@@ -14,7 +14,7 @@
 # crewai の推移的依存。crewai 0.60+ は langchain 0.3.x をサポート済み。
 # 0.4.x 以降は API 破壊的変更の可能性があるため上限を設定。
 langchain>=0.3.0,<0.4
-langchain-community>=0.3.0,<0.4
+langchain-community>=0.3.0,<0.5
 langchain-core>=0.3.0,<0.4
 # langchain-openai 0.2.x が langchain 0.3.x に対応するバージョン系列
 langchain-openai>=0.2.0,<0.4
