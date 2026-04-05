@@ -19,10 +19,7 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /bin/company-graph .
 # Runtime stage
 FROM debian:bullseye-slim
 
-RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list \
- && sed -i 's|http://security.debian.org|https://security.debian.org|g' /etc/apt/sources.list \
- && apt-get update -o Acquire::Retries=3 \
- && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       tzdata \
       chromium \
