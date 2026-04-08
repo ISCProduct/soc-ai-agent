@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const RAG_URL = process.env.RAG_URL || 'http://rag:9000'
+const RAG_REVIEW_URL = process.env.RAG_REVIEW_URL || 'http://rag-review:9000'
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ style_tags: [], top_questions: [] })
     }
 
-    const response = await fetch(`${RAG_URL}/company/hints`, {
+    const response = await fetch(`${RAG_REVIEW_URL}/company/hints`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ company_name: company_name.trim(), position: position || '' }),
