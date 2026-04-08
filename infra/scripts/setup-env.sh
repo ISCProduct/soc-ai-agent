@@ -1,14 +1,19 @@
 #!/bin/bash
 # EC2 上で Secrets Manager からシークレットを取得し .env を生成するスクリプト
 # IAM ロールに secretsmanager:GetSecretValue 権限が必要
+#
+# 必須環境変数（GitHub Actions Secrets で管理）:
+#   DB_SECRET_ARN     - RDS マネージドシークレットの ARN
+#   OPENAI_SECRET_ARN - OpenAI API キーシークレットの ARN
 set -euo pipefail
 
 REGION="ap-northeast-1"
 APP_DIR="/home/ubuntu/soc-app"
 ENV_FILE="${APP_DIR}/.env"
 
-DB_SECRET_ARN="arn:aws:secretsmanager:${REGION}:970835573274:secret:rds!db-3abb75b9-c579-47de-a978-d4f6e56dd4ba-kXjKwE"
-OPENAI_SECRET_ARN="arn:aws:secretsmanager:${REGION}:970835573274:secret:prod/openai/api-key-ctv4bB"
+# ARN は環境変数から受け取る（ハードコード禁止）
+: "${DB_SECRET_ARN:?DB_SECRET_ARN が設定されていません}"
+: "${OPENAI_SECRET_ARN:?OPENAI_SECRET_ARN が設定されていません}"
 
 echo "Fetching secrets from Secrets Manager..."
 

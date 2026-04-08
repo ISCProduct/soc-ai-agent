@@ -84,11 +84,11 @@ export type PhraseSuggestion = {
 }
 
 export const interviewApi = {
-  async createSession(userId: number, language = 'ja'): Promise<InterviewSession> {
+  async createSession(userId: number, language = 'ja', interviewerGender?: string): Promise<InterviewSession> {
     const res = await fetch(`${BACKEND_URL}/api/interviews`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, language }),
+      body: JSON.stringify({ user_id: userId, language, interviewer_gender: interviewerGender }),
     })
     if (!res.ok) throw new Error(await res.text())
     return res.json()

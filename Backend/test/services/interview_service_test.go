@@ -149,8 +149,8 @@ func TestInterviewService_TTSVoiceSelection(t *testing.T) {
 
 	t.Run("Male voice onyx", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/v1/audio/speech" {
-				var body map[string]interface{}
+			if r.URL.Path == "/audio/speech" {
+				var body map[string]any
 				_ = json.NewDecoder(r.Body).Decode(&body)
 				if body["voice"].(string) == "onyx" {
 					w.WriteHeader(http.StatusOK)
@@ -182,8 +182,8 @@ func TestInterviewService_TTSVoiceSelection(t *testing.T) {
 
 	t.Run("Female voice shimmer", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/v1/audio/speech" {
-				var body map[string]interface{}
+			if r.URL.Path == "/audio/speech" {
+				var body map[string]any
 				_ = json.NewDecoder(r.Body).Decode(&body)
 				if body["voice"].(string) == "shimmer" {
 					w.WriteHeader(http.StatusOK)

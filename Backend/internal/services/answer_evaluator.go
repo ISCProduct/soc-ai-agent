@@ -428,6 +428,9 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 		"credibility": 1,
 	}
 
+	// 理想的・定型的な回答に対するペナルティ
+	isTooPerfect := !signals.hasReason && !signals.hasNumbersOrTime && length > 50 && signals.hasAction && signals.hasResult
+
 	if rubric == "collaboration_rubric" && !signals.hasCollaborationTerm {
 		scores["relevance"] = 1
 	} else if rubric == "communication_non_it_rubric" && !signals.hasNonITTerm {
@@ -459,7 +462,9 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 	}
 
 	if signals.contradiction {
-		scores["credibility"] = 0
+		scores["credibility"] = 0 // 矛盾あり: 最低評価
+	} else if isTooPerfect {
+		scores["credibility"] = 1 // 理由・数値のない定型回答: 信頼度を落とす
 	} else if signals.hasNumbersOrTime {
 		scores["credibility"] = 3
 	} else if signals.hasConcreteExample {

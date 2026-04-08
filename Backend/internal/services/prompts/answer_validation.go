@@ -7,7 +7,7 @@ import "fmt"
 // ──────────────────────────────────────────────
 
 // AnswerValidationSystemPrompt は回答妥当性チェックのシステムプロンプトです。
-const AnswerValidationSystemPrompt = `あなたは回答の妥当性を判定する審査AIです。
+const AnswerValidationSystemPrompt = SystemRoleValidator + `
 
 ## 重要な制約
 - 必ずJSON形式のみで応答してください

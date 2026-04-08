@@ -965,23 +965,15 @@ func buildReportSystemPrompt(lang string) string {
 }
 
 // ttsVoiceForGenderAndLang 性別と言語に応じたTTSボイスを返す。
-// male: onyx(ja/ko) / echo(en/other), female: nova(ja/ko) / shimmer(en/other)
+// 参照: https://note.com/affiwriting/n/nc2a665c234a7
+// 男性: onyx (深みがあり権威のある声)
+// 女性: shimmer (クリアで表現力豊かな女性の声)
 func ttsVoiceForGenderAndLang(gender, lang string) string {
 	switch gender {
 	case "male":
-		switch lang {
-		case "ja", "ko":
-			return "onyx"
-		default:
-			return "echo"
-		}
+		return "onyx"
 	default: // female
-		switch lang {
-		case "ja", "ko":
-			return "nova"
-		default:
-			return "shimmer"
-		}
+		return "shimmer"
 	}
 }
 

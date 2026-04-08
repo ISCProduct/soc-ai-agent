@@ -4,6 +4,12 @@
 .env.production
 .env.*.local
 
+# Terraform（シークレットを含む可能性があるため管理外）
+*.tfvars
+*.tfvars.json
+.terraform/
+.terraform.lock.hcl
+
 # Database
 database/
 *.sql

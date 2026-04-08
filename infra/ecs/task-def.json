@@ -91,7 +91,7 @@
   "requiresCompatibilities": [
     "FARGATE"
   ],
-  "cpu": "2048",
-  "memory": "8192"
+  "cpu": "512",
+  "memory": "1024"
 }
 
