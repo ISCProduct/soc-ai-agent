@@ -24,6 +24,7 @@ type Client struct {
 	c            *openai.Client
 	DefaultModel string
 	apiKey       string
+	baseURL      string
 	OnUsage      UsageHook // オプション: コール成功時にトークン使用量を通知
 }
 
@@ -47,14 +48,21 @@ func NewFromEnv(optionalModel string) (*Client, error) {
 	}
 
 	cli := openai.NewClient(key)
-	return &Client{c: cli, DefaultModel: model, apiKey: key}, nil
+	return &Client{c: cli, DefaultModel: model, apiKey: key, baseURL: "https://api.openai.com/v1"}, nil
 }
 
 // NewWithBaseURL はテスト用コンストラクタ。baseURL を差し替えてモックサーバーを利用できる。
 func NewWithBaseURL(baseURL, model string) *Client {
 	config := openai.DefaultConfig("test-key")
 	config.BaseURL = baseURL
-	return &Client{c: openai.NewClientWithConfig(config), DefaultModel: model, apiKey: "test-key"}
+	return &Client{c: openai.NewClientWithConfig(config), DefaultModel: model, apiKey: "test-key", baseURL: baseURL}
+}
+
+func (cli *Client) BaseURL() string {
+	if cli.baseURL != "" {
+		return cli.baseURL
+	}
+	return "https://api.openai.com/v1"
 }
 
 func (cli *Client) callResponsesAPI(ctx context.Context, input interface{}, model string, temperature *float32, maxOutputTokens int, includeTextFormat bool) (string, error) {

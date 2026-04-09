@@ -7,7 +7,9 @@
 
 - **バックエンド**: 大橋 和幸
 - **フロントエンド**: 原 拓哉
-
+- **AI・LLM**: 大橋 和幸
+- **インフラ**: 亀川英地
+- **インフラ**: 江坂広樹
 ---
 
 ## 目次
@@ -229,9 +231,13 @@ npm run dev   # http://localhost:3000
 
 ### Docker Compose（推奨）
 
+ローカル開発には `compose.yml` を使用します。
+
 ```sh
 docker compose up -d --build
 ```
+
+**注意:** プロジェクト直下には `docker-compose.yml` も存在しますが、こちらは **本番環境（AWS ECR/RDS接続）用** です。ローカル開発で誤って使用すると本番DBに接続しようとするため、必ずデフォルトの `compose.yml`（ファイル名指定なしの `docker compose` コマンドで読み込まれます）を使用してください。
 
 重いサービス（RAG）を後から起動する場合:
 
@@ -242,6 +248,13 @@ docker compose --profile rag up -d rag-review
 ---
 
 ## Docker Compose
+
+| ファイル名 | 用途 | 参照イメージ / 接続先 |
+|------------|------|-----------------------|
+| `compose.yml` | **ローカル開発用** | ローカルビルド / ローカルMySQL |
+| `docker-compose.yml` | **本番環境用** | AWS ECR / AWS RDS |
+
+### サービス一覧
 
 | サービス | 役割 | ポート |
 |---------|------|--------|
@@ -320,7 +333,7 @@ docker compose --profile rag up -d rag-review
 
 ---
 
-## 品質管理
+## /品質管理
 
 - **Go**: `go vet` / `go test ./...` を CI で実行
 - **Frontend**: `npm run lint`（ESLint）

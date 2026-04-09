@@ -25,6 +25,7 @@ module "compute" {
   subnet_id         = module.network.public_subnet_id
   security_group_id = module.network.security_group_id
   key_name          = var.key_name
+  secret_arns       = var.secret_arns
 }
 
 # Route 53 (既存のドメインを使用する場合)

@@ -27,3 +27,8 @@ variable "domain_name" {
   default     = "it-industryanalysis.jp"
   description = "購入済みのドメイン名 (例: example.com)"
 }
+
+variable "secret_arns" {
+  type        = list(string)
+  description = "EC2 から読み取りを許可する Secrets Manager ARN のリスト。terraform.tfvars で指定すること（git 管理外）"
+}

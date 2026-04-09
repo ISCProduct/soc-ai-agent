@@ -9,3 +9,8 @@ variable "key_name" {
   type    = string
   default = null
 }
+variable "secret_arns" {
+  type        = list(string)
+  description = "Secrets Manager からの読み取りを許可するシークレット ARN のリスト"
+  default     = []
+}

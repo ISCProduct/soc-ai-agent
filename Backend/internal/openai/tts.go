@@ -38,7 +38,7 @@ func (cli *Client) Transcribe(ctx context.Context, audio []byte, filename string
 	}
 	w.Close()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/audio/transcriptions", &buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.BaseURL()+"/audio/transcriptions", &buf)
 	if err != nil {
 		return "", err
 	}
@@ -96,7 +96,7 @@ func (cli *Client) TTS(ctx context.Context, text, voice string) ([]byte, error) 
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/audio/speech", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.BaseURL()+"/audio/speech", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +152,7 @@ func (cli *Client) ChatInterview(ctx context.Context, systemPrompt string, histo
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.BaseURL()+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
