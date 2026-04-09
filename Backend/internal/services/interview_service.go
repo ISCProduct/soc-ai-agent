@@ -492,7 +492,7 @@ type TurnResult struct {
 }
 
 // Turn はユーザー音声を受け取り、STT→Chat→TTSを実行してTurnResultを返します
-func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint, audioData []byte, history []map[string]string, companyName, companyReading, position, companyInfo, companyType string, turnCount int) (*TurnResult, error) {
+func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint, audioData []byte, history []map[string]string, companyName, companyReading, position, companyInfo, companyType string, turnCount int, remainingSeconds int) (*TurnResult, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -524,7 +524,7 @@ func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint
 	history = append(history, map[string]string{"role": "user", "content": userText})
 
 	// Chat: 面接官として返答生成
-	systemPrompt := buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo, companyType, turnCount)
+	systemPrompt := buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo, companyType, turnCount, remainingSeconds)
 	if s.crossFeature != nil {
 		if profileCtx := s.crossFeature.BuildInterviewContextFromUser(userID); profileCtx != "" {
 			systemPrompt = profileCtx + "\n" + systemPrompt
@@ -565,7 +565,7 @@ func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID
 		companyInfo = s.lookupCompanyProfile(ctx, companyName)
 	}
 
-	systemPromptStart := buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo, companyType, 0)
+	systemPromptStart := buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo, companyType, 0, 0)
 	if s.crossFeature != nil {
 		if profileCtx := s.crossFeature.BuildInterviewContextFromUser(userID); profileCtx != "" {
 			systemPromptStart = profileCtx + "\n" + systemPromptStart
@@ -621,14 +621,53 @@ func (s *InterviewService) lookupCompanyProfile(ctx context.Context, companyName
 	return strings.TrimSpace(result)
 }
 
-func buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo, companyType string, turnCount int) string {
+// interviewTopics は面接で扱うトピックの順序定義です
+var interviewTopics = []string{
+	"自己紹介・志望動機",
+	"職務経験・実績",
+	"強み・弱み",
+	"キャリアビジョン",
+	"逆質問",
+}
+
+// maxTurnsPerTopic は1トピックあたりの最大ターン数（深掘り含む）
+const maxTurnsPerTopic = 3
+
+func buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo, companyType string, turnCount int, remainingSeconds int) string {
+	// ターン数からトピックインデックスと当該トピック内のターン数を計算
+	topicIndex := 0
+	turnsOnTopic := 0
+	if turnCount > 0 {
+		topicIndex = (turnCount - 1) / maxTurnsPerTopic
+		if topicIndex >= len(interviewTopics) {
+			topicIndex = len(interviewTopics) - 1
+		}
+		turnsOnTopic = (turnCount-1)%maxTurnsPerTopic + 1
+	}
+	currentTopic := interviewTopics[topicIndex]
+	remainingTopics := len(interviewTopics) - topicIndex - 1
+
 	base := `あなたは日本語の就活面接官です。以下を守ってください。
 
 【基本ルール】
 - 1回の返答は2〜3文以内で短くまとめる
 - 必ず1つの質問で締めくくる
 - 評価・講評は面接終了まで行わない
-- 企業名を発話する際は、英字・略語はカタカナの正しい読み方で読んでください
+- 企業名を発話する際は、英字・略語はカタカナの正しい読み方で読んでください`
+
+	// 現在のトピックと進行状況を明示
+	base += fmt.Sprintf("\n\n【現在の面接状況】\n現在のトピック: %s（%d/%d）\n現在のトピックでの質問回数: %d/%d回",
+		currentTopic, topicIndex+1, len(interviewTopics), turnsOnTopic, maxTurnsPerTopic)
+
+	if remainingSeconds > 0 {
+		remainingMinutes := remainingSeconds / 60
+		base += fmt.Sprintf("\n残り時間: 約%d分", remainingMinutes)
+		if remainingMinutes <= 2 && remainingTopics > 0 {
+			base += fmt.Sprintf("（残り%dトピックあります。ペースを上げてください）", remainingTopics)
+		}
+	}
+
+	base += `
 
 【質問の進め方】
 面接は以下の順番でトピックを進めてください:
@@ -641,12 +680,8 @@ func buildInterviewSystemPrompt(companyName, companyReading, position, companyIn
 【深掘りの判断基準】（重要）
 - 応募者の回答が抽象的・表面的な場合のみ深掘りしてください
 - 採用判断に有益な情報（具体的エピソード・数値・自分の行動・結果）が得られた場合は次のトピックへ移行してください
-- 同一トピックへの深掘りは最大2回までとし、それ以上は次のトピックへ移行してください
+- 同一トピックへの深掘りは最大2回までとし、現在のトピックでの質問回数が3回に達したら必ず次のトピックへ移行してください
 - トピックを移行する際は「ありがとうございます。次に〜についてお聞きします。」と自然につないでください`
-
-	if turnCount > 0 {
-		base += fmt.Sprintf("\n\n【現在の面接状況】\n現在 %d ターン目です。会話の流れと上記トピック順を参考に、適切なペースで進めてください。", turnCount)
-	}
 
 	if companyName != "" || position != "" {
 		base += "\n\n【面接情報】"
