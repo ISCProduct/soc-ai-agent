@@ -602,6 +602,7 @@ function InterviewContent() {
     formData.append('audio', audioBlob, 'audio.webm')
     formData.append('user_id', String(user.user_id))
     formData.append('history', JSON.stringify(historyRef.current))
+    formData.append('turn_count', String(Math.floor(historyRef.current.length / 2) + 1))
     formData.append('company_name', interviewCompany?.name || '')
     formData.append('company_reading', interviewCompany?.name_reading || '')
     formData.append('position', selectedPosition?.title || '')

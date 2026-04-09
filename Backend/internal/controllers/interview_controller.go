@@ -357,6 +357,12 @@ func (c *InterviewController) Turn(w http.ResponseWriter, r *http.Request) {
 	position := r.FormValue("position")
 	companyInfo := r.FormValue("company_info")
 	companyType := r.FormValue("company_type")
+	turnCount := 0
+	if tc := r.FormValue("turn_count"); tc != "" {
+		if parsed, err := strconv.Atoi(tc); err == nil && parsed >= 0 {
+			turnCount = parsed
+		}
+	}
 
 	audioFile, _, err := r.FormFile("audio")
 	if err != nil {
@@ -370,7 +376,7 @@ func (c *InterviewController) Turn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := c.interviewService.Turn(r.Context(), userID, sessionID, audioData, history, companyName, companyReading, position, companyInfo, companyType)
+	result, err := c.interviewService.Turn(r.Context(), userID, sessionID, audioData, history, companyName, companyReading, position, companyInfo, companyType, turnCount)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
