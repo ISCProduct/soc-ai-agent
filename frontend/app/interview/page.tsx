@@ -164,9 +164,6 @@ function InterviewContent() {
   useEffect(() => {
     const storedUser = authService.getStoredUser()
     if (!storedUser) { router.replace('/login'); return }
-    if (storedUser.target_level !== '新卒' && storedUser.target_level !== '中途') {
-      router.replace('/onboarding'); return
-    }
     setUser(storedUser)
     setLoading(false)
   }, [router])

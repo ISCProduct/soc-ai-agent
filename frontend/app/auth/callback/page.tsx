@@ -52,11 +52,8 @@ function OAuthCallbackContent() {
         authService.saveAuth(userData)
         localStorage.removeItem('oauth_state')
 
-        const needsOnboarding =
-          (userData.target_level !== '新卒' && userData.target_level !== '中途') ||
-          !userData.school_name
-        // 必須情報が未設定ならオンボーディングへ
-        if (needsOnboarding) {
+        // 名前が未設定の場合のみオンボーディングへ（初回登録ユーザー）
+        if (!userData.name) {
           router.push('/onboarding')
           return
         }

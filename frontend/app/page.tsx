@@ -18,15 +18,6 @@ export default function Home() {
       router.replace('/login')
       return
     }
-    if (storedUser.target_level !== '新卒' && storedUser.target_level !== '中途') {
-      // 名前が設定済みの場合はプロフィール画面へ、未設定の場合はオンボーディングへ
-      if (storedUser.name) {
-        router.replace('/profile')
-      } else {
-        router.replace('/onboarding')
-      }
-      return
-    }
     setUser(storedUser)
     setLoading(false)
   }, [router])

@@ -153,8 +153,8 @@ export function MuiChat() {
     const initializeChat = async () => {
       // ユーザー情報を初期化
       const user = authService.getStoredUser()
-      if (!user || !user.name || !user.target_level) {
-        router.replace('/onboarding')
+      if (!user) {
+        router.replace('/login')
         return
       }
       const currentUserId = user.user_id
