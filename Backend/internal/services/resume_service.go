@@ -820,19 +820,26 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	}
 
 	// 注釈 PDF を生成して保存
+	annotatedAvailable := false
 	_, annotatedStored, err := s.annotatePDF(pdfPath, doc, review, items)
 	if err != nil {
 		log.Printf("resume_review_stream: annotatePDF failed document_id=%d err=%v", documentID, err)
+		sendEvent(map[string]interface{}{
+			"type":    "annotate_error",
+			"message": "注釈PDFの生成に失敗しました。レビュー結果は表示されますが、PDFダウンロードはご利用いただけません。",
+		})
 	} else {
 		doc.AnnotatedPath = annotatedStored
 		doc.Status = "reviewed"
 		_ = s.repo.UpdateDocument(doc)
+		annotatedAvailable = true
 	}
 
 	sendEvent(map[string]interface{}{
-		"type":   "complete",
-		"review": review,
-		"items":  items,
+		"type":                "complete",
+		"review":              review,
+		"items":               items,
+		"annotated_available": annotatedAvailable,
 	})
 	return nil
 }
