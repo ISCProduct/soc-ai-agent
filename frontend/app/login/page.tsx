@@ -11,10 +11,6 @@ export default function Login() {
   useEffect(() => {
     const storedUser = authService.getStoredUser()
     if (storedUser) {
-      if (storedUser.target_level !== '新卒' && storedUser.target_level !== '中途') {
-        router.replace('/onboarding')
-        return
-      }
       router.replace('/')
     }
   }, [router])
