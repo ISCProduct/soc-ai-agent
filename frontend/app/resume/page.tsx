@@ -34,6 +34,7 @@ type ReviewResult = {
     summary: string
   }
   items: ReviewItem[]
+  annotated_available: boolean
 }
 
 const severityConfig: Record<string, { color: 'error' | 'warning' | 'info'; label: string; borderColor: string }> = {
@@ -57,6 +58,7 @@ function ResumeContent() {
   const [reviewLoading, setReviewLoading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [reviewError, setReviewError] = useState('')
+  const [annotateError, setAnnotateError] = useState('')
   const [review, setReview] = useState<ReviewResult | null>(null)
   const [ragReport, setRagReport] = useState('')
 
@@ -136,6 +138,7 @@ function ResumeContent() {
       return
     }
     setReviewError('')
+    setAnnotateError('')
     setReview(null)
     setRagReport('')
     setReviewLoading(true)
@@ -175,7 +178,9 @@ function ResumeContent() {
             if (data.type === 'chunk') {
               setRagReport((prev) => prev + data.text)
             } else if (data.type === 'complete') {
-              setReview({ review: data.review, items: data.items })
+              setReview({ review: data.review, items: data.items, annotated_available: data.annotated_available ?? false })
+            } else if (data.type === 'annotate_error') {
+              setAnnotateError(data.message)
             } else if (data.type === 'error') {
               throw new Error(data.message)
             }
@@ -392,9 +397,14 @@ function ResumeContent() {
             })}
           </Stack>
           <Box sx={{ mt: 3 }}>
-            <Button variant="outlined" onClick={handleDownload}>
-              注釈PDFをダウンロード
-            </Button>
+            {annotateError && (
+              <Alert severity="warning" sx={{ mb: 2 }}>{annotateError}</Alert>
+            )}
+            {review.annotated_available && (
+              <Button variant="outlined" onClick={handleDownload}>
+                注釈PDFをダウンロード
+              </Button>
+            )}
           </Box>
         </Paper>
       )}
