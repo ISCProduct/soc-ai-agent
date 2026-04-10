@@ -129,6 +129,7 @@ export default function ProfilePage() {
 
   const avatarLetter = name ? name[0].toUpperCase() : user.email[0].toUpperCase()
   const isGitHubUser = user.oauth_provider === 'github'
+  const isGuest = user.is_guest === true
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f5f7fa' }}>
@@ -346,10 +347,12 @@ export default function ProfilePage() {
             </Card>
           </Box>
 
-          {/* 右カラム: GitHub スキル分析 */}
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            <GitHubSkills userId={user.user_id} />
-          </Box>
+          {/* 右カラム: GitHub スキル分析（ゲストアカウントは非表示） */}
+          {!isGuest && (
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <GitHubSkills userId={user.user_id} />
+            </Box>
+          )}
         </Box>
       </Container>
 
