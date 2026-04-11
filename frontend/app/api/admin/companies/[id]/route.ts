@@ -10,7 +10,8 @@ export async function GET(
 ) {
   const { id } = await params
   const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}`, {
-    headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '' },
+    headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '',
+      'X-Admin-Token': request.headers.get('x-admin-token') || '' },
   })
   const raw = await response.text()
   let data: any = {}
@@ -32,7 +33,8 @@ export async function PUT(
   const body = await request.text()
   const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-Admin-Email': request.headers.get('x-admin-email') || '' },
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Email': request.headers.get('x-admin-email') || '',
+      'X-Admin-Token': request.headers.get('x-admin-token') || '' },
     body,
   })
   const raw = await response.text()

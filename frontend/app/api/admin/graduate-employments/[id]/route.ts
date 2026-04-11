@@ -7,7 +7,10 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const response = await fetch(`${BACKEND_URL}/api/admin/graduate-employments/${id}`, {
-    headers: { 'X-Admin-Email': req.headers.get('x-admin-email') || '' },
+    headers: {
+      'X-Admin-Email': req.headers.get('x-admin-email') || '',
+      'X-Admin-Token': req.headers.get('x-admin-token') || '',
+    },
   })
   const raw = await response.text()
   let data: any = {}
@@ -25,6 +28,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     headers: {
       'Content-Type': 'application/json',
       'X-Admin-Email': request.headers.get('x-admin-email') || '',
+      'X-Admin-Token': request.headers.get('x-admin-token') || '',
     },
     body,
   })

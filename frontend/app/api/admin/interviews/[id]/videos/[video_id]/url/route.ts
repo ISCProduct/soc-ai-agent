@@ -11,7 +11,8 @@ export async function GET(
   const resolvedParams = await params
   const url = `${BACKEND_URL}/api/admin/interviews/${resolvedParams.id}/videos/${resolvedParams.video_id}/url`
   const response = await fetch(url, {
-    headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '' },
+    headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '',
+      'X-Admin-Token': request.headers.get('x-admin-token') || '' },
   })
   const data = await response.json().catch(() => ({}))
   return NextResponse.json(data, { status: response.status })

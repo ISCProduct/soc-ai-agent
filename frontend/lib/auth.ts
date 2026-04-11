@@ -230,6 +230,16 @@ export const authService = {
     return localStorage.getItem('token')
   },
 
+  // 管理者APIリクエスト用のヘッダーを返す（X-Admin-Email + X-Admin-Token）
+  getAdminFetchHeaders(): Record<string, string> {
+    const user = this.getStoredUser()
+    const token = this.getStoredToken()
+    return {
+      'X-Admin-Email': user?.email || '',
+      'X-Admin-Token': token || '',
+    }
+  },
+
   logout() {
     // ユーザー情報とトークンを削除
     localStorage.removeItem('user')

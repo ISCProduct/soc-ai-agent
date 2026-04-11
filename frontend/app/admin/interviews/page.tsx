@@ -58,15 +58,13 @@ export default function AdminInterviewsPage() {
 
   useEffect(() => {
     const fetchSessions = async () => {
-      const admin = authService.getStoredUser()
-      if (!admin) return
       setError('')
       const params = new URLSearchParams({
         page: String(page + 1),
         limit: String(rowsPerPage),
       })
       const response = await fetch(`/api/admin/interviews?${params}`, {
-        headers: { 'X-Admin-Email': admin.email || '' },
+        headers: authService.getAdminFetchHeaders(),
       })
       const data = await response.json()
       if (!response.ok) {

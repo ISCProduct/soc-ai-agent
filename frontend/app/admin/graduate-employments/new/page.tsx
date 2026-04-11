@@ -40,21 +40,16 @@ export default function AdminGraduateEmploymentNewPage() {
   const [note, setNote] = useState('')
 
   useEffect(() => {
-    const admin = authService.getStoredUser()
-    const headers = { 'X-Admin-Email': admin?.email || '' }
+    const headers = authService.getAdminFetchHeaders()
     fetch('/api/admin/companies', { headers }).then((r) => r.json()).then((d) => setCompanies(d?.companies || []))
     fetch('/api/admin/job-positions?limit=100', { headers }).then((r) => r.json()).then((d) => setJobPositions(d?.positions || []))
   }, [])
 
   const handleCreate = async () => {
     setError('')
-    const admin = authService.getStoredUser()
     const res = await fetch('/api/admin/graduate-employments', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Admin-Email': admin?.email || '',
-      },
+      headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({
         company_id: Number(companyId),
         job_position_id: jobPositionId ? Number(jobPositionId) : undefined,

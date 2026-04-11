@@ -13,7 +13,8 @@ export async function GET(request: NextRequest) {
   }
   const url = `${BACKEND_URL}/api/admin/interviews?${params}`
   const response = await fetch(url, {
-    headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '' },
+    headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '',
+      'X-Admin-Token': request.headers.get('x-admin-token') || '' },
   })
   const raw = await response.text()
   let data: any = {}

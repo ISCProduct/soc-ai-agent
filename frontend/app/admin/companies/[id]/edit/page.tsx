@@ -92,7 +92,7 @@ export default function AdminCompanyEditPage() {
   useEffect(() => {
     const admin = authService.getStoredUser()
     fetch(`/api/admin/companies/${id}`, {
-      headers: { 'X-Admin-Email': admin?.email || '' },
+      headers: authService.getAdminFetchHeaders(),
     })
       .then((r) => r.json())
       .then((data) => {
@@ -112,7 +112,7 @@ export default function AdminCompanyEditPage() {
     try {
       const res = await fetch(`/api/admin/companies/${id}/tech-stack-search`, {
         method: 'POST',
-        headers: { 'X-Admin-Email': admin?.email || '' },
+        headers: authService.getAdminFetchHeaders(),
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
@@ -138,7 +138,7 @@ export default function AdminCompanyEditPage() {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
-        'X-Admin-Email': admin?.email || '',
+        ...authService.getAdminFetchHeaders(),
       },
       body: JSON.stringify({
         tech_stack: JSON.stringify(techStack),

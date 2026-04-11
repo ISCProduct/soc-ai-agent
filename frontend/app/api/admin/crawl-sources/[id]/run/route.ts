@@ -10,6 +10,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     method: 'POST',
     headers: {
       'X-Admin-Email': request.headers.get('x-admin-email') || '',
+      'X-Admin-Token': request.headers.get('x-admin-token') || '',
     },
   })
   const raw = await response.text()

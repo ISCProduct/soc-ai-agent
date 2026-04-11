@@ -110,9 +110,8 @@ export default function AdminCrawlingPage() {
 
   const loadSources = async () => {
     setError('')
-    const admin = authService.getStoredUser()
     const response = await fetch('/api/admin/crawl-sources', {
-      headers: { 'X-Admin-Email': admin?.email || '' },
+      headers: authService.getAdminFetchHeaders(),
     })
     const data = await response.json()
     if (!response.ok) {
@@ -123,9 +122,8 @@ export default function AdminCrawlingPage() {
   }
 
   const loadRuns = async () => {
-    const admin = authService.getStoredUser()
     const response = await fetch('/api/admin/crawl-runs', {
-      headers: { 'X-Admin-Email': admin?.email || '' },
+      headers: authService.getAdminFetchHeaders(),
     })
     const data = await response.json()
     if (response.ok) {
@@ -141,7 +139,6 @@ export default function AdminCrawlingPage() {
   const handleCreate = async () => {
     setError('')
     setLoading(true)
-    const admin = authService.getStoredUser()
     const payload = {
       name,
       target_type: targetType,
@@ -153,10 +150,7 @@ export default function AdminCrawlingPage() {
     }
     const response = await fetch('/api/admin/crawl-sources', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Admin-Email': admin?.email || '',
-      },
+      headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
     const data = await response.json()
@@ -176,13 +170,9 @@ export default function AdminCrawlingPage() {
   }
 
   const handleToggleActive = async (source: CrawlSource) => {
-    const admin = authService.getStoredUser()
     const response = await fetch(`/api/admin/crawl-sources/${source.id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Admin-Email': admin?.email || '',
-      },
+      headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_active: !source.is_active }),
     })
     if (response.ok) {
@@ -191,12 +181,9 @@ export default function AdminCrawlingPage() {
   }
 
   const handleRun = async (source: CrawlSource) => {
-    const admin = authService.getStoredUser()
     const response = await fetch(`/api/admin/crawl-sources/${source.id}/run`, {
       method: 'POST',
-      headers: {
-        'X-Admin-Email': admin?.email || '',
-      },
+      headers: authService.getAdminFetchHeaders(),
     })
     if (response.ok) {
       await loadSources()
@@ -207,13 +194,9 @@ export default function AdminCrawlingPage() {
   const handleGraphCrawl = async () => {
     setGraphLoading(true)
     setGraphResult(null)
-    const admin = authService.getStoredUser()
     const response = await fetch('/api/admin/company-graph-crawl', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Admin-Email': admin?.email || '',
-      },
+      headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({
         sites: graphSites,
         query: graphQuery,
@@ -232,10 +215,9 @@ export default function AdminCrawlingPage() {
     setGbizSearchError('')
     setGbizSearchResults([])
     setGbizRegisterMessage('')
-    const admin = authService.getStoredUser()
     const response = await fetch(
       `/api/admin/companies/search-gbiz?name=${encodeURIComponent(gbizSearchName)}`,
-      { headers: { 'X-Admin-Email': admin?.email || '' } },
+      { headers: authService.getAdminFetchHeaders() },
     )
     const data = await response.json()
     if (!response.ok) {
@@ -252,13 +234,9 @@ export default function AdminCrawlingPage() {
   const handleGbizRegister = async (result: { corporate_number: string; name: string; location: string; company_url: string; employee_number: number }) => {
     setGbizRegisterLoading(result.corporate_number)
     setGbizRegisterMessage('')
-    const admin = authService.getStoredUser()
     const response = await fetch('/api/admin/companies', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Admin-Email': admin?.email || '',
-      },
+      headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: result.name,
         location: result.location,

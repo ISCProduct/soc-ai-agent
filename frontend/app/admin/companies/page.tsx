@@ -55,10 +55,9 @@ export default function AdminCompaniesPage() {
 
   const fetchCompanies = async (p: number = page) => {
     setError('')
-    const admin = authService.getStoredUser()
     const offset = (p - 1) * PAGE_SIZE
     const res = await fetch(`/api/admin/companies?limit=${PAGE_SIZE}&offset=${offset}`, {
-      headers: { 'X-Admin-Email': admin?.email || '' },
+      headers: authService.getAdminFetchHeaders(),
     })
     const data = await res.json()
     if (!res.ok) {
@@ -79,10 +78,9 @@ export default function AdminCompaniesPage() {
   }
 
   const handlePublish = async (companyId: number) => {
-    const admin = authService.getStoredUser()
     const res = await fetch(`/api/admin/companies/${companyId}/publish`, {
       method: 'PATCH',
-      headers: { 'X-Admin-Email': admin?.email || '' },
+      headers: authService.getAdminFetchHeaders(),
     })
     if (!res.ok) {
       const data = await res.json()
@@ -93,10 +91,9 @@ export default function AdminCompaniesPage() {
   }
 
   const handleReject = async (companyId: number) => {
-    const admin = authService.getStoredUser()
     const res = await fetch(`/api/admin/companies/${companyId}/reject`, {
       method: 'PATCH',
-      headers: { 'X-Admin-Email': admin?.email || '' },
+      headers: authService.getAdminFetchHeaders(),
     })
     if (!res.ok) {
       const data = await res.json()

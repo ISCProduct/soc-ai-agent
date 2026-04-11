@@ -62,9 +62,8 @@ export default function AdminUsersPage() {
       })
       if (query.trim()) params.set('q', query.trim())
 
-      const admin = authService.getStoredUser()
       const response = await fetch(`/api/admin/users?${params}`, {
-        headers: { 'X-Admin-Email': admin?.email || '' },
+        headers: authService.getAdminFetchHeaders(),
       })
       const data = await response.json()
       if (cancelled) return
@@ -84,10 +83,7 @@ export default function AdminUsersPage() {
     setLoading(true)
     const response = await fetch(`/api/admin/users/${user.id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Admin-Email': admin.email,
-      },
+      headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_admin: !user.is_admin }),
     })
     const data = await response.json()

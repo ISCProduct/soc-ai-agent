@@ -65,12 +65,10 @@ export default function AdminInterviewDetailPage() {
 
   useEffect(() => {
     const fetchVideos = async () => {
-      const admin = authService.getStoredUser()
-      if (!admin) return
       setLoading(true)
       setError('')
       const response = await fetch(`/api/admin/interviews/${sessionId}/videos`, {
-        headers: { 'X-Admin-Email': admin.email || '' },
+        headers: authService.getAdminFetchHeaders(),
       })
       const data = await response.json()
       setLoading(false)
@@ -88,9 +86,8 @@ export default function AdminInterviewDetailPage() {
     setUrlLoading(video.id)
     setUrlError('')
     setPlayingURL(null)
-    const admin = authService.getStoredUser()
     const response = await fetch(`/api/admin/interviews/${sessionId}/videos/${video.id}/url`, {
-      headers: { 'X-Admin-Email': admin?.email || '' },
+      headers: authService.getAdminFetchHeaders(),
     })
     const data = await response.json()
     setUrlLoading(null)

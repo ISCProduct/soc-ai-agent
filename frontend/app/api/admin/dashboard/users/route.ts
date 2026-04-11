@@ -5,12 +5,14 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
-  const admin = request.headers.get('x-admin-email') || ''
   const { searchParams } = new URL(request.url)
   const qs = searchParams.toString()
 
   const res = await fetch(`${BACKEND_URL}/api/admin/dashboard/users${qs ? '?' + qs : ''}`, {
-    headers: { 'X-Admin-Email': admin },
+    headers: {
+      'X-Admin-Email': request.headers.get('x-admin-email') || '',
+      'X-Admin-Token': request.headers.get('x-admin-token') || '',
+    },
   })
   const data = await res.json()
   return NextResponse.json(data, { status: res.status })

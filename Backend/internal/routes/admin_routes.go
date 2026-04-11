@@ -21,9 +21,10 @@ func SetupAdminRoutes(
 	scoreValidationController *controllers.AdminScoreValidationController,
 	collectiveInsightController *controllers.CollectiveInsightController,
 	userRepo *repositories.UserRepository,
+	adminSecret string,
 ) {
 	auth := func(f http.HandlerFunc) http.HandlerFunc {
-		return middleware.AdminAuthFunc(userRepo, f)
+		return middleware.AdminAuthFunc(userRepo, adminSecret, f)
 	}
 
 	http.HandleFunc("/api/admin/companies", auth(adminCompanyController.ListOrCreate))

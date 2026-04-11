@@ -38,9 +38,8 @@ export default function AdminGraduateEmploymentsPage() {
   const [graduateEntries, setGraduateEntries] = useState<GraduateEmployment[]>([])
 
   useEffect(() => {
-    const admin = authService.getStoredUser()
     fetch('/api/admin/graduate-employments?limit=100', {
-      headers: { 'X-Admin-Email': admin?.email || '' },
+      headers: authService.getAdminFetchHeaders(),
     })
       .then((r) => r.json())
       .then((data) => setGraduateEntries(data?.entries || []))

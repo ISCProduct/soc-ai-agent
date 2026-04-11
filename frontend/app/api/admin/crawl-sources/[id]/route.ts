@@ -12,6 +12,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     headers: {
       'Content-Type': 'application/json',
       'X-Admin-Email': request.headers.get('x-admin-email') || '',
+      'X-Admin-Token': request.headers.get('x-admin-token') || '',
     },
     body,
   })
