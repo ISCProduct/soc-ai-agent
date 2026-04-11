@@ -9,7 +9,8 @@ export async function GET(request: NextRequest) {
   const limit = url.searchParams.get('limit')
   const query = limit ? `?limit=${limit}` : ''
   const response = await fetch(`${BACKEND_URL}/api/admin/audit-logs${query}`, {
-    headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '' },
+    headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '',
+      'X-Admin-Token': request.headers.get('x-admin-token') || '' },
   })
   const raw = await response.text()
   let data: any = {}

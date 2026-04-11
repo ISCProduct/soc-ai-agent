@@ -3,6 +3,7 @@ package services
 import (
 	"Backend/domain/entity"
 	"Backend/domain/repository"
+	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"crypto/rand"
 	"encoding/base64"
@@ -309,7 +310,7 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 	user.LastLoginAt = &now
 	s.userRepo.UpdateUser(user)
 
-	return &AuthResponse{
+	resp := &AuthResponse{
 		UserID:                   user.ID,
 		Email:                    user.Email,
 		Name:                     user.Name,
@@ -322,7 +323,15 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 		AvatarURL:                user.AvatarURL,
 		EmailVerified:            emailVerified,
 		RequiresReVerification:   requiresReVerification,
-	}, nil
+	}
+	// 管理者ユーザーにはHMACトークンを付与する
+	if user.IsAdmin {
+		adminSecret := os.Getenv("ADMIN_SECRET")
+		if adminSecret != "" {
+			resp.Token = middleware.GenerateAdminToken(user.ID, user.Email, adminSecret)
+		}
+	}
+	return resp, nil
 }
 
 // CreateGuestUser ゲストユーザー作成

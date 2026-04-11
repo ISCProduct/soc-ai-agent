@@ -14,6 +14,7 @@ export async function POST(request: NextRequest) {
       headers: {
         'Content-Type': 'application/json',
         'X-Admin-Email': request.headers.get('X-Admin-Email') ?? '',
+        'X-Admin-Token': request.headers.get('X-Admin-Token') ?? '',
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(310_000), // 5 min + buffer

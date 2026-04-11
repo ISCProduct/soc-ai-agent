@@ -37,9 +37,8 @@ export default function AdminAuditLogsPage() {
 
   const loadLogs = async () => {
     setError('')
-    const admin = authService.getStoredUser()
     const response = await fetch('/api/admin/audit-logs', {
-      headers: { 'X-Admin-Email': admin?.email || '' },
+      headers: authService.getAdminFetchHeaders(),
     })
     const data = await response.json()
     if (!response.ok) {

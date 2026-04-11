@@ -28,8 +28,7 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     const loadCounts = async () => {
-      const admin = authService.getStoredUser()
-      const headers = { 'X-Admin-Email': admin?.email || '' }
+      const headers = authService.getAdminFetchHeaders()
       try {
         const [companiesRes, crawlRes] = await Promise.all([
           fetch('/api/admin/companies', { headers }),

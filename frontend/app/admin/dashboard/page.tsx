@@ -117,7 +117,7 @@ export default function AdminScoreDashboardPage() {
         ...(query ? { query } : {}),
       })
       const res = await fetch(`/api/admin/dashboard/users?${params}`, {
-        headers: { 'X-Admin-Email': adminEmail },
+        headers: { 'X-Admin-Email': adminEmail, 'X-Admin-Token': authService.getStoredToken() || '' },
       })
       if (!res.ok) throw new Error('データの取得に失敗しました')
       const data = await res.json()
@@ -137,7 +137,7 @@ export default function AdminScoreDashboardPage() {
   const handleExport = () => {
     const link = document.createElement('a')
     link.href = '/api/admin/dashboard/export'
-    const headers = new Headers({ 'X-Admin-Email': adminEmail })
+    const headers = new Headers({ 'X-Admin-Email': adminEmail, 'X-Admin-Token': authService.getStoredToken() || '' })
     fetch('/api/admin/dashboard/export', { headers })
       .then(res => res.blob())
       .then(blob => {
@@ -155,7 +155,7 @@ export default function AdminScoreDashboardPage() {
     setDetailLoading(true)
     try {
       const res = await fetch(`/api/admin/dashboard/users/${user.user_id}/sessions`, {
-        headers: { 'X-Admin-Email': adminEmail },
+        headers: { 'X-Admin-Email': adminEmail, 'X-Admin-Token': authService.getStoredToken() || '' },
       })
       const data = await res.json()
       setDetailSessions(data.sessions ?? [])

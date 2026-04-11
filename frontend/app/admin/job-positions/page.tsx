@@ -245,9 +245,8 @@ export default function AdminJobPositionsPage() {
   const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'published' | 'rejected'>('all')
 
   const fetchJobPositions = async () => {
-    const admin = authService.getStoredUser()
     const res = await fetch('/api/admin/job-positions?limit=100', {
-      headers: { 'X-Admin-Email': admin?.email || '' },
+      headers: authService.getAdminFetchHeaders(),
     })
     const data = await res.json()
     if (res.ok) setJobPositions(data?.positions || [])
@@ -258,10 +257,9 @@ export default function AdminJobPositionsPage() {
   }, [])
 
   const handlePublish = async (id: number) => {
-    const admin = authService.getStoredUser()
     const res = await fetch(`/api/admin/job-positions/${id}/publish`, {
       method: 'PATCH',
-      headers: { 'X-Admin-Email': admin?.email || '' },
+      headers: authService.getAdminFetchHeaders(),
     })
     if (!res.ok) {
       const data = await res.json()
@@ -272,10 +270,9 @@ export default function AdminJobPositionsPage() {
   }
 
   const handleReject = async (id: number) => {
-    const admin = authService.getStoredUser()
     const res = await fetch(`/api/admin/job-positions/${id}/reject`, {
       method: 'PATCH',
-      headers: { 'X-Admin-Email': admin?.email || '' },
+      headers: authService.getAdminFetchHeaders(),
     })
     if (!res.ok) {
       const data = await res.json()

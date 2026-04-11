@@ -11,7 +11,8 @@ export async function POST(
   const { id } = await params
   const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/tech-stack-search`, {
     method: 'POST',
-    headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '' },
+    headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '',
+      'X-Admin-Token': request.headers.get('x-admin-token') || '' },
   })
   const raw = await response.text()
   let data: Record<string, unknown> = {}

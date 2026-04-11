@@ -147,7 +147,7 @@ export default function AdminCostsPage() {
     if (!adminEmail) return
     setLoading(true)
     setError('')
-    const h = { 'X-Admin-Email': adminEmail }
+    const h = { 'X-Admin-Email': adminEmail, 'X-Admin-Token': authService.getStoredToken() || '' }
     try {
       const [sumRes, dailyRes, monthlyRes] = await Promise.all([
         fetch('/api/admin/costs', { headers: h }),

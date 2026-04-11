@@ -42,7 +42,7 @@ export default function AdminCompanyNewPage() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Admin-Email': admin?.email || '',
+        ...authService.getAdminFetchHeaders(),
       },
       body: JSON.stringify({
         name,
