@@ -218,4 +218,5 @@ export const interviewApi = {
 
 export const interviewLimits = {
   maxMinutes: Number(process.env.NEXT_PUBLIC_INTERVIEW_MAX_MINUTES || 10),
+  questionDurationSeconds: Number(process.env.NEXT_PUBLIC_INTERVIEW_QUESTION_DURATION_SECONDS || 180),
 }
