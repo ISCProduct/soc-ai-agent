@@ -369,6 +369,30 @@ func (c *InterviewController) Turn(w http.ResponseWriter, r *http.Request) {
 			remainingSeconds = parsed
 		}
 	}
+	questionIndex := 0
+	if qi := r.FormValue("question_index"); qi != "" {
+		if parsed, err := strconv.Atoi(qi); err == nil && parsed >= 0 {
+			questionIndex = parsed
+		}
+	}
+	totalQuestions := 0
+	if tq := r.FormValue("total_questions"); tq != "" {
+		if parsed, err := strconv.Atoi(tq); err == nil && parsed >= 0 {
+			totalQuestions = parsed
+		}
+	}
+	questionElapsedSeconds := 0
+	if qe := r.FormValue("question_elapsed_seconds"); qe != "" {
+		if parsed, err := strconv.Atoi(qe); err == nil && parsed >= 0 {
+			questionElapsedSeconds = parsed
+		}
+	}
+	questionDurationSeconds := 0
+	if qd := r.FormValue("question_duration_seconds"); qd != "" {
+		if parsed, err := strconv.Atoi(qd); err == nil && parsed >= 0 {
+			questionDurationSeconds = parsed
+		}
+	}
 
 	audioFile, _, err := r.FormFile("audio")
 	if err != nil {
@@ -382,7 +406,24 @@ func (c *InterviewController) Turn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := c.interviewService.Turn(r.Context(), userID, sessionID, audioData, history, companyName, companyReading, position, companyInfo, companyType, turnCount, remainingSeconds)
+	result, err := c.interviewService.Turn(
+		r.Context(),
+		userID,
+		sessionID,
+		audioData,
+		history,
+		companyName,
+		companyReading,
+		position,
+		companyInfo,
+		companyType,
+		turnCount,
+		remainingSeconds,
+		questionIndex,
+		totalQuestions,
+		questionElapsedSeconds,
+		questionDurationSeconds,
+	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -415,16 +456,33 @@ func (c *InterviewController) StartTurn(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req struct {
-		UserID         uint   `json:"user_id"`
-		CompanyName    string `json:"company_name"`
-		CompanyReading string `json:"company_reading"`
-		Position       string `json:"position"`
-		CompanyInfo    string `json:"company_info"`
-		CompanyType    string `json:"company_type"`
+		UserID                  uint   `json:"user_id"`
+		CompanyName             string `json:"company_name"`
+		CompanyReading          string `json:"company_reading"`
+		Position                string `json:"position"`
+		CompanyInfo             string `json:"company_info"`
+		CompanyType             string `json:"company_type"`
+		QuestionIndex           int    `json:"question_index"`
+		TotalQuestions          int    `json:"total_questions"`
+		QuestionElapsedSeconds  int    `json:"question_elapsed_seconds"`
+		QuestionDurationSeconds int    `json:"question_duration_seconds"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 
-	result, err := c.interviewService.StartTurn(r.Context(), req.UserID, sessionID, req.CompanyName, req.CompanyReading, req.Position, req.CompanyInfo, req.CompanyType)
+	result, err := c.interviewService.StartTurn(
+		r.Context(),
+		req.UserID,
+		sessionID,
+		req.CompanyName,
+		req.CompanyReading,
+		req.Position,
+		req.CompanyInfo,
+		req.CompanyType,
+		req.QuestionIndex,
+		req.TotalQuestions,
+		req.QuestionElapsedSeconds,
+		req.QuestionDurationSeconds,
+	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

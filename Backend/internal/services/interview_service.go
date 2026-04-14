@@ -492,7 +492,24 @@ type TurnResult struct {
 }
 
 // Turn はユーザー音声を受け取り、STT→Chat→TTSを実行してTurnResultを返します
-func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint, audioData []byte, history []map[string]string, companyName, companyReading, position, companyInfo, companyType string, turnCount int, remainingSeconds int) (*TurnResult, error) {
+func (s *InterviewService) Turn(
+	ctx context.Context,
+	userID uint,
+	sessionID uint,
+	audioData []byte,
+	history []map[string]string,
+	companyName,
+	companyReading,
+	position,
+	companyInfo,
+	companyType string,
+	turnCount int,
+	remainingSeconds int,
+	questionIndex int,
+	totalQuestions int,
+	questionElapsedSeconds int,
+	questionDurationSeconds int,
+) (*TurnResult, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -524,7 +541,19 @@ func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint
 	history = append(history, map[string]string{"role": "user", "content": userText})
 
 	// Chat: 面接官として返答生成
-	systemPrompt := buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo, companyType, turnCount, remainingSeconds)
+	systemPrompt := buildInterviewSystemPrompt(
+		companyName,
+		companyReading,
+		position,
+		companyInfo,
+		companyType,
+		turnCount,
+		remainingSeconds,
+		questionIndex,
+		totalQuestions,
+		questionElapsedSeconds,
+		questionDurationSeconds,
+	)
 	if s.crossFeature != nil {
 		if profileCtx := s.crossFeature.BuildInterviewContextFromUser(userID); profileCtx != "" {
 			systemPrompt = profileCtx + "\n" + systemPrompt
@@ -546,7 +575,20 @@ func (s *InterviewService) Turn(ctx context.Context, userID uint, sessionID uint
 }
 
 // StartTurn は面接開始の最初のAI発話を生成します
-func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID uint, companyName, companyReading, position, companyInfo, companyType string) (*TurnResult, error) {
+func (s *InterviewService) StartTurn(
+	ctx context.Context,
+	userID uint,
+	sessionID uint,
+	companyName,
+	companyReading,
+	position,
+	companyInfo,
+	companyType string,
+	questionIndex int,
+	totalQuestions int,
+	questionElapsedSeconds int,
+	questionDurationSeconds int,
+) (*TurnResult, error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return nil, err
@@ -565,7 +607,19 @@ func (s *InterviewService) StartTurn(ctx context.Context, userID uint, sessionID
 		companyInfo = s.lookupCompanyProfile(ctx, companyName)
 	}
 
-	systemPromptStart := buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo, companyType, 0, 0)
+	systemPromptStart := buildInterviewSystemPrompt(
+		companyName,
+		companyReading,
+		position,
+		companyInfo,
+		companyType,
+		0,
+		0,
+		questionIndex,
+		totalQuestions,
+		questionElapsedSeconds,
+		questionDurationSeconds,
+	)
 	if s.crossFeature != nil {
 		if profileCtx := s.crossFeature.BuildInterviewContextFromUser(userID); profileCtx != "" {
 			systemPromptStart = profileCtx + "\n" + systemPromptStart
@@ -633,7 +687,38 @@ var interviewTopics = []string{
 // maxTurnsPerTopic は1トピックあたりの最大ターン数（深掘り含む）
 const maxTurnsPerTopic = 3
 
-func buildInterviewSystemPrompt(companyName, companyReading, position, companyInfo, companyType string, turnCount int, remainingSeconds int) string {
+func buildInterviewSystemPrompt(
+	companyName,
+	companyReading,
+	position,
+	companyInfo,
+	companyType string,
+	turnCount int,
+	remainingSeconds int,
+	questionIndex int,
+	totalQuestions int,
+	questionElapsedSeconds int,
+	questionDurationSeconds int,
+) string {
+	if questionDurationSeconds <= 0 {
+		questionDurationSeconds = 180
+	}
+	if totalQuestions <= 0 {
+		totalQuestions = 1
+	}
+	if questionIndex <= 0 {
+		questionIndex = 1
+	}
+	if questionIndex > totalQuestions {
+		questionIndex = totalQuestions
+	}
+	if questionElapsedSeconds < 0 {
+		questionElapsedSeconds = 0
+	}
+	if questionElapsedSeconds > questionDurationSeconds {
+		questionElapsedSeconds = questionDurationSeconds
+	}
+
 	// ターン数からトピックインデックスと当該トピック内のターン数を計算
 	topicIndex := 0
 	turnsOnTopic := 0
@@ -658,6 +743,15 @@ func buildInterviewSystemPrompt(companyName, companyReading, position, companyIn
 	// 現在のトピックと進行状況を明示
 	base += fmt.Sprintf("\n\n【現在の面接状況】\n現在のトピック: %s（%d/%d）\n現在のトピックでの質問回数: %d/%d回",
 		currentTopic, topicIndex+1, len(interviewTopics), turnsOnTopic, maxTurnsPerTopic)
+	base += fmt.Sprintf(
+		"\n\n【質問タイムボックス】\n1質問あたりの目安: 約%d分（%d秒）\n現在の質問番号: %d/%d\nこの質問の経過時間: %d秒\nこの質問の残り目安: %d秒",
+		questionDurationSeconds/60,
+		questionDurationSeconds,
+		questionIndex,
+		totalQuestions,
+		questionElapsedSeconds,
+		questionDurationSeconds-questionElapsedSeconds,
+	)
 
 	if remainingSeconds > 0 {
 		remainingMinutes := remainingSeconds / 60
@@ -681,6 +775,7 @@ func buildInterviewSystemPrompt(companyName, companyReading, position, companyIn
 - 応募者の回答が抽象的・表面的な場合のみ深掘りしてください
 - 採用判断に有益な情報（具体的エピソード・数値・自分の行動・結果）が得られた場合は次のトピックへ移行してください
 - 同一トピックへの深掘りは最大2回までとし、現在のトピックでの質問回数が3回に達したら必ず次のトピックへ移行してください
+- 1つの質問は約3分を目安にし、目安時間に達したら自然に次の質問へ移行してください
 - トピックを移行する際は「ありがとうございます。次に〜についてお聞きします。」と自然につないでください`
 
 	if companyName != "" || position != "" {

@@ -103,6 +103,9 @@ function InterviewContent() {
   const [partialUser, setPartialUser] = useState('')
   const [partialAi, setPartialAi] = useState('')
   const [remainingSeconds, setRemainingSeconds] = useState(interviewLimits.maxMinutes * 60)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(1)
+  const [questionElapsedSeconds, setQuestionElapsedSeconds] = useState(0)
   const [sessionWarningShown, setSessionWarningShown] = useState(false)
   const [session, setSession] = useState<InterviewSession | null>(null)
   const [report, setReport] = useState<InterviewReport | null>(null)
@@ -348,13 +351,27 @@ function InterviewContent() {
     setIsRecording(false); setTurnPending(false); setAiSpeaking(false)
   }
 
-  const startTimer = () => {
+  const startTimer = (totalQuestions: number) => {
     sessionStartRef.current = Date.now()
     timerRef.current = setInterval(() => {
       if (!sessionStartRef.current) return
       const elapsed = Math.floor((Date.now() - sessionStartRef.current) / 1000)
       const remaining = Math.max(0, interviewLimits.maxMinutes * 60 - elapsed)
+      const safeQuestionDuration = Math.max(60, interviewLimits.questionDurationSeconds || 180)
+      const safeTotalQuestions = Math.max(1, totalQuestions)
+      const nextQuestionIndex = Math.min(
+        safeTotalQuestions,
+        Math.floor(elapsed / safeQuestionDuration) + 1,
+      )
+      const questionElapsed = Math.min(
+        safeQuestionDuration,
+        Math.max(0, elapsed - (nextQuestionIndex - 1) * safeQuestionDuration),
+      )
+
+      setElapsedSeconds(elapsed)
       setRemainingSeconds(remaining)
+      setCurrentQuestionIndex(nextQuestionIndex)
+      setQuestionElapsedSeconds(questionElapsed)
       if (remaining <= 120 && !sessionWarningShown) setSessionWarningShown(true)
       if (remaining <= 0) handleStop(true)
     }, 1000)
@@ -423,6 +440,10 @@ function InterviewContent() {
         position: selectedPosition?.title || '',
         company_info: [interviewCompany?.description, interviewCompany?.main_business].filter(Boolean).join(' / '),
         company_type: selectedPosition?.category || 'general',
+        question_index: 1,
+        total_questions: Math.max(1, selectedPosition?.questions || 1),
+        question_elapsed_seconds: 0,
+        question_duration_seconds: Math.max(60, interviewLimits.questionDurationSeconds || 180),
       }),
     })
     if (!res.ok) throw new Error(await res.text())
@@ -451,6 +472,9 @@ function InterviewContent() {
     setPartialUser(''); setPartialAi('')
     setReport(null); setReportStatus('idle')
     setRemainingSeconds(interviewLimits.maxMinutes * 60)
+    setElapsedSeconds(0)
+    setCurrentQuestionIndex(1)
+    setQuestionElapsedSeconds(0)
     setSessionWarningShown(false)
     setMicEnabled(true); setCameraEnabled(true)
     historyRef.current = []
@@ -496,7 +520,7 @@ function InterviewContent() {
         } catch { /* camera unavailable — skip recording */ }
       }
 
-      startTimer()
+      startTimer(selectedPosition.questions)
       await doStartTurn(created.id, user.user_id)
     } catch (error: any) {
       setStatus('error')
@@ -604,6 +628,10 @@ function InterviewContent() {
     formData.append('history', JSON.stringify(historyRef.current))
     formData.append('turn_count', String(Math.floor(historyRef.current.length / 2) + 1))
     formData.append('remaining_seconds', String(remainingSeconds))
+    formData.append('question_index', String(currentQuestionIndex))
+    formData.append('total_questions', String(Math.max(1, selectedPosition.questions)))
+    formData.append('question_elapsed_seconds', String(questionElapsedSeconds))
+    formData.append('question_duration_seconds', String(Math.max(60, interviewLimits.questionDurationSeconds || 180)))
     formData.append('company_name', interviewCompany?.name || '')
     formData.append('company_reading', interviewCompany?.name_reading || '')
     formData.append('position', selectedPosition?.title || '')
@@ -655,6 +683,10 @@ function InterviewContent() {
 
   const isActive = status === 'connecting' || status === 'connected'
   const isConnected = status === 'connected'
+  const questionDurationSeconds = Math.max(60, interviewLimits.questionDurationSeconds || 180)
+  const totalQuestionCount = Math.max(1, selectedPosition.questions)
+  const questionProgress = Math.min(100, Math.round((questionElapsedSeconds / questionDurationSeconds) * 100))
+  const questionRemainingSeconds = Math.max(0, questionDurationSeconds - questionElapsedSeconds)
   const progress = Math.min(100, Math.round(((interviewLimits.maxMinutes * 60 - remainingSeconds) / (interviewLimits.maxMinutes * 60)) * 100))
   const isFemale = avatarGender === 'female'
   const companyName = interviewCompany?.name || 'AI面接練習'
@@ -1369,6 +1401,13 @@ function InterviewContent() {
               <Typography sx={{ fontSize: 13, color: '#e8eaed', fontWeight: 500 }}>{formatSeconds(remainingSeconds)}</Typography>
             </Box>
           )}
+          {isActive && (
+            <Box sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 0.6, borderRadius: 9999, bgcolor: 'rgba(236,91,19,0.2)', border: `1px solid ${PRIMARY}66` }}>
+              <Typography sx={{ fontSize: 12, color: '#ffd8c2', fontWeight: 700 }}>
+                質問 {currentQuestionIndex}/{totalQuestionCount}
+              </Typography>
+            </Box>
+          )}
           {isConnected && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#34a853', animation: 'pulse 2s infinite', '@keyframes pulse': { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.4 } } }} />
@@ -1388,6 +1427,27 @@ function InterviewContent() {
                 : `⚠️ 残り約${Math.ceil(remainingSeconds / 60)}分です。セッションがまもなく終了します。`}
             </Typography>
           </Box>
+        </Box>
+      )}
+
+      {/* ── Question progress ── */}
+      {isConnected && (
+        <Box sx={{ px: 2, pt: 1, flexShrink: 0 }}>
+          <Paper sx={{ bgcolor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 2, p: 1.5 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+              <Typography sx={{ fontSize: 13, color: '#e8eaed', fontWeight: 700 }}>
+                質問 {currentQuestionIndex}/{totalQuestionCount}
+              </Typography>
+              <Typography sx={{ fontSize: 12, color: '#cdd1d5' }}>
+                全体経過 {formatSeconds(elapsedSeconds)} • 質問内 {formatSeconds(questionElapsedSeconds)} / 残り目安 {formatSeconds(questionRemainingSeconds)}
+              </Typography>
+            </Box>
+            <LinearProgress
+              variant="determinate"
+              value={questionProgress}
+              sx={{ height: 7, borderRadius: 9999, bgcolor: 'rgba(255,255,255,0.12)', '& .MuiLinearProgress-bar': { bgcolor: PRIMARY } }}
+            />
+          </Paper>
         </Box>
       )}
 
@@ -1701,7 +1761,7 @@ function InterviewContent() {
             </IconButton>
           </Tooltip>
           <Typography variant="caption" sx={{ color: '#5f6368', ml: 1 }}>
-            残り {Math.floor(remainingSeconds / 60)}:{String(remainingSeconds % 60).padStart(2, '0')}
+            質問 {currentQuestionIndex}/{totalQuestionCount} • 残り {Math.floor(remainingSeconds / 60)}:{String(remainingSeconds % 60).padStart(2, '0')}
           </Typography>
         </Box>
       </Box>
