@@ -177,6 +177,9 @@ INTERVIEW_MAX_MINUTES=10
 INTERVIEW_MAX_COST_USD=1.8
 INTERVIEW_COST_PER_MIN_USD=0.18
 
+# CORS 許可オリジン（カンマ区切り）
+ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+
 # gBizINFO
 GBIZINFO_BASE_URL=https://api.biz-info.go.jp
 GBIZINFO_API_KEY=xxxxxxxxxxxxxxxx
