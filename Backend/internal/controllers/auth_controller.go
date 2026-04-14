@@ -86,7 +86,7 @@ func (c *AuthController) CreateGuest(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := c.authService.CreateGuestUser()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -120,7 +120,7 @@ func (c *AuthController) GetUser(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -295,7 +295,7 @@ func (c *AuthController) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := c.authService.DeleteAccount(uint(userID)); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 

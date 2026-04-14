@@ -46,7 +46,7 @@ func (c *AdminInterviewController) ListSessions(w http.ResponseWriter, r *http.R
 
 	sessions, total, err := c.interviewService.ListAllSessionsAdmin(limit, offset)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -122,7 +122,7 @@ func (c *AdminInterviewController) VideoURL(w http.ResponseWriter, r *http.Reque
 	expires := 15 * time.Minute
 	presignedURL, err := c.s3Service.PresignGetURL(r.Context(), video.DriveFileID, expires)
 	if err != nil {
-		http.Error(w, "Failed to generate video URL: "+err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 

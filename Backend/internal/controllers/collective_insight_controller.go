@@ -57,7 +57,7 @@ func (c *CollectiveInsightController) GetRecommendations(w http.ResponseWriter, 
 
 	items, err := c.svc.GetCollectiveRecommendations(userID, sessionID, excludeIDs)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	if items == nil {
@@ -83,7 +83,7 @@ func (c *CollectiveInsightController) GetTopPassRateCompanies(w http.ResponseWri
 
 	companies, err := c.svc.GetTopPassRateCompanies(limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -106,7 +106,7 @@ func (c *CollectiveInsightController) UpdateConsent(w http.ResponseWriter, r *ht
 	}
 
 	if err := c.svc.UpdateConsent(req.UserID, req.Allow); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -142,7 +142,7 @@ func (c *CollectiveInsightController) RecordAction(w http.ResponseWriter, r *htt
 	}
 
 	if err := c.svc.RecordAction(req.UserID, req.SessionID, req.CompanyID, req.ActionType); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -155,7 +155,7 @@ func (c *CollectiveInsightController) RecordAction(w http.ResponseWriter, r *htt
 // 全企業の行動サマリーをバッチ再集計する（管理画面用）
 func (c *CollectiveInsightController) RebuildSummaries(w http.ResponseWriter, r *http.Request) {
 	if err := c.svc.RebuildSummaries(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

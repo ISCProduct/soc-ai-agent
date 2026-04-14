@@ -13,7 +13,7 @@ import (
 )
 
 type CompanyRelationController struct {
-	repo        repository.CompanyRelationQueryRepository
+	repo         repository.CompanyRelationQueryRepository
 	openaiClient *openai.Client
 }
 

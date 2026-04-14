@@ -122,12 +122,12 @@ func (c *AdminCompanyGraphController) Crawl(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"ok":            true,
-		"logs":          logs,
-		"nodes":         len(nodes),
-		"saved":         saved,
-		"skipped":       skipped,
-		"target_year":   targetYear,
+		"ok":               true,
+		"logs":             logs,
+		"nodes":            len(nodes),
+		"saved":            saved,
+		"skipped":          skipped,
+		"target_year":      targetYear,
 		"relations_synced": relSynced,
 	})
 
@@ -173,10 +173,10 @@ func (c *AdminCompanyGraphController) crawlViaService(
 	body, _ := io.ReadAll(resp.Body)
 
 	var result struct {
-		OK         bool                          `json:"ok"`
-		Error      string                        `json:"error"`
-		Logs       string                        `json:"logs"`
-		TargetYear int                           `json:"target_year"`
+		OK         bool                            `json:"ok"`
+		Error      string                          `json:"error"`
+		Logs       string                          `json:"logs"`
+		TargetYear int                             `json:"target_year"`
 		Nodes      map[string]*scraper.CompanyNode `json:"nodes"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {

@@ -71,7 +71,7 @@ func (c *IntegratedProfileController) GetProfile(w http.ResponseWriter, r *http.
 
 	profile, err := c.crossFeature.BuildIntegratedProfile(userID, sessionID, interviewCount, resumeReviewDone)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 

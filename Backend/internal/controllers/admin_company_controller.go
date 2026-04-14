@@ -16,9 +16,9 @@ import (
 )
 
 type AdminCompanyController struct {
-	repo        repository.CompanyRepository
-	audit       *services.AuditLogService
-	gbiz        *services.GBizInfoService
+	repo         repository.CompanyRepository
+	audit        *services.AuditLogService
+	gbiz         *services.GBizInfoService
 	openaiClient *openai.Client
 }
 
@@ -247,7 +247,7 @@ func (c *AdminCompanyController) searchGBiz(w http.ResponseWriter, r *http.Reque
 	}
 	results, err := c.gbiz.SearchByName(r.Context(), name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -320,7 +320,7 @@ func (c *AdminCompanyController) fetchTechStack(w http.ResponseWriter, r *http.R
 
 	text, err := c.openaiClient.WebSearchQuery(ctx, prompt)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("web search failed: %v", err), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 

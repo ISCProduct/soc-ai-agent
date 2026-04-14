@@ -49,7 +49,7 @@ func (c *AdminScoreValidationController) Route(w http.ResponseWriter, r *http.Re
 func (c *AdminScoreValidationController) GetCorrelation(w http.ResponseWriter, r *http.Request) {
 	report, err := c.svc.GetCorrelationReport()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	writeJSON(w, report)
@@ -60,7 +60,7 @@ func (c *AdminScoreValidationController) GetCorrelation(w http.ResponseWriter, r
 func (c *AdminScoreValidationController) GetPhaseMetrics(w http.ResponseWriter, r *http.Request) {
 	report, err := c.svc.GetPhasePrecisionReport()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	writeJSON(w, report)
@@ -71,7 +71,7 @@ func (c *AdminScoreValidationController) GetPhaseMetrics(w http.ResponseWriter, 
 func (c *AdminScoreValidationController) GetCalibration(w http.ResponseWriter, r *http.Request) {
 	weights, err := c.svc.GetCurrentCalibration()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	writeJSON(w, map[string]interface{}{"weights": weights})
@@ -99,7 +99,7 @@ func (c *AdminScoreValidationController) GetCalibrationHistory(w http.ResponseWr
 	}
 	history, err := c.svc.GetCalibrationHistory(limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	writeJSON(w, map[string]interface{}{"history": history})
@@ -109,7 +109,7 @@ func (c *AdminScoreValidationController) GetCalibrationHistory(w http.ResponseWr
 func (c *AdminScoreValidationController) ListVariants(w http.ResponseWriter, r *http.Request) {
 	experiments, err := c.svc.ListExperiments()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	writeJSON(w, map[string]interface{}{"experiments": experiments})
@@ -137,7 +137,7 @@ func (c *AdminScoreValidationController) CreateVariant(w http.ResponseWriter, r 
 
 	variant, err := c.svc.CreateVariant(req.ExperimentName, req.VariantName, req.Description, req.TrafficRatio)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
@@ -153,7 +153,7 @@ func (c *AdminScoreValidationController) GetVariantResults(w http.ResponseWriter
 	}
 	results, err := c.svc.GetVariantResults(experimentName)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	writeJSON(w, map[string]interface{}{"experiment": experimentName, "results": results})
