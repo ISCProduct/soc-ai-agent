@@ -12,15 +12,49 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 )
 
+func buildAllowedOrigins() map[string]struct{} {
+	allowedOrigins := make(map[string]struct{})
+	raw := os.Getenv("ALLOWED_ORIGINS")
+
+	for _, origin := range strings.Split(raw, ",") {
+		trimmed := strings.TrimSpace(origin)
+		if trimmed == "" {
+			continue
+		}
+		allowedOrigins[trimmed] = struct{}{}
+	}
+
+	if len(allowedOrigins) == 0 && os.Getenv("APP_ENV") != "production" {
+		allowedOrigins["http://localhost:3000"] = struct{}{}
+		allowedOrigins["http://127.0.0.1:3000"] = struct{}{}
+		log.Println("WARNING: ALLOWED_ORIGINS が未設定のため、開発用デフォルト（localhost:3000）のみ許可します。")
+	}
+
+	return allowedOrigins
+}
+
 func corsMiddleware(next http.Handler) http.Handler {
+	allowedOrigins := buildAllowedOrigins()
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		_, isAllowedOrigin := allowedOrigins[origin]
+
+		w.Header().Add("Vary", "Origin")
+		if isAllowedOrigin {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 		if r.Method == "OPTIONS" {
+			if origin != "" && !isAllowedOrigin {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 			return
 		}
