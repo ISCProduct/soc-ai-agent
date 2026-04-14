@@ -89,7 +89,7 @@ JSONのみで返してください。`
 
 	raw, err := c.openaiClient.ChatCompletionJSON(context.Background(), systemPrompt, userPrompt, 0.7, 1500)
 	if err != nil {
-		http.Error(w, "AI generation failed: "+err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 

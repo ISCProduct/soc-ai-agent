@@ -39,7 +39,7 @@ func (c *QuestionController) GenerateQuestions(w http.ResponseWriter, r *http.Re
 
 	questions, err := c.questionService.GenerateAndSaveQuestions(r.Context(), req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -70,7 +70,7 @@ func (c *QuestionController) CreateQuestion(w http.ResponseWriter, r *http.Reque
 	}
 
 	if err := c.questionService.CreateQuestion(&qw); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -94,7 +94,7 @@ func (c *QuestionController) GetQuestionsByCategory(w http.ResponseWriter, r *ht
 
 	questions, err := c.questionService.GetQuestionsByCategory(category)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 

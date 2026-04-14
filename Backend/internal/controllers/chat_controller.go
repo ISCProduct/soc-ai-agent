@@ -63,9 +63,7 @@ func (c *ChatController) Chat(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := c.chatService.ProcessChat(r.Context(), req)
 	if err != nil {
-		// エラーログを詳細に出力
-		println("Error in ProcessChat:", err.Error())
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -97,7 +95,7 @@ func (c *ChatController) GetHistory(w http.ResponseWriter, r *http.Request) {
 
 	history, err := c.chatService.GetChatHistory(sessionID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -128,7 +126,7 @@ func (c *ChatController) GetScores(w http.ResponseWriter, r *http.Request) {
 
 	scores, err := c.chatService.GetUserScores(uint(userID), sessionID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -329,7 +327,7 @@ func (c *ChatController) ToggleFavorite(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := c.matchingService.ToggleFavorite(req.MatchID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -364,7 +362,7 @@ func (c *ChatController) GetAnalysisSummary(w http.ResponseWriter, r *http.Reque
 
 	summary, err := c.analysisService.BuildAnalysisSummary(r.Context(), uint(userID), sessionID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -501,7 +499,7 @@ func (c *ChatController) SendReport(w http.ResponseWriter, r *http.Request) {
 	// 分析サマリー取得
 	summary, err := c.analysisService.BuildAnalysisSummary(r.Context(), req.UserID, req.SessionID)
 	if err != nil {
-		http.Error(w, "Failed to build analysis summary: "+err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -556,7 +554,7 @@ func (c *ChatController) GetSessions(w http.ResponseWriter, r *http.Request) {
 
 	sessions, err := c.chatService.GetUserChatSessions(uint(userID))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 

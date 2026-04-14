@@ -28,7 +28,7 @@ func (c *AdminCostsController) Summary(w http.ResponseWriter, r *http.Request) {
 
 	monthTotal, err := c.costService.GetCurrentMonthTotal()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	realtimeMonthTotal := 0.0
@@ -37,17 +37,17 @@ func (c *AdminCostsController) Summary(w http.ResponseWriter, r *http.Request) {
 	if c.realtimeUsageService != nil {
 		realtimeMonthTotal, err = c.realtimeUsageService.CurrentMonthTotalCost()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalServerError(w, err)
 			return
 		}
 		activeConnections, err = c.realtimeUsageService.CurrentActiveCount()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalServerError(w, err)
 			return
 		}
 		realtimeUsers, err = c.realtimeUsageService.GetUserBreakdown(30, 20)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalServerError(w, err)
 			return
 		}
 	}
@@ -55,7 +55,7 @@ func (c *AdminCostsController) Summary(w http.ResponseWriter, r *http.Request) {
 	since30d := time.Now().UTC().AddDate(0, 0, -30)
 	modelBreakdown, err := c.costService.GetModelBreakdown(since30d)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -83,14 +83,14 @@ func (c *AdminCostsController) Daily(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := c.costService.GetDailyCosts(days)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	realtimeRows := []services.RealtimeDailySummary{}
 	if c.realtimeUsageService != nil {
 		realtimeRows, err = c.realtimeUsageService.GetDailyUsage(days)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalServerError(w, err)
 			return
 		}
 	}
@@ -113,14 +113,14 @@ func (c *AdminCostsController) Monthly(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := c.costService.GetMonthlyCosts(months)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	realtimeRows := []services.RealtimeMonthlySummary{}
 	if c.realtimeUsageService != nil {
 		realtimeRows, err = c.realtimeUsageService.GetMonthlyUsage(months)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalServerError(w, err)
 			return
 		}
 	}

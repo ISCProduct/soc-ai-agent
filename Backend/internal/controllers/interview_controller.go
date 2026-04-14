@@ -123,7 +123,7 @@ func (c *InterviewController) GetTrend(w http.ResponseWriter, r *http.Request) {
 	}
 	points, err := c.interviewService.GetTrend(uint(userID), limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -158,7 +158,7 @@ func (c *InterviewController) GetReport(w http.ResponseWriter, r *http.Request) 
 		if err.Error() == "forbidden" {
 			status = http.StatusForbidden
 		}
-		http.Error(w, err.Error(), status)
+		writeErrorByStatus(w, status, err)
 		return
 	}
 	if report == nil {
@@ -195,7 +195,7 @@ func (c *InterviewController) GetPhraseSuggestions(w http.ResponseWriter, r *htt
 		if err.Error() == "forbidden" {
 			status = http.StatusForbidden
 		}
-		http.Error(w, err.Error(), status)
+		writeErrorByStatus(w, status, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -229,7 +229,7 @@ func (c *InterviewController) SendReport(w http.ResponseWriter, r *http.Request)
 		if err.Error() == "guest users cannot receive email reports" {
 			status = http.StatusForbidden
 		}
-		http.Error(w, err.Error(), status)
+		writeErrorByStatus(w, status, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -425,7 +425,7 @@ func (c *InterviewController) Turn(w http.ResponseWriter, r *http.Request) {
 		questionDurationSeconds,
 	)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -484,7 +484,7 @@ func (c *InterviewController) StartTurn(w http.ResponseWriter, r *http.Request) 
 		req.QuestionDurationSeconds,
 	)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -547,7 +547,7 @@ func (c *InterviewController) Start(w http.ResponseWriter, r *http.Request) {
 		if err.Error() == "forbidden" {
 			status = http.StatusForbidden
 		}
-		http.Error(w, err.Error(), status)
+		writeErrorByStatus(w, status, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -579,7 +579,7 @@ func (c *InterviewController) Finish(w http.ResponseWriter, r *http.Request) {
 		if err.Error() == "forbidden" {
 			status = http.StatusForbidden
 		}
-		http.Error(w, err.Error(), status)
+		writeErrorByStatus(w, status, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -614,7 +614,7 @@ func (c *InterviewController) List(w http.ResponseWriter, r *http.Request) {
 		if err.Error() == "forbidden" {
 			status = http.StatusForbidden
 		}
-		http.Error(w, err.Error(), status)
+		writeErrorByStatus(w, status, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -656,7 +656,7 @@ func (c *InterviewController) Get(w http.ResponseWriter, r *http.Request) {
 		if err.Error() == "forbidden" {
 			status = http.StatusForbidden
 		}
-		http.Error(w, err.Error(), status)
+		writeErrorByStatus(w, status, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -687,7 +687,7 @@ func (c *InterviewController) AddUtterance(w http.ResponseWriter, r *http.Reques
 		if err.Error() == "forbidden" {
 			status = http.StatusForbidden
 		}
-		http.Error(w, err.Error(), status)
+		writeErrorByStatus(w, status, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

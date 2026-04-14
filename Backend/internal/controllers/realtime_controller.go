@@ -8,7 +8,7 @@ import (
 )
 
 type RealtimeController struct {
-	interviewService    *services.InterviewService
+	interviewService     *services.InterviewService
 	realtimeUsageService *services.RealtimeUsageService
 }
 
@@ -48,7 +48,7 @@ func (c *RealtimeController) Token(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(err.Error(), "realtime capacity exceeded") {
 			status = http.StatusTooManyRequests
 		}
-		http.Error(w, err.Error(), status)
+		writeErrorByStatus(w, status, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

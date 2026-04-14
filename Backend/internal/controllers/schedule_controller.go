@@ -67,7 +67,7 @@ func (c *ScheduleController) List(w http.ResponseWriter, r *http.Request) {
 	}
 	events, err := c.service.List(userID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -242,7 +242,7 @@ func (c *ScheduleController) ExportICS(w http.ResponseWriter, r *http.Request) {
 	}
 	ics, err := c.service.ExportICS(userID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")

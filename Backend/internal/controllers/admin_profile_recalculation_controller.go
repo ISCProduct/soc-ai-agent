@@ -65,7 +65,7 @@ func (c *AdminProfileRecalculationController) RecalculateAll(w http.ResponseWrit
 
 	results, err := c.service.RecalculateAll(req.MinSamples)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -97,7 +97,7 @@ func (c *AdminProfileRecalculationController) RecalculateOne(w http.ResponseWrit
 
 	result, err := c.service.RecalculateCompany(companyID, req.MinSamples)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -124,7 +124,7 @@ func (c *AdminProfileRecalculationController) Rollback(w http.ResponseWriter, r 
 func (c *AdminProfileRecalculationController) GetHistory(w http.ResponseWriter, r *http.Request, companyID uint) {
 	histories, err := c.service.GetHistory(companyID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 

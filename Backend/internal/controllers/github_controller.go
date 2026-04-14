@@ -118,7 +118,7 @@ func (c *GitHubController) SyncAndWait(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusForbidden)
 			return
 		}
-		http.Error(w, "sync failed: "+err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -202,7 +202,7 @@ func (c *GitHubController) SummarizeRepo(w http.ResponseWriter, r *http.Request)
 
 	summary, err := c.githubService.SummarizeRepo(r.Context(), userID, body.FullName, body.ForceRefresh)
 	if err != nil {
-		http.Error(w, "summarize failed: "+err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 

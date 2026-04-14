@@ -41,9 +41,9 @@ type UserScoreSummary struct {
 }
 
 type SessionScoreEntry struct {
-	SessionID uint       `json:"session_id"`
-	EndedAt   *time.Time `json:"ended_at,omitempty"`
-	AvgScore  *float64   `json:"avg_score,omitempty"`
+	SessionID uint               `json:"session_id"`
+	EndedAt   *time.Time         `json:"ended_at,omitempty"`
+	AvgScore  *float64           `json:"avg_score,omitempty"`
 	Scores    map[string]float64 `json:"scores,omitempty"`
 }
 
@@ -88,7 +88,7 @@ func (c *AdminDashboardController) ListUsers(w http.ResponseWriter, r *http.Requ
 
 	users, total, err := c.userRepo.ListUsersPaged(limit, offset, query)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -99,7 +99,7 @@ func (c *AdminDashboardController) ListUsers(w http.ResponseWriter, r *http.Requ
 
 	statMap, err := c.sessionRepo.GetUserStatsBatch(userIDs)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -120,7 +120,7 @@ func (c *AdminDashboardController) ListUsers(w http.ResponseWriter, r *http.Requ
 
 	reports, err := c.reportRepo.FindBySessionIDs(allSessionIDs)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -218,13 +218,13 @@ func (c *AdminDashboardController) UserSessions(w http.ResponseWriter, r *http.R
 
 	sessionIDs, err := c.sessionRepo.ListFinishedSessionIDsByUser(userID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
 	reports, err := c.reportRepo.FindBySessionIDs(sessionIDs)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	reportBySession := map[uint]*models.InterviewReport{}
@@ -234,7 +234,7 @@ func (c *AdminDashboardController) UserSessions(w http.ResponseWriter, r *http.R
 
 	sessions, err := c.sessionRepo.ListFinishedByUser(userID, 0)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -262,7 +262,7 @@ func (c *AdminDashboardController) ExportCSV(w http.ResponseWriter, r *http.Requ
 
 	users, _, err := c.userRepo.ListUsersPaged(10000, 0, "")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	userIDs := make([]uint, len(users))

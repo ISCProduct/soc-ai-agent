@@ -54,7 +54,7 @@ func (c *ResumeController) Upload(w http.ResponseWriter, r *http.Request) {
 
 	result, err := c.resumeService.Upload(uint(userID), sessionID, sourceType, sourceURL, fileHeader)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 
@@ -107,7 +107,7 @@ func (c *ResumeController) Review(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, ve.Message, http.StatusUnprocessableEntity)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalServerError(w, err)
 		return
 	}
 	log.Printf("resume_review: completed document_id=%d score=%d items=%d", docID, review.Score, len(items))
