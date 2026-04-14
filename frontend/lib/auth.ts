@@ -1,4 +1,6 @@
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
+const AUTH_USER_KEY = 'user'
+const AUTH_TOKEN_KEY = 'token'
 
 function fixMojibake(s: string): string {
   // Detect common mojibake patterns (Ã, å followed by other Latin-1 chars)
@@ -17,6 +19,31 @@ function fixMojibake(s: string): string {
       }
     }
   })() : s
+}
+
+function getSessionStorage(): Storage | null {
+  if (typeof window === 'undefined') return null
+  return window.sessionStorage
+}
+
+function getLocalStorage(): Storage | null {
+  if (typeof window === 'undefined') return null
+  return window.localStorage
+}
+
+function migrateAuthValue(key: string): string | null {
+  const session = getSessionStorage()
+  if (!session) return null
+
+  const current = session.getItem(key)
+  if (current) return current
+
+  const legacy = getLocalStorage()?.getItem(key)
+  if (!legacy) return null
+
+  session.setItem(key, legacy)
+  getLocalStorage()?.removeItem(key)
+  return legacy
 }
 
 export interface User {
@@ -208,14 +235,18 @@ export const authService = {
       oauth_provider: authResponse.oauth_provider,
       avatar_url: authResponse.avatar_url,
     }
-    localStorage.setItem('user', JSON.stringify(user))
+    const session = getSessionStorage()
+    session?.setItem(AUTH_USER_KEY, JSON.stringify(user))
     if (authResponse.token) {
-      localStorage.setItem('token', authResponse.token)
+      session?.setItem(AUTH_TOKEN_KEY, authResponse.token)
     }
+    // 既存localStorageからの段階移行: 保存後は残存値を削除
+    getLocalStorage()?.removeItem(AUTH_USER_KEY)
+    getLocalStorage()?.removeItem(AUTH_TOKEN_KEY)
   },
 
   getStoredUser(): User | null {
-    const user = localStorage.getItem('user')
+    const user = migrateAuthValue(AUTH_USER_KEY)
     if (!user) return null
     try {
       const parsed: User = JSON.parse(user)
@@ -227,7 +258,7 @@ export const authService = {
   },
 
   getStoredToken(): string | null {
-    return localStorage.getItem('token')
+    return migrateAuthValue(AUTH_TOKEN_KEY)
   },
 
   // 管理者APIリクエスト用のヘッダーを返す（X-Admin-Email + X-Admin-Token）
@@ -241,9 +272,11 @@ export const authService = {
   },
 
   logout() {
-    // ユーザー情報とトークンを削除
-    localStorage.removeItem('user')
-    localStorage.removeItem('token')
+    // ユーザー情報とトークンを削除（sessionStorage運用 + legacy localStorage清掃）
+    getSessionStorage()?.removeItem(AUTH_USER_KEY)
+    getSessionStorage()?.removeItem(AUTH_TOKEN_KEY)
+    getLocalStorage()?.removeItem(AUTH_USER_KEY)
+    getLocalStorage()?.removeItem(AUTH_TOKEN_KEY)
     
     // チャットキャッシュを削除
     const sessionId = localStorage.getItem('chat_session_id')
