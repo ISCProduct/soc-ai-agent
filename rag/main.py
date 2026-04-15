@@ -82,10 +82,14 @@ def get_cached_context(
     try:
         client = get_chroma_client()
         col_name = _sanitize_collection_name(cache_key)
-        try:
-            collection = client.get_collection(col_name)
-        except Exception:
+        collection_names = {
+            getattr(col, "name", "")
+            for col in client.list_collections()
+        }
+        if col_name not in collection_names:
+            logger.info("chromadb cache miss key=%s reason=collection_not_found", cache_key)
             return []
+        collection = client.get_collection(col_name)
         count = collection.count()
         if count == 0:
             return []
@@ -98,7 +102,7 @@ def get_cached_context(
         logger.info("chromadb cache hit key=%s docs=%d", cache_key, len(docs))
         return docs
     except Exception as exc:
-        logger.warning("chromadb get failed key=%s error=%s", cache_key, exc)
+        logger.exception("chromadb get failed key=%s error=%s", cache_key, exc)
         return []
 
 
@@ -115,7 +119,7 @@ def set_cached_context(cache_key: str, docs: List[str]) -> None:
         collection.upsert(ids=ids, documents=docs, embeddings=embeddings)
         logger.info("chromadb upsert key=%s docs=%d", cache_key, len(docs))
     except Exception as exc:
-        logger.warning("chromadb set failed key=%s error=%s", cache_key, exc)
+        logger.exception("chromadb set failed key=%s error=%s", cache_key, exc)
 
 
 def run_search(query: str, limit: int = 5) -> Tuple[List[dict], bool]:
