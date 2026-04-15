@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -33,6 +34,12 @@ type JobValidationResult struct {
 
 // ValidateJobCategory ユーザーの職種回答を判定
 func (v *JobCategoryValidator) ValidateJobCategory(ctx context.Context, userAnswer string) (*JobValidationResult, error) {
+	normalizedAnswer, err := v.normalizeNumericAnswer(userAnswer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to normalize numeric answer: %w", err)
+	}
+	userAnswer = normalizedAnswer
+
 	// 1. すべての職種を取得
 	allCategories, err := v.jobCategoryRepo.FindAll()
 	if err != nil {
@@ -169,6 +176,31 @@ JSONのみを返してください。説明は不要です。`, userAnswer, stri
 		SuggestedQuestion:  aiResponse.SuggestedQuestion,
 		NeedsClarification: aiResponse.NeedsClarification,
 	}, nil
+}
+
+func (v *JobCategoryValidator) normalizeNumericAnswer(userAnswer string) (string, error) {
+	trimmed := strings.TrimSpace(userAnswer)
+	if trimmed == "" {
+		return userAnswer, nil
+	}
+
+	choice, err := strconv.Atoi(trimmed)
+	if err != nil || choice <= 0 {
+		return userAnswer, nil
+	}
+
+	topCategories, err := v.jobCategoryRepo.GetTopCategories()
+	if err != nil {
+		return "", err
+	}
+
+	if choice <= len(topCategories) {
+		return topCategories[choice-1].Name, nil
+	}
+	if choice == len(topCategories)+1 {
+		return "まだ決めていない", nil
+	}
+	return userAnswer, nil
 }
 
 // GenerateJobSelectionQuestion 職種選択の質問を生成
