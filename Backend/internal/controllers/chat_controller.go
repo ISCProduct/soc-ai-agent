@@ -4,12 +4,16 @@ import (
 	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/services"
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type ChatController struct {
@@ -21,6 +25,7 @@ type ChatController struct {
 }
 
 const minEvaluatedCategoriesForFinal = 4
+const matchingRetryMaxAttempts = 3
 
 func NewChatController(chatService *services.ChatService, matchingService *services.MatchingService, analysisService *services.AnalysisScoringService, userRepo repository.UserRepository, emailService *services.EmailService) *ChatController {
 	return &ChatController{
@@ -40,6 +45,67 @@ func countEvaluatedCategories(scores []entity.UserWeightScore) int {
 		}
 	}
 	return count
+}
+
+func parseEmailListFromEnv(key string) []string {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		addr := strings.TrimSpace(p)
+		if addr != "" {
+			out = append(out, addr)
+		}
+	}
+	return out
+}
+
+func (c *ChatController) notifyMatchingFailure(userID uint, sessionID string, err error) {
+	if c.emailService == nil {
+		return
+	}
+	recipients := parseEmailListFromEnv("MATCHING_ALERT_EMAILS")
+	if len(recipients) == 0 {
+		return
+	}
+	subject := fmt.Sprintf("[SOC AI] Background matching failed (user=%d)", userID)
+	body := fmt.Sprintf(
+		"Background matching permanently failed after retries.\nuser_id=%d\nsession_id=%s\nerror=%v\n",
+		userID,
+		sessionID,
+		err,
+	)
+	if sendErr := c.emailService.SendSystemAlertEmail(recipients, subject, body); sendErr != nil {
+		log.Printf("[Chat] matching failure alert email failed: %v", sendErr)
+	}
+}
+
+func (c *ChatController) runBackgroundMatching(userID uint, sessionID string) {
+	ctx := context.Background()
+	var lastErr error
+
+	for attempt := 1; attempt <= matchingRetryMaxAttempts; attempt++ {
+		err := c.matchingService.CalculateMatching(ctx, userID, sessionID)
+		if err == nil {
+			log.Printf("[Chat] Background matching calculation completed: user=%d session=%s attempt=%d", userID, sessionID, attempt)
+			return
+		}
+		lastErr = err
+
+		if attempt == matchingRetryMaxAttempts {
+			break
+		}
+
+		wait := time.Duration(1<<(attempt-1)) * time.Second
+		log.Printf("[Chat] Background matching calculation failed: user=%d session=%s attempt=%d/%d err=%v retry_in=%s", userID, sessionID, attempt, matchingRetryMaxAttempts, err, wait)
+		time.Sleep(wait)
+	}
+
+	log.Printf("[Chat] ALERT: background matching permanently failed: user=%d session=%s attempts=%d err=%v", userID, sessionID, matchingRetryMaxAttempts, lastErr)
+	c.notifyMatchingFailure(userID, sessionID, lastErr)
 }
 
 // Chat チャット処理
@@ -68,13 +134,7 @@ func (c *ChatController) Chat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// マッチング計算を非同期で実行（レスポンスは待たない）
-	go func() {
-		if err := c.matchingService.CalculateMatching(r.Context(), req.UserID, req.SessionID); err != nil {
-			fmt.Printf("[Chat] Background matching calculation failed: %v\n", err)
-		} else {
-			fmt.Printf("[Chat] Background matching calculation completed for user %d\n", req.UserID)
-		}
-	}()
+	go c.runBackgroundMatching(req.UserID, req.SessionID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
