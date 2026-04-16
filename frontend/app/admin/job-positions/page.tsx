@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
-  Alert,
   Box,
   Button,
   Card,
@@ -20,6 +19,10 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import { authService } from '@/lib/auth'
+import { PageContainer } from '@/components/admin/PageContainer'
+import { ErrorAlert } from '@/components/common/ErrorAlert'
+import { AdminListCard } from '@/components/admin/AdminListCard'
+import { StatusBadge } from '@/components/admin/StatusBadge'
 
 type JobPosition = {
   id: number
@@ -44,12 +47,6 @@ type JobPosition = {
     is_provisional?: boolean
   }
   job_category?: { id: number; name: string }
-}
-
-const statusBadge = (status?: string) => {
-  if (status === 'published') return <Chip label="公開" color="success" size="small" />
-  if (status === 'rejected') return <Chip label="却下" color="error" size="small" />
-  return <Chip label="審査中" color="warning" size="small" />
 }
 
 const formatDate = (dateStr?: string) => {
@@ -84,14 +81,14 @@ function JobPositionCard({
   const hasCrawlInfo = !!(position.company?.source_url || position.company?.source_fetched_at || position.description || position.min_salary || reqSkills.length || prefSkills.length)
 
   return (
-    <Box sx={{ border: '1px solid #e0e0e0', borderRadius: 1, p: 2 }}>
+    <AdminListCard>
       <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={1}>
         <Box flex={1} minWidth={0}>
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 0.5 }}>
             <Typography variant="subtitle1" fontWeight="bold">
               {position.title}
             </Typography>
-            {statusBadge(position.data_status)}
+            <StatusBadge status={position.data_status || 'draft'} fallbackLabel="審査中" />
             {position.company?.is_provisional && (
               <Chip label="仮登録" size="small" variant="outlined" color="warning" />
             )}
@@ -228,7 +225,7 @@ function JobPositionCard({
           )}
         </Stack>
       </Collapse>
-    </Box>
+    </AdminListCard>
   )
 }
 
@@ -288,7 +285,7 @@ export default function AdminJobPositionsPage() {
   })
 
   return (
-    <Box sx={{ p: 4, maxWidth: 1000, mx: 'auto' }}>
+    <PageContainer maxWidth={1000}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
         <Typography variant="h4" fontWeight="bold">
           求人管理
@@ -309,11 +306,7 @@ export default function AdminJobPositionsPage() {
         クローリングで取得した求人情報を審査・公開します。各求人の▼ボタンでクロール元URL・スキル・職務内容を確認できます。
       </Typography>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
-      )}
+      <ErrorAlert error={error} />
 
       <Card>
         <CardContent>
@@ -356,6 +349,6 @@ export default function AdminJobPositionsPage() {
           </Stack>
         </CardContent>
       </Card>
-    </Box>
+    </PageContainer>
   )
 }

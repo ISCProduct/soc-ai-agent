@@ -12,6 +12,8 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { PageContainer } from '@/components/admin/PageContainer'
+import { AdminListCard } from '@/components/admin/AdminListCard'
 
 type GraduateEmployment = {
   id: number
@@ -47,7 +49,7 @@ export default function AdminGraduateEmploymentsPage() {
   }, [])
 
   return (
-    <Box sx={{ p: 4, maxWidth: 1000, mx: 'auto' }}>
+    <PageContainer maxWidth={1000}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
         <Typography variant="h4" fontWeight="bold">
           卒業生の就職情報管理
@@ -81,7 +83,7 @@ export default function AdminGraduateEmploymentsPage() {
               </Typography>
             ) : (
               graduateEntries.map((entry) => (
-                <Box key={entry.id} sx={{ border: '1px solid #eee', borderRadius: 1, p: 2 }}>
+                <AdminListCard key={entry.id}>
                   <Stack direction="row" alignItems="center" justifyContent="space-between">
                     <Box>
                       <Typography variant="subtitle2" fontWeight="bold">
@@ -106,12 +108,12 @@ export default function AdminGraduateEmploymentsPage() {
                       編集
                     </Button>
                   </Stack>
-                </Box>
+                </AdminListCard>
               ))
             )}
           </Stack>
         </CardContent>
       </Card>
-    </Box>
+    </PageContainer>
   )
 }

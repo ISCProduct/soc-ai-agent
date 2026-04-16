@@ -3,23 +3,22 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
-  Alert,
-  Box,
   Button,
   Card,
   CardContent,
-  Chip,
   Divider,
-  Table,
   TableBody,
   TableCell,
-  TableContainer,
   TableHead,
   TablePagination,
   TableRow,
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { PageContainer } from '@/components/admin/PageContainer'
+import { ErrorAlert } from '@/components/common/ErrorAlert'
+import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
+import { StatusBadge } from '@/components/admin/StatusBadge'
 
 type InterviewSession = {
   id: number
@@ -84,7 +83,7 @@ export default function AdminInterviewsPage() {
   }
 
   return (
-    <Box sx={{ p: 4, maxWidth: 1200, mx: 'auto' }}>
+    <PageContainer maxWidth={1200}>
       <Typography variant="h4" fontWeight="bold" gutterBottom>
         面接管理
       </Typography>
@@ -92,11 +91,7 @@ export default function AdminInterviewsPage() {
         全ユーザーの面接セッション一覧です。動画を確認するには詳細ページを開いてください。
       </Typography>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
-      )}
+      <ErrorAlert error={error} />
 
       <Card>
         <CardContent>
@@ -110,8 +105,7 @@ export default function AdminInterviewsPage() {
             </Typography>
           ) : (
             <>
-              <TableContainer>
-                <Table size="small">
+              <AdminTableWrapper>
                   <TableHead>
                     <TableRow>
                       <TableCell>ID</TableCell>
@@ -134,7 +128,7 @@ export default function AdminInterviewsPage() {
                           <TableCell>{session.company_name || '—'}</TableCell>
                           <TableCell>{session.position || '—'}</TableCell>
                           <TableCell>
-                            <Chip label={st.label} color={st.color} size="small" />
+                            <StatusBadge status={session.status} fallbackLabel={st.label} />
                           </TableCell>
                           <TableCell>
                             {session.started_at
@@ -158,8 +152,7 @@ export default function AdminInterviewsPage() {
                       )
                     })}
                   </TableBody>
-                </Table>
-              </TableContainer>
+              </AdminTableWrapper>
               <TablePagination
                 component="div"
                 count={total}
@@ -175,6 +168,6 @@ export default function AdminInterviewsPage() {
           )}
         </CardContent>
       </Card>
-    </Box>
+    </PageContainer>
   )
 }

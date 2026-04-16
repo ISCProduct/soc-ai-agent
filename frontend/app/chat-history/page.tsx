@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { Box, Container, Typography, Paper, List, ListItem, ListItemButton, ListItemText, Divider, CircularProgress, Button } from '@mui/material'
 import { useRouter } from 'next/navigation'
 import { authService } from '@/lib/auth'
-import { BACKEND_URL } from '@/lib/backend-url'
+import { BACKEND_URL } from '@/lib/config'
 import ChatIcon from '@mui/icons-material/Chat'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 

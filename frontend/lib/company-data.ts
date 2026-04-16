@@ -1,4 +1,4 @@
-import { BACKEND_URL } from './backend-url';
+import { BACKEND_URL } from './config';
 
 // 企業データの型定義
 export type MarketType = 'prime' | 'standard' | 'growth' | 'unlisted';
