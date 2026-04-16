@@ -22,6 +22,7 @@
 - [環境変数](#環境変数)
 - [ローカル開発](#ローカル開発)
 - [Docker Compose](#docker-compose)
+- [Copilot カスタムコマンド共有](#copilot-カスタムコマンド共有)
 - [主要APIエンドポイント](#主要apiエンドポイント)
 - [品質管理](#品質管理)
 - [よくあるトラブル](#よくあるトラブル)
@@ -267,6 +268,35 @@ docker compose --profile rag up -d rag-review
 | `frontend` | Next.js | 3000 |
 | `rag-review` | 職務経歴書 RAG | 9000 |
 | `company-graph` | 企業スクレイピング | 9100 |
+
+---
+
+## Copilot カスタムコマンド共有
+
+チームで同じCopilotカスタムコマンドを使う場合は、リポジトリ内の以下を共通利用します。
+
+- Prompt定義: `.github/prompts/*.prompt.md`
+- 呼び出し関数: `scripts/copilot-shortcuts.sh`
+
+### 初回セットアップ
+
+```sh
+source scripts/copilot-shortcuts.sh
+```
+
+毎回読み込む場合は、`~/.zshrc` などに追記します。
+
+```sh
+echo 'source /absolute/path/to/soc-ai-agent-mock/scripts/copilot-shortcuts.sh' >> ~/.zshrc
+```
+
+### 利用例
+
+```sh
+cissue "管理者画面に監査ログ検索を追加したい"
+cimpl "123"
+cpr "123"
+```
 
 ---
 
