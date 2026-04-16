@@ -305,6 +305,14 @@ source scripts/copilot-shortcuts.sh
 ### うまく動かない場合
 
 - `cissue: command not found`: `source scripts/copilot-shortcuts.sh` が未実行です。
+- `source` したのに `cissue` が見つからない:
+  - `echo $SHELL` で bash / zsh 以外（例: fish）の場合、`source` で関数が読み込まれません。
+  - `bash -c "source ..."` のように別プロセスで実行すると、現在のシェルには反映されません。
+  - 同じターミナルで次を順に実行して確認してください。
+    ```sh
+    source scripts/copilot-shortcuts.sh
+    type cissue
+    ```
 - `Permission denied`: `chmod +x scripts/copilot-shortcuts.sh scripts/cissue scripts/cimpl scripts/cpr` を実行してください。
 
 ---
