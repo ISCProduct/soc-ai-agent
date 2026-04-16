@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseProxyResponse } from '@/lib/proxy-response'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
@@ -13,14 +14,7 @@ export async function POST(request: NextRequest) {
     })
 
     const raw = await response.text()
-    let data: any = {}
-    if (raw) {
-      try {
-        data = JSON.parse(raw)
-      } catch {
-        data = response.ok ? { message: raw } : { error: raw }
-      }
-    }
+    const data = parseProxyResponse(raw, response.ok)
     return NextResponse.json(data, { status: response.status })
   } catch (error) {
     console.error('Resume upload proxy error:', error)

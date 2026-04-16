@@ -40,11 +40,25 @@ export interface ChatResponse {
         id: number
         user_id: number
         session_id: string
+        weight_category?: string
         category: string
         score: number
+        reason?: string
         created_at: string
         updated_at: string
     }>
+}
+
+export interface ChatScore {
+    id: number
+    user_id: number
+    session_id: string
+    weight_category?: string
+    category: string
+    score: number
+    reason?: string
+    created_at: string
+    updated_at: string
 }
 
 export interface ChatHistory {
@@ -96,7 +110,7 @@ export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> 
     }
 }
 
-export async function getUserScores(userId: number, sessionId: string) {
+export async function getUserScores(userId: number, sessionId: string): Promise<ChatScore[]> {
     const response = await fetch(`${API_BASE}/chat/scores?user_id=${userId}&session_id=${sessionId}`)
 
     if (!response.ok) {

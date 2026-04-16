@@ -9,7 +9,7 @@ import { Progress } from "@/components/ui/progress"
 import { Send, Bot, User } from "lucide-react"
 import { CompanyResults } from "@/components/company-results"
 import { AnalysisLoading } from "@/components/analysis-loading"
-import { sendChatMessage, getChatHistory, getUserScores, type ChatResponse } from "@/lib/api"
+import { sendChatMessage, getChatHistory, getUserScores, type ChatResponse, type ChatScore } from "@/lib/api"
 
 type Message = {
   id: string
@@ -147,7 +147,7 @@ export function JobAgentChat() {
           const scoresData = await getUserScores(userId, sessionId)
           console.log('[Frontend] Scores loaded:', scoresData)
           if (scoresData && scoresData.length > 0) {
-            const scores: UserScore[] = scoresData.map((s: any) => ({
+            const scores: UserScore[] = scoresData.map((s: ChatScore) => ({
               category: s.weight_category || s.category,
               score: s.score || 0,
               reason: s.reason || ''
@@ -280,7 +280,7 @@ export function JobAgentChat() {
       if (response.current_scores && response.current_scores.length > 0) {
         console.log("[Frontend] Current scores:", response.current_scores)
         // スコアを保存
-        const scores: UserScore[] = response.current_scores.map((s: any) => ({
+        const scores: UserScore[] = response.current_scores.map((s) => ({
           category: s.weight_category || s.category,
           score: s.score || 0,
           reason: s.reason || ''

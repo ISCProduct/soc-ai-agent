@@ -81,7 +81,7 @@ function TypingIndicator() {
         AIが考えています
       </Typography>
       <Box sx={{ display: 'flex', gap: 0.5 }}>
-        {[0, 0.16, 0.32].map((delay: any, i: any) => (
+        {[0, 0.16, 0.32].map((delay, i) => (
           <Box
             key={i}
             sx={{
@@ -356,7 +356,7 @@ export function MuiChat() {
           console.log('[MUI Chat] is_complete:', response.is_complete, 'type:', typeof response.is_complete)
           console.log('[MUI Chat] evaluated_categories:', response.evaluated_categories, 'total:', response.total_categories)
           
-          const allCompleted = response.all_phases?.every((phase: any) => {
+          const allCompleted = response.all_phases?.every((phase) => {
             const required = phase.max_questions > 0 ? phase.max_questions : phase.min_questions
             return required > 0 && phase.valid_answers >= required
           }) ?? false
