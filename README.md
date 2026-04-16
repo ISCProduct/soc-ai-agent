@@ -22,6 +22,7 @@
 - [環境変数](#環境変数)
 - [ローカル開発](#ローカル開発)
 - [Docker Compose](#docker-compose)
+- [Copilot カスタムコマンド共有](#copilot-カスタムコマンド共有)
 - [主要APIエンドポイント](#主要apiエンドポイント)
 - [品質管理](#品質管理)
 - [よくあるトラブル](#よくあるトラブル)
@@ -267,6 +268,36 @@ docker compose --profile rag up -d rag-review
 | `frontend` | Next.js | 3000 |
 | `rag-review` | 職務経歴書 RAG | 9000 |
 | `company-graph` | 企業スクレイピング | 9100 |
+
+---
+
+## Copilot カスタムコマンド共有
+
+チームで同じCopilotカスタムコマンドを使う場合は、リポジトリ内の以下を共通利用します。
+
+- Prompt定義: `.github/prompts/*.prompt.md`
+- 呼び出しスクリプト: `scripts/copilot-shortcuts.sh`
+
+### 初回セットアップ
+
+方法1（推奨）: 関数として読み込む
+
+```sh
+source scripts/copilot-shortcuts.sh
+```
+
+方法2: 直接実行する（`source` 不要）
+
+```sh
+./scripts/copilot-shortcuts.sh issue "管理者画面に監査ログ検索を追加したい"
+./scripts/copilot-shortcuts.sh implement "123"
+./scripts/copilot-shortcuts.sh pr "123"
+```
+
+### うまく動かない場合
+
+- `cissue: command not found`: `source scripts/copilot-shortcuts.sh` が未実行です。
+- `Permission denied`: `chmod +x scripts/copilot-shortcuts.sh` を実行してください。
 
 ---
 
