@@ -294,10 +294,18 @@ source scripts/copilot-shortcuts.sh
 ./scripts/copilot-shortcuts.sh pr "123"
 ```
 
+方法3: pull 後にすぐ使えるラッパーを実行する（`source` 不要）
+
+```sh
+./scripts/cissue "管理者画面に監査ログ検索を追加したい"
+./scripts/cimpl "123"
+./scripts/cpr "123"
+```
+
 ### うまく動かない場合
 
 - `cissue: command not found`: `source scripts/copilot-shortcuts.sh` が未実行です。
-- `Permission denied`: `chmod +x scripts/copilot-shortcuts.sh` を実行してください。
+- `Permission denied`: `chmod +x scripts/copilot-shortcuts.sh scripts/cissue scripts/cimpl scripts/cpr` を実行してください。
 
 ---
 
