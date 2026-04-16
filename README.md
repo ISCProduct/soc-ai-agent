@@ -280,6 +280,8 @@ docker compose --profile rag up -d rag-review
 
 ### 初回セットアップ
 
+方法1（推奨）: シェルに読み込んで関数として使う
+
 ```sh
 source scripts/copilot-shortcuts.sh
 ```
@@ -290,6 +292,14 @@ source scripts/copilot-shortcuts.sh
 echo 'source /absolute/path/to/soc-ai-agent-mock/scripts/copilot-shortcuts.sh' >> ~/.zshrc
 ```
 
+方法2: 直接実行する（`source` 不要）
+
+```sh
+./scripts/copilot-shortcuts.sh issue "管理者画面に監査ログ検索を追加したい"
+./scripts/copilot-shortcuts.sh implement "123"
+./scripts/copilot-shortcuts.sh pr "123"
+```
+
 ### 利用例
 
 ```sh
@@ -297,6 +307,11 @@ cissue "管理者画面に監査ログ検索を追加したい"
 cimpl "123"
 cpr "123"
 ```
+
+### うまく動かない場合
+
+- `cissue: command not found` が出る場合: `source scripts/copilot-shortcuts.sh` が未実行です（またはシェル再起動後に未読込）。
+- 直接実行する場合は `./scripts/copilot-shortcuts.sh ...` の形式で実行してください。
 
 ---
 
