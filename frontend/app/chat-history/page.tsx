@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { Box, Container, Typography, Paper, List, ListItem, ListItemButton, ListItemText, Divider, CircularProgress, Button } from '@mui/material'
 import { useRouter } from 'next/navigation'
 import { authService } from '@/lib/auth'
+import { BACKEND_URL } from '@/lib/backend-url'
 import ChatIcon from '@mui/icons-material/Chat'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 
@@ -31,7 +32,7 @@ export default function ChatHistoryPage() {
 
   const fetchSessions = async (userId: number) => {
     try {
-      const response = await fetch(`http://localhost:8080/api/chat/sessions?user_id=${userId}`)
+      const response = await fetch(`${BACKEND_URL}/api/chat/sessions?user_id=${userId}`)
       if (!response.ok) {
         throw new Error('Failed to fetch sessions')
       }

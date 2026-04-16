@@ -15,9 +15,8 @@ import {
   MenuItem,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { BACKEND_URL } from '@/lib/backend-url'
 import { CERTIFICATION_OPTIONS, joinCertifications } from '@/lib/profile'
-
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
 
 function VerifyRegistrationContent() {
   const searchParams = useSearchParams()

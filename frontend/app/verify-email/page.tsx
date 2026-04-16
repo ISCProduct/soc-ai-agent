@@ -6,8 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Box, Button, CircularProgress, Paper, Typography } from '@mui/material'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
-
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
+import { BACKEND_URL } from '@/lib/backend-url'
 
 function VerifyEmailContent() {
   const searchParams = useSearchParams()

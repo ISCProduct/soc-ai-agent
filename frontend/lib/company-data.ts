@@ -1,3 +1,5 @@
+import { BACKEND_URL } from './backend-url';
+
 // 企業データの型定義
 export type MarketType = 'prime' | 'standard' | 'growth' | 'unlisted';
 export type RelationType = 'subsidiary' | 'affiliate'; // 子会社 or 関連会社
@@ -36,7 +38,7 @@ export interface CompanyMarketInfo {
 // APIから企業関係データを取得
 export async function fetchCompanyRelations(): Promise<CapitalRelation[]> {
   try {
-    const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080'}/api/companies/relations`);
+    const response = await fetch(`${BACKEND_URL}/api/companies/relations`);
     if (!response.ok) {
       console.warn('Failed to fetch company relations');
       return [];
@@ -51,7 +53,7 @@ export async function fetchCompanyRelations(): Promise<CapitalRelation[]> {
 // APIから企業市場情報を取得
 export async function fetchCompanyMarketInfo(): Promise<CompanyMarketInfo[]> {
   try {
-    const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080'}/api/companies/market-info`);
+    const response = await fetch(`${BACKEND_URL}/api/companies/market-info`);
     if (!response.ok) {
       console.warn('Failed to fetch market info');
       return [];

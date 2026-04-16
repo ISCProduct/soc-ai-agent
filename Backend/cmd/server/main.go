@@ -28,8 +28,9 @@ func buildAllowedOrigins() map[string]struct{} {
 	}
 
 	if len(allowedOrigins) == 0 && os.Getenv("APP_ENV") != "production" {
-		allowedOrigins["http://localhost:3000"] = struct{}{}
-		allowedOrigins["http://127.0.0.1:3000"] = struct{}{}
+		for _, origin := range config.DevAllowedOrigins() {
+			allowedOrigins[origin] = struct{}{}
+		}
 		log.Println("WARNING: ALLOWED_ORIGINS が未設定のため、開発用デフォルト（localhost:3000）のみ許可します。")
 	}
 
@@ -217,7 +218,7 @@ func main() {
 	gbizToken := os.Getenv("GBIZINFO_API_TOKEN")
 	companyGraphPipeline := &scraper.Pipeline{
 		GBiz:      scraper.NewGBizClient("", gbizToken),
-		Threshold: 0.75,
+		Threshold: config.CompanyGraphThreshold(),
 	}
 	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService)
 	resumeController := controllers.NewResumeController(resumeService)

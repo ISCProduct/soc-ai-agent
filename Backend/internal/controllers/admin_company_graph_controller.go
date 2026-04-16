@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/scraper"
 	"Backend/internal/services"
@@ -64,7 +65,7 @@ func (c *AdminCompanyGraphController) Crawl(w http.ResponseWriter, r *http.Reque
 	req.Sites = []string{"rikunabi", "career_tasu"}
 	req.Query = "IT"
 	req.Pages = 2
-	req.Threshold = 0.75
+	req.Threshold = config.CompanyGraphThreshold()
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
 		http.Error(w, "invalid request body", http.StatusBadRequest)

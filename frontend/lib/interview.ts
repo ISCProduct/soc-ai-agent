@@ -1,4 +1,7 @@
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
+import { BACKEND_URL } from './backend-url'
+
+const DEFAULT_INTERVIEW_MAX_MINUTES = 10
+const DEFAULT_INTERVIEW_QUESTION_DURATION_SECONDS = 180
 
 export type InterviewSession = {
   id: number
@@ -217,6 +220,6 @@ export const interviewApi = {
 }
 
 export const interviewLimits = {
-  maxMinutes: Number(process.env.NEXT_PUBLIC_INTERVIEW_MAX_MINUTES || 10),
-  questionDurationSeconds: Number(process.env.NEXT_PUBLIC_INTERVIEW_QUESTION_DURATION_SECONDS || 180),
+  maxMinutes: Number(process.env.NEXT_PUBLIC_INTERVIEW_MAX_MINUTES || DEFAULT_INTERVIEW_MAX_MINUTES),
+  questionDurationSeconds: Number(process.env.NEXT_PUBLIC_INTERVIEW_QUESTION_DURATION_SECONDS || DEFAULT_INTERVIEW_QUESTION_DURATION_SECONDS),
 }

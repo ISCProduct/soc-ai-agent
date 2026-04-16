@@ -14,10 +14,7 @@ type OAuthConfig struct {
 }
 
 func LoadOAuthConfig() *OAuthConfig {
-	baseURL := os.Getenv("BASE_URL")
-	if baseURL == "" {
-		baseURL = "http://localhost:8080"
-	}
+	baseURL := OAuthBaseURL()
 
 	return &OAuthConfig{
 		Google: &oauth2.Config{
@@ -37,8 +34,8 @@ func LoadOAuthConfig() *OAuthConfig {
 			Scopes: []string{
 				"user:email",
 				"read:user",
-				"repo",      // プライベートリポジトリ・組織リポジトリへのアクセスに必要
-				"read:org",  // 所属組織のメンバーシップ情報取得に必要
+				"repo",     // プライベートリポジトリ・組織リポジトリへのアクセスに必要
+				"read:org", // 所属組織のメンバーシップ情報取得に必要
 			},
 			Endpoint: github.Endpoint,
 		},

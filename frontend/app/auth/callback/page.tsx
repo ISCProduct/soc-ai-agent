@@ -4,8 +4,7 @@ import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Box, CircularProgress, Typography, Alert } from '@mui/material'
 import { authService } from '@/lib/auth'
-
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
+import { BACKEND_URL } from '@/lib/backend-url'
 
 function OAuthCallbackContent() {
   const router = useRouter()
