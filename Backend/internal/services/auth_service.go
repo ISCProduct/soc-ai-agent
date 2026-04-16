@@ -3,6 +3,7 @@ package services
 import (
 	"Backend/domain/entity"
 	"Backend/domain/repository"
+	"Backend/internal/config"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"crypto/rand"
@@ -323,7 +324,7 @@ func (s *AuthService) RequestRegistration(email string) error {
 	pending := &entity.PendingRegistration{
 		Token:     token,
 		Email:     email,
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+		ExpiresAt: time.Now().Add(config.PendingRegistrationTokenTTL),
 	}
 	if err := s.pendingRepo.Create(pending); err != nil {
 		return fmt.Errorf("failed to save pending registration: %w", err)
@@ -370,7 +371,7 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 		return nil, errors.New("target_level must be '新卒' or '中途'")
 	}
 	if strings.TrimSpace(req.SchoolName) == "" {
-		req.SchoolName = "学校法人岩崎学園情報科学専門学校"
+		req.SchoolName = config.SchoolName()
 	}
 
 	// 既存ユーザーチェック
@@ -411,10 +412,7 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 	}
 
 	// 認証メール送信（失敗しても登録は成功扱い）
-	appURL := os.Getenv("APP_URL")
-	if appURL == "" {
-		appURL = "http://localhost:3000"
-	}
+	appURL := config.AppURL()
 	go s.emailService.SendVerificationEmail(user, user.EmailVerificationToken, appURL)
 
 	return &AuthResponse{
@@ -469,16 +467,13 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 		}
 
 		// 10日以上ログインなし → 再認証
-		if user.LastLoginAt != nil && time.Since(*user.LastLoginAt) > 10*24*time.Hour {
+		if user.LastLoginAt != nil && time.Since(*user.LastLoginAt) > config.ReVerificationInactiveDuration {
 			tokenBytes := make([]byte, 24)
 			rand.Read(tokenBytes)
 			user.EmailVerificationToken = base64.URLEncoding.EncodeToString(tokenBytes)
 			user.EmailVerifiedAt = nil
 			s.userRepo.UpdateUser(user)
-			appURL := os.Getenv("APP_URL")
-			if appURL == "" {
-				appURL = "http://localhost:3000"
-			}
+			appURL := config.AppURL()
 			go s.emailService.SendReVerificationEmail(user, user.EmailVerificationToken, appURL)
 			requiresReVerification = true
 			return nil, errors.New("re_verification_required")
@@ -524,12 +519,12 @@ func (s *AuthService) CreateGuestUser() (*AuthResponse, error) {
 	guestID := base64.URLEncoding.EncodeToString(randomBytes)
 
 	user := &entity.User{
-		Email:       fmt.Sprintf("guest_%s@temp.local", guestID),
+		Email:       fmt.Sprintf("guest_%s@%s", guestID, config.GuestEmailDomain()),
 		Password:    "", // ゲストユーザーはパスワード不要
 		Name:        fmt.Sprintf("Guest_%s", guestID[:8]),
 		IsGuest:     true,
 		TargetLevel: "未設定",
-		SchoolName:  "学校法人岩崎学園情報科学専門学校",
+		SchoolName:  config.SchoolName(),
 	}
 
 	if err := s.userRepo.CreateUser(user); err != nil {
@@ -639,7 +634,7 @@ func (s *AuthService) RequestPasswordReset(email string) error {
 	}
 	token := base64.URLEncoding.EncodeToString(b)
 
-	expiresAt := time.Now().Add(1 * time.Hour)
+	expiresAt := time.Now().Add(config.PasswordResetTokenTTL)
 	user.PasswordResetToken = token
 	user.PasswordResetExpiresAt = &expiresAt
 
@@ -647,10 +642,7 @@ func (s *AuthService) RequestPasswordReset(email string) error {
 		return fmt.Errorf("failed to update user: %w", err)
 	}
 
-	appURL := os.Getenv("APP_URL")
-	if appURL == "" {
-		appURL = "http://localhost:3000"
-	}
+	appURL := config.AppURL()
 	return s.emailService.SendPasswordResetEmail(user.Email, token, appURL)
 }
 

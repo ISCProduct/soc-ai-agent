@@ -25,14 +25,23 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # ── 環境変数 ────────────────────────────────────────────────────────────────
-CACHE_TTL_SECONDS = int(os.getenv("RAG_SEARCH_CACHE_TTL_SECONDS", "86400"))
+DEFAULT_CACHE_TTL_SECONDS = 86400
+DEFAULT_MAX_EMBED_TOKENS = 8191
+DEFAULT_EMBED_MAX_RETRIES = 3
+DEFAULT_CHROMA_DATA_DIR = "/app/chroma_db"
+DEFAULT_HINTS_PARSE_MAX_TOKENS = 600
+DEFAULT_RESUME_REVIEW_INPUT_CHAR_LIMIT = 10000
+
+CACHE_TTL_SECONDS = int(os.getenv("RAG_SEARCH_CACHE_TTL_SECONDS", str(DEFAULT_CACHE_TTL_SECONDS)))
 USE_DEEP_RESEARCH = os.getenv("RAG_USE_DEEP_RESEARCH", "true").lower() == "true"
 ALLOW_DDG_FALLBACK = os.getenv("RAG_ALLOW_DUCKDUCKGO_FALLBACK", "true").lower() == "true"
 STRICT_DEEP_RESEARCH = os.getenv("RAG_DEEP_RESEARCH_STRICT", "false").lower() == "true"
 CREWAI_VERBOSE = os.getenv("RAG_CREWAI_VERBOSE", "false").lower() == "true"
-MAX_EMBED_TOKENS = int(os.getenv("RAG_MAX_EMBED_TOKENS", "8191"))
-EMBED_MAX_RETRIES = int(os.getenv("RAG_EMBED_MAX_RETRIES", "3"))
-CHROMA_DATA_DIR = os.getenv("RAG_CHROMA_DATA_DIR", "/app/chroma_db")
+MAX_EMBED_TOKENS = int(os.getenv("RAG_MAX_EMBED_TOKENS", str(DEFAULT_MAX_EMBED_TOKENS)))
+EMBED_MAX_RETRIES = int(os.getenv("RAG_EMBED_MAX_RETRIES", str(DEFAULT_EMBED_MAX_RETRIES)))
+CHROMA_DATA_DIR = os.getenv("RAG_CHROMA_DATA_DIR", DEFAULT_CHROMA_DATA_DIR)
+HINTS_PARSE_MAX_TOKENS = int(os.getenv("RAG_HINTS_PARSE_MAX_TOKENS", str(DEFAULT_HINTS_PARSE_MAX_TOKENS)))
+RESUME_REVIEW_INPUT_CHAR_LIMIT = int(os.getenv("RAG_REVIEW_RESUME_CHAR_LIMIT", str(DEFAULT_RESUME_REVIEW_INPUT_CHAR_LIMIT)))
 
 # ── Chromadb 永続ベクトルストア ────────────────────────────────────────────
 _chroma_client: Optional[chromadb.PersistentClient] = None
@@ -483,7 +492,7 @@ def _parse_hints_from_text(company_name: str, position: str, research_text: str)
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.2,
-            max_tokens=600,
+            max_tokens=HINTS_PARSE_MAX_TOKENS,
             response_format={"type": "json_object"},
         )
         raw = resp.choices[0].message.content or "{}"
@@ -643,7 +652,7 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
             company=request.company_name,
             role=role_label,
             context=context_block,
-            resume=request.resume_text[:10000],
+            resume=request.resume_text[:RESUME_REVIEW_INPUT_CHAR_LIMIT],
             source=source_label,
         )
 

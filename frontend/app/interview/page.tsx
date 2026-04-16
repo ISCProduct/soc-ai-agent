@@ -39,6 +39,7 @@ import SearchIcon from '@mui/icons-material/Search'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ApartmentIcon from '@mui/icons-material/Apartment'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
+import { BACKEND_URL } from '@/lib/backend-url'
 import { authService, User } from '@/lib/auth'
 import { interviewApi, interviewLimits, InterviewReport, InterviewSession } from '@/lib/interview'
 import { formatSeconds, parseJsonSafe, parseMediaError, parseMultipartResponse } from '@/lib/interview-utils'
@@ -426,8 +427,7 @@ function InterviewContent() {
   }
 
   const doStartTurn = async (sessionId: number, userId: number) => {
-    const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
-    const res = await fetch(`${BACKEND}/api/interviews/${sessionId}/start-turn`, {
+    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/start-turn`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -635,8 +635,7 @@ function InterviewContent() {
     formData.append('company_info', [interviewCompany?.description, interviewCompany?.main_business].filter(Boolean).join(' / '))
     formData.append('company_type', selectedPosition?.category || 'general')
     try {
-      const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
-      const res = await fetch(`${BACKEND}/api/interviews/${session.id}/turn`, {
+      const res = await fetch(`${BACKEND_URL}/api/interviews/${session.id}/turn`, {
         method: 'POST',
         body: formData,
       })

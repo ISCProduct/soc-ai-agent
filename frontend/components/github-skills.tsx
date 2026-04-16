@@ -6,8 +6,7 @@ import GitHubIcon from '@mui/icons-material/GitHub'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
+import { BACKEND_URL } from '@/lib/backend-url'
 
 interface SkillScore {
   ID: number

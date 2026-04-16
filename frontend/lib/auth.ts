@@ -1,4 +1,4 @@
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
+import { BACKEND_URL } from './backend-url'
 const AUTH_USER_KEY = 'user'
 const AUTH_TOKEN_KEY = 'token'
 

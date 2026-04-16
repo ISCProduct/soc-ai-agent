@@ -23,8 +23,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CheckIcon from '@mui/icons-material/Check'
 import EditNoteIcon from '@mui/icons-material/EditNote'
 import RateReviewIcon from '@mui/icons-material/RateReview'
-
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:80'
+import { BACKEND_URL } from '@/lib/backend-url'
 const PRIMARY = '#ec5b13'
 
 const QUESTION_TYPES = ['志望動機', '自己PR', '学チカ', 'ガクチカ', 'その他']
