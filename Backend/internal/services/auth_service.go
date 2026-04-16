@@ -39,34 +39,214 @@ func (s *AuthService) DeleteAccount(userID uint) error {
 		return errors.New("database not configured")
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		// チャット履歴・重みスコア
+		var user models.User
+		if err := tx.First(&user, userID).Error; err != nil {
+			return err
+		}
+
+		sessionIDs, err := collectUserSessionIDs(tx, userID)
+		if err != nil {
+			return err
+		}
+		if len(sessionIDs) > 0 {
+			if err := tx.Where("session_id IN ?", sessionIDs).Delete(&models.SessionValidation{}).Error; err != nil {
+				return err
+			}
+		}
+
+		interviewSessionIDs, err := collectInterviewSessionIDs(tx, userID)
+		if err != nil {
+			return err
+		}
+		if len(interviewSessionIDs) > 0 {
+			if err := tx.Where("interview_session_id IN ?", interviewSessionIDs).Delete(&models.RealtimeUsageLog{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("session_id IN ?", interviewSessionIDs).Delete(&models.InterviewUtterance{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("session_id IN ?", interviewSessionIDs).Delete(&models.InterviewReport{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("session_id IN ?", interviewSessionIDs).Delete(&models.InterviewVideo{}).Error; err != nil {
+				return err
+			}
+		}
+
+		resumeDocumentIDs, err := collectResumeDocumentIDs(tx, userID)
+		if err != nil {
+			return err
+		}
+		if len(resumeDocumentIDs) > 0 {
+			resumeReviewIDs, err := collectResumeReviewIDs(tx, resumeDocumentIDs)
+			if err != nil {
+				return err
+			}
+			if len(resumeReviewIDs) > 0 {
+				if err := tx.Where("review_id IN ?", resumeReviewIDs).Delete(&models.ResumeReviewItem{}).Error; err != nil {
+					return err
+				}
+			}
+			if err := tx.Where("document_id IN ?", resumeDocumentIDs).Delete(&models.ResumeTextBlock{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("document_id IN ?", resumeDocumentIDs).Delete(&models.ResumeReview{}).Error; err != nil {
+				return err
+			}
+		}
+
 		if err := tx.Where("user_id = ?", userID).Delete(&models.ChatMessage{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.AIGeneratedQuestion{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.ConversationContext{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("user_id = ?", userID).Delete(&models.UserWeightScore{}).Error; err != nil {
 			return err
 		}
-		// マッチング結果
+		if err := tx.Where("user_id = ?", userID).Delete(&models.UserAnalysisProgress{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.UserEmbedding{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.VariantAssignment{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("user_id = ?", userID).Delete(&models.UserCompanyMatch{}).Error; err != nil {
 			return err
 		}
-		// 面接セッション・発話・レポート・動画
-		var sessionIDs []uint
-		tx.Model(&models.InterviewSession{}).Where("user_id = ?", userID).Pluck("id", &sessionIDs)
-		if len(sessionIDs) > 0 {
-			tx.Where("session_id IN ?", sessionIDs).Delete(&models.InterviewUtterance{})
-			tx.Where("session_id IN ?", sessionIDs).Delete(&models.InterviewReport{})
-			tx.Where("session_id IN ?", sessionIDs).Delete(&models.InterviewVideo{})
+		if err := tx.Where("user_id = ?", userID).Delete(&models.UserApplicationStatus{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.CompanyReview{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.ResumeDocument{}).Error; err != nil {
+			return err
 		}
 		if err := tx.Where("user_id = ?", userID).Delete(&models.InterviewSession{}).Error; err != nil {
 			return err
 		}
-		// ユーザー本体
+		if err := tx.Where("user_id = ?", userID).Delete(&models.InterviewVideo{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.RealtimeUsageLog{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.ScheduleEvent{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.SkillScore{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.GitHubRepoSummary{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.GitHubLanguageStat{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.GitHubRepo{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.GitHubProfile{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("email = ?", user.Email).Delete(&models.PendingRegistration{}).Error; err != nil {
+			return err
+		}
+
 		if err := tx.Delete(&models.User{}, userID).Error; err != nil {
 			return err
 		}
 		return nil
 	})
+}
+
+func collectUserSessionIDs(tx *gorm.DB, userID uint) ([]string, error) {
+	sessions := map[string]struct{}{}
+	collect := func(model any) error {
+		var ids []string
+		if err := tx.Model(model).
+			Where("user_id = ?", userID).
+			Distinct().
+			Pluck("session_id", &ids).Error; err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if id != "" {
+				sessions[id] = struct{}{}
+			}
+		}
+		return nil
+	}
+
+	if err := collect(&models.ChatMessage{}); err != nil {
+		return nil, err
+	}
+	if err := collect(&models.UserWeightScore{}); err != nil {
+		return nil, err
+	}
+	if err := collect(&models.ConversationContext{}); err != nil {
+		return nil, err
+	}
+	if err := collect(&models.AIGeneratedQuestion{}); err != nil {
+		return nil, err
+	}
+	if err := collect(&models.UserAnalysisProgress{}); err != nil {
+		return nil, err
+	}
+	if err := collect(&models.UserEmbedding{}); err != nil {
+		return nil, err
+	}
+	if err := collect(&models.UserCompanyMatch{}); err != nil {
+		return nil, err
+	}
+	if err := collect(&models.VariantAssignment{}); err != nil {
+		return nil, err
+	}
+	if err := collect(&models.ResumeDocument{}); err != nil {
+		return nil, err
+	}
+
+	result := make([]string, 0, len(sessions))
+	for id := range sessions {
+		result = append(result, id)
+	}
+	return result, nil
+}
+
+func collectInterviewSessionIDs(tx *gorm.DB, userID uint) ([]uint, error) {
+	var sessionIDs []uint
+	if err := tx.Model(&models.InterviewSession{}).
+		Where("user_id = ?", userID).
+		Pluck("id", &sessionIDs).Error; err != nil {
+		return nil, err
+	}
+	return sessionIDs, nil
+}
+
+func collectResumeDocumentIDs(tx *gorm.DB, userID uint) ([]uint, error) {
+	var documentIDs []uint
+	if err := tx.Model(&models.ResumeDocument{}).
+		Where("user_id = ?", userID).
+		Pluck("id", &documentIDs).Error; err != nil {
+		return nil, err
+	}
+	return documentIDs, nil
+}
+
+func collectResumeReviewIDs(tx *gorm.DB, documentIDs []uint) ([]uint, error) {
+	var reviewIDs []uint
+	if err := tx.Model(&models.ResumeReview{}).
+		Where("document_id IN ?", documentIDs).
+		Pluck("id", &reviewIDs).Error; err != nil {
+		return nil, err
+	}
+	return reviewIDs, nil
 }
 
 // RegisterRequest ユーザー登録リクエスト
