@@ -2,28 +2,36 @@ package services
 
 import (
 	"Backend/domain/entity"
+	"Backend/domain/mapper"
 	"Backend/domain/repository"
 	"Backend/internal/models"
+	"Backend/internal/openai"
+	"Backend/internal/services/prompts"
 	"context"
 	"fmt"
 	"math"
+	"sort"
+	"strings"
 )
 
 type MatchingService struct {
 	userWeightScoreRepo repository.UserWeightScoreRepository
 	companyRepo         repository.CompanyRepository
 	matchRepo           repository.UserCompanyMatchRepository
+	aiClient            *openai.Client
 }
 
 func NewMatchingService(
 	userWeightScoreRepo repository.UserWeightScoreRepository,
 	companyRepo repository.CompanyRepository,
 	matchRepo repository.UserCompanyMatchRepository,
+	aiClient *openai.Client,
 ) *MatchingService {
 	return &MatchingService{
 		userWeightScoreRepo: userWeightScoreRepo,
 		companyRepo:         companyRepo,
 		matchRepo:           matchRepo,
+		aiClient:            aiClient,
 	}
 }
 
@@ -73,6 +81,14 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 		match.UserID = userID
 		match.SessionID = sessionID
 		match.CompanyID = company.ID
+		match.Company = mapper.CompanyToEntity(&company)
+
+		reason, err := s.GenerateMatchReason(ctx, match, userScores)
+		if err != nil {
+			fmt.Printf("[CalculateMatching] Warning: Failed to generate AI reason for company %d: %v\n", company.ID, err)
+			reason = BuildMatchReason(match, userScores)
+		}
+		match.MatchReason = reason
 
 		// マッチング結果を保存
 		if err := s.matchRepo.CreateOrUpdate(match); err != nil {
@@ -171,14 +187,107 @@ func (s *MatchingService) GetDiagnostics(userID uint, sessionID string) (*Matchi
 }
 
 // GenerateMatchReason AIを使ってマッチング理由を生成（オプション）
-func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity.UserCompanyMatch) (string, error) {
-	// TODO: OpenAI APIを使って、ユーザーの適性と企業の特徴を基にマッチング理由を生成
-	reason := fmt.Sprintf(
-		"あなたの適性スコアと企業の求める人材像が%0.1f%%マッチしています。"+
-			"特に、技術志向(%0.1f%%)とチームワーク志向(%0.1f%%)において高い親和性が見られます。",
-		match.MatchScore,
-		match.TechnicalMatch,
-		match.TeamworkMatch,
+func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) (string, error) {
+	if match == nil {
+		return "", fmt.Errorf("match is nil")
+	}
+	if match.Company == nil {
+		return "", fmt.Errorf("company is nil")
+	}
+	if s.aiClient == nil {
+		return BuildMatchReason(match, userScores), nil
+	}
+
+	userPrompt := buildMatchingReasonUserPrompt(match, userScores)
+	reason, err := s.aiClient.ResponsesWithTemperature(
+		ctx,
+		prompts.MatchingReasonSystemPrompt,
+		userPrompt,
+		0.4,
 	)
+	if err != nil {
+		return "", err
+	}
+
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return "", fmt.Errorf("empty matching reason response")
+	}
 	return reason, nil
+}
+
+func buildMatchingReasonUserPrompt(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) string {
+	company := match.Company
+	return fmt.Sprintf(
+		prompts.MatchingReasonUserPromptTemplate,
+		prompts.MatchingReasonPromptVersion,
+		company.Name,
+		fallbackValue(company.Industry, "未設定"),
+		fallbackValue(company.MainBusiness, "未設定"),
+		fallbackValue(company.Culture, "未設定"),
+		fallbackValue(company.WorkStyle, "未設定"),
+		fallbackValue(company.DevelopmentStyle, "未設定"),
+		fallbackValue(company.TechStack, "未設定"),
+		formatTopUserScores(userScores),
+		formatTopMatchAxes(match),
+		match.MatchScore,
+	)
+}
+
+func formatTopUserScores(scores []entity.UserWeightScore) string {
+	if len(scores) == 0 {
+		return "データなし"
+	}
+
+	sorted := append([]entity.UserWeightScore(nil), scores...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Score > sorted[j].Score
+	})
+
+	parts := make([]string, 0, 3)
+	for i := 0; i < len(sorted) && i < 3; i++ {
+		if sorted[i].Score <= 0 {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s:%d", sorted[i].WeightCategory, sorted[i].Score))
+	}
+	if len(parts) == 0 {
+		return "有効なスコアなし"
+	}
+	return strings.Join(parts, ", ")
+}
+
+func formatTopMatchAxes(match *entity.UserCompanyMatch) string {
+	axes := []struct {
+		name  string
+		score float64
+	}{
+		{name: "技術志向", score: match.TechnicalMatch},
+		{name: "チームワーク志向", score: match.TeamworkMatch},
+		{name: "リーダーシップ志向", score: match.LeadershipMatch},
+		{name: "創造性志向", score: match.CreativityMatch},
+		{name: "安定志向", score: match.StabilityMatch},
+		{name: "成長志向", score: match.GrowthMatch},
+		{name: "ワークライフバランス", score: match.WorkLifeMatch},
+		{name: "チャレンジ志向", score: match.ChallengeMatch},
+		{name: "細部志向", score: match.DetailMatch},
+		{name: "コミュニケーション力", score: match.CommunicationMatch},
+	}
+	sort.Slice(axes, func(i, j int) bool {
+		return axes[i].score > axes[j].score
+	})
+
+	parts := make([]string, 0, 3)
+	for i := 0; i < len(axes) && i < 3; i++ {
+		parts = append(parts, fmt.Sprintf("%s:%.1f", axes[i].name, axes[i].score))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func fallbackValue(value, fallback string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fallback
+	}
+	return trimmed
 }
