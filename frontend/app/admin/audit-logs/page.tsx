@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Alert,
-  Box,
   Card,
   CardContent,
   Divider,
@@ -12,6 +10,9 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { PageContainer } from '@/components/admin/PageContainer'
+import { ErrorAlert } from '@/components/common/ErrorAlert'
+import { AdminListCard } from '@/components/admin/AdminListCard'
 
 type AuditLog = {
   id: number
@@ -71,7 +72,7 @@ export default function AdminAuditLogsPage() {
   }
 
   return (
-    <Box sx={{ p: 4, maxWidth: 1100, mx: 'auto' }}>
+    <PageContainer maxWidth={1100}>
       <Typography variant="h4" fontWeight="bold" gutterBottom>
         監査ログ
       </Typography>
@@ -79,11 +80,7 @@ export default function AdminAuditLogsPage() {
         管理者操作の履歴を確認できます。
       </Typography>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
-      )}
+      <ErrorAlert error={error} />
 
       <Card sx={{ mb: 3 }}>
         <CardContent>
@@ -109,7 +106,7 @@ export default function AdminAuditLogsPage() {
               </Typography>
             )}
             {filtered.map((log) => (
-              <Box key={log.id} sx={{ border: '1px solid #eee', borderRadius: 1, p: 2 }}>
+              <AdminListCard key={log.id}>
                 <Stack spacing={0.5}>
                   <Typography variant="subtitle2" fontWeight="bold">
                     {log.action}
@@ -124,11 +121,11 @@ export default function AdminAuditLogsPage() {
                     {log.created_at}
                   </Typography>
                 </Stack>
-              </Box>
+              </AdminListCard>
             ))}
           </Stack>
         </CardContent>
       </Card>
-    </Box>
+    </PageContainer>
   )
 }

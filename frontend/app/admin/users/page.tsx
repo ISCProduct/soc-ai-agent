@@ -2,18 +2,14 @@
 
 import { useEffect, useState } from 'react'
 import {
-  Alert,
-  Box,
   Button,
   Card,
   CardContent,
   Chip,
   Divider,
   Stack,
-  Table,
   TableBody,
   TableCell,
-  TableContainer,
   TableHead,
   TablePagination,
   TableRow,
@@ -21,6 +17,9 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { PageContainer } from '@/components/admin/PageContainer'
+import { ErrorAlert } from '@/components/common/ErrorAlert'
+import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 
 type AdminUser = {
   id: number
@@ -109,7 +108,7 @@ export default function AdminUsersPage() {
   }
 
   return (
-    <Box sx={{ p: 4, maxWidth: 1100, mx: 'auto' }}>
+    <PageContainer maxWidth={1100}>
       <Typography variant="h4" fontWeight="bold" gutterBottom>
         ユーザー管理
       </Typography>
@@ -117,11 +116,7 @@ export default function AdminUsersPage() {
         管理者権限の付与やユーザー情報の確認を行います。
       </Typography>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
-      )}
+      <ErrorAlert error={error} />
 
       <Card sx={{ mb: 3 }}>
         <CardContent>
@@ -148,8 +143,7 @@ export default function AdminUsersPage() {
             </Typography>
           ) : (
             <>
-              <TableContainer>
-                <Table size="small">
+              <AdminTableWrapper>
                   <TableHead>
                     <TableRow>
                       <TableCell>ユーザー</TableCell>
@@ -194,8 +188,7 @@ export default function AdminUsersPage() {
                       </TableRow>
                     ))}
                   </TableBody>
-                </Table>
-              </TableContainer>
+              </AdminTableWrapper>
               <TablePagination
                 component="div"
                 count={total}
@@ -211,6 +204,6 @@ export default function AdminUsersPage() {
           )}
         </CardContent>
       </Card>
-    </Box>
+    </PageContainer>
   )
 }

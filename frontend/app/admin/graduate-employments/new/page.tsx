@@ -3,17 +3,14 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Alert,
-  Box,
   Button,
-  Card,
-  CardContent,
   MenuItem,
   Stack,
   TextField,
-  Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
+import { ErrorAlert } from '@/components/common/ErrorAlert'
 
 type Company = { id: number; name: string }
 type JobPosition = { id: number; title: string; company?: Company }
@@ -70,44 +67,35 @@ export default function AdminGraduateEmploymentNewPage() {
   }
 
   return (
-    <Box sx={{ p: 4, maxWidth: 700, mx: 'auto' }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 3 }}>
-        <Typography variant="h4" fontWeight="bold">
-          就職情報の登録
-        </Typography>
-        <Button variant="outlined" size="small" onClick={() => router.push('/admin/graduate-employments')}>
-          一覧に戻る
+    <AdminFormContainer
+      title="就職情報の登録"
+      maxWidth={700}
+      backHref="/admin/graduate-employments"
+      backLabel="一覧に戻る"
+    >
+      <ErrorAlert error={error} />
+      <Stack spacing={2}>
+        <TextField select label="企業" value={companyId} onChange={(e) => setCompanyId(e.target.value)} required>
+          {companies.map((c) => (
+            <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
+          ))}
+        </TextField>
+        <TextField select label="応募職種" value={jobPositionId} onChange={(e) => setJobPositionId(e.target.value)}>
+          <MenuItem value="">未設定</MenuItem>
+          {jobPositions.map((p) => (
+            <MenuItem key={p.id} value={p.id}>{p.title} ({p.company?.name || '企業未設定'})</MenuItem>
+          ))}
+        </TextField>
+        <TextField label="卒業生氏名" value={graduateName} onChange={(e) => setGraduateName(e.target.value)} />
+        <TextField label="卒業年度" value={graduationYear} onChange={(e) => setGraduationYear(e.target.value)} type="number" />
+        <TextField label="学校名" value={schoolName} onChange={(e) => setSchoolName(e.target.value)} />
+        <TextField label="学科/専攻" value={department} onChange={(e) => setDepartment(e.target.value)} />
+        <TextField label="就職日 (YYYY-MM-DD)" value={hiredAt} onChange={(e) => setHiredAt(e.target.value)} />
+        <TextField label="メモ" value={note} onChange={(e) => setNote(e.target.value)} multiline minRows={2} />
+        <Button variant="contained" onClick={handleCreate} disabled={!companyId}>
+          登録する
         </Button>
       </Stack>
-
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-
-      <Card>
-        <CardContent>
-          <Stack spacing={2}>
-            <TextField select label="企業" value={companyId} onChange={(e) => setCompanyId(e.target.value)} required>
-              {companies.map((c) => (
-                <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
-              ))}
-            </TextField>
-            <TextField select label="応募職種" value={jobPositionId} onChange={(e) => setJobPositionId(e.target.value)}>
-              <MenuItem value="">未設定</MenuItem>
-              {jobPositions.map((p) => (
-                <MenuItem key={p.id} value={p.id}>{p.title} ({p.company?.name || '企業未設定'})</MenuItem>
-              ))}
-            </TextField>
-            <TextField label="卒業生氏名" value={graduateName} onChange={(e) => setGraduateName(e.target.value)} />
-            <TextField label="卒業年度" value={graduationYear} onChange={(e) => setGraduationYear(e.target.value)} type="number" />
-            <TextField label="学校名" value={schoolName} onChange={(e) => setSchoolName(e.target.value)} />
-            <TextField label="学科/専攻" value={department} onChange={(e) => setDepartment(e.target.value)} />
-            <TextField label="就職日 (YYYY-MM-DD)" value={hiredAt} onChange={(e) => setHiredAt(e.target.value)} />
-            <TextField label="メモ" value={note} onChange={(e) => setNote(e.target.value)} multiline minRows={2} />
-            <Button variant="contained" onClick={handleCreate} disabled={!companyId}>
-              登録する
-            </Button>
-          </Stack>
-        </CardContent>
-      </Card>
-    </Box>
+    </AdminFormContainer>
   )
 }

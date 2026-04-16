@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
-  Alert,
   Box,
   Button,
   Card,
@@ -15,6 +14,10 @@ import {
   Pagination,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { PageContainer } from '@/components/admin/PageContainer'
+import { ErrorAlert } from '@/components/common/ErrorAlert'
+import { AdminListCard } from '@/components/admin/AdminListCard'
+import { StatusBadge } from '@/components/admin/StatusBadge'
 
 const PAGE_SIZE = 50
 
@@ -26,11 +29,6 @@ type Company = {
   source_type?: string
   is_provisional?: boolean
   data_status?: string
-}
-
-const statusBadge = (status?: string) => {
-  if (status === 'published') return <Chip label="公開" color="success" size="small" />
-  return <Chip label="下書き" color="warning" size="small" />
 }
 
 const sourceLabel = (sourceType?: string) => {
@@ -111,7 +109,7 @@ export default function AdminCompaniesPage() {
   const pageCount = Math.ceil(total / PAGE_SIZE)
 
   return (
-    <Box sx={{ p: 4, maxWidth: 1000, mx: 'auto' }}>
+    <PageContainer maxWidth={1000}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
         <Typography variant="h4" fontWeight="bold">
           企業管理
@@ -132,11 +130,7 @@ export default function AdminCompaniesPage() {
         企業情報の公開ステータスを管理します。（全 {total.toLocaleString()} 件）
       </Typography>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
-      )}
+      <ErrorAlert error={error} />
 
       <Card>
         <CardContent>
@@ -158,14 +152,14 @@ export default function AdminCompaniesPage() {
           <Divider sx={{ mb: 2 }} />
           <Stack spacing={1}>
             {filteredCompanies.map((company) => (
-              <Box key={company.id} sx={{ border: '1px solid #eee', borderRadius: 1, p: 2 }}>
+              <AdminListCard key={company.id}>
                 <Stack direction="row" alignItems="center" justifyContent="space-between">
                   <Box>
                     <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
                       <Typography variant="subtitle1" fontWeight="bold">
                         {company.name}
                       </Typography>
-                      {statusBadge(company.data_status)}
+                      <StatusBadge status={company.data_status} />
                       <Chip label={sourceLabel(company.source_type)} size="small" variant="outlined" />
                       {company.is_provisional && (
                         <Chip label="暫定" size="small" color="default" variant="outlined" />
@@ -206,7 +200,7 @@ export default function AdminCompaniesPage() {
                     )}
                   </Stack>
                 </Stack>
-              </Box>
+              </AdminListCard>
             ))}
           </Stack>
 
@@ -222,6 +216,6 @@ export default function AdminCompaniesPage() {
           )}
         </CardContent>
       </Card>
-    </Box>
+    </PageContainer>
   )
 }

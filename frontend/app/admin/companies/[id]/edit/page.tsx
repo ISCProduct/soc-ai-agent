@@ -6,8 +6,6 @@ import {
   Alert,
   Box,
   Button,
-  Card,
-  CardContent,
   Chip,
   Divider,
   MenuItem,
@@ -16,6 +14,8 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
+import { ErrorAlert } from '@/components/common/ErrorAlert'
 
 const DEV_STYLES = ['スクラム', 'ウォーターフォール', 'カンバン', 'アジャイル', 'その他']
 
@@ -156,66 +156,59 @@ export default function AdminCompanyEditPage() {
   }
 
   return (
-    <Box sx={{ p: 4, maxWidth: 800, mx: 'auto' }}>
-      <Button variant="text" onClick={() => router.back()} sx={{ mb: 2 }}>
-        ← 戻る
-      </Button>
-      <Typography variant="h5" fontWeight="bold" sx={{ mb: 3 }}>
-        技術スタック編集: {name}
-      </Typography>
-
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+    <AdminFormContainer
+      title={`技術スタック編集: ${name}`}
+      maxWidth={800}
+      backLabel="← 戻る"
+      onBack={() => router.back()}
+    >
+      <ErrorAlert error={error} />
       {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
+      <Stack spacing={3}>
+        <Button
+          variant="contained"
+          color="secondary"
+          onClick={handleAiFill}
+          disabled={aiLoading}
+          sx={{ alignSelf: 'flex-start' }}
+        >
+          {aiLoading ? 'AI検索中...' : '🤖 AI自動入力（OpenAI WebSearch）'}
+        </Button>
 
-      <Card>
-        <CardContent>
-          <Stack spacing={3}>
-            <Button
-              variant="contained"
-              color="secondary"
-              onClick={handleAiFill}
-              disabled={aiLoading}
-              sx={{ alignSelf: 'flex-start' }}
-            >
-              {aiLoading ? 'AI検索中...' : '🤖 AI自動入力（OpenAI WebSearch）'}
-            </Button>
+        <Divider />
 
-            <Divider />
+        <ChipEditor
+          label="言語・フレームワーク（例: Go, React, TypeScript）"
+          values={techStack}
+          onChange={setTechStack}
+        />
+        <ChipEditor
+          label="インフラ（例: AWS, GCP, Azure, オンプレ）"
+          values={infraStack}
+          onChange={setInfraStack}
+        />
+        <ChipEditor
+          label="CI/CDツール（例: GitHub Actions, Jenkins, CircleCI）"
+          values={cicdTools}
+          onChange={setCicdTools}
+        />
+        <TextField
+          select
+          label="開発手法"
+          value={devStyle}
+          onChange={(e) => setDevStyle(e.target.value)}
+          size="small"
+        >
+          <MenuItem value="">未設定</MenuItem>
+          {DEV_STYLES.map((s) => (
+            <MenuItem key={s} value={s}>{s}</MenuItem>
+          ))}
+        </TextField>
 
-            <ChipEditor
-              label="言語・フレームワーク（例: Go, React, TypeScript）"
-              values={techStack}
-              onChange={setTechStack}
-            />
-            <ChipEditor
-              label="インフラ（例: AWS, GCP, Azure, オンプレ）"
-              values={infraStack}
-              onChange={setInfraStack}
-            />
-            <ChipEditor
-              label="CI/CDツール（例: GitHub Actions, Jenkins, CircleCI）"
-              values={cicdTools}
-              onChange={setCicdTools}
-            />
-            <TextField
-              select
-              label="開発手法"
-              value={devStyle}
-              onChange={(e) => setDevStyle(e.target.value)}
-              size="small"
-            >
-              <MenuItem value="">未設定</MenuItem>
-              {DEV_STYLES.map((s) => (
-                <MenuItem key={s} value={s}>{s}</MenuItem>
-              ))}
-            </TextField>
-
-            <Button variant="contained" onClick={handleSave} sx={{ alignSelf: 'flex-end' }}>
-              保存
-            </Button>
-          </Stack>
-        </CardContent>
-      </Card>
-    </Box>
+        <Button variant="contained" onClick={handleSave} sx={{ alignSelf: 'flex-end' }}>
+          保存
+        </Button>
+      </Stack>
+    </AdminFormContainer>
   )
 }
