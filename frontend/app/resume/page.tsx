@@ -62,6 +62,19 @@ function ResumeContent() {
   const [review, setReview] = useState<ReviewResult | null>(null)
   const [ragReport, setRagReport] = useState('')
 
+  const checkAnnotatedPdfAvailable = async (id: number) => {
+    try {
+      const response = await fetch(`/api/resume/annotated?document_id=${id}`, {
+        headers: { Range: 'bytes=0-0' },
+      })
+      if (!response.ok) return false
+      const contentType = response.headers.get('content-type') || ''
+      return contentType.includes('application/pdf')
+    } catch {
+      return false
+    }
+  }
+
   const prefilledCompany = searchParams.get('company_name') || ''
   const prefilledIndustry = searchParams.get('industry') || ''
 
@@ -178,7 +191,9 @@ function ResumeContent() {
             if (data.type === 'chunk') {
               setRagReport((prev) => prev + data.text)
             } else if (data.type === 'complete') {
-              setReview({ review: data.review, items: data.items, annotated_available: data.annotated_available ?? false })
+              const backendAnnotated = data.annotated_available === true
+              const annotatedAvailable = backendAnnotated || (documentId ? await checkAnnotatedPdfAvailable(documentId) : false)
+              setReview({ review: data.review, items: data.items, annotated_available: annotatedAvailable })
             } else if (data.type === 'annotate_error') {
               setAnnotateError(data.message)
             } else if (data.type === 'error') {

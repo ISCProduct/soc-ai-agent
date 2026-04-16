@@ -12,7 +12,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'document_id is required' }, { status: 400 })
     }
 
-    const response = await fetch(`${BACKEND_URL}/api/resume/annotated?document_id=${documentId}`)
+    const upstreamHeaders: HeadersInit = {}
+    const range = request.headers.get('range')
+    if (range) {
+      upstreamHeaders.Range = range
+    }
+
+    const response = await fetch(`${BACKEND_URL}/api/resume/annotated?document_id=${documentId}`, {
+      headers: upstreamHeaders,
+    })
     if (!response.ok) {
       const data = await response.json().catch(() => ({}))
       return NextResponse.json(data, { status: response.status })
@@ -26,7 +34,13 @@ export async function GET(request: NextRequest) {
       headers.set('Content-Disposition', disposition)
     }
 
-    return new NextResponse(buffer, { status: 200, headers })
+    const contentRange = response.headers.get('content-range')
+    if (contentRange) {
+      headers.set('Content-Range', contentRange)
+    }
+
+    const status = response.status === 206 ? 206 : 200
+    return new NextResponse(buffer, { status, headers })
   } catch (error) {
     console.error('Resume annotated proxy error:', error)
     return NextResponse.json({ error: 'Failed to connect to backend' }, { status: 500 })
