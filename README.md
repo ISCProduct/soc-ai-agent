@@ -277,6 +277,12 @@ docker compose --profile rag up -d rag-review
 
 - Prompt定義: `.github/prompts/*.prompt.md`
 - 呼び出しスクリプト: `scripts/copilot-shortcuts.sh`
+- Copilot共通指示: `.github/copilot-instructions.md`
+- パス別指示: `.github/instructions/*.instructions.md`
+
+> **注意 (Copilot CLI)**  
+> 現在の Copilot CLI では、任意の `.github/prompts/*` を `/issue` のような**独自スラッシュコマンドとして `/` メニューに表示する機能はありません**。  
+> そのため本リポジトリでは、`scripts/cissue` / `scripts/cimpl` / `scripts/cpr` を共通実行入口として提供しています。
 
 ### 初回セットアップ
 
@@ -302,6 +308,14 @@ source scripts/copilot-shortcuts.sh
 ./scripts/cpr "123"
 ```
 
+WSL ユーザーは実行権限の差異を避けるため、次の形式を推奨します。
+
+```sh
+bash scripts/cissue "管理者画面に監査ログ検索を追加したい"
+bash scripts/cimpl "123"
+bash scripts/cpr "123"
+```
+
 ### うまく動かない場合
 
 - `cissue: command not found`: `source scripts/copilot-shortcuts.sh` が未実行です。
@@ -314,6 +328,13 @@ source scripts/copilot-shortcuts.sh
     type cissue
     ```
 - `Permission denied`: `chmod +x scripts/copilot-shortcuts.sh scripts/cissue scripts/cimpl scripts/cpr` を実行してください。
+- WSL で `./scripts/...` が失敗する: 実行権限やマウント設定の影響があるため、`bash scripts/cissue "..."` 形式で実行してください。
+
+### Copilotカスタム指示（どの環境でも共通化）
+
+- 本リポジトリでは GitHub 公式仕様に合わせて `.github/copilot-instructions.md` を配置しています。
+- 追加で、`Backend` / `frontend` / `rag` 向けのパス別指示を `.github/instructions/*.instructions.md` に配置しています。
+- これらはリポジトリに含まれるため、`git pull` 後の各環境で同じ指示が自動的に使われます。
 
 ---
 
