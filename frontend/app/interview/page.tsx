@@ -332,7 +332,11 @@ function InterviewContent() {
       }
     }
     rafId = requestAnimationFrame(tick)
-    return () => { cancelAnimationFrame(rafId); audioCtx.close() }
+    return () => {
+      cancelAnimationFrame(rafId)
+      source.disconnect()
+      audioCtx.close().catch(() => {})
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handsFreeMode, status])
 
