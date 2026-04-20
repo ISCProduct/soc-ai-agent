@@ -276,20 +276,20 @@ docker compose --profile rag up -d rag-review
 チームで同じCopilotカスタムコマンドを使う場合は、リポジトリ内の以下を共通利用します。
 
 - Prompt定義: `.github/prompts/*.prompt.md`
-- 呼び出しスクリプト: `scripts/copilot-shortcuts.sh`
-- Copilot共通指示: `.github/copilot-instructions.md`
-- パス別指示: `.github/instructions/*.instructions.md`
-
-> **注意 (Copilot CLI)**  
-> 現在の Copilot CLI では、任意の `.github/prompts/*` を `/issue` のような**独自スラッシュコマンドとして `/` メニューに表示する機能はありません**。  
-> そのため本リポジトリでは、`scripts/cissue` / `scripts/cimpl` / `scripts/cpr` を共通実行入口として提供しています。
+- 呼び出し関数: `scripts/copilot-shortcuts.sh`
 
 ### 初回セットアップ
 
-方法1（推奨）: 関数として読み込む
+方法1（推奨）: シェルに読み込んで関数として使う
 
 ```sh
 source scripts/copilot-shortcuts.sh
+```
+
+毎回読み込む場合は、`~/.zshrc` などに追記します。
+
+```sh
+echo 'source /absolute/path/to/soc-ai-agent-mock/scripts/copilot-shortcuts.sh' >> ~/.zshrc
 ```
 
 方法2: 直接実行する（`source` 不要）
@@ -300,41 +300,18 @@ source scripts/copilot-shortcuts.sh
 ./scripts/copilot-shortcuts.sh pr "123"
 ```
 
-方法3: pull 後にすぐ使えるラッパーを実行する（`source` 不要）
+### 利用例
 
 ```sh
-./scripts/cissue "管理者画面に監査ログ検索を追加したい"
-./scripts/cimpl "123"
-./scripts/cpr "123"
-```
-
-WSL ユーザーは実行権限の差異を避けるため、次の形式を推奨します。
-
-```sh
-bash scripts/cissue "管理者画面に監査ログ検索を追加したい"
-bash scripts/cimpl "123"
-bash scripts/cpr "123"
+cissue "管理者画面に監査ログ検索を追加したい"
+cimpl "123"
+cpr "123"
 ```
 
 ### うまく動かない場合
 
-- `cissue: command not found`: `source scripts/copilot-shortcuts.sh` が未実行です。
-- `source` したのに `cissue` が見つからない:
-  - `echo $SHELL` で bash / zsh 以外（例: fish）の場合、`source` で関数が読み込まれません。
-  - `bash -c "source ..."` のように別プロセスで実行すると、現在のシェルには反映されません。
-  - 同じターミナルで次を順に実行して確認してください。
-    ```sh
-    source scripts/copilot-shortcuts.sh
-    type cissue
-    ```
-- `Permission denied`: `chmod +x scripts/copilot-shortcuts.sh scripts/cissue scripts/cimpl scripts/cpr` を実行してください。
-- WSL で `./scripts/...` が失敗する: 実行権限やマウント設定の影響があるため、`bash scripts/cissue "..."` 形式で実行してください。
-
-### Copilotカスタム指示（どの環境でも共通化）
-
-- 本リポジトリでは GitHub 公式仕様に合わせて `.github/copilot-instructions.md` を配置しています。
-- 追加で、`Backend` / `frontend` / `rag` 向けのパス別指示を `.github/instructions/*.instructions.md` に配置しています。
-- これらはリポジトリに含まれるため、`git pull` 後の各環境で同じ指示が自動的に使われます。
+- `cissue: command not found` が出る場合: `source scripts/copilot-shortcuts.sh` が未実行です（またはシェル再起動後に未読込）。
+- 直接実行する場合は `./scripts/copilot-shortcuts.sh ...` の形式で実行してください。
 
 ---
 
