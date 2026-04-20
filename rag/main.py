@@ -573,7 +573,7 @@ def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
                 else:
                     logger.warning("deep research returned empty result")
             except Exception as exc:
-                logger.warning("deep research failed error=%s", exc)
+                logger.error("deep research failed error=%s", exc, exc_info=True)
                 if STRICT_DEEP_RESEARCH and not ALLOW_DDG_FALLBACK:
                     raise HTTPException(status_code=502, detail="Deep Research failed")
 
