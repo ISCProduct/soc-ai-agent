@@ -15,7 +15,10 @@ func (s *ChatService) getCurrentOrNextPhase(ctx context.Context, userID uint, se
 		return nil, err
 	}
 
-	progresses, _ := s.progressRepo.FindByUserAndSession(userID, sessionID)
+	progresses, err := s.progressRepo.FindByUserAndSession(userID, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	progressMap := make(map[uint]*entity.UserAnalysisProgress, len(progresses))
 	for i := range progresses {
 		progressMap[progresses[i].PhaseID] = &progresses[i]
@@ -75,7 +78,10 @@ func (s *ChatService) updatePhaseProgress(progress *entity.UserAnalysisProgress,
 
 // buildPhaseProgressResponse フェーズ進捗レスポンスを構築
 func (s *ChatService) buildPhaseProgressResponse(userID uint, sessionID string) ([]PhaseProgress, *PhaseProgress, error) {
-	progresses, _ := s.progressRepo.FindByUserAndSession(userID, sessionID)
+	progresses, err := s.progressRepo.FindByUserAndSession(userID, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
 	allPhases, err := s.phaseRepo.FindAll()
 	if err != nil {
 		return nil, nil, err
