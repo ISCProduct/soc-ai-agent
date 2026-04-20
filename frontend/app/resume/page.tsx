@@ -68,8 +68,14 @@ function ResumeContent() {
         headers: { Range: 'bytes=0-0' },
       })
       if (!response.ok) return false
-      const contentType = response.headers.get('content-type') || ''
-      return contentType.includes('application/pdf')
+      const contentType = (response.headers.get('content-type') || '').toLowerCase()
+      if (contentType.includes('application/pdf')) return true
+
+      const contentDisposition = (response.headers.get('content-disposition') || '').toLowerCase()
+      if (contentDisposition.includes('.pdf')) return true
+
+      // Content-Type が application/octet-stream でも、Range リクエスト成功なら実体ありとみなす。
+      return response.status === 206 || response.status === 200
     } catch {
       return false
     }
