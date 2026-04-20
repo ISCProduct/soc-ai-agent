@@ -7,6 +7,7 @@ import (
 	"Backend/internal/openai"
 	"context"
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -124,7 +125,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 			Content:   terminationMsg,
 		}
 		if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
-			fmt.Printf("Warning: failed to save termination message: %v\n", err)
+			log.Printf("Warning: failed to save termination message: %v\n", err)
 		}
 		return &ChatResponse{
 			Response:     terminationMsg,
@@ -163,31 +164,31 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	}
 	if jobCategoryID != 0 && s.conversationContextRepo != nil && storedJobCategoryID != jobCategoryID {
 		if err := s.conversationContextRepo.SetJobCategoryID(req.UserID, req.SessionID, jobCategoryID); err != nil {
-			fmt.Printf("Warning: failed to store job category: %v\n", err)
+			log.Printf("Warning: failed to store job category: %v\n", err)
 		}
 	}
 
 	jobJustResolved := false
 	if jobCategoryID == 0 && s.shouldValidateJobCategory(history) {
-		fmt.Printf("[JobValidation] Validating job category answer: %s\n", req.Message)
+		log.Printf("[JobValidation] Validating job category answer: %s\n", req.Message)
 		jobValidation, err := s.jobValidator.ValidateJobCategory(ctx, req.Message)
 		if err != nil {
-			fmt.Printf("[JobValidation] Error: %v\n", err)
+			log.Printf("[JobValidation] Error: %v\n", err)
 			// エラーでも続行
 		} else if jobValidation != nil {
 			if jobValidation.IsValid && len(jobValidation.MatchedCategories) > 0 {
 				// 明確に職種が特定できた場合
-				fmt.Printf("[JobValidation] Valid job category matched: %d categories\n", len(jobValidation.MatchedCategories))
+				log.Printf("[JobValidation] Valid job category matched: %d categories\n", len(jobValidation.MatchedCategories))
 				jobCategoryID = jobValidation.MatchedCategories[0].ID
 				jobJustResolved = true
 				if s.conversationContextRepo != nil {
 					if err := s.conversationContextRepo.SetJobCategoryID(req.UserID, req.SessionID, jobCategoryID); err != nil {
-						fmt.Printf("Warning: failed to store job category: %v\n", err)
+						log.Printf("Warning: failed to store job category: %v\n", err)
 					}
 				}
 			} else if jobValidation.NeedsClarification && jobValidation.SuggestedQuestion != "" {
 				// 職種が曖昧な場合は選択肢を提示
-				fmt.Printf("[JobValidation] Needs clarification, presenting options\n")
+				log.Printf("[JobValidation] Needs clarification, presenting options\n")
 
 				assistantMsg := &models.ChatMessage{
 					SessionID: req.SessionID,
@@ -196,7 +197,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 					Content:   jobValidation.SuggestedQuestion,
 				}
 				if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
-					fmt.Printf("Warning: failed to save assistant message: %v\n", err)
+					log.Printf("Warning: failed to save assistant message: %v\n", err)
 				}
 
 				return &ChatResponse{
@@ -211,7 +212,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 
 	if jobCategoryID != 0 {
 		if err := s.completeJobAnalysisPhase(req.UserID, req.SessionID); err != nil {
-			fmt.Printf("Warning: failed to complete job analysis phase: %v\n", err)
+			log.Printf("Warning: failed to complete job analysis phase: %v\n", err)
 		}
 	}
 
@@ -226,13 +227,13 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		currentPhase, phaseErr := s.getCurrentOrNextPhase(ctx, req.UserID, req.SessionID)
 		if phaseErr == nil {
 			if err := s.updatePhaseProgress(currentPhase, false); err != nil {
-				fmt.Printf("Warning: failed to update phase progress for invalid answer: %v\n", err)
+				log.Printf("Warning: failed to update phase progress for invalid answer: %v\n", err)
 			}
 		}
 
 		validation, err := s.sessionValidationRepo.GetOrCreate(req.SessionID)
 		if err != nil {
-			fmt.Printf("Warning: failed to get validation: %v\n", err)
+			log.Printf("Warning: failed to get validation: %v\n", err)
 		}
 
 		allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
@@ -274,7 +275,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 				Content:   completionMsg,
 			}
 			if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
-				fmt.Printf("Warning: failed to save completion message: %v\n", err)
+				log.Printf("Warning: failed to save completion message: %v\n", err)
 			}
 
 			allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
@@ -294,7 +295,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 
 	allPhases, err := s.phaseRepo.FindAll()
 	if err != nil {
-		fmt.Printf("Warning: failed to get phases: %v\n", err)
+		log.Printf("Warning: failed to get phases: %v\n", err)
 	}
 	completedProgresses, _ := s.progressRepo.FindByUserAndSession(req.UserID, req.SessionID)
 	completedPhaseCount := 0
@@ -320,13 +321,13 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 			Content:   completionMsg,
 		}
 		if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
-			fmt.Printf("Warning: failed to save completion message: %v\n", err)
+			log.Printf("Warning: failed to save completion message: %v\n", err)
 		}
 		allPhasesInfo, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
 		evaluatedCategoriesCount := 0
 		scores, err := s.userWeightScoreRepo.FindByUserAndSession(req.UserID, req.SessionID)
 		if err != nil {
-			fmt.Printf("Warning: failed to get scores for completion response: %v\n", err)
+			log.Printf("Warning: failed to get scores for completion response: %v\n", err)
 		} else {
 			seenCategories := make(map[string]bool)
 			for _, score := range scores {
@@ -360,22 +361,22 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	// 3. ユーザーの回答から重み係数を判定・更新し、結果に応じてフェーズ進捗を更新
 	// スコア更新に成功した場合のみ有効回答としてカウントする
 	trimmedAnswer := strings.TrimSpace(req.Message)
-	fmt.Printf("[ProcessChat] Checking if choice answer: '%s' (len=%d)\n", trimmedAnswer, len(trimmedAnswer))
+	log.Printf("[ProcessChat] Checking if choice answer: '%s' (len=%d)\n", trimmedAnswer, len(trimmedAnswer))
 	scoreUpdated := false
 	if len(trimmedAnswer) <= 3 && s.isChoiceAnswer(trimmedAnswer) {
-		fmt.Printf("[ProcessChat] Processing as choice answer\n")
+		log.Printf("[ProcessChat] Processing as choice answer\n")
 		// 選択肢回答の場合は直接スコアを計算
 		if err := s.processChoiceAnswer(ctx, req.UserID, req.SessionID, trimmedAnswer, history, jobCategoryID); err != nil {
-			fmt.Printf("Warning: failed to process choice answer: %v\n", err)
+			log.Printf("Warning: failed to process choice answer: %v\n", err)
 		} else {
 			scoreUpdated = true
 		}
 	} else {
-		fmt.Printf("[ProcessChat] Processing as text answer\n")
+		log.Printf("[ProcessChat] Processing as text answer\n")
 		// 通常の回答分析
 		if err := s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, req.Message, jobCategoryID); err != nil {
 			// ログに記録するが、処理は継続
-			fmt.Printf("Warning: failed to update weights: %v\n", err)
+			log.Printf("Warning: failed to update weights: %v\n", err)
 		} else {
 			scoreUpdated = true
 		}
@@ -383,7 +384,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 
 	// フェーズ進捗を更新（スコア更新成功時のみ有効カウント）
 	if err := s.updatePhaseProgress(currentPhase, scoreUpdated); err != nil {
-		fmt.Printf("Warning: failed to update phase progress: %v\n", err)
+		log.Printf("Warning: failed to update phase progress: %v\n", err)
 	}
 
 	// 4. 既に聞いた質問を全て収集（重複防止を徹底）
@@ -392,7 +393,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	// 4-1. AI生成質問テーブルから取得
 	askedQuestions, err := s.aiGeneratedQuestionRepo.FindByUserAndSession(req.UserID, req.SessionID)
 	if err != nil {
-		fmt.Printf("Warning: failed to get asked questions: %v\n", err)
+		log.Printf("Warning: failed to get asked questions: %v\n", err)
 		askedQuestions = []models.AIGeneratedQuestion{}
 	}
 	for _, q := range askedQuestions {
@@ -415,13 +416,13 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		}
 	}
 
-	fmt.Printf("Total asked questions for duplicate check: %d\n", len(askedTexts))
+	log.Printf("Total asked questions for duplicate check: %d\n", len(askedTexts))
 
 	// 5. 現在のスコアを分析して、次に評価すべきカテゴリを決定
 	targetLevel := s.getUserTargetLevel(req.UserID)
 	scores, err := s.userWeightScoreRepo.FindByUserAndSession(req.UserID, req.SessionID)
 	if err != nil {
-		fmt.Printf("Warning: failed to get scores for question selection: %v\n", err)
+		log.Printf("Warning: failed to get scores for question selection: %v\n", err)
 	}
 
 	// スコア分布を分析
@@ -454,10 +455,10 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 
 	if len(unevaluatedCategories) > 0 {
 		targetCategory = unevaluatedCategories[0]
-		fmt.Printf("Targeting unevaluated category: %s\n", targetCategory)
+		log.Printf("Targeting unevaluated category: %s\n", targetCategory)
 	} else if len(weaklyEvaluatedCategories) > 0 {
 		targetCategory = weaklyEvaluatedCategories[0]
-		fmt.Printf("Targeting weakly evaluated category: %s (score: %d)\n", targetCategory, scoreMap[targetCategory])
+		log.Printf("Targeting weakly evaluated category: %s (score: %d)\n", targetCategory, scoreMap[targetCategory])
 	} else {
 		// 全カテゴリ評価済みなら、最もスコアが極端なものを深掘り
 		maxAbsScore := 0
@@ -471,7 +472,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 				targetCategory = cat
 			}
 		}
-		fmt.Printf("All categories evaluated, deepening strongest: %s (score: %d)\n", targetCategory, scoreMap[targetCategory])
+		log.Printf("All categories evaluated, deepening strongest: %s (score: %d)\n", targetCategory, scoreMap[targetCategory])
 	}
 
 	// 常にまずルールベース質問を試し、なければAIで生成
@@ -485,7 +486,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	}
 
 	// まず、ルールベース質問から選択を試みる
-	fmt.Printf("[RuleBased] Attempting to get predefined question for category: %s\n", targetCategory)
+	log.Printf("[RuleBased] Attempting to get predefined question for category: %s\n", targetCategory)
 	currentPhaseName := ""
 	if currentPhase != nil && currentPhase.Phase != nil {
 		currentPhaseName = currentPhase.Phase.PhaseName
@@ -493,16 +494,16 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	predefinedQ, err := s.tryGetPredefinedQuestion(req.UserID, req.SessionID, targetCategory, req.IndustryID, jobCategoryID, targetLevel, askedTexts, currentPhaseName)
 
 	if err == nil && predefinedQ != nil {
-		fmt.Printf("[RuleBased] Using predefined question (ID: %d) for category: %s\n", predefinedQ.ID, predefinedQ.Category)
+		log.Printf("[RuleBased] Using predefined question (ID: %d) for category: %s\n", predefinedQ.ID, predefinedQ.Category)
 		aiResponse = predefinedQ.QuestionText
 		questionWeightID = predefinedQ.ID
 	} else {
 		// ルールベース質問がない場合、AIで生成
-		fmt.Printf("[AI] No predefined question available, generating with AI for category: %s (asked: %d questions)\n", targetCategory, len(askedTexts))
+		log.Printf("[AI] No predefined question available, generating with AI for category: %s (asked: %d questions)\n", targetCategory, len(askedTexts))
 		aiResponse, _, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, jobCategoryID, targetLevel, currentPhase)
 		if err != nil {
 			// エラーは致命的にせずフォールバック質問を設定
-			fmt.Printf("Warning: failed to generate question via AI: %v\n", err)
+			log.Printf("Warning: failed to generate question via AI: %v\n", err)
 			fallbackQuestion := s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
 			if fallbackQuestion != "" {
 				aiResponse = fallbackQuestion
@@ -537,7 +538,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	// 完了判定: 全フェーズが完了していれば終了
 	isComplete := completedPhaseCount == len(allPhases)
 
-	fmt.Printf("Diagnosis progress: %d phases completed out of %d, %d questions asked, %d/10 categories evaluated, complete: %v\n",
+	log.Printf("Diagnosis progress: %d phases completed out of %d, %d questions asked, %d/10 categories evaluated, complete: %v\n",
 		completedPhaseCount, len(allPhases), answeredCount, len(evaluatedCategories), isComplete)
 
 	// 診断完了時のメッセージは追加しない（次の回答時に完了判定する）
@@ -571,18 +572,18 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 			QuestionWeightID: questionWeightID,
 		}
 		if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
-			fmt.Printf("Warning: failed to save assistant message: %v\n", err)
+			log.Printf("Warning: failed to save assistant message: %v\n", err)
 			// 続行は可能にする
 		}
 	} else {
 		// フォールバック: 空のAI応答の場合は簡易質問を返す
-		fmt.Printf("Warning: skipped saving empty assistant message for session %s user %d\n", req.SessionID, req.UserID)
+		log.Printf("Warning: skipped saving empty assistant message for session %s user %d\n", req.SessionID, req.UserID)
 		aiResponse = "すみません、質問を生成できませんでした。少し時間をおいてからもう一度お試しください。"
 	}
 
 	if isComplete {
 		if err := s.ensureEmbeddings(ctx, req.UserID, req.SessionID, jobCategoryID); err != nil {
-			fmt.Printf("Warning: failed to ensure embeddings: %v\n", err)
+			log.Printf("Warning: failed to ensure embeddings: %v\n", err)
 		}
 	}
 

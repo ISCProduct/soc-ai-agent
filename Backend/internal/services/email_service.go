@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"log"
 	"net/smtp"
 	"os"
 	"strconv"
@@ -221,7 +222,7 @@ func (s *EmailService) SendAnalysisReport(user *entity.User, summary *AnalysisSu
 
 	// SMTP未設定の場合はログ出力のみ（開発環境向け）
 	if s.host == "" {
-		fmt.Printf("[EmailService] SMTP not configured. Simulating send to %s (body: %d bytes)\n", user.Email, len(htmlBody))
+		log.Printf("[EmailService] SMTP not configured. Simulating send to %s (body: %d bytes)\n", user.Email, len(htmlBody))
 		return nil
 	}
 
@@ -237,7 +238,7 @@ func (s *EmailService) SendAnalysisReport(user *entity.User, summary *AnalysisSu
 		return fmt.Errorf("failed to send email: %w", err)
 	}
 
-	fmt.Printf("[EmailService] Email sent successfully to %s\n", user.Email)
+	log.Printf("[EmailService] Email sent successfully to %s\n", user.Email)
 	return nil
 }
 
@@ -257,7 +258,7 @@ func (s *EmailService) SendVerificationEmail(user *entity.User, token, appURL st
 </body></html>`, user.Name, verifyURL)
 
 	if s.host == "" {
-		fmt.Printf("[EmailService] Verification email for %s: %s\n", user.Email, verifyURL)
+		log.Printf("[EmailService] Verification email for %s: %s\n", user.Email, verifyURL)
 		return nil
 	}
 
@@ -286,7 +287,7 @@ func (s *EmailService) SendReVerificationEmail(user *entity.User, token, appURL 
 </body></html>`, user.Name, verifyURL)
 
 	if s.host == "" {
-		fmt.Printf("[EmailService] Re-verification email for %s: %s\n", user.Email, verifyURL)
+		log.Printf("[EmailService] Re-verification email for %s: %s\n", user.Email, verifyURL)
 		return nil
 	}
 
@@ -393,7 +394,7 @@ func (s *EmailService) SendRegistrationEmail(email, token string) error {
 </body></html>`, registerURL)
 
 	if s.host == "" {
-		fmt.Printf("[EmailService] Registration email for %s: %s\n", email, registerURL)
+		log.Printf("[EmailService] Registration email for %s: %s\n", email, registerURL)
 		return nil
 	}
 
@@ -422,7 +423,7 @@ func (s *EmailService) SendPasswordResetEmail(email, token, appURL string) error
 </body></html>`, resetURL)
 
 	if s.host == "" {
-		fmt.Printf("[EmailService] Password reset email for %s: %s\n", email, resetURL)
+		log.Printf("[EmailService] Password reset email for %s: %s\n", email, resetURL)
 		return nil
 	}
 
@@ -452,7 +453,7 @@ func (s *EmailService) SendInterviewReport(user *entity.User, data InterviewRepo
 	htmlBody := buf.String()
 
 	if s.host == "" {
-		fmt.Printf("[EmailService] SMTP not configured. Simulating interview report send to %s (body: %d bytes)\n", user.Email, len(htmlBody))
+		log.Printf("[EmailService] SMTP not configured. Simulating interview report send to %s (body: %d bytes)\n", user.Email, len(htmlBody))
 		return nil
 	}
 
@@ -465,7 +466,7 @@ func (s *EmailService) SendInterviewReport(user *entity.User, data InterviewRepo
 	if err := smtp.SendMail(addr, auth, s.from, []string{user.Email}, []byte(msg)); err != nil {
 		return fmt.Errorf("failed to send email: %w", err)
 	}
-	fmt.Printf("[EmailService] Interview report email sent successfully to %s\n", user.Email)
+	log.Printf("[EmailService] Interview report email sent successfully to %s\n", user.Email)
 	return nil
 }
 
@@ -475,7 +476,7 @@ func (s *EmailService) SendSystemAlertEmail(recipients []string, subject, body s
 		return nil
 	}
 	if s.host == "" || s.user == "" || s.password == "" || s.from == "" {
-		fmt.Printf("[EmailService] SMTP not configured. Simulating alert send to %v\n", recipients)
+		log.Printf("[EmailService] SMTP not configured. Simulating alert send to %v\n", recipients)
 		return nil
 	}
 

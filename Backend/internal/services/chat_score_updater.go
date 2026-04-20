@@ -4,6 +4,7 @@ import (
 	"Backend/internal/models"
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"strings"
 )
@@ -13,7 +14,7 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 	// 会話履歴から直近の質問を取得
 	history, err := s.chatMessageRepo.FindRecentBySessionID(sessionID, 5)
 	if err != nil {
-		fmt.Printf("Warning: failed to get history for analysis: %v\n", err)
+		log.Printf("Warning: failed to get history for analysis: %v\n", err)
 		history = []models.ChatMessage{}
 	}
 
@@ -26,11 +27,11 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 	}
 
 	if strings.TrimSpace(lastQuestion) == "" {
-		fmt.Printf("Warning: no previous question found for scoring\n")
+		log.Printf("Warning: no previous question found for scoring\n")
 		return nil
 	}
 	if s.isJobSelectionQuestion(lastQuestion) {
-		fmt.Printf("Skipping analysis for job selection question\n")
+		log.Printf("Skipping analysis for job selection question\n")
 		return nil
 	}
 
@@ -39,11 +40,11 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 
 	result := s.answerEvaluator.EvaluateHumanScoring(lastQuestion, message, isChoice, jobCategoryID != 0, nil)
 	if result.Action != PrecheckScore {
-		fmt.Printf("Skipping scoring due to precheck: %s\n", result.Reason)
+		log.Printf("Skipping scoring due to precheck: %s\n", result.Reason)
 		return nil
 	}
 	if result.Score <= 0 {
-		fmt.Printf("No human score applied (score=%d)\n", result.Score)
+		log.Printf("No human score applied (score=%d)\n", result.Score)
 		return nil
 	}
 
@@ -67,7 +68,7 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 		return fmt.Errorf("no previous question found")
 	}
 	if s.isJobSelectionQuestion(lastQuestion) {
-		fmt.Printf("[Choice Answer] Skipping score update for job selection question\n")
+		log.Printf("[Choice Answer] Skipping score update for job selection question\n")
 		return nil
 	}
 
@@ -92,11 +93,11 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 		targetCategory = s.inferCategoryFromQuestion(lastQuestion)
 	}
 
-	fmt.Printf("[Choice Answer] Processing choice '%s' for category: %s\n", answer, targetCategory)
+	log.Printf("[Choice Answer] Processing choice '%s' for category: %s\n", answer, targetCategory)
 
 	result := s.answerEvaluator.EvaluateHumanScoring(lastQuestion, answer, true, jobCategoryID != 0, nil)
 	if result.Action != PrecheckScore {
-		fmt.Printf("Skipping choice scoring due to precheck: %s\n", result.Reason)
+		log.Printf("Skipping choice scoring due to precheck: %s\n", result.Reason)
 		return nil
 	}
 	score := result.Score
@@ -161,19 +162,19 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 		if err := s.userWeightScoreRepo.UpdateScore(userID, sessionID, category, score); err != nil {
 			return fmt.Errorf("failed to create score: %w", err)
 		}
-		fmt.Printf("[Choice Answer] Created new score: %s = %d\n", category, score)
+		log.Printf("[Choice Answer] Created new score: %s = %d\n", category, score)
 	} else {
 		// 移動平均で更新（直近回答の影響を反映）
 		newScore := int(math.Round(float64(existingScore.Score)*0.7 + float64(score)*0.3))
 		delta := newScore - existingScore.Score
 		if delta == 0 {
-			fmt.Printf("[Choice Answer] Score unchanged: %s = %d\n", category, existingScore.Score)
+			log.Printf("[Choice Answer] Score unchanged: %s = %d\n", category, existingScore.Score)
 			return nil
 		}
 		if err := s.userWeightScoreRepo.UpdateScore(userID, sessionID, category, delta); err != nil {
 			return fmt.Errorf("failed to update score: %w", err)
 		}
-		fmt.Printf("[Choice Answer] Updated score: %s = %d (average)\n", category, newScore)
+		log.Printf("[Choice Answer] Updated score: %s = %d (average)\n", category, newScore)
 	}
 
 	return nil

@@ -5,6 +5,7 @@ import (
 	"Backend/internal/models"
 	"context"
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -63,7 +64,7 @@ func (s *ChatService) updatePhaseProgress(progress *entity.UserAnalysisProgress,
 					phaseLabel = progress.Phase.PhaseName
 				}
 			}
-			fmt.Printf("%sが完了しました。\n", phaseLabel)
+			log.Printf("%sが完了しました。\n", phaseLabel)
 		}
 	} else {
 		progress.CompletedAt = nil

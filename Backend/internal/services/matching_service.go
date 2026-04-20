@@ -9,6 +9,7 @@ import (
 	"Backend/internal/services/prompts"
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"sort"
 	"strings"
@@ -37,7 +38,7 @@ func NewMatchingService(
 
 // CalculateMatching ユーザーと企業のマッチングを計算
 func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, sessionID string) error {
-	fmt.Printf("[CalculateMatching] Starting matching calculation for user %d, session %s\n", userID, sessionID)
+	log.Printf("[CalculateMatching] Starting matching calculation for user %d, session %s\n", userID, sessionID)
 
 	// 1. ユーザーのスコアを取得
 	userScores, err := s.userWeightScoreRepo.FindByUserAndSession(userID, sessionID)
@@ -46,7 +47,7 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 	}
 
 	if len(userScores) == 0 {
-		fmt.Printf("[CalculateMatching] No user scores found for user %d, session %s\n", userID, sessionID)
+		log.Printf("[CalculateMatching] No user scores found for user %d, session %s\n", userID, sessionID)
 		return nil
 	}
 
@@ -56,7 +57,7 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 		scoreMap[score.WeightCategory] = float64(score.Score)
 	}
 
-	fmt.Printf("[CalculateMatching] User scores: %v\n", scoreMap)
+	log.Printf("[CalculateMatching] User scores: %v\n", scoreMap)
 
 	// 2. 全企業のプロファイルを取得
 	companies, err := s.companyRepo.FindAllActive(10000, 0)
@@ -64,7 +65,7 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 		return fmt.Errorf("failed to get companies: %w", err)
 	}
 
-	fmt.Printf("[CalculateMatching] Found %d active companies\n", len(companies))
+	log.Printf("[CalculateMatching] Found %d active companies\n", len(companies))
 
 	// 3. 各企業とのマッチングを計算
 	matchCount := 0
@@ -72,7 +73,7 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 		// 企業のweightプロファイルを取得
 		profile, err := s.companyRepo.GetWeightProfile(company.ID, nil)
 		if err != nil {
-			fmt.Printf("[CalculateMatching] Warning: No profile for company %d: %v\n", company.ID, err)
+			log.Printf("[CalculateMatching] Warning: No profile for company %d: %v\n", company.ID, err)
 			continue
 		}
 
@@ -85,20 +86,20 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 
 		reason, err := s.GenerateMatchReason(ctx, match, userScores)
 		if err != nil {
-			fmt.Printf("[CalculateMatching] Warning: Failed to generate AI reason for company %d: %v\n", company.ID, err)
+			log.Printf("[CalculateMatching] Warning: Failed to generate AI reason for company %d: %v\n", company.ID, err)
 			reason = BuildMatchReason(match, userScores)
 		}
 		match.MatchReason = reason
 
 		// マッチング結果を保存
 		if err := s.matchRepo.CreateOrUpdate(match); err != nil {
-			fmt.Printf("[CalculateMatching] Warning: Failed to save match for company %d: %v\n", company.ID, err)
+			log.Printf("[CalculateMatching] Warning: Failed to save match for company %d: %v\n", company.ID, err)
 			continue
 		}
 		matchCount++
 	}
 
-	fmt.Printf("[CalculateMatching] Completed: %d matches created for user %d, session %s\n", matchCount, userID, sessionID)
+	log.Printf("[CalculateMatching] Completed: %d matches created for user %d, session %s\n", matchCount, userID, sessionID)
 	return nil
 }
 

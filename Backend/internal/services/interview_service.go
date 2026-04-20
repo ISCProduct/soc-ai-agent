@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -65,10 +66,10 @@ func (s *InterviewService) StartWorker() {
 func (s *InterviewService) runWorker() {
 	for sessionID := range s.jobCh {
 		if err := s.generateReport(context.Background(), sessionID); err != nil {
-			fmt.Printf("[Interview] Report generation failed for session %d: %v\n", sessionID, err)
+			log.Printf("[Interview] Report generation failed for session %d: %v\n", sessionID, err)
 			continue
 		}
-		fmt.Printf("[Interview] Report generation completed for session %d\n", sessionID)
+		log.Printf("[Interview] Report generation completed for session %d\n", sessionID)
 	}
 }
 
@@ -976,7 +977,7 @@ Interview transcript:
 		chatSessionID := fmt.Sprintf("interview-%d", session.UserID)
 		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, chatSessionID, report); err != nil {
 			// スコア反映失敗はレポート生成を失敗扱いにしない
-			fmt.Printf("[CrossFeature] interview score update failed for session %d: %v\n", sessionID, err)
+			log.Printf("[CrossFeature] interview score update failed for session %d: %v\n", sessionID, err)
 		}
 	}
 	return nil

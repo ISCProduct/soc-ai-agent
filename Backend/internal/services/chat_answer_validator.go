@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -41,35 +42,35 @@ func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.
 	isValid, err := s.validateAnswerRelevance(ctx, questionText, userMessage)
 	if err != nil {
 		// AI判定エラー時は基本的な検証のみ
-		fmt.Printf("[Validation] AI validation failed: %v, using basic validation\n", err)
+		log.Printf("[Validation] AI validation failed: %v, using basic validation\n", err)
 		isValid = isLikelyAnswer(userMessage, questionText)
-		fmt.Printf("[Validation] Basic validation result: %v for message: %s\n", isValid, userMessage)
+		log.Printf("[Validation] Basic validation result: %v for message: %s\n", isValid, userMessage)
 	} else {
-		fmt.Printf("[Validation] AI validation result: %v for message: %s\n", isValid, userMessage)
+		log.Printf("[Validation] AI validation result: %v for message: %s\n", isValid, userMessage)
 	}
 
 	if isValid {
 		// 有効な回答と判断 -> カウントをリセットして既存の処理に進める
-		fmt.Printf("[Validation] Valid answer detected, resetting invalid count for session: %s\n", sessionID)
+		log.Printf("[Validation] Valid answer detected, resetting invalid count for session: %s\n", sessionID)
 		if err := s.sessionValidationRepo.ResetInvalidCount(sessionID); err != nil {
-			fmt.Printf("Warning: failed to reset invalid count: %v\n", err)
+			log.Printf("Warning: failed to reset invalid count: %v\n", err)
 		}
 		return false, "", nil
 	}
 
 	// 無効な回答と判断 -> カウントをインクリメント
-	fmt.Printf("[Validation] Invalid answer detected for message: %s\n", userMessage)
+	log.Printf("[Validation] Invalid answer detected for message: %s\n", userMessage)
 	validation, err := s.sessionValidationRepo.IncrementInvalidCount(sessionID)
 	if err != nil {
 		return true, "", fmt.Errorf("failed to increment invalid count: %w", err)
 	}
-	fmt.Printf("[Validation] Invalid count incremented to: %d/3\n", validation.InvalidAnswerCount)
+	log.Printf("[Validation] Invalid count incremented to: %d/3\n", validation.InvalidAnswerCount)
 
 	var assistantText string
 	if validation.InvalidAnswerCount >= 3 {
 		// 3回目の無効回答 -> セッションを強制終了
 		if err := s.sessionValidationRepo.TerminateSession(sessionID); err != nil {
-			fmt.Printf("Warning: failed to terminate session: %v\n", err)
+			log.Printf("Warning: failed to terminate session: %v\n", err)
 		}
 		assistantText = "申し訳ございませんが、質問と関係のない内容が3回続いたため、チャットを終了させていただきます。新しいセッションで最初からやり直してください。"
 	} else {
@@ -96,12 +97,12 @@ func (s *ChatService) validateAnswerRelevance(ctx context.Context, question, ans
 
 	if isTextQuestion {
 		// 文章系の質問: キーワードベースで柔軟に判定
-		fmt.Printf("[Validation] Text-based question detected, using keyword-based validation\n")
+		log.Printf("[Validation] Text-based question detected, using keyword-based validation\n")
 		return isLikelyAnswer(answer, question), nil
 	}
 
 	// 選択肢型の質問: AI判定を使用
-	fmt.Printf("[Validation] Choice-based question detected, using AI validation\n")
+	log.Printf("[Validation] Choice-based question detected, using AI validation\n")
 
 	systemPrompt := prompts.AnswerValidationSystemPrompt
 	userPrompt := prompts.BuildAnswerValidationUserPrompt(question, answer)
@@ -127,7 +128,7 @@ func (s *ChatService) validateAnswerRelevance(ctx context.Context, question, ans
 	var result ValidationResult
 	if err := json.Unmarshal([]byte(response), &result); err != nil {
 		// JSONパースに失敗した場合は無効とみなす
-		fmt.Printf("Warning: Failed to parse AI validation response: %v, response: %s\n", err, response)
+		log.Printf("Warning: Failed to parse AI validation response: %v, response: %s\n", err, response)
 		return false, nil
 	}
 
@@ -229,7 +230,7 @@ func isLikelyAnswer(answer, question string) bool {
 
 	// 十分に長い回答（15文字超）は内容があるとみなし有効
 	if len([]rune(a)) > 15 {
-		fmt.Printf("[Validation] Fallback: Long answer accepted as valid (%d chars)\n", len([]rune(a)))
+		log.Printf("[Validation] Fallback: Long answer accepted as valid (%d chars)\n", len([]rune(a)))
 		return true
 	}
 
@@ -238,7 +239,7 @@ func isLikelyAnswer(answer, question string) bool {
 
 	// 記号のみの回答（A, B, 1, 2など）は有効
 	if len([]rune(a)) <= 3 && strings.ContainsAny(a, "ABCDEabcde12345①②③④⑤") {
-		fmt.Printf("[Validation] Fallback: Valid choice symbol: %s\n", a)
+		log.Printf("[Validation] Fallback: Valid choice symbol: %s\n", a)
 		return true
 	}
 
@@ -253,7 +254,7 @@ func isLikelyAnswer(answer, question string) bool {
 	}
 	for _, pattern := range noAnswerPatterns {
 		if answerLowerStripped == pattern {
-			fmt.Printf("[Validation] Fallback: No-answer pattern detected: %s\n", a)
+			log.Printf("[Validation] Fallback: No-answer pattern detected: %s\n", a)
 			return false
 		}
 	}
@@ -270,25 +271,25 @@ func isLikelyAnswer(answer, question string) bool {
 	}
 	for _, valid := range shortValidAnswers {
 		if answerLowerStripped == valid {
-			fmt.Printf("[Validation] Fallback: Valid short answer: %s\n", a)
+			log.Printf("[Validation] Fallback: Valid short answer: %s\n", a)
 			return true
 		}
 	}
 
 	// 2文字未満は無効（選択肢記号・短答キーワードは上で判定済み）
 	if len([]rune(a)) < 2 {
-		fmt.Printf("[Validation] Fallback: Too short (< 2 chars): %s\n", a)
+		log.Printf("[Validation] Fallback: Too short (< 2 chars): %s\n", a)
 		return false
 	}
 
 	// 挨拶・感謝などの雑談パターンは無効
 	if containsGreeting(a) {
-		fmt.Printf("[Validation] Fallback: Contains greeting: %s\n", a)
+		log.Printf("[Validation] Fallback: Contains greeting: %s\n", a)
 		return false
 	}
 
 	if !isJobSelection && looksLikeKeywordList(a) {
-		fmt.Printf("[Validation] Fallback: Keyword-only list detected: %s\n", a)
+		log.Printf("[Validation] Fallback: Keyword-only list detected: %s\n", a)
 		return false
 	}
 
@@ -312,14 +313,14 @@ func isLikelyAnswer(answer, question string) bool {
 	// 質問文に選択肢や具体例が含まれている場合、回答側に数字や選択肢文字があれば回答とみなす
 	if strings.Contains(question, "A)") || strings.Contains(question, "A：") || strings.Contains(question, "A、") {
 		if strings.ContainsAny(a, "ABCDabcd1-5①②③④") {
-			fmt.Printf("[Validation] Fallback: Contains choice character: %s\n", a)
+			log.Printf("[Validation] Fallback: Contains choice character: %s\n", a)
 			return true
 		}
 	}
 
 	// IT関連キーワードを含む、または5文字以上なら有効（緩和）
 	if hasITKeyword || len([]rune(a)) >= 5 {
-		fmt.Printf("[Validation] Fallback: Valid answer (IT keyword or >= 5 chars): %s\n", a)
+		log.Printf("[Validation] Fallback: Valid answer (IT keyword or >= 5 chars): %s\n", a)
 		return true
 	}
 
@@ -335,12 +336,12 @@ func isLikelyAnswer(answer, question string) bool {
 
 	// 共通キーワードが1つ以上あれば回答とみなす（緩和）
 	if common >= 1 {
-		fmt.Printf("[Validation] Fallback: Common keywords >= 1: %s\n", a)
+		log.Printf("[Validation] Fallback: Common keywords >= 1: %s\n", a)
 		return true
 	}
 
 	// デフォルトは無効（厳格に判断）
-	fmt.Printf("[Validation] Fallback: Default INVALID for: %s\n", a)
+	log.Printf("[Validation] Fallback: Default INVALID for: %s\n", a)
 	return false
 }
 

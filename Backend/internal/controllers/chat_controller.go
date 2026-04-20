@@ -225,20 +225,20 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 	}
 
 	// 既存のマッチング結果を取得（事前計算済みを想定）
-	fmt.Printf("[GetRecommendations] Fetching pre-calculated matches for user %d, session %s\n", userID, sessionID)
+	log.Printf("[GetRecommendations] Fetching pre-calculated matches for user %d, session %s\n", userID, sessionID)
 	matches, err := c.matchingService.GetTopMatches(r.Context(), uint(userID), sessionID, limit)
-	fmt.Printf("[GetRecommendations] Retrieved %d matches in fast mode\n", len(matches))
+	log.Printf("[GetRecommendations] Retrieved %d matches in fast mode\n", len(matches))
 
 	if err != nil || len(matches) == 0 {
-		fmt.Printf("[GetRecommendations] No matching results found, returning empty result\n")
+		log.Printf("[GetRecommendations] No matching results found, returning empty result\n")
 		diagnostics, diagErr := c.matchingService.GetDiagnostics(uint(userID), sessionID)
 		if diagErr != nil {
-			fmt.Printf("[GetRecommendations] Diagnostics error: %v\n", diagErr)
+			log.Printf("[GetRecommendations] Diagnostics error: %v\n", diagErr)
 		}
 
 		userScores, scoreErr := c.chatService.GetUserScores(uint(userID), sessionID)
 		if scoreErr != nil {
-			fmt.Printf("[GetRecommendations] Failed to load user scores for provisional status: %v\n", scoreErr)
+			log.Printf("[GetRecommendations] Failed to load user scores for provisional status: %v\n", scoreErr)
 			userScores = []entity.UserWeightScore{}
 		}
 
@@ -311,7 +311,7 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 
 	userScores, err := c.chatService.GetUserScores(uint(userID), sessionID)
 	if err != nil {
-		fmt.Printf("[GetRecommendations] Failed to load user scores: %v\n", err)
+		log.Printf("[GetRecommendations] Failed to load user scores: %v\n", err)
 		userScores = []entity.UserWeightScore{}
 	}
 	evaluatedCategories := countEvaluatedCategories(userScores)
@@ -582,7 +582,7 @@ func (c *ChatController) SendReport(w http.ResponseWriter, r *http.Request) {
 
 	// メール送信
 	if err := c.emailService.SendAnalysisReport(user, summary, companies, req.SessionID); err != nil {
-		fmt.Printf("[SendReport] Failed to send email: %v\n", err)
+		log.Printf("[SendReport] Failed to send email: %v\n", err)
 		http.Error(w, "Failed to send email", http.StatusInternalServerError)
 		return
 	}
