@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -97,7 +98,7 @@ func (s *QuestionGeneratorService) GenerateAndSaveQuestions(ctx context.Context,
 		if err != nil {
 			// 重複エラーの場合はスキップ
 			if strings.Contains(err.Error(), "既に存在") {
-				fmt.Printf("Question already exists, skipping: %s\n", gq.Question)
+				log.Printf("Question already exists, skipping: %s\n", gq.Question)
 				continue
 			}
 			return nil, fmt.Errorf("failed to save question: %w", err)

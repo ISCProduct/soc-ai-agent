@@ -6,6 +6,7 @@ import (
 	"Backend/internal/repositories"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 )
 
@@ -65,7 +66,7 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromInterviewReport(
 		for _, category := range mapping.categories {
 			if err := s.applyMovingAverage(userID, chatSessionID, category, normalized); err != nil {
 				// 更新失敗は警告ログのみ（処理継続）
-				fmt.Printf("[CrossFeature] interview→score update failed (cat=%s): %v\n", category, err)
+				log.Printf("[CrossFeature] interview→score update failed (cat=%s): %v\n", category, err)
 			}
 		}
 	}
@@ -101,7 +102,7 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromResumeReview(
 		bonus := int(math.Round(float64(score-70) / 3)) // 最大 +10
 		for _, category := range []string{"細部志向", "コミュニケーション力", "技術志向"} {
 			if err := s.applyMovingAverage(userID, chatSessionID, category, score+bonus); err != nil {
-				fmt.Printf("[CrossFeature] resume→score bonus failed (cat=%s): %v\n", category, err)
+				log.Printf("[CrossFeature] resume→score bonus failed (cat=%s): %v\n", category, err)
 			}
 		}
 	}
@@ -111,7 +112,7 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromResumeReview(
 		penalty := clampInt(score-10*criticalCount, 0, 100)
 		for _, category := range []string{"細部志向", "コミュニケーション力"} {
 			if err := s.applyMovingAverage(userID, chatSessionID, category, penalty); err != nil {
-				fmt.Printf("[CrossFeature] resume→score penalty failed (cat=%s): %v\n", category, err)
+				log.Printf("[CrossFeature] resume→score penalty failed (cat=%s): %v\n", category, err)
 			}
 		}
 	}
@@ -238,11 +239,11 @@ func (s *CrossFeatureIntegrationService) BuildResumeContextFromScores(
 
 // UserIntegratedProfile ユーザーの統合プロファイル
 type UserIntegratedProfile struct {
-	UserID        uint                    `json:"user_id"`
-	ChatSessionID string                  `json:"chat_session_id"`
+	UserID        uint                     `json:"user_id"`
+	ChatSessionID string                   `json:"chat_session_id"`
 	WeightScores  []entity.UserWeightScore `json:"weight_scores"`
 	TopCategories []entity.UserWeightScore `json:"top_categories"`
-	SourceSummary ProfileSourceSummary    `json:"source_summary"`
+	SourceSummary ProfileSourceSummary     `json:"source_summary"`
 }
 
 // ProfileSourceSummary 各機能からのデータ取得状況

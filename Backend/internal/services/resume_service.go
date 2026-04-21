@@ -190,7 +190,7 @@ func (s *ResumeService) ReviewDocument(documentID uint, companyName string, jobT
 	// スコア更新（クロス機能連携）
 	if s.crossFeature != nil {
 		if err := s.crossFeature.UpdateScoresFromResumeReview(doc.UserID, doc.SessionID, review, items); err != nil {
-			fmt.Printf("[Resume] crossFeature score update failed: %v\n", err)
+			log.Printf("[Resume] crossFeature score update failed: %v\n", err)
 		}
 	}
 

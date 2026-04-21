@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"time"
 
@@ -16,11 +17,11 @@ func SeedLargeCompanyData(db *gorm.DB) error {
 
 	if count >= 40000 {
 		// すでに4万社以上ある場合はスキップ
-		fmt.Printf("Company data already exists (%d records), skipping large seed\n", count)
+		slog.Info("Company data already exists, skipping large seed", "records", count)
 		return nil
 	}
 
-	fmt.Println("Starting to seed 40,000 companies with relationships...")
+	slog.Info("Starting to seed companies with relationships", "target_companies", 40000)
 	startTime := time.Now()
 
 	// ランダムシードを初期化
@@ -122,11 +123,11 @@ func SeedLargeCompanyData(db *gorm.DB) error {
 		}
 
 		if (i/batchSize)%10 == 0 {
-			fmt.Printf("Inserted %d / %d companies...\n", end, totalCompanies)
+			slog.Info("Inserted companies", "inserted", end, "total", totalCompanies)
 		}
 	}
 
-	fmt.Printf("Successfully inserted %d companies in %v\n", totalCompanies, time.Since(startTime))
+	slog.Info("Successfully inserted companies", "count", totalCompanies, "duration", time.Since(startTime))
 	return nil
 }
 
@@ -136,11 +137,11 @@ func SeedLargeCompanyMarketInfo(db *gorm.DB) error {
 	db.Model(&CompanyMarketInfo{}).Count(&count)
 
 	if count >= 100 {
-		fmt.Printf("Market info already exists (%d records), skipping\n", count)
+		slog.Info("Market info already exists, skipping", "records", count)
 		return nil
 	}
 
-	fmt.Println("Seeding market info for companies...")
+	slog.Info("Seeding market info for companies")
 	startTime := time.Now()
 
 	marketTypes := []string{"prime", "standard", "growth", "unlisted"}
@@ -194,11 +195,11 @@ func SeedLargeCompanyMarketInfo(db *gorm.DB) error {
 		}
 
 		if (i/batchSize)%10 == 0 {
-			fmt.Printf("Inserted %d / %d market info...\n", end, len(companyIDs))
+			slog.Info("Inserted market info", "inserted", end, "total", len(companyIDs))
 		}
 	}
 
-	fmt.Printf("Successfully inserted market info in %v\n", time.Since(startTime))
+	slog.Info("Successfully inserted market info", "duration", time.Since(startTime))
 	return nil
 }
 
@@ -208,11 +209,11 @@ func SeedLargeCompanyRelations(db *gorm.DB) error {
 	db.Model(&CompanyRelation{}).Count(&count)
 
 	if count >= 50000 {
-		fmt.Printf("Relations already exist (%d records), skipping\n", count)
+		slog.Info("Relations already exist, skipping", "records", count)
 		return nil
 	}
 
-	fmt.Println("Seeding company relations (capital & business) with enhanced group structures...")
+	slog.Info("Seeding company relations with enhanced group structures")
 	startTime := time.Now()
 
 	// 全企業IDを取得
@@ -223,7 +224,7 @@ func SeedLargeCompanyRelations(db *gorm.DB) error {
 		return fmt.Errorf("no companies found")
 	}
 
-	fmt.Printf("Generating relations for %d companies...\n", len(companyIDs))
+	slog.Info("Generating relations", "company_count", len(companyIDs))
 
 	// === 企業グループの生成 ===
 	// 約200のグループを作成（各グループ5-20社）
@@ -242,7 +243,7 @@ func SeedLargeCompanyRelations(db *gorm.DB) error {
 	relations := make([]CompanyRelation, 0, numCapitalRelations+numBusinessRelations)
 
 	// === 企業グループの資本関係生成 ===
-	fmt.Println("Generating corporate groups with capital relations...")
+	slog.Info("Generating corporate groups with capital relations")
 
 	usedCompanies := make(map[uint]bool)
 	groups := make([][]uint, 0, numGroups)
@@ -299,14 +300,14 @@ func SeedLargeCompanyRelations(db *gorm.DB) error {
 		groups = append(groups, group)
 
 		if g%20 == 0 {
-			fmt.Printf("Generated %d corporate groups...\n", g)
+			slog.Info("Generated corporate groups", "count", g)
 		}
 	}
 
-	fmt.Printf("Generated %d corporate groups with total %d capital relations\n", len(groups), len(relations))
+	slog.Info("Generated corporate groups and capital relations", "groups", len(groups), "capital_relations", len(relations))
 
 	// === ビジネス関係の生成（多様な関係タイプ） ===
-	fmt.Println("Generating business relations...")
+	slog.Info("Generating business relations")
 
 	businessRelationTypes := []struct {
 		Type        string
@@ -332,7 +333,7 @@ func SeedLargeCompanyRelations(db *gorm.DB) error {
 	businessRelationsCount := 0
 
 	// 1. グループ内のビジネス関係（各グループ内で5-10件）
-	fmt.Println("Generating intra-group business relations...")
+	slog.Info("Generating intra-group business relations")
 	for _, group := range groups {
 		if len(group) < 2 {
 			continue
@@ -365,10 +366,10 @@ func SeedLargeCompanyRelations(db *gorm.DB) error {
 		}
 	}
 
-	fmt.Printf("Generated %d intra-group business relations\n", businessRelationsCount)
+	slog.Info("Generated intra-group business relations", "count", businessRelationsCount)
 
 	// 2. グループ間のビジネス関係（各グループが5-15社と取引）
-	fmt.Println("Generating inter-group business relations...")
+	slog.Info("Generating inter-group business relations")
 	interGroupCount := 0
 	for _, group := range groups {
 		if len(group) == 0 {
@@ -418,11 +419,11 @@ func SeedLargeCompanyRelations(db *gorm.DB) error {
 		}
 	}
 
-	fmt.Printf("Generated %d inter-group business relations\n", interGroupCount)
+	slog.Info("Generated inter-group business relations", "count", interGroupCount)
 	businessRelationsCount += interGroupCount
 
 	// 3. ランダムなビジネス関係（エコシステム）
-	fmt.Println("Generating random business ecosystem...")
+	slog.Info("Generating random business ecosystem")
 	randomCount := 0
 	targetRandomRelations := 25000
 
@@ -470,18 +471,18 @@ func SeedLargeCompanyRelations(db *gorm.DB) error {
 		randomCount++
 
 		if randomCount%5000 == 0 {
-			fmt.Printf("Generated %d random business relations...\n", randomCount)
+			slog.Info("Generated random business relations", "count", randomCount)
 		}
 	}
 
 	businessRelationsCount += randomCount
-	fmt.Printf("Generated %d total business relations\n", businessRelationsCount)
-
-	fmt.Printf("\n=== Summary ===\n")
-	fmt.Printf("Total relations generated: %d\n", len(relations))
-	fmt.Printf("  - Capital relations: %d\n", len(relations)-businessRelationsCount)
-	fmt.Printf("  - Business relations: %d\n", businessRelationsCount)
-	fmt.Printf("  - Corporate groups: %d\n", len(groups))
+	slog.Info("Generated total business relations", "count", businessRelationsCount)
+	slog.Info("Relations generation summary",
+		"total_relations", len(relations),
+		"capital_relations", len(relations)-businessRelationsCount,
+		"business_relations", businessRelationsCount,
+		"corporate_groups", len(groups),
+	)
 
 	// バッチ挿入
 	batchSize := 1000
@@ -496,11 +497,11 @@ func SeedLargeCompanyRelations(db *gorm.DB) error {
 		}
 
 		if (i/batchSize)%5 == 0 {
-			fmt.Printf("Inserted %d / %d relations...\n", end, len(relations))
+			slog.Info("Inserted relations", "inserted", end, "total", len(relations))
 		}
 	}
 
-	fmt.Printf("Successfully inserted %d relations in %v\n", len(relations), time.Since(startTime))
+	slog.Info("Successfully inserted relations", "count", len(relations), "duration", time.Since(startTime))
 	return nil
 }
 
@@ -510,11 +511,11 @@ func SeedLargeCompanyProfiles(db *gorm.DB) error {
 	db.Model(&CompanyWeightProfile{}).Count(&count)
 
 	if count >= 40000 {
-		fmt.Printf("Profiles already exist (%d records), skipping\n", count)
+		slog.Info("Profiles already exist, skipping", "records", count)
 		return nil
 	}
 
-	fmt.Println("Seeding company weight profiles for all companies...")
+	slog.Info("Seeding company weight profiles for all companies")
 	startTime := time.Now()
 
 	// 全企業IDを取得
@@ -558,11 +559,11 @@ func SeedLargeCompanyProfiles(db *gorm.DB) error {
 		}
 
 		if (i/batchSize)%10 == 0 {
-			fmt.Printf("Inserted %d / %d profiles...\n", end, len(companyIDs))
+			slog.Info("Inserted company profiles", "inserted", end, "total", len(companyIDs))
 		}
 	}
 
-	fmt.Printf("Successfully inserted %d profiles in %v\n", len(companyIDs), time.Since(startTime))
+	slog.Info("Successfully inserted company profiles", "count", len(companyIDs), "duration", time.Since(startTime))
 	return nil
 }
 

@@ -6,12 +6,13 @@ import (
 	"Backend/internal/services/prompts"
 	"context"
 	"fmt"
+	"log"
 	"strings"
 )
 
 // handleSessionStart セッション開始時の初回質問を生成
 func (s *ChatService) handleSessionStart(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
-	fmt.Printf("Starting new session: %s\n", req.SessionID)
+	log.Printf("Starting new session: %s\n", req.SessionID)
 
 	// ユーザー情報を取得
 	user, err := s.userRepo.GetUserByID(req.UserID)
@@ -317,7 +318,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 			break // 重複なし、使用可能
 		}
 
-		fmt.Printf("Retry %d: Duplicate detected (%s)\n", attempt+1, duplicateReason)
+		log.Printf("Retry %d: Duplicate detected (%s)\n", attempt+1, duplicateReason)
 
 		// 再生成プロンプト
 		retryPrompt := fmt.Sprintf(`以下の質問は既に聞いているか類似しています：
@@ -350,14 +351,14 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 
 		// 最後の試行で重複してもそのまま使用（無限ループ防止）
 		if attempt == maxRetries-1 {
-			fmt.Printf("Max retries reached, using question anyway: %s\n", questionText)
+			log.Printf("Max retries reached, using question anyway: %s\n", questionText)
 		}
 	}
 
 	// AI生成質問をデータベースに保存（空文字は保存しない）
 	questionText = strings.TrimSpace(questionText)
 	if questionText == "" {
-		fmt.Printf("Warning: AI generated empty question even after fallback, not saving. user=%d session=%s\n", userID, sessionID)
+		log.Printf("Warning: AI generated empty question even after fallback, not saving. user=%d session=%s\n", userID, sessionID)
 		return "", 0, fmt.Errorf("ai returned empty question")
 	}
 
@@ -409,7 +410,7 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 	// 現在のスコアを取得して、まだ評価が不十分な領域を特定
 	scores, err := s.userWeightScoreRepo.FindByUserAndSession(userID, sessionID)
 	if err != nil {
-		fmt.Printf("Warning: failed to get scores for question generation: %v\n", err)
+		log.Printf("Warning: failed to get scores for question generation: %v\n", err)
 	}
 
 	// スコア分布を分析

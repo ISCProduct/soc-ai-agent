@@ -5,7 +5,7 @@ import (
 	"Backend/internal/models"
 	"context"
 	"errors"
-	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -44,7 +44,7 @@ func (s *ChatService) aiCallWithRetries(ctx context.Context, prompt string) (str
 			err = errors.New("empty response")
 		}
 		// log and wait before retry
-		fmt.Printf("Warning: AI call failed or empty response (attempt %d): %v\n", i+1, err)
+		log.Printf("Warning: AI call failed or empty response (attempt %d): %v\n", i+1, err)
 		if i == len(backoffs)-1 {
 			break
 		}

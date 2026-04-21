@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 
 	"golang.org/x/oauth2"
@@ -252,7 +253,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 		accessToken := token.AccessToken
 		if err := s.githubService.StoreAccessToken(user.ID, userInfo.Login, accessToken); err != nil {
 			// トークン保存失敗はログのみ（ログイン自体は成功扱い）
-			fmt.Printf("[OAuthService] failed to store github access token for user %d: %v\n", user.ID, err)
+			log.Printf("[OAuthService] failed to store github access token for user %d: %v\n", user.ID, err)
 		} else {
 			s.githubService.TriggerAsyncSync(user.ID, false)
 		}
