@@ -291,7 +291,8 @@ type AuthResponse struct {
 	CertificationsInProgress string `json:"certifications_in_progress,omitempty"`
 	AvatarURL                string `json:"avatar_url,omitempty"`
 	OAuthProvider            string `json:"oauth_provider,omitempty"` // OAuth連携プロバイダ
-	Token                    string `json:"token,omitempty"`          // 将来的なトークン認証用
+	Token                    string `json:"token,omitempty"`           // 管理者トークン（管理者ユーザーのみ）
+	UserToken                string `json:"user_token,omitempty"`      // ユーザー認証トークン（全ユーザー）
 	EmailVerified            bool   `json:"email_verified"`
 	RequiresReVerification   bool   `json:"requires_re_verification,omitempty"`
 }
@@ -397,14 +398,16 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 		IsGuest:                  false,
 		TargetLevel:              req.TargetLevel,
 		SchoolName:               req.SchoolName,
-		IsAdmin:                  isAdminIdentity(req.Email, req.Name),
+		IsAdmin:                  isAdminIdentity(req.Email),
 		CertificationsAcquired:   req.CertificationsAcquired,
 		CertificationsInProgress: req.CertificationsInProgress,
 	}
 
 	// メール認証トークン生成
 	tokenBytes := make([]byte, 24)
-	rand.Read(tokenBytes)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return nil, fmt.Errorf("failed to generate verification token: %w", err)
+	}
 	user.EmailVerificationToken = base64.URLEncoding.EncodeToString(tokenBytes)
 
 	if err := s.userRepo.CreateUser(user); err != nil {
@@ -469,7 +472,9 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 		// 10日以上ログインなし → 再認証
 		if user.LastLoginAt != nil && time.Since(*user.LastLoginAt) > config.ReVerificationInactiveDuration {
 			tokenBytes := make([]byte, 24)
-			rand.Read(tokenBytes)
+			if _, err := rand.Read(tokenBytes); err != nil {
+				return nil, fmt.Errorf("failed to generate re-verification token: %w", err)
+			}
 			user.EmailVerificationToken = base64.URLEncoding.EncodeToString(tokenBytes)
 			user.EmailVerifiedAt = nil
 			s.userRepo.UpdateUser(user)
@@ -499,12 +504,14 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 		EmailVerified:            emailVerified,
 		RequiresReVerification:   requiresReVerification,
 	}
+	adminSecret := os.Getenv("ADMIN_SECRET")
 	// 管理者ユーザーにはHMACトークンを付与する
-	if user.IsAdmin {
-		adminSecret := os.Getenv("ADMIN_SECRET")
-		if adminSecret != "" {
-			resp.Token = middleware.GenerateAdminToken(user.ID, user.Email, adminSecret)
-		}
+	if user.IsAdmin && adminSecret != "" {
+		resp.Token = middleware.GenerateAdminToken(user.ID, user.Email, adminSecret)
+	}
+	// 全ユーザーにユーザー認証トークンを付与する
+	if adminSecret != "" {
+		resp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, adminSecret)
 	}
 	return resp, nil
 }

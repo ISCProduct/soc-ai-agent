@@ -111,7 +111,10 @@ export default function ProfilePage() {
     if (!user) return
     setDeleting(true)
     try {
-      const res = await fetch(`/api/auth/account?user_id=${user.user_id}`, { method: 'DELETE' })
+      const res = await fetch(`/api/auth/account?user_id=${user.user_id}`, {
+        method: 'DELETE',
+        headers: authService.getUserFetchHeaders(),
+      })
       if (!res.ok) {
         const err = await res.text()
         setError(err || 'アカウント削除に失敗しました')

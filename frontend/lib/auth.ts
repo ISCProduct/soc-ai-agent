@@ -1,6 +1,7 @@
 import { BACKEND_URL } from './backend-url'
 const AUTH_USER_KEY = 'user'
 const AUTH_TOKEN_KEY = 'token'
+const AUTH_USER_TOKEN_KEY = 'user_token'
 
 function fixMojibake(s: string): string {
   // Detect common mojibake patterns (Ã, å followed by other Latin-1 chars)
@@ -74,6 +75,7 @@ export interface AuthResponse {
   oauth_provider?: string
   avatar_url?: string
   token?: string
+  user_token?: string
 }
 
 export const authService = {
@@ -153,7 +155,9 @@ export const authService = {
   },
 
   async getUser(userId: number): Promise<User> {
-    const res = await fetch(`${BACKEND_URL}/api/auth/user?user_id=${userId}`)
+    const res = await fetch(`${BACKEND_URL}/api/auth/user?user_id=${userId}`, {
+      headers: this.getUserFetchHeaders(),
+    })
     if (!res.ok) throw new Error('Failed to get user')
     return res.json()
   },
@@ -168,7 +172,7 @@ export const authService = {
   ): Promise<AuthResponse> {
     const res = await fetch(`${BACKEND_URL}/api/auth/profile`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...this.getUserFetchHeaders() },
       body: JSON.stringify({
         user_id: userId,
         name,
@@ -240,9 +244,13 @@ export const authService = {
     if (authResponse.token) {
       session?.setItem(AUTH_TOKEN_KEY, authResponse.token)
     }
+    if (authResponse.user_token) {
+      session?.setItem(AUTH_USER_TOKEN_KEY, authResponse.user_token)
+    }
     // 既存localStorageからの段階移行: 保存後は残存値を削除
     getLocalStorage()?.removeItem(AUTH_USER_KEY)
     getLocalStorage()?.removeItem(AUTH_TOKEN_KEY)
+    getLocalStorage()?.removeItem(AUTH_USER_TOKEN_KEY)
   },
 
   getStoredUser(): User | null {
@@ -261,6 +269,20 @@ export const authService = {
     return migrateAuthValue(AUTH_TOKEN_KEY)
   },
 
+  getStoredUserToken(): string | null {
+    return migrateAuthValue(AUTH_USER_TOKEN_KEY)
+  },
+
+  // ユーザーAPIリクエスト用のヘッダーを返す（X-User-ID + X-User-Token）
+  getUserFetchHeaders(): Record<string, string> {
+    const user = this.getStoredUser()
+    const token = this.getStoredUserToken()
+    return {
+      'X-User-ID': String(user?.user_id ?? ''),
+      'X-User-Token': token || '',
+    }
+  },
+
   // 管理者APIリクエスト用のヘッダーを返す（X-Admin-Email + X-Admin-Token）
   getAdminFetchHeaders(): Record<string, string> {
     const user = this.getStoredUser()
@@ -275,8 +297,10 @@ export const authService = {
     // ユーザー情報とトークンを削除（sessionStorage運用 + legacy localStorage清掃）
     getSessionStorage()?.removeItem(AUTH_USER_KEY)
     getSessionStorage()?.removeItem(AUTH_TOKEN_KEY)
+    getSessionStorage()?.removeItem(AUTH_USER_TOKEN_KEY)
     getLocalStorage()?.removeItem(AUTH_USER_KEY)
     getLocalStorage()?.removeItem(AUTH_TOKEN_KEY)
+    getLocalStorage()?.removeItem(AUTH_USER_TOKEN_KEY)
     
     // チャットキャッシュを削除
     const sessionId = localStorage.getItem('chat_session_id')

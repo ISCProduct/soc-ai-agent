@@ -37,13 +37,15 @@ func verifyAdminRequest(w http.ResponseWriter, r *http.Request, userRepo *reposi
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return false
 	}
-	// ADMIN_SECRET が設定されている場合はトークンを検証する
-	if adminSecret != "" {
-		token := r.Header.Get("X-Admin-Token")
-		if token == "" || !VerifyAdminToken(token, user.ID, user.Email, adminSecret) {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return false
-		}
+	// ADMIN_SECRET 未設定の場合はフェイルクローズ（セキュリティ設定漏れを防ぐ）
+	if adminSecret == "" {
+		http.Error(w, "Service Unavailable: admin authentication not configured", http.StatusServiceUnavailable)
+		return false
+	}
+	token := r.Header.Get("X-Admin-Token")
+	if token == "" || !VerifyAdminToken(token, user.ID, user.Email, adminSecret) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return false
 	}
 	return true
 }
