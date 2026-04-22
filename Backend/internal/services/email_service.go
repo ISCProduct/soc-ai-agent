@@ -245,6 +245,7 @@ func (s *EmailService) SendAnalysisReport(user *entity.User, summary *AnalysisSu
 // SendVerificationEmail メール認証用のメールを送信
 func (s *EmailService) SendVerificationEmail(user *entity.User, token, appURL string) error {
 	verifyURL := appURL + "/verify-email?token=" + token
+	safeName := template.HTMLEscapeString(user.Name)
 	body := fmt.Sprintf(`<!DOCTYPE html>
 <html lang="ja"><head><meta charset="UTF-8"><title>メール認証</title></head>
 <body style="font-family:sans-serif;background:#f5f5f5;padding:20px;">
@@ -255,7 +256,7 @@ func (s *EmailService) SendVerificationEmail(user *entity.User, token, appURL st
 <a href="%s" style="display:inline-block;background:#1976D2;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:16px 0;">メールアドレスを確認する</a>
 <p style="color:#888;font-size:12px;">このリンクは24時間有効です。身に覚えのない場合は無視してください。</p>
 </div>
-</body></html>`, user.Name, verifyURL)
+</body></html>`, safeName, verifyURL)
 
 	if s.host == "" {
 		log.Printf("[EmailService] Verification email for %s: %s\n", user.Email, verifyURL)
@@ -274,6 +275,7 @@ func (s *EmailService) SendVerificationEmail(user *entity.User, token, appURL st
 // SendReVerificationEmail 再認証メールを送信
 func (s *EmailService) SendReVerificationEmail(user *entity.User, token, appURL string) error {
 	verifyURL := appURL + "/verify-email?token=" + token
+	safeName := template.HTMLEscapeString(user.Name)
 	body := fmt.Sprintf(`<!DOCTYPE html>
 <html lang="ja"><head><meta charset="UTF-8"><title>再認証</title></head>
 <body style="font-family:sans-serif;background:#f5f5f5;padding:20px;">
@@ -284,7 +286,7 @@ func (s *EmailService) SendReVerificationEmail(user *entity.User, token, appURL 
 <a href="%s" style="display:inline-block;background:#ec5b13;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:16px 0;">再認証する</a>
 <p style="color:#888;font-size:12px;">このリンクは24時間有効です。</p>
 </div>
-</body></html>`, user.Name, verifyURL)
+</body></html>`, safeName, verifyURL)
 
 	if s.host == "" {
 		log.Printf("[EmailService] Re-verification email for %s: %s\n", user.Email, verifyURL)

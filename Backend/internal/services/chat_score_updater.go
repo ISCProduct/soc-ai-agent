@@ -158,20 +158,20 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 	existingScore, err := s.userWeightScoreRepo.FindByUserSessionAndCategory(userID, sessionID, category)
 
 	if err != nil || existingScore == nil {
-		// 新規作成
-		if err := s.userWeightScoreRepo.UpdateScore(userID, sessionID, category, score); err != nil {
+		// 新規作成: 絶対値でセット
+		if err := s.userWeightScoreRepo.SetScore(userID, sessionID, category, score); err != nil {
 			return fmt.Errorf("failed to create score: %w", err)
 		}
 		log.Printf("[Choice Answer] Created new score: %s = %d\n", category, score)
 	} else {
-		// 移動平均で更新（直近回答の影響を反映）
+		// 移動平均で更新（直近回答の影響を反映）: 差分を加算
 		newScore := int(math.Round(float64(existingScore.Score)*0.7 + float64(score)*0.3))
 		delta := newScore - existingScore.Score
 		if delta == 0 {
 			log.Printf("[Choice Answer] Score unchanged: %s = %d\n", category, existingScore.Score)
 			return nil
 		}
-		if err := s.userWeightScoreRepo.UpdateScore(userID, sessionID, category, delta); err != nil {
+		if err := s.userWeightScoreRepo.AddScore(userID, sessionID, category, delta); err != nil {
 			return fmt.Errorf("failed to update score: %w", err)
 		}
 		log.Printf("[Choice Answer] Updated score: %s = %d (average)\n", category, newScore)

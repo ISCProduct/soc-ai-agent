@@ -260,7 +260,10 @@ func (s *ResumeService) OpenAnnotatedFile(documentID uint) (*AnnotatedFile, erro
 	if resp.ContentType != nil && strings.TrimSpace(*resp.ContentType) != "" {
 		contentType = *resp.ContentType
 	}
-	reader := newSeekableReader(resp.Body)
+	reader, err := newSeekableReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load resume file: %w", err)
+	}
 	return &AnnotatedFile{
 		Reader:      reader,
 		Size:        derefInt64(resp.ContentLength),
@@ -522,13 +525,26 @@ type seekableReader struct {
 	r    *bytes.Reader
 }
 
-func newSeekableReader(src io.ReadCloser) *seekableReader {
+// maxResumeBytes はメモリ展開を許可する最大ファイルサイズ（100 MB）
+const maxResumeBytes = 100 * 1024 * 1024
+
+// newSeekableReader は src を全量メモリに読み込んで Seek 可能なリーダーを返す。
+// PDF解析ライブラリが io.ReadSeeker を要求するため全量読み込みが必要だが、
+// OOM を防ぐため maxResumeBytes を超えるファイルはエラーを返す。
+func newSeekableReader(src io.ReadCloser) (*seekableReader, error) {
 	defer src.Close()
-	data, _ := io.ReadAll(src)
+	lr := io.LimitReader(src, maxResumeBytes+1)
+	data, err := io.ReadAll(lr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+	if int64(len(data)) > maxResumeBytes {
+		return nil, fmt.Errorf("file size exceeds maximum allowed size (%d MB)", maxResumeBytes/1024/1024)
+	}
 	return &seekableReader{
 		data: data,
 		r:    bytes.NewReader(data),
-	}
+	}, nil
 }
 
 func (s *seekableReader) Read(p []byte) (int, error) {

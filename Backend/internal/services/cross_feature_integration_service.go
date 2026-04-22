@@ -289,8 +289,8 @@ func (s *CrossFeatureIntegrationService) applyMovingAverage(
 ) error {
 	existing, err := s.weightScoreRepo.FindByUserSessionAndCategory(userID, sessionID, category)
 	if err != nil || existing == nil {
-		// 新規: そのまま設定（incremental = newValue）
-		return s.weightScoreRepo.UpdateScore(userID, sessionID, category, newValue)
+		// 新規: 絶対値でセット
+		return s.weightScoreRepo.SetScore(userID, sessionID, category, newValue)
 	}
 
 	// 移動平均: new = existing * 0.7 + newValue * 0.3
@@ -299,7 +299,7 @@ func (s *CrossFeatureIntegrationService) applyMovingAverage(
 	if delta == 0 {
 		return nil
 	}
-	return s.weightScoreRepo.UpdateScore(userID, sessionID, category, delta)
+	return s.weightScoreRepo.AddScore(userID, sessionID, category, delta)
 }
 
 // extractTopBottom スコア上位3件と下位3件を返す

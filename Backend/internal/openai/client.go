@@ -44,7 +44,7 @@ func NewFromEnv(optionalModel string) (*Client, error) {
 		model = os.Getenv("OPENAI_MODEL")
 	}
 	if model == "" {
-		model = "gpt-5.2"
+		model = "gpt-4o-mini"
 	}
 
 	cli := openai.NewClient(key)
@@ -250,7 +250,7 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 		model = modelOverride[0]
 	}
 	if strings.TrimSpace(model) == "" {
-		model = "gpt-5.2"
+		model = "gpt-4o-mini"
 	}
 
 	var lastErr error
@@ -343,7 +343,7 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 		model = modelOverride[0]
 	}
 	if strings.TrimSpace(model) == "" {
-		model = "gpt-5.2"
+		model = "gpt-4o-mini"
 	}
 
 	var lastErr error
@@ -419,7 +419,7 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 		model = modelOverride[0]
 	}
 	if strings.TrimSpace(model) == "" {
-		model = "gpt-5.2"
+		model = "gpt-4o-mini"
 	}
 
 	var lastErr error

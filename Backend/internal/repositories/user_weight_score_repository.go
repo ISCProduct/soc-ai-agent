@@ -16,27 +16,28 @@ func NewUserWeightScoreRepository(db *gorm.DB) *UserWeightScoreRepository {
 	return &UserWeightScoreRepository{db: db}
 }
 
-// UpdateScore スコアを更新または作成
-func (r *UserWeightScoreRepository) UpdateScore(userID uint, sessionID, category string, scoreIncrement int) error {
+// SetScore スコアを絶対値で新規作成する。
+// 呼び出し前に対象レコードが存在しないことを確認すること。
+func (r *UserWeightScoreRepository) SetScore(userID uint, sessionID, category string, absoluteScore int) error {
+	score := models.UserWeightScore{
+		UserID:         userID,
+		SessionID:      sessionID,
+		WeightCategory: category,
+		Score:          absoluteScore,
+	}
+	return r.db.Create(&score).Error
+}
+
+// AddScore 既存スコアに差分を加算する。
+// レコードが存在しない場合はエラーを返す。
+func (r *UserWeightScoreRepository) AddScore(userID uint, sessionID, category string, delta int) error {
 	var score models.UserWeightScore
 	err := r.db.Where("user_id = ? AND session_id = ? AND weight_category = ?",
 		userID, sessionID, category).First(&score).Error
-
-	if err == gorm.ErrRecordNotFound {
-		// 新規作成
-		score = models.UserWeightScore{
-			UserID:         userID,
-			SessionID:      sessionID,
-			WeightCategory: category,
-			Score:          scoreIncrement,
-		}
-		return r.db.Create(&score).Error
-	} else if err != nil {
+	if err != nil {
 		return err
 	}
-
-	// 既存レコードを更新
-	return r.db.Model(&score).Update("score", gorm.Expr("score + ?", scoreIncrement)).Error
+	return r.db.Model(&score).Update("score", gorm.Expr("score + ?", delta)).Error
 }
 
 // FindByUserAndSession ユーザーとセッションに紐づく全スコアを取得

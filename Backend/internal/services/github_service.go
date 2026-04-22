@@ -555,13 +555,27 @@ func (s *GitHubService) fetchContributedRepos(ctx context.Context, client *http.
 	after := ""
 
 	for {
-		var cursorPart string
-		if after != "" {
-			cursorPart = fmt.Sprintf(`, after: "%s"`, after)
+		// GraphQL variables を使いカーソル値を安全に渡す（文字列インジェクション防止）
+		type contributedReposVars struct {
+			After *string `json:"after,omitempty"`
 		}
-		query := fmt.Sprintf(`{"query":"{ viewer { repositoriesContributedTo(first: 100, includeUserRepositories: true, contributionTypes: [COMMIT, PULL_REQUEST, REPOSITORY]%s) { nodes { name nameWithOwner description primaryLanguage { name } stargazerCount forkCount isFork updatedAt } pageInfo { hasNextPage endCursor } } } }"}`, cursorPart)
+		vars := contributedReposVars{}
+		if after != "" {
+			vars.After = &after
+		}
+		gqlPayload := struct {
+			Query     string                `json:"query"`
+			Variables contributedReposVars  `json:"variables"`
+		}{
+			Query: `query($after: String) { viewer { repositoriesContributedTo(first: 100, includeUserRepositories: true, contributionTypes: [COMMIT, PULL_REQUEST, REPOSITORY], after: $after) { nodes { name nameWithOwner description primaryLanguage { name } stargazerCount forkCount isFork updatedAt } pageInfo { hasNextPage endCursor } } } }`,
+			Variables: vars,
+		}
+		queryBytes, err := json.Marshal(gqlPayload)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal graphql query: %w", err)
+		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, githubGraphQLURL, bytes.NewBufferString(query))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, githubGraphQLURL, bytes.NewReader(queryBytes))
 		if err != nil {
 			return nil, err
 		}
@@ -631,9 +645,20 @@ type contributionsGraphQLResponse struct {
 
 // FetchTotalContributions GraphQL APIで年間コントリビューション数を取得する
 func (s *GitHubService) FetchTotalContributions(ctx context.Context, client *http.Client, token, login string) (int, error) {
-	query := fmt.Sprintf(`{"query":"query{user(login:\"%s\"){contributionsCollection{contributionCalendar{totalContributions}}}}"}`, login)
+	// GraphQL variables を使い login 値を安全に渡す（文字列インジェクション防止）
+	gqlPayload := struct {
+		Query     string         `json:"query"`
+		Variables map[string]any `json:"variables"`
+	}{
+		Query:     `query($login: String!) { user(login: $login) { contributionsCollection { contributionCalendar { totalContributions } } } }`,
+		Variables: map[string]any{"login": login},
+	}
+	queryBytes, err := json.Marshal(gqlPayload)
+	if err != nil {
+		return 0, fmt.Errorf("failed to marshal graphql query: %w", err)
+	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.getGraphQLURL(), bytes.NewBufferString(query))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.getGraphQLURL(), bytes.NewReader(queryBytes))
 	if err != nil {
 		return 0, err
 	}
