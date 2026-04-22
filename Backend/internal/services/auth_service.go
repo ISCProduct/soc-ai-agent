@@ -69,9 +69,7 @@ func (s *AuthService) DeleteAccount(userID uint) error {
 			if err := tx.Where("session_id IN ?", interviewSessionIDs).Delete(&models.InterviewReport{}).Error; err != nil {
 				return err
 			}
-			if err := tx.Where("session_id IN ?", interviewSessionIDs).Delete(&models.InterviewVideo{}).Error; err != nil {
-				return err
-			}
+			// InterviewVideo は後続の user_id = ? による一括削除でカバーされるため、ここでは削除しない
 		}
 
 		resumeDocumentIDs, err := collectResumeDocumentIDs(tx, userID)

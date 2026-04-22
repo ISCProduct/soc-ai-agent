@@ -13,19 +13,22 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 type ChatController struct {
-	chatService     *services.ChatService
-	matchingService *services.MatchingService
-	analysisService *services.AnalysisScoringService
-	userRepo        repository.UserRepository
-	emailService    *services.EmailService
+	chatService      *services.ChatService
+	matchingService  *services.MatchingService
+	analysisService  *services.AnalysisScoringService
+	userRepo         repository.UserRepository
+	emailService     *services.EmailService
+	matchingTimers   sync.Map // key: sessionID, value: *time.Timer（デバウンス用）
 }
 
 const minEvaluatedCategoriesForFinal = 4
 const matchingRetryMaxAttempts = 3
+const matchingDebounceDelay = 3 * time.Second
 
 func NewChatController(chatService *services.ChatService, matchingService *services.MatchingService, analysisService *services.AnalysisScoringService, userRepo repository.UserRepository, emailService *services.EmailService) *ChatController {
 	return &ChatController{
@@ -108,6 +111,20 @@ func (c *ChatController) runBackgroundMatching(userID uint, sessionID string) {
 	c.notifyMatchingFailure(userID, sessionID, lastErr)
 }
 
+// scheduleBackgroundMatching はセッション単位でデバウンスしてマッチング計算をスケジュールする。
+// 同一セッションへの連続メッセージが来ても、最後のメッセージから matchingDebounceDelay 後に1回だけ実行する。
+func (c *ChatController) scheduleBackgroundMatching(userID uint, sessionID string) {
+	// 既存タイマーがあればキャンセル
+	if prev, ok := c.matchingTimers.Load(sessionID); ok {
+		prev.(*time.Timer).Stop()
+	}
+	timer := time.AfterFunc(matchingDebounceDelay, func() {
+		c.matchingTimers.Delete(sessionID)
+		c.runBackgroundMatching(userID, sessionID)
+	})
+	c.matchingTimers.Store(sessionID, timer)
+}
+
 // Chat チャット処理
 func (c *ChatController) Chat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -133,8 +150,8 @@ func (c *ChatController) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// マッチング計算を非同期で実行（レスポンスは待たない）
-	go c.runBackgroundMatching(req.UserID, req.SessionID)
+	// マッチング計算をデバウンスして非同期実行（同一セッションへの連続リクエストを1回にまとめる）
+	c.scheduleBackgroundMatching(req.UserID, req.SessionID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

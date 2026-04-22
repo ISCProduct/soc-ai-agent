@@ -4,7 +4,10 @@ import "Backend/domain/entity"
 
 // UserWeightScoreRepository はユーザースコアの永続化インターフェース。
 type UserWeightScoreRepository interface {
-	UpdateScore(userID uint, sessionID, category string, scoreIncrement int) error
+	// SetScore は新規レコードをスコアの絶対値で作成する
+	SetScore(userID uint, sessionID, category string, absoluteScore int) error
+	// AddScore は既存レコードのスコアに差分を加算する
+	AddScore(userID uint, sessionID, category string, delta int) error
 	FindByUserAndSession(userID uint, sessionID string) ([]entity.UserWeightScore, error)
 	FindTopCategories(userID uint, sessionID string, limit int) ([]entity.UserWeightScore, error)
 	FindByUserSessionAndCategory(userID uint, sessionID, category string) (*entity.UserWeightScore, error)

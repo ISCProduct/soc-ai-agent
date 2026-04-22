@@ -230,8 +230,9 @@ func (s *ScoreValidationService) RunCalibration() (*CalibrationResult, error) {
 		weight := stat.PassRate / avgPassRate
 		weight = math.Round(weight*100) / 100
 
-		// 相関係数の簡易近似（高スコア帯の通過率 / 低スコア帯の通過率の比）
-		correlation := math.Min(weight-1.0, 1.0) // -1～1に簡易正規化
+		// 相関係数の簡易近似（重み - 1.0 を [-1, 1] にクランプ）
+		// weight=1.0 が平均的なカテゴリ、1.0超が正の相関、1.0未満が負の相関を示す
+		correlation := math.Max(-1.0, math.Min(weight-1.0, 1.0))
 
 		weights = append(weights, models.ScoreCalibrationWeight{
 			Category:    stat.Category,
