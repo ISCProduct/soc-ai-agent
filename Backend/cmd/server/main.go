@@ -49,7 +49,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID, X-User-Token, X-Admin-Email, X-Admin-Token")
 
 		if r.Method == "OPTIONS" {
 			if origin != "" && !isAllowedOrigin {
@@ -254,7 +254,7 @@ func main() {
 	collectiveInsightController := controllers.NewCollectiveInsightController(collectiveInsightService)
 
 	// ルーティング設定
-	routes.SetupAuthRoutes(authController, oauthController)
+	routes.SetupAuthRoutes(authController, oauthController, userRepo, cfg.AdminSecret)
 	routes.SetupChatRoutes(chatController, questionController)
 	routes.SetupCompanyRoutes(relationController)
 	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, userRepo, cfg.AdminSecret)

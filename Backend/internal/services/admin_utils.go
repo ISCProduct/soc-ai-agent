@@ -11,29 +11,18 @@ func promoteAdminIfMatched(user *entity.User, repo repository.UserRepository) {
 	if user == nil || repo == nil || user.IsAdmin {
 		return
 	}
-	if !isAdminIdentity(user.Email, user.Name) {
+	if !isAdminIdentity(user.Email) {
 		return
 	}
 	user.IsAdmin = true
 	_ = repo.UpdateUser(user)
 }
 
-func isAdminIdentity(email string, name string) bool {
+func isAdminIdentity(email string) bool {
 	email = strings.ToLower(strings.TrimSpace(email))
-	name = strings.ToLower(strings.TrimSpace(name))
-	localPart := email
-	if at := strings.Index(localPart, "@"); at >= 0 {
-		localPart = localPart[:at]
-	}
 	adminEmails := splitEnvList("ADMIN_EMAILS")
-	adminUsers := splitEnvList("ADMIN_USERNAMES")
 	for _, v := range adminEmails {
 		if v == email {
-			return true
-		}
-	}
-	for _, v := range adminUsers {
-		if v == name || v == localPart {
 			return true
 		}
 	}

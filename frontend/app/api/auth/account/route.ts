@@ -10,8 +10,15 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'user_id is required' }, { status: 400 })
     }
 
+    const userID = request.headers.get('X-User-ID') || ''
+    const userToken = request.headers.get('X-User-Token') || ''
+
     const response = await fetch(`${BACKEND_URL}/api/auth/account?user_id=${userId}`, {
       method: 'DELETE',
+      headers: {
+        'X-User-ID': userID,
+        'X-User-Token': userToken,
+      },
     })
 
     const text = await response.text()
