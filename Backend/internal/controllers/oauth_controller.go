@@ -1,10 +1,12 @@
 package controllers
 
 import (
+	"Backend/internal/config"
+	"Backend/internal/middleware"
 	"Backend/internal/services"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"net/http"
 )
 
@@ -23,15 +25,18 @@ func (c *OAuthController) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state := generateStateToken()
-	// 本番環境ではセッションやクッキーに保存してCSRF対策を行う
+	// state を生成して HttpOnly Cookie に保存（CSRF 対策 #324）
+	state, err := middleware.GenerateOAuthState(w)
+	if err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
 	url := c.oauthService.GetGoogleAuthURL(state)
 
-	// リダイレクトURLをJSON形式で返す（フロントエンド側でリダイレクト）
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"auth_url": url,
-		"state":    state,
 	})
 }
 
@@ -42,25 +47,29 @@ func (c *OAuthController) GoogleCallback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// state 検証（CSRF 対策 #324）
+	if !middleware.VerifyOAuthState(w, r) {
+		log.Printf("[OAuth] Google callback: invalid or missing state from %s", r.RemoteAddr)
+		http.Redirect(w, r, config.AppURL()+"?error=auth_failed", http.StatusTemporaryRedirect)
+		return
+	}
+
 	code := r.URL.Query().Get("code")
 	if code == "" {
 		http.Error(w, "Authorization code not found", http.StatusBadRequest)
 		return
 	}
 
-	// 本番環境ではstateの検証を行う
-	// state := r.URL.Query().Get("state")
-
 	resp, err := c.oauthService.HandleGoogleCallback(r.Context(), code)
 	if err != nil {
-		// エラー時はフロントエンドにリダイレクトしてエラーを表示
-		http.Redirect(w, r, "http://localhost:3000?error="+err.Error(), http.StatusTemporaryRedirect)
+		// エラー詳細はサーバーログにのみ記録し、クライアントには汎用コードを返す（#329）
+		log.Printf("[OAuth] Google callback error: %v", err)
+		http.Redirect(w, r, config.AppURL()+"?error=auth_failed", http.StatusTemporaryRedirect)
 		return
 	}
 
-	// 認証成功時はユーザー情報をクエリパラメータとしてフロントエンドに渡してリダイレクト
 	userData, _ := json.Marshal(resp)
-	redirectURL := "http://localhost:3000/auth/callback?provider=google&code=" + code + "&user=" + base64.URLEncoding.EncodeToString(userData)
+	redirectURL := config.AppURL() + "/auth/callback?provider=google&user=" + base64.URLEncoding.EncodeToString(userData)
 	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 }
 
@@ -71,13 +80,18 @@ func (c *OAuthController) GitHubLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state := generateStateToken()
+	// state を生成して HttpOnly Cookie に保存（CSRF 対策 #324）
+	state, err := middleware.GenerateOAuthState(w)
+	if err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
 	url := c.oauthService.GetGitHubAuthURL(state)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"auth_url": url,
-		"state":    state,
 	})
 }
 
@@ -85,6 +99,13 @@ func (c *OAuthController) GitHubLogin(w http.ResponseWriter, r *http.Request) {
 func (c *OAuthController) GitHubCallback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// state 検証（CSRF 対策 #324）
+	if !middleware.VerifyOAuthState(w, r) {
+		log.Printf("[OAuth] GitHub callback: invalid or missing state from %s", r.RemoteAddr)
+		http.Redirect(w, r, config.AppURL()+"?error=auth_failed", http.StatusTemporaryRedirect)
 		return
 	}
 
@@ -96,20 +117,13 @@ func (c *OAuthController) GitHubCallback(w http.ResponseWriter, r *http.Request)
 
 	resp, err := c.oauthService.HandleGitHubCallback(r.Context(), code)
 	if err != nil {
-		// エラー時はフロントエンドにリダイレクトしてエラーを表示
-		http.Redirect(w, r, "http://localhost:3000?error="+err.Error(), http.StatusTemporaryRedirect)
+		// エラー詳細はサーバーログにのみ記録し、クライアントには汎用コードを返す（#329）
+		log.Printf("[OAuth] GitHub callback error: %v", err)
+		http.Redirect(w, r, config.AppURL()+"?error=auth_failed", http.StatusTemporaryRedirect)
 		return
 	}
 
-	// 認証成功時はユーザー情報をクエリパラメータとしてフロントエンドに渡してリダイレクト
 	userData, _ := json.Marshal(resp)
-	redirectURL := "http://localhost:3000/auth/callback?provider=github&code=" + code + "&user=" + base64.URLEncoding.EncodeToString(userData)
+	redirectURL := config.AppURL() + "/auth/callback?provider=github&user=" + base64.URLEncoding.EncodeToString(userData)
 	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
-}
-
-// generateStateToken CSRF対策用のランダムなstateトークンを生成
-func generateStateToken() string {
-	b := make([]byte, 32)
-	rand.Read(b)
-	return base64.URLEncoding.EncodeToString(b)
 }
