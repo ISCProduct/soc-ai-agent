@@ -131,7 +131,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 				AvatarURL:     userInfo.Picture,
 				IsGuest:       false,
 				TargetLevel:   "未設定",
-				SchoolName:    "学校法人岩崎学園情報科学専門学校",
+				SchoolName:    config.SchoolName(),
 				IsAdmin:       isAdminIdentity(userInfo.Email),
 			}
 			if err := s.userRepo.CreateUser(user); err != nil {
@@ -239,7 +239,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 				AvatarURL:     userInfo.AvatarURL,
 				IsGuest:       false,
 				TargetLevel:   "未設定",
-				SchoolName:    "学校法人岩崎学園情報科学専門学校",
+				SchoolName:    config.SchoolName(),
 				IsAdmin:       isAdminIdentity(email),
 			}
 			if err := s.userRepo.CreateUser(user); err != nil {

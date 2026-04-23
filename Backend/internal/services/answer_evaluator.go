@@ -329,10 +329,8 @@ func (e *AnswerEvaluator) precheckHuman(answer string, isChoice bool, jobRoleSet
 		return HumanScoreResult{Action: PrecheckIgnore, Reason: "too_short_ignore"}
 	}
 
-	// skipPhrases は完全一致のみスキップ（Contains だと「資格なし」等が誤ってスキップされるため）
-	skipPhrases = []string{
-		"わからない", "分からない", "わかりません", "特にない", "特になし", "なし",
-	}
+	// skipPhrases（上記と同一スライスを再利用）を非ストリップ形式でも照合
+	// 句読点付き「なし。」等も捕捉するため trailing 記号を含む形でも確認
 	for _, phrase := range skipPhrases {
 		if normalizedAnswer == phrase || normalizedAnswer == phrase+"。" || normalizedAnswer == phrase+"、" {
 			return HumanScoreResult{Action: PrecheckSkip, Reason: "skip_phrase"}

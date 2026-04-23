@@ -28,10 +28,6 @@ type Client struct {
 	OnUsage      UsageHook // オプション: コール成功時にトークン使用量を通知
 }
 
-func init() {
-	// ジッター用の乱数初期化
-	rand.Seed(time.Now().UnixNano())
-}
 
 func NewFromEnv(optionalModel string) (*Client, error) {
 	key := os.Getenv("OPENAI_API_KEY")

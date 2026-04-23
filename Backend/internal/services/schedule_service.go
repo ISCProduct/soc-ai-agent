@@ -117,19 +117,37 @@ func (s *ScheduleService) ExportICS(userID uint) (string, error) {
 		uid := fmt.Sprintf("schedule-%d@soc-ai-agent", ev.ID)
 
 		b.WriteString("BEGIN:VEVENT\r\n")
-		fmt.Fprintf(&b, "UID:%s\r\n", uid)
-		fmt.Fprintf(&b, "DTSTART:%s\r\n", dtStart)
-		fmt.Fprintf(&b, "DTEND:%s\r\n", dtEnd)
-		fmt.Fprintf(&b, "SUMMARY:%s\r\n", escapeICS(title))
+		b.WriteString(foldICSLine("UID:" + uid))
+		b.WriteString(foldICSLine("DTSTART:" + dtStart))
+		b.WriteString(foldICSLine("DTEND:" + dtEnd))
+		b.WriteString(foldICSLine("SUMMARY:" + escapeICS(title)))
 		if ev.Notes != "" {
-			fmt.Fprintf(&b, "DESCRIPTION:%s\r\n", escapeICS(ev.Notes))
+			b.WriteString(foldICSLine("DESCRIPTION:" + escapeICS(ev.Notes)))
 		}
-		fmt.Fprintf(&b, "CATEGORIES:%s\r\n", escapeICS(string(ev.Stage)))
+		b.WriteString(foldICSLine("CATEGORIES:" + escapeICS(string(ev.Stage))))
 		b.WriteString("END:VEVENT\r\n")
 	}
 
 	b.WriteString("END:VCALENDAR\r\n")
 	return b.String(), nil
+}
+
+// foldICSLine は RFC 5545 に従い、75オクテット超の行を CRLF + スペースで折り返す
+func foldICSLine(line string) string {
+	const maxOctets = 75
+	var b strings.Builder
+	octets := 0
+	for _, r := range line {
+		encoded := []byte(string(r))
+		if octets+len(encoded) > maxOctets {
+			b.WriteString("\r\n ")
+			octets = 1 // 折り返しの先頭スペース分
+		}
+		b.WriteRune(r)
+		octets += len(encoded)
+	}
+	b.WriteString("\r\n")
+	return b.String()
 }
 
 func escapeICS(s string) string {
