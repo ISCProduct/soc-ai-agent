@@ -51,7 +51,7 @@ _chroma_lock = threading.Lock()
 @app.on_event("startup")
 def log_openai_version() -> None:
     version = getattr(openai_module, "__version__", "unknown")
-    has_responses = hasattr(OpenAI(api_key=""), "responses")
+    has_responses = hasattr(openai_module.OpenAI, "responses")
     logger.info("openai version=%s responses_api=%s", version, has_responses)
 
 

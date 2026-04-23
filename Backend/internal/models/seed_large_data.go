@@ -24,9 +24,6 @@ func SeedLargeCompanyData(db *gorm.DB) error {
 	slog.Info("Starting to seed companies with relationships", "target_companies", 40000)
 	startTime := time.Now()
 
-	// ランダムシードを初期化
-	rand.Seed(time.Now().UnixNano())
-
 	// 業界リスト
 	industries := []string{
 		"IT・ソフトウェア", "製造業", "金融", "商社", "小売",
