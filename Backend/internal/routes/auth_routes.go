@@ -17,10 +17,10 @@ func SetupAuthRoutes(authController *controllers.AuthController, oauthController
 	http.HandleFunc("/api/auth/request-registration", authController.RequestRegistration)
 	http.HandleFunc("/api/auth/verify-registration", authController.VerifyRegistration)
 	http.HandleFunc("/api/auth/register", authController.Register)
-	http.HandleFunc("/api/auth/login", authController.Login)
+	http.HandleFunc("/api/auth/login", middleware.LoginRateLimit(authController.Login))
 	http.HandleFunc("/api/auth/guest", authController.CreateGuest)
 	http.HandleFunc("/api/auth/verify-email", authController.VerifyEmail)
-	http.HandleFunc("/api/auth/forgot-password", authController.RequestPasswordReset)
+	http.HandleFunc("/api/auth/forgot-password", middleware.PasswordResetRateLimit(authController.RequestPasswordReset))
 	http.HandleFunc("/api/auth/reset-password", authController.ResetPassword)
 
 	// 認証必須エンドポイント（X-User-ID + X-User-Token ヘッダーが必要）
