@@ -19,5 +19,30 @@ services:
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
       APP_ENV: production
+      COMPANY_GRAPH_URL: http://company-graph:9100
     depends_on:
       - backend
+
+  # Resume review RAG (DuckDuckGo + CrewAI)
+  rag-review:
+    image: 970835573274.dkr.ecr.ap-northeast-1.amazonaws.com/soc-rag-review:latest
+    restart: unless-stopped
+    ports:
+      - "${RAG_REVIEW_PORT:-9000}:9000"
+    env_file:
+      - .env
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      OPENAI_HINTS_MODEL: ${OPENAI_HINTS_MODEL:-gpt-4o-search-preview}
+      OPENAI_HINTS_PARSE_MODEL: ${OPENAI_HINTS_PARSE_MODEL:-gpt-4o}
+
+  # Company graph pipeline (マルチソース新卒採用データ × gBizINFO)
+  company-graph:
+    image: 970835573274.dkr.ecr.ap-northeast-1.amazonaws.com/soc-company-graph:latest
+    restart: unless-stopped
+    ports:
+      - "${COMPANY_GRAPH_PORT:-9100}:9100"
+    environment:
+      GBIZINFO_API_KEY: ${GBIZINFO_API_KEY:-}
+      GBIZINFO_BASE_URL: ${GBIZINFO_BASE_URL:-}

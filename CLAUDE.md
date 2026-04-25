@@ -9,7 +9,7 @@ SOC AI Agent: 採用支援SaaS (Go + Next.js + Python RAG)
 ### RAG (Python)
 - `cd rag && pip install -r constraints.txt && python3 main.py` (9000)
 ### Docker
-- `docker compose up -d` (app/db/fe) / `--profile rag` (rag)
+- `docker compose up -d` (全サービス: backend/frontend/rag-review/company-graph)
 
 ## アーキテクチャ & フライホイール
 - **構造**: FE(Next.js) -> BE(Go/MySQL/S3) -> RAG(Python/ChromaDB/CrewAI)
