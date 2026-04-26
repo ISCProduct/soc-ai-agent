@@ -7,6 +7,7 @@ import { Menu as MenuIcon } from '@mui/icons-material'
 import { AnalysisSidebar } from '@/components/analysis-sidebar'
 import { MuiChat } from '@/components/mui-chat'
 import { authService, User } from '@/lib/auth'
+import styles from './page.module.css'
 
 export default function Home() {
   const router = useRouter()
@@ -42,25 +43,13 @@ export default function Home() {
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
       />
-      <Box
-        component="main"
-        sx={{
-          flexGrow: 1,
-          height: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          minWidth: 0,
-        }}
-      >
+      <main className={styles.mainContent}>
         {/* モバイル用ヘッダー（ハンバーガーメニュー） */}
         <AppBar
           position="static"
           elevation={0}
-          sx={{
-            display: { xs: 'flex', md: 'none' },
-            backgroundColor: '#fff',
-            borderBottom: '1px solid #e0e0e0',
-          }}
+          className={styles.mobileHeader}
+          sx={{ backgroundColor: '#fff', borderBottom: '1px solid #e0e0e0' }}
         >
           <Toolbar variant="dense" sx={{ minHeight: 48 }}>
             <IconButton
@@ -76,10 +65,10 @@ export default function Home() {
             </Typography>
           </Toolbar>
         </AppBar>
-        <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
+        <div className={styles.chatWrapper}>
           <MuiChat />
-        </Box>
-      </Box>
+        </div>
+      </main>
     </Box>
   )
 }

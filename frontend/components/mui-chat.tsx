@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import styles from './mui-chat.module.css'
 import {
   Box,
   Paper,
@@ -681,36 +682,13 @@ export function MuiChat() {
         </DialogActions>
       </Dialog>
 
-      <Box
-        sx={{
-          height: { xs: 'calc(100vh - 48px)', md: '100vh' },
-          display: 'flex',
-          flexDirection: 'column',
-          backgroundColor: '#fff',
-        }}
-      >
-      <Box
-        sx={{
-          p: { xs: 1.5, sm: 2 },
-          borderBottom: '1px solid #e0e0e0',
-          backgroundColor: '#fff',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
+      <Box className={styles.chatContainer}>
+      <Box className={styles.chatHeader}>
         <Box sx={{ minWidth: 0 }}>
-          <Typography
-            variant="h5"
-            sx={{
-              fontWeight: 600,
-              fontSize: { xs: '1rem', sm: '1.5rem' },
-              display: { xs: 'none', md: 'block' },
-            }}
-          >
+          <Typography variant="h5" className={styles.chatTitle}>
             IT業界キャリアエージェント
           </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+          <Typography variant="body2" color="text.secondary" className={styles.chatProgress}>
             AI適性診断 - {(progressTotals?.valid ?? questionCount)}/{(progressTotals?.required ?? totalQuestions)} 問完了
             {((progressTotals?.valid ?? questionCount) > 0) && ` (${progressTotals?.percent ?? Math.round((questionCount / totalQuestions) * 100)}%)`}
           </Typography>
@@ -719,17 +697,17 @@ export function MuiChat() {
           variant="outlined"
           size="small"
           onClick={handleEndChat}
-          sx={{ minWidth: { xs: '80px', sm: '120px' }, fontSize: { xs: '0.75rem', sm: '0.875rem' } }}
+          className={styles.endButton}
         >
           終了
         </Button>
       </Box>
 
       <Box
+        className={styles.messagesArea}
         sx={{
           flexGrow: 1,
           overflowY: 'auto',
-          p: { xs: 2, sm: 3 },
           backgroundColor: '#fff',
         }}
       >
@@ -780,9 +758,8 @@ export function MuiChat() {
             )}
             <Paper
               elevation={1}
+              className={styles.messageBubble}
               sx={{
-                p: { xs: 1.5, sm: 2 },
-                maxWidth: { xs: '90%', sm: '70%' },
                 backgroundColor:
                   message.role === 'user' 
                     ? '#1976d2' 
@@ -834,9 +811,8 @@ export function MuiChat() {
             </Avatar>
             <Paper
               elevation={1}
+              className={styles.messageBubble}
               sx={{
-                p: { xs: 1.5, sm: 2 },
-                maxWidth: { xs: '90%', sm: '70%' },
                 backgroundColor: '#f5f5f5',
               }}
             >
@@ -937,7 +913,8 @@ export function MuiChat() {
                           handleSend(choice.value)
                         }}
                         disabled={isLoading}
-                        sx={{ borderRadius: 2, fontSize: { xs: '0.75rem', sm: '0.875rem' }, py: { xs: 0.75, sm: 1 } }}
+                        className={styles.choiceButton}
+                        sx={{ borderRadius: 2 }}
                       >
                         {choice.label}. {choice.text}
                       </Button>

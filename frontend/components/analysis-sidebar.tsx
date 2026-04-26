@@ -1,5 +1,6 @@
 'use client'
 import React, {useState, useEffect} from 'react'
+import styles from './analysis-sidebar.module.css'
 import
 {
     Box,
@@ -500,20 +501,16 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                 open={mobileOpen}
                 onClose={onMobileClose}
                 ModalProps={{ keepMounted: true }}
-                sx={{
-                    display: { xs: 'block', md: 'none' },
-                    ...drawerSx,
-                }}
+                className={styles.drawerMobile}
+                sx={drawerSx}
             >
                 {drawerContent}
             </Drawer>
             {/* デスクトップ用: Permanent Drawer */}
             <Drawer
                 variant="permanent"
-                sx={{
-                    display: { xs: 'none', md: 'block' },
-                    ...drawerSx,
-                }}
+                className={styles.drawerDesktop}
+                sx={drawerSx}
                 open
             >
                 {drawerContent}
