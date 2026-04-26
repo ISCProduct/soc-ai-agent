@@ -10,7 +10,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
@@ -19,7 +19,7 @@ type S3UploadService struct {
 	bucket   string
 	region   string
 	client   *s3.Client
-	uploader *manager.Uploader
+	uploader *transfermanager.Client
 }
 
 // NewS3UploadService initialises the service from environment variables
@@ -40,7 +40,7 @@ func NewS3UploadService() (*S3UploadService, error) {
 	}
 
 	client := s3.NewFromConfig(cfg)
-	uploader := manager.NewUploader(client)
+	uploader := transfermanager.New(client)
 
 	return &S3UploadService{
 		bucket:   bucket,
@@ -58,7 +58,7 @@ func (s *S3UploadService) UploadFile(ctx context.Context, key, mimeType string, 
 // UploadReader streams an io.Reader to S3 using multipart upload.
 // This avoids loading the entire file into memory and supports files larger than 32 MB.
 func (s *S3UploadService) UploadReader(ctx context.Context, key, mimeType string, r io.Reader) (string, string, error) {
-	_, err := s.uploader.Upload(ctx, &s3.PutObjectInput{
+	_, err := s.uploader.UploadObject(ctx, &transfermanager.UploadObjectInput{
 		Bucket:      aws.String(s.bucket),
 		Key:         aws.String(key),
 		Body:        r,
