@@ -350,28 +350,28 @@ export function JobAgentChat() {
     : false
 
   return (
-      <div className="flex justify-center items-center h-screen bg-background p-4">
-        <Card className="flex flex-col w-full max-w-4xl h-[90vh] border-2">
-          <div className="border-b bg-muted/50 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <Avatar className="w-10 h-10 bg-primary">
+      <div className="flex justify-center items-start sm:items-center h-screen bg-background p-2 sm:p-4 overflow-hidden">
+        <Card className="flex flex-col w-full max-w-4xl h-screen sm:h-[90vh] border-0 sm:border-2 rounded-none sm:rounded-lg">
+          <div className="border-b bg-muted/50 p-3 sm:p-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Avatar className="w-8 h-8 sm:w-10 sm:h-10 bg-primary flex-shrink-0">
                   <AvatarFallback>
-                    <Bot className="w-5 h-5 text-primary-foreground" />
+                    <Bot className="w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground" />
                   </AvatarFallback>
                 </Avatar>
-                <div>
-                  <h2 className="font-bold text-foreground">IT業界キャリアエージェント</h2>
-                  <p className="text-xs text-muted-foreground">
+                <div className="min-w-0">
+                  <h2 className="font-bold text-foreground text-sm sm:text-base truncate">IT業界キャリアエージェント</h2>
+                  <p className="text-xs text-muted-foreground hidden sm:block">
                     AI駆動で最適な企業を選定
                   </p>
                 </div>
               </div>
-              
-              <div className="flex items-center gap-3">
+
+              <div className="flex items-center gap-2 flex-shrink-0">
                 {/* 進捗状況表示 */}
                 {progress.categories > 0 && (
-                  <div className="flex flex-col items-end gap-1.5 min-w-[200px]">
+                  <div className="flex flex-col items-end gap-1.5 min-w-0 w-full sm:w-auto sm:min-w-[180px]">
                     <div className="flex items-center gap-2">
                       <div className="text-sm font-semibold text-primary">
                         診断進行度
@@ -391,19 +391,19 @@ export function JobAgentChat() {
                 )}
                 
                 {/* チャットを終了ボタン */}
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   size="sm"
                   onClick={handleEndChat}
-                  className="text-sm"
+                  className="text-xs sm:text-sm px-2 sm:px-3"
                 >
-                  チャットを終了
+                  <span className="hidden sm:inline">チャットを</span>終了
                 </Button>
               </div>
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4">
             {isInitializing ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center space-y-2">
@@ -430,7 +430,7 @@ export function JobAgentChat() {
                         </AvatarFallback>
                       </Avatar>
                       <div
-                          className={`flex flex-col gap-3 max-w-[75%] ${message.role === "user" ? "items-end" : "items-start"}`}
+                          className={`flex flex-col gap-3 max-w-[85%] sm:max-w-[75%] ${message.role === "user" ? "items-end" : "items-start"}`}
                       >
                         <div
                             className={`rounded-2xl px-4 py-3 ${

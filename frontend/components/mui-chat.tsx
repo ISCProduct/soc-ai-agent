@@ -683,7 +683,7 @@ export function MuiChat() {
 
       <Box
         sx={{
-          height: '100vh',
+          height: { xs: 'calc(100vh - 48px)', md: '100vh' },
           display: 'flex',
           flexDirection: 'column',
           backgroundColor: '#fff',
@@ -691,7 +691,7 @@ export function MuiChat() {
       >
       <Box
         sx={{
-          p: 2,
+          p: { xs: 1.5, sm: 2 },
           borderBottom: '1px solid #e0e0e0',
           backgroundColor: '#fff',
           display: 'flex',
@@ -699,12 +699,19 @@ export function MuiChat() {
           alignItems: 'center',
         }}
       >
-        <Box>
-          <Typography variant="h5" sx={{ fontWeight: 600 }}>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography
+            variant="h5"
+            sx={{
+              fontWeight: 600,
+              fontSize: { xs: '1rem', sm: '1.5rem' },
+              display: { xs: 'none', md: 'block' },
+            }}
+          >
             IT業界キャリアエージェント
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            AI適性診断 - {(progressTotals?.valid ?? questionCount)}/{(progressTotals?.required ?? totalQuestions)} 問完了 
+          <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+            AI適性診断 - {(progressTotals?.valid ?? questionCount)}/{(progressTotals?.required ?? totalQuestions)} 問完了
             {((progressTotals?.valid ?? questionCount) > 0) && ` (${progressTotals?.percent ?? Math.round((questionCount / totalQuestions) * 100)}%)`}
           </Typography>
         </Box>
@@ -712,9 +719,9 @@ export function MuiChat() {
           variant="outlined"
           size="small"
           onClick={handleEndChat}
-          sx={{ minWidth: '120px' }}
+          sx={{ minWidth: { xs: '80px', sm: '120px' }, fontSize: { xs: '0.75rem', sm: '0.875rem' } }}
         >
-          チャットを終了
+          終了
         </Button>
       </Box>
 
@@ -722,7 +729,7 @@ export function MuiChat() {
         sx={{
           flexGrow: 1,
           overflowY: 'auto',
-          p: 3,
+          p: { xs: 2, sm: 3 },
           backgroundColor: '#fff',
         }}
       >
@@ -774,8 +781,8 @@ export function MuiChat() {
             <Paper
               elevation={1}
               sx={{
-                p: 2,
-                maxWidth: '70%',
+                p: { xs: 1.5, sm: 2 },
+                maxWidth: { xs: '90%', sm: '70%' },
                 backgroundColor:
                   message.role === 'user' 
                     ? '#1976d2' 
@@ -828,8 +835,8 @@ export function MuiChat() {
             <Paper
               elevation={1}
               sx={{
-                p: 2,
-                maxWidth: '70%',
+                p: { xs: 1.5, sm: 2 },
+                maxWidth: { xs: '90%', sm: '70%' },
                 backgroundColor: '#f5f5f5',
               }}
             >
@@ -930,7 +937,7 @@ export function MuiChat() {
                           handleSend(choice.value)
                         }}
                         disabled={isLoading}
-                        sx={{ borderRadius: 2 }}
+                        sx={{ borderRadius: 2, fontSize: { xs: '0.75rem', sm: '0.875rem' }, py: { xs: 0.75, sm: 1 } }}
                       >
                         {choice.label}. {choice.text}
                       </Button>

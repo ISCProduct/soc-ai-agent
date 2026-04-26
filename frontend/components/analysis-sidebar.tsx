@@ -15,6 +15,8 @@ import
     Chip,
     Avatar,
     IconButton,
+    useTheme,
+    useMediaQuery,
 }
     from '@mui/material'
 import {
@@ -62,15 +64,19 @@ interface PhaseProgress {
 interface AnalysisSidebarProps {
     user: User
     onLogout: () => void
+    mobileOpen?: boolean
+    onMobileClose?: () => void
 }
 
-export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
+export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClose}: AnalysisSidebarProps) {
     const [messageCount, setMessageCount] = useState(0)
     const [questionCount, setQuestionCount] = useState(0)
     const [totalQuestions, setTotalQuestions] = useState(15)
     const [phases, setPhases] = useState<PhaseProgress[] | null>(null)
     const [isAdmin, setIsAdmin] = useState(!!user.is_admin)
     const router = useRouter()
+    const theme = useTheme()
+    const isMobile = useMediaQuery(theme.breakpoints.down('md'))
 
     useEffect(() => {
         setIsAdmin(!!user.is_admin)
@@ -190,20 +196,19 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
         },
     ]
 
-    return (
-        <Drawer
-            variant="permanent"
-            sx={{
-                width: DRAWER_WIDTH,
-                flexShrink: 0,
-                '& .MuiDrawer-paper': {
-                    width: DRAWER_WIDTH,
-                    boxSizing: 'border-box',
-                    backgroundColor: '#f7f7f8',
-                    borderRight: '1px solid #e0e0e0',
-                },
-            }}
-        >
+    const drawerSx = {
+        width: DRAWER_WIDTH,
+        flexShrink: 0,
+        '& .MuiDrawer-paper': {
+            width: DRAWER_WIDTH,
+            boxSizing: 'border-box',
+            backgroundColor: '#f7f7f8',
+            borderRight: '1px solid #e0e0e0',
+            overflowY: 'auto',
+        },
+    }
+
+    const drawerContent = (
             <Box sx={{p: 2}}>
                 <Box sx={{display: 'flex', alignItems: 'center', mb: 2, gap: 1}}>
                     <Avatar sx={{bgcolor: user.is_guest ? 'grey.500' : 'primary.main'}}>
@@ -485,6 +490,34 @@ export function AnalysisSidebar({user, onLogout}: AnalysisSidebarProps) {
                     </ListItem>
                 )}
             </Box>
-        </Drawer>
+    )
+
+    return (
+        <>
+            {/* モバイル用: Temporary Drawer */}
+            <Drawer
+                variant="temporary"
+                open={mobileOpen}
+                onClose={onMobileClose}
+                ModalProps={{ keepMounted: true }}
+                sx={{
+                    display: { xs: 'block', md: 'none' },
+                    ...drawerSx,
+                }}
+            >
+                {drawerContent}
+            </Drawer>
+            {/* デスクトップ用: Permanent Drawer */}
+            <Drawer
+                variant="permanent"
+                sx={{
+                    display: { xs: 'none', md: 'block' },
+                    ...drawerSx,
+                }}
+                open
+            >
+                {drawerContent}
+            </Drawer>
+        </>
     )
 }
