@@ -10,16 +10,15 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 type s3Storage struct {
-	client     *s3.Client
-	uploader   *manager.Uploader
-	downloader *manager.Downloader
-	bucket     string
-	prefix     string
+	client      *s3.Client
+	tmClient    *transfermanager.Client
+	bucket      string
+	prefix      string
 }
 
 func newS3StorageFromEnv(ctx context.Context) (*s3Storage, error) {
@@ -40,11 +39,10 @@ func newS3StorageFromEnv(ctx context.Context) (*s3Storage, error) {
 	client := s3.NewFromConfig(cfg)
 	prefix := strings.Trim(strings.TrimSpace(os.Getenv("AWS_S3_PREFIX")), "/")
 	return &s3Storage{
-		client:     client,
-		uploader:   manager.NewUploader(client),
-		downloader: manager.NewDownloader(client),
-		bucket:     bucket,
-		prefix:     prefix,
+		client:   client,
+		tmClient: transfermanager.New(client),
+		bucket:   bucket,
+		prefix:   prefix,
 	}, nil
 }
 
@@ -67,7 +65,7 @@ func (s *s3Storage) uploadFile(ctx context.Context, key, filePath, contentType s
 	}
 	defer f.Close()
 
-	_, err = s.uploader.Upload(ctx, &s3.PutObjectInput{
+	_, err = s.tmClient.UploadObject(ctx, &transfermanager.UploadObjectInput{
 		Bucket:      &s.bucket,
 		Key:         &key,
 		Body:        f,
@@ -86,9 +84,10 @@ func (s *s3Storage) downloadToFile(ctx context.Context, key, destPath string) er
 	}
 	defer f.Close()
 
-	_, err = s.downloader.Download(ctx, f, &s3.GetObjectInput{
-		Bucket: &s.bucket,
-		Key:    &key,
+	_, err = s.tmClient.DownloadObject(ctx, &transfermanager.DownloadObjectInput{
+		Bucket:   &s.bucket,
+		Key:      &key,
+		WriterAt: f,
 	})
 	return err
 }
