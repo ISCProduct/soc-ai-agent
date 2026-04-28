@@ -1,0 +1,17 @@
+/* モバイル: Temporary Drawer のみ表示 */
+.drawerMobile {
+    display: block;
+}
+.drawerDesktop {
+    display: none;
+}
+
+/* デスクトップ(md: 900px以上): Permanent Drawer のみ表示 */
+@media (min-width: 900px) {
+    .drawerMobile {
+        display: none;
+    }
+    .drawerDesktop {
+        display: block;
+    }
+}

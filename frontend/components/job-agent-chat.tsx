@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
+import styles from "./job-agent-chat.module.css"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -350,28 +351,28 @@ export function JobAgentChat() {
     : false
 
   return (
-      <div className="flex justify-center items-center h-screen bg-background p-4">
-        <Card className="flex flex-col w-full max-w-4xl h-[90vh] border-2">
-          <div className="border-b bg-muted/50 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <Avatar className="w-10 h-10 bg-primary">
+      <div className={`flex justify-center bg-background overflow-hidden ${styles.chatWrapper}`}>
+        <Card className={`flex flex-col w-full max-w-4xl ${styles.chatCard}`}>
+          <div className={`border-b bg-muted/50 ${styles.header}`}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Avatar className={`bg-primary flex-shrink-0 ${styles.avatar}`}>
                   <AvatarFallback>
-                    <Bot className="w-5 h-5 text-primary-foreground" />
+                    <Bot className="w-4 h-4 text-primary-foreground" />
                   </AvatarFallback>
                 </Avatar>
-                <div>
-                  <h2 className="font-bold text-foreground">IT業界キャリアエージェント</h2>
-                  <p className="text-xs text-muted-foreground">
+                <div className="min-w-0">
+                  <h2 className={`font-bold text-foreground truncate ${styles.title}`}>IT業界キャリアエージェント</h2>
+                  <p className={`text-muted-foreground ${styles.subtitle}`}>
                     AI駆動で最適な企業を選定
                   </p>
                 </div>
               </div>
-              
-              <div className="flex items-center gap-3">
+
+              <div className="flex items-center gap-2 flex-shrink-0">
                 {/* 進捗状況表示 */}
                 {progress.categories > 0 && (
-                  <div className="flex flex-col items-end gap-1.5 min-w-[200px]">
+                  <div className={`flex flex-col items-end gap-1.5 ${styles.progressArea}`}>
                     <div className="flex items-center gap-2">
                       <div className="text-sm font-semibold text-primary">
                         診断進行度
@@ -383,27 +384,27 @@ export function JobAgentChat() {
                     <div className="text-xs text-muted-foreground text-right">
                       {progress.categories}/{progress.totalCategories} カテゴリ評価済み
                     </div>
-                    <Progress 
-                      value={(progress.categories / progress.totalCategories) * 100} 
+                    <Progress
+                      value={(progress.categories / progress.totalCategories) * 100}
                       className="w-full h-2.5"
                     />
                   </div>
                 )}
-                
+
                 {/* チャットを終了ボタン */}
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   size="sm"
                   onClick={handleEndChat}
-                  className="text-sm"
+                  className={styles.endButton}
                 >
-                  チャットを終了
+                  <span className={styles.endButtonFull}>チャットを</span>終了
                 </Button>
               </div>
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          <div className={`flex-1 overflow-y-auto space-y-4 ${styles.messagesArea}`}>
             {isInitializing ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center space-y-2">
@@ -430,7 +431,7 @@ export function JobAgentChat() {
                         </AvatarFallback>
                       </Avatar>
                       <div
-                          className={`flex flex-col gap-3 max-w-[75%] ${message.role === "user" ? "items-end" : "items-start"}`}
+                          className={`flex flex-col gap-3 ${styles.messageBubble} ${message.role === "user" ? "items-end" : "items-start"}`}
                       >
                         <div
                             className={`rounded-2xl px-4 py-3 ${

@@ -1,0 +1,25 @@
+/* モバイル用ヘッダー: md(900px)未満のみ表示 */
+.mobileHeader {
+    display: flex;
+}
+
+/* デスクトップでは非表示 */
+@media (min-width: 900px) {
+    .mobileHeader {
+        display: none;
+    }
+}
+
+.mainContent {
+    flex-grow: 1;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.chatWrapper {
+    flex-grow: 1;
+    overflow: hidden;
+}
