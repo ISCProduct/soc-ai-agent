@@ -1,6 +1,6 @@
 # RAG サービス 直接依存パッケージ
 # バージョン制約の詳細は constraints.txt を参照。
-chromadb>=0.5.0,<1.0
+chromadb>=0.6.3,<1.0
 crewai==0.64.0
 duckduckgo-search==6.4.2
 fastapi==0.136.1
