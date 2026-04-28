@@ -143,6 +143,14 @@ def run_search(query: str, limit: int = 5) -> Tuple[List[dict], bool]:
         return [], False
 
 
+def _sanitize_company_name_for_query(company_name: str) -> str:
+    sanitized = re.sub(r"[^0-9A-Za-zぁ-んァ-ン一-龥ー々〆ヵヶ・\s]", "", company_name)
+    sanitized = re.sub(r"\s+", " ", sanitized).strip()
+    if not sanitized:
+        raise HTTPException(status_code=400, detail="invalid company_name")
+    return sanitized
+
+
 def build_context(results: List[dict]) -> List[str]:
     docs = []
     for item in results:
@@ -508,14 +516,15 @@ def _parse_hints_from_text(company_name: str, position: str, research_text: str)
 
 @app.post("/company/hints", response_model=CompanyHintsResponse)
 def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
+    safe_company_name = _sanitize_company_name_for_query(request.company_name)
     role_label = request.position or "一般職"
     cache_key = "hints::{company}::{role}".format(
-        company=request.company_name, role=role_label
+        company=safe_company_name, role=role_label
     )
 
     # キャッシュヒット: そのまま構造化して返す
     retrieved = get_cached_context(
-        cache_key, query=f"{request.company_name} 面接 よく聞かれる質問"
+        cache_key, query=f"{safe_company_name} 面接 よく聞かれる質問"
     )
     if retrieved:
         result = _parse_hints_from_text(request.company_name, role_label, "\n\n".join(retrieved))
@@ -523,22 +532,22 @@ def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
         return result
 
     # 1. OpenAI responses API + web_search（最新モデル）で調査
-    research_text = _run_hints_web_search(request.company_name, role_label)
+    research_text = _run_hints_web_search(safe_company_name, role_label)
 
     # 2. responses API が使えない場合は DuckDuckGo フォールバック
     if not research_text and ALLOW_DDG_FALLBACK:
-        query = f"{request.company_name} 面接 よく聞かれる質問 選考体験 {role_label}"
+        query = f"{safe_company_name} 面接 よく聞かれる質問 選考体験 {role_label}"
         results, rate_limited = run_search(query, limit=6)
         if results:
             docs = build_context(results)
             research_text = "\n\n".join(docs)
         elif rate_limited:
-            logger.warning("duckduckgo rate limited for company hints company=%s", request.company_name)
+            logger.warning("duckduckgo rate limited for company hints company=%s", safe_company_name)
 
     if research_text:
         set_cached_context(cache_key, [research_text])
 
-    return _parse_hints_from_text(request.company_name, role_label, research_text or "")
+    return _parse_hints_from_text(safe_company_name, role_label, research_text or "")
 
 
 @app.get("/health")
@@ -555,17 +564,18 @@ def healthz() -> dict:
 
 def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
     """RAGコンテキストを収集し (docs, context_source) を返す。"""
+    safe_company_name = _sanitize_company_name_for_query(request.company_name)
     role_label = request.job_title or "指定なし"
-    cache_key = "{company}::{role}".format(company=request.company_name, role=role_label)
+    cache_key = "{company}::{role}".format(company=safe_company_name, role=role_label)
     context_source = "none"
 
     retrieved = get_cached_context(cache_key)
     if retrieved:
         context_source = "cache"
     else:
-        if USE_DEEP_RESEARCH and request.company_name.strip():
+        if USE_DEEP_RESEARCH and safe_company_name:
             try:
-                report = run_deep_research(request.company_name, role_label)
+                report = run_deep_research(safe_company_name, role_label)
                 if report:
                     retrieved = [report]
                     set_cached_context(cache_key, retrieved)
@@ -580,11 +590,11 @@ def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
         if not retrieved and ALLOW_DDG_FALLBACK:
             logger.info(
                 "duckduckgo search start company=%s role=%s",
-                request.company_name,
+                safe_company_name,
                 role_label,
             )
             query = "{company} {role} 求める人物像 大切にしている価値観".format(
-                company=request.company_name,
+                company=safe_company_name,
                 role=role_label,
             )
             results, rate_limited = run_search(query, limit=8)
@@ -788,13 +798,15 @@ def _run_es_review(
 @app.post("/es/review", response_model=ESReviewResponse)
 def es_review(request: ESReviewRequest) -> ESReviewResponse:
     context_docs: List[str] = []
+    safe_company_name = ""
     if request.company_name.strip():
-        cache_key = "{company}::es_review".format(company=request.company_name)
+        safe_company_name = _sanitize_company_name_for_query(request.company_name)
+        cache_key = "{company}::es_review".format(company=safe_company_name)
         context_docs = get_cached_context(
-            cache_key, query=f"{request.company_name} 求める人物像 採用 価値観"
+            cache_key, query=f"{safe_company_name} 求める人物像 採用 価値観"
         )
         if not context_docs and ALLOW_DDG_FALLBACK:
-            query = f"{request.company_name} 求める人物像 大切にしている価値観 採用"
+            query = f"{safe_company_name} 求める人物像 大切にしている価値観 採用"
             results, _ = run_search(query, limit=5)
             if results:
                 context_docs = build_context(results)
@@ -803,6 +815,6 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
     return _run_es_review(
         es_text=request.es_text,
         question_type=request.question_type,
-        company_name=request.company_name,
+        company_name=safe_company_name,
         context_docs=context_docs,
     )
