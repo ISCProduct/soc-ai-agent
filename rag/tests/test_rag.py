@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # ── 重いモジュールをインポート前にモック ──────────────────────────────────────
-# crewai / duckduckgo_search はローカル環境に不要なため sys.modules でスタブ化する
+# crewai はローカル環境に不要なため sys.modules でスタブ化する
 
 _crewai_mock = types.ModuleType("crewai")
 _crewai_mock.Agent = MagicMock()
@@ -24,20 +24,6 @@ _crewai_mock.Task = MagicMock()
 _crewai_mock.Crew = MagicMock()
 _crewai_mock.Process = MagicMock()
 sys.modules.setdefault("crewai", _crewai_mock)
-
-_ddgs_exc_mod = types.ModuleType("duckduckgo_search")
-_ddgs_exc_mod.DDGS = MagicMock()
-sys.modules.setdefault("duckduckgo_search", _ddgs_exc_mod)
-
-_ddgs_exc_sub = types.ModuleType("duckduckgo_search.exceptions")
-
-
-class _RatelimitException(Exception):
-    pass
-
-
-_ddgs_exc_sub.RatelimitException = _RatelimitException
-sys.modules.setdefault("duckduckgo_search.exceptions", _ddgs_exc_sub)
 
 # ── main をインポート ──────────────────────────────────────────────────────────
 import main  # noqa: E402  (after sys.modules stubs)
@@ -60,32 +46,6 @@ class TestCosineSimilarity:
 
     def test_both_zero_returns_zero(self):
         assert main.cosine_similarity([0.0, 0.0], [0.0, 0.0]) == 0.0
-
-
-class TestBuildContext:
-    def test_basic(self):
-        results = [{"title": "Title1", "body": "Snippet1", "href": "http://example.com"}]
-        docs = main.build_context(results)
-        assert len(docs) == 1
-        assert "Title1" in docs[0]
-        assert "Snippet1" in docs[0]
-        assert "http://example.com" in docs[0]
-
-    def test_empty_input(self):
-        assert main.build_context([]) == []
-
-    def test_missing_fields(self):
-        docs = main.build_context([{}])
-        assert len(docs) == 1
-        assert isinstance(docs[0], str)
-
-    def test_multiple_results(self):
-        results = [
-            {"title": "A", "body": "a", "href": "http://a.com"},
-            {"title": "B", "body": "b", "href": "http://b.com"},
-        ]
-        docs = main.build_context(results)
-        assert len(docs) == 2
 
 
 class TestSanitizeCollectionName:
@@ -207,16 +167,13 @@ class TestReviewEndpoint:
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
 
-    def test_review_success_duckduckgo_path(self):
+    def test_review_success_web_search_path(self):
         from fastapi.testclient import TestClient
 
         with patch("main.get_cached_context", return_value=[]), \
              patch("main.USE_DEEP_RESEARCH", False), \
              patch("main.ALLOW_DDG_FALLBACK", True), \
-             patch("main.run_search", return_value=([
-                 {"title": "企業概要", "body": "チームワークを重視", "href": "http://example.com"}
-             ], False)), \
-             patch("main.embed_texts", return_value=[[0.1, 0.2], [0.1, 0.2]]), \
+             patch("main.asyncio.run", return_value="企業の採用情報: チームワークを重視"), \
              patch("main.set_cached_context"), \
              patch("main.run_crewai", return_value="【企業別レビュー報告書】\nレポート内容"):
 
@@ -253,7 +210,7 @@ class TestReviewEndpoint:
         assert call_kwargs.kwargs.get("context_docs") == cached_docs
 
     def test_review_no_context_fallback(self):
-        """Deep Research・DDG 両方無効時もコンテキストなしでレポートを返す。"""
+        """Deep Research・Web Search 両方無効時もコンテキストなしでレポートを返す。"""
         from fastapi.testclient import TestClient
 
         with patch("main.get_cached_context", return_value=[]), \
