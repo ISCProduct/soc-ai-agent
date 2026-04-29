@@ -508,37 +508,39 @@ def _parse_hints_from_text(company_name: str, position: str, research_text: str)
 
 @app.post("/company/hints", response_model=CompanyHintsResponse)
 def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
+    # 入力値サニタイズ（#331: クエリインジェクション対策）
+    safe_company_name = _sanitize_company_name_for_query(request.company_name)
     role_label = request.position or "一般職"
     cache_key = "hints::{company}::{role}".format(
-        company=request.company_name, role=role_label
+        company=safe_company_name, role=role_label
     )
 
     # キャッシュヒット: そのまま構造化して返す
     retrieved = get_cached_context(
-        cache_key, query=f"{request.company_name} 面接 よく聞かれる質問"
+        cache_key, query=f"{safe_company_name} 面接 よく聞かれる質問"
     )
     if retrieved:
-        result = _parse_hints_from_text(request.company_name, role_label, "\n\n".join(retrieved))
+        result = _parse_hints_from_text(safe_company_name, role_label, "\n\n".join(retrieved))
         result.cached = True
         return result
 
     # 1. OpenAI responses API + web_search（最新モデル）で調査
-    research_text = _run_hints_web_search(request.company_name, role_label)
+    research_text = _run_hints_web_search(safe_company_name, role_label)
 
     # 2. responses API が使えない場合は DuckDuckGo フォールバック
     if not research_text and ALLOW_DDG_FALLBACK:
-        query = f"{request.company_name} 面接 よく聞かれる質問 選考体験 {role_label}"
+        query = f"{safe_company_name} 面接 よく聞かれる質問 選考体験 {role_label}"
         results, rate_limited = run_search(query, limit=6)
         if results:
             docs = build_context(results)
             research_text = "\n\n".join(docs)
         elif rate_limited:
-            logger.warning("duckduckgo rate limited for company hints company=%s", request.company_name)
+            logger.warning("duckduckgo rate limited for company hints company=%s", safe_company_name)
 
     if research_text:
         set_cached_context(cache_key, [research_text])
 
-    return _parse_hints_from_text(request.company_name, role_label, research_text or "")
+    return _parse_hints_from_text(safe_company_name, role_label, research_text or "")
 
 
 @app.get("/health")
