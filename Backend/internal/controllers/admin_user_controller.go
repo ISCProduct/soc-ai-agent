@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const maxAdminUsersOffset = 10000
+
 type AdminUserController struct {
 	repo  repository.UserRepository
 	audit *services.AuditLogService
@@ -49,7 +51,7 @@ func (c *AdminUserController) List(w http.ResponseWriter, r *http.Request) {
 		limit = l
 	}
 	if o, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && o >= 0 {
-		offset = o
+		offset = min(o, maxAdminUsersOffset)
 	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 

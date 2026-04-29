@@ -28,10 +28,7 @@ func buildAllowedOrigins() map[string]struct{} {
 	}
 
 	if len(allowedOrigins) == 0 && os.Getenv("APP_ENV") != "production" {
-		for _, origin := range config.DevAllowedOrigins() {
-			allowedOrigins[origin] = struct{}{}
-		}
-		log.Println("WARNING: ALLOWED_ORIGINS が未設定のため、開発用デフォルト（localhost:3000）のみ許可します。")
+		log.Println("WARNING: ALLOWED_ORIGINS が未設定のため、全オリジン拒否で起動します。")
 	}
 
 	return allowedOrigins
@@ -278,7 +275,8 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	}
-	http.HandleFunc("/health", healthHandler)
+	http.HandleFunc(
+		"/health", healthHandler)
 	http.HandleFunc("/healthz", healthHandler)
 
 	// サーバー起動

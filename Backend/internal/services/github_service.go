@@ -6,6 +6,9 @@ import (
 	"Backend/internal/repositories"
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -13,6 +16,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -24,7 +28,8 @@ const (
 	// レート制限: 最終同期から1時間以内は再同期しない
 	syncCacheDuration = time.Hour
 	// レート制限リトライ: 最大2回
-	maxRetries = 2
+	maxRetries                  = 2
+	githubTokenEncryptionKeyEnv = "GITHUB_TOKEN_ENCRYPTION_KEY"
 )
 
 // GitHubService GitHub API連携サービス
@@ -65,12 +70,82 @@ func (s *GitHubService) getGraphQLURL() string {
 
 // StoreAccessToken GitHubアクセストークンとプロフィール基本情報を保存する
 func (s *GitHubService) StoreAccessToken(userID uint, login, accessToken string) error {
+	encryptedToken, err := encryptGitHubToken(accessToken)
+	if err != nil {
+		return fmt.Errorf("encrypt github access token: %w", err)
+	}
 	profile := &models.GitHubProfile{
 		UserID:      userID,
 		GitHubLogin: login,
-		AccessToken: accessToken,
+		AccessToken: encryptedToken,
 	}
 	return s.githubRepo.UpsertProfile(profile)
+}
+
+func encryptGitHubToken(token string) (string, error) {
+	key, err := getGitHubTokenEncryptionKey()
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", err
+	}
+	sealed := gcm.Seal(nil, nonce, []byte(token), nil)
+	payload := append(nonce, sealed...)
+	return base64.StdEncoding.EncodeToString(payload), nil
+}
+
+func decryptGitHubToken(encrypted string) (string, error) {
+	key, err := getGitHubTokenEncryptionKey()
+	if err != nil {
+		return "", err
+	}
+	raw, err := base64.StdEncoding.DecodeString(encrypted)
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	if len(raw) < gcm.NonceSize() {
+		return "", errors.New("encrypted token payload too short")
+	}
+	nonce := raw[:gcm.NonceSize()]
+	ciphertext := raw[gcm.NonceSize():]
+	plain, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
+}
+
+func getGitHubTokenEncryptionKey() ([]byte, error) {
+	raw := strings.TrimSpace(os.Getenv(githubTokenEncryptionKeyEnv))
+	if raw == "" {
+		return nil, fmt.Errorf("%s is required", githubTokenEncryptionKeyEnv)
+	}
+	key, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s: %w", githubTokenEncryptionKeyEnv, err)
+	}
+	if len(key) != 32 {
+		return nil, fmt.Errorf("%s must be base64-encoded 32-byte key", githubTokenEncryptionKeyEnv)
+	}
+	return key, nil
 }
 
 // TriggerAsyncSync 非同期でGitHubデータ同期を開始する（ノンブロッキング）
@@ -103,7 +178,10 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint, force boo
 	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
-	token := profile.AccessToken
+	token, err := decryptGitHubToken(profile.AccessToken)
+	if err != nil {
+		return fmt.Errorf("decrypt github access token: %w", err)
+	}
 	login := profile.GitHubLogin
 
 	// 1. リポジトリ一覧取得（自分のリポジトリ + 所属組織のリポジトリ）
@@ -199,7 +277,11 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	// README取得
-	readme, err := s.fetchREADME(ctx, client, profile.AccessToken, fullName)
+	token, err := decryptGitHubToken(profile.AccessToken)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt github access token: %w", err)
+	}
+	readme, err := s.fetchREADME(ctx, client, token, fullName)
 	if err != nil {
 		log.Printf("[SummarizeRepo] README fetch warning for %s: %v", fullName, err)
 		readme = ""
@@ -319,14 +401,14 @@ func extractRepoSummaryJSON(raw string) string {
 
 // githubAPIRepository GitHub API レスポンスのリポジトリ構造体
 type githubAPIRepository struct {
-	Name        string `json:"name"`
-	FullName    string `json:"full_name"`
-	Description string `json:"description"`
-	Language    string `json:"language"`
-	StargazersCount int `json:"stargazers_count"`
-	ForksCount  int    `json:"forks_count"`
-	Fork        bool   `json:"fork"`
-	UpdatedAt   string `json:"updated_at"`
+	Name            string `json:"name"`
+	FullName        string `json:"full_name"`
+	Description     string `json:"description"`
+	Language        string `json:"language"`
+	StargazersCount int    `json:"stargazers_count"`
+	ForksCount      int    `json:"forks_count"`
+	Fork            bool   `json:"fork"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 // fetchRepositories 自分のリポジトリ + 所属組織のリポジトリを取得してマージする
@@ -525,15 +607,15 @@ type contributedReposGraphQLResponse struct {
 		Viewer struct {
 			RepositoriesContributedTo struct {
 				Nodes []struct {
-					Name        string `json:"name"`
-					NameWithOwner string `json:"nameWithOwner"`
-					Description string `json:"description"`
+					Name            string `json:"name"`
+					NameWithOwner   string `json:"nameWithOwner"`
+					Description     string `json:"description"`
 					PrimaryLanguage *struct {
 						Name string `json:"name"`
 					} `json:"primaryLanguage"`
-					StargazerCount int  `json:"stargazerCount"`
-					ForkCount      int  `json:"forkCount"`
-					IsFork         bool `json:"isFork"`
+					StargazerCount int    `json:"stargazerCount"`
+					ForkCount      int    `json:"forkCount"`
+					IsFork         bool   `json:"isFork"`
 					UpdatedAt      string `json:"updatedAt"`
 				} `json:"nodes"`
 				PageInfo struct {
@@ -564,10 +646,10 @@ func (s *GitHubService) fetchContributedRepos(ctx context.Context, client *http.
 			vars.After = &after
 		}
 		gqlPayload := struct {
-			Query     string                `json:"query"`
-			Variables contributedReposVars  `json:"variables"`
+			Query     string               `json:"query"`
+			Variables contributedReposVars `json:"variables"`
 		}{
-			Query: `query($after: String) { viewer { repositoriesContributedTo(first: 100, includeUserRepositories: true, contributionTypes: [COMMIT, PULL_REQUEST, REPOSITORY], after: $after) { nodes { name nameWithOwner description primaryLanguage { name } stargazerCount forkCount isFork updatedAt } pageInfo { hasNextPage endCursor } } } }`,
+			Query:     `query($after: String) { viewer { repositoriesContributedTo(first: 100, includeUserRepositories: true, contributionTypes: [COMMIT, PULL_REQUEST, REPOSITORY], after: $after) { nodes { name nameWithOwner description primaryLanguage { name } stargazerCount forkCount isFork updatedAt } pageInfo { hasNextPage endCursor } } } }`,
 			Variables: vars,
 		}
 		queryBytes, err := json.Marshal(gqlPayload)

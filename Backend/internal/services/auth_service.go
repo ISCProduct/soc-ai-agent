@@ -18,6 +18,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const passwordHashCost = 12
+
 type AuthService struct {
 	userRepo     repository.UserRepository
 	pendingRepo  repository.PendingRegistrationRepository
@@ -289,8 +291,8 @@ type AuthResponse struct {
 	CertificationsInProgress string `json:"certifications_in_progress,omitempty"`
 	AvatarURL                string `json:"avatar_url,omitempty"`
 	OAuthProvider            string `json:"oauth_provider,omitempty"` // OAuth連携プロバイダ
-	Token                    string `json:"token,omitempty"`           // 管理者トークン（管理者ユーザーのみ）
-	UserToken                string `json:"user_token,omitempty"`      // ユーザー認証トークン（全ユーザー）
+	Token                    string `json:"token,omitempty"`          // 管理者トークン（管理者ユーザーのみ）
+	UserToken                string `json:"user_token,omitempty"`     // ユーザー認証トークン（全ユーザー）
 	EmailVerified            bool   `json:"email_verified"`
 	RequiresReVerification   bool   `json:"requires_re_verification,omitempty"`
 }
@@ -383,7 +385,7 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 	}
 
 	// パスワードハッシュ化
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), passwordHashCost)
 	if err != nil {
 		return nil, fmt.Errorf("failed to hash password: %w", err)
 	}
@@ -454,6 +456,12 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 	// パスワード検証
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
 		return nil, errors.New("invalid email or password")
+	}
+	if currentCost, err := bcrypt.Cost([]byte(user.Password)); err == nil && currentCost < passwordHashCost {
+		if upgradedHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), passwordHashCost); err == nil {
+			user.Password = string(upgradedHash)
+			s.userRepo.UpdateUser(user)
+		}
 	}
 	promoteAdminIfMatched(user, s.userRepo)
 
@@ -668,7 +676,7 @@ func (s *AuthService) ResetPassword(token, newPassword string) error {
 		return errors.New("invalid or expired token")
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), passwordHashCost)
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
