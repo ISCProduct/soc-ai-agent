@@ -1,6 +1,7 @@
 package services
 
 import (
+	"Backend/internal/crypto"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/repositories"
@@ -68,16 +69,24 @@ func (s *GitHubService) getGraphQLURL() string {
 	return githubGraphQLURL
 }
 
-// StoreAccessToken GitHubアクセストークンとプロフィール基本情報を保存する
+// StoreAccessToken GitHubアクセストークンを AES-GCM で暗号化してDBに保存する（#326）
 func (s *GitHubService) StoreAccessToken(userID uint, login, accessToken string) error {
-	encryptedToken, err := encryptGitHubToken(accessToken)
-	if err != nil {
-		return fmt.Errorf("encrypt github access token: %w", err)
+	encryptionKey := os.Getenv("TOKEN_ENCRYPTION_KEY")
+	storedToken := accessToken
+	if encryptionKey != "" {
+		encrypted, err := crypto.EncryptToken(accessToken, encryptionKey)
+		if err != nil {
+			log.Printf("[GitHubService] failed to encrypt access token for user %d: %v", userID, err)
+			return fmt.Errorf("failed to encrypt access token: %w", err)
+		}
+		storedToken = encrypted
+	} else {
+		log.Printf("[GitHubService] WARNING: TOKEN_ENCRYPTION_KEY not set, storing access token in plaintext for user %d", userID)
 	}
 	profile := &models.GitHubProfile{
 		UserID:      userID,
 		GitHubLogin: login,
-		AccessToken: encryptedToken,
+		AccessToken: storedToken,
 	}
 	return s.githubRepo.UpsertProfile(profile)
 }
@@ -178,9 +187,17 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint, force boo
 	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
-	token, err := decryptGitHubToken(profile.AccessToken)
-	if err != nil {
-		return fmt.Errorf("decrypt github access token: %w", err)
+
+	// トークンを復号する（暗号化されている場合）（#326）
+	token := profile.AccessToken
+	if encryptionKey := os.Getenv("TOKEN_ENCRYPTION_KEY"); encryptionKey != "" {
+		decrypted, err := crypto.DecryptToken(profile.AccessToken, encryptionKey)
+		if err != nil {
+			log.Printf("[GitHubService] failed to decrypt access token for user %d: %v", userID, err)
+			// 復号失敗時は平文として扱う（移行期対応）
+		} else {
+			token = decrypted
+		}
 	}
 	login := profile.GitHubLogin
 

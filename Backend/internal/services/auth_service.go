@@ -18,7 +18,9 @@ import (
 	"gorm.io/gorm"
 )
 
-const passwordHashCost = 12
+// bcryptCost パスワードハッシュのコストパラメータ（#328）
+// OWASP 推奨: 12 以上。DefaultCost(10) は現代の GPU 攻撃に対して不十分。
+const bcryptCost = 12
 
 type AuthService struct {
 	userRepo     repository.UserRepository
@@ -385,7 +387,7 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 	}
 
 	// パスワードハッシュ化
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), passwordHashCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost)
 	if err != nil {
 		return nil, fmt.Errorf("failed to hash password: %w", err)
 	}
@@ -403,12 +405,14 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 		CertificationsInProgress: req.CertificationsInProgress,
 	}
 
-	// メール認証トークン生成
+	// メール認証トークン生成（有効期限 24 時間）（#330）
 	tokenBytes := make([]byte, 24)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return nil, fmt.Errorf("failed to generate verification token: %w", err)
 	}
 	user.EmailVerificationToken = base64.URLEncoding.EncodeToString(tokenBytes)
+	emailVerExpires := time.Now().Add(24 * time.Hour)
+	user.EmailVerificationExpires = &emailVerExpires
 
 	if err := s.userRepo.CreateUser(user); err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)
@@ -457,12 +461,15 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
 		return nil, errors.New("invalid email or password")
 	}
-	if currentCost, err := bcrypt.Cost([]byte(user.Password)); err == nil && currentCost < passwordHashCost {
-		if upgradedHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), passwordHashCost); err == nil {
-			user.Password = string(upgradedHash)
-			s.userRepo.UpdateUser(user)
+
+	// コストが古い場合は再ハッシュ（#328: bcryptCost=12 への移行）
+	if cost, err := bcrypt.Cost([]byte(user.Password)); err == nil && cost < bcryptCost {
+		if rehashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost); err == nil {
+			user.Password = string(rehashed)
+			_ = s.userRepo.UpdateUser(user)
 		}
 	}
+
 	promoteAdminIfMatched(user, s.userRepo)
 
 	isOAuth := user.OAuthProvider != ""
@@ -482,6 +489,8 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 				return nil, fmt.Errorf("failed to generate re-verification token: %w", err)
 			}
 			user.EmailVerificationToken = base64.URLEncoding.EncodeToString(tokenBytes)
+			reVerExpires := time.Now().Add(24 * time.Hour)
+			user.EmailVerificationExpires = &reVerExpires
 			user.EmailVerifiedAt = nil
 			s.userRepo.UpdateUser(user)
 			appURL := config.AppURL()
@@ -676,7 +685,7 @@ func (s *AuthService) ResetPassword(token, newPassword string) error {
 		return errors.New("invalid or expired token")
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), passwordHashCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcryptCost)
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
@@ -688,7 +697,7 @@ func (s *AuthService) ResetPassword(token, newPassword string) error {
 	return s.userRepo.UpdateUser(user)
 }
 
-// VerifyEmail トークンを検証してメールを認証済みにする
+// VerifyEmail トークンを検証してメールを認証済みにする（#330: 有効期限チェック追加）
 func (s *AuthService) VerifyEmail(token string) error {
 	if token == "" {
 		return errors.New("token is required")
@@ -700,8 +709,13 @@ func (s *AuthService) VerifyEmail(token string) error {
 	if user == nil {
 		return errors.New("invalid or expired token")
 	}
+	// 有効期限チェック（ExpiresAt が設定されている場合のみ）
+	if user.EmailVerificationExpires != nil && time.Now().After(*user.EmailVerificationExpires) {
+		return errors.New("invalid or expired token")
+	}
 	now := time.Now()
 	user.EmailVerifiedAt = &now
 	user.EmailVerificationToken = ""
+	user.EmailVerificationExpires = nil
 	return s.userRepo.UpdateUser(user)
 }

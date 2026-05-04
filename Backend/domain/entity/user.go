@@ -19,6 +19,7 @@ type User struct {
 	CertificationsInProgress string
 	EmailVerifiedAt          *time.Time
 	EmailVerificationToken   string
+	EmailVerificationExpires *time.Time // メール認証トークン有効期限（#330）
 	LastLoginAt              *time.Time
 	PasswordResetToken       string
 	PasswordResetExpiresAt   *time.Time

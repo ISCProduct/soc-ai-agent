@@ -20,6 +20,7 @@ type User struct {
 	CertificationsInProgress string     `gorm:"type:text;column:certifications_in_progress"` // 勉強中の資格
 	EmailVerifiedAt          *time.Time `gorm:"column:email_verified_at"`                    // メール認証日時
 	EmailVerificationToken   string     `gorm:"size:255;column:email_verification_token"`    // メール認証トークン
+	EmailVerificationExpires *time.Time `gorm:"column:email_verification_expires"`           // メール認証トークン有効期限（#330）
 	LastLoginAt              *time.Time `gorm:"column:last_login_at"`                        // 最終ログイン日時
 	PasswordResetToken       string     `gorm:"size:255;column:password_reset_token"`        // パスワードリセットトークン
 	PasswordResetExpiresAt   *time.Time `gorm:"column:password_reset_expires_at"`            // パスワードリセットトークン有効期限

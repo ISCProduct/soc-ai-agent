@@ -179,8 +179,13 @@ INTERVIEW_MAX_MINUTES=10
 INTERVIEW_MAX_COST_USD=1.8
 INTERVIEW_COST_PER_MIN_USD=0.18
 
-# CORS 許可オリジン（カンマ区切り）
+# CORS 許可オリジン（カンマ区切り）（#327: 未設定時は全オリジン拒否）
 ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+
+# GitHubアクセストークン暗号化キー（AES-256-GCM）（#326）
+# 生成コマンド: python3 -c "import secrets; print(secrets.token_hex(32))"
+# ⚠️ 本番環境では必ず環境ごとに異なる値を設定してください
+TOKEN_ENCRYPTION_KEY=your-64-char-hex-key-here
 
 # gBizINFO
 GBIZINFO_BASE_URL=https://api.biz-info.go.jp
@@ -398,6 +403,8 @@ cpr "123"
 | DB接続エラー | `.env` の `DB_HOST` / 資格情報を確認。MySQL起動確認 |
 | OpenAIキーエラー | `OPENAI_API_KEY` を設定 |
 | OAuth動作不良 | `BASE_URL` / クライアントID / コールバックURLを確認 |
+| GitHub同期エラー | `TOKEN_ENCRYPTION_KEY` が設定されているか確認。未設定だとトークン暗号化がスキップされ警告ログが出力される |
+| CORS エラー（開発時） | `ALLOWED_ORIGINS=http://localhost:3000` を `.env` に設定（未設定時は全オリジン拒否） |
 | S3アップロード失敗 | `AWS_S3_BUCKET` と IAM権限（`s3:PutObject` / `s3:GetObject`）を確認 |
 | フロントビルド失敗 | Node.js 18以上を使用 |
 | rag-review起動失敗 | `rag/constraints.txt` の固定バージョンで `pip install` |

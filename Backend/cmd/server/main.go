@@ -27,8 +27,10 @@ func buildAllowedOrigins() map[string]struct{} {
 		allowedOrigins[trimmed] = struct{}{}
 	}
 
-	if len(allowedOrigins) == 0 && os.Getenv("APP_ENV") != "production" {
-		log.Println("WARNING: ALLOWED_ORIGINS が未設定のため、全オリジン拒否で起動します。")
+	// フェイルセーフ: ALLOWED_ORIGINS 未設定時は全オリジン拒否（#327）
+	// ローカル開発時は .env に ALLOWED_ORIGINS=http://localhost:3000 を明示設定してください。
+	if len(allowedOrigins) == 0 {
+		log.Println("WARNING: ALLOWED_ORIGINS が未設定のため、全クロスオリジンリクエストを拒否します。")
 	}
 
 	return allowedOrigins

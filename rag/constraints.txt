@@ -11,14 +11,14 @@
 # ============================================================
 
 # --- LangChain エコシステム ---
-# crewai の推移的依存。crewai 0.60+ は langchain 0.3.x をサポート済み。
-# 0.4.x 以降は API 破壊的変更の可能性があるため上限を設定。
-langchain>=0.3.0,<0.4
-langchain-community>=0.3.0,<0.5
-langchain-core>=0.3.0,<0.4
-# langchain-openai 0.2.x が langchain 0.3.x に対応するバージョン系列
-langchain-openai>=0.2.0,<0.4
-langchain-text-splitters>=0.3.0,<0.4
+# crewai 0.64.0 は langchain 0.2.x を要求する（langchain<0.3.0,>=0.2.16）。
+# 0.3.x 以降は crewai 0.64.0 との互換性がないため上限を 0.3 未満に設定。
+langchain>=0.2.16,<0.3.0
+langchain-community>=0.2.6,<0.3.0
+langchain-core>=0.2.43,<0.3.0
+# langchain-openai 0.1.x が langchain 0.2.x に対応するバージョン系列
+langchain-openai>=0.1.7,<0.2.0
+langchain-text-splitters>=0.2.0,<0.3.0
 
 # --- ベクトルストア ---
 # main.py で PersistentClient / get_or_create_collection / upsert / query を直接利用。

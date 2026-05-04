@@ -45,13 +45,17 @@ func (c *AdminUserController) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	const maxOffset = 10000 // DoS対策: 巨大オフセットによるフルスキャンを防ぐ（#332）
 	limit := 25
 	offset := 0
 	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 100 {
 		limit = l
 	}
 	if o, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && o >= 0 {
-		offset = min(o, maxAdminUsersOffset)
+		if o > maxOffset {
+			o = maxOffset
+		}
+		offset = o
 	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 
