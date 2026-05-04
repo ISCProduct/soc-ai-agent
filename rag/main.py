@@ -516,6 +516,7 @@ def _parse_hints_from_text(company_name: str, position: str, research_text: str)
 
 @app.post("/company/hints", response_model=CompanyHintsResponse)
 def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
+    # 入力値サニタイズ（#331: クエリインジェクション対策）
     safe_company_name = _sanitize_company_name_for_query(request.company_name)
     role_label = request.position or "一般職"
     cache_key = "hints::{company}::{role}".format(
@@ -527,7 +528,7 @@ def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
         cache_key, query=f"{safe_company_name} 面接 よく聞かれる質問"
     )
     if retrieved:
-        result = _parse_hints_from_text(request.company_name, role_label, "\n\n".join(retrieved))
+        result = _parse_hints_from_text(safe_company_name, role_label, "\n\n".join(retrieved))
         result.cached = True
         return result
 
