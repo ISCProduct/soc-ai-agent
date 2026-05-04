@@ -8,7 +8,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Generator, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Generator, List, Optional, Tuple, TypeVar
 
 import chromadb
 import tiktoken
@@ -38,7 +38,10 @@ DEFAULT_SEARCH_LOG_DIR = "/app/search_logs"
 
 CACHE_TTL_SECONDS = int(os.getenv("RAG_SEARCH_CACHE_TTL_SECONDS", str(DEFAULT_CACHE_TTL_SECONDS)))
 USE_DEEP_RESEARCH = os.getenv("RAG_USE_DEEP_RESEARCH", "true").lower() == "true"
-ALLOW_DDG_FALLBACK = os.getenv("RAG_ALLOW_DUCKDUCKGO_FALLBACK", "true").lower() == "true"
+ALLOW_WEB_SEARCH_FALLBACK = os.getenv(
+    "RAG_ALLOW_WEB_SEARCH_FALLBACK",
+    os.getenv("RAG_ALLOW_DUCKDUCKGO_FALLBACK", "true"),
+).lower() == "true"
 STRICT_DEEP_RESEARCH = os.getenv("RAG_DEEP_RESEARCH_STRICT", "false").lower() == "true"
 CREWAI_VERBOSE = os.getenv("RAG_CREWAI_VERBOSE", "false").lower() == "true"
 MAX_EMBED_TOKENS = int(os.getenv("RAG_MAX_EMBED_TOKENS", str(DEFAULT_MAX_EMBED_TOKENS)))
@@ -48,6 +51,12 @@ HINTS_PARSE_MAX_TOKENS = int(os.getenv("RAG_HINTS_PARSE_MAX_TOKENS", str(DEFAULT
 RESUME_REVIEW_INPUT_CHAR_LIMIT = int(os.getenv("RAG_REVIEW_RESUME_CHAR_LIMIT", str(DEFAULT_RESUME_REVIEW_INPUT_CHAR_LIMIT)))
 WEB_SEARCH_MODEL = os.getenv("OPENAI_WEB_SEARCH_MODEL", DEFAULT_WEB_SEARCH_MODEL)
 SEARCH_LOG_DIR = os.getenv("RAG_SEARCH_LOG_DIR", DEFAULT_SEARCH_LOG_DIR)
+T = TypeVar("T")
+
+
+def _run_async(async_func: Callable[..., Awaitable[T]], *args: Any) -> T:
+    """同期コンテキストから非同期関数を実行する。"""
+    return asyncio.run(async_func(*args))
 
 # ── Chromadb 永続ベクトルストア ────────────────────────────────────────────
 _chroma_client: Optional[chromadb.PersistentClient] = None
@@ -606,7 +615,7 @@ def _run_hints_web_search(company_name: str, position: str) -> Optional[str]:
         f"{company_name} 採用 求める人物像 評価軸 公式",
     ]
     try:
-        summary = asyncio.run(_run_hints_web_search_pipeline(company_name, role_text, queries))
+        summary = _run_async(_run_hints_web_search_pipeline, company_name, role_text, queries)
         return summary if summary else None
     except Exception as exc:
         logger.warning("hints web search failed company=%s error=%s", company_name, exc)
@@ -779,10 +788,10 @@ def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
                 raise HTTPException(status_code=502, detail="Deep Research failed")
 
     # OpenAI Web Searchパイプライン（クエリ生成→並列検索→LLM要約→キャッシュ保存）
-    if not retrieved and ALLOW_DDG_FALLBACK and safe_company_name:
+    if not retrieved and ALLOW_WEB_SEARCH_FALLBACK and safe_company_name:
         logger.info("web search pipeline start company=%s role=%s", safe_company_name, role_label)
         try:
-            summary = asyncio.run(_run_web_search_pipeline(safe_company_name, role_label))
+            summary = _run_async(_run_web_search_pipeline, safe_company_name, role_label)
             if summary:
                 retrieved = [summary]
                 set_cached_context(cache_key, retrieved)
@@ -799,7 +808,7 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
     """RAGレポートをSSEでストリーミング配信するエンドポイント。"""
     role_label = request.job_title or "指定なし"
 
-    # コンテキスト収集（キャッシュ/DeepResearch/DDG）
+    # コンテキスト収集（キャッシュ/DeepResearch/Web Search）
     retrieved, context_source = _gather_context(request)
 
     source_labels = {
@@ -988,7 +997,7 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
         if not context_docs:
             logger.info("es review web search start company=%s", safe_company_name)
             try:
-                summary = asyncio.run(_run_web_search_pipeline(safe_company_name, ""))
+                summary = _run_async(_run_web_search_pipeline, safe_company_name, "")
                 if summary:
                     context_docs = [summary]
                     set_cached_context(cache_key, context_docs)

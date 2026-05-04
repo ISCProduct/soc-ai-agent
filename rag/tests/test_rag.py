@@ -172,8 +172,8 @@ class TestReviewEndpoint:
 
         with patch("main.get_cached_context", return_value=[]), \
              patch("main.USE_DEEP_RESEARCH", False), \
-             patch("main.ALLOW_DDG_FALLBACK", True), \
-             patch("main.asyncio.run", return_value="企業の採用情報: チームワークを重視"), \
+             patch("main.ALLOW_WEB_SEARCH_FALLBACK", True), \
+             patch("main._run_async", return_value="企業の採用情報: チームワークを重視"), \
              patch("main.set_cached_context"), \
              patch("main.run_crewai", return_value="【企業別レビュー報告書】\nレポート内容"):
 
@@ -215,7 +215,7 @@ class TestReviewEndpoint:
 
         with patch("main.get_cached_context", return_value=[]), \
              patch("main.USE_DEEP_RESEARCH", False), \
-             patch("main.ALLOW_DDG_FALLBACK", False), \
+             patch("main.ALLOW_WEB_SEARCH_FALLBACK", False), \
              patch("main.run_crewai", return_value="外部コンテキストなしのレポート") as mock_crewai:
 
             client = TestClient(main.app)
