@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const maxAdminUsersOffset = 10000
+
 type AdminUserController struct {
 	repo  repository.UserRepository
 	audit *services.AuditLogService

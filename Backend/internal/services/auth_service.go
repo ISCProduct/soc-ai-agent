@@ -293,8 +293,8 @@ type AuthResponse struct {
 	CertificationsInProgress string `json:"certifications_in_progress,omitempty"`
 	AvatarURL                string `json:"avatar_url,omitempty"`
 	OAuthProvider            string `json:"oauth_provider,omitempty"` // OAuth連携プロバイダ
-	Token                    string `json:"token,omitempty"`           // 管理者トークン（管理者ユーザーのみ）
-	UserToken                string `json:"user_token,omitempty"`      // ユーザー認証トークン（全ユーザー）
+	Token                    string `json:"token,omitempty"`          // 管理者トークン（管理者ユーザーのみ）
+	UserToken                string `json:"user_token,omitempty"`     // ユーザー認証トークン（全ユーザー）
 	EmailVerified            bool   `json:"email_verified"`
 	RequiresReVerification   bool   `json:"requires_re_verification,omitempty"`
 }

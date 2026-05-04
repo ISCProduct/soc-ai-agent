@@ -277,7 +277,8 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	}
-	http.HandleFunc("/health", healthHandler)
+	http.HandleFunc(
+		"/health", healthHandler)
 	http.HandleFunc("/healthz", healthHandler)
 
 	// サーバー起動
