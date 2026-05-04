@@ -63,3 +63,6 @@ mysql/logs/
 /Backend/README_RESUME_REVIEW.md
 /frontend/tsconfig.tsbuildinfo
 /Backend/server
+/rag/.venv/
+/rag/__pycache__/
+/rag/tests/__pycache__/

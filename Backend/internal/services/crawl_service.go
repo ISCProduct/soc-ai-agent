@@ -194,6 +194,8 @@ func (s *CrawlService) executeCrawl(source *models.CrawlSource) error {
 		return s.executeJobSiteCompanyCrawl(source)
 	case "job_listing":
 		return s.executeJobListingCrawl(source)
+	case "mynavi_company":
+		return s.executeMynaviCompanyCrawl(source)
 	default:
 		return fmt.Errorf("unsupported target_type: %s", source.TargetType)
 	}
@@ -206,17 +208,24 @@ func validateCrawlSource(source *models.CrawlSource) error {
 	if strings.TrimSpace(source.TargetType) == "" {
 		return errors.New("target_type is required")
 	}
-	if source.TargetType != "company" && source.TargetType != "popular_companies" && source.TargetType != "job_site_company" && source.TargetType != "job_listing" {
-		return errors.New("target_type must be company, popular_companies, job_site_company, or job_listing")
+	validTypes := map[string]bool{
+		"company":          true,
+		"popular_companies": true,
+		"job_site_company": true,
+		"job_listing":      true,
+		"mynavi_company":   true,
 	}
-	if source.TargetType == "popular_companies" && strings.TrimSpace(source.SourceURL) == "" {
-		return errors.New("source_url is required for popular_companies")
+	if !validTypes[source.TargetType] {
+		return errors.New("target_type must be company, popular_companies, job_site_company, job_listing, or mynavi_company")
 	}
-	if source.TargetType == "job_site_company" && strings.TrimSpace(source.SourceURL) == "" {
-		return errors.New("source_url is required for job_site_company")
+	urlRequired := map[string]bool{
+		"popular_companies": true,
+		"job_site_company":  true,
+		"job_listing":       true,
+		"mynavi_company":    true,
 	}
-	if source.TargetType == "job_listing" && strings.TrimSpace(source.SourceURL) == "" {
-		return errors.New("source_url is required for job_listing")
+	if urlRequired[source.TargetType] && strings.TrimSpace(source.SourceURL) == "" {
+		return fmt.Errorf("source_url is required for %s", source.TargetType)
 	}
 	if source.ScheduleType != "weekly" && source.ScheduleType != "monthly" {
 		return errors.New("schedule_type must be weekly or monthly")
@@ -761,4 +770,93 @@ func computeNextRun(now time.Time, source *models.CrawlSource) *time.Time {
 
 func lastDayOfMonth(year int, month time.Month, loc *time.Location) int {
 	return time.Date(year, month+1, 0, 0, 0, 0, 0, loc).Day()
+}
+
+func (s *CrawlService) executeMynaviCompanyCrawl(source *models.CrawlSource) error {
+	rawHTML, err := fetchText(source.SourceURL)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(rawHTML) == "" {
+		return errors.New("empty content from mynavi source_url")
+	}
+
+	extracted, err := parseMynaviCompanyPage(rawHTML)
+	if err != nil {
+		return fmt.Errorf("mynavi parse error: %w", err)
+	}
+	if strings.TrimSpace(extracted.Name) == "" {
+		return errors.New("could not extract company name from mynavi page")
+	}
+
+	now := time.Now()
+	company, err := s.companyRepo.FindByName(extracted.Name)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	if company == nil || errors.Is(err, gorm.ErrRecordNotFound) {
+		newCompany := &models.Company{
+			Name:            extracted.Name,
+			Description:     extracted.Description,
+			Industry:        extracted.Industry,
+			EmployeeCount:   extracted.EmployeeCount,
+			FoundedYear:     extracted.FoundedYear,
+			Location:        extracted.Location,
+			WebsiteURL:      extracted.WebsiteURL,
+			Culture:         extracted.Culture,
+			WorkStyle:       extracted.WorkStyle,
+			WelfareDetails:  extracted.WelfareDetails,
+			MainBusiness:    extracted.MainBusiness,
+			AverageAge:      extracted.AverageAge,
+			FemaleRatio:     extracted.FemaleRatio,
+			SourceType:      source.SourceType,
+			SourceURL:       source.SourceURL,
+			SourceFetchedAt: &now,
+			IsProvisional:   true,
+			DataStatus:      "draft",
+		}
+		return s.companyRepo.Create(newCompany)
+	}
+
+	if extracted.Description != "" {
+		company.Description = extracted.Description
+	}
+	if extracted.Industry != "" {
+		company.Industry = extracted.Industry
+	}
+	if extracted.EmployeeCount > 0 {
+		company.EmployeeCount = extracted.EmployeeCount
+	}
+	if extracted.FoundedYear > 0 {
+		company.FoundedYear = extracted.FoundedYear
+	}
+	if extracted.Location != "" {
+		company.Location = extracted.Location
+	}
+	if extracted.WebsiteURL != "" {
+		company.WebsiteURL = extracted.WebsiteURL
+	}
+	if extracted.Culture != "" {
+		company.Culture = extracted.Culture
+	}
+	if extracted.WorkStyle != "" {
+		company.WorkStyle = extracted.WorkStyle
+	}
+	if extracted.WelfareDetails != "" {
+		company.WelfareDetails = extracted.WelfareDetails
+	}
+	if extracted.MainBusiness != "" {
+		company.MainBusiness = extracted.MainBusiness
+	}
+	if extracted.AverageAge > 0 {
+		company.AverageAge = extracted.AverageAge
+	}
+	if extracted.FemaleRatio > 0 {
+		company.FemaleRatio = extracted.FemaleRatio
+	}
+	company.SourceType = source.SourceType
+	company.SourceURL = source.SourceURL
+	company.SourceFetchedAt = &now
+	return s.companyRepo.Update(company)
 }
