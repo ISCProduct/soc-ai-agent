@@ -3,10 +3,8 @@ set -euo pipefail
 
 repo="${1:-ISCProduct/soc-ai-agent}"
 target_branch="${2:-main}"
-admin_login="${3:-$(gh api user --jq .login)}"
 ruleset_name="main-review-required-no-bypass"
 
-admin_id="$(gh api "users/${admin_login}" --jq .id)"
 existing_id="$(
   gh api "repos/${repo}/rulesets" --jq ".[] | select(.name == \"${ruleset_name}\") | .id" | head -n1 || true
 )"
@@ -23,13 +21,7 @@ cat > "${payload_file}" <<EOF
       "exclude": []
     }
   },
-  "bypass_actors": [
-    {
-      "actor_id": ${admin_id},
-      "actor_type": "User",
-      "bypass_mode": "pull_request"
-    }
-  ],
+  "bypass_actors": [],
   "rules": [
     { "type": "deletion" },
     { "type": "non_fast_forward" },
