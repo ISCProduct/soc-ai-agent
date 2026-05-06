@@ -3,11 +3,18 @@ set -euo pipefail
 
 repo="${1:-ISCProduct/soc-ai-agent}"
 target_branch="${2:-main}"
+bypass_login="${3:-}"
 ruleset_name="main-review-required-no-bypass"
 
 existing_id="$(
   gh api "repos/${repo}/rulesets" --jq ".[] | select(.name == \"${ruleset_name}\") | .id" | head -n1 || true
 )"
+
+bypass_actors='[]'
+if [[ -n "${bypass_login}" ]]; then
+  bypass_id="$(gh api "users/${bypass_login}" --jq .id)"
+  bypass_actors="[ { \"actor_id\": ${bypass_id}, \"actor_type\": \"User\", \"bypass_mode\": \"pull_request\" } ]"
+fi
 
 payload_file="$(mktemp)"
 cat > "${payload_file}" <<EOF
@@ -21,7 +28,7 @@ cat > "${payload_file}" <<EOF
       "exclude": []
     }
   },
-  "bypass_actors": [],
+  "bypass_actors": ${bypass_actors},
   "rules": [
     { "type": "deletion" },
     { "type": "non_fast_forward" },
@@ -32,7 +39,7 @@ cat > "${payload_file}" <<EOF
         "dismiss_stale_reviews_on_push": true,
         "require_code_owner_review": false,
         "require_last_push_approval": false,
-        "required_review_thread_resolution": true
+        "required_review_thread_resolution": false
       }
     }
   ]
