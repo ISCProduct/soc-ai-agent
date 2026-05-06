@@ -1,3 +1,5 @@
+import asyncio
+import datetime
 import json
 import logging
 import math
@@ -5,13 +7,12 @@ import os
 import re
 import threading
 import time
-from typing import Generator, List, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Awaitable, Callable, Generator, List, Optional, Tuple, TypeVar
 
 import chromadb
 import tiktoken
 from crewai import Agent, Task, Crew, Process
-from duckduckgo_search import DDGS
-from duckduckgo_search.exceptions import RatelimitException
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 import openai as openai_module
@@ -32,9 +33,15 @@ DEFAULT_CHROMA_DATA_DIR = "/app/chroma_db"
 DEFAULT_HINTS_PARSE_MAX_TOKENS = 600
 DEFAULT_RESUME_REVIEW_INPUT_CHAR_LIMIT = 10000
 
+DEFAULT_WEB_SEARCH_MODEL = "gpt-4o-search-preview"
+DEFAULT_SEARCH_LOG_DIR = "/app/search_logs"
+
 CACHE_TTL_SECONDS = int(os.getenv("RAG_SEARCH_CACHE_TTL_SECONDS", str(DEFAULT_CACHE_TTL_SECONDS)))
 USE_DEEP_RESEARCH = os.getenv("RAG_USE_DEEP_RESEARCH", "true").lower() == "true"
-ALLOW_DDG_FALLBACK = os.getenv("RAG_ALLOW_DUCKDUCKGO_FALLBACK", "true").lower() == "true"
+ALLOW_WEB_SEARCH_FALLBACK = os.getenv(
+    "RAG_ALLOW_WEB_SEARCH_FALLBACK",
+    os.getenv("RAG_ALLOW_DUCKDUCKGO_FALLBACK", "true"),
+).lower() == "true"
 STRICT_DEEP_RESEARCH = os.getenv("RAG_DEEP_RESEARCH_STRICT", "false").lower() == "true"
 CREWAI_VERBOSE = os.getenv("RAG_CREWAI_VERBOSE", "false").lower() == "true"
 MAX_EMBED_TOKENS = int(os.getenv("RAG_MAX_EMBED_TOKENS", str(DEFAULT_MAX_EMBED_TOKENS)))
@@ -42,6 +49,14 @@ EMBED_MAX_RETRIES = int(os.getenv("RAG_EMBED_MAX_RETRIES", str(DEFAULT_EMBED_MAX
 CHROMA_DATA_DIR = os.getenv("RAG_CHROMA_DATA_DIR", DEFAULT_CHROMA_DATA_DIR)
 HINTS_PARSE_MAX_TOKENS = int(os.getenv("RAG_HINTS_PARSE_MAX_TOKENS", str(DEFAULT_HINTS_PARSE_MAX_TOKENS)))
 RESUME_REVIEW_INPUT_CHAR_LIMIT = int(os.getenv("RAG_REVIEW_RESUME_CHAR_LIMIT", str(DEFAULT_RESUME_REVIEW_INPUT_CHAR_LIMIT)))
+WEB_SEARCH_MODEL = os.getenv("OPENAI_WEB_SEARCH_MODEL", DEFAULT_WEB_SEARCH_MODEL)
+SEARCH_LOG_DIR = os.getenv("RAG_SEARCH_LOG_DIR", DEFAULT_SEARCH_LOG_DIR)
+T = TypeVar("T")
+
+
+def _run_async(async_func: Callable[..., Awaitable[T]], *args: Any) -> T:
+    """同期コンテキストから非同期関数を実行する。"""
+    return asyncio.run(async_func(*args))
 
 # ── Chromadb 永続ベクトルストア ────────────────────────────────────────────
 _chroma_client: Optional[chromadb.PersistentClient] = None
@@ -131,39 +146,12 @@ def set_cached_context(cache_key: str, docs: List[str]) -> None:
         logger.exception("chromadb set failed key=%s error=%s", cache_key, exc)
 
 
-def run_search(query: str, limit: int = 5) -> Tuple[List[dict], bool]:
-    try:
-        with DDGS() as ddgs:
-            return list(ddgs.text(query, max_results=limit)), False
-    except RatelimitException as exc:
-        logger.warning("duckduckgo rate limited for query=%s error=%s", query, exc)
-        return [], True
-    except Exception as exc:
-        logger.warning("duckduckgo search failed for query=%s error=%s", query, exc)
-        return [], False
-
-
 def _sanitize_company_name_for_query(company_name: str) -> str:
     sanitized = re.sub(r"[^0-9A-Za-zぁ-んァ-ン一-龥ー々〆ヵヶ・\s]", "", company_name)
     sanitized = re.sub(r"\s+", " ", sanitized).strip()
     if not sanitized:
         raise HTTPException(status_code=400, detail="invalid company_name")
     return sanitized
-
-
-def build_context(results: List[dict]) -> List[str]:
-    docs = []
-    for item in results:
-        title = item.get("title", "")
-        snippet = item.get("body", "")
-        url = item.get("href", "")
-        text = "Title: {title}\nSnippet: {snippet}\nURL: {url}".format(
-            title=title,
-            snippet=snippet,
-            url=url,
-        )
-        docs.append(text.strip())
-    return docs
 
 
 def _truncate_text(text: str, model: str) -> str:
@@ -346,7 +334,7 @@ def run_crewai(
 
     source_labels = {
         "deep_research": "OpenAI Deep Research（o3-deep-research）",
-        "duckduckgo": "DuckDuckGo ウェブ検索",
+        "web_search": "OpenAI Web Search（gpt-4o-search-preview）",
         "cache": "chromadb キャッシュ（以前の検索結果）",
         "none": "事前学習データのみ（外部検索なし）",
     }
@@ -424,6 +412,182 @@ def run_crewai(
     return str(crew.kickoff())
 
 
+def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
+    """LLMを使って企業・職種に応じた3〜5つの検索クエリを生成する。
+
+    以下の3軸をカバーするクエリを生成する:
+    - 採用方針（採用基準・求める人物像・企業文化）
+    - 選考の特徴（面接スタイル・選考フロー・評価ポイント）
+    - 最近の事業展開（直近ニュース・IR情報・新規事業）
+    """
+    api_key = os.getenv("OPENAI_API_KEY")
+    role_text = job_title or "一般職"
+    if not api_key:
+        return [
+            f"{company_name} {role_text} 採用方針 求める人物像",
+            f"{company_name} {role_text} 面接 選考 特徴",
+            f"{company_name} 最近の事業展開 ニュース IR",
+        ]
+    client = OpenAI(api_key=api_key)
+    prompt = (
+        f"企業名: {company_name}\n"
+        f"職種: {role_text}\n\n"
+        "この企業と職種について、以下の3軸をカバーする検索クエリを3〜5個生成してください。\n"
+        "軸1: 採用方針（採用基準・求める人物像・企業文化）\n"
+        "軸2: 選考の特徴（面接スタイル・選考フロー・評価ポイント）\n"
+        "軸3: 最近の事業展開（直近のニュース・IR情報・新規事業）\n\n"
+        "検索エンジンのヒット率を最大化するため、具体的なキーワードを組み合わせてください。\n"
+        "出力はJSONのみ: {\"queries\": [\"クエリ1\", \"クエリ2\", ...]}"
+    )
+    try:
+        resp = client.chat.completions.create(
+            model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o"),
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=300,
+            response_format={"type": "json_object"},
+        )
+        data = json.loads(resp.choices[0].message.content or "{}")
+        queries = data.get("queries", [])
+        if queries:
+            logger.info("generated %d search queries company=%s", len(queries), company_name)
+            return queries[:5]
+    except Exception as exc:
+        logger.warning("query generation failed company=%s error=%s", company_name, exc)
+    return [
+        f"{company_name} {role_text} 採用方針 求める人物像",
+        f"{company_name} {role_text} 面接 選考 特徴",
+        f"{company_name} 最近の事業展開 ニュース IR",
+    ]
+
+
+def _web_search_openai(query: str) -> str:
+    """OpenAI Web Search APIで1クエリを実行し、結果テキストを返す。"""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return ""
+    client = OpenAI(api_key=api_key)
+    try:
+        response = client.chat.completions.create(
+            model=WEB_SEARCH_MODEL,
+            messages=[{"role": "user", "content": query}],
+            max_tokens=1000,
+        )
+        text = response.choices[0].message.content or ""
+        logger.info("web search query=%s chars=%d model=%s", query[:60], len(text), WEB_SEARCH_MODEL)
+        return text.strip()
+    except Exception as exc:
+        logger.warning("web search failed query=%s model=%s error=%s", query[:60], WEB_SEARCH_MODEL, exc)
+        return ""
+
+
+def _summarize_for_hiring(company_name: str, job_title: str, raw_texts: List[str]) -> str:
+    """検索結果を採用観点でLLMに要約させる。一次情報（公式/IR/インタビュー）を優先抽出。"""
+    if not raw_texts:
+        return ""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return "\n\n".join(raw_texts)
+    client = OpenAI(api_key=api_key)
+    role_text = job_title or "一般職"
+    combined = "\n\n---\n\n".join(raw_texts)[:6000]
+    prompt = (
+        f"企業名: {company_name}\n"
+        f"職種: {role_text}\n\n"
+        "以下の検索結果をもとに、採用観点での企業分析サマリーを日本語で作成してください。\n\n"
+        "【優先情報ソース（重要度順）】\n"
+        "1. 企業公式サイト（採用ページ・企業理念・代表メッセージ）\n"
+        "2. IR情報（投資家向け資料・決算説明会・中期経営計画）\n"
+        "3. インタビュー記事・社員の声（一次情報）\n"
+        "4. ニュースリリース・プレスリリース\n"
+        "5. 就活メディア・口コミ（参考程度）\n\n"
+        "上位ソースの情報を優先的に引用し、不確かな情報には「※要確認」を付けてください。\n\n"
+        "【まとめる内容】\n"
+        "- 採用方針と求める人物像\n"
+        "- 選考の特徴・評価軸\n"
+        "- 最近の事業展開と成長戦略\n\n"
+        f"【検索結果】\n{combined}"
+    )
+    try:
+        resp = client.chat.completions.create(
+            model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o"),
+            messages=[
+                {"role": "system", "content": "あなたは企業リサーチの専門アナリストです。"},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+            max_tokens=800,
+        )
+        summary = resp.choices[0].message.content or ""
+        logger.info("hiring summary generated company=%s chars=%d", company_name, len(summary))
+        return summary.strip()
+    except Exception as exc:
+        logger.warning("hiring summary failed company=%s error=%s", company_name, exc)
+        return "\n\n".join(raw_texts)
+
+
+def _save_search_log(
+    company_name: str,
+    job_title: str,
+    queries: List[str],
+    raw_results: List[str],
+    summary: str,
+) -> None:
+    """検索結果をJSONL形式でログ保存する（ファインチューニング用データセット）。"""
+    try:
+        os.makedirs(SEARCH_LOG_DIR, exist_ok=True)
+        log_path = os.path.join(SEARCH_LOG_DIR, "search_log.jsonl")
+        record = {
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "company_name": company_name,
+            "job_title": job_title,
+            "queries": queries,
+            "raw_results": raw_results,
+            "summary": summary,
+        }
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        logger.info("search log saved company=%s path=%s", company_name, log_path)
+    except Exception as exc:
+        logger.warning("search log save failed company=%s error=%s", company_name, exc)
+
+
+async def _run_web_search_pipeline(company_name: str, job_title: str) -> str:
+    """クエリ生成 → 並列Web Search → LLM要約 → ログ保存 の非同期パイプライン。
+
+    キャッシュミス時に呼び出し、構造化された採用情報サマリーを返す。
+    """
+    loop = asyncio.get_event_loop()
+
+    # クエリ生成（スレッドプールで実行）
+    queries = await loop.run_in_executor(
+        None, _generate_search_queries, company_name, job_title
+    )
+
+    # Web Search を並列実行
+    with ThreadPoolExecutor() as executor:
+        raw_results = list(await asyncio.gather(
+            *[loop.run_in_executor(executor, _web_search_openai, q) for q in queries]
+        ))
+    raw_results = [r for r in raw_results if r]
+
+    if not raw_results:
+        logger.warning("web search pipeline: no results company=%s", company_name)
+        return ""
+
+    # 採用観点での要約
+    summary = await loop.run_in_executor(
+        None, _summarize_for_hiring, company_name, job_title, raw_results
+    )
+
+    # JSONL ログ保存（非同期、失敗しても処理を止めない）
+    await loop.run_in_executor(
+        None, _save_search_log, company_name, job_title, queries, raw_results, summary
+    )
+
+    return summary
+
+
 class CompanyHintsRequest(BaseModel):
     company_name: str = Field(min_length=1)
     position: str = Field(default="")
@@ -436,38 +600,80 @@ class CompanyHintsResponse(BaseModel):
 
 
 def _run_hints_web_search(company_name: str, position: str) -> Optional[str]:
-    """Chat Completions API の web search 専用モデルで面接傾向を調査する。
-    参照: https://platform.openai.com/docs/guides/tools-web-search
+    """OpenAI Web Search APIで面接傾向を多角的に調査し、採用観点でLLM要約して返す。
+
+    3軸のクエリ（面接スタイル・頻出質問・採用基準）を並列実行して情報ヒット率を高める。
     """
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return None
-    client = OpenAI(api_key=api_key)
-    # web search 専用モデル (Chat Completions API) を使用
-    # 対応モデル: gpt-4o-search-preview, gpt-4o-mini-search-preview
-    model = os.getenv("OPENAI_HINTS_MODEL", "gpt-4o-search-preview")
     role_text = position or "一般職"
+    # 面接調査に特化した3軸クエリ
+    queries = [
+        f"{company_name} {role_text} 面接 選考スタイル 特徴 体験談",
+        f"{company_name} {role_text} 面接 よく聞かれる質問 口コミ",
+        f"{company_name} 採用 求める人物像 評価軸 公式",
+    ]
+    try:
+        summary = _run_async(_run_hints_web_search_pipeline, company_name, role_text, queries)
+        return summary if summary else None
+    except Exception as exc:
+        logger.warning("hints web search failed company=%s error=%s", company_name, exc)
+        return None
+
+
+async def _run_hints_web_search_pipeline(
+    company_name: str, role_text: str, queries: List[str]
+) -> str:
+    """面接調査クエリを並列Web Searchし、面接観点でLLM要約して返す。"""
+    loop = asyncio.get_event_loop()
+
+    with ThreadPoolExecutor() as executor:
+        raw_results = list(await asyncio.gather(
+            *[loop.run_in_executor(executor, _web_search_openai, q) for q in queries]
+        ))
+    raw_results = [r for r in raw_results if r]
+
+    if not raw_results:
+        return ""
+
+    # 面接観点での要約（一次情報優先）
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return "\n\n".join(raw_results)
+    client = OpenAI(api_key=api_key)
+    combined = "\n\n---\n\n".join(raw_results)[:5000]
     prompt = (
-        f"以下の企業の面接について、実際の選考体験・口コミをウェブで調べて日本語で整理してください。\n\n"
         f"企業名: {company_name}\n"
         f"職種: {role_text}\n\n"
+        "以下の検索結果から、面接・選考に関する情報を採用観点で整理してください。\n\n"
+        "【優先情報ソース（重要度順）】\n"
+        "1. 企業公式採用サイト・説明会レポート\n"
+        "2. 実際の選考体験談（一次情報）\n"
+        "3. IR情報・インタビュー記事\n"
+        "4. 就活メディア・口コミサイト（参考程度）\n\n"
+        "不確かな情報には「※要確認」を付けてください。\n\n"
         "以下の2点を簡潔にまとめてください:\n"
-        "1. 面接スタイルの特徴（例: ケース面接の有無、深掘り質問の傾向、グループディスカッションの有無など）\n"
+        "1. 面接スタイルの特徴（ケース面接の有無・深掘り傾向・グループディスカッションの有無等）\n"
         "2. よく聞かれる質問トップ5\n\n"
-        "情報が見つからない場合は「情報なし」と返してください。"
+        f"【検索結果】\n{combined}"
     )
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
+        resp = client.chat.completions.create(
+            model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o"),
+            messages=[
+                {"role": "system", "content": "あなたは就活生向けの面接アドバイザーです。"},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
             max_tokens=800,
         )
-        text = response.choices[0].message.content or ""
-        logger.info("hints web search finished company=%s chars=%d model=%s", company_name, len(text), model)
-        return text.strip() if text.strip() else None
+        summary = resp.choices[0].message.content or ""
+        logger.info("hints web search summary company=%s chars=%d", company_name, len(summary))
+        return summary.strip()
     except Exception as exc:
-        logger.warning("hints web search failed company=%s model=%s error=%s", company_name, model, exc)
-        return None
+        logger.warning("hints web search summary failed company=%s error=%s", company_name, exc)
+        return "\n\n".join(raw_results)
 
 
 def _parse_hints_from_text(company_name: str, position: str, research_text: str) -> CompanyHintsResponse:
@@ -532,18 +738,8 @@ def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
         result.cached = True
         return result
 
-    # 1. OpenAI responses API + web_search（最新モデル）で調査
+    # OpenAI Web Search（多角的クエリ生成 → 並列検索 → LLM要約）
     research_text = _run_hints_web_search(safe_company_name, role_label)
-
-    # 2. responses API が使えない場合は DuckDuckGo フォールバック
-    if not research_text and ALLOW_DDG_FALLBACK:
-        query = f"{safe_company_name} 面接 よく聞かれる質問 選考体験 {role_label}"
-        results, rate_limited = run_search(query, limit=6)
-        if results:
-            docs = build_context(results)
-            research_text = "\n\n".join(docs)
-        elif rate_limited:
-            logger.warning("duckduckgo rate limited for company hints company=%s", safe_company_name)
 
     if research_text:
         set_cached_context(cache_key, [research_text])
@@ -564,55 +760,48 @@ def healthz() -> dict:
 
 
 def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
-    """RAGコンテキストを収集し (docs, context_source) を返す。"""
+    """RAGコンテキストを収集し (docs, context_source) を返す。
+
+    キャッシュヒット時は即時返却。ミス時は以下のパイプラインを実行:
+    クエリ生成 → 並列Web Search → LLM要約（採用観点） → キャッシュ保存
+    """
     safe_company_name = _sanitize_company_name_for_query(request.company_name)
     role_label = request.job_title or "指定なし"
     cache_key = "{company}::{role}".format(company=safe_company_name, role=role_label)
-    context_source = "none"
 
+    # キャッシュヒット: 即時返却
     retrieved = get_cached_context(cache_key)
     if retrieved:
-        context_source = "cache"
-    else:
-        if USE_DEEP_RESEARCH and safe_company_name:
-            try:
-                report = run_deep_research(safe_company_name, role_label)
-                if report:
-                    retrieved = [report]
-                    set_cached_context(cache_key, retrieved)
-                    context_source = "deep_research"
-                else:
-                    logger.warning("deep research returned empty result")
-            except Exception as exc:
-                logger.error("deep research failed error=%s", exc, exc_info=True)
-                if STRICT_DEEP_RESEARCH and not ALLOW_DDG_FALLBACK:
-                    raise HTTPException(status_code=502, detail="Deep Research failed")
+        return retrieved, "cache"
 
-        if not retrieved and ALLOW_DDG_FALLBACK:
-            logger.info(
-                "duckduckgo search start company=%s role=%s",
-                safe_company_name,
-                role_label,
-            )
-            query = "{company} {role} 求める人物像 大切にしている価値観".format(
-                company=safe_company_name,
-                role=role_label,
-            )
-            results, rate_limited = run_search(query, limit=8)
-            if not results:
-                if rate_limited:
-                    logger.warning("duckduckgo rate limited; continuing without external context")
-                else:
-                    logger.warning("duckduckgo returned no results; continuing without external context")
-            else:
-                docs = build_context(results)
-                set_cached_context(cache_key, docs)
-                retrieved = get_cached_context(cache_key)
-                if not retrieved:
-                    retrieved = docs[:5]
-                context_source = "duckduckgo"
+    # Deep Research (o3-deep-research)
+    if USE_DEEP_RESEARCH and safe_company_name:
+        try:
+            report = run_deep_research(safe_company_name, role_label)
+            if report:
+                retrieved = [report]
+                set_cached_context(cache_key, retrieved)
+                return retrieved, "deep_research"
+            logger.warning("deep research returned empty result")
+        except Exception as exc:
+            logger.error("deep research failed error=%s", exc, exc_info=True)
+            if STRICT_DEEP_RESEARCH:
+                raise HTTPException(status_code=502, detail="Deep Research failed")
 
-    return retrieved, context_source
+    # OpenAI Web Searchパイプライン（クエリ生成→並列検索→LLM要約→キャッシュ保存）
+    if not retrieved and ALLOW_WEB_SEARCH_FALLBACK and safe_company_name:
+        logger.info("web search pipeline start company=%s role=%s", safe_company_name, role_label)
+        try:
+            summary = _run_async(_run_web_search_pipeline, safe_company_name, role_label)
+            if summary:
+                retrieved = [summary]
+                set_cached_context(cache_key, retrieved)
+                return retrieved, "web_search"
+            logger.warning("web search pipeline returned empty result company=%s", safe_company_name)
+        except Exception as exc:
+            logger.error("web search pipeline failed error=%s", exc, exc_info=True)
+
+    return retrieved or [], "none"
 
 
 @app.post("/resume/review/stream")
@@ -620,12 +809,12 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
     """RAGレポートをSSEでストリーミング配信するエンドポイント。"""
     role_label = request.job_title or "指定なし"
 
-    # コンテキスト収集（キャッシュ/DeepResearch/DDG）
+    # コンテキスト収集（キャッシュ/DeepResearch/Web Search）
     retrieved, context_source = _gather_context(request)
 
     source_labels = {
         "deep_research": "OpenAI Deep Research（o3-deep-research）",
-        "duckduckgo": "DuckDuckGo ウェブ検索",
+        "web_search": "OpenAI Web Search（gpt-4o-search-preview）",
         "cache": "chromadb キャッシュ（以前の検索結果）",
         "none": "事前学習データのみ（外部検索なし）",
     }
@@ -806,12 +995,15 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
         context_docs = get_cached_context(
             cache_key, query=f"{safe_company_name} 求める人物像 採用 価値観"
         )
-        if not context_docs and ALLOW_DDG_FALLBACK:
-            query = f"{safe_company_name} 求める人物像 大切にしている価値観 採用"
-            results, _ = run_search(query, limit=5)
-            if results:
-                context_docs = build_context(results)
-                set_cached_context(cache_key, context_docs)
+        if not context_docs:
+            logger.info("es review web search start company=%s", safe_company_name)
+            try:
+                summary = _run_async(_run_web_search_pipeline, safe_company_name, "")
+                if summary:
+                    context_docs = [summary]
+                    set_cached_context(cache_key, context_docs)
+            except Exception as exc:
+                logger.warning("es review web search failed company=%s error=%s", safe_company_name, exc)
 
     return _run_es_review(
         es_text=request.es_text,

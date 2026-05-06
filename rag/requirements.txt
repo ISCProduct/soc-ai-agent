@@ -2,8 +2,7 @@
 # バージョン制約の詳細は constraints.txt を参照。
 chromadb>=0.6.3,<1.0
 crewai==0.64.0
-duckduckgo-search==6.4.2
-fastapi==0.136.1
+fastapi==0.136.0
 openai==1.109.1
 pydantic==2.13.3
 pytest==8.4.2
