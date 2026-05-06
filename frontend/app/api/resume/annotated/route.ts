@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { buildProxyJsonResponse, buildProxyNetworkErrorResponse } from '@/lib/api-proxy'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
@@ -22,8 +23,7 @@ export async function GET(request: NextRequest) {
       headers: upstreamHeaders,
     })
     if (!response.ok) {
-      const data = await response.json().catch(() => ({}))
-      return NextResponse.json(data, { status: response.status })
+      return buildProxyJsonResponse(response)
     }
 
     const buffer = await response.arrayBuffer()
@@ -43,6 +43,6 @@ export async function GET(request: NextRequest) {
     return new NextResponse(buffer, { status, headers })
   } catch (error) {
     console.error('Resume annotated proxy error:', error)
-    return NextResponse.json({ error: 'Failed to connect to backend' }, { status: 500 })
+    return buildProxyNetworkErrorResponse(error, 'Failed to connect to backend')
   }
 }

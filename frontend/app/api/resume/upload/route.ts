@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { parseProxyResponse } from '@/lib/proxy-response'
+import { NextRequest } from 'next/server'
+import { buildProxyJsonResponse, buildProxyNetworkErrorResponse } from '@/lib/api-proxy'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
@@ -12,12 +12,9 @@ export async function POST(request: NextRequest) {
       method: 'POST',
       body: formData,
     })
-
-    const raw = await response.text()
-    const data = parseProxyResponse(raw, response.ok)
-    return NextResponse.json(data, { status: response.status })
+    return buildProxyJsonResponse(response)
   } catch (error) {
     console.error('Resume upload proxy error:', error)
-    return NextResponse.json({ error: 'Failed to connect to backend' }, { status: 500 })
+    return buildProxyNetworkErrorResponse(error, 'Failed to connect to backend')
   }
 }
