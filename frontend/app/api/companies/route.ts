@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
+import { buildProxyJsonResponse, buildProxyNetworkErrorResponse } from '@/lib/api-proxy'
 
 const API_BASE_URL = process.env.BACKEND_URL || 'http://app:8080'
 
@@ -31,24 +32,12 @@ export async function GET(request: NextRequest) {
       },
       cache: 'no-store',
     })
-
     if (!response.ok) {
       console.error('[API] Backend error:', response.status, response.statusText)
-      return NextResponse.json(
-        { error: 'Failed to fetch companies from backend' },
-        { status: response.status }
-      )
     }
-
-    const data = await response.json()
-    console.log('[API] Companies fetched:', data.companies?.length || 0)
-    
-    return NextResponse.json(data)
+    return buildProxyJsonResponse(response)
   } catch (error) {
     console.error('[API] Error fetching companies:', error)
-    return NextResponse.json(
-      { error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
-    )
+    return buildProxyNetworkErrorResponse(error, 'Internal server error')
   }
 }

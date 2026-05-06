@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { buildProxyJsonResponse, buildProxyNetworkErrorResponse } from '@/lib/api-proxy'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
@@ -28,17 +29,9 @@ export async function GET(request: NextRequest) {
       }
     )
 
-    if (!response.ok) {
-      throw new Error(`Backend API error: ${response.statusText}`)
-    }
-
-    const data = await response.json()
-    return NextResponse.json(data)
+    return buildProxyJsonResponse(response)
   } catch (error) {
     console.error('API proxy error:', error)
-    return NextResponse.json(
-      { error: 'Failed to connect to backend' },
-      { status: 500 }
-    )
+    return buildProxyNetworkErrorResponse(error, 'Failed to connect to backend')
   }
 }
