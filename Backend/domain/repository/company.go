@@ -18,6 +18,8 @@ type CompanyRelationQueryRepository interface {
 type CompanyRepository interface {
 	FindAllActive(limit, offset int) ([]models.Company, error)
 	CountActive() (int64, error)
+	FindAllPublished(limit, offset int) ([]models.Company, error)
+	CountPublished() (int64, error)
 	FindByID(id uint) (*models.Company, error)
 	FindByName(name string) (*models.Company, error)
 	FindByCorporateNumber(corporateNumber string) (*models.Company, error)
