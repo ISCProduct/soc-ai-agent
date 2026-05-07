@@ -37,6 +37,25 @@ func (r *CompanyRepository) CountActive() (int64, error) {
 	return count, err
 }
 
+// FindAllPublished 公開済み企業をページネーション付きで取得（マッチング用）
+func (r *CompanyRepository) FindAllPublished(limit, offset int) ([]models.Company, error) {
+	var companies []models.Company
+	err := r.db.Where("is_active = ? AND data_status = ?", true, "published").
+		Order("id desc").
+		Limit(limit).Offset(offset).
+		Find(&companies).Error
+	return companies, err
+}
+
+// CountPublished 公開済み企業数を取得
+func (r *CompanyRepository) CountPublished() (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Company{}).
+		Where("is_active = ? AND data_status = ?", true, "published").
+		Count(&count).Error
+	return count, err
+}
+
 // FindByID IDで企業を取得
 func (r *CompanyRepository) FindByID(id uint) (*models.Company, error) {
 	var company models.Company
