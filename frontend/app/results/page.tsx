@@ -237,7 +237,7 @@ function ResultsContent() {
           if (reason === 'insufficient_user_scores') {
             message = '判定結果を出すための根拠が不足しています。チャットで質問に回答してください。'
           } else if (reason === 'insufficient_company_data') {
-            message = '企業マッチング用のデータが不足しています。しばらく待ってから再度お試しください。'
+            message = '現在、公開済みの企業データがありません。管理者が企業情報を公開するまでお待ちください。'
           }
           if (diagnostics) {
             message += `\n\nスコア数: ${diagnostics.user_score_count}, 企業数: ${diagnostics.active_company_count}, プロファイル数: ${diagnostics.weight_profile_count}`
