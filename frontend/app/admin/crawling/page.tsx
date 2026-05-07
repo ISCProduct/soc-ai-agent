@@ -43,6 +43,14 @@ type CrawlRun = {
   ended_at?: string
 }
 
+type ScraperSession = {
+  id: number
+  site_key: string
+  cookies: string
+  expires_at?: string
+  updated_at: string
+}
+
 const WEEKDAY_OPTIONS = [
   { value: 0, label: '日' },
   { value: 1, label: '月' },
@@ -94,6 +102,15 @@ export default function AdminCrawlingPage() {
   const [gbizRegisterLoading, setGbizRegisterLoading] = useState<string | null>(null)
   const [gbizRegisterMessage, setGbizRegisterMessage] = useState('')
 
+  // スクレイパーセッション管理
+  const [sessions, setSessions] = useState<ScraperSession[]>([])
+  const [sessionSiteKey, setSessionSiteKey] = useState('mynavi')
+  const [sessionCookies, setSessionCookies] = useState('')
+  const [sessionExpiresAt, setSessionExpiresAt] = useState('')
+  const [sessionLoading, setSessionLoading] = useState(false)
+  const [sessionError, setSessionError] = useState('')
+  const [sessionSuccess, setSessionSuccess] = useState('')
+
   useEffect(() => {
     fetch('/api/admin/company-graph-crawl')
       .then((r) => r.json())
@@ -131,9 +148,60 @@ export default function AdminCrawlingPage() {
     }
   }
 
+  const loadSessions = async () => {
+    const res = await fetch('/api/admin/scraper-sessions', {
+      headers: authService.getAdminFetchHeaders(),
+    })
+    if (res.ok) {
+      const d = await res.json()
+      setSessions(d?.sessions || [])
+    }
+  }
+
+  const handleSessionUpsert = async () => {
+    setSessionError('')
+    setSessionSuccess('')
+    setSessionLoading(true)
+    try {
+      const payload: Record<string, string> = {
+        site_key: sessionSiteKey,
+        cookies: sessionCookies,
+      }
+      if (sessionExpiresAt) payload.expires_at = new Date(sessionExpiresAt).toISOString()
+
+      const res = await fetch('/api/admin/scraper-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authService.getAdminFetchHeaders() },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const msg = await res.text()
+        setSessionError(msg || '登録に失敗しました')
+      } else {
+        setSessionSuccess('セッションを登録しました')
+        setSessionCookies('')
+        setSessionExpiresAt('')
+        await loadSessions()
+      }
+    } finally {
+      setSessionLoading(false)
+    }
+  }
+
+  const handleSessionDelete = async (siteKey: string) => {
+    const res = await fetch(`/api/admin/scraper-sessions/${encodeURIComponent(siteKey)}`, {
+      method: 'DELETE',
+      headers: authService.getAdminFetchHeaders(),
+    })
+    if (res.ok) {
+      await loadSessions()
+    }
+  }
+
   useEffect(() => {
     loadSources()
     loadRuns()
+    loadSessions()
   }, [])
 
   const handleCreate = async () => {
@@ -666,6 +734,94 @@ export default function AdminCrawlingPage() {
                 </Stack>
               </Box>
             ))}
+          </Stack>
+        </CardContent>
+      </Card>
+
+      {/* ── スクレイパーセッション管理 ── */}
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>スクレイパーセッション管理</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            ログイン必須のスクレイピングサイト（マイナビ等）のCookieを登録します。
+            ブラウザのDevTools → Application → Cookies からコピーしてください。
+          </Typography>
+
+          {sessionError && <Alert severity="error" sx={{ mb: 2 }}>{sessionError}</Alert>}
+          {sessionSuccess && <Alert severity="success" sx={{ mb: 2 }}>{sessionSuccess}</Alert>}
+
+          {/* 登録済みセッション一覧 */}
+          {sessions.length > 0 && (
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="subtitle2" gutterBottom>登録済みセッション</Typography>
+              <Stack spacing={1}>
+                {sessions.map((s) => {
+                  const expired = s.expires_at ? new Date(s.expires_at) < new Date() : false
+                  return (
+                    <Box key={s.site_key} sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 1, border: '1px solid', borderColor: expired ? 'error.light' : 'divider', borderRadius: 1 }}>
+                      <Chip label={s.site_key} size="small" color={expired ? 'error' : 'success'} />
+                      <Typography variant="body2" sx={{ flex: 1 }}>
+                        更新日: {new Date(s.updated_at).toLocaleDateString('ja-JP')}
+                        {s.expires_at && (
+                          <span style={{ marginLeft: 8, color: expired ? 'red' : 'inherit' }}>
+                            {expired ? '⚠️ 期限切れ' : `有効期限: ${new Date(s.expires_at).toLocaleDateString('ja-JP')}`}
+                          </span>
+                        )}
+                      </Typography>
+                      <Button
+                        size="small"
+                        color="error"
+                        variant="outlined"
+                        onClick={() => handleSessionDelete(s.site_key)}
+                      >
+                        削除
+                      </Button>
+                    </Box>
+                  )
+                })}
+              </Stack>
+            </Box>
+          )}
+
+          {/* 登録フォーム */}
+          <Stack spacing={2} sx={{ maxWidth: 600 }}>
+            <TextField
+              select
+              label="サイト"
+              value={sessionSiteKey}
+              onChange={(e) => setSessionSiteKey(e.target.value)}
+              size="small"
+            >
+              <MenuItem value="mynavi">マイナビ</MenuItem>
+              <MenuItem value="rikunabi">リクナビ</MenuItem>
+              <MenuItem value="openwork">OpenWork</MenuItem>
+              <MenuItem value="other">その他</MenuItem>
+            </TextField>
+            <TextField
+              label="Cookie文字列"
+              multiline
+              rows={3}
+              value={sessionCookies}
+              onChange={(e) => setSessionCookies(e.target.value)}
+              placeholder="JSESSIONID=abc123; session_key=xyz（またはJSON配列）"
+              size="small"
+            />
+            <TextField
+              label="有効期限（任意）"
+              type="datetime-local"
+              value={sessionExpiresAt}
+              onChange={(e) => setSessionExpiresAt(e.target.value)}
+              size="small"
+              InputLabelProps={{ shrink: true }}
+            />
+            <Button
+              variant="contained"
+              onClick={handleSessionUpsert}
+              disabled={sessionLoading || !sessionCookies.trim()}
+              sx={{ alignSelf: 'flex-start' }}
+            >
+              {sessionLoading ? '登録中...' : '登録・更新'}
+            </Button>
           </Stack>
         </CardContent>
       </Card>

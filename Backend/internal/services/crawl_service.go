@@ -200,6 +200,8 @@ func (s *CrawlService) executeCrawl(source *models.CrawlSource) error {
 		return s.executeJobSiteCompanyCrawl(source)
 	case "job_listing":
 		return s.executeJobListingCrawl(source)
+	case "mynavi_company":
+		return s.executeMynaviCompanyCrawl(source)
 	case "openwork_company":
 		return s.executeOpenworkCompanyCrawl(source)
 	default:
@@ -214,8 +216,8 @@ func validateCrawlSource(source *models.CrawlSource) error {
 	if strings.TrimSpace(source.TargetType) == "" {
 		return errors.New("target_type is required")
 	}
-	if source.TargetType != "company" && source.TargetType != "popular_companies" && source.TargetType != "job_site_company" && source.TargetType != "job_listing" && source.TargetType != "openwork_company" {
-		return errors.New("target_type must be company, popular_companies, job_site_company, job_listing, or openwork_company")
+	if source.TargetType != "company" && source.TargetType != "popular_companies" && source.TargetType != "job_site_company" && source.TargetType != "job_listing" && source.TargetType != "mynavi_company" && source.TargetType != "openwork_company" {
+		return errors.New("target_type must be company, popular_companies, job_site_company, job_listing, mynavi_company, or openwork_company")
 	}
 	if source.TargetType == "popular_companies" && strings.TrimSpace(source.SourceURL) == "" {
 		return errors.New("source_url is required for popular_companies")
@@ -225,6 +227,9 @@ func validateCrawlSource(source *models.CrawlSource) error {
 	}
 	if source.TargetType == "job_listing" && strings.TrimSpace(source.SourceURL) == "" {
 		return errors.New("source_url is required for job_listing")
+	}
+	if source.TargetType == "mynavi_company" && strings.TrimSpace(source.SourceURL) == "" {
+		return errors.New("source_url is required for mynavi_company")
 	}
 	if source.TargetType == "openwork_company" && strings.TrimSpace(source.SourceURL) == "" {
 		return errors.New("source_url is required for openwork_company")

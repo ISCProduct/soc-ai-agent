@@ -20,6 +20,7 @@ func SetupAdminRoutes(
 	profileRecalcController *controllers.AdminProfileRecalculationController,
 	scoreValidationController *controllers.AdminScoreValidationController,
 	collectiveInsightController *controllers.CollectiveInsightController,
+	scraperSessionController *controllers.AdminScraperSessionController,
 	userRepo *repositories.UserRepository,
 	adminSecret string,
 ) {
@@ -69,4 +70,8 @@ func SetupAdminRoutes(
 
 	// Collective insight batch
 	http.HandleFunc("/api/admin/collective-insights/rebuild-summaries", auth(collectiveInsightController.RebuildSummaries))
+
+	// Scraper session management
+	http.HandleFunc("/api/admin/scraper-sessions", auth(scraperSessionController.Sessions))
+	http.HandleFunc("/api/admin/scraper-sessions/", auth(scraperSessionController.SessionDetail))
 }
