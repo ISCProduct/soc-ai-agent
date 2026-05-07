@@ -139,6 +139,7 @@ func main() {
 	companyRepo := repositories.NewCompanyRepository(db)
 	crawlRepo := repositories.NewCrawlRepository(db)
 	popularityRepo := repositories.NewCompanyPopularityRepository(db)
+	scraperSessionRepo := repositories.NewScraperSessionRepository(db)
 	graduateRepo := repositories.NewGraduateEmploymentRepository(db)
 	companyRelationRepo := repositories.NewCompanyRelationRepository(db)
 	companyQueryRepo := repositories.NewCompanyQueryRepository(db)
@@ -251,12 +252,14 @@ func main() {
 	collectiveInsightRepo := repositories.NewCollectiveInsightRepository(db)
 	collectiveInsightService := services.NewCollectiveInsightService(collectiveInsightRepo, userWeightScoreRepo)
 	collectiveInsightController := controllers.NewCollectiveInsightController(collectiveInsightService)
+	scraperSessionService := services.NewScraperSessionService(scraperSessionRepo)
+	scraperSessionController := controllers.NewAdminScraperSessionController(scraperSessionService)
 
 	// ルーティング設定
 	routes.SetupAuthRoutes(authController, oauthController, userRepo, cfg.AdminSecret)
 	routes.SetupChatRoutes(chatController, questionController)
 	routes.SetupCompanyRoutes(relationController)
-	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, userRepo, cfg.AdminSecret)
+	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, userRepo, cfg.AdminSecret)
 	routes.SetupResumeRoutes(resumeController)
 	routes.SetupInterviewRoutes(interviewController, realtimeController)
 	routes.SetupGitHubRoutes(githubController)
