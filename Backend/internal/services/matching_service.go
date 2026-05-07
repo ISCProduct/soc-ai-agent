@@ -59,13 +59,13 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 
 	log.Printf("[CalculateMatching] User scores: %v\n", scoreMap)
 
-	// 2. 全企業のプロファイルを取得
-	companies, err := s.companyRepo.FindAllActive(10000, 0)
+	// 2. 公開済み企業のプロファイルを取得（ダミー企業を除外）
+	companies, err := s.companyRepo.FindAllPublished(10000, 0)
 	if err != nil {
 		return fmt.Errorf("failed to get companies: %w", err)
 	}
 
-	log.Printf("[CalculateMatching] Found %d active companies\n", len(companies))
+	log.Printf("[CalculateMatching] Found %d published companies\n", len(companies))
 
 	// 3. 各企業とのマッチングを計算
 	matchCount := 0
@@ -172,7 +172,7 @@ func (s *MatchingService) GetDiagnostics(userID uint, sessionID string) (*Matchi
 	if err != nil {
 		return nil, err
 	}
-	activeCompanyCount, err := s.companyRepo.CountActive()
+	activeCompanyCount, err := s.companyRepo.CountPublished()
 	if err != nil {
 		return nil, err
 	}
