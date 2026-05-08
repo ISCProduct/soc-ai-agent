@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -315,7 +316,9 @@ func (s *AuthService) RequestRegistration(email string) error {
 	}
 
 	// 以前の仮登録を削除
-	_ = s.pendingRepo.DeleteByEmail(email)
+	if err := s.pendingRepo.DeleteByEmail(email); err != nil {
+		log.Printf("[AuthService] failed to delete previous pending registration for %s: %v", email, err)
+	}
 
 	// トークン生成
 	b := make([]byte, 32)
@@ -354,6 +357,9 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 	if req.Email == "" || req.Password == "" {
 		return nil, errors.New("email and password are required")
 	}
+	if len(req.Password) < 8 {
+		return nil, errors.New("password must be at least 8 characters")
+	}
 
 	// トークン検証
 	if req.RegistrationToken != "" {
@@ -365,7 +371,9 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 			return nil, errors.New("invalid or expired registration token")
 		}
 		// 使用済みトークンを削除
-		_ = s.pendingRepo.DeleteByEmail(req.Email)
+		if err := s.pendingRepo.DeleteByEmail(req.Email); err != nil {
+			log.Printf("[AuthService] failed to delete used registration token for %s: %v", req.Email, err)
+		}
 	}
 	if req.TargetLevel == "" {
 		req.TargetLevel = "新卒"
@@ -420,7 +428,11 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 
 	// 認証メール送信（失敗しても登録は成功扱い）
 	appURL := config.AppURL()
-	go s.emailService.SendVerificationEmail(user, user.EmailVerificationToken, appURL)
+	go func() {
+		if err := s.emailService.SendVerificationEmail(user, user.EmailVerificationToken, appURL); err != nil {
+			log.Printf("[AuthService] failed to send verification email to %s: %v", user.Email, err)
+		}
+	}()
 
 	return &AuthResponse{
 		UserID:                   user.ID,

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -702,6 +703,9 @@ func extractID(path string, prefix string, suffix string) (uint, error) {
 	id, err := strconv.ParseUint(trimmed, 10, 32)
 	if err != nil {
 		return 0, err
+	}
+	if id > math.MaxInt32 {
+		return 0, fmt.Errorf("id %d exceeds maximum allowed value", id)
 	}
 	return uint(id), nil
 }

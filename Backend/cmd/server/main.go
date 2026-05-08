@@ -36,6 +36,19 @@ func buildAllowedOrigins() map[string]struct{} {
 	return allowedOrigins
 }
 
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+		if r.TLS != nil {
+			w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func corsMiddleware(next http.Handler) http.Handler {
 	allowedOrigins := buildAllowedOrigins()
 
@@ -291,7 +304,7 @@ func main() {
 	}
 
 	log.Printf("Starting server on port %s...", port)
-	if err := http.ListenAndServe(":"+port, corsMiddleware(http.DefaultServeMux)); err != nil {
+	if err := http.ListenAndServe(":"+port, securityHeadersMiddleware(corsMiddleware(http.DefaultServeMux))); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }

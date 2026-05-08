@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 import openai as openai_module
 from openai import OpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 logging.basicConfig(level=logging.INFO)
@@ -71,9 +71,14 @@ def log_openai_version() -> None:
 
 
 class ReviewRequest(BaseModel):
-    resume_text: str = Field(min_length=1)
+    resume_text: str = Field(min_length=1, max_length=10000)
     company_name: str = Field(min_length=1)
     job_title: str = Field(default="")
+
+    @field_validator("job_title")
+    @classmethod
+    def normalize_job_title(cls, v: str) -> str:
+        return v.strip()
 
 
 class ReviewResponse(BaseModel):
