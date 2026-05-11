@@ -23,11 +23,6 @@ variable "db_admin_password" {
   description = "MySQL 管理者パスワード (terraform.tfvars で指定)"
 }
 
-variable "mysql_version" {
-  type    = string
-  default = "8.0"
-}
-
 variable "shape_name" {
   type    = string
   default = "MySQL.Free"

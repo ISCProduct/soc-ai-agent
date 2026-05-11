@@ -33,6 +33,12 @@ variable "memory_in_gbs" {
   default = 6
 }
 
+variable "fault_domain" {
+  type        = string
+  default     = "FAULT-DOMAIN-1"
+  description = "フォルト・ドメイン (容量不足時は FAULT-DOMAIN-2 / FAULT-DOMAIN-3 に変更)"
+}
+
 variable "ssh_authorized_keys" {
   type        = string
   description = "SSH 公開鍵"

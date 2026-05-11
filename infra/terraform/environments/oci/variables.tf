@@ -50,6 +50,11 @@ variable "availability_domain" {
   description = "可用性ドメイン名 (例: Uocm:AP-TOKYO-1-AD-1)"
 }
 
+variable "fault_domain" {
+  type    = string
+  default = "FAULT-DOMAIN-1"
+}
+
 variable "ssh_authorized_keys" {
   type        = string
   description = "Compute Instance に登録する SSH 公開鍵"

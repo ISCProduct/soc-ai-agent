@@ -55,6 +55,7 @@ module "compute" {
   subnet_id           = module.network.public_subnet_id
   ssh_authorized_keys = var.ssh_authorized_keys
   image_id            = var.image_id
+  fault_domain        = var.fault_domain
 }
 
 module "database" {
