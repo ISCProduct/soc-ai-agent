@@ -8,7 +8,7 @@ usermod -aG docker ubuntu || usermod -aG docker opc
 
 # Docker Compose インストール
 COMPOSE_VERSION="v2.27.0"
-curl -SL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-aarch64" \
+curl -SL "https://github.com/docker/compose/releases/download/$${COMPOSE_VERSION}/docker-compose-linux-aarch64" \
   -o /usr/local/bin/docker-compose
 chmod +x /usr/local/bin/docker-compose
 
