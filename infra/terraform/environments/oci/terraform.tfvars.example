@@ -1,0 +1,43 @@
+# ============================================================
+# OCI 認証情報
+# 実際の値は terraform.tfvars に記載し、git管理対象外にすること
+# ============================================================
+
+tenancy_ocid     = "ocid1.tenancy.oc1..xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+user_ocid        = "ocid1.user.oc1..xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+fingerprint      = "xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx"
+private_key_path = "~/.oci/oci_api_key.pem"
+region           = "ap-tokyo-1"
+
+# コンパートメント (空の場合はルートコンパートメントを使用)
+compartment_id = ""
+
+# ============================================================
+# アプリケーション設定
+# ============================================================
+
+project_name = "soc-app"
+
+# OCI コンソール > コンピュート > インスタンスの作成 > 可用性ドメイン で確認
+availability_domain = "Uocm:AP-TOKYO-1-AD-1"
+
+# cat ~/.ssh/id_rsa.pub などで取得
+ssh_authorized_keys = "ssh-rsa AAAA..."
+
+# OCI コンソール > コンピュート > イメージ から取得 (Ubuntu 22.04 ARM64 推奨)
+# 東京リージョン Ubuntu 22.04 Minimal aarch64 のサンプル OCID:
+image_id = "ocid1.image.oc1.ap-tokyo-1.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# MySQL 管理者パスワード (大文字・小文字・数字・記号を含む12文字以上)
+db_admin_password = "YourStrongPassword1!"
+
+# OCI コンソール > Object Storage > バケット > ネームスペース で確認
+storage_namespace = "your-tenancy-namespace"
+
+# ============================================================
+# ネットワーク設定 (デフォルト値で問題なければ変更不要)
+# ============================================================
+
+vcn_cidr            = "10.0.0.0/16"
+public_subnet_cidr  = "10.0.1.0/24"
+private_subnet_cidr = "10.0.2.0/24"

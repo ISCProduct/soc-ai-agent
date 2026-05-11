@@ -9,6 +9,9 @@
 *.tfvars.json
 .terraform/
 .terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfplan
 
 # Database
 database/
