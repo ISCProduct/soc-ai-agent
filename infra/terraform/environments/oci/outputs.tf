@@ -8,12 +8,3 @@ output "db_endpoint" {
   value       = module.database.db_endpoint
 }
 
-output "app_bucket_name" {
-  description = "アプリ用 Object Storage バケット名"
-  value       = module.storage.app_bucket_name
-}
-
-output "uploads_bucket_name" {
-  description = "アップロード用 Object Storage バケット名"
-  value       = module.storage.uploads_bucket_name
-}

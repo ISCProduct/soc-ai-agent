@@ -66,11 +66,6 @@ variable "db_admin_password" {
   description = "MySQL 管理者パスワード"
 }
 
-variable "storage_namespace" {
-  type        = string
-  description = "Object Storage ネームスペース (テナンシー名と同じことが多い)"
-}
-
 # ネットワーク設定
 variable "vcn_cidr" {
   type    = string

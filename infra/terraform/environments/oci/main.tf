@@ -67,10 +67,4 @@ module "database" {
   db_admin_password   = var.db_admin_password
 }
 
-module "storage" {
-  source = "../../modules/oci-storage"
-
-  project_name   = var.project_name
-  compartment_id = local.compartment_id
-  namespace      = var.storage_namespace
-}
+# ストレージは既存の AWS S3 を使用するため OCI Object Storage は不使用

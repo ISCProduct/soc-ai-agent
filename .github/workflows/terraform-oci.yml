@@ -51,7 +51,6 @@ jobs:
           ssh_authorized_keys = "${{ secrets.OCI_SSH_PUBLIC_KEY }}"
           image_id            = "${{ secrets.OCI_IMAGE_ID }}"
           db_admin_password   = "${{ secrets.OCI_DB_ADMIN_PASSWORD }}"
-          storage_namespace   = "${{ secrets.OCI_STORAGE_NAMESPACE }}"
           EOF
 
       - name: Terraform Init
@@ -111,7 +110,6 @@ jobs:
           ssh_authorized_keys = "${{ secrets.OCI_SSH_PUBLIC_KEY }}"
           image_id            = "${{ secrets.OCI_IMAGE_ID }}"
           db_admin_password   = "${{ secrets.OCI_DB_ADMIN_PASSWORD }}"
-          storage_namespace   = "${{ secrets.OCI_STORAGE_NAMESPACE }}"
           EOF
 
       - name: Download Plan

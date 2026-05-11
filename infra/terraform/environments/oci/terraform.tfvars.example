@@ -31,9 +31,6 @@ image_id = "ocid1.image.oc1.ap-tokyo-1.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 # MySQL 管理者パスワード (大文字・小文字・数字・記号を含む12文字以上)
 db_admin_password = "YourStrongPassword1!"
 
-# OCI コンソール > Object Storage > バケット > ネームスペース で確認
-storage_namespace = "your-tenancy-namespace"
-
 # ============================================================
 # ネットワーク設定 (デフォルト値で問題なければ変更不要)
 # ============================================================
