@@ -7,6 +7,7 @@ SERVER_IP="${1:-}"
 SSH_KEY="${2:-~/.ssh/id_ed25519}"
 REMOTE_USER="ubuntu"
 APP_DIR="/opt/soc-app"
+DOMAIN="kazuyukitech.com"
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 if [ -z "$SERVER_IP" ]; then
@@ -17,27 +18,27 @@ fi
 
 echo "==> $SERVER_IP へデプロイ開始"
 
-# .env ファイルの存在確認
 if [ ! -f "$REPO_ROOT/.env" ]; then
   echo "エラー: .env ファイルが見つかりません ($REPO_ROOT/.env)"
+  echo "  .env.oci.example をコピーして .env を作成してください"
   exit 1
 fi
 
 SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=no"
 
-# Docker が起動済みか確認（cloud-init完了待ち）
+# Docker 起動確認（cloud-init 完了待ち）
 echo "==> Docker 起動確認中..."
-for i in $(seq 1 12); do
+for i in $(seq 1 18); do
   if ssh $SSH_OPTS "$REMOTE_USER@$SERVER_IP" "docker info > /dev/null 2>&1"; then
     echo "==> Docker 起動済み"
     break
   fi
-  echo "    待機中... ($i/12)"
+  echo "    待機中... ($i/18)"
   sleep 10
 done
 
-# AWS ECR ログイン (イメージをECRから取得するため)
-echo "==> ECR ログイン情報をサーバーへ転送..."
+# AWS ECR ログイン
+echo "==> ECR ログイン..."
 AWS_TOKEN=$(aws ecr get-login-password --region ap-northeast-1 2>/dev/null || echo "")
 if [ -n "$AWS_TOKEN" ]; then
   ssh $SSH_OPTS "$REMOTE_USER@$SERVER_IP" \
@@ -46,15 +47,41 @@ fi
 
 # ファイル転送
 echo "==> ファイル転送中..."
-ssh $SSH_OPTS "$REMOTE_USER@$SERVER_IP" "mkdir -p $APP_DIR"
-scp $SSH_OPTS "$REPO_ROOT/compose.oci.yml" "$REMOTE_USER@$SERVER_IP:$APP_DIR/docker-compose.yml"
-scp $SSH_OPTS "$REPO_ROOT/.env" "$REMOTE_USER@$SERVER_IP:$APP_DIR/.env"
+ssh $SSH_OPTS "$REMOTE_USER@$SERVER_IP" "mkdir -p $APP_DIR/infra/nginx"
+scp $SSH_OPTS "$REPO_ROOT/compose.oci.yml"        "$REMOTE_USER@$SERVER_IP:$APP_DIR/docker-compose.yml"
+scp $SSH_OPTS "$REPO_ROOT/.env"                   "$REMOTE_USER@$SERVER_IP:$APP_DIR/.env"
+scp $SSH_OPTS "$REPO_ROOT/infra/nginx/nginx.conf" "$REMOTE_USER@$SERVER_IP:$APP_DIR/infra/nginx/nginx.conf"
 
-# 起動
-echo "==> docker compose up..."
-ssh $SSH_OPTS "$REMOTE_USER@$SERVER_IP" "cd $APP_DIR && docker compose pull && docker compose up -d"
+# Step1: HTTP のみで起動（certbot 証明書取得のため）
+echo "==> Step1: HTTP で初回起動..."
+ssh $SSH_OPTS "$REMOTE_USER@$SERVER_IP" "cd $APP_DIR && docker compose up -d mysql backend frontend rag-review company-graph"
+
+# Let's Encrypt 証明書取得
+echo "==> SSL証明書取得中 ($DOMAIN)..."
+ssh $SSH_OPTS "$REMOTE_USER@$SERVER_IP" "
+  docker run --rm \
+    -v $APP_DIR/infra/certbot/www:/var/www/certbot \
+    -v $APP_DIR/infra/certbot/conf:/etc/letsencrypt \
+    -p 80:80 \
+    certbot/certbot certonly \
+      --standalone \
+      --non-interactive \
+      --agree-tos \
+      --email oohashi.0428kazuyuki@gmail.com \
+      -d $DOMAIN \
+      -d api.$DOMAIN \
+    2>&1 || echo '証明書取得済みまたはスキップ'
+"
+
+# nginx設定のボリュームパスを更新してフル起動
+echo "==> Step2: Nginx + SSL でフル起動..."
+ssh $SSH_OPTS "$REMOTE_USER@$SERVER_IP" "cd $APP_DIR && docker compose up -d"
 
 echo ""
 echo "==> デプロイ完了"
-echo "  フロントエンド: http://$SERVER_IP:3000"
-echo "  バックエンド:   http://$SERVER_IP:8080"
+echo "  フロントエンド: https://$DOMAIN"
+echo "  バックエンドAPI: https://api.$DOMAIN"
+echo ""
+echo "  ※ CloudflareのDNSに以下を設定してください:"
+echo "    A  kazuyukitech.com     -> $SERVER_IP"
+echo "    A  api.kazuyukitech.com -> $SERVER_IP"
