@@ -39,7 +39,7 @@ services:
     expose:
       - "3000"
     environment:
-      NEXT_PUBLIC_API_BASE_URL: https://api.kazuyukitech.com
+      NEXT_PUBLIC_API_BASE_URL: https://api.soc-ai-agent.kazuyukitech.com
       APP_ENV: production
       COMPANY_GRAPH_URL: http://company-graph:9100
     depends_on:
