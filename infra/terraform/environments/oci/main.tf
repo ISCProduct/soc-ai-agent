@@ -58,14 +58,5 @@ module "compute" {
   fault_domain        = var.fault_domain
 }
 
-module "database" {
-  source = "../../modules/oci-database"
-
-  project_name        = var.project_name
-  compartment_id      = local.compartment_id
-  availability_domain = var.availability_domain
-  subnet_id           = module.network.private_subnet_id
-  db_admin_password   = var.db_admin_password
-}
-
+# MySQLはDockerコンテナで運用するため OCI MySQL Database Service は不使用
 # ストレージは既存の AWS S3 を使用するため OCI Object Storage は不使用

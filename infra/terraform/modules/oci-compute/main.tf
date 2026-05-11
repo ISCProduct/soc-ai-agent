@@ -2,8 +2,7 @@ resource "oci_core_instance" "app" {
   compartment_id      = var.compartment_id
   availability_domain = var.availability_domain
   display_name        = "${var.project_name}-instance"
-  fault_domain        = var.fault_domain
-
+  # fault_domain未指定でOCIに自動選択させる（指定すると容量不足になりやすい）
   shape = var.shape
   shape_config {
     ocpus         = var.ocpus

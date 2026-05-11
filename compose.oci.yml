@@ -1,17 +1,37 @@
 services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     image: 970835573274.dkr.ecr.ap-northeast-1.amazonaws.com/soc-backend:latest
     restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
-      DB_HOST: ${OCI_DB_HOST}
+      DB_HOST: mysql
       DB_PORT: "3306"
-      DB_USER: admin
-      DB_PASSWORD: ${OCI_DB_PASSWORD}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
       APP_ENV: production
     env_file:
       - .env
+    depends_on:
+      mysql:
+        condition: service_healthy
 
   frontend:
     image: 970835573274.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:latest
@@ -46,3 +66,6 @@ services:
     environment:
       GBIZINFO_API_KEY: ${GBIZINFO_API_KEY:-}
       GBIZINFO_BASE_URL: ${GBIZINFO_BASE_URL:-}
+
+volumes:
+  mysql_data:

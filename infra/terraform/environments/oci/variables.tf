@@ -65,12 +65,6 @@ variable "image_id" {
   description = "Compute Instance のイメージ OCID (Oracle Linux 8 または Ubuntu 22.04 ARM)"
 }
 
-variable "db_admin_password" {
-  type        = string
-  sensitive   = true
-  description = "MySQL 管理者パスワード"
-}
-
 # ネットワーク設定
 variable "vcn_cidr" {
   type    = string
