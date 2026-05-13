@@ -252,7 +252,7 @@ function InterviewContent() {
     let stream: MediaStream | null = null
     const startPreview = async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true })
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 48000, channelCount: 1, echoCancellation: true, noiseSuppression: true }, video: true })
         streamRef.current = stream
         if (lobbyVideoRef.current) {
           lobbyVideoRef.current.srcObject = stream
@@ -489,7 +489,7 @@ function InterviewContent() {
       let stream = streamRef.current
       if (!stream) {
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true })
+          stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 48000, channelCount: 1, echoCancellation: true, noiseSuppression: true }, video: true })
         } catch (err: any) {
           if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') throw new Error('NotAllowedError')
           if (err.name === 'NotFoundError') throw new Error('NotFoundError')
