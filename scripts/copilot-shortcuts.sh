@@ -152,3 +152,4 @@ fi
 if [[ "$is_sourced" -eq 0 ]]; then
   copilot_shortcuts_main "$@"
 fi
+fi
