@@ -1,0 +1,97 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: 970835573274.dkr.ecr.ap-northeast-1.amazonaws.com/soc-backend:latest
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      APP_ENV: production
+    env_file:
+      - .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  frontend:
+    image: 970835573274.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:latest
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: https://api.soc-ai-agent.kazuyukitech.com
+      APP_ENV: production
+      COMPANY_GRAPH_URL: http://company-graph:9100
+    depends_on:
+      - backend
+
+  rag-review:
+    image: 970835573274.dkr.ecr.ap-northeast-1.amazonaws.com/soc-rag-review:latest
+    restart: unless-stopped
+    expose:
+      - "9000"
+    env_file:
+      - .env
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      OPENAI_HINTS_MODEL: ${OPENAI_HINTS_MODEL:-gpt-4o-search-preview}
+      OPENAI_HINTS_PARSE_MODEL: ${OPENAI_HINTS_PARSE_MODEL:-gpt-4o}
+
+  company-graph:
+    image: 970835573274.dkr.ecr.ap-northeast-1.amazonaws.com/soc-company-graph:latest
+    restart: unless-stopped
+    expose:
+      - "9100"
+    environment:
+      GBIZINFO_API_KEY: ${GBIZINFO_API_KEY:-}
+      GBIZINFO_BASE_URL: ${GBIZINFO_BASE_URL:-}
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/certbot/www:/var/www/certbot:ro
+      - ./infra/certbot/conf:/etc/letsencrypt:ro
+    depends_on:
+      - frontend
+      - backend
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./infra/certbot/www:/var/www/certbot
+      - ./infra/certbot/conf:/etc/letsencrypt
+    entrypoint: >
+      sh -c "trap exit TERM;
+             while :; do
+               certbot renew --webroot -w /var/www/certbot --quiet;
+               sleep 12h & wait $${!};
+             done"
+
+volumes:
+  mysql_data:
