@@ -442,7 +442,10 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 	}
 	model := getEnv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview")
 	voice := realtimeVoiceForLangAndGender(lang, gender)
-	transcribeModel := getEnv("OPENAI_REALTIME_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
+	transcribeModel := getEnv("OPENAI_REALTIME_TRANSCRIBE_MODEL", "")
+	if transcribeModel == "" {
+		transcribeModel = "gpt-4o-transcribe"
+	}
 	maxTokens := getIntEnv("OPENAI_REALTIME_MAX_OUTPUT_TOKENS", 120)
 	req := openai.RealtimeSessionRequest{
 		Model:        model,
@@ -450,13 +453,14 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 		Voice:        voice,
 		Instructions: buildRealtimeInstructions(lang),
 		InputAudioTranscription: map[string]interface{}{
-			"model": transcribeModel,
+			"model":    transcribeModel,
+			"language": lang,
 		},
 		TurnDetection: map[string]interface{}{
 			"type":                "server_vad",
-			"threshold":           0.5,
-			"silence_duration_ms": 700,
-			"prefix_padding_ms":   300,
+			"threshold":           0.35,
+			"silence_duration_ms": 500,
+			"prefix_padding_ms":   150,
 			"create_response":     true,
 		},
 		MaxResponseOutputTokens: maxTokens,
