@@ -33,7 +33,7 @@ numpy<3.0
 
 # --- LLM プロキシ ---
 # litellm は crewai の推移的依存。メジャーバージョン固定で API 互換性を保証。
-litellm>=1.44.22,<2.0
+litellm>=1.83.7,<2.0
 
 # --- OpenAI SDK ---
 # Dockerfile 内の検証スクリプトが client.responses API の存在を確認しており、
