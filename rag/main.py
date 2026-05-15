@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
+# Training export endpoints (registered from training_api.py)
+import training_api
+training_api.register(app)
+
 # ── 環境変数 ────────────────────────────────────────────────────────────────
 DEFAULT_CACHE_TTL_SECONDS = 86400
 DEFAULT_MAX_EMBED_TOKENS = 8191
