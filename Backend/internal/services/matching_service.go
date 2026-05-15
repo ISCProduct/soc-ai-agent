@@ -136,19 +136,27 @@ func (s *MatchingService) calculateMatchScore(
 }
 
 func scoredMatch(userScores map[string]float64, category string, companyWeight float64, evaluatedCount int, totalScore float64) (float64, int, float64) {
+	// 未評価カテゴリは中立値(50)として扱い、評価対象に含める
 	userScore, ok := userScores[category]
 	if !ok {
-		return 0, evaluatedCount, totalScore
+		userScore = 50.0
 	}
 	matchScore := calculateCategoryMatch(userScore, companyWeight)
 	return matchScore, evaluatedCount + 1, totalScore + matchScore
 }
 
 // calculateCategoryMatch カテゴリごとのマッチ度を計算
-// ユーザースコアと企業重視度の差が小さいほど高スコア
+// 差分を直接線形に扱う代わりに、意味的な緩やかな変化を持つシグモイド関数でスケーリングする。
+// ユーザースコアと企業重視度の差が小さいほど高スコア（0-100）。
 func calculateCategoryMatch(userScore, companyWeight float64) float64 {
-	diff := math.Abs(userScore - companyWeight)
-	return math.Max(0, 100.0-diff)
+	diff := math.Abs(userScore - companyWeight) // 0..100
+	// similarity: 1.0 (完全一致) -> 0.0 (完全不一致)
+	sim := 1.0 - diff/100.0
+	// ロジスティック関数でスケーリング。中心を 0.5、スロープを適度に設定して差の小さい領域で緩やかに変化するようにする。
+	k := 12.0
+	x := k*(sim-0.5)
+	s := 1.0 / (1.0 + math.Exp(-x))
+	return math.Max(0.0, math.Min(100.0, 100.0*s))
 }
 
 // GetTopMatches マッチング度の高い企業を取得
