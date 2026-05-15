@@ -1,0 +1,38 @@
+name: Create PR for feature branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch name to create PR from'
+        required: true
+        default: 'feature/issue-372-accuracy'
+
+jobs:
+  create_pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check branch exists
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create Pull Request if branch exists
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const branch = core.getInput('branch') || context.payload.inputs.branch || 'feature/issue-372-accuracy'
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            // Check if ref exists
+            try {
+              await github.rest.git.getRef({ owner, repo, ref: `heads/${branch}` })
+            } catch (err) {
+              core.setFailed(`Branch ${branch} does not exist on remote.`)
+              return
+            }
+            // Create PR
+            const body = `概要:\n- 回答妥当性に埋め込み類似度判定を追加（文章系）\n- マッチング計算をシグモイド関数に変更、未評価カテゴリは中立(50)扱い\n\n検証・注意: ローカル/CIで go build を実行してビルド確認および閾値のチューニングを行ってください。`
+            const title = `feat: #372 各AI機能の精度向上（埋め込み判定・マッチング改善）`
+            const pr = await github.rest.pulls.create({ owner, repo, head: branch, base: 'main', title, body })
+            core.notice(`Created PR: ${pr.data.html_url}`)
