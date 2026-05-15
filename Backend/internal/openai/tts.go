@@ -36,7 +36,10 @@ func (cli *Client) Transcribe(ctx context.Context, audio []byte, filename string
 	if _, err := part.Write(audio); err != nil {
 		return "", err
 	}
-	w.Close()
+	err = w.Close()
+	if err != nil {
+		return "", err
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.BaseURL()+"/audio/transcriptions", &buf)
 	if err != nil {
