@@ -159,6 +159,8 @@ DB_NAME=app_db
 
 # サーバー
 SERVER_PORT=8080
+ADMIN_SECRET=change-me-admin-secret
+USER_SECRET=change-me-user-secret
 
 # OpenAI
 OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx

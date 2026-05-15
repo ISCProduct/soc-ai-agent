@@ -269,11 +269,11 @@ func main() {
 	scraperSessionController := controllers.NewAdminScraperSessionController(scraperSessionService)
 
 	// ルーティング設定
-	routes.SetupAuthRoutes(authController, oauthController, userRepo, cfg.AdminSecret)
+	routes.SetupAuthRoutes(authController, oauthController, userRepo, cfg.UserSecret)
 	routes.SetupChatRoutes(chatController, questionController)
 	routes.SetupCompanyRoutes(relationController)
 	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, userRepo, cfg.AdminSecret)
-	routes.SetupResumeRoutes(resumeController)
+	routes.SetupResumeRoutes(resumeController, userRepo, cfg.UserSecret)
 	routes.SetupInterviewRoutes(interviewController, realtimeController)
 	routes.SetupGitHubRoutes(githubController)
 	routes.SetupESRoutes(esRewriteController, esReviewController)

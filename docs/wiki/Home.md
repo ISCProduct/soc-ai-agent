@@ -13,6 +13,7 @@
 | [運用手順書](./operations.md) | 運用担当 | デプロイ・監視・バッチ・障害対応手順 |
 | [データプライバシー設計](./data-privacy.md) | 開発者・法務 | 匿名化・同意管理の設計方針 |
 | [スコアキャリブレーション](./score-calibration.md) | 運用担当 | スコア精度検証・改善の実施手順 |
+| [選考ステータス状態遷移 要件定義](../requirements/application-status-transition.md) | 上流工程担当 | 選考管理の状態遷移・権限・画面/API要件 |
 
 ---
 

@@ -28,6 +28,8 @@ type ValidationError struct {
 
 func (e *ValidationError) Error() string { return e.Message }
 
+var ErrForbidden = errors.New("forbidden")
+
 type ResumeService struct {
 	repo         repository.ResumeRepository
 	storageDir   string
@@ -126,10 +128,13 @@ func (s *ResumeService) Upload(userID uint, sessionID, sourceType, sourceURL str
 	return &ResumeUploadResult{Document: doc}, nil
 }
 
-func (s *ResumeService) ReviewDocument(documentID uint, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+func (s *ResumeService) ReviewDocument(documentID uint, requestingUserID uint, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
 	doc, err := s.repo.FindDocumentByID(documentID)
 	if err != nil {
 		return nil, nil, err
+	}
+	if doc.UserID != requestingUserID {
+		return nil, nil, ErrForbidden
 	}
 	if s.s3 == nil || !s.s3.isEnabled() {
 		return nil, nil, errors.New("s3 is required")
@@ -208,6 +213,17 @@ func (s *ResumeService) ReviewDocument(documentID uint, companyName string, jobT
 	return review, items, nil
 }
 
+func (s *ResumeService) EnsureDocumentOwner(documentID uint, requestingUserID uint) error {
+	doc, err := s.repo.FindDocumentByID(documentID)
+	if err != nil {
+		return err
+	}
+	if doc.UserID != requestingUserID {
+		return ErrForbidden
+	}
+	return nil
+}
+
 type AnnotatedFile struct {
 	Reader      io.ReadSeeker
 	Size        int64
@@ -216,10 +232,13 @@ type AnnotatedFile struct {
 	CloseFunc   func() error
 }
 
-func (s *ResumeService) OpenAnnotatedFile(documentID uint) (*AnnotatedFile, error) {
+func (s *ResumeService) OpenAnnotatedFile(documentID uint, requestingUserID uint) (*AnnotatedFile, error) {
 	doc, err := s.repo.FindDocumentByID(documentID)
 	if err != nil {
 		return nil, err
+	}
+	if doc.UserID != requestingUserID {
+		return nil, ErrForbidden
 	}
 	if strings.TrimSpace(doc.AnnotatedPath) == "" {
 		return nil, errors.New("annotated file not ready")
@@ -746,7 +765,7 @@ func (s *ResumeService) fetchRAGReportStream(ctx context.Context, resumeText, co
 
 // ReviewDocumentStream はドキュメントを前処理した後、SSEでRAGレポートをストリーミングし、
 // 最後にスコア・指摘事項を complete イベントとして送信する。
-func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uint, companyName, jobTitle, candidateType string, w http.ResponseWriter) error {
+func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uint, requestingUserID uint, companyName, jobTitle, candidateType string, w http.ResponseWriter) error {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return fmt.Errorf("streaming not supported")
@@ -762,6 +781,10 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	if err != nil {
 		sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
 		return err
+	}
+	if doc.UserID != requestingUserID {
+		sendEvent(map[string]interface{}{"type": "error", "message": "forbidden"})
+		return ErrForbidden
 	}
 	if s.s3 == nil || !s.s3.isEnabled() {
 		sendEvent(map[string]interface{}{"type": "error", "message": "s3 is required"})
