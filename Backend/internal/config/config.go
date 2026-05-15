@@ -18,6 +18,7 @@ type Config struct {
 	GBizInfoBaseURL string
 	GBizInfoToken   string
 	AdminSecret     string
+	UserSecret      string
 }
 
 func LoadConfig() (*Config, error) {
@@ -35,6 +36,10 @@ func LoadConfig() (*Config, error) {
 	if adminSecret == "" {
 		log.Println("WARNING: ADMIN_SECRET が設定されていません。管理者認証トークンの検証が無効化されます。本番環境では必ず設定してください。")
 	}
+	userSecret := os.Getenv("USER_SECRET")
+	if userSecret == "" {
+		log.Println("WARNING: USER_SECRET が設定されていません。ユーザー認証が利用できません。本番環境では必ず設定してください。")
+	}
 
 	cfg := &Config{
 		DBUser:          os.Getenv("DB_USER"),
@@ -46,6 +51,7 @@ func LoadConfig() (*Config, error) {
 		GBizInfoBaseURL: get("GBIZINFO_BASE_URL", ""),
 		GBizInfoToken:   getFirst("GBIZINFO_API_KEY", "GBIZINFO_API_TOKEN"),
 		AdminSecret:     adminSecret,
+		UserSecret:      userSecret,
 	}
 
 	// 必須値チェック

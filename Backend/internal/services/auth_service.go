@@ -532,13 +532,14 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 		RequiresReVerification:   requiresReVerification,
 	}
 	adminSecret := os.Getenv("ADMIN_SECRET")
+	userSecret := os.Getenv("USER_SECRET")
 	// 管理者ユーザーにはHMACトークンを付与する
 	if user.IsAdmin && adminSecret != "" {
 		resp.Token = middleware.GenerateAdminToken(user.ID, user.Email, adminSecret)
 	}
 	// 全ユーザーにユーザー認証トークンを付与する
-	if adminSecret != "" {
-		resp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, adminSecret)
+	if userSecret != "" {
+		resp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, userSecret)
 	}
 	return resp, nil
 }
@@ -565,7 +566,7 @@ func (s *AuthService) CreateGuestUser() (*AuthResponse, error) {
 		return nil, fmt.Errorf("failed to create guest user: %w", err)
 	}
 
-	return &AuthResponse{
+	resp := &AuthResponse{
 		UserID:                   user.ID,
 		Email:                    user.Email,
 		Name:                     user.Name,
@@ -576,7 +577,12 @@ func (s *AuthService) CreateGuestUser() (*AuthResponse, error) {
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
-	}, nil
+	}
+	userSecret := os.Getenv("USER_SECRET")
+	if userSecret != "" {
+		resp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, userSecret)
+	}
+	return resp, nil
 }
 
 // GetUser ユーザー情報取得

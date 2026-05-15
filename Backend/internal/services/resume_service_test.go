@@ -5,10 +5,41 @@ package services
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"Backend/internal/models"
 )
+
+type resumeRepoStub struct {
+	doc *models.ResumeDocument
+}
+
+func (r *resumeRepoStub) CreateDocument(doc *models.ResumeDocument) error { return nil }
+func (r *resumeRepoStub) UpdateDocument(doc *models.ResumeDocument) error { return nil }
+func (r *resumeRepoStub) FindDocumentByID(id uint) (*models.ResumeDocument, error) {
+	if r.doc == nil || r.doc.ID != id {
+		return nil, errors.New("not found")
+	}
+	return r.doc, nil
+}
+func (r *resumeRepoStub) ReplaceTextBlocks(documentID uint, blocks []models.ResumeTextBlock) error {
+	return nil
+}
+func (r *resumeRepoStub) FindTextBlocks(documentID uint) ([]models.ResumeTextBlock, error) {
+	return nil, nil
+}
+func (r *resumeRepoStub) CreateReview(review *models.ResumeReview) error { return nil }
+func (r *resumeRepoStub) ReplaceReviewItems(reviewID uint, items []models.ResumeReviewItem) error {
+	return nil
+}
+func (r *resumeRepoStub) FindReviewItems(reviewID uint) ([]models.ResumeReviewItem, error) {
+	return nil, nil
+}
 
 // TestNewSeekableReader_NormalFile は通常サイズのファイルが正常に読み込まれることを検証する
 func TestNewSeekableReader_NormalFile(t *testing.T) {
@@ -83,5 +114,52 @@ func TestNewSeekableReader_SeekWorks(t *testing.T) {
 	}
 	if string(buf) != "FGH" {
 		t.Errorf("Seek後の読み込み結果が不正: got %q, want %q", buf, "FGH")
+	}
+}
+
+func TestResumeService_OpenAnnotatedFileRejectsOtherUser(t *testing.T) {
+	service := NewResumeService(&resumeRepoStub{
+		doc: &models.ResumeDocument{
+			ID:            10,
+			UserID:        1,
+			AnnotatedPath: "/tmp/annotated.pdf",
+		},
+	}, "", nil)
+
+	_, err := service.OpenAnnotatedFile(10, 2)
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("他ユーザーの注釈PDF取得は forbidden であるべき: got %v", err)
+	}
+}
+
+func TestResumeService_ReviewDocumentRejectsOtherUser(t *testing.T) {
+	service := NewResumeService(&resumeRepoStub{
+		doc: &models.ResumeDocument{
+			ID:     10,
+			UserID: 1,
+		},
+	}, "", nil)
+
+	_, _, err := service.ReviewDocument(10, 2, "ACME", "Engineer", "new_grad")
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("他ユーザーのレビュー実行は forbidden であるべき: got %v", err)
+	}
+}
+
+func TestResumeService_ReviewDocumentStreamRejectsOtherUser(t *testing.T) {
+	service := NewResumeService(&resumeRepoStub{
+		doc: &models.ResumeDocument{
+			ID:     10,
+			UserID: 1,
+		},
+	}, "", nil)
+	rr := httptest.NewRecorder()
+
+	err := service.ReviewDocumentStream(context.Background(), 10, 2, "ACME", "Engineer", "new_grad", rr)
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("他ユーザーのストリーミングレビューは forbidden であるべき: got %v", err)
+	}
+	if !strings.Contains(rr.Body.String(), "forbidden") {
+		t.Fatalf("SSE エラーに forbidden が含まれるべき: got %q", rr.Body.String())
 	}
 }

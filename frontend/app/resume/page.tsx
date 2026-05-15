@@ -65,7 +65,7 @@ function ResumeContent() {
   const checkAnnotatedPdfAvailable = async (id: number) => {
     try {
       const response = await fetch(`/api/resume/annotated?document_id=${id}`, {
-        headers: { Range: 'bytes=0-0' },
+        headers: { Range: 'bytes=0-0', ...authService.getUserFetchHeaders() },
       })
       if (!response.ok) return false
       const contentType = (response.headers.get('content-type') || '').toLowerCase()
@@ -125,6 +125,7 @@ function ResumeContent() {
 
       const response = await fetch('/api/resume/upload', {
         method: 'POST',
+        headers: authService.getUserFetchHeaders(),
         body: formData,
       })
       if (!response.ok) {
@@ -165,7 +166,7 @@ function ResumeContent() {
     try {
       const response = await fetch(`/api/resume/review/stream?document_id=${documentId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
         body: JSON.stringify({
           company_name: companyName,
           job_title: jobTitle,
@@ -224,7 +225,24 @@ function ResumeContent() {
       setReviewError('document_id が未設定です')
       return
     }
-    window.open(`/api/resume/annotated?document_id=${documentId}`, '_blank')
+    void (async () => {
+      try {
+        setReviewError('')
+        const response = await fetch(`/api/resume/annotated?document_id=${documentId}`, {
+          headers: authService.getUserFetchHeaders(),
+        })
+        if (!response.ok) {
+          const errText = await response.text()
+          throw new Error(errText || 'Download failed')
+        }
+        const blob = await response.blob()
+        const url = URL.createObjectURL(blob)
+        window.open(url, '_blank')
+        setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      } catch (err) {
+        setReviewError(err instanceof Error ? err.message : 'Download failed')
+      }
+    })()
   }
 
   return (

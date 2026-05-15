@@ -20,6 +20,18 @@ func NewResumeController(resumeService *services.ResumeService) *ResumeControlle
 	return &ResumeController{resumeService: resumeService}
 }
 
+func authenticatedUserID(r *http.Request) (uint, error) {
+	userIDStr := r.Header.Get("X-User-ID")
+	if userIDStr == "" {
+		return 0, errors.New("user_id is required")
+	}
+	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	if err != nil {
+		return 0, errors.New("invalid user_id")
+	}
+	return uint(userID), nil
+}
+
 func (c *ResumeController) Upload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -42,6 +54,15 @@ func (c *ResumeController) Upload(w http.ResponseWriter, r *http.Request) {
 	userID, err := strconv.ParseUint(userIDStr, 10, 32)
 	if err != nil {
 		http.Error(w, "Invalid user_id", http.StatusBadRequest)
+		return
+	}
+	authenticatedID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if authenticatedID != uint(userID) {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -78,6 +99,19 @@ func (c *ResumeController) Review(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid document_id", http.StatusBadRequest)
 		return
 	}
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if err := c.resumeService.EnsureDocumentOwner(uint(docID), userID); err != nil {
+		if errors.Is(err, services.ErrForbidden) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		writeInternalServerError(w, err)
+		return
+	}
 
 	var payload struct {
 		CompanyName   string `json:"company_name"`
@@ -99,9 +133,13 @@ func (c *ResumeController) Review(w http.ResponseWriter, r *http.Request) {
 		payload.CandidateType,
 	)
 
-	review, items, err := c.resumeService.ReviewDocument(uint(docID), payload.CompanyName, payload.JobTitle, payload.CandidateType)
+	review, items, err := c.resumeService.ReviewDocument(uint(docID), userID, payload.CompanyName, payload.JobTitle, payload.CandidateType)
 	if err != nil {
 		log.Printf("resume_review: failed document_id=%d err=%v", docID, err)
+		if errors.Is(err, services.ErrForbidden) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		var ve *services.ValidationError
 		if errors.As(err, &ve) {
 			http.Error(w, ve.Message, http.StatusUnprocessableEntity)
@@ -136,6 +174,19 @@ func (c *ResumeController) ReviewStream(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Invalid document_id", http.StatusBadRequest)
 		return
 	}
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if err := c.resumeService.EnsureDocumentOwner(uint(docID), userID); err != nil {
+		if errors.Is(err, services.ErrForbidden) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		writeInternalServerError(w, err)
+		return
+	}
 
 	var payload struct {
 		CompanyName   string `json:"company_name"`
@@ -159,7 +210,7 @@ func (c *ResumeController) ReviewStream(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	if err := c.resumeService.ReviewDocumentStream(r.Context(), uint(docID), payload.CompanyName, payload.JobTitle, payload.CandidateType, w); err != nil {
+	if err := c.resumeService.ReviewDocumentStream(r.Context(), uint(docID), userID, payload.CompanyName, payload.JobTitle, payload.CandidateType, w); err != nil {
 		log.Printf("resume_review_stream: error document_id=%d err=%v", docID, err)
 	}
 }
@@ -179,9 +230,18 @@ func (c *ResumeController) Annotated(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid document_id", http.StatusBadRequest)
 		return
 	}
-
-	file, err := c.resumeService.OpenAnnotatedFile(uint(docID))
+	userID, err := authenticatedUserID(r)
 	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	file, err := c.resumeService.OpenAnnotatedFile(uint(docID), userID)
+	if err != nil {
+		if errors.Is(err, services.ErrForbidden) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
