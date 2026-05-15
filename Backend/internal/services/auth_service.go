@@ -515,7 +515,10 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 	// 最終ログイン更新
 	now := time.Now()
 	user.LastLoginAt = &now
-	s.userRepo.UpdateUser(user)
+	err = s.userRepo.UpdateUser(user)
+	if err != nil {
+		return nil, err
+	}
 
 	resp := &AuthResponse{
 		UserID:                   user.ID,
