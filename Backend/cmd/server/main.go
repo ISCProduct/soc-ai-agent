@@ -56,6 +56,13 @@ func corsMiddleware(next http.Handler) http.Handler {
 		origin := strings.TrimSpace(r.Header.Get("Origin"))
 		_, isAllowedOrigin := allowedOrigins[origin]
 
+		// Originなしリクエストを拒否（HTMLフォームPOSTなどCSRF的攻撃を防ぐ）
+		// ただしヘルスチェックエンドポイントは除外
+		if origin == "" && r.URL.Path != "/health" && r.URL.Path != "/healthz" {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+
 		w.Header().Add("Vary", "Origin")
 		if isAllowedOrigin {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -64,7 +71,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID, X-User-Token, X-Admin-Email, X-Admin-Token")
 
 		if r.Method == "OPTIONS" {
-			if origin != "" && !isAllowedOrigin {
+			if !isAllowedOrigin {
 				w.WriteHeader(http.StatusForbidden)
 				return
 			}
