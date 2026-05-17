@@ -13,7 +13,9 @@ import (
 	"io"
 	"log"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +31,76 @@ type ValidationError struct {
 func (e *ValidationError) Error() string { return e.Message }
 
 var ErrForbidden = errors.New("forbidden")
+
+// allowedMIMETypes はアップロード可能なファイルタイプ
+var allowedMIMETypes = map[string]bool{
+	"application/pdf":  true,
+	"application/msword": true,
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
+}
+
+// pdfMagicBytes はPDFファイルの先頭シグネチャ（%PDF）
+var pdfMagicBytes = []byte{0x25, 0x50, 0x44, 0x46}
+
+// validateFileUpload はMIMEタイプとファイルシグネチャ（magic bytes）を検証する
+func validateFileUpload(fileHeader *multipart.FileHeader) error {
+	mimeType := fileHeader.Header.Get("Content-Type")
+	if !allowedMIMETypes[mimeType] {
+		return &ValidationError{Message: "unsupported file type: only PDF and Word documents are allowed"}
+	}
+
+	f, err := fileHeader.Open()
+	if err != nil {
+		return fmt.Errorf("failed to open uploaded file: %w", err)
+	}
+	defer f.Close()
+
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(f, buf); err != nil {
+		return &ValidationError{Message: "file too small to validate"}
+	}
+
+	// PDFシグネチャ: %PDF
+	if bytes.HasPrefix(buf, pdfMagicBytes) {
+		return nil
+	}
+	// DOCX/XLSX (ZIP): PK\x03\x04
+	if bytes.HasPrefix(buf, []byte{0x50, 0x4B, 0x03, 0x04}) {
+		return nil
+	}
+	// DOC (OLE2): D0 CF 11 E0
+	if bytes.HasPrefix(buf, []byte{0xD0, 0xCF, 0x11, 0xE0}) {
+		return nil
+	}
+	return &ValidationError{Message: "file content does not match declared type"}
+}
+
+// validateURL はSSRF対策のためURLスキームとIPアドレス範囲を検証する
+func validateURL(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return &ValidationError{Message: "only http/https URLs are allowed"}
+	}
+	host := parsed.Hostname()
+	ip := net.ParseIP(host)
+	if ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()) {
+		return &ValidationError{Message: "requests to internal IP addresses are not allowed"}
+	}
+	return nil
+}
+
+// validatePathInDir はpathがdir配下であることを確認する（パストラバーサル対策）
+func validatePathInDir(path, dir string) error {
+	cleanPath := filepath.Clean(path)
+	cleanDir := filepath.Clean(dir)
+	if !strings.HasPrefix(cleanPath, cleanDir+string(filepath.Separator)) && cleanPath != cleanDir {
+		return fmt.Errorf("path %q is outside allowed directory", path)
+	}
+	return nil
+}
 
 type ResumeService struct {
 	repo         repository.ResumeRepository
@@ -91,6 +163,9 @@ func (s *ResumeService) Upload(userID uint, sessionID, sourceType, sourceURL str
 	defer os.RemoveAll(workDir)
 
 	if fileHeader != nil {
+		if err := validateFileUpload(fileHeader); err != nil {
+			return nil, err
+		}
 		doc.OriginalFilename = fileHeader.Filename
 		ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
 		originalPath := filepath.Join(workDir, "original"+ext)
@@ -102,6 +177,9 @@ func (s *ResumeService) Upload(userID uint, sessionID, sourceType, sourceURL str
 		doc.OriginalFilename = "google_doc"
 		doc.StoredPath = ""
 	} else {
+		if err := validateURL(sourceURL); err != nil {
+			return nil, err
+		}
 		downloaded, filename, err := downloadSourceFile(sourceURL, workDir)
 		if err != nil {
 			return nil, err
@@ -159,6 +237,9 @@ func (s *ResumeService) ReviewDocument(documentID uint, requestingUserID uint, c
 		return nil, nil, err
 	}
 
+	if err := validatePathInDir(pdfPath, workDir); err != nil {
+		return nil, nil, fmt.Errorf("invalid pdf path: %w", err)
+	}
 	blocks, err := s.extractTextBlocks(doc, pdfPath)
 	if err != nil {
 		return nil, nil, err
@@ -421,7 +502,8 @@ func (s *ResumeService) annotatePDF(inputPath string, doc *models.ResumeDocument
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", "", fmt.Errorf("annotate failed: %w (%s)", err, stderr.String())
+		log.Printf("annotate script error: %v\nstderr:\n%s", err, stderr.String())
+		return "", "", errors.New("document processing failed")
 	}
 	storedPath, err := s.uploadToS3(context.Background(), doc, outputPath, filepath.Base(outputPath))
 	if err != nil {
@@ -478,6 +560,9 @@ func (s *ResumeService) ensureWorkingDir(docID uint) (string, error) {
 func (s *ResumeService) resolveLocalPath(doc *models.ResumeDocument, workDir string) (string, error) {
 	if !isS3URI(doc.StoredPath) {
 		if strings.TrimSpace(doc.StoredPath) == "" && strings.TrimSpace(doc.SourceURL) != "" {
+			if err := validateURL(doc.SourceURL); err != nil {
+				return "", err
+			}
 			downloaded, _, err := downloadSourceFile(doc.SourceURL, workDir)
 			if err != nil {
 				return "", err
@@ -812,6 +897,10 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	doc.Status = "normalized"
 	_ = s.repo.UpdateDocument(doc)
 
+	if err := validatePathInDir(pdfPath, workDir); err != nil {
+		sendEvent(map[string]any{"type": "error", "message": "document processing failed"})
+		return fmt.Errorf("invalid pdf path: %w", err)
+	}
 	blocks, err := s.extractTextBlocks(doc, pdfPath)
 	if err != nil {
 		sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
