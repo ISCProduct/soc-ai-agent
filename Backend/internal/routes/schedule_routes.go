@@ -2,11 +2,13 @@ package routes
 
 import (
 	"Backend/internal/controllers"
-	"net/http"
+
+	"github.com/labstack/echo/v4"
 )
 
-func SetupScheduleRoutes(scheduleController *controllers.ScheduleController) {
-	http.HandleFunc("/api/schedule/export/ics", scheduleController.ExportICS)
-	http.HandleFunc("/api/schedule/", scheduleController.RouteByID)
-	http.HandleFunc("/api/schedule", scheduleController.RouteList)
+func SetupScheduleRoutes(api *echo.Group, scheduleController *controllers.ScheduleController) {
+	schedule := api.Group("/schedule")
+	schedule.Any("/export/ics", wrap(scheduleController.ExportICS))
+	schedule.Any("", wrap(scheduleController.RouteList))
+	schedule.Any("/:id", wrap(scheduleController.RouteByID))
 }

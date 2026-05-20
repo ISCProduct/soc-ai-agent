@@ -2,12 +2,13 @@ package routes
 
 import (
 	"Backend/internal/controllers"
-	"Backend/internal/middleware"
 	"Backend/internal/repositories"
-	"net/http"
+
+	"github.com/labstack/echo/v4"
 )
 
 func SetupAdminRoutes(
+	api *echo.Group,
 	adminCompanyController *controllers.AdminCompanyController,
 	adminCrawlController *controllers.AdminCrawlController,
 	adminJobController *controllers.AdminJobController,
@@ -24,54 +25,51 @@ func SetupAdminRoutes(
 	userRepo *repositories.UserRepository,
 	adminSecret string,
 ) {
-	auth := func(f http.HandlerFunc) http.HandlerFunc {
-		return middleware.AdminAuthFunc(userRepo, adminSecret, f)
-	}
+	// 認証不要（公開）エンドポイント
+	companyGraph := api.Group("/admin/company-graph")
+	companyGraph.Any("/target-year", wrap(adminCompanyGraphController.TargetYear))
 
-	http.HandleFunc("/api/admin/companies", auth(adminCompanyController.ListOrCreate))
-	// http.HandleFunc("/api/admin/companies/search-gbiz", auth(adminCompanyController.SearchGBizRoute)) // gBizINFO停止中
-	http.HandleFunc("/api/admin/companies/", auth(adminCompanyController.Detail))
-	http.HandleFunc("/api/admin/crawl-sources", auth(adminCrawlController.Sources))
-	http.HandleFunc("/api/admin/crawl-sources/", auth(adminCrawlController.SourceDetail))
-	http.HandleFunc("/api/admin/crawl-runs", auth(adminCrawlController.Runs))
-	http.HandleFunc("/api/admin/job-categories", auth(adminJobController.JobCategories))
-	http.HandleFunc("/api/admin/job-positions", auth(adminJobController.JobPositions))
-	http.HandleFunc("/api/admin/job-positions/", auth(adminJobController.JobPositionAction))
-	http.HandleFunc("/api/admin/graduate-employments", auth(adminJobController.GraduateEmployments))
-	http.HandleFunc("/api/admin/graduate-employments/", auth(adminJobController.GraduateEmploymentDetail))
-	http.HandleFunc("/api/admin/users", auth(adminUserController.List))
-	http.HandleFunc("/api/admin/users/", auth(adminUserController.Update))
-	http.HandleFunc("/api/admin/audit-logs", auth(adminAuditController.List))
+	// 管理者認証必須エンドポイント
+	admin := api.Group("/admin", EchoAdminAuth(userRepo, adminSecret))
 
-	// Company graph (scraping pipeline)
-	http.HandleFunc("/api/admin/company-graph/target-year", adminCompanyGraphController.TargetYear)
-	http.HandleFunc("/api/admin/company-graph/crawl", auth(adminCompanyGraphController.Crawl))
+	admin.Any("/companies", wrap(adminCompanyController.ListOrCreate))
+	admin.Any("/companies/*", wrap(adminCompanyController.Detail))
 
-	// Interview management
-	http.HandleFunc("/api/admin/interviews", auth(adminInterviewController.ListSessions))
-	http.HandleFunc("/api/admin/interviews/", auth(adminInterviewController.Route))
+	admin.Any("/crawl-sources", wrap(adminCrawlController.Sources))
+	admin.Any("/crawl-sources/*", wrap(adminCrawlController.SourceDetail))
+	admin.Any("/crawl-runs", wrap(adminCrawlController.Runs))
 
-	// Dashboard
-	http.HandleFunc("/api/admin/dashboard/users", auth(adminDashboardController.ListUsers))
-	http.HandleFunc("/api/admin/dashboard/users/", auth(adminDashboardController.UserSessions))
-	http.HandleFunc("/api/admin/dashboard/export/csv", auth(adminDashboardController.ExportCSV))
+	admin.Any("/job-categories", wrap(adminJobController.JobCategories))
+	admin.Any("/job-positions", wrap(adminJobController.JobPositions))
+	admin.Any("/job-positions/*", wrap(adminJobController.JobPositionAction))
+	admin.Any("/graduate-employments", wrap(adminJobController.GraduateEmployments))
+	admin.Any("/graduate-employments/*", wrap(adminJobController.GraduateEmploymentDetail))
 
-	// API Cost monitoring
-	http.HandleFunc("/api/admin/costs/summary", auth(adminCostsController.Summary))
-	http.HandleFunc("/api/admin/costs/daily", auth(adminCostsController.Daily))
-	http.HandleFunc("/api/admin/costs/monthly", auth(adminCostsController.Monthly))
+	admin.Any("/users", wrap(adminUserController.List))
+	admin.Any("/users/*", wrap(adminUserController.Update))
 
-	// Profile recalculation
-	http.HandleFunc("/api/admin/profile-recalculation", auth(profileRecalcController.Route))
-	http.HandleFunc("/api/admin/profile-recalculation/", auth(profileRecalcController.Route))
+	admin.Any("/audit-logs", wrap(adminAuditController.List))
 
-	// Score validation (correlation, calibration, A/B test)
-	http.HandleFunc("/api/admin/score-validation/", auth(scoreValidationController.Route))
+	admin.Any("/company-graph/crawl", wrap(adminCompanyGraphController.Crawl))
 
-	// Collective insight batch
-	http.HandleFunc("/api/admin/collective-insights/rebuild-summaries", auth(collectiveInsightController.RebuildSummaries))
+	admin.Any("/interviews", wrap(adminInterviewController.ListSessions))
+	admin.Any("/interviews/*", wrap(adminInterviewController.Route))
 
-	// Scraper session management
-	http.HandleFunc("/api/admin/scraper-sessions", auth(scraperSessionController.Sessions))
-	http.HandleFunc("/api/admin/scraper-sessions/", auth(scraperSessionController.SessionDetail))
+	admin.Any("/dashboard/users", wrap(adminDashboardController.ListUsers))
+	admin.Any("/dashboard/users/*", wrap(adminDashboardController.UserSessions))
+	admin.Any("/dashboard/export/csv", wrap(adminDashboardController.ExportCSV))
+
+	admin.Any("/costs/summary", wrap(adminCostsController.Summary))
+	admin.Any("/costs/daily", wrap(adminCostsController.Daily))
+	admin.Any("/costs/monthly", wrap(adminCostsController.Monthly))
+
+	admin.Any("/profile-recalculation", wrap(profileRecalcController.Route))
+	admin.Any("/profile-recalculation/*", wrap(profileRecalcController.Route))
+
+	admin.Any("/score-validation/*", wrap(scoreValidationController.Route))
+
+	admin.Any("/collective-insights/rebuild-summaries", wrap(collectiveInsightController.RebuildSummaries))
+
+	admin.Any("/scraper-sessions", wrap(scraperSessionController.Sessions))
+	admin.Any("/scraper-sessions/*", wrap(scraperSessionController.SessionDetail))
 }
