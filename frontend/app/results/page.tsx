@@ -824,7 +824,7 @@ function ResultsContent() {
 
                 {/* タブ1: 資本関連図 */}
                 {detailTab === 1 && (
-                  <Box sx={{ height: 600 }}>
+                  <Box sx={{ height: { xs: 320, sm: 450, md: 600 } }}>
                     {diagramLoading ? (
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
                         <CircularProgress />
@@ -892,7 +892,7 @@ function ResultsContent() {
 
                 {/* タブ2: ビジネス関連図 */}
                 {detailTab === 2 && (
-                  <Box sx={{ height: 600 }}>
+                  <Box sx={{ height: { xs: 320, sm: 450, md: 600 } }}>
                     {diagramLoading ? (
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
                         <CircularProgress />

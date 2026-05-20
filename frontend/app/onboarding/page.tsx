@@ -84,7 +84,7 @@ export default function OnboardingPage() {
       <Box sx={{ maxWidth: 720, width: '100%' }}>
         {/* ウェルカムメッセージ */}
         <Box sx={{ textAlign: 'center', mb: 5 }}>
-          <Typography variant="h4" sx={{ fontWeight: 700, mb: 1 }}>
+          <Typography variant="h4" sx={{ fontWeight: 700, mb: 1, fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>
             ようこそ！まずはここから始めましょう
           </Typography>
           <Typography sx={{ color: 'text.secondary', fontSize: 16 }}>
@@ -115,7 +115,7 @@ export default function OnboardingPage() {
                   bgcolor: isDone ? '#f1f8f1' : isActive ? '#fff8f5' : '#fff',
                 }}
               >
-                <CardContent sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, py: 2.5 }}>
+                <CardContent sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, py: 2.5, flexWrap: { xs: 'wrap', sm: 'nowrap' } }}>
                   <Box sx={{ mt: 0.5, flexShrink: 0 }}>
                     {isDone ? <CheckCircleIcon sx={{ fontSize: 32, color: '#388e3c' }} /> : step.icon}
                   </Box>
@@ -136,6 +136,7 @@ export default function OnboardingPage() {
                     onClick={() => handleStart(step.path)}
                     sx={{
                       flexShrink: 0,
+                      width: { xs: '100%', sm: 'auto' },
                       ...(isActive && !isDone
                         ? { bgcolor: '#ec5b13', '&:hover': { bgcolor: '#c44d0e' }, color: '#fff' }
                         : {}),

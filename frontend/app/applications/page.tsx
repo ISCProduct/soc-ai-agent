@@ -132,7 +132,7 @@ function ApplicationsContent() {
   }
 
   return (
-    <Box sx={{ maxWidth: 800, mx: 'auto', p: 3 }}>
+    <Box sx={{ maxWidth: 800, mx: 'auto', p: { xs: 2, sm: 3 } }}>
       <Stack direction="row" alignItems="center" spacing={1} mb={3}>
         <IconButton onClick={() => router.back()}>
           <ArrowBack />

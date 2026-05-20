@@ -269,7 +269,7 @@ export default function SchedulePage() {
           {/* Month navigation */}
           <Stack direction="row" alignItems="center" justifyContent="center" sx={{ p: 2, bgcolor: '#fff' }}>
             <IconButton onClick={handlePrevMonth}><ArrowBackIosIcon fontSize="small" /></IconButton>
-            <Typography variant="h6" fontWeight={600} sx={{ minWidth: 160, textAlign: 'center' }}>
+            <Typography variant="h6" fontWeight={600} sx={{ minWidth: { xs: 120, sm: 160 }, textAlign: 'center' }}>
               {viewYear}年 {viewMonth + 1}月
             </Typography>
             <IconButton onClick={handleNextMonth}><ArrowForwardIosIcon fontSize="small" /></IconButton>
