@@ -250,6 +250,16 @@ export const authService = {
     getLocalStorage()?.removeItem(AUTH_USER_KEY)
     getLocalStorage()?.removeItem(AUTH_TOKEN_KEY)
     getLocalStorage()?.removeItem(AUTH_USER_TOKEN_KEY)
+
+    // httpOnly CookieにトークンをセットしてDevTools経由の露出を防ぐ
+    if (authResponse.user_token) {
+      const userId = typeof authResponse.user_id === 'string' ? Number(authResponse.user_id) : authResponse.user_id
+      fetch('/api/auth/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, userToken: authResponse.user_token }),
+      }).catch(() => {})
+    }
   },
 
   getStoredUser(): User | null {
@@ -298,12 +308,15 @@ export const authService = {
     getLocalStorage()?.removeItem(AUTH_USER_KEY)
     getLocalStorage()?.removeItem(AUTH_TOKEN_KEY)
     getLocalStorage()?.removeItem(AUTH_USER_TOKEN_KEY)
-    
+
     // チャットキャッシュを削除
     const sessionId = localStorage.getItem('chat_session_id')
     if (sessionId) {
       localStorage.removeItem(`chat_cache_${sessionId}`)
     }
     localStorage.removeItem('chat_session_id')
+
+    // httpOnly Cookieを削除
+    fetch('/api/auth/session', { method: 'DELETE' }).catch(() => {})
   },
 }

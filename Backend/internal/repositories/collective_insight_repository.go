@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type CollectiveInsightRepository struct {
@@ -140,16 +141,19 @@ func (r *CollectiveInsightRepository) GetAllBehaviorSummaries() ([]models.Anonym
 }
 
 // RebuildSummaries 全企業の行動サマリーを再集計する（バッチ用）
+// N+1を回避するため、全企業のアクション集計・通過スコアを2クエリで一括取得し
+// 一括 upsert（INSERT ON DUPLICATE KEY UPDATE）で書き込む
 func (r *CollectiveInsightRepository) RebuildSummaries() error {
 	type rawSummary struct {
-		CompanyID   uint
-		ViewCount   int
-		ApplyCount  int
-		PassCount   int
+		CompanyID  uint
+		ViewCount  int
+		ApplyCount int
+		PassCount  int
 	}
 
+	// クエリ1: 企業ごとのアクション集計
 	var raws []rawSummary
-	err := r.db.Raw(`
+	if err := r.db.Raw(`
 		SELECT
 			company_id,
 			SUM(CASE WHEN action_type = 'viewed' THEN 1 ELSE 0 END) AS view_count,
@@ -157,62 +161,71 @@ func (r *CollectiveInsightRepository) RebuildSummaries() error {
 			SUM(CASE WHEN action_type = 'passed' THEN 1 ELSE 0 END) AS pass_count
 		FROM collective_insight_logs
 		GROUP BY company_id
-	`).Scan(&raws).Error
-	if err != nil {
+	`).Scan(&raws).Error; err != nil {
+		return err
+	}
+	if len(raws) == 0 {
+		return nil
+	}
+
+	// クエリ2: 通過ユーザーのスコアスナップショットを一括取得してメモリ内で集計
+	var passedLogs []models.CollectiveInsightLog
+	if err := r.db.Select("company_id, score_snapshot").
+		Where("action_type = 'passed' AND score_snapshot != ''").
+		Find(&passedLogs).Error; err != nil {
 		return err
 	}
 
+	// 企業ごとにスコアを集計（メモリ内）
+	sumsByCompany := make(map[uint]map[string]float64, len(passedLogs))
+	countsByCompany := make(map[uint]map[string]int, len(passedLogs))
+	for _, log := range passedLogs {
+		var scores map[string]float64
+		if err := json.Unmarshal([]byte(log.ScoreSnapshot), &scores); err != nil {
+			continue
+		}
+		if sumsByCompany[log.CompanyID] == nil {
+			sumsByCompany[log.CompanyID] = make(map[string]float64)
+			countsByCompany[log.CompanyID] = make(map[string]int)
+		}
+		for cat, score := range scores {
+			sumsByCompany[log.CompanyID][cat] += score
+			countsByCompany[log.CompanyID][cat]++
+		}
+	}
+
+	// 書き込みスライスを構築
+	summaries := make([]models.AnonymizedBehaviorSummary, 0, len(raws))
 	for _, raw := range raws {
 		passRate := 0.0
 		if raw.ApplyCount > 0 {
 			passRate = float64(raw.PassCount) / float64(raw.ApplyCount) * 100
 		}
 
-		// 通過ユーザーの平均スコアを計算
-		avgScores, _ := r.calcAvgPasserScores(raw.CompanyID)
+		avgScores := make(map[string]float64)
+		if sums, ok := sumsByCompany[raw.CompanyID]; ok {
+			counts := countsByCompany[raw.CompanyID]
+			for cat, sum := range sums {
+				avgScores[cat] = sum / float64(counts[cat])
+			}
+		}
 		avgJSON, _ := json.Marshal(avgScores)
 
-		summary := &models.AnonymizedBehaviorSummary{
+		summaries = append(summaries, models.AnonymizedBehaviorSummary{
 			CompanyID:       raw.CompanyID,
 			ViewCount:       raw.ViewCount,
 			ApplyCount:      raw.ApplyCount,
 			PassCount:       raw.PassCount,
 			PassRate:        passRate,
 			AvgPasserScores: string(avgJSON),
-		}
-
-		r.db.Where("company_id = ?", raw.CompanyID).
-			Assign(summary).
-			FirstOrCreate(summary)
-	}
-	return nil
-}
-
-// calcAvgPasserScores 通過ユーザーのカテゴリ別平均スコアを計算する
-func (r *CollectiveInsightRepository) calcAvgPasserScores(companyID uint) (map[string]float64, error) {
-	var logs []models.CollectiveInsightLog
-	err := r.db.Where("company_id = ? AND action_type = 'passed' AND score_snapshot != ''", companyID).
-		Find(&logs).Error
-	if err != nil || len(logs) == 0 {
-		return nil, err
+		})
 	}
 
-	sums := map[string]float64{}
-	counts := map[string]int{}
-	for _, log := range logs {
-		var scores map[string]float64
-		if err := json.Unmarshal([]byte(log.ScoreSnapshot), &scores); err != nil {
-			continue
-		}
-		for cat, score := range scores {
-			sums[cat] += score
-			counts[cat]++
-		}
-	}
-
-	result := map[string]float64{}
-	for cat, sum := range sums {
-		result[cat] = sum / float64(counts[cat])
-	}
-	return result, nil
+	// クエリ3: 一括 upsert（company_id の uniqueIndex を利用）
+	return r.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "company_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"view_count", "apply_count", "pass_count", "pass_rate", "avg_passer_scores", "updated_at",
+		}),
+	}).CreateInBatches(summaries, 100).Error
 }

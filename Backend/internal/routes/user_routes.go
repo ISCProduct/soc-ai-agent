@@ -2,9 +2,11 @@ package routes
 
 import (
 	"Backend/internal/controllers"
-	"net/http"
+
+	"github.com/labstack/echo/v4"
 )
 
-func SetupUserRoutes(profileController *controllers.IntegratedProfileController) {
-	http.HandleFunc("/api/user/profile", profileController.GetProfile)
+func SetupUserRoutes(api *echo.Group, profileController *controllers.IntegratedProfileController) {
+	user := api.Group("/user")
+	user.Any("/profile", wrap(profileController.GetProfile))
 }

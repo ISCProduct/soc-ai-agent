@@ -2,20 +2,17 @@ package routes
 
 import (
 	"Backend/internal/controllers"
-	"Backend/internal/middleware"
-	"net/http"
+
+	"github.com/labstack/echo/v4"
 )
 
 // SetupGitHubRoutes GitHub連携関連のルーティング設定
-func SetupGitHubRoutes(githubController *controllers.GitHubController, userSecret string) {
-	userAuth := func(f http.HandlerFunc) http.HandlerFunc {
-		return middleware.UserAuthFunc(userSecret, f)
-	}
-
-	http.HandleFunc("/api/github/profile", userAuth(githubController.GetProfile))
-	http.HandleFunc("/api/github/sync", userAuth(githubController.Sync))
-	http.HandleFunc("/api/github/sync/wait", userAuth(githubController.SyncAndWait))
-	http.HandleFunc("/api/github/skills", userAuth(githubController.GetSkills))
-	http.HandleFunc("/api/github/repo/summaries", userAuth(githubController.ListRepoSummaries))
-	http.HandleFunc("/api/github/repo/summarize", userAuth(githubController.SummarizeRepo))
+func SetupGitHubRoutes(api *echo.Group, githubController *controllers.GitHubController, userSecret string) {
+	github := api.Group("/github", EchoUserAuth(userSecret))
+	github.Any("/profile", wrap(githubController.GetProfile))
+	github.Any("/sync", wrap(githubController.Sync))
+	github.Any("/sync/wait", wrap(githubController.SyncAndWait))
+	github.Any("/skills", wrap(githubController.GetSkills))
+	github.Any("/repo/summaries", wrap(githubController.ListRepoSummaries))
+	github.Any("/repo/summarize", wrap(githubController.SummarizeRepo))
 }

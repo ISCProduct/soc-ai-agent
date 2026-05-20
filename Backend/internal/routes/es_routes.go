@@ -2,10 +2,12 @@ package routes
 
 import (
 	"Backend/internal/controllers"
-	"net/http"
+
+	"github.com/labstack/echo/v4"
 )
 
-func SetupESRoutes(esRewriteController *controllers.ESRewriteController, esReviewController *controllers.ESReviewController) {
-	http.HandleFunc("/api/es/rewrite", esRewriteController.Rewrite)
-	http.HandleFunc("/api/es/review", esReviewController.Review)
+func SetupESRoutes(api *echo.Group, esRewriteController *controllers.ESRewriteController, esReviewController *controllers.ESReviewController) {
+	es := api.Group("/es")
+	es.Any("/rewrite", wrap(esRewriteController.Rewrite))
+	es.Any("/review", wrap(esReviewController.Review))
 }
