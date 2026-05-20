@@ -32,19 +32,15 @@ func NewInterviewController(interviewService *services.InterviewService, videoRe
 }
 
 type interviewCreateRequest struct {
-	UserID            uint   `json:"user_id"`
 	Language          string `json:"language"`
 	InterviewerGender string `json:"interviewer_gender"`
 }
 
-type interviewActionRequest struct {
-	UserID uint `json:"user_id"`
-}
+type interviewActionRequest struct{}
 
 type interviewUtteranceRequest struct {
-	UserID uint   `json:"user_id"`
-	Role   string `json:"role"`
-	Text   string `json:"text"`
+	Role string `json:"role"`
+	Text string `json:"text"`
 }
 
 func (c *InterviewController) ListOrCreate(w http.ResponseWriter, r *http.Request) {
@@ -99,21 +95,16 @@ func (c *InterviewController) Route(w http.ResponseWriter, r *http.Request) {
 	c.Get(w, r)
 }
 
-// GetTrend は GET /api/interviews/trend?user_id=X&limit=N を処理し、
+// GetTrend は GET /api/interviews/trend?limit=N を処理し、
 // 完了済みセッションのスコア時系列を返す。
 func (c *InterviewController) GetTrend(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	userIDStr := r.URL.Query().Get("user_id")
-	if userIDStr == "" {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
-		return
-	}
-	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	userID, err := authenticatedUserID(r)
 	if err != nil {
-		http.Error(w, "invalid user_id", http.StatusBadRequest)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 	limit := 20
@@ -122,7 +113,7 @@ func (c *InterviewController) GetTrend(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
-	points, err := c.interviewService.GetTrend(uint(userID), limit)
+	points, err := c.interviewService.GetTrend(userID, limit)
 	if err != nil {
 		writeInternalServerError(w, err)
 		return
@@ -143,17 +134,12 @@ func (c *InterviewController) GetReport(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Invalid session ID", http.StatusBadRequest)
 		return
 	}
-	userIDStr := r.URL.Query().Get("user_id")
-	if userIDStr == "" {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
-		return
-	}
-	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	userID, err := authenticatedUserID(r)
 	if err != nil {
-		http.Error(w, "invalid user_id", http.StatusBadRequest)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	report, err := c.interviewService.GetReport(uint(userID), sessionID)
+	report, err := c.interviewService.GetReport(userID, sessionID)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if err.Error() == "forbidden" {
@@ -180,17 +166,12 @@ func (c *InterviewController) GetPhraseSuggestions(w http.ResponseWriter, r *htt
 		http.Error(w, "Invalid session ID", http.StatusBadRequest)
 		return
 	}
-	userIDStr := r.URL.Query().Get("user_id")
-	if userIDStr == "" {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
-		return
-	}
-	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	userID, err := authenticatedUserID(r)
 	if err != nil {
-		http.Error(w, "invalid user_id", http.StatusBadRequest)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	suggestions, err := c.interviewService.GetPhraseSuggestions(r.Context(), uint(userID), sessionID)
+	suggestions, err := c.interviewService.GetPhraseSuggestions(r.Context(), userID, sessionID)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if err.Error() == "forbidden" {
@@ -215,14 +196,12 @@ func (c *InterviewController) SendReport(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Invalid session ID", http.StatusBadRequest)
 		return
 	}
-	var req struct {
-		UserID uint `json:"user_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.UserID == 0 {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if err := c.interviewService.SendReportEmail(req.UserID, sessionID); err != nil {
+	if err := c.interviewService.SendReportEmail(userID, sessionID); err != nil {
 		status := http.StatusInternalServerError
 		if err.Error() == "user not found" || err.Error() == "report not found" {
 			status = http.StatusNotFound
@@ -263,10 +242,9 @@ func (c *InterviewController) UploadVideo(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	userIDStr := r.FormValue("user_id")
-	userID, err := strconv.ParseUint(userIDStr, 10, 32)
-	if err != nil || userID == 0 {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -294,7 +272,7 @@ func (c *InterviewController) UploadVideo(w http.ResponseWriter, r *http.Request
 
 	videoRecord := &models.InterviewVideo{
 		SessionID:     sessionID,
-		UserID:        uint(userID),
+		UserID:        userID,
 		FileName:      fileName,
 		FileSizeBytes: header.Size,
 		MimeType:      mimeType,
@@ -343,10 +321,10 @@ func (c *InterviewController) Turn(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to parse form", http.StatusBadRequest)
 		return
 	}
-	userIDStr := r.FormValue("user_id")
-	var userID uint
-	if id, err := strconv.ParseUint(userIDStr, 10, 32); err == nil {
-		userID = uint(id)
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
 	}
 	historyStr := r.FormValue("history")
 	var history []map[string]string
@@ -456,8 +434,12 @@ func (c *InterviewController) StartTurn(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 	var req struct {
-		UserID                  uint   `json:"user_id"`
 		CompanyName             string `json:"company_name"`
 		CompanyReading          string `json:"company_reading"`
 		Position                string `json:"position"`
@@ -472,7 +454,7 @@ func (c *InterviewController) StartTurn(w http.ResponseWriter, r *http.Request) 
 
 	result, err := c.interviewService.StartTurn(
 		r.Context(),
-		req.UserID,
+		userID,
 		sessionID,
 		req.CompanyName,
 		req.CompanyReading,
@@ -505,16 +487,17 @@ func (c *InterviewController) Create(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 	var req interviewCreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.UserID == 0 {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
-		return
-	}
-	resp, err := c.interviewService.CreateSession(req.UserID, req.Language, req.InterviewerGender)
+	resp, err := c.interviewService.CreateSession(userID, req.Language, req.InterviewerGender)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -533,16 +516,12 @@ func (c *InterviewController) Start(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid interview id", http.StatusBadRequest)
 		return
 	}
-	var req interviewActionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if req.UserID == 0 {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
-		return
-	}
-	resp, err := c.interviewService.StartSession(req.UserID, sessionID)
+	resp, err := c.interviewService.StartSession(userID, sessionID)
 	if err != nil {
 		status := http.StatusBadRequest
 		if err.Error() == "forbidden" {
@@ -565,16 +544,12 @@ func (c *InterviewController) Finish(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid interview id", http.StatusBadRequest)
 		return
 	}
-	var req interviewActionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if req.UserID == 0 {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
-		return
-	}
-	resp, err := c.interviewService.FinishSession(req.UserID, sessionID)
+	resp, err := c.interviewService.FinishSession(userID, sessionID)
 	if err != nil {
 		status := http.StatusBadRequest
 		if err.Error() == "forbidden" {
@@ -592,14 +567,9 @@ func (c *InterviewController) List(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	userIDStr := r.URL.Query().Get("user_id")
-	if userIDStr == "" {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
-		return
-	}
-	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	userID, err := authenticatedUserID(r)
 	if err != nil {
-		http.Error(w, "invalid user_id", http.StatusBadRequest)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 	page := parseIntQuery(r, "page", 1)
@@ -609,7 +579,7 @@ func (c *InterviewController) List(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := (page - 1) * limit
 	all := r.URL.Query().Get("all") == "1" || strings.ToLower(r.URL.Query().Get("all")) == "true"
-	sessions, total, err := c.interviewService.ListSessions(uint(userID), all, limit, offset)
+	sessions, total, err := c.interviewService.ListSessions(userID, all, limit, offset)
 	if err != nil {
 		status := http.StatusBadRequest
 		if err.Error() == "forbidden" {
@@ -637,21 +607,16 @@ func (c *InterviewController) Get(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid interview id", http.StatusBadRequest)
 		return
 	}
-	userIDStr := r.URL.Query().Get("user_id")
-	if userIDStr == "" {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
-		return
-	}
-	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	userID, err := authenticatedUserID(r)
 	if err != nil {
-		http.Error(w, "invalid user_id", http.StatusBadRequest)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 	role := r.URL.Query().Get("role")
 	if role == "" {
 		role = "student"
 	}
-	resp, err := c.interviewService.GetSessionDetailWithRole(uint(userID), sessionID, role)
+	resp, err := c.interviewService.GetSessionDetailWithRole(userID, sessionID, role)
 	if err != nil {
 		status := http.StatusBadRequest
 		if err.Error() == "forbidden" {
@@ -674,16 +639,17 @@ func (c *InterviewController) AddUtterance(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "invalid interview id", http.StatusBadRequest)
 		return
 	}
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 	var req interviewUtteranceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.UserID == 0 {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
-		return
-	}
-	if err := c.interviewService.SaveUtterance(req.UserID, sessionID, req.Role, req.Text); err != nil {
+	if err := c.interviewService.SaveUtterance(userID, sessionID, req.Role, req.Text); err != nil {
 		status := http.StatusBadRequest
 		if err.Error() == "forbidden" {
 			status = http.StatusForbidden

@@ -58,6 +58,12 @@ func UserAuthFunc(userRepo *repositories.UserRepository, userSecret string, next
 			return
 		}
 
+		// ゲストユーザーは認証が必要なエンドポイントへのアクセスを拒否
+		if user.IsGuest {
+			http.Error(w, "Forbidden: guest users cannot access this resource", http.StatusForbidden)
+			return
+		}
+
 		next(w, r)
 	}
 }
