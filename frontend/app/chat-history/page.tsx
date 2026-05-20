@@ -18,6 +18,7 @@ interface ChatSession {
 export default function ChatHistoryPage() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [loading, setLoading] = useState(true)
+  const [authError, setAuthError] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -26,16 +27,22 @@ export default function ChatHistoryPage() {
       router.push('/')
       return
     }
-    fetchSessions(user.user_id)
+    fetchSessions()
   }, [router])
 
-  const fetchSessions = async (userId: number) => {
+  const fetchSessions = async () => {
     try {
       const response = await fetch('/api/chat/sessions', {
         headers: authService.getUserFetchHeaders(),
       })
+      if (response.status === 401 || response.status === 403) {
+        setAuthError(true)
+        return
+      }
       if (!response.ok) {
-        throw new Error('Failed to fetch sessions')
+        console.error('Failed to fetch sessions:', response.status)
+        setSessions([])
+        return
       }
       const data = await response.json()
       setSessions(data || [])
@@ -69,6 +76,24 @@ export default function ChatHistoryPage() {
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <CircularProgress />
       </Box>
+    )
+  }
+
+  if (authError) {
+    return (
+      <Container maxWidth="md" sx={{ py: 4 }}>
+        <Paper sx={{ p: 4, textAlign: 'center' }}>
+          <Typography variant="h6" color="error" gutterBottom>
+            認証エラー
+          </Typography>
+          <Typography color="text.secondary" sx={{ mb: 2 }}>
+            セッションが期限切れです。再度ログインしてください。
+          </Typography>
+          <Button variant="contained" onClick={() => { authService.logout(); router.push('/') }}>
+            ログインページへ
+          </Button>
+        </Paper>
+      </Container>
     )
   }
 
