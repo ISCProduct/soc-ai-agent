@@ -2,12 +2,14 @@ package routes
 
 import (
 	"Backend/internal/controllers"
-	"net/http"
+
+	"github.com/labstack/echo/v4"
 )
 
-func SetupCollectiveInsightRoutes(controller *controllers.CollectiveInsightController) {
-	http.HandleFunc("/api/collective-insights/recommendations", controller.Route)
-	http.HandleFunc("/api/collective-insights/top-companies", controller.Route)
-	http.HandleFunc("/api/collective-insights/consent", controller.Route)
-	http.HandleFunc("/api/collective-insights/actions", controller.Route)
+func SetupCollectiveInsightRoutes(api *echo.Group, controller *controllers.CollectiveInsightController) {
+	ci := api.Group("/collective-insights")
+	ci.Any("/recommendations", wrap(controller.Route))
+	ci.Any("/top-companies", wrap(controller.Route))
+	ci.Any("/consent", wrap(controller.Route))
+	ci.Any("/actions", wrap(controller.Route))
 }

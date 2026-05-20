@@ -1,4 +1,13 @@
+import { authService } from '@/lib/auth'
+
 const API_BASE = '/api'
+
+function unwrapArray<T>(raw: unknown): T[] {
+    if (Array.isArray(raw)) return raw as T[]
+    const obj = raw as Record<string, unknown>
+    if (obj && Array.isArray(obj.data)) return obj.data as T[]
+    return []
+}
 
 export interface ChatRequest {
     user_id: number
@@ -77,6 +86,7 @@ export async function sendChatMessage(request: ChatRequest): Promise<ChatRespons
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
+                ...authService.getUserFetchHeaders(),
             },
             body: JSON.stringify(request),
         })
@@ -96,14 +106,17 @@ export async function sendChatMessage(request: ChatRequest): Promise<ChatRespons
 
 export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> {
     try {
-        const response = await fetch(`${API_BASE}/chat/history?session_id=${sessionId}`)
+        const response = await fetch(`${API_BASE}/chat/history?session_id=${sessionId}`, {
+            headers: authService.getUserFetchHeaders(),
+        })
 
         if (!response.ok) {
-            console.warn(`History API error: ${response.statusText}`)
+            console.warn(`History API error: ${response.status}`)
             return []
         }
 
-        return response.json()
+        const raw = await response.json()
+        return unwrapArray<ChatHistory>(raw)
     } catch (error) {
         console.warn('Failed to fetch chat history:', error)
         return []
@@ -111,18 +124,22 @@ export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> 
 }
 
 export async function getUserScores(userId: number, sessionId: string): Promise<ChatScore[]> {
-    const response = await fetch(`${API_BASE}/chat/scores?user_id=${userId}&session_id=${sessionId}`)
+    const response = await fetch(`${API_BASE}/chat/scores?user_id=${userId}&session_id=${sessionId}`, {
+        headers: authService.getUserFetchHeaders(),
+    })
 
     if (!response.ok) {
         throw new Error(`Scores API error: ${response.statusText}`)
     }
 
-    return response.json()
+    const raw = await response.json()
+    return unwrapArray<ChatScore>(raw)
 }
 
 export async function getRecommendations(userId: number, sessionId: string, limit = 5) {
     const response = await fetch(
         `${API_BASE}/chat/recommendations?user_id=${userId}&session_id=${sessionId}&limit=${limit}`,
+        { headers: authService.getUserFetchHeaders() },
     )
 
     if (!response.ok) {
@@ -157,8 +174,9 @@ export async function sendAnalysisReport(userId: number, sessionId: string): Pro
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
+            ...authService.getUserFetchHeaders(),
         },
-        body: JSON.stringify({ user_id: userId, session_id: sessionId }),
+        body: JSON.stringify({ session_id: sessionId }),
     })
 
     if (!response.ok) {

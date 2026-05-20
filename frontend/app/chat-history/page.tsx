@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react'
 import { Box, Container, Typography, Paper, List, ListItem, ListItemButton, ListItemText, Divider, CircularProgress, Button } from '@mui/material'
 import { useRouter } from 'next/navigation'
 import { authService } from '@/lib/auth'
-import { BACKEND_URL } from '@/lib/config'
 import ChatIcon from '@mui/icons-material/Chat'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 
@@ -19,6 +18,7 @@ interface ChatSession {
 export default function ChatHistoryPage() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [loading, setLoading] = useState(true)
+  const [authError, setAuthError] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -27,19 +27,27 @@ export default function ChatHistoryPage() {
       router.push('/')
       return
     }
-    fetchSessions(user.user_id)
+    fetchSessions()
   }, [router])
 
-  const fetchSessions = async (userId: number) => {
+  const fetchSessions = async () => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/chat/sessions`, {
+      const response = await fetch('/api/chat/sessions', {
         headers: authService.getUserFetchHeaders(),
       })
-      if (!response.ok) {
-        throw new Error('Failed to fetch sessions')
+      if (response.status === 401 || response.status === 403) {
+        setAuthError(true)
+        return
       }
-      const data = await response.json()
-      setSessions(data || [])
+      if (!response.ok) {
+        console.error('Failed to fetch sessions:', response.status)
+        setSessions([])
+        return
+      }
+      const raw = await response.json()
+      // buildProxyJsonResponse は配列を { data: [...] } にラップするため両形式に対応
+      const data: ChatSession[] = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : []
+      setSessions(data)
     } catch (error) {
       console.error('Error fetching sessions:', error)
       setSessions([])
@@ -70,6 +78,24 @@ export default function ChatHistoryPage() {
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <CircularProgress />
       </Box>
+    )
+  }
+
+  if (authError) {
+    return (
+      <Container maxWidth="md" sx={{ py: 4 }}>
+        <Paper sx={{ p: 4, textAlign: 'center' }}>
+          <Typography variant="h6" color="error" gutterBottom>
+            認証エラー
+          </Typography>
+          <Typography color="text.secondary" sx={{ mb: 2 }}>
+            セッションが期限切れです。再度ログインしてください。
+          </Typography>
+          <Button variant="contained" onClick={() => { authService.logout(); router.push('/') }}>
+            ログインページへ
+          </Button>
+        </Paper>
+      </Container>
     )
   }
 

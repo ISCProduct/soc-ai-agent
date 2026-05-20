@@ -18,13 +18,17 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const authHeaders = extractUserAuthHeaders(request)
+    const userId = authHeaders['X-User-ID']
+    const params = new URLSearchParams({ session_id: sessionId, limit })
+    if (userId) params.set('user_id', userId)
     const response = await fetch(
-      `${BACKEND_URL}/api/chat/recommendations?session_id=${sessionId}&limit=${limit}`,
+      `${BACKEND_URL}/api/chat/recommendations?${params}`,
       {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          ...extractUserAuthHeaders(request),
+          ...authHeaders,
         },
       }
     )

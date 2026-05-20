@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/labstack/echo/v4"
 )
 
 func buildAllowedOrigins() map[string]struct{} {
@@ -49,38 +51,34 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
+// buildCORSMiddleware は許可オリジンを一度だけ構築してCORSミドルウェアを返す
+func buildCORSMiddleware() func(http.Handler) http.Handler {
 	allowedOrigins := buildAllowedOrigins()
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := strings.TrimSpace(r.Header.Get("Origin"))
-		_, isAllowedOrigin := allowedOrigins[origin]
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := strings.TrimSpace(r.Header.Get("Origin"))
+			_, isAllowedOrigin := allowedOrigins[origin]
 
-		// Originなしリクエストを拒否（HTMLフォームPOSTなどCSRF的攻撃を防ぐ）
-		// ただしヘルスチェックエンドポイントは除外
-		if origin == "" && r.URL.Path != "/health" && r.URL.Path != "/healthz" {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
+			w.Header().Add("Vary", "Origin")
+			if isAllowedOrigin {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+			}
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID, X-User-Token, X-Admin-Email, X-Admin-Token")
 
-		w.Header().Add("Vary", "Origin")
-		if isAllowedOrigin {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID, X-User-Token, X-Admin-Email, X-Admin-Token")
-
-		if r.Method == "OPTIONS" {
-			if !isAllowedOrigin {
-				w.WriteHeader(http.StatusForbidden)
+			if r.Method == "OPTIONS" {
+				if origin != "" && !isAllowedOrigin {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
 				return
 			}
-			w.WriteHeader(http.StatusOK)
-			return
-		}
 
-		next.ServeHTTP(w, r)
-	})
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // checkAnnotationFont はサーバー起動時に PDF アノテーション用フォントの存在を確認し、
@@ -275,22 +273,13 @@ func main() {
 	scraperSessionService := services.NewScraperSessionService(scraperSessionRepo)
 	scraperSessionController := controllers.NewAdminScraperSessionController(scraperSessionService)
 
-	// ルーティング設定
-	routes.SetupAuthRoutes(authController, oauthController, userRepo, cfg.UserSecret)
-	routes.SetupChatRoutes(chatController, questionController, userRepo, cfg.UserSecret)
-	routes.SetupCompanyRoutes(relationController)
-	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, userRepo, cfg.AdminSecret)
-	routes.SetupResumeRoutes(resumeController, userRepo, cfg.UserSecret)
-	routes.SetupInterviewRoutes(interviewController, realtimeController, userRepo, cfg.UserSecret)
-	routes.SetupGitHubRoutes(githubController)
-	routes.SetupESRoutes(esRewriteController, esReviewController)
-	routes.SetupScheduleRoutes(scheduleController)
-	routes.SetupApplicationRoutes(appController)
-	routes.SetupUserRoutes(integratedProfileController)
-	routes.SetupCollectiveInsightRoutes(collectiveInsightController)
-	http.HandleFunc("/api/company-entry", companyEntryController.Submit)
+	// Echo初期化
+	e := echo.New()
+	e.HideBanner = true
 
-	go crawlService.StartScheduler()
+	// グローバルミドルウェア
+	e.Use(echo.WrapMiddleware(securityHeadersMiddleware))
+	e.Use(echo.WrapMiddleware(buildCORSMiddleware()))
 
 	// ヘルスチェックエンドポイント
 	// /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス
@@ -300,9 +289,28 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	}
-	http.HandleFunc(
-		"/health", healthHandler)
-	http.HandleFunc("/healthz", healthHandler)
+	e.Any("/health", echo.WrapHandler(http.HandlerFunc(healthHandler)))
+	e.Any("/healthz", echo.WrapHandler(http.HandlerFunc(healthHandler)))
+
+	// APIルートグループ
+	api := e.Group("/api")
+
+	// ルーティング設定
+	routes.SetupAuthRoutes(api, authController, oauthController, userRepo, cfg.UserSecret)
+	routes.SetupChatRoutes(api, chatController, questionController, userRepo, cfg.UserSecret)
+	routes.SetupCompanyRoutes(api, relationController)
+	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, userRepo, cfg.AdminSecret)
+	routes.SetupResumeRoutes(api, resumeController, userRepo, cfg.UserSecret)
+	routes.SetupInterviewRoutes(api, interviewController, realtimeController)
+	routes.SetupGitHubRoutes(api, githubController)
+	routes.SetupESRoutes(api, esRewriteController, esReviewController)
+	routes.SetupScheduleRoutes(api, scheduleController)
+	routes.SetupApplicationRoutes(api, appController)
+	routes.SetupUserRoutes(api, integratedProfileController)
+	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController)
+	api.Any("/company-entry", echo.WrapHandler(http.HandlerFunc(companyEntryController.Submit)))
+
+	go crawlService.StartScheduler()
 
 	// サーバー起動
 	port := cfg.ServerPort
@@ -311,7 +319,7 @@ func main() {
 	}
 
 	log.Printf("Starting server on port %s...", port)
-	if err := http.ListenAndServe(":"+port, securityHeadersMiddleware(corsMiddleware(http.DefaultServeMux))); err != nil {
+	if err := e.Start(":" + port); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }

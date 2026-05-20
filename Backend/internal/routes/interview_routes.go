@@ -2,21 +2,19 @@ package routes
 
 import (
 	"Backend/internal/controllers"
-	"Backend/internal/middleware"
-	"Backend/internal/repositories"
-	"net/http"
+
+	"github.com/labstack/echo/v4"
 )
 
 // SetupInterviewRoutes 面接関連のルーティング設定
-func SetupInterviewRoutes(interviewController *controllers.InterviewController, realtimeController *controllers.RealtimeController, userRepo *repositories.UserRepository, userSecret string) {
-	userAuth := func(f http.HandlerFunc) http.HandlerFunc {
-		return middleware.UserAuthFunc(userRepo, userSecret, f)
-	}
+func SetupInterviewRoutes(api *echo.Group, interviewController *controllers.InterviewController, realtimeController *controllers.RealtimeController) {
+	interviews := api.Group("/interviews")
+	// /trend は /*  より先にEchoのルーターが解決するため順序は不問
+	interviews.Any("/trend", wrap(interviewController.GetTrend))
+	interviews.Any("", wrap(interviewController.ListOrCreate))
+	interviews.Any("/*", wrap(interviewController.Route))
 
-	// /api/interviews/trend はワイルドカード /api/interviews/ より先に登録する必要がある
-	http.HandleFunc("/api/interviews/trend", userAuth(interviewController.GetTrend))
-	http.HandleFunc("/api/interviews", userAuth(interviewController.ListOrCreate))
-	http.HandleFunc("/api/interviews/", userAuth(interviewController.Route))
-	http.HandleFunc("/api/realtime/token", userAuth(realtimeController.Token))
-	http.HandleFunc("/api/realtime/session-info", userAuth(realtimeController.SessionInfo))
+	realtime := api.Group("/realtime")
+	realtime.Any("/token", wrap(realtimeController.Token))
+	realtime.Any("/session-info", wrap(realtimeController.SessionInfo))
 }

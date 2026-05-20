@@ -7,13 +7,16 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
+  const authHeaders = extractUserAuthHeaders(request)
   const params = new URLSearchParams()
   for (const key of ['session_id']) {
     const v = searchParams.get(key)
     if (v !== null) params.set(key, v)
   }
+  const userId = authHeaders['X-User-ID']
+  if (userId) params.set('user_id', userId)
   const response = await fetch(`${BACKEND_URL}/api/chat/analysis?${params}`, {
-    headers: extractUserAuthHeaders(request),
+    headers: authHeaders,
   })
   const raw = await response.text()
   let data: any = {}
