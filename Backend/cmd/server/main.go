@@ -270,7 +270,7 @@ func main() {
 
 	// ルーティング設定
 	routes.SetupAuthRoutes(authController, oauthController, userRepo, cfg.UserSecret)
-	routes.SetupChatRoutes(chatController, questionController)
+	routes.SetupChatRoutes(chatController, questionController, userRepo, cfg.UserSecret)
 	routes.SetupCompanyRoutes(relationController)
 	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, userRepo, cfg.AdminSecret)
 	routes.SetupResumeRoutes(resumeController, userRepo, cfg.UserSecret)
