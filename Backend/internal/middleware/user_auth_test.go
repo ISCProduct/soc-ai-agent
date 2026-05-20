@@ -1,7 +1,7 @@
 package middleware_test
 
-// ユーザー認証ミドルウェアのセキュリティテスト（JWT版）
-// 実行: cd Backend && go test ./internal/middleware/... -v
+// UserAuthFunc HTTPミドルウェアのセキュリティテスト
+// 実行: cd Backend && go test ./internal/middleware/... -run TestUserAuth -v
 
 import (
 	"net/http"
@@ -10,10 +10,6 @@ import (
 
 	"Backend/internal/middleware"
 )
-
-func okHandler(w http.ResponseWriter, _ *http.Request) {
-	w.WriteHeader(http.StatusOK)
-}
 
 // TestUserAuth_SecretNotConfigured は userSecret が空のとき 503 を返すことを検証する（フェイルクローズ）
 func TestUserAuth_SecretNotConfigured(t *testing.T) {
@@ -32,8 +28,7 @@ func TestUserAuth_SecretNotConfigured(t *testing.T) {
 
 // TestUserAuth_MissingToken はトークンヘッダーが欠けているとき 401 を返すことを検証する
 func TestUserAuth_MissingToken(t *testing.T) {
-	secret := "test-secret"
-	h := middleware.UserAuthFunc(secret, okHandler)
+	h := middleware.UserAuthFunc("test-secret", okHandler)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -82,7 +77,6 @@ func TestUserAuth_ValidToken(t *testing.T) {
 		userID = uint(1)
 		email  = "user@example.com"
 	)
-
 	validToken := middleware.GenerateUserToken(userID, email, secret)
 	h := middleware.UserAuthFunc(secret, okHandler)
 
@@ -104,7 +98,6 @@ func TestUserAuth_ContextContainsUserID(t *testing.T) {
 		userID = uint(42)
 		email  = "user@example.com"
 	)
-
 	token := middleware.GenerateUserToken(userID, email, secret)
 
 	var capturedID uint
@@ -123,44 +116,5 @@ func TestUserAuth_ContextContainsUserID(t *testing.T) {
 
 	if capturedID != userID {
 		t.Errorf("コンテキストのユーザーID: got %d, want %d", capturedID, userID)
-	}
-}
-
-// TestGenerateUserToken_NotEmpty は GenerateUserToken が空でないトークンを返すことを検証する
-func TestGenerateUserToken_NotEmpty(t *testing.T) {
-	tok := middleware.GenerateUserToken(1, "user@example.com", "secret")
-	if tok == "" {
-		t.Error("GenerateUserToken が空文字列を返した")
-	}
-}
-
-// TestGenerateUserToken_DifferentFromAdminToken はユーザートークンと管理者トークンが異なることを検証する
-func TestGenerateUserToken_DifferentFromAdminToken(t *testing.T) {
-	const (
-		userID = uint(1)
-		email  = "user@example.com"
-		secret = "secret"
-	)
-	userToken := middleware.GenerateUserToken(userID, email, secret)
-	adminToken := middleware.GenerateAdminToken(userID, email, secret)
-	if userToken == adminToken {
-		t.Error("ユーザートークンと管理者トークンが同一になってはならない（トークン流用防止）")
-	}
-}
-
-// TestVerifyUserToken_WrongUserID は別ユーザーIDのトークンを拒否することを検証する
-func TestVerifyUserToken_WrongUserID(t *testing.T) {
-	secret := "secret"
-	token := middleware.GenerateUserToken(1, "user@example.com", secret)
-	if middleware.VerifyUserToken(token, 2, "user@example.com", secret) {
-		t.Error("別ユーザーIDのトークンを受け入れてはならない")
-	}
-}
-
-// TestVerifyUserToken_WrongSecret は別シークレットのトークンを拒否することを検証する
-func TestVerifyUserToken_WrongSecret(t *testing.T) {
-	token := middleware.GenerateUserToken(1, "user@example.com", "correct-secret")
-	if middleware.VerifyUserToken(token, 1, "user@example.com", "wrong-secret") {
-		t.Error("別シークレットのトークンを受け入れてはならない")
 	}
 }

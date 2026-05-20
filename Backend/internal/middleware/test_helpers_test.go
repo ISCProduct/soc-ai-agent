@@ -1,6 +1,7 @@
 package middleware_test
 
 import (
+	"net/http"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -32,4 +33,8 @@ func newTestUserRepo(t *testing.T) (*repositories.UserRepository, sqlmock.Sqlmoc
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	return repositories.NewUserRepository(db), mock
+}
+
+func okHandler(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusOK)
 }
