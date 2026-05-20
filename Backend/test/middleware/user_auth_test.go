@@ -1,7 +1,7 @@
 package middleware_test
 
 // UserAuthFunc HTTPミドルウェアのセキュリティテスト
-// 実行: cd Backend && go test ./internal/middleware/... -run TestUserAuth -v
+// 実行: cd Backend && go test ./test/middleware/... -run TestUserAuth -v
 
 import (
 	"net/http"

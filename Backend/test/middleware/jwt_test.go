@@ -1,7 +1,7 @@
 package middleware_test
 
 // JWT生成・検証ユーティリティの単体テスト
-// 実行: cd Backend && go test ./internal/middleware/... -run TestJWT -v
+// 実行: cd Backend && go test ./test/middleware/... -run TestJWT -v
 
 import (
 	"testing"
