@@ -44,8 +44,10 @@ export default function ChatHistoryPage() {
         setSessions([])
         return
       }
-      const data = await response.json()
-      setSessions(data || [])
+      const raw = await response.json()
+      // buildProxyJsonResponse は配列を { data: [...] } にラップするため両形式に対応
+      const data: ChatSession[] = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : []
+      setSessions(data)
     } catch (error) {
       console.error('Error fetching sessions:', error)
       setSessions([])
