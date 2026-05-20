@@ -19,12 +19,12 @@ require (
 	gorm.io/gorm v1.31.1
 )
 
-require github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
+require github.com/golang-jwt/jwt/v5 v5.3.1
 
 require (
 	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
-	github.com/PuerkitoBio/goquery v1.12.0 // indirect
+	github.com/PuerkitoBio/goquery v1.12.0
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.9 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.15 // indirect
