@@ -157,7 +157,15 @@ func (s *MatchingService) GetTopMatches(ctx context.Context, userID uint, sessio
 }
 
 // ToggleFavorite お気に入りをトグル
-func (s *MatchingService) ToggleFavorite(matchID uint) error {
+// userID を検証し、マッチングレコードの所有者のみが操作できることを保証する
+func (s *MatchingService) ToggleFavorite(matchID uint, userID uint) error {
+	match, err := s.matchRepo.FindByID(matchID)
+	if err != nil {
+		return err
+	}
+	if match.UserID != userID {
+		return ErrForbidden
+	}
 	return s.matchRepo.ToggleFavorite(matchID)
 }
 

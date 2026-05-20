@@ -412,6 +412,12 @@ func (c *ChatController) ToggleFavorite(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req struct {
 		MatchID uint `json:"match_id"`
 	}
@@ -420,7 +426,11 @@ func (c *ChatController) ToggleFavorite(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := c.matchingService.ToggleFavorite(req.MatchID); err != nil {
+	if err := c.matchingService.ToggleFavorite(req.MatchID, userID); err != nil {
+		if err == services.ErrForbidden {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 		writeInternalServerError(w, err)
 		return
 	}
