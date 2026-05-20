@@ -1,10 +1,10 @@
 package controllers
 
 import (
+	"Backend/internal/middleware"
 	"Backend/internal/services"
 	"encoding/json"
 	"net/http"
-	"strconv"
 )
 
 type AuthController struct {
@@ -102,19 +102,13 @@ func (c *AuthController) GetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userIDStr := r.URL.Query().Get("user_id")
-	if userIDStr == "" {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
+	userID, ok := r.Context().Value(middleware.UserIDContextKey).(uint)
+	if !ok || userID == 0 {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	userID, err := strconv.ParseUint(userIDStr, 10, 32)
-	if err != nil {
-		http.Error(w, "Invalid user_id", http.StatusBadRequest)
-		return
-	}
-
-	resp, err := c.authService.GetUser(uint(userID))
+	resp, err := c.authService.GetUser(userID)
 	if err != nil {
 		if err.Error() == "user not found" {
 			http.Error(w, err.Error(), http.StatusNotFound)
@@ -186,11 +180,19 @@ func (c *AuthController) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, ok := r.Context().Value(middleware.UserIDContextKey).(uint)
+	if !ok || userID == 0 {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req services.UpdateProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+	// リクエストボディの user_id を無視し、JWTから取得した値で上書き
+	req.UserID = userID
 
 	resp, err := c.authService.UpdateProfile(req)
 	if err != nil {
@@ -283,18 +285,13 @@ func (c *AuthController) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userIDStr := r.URL.Query().Get("user_id")
-	if userIDStr == "" {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
-		return
-	}
-	userID, err := strconv.ParseUint(userIDStr, 10, 32)
-	if err != nil {
-		http.Error(w, "Invalid user_id", http.StatusBadRequest)
+	userID, ok := r.Context().Value(middleware.UserIDContextKey).(uint)
+	if !ok || userID == 0 {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	if err := c.authService.DeleteAccount(uint(userID)); err != nil {
+	if err := c.authService.DeleteAccount(userID); err != nil {
 		writeInternalServerError(w, err)
 		return
 	}

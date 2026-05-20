@@ -3,13 +3,12 @@ package routes
 import (
 	"Backend/internal/controllers"
 	"Backend/internal/middleware"
-	"Backend/internal/repositories"
 
 	"github.com/labstack/echo/v4"
 )
 
 // SetupAuthRoutes 認証関連のルーティング設定
-func SetupAuthRoutes(api *echo.Group, authController *controllers.AuthController, oauthController *controllers.OAuthController, userRepo *repositories.UserRepository, userSecret string) {
+func SetupAuthRoutes(api *echo.Group, authController *controllers.AuthController, oauthController *controllers.OAuthController, userSecret string) {
 	auth := api.Group("/auth")
 
 	// 認証不要エンドポイント
@@ -26,8 +25,8 @@ func SetupAuthRoutes(api *echo.Group, authController *controllers.AuthController
 	auth.Any("/github", wrap(oauthController.GitHubLogin))
 	auth.Any("/github/callback", wrap(oauthController.GitHubCallback))
 
-	// 認証必須エンドポイント（X-User-ID + X-User-Token ヘッダーが必要）
-	authProtected := api.Group("/auth", EchoUserAuth(userRepo, userSecret))
+	// 認証必須エンドポイント（X-User-Token JWTヘッダーが必要）
+	authProtected := api.Group("/auth", EchoUserAuth(userSecret))
 	authProtected.Any("/user", wrap(authController.GetUser))
 	authProtected.Any("/profile", wrap(authController.UpdateProfile))
 	authProtected.Any("/account", wrap(authController.DeleteAccount))

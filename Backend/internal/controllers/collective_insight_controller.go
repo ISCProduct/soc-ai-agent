@@ -36,12 +36,18 @@ func (c *CollectiveInsightController) Route(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-// GetRecommendations GET /api/collective-insights/recommendations?user_id=xxx&session_id=xxx
+// GetRecommendations GET /api/collective-insights/recommendations?session_id=xxx
 // 類似スコアプロファイルのユーザーが通過した企業をレコメンドする
 func (c *CollectiveInsightController) GetRecommendations(w http.ResponseWriter, r *http.Request) {
-	userID, sessionID, ok := parseUserAndSession(r)
-	if !ok {
-		http.Error(w, "user_id and session_id are required", http.StatusBadRequest)
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		http.Error(w, "session_id is required", http.StatusBadRequest)
 		return
 	}
 
@@ -96,23 +102,28 @@ func (c *CollectiveInsightController) GetTopPassRateCompanies(w http.ResponseWri
 // UpdateConsent PUT /api/collective-insights/consent
 // ユーザーの集合知参加同意を更新する
 func (c *CollectiveInsightController) UpdateConsent(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		UserID uint `json:"user_id"`
-		Allow  bool `json:"allow"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.UserID == 0 {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	if err := c.svc.UpdateConsent(req.UserID, req.Allow); err != nil {
+	var req struct {
+		Allow bool `json:"allow"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := c.svc.UpdateConsent(userID, req.Allow); err != nil {
 		writeInternalServerError(w, err)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"user_id": req.UserID,
+		"user_id": userID,
 		"allow":   req.Allow,
 	})
 }
@@ -120,8 +131,13 @@ func (c *CollectiveInsightController) UpdateConsent(w http.ResponseWriter, r *ht
 // RecordAction POST /api/collective-insights/actions
 // ユーザー行動を匿名ログとして記録する
 func (c *CollectiveInsightController) RecordAction(w http.ResponseWriter, r *http.Request) {
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req struct {
-		UserID     uint   `json:"user_id"`
 		SessionID  string `json:"session_id"`
 		CompanyID  uint   `json:"company_id"`
 		ActionType string `json:"action_type"` // viewed / applied / passed / rejected
@@ -130,8 +146,8 @@ func (c *CollectiveInsightController) RecordAction(w http.ResponseWriter, r *htt
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.UserID == 0 || req.CompanyID == 0 || req.ActionType == "" {
-		http.Error(w, "user_id, company_id, action_type are required", http.StatusBadRequest)
+	if req.CompanyID == 0 || req.ActionType == "" {
+		http.Error(w, "company_id, action_type are required", http.StatusBadRequest)
 		return
 	}
 
@@ -141,7 +157,7 @@ func (c *CollectiveInsightController) RecordAction(w http.ResponseWriter, r *htt
 		return
 	}
 
-	if err := c.svc.RecordAction(req.UserID, req.SessionID, req.CompanyID, req.ActionType); err != nil {
+	if err := c.svc.RecordAction(userID, req.SessionID, req.CompanyID, req.ActionType); err != nil {
 		writeInternalServerError(w, err)
 		return
 	}
@@ -160,18 +176,4 @@ func (c *CollectiveInsightController) RebuildSummaries(w http.ResponseWriter, r 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "rebuilt"})
-}
-
-// parseUserAndSession user_id・session_idをクエリから取得するヘルパー
-func parseUserAndSession(r *http.Request) (uint, string, bool) {
-	userIDStr := r.URL.Query().Get("user_id")
-	sessionID := r.URL.Query().Get("session_id")
-	if userIDStr == "" || sessionID == "" {
-		return 0, "", false
-	}
-	uid, err := strconv.ParseUint(userIDStr, 10, 32)
-	if err != nil {
-		return 0, "", false
-	}
-	return uint(uid), sessionID, true
 }

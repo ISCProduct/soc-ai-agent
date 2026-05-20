@@ -145,7 +145,7 @@ export function JobAgentChat() {
         
         // バックエンドからスコアと進捗を取得
         try {
-          const scoresData = await getUserScores(userId, sessionId)
+          const scoresData = await getUserScores(sessionId)
           console.log('[Frontend] Scores loaded:', scoresData)
           if (scoresData && scoresData.length > 0) {
             const scores: UserScore[] = scoresData.map((s: ChatScore) => ({

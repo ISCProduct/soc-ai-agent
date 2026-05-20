@@ -1,69 +1,54 @@
 package middleware
 
 import (
-	"Backend/internal/repositories"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
+	"context"
 	"net/http"
-	"strconv"
 )
 
-// GenerateUserToken はユーザーID・メールアドレス・シークレットからHMAC-SHA256ユーザートークンを生成する
-// 管理者トークンとはペイロードのプレフィックスが異なるため、トークンの流用を防ぐ
+type contextKey string
+
+const UserIDContextKey contextKey = "userID"
+
+// GenerateUserToken はJWTユーザートークンを生成する
 func GenerateUserToken(userID uint, email, secret string) string {
-	payload := fmt.Sprintf("user:%d:%s", userID, email)
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(payload))
-	return hex.EncodeToString(mac.Sum(nil))
+	token, err := GenerateJWT(userID, email, secret)
+	if err != nil {
+		return ""
+	}
+	return token
 }
 
-// VerifyUserToken はトークンがユーザーID・メールアドレス・シークレットと一致するか検証する
-func VerifyUserToken(token string, userID uint, email, secret string) bool {
-	expected := GenerateUserToken(userID, email, secret)
-	return hmac.Equal([]byte(token), []byte(expected))
+// VerifyUserToken はJWTトークンを検証する（後方互換性のため残存）
+func VerifyUserToken(token string, userID uint, _ string, secret string) bool {
+	parsedID, _, err := ParseJWT(token, secret)
+	if err != nil {
+		return false
+	}
+	return parsedID == userID
 }
 
-// UserAuthFunc は X-User-ID と X-User-Token ヘッダーでリクエストを認証するミドルウェア
+// UserAuthFunc は X-User-Token ヘッダーのJWTを検証し、ユーザーIDをコンテキストに保存するミドルウェア
 // userSecret が未設定の場合はフェイルクローズ（503）として動作する
-func UserAuthFunc(userRepo *repositories.UserRepository, userSecret string, next http.HandlerFunc) http.HandlerFunc {
+func UserAuthFunc(userSecret string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if userSecret == "" {
 			http.Error(w, "Service Unavailable: authentication not configured", http.StatusServiceUnavailable)
 			return
 		}
 
-		userIDStr := r.Header.Get("X-User-ID")
 		token := r.Header.Get("X-User-Token")
-		if userIDStr == "" || token == "" {
+		if token == "" {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		userID, err := strconv.ParseUint(userIDStr, 10, 32)
+		userID, _, err := ParseJWT(token, userSecret)
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		user, err := userRepo.GetUserByID(uint(userID))
-		if err != nil || user == nil {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		if !VerifyUserToken(token, user.ID, user.Email, userSecret) {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
-
-		// ゲストユーザーは認証が必要なエンドポイントへのアクセスを拒否
-		if user.IsGuest {
-			http.Error(w, "Forbidden: guest users cannot access this resource", http.StatusForbidden)
-			return
-		}
-
-		next(w, r)
+		ctx := context.WithValue(r.Context(), UserIDContextKey, userID)
+		next(w, r.WithContext(ctx))
 	}
 }

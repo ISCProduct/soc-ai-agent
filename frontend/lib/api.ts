@@ -123,8 +123,8 @@ export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> 
     }
 }
 
-export async function getUserScores(userId: number, sessionId: string): Promise<ChatScore[]> {
-    const response = await fetch(`${API_BASE}/chat/scores?user_id=${userId}&session_id=${sessionId}`, {
+export async function getUserScores(sessionId: string): Promise<ChatScore[]> {
+    const response = await fetch(`${API_BASE}/chat/scores?session_id=${sessionId}`, {
         headers: authService.getUserFetchHeaders(),
     })
 
@@ -136,9 +136,9 @@ export async function getUserScores(userId: number, sessionId: string): Promise<
     return unwrapArray<ChatScore>(raw)
 }
 
-export async function getRecommendations(userId: number, sessionId: string, limit = 5) {
+export async function getRecommendations(sessionId: string, limit = 5) {
     const response = await fetch(
-        `${API_BASE}/chat/recommendations?user_id=${userId}&session_id=${sessionId}&limit=${limit}`,
+        `${API_BASE}/chat/recommendations?session_id=${sessionId}&limit=${limit}`,
         { headers: authService.getUserFetchHeaders() },
     )
 

@@ -39,9 +39,7 @@ function OAuthCallbackContent() {
         const fixMojibake = (s: string) => /[Ãå][^\s]/.test(s) ? decodeURIComponent(escape(s)) : s
         let userData = { ...userDataRaw, name: fixMojibake(userDataRaw.name) }
         try {
-          const fresh = await authService.getUser(
-            typeof userData.user_id === 'string' ? Number(userData.user_id) : userData.user_id,
-          )
+          const fresh = await authService.getUser()
           userData = { ...userData, ...fresh }
         } catch {
           // ignore and fall back to callback payload

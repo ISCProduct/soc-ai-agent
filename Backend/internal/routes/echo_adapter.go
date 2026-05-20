@@ -13,10 +13,10 @@ func wrap(h http.HandlerFunc) echo.HandlerFunc {
 	return echo.WrapHandler(h)
 }
 
-// EchoUserAuth はX-User-ID / X-User-Tokenヘッダーを検証するEchoミドルウェアを返す
-func EchoUserAuth(userRepo *repositories.UserRepository, userSecret string) echo.MiddlewareFunc {
+// EchoUserAuth はX-User-Token JWTを検証するEchoミドルウェアを返す
+func EchoUserAuth(userSecret string) echo.MiddlewareFunc {
 	return echo.WrapMiddleware(func(next http.Handler) http.Handler {
-		return middleware.UserAuthFunc(userRepo, userSecret, http.HandlerFunc(next.ServeHTTP))
+		return middleware.UserAuthFunc(userSecret, http.HandlerFunc(next.ServeHTTP))
 	})
 }
 

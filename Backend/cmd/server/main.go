@@ -296,18 +296,18 @@ func main() {
 	api := e.Group("/api")
 
 	// ルーティング設定
-	routes.SetupAuthRoutes(api, authController, oauthController, userRepo, cfg.UserSecret)
-	routes.SetupChatRoutes(api, chatController, questionController, userRepo, cfg.UserSecret)
+	routes.SetupAuthRoutes(api, authController, oauthController, cfg.UserSecret)
+	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret)
 	routes.SetupCompanyRoutes(api, relationController)
 	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, userRepo, cfg.AdminSecret)
-	routes.SetupResumeRoutes(api, resumeController, userRepo, cfg.UserSecret)
+	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret)
 	routes.SetupInterviewRoutes(api, interviewController, realtimeController)
-	routes.SetupGitHubRoutes(api, githubController)
+	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret)
 	routes.SetupESRoutes(api, esRewriteController, esReviewController)
 	routes.SetupScheduleRoutes(api, scheduleController)
 	routes.SetupApplicationRoutes(api, appController)
 	routes.SetupUserRoutes(api, integratedProfileController)
-	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController)
+	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret)
 	api.Any("/company-entry", echo.WrapHandler(http.HandlerFunc(companyEntryController.Submit)))
 
 	go crawlService.StartScheduler()
