@@ -281,7 +281,7 @@ func main() {
 	routes.SetupCompanyRoutes(relationController)
 	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, userRepo, cfg.AdminSecret)
 	routes.SetupResumeRoutes(resumeController, userRepo, cfg.UserSecret)
-	routes.SetupInterviewRoutes(interviewController, realtimeController)
+	routes.SetupInterviewRoutes(interviewController, realtimeController, userRepo, cfg.UserSecret)
 	routes.SetupGitHubRoutes(githubController)
 	routes.SetupESRoutes(esRewriteController, esReviewController)
 	routes.SetupScheduleRoutes(scheduleController)
