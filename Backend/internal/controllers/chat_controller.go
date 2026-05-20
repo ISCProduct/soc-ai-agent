@@ -132,14 +132,22 @@ func (c *ChatController) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req services.ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	// バリデーション
-	if req.UserID == 0 || req.SessionID == "" || req.Message == "" {
+	// user_id は認証ヘッダーから設定（リクエストボディの値は無視）
+	req.UserID = userID
+
+	if req.SessionID == "" || req.Message == "" {
 		http.Error(w, "Missing required fields", http.StatusBadRequest)
 		return
 	}
@@ -164,6 +172,12 @@ func (c *ChatController) GetHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	sessionID := r.URL.Query().Get("session_id")
 	if sessionID == "" {
 		http.Error(w, "session_id is required", http.StatusBadRequest)
@@ -173,6 +187,12 @@ func (c *ChatController) GetHistory(w http.ResponseWriter, r *http.Request) {
 	history, err := c.chatService.GetChatHistory(sessionID)
 	if err != nil {
 		writeInternalServerError(w, err)
+		return
+	}
+
+	// セッション所有者チェック：最初のメッセージの UserID と照合
+	if len(history) > 0 && history[0].UserID != 0 && history[0].UserID != userID {
+		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -187,21 +207,19 @@ func (c *ChatController) GetScores(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userIDStr := r.URL.Query().Get("user_id")
-	sessionID := r.URL.Query().Get("session_id")
-
-	if userIDStr == "" || sessionID == "" {
-		http.Error(w, "user_id and session_id are required", http.StatusBadRequest)
-		return
-	}
-
-	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	userID, err := authenticatedUserID(r)
 	if err != nil {
-		http.Error(w, "Invalid user_id", http.StatusBadRequest)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	scores, err := c.chatService.GetUserScores(uint(userID), sessionID)
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		http.Error(w, "session_id is required", http.StatusBadRequest)
+		return
+	}
+
+	scores, err := c.chatService.GetUserScores(userID, sessionID)
 	if err != nil {
 		writeInternalServerError(w, err)
 		return
@@ -218,18 +236,17 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	userIDStr := r.URL.Query().Get("user_id")
-	sessionID := r.URL.Query().Get("session_id")
-	limitStr := r.URL.Query().Get("limit")
-
-	if userIDStr == "" || sessionID == "" {
-		http.Error(w, "user_id and session_id are required", http.StatusBadRequest)
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	userID, err := strconv.ParseUint(userIDStr, 10, 32)
-	if err != nil {
-		http.Error(w, "Invalid user_id", http.StatusBadRequest)
+	sessionID := r.URL.Query().Get("session_id")
+	limitStr := r.URL.Query().Get("limit")
+
+	if sessionID == "" {
+		http.Error(w, "session_id is required", http.StatusBadRequest)
 		return
 	}
 
@@ -243,17 +260,17 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 
 	// 既存のマッチング結果を取得（事前計算済みを想定）
 	log.Printf("[GetRecommendations] Fetching pre-calculated matches for user %d, session %s\n", userID, sessionID)
-	matches, err := c.matchingService.GetTopMatches(r.Context(), uint(userID), sessionID, limit)
+	matches, err := c.matchingService.GetTopMatches(r.Context(), userID, sessionID, limit)
 	log.Printf("[GetRecommendations] Retrieved %d matches in fast mode\n", len(matches))
 
 	if err != nil || len(matches) == 0 {
 		log.Printf("[GetRecommendations] No matching results found, returning empty result\n")
-		diagnostics, diagErr := c.matchingService.GetDiagnostics(uint(userID), sessionID)
+		diagnostics, diagErr := c.matchingService.GetDiagnostics(userID, sessionID)
 		if diagErr != nil {
 			log.Printf("[GetRecommendations] Diagnostics error: %v\n", diagErr)
 		}
 
-		userScores, scoreErr := c.chatService.GetUserScores(uint(userID), sessionID)
+		userScores, scoreErr := c.chatService.GetUserScores(userID, sessionID)
 		if scoreErr != nil {
 			log.Printf("[GetRecommendations] Failed to load user scores for provisional status: %v\n", scoreErr)
 			userScores = []entity.UserWeightScore{}
@@ -326,7 +343,7 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 		IsProvisional       bool                    `json:"is_provisional"`
 	}
 
-	userScores, err := c.chatService.GetUserScores(uint(userID), sessionID)
+	userScores, err := c.chatService.GetUserScores(userID, sessionID)
 	if err != nil {
 		log.Printf("[GetRecommendations] Failed to load user scores: %v\n", err)
 		userScores = []entity.UserWeightScore{}
@@ -419,16 +436,15 @@ func (c *ChatController) GetAnalysisSummary(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	userIDStr := r.URL.Query().Get("user_id")
-	sessionID := r.URL.Query().Get("session_id")
-	if userIDStr == "" || sessionID == "" {
-		http.Error(w, "user_id and session_id are required", http.StatusBadRequest)
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	userID, err := strconv.ParseUint(userIDStr, 10, 32)
-	if err != nil {
-		http.Error(w, "Invalid user_id", http.StatusBadRequest)
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		http.Error(w, "session_id is required", http.StatusBadRequest)
 		return
 	}
 
@@ -437,7 +453,7 @@ func (c *ChatController) GetAnalysisSummary(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	summary, err := c.analysisService.BuildAnalysisSummary(r.Context(), uint(userID), sessionID)
+	summary, err := c.analysisService.BuildAnalysisSummary(r.Context(), userID, sessionID)
 	if err != nil {
 		writeInternalServerError(w, err)
 		return
@@ -547,21 +563,26 @@ func (c *ChatController) SendReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req struct {
-		UserID    uint   `json:"user_id"`
 		SessionID string `json:"session_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.UserID == 0 || req.SessionID == "" {
-		http.Error(w, "user_id and session_id are required", http.StatusBadRequest)
+	if req.SessionID == "" {
+		http.Error(w, "session_id is required", http.StatusBadRequest)
 		return
 	}
 
 	// ユーザー情報取得
-	user, err := c.userRepo.GetUserByID(req.UserID)
+	user, err := c.userRepo.GetUserByID(userID)
 	if err != nil || user == nil {
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
@@ -574,15 +595,15 @@ func (c *ChatController) SendReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 分析サマリー取得
-	summary, err := c.analysisService.BuildAnalysisSummary(r.Context(), req.UserID, req.SessionID)
+	summary, err := c.analysisService.BuildAnalysisSummary(r.Context(), userID, req.SessionID)
 	if err != nil {
 		writeInternalServerError(w, err)
 		return
 	}
 
 	// おすすめ企業取得（最大5件）
-	matches, _ := c.matchingService.GetTopMatches(r.Context(), req.UserID, req.SessionID, 5)
-	userScores, _ := c.chatService.GetUserScores(req.UserID, req.SessionID)
+	matches, _ := c.matchingService.GetTopMatches(r.Context(), userID, req.SessionID, 5)
+	userScores, _ := c.chatService.GetUserScores(userID, req.SessionID)
 
 	var companies []services.EmailReportCompany
 	for i, match := range matches {
@@ -617,19 +638,13 @@ func (c *ChatController) GetSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userIDStr := r.URL.Query().Get("user_id")
-	if userIDStr == "" {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
-		return
-	}
-
-	userID, err := strconv.ParseUint(userIDStr, 10, 32)
+	userID, err := authenticatedUserID(r)
 	if err != nil {
-		http.Error(w, "Invalid user_id", http.StatusBadRequest)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	sessions, err := c.chatService.GetUserChatSessions(uint(userID))
+	sessions, err := c.chatService.GetUserChatSessions(userID)
 	if err != nil {
 		writeInternalServerError(w, err)
 		return

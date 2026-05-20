@@ -32,7 +32,9 @@ export default function ChatHistoryPage() {
 
   const fetchSessions = async (userId: number) => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/chat/sessions?user_id=${userId}`)
+      const response = await fetch(`${BACKEND_URL}/api/chat/sessions`, {
+        headers: authService.getUserFetchHeaders(),
+      })
       if (!response.ok) {
         throw new Error('Failed to fetch sessions')
       }

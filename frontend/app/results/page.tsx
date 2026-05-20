@@ -195,7 +195,7 @@ function ResultsContent() {
         console.log('[Results] Fetching recommendations for user:', userId, 'session:', sessionId)
 
         // 職種適性コメントを取得
-        fetch(`/api/chat/analysis?user_id=${userId}&session_id=${sessionId}`)
+        fetch(`/api/chat/analysis?session_id=${sessionId}`, { headers: authService.getUserFetchHeaders() })
           .then(r => r.ok ? r.json() : null)
           .then(data => {
             if (data?.job_suitability_comment) {
@@ -218,7 +218,7 @@ function ResultsContent() {
           })
           .catch(() => {/* サイレント失敗 */})
 
-        const response = await fetch(`/api/chat/recommendations?user_id=${userId}&session_id=${sessionId}&limit=10`)
+        const response = await fetch(`/api/chat/recommendations?session_id=${sessionId}&limit=10`, { headers: authService.getUserFetchHeaders() })
         
         if (!response.ok) {
           throw new Error('企業データの取得に失敗しました')
@@ -345,7 +345,7 @@ function ResultsContent() {
     try {
       const res = await fetch('/api/chat/favorite', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
         body: JSON.stringify({ match_id: company.matchId }),
       })
       if (res.ok) {
