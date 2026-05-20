@@ -3,14 +3,13 @@ package routes
 import (
 	"Backend/internal/controllers"
 	"Backend/internal/middleware"
-	"Backend/internal/repositories"
 	"net/http"
 )
 
 // SetupAuthRoutes 認証関連のルーティング設定
-func SetupAuthRoutes(authController *controllers.AuthController, oauthController *controllers.OAuthController, userRepo *repositories.UserRepository, userSecret string) {
+func SetupAuthRoutes(authController *controllers.AuthController, oauthController *controllers.OAuthController, userSecret string) {
 	userAuth := func(f http.HandlerFunc) http.HandlerFunc {
-		return middleware.UserAuthFunc(userRepo, userSecret, f)
+		return middleware.UserAuthFunc(userSecret, f)
 	}
 
 	// 認証エンドポイント（認証不要）
@@ -23,7 +22,7 @@ func SetupAuthRoutes(authController *controllers.AuthController, oauthController
 	http.HandleFunc("/api/auth/forgot-password", middleware.PasswordResetRateLimit(authController.RequestPasswordReset))
 	http.HandleFunc("/api/auth/reset-password", authController.ResetPassword)
 
-	// 認証必須エンドポイント（X-User-ID + X-User-Token ヘッダーが必要）
+	// 認証必須エンドポイント（X-User-Token JWTヘッダーが必要）
 	http.HandleFunc("/api/auth/user", userAuth(authController.GetUser))
 	http.HandleFunc("/api/auth/profile", userAuth(authController.UpdateProfile))
 	http.HandleFunc("/api/auth/account", userAuth(authController.DeleteAccount))

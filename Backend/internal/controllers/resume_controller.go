@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/middleware"
 	"Backend/internal/services"
 	"encoding/json"
 	"errors"
@@ -21,15 +22,11 @@ func NewResumeController(resumeService *services.ResumeService) *ResumeControlle
 }
 
 func authenticatedUserID(r *http.Request) (uint, error) {
-	userIDStr := r.Header.Get("X-User-ID")
-	if userIDStr == "" {
+	userID, ok := r.Context().Value(middleware.UserIDContextKey).(uint)
+	if !ok || userID == 0 {
 		return 0, errors.New("user_id is required")
 	}
-	userID, err := strconv.ParseUint(userIDStr, 10, 32)
-	if err != nil {
-		return 0, errors.New("invalid user_id")
-	}
-	return uint(userID), nil
+	return userID, nil
 }
 
 func (c *ResumeController) Upload(w http.ResponseWriter, r *http.Request) {

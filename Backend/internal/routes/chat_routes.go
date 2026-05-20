@@ -3,14 +3,13 @@ package routes
 import (
 	"Backend/internal/controllers"
 	"Backend/internal/middleware"
-	"Backend/internal/repositories"
 	"net/http"
 )
 
 // SetupChatRoutes チャット関連のルーティング設定
-func SetupChatRoutes(chatController *controllers.ChatController, questionController *controllers.QuestionController, userRepo *repositories.UserRepository, userSecret string) {
+func SetupChatRoutes(chatController *controllers.ChatController, questionController *controllers.QuestionController, userSecret string) {
 	userAuth := func(f http.HandlerFunc) http.HandlerFunc {
-		return middleware.UserAuthFunc(userRepo, userSecret, f)
+		return middleware.UserAuthFunc(userSecret, f)
 	}
 
 	// チャットエンドポイント（認証必須）

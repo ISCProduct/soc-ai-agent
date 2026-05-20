@@ -5,9 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
-	"strconv"
 )
 
 // GitHubController GitHub連携APIのコントローラー
@@ -24,16 +22,16 @@ func NewGitHubController(githubService *services.GitHubService, skillScoreServic
 }
 
 // GetProfile GitHubプロフィール・リポジトリ・言語統計を取得する
-// GET /api/github/profile?user_id=<id>
+// GET /api/github/profile
 func (c *GitHubController) GetProfile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	userID, err := parseUserID(r)
+	userID, err := authenticatedUserID(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -70,16 +68,16 @@ func (c *GitHubController) GetProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 // Sync GitHubデータの非同期同期をトリガーする
-// POST /api/github/sync?user_id=<id>
+// POST /api/github/sync
 func (c *GitHubController) Sync(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	userID, err := parseUserID(r)
+	userID, err := authenticatedUserID(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -99,16 +97,16 @@ func (c *GitHubController) Sync(w http.ResponseWriter, r *http.Request) {
 }
 
 // SyncAndWait GitHubデータを同期してから結果を返す（同期的）
-// POST /api/github/sync/wait?user_id=<id>
+// POST /api/github/sync/wait
 func (c *GitHubController) SyncAndWait(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	userID, err := parseUserID(r)
+	userID, err := authenticatedUserID(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -129,16 +127,16 @@ func (c *GitHubController) SyncAndWait(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetSkills ユーザーのカテゴリ別スキルスコアを取得する
-// GET /api/github/skills?user_id=<id>
+// GET /api/github/skills
 func (c *GitHubController) GetSkills(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	userID, err := parseUserID(r)
+	userID, err := authenticatedUserID(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -153,16 +151,16 @@ func (c *GitHubController) GetSkills(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListRepoSummaries ユーザーのリポジトリAI要約一覧を取得する
-// GET /api/github/repo/summaries?user_id=<id>
+// GET /api/github/repo/summaries
 func (c *GitHubController) ListRepoSummaries(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	userID, err := parseUserID(r)
+	userID, err := authenticatedUserID(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -177,7 +175,7 @@ func (c *GitHubController) ListRepoSummaries(w http.ResponseWriter, r *http.Requ
 }
 
 // SummarizeRepo リポジトリのAI要約を生成・キャッシュする
-// POST /api/github/repo/summarize?user_id=<id>
+// POST /api/github/repo/summarize
 // Body: { "full_name": "owner/repo", "force_refresh": false }
 func (c *GitHubController) SummarizeRepo(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -185,9 +183,9 @@ func (c *GitHubController) SummarizeRepo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	userID, err := parseUserID(r)
+	userID, err := authenticatedUserID(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -208,16 +206,4 @@ func (c *GitHubController) SummarizeRepo(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(summary)
-}
-
-func parseUserID(r *http.Request) (uint, error) {
-	userIDStr := r.URL.Query().Get("user_id")
-	if userIDStr == "" {
-		return 0, fmt.Errorf("user_id is required")
-	}
-	id, err := strconv.ParseUint(userIDStr, 10, 32)
-	if err != nil {
-		return 0, fmt.Errorf("invalid user_id")
-	}
-	return uint(id), nil
 }
