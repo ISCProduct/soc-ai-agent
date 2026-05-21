@@ -246,8 +246,8 @@ function ResumeContent() {
   }
 
   return (
-    <Box sx={{ p: 4, maxWidth: 900, mx: 'auto' }}>
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
+    <Box sx={{ p: { xs: 2, sm: 4 }, maxWidth: 900, mx: 'auto' }}>
+      <Typography variant="h4" fontWeight="bold" gutterBottom sx={{ fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>
         履歴書・エントリシート レビュー
       </Typography>
       <Typography variant="body1" color="text.secondary" sx={{ mb: prefilledCompany ? 1.5 : 3 }}>
