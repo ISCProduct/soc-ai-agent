@@ -710,12 +710,12 @@ function InterviewContent() {
     return (
       <Box sx={{ minHeight: '100vh', bgcolor: BG_LIGHT }}>
         {/* Header */}
-        <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: { xs: 3, lg: 10 }, py: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
+        <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: { xs: 2, sm: 3, lg: 10 }, py: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <Box sx={{ color: PRIMARY, display: 'flex', alignItems: 'center' }}>
               <PsychologyIcon sx={{ fontSize: 32 }} />
             </Box>
-            <Typography sx={{ fontWeight: 700, fontSize: 20, color: '#0f172a' }}>InterviewAI</Typography>
+            <Typography sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: '#0f172a' }}>InterviewAI</Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <IconButton sx={{ bgcolor: '#f1f5f9', color: '#475569' }} size="small" onClick={() => router.push('/')}>
@@ -730,7 +730,7 @@ function InterviewContent() {
         </Box>
 
         {/* Main */}
-        <Box component="main" sx={{ display: 'flex', justifyContent: 'center', py: 5, px: { xs: 3, lg: 10 } }}>
+        <Box component="main" sx={{ display: 'flex', justifyContent: 'center', py: { xs: 3, sm: 5 }, px: { xs: 2, sm: 3, lg: 10 } }}>
           <Box sx={{ maxWidth: 896, width: '100%', display: 'flex', flexDirection: 'column', gap: 4 }}>
 
             {/* Step indicator + Title */}
@@ -743,7 +743,7 @@ function InterviewContent() {
                   <Box sx={{ height: '100%', width: '33%', bgcolor: PRIMARY }} />
                 </Box>
               </Box>
-              <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a' }}>練習する企業・職種を選ぶ</Typography>
+              <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>練習する企業・職種を選ぶ</Typography>
               <Typography sx={{ color: '#64748b', fontSize: 15 }}>
                 志望企業と職種を選択して、AIが面接内容をカスタマイズします。
               </Typography>

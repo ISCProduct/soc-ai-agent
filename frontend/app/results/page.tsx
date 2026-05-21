@@ -601,16 +601,16 @@ function ResultsContent() {
         <Typography variant="h6" color="text.secondary" sx={{ textAlign: 'center' }}>
           データがありません。診断を完了してから数秒待ち、ページを更新してください。
         </Typography>
-        <Stack direction="row" spacing={2}>
-          <Button 
-            variant="contained" 
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+          <Button
+            variant="contained"
             startIcon={<Refresh />}
             onClick={() => window.location.reload()}
           >
             ページを更新
           </Button>
-          <Button 
-            variant="outlined" 
+          <Button
+            variant="outlined"
             onClick={() => router.push('/')}
           >
             チャットに戻る
@@ -622,7 +622,7 @@ function ResultsContent() {
 
   if (error) {
     return (
-      <Box sx={{ 
+      <Box sx={{
         height: '100vh',
         display: 'flex',
         alignItems: 'center',
@@ -634,22 +634,22 @@ function ResultsContent() {
         <Typography variant="h6" color="error" sx={{ whiteSpace: 'pre-line', textAlign: 'center' }}>
           {error}
         </Typography>
-        <Stack direction="row" spacing={2}>
-          <Button 
-            variant="contained" 
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+          <Button
+            variant="contained"
             startIcon={<Refresh />}
             onClick={() => window.location.reload()}
           >
             ページを更新
           </Button>
-          <Button 
-            variant="outlined" 
+          <Button
+            variant="outlined"
             onClick={() => router.push('/chat')}
           >
             チャットに戻る
           </Button>
-          <Button 
-            variant="outlined" 
+          <Button
+            variant="outlined"
             color="error"
             onClick={handleReset}
           >
@@ -1015,7 +1015,7 @@ function ResultsContent() {
                   📊 4分析スコア
                 </Typography>
                 {analysisScores && (
-                  <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 2, mb: 2 }}>
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)' }, gap: 2, mb: 2 }}>
                     {[
                       { label: '職種分析', value: analysisScores.job },
                       { label: '興味分析', value: analysisScores.interest },
