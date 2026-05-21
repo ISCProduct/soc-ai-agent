@@ -691,8 +691,8 @@ function ResultsContent() {
         backgroundColor: '#fff',
       }}>
         {/* ヘッダー */}
-        <Box sx={{ 
-          p: 3, 
+        <Box sx={{
+          p: { xs: 2, sm: 3 },
           borderBottom: '1px solid #e0e0e0',
           backgroundColor: '#fff',
           flexShrink: 0,
@@ -706,27 +706,27 @@ function ResultsContent() {
         </Box>
 
         {/* 企業詳細コンテンツ */}
-        <Box sx={{ 
+        <Box sx={{
           flexGrow: 1,
           overflowY: 'auto',
-          p: 3,
+          p: { xs: 2, sm: 3 },
           backgroundColor: '#fafafa',
         }}>
           <Box sx={{ maxWidth: 1200, mx: 'auto' }}>
             <Card elevation={3}>
-              <CardContent sx={{ p: 4 }}>
+              <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
                 {/* 企業名とマッチスコア */}
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
+                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'flex-start' }, mb: 3, gap: 1 }}>
                   <Box>
-                    <Typography variant="h4" fontWeight="bold" gutterBottom>
+                    <Typography variant="h4" fontWeight="bold" gutterBottom sx={{ fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>
                       {selectedCompany.name}
                     </Typography>
-                    <Typography variant="h6" color="text.secondary">
+                    <Typography variant="h6" color="text.secondary" sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
                       {selectedCompany.industry}
                     </Typography>
                   </Box>
-                  <Box sx={{ textAlign: 'right' }}>
-                    <Typography variant="h2" color="primary.main" fontWeight="bold">
+                  <Box sx={{ textAlign: { xs: 'left', sm: 'right' }, display: 'flex', alignItems: 'center', gap: 1, flexDirection: { xs: 'row', sm: 'column' } }}>
+                    <Typography variant="h2" color="primary.main" fontWeight="bold" sx={{ fontSize: { xs: '2rem', sm: '3.75rem' } }}>
                       {selectedCompany.matchScore}
                     </Typography>
                     <Typography variant="body1" color="text.secondary">
@@ -966,13 +966,13 @@ function ResultsContent() {
       backgroundColor: '#fff',
     }}>
       {/* ヘッダー部分 */}
-      <Box sx={{ 
-        p: 3, 
+      <Box sx={{
+        p: { xs: 2, sm: 3 },
         borderBottom: '1px solid #e0e0e0',
         backgroundColor: '#fff',
         flexShrink: 0,
       }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 2 }}>
           <Button variant="outlined" startIcon={<ArrowBack />} onClick={handleBack}>
             チャットに戻る
           </Button>
@@ -981,12 +981,13 @@ function ResultsContent() {
             startIcon={<Email />}
             onClick={handleSendEmail}
             disabled={emailSending}
+            sx={{ width: { xs: '100%', sm: 'auto' } }}
           >
             {emailSending ? '送信中...' : '結果をメールで受け取る'}
           </Button>
         </Box>
         <Box sx={{ textAlign: 'center' }}>
-          <Typography variant="h4" fontWeight="bold" gutterBottom>
+          <Typography variant="h4" fontWeight="bold" gutterBottom sx={{ fontSize: { xs: '1.2rem', sm: '2.125rem' } }}>
             🎉 AI分析完了！適合企業を{companies.length}社に絞り込みました
           </Typography>
           {isProvisional && (
@@ -999,10 +1000,10 @@ function ResultsContent() {
       </Box>
 
       {/* スクロール可能なコンテンツエリア */}
-      <Box sx={{ 
+      <Box sx={{
         flexGrow: 1,
         overflowY: 'auto',
-        p: 3,
+        p: { xs: 2, sm: 3 },
         backgroundColor: '#fafafa',
       }}>
         <Box sx={{ maxWidth: 1200, mx: 'auto' }}>
