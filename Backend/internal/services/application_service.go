@@ -99,7 +99,7 @@ func (s *ApplicationService) GetApplicationsByUser(userID uint) ([]*entity.UserA
 }
 
 // GetCorrelation マッチングスコアと選考通過率の相関データを取得する
-func (s *ApplicationService) GetCorrelation(companyID uint) ([]map[string]interface{}, error) {
+func (s *ApplicationService) GetCorrelation(companyID uint) ([]map[string]any, error) {
 	if companyID > 0 {
 		return s.appRepo.GetCorrelationByCompany(companyID)
 	}

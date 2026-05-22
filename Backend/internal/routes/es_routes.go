@@ -8,6 +8,6 @@ import (
 
 func SetupESRoutes(api *echo.Group, esRewriteController *controllers.ESRewriteController, esReviewController *controllers.ESReviewController) {
 	es := api.Group("/es")
-	es.Any("/rewrite", wrap(esRewriteController.Rewrite))
-	es.Any("/review", wrap(esReviewController.Review))
+	es.POST("/rewrite", esRewriteController.Rewrite)
+	es.POST("/review", esReviewController.Review)
 }

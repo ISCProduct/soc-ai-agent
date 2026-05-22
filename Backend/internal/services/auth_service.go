@@ -255,9 +255,9 @@ func collectResumeReviewIDs(tx *gorm.DB, documentIDs []uint) ([]uint, error) {
 
 // RegisterRequest ユーザー登録リクエスト
 type RegisterRequest struct {
-	Email                    string `json:"email"`
-	Password                 string `json:"password"`
-	Name                     string `json:"name"`
+	Email                    string `json:"email"    validate:"required,email"`
+	Password                 string `json:"password" validate:"required,min=8"`
+	Name                     string `json:"name"     validate:"required"`
 	TargetLevel              string `json:"target_level"`
 	SchoolName               string `json:"school_name"`
 	CertificationsAcquired   string `json:"certifications_acquired"`
@@ -267,8 +267,8 @@ type RegisterRequest struct {
 
 // LoginRequest ログインリクエスト
 type LoginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email    string `json:"email"    validate:"required,email"`
+	Password string `json:"password" validate:"required"`
 }
 
 // UpdateProfileRequest プロフィール更新リクエスト

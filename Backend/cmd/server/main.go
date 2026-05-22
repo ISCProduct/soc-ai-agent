@@ -282,6 +282,9 @@ func main() {
 	// Echo初期化
 	e := echo.New()
 	e.HideBanner = true
+	// カスタムエラーハンドラーとバリデーターを設定
+	e.HTTPErrorHandler = middleware.CustomHTTPErrorHandler
+	e.Validator = middleware.NewCustomValidator()
 
 	// グローバルミドルウェア
 	e.Use(echo.WrapMiddleware(middleware.RequestIDMiddleware))
@@ -292,13 +295,11 @@ func main() {
 	// ヘルスチェックエンドポイント
 	// /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス
 	// /health は後方互換のため維持
-	healthHandler := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+	healthHandler := func(c echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	}
-	e.Any("/health", echo.WrapHandler(http.HandlerFunc(healthHandler)))
-	e.Any("/healthz", echo.WrapHandler(http.HandlerFunc(healthHandler)))
+	e.GET("/health", healthHandler)
+	e.GET("/healthz", healthHandler)
 
 	// APIルートグループ
 	api := e.Group("/api")
@@ -316,7 +317,7 @@ func main() {
 	routes.SetupApplicationRoutes(api, appController)
 	routes.SetupUserRoutes(api, integratedProfileController)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret)
-	api.Any("/company-entry", echo.WrapHandler(http.HandlerFunc(companyEntryController.Submit)))
+	api.POST("/company-entry", companyEntryController.Submit)
 
 	go crawlService.StartScheduler()
 

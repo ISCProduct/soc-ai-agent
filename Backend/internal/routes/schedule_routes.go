@@ -8,7 +8,10 @@ import (
 
 func SetupScheduleRoutes(api *echo.Group, scheduleController *controllers.ScheduleController) {
 	schedule := api.Group("/schedule")
-	schedule.Any("/export/ics", wrap(scheduleController.ExportICS))
-	schedule.Any("", wrap(scheduleController.RouteList))
-	schedule.Any("/:id", wrap(scheduleController.RouteByID))
+	schedule.GET("/export/ics", scheduleController.ExportICS)
+	schedule.GET("", scheduleController.List)
+	schedule.POST("", scheduleController.Create)
+	schedule.GET("/:id", scheduleController.Get)
+	schedule.PUT("/:id", scheduleController.Update)
+	schedule.DELETE("/:id", scheduleController.Delete)
 }

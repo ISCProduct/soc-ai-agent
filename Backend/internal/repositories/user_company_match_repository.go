@@ -119,7 +119,7 @@ func (r *UserCompanyMatchRepository) FindFavoritesByUser(userID uint, sessionID 
 }
 
 // GetMatchStatistics マッチング統計情報を取得
-func (r *UserCompanyMatchRepository) GetMatchStatistics(userID uint, sessionID string) (map[string]interface{}, error) {
+func (r *UserCompanyMatchRepository) GetMatchStatistics(userID uint, sessionID string) (map[string]any, error) {
 	var result struct {
 		TotalMatches   int64
 		ViewedCount    int64
@@ -152,7 +152,7 @@ func (r *UserCompanyMatchRepository) GetMatchStatistics(userID uint, sessionID s
 		Where("user_id = ? AND session_id = ?", userID, sessionID).
 		Scan(&result.AvgMatchScore)
 
-	stats := map[string]interface{}{
+	stats := map[string]any{
 		"total_matches":   result.TotalMatches,
 		"viewed_count":    result.ViewedCount,
 		"favorited_count": result.FavoritedCount,
