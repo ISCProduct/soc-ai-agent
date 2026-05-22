@@ -3,15 +3,16 @@ package controllers
 import (
 	"Backend/internal/middleware"
 	"Backend/internal/services"
+	"Backend/internal/services/interfaces"
 	"encoding/json"
 	"net/http"
 )
 
 type AuthController struct {
-	authService *services.AuthService
+	authService interfaces.AuthService
 }
 
-func NewAuthController(authService *services.AuthService) *AuthController {
+func NewAuthController(authService interfaces.AuthService) *AuthController {
 	return &AuthController{authService: authService}
 }
 
