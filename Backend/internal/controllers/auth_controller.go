@@ -2,16 +2,17 @@ package controllers
 
 import (
 	"Backend/internal/services"
+	"Backend/internal/services/interfaces"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
 )
 
 type AuthController struct {
-	authService *services.AuthService
+	authService interfaces.AuthService
 }
 
-func NewAuthController(authService *services.AuthService) *AuthController {
+func NewAuthController(authService interfaces.AuthService) *AuthController {
 	return &AuthController{authService: authService}
 }
 

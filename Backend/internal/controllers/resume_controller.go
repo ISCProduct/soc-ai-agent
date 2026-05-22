@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/internal/services"
+	"Backend/internal/services/interfaces"
 	"errors"
 	"log"
 	"mime/multipart"
@@ -13,10 +14,10 @@ import (
 )
 
 type ResumeController struct {
-	resumeService *services.ResumeService
+	resumeService interfaces.ResumeService
 }
 
-func NewResumeController(resumeService *services.ResumeService) *ResumeController {
+func NewResumeController(resumeService interfaces.ResumeService) *ResumeController {
 	return &ResumeController{resumeService: resumeService}
 }
 

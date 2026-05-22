@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/internal/services"
+	"Backend/internal/services/interfaces"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,10 +12,10 @@ import (
 
 // CollectiveInsightController 集合知レコメンドAPI
 type CollectiveInsightController struct {
-	svc *services.CollectiveInsightService
+	svc interfaces.CollectiveInsightService
 }
 
-func NewCollectiveInsightController(svc *services.CollectiveInsightService) *CollectiveInsightController {
+func NewCollectiveInsightController(svc interfaces.CollectiveInsightService) *CollectiveInsightController {
 	return &CollectiveInsightController{svc: svc}
 }
 

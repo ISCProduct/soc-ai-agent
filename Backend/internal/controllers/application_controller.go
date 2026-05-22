@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/interfaces"
 	"net/http"
 	"strconv"
 
@@ -10,10 +10,10 @@ import (
 
 // ApplicationController 応募・選考ステータス管理コントローラー
 type ApplicationController struct {
-	appService *services.ApplicationService
+	appService interfaces.ApplicationService
 }
 
-func NewApplicationController(appService *services.ApplicationService) *ApplicationController {
+func NewApplicationController(appService interfaces.ApplicationService) *ApplicationController {
 	return &ApplicationController{appService: appService}
 }
 
