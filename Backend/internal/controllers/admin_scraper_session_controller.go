@@ -22,7 +22,7 @@ func (c *AdminScraperSessionController) List(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch sessions")
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{"sessions": sessions})
+	return ctx.JSON(http.StatusOK, map[string]any{"sessions": sessions})
 }
 
 // Upsert POST /api/admin/scraper-sessions

@@ -37,7 +37,7 @@ func (c *QuestionController) GenerateQuestions(ctx echo.Context) error {
 		return echoInternalError(err)
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"generated_count": len(questions),
 		"questions":       questions,
 	})

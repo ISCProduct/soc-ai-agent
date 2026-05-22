@@ -44,7 +44,7 @@ func (c *AdminInterviewController) ListSessions(ctx echo.Context) error {
 		return echoInternalError(err)
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"sessions": sessions,
 		"total":    total,
 		"page":     page,
@@ -64,7 +64,7 @@ func (c *AdminInterviewController) ListVideos(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch videos")
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"videos": videos,
 	})
 }

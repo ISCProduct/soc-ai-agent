@@ -36,7 +36,7 @@ func (c *ApplicationController) Apply(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	return ctx.JSON(http.StatusCreated, map[string]interface{}{
+	return ctx.JSON(http.StatusCreated, map[string]any{
 		"id":         app.ID,
 		"user_id":    app.UserID,
 		"company_id": app.CompanyID,
@@ -71,7 +71,7 @@ func (c *ApplicationController) UpdateStatus(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"id":     app.ID,
 		"status": app.Status,
 		"notes":  app.Notes,
@@ -99,8 +99,8 @@ func (c *ApplicationController) List(ctx echo.Context) error {
 		MatchID         uint        `json:"match_id"`
 		Status          string      `json:"status"`
 		Notes           string      `json:"notes"`
-		AppliedAt       interface{} `json:"applied_at"`
-		StatusUpdatedAt interface{} `json:"status_updated_at"`
+		AppliedAt       any `json:"applied_at"`
+		StatusUpdatedAt any `json:"status_updated_at"`
 	}
 
 	resp := make([]AppResponse, len(apps))
@@ -124,7 +124,7 @@ func (c *ApplicationController) List(ctx echo.Context) error {
 		}
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"applications": resp,
 		"total":        len(resp),
 	})
@@ -146,7 +146,7 @@ func (c *ApplicationController) GetCorrelation(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "相関データ取得エラー")
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"correlation": data,
 		"total":       len(data),
 	})

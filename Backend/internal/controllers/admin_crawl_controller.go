@@ -23,7 +23,7 @@ func (c *AdminCrawlController) ListSources(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch sources")
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"sources": sources,
 	})
 }
@@ -39,7 +39,7 @@ func (c *AdminCrawlController) CreateSource(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "crawl_source.create", "crawl_source", source.ID, map[string]interface{}{
+	c.audit.Record(actor, "crawl_source.create", "crawl_source", source.ID, map[string]any{
 		"name": source.Name,
 	})
 	return ctx.JSON(http.StatusOK, source)
@@ -60,7 +60,7 @@ func (c *AdminCrawlController) UpdateSource(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "crawl_source.update", "crawl_source", source.ID, map[string]interface{}{
+	c.audit.Record(actor, "crawl_source.update", "crawl_source", source.ID, map[string]any{
 		"name": source.Name,
 	})
 	return ctx.JSON(http.StatusOK, source)
@@ -77,7 +77,7 @@ func (c *AdminCrawlController) RunSource(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "crawl_source.run", "crawl_source", uint(id), map[string]interface{}{
+	c.audit.Record(actor, "crawl_source.run", "crawl_source", uint(id), map[string]any{
 		"status": run.Status,
 	})
 	return ctx.JSON(http.StatusOK, run)
@@ -95,7 +95,7 @@ func (c *AdminCrawlController) Runs(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch runs")
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"runs": runs,
 	})
 }

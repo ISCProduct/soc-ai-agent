@@ -44,7 +44,7 @@ func (c *AdminScoreValidationController) GetCalibration(ctx echo.Context) error 
 	if err != nil {
 		return echoInternalError(err)
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{"weights": weights})
+	return ctx.JSON(http.StatusOK, map[string]any{"weights": weights})
 }
 
 // RunCalibration POST /api/admin/score-validation/calibration/run
@@ -69,7 +69,7 @@ func (c *AdminScoreValidationController) GetCalibrationHistory(ctx echo.Context)
 	if err != nil {
 		return echoInternalError(err)
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{"history": history})
+	return ctx.JSON(http.StatusOK, map[string]any{"history": history})
 }
 
 // ListVariants GET /api/admin/score-validation/variants
@@ -78,7 +78,7 @@ func (c *AdminScoreValidationController) ListVariants(ctx echo.Context) error {
 	if err != nil {
 		return echoInternalError(err)
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{"experiments": experiments})
+	return ctx.JSON(http.StatusOK, map[string]any{"experiments": experiments})
 }
 
 // CreateVariant POST /api/admin/score-validation/variants
@@ -116,5 +116,5 @@ func (c *AdminScoreValidationController) GetVariantResults(ctx echo.Context) err
 	if err != nil {
 		return echoInternalError(err)
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{"experiment": experimentName, "results": results})
+	return ctx.JSON(http.StatusOK, map[string]any{"experiment": experimentName, "results": results})
 }

@@ -55,7 +55,7 @@ func avgScoresJSON(scoresJSON string) (map[string]float64, *float64) {
 	if scoresJSON == "" {
 		return nil, nil
 	}
-	var raw map[string]interface{}
+	var raw map[string]any
 	if err := json.Unmarshal([]byte(scoresJSON), &raw); err != nil {
 		return nil, nil
 	}
@@ -168,7 +168,7 @@ func (c *AdminDashboardController) ListUsers(ctx echo.Context) error {
 		})
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"users": summaries,
 		"total": total,
 	})
@@ -227,7 +227,7 @@ func (c *AdminDashboardController) UserSessions(ctx echo.Context) error {
 		entries = append(entries, entry)
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{"sessions": entries})
+	return ctx.JSON(http.StatusOK, map[string]any{"sessions": entries})
 }
 
 // ExportCSV handles GET /api/admin/dashboard/export/csv

@@ -74,7 +74,7 @@ func (c *AdminUserController) List(ctx echo.Context) error {
 			UpdatedAt:   u.UpdatedAt.Format(timeLayout()),
 		})
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"users":  resp,
 		"total":  total,
 		"limit":  limit,
@@ -116,7 +116,7 @@ func (c *AdminUserController) Update(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update user")
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "user.update", "user", user.ID, map[string]interface{}{
+	c.audit.Record(actor, "user.update", "user", user.ID, map[string]any{
 		"is_admin":     user.IsAdmin,
 		"target_level": user.TargetLevel,
 		"school_name":  user.SchoolName,

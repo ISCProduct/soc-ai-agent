@@ -109,7 +109,7 @@ func (ctrl *CompanyRelationController) GetCompanyJobPositions(ctx echo.Context) 
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch job positions")
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"positions": positions,
 	})
 }
@@ -147,7 +147,7 @@ func (ctrl *CompanyRelationController) GetCompanies(ctx echo.Context) error {
 	}
 
 	type CompanyResponse struct {
-		Companies interface{} `json:"companies"`
+		Companies any `json:"companies"`
 		Total     int64       `json:"total"`
 		Limit     int         `json:"limit"`
 		Offset    int         `json:"offset"`
@@ -173,7 +173,7 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(ctx echo.Context) erro
 
 	results := ctrl.searchCompaniesWithOpenAI(ctx.Request().Context(), query)
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{"results": results})
+	return ctx.JSON(http.StatusOK, map[string]any{"results": results})
 }
 
 // searchCompaniesWithOpenAI はOpenAI Web Search APIを使って企業候補を取得する

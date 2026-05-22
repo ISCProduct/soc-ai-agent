@@ -34,7 +34,7 @@ func (c *CollectiveInsightController) GetRecommendations(ctx echo.Context) error
 	// 除外企業IDをオプションで受け取る（カンマ区切り）
 	var excludeIDs []uint
 	if excStr := ctx.QueryParam("exclude"); excStr != "" {
-		for _, idStr := range strings.Split(excStr, ",") {
+		for idStr := range strings.SplitSeq(excStr, ",") {
 			if id, err := strconv.ParseUint(strings.TrimSpace(idStr), 10, 32); err == nil {
 				excludeIDs = append(excludeIDs, uint(id))
 			}
@@ -49,7 +49,7 @@ func (c *CollectiveInsightController) GetRecommendations(ctx echo.Context) error
 		items = []services.CollectiveRecommendItem{}
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"recommendations": items,
 		"count":           len(items),
 	})
@@ -70,7 +70,7 @@ func (c *CollectiveInsightController) GetTopPassRateCompanies(ctx echo.Context) 
 		return echoInternalError(err)
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"companies": companies,
 	})
 }
@@ -94,7 +94,7 @@ func (c *CollectiveInsightController) UpdateConsent(ctx echo.Context) error {
 		return echoInternalError(err)
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"user_id": userID,
 		"allow":   req.Allow,
 	})
@@ -129,7 +129,7 @@ func (c *CollectiveInsightController) RecordAction(ctx echo.Context) error {
 		return echoInternalError(err)
 	}
 
-	return ctx.JSON(http.StatusCreated, map[string]interface{}{"status": "recorded"})
+	return ctx.JSON(http.StatusCreated, map[string]any{"status": "recorded"})
 }
 
 // RebuildSummaries POST /api/admin/collective-insights/rebuild-summaries
@@ -138,5 +138,5 @@ func (c *CollectiveInsightController) RebuildSummaries(ctx echo.Context) error {
 	if err := c.svc.RebuildSummaries(); err != nil {
 		return echoInternalError(err)
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{"status": "rebuilt"})
+	return ctx.JSON(http.StatusOK, map[string]any{"status": "rebuilt"})
 }

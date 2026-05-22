@@ -47,7 +47,7 @@ func (c *AdminCompanyController) List(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch companies")
 	}
 	total, _ := c.repo.CountActive()
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"companies": companies,
 		"total":     total,
 		"limit":     limit,
@@ -69,7 +69,7 @@ func (c *AdminCompanyController) Create(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create company")
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.create", "company", payload.ID, map[string]interface{}{
+	c.audit.Record(actor, "company.create", "company", payload.ID, map[string]any{
 		"name": payload.Name,
 	})
 	return ctx.JSON(http.StatusOK, payload)
@@ -110,7 +110,7 @@ func (c *AdminCompanyController) Update(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update company")
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.update", "company", company.ID, map[string]interface{}{
+	c.audit.Record(actor, "company.update", "company", company.ID, map[string]any{
 		"name": company.Name,
 	})
 	return ctx.JSON(http.StatusOK, company)
@@ -132,7 +132,7 @@ func (c *AdminCompanyController) Publish(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to publish company")
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.publish", "company", company.ID, map[string]interface{}{
+	c.audit.Record(actor, "company.publish", "company", company.ID, map[string]any{
 		"name": company.Name,
 	})
 	return ctx.JSON(http.StatusOK, company)
@@ -153,7 +153,7 @@ func (c *AdminCompanyController) Reject(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to reject company")
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.reject", "company", company.ID, map[string]interface{}{
+	c.audit.Record(actor, "company.reject", "company", company.ID, map[string]any{
 		"name": company.Name,
 	})
 	return ctx.JSON(http.StatusOK, map[string]string{"status": "rejected"})
@@ -172,7 +172,7 @@ func (c *AdminCompanyController) SearchGBiz(ctx echo.Context) error {
 	if err != nil {
 		return echoInternalError(err)
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{"results": results})
+	return ctx.JSON(http.StatusOK, map[string]any{"results": results})
 }
 
 // SyncGBiz POST /api/admin/companies/:id/gbiz-sync
@@ -189,7 +189,7 @@ func (c *AdminCompanyController) SyncGBiz(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.gbiz_sync", "company", uint(id), map[string]interface{}{
+	c.audit.Record(actor, "company.gbiz_sync", "company", uint(id), map[string]any{
 		"status": result.Status,
 	})
 	return ctx.JSON(http.StatusOK, result)
@@ -272,11 +272,11 @@ func (c *AdminCompanyController) FetchTechStack(ctx echo.Context) error {
 	}
 
 	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.tech_stack_search", "company", company.ID, map[string]interface{}{
+	c.audit.Record(actor, "company.tech_stack_search", "company", company.ID, map[string]any{
 		"name": company.Name,
 	})
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"tech_stack":        result.TechStack,
 		"infra_stack":       result.InfraStack,
 		"cicd_tools":        result.CicdTools,

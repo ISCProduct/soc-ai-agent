@@ -39,7 +39,7 @@ func (c *AdminProfileRecalculationController) RecalculateAll(ctx echo.Context) e
 		}
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"results":       results,
 		"total":         len(results),
 		"updated_count": updated,
@@ -78,7 +78,7 @@ func (c *AdminProfileRecalculationController) Rollback(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"ok":         true,
 		"company_id": companyID,
 		"message":    "プロファイルをロールバックしました",
@@ -116,7 +116,7 @@ func (c *AdminProfileRecalculationController) GetHistory(ctx echo.Context) error
 		}
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"histories": resp,
 		"total":     len(resp),
 	})

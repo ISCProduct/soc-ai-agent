@@ -109,7 +109,7 @@ func (c *ResumeController) Review(ctx echo.Context) error {
 	}
 	log.Printf("resume_review: completed document_id=%d score=%d items=%d", docID, review.Score, len(items))
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"review": review,
 		"items":  items,
 	})

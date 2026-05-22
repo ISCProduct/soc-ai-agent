@@ -198,7 +198,7 @@ func (c *InterviewController) UploadVideo(ctx echo.Context) error {
 		c.videoRepo.UpdateStatus(ctx, vid.ID, "done", "", fileID, s3URL, &uploadedAt)
 	}(videoRecord, file, s3Key)
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"video_id": videoRecord.ID,
 		"status":   "uploading",
 		"message":  "動画のアップロードを開始しました",
@@ -424,7 +424,7 @@ func (c *InterviewController) List(ctx echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"sessions": sessions,
 		"total":    total,
 		"page":     page,

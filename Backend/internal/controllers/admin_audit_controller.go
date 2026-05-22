@@ -27,7 +27,7 @@ func (c *AdminAuditController) List(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch logs")
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"logs": logs,
 	})
 }

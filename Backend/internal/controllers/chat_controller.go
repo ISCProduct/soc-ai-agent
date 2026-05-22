@@ -252,7 +252,7 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		}
 
 		type RecommendationResponse struct {
-			Recommendations     []interface{}                 `json:"recommendations"`
+			Recommendations     []any                 `json:"recommendations"`
 			Reason              string                        `json:"reason,omitempty"`
 			Diagnostics         *services.MatchingDiagnostics `json:"diagnostics,omitempty"`
 			EvaluatedCategories int                           `json:"evaluated_categories"`
@@ -262,7 +262,7 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		evaluatedCategories := countEvaluatedCategories(userScores)
 		isProvisional := evaluatedCategories < minEvaluatedCategoriesForFinal
 		response := RecommendationResponse{
-			Recommendations:     []interface{}{},
+			Recommendations:     []any{},
 			Reason:              reason,
 			Diagnostics:         diagnostics,
 			EvaluatedCategories: evaluatedCategories,
@@ -417,7 +417,7 @@ func (c *ChatController) GetAnalysisSummary(ctx echo.Context) error {
 }
 
 // generateReasonForCategory カテゴリごとのマッチング理由を生成（フォールバック用）
-func generateReasonForCategory(category string, score int) string {
+func generateReasonForCategory(category string, _ int) string {
 	reasons := map[string]string{
 		"技術志向":        "最新技術への探求心と技術的な深掘りが評価されています。技術主導型の企業で活躍できるでしょう。",
 		"コミュニケーション能力": "優れた対話力と説明力が認められています。チーム協業が重視される企業に適しています。",

@@ -441,7 +441,7 @@ func (s *ResumeService) extractTextBlocks(doc *models.ResumeDocument, pdfPath st
 	var blocks []models.ResumeTextBlock
 	for _, page := range payload.Pages {
 		for _, block := range page.Blocks {
-			bbox, _ := json.Marshal(map[string]interface{}{
+			bbox, _ := json.Marshal(map[string]any{
 				"bbox":        block.BBox,
 				"page_width":  page.Width,
 				"page_height": page.Height,
@@ -466,10 +466,10 @@ func (s *ResumeService) annotatePDF(inputPath string, doc *models.ResumeDocument
 		}
 		return inputPath, storedPath, nil
 	}
-	payload := make([]map[string]interface{}, 0, len(items))
+	payload := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		bboxInfo := decodeBBoxInfo(item.BBox)
-		payload = append(payload, map[string]interface{}{
+		payload = append(payload, map[string]any{
 			"page_number": item.PageNumber,
 			"bbox":        bboxInfo.BBox,
 			"page_width":  bboxInfo.PageWidth,
@@ -856,7 +856,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		return fmt.Errorf("streaming not supported")
 	}
 
-	sendEvent := func(v map[string]interface{}) {
+	sendEvent := func(v map[string]any) {
 		data, _ := json.Marshal(v)
 		fmt.Fprintf(w, "data: %s\n\n", data)
 		flusher.Flush()
@@ -864,33 +864,33 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 
 	doc, err := s.repo.FindDocumentByID(documentID)
 	if err != nil {
-		sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
+		sendEvent(map[string]any{"type": "error", "message": err.Error()})
 		return err
 	}
 	if doc.UserID != requestingUserID {
-		sendEvent(map[string]interface{}{"type": "error", "message": "forbidden"})
+		sendEvent(map[string]any{"type": "error", "message": "forbidden"})
 		return ErrForbidden
 	}
 	if s.s3 == nil || !s.s3.isEnabled() {
-		sendEvent(map[string]interface{}{"type": "error", "message": "s3 is required"})
+		sendEvent(map[string]any{"type": "error", "message": "s3 is required"})
 		return errors.New("s3 is required")
 	}
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
 		msg := "応募企業名または応募職種を入力してください"
-		sendEvent(map[string]interface{}{"type": "error", "message": msg})
+		sendEvent(map[string]any{"type": "error", "message": msg})
 		return errors.New(msg)
 	}
 
 	workDir, err := s.ensureWorkingDir(doc.ID)
 	if err != nil {
-		sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
+		sendEvent(map[string]any{"type": "error", "message": err.Error()})
 		return err
 	}
 	defer os.RemoveAll(workDir)
 
 	pdfPath, normalizedStored, err := s.normalizeToPDF(doc, workDir)
 	if err != nil {
-		sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
+		sendEvent(map[string]any{"type": "error", "message": err.Error()})
 		return err
 	}
 	doc.NormalizedPath = normalizedStored
@@ -903,7 +903,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	}
 	blocks, err := s.extractTextBlocks(doc, pdfPath)
 	if err != nil {
-		sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
+		sendEvent(map[string]any{"type": "error", "message": err.Error()})
 		return err
 	}
 	hasText := false
@@ -915,7 +915,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	}
 	if !hasText {
 		msg := "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"
-		sendEvent(map[string]interface{}{"type": "error", "message": msg})
+		sendEvent(map[string]any{"type": "error", "message": msg})
 		return errors.New(msg)
 	}
 	_ = s.repo.ReplaceTextBlocks(doc.ID, blocks)
@@ -940,9 +940,9 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		log.Printf("resume_review_stream: build score failed: %v", err)
 		var ve *ValidationError
 		if errors.As(err, &ve) {
-			sendEvent(map[string]interface{}{"type": "error", "message": ve.Message})
+			sendEvent(map[string]any{"type": "error", "message": ve.Message})
 		} else {
-			sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
+			sendEvent(map[string]any{"type": "error", "message": err.Error()})
 		}
 		return err
 	}
@@ -952,7 +952,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	_, annotatedStored, err := s.annotatePDF(pdfPath, doc, review, items)
 	if err != nil {
 		log.Printf("resume_review_stream: annotatePDF failed document_id=%d err=%v", documentID, err)
-		sendEvent(map[string]interface{}{
+		sendEvent(map[string]any{
 			"type":    "annotate_error",
 			"message": "注釈PDFの生成に失敗しました。レビュー結果は表示されますが、PDFダウンロードはご利用いただけません。",
 		})
@@ -963,7 +963,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		annotatedAvailable = true
 	}
 
-	sendEvent(map[string]interface{}{
+	sendEvent(map[string]any{
 		"type":                "complete",
 		"review":              review,
 		"items":               items,
@@ -1189,7 +1189,7 @@ func buildResumeText(blocks []models.ResumeTextBlock, maxLen int) string {
 	return b.String()
 }
 
-func decodeJSON(raw string, out interface{}) error {
+func decodeJSON(raw string, out any) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return errors.New("empty response")

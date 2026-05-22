@@ -105,7 +105,7 @@ func (c *AdminCompanyGraphController) Crawl(ctx echo.Context) error {
 
 	adminEmail := ctx.Request().Header.Get("X-Admin-Email")
 	if adminEmail != "" && c.audit != nil {
-		c.audit.Record(adminEmail, "company_graph_crawl", "pipeline", 0, map[string]interface{}{
+		c.audit.Record(adminEmail, "company_graph_crawl", "pipeline", 0, map[string]any{
 			"sites": req.Sites,
 			"query": req.Query,
 			"nodes": len(nodes),

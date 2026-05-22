@@ -34,7 +34,7 @@ func (c *AdminJobController) JobCategories(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch job categories")
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"job_categories": categories,
 	})
 }
@@ -58,7 +58,7 @@ func (c *AdminJobController) JobPositions(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch job positions")
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"positions": positions,
 	})
 }
@@ -80,7 +80,7 @@ func (c *AdminJobController) CreateJobPosition(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create job position")
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "job_position.create", "company_job_position", payload.ID, map[string]interface{}{
+	c.audit.Record(actor, "job_position.create", "company_job_position", payload.ID, map[string]any{
 		"company_id": payload.CompanyID,
 		"title":      payload.Title,
 	})
@@ -114,7 +114,7 @@ func (c *AdminJobController) JobPositionAction(ctx echo.Context) error {
 	if err := c.companyRepo.UpdateJobPosition(position); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update")
 	}
-	c.audit.Record(actor, "job_position."+action, "company_job_position", position.ID, map[string]interface{}{
+	c.audit.Record(actor, "job_position."+action, "company_job_position", position.ID, map[string]any{
 		"data_status": position.DataStatus,
 	})
 	return ctx.JSON(http.StatusOK, position)
@@ -139,7 +139,7 @@ func (c *AdminJobController) GraduateEmployments(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch graduate employments")
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"entries": entries,
 	})
 }
@@ -183,7 +183,7 @@ func (c *AdminJobController) CreateGraduateEmployment(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create graduate employment")
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "graduate_employment.create", "graduate_employment", entry.ID, map[string]interface{}{
+	c.audit.Record(actor, "graduate_employment.create", "graduate_employment", entry.ID, map[string]any{
 		"company_id": entry.CompanyID,
 	})
 	return ctx.JSON(http.StatusOK, entry)
@@ -246,7 +246,7 @@ func (c *AdminJobController) UpdateGraduateEmployment(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update")
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "graduate_employment.update", "graduate_employment", entry.ID, map[string]interface{}{
+	c.audit.Record(actor, "graduate_employment.update", "graduate_employment", entry.ID, map[string]any{
 		"company_id": entry.CompanyID,
 	})
 	return ctx.JSON(http.StatusOK, entry)

@@ -89,7 +89,7 @@ func (cli *Client) TTS(ctx context.Context, text, voice string) ([]byte, error) 
 		voice = "alloy"
 	}
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"model": model,
 		"input": text,
 		"voice": voice,

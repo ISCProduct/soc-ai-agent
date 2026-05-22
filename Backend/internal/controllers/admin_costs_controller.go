@@ -50,10 +50,10 @@ func (c *AdminCostsController) Summary(ctx echo.Context) error {
 		return echoInternalError(err)
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"current_month_cost_usd": monthTotal,
 		"model_breakdown":        modelBreakdown,
-		"realtime": map[string]interface{}{
+		"realtime": map[string]any{
 			"current_month_cost_usd": realtimeMonthTotal,
 			"active_connections":     activeConnections,
 			"user_breakdown":         realtimeUsers,
@@ -78,7 +78,7 @@ func (c *AdminCostsController) Daily(ctx echo.Context) error {
 			return echoInternalError(err)
 		}
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"daily":          rows,
 		"realtime_daily": realtimeRows,
 	})
@@ -101,7 +101,7 @@ func (c *AdminCostsController) Monthly(ctx echo.Context) error {
 			return echoInternalError(err)
 		}
 	}
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"monthly":          rows,
 		"realtime_monthly": realtimeRows,
 	})

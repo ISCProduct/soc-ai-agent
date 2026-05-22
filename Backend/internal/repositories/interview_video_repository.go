@@ -21,7 +21,7 @@ func (r *InterviewVideoRepository) Create(ctx context.Context, v *models.Intervi
 }
 
 func (r *InterviewVideoRepository) UpdateStatus(ctx context.Context, id uint, status, errorMessage string, driveFileID, driveFileURL string, uploadedAt *time.Time) error {
-	updates := map[string]interface{}{
+	updates := map[string]any{
 		"status":         status,
 		"error_message":  errorMessage,
 		"drive_file_id":  driveFileID,

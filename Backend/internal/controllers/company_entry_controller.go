@@ -200,7 +200,7 @@ func (c *CompanyEntryController) Submit(ctx echo.Context) error {
 		}
 	}
 
-	return ctx.JSON(http.StatusCreated, map[string]interface{}{
+	return ctx.JSON(http.StatusCreated, map[string]any{
 		"message":    "送信が完了しました。内容を確認の上、掲載審査を行います。",
 		"company_id": company.ID,
 	})
