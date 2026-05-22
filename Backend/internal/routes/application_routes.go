@@ -11,10 +11,10 @@ func SetupApplicationRoutes(api *echo.Group, appController *controllers.Applicat
 	applications := api.Group("/applications")
 	// POST /api/applications       → 応募登録
 	// GET  /api/applications       → 応募一覧取得
-	applications.POST("", wrap(appController.Apply))
-	applications.GET("", wrap(appController.List))
+	applications.POST("", appController.Apply)
+	applications.GET("", appController.List)
 	// GET  /api/applications/correlation → 相関分析データ
-	applications.Any("/correlation", wrap(appController.GetCorrelation))
+	applications.GET("/correlation", appController.GetCorrelation)
 	// PUT  /api/applications/:id  → ステータス更新
-	applications.PUT("/:id", wrap(appController.UpdateStatus))
+	applications.PUT("/:id", appController.UpdateStatus)
 }

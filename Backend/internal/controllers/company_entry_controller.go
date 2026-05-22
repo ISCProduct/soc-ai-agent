@@ -3,10 +3,11 @@ package controllers
 import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/labstack/echo/v4"
 )
 
 type CompanyEntryController struct {
@@ -93,20 +94,14 @@ type companyEntryRequest struct {
 	Graduates     []companyEntryGraduate     `json:"graduates"`
 }
 
-func (c *CompanyEntryController) Submit(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+// Submit POST /api/company-entry
+func (c *CompanyEntryController) Submit(ctx echo.Context) error {
 	var req companyEntryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid payload", http.StatusBadRequest)
-		return
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
 	}
 
 	now := time.Now()
@@ -136,8 +131,7 @@ func (c *CompanyEntryController) Submit(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := c.companyRepo.Create(company); err != nil {
-		http.Error(w, "failed to create company", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create company")
 	}
 
 	// 求人情報の保存
@@ -160,8 +154,7 @@ func (c *CompanyEntryController) Submit(w http.ResponseWriter, r *http.Request) 
 			IsActive:        true,
 		}
 		if err := c.companyRepo.CreateJobPosition(position); err != nil {
-			http.Error(w, "failed to create job position", http.StatusInternalServerError)
-			return
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to create job position")
 		}
 	}
 
@@ -181,8 +174,7 @@ func (c *CompanyEntryController) Submit(w http.ResponseWriter, r *http.Request) 
 			CommunicationSkill:    req.WeightProfile.CommunicationSkill,
 		}
 		if err := c.companyRepo.CreateOrUpdateWeightProfile(profile); err != nil {
-			http.Error(w, "failed to create weight profile", http.StatusInternalServerError)
-			return
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to create weight profile")
 		}
 	}
 
@@ -204,14 +196,11 @@ func (c *CompanyEntryController) Submit(w http.ResponseWriter, r *http.Request) 
 			Note:           strings.TrimSpace(g.Note),
 		}
 		if err := c.graduateRepo.Create(entry); err != nil {
-			http.Error(w, "failed to create graduate employment", http.StatusInternalServerError)
-			return
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to create graduate employment")
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusCreated, map[string]interface{}{
 		"message":    "送信が完了しました。内容を確認の上、掲載審査を行います。",
 		"company_id": company.ID,
 	})

@@ -1,16 +1,15 @@
 package controllers
 
 import (
-	"Backend/internal/middleware"
 	"Backend/internal/services"
-	"encoding/json"
 	"errors"
-	"io"
 	"log"
 	"mime/multipart"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/labstack/echo/v4"
 )
 
 type ResumeController struct {
@@ -21,50 +20,33 @@ func NewResumeController(resumeService *services.ResumeService) *ResumeControlle
 	return &ResumeController{resumeService: resumeService}
 }
 
-func authenticatedUserID(r *http.Request) (uint, error) {
-	userID, ok := r.Context().Value(middleware.UserIDContextKey).(uint)
-	if !ok || userID == 0 {
-		return 0, errors.New("user_id is required")
-	}
-	return userID, nil
-}
-
-func (c *ResumeController) Upload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		http.Error(w, "Invalid form data", http.StatusBadRequest)
-		return
+func (c *ResumeController) Upload(ctx echo.Context) error {
+	if err := ctx.Request().ParseMultipartForm(32 << 20); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid form data")
 	}
 
-	userIDStr := r.FormValue("user_id")
-	sessionID := r.FormValue("session_id")
-	sourceType := r.FormValue("source_type")
-	sourceURL := r.FormValue("source_url")
+	userIDStr := ctx.FormValue("user_id")
+	sessionID := ctx.FormValue("session_id")
+	sourceType := ctx.FormValue("source_type")
+	sourceURL := ctx.FormValue("source_url")
 
 	if userIDStr == "" {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "user_id is required")
 	}
 	userID, err := strconv.ParseUint(userIDStr, 10, 32)
 	if err != nil {
-		http.Error(w, "Invalid user_id", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid user_id")
 	}
-	authenticatedID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
-		return
+	authenticatedID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "user_id is required")
 	}
 	if authenticatedID != uint(userID) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
+		return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 	}
 
 	var fileHeader *multipart.FileHeader
-	file, header, err := r.FormFile("file")
+	file, header, err := ctx.Request().FormFile("file")
 	if err == nil {
 		file.Close()
 		fileHeader = header
@@ -72,42 +54,30 @@ func (c *ResumeController) Upload(w http.ResponseWriter, r *http.Request) {
 
 	result, err := c.resumeService.Upload(uint(userID), sessionID, sourceType, sourceURL, fileHeader)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	return ctx.JSON(http.StatusOK, result)
 }
 
-func (c *ResumeController) Review(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	docIDStr := r.URL.Query().Get("document_id")
+func (c *ResumeController) Review(ctx echo.Context) error {
+	docIDStr := ctx.QueryParam("document_id")
 	if docIDStr == "" {
-		http.Error(w, "document_id is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "document_id is required")
 	}
 	docID, err := strconv.ParseUint(docIDStr, 10, 32)
 	if err != nil {
-		http.Error(w, "Invalid document_id", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid document_id")
 	}
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
-		return
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "user_id is required")
 	}
 	if err := c.resumeService.EnsureDocumentOwner(uint(docID), userID); err != nil {
 		if errors.Is(err, services.ErrForbidden) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
+			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
 	var payload struct {
@@ -115,12 +85,7 @@ func (c *ResumeController) Review(w http.ResponseWriter, r *http.Request) {
 		CandidateType string `json:"candidate_type"`
 		JobTitle      string `json:"job_title"`
 	}
-	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
-			return
-		}
-	}
+	ctx.Bind(&payload)
 
 	log.Printf(
 		"resume_review: start document_id=%d company=%q job_title=%q candidate_type=%q",
@@ -134,55 +99,40 @@ func (c *ResumeController) Review(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("resume_review: failed document_id=%d err=%v", docID, err)
 		if errors.Is(err, services.ErrForbidden) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
+			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
 		var ve *services.ValidationError
 		if errors.As(err, &ve) {
-			http.Error(w, ve.Message, http.StatusUnprocessableEntity)
-			return
+			return echo.NewHTTPError(http.StatusUnprocessableEntity, ve.Message)
 		}
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 	log.Printf("resume_review: completed document_id=%d score=%d items=%d", docID, review.Score, len(items))
 
-	resp := map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]interface{}{
 		"review": review,
 		"items":  items,
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	})
 }
 
-func (c *ResumeController) ReviewStream(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	docIDStr := r.URL.Query().Get("document_id")
+func (c *ResumeController) ReviewStream(ctx echo.Context) error {
+	docIDStr := ctx.QueryParam("document_id")
 	if docIDStr == "" {
-		http.Error(w, "document_id is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "document_id is required")
 	}
 	docID, err := strconv.ParseUint(docIDStr, 10, 32)
 	if err != nil {
-		http.Error(w, "Invalid document_id", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid document_id")
 	}
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
-		return
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "user_id is required")
 	}
 	if err := c.resumeService.EnsureDocumentOwner(uint(docID), userID); err != nil {
 		if errors.Is(err, services.ErrForbidden) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
+			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
 	var payload struct {
@@ -190,65 +140,56 @@ func (c *ResumeController) ReviewStream(w http.ResponseWriter, r *http.Request) 
 		CandidateType string `json:"candidate_type"`
 		JobTitle      string `json:"job_title"`
 	}
-	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
-			return
-		}
-	}
+	ctx.Bind(&payload)
 
 	log.Printf(
 		"resume_review_stream: start document_id=%d company=%q job_title=%q",
 		docID, payload.CompanyName, payload.JobTitle,
 	)
 
+	w := ctx.Response().Writer
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	if err := c.resumeService.ReviewDocumentStream(r.Context(), uint(docID), userID, payload.CompanyName, payload.JobTitle, payload.CandidateType, w); err != nil {
+	if err := c.resumeService.ReviewDocumentStream(ctx.Request().Context(), uint(docID), userID, payload.CompanyName, payload.JobTitle, payload.CandidateType, w); err != nil {
 		log.Printf("resume_review_stream: error document_id=%d err=%v", docID, err)
 	}
+	return nil
 }
 
-func (c *ResumeController) Annotated(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	docIDStr := r.URL.Query().Get("document_id")
+func (c *ResumeController) Annotated(ctx echo.Context) error {
+	docIDStr := ctx.QueryParam("document_id")
 	if docIDStr == "" {
-		http.Error(w, "document_id is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "document_id is required")
 	}
 	docID, err := strconv.ParseUint(docIDStr, 10, 32)
 	if err != nil {
-		http.Error(w, "Invalid document_id", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid document_id")
 	}
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
-		return
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "user_id is required")
 	}
 
 	file, err := c.resumeService.OpenAnnotatedFile(uint(docID), userID)
 	if err != nil {
 		if errors.Is(err, services.ErrForbidden) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
+			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
 	if file.CloseFunc != nil {
 		defer file.CloseFunc()
 	}
 
+	w := ctx.Response().Writer
+	r := ctx.Request()
 	w.Header().Set("Content-Type", file.ContentType)
 	if file.Size > 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
 	}
 	http.ServeContent(w, r, file.Filename, time.Now(), file.Reader)
+	return nil
 }

@@ -8,13 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/labstack/echo/v4"
 )
 
 type InterviewController struct {
@@ -36,229 +37,130 @@ type interviewCreateRequest struct {
 	InterviewerGender string `json:"interviewer_gender"`
 }
 
-type interviewActionRequest struct{}
-
 type interviewUtteranceRequest struct {
 	Role string `json:"role"`
 	Text string `json:"text"`
 }
 
-func (c *InterviewController) ListOrCreate(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		c.List(w, r)
-	case http.MethodPost:
-		c.Create(w, r)
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-func (c *InterviewController) Route(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/api/interviews/")
-	if strings.HasSuffix(path, "/start") {
-		c.Start(w, r)
-		return
-	}
-	if strings.HasSuffix(path, "/finish") {
-		c.Finish(w, r)
-		return
-	}
-	if strings.HasSuffix(path, "/utterances") {
-		c.AddUtterance(w, r)
-		return
-	}
-	if strings.HasSuffix(path, "/turn") {
-		c.Turn(w, r)
-		return
-	}
-	if strings.HasSuffix(path, "/start-turn") {
-		c.StartTurn(w, r)
-		return
-	}
-	if strings.HasSuffix(path, "/report") {
-		c.GetReport(w, r)
-		return
-	}
-	if strings.HasSuffix(path, "/send-report") {
-		c.SendReport(w, r)
-		return
-	}
-	if strings.HasSuffix(path, "/upload-video") {
-		c.UploadVideo(w, r)
-		return
-	}
-	if strings.HasSuffix(path, "/phrase-suggestions") {
-		c.GetPhraseSuggestions(w, r)
-		return
-	}
-	c.Get(w, r)
-}
-
-// GetTrend は GET /api/interviews/trend?limit=N を処理し、
+// GetTrend GET /api/interviews/trend?limit=N
 // 完了済みセッションのスコア時系列を返す。
-func (c *InterviewController) GetTrend(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+func (c *InterviewController) GetTrend(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-	limit := 20
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
-			limit = parsed
-		}
-	}
+	limit := echoIntQuery(ctx, "limit", 20)
 	points, err := c.interviewService.GetTrend(userID, limit)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"points": points,
 	})
 }
 
-func (c *InterviewController) GetReport(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/report")
+// GetReport GET /api/interviews/:id/report
+func (c *InterviewController) GetReport(ctx echo.Context) error {
+	sessionID, err := echoUintParam(ctx, "id")
 	if err != nil {
-		http.Error(w, "Invalid session ID", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
 	}
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 	report, err := c.interviewService.GetReport(userID, sessionID)
 	if err != nil {
-		status := http.StatusInternalServerError
 		if err.Error() == "forbidden" {
-			status = http.StatusForbidden
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
-		writeErrorByStatus(w, status, err)
-		return
+		return echoInternalError(err)
 	}
 	if report == nil {
-		http.Error(w, "report not yet available", http.StatusNotFound)
-		return
+		return echo.NewHTTPError(http.StatusNotFound, "report not yet available")
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(report)
+	return ctx.JSON(http.StatusOK, report)
 }
 
-func (c *InterviewController) GetPhraseSuggestions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/phrase-suggestions")
+// GetPhraseSuggestions GET /api/interviews/:id/phrase-suggestions
+func (c *InterviewController) GetPhraseSuggestions(ctx echo.Context) error {
+	sessionID, err := echoUintParam(ctx, "id")
 	if err != nil {
-		http.Error(w, "Invalid session ID", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
 	}
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	suggestions, err := c.interviewService.GetPhraseSuggestions(r.Context(), userID, sessionID)
+	suggestions, err := c.interviewService.GetPhraseSuggestions(ctx.Request().Context(), userID, sessionID)
 	if err != nil {
-		status := http.StatusInternalServerError
 		if err.Error() == "forbidden" {
-			status = http.StatusForbidden
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
-		writeErrorByStatus(w, status, err)
-		return
+		return echoInternalError(err)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"suggestions": suggestions,
 	})
 }
 
-func (c *InterviewController) SendReport(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/send-report")
+// SendReport POST /api/interviews/:id/send-report
+func (c *InterviewController) SendReport(ctx echo.Context) error {
+	sessionID, err := echoUintParam(ctx, "id")
 	if err != nil {
-		http.Error(w, "Invalid session ID", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
 	}
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 	if err := c.interviewService.SendReportEmail(userID, sessionID); err != nil {
-		status := http.StatusInternalServerError
 		if err.Error() == "user not found" || err.Error() == "report not found" {
-			status = http.StatusNotFound
+			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
 		if err.Error() == "guest users cannot receive email reports" {
-			status = http.StatusForbidden
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
-		writeErrorByStatus(w, status, err)
-		return
+		return echoInternalError(err)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "レポートをメールで送信しました"})
+	return ctx.JSON(http.StatusOK, map[string]string{"message": "レポートをメールで送信しました"})
 }
 
 // maxVideoSize は受け付ける動画の最大サイズ（500 MB）
 const maxVideoSize = 500 << 20
 
-func (c *InterviewController) UploadVideo(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/upload-video")
+// UploadVideo POST /api/interviews/:id/upload-video
+func (c *InterviewController) UploadVideo(ctx echo.Context) error {
+	sessionID, err := echoUintParam(ctx, "id")
 	if err != nil {
-		http.Error(w, "Invalid session ID", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
 	}
 
 	if c.videoRepo == nil || c.s3Service == nil {
-		http.Error(w, "video upload service not configured", http.StatusServiceUnavailable)
-		return
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "video upload service not configured")
 	}
 
 	// メモリには最大 10 MB を確保し、それ以上は一時ファイルに書き出す
-	// これにより 32 MB 超の動画もメモリ不足なく受信できる
+	r := ctx.Request()
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		http.Error(w, "リクエストの解析に失敗しました。ファイルが破損しているか、サイズが大きすぎます", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "リクエストの解析に失敗しました。ファイルが破損しているか、サイズが大きすぎます")
 	}
 
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
 	file, header, err := r.FormFile("video")
 	if err != nil {
-		http.Error(w, "動画ファイルが見つかりません", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "動画ファイルが見つかりません")
 	}
 
 	// ファイルサイズ上限チェック
 	if header.Size > maxVideoSize {
 		file.Close()
-		http.Error(w, fmt.Sprintf("動画ファイルが大きすぎます（上限 %d MB）。録画設定を下げて再度お試しください", maxVideoSize>>20), http.StatusRequestEntityTooLarge)
-		return
+		return echo.NewHTTPError(http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("動画ファイルが大きすぎます（上限 %d MB）。録画設定を下げて再度お試しください", maxVideoSize>>20))
 	}
 
 	mimeType := header.Header.Get("Content-Type")
@@ -280,8 +182,7 @@ func (c *InterviewController) UploadVideo(w http.ResponseWriter, r *http.Request
 	}
 	if err := c.videoRepo.Create(r.Context(), videoRecord); err != nil {
 		file.Close()
-		http.Error(w, "動画レコードの作成に失敗しました", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "動画レコードの作成に失敗しました")
 	}
 
 	// S3 へのアップロードを非同期で実行（io.Reader をそのまま渡してメモリを節約）
@@ -297,92 +198,58 @@ func (c *InterviewController) UploadVideo(w http.ResponseWriter, r *http.Request
 		c.videoRepo.UpdateStatus(ctx, vid.ID, "done", "", fileID, s3URL, &uploadedAt)
 	}(videoRecord, file, s3Key)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]interface{}{
 		"video_id": videoRecord.ID,
 		"status":   "uploading",
 		"message":  "動画のアップロードを開始しました",
 	})
 }
 
-func (c *InterviewController) Turn(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/turn")
+// Turn POST /api/interviews/:id/turn
+func (c *InterviewController) Turn(ctx echo.Context) error {
+	sessionID, err := echoUintParam(ctx, "id")
 	if err != nil {
-		http.Error(w, "Invalid session ID", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
 	}
 
 	// multipart から音声と履歴を取得
+	r := ctx.Request()
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		http.Error(w, "Failed to parse form", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Failed to parse form")
 	}
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
+
 	historyStr := r.FormValue("history")
 	var history []map[string]string
 	if historyStr != "" {
 		json.Unmarshal([]byte(historyStr), &history)
 	}
+
+	// フォームから各パラメータを取得
 	companyName := r.FormValue("company_name")
 	companyReading := r.FormValue("company_reading")
 	position := r.FormValue("position")
 	companyInfo := r.FormValue("company_info")
 	companyType := r.FormValue("company_type")
-	turnCount := 0
-	if tc := r.FormValue("turn_count"); tc != "" {
-		if parsed, err := strconv.Atoi(tc); err == nil && parsed >= 0 {
-			turnCount = parsed
-		}
-	}
-	remainingSeconds := 0
-	if rs := r.FormValue("remaining_seconds"); rs != "" {
-		if parsed, err := strconv.Atoi(rs); err == nil && parsed >= 0 {
-			remainingSeconds = parsed
-		}
-	}
-	questionIndex := 0
-	if qi := r.FormValue("question_index"); qi != "" {
-		if parsed, err := strconv.Atoi(qi); err == nil && parsed >= 0 {
-			questionIndex = parsed
-		}
-	}
-	totalQuestions := 0
-	if tq := r.FormValue("total_questions"); tq != "" {
-		if parsed, err := strconv.Atoi(tq); err == nil && parsed >= 0 {
-			totalQuestions = parsed
-		}
-	}
-	questionElapsedSeconds := 0
-	if qe := r.FormValue("question_elapsed_seconds"); qe != "" {
-		if parsed, err := strconv.Atoi(qe); err == nil && parsed >= 0 {
-			questionElapsedSeconds = parsed
-		}
-	}
-	questionDurationSeconds := 0
-	if qd := r.FormValue("question_duration_seconds"); qd != "" {
-		if parsed, err := strconv.Atoi(qd); err == nil && parsed >= 0 {
-			questionDurationSeconds = parsed
-		}
-	}
+
+	turnCount := parseFormInt(r, "turn_count", 0)
+	remainingSeconds := parseFormInt(r, "remaining_seconds", 0)
+	questionIndex := parseFormInt(r, "question_index", 0)
+	totalQuestions := parseFormInt(r, "total_questions", 0)
+	questionElapsedSeconds := parseFormInt(r, "question_elapsed_seconds", 0)
+	questionDurationSeconds := parseFormInt(r, "question_duration_seconds", 0)
 
 	audioFile, _, err := r.FormFile("audio")
 	if err != nil {
-		http.Error(w, "audio file required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "audio file required")
 	}
 	defer audioFile.Close()
 	audioData, err := io.ReadAll(audioFile)
 	if err != nil {
-		http.Error(w, "Failed to read audio", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to read audio")
 	}
 
 	result, err := c.interviewService.Turn(
@@ -404,13 +271,13 @@ func (c *InterviewController) Turn(w http.ResponseWriter, r *http.Request) {
 		questionDurationSeconds,
 	)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
 	// multipart レスポンス: JSON メタ + audio
+	w := ctx.Response().Writer
 	mw := multipart.NewWriter(w)
-	w.Header().Set("Content-Type", "multipart/mixed; boundary="+mw.Boundary())
+	ctx.Response().Header().Set("Content-Type", "multipart/mixed; boundary="+mw.Boundary())
 
 	metaPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
 	json.NewEncoder(metaPart).Encode(map[string]string{
@@ -421,23 +288,19 @@ func (c *InterviewController) Turn(w http.ResponseWriter, r *http.Request) {
 	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})
 	audioPart.Write(result.Audio)
 	mw.Close()
+	return nil
 }
 
-func (c *InterviewController) StartTurn(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/start-turn")
+// StartTurn POST /api/interviews/:id/start-turn
+func (c *InterviewController) StartTurn(ctx echo.Context) error {
+	sessionID, err := echoUintParam(ctx, "id")
 	if err != nil {
-		http.Error(w, "Invalid session ID", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
 	}
 
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 	var req struct {
 		CompanyName             string `json:"company_name"`
@@ -450,10 +313,10 @@ func (c *InterviewController) StartTurn(w http.ResponseWriter, r *http.Request) 
 		QuestionElapsedSeconds  int    `json:"question_elapsed_seconds"`
 		QuestionDurationSeconds int    `json:"question_duration_seconds"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
+	ctx.Bind(&req)
 
 	result, err := c.interviewService.StartTurn(
-		r.Context(),
+		ctx.Request().Context(),
 		userID,
 		sessionID,
 		req.CompanyName,
@@ -467,12 +330,12 @@ func (c *InterviewController) StartTurn(w http.ResponseWriter, r *http.Request) 
 		req.QuestionDurationSeconds,
 	)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
+	w := ctx.Response().Writer
 	mw := multipart.NewWriter(w)
-	w.Header().Set("Content-Type", "multipart/mixed; boundary="+mw.Boundary())
+	ctx.Response().Header().Set("Content-Type", "multipart/mixed; boundary="+mw.Boundary())
 
 	metaPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
 	json.NewEncoder(metaPart).Encode(map[string]string{"ai_text": result.AIText})
@@ -480,116 +343,88 @@ func (c *InterviewController) StartTurn(w http.ResponseWriter, r *http.Request) 
 	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})
 	audioPart.Write(result.Audio)
 	mw.Close()
+	return nil
 }
 
-func (c *InterviewController) Create(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+// Create POST /api/interviews
+func (c *InterviewController) Create(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 	var req interviewCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
 	resp, err := c.interviewService.CreateSession(userID, req.Language, req.InterviewerGender)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	return ctx.JSON(http.StatusOK, resp)
 }
 
-func (c *InterviewController) Start(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/start")
+// Start POST /api/interviews/:id/start
+func (c *InterviewController) Start(ctx echo.Context) error {
+	sessionID, err := echoUintParam(ctx, "id")
 	if err != nil {
-		http.Error(w, "invalid interview id", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid interview id")
 	}
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 	resp, err := c.interviewService.StartSession(userID, sessionID)
 	if err != nil {
-		status := http.StatusBadRequest
 		if err.Error() == "forbidden" {
-			status = http.StatusForbidden
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
-		writeErrorByStatus(w, status, err)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	return ctx.JSON(http.StatusOK, resp)
 }
 
-func (c *InterviewController) Finish(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/finish")
+// Finish POST /api/interviews/:id/finish
+func (c *InterviewController) Finish(ctx echo.Context) error {
+	sessionID, err := echoUintParam(ctx, "id")
 	if err != nil {
-		http.Error(w, "invalid interview id", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid interview id")
 	}
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 	resp, err := c.interviewService.FinishSession(userID, sessionID)
 	if err != nil {
-		status := http.StatusBadRequest
 		if err.Error() == "forbidden" {
-			status = http.StatusForbidden
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
-		writeErrorByStatus(w, status, err)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	return ctx.JSON(http.StatusOK, resp)
 }
 
-func (c *InterviewController) List(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+// List GET /api/interviews
+func (c *InterviewController) List(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-	page := parseIntQuery(r, "page", 1)
-	limit := parseIntQuery(r, "limit", 20)
+	page := echoIntQuery(ctx, "page", 1)
+	limit := echoIntQuery(ctx, "limit", 20)
 	if limit > 100 {
 		limit = 100
 	}
 	offset := (page - 1) * limit
-	all := r.URL.Query().Get("all") == "1" || strings.ToLower(r.URL.Query().Get("all")) == "true"
+	allStr := ctx.QueryParam("all")
+	all := allStr == "1" || strings.ToLower(allStr) == "true"
 	sessions, total, err := c.interviewService.ListSessions(userID, all, limit, offset)
 	if err != nil {
-		status := http.StatusBadRequest
 		if err.Error() == "forbidden" {
-			status = http.StatusForbidden
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
-		writeErrorByStatus(w, status, err)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]interface{}{
 		"sessions": sessions,
 		"total":    total,
 		"page":     page,
@@ -597,92 +432,61 @@ func (c *InterviewController) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (c *InterviewController) Get(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "")
+// Get GET /api/interviews/:id
+func (c *InterviewController) Get(ctx echo.Context) error {
+	sessionID, err := echoUintParam(ctx, "id")
 	if err != nil {
-		http.Error(w, "invalid interview id", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid interview id")
 	}
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	role := r.URL.Query().Get("role")
+	role := ctx.QueryParam("role")
 	if role == "" {
 		role = "student"
 	}
 	resp, err := c.interviewService.GetSessionDetailWithRole(userID, sessionID, role)
 	if err != nil {
-		status := http.StatusBadRequest
 		if err.Error() == "forbidden" {
-			status = http.StatusForbidden
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
-		writeErrorByStatus(w, status, err)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	return ctx.JSON(http.StatusOK, resp)
 }
 
-func (c *InterviewController) AddUtterance(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	sessionID, err := extractID(r.URL.Path, "/api/interviews/", "/utterances")
+// AddUtterance POST /api/interviews/:id/utterances
+func (c *InterviewController) AddUtterance(ctx echo.Context) error {
+	sessionID, err := echoUintParam(ctx, "id")
 	if err != nil {
-		http.Error(w, "invalid interview id", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid interview id")
 	}
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 	var req interviewUtteranceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
 	if err := c.interviewService.SaveUtterance(userID, sessionID, req.Role, req.Text); err != nil {
-		status := http.StatusBadRequest
 		if err.Error() == "forbidden" {
-			status = http.StatusForbidden
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
-		writeErrorByStatus(w, status, err)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	w.WriteHeader(http.StatusNoContent)
+	return ctx.NoContent(http.StatusNoContent)
 }
 
-func extractID(path string, prefix string, suffix string) (uint, error) {
-	trimmed := strings.TrimPrefix(path, prefix)
-	if suffix != "" && strings.HasSuffix(trimmed, suffix) {
-		trimmed = strings.TrimSuffix(trimmed, suffix)
-	}
-	trimmed = strings.Trim(trimmed, "/")
-	id, err := strconv.ParseUint(trimmed, 10, 32)
-	if err != nil {
-		return 0, err
-	}
-	if id > math.MaxInt32 {
-		return 0, fmt.Errorf("id %d exceeds maximum allowed value", id)
-	}
-	return uint(id), nil
-}
-
-func parseIntQuery(r *http.Request, key string, def int) int {
-	value := r.URL.Query().Get(key)
-	if value == "" {
+// parseFormInt はフォーム値を整数として取得し、失敗時はデフォルト値を返す。
+func parseFormInt(r interface{ FormValue(string) string }, key string, def int) int {
+	v := r.FormValue(key)
+	if v == "" {
 		return def
 	}
-	n, err := strconv.Atoi(value)
-	if err != nil || n <= 0 {
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
 		return def
 	}
 	return n

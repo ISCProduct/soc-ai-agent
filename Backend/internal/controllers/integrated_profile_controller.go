@@ -3,9 +3,10 @@ package controllers
 import (
 	"Backend/internal/repositories"
 	"Backend/internal/services"
-	"encoding/json"
 	"net/http"
 	"strconv"
+
+	"github.com/labstack/echo/v4"
 )
 
 // IntegratedProfileController ユーザー統合プロファイルAPI
@@ -28,28 +29,20 @@ func NewIntegratedProfileController(
 }
 
 // GetProfile GET /api/user/profile?user_id=xxx&session_id=xxx
-func (c *IntegratedProfileController) GetProfile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	userIDStr := r.URL.Query().Get("user_id")
+func (c *IntegratedProfileController) GetProfile(ctx echo.Context) error {
+	userIDStr := ctx.QueryParam("user_id")
 	if userIDStr == "" {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "user_id is required")
 	}
 	userIDParsed, err := strconv.ParseUint(userIDStr, 10, 32)
 	if err != nil {
-		http.Error(w, "invalid user_id", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid user_id")
 	}
 	userID := uint(userIDParsed)
 
-	sessionID := r.URL.Query().Get("session_id")
+	sessionID := ctx.QueryParam("session_id")
 	if sessionID == "" {
-		http.Error(w, "session_id is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
 	}
 
 	// 面接セッション数を取得
@@ -71,10 +64,8 @@ func (c *IntegratedProfileController) GetProfile(w http.ResponseWriter, r *http.
 
 	profile, err := c.crossFeature.BuildIntegratedProfile(userID, sessionID, interviewCount, resumeReviewDone)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(profile)
+	return ctx.JSON(http.StatusOK, profile)
 }

@@ -2,9 +2,10 @@ package controllers
 
 import (
 	"Backend/internal/services"
-	"encoding/json"
 	"net/http"
 	"strconv"
+
+	"github.com/labstack/echo/v4"
 )
 
 // ApplicationController 応募・選考ステータス管理コントローラー
@@ -17,35 +18,25 @@ func NewApplicationController(appService *services.ApplicationService) *Applicat
 }
 
 // Apply POST /api/applications - 企業への応募登録
-func (c *ApplicationController) Apply(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+func (c *ApplicationController) Apply(ctx echo.Context) error {
 	var req struct {
 		UserID    uint `json:"user_id"`
 		CompanyID uint `json:"company_id"`
 		MatchID   uint `json:"match_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
 	if req.UserID == 0 || req.CompanyID == 0 || req.MatchID == 0 {
-		http.Error(w, "user_id, company_id, match_id は必須です", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "user_id, company_id, match_id は必須です")
 	}
 
 	app, err := c.appService.Apply(req.UserID, req.CompanyID, req.MatchID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusCreated, map[string]interface{}{
 		"id":         app.ID,
 		"user_id":    app.UserID,
 		"company_id": app.CompanyID,
@@ -56,18 +47,11 @@ func (c *ApplicationController) Apply(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateStatus PUT /api/applications/{id} - 選考ステータス更新
-func (c *ApplicationController) UpdateStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// パスから ID を取得: /api/applications/123
-	idStr := r.URL.Path[len("/api/applications/"):]
+func (c *ApplicationController) UpdateStatus(ctx echo.Context) error {
+	idStr := ctx.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil || id == 0 {
-		http.Error(w, "Invalid application ID", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid application ID")
 	}
 
 	var req struct {
@@ -75,23 +59,19 @@ func (c *ApplicationController) UpdateStatus(w http.ResponseWriter, r *http.Requ
 		Status string `json:"status"`
 		Notes  string `json:"notes"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
 	if req.UserID == 0 || req.Status == "" {
-		http.Error(w, "user_id と status は必須です", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "user_id と status は必須です")
 	}
 
 	app, err := c.appService.UpdateStatus(uint(id), req.UserID, req.Status, req.Notes)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]interface{}{
 		"id":     app.ID,
 		"status": app.Status,
 		"notes":  app.Notes,
@@ -99,23 +79,16 @@ func (c *ApplicationController) UpdateStatus(w http.ResponseWriter, r *http.Requ
 }
 
 // List GET /api/applications?user_id=X - ユーザーの応募一覧取得
-func (c *ApplicationController) List(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	userIDStr := r.URL.Query().Get("user_id")
+func (c *ApplicationController) List(ctx echo.Context) error {
+	userIDStr := ctx.QueryParam("user_id")
 	userID, err := strconv.ParseUint(userIDStr, 10, 64)
 	if err != nil || userID == 0 {
-		http.Error(w, "user_id は必須です", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "user_id は必須です")
 	}
 
 	apps, err := c.appService.GetApplicationsByUser(uint(userID))
 	if err != nil {
-		http.Error(w, "データ取得エラー", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "データ取得エラー")
 	}
 
 	type AppResponse struct {
@@ -151,21 +124,15 @@ func (c *ApplicationController) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]interface{}{
 		"applications": resp,
 		"total":        len(resp),
 	})
 }
 
 // GetCorrelation GET /api/applications/correlation?company_id=X - 相関分析データ取得
-func (c *ApplicationController) GetCorrelation(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	companyIDStr := r.URL.Query().Get("company_id")
+func (c *ApplicationController) GetCorrelation(ctx echo.Context) error {
+	companyIDStr := ctx.QueryParam("company_id")
 	var companyID uint
 	if companyIDStr != "" {
 		id, err := strconv.ParseUint(companyIDStr, 10, 64)
@@ -176,12 +143,10 @@ func (c *ApplicationController) GetCorrelation(w http.ResponseWriter, r *http.Re
 
 	data, err := c.appService.GetCorrelation(companyID)
 	if err != nil {
-		http.Error(w, "相関データ取得エラー", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "相関データ取得エラー")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]interface{}{
 		"correlation": data,
 		"total":       len(data),
 	})

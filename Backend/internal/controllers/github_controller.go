@@ -3,9 +3,10 @@ package controllers
 import (
 	"Backend/internal/services"
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
+
+	"github.com/labstack/echo/v4"
 )
 
 // GitHubController GitHub連携APIのコントローラー
@@ -23,187 +24,132 @@ func NewGitHubController(githubService *services.GitHubService, skillScoreServic
 
 // GetProfile GitHubプロフィール・リポジトリ・言語統計を取得する
 // GET /api/github/profile
-func (c *GitHubController) GetProfile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+func (c *GitHubController) GetProfile(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
 	profile, err := c.githubService.GetProfile(userID)
 	if err != nil {
-		http.Error(w, "failed to get github profile", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get github profile")
 	}
 	if profile == nil {
-		http.Error(w, "github profile not found", http.StatusNotFound)
-		return
+		return echo.NewHTTPError(http.StatusNotFound, "github profile not found")
 	}
 
 	repos, err := c.githubService.GetRepositories(userID)
 	if err != nil {
-		http.Error(w, "failed to get repositories", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get repositories")
 	}
 
 	langStats, err := c.githubService.GetLanguageStats(userID)
 	if err != nil {
-		http.Error(w, "failed to get language stats", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get language stats")
 	}
 
-	resp := map[string]any{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"profile":        profile,
 		"repositories":   repos,
 		"language_stats": langStats,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	})
 }
 
 // Sync GitHubデータの非同期同期をトリガーする
 // POST /api/github/sync
-func (c *GitHubController) Sync(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+func (c *GitHubController) Sync(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
 	profile, err := c.githubService.GetProfile(userID)
 	if err != nil || profile == nil {
-		http.Error(w, "github profile not found: please connect your GitHub account", http.StatusNotFound)
-		return
+		return echo.NewHTTPError(http.StatusNotFound, "github profile not found: please connect your GitHub account")
 	}
 
-	force := r.URL.Query().Get("force") == "true"
+	force := ctx.QueryParam("force") == "true"
 	c.githubService.TriggerAsyncSync(userID, force)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	return ctx.JSON(http.StatusOK, map[string]string{
 		"status": "sync started",
 	})
 }
 
 // SyncAndWait GitHubデータを同期してから結果を返す（同期的）
 // POST /api/github/sync/wait
-func (c *GitHubController) SyncAndWait(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+func (c *GitHubController) SyncAndWait(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
 	if err := c.githubService.SyncUserData(context.Background(), userID, true); err != nil {
 		var scopeErr *services.InsufficientScopesError
 		if errors.As(err, &scopeErr) {
-			http.Error(w, err.Error(), http.StatusForbidden)
-			return
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	return ctx.JSON(http.StatusOK, map[string]string{
 		"status": "sync completed",
 	})
 }
 
 // GetSkills ユーザーのカテゴリ別スキルスコアを取得する
 // GET /api/github/skills
-func (c *GitHubController) GetSkills(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+func (c *GitHubController) GetSkills(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
 	scores, err := c.skillScoreService.GetScores(userID)
 	if err != nil {
-		http.Error(w, "failed to get skill scores", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get skill scores")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(scores)
+	return ctx.JSON(http.StatusOK, scores)
 }
 
 // ListRepoSummaries ユーザーのリポジトリAI要約一覧を取得する
 // GET /api/github/repo/summaries
-func (c *GitHubController) ListRepoSummaries(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+func (c *GitHubController) ListRepoSummaries(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
 	summaries, err := c.githubService.ListRepoSummaries(userID)
 	if err != nil {
-		http.Error(w, "failed to get repo summaries", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get repo summaries")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(summaries)
+	return ctx.JSON(http.StatusOK, summaries)
 }
 
 // SummarizeRepo リポジトリのAI要約を生成・キャッシュする
 // POST /api/github/repo/summarize
 // Body: { "full_name": "owner/repo", "force_refresh": false }
-func (c *GitHubController) SummarizeRepo(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+func (c *GitHubController) SummarizeRepo(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
 	var body struct {
 		FullName     string `json:"full_name"`
 		ForceRefresh bool   `json:"force_refresh"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.FullName == "" {
-		http.Error(w, "full_name is required", http.StatusBadRequest)
-		return
+	if err := ctx.Bind(&body); err != nil || body.FullName == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "full_name is required")
 	}
 
-	summary, err := c.githubService.SummarizeRepo(r.Context(), userID, body.FullName, body.ForceRefresh)
+	summary, err := c.githubService.SummarizeRepo(ctx.Request().Context(), userID, body.FullName, body.ForceRefresh)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(summary)
+	return ctx.JSON(http.StatusOK, summary)
 }
