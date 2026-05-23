@@ -146,6 +146,71 @@ func TestAdminCompanyController_SearchGBizRoute_MethodNotAllowed(t *testing.T) {
 	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 }
 
+func TestAdminCompanyController_Detail_Put_Success(t *testing.T) {
+	repo := &mocks.CompanyRepositoryMock{}
+	audit := &mocks.AuditLogServiceMock{}
+	company := &models.Company{Name: "Test Corp"}
+	repo.On("FindByID", uint(1)).Return(company, nil)
+	repo.On("Update", mock.Anything).Return(nil)
+	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
+
+	body, _ := json.Marshal(map[string]string{"name": "Updated Corp"})
+	req := httptest.NewRequest(http.MethodPut, "/api/admin/companies/1", bytes.NewReader(body))
+	req.URL.Path = "/api/admin/companies/1"
+	w := httptest.NewRecorder()
+	newAdminCompanyController(repo, audit).Detail(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	repo.AssertExpectations(t)
+}
+
+func TestAdminCompanyController_Publish_Success(t *testing.T) {
+	repo := &mocks.CompanyRepositoryMock{}
+	audit := &mocks.AuditLogServiceMock{}
+	company := &models.Company{Name: "Test Corp"}
+	repo.On("FindByID", uint(1)).Return(company, nil)
+	repo.On("Update", mock.Anything).Return(nil)
+	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/companies/1/publish", nil)
+	req.URL.Path = "/api/admin/companies/1/publish"
+	w := httptest.NewRecorder()
+	newAdminCompanyController(repo, audit).Detail(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	repo.AssertExpectations(t)
+}
+
+func TestAdminCompanyController_Publish_NotFound(t *testing.T) {
+	repo := &mocks.CompanyRepositoryMock{}
+	repo.On("FindByID", uint(1)).Return(nil, errors.New("not found"))
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/companies/1/publish", nil)
+	req.URL.Path = "/api/admin/companies/1/publish"
+	w := httptest.NewRecorder()
+	newAdminCompanyController(repo, nil).Detail(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	repo.AssertExpectations(t)
+}
+
+func TestAdminCompanyController_Reject_Success(t *testing.T) {
+	repo := &mocks.CompanyRepositoryMock{}
+	audit := &mocks.AuditLogServiceMock{}
+	company := &models.Company{Name: "Test Corp"}
+	repo.On("FindByID", uint(1)).Return(company, nil)
+	repo.On("Update", mock.Anything).Return(nil)
+	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/companies/1/reject", nil)
+	req.URL.Path = "/api/admin/companies/1/reject"
+	w := httptest.NewRecorder()
+	newAdminCompanyController(repo, audit).Detail(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	repo.AssertExpectations(t)
+}
+
 // ===== AdminJobController =====
 
 func newAdminJobController(companyRepo *mocks.CompanyRepositoryMock, jobCatRepo *mocks.JobCategoryRepositoryMock, gradRepo *mocks.GraduateEmploymentRepositoryMock, audit *mocks.AuditLogServiceMock) *controllers.AdminJobController {
