@@ -441,3 +441,63 @@ func TestChatController_GetSessions_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	chatSvc.AssertExpectations(t)
 }
+
+// ===== GetRecommendations =====
+
+func TestChatController_GetRecommendations_MethodNotAllowed(t *testing.T) {
+	c := controllers.NewChatController(nil, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/recommendations?session_id=s1", nil)
+	w := httptest.NewRecorder()
+	c.GetRecommendations(w, req)
+	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
+
+func TestChatController_GetRecommendations_Unauthorized(t *testing.T) {
+	c := controllers.NewChatController(nil, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations?session_id=s1", nil)
+	w := httptest.NewRecorder()
+	c.GetRecommendations(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestChatController_GetRecommendations_MissingSessionID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations", nil)
+	req = withUserID(req, 1)
+	w := httptest.NewRecorder()
+	controllers.NewChatController(nil, nil, nil, nil, nil).GetRecommendations(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestChatController_GetRecommendations_NoMatches_ReturnEmpty(t *testing.T) {
+	matchSvc := &mocks.MatchingServiceMock{}
+	chatSvc := &mocks.ChatServiceMock{}
+	matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", 10).Return(nil, nil)
+	matchSvc.On("GetDiagnostics", uint(1), "s1").Return(nil, nil)
+	chatSvc.On("GetUserScores", uint(1), "s1").Return([]entity.UserWeightScore{}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations?session_id=s1", nil)
+	req = withUserID(req, 1)
+	w := httptest.NewRecorder()
+	newChatController(chatSvc, matchSvc, nil, nil, nil).GetRecommendations(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	matchSvc.AssertExpectations(t)
+}
+
+func TestChatController_GetRecommendations_WithMatches_Success(t *testing.T) {
+	matchSvc := &mocks.MatchingServiceMock{}
+	chatSvc := &mocks.ChatServiceMock{}
+	matches := []*entity.UserCompanyMatch{
+		{MatchScore: 85.0, Company: &entity.Company{ID: 1, Name: "Test Corp"}},
+	}
+	matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", 10).Return(matches, nil)
+	chatSvc.On("GetUserScores", uint(1), "s1").Return([]entity.UserWeightScore{}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations?session_id=s1", nil)
+	req = withUserID(req, 1)
+	w := httptest.NewRecorder()
+	newChatController(chatSvc, matchSvc, nil, nil, nil).GetRecommendations(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	matchSvc.AssertExpectations(t)
+}
