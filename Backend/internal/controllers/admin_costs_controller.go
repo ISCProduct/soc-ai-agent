@@ -2,17 +2,18 @@ package controllers
 
 import (
 	"Backend/internal/services"
+	ifaces "Backend/internal/services/interfaces"
 	"encoding/json"
 	"net/http"
 	"time"
 )
 
 type AdminCostsController struct {
-	costService          *services.APICostService
-	realtimeUsageService *services.RealtimeUsageService
+	costService          ifaces.APICostService
+	realtimeUsageService ifaces.RealtimeUsageService
 }
 
-func NewAdminCostsController(costService *services.APICostService, realtimeUsageService *services.RealtimeUsageService) *AdminCostsController {
+func NewAdminCostsController(costService ifaces.APICostService, realtimeUsageService ifaces.RealtimeUsageService) *AdminCostsController {
 	return &AdminCostsController{
 		costService:          costService,
 		realtimeUsageService: realtimeUsageService,
