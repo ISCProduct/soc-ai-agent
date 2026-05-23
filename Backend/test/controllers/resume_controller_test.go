@@ -252,3 +252,102 @@ func TestResumeController_ReviewStream_Forbidden(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	svc.AssertExpectations(t)
 }
+
+func TestResumeController_ReviewStream_EnsureOwnerError(t *testing.T) {
+	svc := &mocks.ResumeServiceMock{}
+	svc.On("EnsureDocumentOwner", uint(1), uint(1)).Return(errors.New("db error"))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/resumes/review/stream?document_id=1", nil)
+	req = withUserID(req, 1)
+	w := httptest.NewRecorder()
+	newResumeControllerWithMock(svc).ReviewStream(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	svc.AssertExpectations(t)
+}
+
+func TestResumeController_ReviewStream_InvalidDocumentID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/resumes/review/stream?document_id=abc", nil)
+	req = withUserID(req, 1)
+	w := httptest.NewRecorder()
+	controllers.NewResumeController(nil).ReviewStream(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// ---- Review (補完) ----
+
+func TestResumeController_Review_InvalidDocumentID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/resumes/review?document_id=abc", nil)
+	req = withUserID(req, 1)
+	w := httptest.NewRecorder()
+	controllers.NewResumeController(nil).Review(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestResumeController_Review_EnsureOwnerError(t *testing.T) {
+	svc := &mocks.ResumeServiceMock{}
+	svc.On("EnsureDocumentOwner", uint(1), uint(1)).Return(errors.New("db error"))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/resumes/review?document_id=1", nil)
+	req = withUserID(req, 1)
+	w := httptest.NewRecorder()
+	newResumeControllerWithMock(svc).Review(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	svc.AssertExpectations(t)
+}
+
+func TestResumeController_Review_ValidationError(t *testing.T) {
+	svc := &mocks.ResumeServiceMock{}
+	svc.On("EnsureDocumentOwner", uint(1), uint(1)).Return(nil)
+	svc.On("ReviewDocument", uint(1), uint(1), "", "", "").
+		Return(nil, nil, &services.ValidationError{Message: "invalid document"})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/resumes/review?document_id=1", nil)
+	req = withUserID(req, 1)
+	w := httptest.NewRecorder()
+	newResumeControllerWithMock(svc).Review(w, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
+	svc.AssertExpectations(t)
+}
+
+func TestResumeController_Review_ServiceError(t *testing.T) {
+	svc := &mocks.ResumeServiceMock{}
+	svc.On("EnsureDocumentOwner", uint(1), uint(1)).Return(nil)
+	svc.On("ReviewDocument", uint(1), uint(1), "", "", "").
+		Return(nil, nil, errors.New("openai error"))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/resumes/review?document_id=1", nil)
+	req = withUserID(req, 1)
+	w := httptest.NewRecorder()
+	newResumeControllerWithMock(svc).Review(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	svc.AssertExpectations(t)
+}
+
+func TestResumeController_Review_ReviewForbidden(t *testing.T) {
+	svc := &mocks.ResumeServiceMock{}
+	svc.On("EnsureDocumentOwner", uint(1), uint(1)).Return(nil)
+	svc.On("ReviewDocument", uint(1), uint(1), "", "", "").
+		Return(nil, nil, services.ErrForbidden)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/resumes/review?document_id=1", nil)
+	req = withUserID(req, 1)
+	w := httptest.NewRecorder()
+	newResumeControllerWithMock(svc).Review(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	svc.AssertExpectations(t)
+}
+
+// ---- Annotated (補完) ----
+
+func TestResumeController_Annotated_InvalidDocumentID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/resumes/annotated?document_id=abc", nil)
+	req = withUserID(req, 1)
+	w := httptest.NewRecorder()
+	controllers.NewResumeController(nil).Annotated(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}

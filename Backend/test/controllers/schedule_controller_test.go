@@ -403,10 +403,77 @@ func TestScheduleController_RouteList_Default(t *testing.T) {
 	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 }
 
+func TestScheduleController_RouteList_DispatchesGET(t *testing.T) {
+	svc := &mocks.ScheduleServiceMock{}
+	svc.On("List", uint(1)).Return([]models.ScheduleEvent{}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/schedule?user_id=1", nil)
+	w := httptest.NewRecorder()
+	newScheduleController(svc).RouteList(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	svc.AssertExpectations(t)
+}
+
+func TestScheduleController_RouteList_DispatchesPOST(t *testing.T) {
+	svc := &mocks.ScheduleServiceMock{}
+	scheduledAt, _ := time.Parse(time.RFC3339, "2025-01-01T10:00:00Z")
+	event := &models.ScheduleEvent{UserID: 1, CompanyName: "Test Co"}
+	svc.On("Create", uint(1), "Test Co", "", "", scheduledAt, "").Return(event, nil)
+
+	body, _ := json.Marshal(map[string]string{
+		"company_name": "Test Co",
+		"scheduled_at": "2025-01-01T10:00:00Z",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/schedule?user_id=1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	newScheduleController(svc).RouteList(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	svc.AssertExpectations(t)
+}
+
 func TestScheduleController_RouteByID_Default(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPatch, "/api/schedule/1?user_id=1", nil)
 	req.URL.Path = "/api/schedule/1"
 	w := httptest.NewRecorder()
 	controllers.NewScheduleController(nil).RouteByID(w, req)
 	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
+
+func TestScheduleController_RouteByID_DispatchesGET(t *testing.T) {
+	svc := &mocks.ScheduleServiceMock{}
+	event := &models.ScheduleEvent{UserID: 1, CompanyName: "Test Co"}
+	svc.On("Get", uint(1), uint(1)).Return(event, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/schedule/1?user_id=1", nil)
+	req.URL.Path = "/api/schedule/1"
+	w := httptest.NewRecorder()
+	newScheduleController(svc).RouteByID(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	svc.AssertExpectations(t)
+}
+
+func TestScheduleController_RouteByID_DispatchesDELETE(t *testing.T) {
+	svc := &mocks.ScheduleServiceMock{}
+	svc.On("Delete", uint(1), uint(1)).Return(nil)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/schedule/1?user_id=1", nil)
+	req.URL.Path = "/api/schedule/1"
+	w := httptest.NewRecorder()
+	newScheduleController(svc).RouteByID(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	svc.AssertExpectations(t)
+}
+
+// ---- getUserID (補完) ----
+
+func TestScheduleController_InvalidUserID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/schedule?user_id=abc", nil)
+	w := httptest.NewRecorder()
+	controllers.NewScheduleController(nil).List(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }

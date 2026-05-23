@@ -494,3 +494,87 @@ func TestAuthController_RequestRegistration_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	svc.AssertExpectations(t)
 }
+
+// ---- CreateGuest (補完) ----
+
+func TestAuthController_CreateGuest_ServiceError(t *testing.T) {
+	svc := &mocks.AuthServiceMock{}
+	svc.On("CreateGuestUser").Return(nil, errors.New("db error"))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/guest", nil)
+	w := httptest.NewRecorder()
+	newAuthControllerWithMock(svc).CreateGuest(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	svc.AssertExpectations(t)
+}
+
+// ---- UpdateProfile (補完) ----
+
+func TestAuthController_UpdateProfile_InvalidBody(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/profile", bytes.NewBufferString("not-json"))
+	req = withUserID(req, 1)
+	w := httptest.NewRecorder()
+	controllers.NewAuthController(nil).UpdateProfile(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestAuthController_UpdateProfile_NotFound(t *testing.T) {
+	svc := &mocks.AuthServiceMock{}
+	svc.On("UpdateProfile", services.UpdateProfileRequest{UserID: 1, Name: "テスト"}).
+		Return(nil, errors.New("user not found"))
+
+	body, _ := json.Marshal(map[string]string{"name": "テスト"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/profile", bytes.NewBuffer(body))
+	req = withUserID(req, 1)
+	w := httptest.NewRecorder()
+	newAuthControllerWithMock(svc).UpdateProfile(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	svc.AssertExpectations(t)
+}
+
+func TestAuthController_UpdateProfile_ServiceError(t *testing.T) {
+	svc := &mocks.AuthServiceMock{}
+	svc.On("UpdateProfile", services.UpdateProfileRequest{UserID: 1, Name: "テスト"}).
+		Return(nil, errors.New("invalid data"))
+
+	body, _ := json.Marshal(map[string]string{"name": "テスト"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/profile", bytes.NewBuffer(body))
+	req = withUserID(req, 1)
+	w := httptest.NewRecorder()
+	newAuthControllerWithMock(svc).UpdateProfile(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	svc.AssertExpectations(t)
+}
+
+// ---- VerifyEmail (補完) ----
+
+func TestAuthController_VerifyEmail_TokenFromBody(t *testing.T) {
+	svc := &mocks.AuthServiceMock{}
+	svc.On("VerifyEmail", "body-token").Return(nil)
+
+	body, _ := json.Marshal(map[string]string{"token": "body-token"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/verify-email", bytes.NewBuffer(body))
+	w := httptest.NewRecorder()
+	newAuthControllerWithMock(svc).VerifyEmail(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	svc.AssertExpectations(t)
+}
+
+// ---- RequestRegistration (補完) ----
+
+func TestAuthController_RequestRegistration_OtherError(t *testing.T) {
+	svc := &mocks.AuthServiceMock{}
+	svc.On("RequestRegistration", "bad@example.com").Return(errors.New("invalid email format"))
+
+	body, _ := json.Marshal(map[string]string{"email": "bad@example.com"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/request-registration", bytes.NewBuffer(body))
+	w := httptest.NewRecorder()
+	newAuthControllerWithMock(svc).RequestRegistration(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	svc.AssertExpectations(t)
+}
