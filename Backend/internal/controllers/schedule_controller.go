@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/interfaces"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,10 +10,10 @@ import (
 )
 
 type ScheduleController struct {
-	service *services.ScheduleService
+	service interfaces.ScheduleService
 }
 
-func NewScheduleController(service *services.ScheduleService) *ScheduleController {
+func NewScheduleController(service interfaces.ScheduleService) *ScheduleController {
 	return &ScheduleController{service: service}
 }
 
