@@ -3,16 +3,17 @@ package controllers
 import (
 	"Backend/internal/models"
 	"Backend/internal/services"
+	"Backend/internal/services/interfaces"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
 )
 
 type QuestionController struct {
-	questionService *services.QuestionGeneratorService
+	questionService interfaces.QuestionGeneratorService
 }
 
-func NewQuestionController(questionService *services.QuestionGeneratorService) *QuestionController {
+func NewQuestionController(questionService interfaces.QuestionGeneratorService) *QuestionController {
 	return &QuestionController{questionService: questionService}
 }
 
