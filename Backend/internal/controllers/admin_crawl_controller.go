@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/internal/services"
+	ifaces "Backend/internal/services/interfaces"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -9,11 +10,11 @@ import (
 )
 
 type AdminCrawlController struct {
-	service *services.CrawlService
-	audit   *services.AuditLogService
+	service ifaces.CrawlService
+	audit   ifaces.AuditLogService
 }
 
-func NewAdminCrawlController(service *services.CrawlService, audit *services.AuditLogService) *AdminCrawlController {
+func NewAdminCrawlController(service ifaces.CrawlService, audit ifaces.AuditLogService) *AdminCrawlController {
 	return &AdminCrawlController{service: service, audit: audit}
 }
 

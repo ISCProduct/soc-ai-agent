@@ -266,3 +266,128 @@ func TestAdminJobController_GraduateEmploymentDetail_Get_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	gradRepo.AssertExpectations(t)
 }
+
+func TestAdminJobController_GraduateEmploymentDetail_Put_Success(t *testing.T) {
+	gradRepo := &mocks.GraduateEmploymentRepositoryMock{}
+	audit := &mocks.AuditLogServiceMock{}
+	entry := &models.GraduateEmployment{GraduateName: "Test User", CompanyID: 1}
+	gradRepo.On("FindByID", uint(1)).Return(entry, nil)
+	gradRepo.On("Update", mock.Anything).Return(nil)
+	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
+
+	body, _ := json.Marshal(map[string]interface{}{"company_id": 1, "graduate_name": "Updated User"})
+	req := httptest.NewRequest(http.MethodPut, "/api/admin/graduate-employments/1", bytes.NewReader(body))
+	req.URL.Path = "/api/admin/graduate-employments/1"
+	w := httptest.NewRecorder()
+	newAdminJobController(nil, nil, gradRepo, audit).GraduateEmploymentDetail(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	gradRepo.AssertExpectations(t)
+}
+
+func TestAdminJobController_JobPositionAction_InvalidPath(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/job-positions/1", nil)
+	req.URL.Path = "/api/admin/job-positions/1"
+	w := httptest.NewRecorder()
+	controllers.NewAdminJobController(nil, nil, nil, nil).JobPositionAction(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestAdminJobController_JobPositionAction_InvalidID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/job-positions/abc/publish", nil)
+	req.URL.Path = "/api/admin/job-positions/abc/publish"
+	w := httptest.NewRecorder()
+	controllers.NewAdminJobController(nil, nil, nil, nil).JobPositionAction(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestAdminJobController_JobPositionAction_MethodNotAllowed(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/job-positions/1/publish", nil)
+	req.URL.Path = "/api/admin/job-positions/1/publish"
+	w := httptest.NewRecorder()
+	controllers.NewAdminJobController(nil, nil, nil, nil).JobPositionAction(w, req)
+	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
+
+func TestAdminJobController_JobPositionAction_NotFound(t *testing.T) {
+	companyRepo := &mocks.CompanyRepositoryMock{}
+	companyRepo.On("FindJobPositionByID", uint(1)).Return(nil, errors.New("not found"))
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/job-positions/1/publish", nil)
+	req.URL.Path = "/api/admin/job-positions/1/publish"
+	w := httptest.NewRecorder()
+	newAdminJobController(companyRepo, nil, nil, nil).JobPositionAction(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	companyRepo.AssertExpectations(t)
+}
+
+func TestAdminJobController_JobPositionAction_UnknownAction(t *testing.T) {
+	companyRepo := &mocks.CompanyRepositoryMock{}
+	position := &models.CompanyJobPosition{Title: "Engineer"}
+	companyRepo.On("FindJobPositionByID", uint(1)).Return(position, nil)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/job-positions/1/unknown", nil)
+	req.URL.Path = "/api/admin/job-positions/1/unknown"
+	w := httptest.NewRecorder()
+	newAdminJobController(companyRepo, nil, nil, nil).JobPositionAction(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	companyRepo.AssertExpectations(t)
+}
+
+func TestAdminJobController_JobPositionAction_Publish_Success(t *testing.T) {
+	companyRepo := &mocks.CompanyRepositoryMock{}
+	audit := &mocks.AuditLogServiceMock{}
+	position := &models.CompanyJobPosition{Title: "Engineer"}
+	companyRepo.On("FindJobPositionByID", uint(1)).Return(position, nil)
+	companyRepo.On("UpdateJobPosition", mock.Anything).Return(nil)
+	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/job-positions/1/publish", nil)
+	req.URL.Path = "/api/admin/job-positions/1/publish"
+	w := httptest.NewRecorder()
+	newAdminJobController(companyRepo, nil, nil, audit).JobPositionAction(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	companyRepo.AssertExpectations(t)
+}
+
+func TestAdminJobController_JobPositionAction_Create_InvalidBody(t *testing.T) {
+	// POSTのcreateはJobPositionActionではなく別のルートだがJobPositionsはGETのみ
+	// JobPositions POST → MethodNotAllowed (実装上GET専用)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/job-positions", bytes.NewBufferString("not-json"))
+	w := httptest.NewRecorder()
+	controllers.NewAdminJobController(nil, nil, nil, nil).JobPositions(w, req)
+	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
+
+func TestAdminJobController_GraduateEmployments_Create_InvalidBody(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewBufferString("not-json"))
+	w := httptest.NewRecorder()
+	controllers.NewAdminJobController(nil, nil, nil, nil).GraduateEmployments(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestAdminJobController_GraduateEmployments_Create_MissingCompanyID(t *testing.T) {
+	body, _ := json.Marshal(map[string]string{"graduate_name": "Test"})
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	controllers.NewAdminJobController(nil, nil, nil, nil).GraduateEmployments(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestAdminJobController_GraduateEmployments_Create_Success(t *testing.T) {
+	gradRepo := &mocks.GraduateEmploymentRepositoryMock{}
+	audit := &mocks.AuditLogServiceMock{}
+	gradRepo.On("Create", mock.Anything).Return(nil)
+	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
+
+	body, _ := json.Marshal(map[string]interface{}{"company_id": 1, "graduate_name": "Test User"})
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	newAdminJobController(nil, nil, gradRepo, audit).GraduateEmployments(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	gradRepo.AssertExpectations(t)
+}
