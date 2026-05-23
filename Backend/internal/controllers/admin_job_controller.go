@@ -3,7 +3,7 @@ package controllers
 import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
-	"Backend/internal/services"
+	ifaces "Backend/internal/services/interfaces"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -15,10 +15,10 @@ type AdminJobController struct {
 	companyRepo  repository.CompanyRepository
 	jobCategory  repository.JobCategoryRepository
 	graduateRepo repository.GraduateEmploymentRepository
-	audit        *services.AuditLogService
+	audit        ifaces.AuditLogService
 }
 
-func NewAdminJobController(companyRepo repository.CompanyRepository, jobCategory repository.JobCategoryRepository, graduateRepo repository.GraduateEmploymentRepository, audit *services.AuditLogService) *AdminJobController {
+func NewAdminJobController(companyRepo repository.CompanyRepository, jobCategory repository.JobCategoryRepository, graduateRepo repository.GraduateEmploymentRepository, audit ifaces.AuditLogService) *AdminJobController {
 	return &AdminJobController{
 		companyRepo:  companyRepo,
 		jobCategory:  jobCategory,

@@ -5,6 +5,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services"
+	ifaces "Backend/internal/services/interfaces"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,12 +18,12 @@ import (
 
 type AdminCompanyController struct {
 	repo         repository.CompanyRepository
-	audit        *services.AuditLogService
+	audit        ifaces.AuditLogService
 	gbiz         *services.GBizInfoService
 	openaiClient *openai.Client
 }
 
-func NewAdminCompanyController(repo repository.CompanyRepository, audit *services.AuditLogService, gbiz *services.GBizInfoService, openaiClient ...*openai.Client) *AdminCompanyController {
+func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.AuditLogService, gbiz *services.GBizInfoService, openaiClient ...*openai.Client) *AdminCompanyController {
 	ctrl := &AdminCompanyController{repo: repo, audit: audit, gbiz: gbiz}
 	if len(openaiClient) > 0 {
 		ctrl.openaiClient = openaiClient[0]
