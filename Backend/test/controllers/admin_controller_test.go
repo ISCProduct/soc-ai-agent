@@ -83,6 +83,20 @@ func TestAdminScraperSessionController_Upsert_InvalidBody(t *testing.T) {
 	assertStatus(t, c.Upsert, newCtx(req, rec), http.StatusBadRequest)
 }
 
+func TestAdminScraperSessionController_Upsert_InvalidExpiresAt(t *testing.T) {
+	c := controllers.NewAdminScraperSessionController(nil)
+	expiresAt := "not-a-date"
+	body, _ := json.Marshal(map[string]any{
+		"site_key":   "test-site",
+		"cookies":    "session=abc",
+		"expires_at": expiresAt,
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/admin/scraper-sessions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, c.Upsert, newCtx(req, rec), http.StatusBadRequest)
+}
+
 // ---- AdminDashboardController ----
 
 func TestAdminDashboardController_UserSessions_InvalidID(t *testing.T) {

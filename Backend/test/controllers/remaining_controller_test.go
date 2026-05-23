@@ -175,6 +175,28 @@ func TestCompanyRelationController_WebSearchCompanies_MissingQuery(t *testing.T)
 	assertStatus(t, c.WebSearchCompanies, newCtx(req, rec), http.StatusBadRequest)
 }
 
+// ---- CompanyRelationController (追加) ----
+
+func TestCompanyRelationController_GetCompanyRelations_InvalidID(t *testing.T) {
+	c := controllers.NewCompanyRelationController(nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/companies/abc/relations", nil)
+	rec := httptest.NewRecorder()
+	ctx := newCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("abc")
+	assertStatus(t, c.GetCompanyRelations, ctx, http.StatusBadRequest)
+}
+
+func TestCompanyRelationController_GetCompanyMarketInfo_InvalidID(t *testing.T) {
+	c := controllers.NewCompanyRelationController(nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/companies/abc/market-info", nil)
+	rec := httptest.NewRecorder()
+	ctx := newCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("abc")
+	assertStatus(t, c.GetCompanyMarketInfo, ctx, http.StatusBadRequest)
+}
+
 // ---- ESReviewController ----
 
 func TestESReviewController_Review_MissingESText(t *testing.T) {
@@ -186,11 +208,31 @@ func TestESReviewController_Review_MissingESText(t *testing.T) {
 	assertStatus(t, c.Review, newCtx(req, rec), http.StatusBadRequest)
 }
 
+func TestESReviewController_Review_MissingRAGURL(t *testing.T) {
+	// RAG_REVIEW_URL 未設定時は ServiceUnavailable
+	t.Setenv("RAG_REVIEW_URL", "")
+	c := controllers.NewESReviewController()
+	body, _ := json.Marshal(map[string]any{"es_text": "私はエンジニアです。"})
+	req := httptest.NewRequest(http.MethodPost, "/api/es/review", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, c.Review, newCtx(req, rec), http.StatusServiceUnavailable)
+}
+
 // ---- ESRewriteController ----
 
 func TestESRewriteController_Rewrite_InvalidBody(t *testing.T) {
 	c := controllers.NewESRewriteController(nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/es/rewrite", bytes.NewBufferString("not-json"))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, c.Rewrite, newCtx(req, rec), http.StatusBadRequest)
+}
+
+func TestESRewriteController_Rewrite_MissingOriginalText(t *testing.T) {
+	c := controllers.NewESRewriteController(nil)
+	body, _ := json.Marshal(map[string]any{"original_text": ""})
+	req := httptest.NewRequest(http.MethodPost, "/api/es/rewrite", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	assertStatus(t, c.Rewrite, newCtx(req, rec), http.StatusBadRequest)

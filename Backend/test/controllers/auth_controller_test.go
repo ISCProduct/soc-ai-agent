@@ -221,6 +221,20 @@ func TestAuthController_UpdateProfile_Unauthorized(t *testing.T) {
 	assertStatus(t, controllers.NewAuthController(nil).UpdateProfile, newCtx(req, rec), http.StatusUnauthorized)
 }
 
+func TestAuthController_UpdateProfile_NotFound(t *testing.T) {
+	svc := &mocks.AuthServiceMock{}
+	updateReq := services.UpdateProfileRequest{UserID: 1}
+	svc.On("UpdateProfile", updateReq).Return(nil, errors.New("user not found"))
+
+	body, _ := json.Marshal(map[string]any{})
+	req := httptest.NewRequest(http.MethodPut, "/api/auth/profile", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).UpdateProfile, newCtx(req, rec), http.StatusNotFound)
+	svc.AssertExpectations(t)
+}
+
 func TestAuthController_UpdateProfile_Success(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
 	updateReq := services.UpdateProfileRequest{UserID: 1, Name: "更新太郎"}
@@ -285,6 +299,18 @@ func TestAuthController_VerifyEmail_InvalidToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-email?token=bad", nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, newAuthController(svc).VerifyEmail, newCtx(req, rec), http.StatusBadRequest)
+	svc.AssertExpectations(t)
+}
+
+func TestAuthController_VerifyEmail_TokenFromBody(t *testing.T) {
+	svc := &mocks.AuthServiceMock{}
+	svc.On("VerifyEmail", "body-token").Return(nil)
+
+	body, _ := json.Marshal(map[string]string{"token": "body-token"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/verify-email", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).VerifyEmail, newCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
