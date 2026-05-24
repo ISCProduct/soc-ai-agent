@@ -3,6 +3,8 @@ package main
 import (
 	"Backend/internal/config"
 	"Backend/internal/controllers"
+	"Backend/internal/logger"
+	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/repositories"
@@ -10,6 +12,7 @@ import (
 	"Backend/internal/scraper"
 	"Backend/internal/services"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -32,7 +35,8 @@ func buildAllowedOrigins() map[string]struct{} {
 	// フェイルセーフ: ALLOWED_ORIGINS 未設定時は全オリジン拒否（#327）
 	// ローカル開発時は .env に ALLOWED_ORIGINS=http://localhost:3000 を明示設定してください。
 	if len(allowedOrigins) == 0 {
-		log.Println("WARNING: ALLOWED_ORIGINS が未設定のため、全クロスオリジンリクエストを拒否します。")
+		slog.Warn("ALLOWED_ORIGINS が未設定のため、全クロスオリジンリクエストを拒否します",
+			"hint", "ローカル開発時は .env に ALLOWED_ORIGINS=http://localhost:3000 を設定してください")
 	}
 
 	return allowedOrigins
@@ -87,21 +91,23 @@ func buildCORSMiddleware() func(http.Handler) http.Handler {
 func checkAnnotationFont() {
 	fontPath := os.Getenv("ANNOTATION_FONT_PATH")
 	if fontPath == "" {
-		log.Println("WARNING: ANNOTATION_FONT_PATH が設定されていません。" +
-			"フォールバックフォントを使用します（日本語注釈が正常に表示されない可能性があります）。" +
-			"環境変数 ANNOTATION_FONT_PATH にフォントパスを設定してください。")
+		slog.Warn("ANNOTATION_FONT_PATH が設定されていません。フォールバックフォントを使用します",
+			"hint", "環境変数 ANNOTATION_FONT_PATH にフォントパスを設定してください")
 		return
 	}
 	if _, err := os.Stat(fontPath); os.IsNotExist(err) {
-		log.Printf("WARNING: ANNOTATION_FONT_PATH のフォントが見つかりません: %q\n"+
-			"PDF注釈の日本語レビューページが生成されない場合があります。\n"+
-			"Dockerfileで fonts-noto-cjk がインストールされているか確認してください。", fontPath)
+		slog.Warn("ANNOTATION_FONT_PATH のフォントが見つかりません",
+			"path", fontPath,
+			"hint", "Dockerfileで fonts-noto-cjk がインストールされているか確認してください")
 		return
 	}
-	log.Printf("INFO: PDF アノテーションフォント確認済み: %q", fontPath)
+	slog.Info("PDF アノテーションフォント確認済み", "path", fontPath)
 }
 
 func main() {
+	// 構造化ログの初期化（LOG_LEVEL / LOG_FORMAT 環境変数で制御）
+	logger.Setup()
+
 	// PDF アノテーションフォントの存在チェック（起動時警告）
 	checkAnnotationFont()
 
@@ -121,13 +127,13 @@ func main() {
 	if err := models.AutoMigrate(db); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
-	log.Println("Database migration completed")
+	slog.Info("Database migration completed")
 
 	// 初期データ投入
 	if err := models.SeedData(db); err != nil {
 		log.Fatalf("Failed to seed data: %v", err)
 	}
-	log.Println("Database seeding completed")
+	slog.Info("Database seeding completed")
 
 	// OpenAI クライアント初期化
 	aiClient, err := openai.NewFromEnv("")
@@ -244,7 +250,7 @@ func main() {
 	// S3 upload service for interview videos (optional — skipped if env vars are not set)
 	s3UploadService, s3Err := services.NewS3UploadService()
 	if s3Err != nil {
-		log.Printf("S3 upload service not available: %v", s3Err)
+		slog.Warn("S3 upload service not available", "error", s3Err)
 		s3UploadService = nil
 	}
 	interviewController := controllers.NewInterviewController(interviewService, videoRepo, s3UploadService)
@@ -278,6 +284,8 @@ func main() {
 	e.HideBanner = true
 
 	// グローバルミドルウェア
+	e.Use(echo.WrapMiddleware(middleware.RequestIDMiddleware))
+	e.Use(echo.WrapMiddleware(middleware.RequestLoggerMiddleware))
 	e.Use(echo.WrapMiddleware(securityHeadersMiddleware))
 	e.Use(echo.WrapMiddleware(buildCORSMiddleware()))
 
@@ -318,7 +326,7 @@ func main() {
 		port = "80"
 	}
 
-	log.Printf("Starting server on port %s...", port)
+	slog.Info("Starting server", "port", port)
 	if err := e.Start(":" + port); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
