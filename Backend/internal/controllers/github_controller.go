@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/internal/services"
+	ifaces "Backend/internal/services/interfaces"
 	"context"
 	"errors"
 	"net/http"
@@ -11,11 +12,11 @@ import (
 
 // GitHubController GitHub連携APIのコントローラー
 type GitHubController struct {
-	githubService     *services.GitHubService
-	skillScoreService *services.SkillScoreService
+	githubService     ifaces.GitHubService
+	skillScoreService ifaces.SkillScoreService
 }
 
-func NewGitHubController(githubService *services.GitHubService, skillScoreService *services.SkillScoreService) *GitHubController {
+func NewGitHubController(githubService ifaces.GitHubService, skillScoreService ifaces.SkillScoreService) *GitHubController {
 	return &GitHubController{
 		githubService:     githubService,
 		skillScoreService: skillScoreService,

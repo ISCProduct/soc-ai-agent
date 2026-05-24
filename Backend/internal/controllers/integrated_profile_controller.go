@@ -1,8 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/repositories"
-	"Backend/internal/services"
+	ifaces "Backend/internal/services/interfaces"
 	"net/http"
 	"strconv"
 
@@ -11,15 +10,15 @@ import (
 
 // IntegratedProfileController ユーザー統合プロファイルAPI
 type IntegratedProfileController struct {
-	crossFeature         *services.CrossFeatureIntegrationService
-	interviewSessionRepo *repositories.InterviewSessionRepository
-	resumeRepo           *repositories.ResumeRepository
+	crossFeature         ifaces.CrossFeatureIntegrationService
+	interviewSessionRepo ifaces.InterviewSessionCounter
+	resumeRepo           ifaces.ResumeDocumentFinder
 }
 
 func NewIntegratedProfileController(
-	crossFeature *services.CrossFeatureIntegrationService,
-	interviewSessionRepo *repositories.InterviewSessionRepository,
-	resumeRepo *repositories.ResumeRepository,
+	crossFeature ifaces.CrossFeatureIntegrationService,
+	interviewSessionRepo ifaces.InterviewSessionCounter,
+	resumeRepo ifaces.ResumeDocumentFinder,
 ) *IntegratedProfileController {
 	return &IntegratedProfileController{
 		crossFeature:         crossFeature,

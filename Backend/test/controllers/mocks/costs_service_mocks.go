@@ -46,6 +46,11 @@ type RealtimeUsageServiceMock struct {
 	mock.Mock
 }
 
+func (m *RealtimeUsageServiceMock) SessionDurationMinutes() int {
+	args := m.Called()
+	return args.Int(0)
+}
+
 func (m *RealtimeUsageServiceMock) CurrentMonthTotalCost() (float64, error) {
 	args := m.Called()
 	return args.Get(0).(float64), args.Error(1)
