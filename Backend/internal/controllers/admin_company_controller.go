@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/labstack/echo/v4"
 )
 
 type AdminCompanyController struct {
@@ -30,134 +32,22 @@ func NewAdminCompanyController(repo repository.CompanyRepository, audit *service
 	return ctrl
 }
 
-func (c *AdminCompanyController) ListOrCreate(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		c.list(w, r)
-	case http.MethodPost:
-		c.create(w, r)
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-func (c *AdminCompanyController) Detail(w http.ResponseWriter, r *http.Request) {
-	idStr := strings.TrimPrefix(r.URL.Path, "/api/admin/companies/")
-	idStr = strings.Trim(idStr, "/")
-	if idStr == "" {
-		http.Error(w, "company id is required", http.StatusBadRequest)
-		return
-	}
-	if idStr == "search-gbiz" {
-		c.searchGBiz(w, r)
-		return
-	}
-	if strings.HasSuffix(idStr, "/gbiz-sync") {
-		c.syncGBiz(w, r, strings.TrimSuffix(idStr, "/gbiz-sync"))
-		return
-	}
-	if strings.HasSuffix(idStr, "/tech-stack-search") {
-		c.fetchTechStack(w, r, strings.TrimSuffix(idStr, "/tech-stack-search"))
-		return
-	}
-	if strings.HasSuffix(idStr, "/publish") {
-		c.publish(w, r, strings.TrimSuffix(idStr, "/publish"))
-		return
-	}
-	if strings.HasSuffix(idStr, "/reject") {
-		c.reject(w, r, strings.TrimSuffix(idStr, "/reject"))
-		return
-	}
-	id, err := strconv.ParseUint(idStr, 10, 32)
-	if err != nil {
-		http.Error(w, "invalid company id", http.StatusBadRequest)
-		return
-	}
-
-	switch r.Method {
-	case http.MethodGet:
-		c.get(w, uint(id))
-	case http.MethodPut:
-		c.update(w, r, uint(id))
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-func (c *AdminCompanyController) publish(w http.ResponseWriter, r *http.Request, idStr string) {
-	if r.Method != http.MethodPatch {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	id, err := strconv.ParseUint(strings.Trim(idStr, "/"), 10, 32)
-	if err != nil {
-		http.Error(w, "invalid company id", http.StatusBadRequest)
-		return
-	}
-	company, err := c.repo.FindByID(uint(id))
-	if err != nil {
-		http.Error(w, "company not found", http.StatusNotFound)
-		return
-	}
-	company.DataStatus = "published"
-	company.IsProvisional = false
-	if err := c.repo.Update(company); err != nil {
-		http.Error(w, "failed to publish company", http.StatusInternalServerError)
-		return
-	}
-	actor := r.Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.publish", "company", company.ID, map[string]interface{}{
-		"name": company.Name,
-	})
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(company)
-}
-
-func (c *AdminCompanyController) reject(w http.ResponseWriter, r *http.Request, idStr string) {
-	if r.Method != http.MethodPatch {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	id, err := strconv.ParseUint(strings.Trim(idStr, "/"), 10, 32)
-	if err != nil {
-		http.Error(w, "invalid company id", http.StatusBadRequest)
-		return
-	}
-	company, err := c.repo.FindByID(uint(id))
-	if err != nil {
-		http.Error(w, "company not found", http.StatusNotFound)
-		return
-	}
-	company.IsActive = false
-	if err := c.repo.Update(company); err != nil {
-		http.Error(w, "failed to reject company", http.StatusInternalServerError)
-		return
-	}
-	actor := r.Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.reject", "company", company.ID, map[string]interface{}{
-		"name": company.Name,
-	})
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "rejected"})
-}
-
-func (c *AdminCompanyController) list(w http.ResponseWriter, r *http.Request) {
+// List GET /api/admin/companies
+func (c *AdminCompanyController) List(ctx echo.Context) error {
 	limit := 50
 	offset := 0
-	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 {
+	if v, err := strconv.Atoi(ctx.QueryParam("limit")); err == nil && v > 0 {
 		limit = v
 	}
-	if v, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && v >= 0 {
+	if v, err := strconv.Atoi(ctx.QueryParam("offset")); err == nil && v >= 0 {
 		offset = v
 	}
 	companies, err := c.repo.FindAllActive(limit, offset)
 	if err != nil {
-		http.Error(w, "failed to fetch companies", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch companies")
 	}
 	total, _ := c.repo.CountActive()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"companies": companies,
 		"total":     total,
 		"limit":     limit,
@@ -165,143 +55,159 @@ func (c *AdminCompanyController) list(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (c *AdminCompanyController) create(w http.ResponseWriter, r *http.Request) {
+// Create POST /api/admin/companies
+func (c *AdminCompanyController) Create(ctx echo.Context) error {
 	var payload models.Company
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, "invalid payload", http.StatusBadRequest)
-		return
+	if err := ctx.Bind(&payload); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
 	}
 	if strings.TrimSpace(payload.Name) == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
 	}
 	applyCompanyDefaults(&payload)
 	if err := c.repo.Create(&payload); err != nil {
-		http.Error(w, "failed to create company", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create company")
 	}
-	actor := r.Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.create", "company", payload.ID, map[string]interface{}{
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.create", "company", payload.ID, map[string]any{
 		"name": payload.Name,
 	})
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(payload)
+	return ctx.JSON(http.StatusOK, payload)
 }
 
-func (c *AdminCompanyController) get(w http.ResponseWriter, id uint) {
-	company, err := c.repo.FindByID(id)
+// Get GET /api/admin/companies/:id
+func (c *AdminCompanyController) Get(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
 	if err != nil {
-		http.Error(w, "company not found", http.StatusNotFound)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(company)
-}
-
-func (c *AdminCompanyController) update(w http.ResponseWriter, r *http.Request, id uint) {
-	var payload models.Company
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, "invalid payload", http.StatusBadRequest)
-		return
-	}
-	company, err := c.repo.FindByID(id)
-	if err != nil {
-		http.Error(w, "company not found", http.StatusNotFound)
-		return
-	}
-
-	if err := mergeCompany(company, &payload); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := c.repo.Update(company); err != nil {
-		http.Error(w, "failed to update company", http.StatusInternalServerError)
-		return
-	}
-	actor := r.Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.update", "company", company.ID, map[string]interface{}{
-		"name": company.Name,
-	})
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(company)
-}
-
-// SearchGBizRoute は専用ルート /api/admin/companies/search-gbiz 用のパブリックハンドラ
-func (c *AdminCompanyController) SearchGBizRoute(w http.ResponseWriter, r *http.Request) {
-	c.searchGBiz(w, r)
-}
-
-func (c *AdminCompanyController) searchGBiz(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	name := strings.TrimSpace(r.URL.Query().Get("name"))
-	if name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
-		return
-	}
-	if c.gbiz == nil {
-		http.Error(w, "gbizinfo service not configured", http.StatusServiceUnavailable)
-		return
-	}
-	results, err := c.gbiz.SearchByName(r.Context(), name)
-	if err != nil {
-		writeInternalServerError(w, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
-}
-
-func (c *AdminCompanyController) syncGBiz(w http.ResponseWriter, r *http.Request, idStr string) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	idStr = strings.Trim(idStr, "/")
-	id, err := strconv.ParseUint(idStr, 10, 32)
-	if err != nil {
-		http.Error(w, "invalid company id", http.StatusBadRequest)
-		return
-	}
-	if c.gbiz == nil {
-		http.Error(w, "gbizinfo service not configured", http.StatusServiceUnavailable)
-		return
-	}
-	result, err := c.gbiz.SyncCompany(r.Context(), uint(id))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	actor := r.Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.gbiz_sync", "company", uint(id), map[string]interface{}{
-		"status": result.Status,
-	})
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
-}
-
-// fetchTechStack はOpenAI WebSearchで企業の技術スタックを取得してDBを更新する
-func (c *AdminCompanyController) fetchTechStack(w http.ResponseWriter, r *http.Request, idStr string) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	idStr = strings.Trim(idStr, "/")
-	id, err := strconv.ParseUint(idStr, 10, 32)
-	if err != nil {
-		http.Error(w, "invalid company id", http.StatusBadRequest)
-		return
-	}
-	if c.openaiClient == nil {
-		http.Error(w, "openai client not configured", http.StatusServiceUnavailable)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
 	}
 	company, err := c.repo.FindByID(uint(id))
 	if err != nil {
-		http.Error(w, "company not found", http.StatusNotFound)
-		return
+		return echo.NewHTTPError(http.StatusNotFound, "company not found")
+	}
+	return ctx.JSON(http.StatusOK, company)
+}
+
+// Update PUT /api/admin/companies/:id
+func (c *AdminCompanyController) Update(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	var payload models.Company
+	if err := ctx.Bind(&payload); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
+	}
+	company, err := c.repo.FindByID(uint(id))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "company not found")
+	}
+
+	if err := mergeCompany(company, &payload); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if err := c.repo.Update(company); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update company")
+	}
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.update", "company", company.ID, map[string]any{
+		"name": company.Name,
+	})
+	return ctx.JSON(http.StatusOK, company)
+}
+
+// Publish PATCH /api/admin/companies/:id/publish
+func (c *AdminCompanyController) Publish(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	company, err := c.repo.FindByID(uint(id))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "company not found")
+	}
+	company.DataStatus = "published"
+	company.IsProvisional = false
+	if err := c.repo.Update(company); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to publish company")
+	}
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.publish", "company", company.ID, map[string]any{
+		"name": company.Name,
+	})
+	return ctx.JSON(http.StatusOK, company)
+}
+
+// Reject PATCH /api/admin/companies/:id/reject
+func (c *AdminCompanyController) Reject(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	company, err := c.repo.FindByID(uint(id))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "company not found")
+	}
+	company.IsActive = false
+	if err := c.repo.Update(company); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to reject company")
+	}
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.reject", "company", company.ID, map[string]any{
+		"name": company.Name,
+	})
+	return ctx.JSON(http.StatusOK, map[string]string{"status": "rejected"})
+}
+
+// SearchGBiz GET /api/admin/companies/search-gbiz?name=xxx
+func (c *AdminCompanyController) SearchGBiz(ctx echo.Context) error {
+	name := strings.TrimSpace(ctx.QueryParam("name"))
+	if name == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+	}
+	if c.gbiz == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "gbizinfo service not configured")
+	}
+	results, err := c.gbiz.SearchByName(ctx.Request().Context(), name)
+	if err != nil {
+		return echoInternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{"results": results})
+}
+
+// SyncGBiz POST /api/admin/companies/:id/gbiz-sync
+func (c *AdminCompanyController) SyncGBiz(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	if c.gbiz == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "gbizinfo service not configured")
+	}
+	result, err := c.gbiz.SyncCompany(ctx.Request().Context(), uint(id))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.gbiz_sync", "company", uint(id), map[string]any{
+		"status": result.Status,
+	})
+	return ctx.JSON(http.StatusOK, result)
+}
+
+// FetchTechStack POST /api/admin/companies/:id/tech-stack-search
+// OpenAI WebSearchで企業の技術スタックを取得してDBを更新する
+func (c *AdminCompanyController) FetchTechStack(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	if c.openaiClient == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
+	}
+	company, err := c.repo.FindByID(uint(id))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "company not found")
 	}
 
 	prompt := fmt.Sprintf(
@@ -315,21 +221,19 @@ func (c *AdminCompanyController) fetchTechStack(w http.ResponseWriter, r *http.R
 		company.Name,
 	)
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), 30*time.Second)
 	defer cancel()
 
-	text, err := c.openaiClient.WebSearchQuery(ctx, prompt)
+	text, err := c.openaiClient.WebSearchQuery(reqCtx, prompt)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
 	// JSON部分を抽出
 	start := strings.Index(text, "{")
 	end := strings.LastIndex(text, "}")
 	if start == -1 || end == -1 || end <= start {
-		http.Error(w, "failed to parse web search response", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to parse web search response")
 	}
 
 	type techStackResult struct {
@@ -340,8 +244,7 @@ func (c *AdminCompanyController) fetchTechStack(w http.ResponseWriter, r *http.R
 	}
 	var result techStackResult
 	if err := json.Unmarshal([]byte(text[start:end+1]), &result); err != nil {
-		http.Error(w, "failed to parse tech stack json", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to parse tech stack json")
 	}
 
 	// JSON配列をシリアライズしてDBに保存
@@ -365,17 +268,15 @@ func (c *AdminCompanyController) fetchTechStack(w http.ResponseWriter, r *http.R
 	}
 
 	if err := c.repo.Update(company); err != nil {
-		http.Error(w, "failed to update company", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update company")
 	}
 
-	actor := r.Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.tech_stack_search", "company", company.ID, map[string]interface{}{
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.tech_stack_search", "company", company.ID, map[string]any{
 		"name": company.Name,
 	})
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"tech_stack":        result.TechStack,
 		"infra_stack":       result.InfraStack,
 		"cicd_tools":        result.CicdTools,

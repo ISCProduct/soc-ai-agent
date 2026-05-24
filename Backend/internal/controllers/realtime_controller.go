@@ -2,9 +2,10 @@ package controllers
 
 import (
 	"Backend/internal/services"
-	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/labstack/echo/v4"
 )
 
 type RealtimeController struct {
@@ -25,50 +26,38 @@ type realtimeTokenResponse struct {
 	ClientSecret string `json:"client_secret"`
 }
 
-func (c *RealtimeController) Token(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+// Token POST /api/realtime/token
+func (c *RealtimeController) Token(ctx echo.Context) error {
 	var req realtimeTokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
 	if req.UserID == 0 || req.InterviewID == 0 {
-		http.Error(w, "user_id and interview_id are required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "user_id and interview_id are required")
 	}
-	secret, err := c.interviewService.CreateRealtimeToken(r.Context(), req.UserID, req.InterviewID)
+	secret, err := c.interviewService.CreateRealtimeToken(ctx.Request().Context(), req.UserID, req.InterviewID)
 	if err != nil {
-		status := http.StatusBadRequest
 		if err.Error() == "forbidden" {
-			status = http.StatusForbidden
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
 		if strings.Contains(err.Error(), "realtime capacity exceeded") {
-			status = http.StatusTooManyRequests
+			return echo.NewHTTPError(http.StatusTooManyRequests, err.Error())
 		}
-		writeErrorByStatus(w, status, err)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(realtimeTokenResponse{ClientSecret: secret})
+	return ctx.JSON(http.StatusOK, realtimeTokenResponse{ClientSecret: secret})
 }
 
 type sessionInfoResponse struct {
 	SessionMinutes int `json:"session_minutes"`
 }
 
-// SessionInfo はユーザー向けのセッション時間（分）を返す。コスト情報は含まない。
-func (c *RealtimeController) SessionInfo(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+// SessionInfo GET /api/realtime/session-info
+// ユーザー向けのセッション時間（分）を返す。コスト情報は含まない。
+func (c *RealtimeController) SessionInfo(ctx echo.Context) error {
 	minutes := 10
 	if c.realtimeUsageService != nil {
 		minutes = c.realtimeUsageService.SessionDurationMinutes()
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sessionInfoResponse{SessionMinutes: minutes})
+	return ctx.JSON(http.StatusOK, sessionInfoResponse{SessionMinutes: minutes})
 }

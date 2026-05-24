@@ -2,10 +2,10 @@ package controllers
 
 import (
 	"Backend/internal/services"
-	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
+
+	"github.com/labstack/echo/v4"
 )
 
 type AdminCrawlController struct {
@@ -17,134 +17,85 @@ func NewAdminCrawlController(service *services.CrawlService, audit *services.Aud
 	return &AdminCrawlController{service: service, audit: audit}
 }
 
-func (c *AdminCrawlController) Sources(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		c.listSources(w)
-	case http.MethodPost:
-		c.createSource(w, r)
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-func (c *AdminCrawlController) SourceDetail(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/api/admin/crawl-sources/")
-	path = strings.Trim(path, "/")
-	if path == "" {
-		http.Error(w, "source id is required", http.StatusBadRequest)
-		return
-	}
-	if strings.HasSuffix(path, "/run") {
-		c.runSource(w, r)
-		return
-	}
-	id, err := strconv.ParseUint(path, 10, 32)
+// ListSources GET /api/admin/crawl-sources
+func (c *AdminCrawlController) ListSources(ctx echo.Context) error {
+	sources, err := c.service.ListSources()
 	if err != nil {
-		http.Error(w, "invalid source id", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch sources")
 	}
-	if r.Method != http.MethodPut {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	c.updateSource(w, r, uint(id))
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"sources": sources,
+	})
 }
 
-func (c *AdminCrawlController) Runs(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+// CreateSource POST /api/admin/crawl-sources
+func (c *AdminCrawlController) CreateSource(ctx echo.Context) error {
+	var payload services.CrawlSourcePayload
+	if err := ctx.Bind(&payload); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
 	}
+	source, err := c.service.CreateSource(payload)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "crawl_source.create", "crawl_source", source.ID, map[string]any{
+		"name": source.Name,
+	})
+	return ctx.JSON(http.StatusOK, source)
+}
+
+// UpdateSource PUT /api/admin/crawl-sources/:id
+func (c *AdminCrawlController) UpdateSource(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid source id")
+	}
+	var payload services.CrawlSourcePayload
+	if err := ctx.Bind(&payload); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
+	}
+	source, err := c.service.UpdateSource(uint(id), payload)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "crawl_source.update", "crawl_source", source.ID, map[string]any{
+		"name": source.Name,
+	})
+	return ctx.JSON(http.StatusOK, source)
+}
+
+// RunSource POST /api/admin/crawl-sources/:id/run
+func (c *AdminCrawlController) RunSource(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid source id")
+	}
+	run, err := c.service.RunSource(uint(id))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "crawl_source.run", "crawl_source", uint(id), map[string]any{
+		"status": run.Status,
+	})
+	return ctx.JSON(http.StatusOK, run)
+}
+
+// Runs GET /api/admin/crawl-runs
+func (c *AdminCrawlController) Runs(ctx echo.Context) error {
 	var sourceID uint
-	if value := r.URL.Query().Get("source_id"); value != "" {
+	if value := ctx.QueryParam("source_id"); value != "" {
 		if id, err := strconv.ParseUint(value, 10, 32); err == nil {
 			sourceID = uint(id)
 		}
 	}
 	runs, err := c.service.ListRuns(sourceID, 20)
 	if err != nil {
-		http.Error(w, "failed to fetch runs", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch runs")
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"runs": runs,
 	})
-}
-
-func (c *AdminCrawlController) listSources(w http.ResponseWriter) {
-	sources, err := c.service.ListSources()
-	if err != nil {
-		http.Error(w, "failed to fetch sources", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"sources": sources,
-	})
-}
-
-func (c *AdminCrawlController) createSource(w http.ResponseWriter, r *http.Request) {
-	var payload services.CrawlSourcePayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, "invalid payload", http.StatusBadRequest)
-		return
-	}
-	source, err := c.service.CreateSource(payload)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	actor := r.Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "crawl_source.create", "crawl_source", source.ID, map[string]interface{}{
-		"name": source.Name,
-	})
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(source)
-}
-
-func (c *AdminCrawlController) updateSource(w http.ResponseWriter, r *http.Request, id uint) {
-	var payload services.CrawlSourcePayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, "invalid payload", http.StatusBadRequest)
-		return
-	}
-	source, err := c.service.UpdateSource(id, payload)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	actor := r.Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "crawl_source.update", "crawl_source", source.ID, map[string]interface{}{
-		"name": source.Name,
-	})
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(source)
-}
-
-func (c *AdminCrawlController) runSource(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	path := strings.TrimPrefix(r.URL.Path, "/api/admin/crawl-sources/")
-	path = strings.TrimSuffix(path, "/run")
-	path = strings.Trim(path, "/")
-	id, err := strconv.ParseUint(path, 10, 32)
-	if err != nil {
-		http.Error(w, "invalid source id", http.StatusBadRequest)
-		return
-	}
-	run, err := c.service.RunSource(uint(id))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	actor := r.Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "crawl_source.run", "crawl_source", uint(id), map[string]interface{}{
-		"status": run.Status,
-	})
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(run)
 }

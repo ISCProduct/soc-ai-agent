@@ -76,7 +76,7 @@ func (r *UserApplicationStatusRepository) UpdateStatus(id uint, status, notes st
 	now := time.Now()
 	return r.db.Model(&models.UserApplicationStatus{}).
 		Where("id = ?", id).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"status":            status,
 			"notes":             notes,
 			"status_updated_at": now,
@@ -85,7 +85,7 @@ func (r *UserApplicationStatusRepository) UpdateStatus(id uint, status, notes st
 }
 
 // GetCorrelationByCompany 企業ごとのマッチングスコア×選考通過率の相関データを取得
-func (r *UserApplicationStatusRepository) GetCorrelationByCompany(companyID uint) ([]map[string]interface{}, error) {
+func (r *UserApplicationStatusRepository) GetCorrelationByCompany(companyID uint) ([]map[string]any, error) {
 	type Row struct {
 		MatchScore float64
 		Status     string
@@ -100,9 +100,9 @@ func (r *UserApplicationStatusRepository) GetCorrelationByCompany(companyID uint
 		return nil, err
 	}
 
-	result := make([]map[string]interface{}, len(rows))
+	result := make([]map[string]any, len(rows))
 	for i, row := range rows {
-		result[i] = map[string]interface{}{
+		result[i] = map[string]any{
 			"match_score": row.MatchScore,
 			"status":      row.Status,
 		}
@@ -111,7 +111,7 @@ func (r *UserApplicationStatusRepository) GetCorrelationByCompany(companyID uint
 }
 
 // GetGlobalCorrelation 全企業横断のマッチングスコア×選考結果相関データ
-func (r *UserApplicationStatusRepository) GetGlobalCorrelation() ([]map[string]interface{}, error) {
+func (r *UserApplicationStatusRepository) GetGlobalCorrelation() ([]map[string]any, error) {
 	type Row struct {
 		CompanyID  uint
 		MatchScore float64
@@ -126,9 +126,9 @@ func (r *UserApplicationStatusRepository) GetGlobalCorrelation() ([]map[string]i
 		return nil, err
 	}
 
-	result := make([]map[string]interface{}, len(rows))
+	result := make([]map[string]any, len(rows))
 	for i, row := range rows {
-		result[i] = map[string]interface{}{
+		result[i] = map[string]any{
 			"company_id":  row.CompanyID,
 			"match_score": row.MatchScore,
 			"status":      row.Status,

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
 )
 
@@ -34,27 +35,17 @@ func NewAdminCompanyGraphController(pipeline *scraper.Pipeline, companyRepo repo
 }
 
 // TargetYear handles GET /api/admin/company-graph/target-year
-func (c *AdminCompanyGraphController) TargetYear(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+func (c *AdminCompanyGraphController) TargetYear(ctx echo.Context) error {
 	override := 0
-	if v := r.URL.Query().Get("year"); v != "" {
+	if v := ctx.QueryParam("year"); v != "" {
 		override, _ = strconv.Atoi(v)
 	}
 	y := scraper.ResolveYear(override)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]int{"target_year": y})
+	return ctx.JSON(http.StatusOK, map[string]int{"target_year": y})
 }
 
 // Crawl handles POST /api/admin/company-graph/crawl
-func (c *AdminCompanyGraphController) Crawl(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+func (c *AdminCompanyGraphController) Crawl(ctx echo.Context) error {
 	var req struct {
 		Sites     []string `json:"sites"`
 		Query     string   `json:"query"`
@@ -67,10 +58,7 @@ func (c *AdminCompanyGraphController) Crawl(w http.ResponseWriter, r *http.Reque
 	req.Pages = 2
 	req.Threshold = config.CompanyGraphThreshold()
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
+	ctx.Bind(&req)
 
 	// company-graph コンテナ経由でクロール（未設定の場合は埋め込みパイプラインを使用）
 	var nodes map[string]*scraper.CompanyNode
@@ -79,12 +67,9 @@ func (c *AdminCompanyGraphController) Crawl(w http.ResponseWriter, r *http.Reque
 
 	companyGraphURL := os.Getenv("COMPANY_GRAPH_URL")
 	if companyGraphURL != "" {
-		n, l, y, err := c.crawlViaService(r, companyGraphURL, req.Sites, req.Query, req.Pages, req.Year, req.Threshold)
+		n, l, y, err := c.crawlViaService(ctx, companyGraphURL, req.Sites, req.Query, req.Pages, req.Year, req.Threshold)
 		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadGateway)
-			json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
-			return
+			return ctx.JSON(http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error()})
 		}
 		nodes, logs, targetYear = n, l, y
 	} else {
@@ -92,21 +77,18 @@ func (c *AdminCompanyGraphController) Crawl(w http.ResponseWriter, r *http.Reque
 		if req.Threshold > 0 {
 			p.Threshold = req.Threshold
 		}
-		result, err := p.Run(r.Context(), scraper.RunRequest{
+		result, err := p.Run(ctx.Request().Context(), scraper.RunRequest{
 			Sites:    req.Sites,
 			Query:    req.Query,
 			MaxPages: req.Pages,
 			Year:     req.Year,
 		})
 		if err != nil && (result == nil || len(result.Nodes) == 0) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnprocessableEntity)
 			l := ""
 			if result != nil {
 				l = strings.Join(result.Logs, "\n")
 			}
-			json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error(), "logs": l})
-			return
+			return ctx.JSON(http.StatusUnprocessableEntity, map[string]any{"ok": false, "error": err.Error(), "logs": l})
 		}
 		if result != nil {
 			nodes = result.Nodes
@@ -121,8 +103,17 @@ func (c *AdminCompanyGraphController) Crawl(w http.ResponseWriter, r *http.Reque
 	// スクレイピングで取得した関連会社・取引先を company_relations に同期
 	relSynced := c.syncRelationsFromNodes(nodes)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	adminEmail := ctx.Request().Header.Get("X-Admin-Email")
+	if adminEmail != "" && c.audit != nil {
+		c.audit.Record(adminEmail, "company_graph_crawl", "pipeline", 0, map[string]any{
+			"sites": req.Sites,
+			"query": req.Query,
+			"nodes": len(nodes),
+			"saved": saved,
+		})
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"ok":               true,
 		"logs":             logs,
 		"nodes":            len(nodes),
@@ -131,21 +122,11 @@ func (c *AdminCompanyGraphController) Crawl(w http.ResponseWriter, r *http.Reque
 		"target_year":      targetYear,
 		"relations_synced": relSynced,
 	})
-
-	adminEmail := r.Header.Get("X-Admin-Email")
-	if adminEmail != "" && c.audit != nil {
-		c.audit.Record(adminEmail, "company_graph_crawl", "pipeline", 0, map[string]interface{}{
-			"sites": req.Sites,
-			"query": req.Query,
-			"nodes": len(nodes),
-			"saved": saved,
-		})
-	}
 }
 
 // crawlViaService は company-graph コンテナを呼び出してノードデータを取得する。
 func (c *AdminCompanyGraphController) crawlViaService(
-	r *http.Request,
+	ctx echo.Context,
 	baseURL string,
 	sites []string, query string, pages, year int, threshold float64,
 ) (map[string]*scraper.CompanyNode, string, int, error) {
@@ -158,7 +139,7 @@ func (c *AdminCompanyGraphController) crawlViaService(
 		"threshold": threshold,
 	})
 
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, baseURL+"/crawl", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx.Request().Context(), http.MethodPost, baseURL+"/crawl", bytes.NewReader(payload))
 	if err != nil {
 		return nil, "", 0, err
 	}

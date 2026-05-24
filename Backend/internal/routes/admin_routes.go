@@ -27,49 +27,85 @@ func SetupAdminRoutes(
 ) {
 	// 認証不要（公開）エンドポイント
 	companyGraph := api.Group("/admin/company-graph")
-	companyGraph.Any("/target-year", wrap(adminCompanyGraphController.TargetYear))
+	companyGraph.GET("/target-year", adminCompanyGraphController.TargetYear)
 
 	// 管理者認証必須エンドポイント
 	admin := api.Group("/admin", EchoAdminAuth(userRepo, adminSecret))
 
-	admin.Any("/companies", wrap(adminCompanyController.ListOrCreate))
-	admin.Any("/companies/*", wrap(adminCompanyController.Detail))
+	// 企業管理
+	admin.GET("/companies", adminCompanyController.List)
+	admin.POST("/companies", adminCompanyController.Create)
+	admin.GET("/companies/:id", adminCompanyController.Get)
+	admin.PUT("/companies/:id", adminCompanyController.Update)
+	admin.POST("/companies/:id/publish", adminCompanyController.Publish)
+	admin.POST("/companies/:id/reject", adminCompanyController.Reject)
+	admin.GET("/companies/:id/gbiz-search", adminCompanyController.SearchGBiz)
+	admin.POST("/companies/:id/gbiz-sync", adminCompanyController.SyncGBiz)
+	admin.POST("/companies/:id/fetch-tech-stack", adminCompanyController.FetchTechStack)
 
-	admin.Any("/crawl-sources", wrap(adminCrawlController.Sources))
-	admin.Any("/crawl-sources/*", wrap(adminCrawlController.SourceDetail))
-	admin.Any("/crawl-runs", wrap(adminCrawlController.Runs))
+	// クロールソース管理
+	admin.GET("/crawl-sources", adminCrawlController.ListSources)
+	admin.POST("/crawl-sources", adminCrawlController.CreateSource)
+	admin.PUT("/crawl-sources/:id", adminCrawlController.UpdateSource)
+	admin.POST("/crawl-sources/:id/run", adminCrawlController.RunSource)
+	admin.GET("/crawl-runs", adminCrawlController.Runs)
 
-	admin.Any("/job-categories", wrap(adminJobController.JobCategories))
-	admin.Any("/job-positions", wrap(adminJobController.JobPositions))
-	admin.Any("/job-positions/*", wrap(adminJobController.JobPositionAction))
-	admin.Any("/graduate-employments", wrap(adminJobController.GraduateEmployments))
-	admin.Any("/graduate-employments/*", wrap(adminJobController.GraduateEmploymentDetail))
+	// 求人・カテゴリ管理
+	admin.GET("/job-categories", adminJobController.JobCategories)
+	admin.GET("/job-positions", adminJobController.JobPositions)
+	admin.POST("/job-positions", adminJobController.CreateJobPosition)
+	admin.Any("/job-positions/:id/:action", adminJobController.JobPositionAction)
+	admin.GET("/graduate-employments", adminJobController.GraduateEmployments)
+	admin.POST("/graduate-employments", adminJobController.CreateGraduateEmployment)
+	admin.GET("/graduate-employments/:id", adminJobController.GetGraduateEmployment)
+	admin.PUT("/graduate-employments/:id", adminJobController.UpdateGraduateEmployment)
 
-	admin.Any("/users", wrap(adminUserController.List))
-	admin.Any("/users/*", wrap(adminUserController.Update))
+	// ユーザー管理
+	admin.GET("/users", adminUserController.List)
+	admin.PUT("/users/:id", adminUserController.Update)
 
-	admin.Any("/audit-logs", wrap(adminAuditController.List))
+	// 監査ログ
+	admin.GET("/audit-logs", adminAuditController.List)
 
-	admin.Any("/company-graph/crawl", wrap(adminCompanyGraphController.Crawl))
+	// 企業関係グラフ
+	admin.POST("/company-graph/crawl", adminCompanyGraphController.Crawl)
 
-	admin.Any("/interviews", wrap(adminInterviewController.ListSessions))
-	admin.Any("/interviews/*", wrap(adminInterviewController.Route))
+	// 面接管理
+	admin.GET("/interviews", adminInterviewController.ListSessions)
+	admin.GET("/interviews/:id/videos", adminInterviewController.ListVideos)
+	admin.GET("/interviews/videos/:video_id/url", adminInterviewController.VideoURL)
 
-	admin.Any("/dashboard/users", wrap(adminDashboardController.ListUsers))
-	admin.Any("/dashboard/users/*", wrap(adminDashboardController.UserSessions))
-	admin.Any("/dashboard/export/csv", wrap(adminDashboardController.ExportCSV))
+	// ダッシュボード
+	admin.GET("/dashboard/users", adminDashboardController.ListUsers)
+	admin.GET("/dashboard/users/:id", adminDashboardController.UserSessions)
+	admin.GET("/dashboard/export/csv", adminDashboardController.ExportCSV)
 
-	admin.Any("/costs/summary", wrap(adminCostsController.Summary))
-	admin.Any("/costs/daily", wrap(adminCostsController.Daily))
-	admin.Any("/costs/monthly", wrap(adminCostsController.Monthly))
+	// コスト管理
+	admin.GET("/costs/summary", adminCostsController.Summary)
+	admin.GET("/costs/daily", adminCostsController.Daily)
+	admin.GET("/costs/monthly", adminCostsController.Monthly)
 
-	admin.Any("/profile-recalculation", wrap(profileRecalcController.Route))
-	admin.Any("/profile-recalculation/*", wrap(profileRecalcController.Route))
+	// プロファイル再計算
+	admin.POST("/profile-recalculation", profileRecalcController.RecalculateAll)
+	admin.POST("/profile-recalculation/:id", profileRecalcController.RecalculateOne)
+	admin.POST("/profile-recalculation/:id/rollback", profileRecalcController.Rollback)
+	admin.GET("/profile-recalculation/history", profileRecalcController.GetHistory)
 
-	admin.Any("/score-validation/*", wrap(scoreValidationController.Route))
+	// スコアバリデーション
+	admin.GET("/score-validation/correlation", scoreValidationController.GetCorrelation)
+	admin.GET("/score-validation/phase-metrics", scoreValidationController.GetPhaseMetrics)
+	admin.GET("/score-validation/calibration", scoreValidationController.GetCalibration)
+	admin.POST("/score-validation/calibration/run", scoreValidationController.RunCalibration)
+	admin.GET("/score-validation/calibration/history", scoreValidationController.GetCalibrationHistory)
+	admin.GET("/score-validation/variants", scoreValidationController.ListVariants)
+	admin.POST("/score-validation/variants", scoreValidationController.CreateVariant)
+	admin.GET("/score-validation/variants/:id/results", scoreValidationController.GetVariantResults)
 
-	admin.Any("/collective-insights/rebuild-summaries", wrap(collectiveInsightController.RebuildSummaries))
+	// 集合知管理
+	admin.POST("/collective-insights/rebuild-summaries", collectiveInsightController.RebuildSummaries)
 
-	admin.Any("/scraper-sessions", wrap(scraperSessionController.Sessions))
-	admin.Any("/scraper-sessions/*", wrap(scraperSessionController.SessionDetail))
+	// スクレイパーセッション管理
+	admin.GET("/scraper-sessions", scraperSessionController.List)
+	admin.POST("/scraper-sessions", scraperSessionController.Upsert)
+	admin.DELETE("/scraper-sessions/:site_key", scraperSessionController.Delete)
 }

@@ -1,158 +1,157 @@
 package controllers_test
 
-// ApplicationControllerのHTTPハンドラーテスト (Issue #397)
+// ApplicationControllerのHTTPハンドラーテスト
 //
 // 実行: cd Backend && go test ./test/controllers/... -run Application -v
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"Backend/domain/entity"
 	"Backend/internal/controllers"
-	"Backend/internal/middleware"
+	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// applicationControllerForTest はサービスなしで生成した ApplicationController
-// バリデーションのみをテストするため、サービスを呼び出さないパスのみを対象とする
-func newApplicationController() *controllers.ApplicationController {
-	return controllers.NewApplicationController(nil)
+func newApplicationController(svc *mocks.ApplicationServiceMock) *controllers.ApplicationController {
+	return controllers.NewApplicationController(svc)
 }
 
-// TestApplicationController_Apply_MethodNotAllowed はGETリクエストに405を返すことを検証
-func TestApplicationController_Apply_MethodNotAllowed(t *testing.T) {
-	methods := []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodPatch}
-	for _, method := range methods {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/applications", nil)
-			w := httptest.NewRecorder()
-			newApplicationController().Apply(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
-}
+// ---- Apply ----
 
-// TestApplicationController_Apply_InvalidBody はJSONパースエラーに400を返すことを検証
 func TestApplicationController_Apply_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/applications", bytes.NewBufferString("invalid json"))
-	w := httptest.NewRecorder()
-	newApplicationController().Apply(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewApplicationController(nil).Apply, newCtx(req, rec), http.StatusBadRequest)
 }
 
-// TestApplicationController_Apply_MissingFields は必須フィールド欠損時に400を返すことを検証
 func TestApplicationController_Apply_MissingFields(t *testing.T) {
 	tests := []struct {
 		name string
-		body map[string]interface{}
+		body map[string]any
 	}{
-		{"user_id=0", map[string]interface{}{"user_id": 0, "company_id": 1, "match_id": 1}},
-		{"company_id=0", map[string]interface{}{"user_id": 1, "company_id": 0, "match_id": 1}},
-		{"match_id=0", map[string]interface{}{"user_id": 1, "company_id": 1, "match_id": 0}},
-		{"all zero", map[string]interface{}{"user_id": 0, "company_id": 0, "match_id": 0}},
+		{"user_id=0", map[string]any{"user_id": 0, "company_id": 1, "match_id": 1}},
+		{"company_id=0", map[string]any{"user_id": 1, "company_id": 0, "match_id": 1}},
+		{"match_id=0", map[string]any{"user_id": 1, "company_id": 1, "match_id": 0}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			body, _ := json.Marshal(tc.body)
 			req := httptest.NewRequest(http.MethodPost, "/api/applications", bytes.NewBuffer(body))
-			w := httptest.NewRecorder()
-			newApplicationController().Apply(w, req)
-			assert.Equal(t, http.StatusBadRequest, w.Code)
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			assertStatus(t, controllers.NewApplicationController(nil).Apply, newCtx(req, rec), http.StatusBadRequest)
 		})
 	}
 }
 
-// TestApplicationController_UpdateStatus_MethodNotAllowed はPUT以外に405を返すことを検証
-func TestApplicationController_UpdateStatus_MethodNotAllowed(t *testing.T) {
-	methods := []string{http.MethodGet, http.MethodPost, http.MethodDelete}
-	for _, method := range methods {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/applications/1", nil)
-			w := httptest.NewRecorder()
-			newApplicationController().UpdateStatus(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
+func TestApplicationController_Apply_ServiceError(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	svc.On("Apply", uint(1), uint(2), uint(3)).Return(nil, errors.New("already applied"))
+
+	body, _ := json.Marshal(map[string]any{"user_id": 1, "company_id": 2, "match_id": 3})
+	req := httptest.NewRequest(http.MethodPost, "/api/applications", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, newApplicationController(svc).Apply, newCtx(req, rec), http.StatusBadRequest)
+	svc.AssertExpectations(t)
 }
 
-// TestApplicationController_UpdateStatus_InvalidID はIDパースエラーに400を返すことを検証
+func TestApplicationController_Apply_Success(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	now := time.Now()
+	app := &entity.UserApplicationStatus{UserID: 1, CompanyID: 2, MatchID: 3, Status: "applied", AppliedAt: &now}
+	svc.On("Apply", uint(1), uint(2), uint(3)).Return(app, nil)
+
+	body, _ := json.Marshal(map[string]any{"user_id": 1, "company_id": 2, "match_id": 3})
+	req := httptest.NewRequest(http.MethodPost, "/api/applications", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, newApplicationController(svc).Apply, newCtx(req, rec), http.StatusCreated)
+
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "applied", resp["status"])
+	svc.AssertExpectations(t)
+}
+
+// ---- UpdateStatus ----
+
 func TestApplicationController_UpdateStatus_InvalidID(t *testing.T) {
-	tests := []struct {
-		name string
-		path string
-	}{
-		{"non-numeric", "/api/applications/abc"},
-		{"zero", "/api/applications/0"},
-		{"empty", "/api/applications/"},
+	tests := []struct{ name, id string }{
+		{"non-numeric", "abc"},
+		{"zero", "0"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPut, tc.path, nil)
-			w := httptest.NewRecorder()
-			newApplicationController().UpdateStatus(w, req)
-			assert.Equal(t, http.StatusBadRequest, w.Code)
+			req := httptest.NewRequest(http.MethodPut, "/api/applications/"+tc.id, nil)
+			rec := httptest.NewRecorder()
+			c := newCtx(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues(tc.id)
+			assertStatus(t, controllers.NewApplicationController(nil).UpdateStatus, c, http.StatusBadRequest)
 		})
 	}
 }
 
-// TestApplicationController_UpdateStatus_InvalidBody はIDが正常でもJSONパースエラーに400を返すことを検証
-func TestApplicationController_UpdateStatus_InvalidBody(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPut, "/api/applications/1", bytes.NewBufferString("not-json"))
-	w := httptest.NewRecorder()
-	newApplicationController().UpdateStatus(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-// TestApplicationController_UpdateStatus_MissingFields はbody必須フィールド欠損に400を返すことを検証
 func TestApplicationController_UpdateStatus_MissingFields(t *testing.T) {
 	tests := []struct {
 		name string
-		body map[string]interface{}
+		body map[string]any
 	}{
-		{"user_id=0", map[string]interface{}{"user_id": 0, "status": "applied"}},
-		{"status empty", map[string]interface{}{"user_id": 1, "status": ""}},
-		{"both empty", map[string]interface{}{"user_id": 0, "status": ""}},
+		{"user_id=0", map[string]any{"user_id": 0, "status": "applied"}},
+		{"status empty", map[string]any{"user_id": 1, "status": ""}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			body, _ := json.Marshal(tc.body)
 			req := httptest.NewRequest(http.MethodPut, "/api/applications/1", bytes.NewBuffer(body))
-			w := httptest.NewRecorder()
-			newApplicationController().UpdateStatus(w, req)
-			assert.Equal(t, http.StatusBadRequest, w.Code)
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			c := newCtx(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues("1")
+			assertStatus(t, controllers.NewApplicationController(nil).UpdateStatus, c, http.StatusBadRequest)
 		})
 	}
 }
 
-// TestApplicationController_List_MethodNotAllowed はGET以外に405を返すことを検証
-func TestApplicationController_List_MethodNotAllowed(t *testing.T) {
-	methods := []string{http.MethodPost, http.MethodPut, http.MethodDelete}
-	for _, method := range methods {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/applications", nil)
-			w := httptest.NewRecorder()
-			newApplicationController().List(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
+func TestApplicationController_UpdateStatus_Success(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	app := &entity.UserApplicationStatus{Status: "interview", Notes: "通過"}
+	svc.On("UpdateStatus", uint(1), uint(1), "interview", "通過").Return(app, nil)
+
+	body, _ := json.Marshal(map[string]any{"user_id": 1, "status": "interview", "notes": "通過"})
+	req := httptest.NewRequest(http.MethodPut, "/api/applications/1", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("1")
+	assertStatus(t, newApplicationController(svc).UpdateStatus, c, http.StatusOK)
+
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "interview", resp["status"])
+	svc.AssertExpectations(t)
 }
 
-// TestApplicationController_List_MissingUserID はuser_id未指定に400を返すことを検証
+// ---- List ----
+
 func TestApplicationController_List_MissingUserID(t *testing.T) {
-	tests := []struct {
-		name    string
-		userID  string
-		wantBad bool
-	}{
-		{"missing", "", true},
-		{"non-numeric", "abc", true},
-		{"zero", "0", true},
+	tests := []struct{ name, userID string }{
+		{"missing", ""},
+		{"non-numeric", "abc"},
+		{"zero", "0"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -161,48 +160,53 @@ func TestApplicationController_List_MissingUserID(t *testing.T) {
 				url += "?user_id=" + tc.userID
 			}
 			req := httptest.NewRequest(http.MethodGet, url, nil)
-			w := httptest.NewRecorder()
-			newApplicationController().List(w, req)
-			if tc.wantBad {
-				assert.Equal(t, http.StatusBadRequest, w.Code)
-			}
+			rec := httptest.NewRecorder()
+			assertStatus(t, controllers.NewApplicationController(nil).List, newCtx(req, rec), http.StatusBadRequest)
 		})
 	}
 }
 
-// TestApplicationController_GetCorrelation_MethodNotAllowed はGET以外に405を返すことを検証
-func TestApplicationController_GetCorrelation_MethodNotAllowed(t *testing.T) {
-	methods := []string{http.MethodPost, http.MethodPut, http.MethodDelete}
-	for _, method := range methods {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/applications/correlation", nil)
-			w := httptest.NewRecorder()
-			newApplicationController().GetCorrelation(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
+func TestApplicationController_List_ServiceError(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	svc.On("GetApplicationsByUser", uint(1)).Return(nil, errors.New("DB error"))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/applications?user_id=1", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newApplicationController(svc).List, newCtx(req, rec), http.StatusInternalServerError)
+	svc.AssertExpectations(t)
+}
+
+func TestApplicationController_List_Success(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	apps := []*entity.UserApplicationStatus{
+		{UserID: 1, CompanyID: 10, Status: "applied"},
+		{UserID: 1, CompanyID: 20, Status: "interview"},
 	}
+	svc.On("GetApplicationsByUser", uint(1)).Return(apps, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/applications?user_id=1", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newApplicationController(svc).List, newCtx(req, rec), http.StatusOK)
+
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, float64(2), resp["total"])
+	svc.AssertExpectations(t)
 }
 
-// withUserID はリクエストコンテキストにuserIDを設定するヘルパー
-func withUserID(r *http.Request, userID uint) *http.Request {
-	ctx := context.WithValue(r.Context(), middleware.UserIDContextKey, userID)
-	return r.WithContext(ctx)
-}
+// ---- GetCorrelation ----
 
-// TestApplicationController_Apply_ValidInput は有効な入力でサービスが呼ばれることを検証（nilサービスへのアクセスをパニックで捕捉）
-func TestApplicationController_Apply_ValidInput(t *testing.T) {
-	body, _ := json.Marshal(map[string]interface{}{
-		"user_id":    1,
-		"company_id": 2,
-		"match_id":   3,
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/applications", bytes.NewBuffer(body))
-	w := httptest.NewRecorder()
+func TestApplicationController_GetCorrelation_Success(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	data := []map[string]any{{"company_id": 1, "pass_rate": 0.75}}
+	svc.On("GetCorrelation", uint(0)).Return(data, nil)
 
-	defer func() {
-		r := recover()
-		// nilサービスへのアクセスでpanicが発生する = バリデーションは通過している
-		require.NotNil(t, r, "バリデーション通過後にサービスが呼ばれることを確認")
-	}()
-	newApplicationController().Apply(w, req)
+	req := httptest.NewRequest(http.MethodGet, "/api/applications/correlation", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newApplicationController(svc).GetCorrelation, newCtx(req, rec), http.StatusOK)
+
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, float64(1), resp["total"])
+	svc.AssertExpectations(t)
 }

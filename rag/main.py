@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import datetime
 import json
 import logging
@@ -7,23 +8,88 @@ import os
 import re
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Awaitable, Callable, Generator, List, Optional, Tuple, TypeVar
 
 import chromadb
 import tiktoken
 from crewai import Agent, Task, Crew, Process
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 import openai as openai_module
 from openai import OpenAI
 from pydantic import BaseModel, Field, field_validator
 
+# ── 構造化ログ設定 ────────────────────────────────────────────────────────────
+_trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id", default="")
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+_LOG_LEVEL_MAP = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARN": logging.WARNING,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+}
+_log_level = _LOG_LEVEL_MAP.get(os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+
+
+class _JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, Any] = {
+            "time": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        trace_id = _trace_id_var.get("")
+        if trace_id:
+            payload["trace_id"] = trace_id
+        if record.exc_info:
+            payload["exc_info"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+def _setup_logging() -> logging.Logger:
+    handler = logging.StreamHandler()
+    handler.setFormatter(_JsonFormatter())
+    root = logging.getLogger()
+    root.setLevel(_log_level)
+    root.handlers = [handler]
+    return logging.getLogger(__name__)
+
+
+logger = _setup_logging()
 
 app = FastAPI()
+
+
+@app.middleware("http")
+async def _trace_id_middleware(request: Request, call_next: Callable) -> Any:
+    trace_id = request.headers.get("X-Trace-ID") or str(uuid.uuid4())
+    token = _trace_id_var.set(trace_id)
+    start = time.time()
+    try:
+        response = await call_next(request)
+        duration_ms = int((time.time() - start) * 1000)
+        level = "INFO" if response.status_code < 400 else ("WARN" if response.status_code < 500 else "ERROR")
+        payload = {
+            "time": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "level": level,
+            "logger": __name__,
+            "message": "http request",
+            "trace_id": trace_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+            "duration_ms": duration_ms,
+        }
+        print(json.dumps(payload, ensure_ascii=False), flush=True)
+        response.headers["X-Trace-ID"] = trace_id
+        return response
+    finally:
+        _trace_id_var.reset(token)
+
 
 # ── 環境変数 ────────────────────────────────────────────────────────────────
 DEFAULT_CACHE_TTL_SECONDS = 86400

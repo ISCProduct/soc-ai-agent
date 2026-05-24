@@ -2,9 +2,10 @@ package controllers
 
 import (
 	"Backend/internal/services"
-	"encoding/json"
 	"net/http"
 	"strconv"
+
+	"github.com/labstack/echo/v4"
 )
 
 type AdminAuditController struct {
@@ -15,24 +16,18 @@ func NewAdminAuditController(service *services.AuditLogService) *AdminAuditContr
 	return &AdminAuditController{service: service}
 }
 
-func (c *AdminAuditController) List(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+func (c *AdminAuditController) List(ctx echo.Context) error {
 	limit := 50
-	if value := r.URL.Query().Get("limit"); value != "" {
+	if value := ctx.QueryParam("limit"); value != "" {
 		if v, err := strconv.Atoi(value); err == nil && v > 0 && v <= 200 {
 			limit = v
 		}
 	}
 	logs, err := c.service.List(limit)
 	if err != nil {
-		http.Error(w, "failed to fetch logs", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch logs")
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"logs": logs,
 	})
 }

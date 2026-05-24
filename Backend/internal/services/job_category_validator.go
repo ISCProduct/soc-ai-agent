@@ -47,9 +47,9 @@ func (v *JobCategoryValidator) ValidateJobCategory(ctx context.Context, userAnsw
 	}
 
 	// 2. 職種リストをJSON形式に変換
-	categoryList := make([]map[string]interface{}, 0)
+	categoryList := make([]map[string]any, 0)
 	for _, cat := range allCategories {
-		categoryList = append(categoryList, map[string]interface{}{
+		categoryList = append(categoryList, map[string]any{
 			"id":   cat.ID,
 			"name": cat.Name,
 			"code": cat.Code,
