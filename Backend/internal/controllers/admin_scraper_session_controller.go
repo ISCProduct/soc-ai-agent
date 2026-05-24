@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/internal/services"
+	"Backend/internal/services/interfaces"
 	"net/http"
 	"time"
 
@@ -9,10 +10,10 @@ import (
 )
 
 type AdminScraperSessionController struct {
-	service *services.ScraperSessionService
+	service interfaces.ScraperSessionService
 }
 
-func NewAdminScraperSessionController(service *services.ScraperSessionService) *AdminScraperSessionController {
+func NewAdminScraperSessionController(service interfaces.ScraperSessionService) *AdminScraperSessionController {
 	return &AdminScraperSessionController{service: service}
 }
 

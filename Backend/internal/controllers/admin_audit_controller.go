@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/interfaces"
 	"net/http"
 	"strconv"
 
@@ -9,10 +9,10 @@ import (
 )
 
 type AdminAuditController struct {
-	service *services.AuditLogService
+	service interfaces.AuditLogService
 }
 
-func NewAdminAuditController(service *services.AuditLogService) *AdminAuditController {
+func NewAdminAuditController(service interfaces.AuditLogService) *AdminAuditController {
 	return &AdminAuditController{service: service}
 }
 

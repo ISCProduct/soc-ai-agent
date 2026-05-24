@@ -2,7 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/repository"
-	"Backend/internal/services"
+	"Backend/internal/services/interfaces"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,10 +14,10 @@ const maxAdminUsersOffset = 10000
 
 type AdminUserController struct {
 	repo  repository.UserRepository
-	audit *services.AuditLogService
+	audit interfaces.AuditLogService
 }
 
-func NewAdminUserController(repo repository.UserRepository, audit *services.AuditLogService) *AdminUserController {
+func NewAdminUserController(repo repository.UserRepository, audit interfaces.AuditLogService) *AdminUserController {
 	return &AdminUserController{repo: repo, audit: audit}
 }
 
