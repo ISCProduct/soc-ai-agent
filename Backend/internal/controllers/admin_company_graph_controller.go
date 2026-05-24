@@ -5,7 +5,7 @@ import (
 	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/scraper"
-	"Backend/internal/services"
+	ifaces "Backend/internal/services/interfaces"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -27,10 +27,10 @@ type AdminCompanyGraphController struct {
 	pipeline     *scraper.Pipeline
 	companyRepo  repository.CompanyRepository
 	relationRepo repository.CompanyRelationRepository
-	audit        *services.AuditLogService
+	audit        ifaces.AuditLogService
 }
 
-func NewAdminCompanyGraphController(pipeline *scraper.Pipeline, companyRepo repository.CompanyRepository, relationRepo repository.CompanyRelationRepository, audit *services.AuditLogService) *AdminCompanyGraphController {
+func NewAdminCompanyGraphController(pipeline *scraper.Pipeline, companyRepo repository.CompanyRepository, relationRepo repository.CompanyRelationRepository, audit ifaces.AuditLogService) *AdminCompanyGraphController {
 	return &AdminCompanyGraphController{pipeline: pipeline, companyRepo: companyRepo, relationRepo: relationRepo, audit: audit}
 }
 
@@ -73,6 +73,9 @@ func (c *AdminCompanyGraphController) Crawl(ctx echo.Context) error {
 		}
 		nodes, logs, targetYear = n, l, y
 	} else {
+		if c.pipeline == nil {
+			return echoInternalError(errors.New("pipeline not configured"))
+		}
 		p := *c.pipeline
 		if req.Threshold > 0 {
 			p.Threshold = req.Threshold

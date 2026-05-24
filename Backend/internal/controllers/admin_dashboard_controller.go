@@ -1,29 +1,29 @@
 package controllers
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
+	ifaces "Backend/internal/services/interfaces"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
-
-	"encoding/json"
 
 	"github.com/labstack/echo/v4"
 )
 
 // AdminDashboardController provides admin endpoints for the user score dashboard.
 type AdminDashboardController struct {
-	userRepo    *repositories.UserRepository
-	sessionRepo *repositories.InterviewSessionRepository
-	reportRepo  *repositories.InterviewReportRepository
+	userRepo    repository.UserRepository
+	sessionRepo ifaces.DashboardSessionRepo
+	reportRepo  ifaces.DashboardReportRepo
 }
 
 func NewAdminDashboardController(
-	userRepo *repositories.UserRepository,
-	sessionRepo *repositories.InterviewSessionRepository,
-	reportRepo *repositories.InterviewReportRepository,
+	userRepo repository.UserRepository,
+	sessionRepo ifaces.DashboardSessionRepo,
+	reportRepo ifaces.DashboardReportRepo,
 ) *AdminDashboardController {
 	return &AdminDashboardController{
 		userRepo:    userRepo,
