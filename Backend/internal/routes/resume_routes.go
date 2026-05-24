@@ -8,8 +8,8 @@ import (
 
 func SetupResumeRoutes(api *echo.Group, resumeController *controllers.ResumeController, userSecret string) {
 	resume := api.Group("/resume", EchoUserAuth(userSecret))
-	resume.Any("/upload", wrap(resumeController.Upload))
-	resume.Any("/review", wrap(resumeController.Review))
-	resume.Any("/review/stream", wrap(resumeController.ReviewStream))
-	resume.Any("/annotated", wrap(resumeController.Annotated))
+	resume.POST("/upload", resumeController.Upload)
+	resume.POST("/review", resumeController.Review)
+	resume.GET("/review/stream", resumeController.ReviewStream)
+	resume.GET("/annotated", resumeController.Annotated)
 }

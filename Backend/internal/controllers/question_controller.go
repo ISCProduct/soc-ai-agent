@@ -4,8 +4,9 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/services"
 	"Backend/internal/services/interfaces"
-	"encoding/json"
 	"net/http"
+
+	"github.com/labstack/echo/v4"
 )
 
 type QuestionController struct {
@@ -17,88 +18,64 @@ func NewQuestionController(questionService interfaces.QuestionGeneratorService) 
 }
 
 // GenerateQuestions AIで質問を生成
-func (c *QuestionController) GenerateQuestions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+// POST /api/questions/generate
+func (c *QuestionController) GenerateQuestions(ctx echo.Context) error {
 	var req services.GenerateQuestionsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
 
 	// バリデーション
 	if req.Category == "" {
-		http.Error(w, "category is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "category is required")
 	}
 	if req.Count <= 0 {
 		req.Count = 5 // デフォルト5個
 	}
 
-	questions, err := c.questionService.GenerateAndSaveQuestions(r.Context(), req)
+	questions, err := c.questionService.GenerateAndSaveQuestions(ctx.Request().Context(), req)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"generated_count": len(questions),
 		"questions":       questions,
 	})
 }
 
 // CreateQuestion 手動で質問を登録
-func (c *QuestionController) CreateQuestion(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+// POST /api/questions
+func (c *QuestionController) CreateQuestion(ctx echo.Context) error {
 	var qw models.QuestionWeight
-	if err := json.NewDecoder(r.Body).Decode(&qw); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
+	if err := ctx.Bind(&qw); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
 
 	// バリデーション
 	if qw.Question == "" || qw.WeightCategory == "" {
-		http.Error(w, "question and weight_category are required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "question and weight_category are required")
 	}
 
 	if err := c.questionService.CreateQuestion(&qw); err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(qw)
+	return ctx.JSON(http.StatusCreated, qw)
 }
 
 // GetQuestionsByCategory カテゴリ別質問取得
-func (c *QuestionController) GetQuestionsByCategory(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	category := r.URL.Query().Get("category")
+// GET /api/questions?category=xxx
+func (c *QuestionController) GetQuestionsByCategory(ctx echo.Context) error {
+	category := ctx.QueryParam("category")
 	if category == "" {
-		http.Error(w, "category is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "category is required")
 	}
 
 	questions, err := c.questionService.GetQuestionsByCategory(category)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(questions)
+	return ctx.JSON(http.StatusOK, questions)
 }

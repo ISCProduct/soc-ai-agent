@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// AuthServiceMock AuthServiceインターフェースのモック実装
 type AuthServiceMock struct {
 	mock.Mock
 }
@@ -52,8 +51,7 @@ func (m *AuthServiceMock) UpdateProfile(req services.UpdateProfileRequest) (*ser
 }
 
 func (m *AuthServiceMock) RequestRegistration(email string) error {
-	args := m.Called(email)
-	return args.Error(0)
+	return m.Called(email).Error(0)
 }
 
 func (m *AuthServiceMock) ValidateRegistrationToken(token string) (string, error) {
@@ -62,21 +60,17 @@ func (m *AuthServiceMock) ValidateRegistrationToken(token string) (string, error
 }
 
 func (m *AuthServiceMock) RequestPasswordReset(email string) error {
-	args := m.Called(email)
-	return args.Error(0)
+	return m.Called(email).Error(0)
 }
 
 func (m *AuthServiceMock) ResetPassword(token, newPassword string) error {
-	args := m.Called(token, newPassword)
-	return args.Error(0)
+	return m.Called(token, newPassword).Error(0)
 }
 
 func (m *AuthServiceMock) VerifyEmail(token string) error {
-	args := m.Called(token)
-	return args.Error(0)
+	return m.Called(token).Error(0)
 }
 
 func (m *AuthServiceMock) DeleteAccount(userID uint) error {
-	args := m.Called(userID)
-	return args.Error(0)
+	return m.Called(userID).Error(0)
 }

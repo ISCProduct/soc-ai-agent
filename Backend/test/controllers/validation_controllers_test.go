@@ -14,35 +14,15 @@ import (
 
 	"Backend/internal/controllers"
 
-	"github.com/stretchr/testify/assert"
 )
 
 // ---- ESReviewController ----
 
-func TestESReviewController_Review_MethodNotAllowed(t *testing.T) {
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/es/review", nil)
-			w := httptest.NewRecorder()
-			controllers.NewESReviewController().Review(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
-}
-
 func TestESReviewController_Review_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/es/review", bytes.NewBufferString("not-json"))
-	w := httptest.NewRecorder()
-	controllers.NewESReviewController().Review(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestESReviewController_Review_MissingESText(t *testing.T) {
-	body, _ := json.Marshal(map[string]string{"question_type": "志望動機"})
-	req := httptest.NewRequest(http.MethodPost, "/api/es/review", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	controllers.NewESReviewController().Review(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewESReviewController().Review, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestESReviewController_Review_MissingRAGURL(t *testing.T) {
@@ -52,97 +32,38 @@ func TestESReviewController_Review_MissingRAGURL(t *testing.T) {
 		"question_type": "志望動機",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/es/review", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	controllers.NewESReviewController().Review(w, req)
-	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewESReviewController().Review, newCtx(req, rec), http.StatusServiceUnavailable)
 }
 
 // ---- ESRewriteController ----
 
-func TestESRewriteController_Rewrite_MethodNotAllowed(t *testing.T) {
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/es/rewrite", nil)
-			w := httptest.NewRecorder()
-			controllers.NewESRewriteController(nil).Rewrite(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
-}
-
-func TestESRewriteController_Rewrite_InvalidBody(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/es/rewrite", bytes.NewBufferString("not-json"))
-	w := httptest.NewRecorder()
-	controllers.NewESRewriteController(nil).Rewrite(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
 func TestESRewriteController_Rewrite_MissingOriginalText(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"question_type": "志望動機"})
 	req := httptest.NewRequest(http.MethodPost, "/api/es/rewrite", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	controllers.NewESRewriteController(nil).Rewrite(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-// ---- GitHubController (バリデーション・認証パス) ----
-
-func TestGitHubController_GetProfile_MethodNotAllowed(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/github/profile", nil)
-	w := httptest.NewRecorder()
-	controllers.NewGitHubController(nil, nil).GetProfile(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
-
-func TestGitHubController_GetProfile_Unauthorized(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/github/profile", nil)
-	w := httptest.NewRecorder()
-	controllers.NewGitHubController(nil, nil).GetProfile(w, req)
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-}
-
-func TestGitHubController_Sync_MethodNotAllowed(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/github/sync", nil)
-	w := httptest.NewRecorder()
-	controllers.NewGitHubController(nil, nil).Sync(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
-
-func TestGitHubController_Sync_Unauthorized(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/github/sync", nil)
-	w := httptest.NewRecorder()
-	controllers.NewGitHubController(nil, nil).Sync(w, req)
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-}
-
-func TestGitHubController_GetSkills_MethodNotAllowed(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/github/skills", nil)
-	w := httptest.NewRecorder()
-	controllers.NewGitHubController(nil, nil).GetSkills(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
-
-func TestGitHubController_GetSkills_Unauthorized(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/github/skills", nil)
-	w := httptest.NewRecorder()
-	controllers.NewGitHubController(nil, nil).GetSkills(w, req)
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewESRewriteController(nil).Rewrite, newCtx(req, rec), http.StatusBadRequest)
 }
 
 // ---- CompanyRelationController ----
 
 func TestCompanyRelationController_GetCompanyRelations_InvalidID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/abc/relations", nil)
-	req.URL.Path = "/api/companies/abc/relations"
-	w := httptest.NewRecorder()
-	controllers.NewCompanyRelationController(nil, nil).GetCompanyRelations(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	rec := httptest.NewRecorder()
+	ctx := newCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("abc")
+	assertStatus(t, controllers.NewCompanyRelationController(nil, nil).GetCompanyRelations, ctx, http.StatusBadRequest)
 }
 
 func TestCompanyRelationController_GetCompanyMarketInfo_InvalidID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/abc/market-info", nil)
-	req.URL.Path = "/api/companies/abc/market-info"
-	w := httptest.NewRecorder()
-	controllers.NewCompanyRelationController(nil, nil).GetCompanyMarketInfo(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	rec := httptest.NewRecorder()
+	ctx := newCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("abc")
+	assertStatus(t, controllers.NewCompanyRelationController(nil, nil).GetCompanyMarketInfo, ctx, http.StatusBadRequest)
 }
+

@@ -5,7 +5,6 @@ import (
 	"Backend/internal/services"
 )
 
-// CollectiveInsightService 集合知レコメンドサービスのインターフェース
 type CollectiveInsightService interface {
 	GetCollectiveRecommendations(userID uint, sessionID string, excludeCompanyIDs []uint) ([]services.CollectiveRecommendItem, error)
 	GetTopPassRateCompanies(limit int) ([]models.AnonymizedBehaviorSummary, error)

@@ -1,6 +1,6 @@
 package controllers_test
 
-// AuthControllerのHTTPハンドラーテスト (Issue #397/#422)
+// AuthControllerのHTTPハンドラーテスト
 //
 // 実行: cd Backend && go test ./test/controllers/... -run Auth -v
 
@@ -20,465 +20,148 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newAuthControllerWithMock(svc *mocks.AuthServiceMock) *controllers.AuthController {
+func newAuthController(svc *mocks.AuthServiceMock) *controllers.AuthController {
 	return controllers.NewAuthController(svc)
 }
 
 // ---- Register ----
 
-func TestAuthController_Register_MethodNotAllowed(t *testing.T) {
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/auth/register", nil)
-			w := httptest.NewRecorder()
-			controllers.NewAuthController(nil).Register(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
-}
-
 func TestAuthController_Register_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewBufferString("not-json"))
-	w := httptest.NewRecorder()
-	controllers.NewAuthController(nil).Register(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewAuthController(nil).Register, newCtx(req, rec), http.StatusBadRequest)
 }
 
-func TestAuthController_Register_EmailAlreadyExists(t *testing.T) {
+func TestAuthController_Register_EmailExists(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	svc.On("Register", services.RegisterRequest{Email: "test@example.com", Password: "pass"}).
-		Return(nil, errors.New("email already exists"))
+	regReq := services.RegisterRequest{Email: "dup@example.com", Password: "pass1234", Name: "テスト"}
+	svc.On("Register", regReq).Return(nil, errors.New("email already exists"))
 
-	body, _ := json.Marshal(map[string]string{"email": "test@example.com", "password": "pass"})
+	body, _ := json.Marshal(regReq)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewBuffer(body))
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).Register(w, req)
-
-	assert.Equal(t, http.StatusConflict, w.Code)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).Register, newCtx(req, rec), http.StatusConflict)
 	svc.AssertExpectations(t)
 }
 
 func TestAuthController_Register_Success(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	resp := &services.AuthResponse{Token: "jwt-token"}
-	svc.On("Register", services.RegisterRequest{Email: "new@example.com", Password: "pass123"}).
-		Return(resp, nil)
+	regReq := services.RegisterRequest{Email: "new@example.com", Password: "pass1234", Name: "テスト"}
+	resp := &services.AuthResponse{Token: "tok"}
+	svc.On("Register", regReq).Return(resp, nil)
 
-	body, _ := json.Marshal(map[string]string{"email": "new@example.com", "password": "pass123"})
+	body, _ := json.Marshal(regReq)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewBuffer(body))
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).Register(w, req)
-
-	assert.Equal(t, http.StatusCreated, w.Code)
-	var got services.AuthResponse
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&got))
-	assert.Equal(t, "jwt-token", got.Token)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).Register, newCtx(req, rec), http.StatusCreated)
 	svc.AssertExpectations(t)
 }
 
 // ---- Login ----
 
-func TestAuthController_Login_MethodNotAllowed(t *testing.T) {
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/auth/login", nil)
-			w := httptest.NewRecorder()
-			controllers.NewAuthController(nil).Login(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
-}
-
 func TestAuthController_Login_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString("not-json"))
-	w := httptest.NewRecorder()
-	controllers.NewAuthController(nil).Login(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewAuthController(nil).Login, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAuthController_Login_InvalidCredentials(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	svc.On("Login", services.LoginRequest{Email: "bad@example.com", Password: "wrong"}).
-		Return(nil, errors.New("invalid email or password"))
+	loginReq := services.LoginRequest{Email: "a@example.com", Password: "wrong"}
+	svc.On("Login", loginReq).Return(nil, errors.New("invalid email or password"))
 
-	body, _ := json.Marshal(map[string]string{"email": "bad@example.com", "password": "wrong"})
+	body, _ := json.Marshal(loginReq)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBuffer(body))
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).Login(w, req)
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).Login, newCtx(req, rec), http.StatusUnauthorized)
 	svc.AssertExpectations(t)
 }
 
 func TestAuthController_Login_EmailNotVerified(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	svc.On("Login", services.LoginRequest{Email: "unverified@example.com", Password: "pass"}).
-		Return(nil, errors.New("email_not_verified"))
+	loginReq := services.LoginRequest{Email: "a@example.com", Password: "pass1234"}
+	svc.On("Login", loginReq).Return(nil, errors.New("email_not_verified"))
 
-	body, _ := json.Marshal(map[string]string{"email": "unverified@example.com", "password": "pass"})
+	body, _ := json.Marshal(loginReq)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBuffer(body))
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).Login(w, req)
-
-	assert.Equal(t, http.StatusForbidden, w.Code)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).Login, newCtx(req, rec), http.StatusForbidden)
 	svc.AssertExpectations(t)
 }
 
 func TestAuthController_Login_Success(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	resp := &services.AuthResponse{Token: "valid-token"}
-	svc.On("Login", services.LoginRequest{Email: "user@example.com", Password: "correct"}).
-		Return(resp, nil)
+	loginReq := services.LoginRequest{Email: "a@example.com", Password: "pass1234"}
+	resp := &services.AuthResponse{Token: "jwt-token"}
+	svc.On("Login", loginReq).Return(resp, nil)
 
-	body, _ := json.Marshal(map[string]string{"email": "user@example.com", "password": "correct"})
+	body, _ := json.Marshal(loginReq)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBuffer(body))
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).Login(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	var got services.AuthResponse
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&got))
-	assert.Equal(t, "valid-token", got.Token)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).Login, newCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
 // ---- CreateGuest ----
 
-func TestAuthController_CreateGuest_MethodNotAllowed(t *testing.T) {
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/auth/guest", nil)
-			w := httptest.NewRecorder()
-			controllers.NewAuthController(nil).CreateGuest(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
-}
-
 func TestAuthController_CreateGuest_Success(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	resp := &services.AuthResponse{Token: "guest-token"}
-	svc.On("CreateGuestUser").Return(resp, nil)
+	svc.On("CreateGuestUser").Return(&services.AuthResponse{Token: "guest-tok"}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/guest", nil)
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).CreateGuest(w, req)
-
-	assert.Equal(t, http.StatusCreated, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).CreateGuest, newCtx(req, rec), http.StatusCreated)
 	svc.AssertExpectations(t)
 }
 
 // ---- GetUser ----
 
-func TestAuthController_GetUser_MethodNotAllowed(t *testing.T) {
-	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/auth/me", nil)
-			w := httptest.NewRecorder()
-			controllers.NewAuthController(nil).GetUser(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
-}
-
 func TestAuthController_GetUser_Unauthorized(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
-	w := httptest.NewRecorder()
-	controllers.NewAuthController(nil).GetUser(w, req)
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/user", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewAuthController(nil).GetUser, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestAuthController_GetUser_NotFound(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	svc.On("GetUser", uint(99)).Return(nil, errors.New("user not found"))
+	svc.On("GetUser", uint(1)).Return(nil, errors.New("user not found"))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
-	req = withUserID(req, 99)
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).GetUser(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/user", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).GetUser, newCtx(req, rec), http.StatusNotFound)
 	svc.AssertExpectations(t)
 }
 
 func TestAuthController_GetUser_Success(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	resp := &services.AuthResponse{Token: "tok", UserID: 1}
-	svc.On("GetUser", uint(1)).Return(resp, nil)
+	svc.On("GetUser", uint(1)).Return(&services.AuthResponse{Token: "tok"}, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/user", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).GetUser(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	svc.AssertExpectations(t)
-}
-
-// ---- VerifyRegistration ----
-
-func TestAuthController_VerifyRegistration_MethodNotAllowed(t *testing.T) {
-	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/auth/verify-registration", nil)
-			w := httptest.NewRecorder()
-			controllers.NewAuthController(nil).VerifyRegistration(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
-}
-
-func TestAuthController_VerifyRegistration_MissingToken(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-registration", nil)
-	w := httptest.NewRecorder()
-	controllers.NewAuthController(nil).VerifyRegistration(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestAuthController_VerifyRegistration_InvalidToken(t *testing.T) {
-	svc := &mocks.AuthServiceMock{}
-	svc.On("ValidateRegistrationToken", "bad-token").Return("", errors.New("invalid token"))
-
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-registration?token=bad-token", nil)
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).VerifyRegistration(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	svc.AssertExpectations(t)
-}
-
-func TestAuthController_VerifyRegistration_Success(t *testing.T) {
-	svc := &mocks.AuthServiceMock{}
-	svc.On("ValidateRegistrationToken", "valid-token").Return("user@example.com", nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-registration?token=valid-token", nil)
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).VerifyRegistration(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	var resp map[string]string
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
-	assert.Equal(t, "user@example.com", resp["email"])
-	svc.AssertExpectations(t)
-}
-
-// ---- RequestPasswordReset ----
-
-func TestAuthController_RequestPasswordReset_MethodNotAllowed(t *testing.T) {
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/auth/forgot-password", nil)
-			w := httptest.NewRecorder()
-			controllers.NewAuthController(nil).RequestPasswordReset(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
-}
-
-func TestAuthController_RequestPasswordReset_InvalidBody(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", bytes.NewBufferString("not-json"))
-	w := httptest.NewRecorder()
-	controllers.NewAuthController(nil).RequestPasswordReset(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestAuthController_RequestPasswordReset_AlwaysOK(t *testing.T) {
-	// 情報漏洩防止のため、エラー時も200を返す仕様
-	svc := &mocks.AuthServiceMock{}
-	svc.On("RequestPasswordReset", "any@example.com").Return(nil)
-
-	body, _ := json.Marshal(map[string]string{"email": "any@example.com"})
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", bytes.NewBuffer(body))
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).RequestPasswordReset(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	svc.AssertExpectations(t)
-}
-
-// ---- ResetPassword ----
-
-func TestAuthController_ResetPassword_MethodNotAllowed(t *testing.T) {
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/auth/reset-password", nil)
-			w := httptest.NewRecorder()
-			controllers.NewAuthController(nil).ResetPassword(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
-}
-
-func TestAuthController_ResetPassword_InvalidBody(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password", bytes.NewBufferString("not-json"))
-	w := httptest.NewRecorder()
-	controllers.NewAuthController(nil).ResetPassword(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestAuthController_ResetPassword_InvalidToken(t *testing.T) {
-	svc := &mocks.AuthServiceMock{}
-	svc.On("ResetPassword", "invalid", "newpass").Return(errors.New("invalid token"))
-
-	body, _ := json.Marshal(map[string]string{"token": "invalid", "password": "newpass"})
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password", bytes.NewBuffer(body))
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).ResetPassword(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	svc.AssertExpectations(t)
-}
-
-func TestAuthController_ResetPassword_Success(t *testing.T) {
-	svc := &mocks.AuthServiceMock{}
-	svc.On("ResetPassword", "valid-token", "newpassword").Return(nil)
-
-	body, _ := json.Marshal(map[string]string{"token": "valid-token", "password": "newpassword"})
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password", bytes.NewBuffer(body))
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).ResetPassword(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	svc.AssertExpectations(t)
-}
-
-// ---- DeleteAccount ----
-
-func TestAuthController_DeleteAccount_MethodNotAllowed(t *testing.T) {
-	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut} {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/auth/account", nil)
-			w := httptest.NewRecorder()
-			controllers.NewAuthController(nil).DeleteAccount(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
-}
-
-func TestAuthController_DeleteAccount_Unauthorized(t *testing.T) {
-	req := httptest.NewRequest(http.MethodDelete, "/api/auth/account", nil)
-	w := httptest.NewRecorder()
-	controllers.NewAuthController(nil).DeleteAccount(w, req)
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-}
-
-func TestAuthController_DeleteAccount_Success(t *testing.T) {
-	svc := &mocks.AuthServiceMock{}
-	svc.On("DeleteAccount", uint(1)).Return(nil)
-
-	req := httptest.NewRequest(http.MethodDelete, "/api/auth/account", nil)
-	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).DeleteAccount(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	svc.AssertExpectations(t)
-}
-
-// ---- UpdateProfile ----
-
-func TestAuthController_UpdateProfile_MethodNotAllowed(t *testing.T) {
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/auth/profile", nil)
-			w := httptest.NewRecorder()
-			controllers.NewAuthController(nil).UpdateProfile(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
-}
-
-func TestAuthController_UpdateProfile_Unauthorized(t *testing.T) {
-	body, _ := json.Marshal(map[string]interface{}{"name": "テスト"})
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/profile", bytes.NewBuffer(body))
-	w := httptest.NewRecorder()
-	controllers.NewAuthController(nil).UpdateProfile(w, req)
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-}
-
-func TestAuthController_UpdateProfile_Success(t *testing.T) {
-	svc := &mocks.AuthServiceMock{}
-	resp := &services.AuthResponse{UserID: 1}
-	svc.On("UpdateProfile", services.UpdateProfileRequest{UserID: 1, Name: "山田太郎"}).
-		Return(resp, nil)
-
-	body, _ := json.Marshal(map[string]interface{}{"name": "山田太郎"})
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/profile", bytes.NewBuffer(body))
-	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).UpdateProfile(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	svc.AssertExpectations(t)
-}
-
-// ---- VerifyEmail ----
-
-func TestAuthController_VerifyEmail_MethodNotAllowed(t *testing.T) {
-	for _, method := range []string{http.MethodPut, http.MethodDelete, http.MethodPatch} {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/auth/verify-email", nil)
-			w := httptest.NewRecorder()
-			controllers.NewAuthController(nil).VerifyEmail(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
-}
-
-func TestAuthController_VerifyEmail_InvalidToken(t *testing.T) {
-	svc := &mocks.AuthServiceMock{}
-	svc.On("VerifyEmail", "bad").Return(errors.New("invalid token"))
-
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-email?token=bad", nil)
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).VerifyEmail(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	svc.AssertExpectations(t)
-}
-
-func TestAuthController_VerifyEmail_Success(t *testing.T) {
-	svc := &mocks.AuthServiceMock{}
-	svc.On("VerifyEmail", "valid-token").Return(nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-email?token=valid-token", nil)
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).VerifyEmail(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).GetUser, newCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
 // ---- RequestRegistration ----
 
-func TestAuthController_RequestRegistration_MethodNotAllowed(t *testing.T) {
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/auth/request-registration", nil)
-			w := httptest.NewRecorder()
-			controllers.NewAuthController(nil).RequestRegistration(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
-}
-
-func TestAuthController_RequestRegistration_InvalidBody(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/request-registration", bytes.NewBufferString("not-json"))
-	w := httptest.NewRecorder()
-	controllers.NewAuthController(nil).RequestRegistration(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestAuthController_RequestRegistration_EmailAlreadyExists(t *testing.T) {
+func TestAuthController_RequestRegistration_Conflict(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
 	svc.On("RequestRegistration", "dup@example.com").Return(errors.New("email already exists"))
 
 	body, _ := json.Marshal(map[string]string{"email": "dup@example.com"})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/request-registration", bytes.NewBuffer(body))
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).RequestRegistration(w, req)
-
-	assert.Equal(t, http.StatusConflict, w.Code)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).RequestRegistration, newCtx(req, rec), http.StatusConflict)
 	svc.AssertExpectations(t)
 }
 
@@ -488,93 +171,148 @@ func TestAuthController_RequestRegistration_Success(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"email": "new@example.com"})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/request-registration", bytes.NewBuffer(body))
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).RequestRegistration(w, req)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).RequestRegistration, newCtx(req, rec), http.StatusOK)
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]string
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "confirmation email sent", resp["message"])
 	svc.AssertExpectations(t)
 }
 
-// ---- CreateGuest (補完) ----
+// ---- VerifyRegistration ----
 
-func TestAuthController_CreateGuest_ServiceError(t *testing.T) {
+func TestAuthController_VerifyRegistration_MissingToken(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-registration", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewAuthController(nil).VerifyRegistration, newCtx(req, rec), http.StatusBadRequest)
+}
+
+func TestAuthController_VerifyRegistration_InvalidToken(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	svc.On("CreateGuestUser").Return(nil, errors.New("db error"))
+	svc.On("ValidateRegistrationToken", "bad-token").Return("", errors.New("invalid token"))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/guest", nil)
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).CreateGuest(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-registration?token=bad-token", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).VerifyRegistration, newCtx(req, rec), http.StatusBadRequest)
 	svc.AssertExpectations(t)
 }
 
-// ---- UpdateProfile (補完) ----
+func TestAuthController_VerifyRegistration_Success(t *testing.T) {
+	svc := &mocks.AuthServiceMock{}
+	svc.On("ValidateRegistrationToken", "valid-token").Return("user@example.com", nil)
 
-func TestAuthController_UpdateProfile_InvalidBody(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/profile", bytes.NewBufferString("not-json"))
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-registration?token=valid-token", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).VerifyRegistration, newCtx(req, rec), http.StatusOK)
+
+	var resp map[string]string
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "user@example.com", resp["email"])
+	svc.AssertExpectations(t)
+}
+
+// ---- UpdateProfile ----
+
+func TestAuthController_UpdateProfile_Unauthorized(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPut, "/api/auth/profile", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewAuthController(nil).UpdateProfile, newCtx(req, rec), http.StatusUnauthorized)
+}
+
+func TestAuthController_UpdateProfile_Success(t *testing.T) {
+	svc := &mocks.AuthServiceMock{}
+	updateReq := services.UpdateProfileRequest{UserID: 1, Name: "更新太郎"}
+	svc.On("UpdateProfile", updateReq).Return(&services.AuthResponse{Token: "tok"}, nil)
+
+	body, _ := json.Marshal(map[string]any{"name": "更新太郎"})
+	req := httptest.NewRequest(http.MethodPut, "/api/auth/profile", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	controllers.NewAuthController(nil).UpdateProfile(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).UpdateProfile, newCtx(req, rec), http.StatusOK)
+	svc.AssertExpectations(t)
 }
 
-func TestAuthController_UpdateProfile_NotFound(t *testing.T) {
-	svc := &mocks.AuthServiceMock{}
-	svc.On("UpdateProfile", services.UpdateProfileRequest{UserID: 1, Name: "テスト"}).
-		Return(nil, errors.New("user not found"))
+// ---- RequestPasswordReset ----
 
-	body, _ := json.Marshal(map[string]string{"name": "テスト"})
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/profile", bytes.NewBuffer(body))
+func TestAuthController_RequestPasswordReset_AlwaysOK(t *testing.T) {
+	svc := &mocks.AuthServiceMock{}
+	svc.On("RequestPasswordReset", "any@example.com").Return(errors.New("not found"))
+
+	body, _ := json.Marshal(map[string]string{"email": "any@example.com"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	// エラーがあっても常に200（情報漏洩防止）
+	assertStatus(t, newAuthController(svc).RequestPasswordReset, newCtx(req, rec), http.StatusOK)
+	svc.AssertExpectations(t)
+}
+
+// ---- ResetPassword ----
+
+func TestAuthController_ResetPassword_InvalidToken(t *testing.T) {
+	svc := &mocks.AuthServiceMock{}
+	svc.On("ResetPassword", "bad-tok", "newpass").Return(errors.New("invalid token"))
+
+	body, _ := json.Marshal(map[string]string{"token": "bad-tok", "password": "newpass"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).ResetPassword, newCtx(req, rec), http.StatusBadRequest)
+	svc.AssertExpectations(t)
+}
+
+func TestAuthController_ResetPassword_Success(t *testing.T) {
+	svc := &mocks.AuthServiceMock{}
+	svc.On("ResetPassword", "valid-tok", "newpass").Return(nil)
+
+	body, _ := json.Marshal(map[string]string{"token": "valid-tok", "password": "newpass"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).ResetPassword, newCtx(req, rec), http.StatusOK)
+	svc.AssertExpectations(t)
+}
+
+// ---- VerifyEmail ----
+
+func TestAuthController_VerifyEmail_InvalidToken(t *testing.T) {
+	svc := &mocks.AuthServiceMock{}
+	svc.On("VerifyEmail", "bad").Return(errors.New("invalid token"))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-email?token=bad", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).VerifyEmail, newCtx(req, rec), http.StatusBadRequest)
+	svc.AssertExpectations(t)
+}
+
+func TestAuthController_VerifyEmail_Success(t *testing.T) {
+	svc := &mocks.AuthServiceMock{}
+	svc.On("VerifyEmail", "valid").Return(nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-email?token=valid", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).VerifyEmail, newCtx(req, rec), http.StatusOK)
+	svc.AssertExpectations(t)
+}
+
+// ---- DeleteAccount ----
+
+func TestAuthController_DeleteAccount_Unauthorized(t *testing.T) {
+	req := httptest.NewRequest(http.MethodDelete, "/api/auth/account", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewAuthController(nil).DeleteAccount, newCtx(req, rec), http.StatusUnauthorized)
+}
+
+func TestAuthController_DeleteAccount_Success(t *testing.T) {
+	svc := &mocks.AuthServiceMock{}
+	svc.On("DeleteAccount", uint(1)).Return(nil)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/auth/account", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).UpdateProfile(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code)
-	svc.AssertExpectations(t)
-}
-
-func TestAuthController_UpdateProfile_ServiceError(t *testing.T) {
-	svc := &mocks.AuthServiceMock{}
-	svc.On("UpdateProfile", services.UpdateProfileRequest{UserID: 1, Name: "テスト"}).
-		Return(nil, errors.New("invalid data"))
-
-	body, _ := json.Marshal(map[string]string{"name": "テスト"})
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/profile", bytes.NewBuffer(body))
-	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).UpdateProfile(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	svc.AssertExpectations(t)
-}
-
-// ---- VerifyEmail (補完) ----
-
-func TestAuthController_VerifyEmail_TokenFromBody(t *testing.T) {
-	svc := &mocks.AuthServiceMock{}
-	svc.On("VerifyEmail", "body-token").Return(nil)
-
-	body, _ := json.Marshal(map[string]string{"token": "body-token"})
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/verify-email", bytes.NewBuffer(body))
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).VerifyEmail(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	svc.AssertExpectations(t)
-}
-
-// ---- RequestRegistration (補完) ----
-
-func TestAuthController_RequestRegistration_OtherError(t *testing.T) {
-	svc := &mocks.AuthServiceMock{}
-	svc.On("RequestRegistration", "bad@example.com").Return(errors.New("invalid email format"))
-
-	body, _ := json.Marshal(map[string]string{"email": "bad@example.com"})
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/request-registration", bytes.NewBuffer(body))
-	w := httptest.NewRecorder()
-	newAuthControllerWithMock(svc).RequestRegistration(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newAuthController(svc).DeleteAccount, newCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }

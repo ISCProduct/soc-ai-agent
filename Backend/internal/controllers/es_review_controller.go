@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/labstack/echo/v4"
 )
 
 type ESReviewController struct{}
@@ -23,21 +25,15 @@ type esReviewRequest struct {
 	CompanyName  string `json:"company_name"`
 }
 
-func (c *ESReviewController) Review(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+// Review POST /api/es/review
+func (c *ESReviewController) Review(ctx echo.Context) error {
 	var req esReviewRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
 	req.ESText = strings.TrimSpace(req.ESText)
 	if req.ESText == "" {
-		http.Error(w, "es_text is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "es_text is required")
 	}
 	if req.QuestionType == "" {
 		req.QuestionType = "その他"
@@ -45,14 +41,13 @@ func (c *ESReviewController) Review(w http.ResponseWriter, r *http.Request) {
 
 	ragURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
 	if ragURL == "" {
-		http.Error(w, "RAG_REVIEW_URL is not configured", http.StatusServiceUnavailable)
-		return
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "RAG_REVIEW_URL is not configured")
 	}
 
+	// RAGサービスへのリクエストボディを構築
 	body, err := json.Marshal(req)
 	if err != nil {
-		http.Error(w, "Failed to encode request", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to encode request")
 	}
 
 	url := strings.TrimRight(ragURL, "/") + "/es/review"
@@ -60,26 +55,22 @@ func (c *ESReviewController) Review(w http.ResponseWriter, r *http.Request) {
 
 	ragReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		http.Error(w, "Failed to create RAG request", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to create RAG request")
 	}
 	ragReq.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(ragReq)
 	if err != nil {
-		http.Error(w, "RAG service unavailable: "+err.Error(), http.StatusBadGateway)
-		return
+		return echo.NewHTTPError(http.StatusBadGateway, "RAG service unavailable: "+err.Error())
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		http.Error(w, "Failed to read RAG response", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to read RAG response")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	w.Write(respBody)
+	// RAGからのレスポンスをそのままクライアントへ転送
+	return ctx.JSONBlob(resp.StatusCode, respBody)
 }

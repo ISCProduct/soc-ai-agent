@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// CollectiveInsightServiceMock CollectiveInsightServiceインターフェースのモック実装
 type CollectiveInsightServiceMock struct {
 	mock.Mock
 }
@@ -29,16 +28,13 @@ func (m *CollectiveInsightServiceMock) GetTopPassRateCompanies(limit int) ([]mod
 }
 
 func (m *CollectiveInsightServiceMock) UpdateConsent(userID uint, allow bool) error {
-	args := m.Called(userID, allow)
-	return args.Error(0)
+	return m.Called(userID, allow).Error(0)
 }
 
 func (m *CollectiveInsightServiceMock) RecordAction(userID uint, sessionID string, companyID uint, actionType string) error {
-	args := m.Called(userID, sessionID, companyID, actionType)
-	return args.Error(0)
+	return m.Called(userID, sessionID, companyID, actionType).Error(0)
 }
 
 func (m *CollectiveInsightServiceMock) RebuildSummaries() error {
-	args := m.Called()
-	return args.Error(0)
+	return m.Called().Error(0)
 }

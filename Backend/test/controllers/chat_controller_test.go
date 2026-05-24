@@ -18,7 +18,6 @@ import (
 	"Backend/internal/services"
 	"Backend/test/controllers/mocks"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -34,28 +33,18 @@ func newChatController(
 
 // ===== GetHistory =====
 
-func TestChatController_GetHistory_MethodNotAllowed(t *testing.T) {
-	c := controllers.NewChatController(nil, nil, nil, nil, nil)
-	req := httptest.NewRequest(http.MethodPost, "/api/chat/history?session_id=s1", nil)
-	w := httptest.NewRecorder()
-	c.GetHistory(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
-
 func TestChatController_GetHistory_Unauthorized(t *testing.T) {
 	c := controllers.NewChatController(nil, nil, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/history?session_id=s1", nil)
-	w := httptest.NewRecorder()
-	c.GetHistory(w, req)
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, c.GetHistory, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestChatController_GetHistory_MissingSessionID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/history", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	controllers.NewChatController(nil, nil, nil, nil, nil).GetHistory(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewChatController(nil, nil, nil, nil, nil).GetHistory, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestChatController_GetHistory_ServiceError(t *testing.T) {
@@ -64,10 +53,8 @@ func TestChatController_GetHistory_ServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/history?session_id=s1", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(chatSvc, nil, nil, nil, nil).GetHistory(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(chatSvc, nil, nil, nil, nil).GetHistory, newCtx(req, rec), http.StatusInternalServerError)
 	chatSvc.AssertExpectations(t)
 }
 
@@ -78,10 +65,8 @@ func TestChatController_GetHistory_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/history?session_id=s1", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(chatSvc, nil, nil, nil, nil).GetHistory(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(chatSvc, nil, nil, nil, nil).GetHistory, newCtx(req, rec), http.StatusOK)
 	chatSvc.AssertExpectations(t)
 }
 
@@ -93,37 +78,25 @@ func TestChatController_GetHistory_Forbidden(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/history?session_id=s1", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(chatSvc, nil, nil, nil, nil).GetHistory(w, req)
-
-	assert.Equal(t, http.StatusForbidden, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(chatSvc, nil, nil, nil, nil).GetHistory, newCtx(req, rec), http.StatusForbidden)
 	chatSvc.AssertExpectations(t)
 }
 
 // ===== GetScores =====
 
-func TestChatController_GetScores_MethodNotAllowed(t *testing.T) {
-	c := controllers.NewChatController(nil, nil, nil, nil, nil)
-	req := httptest.NewRequest(http.MethodPost, "/api/chat/scores?session_id=s1", nil)
-	w := httptest.NewRecorder()
-	c.GetScores(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
-
 func TestChatController_GetScores_Unauthorized(t *testing.T) {
 	c := controllers.NewChatController(nil, nil, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/scores?session_id=s1", nil)
-	w := httptest.NewRecorder()
-	c.GetScores(w, req)
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, c.GetScores, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestChatController_GetScores_MissingSessionID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/scores", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	controllers.NewChatController(nil, nil, nil, nil, nil).GetScores(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewChatController(nil, nil, nil, nil, nil).GetScores, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestChatController_GetScores_ServiceError(t *testing.T) {
@@ -132,10 +105,8 @@ func TestChatController_GetScores_ServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/scores?session_id=s1", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(chatSvc, nil, nil, nil, nil).GetScores(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(chatSvc, nil, nil, nil, nil).GetScores, newCtx(req, rec), http.StatusInternalServerError)
 	chatSvc.AssertExpectations(t)
 }
 
@@ -146,46 +117,35 @@ func TestChatController_GetScores_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/scores?session_id=s1", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(chatSvc, nil, nil, nil, nil).GetScores(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(chatSvc, nil, nil, nil, nil).GetScores, newCtx(req, rec), http.StatusOK)
 	chatSvc.AssertExpectations(t)
 }
 
 // ===== ToggleFavorite =====
 
-func TestChatController_ToggleFavorite_MethodNotAllowed(t *testing.T) {
-	c := controllers.NewChatController(nil, nil, nil, nil, nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/chat/favorite", nil)
-	w := httptest.NewRecorder()
-	c.ToggleFavorite(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
-
 func TestChatController_ToggleFavorite_Unauthorized(t *testing.T) {
 	c := controllers.NewChatController(nil, nil, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/favorite", nil)
-	w := httptest.NewRecorder()
-	c.ToggleFavorite(w, req)
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, c.ToggleFavorite, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestChatController_ToggleFavorite_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/favorite", bytes.NewBufferString("not-json"))
+	req.Header.Set("Content-Type", "application/json")
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	controllers.NewChatController(nil, nil, nil, nil, nil).ToggleFavorite(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewChatController(nil, nil, nil, nil, nil).ToggleFavorite, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestChatController_ToggleFavorite_MissingMatchID(t *testing.T) {
 	body, _ := json.Marshal(map[string]uint{"match_id": 0})
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/favorite", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	controllers.NewChatController(nil, nil, nil, nil, nil).ToggleFavorite(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewChatController(nil, nil, nil, nil, nil).ToggleFavorite, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestChatController_ToggleFavorite_Forbidden(t *testing.T) {
@@ -194,11 +154,10 @@ func TestChatController_ToggleFavorite_Forbidden(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]uint{"match_id": 5})
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/favorite", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(nil, matchSvc, nil, nil, nil).ToggleFavorite(w, req)
-
-	assert.Equal(t, http.StatusForbidden, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(nil, matchSvc, nil, nil, nil).ToggleFavorite, newCtx(req, rec), http.StatusForbidden)
 	matchSvc.AssertExpectations(t)
 }
 
@@ -208,11 +167,10 @@ func TestChatController_ToggleFavorite_ServiceError(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]uint{"match_id": 5})
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/favorite", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(nil, matchSvc, nil, nil, nil).ToggleFavorite(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(nil, matchSvc, nil, nil, nil).ToggleFavorite, newCtx(req, rec), http.StatusInternalServerError)
 	matchSvc.AssertExpectations(t)
 }
 
@@ -222,47 +180,35 @@ func TestChatController_ToggleFavorite_Success(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]uint{"match_id": 5})
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/favorite", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(nil, matchSvc, nil, nil, nil).ToggleFavorite(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(nil, matchSvc, nil, nil, nil).ToggleFavorite, newCtx(req, rec), http.StatusOK)
 	matchSvc.AssertExpectations(t)
 }
 
 // ===== GetAnalysisSummary =====
 
-func TestChatController_GetAnalysisSummary_MethodNotAllowed(t *testing.T) {
-	c := controllers.NewChatController(nil, nil, nil, nil, nil)
-	req := httptest.NewRequest(http.MethodPost, "/api/chat/analysis?session_id=s1", nil)
-	w := httptest.NewRecorder()
-	c.GetAnalysisSummary(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
-
 func TestChatController_GetAnalysisSummary_Unauthorized(t *testing.T) {
 	c := controllers.NewChatController(nil, nil, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/analysis?session_id=s1", nil)
-	w := httptest.NewRecorder()
-	c.GetAnalysisSummary(w, req)
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, c.GetAnalysisSummary, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestChatController_GetAnalysisSummary_MissingSessionID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/analysis", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	controllers.NewChatController(nil, nil, nil, nil, nil).GetAnalysisSummary(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewChatController(nil, nil, nil, nil, nil).GetAnalysisSummary, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestChatController_GetAnalysisSummary_ServiceUnavailable(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/analysis?session_id=s1", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
+	rec := httptest.NewRecorder()
 	// analysisService=nilを渡す
-	controllers.NewChatController(nil, nil, nil, nil, nil).GetAnalysisSummary(w, req)
-	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assertStatus(t, controllers.NewChatController(nil, nil, nil, nil, nil).GetAnalysisSummary, newCtx(req, rec), http.StatusServiceUnavailable)
 }
 
 func TestChatController_GetAnalysisSummary_ServiceError(t *testing.T) {
@@ -271,10 +217,8 @@ func TestChatController_GetAnalysisSummary_ServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/analysis?session_id=s1", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(nil, nil, analysisSvc, nil, nil).GetAnalysisSummary(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(nil, nil, analysisSvc, nil, nil).GetAnalysisSummary, newCtx(req, rec), http.StatusInternalServerError)
 	analysisSvc.AssertExpectations(t)
 }
 
@@ -285,46 +229,35 @@ func TestChatController_GetAnalysisSummary_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/analysis?session_id=s1", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(nil, nil, analysisSvc, nil, nil).GetAnalysisSummary(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(nil, nil, analysisSvc, nil, nil).GetAnalysisSummary, newCtx(req, rec), http.StatusOK)
 	analysisSvc.AssertExpectations(t)
 }
 
 // ===== SendReport =====
 
-func TestChatController_SendReport_MethodNotAllowed(t *testing.T) {
-	c := controllers.NewChatController(nil, nil, nil, nil, nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/chat/send-report", nil)
-	w := httptest.NewRecorder()
-	c.SendReport(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
-
 func TestChatController_SendReport_Unauthorized(t *testing.T) {
 	c := controllers.NewChatController(nil, nil, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/send-report", nil)
-	w := httptest.NewRecorder()
-	c.SendReport(w, req)
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, c.SendReport, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestChatController_SendReport_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/send-report", bytes.NewBufferString("not-json"))
+	req.Header.Set("Content-Type", "application/json")
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	controllers.NewChatController(nil, nil, nil, nil, nil).SendReport(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewChatController(nil, nil, nil, nil, nil).SendReport, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestChatController_SendReport_MissingSessionID(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"session_id": ""})
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/send-report", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	controllers.NewChatController(nil, nil, nil, nil, nil).SendReport(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewChatController(nil, nil, nil, nil, nil).SendReport, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestChatController_SendReport_UserNotFound(t *testing.T) {
@@ -333,11 +266,10 @@ func TestChatController_SendReport_UserNotFound(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"session_id": "s1"})
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/send-report", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(nil, nil, nil, userRepo, nil).SendReport(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(nil, nil, nil, userRepo, nil).SendReport, newCtx(req, rec), http.StatusNotFound)
 	userRepo.AssertExpectations(t)
 }
 
@@ -348,11 +280,10 @@ func TestChatController_SendReport_GuestForbidden(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"session_id": "s1"})
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/send-report", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(nil, nil, nil, userRepo, nil).SendReport(w, req)
-
-	assert.Equal(t, http.StatusForbidden, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(nil, nil, nil, userRepo, nil).SendReport, newCtx(req, rec), http.StatusForbidden)
 	userRepo.AssertExpectations(t)
 }
 
@@ -365,11 +296,10 @@ func TestChatController_SendReport_AnalysisError(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"session_id": "s1"})
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/send-report", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(nil, nil, analysisSvc, userRepo, nil).SendReport(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(nil, nil, analysisSvc, userRepo, nil).SendReport, newCtx(req, rec), http.StatusInternalServerError)
 	analysisSvc.AssertExpectations(t)
 }
 
@@ -390,29 +320,19 @@ func TestChatController_SendReport_Success(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"session_id": "s1"})
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/send-report", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(chatSvc, matchSvc, analysisSvc, userRepo, emailSvc).SendReport(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(chatSvc, matchSvc, analysisSvc, userRepo, emailSvc).SendReport, newCtx(req, rec), http.StatusOK)
 }
 
 // ===== GetSessions =====
 
-func TestChatController_GetSessions_MethodNotAllowed(t *testing.T) {
-	c := controllers.NewChatController(nil, nil, nil, nil, nil)
-	req := httptest.NewRequest(http.MethodPost, "/api/chat/sessions", nil)
-	w := httptest.NewRecorder()
-	c.GetSessions(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
-
 func TestChatController_GetSessions_Unauthorized(t *testing.T) {
 	c := controllers.NewChatController(nil, nil, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/sessions", nil)
-	w := httptest.NewRecorder()
-	c.GetSessions(w, req)
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, c.GetSessions, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestChatController_GetSessions_ServiceError(t *testing.T) {
@@ -421,10 +341,8 @@ func TestChatController_GetSessions_ServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/sessions", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(chatSvc, nil, nil, nil, nil).GetSessions(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(chatSvc, nil, nil, nil, nil).GetSessions, newCtx(req, rec), http.StatusInternalServerError)
 	chatSvc.AssertExpectations(t)
 }
 
@@ -435,37 +353,25 @@ func TestChatController_GetSessions_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/sessions", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(chatSvc, nil, nil, nil, nil).GetSessions(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(chatSvc, nil, nil, nil, nil).GetSessions, newCtx(req, rec), http.StatusOK)
 	chatSvc.AssertExpectations(t)
 }
 
 // ===== GetRecommendations =====
 
-func TestChatController_GetRecommendations_MethodNotAllowed(t *testing.T) {
-	c := controllers.NewChatController(nil, nil, nil, nil, nil)
-	req := httptest.NewRequest(http.MethodPost, "/api/chat/recommendations?session_id=s1", nil)
-	w := httptest.NewRecorder()
-	c.GetRecommendations(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
-
 func TestChatController_GetRecommendations_Unauthorized(t *testing.T) {
 	c := controllers.NewChatController(nil, nil, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations?session_id=s1", nil)
-	w := httptest.NewRecorder()
-	c.GetRecommendations(w, req)
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, c.GetRecommendations, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestChatController_GetRecommendations_MissingSessionID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	controllers.NewChatController(nil, nil, nil, nil, nil).GetRecommendations(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewChatController(nil, nil, nil, nil, nil).GetRecommendations, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestChatController_GetRecommendations_NoMatches_ReturnEmpty(t *testing.T) {
@@ -477,10 +383,8 @@ func TestChatController_GetRecommendations_NoMatches_ReturnEmpty(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations?session_id=s1", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(chatSvc, matchSvc, nil, nil, nil).GetRecommendations(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(chatSvc, matchSvc, nil, nil, nil).GetRecommendations, newCtx(req, rec), http.StatusOK)
 	matchSvc.AssertExpectations(t)
 }
 
@@ -495,9 +399,7 @@ func TestChatController_GetRecommendations_WithMatches_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations?session_id=s1", nil)
 	req = withUserID(req, 1)
-	w := httptest.NewRecorder()
-	newChatController(chatSvc, matchSvc, nil, nil, nil).GetRecommendations(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(chatSvc, matchSvc, nil, nil, nil).GetRecommendations, newCtx(req, rec), http.StatusOK)
 	matchSvc.AssertExpectations(t)
 }

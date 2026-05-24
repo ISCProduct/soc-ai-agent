@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// ApplicationServiceMock ApplicationServiceインターフェースのモック実装
 type ApplicationServiceMock struct {
 	mock.Mock
 }
@@ -35,10 +34,10 @@ func (m *ApplicationServiceMock) GetApplicationsByUser(userID uint) ([]*entity.U
 	return args.Get(0).([]*entity.UserApplicationStatus), args.Error(1)
 }
 
-func (m *ApplicationServiceMock) GetCorrelation(companyID uint) ([]map[string]interface{}, error) {
+func (m *ApplicationServiceMock) GetCorrelation(companyID uint) ([]map[string]any, error) {
 	args := m.Called(companyID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).([]map[string]interface{}), args.Error(1)
+	return args.Get(0).([]map[string]any), args.Error(1)
 }

@@ -3,11 +3,11 @@ package controllers
 import (
 	"Backend/domain/repository"
 	"Backend/internal/services"
-	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
+
+	"github.com/labstack/echo/v4"
 )
 
 // AdminInterviewController provides admin endpoints for viewing interview sessions and videos.
@@ -31,14 +31,9 @@ func NewAdminInterviewController(
 
 // ListSessions handles GET /api/admin/interviews
 // Returns all interview sessions with pagination.
-func (c *AdminInterviewController) ListSessions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	page := parseIntQuery(r, "page", 1)
-	limit := parseIntQuery(r, "limit", 20)
+func (c *AdminInterviewController) ListSessions(ctx echo.Context) error {
+	page := echoIntQuery(ctx, "page", 1)
+	limit := echoIntQuery(ctx, "limit", 20)
 	if limit > 100 {
 		limit = 100
 	}
@@ -46,12 +41,10 @@ func (c *AdminInterviewController) ListSessions(w http.ResponseWriter, r *http.R
 
 	sessions, total, err := c.interviewService.ListAllSessionsAdmin(limit, offset)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"sessions": sessions,
 		"total":    total,
 		"page":     page,
@@ -59,120 +52,56 @@ func (c *AdminInterviewController) ListSessions(w http.ResponseWriter, r *http.R
 	})
 }
 
-// ListVideos handles GET /api/admin/interviews/{id}/videos
-func (c *AdminInterviewController) ListVideos(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	sessionID, err := extractAdminInterviewID(r.URL.Path, "/videos")
+// ListVideos handles GET /api/admin/interviews/:id/videos
+func (c *AdminInterviewController) ListVideos(ctx echo.Context) error {
+	sessionID, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
 	if err != nil {
-		http.Error(w, "Invalid session ID", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
 	}
 
-	videos, err := c.videoRepo.FindBySessionID(r.Context(), sessionID)
+	videos, err := c.videoRepo.FindBySessionID(ctx.Request().Context(), uint(sessionID))
 	if err != nil {
-		http.Error(w, "Failed to fetch videos", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch videos")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"videos": videos,
 	})
 }
 
-// VideoURL handles GET /api/admin/interviews/{id}/videos/{video_id}/url
+// VideoURL handles GET /api/admin/interviews/:id/videos/:video_id/url
 // Returns a presigned S3 URL valid for 15 minutes.
-func (c *AdminInterviewController) VideoURL(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	videoID, err := extractVideoID(r.URL.Path)
+func (c *AdminInterviewController) VideoURL(ctx echo.Context) error {
+	videoID, err := strconv.ParseUint(ctx.Param("video_id"), 10, 32)
 	if err != nil {
-		http.Error(w, "Invalid video ID", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid video ID")
 	}
 
-	video, err := c.videoRepo.FindByID(r.Context(), videoID)
+	video, err := c.videoRepo.FindByID(ctx.Request().Context(), uint(videoID))
 	if err != nil || video == nil {
-		http.Error(w, "Video not found", http.StatusNotFound)
-		return
+		return echo.NewHTTPError(http.StatusNotFound, "Video not found")
 	}
 
 	if video.Status != "done" || video.DriveFileID == "" {
-		http.Error(w, "Video is not available yet", http.StatusUnprocessableEntity)
-		return
+		return echo.NewHTTPError(http.StatusUnprocessableEntity, "Video is not available yet")
 	}
 
 	if c.s3Service == nil {
 		// S3 not configured: return the stored URL directly
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		return ctx.JSON(http.StatusOK, map[string]string{
 			"url":        video.DriveFileURL,
 			"expires_at": "",
 		})
-		return
 	}
 
 	expires := 15 * time.Minute
-	presignedURL, err := c.s3Service.PresignGetURL(r.Context(), video.DriveFileID, expires)
+	presignedURL, err := c.s3Service.PresignGetURL(ctx.Request().Context(), video.DriveFileID, expires)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	return ctx.JSON(http.StatusOK, map[string]string{
 		"url":        presignedURL,
 		"expires_at": time.Now().Add(expires).UTC().Format(time.RFC3339),
 	})
-}
-
-// Route dispatches /api/admin/interviews/ sub-paths.
-func (c *AdminInterviewController) Route(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
-
-	// /api/admin/interviews/{id}/videos/{video_id}/url
-	if strings.HasSuffix(path, "/url") && strings.Contains(path, "/videos/") {
-		c.VideoURL(w, r)
-		return
-	}
-	// /api/admin/interviews/{id}/videos
-	if strings.HasSuffix(path, "/videos") {
-		c.ListVideos(w, r)
-		return
-	}
-	http.Error(w, "not found", http.StatusNotFound)
-}
-
-func extractAdminInterviewID(path, suffix string) (uint, error) {
-	// /api/admin/interviews/{id}/videos → extract {id}
-	trimmed := strings.TrimPrefix(path, "/api/admin/interviews/")
-	if idx := strings.Index(trimmed, "/"); idx != -1 {
-		trimmed = trimmed[:idx]
-	}
-	trimmed = strings.TrimSuffix(trimmed, suffix)
-	id, err := strconv.ParseUint(trimmed, 10, 32)
-	return uint(id), err
-}
-
-func extractVideoID(path string) (uint, error) {
-	// /api/admin/interviews/{id}/videos/{video_id}/url
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	// parts: ["api","admin","interviews","{id}","videos","{video_id}","url"]
-	for i, p := range parts {
-		if p == "videos" && i+1 < len(parts) {
-			vidStr := parts[i+1]
-			// remove trailing /url if present
-			vidStr = strings.TrimSuffix(vidStr, "/url")
-			id, err := strconv.ParseUint(vidStr, 10, 32)
-			return uint(id), err
-		}
-	}
-	return 0, strconv.ErrSyntax
 }

@@ -16,15 +16,17 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/labstack/echo/v4"
 )
 
 type ChatController struct {
-	chatService      ifaces.ChatService
-	matchingService  ifaces.MatchingService
-	analysisService  ifaces.AnalysisScoringService
-	userRepo         repository.UserRepository
-	emailService     ifaces.EmailService
-	matchingTimers   sync.Map // key: sessionID, value: *time.Timer（デバウンス用）
+	chatService     ifaces.ChatService
+	matchingService ifaces.MatchingService
+	analysisService ifaces.AnalysisScoringService
+	userRepo        repository.UserRepository
+	emailService    ifaces.EmailService
+	matchingTimers  sync.Map // key: sessionID, value: *time.Timer（デバウンス用）
 }
 
 const minEvaluatedCategoriesForFinal = 4
@@ -127,128 +129,92 @@ func (c *ChatController) scheduleBackgroundMatching(userID uint, sessionID strin
 }
 
 // Chat チャット処理
-func (c *ChatController) Chat(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+func (c *ChatController) Chat(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
 	var req services.ChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
 
 	// user_id は認証ヘッダーから設定（リクエストボディの値は無視）
 	req.UserID = userID
 
 	if req.SessionID == "" || req.Message == "" {
-		http.Error(w, "Missing required fields", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Missing required fields")
 	}
 
-	resp, err := c.chatService.ProcessChat(r.Context(), req)
+	resp, err := c.chatService.ProcessChat(ctx.Request().Context(), req)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
 	// マッチング計算をデバウンスして非同期実行（同一セッションへの連続リクエストを1回にまとめる）
 	c.scheduleBackgroundMatching(req.UserID, req.SessionID)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	return ctx.JSON(http.StatusOK, resp)
 }
 
 // GetHistory チャット履歴取得
-func (c *ChatController) GetHistory(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+func (c *ChatController) GetHistory(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	sessionID := r.URL.Query().Get("session_id")
+	sessionID := ctx.QueryParam("session_id")
 	if sessionID == "" {
-		http.Error(w, "session_id is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
 	}
 
 	history, err := c.chatService.GetChatHistory(sessionID)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
 	// セッション所有者チェック：最初のメッセージの UserID と照合
 	if len(history) > 0 && history[0].UserID != 0 && history[0].UserID != userID {
-		http.Error(w, "Forbidden", http.StatusForbidden)
-		return
+		return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(history)
+	return ctx.JSON(http.StatusOK, history)
 }
 
 // GetScores ユーザースコア取得
-func (c *ChatController) GetScores(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+func (c *ChatController) GetScores(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	sessionID := r.URL.Query().Get("session_id")
+	sessionID := ctx.QueryParam("session_id")
 	if sessionID == "" {
-		http.Error(w, "session_id is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
 	}
 
 	scores, err := c.chatService.GetUserScores(userID, sessionID)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(scores)
+	return ctx.JSON(http.StatusOK, scores)
 }
 
 // GetRecommendations トップ適性企業を取得
-func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+func (c *ChatController) GetRecommendations(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	sessionID := r.URL.Query().Get("session_id")
-	limitStr := r.URL.Query().Get("limit")
+	sessionID := ctx.QueryParam("session_id")
+	limitStr := ctx.QueryParam("limit")
 
 	if sessionID == "" {
-		http.Error(w, "session_id is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
 	}
 
 	limit := 10 // デフォルト
@@ -261,7 +227,7 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 
 	// 既存のマッチング結果を取得（事前計算済みを想定）
 	log.Printf("[GetRecommendations] Fetching pre-calculated matches for user %d, session %s\n", userID, sessionID)
-	matches, err := c.matchingService.GetTopMatches(r.Context(), userID, sessionID, limit)
+	matches, err := c.matchingService.GetTopMatches(ctx.Request().Context(), userID, sessionID, limit)
 	log.Printf("[GetRecommendations] Retrieved %d matches in fast mode\n", len(matches))
 
 	if err != nil || len(matches) == 0 {
@@ -287,7 +253,7 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 		}
 
 		type RecommendationResponse struct {
-			Recommendations     []interface{}                 `json:"recommendations"`
+			Recommendations     []any                 `json:"recommendations"`
 			Reason              string                        `json:"reason,omitempty"`
 			Diagnostics         *services.MatchingDiagnostics `json:"diagnostics,omitempty"`
 			EvaluatedCategories int                           `json:"evaluated_categories"`
@@ -297,16 +263,14 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 		evaluatedCategories := countEvaluatedCategories(userScores)
 		isProvisional := evaluatedCategories < minEvaluatedCategoriesForFinal
 		response := RecommendationResponse{
-			Recommendations:     []interface{}{},
+			Recommendations:     []any{},
 			Reason:              reason,
 			Diagnostics:         diagnostics,
 			EvaluatedCategories: evaluatedCategories,
 			IsProvisional:       isProvisional,
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-		return
+		return ctx.JSON(http.StatusOK, response)
 	}
 
 	// フロントエンド用のレスポンス形式に変換
@@ -402,80 +366,59 @@ func (c *ChatController) GetRecommendations(w http.ResponseWriter, r *http.Reque
 		IsProvisional:       isProvisional,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	return ctx.JSON(http.StatusOK, response)
 }
 
 // ToggleFavorite お気に入りをトグル (POST /api/chat/favorite)
-func (c *ChatController) ToggleFavorite(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+func (c *ChatController) ToggleFavorite(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
 	var req struct {
 		MatchID uint `json:"match_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MatchID == 0 {
-		http.Error(w, "match_id is required", http.StatusBadRequest)
-		return
+	if err := ctx.Bind(&req); err != nil || req.MatchID == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "match_id is required")
 	}
 
 	if err := c.matchingService.ToggleFavorite(req.MatchID, userID); err != nil {
 		if err == services.ErrForbidden {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
+			return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
 		}
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	return ctx.JSON(http.StatusOK, map[string]bool{"ok": true})
 }
 
 // GetAnalysisSummary 4分析スコアと進捗を取得
-func (c *ChatController) GetAnalysisSummary(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+func (c *ChatController) GetAnalysisSummary(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	sessionID := r.URL.Query().Get("session_id")
+	sessionID := ctx.QueryParam("session_id")
 	if sessionID == "" {
-		http.Error(w, "session_id is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
 	}
 
 	if c.analysisService == nil {
-		http.Error(w, "analysis service not available", http.StatusServiceUnavailable)
-		return
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "analysis service not available")
 	}
 
-	summary, err := c.analysisService.BuildAnalysisSummary(r.Context(), userID, sessionID)
+	summary, err := c.analysisService.BuildAnalysisSummary(ctx.Request().Context(), userID, sessionID)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(summary)
+	return ctx.JSON(http.StatusOK, summary)
 }
 
 // generateReasonForCategory カテゴリごとのマッチング理由を生成（フォールバック用）
-func generateReasonForCategory(category string, score int) string {
+func generateReasonForCategory(category string, _ int) string {
 	reasons := map[string]string{
 		"技術志向":        "最新技術への探求心と技術的な深掘りが評価されています。技術主導型の企業で活躍できるでしょう。",
 		"コミュニケーション能力": "優れた対話力と説明力が認められています。チーム協業が重視される企業に適しています。",
@@ -568,52 +511,41 @@ func splitTechStack(techStack string) []string {
 }
 
 // SendReport チャット分析結果をメールで送信
-func (c *ChatController) SendReport(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+func (c *ChatController) SendReport(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
 	var req struct {
 		SessionID string `json:"session_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
 	if req.SessionID == "" {
-		http.Error(w, "session_id is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
 	}
 
 	// ユーザー情報取得
 	user, err := c.userRepo.GetUserByID(userID)
 	if err != nil || user == nil {
-		http.Error(w, "User not found", http.StatusNotFound)
-		return
+		return echo.NewHTTPError(http.StatusNotFound, "User not found")
 	}
 
 	// ゲストユーザーは送信不可
 	if user.IsGuest {
-		http.Error(w, "Guest users cannot receive email reports", http.StatusForbidden)
-		return
+		return echo.NewHTTPError(http.StatusForbidden, "Guest users cannot receive email reports")
 	}
 
 	// 分析サマリー取得
-	summary, err := c.analysisService.BuildAnalysisSummary(r.Context(), userID, req.SessionID)
+	summary, err := c.analysisService.BuildAnalysisSummary(ctx.Request().Context(), userID, req.SessionID)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
 	// おすすめ企業取得（最大5件）
-	matches, _ := c.matchingService.GetTopMatches(r.Context(), userID, req.SessionID, 5)
+	matches, _ := c.matchingService.GetTopMatches(ctx.Request().Context(), userID, req.SessionID, 5)
 	userScores, _ := c.chatService.GetUserScores(userID, req.SessionID)
 
 	var companies []services.EmailReportCompany
@@ -632,35 +564,25 @@ func (c *ChatController) SendReport(w http.ResponseWriter, r *http.Request) {
 	// メール送信
 	if err := c.emailService.SendAnalysisReport(user, summary, companies, req.SessionID); err != nil {
 		log.Printf("[SendReport] Failed to send email: %v\n", err)
-		http.Error(w, "Failed to send email", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to send email")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	return ctx.JSON(http.StatusOK, map[string]string{
 		"message": "分析レポートを " + user.Email + " に送信しました",
 	})
 }
 
 // GetSessions ユーザーのチャットセッション一覧を取得
-func (c *ChatController) GetSessions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	userID, err := authenticatedUserID(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+func (c *ChatController) GetSessions(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
 	sessions, err := c.chatService.GetUserChatSessions(userID)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sessions)
+	return ctx.JSON(http.StatusOK, sessions)
 }

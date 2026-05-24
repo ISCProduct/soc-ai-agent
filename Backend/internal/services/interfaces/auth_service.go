@@ -2,7 +2,6 @@ package interfaces
 
 import "Backend/internal/services"
 
-// AuthService 認証サービスのインターフェース
 type AuthService interface {
 	Register(req services.RegisterRequest) (*services.AuthResponse, error)
 	Login(req services.LoginRequest) (*services.AuthResponse, error)

@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// ResumeServiceMock ResumeServiceインターフェースのモック実装
 type ResumeServiceMock struct {
 	mock.Mock
 }
@@ -24,11 +23,10 @@ func (m *ResumeServiceMock) Upload(userID uint, sessionID, sourceType, sourceURL
 }
 
 func (m *ResumeServiceMock) EnsureDocumentOwner(documentID uint, requestingUserID uint) error {
-	args := m.Called(documentID, requestingUserID)
-	return args.Error(0)
+	return m.Called(documentID, requestingUserID).Error(0)
 }
 
-func (m *ResumeServiceMock) ReviewDocument(documentID uint, requestingUserID uint, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+func (m *ResumeServiceMock) ReviewDocument(documentID uint, requestingUserID uint, companyName, jobTitle, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
 	args := m.Called(documentID, requestingUserID, companyName, jobTitle, candidateType)
 	var review *models.ResumeReview
 	var items []models.ResumeReviewItem
@@ -42,8 +40,7 @@ func (m *ResumeServiceMock) ReviewDocument(documentID uint, requestingUserID uin
 }
 
 func (m *ResumeServiceMock) ReviewDocumentStream(ctx context.Context, documentID uint, requestingUserID uint, companyName, jobTitle, candidateType string, w http.ResponseWriter) error {
-	args := m.Called(ctx, documentID, requestingUserID, companyName, jobTitle, candidateType, w)
-	return args.Error(0)
+	return m.Called(ctx, documentID, requestingUserID, companyName, jobTitle, candidateType, w).Error(0)
 }
 
 func (m *ResumeServiceMock) OpenAnnotatedFile(documentID uint, requestingUserID uint) (*services.AnnotatedFile, error) {
