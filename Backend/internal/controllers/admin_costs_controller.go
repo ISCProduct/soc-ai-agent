@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/internal/services"
+	"Backend/internal/services/interfaces"
 	"net/http"
 	"time"
 
@@ -9,11 +10,11 @@ import (
 )
 
 type AdminCostsController struct {
-	costService          *services.APICostService
-	realtimeUsageService *services.RealtimeUsageService
+	costService          interfaces.APICostService
+	realtimeUsageService interfaces.RealtimeUsageService
 }
 
-func NewAdminCostsController(costService *services.APICostService, realtimeUsageService *services.RealtimeUsageService) *AdminCostsController {
+func NewAdminCostsController(costService interfaces.APICostService, realtimeUsageService interfaces.RealtimeUsageService) *AdminCostsController {
 	return &AdminCostsController{
 		costService:          costService,
 		realtimeUsageService: realtimeUsageService,

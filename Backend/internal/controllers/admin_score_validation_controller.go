@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/interfaces"
 	"net/http"
 	"strconv"
 
@@ -10,10 +10,10 @@ import (
 
 // AdminScoreValidationController スコア精度検証・A/Bテスト管理API
 type AdminScoreValidationController struct {
-	svc *services.ScoreValidationService
+	svc interfaces.ScoreValidationService
 }
 
-func NewAdminScoreValidationController(svc *services.ScoreValidationService) *AdminScoreValidationController {
+func NewAdminScoreValidationController(svc interfaces.ScoreValidationService) *AdminScoreValidationController {
 	return &AdminScoreValidationController{svc: svc}
 }
 

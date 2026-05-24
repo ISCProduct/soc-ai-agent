@@ -4,6 +4,7 @@ import (
 	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/services"
+	ifaces "Backend/internal/services/interfaces"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,11 +21,11 @@ import (
 )
 
 type ChatController struct {
-	chatService     *services.ChatService
-	matchingService *services.MatchingService
-	analysisService *services.AnalysisScoringService
+	chatService     ifaces.ChatService
+	matchingService ifaces.MatchingService
+	analysisService ifaces.AnalysisScoringService
 	userRepo        repository.UserRepository
-	emailService    *services.EmailService
+	emailService    ifaces.EmailService
 	matchingTimers  sync.Map // key: sessionID, value: *time.Timer（デバウンス用）
 }
 
@@ -32,7 +33,7 @@ const minEvaluatedCategoriesForFinal = 4
 const matchingRetryMaxAttempts = 3
 const matchingDebounceDelay = 3 * time.Second
 
-func NewChatController(chatService *services.ChatService, matchingService *services.MatchingService, analysisService *services.AnalysisScoringService, userRepo repository.UserRepository, emailService *services.EmailService) *ChatController {
+func NewChatController(chatService ifaces.ChatService, matchingService ifaces.MatchingService, analysisService ifaces.AnalysisScoringService, userRepo repository.UserRepository, emailService ifaces.EmailService) *ChatController {
 	return &ChatController{
 		chatService:     chatService,
 		matchingService: matchingService,

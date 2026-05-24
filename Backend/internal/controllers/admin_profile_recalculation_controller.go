@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/interfaces"
 	"net/http"
 	"strconv"
 
@@ -10,10 +10,10 @@ import (
 
 // AdminProfileRecalculationController 企業プロファイル再計算管理コントローラー
 type AdminProfileRecalculationController struct {
-	service *services.ProfileRecalculationService
+	service interfaces.ProfileRecalculationService
 }
 
-func NewAdminProfileRecalculationController(service *services.ProfileRecalculationService) *AdminProfileRecalculationController {
+func NewAdminProfileRecalculationController(service interfaces.ProfileRecalculationService) *AdminProfileRecalculationController {
 	return &AdminProfileRecalculationController{service: service}
 }
 
