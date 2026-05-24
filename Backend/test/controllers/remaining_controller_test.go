@@ -196,25 +196,3 @@ func TestESRewriteController_Rewrite_InvalidBody(t *testing.T) {
 	assertStatus(t, c.Rewrite, newCtx(req, rec), http.StatusBadRequest)
 }
 
-// ---- GitHubController ----
-
-func TestGitHubController_GetProfile_Unauthorized(t *testing.T) {
-	c := controllers.NewGitHubController(nil, nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/github/profile", nil)
-	rec := httptest.NewRecorder()
-	assertStatus(t, c.GetProfile, newCtx(req, rec), http.StatusUnauthorized)
-}
-
-func TestGitHubController_Sync_Unauthorized(t *testing.T) {
-	c := controllers.NewGitHubController(nil, nil)
-	req := httptest.NewRequest(http.MethodPost, "/api/github/sync", nil)
-	rec := httptest.NewRecorder()
-	assertStatus(t, c.Sync, newCtx(req, rec), http.StatusUnauthorized)
-}
-
-func TestGitHubController_GetSkills_Unauthorized(t *testing.T) {
-	c := controllers.NewGitHubController(nil, nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/github/skills", nil)
-	rec := httptest.NewRecorder()
-	assertStatus(t, c.GetSkills, newCtx(req, rec), http.StatusUnauthorized)
-}

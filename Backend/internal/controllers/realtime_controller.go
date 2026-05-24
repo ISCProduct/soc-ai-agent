@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	ifaces "Backend/internal/services/interfaces"
 	"net/http"
 	"strings"
 
@@ -9,11 +9,11 @@ import (
 )
 
 type RealtimeController struct {
-	interviewService     *services.InterviewService
-	realtimeUsageService *services.RealtimeUsageService
+	interviewService     ifaces.InterviewService
+	realtimeUsageService ifaces.RealtimeUsageService
 }
 
-func NewRealtimeController(interviewService *services.InterviewService, realtimeUsageService *services.RealtimeUsageService) *RealtimeController {
+func NewRealtimeController(interviewService ifaces.InterviewService, realtimeUsageService ifaces.RealtimeUsageService) *RealtimeController {
 	return &RealtimeController{interviewService: interviewService, realtimeUsageService: realtimeUsageService}
 }
 

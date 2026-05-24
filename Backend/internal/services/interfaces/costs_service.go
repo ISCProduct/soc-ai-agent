@@ -15,6 +15,7 @@ type APICostService interface {
 
 // RealtimeUsageService リアルタイム使用量サービスのインターフェース
 type RealtimeUsageService interface {
+	SessionDurationMinutes() int
 	CurrentMonthTotalCost() (float64, error)
 	CurrentActiveCount() (int64, error)
 	GetUserBreakdown(days int, limit int) ([]services.RealtimeUserSummary, error)
