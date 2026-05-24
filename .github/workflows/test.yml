@@ -24,6 +24,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: ./Backend/go.mod
+          check-latest: true
           cache-dependency-path: ./Backend/go.sum
 
       - name: Download dependencies
