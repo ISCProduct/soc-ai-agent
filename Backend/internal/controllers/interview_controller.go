@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/services"
+	ifaces "Backend/internal/services/interfaces"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,12 +20,12 @@ import (
 )
 
 type InterviewController struct {
-	interviewService *services.InterviewService
+	interviewService ifaces.InterviewService
 	videoRepo        repository.InterviewVideoRepository
 	s3Service        *services.S3UploadService
 }
 
-func NewInterviewController(interviewService *services.InterviewService, videoRepo repository.InterviewVideoRepository, s3Service *services.S3UploadService) *InterviewController {
+func NewInterviewController(interviewService ifaces.InterviewService, videoRepo repository.InterviewVideoRepository, s3Service *services.S3UploadService) *InterviewController {
 	return &InterviewController{
 		interviewService: interviewService,
 		videoRepo:        videoRepo,
