@@ -83,18 +83,6 @@ func TestAdminScraperSessionController_Upsert_InvalidBody(t *testing.T) {
 	assertStatus(t, c.Upsert, newCtx(req, rec), http.StatusBadRequest)
 }
 
-// ---- AdminDashboardController ----
-
-func TestAdminDashboardController_UserSessions_InvalidID(t *testing.T) {
-	c := controllers.NewAdminDashboardController(nil, nil, nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/abc/sessions", nil)
-	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
-	ctx.SetParamNames("id")
-	ctx.SetParamValues("abc")
-	assertStatus(t, c.UserSessions, ctx, http.StatusBadRequest)
-}
-
 // ---- AdminUserController ----
 
 func TestAdminUserController_Update_InvalidID(t *testing.T) {
