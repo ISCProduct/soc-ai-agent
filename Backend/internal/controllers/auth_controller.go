@@ -3,10 +3,15 @@ package controllers
 import (
 	"Backend/internal/services"
 	"Backend/internal/services/interfaces"
+	"log"
 	"net/http"
+	"os"
 
 	"github.com/labstack/echo/v4"
 )
+
+// isProduction は APP_ENV=production のときのみ true を返す。
+func isProduction() bool { return os.Getenv("APP_ENV") == "production" }
 
 type AuthController struct {
 	authService interfaces.AuthService
@@ -26,7 +31,16 @@ func (c *AuthController) Register(ctx echo.Context) error {
 	resp, err := c.authService.Register(req)
 	if err != nil {
 		if err.Error() == "email already exists" {
+			if isProduction() {
+				// ユーザー列挙対策: 本番では汎用メッセージを返す
+				log.Printf("[Register] email already exists: %s", req.Email)
+				return echo.NewHTTPError(http.StatusConflict, "Registration failed")
+			}
 			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
+		if isProduction() {
+			log.Printf("[Register] error: %v", err)
+			return echo.NewHTTPError(http.StatusBadRequest, "Registration failed")
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -94,6 +108,11 @@ func (c *AuthController) RequestRegistration(ctx echo.Context) error {
 	}
 
 	if err := c.authService.RequestRegistration(body.Email); err != nil {
+		if isProduction() {
+			// ユーザー列挙対策: 本番では成功と同じレスポンスを返す
+			log.Printf("[RequestRegistration] error for %s: %v", body.Email, err)
+			return ctx.JSON(http.StatusOK, map[string]string{"message": "confirmation email sent"})
+		}
 		if err.Error() == "email already exists" {
 			return echo.NewHTTPError(http.StatusConflict, err.Error())
 		}
