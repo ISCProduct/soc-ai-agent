@@ -516,7 +516,7 @@ func SeedPredefinedQuestions(db *gorm.DB) error {
 }
 
 // mustMarshalJSON JSONにマーシャル（エラー時はパニック）
-func mustMarshalJSON(v interface{}) string {
+func mustMarshalJSON(v any) string {
 	data, err := json.Marshal(v)
 	if err != nil {
 		panic(err)

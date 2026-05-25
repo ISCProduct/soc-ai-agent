@@ -61,18 +61,18 @@ func (cli *Client) BaseURL() string {
 	return "https://api.openai.com/v1"
 }
 
-func (cli *Client) callResponsesAPI(ctx context.Context, input interface{}, model string, temperature *float32, maxOutputTokens int, includeTextFormat bool) (string, error) {
+func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string, temperature *float32, maxOutputTokens int, includeTextFormat bool) (string, error) {
 	if cli.apiKey == "" {
 		return "", errors.New("openai api key is not set")
 	}
 
 	type responsesRequest struct {
 		Model           string      `json:"model"`
-		Input           interface{} `json:"input"`
+		Input           any `json:"input"`
 		MaxOutputTokens int         `json:"max_output_tokens,omitempty"`
 		Temperature     *float32    `json:"temperature,omitempty"`
-		Text            interface{} `json:"text,omitempty"`
-		Reasoning       interface{} `json:"reasoning,omitempty"`
+		Text            any `json:"text,omitempty"`
+		Reasoning       any `json:"reasoning,omitempty"`
 	}
 
 	payload := responsesRequest{
@@ -87,7 +87,7 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input interface{}, mode
 		payload.Reasoning = map[string]string{"effort": "low"}
 	}
 	if includeTextFormat {
-		payload.Text = map[string]interface{}{
+		payload.Text = map[string]any{
 			"format": map[string]string{
 				"type": "text",
 			},
@@ -228,7 +228,7 @@ func isModelNotFoundErr(err error) bool {
 	return strings.Contains(msg, "model") && (strings.Contains(msg, "not found") || strings.Contains(msg, "does not exist") || strings.Contains(msg, "unsupported"))
 }
 
-func (cli *Client) callResponsesAPIWithTempFallback(ctx context.Context, input interface{}, model string, temperature *float32, maxOutputTokens int, includeTextFormat bool) (string, error) {
+func (cli *Client) callResponsesAPIWithTempFallback(ctx context.Context, input any, model string, temperature *float32, maxOutputTokens int, includeTextFormat bool) (string, error) {
 	content, err := cli.callResponsesAPI(ctx, input, model, temperature, maxOutputTokens, includeTextFormat)
 	if err != nil && isUnsupportedTemperatureErr(err) {
 		return cli.callResponsesAPI(ctx, input, model, nil, maxOutputTokens, includeTextFormat)
@@ -253,7 +253,7 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 	// attempts を 5 回に増やし、各リクエストにタイムアウトを設定
 	for attempt := 1; attempt <= 5; attempt++ {
 		ctxReq, cancel := context.WithTimeout(ctx, 60*time.Second)
-		messageInput := []map[string]interface{}{
+		messageInput := []map[string]any{
 			{
 				"role": "user",
 				"content": []map[string]string{
@@ -345,7 +345,7 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 	var lastErr error
 	for attempt := 1; attempt <= 5; attempt++ {
 		ctxReq, cancel := context.WithTimeout(ctx, 60*time.Second)
-		messageInput := []map[string]interface{}{
+		messageInput := []map[string]any{
 			{
 				"role": "system",
 				"content": []map[string]string{
@@ -579,7 +579,7 @@ func (cli *Client) ResponsesWithMaxTokens(ctx context.Context, systemPrompt, use
 	var lastErr error
 	for attempt := 1; attempt <= 5; attempt++ {
 		ctxReq, cancel := context.WithTimeout(ctx, 90*time.Second)
-		messageInput := []map[string]interface{}{
+		messageInput := []map[string]any{
 			{
 				"role": "system",
 				"content": []map[string]string{

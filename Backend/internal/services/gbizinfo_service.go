@@ -299,7 +299,7 @@ func (s *GBizInfoService) fetchWorkplace(ctx context.Context, corporateNumber st
 	}, nil
 }
 
-func (s *GBizInfoService) get(ctx context.Context, path string, out interface{}) error {
+func (s *GBizInfoService) get(ctx context.Context, path string, out any) error {
 	if s.baseURL == "" {
 		return errors.New("gbizinfo: base url is empty")
 	}

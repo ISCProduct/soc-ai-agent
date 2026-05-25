@@ -195,7 +195,7 @@ function ResultsContent() {
         console.log('[Results] Fetching recommendations for user:', userId, 'session:', sessionId)
 
         // 職種適性コメントを取得
-        fetch(`/api/chat/analysis?user_id=${userId}&session_id=${sessionId}`)
+        fetch(`/api/chat/analysis?session_id=${sessionId}`, { headers: authService.getUserFetchHeaders() })
           .then(r => r.ok ? r.json() : null)
           .then(data => {
             if (data?.job_suitability_comment) {
@@ -218,7 +218,7 @@ function ResultsContent() {
           })
           .catch(() => {/* サイレント失敗 */})
 
-        const response = await fetch(`/api/chat/recommendations?user_id=${userId}&session_id=${sessionId}&limit=10`)
+        const response = await fetch(`/api/chat/recommendations?session_id=${sessionId}&limit=10`, { headers: authService.getUserFetchHeaders() })
         
         if (!response.ok) {
           throw new Error('企業データの取得に失敗しました')
@@ -345,7 +345,7 @@ function ResultsContent() {
     try {
       const res = await fetch('/api/chat/favorite', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
         body: JSON.stringify({ match_id: company.matchId }),
       })
       if (res.ok) {
@@ -601,16 +601,16 @@ function ResultsContent() {
         <Typography variant="h6" color="text.secondary" sx={{ textAlign: 'center' }}>
           データがありません。診断を完了してから数秒待ち、ページを更新してください。
         </Typography>
-        <Stack direction="row" spacing={2}>
-          <Button 
-            variant="contained" 
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+          <Button
+            variant="contained"
             startIcon={<Refresh />}
             onClick={() => window.location.reload()}
           >
             ページを更新
           </Button>
-          <Button 
-            variant="outlined" 
+          <Button
+            variant="outlined"
             onClick={() => router.push('/')}
           >
             チャットに戻る
@@ -622,7 +622,7 @@ function ResultsContent() {
 
   if (error) {
     return (
-      <Box sx={{ 
+      <Box sx={{
         height: '100vh',
         display: 'flex',
         alignItems: 'center',
@@ -634,22 +634,22 @@ function ResultsContent() {
         <Typography variant="h6" color="error" sx={{ whiteSpace: 'pre-line', textAlign: 'center' }}>
           {error}
         </Typography>
-        <Stack direction="row" spacing={2}>
-          <Button 
-            variant="contained" 
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+          <Button
+            variant="contained"
             startIcon={<Refresh />}
             onClick={() => window.location.reload()}
           >
             ページを更新
           </Button>
-          <Button 
-            variant="outlined" 
+          <Button
+            variant="outlined"
             onClick={() => router.push('/chat')}
           >
             チャットに戻る
           </Button>
-          <Button 
-            variant="outlined" 
+          <Button
+            variant="outlined"
             color="error"
             onClick={handleReset}
           >
@@ -691,8 +691,8 @@ function ResultsContent() {
         backgroundColor: '#fff',
       }}>
         {/* ヘッダー */}
-        <Box sx={{ 
-          p: 3, 
+        <Box sx={{
+          p: { xs: 2, sm: 3 },
           borderBottom: '1px solid #e0e0e0',
           backgroundColor: '#fff',
           flexShrink: 0,
@@ -706,27 +706,27 @@ function ResultsContent() {
         </Box>
 
         {/* 企業詳細コンテンツ */}
-        <Box sx={{ 
+        <Box sx={{
           flexGrow: 1,
           overflowY: 'auto',
-          p: 3,
+          p: { xs: 2, sm: 3 },
           backgroundColor: '#fafafa',
         }}>
           <Box sx={{ maxWidth: 1200, mx: 'auto' }}>
             <Card elevation={3}>
-              <CardContent sx={{ p: 4 }}>
+              <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
                 {/* 企業名とマッチスコア */}
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
+                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'flex-start' }, mb: 3, gap: 1 }}>
                   <Box>
-                    <Typography variant="h4" fontWeight="bold" gutterBottom>
+                    <Typography variant="h4" fontWeight="bold" gutterBottom sx={{ fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>
                       {selectedCompany.name}
                     </Typography>
-                    <Typography variant="h6" color="text.secondary">
+                    <Typography variant="h6" color="text.secondary" sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
                       {selectedCompany.industry}
                     </Typography>
                   </Box>
-                  <Box sx={{ textAlign: 'right' }}>
-                    <Typography variant="h2" color="primary.main" fontWeight="bold">
+                  <Box sx={{ textAlign: { xs: 'left', sm: 'right' }, display: 'flex', alignItems: 'center', gap: 1, flexDirection: { xs: 'row', sm: 'column' } }}>
+                    <Typography variant="h2" color="primary.main" fontWeight="bold" sx={{ fontSize: { xs: '2rem', sm: '3.75rem' } }}>
                       {selectedCompany.matchScore}
                     </Typography>
                     <Typography variant="body1" color="text.secondary">
@@ -824,7 +824,7 @@ function ResultsContent() {
 
                 {/* タブ1: 資本関連図 */}
                 {detailTab === 1 && (
-                  <Box sx={{ height: 600 }}>
+                  <Box sx={{ height: { xs: 320, sm: 450, md: 600 } }}>
                     {diagramLoading ? (
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
                         <CircularProgress />
@@ -892,7 +892,7 @@ function ResultsContent() {
 
                 {/* タブ2: ビジネス関連図 */}
                 {detailTab === 2 && (
-                  <Box sx={{ height: 600 }}>
+                  <Box sx={{ height: { xs: 320, sm: 450, md: 600 } }}>
                     {diagramLoading ? (
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
                         <CircularProgress />
@@ -966,13 +966,13 @@ function ResultsContent() {
       backgroundColor: '#fff',
     }}>
       {/* ヘッダー部分 */}
-      <Box sx={{ 
-        p: 3, 
+      <Box sx={{
+        p: { xs: 2, sm: 3 },
         borderBottom: '1px solid #e0e0e0',
         backgroundColor: '#fff',
         flexShrink: 0,
       }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 2 }}>
           <Button variant="outlined" startIcon={<ArrowBack />} onClick={handleBack}>
             チャットに戻る
           </Button>
@@ -981,12 +981,13 @@ function ResultsContent() {
             startIcon={<Email />}
             onClick={handleSendEmail}
             disabled={emailSending}
+            sx={{ width: { xs: '100%', sm: 'auto' } }}
           >
             {emailSending ? '送信中...' : '結果をメールで受け取る'}
           </Button>
         </Box>
         <Box sx={{ textAlign: 'center' }}>
-          <Typography variant="h4" fontWeight="bold" gutterBottom>
+          <Typography variant="h4" fontWeight="bold" gutterBottom sx={{ fontSize: { xs: '1.2rem', sm: '2.125rem' } }}>
             🎉 AI分析完了！適合企業を{companies.length}社に絞り込みました
           </Typography>
           {isProvisional && (
@@ -999,10 +1000,10 @@ function ResultsContent() {
       </Box>
 
       {/* スクロール可能なコンテンツエリア */}
-      <Box sx={{ 
+      <Box sx={{
         flexGrow: 1,
         overflowY: 'auto',
-        p: 3,
+        p: { xs: 2, sm: 3 },
         backgroundColor: '#fafafa',
       }}>
         <Box sx={{ maxWidth: 1200, mx: 'auto' }}>
@@ -1014,7 +1015,7 @@ function ResultsContent() {
                   📊 4分析スコア
                 </Typography>
                 {analysisScores && (
-                  <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 2, mb: 2 }}>
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)' }, gap: 2, mb: 2 }}>
                     {[
                       { label: '職種分析', value: analysisScores.job },
                       { label: '興味分析', value: analysisScores.interest },

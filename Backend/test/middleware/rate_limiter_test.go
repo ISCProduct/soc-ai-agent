@@ -1,22 +1,20 @@
-package middleware
+package middleware_test
 
 // レート制限ミドルウェアのテスト（Issue #325）
-// 実行: cd Backend && go test ./internal/middleware/... -run TestRateLimit -v
+// 実行: cd Backend && go test ./test/middleware/... -run TestRateLimit -v
 
 import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
-)
 
-var okHandlerRL = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-})
+	"Backend/internal/middleware"
+)
 
 // TestRateLimiter_AllowsUnderLimit はウィンドウ内の上限以下のリクエストが全て通ることを検証する
 func TestRateLimiter_AllowsUnderLimit(t *testing.T) {
-	rl := NewRateLimiter(time.Minute, 5)
+	rl := middleware.NewRateLimiter(time.Minute, 5)
 	for i := range 5 {
 		if !rl.Allow("key1") {
 			t.Errorf("request %d should be allowed", i+1)
@@ -26,7 +24,7 @@ func TestRateLimiter_AllowsUnderLimit(t *testing.T) {
 
 // TestRateLimiter_BlocksOverLimit はウィンドウ内の上限を超えたリクエストがブロックされることを検証する（#325修正の担保）
 func TestRateLimiter_BlocksOverLimit(t *testing.T) {
-	rl := NewRateLimiter(time.Minute, 3)
+	rl := middleware.NewRateLimiter(time.Minute, 3)
 	for range 3 {
 		rl.Allow("key2")
 	}
@@ -37,10 +35,9 @@ func TestRateLimiter_BlocksOverLimit(t *testing.T) {
 
 // TestRateLimiter_DifferentKeysAreIndependent は異なるキーが独立してカウントされることを検証する
 func TestRateLimiter_DifferentKeysAreIndependent(t *testing.T) {
-	rl := NewRateLimiter(time.Minute, 2)
+	rl := middleware.NewRateLimiter(time.Minute, 2)
 	rl.Allow("user-a")
 	rl.Allow("user-a")
-	// user-a は上限到達、user-b はまだ余裕あり
 	if rl.Allow("user-a") {
 		t.Error("user-a の3回目はブロックされるべき")
 	}
@@ -51,11 +48,10 @@ func TestRateLimiter_DifferentKeysAreIndependent(t *testing.T) {
 
 // TestLoginRateLimit_Middleware はミドルウェアが 429 を返すことを検証する
 func TestLoginRateLimit_Middleware(t *testing.T) {
-	// テスト用に制限値が低いレート制限器を使用
-	testLimiter := NewRateLimiter(time.Minute, 2)
+	testLimiter := middleware.NewRateLimiter(time.Minute, 2)
 	wrapped := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			ip := getClientIP(r)
+			ip := middleware.GetClientIP(r)
 			if !testLimiter.Allow(ip) {
 				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 				return
@@ -64,7 +60,7 @@ func TestLoginRateLimit_Middleware(t *testing.T) {
 		}
 	}
 
-	handler := wrapped(okHandlerRL)
+	handler := wrapped(okHandler)
 	for i := 1; i <= 3; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
 		req.RemoteAddr = "10.0.0.1:12345"
@@ -87,7 +83,7 @@ func TestGetClientIP_XForwardedFor(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Forwarded-For", "1.2.3.4")
 	req.RemoteAddr = "127.0.0.1:8080"
-	ip := getClientIP(req)
+	ip := middleware.GetClientIP(req)
 	if ip != "1.2.3.4" {
 		t.Errorf("got %q, want %q", ip, "1.2.3.4")
 	}
@@ -97,7 +93,7 @@ func TestGetClientIP_XForwardedFor(t *testing.T) {
 func TestGetClientIP_RemoteAddr(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "192.168.1.1:9999"
-	ip := getClientIP(req)
+	ip := middleware.GetClientIP(req)
 	if ip != "192.168.1.1" {
 		t.Errorf("got %q, want %q", ip, "192.168.1.1")
 	}

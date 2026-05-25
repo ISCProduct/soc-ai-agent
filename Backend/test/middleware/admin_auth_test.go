@@ -1,7 +1,7 @@
 package middleware_test
 
 // 管理者認証ミドルウェアのセキュリティテスト
-// 実行: cd Backend && go test ./internal/middleware/... -v
+// 実行: cd Backend && go test ./test/middleware/... -run TestAdminAuth -v
 
 import (
 	"net/http"
@@ -57,7 +57,6 @@ func TestAdminAuth_SecretNotConfigured(t *testing.T) {
 		WithArgs("admin@example.com", 1).
 		WillReturnRows(sqlmock.NewRows(userRepoColumns).AddRow(1, "admin@example.com", "管理者", true, false))
 
-	// ADMIN_SECRET を空文字にして渡す（未設定状態をシミュレート）
 	h := middleware.AdminAuthFunc(repo, "", okHandler)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -83,7 +82,6 @@ func TestAdminAuth_MissingToken(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Admin-Email", "admin@example.com")
-	// X-Admin-Token は意図的に省略
 	rr := httptest.NewRecorder()
 
 	h(rr, req)
@@ -153,7 +151,6 @@ func TestAdminAuth_UserTokenCannotBeUsedAsAdminToken(t *testing.T) {
 		WithArgs(email, 1).
 		WillReturnRows(sqlmock.NewRows(userRepoColumns).AddRow(adminID, email, "管理者", true, false))
 
-	// ユーザートークン（ペイロード: "user:{id}:{email}"）を管理者認証に使う
 	userToken := middleware.GenerateUserToken(adminID, email, secret)
 	h := middleware.AdminAuthFunc(repo, secret, okHandler)
 

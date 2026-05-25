@@ -14,7 +14,7 @@ func NewAuditLogService(repo repository.AuditLogRepository) *AuditLogService {
 	return &AuditLogService{repo: repo}
 }
 
-func (s *AuditLogService) Record(actorEmail, action, targetType string, targetID uint, metadata map[string]interface{}) {
+func (s *AuditLogService) Record(actorEmail, action, targetType string, targetID uint, metadata map[string]any) {
 	if s == nil || s.repo == nil {
 		return
 	}

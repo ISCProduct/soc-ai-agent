@@ -187,7 +187,7 @@ export default function CompanyEntryPage() {
   }
 
   return (
-    <Box sx={{ p: 4, maxWidth: 800, mx: 'auto' }}>
+    <Box sx={{ p: { xs: 2, sm: 4 }, maxWidth: 800, mx: 'auto' }}>
       <Typography variant="h4" fontWeight="bold" gutterBottom>
         企業情報登録フォーム
       </Typography>
@@ -306,7 +306,7 @@ export default function CompanyEntryPage() {
                     <MenuItem value="no">不可</MenuItem>
                     <MenuItem value="yes">可</MenuItem>
                   </TextField>
-                  <Stack direction="row" spacing={2}>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
                     <TextField label="最低年収（万円）" value={job.min_salary} onChange={(e) => updateJob(idx, 'min_salary', e.target.value)} type="number" fullWidth />
                     <TextField label="最高年収（万円）" value={job.max_salary} onChange={(e) => updateJob(idx, 'max_salary', e.target.value)} type="number" fullWidth />
                   </Stack>

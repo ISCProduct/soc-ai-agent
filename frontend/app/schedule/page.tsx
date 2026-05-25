@@ -231,14 +231,14 @@ export default function SchedulePage() {
   const today = new Date()
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f5f5f5', p: 3 }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: '#f5f5f5', p: { xs: 1.5, sm: 3 } }}>
       <Box sx={{ maxWidth: 900, mx: 'auto' }}>
         {/* Header */}
-        <Stack direction="row" alignItems="center" spacing={2} mb={3}>
-          <IconButton onClick={() => router.back()}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, mb: 3 }}>
+          <IconButton onClick={() => router.back()} size="small">
             <ArrowBackIcon />
           </IconButton>
-          <Typography variant="h5" fontWeight={700} flex={1}>
+          <Typography variant="h5" fontWeight={700} sx={{ flex: 1, minWidth: 0, fontSize: { xs: '1.1rem', sm: '1.5rem' } }}>
             選考スケジュール
           </Typography>
           <Button
@@ -247,16 +247,17 @@ export default function SchedulePage() {
             onClick={handleExport}
             size="small"
           >
-            .ics エクスポート
+            .ics
           </Button>
           <Button
             variant="contained"
             startIcon={<AddIcon />}
             onClick={() => openCreateDialog()}
+            size="small"
           >
-            イベント追加
+            追加
           </Button>
-        </Stack>
+        </Box>
 
         {error && (
           <Alert severity="error" onClose={() => setError(null)} sx={{ mb: 2 }}>
@@ -269,7 +270,7 @@ export default function SchedulePage() {
           {/* Month navigation */}
           <Stack direction="row" alignItems="center" justifyContent="center" sx={{ p: 2, bgcolor: '#fff' }}>
             <IconButton onClick={handlePrevMonth}><ArrowBackIosIcon fontSize="small" /></IconButton>
-            <Typography variant="h6" fontWeight={600} sx={{ minWidth: 160, textAlign: 'center' }}>
+            <Typography variant="h6" fontWeight={600} sx={{ minWidth: { xs: 120, sm: 160 }, textAlign: 'center' }}>
               {viewYear}年 {viewMonth + 1}月
             </Typography>
             <IconButton onClick={handleNextMonth}><ArrowForwardIosIcon fontSize="small" /></IconButton>
@@ -281,9 +282,9 @@ export default function SchedulePage() {
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', bgcolor: '#f9f9f9' }}>
             {WEEKDAYS.map((d, i) => (
               <Box key={d} sx={{
-                p: 1, textAlign: 'center',
+                p: { xs: 0.5, sm: 1 }, textAlign: 'center',
                 color: i === 0 ? '#d32f2f' : i === 6 ? '#1565c0' : 'text.secondary',
-                fontWeight: 600, fontSize: '0.85rem',
+                fontWeight: 600, fontSize: { xs: '0.65rem', sm: '0.85rem' },
               }}>
                 {d}
               </Box>
@@ -307,7 +308,7 @@ export default function SchedulePage() {
                       key={di}
                       onClick={() => day && openCreateDialog(day)}
                       sx={{
-                        minHeight: 80,
+                        minHeight: { xs: 52, sm: 80 },
                         p: 0.5,
                         borderRight: di < 6 ? '1px solid #eee' : 'none',
                         bgcolor: day ? '#fff' : '#f9f9f9',
@@ -320,11 +321,11 @@ export default function SchedulePage() {
                         <>
                           <Box
                             sx={{
-                              width: 26, height: 26, borderRadius: '50%', display: 'flex',
+                              width: { xs: 20, sm: 26 }, height: { xs: 20, sm: 26 }, borderRadius: '50%', display: 'flex',
                               alignItems: 'center', justifyContent: 'center',
                               bgcolor: isToday ? '#1976d2' : 'transparent',
                               color: isToday ? '#fff' : di === 0 ? '#d32f2f' : di === 6 ? '#1565c0' : 'text.primary',
-                              fontSize: '0.85rem', fontWeight: isToday ? 700 : 400,
+                              fontSize: { xs: '0.65rem', sm: '0.85rem' }, fontWeight: isToday ? 700 : 400,
                               mb: 0.5,
                             }}
                           >
@@ -340,7 +341,7 @@ export default function SchedulePage() {
                                     color: '#fff',
                                     borderRadius: 0.5,
                                     px: 0.5,
-                                    fontSize: '0.7rem',
+                                    fontSize: { xs: '0.55rem', sm: '0.7rem' },
                                     whiteSpace: 'nowrap',
                                     overflow: 'hidden',
                                     textOverflow: 'ellipsis',

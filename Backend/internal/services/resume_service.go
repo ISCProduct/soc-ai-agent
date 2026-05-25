@@ -13,7 +13,9 @@ import (
 	"io"
 	"log"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +29,78 @@ type ValidationError struct {
 }
 
 func (e *ValidationError) Error() string { return e.Message }
+
+var ErrForbidden = errors.New("forbidden")
+
+// allowedMIMETypes はアップロード可能なファイルタイプ
+var allowedMIMETypes = map[string]bool{
+	"application/pdf":  true,
+	"application/msword": true,
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
+}
+
+// pdfMagicBytes はPDFファイルの先頭シグネチャ（%PDF）
+var pdfMagicBytes = []byte{0x25, 0x50, 0x44, 0x46}
+
+// validateFileUpload はMIMEタイプとファイルシグネチャ（magic bytes）を検証する
+func validateFileUpload(fileHeader *multipart.FileHeader) error {
+	mimeType := fileHeader.Header.Get("Content-Type")
+	if !allowedMIMETypes[mimeType] {
+		return &ValidationError{Message: "unsupported file type: only PDF and Word documents are allowed"}
+	}
+
+	f, err := fileHeader.Open()
+	if err != nil {
+		return fmt.Errorf("failed to open uploaded file: %w", err)
+	}
+	defer f.Close()
+
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(f, buf); err != nil {
+		return &ValidationError{Message: "file too small to validate"}
+	}
+
+	// PDFシグネチャ: %PDF
+	if bytes.HasPrefix(buf, pdfMagicBytes) {
+		return nil
+	}
+	// DOCX/XLSX (ZIP): PK\x03\x04
+	if bytes.HasPrefix(buf, []byte{0x50, 0x4B, 0x03, 0x04}) {
+		return nil
+	}
+	// DOC (OLE2): D0 CF 11 E0
+	if bytes.HasPrefix(buf, []byte{0xD0, 0xCF, 0x11, 0xE0}) {
+		return nil
+	}
+	return &ValidationError{Message: "file content does not match declared type"}
+}
+
+// validateURL はSSRF対策のためURLスキームとIPアドレス範囲を検証する
+func validateURL(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return &ValidationError{Message: "only http/https URLs are allowed"}
+	}
+	host := parsed.Hostname()
+	ip := net.ParseIP(host)
+	if ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()) {
+		return &ValidationError{Message: "requests to internal IP addresses are not allowed"}
+	}
+	return nil
+}
+
+// validatePathInDir はpathがdir配下であることを確認する（パストラバーサル対策）
+func validatePathInDir(path, dir string) error {
+	cleanPath := filepath.Clean(path)
+	cleanDir := filepath.Clean(dir)
+	if !strings.HasPrefix(cleanPath, cleanDir+string(filepath.Separator)) && cleanPath != cleanDir {
+		return fmt.Errorf("path %q is outside allowed directory", path)
+	}
+	return nil
+}
 
 type ResumeService struct {
 	repo         repository.ResumeRepository
@@ -89,6 +163,9 @@ func (s *ResumeService) Upload(userID uint, sessionID, sourceType, sourceURL str
 	defer os.RemoveAll(workDir)
 
 	if fileHeader != nil {
+		if err := validateFileUpload(fileHeader); err != nil {
+			return nil, err
+		}
 		doc.OriginalFilename = fileHeader.Filename
 		ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
 		originalPath := filepath.Join(workDir, "original"+ext)
@@ -100,6 +177,9 @@ func (s *ResumeService) Upload(userID uint, sessionID, sourceType, sourceURL str
 		doc.OriginalFilename = "google_doc"
 		doc.StoredPath = ""
 	} else {
+		if err := validateURL(sourceURL); err != nil {
+			return nil, err
+		}
 		downloaded, filename, err := downloadSourceFile(sourceURL, workDir)
 		if err != nil {
 			return nil, err
@@ -126,10 +206,13 @@ func (s *ResumeService) Upload(userID uint, sessionID, sourceType, sourceURL str
 	return &ResumeUploadResult{Document: doc}, nil
 }
 
-func (s *ResumeService) ReviewDocument(documentID uint, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+func (s *ResumeService) ReviewDocument(documentID uint, requestingUserID uint, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
 	doc, err := s.repo.FindDocumentByID(documentID)
 	if err != nil {
 		return nil, nil, err
+	}
+	if doc.UserID != requestingUserID {
+		return nil, nil, ErrForbidden
 	}
 	if s.s3 == nil || !s.s3.isEnabled() {
 		return nil, nil, errors.New("s3 is required")
@@ -154,6 +237,9 @@ func (s *ResumeService) ReviewDocument(documentID uint, companyName string, jobT
 		return nil, nil, err
 	}
 
+	if err := validatePathInDir(pdfPath, workDir); err != nil {
+		return nil, nil, fmt.Errorf("invalid pdf path: %w", err)
+	}
 	blocks, err := s.extractTextBlocks(doc, pdfPath)
 	if err != nil {
 		return nil, nil, err
@@ -208,6 +294,17 @@ func (s *ResumeService) ReviewDocument(documentID uint, companyName string, jobT
 	return review, items, nil
 }
 
+func (s *ResumeService) EnsureDocumentOwner(documentID uint, requestingUserID uint) error {
+	doc, err := s.repo.FindDocumentByID(documentID)
+	if err != nil {
+		return err
+	}
+	if doc.UserID != requestingUserID {
+		return ErrForbidden
+	}
+	return nil
+}
+
 type AnnotatedFile struct {
 	Reader      io.ReadSeeker
 	Size        int64
@@ -216,10 +313,13 @@ type AnnotatedFile struct {
 	CloseFunc   func() error
 }
 
-func (s *ResumeService) OpenAnnotatedFile(documentID uint) (*AnnotatedFile, error) {
+func (s *ResumeService) OpenAnnotatedFile(documentID uint, requestingUserID uint) (*AnnotatedFile, error) {
 	doc, err := s.repo.FindDocumentByID(documentID)
 	if err != nil {
 		return nil, err
+	}
+	if doc.UserID != requestingUserID {
+		return nil, ErrForbidden
 	}
 	if strings.TrimSpace(doc.AnnotatedPath) == "" {
 		return nil, errors.New("annotated file not ready")
@@ -341,7 +441,7 @@ func (s *ResumeService) extractTextBlocks(doc *models.ResumeDocument, pdfPath st
 	var blocks []models.ResumeTextBlock
 	for _, page := range payload.Pages {
 		for _, block := range page.Blocks {
-			bbox, _ := json.Marshal(map[string]interface{}{
+			bbox, _ := json.Marshal(map[string]any{
 				"bbox":        block.BBox,
 				"page_width":  page.Width,
 				"page_height": page.Height,
@@ -366,10 +466,10 @@ func (s *ResumeService) annotatePDF(inputPath string, doc *models.ResumeDocument
 		}
 		return inputPath, storedPath, nil
 	}
-	payload := make([]map[string]interface{}, 0, len(items))
+	payload := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		bboxInfo := decodeBBoxInfo(item.BBox)
-		payload = append(payload, map[string]interface{}{
+		payload = append(payload, map[string]any{
 			"page_number": item.PageNumber,
 			"bbox":        bboxInfo.BBox,
 			"page_width":  bboxInfo.PageWidth,
@@ -402,7 +502,8 @@ func (s *ResumeService) annotatePDF(inputPath string, doc *models.ResumeDocument
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", "", fmt.Errorf("annotate failed: %w (%s)", err, stderr.String())
+		log.Printf("annotate script error: %v\nstderr:\n%s", err, stderr.String())
+		return "", "", errors.New("document processing failed")
 	}
 	storedPath, err := s.uploadToS3(context.Background(), doc, outputPath, filepath.Base(outputPath))
 	if err != nil {
@@ -459,6 +560,9 @@ func (s *ResumeService) ensureWorkingDir(docID uint) (string, error) {
 func (s *ResumeService) resolveLocalPath(doc *models.ResumeDocument, workDir string) (string, error) {
 	if !isS3URI(doc.StoredPath) {
 		if strings.TrimSpace(doc.StoredPath) == "" && strings.TrimSpace(doc.SourceURL) != "" {
+			if err := validateURL(doc.SourceURL); err != nil {
+				return "", err
+			}
 			downloaded, _, err := downloadSourceFile(doc.SourceURL, workDir)
 			if err != nil {
 				return "", err
@@ -746,13 +850,13 @@ func (s *ResumeService) fetchRAGReportStream(ctx context.Context, resumeText, co
 
 // ReviewDocumentStream はドキュメントを前処理した後、SSEでRAGレポートをストリーミングし、
 // 最後にスコア・指摘事項を complete イベントとして送信する。
-func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uint, companyName, jobTitle, candidateType string, w http.ResponseWriter) error {
+func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uint, requestingUserID uint, companyName, jobTitle, candidateType string, w http.ResponseWriter) error {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return fmt.Errorf("streaming not supported")
 	}
 
-	sendEvent := func(v map[string]interface{}) {
+	sendEvent := func(v map[string]any) {
 		data, _ := json.Marshal(v)
 		fmt.Fprintf(w, "data: %s\n\n", data)
 		flusher.Flush()
@@ -760,38 +864,46 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 
 	doc, err := s.repo.FindDocumentByID(documentID)
 	if err != nil {
-		sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
+		sendEvent(map[string]any{"type": "error", "message": err.Error()})
 		return err
 	}
+	if doc.UserID != requestingUserID {
+		sendEvent(map[string]any{"type": "error", "message": "forbidden"})
+		return ErrForbidden
+	}
 	if s.s3 == nil || !s.s3.isEnabled() {
-		sendEvent(map[string]interface{}{"type": "error", "message": "s3 is required"})
+		sendEvent(map[string]any{"type": "error", "message": "s3 is required"})
 		return errors.New("s3 is required")
 	}
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
 		msg := "応募企業名または応募職種を入力してください"
-		sendEvent(map[string]interface{}{"type": "error", "message": msg})
+		sendEvent(map[string]any{"type": "error", "message": msg})
 		return errors.New(msg)
 	}
 
 	workDir, err := s.ensureWorkingDir(doc.ID)
 	if err != nil {
-		sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
+		sendEvent(map[string]any{"type": "error", "message": err.Error()})
 		return err
 	}
 	defer os.RemoveAll(workDir)
 
 	pdfPath, normalizedStored, err := s.normalizeToPDF(doc, workDir)
 	if err != nil {
-		sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
+		sendEvent(map[string]any{"type": "error", "message": err.Error()})
 		return err
 	}
 	doc.NormalizedPath = normalizedStored
 	doc.Status = "normalized"
 	_ = s.repo.UpdateDocument(doc)
 
+	if err := validatePathInDir(pdfPath, workDir); err != nil {
+		sendEvent(map[string]any{"type": "error", "message": "document processing failed"})
+		return fmt.Errorf("invalid pdf path: %w", err)
+	}
 	blocks, err := s.extractTextBlocks(doc, pdfPath)
 	if err != nil {
-		sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
+		sendEvent(map[string]any{"type": "error", "message": err.Error()})
 		return err
 	}
 	hasText := false
@@ -803,7 +915,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	}
 	if !hasText {
 		msg := "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"
-		sendEvent(map[string]interface{}{"type": "error", "message": msg})
+		sendEvent(map[string]any{"type": "error", "message": msg})
 		return errors.New(msg)
 	}
 	_ = s.repo.ReplaceTextBlocks(doc.ID, blocks)
@@ -828,9 +940,9 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		log.Printf("resume_review_stream: build score failed: %v", err)
 		var ve *ValidationError
 		if errors.As(err, &ve) {
-			sendEvent(map[string]interface{}{"type": "error", "message": ve.Message})
+			sendEvent(map[string]any{"type": "error", "message": ve.Message})
 		} else {
-			sendEvent(map[string]interface{}{"type": "error", "message": err.Error()})
+			sendEvent(map[string]any{"type": "error", "message": err.Error()})
 		}
 		return err
 	}
@@ -840,7 +952,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	_, annotatedStored, err := s.annotatePDF(pdfPath, doc, review, items)
 	if err != nil {
 		log.Printf("resume_review_stream: annotatePDF failed document_id=%d err=%v", documentID, err)
-		sendEvent(map[string]interface{}{
+		sendEvent(map[string]any{
 			"type":    "annotate_error",
 			"message": "注釈PDFの生成に失敗しました。レビュー結果は表示されますが、PDFダウンロードはご利用いただけません。",
 		})
@@ -851,7 +963,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		annotatedAvailable = true
 	}
 
-	sendEvent(map[string]interface{}{
+	sendEvent(map[string]any{
 		"type":                "complete",
 		"review":              review,
 		"items":               items,
@@ -1077,7 +1189,7 @@ func buildResumeText(blocks []models.ResumeTextBlock, maxLen int) string {
 	return b.String()
 }
 
-func decodeJSON(raw string, out interface{}) error {
+func decodeJSON(raw string, out any) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return errors.New("empty response")

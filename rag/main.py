@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import datetime
 import json
 import logging
@@ -7,27 +8,88 @@ import os
 import re
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Awaitable, Callable, Generator, List, Optional, Tuple, TypeVar
 
 import chromadb
 import tiktoken
 from crewai import Agent, Task, Crew, Process
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 import openai as openai_module
 from openai import OpenAI
 from pydantic import BaseModel, Field, field_validator
 
+# ── 構造化ログ設定 ────────────────────────────────────────────────────────────
+_trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id", default="")
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+_LOG_LEVEL_MAP = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARN": logging.WARNING,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+}
+_log_level = _LOG_LEVEL_MAP.get(os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+
+
+class _JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, Any] = {
+            "time": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        trace_id = _trace_id_var.get("")
+        if trace_id:
+            payload["trace_id"] = trace_id
+        if record.exc_info:
+            payload["exc_info"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+def _setup_logging() -> logging.Logger:
+    handler = logging.StreamHandler()
+    handler.setFormatter(_JsonFormatter())
+    root = logging.getLogger()
+    root.setLevel(_log_level)
+    root.handlers = [handler]
+    return logging.getLogger(__name__)
+
+
+logger = _setup_logging()
 
 app = FastAPI()
 
-# Training export endpoints (registered from training_api.py)
-import training_api
-training_api.register(app)
+
+@app.middleware("http")
+async def _trace_id_middleware(request: Request, call_next: Callable) -> Any:
+    trace_id = request.headers.get("X-Trace-ID") or str(uuid.uuid4())
+    token = _trace_id_var.set(trace_id)
+    start = time.time()
+    try:
+        response = await call_next(request)
+        duration_ms = int((time.time() - start) * 1000)
+        level = "INFO" if response.status_code < 400 else ("WARN" if response.status_code < 500 else "ERROR")
+        payload = {
+            "time": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "level": level,
+            "logger": __name__,
+            "message": "http request",
+            "trace_id": trace_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+            "duration_ms": duration_ms,
+        }
+        print(json.dumps(payload, ensure_ascii=False), flush=True)
+        response.headers["X-Trace-ID"] = trace_id
+        return response
+    finally:
+        _trace_id_var.reset(token)
+
 
 # ── 環境変数 ────────────────────────────────────────────────────────────────
 DEFAULT_CACHE_TTL_SECONDS = 86400
@@ -163,6 +225,13 @@ def _sanitize_company_name_for_query(company_name: str) -> str:
     return sanitized
 
 
+def _sanitize_job_title(job_title: str) -> str:
+    """職種名からプロンプトインジェクションに使われうる特殊文字を除去する"""
+    sanitized = re.sub(r"[^\w\s\-（）()／/]", "", job_title, flags=re.UNICODE)
+    sanitized = re.sub(r"\s+", " ", sanitized).strip()
+    return sanitized or "指定なし"
+
+
 def _truncate_text(text: str, model: str) -> str:
     """テキストが埋め込みモデルのトークン上限を超えている場合に切り詰める。"""
     try:
@@ -247,8 +316,9 @@ def run_deep_research(company_name: str, job_title: str) -> str:
             status_code=500,
             detail="Deep Research requires OpenAI responses API. Upgrade openai>=1.66 and rebuild the image.",
         )
-    role = job_title or "指定なし"
-    logger.info("deep research start model=%s company=%s role=%s", model, company_name, role)
+    safe_company = _sanitize_company_name_for_query(company_name)
+    role = _sanitize_job_title(job_title) if job_title else "指定なし"
+    logger.info("deep research start model=%s company=%s role=%s", model, safe_company, role)
     prompt = (
         "以下の企業について、採用に関わる価値観・求める人物像・評価軸・事業の特徴を、"
         "一次情報または信頼できる情報に基づいて簡潔に整理してください。"
@@ -256,7 +326,7 @@ def run_deep_research(company_name: str, job_title: str) -> str:
         "企業名: {company}\n"
         "職種: {role}\n"
         "出力は日本語で、箇条書きを含む短いレポート形式にしてください。"
-    ).format(company=company_name, role=role)
+    ).format(company=safe_company, role=role)
     last_err = None
 
     def request_response(use_tools: bool, model_name: str):
@@ -339,6 +409,8 @@ def run_crewai(
     context_docs: List[str],
     context_source: str = "none",
 ) -> str:
+    safe_company = _sanitize_company_name_for_query(company_name)
+    safe_job_title = _sanitize_job_title(job_title) if job_title else "指定なし"
     context_block = "\n\n".join(context_docs)
 
     source_labels = {
@@ -370,7 +442,7 @@ def run_crewai(
             "Company: {company}\n"
             "Role: {role}\n"
             "Context:\n{context}\n"
-        ).format(company=company_name, role=job_title, context=context_block),
+        ).format(company=safe_company, role=safe_job_title, context=context_block),
         expected_output="Bullet keywords",
         agent=researcher,
     )
@@ -401,8 +473,8 @@ def run_crewai(
             "Role: {role}\n"
             "Resume:\n{resume}\n"
         ).format(
-            company=company_name,
-            role=job_title or "指定なし",
+            company=safe_company,
+            role=safe_job_title,
             resume=resume_text,
             source=source_label,
         ),
@@ -430,24 +502,26 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
     - 最近の事業展開（直近ニュース・IR情報・新規事業）
     """
     api_key = os.getenv("OPENAI_API_KEY")
-    role_text = job_title or "一般職"
+    safe_company = _sanitize_company_name_for_query(company_name)
+    role_text = _sanitize_job_title(job_title) if job_title else "一般職"
     if not api_key:
         return [
-            f"{company_name} {role_text} 採用方針 求める人物像",
-            f"{company_name} {role_text} 面接 選考 特徴",
-            f"{company_name} 最近の事業展開 ニュース IR",
+            f"{safe_company} {role_text} 採用方針 求める人物像",
+            f"{safe_company} {role_text} 面接 選考 特徴",
+            f"{safe_company} 最近の事業展開 ニュース IR",
         ]
     client = OpenAI(api_key=api_key)
     prompt = (
-        f"企業名: {company_name}\n"
-        f"職種: {role_text}\n\n"
-        "この企業と職種について、以下の3軸をカバーする検索クエリを3〜5個生成してください。\n"
+        "以下の企業と職種について、採用情報を調査するための検索クエリを3〜5個生成してください。\n\n"
+        "企業名: {company}\n"
+        "職種: {role}\n\n"
+        "以下の3軸をカバーする検索クエリを生成してください。\n"
         "軸1: 採用方針（採用基準・求める人物像・企業文化）\n"
         "軸2: 選考の特徴（面接スタイル・選考フロー・評価ポイント）\n"
         "軸3: 最近の事業展開（直近のニュース・IR情報・新規事業）\n\n"
         "検索エンジンのヒット率を最大化するため、具体的なキーワードを組み合わせてください。\n"
-        "出力はJSONのみ: {\"queries\": [\"クエリ1\", \"クエリ2\", ...]}"
-    )
+        "出力はJSONのみ: {{\"queries\": [\"クエリ1\", \"クエリ2\", ...]}}"
+    ).format(company=safe_company, role=role_text)
     try:
         resp = client.chat.completions.create(
             model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o"),
@@ -459,10 +533,10 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
         data = json.loads(resp.choices[0].message.content or "{}")
         queries = data.get("queries", [])
         if queries:
-            logger.info("generated %d search queries company=%s", len(queries), company_name)
+            logger.info("generated %d search queries company=%s", len(queries), safe_company)
             return queries[:5]
     except Exception as exc:
-        logger.warning("query generation failed company=%s error=%s", company_name, exc)
+        logger.warning("query generation failed company=%s error=%s", safe_company, exc)
     return [
         f"{company_name} {role_text} 採用方針 求める人物像",
         f"{company_name} {role_text} 面接 選考 特徴",
@@ -498,11 +572,13 @@ def _summarize_for_hiring(company_name: str, job_title: str, raw_texts: List[str
     if not api_key:
         return "\n\n".join(raw_texts)
     client = OpenAI(api_key=api_key)
-    role_text = job_title or "一般職"
+    safe_company = _sanitize_company_name_for_query(company_name)
+    role_text = _sanitize_job_title(job_title) if job_title else "一般職"
     combined = "\n\n---\n\n".join(raw_texts)[:6000]
     prompt = (
-        f"企業名: {company_name}\n"
-        f"職種: {role_text}\n\n"
+        "企業名: {company}\n"
+        "職種: {role}\n\n"
+    ).format(company=safe_company, role=role_text) + (
         "以下の検索結果をもとに、採用観点での企業分析サマリーを日本語で作成してください。\n\n"
         "【優先情報ソース（重要度順）】\n"
         "1. 企業公式サイト（採用ページ・企業理念・代表メッセージ）\n"
@@ -616,18 +692,19 @@ def _run_hints_web_search(company_name: str, position: str) -> Optional[str]:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return None
-    role_text = position or "一般職"
+    safe_company = _sanitize_company_name_for_query(company_name)
+    role_text = _sanitize_job_title(position) if position else "一般職"
     # 面接調査に特化した3軸クエリ
     queries = [
-        f"{company_name} {role_text} 面接 選考スタイル 特徴 体験談",
-        f"{company_name} {role_text} 面接 よく聞かれる質問 口コミ",
-        f"{company_name} 採用 求める人物像 評価軸 公式",
+        f"{safe_company} {role_text} 面接 選考スタイル 特徴 体験談",
+        f"{safe_company} {role_text} 面接 よく聞かれる質問 口コミ",
+        f"{safe_company} 採用 求める人物像 評価軸 公式",
     ]
     try:
-        summary = _run_async(_run_hints_web_search_pipeline, company_name, role_text, queries)
+        summary = _run_async(_run_hints_web_search_pipeline, safe_company, role_text, queries)
         return summary if summary else None
     except Exception as exc:
-        logger.warning("hints web search failed company=%s error=%s", company_name, exc)
+        logger.warning("hints web search failed company=%s error=%s", safe_company, exc)
         return None
 
 
@@ -653,9 +730,10 @@ async def _run_hints_web_search_pipeline(
     client = OpenAI(api_key=api_key)
     combined = "\n\n---\n\n".join(raw_results)[:5000]
     prompt = (
-        f"企業名: {company_name}\n"
-        f"職種: {role_text}\n\n"
+        "企業名: {company}\n"
+        "職種: {role}\n\n"
         "以下の検索結果から、面接・選考に関する情報を採用観点で整理してください。\n\n"
+    ).format(company=company_name, role=role_text) + (
         "【優先情報ソース（重要度順）】\n"
         "1. 企業公式採用サイト・説明会レポート\n"
         "2. 実際の選考体験談（一次情報）\n"
@@ -816,7 +894,8 @@ def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
 @app.post("/resume/review/stream")
 def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
     """RAGレポートをSSEでストリーミング配信するエンドポイント。"""
-    role_label = request.job_title or "指定なし"
+    safe_company_for_prompt = _sanitize_company_name_for_query(request.company_name)
+    role_label = _sanitize_job_title(request.job_title) if request.job_title else "指定なし"
 
     # コンテキスト収集（キャッシュ/DeepResearch/Web Search）
     retrieved, context_source = _gather_context(request)
@@ -858,7 +937,7 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
             "- 情報ソース: {source}\n"
             "- 注意: 外部情報に基づく内容は変化する可能性があります。最新情報は企業公式サイトで確認してください。\n"
         ).format(
-            company=request.company_name,
+            company=safe_company_for_prompt,
             role=role_label,
             context=context_block,
             resume=request.resume_text[:RESUME_REVIEW_INPUT_CHAR_LIMIT],

@@ -2,12 +2,14 @@ package routes
 
 import (
 	"Backend/internal/controllers"
-	"net/http"
+
+	"github.com/labstack/echo/v4"
 )
 
-func SetupResumeRoutes(resumeController *controllers.ResumeController) {
-	http.HandleFunc("/api/resume/upload", resumeController.Upload)
-	http.HandleFunc("/api/resume/review", resumeController.Review)
-	http.HandleFunc("/api/resume/review/stream", resumeController.ReviewStream)
-	http.HandleFunc("/api/resume/annotated", resumeController.Annotated)
+func SetupResumeRoutes(api *echo.Group, resumeController *controllers.ResumeController, userSecret string) {
+	resume := api.Group("/resume", EchoUserAuth(userSecret))
+	resume.POST("/upload", resumeController.Upload)
+	resume.POST("/review", resumeController.Review)
+	resume.GET("/review/stream", resumeController.ReviewStream)
+	resume.GET("/annotated", resumeController.Annotated)
 }

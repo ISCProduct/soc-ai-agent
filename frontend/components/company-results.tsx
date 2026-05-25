@@ -462,7 +462,9 @@ export function CompanyResults({ userData, onResetAction }: { userData: UserData
         }
 
         // バックエンドから推奨企業を取得
-        const response = await fetch(`/api/chat/recommendations?user_id=1&session_id=${sessionId}&limit=10`)
+        const response = await fetch(`/api/chat/recommendations?session_id=${sessionId}&limit=10`, {
+          headers: authService.getUserFetchHeaders(),
+        })
         
         if (response.ok) {
           const data = await response.json()

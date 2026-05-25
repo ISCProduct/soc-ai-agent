@@ -2,21 +2,22 @@ package controllers
 
 import (
 	"Backend/domain/repository"
-	"Backend/internal/services"
-	"encoding/json"
+	"Backend/internal/services/interfaces"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/labstack/echo/v4"
 )
 
 const maxAdminUsersOffset = 10000
 
 type AdminUserController struct {
 	repo  repository.UserRepository
-	audit *services.AuditLogService
+	audit interfaces.AuditLogService
 }
 
-func NewAdminUserController(repo repository.UserRepository, audit *services.AuditLogService) *AdminUserController {
+func NewAdminUserController(repo repository.UserRepository, audit interfaces.AuditLogService) *AdminUserController {
 	return &AdminUserController{repo: repo, audit: audit}
 }
 
@@ -39,30 +40,25 @@ type adminUserUpdateRequest struct {
 	SchoolName  *string `json:"school_name"`
 }
 
-func (c *AdminUserController) List(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+// List GET /api/admin/users
+func (c *AdminUserController) List(ctx echo.Context) error {
 	const maxOffset = 10000 // DoS対策: 巨大オフセットによるフルスキャンを防ぐ（#332）
 	limit := 25
 	offset := 0
-	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 100 {
+	if l, err := strconv.Atoi(ctx.QueryParam("limit")); err == nil && l > 0 && l <= 100 {
 		limit = l
 	}
-	if o, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && o >= 0 {
+	if o, err := strconv.Atoi(ctx.QueryParam("offset")); err == nil && o >= 0 {
 		if o > maxOffset {
 			o = maxOffset
 		}
 		offset = o
 	}
-	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	query := strings.TrimSpace(ctx.QueryParam("q"))
 
 	users, total, err := c.repo.ListUsersPaged(limit, offset, query)
 	if err != nil {
-		http.Error(w, "failed to fetch users", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch users")
 	}
 	resp := make([]adminUserResponse, 0, len(users))
 	for _, u := range users {
@@ -78,8 +74,7 @@ func (c *AdminUserController) List(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:   u.UpdatedAt.Format(timeLayout()),
 		})
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"users":  resp,
 		"total":  total,
 		"limit":  limit,
@@ -87,27 +82,19 @@ func (c *AdminUserController) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (c *AdminUserController) Update(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	path := strings.TrimPrefix(r.URL.Path, "/api/admin/users/")
-	path = strings.Trim(path, "/")
-	id, err := strconv.ParseUint(path, 10, 32)
+// Update PUT /api/admin/users/:id
+func (c *AdminUserController) Update(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
 	if err != nil {
-		http.Error(w, "invalid user id", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid user id")
 	}
 	var payload adminUserUpdateRequest
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, "invalid payload", http.StatusBadRequest)
-		return
+	if err := ctx.Bind(&payload); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
 	}
 	user, err := c.repo.GetUserByID(uint(id))
 	if err != nil || user == nil {
-		http.Error(w, "user not found", http.StatusNotFound)
-		return
+		return echo.NewHTTPError(http.StatusNotFound, "user not found")
 	}
 	if payload.IsAdmin != nil {
 		user.IsAdmin = *payload.IsAdmin
@@ -118,8 +105,7 @@ func (c *AdminUserController) Update(w http.ResponseWriter, r *http.Request) {
 	if payload.TargetLevel != nil {
 		level := strings.TrimSpace(*payload.TargetLevel)
 		if level != "" && level != "新卒" && level != "中途" {
-			http.Error(w, "target_level must be 新卒 or 中途", http.StatusBadRequest)
-			return
+			return echo.NewHTTPError(http.StatusBadRequest, "target_level must be 新卒 or 中途")
 		}
 		user.TargetLevel = level
 	}
@@ -127,17 +113,15 @@ func (c *AdminUserController) Update(w http.ResponseWriter, r *http.Request) {
 		user.SchoolName = strings.TrimSpace(*payload.SchoolName)
 	}
 	if err := c.repo.UpdateUser(user); err != nil {
-		http.Error(w, "failed to update user", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update user")
 	}
-	actor := r.Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "user.update", "user", user.ID, map[string]interface{}{
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "user.update", "user", user.ID, map[string]any{
 		"is_admin":     user.IsAdmin,
 		"target_level": user.TargetLevel,
 		"school_name":  user.SchoolName,
 	})
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(adminUserResponse{
+	return ctx.JSON(http.StatusOK, adminUserResponse{
 		ID:          user.ID,
 		Email:       user.Email,
 		Name:        user.Name,
