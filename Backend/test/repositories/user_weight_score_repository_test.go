@@ -1,7 +1,7 @@
 package repositories_test
 
 // UserWeightScoreRepository SetScore/AddScore のテスト（Issue #315）
-// 実行: cd Backend && go test ./internal/repositories/... -run TestUserWeightScore -v
+// 実行: cd Backend && go test ./test/repositories/... -run TestUserWeightScore -v
 
 import (
 	"testing"
@@ -56,7 +56,6 @@ func TestSetScore_CreatesNewRecord(t *testing.T) {
 func TestAddScore_UpdatesExistingRecord(t *testing.T) {
 	repo, mock := newScoreRepoTestDB(t)
 
-	// 既存レコードを返す
 	mock.ExpectQuery("SELECT \\* FROM `user_weight_scores` WHERE").
 		WithArgs(uint(1), "session-1", "技術志向", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "session_id", "weight_category", "score"}).
@@ -95,7 +94,6 @@ func TestAddScore_RecordNotFound(t *testing.T) {
 func TestSetScore_SemanticSeparation(t *testing.T) {
 	repo, mock := newScoreRepoTestDB(t)
 
-	// SetScore は SELECT せず直接 INSERT する
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO `user_weight_scores`").
 		WillReturnResult(sqlmock.NewResult(1, 1))
