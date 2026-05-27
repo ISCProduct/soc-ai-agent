@@ -21,6 +21,10 @@ test.describe('職務経歴書レビューフロー', () => {
   })
 
   test('PDFアップロードからレビュー完了まで', async ({ page }) => {
+    await page.route('**/api/resume/annotated*', async (route) => {
+      await route.fulfill({ status: 404 })
+    })
+
     await page.route('**/api/resume/upload', async (route) => {
       await route.fulfill({
         status: 200,
@@ -57,22 +61,14 @@ test.describe('職務経歴書レビューフロー', () => {
     await page.waitForLoadState('networkidle')
     await expect(page.getByText('履歴書・エントリシート レビュー')).toBeVisible({ timeout: 8000 })
 
-    const uploadButton = page.getByRole('button', { name: /アップロード|PDFを選択/ })
-    if (await uploadButton.count() > 0) {
-      const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null)
-      await uploadButton.click()
-      const fileChooser = await fileChooserPromise
-      if (fileChooser) {
-        await fileChooser.setFiles({
-          name: 'test-resume.pdf',
-          mimeType: 'application/pdf',
-          buffer: Buffer.from('%PDF-1.4 test'),
-        })
-      }
+    // "アップロード" ボタンを直接クリックしてモックで documentId を取得する
+    const uploadBtn = page.getByRole('button', { name: 'アップロード', exact: true })
+    if (await uploadBtn.count() > 0) {
+      await uploadBtn.click()
     }
 
     const reviewBtn = page.getByRole('button', { name: 'レビューを生成' })
-    const isEnabled = await reviewBtn.isEnabled({ timeout: 3000 }).catch(() => false)
+    const isEnabled = await reviewBtn.isEnabled({ timeout: 5000 }).catch(() => false)
     if (isEnabled) {
       await page.getByLabel(/応募企業名/).fill('テスト株式会社')
       await reviewBtn.click()

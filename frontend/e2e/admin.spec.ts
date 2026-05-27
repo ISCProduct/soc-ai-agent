@@ -63,11 +63,22 @@ test.describe('管理者ダッシュボードフロー', () => {
 
   test('スコア精度検証ページが表示される', async ({ page }) => {
     await page.route('**/api/admin/score-validation/*', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({}),
-      })
+      const url = route.request().url()
+      if (url.includes('/correlation')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ generated_at: new Date().toISOString(), total_candidates: 0, categories: [] }),
+        })
+      } else if (url.includes('/phase-metrics')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ generated_at: new Date().toISOString(), phases: [] }),
+        })
+      } else {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) })
+      }
     })
 
     await page.goto('/admin/score-validation')
