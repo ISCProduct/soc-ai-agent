@@ -8,24 +8,22 @@
 # 更新履歴:
 #   - 2024: 初期固定 (LangChain 0.2.x, chromadb 0.4.x)
 #   - 2026-03: langchain 0.3.x へ更新、chromadb 0.5.x へ更新 (#135)
+#   - 2026-05: crewai 0.80.x へ更新（embedchain依存を除去）、langchain 0.3.x へ統一
 # ============================================================
 
 # --- LangChain エコシステム ---
-# crewai 0.64.0 は langchain 0.2.x を要求する（langchain<0.3.0,>=0.2.16）。
-# 0.3.x 以降は crewai 0.64.0 との互換性がないため上限を 0.3 未満に設定。
-langchain>=0.2.16,<0.3.0
-langchain-community>=0.4.1,<0.5.0
+# crewai 0.80.0 以降は embedchain を除去し langchain 0.3.x を使用する。
+langchain>=0.3.0,<0.4.0
+langchain-community>=0.3.0,<0.4.0
 langchain-core>=0.3.86,<0.4.0
-# langchain-openai 0.1.x が langchain 0.2.x に対応するバージョン系列
-langchain-openai>=0.1.7,<0.2.0
-langchain-text-splitters>=0.3.11,<0.4.0
+langchain-openai>=0.2.0,<0.3.0
+langchain-text-splitters>=0.3.0,<0.4.0
 
 # --- ベクトルストア ---
+# crewai 0.80.0 以降は embedchain を除去したため chromadb の上限制約を緩和。
 # main.py で PersistentClient / get_or_create_collection / upsert / query を直接利用。
-# これらの API は 0.5.x でも互換性あり。
-# chromadb 0.4.x には修正済みの潜在的脆弱性が含まれる可能性があるため 0.5.x 以降に移行。
 # 1.0 以降は破壊的変更のリスクがあるため上限を設定。
-chromadb>=0.5.0,<1.0
+chromadb>=0.5.10,<1.0
 
 # --- 数値計算 ---
 # numpy 2.0 以降で chromadb および一部パッケージとの互換性問題が報告されているため上限を維持。
@@ -41,11 +39,10 @@ litellm>=1.83.7,<2.0
 openai>=1.66.0,<2.0
 
 # --- トークナイザー ---
-# tiktoken: OpenAI エンコーダーとのバイト互換を保つため 0.7.x に固定。
-# 0.8.x 以降はエンコーディング変更の可能性あり、アップグレード時は動作確認が必要。
+# tiktoken: OpenAI エンコーダーとのバイト互換を保つため固定。
 tiktoken>=0.7.0,<0.13
 
 # --- HTTP クライアント ---
-# httpx 0.28.x 以降で openai SDK との互換性問題が生じた実績があるため 0.27.x に固定。
+# httpx 0.28.x 以降で openai SDK との互換性問題が生じた実績があるため固定。
 # openai SDK 側で httpx>=0.28 対応が確認されたら上限を緩和可能。
 httpx>=0.28.1,<0.29
