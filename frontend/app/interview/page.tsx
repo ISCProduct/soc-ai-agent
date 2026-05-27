@@ -45,6 +45,7 @@ import { interviewApi, interviewLimits, InterviewReport, InterviewSession } from
 import { formatSeconds, parseJsonSafe, parseMediaError, parseMultipartResponse } from '@/lib/interview-utils'
 import ThreeAvatar from './components/ThreeAvatar'
 import InterviewSummary from './components/InterviewSummary'
+import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
 
 const PRIMARY = '#ec5b13'
 const BG_LIGHT = '#f8f6f6'
@@ -140,6 +141,9 @@ function InterviewContent() {
   const [videoUploadStatus, setVideoUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle')
   const [videoUploadProgress, setVideoUploadProgress] = useState(0)
   const [videoSizeWarning, setVideoSizeWarning] = useState<string | null>(null)
+
+  const [scoresBefore, setScoresBefore] = useState<WeightScore[] | null>(null)
+  const [scoresAfter, setScoresAfter] = useState<WeightScore[] | null>(null)
 
   const streamRef = useRef<MediaStream | null>(null)
   const lobbyVideoRef = useRef<HTMLVideoElement | null>(null)
@@ -550,6 +554,12 @@ function InterviewContent() {
     const currentSession = session
     const currentUser = user
     if (currentUser && currentSession) {
+      const scoreSessionId = `interview-${currentUser.user_id}`
+      try {
+        const res = await fetch(`/api/user/weight-scores?user_id=${currentUser.user_id}&session_id=${encodeURIComponent(scoreSessionId)}`)
+        const data = await res.json()
+        setScoresBefore(data.weight_scores ?? null)
+      } catch { /* ignore */ }
       try { await interviewApi.finishSession(currentSession.id, currentUser.user_id) } catch { /* ignore */ }
     }
     setStatus('finished')
@@ -587,6 +597,12 @@ function InterviewContent() {
         if (detail.report) {
           setReport(detail.report); setReportStatus('ready')
           clearInterval(pollRef.current!); pollRef.current = null
+          const scoreSessionId = `interview-${userId}`
+          try {
+            const res = await fetch(`/api/user/weight-scores?user_id=${userId}&session_id=${encodeURIComponent(scoreSessionId)}`)
+            const data = await res.json()
+            setScoresAfter(data.weight_scores ?? null)
+          } catch { /* ignore */ }
         }
       } catch { setReportStatus('error') }
     }, 3000)
@@ -1320,6 +1336,11 @@ function InterviewContent() {
 
           {reportStatus === 'ready' && report && (
             <Stack spacing={2}>
+              <ScoreUpdateBanner
+                beforeScores={scoresBefore}
+                afterScores={scoresAfter}
+                title="面接結果がプロフィールスコアに反映されました"
+              />
               <InterviewSummary report={report} userId={user?.user_id} theme="dark" />
               <Button
                 variant="outlined"
