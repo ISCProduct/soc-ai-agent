@@ -16,8 +16,8 @@
 langchain>=0.2.16,<0.3.0
 langchain-community>=0.4.2,<0.5.0
 langchain-core>=0.3.86,<0.4.0
-# langchain-openai 0.1.x が langchain 0.2.x に対応するバージョン系列
-langchain-openai>=0.1.7,<0.2.0
+# langchain-openai 0.3.x が langchain 0.3.x + openai 2.x に対応するバージョン系列
+langchain-openai>=0.3.0,<0.4.0
 langchain-text-splitters>=0.3.11,<0.4.0
 
 # --- ベクトルストア ---
@@ -36,9 +36,9 @@ numpy<3.0
 litellm>=1.83.7,<2.0
 
 # --- OpenAI SDK ---
-# Dockerfile 内の検証スクリプトが client.responses API の存在を確認しており、
-# この API は openai>=1.66.0 で利用可能。メジャーバージョン変更時は要検証。
-openai>=1.66.0,<2.0
+# litellm>=1.83.7 が openai 2.x を要求するため 2.x 系列に移行。
+# client.responses / chat.completions / embeddings API は 2.x でも互換性あり。
+openai>=2.0,<3.0
 
 # --- トークナイザー ---
 # tiktoken: OpenAI エンコーダーとのバイト互換を保つため 0.7.x に固定。
