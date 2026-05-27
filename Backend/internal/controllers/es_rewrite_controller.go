@@ -22,6 +22,7 @@ type esRewriteRequest struct {
 	OriginalText string `json:"original_text"`
 	QuestionType string `json:"question_type"` // "志望動機" | "自己PR" | "学チカ" | "その他"
 	TechStack    string `json:"tech_stack"`    // 任意: 使用技術スタック
+	CompanyName  string `json:"company_name"`  // 任意: 志望企業名（Web Search を利用する場合）
 }
 
 type starBreakdown struct {
@@ -59,11 +60,22 @@ JSONのみで返してください。`
 		techInfo = "\n使用技術スタック（参考）: " + req.TechStack
 	}
 
+	// 企業名が指定されていれば Web Search を使って最新の企業情報を取得し、プロンプトに注入する（失敗しても処理を継続）
+	companyInfo := ""
+	if strings.TrimSpace(req.CompanyName) != "" {
+		if info, err := c.openaiClient.WebSearchQuery(context.Background(), "企業名: "+req.CompanyName+" 採用情報 求める人物像 企業理念"); err == nil {
+			if len(info) > 2000 {
+				info = info[:2000]
+			}
+			companyInfo = "\n\n【企業情報（WebSearch）】\n" + info
+		}
+	}
+
 	userPrompt := `以下のES文章を、STAR法（Situation/Task/Action/Result）に沿ったエンジニア採用向けの表現にリライトしてください。
 
 【質問種別】` + req.QuestionType + `
 【元のES文章】
-` + req.OriginalText + techInfo + `
+` + req.OriginalText + techInfo + companyInfo + `
 
 ## リライトのルール
 - 「頑張りました」「工夫しました」等の抽象表現を、具体的な技術・数値・成果に置き換える

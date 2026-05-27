@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 )
 
@@ -96,7 +97,48 @@ func (s *ChatService) validateAnswerRelevance(ctx context.Context, question, ans
 	isTextQuestion := isTextBasedQuestion(question)
 
 	if isTextQuestion {
-		// 文章系の質問: キーワードベースで柔軟に判定
+		// 文章系の質問: 可能であれば埋め込みベースの意味的類似度で判定
+		if s.aiClient != nil {
+			qText := normalizeQuestionText(question)
+			if qText == "" {
+				qText = question
+			}
+			qEmb, err := s.aiClient.Embedding(ctx, qText)
+			if err != nil {
+				log.Printf("[Validation] Embedding error for question: %v\n", err)
+				return isLikelyAnswer(answer, question), nil
+			}
+			aEmb, err := s.aiClient.Embedding(ctx, answer)
+			if err != nil {
+				log.Printf("[Validation] Embedding error for answer: %v\n", err)
+				return isLikelyAnswer(answer, question), nil
+			}
+
+			// cosine similarity
+			dot := 0.0
+			qNorm := 0.0
+			aNorm := 0.0
+			for i := range qEmb {
+				vq := float64(qEmb[i])
+				va := float64(aEmb[i])
+				dot += vq * va
+				qNorm += vq * vq
+				aNorm += va * va
+			}
+			if qNorm == 0 || aNorm == 0 {
+				return isLikelyAnswer(answer, question), nil
+			}
+			cos := dot / (math.Sqrt(qNorm) * math.Sqrt(aNorm))
+			log.Printf("[Validation] Embedding cosine similarity=%f\n", cos)
+
+			// 閾値は運用で調整。まずは 0.45 を採用（高めの類似度がある場合は有効とする）
+			if cos >= 0.45 {
+				return true, nil
+			}
+			return false, nil
+		}
+
+		// AIクライアントが無い場合は既存のキーワードベースフォールバック
 		log.Printf("[Validation] Text-based question detected, using keyword-based validation\n")
 		return isLikelyAnswer(answer, question), nil
 	}

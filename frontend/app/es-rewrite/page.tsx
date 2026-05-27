@@ -91,14 +91,15 @@ export default function ESRewritePage() {
           original_text: originalText,
           question_type: questionType,
           tech_stack: techStack,
-        }),
-      })
-      if (!res.ok) throw new Error(await res.text())
-      setRewriteResult(await res.json())
+      company_name: companyName,
+    }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  setRewriteResult(await res.json())
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'リライトに失敗しました。再試行してください。')
+  setError(e instanceof Error ? e.message : 'リライトに失敗しました。再試行してください。')
     } finally {
-      setLoading(false)
+  setLoading(false)
     }
   }
 
@@ -261,22 +262,40 @@ export default function ESRewritePage() {
                 }}
               />
             ) : (
-              <TextField
-                fullWidth
-                size="small"
-                value={techStack}
-                onChange={e => setTechStack(e.target.value)}
-                label="使用技術スタック（任意）"
-                placeholder="例: React, Node.js, PostgreSQL, Docker"
-                sx={{
-                  mb: 3,
-                  '& .MuiOutlinedInput-root': {
-                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: PRIMARY },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: PRIMARY },
-                  },
-                  '& .MuiInputLabel-root.Mui-focused': { color: PRIMARY },
-                }}
-              />
+              <>
+                <TextField
+                  fullWidth
+                  size="small"
+                  value={techStack}
+                  onChange={e => setTechStack(e.target.value)}
+                  label="使用技術スタック（任意）"
+                  placeholder="例: React, Node.js, PostgreSQL, Docker"
+                  sx={{
+                    mb: 3,
+                    '& .MuiOutlinedInput-root': {
+                      '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: PRIMARY },
+                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: PRIMARY },
+                    },
+                    '& .MuiInputLabel-root.Mui-focused': { color: PRIMARY },
+                  }}
+                />
+                <TextField
+                  fullWidth
+                  size="small"
+                  value={companyName}
+                  onChange={e => setCompanyName(e.target.value)}
+                  label="志望企業名（任意・入力で企業情報を参照）"
+                  placeholder="例: 株式会社サイバーエージェント"
+                  sx={{
+                    mb: 3,
+                    '& .MuiOutlinedInput-root': {
+                      '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: PRIMARY },
+                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: PRIMARY },
+                    },
+                    '& .MuiInputLabel-root.Mui-focused': { color: PRIMARY },
+                  }}
+                />
+              </>
             )}
 
             <Button
