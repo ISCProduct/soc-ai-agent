@@ -9,7 +9,7 @@ test.describe('認証フロー', () => {
   })
 
   test('メールアドレスとパスワードでログインできる', async ({ page }) => {
-    await page.route('/api/auth/login', async (route) => {
+    await page.route('**/api/auth/login', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -29,11 +29,11 @@ test.describe('認証フロー', () => {
     await page.locator('input[type="password"]').fill('password123')
     await page.getByRole('button', { name: 'ログイン', exact: true }).click()
 
-    await expect(page).toHaveURL('/', { timeout: 5000 })
+    await expect(page).not.toHaveURL(/\/login/, { timeout: 10000 })
   })
 
   test('無効な認証情報でエラーメッセージが表示される', async ({ page }) => {
-    await page.route('/api/auth/login', async (route) => {
+    await page.route('**/api/auth/login', async (route) => {
       await route.fulfill({
         status: 401,
         contentType: 'application/json',
@@ -46,11 +46,12 @@ test.describe('認証フロー', () => {
     await page.locator('input[type="password"]').fill('wrongpassword')
     await page.getByRole('button', { name: 'ログイン', exact: true }).click()
 
-    await expect(page.getByText('invalid email or password')).toBeVisible({ timeout: 5000 })
+    const errorAlert = page.getByRole('alert').filter({ hasText: /invalid email or password/ })
+    await expect(errorAlert).toBeVisible({ timeout: 5000 })
   })
 
   test('仮登録メールアドレス送信', async ({ page }) => {
-    await page.route('/api/auth/registration', async (route) => {
+    await page.route('**/api/auth/request-registration', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',

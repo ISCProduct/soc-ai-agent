@@ -5,7 +5,7 @@ test.describe('管理者ダッシュボードフロー', () => {
   test.beforeEach(async ({ page }) => {
     await setupAuth(page, TEST_ADMIN)
 
-    await page.route('/api/admin/companies*', async (route) => {
+    await page.route('**/api/admin/companies*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -18,7 +18,7 @@ test.describe('管理者ダッシュボードフロー', () => {
       })
     })
 
-    await page.route('/api/admin/crawl-sources*', async (route) => {
+    await page.route('**/api/admin/crawl-sources*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -26,7 +26,7 @@ test.describe('管理者ダッシュボードフロー', () => {
       })
     })
 
-    await page.route('/api/admin/dashboard/users*', async (route) => {
+    await page.route('**/api/admin/dashboard/users*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -59,7 +59,7 @@ test.describe('管理者ダッシュボードフロー', () => {
   })
 
   test('スコア精度検証ページが表示される', async ({ page }) => {
-    await page.route('/api/admin/score-validation/*', async (route) => {
+    await page.route('**/api/admin/score-validation/*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -81,7 +81,6 @@ test.describe('管理者ダッシュボードフロー', () => {
     })
 
     await page.goto('/admin')
-    await page.waitForTimeout(1000)
-    expect(page.url()).not.toContain('/admin')
+    await page.waitForURL((url) => !url.pathname.startsWith('/admin'), { timeout: 10000 })
   })
 })

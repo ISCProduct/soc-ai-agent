@@ -5,7 +5,7 @@ test.describe('チャット分析フロー', () => {
   test.beforeEach(async ({ page }) => {
     await setupAuth(page, TEST_USER)
 
-    await page.route('/api/chat/session', async (route) => {
+    await page.route('**/api/chat/session', async (route) => {
       if (route.request().method() === 'POST') {
         await route.fulfill({
           status: 200,
@@ -17,7 +17,15 @@ test.describe('チャット分析フロー', () => {
       }
     })
 
-    await page.route('/api/chat/messages*', async (route) => {
+    await page.route('**/api/chat/history*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([]),
+      })
+    })
+
+    await page.route('**/api/chat/messages*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -28,11 +36,14 @@ test.describe('チャット分析フロー', () => {
 
   test('チャット画面が表示される', async ({ page }) => {
     await page.goto('/')
-    await expect(page.locator('body')).toBeVisible()
+    // ログインページにリダイレクトされないことを確認
+    await page.waitForTimeout(2000)
+    const url = page.url()
+    expect(url).not.toContain('/login')
   })
 
   test('マッチング結果ページに遷移できる', async ({ page }) => {
-    await page.route('/api/companies*', async (route) => {
+    await page.route('**/api/companies*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
