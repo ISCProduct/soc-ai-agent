@@ -1,0 +1,19 @@
+FROM python:3.10-slim
+
+# 最小限のビルド環境
+RUN apt-get update && apt-get install -y git build-essential && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 依存関係
+COPY requirements-finetune.txt /app/requirements-finetune.txt
+RUN python3 -m pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r /app/requirements-finetune.txt
+
+# アプリケーションをコピー
+COPY . /app
+WORKDIR /app/rag
+
+# デフォルトはヘルプ表示
+ENTRYPOINT ["python3", "-u", "train/lora_train.py"]
+CMD ["--help"]

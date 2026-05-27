@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
+# Training export endpoints (registered from training_api.py)
+import training_api
+training_api.register(app)
+
 # ── 環境変数 ────────────────────────────────────────────────────────────────
 DEFAULT_CACHE_TTL_SECONDS = 86400
 DEFAULT_MAX_EMBED_TOKENS = 8191
@@ -775,7 +779,11 @@ def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
     cache_key = "{company}::{role}".format(company=safe_company_name, role=role_label)
 
     # キャッシュヒット: 即時返却
-    retrieved = get_cached_context(cache_key)
+    try:
+        retrieved = get_cached_context(cache_key)
+    except Exception as exc:
+        logger.error("get_cached_context failed error=%s", exc, exc_info=True)
+        retrieved = None
     if retrieved:
         return retrieved, "cache"
 

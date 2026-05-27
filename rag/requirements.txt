@@ -1,7 +1,7 @@
 # RAG サービス 直接依存パッケージ
 # バージョン制約の詳細は constraints.txt を参照。
-chromadb>=0.6.3,<1.0
-crewai==0.64.0
+chromadb>=0.5.10,<1.0
+crewai>=0.80.0,<1.0
 fastapi==0.136.1
 openai==1.109.1
 pydantic==2.13.4

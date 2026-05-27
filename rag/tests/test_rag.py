@@ -245,3 +245,23 @@ class TestReviewEndpoint:
             "company_name": "",
         })
         assert resp.status_code == 422
+
+
+class TestFailureCases:
+    def test_chromadb_connection_failure_fallback(self):
+        """ChromaDB 接続で例外が出てもエンドポイントが 200 を返すことを確認する。"""
+        from fastapi.testclient import TestClient
+
+        with patch("main.get_cached_context", side_effect=Exception("ChromaDB connection failed")), \
+             patch("main.run_crewai", return_value="外部依存失敗時のレポート") as mock_crewai:
+
+            client = TestClient(main.app)
+            resp = client.post("/resume/review", json={
+                "resume_text": "経歴テスト",
+                "company_name": "接続失敗企業",
+            })
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "report" in body
+        assert len(body["report"]) > 0
