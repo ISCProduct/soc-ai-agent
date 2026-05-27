@@ -3,8 +3,22 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Box, CircularProgress, Typography, Alert } from '@mui/material'
+import { z } from 'zod'
 import { authService } from '@/lib/auth'
 import { BACKEND_URL } from '@/lib/backend-url'
+
+const OAuthUserSchema = z.object({
+  user_id: z.union([z.number().int().positive(), z.string()]),
+  email: z.string().email(),
+  name: z.string(),
+  token: z.string().min(1).optional(),
+  user_token: z.string().optional(),
+  is_guest: z.boolean().optional().default(false),
+  target_level: z.string().optional().default(''),
+  is_admin: z.boolean().optional(),
+  oauth_provider: z.string().optional(),
+  avatar_url: z.string().optional(),
+})
 
 function OAuthCallbackContent() {
   const router = useRouter()
@@ -35,13 +49,16 @@ function OAuthCallbackContent() {
         const bytes = Uint8Array.from(binary, c => c.charCodeAt(0))
         const userDataString = new TextDecoder('utf-8').decode(bytes)
         const userDataRaw = JSON.parse(userDataString)
+        // スキーマ検証: 不正な構造のペイロードを拒否
+        const parsed = OAuthUserSchema.safeParse(userDataRaw)
+        if (!parsed.success) {
+          throw new Error('Invalid OAuth payload structure')
+        }
         // Fallback repair for mojibake in name
         const fixMojibake = (s: string) => /[Ãå][^\s]/.test(s) ? decodeURIComponent(escape(s)) : s
-        let userData = { ...userDataRaw, name: fixMojibake(userDataRaw.name) }
+        let userData = { ...parsed.data, name: fixMojibake(parsed.data.name) }
         try {
-          const fresh = await authService.getUser(
-            typeof userData.user_id === 'string' ? Number(userData.user_id) : userData.user_id,
-          )
+          const fresh = await authService.getUser()
           userData = { ...userData, ...fresh }
         } catch {
           // ignore and fall back to callback payload

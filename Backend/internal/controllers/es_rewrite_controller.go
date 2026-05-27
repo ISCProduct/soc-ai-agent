@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/labstack/echo/v4"
 )
 
 type ESRewriteController struct {
@@ -35,21 +37,15 @@ type esRewriteResponse struct {
 	Star          starBreakdown `json:"star"`
 }
 
-func (c *ESRewriteController) Rewrite(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+// Rewrite POST /api/es/rewrite
+func (c *ESRewriteController) Rewrite(ctx echo.Context) error {
 	var req esRewriteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
 	req.OriginalText = strings.TrimSpace(req.OriginalText)
 	if req.OriginalText == "" {
-		http.Error(w, "original_text is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "original_text is required")
 	}
 	if req.QuestionType == "" {
 		req.QuestionType = "その他"
@@ -101,24 +97,21 @@ JSONのみで返してください。`
 
 	raw, err := c.openaiClient.ChatCompletionJSON(context.Background(), systemPrompt, userPrompt, 0.7, 1500)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
-	// Extract JSON object in case of markdown fences
+	// マークダウンフェンスなどを除去してJSONオブジェクトを抽出
 	cleaned := extractESJSON(raw)
 
 	var resp esRewriteResponse
 	if err := json.Unmarshal([]byte(cleaned), &resp); err != nil {
-		http.Error(w, "Failed to parse AI response", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to parse AI response")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	return ctx.JSON(http.StatusOK, resp)
 }
 
-// extractESJSON strips markdown code fences and extracts the outermost JSON object.
+// extractESJSON はマークダウンコードフェンスを取り除き、最外部のJSONオブジェクトを返す。
 func extractESJSON(raw string) string {
 	s := strings.TrimSpace(raw)
 	if start := strings.Index(s, "{"); start > 0 {

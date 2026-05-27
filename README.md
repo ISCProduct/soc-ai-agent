@@ -22,6 +22,7 @@
 - [環境変数](#環境変数)
 - [ローカル開発](#ローカル開発)
 - [Docker Compose](#docker-compose)
+- [GitHub CLI セットアップ](#github-cli-セットアップ)
 - [Copilot カスタムコマンド共有](#copilot-カスタムコマンド共有)
 - [主要APIエンドポイント](#主要apiエンドポイント)
 - [品質管理](#品質管理)
@@ -158,6 +159,8 @@ DB_NAME=app_db
 
 # サーバー
 SERVER_PORT=8080
+ADMIN_SECRET=change-me-admin-secret
+USER_SECRET=change-me-user-secret
 
 # OpenAI
 OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -273,6 +276,70 @@ docker compose --profile rag up -d rag-review
 | `frontend` | Next.js | 3000 |
 | `rag-review` | 職務経歴書 RAG | 9000 |
 | `company-graph` | 企業スクレイピング | 9100 |
+
+---
+
+## GitHub CLI セットアップ
+
+GitHub CLI（`gh`）を使うことで、Issue作成・PR作成・ブランチ操作などをターミナルから直接行えます。
+
+### インストール
+
+**macOS**
+
+```sh
+brew install gh
+```
+
+**Linux (apt)**
+
+```sh
+sudo apt install gh
+```
+
+**Windows (winget)**
+
+```sh
+winget install GitHub.cli
+```
+
+その他のインストール方法は [GitHub CLI 公式ドキュメント](https://cli.github.com/) を参照してください。
+
+### 認証
+
+```sh
+gh auth login
+```
+
+対話形式で以下を選択します:
+
+1. **GitHub.com** を選択
+2. 認証プロトコルは **HTTPS** を推奨
+3. 認証方法は **Login with a web browser** を選択（ブラウザが開き、コードを入力して認証）
+
+### 認証確認
+
+```sh
+gh auth status
+```
+
+`Logged in to github.com as <username>` と表示されれば完了です。
+
+### よく使うコマンド
+
+```sh
+# Issue 一覧
+gh issue list
+
+# PR 一覧
+gh pr list
+
+# 現在のブランチからPR作成
+gh pr create
+
+# PR のチェック状況確認
+gh pr checks
+```
 
 ---
 

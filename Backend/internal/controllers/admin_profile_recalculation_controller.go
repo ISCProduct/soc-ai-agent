@@ -1,72 +1,32 @@
 package controllers
 
 import (
-	"Backend/internal/services"
-	"encoding/json"
+	"Backend/internal/services/interfaces"
 	"net/http"
 	"strconv"
-	"strings"
+
+	"github.com/labstack/echo/v4"
 )
 
 // AdminProfileRecalculationController 企業プロファイル再計算管理コントローラー
 type AdminProfileRecalculationController struct {
-	service *services.ProfileRecalculationService
+	service interfaces.ProfileRecalculationService
 }
 
-func NewAdminProfileRecalculationController(service *services.ProfileRecalculationService) *AdminProfileRecalculationController {
+func NewAdminProfileRecalculationController(service interfaces.ProfileRecalculationService) *AdminProfileRecalculationController {
 	return &AdminProfileRecalculationController{service: service}
 }
 
-// Route /api/admin/profile-recalculation 以下のルーティング
-func (c *AdminProfileRecalculationController) Route(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path // 例: /api/admin/profile-recalculation/42/rollback
-
-	// POST /api/admin/profile-recalculation → 全企業一括再計算
-	if r.Method == http.MethodPost && path == "/api/admin/profile-recalculation" {
-		c.RecalculateAll(w, r)
-		return
-	}
-
-	// パスから company_id を取得
-	// /api/admin/profile-recalculation/{company_id}
-	// /api/admin/profile-recalculation/{company_id}/rollback
-	// /api/admin/profile-recalculation/{company_id}/history
-	trimmed := strings.TrimPrefix(path, "/api/admin/profile-recalculation/")
-	parts := strings.SplitN(trimmed, "/", 2)
-	companyID, err := strconv.ParseUint(parts[0], 10, 64)
-	if err != nil || companyID == 0 {
-		http.Error(w, "Invalid company_id", http.StatusBadRequest)
-		return
-	}
-
-	action := ""
-	if len(parts) == 2 {
-		action = parts[1]
-	}
-
-	switch {
-	case r.Method == http.MethodPost && action == "rollback":
-		c.Rollback(w, r, uint(companyID))
-	case r.Method == http.MethodGet && action == "history":
-		c.GetHistory(w, r, uint(companyID))
-	case r.Method == http.MethodPost && action == "":
-		c.RecalculateOne(w, r, uint(companyID))
-	default:
-		http.Error(w, "Not found", http.StatusNotFound)
-	}
-}
-
 // RecalculateAll POST /api/admin/profile-recalculation
-func (c *AdminProfileRecalculationController) RecalculateAll(w http.ResponseWriter, r *http.Request) {
+func (c *AdminProfileRecalculationController) RecalculateAll(ctx echo.Context) error {
 	var req struct {
 		MinSamples int `json:"min_samples"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
+	ctx.Bind(&req)
 
 	results, err := c.service.RecalculateAll(req.MinSamples)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
 	updated := 0
@@ -79,8 +39,7 @@ func (c *AdminProfileRecalculationController) RecalculateAll(w http.ResponseWrit
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"results":       results,
 		"total":         len(results),
 		"updated_count": updated,
@@ -88,44 +47,54 @@ func (c *AdminProfileRecalculationController) RecalculateAll(w http.ResponseWrit
 	})
 }
 
-// RecalculateOne POST /api/admin/profile-recalculation/{company_id}
-func (c *AdminProfileRecalculationController) RecalculateOne(w http.ResponseWriter, r *http.Request, companyID uint) {
+// RecalculateOne POST /api/admin/profile-recalculation/:company_id
+func (c *AdminProfileRecalculationController) RecalculateOne(ctx echo.Context) error {
+	var companyID uint
+	if _, err := parseEchoUintParam(ctx, "company_id", &companyID); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company_id")
+	}
+
 	var req struct {
 		MinSamples int `json:"min_samples"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
+	ctx.Bind(&req)
 
 	result, err := c.service.RecalculateCompany(companyID, req.MinSamples)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	return ctx.JSON(http.StatusOK, result)
 }
 
-// Rollback POST /api/admin/profile-recalculation/{company_id}/rollback
-func (c *AdminProfileRecalculationController) Rollback(w http.ResponseWriter, r *http.Request, companyID uint) {
-	if err := c.service.Rollback(companyID); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+// Rollback POST /api/admin/profile-recalculation/:company_id/rollback
+func (c *AdminProfileRecalculationController) Rollback(ctx echo.Context) error {
+	var companyID uint
+	if _, err := parseEchoUintParam(ctx, "company_id", &companyID); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company_id")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := c.service.Rollback(companyID); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"ok":         true,
 		"company_id": companyID,
 		"message":    "プロファイルをロールバックしました",
 	})
 }
 
-// GetHistory GET /api/admin/profile-recalculation/{company_id}/history
-func (c *AdminProfileRecalculationController) GetHistory(w http.ResponseWriter, r *http.Request, companyID uint) {
+// GetHistory GET /api/admin/profile-recalculation/:company_id/history
+func (c *AdminProfileRecalculationController) GetHistory(ctx echo.Context) error {
+	var companyID uint
+	if _, err := parseEchoUintParam(ctx, "company_id", &companyID); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company_id")
+	}
+
 	histories, err := c.service.GetHistory(companyID)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
 	type HistoryResponse struct {
@@ -147,9 +116,19 @@ func (c *AdminProfileRecalculationController) GetHistory(w http.ResponseWriter, 
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"histories": resp,
 		"total":     len(resp),
 	})
+}
+
+// parseEchoUintParam はパスパラメータを uint に変換するヘルパー。
+func parseEchoUintParam(ctx echo.Context, name string, out *uint) (uint, error) {
+	s := ctx.Param(name)
+	id, err := strconv.ParseUint(s, 10, 64)
+	if err != nil || id == 0 {
+		return 0, err
+	}
+	*out = uint(id)
+	return uint(id), nil
 }

@@ -132,7 +132,7 @@ function ApplicationsContent() {
   }
 
   return (
-    <Box sx={{ maxWidth: 800, mx: 'auto', p: 3 }}>
+    <Box sx={{ maxWidth: 800, mx: 'auto', p: { xs: 2, sm: 3 } }}>
       <Stack direction="row" alignItems="center" spacing={1} mb={3}>
         <IconButton onClick={() => router.back()}>
           <ArrowBack />
@@ -154,8 +154,8 @@ function ApplicationsContent() {
           {applications.map(app => (
             <Card key={app.id} variant="outlined">
               <CardContent>
-                <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-                  <Box>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={1}>
+                  <Box sx={{ minWidth: 0, flex: 1 }}>
                     <Typography variant="h6" fontWeight="bold">
                       {app.company_name}
                     </Typography>
@@ -172,6 +172,7 @@ function ApplicationsContent() {
                     label={STATUS_LABELS[app.status] || app.status}
                     color={STATUS_COLORS[app.status] || 'default'}
                     size="small"
+                    sx={{ flexShrink: 0 }}
                   />
                 </Stack>
 

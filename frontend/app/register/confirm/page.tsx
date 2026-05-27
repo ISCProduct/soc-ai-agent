@@ -81,7 +81,7 @@ function RegisterConfirmForm() {
       }}
     >
       <Card sx={{ maxWidth: 450, width: '100%' }}>
-        <CardContent sx={{ p: 4 }}>
+        <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
           <Typography variant="h5" align="center" gutterBottom fontWeight="bold">
             会員登録の完了
           </Typography>

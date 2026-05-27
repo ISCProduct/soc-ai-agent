@@ -176,7 +176,7 @@ func TestInterviewService_TTSVoiceSelection(t *testing.T) {
 		}
 		sRepo.On("FindByID", uint(100)).Return(session, nil)
 
-		_, err := svc.StartTurn(context.Background(), 1, 100, "", "", "", "", "")
+		_, err := svc.StartTurn(context.Background(), 1, 100, "", "", "", "", "", 0, 0, 0, 0)
 		assert.NoError(t, err)
 	})
 
@@ -209,7 +209,7 @@ func TestInterviewService_TTSVoiceSelection(t *testing.T) {
 		}
 		sRepo.On("FindByID", uint(101)).Return(session, nil)
 
-		_, err := svc.StartTurn(context.Background(), 1, 101, "", "", "", "", "")
+		_, err := svc.StartTurn(context.Background(), 1, 101, "", "", "", "", "", 0, 0, 0, 0)
 		assert.NoError(t, err)
 	})
 }

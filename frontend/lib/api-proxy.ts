@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { parseProxyResponse, type ProxyResponseData } from '@/lib/proxy-response'
 
 export interface ProxyErrorBody {
@@ -26,6 +26,15 @@ function getDetailText(data: ProxyResponseData, raw: string): string | undefined
     getString(data.message) ??
     getString(raw)
   return detail
+}
+
+export function extractUserAuthHeaders(request: NextRequest): Record<string, string> {
+  const headers: Record<string, string> = {}
+  const xUserId = request.headers.get('X-User-ID')
+  const xUserToken = request.headers.get('X-User-Token')
+  if (xUserId) headers['X-User-ID'] = xUserId
+  if (xUserToken) headers['X-User-Token'] = xUserToken
+  return headers
 }
 
 export async function buildProxyJsonResponse(response: Response): Promise<NextResponse> {

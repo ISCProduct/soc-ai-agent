@@ -452,11 +452,11 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 		Modalities:   []string{"audio"},
 		Voice:        voice,
 		Instructions: buildRealtimeInstructions(lang),
-		InputAudioTranscription: map[string]interface{}{
+		InputAudioTranscription: map[string]any{
 			"model":    transcribeModel,
 			"language": lang,
 		},
-		TurnDetection: map[string]interface{}{
+		TurnDetection: map[string]any{
 			"type":                "server_vad",
 			"threshold":           0.35,
 			"silence_duration_ms": 500,

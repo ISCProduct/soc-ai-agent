@@ -33,7 +33,8 @@
     "recharts": "^2.15.3",
     "tailwind-merge": "^2.4.0",
     "three": "^0.165.0",
-    "wawa-lipsync": "^0.0.2"
+    "wawa-lipsync": "^0.0.2",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0",

@@ -2,23 +2,26 @@ package routes
 
 import (
 	"Backend/internal/controllers"
-	"net/http"
+
+	"github.com/labstack/echo/v4"
 )
 
 // SetupChatRoutes チャット関連のルーティング設定
-func SetupChatRoutes(chatController *controllers.ChatController, questionController *controllers.QuestionController) {
-	// チャットエンドポイント
-	http.HandleFunc("/api/chat", chatController.Chat)
-	http.HandleFunc("/api/chat/history", chatController.GetHistory)
-	http.HandleFunc("/api/chat/scores", chatController.GetScores)
-	http.HandleFunc("/api/chat/recommendations", chatController.GetRecommendations)
-	http.HandleFunc("/api/chat/analysis", chatController.GetAnalysisSummary)
-	http.HandleFunc("/api/chat/sessions", chatController.GetSessions)
-	http.HandleFunc("/api/chat/send-report", chatController.SendReport)
-	http.HandleFunc("/api/chat/favorite", chatController.ToggleFavorite)
+func SetupChatRoutes(api *echo.Group, chatController *controllers.ChatController, questionController *controllers.QuestionController, userSecret string) {
+	// チャットエンドポイント（認証必須）
+	chat := api.Group("/chat", EchoUserAuth(userSecret))
+	chat.POST("", chatController.Chat)
+	chat.GET("/history", chatController.GetHistory)
+	chat.GET("/scores", chatController.GetScores)
+	chat.GET("/recommendations", chatController.GetRecommendations)
+	chat.GET("/analysis", chatController.GetAnalysisSummary)
+	chat.GET("/sessions", chatController.GetSessions)
+	chat.POST("/send-report", chatController.SendReport)
+	chat.POST("/favorite", chatController.ToggleFavorite)
 
-	// 質問管理エンドポイント
-	http.HandleFunc("/api/questions/generate", questionController.GenerateQuestions)
-	http.HandleFunc("/api/questions/create", questionController.CreateQuestion)
-	http.HandleFunc("/api/questions/list", questionController.GetQuestionsByCategory)
+	// 質問管理エンドポイント（認証必須）
+	questions := api.Group("/questions", EchoUserAuth(userSecret))
+	questions.POST("/generate", questionController.GenerateQuestions)
+	questions.POST("/create", questionController.CreateQuestion)
+	questions.GET("/list", questionController.GetQuestionsByCategory)
 }

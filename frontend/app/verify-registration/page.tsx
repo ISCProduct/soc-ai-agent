@@ -95,7 +95,7 @@ function VerifyRegistrationContent() {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', p: 2 }}>
         <Card sx={{ maxWidth: 450, width: '100%' }}>
-          <CardContent sx={{ p: 4 }}>
+          <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
             <Alert severity="error">{tokenError}</Alert>
             <Button sx={{ mt: 2 }} onClick={() => router.push('/login')}>
               ログインページへ
@@ -109,7 +109,7 @@ function VerifyRegistrationContent() {
   return (
     <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', p: 2 }}>
       <Card sx={{ maxWidth: 450, width: '100%' }}>
-        <CardContent sx={{ p: 4 }}>
+        <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
           <Typography variant="h5" fontWeight="bold" gutterBottom>
             アカウント情報の入力
           </Typography>

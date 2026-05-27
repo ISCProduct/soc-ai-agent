@@ -86,8 +86,8 @@ func (rl *RateLimiter) cleanupLoop() {
 	}
 }
 
-// getClientIP は X-Forwarded-For / X-Real-IP を優先してクライアントIPを取得する
-func getClientIP(r *http.Request) string {
+// GetClientIP は X-Forwarded-For / X-Real-IP を優先してクライアントIPを取得する
+func GetClientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		if ip, _, err := net.SplitHostPort(xff); err == nil {
 			return ip
@@ -115,7 +115,7 @@ var PasswordResetRateLimiter = NewRateLimiter(time.Hour, 5)
 // LoginRateLimit はログインエンドポイントのレート制限ミドルウェア
 func LoginRateLimit(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ip := getClientIP(r)
+		ip := GetClientIP(r)
 		if !LoginRateLimiter.Allow(ip) {
 			http.Error(w, "Too Many Requests: お試し回数の上限に達しました。しばらく待ってから再試行してください。", http.StatusTooManyRequests)
 			return
@@ -127,7 +127,7 @@ func LoginRateLimit(next http.HandlerFunc) http.HandlerFunc {
 // PasswordResetRateLimit はパスワードリセットエンドポイントのレート制限ミドルウェア
 func PasswordResetRateLimit(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ip := getClientIP(r)
+		ip := GetClientIP(r)
 		if !PasswordResetRateLimiter.Allow(ip) {
 			http.Error(w, "Too Many Requests: リクエスト上限に達しました。しばらく待ってから再試行してください。", http.StatusTooManyRequests)
 			return

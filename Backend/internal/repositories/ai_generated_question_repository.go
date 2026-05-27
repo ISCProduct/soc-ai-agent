@@ -49,7 +49,7 @@ func (r *AIGeneratedQuestionRepository) GetAskedQuestionIDs(userID uint, session
 func (r *AIGeneratedQuestionRepository) UpdateAnswer(id uint, answerText string, answerScore int) error {
 	return r.db.Model(&models.AIGeneratedQuestion{}).
 		Where("id = ?", id).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"answer_text":  answerText,
 			"answer_score": answerScore,
 			"is_answered":  true,

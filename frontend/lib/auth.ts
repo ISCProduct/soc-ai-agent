@@ -154,8 +154,8 @@ export const authService = {
     return res.json()
   },
 
-  async getUser(userId: number): Promise<User> {
-    const res = await fetch(`${BACKEND_URL}/api/auth/user?user_id=${userId}`, {
+  async getUser(): Promise<User> {
+    const res = await fetch(`${BACKEND_URL}/api/auth/user`, {
       headers: this.getUserFetchHeaders(),
     })
     if (!res.ok) throw new Error('Failed to get user')
@@ -163,7 +163,7 @@ export const authService = {
   },
 
   async updateProfile(
-    userId: number,
+    _userId: number,
     name: string,
     targetLevel: string,
     schoolName: string,
@@ -174,7 +174,6 @@ export const authService = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this.getUserFetchHeaders() },
       body: JSON.stringify({
-        user_id: userId,
         name,
         target_level: targetLevel,
         school_name: schoolName,
@@ -251,6 +250,16 @@ export const authService = {
     getLocalStorage()?.removeItem(AUTH_USER_KEY)
     getLocalStorage()?.removeItem(AUTH_TOKEN_KEY)
     getLocalStorage()?.removeItem(AUTH_USER_TOKEN_KEY)
+
+    // httpOnly CookieにトークンをセットしてDevTools経由の露出を防ぐ
+    if (authResponse.user_token) {
+      const userId = typeof authResponse.user_id === 'string' ? Number(authResponse.user_id) : authResponse.user_id
+      fetch('/api/auth/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, userToken: authResponse.user_token }),
+      }).catch(() => {})
+    }
   },
 
   getStoredUser(): User | null {
@@ -273,12 +282,10 @@ export const authService = {
     return migrateAuthValue(AUTH_USER_TOKEN_KEY)
   },
 
-  // ユーザーAPIリクエスト用のヘッダーを返す（X-User-ID + X-User-Token）
+  // ユーザーAPIリクエスト用のヘッダーを返す（X-User-Token JWT）
   getUserFetchHeaders(): Record<string, string> {
-    const user = this.getStoredUser()
     const token = this.getStoredUserToken()
     return {
-      'X-User-ID': String(user?.user_id ?? ''),
       'X-User-Token': token || '',
     }
   },
@@ -301,12 +308,15 @@ export const authService = {
     getLocalStorage()?.removeItem(AUTH_USER_KEY)
     getLocalStorage()?.removeItem(AUTH_TOKEN_KEY)
     getLocalStorage()?.removeItem(AUTH_USER_TOKEN_KEY)
-    
+
     // チャットキャッシュを削除
     const sessionId = localStorage.getItem('chat_session_id')
     if (sessionId) {
       localStorage.removeItem(`chat_cache_${sessionId}`)
     }
     localStorage.removeItem('chat_session_id')
+
+    // httpOnly Cookieを削除
+    fetch('/api/auth/session', { method: 'DELETE' }).catch(() => {})
   },
 }

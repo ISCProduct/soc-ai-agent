@@ -71,10 +71,7 @@ func VerifyOAuthState(w http.ResponseWriter, r *http.Request) bool {
 
 // signState は state 値を HMAC-SHA256 で署名し "state.signature" 形式の文字列を返す
 func signState(state string) string {
-	secret := os.Getenv("ADMIN_SECRET")
-	if secret == "" {
-		secret = "dev-oauth-state-secret" // 開発環境フォールバック（本番では必ず設定）
-	}
+	secret := os.Getenv("OAUTH_STATE_SECRET")
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(state))
 	sig := hex.EncodeToString(mac.Sum(nil))

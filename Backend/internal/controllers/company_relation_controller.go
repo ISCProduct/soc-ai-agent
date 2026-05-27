@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/labstack/echo/v4"
 )
 
 type CompanyRelationController struct {
@@ -22,146 +24,104 @@ func NewCompanyRelationController(repo repository.CompanyRelationQueryRepository
 }
 
 // GetCompanyRelations 企業IDに関連する企業関係を取得
-func (ctrl *CompanyRelationController) GetCompanyRelations(w http.ResponseWriter, r *http.Request) {
-	// パスから企業IDを抽出
-	pathParts := splitPath(r.URL.Path)
-	if len(pathParts) < 3 {
-		http.Error(w, "Invalid company ID", http.StatusBadRequest)
-		return
-	}
-
-	companyID, err := strconv.ParseUint(pathParts[2], 10, 32)
+// GET /api/companies/:id/relations
+func (ctrl *CompanyRelationController) GetCompanyRelations(ctx echo.Context) error {
+	companyID, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
 	if err != nil {
-		http.Error(w, "Invalid company ID", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
 	}
 
 	relations, err := ctrl.repo.GetByCompanyID(uint(companyID))
 	if err != nil {
-		http.Error(w, "Failed to fetch relations", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch relations")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(relations)
+	return ctx.JSON(http.StatusOK, relations)
 }
 
 // GetCompanyMarketInfo 企業の市場情報を取得
-func (ctrl *CompanyRelationController) GetCompanyMarketInfo(w http.ResponseWriter, r *http.Request) {
-	pathParts := splitPath(r.URL.Path)
-	if len(pathParts) < 3 {
-		http.Error(w, "Invalid company ID", http.StatusBadRequest)
-		return
-	}
-
-	companyID, err := strconv.ParseUint(pathParts[2], 10, 32)
+// GET /api/companies/:id/market-info
+func (ctrl *CompanyRelationController) GetCompanyMarketInfo(ctx echo.Context) error {
+	companyID, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
 	if err != nil {
-		http.Error(w, "Invalid company ID", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
 	}
 
 	marketInfo, err := ctrl.repo.GetMarketInfoByCompanyID(uint(companyID))
 	if err != nil {
-		http.Error(w, "Failed to fetch market info", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch market info")
 	}
 	if marketInfo == nil {
-		http.Error(w, "Market info not found", http.StatusNotFound)
-		return
+		return echo.NewHTTPError(http.StatusNotFound, "Market info not found")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(marketInfo)
+	return ctx.JSON(http.StatusOK, marketInfo)
 }
 
 // GetAllCompanyRelations 全企業関係を取得（関連図用）
-func (ctrl *CompanyRelationController) GetAllCompanyRelations(w http.ResponseWriter, r *http.Request) {
+// GET /api/companies/relations
+func (ctrl *CompanyRelationController) GetAllCompanyRelations(ctx echo.Context) error {
 	relations, err := ctrl.repo.GetAll()
 	if err != nil {
-		http.Error(w, "Failed to fetch relations", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch relations")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(relations)
+	return ctx.JSON(http.StatusOK, relations)
 }
 
 // GetAllMarketInfo 全企業の市場情報を取得
-func (ctrl *CompanyRelationController) GetAllMarketInfo(w http.ResponseWriter, r *http.Request) {
+// GET /api/companies/market-info
+func (ctrl *CompanyRelationController) GetAllMarketInfo(ctx echo.Context) error {
 	marketInfos, err := ctrl.repo.GetAllMarketInfo()
 	if err != nil {
-		http.Error(w, "Failed to fetch market info", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch market info")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(marketInfos)
+	return ctx.JSON(http.StatusOK, marketInfos)
 }
 
 // GetCompanyByID 企業IDで企業詳細を取得
-func (ctrl *CompanyRelationController) GetCompanyByID(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	pathParts := splitPath(r.URL.Path)
-	if len(pathParts) < 3 {
-		http.Error(w, "Invalid path", http.StatusBadRequest)
-		return
-	}
-	companyID, err := strconv.ParseUint(pathParts[2], 10, 32)
+// GET /api/companies/:id
+func (ctrl *CompanyRelationController) GetCompanyByID(ctx echo.Context) error {
+	companyID, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
 	if err != nil {
-		http.Error(w, "Invalid company ID", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
 	}
 
 	company, err := ctrl.repo.GetCompanyByID(uint(companyID))
 	if err != nil {
-		http.Error(w, "Company not found", http.StatusNotFound)
-		return
+		return echo.NewHTTPError(http.StatusNotFound, "Company not found")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(company)
+	return ctx.JSON(http.StatusOK, company)
 }
 
 // GetCompanyJobPositions 企業の公開済み求人一覧を取得
-func (ctrl *CompanyRelationController) GetCompanyJobPositions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	pathParts := splitPath(r.URL.Path)
-	// path: /api/companies/{id}/job-positions → ["api","companies","{id}","job-positions"]
-	if len(pathParts) < 3 {
-		http.Error(w, "Invalid path", http.StatusBadRequest)
-		return
-	}
-	companyID, err := strconv.ParseUint(pathParts[2], 10, 32)
+// GET /api/companies/:id/job-positions
+func (ctrl *CompanyRelationController) GetCompanyJobPositions(ctx echo.Context) error {
+	companyID, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
 	if err != nil {
-		http.Error(w, "Invalid company ID", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
 	}
 
 	positions, err := ctrl.repo.GetJobPositionsByCompany(uint(companyID))
 	if err != nil {
-		http.Error(w, "Failed to fetch job positions", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch job positions")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"positions": positions,
 	})
 }
 
 // GetCompanies 企業一覧を取得
-func (ctrl *CompanyRelationController) GetCompanies(w http.ResponseWriter, r *http.Request) {
-	limitStr := r.URL.Query().Get("limit")
-	offsetStr := r.URL.Query().Get("offset")
-	industry := r.URL.Query().Get("industry")
-	name := r.URL.Query().Get("name")
-	tech := r.URL.Query().Get("tech")
+// GET /api/companies
+func (ctrl *CompanyRelationController) GetCompanies(ctx echo.Context) error {
+	limitStr := ctx.QueryParam("limit")
+	offsetStr := ctx.QueryParam("offset")
+	industry := ctx.QueryParam("industry")
+	name := ctx.QueryParam("name")
+	tech := ctx.QueryParam("tech")
 
 	limit := 10 // デフォルト
 	offset := 0
@@ -183,12 +143,11 @@ func (ctrl *CompanyRelationController) GetCompanies(w http.ResponseWriter, r *ht
 
 	companies, total, err := ctrl.repo.GetCompaniesFiltered(limit, offset, industry, name, tech)
 	if err != nil {
-		http.Error(w, "Failed to fetch companies", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch companies")
 	}
 
 	type CompanyResponse struct {
-		Companies interface{} `json:"companies"`
+		Companies any `json:"companies"`
 		Total     int64       `json:"total"`
 		Limit     int         `json:"limit"`
 		Offset    int         `json:"offset"`
@@ -201,37 +160,20 @@ func (ctrl *CompanyRelationController) GetCompanies(w http.ResponseWriter, r *ht
 		Offset:    offset,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	return ctx.JSON(http.StatusOK, response)
 }
 
 // WebSearchCompanies OpenAI Web Searchを使用して企業をWEB検索
-func (ctrl *CompanyRelationController) WebSearchCompanies(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	query := r.URL.Query().Get("q")
+// GET /api/companies/web-search?q=xxx
+func (ctrl *CompanyRelationController) WebSearchCompanies(ctx echo.Context) error {
+	query := strings.TrimSpace(ctx.QueryParam("q"))
 	if query == "" {
-		http.Error(w, "q parameter is required", http.StatusBadRequest)
-		return
-	}
-	query = trimSpace(query)
-	if query == "" {
-		http.Error(w, "q parameter is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "q parameter is required")
 	}
 
-	type WebSearchResult struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-	}
+	results := ctrl.searchCompaniesWithOpenAI(ctx.Request().Context(), query)
 
-	results := ctrl.searchCompaniesWithOpenAI(r.Context(), query)
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
+	return ctx.JSON(http.StatusOK, map[string]any{"results": results})
 }
 
 // searchCompaniesWithOpenAI はOpenAI Web Search APIを使って企業候補を取得する
@@ -263,9 +205,8 @@ func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Con
 	return results
 }
 
-// splitPath はURLパスを "/" で分割してスラッシュを除去した要素のスライスを返す
+// splitPath はURLパスを "/" で分割してスラッシュを除去した要素のスライスを返す（後方互換性のため残存）
 func splitPath(path string) []string {
-	// strings パッケージは同一ファイル内で使えるのでコピーして利用
 	result := []string{}
 	start := 0
 	for i := 0; i <= len(path); i++ {
@@ -279,7 +220,7 @@ func splitPath(path string) []string {
 	return result
 }
 
-// trimSpace は文字列の先頭と末尾の空白を除去する（標準ライブラリ呼び出しを避けるためのラッパー）
+// trimSpace は文字列の先頭と末尾の空白を除去する
 func trimSpace(s string) string {
 	start := 0
 	end := len(s)

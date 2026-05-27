@@ -143,14 +143,14 @@ export default function ESRewritePage() {
         component="header"
         sx={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          px: { xs: 3, lg: 8 }, py: 2,
+          px: { xs: 2, sm: 3, lg: 8 }, py: 2,
           bgcolor: '#fff', borderBottom: '1px solid #e2e8f0',
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Box sx={{ color: PRIMARY }}><EditNoteIcon sx={{ fontSize: 32 }} /></Box>
           <Box>
-            <Typography sx={{ fontWeight: 700, fontSize: 20, color: '#0f172a' }}>ES添削・リライト</Typography>
+            <Typography sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: '#0f172a' }}>ES添削・リライト</Typography>
             <Typography sx={{ fontSize: 12, color: '#64748b' }}>AIがあなたのES文章を添削・リライトします</Typography>
           </Box>
         </Box>
@@ -161,7 +161,7 @@ export default function ESRewritePage() {
 
       {/* Mode toggle */}
       <Box sx={{ maxWidth: 1200, mx: 'auto', px: { xs: 2, md: 4 }, pt: 3 }}>
-        <Box sx={{ display: 'flex', gap: 1, mb: 3 }}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 3 }}>
           <Button
             startIcon={<RateReviewIcon />}
             onClick={() => { setMode('review'); setRewriteResult(null); setError(null) }}
