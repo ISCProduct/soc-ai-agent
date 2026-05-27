@@ -1,26 +1,29 @@
 package controllers
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
-	"Backend/internal/repositories"
+	ifaces "Backend/internal/services/interfaces"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/labstack/echo/v4"
 )
 
 // AdminDashboardController provides admin endpoints for the user score dashboard.
 type AdminDashboardController struct {
-	userRepo    *repositories.UserRepository
-	sessionRepo *repositories.InterviewSessionRepository
-	reportRepo  *repositories.InterviewReportRepository
+	userRepo    repository.UserRepository
+	sessionRepo ifaces.DashboardSessionRepo
+	reportRepo  ifaces.DashboardReportRepo
 }
 
 func NewAdminDashboardController(
-	userRepo *repositories.UserRepository,
-	sessionRepo *repositories.InterviewSessionRepository,
-	reportRepo *repositories.InterviewReportRepository,
+	userRepo repository.UserRepository,
+	sessionRepo ifaces.DashboardSessionRepo,
+	reportRepo ifaces.DashboardReportRepo,
 ) *AdminDashboardController {
 	return &AdminDashboardController{
 		userRepo:    userRepo,
@@ -52,7 +55,7 @@ func avgScoresJSON(scoresJSON string) (map[string]float64, *float64) {
 	if scoresJSON == "" {
 		return nil, nil
 	}
-	var raw map[string]interface{}
+	var raw map[string]any
 	if err := json.Unmarshal([]byte(scoresJSON), &raw); err != nil {
 		return nil, nil
 	}
@@ -75,21 +78,15 @@ func avgScoresJSON(scoresJSON string) (map[string]float64, *float64) {
 }
 
 // ListUsers handles GET /api/admin/dashboard/users
-func (c *AdminDashboardController) ListUsers(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	limit := parseIntQuery(r, "limit", 25)
-	offset := (parseIntQuery(r, "page", 1) - 1) * limit
-	query := r.URL.Query().Get("query")
-	sort := r.URL.Query().Get("sort") // avg_score_asc | avg_score_desc | session_count_desc | registered_desc
+func (c *AdminDashboardController) ListUsers(ctx echo.Context) error {
+	limit := echoIntQuery(ctx, "limit", 25)
+	offset := (echoIntQuery(ctx, "page", 1) - 1) * limit
+	query := ctx.QueryParam("query")
+	sort := ctx.QueryParam("sort") // avg_score_asc | avg_score_desc | session_count_desc | registered_desc
 
 	users, total, err := c.userRepo.ListUsersPaged(limit, offset, query)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
 	userIDs := make([]uint, len(users))
@@ -99,12 +96,10 @@ func (c *AdminDashboardController) ListUsers(w http.ResponseWriter, r *http.Requ
 
 	statMap, err := c.sessionRepo.GetUserStatsBatch(userIDs)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
 	// Collect all finished session IDs to batch-fetch reports
-	type sessionIDsEntry struct{ userID, sessionID uint }
 	var allSessionIDs []uint
 	sessionToUser := map[uint]uint{}
 	for _, u := range users {
@@ -120,8 +115,7 @@ func (c *AdminDashboardController) ListUsers(w http.ResponseWriter, r *http.Requ
 
 	reports, err := c.reportRepo.FindBySessionIDs(allSessionIDs)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
 	// Compute per-user avg scores
@@ -174,8 +168,7 @@ func (c *AdminDashboardController) ListUsers(w http.ResponseWriter, r *http.Requ
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	return ctx.JSON(http.StatusOK, map[string]any{
 		"users": summaries,
 		"total": total,
 	})
@@ -197,35 +190,21 @@ func stableSort(s []UserScoreSummary, less func(a, b UserScoreSummary) bool) {
 	}
 }
 
-// UserSessions handles GET /api/admin/dashboard/users/{id}/sessions
-func (c *AdminDashboardController) UserSessions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// extract user id from path /api/admin/dashboard/users/{id}/sessions
-	parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/sessions"), "/")
-	if len(parts) == 0 {
-		http.Error(w, "invalid path", http.StatusBadRequest)
-		return
-	}
+// UserSessions handles GET /api/admin/dashboard/users/:id/sessions
+func (c *AdminDashboardController) UserSessions(ctx echo.Context) error {
 	var userID uint
-	if _, err := fmt.Sscanf(parts[len(parts)-1], "%d", &userID); err != nil {
-		http.Error(w, "invalid user id", http.StatusBadRequest)
-		return
+	if _, err := fmt.Sscanf(ctx.Param("id"), "%d", &userID); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid user id")
 	}
 
 	sessionIDs, err := c.sessionRepo.ListFinishedSessionIDsByUser(userID)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
 	reports, err := c.reportRepo.FindBySessionIDs(sessionIDs)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 	reportBySession := map[uint]*models.InterviewReport{}
 	for i := range reports {
@@ -234,8 +213,7 @@ func (c *AdminDashboardController) UserSessions(w http.ResponseWriter, r *http.R
 
 	sessions, err := c.sessionRepo.ListFinishedByUser(userID, 0)
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 
 	entries := make([]SessionScoreEntry, 0, len(sessions))
@@ -249,21 +227,14 @@ func (c *AdminDashboardController) UserSessions(w http.ResponseWriter, r *http.R
 		entries = append(entries, entry)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"sessions": entries})
+	return ctx.JSON(http.StatusOK, map[string]any{"sessions": entries})
 }
 
 // ExportCSV handles GET /api/admin/dashboard/export/csv
-func (c *AdminDashboardController) ExportCSV(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+func (c *AdminDashboardController) ExportCSV(ctx echo.Context) error {
 	users, _, err := c.userRepo.ListUsersPaged(10000, 0, "")
 	if err != nil {
-		writeInternalServerError(w, err)
-		return
+		return echoInternalError(err)
 	}
 	userIDs := make([]uint, len(users))
 	for i, u := range users {
@@ -293,10 +264,11 @@ func (c *AdminDashboardController) ExportCSV(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	w := ctx.Response().Writer
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"user_scores.csv\"")
 
-	fmt.Fprint(w, "\uFEFF") // BOM for Excel
+	fmt.Fprint(w, "\xef\xbb\xbf") // Excel用BOM
 	fmt.Fprintln(w, "ユーザーID,名前,メール,ロール,登録日,練習回数,最終練習日,平均スコア")
 	for _, u := range users {
 		stat := statMap[u.ID]
@@ -319,6 +291,7 @@ func (c *AdminDashboardController) ExportCSV(w http.ResponseWriter, r *http.Requ
 			avgScore,
 		)
 	}
+	return nil
 }
 
 func csvEscape(s string) string {

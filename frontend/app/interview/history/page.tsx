@@ -96,10 +96,10 @@ export default function InterviewHistoryPage() {
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f8f6f6' }}>
       {/* Header */}
-      <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: { xs: 3, lg: 8 }, py: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
+      <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: { xs: 2, sm: 3, lg: 8 }, py: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Box sx={{ color: PRIMARY }}><PsychologyIcon sx={{ fontSize: 32 }} /></Box>
-          <Typography sx={{ fontWeight: 700, fontSize: 20, color: '#0f172a' }}>面接履歴</Typography>
+          <Typography sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: '#0f172a' }}>面接履歴</Typography>
           {user?.role === 'teacher' && (
             <Chip label="教員モード" size="small" sx={{ bgcolor: '#3b82f6', color: '#fff', fontWeight: 700, ml: 1 }} />
           )}
@@ -134,7 +134,8 @@ export default function InterviewHistoryPage() {
               完了した面接がないためトレンドを表示できません。
             </Typography>
           ) : (
-            <ResponsiveContainer width="100%" height={240}>
+            <Box sx={{ height: { xs: 180, md: 240 } }}>
+            <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trendPoints.map((p, i) => ({
                 ...p,
                 label: `#${p.session_id}`,
@@ -152,6 +153,7 @@ export default function InterviewHistoryPage() {
                 <Line type="monotone" dataKey="enthusiasm" name="熱意" stroke="#f59e0b" dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls />
               </LineChart>
             </ResponsiveContainer>
+            </Box>
           )}
         </Paper>
       </Box>

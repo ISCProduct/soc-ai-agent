@@ -3,6 +3,8 @@ package main
 import (
 	"Backend/internal/config"
 	"Backend/internal/controllers"
+	"Backend/internal/logger"
+	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/repositories"
@@ -10,9 +12,12 @@ import (
 	"Backend/internal/scraper"
 	"Backend/internal/services"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/labstack/echo/v4"
 )
 
 func buildAllowedOrigins() map[string]struct{} {
@@ -30,7 +35,8 @@ func buildAllowedOrigins() map[string]struct{} {
 	// フェイルセーフ: ALLOWED_ORIGINS 未設定時は全オリジン拒否（#327）
 	// ローカル開発時は .env に ALLOWED_ORIGINS=http://localhost:3000 を明示設定してください。
 	if len(allowedOrigins) == 0 {
-		log.Println("WARNING: ALLOWED_ORIGINS が未設定のため、全クロスオリジンリクエストを拒否します。")
+		slog.Warn("ALLOWED_ORIGINS が未設定のため、全クロスオリジンリクエストを拒否します",
+			"hint", "ローカル開発時は .env に ALLOWED_ORIGINS=http://localhost:3000 を設定してください")
 	}
 
 	return allowedOrigins
@@ -49,31 +55,34 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
+// buildCORSMiddleware は許可オリジンを一度だけ構築してCORSミドルウェアを返す
+func buildCORSMiddleware() func(http.Handler) http.Handler {
 	allowedOrigins := buildAllowedOrigins()
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := strings.TrimSpace(r.Header.Get("Origin"))
-		_, isAllowedOrigin := allowedOrigins[origin]
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := strings.TrimSpace(r.Header.Get("Origin"))
+			_, isAllowedOrigin := allowedOrigins[origin]
 
-		w.Header().Add("Vary", "Origin")
-		if isAllowedOrigin {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID, X-User-Token, X-Admin-Email, X-Admin-Token")
+			w.Header().Add("Vary", "Origin")
+			if isAllowedOrigin {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+			}
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID, X-User-Token, X-Admin-Email, X-Admin-Token")
 
-		if r.Method == "OPTIONS" {
-			if origin != "" && !isAllowedOrigin {
-				w.WriteHeader(http.StatusForbidden)
+			if r.Method == "OPTIONS" {
+				if origin != "" && !isAllowedOrigin {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
 				return
 			}
-			w.WriteHeader(http.StatusOK)
-			return
-		}
 
-		next.ServeHTTP(w, r)
-	})
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // checkAnnotationFont はサーバー起動時に PDF アノテーション用フォントの存在を確認し、
@@ -82,21 +91,23 @@ func corsMiddleware(next http.Handler) http.Handler {
 func checkAnnotationFont() {
 	fontPath := os.Getenv("ANNOTATION_FONT_PATH")
 	if fontPath == "" {
-		log.Println("WARNING: ANNOTATION_FONT_PATH が設定されていません。" +
-			"フォールバックフォントを使用します（日本語注釈が正常に表示されない可能性があります）。" +
-			"環境変数 ANNOTATION_FONT_PATH にフォントパスを設定してください。")
+		slog.Warn("ANNOTATION_FONT_PATH が設定されていません。フォールバックフォントを使用します",
+			"hint", "環境変数 ANNOTATION_FONT_PATH にフォントパスを設定してください")
 		return
 	}
 	if _, err := os.Stat(fontPath); os.IsNotExist(err) {
-		log.Printf("WARNING: ANNOTATION_FONT_PATH のフォントが見つかりません: %q\n"+
-			"PDF注釈の日本語レビューページが生成されない場合があります。\n"+
-			"Dockerfileで fonts-noto-cjk がインストールされているか確認してください。", fontPath)
+		slog.Warn("ANNOTATION_FONT_PATH のフォントが見つかりません",
+			"path", fontPath,
+			"hint", "Dockerfileで fonts-noto-cjk がインストールされているか確認してください")
 		return
 	}
-	log.Printf("INFO: PDF アノテーションフォント確認済み: %q", fontPath)
+	slog.Info("PDF アノテーションフォント確認済み", "path", fontPath)
 }
 
 func main() {
+	// 構造化ログの初期化（LOG_LEVEL / LOG_FORMAT 環境変数で制御）
+	logger.Setup()
+
 	// PDF アノテーションフォントの存在チェック（起動時警告）
 	checkAnnotationFont()
 
@@ -116,13 +127,13 @@ func main() {
 	if err := models.AutoMigrate(db); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
-	log.Println("Database migration completed")
+	slog.Info("Database migration completed")
 
 	// 初期データ投入
 	if err := models.SeedData(db); err != nil {
 		log.Fatalf("Failed to seed data: %v", err)
 	}
-	log.Println("Database seeding completed")
+	slog.Info("Database seeding completed")
 
 	// OpenAI クライアント初期化
 	aiClient, err := openai.NewFromEnv("")
@@ -239,7 +250,7 @@ func main() {
 	// S3 upload service for interview videos (optional — skipped if env vars are not set)
 	s3UploadService, s3Err := services.NewS3UploadService()
 	if s3Err != nil {
-		log.Printf("S3 upload service not available: %v", s3Err)
+		slog.Warn("S3 upload service not available", "error", s3Err)
 		s3UploadService = nil
 	}
 	interviewController := controllers.NewInterviewController(interviewService, videoRepo, s3UploadService)
@@ -268,34 +279,47 @@ func main() {
 	scraperSessionService := services.NewScraperSessionService(scraperSessionRepo)
 	scraperSessionController := controllers.NewAdminScraperSessionController(scraperSessionService)
 
-	// ルーティング設定
-	routes.SetupAuthRoutes(authController, oauthController, userRepo, cfg.AdminSecret)
-	routes.SetupChatRoutes(chatController, questionController)
-	routes.SetupCompanyRoutes(relationController)
-	routes.SetupAdminRoutes(adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, userRepo, cfg.AdminSecret)
-	routes.SetupResumeRoutes(resumeController)
-	routes.SetupInterviewRoutes(interviewController, realtimeController)
-	routes.SetupGitHubRoutes(githubController)
-	routes.SetupESRoutes(esRewriteController, esReviewController)
-	routes.SetupScheduleRoutes(scheduleController)
-	routes.SetupApplicationRoutes(appController)
-	routes.SetupUserRoutes(integratedProfileController)
-	routes.SetupCollectiveInsightRoutes(collectiveInsightController)
-	http.HandleFunc("/api/company-entry", companyEntryController.Submit)
+	// Echo初期化
+	e := echo.New()
+	e.HideBanner = true
+	// カスタムエラーハンドラーとバリデーターを設定
+	e.HTTPErrorHandler = middleware.CustomHTTPErrorHandler
+	e.Validator = middleware.NewCustomValidator()
 
-	go crawlService.StartScheduler()
+	// グローバルミドルウェア
+	e.Use(echo.WrapMiddleware(middleware.RequestIDMiddleware))
+	e.Use(echo.WrapMiddleware(middleware.RequestLoggerMiddleware))
+	e.Use(echo.WrapMiddleware(securityHeadersMiddleware))
+	e.Use(echo.WrapMiddleware(buildCORSMiddleware()))
 
 	// ヘルスチェックエンドポイント
 	// /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス
 	// /health は後方互換のため維持
-	healthHandler := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+	healthHandler := func(c echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	}
-	http.HandleFunc(
-		"/health", healthHandler)
-	http.HandleFunc("/healthz", healthHandler)
+	e.GET("/health", healthHandler)
+	e.GET("/healthz", healthHandler)
+
+	// APIルートグループ
+	api := e.Group("/api")
+
+	// ルーティング設定
+	routes.SetupAuthRoutes(api, authController, oauthController, cfg.UserSecret)
+	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret)
+	routes.SetupCompanyRoutes(api, relationController)
+	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, userRepo, cfg.AdminSecret)
+	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret)
+	routes.SetupInterviewRoutes(api, interviewController, realtimeController)
+	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret)
+	routes.SetupESRoutes(api, esRewriteController, esReviewController)
+	routes.SetupScheduleRoutes(api, scheduleController)
+	routes.SetupApplicationRoutes(api, appController)
+	routes.SetupUserRoutes(api, integratedProfileController)
+	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret)
+	api.POST("/company-entry", companyEntryController.Submit)
+
+	go crawlService.StartScheduler()
 
 	// サーバー起動
 	port := cfg.ServerPort
@@ -303,8 +327,8 @@ func main() {
 		port = "80"
 	}
 
-	log.Printf("Starting server on port %s...", port)
-	if err := http.ListenAndServe(":"+port, securityHeadersMiddleware(corsMiddleware(http.DefaultServeMux))); err != nil {
+	slog.Info("Starting server", "port", port)
+	if err := e.Start(":" + port); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }

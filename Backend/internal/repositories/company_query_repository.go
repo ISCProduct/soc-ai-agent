@@ -91,7 +91,7 @@ func (r *CompanyQueryRepository) GetCompanyByID(id uint) (*models.Company, error
 
 // GetCompaniesFiltered フィルタリングされた企業一覧と総件数を取得
 func (r *CompanyQueryRepository) GetCompaniesFiltered(limit, offset int, industry, name, tech string) ([]models.Company, int64, error) {
-	applyFilters := func(q interface{ Where(query interface{}, args ...interface{}) *gorm.DB }) *gorm.DB {
+	applyFilters := func(q interface{ Where(query any, args ...any) *gorm.DB }) *gorm.DB {
 		db := q.Where("is_active = ?", true)
 		if industry != "" {
 			db = db.Where("industry = ?", industry)

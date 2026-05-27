@@ -36,7 +36,10 @@ func (cli *Client) Transcribe(ctx context.Context, audio []byte, filename string
 	if _, err := part.Write(audio); err != nil {
 		return "", err
 	}
-	w.Close()
+	err = w.Close()
+	if err != nil {
+		return "", err
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.BaseURL()+"/audio/transcriptions", &buf)
 	if err != nil {
@@ -86,7 +89,7 @@ func (cli *Client) TTS(ctx context.Context, text, voice string) ([]byte, error) 
 		voice = "alloy"
 	}
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"model": model,
 		"input": text,
 		"voice": voice,

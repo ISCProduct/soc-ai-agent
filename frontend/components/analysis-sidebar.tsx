@@ -84,7 +84,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
         const refreshAdminFlag = async () => {
             if (!user?.user_id || user.is_admin) return
             try {
-                const fresh = await authService.getUser(user.user_id)
+                const fresh = await authService.getUser()
                 if (fresh?.is_admin) {
                     setIsAdmin(true)
                     authService.saveAuth({ ...fresh, user_id: fresh.user_id, is_guest: fresh.is_guest } as any)

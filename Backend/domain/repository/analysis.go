@@ -38,5 +38,5 @@ type UserCompanyMatchRepository interface {
 	ToggleFavorite(matchID uint) error
 	MarkAsApplied(matchID uint) error
 	FindFavoritesByUser(userID uint, sessionID string) ([]*entity.UserCompanyMatch, error)
-	GetMatchStatistics(userID uint, sessionID string) (map[string]interface{}, error)
+	GetMatchStatistics(userID uint, sessionID string) (map[string]any, error)
 }

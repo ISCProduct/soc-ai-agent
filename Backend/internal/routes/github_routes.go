@@ -2,15 +2,17 @@ package routes
 
 import (
 	"Backend/internal/controllers"
-	"net/http"
+
+	"github.com/labstack/echo/v4"
 )
 
 // SetupGitHubRoutes GitHub連携関連のルーティング設定
-func SetupGitHubRoutes(githubController *controllers.GitHubController) {
-	http.HandleFunc("/api/github/profile", githubController.GetProfile)
-	http.HandleFunc("/api/github/sync", githubController.Sync)
-	http.HandleFunc("/api/github/sync/wait", githubController.SyncAndWait)
-	http.HandleFunc("/api/github/skills", githubController.GetSkills)
-	http.HandleFunc("/api/github/repo/summaries", githubController.ListRepoSummaries)
-	http.HandleFunc("/api/github/repo/summarize", githubController.SummarizeRepo)
+func SetupGitHubRoutes(api *echo.Group, githubController *controllers.GitHubController, userSecret string) {
+	github := api.Group("/github", EchoUserAuth(userSecret))
+	github.GET("/profile", githubController.GetProfile)
+	github.POST("/sync", githubController.Sync)
+	github.POST("/sync/wait", githubController.SyncAndWait)
+	github.GET("/skills", githubController.GetSkills)
+	github.GET("/repo/summaries", githubController.ListRepoSummaries)
+	github.POST("/repo/summarize", githubController.SummarizeRepo)
 }

@@ -137,7 +137,7 @@ export default function ProfilePage() {
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f5f7fa' }}>
       {/* ページヘッダー */}
-      <Box sx={{ bgcolor: 'white', borderBottom: '1px solid #e0e0e0', px: 3, py: 1.5 }}>
+      <Box sx={{ bgcolor: 'white', borderBottom: '1px solid #e0e0e0', px: { xs: 2, sm: 3 }, py: 1.5 }}>
         <Container maxWidth="lg">
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <Typography variant="h6" fontWeight="bold" color="primary">

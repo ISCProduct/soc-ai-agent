@@ -5,6 +5,13 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
 export const dynamic = 'force-dynamic'
 
+function userHeaders(request: NextRequest): Record<string, string> {
+  return {
+    'X-User-ID': request.headers.get('X-User-ID') || '',
+    'X-User-Token': request.headers.get('X-User-Token') || '',
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
@@ -13,7 +20,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'document_id is required' }, { status: 400 })
     }
 
-    const upstreamHeaders: HeadersInit = {}
+    const upstreamHeaders = userHeaders(request)
     const range = request.headers.get('range')
     if (range) {
       upstreamHeaders.Range = range
