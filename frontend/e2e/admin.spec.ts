@@ -47,9 +47,9 @@ test.describe('管理者ダッシュボードフロー', () => {
 
   test('管理者ダッシュボードにメニューカードが表示される', async ({ page }) => {
     await page.goto('/admin')
-    await expect(page.getByText('企業データ')).toBeVisible({ timeout: 8000 })
-    await expect(page.getByText('スコアダッシュボード')).toBeVisible({ timeout: 8000 })
-    await expect(page.getByText('スコア精度検証')).toBeVisible({ timeout: 8000 })
+    await expect(page.getByRole('heading', { name: '企業データ' })).toBeVisible({ timeout: 8000 })
+    await expect(page.getByRole('heading', { name: 'スコアダッシュボード' })).toBeVisible({ timeout: 8000 })
+    await expect(page.getByRole('heading', { name: 'スコア精度検証' })).toBeVisible({ timeout: 8000 })
   })
 
   test('スコアダッシュボードページに遷移できる', async ({ page }) => {

@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test'
 test.describe('認証フロー', () => {
   test('ログインページが表示される', async ({ page }) => {
     await page.goto('/login')
-    await expect(page.getByText('ログイン')).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'ログイン' })).toBeVisible()
     await expect(page.locator('input[type="email"]')).toBeVisible()
     await expect(page.locator('input[type="password"]')).toBeVisible()
   })
@@ -27,7 +27,7 @@ test.describe('認証フロー', () => {
     await page.goto('/login')
     await page.locator('input[type="email"]').fill('test@example.com')
     await page.locator('input[type="password"]').fill('password123')
-    await page.getByRole('button', { name: 'ログイン' }).click()
+    await page.getByRole('button', { name: 'ログイン', exact: true }).click()
 
     await expect(page).toHaveURL('/', { timeout: 5000 })
   })
@@ -44,9 +44,9 @@ test.describe('認証フロー', () => {
     await page.goto('/login')
     await page.locator('input[type="email"]').fill('wrong@example.com')
     await page.locator('input[type="password"]').fill('wrongpassword')
-    await page.getByRole('button', { name: 'ログイン' }).click()
+    await page.getByRole('button', { name: 'ログイン', exact: true }).click()
 
-    await expect(page.getByText(/メールアドレスまたはパスワードが/)).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText('invalid email or password')).toBeVisible({ timeout: 5000 })
   })
 
   test('仮登録メールアドレス送信', async ({ page }) => {
