@@ -16,6 +16,7 @@ test.describe('職務経歴書レビューフロー', () => {
 
   test('職務経歴書ページが表示される', async ({ page }) => {
     await page.goto('/resume')
+    await page.waitForLoadState('networkidle')
     await expect(page.getByText('履歴書・エントリシート レビュー')).toBeVisible({ timeout: 8000 })
   })
 
@@ -53,6 +54,7 @@ test.describe('職務経歴書レビューフロー', () => {
     })
 
     await page.goto('/resume')
+    await page.waitForLoadState('networkidle')
     await expect(page.getByText('履歴書・エントリシート レビュー')).toBeVisible({ timeout: 8000 })
 
     const uploadButton = page.getByRole('button', { name: /アップロード|PDFを選択/ })

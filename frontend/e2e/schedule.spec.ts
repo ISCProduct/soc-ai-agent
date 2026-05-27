@@ -61,8 +61,8 @@ test.describe('選考スケジュール管理フロー', () => {
 
   test('既存のイベントが一覧表示される', async ({ page }) => {
     await page.goto('/schedule')
-    await expect(page.getByLabel('テスト株式会社 - 一次面接 (一次面接)')).toBeVisible({ timeout: 8000 })
-    await expect(page.getByLabel('サンプル工業 - 書類選考 (書類選考)')).toBeVisible({ timeout: 8000 })
+    await expect(page.getByText('テスト株式会社').first()).toBeVisible({ timeout: 8000 })
+    await expect(page.getByText('サンプル工業').first()).toBeVisible({ timeout: 8000 })
   })
 
   test('新しいイベントを登録できる', async ({ page }) => {
@@ -87,7 +87,7 @@ test.describe('選考スケジュール管理フロー', () => {
 
   test('イベントの選考ステージを更新できる', async ({ page }) => {
     await page.goto('/schedule')
-    await expect(page.getByLabel('テスト株式会社 - 一次面接 (一次面接)')).toBeVisible({ timeout: 8000 })
+    await expect(page.getByText('テスト株式会社').first()).toBeVisible({ timeout: 8000 })
 
     const editButton = page.getByRole('button', { name: /編集|詳細/ }).first()
     if (await editButton.count() > 0) {

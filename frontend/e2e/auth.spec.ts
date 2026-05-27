@@ -25,6 +25,7 @@ test.describe('認証フロー', () => {
     })
 
     await page.goto('/login')
+    await page.waitForLoadState('networkidle')
     await page.locator('input[type="email"]').fill('test@example.com')
     await page.locator('input[type="password"]').fill('password123')
     await page.getByRole('button', { name: 'ログイン', exact: true }).click()
@@ -42,6 +43,7 @@ test.describe('認証フロー', () => {
     })
 
     await page.goto('/login')
+    await page.waitForLoadState('networkidle')
     await page.locator('input[type="email"]').fill('wrong@example.com')
     await page.locator('input[type="password"]').fill('wrongpassword')
     await page.getByRole('button', { name: 'ログイン', exact: true }).click()
@@ -60,6 +62,7 @@ test.describe('認証フロー', () => {
     })
 
     await page.goto('/login')
+    await page.waitForLoadState('networkidle')
     await page.getByRole('tab', { name: '新規登録' }).click()
     await page.locator('input[type="email"]').last().fill('newuser@example.com')
     await page.getByRole('button', { name: '確認メールを送る' }).click()

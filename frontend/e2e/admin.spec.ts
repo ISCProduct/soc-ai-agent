@@ -26,7 +26,7 @@ test.describe('管理者ダッシュボードフロー', () => {
       })
     })
 
-    await page.route('**/api/admin/dashboard/users*', async (route) => {
+    await page.route(/\/api\/admin\/dashboard\/users/, async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -42,11 +42,13 @@ test.describe('管理者ダッシュボードフロー', () => {
 
   test('管理者ダッシュボードが表示される', async ({ page }) => {
     await page.goto('/admin')
+    await page.waitForLoadState('networkidle')
     await expect(page.getByText('管理者ダッシュボード')).toBeVisible({ timeout: 8000 })
   })
 
   test('管理者ダッシュボードにメニューカードが表示される', async ({ page }) => {
     await page.goto('/admin')
+    await page.waitForLoadState('networkidle')
     await expect(page.getByRole('heading', { name: '企業データ' })).toBeVisible({ timeout: 8000 })
     await expect(page.getByRole('heading', { name: 'スコアダッシュボード' })).toBeVisible({ timeout: 8000 })
     await expect(page.getByRole('heading', { name: 'スコア精度検証' })).toBeVisible({ timeout: 8000 })
@@ -54,6 +56,7 @@ test.describe('管理者ダッシュボードフロー', () => {
 
   test('スコアダッシュボードページに遷移できる', async ({ page }) => {
     await page.goto('/admin/dashboard')
+    await page.waitForLoadState('networkidle')
     await expect(page.getByText('ユーザー別スコアダッシュボード')).toBeVisible({ timeout: 8000 })
     await expect(page.getByText('ユーザー1')).toBeVisible({ timeout: 8000 })
   })
@@ -68,11 +71,14 @@ test.describe('管理者ダッシュボードフロー', () => {
     })
 
     await page.goto('/admin/score-validation')
+    await page.waitForLoadState('networkidle')
     await expect(page.getByText('スコア精度検証')).toBeVisible({ timeout: 8000 })
     await expect(page.getByRole('tab', { name: '相関分析' })).toBeVisible()
     await expect(page.getByRole('tab', { name: 'A/Bテスト管理' })).toBeVisible()
   })
+})
 
+test.describe('非管理者アクセス制御', () => {
   test('管理者以外はリダイレクトされる', async ({ page }) => {
     await page.addInitScript(() => {
       const user = { user_id: 1, email: 'normal@example.com', name: 'Normal', is_guest: false, is_admin: false }
