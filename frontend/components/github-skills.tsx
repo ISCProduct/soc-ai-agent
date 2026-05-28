@@ -186,7 +186,7 @@ function RadarChart({ scores, size = 240 }: RadarChartProps) {
 
 // --- メインコンポーネント ---
 
-export default function GitHubSkills({ userId }: { userId: number }) {
+export default function GitHubSkills({ userId, targetRole = '' }: { userId: number; targetRole?: string }) {
   const [scores, setScores] = useState<SkillScore[]>([])
   const [profile, setProfile] = useState<GitHubProfile | null>(null)
   const [langStats, setLangStats] = useState<LanguageStat[]>([])
@@ -253,7 +253,7 @@ export default function GitHubSkills({ userId }: { userId: number }) {
       const res = await fetch(`${BACKEND_URL}/api/github/repo/summarize?user_id=${userId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
-        body: JSON.stringify({ full_name: fullName }),
+        body: JSON.stringify({ full_name: fullName, target_role: targetRole }),
       })
       if (!res.ok) {
         const msg = await res.text()
