@@ -17,6 +17,7 @@ import GitHubIcon from '@mui/icons-material/GitHub'
 import GoogleIcon from '@mui/icons-material/Google'
 import Link from 'next/link'
 import { authService, AuthResponse } from '@/lib/auth'
+import { BACKEND_URL } from '@/lib/backend-url'
 
 interface LoginPageProps {
   onAuthSuccess: (authResponse: AuthResponse) => void
@@ -81,18 +82,10 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
     }
   }
 
-  const handleOAuthLogin = async (provider: 'google' | 'github') => {
-    setError('')
-    try {
-      const response = provider === 'google' 
-        ? await authService.getGoogleAuthUrl()
-        : await authService.getGithubAuthUrl()
-      
-      localStorage.setItem('oauth_state', response.state)
-      window.location.href = response.auth_url
-    } catch (err: any) {
-      setError(err.message)
-    }
+  const handleOAuthLogin = (provider: 'google' | 'github') => {
+    // バックエンドのOAuthエンドポイントへ直接遷移する
+    // fetch経由ではなく直接ナビゲートすることでクッキーが同一オリジンで正しく設定される
+    window.location.href = `${BACKEND_URL}/api/auth/${provider}`
   }
 
   return (

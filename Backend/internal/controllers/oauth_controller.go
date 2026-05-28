@@ -31,9 +31,9 @@ func (c *OAuthController) GoogleLogin(ctx echo.Context) error {
 
 	url := c.oauthService.GetGoogleAuthURL(state)
 
-	return ctx.JSON(http.StatusOK, map[string]string{
-		"auth_url": url,
-	})
+	// ブラウザを直接 Google OAuth へリダイレクト
+	// クッキーがバックエンドと同一オリジンで設定されるため state 検証が正常に機能する
+	return ctx.Redirect(http.StatusTemporaryRedirect, url)
 }
 
 // GoogleCallback Google OAuth認証コールバック
@@ -73,9 +73,16 @@ func (c *OAuthController) GitHubLogin(ctx echo.Context) error {
 
 	url := c.oauthService.GetGitHubAuthURL(state)
 
-	return ctx.JSON(http.StatusOK, map[string]string{
-		"auth_url": url,
-	})
+	// Accept ヘッダーで JSON が要求されている場合（後方互換）はJSONを返す
+	if ctx.Request().Header.Get("Accept") == "application/json" {
+		return ctx.JSON(http.StatusOK, map[string]string{
+			"auth_url": url,
+			"state":    state,
+		})
+	}
+
+	// ブラウザ直接アクセスはリダイレクト（クッキーが同一オリジンで正しく設定される）
+	return ctx.Redirect(http.StatusTemporaryRedirect, url)
 }
 
 // GitHubCallback GitHub OAuth認証コールバック
