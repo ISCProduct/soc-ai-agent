@@ -9,9 +9,10 @@ const securityHeaders = [
       "default-src 'self'",
       // 開発モードでは webpack が eval() を使うため 'unsafe-eval' が必要
       isDev
-        ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
-        : "script-src 'self' 'unsafe-inline'",
-      "style-src 'self' 'unsafe-inline'",
+        ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://va.vercel-scripts.com"
+        : "script-src 'self' 'unsafe-inline' https://va.vercel-scripts.com",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' https://fonts.gstatic.com",
       "img-src 'self' data: https:",
       // 開発モードでは webpack HMR の WebSocket 接続を許可
       isDev
@@ -29,6 +30,8 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: 'standalone',
+  // zod v4 は ESM-first ("type":"module") のため Webpack が解決できない場合がある
+  transpilePackages: ['zod'],
   // MUI emotion CSS-in-JS のSSR対応
   compiler: {
     emotion: true,

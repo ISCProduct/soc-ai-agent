@@ -451,7 +451,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
 
                 <ListItem disablePadding>
                     <ListItemButton
-                        onClick={() => router.push('/onboarding')}
+                        onClick={() => router.push('/profile')}
                         sx={{
                             borderRadius: 1,
                         }}
