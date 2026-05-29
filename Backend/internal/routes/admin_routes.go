@@ -69,6 +69,7 @@ func SetupAdminRoutes(
 
 	// 企業関係グラフ
 	admin.POST("/company-graph/crawl", adminCompanyGraphController.Crawl)
+	admin.POST("/company-graph/enrich-relations", adminCompanyGraphController.EnrichRelations)
 
 	// 面接管理
 	admin.GET("/interviews", adminInterviewController.ListSessions)

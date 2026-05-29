@@ -4,9 +4,11 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/config"
 	"Backend/internal/models"
+	"Backend/internal/openai"
 	"Backend/internal/scraper"
 	ifaces "Backend/internal/services/interfaces"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,10 +30,11 @@ type AdminCompanyGraphController struct {
 	companyRepo  repository.CompanyRepository
 	relationRepo repository.CompanyRelationRepository
 	audit        ifaces.AuditLogService
+	openaiClient *openai.Client
 }
 
-func NewAdminCompanyGraphController(pipeline *scraper.Pipeline, companyRepo repository.CompanyRepository, relationRepo repository.CompanyRelationRepository, audit ifaces.AuditLogService) *AdminCompanyGraphController {
-	return &AdminCompanyGraphController{pipeline: pipeline, companyRepo: companyRepo, relationRepo: relationRepo, audit: audit}
+func NewAdminCompanyGraphController(pipeline *scraper.Pipeline, companyRepo repository.CompanyRepository, relationRepo repository.CompanyRelationRepository, audit ifaces.AuditLogService, openaiClient *openai.Client) *AdminCompanyGraphController {
+	return &AdminCompanyGraphController{pipeline: pipeline, companyRepo: companyRepo, relationRepo: relationRepo, audit: audit, openaiClient: openaiClient}
 }
 
 // TargetYear handles GET /api/admin/company-graph/target-year
@@ -328,4 +331,123 @@ func (c *AdminCompanyGraphController) upsertNodes(nodes map[string]*scraper.Comp
 		saved++
 	}
 	return saved, skipped
+}
+
+// llmExtractedRelations はOpenAI Web Searchで抽出した企業関係データ。
+type llmExtractedRelations struct {
+	Subsidiaries     []string `json:"subsidiaries"`
+	Affiliates       []string `json:"affiliates"`
+	BusinessPartners []string `json:"business_partners"`
+}
+
+// EnrichRelations handles POST /api/admin/company-graph/enrich-relations
+// OpenAI Web Searchを使って指定企業の関連会社・取引先を取得し、DBに保存する。
+func (c *AdminCompanyGraphController) EnrichRelations(ctx echo.Context) error {
+	var req struct {
+		CompanyID uint `json:"company_id"`
+	}
+	if err := ctx.Bind(&req); err != nil || req.CompanyID == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "company_id is required")
+	}
+
+	company, err := c.companyRepo.FindByID(req.CompanyID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "company not found")
+	}
+
+	extracted, err := c.fetchRelationsWithLLM(ctx.Request().Context(), company.Name)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	now := time.Now()
+	saved := 0
+
+	type relEntry struct {
+		names        []string
+		relationType string
+	}
+	entries := []relEntry{
+		{extracted.Subsidiaries, "capital_subsidiary"},
+		{extracted.Affiliates, "capital_affiliate"},
+		{extracted.BusinessPartners, "business_partner"},
+	}
+
+	for _, entry := range entries {
+		for _, name := range entry.names {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			toCompany, findErr := c.companyRepo.FindByName(name)
+			if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
+				continue
+			}
+			if toCompany == nil {
+				toCompany = &models.Company{
+					Name:            name,
+					SourceType:      "llm_web_search",
+					SourceFetchedAt: &now,
+					IsProvisional:   true,
+					DataStatus:      "draft",
+				}
+				if createErr := c.companyRepo.Create(toCompany); createErr != nil {
+					continue
+				}
+			}
+			desc := fmt.Sprintf("llm_web_search:%s", company.Name)
+			if upsertErr := c.relationRepo.UpsertBusinessRelation(company.ID, toCompany.ID, entry.relationType, desc); upsertErr != nil {
+				continue
+			}
+			saved++
+		}
+	}
+
+	adminEmail := ctx.Request().Header.Get("X-Admin-Email")
+	if adminEmail != "" && c.audit != nil {
+		c.audit.Record(adminEmail, "company_graph_enrich_relations", "company", company.ID, map[string]any{
+			"company": company.Name,
+			"saved":   saved,
+		})
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"ok":        true,
+		"company":   company.Name,
+		"saved":     saved,
+		"extracted": extracted,
+	})
+}
+
+// fetchRelationsWithLLM はOpenAI Web Searchで企業の関連会社・取引先を抽出する。
+func (c *AdminCompanyGraphController) fetchRelationsWithLLM(ctx context.Context, companyName string) (*llmExtractedRelations, error) {
+	if c.openaiClient == nil {
+		return nil, errors.New("openai client not configured")
+	}
+
+	prompt := fmt.Sprintf(
+		`「%s」の企業関係情報をウェブで検索してください。子会社・グループ会社・資本提携先・主要取引先を調べて、実在する企業名のみを以下のJSON形式のみで返してください。余分な説明は不要です。
+{"subsidiaries":["子会社・グループ会社名"],"affiliates":["資本提携・関連会社名"],"business_partners":["主要取引先名"]}`,
+		companyName,
+	)
+
+	ctxTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	text, err := c.openaiClient.WebSearchQuery(ctxTimeout, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("web search failed: %w", err)
+	}
+
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start == -1 || end == -1 || end <= start {
+		return &llmExtractedRelations{}, nil
+	}
+
+	var result llmExtractedRelations
+	if err := json.Unmarshal([]byte(text[start:end+1]), &result); err != nil {
+		return &llmExtractedRelations{}, nil
+	}
+	return &result, nil
 }
