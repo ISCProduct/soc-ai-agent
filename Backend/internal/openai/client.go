@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"math/rand"
 	"net/http"
 	"os"
@@ -128,9 +129,13 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 	type responsesOutput struct {
 		Content []responsesContent `json:"content"`
 	}
+	type promptTokensDetails struct {
+		CachedTokens int `json:"cached_tokens,omitempty"`
+	}
 	type responsesUsage struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens         int                  `json:"input_tokens"`
+		OutputTokens        int                  `json:"output_tokens"`
+		PromptTokensDetails *promptTokensDetails `json:"prompt_tokens_details,omitempty"`
 	}
 	type responsesResponse struct {
 		Output            []responsesOutput `json:"output"`
@@ -153,6 +158,15 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 	}
 	if cli.OnUsage != nil && (parsed.Usage.InputTokens > 0 || parsed.Usage.OutputTokens > 0) {
 		cli.OnUsage(model, parsed.Usage.InputTokens, parsed.Usage.OutputTokens)
+		if parsed.Usage.PromptTokensDetails != nil {
+			cached := parsed.Usage.PromptTokensDetails.CachedTokens
+			if cached > 0 && parsed.Usage.InputTokens > 0 {
+				hit := float64(cached) / float64(parsed.Usage.InputTokens)
+				log.Printf("[openai] model=%s input_tokens=%d cached_tokens=%d cache_hit_rate=%.2f", model, parsed.Usage.InputTokens, cached, hit)
+			} else {
+				log.Printf("[openai] model=%s input_tokens=%d cached_tokens=%d", model, parsed.Usage.InputTokens, cached)
+			}
+		}
 	}
 	if strings.TrimSpace(parsed.OutputText) != "" {
 		return strings.TrimSpace(parsed.OutputText), nil
@@ -461,6 +475,18 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 			if content != "" {
 				if cli.OnUsage != nil {
 					cli.OnUsage(req.Model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+				}
+				if resp != nil {
+					// キャッシュヒットのログを出力（存在すれば）
+					if resp.Usage.PromptTokensDetails != nil {
+						cached := resp.Usage.PromptTokensDetails.CachedTokens
+						if cached > 0 && resp.Usage.PromptTokens > 0 {
+							hit := float64(cached) / float64(resp.Usage.PromptTokens)
+							log.Printf("[openai] model=%s prompt_tokens=%d cached_tokens=%d cache_hit_rate=%.2f", req.Model, resp.Usage.PromptTokens, cached, hit)
+						} else {
+							log.Printf("[openai] model=%s prompt_tokens=%d cached_tokens=%d", req.Model, resp.Usage.PromptTokens, cached)
+						}
+					}
 				}
 				return content, nil
 			}
