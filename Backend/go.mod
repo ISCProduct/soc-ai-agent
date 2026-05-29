@@ -12,6 +12,7 @@ require (
 	github.com/labstack/echo/v4 v4.15.1
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/stretchr/testify v1.11.1
+	github.com/prometheus/client_golang v1.16.0
 	golang.org/x/crypto v0.52.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/time v0.15.0
