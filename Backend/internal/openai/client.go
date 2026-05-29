@@ -162,9 +162,10 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 			cached := parsed.Usage.PromptTokensDetails.CachedTokens
 			if cached > 0 && parsed.Usage.InputTokens > 0 {
 				hit := float64(cached) / float64(parsed.Usage.InputTokens)
-				log.Printf("[openai] model=%s input_tokens=%d cached_tokens=%d cache_hit_rate=%.2f", model, parsed.Usage.InputTokens, cached, hit)
+				// 日本語プレーンテキストログ: 見込まれる改善率、キャッシュ利用、ヒット率
+				log.Printf("[openai] model=%s OpenAIプロンプトキャッシュ: 見込まれる改善率=%.2f%% キャッシュ利用=%d/%d ヒット率=%.2f", model, hit*100, cached, parsed.Usage.InputTokens, hit)
 			} else {
-				log.Printf("[openai] model=%s input_tokens=%d cached_tokens=%d", model, parsed.Usage.InputTokens, cached)
+				log.Printf("[openai] model=%s OpenAIプロンプトキャッシュ: 見込まれる改善率=0.00%% キャッシュ利用=%d/%d ヒット率=0.00", model, cached, parsed.Usage.InputTokens)
 			}
 		}
 	}
@@ -482,9 +483,10 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 						cached := resp.Usage.PromptTokensDetails.CachedTokens
 						if cached > 0 && resp.Usage.PromptTokens > 0 {
 							hit := float64(cached) / float64(resp.Usage.PromptTokens)
-							log.Printf("[openai] model=%s prompt_tokens=%d cached_tokens=%d cache_hit_rate=%.2f", req.Model, resp.Usage.PromptTokens, cached, hit)
+							// 日本語プレーンテキストログ: 見込まれる改善率、キャッシュ利用、ヒット率
+							log.Printf("[openai] model=%s OpenAIプロンプトキャッシュ: 見込まれる改善率=%.2f%% キャッシュ利用=%d/%d ヒット率=%.2f", req.Model, hit*100, cached, resp.Usage.PromptTokens, hit)
 						} else {
-							log.Printf("[openai] model=%s prompt_tokens=%d cached_tokens=%d", req.Model, resp.Usage.PromptTokens, cached)
+							log.Printf("[openai] model=%s OpenAIプロンプトキャッシュ: 見込まれる改善率=0.00%% キャッシュ利用=%d/%d ヒット率=0.00", req.Model, cached, resp.Usage.PromptTokens)
 						}
 					}
 				}
