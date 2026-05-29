@@ -99,7 +99,7 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/responses", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.baseURL+"/responses", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -476,16 +476,13 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 				if cli.OnUsage != nil {
 					cli.OnUsage(req.Model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 				}
-				if resp != nil {
-					// キャッシュヒットのログを出力（存在すれば）
-					if resp.Usage.PromptTokensDetails != nil {
-						cached := resp.Usage.PromptTokensDetails.CachedTokens
-						if cached > 0 && resp.Usage.PromptTokens > 0 {
-							hit := float64(cached) / float64(resp.Usage.PromptTokens)
-							log.Printf("[openai] model=%s prompt_tokens=%d cached_tokens=%d cache_hit_rate=%.2f", req.Model, resp.Usage.PromptTokens, cached, hit)
-						} else {
-							log.Printf("[openai] model=%s prompt_tokens=%d cached_tokens=%d", req.Model, resp.Usage.PromptTokens, cached)
-						}
+				if resp.Usage.PromptTokensDetails != nil {
+					cached := resp.Usage.PromptTokensDetails.CachedTokens
+					if cached > 0 && resp.Usage.PromptTokens > 0 {
+						hit := float64(cached) / float64(resp.Usage.PromptTokens)
+						log.Printf("[openai] model=%s prompt_tokens=%d cached_tokens=%d cache_hit_rate=%.2f", req.Model, resp.Usage.PromptTokens, cached, hit)
+					} else {
+						log.Printf("[openai] model=%s prompt_tokens=%d cached_tokens=%d", req.Model, resp.Usage.PromptTokens, cached)
 					}
 				}
 				return content, nil
@@ -535,7 +532,7 @@ func (cli *Client) WebSearchQuery(ctx context.Context, query string) (string, er
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/responses", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.baseURL+"/responses", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
