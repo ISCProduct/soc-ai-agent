@@ -4,6 +4,7 @@ import (
 	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/config"
+	"Backend/internal/middleware"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 
 	"golang.org/x/oauth2"
 )
@@ -119,7 +121,6 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 			if err := s.userRepo.UpdateUser(existingUser); err != nil {
 				return nil, fmt.Errorf("failed to update user: %w", err)
 			}
-			promoteAdminIfMatched(existingUser, s.userRepo)
 			user = existingUser
 		} else {
 			// 新規ユーザー作成
@@ -132,7 +133,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 				IsGuest:       false,
 				TargetLevel:   "未設定",
 				SchoolName:    config.SchoolName(),
-				IsAdmin:       isAdminIdentity(userInfo.Email),
+				IsAdmin:       false,
 			}
 			if err := s.userRepo.CreateUser(user); err != nil {
 				return nil, fmt.Errorf("failed to create user: %w", err)
@@ -140,7 +141,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 		}
 	}
 
-	return &AuthResponse{
+	authResp := &AuthResponse{
 		UserID:                   user.ID,
 		Email:                    user.Email,
 		Name:                     user.Name,
@@ -152,7 +153,11 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
 		OAuthProvider:            "google",
-	}, nil
+	}
+	if userSecret := os.Getenv("USER_SECRET"); userSecret != "" {
+		authResp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, userSecret)
+	}
+	return authResp, nil
 }
 
 // HandleGitHubCallback GitHub OAuth認証後のコールバック処理
@@ -223,7 +228,6 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 			if err := s.userRepo.UpdateUser(existingUser); err != nil {
 				return nil, fmt.Errorf("failed to update user: %w", err)
 			}
-			promoteAdminIfMatched(existingUser, s.userRepo)
 			user = existingUser
 		} else {
 			// 新規ユーザー作成
@@ -240,7 +244,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 				IsGuest:       false,
 				TargetLevel:   "未設定",
 				SchoolName:    config.SchoolName(),
-				IsAdmin:       isAdminIdentity(email),
+				IsAdmin:       false,
 			}
 			if err := s.userRepo.CreateUser(user); err != nil {
 				return nil, fmt.Errorf("failed to create user: %w", err)
@@ -259,7 +263,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 		}
 	}
 
-	return &AuthResponse{
+	authResp := &AuthResponse{
 		UserID:                   user.ID,
 		Email:                    user.Email,
 		Name:                     user.Name,
@@ -271,7 +275,16 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
 		OAuthProvider:            "github",
-	}, nil
+	}
+	if userSecret := os.Getenv("USER_SECRET"); userSecret != "" {
+		authResp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, userSecret)
+	}
+	if user.IsAdmin {
+		if adminSecret := os.Getenv("ADMIN_SECRET"); adminSecret != "" {
+			authResp.Token = middleware.GenerateAdminToken(user.ID, user.Email, adminSecret)
+		}
+	}
+	return authResp, nil
 }
 
 // getGitHubPrimaryEmail GitHubのプライマリメールアドレスを取得
