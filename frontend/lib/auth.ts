@@ -34,17 +34,20 @@ function getLocalStorage(): Storage | null {
 
 function migrateAuthValue(key: string): string | null {
   const session = getSessionStorage()
-  if (!session) return null
+  if (session) {
+    const current = session.getItem(key)
+    if (current) return current
+  }
 
-  const current = session.getItem(key)
-  if (current) return current
+  // sessionStorage になければ localStorage を確認（タブ間・セッション間の継続）
+  const persisted = getLocalStorage()?.getItem(key)
+  if (persisted) {
+    // sessionStorage にも同期しておく
+    session?.setItem(key, persisted)
+    return persisted
+  }
 
-  const legacy = getLocalStorage()?.getItem(key)
-  if (!legacy) return null
-
-  session.setItem(key, legacy)
-  getLocalStorage()?.removeItem(key)
-  return legacy
+  return null
 }
 
 export interface User {
@@ -170,7 +173,7 @@ export const authService = {
     certificationsAcquired: string,
     certificationsInProgress: string,
   ): Promise<AuthResponse> {
-    const res = await fetch(`${BACKEND_URL}/api/auth/profile`, {
+    const res = await fetch(`/api/auth/profile`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this.getUserFetchHeaders() },
       body: JSON.stringify({
@@ -239,17 +242,19 @@ export const authService = {
       avatar_url: authResponse.avatar_url,
     }
     const session = getSessionStorage()
-    session?.setItem(AUTH_USER_KEY, JSON.stringify(user))
+    const local = getLocalStorage()
+    const userJson = JSON.stringify(user)
+    // sessionStorage（タブ内）と localStorage（タブ間・再起動後）の両方に保存する
+    session?.setItem(AUTH_USER_KEY, userJson)
+    local?.setItem(AUTH_USER_KEY, userJson)
     if (authResponse.token) {
       session?.setItem(AUTH_TOKEN_KEY, authResponse.token)
+      local?.setItem(AUTH_TOKEN_KEY, authResponse.token)
     }
     if (authResponse.user_token) {
       session?.setItem(AUTH_USER_TOKEN_KEY, authResponse.user_token)
+      local?.setItem(AUTH_USER_TOKEN_KEY, authResponse.user_token)
     }
-    // 既存localStorageからの段階移行: 保存後は残存値を削除
-    getLocalStorage()?.removeItem(AUTH_USER_KEY)
-    getLocalStorage()?.removeItem(AUTH_TOKEN_KEY)
-    getLocalStorage()?.removeItem(AUTH_USER_TOKEN_KEY)
 
     // httpOnly CookieにトークンをセットしてDevTools経由の露出を防ぐ
     if (authResponse.user_token) {

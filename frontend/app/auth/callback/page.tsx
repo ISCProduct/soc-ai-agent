@@ -3,22 +3,43 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Box, CircularProgress, Typography, Alert } from '@mui/material'
-import { z } from 'zod'
 import { authService } from '@/lib/auth'
-import { BACKEND_URL } from '@/lib/backend-url'
 
-const OAuthUserSchema = z.object({
-  user_id: z.union([z.number().int().positive(), z.string()]),
-  email: z.string().email(),
-  name: z.string(),
-  token: z.string().min(1).optional(),
-  user_token: z.string().optional(),
-  is_guest: z.boolean().optional().default(false),
-  target_level: z.string().optional().default(''),
-  is_admin: z.boolean().optional(),
-  oauth_provider: z.string().optional(),
-  avatar_url: z.string().optional(),
-})
+type OAuthUser = {
+  user_id: number | string
+  email: string
+  name: string
+  token?: string
+  user_token?: string
+  is_guest: boolean
+  target_level?: string
+  is_admin?: boolean
+  oauth_provider?: string
+  avatar_url?: string
+}
+
+function validateOAuthPayload(raw: unknown): OAuthUser {
+  if (!raw || typeof raw !== 'object') throw new Error('Invalid OAuth payload structure')
+  const d = raw as Record<string, unknown>
+  if ((typeof d.user_id !== 'number' && typeof d.user_id !== 'string') || !d.user_id)
+    throw new Error('Invalid OAuth payload structure')
+  if (typeof d.email !== 'string' || !d.email.includes('@'))
+    throw new Error('Invalid OAuth payload structure')
+  if (typeof d.name !== 'string')
+    throw new Error('Invalid OAuth payload structure')
+  return {
+    user_id: d.user_id as number | string,
+    email: d.email,
+    name: d.name,
+    token: typeof d.token === 'string' ? d.token : undefined,
+    user_token: typeof d.user_token === 'string' ? d.user_token : undefined,
+    is_guest: typeof d.is_guest === 'boolean' ? d.is_guest : false,
+    target_level: typeof d.target_level === 'string' ? d.target_level : '',
+    is_admin: typeof d.is_admin === 'boolean' ? d.is_admin : undefined,
+    oauth_provider: typeof d.oauth_provider === 'string' ? d.oauth_provider : undefined,
+    avatar_url: typeof d.avatar_url === 'string' ? d.avatar_url : undefined,
+  }
+}
 
 function OAuthCallbackContent() {
   const router = useRouter()
@@ -50,13 +71,10 @@ function OAuthCallbackContent() {
         const userDataString = new TextDecoder('utf-8').decode(bytes)
         const userDataRaw = JSON.parse(userDataString)
         // スキーマ検証: 不正な構造のペイロードを拒否
-        const parsed = OAuthUserSchema.safeParse(userDataRaw)
-        if (!parsed.success) {
-          throw new Error('Invalid OAuth payload structure')
-        }
+        const validatedData = validateOAuthPayload(userDataRaw)
         // Fallback repair for mojibake in name
         const fixMojibake = (s: string) => /[Ãå][^\s]/.test(s) ? decodeURIComponent(escape(s)) : s
-        let userData = { ...parsed.data, name: fixMojibake(parsed.data.name) }
+        let userData = { ...validatedData, name: fixMojibake(validatedData.name) }
         try {
           const fresh = await authService.getUser()
           userData = { ...userData, ...fresh }

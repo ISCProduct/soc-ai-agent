@@ -18,6 +18,7 @@ import {
   Chip,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
 
 type ReviewItem = {
   id: number
@@ -61,6 +62,8 @@ function ResumeContent() {
   const [annotateError, setAnnotateError] = useState('')
   const [review, setReview] = useState<ReviewResult | null>(null)
   const [ragReport, setRagReport] = useState('')
+  const [scoresBefore, setScoresBefore] = useState<WeightScore[] | null>(null)
+  const [scoresAfter, setScoresAfter] = useState<WeightScore[] | null>(null)
 
   const checkAnnotatedPdfAvailable = async (id: number) => {
     try {
@@ -161,7 +164,16 @@ function ResumeContent() {
     setAnnotateError('')
     setReview(null)
     setRagReport('')
+    setScoresAfter(null)
     setReviewLoading(true)
+
+    if (userId && sessionId) {
+      try {
+        const res = await fetch(`/api/user/weight-scores?user_id=${userId}&session_id=${encodeURIComponent(sessionId)}`)
+        const data = await res.json()
+        setScoresBefore(data.weight_scores ?? null)
+      } catch { /* ignore */ }
+    }
 
     try {
       const response = await fetch(`/api/resume/review/stream?document_id=${documentId}`, {
@@ -201,6 +213,13 @@ function ResumeContent() {
               const backendAnnotated = data.annotated_available === true
               const annotatedAvailable = backendAnnotated || (documentId ? await checkAnnotatedPdfAvailable(documentId) : false)
               setReview({ review: data.review, items: data.items, annotated_available: annotatedAvailable })
+              if (userId && sessionId) {
+                try {
+                  const res = await fetch(`/api/user/weight-scores?user_id=${userId}&session_id=${encodeURIComponent(sessionId)}`)
+                  const scoreData = await res.json()
+                  setScoresAfter(scoreData.weight_scores ?? null)
+                } catch { /* ignore */ }
+              }
             } else if (data.type === 'annotate_error') {
               setAnnotateError(data.message)
             } else if (data.type === 'error') {
@@ -390,6 +409,16 @@ function ResumeContent() {
             {ragReport}
           </Box>
         </Paper>
+      )}
+
+      {review && scoresAfter && (
+        <Box mt={4}>
+          <ScoreUpdateBanner
+            beforeScores={scoresBefore}
+            afterScores={scoresAfter}
+            title="職務経歴書レビュー結果がプロフィールスコアに反映されました"
+          />
+        </Box>
       )}
 
       {review && (
