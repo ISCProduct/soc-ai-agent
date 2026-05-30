@@ -344,7 +344,8 @@ type llmExtractedRelations struct {
 // OpenAI Web Searchを使って指定企業の関連会社・取引先を取得し、DBに保存する。
 func (c *AdminCompanyGraphController) EnrichRelations(ctx echo.Context) error {
 	var req struct {
-		CompanyID uint `json:"company_id"`
+		CompanyID uint   `json:"company_id"`
+		URL       string `json:"url"`
 	}
 	if err := ctx.Bind(&req); err != nil || req.CompanyID == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "company_id is required")
@@ -355,7 +356,7 @@ func (c *AdminCompanyGraphController) EnrichRelations(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "company not found")
 	}
 
-	extracted, err := c.fetchRelationsWithLLM(ctx.Request().Context(), company.Name)
+	extracted, err := c.fetchRelationsWithLLM(ctx.Request().Context(), company.Name, req.URL)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -420,16 +421,26 @@ func (c *AdminCompanyGraphController) EnrichRelations(ctx echo.Context) error {
 }
 
 // fetchRelationsWithLLM はOpenAI Web Searchで企業の関連会社・取引先を抽出する。
-func (c *AdminCompanyGraphController) fetchRelationsWithLLM(ctx context.Context, companyName string) (*llmExtractedRelations, error) {
+// urlを指定した場合はそのページを優先的に参照する。
+func (c *AdminCompanyGraphController) fetchRelationsWithLLM(ctx context.Context, companyName, url string) (*llmExtractedRelations, error) {
 	if c.openaiClient == nil {
 		return nil, errors.New("openai client not configured")
 	}
 
-	prompt := fmt.Sprintf(
-		`「%s」の企業関係情報をウェブで検索してください。子会社・グループ会社・資本提携先・主要取引先を調べて、実在する企業名のみを以下のJSON形式のみで返してください。余分な説明は不要です。
+	var prompt string
+	if url != "" {
+		prompt = fmt.Sprintf(
+			`次のURL「%s」を参照して、「%s」の企業関係情報を調べてください。子会社・グループ会社・資本提携先・主要取引先を抽出し、実在する企業名のみを以下のJSON形式のみで返してください。余分な説明は不要です。
 {"subsidiaries":["子会社・グループ会社名"],"affiliates":["資本提携・関連会社名"],"business_partners":["主要取引先名"]}`,
-		companyName,
-	)
+			url, companyName,
+		)
+	} else {
+		prompt = fmt.Sprintf(
+			`「%s」の企業関係情報をウェブで検索してください。子会社・グループ会社・資本提携先・主要取引先を調べて、実在する企業名のみを以下のJSON形式のみで返してください。余分な説明は不要です。
+{"subsidiaries":["子会社・グループ会社名"],"affiliates":["資本提携・関連会社名"],"business_partners":["主要取引先名"]}`,
+			companyName,
+		)
+	}
 
 	ctxTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
