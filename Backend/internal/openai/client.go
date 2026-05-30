@@ -115,7 +115,8 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/responses", bytes.NewReader(body))
+	responsesURL := cli.baseURL + "/responses"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, responsesURL, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -510,9 +511,8 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 				if cli.OnUsage != nil {
 					cli.OnUsage(req.Model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 				}
-				if resp != nil {
-					// キャッシュヒットのログを出力（存在すれば）
-					if resp.Usage.PromptTokensDetails != nil {
+				// キャッシュヒットのログを出力（存在すれば）
+				if resp.Usage.PromptTokensDetails != nil {
 						cached := resp.Usage.PromptTokensDetails.CachedTokens
 						var hit float64
 						if resp.Usage.PromptTokens > 0 {
@@ -534,9 +534,8 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 							log.Println(string(jl))
 						}
 						// Update prometheus metric if available
-						if openaiPromptCacheHitRate != nil {
-							openaiPromptCacheHitRate.WithLabelValues(req.Model).Set(hit)
-						}
+					if openaiPromptCacheHitRate != nil {
+						openaiPromptCacheHitRate.WithLabelValues(req.Model).Set(hit)
 					}
 				}
 				return content, nil
