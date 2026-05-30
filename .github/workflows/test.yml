@@ -13,8 +13,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'Backend/**'
+            frontend:
+              - 'frontend/**'
+
   test-backend:
     name: Go Unit Tests
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
 
     defaults:
@@ -47,6 +66,8 @@ jobs:
 
   audit-frontend:
     name: Frontend Security Audit
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
 
     defaults:
@@ -71,6 +92,8 @@ jobs:
 
   test-frontend-unit:
     name: Frontend Unit Tests
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
 
     defaults:
@@ -95,6 +118,8 @@ jobs:
 
   e2e-frontend:
     name: Frontend E2E Tests (Playwright)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
 
     defaults:
