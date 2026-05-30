@@ -182,7 +182,7 @@ func TestAdminDashboardController_ExportCSV_Success(t *testing.T) {
 // ========== AdminCompanyGraphController ==========
 
 func newAdminCompanyGraphController() *controllers.AdminCompanyGraphController {
-	return controllers.NewAdminCompanyGraphController(nil, nil, nil, nil)
+	return controllers.NewAdminCompanyGraphController(nil, nil, nil, nil, nil)
 }
 
 // ---- TargetYear ----
