@@ -61,7 +61,7 @@ func NewChatService(
 		progressRepo:            progressRepo,
 		sessionValidationRepo:   sessionValidationRepo,
 		conversationContextRepo: conversationContextRepo,
-		answerEvaluator:         NewAnswerEvaluator(),
+		answerEvaluator:         NewAnswerEvaluatorWithLLM(aiClient),
 		jobValidator:            NewJobCategoryValidator(aiClient, jobCategoryRepo),
 	}
 }

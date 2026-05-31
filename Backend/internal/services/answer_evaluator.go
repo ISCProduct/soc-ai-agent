@@ -2,18 +2,164 @@ package services
 
 import (
 	"Backend/internal/models"
+	internalOpenAI "Backend/internal/openai"
+	"Backend/internal/services/prompts"
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // AnswerEvaluator 回答の評価サービス
-type AnswerEvaluator struct{}
+type AnswerEvaluator struct {
+	llmClient *internalOpenAI.Client // nil の場合はLLM評価を無効化
+}
 
 func NewAnswerEvaluator() *AnswerEvaluator {
 	return &AnswerEvaluator{}
+}
+
+// NewAnswerEvaluatorWithLLM LLMフォールバックを有効にして生成する
+func NewAnswerEvaluatorWithLLM(client *internalOpenAI.Client) *AnswerEvaluator {
+	return &AnswerEvaluator{llmClient: client}
+}
+
+// LLMAnswerEvaluation はLLM評価のレスポンス構造体
+type LLMAnswerEvaluation struct {
+	Score        int    `json:"score"`
+	Confidence   string `json:"confidence"`
+	Specificity  int    `json:"specificity"`
+	Authenticity int    `json:"authenticity"`
+	Consistency  int    `json:"consistency"`
+	Explanation  string `json:"explanation"`
+}
+
+// llmEvaluate は質問と回答をLLMで評価する。llmClientがnilの場合はnilを返す。
+func (e *AnswerEvaluator) llmEvaluate(ctx context.Context, question, answer string) *LLMAnswerEvaluation {
+	if e.llmClient == nil {
+		return nil
+	}
+	userPrompt := prompts.BuildAnswerQualityUserPrompt(question, answer)
+	raw, err := e.llmClient.ChatCompletionJSON(ctx, prompts.AnswerQualitySystemPrompt, userPrompt, 0.2, 256)
+	if err != nil {
+		log.Printf("[AnswerEvaluator] LLM評価エラー: %v", err)
+		return nil
+	}
+	var eval LLMAnswerEvaluation
+	if err := json.Unmarshal([]byte(raw), &eval); err != nil {
+		log.Printf("[AnswerEvaluator] LLMレスポンスパースエラー: %v raw=%s", err, raw)
+		return nil
+	}
+	if eval.Score < 0 {
+		eval.Score = 0
+	}
+	if eval.Score > 100 {
+		eval.Score = 100
+	}
+	if eval.Confidence != "high" && eval.Confidence != "medium" && eval.Confidence != "low" {
+		eval.Confidence = "medium"
+	}
+	log.Printf("[AnswerEvaluator] LLM評価完了: score=%d confidence=%s specificity=%d authenticity=%d consistency=%d",
+		eval.Score, eval.Confidence, eval.Specificity, eval.Authenticity, eval.Consistency)
+	return &eval
+}
+
+// EvaluateWithLLMFallback はルールベース評価を行い、信頼度が "low" の場合のみLLMで再評価する（Phase 1）。
+// llmClientがnilの場合はEvaluateと同一の動作をする。
+func (e *AnswerEvaluator) EvaluateWithLLMFallback(ctx context.Context, question *models.PredefinedQuestion, questionText, answer string) (*EvaluationResult, error) {
+	result, err := e.Evaluate(question, answer)
+	if err != nil {
+		return result, err
+	}
+	if result.Confidence != "low" || e.llmClient == nil {
+		return result, nil
+	}
+
+	llmResult := e.llmEvaluate(ctx, questionText, answer)
+	if llmResult == nil {
+		return result, nil
+	}
+
+	// LLMがより高い信頼度を判定した場合は結果を上書きする
+	if llmResult.Confidence == "high" || llmResult.Confidence == "medium" {
+		result.Confidence = llmResult.Confidence
+		result.Score = int(math.Round(float64(llmResult.Score) / 10.0))
+		result.Explanation = llmResult.Explanation
+		result.NeedsFollowUp = false
+		result.FollowUpTrigger = ""
+	}
+	return result, nil
+}
+
+// EvaluateHybrid はルールベースとLLM評価を並列実行し、加重平均でスコアを合成する（Phase 2）。
+// llmClientがnilの場合はEvaluateと同一の動作をする。
+// ruleWeight: ルールベースの重み（0.0〜1.0）。llmWeight = 1.0 - ruleWeight。
+func (e *AnswerEvaluator) EvaluateHybrid(ctx context.Context, question *models.PredefinedQuestion, questionText, answer string, ruleWeight float64) (*EvaluationResult, error) {
+	if e.llmClient == nil {
+		return e.Evaluate(question, answer)
+	}
+
+	var (
+		ruleResult *EvaluationResult
+		ruleErr    error
+		llmResult  *LLMAnswerEvaluation
+		wg         sync.WaitGroup
+		mu         sync.Mutex
+	)
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		r, err := e.Evaluate(question, answer)
+		mu.Lock()
+		ruleResult, ruleErr = r, err
+		mu.Unlock()
+	}()
+	go func() {
+		defer wg.Done()
+		r := e.llmEvaluate(ctx, questionText, answer)
+		mu.Lock()
+		llmResult = r
+		mu.Unlock()
+	}()
+	wg.Wait()
+
+	if ruleErr != nil {
+		return ruleResult, ruleErr
+	}
+	if llmResult == nil {
+		return ruleResult, nil
+	}
+
+	// スコアを加重平均で合成（ruleResultのスコアは0-10スケール想定）
+	llmWeight := 1.0 - ruleWeight
+	ruleScore := float64(ruleResult.Score) * 10.0
+	blended := ruleWeight*ruleScore + llmWeight*float64(llmResult.Score)
+	ruleResult.Score = int(math.Round(blended / 10.0))
+
+	// より楽観的な信頼度を採用する
+	ruleResult.Confidence = MergeConfidence(ruleResult.Confidence, llmResult.Confidence)
+	if ruleResult.Confidence != "low" {
+		ruleResult.NeedsFollowUp = false
+		ruleResult.FollowUpTrigger = ""
+	}
+	if llmResult.Explanation != "" {
+		ruleResult.Explanation = llmResult.Explanation
+	}
+	return ruleResult, nil
+}
+
+// MergeConfidence は2つの信頼度のうち高い方を返す
+func MergeConfidence(a, b string) string {
+	rank := map[string]int{"low": 0, "medium": 1, "high": 2}
+	if rank[a] >= rank[b] {
+		return a
+	}
+	return b
 }
 
 // EvaluationResult 評価結果
@@ -37,16 +183,6 @@ func (e *AnswerEvaluator) Evaluate(question *models.PredefinedQuestion, answer s
 
 	answerLower := strings.ToLower(answer)
 	answerLength := len([]rune(answer))
-
-	// 1. 回答の長さチェック（基本的な信頼性判定）
-	if answerLength < 10 {
-		result.Score -= 3
-		result.Confidence = "low"
-		result.NeedsFollowUp = true
-		result.FollowUpTrigger = "too_short"
-		result.Explanation = "回答が短すぎます（10文字未満）"
-		return result, nil
-	}
 
 	// 2. ネガティブキーワードチェック
 	var negativeKeywords []string
@@ -91,15 +227,15 @@ func (e *AnswerEvaluator) Evaluate(question *models.PredefinedQuestion, answer s
 		}
 	}
 
-	// 5. 信頼度の判定
+	// 5. 信頼度の判定（文字数ではなくキーワードマッチとスコアで判断）
 	if matchedCount == 0 && result.Score <= 0 {
 		result.Confidence = "low"
 		result.NeedsFollowUp = true
 		result.FollowUpTrigger = "no_keywords"
 		result.Explanation = "関連キーワードが見つかりませんでした"
-	} else if answerLength > 100 && matchedCount >= 2 {
+	} else if matchedCount >= 2 {
 		result.Confidence = "high"
-		result.Explanation = "具体的で詳細な回答です"
+		result.Explanation = "関連キーワードを複数含む回答です"
 	} else {
 		result.Confidence = "medium"
 		result.Explanation = "ある程度の評価ができました"
@@ -214,15 +350,13 @@ func (e *AnswerEvaluator) shouldTriggerFollowUp(rule models.FollowUpRule, result
 }
 
 // GetConfidenceLevel スコアから信頼度レベルを取得
-func (e *AnswerEvaluator) GetConfidenceLevel(score int, keywordCount int, answerLength int) string {
+func (e *AnswerEvaluator) GetConfidenceLevel(score int, keywordCount int) string {
 	if score <= 0 || keywordCount == 0 {
 		return "low"
 	}
-
-	if score >= 5 && keywordCount >= 2 && answerLength > 50 {
+	if score >= 5 && keywordCount >= 2 {
 		return "high"
 	}
-
 	return "medium"
 }
 
@@ -439,7 +573,7 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 
 	if signals.hasConcreteExample && signals.hasAction {
 		scores["relevance"] = 3
-	} else if length >= 20 {
+	} else if signals.hasAction || signals.hasResult || signals.hasConcreteExample {
 		scores["relevance"] = 2
 	}
 
@@ -447,7 +581,7 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 		scores["specificity"] = 3
 	} else if signals.hasConcreteExample {
 		scores["specificity"] = 2
-	} else if length >= 20 {
+	} else if signals.hasNumbersOrTime || signals.hasAction || signals.hasResult {
 		scores["specificity"] = 1
 	}
 
@@ -455,7 +589,7 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 		scores["reasoning"] = 3
 	} else if signals.hasReason {
 		scores["reasoning"] = 2
-	} else if length >= 30 {
+	} else if signals.hasConcreteExample {
 		scores["reasoning"] = 1
 	}
 
@@ -510,7 +644,7 @@ func applyPenaltiesAndBoosts(score int, signals signalSet) (int, []string, []str
 	finalScore := score
 
 	if !signals.hasConcreteExample && !signals.hasAction {
-		finalScore -= 10
+		finalScore -= 5
 		penalties = append(penalties, "too_generic")
 	}
 	if signals.contradiction {
