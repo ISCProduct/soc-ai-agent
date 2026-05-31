@@ -7,6 +7,8 @@ import {
   Card,
   CardContent,
   Divider,
+  IconButton,
+  Stack,
   TableBody,
   TableCell,
   TableHead,
@@ -14,6 +16,7 @@ import {
   TableRow,
   Typography,
 } from '@mui/material'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService } from '@/lib/auth'
 import { PageContainer } from '@/components/admin/PageContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
@@ -84,9 +87,12 @@ export default function AdminInterviewsPage() {
 
   return (
     <PageContainer maxWidth={1200}>
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
-        面接管理
-      </Typography>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+        <IconButton component={Link} href="/admin"><ArrowBackIcon /></IconButton>
+        <Typography variant="h4" fontWeight="bold">
+          面接管理
+        </Typography>
+      </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         全ユーザーの面接セッション一覧です。動画を確認するには詳細ページを開いてください。
       </Typography>

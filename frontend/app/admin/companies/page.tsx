@@ -9,10 +9,12 @@ import {
   CardContent,
   Chip,
   Divider,
+  IconButton,
   Stack,
   Typography,
   Pagination,
 } from '@mui/material'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService } from '@/lib/auth'
 import { PageContainer } from '@/components/admin/PageContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
@@ -111,9 +113,12 @@ export default function AdminCompaniesPage() {
   return (
     <PageContainer maxWidth={1000}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-        <Typography variant="h4" fontWeight="bold">
-          企業管理
-        </Typography>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          <IconButton component={Link} href="/admin"><ArrowBackIcon /></IconButton>
+          <Typography variant="h4" fontWeight="bold">
+            企業管理
+          </Typography>
+        </Stack>
         <Stack direction="row" spacing={1}>
           <Button variant="outlined" size="small" component={Link} href="/admin/job-positions">
             求人管理

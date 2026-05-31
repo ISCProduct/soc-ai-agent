@@ -1,24 +1,32 @@
 import { test, expect } from '@playwright/test'
 import { setupAuth, TEST_USER } from './fixtures/auth'
 
+// 月末でも翌月にならないよう、当月15日を使用する
+const _now = new Date()
+const _mid = new Date(_now.getFullYear(), _now.getMonth(), 15, 10, 0, 0)
+
 const MOCK_EVENTS = [
   {
     id: 1,
+    user_id: 1,
     company_name: 'テスト株式会社',
     title: '一次面接',
     stage: '一次面接',
-    scheduled_at: new Date(Date.now() + 86400000).toISOString(),
-    memo: '',
-    passed: null,
+    scheduled_at: _mid.toISOString(),
+    notes: '',
+    created_at: _mid.toISOString(),
+    updated_at: _mid.toISOString(),
   },
   {
     id: 2,
+    user_id: 1,
     company_name: 'サンプル工業',
     title: '書類選考',
     stage: '書類選考',
-    scheduled_at: new Date(Date.now() + 172800000).toISOString(),
-    memo: '',
-    passed: null,
+    scheduled_at: new Date(_now.getFullYear(), _now.getMonth(), 16, 14, 0, 0).toISOString(),
+    notes: '',
+    created_at: _mid.toISOString(),
+    updated_at: _mid.toISOString(),
   },
 ]
 

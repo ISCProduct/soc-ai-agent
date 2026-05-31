@@ -9,9 +9,11 @@ import {
   CardContent,
   Chip,
   Divider,
+  IconButton,
   Stack,
   Typography,
 } from '@mui/material'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import Grid from '@mui/material/GridLegacy'
 import { authService } from '@/lib/auth'
 
@@ -48,9 +50,12 @@ export default function AdminDashboardPage() {
 
   return (
     <Box sx={{ p: 4, maxWidth: 960, mx: 'auto' }}>
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
-        管理者ダッシュボード
-      </Typography>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+        <IconButton component={Link} href="/"><ArrowBackIcon /></IconButton>
+        <Typography variant="h4" fontWeight="bold">
+          管理者ダッシュボード
+        </Typography>
+      </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         管理者向けの操作メニューです。権限がない場合は表示されません。
       </Typography>
