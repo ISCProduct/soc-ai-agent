@@ -46,3 +46,21 @@ const AnswerQualitySystemPrompt = `あなたは就職面接の回答品質を評
 func BuildAnswerQualityUserPrompt(question, answer string) string {
 	return fmt.Sprintf("【質問】\n%s\n\n【回答】\n%s", question, answer)
 }
+
+// BuildAnswerQualitySystemPromptWithContext はユーザーの学年・志望職種を考慮した
+// 回答品質評価システムプロンプトを返します。
+// gradeLevel: "新卒" / "既卒" / "中途" など、targetJob: 志望職種名
+func BuildAnswerQualitySystemPromptWithContext(gradeLevel, targetJob string) string {
+	if gradeLevel == "" && targetJob == "" {
+		return AnswerQualitySystemPrompt
+	}
+	ctx := "\n\n## 評価対象者の背景"
+	if gradeLevel != "" {
+		ctx += fmt.Sprintf("\n- 学年・経験レベル: %s", gradeLevel)
+	}
+	if targetJob != "" {
+		ctx += fmt.Sprintf("\n- 志望職種: %s", targetJob)
+	}
+	ctx += "\n\n上記の背景を踏まえ、経験レベルに応じた評価軸（新卒なら学生経験ベース、中途なら実務経験ベース）で判定してください。"
+	return AnswerQualitySystemPrompt + ctx
+}

@@ -185,3 +185,31 @@ func BuildSimplifyQuestionPrompt(question string) string {
 質問:
 %s`, question)
 }
+
+// BuildSimplifyQuestionPromptWithJobType は職種別のトーンと文字数ガイドラインを考慮した
+// 質問簡略化プロンプトを構築します。
+func BuildSimplifyQuestionPromptWithJobType(question, jobCategoryName string) string {
+	cfg := GetJobTypeConfig(jobCategoryName)
+	charRange := "40〜80文字"
+	// エンジニア向けは技術的な文脈を保つため若干長めも許容
+	if cfg.Type == JobTypeEngineer {
+		charRange = "40〜100文字"
+	}
+	return fmt.Sprintf(`次の質問を、%s向けに短く言い換えてください。
+
+## 制約
+- 1文で、%s程度
+- 例示やカッコ補足は入れない
+- 元の質問の意図・キーワードを必ず保持する
+- 質問文のみを返す
+- %s
+
+## 自己検証
+言い換えた質問が以下を満たすか確認してから出力してください：
+1. 元の質問が問いたい「評価対象（技術志向・リーダーシップ等）」が伝わるか
+2. 対象者が経験をもとに答えられる内容か
+3. 文字数の範囲に収まっているか
+
+質問:
+%s`, jobCategoryName, charRange, cfg.TechFocusNote, question)
+}
