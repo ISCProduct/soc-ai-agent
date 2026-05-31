@@ -588,7 +588,7 @@ func (cli *Client) WebSearchQuery(ctx context.Context, query string) (string, er
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/responses", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.baseURL+"/responses", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
