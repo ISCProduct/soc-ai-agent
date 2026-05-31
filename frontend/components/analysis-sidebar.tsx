@@ -117,11 +117,12 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
     const getPhasePercent = (phaseName: string, fallback: number) => {
         const phase = phaseProgressFor(phaseName)
         if (!phase) return fallback
+        // まだ質問が始まっていないフェーズは「待機中」として fallback を返さない
+        if (phase.questions_asked === 0) return 0
         const required = phase.max_questions > 0 ? phase.max_questions : phase.min_questions
         if (required > 0) {
             return Math.min(100, Math.max(0, Math.floor((phase.valid_answers / required) * 100)))
         }
-        if (phase.questions_asked <= 0) return 0
         return Math.min(100, Math.floor((phase.valid_answers / phase.questions_asked) * 100))
     }
     const getPhaseStatus = (phaseName: string, defaultLabel: string) => {

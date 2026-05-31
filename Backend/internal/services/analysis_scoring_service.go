@@ -252,12 +252,20 @@ func (s *AnalysisScoringService) calculateInterestScore(userID uint, sessionID s
 	favoritedCount, _ := stats["favorited_count"].(int64)
 	appliedCount, _ := stats["applied_count"].(int64)
 
+	phaseScore := s.phaseCompletionScore("interest_analysis", userID, sessionID)
+
+	// マッチ企業との操作実績がなければチャット回答の達成度をそのまま返す
+	if viewedCount+appliedCount+favoritedCount == 0 {
+		return phaseScore
+	}
+
 	raw := (float64(viewedCount) * 0.7) + (float64(appliedCount) * 1.0) + (float64(favoritedCount) * 1.2)
 	max := float64(totalMatches) * (0.7 + 1.0 + 1.2)
 	if max <= 0 {
-		return s.phaseCompletionScore("interest_analysis", userID, sessionID)
+		return phaseScore
 	}
-	return clamp01(raw / max)
+	// チャット達成度60% + マッチ操作40% でブレンド
+	return clamp01(phaseScore*0.6 + clamp01(raw/max)*0.4)
 }
 
 func (s *AnalysisScoringService) calculateAptitudeScore(userID uint, sessionID string) (float64, []AxisScore) {
