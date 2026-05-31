@@ -244,7 +244,7 @@ func main() {
 		GBiz:      scraper.NewGBizClient("", gbizToken),
 		Threshold: config.CompanyGraphThreshold(),
 	}
-	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService)
+	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService, aiClient)
 	resumeController := controllers.NewResumeController(resumeService)
 
 	// S3 upload service for interview videos (optional — skipped if env vars are not set)

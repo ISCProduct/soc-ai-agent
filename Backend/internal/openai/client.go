@@ -14,6 +14,7 @@ import (
 	"time"
 
 	openai "github.com/sashabaranov/go-openai"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // UsageHook はAPIコール成功時に呼ばれるコールバック。
@@ -27,6 +28,21 @@ type Client struct {
 	apiKey       string
 	baseURL      string
 	OnUsage      UsageHook // オプション: コール成功時にトークン使用量を通知
+}
+
+var (
+	// OpenAI prompt cache hit rate metric (0.0-1.0)
+	openaiPromptCacheHitRate = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "soc",
+		Subsystem: "openai",
+		Name:      "prompt_cache_hit_rate",
+		Help:      "OpenAI prompt cache hit rate (0.0-1.0)",
+	}, []string{"model"})
+)
+
+func init() {
+	// Register metric; ignore error if already registered
+	_ = prometheus.Register(openaiPromptCacheHitRate)
 }
 
 
@@ -99,7 +115,8 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.baseURL+"/responses", bytes.NewReader(body))
+	responsesURL := cli.baseURL + "/responses"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, responsesURL, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -160,11 +177,29 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 		cli.OnUsage(model, parsed.Usage.InputTokens, parsed.Usage.OutputTokens)
 		if parsed.Usage.PromptTokensDetails != nil {
 			cached := parsed.Usage.PromptTokensDetails.CachedTokens
+			var hit float64
+			if parsed.Usage.InputTokens > 0 {
+				hit = float64(cached) / float64(parsed.Usage.InputTokens)
+			}
+			// 日本語プレーンテキストログ: 見込まれる改善率、キャッシュ利用、ヒット率
 			if cached > 0 && parsed.Usage.InputTokens > 0 {
-				hit := float64(cached) / float64(parsed.Usage.InputTokens)
-				log.Printf("[openai] model=%s input_tokens=%d cached_tokens=%d cache_hit_rate=%.2f", model, parsed.Usage.InputTokens, cached, hit)
+				log.Printf("[openai] model=%s OpenAIプロンプトキャッシュ: 見込まれる改善率=%.2f%% キャッシュ利用=%d/%d ヒット率=%.2f", model, hit*100, cached, parsed.Usage.InputTokens, hit)
 			} else {
-				log.Printf("[openai] model=%s input_tokens=%d cached_tokens=%d", model, parsed.Usage.InputTokens, cached)
+				log.Printf("[openai] model=%s OpenAIプロンプトキャッシュ: 見込まれる改善率=0.00%% キャッシュ利用=%d/%d ヒット率=0.00", model, cached, parsed.Usage.InputTokens)
+			}
+			// JSON structured log for machines
+			if jl, err := json.Marshal(map[string]any{
+				"event": "openai_prompt_cache",
+				"model": model,
+				"cached_tokens": cached,
+				"input_tokens": parsed.Usage.InputTokens,
+				"cache_hit_rate": hit,
+			}); err == nil {
+				log.Println(string(jl))
+			}
+			// Update prometheus metric if available
+			if openaiPromptCacheHitRate != nil {
+				openaiPromptCacheHitRate.WithLabelValues(model).Set(hit)
 			}
 		}
 	}
@@ -339,6 +374,9 @@ func (cli *Client) Embedding(ctx context.Context, input string, modelOverride ..
 	if len(resp.Data) == 0 {
 		return nil, errors.New("empty embedding response")
 	}
+	if cli.OnUsage != nil && resp.Usage.PromptTokens > 0 {
+		cli.OnUsage(model, resp.Usage.PromptTokens, 0)
+	}
 	return resp.Data[0].Embedding, nil
 }
 
@@ -476,13 +514,31 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 				if cli.OnUsage != nil {
 					cli.OnUsage(req.Model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 				}
+				// キャッシュヒットのログを出力（存在すれば）
 				if resp.Usage.PromptTokensDetails != nil {
-					cached := resp.Usage.PromptTokensDetails.CachedTokens
-					if cached > 0 && resp.Usage.PromptTokens > 0 {
-						hit := float64(cached) / float64(resp.Usage.PromptTokens)
-						log.Printf("[openai] model=%s prompt_tokens=%d cached_tokens=%d cache_hit_rate=%.2f", req.Model, resp.Usage.PromptTokens, cached, hit)
-					} else {
-						log.Printf("[openai] model=%s prompt_tokens=%d cached_tokens=%d", req.Model, resp.Usage.PromptTokens, cached)
+						cached := resp.Usage.PromptTokensDetails.CachedTokens
+						var hit float64
+						if resp.Usage.PromptTokens > 0 {
+							hit = float64(cached) / float64(resp.Usage.PromptTokens)
+						}
+						if cached > 0 && resp.Usage.PromptTokens > 0 {
+							log.Printf("[openai] model=%s OpenAIプロンプトキャッシュ: 見込まれる改善率=%.2f%% キャッシュ利用=%d/%d ヒット率=%.2f", req.Model, hit*100, cached, resp.Usage.PromptTokens, hit)
+						} else {
+							log.Printf("[openai] model=%s OpenAIプロンプトキャッシュ: 見込まれる改善率=0.00%% キャッシュ利用=%d/%d ヒット率=0.00", req.Model, cached, resp.Usage.PromptTokens)
+						}
+						// JSON structured log for machines
+						if jl, err := json.Marshal(map[string]any{
+							"event": "openai_prompt_cache",
+							"model": req.Model,
+							"cached_tokens": cached,
+							"input_tokens": resp.Usage.PromptTokens,
+							"cache_hit_rate": hit,
+						}); err == nil {
+							log.Println(string(jl))
+						}
+						// Update prometheus metric if available
+					if openaiPromptCacheHitRate != nil {
+						openaiPromptCacheHitRate.WithLabelValues(req.Model).Set(hit)
 					}
 				}
 				return content, nil
@@ -562,14 +618,22 @@ func (cli *Client) WebSearchQuery(ctx context.Context, query string) (string, er
 		Type    string          `json:"type"`
 		Content []outputContent `json:"content"`
 	}
+	type webSearchUsage struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	}
 	type webSearchResponse struct {
-		Output     []outputItem `json:"output"`
-		OutputText string       `json:"output_text"`
+		Output     []outputItem   `json:"output"`
+		OutputText string         `json:"output_text"`
+		Usage      webSearchUsage `json:"usage"`
 	}
 
 	var parsed webSearchResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return "", err
+	}
+	if cli.OnUsage != nil && (parsed.Usage.InputTokens > 0 || parsed.Usage.OutputTokens > 0) {
+		cli.OnUsage(model, parsed.Usage.InputTokens, parsed.Usage.OutputTokens)
 	}
 	if strings.TrimSpace(parsed.OutputText) != "" {
 		return strings.TrimSpace(parsed.OutputText), nil

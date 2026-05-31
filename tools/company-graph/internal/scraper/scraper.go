@@ -33,18 +33,29 @@ type RawCompany struct {
 	BusinessDescription  string
 }
 
+// CompanyRef is a resolved reference to another company (used for relations).
+type CompanyRef struct {
+	Name            string `json:"name"`
+	CorporateNumber string `json:"corporate_number,omitempty"` // empty when gBizINFO lookup failed
+}
+
 // CompanyNode is a normalized company record keyed by corporate number.
 type CompanyNode struct {
-	CorporateNumber  string
-	OfficialName     string
-	SourceURLs       []string
-	BusinessCategory string
-	Address          string
-	Website          string
-	Capital          string
-	Employees        string
-	MatchScore       float64
-	NeedsReview      bool
+	CorporateNumber          string
+	OfficialName             string
+	SourceURLs               []string
+	BusinessCategory         string
+	Address                  string
+	Website                  string
+	Capital                  string
+	Employees                string
+	MatchScore               float64
+	NeedsReview              bool
+	BusinessDescription      string       // 事業内容（スクレイピング原文）
+	RelatedCompanies         []CompanyRef // 関連会社・グループ会社（gBizINFO法人番号解決済）
+	BusinessPartners         []CompanyRef // 主要取引先（gBizINFO法人番号解決済）
+	RawRelatedCompaniesText  string       // 関連会社テキスト原文（gBizINFO未解決時のフォールバック用）
+	RawBusinessPartnersText  string       // 主要取引先テキスト原文（同上）
 }
 
 // RunRequest parameterises a pipeline run.

@@ -7,6 +7,7 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { BACKEND_URL } from '@/lib/backend-url'
+import { authService } from '@/lib/auth'
 
 interface SkillScore {
   ID: number
@@ -185,7 +186,7 @@ function RadarChart({ scores, size = 240 }: RadarChartProps) {
 
 // --- メインコンポーネント ---
 
-export default function GitHubSkills({ userId }: { userId: number }) {
+export default function GitHubSkills({ userId, targetRole = '' }: { userId: number; targetRole?: string }) {
   const [scores, setScores] = useState<SkillScore[]>([])
   const [profile, setProfile] = useState<GitHubProfile | null>(null)
   const [langStats, setLangStats] = useState<LanguageStat[]>([])
@@ -209,10 +210,11 @@ export default function GitHubSkills({ userId }: { userId: number }) {
     setError(null)
     setNotLinked(false)
     try {
+      const headers = authService.getUserFetchHeaders()
       const [skillsRes, profileRes, summariesRes] = await Promise.all([
-        fetch(`${BACKEND_URL}/api/github/skills?user_id=${userId}`),
-        fetch(`${BACKEND_URL}/api/github/profile?user_id=${userId}`),
-        fetch(`${BACKEND_URL}/api/github/repo/summaries?user_id=${userId}`),
+        fetch(`${BACKEND_URL}/api/github/skills?user_id=${userId}`, { headers }),
+        fetch(`${BACKEND_URL}/api/github/profile?user_id=${userId}`, { headers }),
+        fetch(`${BACKEND_URL}/api/github/repo/summaries?user_id=${userId}`, { headers }),
       ])
 
       if (skillsRes.ok) {
@@ -250,8 +252,8 @@ export default function GitHubSkills({ userId }: { userId: number }) {
     try {
       const res = await fetch(`${BACKEND_URL}/api/github/repo/summarize?user_id=${userId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ full_name: fullName }),
+        headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
+        body: JSON.stringify({ full_name: fullName, target_role: targetRole }),
       })
       if (!res.ok) {
         const msg = await res.text()
@@ -269,17 +271,9 @@ export default function GitHubSkills({ userId }: { userId: number }) {
     }
   }
 
-  const handleConnect = async () => {
+  const handleConnect = () => {
     setConnecting(true)
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/auth/github`)
-      if (!res.ok) throw new Error()
-      const { auth_url } = await res.json()
-      window.location.href = auth_url
-    } catch {
-      setError('GitHub連携URLの取得に失敗しました')
-      setConnecting(false)
-    }
+    window.location.href = `${BACKEND_URL}/api/auth/github`
   }
 
   const handleSync = async () => {
@@ -288,7 +282,10 @@ export default function GitHubSkills({ userId }: { userId: number }) {
     setNeedsReauth(false)
     try {
       // sync/wait で同期的に実行してスコープ不足エラーを検出する
-      const res = await fetch(`${BACKEND_URL}/api/github/sync/wait?user_id=${userId}`, { method: 'POST' })
+      const res = await fetch(`${BACKEND_URL}/api/github/sync/wait?user_id=${userId}`, {
+        method: 'POST',
+        headers: authService.getUserFetchHeaders(),
+      })
       if (res.status === 403) {
         const msg = await res.text()
         setNeedsReauth(true)

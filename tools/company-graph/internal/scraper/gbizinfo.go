@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -135,30 +136,90 @@ func (c *GBizClient) Match(ctx context.Context, raw *RawCompany, threshold float
 	}
 
 	needsReview := bestScore < threshold
-	return &CompanyNode{
-		CorporateNumber:  best.CorporateNumber,
-		OfficialName:     best.Name,
-		SourceURLs:       []string{raw.SourceURL},
-		BusinessCategory: best.BusinessSummary.MajorClassificationName,
-		Address:          best.Location,
-		Website:          best.CompanyURL,
-		Capital:          raw.Capital,
-		Employees:        raw.Employees,
-		MatchScore:       bestScore,
-		NeedsReview:      needsReview,
-	}, nil
+
+	node := &CompanyNode{
+		CorporateNumber:         best.CorporateNumber,
+		OfficialName:            best.Name,
+		SourceURLs:              []string{raw.SourceURL},
+		BusinessCategory:        best.BusinessSummary.MajorClassificationName,
+		Address:                 best.Location,
+		Website:                 best.CompanyURL,
+		Capital:                 raw.Capital,
+		Employees:               raw.Employees,
+		MatchScore:              bestScore,
+		NeedsReview:             needsReview,
+		BusinessDescription:     raw.BusinessDescription,
+		RawRelatedCompaniesText: raw.RelatedCompaniesText,
+		RawBusinessPartnersText: raw.BusinessPartnersText,
+	}
+
+	// gBizINFO で関連会社・主要取引先の法人番号を解決する
+	node.RelatedCompanies = c.ResolveCompanyRefs(ctx, raw.RelatedCompaniesText)
+	node.BusinessPartners = c.ResolveCompanyRefs(ctx, raw.BusinessPartnersText)
+
+	return node, nil
+}
+
+// ResolveCompanyRefs parses a free-text list of company names (delimited by 、,, or newlines)
+// and resolves each name to a CompanyRef via gBizINFO. Names that cannot be resolved
+// still appear in the result with an empty CorporateNumber.
+func (c *GBizClient) ResolveCompanyRefs(ctx context.Context, text string) []CompanyRef {
+	if text == "" {
+		return nil
+	}
+
+	// 区切り文字で分割（全角読点・半角カンマ・改行）
+	sep := func(r rune) bool {
+		return r == '、' || r == ',' || r == '\n' || r == '・'
+	}
+	names := strings.FieldsFunc(text, sep)
+
+	var refs []CompanyRef
+	for _, raw := range names {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		ref := CompanyRef{Name: name}
+
+		// gBizINFO で法人番号を取得（ベストエフォート）
+		normalized := NormalizeName(name)
+		if normalized != "" {
+			if candidates, err := c.Search(ctx, normalized, ""); err == nil && len(candidates) > 0 {
+				best, bestScore := candidates[0], 0.0
+				for _, rec := range candidates {
+					s := Similarity(normalized, NormalizeName(rec.Name))
+					if s > bestScore {
+						bestScore = s
+						best = rec
+					}
+				}
+				// 0.7 以上のマッチのみ法人番号を付与（精度優先）
+				if bestScore >= 0.7 {
+					ref.CorporateNumber = best.CorporateNumber
+				}
+			}
+		}
+
+		refs = append(refs, ref)
+	}
+	return refs
 }
 
 func fallbackNode(raw *RawCompany) *CompanyNode {
 	return &CompanyNode{
-		CorporateNumber: "UNKNOWN_" + NormalizeName(raw.RawName),
-		OfficialName:    raw.RawName,
-		SourceURLs:      []string{raw.SourceURL},
-		Address:         raw.Address,
-		Website:         raw.Website,
-		Capital:         raw.Capital,
-		Employees:       raw.Employees,
-		MatchScore:      0,
-		NeedsReview:     true,
+		CorporateNumber:         "UNKNOWN_" + NormalizeName(raw.RawName),
+		OfficialName:            raw.RawName,
+		SourceURLs:              []string{raw.SourceURL},
+		Address:                 raw.Address,
+		Website:                 raw.Website,
+		Capital:                 raw.Capital,
+		Employees:               raw.Employees,
+		MatchScore:              0,
+		NeedsReview:             true,
+		BusinessDescription:     raw.BusinessDescription,
+		RawRelatedCompaniesText: raw.RelatedCompaniesText,
+		RawBusinessPartnersText: raw.BusinessPartnersText,
+		// fallback時はgBizINFO解決なし（テキスト原文はRaw*フィールドに保持）
 	}
 }

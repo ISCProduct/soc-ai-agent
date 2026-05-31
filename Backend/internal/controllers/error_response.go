@@ -12,12 +12,43 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// ── エラーコード定数 ──────────────────────────────────────────────────────────
+
+const (
+	ErrCodeDuplicateEmail   = "DUPLICATE_EMAIL"
+	ErrCodeNotFound         = "NOT_FOUND"
+	ErrCodeValidationError  = "VALIDATION_ERROR"
+	ErrCodeUnauthorized     = "UNAUTHORIZED"
+	ErrCodeForbidden        = "FORBIDDEN"
+	ErrCodeInvalidStatus    = "INVALID_STATUS"
+	ErrCodeInternalError    = "INTERNAL_ERROR"
+	ErrCodeServiceUnavail   = "SERVICE_UNAVAILABLE"
+	ErrCodeConflict         = "CONFLICT"
+	ErrCodeTooManyRequests  = "TOO_MANY_REQUESTS"
+)
+
+// ── ヘルパー関数 ──────────────────────────────────────────────────────────────
+
+// newAPIError はエラーコード付きの echo エラーを生成する。
+// detail は省略可能（省略時はレスポンスに含まれない）。
+func newAPIError(status int, code, message string, detail ...string) error {
+	d := ""
+	if len(detail) > 0 {
+		d = detail[0]
+	}
+	return echo.NewHTTPError(status, middleware.APIError{
+		Code:   code,
+		Msg:    message,
+		Detail: d,
+	})
+}
+
 // echoUintParam はパスパラメータを uint として取得する。
 func echoUintParam(c echo.Context, key string) (uint, error) {
 	s := c.Param(key)
 	id, err := strconv.ParseUint(s, 10, 64)
 	if err != nil || id == 0 {
-		return 0, echo.NewHTTPError(http.StatusBadRequest, "invalid "+key)
+		return 0, newAPIError(http.StatusBadRequest, ErrCodeValidationError, "invalid "+key)
 	}
 	return uint(id), nil
 }
@@ -27,7 +58,7 @@ const internalServerErrorMessage = "内部エラーが発生しました"
 // echoInternalError はエラーをログ出力しつつ echo.HTTPError を返す。
 func echoInternalError(err error) error {
 	logError(err)
-	return echo.NewHTTPError(http.StatusInternalServerError, internalServerErrorMessage)
+	return newAPIError(http.StatusInternalServerError, ErrCodeInternalError, internalServerErrorMessage)
 }
 
 // echoUserID は echo.Context のリクエストコンテキストからユーザーIDを取得する。
