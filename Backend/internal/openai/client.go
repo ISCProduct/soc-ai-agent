@@ -115,8 +115,7 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 		return "", err
 	}
 
-	responsesURL := cli.baseURL + "/responses"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, responsesURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.baseURL+"/responses", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
