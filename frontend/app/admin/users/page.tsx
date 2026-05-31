@@ -1,12 +1,14 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import {
   Button,
   Card,
   CardContent,
   Chip,
   Divider,
+  IconButton,
   Stack,
   TableBody,
   TableCell,
@@ -16,6 +18,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService } from '@/lib/auth'
 import { PageContainer } from '@/components/admin/PageContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
@@ -109,9 +112,12 @@ export default function AdminUsersPage() {
 
   return (
     <PageContainer maxWidth={1100}>
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
-        ユーザー管理
-      </Typography>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+        <IconButton component={Link} href="/admin"><ArrowBackIcon /></IconButton>
+        <Typography variant="h4" fontWeight="bold">
+          ユーザー管理
+        </Typography>
+      </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         管理者権限の付与やユーザー情報の確認を行います。
       </Typography>

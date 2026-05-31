@@ -2,18 +2,21 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import {
   Box,
   Button,
   Card,
   CardContent,
   Chip,
+  IconButton,
   Stack,
   Step,
   StepLabel,
   Stepper,
   Typography,
 } from '@mui/material'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ChatIcon from '@mui/icons-material/Chat'
 import BusinessIcon from '@mui/icons-material/Business'
 import MicIcon from '@mui/icons-material/Mic'
@@ -82,6 +85,9 @@ export default function OnboardingPage() {
       }}
     >
       <Box sx={{ maxWidth: 720, width: '100%' }}>
+        <Box sx={{ mb: 2 }}>
+          <IconButton component={Link} href="/"><ArrowBackIcon /></IconButton>
+        </Box>
         {/* ウェルカムメッセージ */}
         <Box sx={{ textAlign: 'center', mb: 5 }}>
           <Typography variant="h4" sx={{ fontWeight: 700, mb: 1, fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>
