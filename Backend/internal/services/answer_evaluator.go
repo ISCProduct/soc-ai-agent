@@ -184,16 +184,6 @@ func (e *AnswerEvaluator) Evaluate(question *models.PredefinedQuestion, answer s
 	answerLower := strings.ToLower(answer)
 	answerLength := len([]rune(answer))
 
-	// 1. 回答の長さチェック（基本的な信頼性判定）
-	if answerLength < 10 {
-		result.Score -= 3
-		result.Confidence = "low"
-		result.NeedsFollowUp = true
-		result.FollowUpTrigger = "too_short"
-		result.Explanation = "回答が短すぎます（10文字未満）"
-		return result, nil
-	}
-
 	// 2. ネガティブキーワードチェック
 	var negativeKeywords []string
 	if question.NegativeKeywords != "" {
@@ -237,15 +227,15 @@ func (e *AnswerEvaluator) Evaluate(question *models.PredefinedQuestion, answer s
 		}
 	}
 
-	// 5. 信頼度の判定
+	// 5. 信頼度の判定（文字数ではなくキーワードマッチとスコアで判断）
 	if matchedCount == 0 && result.Score <= 0 {
 		result.Confidence = "low"
 		result.NeedsFollowUp = true
 		result.FollowUpTrigger = "no_keywords"
 		result.Explanation = "関連キーワードが見つかりませんでした"
-	} else if answerLength > 100 && matchedCount >= 2 {
+	} else if matchedCount >= 2 {
 		result.Confidence = "high"
-		result.Explanation = "具体的で詳細な回答です"
+		result.Explanation = "関連キーワードを複数含む回答です"
 	} else {
 		result.Confidence = "medium"
 		result.Explanation = "ある程度の評価ができました"
@@ -360,15 +350,13 @@ func (e *AnswerEvaluator) shouldTriggerFollowUp(rule models.FollowUpRule, result
 }
 
 // GetConfidenceLevel スコアから信頼度レベルを取得
-func (e *AnswerEvaluator) GetConfidenceLevel(score int, keywordCount int, answerLength int) string {
+func (e *AnswerEvaluator) GetConfidenceLevel(score int, keywordCount int) string {
 	if score <= 0 || keywordCount == 0 {
 		return "low"
 	}
-
-	if score >= 5 && keywordCount >= 2 && answerLength > 50 {
+	if score >= 5 && keywordCount >= 2 {
 		return "high"
 	}
-
 	return "medium"
 }
 
@@ -585,7 +573,7 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 
 	if signals.hasConcreteExample && signals.hasAction {
 		scores["relevance"] = 3
-	} else if length >= 20 {
+	} else if signals.hasAction || signals.hasResult {
 		scores["relevance"] = 2
 	}
 
@@ -593,7 +581,7 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 		scores["specificity"] = 3
 	} else if signals.hasConcreteExample {
 		scores["specificity"] = 2
-	} else if length >= 20 {
+	} else if signals.hasNumbersOrTime {
 		scores["specificity"] = 1
 	}
 
@@ -601,8 +589,6 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 		scores["reasoning"] = 3
 	} else if signals.hasReason {
 		scores["reasoning"] = 2
-	} else if length >= 30 {
-		scores["reasoning"] = 1
 	}
 
 	if signals.contradiction {
