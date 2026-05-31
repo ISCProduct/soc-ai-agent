@@ -142,7 +142,7 @@ func (e *AnswerEvaluator) EvaluateHybrid(ctx context.Context, question *models.P
 	ruleResult.Score = int(math.Round(blended / 10.0))
 
 	// より楽観的な信頼度を採用する
-	ruleResult.Confidence = mergeConfidence(ruleResult.Confidence, llmResult.Confidence)
+	ruleResult.Confidence = MergeConfidence(ruleResult.Confidence, llmResult.Confidence)
 	if ruleResult.Confidence != "low" {
 		ruleResult.NeedsFollowUp = false
 		ruleResult.FollowUpTrigger = ""
@@ -153,8 +153,8 @@ func (e *AnswerEvaluator) EvaluateHybrid(ctx context.Context, question *models.P
 	return ruleResult, nil
 }
 
-// mergeConfidence は2つの信頼度のうち高い方を返す
-func mergeConfidence(a, b string) string {
+// MergeConfidence は2つの信頼度のうち高い方を返す
+func MergeConfidence(a, b string) string {
 	rank := map[string]int{"low": 0, "medium": 1, "high": 2}
 	if rank[a] >= rank[b] {
 		return a
@@ -573,7 +573,7 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 
 	if signals.hasConcreteExample && signals.hasAction {
 		scores["relevance"] = 3
-	} else if signals.hasAction || signals.hasResult {
+	} else if signals.hasAction || signals.hasResult || signals.hasConcreteExample {
 		scores["relevance"] = 2
 	}
 
@@ -581,7 +581,7 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 		scores["specificity"] = 3
 	} else if signals.hasConcreteExample {
 		scores["specificity"] = 2
-	} else if signals.hasNumbersOrTime {
+	} else if signals.hasNumbersOrTime || signals.hasAction || signals.hasResult {
 		scores["specificity"] = 1
 	}
 
@@ -589,6 +589,8 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 		scores["reasoning"] = 3
 	} else if signals.hasReason {
 		scores["reasoning"] = 2
+	} else if signals.hasConcreteExample {
+		scores["reasoning"] = 1
 	}
 
 	if signals.contradiction {
@@ -642,7 +644,7 @@ func applyPenaltiesAndBoosts(score int, signals signalSet) (int, []string, []str
 	finalScore := score
 
 	if !signals.hasConcreteExample && !signals.hasAction {
-		finalScore -= 10
+		finalScore -= 5
 		penalties = append(penalties, "too_generic")
 	}
 	if signals.contradiction {
