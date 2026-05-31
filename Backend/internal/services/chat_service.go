@@ -357,33 +357,29 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		}, nil
 	}
 
-	// 3. ユーザーの回答から重み係数を判定・更新
-	// 3. ユーザーの回答から重み係数を判定・更新し、結果に応じてフェーズ進捗を更新
-	// スコア更新に成功した場合のみ有効回答としてカウントする
+	// 3. ユーザーの回答から重み係数を判定・更新し、回答品質に応じてフェーズ進捗を更新
+	// isQualityAnswer: スキップフレーズ・極短回答・スコア0でなければ true（進捗カウント対象）
 	trimmedAnswer := strings.TrimSpace(req.Message)
 	log.Printf("[ProcessChat] Checking if choice answer: '%s' (len=%d)\n", trimmedAnswer, len(trimmedAnswer))
-	scoreUpdated := false
+	isQualityAnswer := false
 	if len(trimmedAnswer) <= 3 && s.isChoiceAnswer(trimmedAnswer) {
 		log.Printf("[ProcessChat] Processing as choice answer\n")
-		// 選択肢回答の場合は直接スコアを計算
-		if err := s.processChoiceAnswer(ctx, req.UserID, req.SessionID, trimmedAnswer, history, jobCategoryID); err != nil {
+		var err error
+		isQualityAnswer, err = s.processChoiceAnswer(ctx, req.UserID, req.SessionID, trimmedAnswer, history, jobCategoryID)
+		if err != nil {
 			log.Printf("Warning: failed to process choice answer: %v\n", err)
-		} else {
-			scoreUpdated = true
 		}
 	} else {
 		log.Printf("[ProcessChat] Processing as text answer\n")
-		// 通常の回答分析
-		if err := s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, req.Message, jobCategoryID); err != nil {
-			// ログに記録するが、処理は継続
+		var err error
+		isQualityAnswer, err = s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, req.Message, jobCategoryID)
+		if err != nil {
 			log.Printf("Warning: failed to update weights: %v\n", err)
-		} else {
-			scoreUpdated = true
 		}
 	}
 
-	// フェーズ進捗を更新（スコア更新成功時のみ有効カウント）
-	if err := s.updatePhaseProgress(currentPhase, scoreUpdated); err != nil {
+	// 品質回答のみ valid_answers をインクリメントして進捗を進める
+	if err := s.updatePhaseProgress(currentPhase, isQualityAnswer); err != nil {
 		log.Printf("Warning: failed to update phase progress: %v\n", err)
 	}
 

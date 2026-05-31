@@ -131,8 +131,8 @@ func (s *ChatService) validateAnswerRelevance(ctx context.Context, question, ans
 			cos := dot / (math.Sqrt(qNorm) * math.Sqrt(aNorm))
 			log.Printf("[Validation] Embedding cosine similarity=%f\n", cos)
 
-			// 閾値は運用で調整。まずは 0.45 を採用（高めの類似度がある場合は有効とする）
-			if cos >= 0.45 {
+			// 閾値は運用で調整。0.30 を採用（緩めに設定して誤検知を抑える）
+			if cos >= 0.30 {
 				return true, nil
 			}
 			return false, nil
