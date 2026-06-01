@@ -7,9 +7,10 @@ name: GitHub Issue → Backlog 課題
 # ループ防止: 本文に <!-- backlog-synced --> を含む Issue（Backlog起源）はスキップします。
 #
 # 必要な GitHub Secrets:
-#   BACKLOG_SPACE_ID    : スペースID（例: myspace）
+#   BACKLOG_SPACE_ID    : スペースID（例: myspace ← myspace.backlog.jp の場合）
 #   BACKLOG_API_KEY     : Backlog APIキー
 #   BACKLOG_PROJECT_KEY : プロジェクトキー（例: PROJ）
+#   BACKLOG_DOMAIN      : ドメイン（任意。省略時は backlog.jp → backlog.com の順に自動判定）
 
 on:
   issues:
@@ -24,6 +25,7 @@ jobs:
           BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
           BACKLOG_SPACE_ID: ${{ secrets.BACKLOG_SPACE_ID }}
           BACKLOG_PROJECT_KEY: ${{ secrets.BACKLOG_PROJECT_KEY }}
+          BACKLOG_DOMAIN: ${{ secrets.BACKLOG_DOMAIN }}
           GH_NUMBER: ${{ github.event.issue.number }}
           GH_TITLE: ${{ github.event.issue.title }}
           GH_BODY: ${{ github.event.issue.body }}
@@ -45,9 +47,30 @@ jobs:
           ACTION    = os.environ['ACTION']
           GH_TOKEN  = os.environ['GH_TOKEN']
           GH_REPO   = os.environ['GH_REPO']
+          DOMAIN    = os.environ.get('BACKLOG_DOMAIN', '').strip()
 
-          BL_BASE = f"https://{SPACE_ID}.backlog.jp/api/v2"
           GH_BASE = "https://api.github.com"
+
+          def resolve_bl_base(space_id, api_key, domain):
+              """ドメインを自動判定して Backlog API のベース URL を返す"""
+              candidates = [domain] if domain else ['backlog.jp', 'backlog.com']
+              for d in candidates:
+                  url = f"https://{space_id}.{d}/api/v2/space?apiKey={api_key}"
+                  try:
+                      with urllib.request.urlopen(urllib.request.Request(url)) as r:
+                          r.read()
+                          return f"https://{space_id}.{d}/api/v2", d
+                  except urllib.error.HTTPError as e:
+                      body = e.read().decode()
+                      if e.code == 404 and '"code":6' in body:
+                          continue
+                      print(f"Backlog API エラー {e.code}: {body}", file=sys.stderr)
+                      sys.exit(1)
+              print(f"エラー: スペース '{space_id}' が backlog.jp / backlog.com のいずれにも見つかりませんでした。", file=sys.stderr)
+              sys.exit(1)
+
+          BL_BASE, BL_DOMAIN = resolve_bl_base(SPACE_ID, API_KEY, DOMAIN)
+          print(f"Backlog ドメイン: {BL_DOMAIN}")
 
           # Backlog 側から同期された Issue はスキップ（ループ防止）
           if '<!-- backlog-synced -->' in GH_BODY:
