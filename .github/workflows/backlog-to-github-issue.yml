@@ -7,9 +7,10 @@ name: Backlog 課題 → GitHub Issue
 # ループ防止: 説明に "GitHub Issue:" を含む課題（GitHub起源）はスキップします。
 #
 # 必要な GitHub Secrets:
-#   BACKLOG_SPACE_ID    : スペースID（例: myspace）
+#   BACKLOG_SPACE_ID    : スペースID（例: myspace ← myspace.backlog.jp の場合）
 #   BACKLOG_API_KEY     : Backlog APIキー
 #   BACKLOG_PROJECT_KEY : プロジェクトキー（例: PROJ）
+#   BACKLOG_DOMAIN      : ドメイン（任意。省略時は backlog.jp → backlog.com の順に自動判定）
 #   GH_TOKEN            : GitHub PAT（issues 読み書き権限）
 #                         ※省略時は github.token を使用
 
@@ -35,6 +36,7 @@ jobs:
           BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
           BACKLOG_SPACE_ID: ${{ secrets.BACKLOG_SPACE_ID }}
           BACKLOG_PROJECT_KEY: ${{ secrets.BACKLOG_PROJECT_KEY }}
+          BACKLOG_DOMAIN: ${{ secrets.BACKLOG_DOMAIN }}
           GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
           GH_REPO: ${{ github.repository }}
           MINUTES_BACK: ${{ inputs.minutes_back || '20' }}
@@ -49,9 +51,30 @@ jobs:
           GH_TOKEN   = os.environ['GH_TOKEN']
           GH_REPO    = os.environ['GH_REPO']
           MINUTES    = int(os.environ.get('MINUTES_BACK', '20'))
+          DOMAIN     = os.environ.get('BACKLOG_DOMAIN', '').strip()
 
-          BL_BASE = f"https://{SPACE_ID}.backlog.jp/api/v2"
           GH_BASE = "https://api.github.com"
+
+          def resolve_bl_base(space_id, api_key, domain):
+              """ドメインを自動判定して Backlog API のベース URL を返す"""
+              candidates = [domain] if domain else ['backlog.jp', 'backlog.com']
+              for d in candidates:
+                  url = f"https://{space_id}.{d}/api/v2/space?apiKey={api_key}"
+                  try:
+                      with urllib.request.urlopen(urllib.request.Request(url)) as r:
+                          r.read()
+                          return f"https://{space_id}.{d}/api/v2", d
+                  except urllib.error.HTTPError as e:
+                      body = e.read().decode()
+                      if e.code == 404 and '"code":6' in body:
+                          continue
+                      print(f"Backlog API エラー {e.code}: {body}", file=sys.stderr)
+                      sys.exit(1)
+              print(f"エラー: スペース '{space_id}' が backlog.jp / backlog.com のいずれにも見つかりませんでした。", file=sys.stderr)
+              sys.exit(1)
+
+          BL_BASE, BL_DOMAIN = resolve_bl_base(SPACE_ID, API_KEY, DOMAIN)
+          print(f"Backlog ドメイン: {BL_DOMAIN}")
 
           def bl_request(method, path, data=None):
               url = f"{BL_BASE}{path}?apiKey={API_KEY}"
@@ -107,7 +130,7 @@ jobs:
               bl_key       = issue['issueKey']
               bl_summary   = issue['summary']
               bl_desc      = issue.get('description') or ''
-              bl_url       = f"https://{SPACE_ID}.backlog.jp/view/{bl_key}"
+              bl_url       = f"https://{SPACE_ID}.{BL_DOMAIN}/view/{bl_key}"
               bl_status_id = issue['status']['id']
 
               # GitHub 側から作成された課題はスキップ（説明に "GitHub Issue:" を含む）
