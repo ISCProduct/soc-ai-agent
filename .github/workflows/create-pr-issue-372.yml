@@ -18,7 +18,7 @@ jobs:
           fetch-depth: 0
 
       - name: Create Pull Request if branch exists
-        uses: actions/github-script@v6
+        uses: actions/github-script@v9
         with:
           script: |
             const branch = core.getInput('branch') || context.payload.inputs.branch || 'feature/issue-372-accuracy'
