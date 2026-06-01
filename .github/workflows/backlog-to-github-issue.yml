@@ -1,0 +1,149 @@
+name: Backlog 課題 → GitHub Issue
+
+# 15分ごとに Backlog の更新課題をポーリングし、
+# 対応する GitHub Issue を自動作成・更新・クローズします。
+# GitHub Issue タイトル形式: [PROJ-N] 課題タイトル
+#
+# ループ防止: 説明に "GitHub Issue:" を含む課題（GitHub起源）はスキップします。
+#
+# 必要な GitHub Secrets:
+#   BACKLOG_SPACE_ID    : スペースID（例: myspace）
+#   BACKLOG_API_KEY     : Backlog APIキー
+#   BACKLOG_PROJECT_KEY : プロジェクトキー（例: PROJ）
+#   GH_TOKEN            : GitHub PAT（issues 読み書き権限）
+#                         ※省略時は github.token を使用
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      minutes_back:
+        description: '何分前からの更新を取得するか（デフォルト: 20）'
+        required: false
+        default: '20'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - name: Backlog 課題を GitHub Issue へ同期
+        env:
+          BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
+          BACKLOG_SPACE_ID: ${{ secrets.BACKLOG_SPACE_ID }}
+          BACKLOG_PROJECT_KEY: ${{ secrets.BACKLOG_PROJECT_KEY }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
+          GH_REPO: ${{ github.repository }}
+          MINUTES_BACK: ${{ inputs.minutes_back || '20' }}
+        run: |
+          python3 - << 'PYEOF'
+          import os, sys, json, urllib.parse, urllib.request, urllib.error
+          from datetime import datetime, timezone, timedelta
+
+          API_KEY    = os.environ['BACKLOG_API_KEY']
+          SPACE_ID   = os.environ['BACKLOG_SPACE_ID']
+          PROJ_KEY   = os.environ['BACKLOG_PROJECT_KEY']
+          GH_TOKEN   = os.environ['GH_TOKEN']
+          GH_REPO    = os.environ['GH_REPO']
+          MINUTES    = int(os.environ.get('MINUTES_BACK', '20'))
+
+          BL_BASE = f"https://{SPACE_ID}.backlog.jp/api/v2"
+          GH_BASE = "https://api.github.com"
+
+          def bl_request(method, path, data=None):
+              url = f"{BL_BASE}{path}?apiKey={API_KEY}"
+              body = urllib.parse.urlencode(data).encode() if data else None
+              req = urllib.request.Request(url, data=body, method=method)
+              if body:
+                  req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  print(f"Backlog API エラー {e.code}: {e.read().decode()}", file=sys.stderr)
+                  sys.exit(1)
+
+          def gh_request(method, path, data=None):
+              url = f"{GH_BASE}{path}"
+              body = json.dumps(data).encode() if data else None
+              req = urllib.request.Request(url, data=body, method=method)
+              req.add_header('Authorization', f'Bearer {GH_TOKEN}')
+              req.add_header('Accept', 'application/vnd.github+json')
+              req.add_header('X-GitHub-Api-Version', '2022-11-28')
+              if body:
+                  req.add_header('Content-Type', 'application/json')
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  print(f"GitHub API エラー {e.code}: {e.read().decode()}", file=sys.stderr)
+                  return None
+
+          def gh_search_issue(bl_key):
+              """GitHub Issue を Backlog キーで検索する（タイトルの [PROJ-N] プレフィックスで照合）"""
+              q = urllib.parse.quote(f"[{bl_key}] repo:{GH_REPO} in:title is:issue")
+              result = gh_request('GET', f"/search/issues?q={q}&per_page=5")
+              if not result:
+                  return None
+              for item in result.get('items', []):
+                  if item['title'].startswith(f"[{bl_key}]"):
+                      return item
+              return None
+
+          project    = bl_request('GET', f"/projects/{PROJ_KEY}")
+          project_id = project['id']
+
+          since  = (datetime.now(timezone.utc) - timedelta(minutes=MINUTES)).strftime('%Y-%m-%dT%H:%M:%SZ')
+          issues = bl_request('GET', f"/issues?projectId[]={project_id}&updatedSince={since}&count=100&sort=updated&order=desc")
+
+          print(f"{len(issues)} 件の Backlog 課題を取得しました（直近 {MINUTES} 分）。")
+
+          CLOSED_STATUS_IDS = {3, 4}  # 処理済み / 完了
+
+          for issue in issues:
+              bl_key       = issue['issueKey']
+              bl_summary   = issue['summary']
+              bl_desc      = issue.get('description') or ''
+              bl_url       = f"https://{SPACE_ID}.backlog.jp/view/{bl_key}"
+              bl_status_id = issue['status']['id']
+
+              # GitHub 側から作成された課題はスキップ（説明に "GitHub Issue:" を含む）
+              if 'GitHub Issue:' in bl_desc:
+                  print(f"  スキップ（GitHub 起源）: {bl_key}")
+                  continue
+
+              # GitHub Issue のタイトル・本文
+              gh_title = f"[{bl_key}] {bl_summary}"
+              gh_body  = (
+                  f"<!-- backlog-synced -->\n"
+                  f"<!-- backlog-key:{bl_key} -->\n\n"
+                  f"**Backlog 課題:** [{bl_key}]({bl_url})\n\n"
+                  f"---\n\n{bl_desc}"
+              )
+
+              existing_gh = gh_search_issue(bl_key)
+
+              if existing_gh is None:
+                  result = gh_request('POST', f"/repos/{GH_REPO}/issues", {
+                      'title': gh_title,
+                      'body':  gh_body,
+                  })
+                  if result:
+                      print(f"  GitHub Issue を作成しました: #{result['number']} ← {bl_key}")
+                      if bl_status_id in CLOSED_STATUS_IDS:
+                          gh_request('PATCH', f"/repos/{GH_REPO}/issues/{result['number']}", {'state': 'closed'})
+              else:
+                  gh_num         = existing_gh['number']
+                  gh_curr_state  = existing_gh['state']
+                  new_state      = 'closed' if bl_status_id in CLOSED_STATUS_IDS else 'open'
+                  update_data    = {'title': gh_title, 'body': gh_body}
+                  if gh_curr_state != new_state:
+                      update_data['state'] = new_state
+                  gh_request('PATCH', f"/repos/{GH_REPO}/issues/{gh_num}", update_data)
+                  print(f"  GitHub Issue を更新しました: #{gh_num} ← {bl_key} (state: {new_state})")
+
+          print("同期完了。")
+          PYEOF
