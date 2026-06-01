@@ -127,6 +127,7 @@ jobs:
                   'projectId':   project_id,
                   'summary':     GH_TITLE,
                   'issueTypeId': type_id,
+                  'priorityId':  3,
                   'description': f"GitHub Issue: {GH_URL}\n\n{GH_BODY}",
               })
               bl_key = result['issueKey']
