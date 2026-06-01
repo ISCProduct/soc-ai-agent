@@ -1,0 +1,148 @@
+name: GitHub Issue → Backlog 課題
+
+# GitHub Issue の作成・編集・クローズ・再オープン時に
+# 対応する Backlog 課題を自動作成・更新します。
+#
+# 課題作成後、GitHub Issue タイトルを [PROJ-N] 形式に自動更新します。
+# ループ防止: 本文に <!-- backlog-synced --> を含む Issue（Backlog起源）はスキップします。
+#
+# 必要な GitHub Secrets:
+#   BACKLOG_SPACE_ID    : スペースID（例: myspace）
+#   BACKLOG_API_KEY     : Backlog APIキー
+#   BACKLOG_PROJECT_KEY : プロジェクトキー（例: PROJ）
+
+on:
+  issues:
+    types: [opened, edited, closed, reopened]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: GitHub Issue を Backlog 課題へ同期
+        env:
+          BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
+          BACKLOG_SPACE_ID: ${{ secrets.BACKLOG_SPACE_ID }}
+          BACKLOG_PROJECT_KEY: ${{ secrets.BACKLOG_PROJECT_KEY }}
+          GH_NUMBER: ${{ github.event.issue.number }}
+          GH_TITLE: ${{ github.event.issue.title }}
+          GH_BODY: ${{ github.event.issue.body }}
+          GH_URL: ${{ github.event.issue.html_url }}
+          ACTION: ${{ github.event.action }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - << 'PYEOF'
+          import os, sys, json, re, urllib.parse, urllib.request, urllib.error
+
+          API_KEY   = os.environ['BACKLOG_API_KEY']
+          SPACE_ID  = os.environ['BACKLOG_SPACE_ID']
+          PROJ_KEY  = os.environ['BACKLOG_PROJECT_KEY']
+          GH_NUMBER = os.environ['GH_NUMBER']
+          GH_TITLE  = os.environ.get('GH_TITLE', '')
+          GH_BODY   = os.environ.get('GH_BODY') or ''
+          GH_URL    = os.environ['GH_URL']
+          ACTION    = os.environ['ACTION']
+          GH_TOKEN  = os.environ['GH_TOKEN']
+          GH_REPO   = os.environ['GH_REPO']
+
+          BL_BASE = f"https://{SPACE_ID}.backlog.jp/api/v2"
+          GH_BASE = "https://api.github.com"
+
+          # Backlog 側から同期された Issue はスキップ（ループ防止）
+          if '<!-- backlog-synced -->' in GH_BODY:
+              print("Backlog 側から同期された Issue のためスキップします。")
+              sys.exit(0)
+
+          def bl_request(method, path, data=None):
+              url = f"{BL_BASE}{path}?apiKey={API_KEY}"
+              body = urllib.parse.urlencode(data).encode() if data else None
+              req = urllib.request.Request(url, data=body, method=method)
+              if body:
+                  req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  print(f"Backlog API エラー {e.code}: {e.read().decode()}", file=sys.stderr)
+                  sys.exit(1)
+
+          def gh_update_issue(number, data):
+              """github.token を使用するため、この更新は issues/edited イベントを再トリガーしない"""
+              url = f"{GH_BASE}/repos/{GH_REPO}/issues/{number}"
+              req = urllib.request.Request(url, data=json.dumps(data).encode(), method='PATCH')
+              req.add_header('Authorization', f'Bearer {GH_TOKEN}')
+              req.add_header('Accept', 'application/vnd.github+json')
+              req.add_header('X-GitHub-Api-Version', '2022-11-28')
+              req.add_header('Content-Type', 'application/json')
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  print(f"GitHub API エラー {e.code}: {e.read().decode()}", file=sys.stderr)
+
+          def extract_bl_key(body, title):
+              """本文のマーカーまたはタイトルのプレフィックスから Backlog キーを抽出"""
+              m = re.search(r'<!--\s*backlog-key:(\S+?)\s*-->', body)
+              if m:
+                  return m.group(1)
+              m = re.match(rf'\[({re.escape(PROJ_KEY)}-\d+)\]\s', title)
+              return m.group(1) if m else None
+
+          def strip_prefix(title):
+              """タイトルから [PROJ-N] プレフィックスを除去"""
+              return re.sub(rf'^\[{re.escape(PROJ_KEY)}-\d+\]\s*', '', title).strip()
+
+          # ---- opened: Backlog 課題を新規作成 ----
+          if ACTION == 'opened':
+              project    = bl_request('GET', f"/projects/{PROJ_KEY}")
+              project_id = project['id']
+              types      = bl_request('GET', f"/projects/{PROJ_KEY}/issueTypes")
+              type_id    = types[0]['id']
+
+              result = bl_request('POST', '/issues', {
+                  'projectId':   project_id,
+                  'summary':     GH_TITLE,
+                  'issueTypeId': type_id,
+                  'description': f"GitHub Issue: {GH_URL}\n\n{GH_BODY}",
+              })
+              bl_key = result['issueKey']
+              print(f"Backlog 課題を作成しました: {bl_key}")
+
+              # GitHub Issue タイトルを [PROJ-N] 形式に更新し、マーカーを本文に追加
+              new_title = f"[{bl_key}] {GH_TITLE}"
+              new_body  = f"<!-- backlog-key:{bl_key} -->\n\n{GH_BODY}" if GH_BODY else f"<!-- backlog-key:{bl_key} -->"
+              gh_update_issue(GH_NUMBER, {'title': new_title, 'body': new_body})
+              print(f"GitHub Issue #{GH_NUMBER} を '{new_title}' に更新しました。")
+
+          # ---- edited: Backlog 課題のタイトル・説明を更新 ----
+          elif ACTION == 'edited':
+              bl_key = extract_bl_key(GH_BODY, GH_TITLE)
+              if not bl_key:
+                  print("Backlog 課題キーが見つかりません。スキップします。")
+                  sys.exit(0)
+              clean_title = strip_prefix(GH_TITLE)
+              bl_request('PATCH', f"/issues/{bl_key}", {
+                  'summary':     clean_title,
+                  'description': f"GitHub Issue: {GH_URL}\n\n{GH_BODY}",
+              })
+              print(f"Backlog 課題を更新しました: {bl_key}")
+
+          # ---- closed: Backlog 課題を完了（ステータス 4）にする ----
+          elif ACTION == 'closed':
+              bl_key = extract_bl_key(GH_BODY, GH_TITLE)
+              if not bl_key:
+                  print("Backlog 課題キーが見つかりません。スキップします。")
+                  sys.exit(0)
+              bl_request('PATCH', f"/issues/{bl_key}", {'statusId': 4})
+              print(f"Backlog 課題をクローズしました: {bl_key}")
+
+          # ---- reopened: Backlog 課題を未対応（ステータス 1）に戻す ----
+          elif ACTION == 'reopened':
+              bl_key = extract_bl_key(GH_BODY, GH_TITLE)
+              if not bl_key:
+                  print("Backlog 課題キーが見つかりません。スキップします。")
+                  sys.exit(0)
+              bl_request('PATCH', f"/issues/{bl_key}", {'statusId': 1})
+              print(f"Backlog 課題を再オープンしました: {bl_key}")
+          PYEOF
