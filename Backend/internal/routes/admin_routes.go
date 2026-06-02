@@ -39,6 +39,7 @@ func SetupAdminRoutes(
 	admin.PUT("/companies/:id", adminCompanyController.Update)
 	admin.POST("/companies/:id/publish", adminCompanyController.Publish)
 	admin.POST("/companies/:id/reject", adminCompanyController.Reject)
+	admin.POST("/companies/web-search", adminCompanyController.WebSearchCompanyInfo)
 	admin.GET("/companies/:id/gbiz-search", adminCompanyController.SearchGBiz)
 	admin.POST("/companies/:id/gbiz-sync", adminCompanyController.SyncGBiz)
 	admin.POST("/companies/:id/fetch-tech-stack", adminCompanyController.FetchTechStack)
