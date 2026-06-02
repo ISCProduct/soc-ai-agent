@@ -3,30 +3,16 @@ RAG サービス単体・統合テスト
 
 実行方法:
     cd rag && pytest tests/ -v
+
+モジュールスタブ（crewai・chromadb）は conftest.py で一元管理している。
 """
-import re
-import sys
 import os
-import types
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# rag/ ディレクトリをパスに追加
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-# ── 重いモジュールをインポート前にモック ──────────────────────────────────────
-# crewai はローカル環境に不要なため sys.modules でスタブ化する
-
-_crewai_mock = types.ModuleType("crewai")
-_crewai_mock.Agent = MagicMock()
-_crewai_mock.Task = MagicMock()
-_crewai_mock.Crew = MagicMock()
-_crewai_mock.Process = MagicMock()
-sys.modules.setdefault("crewai", _crewai_mock)
-
-# ── main をインポート ──────────────────────────────────────────────────────────
-import main  # noqa: E402  (after sys.modules stubs)
+import main
 
 
 # ── 純粋関数テスト（モック不要） ────────────────────────────────────────────
