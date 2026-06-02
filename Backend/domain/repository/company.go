@@ -17,6 +17,7 @@ type CompanyRelationQueryRepository interface {
 // CompanyRepository は企業情報の永続化インターフェース。
 type CompanyRepository interface {
 	FindAllActive(limit, offset int) ([]models.Company, error)
+	FindAllActiveNames(q string) ([]models.CompanyName, error)
 	CountActive() (int64, error)
 	FindAllPublished(limit, offset int) ([]models.Company, error)
 	CountPublished() (int64, error)
