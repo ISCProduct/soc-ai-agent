@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -35,6 +36,17 @@ func (r *CompanyRepository) CountActive() (int64, error) {
 		Where("is_active = ?", true).
 		Count(&count).Error
 	return count, err
+}
+
+// FindAllActiveNames アクティブ企業のIDと名前を取得（フィルタ q で部分一致）
+func (r *CompanyRepository) FindAllActiveNames(q string) ([]models.CompanyName, error) {
+	var names []models.CompanyName
+	query := r.db.Model(&models.Company{}).Select("id, name").Where("is_active = ?", true)
+	if q = strings.TrimSpace(q); q != "" {
+		query = query.Where("name LIKE ?", "%"+q+"%")
+	}
+	err := query.Order("name asc").Find(&names).Error
+	return names, err
 }
 
 // FindAllPublished 公開済み企業をページネーション付きで取得（マッチング用）
