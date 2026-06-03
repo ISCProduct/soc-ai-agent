@@ -403,6 +403,10 @@ function InterviewContent() {
     let rafId: number | null = null
 
     const cleanup = (el: HTMLAudioElement) => {
+      // イベントハンドラを先に外す — el.src='' が onerror を再発火させるのを防ぐ
+      el.onended = null
+      el.onerror = null
+      el.pause()
       if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null }
       if (aiLevelRafRef.current !== null) { cancelAnimationFrame(aiLevelRafRef.current); aiLevelRafRef.current = null }
       setAiLevel(0)
@@ -410,6 +414,7 @@ function InterviewContent() {
       URL.revokeObjectURL(url)
       aiAudioRef.current = null
       el.src = ''
+      el.load()
     }
 
     const playWithCtx = async (el: HTMLAudioElement): Promise<boolean> => {
