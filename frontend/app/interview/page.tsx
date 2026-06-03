@@ -312,14 +312,17 @@ function InterviewContent() {
   useEffect(() => {
     if (!handsFreeMode || status !== 'connected' || !streamRef.current) return
     const VAD_THRESHOLD = 0.015   // 発話検知の音量閾値 (RMS)
-    const SILENCE_MS = 2500       // この無音時間が続いたら自動送信（長めに設定して途切れ防止）
-    const MIN_RECORDING_MS = 1000 // 録音開始後この時間は自動停止しない（息継ぎなどで誤停止しない）
+    const SILENCE_MS = 3500       // この無音時間が続いたら自動送信
+    const MIN_RECORDING_MS = 1500 // 録音開始後この時間は自動停止しない（息継ぎなどで誤停止しない）
+    // 指数移動平均の係数: 小さいほど平滑化が強く、単語間の短い無音でタイマーが走らない
+    const EMA_ALPHA = 0.15
     const audioCtx = new AudioContext()
     const source = audioCtx.createMediaStreamSource(streamRef.current)
     const analyser = audioCtx.createAnalyser()
     analyser.fftSize = 512
     source.connect(analyser)
     const buf = new Float32Array(analyser.fftSize)
+    let smoothedRms = 0
     let silenceStart: number | null = null
     let recordingStartTime: number | null = null
     let rafId: number
@@ -327,7 +330,9 @@ function InterviewContent() {
       rafId = requestAnimationFrame(tick)
       analyser.getFloatTimeDomainData(buf)
       const rms = Math.sqrt(buf.reduce((s, v) => s + v * v, 0) / buf.length)
-      const speaking = rms > VAD_THRESHOLD
+      // EMAで平滑化: 単語間の短い無音(~200ms)でも閾値割れしにくくなる
+      smoothedRms = EMA_ALPHA * rms + (1 - EMA_ALPHA) * smoothedRms
+      const speaking = smoothedRms > VAD_THRESHOLD
       if (speaking) {
         silenceStart = null
         if (!isRecordingRef.current && !turnPendingRef.current && !aiSpeakingRef.current) {
