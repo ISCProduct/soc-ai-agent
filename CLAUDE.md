@@ -12,7 +12,7 @@ SOC AI Agent: 採用支援SaaS (Go + Next.js + Python RAG)
 - `docker compose up -d` (全サービス: backend/frontend/rag-review/company-graph)
 
 ## アーキテクチャ & フライホイール
-- **構造**: FE(Next.js) -> BE(Go/MySQL/S3) -> RAG(Python/ChromaDB/CrewAI)
+- **構造**: FE(Next.js) -> BE(Go/MySQL/S3) -> RAG(Python/ChromaDB/LangChain)
 - **DDD**: Controller -> Service -> Repository -> GORM Model
 - **Flywheel**: チャット分析/面接/職務経歴書スコアがDBへ反映され、マッチングやプロファイルを自動調整
 
