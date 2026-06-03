@@ -16,8 +16,8 @@ const securityHeaders = [
       "img-src 'self' data: https:",
       // 開発モードでは webpack HMR の WebSocket 接続を許可
       isDev
-        ? "connect-src 'self' http://localhost:* https://api.openai.com ws://localhost:* wss://localhost:*"
-        : "connect-src 'self' https://api.openai.com",
+        ? "connect-src 'self' blob: http://localhost:* https://api.openai.com ws://localhost:* wss://localhost:*"
+        : "connect-src 'self' blob: https://api.openai.com",
       "frame-ancestors 'none'",
     ].join('; '),
   },
@@ -26,6 +26,12 @@ const securityHeaders = [
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
 ]
+
+// 面接ページはカメラ・マイクへのアクセスが必要なため Permissions-Policy を上書き
+const interviewPermissionsHeader = {
+  key: 'Permissions-Policy',
+  value: 'camera=(self), microphone=(self), geolocation=()',
+}
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -41,6 +47,14 @@ const nextConfig: NextConfig = {
       {
         source: '/(.*)',
         headers: securityHeaders,
+      },
+      {
+        // 面接ページのみカメラ・マイクを許可（他ページは securityHeaders で引き続き禁止）
+        source: '/interview(.*)',
+        headers: [
+          ...securityHeaders.filter((h) => h.key !== 'Permissions-Policy'),
+          interviewPermissionsHeader,
+        ],
       },
     ]
   },

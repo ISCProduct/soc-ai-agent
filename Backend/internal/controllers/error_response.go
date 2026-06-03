@@ -80,6 +80,16 @@ func echoIntQuery(c echo.Context, key string, def int) int {
 	return n
 }
 
+// Exported wrappers for testing from external packages.
+
+const InternalServerErrorMessage = internalServerErrorMessage
+
+func NewAPIError(status int, code, message string, detail ...string) error {
+	return newAPIError(status, code, message, detail...)
+}
+func EchoUintParam(c echo.Context, key string) (uint, error) { return echoUintParam(c, key) }
+func EchoInternalError(err error) error                       { return echoInternalError(err) }
+
 func logError(err error) {
 	if err == nil {
 		return

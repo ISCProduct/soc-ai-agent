@@ -1,0 +1,141 @@
+name: PR → Backlog 同期
+
+# PR に Backlog 課題キー（例: SOCAIAGENT-8）が含まれる場合に Backlog 課題を自動更新します。
+#
+# 動作:
+#   - PR オープン/更新時 : ステータスを「処理中」に変更し、説明に PR URL を追記
+#   - PR マージ時        : ステータスを「完了」に変更
+#   - PR クローズ（非マージ）: ステータスを「未対応」に戻す
+#
+# 課題キーの検出場所（優先順）:
+#   1. PR タイトルの [PROJ-N] プレフィックス
+#   2. PR 本文の <!-- backlog-key:PROJ-N --> マーカー
+#   3. PR 本文の「Backlog: PROJ-N」記述
+#
+# 必要な GitHub Secrets:
+#   BACKLOG_SPACE_ID    : スペースID（例: myspace ← myspace.backlog.jp の場合）
+#   BACKLOG_API_KEY     : Backlog APIキー
+#   BACKLOG_PROJECT_KEY : プロジェクトキー（例: SOCAIAGENT）
+#   BACKLOG_DOMAIN      : ドメイン（省略時は backlog.jp → backlog.com の順に自動判定）
+
+on:
+  pull_request:
+    types: [opened, synchronize, closed]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: PR を Backlog 課題へ反映
+        env:
+          BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
+          BACKLOG_SPACE_ID: ${{ secrets.BACKLOG_SPACE_ID }}
+          BACKLOG_PROJECT_KEY: ${{ secrets.BACKLOG_PROJECT_KEY }}
+          BACKLOG_DOMAIN: ${{ secrets.BACKLOG_DOMAIN }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          ACTION: ${{ github.event.action }}
+        run: |
+          python3 - << 'PYEOF'
+          import os, sys, json, re, urllib.parse, urllib.request, urllib.error
+
+          API_KEY   = os.environ['BACKLOG_API_KEY']
+          SPACE_ID  = os.environ['BACKLOG_SPACE_ID']
+          PROJ_KEY  = os.environ['BACKLOG_PROJECT_KEY']
+          PR_TITLE  = os.environ.get('PR_TITLE', '')
+          PR_BODY   = os.environ.get('PR_BODY') or ''
+          PR_URL    = os.environ['PR_URL']
+          PR_MERGED = os.environ.get('PR_MERGED', 'false').lower() == 'true'
+          ACTION    = os.environ['ACTION']
+          DOMAIN    = os.environ.get('BACKLOG_DOMAIN', '').strip()
+
+          def resolve_bl_base(space_id, api_key, domain):
+              candidates = [domain] if domain else ['backlog.jp', 'backlog.com']
+              for d in candidates:
+                  url = f"https://{space_id}.{d}/api/v2/space?apiKey={api_key}"
+                  try:
+                      with urllib.request.urlopen(urllib.request.Request(url)) as r:
+                          r.read()
+                          return f"https://{space_id}.{d}/api/v2", d
+                  except urllib.error.HTTPError as e:
+                      body = e.read().decode()
+                      if e.code == 404 and '"code":6' in body:
+                          continue
+                      print(f"Backlog API エラー {e.code}: {body}", file=sys.stderr)
+                      sys.exit(1)
+              print(f"エラー: スペース '{space_id}' が見つかりませんでした。", file=sys.stderr)
+              sys.exit(1)
+
+          BL_BASE, BL_DOMAIN = resolve_bl_base(SPACE_ID, API_KEY, DOMAIN)
+          print(f"Backlog ドメイン: {BL_DOMAIN}")
+
+          def bl_request(method, path, data=None):
+              url = f"{BL_BASE}{path}?apiKey={API_KEY}"
+              body = urllib.parse.urlencode(data).encode() if data else None
+              req = urllib.request.Request(url, data=body, method=method)
+              if body:
+                  req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  print(f"Backlog API エラー {e.code}: {e.read().decode()}", file=sys.stderr)
+                  return None
+
+          def extract_bl_key(title, body):
+              # 1. タイトルの [PROJ-N] プレフィックス
+              m = re.search(rf'\[({re.escape(PROJ_KEY)}-\d+)\]', title)
+              if m:
+                  return m.group(1)
+              # 2. 本文の <!-- backlog-key:PROJ-N --> マーカー
+              m = re.search(r'<!--\s*backlog-key:(\S+?)\s*-->', body)
+              if m:
+                  return m.group(1)
+              # 3. 本文の「Backlog: PROJ-N」記述
+              m = re.search(rf'[Bb]acklog[：:]\s*({re.escape(PROJ_KEY)}-\d+)', body)
+              if m:
+                  return m.group(1)
+              return None
+
+          bl_key = extract_bl_key(PR_TITLE, PR_BODY)
+          if not bl_key:
+              print("Backlog 課題キーが見つかりません。スキップします。")
+              sys.exit(0)
+
+          print(f"検出した Backlog 課題キー: {bl_key}")
+
+          # 現在の課題情報を取得
+          issue = bl_request('GET', f"/issues/{bl_key}")
+          if not issue:
+              print(f"Backlog 課題 {bl_key} が見つかりません。")
+              sys.exit(0)
+
+          # 説明に PR URL セクションを追記（すでにあれば上書き）
+          current_desc = issue.get('description') or ''
+          pr_section = f'\n\n## GitHub PR\n{PR_URL}'
+          pr_pattern  = r'\n*## GitHub PR\n[^\n]*'
+          if re.search(pr_pattern, current_desc):
+              new_desc = re.sub(pr_pattern, pr_section, current_desc)
+          else:
+              new_desc = current_desc.rstrip() + pr_section
+
+          # ステータスID の決定
+          # 1=未対応 / 2=処理中 / 3=処理済み / 4=完了
+          if ACTION == 'closed':
+              status_id    = 4 if PR_MERGED else 1
+              status_label = '完了' if PR_MERGED else '未対応'
+          else:
+              status_id    = 2
+              status_label = '処理中'
+
+          result = bl_request('PATCH', f"/issues/{bl_key}", {
+              'description': new_desc,
+              'statusId':    status_id,
+          })
+          if result:
+              print(f"Backlog 課題を更新しました: {bl_key} (ステータス: {status_label}、PR URL を追記)")
+          PYEOF

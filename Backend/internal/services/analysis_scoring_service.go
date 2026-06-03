@@ -625,3 +625,16 @@ func averageCategoryScore(scoreMap map[string]float64, categories []string) floa
 	}
 	return clamp01(sum / count)
 }
+
+// Exported wrappers for testing from external packages.
+
+func BuildScoreComment(scores AnalysisScores) string { return buildScoreComment(scores) }
+func BuildJobSuitabilityComment(scores []entity.UserWeightScore) (string, []JobSuitabilityRole) {
+	return buildJobSuitabilityComment(scores)
+}
+func ParseEmbedding(raw string) ([]float64, error)     { return parseEmbedding(raw) }
+func CosineSimilarity(a, b []float64) float64          { return cosineSimilarity(a, b) }
+func Clamp01(value float64) float64                    { return clamp01(value) }
+func AverageCategoryScore(scoreMap map[string]float64, categories []string) float64 {
+	return averageCategoryScore(scoreMap, categories)
+}

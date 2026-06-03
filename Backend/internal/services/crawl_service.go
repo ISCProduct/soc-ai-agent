@@ -1082,3 +1082,16 @@ func computeNextRun(now time.Time, source *models.CrawlSource) *time.Time {
 func lastDayOfMonth(year int, month time.Month, loc *time.Location) int {
 	return time.Date(year, month+1, 0, 0, 0, 0, 0, loc).Day()
 }
+
+// Exported type alias and wrappers for testing from external packages.
+
+type MynaviCompanyData = mynaviCompanyData
+
+func ParseMynaviCompanyPage(htmlBytes []byte) (*MynaviCompanyData, error) {
+	return parseMynaviCompanyPage(htmlBytes)
+}
+func ExtractYear(s string) int                                          { return extractYear(s) }
+func ExtractInt(s string) int                                           { return extractInt(s) }
+func ExtractFloat(s string) float64                                     { return extractFloat(s) }
+func ExtractCharset(contentType string) string                          { return extractCharset(contentType) }
+func ValidateCrawlSource(source *models.CrawlSource) error             { return validateCrawlSource(source) }

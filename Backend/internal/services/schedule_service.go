@@ -157,3 +157,6 @@ func escapeICS(s string) string {
 	s = strings.ReplaceAll(s, "\n", "\\n")
 	return s
 }
+
+// FoldICSLine is an exported wrapper for foldICSLine for use in external tests.
+func FoldICSLine(line string) string { return foldICSLine(line) }

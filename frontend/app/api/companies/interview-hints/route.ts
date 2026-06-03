@@ -19,13 +19,17 @@ export async function POST(request: NextRequest) {
     })
 
     if (!response.ok) {
-      return NextResponse.json({ style_tags: [], top_questions: [] }, { status: response.status })
+      // RAG サービス側のエラーは UI に伝えず空レスポンスで正常扱い
+      return NextResponse.json({ style_tags: [], top_questions: [] })
     }
 
     const data = await response.json()
     return NextResponse.json(data)
-  } catch (error) {
-    console.error('[API] Interview hints error:', error)
-    return NextResponse.json({ style_tags: [], top_questions: [] }, { status: 500 })
+  } catch (error: any) {
+    // RAG 未起動（ECONNREFUSED 等）はログのみで空レスポンスを返す
+    if (error?.cause?.code !== 'ECONNREFUSED') {
+      console.error('[API] Interview hints error:', error)
+    }
+    return NextResponse.json({ style_tags: [], top_questions: [] })
   }
 }

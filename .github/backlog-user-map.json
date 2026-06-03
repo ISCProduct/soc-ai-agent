@@ -1,0 +1,4 @@
+{
+  "_comment": "GitHub ログイン名 → Backlog ユーザーID のマッピング。ユーザーIDは Backlog の「個人設定」または GET /api/v2/users/myself で確認できます。",
+  "oohasikazuyuki": 0
+}

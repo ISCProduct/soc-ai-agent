@@ -203,6 +203,11 @@ func (v *JobCategoryValidator) normalizeNumericAnswer(userAnswer string) (string
 	return userAnswer, nil
 }
 
+// NormalizeNumericAnswer is an exported wrapper for normalizeNumericAnswer for use in external tests.
+func (v *JobCategoryValidator) NormalizeNumericAnswer(userAnswer string) (string, error) {
+	return v.normalizeNumericAnswer(userAnswer)
+}
+
 // GenerateJobSelectionQuestion 職種選択の質問を生成
 func (v *JobCategoryValidator) GenerateJobSelectionQuestion(ctx context.Context) (string, error) {
 	// 主要な職種カテゴリを取得
