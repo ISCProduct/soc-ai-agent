@@ -1,7 +1,7 @@
 import { BACKEND_URL } from './backend-url'
 import { authService } from './auth'
 
-const DEFAULT_INTERVIEW_MAX_MINUTES = 10
+const DEFAULT_INTERVIEW_MAX_MINUTES = 30
 const DEFAULT_INTERVIEW_QUESTION_DURATION_SECONDS = 180
 
 export type InterviewSession = {

@@ -745,6 +745,13 @@ function InterviewContent() {
   const totalQuestionCount = Math.max(1, selectedPosition.questions)
   const questionProgress = Math.min(100, Math.round((questionElapsedSeconds / questionDurationSeconds) * 100))
   const questionRemainingSeconds = Math.max(0, questionDurationSeconds - questionElapsedSeconds)
+  const questionRemainingLabel = (() => {
+    if (questionRemainingSeconds <= 0) return '次の質問へ移行中...'
+    if (questionRemainingSeconds < 60) return `あと${questionRemainingSeconds}秒で次の質問へ`
+    const m = Math.floor(questionRemainingSeconds / 60)
+    const s = questionRemainingSeconds % 60
+    return s > 0 ? `あと${m}分${s}秒で次の質問へ` : `あと${m}分で次の質問へ`
+  })()
   const progress = Math.min(100, Math.round(((interviewLimits.maxMinutes * 60 - remainingSeconds) / (interviewLimits.maxMinutes * 60)) * 100))
   const isFemale = avatarGender === 'female'
   const companyName = interviewCompany?.name || 'AI面接練習'
@@ -1065,7 +1072,9 @@ function InterviewContent() {
                       </Box>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <Typography sx={{ fontSize: 14 }}>❓</Typography>
-                        <Typography sx={{ fontSize: 13, color: '#475569' }}>{selectedPosition.questions}問 技術・行動面接</Typography>
+                        <Typography sx={{ fontSize: 13, color: '#475569' }}>
+                          {selectedPosition.questions}問（1問あたり約{Math.round(questionDurationSeconds / 60)}分）
+                        </Typography>
                       </Box>
                     </Box>
                   </Stack>
@@ -1506,6 +1515,54 @@ function InterviewContent() {
           <Box sx={{ bgcolor: remainingSeconds <= 0 ? 'rgba(234,67,53,0.25)' : 'rgba(251,188,4,0.2)', borderRadius: 1.5, px: 2, py: 0.7 }}>
             <Typography sx={{ fontSize: 13, color: remainingSeconds <= 0 ? '#ffb3ae' : '#ffe082', fontWeight: 600 }}>
               {remainingSeconds <= 0 ? 'セッションが終了しました。' : `⚠️ 残り約${Math.ceil(remainingSeconds / 60)}分です。`}
+            </Typography>
+          </Box>
+        </Box>
+      )}
+
+      {/* ── 質問タイマー ── */}
+      {isConnected && (
+        <Box sx={{ px: 2, pb: 1.5, flexShrink: 0 }}>
+          <Box sx={{
+            bgcolor: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)',
+            borderRadius: 2, px: 2, py: 1,
+            display: 'flex', alignItems: 'center', gap: 2,
+          }}>
+            {/* 質問番号バッジ */}
+            <Box sx={{
+              flexShrink: 0, display: 'flex', alignItems: 'center', gap: 0.5,
+              bgcolor: 'rgba(255,255,255,0.12)', borderRadius: 1, px: 1, py: 0.3,
+            }}>
+              <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Q</Typography>
+              <Typography sx={{ color: '#fff', fontSize: 13, fontWeight: 700, lineHeight: 1 }}>
+                {currentQuestionIndex}
+              </Typography>
+              <Typography sx={{ color: 'rgba(255,255,255,0.4)', fontSize: 10 }}>
+                /{totalQuestionCount}
+              </Typography>
+            </Box>
+
+            {/* プログレスバー */}
+            <Box sx={{ flex: 1, height: 5, bgcolor: 'rgba(255,255,255,0.12)', borderRadius: 9999, overflow: 'hidden' }}>
+              <Box sx={{
+                height: '100%',
+                width: `${questionProgress}%`,
+                bgcolor: questionRemainingSeconds <= 30 ? '#f28b82'
+                       : questionRemainingSeconds <= 60 ? '#fdd663'
+                       : '#34a853',
+                borderRadius: 9999,
+                transition: 'width 1s linear, background-color 0.5s',
+              }} />
+            </Box>
+
+            {/* カウントダウンテキスト */}
+            <Typography sx={{
+              flexShrink: 0, fontSize: 12, fontWeight: 600,
+              color: questionRemainingSeconds <= 30 ? '#f28b82'
+                   : questionRemainingSeconds <= 60 ? '#fdd663'
+                   : 'rgba(255,255,255,0.75)',
+            }}>
+              {questionRemainingLabel}
             </Typography>
           </Box>
         </Box>
