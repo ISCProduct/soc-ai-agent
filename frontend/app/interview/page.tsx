@@ -399,59 +399,65 @@ function InterviewContent() {
 
   const playAudioBlob = async (blob: Blob): Promise<void> => {
     const url = URL.createObjectURL(blob)
-    const el = new Audio()
-    aiAudioRef.current = el
-    el.src = url
-    setAiSpeaking(true)
 
     let rafId: number | null = null
-    let routedThroughCtx = false
 
-    try {
-      if (!aiAudioCtxRef.current || aiAudioCtxRef.current.state === 'closed') {
-        aiAudioCtxRef.current = new AudioContext()
-      }
-      const ctx = aiAudioCtxRef.current
-      // resume を await して running 状態を確実に待つ（suspended のまま再生すると無音になる）
-      await ctx.resume()
-
-      const source   = ctx.createMediaElementSource(el)
-      routedThroughCtx = true
-      const analyser = ctx.createAnalyser()
-      analyser.fftSize = 512
-      analyser.smoothingTimeConstant = 0.6
-      source.connect(analyser)
-      analyser.connect(ctx.destination)
-
-      const timeData = new Uint8Array(analyser.fftSize)
-      const trackLevel = () => {
-        analyser.getByteTimeDomainData(timeData)
-        let sum = 0
-        for (const v of timeData) { const n = (v - 128) / 128; sum += n * n }
-        const rms = Math.sqrt(sum / timeData.length)
-        setAiLevel(Math.min(1, rms * 6))
-        rafId = requestAnimationFrame(trackLevel)
-      }
-      rafId = requestAnimationFrame(trackLevel)
-      aiLevelRafRef.current = rafId
-    } catch {
-      // AudioContext 未対応またはセキュリティポリシーで拒否された場合はリップシンク無効で続行
-      if (!routedThroughCtx) {
-        // AudioContext を経由していないので Audio 要素がデフォルト出力に直接流れる
-      }
+    const cleanup = (el: HTMLAudioElement) => {
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null }
+      if (aiLevelRafRef.current !== null) { cancelAnimationFrame(aiLevelRafRef.current); aiLevelRafRef.current = null }
+      setAiLevel(0)
+      setAiSpeaking(false)
+      URL.revokeObjectURL(url)
+      aiAudioRef.current = null
+      el.src = ''
     }
 
-    const cleanup = () => {
-      if (rafId !== null) cancelAnimationFrame(rafId)
-      if (aiLevelRafRef.current !== null) cancelAnimationFrame(aiLevelRafRef.current)
-      aiLevelRafRef.current = null
-      setAiLevel(0)
+    const playWithCtx = async (el: HTMLAudioElement): Promise<boolean> => {
+      try {
+        if (!aiAudioCtxRef.current || aiAudioCtxRef.current.state === 'closed') {
+          aiAudioCtxRef.current = new AudioContext()
+        }
+        const ctx = aiAudioCtxRef.current
+        await ctx.resume()
+        const source  = ctx.createMediaElementSource(el)
+        const analyser = ctx.createAnalyser()
+        analyser.fftSize = 512
+        analyser.smoothingTimeConstant = 0.6
+        source.connect(analyser)
+        analyser.connect(ctx.destination)
+        const timeData = new Uint8Array(analyser.fftSize)
+        const trackLevel = () => {
+          analyser.getByteTimeDomainData(timeData)
+          let sum = 0
+          for (const v of timeData) { const n = (v - 128) / 128; sum += n * n }
+          setAiLevel(Math.min(1, Math.sqrt(sum / timeData.length) * 6))
+          rafId = requestAnimationFrame(trackLevel)
+        }
+        rafId = requestAnimationFrame(trackLevel)
+        aiLevelRafRef.current = rafId
+        return true
+      } catch (e) {
+        console.warn('[audio] AudioContext routing failed, falling back to direct playback:', e)
+        return false
+      }
     }
 
     return new Promise<void>((resolve) => {
-      el.onended = () => { cleanup(); setAiSpeaking(false); URL.revokeObjectURL(url); resolve() }
-      el.onerror = () => { cleanup(); setAiSpeaking(false); URL.revokeObjectURL(url); resolve() }
-      el.play().catch(() => { cleanup(); setAiSpeaking(false); resolve() })
+      const el = new Audio()
+      aiAudioRef.current = el
+      el.src = url
+      setAiSpeaking(true)
+
+      el.onended = () => { cleanup(el); resolve() }
+      el.onerror = () => { console.error('[audio] playback error:', el.error?.code, el.error?.message); cleanup(el); resolve() }
+
+      playWithCtx(el).then(() => {
+        el.play().catch((e) => {
+          console.error('[audio] el.play() failed:', e)
+          cleanup(el)
+          resolve()
+        })
+      })
     })
   }
 

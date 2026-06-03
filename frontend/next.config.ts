@@ -14,6 +14,8 @@ const securityHeaders = [
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com",
       "img-src 'self' data: https:",
+      // blob: URL の音声/動画再生を許可（AI面接の TTS 音声は blob: URL 経由で再生）
+      "media-src 'self' blob:",
       // 開発モードでは webpack HMR の WebSocket 接続を許可
       isDev
         ? "connect-src 'self' blob: http://localhost:* https://api.openai.com ws://localhost:* wss://localhost:*"
