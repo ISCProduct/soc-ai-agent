@@ -86,3 +86,6 @@ func CustomHTTPErrorHandler(err error, c echo.Context) {
 
 	_ = c.JSON(status, resp)
 }
+
+// DefaultCodeByStatus is an exported wrapper for defaultCodeByStatus for use in external tests.
+func DefaultCodeByStatus(status int) string { return defaultCodeByStatus(status) }

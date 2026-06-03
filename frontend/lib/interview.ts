@@ -1,4 +1,5 @@
 import { BACKEND_URL } from './backend-url'
+import { authService } from './auth'
 
 const DEFAULT_INTERVIEW_MAX_MINUTES = 10
 const DEFAULT_INTERVIEW_QUESTION_DURATION_SECONDS = 180
@@ -90,7 +91,7 @@ export const interviewApi = {
   async createSession(userId: number, language = 'ja', interviewerGender?: string): Promise<InterviewSession> {
     const res = await fetch(`${BACKEND_URL}/api/interviews`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
       body: JSON.stringify({ user_id: userId, language, interviewer_gender: interviewerGender }),
     })
     if (!res.ok) throw new Error(await res.text())
@@ -100,7 +101,7 @@ export const interviewApi = {
   async startSession(sessionId: number, userId: number): Promise<InterviewSession> {
     const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/start`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
       body: JSON.stringify({ user_id: userId }),
     })
     if (!res.ok) throw new Error(await res.text())
@@ -110,7 +111,7 @@ export const interviewApi = {
   async finishSession(sessionId: number, userId: number): Promise<InterviewSession> {
     const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/finish`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
       body: JSON.stringify({ user_id: userId }),
     })
     if (!res.ok) throw new Error(await res.text())
@@ -120,7 +121,7 @@ export const interviewApi = {
   async saveUtterance(sessionId: number, userId: number, role: 'user' | 'ai', text: string): Promise<void> {
     const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/utterances`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
       body: JSON.stringify({ user_id: userId, role, text }),
     })
     if (!res.ok) throw new Error(await res.text())
@@ -128,20 +129,26 @@ export const interviewApi = {
 
   async getDetail(sessionId: number, userId: number, role?: string): Promise<InterviewDetail> {
     const roleParam = role ? `&role=${role}` : ''
-    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}?user_id=${userId}${roleParam}`)
+    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}?user_id=${userId}${roleParam}`, {
+      headers: { ...authService.getUserFetchHeaders() },
+    })
     if (!res.ok) throw new Error(await res.text())
     return res.json()
   },
 
   async getReport(sessionId: number, userId: number): Promise<InterviewReport | null> {
-    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/report?user_id=${userId}`)
+    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/report?user_id=${userId}`, {
+      headers: { ...authService.getUserFetchHeaders() },
+    })
     if (res.status === 404) return null
     if (!res.ok) throw new Error(await res.text())
     return res.json()
   },
 
   async listSessions(userId: number, page = 1, limit = 20): Promise<{ sessions: InterviewSession[]; total: number }> {
-    const res = await fetch(`${BACKEND_URL}/api/interviews?user_id=${userId}&page=${page}&limit=${limit}`)
+    const res = await fetch(`${BACKEND_URL}/api/interviews?user_id=${userId}&page=${page}&limit=${limit}`, {
+      headers: { ...authService.getUserFetchHeaders() },
+    })
     if (!res.ok) throw new Error(await res.text())
     return res.json()
   },
@@ -149,7 +156,7 @@ export const interviewApi = {
   async createRealtimeToken(userId: number, interviewId: number): Promise<string> {
     const res = await fetch(`${BACKEND_URL}/api/realtime/token`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
       body: JSON.stringify({ user_id: userId, interview_id: interviewId }),
     })
     if (!res.ok) throw new Error(await res.text())
@@ -158,7 +165,9 @@ export const interviewApi = {
   },
 
   async getPhraseSuggestions(sessionId: number, userId: number): Promise<PhraseSuggestion[]> {
-    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/phrase-suggestions?user_id=${userId}`)
+    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/phrase-suggestions?user_id=${userId}`, {
+      headers: { ...authService.getUserFetchHeaders() },
+    })
     if (!res.ok) throw new Error(await res.text())
     const data = await res.json()
     return data.suggestions as PhraseSuggestion[]
@@ -166,7 +175,9 @@ export const interviewApi = {
 
   async getTrend(userId: number, limit = 0): Promise<InterviewTrendPoint[]> {
     const params = limit > 0 ? `?user_id=${userId}&limit=${limit}` : `?user_id=${userId}`
-    const res = await fetch(`${BACKEND_URL}/api/interviews/trend${params}`)
+    const res = await fetch(`${BACKEND_URL}/api/interviews/trend${params}`, {
+      headers: { ...authService.getUserFetchHeaders() },
+    })
     if (!res.ok) throw new Error(await res.text())
     const data = await res.json()
     return data.points as InterviewTrendPoint[]
@@ -175,7 +186,7 @@ export const interviewApi = {
   async sendReportEmail(sessionId: number, userId: number): Promise<{ message: string }> {
     const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/send-report`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
       body: JSON.stringify({ user_id: userId }),
     })
     if (!res.ok) throw new Error(await res.text())
@@ -195,6 +206,8 @@ export const interviewApi = {
 
       const xhr = new XMLHttpRequest()
       xhr.open('POST', `${BACKEND_URL}/api/interviews/${sessionId}/upload-video`)
+      const userHeaders = authService.getUserFetchHeaders()
+      Object.entries(userHeaders).forEach(([k, v]) => xhr.setRequestHeader(k, v))
 
       if (onProgress) {
         xhr.upload.onprogress = (e) => {
