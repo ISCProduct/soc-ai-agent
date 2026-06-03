@@ -38,7 +38,7 @@ export default function AdminGraduateEmploymentNewPage() {
 
   useEffect(() => {
     const headers = authService.getAdminFetchHeaders()
-    fetch('/api/admin/companies', { headers }).then((r) => r.json()).then((d) => setCompanies(d?.companies || []))
+    fetch('/api/admin/companies/names', { headers }).then((r) => r.json()).then((d) => setCompanies(d || []))
     fetch('/api/admin/job-positions?limit=100', { headers }).then((r) => r.json()).then((d) => setJobPositions(d?.positions || []))
   }, [])
 

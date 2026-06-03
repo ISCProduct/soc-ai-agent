@@ -19,6 +19,14 @@ func (m *CompanyRepositoryMock) FindAllActive(limit, offset int) ([]models.Compa
 	return nil, args.Error(1)
 }
 
+func (m *CompanyRepositoryMock) FindAllActiveNames(q string) ([]models.CompanyName, error) {
+	args := m.Called(q)
+	if v := args.Get(0); v != nil {
+		return v.([]models.CompanyName), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
 func (m *CompanyRepositoryMock) CountActive() (int64, error) {
 	args := m.Called()
 	return args.Get(0).(int64), args.Error(1)

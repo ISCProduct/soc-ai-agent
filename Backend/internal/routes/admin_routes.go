@@ -35,6 +35,8 @@ func SetupAdminRoutes(
 	// 企業管理
 	admin.GET("/companies", adminCompanyController.List)
 	admin.POST("/companies", adminCompanyController.Create)
+	// 軽量な企業名一覧（セレクト用）
+	admin.GET("/companies/names", adminCompanyController.Names)
 	admin.GET("/companies/:id", adminCompanyController.Get)
 	admin.PUT("/companies/:id", adminCompanyController.Update)
 	admin.POST("/companies/:id/publish", adminCompanyController.Publish)
