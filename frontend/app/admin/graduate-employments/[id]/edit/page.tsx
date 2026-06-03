@@ -46,11 +46,11 @@ export default function AdminGraduateEmploymentEditPage() {
     if (!id) return
     const headers = authService.getAdminFetchHeaders()
     Promise.all([
-      fetch('/api/admin/companies', { headers }).then((r) => r.json()),
+      fetch('/api/admin/companies/names', { headers }).then((r) => r.json()),
       fetch('/api/admin/job-positions?limit=100', { headers }).then((r) => r.json()),
       fetch(`/api/admin/graduate-employments/${id}`, { headers }).then((r) => r.json()),
     ]).then(([companiesData, positionsData, entry]) => {
-      setCompanies(companiesData?.companies || [])
+      setCompanies(companiesData || [])
       setJobPositions(positionsData?.positions || [])
       if (entry?.id) {
         setCompanyId(String(entry.company_id || ''))

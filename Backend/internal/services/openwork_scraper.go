@@ -341,3 +341,19 @@ func decodeOpenworkToUTF8(b []byte, charset string) ([]byte, error) {
 		return b, nil
 	}
 }
+
+// Exported type aliases and wrappers for testing from external packages.
+
+type OpenworkScores = openworkScores
+type OpenworkCompanyData = openworkCompanyData
+
+func ParseOpenworkCompanyPage(htmlBytes []byte) (*OpenworkCompanyData, error) {
+	return parseOpenworkCompanyPage(htmlBytes)
+}
+func ParseOpenworkScore(s string) float64                    { return parseOpenworkScore(s) }
+func ParseOpenworkSalary(s string) int                       { return parseOpenworkSalary(s) }
+func ParseOpenworkReviewCount(s string) int                  { return parseOpenworkReviewCount(s) }
+func BuildOpenworkCultureJSON(scores OpenworkScores) string  { return buildOpenworkCultureJSON(scores) }
+func BuildOpenworkWelfareText(welfareScore float64) string   { return buildOpenworkWelfareText(welfareScore) }
+func BuildOpenworkSalaryText(salary int) string              { return buildOpenworkSalaryText(salary) }
+func ExtractOpenworkCharset(contentType string) string       { return extractOpenworkCharset(contentType) }

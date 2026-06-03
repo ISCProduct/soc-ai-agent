@@ -1,0 +1,24 @@
+name: Backlog 通知 (commit / PR)
+
+# commit メッセージや PR に Backlog 課題キー（例: PROJ-123）が含まれている場合、
+# 対応する Backlog 課題へ自動コメント・ステータス更新を行います。
+# コミットメッセージに #fixed / #closed を付けると課題をクローズできます。
+#
+# 必要な GitHub Secrets:
+#   BACKLOG_SPACE_ID  : スペースID（例: myspace ← myspace.backlog.jp の場合）
+#   BACKLOG_API_KEY   : Backlog のアカウント設定で発行した APIキー
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: bicstone/backlog-notify@v4
+        with:
+          space_id: ${{ secrets.BACKLOG_SPACE_ID }}
+          api_key: ${{ secrets.BACKLOG_API_KEY }}
