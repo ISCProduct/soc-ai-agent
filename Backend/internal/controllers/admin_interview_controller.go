@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/models"
 	"Backend/internal/services"
 	"net/http"
 	"strconv"
@@ -12,9 +13,10 @@ import (
 
 // AdminInterviewController provides admin endpoints for viewing interview sessions and videos.
 type AdminInterviewController struct {
-	interviewService *services.InterviewService
-	videoRepo        repository.InterviewVideoRepository
-	s3Service        *services.S3UploadService
+	interviewService    *services.InterviewService
+	videoRepo           repository.InterviewVideoRepository
+	s3Service           *services.S3UploadService
+	companyQuestionRepo repository.InterviewCompanyQuestionRepository
 }
 
 func NewAdminInterviewController(
@@ -27,6 +29,122 @@ func NewAdminInterviewController(
 		videoRepo:        videoRepo,
 		s3Service:        s3Service,
 	}
+}
+
+// SetCompanyQuestionRepo 企業別質問リポジトリを注入する
+func (c *AdminInterviewController) SetCompanyQuestionRepo(r repository.InterviewCompanyQuestionRepository) {
+	c.companyQuestionRepo = r
+}
+
+// ListCompanyQuestions GET /api/admin/companies/:id/interview-questions
+func (c *AdminInterviewController) ListCompanyQuestions(ctx echo.Context) error {
+	if c.companyQuestionRepo == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "not configured")
+	}
+	companyID, err := echoUintParam(ctx, "id")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
+	}
+	qs, err := c.companyQuestionRepo.FindByCompanyID(companyID)
+	if err != nil {
+		return echoInternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{"questions": qs})
+}
+
+// CreateCompanyQuestion POST /api/admin/companies/:id/interview-questions
+func (c *AdminInterviewController) CreateCompanyQuestion(ctx echo.Context) error {
+	if c.companyQuestionRepo == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "not configured")
+	}
+	companyID, err := echoUintParam(ctx, "id")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
+	}
+	var req struct {
+		Position     string `json:"position"`
+		Category     string `json:"category"`
+		QuestionText string `json:"question_text"`
+		Priority     int    `json:"priority"`
+		IsRequired   bool   `json:"is_required"`
+	}
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
+	}
+	if req.Category == "" || req.QuestionText == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "category and question_text are required")
+	}
+	q := &models.InterviewCompanyQuestion{
+		CompanyID:    companyID,
+		Position:     req.Position,
+		Category:     req.Category,
+		QuestionText: req.QuestionText,
+		Priority:     req.Priority,
+		IsRequired:   req.IsRequired,
+	}
+	if err := c.companyQuestionRepo.Create(q); err != nil {
+		return echoInternalError(err)
+	}
+	return ctx.JSON(http.StatusCreated, q)
+}
+
+// UpdateCompanyQuestion PUT /api/admin/companies/:id/interview-questions/:qid
+func (c *AdminInterviewController) UpdateCompanyQuestion(ctx echo.Context) error {
+	if c.companyQuestionRepo == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "not configured")
+	}
+	qID, err := echoUintParam(ctx, "qid")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid question ID")
+	}
+	q, err := c.companyQuestionRepo.FindByID(qID)
+	if err != nil || q == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "Question not found")
+	}
+	var req struct {
+		Position     *string `json:"position"`
+		Category     *string `json:"category"`
+		QuestionText *string `json:"question_text"`
+		Priority     *int    `json:"priority"`
+		IsRequired   *bool   `json:"is_required"`
+	}
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
+	}
+	if req.Position != nil {
+		q.Position = *req.Position
+	}
+	if req.Category != nil {
+		q.Category = *req.Category
+	}
+	if req.QuestionText != nil {
+		q.QuestionText = *req.QuestionText
+	}
+	if req.Priority != nil {
+		q.Priority = *req.Priority
+	}
+	if req.IsRequired != nil {
+		q.IsRequired = *req.IsRequired
+	}
+	if err := c.companyQuestionRepo.Update(q); err != nil {
+		return echoInternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, q)
+}
+
+// DeleteCompanyQuestion DELETE /api/admin/companies/:id/interview-questions/:qid
+func (c *AdminInterviewController) DeleteCompanyQuestion(ctx echo.Context) error {
+	if c.companyQuestionRepo == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "not configured")
+	}
+	qID, err := echoUintParam(ctx, "qid")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid question ID")
+	}
+	if err := c.companyQuestionRepo.Delete(qID); err != nil {
+		return echoInternalError(err)
+	}
+	return ctx.NoContent(http.StatusNoContent)
 }
 
 // ListSessions handles GET /api/admin/interviews

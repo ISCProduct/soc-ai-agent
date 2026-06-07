@@ -79,6 +79,12 @@ func SetupAdminRoutes(
 	admin.GET("/interviews/:id/videos", adminInterviewController.ListVideos)
 	admin.GET("/interviews/videos/:video_id/url", adminInterviewController.VideoURL)
 
+	// 企業別面接質問管理
+	admin.GET("/companies/:id/interview-questions", adminInterviewController.ListCompanyQuestions)
+	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion)
+	admin.PUT("/companies/:id/interview-questions/:qid", adminInterviewController.UpdateCompanyQuestion)
+	admin.DELETE("/companies/:id/interview-questions/:qid", adminInterviewController.DeleteCompanyQuestion)
+
 	// ダッシュボード
 	admin.GET("/dashboard/users", adminDashboardController.ListUsers)
 	admin.GET("/dashboard/users/:id", adminDashboardController.UserSessions)

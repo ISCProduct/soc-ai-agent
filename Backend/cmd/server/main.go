@@ -177,6 +177,7 @@ func main() {
 	interviewUtteranceRepo := repositories.NewInterviewUtteranceRepository(db)
 	interviewReportRepo := repositories.NewInterviewReportRepository(db)
 	videoRepo := repositories.NewInterviewVideoRepository(db)
+	interviewCompanyQuestionRepo := repositories.NewInterviewCompanyQuestionRepository(db)
 	// その他
 	resumeRepo := repositories.NewResumeRepository(db)
 	auditLogRepo := repositories.NewAuditLogRepository(db)
@@ -224,6 +225,8 @@ func main() {
 	// クロス機能連携サービス（チャットスコア↔面接/職務経歴書レビュー）
 	crossFeatureService := services.NewCrossFeatureIntegrationService(userWeightScoreRepo)
 	interviewService.SetCrossFeatureService(crossFeatureService)
+	interviewService.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
+	interviewService.SetSkillScoreRepo(skillScoreRepo)
 	resumeService.SetCrossFeatureService(crossFeatureService)
 
 	// コントローラー層の初期化
@@ -256,6 +259,7 @@ func main() {
 	interviewController := controllers.NewInterviewController(interviewService, videoRepo, s3UploadService)
 	realtimeController := controllers.NewRealtimeController(interviewService, realtimeUsageService)
 	adminInterviewController := controllers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
+	adminInterviewController.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminCostsController := controllers.NewAdminCostsController(apiCostService, realtimeUsageService)
 	profileRecalcService := services.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
