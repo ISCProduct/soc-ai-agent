@@ -164,6 +164,22 @@ export default function AdminCompanyEditPage() {
     >
       <ErrorAlert error={error} />
       {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
+
+      <Box sx={{ mb: 3, p: 2, bgcolor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Box>
+          <Typography sx={{ fontWeight: 700, fontSize: 14, color: '#0c4a6e' }}>面接カスタム質問</Typography>
+          <Typography sx={{ fontSize: 13, color: '#075985' }}>AI面接で使用する企業別の質問リストを管理できます</Typography>
+        </Box>
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={() => router.push(`/admin/companies/${id}/interview-questions`)}
+          sx={{ borderColor: '#0284c7', color: '#0284c7', whiteSpace: 'nowrap' }}
+        >
+          質問を管理 →
+        </Button>
+      </Box>
+
       <Stack spacing={3}>
         <Button
           variant="contained"
