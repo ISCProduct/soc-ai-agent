@@ -1,4 +1,4 @@
-transformers>=4.30.0
+transformers>=4.57.6
 peft>=0.4.0
 accelerate>=0.34.2
 accelerate>=0.20.0
