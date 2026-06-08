@@ -1006,6 +1006,7 @@ class ESReviewResponse(BaseModel):
     length_balance_score: int  # 1-10: 文字数バランス
     feedback: str  # 全体フィードバック文
     improved_text: str  # 改善後テキスト
+    company_strategy: Optional[str] = None  # 企業特化の対策アドバイス（企業名なしは null）
 
 
 def _run_es_review(
@@ -1047,8 +1048,9 @@ def _run_es_review(
   "star_score": <1-10の整数: Situation/Task/Action/Resultの構造が揃っているか>,
   {company_fit_key},
   "length_balance_score": <1-10の整数: 文字数・各要素のバランスが適切か>,
-  "feedback": "<具体性・STAR準拠・企業適合性・文字数について200字以内でアドバイス>",
-  "improved_text": "<元の文章を改善したバージョン（元の文字数の110〜130%を目安）>"
+  "feedback": "<具体性・STAR準拠・企業適合性・文字数について400字程度でアドバイス。企業名が指定されている場合は企業特化アドバイスを含めてください>",
+  "improved_text": "<元の文章を改善したバージョン（元の文字数の110〜130%を目安）>",
+  "company_strategy": "<企業特化の対策アドバイス（企業名なしは null。指定時は約200〜400字）>"
 }}"""
     )
     try:
@@ -1073,6 +1075,7 @@ def _run_es_review(
             length_balance_score=max(1, min(10, int(data.get("length_balance_score", 5)))),
             feedback=str(data.get("feedback", "")),
             improved_text=str(data.get("improved_text", "")),
+            company_strategy=(str(data.get("company_strategy")) if data.get("company_strategy") is not None else None),
         )
     except Exception as exc:
         logger.warning("es review failed error=%s", exc)
