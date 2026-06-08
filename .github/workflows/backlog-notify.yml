@@ -18,7 +18,7 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
-      - uses: bicstone/backlog-notify@v4
+      - uses: bicstone/backlog-notify@v6
         with:
           space_id: ${{ secrets.BACKLOG_SPACE_ID }}
           api_key: ${{ secrets.BACKLOG_API_KEY }}
