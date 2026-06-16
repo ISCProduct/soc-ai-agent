@@ -1095,9 +1095,16 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
         if not context_docs:
             logger.info("es review web search start company=%s", safe_company_name)
             try:
-                summary = _run_async(_run_web_search_pipeline, safe_company_name, "")
-                if summary:
-                    context_docs = [summary]
+                # 段階的に2回の軽量Web Searchパイプラインを実行して、採用情報（一般）とエンジニア向け観点を取得する
+                summary_general = _run_async(_run_web_search_pipeline, safe_company_name, "")
+                summary_engineer = _run_async(_run_web_search_pipeline, safe_company_name, "エンジニア")
+                parts = [s for s in (summary_general, summary_engineer) if s]
+                if parts:
+                    combined = "\n\n".join(parts)
+                    # 先頭2000文字に制限してコンテキストに注入（プロンプト長を考慮）
+                    if len(combined) > 2000:
+                        combined = combined[:2000]
+                    context_docs = [combined]
                     set_cached_context(cache_key, context_docs)
             except Exception as exc:
                 logger.warning("es review web search failed company=%s error=%s", safe_company_name, exc)
