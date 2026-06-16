@@ -78,3 +78,12 @@ func (r *ConversationContextRepository) GetJobCategoryID(sessionID string) (uint
 	}
 	return ids[0], nil
 }
+
+// SetSessionSummary はセッションに対する短い LLM 要約を保存します。既存レコードがなければ作成します。
+func (r *ConversationContextRepository) SetSessionSummary(userID uint, sessionID string, summary string) error {
+	ctx, err := r.GetOrCreate(userID, sessionID)
+	if err != nil {
+		return err
+	}
+	return r.db.Model(ctx).Updates(map[string]any{"llm_summary": summary}).Error
+}
