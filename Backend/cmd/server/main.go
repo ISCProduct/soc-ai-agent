@@ -245,7 +245,7 @@ func main() {
 		GBiz:      scraper.NewGBizClient("", gbizToken),
 		Threshold: config.CompanyGraphThreshold(),
 	}
-	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService)
+	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService, aiClient)
 	resumeController := controllers.NewResumeController(resumeService)
 
 	// S3 upload service for interview videos (optional — skipped if env vars are not set)
@@ -311,7 +311,7 @@ func main() {
 	routes.SetupCompanyRoutes(api, relationController)
 	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, userRepo, cfg.AdminSecret)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret)
-	routes.SetupInterviewRoutes(api, interviewController, realtimeController)
+	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret)
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret)
 	routes.SetupESRoutes(api, esRewriteController, esReviewController)
 	routes.SetupScheduleRoutes(api, scheduleController)

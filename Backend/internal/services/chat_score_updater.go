@@ -9,8 +9,9 @@ import (
 	"strings"
 )
 
-// analyzeAndUpdateWeights ユーザーの回答を分析し重み係数を更新
-func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, sessionID, message string, jobCategoryID uint) error {
+// analyzeAndUpdateWeights ユーザーの回答を分析し重み係数を更新する。
+// 戻り値の bool は「有効な品質回答かどうか」を示す（進捗カウントに使用）。
+func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, sessionID, message string, jobCategoryID uint) (bool, error) {
 	// 会話履歴から直近の質問を取得
 	history, err := s.chatMessageRepo.FindRecentBySessionID(sessionID, 5)
 	if err != nil {
@@ -28,31 +29,42 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 
 	if strings.TrimSpace(lastQuestion) == "" {
 		log.Printf("Warning: no previous question found for scoring\n")
-		return nil
+		// 質問が見つからない場合は進捗を進める（チャット開始直後など）
+		return true, nil
 	}
 	if s.isJobSelectionQuestion(lastQuestion) {
 		log.Printf("Skipping analysis for job selection question\n")
-		return nil
+		return true, nil
 	}
 
 	targetCategory := s.inferCategoryFromQuestion(lastQuestion)
 	isChoice := !isTextBasedQuestion(lastQuestion)
 
 	result := s.answerEvaluator.EvaluateHumanScoring(lastQuestion, message, isChoice, jobCategoryID != 0, nil)
-	if result.Action != PrecheckScore {
-		log.Printf("Skipping scoring due to precheck: %s\n", result.Reason)
-		return nil
+	if result.Action == PrecheckSkip {
+		// 「わかりません」などのスキップフレーズは進捗カウントしない
+		log.Printf("Skipping progress: skip phrase detected (%s)\n", result.Reason)
+		return false, nil
+	}
+	if result.Action == PrecheckIgnore {
+		// 空・極短回答も進捗カウントしない
+		log.Printf("Skipping progress: answer ignored (%s)\n", result.Reason)
+		return false, nil
 	}
 	if result.Score <= 0 {
-		log.Printf("No human score applied (score=%d)\n", result.Score)
-		return nil
+		log.Printf("No human score applied (score=%d), not counting for progress\n", result.Score)
+		return false, nil
 	}
 
-	return s.updateCategoryScore(userID, sessionID, targetCategory, result.Score)
+	if err := s.updateCategoryScore(userID, sessionID, targetCategory, result.Score); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
-// processChoiceAnswer 選択肢回答を処理してスコアを更新
-func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sessionID, answer string, history []models.ChatMessage, jobCategoryID uint) error {
+// processChoiceAnswer 選択肢回答を処理してスコアを更新する。
+// 戻り値の bool は「有効な品質回答かどうか」を示す（進捗カウントに使用）。
+func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sessionID, answer string, history []models.ChatMessage, jobCategoryID uint) (bool, error) {
 	// 最後のAIの質問を取得
 	var lastQuestion string
 	var targetCategory string
@@ -65,17 +77,18 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 	}
 
 	if lastQuestion == "" {
-		return fmt.Errorf("no previous question found")
+		return false, fmt.Errorf("no previous question found")
 	}
 	if s.isJobSelectionQuestion(lastQuestion) {
 		log.Printf("[Choice Answer] Skipping score update for job selection question\n")
-		return nil
+		// 職種選択は進捗カウントする（ユーザーが意思表示した）
+		return true, nil
 	}
 
 	// AIが生成した質問から対象カテゴリを特定
 	aiQuestions, err := s.aiGeneratedQuestionRepo.FindByUserAndSession(userID, sessionID)
 	if err != nil {
-		return fmt.Errorf("failed to get AI questions: %w", err)
+		return false, fmt.Errorf("failed to get AI questions: %w", err)
 	}
 
 	for i := len(aiQuestions) - 1; i >= 0; i-- {
@@ -89,7 +102,6 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 	}
 
 	if targetCategory == "" {
-		// カテゴリが特定できない場合は、質問文から推測
 		targetCategory = s.inferCategoryFromQuestion(lastQuestion)
 	}
 
@@ -98,12 +110,14 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 	result := s.answerEvaluator.EvaluateHumanScoring(lastQuestion, answer, true, jobCategoryID != 0, nil)
 	if result.Action != PrecheckScore {
 		log.Printf("Skipping choice scoring due to precheck: %s\n", result.Reason)
-		return nil
+		return false, nil
 	}
-	score := result.Score
 
-	// スコアを保存または更新
-	return s.updateCategoryScore(userID, sessionID, targetCategory, score)
+	if err := s.updateCategoryScore(userID, sessionID, targetCategory, result.Score); err != nil {
+		return false, err
+	}
+	// 選択肢回答は選択した内容に関わらず有効（スコア0でも意思表示）
+	return true, nil
 }
 
 // convertChoiceToScore 選択肢をスコアに変換
