@@ -148,9 +148,19 @@ jobs:
                   print("Backlog 課題キーが見つかりません。スキップします。")
                   sys.exit(0)
               clean_title = strip_prefix(GH_TITLE)
+
+              # pr-to-backlog.yml が追記した PR URL セクションを保持する
+              current_issue = bl_request('GET', f"/issues/{bl_key}")
+              current_desc  = (current_issue.get('description') or '') if current_issue else ''
+              pr_match      = re.search(r'\n*## GitHub PR\n[^\n]*', current_desc)
+
+              new_desc = f"GitHub Issue: {GH_URL}\n\n{GH_BODY}"
+              if pr_match:
+                  new_desc = new_desc.rstrip() + pr_match.group(0)
+
               bl_request('PATCH', f"/issues/{bl_key}", {
                   'summary':     clean_title,
-                  'description': f"GitHub Issue: {GH_URL}\n\n{GH_BODY}",
+                  'description': new_desc,
               })
               print(f"Backlog 課題を更新しました: {bl_key}")
 
