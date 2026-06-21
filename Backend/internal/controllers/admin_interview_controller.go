@@ -6,6 +6,7 @@ import (
 	"Backend/internal/services"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -71,6 +72,9 @@ func (c *AdminInterviewController) CreateCompanyQuestion(ctx echo.Context) error
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
+	req.Position = strings.TrimSpace(req.Position)
+	req.Category = strings.TrimSpace(req.Category)
+	req.QuestionText = strings.TrimSpace(req.QuestionText)
 	if req.Category == "" || req.QuestionText == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "category and question_text are required")
 	}
@@ -93,12 +97,16 @@ func (c *AdminInterviewController) UpdateCompanyQuestion(ctx echo.Context) error
 	if c.companyQuestionRepo == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "not configured")
 	}
+	companyID, err := echoUintParam(ctx, "id")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
+	}
 	qID, err := echoUintParam(ctx, "qid")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid question ID")
 	}
 	q, err := c.companyQuestionRepo.FindByID(qID)
-	if err != nil || q == nil {
+	if err != nil || q == nil || q.CompanyID != companyID {
 		return echo.NewHTTPError(http.StatusNotFound, "Question not found")
 	}
 	var req struct {
@@ -112,13 +120,21 @@ func (c *AdminInterviewController) UpdateCompanyQuestion(ctx echo.Context) error
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
 	if req.Position != nil {
-		q.Position = *req.Position
+		q.Position = strings.TrimSpace(*req.Position)
 	}
 	if req.Category != nil {
-		q.Category = *req.Category
+		category := strings.TrimSpace(*req.Category)
+		if category == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "category must not be empty")
+		}
+		q.Category = category
 	}
 	if req.QuestionText != nil {
-		q.QuestionText = *req.QuestionText
+		questionText := strings.TrimSpace(*req.QuestionText)
+		if questionText == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "question_text must not be empty")
+		}
+		q.QuestionText = questionText
 	}
 	if req.Priority != nil {
 		q.Priority = *req.Priority
@@ -137,9 +153,17 @@ func (c *AdminInterviewController) DeleteCompanyQuestion(ctx echo.Context) error
 	if c.companyQuestionRepo == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "not configured")
 	}
+	companyID, err := echoUintParam(ctx, "id")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
+	}
 	qID, err := echoUintParam(ctx, "qid")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid question ID")
+	}
+	q, err := c.companyQuestionRepo.FindByID(qID)
+	if err != nil || q == nil || q.CompanyID != companyID {
+		return echo.NewHTTPError(http.StatusNotFound, "Question not found")
 	}
 	if err := c.companyQuestionRepo.Delete(qID); err != nil {
 		return echoInternalError(err)

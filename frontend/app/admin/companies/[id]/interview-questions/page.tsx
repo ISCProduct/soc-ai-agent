@@ -87,12 +87,20 @@ export default function AdminInterviewQuestionsPage() {
   const [saving, setSaving] = useState(false)
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null)
 
+  const fetchJSON = async (url: string) => {
+    const response = await fetch(url, { headers: authService.getAdminFetchHeaders() })
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`)
+    }
+    return response.json()
+  }
+
   const fetchQuestions = () => {
     setLoading(true)
     setError('')
     Promise.all([
-      fetch(`/api/admin/companies/${id}`, { headers: authService.getAdminFetchHeaders() }).then(r => r.json()),
-      fetch(`/api/admin/companies/${id}/interview-questions`, { headers: authService.getAdminFetchHeaders() }).then(r => r.json()),
+      fetchJSON(`/api/admin/companies/${id}`),
+      fetchJSON(`/api/admin/companies/${id}/interview-questions`),
     ])
       .then(([company, data]) => {
         setCompanyName(company.name || '')
