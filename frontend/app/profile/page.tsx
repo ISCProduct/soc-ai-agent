@@ -353,7 +353,7 @@ export default function ProfilePage() {
           {/* 右カラム: GitHub スキル分析（ゲストアカウントは非表示） */}
           {!isGuest && (
             <Box sx={{ flex: 1, minWidth: 0 }}>
-              <GitHubSkills userId={user.user_id} />
+              <GitHubSkills userId={user.user_id} targetRole={user.target_level} />
             </Box>
           )}
         </Box>

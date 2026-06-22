@@ -43,13 +43,13 @@ type UserSummary = {
   registered_at: string
   session_count: number
   last_session_at: string | null
-  avg_score: number | null
+  avg_score: number | null | undefined
 }
 
 type SessionEntry = {
   session_id: number
   ended_at: string | null
-  avg_score: number | null
+  avg_score: number | null | undefined
   scores: Record<string, number> | null
 }
 
@@ -68,8 +68,8 @@ const SORT_OPTIONS = [
   { value: 'session_count_desc', label: '練習回数（多い順）' },
 ]
 
-function ScoreBadge({ score }: { score: number | null }) {
-  if (score === null) return <Typography color="text.disabled" fontSize="0.85rem">—</Typography>
+function ScoreBadge({ score }: { score: number | null | undefined }) {
+  if (score == null) return <Typography color="text.disabled" fontSize="0.85rem">—</Typography>
   const color = score >= 4 ? '#388e3c' : score >= 3 ? '#f57c00' : '#d32f2f'
   return (
     <Box sx={{

@@ -31,6 +31,7 @@ func SetupAuthRoutes(api *echo.Group, authController *controllers.AuthController
 	authProtected := api.Group("/auth", EchoUserAuth(userSecret))
 	authProtected.GET("/user", authController.GetUser)
 	authProtected.PUT("/profile", authController.UpdateProfile)
+	authProtected.POST("/profile", authController.UpdateProfile) // POST互換（旧クライアント対応）
 	authProtected.DELETE("/account", authController.DeleteAccount)
 }
 

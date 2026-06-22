@@ -1,0 +1,67 @@
+# CodeRabbit 設定ファイル
+# https://docs.coderabbit.ai/guides/configure-coderabbit
+
+language: ja-JP
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+
+  path_filters:
+    - "!**/__pycache__/**"
+    - "!**/*.pyc"
+    - "!**/vendor/**"
+    - "!**/.next/**"
+    - "!**/node_modules/**"
+    - "!**/*.min.js"
+    - "!**/dist/**"
+
+  path_instructions:
+    - path: "Backend/**/*.go"
+      instructions: |
+        Go 1.25+ のプロジェクトです。以下の規約を確認してください:
+        - DDD構造: Controller → Service → Repository → GORMモデル の依存方向を遵守しているか
+        - 手動DIを使用している（DIフレームワーク不使用）
+        - `any` / `slices` / `for i := range n` / `errors.Is/As` を適切に使用しているか
+        - テーブル駆動テストを採用しているか
+        - エラーハンドリングは `echoInternalError()` などの共通ヘルパーを使用しているか
+        - インターフェースはリポジトリ層に定義されているか (`domain/repository/`)
+        - 不要なコメントがないか（WHYが明確でないコメントは不要）
+
+    - path: "Backend/internal/models/**"
+      instructions: |
+        GORMモデルの定義を確認してください:
+        - `gorm:"..."` タグが適切に設定されているか
+        - `AutoMigrate` への登録が `migrate.go` に追加されているか
+        - JSONタグが snake_case で定義されているか
+
+    - path: "frontend/**/*.{ts,tsx}"
+      instructions: |
+        Next.js App Router + TypeScript + MUI のプロジェクトです:
+        - `any` 型の使用は禁止（型安全を維持すること）
+        - Functional Components + Hooks パターンを使用しているか
+        - `use client` / `use server` ディレクティブが適切に使われているか
+        - API呼び出しは `NEXT_PUBLIC_BACKEND_URL` を使用しているか
+
+    - path: "rag/**/*.py"
+      instructions: |
+        Python 3.10+ / FastAPI / LangChain のプロジェクトです:
+        - 型ヒントが付与されているか
+        - Pydantic モデルを使用しているか
+        - `logging` モジュールで適切にログを出力しているか
+        - 依存パッケージは `constraints.txt` に記載されているか
+        - プロンプトはバージョン管理されているか
+
+    - path: ".github/workflows/**"
+      instructions: |
+        GitHub Actions ワークフローを確認してください:
+        - Secrets が適切にマスクされているか（直接埋め込みは禁止）
+        - `permissions` が最小権限になっているか
+        - シェルスクリプトのインジェクション対策がされているか
+
+chat:
+  auto_reply: true

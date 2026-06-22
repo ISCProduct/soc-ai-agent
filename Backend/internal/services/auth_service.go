@@ -408,7 +408,7 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 		IsGuest:                  false,
 		TargetLevel:              req.TargetLevel,
 		SchoolName:               req.SchoolName,
-		IsAdmin:                  isAdminIdentity(req.Email),
+		IsAdmin:                  false,
 		CertificationsAcquired:   req.CertificationsAcquired,
 		CertificationsInProgress: req.CertificationsInProgress,
 	}
@@ -481,8 +481,6 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 			_ = s.userRepo.UpdateUser(user)
 		}
 	}
-
-	promoteAdminIfMatched(user, s.userRepo)
 
 	isOAuth := user.OAuthProvider != ""
 	emailVerified := user.EmailVerifiedAt != nil

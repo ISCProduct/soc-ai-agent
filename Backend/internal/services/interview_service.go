@@ -796,13 +796,9 @@ func buildInterviewSystemPrompt(
 			base += "\n応募職種: " + position
 		}
 		if companyInfo != "" {
-			if companyType == "general" {
-				base += "\n\n【企業研究情報（公式サイトより）】\n" + companyInfo
-			} else {
-				base += "\n企業概要: " + companyInfo
-			}
+			base += "\n\n【企業情報】\n" + companyInfo
 		}
-		base += "\n\n上記の企業・職種に合わせた質問を行ってください。"
+		base += "\n\n上記の企業・職種に合わせた質問を行ってください。企業文化・働き方・福利厚生の情報がある場合は、それらを踏まえた「この企業ならでは」の深掘り質問を取り入れてください。"
 	}
 
 	if companyType == "sier" {
@@ -813,7 +809,8 @@ func buildInterviewSystemPrompt(
 - 上流工程（要件定義・基本設計）への関与実績を確認する
 - ウォーターフォール・アジャイルどちらの経験があるか確認する
 - IPA資格や技術資格の取得状況・今後の学習意欲を聞く
-- 多様な現場・技術スタックへの適応力を問う`
+- 多様な現場・技術スタックへの適応力を問う
+- 技術フェーズ（詳細設計・実装・テスト）と要件定義フェーズの両方を経験しているか確認する`
 	}
 
 	return strings.TrimSpace(base)
@@ -1134,6 +1131,14 @@ func ttsVoiceForGenderAndLang(gender, lang string) string {
 	default: // female
 		return "shimmer"
 	}
+}
+
+// TTSVoiceForGenderAndLang is an exported wrapper for ttsVoiceForGenderAndLang for external tests.
+func TTSVoiceForGenderAndLang(gender, lang string) string { return ttsVoiceForGenderAndLang(gender, lang) }
+
+// RealtimeVoiceForLangAndGender is an exported wrapper for realtimeVoiceForLangAndGender for external tests.
+func RealtimeVoiceForLangAndGender(lang, gender string) string {
+	return realtimeVoiceForLangAndGender(lang, gender)
 }
 
 // realtimeVoiceForLangAndGender 言語・性別コードに応じた推奨ボイスを返す。

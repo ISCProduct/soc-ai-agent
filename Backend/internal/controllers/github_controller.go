@@ -142,12 +142,13 @@ func (c *GitHubController) SummarizeRepo(ctx echo.Context) error {
 	var body struct {
 		FullName     string `json:"full_name"`
 		ForceRefresh bool   `json:"force_refresh"`
+		TargetRole   string `json:"target_role"`
 	}
 	if err := ctx.Bind(&body); err != nil || body.FullName == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "full_name is required")
 	}
 
-	summary, err := c.githubService.SummarizeRepo(ctx.Request().Context(), userID, body.FullName, body.ForceRefresh)
+	summary, err := c.githubService.SummarizeRepo(ctx.Request().Context(), userID, body.FullName, body.ForceRefresh, body.TargetRole)
 	if err != nil {
 		return echoInternalError(err)
 	}

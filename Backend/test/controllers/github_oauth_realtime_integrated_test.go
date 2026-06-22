@@ -207,7 +207,7 @@ func TestGitHubController_SummarizeRepo_Success(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	gh := &mocks.GitHubServiceMock{}
-	gh.On("SummarizeRepo", tmock.Anything, uint(1), "owner/repo", false).
+	gh.On("SummarizeRepo", tmock.Anything, uint(1), "owner/repo", false, "").
 		Return(&models.GitHubRepoSummary{FullName: "owner/repo"}, nil)
 	assertStatus(t, newGitHubController(gh, nil).SummarizeRepo, newCtx(req, rec), http.StatusOK)
 	gh.AssertExpectations(t)
@@ -227,11 +227,8 @@ func TestOAuthController_GoogleLogin_Success(t *testing.T) {
 
 	svc := &mocks.OAuthServiceMock{}
 	svc.On("GetGoogleAuthURL", tmock.AnythingOfType("string")).Return("https://accounts.google.com/auth?state=xxx")
-	assertStatus(t, newOAuthController(svc).GoogleLogin, newCtx(req, rec), http.StatusOK)
-
-	var body map[string]string
-	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-	assert.Contains(t, body["auth_url"], "accounts.google.com")
+	assertStatus(t, newOAuthController(svc).GoogleLogin, newCtx(req, rec), http.StatusTemporaryRedirect)
+	assert.Contains(t, rec.Header().Get("Location"), "accounts.google.com")
 }
 
 // ---- GitHubLogin ----
@@ -242,11 +239,8 @@ func TestOAuthController_GitHubLogin_Success(t *testing.T) {
 
 	svc := &mocks.OAuthServiceMock{}
 	svc.On("GetGitHubAuthURL", tmock.AnythingOfType("string")).Return("https://github.com/login/oauth/authorize?state=xxx")
-	assertStatus(t, newOAuthController(svc).GitHubLogin, newCtx(req, rec), http.StatusOK)
-
-	var body map[string]string
-	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-	assert.Contains(t, body["auth_url"], "github.com")
+	assertStatus(t, newOAuthController(svc).GitHubLogin, newCtx(req, rec), http.StatusTemporaryRedirect)
+	assert.Contains(t, rec.Header().Get("Location"), "github.com")
 }
 
 // ---- GoogleCallback ----
