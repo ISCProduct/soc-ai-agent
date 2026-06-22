@@ -406,6 +406,65 @@ def retrieve_docs(docs: List[str], query: str) -> List[str]:
     return top_docs
 
 
+# -----------------------
+# フェーズ1: ドメインベース信頼度スコアリング
+# -----------------------
+
+def _extract_domains_from_text(text: str) -> List[str]:
+    """テキストから URL ドメインを抽出する。見つからなければ空リストを返す。"""
+    domains = []
+    try:
+        for m in re.finditer(r"https?://([^/\s]+)", text):
+            host = m.group(1).lower()
+            # strip port
+            host = host.split(":")[0]
+            domains.append(host)
+    except Exception:
+        pass
+    return domains
+
+
+def _domain_trust_score(domain: str, company_name: str) -> float:
+    """ドメインに対して単純な信頼度スコアを返す（0.0-1.0）。"""
+    if not domain:
+        return 0.5
+    d = domain.lower()
+    cn = re.sub(r"[^a-z0-9]", "", company_name.lower())
+    # 高評価: 企業名がドメインに含まれる（公式サイトの可能性）
+    if cn and cn in d:
+        return 0.95
+    # IR・投資家情報
+    if any(x in d for x in ["ir", "investor", "investorrelations", "sec"]):
+        return 0.9
+    # ニュース・主要メディア
+    news_indicators = ["news", "reuters", "nhk", "mainichi", "asahi", "nikkei", "yomiuri", "bloomberg"]
+    if any(x in d for x in news_indicators):
+        return 0.75
+    # SNS は低め
+    social = ["twitter.com", "x.com", "facebook.com", "linkedin.com", "instagram.com", "note.com", "reddit.com"]
+    if any(s in d for s in social):
+        return 0.2
+    # デフォルト中立
+    return 0.5
+
+
+def rank_results_by_domain_trust(raw_texts: List[str], company_name: str) -> List[str]:
+    """各 raw_text からドメインを抽出し、信頼度スコアで上位に並べ替える。"""
+    scored = []
+    for text in raw_texts:
+        domains = _extract_domains_from_text(text)
+        if domains:
+            # pick best domain score
+            scores = [_domain_trust_score(d, company_name) for d in domains]
+            score = max(scores) if scores else 0.5
+        else:
+            # ドメインが見つからない場合は中立スコア
+            score = 0.5
+        scored.append((score, text))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [t for _, t in scored]
+
+
 def run_crewai(
         resume_text: str,
         company_name: str,
@@ -413,6 +472,11 @@ def run_crewai(
         context_docs: List[str],
         context_source: str = "none",
 ) -> str:
+    """CrewAI を実行し、構造化されたレポートを試みる。
+
+    フェーズ1: 出力をまず文字列で受け取り、JSON 形式なら Pydantic で検証。
+    構造化に失敗した場合は元の文字列をフォールバックとして返し、詳細ログを残す。
+    """
     safe_company = _sanitize_company_name_for_query(company_name)
     safe_job_title = _sanitize_job_title(job_title) if job_title else "指定なし"
     context_block = "\n\n".join(context_docs)
@@ -494,7 +558,37 @@ def run_crewai(
         verbose=CREWAI_VERBOSE,
     )
 
-    return str(crew.kickoff())
+    # Run crew and attempt to parse structured output
+    try:
+        raw_out = crew.kickoff()
+        out_str = str(raw_out)
+    except Exception as exc:
+        logger.exception("crew kickoff failed company=%s error=%s", safe_company, exc)
+        return f"※CrewAI実行に失敗しました: {str(exc)[:300]}"
+
+    # Try JSON parse -> Pydantic validation
+    class CrewReport(BaseModel):
+        report: str
+        sources: Optional[List[str]] = None
+
+    try:
+        parsed = None
+        # attempt to find JSON substring
+        json_match = re.search(r"\{[\s\S]*\}\s*$", out_str)
+        if json_match:
+            candidate = json_match.group(0)
+            parsed_json = json.loads(candidate)
+            parsed = CrewReport(**parsed_json)
+            return parsed.report
+        # fallback: if output starts with expected heading, return raw
+        if out_str.strip().startswith("【企業別レビュー報告書】"):
+            return out_str
+        # otherwise return raw but log warning
+        logger.warning("crew output not structured, returning raw for company=%s len=%d", safe_company, len(out_str))
+        return out_str
+    except Exception as exc:
+        logger.exception("CrewAI output parsing failed company=%s error=%s output=%s", safe_company, exc, out_str[:1000])
+        return f"※CrewAI出力の構造化に失敗しました（詳細はログ）。出力冒頭: {out_str[:300]}"
 
 
 def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
@@ -664,9 +758,16 @@ async def _run_web_search_pipeline(company_name: str, job_title: str) -> str:
         logger.warning("web search pipeline: no results company=%s", company_name)
         return ""
 
+    # ドメインベースの信頼度で結果を再ランキングしてから要約（フェーズ1: 可視化＋加重）
+    try:
+        ranked_results = rank_results_by_domain_trust(raw_results, company_name)
+    except Exception as exc:
+        logger.warning("ranking by domain trust failed company=%s error=%s", company_name, exc)
+        ranked_results = raw_results
+
     # 採用観点での要約
     summary = await loop.run_in_executor(
-        None, _summarize_for_hiring, company_name, job_title, raw_results
+        None, _summarize_for_hiring, company_name, job_title, ranked_results
     )
 
     # JSONL ログ保存（非同期、失敗しても処理を止めない）
