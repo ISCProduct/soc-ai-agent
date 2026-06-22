@@ -594,52 +594,89 @@ def run_crewai(
 def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
     """LLMを使って企業・職種に応じた3〜5つの検索クエリを生成する。
 
-    以下の3軸をカバーするクエリを生成する:
-    - 採用方針（採用基準・求める人物像・企業文化）
-    - 選考の特徴（面接スタイル・選考フロー・評価ポイント）
-    - 最近の事業展開（直近ニュース・IR情報・新規事業）
+    改善点：LLM失敗時は業種/職種テンプレートを用いたフォールバックを行う。
+    生成クエリは短TTLのファイルキャッシュに保存して再利用する。
     """
     api_key = os.getenv("OPENAI_API_KEY")
     safe_company = _sanitize_company_name_for_query(company_name)
     role_text = _sanitize_job_title(job_title) if job_title else "一般職"
-    if not api_key:
-        return [
-            f"{safe_company} {role_text} 採用方針 求める人物像",
-            f"{safe_company} {role_text} 面接 選考 特徴",
-            f"{safe_company} 最近の事業展開 ニュース IR",
-        ]
-    client = OpenAI(api_key=api_key)
-    prompt = (
-        "以下の企業と職種について、採用情報を調査するための検索クエリを3〜5個生成してください。\n\n"
-        "企業名: {company}\n"
-        "職種: {role}\n\n"
-        "以下の3軸をカバーする検索クエリを生成してください。\n"
-        "軸1: 採用方針（採用基準・求める人物像・企業文化）\n"
-        "軸2: 選考の特徴（面接スタイル・選考フロー・評価ポイント）\n"
-        "軸3: 最近の事業展開（直近のニュース・IR情報・新規事業）\n\n"
-        "検索エンジンのヒット率を最大化するため、具体的なキーワードを組み合わせてください。\n"
-        "出力はJSONのみ: {{\"queries\": [\"クエリ1\", \"クエリ2\", ...]}}"
-    ).format(company=safe_company, role=role_text)
+
+    # 簡易ファイルキャッシュ
+    cache_ttl = int(os.getenv("RAG_QUERY_CACHE_TTL_SECONDS", "300"))
+    cache_path = os.path.join(SEARCH_LOG_DIR, "query_cache.json")
+    cache_key = f"{safe_company}::{role_text}"
     try:
-        resp = client.chat.completions.create(
-            model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o"),
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=300,
-            response_format={"type": "json_object"},
-        )
-        data = json.loads(resp.choices[0].message.content or "{}")
-        queries = data.get("queries", [])
-        if queries:
-            logger.info("generated %d search queries company=%s", len(queries), safe_company)
-            return queries[:5]
+        if os.path.exists(cache_path):
+            with open(cache_path, "r", encoding="utf-8") as f:
+                cache = json.load(f)
+            entry = cache.get(cache_key)
+            if entry:
+                ts = entry.get("ts", 0)
+                if time.time() - ts < cache_ttl:
+                    return entry.get("queries", [])
     except Exception as exc:
-        logger.warning("query generation failed company=%s error=%s", safe_company, exc)
-    return [
-        f"{company_name} {role_text} 採用方針 求める人物像",
-        f"{company_name} {role_text} 面接 選考 特徴",
-        f"{company_name} 最近の事業展開 ニュース IR",
-    ]
+        logger.warning("query cache read failed error=%s", exc)
+
+    def save_to_cache(key: str, queries: List[str]) -> None:
+        try:
+            cache = {}
+            if os.path.exists(cache_path):
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    cache = json.load(f)
+            cache[key] = {"ts": int(time.time()), "queries": queries}
+            os.makedirs(SEARCH_LOG_DIR, exist_ok=True)
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(cache, f, ensure_ascii=False)
+        except Exception as exc:
+            logger.warning("query cache save failed error=%s", exc)
+
+    # テンプレートベースのフォールバック
+    def template_queries(cn: str, role: str) -> List[str]:
+        return [
+            f"{cn} {role} 採用方針 求める人物像",
+            f"{cn} {role} 面接 選考 特徴 口コミ",
+            f"{cn} {role} 採用 ニュース IR 採用情報",
+            f"{cn} 採用 求める人物像 企業文化",
+            f"{cn} 採用 選考 フロー 面接 質問",
+        ]
+
+    # LLM からの生成を試みる
+    if api_key:
+        try:
+            client = OpenAI(api_key=api_key)
+            prompt = (
+                "以下の企業と職種について、採用情報を調査するための検索クエリを3〜5個生成してください。\n\n"
+                "企業名: {company}\n"
+                "職種: {role}\n\n"
+                "以下の3軸をカバーする検索クエリを生成してください。\n"
+                "軸1: 採用方針（採用基準・求める人物像・企業文化）\n"
+                "軸2: 選考の特徴（面接スタイル・選考フロー・評価ポイント）\n"
+                "軸3: 最近の事業展開（直近のニュース・IR情報・新規事業）\n\n"
+                "検索エンジンのヒット率を最大化するため、具体的なキーワードを組み合わせてください。\n"
+                "出力はJSONのみ: {{\"queries\": [\"クエリ1\", \"クエリ2\", ...]}}"
+            ).format(company=safe_company, role=role_text)
+            resp = client.chat.completions.create(
+                model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o"),
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=300,
+                response_format={"type": "json_object"},
+            )
+            data = json.loads(resp.choices[0].message.content or "{}")
+            queries = data.get("queries", [])
+            if queries:
+                queries = [q.strip() for q in queries if q and isinstance(q, str)]
+                if queries:
+                    logger.info("generated %d search queries company=%s", len(queries), safe_company)
+                    save_to_cache(cache_key, queries[:5])
+                    return queries[:5]
+        except Exception as exc:
+            logger.warning("query generation failed company=%s error=%s", safe_company, exc)
+
+    # フォールバック: テンプレートを使用
+    tqs = template_queries(company_name, role_text)
+    save_to_cache(cache_key, tqs[:5])
+    return tqs[:5]
 
 
 def _web_search_openai(query: str) -> str:
