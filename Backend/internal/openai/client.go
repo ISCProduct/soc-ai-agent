@@ -301,10 +301,12 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 		}
 		content, err := cli.callResponsesAPI(ctxReq, messageInput, model, nil, 600, true)
 		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
+			// キャッシュ活用のため、system/user を分離したまま再試行する（combinedPrompt を作らない）
 			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, nil, 600, false)
 		}
 		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
-			content, err = cli.callResponsesAPI(ctxReq, input, model, nil, 600, false)
+			// それでも空応答なら maxOutputTokens を増やして再試行（system/user を分離したまま）
+			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, nil, 1200, false)
 		}
 		if err != nil && strings.Contains(err.Error(), "max_output_tokens") {
 			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, nil, 1200, true)
@@ -405,15 +407,12 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 		}
 		content, err := cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 100, true)
 		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
+			// キャッシュを活かすために system/user を分離したまま再試行
 			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 100, false)
 		}
 		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
-			combinedPrompt := strings.TrimSpace(systemPrompt)
-			if combinedPrompt != "" {
-				combinedPrompt += "\n\n"
-			}
-			combinedPrompt += userPrompt
-			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, combinedPrompt, model, &temperature, 100, false)
+			// 空応答が続く場合は出力トークン上限を増やして再試行
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 200, false)
 		}
 		if err != nil && strings.Contains(err.Error(), "max_output_tokens") {
 			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 200, true)
