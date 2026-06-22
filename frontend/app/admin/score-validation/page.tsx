@@ -95,7 +95,7 @@ function CorrelationTab({ headers }: { headers: Record<string, string> }) {
   useEffect(() => {
     setLoading(true)
     fetch('/api/admin/score-validation/correlation', { headers })
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
       .then(d => setData(d))
       .catch(() => setError('相関データの取得に失敗しました'))
       .finally(() => setLoading(false))
@@ -166,7 +166,7 @@ function PhaseMetricsTab({ headers }: { headers: Record<string, string> }) {
   useEffect(() => {
     setLoading(true)
     fetch('/api/admin/score-validation/phase-metrics', { headers })
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
       .then(d => setData(d))
       .catch(() => setError('フェーズ別メトリクスの取得に失敗しました'))
       .finally(() => setLoading(false))
@@ -226,7 +226,7 @@ function ABTestTab({ headers }: { headers: Record<string, string> }) {
   const fetchVariants = useCallback(() => {
     setLoading(true)
     fetch('/api/admin/score-validation/variants', { headers })
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
       .then(d => setVariants(d.experiments ?? []))
       .catch(() => setError('バリアント一覧の取得に失敗しました'))
       .finally(() => setLoading(false))
@@ -237,7 +237,7 @@ function ABTestTab({ headers }: { headers: Record<string, string> }) {
   const fetchResults = useCallback((exp: string) => {
     if (!exp) return
     fetch(`/api/admin/score-validation/variants/results?experiment=${encodeURIComponent(exp)}`, { headers })
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
       .then(d => setResults(d.results ?? []))
       .catch(() => setResults([]))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -418,7 +418,7 @@ function CalibrationTab({ headers }: { headers: Record<string, string> }) {
   const fetchHistory = useCallback(() => {
     setLoading(true)
     fetch('/api/admin/score-validation/calibration/history', { headers })
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
       .then(d => setHistory(d.history ?? []))
       .catch(() => setError('キャリブレーション履歴の取得に失敗しました'))
       .finally(() => setLoading(false))
