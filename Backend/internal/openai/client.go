@@ -14,7 +14,6 @@ import (
 	"time"
 
 	openai "github.com/sashabaranov/go-openai"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 // UsageHook はAPIコール成功時に呼ばれるコールバック。
@@ -31,19 +30,10 @@ type Client struct {
 }
 
 var (
-	// OpenAI prompt cache hit rate metric (0.0-1.0)
-	openaiPromptCacheHitRate = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Namespace: "soc",
-		Subsystem: "openai",
-		Name:      "prompt_cache_hit_rate",
-		Help:      "OpenAI prompt cache hit rate (0.0-1.0)",
-	}, []string{"model"})
+	// openaiPromptCacheHitRate は以前は prometheus メトリクスでしたが、CI の依存管理簡素化のため無効化しています。
+	// 将来必要なら prometheus を再導入してください。
+	openaiPromptCacheHitRate interface{} = nil
 )
-
-func init() {
-	// Register metric; ignore error if already registered
-	_ = prometheus.Register(openaiPromptCacheHitRate)
-}
 
 
 func NewFromEnv(optionalModel string) (*Client, error) {
@@ -196,10 +186,7 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 			}); err == nil {
 				log.Println(string(jl))
 			}
-			// Update prometheus metric if available
-			if openaiPromptCacheHitRate != nil {
-				openaiPromptCacheHitRate.WithLabelValues(model).Set(hit)
-			}
+			// prometheus metrics disabled in this environment
 		}
 	}
 	if strings.TrimSpace(parsed.OutputText) != "" {
@@ -534,9 +521,7 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 							log.Println(string(jl))
 						}
 						// Update prometheus metric if available
-						if openaiPromptCacheHitRate != nil {
-							openaiPromptCacheHitRate.WithLabelValues(req.Model).Set(hit)
-						}
+						// prometheus metrics disabled in this environment
 					}
 				}
 				return content, nil
