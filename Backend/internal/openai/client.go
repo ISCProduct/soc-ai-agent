@@ -115,7 +115,7 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/responses", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.baseURL+"/responses", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -373,6 +373,9 @@ func (cli *Client) Embedding(ctx context.Context, input string, modelOverride ..
 	if len(resp.Data) == 0 {
 		return nil, errors.New("empty embedding response")
 	}
+	if cli.OnUsage != nil && resp.Usage.PromptTokens > 0 {
+		cli.OnUsage(model, resp.Usage.PromptTokens, 0)
+	}
 	return resp.Data[0].Embedding, nil
 }
 
@@ -510,9 +513,8 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 				if cli.OnUsage != nil {
 					cli.OnUsage(req.Model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 				}
-				if resp != nil {
-					// キャッシュヒットのログを出力（存在すれば）
-					if resp.Usage.PromptTokensDetails != nil {
+				// キャッシュヒットのログを出力（存在すれば）
+				if resp.Usage.PromptTokensDetails != nil {
 						cached := resp.Usage.PromptTokensDetails.CachedTokens
 						var hit float64
 						if resp.Usage.PromptTokens > 0 {
@@ -534,9 +536,8 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 							log.Println(string(jl))
 						}
 						// Update prometheus metric if available
-						if openaiPromptCacheHitRate != nil {
-							openaiPromptCacheHitRate.WithLabelValues(req.Model).Set(hit)
-						}
+					if openaiPromptCacheHitRate != nil {
+						openaiPromptCacheHitRate.WithLabelValues(req.Model).Set(hit)
 					}
 				}
 				return content, nil
@@ -586,7 +587,7 @@ func (cli *Client) WebSearchQuery(ctx context.Context, query string) (string, er
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/responses", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.baseURL+"/responses", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -616,14 +617,22 @@ func (cli *Client) WebSearchQuery(ctx context.Context, query string) (string, er
 		Type    string          `json:"type"`
 		Content []outputContent `json:"content"`
 	}
+	type webSearchUsage struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	}
 	type webSearchResponse struct {
-		Output     []outputItem `json:"output"`
-		OutputText string       `json:"output_text"`
+		Output     []outputItem   `json:"output"`
+		OutputText string         `json:"output_text"`
+		Usage      webSearchUsage `json:"usage"`
 	}
 
 	var parsed webSearchResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return "", err
+	}
+	if cli.OnUsage != nil && (parsed.Usage.InputTokens > 0 || parsed.Usage.OutputTokens > 0) {
+		cli.OnUsage(model, parsed.Usage.InputTokens, parsed.Usage.OutputTokens)
 	}
 	if strings.TrimSpace(parsed.OutputText) != "" {
 		return strings.TrimSpace(parsed.OutputText), nil

@@ -1,14 +1,17 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import {
   Card,
   CardContent,
   Divider,
+  IconButton,
   Stack,
   TextField,
   Typography,
 } from '@mui/material'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService } from '@/lib/auth'
 import { PageContainer } from '@/components/admin/PageContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
@@ -73,9 +76,12 @@ export default function AdminAuditLogsPage() {
 
   return (
     <PageContainer maxWidth={1100}>
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
-        監査ログ
-      </Typography>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+        <IconButton component={Link} href="/admin"><ArrowBackIcon /></IconButton>
+        <Typography variant="h4" fontWeight="bold">
+          監査ログ
+        </Typography>
+      </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         管理者操作の履歴を確認できます。
       </Typography>

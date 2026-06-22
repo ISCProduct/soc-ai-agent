@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import {
   Alert,
   Box,
@@ -12,12 +13,14 @@ import {
   Divider,
   FormControlLabel,
   FormGroup,
+  IconButton,
   MenuItem,
   Stack,
   TextField,
   Typography,
 } from '@mui/material'
 import Grid from '@mui/material/GridLegacy'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService } from '@/lib/auth'
 
 type CrawlSource = {
@@ -339,9 +342,12 @@ export default function AdminCrawlingPage() {
 
   return (
     <Box sx={{ p: 4, maxWidth: 1100, mx: 'auto' }}>
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
-        自動クローリング管理
-      </Typography>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+        <IconButton component={Link} href="/admin"><ArrowBackIcon /></IconButton>
+        <Typography variant="h4" fontWeight="bold">
+          自動クローリング管理
+        </Typography>
+      </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         週次・月次で企業データを自動更新します。対象URLごとにスケジュールを設定してください。
       </Typography>

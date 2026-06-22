@@ -240,6 +240,8 @@ func (p *Pipeline) Run(ctx context.Context, req RunRequest) (*RunResult, error) 
 				if node.MatchScore > existing.MatchScore {
 					existing.MatchScore = node.MatchScore
 				}
+				// 関連会社・事業内容は先着優先でマージ（空の場合のみ上書き）
+				mergeRelations(existing, node)
 			} else {
 				nodes[node.CorporateNumber] = node
 			}
@@ -262,6 +264,19 @@ func (p *Pipeline) Run(ctx context.Context, req RunRequest) (*RunResult, error) 
 		Logs:       log.Lines(),
 		Warnings:   warnings,
 	}, nil
+}
+
+// mergeRelations copies relation fields from src into dst when dst fields are empty.
+func mergeRelations(dst, src *CompanyNode) {
+	if dst.BusinessDescription == "" {
+		dst.BusinessDescription = src.BusinessDescription
+	}
+	if len(dst.RelatedCompanies) == 0 {
+		dst.RelatedCompanies = src.RelatedCompanies
+	}
+	if len(dst.BusinessPartners) == 0 {
+		dst.BusinessPartners = src.BusinessPartners
+	}
 }
 
 func countSite(companies []*RawCompany, site string) int {

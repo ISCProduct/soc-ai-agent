@@ -196,6 +196,76 @@ func (c *AdminCompanyController) SyncGBiz(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, result)
 }
 
+// WebSearchCompanyInfo POST /api/admin/companies/web-search
+// 企業名をもとにOpenAI WebSearchで一般的な企業情報を取得してプレビュー用に返す
+func (c *AdminCompanyController) WebSearchCompanyInfo(ctx echo.Context) error {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+	}
+	if c.openaiClient == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
+	}
+
+	prompt := fmt.Sprintf(
+		`「%s」という企業の情報を調査してください。以下のJSON形式のみで回答してください（余分な説明は不要）。
+{
+  "description": "企業概要（100〜200文字程度）",
+  "industry": "業種（例: IT・ソフトウェア, 金融, 製造業）",
+  "location": "本社所在地（例: 東京都渋谷区）",
+  "website_url": "公式サイトURL（https://から始まる）",
+  "founded_year": 設立年（整数、不明なら0）,
+  "employee_count": 従業員数（整数、不明なら0）,
+  "main_business": "主要事業内容（50〜100文字程度）",
+  "culture": "企業文化・働き方の特徴（50〜100文字程度）",
+  "work_style": "勤務スタイル（リモート / ハイブリッド / オフィス のいずれか、不明なら空文字）"
+}`,
+		req.Name,
+	)
+
+	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), 30*time.Second)
+	defer cancel()
+
+	text, err := c.openaiClient.WebSearchQuery(reqCtx, prompt)
+	if err != nil {
+		return echoInternalError(err)
+	}
+
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start == -1 || end == -1 || end <= start {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to parse web search response")
+	}
+
+	type companyInfoResult struct {
+		Description   string `json:"description"`
+		Industry      string `json:"industry"`
+		Location      string `json:"location"`
+		WebsiteURL    string `json:"website_url"`
+		FoundedYear   int    `json:"founded_year"`
+		EmployeeCount int    `json:"employee_count"`
+		MainBusiness  string `json:"main_business"`
+		Culture       string `json:"culture"`
+		WorkStyle     string `json:"work_style"`
+	}
+	var result companyInfoResult
+	if err := json.Unmarshal([]byte(text[start:end+1]), &result); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to parse company info json")
+	}
+
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.web_search", "company", 0, map[string]any{
+		"name": req.Name,
+	})
+
+	return ctx.JSON(http.StatusOK, result)
+}
+
 // FetchTechStack POST /api/admin/companies/:id/tech-stack-search
 // OpenAI WebSearchで企業の技術スタックを取得してDBを更新する
 func (c *AdminCompanyController) FetchTechStack(ctx echo.Context) error {

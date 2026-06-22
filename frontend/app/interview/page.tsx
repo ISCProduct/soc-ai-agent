@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, Suspense } from 'react'
+import { useEffect, useRef, useState, Suspense, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Box,
@@ -45,6 +45,7 @@ import { interviewApi, interviewLimits, InterviewReport, InterviewSession } from
 import { formatSeconds, parseJsonSafe, parseMediaError, parseMultipartResponse } from '@/lib/interview-utils'
 import ThreeAvatar from './components/ThreeAvatar'
 import InterviewSummary from './components/InterviewSummary'
+import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
 
 const PRIMARY = '#ec5b13'
 const BG_LIGHT = '#f8f6f6'
@@ -141,9 +142,21 @@ function InterviewContent() {
   const [videoUploadProgress, setVideoUploadProgress] = useState(0)
   const [videoSizeWarning, setVideoSizeWarning] = useState<string | null>(null)
 
+  const [scoresBefore, setScoresBefore] = useState<WeightScore[] | null>(null)
+  const [scoresAfter, setScoresAfter] = useState<WeightScore[] | null>(null)
+
   const streamRef = useRef<MediaStream | null>(null)
   const lobbyVideoRef = useRef<HTMLVideoElement | null>(null)
   const sessionVideoRef = useRef<HTMLVideoElement | null>(null)
+  // video 要素がマウントした瞬間にストリームをアタッチするための callback ref。
+  // useEffect([status]) では DOM コミット前に status が更新されるため srcObject が設定されないことがある。
+  const sessionVideoCallbackRef = useCallback((node: HTMLVideoElement | null) => {
+    sessionVideoRef.current = node
+    if (node && streamRef.current) {
+      node.srcObject = streamRef.current
+      node.play().catch(() => undefined)
+    }
+  }, [])
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const videoRecorderRef = useRef<MediaRecorder | null>(null)
@@ -260,7 +273,12 @@ function InterviewContent() {
         }
       } catch (err: any) {
         if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-          setLobbyPermissionError('マイクとカメラへのアクセスが拒否されました。ブラウザの設定から許可してください。')
+          // カメラとマイクを個別に試してどちらがブロックされているか特定する
+          const blocked: string[] = []
+          await navigator.mediaDevices.getUserMedia({ video: true }).then(s => s.getTracks().forEach(t => t.stop())).catch(() => { blocked.push('カメラ') })
+          await navigator.mediaDevices.getUserMedia({ audio: true }).then(s => s.getTracks().forEach(t => t.stop())).catch(() => { blocked.push('マイク') })
+          const target = blocked.length > 0 ? blocked.join('と') : 'マイクとカメラ'
+          setLobbyPermissionError(`${target}へのアクセスが拒否されました。`)
         } else if (err.name === 'NotFoundError') {
           setLobbyPermissionError('マイクまたはカメラが見つかりません。デバイスを確認してください。')
         } else {
@@ -379,51 +397,58 @@ function InterviewContent() {
     }, 1000)
   }
 
-  const playAudioBlob = (blob: Blob): Promise<void> => {
-    return new Promise((resolve) => {
-      const url = URL.createObjectURL(blob)
-      // Always create a fresh Audio element so createMediaElementSource can be called each time
-      const el = new Audio()
-      aiAudioRef.current = el
-      el.src = url
-      setAiSpeaking(true)
+  const playAudioBlob = async (blob: Blob): Promise<void> => {
+    const url = URL.createObjectURL(blob)
+    const el = new Audio()
+    aiAudioRef.current = el
+    el.src = url
+    setAiSpeaking(true)
 
-      // Set up AudioContext for real-time amplitude analysis (drives aiLevel / lipsync)
-      let rafId: number | null = null
-      try {
-        if (!aiAudioCtxRef.current || aiAudioCtxRef.current.state === 'closed') {
-          aiAudioCtxRef.current = new AudioContext()
-        }
-        const ctx = aiAudioCtxRef.current
-        if (ctx.state === 'suspended') ctx.resume().catch(() => {})
+    let rafId: number | null = null
+    let routedThroughCtx = false
 
-        const source   = ctx.createMediaElementSource(el)
-        const analyser = ctx.createAnalyser()
-        analyser.fftSize = 512
-        analyser.smoothingTimeConstant = 0.6
-        source.connect(analyser)
-        analyser.connect(ctx.destination)
-
-        const timeData = new Uint8Array(analyser.fftSize)
-        const trackLevel = () => {
-          analyser.getByteTimeDomainData(timeData)
-          let sum = 0
-          for (const v of timeData) { const n = (v - 128) / 128; sum += n * n }
-          const rms = Math.sqrt(sum / timeData.length)
-          setAiLevel(Math.min(1, rms * 6))
-          rafId = requestAnimationFrame(trackLevel)
-        }
-        rafId = requestAnimationFrame(trackLevel)
-        aiLevelRafRef.current = rafId
-      } catch { /* AudioContext not supported – lipsync disabled */ }
-
-      const cleanup = () => {
-        if (rafId !== null) cancelAnimationFrame(rafId)
-        if (aiLevelRafRef.current !== null) cancelAnimationFrame(aiLevelRafRef.current)
-        aiLevelRafRef.current = null
-        setAiLevel(0)
+    try {
+      if (!aiAudioCtxRef.current || aiAudioCtxRef.current.state === 'closed') {
+        aiAudioCtxRef.current = new AudioContext()
       }
+      const ctx = aiAudioCtxRef.current
+      // resume を await して running 状態を確実に待つ（suspended のまま再生すると無音になる）
+      await ctx.resume()
 
+      const source   = ctx.createMediaElementSource(el)
+      routedThroughCtx = true
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 512
+      analyser.smoothingTimeConstant = 0.6
+      source.connect(analyser)
+      analyser.connect(ctx.destination)
+
+      const timeData = new Uint8Array(analyser.fftSize)
+      const trackLevel = () => {
+        analyser.getByteTimeDomainData(timeData)
+        let sum = 0
+        for (const v of timeData) { const n = (v - 128) / 128; sum += n * n }
+        const rms = Math.sqrt(sum / timeData.length)
+        setAiLevel(Math.min(1, rms * 6))
+        rafId = requestAnimationFrame(trackLevel)
+      }
+      rafId = requestAnimationFrame(trackLevel)
+      aiLevelRafRef.current = rafId
+    } catch {
+      // AudioContext 未対応またはセキュリティポリシーで拒否された場合はリップシンク無効で続行
+      if (!routedThroughCtx) {
+        // AudioContext を経由していないので Audio 要素がデフォルト出力に直接流れる
+      }
+    }
+
+    const cleanup = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId)
+      if (aiLevelRafRef.current !== null) cancelAnimationFrame(aiLevelRafRef.current)
+      aiLevelRafRef.current = null
+      setAiLevel(0)
+    }
+
+    return new Promise<void>((resolve) => {
       el.onended = () => { cleanup(); setAiSpeaking(false); URL.revokeObjectURL(url); resolve() }
       el.onerror = () => { cleanup(); setAiSpeaking(false); URL.revokeObjectURL(url); resolve() }
       el.play().catch(() => { cleanup(); setAiSpeaking(false); resolve() })
@@ -433,13 +458,19 @@ function InterviewContent() {
   const doStartTurn = async (sessionId: number, userId: number) => {
     const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/start-turn`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
       body: JSON.stringify({
         user_id: userId,
         company_name: interviewCompany?.name || '',
         company_reading: interviewCompany?.name_reading || '',
         position: selectedPosition?.title || '',
-        company_info: [interviewCompany?.description, interviewCompany?.main_business].filter(Boolean).join(' / '),
+        company_info: [
+          interviewCompany?.description,
+          interviewCompany?.main_business,
+          interviewCompany?.culture && `企業文化: ${interviewCompany.culture}`,
+          interviewCompany?.work_style && `働き方: ${interviewCompany.work_style}`,
+          interviewCompany?.welfare_details && `福利厚生: ${interviewCompany.welfare_details}`,
+        ].filter(Boolean).join(' / '),
         company_type: selectedPosition?.category || 'general',
         question_index: 1,
         total_questions: Math.max(1, selectedPosition?.questions || 1),
@@ -484,6 +515,14 @@ function InterviewContent() {
       setStatus('connecting')
       const nextGender = getNextAvatarGender()
       setAvatarGender(nextGender)
+
+      // ユーザー操作中に AudioContext を事前作成・resume（autoplay policy 対策）
+      try {
+        if (!aiAudioCtxRef.current || aiAudioCtxRef.current.state === 'closed') {
+          aiAudioCtxRef.current = new AudioContext()
+        }
+        await aiAudioCtxRef.current.resume()
+      } catch { /* 非対応環境は無視 */ }
 
       // Acquire camera/mic stream
       let stream = streamRef.current
@@ -550,6 +589,12 @@ function InterviewContent() {
     const currentSession = session
     const currentUser = user
     if (currentUser && currentSession) {
+      const scoreSessionId = `interview-${currentUser.user_id}`
+      try {
+        const res = await fetch(`/api/user/weight-scores?user_id=${currentUser.user_id}&session_id=${encodeURIComponent(scoreSessionId)}`)
+        const data = await res.json()
+        setScoresBefore(data.weight_scores ?? null)
+      } catch { /* ignore */ }
       try { await interviewApi.finishSession(currentSession.id, currentUser.user_id) } catch { /* ignore */ }
     }
     setStatus('finished')
@@ -587,6 +632,12 @@ function InterviewContent() {
         if (detail.report) {
           setReport(detail.report); setReportStatus('ready')
           clearInterval(pollRef.current!); pollRef.current = null
+          const scoreSessionId = `interview-${userId}`
+          try {
+            const res = await fetch(`/api/user/weight-scores?user_id=${userId}&session_id=${encodeURIComponent(scoreSessionId)}`)
+            const data = await res.json()
+            setScoresAfter(data.weight_scores ?? null)
+          } catch { /* ignore */ }
         }
       } catch { setReportStatus('error') }
     }, 3000)
@@ -636,11 +687,18 @@ function InterviewContent() {
     formData.append('company_name', interviewCompany?.name || '')
     formData.append('company_reading', interviewCompany?.name_reading || '')
     formData.append('position', selectedPosition?.title || '')
-    formData.append('company_info', [interviewCompany?.description, interviewCompany?.main_business].filter(Boolean).join(' / '))
+    formData.append('company_info', [
+      interviewCompany?.description,
+      interviewCompany?.main_business,
+      interviewCompany?.culture && `企業文化: ${interviewCompany.culture}`,
+      interviewCompany?.work_style && `働き方: ${interviewCompany.work_style}`,
+      interviewCompany?.welfare_details && `福利厚生: ${interviewCompany.welfare_details}`,
+    ].filter(Boolean).join(' / '))
     formData.append('company_type', selectedPosition?.category || 'general')
     try {
       const res = await fetch(`${BACKEND_URL}/api/interviews/${session.id}/turn`, {
         method: 'POST',
+        headers: { ...authService.getUserFetchHeaders() },
         body: formData,
       })
       if (!res.ok) throw new Error(await res.text())
@@ -687,6 +745,13 @@ function InterviewContent() {
   const totalQuestionCount = Math.max(1, selectedPosition.questions)
   const questionProgress = Math.min(100, Math.round((questionElapsedSeconds / questionDurationSeconds) * 100))
   const questionRemainingSeconds = Math.max(0, questionDurationSeconds - questionElapsedSeconds)
+  const questionRemainingLabel = (() => {
+    if (questionRemainingSeconds <= 0) return '次の質問へ移行中...'
+    if (questionRemainingSeconds < 60) return `あと${questionRemainingSeconds}秒で次の質問へ`
+    const m = Math.floor(questionRemainingSeconds / 60)
+    const s = questionRemainingSeconds % 60
+    return s > 0 ? `あと${m}分${s}秒で次の質問へ` : `あと${m}分で次の質問へ`
+  })()
   const progress = Math.min(100, Math.round(((interviewLimits.maxMinutes * 60 - remainingSeconds) / (interviewLimits.maxMinutes * 60)) * 100))
   const isFemale = avatarGender === 'female'
   const companyName = interviewCompany?.name || 'AI面接練習'
@@ -1007,7 +1072,9 @@ function InterviewContent() {
                       </Box>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <Typography sx={{ fontSize: 14 }}>❓</Typography>
-                        <Typography sx={{ fontSize: 13, color: '#475569' }}>{selectedPosition.questions}問 技術・行動面接</Typography>
+                        <Typography sx={{ fontSize: 13, color: '#475569' }}>
+                          {selectedPosition.questions}問（1問あたり約{Math.round(questionDurationSeconds / 60)}分）
+                        </Typography>
                       </Box>
                     </Box>
                   </Stack>
@@ -1162,7 +1229,18 @@ function InterviewContent() {
               <Box sx={{ position: 'relative', width: '100%', aspectRatio: '16/9', bgcolor: '#202124', borderRadius: 2, overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 {lobbyPermissionError ? (
                   <Box sx={{ textAlign: 'center', p: 3 }}>
-                    <Typography sx={{ color: '#f28b82', mb: 2, fontSize: 14 }}>{lobbyPermissionError}</Typography>
+                    <Typography sx={{ color: '#f28b82', mb: 1.5, fontSize: 14 }}>{lobbyPermissionError}</Typography>
+                    <Box sx={{ mb: 2, textAlign: 'left', bgcolor: 'rgba(0,0,0,0.4)', borderRadius: 1, p: 1.5 }}>
+                      <Typography sx={{ color: '#e8eaed', fontSize: 12, mb: 0.5 }}>【ブラウザの許可】</Typography>
+                      <Typography sx={{ color: '#9aa0a6', fontSize: 12, lineHeight: 1.8, mb: 1 }}>
+                        アドレスバー左端の 🔒 → カメラ・マイクを「許可」
+                      </Typography>
+                      <Typography sx={{ color: '#e8eaed', fontSize: 12, mb: 0.5 }}>【Mac のシステム設定】</Typography>
+                      <Typography sx={{ color: '#9aa0a6', fontSize: 12, lineHeight: 1.8 }}>
+                        システム設定 → プライバシーとセキュリティ<br />
+                        → カメラ / マイク → 使用中のブラウザをオン
+                      </Typography>
+                    </Box>
                     <Button size="small" startIcon={<RefreshIcon />} onClick={() => { setLobbyPermissionError(null); window.location.reload() }} sx={{ color: '#8ab4f8' }}>
                       再試行
                     </Button>
@@ -1263,16 +1341,32 @@ function InterviewContent() {
                 </Button>
               </Stack>
 
-              <Box sx={{ mt: 5 }}>
-                <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1.5 }}>募集要項を確認する</Typography>
-                <Button
-                  size="small"
-                  onClick={() => {/* scroll to info */ }}
-                  sx={{ color: '#1a73e8', textTransform: 'none', fontWeight: 500, p: 0, '&:hover': { textDecoration: 'underline', bgcolor: 'transparent' } }}
-                >
-                  求人詳細を見る →
-                </Button>
-              </Box>
+              {/* 企業特徴プレビュー */}
+              {interviewCompany && (interviewCompany.culture || interviewCompany.work_style || interviewCompany.welfare_details) && (
+                <Box sx={{ mt: 3, width: '100%', maxWidth: 340 }}>
+                  <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1, fontWeight: 600 }}>企業情報</Typography>
+                  <Stack spacing={1}>
+                    {interviewCompany.culture && (
+                      <Box sx={{ p: 1.5, bgcolor: '#f0f4ff', borderRadius: 2, border: '1px solid #c7d7f0' }}>
+                        <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#3b5bdb', mb: 0.3, textTransform: 'uppercase', letterSpacing: 0.5 }}>企業文化</Typography>
+                        <Typography sx={{ fontSize: 13, color: '#1e3a8a', lineHeight: 1.5 }}>{interviewCompany.culture}</Typography>
+                      </Box>
+                    )}
+                    {interviewCompany.work_style && (
+                      <Box sx={{ p: 1.5, bgcolor: '#f0fff4', borderRadius: 2, border: '1px solid #b2dfdb' }}>
+                        <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#2e7d32', mb: 0.3, textTransform: 'uppercase', letterSpacing: 0.5 }}>働き方</Typography>
+                        <Typography sx={{ fontSize: 13, color: '#1b5e20', lineHeight: 1.5 }}>{interviewCompany.work_style}</Typography>
+                      </Box>
+                    )}
+                    {interviewCompany.welfare_details && (
+                      <Box sx={{ p: 1.5, bgcolor: '#fff8f0', borderRadius: 2, border: '1px solid #ffcc80' }}>
+                        <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#e65100', mb: 0.3, textTransform: 'uppercase', letterSpacing: 0.5 }}>福利厚生</Typography>
+                        <Typography sx={{ fontSize: 13, color: '#bf360c', lineHeight: 1.5 }}>{interviewCompany.welfare_details}</Typography>
+                      </Box>
+                    )}
+                  </Stack>
+                </Box>
+              )}
             </Box>
           </Box>
         </Box>
@@ -1320,6 +1414,11 @@ function InterviewContent() {
 
           {reportStatus === 'ready' && report && (
             <Stack spacing={2}>
+              <ScoreUpdateBanner
+                beforeScores={scoresBefore}
+                afterScores={scoresAfter}
+                title="面接結果がプロフィールスコアに反映されました"
+              />
               <InterviewSummary report={report} userId={user?.user_id} theme="dark" />
               <Button
                 variant="outlined"
@@ -1380,237 +1479,228 @@ function InterviewContent() {
   // ─────────────────────────────────────────────
   // SESSION SCREEN (connecting / connected / error)
   // ─────────────────────────────────────────────
+  const waveHeights = [5, 8, 13, 18, 25, 34, 42, 48, 44, 36, 28, 20, 14, 9, 6, 7, 11, 18, 27, 36, 44, 48, 42, 34, 26, 18, 12, 8, 5, 7, 10, 14]
+
   return (
-    <Box sx={{ height: '100vh', width: '100vw', bgcolor: BG_DARK, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <Box sx={{ height: '100vh', width: '100vw', bgcolor: '#606553', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
       {/* ── Header ── */}
-      <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 3, py: 1.5, flexShrink: 0, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Box sx={{ width: 36, height: 36, borderRadius: 2, bgcolor: PRIMARY, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <PsychologyIcon sx={{ color: '#fff', fontSize: 20 }} />
-          </Box>
-          <Box>
-            <Typography sx={{ fontWeight: 700, fontSize: 15, color: '#e8eaed', lineHeight: 1.2 }}>AI面接練習</Typography>
-            <Typography sx={{ fontSize: 12, color: '#9aa0a6' }}>セッション: {companyName}</Typography>
-          </Box>
+      <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 3, py: 1.5, flexShrink: 0 }}>
+        {/* 企業名 */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, bgcolor: 'rgba(255,255,255,0.18)', borderRadius: 2, px: 2, py: 0.8, backdropFilter: 'blur(8px)' }}>
+          <Typography sx={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>
+            {companyName || 'AI面接練習'}
+          </Typography>
+          <Typography sx={{ color: 'rgba(255,255,255,0.65)', fontSize: 12, lineHeight: 1 }}>▾</Typography>
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+
+        {/* タイマー + ユーザーアバター */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           {isActive && (
-            <Box sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 0.6, borderRadius: 9999, bgcolor: 'rgba(255,255,255,0.08)', gap: 1 }}>
-              <Box component="span" sx={{ fontSize: 16 }}>⏱</Box>
-              <Typography sx={{ fontSize: 13, color: '#e8eaed', fontWeight: 500 }}>{formatSeconds(remainingSeconds)}</Typography>
-            </Box>
+            <Typography sx={{ color: 'rgba(255,255,255,0.75)', fontSize: 13, fontWeight: 500 }}>
+              {formatSeconds(remainingSeconds)}
+            </Typography>
           )}
-          {isActive && (
-            <Box sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 0.6, borderRadius: 9999, bgcolor: 'rgba(236,91,19,0.2)', border: `1px solid ${PRIMARY}66` }}>
-              <Typography sx={{ fontSize: 12, color: '#ffd8c2', fontWeight: 700 }}>
-                質問 {currentQuestionIndex}/{totalQuestionCount}
-              </Typography>
-            </Box>
-          )}
-          {isConnected && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#34a853', animation: 'pulse 2s infinite', '@keyframes pulse': { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.4 } } }} />
-              <Typography sx={{ fontSize: 12, color: '#34a853', fontWeight: 600 }}>接続中</Typography>
-            </Box>
-          )}
+          <Box sx={{ width: 34, height: 34, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.22)', border: '1.5px solid rgba(255,255,255,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>
+              {(user.name || 'U').charAt(0).toUpperCase()}
+            </Typography>
+          </Box>
         </Box>
       </Box>
 
-      {/* ── Time warning ── */}
+      {/* ── 残り時間警告 ── */}
       {isConnected && sessionWarningShown && (
-        <Box sx={{ px: 2, pt: 1, flexShrink: 0 }}>
-          <Box sx={{ bgcolor: remainingSeconds <= 0 ? 'rgba(234,67,53,0.2)' : 'rgba(251,188,4,0.15)', border: `1px solid ${remainingSeconds <= 0 ? '#ea4335' : '#fbbc04'}`, borderRadius: 1, px: 2, py: 0.8, display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography sx={{ fontSize: 13, color: remainingSeconds <= 0 ? '#f28b82' : '#fdd663', fontWeight: 600 }}>
-              {remainingSeconds <= 0
-                ? 'セッションが終了しました。'
-                : `⚠️ 残り約${Math.ceil(remainingSeconds / 60)}分です。セッションがまもなく終了します。`}
+        <Box sx={{ px: 2, pb: 1, flexShrink: 0 }}>
+          <Box sx={{ bgcolor: remainingSeconds <= 0 ? 'rgba(234,67,53,0.25)' : 'rgba(251,188,4,0.2)', borderRadius: 1.5, px: 2, py: 0.7 }}>
+            <Typography sx={{ fontSize: 13, color: remainingSeconds <= 0 ? '#ffb3ae' : '#ffe082', fontWeight: 600 }}>
+              {remainingSeconds <= 0 ? 'セッションが終了しました。' : `⚠️ 残り約${Math.ceil(remainingSeconds / 60)}分です。`}
             </Typography>
           </Box>
         </Box>
       )}
 
-      {/* ── Question progress ── */}
+      {/* ── 質問タイマー ── */}
       {isConnected && (
-        <Box sx={{ px: 2, pt: 1, flexShrink: 0 }}>
-          <Paper sx={{ bgcolor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 2, p: 1.5 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-              <Typography sx={{ fontSize: 13, color: '#e8eaed', fontWeight: 700 }}>
-                質問 {currentQuestionIndex}/{totalQuestionCount}
+        <Box sx={{ px: 2, pb: 1.5, flexShrink: 0 }}>
+          <Box sx={{
+            bgcolor: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)',
+            borderRadius: 2, px: 2, py: 1,
+            display: 'flex', alignItems: 'center', gap: 2,
+          }}>
+            {/* 質問番号バッジ */}
+            <Box sx={{
+              flexShrink: 0, display: 'flex', alignItems: 'center', gap: 0.5,
+              bgcolor: 'rgba(255,255,255,0.12)', borderRadius: 1, px: 1, py: 0.3,
+            }}>
+              <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Q</Typography>
+              <Typography sx={{ color: '#fff', fontSize: 13, fontWeight: 700, lineHeight: 1 }}>
+                {currentQuestionIndex}
               </Typography>
-              <Typography sx={{ fontSize: 12, color: '#cdd1d5' }}>
-                全体経過 {formatSeconds(elapsedSeconds)} • 質問内 {formatSeconds(questionElapsedSeconds)} / 残り目安 {formatSeconds(questionRemainingSeconds)}
+              <Typography sx={{ color: 'rgba(255,255,255,0.4)', fontSize: 10 }}>
+                /{totalQuestionCount}
               </Typography>
             </Box>
-            <LinearProgress
-              variant="determinate"
-              value={questionProgress}
-              sx={{ height: 7, borderRadius: 9999, bgcolor: 'rgba(255,255,255,0.12)', '& .MuiLinearProgress-bar': { bgcolor: PRIMARY } }}
-            />
-          </Paper>
+
+            {/* プログレスバー */}
+            <Box sx={{ flex: 1, height: 5, bgcolor: 'rgba(255,255,255,0.12)', borderRadius: 9999, overflow: 'hidden' }}>
+              <Box sx={{
+                height: '100%',
+                width: `${questionProgress}%`,
+                bgcolor: questionRemainingSeconds <= 30 ? '#f28b82'
+                       : questionRemainingSeconds <= 60 ? '#fdd663'
+                       : '#34a853',
+                borderRadius: 9999,
+                transition: 'width 1s linear, background-color 0.5s',
+              }} />
+            </Box>
+
+            {/* カウントダウンテキスト */}
+            <Typography sx={{
+              flexShrink: 0, fontSize: 12, fontWeight: 600,
+              color: questionRemainingSeconds <= 30 ? '#f28b82'
+                   : questionRemainingSeconds <= 60 ? '#fdd663'
+                   : 'rgba(255,255,255,0.75)',
+            }}>
+              {questionRemainingLabel}
+            </Typography>
+          </Box>
         </Box>
       )}
 
       {/* ── Main ── */}
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 2, px: 2, pb: '88px', pt: 2, overflow: 'hidden', minHeight: 0 }}>
+      <Box sx={{ flex: 1, display: 'flex', gap: 2, px: 2, pb: 2, overflow: 'hidden', minHeight: 0 }}>
 
-        {/* Video grid */}
-        <Box sx={{ flex: 1, display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2, alignContent: 'center', minHeight: 0 }}>
+        {/* ── 左: アバターパネル ── */}
+        <Box sx={{ flex: '0 0 62%', position: 'relative', borderRadius: 3, overflow: 'hidden' }}>
 
-          {/* AI interviewer tile */}
-          <Box sx={{ position: 'relative', aspectRatio: '16/9', borderRadius: 2, overflow: 'hidden', bgcolor: '#303134', boxShadow: '0 8px 32px rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Box sx={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'radial-gradient(circle at 50% 40%, #3c4043 0%, #202124 100%)',
-            }}>
-              <Box sx={{
-                width: { xs: 120, md: 180 },
-                height: { xs: 120, md: 180 },
-                borderRadius: '50%',
-                boxShadow: aiSpeaking ? `0 0 0 16px rgba(236,91,19,0.15), 0 0 40px rgba(236,91,19,0.1)` : 'none',
-                transition: 'box-shadow 0.3s',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                <ThreeAvatar gender={avatarGender} audioStream={null} level={aiLevel} speaking={aiSpeaking} />
-              </Box>
-            </Box>
-
-            {/* Speaking indicator */}
-            {aiSpeaking && (
-              <Box sx={{ position: 'absolute', top: 12, right: 12, width: 10, height: 10, borderRadius: '50%', bgcolor: PRIMARY, animation: 'pulse 1s infinite' }} />
-            )}
-
-            {/* Label */}
-            <Box sx={{ position: 'absolute', bottom: 12, left: 12, display: 'flex', alignItems: 'center', gap: 1, bgcolor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)', px: 1.5, py: 0.6, borderRadius: 1.5 }}>
-              <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: PRIMARY }} />
-              <Typography sx={{ color: '#fff', fontSize: 13, fontWeight: 500 }}>
-                面接官AI（{isFemale ? '女性' : '男性'}）
-              </Typography>
-            </Box>
-
-
-            {/* Error overlay */}
-            {status === 'error' && (
-              <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'rgba(0,0,0,0.8)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', p: 3, gap: 2 }}>
-                <Typography sx={{ color: '#f28b82', textAlign: 'center', fontSize: 14, lineHeight: 1.6 }}>{errorMessage}</Typography>
-                <Button variant="contained" startIcon={<RefreshIcon />} onClick={handleJoin}
-                  sx={{ bgcolor: '#4285f4', '&:hover': { bgcolor: '#3367d6' }, textTransform: 'none' }}>
-                  再接続する
-                </Button>
-              </Box>
-            )}
-
-            {/* Connecting overlay */}
-            {status === 'connecting' && (
-              <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-                <Typography sx={{ color: '#e8eaed' }}>接続中...</Typography>
-                <LinearProgress sx={{ width: 160, bgcolor: '#3c4043', '& .MuiLinearProgress-bar': { bgcolor: PRIMARY } }} />
-              </Box>
-            )}
+          {/* アバター（全面） */}
+          <Box sx={{ width: '100%', height: '100%' }}>
+            <ThreeAvatar gender={avatarGender} audioStream={null} level={aiLevel} speaking={aiSpeaking} />
           </Box>
 
-          {/* Subtitle below avatar frame */}
-          {captionsVisible && latestAiText && (
-            <Box sx={{ mx: 1, mt: -0.5, mb: 0.5, bgcolor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)', borderRadius: 1.5, px: 2, py: 0.8, textAlign: 'center' }}>
-              <Typography sx={{ color: '#fff', fontSize: 13, lineHeight: 1.5 }}>{latestAiText}</Typography>
+          {/* 面接官ロールラベル */}
+          <Box sx={{
+            position: 'absolute', top: 12, left: 0, right: 0,
+            display: 'flex', justifyContent: 'center',
+          }}>
+            <Box sx={{
+              bgcolor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)',
+              borderRadius: 9999, px: 2, py: 0.6,
+              display: 'flex', alignItems: 'center', gap: 0.75,
+            }}>
+              <Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: '#34a853' }} />
+              <Typography sx={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>
+                {companyName} 面接官
+              </Typography>
+            </Box>
+          </Box>
+
+          {/* 音声波形 */}
+          <Box sx={{
+            position: 'absolute', bottom: 88, left: 0, right: 0,
+            display: 'flex', justifyContent: 'center', alignItems: 'flex-end',
+            gap: '3px', height: 52, px: 6,
+          }}>
+            {waveHeights.map((h, i) => (
+              <Box key={i} sx={{
+                width: 3,
+                height: `${Math.max(4, h * Math.max(0.12, aiSpeaking ? aiLevel * 1.2 : 0.12))}px`,
+                bgcolor: 'rgba(255,255,255,0.75)',
+                borderRadius: '2px 2px 1px 1px',
+                transition: 'height 0.09s ease',
+              }} />
+            ))}
+          </Box>
+
+          {/* ユーザーカメラ（小）- 左下オーバーレイ */}
+          <Box sx={{
+            position: 'absolute', bottom: 16, left: 16,
+            width: 128, borderRadius: 2, overflow: 'hidden',
+            border: '2px solid rgba(255,255,255,0.3)',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+            bgcolor: '#1a1a1a',
+          }}>
+            <Box sx={{ paddingTop: '75%', position: 'relative' }}>
+              <video
+                ref={sessionVideoCallbackRef}
+                muted
+                playsInline
+                style={{
+                  position: 'absolute', inset: 0,
+                  width: '100%', height: '100%',
+                  objectFit: 'cover', transform: 'scaleX(-1)',
+                  display: cameraEnabled ? 'block' : 'none',
+                }}
+              />
+              {!cameraEnabled && (
+                <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <VideocamOffIcon sx={{ color: '#666', fontSize: 28 }} />
+                </Box>
+              )}
+            </Box>
+          </Box>
+
+          {/* 接続中オーバーレイ */}
+          {status === 'connecting' && (
+            <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
+              <Typography sx={{ color: '#e8eaed', fontSize: 15 }}>接続中...</Typography>
+              <LinearProgress sx={{ width: 160, bgcolor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { bgcolor: PRIMARY } }} />
             </Box>
           )}
 
-          {/* User camera tile */}
-          <Box sx={{ position: 'relative', aspectRatio: '16/9', borderRadius: 2, overflow: 'hidden', bgcolor: '#3c4043', boxShadow: `0 0 0 2px rgba(236,91,19,0.3), 0 8px 32px rgba(0,0,0,0.4)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <video
-              ref={sessionVideoRef}
-              muted
-              playsInline
-              style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', display: cameraEnabled ? 'block' : 'none' }}
-            />
-            {!cameraEnabled && (
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                <VideocamOffIcon sx={{ color: '#9aa0a6', fontSize: 40 }} />
-                <Typography sx={{ color: '#9aa0a6', fontSize: 13 }}>カメラオフ</Typography>
-              </Box>
-            )}
-            <Box sx={{ position: 'absolute', bottom: 12, left: 12, display: 'flex', alignItems: 'center', gap: 1, bgcolor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)', px: 1.5, py: 0.6, borderRadius: 1.5 }}>
-              {micEnabled ? <MicIcon sx={{ color: '#fff', fontSize: 16 }} /> : <MicOffIcon sx={{ color: '#ea4335', fontSize: 16 }} />}
-              <Typography sx={{ color: '#fff', fontSize: 13, fontWeight: 500 }}>あなた（候補者）</Typography>
+          {/* エラーオーバーレイ */}
+          {status === 'error' && (
+            <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'rgba(0,0,0,0.75)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', p: 3, gap: 2 }}>
+              <Typography sx={{ color: '#f28b82', textAlign: 'center', fontSize: 14, lineHeight: 1.6 }}>{errorMessage}</Typography>
+              <Button variant="contained" startIcon={<RefreshIcon />} onClick={handleJoin}
+                sx={{ bgcolor: '#4285f4', '&:hover': { bgcolor: '#3367d6' }, textTransform: 'none' }}>
+                再接続する
+              </Button>
             </Box>
-            {/* Highlight border overlay */}
-            <Box sx={{ position: 'absolute', inset: 0, border: `2px solid rgba(236,91,19,0.25)`, borderRadius: 2, pointerEvents: 'none' }} />
-          </Box>
+          )}
         </Box>
 
-        {/* ── Right sidebar: Transcript ── */}
-        <Box sx={{ width: { xs: '100%', lg: 360 }, display: 'flex', flexDirection: 'column', bgcolor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 2, overflow: 'hidden', flexShrink: 0 }}>
-          {/* Sidebar header */}
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2, py: 1.5, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Box component="span" sx={{ fontSize: 20 }}>💬</Box>
-              <Typography sx={{ fontWeight: 700, color: '#e8eaed', fontSize: 14 }}>リアルタイム字幕</Typography>
-            </Box>
-            {isConnected && (
-              <Box sx={{ bgcolor: `${PRIMARY}20`, border: `1px solid ${PRIMARY}40`, px: 1, py: 0.3, borderRadius: 1 }}>
-                <Typography sx={{ color: PRIMARY, fontSize: 10, fontWeight: 700, letterSpacing: 1 }}>LIVE</Typography>
-              </Box>
-            )}
-          </Box>
+        {/* ── 右: チャット + コントロール ── */}
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5, minWidth: 0, overflow: 'hidden' }}>
 
-          {/* Transcript list */}
-          <Box sx={{ flex: 1, overflowY: 'auto', p: 2, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+          {/* 発話履歴 */}
+          <Box sx={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1.5, py: 1,
+            '&::-webkit-scrollbar': { width: 4 },
+            '&::-webkit-scrollbar-thumb': { bgcolor: 'rgba(255,255,255,0.2)', borderRadius: 2 },
+          }}>
             {utterances.length === 0 && !partialAi && (
-              <Typography sx={{ color: '#5f6368', fontSize: 13, textAlign: 'center', mt: 4 }}>
-                面接が始まると字幕がここに表示されます
+              <Typography sx={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, textAlign: 'center', mt: 4 }}>
+                面接が始まると会話がここに表示されます
               </Typography>
             )}
             {utterances.map((u, i) => (
-              <Box key={i} sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, alignItems: u.role === 'ai' ? 'flex-start' : 'flex-end' }}>
-                <Typography sx={{ fontSize: 10, fontWeight: 700, color: u.role === 'ai' ? '#9aa0a6' : PRIMARY, letterSpacing: 1, textTransform: 'uppercase' }}>
-                  {u.role === 'ai' ? `面接官AI（${isFemale ? '女性' : '男性'}）` : 'あなた'}
-                </Typography>
+              <Box key={i} sx={{ display: 'flex', flexDirection: 'column', gap: 0.3, alignItems: u.role === 'ai' ? 'flex-start' : 'flex-end' }}>
                 <Box sx={{
-                  bgcolor: u.role === 'ai' ? 'rgba(255,255,255,0.06)' : PRIMARY,
-                  px: 1.5, py: 1, borderRadius: u.role === 'ai' ? '0 12px 12px 12px' : '12px 0 12px 12px',
-                  maxWidth: '90%',
+                  bgcolor: u.role === 'ai' ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.18)',
+                  color: u.role === 'ai' ? '#1a1a1a' : '#fff',
+                  px: 2, py: 1.2,
+                  borderRadius: u.role === 'ai' ? '4px 16px 16px 16px' : '16px 4px 16px 16px',
+                  maxWidth: '88%',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
                 }}>
-                  <Typography sx={{ fontSize: 13, color: '#e8eaed', lineHeight: 1.6 }}>{u.text}</Typography>
+                  <Typography sx={{ fontSize: 13.5, lineHeight: 1.65 }}>{u.text}</Typography>
                 </Box>
               </Box>
             ))}
 
-            {/* Partial AI (typing) */}
             {partialAi && (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                <Typography sx={{ fontSize: 10, fontWeight: 700, color: '#9aa0a6', letterSpacing: 1, textTransform: 'uppercase' }}>
-                  面接官AI
-                </Typography>
-                <Box sx={{ bgcolor: 'rgba(255,255,255,0.06)', px: 1.5, py: 1, borderRadius: '0 12px 12px 12px', maxWidth: '90%', opacity: 0.7 }}>
-                  <Typography sx={{ fontSize: 13, color: '#e8eaed', lineHeight: 1.6 }}>{partialAi}</Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.3 }}>
+                <Box sx={{ bgcolor: 'rgba(255,255,255,0.7)', px: 2, py: 1.2, borderRadius: '4px 16px 16px 16px', maxWidth: '88%', opacity: 0.8 }}>
+                  <Typography sx={{ fontSize: 13.5, color: '#1a1a1a', lineHeight: 1.65 }}>{partialAi}</Typography>
                 </Box>
               </Box>
             )}
 
-            {/* Partial user (typing) */}
             {partialUser && (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, alignItems: 'flex-end' }}>
-                <Typography sx={{ fontSize: 10, fontWeight: 700, color: PRIMARY, letterSpacing: 1, textTransform: 'uppercase' }}>あなた</Typography>
-                <Box sx={{ bgcolor: `${PRIMARY}80`, px: 1.5, py: 1, borderRadius: '12px 0 12px 12px', maxWidth: '90%', opacity: 0.7 }}>
-                  <Typography sx={{ fontSize: 13, color: '#fff', lineHeight: 1.6 }}>{partialUser}</Typography>
-                </Box>
-              </Box>
-            )}
-
-            {/* AI tip */}
-            {utterances.length >= 2 && (
-              <Box sx={{ p: 1.5, bgcolor: `${PRIMARY}10`, border: `1px solid ${PRIMARY}30`, borderRadius: 2, display: 'flex', gap: 1.5 }}>
-                <LightbulbIcon sx={{ color: PRIMARY, fontSize: 20, flexShrink: 0 }} />
-                <Box>
-                  <Typography sx={{ fontSize: 11, fontWeight: 700, color: PRIMARY, mb: 0.3 }}>AIヒント</Typography>
-                  <Typography sx={{ fontSize: 12, color: '#9aa0a6', lineHeight: 1.5 }}>
-                    具体的なエピソードを交えて回答すると、より説得力が増します。
-                  </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.3, alignItems: 'flex-end' }}>
+                <Box sx={{ bgcolor: 'rgba(255,255,255,0.12)', px: 2, py: 1.2, borderRadius: '16px 4px 16px 16px', maxWidth: '88%', opacity: 0.8 }}>
+                  <Typography sx={{ fontSize: 13.5, color: '#fff', lineHeight: 1.65 }}>{partialUser}</Typography>
                 </Box>
               </Box>
             )}
@@ -1618,151 +1708,85 @@ function InterviewContent() {
             <div ref={transcriptEndRef} />
           </Box>
 
-          {/* Note input */}
-          <Box sx={{ p: 1.5, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', bgcolor: 'rgba(255,255,255,0.06)', borderRadius: 2, px: 1.5, py: 0.5 }}>
-              <InputBase
-                value={noteInput}
-                onChange={e => setNoteInput(e.target.value)}
-                placeholder="メモやヒントのリクエストを入力..."
-                sx={{ flex: 1, color: '#e8eaed', fontSize: 13, '& ::placeholder': { color: '#5f6368' } }}
-              />
-              <IconButton size="small" sx={{ color: noteInput ? PRIMARY : '#5f6368' }}>
-                <SendIcon fontSize="small" />
-              </IconButton>
-            </Box>
-          </Box>
-        </Box>
-      </Box>
-
-      {/* ── Bottom control bar ── */}
-      <Box sx={{
-        position: 'fixed', bottom: 0, left: 0, right: 0,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        px: { xs: 2, md: 4 }, py: 1.5,
-        bgcolor: 'rgba(32,33,36,0.97)',
-        borderTop: '1px solid rgba(255,255,255,0.06)',
-        zIndex: 100,
-      }}>
-        {/* Left: session info */}
-        <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 1 }}>
-          <Typography sx={{ fontSize: 13, color: '#9aa0a6', fontWeight: 500 }}>
-            {companyName} 面接
-          </Typography>
-          {isActive && (
-            <LinearProgress
-              variant="determinate"
-              value={progress}
-              sx={{ width: 80, height: 4, borderRadius: 2, bgcolor: '#3c4043', '& .MuiLinearProgress-bar': { bgcolor: PRIMARY } }}
-            />
-          )}
-        </Box>
-
-        {/* Center: controls */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, md: 1.5 }, mx: 'auto' }}>
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
-            <Tooltip title={
-              aiSpeaking ? 'AI発話中...' :
-              turnPending ? 'AIが考えています...' :
-              isRecording ? 'クリックして送信' :
-              'クリックして話す'
-            }>
-              <span>
-                <IconButton
-                  onClick={isRecording ? stopRecording : startRecording}
-                  disabled={!isConnected || turnPending || aiSpeaking}
-                  sx={{
-                    bgcolor: isRecording ? '#ea4335' : aiSpeaking ? `${PRIMARY}40` : 'rgba(255,255,255,0.08)',
-                    width: 52, height: 52,
-                    animation: isRecording ? 'micPulse 1s infinite' : 'none',
-                    '@keyframes micPulse': { '0%,100%': { boxShadow: `0 0 0 0 rgba(234,67,53,0.4)` }, '50%': { boxShadow: `0 0 0 8px rgba(234,67,53,0)` } },
-                    '&:hover': { bgcolor: isRecording ? '#c5221f' : 'rgba(255,255,255,0.15)' },
-                    '&:disabled': { bgcolor: 'rgba(255,255,255,0.04)' },
-                  }}
-                >
-                  {turnPending
-                    ? <CircularProgress size={22} sx={{ color: '#9aa0a6' }} />
-                    : aiSpeaking
-                      ? <VolumeUpIcon sx={{ color: PRIMARY }} />
-                      : isRecording
-                        ? <MicIcon sx={{ color: '#fff' }} />
-                        : <MicIcon sx={{ color: '#e8eaed' }} />
-                  }
+          {/* ── コントロールボタン ── */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, flexShrink: 0 }}>
+            {/* サブコントロール行 */}
+            <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+              <Tooltip title={cameraEnabled ? 'カメラをオフ' : 'カメラをオン'}>
+                <span>
+                  <IconButton onClick={toggleCamera} disabled={!isConnected} size="small"
+                    sx={{ bgcolor: cameraEnabled ? 'rgba(255,255,255,0.15)' : '#ea4335', width: 36, height: 36, '&:hover': { bgcolor: cameraEnabled ? 'rgba(255,255,255,0.25)' : '#c5221f' }, '&:disabled': { bgcolor: 'rgba(255,255,255,0.06)' } }}>
+                    {cameraEnabled ? <VideocamIcon sx={{ color: '#fff', fontSize: 18 }} /> : <VideocamOffIcon sx={{ color: '#fff', fontSize: 18 }} />}
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <Tooltip title={captionsVisible ? '字幕をオフ' : '字幕をオン'}>
+                <IconButton onClick={() => setCaptionsVisible(p => !p)} size="small"
+                  sx={{ bgcolor: captionsVisible ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', width: 36, height: 36 }}>
+                  <ClosedCaptionIcon sx={{ color: captionsVisible ? '#fff' : 'rgba(255,255,255,0.5)', fontSize: 18 }} />
                 </IconButton>
-              </span>
-            </Tooltip>
-            <Typography sx={{ fontSize: 10, color: isRecording ? '#ea4335' : aiSpeaking ? PRIMARY : '#9aa0a6', fontWeight: 600, letterSpacing: 0.5, lineHeight: 1 }}>
-              {isRecording ? '録音中' : turnPending ? '処理中' : aiSpeaking ? 'AI発話中' : '話す'}
-            </Typography>
-          </Box>
-
-          <Tooltip title={cameraEnabled ? 'カメラをオフ' : 'カメラをオン'}>
-            <span>
-              <IconButton onClick={toggleCamera} disabled={!isConnected} sx={{ bgcolor: cameraEnabled ? 'rgba(255,255,255,0.08)' : '#ea4335', width: 48, height: 48, '&:hover': { bgcolor: cameraEnabled ? 'rgba(255,255,255,0.15)' : '#c5221f' }, '&:disabled': { bgcolor: 'rgba(255,255,255,0.04)' } }}>
-                {cameraEnabled ? <VideocamIcon sx={{ color: '#e8eaed' }} /> : <VideocamOffIcon sx={{ color: '#fff' }} />}
-              </IconButton>
-            </span>
-          </Tooltip>
-
-          <Tooltip title={captionsVisible ? '字幕をオフ' : '字幕をオン'}>
-            <IconButton onClick={() => setCaptionsVisible(p => !p)} sx={{ bgcolor: captionsVisible ? `${PRIMARY}30` : 'rgba(255,255,255,0.08)', width: 48, height: 48, '&:hover': { bgcolor: captionsVisible ? `${PRIMARY}40` : 'rgba(255,255,255,0.15)' } }}>
-              <ClosedCaptionIcon sx={{ color: captionsVisible ? PRIMARY : '#9aa0a6' }} />
-            </IconButton>
-          </Tooltip>
-
-          <Tooltip title={handsFreeMode ? 'ハンズフリーをオフ（ボタン操作に戻す）' : 'ハンズフリーをオン（声を検知して自動送信）'}>
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
-              <IconButton
-                onClick={() => setHandsFreeMode(p => !p)}
-                disabled={!isConnected}
-                sx={{
-                  bgcolor: handsFreeMode ? `${PRIMARY}30` : 'rgba(255,255,255,0.08)',
-                  width: 48, height: 48,
-                  '&:hover': { bgcolor: handsFreeMode ? `${PRIMARY}40` : 'rgba(255,255,255,0.15)' },
-                  '&:disabled': { bgcolor: 'rgba(255,255,255,0.04)' },
-                }}
-              >
-                <MicIcon sx={{ color: handsFreeMode ? PRIMARY : '#9aa0a6', fontSize: 20 }} />
-              </IconButton>
-              <Typography sx={{ fontSize: 9, color: handsFreeMode ? PRIMARY : '#9aa0a6', fontWeight: 600, letterSpacing: 0.3 }}>
-                {handsFreeMode ? 'AUTO' : 'ハンズフリー'}
-              </Typography>
+              </Tooltip>
+              <Tooltip title={handsFreeMode ? 'ハンズフリーをオフ' : 'ハンズフリーをオン'}>
+                <IconButton onClick={() => setHandsFreeMode(p => !p)} disabled={!isConnected} size="small"
+                  sx={{ bgcolor: handsFreeMode ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', width: 36, height: 36 }}>
+                  <MicIcon sx={{ color: handsFreeMode ? '#fff' : 'rgba(255,255,255,0.5)', fontSize: 18 }} />
+                </IconButton>
+              </Tooltip>
             </Box>
-          </Tooltip>
 
-          {/* End call / Join button */}
-          {!isActive ? (
-            <Button
-              variant="contained"
-              onClick={handleJoin}
-              sx={{ bgcolor: '#34a853', '&:hover': { bgcolor: '#2d8f47' }, borderRadius: 9999, px: 3, py: 1, fontWeight: 600, textTransform: 'none', fontSize: 14 }}
-            >
-              面接を開始
-            </Button>
-          ) : (
-            <Tooltip title="面接を終了">
-              <Button
-                variant="contained"
-                startIcon={<CallEndIcon />}
-                onClick={() => handleStop(false)}
-                sx={{ bgcolor: '#ea4335', '&:hover': { bgcolor: '#c5221f' }, borderRadius: 9999, px: 3, py: 1, fontWeight: 600, textTransform: 'none', fontSize: 14 }}
-              >
-                終了
-              </Button>
-            </Tooltip>
-          )}
-        </Box>
+            {/* 主要ボタン行 */}
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              {/* 録音 / 話す ボタン */}
+              <Tooltip title={aiSpeaking ? 'AI発話中...' : turnPending ? 'AIが考えています...' : isRecording ? 'クリックして送信' : 'クリックして話す'}>
+                <span style={{ flex: 1 }}>
+                  <Button
+                    fullWidth
+                    onClick={isRecording ? stopRecording : startRecording}
+                    disabled={!isConnected || turnPending || aiSpeaking}
+                    startIcon={
+                      turnPending
+                        ? <CircularProgress size={16} sx={{ color: 'inherit' }} />
+                        : aiSpeaking
+                          ? <VolumeUpIcon sx={{ fontSize: 18 }} />
+                          : <MicIcon sx={{ fontSize: 18 }} />
+                    }
+                    sx={{
+                      borderRadius: 9999, py: 1.1,
+                      bgcolor: isRecording ? 'rgba(234,67,53,0.25)' : 'rgba(255,255,255,0.18)',
+                      color: isRecording ? '#ff8a80' : 'rgba(255,255,255,0.9)',
+                      border: `1px solid ${isRecording ? 'rgba(234,67,53,0.5)' : 'rgba(255,255,255,0.25)'}`,
+                      textTransform: 'none', fontWeight: 600, fontSize: 13,
+                      animation: isRecording ? 'micPulse 1.4s ease-in-out infinite' : 'none',
+                      '@keyframes micPulse': { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.75 } },
+                      '&:hover': { bgcolor: isRecording ? 'rgba(234,67,53,0.35)' : 'rgba(255,255,255,0.25)' },
+                      '&:disabled': { bgcolor: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.3)', border: '1px solid rgba(255,255,255,0.1)' },
+                    }}
+                  >
+                    {isRecording ? 'レコーディング中...' : turnPending ? '処理中...' : aiSpeaking ? 'AI発話中' : '話す'}
+                  </Button>
+                </span>
+              </Tooltip>
 
-        {/* Right: secondary actions */}
-        <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 1 }}>
-          <Tooltip title="募集要項">
-            <IconButton sx={{ color: '#9aa0a6', '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' } }} onClick={() => {}}>
-              <InfoOutlinedIcon />
-            </IconButton>
-          </Tooltip>
-          <Typography variant="caption" sx={{ color: '#5f6368', ml: 1 }}>
-            質問 {currentQuestionIndex}/{totalQuestionCount} • 残り {Math.floor(remainingSeconds / 60)}:{String(remainingSeconds % 60).padStart(2, '0')}
-          </Typography>
+              {/* 完了 / 開始ボタン */}
+              {!isActive ? (
+                <Button
+                  variant="contained"
+                  onClick={handleJoin}
+                  sx={{ borderRadius: 9999, px: 2.5, py: 1.1, fontWeight: 600, textTransform: 'none', fontSize: 13, bgcolor: '#34a853', '&:hover': { bgcolor: '#2d8f47' }, flexShrink: 0 }}
+                >
+                  面接を開始
+                </Button>
+              ) : (
+                <Button
+                  variant="contained"
+                  onClick={() => handleStop(false)}
+                  sx={{ borderRadius: 9999, px: 2.5, py: 1.1, fontWeight: 600, textTransform: 'none', fontSize: 13, bgcolor: 'rgba(255,255,255,0.22)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', boxShadow: 'none', '&:hover': { bgcolor: 'rgba(255,255,255,0.32)', boxShadow: 'none' }, flexShrink: 0 }}
+                >
+                  完了する
+                </Button>
+              )}
+            </Box>
+          </Box>
         </Box>
       </Box>
 

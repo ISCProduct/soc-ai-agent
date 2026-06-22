@@ -9,9 +9,11 @@ import {
   CardContent,
   Chip,
   Divider,
+  IconButton,
   Stack,
   Typography,
 } from '@mui/material'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import Grid from '@mui/material/GridLegacy'
 import { authService } from '@/lib/auth'
 
@@ -48,9 +50,12 @@ export default function AdminDashboardPage() {
 
   return (
     <Box sx={{ p: 4, maxWidth: 960, mx: 'auto' }}>
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
-        管理者ダッシュボード
-      </Typography>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+        <IconButton component={Link} href="/"><ArrowBackIcon /></IconButton>
+        <Typography variant="h4" fontWeight="bold">
+          管理者ダッシュボード
+        </Typography>
+      </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         管理者向けの操作メニューです。権限がない場合は表示されません。
       </Typography>
@@ -206,6 +211,22 @@ export default function AdminDashboardPage() {
               <Divider sx={{ mb: 2 }} />
               <Button variant="contained" component={Link} href="/admin/dashboard">
                 ダッシュボードへ
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                スコア精度検証
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                相関分析・フェーズ別メトリクス・A/Bテスト・キャリブレーションを管理します。
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Button variant="contained" component={Link} href="/admin/score-validation">
+                スコア精度検証へ
               </Button>
             </CardContent>
           </Card>

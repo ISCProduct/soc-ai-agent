@@ -1,0 +1,234 @@
+name: 既存 GitHub Issue → Backlog 一括同期
+
+# 既存の GitHub Issue を Backlog へ一括登録するワークフロー。
+# [PROJ-N] プレフィックスが付いていない Issue のみを対象とする（未同期のもの）。
+#
+# 必要な GitHub Secrets:
+#   BACKLOG_API_KEY     : Backlog APIキー
+#   BACKLOG_SPACE_ID    : スペースID（例: myspace ← myspace.backlog.jp の場合）
+#   BACKLOG_PROJECT_KEY : プロジェクトキー（例: SOCAIAGENT）
+#   GH_TOKEN            : GitHub PAT（issues 読み書き権限）
+
+on:
+  workflow_dispatch:
+    inputs:
+      state:
+        description: '対象とする Issue の状態'
+        required: false
+        default: 'open'
+        type: choice
+        options:
+          - open
+          - closed
+          - all
+      dry_run:
+        description: 'ドライラン（trueにすると Backlog への書き込みをスキップ）'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+jobs:
+  bulk-sync:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - name: 既存 GitHub Issue を Backlog へ一括登録
+        env:
+          BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
+          BACKLOG_SPACE_ID: ${{ secrets.BACKLOG_SPACE_ID }}
+          BACKLOG_PROJECT_KEY: ${{ secrets.BACKLOG_PROJECT_KEY }}
+          BACKLOG_DOMAIN: ${{ secrets.BACKLOG_DOMAIN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_STATE: ${{ inputs.state || 'open' }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: |
+          python3 - << 'PYEOF'
+          import os, sys, json, re, urllib.parse, urllib.request, urllib.error
+          from time import sleep
+
+          API_KEY   = os.environ['BACKLOG_API_KEY']
+          SPACE_ID  = os.environ['BACKLOG_SPACE_ID']
+          PROJ_KEY  = os.environ['BACKLOG_PROJECT_KEY']
+          GH_TOKEN  = os.environ['GH_TOKEN']
+          GH_REPO   = os.environ['GH_REPO']
+          DOMAIN    = os.environ.get('BACKLOG_DOMAIN', '').strip()
+          ISSUE_STATE = os.environ.get('ISSUE_STATE', 'open')
+          DRY_RUN   = os.environ.get('DRY_RUN', 'false').lower() == 'true'
+
+          GH_BASE = "https://api.github.com"
+
+          if DRY_RUN:
+              print("=== ドライランモード: Backlog への書き込みはスキップされます ===")
+
+          def resolve_bl_base(space_id, api_key, domain):
+              candidates = [domain] if domain else ['backlog.jp', 'backlog.com']
+              for d in candidates:
+                  url = f"https://{space_id}.{d}/api/v2/space?apiKey={api_key}"
+                  try:
+                      with urllib.request.urlopen(urllib.request.Request(url)) as r:
+                          r.read()
+                          return f"https://{space_id}.{d}/api/v2", d
+                  except urllib.error.HTTPError as e:
+                      body = e.read().decode()
+                      if e.code == 404 and '"code":6' in body:
+                          continue
+                      print(f"Backlog API エラー {e.code}: {body}", file=sys.stderr)
+                      sys.exit(1)
+              print(f"エラー: スペース '{space_id}' が見つかりません。", file=sys.stderr)
+              sys.exit(1)
+
+          BL_BASE, BL_DOMAIN = resolve_bl_base(SPACE_ID, API_KEY, DOMAIN)
+          print(f"Backlog ドメイン: {BL_DOMAIN}")
+
+          def bl_request(method, path, data=None):
+              url = f"{BL_BASE}{path}?apiKey={API_KEY}"
+              body = urllib.parse.urlencode(data).encode() if data else None
+              req = urllib.request.Request(url, data=body, method=method)
+              if body:
+                  req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  print(f"Backlog API エラー {e.code}: {e.read().decode()}", file=sys.stderr)
+                  sys.exit(1)
+
+          def gh_request(method, path, data=None):
+              url = f"{GH_BASE}{path}"
+              body = json.dumps(data).encode() if data else None
+              req = urllib.request.Request(url, data=body, method=method)
+              req.add_header('Authorization', f'Bearer {GH_TOKEN}')
+              req.add_header('Accept', 'application/vnd.github+json')
+              req.add_header('X-GitHub-Api-Version', '2022-11-28')
+              if body:
+                  req.add_header('Content-Type', 'application/json')
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  print(f"GitHub API エラー {e.code}: {e.read().decode()}", file=sys.stderr)
+                  return None
+
+          # GitHub Issue を全件取得（ページネーション対応）
+          def fetch_all_issues(state):
+              issues = []
+              page = 1
+              while True:
+                  result = gh_request('GET', f"/repos/{GH_REPO}/issues?state={state}&per_page=100&page={page}")
+                  if not result:
+                      break
+                  # Pull Request を除外
+                  batch = [i for i in result if 'pull_request' not in i]
+                  issues.extend(batch)
+                  if len(result) < 100:
+                      break
+                  page += 1
+              return issues
+
+          def is_already_synced(title, body):
+              """[PROJ-N] プレフィックスまたは backlog-key マーカーがあれば同期済みとみなす"""
+              if re.match(rf'^\[{re.escape(PROJ_KEY)}-\d+\]', title):
+                  return True
+              if body and re.search(r'<!--\s*backlog-key:\S+\s*-->', body):
+                  return True
+              return False
+
+          def is_backlog_origin(body):
+              """Backlog 側から作成された Issue はスキップ"""
+              return body and '<!-- backlog-synced -->' in body
+
+          # Backlog プロジェクト情報を取得
+          project    = bl_request('GET', f"/projects/{PROJ_KEY}")
+          project_id = project['id']
+          types      = bl_request('GET', f"/projects/{PROJ_KEY}/issueTypes")
+          type_id    = types[0]['id']
+
+          print(f"Backlog プロジェクト: {project['name']} (ID: {project_id})")
+          print(f"Issue タイプ: {types[0]['name']} (ID: {type_id})")
+
+          # GitHub Issue を全件取得
+          print(f"\nGitHub Issue を取得中（state={ISSUE_STATE}）...")
+          all_issues = fetch_all_issues(ISSUE_STATE)
+          print(f"取得件数: {len(all_issues)} 件")
+
+          # 未同期のものだけフィルタ
+          target_issues = []
+          for issue in all_issues:
+              title = issue['title']
+              body  = issue.get('body') or ''
+              if is_backlog_origin(body):
+                  print(f"  スキップ（Backlog起源）: #{issue['number']} {title}")
+                  continue
+              if is_already_synced(title, body):
+                  print(f"  スキップ（同期済み）: #{issue['number']} {title}")
+                  continue
+              target_issues.append(issue)
+
+          print(f"\n未同期 Issue 数: {len(target_issues)} 件")
+          if not target_issues:
+              print("同期対象の Issue はありません。")
+              sys.exit(0)
+
+          print("\n--- 同期開始 ---")
+          success = 0
+          failed  = 0
+
+          for issue in target_issues:
+              gh_number = issue['number']
+              gh_title  = issue['title']
+              gh_body   = issue.get('body') or ''
+              gh_url    = issue['html_url']
+              gh_state  = issue['state']
+
+              print(f"\n処理中: #{gh_number} {gh_title}")
+
+              if DRY_RUN:
+                  print(f"  [DRY RUN] Backlog に課題を作成します: {gh_title}")
+                  success += 1
+                  continue
+
+              try:
+                  # Backlog に課題を作成
+                  result = bl_request('POST', '/issues', {
+                      'projectId':   project_id,
+                      'summary':     gh_title,
+                      'issueTypeId': type_id,
+                      'priorityId':  3,
+                      'description': f"GitHub Issue: {gh_url}\n\n{gh_body}",
+                  })
+                  bl_key = result['issueKey']
+                  print(f"  Backlog 課題を作成しました: {bl_key}")
+
+                  # GitHub Issue のタイトルとBodyを更新
+                  new_title = f"[{bl_key}] {gh_title}"
+                  new_body  = (
+                      f"<!-- backlog-key:{bl_key} -->\n\n{gh_body}"
+                      if gh_body else f"<!-- backlog-key:{bl_key} -->"
+                  )
+                  gh_data = {'title': new_title, 'body': new_body}
+
+                  # クローズ済みの Issue は Backlog 側でも完了に設定
+                  if gh_state == 'closed':
+                      bl_request('PATCH', f"/issues/{bl_key}", {'statusId': 4})
+
+                  gh_request('PATCH', f"/repos/{GH_REPO}/issues/{gh_number}", gh_data)
+                  print(f"  GitHub Issue #{gh_number} を '{new_title}' に更新しました。")
+                  success += 1
+
+                  # API レート制限を考慮して少し待機
+                  sleep(0.5)
+
+              except SystemExit:
+                  print(f"  エラー: #{gh_number} の処理に失敗しました。")
+                  failed += 1
+                  continue
+
+          print(f"\n=== 完了 ===")
+          print(f"成功: {success} 件 / 失敗: {failed} 件 / スキップ: {len(all_issues) - len(target_issues)} 件")
+          PYEOF

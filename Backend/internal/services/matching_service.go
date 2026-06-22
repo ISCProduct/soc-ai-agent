@@ -308,3 +308,12 @@ func fallbackValue(value, fallback string) string {
 	}
 	return trimmed
 }
+
+// Exported wrappers for testing from external packages.
+
+func FormatTopUserScores(scores []entity.UserWeightScore) string { return formatTopUserScores(scores) }
+
+// NewMatchingServiceForTest returns a MatchingService with no AI client, suitable for unit tests.
+func NewMatchingServiceForTest() *MatchingService {
+	return &MatchingService{}
+}

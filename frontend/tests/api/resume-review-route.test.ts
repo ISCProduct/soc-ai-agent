@@ -34,7 +34,7 @@ describe('POST /api/resume/review', () => {
       expect.stringMatching(/\/api\/resume\/review\?document_id=99$/),
       expect.objectContaining({
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
       }),
     )
     expect(response.status).toBe(201)

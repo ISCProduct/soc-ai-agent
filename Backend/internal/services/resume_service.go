@@ -663,6 +663,14 @@ func (s *seekableReader) Close() error {
 	return nil
 }
 
+// MaxResumeBytes is the exported constant for use in external tests.
+const MaxResumeBytes = maxResumeBytes
+
+// NewSeekableReader is an exported wrapper for newSeekableReader for use in external tests.
+func NewSeekableReader(src io.ReadCloser) (io.ReadSeekCloser, error) {
+	return newSeekableReader(src)
+}
+
 func derefInt64(value *int64) int64 {
 	if value == nil {
 		return 0

@@ -42,8 +42,8 @@ func (m *GitHubServiceMock) ListRepoSummaries(userID uint) ([]models.GitHubRepoS
 	return args.Get(0).([]models.GitHubRepoSummary), args.Error(1)
 }
 
-func (m *GitHubServiceMock) SummarizeRepo(ctx context.Context, userID uint, fullName string, forceRefresh bool) (*models.GitHubRepoSummary, error) {
-	args := m.Called(ctx, userID, fullName, forceRefresh)
+func (m *GitHubServiceMock) SummarizeRepo(ctx context.Context, userID uint, fullName string, forceRefresh bool, targetRole string) (*models.GitHubRepoSummary, error) {
+	args := m.Called(ctx, userID, fullName, forceRefresh, targetRole)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
