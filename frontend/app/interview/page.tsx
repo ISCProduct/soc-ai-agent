@@ -471,6 +471,7 @@ function InterviewContent() {
           interviewCompany?.work_style && `働き方: ${interviewCompany.work_style}`,
           interviewCompany?.welfare_details && `福利厚生: ${interviewCompany.welfare_details}`,
         ].filter(Boolean).join(' / '),
+        company_id: interviewCompany?.id || 0,
         company_type: selectedPosition?.category || 'general',
         question_index: 1,
         total_questions: Math.max(1, selectedPosition?.questions || 1),
@@ -695,6 +696,7 @@ function InterviewContent() {
       interviewCompany?.welfare_details && `福利厚生: ${interviewCompany.welfare_details}`,
     ].filter(Boolean).join(' / '))
     formData.append('company_type', selectedPosition?.category || 'general')
+    formData.append('company_id', String(interviewCompany?.id || 0))
     try {
       const res = await fetch(`${BACKEND_URL}/api/interviews/${session.id}/turn`, {
         method: 'POST',

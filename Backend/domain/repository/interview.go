@@ -40,3 +40,13 @@ type InterviewVideoRepository interface {
 	FindBySessionID(ctx context.Context, sessionID uint) ([]models.InterviewVideo, error)
 	FindByID(ctx context.Context, id uint) (*models.InterviewVideo, error)
 }
+
+// InterviewCompanyQuestionRepository は企業別カスタム面接質問の永続化インターフェース。
+type InterviewCompanyQuestionRepository interface {
+	FindByCompanyID(companyID uint) ([]models.InterviewCompanyQuestion, error)
+	FindByCompanyAndPosition(companyID uint, position string) ([]models.InterviewCompanyQuestion, error)
+	FindByID(id uint) (*models.InterviewCompanyQuestion, error)
+	Create(q *models.InterviewCompanyQuestion) error
+	Update(q *models.InterviewCompanyQuestion) error
+	Delete(id uint) error
+}
