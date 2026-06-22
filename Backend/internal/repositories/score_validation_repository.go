@@ -194,13 +194,14 @@ func (r *ScoreValidationRepository) GetLatestCalibrationWeights() ([]models.Scor
 }
 
 func (r *ScoreValidationRepository) SaveCalibrationWeights(weights []models.ScoreCalibrationWeight) error {
-	// 現行アクティブ版を非アクティブ化
-	if err := r.db.Model(&models.ScoreCalibrationWeight{}).
-		Where("is_active = ?", true).
-		Update("is_active", false).Error; err != nil {
-		return err
-	}
-	return r.db.Create(&weights).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.ScoreCalibrationWeight{}).
+			Where("is_active = ?", true).
+			Update("is_active", false).Error; err != nil {
+			return err
+		}
+		return tx.Create(&weights).Error
+	})
 }
 
 // CategoryPassStats キャリブレーション計算用の生データ

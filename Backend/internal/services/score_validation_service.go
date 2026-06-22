@@ -3,10 +3,14 @@ package services
 import (
 	"Backend/internal/models"
 	"Backend/internal/repositories"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
 )
+
+// ErrInsufficientSamples サンプル数不足でキャリブレーションが実行できない場合
+var ErrInsufficientSamples = errors.New("キャリブレーションに必要なサンプル数が不足しています（各カテゴリ5件以上必要）")
 
 // ScoreValidationService チャット分析スコアの精度検証・改善サービス
 type ScoreValidationService struct {
@@ -206,7 +210,7 @@ func (s *ScoreValidationService) RunCalibration() (*CalibrationResult, error) {
 		return nil, fmt.Errorf("統計取得エラー: %w", err)
 	}
 	if len(stats) == 0 {
-		return nil, fmt.Errorf("キャリブレーションに必要なサンプル数が不足しています（各カテゴリ5件以上必要）")
+		return nil, ErrInsufficientSamples
 	}
 
 	// 全体の平均通過率を基準にして重みを計算

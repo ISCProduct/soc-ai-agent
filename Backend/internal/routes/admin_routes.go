@@ -109,7 +109,7 @@ func SetupAdminRoutes(
 	admin.GET("/score-validation/calibration/history", scoreValidationController.GetCalibrationHistory)
 	admin.GET("/score-validation/variants", scoreValidationController.ListVariants)
 	admin.POST("/score-validation/variants", scoreValidationController.CreateVariant)
-	admin.GET("/score-validation/variants/:id/results", scoreValidationController.GetVariantResults)
+	admin.GET("/score-validation/variants/results", scoreValidationController.GetVariantResults)
 
 	// 集合知管理
 	admin.POST("/collective-insights/rebuild-summaries", collectiveInsightController.RebuildSummaries)
