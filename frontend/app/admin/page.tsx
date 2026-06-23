@@ -14,7 +14,7 @@ import {
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
-import Grid from '@mui/material/GridLegacy'
+import Grid from '@mui/material/Grid'
 import { authService } from '@/lib/auth'
 
 export default function AdminDashboardPage() {
@@ -61,7 +61,7 @@ export default function AdminDashboardPage() {
       </Typography>
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -82,7 +82,7 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -103,7 +103,7 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -119,7 +119,7 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -135,7 +135,7 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -151,7 +151,7 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -167,7 +167,7 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -183,7 +183,7 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -199,7 +199,7 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -215,7 +215,7 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -231,20 +231,55 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
         </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                プロファイル再計算
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                企業マッチングプロファイルを一括または個別に再計算します。ロールバックも可能です。
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Button variant="contained" component={Link} href="/admin/profile-recalculation">
+                プロファイル再計算へ
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                集合知サマリー再構築
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                全企業の行動サマリーをバッチ再集計します。データの整合性を保つ際に使用します。
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Button variant="contained" component={Link} href="/admin/collective-insights">
+                集合知管理へ
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                スクレイパーセッション
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                クローリングに使用するサイトごとのセッション（Cookie）を管理します。
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Button variant="contained" component={Link} href="/admin/scraper-sessions">
+                セッション管理へ
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
-
-      <Stack spacing={2}>
-        <Card>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>
-              近日追加予定
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              ユーザー権限管理、監査ログ、通知設定などを順次追加します。
-            </Typography>
-          </CardContent>
-        </Card>
-      </Stack>
     </Box>
   )
 }
