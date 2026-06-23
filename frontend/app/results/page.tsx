@@ -333,8 +333,8 @@ function ResultsContent() {
   }
 
   const handleReset = () => {
-    localStorage.clear()
-    sessionStorage.clear()
+    sessionStorage.removeItem('chatSessionId')
+    localStorage.removeItem('currentSessionId')
     router.push('/')
   }
 
@@ -366,7 +366,7 @@ function ResultsContent() {
     try {
       const res = await fetch('/api/applications', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
         body: JSON.stringify({
           user_id: Number(userId),
           company_id: Number(company.id),

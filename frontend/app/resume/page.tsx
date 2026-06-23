@@ -94,7 +94,6 @@ function ResumeContent() {
     }
     if (typeof window !== 'undefined') {
       const storedSession =
-        localStorage.getItem('chat_session_id') ||
         sessionStorage.getItem('chatSessionId') ||
         localStorage.getItem('currentSessionId') ||
         ''
