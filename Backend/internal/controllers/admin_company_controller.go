@@ -23,12 +23,14 @@ type AdminCompanyController struct {
 	audit        ifaces.AuditLogService
 	gbiz         *services.GBizInfoService
 	openaiClient *openai.Client
+	infoFetcher  *services.CompanyInfoFetcher
 }
 
 func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.AuditLogService, gbiz *services.GBizInfoService, openaiClient ...*openai.Client) *AdminCompanyController {
 	ctrl := &AdminCompanyController{repo: repo, audit: audit, gbiz: gbiz}
 	if len(openaiClient) > 0 {
 		ctrl.openaiClient = openaiClient[0]
+		ctrl.infoFetcher = services.NewCompanyInfoFetcher(repo, openaiClient[0])
 	}
 	return ctrl
 }
@@ -353,6 +355,30 @@ func (c *AdminCompanyController) FetchTechStack(ctx echo.Context) error {
 		"cicd_tools":        result.CicdTools,
 		"development_style": result.DevelopmentStyle,
 	})
+}
+
+// FetchCompanyInfo POST /api/admin/companies/:id/fetch-info
+// 企業IDからOpenAI WebSearchで基本情報を取得してDBに反映する
+func (c *AdminCompanyController) FetchCompanyInfo(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	if c.infoFetcher == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
+	}
+
+	result, err := c.infoFetcher.FetchAndSave(ctx.Request().Context(), uint(id))
+	if err != nil {
+		return echoInternalError(err)
+	}
+
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.fetch_info", "company", uint(id), map[string]any{
+		"industry": result.Industry,
+	})
+
+	return ctx.JSON(http.StatusOK, result)
 }
 
 func applyCompanyDefaults(company *models.Company) {
