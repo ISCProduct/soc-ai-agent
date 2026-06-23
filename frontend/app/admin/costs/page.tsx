@@ -21,9 +21,11 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import { authService } from '@/lib/auth'
 
 type DailyRow = {
@@ -63,6 +65,10 @@ type RealtimeDailyRow = {
   total_duration_seconds: number
   session_count: number
   user_count: number
+  total_input_audio_tokens: number
+  total_output_audio_tokens: number
+  total_input_text_tokens: number
+  total_output_text_tokens: number
 }
 
 type RealtimeUserRow = {
@@ -70,6 +76,10 @@ type RealtimeUserRow = {
   total_cost_usd: number
   total_duration_seconds: number
   session_count: number
+  total_input_audio_tokens: number
+  total_output_audio_tokens: number
+  total_input_text_tokens: number
+  total_output_text_tokens: number
 }
 
 function CostBar({ value, max }: { value: number; max: number }) {
@@ -324,7 +334,12 @@ export default function AdminCostsPage() {
 
       {/* Realtime usage */}
       <Paper elevation={1} sx={{ p: 3, mb: 3, borderRadius: 2 }}>
-        <Typography variant="h6" fontWeight={600} mb={1}>Realtime 利用状況</Typography>
+        <Stack direction="row" alignItems="center" spacing={1} mb={1}>
+          <Typography variant="h6" fontWeight={600}>Realtime 利用状況</Typography>
+          <Tooltip title="コスト計算方法: トークン使用量が記録されている場合はトークンベース（音声入力 $100/1M・出力 $200/1M、テキスト入力 $5/1M・出力 $15/1M）、記録がない場合は時間ベース（INTERVIEW_COST_PER_MIN_USD × 利用分数）で算出します。">
+            <InfoOutlinedIcon fontSize="small" sx={{ color: 'text.secondary', cursor: 'help' }} />
+          </Tooltip>
+        </Stack>
         <Typography variant="body2" color="text.secondary" mb={2}>
           過去{dailyDays}日合計: ${realtimeDailyCost.toFixed(4)}
         </Typography>
@@ -339,6 +354,10 @@ export default function AdminCostsPage() {
                 <TableCell align="right">時間 (分)</TableCell>
                 <TableCell align="right">セッション数</TableCell>
                 <TableCell align="right">利用ユーザー数</TableCell>
+                <TableCell align="right">音声入力 (tok)</TableCell>
+                <TableCell align="right">音声出力 (tok)</TableCell>
+                <TableCell align="right">テキスト入力 (tok)</TableCell>
+                <TableCell align="right">テキスト出力 (tok)</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -349,6 +368,10 @@ export default function AdminCostsPage() {
                   <TableCell align="right">{(row.total_duration_seconds / 60).toFixed(1)}</TableCell>
                   <TableCell align="right">{row.session_count.toLocaleString()}</TableCell>
                   <TableCell align="right">{row.user_count.toLocaleString()}</TableCell>
+                  <TableCell align="right">{(row.total_input_audio_tokens ?? 0).toLocaleString()}</TableCell>
+                  <TableCell align="right">{(row.total_output_audio_tokens ?? 0).toLocaleString()}</TableCell>
+                  <TableCell align="right">{(row.total_input_text_tokens ?? 0).toLocaleString()}</TableCell>
+                  <TableCell align="right">{(row.total_output_text_tokens ?? 0).toLocaleString()}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -367,6 +390,10 @@ export default function AdminCostsPage() {
                 <TableCell align="right">コスト (USD)</TableCell>
                 <TableCell align="right">時間 (分)</TableCell>
                 <TableCell align="right">セッション数</TableCell>
+                <TableCell align="right">音声入力 (tok)</TableCell>
+                <TableCell align="right">音声出力 (tok)</TableCell>
+                <TableCell align="right">テキスト入力 (tok)</TableCell>
+                <TableCell align="right">テキスト出力 (tok)</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -376,6 +403,10 @@ export default function AdminCostsPage() {
                   <TableCell align="right">${row.total_cost_usd.toFixed(4)}</TableCell>
                   <TableCell align="right">{(row.total_duration_seconds / 60).toFixed(1)}</TableCell>
                   <TableCell align="right">{row.session_count.toLocaleString()}</TableCell>
+                  <TableCell align="right">{(row.total_input_audio_tokens ?? 0).toLocaleString()}</TableCell>
+                  <TableCell align="right">{(row.total_output_audio_tokens ?? 0).toLocaleString()}</TableCell>
+                  <TableCell align="right">{(row.total_input_text_tokens ?? 0).toLocaleString()}</TableCell>
+                  <TableCell align="right">{(row.total_output_text_tokens ?? 0).toLocaleString()}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

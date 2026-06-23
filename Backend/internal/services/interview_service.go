@@ -170,7 +170,7 @@ func (s *InterviewService) FinishSession(userID uint, sessionID uint) (*Intervie
 	}
 	session.Status = "finished"
 	if s.realtimeUsageService != nil {
-		if durationSec, cost, err := s.realtimeUsageService.CloseSession(sessionID, *session.EndedAt); err == nil && durationSec >= 0 {
+		if durationSec, cost, err := s.realtimeUsageService.CloseSession(sessionID, *session.EndedAt, nil); err == nil && durationSec >= 0 {
 			session.EstimatedCostUSD = cost
 		} else {
 			session.EstimatedCostUSD = s.estimateCost(session.StartedAt, session.EndedAt)
