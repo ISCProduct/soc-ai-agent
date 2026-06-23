@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Avatar,
   Box,
@@ -28,11 +28,13 @@ import EmojiEventsIcon from '@mui/icons-material/EmojiEvents'
 import SaveIcon from '@mui/icons-material/Save'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService, User } from '@/lib/auth'
+import { BACKEND_URL } from '@/lib/backend-url'
 import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '@/lib/profile'
 import GitHubSkills from '@/components/github-skills'
 
 export default function ProfilePage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [user, setUser] = useState<User | null>(null)
   const [name, setName] = useState('')
   const [targetLevel, setTargetLevel] = useState('新卒')
@@ -46,6 +48,9 @@ export default function ProfilePage() {
   const [isFirstTime, setIsFirstTime] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [calendarConnected, setCalendarConnected] = useState(false)
+  const [calendarLoading, setCalendarLoading] = useState(false)
+  const [calendarMessage, setCalendarMessage] = useState('')
 
   useEffect(() => {
     const storedUser = authService.getStoredUser()
@@ -76,7 +81,26 @@ export default function ProfilePage() {
     // 初回セットアップかどうか（target_levelが未設定なら初回）
     const firstTime = !storedUser.target_level || (storedUser.target_level !== '新卒' && storedUser.target_level !== '中途')
     setIsFirstTime(firstTime)
-  }, [router])
+
+    // Googleカレンダー連携状態を取得
+    fetch(`${BACKEND_URL}/api/google-calendar/status`, {
+      headers: authService.getUserFetchHeaders(),
+      credentials: 'include',
+    })
+      .then((r) => r.json())
+      .then((d) => setCalendarConnected(d.connected === true))
+      .catch(() => {})
+
+    // コールバック後のメッセージ処理
+    const calendarConnectedParam = searchParams.get('calendar_connected')
+    const calendarErrorParam = searchParams.get('calendar_error')
+    if (calendarConnectedParam === '1') {
+      setCalendarConnected(true)
+      setCalendarMessage('Googleカレンダーと連携しました')
+    } else if (calendarErrorParam) {
+      setCalendarMessage('Googleカレンダーの連携に失敗しました')
+    }
+  }, [router, searchParams])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -125,6 +149,43 @@ export default function ProfilePage() {
     } finally {
       setDeleting(false)
       setDeleteDialogOpen(false)
+    }
+  }
+
+  const handleCalendarConnect = async () => {
+    if (!user) return
+    try {
+      // バックエンドから認証URLを取得し、ブラウザをリダイレクト
+      // credentials: 'include' でstateクッキーをブラウザに設定する
+      const res = await fetch(`${BACKEND_URL}/api/google-calendar/connect`, {
+        headers: { ...authService.getUserFetchHeaders(), Accept: 'application/json' },
+        credentials: 'include',
+      })
+      if (!res.ok) throw new Error('Failed to get auth URL')
+      const data = await res.json()
+      window.location.href = data.auth_url
+    } catch {
+      setCalendarMessage('Googleカレンダー連携の開始に失敗しました')
+    }
+  }
+
+  const handleCalendarDisconnect = async () => {
+    setCalendarLoading(true)
+    setCalendarMessage('')
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/google-calendar/disconnect`, {
+        method: 'DELETE',
+        headers: authService.getUserFetchHeaders(),
+        credentials: 'include',
+      })
+      if (res.ok) {
+        setCalendarConnected(false)
+        setCalendarMessage('Googleカレンダーの連携を解除しました')
+      } else {
+        setCalendarMessage('連携解除に失敗しました')
+      }
+    } finally {
+      setCalendarLoading(false)
     }
   }
 
@@ -358,6 +419,56 @@ export default function ProfilePage() {
           )}
         </Box>
       </Container>
+
+      {/* Googleカレンダー連携セクション */}
+      {!isGuest && (
+        <Container maxWidth="lg" sx={{ mb: 4 }}>
+          <Card sx={{ borderRadius: 2 }}>
+            <CardContent sx={{ p: 3 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                <WorkIcon color="primary" />
+                <Typography variant="h6" fontWeight="bold">
+                  Googleカレンダー連携
+                </Typography>
+                {calendarConnected && (
+                  <Chip label="連携済み" size="small" color="success" />
+                )}
+              </Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                連携することで、面接スケジュールを登録・変更・キャンセルした際にGoogleカレンダーへ自動同期されます。
+              </Typography>
+              {calendarMessage && (
+                <Alert
+                  severity={calendarConnected && calendarMessage.includes('連携しました') ? 'success' : calendarMessage.includes('解除') ? 'info' : 'error'}
+                  sx={{ mb: 2 }}
+                >
+                  {calendarMessage}
+                </Alert>
+              )}
+              {calendarConnected ? (
+                <Button
+                  variant="outlined"
+                  color="error"
+                  size="small"
+                  onClick={handleCalendarDisconnect}
+                  disabled={calendarLoading}
+                >
+                  {calendarLoading ? '解除中...' : '連携を解除する'}
+                </Button>
+              ) : (
+                <Button
+                  variant="contained"
+                  size="small"
+                  onClick={handleCalendarConnect}
+                  sx={{ bgcolor: '#4285F4', '&:hover': { bgcolor: '#3367D6' } }}
+                >
+                  Googleカレンダーと連携する
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        </Container>
+      )}
 
       {/* アカウント管理セクション */}
       <Container maxWidth="lg" sx={{ pb: 6 }}>

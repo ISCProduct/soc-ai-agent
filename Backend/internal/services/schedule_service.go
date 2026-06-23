@@ -3,6 +3,7 @@ package services
 import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,11 +11,17 @@ import (
 )
 
 type ScheduleService struct {
-	repo repository.ScheduleRepository
+	repo         repository.ScheduleRepository
+	calendarSync *CalendarSyncService
 }
 
 func NewScheduleService(repo repository.ScheduleRepository) *ScheduleService {
 	return &ScheduleService{repo: repo}
+}
+
+// SetCalendarSyncService はGoogleカレンダー同期サービスを注入する（オプション）。
+func (s *ScheduleService) SetCalendarSyncService(svc *CalendarSyncService) {
+	s.calendarSync = svc
 }
 
 func (s *ScheduleService) Create(userID uint, companyName, stage, title string, scheduledAt time.Time, notes string) (*models.ScheduleEvent, error) {
@@ -34,6 +41,10 @@ func (s *ScheduleService) Create(userID uint, companyName, stage, title string, 
 	}
 	if err := s.repo.Create(event); err != nil {
 		return nil, err
+	}
+	// Googleカレンダーへの同期は非同期で実行（スケジュール登録の成否には影響しない）
+	if s.calendarSync != nil {
+		go s.calendarSync.CreateEvent(context.Background(), userID, event)
 	}
 	return event, nil
 }
@@ -71,6 +82,9 @@ func (s *ScheduleService) Update(userID, eventID uint, companyName, stage, title
 	if err := s.repo.Update(event); err != nil {
 		return nil, err
 	}
+	if s.calendarSync != nil {
+		go s.calendarSync.UpdateEvent(context.Background(), userID, event)
+	}
 	return event, nil
 }
 
@@ -82,7 +96,14 @@ func (s *ScheduleService) Delete(userID, eventID uint) error {
 	if event.UserID != userID {
 		return errors.New("forbidden")
 	}
-	return s.repo.Delete(eventID)
+	googleEventID := event.GoogleCalendarEventID
+	if err := s.repo.Delete(eventID); err != nil {
+		return err
+	}
+	if s.calendarSync != nil && googleEventID != "" {
+		go s.calendarSync.DeleteEvent(context.Background(), userID, googleEventID)
+	}
+	return nil
 }
 
 func (s *ScheduleService) List(userID uint) ([]models.ScheduleEvent, error) {

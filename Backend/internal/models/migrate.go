@@ -56,6 +56,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&PendingRegistration{},
 		// 選考スケジュール
 		&ScheduleEvent{},
+		// Google連携トークン
+		&UserGoogleToken{},
 		// APIコストモニタリング
 		&APICallLog{},
 		// 集合知レコメンド
