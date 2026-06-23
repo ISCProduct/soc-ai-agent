@@ -603,7 +603,7 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
 
     # 簡易ファイルキャッシュ
     cache_ttl = int(os.getenv("RAG_QUERY_CACHE_TTL_SECONDS", "300"))
-    cache_path = os.path.join(SEARCH_LOG_DIR, "query_cache.json")
+    cache_path = os.path.join(os.getenv("RAG_SEARCH_LOG_DIR", DEFAULT_SEARCH_LOG_DIR), "query_cache.json")
     cache_key = f"{safe_company}::{role_text}"
     try:
         if os.path.exists(cache_path):
@@ -624,7 +624,7 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
                 with open(cache_path, "r", encoding="utf-8") as f:
                     cache = json.load(f)
             cache[key] = {"ts": int(time.time()), "queries": queries}
-            os.makedirs(SEARCH_LOG_DIR, exist_ok=True)
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
             with open(cache_path, "w", encoding="utf-8") as f:
                 json.dump(cache, f, ensure_ascii=False)
         except Exception as exc:
