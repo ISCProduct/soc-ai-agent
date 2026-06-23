@@ -4,9 +4,11 @@ import (
 	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
+	"Backend/internal/openai"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"sort"
 	"strings"
@@ -54,6 +56,12 @@ type JobSuitabilityRole struct {
 	Reason string `json:"reason"`
 }
 
+type LLMStructuredSummary struct {
+	Strengths               []string `json:"strengths"`
+	Concerns                []string `json:"concerns"`
+	RecommendedWorkingStyle string   `json:"recommended_working_style"`
+}
+
 type AnalysisSummary struct {
 	Scores                AnalysisScores          `json:"scores"`
 	Progress              AnalysisProgress        `json:"progress"`
@@ -63,6 +71,10 @@ type AnalysisSummary struct {
 	JobSuitabilityComment string                  `json:"job_suitability_comment,omitempty"`
 	SuggestedRoles        []JobSuitabilityRole    `json:"suggested_roles,omitempty"`
 	ScoreComment          string                  `json:"score_comment,omitempty"`
+	// LLM による要約（生テキスト）
+	LLMRawSummary string `json:"llm_raw_summary,omitempty"`
+	// LLM による構造化サマリ（可能な場合）
+	LLMStructured *LLMStructuredSummary `json:"llm_structured_summary,omitempty"`
 }
 
 type FutureAnalyzer interface {
@@ -124,6 +136,7 @@ type AnalysisScoringService struct {
 	jobEmbeddingRepo        repository.JobCategoryEmbeddingRepository
 	matchRepo               repository.UserCompanyMatchRepository
 	futureAnalyzer          FutureAnalyzer
+	aiClient                *openai.Client
 }
 
 func NewAnalysisScoringService(
@@ -134,6 +147,7 @@ func NewAnalysisScoringService(
 	userEmbeddingRepo repository.UserEmbeddingRepository,
 	jobEmbeddingRepo repository.JobCategoryEmbeddingRepository,
 	matchRepo repository.UserCompanyMatchRepository,
+	aiClient *openai.Client,
 	futureAnalyzer FutureAnalyzer,
 ) *AnalysisScoringService {
 	if futureAnalyzer == nil {
@@ -148,6 +162,7 @@ func NewAnalysisScoringService(
 		jobEmbeddingRepo:        jobEmbeddingRepo,
 		matchRepo:               matchRepo,
 		futureAnalyzer:          futureAnalyzer,
+		aiClient:                aiClient,
 	}
 }
 
@@ -178,7 +193,7 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 	}
 	scoreComment := buildScoreComment(allScores)
 
-	return &AnalysisSummary{
+	summary := &AnalysisSummary{
 		Scores:                allScores,
 		Progress:              progress,
 		AptitudeAxes:          axes,
@@ -187,7 +202,57 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 		JobSuitabilityComment: jobSuitabilityComment,
 		SuggestedRoles:        suggestedRoles,
 		ScoreComment:          scoreComment,
-	}, nil
+	}
+
+	// LLMによる簡易サマリ（利用可能な場合）
+	if s.aiClient != nil && s.chatMessageRepo != nil && s.conversationContextRepo != nil {
+		// 直近のユーザーメッセージを収集
+		msgs, err := s.chatMessageRepo.FindRecentBySessionID(sessionID, 30)
+		if err == nil {
+			// プロンプト構築：スコア要約 + 最近メッセージ
+			contextBytes, _ := json.Marshal(map[string]any{
+				"scores":          summary.Scores,
+				"progress":        summary.Progress,
+				"recommendations": summary.Recommendations,
+			})
+			var lastUserTexts []string
+			for _, m := range msgs {
+				if m.Role == "user" && strings.TrimSpace(m.Content) != "" {
+					lastUserTexts = append(lastUserTexts, m.Content)
+				}
+			}
+			userContext := strings.Join(lastUserTexts, "\n---\n")
+
+			systemPrompt := `あなたは採用支援の専門家です。以下の情報を元に、JSON形式で要約を出力してください。
+出力フォーマット: {"strengths": ["..."], "concerns": ["..."], "recommended_working_style": "..."}
+日本語で簡潔に記述してください。`
+			userPrompt := "解析メタ情報: " + string(contextBytes) + "\n\n直近のユーザーメッセージ:\n" + userContext
+
+			raw, err := s.aiClient.ChatCompletionJSON(context.Background(), systemPrompt, userPrompt, 0.2, 400)
+			if err == nil && strings.TrimSpace(raw) != "" {
+				// パースを試みる
+				var parsed LLMStructuredSummary
+				if err := json.Unmarshal([]byte(raw), &parsed); err == nil {
+					summary.LLMStructured = &parsed
+					summary.LLMRawSummary = raw
+					// 永続化
+					if err := s.conversationContextRepo.SetSessionSummary(userID, sessionID, raw); err != nil {
+						log.Printf("failed to persist llm summary: %v", err)
+					}
+				} else {
+					// JSONでない場合は生テキストとして保存
+					summary.LLMRawSummary = raw
+					if err := s.conversationContextRepo.SetSessionSummary(userID, sessionID, raw); err != nil {
+						log.Printf("failed to persist llm summary: %v", err)
+					}
+				}
+			} else if err != nil {
+				log.Printf("LLM summary generation failed: %v", err)
+			}
+		}
+	}
+
+	return summary, nil
 }
 
 func (s *AnalysisScoringService) calculateJobScore(userID uint, sessionID string) (float64, error) {
@@ -632,9 +697,9 @@ func BuildScoreComment(scores AnalysisScores) string { return buildScoreComment(
 func BuildJobSuitabilityComment(scores []entity.UserWeightScore) (string, []JobSuitabilityRole) {
 	return buildJobSuitabilityComment(scores)
 }
-func ParseEmbedding(raw string) ([]float64, error)     { return parseEmbedding(raw) }
-func CosineSimilarity(a, b []float64) float64          { return cosineSimilarity(a, b) }
-func Clamp01(value float64) float64                    { return clamp01(value) }
+func ParseEmbedding(raw string) ([]float64, error) { return parseEmbedding(raw) }
+func CosineSimilarity(a, b []float64) float64      { return cosineSimilarity(a, b) }
+func Clamp01(value float64) float64                { return clamp01(value) }
 func AverageCategoryScore(scoreMap map[string]float64, categories []string) float64 {
 	return averageCategoryScore(scoreMap, categories)
 }

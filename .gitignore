@@ -7003,5 +7003,8 @@ mysql/logs/
 /rag/.venv/lib/python3.12/site-packages/six.py
 /rag/.venv/lib/python3.12/site-packages/typing_extensions.py
 /rag/.venv/pyvenv.cfg
-/rag/__pycache__/
-/rag/tests/__pycache__/
+
+# Ignore rag virtualenv
+rag/.venv/
+__pycache__/
+*.pyc

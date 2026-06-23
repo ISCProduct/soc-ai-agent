@@ -47,6 +47,7 @@ type ReviewResult = {
   length_balance_score: number
   feedback: string
   improved_text: string
+  company_strategy?: string | null
 }
 
 const STAR_LABELS: { key: keyof StarBreakdown; label: string; color: string; emoji: string }[] = [
@@ -245,22 +246,30 @@ export default function ESRewritePage() {
 
             {/* 添削モード: 志望企業 / リライトモード: 技術スタック */}
             {mode === 'review' ? (
-              <TextField
-                fullWidth
-                size="small"
-                value={companyName}
-                onChange={e => setCompanyName(e.target.value)}
-                label="志望企業名（任意・入力で企業適合性を評価）"
-                placeholder="例: 株式会社サイバーエージェント"
-                sx={{
-                  mb: 3,
-                  '& .MuiOutlinedInput-root': {
-                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: PRIMARY },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: PRIMARY },
-                  },
-                  '& .MuiInputLabel-root.Mui-focused': { color: PRIMARY },
-                }}
-              />
+              <>
+                <TextField
+                  fullWidth
+                  size="small"
+                  value={companyName}
+                  onChange={e => setCompanyName(e.target.value)}
+                  label="志望企業名（任意・入力で企業適合性を評価）"
+                  placeholder="例: 株式会社サイバーエージェント"
+                  sx={{
+                    mb: 3,
+                    '& .MuiOutlinedInput-root': {
+                      '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: PRIMARY },
+                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: PRIMARY },
+                    },
+                    '& .MuiInputLabel-root.Mui-focused': { color: PRIMARY },
+                  }}
+                />
+                {companyName.trim() !== '' && loading && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
+                    <CircularProgress size={16} />
+                    <Typography variant="body2" sx={{ color: '#64748b' }}>企業情報を分析中...</Typography>
+                  </Box>
+                )}
+              </>
             ) : (
               <>
                 <TextField
@@ -295,6 +304,12 @@ export default function ESRewritePage() {
                     '& .MuiInputLabel-root.Mui-focused': { color: PRIMARY },
                   }}
                 />
+                {companyName.trim() !== '' && loading && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
+                    <CircularProgress size={16} />
+                    <Typography variant="body2" sx={{ color: '#64748b' }}>企業情報を分析中...</Typography>
+                  </Box>
+                )}
               </>
             )}
 
@@ -366,6 +381,13 @@ export default function ESRewritePage() {
                   {reviewResult.feedback}
                 </Typography>
               </Paper>
+
+              {reviewResult.company_strategy && (
+                <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #f1f5f9', bgcolor: '#fff' }}>
+                  <Typography sx={{ fontWeight: 700, fontSize: 16, mb: 1.5 }}>🏢 {companyName || '志望企業'}への対策アドバイス</Typography>
+                  <Typography variant="body2" sx={{ color: '#475569', lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{reviewResult.company_strategy}</Typography>
+                </Paper>
+              )}
 
               {/* Before / After comparison */}
               {reviewResult.improved_text && (

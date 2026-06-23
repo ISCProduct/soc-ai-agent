@@ -217,6 +217,7 @@ func main() {
 		userEmbeddingRepo,
 		jobEmbeddingRepo,
 		matchRepo,
+		aiClient,
 		nil,
 	)
 	interviewService := services.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)

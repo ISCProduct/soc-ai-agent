@@ -63,11 +63,23 @@ JSONのみで返してください。`
 	// 企業名が指定されていれば Web Search を使って最新の企業情報を取得し、プロンプトに注入する（失敗しても処理を継続）
 	companyInfo := ""
 	if strings.TrimSpace(req.CompanyName) != "" {
-		if info, err := c.openaiClient.WebSearchQuery(context.Background(), "企業名: "+req.CompanyName+" 採用情報 求める人物像 企業理念"); err == nil {
+		parts := []string{}
+		// Query 1: 採用情報・企業理念・求める人物像
+		if info, err := c.openaiClient.WebSearchQuery(context.Background(), "企業名: "+req.CompanyName+" 採用情報 求める人物像 企業理念"); err == nil && strings.TrimSpace(info) != "" {
 			if len(info) > 2000 {
 				info = info[:2000]
 			}
-			companyInfo = "\n\n【企業情報（WebSearch）】\n" + info
+			parts = append(parts, info)
+		}
+		// Query 2: エンジニア向けの選考ポイント・技術スタックに関する情報
+		if info2, err2 := c.openaiClient.WebSearchQuery(context.Background(), "企業名: "+req.CompanyName+" エンジニア 選考 重視する点 技術スタック"); err2 == nil && strings.TrimSpace(info2) != "" {
+			if len(info2) > 2000 {
+				info2 = info2[:2000]
+			}
+			parts = append(parts, info2)
+		}
+		if len(parts) > 0 {
+			companyInfo = "\n\n【企業が重視するポイント】\n" + strings.Join(parts, "\n\n")
 		}
 	}
 
