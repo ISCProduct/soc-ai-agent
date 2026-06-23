@@ -8,9 +8,8 @@ import (
 	"fmt"
 	"log"
 	"math"
-"regexp"
-"strings"
-"unicode"
+	"strings"
+	"unicode"
 )
 
 // checkAnswerValidity: 直近の assistant メッセージが質問かを判定し、ユーザー入力がその質問に対する有効な回答かを判定する。
@@ -448,21 +447,24 @@ func isMostlyPunctuation(s string) bool {
 
 // containsITKeyword checks for presence of IT-related keywords
 func containsITKeyword(s string) bool {
+	lower := strings.ToLower(s)
 	itKeywords := []string{
 		"エンジニア", "プログラマ", "開発", "インフラ", "セキュリティ",
 		"データ", "サイエンティスト", "アプリ", "Web", "モバイル",
 		"フロントエンド", "バックエンド", "フルスタック", "DevOps",
 		"クラウド", "ネットワーク", "システム", "プロジェクト",
 		"技術", "スキル", "経験", "プログラミング", "コード",
+		"backend", "frontend", "react", "python", "java", "javascript",
+		"typescript", "go", "golang", "aws", "gcp", "azure", "docker",
+		"kubernetes", "sql", "mysql", "postgres", "api", "devops",
 	}
 	for _, k := range itKeywords {
-		if strings.Contains(s, k) {
+		if strings.Contains(s, k) || strings.Contains(lower, strings.ToLower(k)) {
 			return true
 		}
 	}
 	return false
 }
-
 
 func looksLikeKeywordList(answer string) bool {
 	normalized := strings.TrimSpace(answer)
