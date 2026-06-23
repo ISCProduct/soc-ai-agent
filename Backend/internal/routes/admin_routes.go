@@ -79,6 +79,12 @@ func SetupAdminRoutes(
 	admin.GET("/interviews/:id/videos", adminInterviewController.ListVideos)
 	admin.GET("/interviews/videos/:video_id/url", adminInterviewController.VideoURL)
 
+	// 企業別面接質問管理
+	admin.GET("/companies/:id/interview-questions", adminInterviewController.ListCompanyQuestions)
+	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion)
+	admin.PUT("/companies/:id/interview-questions/:qid", adminInterviewController.UpdateCompanyQuestion)
+	admin.DELETE("/companies/:id/interview-questions/:qid", adminInterviewController.DeleteCompanyQuestion)
+
 	// ダッシュボード
 	admin.GET("/dashboard/users", adminDashboardController.ListUsers)
 	admin.GET("/dashboard/users/:id", adminDashboardController.UserSessions)
@@ -103,7 +109,7 @@ func SetupAdminRoutes(
 	admin.GET("/score-validation/calibration/history", scoreValidationController.GetCalibrationHistory)
 	admin.GET("/score-validation/variants", scoreValidationController.ListVariants)
 	admin.POST("/score-validation/variants", scoreValidationController.CreateVariant)
-	admin.GET("/score-validation/variants/:id/results", scoreValidationController.GetVariantResults)
+	admin.GET("/score-validation/variants/results", scoreValidationController.GetVariantResults)
 
 	// 集合知管理
 	admin.POST("/collective-insights/rebuild-summaries", collectiveInsightController.RebuildSummaries)

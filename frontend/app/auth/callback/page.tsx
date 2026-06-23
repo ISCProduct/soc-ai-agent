@@ -55,8 +55,7 @@ function OAuthCallbackContent() {
       }
 
       const userParam = searchParams.get('user')
-      const provider = searchParams.get('provider')
-      
+
       if (!userParam) {
         setError('ユーザー情報が見つかりません')
         return

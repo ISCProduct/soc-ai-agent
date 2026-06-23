@@ -211,8 +211,8 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 		if err == nil {
 			// プロンプト構築：スコア要約 + 最近メッセージ
 			contextBytes, _ := json.Marshal(map[string]any{
-				"scores": summary.Scores,
-				"progress": summary.Progress,
+				"scores":          summary.Scores,
+				"progress":        summary.Progress,
 				"recommendations": summary.Recommendations,
 			})
 			var lastUserTexts []string
@@ -223,7 +223,9 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 			}
 			userContext := strings.Join(lastUserTexts, "\n---\n")
 
-			systemPrompt := "あなたは採用支援の専門家です。以下の情報を元に、JSON形式で要約を出力してください。\n出力フォーマット: {\"strengths\": [\"...\"], \"concerns\": [\"...\"], \"recommended_working_style\": \"...\"}\n日本語で簡潔に記述してください。"
+			systemPrompt := `あなたは採用支援の専門家です。以下の情報を元に、JSON形式で要約を出力してください。
+出力フォーマット: {"strengths": ["..."], "concerns": ["..."], "recommended_working_style": "..."}
+日本語で簡潔に記述してください。`
 			userPrompt := "解析メタ情報: " + string(contextBytes) + "\n\n直近のユーザーメッセージ:\n" + userContext
 
 			raw, err := s.aiClient.ChatCompletionJSON(context.Background(), systemPrompt, userPrompt, 0.2, 400)
@@ -695,9 +697,9 @@ func BuildScoreComment(scores AnalysisScores) string { return buildScoreComment(
 func BuildJobSuitabilityComment(scores []entity.UserWeightScore) (string, []JobSuitabilityRole) {
 	return buildJobSuitabilityComment(scores)
 }
-func ParseEmbedding(raw string) ([]float64, error)     { return parseEmbedding(raw) }
-func CosineSimilarity(a, b []float64) float64          { return cosineSimilarity(a, b) }
-func Clamp01(value float64) float64                    { return clamp01(value) }
+func ParseEmbedding(raw string) ([]float64, error) { return parseEmbedding(raw) }
+func CosineSimilarity(a, b []float64) float64      { return cosineSimilarity(a, b) }
+func Clamp01(value float64) float64                { return clamp01(value) }
 func AverageCategoryScore(scoreMap map[string]float64, categories []string) float64 {
 	return averageCategoryScore(scoreMap, categories)
 }

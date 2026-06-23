@@ -235,6 +235,7 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 	position := r.FormValue("position")
 	companyInfo := r.FormValue("company_info")
 	companyType := r.FormValue("company_type")
+	companyID := uint(parseFormInt(r, "company_id", 0))
 
 	turnCount := parseFormInt(r, "turn_count", 0)
 	remainingSeconds := parseFormInt(r, "remaining_seconds", 0)
@@ -264,6 +265,7 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		position,
 		companyInfo,
 		companyType,
+		companyID,
 		turnCount,
 		remainingSeconds,
 		questionIndex,
@@ -309,6 +311,7 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 		Position                string `json:"position"`
 		CompanyInfo             string `json:"company_info"`
 		CompanyType             string `json:"company_type"`
+		CompanyID               uint   `json:"company_id"`
 		QuestionIndex           int    `json:"question_index"`
 		TotalQuestions          int    `json:"total_questions"`
 		QuestionElapsedSeconds  int    `json:"question_elapsed_seconds"`
@@ -325,6 +328,7 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 		req.Position,
 		req.CompanyInfo,
 		req.CompanyType,
+		req.CompanyID,
 		req.QuestionIndex,
 		req.TotalQuestions,
 		req.QuestionElapsedSeconds,

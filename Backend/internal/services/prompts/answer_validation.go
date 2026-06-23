@@ -14,7 +14,8 @@ const AnswerValidationSystemPrompt = SystemRoleValidator + `
 - 他の説明文やコメントは一切含めないでください
 
 ## 出力形式（厳守）
-{"valid": true} または {"valid": false}`
+{"valid": true, "reason": "...", "confidence": 0.0} または {"valid": false, "reason": "...", "confidence": 0.0}
+(キーは必須。confidence は 0.0〜1.0 の範囲の数値を返してください)`
 
 // BuildAnswerValidationUserPrompt は回答妥当性チェック用のユーザープロンプトを構築します。
 // 「無効条件のみ列挙」ではなく「有効条件を正面から定義」する方式で、
