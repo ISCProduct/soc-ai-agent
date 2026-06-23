@@ -246,28 +246,30 @@ export default function ESRewritePage() {
 
             {/* 添削モード: 志望企業 / リライトモード: 技術スタック */}
             {mode === 'review' ? (
-              <TextField
-                fullWidth
-                size="small"
-                value={companyName}
-                onChange={e => setCompanyName(e.target.value)}
-                label="志望企業名（任意・入力で企業適合性を評価）"
-                placeholder="例: 株式会社サイバーエージェント"
-                sx={{
-                  mb: 3,
-                  '& .MuiOutlinedInput-root': {
-                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: PRIMARY },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: PRIMARY },
-                  },
-                  '& .MuiInputLabel-root.Mui-focused': { color: PRIMARY },
-                }}
-              />
-              {companyName.trim() !== '' && loading && (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
-                  <CircularProgress size={16} />
-                  <Typography variant="body2" sx={{ color: '#64748b' }}>企業情報を分析中...</Typography>
-                </Box>
-              )}
+              <>
+                <TextField
+                  fullWidth
+                  size="small"
+                  value={companyName}
+                  onChange={e => setCompanyName(e.target.value)}
+                  label="志望企業名（任意・入力で企業適合性を評価）"
+                  placeholder="例: 株式会社サイバーエージェント"
+                  sx={{
+                    mb: 3,
+                    '& .MuiOutlinedInput-root': {
+                      '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: PRIMARY },
+                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: PRIMARY },
+                    },
+                    '& .MuiInputLabel-root.Mui-focused': { color: PRIMARY },
+                  }}
+                />
+                {companyName.trim() !== '' && loading && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
+                    <CircularProgress size={16} />
+                    <Typography variant="body2" sx={{ color: '#64748b' }}>企業情報を分析中...</Typography>
+                  </Box>
+                )}
+              </>
             ) : (
               <>
                 <TextField
