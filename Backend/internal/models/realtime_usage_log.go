@@ -12,6 +12,13 @@ type RealtimeUsageLog struct {
 	EndedAt            *time.Time `gorm:"index" json:"ended_at,omitempty"`
 	DurationSeconds    int        `gorm:"not null;default:0" json:"duration_seconds"`
 	CostUSD            float64    `gorm:"type:decimal(10,4);default:0" json:"cost_usd"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	// トークンベースコスト計算用（response.done イベントから取得）
+	InputTextTokens        int  `gorm:"not null;default:0" json:"input_text_tokens"`
+	OutputTextTokens       int  `gorm:"not null;default:0" json:"output_text_tokens"`
+	InputAudioTokens       int  `gorm:"not null;default:0" json:"input_audio_tokens"`
+	OutputAudioTokens      int  `gorm:"not null;default:0" json:"output_audio_tokens"`
+	InputCachedAudioTokens int  `gorm:"not null;default:0" json:"input_cached_audio_tokens"`
+	TokenBasedCost         bool `gorm:"not null;default:false" json:"token_based_cost"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }

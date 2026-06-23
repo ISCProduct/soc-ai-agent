@@ -17,36 +17,92 @@ import (
 	"gorm.io/gorm"
 )
 
+// TokenUsage は Realtime API の response.done イベントから取得するトークン使用量。
+// nil のとき時間ベースにフォールバックする。
+type TokenUsage struct {
+	InputTextTokens        int
+	OutputTextTokens       int
+	InputAudioTokens       int
+	OutputAudioTokens      int
+	InputCachedAudioTokens int
+}
+
+// realtimeTokenRates はトークン単価（USD/1Mトークン）を保持する。
+type realtimeTokenRates struct {
+	textInput        float64
+	textOutput       float64
+	audioInput       float64
+	audioOutput      float64
+	cachedAudioInput float64
+}
+
+func loadTokenRates() realtimeTokenRates {
+	return realtimeTokenRates{
+		textInput:        getFloatEnv("REALTIME_TEXT_INPUT_COST_PER_1M_USD", 5.0),
+		textOutput:       getFloatEnv("REALTIME_TEXT_OUTPUT_COST_PER_1M_USD", 15.0),
+		audioInput:       getFloatEnv("REALTIME_AUDIO_INPUT_COST_PER_1M_USD", 100.0),
+		audioOutput:      getFloatEnv("REALTIME_AUDIO_OUTPUT_COST_PER_1M_USD", 200.0),
+		cachedAudioInput: getFloatEnv("REALTIME_CACHED_AUDIO_INPUT_COST_PER_1M_USD", 20.0),
+	}
+}
+
+func (r realtimeTokenRates) calcCost(u TokenUsage) float64 {
+	const perM = 1_000_000.0
+	return float64(u.InputTextTokens)/perM*r.textInput +
+		float64(u.OutputTextTokens)/perM*r.textOutput +
+		float64(u.InputAudioTokens)/perM*r.audioInput +
+		float64(u.OutputAudioTokens)/perM*r.audioOutput +
+		float64(u.InputCachedAudioTokens)/perM*r.cachedAudioInput
+}
+
+// CalcTokenCost はデフォルト単価を使ってトークンベースのコストを計算する（テスト用公開関数）。
+func CalcTokenCost(u TokenUsage) float64 {
+	return loadTokenRates().calcCost(u)
+}
+
 type RealtimeDailySummary struct {
-	Date                 string  `json:"date"`
-	TotalCostUSD         float64 `json:"total_cost_usd"`
-	TotalDurationSeconds int64   `json:"total_duration_seconds"`
-	SessionCount         int64   `json:"session_count"`
-	UserCount            int64   `json:"user_count"`
+	Date                       string  `json:"date"`
+	TotalCostUSD               float64 `json:"total_cost_usd"`
+	TotalDurationSeconds       int64   `json:"total_duration_seconds"`
+	SessionCount               int64   `json:"session_count"`
+	UserCount                  int64   `json:"user_count"`
+	TotalInputAudioTokens      int64   `json:"total_input_audio_tokens"`
+	TotalOutputAudioTokens     int64   `json:"total_output_audio_tokens"`
+	TotalInputTextTokens       int64   `json:"total_input_text_tokens"`
+	TotalOutputTextTokens      int64   `json:"total_output_text_tokens"`
 }
 
 type RealtimeMonthlySummary struct {
-	Month                string  `json:"month"`
-	TotalCostUSD         float64 `json:"total_cost_usd"`
-	TotalDurationSeconds int64   `json:"total_duration_seconds"`
-	SessionCount         int64   `json:"session_count"`
-	UserCount            int64   `json:"user_count"`
+	Month                      string  `json:"month"`
+	TotalCostUSD               float64 `json:"total_cost_usd"`
+	TotalDurationSeconds       int64   `json:"total_duration_seconds"`
+	SessionCount               int64   `json:"session_count"`
+	UserCount                  int64   `json:"user_count"`
+	TotalInputAudioTokens      int64   `json:"total_input_audio_tokens"`
+	TotalOutputAudioTokens     int64   `json:"total_output_audio_tokens"`
+	TotalInputTextTokens       int64   `json:"total_input_text_tokens"`
+	TotalOutputTextTokens      int64   `json:"total_output_text_tokens"`
 }
 
 type RealtimeUserSummary struct {
-	UserID               uint    `json:"user_id"`
-	TotalCostUSD         float64 `json:"total_cost_usd"`
-	TotalDurationSeconds int64   `json:"total_duration_seconds"`
-	SessionCount         int64   `json:"session_count"`
+	UserID                     uint    `json:"user_id"`
+	TotalCostUSD               float64 `json:"total_cost_usd"`
+	TotalDurationSeconds       int64   `json:"total_duration_seconds"`
+	SessionCount               int64   `json:"session_count"`
+	TotalInputAudioTokens      int64   `json:"total_input_audio_tokens"`
+	TotalOutputAudioTokens     int64   `json:"total_output_audio_tokens"`
+	TotalInputTextTokens       int64   `json:"total_input_text_tokens"`
+	TotalOutputTextTokens      int64   `json:"total_output_text_tokens"`
 }
 
 type RealtimeUsageService struct {
-	repo                    *repositories.RealtimeUsageRepository
-	emailService            *EmailService
-	alertThresholdUSD       float64
-	maxConcurrent           int64
-	ratePerMinuteUSD        float64
-	sessionDurationMinutes  int
+	repo                   *repositories.RealtimeUsageRepository
+	emailService           *EmailService
+	alertThresholdUSD      float64
+	maxConcurrent          int64
+	ratePerMinuteUSD       float64
+	sessionDurationMinutes int
+	tokenRates             realtimeTokenRates
 
 	mu               sync.Mutex
 	lastAlertMonthID string
@@ -70,6 +126,7 @@ func NewRealtimeUsageService(repo *repositories.RealtimeUsageRepository, emailSe
 		maxConcurrent:          maxConcurrent,
 		ratePerMinuteUSD:       rate,
 		sessionDurationMinutes: sessionMinutes,
+		tokenRates:             loadTokenRates(),
 	}
 }
 
@@ -104,7 +161,9 @@ func (s *RealtimeUsageService) EnsureSessionStarted(userID, sessionID uint) erro
 	return nil
 }
 
-func (s *RealtimeUsageService) CloseSession(sessionID uint, endedAt time.Time) (durationSec int64, costUSD float64, err error) {
+// CloseSession はセッションを終了し、duration と cost を返す。
+// tokens が非 nil の場合はトークンベースでコストを計算し、nil の場合は時間ベースにフォールバックする。
+func (s *RealtimeUsageService) CloseSession(sessionID uint, endedAt time.Time, tokens *TokenUsage) (durationSec int64, costUSD float64, err error) {
 	entry, err := s.repo.FindActiveBySessionID(sessionID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -116,7 +175,20 @@ func (s *RealtimeUsageService) CloseSession(sessionID uint, endedAt time.Time) (
 	if dur < 0 {
 		dur = 0
 	}
-	cost := (float64(dur) / 60.0) * s.ratePerMinuteUSD
+
+	var cost float64
+	if tokens != nil {
+		cost = s.tokenRates.calcCost(*tokens)
+		entry.InputTextTokens = tokens.InputTextTokens
+		entry.OutputTextTokens = tokens.OutputTextTokens
+		entry.InputAudioTokens = tokens.InputAudioTokens
+		entry.OutputAudioTokens = tokens.OutputAudioTokens
+		entry.InputCachedAudioTokens = tokens.InputCachedAudioTokens
+		entry.TokenBasedCost = true
+	} else {
+		cost = (float64(dur) / 60.0) * s.ratePerMinuteUSD
+	}
+
 	entry.EndedAt = &endedAt
 	entry.DurationSeconds = int(dur)
 	entry.CostUSD = cost
@@ -144,11 +216,15 @@ func (s *RealtimeUsageService) GetDailyUsage(nDays int) ([]RealtimeDailySummary,
 	out := make([]RealtimeDailySummary, len(rows))
 	for i, r := range rows {
 		out[i] = RealtimeDailySummary{
-			Date:                 r.Date,
-			TotalCostUSD:         r.TotalCostUSD,
-			TotalDurationSeconds: r.TotalDurationSeconds,
-			SessionCount:         r.SessionCount,
-			UserCount:            r.UserCount,
+			Date:                   r.Date,
+			TotalCostUSD:           r.TotalCostUSD,
+			TotalDurationSeconds:   r.TotalDurationSeconds,
+			SessionCount:           r.SessionCount,
+			UserCount:              r.UserCount,
+			TotalInputAudioTokens:  r.TotalInputAudioTokens,
+			TotalOutputAudioTokens: r.TotalOutputAudioTokens,
+			TotalInputTextTokens:   r.TotalInputTextTokens,
+			TotalOutputTextTokens:  r.TotalOutputTextTokens,
 		}
 	}
 	return out, nil
@@ -162,11 +238,15 @@ func (s *RealtimeUsageService) GetMonthlyUsage(nMonths int) ([]RealtimeMonthlySu
 	out := make([]RealtimeMonthlySummary, len(rows))
 	for i, r := range rows {
 		out[i] = RealtimeMonthlySummary{
-			Month:                r.Month,
-			TotalCostUSD:         r.TotalCostUSD,
-			TotalDurationSeconds: r.TotalDurationSeconds,
-			SessionCount:         r.SessionCount,
-			UserCount:            r.UserCount,
+			Month:                  r.Month,
+			TotalCostUSD:           r.TotalCostUSD,
+			TotalDurationSeconds:   r.TotalDurationSeconds,
+			SessionCount:           r.SessionCount,
+			UserCount:              r.UserCount,
+			TotalInputAudioTokens:  r.TotalInputAudioTokens,
+			TotalOutputAudioTokens: r.TotalOutputAudioTokens,
+			TotalInputTextTokens:   r.TotalInputTextTokens,
+			TotalOutputTextTokens:  r.TotalOutputTextTokens,
 		}
 	}
 	return out, nil
@@ -184,10 +264,14 @@ func (s *RealtimeUsageService) GetUserBreakdown(days int, limit int) ([]Realtime
 	out := make([]RealtimeUserSummary, len(rows))
 	for i, r := range rows {
 		out[i] = RealtimeUserSummary{
-			UserID:               r.UserID,
-			TotalCostUSD:         r.TotalCostUSD,
-			TotalDurationSeconds: r.TotalDurationSeconds,
-			SessionCount:         r.SessionCount,
+			UserID:                 r.UserID,
+			TotalCostUSD:           r.TotalCostUSD,
+			TotalDurationSeconds:   r.TotalDurationSeconds,
+			SessionCount:           r.SessionCount,
+			TotalInputAudioTokens:  r.TotalInputAudioTokens,
+			TotalOutputAudioTokens: r.TotalOutputAudioTokens,
+			TotalInputTextTokens:   r.TotalInputTextTokens,
+			TotalOutputTextTokens:  r.TotalOutputTextTokens,
 		}
 	}
 	return out, nil

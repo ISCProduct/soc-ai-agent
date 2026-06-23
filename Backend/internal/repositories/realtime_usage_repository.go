@@ -43,26 +43,38 @@ func (r *RealtimeUsageRepository) CountActiveSessions() (int64, error) {
 }
 
 type RealtimeDailyRow struct {
-	Date                 string
-	TotalCostUSD         float64
-	TotalDurationSeconds int64
-	SessionCount         int64
-	UserCount            int64
+	Date                   string
+	TotalCostUSD           float64
+	TotalDurationSeconds   int64
+	SessionCount           int64
+	UserCount              int64
+	TotalInputAudioTokens  int64
+	TotalOutputAudioTokens int64
+	TotalInputTextTokens   int64
+	TotalOutputTextTokens  int64
 }
 
 type RealtimeMonthlyRow struct {
-	Month                string
-	TotalCostUSD         float64
-	TotalDurationSeconds int64
-	SessionCount         int64
-	UserCount            int64
+	Month                  string
+	TotalCostUSD           float64
+	TotalDurationSeconds   int64
+	SessionCount           int64
+	UserCount              int64
+	TotalInputAudioTokens  int64
+	TotalOutputAudioTokens int64
+	TotalInputTextTokens   int64
+	TotalOutputTextTokens  int64
 }
 
 type RealtimeUserRow struct {
-	UserID               uint
-	TotalCostUSD         float64
-	TotalDurationSeconds int64
-	SessionCount         int64
+	UserID                 uint
+	TotalCostUSD           float64
+	TotalDurationSeconds   int64
+	SessionCount           int64
+	TotalInputAudioTokens  int64
+	TotalOutputAudioTokens int64
+	TotalInputTextTokens   int64
+	TotalOutputTextTokens  int64
 }
 
 func (r *RealtimeUsageRepository) DailyUsage(nDays int, currentRatePerMinute float64) ([]RealtimeDailyRow, error) {
@@ -79,7 +91,11 @@ func (r *RealtimeUsageRepository) DailyUsage(nDays int, currentRatePerMinute flo
 		             ELSE duration_seconds
 		           END) AS total_duration_seconds,
 		       COUNT(DISTINCT interview_session_id) AS session_count,
-		       COUNT(DISTINCT user_id) AS user_count
+		       COUNT(DISTINCT user_id) AS user_count,
+		       SUM(input_audio_tokens) AS total_input_audio_tokens,
+		       SUM(output_audio_tokens) AS total_output_audio_tokens,
+		       SUM(input_text_tokens) AS total_input_text_tokens,
+		       SUM(output_text_tokens) AS total_output_text_tokens
 		FROM realtime_usage_logs
 		WHERE started_at >= ?
 		GROUP BY DATE(started_at)
@@ -102,7 +118,11 @@ func (r *RealtimeUsageRepository) MonthlyUsage(nMonths int, currentRatePerMinute
 		             ELSE duration_seconds
 		           END) AS total_duration_seconds,
 		       COUNT(DISTINCT interview_session_id) AS session_count,
-		       COUNT(DISTINCT user_id) AS user_count
+		       COUNT(DISTINCT user_id) AS user_count,
+		       SUM(input_audio_tokens) AS total_input_audio_tokens,
+		       SUM(output_audio_tokens) AS total_output_audio_tokens,
+		       SUM(input_text_tokens) AS total_input_text_tokens,
+		       SUM(output_text_tokens) AS total_output_text_tokens
 		FROM realtime_usage_logs
 		WHERE started_at >= ?
 		GROUP BY month
@@ -123,7 +143,11 @@ func (r *RealtimeUsageRepository) UserBreakdown(since time.Time, currentRatePerM
 		             WHEN ended_at IS NULL THEN TIMESTAMPDIFF(SECOND, started_at, UTC_TIMESTAMP())
 		             ELSE duration_seconds
 		           END) AS total_duration_seconds,
-		       COUNT(DISTINCT interview_session_id) AS session_count
+		       COUNT(DISTINCT interview_session_id) AS session_count,
+		       SUM(input_audio_tokens) AS total_input_audio_tokens,
+		       SUM(output_audio_tokens) AS total_output_audio_tokens,
+		       SUM(input_text_tokens) AS total_input_text_tokens,
+		       SUM(output_text_tokens) AS total_output_text_tokens
 		FROM realtime_usage_logs
 		WHERE started_at >= ?
 		GROUP BY user_id
