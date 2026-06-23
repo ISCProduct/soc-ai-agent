@@ -6,7 +6,11 @@ import {
   Alert,
   Box,
   Button,
+  Card,
+  CardContent,
   Chip,
+  CircularProgress,
+  Collapse,
   Divider,
   MenuItem,
   Stack,
@@ -16,6 +20,18 @@ import {
 import { authService } from '@/lib/auth'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
+
+type CompanyInfoResult = {
+  description: string
+  industry: string
+  location: string
+  website_url: string
+  founded_year: number
+  employee_count: number
+  main_business: string
+  culture: string
+  work_style: string
+}
 
 const DEV_STYLES = ['スクラム', 'ウォーターフォール', 'カンバン', 'アジャイル', 'その他']
 
@@ -83,6 +99,8 @@ export default function AdminCompanyEditPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
+  const [infoLoading, setInfoLoading] = useState(false)
+  const [infoPreview, setInfoPreview] = useState<CompanyInfoResult | null>(null)
   const [name, setName] = useState('')
   const [techStack, setTechStack] = useState<string[]>([])
   const [infraStack, setInfraStack] = useState<string[]>([])
@@ -104,6 +122,28 @@ export default function AdminCompanyEditPage() {
       })
       .catch(() => setError('企業情報の取得に失敗しました'))
   }, [id])
+
+  const handleFetchInfo = async () => {
+    setInfoLoading(true)
+    setError('')
+    setInfoPreview(null)
+    try {
+      const res = await fetch(`/api/admin/companies/${id}/fetch-info`, {
+        method: 'POST',
+        headers: authService.getAdminFetchHeaders(),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        setError(d?.message || '企業情報の自動取得に失敗しました')
+        return
+      }
+      const data: CompanyInfoResult = await res.json()
+      setInfoPreview(data)
+      setSuccess('企業基本情報を取得してDBに保存しました')
+    } finally {
+      setInfoLoading(false)
+    }
+  }
 
   const handleAiFill = async () => {
     setAiLoading(true)
@@ -181,6 +221,66 @@ export default function AdminCompanyEditPage() {
       </Box>
 
       <Stack spacing={3}>
+        <Box sx={{ p: 2, bgcolor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 2 }}>
+          <Typography sx={{ fontWeight: 700, fontSize: 14, color: '#14532d', mb: 1 }}>
+            企業基本情報の自動取得
+          </Typography>
+          <Typography sx={{ fontSize: 13, color: '#166534', mb: 2 }}>
+            OpenAI Web Searchで企業概要・業種・所在地・公式URL・事業内容などを取得してDBに保存します。
+          </Typography>
+          <Button
+            variant="contained"
+            color="success"
+            onClick={handleFetchInfo}
+            disabled={infoLoading}
+            startIcon={infoLoading ? <CircularProgress size={16} color="inherit" /> : undefined}
+            sx={{ mb: 2 }}
+          >
+            {infoLoading ? '取得中...' : '🔍 企業基本情報を自動取得'}
+          </Button>
+
+          <Collapse in={infoPreview !== null}>
+            {infoPreview && (
+              <Card variant="outlined" sx={{ mt: 1 }}>
+                <CardContent>
+                  <Typography variant="subtitle2" sx={{ mb: 1, color: '#166534' }}>取得結果プレビュー（DB保存済み）</Typography>
+                  <Stack spacing={0.5}>
+                    {infoPreview.description && (
+                      <Typography variant="body2"><strong>概要:</strong> {infoPreview.description}</Typography>
+                    )}
+                    {infoPreview.industry && (
+                      <Typography variant="body2"><strong>業種:</strong> {infoPreview.industry}</Typography>
+                    )}
+                    {infoPreview.location && (
+                      <Typography variant="body2"><strong>所在地:</strong> {infoPreview.location}</Typography>
+                    )}
+                    {infoPreview.website_url && (
+                      <Typography variant="body2"><strong>公式URL:</strong> <a href={infoPreview.website_url} target="_blank" rel="noopener noreferrer">{infoPreview.website_url}</a></Typography>
+                    )}
+                    {infoPreview.founded_year > 0 && (
+                      <Typography variant="body2"><strong>設立年:</strong> {infoPreview.founded_year}年</Typography>
+                    )}
+                    {infoPreview.employee_count > 0 && (
+                      <Typography variant="body2"><strong>従業員数:</strong> {infoPreview.employee_count.toLocaleString()}名</Typography>
+                    )}
+                    {infoPreview.main_business && (
+                      <Typography variant="body2"><strong>主要事業:</strong> {infoPreview.main_business}</Typography>
+                    )}
+                    {infoPreview.culture && (
+                      <Typography variant="body2"><strong>企業文化:</strong> {infoPreview.culture}</Typography>
+                    )}
+                    {infoPreview.work_style && (
+                      <Typography variant="body2"><strong>勤務スタイル:</strong> {infoPreview.work_style}</Typography>
+                    )}
+                  </Stack>
+                </CardContent>
+              </Card>
+            )}
+          </Collapse>
+        </Box>
+
+        <Divider />
+
         <Button
           variant="contained"
           color="secondary"

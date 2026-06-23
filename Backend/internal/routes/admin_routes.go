@@ -45,6 +45,7 @@ func SetupAdminRoutes(
 	admin.GET("/companies/:id/gbiz-search", adminCompanyController.SearchGBiz)
 	admin.POST("/companies/:id/gbiz-sync", adminCompanyController.SyncGBiz)
 	admin.POST("/companies/:id/fetch-tech-stack", adminCompanyController.FetchTechStack)
+	admin.POST("/companies/:id/fetch-info", adminCompanyController.FetchCompanyInfo)
 
 	// クロールソース管理
 	admin.GET("/crawl-sources", adminCrawlController.ListSources)
