@@ -9,8 +9,9 @@ import (
 )
 
 type OAuthConfig struct {
-	Google *oauth2.Config
-	GitHub *oauth2.Config
+	Google         *oauth2.Config
+	GoogleCalendar *oauth2.Config
+	GitHub         *oauth2.Config
 }
 
 func LoadOAuthConfig() *OAuthConfig {
@@ -24,6 +25,16 @@ func LoadOAuthConfig() *OAuthConfig {
 			Scopes: []string{
 				"https://www.googleapis.com/auth/userinfo.email",
 				"https://www.googleapis.com/auth/userinfo.profile",
+			},
+			Endpoint: google.Endpoint,
+		},
+		// カレンダー連携用（既存ログインとは別フロー）
+		GoogleCalendar: &oauth2.Config{
+			ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
+			ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+			RedirectURL:  baseURL + "/api/google-calendar/callback",
+			Scopes: []string{
+				"https://www.googleapis.com/auth/calendar.events",
 			},
 			Endpoint: google.Endpoint,
 		},
