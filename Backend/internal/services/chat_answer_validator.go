@@ -9,6 +9,7 @@ import (
 	"log"
 	"math"
 	"strings"
+	"unicode"
 )
 
 // checkAnswerValidity: 直近の assistant メッセージが質問かを判定し、ユーザー入力がその質問に対する有効な回答かを判定する。
@@ -269,8 +270,28 @@ func isTextBasedQuestion(question string) bool {
 // AI判定が失敗した場合の適度に柔軟なフォールバック
 func isLikelyAnswer(answer, question string) bool {
 	a := strings.TrimSpace(answer)
+	if a == "" {
+		return false
+	}
 
-	// 十分に長い回答（15文字超）は内容があるとみなし有効
+	// 先に明らかに無意味なパターンを弾く
+	// 連続同一文字 (例: "あああああ"), ほぼ記号のみ, ランダム文字列の疑い
+	if hasLongRepeatedRune(a, 5) {
+		log.Printf("[Validation] Fallback: Repeated rune detected: %s\n", a)
+		return false
+	}
+	if isMostlyPunctuation(a) {
+		log.Printf("[Validation] Fallback: Mostly punctuation detected: %s\n", a)
+		return false
+	}
+	// 日本語文字比率が極端に低く、かつ長さが短い/意味のなさそうな場合は無効
+	jr := japaneseCharRatio(a)
+	if jr < 0.25 && len([]rune(a)) >= 6 && !containsITKeyword(a) {
+		log.Printf("[Validation] Fallback: Low japanese ratio (%.2f) and short/random: %s\n", jr, a)
+		return false
+	}
+
+	// 十分に長い回答（15文字超）は基本的に内容があるとみなすが、上の無意味判定は優先
 	if len([]rune(a)) > 15 {
 		log.Printf("[Validation] Fallback: Long answer accepted as valid (%d chars)\n", len([]rune(a)))
 		return true
@@ -287,8 +308,7 @@ func isLikelyAnswer(answer, question string) bool {
 
 	answerLower := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(a, " ", ""), "　", ""))
 
-	// 無回答パターンを先に判定し、shortValidAnswers の部分一致より優先させる。
-	// 「わからない」「わからないです」等の単体のみ無効（他の文章が続く場合は有効）
+	// 無回答パターンを先に判定
 	answerLowerStripped := strings.TrimRight(answerLower, "。、！？…,.!?・")
 	noAnswerPatterns := []string{
 		"わからない", "分からない", "わかりません", "分かりません",
@@ -301,10 +321,7 @@ func isLikelyAnswer(answer, question string) bool {
 		}
 	}
 
-	// 「はい」「いいえ」「うん」などの短い回答は文字数チェックより先に判定する。
-	// noAnswerPatterns の後に置き、完全一致のみとすることで "ない" → "わからない" の誤マッチを防ぐ。
-	// 「はい」「いいえ」「うん」などの短い回答は文字数チェックより先に判定する
-	// （新卒ユーザーの短文回答を正しく有効扱いするため）
+	// 短いが意味ある応答（はい/いいえ等）は有効
 	shortValidAnswers := []string{
 		"はい", "いいえ", "yes", "no", "好き", "嫌い", "得意", "苦手",
 		"できる", "できない", "ある", "ない", "する", "しない",
@@ -335,33 +352,8 @@ func isLikelyAnswer(answer, question string) bool {
 		return false
 	}
 
-	// IT職種関連のキーワードを含むかチェック
-	itKeywords := []string{
-		"エンジニア", "プログラマ", "開発", "インフラ", "セキュリティ",
-		"データ", "サイエンティスト", "アプリ", "Web", "モバイル",
-		"フロントエンド", "バックエンド", "フルスタック", "DevOps",
-		"クラウド", "ネットワーク", "システム", "プロジェクト",
-		"技術", "スキル", "経験", "プログラミング", "コード",
-	}
-
-	hasITKeyword := false
-	for _, keyword := range itKeywords {
-		if strings.Contains(a, keyword) {
-			hasITKeyword = true
-			break
-		}
-	}
-
-	// 質問文に選択肢や具体例が含まれている場合、回答側に数字や選択肢文字があれば回答とみなす
-	if strings.Contains(question, "A)") || strings.Contains(question, "A：") || strings.Contains(question, "A、") {
-		if strings.ContainsAny(a, "ABCDabcd1-5①②③④") {
-			log.Printf("[Validation] Fallback: Contains choice character: %s\n", a)
-			return true
-		}
-	}
-
-	// IT関連キーワードを含む、または5文字以上なら有効（緩和）
-	if hasITKeyword || len([]rune(a)) >= 5 {
+	// IT関連キーワードを含む、または5文字以上なら有効
+	if containsITKeyword(a) || len([]rune(a)) >= 5 {
 		log.Printf("[Validation] Fallback: Valid answer (IT keyword or >= 5 chars): %s\n", a)
 		return true
 	}
@@ -384,6 +376,93 @@ func isLikelyAnswer(answer, question string) bool {
 
 	// デフォルトは無効（厳格に判断）
 	log.Printf("[Validation] Fallback: Default INVALID for: %s\n", a)
+	return false
+}
+
+// hasLongRepeatedRune returns true if any rune repeats consecutively >= n times
+func hasLongRepeatedRune(s string, n int) bool {
+	if n <= 1 {
+		return false
+	}
+	count := 1
+	var prev rune
+	for i, r := range s {
+		if i == 0 {
+			prev = r
+			continue
+		}
+		if r == prev {
+			count++
+			if count >= n {
+				return true
+			}
+		} else {
+			count = 1
+			prev = r
+		}
+	}
+	return false
+}
+
+// japaneseCharRatio returns ratio of runes that are Hiragana/Katakana/CJK
+func japaneseCharRatio(s string) float64 {
+	if s == "" {
+		return 0
+	}
+	total := 0
+	j := 0
+	for _, r := range s {
+		if unicode.IsSpace(r) {
+			continue
+		}
+		total++
+		if (r >= '\u3040' && r <= '\u30ff') || (r >= '\u4e00' && r <= '\u9faf') || (r >= '\u3400' && r <= '\u4dbf') {
+			j++
+		}
+	}
+	if total == 0 {
+		return 0
+	}
+	return float64(j) / float64(total)
+}
+
+// isMostlyPunctuation returns true if over 80% of runes are punctuation/symbols
+func isMostlyPunctuation(s string) bool {
+	total := 0
+	p := 0
+	for _, r := range s {
+		if unicode.IsSpace(r) {
+			continue
+		}
+		total++
+		if unicode.IsPunct(r) || unicode.IsSymbol(r) || strings.ContainsRune("。、！？….,!?・", r) {
+			p++
+		}
+	}
+	if total == 0 {
+		return false
+	}
+	return float64(p)/float64(total) >= 0.8
+}
+
+// containsITKeyword checks for presence of IT-related keywords
+func containsITKeyword(s string) bool {
+	lower := strings.ToLower(s)
+	itKeywords := []string{
+		"エンジニア", "プログラマ", "開発", "インフラ", "セキュリティ",
+		"データ", "サイエンティスト", "アプリ", "Web", "モバイル",
+		"フロントエンド", "バックエンド", "フルスタック", "DevOps",
+		"クラウド", "ネットワーク", "システム", "プロジェクト",
+		"技術", "スキル", "経験", "プログラミング", "コード",
+		"backend", "frontend", "react", "python", "java", "javascript",
+		"typescript", "go", "golang", "aws", "gcp", "azure", "docker",
+		"kubernetes", "sql", "mysql", "postgres", "api", "devops",
+	}
+	for _, k := range itKeywords {
+		if strings.Contains(s, k) || strings.Contains(lower, strings.ToLower(k)) {
+			return true
+		}
+	}
 	return false
 }
 

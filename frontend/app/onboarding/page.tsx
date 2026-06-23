@@ -56,7 +56,7 @@ export default function OnboardingPage() {
   const [completedSteps, setCompletedSteps] = useState<boolean[]>([false, false, false])
 
   useEffect(() => {
-    const hasChatSession = !!(localStorage.getItem('chat_session_id') || localStorage.getItem('currentSessionId'))
+    const hasChatSession = !!(sessionStorage.getItem('chatSessionId') || localStorage.getItem('currentSessionId'))
     const hasResults = hasChatSession // マッチング結果はチャット完了後に閲覧可能
     const hasInterview = !!localStorage.getItem('interview_session_id')
     const completed = [hasChatSession, hasResults, hasInterview]

@@ -1,7 +1,9 @@
 package controllers
 
 import (
+	"Backend/internal/services"
 	"Backend/internal/services/interfaces"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -52,7 +54,10 @@ func (c *AdminScoreValidationController) GetCalibration(ctx echo.Context) error 
 func (c *AdminScoreValidationController) RunCalibration(ctx echo.Context) error {
 	result, err := c.svc.RunCalibration()
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		if errors.Is(err, services.ErrInsufficientSamples) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		return echoInternalError(err)
 	}
 	return ctx.JSON(http.StatusCreated, result)
 }

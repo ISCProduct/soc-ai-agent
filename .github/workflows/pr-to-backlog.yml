@@ -27,6 +27,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      issues: read
+      pull-requests: read
     steps:
       - name: PR を Backlog 課題へ反映
         env:
@@ -39,6 +41,8 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
           PR_MERGED: ${{ github.event.pull_request.merged }}
           ACTION: ${{ github.event.action }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           python3 - << 'PYEOF'
           import os, sys, json, re, urllib.parse, urllib.request, urllib.error
@@ -52,6 +56,8 @@ jobs:
           PR_MERGED = os.environ.get('PR_MERGED', 'false').lower() == 'true'
           ACTION    = os.environ['ACTION']
           DOMAIN    = os.environ.get('BACKLOG_DOMAIN', '').strip()
+          GH_TOKEN  = os.environ.get('GH_TOKEN', '')
+          GH_REPO   = os.environ.get('GH_REPO', '')
 
           def resolve_bl_base(space_id, api_key, domain):
               candidates = [domain] if domain else ['backlog.jp', 'backlog.com']
@@ -101,7 +107,34 @@ jobs:
                   return m.group(1)
               return None
 
+          def resolve_bl_key_from_gh_issue(body):
+              """PR 本文の Closes/Fixes/Resolves #N から GitHub Issue を取得し Backlog キーを解決する"""
+              if not GH_TOKEN or not GH_REPO:
+                  return None
+              nums = re.findall(
+                  r'(?:closes?|fixes?|resolves?)\s+#(\d+)',
+                  body, re.IGNORECASE
+              )
+              for num in nums:
+                  url = f"https://api.github.com/repos/{GH_REPO}/issues/{num}"
+                  req = urllib.request.Request(url)
+                  req.add_header('Authorization', f'Bearer {GH_TOKEN}')
+                  req.add_header('Accept', 'application/vnd.github+json')
+                  req.add_header('X-GitHub-Api-Version', '2022-11-28')
+                  try:
+                      with urllib.request.urlopen(req) as r:
+                          issue = json.loads(r.read())
+                  except Exception:
+                      continue
+                  bl_key = extract_bl_key(issue.get('title', ''), issue.get('body') or '')
+                  if bl_key:
+                      print(f"GitHub Issue #{num} から Backlog キーを解決: {bl_key}")
+                      return bl_key
+              return None
+
           bl_key = extract_bl_key(PR_TITLE, PR_BODY)
+          if not bl_key:
+              bl_key = resolve_bl_key_from_gh_issue(PR_BODY)
           if not bl_key:
               print("Backlog 課題キーが見つかりません。スキップします。")
               sys.exit(0)

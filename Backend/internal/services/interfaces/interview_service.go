@@ -25,6 +25,7 @@ type InterviewService interface {
 		audioData []byte,
 		history []map[string]string,
 		companyName, companyReading, position, companyInfo, companyType string,
+		companyID uint,
 		turnCount, remainingSeconds, questionIndex, totalQuestions, questionElapsedSeconds, questionDurationSeconds int,
 	) (*services.TurnResult, error)
 	StartTurn(
@@ -32,6 +33,7 @@ type InterviewService interface {
 		userID uint,
 		sessionID uint,
 		companyName, companyReading, position, companyInfo, companyType string,
+		companyID uint,
 		questionIndex, totalQuestions, questionElapsedSeconds, questionDurationSeconds int,
 	) (*services.TurnResult, error)
 }

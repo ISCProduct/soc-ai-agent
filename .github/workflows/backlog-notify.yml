@@ -6,7 +6,9 @@ name: Backlog 通知 (commit / PR)
 #
 # 必要な GitHub Secrets:
 #   BACKLOG_SPACE_ID  : スペースID（例: myspace ← myspace.backlog.jp の場合）
+#   BACKLOG_PROJECT_KEY: プロジェクトキー（例: PROJ）
 #   BACKLOG_API_KEY   : Backlog のアカウント設定で発行した APIキー
+#   BACKLOG_DOMAIN    : 任意。backlog.jp 以外を利用する場合のドメイン
 
 on:
   push:
@@ -18,7 +20,17 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
-      - uses: bicstone/backlog-notify@v4
+      - name: Backlog ホスト名を解決
+        id: resolve
+        env:
+          BACKLOG_SPACE_ID: ${{ secrets.BACKLOG_SPACE_ID }}
+          BACKLOG_DOMAIN: ${{ secrets.BACKLOG_DOMAIN }}
+        run: |
+          domain="${BACKLOG_DOMAIN:-backlog.jp}"
+          echo "host=${BACKLOG_SPACE_ID}.${domain}" >> "$GITHUB_OUTPUT"
+
+      - uses: bicstone/backlog-notify@v6
         with:
-          space_id: ${{ secrets.BACKLOG_SPACE_ID }}
+          project_key: ${{ secrets.BACKLOG_PROJECT_KEY }}
+          api_host: ${{ steps.resolve.outputs.host }}
           api_key: ${{ secrets.BACKLOG_API_KEY }}
