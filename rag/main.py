@@ -406,6 +406,65 @@ def retrieve_docs(docs: List[str], query: str) -> List[str]:
     return top_docs
 
 
+# -----------------------
+# フェーズ1: ドメインベース信頼度スコアリング
+# -----------------------
+
+def _extract_domains_from_text(text: str) -> List[str]:
+    """テキストから URL ドメインを抽出する。見つからなければ空リストを返す。"""
+    domains = []
+    try:
+        for m in re.finditer(r"https?://([^/\s]+)", text):
+            host = m.group(1).lower()
+            # strip port
+            host = host.split(":")[0]
+            domains.append(host)
+    except Exception:
+        pass
+    return domains
+
+
+def _domain_trust_score(domain: str, company_name: str) -> float:
+    """ドメインに対して単純な信頼度スコアを返す（0.0-1.0）。"""
+    if not domain:
+        return 0.5
+    d = domain.lower()
+    cn = re.sub(r"[^a-z0-9]", "", company_name.lower())
+    # 高評価: 企業名がドメインに含まれる（公式サイトの可能性）
+    if cn and cn in d:
+        return 0.95
+    # IR・投資家情報
+    if any(x in d for x in ["ir", "investor", "investorrelations", "sec"]):
+        return 0.9
+    # ニュース・主要メディア
+    news_indicators = ["news", "reuters", "nhk", "mainichi", "asahi", "nikkei", "yomiuri", "bloomberg"]
+    if any(x in d for x in news_indicators):
+        return 0.75
+    # SNS は低め
+    social = ["twitter.com", "x.com", "facebook.com", "linkedin.com", "instagram.com", "note.com", "reddit.com"]
+    if any(s in d for s in social):
+        return 0.2
+    # デフォルト中立
+    return 0.5
+
+
+def rank_results_by_domain_trust(raw_texts: List[str], company_name: str) -> List[str]:
+    """各 raw_text からドメインを抽出し、信頼度スコアで上位に並べ替える。"""
+    scored = []
+    for text in raw_texts:
+        domains = _extract_domains_from_text(text)
+        if domains:
+            # pick best domain score
+            scores = [_domain_trust_score(d, company_name) for d in domains]
+            score = max(scores) if scores else 0.5
+        else:
+            # ドメインが見つからない場合は中立スコア
+            score = 0.5
+        scored.append((score, text))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [t for _, t in scored]
+
+
 def run_crewai(
         resume_text: str,
         company_name: str,
@@ -413,6 +472,11 @@ def run_crewai(
         context_docs: List[str],
         context_source: str = "none",
 ) -> str:
+    """CrewAI を実行し、構造化されたレポートを試みる。
+
+    フェーズ1: 出力をまず文字列で受け取り、JSON 形式なら Pydantic で検証。
+    構造化に失敗した場合は元の文字列をフォールバックとして返し、詳細ログを残す。
+    """
     safe_company = _sanitize_company_name_for_query(company_name)
     safe_job_title = _sanitize_job_title(job_title) if job_title else "指定なし"
     context_block = "\n\n".join(context_docs)
@@ -494,58 +558,125 @@ def run_crewai(
         verbose=CREWAI_VERBOSE,
     )
 
-    return str(crew.kickoff())
+    # Run crew and attempt to parse structured output
+    try:
+        raw_out = crew.kickoff()
+        out_str = str(raw_out)
+    except Exception as exc:
+        logger.exception("crew kickoff failed company=%s error=%s", safe_company, exc)
+        return f"※CrewAI実行に失敗しました: {str(exc)[:300]}"
+
+    # Try JSON parse -> Pydantic validation
+    class CrewReport(BaseModel):
+        report: str
+        sources: Optional[List[str]] = None
+
+    try:
+        parsed = None
+        # attempt to find JSON substring
+        json_match = re.search(r"\{[\s\S]*\}\s*$", out_str)
+        if json_match:
+            candidate = json_match.group(0)
+            parsed_json = json.loads(candidate)
+            parsed = CrewReport(**parsed_json)
+            return parsed.report
+        # fallback: if output starts with expected heading, return raw
+        if out_str.strip().startswith("【企業別レビュー報告書】"):
+            return out_str
+        # otherwise return raw but log warning
+        logger.warning("crew output not structured, returning raw for company=%s len=%d", safe_company, len(out_str))
+        return out_str
+    except Exception as exc:
+        logger.exception("CrewAI output parsing failed company=%s error=%s output=%s", safe_company, exc, out_str[:1000])
+        return f"※CrewAI出力の構造化に失敗しました（詳細はログ）。出力冒頭: {out_str[:300]}"
 
 
 def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
     """LLMを使って企業・職種に応じた3〜5つの検索クエリを生成する。
 
-    以下の3軸をカバーするクエリを生成する:
-    - 採用方針（採用基準・求める人物像・企業文化）
-    - 選考の特徴（面接スタイル・選考フロー・評価ポイント）
-    - 最近の事業展開（直近ニュース・IR情報・新規事業）
+    改善点：LLM失敗時は業種/職種テンプレートを用いたフォールバックを行う。
+    生成クエリは短TTLのファイルキャッシュに保存して再利用する。
     """
     api_key = os.getenv("OPENAI_API_KEY")
     safe_company = _sanitize_company_name_for_query(company_name)
     role_text = _sanitize_job_title(job_title) if job_title else "一般職"
-    if not api_key:
-        return [
-            f"{safe_company} {role_text} 採用方針 求める人物像",
-            f"{safe_company} {role_text} 面接 選考 特徴",
-            f"{safe_company} 最近の事業展開 ニュース IR",
-        ]
-    client = OpenAI(api_key=api_key)
-    prompt = (
-        "以下の企業と職種について、採用情報を調査するための検索クエリを3〜5個生成してください。\n\n"
-        "企業名: {company}\n"
-        "職種: {role}\n\n"
-        "以下の3軸をカバーする検索クエリを生成してください。\n"
-        "軸1: 採用方針（採用基準・求める人物像・企業文化）\n"
-        "軸2: 選考の特徴（面接スタイル・選考フロー・評価ポイント）\n"
-        "軸3: 最近の事業展開（直近のニュース・IR情報・新規事業）\n\n"
-        "検索エンジンのヒット率を最大化するため、具体的なキーワードを組み合わせてください。\n"
-        "出力はJSONのみ: {{\"queries\": [\"クエリ1\", \"クエリ2\", ...]}}"
-    ).format(company=safe_company, role=role_text)
+
+    # 簡易ファイルキャッシュ
+    cache_ttl = int(os.getenv("RAG_QUERY_CACHE_TTL_SECONDS", "300"))
+    cache_path = os.path.join(os.getenv("RAG_SEARCH_LOG_DIR", DEFAULT_SEARCH_LOG_DIR), "query_cache.json")
+    cache_key = f"{safe_company}::{role_text}"
     try:
-        resp = client.chat.completions.create(
-            model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o"),
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=300,
-            response_format={"type": "json_object"},
-        )
-        data = json.loads(resp.choices[0].message.content or "{}")
-        queries = data.get("queries", [])
-        if queries:
-            logger.info("generated %d search queries company=%s", len(queries), safe_company)
-            return queries[:5]
+        if os.path.exists(cache_path):
+            with open(cache_path, "r", encoding="utf-8") as f:
+                cache = json.load(f)
+            entry = cache.get(cache_key)
+            if entry:
+                ts = entry.get("ts", 0)
+                if time.time() - ts < cache_ttl:
+                    return entry.get("queries", [])
     except Exception as exc:
-        logger.warning("query generation failed company=%s error=%s", safe_company, exc)
-    return [
-        f"{company_name} {role_text} 採用方針 求める人物像",
-        f"{company_name} {role_text} 面接 選考 特徴",
-        f"{company_name} 最近の事業展開 ニュース IR",
-    ]
+        logger.warning("query cache read failed error=%s", exc)
+
+    def save_to_cache(key: str, queries: List[str]) -> None:
+        try:
+            cache = {}
+            if os.path.exists(cache_path):
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    cache = json.load(f)
+            cache[key] = {"ts": int(time.time()), "queries": queries}
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(cache, f, ensure_ascii=False)
+        except Exception as exc:
+            logger.warning("query cache save failed error=%s", exc)
+
+    # テンプレートベースのフォールバック
+    def template_queries(cn: str, role: str) -> List[str]:
+        return [
+            f"{cn} {role} 採用方針 求める人物像",
+            f"{cn} {role} 面接 選考 特徴 口コミ",
+            f"{cn} {role} 採用 ニュース IR 採用情報",
+            f"{cn} 採用 求める人物像 企業文化",
+            f"{cn} 採用 選考 フロー 面接 質問",
+        ]
+
+    # LLM からの生成を試みる
+    if api_key:
+        try:
+            client = OpenAI(api_key=api_key)
+            prompt = (
+                "以下の企業と職種について、採用情報を調査するための検索クエリを3〜5個生成してください。\n\n"
+                "企業名: {company}\n"
+                "職種: {role}\n\n"
+                "以下の3軸をカバーする検索クエリを生成してください。\n"
+                "軸1: 採用方針（採用基準・求める人物像・企業文化）\n"
+                "軸2: 選考の特徴（面接スタイル・選考フロー・評価ポイント）\n"
+                "軸3: 最近の事業展開（直近のニュース・IR情報・新規事業）\n\n"
+                "検索エンジンのヒット率を最大化するため、具体的なキーワードを組み合わせてください。\n"
+                "出力はJSONのみ: {{\"queries\": [\"クエリ1\", \"クエリ2\", ...]}}"
+            ).format(company=safe_company, role=role_text)
+            resp = client.chat.completions.create(
+                model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o"),
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=300,
+                response_format={"type": "json_object"},
+            )
+            data = json.loads(resp.choices[0].message.content or "{}")
+            queries = data.get("queries", [])
+            if queries:
+                queries = [q.strip() for q in queries if q and isinstance(q, str)]
+                if queries:
+                    logger.info("generated %d search queries company=%s", len(queries), safe_company)
+                    save_to_cache(cache_key, queries[:5])
+                    return queries[:5]
+        except Exception as exc:
+            logger.warning("query generation failed company=%s error=%s", safe_company, exc)
+
+    # フォールバック: テンプレートを使用
+    tqs = template_queries(company_name, role_text)
+    save_to_cache(cache_key, tqs[:5])
+    return tqs[:5]
 
 
 def _web_search_openai(query: str) -> str:
@@ -664,9 +795,16 @@ async def _run_web_search_pipeline(company_name: str, job_title: str) -> str:
         logger.warning("web search pipeline: no results company=%s", company_name)
         return ""
 
+    # ドメインベースの信頼度で結果を再ランキングしてから要約（フェーズ1: 可視化＋加重）
+    try:
+        ranked_results = rank_results_by_domain_trust(raw_results, company_name)
+    except Exception as exc:
+        logger.warning("ranking by domain trust failed company=%s error=%s", company_name, exc)
+        ranked_results = raw_results
+
     # 採用観点での要約
     summary = await loop.run_in_executor(
-        None, _summarize_for_hiring, company_name, job_title, raw_results
+        None, _summarize_for_hiring, company_name, job_title, ranked_results
     )
 
     # JSONL ログ保存（非同期、失敗しても処理を止めない）
