@@ -127,10 +127,10 @@ func TestApplicationController_UpdateStatus_MissingFields(t *testing.T) {
 
 func TestApplicationController_UpdateStatus_Success(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
-	app := &entity.UserApplicationStatus{Status: "interview", Notes: "通過"}
-	svc.On("UpdateStatus", uint(1), uint(1), "interview", "通過").Return(app, nil)
+	app := &entity.UserApplicationStatus{Status: "interview_in_progress", Notes: "通過"}
+	svc.On("UpdateStatus", uint(1), uint(1), "interview_in_progress", "通過", false).Return(app, nil)
 
-	body, _ := json.Marshal(map[string]any{"user_id": 1, "status": "interview", "notes": "通過"})
+	body, _ := json.Marshal(map[string]any{"user_id": 1, "status": "interview_in_progress", "notes": "通過"})
 	req := httptest.NewRequest(http.MethodPut, "/api/applications/1", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -141,7 +141,23 @@ func TestApplicationController_UpdateStatus_Success(t *testing.T) {
 
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
-	assert.Equal(t, "interview", resp["status"])
+	assert.Equal(t, "interview_in_progress", resp["status"])
+	svc.AssertExpectations(t)
+}
+
+func TestApplicationController_UpdateStatus_AdminSuccess(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	app := &entity.UserApplicationStatus{Status: "document_screening", Notes: "書類選考開始"}
+	svc.On("UpdateStatus", uint(1), uint(1), "document_screening", "書類選考開始", true).Return(app, nil)
+
+	body, _ := json.Marshal(map[string]any{"user_id": 1, "status": "document_screening", "notes": "書類選考開始", "is_admin": true})
+	req := httptest.NewRequest(http.MethodPut, "/api/applications/1", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("1")
+	assertStatus(t, newApplicationController(svc).UpdateStatus, c, http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
