@@ -55,9 +55,10 @@ func (c *ApplicationController) UpdateStatus(ctx echo.Context) error {
 	}
 
 	var req struct {
-		UserID uint   `json:"user_id"`
-		Status string `json:"status"`
-		Notes  string `json:"notes"`
+		UserID  uint   `json:"user_id"`
+		Status  string `json:"status"`
+		Notes   string `json:"notes"`
+		IsAdmin bool   `json:"is_admin"`
 	}
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
@@ -66,7 +67,7 @@ func (c *ApplicationController) UpdateStatus(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "user_id と status は必須です")
 	}
 
-	app, err := c.appService.UpdateStatus(uint(id), req.UserID, req.Status, req.Notes)
+	app, err := c.appService.UpdateStatus(uint(id), req.UserID, req.Status, req.Notes, req.IsAdmin)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}

@@ -18,8 +18,8 @@ func (m *ApplicationServiceMock) Apply(userID, companyID, matchID uint) (*entity
 	return args.Get(0).(*entity.UserApplicationStatus), args.Error(1)
 }
 
-func (m *ApplicationServiceMock) UpdateStatus(applicationID uint, userID uint, status, notes string) (*entity.UserApplicationStatus, error) {
-	args := m.Called(applicationID, userID, status, notes)
+func (m *ApplicationServiceMock) UpdateStatus(applicationID uint, userID uint, status, notes string, isAdmin bool) (*entity.UserApplicationStatus, error) {
+	args := m.Called(applicationID, userID, status, notes, isAdmin)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
