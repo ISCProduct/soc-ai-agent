@@ -24,6 +24,7 @@ type AdminCompanyController struct {
 	gbiz         *services.GBizInfoService
 	openaiClient *openai.Client
 	infoFetcher  *services.CompanyInfoFetcher
+	jobFetcher   *services.JobFetchService
 }
 
 func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.AuditLogService, gbiz *services.GBizInfoService, openaiClient ...*openai.Client) *AdminCompanyController {
@@ -31,6 +32,7 @@ func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.A
 	if len(openaiClient) > 0 {
 		ctrl.openaiClient = openaiClient[0]
 		ctrl.infoFetcher = services.NewCompanyInfoFetcher(repo, openaiClient[0])
+		ctrl.jobFetcher = services.NewJobFetchService(repo, openaiClient[0])
 	}
 	return ctrl
 }
@@ -379,6 +381,55 @@ func (c *AdminCompanyController) FetchCompanyInfo(ctx echo.Context) error {
 	})
 
 	return ctx.JSON(http.StatusOK, result)
+}
+
+// FetchJobs POST /api/admin/companies/:id/fetch-jobs
+// 企業の採用ページとWantedlyからAIで求人情報を取得してDBに保存する。
+func (c *AdminCompanyController) FetchJobs(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	if c.jobFetcher == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
+	}
+
+	positions, err := c.jobFetcher.FetchAndSaveJobs(ctx.Request().Context(), uint(id))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.fetch_jobs", "company", uint(id), map[string]any{
+		"count": len(positions),
+	})
+
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"positions": positions,
+		"total":     len(positions),
+	})
+}
+
+// FetchPersona POST /api/admin/companies/:id/fetch-persona
+// AIで企業の求める人物像を分析してCompanyWeightProfileに保存する。
+func (c *AdminCompanyController) FetchPersona(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	if c.jobFetcher == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
+	}
+
+	profile, err := c.jobFetcher.FetchAndSavePersona(ctx.Request().Context(), uint(id))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.fetch_persona", "company", uint(id), nil)
+
+	return ctx.JSON(http.StatusOK, profile)
 }
 
 func applyCompanyDefaults(company *models.Company) {
