@@ -111,7 +111,7 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 	req.Header.Set("Authorization", "Bearer "+cli.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -576,7 +576,7 @@ func (cli *Client) WebSearchQuery(ctx context.Context, query string) (string, er
 	req.Header.Set("Authorization", "Bearer "+cli.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	httpClient := &http.Client{Timeout: 30 * time.Second}
+	httpClient := &http.Client{Timeout: 120 * time.Second}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", err

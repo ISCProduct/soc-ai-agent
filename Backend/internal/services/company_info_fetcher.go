@@ -33,12 +33,26 @@ func NewCompanyInfoFetcher(repo repository.CompanyRepository, client *openai.Cli
 	return &CompanyInfoFetcher{repo: repo, openaiClient: client}
 }
 
-// FetchAndSave は指定企業のWebSearch情報を取得してDBに保存し、取得結果を返す。
-// 取得失敗時は既存データを変更しない。
-func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint) (*CompanyInfoResult, error) {
+// FetchAndSave は指定企業の基本情報を返す。
+// forceRefresh=false かつ DB に概要が存在する場合は AI を呼ばずに既存データを返す。
+func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, forceRefresh bool) (*CompanyInfoResult, error) {
 	company, err := f.repo.FindByID(companyID)
 	if err != nil {
 		return nil, fmt.Errorf("company not found: %w", err)
+	}
+
+	if !forceRefresh && company.Description != "" {
+		return &CompanyInfoResult{
+			Description:   company.Description,
+			Industry:      company.Industry,
+			Location:      company.Location,
+			WebsiteURL:    company.WebsiteURL,
+			FoundedYear:   company.FoundedYear,
+			EmployeeCount: company.EmployeeCount,
+			MainBusiness:  company.MainBusiness,
+			Culture:       company.Culture,
+			WorkStyle:     company.WorkStyle,
+		}, nil
 	}
 
 	prompt := fmt.Sprintf(

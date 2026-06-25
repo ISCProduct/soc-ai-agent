@@ -1224,6 +1224,46 @@ def _run_es_review(
         raise HTTPException(status_code=500, detail=f"ES review failed: {exc}")
 
 
+class CompanyContextRequest(BaseModel):
+    company_name: str = Field(min_length=1)
+    context_type: str = Field(default="general")  # "jobs", "persona", "general"
+    content: str = Field(min_length=1)
+
+
+class CompanyContextResponse(BaseModel):
+    status: str
+    company: str
+    context_type: str
+    keys_updated: int
+
+
+@app.post("/company/context", response_model=CompanyContextResponse)
+def upsert_company_context(request: CompanyContextRequest) -> CompanyContextResponse:
+    """バックエンドが取得した求人情報・人物像をChromaDBに保存し、全RAGエンドポイントで活用できるようにする。"""
+    safe_company = _sanitize_company_name_for_query(request.company_name)
+    docs = [request.content]
+
+    # 各エンドポイントが使うキャッシュキーに一括upsert
+    cache_keys = [
+        f"{safe_company}::指定なし",       # /resume/review
+        f"{safe_company}::es_review",      # /es/review
+        f"hints::{safe_company}::一般職",  # /company/hints
+    ]
+    for key in cache_keys:
+        set_cached_context(key, docs)
+
+    logger.info(
+        "company context upserted company=%s type=%s keys=%d chars=%d",
+        safe_company, request.context_type, len(cache_keys), len(request.content),
+    )
+    return CompanyContextResponse(
+        status="ok",
+        company=safe_company,
+        context_type=request.context_type,
+        keys_updated=len(cache_keys),
+    )
+
+
 @app.post("/es/review", response_model=ESReviewResponse)
 def es_review(request: ESReviewRequest) -> ESReviewResponse:
     context_docs: List[str] = []

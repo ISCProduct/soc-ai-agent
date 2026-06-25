@@ -85,6 +85,7 @@ func SetupAdminRoutes(
 	// 企業別面接質問管理
 	admin.GET("/companies/:id/interview-questions", adminInterviewController.ListCompanyQuestions)
 	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion)
+	admin.POST("/companies/:id/interview-questions/generate", adminInterviewController.GenerateCompanyQuestions)
 	admin.PUT("/companies/:id/interview-questions/:qid", adminInterviewController.UpdateCompanyQuestion)
 	admin.DELETE("/companies/:id/interview-questions/:qid", adminInterviewController.DeleteCompanyQuestion)
 

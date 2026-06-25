@@ -12,11 +12,14 @@ import {
   CircularProgress,
   Collapse,
   Divider,
+  IconButton,
   MenuItem,
   Stack,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material'
+import RefreshIcon from '@mui/icons-material/Refresh'
 import { authService } from '@/lib/auth'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
@@ -35,6 +38,7 @@ type CompanyInfoResult = {
 
 type JobPosition = {
   title: string
+  job_url: string
   employment_type: string
   work_location: string
   remote_option: boolean
@@ -152,12 +156,13 @@ export default function AdminCompanyEditPage() {
       .catch(() => setError('企業情報の取得に失敗しました'))
   }, [id])
 
-  const handleFetchInfo = async () => {
+  const handleFetchInfo = async (force = false) => {
     setInfoLoading(true)
     setError('')
     setInfoPreview(null)
     try {
-      const res = await fetch(`/api/admin/companies/${id}/fetch-info`, {
+      const url = `/api/admin/companies/${id}/fetch-info${force ? '?force=true' : ''}`
+      const res = await fetch(url, {
         method: 'POST',
         headers: authService.getAdminFetchHeaders(),
       })
@@ -168,7 +173,7 @@ export default function AdminCompanyEditPage() {
       }
       const data: CompanyInfoResult = await res.json()
       setInfoPreview(data)
-      setSuccess('企業基本情報を取得してDBに保存しました')
+      setSuccess(force ? 'AIで企業基本情報を再取得してDBに保存しました' : 'DBから企業基本情報を取得しました')
     } finally {
       setInfoLoading(false)
     }
@@ -199,12 +204,13 @@ export default function AdminCompanyEditPage() {
     }
   }
 
-  const handleFetchJobs = async () => {
+  const handleFetchJobs = async (force = false) => {
     setJobsLoading(true)
     setError('')
     setJobsResult(null)
     try {
-      const res = await fetch(`/api/admin/companies/${id}/fetch-jobs`, {
+      const url = `/api/admin/companies/${id}/fetch-jobs${force ? '?force=true' : ''}`
+      const res = await fetch(url, {
         method: 'POST',
         headers: authService.getAdminFetchHeaders(),
       })
@@ -215,18 +221,19 @@ export default function AdminCompanyEditPage() {
       }
       const data = await res.json()
       setJobsResult(data.positions ?? [])
-      setSuccess(`求人情報を${data.total ?? 0}件取得してDBに保存しました`)
+      setSuccess(force ? `AIで求人情報を再取得して${data.total ?? 0}件保存しました` : `DBから求人情報${data.total ?? 0}件を取得しました`)
     } finally {
       setJobsLoading(false)
     }
   }
 
-  const handleFetchPersona = async () => {
+  const handleFetchPersona = async (force = false) => {
     setPersonaLoading(true)
     setError('')
     setPersonaResult(null)
     try {
-      const res = await fetch(`/api/admin/companies/${id}/fetch-persona`, {
+      const url = `/api/admin/companies/${id}/fetch-persona${force ? '?force=true' : ''}`
+      const res = await fetch(url, {
         method: 'POST',
         headers: authService.getAdminFetchHeaders(),
       })
@@ -237,7 +244,7 @@ export default function AdminCompanyEditPage() {
       }
       const data: PersonaProfile = await res.json()
       setPersonaResult(data)
-      setSuccess('求める人物像を分析してCompanyWeightProfileに保存しました')
+      setSuccess(force ? 'AIで人物像を再分析してCompanyWeightProfileに保存しました' : 'DBから求める人物像を取得しました')
     } finally {
       setPersonaLoading(false)
     }
@@ -301,16 +308,29 @@ export default function AdminCompanyEditPage() {
           <Typography sx={{ fontSize: 13, color: '#166534', mb: 2 }}>
             OpenAI Web Searchで企業概要・業種・所在地・公式URL・事業内容などを取得してDBに保存します。
           </Typography>
-          <Button
-            variant="contained"
-            color="success"
-            onClick={handleFetchInfo}
-            disabled={infoLoading}
-            startIcon={infoLoading ? <CircularProgress size={16} color="inherit" /> : undefined}
-            sx={{ mb: 2 }}
-          >
-            {infoLoading ? '取得中...' : '🔍 企業基本情報を自動取得'}
-          </Button>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+            <Button
+              variant="contained"
+              color="success"
+              onClick={() => handleFetchInfo(false)}
+              disabled={infoLoading}
+              startIcon={infoLoading ? <CircularProgress size={16} color="inherit" /> : undefined}
+            >
+              {infoLoading ? '取得中...' : '🔍 企業基本情報を取得'}
+            </Button>
+            <Tooltip title="DBキャッシュを無視してAIで再取得する">
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={() => handleFetchInfo(true)}
+                  disabled={infoLoading}
+                  sx={{ color: '#166534', border: '1px solid #166534', borderRadius: 1 }}
+                >
+                  <RefreshIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
 
           <Collapse in={infoPreview !== null}>
             {infoPreview && (
@@ -362,15 +382,29 @@ export default function AdminCompanyEditPage() {
           <Typography sx={{ fontSize: 13, color: '#854d0e', mb: 2 }}>
             企業の採用ページをクロールし、WantedlyのWebSearchも組み合わせて求人情報をDBに保存します。
           </Typography>
-          <Button
-            variant="contained"
-            onClick={handleFetchJobs}
-            disabled={jobsLoading}
-            startIcon={jobsLoading ? <CircularProgress size={16} color="inherit" /> : undefined}
-            sx={{ mb: 2, bgcolor: '#ca8a04', '&:hover': { bgcolor: '#a16207' } }}
-          >
-            {jobsLoading ? '取得中...' : '📋 求人情報を自動取得'}
-          </Button>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+            <Button
+              variant="contained"
+              onClick={() => handleFetchJobs(false)}
+              disabled={jobsLoading}
+              startIcon={jobsLoading ? <CircularProgress size={16} color="inherit" /> : undefined}
+              sx={{ bgcolor: '#ca8a04', '&:hover': { bgcolor: '#a16207' } }}
+            >
+              {jobsLoading ? '取得中...' : '📋 求人情報を取得'}
+            </Button>
+            <Tooltip title="DBキャッシュを無視してAIで再取得する">
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={() => handleFetchJobs(true)}
+                  disabled={jobsLoading}
+                  sx={{ color: '#a16207', border: '1px solid #a16207', borderRadius: 1 }}
+                >
+                  <RefreshIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
 
           <Collapse in={jobsResult !== null}>
             {jobsResult && jobsResult.length === 0 && (
@@ -381,7 +415,14 @@ export default function AdminCompanyEditPage() {
                 {jobsResult.map((job, i) => (
                   <Card key={i} variant="outlined">
                     <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
-                      <Typography sx={{ fontWeight: 700, fontSize: 13 }}>{job.title}</Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography sx={{ fontWeight: 700, fontSize: 13 }}>{job.title}</Typography>
+                        {job.job_url && (
+                          <a href={job.job_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: '#0284c7' }}>
+                            求人ページ →
+                          </a>
+                        )}
+                      </Box>
                       <Stack direction="row" spacing={1} sx={{ mt: 0.5, flexWrap: 'wrap', gap: 0.5 }}>
                         {job.employment_type && <Chip label={job.employment_type} size="small" />}
                         {job.work_location && <Chip label={job.work_location} size="small" variant="outlined" />}
@@ -411,15 +452,29 @@ export default function AdminCompanyEditPage() {
           <Typography sx={{ fontSize: 13, color: '#6b21a8', mb: 2 }}>
             企業の採用情報・社風をAIで分析し、10カテゴリのマッチングスコアをDBに保存します。
           </Typography>
-          <Button
-            variant="contained"
-            onClick={handleFetchPersona}
-            disabled={personaLoading}
-            startIcon={personaLoading ? <CircularProgress size={16} color="inherit" /> : undefined}
-            sx={{ mb: 2, bgcolor: '#7c3aed', '&:hover': { bgcolor: '#6d28d9' } }}
-          >
-            {personaLoading ? '分析中...' : '👤 人物像を自動分析'}
-          </Button>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+            <Button
+              variant="contained"
+              onClick={() => handleFetchPersona(false)}
+              disabled={personaLoading}
+              startIcon={personaLoading ? <CircularProgress size={16} color="inherit" /> : undefined}
+              sx={{ bgcolor: '#7c3aed', '&:hover': { bgcolor: '#6d28d9' } }}
+            >
+              {personaLoading ? '分析中...' : '👤 人物像を分析'}
+            </Button>
+            <Tooltip title="DBキャッシュを無視してAIで再分析する">
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={() => handleFetchPersona(true)}
+                  disabled={personaLoading}
+                  sx={{ color: '#6d28d9', border: '1px solid #6d28d9', borderRadius: 1 }}
+                >
+                  <RefreshIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
 
           <Collapse in={personaResult !== null}>
             {personaResult && (

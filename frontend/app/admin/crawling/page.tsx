@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
   Alert,
@@ -8,11 +8,9 @@ import {
   Button,
   Card,
   CardContent,
-  Checkbox,
   Chip,
+  Collapse,
   Divider,
-  FormControlLabel,
-  FormGroup,
   IconButton,
   MenuItem,
   Stack,
@@ -21,6 +19,8 @@ import {
 } from '@mui/material'
 import Grid from '@mui/material/GridLegacy'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import PlayArrowIcon from '@mui/icons-material/PlayArrow'
+import ScheduleIcon from '@mui/icons-material/Schedule'
 import { authService } from '@/lib/auth'
 
 type CrawlSource = {
@@ -46,13 +46,31 @@ type CrawlRun = {
   ended_at?: string
 }
 
-type ScraperSession = {
-  id: number
-  site_key: string
-  cookies: string
-  expires_at?: string
-  updated_at: string
-}
+type AiTargetType = 'fetch_info_all' | 'fetch_jobs_all' | 'fetch_persona_all'
+
+const AI_TARGETS: { type: AiTargetType; label: string; description: string; color: string }[] = [
+  {
+    type: 'fetch_info_all',
+    label: '全企業 基本情報取得',
+    description:
+      'OpenAI WebSearchで登録済み全企業の基本情報（概要・業種・所在地・公式URL等）を自動取得します。すでに取得済みの企業はスキップされます。',
+    color: '#1976d2',
+  },
+  {
+    type: 'fetch_jobs_all',
+    label: '全企業 求人情報取得',
+    description:
+      '採用ページ・WantedlyのWebSearchで登録済み全企業の求人情報（職種・給与・勤務地・必要スキル等）を自動取得します。すでに取得済みの企業はスキップされます。',
+    color: '#388e3c',
+  },
+  {
+    type: 'fetch_persona_all',
+    label: '全企業 人物像分析',
+    description:
+      '登録済み全企業の求める人物像をAIで分析し、CompanyWeightProfileに保存します。すでに分析済みの企業はスキップされます。',
+    color: '#7b1fa2',
+  },
+]
 
 const WEEKDAY_OPTIONS = [
   { value: 0, label: '日' },
@@ -64,62 +82,18 @@ const WEEKDAY_OPTIONS = [
   { value: 6, label: '土' },
 ]
 
-const SITE_OPTIONS = [
-  { key: 'career_tasu', label: 'キャリタス就活' },
-]
-
 export default function AdminCrawlingPage() {
   const [sources, setSources] = useState<CrawlSource[]>([])
   const [runs, setRuns] = useState<CrawlRun[]>([])
   const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [runningType, setRunningType] = useState<AiTargetType | null>(null)
+  const [runningAll, setRunningAll] = useState(false)
+  const [scheduleOpen, setScheduleOpen] = useState<AiTargetType | null>(null)
+  const [scheduleSaving, setScheduleSaving] = useState(false)
 
-  const [name, setName] = useState('')
-  const [targetType, setTargetType] = useState<'company' | 'popular_companies' | 'job_site_company' | 'job_listing'>('job_site_company')
-  const [sourceType, setSourceType] = useState('official')
-  const [sourceUrl, setSourceUrl] = useState('')
   const [scheduleType, setScheduleType] = useState<'weekly' | 'monthly'>('weekly')
   const [scheduleDay, setScheduleDay] = useState(1)
   const [scheduleTime, setScheduleTime] = useState('09:00')
-
-  // マルチソースクロール（company-graph パイプライン）
-  const [graphSites, setGraphSites] = useState<string[]>(['career_tasu'])
-  const [graphQuery, setGraphQuery] = useState('IT')
-  const [graphPages, setGraphPages] = useState(2)
-  const [graphYear, setGraphYear] = useState<string>('')
-  const [graphLoading, setGraphLoading] = useState(false)
-  const [graphResult, setGraphResult] = useState<{ ok: boolean; logs: string; error?: string } | null>(null)
-  const [autoYear, setAutoYear] = useState<number | null>(null)
-
-  // gBizINFO企業名検索
-  const [gbizSearchName, setGbizSearchName] = useState('')
-  const [gbizSearchLoading, setGbizSearchLoading] = useState(false)
-  const [gbizSearchError, setGbizSearchError] = useState('')
-  const [gbizSearchResults, setGbizSearchResults] = useState<{
-    corporate_number: string
-    name: string
-    location: string
-    company_url: string
-    employee_number: number
-  }[]>([])
-  const [gbizRegisterLoading, setGbizRegisterLoading] = useState<string | null>(null)
-  const [gbizRegisterMessage, setGbizRegisterMessage] = useState('')
-
-  // スクレイパーセッション管理
-  const [sessions, setSessions] = useState<ScraperSession[]>([])
-  const [sessionSiteKey, setSessionSiteKey] = useState('mynavi')
-  const [sessionCookies, setSessionCookies] = useState('')
-  const [sessionExpiresAt, setSessionExpiresAt] = useState('')
-  const [sessionLoading, setSessionLoading] = useState(false)
-  const [sessionError, setSessionError] = useState('')
-  const [sessionSuccess, setSessionSuccess] = useState('')
-
-  useEffect(() => {
-    fetch('/api/admin/company-graph-crawl')
-      .then((r) => r.json())
-      .then((d) => setAutoYear(d.target_year))
-      .catch(() => {})
-  }, [])
 
   useEffect(() => {
     const user = authService.getStoredUser()
@@ -129,417 +103,351 @@ export default function AdminCrawlingPage() {
   }, [])
 
   const loadSources = async () => {
-    setError('')
-    const response = await fetch('/api/admin/crawl-sources', {
-      headers: authService.getAdminFetchHeaders(),
-    })
-    const data = await response.json()
-    if (!response.ok) {
-      setError(data?.error || 'クローリング設定の取得に失敗しました')
-      return
+    try {
+      const res = await fetch('/api/admin/crawl-sources', {
+        headers: authService.getAdminFetchHeaders(),
+      })
+      const text = await res.text()
+      if (!text) return
+      const data = JSON.parse(text)
+      if (res.ok) setSources(data?.sources || [])
+    } catch {
+      // バックエンド未起動時は無視
     }
-    setSources(data?.sources || [])
   }
 
   const loadRuns = async () => {
-    const response = await fetch('/api/admin/crawl-runs', {
-      headers: authService.getAdminFetchHeaders(),
-    })
-    const data = await response.json()
-    if (response.ok) {
-      setRuns(data?.runs || [])
-    }
-  }
-
-  const loadSessions = async () => {
-    const res = await fetch('/api/admin/scraper-sessions', {
-      headers: authService.getAdminFetchHeaders(),
-    })
-    if (res.ok) {
-      const d = await res.json()
-      setSessions(d?.sessions || [])
-    }
-  }
-
-  const handleSessionUpsert = async () => {
-    setSessionError('')
-    setSessionSuccess('')
-    setSessionLoading(true)
     try {
-      const payload: Record<string, string> = {
-        site_key: sessionSiteKey,
-        cookies: sessionCookies,
-      }
-      if (sessionExpiresAt) payload.expires_at = new Date(sessionExpiresAt).toISOString()
-
-      const res = await fetch('/api/admin/scraper-sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authService.getAdminFetchHeaders() },
-        body: JSON.stringify(payload),
+      const res = await fetch('/api/admin/crawl-runs', {
+        headers: authService.getAdminFetchHeaders(),
       })
-      if (!res.ok) {
-        const msg = await res.text()
-        setSessionError(msg || '登録に失敗しました')
-      } else {
-        setSessionSuccess('セッションを登録しました')
-        setSessionCookies('')
-        setSessionExpiresAt('')
-        await loadSessions()
-      }
-    } finally {
-      setSessionLoading(false)
-    }
-  }
-
-  const handleSessionDelete = async (siteKey: string) => {
-    const res = await fetch(`/api/admin/scraper-sessions/${encodeURIComponent(siteKey)}`, {
-      method: 'DELETE',
-      headers: authService.getAdminFetchHeaders(),
-    })
-    if (res.ok) {
-      await loadSessions()
+      const text = await res.text()
+      if (!text) return
+      const data = JSON.parse(text)
+      if (res.ok) setRuns(data?.runs || [])
+    } catch {
+      // バックエンド未起動時は無視
     }
   }
 
   useEffect(() => {
     loadSources()
     loadRuns()
-    loadSessions()
   }, [])
 
-  const handleCreate = async () => {
+  const getSourceByType = (type: AiTargetType) => sources.find((s) => s.target_type === type)
+
+  const handleRunNow = async (type: AiTargetType) => {
     setError('')
-    setLoading(true)
-    const payload = {
-      name,
-      target_type: targetType,
-      source_type: sourceType,
-      source_url: sourceUrl,
-      schedule_type: scheduleType,
-      schedule_day: scheduleDay,
-      schedule_time: scheduleTime,
+    setRunningType(type)
+    try {
+      let source = getSourceByType(type)
+
+      if (!source) {
+        const target = AI_TARGETS.find((t) => t.type === type)!
+        const createRes = await fetch('/api/admin/crawl-sources', {
+          method: 'POST',
+          headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: target.label,
+            target_type: type,
+            source_type: 'ai',
+            source_url: '',
+            schedule_type: 'weekly',
+            schedule_day: 1,
+            schedule_time: '09:00',
+          }),
+        })
+        if (!createRes.ok) {
+          const d = await createRes.json()
+          setError(d?.error || '実行準備に失敗しました')
+          return
+        }
+        const d = await createRes.json()
+        source = d as CrawlSource
+        await loadSources()
+      }
+
+      if (!source) return
+
+      const runRes = await fetch(`/api/admin/crawl-sources/${source.id}/run`, {
+        method: 'POST',
+        headers: authService.getAdminFetchHeaders(),
+      })
+      if (!runRes.ok) {
+        const d = await runRes.json()
+        setError(d?.error || '実行に失敗しました')
+        return
+      }
+      await loadRuns()
+    } finally {
+      setRunningType(null)
     }
-    const response = await fetch('/api/admin/crawl-sources', {
-      method: 'POST',
-      headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-    const data = await response.json()
-    if (!response.ok) {
-      setError(data?.error || 'スケジュール作成に失敗しました')
-      setLoading(false)
+  }
+
+  const handleRunAll = async () => {
+    setError('')
+    setRunningAll(true)
+    for (const target of AI_TARGETS) {
+      await handleRunNow(target.type)
+    }
+    setRunningAll(false)
+  }
+
+  const handleOpenSchedule = (type: AiTargetType) => {
+    if (scheduleOpen === type) {
+      setScheduleOpen(null)
       return
     }
-    setName('')
-    setTargetType('job_site_company')
-    setSourceUrl('')
-    setScheduleType('weekly')
-    setScheduleDay(1)
-    setScheduleTime('09:00')
-    await loadSources()
-    setLoading(false)
+    const existing = getSourceByType(type)
+    if (existing) {
+      setScheduleType(existing.schedule_type as 'weekly' | 'monthly')
+      setScheduleDay(existing.schedule_day)
+      setScheduleTime(existing.schedule_time)
+    } else {
+      setScheduleType('weekly')
+      setScheduleDay(1)
+      setScheduleTime('09:00')
+    }
+    setScheduleOpen(type)
+  }
+
+  const handleSaveSchedule = async (type: AiTargetType) => {
+    setError('')
+    setScheduleSaving(true)
+    try {
+      const target = AI_TARGETS.find((t) => t.type === type)!
+      const existing = getSourceByType(type)
+
+      if (existing) {
+        await fetch(`/api/admin/crawl-sources/${existing.id}`, {
+          method: 'PUT',
+          headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            schedule_type: scheduleType,
+            schedule_day: scheduleDay,
+            schedule_time: scheduleTime,
+            is_active: true,
+          }),
+        })
+      } else {
+        await fetch('/api/admin/crawl-sources', {
+          method: 'POST',
+          headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: target.label,
+            target_type: type,
+            source_type: 'ai',
+            source_url: '',
+            schedule_type: scheduleType,
+            schedule_day: scheduleDay,
+            schedule_time: scheduleTime,
+          }),
+        })
+      }
+      await loadSources()
+      setScheduleOpen(null)
+    } finally {
+      setScheduleSaving(false)
+    }
   }
 
   const handleToggleActive = async (source: CrawlSource) => {
-    const response = await fetch(`/api/admin/crawl-sources/${source.id}`, {
+    await fetch(`/api/admin/crawl-sources/${source.id}`, {
       method: 'PUT',
       headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_active: !source.is_active }),
     })
-    if (response.ok) {
-      await loadSources()
-    }
+    await loadSources()
   }
-
-  const handleRun = async (source: CrawlSource) => {
-    const response = await fetch(`/api/admin/crawl-sources/${source.id}/run`, {
-      method: 'POST',
-      headers: authService.getAdminFetchHeaders(),
-    })
-    if (response.ok) {
-      await loadSources()
-      await loadRuns()
-    }
-  }
-
-  const handleGraphCrawl = async () => {
-    setGraphLoading(true)
-    setGraphResult(null)
-    const response = await fetch('/api/admin/company-graph-crawl', {
-      method: 'POST',
-      headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sites: graphSites,
-        query: graphQuery,
-        pages: graphPages,
-        year: graphYear ? Number(graphYear) : undefined,
-      }),
-    })
-    const data = await response.json()
-    setGraphResult(data)
-    setGraphLoading(false)
-  }
-
-  const handleGbizSearch = async () => {
-    if (!gbizSearchName.trim()) return
-    setGbizSearchLoading(true)
-    setGbizSearchError('')
-    setGbizSearchResults([])
-    setGbizRegisterMessage('')
-    const response = await fetch(
-      `/api/admin/companies/search-gbiz?name=${encodeURIComponent(gbizSearchName)}`,
-      { headers: authService.getAdminFetchHeaders() },
-    )
-    const data = await response.json()
-    if (!response.ok) {
-      setGbizSearchError(data?.error || '検索に失敗しました')
-    } else {
-      setGbizSearchResults(data?.results || [])
-      if ((data?.results || []).length === 0) {
-        setGbizSearchError('該当する企業が見つかりませんでした')
-      }
-    }
-    setGbizSearchLoading(false)
-  }
-
-  const handleGbizRegister = async (result: { corporate_number: string; name: string; location: string; company_url: string; employee_number: number }) => {
-    setGbizRegisterLoading(result.corporate_number)
-    setGbizRegisterMessage('')
-    const response = await fetch('/api/admin/companies', {
-      method: 'POST',
-      headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: result.name,
-        location: result.location,
-        website_url: result.company_url,
-        corporate_number: result.corporate_number,
-        employee_count: result.employee_number,
-        source_type: 'gbizinfo',
-      }),
-    })
-    const data = await response.json()
-    if (!response.ok) {
-      setGbizRegisterMessage(`登録失敗: ${data?.error || 'エラーが発生しました'}`)
-    } else {
-      setGbizRegisterMessage(`「${result.name}」を登録しました（ID: ${data?.id}）`)
-    }
-    setGbizRegisterLoading(null)
-  }
-
-  const toggleGraphSite = (key: string) => {
-    setGraphSites((prev) =>
-      prev.includes(key) ? prev.filter((s) => s !== key) : [...prev, key],
-    )
-  }
-
-  const scheduleLabel = useMemo(() => {
-    if (scheduleType === 'weekly') {
-      const dayLabel = WEEKDAY_OPTIONS.find((d) => d.value === scheduleDay)?.label ?? '月'
-      return `毎週${dayLabel} ${scheduleTime}`
-    }
-    return `毎月${scheduleDay}日 ${scheduleTime}`
-  }, [scheduleType, scheduleDay, scheduleTime])
 
   return (
     <Box sx={{ p: 4, maxWidth: 1100, mx: 'auto' }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-        <IconButton component={Link} href="/admin"><ArrowBackIcon /></IconButton>
+        <IconButton component={Link} href="/admin">
+          <ArrowBackIcon />
+        </IconButton>
         <Typography variant="h4" fontWeight="bold">
-          自動クローリング管理
+          AI情報取得管理
         </Typography>
       </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        週次・月次で企業データを自動更新します。対象URLごとにスケジュールを設定してください。
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        OpenAI WebSearchを使って登録済み企業の基本情報・求人情報・人物像を自動取得します。
+        スケジュール設定で定期実行が可能です。
       </Typography>
+      <Button
+        variant="contained"
+        size="large"
+        onClick={handleRunAll}
+        disabled={runningAll || runningType !== null}
+        sx={{ mb: 3, bgcolor: '#1a1a2e', '&:hover': { bgcolor: '#16213e' } }}
+      >
+        {runningAll
+          ? `全て実行中... (${AI_TARGETS.findIndex(t => t.type === runningType) + 1}/${AI_TARGETS.length})`
+          : '全て今すぐ実行'}
+      </Button>
 
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
           {error}
         </Alert>
       )}
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={5}>
-          <Card sx={{ height: '100%' }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                新規スケジュール
-              </Typography>
-              <Stack spacing={2}>
-                <TextField
-                  select
-                  label="対象タイプ"
-                  value={targetType}
-                  onChange={(e) =>
-                    setTargetType(
-                      e.target.value as 'company' | 'popular_companies' | 'job_site_company' | 'job_listing',
-                    )
-                  }
-                >
-                  <MenuItem value="job_site_company">会社情報（企業ページ）</MenuItem>
-                  <MenuItem value="job_listing">求人情報（募集職種）</MenuItem>
-                  <MenuItem value="popular_companies">人気企業一覧</MenuItem>
-                  <MenuItem value="company">企業単体（名前のみ）</MenuItem>
-                </TextField>
-                {targetType === 'job_site_company' && (
-                  <Typography variant="caption" color="text.secondary">
-                    新卒求人サイトの企業詳細ページURLを指定すると、会社概要・業界・従業員数・企業文化・福利厚生などを自動取得します。
+        {AI_TARGETS.map((target) => {
+          const source = getSourceByType(target.type)
+          const isRunning = runningType === target.type
+          const isScheduleOpen = scheduleOpen === target.type
+
+          return (
+            <Grid item xs={12} md={4} key={target.type}>
+              <Card sx={{ height: '100%', borderTop: `4px solid ${target.color}` }}>
+                <CardContent>
+                  <Typography variant="h6" fontWeight="bold" gutterBottom>
+                    {target.label}
                   </Typography>
-                )}
-                {targetType === 'job_listing' && (
-                  <Typography variant="caption" color="text.secondary">
-                    新卒求人サイトの募集職種ページURLを指定すると、職種名・仕事内容・給与・勤務地・必要スキルなどを自動取得します。
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2, minHeight: 72 }}>
+                    {target.description}
                   </Typography>
-                )}
-                {targetType === 'popular_companies' && (
-                  <Typography variant="caption" color="text.secondary">
-                    人気企業ランキング等のページURLを指定すると、AIが会社名を一覧抽出してDBに登録します。
-                  </Typography>
-                )}
-                <TextField
-                  label={targetType === 'company' ? '企業名' : '設定名'}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
-                <TextField
-                  select
-                  label="出典タイプ"
-                  value={sourceType}
-                  onChange={(e) => setSourceType(e.target.value)}
-                >
-                  <MenuItem value="official">公式サイト</MenuItem>
-                  <MenuItem value="job_site">就活/転職サイト</MenuItem>
-                  <MenuItem value="manual">手入力</MenuItem>
-                </TextField>
-                <TextField
-                  label="出典URL"
-                  value={sourceUrl}
-                  onChange={(e) => setSourceUrl(e.target.value)}
-                />
-                <TextField
-                  select
-                  label="頻度"
-                  value={scheduleType}
-                  onChange={(e) => setScheduleType(e.target.value as 'weekly' | 'monthly')}
-                >
-                  <MenuItem value="weekly">毎週</MenuItem>
-                  <MenuItem value="monthly">毎月</MenuItem>
-                </TextField>
-                {scheduleType === 'weekly' ? (
-                  <TextField
-                    select
-                    label="曜日"
-                    value={scheduleDay}
-                    onChange={(e) => setScheduleDay(Number(e.target.value))}
-                  >
-                    {WEEKDAY_OPTIONS.map((option) => (
-                      <MenuItem key={option.value} value={option.value}>
-                        {option.label}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                ) : (
-                  <TextField
-                    type="number"
-                    label="日付"
-                    value={scheduleDay}
-                    onChange={(e) => setScheduleDay(Number(e.target.value))}
-                    inputProps={{ min: 1, max: 31 }}
-                  />
-                )}
-                <TextField
-                  type="time"
-                  label="実行時刻"
-                  value={scheduleTime}
-                  onChange={(e) => setScheduleTime(e.target.value)}
-                  InputLabelProps={{ shrink: true }}
-                />
-                <Chip label={scheduleLabel} size="small" sx={{ alignSelf: 'flex-start' }} />
-                <Button variant="contained" onClick={handleCreate} disabled={loading}>
-                  スケジュールを追加
-                </Button>
-              </Stack>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={7}>
-          <Card sx={{ height: '100%' }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                スケジュール一覧
-              </Typography>
-              <Divider sx={{ mb: 2 }} />
-              <Stack spacing={2}>
-                {sources.length === 0 && (
-                  <Typography variant="body2" color="text.secondary">
-                    まだスケジュールが登録されていません。
-                  </Typography>
-                )}
-                {sources.map((source) => (
-                  <Box key={source.id} sx={{ border: '1px solid #eee', borderRadius: 1, p: 2 }}>
-                    <Stack spacing={1}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <Typography variant="subtitle1" fontWeight="bold">
-                          {source.name}
+
+                  {source && (
+                    <Box sx={{ mb: 2, p: 1.5, bgcolor: '#f9f9f9', borderRadius: 1 }}>
+                      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                        <Chip
+                          label={source.is_active ? '自動実行ON' : '自動実行OFF'}
+                          size="small"
+                          color={source.is_active ? 'success' : 'default'}
+                        />
+                        <Typography variant="caption" color="text.secondary">
+                          {source.schedule_type === 'weekly'
+                            ? `毎週${WEEKDAY_OPTIONS.find((d) => d.value === source.schedule_day)?.label} ${source.schedule_time}`
+                            : `毎月${source.schedule_day}日 ${source.schedule_time}`}
                         </Typography>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Chip
-                            label={
-                              source.target_type === 'company'
-                                ? '企業単体'
-                                : source.target_type === 'popular_companies'
-                                  ? '人気企業一覧'
-                                  : source.target_type === 'job_site_company'
-                                    ? '会社情報'
-                                    : '求人情報'
-                            }
-                            size="small"
-                            variant="outlined"
-                            color={
-                              source.target_type === 'job_listing'
-                                ? 'primary'
-                                : source.target_type === 'job_site_company'
-                                  ? 'secondary'
-                                  : 'default'
-                            }
-                          />
-                          <Chip
-                            label={source.is_active ? '稼働中' : '停止中'}
-                            size="small"
-                            color={source.is_active ? 'success' : 'default'}
-                          />
-                        </Stack>
-                      </Box>
-                      <Typography variant="body2" color="text.secondary">
-                        {source.schedule_type === 'weekly'
-                          ? `毎週${WEEKDAY_OPTIONS.find((d) => d.value === source.schedule_day)?.label ?? '月'} ${source.schedule_time}`
-                          : `毎月${source.schedule_day}日 ${source.schedule_time}`}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        次回: {source.next_run_at ? new Date(source.next_run_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '未設定'} / 前回: {source.last_run_at ? new Date(source.last_run_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '未実行'}
-                      </Typography>
-                      <Stack direction="row" spacing={1}>
-                        <Button size="small" variant="outlined" onClick={() => handleRun(source)}>
-                          今すぐ実行
-                        </Button>
-                        <Button size="small" variant="text" onClick={() => handleToggleActive(source)}>
-                          {source.is_active ? '停止する' : '再開する'}
-                        </Button>
                       </Stack>
-                    </Stack>
-                  </Box>
-                ))}
-              </Stack>
-            </CardContent>
-          </Card>
-        </Grid>
+                      <Typography variant="caption" color="text.secondary" component="div">
+                        次回:{' '}
+                        {source.next_run_at
+                          ? new Date(source.next_run_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
+                          : '未設定'}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" component="div">
+                        前回:{' '}
+                        {source.last_run_at
+                          ? new Date(source.last_run_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
+                          : '未実行'}
+                      </Typography>
+                    </Box>
+                  )}
+
+                  <Stack spacing={1}>
+                    <Button
+                      variant="contained"
+                      startIcon={<PlayArrowIcon />}
+                      onClick={() => handleRunNow(target.type)}
+                      disabled={isRunning}
+                      sx={{
+                        bgcolor: target.color,
+                        '&:hover': { bgcolor: target.color, filter: 'brightness(0.88)' },
+                      }}
+                    >
+                      {isRunning ? '実行中...' : '今すぐ実行'}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      startIcon={<ScheduleIcon />}
+                      onClick={() => handleOpenSchedule(target.type)}
+                      size="small"
+                    >
+                      {source ? 'スケジュール変更' : 'スケジュール設定'}
+                    </Button>
+                    {source && (
+                      <Button
+                        size="small"
+                        variant="text"
+                        color={source.is_active ? 'error' : 'success'}
+                        onClick={() => handleToggleActive(source)}
+                      >
+                        {source.is_active ? '自動実行を停止' : '自動実行を再開'}
+                      </Button>
+                    )}
+                  </Stack>
+
+                  <Collapse in={isScheduleOpen}>
+                    <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid #eee' }}>
+                      <Stack spacing={1.5}>
+                        <TextField
+                          select
+                          label="頻度"
+                          value={scheduleType}
+                          onChange={(e) => setScheduleType(e.target.value as 'weekly' | 'monthly')}
+                          size="small"
+                        >
+                          <MenuItem value="weekly">毎週</MenuItem>
+                          <MenuItem value="monthly">毎月</MenuItem>
+                        </TextField>
+                        {scheduleType === 'weekly' ? (
+                          <TextField
+                            select
+                            label="曜日"
+                            value={scheduleDay}
+                            onChange={(e) => setScheduleDay(Number(e.target.value))}
+                            size="small"
+                          >
+                            {WEEKDAY_OPTIONS.map((opt) => (
+                              <MenuItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </MenuItem>
+                            ))}
+                          </TextField>
+                        ) : (
+                          <TextField
+                            type="number"
+                            label="日付"
+                            value={scheduleDay}
+                            onChange={(e) => setScheduleDay(Number(e.target.value))}
+                            size="small"
+                            inputProps={{ min: 1, max: 31 }}
+                          />
+                        )}
+                        <TextField
+                          type="time"
+                          label="実行時刻"
+                          value={scheduleTime}
+                          onChange={(e) => setScheduleTime(e.target.value)}
+                          size="small"
+                          InputLabelProps={{ shrink: true }}
+                        />
+                        <Stack direction="row" spacing={1}>
+                          <Button
+                            variant="contained"
+                            size="small"
+                            onClick={() => handleSaveSchedule(target.type)}
+                            disabled={scheduleSaving}
+                          >
+                            {scheduleSaving ? '保存中...' : '保存'}
+                          </Button>
+                          <Button
+                            variant="text"
+                            size="small"
+                            onClick={() => setScheduleOpen(null)}
+                          >
+                            キャンセル
+                          </Button>
+                        </Stack>
+                      </Stack>
+                    </Box>
+                  </Collapse>
+                </CardContent>
+              </Card>
+            </Grid>
+          )
+        })}
       </Grid>
 
       <Card>
         <CardContent>
           <Typography variant="h6" gutterBottom>
-            最近の実行履歴
+            実行履歴
           </Typography>
           <Divider sx={{ mb: 2 }} />
           <Stack spacing={1}>
@@ -548,286 +456,38 @@ export default function AdminCrawlingPage() {
                 まだ実行履歴がありません。
               </Typography>
             )}
-            {runs.map((run) => (
-              <Box key={run.id} sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                <Typography variant="body2">
-                  #{run.id} / source {run.source_id}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {run.status} · {new Date(run.started_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
-                </Typography>
-              </Box>
-            ))}
-          </Stack>
-        </CardContent>
-      </Card>
-
-      {/* マルチソース企業グラフクロール */}
-      <Card sx={{ mt: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            マルチソース企業グラフクロール（gBizINFO連携）
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            キャリタス就活から一括取得し、gBizINFO APIで法人番号に名寄せして
-            企業関係グラフ（GraphML / JSON）を生成します。年度は自動計算されます（手動指定も可）。
-          </Typography>
-          <Divider sx={{ mb: 2 }} />
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
-              <Stack spacing={2}>
-                <Box>
-                  <Typography variant="body2" fontWeight="bold" sx={{ mb: 1 }}>
-                    対象サイト
-                  </Typography>
-                  <FormGroup row>
-                    {SITE_OPTIONS.map((s) => (
-                      <FormControlLabel
-                        key={s.key}
-                        control={
-                          <Checkbox
-                            checked={graphSites.includes(s.key)}
-                            onChange={() => toggleGraphSite(s.key)}
-                            size="small"
-                          />
-                        }
-                        label={s.label}
-                      />
-                    ))}
-                  </FormGroup>
-                </Box>
-                <TextField
-                  label="検索キーワード"
-                  value={graphQuery}
-                  onChange={(e) => setGraphQuery(e.target.value)}
-                  size="small"
-                  placeholder="例: IT, 製造, 金融"
-                />
-                <TextField
-                  label="最大ページ数（サイトごと）"
-                  type="number"
-                  value={graphPages}
-                  onChange={(e) => setGraphPages(Number(e.target.value))}
-                  size="small"
-                  inputProps={{ min: 1, max: 20 }}
-                />
-                <TextField
-                  label={`年度指定（省略時は自動: ${autoYear ?? '計算中'}年度）`}
-                  type="number"
-                  value={graphYear}
-                  onChange={(e) => setGraphYear(e.target.value)}
-                  size="small"
-                  placeholder={String(autoYear ?? '')}
-                  helperText="4月以降は当年+2、3月以前は当年+1を自動適用"
-                />
-                <Button
-                  variant="contained"
-                  onClick={handleGraphCrawl}
-                  disabled={graphLoading || graphSites.length === 0}
+            {runs.map((run) => {
+              const src = sources.find((s) => s.id === run.source_id)
+              const target = AI_TARGETS.find((t) => t.type === src?.target_type)
+              return (
+                <Box
+                  key={run.id}
+                  sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 >
-                  {graphLoading ? 'クロール実行中...' : 'クロール実行'}
-                </Button>
-              </Stack>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              {graphResult && (
-                <Box>
-                  {graphResult.ok ? (
-                    <Alert severity="success" sx={{ mb: 1 }}>
-                      完了しました。GraphML / JSON を出力しました。
-                    </Alert>
-                  ) : (
-                    <Alert severity="error" sx={{ mb: 1 }}>
-                      {graphResult.error || 'エラーが発生しました'}
-                    </Alert>
-                  )}
-                  <Box
-                    component="pre"
-                    sx={{
-                      fontSize: 11,
-                      bgcolor: '#f5f5f5',
-                      p: 1.5,
-                      borderRadius: 1,
-                      maxHeight: 300,
-                      overflow: 'auto',
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-all',
-                    }}
-                  >
-                    {graphResult.logs}
-                  </Box>
-                </Box>
-              )}
-              {!graphResult && !graphLoading && (
-                <Box sx={{ color: 'text.secondary', fontSize: 14, pt: 1 }}>
-                  実行するとここにログが表示されます。
-                </Box>
-              )}
-              {graphLoading && (
-                <Box sx={{ color: 'text.secondary', fontSize: 14, pt: 1 }}>
-                  クロール中です。完了まで数分かかる場合があります...
-                </Box>
-              )}
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-
-      {/* gBizINFO企業名検索・登録 */}
-      <Card sx={{ mt: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            企業名で検索して登録（gBizINFO）
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            企業名を入力するとgBizINFO APIで法人情報を検索し、ホームページURLを含む企業データをDBに登録できます。
-          </Typography>
-          <Divider sx={{ mb: 2 }} />
-          <Stack spacing={2} sx={{ maxWidth: 600 }}>
-            <Stack direction="row" spacing={1}>
-              <TextField
-                label="企業名"
-                value={gbizSearchName}
-                onChange={(e) => setGbizSearchName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleGbizSearch() }}
-                size="small"
-                placeholder="例: 株式会社ほげ"
-                sx={{ flex: 1 }}
-              />
-              <Button
-                variant="contained"
-                onClick={handleGbizSearch}
-                disabled={gbizSearchLoading || !gbizSearchName.trim()}
-              >
-                {gbizSearchLoading ? '検索中...' : '検索'}
-              </Button>
-            </Stack>
-            {gbizSearchError && (
-              <Alert severity="warning">{gbizSearchError}</Alert>
-            )}
-            {gbizRegisterMessage && (
-              <Alert severity={gbizRegisterMessage.startsWith('登録失敗') ? 'error' : 'success'}>
-                {gbizRegisterMessage}
-              </Alert>
-            )}
-            {gbizSearchResults.map((r) => (
-              <Box key={r.corporate_number} sx={{ border: '1px solid #eee', borderRadius: 1, p: 2 }}>
-                <Stack spacing={0.5}>
-                  <Typography variant="subtitle1" fontWeight="bold">{r.name}</Typography>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Chip
+                      label={target?.label ?? `source #${run.source_id}`}
+                      size="small"
+                      variant="outlined"
+                    />
+                    <Chip
+                      label={run.status}
+                      size="small"
+                      color={
+                        run.status === 'success'
+                          ? 'success'
+                          : run.status === 'running'
+                          ? 'info'
+                          : 'default'
+                      }
+                    />
+                  </Stack>
                   <Typography variant="body2" color="text.secondary">
-                    法人番号: {r.corporate_number}
+                    {new Date(run.started_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
                   </Typography>
-                  {r.location && (
-                    <Typography variant="body2" color="text.secondary">所在地: {r.location}</Typography>
-                  )}
-                  {r.company_url && (
-                    <Typography variant="body2">
-                      HP: <a href={r.company_url} target="_blank" rel="noopener noreferrer">{r.company_url}</a>
-                    </Typography>
-                  )}
-                  {r.employee_number > 0 && (
-                    <Typography variant="body2" color="text.secondary">従業員数: {r.employee_number}人</Typography>
-                  )}
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={() => handleGbizRegister(r)}
-                    disabled={gbizRegisterLoading === r.corporate_number}
-                    sx={{ alignSelf: 'flex-start', mt: 0.5 }}
-                  >
-                    {gbizRegisterLoading === r.corporate_number ? '登録中...' : 'DBに登録'}
-                  </Button>
-                </Stack>
-              </Box>
-            ))}
-          </Stack>
-        </CardContent>
-      </Card>
-
-      {/* ── スクレイパーセッション管理 ── */}
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>スクレイパーセッション管理</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            ログイン必須のスクレイピングサイト（マイナビ等）のCookieを登録します。
-            ブラウザのDevTools → Application → Cookies からコピーしてください。
-          </Typography>
-
-          {sessionError && <Alert severity="error" sx={{ mb: 2 }}>{sessionError}</Alert>}
-          {sessionSuccess && <Alert severity="success" sx={{ mb: 2 }}>{sessionSuccess}</Alert>}
-
-          {/* 登録済みセッション一覧 */}
-          {sessions.length > 0 && (
-            <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle2" gutterBottom>登録済みセッション</Typography>
-              <Stack spacing={1}>
-                {sessions.map((s) => {
-                  const expired = s.expires_at ? new Date(s.expires_at) < new Date() : false
-                  return (
-                    <Box key={s.site_key} sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 1, border: '1px solid', borderColor: expired ? 'error.light' : 'divider', borderRadius: 1 }}>
-                      <Chip label={s.site_key} size="small" color={expired ? 'error' : 'success'} />
-                      <Typography variant="body2" sx={{ flex: 1 }}>
-                        更新日: {new Date(s.updated_at).toLocaleDateString('ja-JP')}
-                        {s.expires_at && (
-                          <span style={{ marginLeft: 8, color: expired ? 'red' : 'inherit' }}>
-                            {expired ? '⚠️ 期限切れ' : `有効期限: ${new Date(s.expires_at).toLocaleDateString('ja-JP')}`}
-                          </span>
-                        )}
-                      </Typography>
-                      <Button
-                        size="small"
-                        color="error"
-                        variant="outlined"
-                        onClick={() => handleSessionDelete(s.site_key)}
-                      >
-                        削除
-                      </Button>
-                    </Box>
-                  )
-                })}
-              </Stack>
-            </Box>
-          )}
-
-          {/* 登録フォーム */}
-          <Stack spacing={2} sx={{ maxWidth: 600 }}>
-            <TextField
-              select
-              label="サイト"
-              value={sessionSiteKey}
-              onChange={(e) => setSessionSiteKey(e.target.value)}
-              size="small"
-            >
-              <MenuItem value="mynavi">マイナビ</MenuItem>
-              <MenuItem value="rikunabi">リクナビ</MenuItem>
-              <MenuItem value="openwork">OpenWork</MenuItem>
-              <MenuItem value="other">その他</MenuItem>
-            </TextField>
-            <TextField
-              label="Cookie文字列"
-              multiline
-              rows={3}
-              value={sessionCookies}
-              onChange={(e) => setSessionCookies(e.target.value)}
-              placeholder="JSESSIONID=abc123; session_key=xyz（またはJSON配列）"
-              size="small"
-            />
-            <TextField
-              label="有効期限（任意）"
-              type="datetime-local"
-              value={sessionExpiresAt}
-              onChange={(e) => setSessionExpiresAt(e.target.value)}
-              size="small"
-              InputLabelProps={{ shrink: true }}
-            />
-            <Button
-              variant="contained"
-              onClick={handleSessionUpsert}
-              disabled={sessionLoading || !sessionCookies.trim()}
-              sx={{ alignSelf: 'flex-start' }}
-            >
-              {sessionLoading ? '登録中...' : '登録・更新'}
-            </Button>
+                </Box>
+              )
+            })}
           </Stack>
         </CardContent>
       </Card>

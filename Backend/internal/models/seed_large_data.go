@@ -15,8 +15,8 @@ func SeedLargeCompanyData(db *gorm.DB) error {
 	var count int64
 	db.Model(&Company{}).Count(&count)
 
-	if count >= 40000 {
-		// すでに4万社以上ある場合はスキップ
+	if count > 0 {
+		// 既にデータがある場合はスキップ（大規模シードは seed-large コマンドで手動実行）
 		slog.Info("Company data already exists, skipping large seed", "records", count)
 		return nil
 	}
@@ -133,7 +133,7 @@ func SeedLargeCompanyMarketInfo(db *gorm.DB) error {
 	var count int64
 	db.Model(&CompanyMarketInfo{}).Count(&count)
 
-	if count >= 100 {
+	if count > 0 {
 		slog.Info("Market info already exists, skipping", "records", count)
 		return nil
 	}
@@ -205,7 +205,7 @@ func SeedLargeCompanyRelations(db *gorm.DB) error {
 	var count int64
 	db.Model(&CompanyRelation{}).Count(&count)
 
-	if count >= 50000 {
+	if count > 0 {
 		slog.Info("Relations already exist, skipping", "records", count)
 		return nil
 	}
@@ -507,7 +507,7 @@ func SeedLargeCompanyProfiles(db *gorm.DB) error {
 	var count int64
 	db.Model(&CompanyWeightProfile{}).Count(&count)
 
-	if count >= 40000 {
+	if count > 0 {
 		slog.Info("Profiles already exist, skipping", "records", count)
 		return nil
 	}
