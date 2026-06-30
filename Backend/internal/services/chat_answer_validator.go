@@ -15,7 +15,7 @@ import (
 // 無効な場合はアシスタントの「書かれた内容にはお答えできません」メッセージを保存して true を返す。
 // 3回連続で無効な場合はセッションを強制終了する。
 // 戻り値: handled(bool) - true の場合は処理を終了してよい、response(string) - 保存したアシスタント応答（ある場合）、error
-func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.ChatMessage, userMessage string, userID uint, sessionID string) (bool, string, error) {
+func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.ChatMessage, userMessage string, userID uint, sessionID string) (bool, string, bool, error) {
 	// 直近の assistant メッセージを探す
 	var lastAssistant *models.ChatMessage
 	for i := len(history) - 1; i >= 0; i-- {
@@ -56,24 +56,24 @@ func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.
 		if err := s.sessionValidationRepo.ResetInvalidCount(sessionID); err != nil {
 			log.Printf("Warning: failed to reset invalid count: %v\n", err)
 		}
-		return false, "", nil
+		return false, "", false, nil
 	}
 
 	// 無効な回答と判断 -> カウントをインクリメント
 	log.Printf("[Validation] Invalid answer detected for message: %s\n", userMessage)
 	validation, err := s.sessionValidationRepo.IncrementInvalidCount(sessionID)
 	if err != nil {
-		return true, "", fmt.Errorf("failed to increment invalid count: %w", err)
+		return true, "", false, fmt.Errorf("failed to increment invalid count: %w", err)
 	}
 	log.Printf("[Validation] Invalid count incremented to: %d/3\n", validation.InvalidAnswerCount)
 
 	var assistantText string
+	suggestRestart := false
 	if validation.InvalidAnswerCount >= 3 {
-		// 3回目の無効回答 -> セッションを強制終了
-		if err := s.sessionValidationRepo.TerminateSession(sessionID); err != nil {
-			log.Printf("Warning: failed to terminate session: %v\n", err)
-		}
-		assistantText = "申し訳ございませんが、質問と関係のない内容が3回続いたため、チャットを終了させていただきます。新しいセッションで最初からやり直してください。"
+		// 3回目の無効回答 -> セッションを強制終了するのではなく救済オプションを提示
+		// ユーザーに「最初からやり直す」か「この質問をスキップする」かの選択肢を提示する
+		assistantText = "申し訳ございません。質問と関係のない回答が3回続きました。\n以下のどちらをご希望ですか？\n1) 最初からやり直す（『やり直す』と入力）\n2) この質問をスキップする（『スキップ』と入力）"
+		suggestRestart = true
 	} else {
 		// 1-2回目の無効回答 -> 警告メッセージ
 		assistantText = fmt.Sprintf("書かれた内容にはお答えできません。質問に回答してください。（%d/3回目の警告）", validation.InvalidAnswerCount)
@@ -86,9 +86,9 @@ func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.
 		Content:   assistantText,
 	}
 	if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
-		return true, "", fmt.Errorf("failed to save assistant message for invalid answer: %w", err)
+		return true, "", false, fmt.Errorf("failed to save assistant message for invalid answer: %w", err)
 	}
-	return true, assistantText, nil
+	return true, assistantText, suggestRestart, nil
 }
 
 // validateAnswerRelevance: 回答が質問に沿っているかを判定（文章系はキーワードベースで柔軟に判定）

@@ -63,7 +63,7 @@ func TestScoreDimensions_isTooPerfect_appliesPenalty(t *testing.T) {
 	// 理由・数値なし、行動（取り組み）・結果（成果）あり、50文字超
 	answer := "チームで積極的に取り組み、プロジェクトを成功させ素晴らしい成果と達成を収めることができました。大変良い経験でした。"
 	signals := extractSignals(answer, "")
-	scores := scoreDimensions("generic_rubric", signals, answer)
+	scores := scoreDimensions("generic_rubric", signals, answer, "generic")
 
 	// hasAction と hasResult が検出されていることを前提確認
 	if !signals.hasAction || !signals.hasResult {
@@ -74,9 +74,9 @@ func TestScoreDimensions_isTooPerfect_appliesPenalty(t *testing.T) {
 		t.Skip("テスト用回答に理由・数値が含まれているためスキップ")
 	}
 
-	// credibility は 1（ペナルティ適用）であること
-	if scores["credibility"] != 1 {
-		t.Errorf("isTooPerfect 判定で credibility=1 を期待したが %d が返った", scores["credibility"])
+	// isTooPerfect のペナルティは緩和されるため credibility は 2（減点）であること
+	if scores["credibility"] != 2 {
+		t.Errorf("isTooPerfect 判定で credibility=2 を期待したが %d が返った", scores["credibility"])
 	}
 }
 
@@ -84,7 +84,7 @@ func TestScoreDimensions_isTooPerfect_appliesPenalty(t *testing.T) {
 func TestScoreDimensions_hasReason_notTooPerfect(t *testing.T) {
 	answer := "効率化のために積極的に取り組み、プロジェクトを成功させ素晴らしい成果と達成を収めることができました。大変良い経験でした。"
 	signals := extractSignals(answer, "")
-	scores := scoreDimensions("generic_rubric", signals, answer)
+	scores := scoreDimensions("generic_rubric", signals, answer, "generic")
 
 	if !signals.hasReason {
 		t.Skip("テスト用回答に「ため」が含まれていない")
@@ -99,7 +99,7 @@ func TestScoreDimensions_hasReason_notTooPerfect(t *testing.T) {
 func TestScoreDimensions_hasNumbersOrTime_notTooPerfect(t *testing.T) {
 	answer := "3ヶ月かけて積極的に取り組み、プロジェクトを成功させ素晴らしい成果と達成を収めることができました。大変良い経験でした。"
 	signals := extractSignals(answer, "")
-	scores := scoreDimensions("generic_rubric", signals, answer)
+	scores := scoreDimensions("generic_rubric", signals, answer, "generic")
 
 	if !signals.hasNumbersOrTime {
 		t.Skip("テスト用回答に数値・時間が含まれていない")
@@ -114,7 +114,7 @@ func TestScoreDimensions_hasNumbersOrTime_notTooPerfect(t *testing.T) {
 func TestScoreDimensions_shortAnswer_notTooPerfect(t *testing.T) {
 	answer := "取り組み、成果が出ました。" // 50文字未満
 	signals := extractSignals(answer, "")
-	scores := scoreDimensions("generic_rubric", signals, answer)
+	scores := scoreDimensions("generic_rubric", signals, answer, "generic")
 
 	// 50文字以下なら isTooPerfect は false のはず → credibility が 1 でも別の理由（初期値）
 	// ただし contradiction もないので 0 にはならないことを確認
@@ -133,7 +133,7 @@ func TestScoreDimensions_contradiction_credibilityZero(t *testing.T) {
 		contradiction:   true,
 	}
 	answer := "取り組み、成果と達成と向上を収めました。チームで実施しました。成功しました。大変良い経験でした。"
-	scores := scoreDimensions("generic_rubric", signals, answer)
+	scores := scoreDimensions("generic_rubric", signals, answer, "generic")
 
 	if scores["credibility"] != 0 {
 		t.Errorf("contradiction ありの場合は credibility=0 を期待したが %d が返った", scores["credibility"])
@@ -161,9 +161,9 @@ func TestEvaluateHumanScoring_tooPerfectAnswer_lowScore(t *testing.T) {
 	if !ok {
 		t.Error("DimensionScores に credibility が含まれていない")
 	}
-	// isTooPerfect が適用されれば credibility <= 1
-	if credibility > 1 {
-		t.Errorf("優等生的回答で credibility=%d（期待: <=1）", credibility)
+	// isTooPerfect が適用されれば credibility <= 2（緩和された減点）
+	if credibility > 2 {
+		t.Errorf("優等生的回答で credibility=%d（期待: <=2）", credibility)
 	}
 }
 

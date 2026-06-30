@@ -86,6 +86,7 @@ type ChatResponse struct {
 	IsComplete          bool                     `json:"is_complete"`
 	IsTerminated        bool                     `json:"is_terminated,omitempty"`
 	InvalidAnswerCount  int                      `json:"invalid_answer_count,omitempty"`
+	SuggestRestart      bool                     `json:"suggest_restart,omitempty"`
 	TotalQuestions      int                      `json:"total_questions"`
 	AnsweredQuestions   int                      `json:"answered_questions"`
 	EvaluatedCategories int                      `json:"evaluated_categories"`
@@ -226,7 +227,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	}
 
 	// 2.5. 回答の妥当性チェック（保存後のhistoryを使用）
-	handled, response, err := s.checkAnswerValidity(ctx, history, req.Message, req.UserID, req.SessionID)
+	handled, response, suggestRestart, err := s.checkAnswerValidity(ctx, history, req.Message, req.UserID, req.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -254,6 +255,7 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 			AnsweredQuestions: len(history) / 2,
 			AllPhases:         allPhases,
 			CurrentPhase:      currentPhaseInfo,
+			SuggestRestart:    suggestRestart,
 		}
 
 		if validation != nil {

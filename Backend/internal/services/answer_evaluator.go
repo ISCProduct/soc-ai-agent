@@ -75,23 +75,39 @@ func (e *AnswerEvaluator) EvaluateWithLLMFallback(ctx context.Context, question 
 	if err != nil {
 		return result, err
 	}
-	if result.Confidence != "low" || e.llmClient == nil {
+	// LLMが無効ならルール評価のみ
+	if e.llmClient == nil {
 		return result, nil
 	}
 
-	llmResult := e.llmEvaluate(ctx, questionText, answer)
-	if llmResult == nil {
+	// 低信頼度は従来通りLLMで上書きを試みる
+	// 追加: mediumかつスコアが境界値にある場合はハイブリッド評価を試す
+	if result.Confidence == "low" {
+		llmResult := e.llmEvaluate(ctx, questionText, answer)
+		if llmResult == nil {
+			return result, nil
+		}
+		if llmResult.Confidence == "high" || llmResult.Confidence == "medium" {
+			result.Confidence = llmResult.Confidence
+			result.Score = int(math.Round(float64(llmResult.Score) / 10.0))
+			result.Explanation = llmResult.Explanation
+			result.NeedsFollowUp = false
+			result.FollowUpTrigger = ""
+		}
 		return result, nil
 	}
 
-	// LLMがより高い信頼度を判定した場合は結果を上書きする
-	if llmResult.Confidence == "high" || llmResult.Confidence == "medium" {
-		result.Confidence = llmResult.Confidence
-		result.Score = int(math.Round(float64(llmResult.Score) / 10.0))
-		result.Explanation = llmResult.Explanation
-		result.NeedsFollowUp = false
-		result.FollowUpTrigger = ""
+	// medium かつスコア境界（40-60）の場合はハイブリッド評価を試す
+	if result.Confidence == "medium" && result.Score >= 40 && result.Score <= 60 {
+		hybrid, err := e.EvaluateHybrid(ctx, question, questionText, answer, 0.7)
+		if err == nil && hybrid != nil {
+			return hybrid, nil
+		}
+		// ハイブリッドが失敗した場合は従来のルール結果を返す
+		return result, nil
 	}
+
+	// それ以外はルール結果を返す
 	return result, nil
 }
 
@@ -405,7 +421,7 @@ func (e *AnswerEvaluator) EvaluateHumanScoring(question, answer string, isChoice
 	category := e.categorizeQuestion(question)
 	rubric := rubricForCategory(category)
 	signals := extractSignals(answer, category)
-	dimensionScores := scoreDimensions(rubric, signals, answer)
+	dimensionScores := scoreDimensions(rubric, signals, answer, category)
 	rawScore := scoreFromDimensions(rubric, dimensionScores)
 	score, penalties, boosts := applyPenaltiesAndBoosts(rawScore, signals)
 
@@ -534,9 +550,9 @@ func extractSignals(answer string, category string) signalSet {
 	lower := strings.ToLower(answer)
 	return signalSet{
 		hasConcreteExample: containsAny(lower, []string{"例えば", "たとえば", "具体的", "実際に", "経験", "した時", "したとき"}),
-		hasAction:          containsAny(lower, []string{"取り組", "実施", "作成", "作った", "実装", "改善", "対応", "開発", "設計", "検証"}),
-		hasResult:          containsAny(lower, []string{"結果", "成果", "達成", "改善された", "向上", "成功", "失敗"}),
-		hasReason:          containsAny(lower, []string{"理由", "なぜ", "ので", "ため", "から", "だから"}),
+		hasAction:          containsAny(lower, []string{"取り組", "実施", "作成", "作った", "実装", "改善", "対応", "開発", "設計", "検証", "対応した", "進め", "進めた", "推進", "推進した", "展開", "行った"}),
+		hasResult:          containsAny(lower, []string{"結果", "成果", "達成", "改善された", "向上", "成功", "失敗", "実現した", "改善できた", "得られた"}),
+		hasReason:          containsAny(lower, []string{"理由", "なぜ", "ので", "ため", "から", "だから", "きっかけ", "背景", "理由は", "きっかけは"}),
 		hasNumbersOrTime:   regexp.MustCompile(`[0-9]`).MatchString(lower) || containsAny(lower, []string{"ヶ月", "年", "週間", "日間", "%", "人", "回"}),
 		hasCollaborationTerm: containsAny(lower, []string{
 			"合意", "調整", "衝突", "折衷", "意見", "まとめ",
@@ -551,7 +567,7 @@ func extractSignals(answer string, category string) signalSet {
 	}
 }
 
-func scoreDimensions(rubric string, signals signalSet, answer string) map[string]int {
+func scoreDimensions(rubric string, signals signalSet, answer string, category string) map[string]int {
 	length := len([]rune(strings.TrimSpace(answer)))
 	scores := map[string]int{
 		"relevance":   1,
@@ -561,7 +577,12 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 	}
 
 	// 理想的・定型的な回答に対するペナルティ
+	// 通常は理由・数値が無い場合に適用するが、カテゴリ（motivation / communication_non_it / ui_ux）では数値要件を緩和する
 	isTooPerfect := !signals.hasReason && !signals.hasNumbersOrTime && length > 50 && signals.hasAction && signals.hasResult
+	if category == "motivation" || category == "communication_non_it" || category == "ui_ux" {
+		// カテゴリ特有の文体では数値を必須としない
+		isTooPerfect = !signals.hasReason && length > 50 && signals.hasAction && signals.hasResult
+	}
 
 	if rubric == "collaboration_rubric" && !signals.hasCollaborationTerm {
 		scores["relevance"] = 1
@@ -596,7 +617,8 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 	if signals.contradiction {
 		scores["credibility"] = 0 // 矛盾あり: 最低評価
 	} else if isTooPerfect {
-		scores["credibility"] = 1 // 理由・数値のない定型回答: 信頼度を落とす
+		// isTooPerfect のペナルティは厳格な 1 固定ではなく、減点（2）に緩和
+		scores["credibility"] = 2
 	} else if signals.hasNumbersOrTime {
 		scores["credibility"] = 3
 	} else if signals.hasConcreteExample {
