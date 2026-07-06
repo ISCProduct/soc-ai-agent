@@ -10,6 +10,6 @@ func SetupResumeRoutes(api *echo.Group, resumeController *controllers.ResumeCont
 	resume := api.Group("/resume", EchoUserAuth(userSecret))
 	resume.POST("/upload", resumeController.Upload)
 	resume.POST("/review", resumeController.Review)
-	resume.GET("/review/stream", resumeController.ReviewStream)
+	resume.POST("/review/stream", resumeController.ReviewStream)
 	resume.GET("/annotated", resumeController.Annotated)
 }

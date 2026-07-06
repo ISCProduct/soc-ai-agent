@@ -208,6 +208,8 @@ func main() {
 	matchingService := services.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)
 	resumeService := services.NewResumeService(resumeRepo, "storage/resumes", aiClient)
 	crawlService := services.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
+	crawlService.SetInfoFetcher(services.NewCompanyInfoFetcher(companyRepo, aiClient))
+	crawlService.SetJobFetcher(services.NewJobFetchService(companyRepo, aiClient))
 	auditLogService := services.NewAuditLogService(auditLogRepo)
 	analysisService := services.NewAnalysisScoringService(
 		userWeightScoreRepo,
@@ -261,6 +263,8 @@ func main() {
 	realtimeController := controllers.NewRealtimeController(interviewService, realtimeUsageService)
 	adminInterviewController := controllers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
 	adminInterviewController.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
+	adminInterviewController.SetCompanyRepo(companyRepo)
+	adminInterviewController.SetOpenAIClient(aiClient)
 	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminCostsController := controllers.NewAdminCostsController(apiCostService, realtimeUsageService)
 	profileRecalcService := services.NewProfileRecalculationService(profileRecalcRepo, companyRepo)

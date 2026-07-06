@@ -3,14 +3,11 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Alert,
   Button,
-  CircularProgress,
   Divider,
   MenuItem,
   Stack,
   TextField,
-  Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
@@ -27,8 +24,6 @@ export default function AdminCompanyNewPage() {
   }, [])
 
   const [error, setError] = useState('')
-  const [aiSuccess, setAiSuccess] = useState('')
-  const [aiLoading, setAiLoading] = useState(false)
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -45,42 +40,8 @@ export default function AdminCompanyNewPage() {
   const [dataStatus, setDataStatus] = useState('draft')
   const [isProvisional, setIsProvisional] = useState(true)
 
-  const handleAiFetch = async () => {
-    setAiLoading(true)
-    setError('')
-    setAiSuccess('')
-    try {
-      const res = await fetch('/api/admin/companies/web-search', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...authService.getAdminFetchHeaders(),
-        },
-        body: JSON.stringify({ name }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data?.error || 'AI企業情報取得に失敗しました')
-        return
-      }
-      if (data.description) setDescription(data.description)
-      if (data.industry) setIndustry(data.industry)
-      if (data.location) setLocation(data.location)
-      if (data.website_url) setWebsiteUrl(data.website_url)
-      if (data.founded_year) setFoundedYear(String(data.founded_year))
-      if (data.employee_count) setEmployeeCount(String(data.employee_count))
-      if (data.main_business) setMainBusiness(data.main_business)
-      if (data.culture) setCulture(data.culture)
-      if (data.work_style) setWorkStyle(data.work_style)
-      setAiSuccess('AI情報取得が完了しました。内容を確認・修正してから追加してください。')
-    } finally {
-      setAiLoading(false)
-    }
-  }
-
   const handleCreate = async () => {
     setError('')
-    setAiSuccess('')
     const res = await fetch('/api/admin/companies', {
       method: 'POST',
       headers: {
@@ -115,24 +76,8 @@ export default function AdminCompanyNewPage() {
   return (
     <AdminFormContainer title="企業の追加" maxWidth={700} backHref="/admin/companies" backLabel="一覧に戻る">
       <ErrorAlert error={error} />
-      {aiSuccess && <Alert severity="success" sx={{ mb: 2 }}>{aiSuccess}</Alert>}
       <Stack spacing={2}>
         <TextField label="企業名" value={name} onChange={(e) => setName(e.target.value)} required />
-
-        <Stack direction="row" alignItems="center" spacing={1}>
-          <Button
-            variant="outlined"
-            color="secondary"
-            onClick={handleAiFetch}
-            disabled={!name.trim() || aiLoading}
-            startIcon={aiLoading ? <CircularProgress size={16} color="inherit" /> : null}
-          >
-            {aiLoading ? 'AI検索中...' : '🤖 AIで企業情報を自動取得'}
-          </Button>
-          <Typography variant="caption" color="text.secondary">
-            企業名を入力後にクリックしてください
-          </Typography>
-        </Stack>
 
         <Divider />
 

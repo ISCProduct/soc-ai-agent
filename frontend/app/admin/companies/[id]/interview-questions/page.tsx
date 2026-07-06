@@ -29,6 +29,7 @@ import {
   Typography,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import { authService } from '@/lib/auth'
@@ -52,6 +53,14 @@ type Question = {
 type QuestionForm = {
   position: string
   category: string
+  question_text: string
+  priority: number
+  is_required: boolean
+}
+
+type GeneratedQuestion = {
+  category: string
+  position: string
   question_text: string
   priority: number
   is_required: boolean
@@ -86,6 +95,12 @@ export default function AdminInterviewQuestionsPage() {
   const [form, setForm] = useState<QuestionForm>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null)
+
+  const [generating, setGenerating] = useState(false)
+  const [generateDialogOpen, setGenerateDialogOpen] = useState(false)
+  const [generatedQuestions, setGeneratedQuestions] = useState<GeneratedQuestion[]>([])
+  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set())
+  const [addingGenerated, setAddingGenerated] = useState(false)
 
   const fetchJSON = async (url: string) => {
     const response = await fetch(url, { headers: authService.getAdminFetchHeaders() })
@@ -157,6 +172,59 @@ export default function AdminInterviewQuestionsPage() {
     }
   }
 
+  const handleGenerate = async () => {
+    setGenerating(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/admin/companies/${id}/interview-questions/generate`, {
+        method: 'POST',
+        headers: authService.getAdminFetchHeaders(),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.message || data?.error || `AI生成に失敗しました (${res.status})`)
+      const qs: GeneratedQuestion[] = data.questions ?? []
+      setGeneratedQuestions(qs)
+      setSelectedIndices(new Set(qs.map((_, i) => i)))
+      setGenerateDialogOpen(true)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const toggleSelectIndex = (i: number) => {
+    setSelectedIndices((prev) => {
+      const next = new Set(prev)
+      next.has(i) ? next.delete(i) : next.add(i)
+      return next
+    })
+  }
+
+  const handleAddGenerated = async () => {
+    setAddingGenerated(true)
+    setError('')
+    const toAdd = generatedQuestions.filter((_, i) => selectedIndices.has(i))
+    try {
+      await Promise.all(
+        toAdd.map((q) =>
+          fetch(`/api/admin/companies/${id}/interview-questions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authService.getAdminFetchHeaders() },
+            body: JSON.stringify(q),
+          }),
+        ),
+      )
+      setSuccess(`${toAdd.length}件の質問を追加しました`)
+      setGenerateDialogOpen(false)
+      fetchQuestions()
+    } catch {
+      setError('質問の追加に失敗しました')
+    } finally {
+      setAddingGenerated(false)
+    }
+  }
+
   const handleDelete = async (qid: number) => {
     setError('')
     try {
@@ -191,9 +259,19 @@ export default function AdminInterviewQuestionsPage() {
         <Typography variant="body2" color="text.secondary">
           登録した質問はAI面接のシステムプロンプトに自動的に注入されます。
         </Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
-          質問を追加
-        </Button>
+        <Stack direction="row" spacing={1}>
+          <Button
+            variant="outlined"
+            startIcon={generating ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
+            onClick={handleGenerate}
+            disabled={generating}
+          >
+            {generating ? 'AI生成中...' : 'AIで自動生成'}
+          </Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+            質問を追加
+          </Button>
+        </Stack>
       </Box>
 
       {loading ? (
@@ -320,6 +398,68 @@ export default function AdminInterviewQuestionsPage() {
           >
             {saving ? '保存中...' : '保存'}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* AI生成プレビューダイアログ */}
+      <Dialog open={generateDialogOpen} onClose={() => setGenerateDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>AIが生成した面接質問（{generatedQuestions.length}件）</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            企業情報・求人情報をもとにAIが生成しました。追加したい質問を選択してください。
+          </Typography>
+          <Stack spacing={1}>
+            {generatedQuestions.map((q, i) => (
+              <Box
+                key={i}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 1,
+                  p: 1.5,
+                  border: '1px solid',
+                  borderColor: selectedIndices.has(i) ? 'primary.main' : 'divider',
+                  borderRadius: 1,
+                  bgcolor: selectedIndices.has(i) ? '#f0f9ff' : 'background.paper',
+                  cursor: 'pointer',
+                }}
+                onClick={() => toggleSelectIndex(i)}
+              >
+                <Checkbox
+                  checked={selectedIndices.has(i)}
+                  onChange={() => toggleSelectIndex(i)}
+                  onClick={(e) => e.stopPropagation()}
+                  size="small"
+                  sx={{ mt: -0.5, flexShrink: 0 }}
+                />
+                <Box flex={1}>
+                  <Stack direction="row" spacing={1} sx={{ mb: 0.5 }} flexWrap="wrap">
+                    <Chip label={q.category} size="small" color="primary" variant="outlined" />
+                    {q.position && <Chip label={q.position} size="small" variant="outlined" />}
+                    {q.is_required && <Chip label="必須" size="small" color="error" />}
+                    <Chip label={`優先度 ${q.priority}`} size="small" variant="outlined" />
+                  </Stack>
+                  <Typography variant="body2">{q.question_text}</Typography>
+                </Box>
+              </Box>
+            ))}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2, justifyContent: 'space-between' }}>
+          <Typography variant="body2" color="text.secondary">
+            {selectedIndices.size}件選択中
+          </Typography>
+          <Stack direction="row" spacing={1}>
+            <Button onClick={() => setGenerateDialogOpen(false)} disabled={addingGenerated}>キャンセル</Button>
+            <Button
+              variant="contained"
+              disabled={selectedIndices.size === 0 || addingGenerated}
+              onClick={handleAddGenerated}
+              startIcon={addingGenerated ? <CircularProgress size={16} color="inherit" /> : undefined}
+            >
+              {addingGenerated ? '追加中...' : `選択した質問を追加（${selectedIndices.size}件）`}
+            </Button>
+          </Stack>
         </DialogActions>
       </Dialog>
 

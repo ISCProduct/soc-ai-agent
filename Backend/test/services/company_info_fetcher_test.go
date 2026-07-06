@@ -161,7 +161,7 @@ func TestCompanyInfoFetcher_FetchAndSave(t *testing.T) {
 				companyID = 99
 			}
 
-			result, err := fetcher.FetchAndSave(context.Background(), companyID)
+			result, err := fetcher.FetchAndSave(context.Background(), companyID, true)
 
 			if tc.wantErr {
 				require.Error(t, err)

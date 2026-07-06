@@ -249,7 +249,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
         const relatedIds = new Set([focusCompanyId]);
 
         relations.forEach(rel => {
-            if (rel.relation_type === 'business') {
+            if (rel.relation_type.startsWith('business')) {
                 if (rel.from_id === focusCompanyId) relatedIds.add(rel.to_id!);
                 if (rel.to_id === focusCompanyId) relatedIds.add(rel.from_id!);
             }
@@ -316,7 +316,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
         const relatedIds = new Set([focusCompanyId]);
 
         relations.forEach(rel => {
-            if (rel.relation_type === 'business') {
+            if (rel.relation_type.startsWith('business')) {
                 if (rel.from_id === focusCompanyId) relatedIds.add(rel.to_id!);
                 if (rel.to_id === focusCompanyId) relatedIds.add(rel.from_id!);
             }
@@ -324,7 +324,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
 
         // ビジネス関係のエッジ
         relations.forEach((rel, idx) => {
-            if (rel.relation_type === 'business' && rel.from_id && rel.to_id) {
+            if (rel.relation_type.startsWith('business') && rel.from_id && rel.to_id) {
                 if (rel.from_id === focusCompanyId || rel.to_id === focusCompanyId ||
                     (relatedIds.has(rel.from_id) && relatedIds.has(rel.to_id))) {
                     edges.push({
@@ -332,7 +332,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
                         source: String(rel.from_id),
                         target: String(rel.to_id),
                         type: 'custom',
-                        label: rel.description,
+                        label: rel.description || rel.relation_type,
                         animated: true,
                         style: {
                             stroke: '#2196F3',

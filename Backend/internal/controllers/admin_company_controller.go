@@ -24,6 +24,7 @@ type AdminCompanyController struct {
 	gbiz         *services.GBizInfoService
 	openaiClient *openai.Client
 	infoFetcher  *services.CompanyInfoFetcher
+	jobFetcher   *services.JobFetchService
 }
 
 func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.AuditLogService, gbiz *services.GBizInfoService, openaiClient ...*openai.Client) *AdminCompanyController {
@@ -31,6 +32,7 @@ func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.A
 	if len(openaiClient) > 0 {
 		ctrl.openaiClient = openaiClient[0]
 		ctrl.infoFetcher = services.NewCompanyInfoFetcher(repo, openaiClient[0])
+		ctrl.jobFetcher = services.NewJobFetchService(repo, openaiClient[0])
 	}
 	return ctrl
 }
@@ -199,7 +201,7 @@ func (c *AdminCompanyController) SyncGBiz(ctx echo.Context) error {
 }
 
 // WebSearchCompanyInfo POST /api/admin/companies/web-search
-// 企業名をもとにOpenAI WebSearchで一般的な企業情報を取得してプレビュー用に返す
+// 企業名をもとにAIモデルの知識で一般的な企業情報を取得してプレビュー用に返す
 func (c *AdminCompanyController) WebSearchCompanyInfo(ctx echo.Context) error {
 	var req struct {
 		Name string `json:"name"`
@@ -214,8 +216,9 @@ func (c *AdminCompanyController) WebSearchCompanyInfo(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
 	}
 
-	prompt := fmt.Sprintf(
-		`「%s」という企業の情報を調査してください。以下のJSON形式のみで回答してください（余分な説明は不要）。
+	systemPrompt := `あなたは日本企業の情報に詳しいアシスタントです。確実に知っている情報のみを回答し、不明な項目は空文字または0にしてください。推測で情報を作らないでください。`
+	userPrompt := fmt.Sprintf(
+		`「%s」という企業について知っている情報を、以下のJSON形式のみで回答してください（余分な説明は不要）。
 {
   "description": "企業概要（100〜200文字程度）",
   "industry": "業種（例: IT・ソフトウェア, 金融, 製造業）",
@@ -230,10 +233,10 @@ func (c *AdminCompanyController) WebSearchCompanyInfo(ctx echo.Context) error {
 		req.Name,
 	)
 
-	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), 30*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), 60*time.Second)
 	defer cancel()
 
-	text, err := c.openaiClient.WebSearchQuery(reqCtx, prompt)
+	text, err := c.openaiClient.ChatCompletionJSON(reqCtx, systemPrompt, userPrompt, 0.2, 600)
 	if err != nil {
 		return echoInternalError(err)
 	}
@@ -269,7 +272,7 @@ func (c *AdminCompanyController) WebSearchCompanyInfo(ctx echo.Context) error {
 }
 
 // FetchTechStack POST /api/admin/companies/:id/tech-stack-search
-// OpenAI WebSearchで企業の技術スタックを取得してDBを更新する
+// AIモデルの知識で企業の技術スタックを取得してDBを更新する
 func (c *AdminCompanyController) FetchTechStack(ctx echo.Context) error {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
 	if err != nil {
@@ -283,8 +286,9 @@ func (c *AdminCompanyController) FetchTechStack(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "company not found")
 	}
 
-	prompt := fmt.Sprintf(
-		`「%s」という日本のIT企業の技術スタックを調査してください。以下のJSON形式のみで回答してください（余分な説明は不要）。
+	systemPrompt := `あなたは日本のIT企業の技術情報に詳しいアシスタントです。確実に知っている情報のみを回答し、不明な項目は空配列または空文字にしてください。推測で情報を作らないでください。`
+	userPrompt := fmt.Sprintf(
+		`「%s」という日本のIT企業の技術スタックについて知っている情報を、以下のJSON形式のみで回答してください（余分な説明は不要）。
 {
   "tech_stack": ["言語・フレームワーク名（例: Go, React, TypeScript）"],
   "infra_stack": ["インフラ名（例: AWS, GCP, Azure, オンプレ）"],
@@ -294,10 +298,10 @@ func (c *AdminCompanyController) FetchTechStack(ctx echo.Context) error {
 		company.Name,
 	)
 
-	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), 30*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), 60*time.Second)
 	defer cancel()
 
-	text, err := c.openaiClient.WebSearchQuery(reqCtx, prompt)
+	text, err := c.openaiClient.ChatCompletionJSON(reqCtx, systemPrompt, userPrompt, 0.2, 400)
 	if err != nil {
 		return echoInternalError(err)
 	}
@@ -358,7 +362,7 @@ func (c *AdminCompanyController) FetchTechStack(ctx echo.Context) error {
 }
 
 // FetchCompanyInfo POST /api/admin/companies/:id/fetch-info
-// 企業IDからOpenAI WebSearchで基本情報を取得してDBに反映する
+// ?force=true を付けると DB キャッシュを無視して AI で再取得する。
 func (c *AdminCompanyController) FetchCompanyInfo(ctx echo.Context) error {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
 	if err != nil {
@@ -368,7 +372,8 @@ func (c *AdminCompanyController) FetchCompanyInfo(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
 	}
 
-	result, err := c.infoFetcher.FetchAndSave(ctx.Request().Context(), uint(id))
+	forceRefresh := ctx.QueryParam("force") == "true"
+	result, err := c.infoFetcher.FetchAndSave(ctx.Request().Context(), uint(id), forceRefresh)
 	if err != nil {
 		return echoInternalError(err)
 	}
@@ -376,9 +381,64 @@ func (c *AdminCompanyController) FetchCompanyInfo(ctx echo.Context) error {
 	actor := ctx.Request().Header.Get("X-Admin-Email")
 	c.audit.Record(actor, "company.fetch_info", "company", uint(id), map[string]any{
 		"industry": result.Industry,
+		"force":    forceRefresh,
 	})
 
 	return ctx.JSON(http.StatusOK, result)
+}
+
+// FetchJobs POST /api/admin/companies/:id/fetch-jobs
+// ?force=true を付けると DB キャッシュを無視して AI で再取得する。
+func (c *AdminCompanyController) FetchJobs(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	if c.jobFetcher == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
+	}
+
+	forceRefresh := ctx.QueryParam("force") == "true"
+	positions, err := c.jobFetcher.FetchAndSaveJobs(ctx.Request().Context(), uint(id), forceRefresh)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.fetch_jobs", "company", uint(id), map[string]any{
+		"count": len(positions),
+		"force": forceRefresh,
+	})
+
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"positions": positions,
+		"total":     len(positions),
+	})
+}
+
+// FetchPersona POST /api/admin/companies/:id/fetch-persona
+// ?force=true を付けると DB キャッシュを無視して AI で再取得する。
+func (c *AdminCompanyController) FetchPersona(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	if c.jobFetcher == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
+	}
+
+	forceRefresh := ctx.QueryParam("force") == "true"
+	profile, err := c.jobFetcher.FetchAndSavePersona(ctx.Request().Context(), uint(id), forceRefresh)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.fetch_persona", "company", uint(id), map[string]any{
+		"force": forceRefresh,
+	})
+
+	return ctx.JSON(http.StatusOK, profile)
 }
 
 func applyCompanyDefaults(company *models.Company) {

@@ -148,7 +148,11 @@ func (r *CompanyRepository) FindJobPositionByID(id uint) (*models.CompanyJobPosi
 
 // CreateJobPosition 募集職種を作成
 func (r *CompanyRepository) CreateJobPosition(position *models.CompanyJobPosition) error {
-	return r.db.Create(position).Error
+	db := r.db
+	if position.JobCategoryID == 0 {
+		db = db.Omit("JobCategoryID")
+	}
+	return db.Create(position).Error
 }
 
 // UpdateJobPosition 募集職種を更新
@@ -198,8 +202,9 @@ func (r *CompanyRepository) CreateOrUpdateWeightProfile(profile *models.CompanyW
 		return err
 	}
 
-	// 更新
+	// 更新（created_atはDBの値を引き継ぐ）
 	profile.ID = existing.ID
+	profile.CreatedAt = existing.CreatedAt
 	return r.db.Save(profile).Error
 }
 

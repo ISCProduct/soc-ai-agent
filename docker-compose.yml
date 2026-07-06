@@ -25,7 +25,7 @@ services:
 
   # Resume review RAG (DuckDuckGo + CrewAI)
   rag-review:
-    image: 970835573274.dkr.ecr.ap-northeast-1.amazonaws.com/soc-rag-review:latest
+    build: ./rag
     restart: unless-stopped
     ports:
       - "${RAG_REVIEW_PORT:-9000}:9000"

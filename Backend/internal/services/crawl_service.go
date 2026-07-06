@@ -30,12 +30,17 @@ type CrawlService struct {
 	companyRepo repository.CompanyRepository
 	popularRepo repository.CompanyPopularityRepository
 	aiClient    *openai.Client
+	jobFetcher  *JobFetchService
+	infoFetcher *CompanyInfoFetcher
 	mu          sync.Mutex
 }
 
 func NewCrawlService(repo repository.CrawlRepository, companyRepo repository.CompanyRepository, popularRepo repository.CompanyPopularityRepository, aiClient *openai.Client) *CrawlService {
 	return &CrawlService{repo: repo, companyRepo: companyRepo, popularRepo: popularRepo, aiClient: aiClient}
 }
+
+func (s *CrawlService) SetJobFetcher(f *JobFetchService)     { s.jobFetcher = f }
+func (s *CrawlService) SetInfoFetcher(f *CompanyInfoFetcher) { s.infoFetcher = f }
 
 type CrawlSourcePayload struct {
 	Name         string `json:"name"`
@@ -204,6 +209,12 @@ func (s *CrawlService) executeCrawl(source *models.CrawlSource) error {
 		return s.executeMynaviCompanyCrawl(source)
 	case "openwork_company":
 		return s.executeOpenworkCompanyCrawl(source)
+	case "fetch_info_all":
+		return s.executeFetchInfoAll()
+	case "fetch_jobs_all":
+		return s.executeFetchJobsAll()
+	case "fetch_persona_all":
+		return s.executeFetchPersonaAll()
 	default:
 		return fmt.Errorf("unsupported target_type: %s", source.TargetType)
 	}
@@ -216,23 +227,26 @@ func validateCrawlSource(source *models.CrawlSource) error {
 	if strings.TrimSpace(source.TargetType) == "" {
 		return errors.New("target_type is required")
 	}
-	if source.TargetType != "company" && source.TargetType != "popular_companies" && source.TargetType != "job_site_company" && source.TargetType != "job_listing" && source.TargetType != "mynavi_company" && source.TargetType != "openwork_company" {
-		return errors.New("target_type must be company, popular_companies, job_site_company, job_listing, mynavi_company, or openwork_company")
+	urlRequiredTypes := map[string]bool{
+		"popular_companies": true,
+		"job_site_company":  true,
+		"job_listing":       true,
+		"mynavi_company":    true,
+		"openwork_company":  true,
 	}
-	if source.TargetType == "popular_companies" && strings.TrimSpace(source.SourceURL) == "" {
-		return errors.New("source_url is required for popular_companies")
+	allTypes := []string{"company", "popular_companies", "job_site_company", "job_listing", "mynavi_company", "openwork_company", "fetch_info_all", "fetch_jobs_all", "fetch_persona_all"}
+	validType := false
+	for _, t := range allTypes {
+		if source.TargetType == t {
+			validType = true
+			break
+		}
 	}
-	if source.TargetType == "job_site_company" && strings.TrimSpace(source.SourceURL) == "" {
-		return errors.New("source_url is required for job_site_company")
+	if !validType {
+		return fmt.Errorf("target_type must be one of: %s", strings.Join(allTypes, ", "))
 	}
-	if source.TargetType == "job_listing" && strings.TrimSpace(source.SourceURL) == "" {
-		return errors.New("source_url is required for job_listing")
-	}
-	if source.TargetType == "mynavi_company" && strings.TrimSpace(source.SourceURL) == "" {
-		return errors.New("source_url is required for mynavi_company")
-	}
-	if source.TargetType == "openwork_company" && strings.TrimSpace(source.SourceURL) == "" {
-		return errors.New("source_url is required for openwork_company")
+	if urlRequiredTypes[source.TargetType] && strings.TrimSpace(source.SourceURL) == "" {
+		return fmt.Errorf("source_url is required for %s", source.TargetType)
 	}
 	if source.ScheduleType != "weekly" && source.ScheduleType != "monthly" {
 		return errors.New("schedule_type must be weekly or monthly")
@@ -1081,6 +1095,75 @@ func computeNextRun(now time.Time, source *models.CrawlSource) *time.Time {
 
 func lastDayOfMonth(year int, month time.Month, loc *time.Location) int {
 	return time.Date(year, month+1, 0, 0, 0, 0, 0, loc).Day()
+}
+
+// executeFetchInfoAll は登録済み全企業の基本情報を未取得のもののみ自動取得する。
+func (s *CrawlService) executeFetchInfoAll() error {
+	if s.infoFetcher == nil {
+		return fmt.Errorf("info fetcher not configured")
+	}
+	companies, err := s.companyRepo.FindAllActive(1000, 0)
+	if err != nil {
+		return fmt.Errorf("企業一覧取得失敗: %w", err)
+	}
+	ctx := context.Background()
+	var errs []string
+	for _, company := range companies {
+		if _, err := s.infoFetcher.FetchAndSave(ctx, company.ID, false); err != nil {
+			errs = append(errs, fmt.Sprintf("id=%d: %v", company.ID, err))
+		}
+	}
+	if len(errs) > 0 {
+		log.Printf("fetch_info_all: %d errors: %s", len(errs), strings.Join(errs, "; "))
+	}
+	log.Printf("fetch_info_all: processed %d companies, errors=%d", len(companies), len(errs))
+	return nil
+}
+
+// executeFetchJobsAll は登録済み全企業の求人情報を未取得のもののみ自動取得する。
+func (s *CrawlService) executeFetchJobsAll() error {
+	if s.jobFetcher == nil {
+		return fmt.Errorf("job fetcher not configured")
+	}
+	companies, err := s.companyRepo.FindAllActive(1000, 0)
+	if err != nil {
+		return fmt.Errorf("企業一覧取得失敗: %w", err)
+	}
+	ctx := context.Background()
+	var errs []string
+	for _, company := range companies {
+		if _, err := s.jobFetcher.FetchAndSaveJobs(ctx, company.ID, false); err != nil {
+			errs = append(errs, fmt.Sprintf("id=%d: %v", company.ID, err))
+		}
+	}
+	if len(errs) > 0 {
+		log.Printf("fetch_jobs_all: %d errors: %s", len(errs), strings.Join(errs, "; "))
+	}
+	log.Printf("fetch_jobs_all: processed %d companies, errors=%d", len(companies), len(errs))
+	return nil
+}
+
+// executeFetchPersonaAll は登録済み全企業の人物像を未取得のもののみ自動分析する。
+func (s *CrawlService) executeFetchPersonaAll() error {
+	if s.jobFetcher == nil {
+		return fmt.Errorf("job fetcher not configured")
+	}
+	companies, err := s.companyRepo.FindAllActive(1000, 0)
+	if err != nil {
+		return fmt.Errorf("企業一覧取得失敗: %w", err)
+	}
+	ctx := context.Background()
+	var errs []string
+	for _, company := range companies {
+		if _, err := s.jobFetcher.FetchAndSavePersona(ctx, company.ID, false); err != nil {
+			errs = append(errs, fmt.Sprintf("id=%d: %v", company.ID, err))
+		}
+	}
+	if len(errs) > 0 {
+		log.Printf("fetch_persona_all: %d errors: %s", len(errs), strings.Join(errs, "; "))
+	}
+	log.Printf("fetch_persona_all: processed %d companies, errors=%d", len(companies), len(errs))
+	return nil
 }
 
 // Exported type alias and wrappers for testing from external packages.

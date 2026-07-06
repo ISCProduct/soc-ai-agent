@@ -46,6 +46,8 @@ func SetupAdminRoutes(
 	admin.POST("/companies/:id/gbiz-sync", adminCompanyController.SyncGBiz)
 	admin.POST("/companies/:id/fetch-tech-stack", adminCompanyController.FetchTechStack)
 	admin.POST("/companies/:id/fetch-info", adminCompanyController.FetchCompanyInfo)
+	admin.POST("/companies/:id/fetch-jobs", adminCompanyController.FetchJobs)
+	admin.POST("/companies/:id/fetch-persona", adminCompanyController.FetchPersona)
 
 	// クロールソース管理
 	admin.GET("/crawl-sources", adminCrawlController.ListSources)
@@ -83,6 +85,7 @@ func SetupAdminRoutes(
 	// 企業別面接質問管理
 	admin.GET("/companies/:id/interview-questions", adminInterviewController.ListCompanyQuestions)
 	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion)
+	admin.POST("/companies/:id/interview-questions/generate", adminInterviewController.GenerateCompanyQuestions)
 	admin.PUT("/companies/:id/interview-questions/:qid", adminInterviewController.UpdateCompanyQuestion)
 	admin.DELETE("/companies/:id/interview-questions/:qid", adminInterviewController.DeleteCompanyQuestion)
 

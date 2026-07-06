@@ -7,6 +7,10 @@ export type RelationType = 'subsidiary' | 'affiliate'; // 子会社 or 関連会
 export interface Company {
   id: number;
   name: string;
+  website_url?: string;
+  corporate_number?: string;
+  source_type?: string;
+  source_url?: string;
   marketType?: MarketType;
   isListed?: boolean;
 }
@@ -35,6 +39,32 @@ export interface CompanyMarketInfo {
   company?: Company;
 }
 
+const demoCompanyNames = new Set([
+  '株式会社テックイノベーション',
+  'エンタープライズシステムズ株式会社',
+  'クリエイティブラボ株式会社',
+]);
+
+function isDemoCompany(company?: Company): boolean {
+  if (!company) return true;
+  const website = company.website_url || '';
+  if (website.includes('.example.com') || website === 'https://example.com') {
+    return true;
+  }
+  if (demoCompanyNames.has(company.name)) {
+    return true;
+  }
+  return false;
+}
+
+function hasDemoEndpoint(relation: CapitalRelation): boolean {
+  if (relation.parent_id && isDemoCompany(relation.parent)) return true;
+  if (relation.child_id && isDemoCompany(relation.child)) return true;
+  if (relation.from_id && isDemoCompany(relation.from)) return true;
+  if (relation.to_id && isDemoCompany(relation.to)) return true;
+  return false;
+}
+
 // APIから企業関係データを取得
 export async function fetchCompanyRelations(): Promise<CapitalRelation[]> {
   try {
@@ -43,7 +73,8 @@ export async function fetchCompanyRelations(): Promise<CapitalRelation[]> {
       console.warn('Failed to fetch company relations');
       return [];
     }
-    return response.json();
+    const relations: CapitalRelation[] = await response.json();
+    return relations.filter((relation) => !hasDemoEndpoint(relation));
   } catch (error) {
     console.warn('Error fetching company relations:', error);
     return [];
