@@ -32,7 +32,7 @@ func NewJobFetchService(repo repository.CompanyRepository, client *openai.Client
 	}
 }
 
-// FetchAndSaveJobs は企業の採用ページとWantedlyから求人情報を取得してDBに保存する。
+// FetchAndSaveJobs はAIモデルの知識から企業の求人情報を取得してDBに保存する。
 // forceRefresh=false かつ DB に既存データがある場合は AI を呼ばずに返す。
 func (s *JobFetchService) FetchAndSaveJobs(ctx context.Context, companyID uint, forceRefresh bool) ([]models.CompanyJobPosition, error) {
 	company, err := s.repo.FindByID(companyID)
@@ -47,23 +47,13 @@ func (s *JobFetchService) FetchAndSaveJobs(ctx context.Context, companyID uint, 
 		}
 	}
 
-	reqCtx, cancel := context.WithTimeout(ctx, 180*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	var allJobs []scraper.JobPostingResult
-
-	// 方針1: 企業公式採用ページのクロール
-	careersJobs, err := s.careers.FetchFromCareersPage(reqCtx, company.Name, company.WebsiteURL)
-	if err == nil {
-		allJobs = append(allJobs, careersJobs...)
+	allJobs, err := s.careers.FetchJobs(reqCtx, company.Name, company.WebsiteURL)
+	if err != nil {
+		return nil, err
 	}
-
-	// 方針2: Wantedlyから求人情報を取得
-	wantedlyJobs, err := s.careers.FetchFromWantedly(reqCtx, company.Name)
-	if err == nil {
-		allJobs = append(allJobs, wantedlyJobs...)
-	}
-
 	if len(allJobs) == 0 {
 		return nil, fmt.Errorf("求人情報を取得できませんでした")
 	}
@@ -108,13 +98,10 @@ func (s *JobFetchService) FetchAndSavePersona(ctx context.Context, companyID uin
 	reqCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 
-	query := fmt.Sprintf(`「%s」が求める人物像・社風・採用基準を調査してください。`, company.Name)
-	searchResult, err := s.openaiClient.WebSearchQuery(reqCtx, query)
-	if err != nil {
-		return nil, fmt.Errorf("人物像検索失敗: %w", err)
-	}
+	// DB保存済みの企業情報を分析材料として使う（WebSearchは使わない）
+	companyInfo := buildCompanyInfoText(company)
 
-	profile, err := s.analyzePersonaProfile(reqCtx, company.Name, searchResult, positionText)
+	profile, err := s.analyzePersonaProfile(reqCtx, company.Name, companyInfo, positionText)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +112,7 @@ func (s *JobFetchService) FetchAndSavePersona(ctx context.Context, companyID uin
 	}
 
 	// RAGのChromaDBに人物像データを保存して履歴書・ESレビューの精度を向上させる
-	ragContent := buildPersonaRAGContent(company.Name, searchResult, profile)
+	ragContent := buildPersonaRAGContent(company.Name, companyInfo, profile)
 	go s.pushContextToRAG(company.Name, "persona", ragContent)
 
 	return profile, nil
@@ -199,12 +186,33 @@ func buildJobsRAGContent(companyName string, jobs []scraper.JobPostingResult) st
 	return sb.String()
 }
 
-// buildPersonaRAGContent は人物像スコアと検索結果を人が読めるテキストに変換する。
-func buildPersonaRAGContent(companyName, searchResult string, profile *models.CompanyWeightProfile) string {
+// buildCompanyInfoText はDB保存済みの企業情報を人物像分析用テキストに整形する。
+func buildCompanyInfoText(company *models.Company) string {
+	var sb strings.Builder
+	if company.Description != "" {
+		fmt.Fprintf(&sb, "概要: %s\n", company.Description)
+	}
+	if company.Industry != "" {
+		fmt.Fprintf(&sb, "業種: %s\n", company.Industry)
+	}
+	if company.MainBusiness != "" {
+		fmt.Fprintf(&sb, "主要事業: %s\n", company.MainBusiness)
+	}
+	if company.Culture != "" {
+		fmt.Fprintf(&sb, "企業文化: %s\n", company.Culture)
+	}
+	if company.WorkStyle != "" {
+		fmt.Fprintf(&sb, "勤務スタイル: %s\n", company.WorkStyle)
+	}
+	return sb.String()
+}
+
+// buildPersonaRAGContent は人物像スコアと企業情報を人が読めるテキストに変換する。
+func buildPersonaRAGContent(companyName, companyInfo string, profile *models.CompanyWeightProfile) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "【%s】求める人物像・採用基準\n\n", companyName)
-	if searchResult != "" {
-		fmt.Fprintf(&sb, "■ 採用情報サマリー\n%s\n\n", searchResult)
+	if companyInfo != "" {
+		fmt.Fprintf(&sb, "■ 企業情報\n%s\n\n", companyInfo)
 	}
 	fmt.Fprintf(&sb, "■ 重視度スコア（0-100）\n")
 	fmt.Fprintf(&sb, "  技術志向: %d\n", profile.TechnicalOrientation)
@@ -267,8 +275,8 @@ func (s *JobFetchService) upsertJobPosition(companyID uint, job scraper.JobPosti
 	return position, nil
 }
 
-// analyzePersonaProfile はWebSearch結果と求人情報テキストから10カテゴリのスコアを導出する。
-func (s *JobFetchService) analyzePersonaProfile(ctx context.Context, companyName, searchResult, positionText string) (*models.CompanyWeightProfile, error) {
+// analyzePersonaProfile は企業情報と求人情報テキストから10カテゴリのスコアを導出する。
+func (s *JobFetchService) analyzePersonaProfile(ctx context.Context, companyName, companyInfo, positionText string) (*models.CompanyWeightProfile, error) {
 	systemPrompt := `あなたは採用コンサルタントです。企業情報から「企業が重視する人物像」を10カテゴリのスコア（0〜100）で評価し、指定のJSON形式のみで回答してください。`
 	userPrompt := fmt.Sprintf(`「%s」が求める人物像を以下の10カテゴリでスコア化してください（0〜100、50が中立）。
 JSON形式のみで回答してください（説明文は不要）。
@@ -290,7 +298,7 @@ JSON形式のみで回答してください（説明文は不要）。
 %s
 
 求人情報:
-%s`, companyName, searchResult, positionText)
+%s`, companyName, companyInfo, positionText)
 
 	jsonStr, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.3, 500)
 	if err != nil {

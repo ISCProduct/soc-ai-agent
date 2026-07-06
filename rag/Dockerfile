@@ -30,6 +30,8 @@ print("OpenAI SDK OK:", openai.__version__)
 PY
 
 COPY main.py /app/main.py
+COPY training_api.py /app/training_api.py
+COPY export_training_data.py /app/export_training_data.py
 
 EXPOSE 9000
 

@@ -13,7 +13,6 @@ import tiktoken
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from crewai import Agent, Task, Crew, Process
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from openai import OpenAI
@@ -473,10 +472,17 @@ def run_crewai(
         context_source: str = "none",
 ) -> str:
     """CrewAI を実行し、構造化されたレポートを試みる。
+    crewai は依存衝突のため requirements.txt に含まれておらず、インストールされている場合のみ動作する。
 
     フェーズ1: 出力をまず文字列で受け取り、JSON 形式なら Pydantic で検証。
     構造化に失敗した場合は元の文字列をフォールバックとして返し、詳細ログを残す。
     """
+    try:
+        from crewai import Agent, Task, Crew, Process
+    except ImportError:
+        logger.warning("crewai not installed, returning fallback report")
+        return "※ CrewAI がインストールされていないため、企業別レビューを生成できませんでした。"
+
     safe_company = _sanitize_company_name_for_query(company_name)
     safe_job_title = _sanitize_job_title(job_title) if job_title else "指定なし"
     context_block = "\n\n".join(context_docs)

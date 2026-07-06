@@ -6,9 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
-
-	"golang.org/x/time/rate"
 )
 
 // JobPostingResult は1件の求人情報を表す。
@@ -24,89 +21,77 @@ type JobPostingResult struct {
 	PreferredSkills []string `json:"preferred_skills"`
 	Description     string   `json:"description"`
 	PersonaKeywords []string `json:"persona_keywords"`
-	Source          string   `json:"source"` // "careers_page" or "wantedly"
+	Source          string   `json:"source"` // "ai_knowledge"
 }
 
-// CareersScraper は企業の採用ページとWantedlyから求人情報を取得する。
+// CareersScraper はAIモデルの知識から企業の求人情報を取得する。
 type CareersScraper struct {
 	openaiClient *openai.Client
-	limiter      *rate.Limiter
 }
 
 // NewCareersScraper は CareersScraper を生成する。
 func NewCareersScraper(client *openai.Client) *CareersScraper {
 	return &CareersScraper{
 		openaiClient: client,
-		limiter:      NewLimiter(2 * time.Second),
 	}
 }
 
-// jobsJSONSchema はWebSearchプロンプトに埋め込む求人JSONスキーマ。
+// jobsJSONSchema はプロンプトに埋め込む求人JSONスキーマ。
 const jobsJSONSchema = `
-[
-  {
-    "title": "職種名（必須・空文字不可）",
-    "url": "求人ページのURL（不明なら空文字）",
-    "employment_type": "正社員 or 契約社員 or アルバイト",
-    "work_location": "勤務地",
-    "remote_option": true or false,
-    "min_salary": 最低年収（万円・整数、不明なら0）,
-    "max_salary": 最高年収（万円・整数、不明なら0）,
-    "required_skills": ["必須スキル"],
-    "preferred_skills": ["歓迎スキル"],
-    "description": "職種説明（100文字程度）",
-    "persona_keywords": ["求める人物像キーワード"]
-  }
-]`
+{
+  "jobs": [
+    {
+      "title": "職種名（必須・空文字不可）",
+      "url": "求人ページのURL（不明なら空文字）",
+      "employment_type": "正社員 or 契約社員 or アルバイト",
+      "work_location": "勤務地",
+      "remote_option": true or false,
+      "min_salary": 最低年収（万円・整数、不明なら0）,
+      "max_salary": 最高年収（万円・整数、不明なら0）,
+      "required_skills": ["必須スキル"],
+      "preferred_skills": ["歓迎スキル"],
+      "description": "職種説明（100文字程度）",
+      "persona_keywords": ["求める人物像キーワード"]
+    }
+  ]
+}`
 
-// FetchFromCareersPage は企業の採用情報をWebSearch 1回で取得してJSONに変換する。
-func (s *CareersScraper) FetchFromCareersPage(ctx context.Context, companyName, websiteURL string) ([]JobPostingResult, error) {
+// FetchJobs はAIモデルの知識から企業の求人情報をチャット補完1回で取得してJSONに変換する。
+func (s *CareersScraper) FetchJobs(ctx context.Context, companyName, websiteURL string) ([]JobPostingResult, error) {
 	siteHint := ""
 	if websiteURL != "" {
 		siteHint = fmt.Sprintf("（公式サイト: %s）", websiteURL)
 	}
-	query := fmt.Sprintf(
-		`「%s」%sの採用・求人情報を調べて、募集職種の一覧を以下のJSON配列形式のみで回答してください（説明文は不要）。%s`,
+	systemPrompt := `あなたは日本企業の採用情報に詳しいアシスタントです。確実に知っている情報のみを回答し、不明な値は空文字・0・空配列にしてください。求人を推測で作り上げてはいけません。`
+	userPrompt := fmt.Sprintf(
+		`「%s」%sが募集していることで知られる職種の一覧を、以下のJSON形式のみで回答してください（説明文は不要）。求人情報を知らない場合は {"jobs": []} を返してください。%s`,
 		companyName, siteHint, jobsJSONSchema,
 	)
 
-	return s.fetchAndParseJobs(ctx, query, "careers_page")
-}
-
-// FetchFromWantedly はWantedlyから企業の求人情報をWebSearch 1回で取得してJSONに変換する。
-func (s *CareersScraper) FetchFromWantedly(ctx context.Context, companyName string) ([]JobPostingResult, error) {
-	query := fmt.Sprintf(
-		`site:wantedly.com の「%s」の募集職種一覧を以下のJSON配列形式のみで回答してください（説明文は不要）。%s`,
-		companyName, jobsJSONSchema,
-	)
-
-	return s.fetchAndParseJobs(ctx, query, "wantedly")
-}
-
-// fetchAndParseJobs は WebSearch クエリを実行してレスポンスから JSON 配列を抽出する。
-func (s *CareersScraper) fetchAndParseJobs(ctx context.Context, query, source string) ([]JobPostingResult, error) {
-	result, err := s.openaiClient.WebSearchQuery(ctx, query)
+	result, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.2, 1500)
 	if err != nil {
-		return nil, fmt.Errorf("WebSearch失敗(%s): %w", source, err)
+		return nil, fmt.Errorf("求人情報の取得失敗: %w", err)
 	}
 	if strings.TrimSpace(result) == "" {
 		return nil, nil
 	}
 
-	// WebSearchレスポンスからJSON配列を抽出
-	start := strings.Index(result, "[")
-	end := strings.LastIndex(result, "]")
+	// レスポンスからJSONオブジェクトを抽出
+	start := strings.Index(result, "{")
+	end := strings.LastIndex(result, "}")
 	if start == -1 || end == -1 || end <= start {
 		return nil, nil
 	}
 
-	var jobs []JobPostingResult
-	if err := json.Unmarshal([]byte(result[start:end+1]), &jobs); err != nil {
-		return nil, fmt.Errorf("JSON解析失敗(%s): %w", source, err)
+	var parsed struct {
+		Jobs []JobPostingResult `json:"jobs"`
+	}
+	if err := json.Unmarshal([]byte(result[start:end+1]), &parsed); err != nil {
+		return nil, fmt.Errorf("求人JSONの解析失敗: %w", err)
 	}
 
-	for i := range jobs {
-		jobs[i].Source = source
+	for i := range parsed.Jobs {
+		parsed.Jobs[i].Source = "ai_knowledge"
 	}
-	return jobs, nil
+	return parsed.Jobs, nil
 }

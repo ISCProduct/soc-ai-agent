@@ -301,9 +301,6 @@ export default function AdminJobPositionsPage() {
           <Button variant="outlined" size="small" component={Link} href="/admin/graduate-employments">
             就職情報管理
           </Button>
-          <Button variant="outlined" size="small" component={Link} href="/admin/crawling">
-            クローリング管理
-          </Button>
         </Stack>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>

@@ -201,7 +201,7 @@ func (c *AdminCompanyController) SyncGBiz(ctx echo.Context) error {
 }
 
 // WebSearchCompanyInfo POST /api/admin/companies/web-search
-// 企業名をもとにOpenAI WebSearchで一般的な企業情報を取得してプレビュー用に返す
+// 企業名をもとにAIモデルの知識で一般的な企業情報を取得してプレビュー用に返す
 func (c *AdminCompanyController) WebSearchCompanyInfo(ctx echo.Context) error {
 	var req struct {
 		Name string `json:"name"`
@@ -216,8 +216,9 @@ func (c *AdminCompanyController) WebSearchCompanyInfo(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
 	}
 
-	prompt := fmt.Sprintf(
-		`「%s」という企業の情報を調査してください。以下のJSON形式のみで回答してください（余分な説明は不要）。
+	systemPrompt := `あなたは日本企業の情報に詳しいアシスタントです。確実に知っている情報のみを回答し、不明な項目は空文字または0にしてください。推測で情報を作らないでください。`
+	userPrompt := fmt.Sprintf(
+		`「%s」という企業について知っている情報を、以下のJSON形式のみで回答してください（余分な説明は不要）。
 {
   "description": "企業概要（100〜200文字程度）",
   "industry": "業種（例: IT・ソフトウェア, 金融, 製造業）",
@@ -232,10 +233,10 @@ func (c *AdminCompanyController) WebSearchCompanyInfo(ctx echo.Context) error {
 		req.Name,
 	)
 
-	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), 30*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), 60*time.Second)
 	defer cancel()
 
-	text, err := c.openaiClient.WebSearchQuery(reqCtx, prompt)
+	text, err := c.openaiClient.ChatCompletionJSON(reqCtx, systemPrompt, userPrompt, 0.2, 600)
 	if err != nil {
 		return echoInternalError(err)
 	}
@@ -271,7 +272,7 @@ func (c *AdminCompanyController) WebSearchCompanyInfo(ctx echo.Context) error {
 }
 
 // FetchTechStack POST /api/admin/companies/:id/tech-stack-search
-// OpenAI WebSearchで企業の技術スタックを取得してDBを更新する
+// AIモデルの知識で企業の技術スタックを取得してDBを更新する
 func (c *AdminCompanyController) FetchTechStack(ctx echo.Context) error {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
 	if err != nil {
@@ -285,8 +286,9 @@ func (c *AdminCompanyController) FetchTechStack(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "company not found")
 	}
 
-	prompt := fmt.Sprintf(
-		`「%s」という日本のIT企業の技術スタックを調査してください。以下のJSON形式のみで回答してください（余分な説明は不要）。
+	systemPrompt := `あなたは日本のIT企業の技術情報に詳しいアシスタントです。確実に知っている情報のみを回答し、不明な項目は空配列または空文字にしてください。推測で情報を作らないでください。`
+	userPrompt := fmt.Sprintf(
+		`「%s」という日本のIT企業の技術スタックについて知っている情報を、以下のJSON形式のみで回答してください（余分な説明は不要）。
 {
   "tech_stack": ["言語・フレームワーク名（例: Go, React, TypeScript）"],
   "infra_stack": ["インフラ名（例: AWS, GCP, Azure, オンプレ）"],
@@ -296,10 +298,10 @@ func (c *AdminCompanyController) FetchTechStack(ctx echo.Context) error {
 		company.Name,
 	)
 
-	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), 30*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), 60*time.Second)
 	defer cancel()
 
-	text, err := c.openaiClient.WebSearchQuery(reqCtx, prompt)
+	text, err := c.openaiClient.ChatCompletionJSON(reqCtx, systemPrompt, userPrompt, 0.2, 400)
 	if err != nil {
 		return echoInternalError(err)
 	}

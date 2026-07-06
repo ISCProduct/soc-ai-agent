@@ -176,33 +176,39 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(ctx echo.Context) erro
 	return ctx.JSON(http.StatusOK, map[string]any{"results": results})
 }
 
-// searchCompaniesWithOpenAI はOpenAI Web Search APIを使って企業候補を取得する
+// searchCompaniesWithOpenAI はAIモデルの知識から企業候補を取得する
 func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Context, query string) []map[string]string {
-	prompt := fmt.Sprintf(
-		`「%s」という検索キーワードで日本の企業を最大5件検索してください。キーワードと一致する企業が実在する場合は必ず最初に含めてください。以下のJSON形式のみで返してください。余分な説明は不要です。
-[{"name":"企業名","description":"事業内容の1行説明"}]`,
+	systemPrompt := `あなたは日本企業に詳しいアシスタントです。確実に知っている実在の企業のみを回答し、不明な場合は空配列にしてください。推測で企業を作らないでください。`
+	userPrompt := fmt.Sprintf(
+		`「%s」という検索キーワードに合致する日本の企業を最大5件挙げてください。キーワードと一致する企業が実在する場合は必ず最初に含めてください。以下のJSON形式のみで返してください。余分な説明は不要です。
+{"results":[{"name":"企業名","description":"事業内容の1行説明"}]}`,
 		query,
 	)
 
-	ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	text, err := ctrl.openaiClient.WebSearchQuery(ctxTimeout, prompt)
+	text, err := ctrl.openaiClient.ChatCompletionJSON(ctxTimeout, systemPrompt, userPrompt, 0.2, 500)
 	if err != nil {
 		return []map[string]string{}
 	}
 
-	start := strings.Index(text, "[")
-	end := strings.LastIndex(text, "]")
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
 	if start == -1 || end == -1 || end <= start {
 		return []map[string]string{}
 	}
 
-	var results []map[string]string
-	if err := json.Unmarshal([]byte(text[start:end+1]), &results); err != nil {
+	var parsed struct {
+		Results []map[string]string `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(text[start:end+1]), &parsed); err != nil {
 		return []map[string]string{}
 	}
-	return results
+	if parsed.Results == nil {
+		return []map[string]string{}
+	}
+	return parsed.Results
 }
 
 // splitPath はURLパスを "/" で分割してスラッシュを除去した要素のスライスを返す（後方互換性のため残存）

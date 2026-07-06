@@ -703,13 +703,14 @@ func (s *InterviewService) fetchSkillScores(userID uint) []models.SkillScore {
 	return scores
 }
 
-// lookupCompanyReading はWeb検索を使って企業名の日本語読み（ふりがな）を取得します。
+// lookupCompanyReading はAIモデルの知識から企業名の日本語読み（ふりがな）を取得します。
 // 取得に失敗した場合は空文字を返します（エラーは無視）。
 func (s *InterviewService) lookupCompanyReading(ctx context.Context, companyName string) string {
+	systemPrompt := "あなたは日本企業の名称に詳しいアシスタントです。確実に知っている場合のみ答え、不明なら空文字を返してください。"
 	query := fmt.Sprintf("「%s」の正しい日本語読み（ふりがな）をカタカナで1行だけ答えてください。", companyName)
-	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	result, err := s.openaiClient.WebSearchQuery(ctxTimeout, query)
+	result, err := s.openaiClient.ResponsesWithTemperature(ctxTimeout, systemPrompt, query, 0.0)
 	if err != nil {
 		return ""
 	}
@@ -724,17 +725,22 @@ func (s *InterviewService) lookupCompanyReading(ctx context.Context, companyName
 	return reading
 }
 
-// lookupCompanyProfile はWeb検索を使って企業の公式サイト情報（理念・求める人物像・事業内容）を取得します。
+// lookupCompanyProfile はAIモデルの知識から企業情報（理念・求める人物像・事業内容）を取得します。
 // 取得に失敗した場合は空文字を返します（エラーは無視）。
 func (s *InterviewService) lookupCompanyProfile(ctx context.Context, companyName string) string {
-	query := fmt.Sprintf("%s 公式サイト 求める人物像 企業理念 事業内容", companyName)
-	ctxTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
+	systemPrompt := "あなたは日本企業の採用情報に詳しいアシスタントです。確実に知っている情報のみを簡潔にまとめ、不明な場合は「不明」とだけ答えてください。"
+	query := fmt.Sprintf("「%s」の企業理念・求める人物像・事業内容を300文字以内でまとめてください。", companyName)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	result, err := s.openaiClient.WebSearchQuery(ctxTimeout, query)
+	result, err := s.openaiClient.ResponsesWithMaxTokens(ctxTimeout, systemPrompt, query, 0.2, 500)
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(result)
+	result = strings.TrimSpace(result)
+	if result == "不明" {
+		return ""
+	}
+	return result
 }
 
 // interviewTopics は面接で扱うトピックの順序定義です

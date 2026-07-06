@@ -61,9 +61,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium-driver \
  && rm -rf /var/lib/apt/lists/*
 
-#
-# NOTE: Hot-reload (air) is omitted to avoid Go toolchain version constraints.
-#
+# Install Air for local Docker Compose hot reload.
+ARG AIR_VERSION=v1.62.0
+RUN go install github.com/air-verse/air@${AIR_VERSION}
+
 
 # Optional: copy full source for debugging/hot reload
 COPY --from=builder /app /app

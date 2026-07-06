@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// CompanyInfoResult はWebSearchで取得した企業基本情報。
+// CompanyInfoResult はAIモデルの知識から取得した企業基本情報。
 type CompanyInfoResult struct {
 	Description   string `json:"description"`
 	Industry      string `json:"industry"`
@@ -23,7 +23,7 @@ type CompanyInfoResult struct {
 	WorkStyle     string `json:"work_style"`
 }
 
-// CompanyInfoFetcher はOpenAI WebSearchを使って企業基本情報を取得・保存するサービス。
+// CompanyInfoFetcher はAIモデルの知識を使って企業基本情報を取得・保存するサービス。
 type CompanyInfoFetcher struct {
 	repo         repository.CompanyRepository
 	openaiClient *openai.Client
@@ -55,8 +55,9 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 		}, nil
 	}
 
-	prompt := fmt.Sprintf(
-		`「%s」という企業の情報を調査してください。以下のJSON形式のみで回答してください（余分な説明は不要）。
+	systemPrompt := `あなたは日本企業の情報に詳しいアシスタントです。確実に知っている情報のみを回答し、不明な項目は空文字または0にしてください。推測で情報を作らないでください。`
+	userPrompt := fmt.Sprintf(
+		`「%s」という企業について知っている情報を、以下のJSON形式のみで回答してください（余分な説明は不要）。
 {
   "description": "企業概要（100〜200文字程度）",
   "industry": "業種（例: IT・ソフトウェア, 金融, 製造業）",
@@ -71,18 +72,18 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 		company.Name,
 	)
 
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	text, err := f.openaiClient.WebSearchQuery(ctx, prompt)
+	text, err := f.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.2, 600)
 	if err != nil {
-		return nil, fmt.Errorf("web search failed: %w", err)
+		return nil, fmt.Errorf("企業情報の取得失敗: %w", err)
 	}
 
 	start := strings.Index(text, "{")
 	end := strings.LastIndex(text, "}")
 	if start == -1 || end == -1 || end <= start {
-		return nil, fmt.Errorf("failed to parse web search response: no valid JSON found")
+		return nil, fmt.Errorf("failed to parse ai response: no valid JSON found")
 	}
 
 	var result CompanyInfoResult
