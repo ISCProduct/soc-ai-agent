@@ -7,4 +7,4 @@ openai==1.109.1
 pydantic==2.13.4
 pytest==8.4.2
 tiktoken==0.13.0
-uvicorn==0.49.0
+uvicorn==0.50.0
