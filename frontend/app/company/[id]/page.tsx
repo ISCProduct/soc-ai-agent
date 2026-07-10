@@ -55,19 +55,6 @@ function parseJsonArray(s?: string): string[] {
   }
 }
 
-// 企業名からIDにマッピング（暫定的に企業ID 1-3 を使用）
-function getMockCompanyId(companyName: string): number {
-  // 実際の企業データから取得する場合はAPIを使用
-  // ここでは既存の3社のいずれかを返す
-  const nameMap: Record<string, number> = {
-    '株式会社テクノシステム': 1,
-    '日本ソフトウェア株式会社': 2,
-    '株式会社クラウドワークス': 3,
-  };
-  
-  return nameMap[companyName] || 1; // デフォルトは企業ID 1
-}
-
 export default function CompanyDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -471,7 +458,7 @@ export default function CompanyDetailPage() {
                   </div>
                 </div>
                 <CompanyDiagram 
-                  companyId={getMockCompanyId(company.name)} 
+                  companyId={company.id} 
                   diagramType="capital" 
                 />
               </TabsContent>
@@ -482,7 +469,7 @@ export default function CompanyDetailPage() {
                   <p>• 青い矢印：ビジネス取引関係、灰色の点線：資本関係（親会社）</p>
                 </div>
                 <CompanyDiagram 
-                  companyId={getMockCompanyId(company.name)} 
+                  companyId={company.id} 
                   diagramType="business" 
                 />
               </TabsContent>
