@@ -3,8 +3,10 @@ package controllers
 import (
 	"Backend/domain/repository"
 	"Backend/internal/openai"
+	"Backend/internal/services"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -17,10 +19,15 @@ import (
 type CompanyRelationController struct {
 	repo         repository.CompanyRelationQueryRepository
 	openaiClient *openai.Client
+	validator    *services.CompanyValidationService
 }
 
 func NewCompanyRelationController(repo repository.CompanyRelationQueryRepository, openaiClient *openai.Client) *CompanyRelationController {
 	return &CompanyRelationController{repo: repo, openaiClient: openaiClient}
+}
+
+func (ctrl *CompanyRelationController) SetCompanyValidator(v *services.CompanyValidationService) {
+	ctrl.validator = v
 }
 
 // GetCompanyRelations 企業IDに関連する企業関係を取得
@@ -171,12 +178,63 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(ctx echo.Context) erro
 		return echo.NewHTTPError(http.StatusBadRequest, "q parameter is required")
 	}
 
-	results := ctrl.searchCompaniesWithOpenAI(ctx.Request().Context(), query)
+	if ctrl.validator != nil {
+		results, err := ctrl.validator.SearchCandidates(ctx.Request().Context(), query, true)
+		if err != nil {
+			var ve *services.ValidationError
+			if errors.As(err, &ve) {
+				return echo.NewHTTPError(http.StatusBadRequest, ve.Message)
+			}
+			return echo.NewHTTPError(http.StatusInternalServerError, "企業検索に失敗しました")
+		}
+		out := make([]map[string]any, 0, len(results))
+		for _, r := range results {
+			item := map[string]any{
+				"name":        r.CanonicalName,
+				"description": r.Description,
+				"source":      r.Source,
+				"exists":      r.Exists,
+				"confidence":  r.Confidence,
+			}
+			if r.CompanyID != nil {
+				item["company_id"] = *r.CompanyID
+			}
+			if len(r.EvidenceURLs) > 0 {
+				item["evidence_urls"] = r.EvidenceURLs
+			}
+			out = append(out, item)
+		}
+		return ctx.JSON(http.StatusOK, map[string]any{"results": out})
+	}
 
+	results := ctrl.searchCompaniesWithOpenAI(ctx.Request().Context(), query)
 	return ctx.JSON(http.StatusOK, map[string]any{"results": results})
 }
 
-// searchCompaniesWithOpenAI はAIモデルの知識から企業候補を取得する
+// ValidateCompany POST /api/companies/validate
+// 企業名の実在確認（DB優先、必要時のみ軽量 WebSearch）
+func (ctrl *CompanyRelationController) ValidateCompany(ctx echo.Context) error {
+	if ctrl.validator == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "company validator is not configured")
+	}
+	var payload struct {
+		Query string `json:"query"`
+	}
+	if err := ctx.Bind(&payload); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+	result, err := ctrl.validator.Validate(ctx.Request().Context(), payload.Query)
+	if err != nil {
+		var ve *services.ValidationError
+		if errors.As(err, &ve) {
+			return echo.NewHTTPError(http.StatusBadRequest, ve.Message)
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return ctx.JSON(http.StatusOK, result)
+}
+
+// searchCompaniesWithOpenAI はAIモデルの知識から企業候補を取得する（validator未設定時のフォールバック）
 func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Context, query string) []map[string]string {
 	systemPrompt := `あなたは日本企業に詳しいアシスタントです。確実に知っている実在の企業のみを回答し、不明な場合は空配列にしてください。推測で企業を作らないでください。`
 	userPrompt := fmt.Sprintf(
