@@ -164,6 +164,7 @@ function ResultsContent() {
   const [relations, setRelations] = useState<CapitalRelation[]>([])
   const [marketInfo, setMarketInfo] = useState<CompanyMarketInfo[]>([])
   const [diagramLoading, setDiagramLoading] = useState(false)
+  const [diagramError, setDiagramError] = useState<string | null>(null)
   const [emailSending, setEmailSending] = useState(false)
   const [favoritingId, setFavoritingId] = useState<number | null>(null)
   const [applyingId, setApplyingId] = useState<number | null>(null)
@@ -291,17 +292,23 @@ function ResultsContent() {
       const loadDiagramData = async () => {
         if (relations.length === 0 || marketInfo.length === 0) {
           setDiagramLoading(true)
-          console.log('[Relations] Fetching company relations and market info...')
-          const [relationsData, marketData] = await Promise.all([
-            fetchCompanyRelations(),
-            fetchCompanyMarketInfo()
-          ])
-          console.log('[Relations] Fetched relations:', relationsData.length)
-          console.log('[Relations] Business relations:', relationsData.filter(r => r.relation_type.startsWith('business')).length)
-          console.log('[Relations] Capital relations:', relationsData.filter(r => r.relation_type.startsWith('capital')).length)
-          setRelations(relationsData)
-          setMarketInfo(marketData)
-          setDiagramLoading(false)
+          setDiagramError(null)
+          try {
+            console.log('[Relations] Fetching company relations and market info...')
+            const [relationsData, marketData] = await Promise.all([
+              fetchCompanyRelations(),
+              fetchCompanyMarketInfo()
+            ])
+            console.log('[Relations] Fetched relations:', relationsData.length)
+            console.log('[Relations] Business relations:', relationsData.filter(r => r.relation_type.startsWith('business')).length)
+            console.log('[Relations] Capital relations:', relationsData.filter(r => r.relation_type.startsWith('capital')).length)
+            setRelations(relationsData)
+            setMarketInfo(marketData)
+          } catch (error) {
+            setDiagramError(error instanceof Error ? error.message : '関連図データの取得に失敗しました')
+          } finally {
+            setDiagramLoading(false)
+          }
         } else {
           console.log('[Relations] Using cached data - relations:', relations.length)
         }
@@ -829,6 +836,10 @@ function ResultsContent() {
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
                         <CircularProgress />
                       </Box>
+                    ) : diagramError ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                        <Typography color="error">{diagramError}</Typography>
+                      </Box>
                     ) : capitalDiagram.nodes.length === 0 ? (
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
                         <Typography color="text.secondary">この企業の資本関連情報はありません</Typography>
@@ -896,6 +907,10 @@ function ResultsContent() {
                     {diagramLoading ? (
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
                         <CircularProgress />
+                      </Box>
+                    ) : diagramError ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                        <Typography color="error">{diagramError}</Typography>
                       </Box>
                     ) : businessDiagram.nodes.length === 0 ? (
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>

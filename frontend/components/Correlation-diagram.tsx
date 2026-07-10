@@ -107,17 +107,26 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
     const [relations, setRelations] = useState<CapitalRelation[]>([]);
     const [marketInfo, setMarketInfo] = useState<CompanyMarketInfo[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
 
     useEffect(() => {
         async function loadData() {
             setLoading(true);
-            const [relationsData, marketData] = await Promise.all([
-                fetchCompanyRelations(),
-                fetchCompanyMarketInfo()
-            ]);
-            setRelations(relationsData);
-            setMarketInfo(marketData);
-            setLoading(false);
+            setLoadError(null);
+            try {
+                const [relationsData, marketData] = await Promise.all([
+                    fetchCompanyRelations(),
+                    fetchCompanyMarketInfo()
+                ]);
+                setRelations(relationsData);
+                setMarketInfo(marketData);
+            } catch (error) {
+                setLoadError(error instanceof Error ? error.message : 'データの取得に失敗しました');
+                setRelations([]);
+                setMarketInfo([]);
+            } finally {
+                setLoading(false);
+            }
         }
         loadData();
     }, []);
@@ -366,6 +375,14 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
         return (
             <Box sx={{ width: '100%', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Typography>読み込み中...</Typography>
+            </Box>
+        );
+    }
+
+    if (loadError) {
+        return (
+            <Box sx={{ width: '100%', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Typography color="error">{loadError}</Typography>
             </Box>
         );
     }

@@ -39,61 +39,39 @@ export interface CompanyMarketInfo {
   company?: Company;
 }
 
-const demoCompanyNames = new Set([
-  '株式会社テックイノベーション',
-  'エンタープライズシステムズ株式会社',
-  'クリエイティブラボ株式会社',
-]);
+export class CompanyDataFetchError extends Error {
+  readonly status?: number;
 
-function isDemoCompany(company?: Company): boolean {
-  if (!company) return true;
-  const website = company.website_url || '';
-  if (website.includes('.example.com') || website === 'https://example.com') {
-    return true;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = 'CompanyDataFetchError';
+    this.status = status;
   }
-  if (demoCompanyNames.has(company.name)) {
-    return true;
-  }
-  return false;
 }
 
-function hasDemoEndpoint(relation: CapitalRelation): boolean {
-  if (relation.parent_id && isDemoCompany(relation.parent)) return true;
-  if (relation.child_id && isDemoCompany(relation.child)) return true;
-  if (relation.from_id && isDemoCompany(relation.from)) return true;
-  if (relation.to_id && isDemoCompany(relation.to)) return true;
-  return false;
+async function fetchJson<T>(url: string, resourceLabel: string): Promise<T> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new CompanyDataFetchError(`${resourceLabel}の取得に失敗しました`, response.status);
+    }
+    return response.json();
+  } catch (error) {
+    if (error instanceof CompanyDataFetchError) {
+      throw error;
+    }
+    throw new CompanyDataFetchError(`${resourceLabel}の取得中にエラーが発生しました`);
+  }
 }
 
 // APIから企業関係データを取得
 export async function fetchCompanyRelations(): Promise<CapitalRelation[]> {
-  try {
-    const response = await fetch(`${BACKEND_URL}/api/companies/relations`);
-    if (!response.ok) {
-      console.warn('Failed to fetch company relations');
-      return [];
-    }
-    const relations: CapitalRelation[] = await response.json();
-    return relations.filter((relation) => !hasDemoEndpoint(relation));
-  } catch (error) {
-    console.warn('Error fetching company relations:', error);
-    return [];
-  }
+  return fetchJson<CapitalRelation[]>(`${BACKEND_URL}/api/companies/relations`, '企業関係データ');
 }
 
 // APIから企業市場情報を取得
 export async function fetchCompanyMarketInfo(): Promise<CompanyMarketInfo[]> {
-  try {
-    const response = await fetch(`${BACKEND_URL}/api/companies/market-info`);
-    if (!response.ok) {
-      console.warn('Failed to fetch market info');
-      return [];
-    }
-    return response.json();
-  } catch (error) {
-    console.warn('Error fetching market info:', error);
-    return [];
-  }
+  return fetchJson<CompanyMarketInfo[]>(`${BACKEND_URL}/api/companies/market-info`, '市場情報');
 }
 
 // 市場区分の色定義
