@@ -108,6 +108,8 @@ function InterviewContent() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(1)
   const [questionElapsedSeconds, setQuestionElapsedSeconds] = useState(0)
+  const [isDeepeningQuestion, setIsDeepeningQuestion] = useState(false)
+  const [questionCategory, setQuestionCategory] = useState<string | null>(null)
   const [sessionWarningShown, setSessionWarningShown] = useState(false)
   const [session, setSession] = useState<InterviewSession | null>(null)
   const [report, setReport] = useState<InterviewReport | null>(null)
@@ -482,6 +484,8 @@ function InterviewContent() {
     if (!res.ok) throw new Error(await res.text())
     const { meta, audio } = await parseMultipartResponse(res)
     const aiText: string = meta.ai_text || ''
+    setIsDeepeningQuestion(Boolean(meta.is_deepening))
+    setQuestionCategory(typeof meta.question_category === 'string' ? meta.question_category : null)
     if (aiText) {
       historyRef.current.push({ role: 'assistant', content: aiText })
       setUtterances(p => [...p, { role: 'ai', text: aiText }])
@@ -707,6 +711,8 @@ function InterviewContent() {
       const { meta, audio } = await parseMultipartResponse(res)
       const userText: string = meta.user_text || ''
       const aiText: string = meta.ai_text || ''
+      setIsDeepeningQuestion(Boolean(meta.is_deepening))
+      setQuestionCategory(typeof meta.question_category === 'string' ? meta.question_category : null)
       if (userText) {
         historyRef.current.push({ role: 'user', content: userText })
         setUtterances(p => [...p, { role: 'user', text: userText }])
@@ -1566,6 +1572,19 @@ function InterviewContent() {
             }}>
               {questionRemainingLabel}
             </Typography>
+            {(isDeepeningQuestion || questionCategory) && (
+              <Chip
+                size="small"
+                label={isDeepeningQuestion ? '深掘り質問' : questionCategory || ''}
+                sx={{
+                  flexShrink: 0,
+                  height: 22,
+                  fontSize: 11,
+                  bgcolor: isDeepeningQuestion ? 'rgba(251,188,4,0.25)' : 'rgba(255,255,255,0.12)',
+                  color: '#fff',
+                }}
+              />
+            )}
           </Box>
         </Box>
       )}

@@ -13,6 +13,9 @@ type InterviewSession struct {
 	EndedAt           *time.Time `gorm:"index"`
 	EstimatedCostUSD  float64    `gorm:"default:0"`
 	TemplateVersion   string     `gorm:"size:32;default:'v1'"`
+	CompanyID         uint       `gorm:"index" json:"company_id"`
+	Position          string     `gorm:"size:100" json:"position"`
+	CompanyName       string     `gorm:"size:255" json:"company_name"`
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	DeletedAt         *time.Time `gorm:"index"`
