@@ -30,6 +30,9 @@ jobs:
       issues: read
       pull-requests: read
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: PR を Backlog 課題へ反映
         env:
           BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
@@ -45,52 +48,24 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           python3 - << 'PYEOF'
-          import os, sys, json, re, urllib.parse, urllib.request, urllib.error
+          import os, sys, json, re, urllib.request
 
-          API_KEY   = os.environ['BACKLOG_API_KEY']
-          SPACE_ID  = os.environ['BACKLOG_SPACE_ID']
-          PROJ_KEY  = os.environ['BACKLOG_PROJECT_KEY']
+          sys.path.insert(0, ".github/scripts")
+          from backlog_client import load_backlog_env, resolve_bl_base, bl_request as _bl_request
+
+          API_KEY, SPACE_ID, PROJ_KEY, DOMAIN = load_backlog_env()
           PR_TITLE  = os.environ.get('PR_TITLE', '')
           PR_BODY   = os.environ.get('PR_BODY') or ''
           PR_URL    = os.environ['PR_URL']
           PR_MERGED = os.environ.get('PR_MERGED', 'false').lower() == 'true'
           ACTION    = os.environ['ACTION']
-          DOMAIN    = os.environ.get('BACKLOG_DOMAIN', '').strip()
           GH_TOKEN  = os.environ.get('GH_TOKEN', '')
           GH_REPO   = os.environ.get('GH_REPO', '')
 
-          def resolve_bl_base(space_id, api_key, domain):
-              candidates = [domain] if domain else ['backlog.jp', 'backlog.com']
-              for d in candidates:
-                  url = f"https://{space_id}.{d}/api/v2/space?apiKey={api_key}"
-                  try:
-                      with urllib.request.urlopen(urllib.request.Request(url)) as r:
-                          r.read()
-                          return f"https://{space_id}.{d}/api/v2", d
-                  except urllib.error.HTTPError as e:
-                      body = e.read().decode()
-                      if e.code == 404 and '"code":6' in body:
-                          continue
-                      print(f"Backlog API エラー {e.code}: {body}", file=sys.stderr)
-                      sys.exit(1)
-              print(f"エラー: スペース '{space_id}' が見つかりませんでした。", file=sys.stderr)
-              sys.exit(1)
-
           BL_BASE, BL_DOMAIN = resolve_bl_base(SPACE_ID, API_KEY, DOMAIN)
-          print(f"Backlog ドメイン: {BL_DOMAIN}")
 
           def bl_request(method, path, data=None):
-              url = f"{BL_BASE}{path}?apiKey={API_KEY}"
-              body = urllib.parse.urlencode(data).encode() if data else None
-              req = urllib.request.Request(url, data=body, method=method)
-              if body:
-                  req.add_header('Content-Type', 'application/x-www-form-urlencoded')
-              try:
-                  with urllib.request.urlopen(req) as r:
-                      return json.loads(r.read())
-              except urllib.error.HTTPError as e:
-                  print(f"Backlog API エラー {e.code}: {e.read().decode()}", file=sys.stderr)
-                  return None
+              return _bl_request(BL_BASE, API_KEY, method, path, data, fatal=False)
 
           def extract_bl_key(title, body):
               # 1. タイトルの [PROJ-N] プレフィックス
