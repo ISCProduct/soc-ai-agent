@@ -1292,7 +1292,7 @@ function ResultsContent() {
               <Button
                 variant="outlined"
                 size="large"
-                onClick={() => router.push(`/applications?user_id=${userId}`)}
+                onClick={() => router.push('/applications')}
               >
                 選考管理を見る
               </Button>
