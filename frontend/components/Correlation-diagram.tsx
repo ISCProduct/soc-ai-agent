@@ -107,12 +107,12 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
     const [relations, setRelations] = useState<CapitalRelation[]>([]);
     const [marketInfo, setMarketInfo] = useState<CompanyMarketInfo[]>([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const [loadError, setLoadError] = useState<string | null>(null);
 
     useEffect(() => {
         async function loadData() {
             setLoading(true);
-            setError(null);
+            setLoadError(null);
             try {
                 const [relationsData, marketData] = await Promise.all([
                     fetchCompanyRelations(),
@@ -120,8 +120,8 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                 ]);
                 setRelations(relationsData);
                 setMarketInfo(marketData);
-            } catch {
-                setError('関係データの取得に失敗しました');
+            } catch (error) {
+                setLoadError(error instanceof Error ? error.message : 'データの取得に失敗しました');
                 setRelations([]);
                 setMarketInfo([]);
             } finally {
@@ -379,10 +379,10 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
         );
     }
 
-    if (error) {
+    if (loadError) {
         return (
             <Box sx={{ width: '100%', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Typography color="error">{error}</Typography>
+                <Typography color="error">{loadError}</Typography>
             </Box>
         );
     }

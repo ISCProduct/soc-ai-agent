@@ -50,3 +50,13 @@ type InterviewCompanyQuestionRepository interface {
 	Update(q *models.InterviewCompanyQuestion) error
 	Delete(id uint) error
 }
+
+// InterviewQuestionStateRepository は面接中の質問キュー状態を永続化する。
+type InterviewQuestionStateRepository interface {
+	CountBySessionID(sessionID uint) (int64, error)
+	CreateBatch(states []models.InterviewQuestionState) error
+	Create(state *models.InterviewQuestionState) error
+	Update(state *models.InterviewQuestionState) error
+	FindBySessionID(sessionID uint) ([]models.InterviewQuestionState, error)
+	FindLatestAsked(sessionID uint) (*models.InterviewQuestionState, error)
+}

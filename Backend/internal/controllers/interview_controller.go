@@ -283,9 +283,12 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 	ctx.Response().Header().Set("Content-Type", "multipart/mixed; boundary="+mw.Boundary())
 
 	metaPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
-	json.NewEncoder(metaPart).Encode(map[string]string{
-		"user_text": result.UserText,
-		"ai_text":   result.AIText,
+	json.NewEncoder(metaPart).Encode(map[string]any{
+		"user_text":         result.UserText,
+		"ai_text":           result.AIText,
+		"question_source":   result.QuestionSource,
+		"question_category": result.QuestionCategory,
+		"is_deepening":      result.IsDeepening,
 	})
 
 	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})
@@ -343,7 +346,12 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 	ctx.Response().Header().Set("Content-Type", "multipart/mixed; boundary="+mw.Boundary())
 
 	metaPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
-	json.NewEncoder(metaPart).Encode(map[string]string{"ai_text": result.AIText})
+	json.NewEncoder(metaPart).Encode(map[string]any{
+		"ai_text":           result.AIText,
+		"question_source":   result.QuestionSource,
+		"question_category": result.QuestionCategory,
+		"is_deepening":      result.IsDeepening,
+	})
 
 	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})
 	audioPart.Write(result.Audio)

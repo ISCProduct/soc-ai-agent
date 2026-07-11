@@ -28,6 +28,7 @@ type InterviewService struct {
 	realtimeUsageService *RealtimeUsageService
 	crossFeature         *CrossFeatureIntegrationService
 	companyQuestionRepo  repository.InterviewCompanyQuestionRepository
+	questionStateRepo  repository.InterviewQuestionStateRepository
 	skillScoreRepo       SkillScoreReader
 	jobCh                chan uint
 	workerOnce           sync.Once
@@ -62,6 +63,11 @@ func NewInterviewService(
 // SetCompanyQuestionRepo 企業別質問リポジトリを注入する（オプション）
 func (s *InterviewService) SetCompanyQuestionRepo(r repository.InterviewCompanyQuestionRepository) {
 	s.companyQuestionRepo = r
+}
+
+// SetQuestionStateRepo 面接質問キューリポジトリを注入する（オプション）
+func (s *InterviewService) SetQuestionStateRepo(r repository.InterviewQuestionStateRepository) {
+	s.questionStateRepo = r
 }
 
 // SetSkillScoreRepo GitHubスキルスコアリポジトリを注入する（オプション）
@@ -508,9 +514,12 @@ func (s *InterviewService) estimateCost(start, end *time.Time) float64 {
 
 // TurnResult は1ターンの結果（AIテキスト + TTS音声バイト列）
 type TurnResult struct {
-	UserText string
-	AIText   string
-	Audio    []byte
+	UserText         string
+	AIText           string
+	Audio            []byte
+	QuestionSource   string
+	QuestionCategory string
+	IsDeepening      bool
 }
 
 // Turn はユーザー音声を受け取り、STT→Chat→TTSを実行してTurnResultを返します
@@ -563,6 +572,10 @@ func (s *InterviewService) Turn(
 	// 企業別カスタム質問とGitHubスキルスコアを取得
 	customQuestions := s.fetchCustomQuestions(companyID, position)
 	skillScores := s.fetchSkillScores(userID)
+	directive, err := s.advanceQuestionPlan(ctx, session, companyID, position, companyName, userText, false)
+	if err != nil {
+		log.Printf("[Interview] advanceQuestionPlan error: %v", err)
+	}
 
 	// 履歴にユーザー発言を追加
 	history = append(history, map[string]string{"role": "user", "content": userText})
@@ -582,6 +595,7 @@ func (s *InterviewService) Turn(
 		totalQuestions,
 		questionElapsedSeconds,
 		questionDurationSeconds,
+		directive,
 	)
 	if s.crossFeature != nil {
 		if profileCtx := s.crossFeature.BuildInterviewContextFromUser(userID); profileCtx != "" {
@@ -600,7 +614,13 @@ func (s *InterviewService) Turn(
 		return nil, fmt.Errorf("tts error: %w", err)
 	}
 
-	return &TurnResult{UserText: userText, AIText: aiText, Audio: audio}, nil
+	result := &TurnResult{UserText: userText, AIText: aiText, Audio: audio}
+	if directive != nil {
+		result.QuestionSource = directive.Source
+		result.QuestionCategory = directive.Category
+		result.IsDeepening = directive.IsDeepening
+	}
+	return result, nil
 }
 
 // StartTurn は面接開始の最初のAI発話を生成します
@@ -640,6 +660,10 @@ func (s *InterviewService) StartTurn(
 	// 企業別カスタム質問とGitHubスキルスコアを取得
 	customQuestions := s.fetchCustomQuestions(companyID, position)
 	skillScores := s.fetchSkillScores(userID)
+	directive, err := s.advanceQuestionPlan(ctx, session, companyID, position, companyName, "", true)
+	if err != nil {
+		log.Printf("[Interview] advanceQuestionPlan error: %v", err)
+	}
 
 	systemPromptStart := buildInterviewSystemPrompt(
 		companyName,
@@ -655,6 +679,7 @@ func (s *InterviewService) StartTurn(
 		totalQuestions,
 		questionElapsedSeconds,
 		questionDurationSeconds,
+		directive,
 	)
 	if s.crossFeature != nil {
 		if profileCtx := s.crossFeature.BuildInterviewContextFromUser(userID); profileCtx != "" {
@@ -674,7 +699,131 @@ func (s *InterviewService) StartTurn(
 		return nil, fmt.Errorf("tts error: %w", err)
 	}
 
-	return &TurnResult{AIText: aiText, Audio: audio}, nil
+	result := &TurnResult{AIText: aiText, Audio: audio}
+	if directive != nil {
+		result.QuestionSource = directive.Source
+		result.QuestionCategory = directive.Category
+		result.IsDeepening = directive.IsDeepening
+	}
+	return result, nil
+}
+
+func (s *InterviewService) advanceQuestionPlan(
+	ctx context.Context,
+	session *models.InterviewSession,
+	companyID uint,
+	position, companyName, userAnswer string,
+	isStart bool,
+) (*questionDirective, error) {
+	if s.questionStateRepo == nil || companyID == 0 {
+		return nil, nil
+	}
+
+	if err := s.persistInterviewContext(session, companyID, position, companyName); err != nil {
+		return nil, err
+	}
+
+	count, err := s.questionStateRepo.CountBySessionID(session.ID)
+	if err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		customQuestions := s.fetchCustomQuestions(companyID, position)
+		queue := BuildQuestionQueue(session.ID, customQuestions)
+		if err := s.questionStateRepo.CreateBatch(queue); err != nil {
+			return nil, err
+		}
+	}
+
+	if !isStart && strings.TrimSpace(userAnswer) != "" {
+		if asked, err := s.questionStateRepo.FindLatestAsked(session.ID); err != nil {
+			return nil, err
+		} else if asked != nil {
+			asked.Status = questionStatusAnswered
+			if err := s.questionStateRepo.Update(asked); err != nil {
+				return nil, err
+			}
+
+			if NeedsDeepening(userAnswer, asked.Depth) {
+				followUpText := BuildFollowUpQuestionText(asked.QuestionText, userAnswer)
+				if generated, genErr := s.generateFollowUpQuestion(ctx, asked.QuestionText, userAnswer); genErr == nil && strings.TrimSpace(generated) != "" {
+					followUpText = generated
+				}
+				parentID := asked.ID
+				followUp := &models.InterviewQuestionState{
+					SessionID:     session.ID,
+					Source:        questionSourceFollowUp,
+					Category:      asked.Category,
+					QuestionText:  followUpText,
+					Status:        questionStatusAsked,
+					ParentStateID: &parentID,
+					Depth:         asked.Depth + 1,
+					SortOrder:     asked.SortOrder,
+				}
+				if err := s.questionStateRepo.Create(followUp); err != nil {
+					return nil, err
+				}
+				return &questionDirective{
+					Text:        followUpText,
+					Source:      questionSourceFollowUp,
+					Category:    asked.Category,
+					IsDeepening: true,
+				}, nil
+			}
+		}
+	}
+
+	states, err := s.questionStateRepo.FindBySessionID(session.ID)
+	if err != nil {
+		return nil, err
+	}
+	next := selectNextPending(states)
+	if next == nil {
+		return nil, nil
+	}
+	next.Status = questionStatusAsked
+	if err := s.questionStateRepo.Update(next); err != nil {
+		return nil, err
+	}
+	return &questionDirective{
+		Text:     next.QuestionText,
+		Source:   next.Source,
+		Category: next.Category,
+	}, nil
+}
+
+func (s *InterviewService) persistInterviewContext(session *models.InterviewSession, companyID uint, position, companyName string) error {
+	if companyID == 0 {
+		return nil
+	}
+	changed := false
+	if session.CompanyID != companyID {
+		session.CompanyID = companyID
+		changed = true
+	}
+	if position != "" && session.Position != position {
+		session.Position = position
+		changed = true
+	}
+	if companyName != "" && session.CompanyName != companyName {
+		session.CompanyName = companyName
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return s.sessionRepo.Update(session)
+}
+
+func (s *InterviewService) generateFollowUpQuestion(ctx context.Context, originalQuestion, userAnswer string) (string, error) {
+	if s.openaiClient == nil {
+		return "", errors.New("openai client not configured")
+	}
+	systemPrompt := "あなたは就活面接官です。応募者の直前回答を踏まえ、具体性を引き出す追質問を1文だけ日本語で作成してください。余計な説明は不要です。"
+	userPrompt := fmt.Sprintf("元の質問: %s\n応募者回答: %s", originalQuestion, userAnswer)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	return s.openaiClient.ResponsesWithMaxTokens(ctxTimeout, systemPrompt, userPrompt, 0.2, 120)
 }
 
 // fetchCustomQuestions は企業別カスタム質問を取得する。未登録時は空スライスを返す。
@@ -769,6 +918,7 @@ func buildInterviewSystemPrompt(
 	totalQuestions int,
 	questionElapsedSeconds int,
 	questionDurationSeconds int,
+	directive *questionDirective,
 ) string {
 	if questionDurationSeconds <= 0 {
 		questionDurationSeconds = 180
@@ -879,7 +1029,16 @@ func buildInterviewSystemPrompt(
 	}
 
 	// 企業別カスタム質問をシステムプロンプトに注入
-	if len(customQuestions) > 0 {
+	if directive != nil && strings.TrimSpace(directive.Text) != "" {
+		base += "\n\n【今回の質問】"
+		if directive.IsDeepening {
+			base += "\n前の回答を踏まえた深掘り質問です。"
+		}
+		base += fmt.Sprintf("\n次の質問文をそのまま面接官として投げかけてください（1問のみ）:\n%s", directive.Text)
+		if directive.Category != "" {
+			base += fmt.Sprintf("\n（カテゴリ: %s）", directive.Category)
+		}
+	} else if len(customQuestions) > 0 {
 		var required, recommended []string
 		for _, q := range customQuestions {
 			if q.IsRequired {
@@ -1107,6 +1266,14 @@ Interview transcript:
 	teacherJSON := []byte("{}")
 	if payload.Teacher != nil {
 		teacherJSON, _ = json.Marshal(payload.Teacher)
+	}
+	if s.questionStateRepo != nil {
+		if states, stateErr := s.questionStateRepo.FindBySessionID(sessionID); stateErr == nil && len(states) > 0 {
+			coverage := buildQuestionCoverage(states)
+			if merged, mergeErr := mergeTeacherReportWithCoverage(string(teacherJSON), coverage); mergeErr == nil {
+				teacherJSON = []byte(merged)
+			}
+		}
 	}
 
 	report := &models.InterviewReport{

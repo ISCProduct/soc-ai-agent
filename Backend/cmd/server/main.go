@@ -178,6 +178,7 @@ func main() {
 	interviewReportRepo := repositories.NewInterviewReportRepository(db)
 	videoRepo := repositories.NewInterviewVideoRepository(db)
 	interviewCompanyQuestionRepo := repositories.NewInterviewCompanyQuestionRepository(db)
+	interviewQuestionStateRepo := repositories.NewInterviewQuestionStateRepository(db)
 	// その他
 	resumeRepo := repositories.NewResumeRepository(db)
 	auditLogRepo := repositories.NewAuditLogRepository(db)
@@ -229,6 +230,7 @@ func main() {
 	crossFeatureService := services.NewCrossFeatureIntegrationService(userWeightScoreRepo)
 	interviewService.SetCrossFeatureService(crossFeatureService)
 	interviewService.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
+	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
 	resumeService.SetCrossFeatureService(crossFeatureService)
 

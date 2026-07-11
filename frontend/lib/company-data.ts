@@ -74,21 +74,31 @@ function hasDemoEndpoint(relation: CapitalRelation): boolean {
 
 /** 企業関係データを Next.js プロキシ経由で取得（DB: company_relations） */
 export async function fetchCompanyRelations(): Promise<CapitalRelation[]> {
-  const response = await fetch('/api/companies/relations', { cache: 'no-store' })
-  if (!response.ok) {
-    throw new CompanyDataFetchError('Failed to fetch company relations', response.status)
+  try {
+    const response = await fetch('/api/companies/relations', { cache: 'no-store' })
+    if (!response.ok) {
+      throw new CompanyDataFetchError('企業関係データの取得に失敗しました', response.status)
+    }
+    const relations: CapitalRelation[] = await response.json()
+    return relations.filter((relation) => !hasDemoEndpoint(relation))
+  } catch (error) {
+    if (error instanceof CompanyDataFetchError) throw error
+    throw new CompanyDataFetchError('企業関係データの取得中にエラーが発生しました')
   }
-  const relations: CapitalRelation[] = await response.json()
-  return relations.filter((relation) => !hasDemoEndpoint(relation))
 }
 
 /** 企業市場情報を Next.js プロキシ経由で取得（DB: company_market_info） */
 export async function fetchCompanyMarketInfo(): Promise<CompanyMarketInfo[]> {
-  const response = await fetch('/api/companies/market-info', { cache: 'no-store' })
-  if (!response.ok) {
-    throw new CompanyDataFetchError('Failed to fetch market info', response.status)
+  try {
+    const response = await fetch('/api/companies/market-info', { cache: 'no-store' })
+    if (!response.ok) {
+      throw new CompanyDataFetchError('市場情報の取得に失敗しました', response.status)
+    }
+    return response.json()
+  } catch (error) {
+    if (error instanceof CompanyDataFetchError) throw error
+    throw new CompanyDataFetchError('市場情報の取得中にエラーが発生しました')
   }
-  return response.json()
 }
 
 export const marketColors: Record<MarketType, string> = {
