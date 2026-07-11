@@ -46,8 +46,11 @@ SOC AI Agent の RAG（Retrieval-Augmented Generation）サービスは Python /
 | POST | `/resume/review/stream` | 職務経歴書レビュー（ストリーミング） |
 | POST | `/company/hints` | 企業面接ヒント収集 |
 | POST | `/es/review` | エントリーシートレビュー |
-| GET | `/health` | ヘルスチェック |
-| GET | `/healthz` | ヘルスチェック（簡易） |
+| GET | `/health` | ヘルスチェック（Chroma 接続含む） |
+| GET | `/healthz` | ヘルスチェック（Chroma 失敗時 503） |
+| POST | `/company/context` | Backend からの企業コンテキスト書き込み |
+| GET | `/vector/status` | ベクトルインデックス状況 |
+| POST | `/vector/reembed` | 企業ベクトル削除・再埋め込み |
 
 ### `/resume/review` リクエスト例
 

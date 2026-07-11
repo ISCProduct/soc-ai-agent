@@ -81,9 +81,42 @@ RAG 環境変数:
 
 - **コールドスタート許容:** 旧 PersistentClient のローカルデータを自動移行しない
 - `CHROMA_HOST` 未設定環境では PersistentClient を維持（開発・単体テスト）
-- Phase 3 で Backend 職種 embedding / チャット関連度との統合を検討
 
-## 7. 受け入れとの対応
+## 7. Phase 3: 横断利用
+
+### 書き込み統一
+
+| 経路 | source | source | コレクション |
+|------|----------|--------|--------------|
+| `/resume/review` | `resume_review` | `web_search` / `deep_research` | `company_context` |
+| `/company/hints` | `interview_hints` | `web_search` | `interview_hints` |
+| `/es/review` | `es_review` | `web_search` | `es_review` |
+| Backend job_fetch → `/company/context` | `company_research` (+ es / hints) | `job_fetch` | 3 コレクションへ企業単位 upsert |
+
+職種キー不一致時は **同一企業の任意 role をフォールバック**（全コレクション）。
+
+### Backend 埋め込みとの関係
+
+| 用途 | 保存先 | 方針 |
+|------|--------|------|
+| 企業コンテキスト RAG | Chroma Server | 本 Issue の対象 |
+| 職種カテゴリ embedding | MySQL (`JobCategoryEmbedding`) | チャット分析用。Chroma へ統合しない |
+| 回答関連度判定 | 都度 OpenAI embedding | 永続化しない |
+
+共通化するのは **埋め込みモデル名**（`text-embedding-3-small`）と運用ドキュメントのみ。用途が異なるためベクトルストアは分離する。
+
+### 管理 API / UI
+
+| 経路 | 内容 |
+|------|------|
+| `GET /vector/status` | コレクション件数・企業フィルタ概要 |
+| `POST /vector/reembed` | 企業ベクトル削除 + 任意で WebSearch 再埋め込み |
+| `GET/POST /api/admin/vector/*` | Backend プロキシ（管理者認証） |
+| `/admin/vector-db` | 管理画面 |
+
+ヘルス: `/health` `/healthz` が Chroma 接続を報告（失敗時 `degraded` / healthz は 503）。
+
+## 8. 受け入れとの対応
 
 | 条件 | 対応 |
 |------|------|
@@ -93,3 +126,4 @@ RAG 環境変数:
 | source / fetched_at | upsert メタデータ |
 | 設計ドキュメント | 本ファイル |
 | ラウンドトリップテスト | `rag/tests/test_vector_store.py` |
+| 横断書き込み・管理 | Phase 3（本節） |
