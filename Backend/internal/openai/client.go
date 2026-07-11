@@ -540,6 +540,52 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 	return "", lastErr
 }
 
+// WebSearchJSON は OpenAI Web Search モデルで 1 クエリだけ実行し、短い JSON テキストを返す。
+// 企業実在確認などトークンを抑えた検証用途向け。RAG の多段調査パイプラインは使わない。
+func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxTokens int, modelOverride ...string) (string, error) {
+	if cli == nil || cli.c == nil {
+		return "", errors.New("openai client is nil")
+	}
+	if maxTokens <= 0 {
+		maxTokens = 200
+	}
+
+	model := os.Getenv("OPENAI_WEB_SEARCH_MODEL")
+	if len(modelOverride) > 0 && modelOverride[0] != "" {
+		model = modelOverride[0]
+	}
+	if strings.TrimSpace(model) == "" {
+		model = "gpt-4o-search-preview"
+	}
+
+	ctxReq, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+
+	req := openai.ChatCompletionRequest{
+		Model: model,
+		Messages: []openai.ChatCompletionMessage{
+			{Role: openai.ChatMessageRoleUser, Content: userPrompt},
+		},
+		MaxTokens:           0,
+		MaxCompletionTokens: maxTokens,
+	}
+
+	resp, err := cli.c.CreateChatCompletion(ctxReq, req)
+	if err != nil {
+		return "", err
+	}
+	if len(resp.Choices) == 0 {
+		return "", errors.New("no response from web search model")
+	}
+	content := strings.TrimSpace(resp.Choices[0].Message.Content)
+	if cli.OnUsage != nil {
+		cli.OnUsage(model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+	}
+	log.Printf("[openai] web_search model=%s prompt_tokens=%d completion_tokens=%d",
+		model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+	return content, nil
+}
+
 // ResponsesWithMaxTokens は Responses API を使い、maxOutputTokens を指定してテキストを取得します。
 // Chat Completions API の代替として、JSON レスポンスが必要な場合にも利用できます。
 func (cli *Client) ResponsesWithMaxTokens(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxOutputTokens int, modelOverride ...string) (string, error) {
