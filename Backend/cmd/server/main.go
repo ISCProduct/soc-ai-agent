@@ -330,7 +330,7 @@ func main() {
 	routes.SetupESRoutes(api, esRewriteController, esReviewController)
 	routes.SetupScheduleRoutes(api, scheduleController)
 	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret)
-	routes.SetupApplicationRoutes(api, appController)
+	routes.SetupApplicationRoutes(api, appController, cfg.UserSecret)
 	routes.SetupUserRoutes(api, integratedProfileController)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret)
 	api.POST("/company-entry", companyEntryController.Submit)

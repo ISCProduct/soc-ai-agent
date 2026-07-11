@@ -19,19 +19,24 @@ func NewApplicationController(appService interfaces.ApplicationService) *Applica
 
 // Apply POST /api/applications - 企業への応募登録
 func (c *ApplicationController) Apply(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
+	}
+
 	var req struct {
-		UserID    uint `json:"user_id"`
+		UserID    uint `json:"user_id"` // 互換のため受け取るが無視する
 		CompanyID uint `json:"company_id"`
 		MatchID   uint `json:"match_id"`
 	}
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
-	if req.UserID == 0 || req.CompanyID == 0 || req.MatchID == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "user_id, company_id, match_id は必須です")
+	if req.CompanyID == 0 || req.MatchID == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "company_id, match_id は必須です")
 	}
 
-	app, err := c.appService.Apply(req.UserID, req.CompanyID, req.MatchID)
+	app, err := c.appService.Apply(userID, req.CompanyID, req.MatchID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -48,6 +53,11 @@ func (c *ApplicationController) Apply(ctx echo.Context) error {
 
 // UpdateStatus PUT /api/applications/{id} - 選考ステータス更新
 func (c *ApplicationController) UpdateStatus(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
+	}
+
 	idStr := ctx.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil || id == 0 {
@@ -55,19 +65,19 @@ func (c *ApplicationController) UpdateStatus(ctx echo.Context) error {
 	}
 
 	var req struct {
-		UserID  uint   `json:"user_id"`
+		UserID  uint   `json:"user_id"` // 互換のため受け取るが無視する
 		Status  string `json:"status"`
 		Notes   string `json:"notes"`
-		IsAdmin bool   `json:"is_admin"`
+		IsAdmin bool   `json:"is_admin"` // クライアント指定は無視（権限昇格防止）
 	}
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
-	if req.UserID == 0 || req.Status == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "user_id と status は必須です")
+	if req.Status == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "status は必須です")
 	}
 
-	app, err := c.appService.UpdateStatus(uint(id), req.UserID, req.Status, req.Notes, req.IsAdmin)
+	app, err := c.appService.UpdateStatus(uint(id), userID, req.Status, req.Notes, false)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -79,27 +89,26 @@ func (c *ApplicationController) UpdateStatus(ctx echo.Context) error {
 	})
 }
 
-// List GET /api/applications?user_id=X - ユーザーの応募一覧取得
+// List GET /api/applications - 認証ユーザーの応募一覧取得
 func (c *ApplicationController) List(ctx echo.Context) error {
-	userIDStr := ctx.QueryParam("user_id")
-	userID, err := strconv.ParseUint(userIDStr, 10, 64)
-	if err != nil || userID == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "user_id は必須です")
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
 	}
 
-	apps, err := c.appService.GetApplicationsByUser(uint(userID))
+	apps, err := c.appService.GetApplicationsByUser(userID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "データ取得エラー")
 	}
 
 	type AppResponse struct {
-		ID              uint        `json:"id"`
-		CompanyID       uint        `json:"company_id"`
-		CompanyName     string      `json:"company_name"`
-		CompanyIndustry string      `json:"company_industry"`
-		MatchID         uint        `json:"match_id"`
-		Status          string      `json:"status"`
-		Notes           string      `json:"notes"`
+		ID              uint `json:"id"`
+		CompanyID       uint `json:"company_id"`
+		CompanyName     string `json:"company_name"`
+		CompanyIndustry string `json:"company_industry"`
+		MatchID         uint `json:"match_id"`
+		Status          string `json:"status"`
+		Notes           string `json:"notes"`
 		AppliedAt       any `json:"applied_at"`
 		StatusUpdatedAt any `json:"status_updated_at"`
 	}
@@ -133,6 +142,10 @@ func (c *ApplicationController) List(ctx echo.Context) error {
 
 // GetCorrelation GET /api/applications/correlation?company_id=X - 相関分析データ取得
 func (c *ApplicationController) GetCorrelation(ctx echo.Context) error {
+	if _, ok := echoUserID(ctx); !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
+	}
+
 	companyIDStr := ctx.QueryParam("company_id")
 	var companyID uint
 	if companyIDStr != "" {
