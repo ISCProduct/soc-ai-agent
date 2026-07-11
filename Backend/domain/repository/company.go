@@ -40,6 +40,8 @@ type CompanyRepository interface {
 // CompanyRelationRepository は企業間関係の永続化インターフェース。
 type CompanyRelationRepository interface {
 	UpsertBusinessRelation(fromID, toID uint, relationType, description string) error
+	// UpsertCapitalRelation は資本関係を parent_id/child_id で保存する（資本図表示用）。
+	UpsertCapitalRelation(parentID, childID uint, relationType string, ratio *float64, description string) error
 }
 
 // CompanyPopularityRepository は企業人気情報の永続化インターフェース。

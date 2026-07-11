@@ -38,6 +38,16 @@ type ReviewResult = {
   annotated_available: boolean
 }
 
+type CompanyCandidate = {
+  name: string
+  description?: string
+  source: string
+  exists?: boolean
+  confidence?: string
+  company_id?: number
+  evidence_urls?: string[]
+}
+
 const severityConfig: Record<string, { color: 'error' | 'warning' | 'info'; label: string; borderColor: string }> = {
   critical: { color: 'error', label: '重大', borderColor: '#d32f2f' },
   warning: { color: 'warning', label: '注意', borderColor: '#ed6c02' },
@@ -51,6 +61,12 @@ function ResumeContent() {
   const [sourceType, setSourceType] = useState('pdf')
   const [sourceUrl, setSourceUrl] = useState('')
   const [companyName, setCompanyName] = useState('')
+  const [companyQuery, setCompanyQuery] = useState('')
+  const [companyCandidates, setCompanyCandidates] = useState<CompanyCandidate[]>([])
+  const [companyValidated, setCompanyValidated] = useState(false)
+  const [companySearchLoading, setCompanySearchLoading] = useState(false)
+  const [companySearchError, setCompanySearchError] = useState('')
+  const [selectedCompanyMeta, setSelectedCompanyMeta] = useState<CompanyCandidate | null>(null)
   const [jobTitle, setJobTitle] = useState('')
   const [candidateType, setCandidateType] = useState('new_grad')
   const [file, setFile] = useState<File | null>(null)
@@ -101,8 +117,93 @@ function ResumeContent() {
     }
     if (prefilledCompany) {
       setCompanyName(prefilledCompany)
+      setCompanyQuery(prefilledCompany)
+      setCompanyValidated(false)
+      setSelectedCompanyMeta(null)
     }
   }, [prefilledCompany])
+
+  const selectCompany = (candidate: CompanyCandidate) => {
+    setCompanyName(candidate.name)
+    setCompanyQuery(candidate.name)
+    setCompanyValidated(true)
+    setSelectedCompanyMeta(candidate)
+    setCompanyCandidates([])
+    setCompanySearchError('')
+  }
+
+  const clearSelectedCompany = () => {
+    setCompanyName('')
+    setCompanyQuery('')
+    setCompanyValidated(false)
+    setSelectedCompanyMeta(null)
+    setCompanyCandidates([])
+    setCompanySearchError('')
+  }
+
+  const handleSearchCompanies = async (includeWebSearch: boolean) => {
+    const q = companyQuery.trim()
+    if (!q) {
+      setCompanySearchError('企業名を入力してください')
+      return
+    }
+    setCompanySearchLoading(true)
+    setCompanySearchError('')
+    setCompanyCandidates([])
+    try {
+      if (!includeWebSearch) {
+        const res = await fetch(`/api/companies?name=${encodeURIComponent(q)}&limit=5`, { cache: 'no-store' })
+        if (!res.ok) throw new Error('DB検索に失敗しました')
+        const data = await res.json()
+        const companies = (data.companies || data || []) as { id?: number; name?: string; description?: string }[]
+        const list = (Array.isArray(companies) ? companies : [])
+          .filter((c) => c?.name)
+          .map((c) => ({
+            name: c.name as string,
+            description: c.description || '',
+            source: 'db',
+            exists: true,
+            confidence: 'high',
+            company_id: c.id,
+          }))
+        setCompanyCandidates(list)
+        if (list.length === 0) {
+          setCompanySearchError('DBに該当企業がありません。「WEBで実在確認」を試してください')
+        }
+        return
+      }
+
+      const res = await fetch('/api/companies/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data?.message || data?.error || '実在確認に失敗しました')
+      }
+      if (!data.exists) {
+        setCompanyValidated(false)
+        setSelectedCompanyMeta(null)
+        setCompanyName('')
+        setCompanySearchError('実在が確認できませんでした。別の企業名で検索してください')
+        return
+      }
+      selectCompany({
+        name: data.canonical_name || q,
+        description: data.description || '',
+        source: data.source || 'web_search',
+        exists: true,
+        confidence: data.confidence,
+        company_id: data.company_id,
+        evidence_urls: data.evidence_urls || [],
+      })
+    } catch (err) {
+      setCompanySearchError(err instanceof Error ? err.message : '企業検索に失敗しました')
+    } finally {
+      setCompanySearchLoading(false)
+    }
+  }
 
   const handleUpload = async () => {
     setUploadError('')
@@ -157,6 +258,10 @@ function ResumeContent() {
     }
     if (!companyName.trim() && !jobTitle.trim()) {
       setReviewError('企業名が未入力の場合は応募職種を入力してください')
+      return
+    }
+    if (companyName.trim() && !companyValidated) {
+      setReviewError('企業を検索して候補から選択するか、「WEBで実在確認」を実行してください')
       return
     }
     setReviewError('')
@@ -341,20 +446,87 @@ function ResumeContent() {
       <Paper sx={{ p: 3 }} elevation={2}>
         <Stack spacing={2}>
           <Typography variant="h6">レビュー実行</Typography>
+          <Typography variant="body2" color="text.secondary">
+            企業を指定する場合は、DB検索またはWEB実在確認で候補を選択してください（自由入力のみではレビューできません）。
+            企業なしで職種のみの一般レビューも可能です。
+          </Typography>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'flex-start' }}>
+            <TextField
+              label="応募企業名を検索"
+              value={companyQuery}
+              onChange={(e) => {
+                setCompanyQuery(e.target.value)
+                setCompanyValidated(false)
+                setSelectedCompanyMeta(null)
+                setCompanyName('')
+              }}
+              fullWidth
+              helperText={companyValidated ? `選択済み: ${companyName}` : '未選択（職種のみレビュー可）'}
+            />
+            <Button
+              variant="outlined"
+              onClick={() => handleSearchCompanies(false)}
+              disabled={companySearchLoading || !companyQuery.trim()}
+              sx={{ whiteSpace: 'nowrap', minWidth: 100 }}
+            >
+              DB検索
+            </Button>
+            <Button
+              variant="contained"
+              onClick={() => handleSearchCompanies(true)}
+              disabled={companySearchLoading || !companyQuery.trim()}
+              sx={{ whiteSpace: 'nowrap', minWidth: 140 }}
+            >
+              WEBで実在確認
+            </Button>
+          </Stack>
+          {companySearchLoading && <LinearProgress />}
+          {companySearchError && <Alert severity="warning">{companySearchError}</Alert>}
+          {selectedCompanyMeta && (
+            <Alert
+              severity="success"
+              action={
+                <Button color="inherit" size="small" onClick={clearSelectedCompany}>
+                  クリア
+                </Button>
+              }
+            >
+              確定: {selectedCompanyMeta.name}
+              {selectedCompanyMeta.source ? `（${selectedCompanyMeta.source}）` : ''}
+              {selectedCompanyMeta.evidence_urls?.[0] ? ` / ${selectedCompanyMeta.evidence_urls[0]}` : ''}
+            </Alert>
+          )}
+          {companyCandidates.length > 0 && (
+            <Stack spacing={1}>
+              <Typography variant="subtitle2">候補から選択</Typography>
+              {companyCandidates.map((c) => (
+                <Card
+                  key={`${c.source}-${c.company_id ?? c.name}`}
+                  variant="outlined"
+                  sx={{ cursor: 'pointer', '&:hover': { borderColor: 'primary.main' } }}
+                  onClick={() => selectCompany(c)}
+                >
+                  <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                    <Typography fontWeight="bold">{c.name}</Typography>
+                    {c.description && (
+                      <Typography variant="body2" color="text.secondary">
+                        {c.description}
+                      </Typography>
+                    )}
+                    <Chip size="small" label={c.source} sx={{ mt: 0.5 }} />
+                  </CardContent>
+                </Card>
+              ))}
+            </Stack>
+          )}
           <TextField
-            label="応募企業名 (任意)"
-            value={companyName}
-            onChange={(e) => setCompanyName(e.target.value)}
-            fullWidth
-          />
-          <TextField
-            label={companyName.trim() ? '応募職種 (任意)' : '応募職種 (企業名未入力の場合は必須)'}
+            label={companyName.trim() ? '応募職種 (任意)' : '応募職種 (企業名未選択の場合は必須)'}
             value={jobTitle}
             onChange={(e) => setJobTitle(e.target.value)}
             fullWidth
             required={!companyName.trim()}
             error={!companyName.trim() && !jobTitle.trim()}
-            helperText={!companyName.trim() ? '企業名が未入力の場合は職種を入力するとAIレビューが実行されます' : ''}
+            helperText={!companyName.trim() ? '企業未選択の場合は職種を入力すると一般レビューが実行されます' : ''}
           />
           <TextField
             select

@@ -84,7 +84,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
                 setLoading(false);
             }
         }
-        loadData();
+        void loadData();
     }, []);
 
     const getMarketType = useCallback((compId: number): MarketType => {

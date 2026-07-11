@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -53,3 +54,9 @@ func (CompanyRelation) TableName() string {
 func (CompanyMarketInfo) TableName() string {
 	return "company_market_info"
 }
+
+// IsCapitalRelationType は資本関係（parent/child で保存・表示する）かどうかを返す。
+func IsCapitalRelationType(relationType string) bool {
+	return strings.HasPrefix(relationType, "capital_")
+}
+

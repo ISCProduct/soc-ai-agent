@@ -128,7 +128,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                 setLoading(false);
             }
         }
-        loadData();
+        void loadData();
     }, []);
 
     const uniqueCompanies = useMemo(() => {

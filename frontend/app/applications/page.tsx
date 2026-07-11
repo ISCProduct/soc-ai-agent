@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, Suspense } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import {
   Box,
   Paper,
@@ -22,6 +22,7 @@ import {
   IconButton,
 } from '@mui/material'
 import { ArrowBack, Edit, Check } from '@mui/icons-material'
+import { authService } from '@/lib/auth'
 
 const STATUS_LABELS: Record<string, string> = {
   applied: '応募済み',
@@ -57,8 +58,6 @@ interface Application {
 
 function ApplicationsContent() {
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const userId = searchParams.get('user_id')
 
   const [applications, setApplications] = useState<Application[]>([])
   const [loading, setLoading] = useState(true)
@@ -73,10 +72,18 @@ function ApplicationsContent() {
   })
 
   useEffect(() => {
-    if (!userId) return
+    const user = authService.getStoredUser()
+    if (!user || user.is_guest) {
+      router.replace('/login')
+      return
+    }
+
     const load = async () => {
       try {
-        const res = await fetch(`/api/applications?user_id=${userId}`)
+        const res = await fetch('/api/applications', {
+          headers: authService.getUserFetchHeaders(),
+          cache: 'no-store',
+        })
         if (!res.ok) throw new Error('取得失敗')
         const data = await res.json()
         setApplications(data.applications || [])
@@ -86,8 +93,8 @@ function ApplicationsContent() {
         setLoading(false)
       }
     }
-    load()
-  }, [userId])
+    void load()
+  }, [router])
 
   const startEdit = (app: Application) => {
     setEditingId(app.id)
@@ -102,13 +109,15 @@ function ApplicationsContent() {
   }
 
   const saveEdit = async (appId: number) => {
-    if (!userId) return
     setSaving(true)
     try {
       const res = await fetch(`/api/applications/${appId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: Number(userId), status: editStatus, notes: editNotes }),
+        headers: {
+          'Content-Type': 'application/json',
+          ...authService.getUserFetchHeaders(),
+        },
+        body: JSON.stringify({ status: editStatus, notes: editNotes }),
       })
       if (!res.ok) throw new Error('更新失敗')
       setApplications(prev =>
@@ -145,7 +154,7 @@ function ApplicationsContent() {
       {applications.length === 0 ? (
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <Typography color="text.secondary">応募した企業はまだありません</Typography>
-          <Button variant="contained" sx={{ mt: 2 }} onClick={() => router.push(`/results?user_id=${userId}`)}>
+          <Button variant="contained" sx={{ mt: 2 }} onClick={() => router.push('/results')}>
             マッチング結果に戻る
           </Button>
         </Paper>

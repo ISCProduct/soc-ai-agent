@@ -250,7 +250,14 @@ func (c *AdminCompanyGraphController) syncRelationsFromNodes(nodes map[string]*s
 					}
 				}
 				desc := fmt.Sprintf("scraping:%s", node.OfficialName)
-				if err := c.relationRepo.UpsertBusinessRelation(fromCompany.ID, toCompany.ID, entry.relationType, desc); err != nil {
+				var upsertErr error
+				if models.IsCapitalRelationType(entry.relationType) {
+					// 資本関係は parent/child で保存（資本図表示用）
+					upsertErr = c.relationRepo.UpsertCapitalRelation(fromCompany.ID, toCompany.ID, entry.relationType, nil, desc)
+				} else {
+					upsertErr = c.relationRepo.UpsertBusinessRelation(fromCompany.ID, toCompany.ID, entry.relationType, desc)
+				}
+				if upsertErr != nil {
 					continue
 				}
 				synced++
@@ -397,7 +404,18 @@ func (c *AdminCompanyGraphController) EnrichRelations(ctx echo.Context) error {
 				}
 			}
 			desc := fmt.Sprintf("llm_web_search:%s", company.Name)
-			if upsertErr := c.relationRepo.UpsertBusinessRelation(company.ID, toCompany.ID, entry.relationType, desc); upsertErr != nil {
+			var upsertErr error
+			if models.IsCapitalRelationType(entry.relationType) {
+				var ratio *float64
+				if entry.relationType == "capital_subsidiary" {
+					r := 100.0
+					ratio = &r
+				}
+				upsertErr = c.relationRepo.UpsertCapitalRelation(company.ID, toCompany.ID, entry.relationType, ratio, desc)
+			} else {
+				upsertErr = c.relationRepo.UpsertBusinessRelation(company.ID, toCompany.ID, entry.relationType, desc)
+			}
+			if upsertErr != nil {
 				continue
 			}
 			saved++

@@ -159,6 +159,22 @@ export default function AdminDashboardPage() {
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
+                ベクトルDB
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Chroma のインデックス状況確認と企業単位の再埋め込みを行います。
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Button variant="contained" component={Link} href="/admin/vector-db">
+                ベクトルDB管理へ
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
                 APIコストモニタリング
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>

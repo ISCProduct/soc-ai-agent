@@ -109,11 +109,17 @@ type ResumeService struct {
 	s3           *s3Storage
 	s3Err        error
 	crossFeature *CrossFeatureIntegrationService
+	validator    *CompanyValidationService
 }
 
 // SetCrossFeatureService 機能間連携サービスを注入する（オプション）
 func (s *ResumeService) SetCrossFeatureService(cf *CrossFeatureIntegrationService) {
 	s.crossFeature = cf
+}
+
+// SetCompanyValidator 企業実在確認サービスを注入する（オプション）
+func (s *ResumeService) SetCompanyValidator(v *CompanyValidationService) {
+	s.validator = v
 }
 
 func NewResumeService(repo repository.ResumeRepository, storageDir string, aiClient *openai.Client) *ResumeService {
@@ -220,6 +226,11 @@ func (s *ResumeService) ReviewDocument(documentID uint, requestingUserID uint, c
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
 		return nil, nil, &ValidationError{Message: "応募企業名または応募職種を入力してください"}
 	}
+	canonicalName, err := s.ensureRealCompany(context.Background(), companyName)
+	if err != nil {
+		return nil, nil, err
+	}
+	companyName = canonicalName
 
 	workDir, err := s.ensureWorkingDir(doc.ID)
 	if err != nil {
@@ -303,6 +314,29 @@ func (s *ResumeService) EnsureDocumentOwner(documentID uint, requestingUserID ui
 		return ErrForbidden
 	}
 	return nil
+}
+
+// ensureRealCompany は企業名が指定されている場合に実在確認を行い、正規化名を返す。
+// 企業名が空の場合（職種のみレビュー）はそのまま通す。
+func (s *ResumeService) ensureRealCompany(ctx context.Context, companyName string) (string, error) {
+	name := strings.TrimSpace(companyName)
+	if name == "" {
+		return "", nil
+	}
+	if s.validator == nil {
+		return "", &ValidationError{Message: "企業の実在確認機能が利用できません。しばらくしてから再度お試しください"}
+	}
+	result, err := s.validator.Validate(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	if !result.Exists {
+		return "", &ValidationError{Message: "実在が確認できない企業名です。企業を検索して候補から選択してください"}
+	}
+	if strings.TrimSpace(result.CanonicalName) != "" {
+		return result.CanonicalName, nil
+	}
+	return name, nil
 }
 
 type AnnotatedFile struct {
@@ -888,6 +922,17 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		sendEvent(map[string]any{"type": "error", "message": msg})
 		return errors.New(msg)
 	}
+	canonicalName, err := s.ensureRealCompany(ctx, companyName)
+	if err != nil {
+		msg := err.Error()
+		var ve *ValidationError
+		if errors.As(err, &ve) {
+			msg = ve.Message
+		}
+		sendEvent(map[string]any{"type": "error", "message": msg})
+		return err
+	}
+	companyName = canonicalName
 
 	workDir, err := s.ensureWorkingDir(doc.ID)
 	if err != nil {

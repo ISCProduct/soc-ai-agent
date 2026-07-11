@@ -294,14 +294,10 @@ function ResultsContent() {
           setDiagramLoading(true)
           setDiagramError(null)
           try {
-            console.log('[Relations] Fetching company relations and market info...')
             const [relationsData, marketData] = await Promise.all([
               fetchCompanyRelations(),
               fetchCompanyMarketInfo()
             ])
-            console.log('[Relations] Fetched relations:', relationsData.length)
-            console.log('[Relations] Business relations:', relationsData.filter(r => r.relation_type.startsWith('business')).length)
-            console.log('[Relations] Capital relations:', relationsData.filter(r => r.relation_type.startsWith('capital')).length)
             setRelations(relationsData)
             setMarketInfo(marketData)
           } catch (error) {
@@ -309,8 +305,6 @@ function ResultsContent() {
           } finally {
             setDiagramLoading(false)
           }
-        } else {
-          console.log('[Relations] Using cached data - relations:', relations.length)
         }
       }
       loadDiagramData()
@@ -1308,7 +1302,7 @@ function ResultsContent() {
               <Button
                 variant="outlined"
                 size="large"
-                onClick={() => router.push(`/applications?user_id=${userId}`)}
+                onClick={() => router.push('/applications')}
               >
                 選考管理を見る
               </Button>
