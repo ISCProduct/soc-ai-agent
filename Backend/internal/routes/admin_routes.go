@@ -22,6 +22,7 @@ func SetupAdminRoutes(
 	scoreValidationController *controllers.AdminScoreValidationController,
 	collectiveInsightController *controllers.CollectiveInsightController,
 	scraperSessionController *controllers.AdminScraperSessionController,
+	adminVectorController *controllers.AdminVectorController,
 	userRepo *repositories.UserRepository,
 	adminSecret string,
 ) {
@@ -122,4 +123,8 @@ func SetupAdminRoutes(
 	admin.GET("/scraper-sessions", scraperSessionController.List)
 	admin.POST("/scraper-sessions", scraperSessionController.Upsert)
 	admin.DELETE("/scraper-sessions/:site_key", scraperSessionController.Delete)
+
+	// ベクトルDB管理（#573 Phase 3）
+	admin.GET("/vector/status", adminVectorController.Status)
+	admin.POST("/vector/reembed", adminVectorController.Reembed)
 }
