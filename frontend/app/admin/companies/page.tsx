@@ -179,9 +179,17 @@ export default function AdminCompaniesPage() {
                       variant="outlined"
                       size="small"
                       component={Link}
+                      href={`/admin/companies/${company.id}/info`}
+                    >
+                      基本情報編集
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      component={Link}
                       href={`/admin/companies/${company.id}/edit`}
                     >
-                      編集
+                      技術スタック編集
                     </Button>
                     {company.data_status !== 'published' && (
                       <>
