@@ -88,7 +88,8 @@ jobs:
           project = bl_request(BL_BASE, API_KEY, "GET", f"/projects/{PROJ_KEY}")
           project_id = project["id"]
 
-          since = (datetime.now(timezone.utc) - timedelta(minutes=MINUTES)).strftime("%Y-%m-%dT%H:%M:%SZ")
+          # Backlog API の updatedSince は yyyy-MM-dd のみ受け付ける（ISO datetime は 400）
+          since = (datetime.now(timezone.utc) - timedelta(minutes=MINUTES)).strftime("%Y-%m-%d")
           issues = bl_request(
               BL_BASE,
               API_KEY,
@@ -103,7 +104,7 @@ jobs:
               },
           )
 
-          print(f"{len(issues)} 件の Backlog 課題を取得しました（直近 {MINUTES} 分）。", flush=True)
+          print(f"{len(issues)} 件の Backlog 課題を取得しました（updatedSince={since}, minutes_back={MINUTES}）。", flush=True)
 
           CLOSED_STATUS_IDS = {3, 4}  # 処理済み / 完了
 
