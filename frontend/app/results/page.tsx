@@ -291,19 +291,18 @@ function ResultsContent() {
       const loadDiagramData = async () => {
         if (relations.length === 0 || marketInfo.length === 0) {
           setDiagramLoading(true)
-          console.log('[Relations] Fetching company relations and market info...')
-          const [relationsData, marketData] = await Promise.all([
-            fetchCompanyRelations(),
-            fetchCompanyMarketInfo()
-          ])
-          console.log('[Relations] Fetched relations:', relationsData.length)
-          console.log('[Relations] Business relations:', relationsData.filter(r => r.relation_type.startsWith('business')).length)
-          console.log('[Relations] Capital relations:', relationsData.filter(r => r.relation_type.startsWith('capital')).length)
-          setRelations(relationsData)
-          setMarketInfo(marketData)
-          setDiagramLoading(false)
-        } else {
-          console.log('[Relations] Using cached data - relations:', relations.length)
+          try {
+            const [relationsData, marketData] = await Promise.all([
+              fetchCompanyRelations(),
+              fetchCompanyMarketInfo()
+            ])
+            setRelations(relationsData)
+            setMarketInfo(marketData)
+          } catch (err) {
+            console.error('[Relations] Fetch failed:', err)
+          } finally {
+            setDiagramLoading(false)
+          }
         }
       }
       loadDiagramData()
