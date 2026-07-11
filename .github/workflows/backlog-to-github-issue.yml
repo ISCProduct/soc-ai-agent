@@ -8,7 +8,7 @@ name: Backlog 課題 → GitHub Issue
 #
 # 必要な GitHub Secrets:
 #   BACKLOG_SPACE_ID    : スペースID（例: myspace ← myspace.backlog.jp の場合）
-#   BACKLOG_API_KEY     : Backlog APIキー
+#   BACKLOG_API_KEY     : Backlog APIキー（個人設定で発行。前後空白なし）
 #   BACKLOG_PROJECT_KEY : プロジェクトキー（例: PROJ）
 #   BACKLOG_DOMAIN      : ドメイン（任意。省略時は backlog.jp → backlog.com の順に自動判定）
 #   GH_TOKEN            : GitHub PAT（issues 読み書き権限）
@@ -31,6 +31,9 @@ jobs:
       issues: write
       contents: read
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Backlog 課題を GitHub Issue へ同期
         env:
           BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
@@ -45,59 +48,26 @@ jobs:
           import os, sys, json, urllib.parse, urllib.request, urllib.error
           from datetime import datetime, timezone, timedelta
 
-          API_KEY    = os.environ['BACKLOG_API_KEY']
-          SPACE_ID   = os.environ['BACKLOG_SPACE_ID']
-          PROJ_KEY   = os.environ['BACKLOG_PROJECT_KEY']
-          GH_TOKEN   = os.environ['GH_TOKEN']
-          GH_REPO    = os.environ['GH_REPO']
-          MINUTES    = int(os.environ.get('MINUTES_BACK', '20'))
-          DOMAIN     = os.environ.get('BACKLOG_DOMAIN', '').strip()
+          sys.path.insert(0, ".github/scripts")
+          from backlog_client import load_backlog_env, resolve_bl_base, bl_request
+
+          API_KEY, SPACE_ID, PROJ_KEY, DOMAIN = load_backlog_env()
+          GH_TOKEN = os.environ["GH_TOKEN"]
+          GH_REPO = os.environ["GH_REPO"]
+          MINUTES = int(os.environ.get("MINUTES_BACK", "20"))
 
           GH_BASE = "https://api.github.com"
-
-          def resolve_bl_base(space_id, api_key, domain):
-              """ドメインを自動判定して Backlog API のベース URL を返す"""
-              candidates = [domain] if domain else ['backlog.jp', 'backlog.com']
-              for d in candidates:
-                  url = f"https://{space_id}.{d}/api/v2/space?apiKey={api_key}"
-                  try:
-                      with urllib.request.urlopen(urllib.request.Request(url)) as r:
-                          r.read()
-                          return f"https://{space_id}.{d}/api/v2", d
-                  except urllib.error.HTTPError as e:
-                      body = e.read().decode()
-                      if e.code == 404 and '"code":6' in body:
-                          continue
-                      print(f"Backlog API エラー {e.code}: {body}", file=sys.stderr)
-                      sys.exit(1)
-              print(f"エラー: スペース '{space_id}' が backlog.jp / backlog.com のいずれにも見つかりませんでした。", file=sys.stderr)
-              sys.exit(1)
-
           BL_BASE, BL_DOMAIN = resolve_bl_base(SPACE_ID, API_KEY, DOMAIN)
-          print(f"Backlog ドメイン: {BL_DOMAIN}")
-
-          def bl_request(method, path, data=None):
-              url = f"{BL_BASE}{path}?apiKey={API_KEY}"
-              body = urllib.parse.urlencode(data).encode() if data else None
-              req = urllib.request.Request(url, data=body, method=method)
-              if body:
-                  req.add_header('Content-Type', 'application/x-www-form-urlencoded')
-              try:
-                  with urllib.request.urlopen(req) as r:
-                      return json.loads(r.read())
-              except urllib.error.HTTPError as e:
-                  print(f"Backlog API エラー {e.code}: {e.read().decode()}", file=sys.stderr)
-                  sys.exit(1)
 
           def gh_request(method, path, data=None):
               url = f"{GH_BASE}{path}"
               body = json.dumps(data).encode() if data else None
               req = urllib.request.Request(url, data=body, method=method)
-              req.add_header('Authorization', f'Bearer {GH_TOKEN}')
-              req.add_header('Accept', 'application/vnd.github+json')
-              req.add_header('X-GitHub-Api-Version', '2022-11-28')
+              req.add_header("Authorization", f"Bearer {GH_TOKEN}")
+              req.add_header("Accept", "application/vnd.github+json")
+              req.add_header("X-GitHub-Api-Version", "2022-11-28")
               if body:
-                  req.add_header('Content-Type', 'application/json')
+                  req.add_header("Content-Type", "application/json")
               try:
                   with urllib.request.urlopen(req) as r:
                       return json.loads(r.read())
@@ -106,41 +76,50 @@ jobs:
                   return None
 
           def gh_search_issue(bl_key):
-              """GitHub Issue を Backlog キーで検索する（タイトルの [PROJ-N] プレフィックスで照合）"""
               q = urllib.parse.quote(f"[{bl_key}] repo:{GH_REPO} in:title is:issue")
-              result = gh_request('GET', f"/search/issues?q={q}&per_page=5")
+              result = gh_request("GET", f"/search/issues?q={q}&per_page=5")
               if not result:
                   return None
-              for item in result.get('items', []):
-                  if item['title'].startswith(f"[{bl_key}]"):
+              for item in result.get("items", []):
+                  if item["title"].startswith(f"[{bl_key}]"):
                       return item
               return None
 
-          project    = bl_request('GET', f"/projects/{PROJ_KEY}")
-          project_id = project['id']
+          project = bl_request(BL_BASE, API_KEY, "GET", f"/projects/{PROJ_KEY}")
+          project_id = project["id"]
 
-          since  = (datetime.now(timezone.utc) - timedelta(minutes=MINUTES)).strftime('%Y-%m-%dT%H:%M:%SZ')
-          issues = bl_request('GET', f"/issues?projectId[]={project_id}&updatedSince={since}&count=100&sort=updated&order=desc")
+          since = (datetime.now(timezone.utc) - timedelta(minutes=MINUTES)).strftime("%Y-%m-%dT%H:%M:%SZ")
+          issues = bl_request(
+              BL_BASE,
+              API_KEY,
+              "GET",
+              "/issues",
+              {
+                  "projectId[]": project_id,
+                  "updatedSince": since,
+                  "count": 100,
+                  "sort": "updated",
+                  "order": "desc",
+              },
+          )
 
-          print(f"{len(issues)} 件の Backlog 課題を取得しました（直近 {MINUTES} 分）。")
+          print(f"{len(issues)} 件の Backlog 課題を取得しました（直近 {MINUTES} 分）。", flush=True)
 
           CLOSED_STATUS_IDS = {3, 4}  # 処理済み / 完了
 
           for issue in issues:
-              bl_key       = issue['issueKey']
-              bl_summary   = issue['summary']
-              bl_desc      = issue.get('description') or ''
-              bl_url       = f"https://{SPACE_ID}.{BL_DOMAIN}/view/{bl_key}"
-              bl_status_id = issue['status']['id']
+              bl_key = issue["issueKey"]
+              bl_summary = issue["summary"]
+              bl_desc = issue.get("description") or ""
+              bl_url = f"https://{SPACE_ID}.{BL_DOMAIN}/view/{bl_key}"
+              bl_status_id = issue["status"]["id"]
 
-              # GitHub 側から作成された課題はスキップ（説明に "GitHub Issue:" を含む）
-              if 'GitHub Issue:' in bl_desc:
-                  print(f"  スキップ（GitHub 起源）: {bl_key}")
+              if "GitHub Issue:" in bl_desc:
+                  print(f"  スキップ（GitHub 起源）: {bl_key}", flush=True)
                   continue
 
-              # GitHub Issue のタイトル・本文
               gh_title = f"[{bl_key}] {bl_summary}"
-              gh_body  = (
+              gh_body = (
                   f"<!-- backlog-synced -->\n"
                   f"<!-- backlog-key:{bl_key} -->\n\n"
                   f"**Backlog 課題:** [{bl_key}]({bl_url})\n\n"
@@ -150,23 +129,23 @@ jobs:
               existing_gh = gh_search_issue(bl_key)
 
               if existing_gh is None:
-                  result = gh_request('POST', f"/repos/{GH_REPO}/issues", {
-                      'title': gh_title,
-                      'body':  gh_body,
+                  result = gh_request("POST", f"/repos/{GH_REPO}/issues", {
+                      "title": gh_title,
+                      "body": gh_body,
                   })
                   if result:
-                      print(f"  GitHub Issue を作成しました: #{result['number']} ← {bl_key}")
+                      print(f"  GitHub Issue を作成しました: #{result['number']} ← {bl_key}", flush=True)
                       if bl_status_id in CLOSED_STATUS_IDS:
-                          gh_request('PATCH', f"/repos/{GH_REPO}/issues/{result['number']}", {'state': 'closed'})
+                          gh_request("PATCH", f"/repos/{GH_REPO}/issues/{result['number']}", {"state": "closed"})
               else:
-                  gh_num         = existing_gh['number']
-                  gh_curr_state  = existing_gh['state']
-                  new_state      = 'closed' if bl_status_id in CLOSED_STATUS_IDS else 'open'
-                  update_data    = {'title': gh_title, 'body': gh_body}
+                  gh_num = existing_gh["number"]
+                  gh_curr_state = existing_gh["state"]
+                  new_state = "closed" if bl_status_id in CLOSED_STATUS_IDS else "open"
+                  update_data = {"title": gh_title, "body": gh_body}
                   if gh_curr_state != new_state:
-                      update_data['state'] = new_state
-                  gh_request('PATCH', f"/repos/{GH_REPO}/issues/{gh_num}", update_data)
-                  print(f"  GitHub Issue を更新しました: #{gh_num} ← {bl_key} (state: {new_state})")
+                      update_data["state"] = new_state
+                  gh_request("PATCH", f"/repos/{GH_REPO}/issues/{gh_num}", update_data)
+                  print(f"  GitHub Issue を更新しました: #{gh_num} ← {bl_key} (state: {new_state})", flush=True)
 
-          print("同期完了。")
+          print("同期完了。", flush=True)
           PYEOF
