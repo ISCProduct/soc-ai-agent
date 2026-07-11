@@ -36,6 +36,22 @@ services:
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       OPENAI_HINTS_MODEL: ${OPENAI_HINTS_MODEL:-gpt-4o-search-preview}
       OPENAI_HINTS_PARSE_MODEL: ${OPENAI_HINTS_PARSE_MODEL:-gpt-4o}
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
+    depends_on:
+      - chroma
+
+  # Vector DB for RAG embeddings (#573)
+  chroma:
+    image: chromadb/chroma:0.6.3
+    restart: unless-stopped
+    ports:
+      - "${CHROMA_HOST_PORT:-8000}:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
 
   # Company graph pipeline (マルチソース新卒採用データ × gBizINFO)
   company-graph:
@@ -46,3 +62,6 @@ services:
     environment:
       GBIZINFO_API_KEY: ${GBIZINFO_API_KEY:-}
       GBIZINFO_BASE_URL: ${GBIZINFO_BASE_URL:-}
+
+volumes:
+  chroma_data:

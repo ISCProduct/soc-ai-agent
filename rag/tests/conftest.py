@@ -29,6 +29,7 @@ sys.modules.setdefault("crewai", _crewai_mock)
 _chroma_client_mock = MagicMock()
 _chromadb_mock = types.ModuleType("chromadb")
 _chromadb_mock.PersistentClient = MagicMock(return_value=_chroma_client_mock)
+_chromadb_mock.HttpClient = MagicMock(return_value=_chroma_client_mock)
 sys.modules.setdefault("chromadb", _chromadb_mock)
 
 # main を遅延インポートして TestClient を提供
@@ -39,3 +40,12 @@ import main
 def client():
     """TestClient を返すフィクスチャ"""
     return TestClient(main.app)
+
+
+@pytest.fixture(autouse=True)
+def _reset_vector_store_client():
+    """各テスト前にベクトルストアのシングルトンをクリアする。"""
+    import vector_store
+    vector_store.reset_chroma_client_for_tests()
+    yield
+    vector_store.reset_chroma_client_for_tests()

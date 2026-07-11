@@ -21,7 +21,7 @@ langchain-openai>=0.3.0,<0.4.0
 langchain-text-splitters>=0.3.11,<0.4.0
 
 # --- ベクトルストア ---
-# main.py で PersistentClient / get_or_create_collection / upsert / query を直接利用。
+# vector_store.py で HttpClient（本番）/ PersistentClient（ローカル）と upsert / query を利用。
 # これらの API は 0.6.x で互換性を確認済み。
 # 0.7.0 以降は API 変更リスクがあるため、requirements.txt と合わせ <0.7.0 に固定。
 chromadb>=0.6.3,<0.7.0

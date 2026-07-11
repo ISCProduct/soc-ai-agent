@@ -1,5 +1,4 @@
 import asyncio
-import chromadb
 import contextvars
 import datetime
 import json
@@ -8,7 +7,6 @@ import math
 import openai as openai_module
 import os
 import re
-import threading
 import tiktoken
 import time
 import uuid
@@ -96,7 +94,6 @@ async def _trace_id_middleware(request: Request, call_next: Callable) -> Any:
 DEFAULT_CACHE_TTL_SECONDS = 86400
 DEFAULT_MAX_EMBED_TOKENS = 8191
 DEFAULT_EMBED_MAX_RETRIES = 3
-DEFAULT_CHROMA_DATA_DIR = "/app/chroma_db"
 DEFAULT_HINTS_PARSE_MAX_TOKENS = 600
 DEFAULT_RESUME_REVIEW_INPUT_CHAR_LIMIT = 10000
 
@@ -113,7 +110,6 @@ STRICT_DEEP_RESEARCH = os.getenv("RAG_DEEP_RESEARCH_STRICT", "false").lower() ==
 CREWAI_VERBOSE = os.getenv("RAG_CREWAI_VERBOSE", "false").lower() == "true"
 MAX_EMBED_TOKENS = int(os.getenv("RAG_MAX_EMBED_TOKENS", str(DEFAULT_MAX_EMBED_TOKENS)))
 EMBED_MAX_RETRIES = int(os.getenv("RAG_EMBED_MAX_RETRIES", str(DEFAULT_EMBED_MAX_RETRIES)))
-CHROMA_DATA_DIR = os.getenv("RAG_CHROMA_DATA_DIR", DEFAULT_CHROMA_DATA_DIR)
 HINTS_PARSE_MAX_TOKENS = int(os.getenv("RAG_HINTS_PARSE_MAX_TOKENS", str(DEFAULT_HINTS_PARSE_MAX_TOKENS)))
 RESUME_REVIEW_INPUT_CHAR_LIMIT = int(
     os.getenv("RAG_REVIEW_RESUME_CHAR_LIMIT", str(DEFAULT_RESUME_REVIEW_INPUT_CHAR_LIMIT)))
@@ -127,9 +123,14 @@ def _run_async(async_func: Callable[..., Awaitable[T]], *args: Any) -> T:
     return asyncio.run(async_func(*args))
 
 
-# ── Chromadb 永続ベクトルストア ────────────────────────────────────────────
-_chroma_client: Optional[chromadb.PersistentClient] = None
-_chroma_lock = threading.Lock()
+# ── Chromadb 永続ベクトルストア（#573: HttpClient / PersistentClient） ─────
+from vector_store import (  # noqa: E402
+    _sanitize_collection_name,
+    describe_backend as describe_chroma_backend,
+    get_cached_documents,
+    get_chroma_client,
+    set_cached_documents,
+)
 
 
 @app.on_event("startup")
@@ -137,6 +138,7 @@ def log_openai_version() -> None:
     version = getattr(openai_module, "__version__", "unknown")
     has_responses = hasattr(openai_module.OpenAI, "responses")
     logger.info("openai version=%s responses_api=%s", version, has_responses)
+    logger.info("vector_store backend=%s", describe_chroma_backend())
 
 
 class ReviewRequest(BaseModel):
@@ -154,68 +156,25 @@ class ReviewResponse(BaseModel):
     report: str
 
 
-def get_chroma_client() -> chromadb.PersistentClient:
-    global _chroma_client
-    if _chroma_client is None:
-        with _chroma_lock:
-            if _chroma_client is None:
-                _chroma_client = chromadb.PersistentClient(path=CHROMA_DATA_DIR)
-    return _chroma_client
-
-
-def _sanitize_collection_name(cache_key: str) -> str:
-    """chromadb のコレクション名制約に合わせてサニタイズする (3-63文字, 英数字/_/-)。"""
-    name = re.sub(r"[^a-zA-Z0-9_-]", "_", cache_key)
-    name = re.sub(r"^[^a-zA-Z0-9]+", "", name)
-    name = re.sub(r"[^a-zA-Z0-9]+$", "", name)
-    if len(name) < 3:
-        name = name.ljust(3, "x")
-    return name[:63]
-
-
 def get_cached_context(
         cache_key: str, query: str = "採用 価値観 求める人物像"
 ) -> List[str]:
-    """chromadb からキャッシュ済みドキュメントをベクトル類似度順で最大 5 件取得する。"""
+    """ベクトルDBからキャッシュ済みドキュメントを類似度順で最大 5 件取得する。"""
     try:
-        client = get_chroma_client()
-        col_name = _sanitize_collection_name(cache_key)
-        collection_names = {
-            getattr(col, "name", "")
-            for col in client.list_collections()
-        }
-        if col_name not in collection_names:
-            logger.info("chromadb cache miss key=%s reason=collection_not_found", cache_key)
-            return []
-        collection = client.get_collection(col_name)
-        count = collection.count()
-        if count == 0:
-            return []
         query_emb = embed_texts([query])[0]
-        results = collection.query(
-            query_embeddings=[query_emb],
-            n_results=min(5, count),
-        )
-        docs: List[str] = results.get("documents", [[]])[0]
-        logger.info("chromadb cache hit key=%s docs=%d", cache_key, len(docs))
-        return docs
+        return get_cached_documents(cache_key, query_emb, n_results=5)
     except Exception as exc:
         logger.exception("chromadb get failed key=%s error=%s", cache_key, exc)
         return []
 
 
-def set_cached_context(cache_key: str, docs: List[str]) -> None:
-    """ドキュメントと埋め込みを chromadb に永続保存する。"""
+def set_cached_context(cache_key: str, docs: List[str], source: str = "unknown") -> None:
+    """ドキュメントと埋め込みをベクトルDBに永続保存する。"""
     if not docs:
         return
     try:
-        client = get_chroma_client()
-        col_name = _sanitize_collection_name(cache_key)
-        collection = client.get_or_create_collection(col_name)
         embeddings = embed_texts(docs)
-        ids = [f"doc_{i}" for i in range(len(docs))]
-        collection.upsert(ids=ids, documents=docs, embeddings=embeddings)
-        logger.info("chromadb upsert key=%s docs=%d", cache_key, len(docs))
+        set_cached_documents(cache_key, docs, embeddings, source=source)
     except Exception as exc:
         logger.exception("chromadb set failed key=%s error=%s", cache_key, exc)
 
@@ -490,7 +449,7 @@ def run_crewai(
     source_labels = {
         "deep_research": "OpenAI Deep Research（o3-deep-research）",
         "web_search": "OpenAI Web Search（gpt-4o-search-preview）",
-        "cache": "chromadb キャッシュ（以前の検索結果）",
+        "cache": "ベクトルDBキャッシュ（Chroma / 以前の検索結果）",
         "none": "事前学習データのみ（外部検索なし）",
     }
     source_label = source_labels.get(context_source, context_source)
@@ -977,7 +936,7 @@ def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
     research_text = _run_hints_web_search(safe_company_name, role_label)
 
     if research_text:
-        set_cached_context(cache_key, [research_text])
+        set_cached_context(cache_key, [research_text], source="web_search")
 
     return _parse_hints_from_text(safe_company_name, role_label, research_text or "")
 
@@ -1019,7 +978,7 @@ def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
             report = run_deep_research(safe_company_name, role_label)
             if report:
                 retrieved = [report]
-                set_cached_context(cache_key, retrieved)
+                set_cached_context(cache_key, retrieved, source="deep_research")
                 return retrieved, "deep_research"
             logger.warning("deep research returned empty result")
         except Exception as exc:
@@ -1034,7 +993,7 @@ def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
             summary = _run_async(_run_web_search_pipeline, safe_company_name, role_label)
             if summary:
                 retrieved = [summary]
-                set_cached_context(cache_key, retrieved)
+                set_cached_context(cache_key, retrieved, source="web_search")
                 return retrieved, "web_search"
             logger.warning("web search pipeline returned empty result company=%s", safe_company_name)
         except Exception as exc:
@@ -1055,7 +1014,7 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
     source_labels = {
         "deep_research": "OpenAI Deep Research（o3-deep-research）",
         "web_search": "OpenAI Web Search（gpt-4o-search-preview）",
-        "cache": "chromadb キャッシュ（以前の検索結果）",
+        "cache": "ベクトルDBキャッシュ（Chroma / 以前の検索結果）",
         "none": "事前学習データのみ（外部検索なし）",
     }
     source_label = source_labels.get(context_source, context_source)
@@ -1256,7 +1215,7 @@ def upsert_company_context(request: CompanyContextRequest) -> CompanyContextResp
         f"hints::{safe_company}::一般職",  # /company/hints
     ]
     for key in cache_keys:
-        set_cached_context(key, docs)
+        set_cached_context(key, docs, source=request.context_type or "job_fetch")
 
     logger.info(
         "company context upserted company=%s type=%s keys=%d chars=%d",
@@ -1293,7 +1252,7 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
                     if len(combined) > 2000:
                         combined = combined[:2000]
                     context_docs = [combined]
-                    set_cached_context(cache_key, context_docs)
+                    set_cached_context(cache_key, context_docs, source="web_search")
             except Exception as exc:
                 logger.warning("es review web search failed company=%s error=%s", safe_company_name, exc)
 

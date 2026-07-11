@@ -4,6 +4,18 @@ SOC AI Agent の RAG（Retrieval-Augmented Generation）サービスは Python /
 
 ---
 
+## ベクトルストア（#573）
+
+| 項目 | 内容 |
+|------|------|
+| 既定 | Docker Compose の `chroma` サービス（`chromadb/chroma:0.6.3`） |
+| RAG 接続 | `CHROMA_HOST` / `CHROMA_PORT` → `HttpClient` |
+| フォールバック | `CHROMA_HOST` 未設定時は `PersistentClient`（ローカル開発・単体テスト） |
+| コレクション | `company_context` / `interview_hints` / `es_review`（企業メタデータ付き） |
+| 設計 | `docs/design/vector-db.md` |
+
+---
+
 ## 概要
 
 ```
@@ -14,8 +26,8 @@ SOC AI Agent の RAG（Retrieval-Augmented Generation）サービスは Python /
 │  FastAPI RAG（Port 9000）                │
 │                                          │
 │  ┌────────────────┐   ┌───────────────┐ │
-│  │ ChromaDB       │   │ OpenAI Web    │ │
-│  │ (ベクトルキャッシュ)│   │ Search        │ │
+│  │ Chroma Server  │   │ OpenAI Web    │ │
+│  │ (ベクトルDB)    │   │ Search        │ │
 │  └────────────────┘   └───────────────┘ │
 │           │                   │         │
 │           └─────────┬─────────┘         │

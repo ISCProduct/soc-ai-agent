@@ -34,9 +34,8 @@ class TestEmbedTextsRetry429:
 
 class TestCacheBehavior:
     def test_set_cached_context_handles_chromadb_exception(self):
-        # get_chroma_client が例外を投げても set_cached_context は例外を伝播させない
-        with patch("main.get_chroma_client", side_effect=Exception("chroma failure")):
-            # 空でないドキュメントを渡しても例外は吸収される
+        # embed / upsert が例外でも set_cached_context は例外を伝播させない
+        with patch("main.embed_texts", side_effect=Exception("chroma failure")):
             main.set_cached_context("key", ["doc1"])  # should not raise
 
     def test_set_cached_context_ignores_empty_docs(self):
