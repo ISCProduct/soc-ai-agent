@@ -91,36 +91,36 @@ func (r *CompanyQueryRepository) GetCompanyByID(id uint) (*models.Company, error
 
 // GetCompaniesFiltered フィルタリングされた企業一覧と総件数を取得
 func (r *CompanyQueryRepository) GetCompaniesFiltered(limit, offset int, industry, name, tech string) ([]models.Company, int64, error) {
-	applyFilters := func(q interface{ Where(query any, args ...any) *gorm.DB }) *gorm.DB {
-		db := q.Where("is_active = ?", true)
-		if industry != "" {
-			db = db.Where("industry = ?", industry)
-		}
-		if name != "" {
-			db = db.Where("name LIKE ?", "%"+name+"%")
-		}
-		if tech != "" {
-			like := "%" + tech + "%"
-			db = db.Where("tech_stack LIKE ? OR infra_stack LIKE ? OR cicd_tools LIKE ?", like, like, like)
-		}
-		return db
-	}
-
 	var total int64
-	if err := applyFilters(r.db.Model(&models.Company{})).Count(&total).Error; err != nil {
+	if err := applyCompanyFilters(r.db.Model(&models.Company{}), industry, name, tech).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	order := "RAND()"
+	order := "updated_at DESC, id ASC"
 	if name != "" {
 		order = "name ASC"
 	}
 
 	var companies []models.Company
-	err := applyFilters(r.db).
+	err := applyCompanyFilters(r.db, industry, name, tech).
 		Limit(limit).
 		Offset(offset).
 		Order(order).
 		Find(&companies).Error
 	return companies, total, err
+}
+
+func applyCompanyFilters(db *gorm.DB, industry, name, tech string) *gorm.DB {
+	db = db.Where("is_active = ?", true)
+	if industry != "" {
+		db = db.Where("industry = ?", industry)
+	}
+	if name != "" {
+		db = db.Where("name LIKE ?", "%"+name+"%")
+	}
+	if tech != "" {
+		like := "%" + tech + "%"
+		db = db.Where("tech_stack LIKE ? OR infra_stack LIKE ? OR cicd_tools LIKE ?", like, like, like)
+	}
+	return db
 }

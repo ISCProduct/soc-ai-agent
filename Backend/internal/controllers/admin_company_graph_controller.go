@@ -250,7 +250,14 @@ func (c *AdminCompanyGraphController) syncRelationsFromNodes(nodes map[string]*s
 					}
 				}
 				desc := fmt.Sprintf("scraping:%s", node.OfficialName)
-				if err := c.relationRepo.UpsertBusinessRelation(fromCompany.ID, toCompany.ID, entry.relationType, desc); err != nil {
+				var upsertErr error
+				if models.IsCapitalRelationType(entry.relationType) {
+					// 資本関係は parent/child で保存（資本図表示用）
+					upsertErr = c.relationRepo.UpsertCapitalRelation(fromCompany.ID, toCompany.ID, entry.relationType, nil, desc)
+				} else {
+					upsertErr = c.relationRepo.UpsertBusinessRelation(fromCompany.ID, toCompany.ID, entry.relationType, desc)
+				}
+				if upsertErr != nil {
 					continue
 				}
 				synced++
@@ -397,7 +404,18 @@ func (c *AdminCompanyGraphController) EnrichRelations(ctx echo.Context) error {
 				}
 			}
 			desc := fmt.Sprintf("llm_web_search:%s", company.Name)
-			if upsertErr := c.relationRepo.UpsertBusinessRelation(company.ID, toCompany.ID, entry.relationType, desc); upsertErr != nil {
+			var upsertErr error
+			if models.IsCapitalRelationType(entry.relationType) {
+				var ratio *float64
+				if entry.relationType == "capital_subsidiary" {
+					r := 100.0
+					ratio = &r
+				}
+				upsertErr = c.relationRepo.UpsertCapitalRelation(company.ID, toCompany.ID, entry.relationType, ratio, desc)
+			} else {
+				upsertErr = c.relationRepo.UpsertBusinessRelation(company.ID, toCompany.ID, entry.relationType, desc)
+			}
+			if upsertErr != nil {
 				continue
 			}
 			saved++
@@ -420,34 +438,25 @@ func (c *AdminCompanyGraphController) EnrichRelations(ctx echo.Context) error {
 	})
 }
 
-// fetchRelationsWithLLM はOpenAI Web Searchで企業の関連会社・取引先を抽出する。
-// urlを指定した場合はそのページを優先的に参照する。
+// fetchRelationsWithLLM はAIモデルの知識から企業の関連会社・取引先を抽出する。
 func (c *AdminCompanyGraphController) fetchRelationsWithLLM(ctx context.Context, companyName, url string) (*llmExtractedRelations, error) {
 	if c.openaiClient == nil {
 		return nil, errors.New("openai client not configured")
 	}
 
-	var prompt string
-	if url != "" {
-		prompt = fmt.Sprintf(
-			`次のURL「%s」を参照して、「%s」の企業関係情報を調べてください。子会社・グループ会社・資本提携先・主要取引先を抽出し、実在する企業名のみを以下のJSON形式のみで返してください。余分な説明は不要です。
+	systemPrompt := `あなたは日本企業の資本関係・取引関係に詳しいアシスタントです。確実に知っている実在の企業名のみを回答し、不明な場合は空配列にしてください。推測で企業名を作らないでください。`
+	userPrompt := fmt.Sprintf(
+		`「%s」の企業関係情報について知っているものを答えてください。子会社・グループ会社・資本提携先・主要取引先を、実在する企業名のみで以下のJSON形式のみで返してください。余分な説明は不要です。
 {"subsidiaries":["子会社・グループ会社名"],"affiliates":["資本提携・関連会社名"],"business_partners":["主要取引先名"]}`,
-			url, companyName,
-		)
-	} else {
-		prompt = fmt.Sprintf(
-			`「%s」の企業関係情報をウェブで検索してください。子会社・グループ会社・資本提携先・主要取引先を調べて、実在する企業名のみを以下のJSON形式のみで返してください。余分な説明は不要です。
-{"subsidiaries":["子会社・グループ会社名"],"affiliates":["資本提携・関連会社名"],"business_partners":["主要取引先名"]}`,
-			companyName,
-		)
-	}
+		companyName,
+	)
 
-	ctxTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	text, err := c.openaiClient.WebSearchQuery(ctxTimeout, prompt)
+	text, err := c.openaiClient.ChatCompletionJSON(ctxTimeout, systemPrompt, userPrompt, 0.2, 800)
 	if err != nil {
-		return nil, fmt.Errorf("web search failed: %w", err)
+		return nil, fmt.Errorf("企業関係情報の取得失敗: %w", err)
 	}
 
 	start := strings.Index(text, "{")

@@ -111,7 +111,7 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 	req.Header.Set("Authorization", "Bearer "+cli.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -540,93 +540,50 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 	return "", lastErr
 }
 
-// WebSearchQuery は Responses API の web_search_preview ツールを使ってWeb検索を実行し、結果テキストを返します。
-func (cli *Client) WebSearchQuery(ctx context.Context, query string) (string, error) {
-	if cli.apiKey == "" {
-		return "", errors.New("openai api key is not set")
+// WebSearchJSON は OpenAI Web Search モデルで 1 クエリだけ実行し、短い JSON テキストを返す。
+// 企業実在確認などトークンを抑えた検証用途向け。RAG の多段調査パイプラインは使わない。
+func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxTokens int, modelOverride ...string) (string, error) {
+	if cli == nil || cli.c == nil {
+		return "", errors.New("openai client is nil")
+	}
+	if maxTokens <= 0 {
+		maxTokens = 200
 	}
 
-	type webSearchTool struct {
-		Type string `json:"type"`
+	model := os.Getenv("OPENAI_WEB_SEARCH_MODEL")
+	if len(modelOverride) > 0 && modelOverride[0] != "" {
+		model = modelOverride[0]
 	}
-	type webSearchRequest struct {
-		Model string          `json:"model"`
-		Tools []webSearchTool `json:"tools"`
-		Input string          `json:"input"`
-	}
-
-	model := cli.DefaultModel
-	if model == "" {
+	if strings.TrimSpace(model) == "" {
 		model = "gpt-4o-search-preview"
 	}
-	payload := webSearchRequest{
+
+	ctxReq, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+
+	req := openai.ChatCompletionRequest{
 		Model: model,
-		Tools: []webSearchTool{{Type: "web_search_preview"}},
-		Input: query,
+		Messages: []openai.ChatCompletionMessage{
+			{Role: openai.ChatMessageRoleUser, Content: userPrompt},
+		},
+		MaxTokens:           0,
+		MaxCompletionTokens: maxTokens,
 	}
-	body, err := json.Marshal(payload)
+
+	resp, err := cli.c.CreateChatCompletion(ctxReq, req)
 	if err != nil {
 		return "", err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.baseURL+"/responses", bytes.NewReader(body))
-	if err != nil {
-		return "", err
+	if len(resp.Choices) == 0 {
+		return "", errors.New("no response from web search model")
 	}
-	req.Header.Set("Authorization", "Bearer "+cli.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return "", err
+	content := strings.TrimSpace(resp.Choices[0].Message.Content)
+	if cli.OnUsage != nil {
+		cli.OnUsage(model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", errors.New(string(respBody))
-	}
-
-	type outputContent struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
-	type outputItem struct {
-		Type    string          `json:"type"`
-		Content []outputContent `json:"content"`
-	}
-	type webSearchUsage struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-	}
-	type webSearchResponse struct {
-		Output     []outputItem   `json:"output"`
-		OutputText string         `json:"output_text"`
-		Usage      webSearchUsage `json:"usage"`
-	}
-
-	var parsed webSearchResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return "", err
-	}
-	if cli.OnUsage != nil && (parsed.Usage.InputTokens > 0 || parsed.Usage.OutputTokens > 0) {
-		cli.OnUsage(model, parsed.Usage.InputTokens, parsed.Usage.OutputTokens)
-	}
-	if strings.TrimSpace(parsed.OutputText) != "" {
-		return strings.TrimSpace(parsed.OutputText), nil
-	}
-	for _, out := range parsed.Output {
-		for _, c := range out.Content {
-			if strings.TrimSpace(c.Text) != "" {
-				return strings.TrimSpace(c.Text), nil
-			}
-		}
-	}
-	return "", errors.New("empty web search response")
+	log.Printf("[openai] web_search model=%s prompt_tokens=%d completion_tokens=%d",
+		model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+	return content, nil
 }
 
 // ResponsesWithMaxTokens は Responses API を使い、maxOutputTokens を指定してテキストを取得します。

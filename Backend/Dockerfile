@@ -31,11 +31,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=1 go build -ldflags="-s -w" -o /bin/migrate ./cmd/migrate
 
-# Build seed script (optional)
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 go build -ldflags="-s -w" -o /bin/seed-large ./cmd/seed-large
-
 # Runtime stage
 FROM golang:1.24-bullseye
 
@@ -61,9 +56,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium-driver \
  && rm -rf /var/lib/apt/lists/*
 
-#
-# NOTE: Hot-reload (air) is omitted to avoid Go toolchain version constraints.
-#
+# Install Air for local Docker Compose hot reload.
+ARG AIR_VERSION=v1.62.0
+RUN go install github.com/air-verse/air@${AIR_VERSION}
+
 
 # Optional: copy full source for debugging/hot reload
 COPY --from=builder /app /app
@@ -71,10 +67,9 @@ COPY --from=builder /app /app
 # Copy built binaries
 COPY --from=builder /bin/server /bin/server
 COPY --from=builder /bin/migrate /bin/migrate
-COPY --from=builder /bin/seed-large /bin/seed-large
 
 # Make them executable
-RUN chmod +x /bin/server /bin/migrate /bin/seed-large
+RUN chmod +x /bin/server /bin/migrate
 
 # Install OCR dependencies (use local wheels if provided)
 RUN if [ -d /app/scripts/wheels ] && [ "$(ls -A /app/scripts/wheels)" ]; then \

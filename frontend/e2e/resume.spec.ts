@@ -70,7 +70,8 @@ test.describe('職務経歴書レビューフロー', () => {
     const reviewBtn = page.getByRole('button', { name: 'レビューを生成' })
     const isEnabled = await reviewBtn.isEnabled({ timeout: 5000 }).catch(() => false)
     if (isEnabled) {
-      await page.getByLabel(/応募企業名/).fill('テスト株式会社')
+      // #570以降: 企業は候補選択必須。未選択時は職種入力で一般レビューする
+      await page.getByLabel(/応募職種/).fill('エンジニア')
       await reviewBtn.click()
       await expect(page.getByText('全体的にバランスの取れた経歴書です。')).toBeVisible({ timeout: 10000 })
     }

@@ -34,9 +34,8 @@ class TestEmbedTextsRetry429:
 
 class TestCacheBehavior:
     def test_set_cached_context_handles_chromadb_exception(self):
-        # get_chroma_client が例外を投げても set_cached_context は例外を伝播させない
-        with patch("main.get_chroma_client", side_effect=Exception("chroma failure")):
-            # 空でないドキュメントを渡しても例外は吸収される
+        # embed / upsert が例外でも set_cached_context は例外を伝播させない
+        with patch("main.embed_texts", side_effect=Exception("chroma failure")):
             main.set_cached_context("key", ["doc1"])  # should not raise
 
     def test_set_cached_context_ignores_empty_docs(self):
@@ -47,7 +46,7 @@ class TestCacheBehavior:
 
 class TestRunCrewAI:
     def test_run_crewai_returns_string_from_mocked_crew(self):
-        # main.Crew をモックして kickoff が所望の文字列を返すようにする
+        # crewai は関数内 import のため crewai.Crew をモックする
         class DummyCrew:
             def __init__(self, *args, **kwargs):
                 pass
@@ -55,7 +54,11 @@ class TestRunCrewAI:
             def kickoff(self):
                 return "【企業別レビュー報告書】\nモックレポート"
 
-        with patch("main.Crew", DummyCrew):
+        with patch("crewai.Crew", DummyCrew), \
+             patch("crewai.Agent", MagicMock), \
+             patch("crewai.Task", MagicMock), \
+             patch("crewai.Process") as mock_process:
+            mock_process.sequential = "sequential"
             report = main.run_crewai(
                 resume_text="経歴",
                 company_name="テスト社",

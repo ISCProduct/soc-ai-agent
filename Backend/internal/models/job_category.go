@@ -3,18 +3,18 @@ package models
 import "time"
 
 type JobCategory struct {
-	ID           uint          `gorm:"primaryKey"`
-	ParentID     *uint         `gorm:"index"`
-	Parent       *JobCategory  `gorm:"foreignKey:ParentID"`
-	Children     []JobCategory `gorm:"foreignKey:ParentID"`
-	Code         string        `gorm:"uniqueIndex;size:100;not null"`
-	Name         string        `gorm:"size:255;not null"`
-	NameEn       string        `gorm:"size:255"`
-	Level        int           `gorm:"default:0"`
-	Path         string        `gorm:"size:1000"`
-	Description  string        `gorm:"type:text"`
-	DisplayOrder int           `gorm:"default:0"`
-	IsActive     bool          `gorm:"default:true"`
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID           uint          `gorm:"primaryKey" json:"id"`
+	ParentID     *uint         `gorm:"index" json:"parent_id,omitempty"`
+	Parent       *JobCategory  `gorm:"foreignKey:ParentID" json:"-"`
+	Children     []JobCategory `gorm:"foreignKey:ParentID" json:"-"`
+	Code         string        `gorm:"uniqueIndex;size:100;not null" json:"code"`
+	Name         string        `gorm:"size:255;not null" json:"name"`
+	NameEn       string        `gorm:"size:255" json:"name_en"`
+	Level        int           `gorm:"default:0" json:"level"`
+	Path         string        `gorm:"size:1000" json:"path"`
+	Description  string        `gorm:"type:text" json:"description"`
+	DisplayOrder int           `gorm:"default:0" json:"display_order"`
+	IsActive     bool          `gorm:"default:true" json:"is_active"`
+	CreatedAt    time.Time     `json:"created_at"`
+	UpdatedAt    time.Time     `json:"updated_at"`
 }

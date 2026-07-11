@@ -1,5 +1,4 @@
 import asyncio
-import chromadb
 import contextvars
 import datetime
 import json
@@ -8,14 +7,12 @@ import math
 import openai as openai_module
 import os
 import re
-import threading
 import tiktoken
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from crewai import Agent, Task, Crew, Process
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from openai import OpenAI
 from pydantic import BaseModel, Field, field_validator
 from typing import Any, Awaitable, Callable, Generator, List, Optional, Tuple, TypeVar
@@ -97,7 +94,6 @@ async def _trace_id_middleware(request: Request, call_next: Callable) -> Any:
 DEFAULT_CACHE_TTL_SECONDS = 86400
 DEFAULT_MAX_EMBED_TOKENS = 8191
 DEFAULT_EMBED_MAX_RETRIES = 3
-DEFAULT_CHROMA_DATA_DIR = "/app/chroma_db"
 DEFAULT_HINTS_PARSE_MAX_TOKENS = 600
 DEFAULT_RESUME_REVIEW_INPUT_CHAR_LIMIT = 10000
 
@@ -114,7 +110,6 @@ STRICT_DEEP_RESEARCH = os.getenv("RAG_DEEP_RESEARCH_STRICT", "false").lower() ==
 CREWAI_VERBOSE = os.getenv("RAG_CREWAI_VERBOSE", "false").lower() == "true"
 MAX_EMBED_TOKENS = int(os.getenv("RAG_MAX_EMBED_TOKENS", str(DEFAULT_MAX_EMBED_TOKENS)))
 EMBED_MAX_RETRIES = int(os.getenv("RAG_EMBED_MAX_RETRIES", str(DEFAULT_EMBED_MAX_RETRIES)))
-CHROMA_DATA_DIR = os.getenv("RAG_CHROMA_DATA_DIR", DEFAULT_CHROMA_DATA_DIR)
 HINTS_PARSE_MAX_TOKENS = int(os.getenv("RAG_HINTS_PARSE_MAX_TOKENS", str(DEFAULT_HINTS_PARSE_MAX_TOKENS)))
 RESUME_REVIEW_INPUT_CHAR_LIMIT = int(
     os.getenv("RAG_REVIEW_RESUME_CHAR_LIMIT", str(DEFAULT_RESUME_REVIEW_INPUT_CHAR_LIMIT)))
@@ -128,9 +123,19 @@ def _run_async(async_func: Callable[..., Awaitable[T]], *args: Any) -> T:
     return asyncio.run(async_func(*args))
 
 
-# ── Chromadb 永続ベクトルストア ────────────────────────────────────────────
-_chroma_client: Optional[chromadb.PersistentClient] = None
-_chroma_lock = threading.Lock()
+# ── Chromadb 永続ベクトルストア（#573: HttpClient / PersistentClient） ─────
+from vector_store import (  # noqa: E402
+    _sanitize_collection_name,
+    build_cache_key,
+    delete_company_documents,
+    describe_backend as describe_chroma_backend,
+    get_cached_documents,
+    get_chroma_client,
+    get_index_status,
+    ping_chroma,
+    set_cached_documents,
+    upsert_by_doc_type,
+)
 
 
 @app.on_event("startup")
@@ -138,6 +143,7 @@ def log_openai_version() -> None:
     version = getattr(openai_module, "__version__", "unknown")
     has_responses = hasattr(openai_module.OpenAI, "responses")
     logger.info("openai version=%s responses_api=%s", version, has_responses)
+    logger.info("vector_store backend=%s", describe_chroma_backend())
 
 
 class ReviewRequest(BaseModel):
@@ -155,68 +161,32 @@ class ReviewResponse(BaseModel):
     report: str
 
 
-def get_chroma_client() -> chromadb.PersistentClient:
-    global _chroma_client
-    if _chroma_client is None:
-        with _chroma_lock:
-            if _chroma_client is None:
-                _chroma_client = chromadb.PersistentClient(path=CHROMA_DATA_DIR)
-    return _chroma_client
-
-
-def _sanitize_collection_name(cache_key: str) -> str:
-    """chromadb のコレクション名制約に合わせてサニタイズする (3-63文字, 英数字/_/-)。"""
-    name = re.sub(r"[^a-zA-Z0-9_-]", "_", cache_key)
-    name = re.sub(r"^[^a-zA-Z0-9]+", "", name)
-    name = re.sub(r"[^a-zA-Z0-9]+$", "", name)
-    if len(name) < 3:
-        name = name.ljust(3, "x")
-    return name[:63]
-
-
 def get_cached_context(
         cache_key: str, query: str = "採用 価値観 求める人物像"
 ) -> List[str]:
-    """chromadb からキャッシュ済みドキュメントをベクトル類似度順で最大 5 件取得する。"""
+    """ベクトルDBからキャッシュ済みドキュメントを類似度順で最大 5 件取得する。"""
     try:
-        client = get_chroma_client()
-        col_name = _sanitize_collection_name(cache_key)
-        collection_names = {
-            getattr(col, "name", "")
-            for col in client.list_collections()
-        }
-        if col_name not in collection_names:
-            logger.info("chromadb cache miss key=%s reason=collection_not_found", cache_key)
-            return []
-        collection = client.get_collection(col_name)
-        count = collection.count()
-        if count == 0:
-            return []
         query_emb = embed_texts([query])[0]
-        results = collection.query(
-            query_embeddings=[query_emb],
-            n_results=min(5, count),
-        )
-        docs: List[str] = results.get("documents", [[]])[0]
-        logger.info("chromadb cache hit key=%s docs=%d", cache_key, len(docs))
-        return docs
+        return get_cached_documents(cache_key, query_emb, n_results=5)
     except Exception as exc:
         logger.exception("chromadb get failed key=%s error=%s", cache_key, exc)
         return []
 
 
-def set_cached_context(cache_key: str, docs: List[str]) -> None:
-    """ドキュメントと埋め込みを chromadb に永続保存する。"""
+def set_cached_context(
+        cache_key: str,
+        docs: List[str],
+        source: str = "unknown",
+        doc_type: Optional[str] = None,
+) -> None:
+    """ドキュメントと埋め込みをベクトルDBに永続保存する。"""
     if not docs:
         return
     try:
-        client = get_chroma_client()
-        col_name = _sanitize_collection_name(cache_key)
-        collection = client.get_or_create_collection(col_name)
         embeddings = embed_texts(docs)
-        ids = [f"doc_{i}" for i in range(len(docs))]
-        collection.upsert(ids=ids, documents=docs, embeddings=embeddings)
-        logger.info("chromadb upsert key=%s docs=%d", cache_key, len(docs))
+        set_cached_documents(
+            cache_key, docs, embeddings, source=source, doc_type=doc_type
+        )
     except Exception as exc:
         logger.exception("chromadb set failed key=%s error=%s", cache_key, exc)
 
@@ -473,10 +443,17 @@ def run_crewai(
         context_source: str = "none",
 ) -> str:
     """CrewAI を実行し、構造化されたレポートを試みる。
+    crewai は依存衝突のため requirements.txt に含まれておらず、インストールされている場合のみ動作する。
 
     フェーズ1: 出力をまず文字列で受け取り、JSON 形式なら Pydantic で検証。
     構造化に失敗した場合は元の文字列をフォールバックとして返し、詳細ログを残す。
     """
+    try:
+        from crewai import Agent, Task, Crew, Process
+    except ImportError:
+        logger.warning("crewai not installed, returning fallback report")
+        return "※ CrewAI がインストールされていないため、企業別レビューを生成できませんでした。"
+
     safe_company = _sanitize_company_name_for_query(company_name)
     safe_job_title = _sanitize_job_title(job_title) if job_title else "指定なし"
     context_block = "\n\n".join(context_docs)
@@ -484,7 +461,7 @@ def run_crewai(
     source_labels = {
         "deep_research": "OpenAI Deep Research（o3-deep-research）",
         "web_search": "OpenAI Web Search（gpt-4o-search-preview）",
-        "cache": "chromadb キャッシュ（以前の検索結果）",
+        "cache": "ベクトルDBキャッシュ（Chroma / 以前の検索結果）",
         "none": "事前学習データのみ（外部検索なし）",
     }
     source_label = source_labels.get(context_source, context_source)
@@ -971,21 +948,34 @@ def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
     research_text = _run_hints_web_search(safe_company_name, role_label)
 
     if research_text:
-        set_cached_context(cache_key, [research_text])
+        set_cached_context(
+            cache_key, [research_text], source="web_search", doc_type="interview_hints"
+        )
 
     return _parse_hints_from_text(safe_company_name, role_label, research_text or "")
 
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
+    ok, detail = ping_chroma()
+    return {
+        "status": "ok" if ok else "degraded",
+        "vector_store": {"ok": ok, "detail": detail},
+    }
 
 
 # /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス
 # /health は後方互換のため維持
 @app.get("/healthz")
 def healthz() -> dict:
-    return {"status": "ok"}
+    ok, detail = ping_chroma()
+    payload = {
+        "status": "ok" if ok else "degraded",
+        "vector_store": {"ok": ok, "detail": detail},
+    }
+    if not ok:
+        return JSONResponse(status_code=503, content=payload)
+    return payload
 
 
 def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
@@ -1013,7 +1003,12 @@ def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
             report = run_deep_research(safe_company_name, role_label)
             if report:
                 retrieved = [report]
-                set_cached_context(cache_key, retrieved)
+                set_cached_context(
+                    cache_key,
+                    retrieved,
+                    source="deep_research",
+                    doc_type="resume_review",
+                )
                 return retrieved, "deep_research"
             logger.warning("deep research returned empty result")
         except Exception as exc:
@@ -1028,7 +1023,12 @@ def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
             summary = _run_async(_run_web_search_pipeline, safe_company_name, role_label)
             if summary:
                 retrieved = [summary]
-                set_cached_context(cache_key, retrieved)
+                set_cached_context(
+                    cache_key,
+                    retrieved,
+                    source="web_search",
+                    doc_type="resume_review",
+                )
                 return retrieved, "web_search"
             logger.warning("web search pipeline returned empty result company=%s", safe_company_name)
         except Exception as exc:
@@ -1049,7 +1049,7 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
     source_labels = {
         "deep_research": "OpenAI Deep Research（o3-deep-research）",
         "web_search": "OpenAI Web Search（gpt-4o-search-preview）",
-        "cache": "chromadb キャッシュ（以前の検索結果）",
+        "cache": "ベクトルDBキャッシュ（Chroma / 以前の検索結果）",
         "none": "事前学習データのみ（外部検索なし）",
     }
     source_label = source_labels.get(context_source, context_source)
@@ -1224,6 +1224,172 @@ def _run_es_review(
         raise HTTPException(status_code=500, detail=f"ES review failed: {exc}")
 
 
+class CompanyContextRequest(BaseModel):
+    company_name: str = Field(min_length=1)
+    context_type: str = Field(default="general")  # "jobs", "persona", "general"
+    content: str = Field(min_length=1)
+
+
+class CompanyContextResponse(BaseModel):
+    status: str
+    company: str
+    context_type: str
+    keys_updated: int
+
+
+@app.post("/company/context", response_model=CompanyContextResponse)
+def upsert_company_context(request: CompanyContextRequest) -> CompanyContextResponse:
+    """バックエンドが取得した求人情報・人物像をベクトルDBへ横断書き込みする。"""
+    safe_company = _sanitize_company_name_for_query(request.company_name)
+    docs = [request.content]
+    # jobs / persona は設計上の source=job_fetch に正規化
+    raw_type = (request.context_type or "general").strip().lower()
+    source = "job_fetch" if raw_type in {"jobs", "persona", "general", "job_fetch"} else raw_type
+
+    try:
+        embeddings = embed_texts(docs)
+    except Exception as exc:
+        logger.exception("company context embed failed company=%s error=%s", safe_company, exc)
+        raise HTTPException(status_code=500, detail="embedding failed") from exc
+
+    # 用途横断: 企業単位（role=general）で各コレクションへ1回ずつ書き込み
+    # 職種指定クエリは company fallback で再利用できる
+    targets = [
+        ("company_research", "指定なし"),
+        ("es_review", "general"),
+        ("interview_hints", "一般職"),
+    ]
+    keys_updated = 0
+    for doc_type, role in targets:
+        upsert_by_doc_type(
+            company=safe_company,
+            role=role,
+            doc_type=doc_type,
+            docs=docs,
+            embeddings=embeddings,
+            source=source,
+        )
+        keys_updated += 1
+
+    logger.info(
+        "company context upserted company=%s type=%s source=%s keys=%d chars=%d",
+        safe_company, request.context_type, source, keys_updated, len(request.content),
+    )
+    return CompanyContextResponse(
+        status="ok",
+        company=safe_company,
+        context_type=request.context_type,
+        keys_updated=keys_updated,
+    )
+
+
+class VectorStatusResponse(BaseModel):
+    backend: str
+    host: Optional[str] = None
+    port: Optional[int] = None
+    company: Optional[str] = None
+    collections: List[dict]
+    total_documents: int
+
+
+@app.get("/vector/status", response_model=VectorStatusResponse)
+def vector_status(company: Optional[str] = None) -> dict:
+    """ベクトルDBのインデックス状況を返す（管理・監視用）。"""
+    company_filter = None
+    if company and company.strip():
+        company_filter = _sanitize_company_name_for_query(company)
+    try:
+        return get_index_status(company_filter)
+    except Exception as exc:
+        logger.exception("vector status failed error=%s", exc)
+        raise HTTPException(status_code=503, detail=f"vector status failed: {exc}") from exc
+
+
+class VectorReembedRequest(BaseModel):
+    company_name: str = Field(min_length=1)
+    doc_type: Optional[str] = None  # resume_review / company_research / interview_hints / es_review
+    refresh: bool = True  # True なら削除後に WebSearch で再取得
+
+
+class VectorReembedResponse(BaseModel):
+    status: str
+    company: str
+    deleted: int
+    collections: dict
+    refreshed: bool
+    sources: List[str] = []
+
+
+@app.post("/vector/reembed", response_model=VectorReembedResponse)
+def vector_reembed(request: VectorReembedRequest) -> VectorReembedResponse:
+    """企業ベクトルを削除し、必要なら WebSearch で再埋め込みする。"""
+    safe_company = _sanitize_company_name_for_query(request.company_name)
+    doc_type = (request.doc_type or "").strip() or None
+    if doc_type and doc_type not in {
+        "resume_review",
+        "company_research",
+        "interview_hints",
+        "es_review",
+    }:
+        raise HTTPException(status_code=400, detail="invalid doc_type")
+
+    try:
+        deleted_info = delete_company_documents(safe_company, doc_type=doc_type)
+    except Exception as exc:
+        logger.exception("vector delete failed company=%s error=%s", safe_company, exc)
+        raise HTTPException(status_code=503, detail=f"vector delete failed: {exc}") from exc
+
+    sources: List[str] = []
+    refreshed = False
+    if request.refresh:
+        try:
+            if doc_type in (None, "company_research", "resume_review"):
+                summary = _run_async(_run_web_search_pipeline, safe_company, "指定なし")
+                if summary:
+                    set_cached_context(
+                        build_cache_key("company_research", safe_company, "指定なし"),
+                        [summary],
+                        source="web_search",
+                        doc_type="company_research",
+                    )
+                    sources.append("company_research")
+                    refreshed = True
+            if doc_type in (None, "interview_hints"):
+                hints_text = _run_hints_web_search(safe_company, "一般職")
+                if hints_text:
+                    set_cached_context(
+                        build_cache_key("interview_hints", safe_company, "一般職"),
+                        [hints_text],
+                        source="web_search",
+                        doc_type="interview_hints",
+                    )
+                    sources.append("interview_hints")
+                    refreshed = True
+            if doc_type in (None, "es_review"):
+                summary = _run_async(_run_web_search_pipeline, safe_company, "")
+                if summary:
+                    set_cached_context(
+                        build_cache_key("es_review", safe_company),
+                        [summary],
+                        source="web_search",
+                        doc_type="es_review",
+                    )
+                    sources.append("es_review")
+                    refreshed = True
+        except Exception as exc:
+            logger.exception("vector reembed refresh failed company=%s error=%s", safe_company, exc)
+            raise HTTPException(status_code=502, detail=f"reembed refresh failed: {exc}") from exc
+
+    return VectorReembedResponse(
+        status="ok",
+        company=safe_company,
+        deleted=int(deleted_info.get("deleted") or 0),
+        collections=deleted_info.get("collections") or {},
+        refreshed=refreshed,
+        sources=sources,
+    )
+
+
 @app.post("/es/review", response_model=ESReviewResponse)
 def es_review(request: ESReviewRequest) -> ESReviewResponse:
     context_docs: List[str] = []
@@ -1247,7 +1413,12 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
                     if len(combined) > 2000:
                         combined = combined[:2000]
                     context_docs = [combined]
-                    set_cached_context(cache_key, context_docs)
+                    set_cached_context(
+                        cache_key,
+                        context_docs,
+                        source="web_search",
+                        doc_type="es_review",
+                    )
             except Exception as exc:
                 logger.warning("es review web search failed company=%s error=%s", safe_company_name, exc)
 

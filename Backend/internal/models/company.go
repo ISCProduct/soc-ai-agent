@@ -51,35 +51,36 @@ type Company struct {
 
 // CompanyJobPosition 企業の募集職種
 type CompanyJobPosition struct {
-	ID        uint    `gorm:"primaryKey"`
-	CompanyID uint    `gorm:"not null;index"`
-	Company   Company `gorm:"foreignKey:CompanyID"`
+	ID        uint    `gorm:"primaryKey" json:"id"`
+	CompanyID uint    `gorm:"not null;index" json:"company_id"`
+	Company   Company `gorm:"foreignKey:CompanyID" json:"company"`
 
-	Title         string      `gorm:"type:varchar(255);not null"`
-	Description   string      `gorm:"type:text"`
-	JobCategoryID uint        `gorm:"index"`
-	JobCategory   JobCategory `gorm:"foreignKey:JobCategoryID"`
+	Title         string      `gorm:"type:varchar(255);not null" json:"title"`
+	JobURL        string      `gorm:"type:varchar(500)" json:"job_url"`
+	Description   string      `gorm:"type:text" json:"description"`
+	JobCategoryID uint        `gorm:"index" json:"job_category_id"`
+	JobCategory   JobCategory `gorm:"foreignKey:JobCategoryID" json:"job_category"`
 
 	// 給与情報
-	MinSalary int // 最低年収（万円）
-	MaxSalary int // 最高年収（万円）
+	MinSalary int `json:"min_salary"` // 最低年収（万円）
+	MaxSalary int `json:"max_salary"` // 最高年収（万円）
 
 	// 勤務条件
-	EmploymentType string `gorm:"type:varchar(50)"` // 正社員、契約社員など
-	WorkLocation   string `gorm:"type:varchar(255)"`
-	RemoteOption   bool   `gorm:"default:false"`
+	EmploymentType string `gorm:"type:varchar(50)" json:"employment_type"` // 正社員、契約社員など
+	WorkLocation   string `gorm:"type:varchar(255)" json:"work_location"`
+	RemoteOption   bool   `gorm:"default:false" json:"remote_option"`
 
 	// 必須スキル・歓迎スキル
-	RequiredSkills  string `gorm:"type:text"` // JSON形式
-	PreferredSkills string `gorm:"type:text"` // JSON形式
+	RequiredSkills  string `gorm:"type:text" json:"required_skills"`  // JSON形式
+	PreferredSkills string `gorm:"type:text" json:"preferred_skills"` // JSON形式
 
 	// 募集ステータス
-	IsActive   bool   `gorm:"default:true"`
+	IsActive   bool   `gorm:"default:true" json:"is_active"`
 	DataStatus string `gorm:"type:varchar(20);default:'draft'" json:"data_status"` // draft, published, rejected
 
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt *time.Time `gorm:"index"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	DeletedAt *time.Time `gorm:"index" json:"-"`
 }
 
 // CompanyWeightProfile 企業の適性プロファイル（10カテゴリの重視度）

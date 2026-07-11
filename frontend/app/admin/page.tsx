@@ -19,7 +19,6 @@ import { authService } from '@/lib/auth'
 
 export default function AdminDashboardPage() {
   const [companyCount, setCompanyCount] = useState<number | null>(null)
-  const [crawlCount, setCrawlCount] = useState<number | null>(null)
 
   useEffect(() => {
     const user = authService.getStoredUser()
@@ -32,17 +31,11 @@ export default function AdminDashboardPage() {
     const loadCounts = async () => {
       const headers = authService.getAdminFetchHeaders()
       try {
-        const [companiesRes, crawlRes] = await Promise.all([
-          fetch('/api/admin/companies', { headers }),
-          fetch('/api/admin/crawl-sources', { headers }),
-        ])
+        const companiesRes = await fetch('/api/admin/companies', { headers })
         const companiesData = await companiesRes.json()
-        const crawlData = await crawlRes.json()
         setCompanyCount(companiesData?.companies?.length ?? 0)
-        setCrawlCount(crawlData?.sources?.length ?? 0)
       } catch {
         setCompanyCount(null)
-        setCrawlCount(null)
       }
     }
     loadCounts()
@@ -78,27 +71,6 @@ export default function AdminDashboardPage() {
               <Divider sx={{ mb: 2 }} />
               <Button variant="contained" component={Link} href="/admin/companies">
                 企業管理へ
-              </Button>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card sx={{ height: '100%' }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                自動クローリング
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                週次・月次のスケジュールを設定し、企業データを自動更新します。
-              </Typography>
-              <Chip
-                label={crawlCount === null ? '読み込み中' : `スケジュール ${crawlCount}`}
-                size="small"
-                sx={{ mb: 2 }}
-              />
-              <Divider sx={{ mb: 2 }} />
-              <Button variant="contained" component={Link} href="/admin/crawling">
-                クローリング管理へ
               </Button>
             </CardContent>
           </Card>
@@ -179,6 +151,22 @@ export default function AdminDashboardPage() {
               <Divider sx={{ mb: 2 }} />
               <Button variant="contained" component={Link} href="/admin/interviews">
                 面接管理へ
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                ベクトルDB
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Chroma のインデックス状況確認と企業単位の再埋め込みを行います。
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Button variant="contained" component={Link} href="/admin/vector-db">
+                ベクトルDB管理へ
               </Button>
             </CardContent>
           </Card>

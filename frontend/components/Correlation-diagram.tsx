@@ -107,19 +107,28 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
     const [relations, setRelations] = useState<CapitalRelation[]>([]);
     const [marketInfo, setMarketInfo] = useState<CompanyMarketInfo[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
 
     useEffect(() => {
         async function loadData() {
             setLoading(true);
-            const [relationsData, marketData] = await Promise.all([
-                fetchCompanyRelations(),
-                fetchCompanyMarketInfo()
-            ]);
-            setRelations(relationsData);
-            setMarketInfo(marketData);
-            setLoading(false);
+            setLoadError(null);
+            try {
+                const [relationsData, marketData] = await Promise.all([
+                    fetchCompanyRelations(),
+                    fetchCompanyMarketInfo()
+                ]);
+                setRelations(relationsData);
+                setMarketInfo(marketData);
+            } catch (error) {
+                setLoadError(error instanceof Error ? error.message : 'データの取得に失敗しました');
+                setRelations([]);
+                setMarketInfo([]);
+            } finally {
+                setLoading(false);
+            }
         }
-        loadData();
+        void loadData();
     }, []);
 
     const uniqueCompanies = useMemo(() => {
@@ -229,7 +238,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                     if (rel.parent_id) relatedIds.add(rel.parent_id);
                     if (rel.child_id) relatedIds.add(rel.child_id);
                 }
-            } else if (type === 'business' && rel.relation_type === 'business') {
+            } else if (type === 'business' && rel.relation_type.startsWith('business')) {
                 if (rel.from_id === focusCompanyId) relatedIds.add(rel.to_id!);
                 if (rel.to_id === focusCompanyId) relatedIds.add(rel.from_id!);
             }
@@ -320,13 +329,13 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                         color: '#555',
                     },
                 });
-            } else if (type === 'business' && rel.relation_type === 'business' && rel.from_id && rel.to_id) {
+            } else if (type === 'business' && rel.relation_type.startsWith('business') && rel.from_id && rel.to_id) {
                 edges.push({
                     id: `business-${idx}`,
                     source: String(rel.from_id),
                     target: String(rel.to_id),
                     type: 'custom',
-                    label: rel.description,
+                    label: rel.description || rel.relation_type,
                     animated: true,
                     style: {
                         stroke: '#2196F3',
@@ -366,6 +375,14 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
         return (
             <Box sx={{ width: '100%', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Typography>読み込み中...</Typography>
+            </Box>
+        );
+    }
+
+    if (loadError) {
+        return (
+            <Box sx={{ width: '100%', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Typography color="error">{loadError}</Typography>
             </Box>
         );
     }

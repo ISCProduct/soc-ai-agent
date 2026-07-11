@@ -17,7 +17,7 @@ export async function POST(
     },
   })
   const raw = await response.text()
-  let data: unknown = {}
+  let data: Record<string, unknown> = {}
   if (raw) {
     try {
       data = JSON.parse(raw)

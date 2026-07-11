@@ -482,11 +482,15 @@ cpr "123"
 
 詳細な運用ドキュメントは [`docs/wiki/`](./docs/wiki/) を参照してください。
 
-| ドキュメント | 内容 |
-|------------|------|
-| [Home](./docs/wiki/Home.md) | 概要・ナビゲーション |
-| [AIフライホイール設計](./docs/wiki/flywheel.md) | データ連携の設計思想・フロー |
-| [API リファレンス](./docs/wiki/api-reference.md) | 全エンドポイント詳細 |
-| [運用手順書](./docs/wiki/operations.md) | デプロイ・監視・バッチ・障害対応 |
-| [データプライバシー設計](./docs/wiki/data-privacy.md) | 匿名化・同意管理の設計 |
-| [スコアキャリブレーション](./docs/wiki/score-calibration.md) | スコア精度検証・改善手順 |
+| ドキュメント | 対象 | 内容 |
+|------------|------|------|
+| [Home](./docs/wiki/Home.md) | 全員 | 概要・ナビゲーション |
+| [システム概要](./docs/wiki/overview.md) | 開発者・新規メンバー | アーキテクチャ・技術スタック・ディレクトリ構成 |
+| [Getting Started](./docs/wiki/getting-started.md) | 新規メンバー | ローカル開発環境構築手順 |
+| [AIフライホイール設計](./docs/wiki/flywheel.md) | 開発者 | データ連携の設計思想・フロー |
+| [API リファレンス](./docs/wiki/api-reference.md) | 開発者 | 全エンドポイント詳細 |
+| [RAG サービス詳細](./docs/wiki/rag-service.md) | 開発者 | ChromaDB・Web Search・Deep Research |
+| [スコアリング・マッチング](./docs/wiki/scoring.md) | 開発者 | 10カテゴリスコア・マッチングアルゴリズム |
+| [運用手順書](./docs/wiki/operations.md) | 運用担当 | デプロイ・監視・バッチ・障害対応 |
+| [データプライバシー設計](./docs/wiki/data-privacy.md) | 開発者・法務 | 匿名化・同意管理の設計 |
+| [スコアキャリブレーション](./docs/wiki/score-calibration.md) | 運用担当 | スコア精度検証・改善手順 |

@@ -134,7 +134,7 @@ func TestBuildInterviewSystemPromptCustomQuestions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			prompt := buildInterviewSystemPrompt(
 				"テスト株式会社", "", "バックエンドエンジニア", "", "general",
-				tt.questions, nil, 0, 0, 1, 5, 0, 180,
+				tt.questions, nil, 0, 0, 1, 5, 0, 180, nil,
 			)
 
 			for _, want := range tt.wantContain {
@@ -185,7 +185,7 @@ func TestBuildInterviewSystemPromptSkillHints(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			prompt := buildInterviewSystemPrompt(
 				"テスト株式会社", "", tt.position, "", "general",
-				nil, scores, 0, 0, 1, 5, 0, 180,
+				nil, scores, 0, 0, 1, 5, 0, 180, nil,
 			)
 
 			for _, want := range tt.wantContain {

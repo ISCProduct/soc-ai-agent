@@ -3,8 +3,10 @@ package controllers
 import (
 	"Backend/domain/repository"
 	"Backend/internal/openai"
+	"Backend/internal/services"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -17,10 +19,15 @@ import (
 type CompanyRelationController struct {
 	repo         repository.CompanyRelationQueryRepository
 	openaiClient *openai.Client
+	validator    *services.CompanyValidationService
 }
 
 func NewCompanyRelationController(repo repository.CompanyRelationQueryRepository, openaiClient *openai.Client) *CompanyRelationController {
 	return &CompanyRelationController{repo: repo, openaiClient: openaiClient}
+}
+
+func (ctrl *CompanyRelationController) SetCompanyValidator(v *services.CompanyValidationService) {
+	ctrl.validator = v
 }
 
 // GetCompanyRelations 企業IDに関連する企業関係を取得
@@ -171,38 +178,95 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(ctx echo.Context) erro
 		return echo.NewHTTPError(http.StatusBadRequest, "q parameter is required")
 	}
 
-	results := ctrl.searchCompaniesWithOpenAI(ctx.Request().Context(), query)
+	if ctrl.validator != nil {
+		results, err := ctrl.validator.SearchCandidates(ctx.Request().Context(), query, true)
+		if err != nil {
+			var ve *services.ValidationError
+			if errors.As(err, &ve) {
+				return echo.NewHTTPError(http.StatusBadRequest, ve.Message)
+			}
+			return echo.NewHTTPError(http.StatusInternalServerError, "企業検索に失敗しました")
+		}
+		out := make([]map[string]any, 0, len(results))
+		for _, r := range results {
+			item := map[string]any{
+				"name":        r.CanonicalName,
+				"description": r.Description,
+				"source":      r.Source,
+				"exists":      r.Exists,
+				"confidence":  r.Confidence,
+			}
+			if r.CompanyID != nil {
+				item["company_id"] = *r.CompanyID
+			}
+			if len(r.EvidenceURLs) > 0 {
+				item["evidence_urls"] = r.EvidenceURLs
+			}
+			out = append(out, item)
+		}
+		return ctx.JSON(http.StatusOK, map[string]any{"results": out})
+	}
 
+	results := ctrl.searchCompaniesWithOpenAI(ctx.Request().Context(), query)
 	return ctx.JSON(http.StatusOK, map[string]any{"results": results})
 }
 
-// searchCompaniesWithOpenAI はOpenAI Web Search APIを使って企業候補を取得する
+// ValidateCompany POST /api/companies/validate
+// 企業名の実在確認（DB優先、必要時のみ軽量 WebSearch）
+func (ctrl *CompanyRelationController) ValidateCompany(ctx echo.Context) error {
+	if ctrl.validator == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "company validator is not configured")
+	}
+	var payload struct {
+		Query string `json:"query"`
+	}
+	if err := ctx.Bind(&payload); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+	result, err := ctrl.validator.Validate(ctx.Request().Context(), payload.Query)
+	if err != nil {
+		var ve *services.ValidationError
+		if errors.As(err, &ve) {
+			return echo.NewHTTPError(http.StatusBadRequest, ve.Message)
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return ctx.JSON(http.StatusOK, result)
+}
+
+// searchCompaniesWithOpenAI はAIモデルの知識から企業候補を取得する（validator未設定時のフォールバック）
 func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Context, query string) []map[string]string {
-	prompt := fmt.Sprintf(
-		`「%s」という検索キーワードで日本の企業を最大5件検索してください。キーワードと一致する企業が実在する場合は必ず最初に含めてください。以下のJSON形式のみで返してください。余分な説明は不要です。
-[{"name":"企業名","description":"事業内容の1行説明"}]`,
+	systemPrompt := `あなたは日本企業に詳しいアシスタントです。確実に知っている実在の企業のみを回答し、不明な場合は空配列にしてください。推測で企業を作らないでください。`
+	userPrompt := fmt.Sprintf(
+		`「%s」という検索キーワードに合致する日本の企業を最大5件挙げてください。キーワードと一致する企業が実在する場合は必ず最初に含めてください。以下のJSON形式のみで返してください。余分な説明は不要です。
+{"results":[{"name":"企業名","description":"事業内容の1行説明"}]}`,
 		query,
 	)
 
-	ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	text, err := ctrl.openaiClient.WebSearchQuery(ctxTimeout, prompt)
+	text, err := ctrl.openaiClient.ChatCompletionJSON(ctxTimeout, systemPrompt, userPrompt, 0.2, 500)
 	if err != nil {
 		return []map[string]string{}
 	}
 
-	start := strings.Index(text, "[")
-	end := strings.LastIndex(text, "]")
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
 	if start == -1 || end == -1 || end <= start {
 		return []map[string]string{}
 	}
 
-	var results []map[string]string
-	if err := json.Unmarshal([]byte(text[start:end+1]), &results); err != nil {
+	var parsed struct {
+		Results []map[string]string `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(text[start:end+1]), &parsed); err != nil {
 		return []map[string]string{}
 	}
-	return results
+	if parsed.Results == nil {
+		return []map[string]string{}
+	}
+	return parsed.Results
 }
 
 // splitPath はURLパスを "/" で分割してスラッシュを除去した要素のスライスを返す（後方互換性のため残存）

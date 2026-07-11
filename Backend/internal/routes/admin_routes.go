@@ -22,6 +22,7 @@ func SetupAdminRoutes(
 	scoreValidationController *controllers.AdminScoreValidationController,
 	collectiveInsightController *controllers.CollectiveInsightController,
 	scraperSessionController *controllers.AdminScraperSessionController,
+	adminVectorController *controllers.AdminVectorController,
 	userRepo *repositories.UserRepository,
 	adminSecret string,
 ) {
@@ -46,6 +47,8 @@ func SetupAdminRoutes(
 	admin.POST("/companies/:id/gbiz-sync", adminCompanyController.SyncGBiz)
 	admin.POST("/companies/:id/fetch-tech-stack", adminCompanyController.FetchTechStack)
 	admin.POST("/companies/:id/fetch-info", adminCompanyController.FetchCompanyInfo)
+	admin.POST("/companies/:id/fetch-jobs", adminCompanyController.FetchJobs)
+	admin.POST("/companies/:id/fetch-persona", adminCompanyController.FetchPersona)
 
 	// クロールソース管理
 	admin.GET("/crawl-sources", adminCrawlController.ListSources)
@@ -83,6 +86,7 @@ func SetupAdminRoutes(
 	// 企業別面接質問管理
 	admin.GET("/companies/:id/interview-questions", adminInterviewController.ListCompanyQuestions)
 	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion)
+	admin.POST("/companies/:id/interview-questions/generate", adminInterviewController.GenerateCompanyQuestions)
 	admin.PUT("/companies/:id/interview-questions/:qid", adminInterviewController.UpdateCompanyQuestion)
 	admin.DELETE("/companies/:id/interview-questions/:qid", adminInterviewController.DeleteCompanyQuestion)
 
@@ -119,4 +123,8 @@ func SetupAdminRoutes(
 	admin.GET("/scraper-sessions", scraperSessionController.List)
 	admin.POST("/scraper-sessions", scraperSessionController.Upsert)
 	admin.DELETE("/scraper-sessions/:site_key", scraperSessionController.Delete)
+
+	// ベクトルDB管理（#573 Phase 3）
+	admin.GET("/vector/status", adminVectorController.Status)
+	admin.POST("/vector/reembed", adminVectorController.Reembed)
 }

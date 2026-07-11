@@ -44,43 +44,8 @@ func SeedData(db *gorm.DB) error {
 		return err
 	}
 
-	// 基本企業データ（20社）
-	if err := SeedCompanies(db); err != nil {
-		return err
-	}
-
-	// 追加企業データ
-	if err := SeedAdditionalCompanies(db); err != nil {
-		return err
-	}
-
-	// **大規模企業データ（40,000社）**
-	if err := SeedLargeCompanyData(db); err != nil {
-		return err
-	}
-
-	// **大規模市場情報データ**
-	if err := SeedLargeCompanyMarketInfo(db); err != nil {
-		return err
-	}
-
-	// **大規模企業プロファイルデータ**
-	if err := SeedLargeCompanyProfiles(db); err != nil {
-		return err
-	}
-
-	// 基本企業関係データ
-	if err := SeedCompanyRelations(db); err != nil {
-		return err
-	}
-
-	// **大規模企業関係データ（資本関係+ビジネス関係）**
-	if err := SeedLargeCompanyRelations(db); err != nil {
-		return err
-	}
-
-	// 基本市場情報
-	if err := SeedCompanyMarketInfo(db); err != nil {
+	// 過去にシードしたデモ企業データを削除
+	if err := CleanupDemoCompanies(db); err != nil {
 		return err
 	}
 

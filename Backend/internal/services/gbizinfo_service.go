@@ -222,6 +222,7 @@ func (s *GBizInfoService) fetchProcurements(ctx context.Context, corporateNumber
 			DateOfOrder:           item.DateOfOrder,
 			Amount:                item.Amount,
 			GovernmentDepartments: strings.TrimSpace(item.GovernmentDepartments),
+			JointSignatures:       marshalJointSignatures(item.JointSignatures),
 		})
 	}
 	return rows, nil
@@ -247,6 +248,7 @@ func (s *GBizInfoService) fetchSubsidies(ctx context.Context, corporateNumber st
 			GovernmentDepartments: strings.TrimSpace(item.GovernmentDepartments),
 			Target:                strings.TrimSpace(item.Target),
 			Note:                  strings.TrimSpace(item.Note),
+			JointSignatures:       marshalJointSignatures(item.JointSignatures),
 		})
 	}
 	return rows, nil
@@ -412,6 +414,24 @@ func parseJointSignatures(raw string) []string {
 	return []string{}
 }
 
+func marshalJointSignatures(names []string) string {
+	cleaned := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			cleaned = append(cleaned, name)
+		}
+	}
+	if len(cleaned) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(cleaned)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
 type gbizProfileResponse struct {
 	HojinInfos []struct {
 		CorporateNumber     string `json:"corporate_number"`
@@ -431,10 +451,11 @@ type gbizProfileResponse struct {
 type gbizProcurementResponse struct {
 	HojinInfos []struct {
 		Procurement []struct {
-			Amount                int64  `json:"amount"`
-			DateOfOrder           string `json:"date_of_order"`
-			GovernmentDepartments string `json:"government_departments"`
-			Title                 string `json:"title"`
+			Amount                int64    `json:"amount"`
+			DateOfOrder           string   `json:"date_of_order"`
+			GovernmentDepartments string   `json:"government_departments"`
+			Title                 string   `json:"title"`
+			JointSignatures       []string `json:"joint_signatures"`
 		} `json:"procurement"`
 	} `json:"hojin-infos"`
 }
@@ -442,12 +463,13 @@ type gbizProcurementResponse struct {
 type gbizSubsidyResponse struct {
 	HojinInfos []struct {
 		Subsidy []struct {
-			Amount                string `json:"amount"`
-			DateOfApproval        string `json:"date_of_approval"`
-			GovernmentDepartments string `json:"government_departments"`
-			Note                  string `json:"note"`
-			Target                string `json:"target"`
-			Title                 string `json:"title"`
+			Amount                string   `json:"amount"`
+			DateOfApproval        string   `json:"date_of_approval"`
+			GovernmentDepartments string   `json:"government_departments"`
+			Note                  string   `json:"note"`
+			Target                string   `json:"target"`
+			Title                 string   `json:"title"`
+			JointSignatures       []string `json:"joint_signatures"`
 		} `json:"subsidy"`
 	} `json:"hojin-infos"`
 }

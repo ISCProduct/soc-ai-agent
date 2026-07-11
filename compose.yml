@@ -10,6 +10,9 @@ services:
     volumes:
       # 開発環境: ソースコードをマウント
       - ./Backend:/app
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+    command: ["air", "-c", ".air.toml"]
     env_file:
       - ${ENV_FILE:-./Backend/.env}
     depends_on:
@@ -124,6 +127,10 @@ volumes:
   mysql_data:
     driver: local
   rag_data:
+    driver: local
+  go_mod_cache:
+    driver: local
+  go_build_cache:
     driver: local
 
 networks:

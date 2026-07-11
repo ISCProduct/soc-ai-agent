@@ -63,19 +63,28 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
     const [relations, setRelations] = useState<CapitalRelation[]>([]);
     const [marketInfo, setMarketInfo] = useState<CompanyMarketInfo[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
 
     useEffect(() => {
         async function loadData() {
             setLoading(true);
-            const [relationsData, marketData] = await Promise.all([
-                fetchCompanyRelations(),
-                fetchCompanyMarketInfo()
-            ]);
-            setRelations(relationsData);
-            setMarketInfo(marketData);
-            setLoading(false);
+            setLoadError(null);
+            try {
+                const [relationsData, marketData] = await Promise.all([
+                    fetchCompanyRelations(),
+                    fetchCompanyMarketInfo()
+                ]);
+                setRelations(relationsData);
+                setMarketInfo(marketData);
+            } catch (error) {
+                setLoadError(error instanceof Error ? error.message : 'データの取得に失敗しました');
+                setRelations([]);
+                setMarketInfo([]);
+            } finally {
+                setLoading(false);
+            }
         }
-        loadData();
+        void loadData();
     }, []);
 
     const getMarketType = useCallback((compId: number): MarketType => {
@@ -249,7 +258,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
         const relatedIds = new Set([focusCompanyId]);
 
         relations.forEach(rel => {
-            if (rel.relation_type === 'business') {
+            if (rel.relation_type.startsWith('business')) {
                 if (rel.from_id === focusCompanyId) relatedIds.add(rel.to_id!);
                 if (rel.to_id === focusCompanyId) relatedIds.add(rel.from_id!);
             }
@@ -316,7 +325,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
         const relatedIds = new Set([focusCompanyId]);
 
         relations.forEach(rel => {
-            if (rel.relation_type === 'business') {
+            if (rel.relation_type.startsWith('business')) {
                 if (rel.from_id === focusCompanyId) relatedIds.add(rel.to_id!);
                 if (rel.to_id === focusCompanyId) relatedIds.add(rel.from_id!);
             }
@@ -324,7 +333,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
 
         // ビジネス関係のエッジ
         relations.forEach((rel, idx) => {
-            if (rel.relation_type === 'business' && rel.from_id && rel.to_id) {
+            if (rel.relation_type.startsWith('business') && rel.from_id && rel.to_id) {
                 if (rel.from_id === focusCompanyId || rel.to_id === focusCompanyId ||
                     (relatedIds.has(rel.from_id) && relatedIds.has(rel.to_id))) {
                     edges.push({
@@ -332,7 +341,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
                         source: String(rel.from_id),
                         target: String(rel.to_id),
                         type: 'custom',
-                        label: rel.description,
+                        label: rel.description || rel.relation_type,
                         animated: true,
                         style: {
                             stroke: '#2196F3',
@@ -400,6 +409,14 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
         return (
             <Box sx={{ width: '100%', height: '500px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Typography>読み込み中...</Typography>
+            </Box>
+        );
+    }
+
+    if (loadError) {
+        return (
+            <Box sx={{ width: '100%', height: '500px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Typography color="error">{loadError}</Typography>
             </Box>
         );
     }

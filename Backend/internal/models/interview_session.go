@@ -11,8 +11,11 @@ type InterviewSession struct {
 	InterviewerGender string     `gorm:"size:16;not null;default:'female'"`
 	StartedAt         *time.Time `gorm:"index"`
 	EndedAt           *time.Time `gorm:"index"`
-	EstimatedCostUSD  float64    `gorm:"type:decimal(10,4);default:0"`
+	EstimatedCostUSD  float64    `gorm:"default:0"`
 	TemplateVersion   string     `gorm:"size:32;default:'v1'"`
+	CompanyID         uint       `gorm:"index" json:"company_id"`
+	Position          string     `gorm:"size:100" json:"position"`
+	CompanyName       string     `gorm:"size:255" json:"company_name"`
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	DeletedAt         *time.Time `gorm:"index"`
