@@ -46,7 +46,7 @@ class TestCacheBehavior:
 
 class TestRunCrewAI:
     def test_run_crewai_returns_string_from_mocked_crew(self):
-        # main.Crew をモックして kickoff が所望の文字列を返すようにする
+        # crewai は関数内 import のため crewai.Crew をモックする
         class DummyCrew:
             def __init__(self, *args, **kwargs):
                 pass
@@ -54,7 +54,11 @@ class TestRunCrewAI:
             def kickoff(self):
                 return "【企業別レビュー報告書】\nモックレポート"
 
-        with patch("main.Crew", DummyCrew):
+        with patch("crewai.Crew", DummyCrew), \
+             patch("crewai.Agent", MagicMock), \
+             patch("crewai.Task", MagicMock), \
+             patch("crewai.Process") as mock_process:
+            mock_process.sequential = "sequential"
             report = main.run_crewai(
                 resume_text="経歴",
                 company_name="テスト社",

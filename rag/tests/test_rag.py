@@ -151,7 +151,11 @@ class TestReviewEndpoint:
         client = TestClient(main.app)
         resp = client.get("/health")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "ok"}
+        body = resp.json()
+        assert body["status"] == "ok"
+        assert "vector_store" in body
+        assert body["vector_store"]["ok"] is True
+        assert "detail" in body["vector_store"]
 
     def test_review_success_web_search_path(self):
         from fastapi.testclient import TestClient
