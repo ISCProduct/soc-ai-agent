@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"Backend/internal/controllers"
@@ -70,6 +71,31 @@ func TestAdminCostsController_Summary_Success_WithRealtime(t *testing.T) {
 	assertStatus(t, newAdminCostsController(cost, realtime).Summary, newCtx(req, rec), http.StatusOK)
 	cost.AssertExpectations(t)
 	realtime.AssertExpectations(t)
+}
+
+func TestAdminCostsController_Summary_IncludesCompanySearch(t *testing.T) {
+	cost := &mocks.APICostServiceMock{}
+	budget := &mocks.CompanySearchBudgetServiceMock{}
+	cost.On("GetCurrentMonthTotal").Return(1.5, nil)
+	cost.On("GetModelBreakdown", mock.Anything).Return([]services.ModelCostSummary{}, nil)
+	budget.On("Status").Return(services.CompanySearchBudgetStatus{
+		Month: "2026-07", Count: 12, Limit: 2000, Remaining: 1988, Enforce: true, Exceeded: false,
+	}, nil)
+
+	ctrl := controllers.NewAdminCostsController(cost, nil, budget)
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/summary", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, ctrl.Summary, newCtx(req, rec), http.StatusOK)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `"company_search"`) {
+		t.Fatalf("response missing company_search: %s", body)
+	}
+	if !strings.Contains(body, `"remaining":1988`) {
+		t.Fatalf("response missing remaining: %s", body)
+	}
+	budget.AssertExpectations(t)
+	cost.AssertExpectations(t)
 }
 
 // ===== Daily =====
