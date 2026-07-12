@@ -7,20 +7,65 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http/httptest"
+	"net/textproto"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"Backend/internal/models"
 )
 
+func makeUploadedFileHeader(t *testing.T, filename string, content []byte, contentType string) *multipart.FileHeader {
+	t.Helper()
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, filename))
+	if contentType != "" {
+		h.Set("Content-Type", contentType)
+	}
+	part, err := w.CreatePart(h)
+	if err != nil {
+		t.Fatalf("CreatePart: %v", err)
+	}
+	if _, err := part.Write(content); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	r := multipart.NewReader(&buf, w.Boundary())
+	form, err := r.ReadForm(10 << 20)
+	if err != nil {
+		t.Fatalf("ReadForm: %v", err)
+	}
+	files := form.File["file"]
+	if len(files) == 0 {
+		t.Fatal("file part missing")
+	}
+	return files[0]
+}
+
 type resumeRepoStub struct {
 	doc *models.ResumeDocument
 }
 
-func (r *resumeRepoStub) CreateDocument(doc *models.ResumeDocument) error { return nil }
-func (r *resumeRepoStub) UpdateDocument(doc *models.ResumeDocument) error { return nil }
+func (r *resumeRepoStub) CreateDocument(doc *models.ResumeDocument) error {
+	if doc.ID == 0 {
+		doc.ID = 1
+	}
+	r.doc = doc
+	return nil
+}
+func (r *resumeRepoStub) UpdateDocument(doc *models.ResumeDocument) error {
+	r.doc = doc
+	return nil
+}
 func (r *resumeRepoStub) FindDocumentByID(id uint) (*models.ResumeDocument, error) {
 	if r.doc == nil || r.doc.ID != id {
 		return nil, errors.New("not found")
@@ -114,6 +159,48 @@ func TestNewSeekableReader_SeekWorks(t *testing.T) {
 	}
 	if string(buf) != "FGH" {
 		t.Errorf("Seek後の読み込み結果が不正: got %q, want %q", buf, "FGH")
+	}
+}
+
+func TestValidateFileUpload_AllowsOctetStreamWithPDFMagic(t *testing.T) {
+	fh := makeUploadedFileHeader(t, "resume.pdf", []byte("%PDF-1.4\n%mock"), "application/octet-stream")
+	if err := validateFileUpload(fh); err != nil {
+		t.Fatalf("PDF magic + octet-stream は許可すべき: %v", err)
+	}
+}
+
+func TestValidateFileUpload_RejectsNonDocument(t *testing.T) {
+	fh := makeUploadedFileHeader(t, "notes.txt", []byte("hello world text"), "text/plain")
+	err := validateFileUpload(fh)
+	var ve *ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("ValidationError を期待: got %v", err)
+	}
+}
+
+func TestResumeService_UploadStoresLocallyWithoutS3(t *testing.T) {
+	dir := t.TempDir()
+	repo := &resumeRepoStub{}
+	svc := &ResumeService{repo: repo, storageDir: dir}
+	fh := makeUploadedFileHeader(t, "resume.pdf", []byte("%PDF-1.4\n%mock-content"), "application/octet-stream")
+
+	result, err := svc.Upload(7, "sess-1", "pdf", "", fh)
+	if err != nil {
+		t.Fatalf("Upload failed: %v", err)
+	}
+	if result.Document == nil || result.Document.ID == 0 {
+		t.Fatalf("document missing: %+v", result)
+	}
+	stored := result.Document.StoredPath
+	if !strings.HasPrefix(stored, dir) {
+		t.Fatalf("local path expected under %s, got %s", dir, stored)
+	}
+	if _, err := os.Stat(stored); err != nil {
+		t.Fatalf("stored file missing: %v", err)
+	}
+	wantSuffix := filepath.Join("7", "1", "original.pdf")
+	if !strings.HasSuffix(stored, wantSuffix) {
+		t.Fatalf("unexpected path layout: got %s want suffix %s", stored, wantSuffix)
 	}
 }
 

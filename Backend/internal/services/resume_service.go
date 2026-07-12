@@ -42,13 +42,9 @@ var allowedMIMETypes = map[string]bool{
 // pdfMagicBytes はPDFファイルの先頭シグネチャ（%PDF）
 var pdfMagicBytes = []byte{0x25, 0x50, 0x44, 0x46}
 
-// validateFileUpload はMIMEタイプとファイルシグネチャ（magic bytes）を検証する
+// validateFileUpload はMIMEタイプとファイルシグネチャ（magic bytes）を検証する。
+// Content-Type が空や application/octet-stream でも、magic bytes が一致すれば許可する。
 func validateFileUpload(fileHeader *multipart.FileHeader) error {
-	mimeType := fileHeader.Header.Get("Content-Type")
-	if !allowedMIMETypes[mimeType] {
-		return &ValidationError{Message: "unsupported file type: only PDF and Word documents are allowed"}
-	}
-
 	f, err := fileHeader.Open()
 	if err != nil {
 		return fmt.Errorf("failed to open uploaded file: %w", err)
@@ -57,22 +53,21 @@ func validateFileUpload(fileHeader *multipart.FileHeader) error {
 
 	buf := make([]byte, 4)
 	if _, err := io.ReadFull(f, buf); err != nil {
-		return &ValidationError{Message: "file too small to validate"}
+		return &ValidationError{Message: "ファイルが小さすぎるか破損しています"}
 	}
 
-	// PDFシグネチャ: %PDF
-	if bytes.HasPrefix(buf, pdfMagicBytes) {
+	magicOK := bytes.HasPrefix(buf, pdfMagicBytes) ||
+		bytes.HasPrefix(buf, []byte{0x50, 0x4B, 0x03, 0x04}) || // DOCX (ZIP)
+		bytes.HasPrefix(buf, []byte{0xD0, 0xCF, 0x11, 0xE0})     // DOC (OLE2)
+	if magicOK {
 		return nil
 	}
-	// DOCX/XLSX (ZIP): PK\x03\x04
-	if bytes.HasPrefix(buf, []byte{0x50, 0x4B, 0x03, 0x04}) {
-		return nil
+
+	mimeType := fileHeader.Header.Get("Content-Type")
+	if allowedMIMETypes[mimeType] {
+		return &ValidationError{Message: "ファイル内容が PDF / Word 形式と一致しません"}
 	}
-	// DOC (OLE2): D0 CF 11 E0
-	if bytes.HasPrefix(buf, []byte{0xD0, 0xCF, 0x11, 0xE0}) {
-		return nil
-	}
-	return &ValidationError{Message: "file content does not match declared type"}
+	return &ValidationError{Message: "PDF または Word（.doc/.docx）のみアップロードできます"}
 }
 
 // validateURL はSSRF対策のためURLスキームとIPアドレス範囲を検証する
@@ -145,13 +140,7 @@ func (s *ResumeService) Upload(userID uint, sessionID, sourceType, sourceURL str
 		sourceType = "pdf"
 	}
 	if fileHeader == nil && strings.TrimSpace(sourceURL) == "" {
-		return nil, errors.New("file or source_url is required")
-	}
-	if err := s.ensureS3Available(); err != nil {
-		return nil, err
-	}
-	if s.s3 == nil || !s.s3.isEnabled() {
-		return nil, errors.New("s3 is required")
+		return nil, &ValidationError{Message: "ファイルまたは source_url が必要です"}
 	}
 
 	doc := &models.ResumeDocument{
@@ -199,17 +188,38 @@ func (s *ResumeService) Upload(userID uint, sessionID, sourceType, sourceURL str
 	}
 	if doc.StoredPath != "" {
 		filename := filepath.Base(doc.StoredPath)
-		s3Path, err := s.uploadToS3(context.Background(), doc, doc.StoredPath, filename)
+		storedPath, err := s.persistUploadedFile(doc, doc.StoredPath, filename)
 		if err != nil {
 			return nil, err
 		}
-		doc.StoredPath = s3Path
+		doc.StoredPath = storedPath
 		if err := s.repo.UpdateDocument(doc); err != nil {
 			return nil, fmt.Errorf("failed to update document: %w", err)
 		}
 	}
 
 	return &ResumeUploadResult{Document: doc}, nil
+}
+
+// persistUploadedFile は S3 が使える場合は S3 へ、不可ならローカル storageDir へ永続化する。
+func (s *ResumeService) persistUploadedFile(doc *models.ResumeDocument, localPath, filename string) (string, error) {
+	if s.s3 != nil && s.s3.isEnabled() {
+		if err := s.ensureS3Available(); err != nil {
+			return "", &ValidationError{Message: "ファイルストレージの準備に失敗しました。しばらくしてから再度お試しください"}
+		}
+		return s.uploadToS3(context.Background(), doc, localPath, filename)
+	}
+
+	dir := filepath.Join(s.storageDir, fmt.Sprintf("%d", doc.UserID), fmt.Sprintf("%d", doc.ID))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("failed to create local storage dir: %w", err)
+	}
+	dest := filepath.Join(dir, filename)
+	if err := copyFile(localPath, dest); err != nil {
+		return "", fmt.Errorf("failed to store file locally: %w", err)
+	}
+	log.Printf("resume_upload: stored locally path=%s (S3 unavailable)", dest)
+	return dest, nil
 }
 
 func (s *ResumeService) ReviewDocument(documentID uint, requestingUserID uint, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
@@ -219,9 +229,6 @@ func (s *ResumeService) ReviewDocument(documentID uint, requestingUserID uint, c
 	}
 	if doc.UserID != requestingUserID {
 		return nil, nil, ErrForbidden
-	}
-	if s.s3 == nil || !s.s3.isEnabled() {
-		return nil, nil, errors.New("s3 is required")
 	}
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
 		return nil, nil, &ValidationError{Message: "応募企業名または応募職種を入力してください"}
@@ -912,10 +919,6 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	if doc.UserID != requestingUserID {
 		sendEvent(map[string]any{"type": "error", "message": "forbidden"})
 		return ErrForbidden
-	}
-	if s.s3 == nil || !s.s3.isEnabled() {
-		sendEvent(map[string]any{"type": "error", "message": "s3 is required"})
-		return errors.New("s3 is required")
 	}
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
 		msg := "応募企業名または応募職種を入力してください"

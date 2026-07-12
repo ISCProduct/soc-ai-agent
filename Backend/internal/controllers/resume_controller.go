@@ -55,6 +55,10 @@ func (c *ResumeController) Upload(ctx echo.Context) error {
 
 	result, err := c.resumeService.Upload(uint(userID), sessionID, sourceType, sourceURL, fileHeader)
 	if err != nil {
+		var ve *services.ValidationError
+		if errors.As(err, &ve) {
+			return echo.NewHTTPError(http.StatusUnprocessableEntity, ve.Message)
+		}
 		return echoInternalError(err)
 	}
 

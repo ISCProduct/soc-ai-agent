@@ -172,7 +172,8 @@ func (s *CompanyValidationService) SearchCandidates(ctx context.Context, query s
 
 	validated, err := s.Validate(ctx, q)
 	if err != nil {
-		return out, err
+		// WEB 補完失敗時も DB 結果（空）を返し、UI でメッセージ表示できるようにする
+		return out, nil
 	}
 	if validated.Exists {
 		key := normalizeCompanyKey(validated.CanonicalName)
@@ -205,7 +206,15 @@ exists=false の場合は canonical_name を空文字、evidence_urls を空配�
 	text, err := s.openaiClient.WebSearchJSON(ctx, prompt, companyValidationMaxTok)
 	if err != nil {
 		log.Printf("[CompanyValidation] web search failed query=%q err=%v", query, err)
-		return nil, fmt.Errorf("企業の実在確認に失敗しました: %w", err)
+		// Search 失敗でも 500 にせず、未確認として呼び出し側で再試行できるようにする
+		return &CompanyValidationResult{
+			Exists:        false,
+			CanonicalName: "",
+			Source:        "web_search",
+			Confidence:    "low",
+			Query:         query,
+			Description:   "WEB検索による実在確認に失敗しました。企業名を変えるか、しばらくしてから再度お試しください",
+		}, nil
 	}
 
 	parsed, parseErr := parseValidationJSON(text)
