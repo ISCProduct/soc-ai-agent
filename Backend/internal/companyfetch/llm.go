@@ -25,8 +25,8 @@ func (l *LLM) ExtractJSON(ctx context.Context, systemPrompt, userPrompt string, 
 	return text, model, err
 }
 
-// SearchJSON は Search モデルで短文 JSON/テキストを取得する。
-func (l *LLM) SearchJSON(ctx context.Context, userPrompt string, maxTokens int) (text string, model string, err error) {
+// SearchLiteJSON は安価な Search モデルのみを使う（deep search-preview は使わない）。
+func (l *LLM) SearchLiteJSON(ctx context.Context, userPrompt string, maxTokens int) (text string, model string, err error) {
 	if l == nil || l.Client == nil {
 		return "", "", fmt.Errorf("openai client is nil")
 	}
@@ -35,20 +35,17 @@ func (l *LLM) SearchJSON(ctx context.Context, userPrompt string, maxTokens int) 
 	}
 	model = SearchModel()
 	text, err = l.Client.WebSearchJSON(ctx, userPrompt, maxTokens, model)
-	if err != nil || strings.TrimSpace(text) == "" {
-		// mini-search 不足時のみ deep search
-		deep := DeepSearchModel()
-		if deep != model {
-			text, err = l.Client.WebSearchJSON(ctx, userPrompt, maxTokens, deep)
-			model = deep
-		}
-	}
 	return text, model, err
 }
 
-// SearchThenParse は Search → Parse の 2 段構成。
-func (l *LLM) SearchThenParse(ctx context.Context, searchPrompt, parseSystem, parseUserPrefix string, parseMaxTokens int) (jsonText string, modelsUsed string, err error) {
-	searchText, searchModel, err := l.SearchJSON(ctx, searchPrompt, 1500)
+// SearchJSON は互換のため残す。企業情報パイプラインでは SearchLiteJSON を使うこと。
+func (l *LLM) SearchJSON(ctx context.Context, userPrompt string, maxTokens int) (text string, model string, err error) {
+	return l.SearchLiteJSON(ctx, userPrompt, maxTokens)
+}
+
+// SearchLiteThenParse は安価 Search → Parse の 2 段構成（高額な deep search なし）。
+func (l *LLM) SearchLiteThenParse(ctx context.Context, searchPrompt, parseSystem, parseUserPrefix string, parseMaxTokens int) (jsonText string, modelsUsed string, err error) {
+	searchText, searchModel, err := l.SearchLiteJSON(ctx, searchPrompt, 1500)
 	if err != nil {
 		return "", "", fmt.Errorf("web search failed: %w", err)
 	}
@@ -62,6 +59,11 @@ func (l *LLM) SearchThenParse(ctx context.Context, searchPrompt, parseSystem, pa
 		return "", searchModel, err
 	}
 	return parsed, searchModel + "+" + parseModel, nil
+}
+
+// SearchThenParse は SearchLiteThenParse のエイリアス（deep search は使わない）。
+func (l *LLM) SearchThenParse(ctx context.Context, searchPrompt, parseSystem, parseUserPrefix string, parseMaxTokens int) (jsonText string, modelsUsed string, err error) {
+	return l.SearchLiteThenParse(ctx, searchPrompt, parseSystem, parseUserPrefix, parseMaxTokens)
 }
 
 // ParseJSON は Parse モデルで JSON 化する。

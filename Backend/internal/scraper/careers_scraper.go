@@ -23,11 +23,10 @@ type JobPostingResult struct {
 	PreferredSkills []string `json:"preferred_skills"`
 	Description     string   `json:"description"`
 	PersonaKeywords []string `json:"persona_keywords"`
-	Source          string   `json:"source"` // llm_extract（WebSearchなし）
+	Source          string   `json:"source"` // web_search (mini-search)
 }
 
-// CareersScraper は安価な Extract モデルのみで求人候補を返す（OpenAI Web Search 不使用）。
-// 鮮度保証はない。確かな公開求人のみ・不明は空。
+// CareersScraper は安価な AI Search（mini-search→Parse）で求人を取得する。
 type CareersScraper struct {
 	llm *companyfetch.LLM
 }
@@ -56,29 +55,33 @@ const jobsJSONSchema = `
   ]
 }`
 
-// FetchJobs は OpenAI Web Search を使わず Extract モデルのみで求人を返す。
+// FetchJobs は mini-search → Parse で公開求人の事実のみを取得する（deep search なし）。
 func (s *CareersScraper) FetchJobs(ctx context.Context, companyName, websiteURL string) ([]JobPostingResult, error) {
 	if s.llm == nil || s.llm.Client == nil {
 		return nil, fmt.Errorf("openai client is nil")
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	systemPrompt := `あなたは採用情報の構造化アシスタントです。確実に公開されていると分かる求人のみをJSON化してください。不確かな求人は含めず、無ければ {"jobs": []} を返してください。Web検索ツールは使えません。推測で求人を作ってはいけません。`
+	systemPrompt := `あなたは採用情報の構造化アシスタントです。検索結果に明示された公開求人のみをJSON化してください。求人を推測で作ってはいけません。無ければ {"jobs": []} を返してください。`
 	siteHint := websiteURL
 	if siteHint == "" {
 		siteHint = "不明"
 	}
-	userPrompt := fmt.Sprintf(
-		"企業「%s」（公式サイト: %s）について、確実な公開求人のみ次のJSON形式で回答してください。\n%s",
-		companyName, siteHint, jobsJSONSchema,
+	searchPrompt := fmt.Sprintf(
+		`日本の企業「%s」の現在公開中の求人・採用職種を調べてください。公式サイト: %s。職種名・勤務地・雇用形態・求人URLが公開情報として確認できるものだけを列挙し、根拠URLを含めてください。非上場企業も含め、確認できない求人は含めないでください。`,
+		companyName, siteHint,
 	)
-	raw, _, err := s.llm.ExtractJSON(ctx, systemPrompt, userPrompt, 1500)
+	parseUser := fmt.Sprintf(
+		"企業「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。推測の求人は入れないでください。\n%s",
+		companyName, jobsJSONSchema,
+	)
+	raw, _, err := s.llm.SearchLiteThenParse(ctx, searchPrompt, systemPrompt, parseUser, 1500)
 	if err != nil {
 		return nil, fmt.Errorf("求人情報の取得失敗: %w", err)
 	}
-	return parseJobsJSON(raw, companyfetch.SourceLLMExtract, "")
+	return parseJobsJSON(raw, companyfetch.SourceWebSearch, "")
 }
 
 func parseJobsJSON(text, source, defaultURL string) ([]JobPostingResult, error) {

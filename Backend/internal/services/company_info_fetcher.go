@@ -29,8 +29,8 @@ type CompanyInfoResult struct {
 	Confidence    string `json:"confidence,omitempty"`
 }
 
-// CompanyInfoFetcher は gBizINFO 優先で企業基本情報を取得・保存する。
-// OpenAI Web Search は使わない（コスト回避）。不足フィールドのみ安価な Extract モデルで補完する。
+// CompanyInfoFetcher は gBizINFO を足がかりにしつつ、不足分は AI（安価 Search→Parse）で充足する。
+// 高額な gpt-4o-search-preview（deep）は使わない。非上場など gBiz で足りない企業を AI 取得で補う。
 type CompanyInfoFetcher struct {
 	repo repository.CompanyRepository
 	llm  *companyfetch.LLM
@@ -97,12 +97,12 @@ func (f *CompanyInfoFetcher) Acquire(ctx context.Context, companyName, websiteUR
 	defer cancel()
 
 	if f.gbiz != nil {
-		if result, err := f.acquireFromGBizName(ctx, companyName); err == nil {
-			return result, nil
+		if result, err := f.acquireFromGBizName(ctx, companyName); err == nil && gbizResultUseful(result) {
+			return f.enrichGapsWithAI(ctx, companyName, websiteURL, result)
 		}
 	}
 
-	return f.acquireCheapExtract(ctx, companyName, websiteURL, "")
+	return f.acquireViaAISearch(ctx, companyName, websiteURL)
 }
 
 func (f *CompanyInfoFetcher) acquireForCompany(ctx context.Context, company *models.Company) (*CompanyInfoResult, error) {
@@ -110,18 +110,12 @@ func (f *CompanyInfoFetcher) acquireForCompany(ctx context.Context, company *mod
 	defer cancel()
 
 	if f.gbiz != nil {
-		if result, err := f.acquireFromGBizCompany(ctx, company); err == nil {
-			return result, nil
+		if result, err := f.acquireFromGBizCompany(ctx, company); err == nil && gbizResultUseful(result) {
+			return f.enrichGapsWithAI(ctx, company.Name, company.WebsiteURL, result)
 		}
 	}
 
-	facts := buildCompanyFactsText(company)
-	// 名前以外の根拠が無い場合は空扱い（confidence=low）
-	if company.CorporateNumber == "" && company.Location == "" && company.Description == "" &&
-		company.WebsiteURL == "" && company.EmployeeCount == 0 && company.FoundedYear == 0 {
-		facts = ""
-	}
-	return f.acquireCheapExtract(ctx, company.Name, company.WebsiteURL, facts)
+	return f.acquireViaAISearch(ctx, company.Name, company.WebsiteURL)
 }
 
 func (f *CompanyInfoFetcher) acquireFromGBizCompany(ctx context.Context, company *models.Company) (*CompanyInfoResult, error) {
@@ -156,31 +150,6 @@ func (f *CompanyInfoFetcher) acquireFromGBizCompany(ctx context.Context, company
 	result.Source = companyfetch.SourceGBiz
 	result.Confidence = companyfetch.ConfidenceHigh
 	result.ModelUsed = "gbizinfo"
-
-	// gBiz に無い叙述フィールドのみ、取得済み事実テキストから安価 Extract
-	if result.Description == "" || result.MainBusiness == "" {
-		facts := buildCompanyFactsText(company)
-		if enriched, err := f.acquireCheapExtract(ctx, company.Name, company.WebsiteURL, facts); err == nil {
-			if result.Description == "" {
-				result.Description = enriched.Description
-			}
-			if result.MainBusiness == "" {
-				result.MainBusiness = enriched.MainBusiness
-			}
-			if result.Industry == "" {
-				result.Industry = enriched.Industry
-			}
-			if result.Culture == "" {
-				result.Culture = enriched.Culture
-			}
-			if result.WorkStyle == "" {
-				result.WorkStyle = enriched.WorkStyle
-			}
-			if enriched.ModelUsed != "" {
-				result.ModelUsed = "gbizinfo+" + enriched.ModelUsed
-			}
-		}
-	}
 	return result, nil
 }
 
@@ -193,48 +162,128 @@ func (f *CompanyInfoFetcher) acquireFromGBizName(ctx context.Context, companyNam
 		return nil, fmt.Errorf("gbizinfo: no match for %s", companyName)
 	}
 	hit := hits[0]
-	result := &CompanyInfoResult{
+	return &CompanyInfoResult{
 		Location:      hit.Location,
 		WebsiteURL:    hit.CompanyURL,
 		EmployeeCount: hit.EmployeeNumber,
 		Source:        companyfetch.SourceGBiz,
 		Confidence:    companyfetch.ConfidenceHigh,
 		ModelUsed:     "gbizinfo",
+	}, nil
+}
+
+func gbizResultUseful(r *CompanyInfoResult) bool {
+	if r == nil {
+		return false
 	}
-	facts := fmt.Sprintf("正式名称: %s\n所在地: %s\n公式URL: %s\n従業員数: %d\n法人番号: %s",
-		hit.Name, hit.Location, hit.CompanyURL, hit.EmployeeNumber, hit.CorporateNumber)
-	if enriched, err := f.acquireCheapExtract(ctx, companyName, hit.CompanyURL, facts); err == nil {
-		result.Description = enriched.Description
-		result.Industry = enriched.Industry
-		result.MainBusiness = enriched.MainBusiness
-		result.Culture = enriched.Culture
-		result.WorkStyle = enriched.WorkStyle
-		result.FoundedYear = enriched.FoundedYear
-		if enriched.ModelUsed != "" {
-			result.ModelUsed = "gbizinfo+" + enriched.ModelUsed
-		}
+	return r.Location != "" || r.WebsiteURL != "" || r.EmployeeCount > 0 || r.FoundedYear > 0 || r.Description != ""
+}
+
+// enrichGapsWithAI は gBiz で埋まった結果の空欄だけ、安価 AI Search で補完する。
+func (f *CompanyInfoFetcher) enrichGapsWithAI(ctx context.Context, companyName, websiteURL string, base *CompanyInfoResult) (*CompanyInfoResult, error) {
+	needsAI := base.Description == "" || base.MainBusiness == "" || base.Industry == "" ||
+		base.Culture == "" || base.WorkStyle == "" || base.WebsiteURL == ""
+	if !needsAI {
+		return base, nil
 	}
+	ai, err := f.acquireViaAISearch(ctx, companyName, firstNonEmpty(websiteURL, base.WebsiteURL))
+	if err != nil {
+		return base, nil // gBiz 分は活かす
+	}
+	mergeCompanyInfoGaps(base, ai)
+	if ai.ModelUsed != "" {
+		base.ModelUsed = "gbizinfo+" + ai.ModelUsed
+	}
+	base.Source = companyfetch.SourceGBiz + "+" + companyfetch.SourceWebSearch
+	base.Confidence = companyfetch.ConfidenceMedium
+	return base, nil
+}
+
+// acquireViaAISearch は安価な mini-search → Parse で事実のみ取得する（deep search なし）。
+func (f *CompanyInfoFetcher) acquireViaAISearch(ctx context.Context, companyName, websiteURL string) (*CompanyInfoResult, error) {
+	if f.llm == nil || f.llm.Client == nil {
+		return nil, fmt.Errorf("openai client is nil")
+	}
+
+	systemPrompt := `あなたは企業情報の構造化アシスタントです。検索結果に明示された事実のみをJSON化してください。検索結果に無い項目は空文字または0。モデルの事前知識や推測で埋めてはいけません。`
+	siteHint := ""
+	if websiteURL != "" {
+		siteHint = fmt.Sprintf("（参考公式URL: %s）", websiteURL)
+	}
+	searchPrompt := fmt.Sprintf(
+		`日本の企業「%s」%sについて、公開情報から確認できる事実だけを調べてください。対象: 企業概要・業種・本社所在地・公式サイトURL・設立年・従業員数・主要事業・企業文化・勤務スタイル。各事実の根拠URLを含めてください。不明な項目は推測せず「不明」と書いてください。非上場企業も含め、公式サイト・採用ページ・登記情報などから確認できる範囲のみ。`,
+		companyName, siteHint,
+	)
+	parseUser := fmt.Sprintf(
+		"企業名「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。検索結果に無い項目は空文字または0。推測禁止。\n%s",
+		companyName, companyInfoJSONSchema,
+	)
+	raw, modelsUsed, err := f.llm.SearchLiteThenParse(ctx, searchPrompt, systemPrompt, parseUser, 600)
+	if err != nil {
+		return nil, fmt.Errorf("企業情報のAI取得失敗: %w", err)
+	}
+	result, err := parseCompanyInfoResult(raw)
+	if err != nil {
+		return nil, err
+	}
+	result.Source = companyfetch.SourceWebSearch
+	result.ModelUsed = modelsUsed
+	result.Confidence = companyfetch.ConfidenceMedium
 	return result, nil
 }
 
-// acquireCheapExtract は OpenAI Web Search を使わず Extract モデルのみで JSON 化する。
-// factsText がある場合はそれに根拠を限定する。無い場合は不明を空にし推測禁止（confidence=low）。
+func mergeCompanyInfoGaps(base, ai *CompanyInfoResult) {
+	if base.Description == "" {
+		base.Description = ai.Description
+	}
+	if base.Industry == "" {
+		base.Industry = ai.Industry
+	}
+	if base.Location == "" {
+		base.Location = ai.Location
+	}
+	if base.WebsiteURL == "" {
+		base.WebsiteURL = ai.WebsiteURL
+	}
+	if base.FoundedYear == 0 {
+		base.FoundedYear = ai.FoundedYear
+	}
+	if base.EmployeeCount == 0 {
+		base.EmployeeCount = ai.EmployeeCount
+	}
+	if base.MainBusiness == "" {
+		base.MainBusiness = ai.MainBusiness
+	}
+	if base.Culture == "" {
+		base.Culture = ai.Culture
+	}
+	if base.WorkStyle == "" {
+		base.WorkStyle = ai.WorkStyle
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// acquireCheapExtract は gBiz 事実テキストからの安価 Extract（Search なし）。後方互換・テスト用。
 func (f *CompanyInfoFetcher) acquireCheapExtract(ctx context.Context, companyName, websiteURL, factsText string) (*CompanyInfoResult, error) {
 	if f.llm == nil || f.llm.Client == nil {
-		return nil, fmt.Errorf("openai client is nil（gBizINFO も未設定のため取得不可）")
+		return nil, fmt.Errorf("openai client is nil")
 	}
 
-	systemPrompt := `あなたは企業情報の構造化アシスタントです。与えられた事実テキストに書かれている内容のみをJSON化してください。テキストに無い項目や不確かな項目は空文字または0にしてください。Web検索や推測で埋めてはいけません。`
+	systemPrompt := `あなたは企業情報の構造化アシスタントです。与えられた事実テキストに書かれている内容のみをJSON化してください。テキストに無い項目は空文字または0。推測禁止。`
 	userPrompt := fmt.Sprintf(
 		"企業名「%s」（参考URL: %s）について、次の事実テキストのみを根拠にJSON化してください。\n%s\n\n事実テキスト:\n%s",
 		companyName, websiteURL, companyInfoJSONSchema, strings.TrimSpace(factsText),
 	)
 	if strings.TrimSpace(factsText) == "" {
-		systemPrompt = `あなたは企業情報の構造化アシスタントです。確実な公開事実のみをJSON化してください。不確かな項目は空文字または0。推測禁止。Web検索ツールは使えません。`
-		userPrompt = fmt.Sprintf(
-			"企業名「%s」（参考URL: %s）について、確実に分かる項目のみ次のJSON形式で回答してください。不明は空/0。\n%s",
-			companyName, websiteURL, companyInfoJSONSchema,
-		)
+		return f.acquireViaAISearch(ctx, companyName, websiteURL)
 	}
 
 	raw, model, err := f.llm.ExtractJSON(ctx, systemPrompt, userPrompt, 600)
@@ -247,11 +296,7 @@ func (f *CompanyInfoFetcher) acquireCheapExtract(ctx context.Context, companyNam
 	}
 	result.Source = companyfetch.SourceLLMExtract
 	result.ModelUsed = model
-	if strings.TrimSpace(factsText) != "" {
-		result.Confidence = companyfetch.ConfidenceMedium
-	} else {
-		result.Confidence = companyfetch.ConfidenceLow
-	}
+	result.Confidence = companyfetch.ConfidenceMedium
 	return result, nil
 }
 

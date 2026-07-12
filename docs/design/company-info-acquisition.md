@@ -310,22 +310,26 @@ PoC（実装前の確認項目）: 大手〜スタートアップ 10 社で (a) 
 
 ### Phase 1（現行実装・暫定）
 
-**方針（コスト優先）:**
-- **OpenAI Web Search（search-preview 系）は使わない**（コスト过高）
-- **公式サイトスクレイプも本流にしない**（運用負荷）
-- **本流: gBizINFO（トークン 0）** で法人情報・所在地・従業員数・URL 等を取得
-- **不足フィールドのみ** `OPENAI_COMPANY_EXTRACT_MODEL`（既定 gpt-4o-mini）で事実テキストから構造化
-- 求人・Tech Stack は暫定で Extract のみ（`source=llm_extract`, confidence=low）。鮮度が必要な場合は手動 or 将来の安価 Search（Brave 等）
+**方針（カバレッジ + コスト）:**
+- gBizINFO は法人データが取れる場合の足がかり（トークン 0）。ただしカバーが限定的で、非上場などでは不足しがち
+- **不足分は AI に事実を取りに行かせる**のが最も適切。ただし高額な `gpt-4o-search-preview`（deep）は使わない
+- **本流フォールバック:** `gpt-4o-mini-search-preview` → `gpt-4o-mini` Parse（Search Lite → Parse）
+- モデル知識への丸投げは禁止（検索結果に無い項目は空）
 
-**目的:** 高額な Search モデルを避けつつ、モデル知識丸投げより根拠のある取得へ寄せる。
+```
+gBizINFO（ヒット時）
+    │ 空欄あり
+    ▼
+AI Search Lite（mini-search）→ Parse（mini）  … 非上場・記述フィールドの充足
+```
 
-1. 企業情報専用 env（Extract 中心）と TTL
-2. `CompanyInfoFetcher` を gBiz 優先 + 安価 Extract 補完に変更（Web Search 廃止）
-3. `CareersScraper` / `FetchTechStack` から Web Search を除去
-4. admin に gBiz / provenance 表示
-5. main で `GBizInfoService` を AdminCompanyController に配線
+**含む**
+1. gBiz 試行 → 不足時 AI Search Lite
+2. Jobs / Tech も Search Lite → Parse
+3. deep search 無効化
+4. TTL / provenance / admin UI
 
-**Phase 1 対象外:** EnrichRelations 全面書き換え、Brave MCP、面接 realtime プロフィール、RAG hints クエリ削減、スクレイプ本流化。
+**Phase 1 対象外:** Brave MCP、スクレイプ本流化、EnrichRelations 全面刷新。
 
 ### Phase 2
 

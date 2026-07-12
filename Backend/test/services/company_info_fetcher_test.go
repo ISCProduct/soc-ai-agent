@@ -62,7 +62,7 @@ func TestCompanyInfoFetcher_FetchAndSave_TTLCache(t *testing.T) {
 	repo.AssertNotCalled(t, "Update", mock.Anything)
 }
 
-func TestCompanyInfoFetcher_FetchAndSave_CheapExtractFallback(t *testing.T) {
+func TestCompanyInfoFetcher_FetchAndSave_AISearchFallback(t *testing.T) {
 	srv := makeChatCompletionsServer(t, validCompanyInfoJSON())
 	defer srv.Close()
 
@@ -73,17 +73,17 @@ func TestCompanyInfoFetcher_FetchAndSave_CheapExtractFallback(t *testing.T) {
 	}, nil)
 	repo.On("Update", mock.AnythingOfType("*models.Company")).Return(nil).Run(func(args mock.Arguments) {
 		c := args.Get(0).(*models.Company)
-		assert.Equal(t, "llm_extract", c.SourceType)
+		assert.Equal(t, "web_search", c.SourceType)
 		assert.NotNil(t, c.InfoFetchedAt)
-		assert.Equal(t, "low", c.LastFetchConfidence)
+		assert.Equal(t, "medium", c.LastFetchConfidence)
 	})
 
 	client := openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")
-	fetcher := services.NewCompanyInfoFetcher(repo, client) // gBiz なし → cheap extract
+	fetcher := services.NewCompanyInfoFetcher(repo, client) // gBiz なし → AI Search Lite
 	result, err := fetcher.FetchAndSave(context.Background(), 1, true)
 	require.NoError(t, err)
 	assert.Equal(t, "テスト企業の概要", result.Description)
-	assert.Equal(t, "llm_extract", result.Source)
+	assert.Equal(t, "web_search", result.Source)
 }
 
 func TestCompanyInfoFetcher_FetchAndSave_CompanyNotFound(t *testing.T) {
