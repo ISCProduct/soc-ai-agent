@@ -77,9 +77,8 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 	applyCompanyInfoResult(company, result)
 	now := time.Now()
 	company.SourceType = result.Source
-	if result.SourceURL != "" {
-		company.SourceURL = result.SourceURL
-	}
+	// Search フォールバック時も SourceURL を明示更新し、旧スクレイプ URL の残存を防ぐ
+	company.SourceURL = result.SourceURL
 	company.SourceFetchedAt = &now
 	company.InfoFetchedAt = &now
 	company.LastModelUsed = result.ModelUsed
@@ -227,6 +226,7 @@ func (f *CompanyInfoFetcher) acquireViaAISearch(ctx context.Context, companyName
 		return nil, err
 	}
 	result.Source = companyfetch.SourceWebSearch
+	result.SourceURL = strings.TrimSpace(websiteURL)
 	result.ModelUsed = modelsUsed
 	result.Confidence = companyfetch.ConfidenceMedium
 	return result, nil

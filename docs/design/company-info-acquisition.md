@@ -154,7 +154,8 @@ Validation の `confidence` は **メモリキャッシュ（30分）のみ**で
 | 企業関係 | 中 | 60日 | gBiz 調達/補助金 + 既存グラフ | Search-Full → Parse | mini / 複雑時 4o |
 | 平均年齢・女性比率 | 低 | 180日 | gBiz workplace / 有報 | — | 原則 LLM 不要 |
 
-判定ルール: `field_fetched_at`（または既存 `SourceFetchedAt` / `GBizLastSyncedAt`）+ TTL。期限内は再取得しない。未充足フィールドのみパイプラインを走らせる。
+判定ルール: 各フィールドは対応する `info_fetched_at` / `jobs_fetched_at` / `tech_fetched_at` のみで TTL 判定する。  
+`SourceFetchedAt` / `GBizLastSyncedAt` は企業レコード全体のメタデータであり、求人・Tech など他フィールドの鮮度判定には使わない。期限内は再取得しない。未充足フィールドのみパイプラインを走らせる。
 
 ---
 
@@ -188,7 +189,7 @@ Validation の `confidence` は **メモリキャッシュ（30分）のみ**で
 
 ## 5. 統合パイプライン（目標アーキテクチャ）
 
-```
+```text
 企業名 / company_id / URL
         │
         ▼
@@ -258,7 +259,7 @@ Validation の `confidence` は **メモリキャッシュ（30分）のみ**で
 | Search フォールバック込み | **2,500 tokens** |
 | UI 実在確認（1クエリ） | **200 tokens**（現行維持） |
 
-50% 削減: 現状中央値 ≈2,500 → 提案通常 1,200 で **約 52% 減**（かつ鮮度改善）。
+目標（仮説）: 現状中央値 ≈2,500 → 提案通常 1,200 で **約 50% 減**を目指す（PoC 10社の実測で検証。未実測の確定値ではない）。
 
 ---
 
@@ -301,9 +302,10 @@ OPENAI_COMPANY_PARSE_MODEL_ADVANCED=gpt-4o
 | `info_fetched_at` | datetime NULL | 基本情報の最終取得 |
 | `jobs_fetched_at` | datetime NULL | 求人 |
 | `tech_fetched_at` | datetime NULL | 技術スタック |
-| `relations_fetched_at` | datetime NULL | 関係（企業単位の最終 enrich） |
 | `last_model_used` | varchar(64) NULL | 直近に使ったモデル名 |
 | `last_fetch_confidence` | varchar(16) NULL | high/medium/low |
+
+> `relations_fetched_at` は Phase 2（関係 enrich 実装時）で追加する。Phase 1 スキーマには含めない。
 
 既存 `SourceType` / `SourceURL` / `SourceFetchedAt` は「企業レコード全体の出典」として維持。フィールド TTL は上記 `*_fetched_at` で判定。
 
@@ -353,7 +355,7 @@ PoC（実装前の確認項目）: 大手〜スタートアップ 10 社で (a) 
 
 移行後:
 
-```
+```text
 1. website_url / 既知 careers URL をスクレイプ
 2. 成功 → EXTRACT(mini) → JobPostingResult[]（source=scrape）
 3. 失敗 → SEARCH(mini-search) で求人ページ URL/スニペット取得

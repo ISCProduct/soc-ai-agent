@@ -41,6 +41,14 @@ func TestCandidateCareerURLs(t *testing.T) {
 	assert.Contains(t, urls, "https://example.com/recruit")
 }
 
+func TestValidatePublicHTTPURL(t *testing.T) {
+	assert.NoError(t, ValidatePublicHTTPURL("https://example.com/careers"))
+	assert.Error(t, ValidatePublicHTTPURL("file:///etc/passwd"))
+	assert.Error(t, ValidatePublicHTTPURL("http://127.0.0.1/"))
+	assert.Error(t, ValidatePublicHTTPURL("http://10.0.0.1/"))
+	assert.Error(t, ValidatePublicHTTPURL("http://localhost/"))
+}
+
 func TestExtractJSONObject(t *testing.T) {
 	obj, err := ExtractJSONObject("prefix {\"a\":1} suffix")
 	assert.NoError(t, err)

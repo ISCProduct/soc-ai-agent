@@ -96,8 +96,8 @@ export default function AdminCompanyInfoEditPage() {
     if (typeof data.work_style === 'string' && data.work_style) setWorkStyle(data.work_style)
     if (typeof data.source === 'string' && data.source) setSourceType(data.source)
     if (typeof data.source_url === 'string' && data.source_url) setSourceUrl(data.source_url)
-    if (typeof data.model_used === 'string') setLastModelUsed(data.model_used)
-    if (typeof data.confidence === 'string') setLastFetchConfidence(data.confidence)
+    if (typeof data.model_used === 'string' && data.model_used) setLastModelUsed(data.model_used)
+    if (typeof data.confidence === 'string' && data.confidence) setLastFetchConfidence(data.confidence)
   }
 
   const handleAiFetch = async () => {

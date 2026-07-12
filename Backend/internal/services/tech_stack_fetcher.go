@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -81,6 +82,7 @@ func (f *TechStackFetcher) FetchAndSave(ctx context.Context, companyID uint, for
 	if result.Source != "" {
 		company.SourceType = result.Source
 	}
+	company.SourceURL = result.SourceURL
 	company.LastModelUsed = result.ModelUsed
 	company.LastFetchConfidence = result.Confidence
 
@@ -120,6 +122,7 @@ func (f *TechStackFetcher) Acquire(ctx context.Context, companyName, websiteURL 
 		return nil, err
 	}
 	result.Source = companyfetch.SourceWebSearch
+	result.SourceURL = strings.TrimSpace(websiteURL)
 	result.ModelUsed = modelsUsed
 	result.Confidence = companyfetch.ConfidenceMedium
 	return result, nil

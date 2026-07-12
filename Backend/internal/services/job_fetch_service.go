@@ -78,8 +78,14 @@ func (s *JobFetchService) FetchAndSaveJobs(ctx context.Context, companyID uint, 
 		if allJobs[0].Source == companyfetch.SourceWebSearch {
 			company.LastModelUsed = companyfetch.SearchModel() + "+" + companyfetch.ParseModel()
 		}
+		// web_search 時は旧スクレイプ URL を残さない
+		if allJobs[0].Source == companyfetch.SourceWebSearch {
+			company.SourceURL = strings.TrimSpace(company.WebsiteURL)
+		}
 	}
-	_ = s.repo.Update(company)
+	if err := s.repo.Update(company); err != nil {
+		return nil, fmt.Errorf("求人取得メタデータの保存に失敗しました: %w", err)
+	}
 
 	// RAGのChromaDBに求人情報を保存してレビュー精度を向上させる
 	if len(saved) > 0 {

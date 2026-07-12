@@ -1,9 +1,11 @@
 package companyfetch
 
 import (
+	"context"
 	"fmt"
 	"html"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -28,6 +30,7 @@ const (
 
 	defaultMaxTextRunes = 1500
 	defaultMinTextRunes = 80
+	maxRedirects        = 5
 )
 
 var (
@@ -38,6 +41,7 @@ var (
 )
 
 // IsFresh は fetchedAt が TTL 以内なら true。
+// フィールド TTL 判定には対応する *_fetched_at のみを渡し、SourceFetchedAt / GBizLastSyncedAt は使わない。
 func IsFresh(fetchedAt *time.Time, ttl time.Duration) bool {
 	if fetchedAt == nil {
 		return false
@@ -69,22 +73,57 @@ func TrimText(text string, maxRunes int) string {
 	return string(runes[:maxRunes])
 }
 
-// FetchURLText は URL から HTML を取得し、正規化・トリムしたテキストを返す。
-func FetchURLText(rawURL string) (string, error) {
+// ValidatePublicHTTPURL は SSRF 対策のため http(s) かつ非プライベート宛先のみ許可する。
+func ValidatePublicHTTPURL(rawURL string) error {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
-		return "", fmt.Errorf("url is empty")
+		return fmt.Errorf("url is empty")
 	}
-	if _, err := url.ParseRequestURI(rawURL); err != nil {
-		return "", fmt.Errorf("invalid url: %w", err)
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid url: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("only http/https urls are allowed")
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return fmt.Errorf("url host is empty")
+	}
+	if host == "localhost" || strings.HasSuffix(strings.ToLower(host), ".localhost") {
+		return fmt.Errorf("requests to localhost are not allowed")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return fmt.Errorf("requests to internal ip addresses are not allowed")
+		}
+	}
+	return nil
+}
+
+// FetchURLText は URL から HTML を取得し、正規化・トリムしたテキストを返す。
+func FetchURLText(ctx context.Context, rawURL string) (string, error) {
+	if err := ValidatePublicHTTPURL(rawURL); err != nil {
+		return "", err
 	}
 
-	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(rawURL), nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; SocAI/1.0; +https://example.com/bot)")
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxRedirects {
+				return fmt.Errorf("stopped after %d redirects", maxRedirects)
+			}
+			if err := ValidatePublicHTTPURL(req.URL.String()); err != nil {
+				return err
+			}
+			return nil
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -125,10 +164,10 @@ func CandidateCareerURLs(websiteURL string) []string {
 }
 
 // FirstFetchableText は候補 URL を順に試し、最初に成功したテキストと URL を返す。
-func FirstFetchableText(urls []string) (text, sourceURL string, err error) {
+func FirstFetchableText(ctx context.Context, urls []string) (text, sourceURL string, err error) {
 	var lastErr error
 	for _, u := range urls {
-		t, e := FetchURLText(u)
+		t, e := FetchURLText(ctx, u)
 		if e == nil && t != "" {
 			return t, u, nil
 		}
