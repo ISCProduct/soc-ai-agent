@@ -21,8 +21,10 @@ const (
 	ConfidenceMedium = "medium"
 	ConfidenceLow    = "low"
 
-	SourceScrape    = "scrape"
-	SourceWebSearch = "web_search"
+	SourceScrape     = "scrape"
+	SourceWebSearch  = "web_search"
+	SourceGBiz       = "gbizinfo"
+	SourceLLMExtract = "llm_extract" // WebSearchなしの安価抽出（鮮度保証なし）
 
 	defaultMaxTextRunes = 1500
 	defaultMinTextRunes = 80

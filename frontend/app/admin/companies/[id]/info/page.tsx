@@ -185,7 +185,8 @@ export default function AdminCompanyInfoEditPage() {
   const isLowTrust =
     lastFetchConfidence === 'low' ||
     sourceType === 'llm_web_search' ||
-    sourceType === 'ai_knowledge'
+    sourceType === 'ai_knowledge' ||
+    sourceType === 'llm_extract'
 
   const formatTs = (v: string | null) => {
     if (!v) return '未取得'
@@ -230,7 +231,7 @@ export default function AdminCompanyInfoEditPage() {
             {forceLoading ? '再取得中...' : '強制再取得して保存'}
           </Button>
           <Typography variant="caption" color="text.secondary">
-            OpenAI Web Search で公開事実のみを取得し構造化します（#557 Phase 1 暫定）
+            gBizINFO 優先（無料）。OpenAI Web Search は使いません。不足分のみ gpt-4o-mini で補完
           </Typography>
         </Stack>
 
@@ -302,8 +303,10 @@ export default function AdminCompanyInfoEditPage() {
         <TextField select label="出典タイプ" value={sourceType} onChange={(e) => setSourceType(e.target.value)}>
           <MenuItem value="official">公式サイト</MenuItem>
           <MenuItem value="job_site">就活/転職サイト</MenuItem>
+          <MenuItem value="gbizinfo">gBizINFO</MenuItem>
           <MenuItem value="scrape">スクレイプ</MenuItem>
           <MenuItem value="web_search">Web検索</MenuItem>
+          <MenuItem value="llm_extract">LLM抽出（安価・鮮度注意）</MenuItem>
           <MenuItem value="manual">手入力</MenuItem>
           <MenuItem value="llm_web_search">旧LLM知識（非推奨）</MenuItem>
         </TextField>

@@ -29,7 +29,7 @@ func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.A
 	ctrl := &AdminCompanyController{repo: repo, audit: audit, gbiz: gbiz}
 	if len(openaiClient) > 0 {
 		ctrl.openaiClient = openaiClient[0]
-		ctrl.infoFetcher = services.NewCompanyInfoFetcher(repo, openaiClient[0])
+		ctrl.infoFetcher = services.NewCompanyInfoFetcher(repo, openaiClient[0], gbiz)
 		ctrl.jobFetcher = services.NewJobFetchService(repo, openaiClient[0])
 		ctrl.techFetcher = services.NewTechStackFetcher(repo, openaiClient[0])
 	}

@@ -23,7 +23,7 @@ type TechStackResult struct {
 	Confidence       string   `json:"confidence,omitempty"`
 }
 
-// TechStackFetcher はスクレイプ/Search から技術スタックを抽出する。
+// TechStackFetcher は安価な Extract モデルのみで技術スタックを取得する（OpenAI Web Search 不使用）。
 type TechStackFetcher struct {
 	repo repository.CompanyRepository
 	llm  *companyfetch.LLM
@@ -81,9 +81,6 @@ func (f *TechStackFetcher) FetchAndSave(ctx context.Context, companyID uint, for
 	if result.Source != "" {
 		company.SourceType = result.Source
 	}
-	if result.SourceURL != "" {
-		company.SourceURL = result.SourceURL
-	}
 	company.LastModelUsed = result.ModelUsed
 	company.LastFetchConfidence = result.Confidence
 
@@ -93,30 +90,24 @@ func (f *TechStackFetcher) FetchAndSave(ctx context.Context, companyID uint, for
 	return result, nil
 }
 
-// Acquire は DB 非更新で技術スタックを取得する。
-// Phase 1 暫定: スクレイプは使わず、OpenAI Search で公開事実のみを収集する。
+// Acquire は DB 非更新で技術スタックを取得する（Web Search なし）。
 func (f *TechStackFetcher) Acquire(ctx context.Context, companyName, websiteURL string) (*TechStackResult, error) {
 	if f.llm == nil || f.llm.Client == nil {
 		return nil, fmt.Errorf("openai client is nil")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	systemPrompt := `あなたは技術スタックの構造化アシスタントです。検索結果に明示された技術のみをJSON化してください。推測で埋めてはいけません。不明な項目は空配列または空文字にしてください。`
-
+	systemPrompt := `あなたは技術スタックの構造化アシスタントです。確実に公開されていると分かる技術のみをJSON化してください。不確かな項目は空配列または空文字。Web検索ツールは使えません。推測禁止。`
 	siteHint := websiteURL
 	if siteHint == "" {
 		siteHint = "不明"
 	}
-	searchPrompt := fmt.Sprintf(
-		`日本のIT企業「%s」が採用ページ・技術ブログ等で公開している技術スタック（言語・フレームワーク・インフラ・CI/CD・開発手法）を調べてください。公式サイト: %s。公開情報として確認できる事実と根拠URLのみをまとめ、推測はしないでください。`,
-		companyName, siteHint,
+	userPrompt := fmt.Sprintf(
+		"企業「%s」（公式サイト: %s）について、確実な技術情報のみ次のJSON形式で回答してください。\n%s",
+		companyName, siteHint, techStackJSONSchema,
 	)
-	parseUser := fmt.Sprintf(
-		"企業「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。推測禁止。\n%s",
-		companyName, techStackJSONSchema,
-	)
-	raw, modelsUsed, err := f.llm.SearchThenParse(ctx, searchPrompt, systemPrompt, parseUser, 400)
+	raw, model, err := f.llm.ExtractJSON(ctx, systemPrompt, userPrompt, 400)
 	if err != nil {
 		return nil, fmt.Errorf("技術スタックの取得失敗: %w", err)
 	}
@@ -124,9 +115,9 @@ func (f *TechStackFetcher) Acquire(ctx context.Context, companyName, websiteURL 
 	if err != nil {
 		return nil, err
 	}
-	result.Source = companyfetch.SourceWebSearch
-	result.ModelUsed = modelsUsed
-	result.Confidence = companyfetch.ConfidenceMedium
+	result.Source = companyfetch.SourceLLMExtract
+	result.ModelUsed = model
+	result.Confidence = companyfetch.ConfidenceLow
 	return result, nil
 }
 

@@ -310,17 +310,20 @@ PoC（実装前の確認項目）: 大手〜スタートアップ 10 社で (a) 
 
 ### Phase 1（現行実装・暫定）
 
-**方針変更（運用判断）:** 公式サイトスクレイプは DOM/robots/成功率の負担が大きいため、Phase 1 では **OpenAI Web Search → Parse** を本流とする。モデルの事前知識への丸投げは禁止し、**検索で確認できた事実のみ**を JSON 化する。スクレイプ優先ルートは Phase 2 以降のオプションとする。
+**方針（コスト優先）:**
+- **OpenAI Web Search（search-preview 系）は使わない**（コスト过高）
+- **公式サイトスクレイプも本流にしない**（運用負荷）
+- **本流: gBizINFO（トークン 0）** で法人情報・所在地・従業員数・URL 等を取得
+- **不足フィールドのみ** `OPENAI_COMPANY_EXTRACT_MODEL`（既定 gpt-4o-mini）で事実テキストから構造化
+- 求人・Tech Stack は暫定で Extract のみ（`source=llm_extract`, confidence=low）。鮮度が必要な場合は手動 or 将来の安価 Search（Brave 等）
 
-**目的:** モデル知識ホットスポットを止め、Search→Parse で鮮度と根拠を確保する。
+**目的:** 高額な Search モデルを避けつつ、モデル知識丸投げより根拠のある取得へ寄せる。
 
-1. 企業情報専用 env を読み込むルータ（Extract / Search / Parse）を追加
-2. `CompanyInfoFetcher` / `WebSearchCompanyInfo` を Search→Parse（事実のみ）に変更
-3. `CareersScraper` を Search→Parse に変更（`ai_knowledge` 廃止）
-4. `FetchTechStack` を同様に移行
-5. `companies` に `*_fetched_at` / `last_model_used` / `last_fetch_confidence` を追加し TTL スキップ
-6. admin UI に source / fetched_at / confidence を表示
-7. 既存 `ai_knowledge` / `llm_web_search` は low confidence 表示 + 強制再取得
+1. 企業情報専用 env（Extract 中心）と TTL
+2. `CompanyInfoFetcher` を gBiz 優先 + 安価 Extract 補完に変更（Web Search 廃止）
+3. `CareersScraper` / `FetchTechStack` から Web Search を除去
+4. admin に gBiz / provenance 表示
+5. main で `GBizInfoService` を AdminCompanyController に配線
 
 **Phase 1 対象外:** EnrichRelations 全面書き換え、Brave MCP、面接 realtime プロフィール、RAG hints クエリ削減、スクレイプ本流化。
 

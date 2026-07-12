@@ -32,8 +32,7 @@ func makeChatCompletionsServer(t *testing.T, responseText string) *httptest.Serv
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		body, _ := io.ReadAll(r.Body)
-		_ = body
+		_, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{
@@ -53,7 +52,7 @@ func TestCompanyInfoFetcher_FetchAndSave_TTLCache(t *testing.T) {
 		Description:   "キャッシュ済み概要",
 		Industry:      "IT",
 		InfoFetchedAt: &now,
-		SourceType:    "scrape",
+		SourceType:    "gbizinfo",
 	}, nil)
 
 	fetcher := services.NewCompanyInfoFetcher(repo, nil)
@@ -63,7 +62,7 @@ func TestCompanyInfoFetcher_FetchAndSave_TTLCache(t *testing.T) {
 	repo.AssertNotCalled(t, "Update", mock.Anything)
 }
 
-func TestCompanyInfoFetcher_FetchAndSave_SearchFallback(t *testing.T) {
+func TestCompanyInfoFetcher_FetchAndSave_CheapExtractFallback(t *testing.T) {
 	srv := makeChatCompletionsServer(t, validCompanyInfoJSON())
 	defer srv.Close()
 
@@ -71,21 +70,20 @@ func TestCompanyInfoFetcher_FetchAndSave_SearchFallback(t *testing.T) {
 	repo.On("FindByID", uint(1)).Return(&models.Company{
 		ID:   1,
 		Name: "テスト株式会社",
-		// WebsiteURL 空 → スクレイプせず Search→Parse
 	}, nil)
 	repo.On("Update", mock.AnythingOfType("*models.Company")).Return(nil).Run(func(args mock.Arguments) {
 		c := args.Get(0).(*models.Company)
-		assert.Equal(t, "web_search", c.SourceType)
+		assert.Equal(t, "llm_extract", c.SourceType)
 		assert.NotNil(t, c.InfoFetchedAt)
-		assert.Equal(t, "medium", c.LastFetchConfidence)
+		assert.Equal(t, "low", c.LastFetchConfidence)
 	})
 
 	client := openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")
-	fetcher := services.NewCompanyInfoFetcher(repo, client)
+	fetcher := services.NewCompanyInfoFetcher(repo, client) // gBiz なし → cheap extract
 	result, err := fetcher.FetchAndSave(context.Background(), 1, true)
 	require.NoError(t, err)
 	assert.Equal(t, "テスト企業の概要", result.Description)
-	assert.Equal(t, "web_search", result.Source)
+	assert.Equal(t, "llm_extract", result.Source)
 }
 
 func TestCompanyInfoFetcher_FetchAndSave_CompanyNotFound(t *testing.T) {

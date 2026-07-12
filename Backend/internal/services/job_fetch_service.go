@@ -74,9 +74,9 @@ func (s *JobFetchService) FetchAndSaveJobs(ctx context.Context, companyID uint, 
 	if len(allJobs) > 0 {
 		company.SourceType = allJobs[0].Source
 		company.LastFetchConfidence = confidenceForJobSource(allJobs[0].Source)
-		company.LastModelUsed = companyfetch.SearchModel() + "+" + companyfetch.ParseModel()
-		if allJobs[0].Source == companyfetch.SourceScrape {
-			company.LastModelUsed = companyfetch.ExtractModel()
+		company.LastModelUsed = companyfetch.ExtractModel()
+		if allJobs[0].Source == companyfetch.SourceWebSearch {
+			company.LastModelUsed = companyfetch.SearchModel() + "+" + companyfetch.ParseModel()
 		}
 	}
 	_ = s.repo.Update(company)
@@ -92,7 +92,7 @@ func (s *JobFetchService) FetchAndSaveJobs(ctx context.Context, companyID uint, 
 
 func confidenceForJobSource(source string) string {
 	switch source {
-	case companyfetch.SourceScrape:
+	case companyfetch.SourceScrape, companyfetch.SourceGBiz:
 		return companyfetch.ConfidenceHigh
 	case companyfetch.SourceWebSearch:
 		return companyfetch.ConfidenceMedium
