@@ -235,6 +235,7 @@ func main() {
 	interviewService.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
+	interviewService.SetCompanyRepo(companyRepo)
 	resumeService.SetCrossFeatureService(crossFeatureService)
 
 	// コントローラー層の初期化
@@ -246,6 +247,7 @@ func main() {
 	companyValidator := services.NewCompanyValidationService(companyRepo, aiClient)
 	relationController.SetCompanyValidator(companyValidator)
 	resumeService.SetCompanyValidator(companyValidator)
+	resumeService.SetCompanyRepo(companyRepo)
 	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
 	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)

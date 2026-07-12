@@ -18,6 +18,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// CompanyBriefReader は面接・レビュー用の共有企業キャッシュ参照の最小面。
+type CompanyBriefReader interface {
+	FindByID(id uint) (*models.Company, error)
+	FindByName(name string) (*models.Company, error)
+	GetWeightProfile(companyID uint, jobPositionID *uint) (*models.CompanyWeightProfile, error)
+}
+
 type InterviewService struct {
 	sessionRepo          repository.InterviewSessionRepository
 	utterRepo            repository.InterviewUtteranceRepository
@@ -28,8 +35,9 @@ type InterviewService struct {
 	realtimeUsageService *RealtimeUsageService
 	crossFeature         *CrossFeatureIntegrationService
 	companyQuestionRepo  repository.InterviewCompanyQuestionRepository
-	questionStateRepo  repository.InterviewQuestionStateRepository
+	questionStateRepo    repository.InterviewQuestionStateRepository
 	skillScoreRepo       SkillScoreReader
+	companyRepo          CompanyBriefReader
 	jobCh                chan uint
 	workerOnce           sync.Once
 }
@@ -73,6 +81,11 @@ func (s *InterviewService) SetQuestionStateRepo(r repository.InterviewQuestionSt
 // SetSkillScoreRepo GitHubスキルスコアリポジトリを注入する（オプション）
 func (s *InterviewService) SetSkillScoreRepo(r SkillScoreReader) {
 	s.skillScoreRepo = r
+}
+
+// SetCompanyRepo 企業共有キャッシュ参照用リポジトリを注入する（オプション）
+func (s *InterviewService) SetCompanyRepo(r CompanyBriefReader) {
+	s.companyRepo = r
 }
 
 // SetCrossFeatureService 機能間連携サービスを注入する（オプション）
@@ -559,15 +572,13 @@ func (s *InterviewService) Turn(
 		userText = "（聞き取れませんでした）"
 	}
 
-	// 読み仮名が未指定の場合はWeb検索で自動取得
+	// 読み仮名: 共有DB優先。無い場合のみモデル知識（Searchではない）
 	if companyName != "" && companyReading == "" {
-		companyReading = s.lookupCompanyReading(ctx, companyName)
+		companyReading = s.resolveCompanyReading(ctx, companyID, companyName)
 	}
 
-	// 自社開発企業の場合は公式サイト情報を取得
-	if companyType == "general" && companyName != "" && companyInfo == "" {
-		companyInfo = s.lookupCompanyProfile(ctx, companyName)
-	}
+	// 企業情報: 共有キャッシュ優先（general/sier 問わず）。無ければクライアント文面をフォールバック
+	companyInfo = s.resolveCompanyInfo(companyID, companyName, companyInfo)
 
 	// 企業別カスタム質問とGitHubスキルスコアを取得
 	customQuestions := s.fetchCustomQuestions(companyID, position)
@@ -647,15 +658,13 @@ func (s *InterviewService) StartTurn(
 		return nil, errors.New("forbidden")
 	}
 
-	// 読み仮名が未指定の場合はWeb検索で自動取得
+	// 読み仮名: 共有DB優先。無い場合のみモデル知識（Searchではない）
 	if companyName != "" && companyReading == "" {
-		companyReading = s.lookupCompanyReading(ctx, companyName)
+		companyReading = s.resolveCompanyReading(ctx, companyID, companyName)
 	}
 
-	// 自社開発企業の場合は公式サイト情報を取得
-	if companyType == "general" && companyName != "" && companyInfo == "" {
-		companyInfo = s.lookupCompanyProfile(ctx, companyName)
-	}
+	// 企業情報: 共有キャッシュ優先（general/sier 問わず）。無ければクライアント文面をフォールバック
+	companyInfo = s.resolveCompanyInfo(companyID, companyName, companyInfo)
 
 	// 企業別カスタム質問とGitHubスキルスコアを取得
 	customQuestions := s.fetchCustomQuestions(companyID, position)
@@ -872,24 +881,6 @@ func (s *InterviewService) lookupCompanyReading(ctx context.Context, companyName
 	// 句読点・括弧・引用符等を除去
 	reading = strings.Trim(reading, "「」『』（）()。、・ ")
 	return reading
-}
-
-// lookupCompanyProfile はAIモデルの知識から企業情報（理念・求める人物像・事業内容）を取得します。
-// 取得に失敗した場合は空文字を返します（エラーは無視）。
-func (s *InterviewService) lookupCompanyProfile(ctx context.Context, companyName string) string {
-	systemPrompt := "あなたは日本企業の採用情報に詳しいアシスタントです。確実に知っている情報のみを簡潔にまとめ、不明な場合は「不明」とだけ答えてください。"
-	query := fmt.Sprintf("「%s」の企業理念・求める人物像・事業内容を300文字以内でまとめてください。", companyName)
-	ctxTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	result, err := s.openaiClient.ResponsesWithMaxTokens(ctxTimeout, systemPrompt, query, 0.2, 500)
-	if err != nil {
-		return ""
-	}
-	result = strings.TrimSpace(result)
-	if result == "不明" {
-		return ""
-	}
-	return result
 }
 
 // interviewTopics は面接で扱うトピックの順序定義です

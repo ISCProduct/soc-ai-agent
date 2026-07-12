@@ -110,6 +110,7 @@ type ResumeService struct {
 	s3Err        error
 	crossFeature *CrossFeatureIntegrationService
 	validator    *CompanyValidationService
+	companyRepo  CompanyBriefReader
 }
 
 // SetCrossFeatureService 機能間連携サービスを注入する（オプション）
@@ -120,6 +121,30 @@ func (s *ResumeService) SetCrossFeatureService(cf *CrossFeatureIntegrationServic
 // SetCompanyValidator 企業実在確認サービスを注入する（オプション）
 func (s *ResumeService) SetCompanyValidator(v *CompanyValidationService) {
 	s.validator = v
+}
+
+// SetCompanyRepo 企業共有キャッシュ参照用リポジトリを注入する（オプション）
+func (s *ResumeService) SetCompanyRepo(r CompanyBriefReader) {
+	s.companyRepo = r
+}
+
+func (s *ResumeService) lookupCompanyBriefFromCache(companyName string) string {
+	if s.companyRepo == nil {
+		return ""
+	}
+	name := strings.TrimSpace(companyName)
+	if name == "" {
+		return ""
+	}
+	company, err := s.companyRepo.FindByName(name)
+	if err != nil || company == nil {
+		return ""
+	}
+	var profile *models.CompanyWeightProfile
+	if p, err := s.companyRepo.GetWeightProfile(company.ID, nil); err == nil {
+		profile = p
+	}
+	return BuildCompanyBrief(company, profile)
 }
 
 func NewResumeService(repo repository.ResumeRepository, storageDir string, aiClient *openai.Client) *ResumeService {
@@ -1090,16 +1115,21 @@ func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, c
 	}
 	text := buildResumeText(blocks, 30000)
 	if strings.TrimSpace(companyName) != "" && strings.TrimSpace(companyInfo) == "" {
-		companyPrompt := fmt.Sprintf(`企業名: %s
+		// 共有キャッシュ優先。未登録時のみ従来のモデル知識サマリ（Searchではない）
+		if brief := s.lookupCompanyBriefFromCache(companyName); brief != "" {
+			companyInfo = brief
+		} else {
+			companyPrompt := fmt.Sprintf(`企業名: %s
 採用観点（求める人物像・評価軸・事業領域）を簡潔に整理してください。
 不確かな情報は断定せず、一般的に言える範囲で述べてください。
 出力は次のJSONのみ:
 {"summary":"200〜300字の企業概要","evaluation_axes":["評価軸1","評価軸2"],"keywords":["キーワード1","キーワード2"]}`, companyName)
-		info, err := s.aiClient.Responses(context.Background(), companyPrompt)
-		if err == nil {
-			companyInfo = info
-		} else {
-			log.Printf("resume_review: company summary failed: %v", err)
+			info, err := s.aiClient.Responses(context.Background(), companyPrompt)
+			if err == nil {
+				companyInfo = info
+			} else {
+				log.Printf("resume_review: company summary failed: %v", err)
+			}
 		}
 	}
 
