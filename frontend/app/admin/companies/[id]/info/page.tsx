@@ -231,7 +231,7 @@ export default function AdminCompanyInfoEditPage() {
             {forceLoading ? '再取得中...' : '強制再取得して保存'}
           </Button>
           <Typography variant="caption" color="text.secondary">
-            gBizINFO があれば利用し、足りない分（非上場など）は安価な AI Search（mini-search）で事実のみ取得
+            gBiz不足時は AI Search Lite。壁打ち/面接はDB共有キャッシュを読む（都度Searchしない）
           </Typography>
         </Stack>
 

@@ -1,9 +1,68 @@
 # 企業情報取得方式の設計（#557）
 
-> 目的: LLM を「最新テキストの抽出器」として使い続けつつ、1企業あたりのトークンを現状比 50% 以上削減し、フィールド単位で鮮度を担保する。
+> 目的: 正確な企業事実を必要なだけ取得しつつ、**7,000ユーザー規模・壁打ち（反復利用）でも月次コストが破綻しない**構成にする。  
+> LLM は「最新テキストの抽出器」として使うが、**ユーザー操作のたびに Search してはいけない**。
 
 関連: Issue [#557](https://github.com/ISCProduct/soc-ai-agent/issues/557) / Backlog `SOCAIAGENT-29`  
-参考実装: `CompanyValidationService`（DB → 軽量 WebSearch）、RAG hints（Search → Parse）
+実測（2026-07）: 企業基本情報の Search Lite→Parse は 1社あたり約 **$0.025（ほぼ検索ツール料金）**
+
+---
+
+## 0. スケール前提（必須制約）
+
+### 0.1 利用モデル
+
+| 層 | 誰が・いつ | 期待回数 | Search を呼んでよいか |
+|----|------------|----------|----------------------|
+| **Write（企業ナレッジ更新）** | admin / バッチ / 企業が DB に無い初回だけ | 企業ユニーク × 低頻度 | **条件付きで可**（TTL 外のみ） |
+| **Read（壁打ち・面接・チャット・レビュー）** | 全ユーザー・反復 | ユーザー × セッション × ターン | **禁止（$0）**。DB/キャッシュのみ |
+
+壁打ち相手として使う場合、1ユーザーが同一企業で **数十〜数百ターン** 会話する。ここに Search や企業プロファイル LLM を挟むと、ユーザー数に比例してコストが爆発する。
+
+### 0.2 7,000ユーザーのコスト感覚（実測ベース）
+
+実測: 基本情報 1取得 ≈ **$0.025**（Search ツール約 $0.025 + トークンは誤差）
+
+| シナリオ | 計算 | 月額概算 |
+|----------|------|----------|
+| ❌ 壁打ち1回ごとに企業 Search | 7,000人 × 月10回 × $0.025 | **約 $1,750（≈27万円）** ※基本情報だけ |
+| ❌ 同上 + 求人/Tech/Hints | ×3〜5 | **約 $5,000〜9,000（≈80〜140万円）** |
+| ❌ 面接開始ごとに `lookupCompanyProfile`（モデル呼び出し） | 7,000 × 月5回 × トークン代 | 小額だが無駄＋鮮度なし。Search 化しなくても DB へ寄せるべき |
+| ✅ **企業ユニーク共有キャッシュ**（月新規 500社のみ Search） | 500 × $0.025 | **約 $12.5（≈2,000円）** |
+| ✅ 同上 + 求人/Tech も新規のみ | 500 × $0.075 | **約 $37.5（≈6,000円）** |
+| ✅ 壁打ち・面接 Read | DB のみ | **Search $0** |
+
+**結論:** コスト最適化の本体はモデル選定ではなく **「誰の・どの操作が Search を発火するか」の分離**。7,000人規模では **企業ナレッジはプロダクト共有資産** として持ち、ユーザーセッションはそれを読むだけにする。
+
+### 0.3 設計原則（スケール用）
+
+1. **Company-level cache（共有）**: `companies` 行＋ `*_fetched_at` が唯一の正。ユーザーごと・セッションごとに再取得しない  
+2. **Read path = zero Search**: 壁打ち / 面接 / チャット / 履歴書レビューのホットパスから Search・企業プロファイル LLM を除去  
+3. **Write path = rare**: admin 手動、夜間バッチ、または「DB に企業がない / TTL 切れ」の初回だけ  
+4. **単一フライト**: 同一 `company_id` の同時取得は1本にまとめる（thundering herd 防止）  
+5. **予算ガード**: 月間 Search 回数のソフト上限（例: 2,000回 ≈ $50）と admin アラート  
+6. **壁打ち用コンテキストは短いスナップショット**: DB から 300〜800字に trim した `company_brief` をプロンプトに載せる（毎回 LLM で企業調査しない）
+
+```mermaid
+flowchart LR
+  subgraph write [Write rare]
+    Admin[Admin/Batch]
+    FirstTouch[初回不足時のみ]
+    Pipeline[gBiz or SearchLite]
+    DB[(companies shared)]
+    Admin --> Pipeline
+    FirstTouch --> Pipeline
+    Pipeline --> DB
+  end
+  subgraph read [Read hot path]
+    Wall[壁打ち/チャット]
+    Interview[AI面接]
+    Resume[履歴書レビュー]
+    Wall --> DB
+    Interview --> DB
+    Resume --> DB
+  end
+```
 
 ---
 
@@ -11,12 +70,12 @@
 
 | 問い | 結論 |
 |------|------|
-| トークン 50% 削減は可能か | **可能**。通常ルートを「スクレイプ/gBiz + mini 抽出」に寄せ、Search をフォールバックに限定すれば 2,000〜3,000 → **〜1,200 tokens** が現実的 |
-| 最新性が必要なフィールドは | **求人（TTL 7日）・技術スタック（30日）・企業関係（60日）** が最優先。法人番号・所在地は gBiz で足りる |
-| モデル使い分け | Extract=`gpt-4o-mini`、Search-Lite=`gpt-4o-mini-search-preview`、Deep=`gpt-4o-search-preview`、Parse=`gpt-4o-mini`（複雑時のみ `gpt-4o`） |
-| 既存資産との統合 | gBiz / company-graph スクレイプ / HINTS 2段 / Validation の **階段フォールバック** を 1 パイプラインに統合する |
+| 7,000人でも現実的か | **企業共有キャッシュ + Read 禁止 Search** なら月数百〜数千円〜数万円で収まる。ユーザー比例 Search は不可 |
+| 正確さはどう担保するか | Write 時だけ AI Search Lite で事実取得。gBiz は足がかり（カバー不足時は AI） |
+| 壁打ちで毎回調べるべきか | **すべきでない**。調べた結果を DB に溜め、壁打ちはそれを使う |
+| トークン 50% 削減は可能か | Write 経路の最適化に加え、Read 経路の LLM 企業調査削減が桁違いに効く |
 
-**現状の最大問題:** エンドポイント名が `web-search` / `fetch-info` でも、実装の大半は `ChatCompletionJSON`（**モデル知識**）であり、学習カットオフ以降の求人・Tech Stack・関係は保証できない。
+**現状の最大問題（コスト）:** 面接 `lookupCompanyProfile` や RAG hints/web_search が **セッション単位で外部/LLM 調査**しうる。スケール前に Read 経路を DB 参照へ寄せる必要がある。
 
 ---
 
@@ -306,43 +365,80 @@ PoC（実装前の確認項目）: 大手〜スタートアップ 10 社で (a) 
 
 ---
 
-## 12. 段階的移行計画
+## 12. 段階的移行計画（スケール前提版）
 
-### Phase 1（現行実装・暫定）
+### Phase 1A（現行・Write 経路）
 
-**方針（カバレッジ + コスト）:**
-- gBizINFO は法人データが取れる場合の足がかり（トークン 0）。ただしカバーが限定的で、非上場などでは不足しがち
-- **不足分は AI に事実を取りに行かせる**のが最も適切。ただし高額な `gpt-4o-search-preview`（deep）は使わない
-- **本流フォールバック:** `gpt-4o-mini-search-preview` → `gpt-4o-mini` Parse（Search Lite → Parse）
-- モデル知識への丸投げは禁止（検索結果に無い項目は空）
+企業ナレッジの **書き込み**を正確・共有化する。
 
-```
-gBizINFO（ヒット時）
-    │ 空欄あり
-    ▼
-AI Search Lite（mini-search）→ Parse（mini）  … 非上場・記述フィールドの充足
-```
+- gBiz 試行 → 不足時 AI Search Lite（`mini-search`→`mini` Parse）
+- deep `gpt-4o-search-preview` は企業パイプラインで使わない
+- `*_fetched_at` / TTL / provenance / admin UI
+- **同一企業の Search は共有 DB に保存**（ユーザー横断で再利用）
 
-**含む**
-1. gBiz 試行 → 不足時 AI Search Lite
-2. Jobs / Tech も Search Lite → Parse
-3. deep search 無効化
-4. TTL / provenance / admin UI
+### Phase 1B（最優先・Read 経路の Search/$ LLM 調査ゼロ化）
 
-**Phase 1 対象外:** Brave MCP、スクレイプ本流化、EnrichRelations 全面刷新。
+7,000人・壁打ち前提で **ここが本命のコスト削減**。
 
-### Phase 2
+| 対象 | 現状 | あるべき姿 |
+|------|------|------------|
+| AI面接 `lookupCompanyProfile` | セッション開始時に LLM 知識で都度生成 | `companies` から brief を読む。無ければ空 or 短文フォールバック。**Search しない** |
+| 壁打ち/チャットの企業文脈 | 都度調査しがち | 選択企業の DB スナップショットのみ注入 |
+| RAG `/company/hints` | Search×3 の可能性 | 企業単位キャッシュ（Chroma or DB）TTL。ヒット時 $0 |
+| 履歴書レビューの web_search | レビュー毎に走りうる | 企業コンテキストは DB 優先。不足時のみ Write 相当を1回 |
 
-- `EnrichRelations` を Search→Parse + relation provenance カラム化
-- `CompanySearchProvider` に Brave を接続（compose.mcp.yml 整備）
-- フィールド単位取得 API（未充足のみ）
-- バッチ再取得ジョブ（TTL 超過のみ）
+受け入れ条件:
+
+- 壁打ち 100 ターンで企業 Search 回数 **0**
+- 面接 1 セッションで企業 Search 回数 **0**（DB 既存時）
+- 新規企業の初回タッチだけ Write が走る
+
+### Phase 2（単価さら下げ + 運用）
+
+- Search Provider 抽象化 → Brave / 安価検索へ切替可能な設計（ツール料金 $0.025/回を下げたい場合）
+- 夜間バッチ: 人気企業・TTL 切れのみ再取得（ユーザー操作と分離）
+- 単一フライト・レート制限・月次 Search 予算ガード（`api_call_log`）
+- フィールド単位の不足のみ再取得（Info 済みなら Jobs だけ等）
 
 ### Phase 3
 
-- 面接 `lookupCompanyProfile` を DB/キャッシュ由来に変更（モデル知識廃止）
-- RAG 履歴書パイプラインと企業パイプラインのキャッシュ共有
-- トークン・コストのダッシュボード（`api_call_log` 活用）
+- EnrichRelations の provenance 化
+- RAG と MySQL 企業キャッシュの統合ダッシュボード
+- コストアラート（月 $50 / $100 など）
+
+---
+
+## 12.1 壁打ち向けデータ契約
+
+壁打ち/面接プロンプトに渡すのは最大でも次の短文（例）:
+
+```text
+【企業スナップショット】
+名称: …
+事業: …（120字）
+文化/働き方: …（80字）
+技術: …（任意）
+出典: gbizinfo|web_search / fetched_at: …
+```
+
+生成ルール:
+
+- `CompanyBriefBuilder`（純関数）が DB 行から組み立て。LLM 呼び出しなし
+- `InfoFetchedAt` が空でも壁打ちは開始可能（スナップショットが薄いだけ）
+- 「もっと詳しく」は **admin/バッチの Write** に回し、ユーザー壁打ち中に Search しない
+
+---
+
+## 12.2 月次予算の設計目標（7,000ユーザー）
+
+| 項目 | 目標 |
+|------|------|
+| 企業 Write（Search） | 月 **≤ 2,000 回**（≈ $50）を初期上限 |
+| 壁打ち/面接の企業 Search | **0** |
+| 1ユーザーあたり企業調査課金 | **ほぼ 0**（共有キャッシュに乗る） |
+| 超過時 | 新規 Search をキューイング or キャッシュのみで継続 |
+
+人気企業ほどキャッシュヒット率が上がる（就活ドメインは企業の重複が大きい）ため、実 Search 回数はユーザー数より **ユニーク企業数** に近づく。
 
 ---
 
@@ -350,38 +446,32 @@ AI Search Lite（mini-search）→ Parse（mini）  … 非上場・記述フィ
 
 | ID | 内容 | 影響 | 提案 |
 |----|------|------|------|
-| R1 | スクレイプ成功率（特に JS レンダリング必須サイト） | Search フォールバック増 → コスト増 | 静的 HTML 優先。失敗率 >40% なら Search-Lite を標準寄りに |
-| R2 | OpenAI Search モデルの API 仕様変更 | パイプライン停止 | Provider 抽象化 |
-| R3 | gBiz レート制限・トークン未設定環境 | Primary 欠落 | 開発はモック、本番は必須化 |
-| R4 | HINTS_MODEL と WEB_SEARCH_MODEL の二重定義 | 運用混乱 | Phase 1 でドキュメント統一、コードは追従 Issue |
-| R5 | 既存 ai_knowledge 求人の一括再取得コスト | 一時的コスト増 | TTL + 手動/夜間バッチ |
-| R6 | robots.txt / 利用規約 | 法務・運用 | 許可サイトの allowlist |
-| U1 | PoC 10 社の実測（精度・トークン）は本 PR 時点では未実施 | 数値の確度 | Phase 1 着手前に別コミットで計測シート追加 |
-| U2 | `search-gbiz` FE パスと BE ルートの不一致疑い | admin UX | 実装時にルート突合 |
+| R1 | Search ツール料金が支配的（~$0.025/回） | 件数増で線形増 | Read 分離必須。単価下げは Brave 等 Phase 2 |
+| R2 | gBiz API の可用性・URL/カバー範囲 | Write の足がかりが弱い | AI Search Lite フォールバック維持 |
+| R3 | 面接/hints がまだセッション課金 | 7,000人で破綻 | **Phase 1B を Phase 1A と同時または直後に必須化** |
+| R4 | 初回タッチの同時集中 | 同じ企業で Search 多重 | singleflight + DB unique |
+| R5 | 鮮度 vs コスト | TTL を短くすると高い | 求人だけ TTL 短く、基本情報は 90日 |
+| U1 | 月間ユニーク企業数の実測 | 予算精度 | ログで `company_id` ユニーク数を計測 |
+| U2 | 壁打ち1人あたり月間セッション数 | Read 負荷 | インフラ側。Search には載せない |
 
 ---
 
-## 14. Phase 1 実装スコープ（確定）
+## 14. 実装スコープの切り方
 
-**含む**
+### 今すぐ（本 PR / #557 Phase 1A）
 
-- env 5 種の配線と `.env.example` 反映
-- Info / Jobs / TechStack の「外部テキスト → Extract」化
-- フィールド別 `*_fetched_at` + TTL スキップ
-- source / confidence / model_used の保存と admin 表示
-- CareersScraper の ai_knowledge 廃止（フォールバックは Search→Parse）
+- Write: gBiz + Search Lite、TTL、provenance、admin
+- 設計として Read/Write 分離と 7,000人予算を文書化（本節）
 
-**含まない**
+### 直後必須（Phase 1B・別コミット可）
 
-- 関係グラフの全面刷新
-- Brave MCP 本番接続
-- RAG / 面接 hints の大規模改修
+- `lookupCompanyProfile` → DB brief
+- hints / resume web_search の企業キャッシュ強制
+- 壁打ちへの `company_brief` 注入（Search なし）
 
-**受け入れ指標**
+### 含まない（後続）
 
-- 通常 1 企業フル取得 ≤ 1,200 tokens（ログ計測）
-- 求人・Tech の新規取得で `source` が `scrape` または `web_search`（`ai_knowledge` 新規禁止）
-- TTL 内の再実行で LLM 呼び出し 0
+- Brave 本番接続、EnrichRelations 全面刷新、deep search 解禁
 
 ---
 
