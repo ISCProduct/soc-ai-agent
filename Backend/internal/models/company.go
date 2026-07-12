@@ -15,7 +15,7 @@ type Company struct {
 	WebsiteURL       string     `gorm:"type:varchar(500)" json:"website_url"`
 	LogoURL          string     `gorm:"type:varchar(500)" json:"logo_url"`
 	CorporateNumber  string     `gorm:"type:varchar(13);index" json:"corporate_number"`
-	SourceType       string     `gorm:"type:varchar(50)" json:"source_type"` // official, job_site, manual
+	SourceType       string     `gorm:"type:varchar(50)" json:"source_type"` // official, job_site, manual, scrape, web_search
 	SourceURL        string     `gorm:"type:varchar(500)" json:"source_url"`
 	SourceFetchedAt  *time.Time `json:"source_fetched_at,omitempty"`
 	IsProvisional    bool       `gorm:"default:true" json:"is_provisional"`
@@ -23,6 +23,13 @@ type Company struct {
 	GBizLastSyncedAt *time.Time `json:"gbiz_last_synced_at,omitempty"`
 	GBizSyncStatus   string     `gorm:"type:varchar(20)" json:"gbiz_sync_status"` // success, failed
 	GBizSyncMessage  string     `gorm:"type:text" json:"gbiz_sync_message"`
+
+	// #557 フィールド別鮮度・provenance
+	InfoFetchedAt        *time.Time `json:"info_fetched_at,omitempty"`
+	JobsFetchedAt        *time.Time `json:"jobs_fetched_at,omitempty"`
+	TechFetchedAt        *time.Time `json:"tech_fetched_at,omitempty"`
+	LastModelUsed        string     `gorm:"type:varchar(64)" json:"last_model_used,omitempty"`
+	LastFetchConfidence  string     `gorm:"type:varchar(16)" json:"last_fetch_confidence,omitempty"` // high|medium|low
 
 	// 企業の特徴・文化
 	Culture        string `gorm:"type:text" json:"culture"`            // 企業文化の説明

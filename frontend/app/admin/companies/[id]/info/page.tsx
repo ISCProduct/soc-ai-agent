@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import {
   Alert,
   Button,
+  Chip,
   CircularProgress,
   Divider,
   MenuItem,
@@ -18,7 +19,6 @@ import { ErrorAlert } from '@/components/common/ErrorAlert'
 
 export default function AdminCompanyInfoEditPage() {
   const params = useParams()
-  const router = useRouter()
   const id = params.id as string
 
   useEffect(() => {
@@ -29,6 +29,7 @@ export default function AdminCompanyInfoEditPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
+  const [forceLoading, setForceLoading] = useState(false)
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -44,8 +45,13 @@ export default function AdminCompanyInfoEditPage() {
   const [sourceUrl, setSourceUrl] = useState('')
   const [dataStatus, setDataStatus] = useState('draft')
   const [isProvisional, setIsProvisional] = useState(false)
+  const [infoFetchedAt, setInfoFetchedAt] = useState<string | null>(null)
+  const [jobsFetchedAt, setJobsFetchedAt] = useState<string | null>(null)
+  const [techFetchedAt, setTechFetchedAt] = useState<string | null>(null)
+  const [lastModelUsed, setLastModelUsed] = useState('')
+  const [lastFetchConfidence, setLastFetchConfidence] = useState('')
 
-  useEffect(() => {
+  const loadCompany = () => {
     fetch(`/api/admin/companies/${id}`, {
       headers: authService.getAdminFetchHeaders(),
     })
@@ -65,9 +71,34 @@ export default function AdminCompanyInfoEditPage() {
         setSourceUrl(data.source_url || '')
         setDataStatus(data.data_status || 'draft')
         setIsProvisional(data.is_provisional ?? false)
+        setInfoFetchedAt(data.info_fetched_at || null)
+        setJobsFetchedAt(data.jobs_fetched_at || null)
+        setTechFetchedAt(data.tech_fetched_at || null)
+        setLastModelUsed(data.last_model_used || '')
+        setLastFetchConfidence(data.last_fetch_confidence || '')
       })
       .catch(() => setError('企業情報の取得に失敗しました'))
+  }
+
+  useEffect(() => {
+    loadCompany()
   }, [id])
+
+  const applyInfoPayload = (data: Record<string, unknown>) => {
+    if (typeof data.description === 'string' && data.description) setDescription(data.description)
+    if (typeof data.industry === 'string' && data.industry) setIndustry(data.industry)
+    if (typeof data.location === 'string' && data.location) setLocation(data.location)
+    if (typeof data.website_url === 'string' && data.website_url) setWebsiteUrl(data.website_url)
+    if (typeof data.founded_year === 'number' && data.founded_year) setFoundedYear(String(data.founded_year))
+    if (typeof data.employee_count === 'number' && data.employee_count) setEmployeeCount(String(data.employee_count))
+    if (typeof data.main_business === 'string' && data.main_business) setMainBusiness(data.main_business)
+    if (typeof data.culture === 'string' && data.culture) setCulture(data.culture)
+    if (typeof data.work_style === 'string' && data.work_style) setWorkStyle(data.work_style)
+    if (typeof data.source === 'string' && data.source) setSourceType(data.source)
+    if (typeof data.source_url === 'string' && data.source_url) setSourceUrl(data.source_url)
+    if (typeof data.model_used === 'string') setLastModelUsed(data.model_used)
+    if (typeof data.confidence === 'string') setLastFetchConfidence(data.confidence)
+  }
 
   const handleAiFetch = async () => {
     if (!name.trim()) return
@@ -81,25 +112,39 @@ export default function AdminCompanyInfoEditPage() {
           'Content-Type': 'application/json',
           ...authService.getAdminFetchHeaders(),
         },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, website_url: websiteUrl }),
       })
       const data = await res.json()
       if (!res.ok) {
-        setError(data?.error || 'AI企業情報取得に失敗しました')
+        setError(data?.error || '企業情報取得に失敗しました')
         return
       }
-      if (data.description) setDescription(data.description)
-      if (data.industry) setIndustry(data.industry)
-      if (data.location) setLocation(data.location)
-      if (data.website_url) setWebsiteUrl(data.website_url)
-      if (data.founded_year) setFoundedYear(String(data.founded_year))
-      if (data.employee_count) setEmployeeCount(String(data.employee_count))
-      if (data.main_business) setMainBusiness(data.main_business)
-      if (data.culture) setCulture(data.culture)
-      if (data.work_style) setWorkStyle(data.work_style)
-      setSuccess('AI情報取得が完了しました。内容を確認・修正してから保存してください。')
+      applyInfoPayload(data)
+      setSuccess('プレビュー取得が完了しました。内容を確認・修正してから保存してください。')
     } finally {
       setAiLoading(false)
+    }
+  }
+
+  const handleForceFetchAndSave = async () => {
+    setForceLoading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const res = await fetch(`/api/admin/companies/${id}/fetch-info?force=true`, {
+        method: 'POST',
+        headers: authService.getAdminFetchHeaders(),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data?.error || '強制再取得に失敗しました')
+        return
+      }
+      applyInfoPayload(data)
+      loadCompany()
+      setSuccess('DBへ強制再取得・保存しました。')
+    } finally {
+      setForceLoading(false)
     }
   }
 
@@ -137,6 +182,17 @@ export default function AdminCompanyInfoEditPage() {
     setSuccess('保存しました')
   }
 
+  const isLowTrust =
+    lastFetchConfidence === 'low' ||
+    sourceType === 'llm_web_search' ||
+    sourceType === 'ai_knowledge'
+
+  const formatTs = (v: string | null) => {
+    if (!v) return '未取得'
+    const d = new Date(v)
+    return Number.isNaN(d.getTime()) ? v : d.toLocaleString('ja-JP')
+  }
+
   return (
     <AdminFormContainer
       title={`基本情報編集: ${name}`}
@@ -146,11 +202,16 @@ export default function AdminCompanyInfoEditPage() {
     >
       <ErrorAlert error={error} />
       {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
+      {isLowTrust && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          出典がモデル知識由来、または信頼度が low です。公式サイトURLを設定して強制再取得してください。
+        </Alert>
+      )}
 
       <Stack spacing={2}>
         <TextField label="企業名" value={name} onChange={(e) => setName(e.target.value)} required />
 
-        <Stack direction="row" alignItems="center" spacing={1}>
+        <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
           <Button
             variant="outlined"
             color="secondary"
@@ -158,12 +219,29 @@ export default function AdminCompanyInfoEditPage() {
             disabled={!name.trim() || aiLoading}
             startIcon={aiLoading ? <CircularProgress size={16} color="inherit" /> : null}
           >
-            {aiLoading ? 'AI検索中...' : '🤖 AIで企業情報を自動取得'}
+            {aiLoading ? '取得中...' : 'プレビュー取得（未保存）'}
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={handleForceFetchAndSave}
+            disabled={forceLoading}
+            startIcon={forceLoading ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {forceLoading ? '再取得中...' : '強制再取得して保存'}
           </Button>
           <Typography variant="caption" color="text.secondary">
-            企業名をもとにAIが情報を取得してフォームに反映します
+            公式URLスクレイプ優先、失敗時のみ Web Search（#557）
           </Typography>
         </Stack>
+
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          <Chip size="small" label={`source: ${sourceType || '-'}`} />
+          <Chip size="small" label={`confidence: ${lastFetchConfidence || '-'}`} color={isLowTrust ? 'warning' : 'default'} />
+          <Chip size="small" label={`model: ${lastModelUsed || '-'}`} />
+        </Stack>
+        <Typography variant="body2" color="text.secondary">
+          info: {formatTs(infoFetchedAt)} / jobs: {formatTs(jobsFetchedAt)} / tech: {formatTs(techFetchedAt)}
+        </Typography>
 
         <Divider />
 
@@ -224,7 +302,10 @@ export default function AdminCompanyInfoEditPage() {
         <TextField select label="出典タイプ" value={sourceType} onChange={(e) => setSourceType(e.target.value)}>
           <MenuItem value="official">公式サイト</MenuItem>
           <MenuItem value="job_site">就活/転職サイト</MenuItem>
+          <MenuItem value="scrape">スクレイプ</MenuItem>
+          <MenuItem value="web_search">Web検索</MenuItem>
           <MenuItem value="manual">手入力</MenuItem>
+          <MenuItem value="llm_web_search">旧LLM知識（非推奨）</MenuItem>
         </TextField>
         <TextField label="出典URL" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} />
         <TextField select label="ステータス" value={dataStatus} onChange={(e) => setDataStatus(e.target.value)}>

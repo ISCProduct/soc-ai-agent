@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"Backend/internal/models"
 	"Backend/internal/openai"
@@ -18,164 +21,103 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func makeWebSearchServer(t *testing.T, responseText string, statusCode int) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/responses" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(statusCode)
-		resp := map[string]any{
-			"output_text": responseText,
-			"usage": map[string]any{
-				"input_tokens":  10,
-				"output_tokens": 5,
-			},
-		}
-		_ = json.NewEncoder(w).Encode(resp)
-	}))
-}
-
 func validCompanyInfoJSON() string {
 	return `{"description":"テスト企業の概要","industry":"IT・ソフトウェア","location":"東京都渋谷区","website_url":"https://example.com","founded_year":2010,"employee_count":500,"main_business":"クラウドサービスの開発","culture":"フラットな組織文化","work_style":"ハイブリッド"}`
 }
 
-func TestCompanyInfoFetcher_FetchAndSave(t *testing.T) {
-	baseCompany := func() *models.Company {
-		return &models.Company{
-			ID:          1,
-			Name:        "テスト株式会社",
-			Description: "旧概要",
-			Industry:    "製造業",
+func makeChatCompletionsServer(t *testing.T, responseText string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "chat/completions") {
+			w.WriteHeader(http.StatusNotFound)
+			return
 		}
-	}
-
-	tests := []struct {
-		name           string
-		setupMock      func(*mocks.CompanyRepositoryMock)
-		serverResponse string
-		serverStatus   int
-		wantErr        bool
-		wantErrContain string
-		checkResult    func(*testing.T, *services.CompanyInfoResult)
-	}{
-		{
-			name: "正常系: 全フィールドが更新される",
-			setupMock: func(m *mocks.CompanyRepositoryMock) {
-				m.On("FindByID", uint(1)).Return(baseCompany(), nil)
-				m.On("Update", mock.AnythingOfType("*models.Company")).Return(nil)
+		body, _ := io.ReadAll(r.Body)
+		_ = body
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"role": "assistant", "content": responseText}},
 			},
-			serverResponse: validCompanyInfoJSON(),
-			serverStatus:   http.StatusOK,
-			wantErr:        false,
-			checkResult: func(t *testing.T, r *services.CompanyInfoResult) {
-				assert.Equal(t, "テスト企業の概要", r.Description)
-				assert.Equal(t, "IT・ソフトウェア", r.Industry)
-				assert.Equal(t, "東京都渋谷区", r.Location)
-				assert.Equal(t, "https://example.com", r.WebsiteURL)
-				assert.Equal(t, 2010, r.FoundedYear)
-				assert.Equal(t, 500, r.EmployeeCount)
-				assert.Equal(t, "クラウドサービスの開発", r.MainBusiness)
-				assert.Equal(t, "フラットな組織文化", r.Culture)
-				assert.Equal(t, "ハイブリッド", r.WorkStyle)
-			},
-		},
-		{
-			name: "正常系: レスポンスに余分なテキストが含まれていてもJSONを抽出できる",
-			setupMock: func(m *mocks.CompanyRepositoryMock) {
-				m.On("FindByID", uint(1)).Return(baseCompany(), nil)
-				m.On("Update", mock.AnythingOfType("*models.Company")).Return(nil)
-			},
-			serverResponse: "こちらが企業情報です：\n" + validCompanyInfoJSON() + "\n以上です。",
-			serverStatus:   http.StatusOK,
-			wantErr:        false,
-			checkResult: func(t *testing.T, r *services.CompanyInfoResult) {
-				assert.Equal(t, "テスト企業の概要", r.Description)
-				assert.Equal(t, "IT・ソフトウェア", r.Industry)
-			},
-		},
-		{
-			name: "正常系: 空文字フィールドは既存データを上書きしない",
-			setupMock: func(m *mocks.CompanyRepositoryMock) {
-				c := baseCompany()
-				c.Industry = "既存業種"
-				m.On("FindByID", uint(1)).Return(c, nil)
-				m.On("Update", mock.AnythingOfType("*models.Company")).Return(nil)
-			},
-			serverResponse: `{"description":"新概要","industry":"","location":"","website_url":"","founded_year":0,"employee_count":0,"main_business":"","culture":"","work_style":""}`,
-			serverStatus:   http.StatusOK,
-			wantErr:        false,
-			checkResult: func(t *testing.T, r *services.CompanyInfoResult) {
-				assert.Equal(t, "新概要", r.Description)
-				assert.Equal(t, "", r.Industry)
-			},
-		},
-		{
-			name: "異常系: 企業が見つからない場合はエラー",
-			setupMock: func(m *mocks.CompanyRepositoryMock) {
-				m.On("FindByID", uint(99)).Return(nil, errors.New("record not found"))
-			},
-			serverResponse: validCompanyInfoJSON(),
-			serverStatus:   http.StatusOK,
-			wantErr:        true,
-			wantErrContain: "company not found",
-		},
-		{
-			name: "異常系: WebSearchが不正なJSONを返した場合はエラー",
-			setupMock: func(m *mocks.CompanyRepositoryMock) {
-				m.On("FindByID", uint(1)).Return(baseCompany(), nil)
-			},
-			serverResponse: "JSONではないテキスト",
-			serverStatus:   http.StatusOK,
-			wantErr:        true,
-			wantErrContain: "failed to parse web search response",
-		},
-		{
-			name: "異常系: DB更新が失敗した場合はエラー",
-			setupMock: func(m *mocks.CompanyRepositoryMock) {
-				m.On("FindByID", uint(1)).Return(baseCompany(), nil)
-				m.On("Update", mock.AnythingOfType("*models.Company")).Return(errors.New("db error"))
-			},
-			serverResponse: validCompanyInfoJSON(),
-			serverStatus:   http.StatusOK,
-			wantErr:        true,
-			wantErrContain: "failed to update company",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			srv := makeWebSearchServer(t, tc.serverResponse, tc.serverStatus)
-			defer srv.Close()
-
-			repo := &mocks.CompanyRepositoryMock{}
-			tc.setupMock(repo)
-
-			client := openai.NewWithBaseURL(srv.URL, "gpt-4o-search-preview")
-			fetcher := services.NewCompanyInfoFetcher(repo, client)
-
-			companyID := uint(1)
-			if tc.wantErrContain == "company not found" {
-				companyID = 99
-			}
-
-			result, err := fetcher.FetchAndSave(context.Background(), companyID, true)
-
-			if tc.wantErr {
-				require.Error(t, err)
-				if tc.wantErrContain != "" {
-					assert.Contains(t, err.Error(), tc.wantErrContain)
-				}
-				return
-			}
-
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			if tc.checkResult != nil {
-				tc.checkResult(t, result)
-			}
+			"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 20},
 		})
-	}
+	}))
+}
+
+func TestCompanyInfoFetcher_FetchAndSave_TTLCache(t *testing.T) {
+	now := time.Now()
+	repo := &mocks.CompanyRepositoryMock{}
+	repo.On("FindByID", uint(1)).Return(&models.Company{
+		ID:            1,
+		Name:          "テスト株式会社",
+		Description:   "キャッシュ済み概要",
+		Industry:      "IT",
+		InfoFetchedAt: &now,
+		SourceType:    "scrape",
+	}, nil)
+
+	fetcher := services.NewCompanyInfoFetcher(repo, nil)
+	result, err := fetcher.FetchAndSave(context.Background(), 1, false)
+	require.NoError(t, err)
+	assert.Equal(t, "キャッシュ済み概要", result.Description)
+	repo.AssertNotCalled(t, "Update", mock.Anything)
+}
+
+func TestCompanyInfoFetcher_FetchAndSave_SearchFallback(t *testing.T) {
+	srv := makeChatCompletionsServer(t, validCompanyInfoJSON())
+	defer srv.Close()
+
+	repo := &mocks.CompanyRepositoryMock{}
+	repo.On("FindByID", uint(1)).Return(&models.Company{
+		ID:   1,
+		Name: "テスト株式会社",
+		// WebsiteURL 空 → スクレイプせず Search→Parse
+	}, nil)
+	repo.On("Update", mock.AnythingOfType("*models.Company")).Return(nil).Run(func(args mock.Arguments) {
+		c := args.Get(0).(*models.Company)
+		assert.Equal(t, "web_search", c.SourceType)
+		assert.NotNil(t, c.InfoFetchedAt)
+		assert.Equal(t, "medium", c.LastFetchConfidence)
+	})
+
+	client := openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")
+	fetcher := services.NewCompanyInfoFetcher(repo, client)
+	result, err := fetcher.FetchAndSave(context.Background(), 1, true)
+	require.NoError(t, err)
+	assert.Equal(t, "テスト企業の概要", result.Description)
+	assert.Equal(t, "web_search", result.Source)
+}
+
+func TestCompanyInfoFetcher_FetchAndSave_CompanyNotFound(t *testing.T) {
+	repo := &mocks.CompanyRepositoryMock{}
+	repo.On("FindByID", uint(99)).Return(nil, errors.New("record not found"))
+	fetcher := services.NewCompanyInfoFetcher(repo, nil)
+	_, err := fetcher.FetchAndSave(context.Background(), 99, true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "company not found")
+}
+
+func TestCompanyInfoFetcher_FetchAndSave_UpdateError(t *testing.T) {
+	srv := makeChatCompletionsServer(t, validCompanyInfoJSON())
+	defer srv.Close()
+
+	repo := &mocks.CompanyRepositoryMock{}
+	repo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "テスト株式会社"}, nil)
+	repo.On("Update", mock.AnythingOfType("*models.Company")).Return(errors.New("db error"))
+
+	client := openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")
+	fetcher := services.NewCompanyInfoFetcher(repo, client)
+	_, err := fetcher.FetchAndSave(context.Background(), 1, true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to update company")
+}
+
+func TestCompanyInfoFetcher_Acquire_InvalidJSON(t *testing.T) {
+	srv := makeChatCompletionsServer(t, "JSONではないテキスト")
+	defer srv.Close()
+
+	client := openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")
+	fetcher := services.NewCompanyInfoFetcher(nil, client)
+	_, err := fetcher.Acquire(context.Background(), "テスト株式会社", "")
+	require.Error(t, err)
 }
