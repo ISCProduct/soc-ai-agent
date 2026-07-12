@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"os"
 	"sort"
 	"strings"
 )
@@ -203,7 +204,8 @@ func (s *MatchingService) GetDiagnostics(userID uint, sessionID string) (*Matchi
 	}, nil
 }
 
-// GenerateMatchReason AIを使ってマッチング理由を生成（オプション）
+// GenerateMatchReason はマッチング理由を返す。
+// 既定は DB/テンプレのみ（#588）。AI 生成は MATCHING_REASON_USE_AI=true のときだけ。
 func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) (string, error) {
 	if match == nil {
 		return "", fmt.Errorf("match is nil")
@@ -211,7 +213,7 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 	if match.Company == nil {
 		return "", fmt.Errorf("company is nil")
 	}
-	if s.aiClient == nil {
+	if !matchingReasonUseAI() || s.aiClient == nil {
 		return BuildMatchReason(match, userScores), nil
 	}
 
@@ -223,14 +225,20 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 		0.4,
 	)
 	if err != nil {
-		return "", err
+		log.Printf("[GenerateMatchReason] AI failed, fallback to template: %v", err)
+		return BuildMatchReason(match, userScores), nil
 	}
 
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
-		return "", fmt.Errorf("empty matching reason response")
+		return BuildMatchReason(match, userScores), nil
 	}
 	return reason, nil
+}
+
+func matchingReasonUseAI() bool {
+	v := strings.TrimSpace(os.Getenv("MATCHING_REASON_USE_AI"))
+	return strings.EqualFold(v, "true") || v == "1" || strings.EqualFold(v, "yes")
 }
 
 func buildMatchingReasonUserPrompt(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) string {
