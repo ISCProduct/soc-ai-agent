@@ -114,6 +114,20 @@ type CompanyWeightProfile struct {
 	UpdatedAt time.Time
 }
 
+// CompanyL1WarmRow は L1 温存バッチ用の候補行。
+type CompanyL1WarmRow struct {
+	Company
+	HasWeightProfile bool `json:"has_weight_profile" gorm:"column:has_weight_profile"`
+}
+
+// L1CoverageStats は公開マッチングカタログの L1 充足統計。
+type L1CoverageStats struct {
+	PublishedTotal int64 `json:"published_total"`
+	InfoFresh      int64 `json:"info_fresh"`
+	HasProfile     int64 `json:"has_profile"`
+	NeedsWarm      int64 `json:"needs_warm"`
+}
+
 // UserCompanyMatch ユーザーと企業のマッチング結果
 type UserCompanyMatch struct {
 	ID            uint                `gorm:"primaryKey"`

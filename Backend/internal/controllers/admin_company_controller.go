@@ -23,6 +23,7 @@ type AdminCompanyController struct {
 	infoFetcher  *services.CompanyInfoFetcher
 	jobFetcher   *services.JobFetchService
 	techFetcher  *services.TechStackFetcher
+	catalogWarm  *services.CatalogWarmService
 }
 
 func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.AuditLogService, gbiz *services.GBizInfoService, openaiClient ...*openai.Client) *AdminCompanyController {
@@ -32,6 +33,7 @@ func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.A
 		ctrl.infoFetcher = services.NewCompanyInfoFetcher(repo, openaiClient[0], gbiz)
 		ctrl.jobFetcher = services.NewJobFetchService(repo, openaiClient[0])
 		ctrl.techFetcher = services.NewTechStackFetcher(repo, openaiClient[0])
+		ctrl.catalogWarm = services.NewCatalogWarmService(repo, ctrl.infoFetcher, ctrl.jobFetcher)
 	}
 	return ctrl
 }
@@ -336,6 +338,47 @@ func (c *AdminCompanyController) FetchPersona(ctx echo.Context) error {
 	})
 
 	return ctx.JSON(http.StatusOK, profile)
+}
+
+// GetL1Coverage GET /api/admin/companies/l1-coverage
+func (c *AdminCompanyController) GetL1Coverage(ctx echo.Context) error {
+	if c.catalogWarm == nil {
+		c.catalogWarm = services.NewCatalogWarmService(c.repo, c.infoFetcher, c.jobFetcher)
+	}
+	cov, err := c.catalogWarm.Coverage(ctx.Request().Context())
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return ctx.JSON(http.StatusOK, cov)
+}
+
+// WarmL1Catalog POST /api/admin/companies/warm-l1
+// Body: { "limit": 100, "dry_run": true, "force": false, "include_info": true, "include_persona": true }
+func (c *AdminCompanyController) WarmL1Catalog(ctx echo.Context) error {
+	if c.catalogWarm == nil {
+		c.catalogWarm = services.NewCatalogWarmService(c.repo, c.infoFetcher, c.jobFetcher)
+	}
+	var opts services.L1WarmOptions
+	opts.IncludeInfo = true
+	opts.IncludePersona = true
+	if err := ctx.Bind(&opts); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
+	}
+	// Bind で false が欠落した場合の既定は normalize 側でも補完する
+	result, err := c.catalogWarm.WarmL1(ctx.Request().Context(), opts)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.warm_l1", "company", 0, map[string]any{
+		"dry_run":    result.DryRun,
+		"limit":      result.Limit,
+		"processed":  result.Processed,
+		"info_ok":    result.InfoOK,
+		"persona_ok": result.PersonaOK,
+		"errors":     result.Errors,
+	})
+	return ctx.JSON(http.StatusOK, result)
 }
 
 func applyCompanyDefaults(company *models.Company) {

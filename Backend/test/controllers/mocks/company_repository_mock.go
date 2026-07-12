@@ -2,6 +2,7 @@ package mocks
 
 import (
 	"Backend/internal/models"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -137,4 +138,20 @@ func (m *CompanyRepositoryMock) CreateOrUpdateWeightProfile(profile *models.Comp
 func (m *CompanyRepositoryMock) CountWeightProfiles() (int64, error) {
 	args := m.Called()
 	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *CompanyRepositoryMock) ListPublishedL1WarmCandidates(limit int, infoTTL time.Duration) ([]models.CompanyL1WarmRow, error) {
+	args := m.Called(limit, infoTTL)
+	if v := args.Get(0); v != nil {
+		return v.([]models.CompanyL1WarmRow), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *CompanyRepositoryMock) CountL1Coverage(infoTTL time.Duration) (*models.L1CoverageStats, error) {
+	args := m.Called(infoTTL)
+	if v := args.Get(0); v != nil {
+		return v.(*models.L1CoverageStats), args.Error(1)
+	}
+	return nil, args.Error(1)
 }
