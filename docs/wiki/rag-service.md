@@ -11,7 +11,9 @@ SOC AI Agent の RAG（Retrieval-Augmented Generation）サービスは Python /
 | 既定 | Docker Compose の `chroma` サービス（`chromadb/chroma:0.6.3`） |
 | RAG 接続 | `CHROMA_HOST` / `CHROMA_PORT` → `HttpClient` |
 | フォールバック | `CHROMA_HOST` 未設定時は `PersistentClient`（ローカル開発・単体テスト） |
+| 永続化 | compose named volume `chroma_data`（`chroma` 再作成でも保持） |
 | コレクション | `company_context` / `interview_hints` / `es_review`（企業メタデータ付き） |
+| 旧データ移行 | [chroma-migration.md](./chroma-migration.md)（#585） |
 | 設計 | `docs/design/vector-db.md` |
 
 ---
@@ -99,17 +101,17 @@ SOC AI Agent の RAG（Retrieval-Augmented Generation）サービスは Python /
 ### 設定
 
 ```env
-# ChromaDB データディレクトリ（デフォルト: /app/chroma_db）
+# 独立 Chroma（推奨）
+CHROMA_HOST=chroma
+CHROMA_PORT=8000
+
+# CHROMA_HOST 未設定時のみ PersistentClient 用
 RAG_CHROMA_DATA_DIR=/app/chroma_db
 ```
 
 ### キャッシュのリセット
 
-```sh
-# Docker Compose 環境の場合
-docker compose exec rag-review rm -rf /app/chroma_db
-docker compose restart rag-review
-```
+HttpClient 構成では RAG コンテナ内の `/app/chroma_db` 削除では消えません。`/vector/reembed` または Chroma 側コレクション削除を使います。ロールバックは [chroma-migration.md](./chroma-migration.md) を参照。
 
 ---
 
