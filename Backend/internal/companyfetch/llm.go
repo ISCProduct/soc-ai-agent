@@ -10,6 +10,12 @@ import (
 // LLM は企業情報パイプライン用の OpenAI ラッパ。
 type LLM struct {
 	Client *openai.Client
+	Budget SearchBudget // 任意。設定時は Search 前に月次予算を検査する
+}
+
+// NewLLM は企業パイプライン用 LLM を生成する。
+func NewLLM(client *openai.Client, budget SearchBudget) *LLM {
+	return &LLM{Client: client, Budget: budget}
 }
 
 // ExtractJSON は与えられたテキスト前提のプロンプトから JSON を抽出する（Extract モデル）。
@@ -27,7 +33,15 @@ func (l *LLM) ExtractJSON(ctx context.Context, systemPrompt, userPrompt string, 
 
 // SearchLiteJSON は安価な Search モデルのみを使う（deep search-preview は使わない）。
 func (l *LLM) SearchLiteJSON(ctx context.Context, userPrompt string, maxTokens int) (text string, model string, err error) {
-	if l == nil || l.Client == nil {
+	if l == nil {
+		return "", "", fmt.Errorf("openai client is nil")
+	}
+	if l.Budget != nil {
+		if err := l.Budget.AllowSearch(); err != nil {
+			return "", "", err
+		}
+	}
+	if l.Client == nil {
 		return "", "", fmt.Errorf("openai client is nil")
 	}
 	if maxTokens <= 0 {

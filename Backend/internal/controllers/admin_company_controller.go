@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/companyfetch"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services"
@@ -36,6 +37,25 @@ func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.A
 		ctrl.catalogWarm = services.NewCatalogWarmService(repo, ctrl.infoFetcher, ctrl.jobFetcher)
 	}
 	return ctrl
+}
+
+// SetCompanySearchGuards は FirstTouch Search の予算・singleflight を注入する（#587）。
+func (c *AdminCompanyController) SetCompanySearchGuards(budget companyfetch.SearchBudget, flight *services.CompanySearchFlight) {
+	if c == nil {
+		return
+	}
+	if c.infoFetcher != nil {
+		c.infoFetcher.SetSearchBudget(budget)
+		c.infoFetcher.SetSearchFlight(flight)
+	}
+	if c.jobFetcher != nil {
+		c.jobFetcher.SetSearchBudget(budget)
+		c.jobFetcher.SetSearchFlight(flight)
+	}
+	if c.techFetcher != nil {
+		c.techFetcher.SetSearchBudget(budget)
+		c.techFetcher.SetSearchFlight(flight)
+	}
 }
 
 // List GET /api/admin/companies

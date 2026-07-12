@@ -12,13 +12,18 @@ import (
 type AdminCostsController struct {
 	costService          interfaces.APICostService
 	realtimeUsageService interfaces.RealtimeUsageService
+	searchBudgetService  interfaces.CompanySearchBudgetService
 }
 
-func NewAdminCostsController(costService interfaces.APICostService, realtimeUsageService interfaces.RealtimeUsageService) *AdminCostsController {
-	return &AdminCostsController{
+func NewAdminCostsController(costService interfaces.APICostService, realtimeUsageService interfaces.RealtimeUsageService, searchBudget ...interfaces.CompanySearchBudgetService) *AdminCostsController {
+	ctrl := &AdminCostsController{
 		costService:          costService,
 		realtimeUsageService: realtimeUsageService,
 	}
+	if len(searchBudget) > 0 {
+		ctrl.searchBudgetService = searchBudget[0]
+	}
+	return ctrl
 }
 
 // Summary handles GET /api/admin/costs/summary
@@ -51,7 +56,7 @@ func (c *AdminCostsController) Summary(ctx echo.Context) error {
 		return echoInternalError(err)
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"current_month_cost_usd": monthTotal,
 		"model_breakdown":        modelBreakdown,
 		"realtime": map[string]any{
@@ -59,7 +64,14 @@ func (c *AdminCostsController) Summary(ctx echo.Context) error {
 			"active_connections":     activeConnections,
 			"user_breakdown":         realtimeUsers,
 		},
-	})
+	}
+	if c.searchBudgetService != nil {
+		if status, serr := c.searchBudgetService.Status(); serr == nil {
+			payload["company_search"] = status
+		}
+	}
+
+	return ctx.JSON(http.StatusOK, payload)
 }
 
 // Daily handles GET /api/admin/costs/daily?days=30
