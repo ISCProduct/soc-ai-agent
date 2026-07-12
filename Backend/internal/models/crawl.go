@@ -9,8 +9,8 @@ type CrawlSource struct {
 	TargetType   string     `gorm:"type:varchar(50);not null" json:"target_type"`   // company, popular_companies, etc
 	SourceType   string     `gorm:"type:varchar(50)" json:"source_type"`            // official, job_site, manual
 	SourceURL    string     `gorm:"type:varchar(500)" json:"source_url"`            // crawler target URL
-	ScheduleType string     `gorm:"type:varchar(20);not null" json:"schedule_type"` // weekly, monthly
-	ScheduleDay  int        `gorm:"default:1" json:"schedule_day"`                  // 0-6 (weekly) or 1-31 (monthly)
+	ScheduleType string     `gorm:"type:varchar(20);not null" json:"schedule_type"` // daily, weekly, monthly
+	ScheduleDay  int        `gorm:"default:1" json:"schedule_day"`                  // unused for daily; 0-6 weekly; 1-31 monthly
 	ScheduleTime string     `gorm:"type:varchar(10);not null" json:"schedule_time"` // HH:MM
 	IsActive     bool       `gorm:"default:true" json:"is_active"`
 	LastRunAt    *time.Time `json:"last_run_at,omitempty"`

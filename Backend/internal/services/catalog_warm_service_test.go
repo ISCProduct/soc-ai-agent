@@ -107,4 +107,10 @@ func TestCoverage_Rates(t *testing.T) {
 	if cov.ProfileRate != 0.5 {
 		t.Fatalf("profile_rate=%v want 0.5", cov.ProfileRate)
 	}
+	if !cov.BelowTarget {
+		t.Fatal("expected below_target")
+	}
+	if len(cov.Alerts) == 0 {
+		t.Fatal("expected alerts")
+	}
 }
