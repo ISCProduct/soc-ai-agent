@@ -124,3 +124,14 @@ func TestCompanyValidationService_NoOpenAIReturnsNotExists(t *testing.T) {
 		t.Fatalf("source=%q", result.Source)
 	}
 }
+
+func TestCompanyValidationService_SearchCandidatesWebFailureReturnsEmpty(t *testing.T) {
+	svc := NewCompanyValidationService(&fakeCompanyLookup{exact: map[string]*models.Company{}}, nil)
+	results, err := svc.SearchCandidates(context.Background(), "未知企業ABC", true)
+	if err != nil {
+		t.Fatalf("WEB補完失敗でもエラーにしない: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("候補なしを期待: %+v", results)
+	}
+}

@@ -153,7 +153,17 @@ function ResumeContent() {
     try {
       if (!includeWebSearch) {
         const res = await fetch(`/api/companies?name=${encodeURIComponent(q)}&limit=5`, { cache: 'no-store' })
-        if (!res.ok) throw new Error('DB検索に失敗しました')
+        if (!res.ok) {
+          const errText = await res.text()
+          let message = 'DB検索に失敗しました'
+          try {
+            const parsed = JSON.parse(errText)
+            message = parsed?.message || parsed?.error || message
+          } catch {
+            /* keep default */
+          }
+          throw new Error(message)
+        }
         const data = await res.json()
         const companies = (data.companies || data || []) as { id?: number; name?: string; description?: string }[]
         const list = (Array.isArray(companies) ? companies : [])
@@ -173,31 +183,39 @@ function ResumeContent() {
         return
       }
 
-      const res = await fetch('/api/companies/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q }),
-      })
-      const data = await res.json()
+      // WEB: 候補一覧 API（DB優先 + WEB補完）。単体 validate より候補選択しやすい
+      const res = await fetch(`/api/companies/web-search?q=${encodeURIComponent(q)}`, { cache: 'no-store' })
+      const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        throw new Error(data?.message || data?.error || '実在確認に失敗しました')
+        throw new Error(data?.message || data?.error || 'WEB検索に失敗しました')
       }
-      if (!data.exists) {
+      const results = (data.results || []) as {
+        name?: string
+        description?: string
+        source?: string
+        exists?: boolean
+        confidence?: string
+        company_id?: number
+        evidence_urls?: string[]
+      }[]
+      const list = (Array.isArray(results) ? results : [])
+        .filter((c) => c?.name && c.exists !== false)
+        .map((c) => ({
+          name: c.name as string,
+          description: c.description || '',
+          source: c.source || 'web_search',
+          exists: true,
+          confidence: c.confidence,
+          company_id: c.company_id,
+          evidence_urls: c.evidence_urls || [],
+        }))
+      setCompanyCandidates(list)
+      if (list.length === 0) {
         setCompanyValidated(false)
         setSelectedCompanyMeta(null)
         setCompanyName('')
-        setCompanySearchError('実在が確認できませんでした。別の企業名で検索してください')
-        return
+        setCompanySearchError('候補が見つかりませんでした。企業名を変えて再検索するか、職種のみでレビューしてください')
       }
-      selectCompany({
-        name: data.canonical_name || q,
-        description: data.description || '',
-        source: data.source || 'web_search',
-        exists: true,
-        confidence: data.confidence,
-        company_id: data.company_id,
-        evidence_urls: data.evidence_urls || [],
-      })
     } catch (err) {
       setCompanySearchError(err instanceof Error ? err.message : '企業検索に失敗しました')
     } finally {
@@ -459,6 +477,12 @@ function ResumeContent() {
                 setCompanyValidated(false)
                 setSelectedCompanyMeta(null)
                 setCompanyName('')
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  void handleSearchCompanies(false)
+                }
               }}
               fullWidth
               helperText={companyValidated ? `選択済み: ${companyName}` : '未選択（職種のみレビュー可）'}
