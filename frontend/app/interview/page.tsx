@@ -134,7 +134,7 @@ function InterviewContent() {
   const [webSearchResults, setWebSearchResults] = useState<{ name: string; description: string }[]>([])
   const [webSearchLoading, setWebSearchLoading] = useState(false)
   const [positionCategory, setPositionCategory] = useState<'general' | 'sier'>('general')
-  const [companyHints, setCompanyHints] = useState<{ style_tags: string[]; top_questions: string[] } | null>(null)
+  const [companyHints, setCompanyHints] = useState<{ style_tags: string[]; top_questions: string[]; company_brief?: string } | null>(null)
   const [hintsLoading, setHintsLoading] = useState(false)
 
   const [isRecording, _setIsRecording] = useState(false)
@@ -1100,10 +1100,18 @@ function InterviewContent() {
                     {hintsLoading ? (
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <CircularProgress size={14} sx={{ color: '#d97706' }} />
-                        <Typography sx={{ fontSize: 12, color: '#92400e' }}>傾向を調査中...</Typography>
+                        <Typography sx={{ fontSize: 12, color: '#92400e' }}>共有キャッシュから読み込み中...</Typography>
                       </Box>
-                    ) : companyHints && (companyHints.style_tags.length > 0 || companyHints.top_questions.length > 0) ? (
+                    ) : companyHints && (companyHints.style_tags.length > 0 || companyHints.top_questions.length > 0 || companyHints.company_brief) ? (
                       <Stack spacing={1.5}>
+                        {companyHints.company_brief ? (
+                          <Box>
+                            <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#b45309', mb: 0.5 }}>企業スナップショット（DB）</Typography>
+                            <Typography sx={{ fontSize: 12, color: '#78350f', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                              {companyHints.company_brief}
+                            </Typography>
+                          </Box>
+                        ) : null}
                         {companyHints.style_tags.length > 0 && (
                           <Box>
                             <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#b45309', mb: 0.5 }}>面接スタイル</Typography>
@@ -1129,7 +1137,9 @@ function InterviewContent() {
                         )}
                       </Stack>
                     ) : (
-                      <Typography sx={{ fontSize: 12, color: '#92400e' }}>企業を選択すると面接傾向を表示します。</Typography>
+                      <Typography sx={{ fontSize: 12, color: '#92400e' }}>
+                        共有キャッシュに企業情報があるとスナップショットを表示します（都度Web検索はしません）。
+                      </Typography>
                     )}
                   </Paper>
                 )}

@@ -218,6 +218,31 @@ class TestReviewEndpoint:
         call_kwargs = mock_crewai.call_args
         assert call_kwargs.kwargs.get("context_source") == "none"
 
+    def test_review_prefers_company_context_over_web_search(self):
+        """Backend brief（company_context）があるとき Search しない。"""
+        from fastapi.testclient import TestClient
+
+        with patch("main.get_cached_context", return_value=[]) as mock_cache, \
+             patch("main.USE_DEEP_RESEARCH", True), \
+             patch("main.ALLOW_WEB_SEARCH_FALLBACK", True), \
+             patch("main._run_async") as mock_async, \
+             patch("main.set_cached_context"), \
+             patch("main.run_crewai", return_value="brief利用レポート") as mock_crewai:
+
+            client = TestClient(main.app)
+            resp = client.post("/resume/review", json={
+                "resume_text": "経歴テスト",
+                "company_name": "テスト企業",
+                "company_context": "企業名: テスト企業\n事業: SaaS",
+            })
+
+        assert resp.status_code == 200
+        mock_async.assert_not_called()
+        mock_cache.assert_not_called()
+        call_kwargs = mock_crewai.call_args
+        assert call_kwargs.kwargs.get("context_source") == "company_brief"
+        assert call_kwargs.kwargs.get("context_docs") == ["企業名: テスト企業\n事業: SaaS"]
+
     def test_review_missing_resume_text(self):
         from fastapi.testclient import TestClient
         client = TestClient(main.app)
@@ -227,6 +252,26 @@ class TestReviewEndpoint:
         })
         assert resp.status_code == 422
 
+    def test_hints_skips_web_search_when_fallback_disabled(self):
+        from fastapi.testclient import TestClient
+
+        with patch("main.get_cached_context", return_value=[]), \
+             patch("main.ALLOW_WEB_SEARCH_FALLBACK", False), \
+             patch("main._run_hints_web_search") as mock_search, \
+             patch("main._parse_hints_from_text", return_value=main.CompanyHintsResponse(
+                 style_tags=[], top_questions=[], cached=False
+             )) as mock_parse:
+
+            client = TestClient(main.app)
+            resp = client.post("/company/hints", json={
+                "company_name": "テスト企業",
+                "position": "エンジニア",
+            })
+
+        assert resp.status_code == 200
+        mock_search.assert_not_called()
+        mock_parse.assert_called_once()
+
     def test_review_missing_company_name(self):
         from fastapi.testclient import TestClient
         client = TestClient(main.app)
@@ -235,6 +280,7 @@ class TestReviewEndpoint:
             "company_name": "",
         })
         assert resp.status_code == 422
+
 
 
 class TestFailureCases:

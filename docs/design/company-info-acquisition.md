@@ -584,9 +584,9 @@ PoC（実装前の確認項目）: 大手〜スタートアップ 10 社で (a) 
 
 - [x] `lookupCompanyProfile` → DB brief（Search/LLM調査なし）
 - [x] `CompanyBriefBuilder` + 面接/履歴書レビューへの注入
-- [ ] hints / resume web_search の企業キャッシュ強制（RAG側）
+- [x] hints / resume / ES の企業キャッシュ強制（RAG: `company_context` 優先、`RAG_ALLOW_WEB_SEARCH_FALLBACK` 既定 false）
 - [ ] L1 カタログ一括温存バッチ（Core+中小SI）
-- [ ] 壁打ち専用 UI への `company_brief` 明示注入（チャット経路の追従）
+- [x] 壁打ち UI: `GET /api/companies/brief` + 面接 hints へ brief 注入（チャット経路の追従）
 
 ### 含まない（後続）
 

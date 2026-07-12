@@ -101,7 +101,7 @@ services:
     networks:
       - soc-ai-network
 
-  # Resume review RAG (DuckDuckGo + CrewAI)
+  # Resume review RAG
   rag-review:
     build:
       context: ./rag
@@ -118,8 +118,31 @@ services:
       - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       - OPENAI_HINTS_MODEL=${OPENAI_HINTS_MODEL:-gpt-4o-search-preview}
       - OPENAI_HINTS_PARSE_MODEL=${OPENAI_HINTS_PARSE_MODEL:-gpt-4o}
+      - CHROMA_HOST=${CHROMA_HOST:-chroma}
+      - CHROMA_PORT=${CHROMA_PORT:-8000}
+      # Phase 1B: Read 経路は既定で Search しない（admin 温存時のみ true）
+      - RAG_ALLOW_WEB_SEARCH_FALLBACK=${RAG_ALLOW_WEB_SEARCH_FALLBACK:-false}
+      - RAG_USE_DEEP_RESEARCH=${RAG_USE_DEEP_RESEARCH:-false}
     volumes:
       - rag_data:/data
+    depends_on:
+      - chroma
+    networks:
+      - soc-ai-network
+
+  # Vector DB for RAG embeddings (#573 / #557)
+  chroma:
+    image: chromadb/chroma:0.6.3
+    container_name: soc-ai-chroma
+    profiles:
+      - rag
+    ports:
+      - "${CHROMA_HOST_PORT:-8000}:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
     networks:
       - soc-ai-network
 
@@ -127,6 +150,8 @@ volumes:
   mysql_data:
     driver: local
   rag_data:
+    driver: local
+  chroma_data:
     driver: local
   go_mod_cache:
     driver: local

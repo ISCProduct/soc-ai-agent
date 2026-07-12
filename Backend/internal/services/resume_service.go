@@ -817,9 +817,10 @@ type aiReviewItem struct {
 }
 
 type ragReviewRequest struct {
-	ResumeText  string `json:"resume_text"`
-	CompanyName string `json:"company_name"`
-	JobTitle    string `json:"job_title"`
+	ResumeText      string `json:"resume_text"`
+	CompanyName     string `json:"company_name"`
+	JobTitle        string `json:"job_title"`
+	CompanyContext  string `json:"company_context,omitempty"`
 }
 
 type ragReviewResponse struct {
@@ -835,9 +836,10 @@ func (s *ResumeService) fetchRAGReport(resumeText, companyName, jobTitle string)
 	log.Printf("resume_review: rag request company=%q job_title=%q", companyName, jobTitle)
 
 	payload := ragReviewRequest{
-		ResumeText:  resumeText,
-		CompanyName: companyName,
-		JobTitle:    jobTitle,
+		ResumeText:     resumeText,
+		CompanyName:    companyName,
+		JobTitle:       jobTitle,
+		CompanyContext: s.lookupCompanyBriefFromCache(companyName),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -886,9 +888,10 @@ func (s *ResumeService) fetchRAGReportStream(ctx context.Context, resumeText, co
 	}
 
 	payload := ragReviewRequest{
-		ResumeText:  resumeText,
-		CompanyName: companyName,
-		JobTitle:    jobTitle,
+		ResumeText:     resumeText,
+		CompanyName:    companyName,
+		JobTitle:       jobTitle,
+		CompanyContext: s.lookupCompanyBriefFromCache(companyName),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -1115,21 +1118,9 @@ func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, c
 	}
 	text := buildResumeText(blocks, 30000)
 	if strings.TrimSpace(companyName) != "" && strings.TrimSpace(companyInfo) == "" {
-		// 共有キャッシュ優先。未登録時のみ従来のモデル知識サマリ（Searchではない）
+		// 共有キャッシュのみ。未登録時は空（Search / 都度 LLM 企業調査はしない）
 		if brief := s.lookupCompanyBriefFromCache(companyName); brief != "" {
 			companyInfo = brief
-		} else {
-			companyPrompt := fmt.Sprintf(`企業名: %s
-採用観点（求める人物像・評価軸・事業領域）を簡潔に整理してください。
-不確かな情報は断定せず、一般的に言える範囲で述べてください。
-出力は次のJSONのみ:
-{"summary":"200〜300字の企業概要","evaluation_axes":["評価軸1","評価軸2"],"keywords":["キーワード1","キーワード2"]}`, companyName)
-			info, err := s.aiClient.Responses(context.Background(), companyPrompt)
-			if err == nil {
-				companyInfo = info
-			} else {
-				log.Printf("resume_review: company summary failed: %v", err)
-			}
 		}
 	}
 
