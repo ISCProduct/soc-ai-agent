@@ -1,8 +1,12 @@
 package companyfetch
 
 import (
+	"context"
 	"testing"
 	"time"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -47,6 +51,29 @@ func TestValidatePublicHTTPURL(t *testing.T) {
 	assert.Error(t, ValidatePublicHTTPURL("http://127.0.0.1/"))
 	assert.Error(t, ValidatePublicHTTPURL("http://10.0.0.1/"))
 	assert.Error(t, ValidatePublicHTTPURL("http://localhost/"))
+}
+
+func TestFirstFetchableText_Success(t *testing.T) {
+	// Acquire は gBiz→Search に移行済みだが、スクレイプユーティリティ自体の成功パスを担保する
+	allowPrivateURLs = true
+	t.Cleanup(func() { allowPrivateURLs = false })
+
+	body := strings.Repeat("企業の採用情報です。", 20)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<html><body><p>" + body + "</p></body></html>"))
+	}))
+	t.Cleanup(srv.Close)
+
+	text, sourceURL, err := FirstFetchableText(context.Background(), []string{srv.URL + "/careers"})
+	assert.NoError(t, err)
+	assert.Equal(t, srv.URL+"/careers", sourceURL)
+	assert.Contains(t, text, "企業の採用情報")
+}
+
+func TestFirstFetchableText_RejectsPrivateURL(t *testing.T) {
+	_, _, err := FirstFetchableText(context.Background(), []string{"http://127.0.0.1/secret"})
+	assert.Error(t, err)
 }
 
 func TestExtractJSONObject(t *testing.T) {

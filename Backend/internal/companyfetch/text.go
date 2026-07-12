@@ -33,6 +33,9 @@ const (
 	maxRedirects        = 5
 )
 
+// allowPrivateURLs は単体テスト専用。本番では常に false。
+var allowPrivateURLs bool
+
 var (
 	scriptRe = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
 	styleRe  = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
@@ -90,12 +93,14 @@ func ValidatePublicHTTPURL(rawURL string) error {
 	if host == "" {
 		return fmt.Errorf("url host is empty")
 	}
-	if host == "localhost" || strings.HasSuffix(strings.ToLower(host), ".localhost") {
-		return fmt.Errorf("requests to localhost are not allowed")
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
-			return fmt.Errorf("requests to internal ip addresses are not allowed")
+	if !allowPrivateURLs {
+		if host == "localhost" || strings.HasSuffix(strings.ToLower(host), ".localhost") {
+			return fmt.Errorf("requests to localhost are not allowed")
+		}
+		if ip := net.ParseIP(host); ip != nil {
+			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+				return fmt.Errorf("requests to internal ip addresses are not allowed")
+			}
 		}
 	}
 	return nil
