@@ -101,7 +101,7 @@ services:
     networks:
       - soc-ai-network
 
-  # Resume review RAG
+  # Resume review RAG（profile=rag 必須。make rag-up 推奨）
   rag-review:
     build:
       context: ./rag

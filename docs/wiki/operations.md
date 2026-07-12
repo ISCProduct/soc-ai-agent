@@ -139,11 +139,19 @@ curl -X POST http://localhost:8080/api/interviews/{sessionID}/send-report \
 
 **対処:**
 ```sh
-# RAGサービス状態確認
-curl http://localhost:9000/health
+# RAG + Chroma を確実に起動（ビルド込み）
+make rag-up
 
-# RAGサービス再起動
-docker compose --profile rag restart rag-review
+# 状態確認（vector_store.ok 必須）
+curl -s http://localhost:9000/health
+curl -s http://localhost:8000/api/v2/heartbeat
+curl -s http://localhost:9000/vector/status
+
+# 旧イメージ疑い → 強制 rebuild
+make rag-rebuild
+
+# ログ
+docker compose --profile rag logs --tail 80 chroma rag-review
 ```
 
 ### スコアキャリブレーション「サンプル不足」エラー

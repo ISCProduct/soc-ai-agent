@@ -247,16 +247,54 @@ npm run dev   # http://localhost:3000
 ローカル開発には `compose.yml` を使用します。
 
 ```sh
+# コア（db / app / frontend）
 docker compose up -d --build
+
+# または
+make core-up
 ```
 
 **注意:** プロジェクト直下には `docker-compose.yml` も存在しますが、こちらは **本番環境（AWS ECR/RDS接続）用** です。ローカル開発で誤って使用すると本番DBに接続しようとするため、必ずデフォルトの `compose.yml`（ファイル名指定なしの `docker compose` コマンドで読み込まれます）を使用してください。
 
-重いサービス（RAG）を後から起動する場合:
+### RAG + Chroma（profile=rag・推奨）
+
+履歴書レビュー / 面接 hints / 企業コンテキストには **独立 Chroma** と **rag-review** が必要です。  
+`compose.yml` では `profiles: [rag]` のため、コア起動だけでは立ち上がりません。
 
 ```sh
-docker compose --profile rag up -d rag-review
+# one-shot（ビルド込み + スモーク）
+make rag-up
+# または
+./scripts/dev-rag-up.sh
+# または
+docker compose --profile rag up -d --build chroma rag-review
 ```
+
+| サービス | 役割 | ポート |
+|---------|------|--------|
+| `chroma` | ベクトル DB（永続 volume `chroma_data`） | 8000 |
+| `rag-review` | RAG API（`CHROMA_HOST=chroma`） | 9000 |
+
+**スモーク（必ず確認）**
+
+```sh
+make rag-smoke
+# または
+curl -s http://localhost:8000/api/v2/heartbeat
+curl -s http://localhost:9000/health
+# → {"status":"ok","vector_store":{"ok":true,"detail":"chromadb http://chroma:8000"}}
+curl -s http://localhost:9000/vector/status
+```
+
+`/health` に `vector_store` が無い・`/vector/status` が 404 のときは **旧 RAG イメージ**です。
+
+```sh
+make rag-rebuild
+# または
+docker compose --profile rag up -d --build --force-recreate chroma rag-review
+```
+
+Backend からは compose 内で `RAG_REVIEW_URL=http://rag-review:9000`（`Backend/.env.example` 参照）。ホストから叩く場合は `http://localhost:9000`。
 
 ---
 
@@ -269,13 +307,14 @@ docker compose --profile rag up -d rag-review
 
 ### サービス一覧
 
-| サービス | 役割 | ポート |
-|---------|------|--------|
-| `app` | Go バックエンド API | 8080 |
-| `db` | MySQL 8.0 | 3306 |
-| `frontend` | Next.js | 3000 |
-| `rag-review` | 職務経歴書 RAG | 9000 |
-| `company-graph` | 企業スクレイピング | 9100 |
+| サービス | 役割 | ポート | 備考 |
+|---------|------|--------|------|
+| `app` | Go バックエンド API | 8080 | |
+| `db` | MySQL 8.0 | 3306 | |
+| `frontend` | Next.js | 3000 | |
+| `chroma` | ベクトル DB | 8000 | **profile `rag`** |
+| `rag-review` | 職務経歴書 / hints RAG | 9000 | **profile `rag`**（Chroma 依存） |
+| `company-graph` | 企業スクレイピング | 9100 | profile `company-graph` |
 
 ---
 
