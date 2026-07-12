@@ -71,18 +71,6 @@ func (s *CompanySearchBudgetService) AllowSearch() error {
 		log.Printf("[CompanySearchBudget] status check failed: %v", err)
 		return nil // 監視失敗で Write を止めない
 	}
-	// #region agent log
-	func() {
-		f, e := os.OpenFile("/Users/oohashikazuyuki/soc-ai-agent-mock/.cursor/debug-6a5539.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if e != nil {
-			return
-		}
-		defer f.Close()
-		payload := fmt.Sprintf(`{"sessionId":"6a5539","runId":"pre-fix","hypothesisId":"H-budget","location":"company_search_budget_service.go:AllowSearch","message":"budget check","data":{"month":%q,"count":%d,"limit":%d,"enforce":%v,"exceeded":%v},"timestamp":%d}`+"\n",
-			status.Month, status.Count, status.Limit, s.enforce, status.Exceeded, time.Now().UnixMilli())
-		_, _ = f.WriteString(payload)
-	}()
-	// #endregion
 	if status.Count >= s.alertThreshold {
 		s.notifyIfNeeded(status)
 	}
