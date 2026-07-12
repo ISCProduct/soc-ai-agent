@@ -230,7 +230,7 @@ export default function AdminCompanyInfoEditPage() {
             {forceLoading ? '再取得中...' : '強制再取得して保存'}
           </Button>
           <Typography variant="caption" color="text.secondary">
-            公式URLスクレイプ優先、失敗時のみ Web Search（#557）
+            OpenAI Web Search で公開事実のみを取得し構造化します（#557 Phase 1 暫定）
           </Typography>
         </Stack>
 

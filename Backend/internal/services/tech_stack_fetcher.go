@@ -94,6 +94,7 @@ func (f *TechStackFetcher) FetchAndSave(ctx context.Context, companyID uint, for
 }
 
 // Acquire は DB 非更新で技術スタックを取得する。
+// Phase 1 暫定: スクレイプは使わず、OpenAI Search で公開事実のみを収集する。
 func (f *TechStackFetcher) Acquire(ctx context.Context, companyName, websiteURL string) (*TechStackResult, error) {
 	if f.llm == nil || f.llm.Client == nil {
 		return nil, fmt.Errorf("openai client is nil")
@@ -101,32 +102,18 @@ func (f *TechStackFetcher) Acquire(ctx context.Context, companyName, websiteURL 
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	systemPrompt := `あなたは技術スタックの抽出アシスタントです。与えられたテキストに書かれている技術のみをJSON化してください。推測で埋めてはいけません。不明な項目は空配列または空文字にしてください。`
+	systemPrompt := `あなたは技術スタックの構造化アシスタントです。検索結果に明示された技術のみをJSON化してください。推測で埋めてはいけません。不明な項目は空配列または空文字にしてください。`
 
-	engURLs := companyfetch.CandidateCareerURLs(websiteURL)
-	if text, sourceURL, err := companyfetch.FirstFetchableText(engURLs); err == nil {
-		userPrompt := fmt.Sprintf(
-			"企業「%s」のページテキストから技術スタックを抽出し、次のJSON形式のみで回答してください。\n%s\n\n---\nテキスト:\n%s",
-			companyName, techStackJSONSchema, text,
-		)
-		raw, model, err := f.llm.ExtractJSON(ctx, systemPrompt, userPrompt, 400)
-		if err == nil {
-			if result, parseErr := parseTechStackResult(raw); parseErr == nil && len(result.TechStack) > 0 {
-				result.Source = companyfetch.SourceScrape
-				result.SourceURL = sourceURL
-				result.ModelUsed = model
-				result.Confidence = companyfetch.ConfidenceHigh
-				return result, nil
-			}
-		}
+	siteHint := websiteURL
+	if siteHint == "" {
+		siteHint = "不明"
 	}
-
 	searchPrompt := fmt.Sprintf(
-		`日本のIT企業「%s」が採用・技術ブログ等で公開している技術スタック（言語・フレームワーク・インフラ・CI/CD・開発手法）を調べ、根拠URL付きで簡潔にまとめてください。公式サイト: %s`,
-		companyName, websiteURL,
+		`日本のIT企業「%s」が採用ページ・技術ブログ等で公開している技術スタック（言語・フレームワーク・インフラ・CI/CD・開発手法）を調べてください。公式サイト: %s。公開情報として確認できる事実と根拠URLのみをまとめ、推測はしないでください。`,
+		companyName, siteHint,
 	)
 	parseUser := fmt.Sprintf(
-		"企業「%s」について、検索結果に基づき次のJSON形式のみで回答してください。\n%s",
+		"企業「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。推測禁止。\n%s",
 		companyName, techStackJSONSchema,
 	)
 	raw, modelsUsed, err := f.llm.SearchThenParse(ctx, searchPrompt, systemPrompt, parseUser, 400)

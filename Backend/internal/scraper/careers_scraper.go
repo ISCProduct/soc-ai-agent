@@ -26,7 +26,7 @@ type JobPostingResult struct {
 	Source          string   `json:"source"` // scrape | web_search
 }
 
-// CareersScraper は公式ページのスクレイプ優先、失敗時 Search→Parse で求人を取得する。
+// CareersScraper は Web Search→Parse で求人を取得する（Phase 1 暫定: スクレイプなし）。
 type CareersScraper struct {
 	llm *companyfetch.LLM
 }
@@ -55,7 +55,8 @@ const jobsJSONSchema = `
   ]
 }`
 
-// FetchJobs はスクレイプ優先、失敗時 Search→Parse で求人一覧を取得する。
+// FetchJobs は Web Search→Parse で求人一覧を取得する。
+// Phase 1 暫定: 採用ページのスクレイプは行わず、OpenAI Search で公開求人の事実のみを収集する。
 func (s *CareersScraper) FetchJobs(ctx context.Context, companyName, websiteURL string) ([]JobPostingResult, error) {
 	if s.llm == nil || s.llm.Client == nil {
 		return nil, fmt.Errorf("openai client is nil")
@@ -64,31 +65,18 @@ func (s *CareersScraper) FetchJobs(ctx context.Context, companyName, websiteURL 
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	systemPrompt := `あなたは採用情報の抽出アシスタントです。与えられたテキストに記載のある求人のみをJSON化してください。求人を推測で作り上げてはいけません。求人が無ければ {"jobs": []} を返してください。`
+	systemPrompt := `あなたは採用情報の構造化アシスタントです。検索結果に明示された公開求人のみをJSON化してください。求人を推測で作り上げてはいけません。求人が無ければ {"jobs": []} を返してください。`
 
-	careerURLs := companyfetch.CandidateCareerURLs(websiteURL)
-	// 採用系パスを優先（トップページは後回し）
-	prioritized := prioritizeCareerURLs(careerURLs)
-	if text, sourceURL, err := companyfetch.FirstFetchableText(prioritized); err == nil {
-		userPrompt := fmt.Sprintf(
-			"企業「%s」の採用ページテキストから募集職種を抽出し、次のJSON形式のみで回答してください。\n%s\n\n出典URL: %s\n\n---\nテキスト:\n%s",
-			companyName, jobsJSONSchema, sourceURL, text,
-		)
-		raw, _, err := s.llm.ExtractJSON(ctx, systemPrompt, userPrompt, 1500)
-		if err == nil {
-			jobs, parseErr := parseJobsJSON(raw, companyfetch.SourceScrape, sourceURL)
-			if parseErr == nil && len(jobs) > 0 {
-				return jobs, nil
-			}
-		}
+	siteHint := websiteURL
+	if siteHint == "" {
+		siteHint = "不明"
 	}
-
 	searchPrompt := fmt.Sprintf(
-		`日本の企業「%s」の現在公開中の求人・採用職種を調べ、職種名・勤務地・雇用形態・求人URLが分かる範囲で簡潔に列挙してください。公式採用ページのURLがあれば含めてください。公式サイト: %s`,
-		companyName, websiteURL,
+		`日本の企業「%s」の現在公開中の求人・採用職種を調べてください。公式サイト: %s。職種名・勤務地・雇用形態・求人URLが公開情報として確認できるものだけを列挙し、根拠URLを含めてください。確認できない求人は含めないでください。`,
+		companyName, siteHint,
 	)
 	parseUser := fmt.Sprintf(
-		"企業「%s」について、検索結果に基づき次のJSON形式のみで回答してください。推測の求人は入れないでください。\n%s",
+		"企業「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。推測の求人は入れないでください。\n%s",
 		companyName, jobsJSONSchema,
 	)
 	raw, _, err := s.llm.SearchThenParse(ctx, searchPrompt, systemPrompt, parseUser, 1500)
@@ -96,17 +84,6 @@ func (s *CareersScraper) FetchJobs(ctx context.Context, companyName, websiteURL 
 		return nil, fmt.Errorf("求人情報の取得失敗: %w", err)
 	}
 	return parseJobsJSON(raw, companyfetch.SourceWebSearch, "")
-}
-
-func prioritizeCareerURLs(urls []string) []string {
-	if len(urls) <= 1 {
-		return urls
-	}
-	// CandidateCareerURLs は [base, /careers, ...] の順。base を末尾へ。
-	out := make([]string, 0, len(urls))
-	out = append(out, urls[1:]...)
-	out = append(out, urls[0])
-	return out
 }
 
 func parseJobsJSON(text, source, defaultURL string) ([]JobPostingResult, error) {

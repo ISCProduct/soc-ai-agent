@@ -112,7 +112,8 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 	return result, nil
 }
 
-// Acquire は企業名と任意の公式 URL から基本情報を取得する（DB 非更新）。
+// Acquire は企業名から Web Search→Parse で基本情報を取得する（DB 非更新）。
+// Phase 1 暫定: スクレイプは運用コストが高いため使わず、OpenAI Search で事実のみを収集する。
 func (f *CompanyInfoFetcher) Acquire(ctx context.Context, companyName, websiteURL string) (*CompanyInfoResult, error) {
 	if f.llm == nil || f.llm.Client == nil {
 		return nil, fmt.Errorf("openai client is nil")
@@ -121,31 +122,18 @@ func (f *CompanyInfoFetcher) Acquire(ctx context.Context, companyName, websiteUR
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	systemPrompt := `あなたは企業情報の抽出アシスタントです。与えられたテキストに書かれている事実のみをJSONで抽出してください。テキストに無い項目は空文字または0にしてください。推測で埋めてはいけません。`
+	systemPrompt := `あなたは企業情報の構造化アシスタントです。検索結果に明示された事実のみをJSON化してください。検索結果に無い項目は空文字または0にしてください。モデルの事前知識や推測で埋めてはいけません。`
 
-	if text, sourceURL, err := companyfetch.FirstFetchableText(companyfetch.CandidateCareerURLs(websiteURL)); err == nil {
-		userPrompt := fmt.Sprintf(
-			"企業名「%s」について、以下の公式サイトテキストから情報を抽出し、次のJSON形式のみで回答してください。\n%s\n\n---\nテキスト:\n%s",
-			companyName, companyInfoJSONSchema, text,
-		)
-		raw, model, err := f.llm.ExtractJSON(ctx, systemPrompt, userPrompt, 600)
-		if err == nil {
-			if result, parseErr := parseCompanyInfoResult(raw); parseErr == nil && result.Description != "" {
-				result.Source = companyfetch.SourceScrape
-				result.SourceURL = sourceURL
-				result.ModelUsed = model
-				result.Confidence = companyfetch.ConfidenceHigh
-				return result, nil
-			}
-		}
+	siteHint := ""
+	if websiteURL != "" {
+		siteHint = fmt.Sprintf("（参考公式URL: %s）", websiteURL)
 	}
-
 	searchPrompt := fmt.Sprintf(
-		`日本の企業「%s」の最新の企業概要・業種・本社所在地・公式サイトURL・設立年・従業員数・主要事業・企業文化・勤務スタイルを調べ、根拠となるURLを含めて簡潔にまとめてください。`,
-		companyName,
+		`日本の企業「%s」%sについて、公開情報から確認できる事実だけを調べてください。対象: 企業概要・業種・本社所在地・公式サイトURL・設立年・従業員数・主要事業・企業文化・勤務スタイル。各事実の根拠URLを必ず含めてください。不明な項目は推測せず「不明」と書いてください。`,
+		companyName, siteHint,
 	)
 	parseUser := fmt.Sprintf(
-		"企業名「%s」について、検索結果に基づき次のJSON形式のみで回答してください。不明な項目は空文字または0。\n%s",
+		"企業名「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。検索結果に無い項目は空文字または0。推測禁止。\n%s",
 		companyName, companyInfoJSONSchema,
 	)
 	raw, modelsUsed, err := f.llm.SearchThenParse(ctx, searchPrompt, systemPrompt, parseUser, 600)

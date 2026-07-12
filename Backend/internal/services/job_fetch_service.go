@@ -33,7 +33,7 @@ func NewJobFetchService(repo repository.CompanyRepository, client *openai.Client
 	}
 }
 
-// FetchAndSaveJobs はスクレイプ/Search から企業の求人情報を取得してDBに保存する。
+// FetchAndSaveJobs は Web Search→Parse から企業の求人情報を取得してDBに保存する。
 // forceRefresh=false かつ JobsFetchedAt が TTL 内なら AI を呼ばずに返す。
 func (s *JobFetchService) FetchAndSaveJobs(ctx context.Context, companyID uint, forceRefresh bool) ([]models.CompanyJobPosition, error) {
 	company, err := s.repo.FindByID(companyID)
@@ -74,9 +74,9 @@ func (s *JobFetchService) FetchAndSaveJobs(ctx context.Context, companyID uint, 
 	if len(allJobs) > 0 {
 		company.SourceType = allJobs[0].Source
 		company.LastFetchConfidence = confidenceForJobSource(allJobs[0].Source)
-		company.LastModelUsed = companyfetch.ExtractModel()
-		if allJobs[0].Source == companyfetch.SourceWebSearch {
-			company.LastModelUsed = companyfetch.SearchModel() + "+" + companyfetch.ParseModel()
+		company.LastModelUsed = companyfetch.SearchModel() + "+" + companyfetch.ParseModel()
+		if allJobs[0].Source == companyfetch.SourceScrape {
+			company.LastModelUsed = companyfetch.ExtractModel()
 		}
 	}
 	_ = s.repo.Update(company)

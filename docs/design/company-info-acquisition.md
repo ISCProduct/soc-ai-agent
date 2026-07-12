@@ -308,19 +308,21 @@ PoC（実装前の確認項目）: 大手〜スタートアップ 10 社で (a) 
 
 ## 12. 段階的移行計画
 
-### Phase 1（本 Issue 完了後の実装スコープ）
+### Phase 1（現行実装・暫定）
 
-**目的:** モデル知識ホットスポットを止め、通常ルートのトークン上限を守る。
+**方針変更（運用判断）:** 公式サイトスクレイプは DOM/robots/成功率の負担が大きいため、Phase 1 では **OpenAI Web Search → Parse** を本流とする。モデルの事前知識への丸投げは禁止し、**検索で確認できた事実のみ**を JSON 化する。スクレイプ優先ルートは Phase 2 以降のオプションとする。
+
+**目的:** モデル知識ホットスポットを止め、Search→Parse で鮮度と根拠を確保する。
 
 1. 企業情報専用 env を読み込むルータ（Extract / Search / Parse）を追加
-2. `CompanyInfoFetcher` / `WebSearchCompanyInfo` を「スクレイプ or gBiz テキスト → Extract」に変更（知識丸投げ廃止）
-3. `CareersScraper` をスクレイプ優先 + Search→Parse フォールバックへ
+2. `CompanyInfoFetcher` / `WebSearchCompanyInfo` を Search→Parse（事実のみ）に変更
+3. `CareersScraper` を Search→Parse に変更（`ai_knowledge` 廃止）
 4. `FetchTechStack` を同様に移行
 5. `companies` に `*_fetched_at` / `last_model_used` / `last_fetch_confidence` を追加し TTL スキップ
 6. admin UI に source / fetched_at / confidence を表示
 7. 既存 `ai_knowledge` / `llm_web_search` は low confidence 表示 + 強制再取得
 
-**Phase 1 対象外:** EnrichRelations の全面書き換え、Brave MCP、面接 realtime プロフィール、RAG hints クエリ削減。
+**Phase 1 対象外:** EnrichRelations 全面書き換え、Brave MCP、面接 realtime プロフィール、RAG hints クエリ削減、スクレイプ本流化。
 
 ### Phase 2
 
