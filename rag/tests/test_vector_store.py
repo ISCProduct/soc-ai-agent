@@ -170,6 +170,25 @@ def test_get_index_status_and_delete():
     assert collection.delete.called
 
 
+def test_collection_names_accepts_string_list():
+    """Chroma 0.6 HttpClient は list_collections が str のリストを返す。"""
+    client = MagicMock()
+    client.list_collections.return_value = ["company_context", "interview_hints"]
+    assert vs._collection_names(client) == {"company_context", "interview_hints"}
+
+
+def test_get_index_status_with_string_collections():
+    collection = MagicMock()
+    collection.count.return_value = 2
+    client = MagicMock()
+    client.list_collections.return_value = ["company_context", "interview_hints", "es_review"]
+    client.get_collection.return_value = collection
+    with patch.object(vs, "get_chroma_client", return_value=client):
+        status = vs.get_index_status()
+    assert status["total_documents"] == 6
+    assert all(c["exists"] for c in status["collections"])
+
+
 def test_set_cached_documents_doc_type_override():
     vs.reset_chroma_client_for_tests()
     collection = MagicMock()

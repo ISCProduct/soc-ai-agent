@@ -3,6 +3,7 @@ package repositories
 import (
 	"Backend/internal/models"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -213,4 +214,72 @@ func (r *CompanyRepository) CountWeightProfiles() (int64, error) {
 	var count int64
 	err := r.db.Model(&models.CompanyWeightProfile{}).Count(&count).Error
 	return count, err
+}
+
+// ListPublishedL1WarmCandidates は L1 未充足の公開企業を返す。
+func (r *CompanyRepository) ListPublishedL1WarmCandidates(limit int, infoTTL time.Duration) ([]models.CompanyL1WarmRow, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	cutoff := time.Now().Add(-infoTTL)
+	var rows []models.CompanyL1WarmRow
+	err := r.db.Raw(`
+SELECT
+  c.*,
+  CASE WHEN p.id IS NULL THEN 0 ELSE 1 END AS has_weight_profile
+FROM companies c
+LEFT JOIN company_weight_profiles p
+  ON p.company_id = c.id AND p.job_position_id IS NULL
+WHERE c.is_active = ?
+  AND c.data_status = ?
+  AND (
+    c.info_fetched_at IS NULL
+    OR c.info_fetched_at < ?
+    OR p.id IS NULL
+  )
+ORDER BY c.id ASC
+LIMIT ?
+`, true, "published", cutoff, limit).Scan(&rows).Error
+	return rows, err
+}
+
+// CountL1Coverage は公開カタログの L1 充足統計を返す。
+func (r *CompanyRepository) CountL1Coverage(infoTTL time.Duration) (*models.L1CoverageStats, error) {
+	cutoff := time.Now().Add(-infoTTL)
+	stats := &models.L1CoverageStats{}
+	if err := r.db.Model(&models.Company{}).
+		Where("is_active = ? AND data_status = ?", true, "published").
+		Count(&stats.PublishedTotal).Error; err != nil {
+		return nil, err
+	}
+	if err := r.db.Model(&models.Company{}).
+		Where("is_active = ? AND data_status = ? AND info_fetched_at IS NOT NULL AND info_fetched_at >= ?", true, "published", cutoff).
+		Count(&stats.InfoFresh).Error; err != nil {
+		return nil, err
+	}
+	if err := r.db.Raw(`
+SELECT COUNT(DISTINCT c.id)
+FROM companies c
+INNER JOIN company_weight_profiles p
+  ON p.company_id = c.id AND p.job_position_id IS NULL
+WHERE c.is_active = ? AND c.data_status = ?
+`, true, "published").Scan(&stats.HasProfile).Error; err != nil {
+		return nil, err
+	}
+	if err := r.db.Raw(`
+SELECT COUNT(*)
+FROM companies c
+LEFT JOIN company_weight_profiles p
+  ON p.company_id = c.id AND p.job_position_id IS NULL
+WHERE c.is_active = ?
+  AND c.data_status = ?
+  AND (
+    c.info_fetched_at IS NULL
+    OR c.info_fetched_at < ?
+    OR p.id IS NULL
+  )
+`, true, "published", cutoff).Scan(&stats.NeedsWarm).Error; err != nil {
+		return nil, err
+	}
+	return stats, nil
 }

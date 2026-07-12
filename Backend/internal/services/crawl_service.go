@@ -215,6 +215,8 @@ func (s *CrawlService) executeCrawl(source *models.CrawlSource) error {
 		return s.executeFetchJobsAll()
 	case "fetch_persona_all":
 		return s.executeFetchPersonaAll()
+	case "warm_l1_catalog":
+		return s.executeWarmL1Catalog()
 	default:
 		return fmt.Errorf("unsupported target_type: %s", source.TargetType)
 	}
@@ -234,7 +236,7 @@ func validateCrawlSource(source *models.CrawlSource) error {
 		"mynavi_company":    true,
 		"openwork_company":  true,
 	}
-	allTypes := []string{"company", "popular_companies", "job_site_company", "job_listing", "mynavi_company", "openwork_company", "fetch_info_all", "fetch_jobs_all", "fetch_persona_all"}
+	allTypes := []string{"company", "popular_companies", "job_site_company", "job_listing", "mynavi_company", "openwork_company", "fetch_info_all", "fetch_jobs_all", "fetch_persona_all", "warm_l1_catalog"}
 	validType := false
 	for _, t := range allTypes {
 		if source.TargetType == t {
@@ -1102,22 +1104,10 @@ func (s *CrawlService) executeFetchInfoAll() error {
 	if s.infoFetcher == nil {
 		return fmt.Errorf("info fetcher not configured")
 	}
-	companies, err := s.companyRepo.FindAllActive(1000, 0)
-	if err != nil {
-		return fmt.Errorf("企業一覧取得失敗: %w", err)
-	}
-	ctx := context.Background()
-	var errs []string
-	for _, company := range companies {
-		if _, err := s.infoFetcher.FetchAndSave(ctx, company.ID, false); err != nil {
-			errs = append(errs, fmt.Sprintf("id=%d: %v", company.ID, err))
-		}
-	}
-	if len(errs) > 0 {
-		log.Printf("fetch_info_all: %d errors: %s", len(errs), strings.Join(errs, "; "))
-	}
-	log.Printf("fetch_info_all: processed %d companies, errors=%d", len(companies), len(errs))
-	return nil
+	return s.forEachActiveCompanyPage(200, func(company models.Company) error {
+		_, err := s.infoFetcher.FetchAndSave(context.Background(), company.ID, false)
+		return err
+	}, "fetch_info_all")
 }
 
 // executeFetchJobsAll は登録済み全企業の求人情報を未取得のもののみ自動取得する。
@@ -1125,22 +1115,10 @@ func (s *CrawlService) executeFetchJobsAll() error {
 	if s.jobFetcher == nil {
 		return fmt.Errorf("job fetcher not configured")
 	}
-	companies, err := s.companyRepo.FindAllActive(1000, 0)
-	if err != nil {
-		return fmt.Errorf("企業一覧取得失敗: %w", err)
-	}
-	ctx := context.Background()
-	var errs []string
-	for _, company := range companies {
-		if _, err := s.jobFetcher.FetchAndSaveJobs(ctx, company.ID, false); err != nil {
-			errs = append(errs, fmt.Sprintf("id=%d: %v", company.ID, err))
-		}
-	}
-	if len(errs) > 0 {
-		log.Printf("fetch_jobs_all: %d errors: %s", len(errs), strings.Join(errs, "; "))
-	}
-	log.Printf("fetch_jobs_all: processed %d companies, errors=%d", len(companies), len(errs))
-	return nil
+	return s.forEachActiveCompanyPage(200, func(company models.Company) error {
+		_, err := s.jobFetcher.FetchAndSaveJobs(context.Background(), company.ID, false)
+		return err
+	}, "fetch_jobs_all")
 }
 
 // executeFetchPersonaAll は登録済み全企業の人物像を未取得のもののみ自動分析する。
@@ -1148,21 +1126,68 @@ func (s *CrawlService) executeFetchPersonaAll() error {
 	if s.jobFetcher == nil {
 		return fmt.Errorf("job fetcher not configured")
 	}
-	companies, err := s.companyRepo.FindAllActive(1000, 0)
+	return s.forEachActiveCompanyPage(200, func(company models.Company) error {
+		_, err := s.jobFetcher.FetchAndSavePersona(context.Background(), company.ID, false)
+		return err
+	}, "fetch_persona_all")
+}
+
+// executeWarmL1Catalog は公開マッチングカタログの L1（info+persona）を日次上限で温存する。
+func (s *CrawlService) executeWarmL1Catalog() error {
+	if s.infoFetcher == nil || s.jobFetcher == nil {
+		return fmt.Errorf("info/job fetcher not configured")
+	}
+	warm := NewCatalogWarmService(s.companyRepo, s.infoFetcher, s.jobFetcher)
+	result, err := warm.WarmL1(context.Background(), L1WarmOptions{
+		IncludeInfo:    true,
+		IncludePersona: true,
+	})
 	if err != nil {
-		return fmt.Errorf("企業一覧取得失敗: %w", err)
+		return err
+	}
+	log.Printf(
+		"warm_l1_catalog: processed=%d info_ok=%d persona_ok=%d errors=%d needs=%d",
+		result.Processed, result.InfoOK, result.PersonaOK, result.Errors,
+		func() int64 {
+			if result.Coverage == nil {
+				return 0
+			}
+			return result.Coverage.NeedsWarm
+		}(),
+	)
+	return nil
+}
+
+func (s *CrawlService) forEachActiveCompanyPage(pageSize int, fn func(models.Company) error, label string) error {
+	if pageSize <= 0 {
+		pageSize = 200
 	}
 	ctx := context.Background()
+	_ = ctx
 	var errs []string
-	for _, company := range companies {
-		if _, err := s.jobFetcher.FetchAndSavePersona(ctx, company.ID, false); err != nil {
-			errs = append(errs, fmt.Sprintf("id=%d: %v", company.ID, err))
+	processed := 0
+	for offset := 0; ; offset += pageSize {
+		companies, err := s.companyRepo.FindAllActive(pageSize, offset)
+		if err != nil {
+			return fmt.Errorf("企業一覧取得失敗: %w", err)
+		}
+		if len(companies) == 0 {
+			break
+		}
+		for _, company := range companies {
+			if err := fn(company); err != nil {
+				errs = append(errs, fmt.Sprintf("id=%d: %v", company.ID, err))
+			}
+			processed++
+		}
+		if len(companies) < pageSize {
+			break
 		}
 	}
 	if len(errs) > 0 {
-		log.Printf("fetch_persona_all: %d errors: %s", len(errs), strings.Join(errs, "; "))
+		log.Printf("%s: %d errors: %s", label, len(errs), strings.Join(errs, "; "))
 	}
-	log.Printf("fetch_persona_all: processed %d companies, errors=%d", len(companies), len(errs))
+	log.Printf("%s: processed %d companies, errors=%d", label, processed, len(errs))
 	return nil
 }
 

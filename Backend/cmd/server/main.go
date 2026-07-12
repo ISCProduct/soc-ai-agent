@@ -209,7 +209,10 @@ func main() {
 	matchingService := services.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)
 	resumeService := services.NewResumeService(resumeRepo, "storage/resumes", aiClient)
 	crawlService := services.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
-	crawlService.SetInfoFetcher(services.NewCompanyInfoFetcher(companyRepo, aiClient))
+	gbizInfoRepo := repositories.NewGBizInfoRepository(db)
+	gbizInfoService := services.NewGBizInfoService(cfg, gbizInfoRepo, companyRepo, companyRelationRepo)
+	infoFetcher := services.NewCompanyInfoFetcher(companyRepo, aiClient, gbizInfoService)
+	crawlService.SetInfoFetcher(infoFetcher)
 	crawlService.SetJobFetcher(services.NewJobFetchService(companyRepo, aiClient))
 	auditLogService := services.NewAuditLogService(auditLogRepo)
 	analysisService := services.NewAnalysisScoringService(
@@ -232,6 +235,7 @@ func main() {
 	interviewService.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
+	interviewService.SetCompanyRepo(companyRepo)
 	resumeService.SetCrossFeatureService(crossFeatureService)
 
 	// コントローラー層の初期化
@@ -243,7 +247,8 @@ func main() {
 	companyValidator := services.NewCompanyValidationService(companyRepo, aiClient)
 	relationController.SetCompanyValidator(companyValidator)
 	resumeService.SetCompanyValidator(companyValidator)
-	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, nil, aiClient)
+	resumeService.SetCompanyRepo(companyRepo)
+	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
 	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
 	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)

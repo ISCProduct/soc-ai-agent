@@ -6,10 +6,7 @@ import (
 	"Backend/internal/openai"
 	"Backend/internal/services"
 	ifaces "Backend/internal/services/interfaces"
-	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -25,14 +22,18 @@ type AdminCompanyController struct {
 	openaiClient *openai.Client
 	infoFetcher  *services.CompanyInfoFetcher
 	jobFetcher   *services.JobFetchService
+	techFetcher  *services.TechStackFetcher
+	catalogWarm  *services.CatalogWarmService
 }
 
 func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.AuditLogService, gbiz *services.GBizInfoService, openaiClient ...*openai.Client) *AdminCompanyController {
 	ctrl := &AdminCompanyController{repo: repo, audit: audit, gbiz: gbiz}
 	if len(openaiClient) > 0 {
 		ctrl.openaiClient = openaiClient[0]
-		ctrl.infoFetcher = services.NewCompanyInfoFetcher(repo, openaiClient[0])
+		ctrl.infoFetcher = services.NewCompanyInfoFetcher(repo, openaiClient[0], gbiz)
 		ctrl.jobFetcher = services.NewJobFetchService(repo, openaiClient[0])
+		ctrl.techFetcher = services.NewTechStackFetcher(repo, openaiClient[0])
+		ctrl.catalogWarm = services.NewCatalogWarmService(repo, ctrl.infoFetcher, ctrl.jobFetcher)
 	}
 	return ctrl
 }
@@ -201,10 +202,11 @@ func (c *AdminCompanyController) SyncGBiz(ctx echo.Context) error {
 }
 
 // WebSearchCompanyInfo POST /api/admin/companies/web-search
-// 企業名をもとにAIモデルの知識で一般的な企業情報を取得してプレビュー用に返す
+// 企業名をもとにスクレイプ/Search→Parse で企業情報をプレビュー用に返す（DB非更新）
 func (c *AdminCompanyController) WebSearchCompanyInfo(ctx echo.Context) error {
 	var req struct {
-		Name string `json:"name"`
+		Name       string `json:"name"`
+		WebsiteURL string `json:"website_url"`
 	}
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
@@ -212,153 +214,50 @@ func (c *AdminCompanyController) WebSearchCompanyInfo(ctx echo.Context) error {
 	if strings.TrimSpace(req.Name) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
 	}
-	if c.openaiClient == nil {
+	if c.infoFetcher == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
 	}
 
-	systemPrompt := `あなたは日本企業の情報に詳しいアシスタントです。確実に知っている情報のみを回答し、不明な項目は空文字または0にしてください。推測で情報を作らないでください。`
-	userPrompt := fmt.Sprintf(
-		`「%s」という企業について知っている情報を、以下のJSON形式のみで回答してください（余分な説明は不要）。
-{
-  "description": "企業概要（100〜200文字程度）",
-  "industry": "業種（例: IT・ソフトウェア, 金融, 製造業）",
-  "location": "本社所在地（例: 東京都渋谷区）",
-  "website_url": "公式サイトURL（https://から始まる）",
-  "founded_year": 設立年（整数、不明なら0）,
-  "employee_count": 従業員数（整数、不明なら0）,
-  "main_business": "主要事業内容（50〜100文字程度）",
-  "culture": "企業文化・働き方の特徴（50〜100文字程度）",
-  "work_style": "勤務スタイル（リモート / ハイブリッド / オフィス のいずれか、不明なら空文字）"
-}`,
-		req.Name,
-	)
-
-	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), 60*time.Second)
-	defer cancel()
-
-	text, err := c.openaiClient.ChatCompletionJSON(reqCtx, systemPrompt, userPrompt, 0.2, 600)
+	result, err := c.infoFetcher.Acquire(ctx.Request().Context(), req.Name, req.WebsiteURL)
 	if err != nil {
 		return echoInternalError(err)
 	}
 
-	start := strings.Index(text, "{")
-	end := strings.LastIndex(text, "}")
-	if start == -1 || end == -1 || end <= start {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to parse web search response")
-	}
-
-	type companyInfoResult struct {
-		Description   string `json:"description"`
-		Industry      string `json:"industry"`
-		Location      string `json:"location"`
-		WebsiteURL    string `json:"website_url"`
-		FoundedYear   int    `json:"founded_year"`
-		EmployeeCount int    `json:"employee_count"`
-		MainBusiness  string `json:"main_business"`
-		Culture       string `json:"culture"`
-		WorkStyle     string `json:"work_style"`
-	}
-	var result companyInfoResult
-	if err := json.Unmarshal([]byte(text[start:end+1]), &result); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to parse company info json")
-	}
-
 	actor := ctx.Request().Header.Get("X-Admin-Email")
 	c.audit.Record(actor, "company.web_search", "company", 0, map[string]any{
-		"name": req.Name,
+		"name":   req.Name,
+		"source": result.Source,
+		"model":  result.ModelUsed,
 	})
 
 	return ctx.JSON(http.StatusOK, result)
 }
 
 // FetchTechStack POST /api/admin/companies/:id/tech-stack-search
-// AIモデルの知識で企業の技術スタックを取得してDBを更新する
+// スクレイプ/Search から技術スタックを取得してDBを更新する
 func (c *AdminCompanyController) FetchTechStack(ctx echo.Context) error {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
 	}
-	if c.openaiClient == nil {
+	if c.techFetcher == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
 	}
-	company, err := c.repo.FindByID(uint(id))
-	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "company not found")
-	}
 
-	systemPrompt := `あなたは日本のIT企業の技術情報に詳しいアシスタントです。確実に知っている情報のみを回答し、不明な項目は空配列または空文字にしてください。推測で情報を作らないでください。`
-	userPrompt := fmt.Sprintf(
-		`「%s」という日本のIT企業の技術スタックについて知っている情報を、以下のJSON形式のみで回答してください（余分な説明は不要）。
-{
-  "tech_stack": ["言語・フレームワーク名（例: Go, React, TypeScript）"],
-  "infra_stack": ["インフラ名（例: AWS, GCP, Azure, オンプレ）"],
-  "cicd_tools": ["CI/CDツール名（例: GitHub Actions, Jenkins, CircleCI）"],
-  "development_style": "開発手法（例: スクラム, ウォーターフォール, カンバン）"
-}`,
-		company.Name,
-	)
-
-	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), 60*time.Second)
-	defer cancel()
-
-	text, err := c.openaiClient.ChatCompletionJSON(reqCtx, systemPrompt, userPrompt, 0.2, 400)
+	forceRefresh := ctx.QueryParam("force") == "true"
+	result, err := c.techFetcher.FetchAndSave(ctx.Request().Context(), uint(id), forceRefresh)
 	if err != nil {
 		return echoInternalError(err)
 	}
 
-	// JSON部分を抽出
-	start := strings.Index(text, "{")
-	end := strings.LastIndex(text, "}")
-	if start == -1 || end == -1 || end <= start {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to parse web search response")
-	}
-
-	type techStackResult struct {
-		TechStack        []string `json:"tech_stack"`
-		InfraStack       []string `json:"infra_stack"`
-		CicdTools        []string `json:"cicd_tools"`
-		DevelopmentStyle string   `json:"development_style"`
-	}
-	var result techStackResult
-	if err := json.Unmarshal([]byte(text[start:end+1]), &result); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to parse tech stack json")
-	}
-
-	// JSON配列をシリアライズしてDBに保存
-	if len(result.TechStack) > 0 {
-		if b, err := json.Marshal(result.TechStack); err == nil {
-			company.TechStack = string(b)
-		}
-	}
-	if len(result.InfraStack) > 0 {
-		if b, err := json.Marshal(result.InfraStack); err == nil {
-			company.InfraStack = string(b)
-		}
-	}
-	if len(result.CicdTools) > 0 {
-		if b, err := json.Marshal(result.CicdTools); err == nil {
-			company.CicdTools = string(b)
-		}
-	}
-	if result.DevelopmentStyle != "" {
-		company.DevelopmentStyle = result.DevelopmentStyle
-	}
-
-	if err := c.repo.Update(company); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update company")
-	}
-
 	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.tech_stack_search", "company", company.ID, map[string]any{
-		"name": company.Name,
+	c.audit.Record(actor, "company.fetch_tech_stack", "company", uint(id), map[string]any{
+		"force":  forceRefresh,
+		"source": result.Source,
+		"model":  result.ModelUsed,
 	})
 
-	return ctx.JSON(http.StatusOK, map[string]any{
-		"tech_stack":        result.TechStack,
-		"infra_stack":       result.InfraStack,
-		"cicd_tools":        result.CicdTools,
-		"development_style": result.DevelopmentStyle,
-	})
+	return ctx.JSON(http.StatusOK, result)
 }
 
 // FetchCompanyInfo POST /api/admin/companies/:id/fetch-info
@@ -439,6 +338,47 @@ func (c *AdminCompanyController) FetchPersona(ctx echo.Context) error {
 	})
 
 	return ctx.JSON(http.StatusOK, profile)
+}
+
+// GetL1Coverage GET /api/admin/companies/l1-coverage
+func (c *AdminCompanyController) GetL1Coverage(ctx echo.Context) error {
+	if c.catalogWarm == nil {
+		c.catalogWarm = services.NewCatalogWarmService(c.repo, c.infoFetcher, c.jobFetcher)
+	}
+	cov, err := c.catalogWarm.Coverage(ctx.Request().Context())
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return ctx.JSON(http.StatusOK, cov)
+}
+
+// WarmL1Catalog POST /api/admin/companies/warm-l1
+// Body: { "limit": 100, "dry_run": true, "force": false, "include_info": true, "include_persona": true }
+func (c *AdminCompanyController) WarmL1Catalog(ctx echo.Context) error {
+	if c.catalogWarm == nil {
+		c.catalogWarm = services.NewCatalogWarmService(c.repo, c.infoFetcher, c.jobFetcher)
+	}
+	var opts services.L1WarmOptions
+	opts.IncludeInfo = true
+	opts.IncludePersona = true
+	if err := ctx.Bind(&opts); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
+	}
+	// Bind で false が欠落した場合の既定は normalize 側でも補完する
+	result, err := c.catalogWarm.WarmL1(ctx.Request().Context(), opts)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.warm_l1", "company", 0, map[string]any{
+		"dry_run":    result.DryRun,
+		"limit":      result.Limit,
+		"processed":  result.Processed,
+		"info_ok":    result.InfoOK,
+		"persona_ok": result.PersonaOK,
+		"errors":     result.Errors,
+	})
+	return ctx.JSON(http.StatusOK, result)
 }
 
 func applyCompanyDefaults(company *models.Company) {

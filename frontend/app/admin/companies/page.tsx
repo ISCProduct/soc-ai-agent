@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
   Box,
@@ -8,6 +8,7 @@ import {
   Card,
   CardContent,
   Chip,
+  CircularProgress,
   Divider,
   IconButton,
   Stack,
@@ -33,11 +34,22 @@ type Company = {
   data_status?: string
 }
 
+type L1Coverage = {
+  published_total: number
+  info_fresh: number
+  has_profile: number
+  needs_warm: number
+  info_rate: number
+  profile_rate: number
+}
+
 const sourceLabel = (sourceType?: string) => {
   if (sourceType === 'official') return '公式'
   if (sourceType === 'job_site') return 'クローリング'
   return '手動'
 }
+
+const pct = (rate: number) => `${Math.round((rate || 0) * 100)}%`
 
 export default function AdminCompaniesPage() {
   useEffect(() => {
@@ -52,6 +64,19 @@ export default function AdminCompaniesPage() {
   const [page, setPage] = useState(1)
   const [error, setError] = useState('')
   const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'published'>('all')
+  const [coverage, setCoverage] = useState<L1Coverage | null>(null)
+  const [warming, setWarming] = useState(false)
+  const [warmMessage, setWarmMessage] = useState('')
+
+  const fetchCoverage = useCallback(async () => {
+    const res = await fetch('/api/admin/companies/l1-coverage', {
+      headers: authService.getAdminFetchHeaders(),
+      cache: 'no-store',
+    })
+    if (!res.ok) return
+    const data = await res.json()
+    setCoverage(data)
+  }, [])
 
   const fetchCompanies = async (p: number = page) => {
     setError('')
@@ -70,11 +95,44 @@ export default function AdminCompaniesPage() {
 
   useEffect(() => {
     fetchCompanies(1)
-  }, [])
+    fetchCoverage()
+  }, [fetchCoverage])
 
   const handlePageChange = (_: React.ChangeEvent<unknown>, value: number) => {
     setPage(value)
     fetchCompanies(value)
+  }
+
+  const handleWarmL1 = async (dryRun: boolean) => {
+    setWarming(true)
+    setWarmMessage('')
+    setError('')
+    try {
+      const res = await fetch('/api/admin/companies/warm-l1', {
+        method: 'POST',
+        headers: {
+          ...authService.getAdminFetchHeaders(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ limit: 100, dry_run: dryRun, include_info: true, include_persona: true }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data?.error || data?.message || 'L1温存に失敗しました')
+        return
+      }
+      if (dryRun) {
+        setWarmMessage(`ドライラン: 候補 ${data.candidate_count ?? 0} 社（上限 ${data.limit}）`)
+      } else {
+        setWarmMessage(
+          `温存完了: 処理 ${data.processed ?? 0} / info ${data.info_ok ?? 0} / persona ${data.persona_ok ?? 0} / エラー ${data.errors ?? 0}`,
+        )
+      }
+      if (data.coverage) setCoverage(data.coverage)
+      else await fetchCoverage()
+    } finally {
+      setWarming(false)
+    }
   }
 
   const handlePublish = async (companyId: number) => {
@@ -136,6 +194,44 @@ export default function AdminCompaniesPage() {
       </Typography>
 
       <ErrorAlert error={error} />
+
+      <Card sx={{ mb: 2 }}>
+        <CardContent>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} justifyContent="space-between">
+            <Box>
+              <Typography variant="h6" sx={{ mb: 0.5 }}>L1 カタログ充足（マッチング用）</Typography>
+              <Typography variant="body2" color="text.secondary">
+                公開企業の基本情報 TTL 内 + WeightProfile。Core/中小SI を優先して日次温存します。
+              </Typography>
+              {coverage && (
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
+                  <Chip size="small" label={`公開 ${coverage.published_total}`} />
+                  <Chip size="small" color="success" label={`Info ${pct(coverage.info_rate)}`} />
+                  <Chip size="small" color="info" label={`Profile ${pct(coverage.profile_rate)}`} />
+                  <Chip size="small" color="warning" label={`要温存 ${coverage.needs_warm}`} />
+                </Stack>
+              )}
+              {warmMessage && (
+                <Typography variant="body2" sx={{ mt: 1 }}>{warmMessage}</Typography>
+              )}
+            </Box>
+            <Stack direction="row" spacing={1}>
+              <Button variant="outlined" size="small" disabled={warming} onClick={() => handleWarmL1(true)}>
+                ドライラン
+              </Button>
+              <Button
+                variant="contained"
+                size="small"
+                disabled={warming}
+                onClick={() => handleWarmL1(false)}
+                startIcon={warming ? <CircularProgress size={14} color="inherit" /> : undefined}
+              >
+                L1温存（最大100社）
+              </Button>
+            </Stack>
+          </Stack>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent>

@@ -101,10 +101,11 @@ DEFAULT_WEB_SEARCH_MODEL = "gpt-4o-search-preview"
 DEFAULT_SEARCH_LOG_DIR = "/app/search_logs"
 
 CACHE_TTL_SECONDS = int(os.getenv("RAG_SEARCH_CACHE_TTL_SECONDS", str(DEFAULT_CACHE_TTL_SECONDS)))
-USE_DEEP_RESEARCH = os.getenv("RAG_USE_DEEP_RESEARCH", "true").lower() == "true"
+# Phase 1B (#557): Read 経路の既定はキャッシュ/呼び出し元 brief のみ（Search/$0）
+USE_DEEP_RESEARCH = os.getenv("RAG_USE_DEEP_RESEARCH", "false").lower() == "true"
 ALLOW_WEB_SEARCH_FALLBACK = os.getenv(
     "RAG_ALLOW_WEB_SEARCH_FALLBACK",
-    os.getenv("RAG_ALLOW_DUCKDUCKGO_FALLBACK", "true"),
+    os.getenv("RAG_ALLOW_DUCKDUCKGO_FALLBACK", "false"),
 ).lower() == "true"
 STRICT_DEEP_RESEARCH = os.getenv("RAG_DEEP_RESEARCH_STRICT", "false").lower() == "true"
 CREWAI_VERBOSE = os.getenv("RAG_CREWAI_VERBOSE", "false").lower() == "true"
@@ -150,11 +151,18 @@ class ReviewRequest(BaseModel):
     resume_text: str = Field(min_length=1, max_length=10000)
     company_name: str = Field(min_length=1)
     job_title: str = Field(default="")
+    # Backend 共有キャッシュの brief（Search なし）。あればキャッシュ/Searchより優先
+    company_context: str = Field(default="")
 
     @field_validator("job_title")
     @classmethod
     def normalize_job_title(cls, v: str) -> str:
         return v.strip()
+
+    @field_validator("company_context")
+    @classmethod
+    def normalize_company_context(cls, v: str) -> str:
+        return (v or "").strip()
 
 
 class ReviewResponse(BaseModel):
@@ -795,6 +803,12 @@ async def _run_web_search_pipeline(company_name: str, job_title: str) -> str:
 class CompanyHintsRequest(BaseModel):
     company_name: str = Field(min_length=1)
     position: str = Field(default="")
+    company_context: str = Field(default="")
+
+    @field_validator("company_context")
+    @classmethod
+    def normalize_hints_company_context(cls, v: str) -> str:
+        return (v or "").strip()
 
 
 class CompanyHintsResponse(BaseModel):
@@ -935,6 +949,16 @@ def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
         company=safe_company_name, role=role_label
     )
 
+    # Backend 共有 brief があれば Search せず構造化（Phase 1B）
+    if request.company_context:
+        set_cached_context(
+            cache_key,
+            [request.company_context],
+            source="company_brief",
+            doc_type="interview_hints",
+        )
+        return _parse_hints_from_text(safe_company_name, role_label, request.company_context)
+
     # キャッシュヒット: そのまま構造化して返す
     retrieved = get_cached_context(
         cache_key, query=f"{safe_company_name} 面接 よく聞かれる質問"
@@ -944,15 +968,21 @@ def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
         result.cached = True
         return result
 
-    # OpenAI Web Search（多角的クエリ生成 → 並列検索 → LLM要約）
-    research_text = _run_hints_web_search(safe_company_name, role_label)
-
-    if research_text:
-        set_cached_context(
-            cache_key, [research_text], source="web_search", doc_type="interview_hints"
+    # 既定はキャッシュ強制。明示オプトイン時のみ Web Search
+    research_text = ""
+    if ALLOW_WEB_SEARCH_FALLBACK:
+        research_text = _run_hints_web_search(safe_company_name, role_label) or ""
+        if research_text:
+            set_cached_context(
+                cache_key, [research_text], source="web_search", doc_type="interview_hints"
+            )
+    else:
+        logger.info(
+            "hints cache miss; web_search skipped company=%s (RAG_ALLOW_WEB_SEARCH_FALLBACK=false)",
+            safe_company_name,
         )
 
-    return _parse_hints_from_text(safe_company_name, role_label, research_text or "")
+    return _parse_hints_from_text(safe_company_name, role_label, research_text)
 
 
 @app.get("/health")
@@ -981,12 +1011,18 @@ def healthz() -> dict:
 def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
     """RAGコンテキストを収集し (docs, context_source) を返す。
 
-    キャッシュヒット時は即時返却。ミス時は以下のパイプラインを実行:
-    クエリ生成 → 並列Web Search → LLM要約（採用観点） → キャッシュ保存
+    優先順: company_context(brief) → Chroma キャッシュ →（オプトイン時）Deep Research / Web Search
     """
     safe_company_name = _sanitize_company_name_for_query(request.company_name)
     role_label = request.job_title or "指定なし"
     cache_key = "{company}::{role}".format(company=safe_company_name, role=role_label)
+
+    if request.company_context:
+        docs = [request.company_context]
+        set_cached_context(
+            cache_key, docs, source="company_brief", doc_type="resume_review"
+        )
+        return docs, "company_brief"
 
     # キャッシュヒット: 即時返却
     try:
@@ -1139,6 +1175,12 @@ class ESReviewRequest(BaseModel):
     es_text: str = Field(min_length=1)
     question_type: str = Field(default="その他")
     company_name: str = Field(default="")
+    company_context: str = Field(default="")
+
+    @field_validator("company_context")
+    @classmethod
+    def normalize_es_company_context(cls, v: str) -> str:
+        return (v or "").strip()
 
 
 class ESReviewResponse(BaseModel):
@@ -1397,10 +1439,19 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
     if request.company_name.strip():
         safe_company_name = _sanitize_company_name_for_query(request.company_name)
         cache_key = "{company}::es_review".format(company=safe_company_name)
-        context_docs = get_cached_context(
-            cache_key, query=f"{safe_company_name} 求める人物像 採用 価値観"
-        )
-        if not context_docs:
+        if request.company_context:
+            context_docs = [request.company_context]
+            set_cached_context(
+                cache_key,
+                context_docs,
+                source="company_brief",
+                doc_type="es_review",
+            )
+        else:
+            context_docs = get_cached_context(
+                cache_key, query=f"{safe_company_name} 求める人物像 採用 価値観"
+            )
+        if not context_docs and ALLOW_WEB_SEARCH_FALLBACK:
             logger.info("es review web search start company=%s", safe_company_name)
             try:
                 # 段階的に2回の軽量Web Searchパイプラインを実行して、採用情報（一般）とエンジニア向け観点を取得する
@@ -1421,6 +1472,11 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
                     )
             except Exception as exc:
                 logger.warning("es review web search failed company=%s error=%s", safe_company_name, exc)
+        elif not context_docs:
+            logger.info(
+                "es review cache miss; web_search skipped company=%s",
+                safe_company_name,
+            )
 
     return _run_es_review(
         es_text=request.es_text,

@@ -2,6 +2,7 @@ package services
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/companyfetch"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/scraper"
@@ -32,15 +33,15 @@ func NewJobFetchService(repo repository.CompanyRepository, client *openai.Client
 	}
 }
 
-// FetchAndSaveJobs はAIモデルの知識から企業の求人情報を取得してDBに保存する。
-// forceRefresh=false かつ DB に既存データがある場合は AI を呼ばずに返す。
+// FetchAndSaveJobs は Web Search→Parse から企業の求人情報を取得してDBに保存する。
+// forceRefresh=false かつ JobsFetchedAt が TTL 内なら AI を呼ばずに返す。
 func (s *JobFetchService) FetchAndSaveJobs(ctx context.Context, companyID uint, forceRefresh bool) ([]models.CompanyJobPosition, error) {
 	company, err := s.repo.FindByID(companyID)
 	if err != nil {
 		return nil, fmt.Errorf("会社が見つかりません: %w", err)
 	}
 
-	if !forceRefresh {
+	if !forceRefresh && companyfetch.IsFresh(company.JobsFetchedAt, companyfetch.TTLJobs) {
 		existing, _ := s.repo.ListJobPositions(&companyID, 100)
 		if len(existing) > 0 {
 			return existing, nil
@@ -67,6 +68,25 @@ func (s *JobFetchService) FetchAndSaveJobs(ctx context.Context, companyID uint, 
 		saved = append(saved, *position)
 	}
 
+	now := time.Now()
+	company.JobsFetchedAt = &now
+	company.SourceFetchedAt = &now
+	if len(allJobs) > 0 {
+		company.SourceType = allJobs[0].Source
+		company.LastFetchConfidence = confidenceForJobSource(allJobs[0].Source)
+		company.LastModelUsed = companyfetch.ExtractModel()
+		if allJobs[0].Source == companyfetch.SourceWebSearch {
+			company.LastModelUsed = companyfetch.SearchModel() + "+" + companyfetch.ParseModel()
+		}
+		// web_search 時は旧スクレイプ URL を残さない
+		if allJobs[0].Source == companyfetch.SourceWebSearch {
+			company.SourceURL = strings.TrimSpace(company.WebsiteURL)
+		}
+	}
+	if err := s.repo.Update(company); err != nil {
+		return nil, fmt.Errorf("求人取得メタデータの保存に失敗しました: %w", err)
+	}
+
 	// RAGのChromaDBに求人情報を保存してレビュー精度を向上させる
 	if len(saved) > 0 {
 		ragContent := buildJobsRAGContent(company.Name, allJobs)
@@ -74,6 +94,17 @@ func (s *JobFetchService) FetchAndSaveJobs(ctx context.Context, companyID uint, 
 	}
 
 	return saved, nil
+}
+
+func confidenceForJobSource(source string) string {
+	switch source {
+	case companyfetch.SourceScrape, companyfetch.SourceGBiz:
+		return companyfetch.ConfidenceHigh
+	case companyfetch.SourceWebSearch:
+		return companyfetch.ConfidenceMedium
+	default:
+		return companyfetch.ConfidenceLow
+	}
 }
 
 // FetchAndSavePersona は企業の求める人物像をAIで分析し、CompanyWeightProfileに保存する。

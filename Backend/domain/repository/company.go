@@ -1,6 +1,9 @@
 package repository
 
-import "Backend/internal/models"
+import (
+	"Backend/internal/models"
+	"time"
+)
 
 // CompanyRelationQueryRepository は企業関係情報の読み取り専用インターフェース。
 // CompanyRelationController で使用する。
@@ -35,6 +38,8 @@ type CompanyRepository interface {
 	ListJobPositions(companyID *uint, limit int) ([]models.CompanyJobPosition, error)
 	CreateOrUpdateWeightProfile(profile *models.CompanyWeightProfile) error
 	CountWeightProfiles() (int64, error)
+	ListPublishedL1WarmCandidates(limit int, infoTTL time.Duration) ([]models.CompanyL1WarmRow, error)
+	CountL1Coverage(infoTTL time.Duration) (*models.L1CoverageStats, error)
 }
 
 // CompanyRelationRepository は企業間関係の永続化インターフェース。

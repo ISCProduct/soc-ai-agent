@@ -170,6 +170,32 @@ func (ctrl *CompanyRelationController) GetCompanies(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, response)
 }
 
+// GetCompanyBrief 共有キャッシュから壁打ち/面接用スナップショットを返す（Search なし）
+// GET /api/companies/brief?name=xxx
+func (ctrl *CompanyRelationController) GetCompanyBrief(ctx echo.Context) error {
+	name := strings.TrimSpace(ctx.QueryParam("name"))
+	if name == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+	}
+	companies, _, err := ctrl.repo.GetCompaniesFiltered(1, 0, "", name, "")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch company")
+	}
+	if len(companies) == 0 {
+		return ctx.JSON(http.StatusOK, map[string]any{
+			"brief": "",
+			"found": false,
+		})
+	}
+	c := companies[0]
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"brief":      services.BuildCompanyBrief(&c, nil),
+		"found":      true,
+		"company_id": c.ID,
+		"name":       c.Name,
+	})
+}
+
 // WebSearchCompanies OpenAI Web Searchを使用して企業をWEB検索
 // GET /api/companies/web-search?q=xxx
 func (ctrl *CompanyRelationController) WebSearchCompanies(ctx echo.Context) error {

@@ -50,6 +50,19 @@ def reset_chroma_client_for_tests() -> None:
         _chroma_client = None
 
 
+def _collection_names(client: Any) -> set:
+    """Chroma 0.6+ では list_collections が名前文字列のみ返す場合がある。"""
+    names: set = set()
+    for col in client.list_collections():
+        if isinstance(col, str):
+            names.add(col)
+        else:
+            name = getattr(col, "name", "") or ""
+            if name:
+                names.add(name)
+    return names
+
+
 def get_chroma_client() -> Any:
     """Chroma クライアントを返す。CHROMA_HOST があれば HttpClient。"""
     global _chroma_client
@@ -157,7 +170,7 @@ def get_cached_documents(
     collection_name = _sanitize_collection_name(meta["collection"])
     try:
         client = get_chroma_client()
-        existing = {getattr(col, "name", "") for col in client.list_collections()}
+        existing = _collection_names(client)
         if collection_name not in existing:
             logger.info(
                 "chromadb cache miss key=%s collection=%s reason=collection_not_found",
@@ -324,7 +337,7 @@ def delete_company_documents(
         collections = (mapped,) if mapped else ()
 
     client = get_chroma_client()
-    existing = {getattr(col, "name", "") for col in client.list_collections()}
+    existing = _collection_names(client)
     deleted_total = 0
     per_collection: Dict[str, int] = {}
 
@@ -357,7 +370,7 @@ def delete_company_documents(
 def get_index_status(company: Optional[str] = None) -> Dict[str, Any]:
     """インデックス状況（コレクション件数・任意で企業フィルタ概要）を返す。"""
     client = get_chroma_client()
-    existing = {getattr(col, "name", "") for col in client.list_collections()}
+    existing = _collection_names(client)
     collections_out: List[Dict[str, Any]] = []
 
     for name in ALL_COLLECTIONS:
