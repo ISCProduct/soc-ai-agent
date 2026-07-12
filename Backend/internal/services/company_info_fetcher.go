@@ -38,7 +38,7 @@ type CompanyInfoFetcher struct {
 }
 
 func NewCompanyInfoFetcher(repo repository.CompanyRepository, client *openai.Client, gbiz ...*GBizInfoService) *CompanyInfoFetcher {
-	f := &CompanyInfoFetcher{repo: repo, llm: &companyfetch.LLM{Client: client}}
+	f := &CompanyInfoFetcher{repo: repo, llm: companyfetch.NewLLM(client)}
 	if len(gbiz) > 0 {
 		f.gbiz = gbiz[0]
 	}

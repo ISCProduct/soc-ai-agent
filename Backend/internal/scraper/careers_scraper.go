@@ -33,7 +33,7 @@ type CareersScraper struct {
 
 // NewCareersScraper は CareersScraper を生成する。
 func NewCareersScraper(client *openai.Client) *CareersScraper {
-	return &CareersScraper{llm: &companyfetch.LLM{Client: client}}
+	return &CareersScraper{llm: companyfetch.NewLLM(client)}
 }
 
 const jobsJSONSchema = `

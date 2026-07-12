@@ -10,6 +10,15 @@ import (
 // LLM は企業情報パイプライン用の OpenAI ラッパ。
 type LLM struct {
 	Client *openai.Client
+	Search CompanySearchProvider // 未設定時は OpenAI Search Lite
+}
+
+// NewLLM は Client と env 由来の Search Provider を束ねる。
+func NewLLM(client *openai.Client) *LLM {
+	return &LLM{
+		Client: client,
+		Search: NewSearchProviderFromEnv(client),
+	}
 }
 
 // ExtractJSON は与えられたテキスト前提のプロンプトから JSON を抽出する（Extract モデル）。
@@ -25,17 +34,19 @@ func (l *LLM) ExtractJSON(ctx context.Context, systemPrompt, userPrompt string, 
 	return text, model, err
 }
 
-// SearchLiteJSON は安価な Search モデルのみを使う（deep search-preview は使わない）。
+// SearchLiteJSON は CompanySearchProvider 経由で検索する（既定: OpenAI Search Lite）。
 func (l *LLM) SearchLiteJSON(ctx context.Context, userPrompt string, maxTokens int) (text string, model string, err error) {
-	if l == nil || l.Client == nil {
+	if l == nil {
 		return "", "", fmt.Errorf("openai client is nil")
 	}
 	if maxTokens <= 0 {
 		maxTokens = 1200
 	}
-	model = SearchModel()
-	text, err = l.Client.WebSearchJSON(ctx, userPrompt, maxTokens, model)
-	return text, model, err
+	provider := l.ensureProvider()
+	if provider == nil {
+		return "", "", fmt.Errorf("search provider is nil")
+	}
+	return provider.Search(ctx, userPrompt, maxTokens)
 }
 
 // SearchJSON は互換のため残す。企業情報パイプラインでは SearchLiteJSON を使うこと。
