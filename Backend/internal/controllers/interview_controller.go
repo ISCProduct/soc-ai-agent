@@ -284,11 +284,13 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 
 	metaPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
 	json.NewEncoder(metaPart).Encode(map[string]any{
-		"user_text":         result.UserText,
-		"ai_text":           result.AIText,
-		"question_source":   result.QuestionSource,
-		"question_category": result.QuestionCategory,
-		"is_deepening":      result.IsDeepening,
+		"user_text":                result.UserText,
+		"ai_text":                  result.AIText,
+		"question_source":          result.QuestionSource,
+		"question_category":        result.QuestionCategory,
+		"is_deepening":             result.IsDeepening,
+		"resolved_company_id":      result.ResolvedCompanyID,
+		"custom_questions_enabled": result.CustomQuestionsEnabled,
 	})
 
 	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})
@@ -347,10 +349,12 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 
 	metaPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
 	json.NewEncoder(metaPart).Encode(map[string]any{
-		"ai_text":           result.AIText,
-		"question_source":   result.QuestionSource,
-		"question_category": result.QuestionCategory,
-		"is_deepening":      result.IsDeepening,
+		"ai_text":                  result.AIText,
+		"question_source":          result.QuestionSource,
+		"question_category":        result.QuestionCategory,
+		"is_deepening":             result.IsDeepening,
+		"resolved_company_id":      result.ResolvedCompanyID,
+		"custom_questions_enabled": result.CustomQuestionsEnabled,
 	})
 
 	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})

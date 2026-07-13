@@ -29,6 +29,7 @@ import VideocamIcon from '@mui/icons-material/Videocam'
 import VideocamOffIcon from '@mui/icons-material/VideocamOff'
 import CallEndIcon from '@mui/icons-material/CallEnd'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
+import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import ClosedCaptionIcon from '@mui/icons-material/ClosedCaption'
@@ -93,6 +94,32 @@ const POSITIONS: Position[] = [
   { id: 'network', title: 'ネットワークエンジニア', department: 'SIer / Network', icon: '🌐', questions: 7, category: 'sier' },
   { id: 'qa', title: 'テスト・品質保証（QA）', department: 'SIer / QA', icon: '✅', questions: 6, category: 'sier' },
 ]
+
+/** DB 登録企業と企業名が一致すれば id を解決。未登録なら id=0 のまま返す (#567) */
+async function resolveCompanyByName(
+  name: string,
+  fallback?: Partial<InterviewCompany>,
+): Promise<InterviewCompany> {
+  const trimmed = name.trim()
+  if (!trimmed) {
+    return { id: 0, name: '', ...fallback }
+  }
+  try {
+    const params = new URLSearchParams({ limit: '20', offset: '0', name: trimmed })
+    const res = await fetch(`/api/companies?${params}`, { cache: 'no-store' })
+    if (res.ok) {
+      const data = await res.json()
+      const list: InterviewCompany[] = Array.isArray(data?.companies) ? data.companies : []
+      const exact = list.find((c) => c.name === trimmed)
+      if (exact) {
+        return { ...exact, ...fallback, id: exact.id, name: exact.name }
+      }
+    }
+  } catch {
+    // ignore — 解決失敗時は id=0
+  }
+  return { id: 0, name: trimmed, ...fallback }
+}
 
 function InterviewContent() {
   const router = useRouter()
@@ -189,16 +216,24 @@ function InterviewContent() {
 
   // マッチング結果から遷移した場合: URL パラメータで企業を事前選択してロビーへ
   useEffect(() => {
-    const companyName = searchParams.get('company_name')
+    const companyNameParam = searchParams.get('company_name')
     const industry = searchParams.get('industry')
     const companyId = searchParams.get('company_id')
-    if (!companyName || loading) return
+    if (!companyNameParam || loading) return
+    const parsedId = companyId ? parseInt(companyId, 10) : 0
     setInterviewCompany({
-      id: companyId ? parseInt(companyId, 10) : 0,
-      name: companyName,
+      id: Number.isFinite(parsedId) ? parsedId : 0,
+      name: companyNameParam,
       industry: industry || undefined,
     })
     setStatus('lobby')
+    if (!companyId || parsedId === 0) {
+      void resolveCompanyByName(companyNameParam, { industry: industry || undefined }).then((resolved) => {
+        setInterviewCompany((prev) =>
+          prev?.name === companyNameParam ? resolved : prev,
+        )
+      })
+    }
   }, [loading, searchParams])
 
   // Load company list for selection screen (initial fetch + debounced search)
@@ -867,9 +902,20 @@ function InterviewContent() {
                       component="input"
                       value={companySearch}
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                        setCompanySearch(e.target.value)
-                        if (companySourceTab === 'db' && e.target.value.trim()) {
-                          setInterviewCompany({ id: 0, name: e.target.value.trim() })
+                        const value = e.target.value
+                        setCompanySearch(value)
+                        if (companySourceTab === 'db' && value.trim()) {
+                          const local = allCompanies.find((c) => c.name === value.trim())
+                          if (local) {
+                            setInterviewCompany(local)
+                          } else {
+                            setInterviewCompany({ id: 0, name: value.trim() })
+                            void resolveCompanyByName(value.trim()).then((resolved) => {
+                              setInterviewCompany((prev) =>
+                                prev?.name === value.trim() ? resolved : prev,
+                              )
+                            })
+                          }
                         }
                       }}
                       placeholder={companySourceTab === 'web' ? '企業名を入力してWEB検索' : '企業名を入力、または下のリストから選択'}
@@ -884,12 +930,25 @@ function InterviewContent() {
                     />
                   </Box>
 
-                  {/* Manual entry confirmation chip (DB mode only) */}
-                  {companySourceTab === 'db' && companySearch.trim() && interviewCompany?.id === 0 && (
+                  {/* Manual entry / unresolved company warning (#567) */}
+                  {interviewCompany && interviewCompany.id === 0 && interviewCompany.name.trim() && (
+                    <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, bgcolor: '#fff8e1', border: '1px solid #ffe082', display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                      <WarningAmberIcon sx={{ color: '#f9a825', fontSize: 18, mt: 0.2, flexShrink: 0 }} />
+                      <Box>
+                        <Typography sx={{ fontSize: 13, color: '#f57f17', fontWeight: 600 }}>
+                          「{interviewCompany.name}」は企業管理に未登録です
+                        </Typography>
+                        <Typography sx={{ fontSize: 12, color: '#795548', mt: 0.5, lineHeight: 1.5 }}>
+                          カスタム質問・深掘り追質問は、企業管理に登録された企業を選択した場合のみ利用できます。一般的な面接練習は可能です。
+                        </Typography>
+                      </Box>
+                    </Box>
+                  )}
+                  {interviewCompany && interviewCompany.id > 0 && companySourceTab !== 'db' && (
                     <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, bgcolor: `${PRIMARY}08`, border: `1px solid ${PRIMARY}30`, display: 'flex', alignItems: 'center', gap: 1 }}>
                       <CheckCircleIcon sx={{ color: PRIMARY, fontSize: 18 }} />
                       <Typography sx={{ fontSize: 13, color: PRIMARY, fontWeight: 600 }}>
-                        「{interviewCompany.name}」で面接練習します
+                        企業管理の「{interviewCompany.name}」と一致しました（カスタム質問・深掘りが有効）
                       </Typography>
                     </Box>
                   )}
@@ -945,7 +1004,20 @@ function InterviewContent() {
                             return (
                               <Box
                                 key={i}
-                                onClick={() => setInterviewCompany({ id: 0, name: result.name, description: result.description })}
+                                onClick={() => {
+                                  setCompanySearch(result.name)
+                                  const local = allCompanies.find((c) => c.name === result.name)
+                                  if (local) {
+                                    setInterviewCompany({ ...local, description: result.description })
+                                    return
+                                  }
+                                  setInterviewCompany({ id: 0, name: result.name, description: result.description })
+                                  void resolveCompanyByName(result.name, { description: result.description }).then((resolved) => {
+                                    setInterviewCompany((prev) =>
+                                      prev?.name === result.name ? resolved : prev,
+                                    )
+                                  })
+                                }}
                                 sx={{
                                   p: 1.5, borderRadius: 2, cursor: 'pointer',
                                   border: `2px solid ${isSelected ? PRIMARY : '#e2e8f0'}`,
@@ -1333,6 +1405,21 @@ function InterviewContent() {
               <Typography sx={{ color: 'text.secondary', mb: 1, fontSize: 15 }}>
                 {companyName}
               </Typography>
+              {interviewCompany && interviewCompany.id === 0 && interviewCompany.name.trim() && (
+                <Box sx={{ mb: 2, px: 2, py: 1.5, bgcolor: '#fff8e1', borderRadius: 2, border: '1px solid #ffe082', width: '100%', maxWidth: 340, textAlign: 'left' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                    <WarningAmberIcon sx={{ color: '#f9a825', fontSize: 18, mt: 0.2, flexShrink: 0 }} />
+                    <Box>
+                      <Typography sx={{ fontSize: 13, color: '#f57f17', fontWeight: 600 }}>
+                        カスタム質問・深掘りは無効です
+                      </Typography>
+                      <Typography sx={{ fontSize: 12, color: '#795548', mt: 0.5, lineHeight: 1.5 }}>
+                        企業管理に未登録のため、一般的な面接練習のみ行えます。登録企業を選ぶとカスタム質問が有効になります。
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Box>
+              )}
               <Box sx={{ mb: 3, px: 2, py: 1, bgcolor: '#e3f2fd', borderRadius: 1, border: '1px solid #90caf9' }}>
                 <Typography sx={{ fontSize: 13, color: '#1565c0' }}>
                   ⏱ このセッションは最大{interviewLimits.maxMinutes}分です
