@@ -33,7 +33,7 @@ type CareersScraper struct {
 
 // NewCareersScraper は CareersScraper を生成する。
 func NewCareersScraper(client *openai.Client) *CareersScraper {
-	return &CareersScraper{llm: companyfetch.NewLLM(client, nil)}
+	return &CareersScraper{llm: companyfetch.NewLLM(client)}
 }
 
 // SetSearchBudget は月次 Search 予算ガードを注入する。

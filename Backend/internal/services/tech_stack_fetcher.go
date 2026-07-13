@@ -33,7 +33,7 @@ type TechStackFetcher struct {
 }
 
 func NewTechStackFetcher(repo repository.CompanyRepository, client *openai.Client) *TechStackFetcher {
-	return &TechStackFetcher{repo: repo, llm: companyfetch.NewLLM(client, nil)}
+	return &TechStackFetcher{repo: repo, llm: companyfetch.NewLLM(client)}
 }
 
 // SetSearchBudget は月次 Search 予算ガードを注入する。
