@@ -439,6 +439,7 @@ OPENAI_COMPANY_PARSE_MODEL_ADVANCED=gpt-4o
 | 利点 | OpenAI Search 以外の検索コスト最適化、根拠 URL の明示 |
 | 欠点 | 運用面（API キー・MCP プロセス）、Go サービスからの直接呼び出し設計が未整備 |
 | 本設計での位置づけ | **Phase 2 候補**。Phase 1 は OpenAI Search-Lite/Full で統一し、インターフェース（`CompanySearchProvider`）だけ抽象化して後から Brave を差し込めるようにする |
+| 実装 (#590) | `Backend/internal/companyfetch/provider*.go` / 切替 `COMPANY_SEARCH_PROVIDER` / コスト比較 [search-provider-cost.md](../wiki/search-provider-cost.md) |
 
 ---
 

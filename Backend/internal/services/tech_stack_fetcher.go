@@ -31,7 +31,7 @@ type TechStackFetcher struct {
 }
 
 func NewTechStackFetcher(repo repository.CompanyRepository, client *openai.Client) *TechStackFetcher {
-	return &TechStackFetcher{repo: repo, llm: &companyfetch.LLM{Client: client}}
+	return &TechStackFetcher{repo: repo, llm: companyfetch.NewLLM(client)}
 }
 
 const techStackJSONSchema = `{
