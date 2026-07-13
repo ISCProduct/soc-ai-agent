@@ -255,8 +255,10 @@ docker compose up -d --build
 重いサービス（RAG）を後から起動する場合:
 
 ```sh
-docker compose --profile rag up -d rag-review
+docker compose --profile rag up -d chroma rag-review
 ```
+
+`chroma` は named volume `chroma_data` で永続化されます。旧 PersistentClient（コンテナ内 `/app/chroma_db`）からの移行は [docs/wiki/chroma-migration.md](docs/wiki/chroma-migration.md)（#585）を参照してください。
 
 ---
 
