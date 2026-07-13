@@ -96,6 +96,8 @@ export function JobAgentChat() {
   const [userScores, setUserScores] = useState<UserScore[]>([])
   const [progress, setProgress] = useState({ questions: 0, total: 15, categories: 0, totalCategories: 10 })
   const [showCustomInput, setShowCustomInput] = useState(false) // カスタム入力モード
+  const [historyLoadError, setHistoryLoadError] = useState<string | null>(null)
+  const [historyRetrying, setHistoryRetrying] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // メッセージが更新されたらキャッシュに保存
@@ -120,92 +122,115 @@ export function JobAgentChat() {
     }
   }, [sessionId])
 
+  const applyHistoryOrStartSession = async (history: Awaited<ReturnType<typeof getChatHistory>>) => {
+    setHistoryLoadError(null)
+    if (history.length > 0) {
+      const loadedMessages: Message[] = history.map((msg) => ({
+        id: msg.id.toString(),
+        role: msg.role === "assistant" ? "agent" : "user",
+        content: msg.content,
+      }))
+      setMessages(loadedMessages)
+
+      try {
+        const scoresData = await getUserScores(sessionId)
+        if (scoresData && scoresData.length > 0) {
+          const scores: UserScore[] = scoresData.map((s: ChatScore) => ({
+            category: s.weight_category || s.category,
+            score: s.score || 0,
+            reason: s.reason || '',
+          }))
+          setUserScores(scores)
+          setProgress({
+            questions: history.length,
+            total: 15,
+            categories: scores.length,
+            totalCategories: 10,
+          })
+        }
+      } catch (error) {
+        console.error("Failed to load scores:", error)
+      }
+
+      const lastMessage = history[history.length - 1]
+      if (lastMessage.role === "assistant" &&
+          (lastMessage.content.includes("分析が完了しました") ||
+           lastMessage.content.includes("診断が完了しました"))) {
+        setIsComplete(true)
+      }
+      return
+    }
+
+    // 履歴 0 件（新規セッション）: 従来どおり最初の質問を生成
+    setIsTyping(true)
+    try {
+      const response = await sendChatMessage({
+        user_id: userId,
+        session_id: sessionId,
+        message: "START_SESSION",
+        industry_id: industryId,
+        job_category_id: jobCategoryId,
+      })
+      setMessages([{
+        id: "1",
+        role: "agent",
+        content: response.response,
+      }])
+    } finally {
+      setIsTyping(false)
+    }
+  }
+
   const initializeChat = async () => {
     if (!sessionId) {
       console.log('[Frontend] Session ID not ready yet')
       return
     }
-    
+
     try {
       console.log('[Frontend] Initializing chat with sessionId:', sessionId)
-      
-      // バックエンドからチャット履歴を取得
-      const history = await getChatHistory(sessionId)
-      console.log('[Frontend] Chat history loaded:', history.length, 'messages')
-      
-      if (history.length > 0) {
-        // 既存の履歴がある場合は復元
-        const loadedMessages: Message[] = history.map((msg) => ({
-          id: msg.id.toString(),
-          role: msg.role === "assistant" ? "agent" : "user",
-          content: msg.content,
-        }))
-        setMessages(loadedMessages)
-        console.log('[Frontend] Messages restored from backend')
-        
-        // バックエンドからスコアと進捗を取得
-        try {
-          const scoresData = await getUserScores(sessionId)
-          console.log('[Frontend] Scores loaded:', scoresData)
-          if (scoresData && scoresData.length > 0) {
-            const scores: UserScore[] = scoresData.map((s: ChatScore) => ({
-              category: s.weight_category || s.category,
-              score: s.score || 0,
-              reason: s.reason || ''
-            }))
-            setUserScores(scores)
-            
-            // 進捗状況を計算（スコアの数から）
-            setProgress({
-              questions: history.length,
-              total: 15,
-              categories: scores.length,
-              totalCategories: 10,
-            })
-          }
-        } catch (error) {
-          console.error("Failed to load scores:", error)
-        }
-        
-        // 完了状態をチェック（診断完了の特別なメッセージを確認）
-        const lastMessage = history[history.length - 1]
-        if (lastMessage.role === "assistant" && 
-            (lastMessage.content.includes("分析が完了しました") || 
-             lastMessage.content.includes("診断が完了しました"))) {
-          setIsComplete(true)
-        }
-      } else {
-        console.log('[Frontend] No history found, starting new session')
-        // 新規セッション：AIに最初の質問を生成させる
-        setIsTyping(true)
-        const response = await sendChatMessage({
-          user_id: userId,
-          session_id: sessionId,
-          message: "START_SESSION",
-          industry_id: industryId,
-          job_category_id: jobCategoryId,
-        })
-        
-        setMessages([
-          {
-            id: "1",
-            role: "agent",
-            content: response.response,
-          },
-        ])
-        setIsTyping(false)
+      let history
+      try {
+        history = await getChatHistory(sessionId)
+      } catch (error) {
+        console.error("Failed to load chat history:", error)
+        // #569: 履歴取得失敗時は挨拶ではなくエラー UI
+        setHistoryLoadError('履歴の読み込みに失敗しました。通信状況を確認して、もう一度お試しください。')
+        setMessages([])
+        return
       }
+      console.log('[Frontend] Chat history loaded:', history.length, 'messages')
+      await applyHistoryOrStartSession(history)
     } catch (error) {
-      console.error("Failed to initialize chat:", error)
-      // エラー時はデフォルトメッセージ
-      setMessages([
-        {
-          id: "1",
-          role: "agent",
-          content: "こんにちは！IT業界専門のキャリアエージェントです。あなたに最適な企業を見つけるため、いくつか質問させてください。まず、どのような職種に興味がありますか？",
-        },
-      ])
+      console.error("Failed to start new chat session:", error)
+      setHistoryLoadError('チャットの開始に失敗しました。もう一度お試しください。')
+      setMessages([])
     } finally {
+      setIsInitializing(false)
+    }
+  }
+
+  const handleRetryHistoryLoad = async () => {
+    if (!sessionId || historyRetrying) return
+    setHistoryRetrying(true)
+    setIsInitializing(true)
+    try {
+      let history
+      try {
+        history = await getChatHistory(sessionId)
+      } catch (error) {
+        console.error("Failed to load history (retry):", error)
+        setHistoryLoadError('履歴の読み込みに失敗しました。通信状況を確認して、もう一度お試しください。')
+        setMessages([])
+        return
+      }
+      await applyHistoryOrStartSession(history)
+    } catch (error) {
+      console.error("Failed to start new chat session (retry):", error)
+      setHistoryLoadError('チャットの開始に失敗しました。もう一度お試しください。')
+      setMessages([])
+    } finally {
+      setHistoryRetrying(false)
       setIsInitializing(false)
     }
   }
@@ -412,6 +437,21 @@ export function JobAgentChat() {
                   <p className="text-sm text-muted-foreground">チャットを準備中...</p>
                 </div>
               </div>
+            ) : historyLoadError ? (
+              <div className="flex items-center justify-center h-full px-4">
+                <div className="text-center space-y-4 max-w-md">
+                  <p className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-4 py-3">
+                    {historyLoadError}
+                  </p>
+                  <Button
+                    variant="default"
+                    onClick={handleRetryHistoryLoad}
+                    disabled={historyRetrying}
+                  >
+                    {historyRetrying ? '再読み込み中...' : '再試行'}
+                  </Button>
+                </div>
+              </div>
             ) : (
               <>
                 {messages.map((message, index) => {
@@ -488,7 +528,7 @@ export function JobAgentChat() {
           </div>
 
           <div className="border-t p-4">
-            {hasChoicesInLastMessage && !showCustomInput ? (
+            {historyLoadError ? null : hasChoicesInLastMessage && !showCustomInput ? (
               // 選択肢がある場合は「その他を入力」ボタンのみ表示
               <div className="flex justify-center">
                 <Button
