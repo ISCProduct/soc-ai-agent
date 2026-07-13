@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -22,6 +23,7 @@ type JobFetchService struct {
 	repo         repository.CompanyRepository
 	openaiClient *openai.Client
 	careers      *scraper.CareersScraper
+	flight       *CompanySearchFlight
 }
 
 // NewJobFetchService は JobFetchService を生成する。
@@ -30,6 +32,23 @@ func NewJobFetchService(repo repository.CompanyRepository, client *openai.Client
 		repo:         repo,
 		openaiClient: client,
 		careers:      scraper.NewCareersScraper(client),
+	}
+}
+
+// SetSearchBudget は月次 Search 予算ガードを注入する。
+func (s *JobFetchService) SetSearchBudget(budget companyfetch.SearchBudget) {
+	if s == nil {
+		return
+	}
+	if s.careers != nil {
+		s.careers.SetSearchBudget(budget)
+	}
+}
+
+// SetSearchFlight は企業キー単位の singleflight を注入する。
+func (s *JobFetchService) SetSearchFlight(flight *CompanySearchFlight) {
+	if s != nil {
+		s.flight = flight
 	}
 }
 
@@ -51,8 +70,24 @@ func (s *JobFetchService) FetchAndSaveJobs(ctx context.Context, companyID uint, 
 	reqCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	allJobs, err := s.careers.FetchJobs(reqCtx, company.Name, company.WebsiteURL)
+	run := func() (any, error) {
+		return s.careers.FetchJobs(reqCtx, company.Name, company.WebsiteURL)
+	}
+	var allJobs []scraper.JobPostingResult
+	if s.flight != nil {
+		v, ferr := s.flight.Do("jobs", normalizeCompanyKey(company.Name), run)
+		err = ferr
+		if v != nil {
+			allJobs, _ = v.([]scraper.JobPostingResult)
+		}
+	} else {
+		allJobs, err = s.careers.FetchJobs(reqCtx, company.Name, company.WebsiteURL)
+	}
 	if err != nil {
+		if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
+			existing, _ := s.repo.ListJobPositions(&companyID, 100)
+			return existing, nil
+		}
 		return nil, err
 	}
 	if len(allJobs) == 0 {

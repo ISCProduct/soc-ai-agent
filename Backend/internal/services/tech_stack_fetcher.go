@@ -7,6 +7,7 @@ import (
 	"Backend/internal/openai"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -26,12 +27,31 @@ type TechStackResult struct {
 
 // TechStackFetcher は安価な AI Search（mini-search→Parse）で技術スタックを取得する。
 type TechStackFetcher struct {
-	repo repository.CompanyRepository
-	llm  *companyfetch.LLM
+	repo   repository.CompanyRepository
+	llm    *companyfetch.LLM
+	flight *CompanySearchFlight
 }
 
 func NewTechStackFetcher(repo repository.CompanyRepository, client *openai.Client) *TechStackFetcher {
 	return &TechStackFetcher{repo: repo, llm: companyfetch.NewLLM(client)}
+}
+
+// SetSearchBudget は月次 Search 予算ガードを注入する。
+func (f *TechStackFetcher) SetSearchBudget(budget companyfetch.SearchBudget) {
+	if f == nil {
+		return
+	}
+	if f.llm == nil {
+		f.llm = &companyfetch.LLM{}
+	}
+	f.llm.Budget = budget
+}
+
+// SetSearchFlight は企業キー単位の singleflight を注入する。
+func (f *TechStackFetcher) SetSearchFlight(flight *CompanySearchFlight) {
+	if f != nil {
+		f.flight = flight
+	}
 }
 
 const techStackJSONSchema = `{
@@ -52,8 +72,23 @@ func (f *TechStackFetcher) FetchAndSave(ctx context.Context, companyID uint, for
 		return techResultFromCompany(company), nil
 	}
 
-	result, err := f.Acquire(ctx, company.Name, company.WebsiteURL)
+	run := func() (any, error) {
+		return f.Acquire(ctx, company.Name, company.WebsiteURL)
+	}
+	var result *TechStackResult
+	if f.flight != nil {
+		v, ferr := f.flight.Do("tech", normalizeCompanyKey(company.Name), run)
+		err = ferr
+		if v != nil {
+			result, _ = v.(*TechStackResult)
+		}
+	} else {
+		result, err = f.Acquire(ctx, company.Name, company.WebsiteURL)
+	}
 	if err != nil {
+		if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
+			return techResultFromCompany(company), nil
+		}
 		return nil, err
 	}
 

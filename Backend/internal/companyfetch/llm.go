@@ -11,9 +11,11 @@ import (
 type LLM struct {
 	Client *openai.Client
 	Search CompanySearchProvider // 未設定時は OpenAI Search Lite
+	Budget SearchBudget          // 任意。設定時は Search 前に月次予算を検査する
 }
 
 // NewLLM は Client と env 由来の Search Provider を束ねる。
+// 予算ガードは SetSearchBudget / LLM.Budget で後から注入する。
 func NewLLM(client *openai.Client) *LLM {
 	return &LLM{
 		Client: client,
@@ -34,10 +36,15 @@ func (l *LLM) ExtractJSON(ctx context.Context, systemPrompt, userPrompt string, 
 	return text, model, err
 }
 
-// SearchLiteJSON は CompanySearchProvider 経由で検索する（既定: OpenAI Search Lite）。
+// SearchLiteJSON は月次予算チェック後、CompanySearchProvider 経由で検索する（既定: OpenAI Search Lite）。
 func (l *LLM) SearchLiteJSON(ctx context.Context, userPrompt string, maxTokens int) (text string, model string, err error) {
 	if l == nil {
 		return "", "", fmt.Errorf("openai client is nil")
+	}
+	if l.Budget != nil {
+		if err := l.Budget.AllowSearch(); err != nil {
+			return "", "", err
+		}
 	}
 	if maxTokens <= 0 {
 		maxTokens = 1200

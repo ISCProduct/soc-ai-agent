@@ -52,6 +52,14 @@ type ModelRow = {
 type Summary = {
   current_month_cost_usd: number
   model_breakdown: ModelRow[]
+  company_search?: {
+    month: string
+    count: number
+    limit: number
+    remaining: number
+    enforce: boolean
+    exceeded: boolean
+  }
   realtime?: {
     current_month_cost_usd: number
     active_connections: number
@@ -244,6 +252,25 @@ export default function AdminCostsPage() {
             </Typography>
             <Typography variant="caption" color="text.secondary">
               active: {summary?.realtime?.active_connections ?? 0}
+            </Typography>
+          </CardContent>
+        </Card>
+
+        <Card sx={{ flex: 1, minWidth: 200 }}>
+          <CardContent>
+            <Typography variant="body2" color="text.secondary">企業 Search 今月</Typography>
+            <Typography variant="h4" fontWeight={700} color={
+              summary?.company_search?.exceeded ? 'error.main' :
+              (summary?.company_search?.remaining ?? 1) < 200 ? 'warning.main' : 'success.main'
+            }>
+              {(summary?.company_search?.count ?? 0).toLocaleString()}
+              <Typography component="span" variant="h6" color="text.secondary">
+                {' '}/ {(summary?.company_search?.limit ?? 2000).toLocaleString()}
+              </Typography>
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              残 {summary?.company_search?.remaining ?? '—'}
+              {summary?.company_search?.enforce === false ? ' (observe)' : ''}
             </Typography>
           </CardContent>
         </Card>

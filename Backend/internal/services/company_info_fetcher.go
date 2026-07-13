@@ -7,6 +7,7 @@ import (
 	"Backend/internal/openai"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -32,9 +33,10 @@ type CompanyInfoResult struct {
 // CompanyInfoFetcher は gBizINFO を足がかりにしつつ、不足分は AI（安価 Search→Parse）で充足する。
 // 高額な gpt-4o-search-preview（deep）は使わない。非上場など gBiz で足りない企業を AI 取得で補う。
 type CompanyInfoFetcher struct {
-	repo repository.CompanyRepository
-	llm  *companyfetch.LLM
-	gbiz *GBizInfoService
+	repo   repository.CompanyRepository
+	llm    *companyfetch.LLM
+	gbiz   *GBizInfoService
+	flight *CompanySearchFlight
 }
 
 func NewCompanyInfoFetcher(repo repository.CompanyRepository, client *openai.Client, gbiz ...*GBizInfoService) *CompanyInfoFetcher {
@@ -43,6 +45,24 @@ func NewCompanyInfoFetcher(repo repository.CompanyRepository, client *openai.Cli
 		f.gbiz = gbiz[0]
 	}
 	return f
+}
+
+// SetSearchBudget は月次 Search 予算ガードを注入する。
+func (f *CompanyInfoFetcher) SetSearchBudget(budget companyfetch.SearchBudget) {
+	if f == nil {
+		return
+	}
+	if f.llm == nil {
+		f.llm = &companyfetch.LLM{}
+	}
+	f.llm.Budget = budget
+}
+
+// SetSearchFlight は企業キー単位の singleflight を注入する。
+func (f *CompanyInfoFetcher) SetSearchFlight(flight *CompanySearchFlight) {
+	if f != nil {
+		f.flight = flight
+	}
 }
 
 const companyInfoJSONSchema = `{
@@ -69,9 +89,28 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 		return companyInfoFromModel(company), nil
 	}
 
-	result, err := f.acquireForCompany(ctx, company)
+	run := func() (any, error) {
+		return f.acquireForCompany(ctx, company)
+	}
+	var result *CompanyInfoResult
+	if f.flight != nil {
+		v, ferr := f.flight.Do("info", normalizeCompanyKey(company.Name), run)
+		err = ferr
+		if v != nil {
+			result, _ = v.(*CompanyInfoResult)
+		}
+	} else {
+		result, err = f.acquireForCompany(ctx, company)
+	}
 	if err != nil {
+		if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
+			// 超過時はキャッシュ（既存DB）のみで継続
+			return companyInfoFromModel(company), nil
+		}
 		return nil, err
+	}
+	if result == nil {
+		return nil, fmt.Errorf("company info acquire returned nil")
 	}
 
 	applyCompanyInfoResult(company, result)
