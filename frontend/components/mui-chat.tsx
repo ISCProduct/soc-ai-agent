@@ -22,6 +22,7 @@ import {
 import { Send, SmartToy, Person, Refresh, Business, LocationOn, People, TrendingUp as TrendingUpIcon } from '@mui/icons-material'
 import { sendChatMessage, getChatHistory, getUserScores, ChatRequest, ChatResponse } from '@/lib/api'
 import { authService } from '@/lib/auth'
+import { resolveChatOutgoingMessage } from '@/lib/chat-choices'
 
 interface Message {
   id: string
@@ -266,9 +267,17 @@ export function MuiChat() {
   }, [])
 
   const handleSend = async (overrideMessage?: string) => {
-    const messageText = (overrideMessage ?? input).trim()
-    if (!messageText || isLoading || !sessionId || !userId) return
-    
+    const rawText = (overrideMessage ?? input).trim()
+    if (!rawText || isLoading || !sessionId || !userId) return
+
+    // ボタン送信はそのまま。自由入力は直近の選択肢ラベルを記号へ正規化する
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
+    const currentChoices = lastAssistant ? extractChoices(lastAssistant.content) : []
+    const messageText =
+      overrideMessage !== undefined
+        ? rawText
+        : resolveChatOutgoingMessage(rawText, currentChoices, otherChoiceActive)
+
     // 分析完了後はメッセージ送信を無効化
     if (analysisComplete) {
       console.log('[MUI Chat] Analysis already complete, ignoring message')
@@ -521,7 +530,11 @@ export function MuiChat() {
   const lastAssistantMessage = [...messages].reverse().find((msg) => msg.role === 'assistant')
   const choiceOptions = lastAssistantMessage ? extractChoices(lastAssistantMessage.content) : []
   const showChoiceButtons = choiceOptions.length >= 2 && !analysisComplete
-  const inputPlaceholder = otherChoiceActive ? 'その他の内容を入力...' : 'メッセージを入力...'
+  const inputPlaceholder = otherChoiceActive
+    ? 'その他の内容を入力...'
+    : showChoiceButtons
+      ? '選択肢と同じ内容を入力しても送信できます'
+      : 'メッセージを入力...'
 
   useEffect(() => {
     if (!showChoiceButtons) {
@@ -894,7 +907,7 @@ export function MuiChat() {
                 }}
               >
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                  選択肢を選んでください
+                  選択肢を選んでください（同じ内容を入力しても構いません。「その他」は自由記述）
                 </Typography>
                 <Stack direction="row" spacing={1} flexWrap="wrap" gap={1}>
                   {choiceOptions.map((choice) => {
@@ -929,7 +942,6 @@ export function MuiChat() {
                 placeholder={inputPlaceholder}
                 value={input}
                 onChange={(e) => {
-                  console.log('[MUI Chat] Rendering input field (analysisComplete=false)')
                   setInput(e.target.value)
                 }}
                 onKeyPress={(e) => {

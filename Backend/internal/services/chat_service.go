@@ -375,19 +375,28 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	// 3. ユーザーの回答から重み係数を判定・更新し、回答品質に応じてフェーズ進捗を更新
 	// isQualityAnswer: スキップフレーズ・極短回答・スコア0でなければ true（進捗カウント対象）
 	trimmedAnswer := strings.TrimSpace(req.Message)
-	log.Printf("[ProcessChat] Checking if choice answer: '%s' (len=%d)\n", trimmedAnswer, len(trimmedAnswer))
+	lastAssistantQuestion := ""
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "assistant" {
+			lastAssistantQuestion = history[i].Content
+			break
+		}
+	}
+	resolved := ResolveChoiceAnswer(lastAssistantQuestion, trimmedAnswer)
+	log.Printf("[ProcessChat] Checking answer: raw=%q resolved_choice=%v letter=%q free_text=%v\n",
+		trimmedAnswer, resolved.IsChoice, resolved.Letter, resolved.IsFreeText)
 	isQualityAnswer := false
-	if len(trimmedAnswer) <= 3 && s.isChoiceAnswer(trimmedAnswer) {
+	if resolved.IsChoice && s.isChoiceAnswer(resolved.Letter) {
 		log.Printf("[ProcessChat] Processing as choice answer\n")
 		var err error
-		isQualityAnswer, err = s.processChoiceAnswer(ctx, req.UserID, req.SessionID, trimmedAnswer, history, jobCategoryID)
+		isQualityAnswer, err = s.processChoiceAnswer(ctx, req.UserID, req.SessionID, resolved.Letter, history, jobCategoryID)
 		if err != nil {
 			log.Printf("Warning: failed to process choice answer: %v\n", err)
 		}
 	} else {
 		log.Printf("[ProcessChat] Processing as text answer\n")
 		var err error
-		isQualityAnswer, err = s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, req.Message, jobCategoryID)
+		isQualityAnswer, err = s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, resolved.Text, jobCategoryID)
 		if err != nil {
 			log.Printf("Warning: failed to update weights: %v\n", err)
 		}

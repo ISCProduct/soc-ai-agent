@@ -38,9 +38,18 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 	}
 
 	targetCategory := s.inferCategoryFromQuestion(lastQuestion)
-	isChoice := !isTextBasedQuestion(lastQuestion)
+	scoreAnswer := message
+	isChoice := false
+	if !isTextBasedQuestion(lastQuestion) {
+		resolved := ResolveChoiceAnswer(lastQuestion, message)
+		if resolved.IsChoice {
+			isChoice = true
+			scoreAnswer = resolved.Letter
+		}
+		// マッチしない自由記述（その他）は isChoice=false で文章採点する
+	}
 
-	result := s.answerEvaluator.EvaluateHumanScoring(lastQuestion, message, isChoice, jobCategoryID != 0, nil)
+	result := s.answerEvaluator.EvaluateHumanScoring(lastQuestion, scoreAnswer, isChoice, jobCategoryID != 0, nil)
 	if result.Action == PrecheckSkip {
 		// 「わかりません」などのスキップフレーズは進捗カウントしない
 		log.Printf("Skipping progress: skip phrase detected (%s)\n", result.Reason)

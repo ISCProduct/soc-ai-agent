@@ -144,7 +144,17 @@ func (s *ChatService) validateAnswerRelevance(ctx context.Context, question, ans
 		return isLikelyAnswer(answer, question), nil
 	}
 
-	// 選択肢型の質問: AI判定を使用
+	// 選択肢型の質問: 記号・ラベル一致、またはその他相当の自由記述はローカルで受理
+	resolved := ResolveChoiceAnswer(question, answer)
+	if resolved.IsChoice {
+		log.Printf("[Validation] Choice answer matched locally: %s\n", resolved.Letter)
+		return true, nil
+	}
+	if len([]rune(strings.TrimSpace(answer))) >= 2 {
+		log.Printf("[Validation] Accepting free-text answer on choice question (その他経路)\n")
+		return true, nil
+	}
+
 	log.Printf("[Validation] Choice-based question detected, using AI validation\n")
 
 	systemPrompt := prompts.AnswerValidationSystemPrompt
