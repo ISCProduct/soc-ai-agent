@@ -126,11 +126,11 @@ func TestScoreDimensions_shortAnswer_notTooPerfect(t *testing.T) {
 // 矛盾あり: credibility = 0（isTooPerfect より優先）
 func TestScoreDimensions_contradiction_credibilityZero(t *testing.T) {
 	signals := signalSet{
-		hasAction:       true,
-		hasResult:       true,
-		hasReason:       false,
+		hasAction:        true,
+		hasResult:        true,
+		hasReason:        false,
 		hasNumbersOrTime: false,
-		contradiction:   true,
+		contradiction:    true,
 	}
 	answer := "取り組み、成果と達成と向上を収めました。チームで実施しました。成功しました。大変良い経験でした。"
 	scores := scoreDimensions("generic_rubric", signals, answer)
@@ -195,7 +195,7 @@ func TestEvaluateHumanScoring_concreteAnswer_higherScore(t *testing.T) {
 
 func TestApplyPenaltiesAndBoosts_contradiction_penalty(t *testing.T) {
 	signals := signalSet{contradiction: true, hasConcreteExample: true, hasAction: true}
-	score, penalties, _ := applyPenaltiesAndBoosts(50, signals)
+	score, penalties, _ := applyPenaltiesAndBoosts(50, signals, 40)
 
 	if !slices.Contains(penalties, "contradiction") {
 		t.Error("contradiction シグナルがあるのに penalties に 'contradiction' が含まれていない")
@@ -207,7 +207,7 @@ func TestApplyPenaltiesAndBoosts_contradiction_penalty(t *testing.T) {
 
 func TestApplyPenaltiesAndBoosts_numbersOrTime_boost(t *testing.T) {
 	signals := signalSet{hasNumbersOrTime: true, hasConcreteExample: true, hasAction: true}
-	score, _, boosts := applyPenaltiesAndBoosts(50, signals)
+	score, _, boosts := applyPenaltiesAndBoosts(50, signals, 40)
 
 	if !slices.Contains(boosts, "evidence") {
 		t.Error("hasNumbersOrTime ありで boosts に 'evidence' が含まれていない")
@@ -219,7 +219,7 @@ func TestApplyPenaltiesAndBoosts_numbersOrTime_boost(t *testing.T) {
 
 func TestApplyPenaltiesAndBoosts_scoreFloor(t *testing.T) {
 	signals := signalSet{contradiction: true}
-	score, _, _ := applyPenaltiesAndBoosts(10, signals)
+	score, _, _ := applyPenaltiesAndBoosts(10, signals, 40)
 	if score < 0 {
 		t.Errorf("スコアがマイナスになった: %d", score)
 	}
@@ -227,8 +227,154 @@ func TestApplyPenaltiesAndBoosts_scoreFloor(t *testing.T) {
 
 func TestApplyPenaltiesAndBoosts_scoreCeiling(t *testing.T) {
 	signals := signalSet{hasNumbersOrTime: true, hasConcreteExample: true, hasAction: true}
-	score, _, _ := applyPenaltiesAndBoosts(100, signals)
+	score, _, _ := applyPenaltiesAndBoosts(100, signals, 40)
 	if score > 100 {
 		t.Errorf("スコアが100を超えた: %d", score)
+	}
+}
+
+func TestApplyPenaltiesAndBoosts_engagementSkipsTooGeneric(t *testing.T) {
+	// 理由のみでも関与あり → too_generic なし
+	signals := signalSet{hasReason: true}
+	score, penalties, _ := applyPenaltiesAndBoosts(40, signals, 40)
+	if slices.Contains(penalties, "too_generic") {
+		t.Error("関与シグナルありなのに too_generic が付与された")
+	}
+	if score != 40 {
+		t.Errorf("got=%d want=40", score)
+	}
+
+	// シグナル0 → too_generic
+	empty := signalSet{}
+	score2, penalties2, _ := applyPenaltiesAndBoosts(40, empty, 40)
+	if !slices.Contains(penalties2, "too_generic") {
+		t.Error("関与シグナル0なのに too_generic が付与されなかった")
+	}
+	if score2 != 35 {
+		t.Errorf("got=%d want=35", score2)
+	}
+}
+
+func TestApplyPenaltiesAndBoosts_condensedEngagementBoost(t *testing.T) {
+	signals := signalSet{hasAction: true, hasResult: true, hasNumbersOrTime: true}
+	score, _, boosts := applyPenaltiesAndBoosts(50, signals, 24)
+	if !slices.Contains(boosts, "condensed_engagement") {
+		t.Error("短文関与回答で condensed_engagement ブーストが無い")
+	}
+	// evidence(+5) + condensed(+8) = 63
+	if score != 63 {
+		t.Errorf("got=%d want=63", score)
+	}
+}
+
+func TestExtractSignals_condensedPatterns(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer string
+		check  func(signalSet) bool
+	}{
+		{"release", "チームで役割分担して3日でリリースした。", func(s signalSet) bool {
+			return s.hasAction && s.hasResult && s.hasNumbersOrTime && s.hasEngagement()
+		}},
+		{"emotion_reason", "やりがいを感じた。人の役に立てたから。", func(s signalSet) bool {
+			return s.hasEmotion && s.hasReason && s.hasEngagement()
+		}},
+		{"hai", "はい", func(s signalSet) bool { return !s.hasEngagement() }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !tt.check(extractSignals(tt.answer, "")) {
+				t.Fatalf("unexpected signals for %q", tt.answer)
+			}
+		})
+	}
+}
+
+func TestEvaluateHumanScoring_ShortHighEngagement(t *testing.T) {
+	e := NewAnswerEvaluator()
+	tests := []struct {
+		name       string
+		question   string
+		answer     string
+		wantMin    int
+		wantMax    int
+		wantSkip   bool
+		wantAction PrecheckAction
+	}{
+		{
+			name:     "thin_reason",
+			question: "なぜその職種に興味を持ちましたか？",
+			answer:   "面白そうだと思ったから。",
+			wantMin:  15,
+			wantMax:  45,
+		},
+		{
+			name:     "condensed_ship",
+			question: "これまでの経験で工夫したことを教えてください",
+			answer:   "チームで役割分担して3日でリリースした。",
+			wantMin:  50,
+			wantMax:  90,
+		},
+		{
+			name:     "emotion_reason",
+			question: "仕事でやりがいを感じた瞬間は？",
+			answer:   "やりがいを感じた。人の役に立てたから。",
+			wantMin:  45,
+			wantMax:  85,
+		},
+		{
+			name:     "hai",
+			question: "チームで働くことは好きですか？",
+			answer:   "はい",
+			wantMin:  0,
+			wantMax:  25,
+		},
+		{
+			name:       "skip",
+			question:   "これまでの経験を教えてください",
+			answer:     "わからない",
+			wantSkip:   true,
+			wantAction: PrecheckSkip,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := e.EvaluateHumanScoring(tt.question, tt.answer, false, false, nil)
+			if tt.wantSkip {
+				if result.Action != tt.wantAction {
+					t.Fatalf("action=%s want=%s", result.Action, tt.wantAction)
+				}
+				return
+			}
+			if result.Action != PrecheckScore {
+				t.Fatalf("action=%s score=%d", result.Action, result.Score)
+			}
+			if result.Score < tt.wantMin || result.Score > tt.wantMax {
+				t.Fatalf("score=%d want [%d,%d] penalties=%v boosts=%v",
+					result.Score, tt.wantMin, tt.wantMax, result.Penalties, result.Boosts)
+			}
+			// 関与短文は進捗カウント対象（score>0 または floor 後）
+			floored := floorEngagedShortScore(tt.answer, result)
+			if tt.name != "hai" && floored.Score <= 0 {
+				t.Fatalf("engaged short should count for progress, score=%d", floored.Score)
+			}
+		})
+	}
+}
+
+func TestShouldBlendLLMForHumanScore(t *testing.T) {
+	short := HumanScoreResult{Action: PrecheckScore, Score: 40}
+	if !shouldBlendLLMForHumanScore("短い関与回答です。", short) {
+		t.Fatal("30文字以下は LLM blend 対象であるべき")
+	}
+	longLow := HumanScoreResult{Action: PrecheckScore, Score: 70}
+	longAnswer := "これは十分に長い回答で、境界帯以外かつ短文でもないためルール評価のみで十分と判断されるべき文章です。"
+	if shouldBlendLLMForHumanScore(longAnswer, longLow) {
+		t.Fatal("長文・高スコアは LLM blend 対象外であるべき")
+	}
+	border := HumanScoreResult{Action: PrecheckScore, Score: 40}
+	if !shouldBlendLLMForHumanScore(longAnswer, border) {
+		t.Fatal("境界帯スコアは LLM blend 対象であるべき")
 	}
 }
