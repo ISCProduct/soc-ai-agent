@@ -40,6 +40,7 @@ func SetupAdminRoutes(
 	admin.GET("/companies/names", adminCompanyController.Names)
 	admin.GET("/companies/l1-coverage", adminCompanyController.GetL1Coverage)
 	admin.POST("/companies/warm-l1", adminCompanyController.WarmL1Catalog)
+	admin.POST("/companies/seed-l1", adminCompanyController.SeedL1Catalog)
 	admin.GET("/companies/:id", adminCompanyController.Get)
 	admin.PUT("/companies/:id", adminCompanyController.Update)
 	admin.POST("/companies/:id/publish", adminCompanyController.Publish)

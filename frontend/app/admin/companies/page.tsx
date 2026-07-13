@@ -41,6 +41,10 @@ type L1Coverage = {
   needs_warm: number
   info_rate: number
   profile_rate: number
+  info_target?: number
+  profile_target?: number
+  below_target?: boolean
+  alerts?: string[]
 }
 
 const sourceLabel = (sourceType?: string) => {
@@ -101,6 +105,30 @@ export default function AdminCompaniesPage() {
   const handlePageChange = (_: React.ChangeEvent<unknown>, value: number) => {
     setPage(value)
     fetchCompanies(value)
+  }
+
+  const handleSeedL1 = async () => {
+    setWarming(true)
+    setWarmMessage('')
+    setError('')
+    try {
+      const res = await fetch('/api/admin/companies/seed-l1', {
+        method: 'POST',
+        headers: authService.getAdminFetchHeaders(),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data?.error || data?.message || 'L1シード投入に失敗しました')
+        return
+      }
+      setWarmMessage(
+        `シード投入: 作成 ${data.created ?? 0} / 更新 ${data.updated ?? 0} / スキップ ${data.skipped ?? 0}`,
+      )
+      await fetchCoverage()
+      await fetchCompanies(page)
+    } finally {
+      setWarming(false)
+    }
   }
 
   const handleWarmL1 = async (dryRun: boolean) => {
@@ -206,16 +234,35 @@ export default function AdminCompaniesPage() {
               {coverage && (
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
                   <Chip size="small" label={`公開 ${coverage.published_total}`} />
-                  <Chip size="small" color="success" label={`Info ${pct(coverage.info_rate)}`} />
-                  <Chip size="small" color="info" label={`Profile ${pct(coverage.profile_rate)}`} />
+                  <Chip
+                    size="small"
+                    color={coverage.info_rate < (coverage.info_target ?? 0.8) ? 'error' : 'success'}
+                    label={`Info ${pct(coverage.info_rate)} / 目標 ${pct(coverage.info_target ?? 0.8)}`}
+                  />
+                  <Chip
+                    size="small"
+                    color={coverage.profile_rate < (coverage.profile_target ?? 0.95) ? 'error' : 'info'}
+                    label={`Profile ${pct(coverage.profile_rate)} / 目標 ${pct(coverage.profile_target ?? 0.95)}`}
+                  />
                   <Chip size="small" color="warning" label={`要温存 ${coverage.needs_warm}`} />
+                  {coverage.below_target && (
+                    <Chip size="small" color="error" label="閾値割れ" />
+                  )}
                 </Stack>
               )}
+              {coverage?.alerts?.length ? (
+                <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+                  {coverage.alerts.join(' / ')}
+                </Typography>
+              ) : null}
               {warmMessage && (
                 <Typography variant="body2" sx={{ mt: 1 }}>{warmMessage}</Typography>
               )}
             </Box>
-            <Stack direction="row" spacing={1}>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Button variant="outlined" size="small" disabled={warming} onClick={() => handleSeedL1()}>
+                サンプルシード投入
+              </Button>
               <Button variant="outlined" size="small" disabled={warming} onClick={() => handleWarmL1(true)}>
                 ドライラン
               </Button>

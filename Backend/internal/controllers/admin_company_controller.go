@@ -8,7 +8,11 @@ import (
 	"Backend/internal/services"
 	ifaces "Backend/internal/services/interfaces"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -358,6 +362,58 @@ func (c *AdminCompanyController) FetchPersona(ctx echo.Context) error {
 	})
 
 	return ctx.JSON(http.StatusOK, profile)
+}
+
+// SeedL1Catalog POST /api/admin/companies/seed-l1
+// multipart file=csv または body に CSV テキスト。未指定時は sample CSV を読む。
+func (c *AdminCompanyController) SeedL1Catalog(ctx echo.Context) error {
+	var reader io.Reader
+	file, err := ctx.FormFile("file")
+	if err == nil && file != nil {
+		f, openErr := file.Open()
+		if openErr != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, openErr.Error())
+		}
+		defer f.Close()
+		reader = f
+	} else if body := ctx.Request().Body; body != nil && ctx.Request().ContentLength > 0 &&
+		strings.Contains(ctx.Request().Header.Get("Content-Type"), "text/csv") {
+		reader = body
+	} else {
+		path := strings.TrimSpace(ctx.QueryParam("path"))
+		if path == "" {
+			path = "config/l1_catalog_seed.sample.csv"
+		}
+		f, openErr := os.Open(path)
+		if openErr != nil {
+			// Backend 作業ディレクトリ差を吸収
+			alt := filepath.Join("Backend", path)
+			f2, err2 := os.Open(alt)
+			if err2 != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("seed file not found: %v", openErr))
+			}
+			defer f2.Close()
+			reader = f2
+		} else {
+			defer f.Close()
+			reader = f
+		}
+	}
+	rows, err := services.ParseL1SeedCSV(reader)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	result, err := services.ImportL1Seed(c.repo, rows)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.seed_l1", "company", 0, map[string]any{
+		"total":   result.Total,
+		"created": result.Created,
+		"updated": result.Updated,
+	})
+	return ctx.JSON(http.StatusOK, result)
 }
 
 // GetL1Coverage GET /api/admin/companies/l1-coverage
