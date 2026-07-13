@@ -9,7 +9,10 @@ SOC AI Agent: 採用支援SaaS (Go + Next.js + Python RAG)
 ### RAG (Python)
 - `cd rag && pip install -r constraints.txt && python3 main.py` (9000)
 ### Docker
-- `docker compose up -d` (全サービス: backend/frontend/rag-review/company-graph)
+- `docker compose up -d`（core: backend/frontend/db）
+- RAG + Chroma（必須 profile）: `make rag-up` または `docker compose --profile rag up -d --build chroma rag-review`
+- スモーク: `make rag-smoke`（`/health` の `vector_store.ok` と Chroma heartbeat）
+- 旧イメージ疑い: `make rag-rebuild`
 
 ## アーキテクチャ & フライホイール
 - **構造**: FE(Next.js) -> BE(Go/MySQL/S3) -> RAG(Python/ChromaDB/LangChain)

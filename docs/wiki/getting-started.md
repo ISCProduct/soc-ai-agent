@@ -90,17 +90,22 @@ NEXT_PUBLIC_INTERVIEW_COST_PER_MIN_USD=0.18
 
 ## 3. Docker Compose での起動（推奨）
 
-**最も簡単な方法**です。バックエンド・フロントエンド・MySQL・RAG サービスをまとめて起動します。
+**最も簡単な方法**です。まずコア（バックエンド・フロントエンド・MySQL）を起動し、RAG が必要なときは **profile `rag`** で Chroma + rag-review を追加します。
 
 ```sh
 # ルートディレクトリから実行
 docker compose up -d --build
+
+# RAG + 独立 Chroma（履歴書レビュー / 面接 hints で必須）
+make rag-up
+# または: docker compose --profile rag up -d --build chroma rag-review
 ```
 
 | サービス | URL |
 |---------|-----|
 | Frontend | http://localhost:3000 |
 | Backend API | http://localhost:8080 |
+| Chroma | http://localhost:8000 |
 | RAG | http://localhost:9000 |
 
 ### ヘルスチェック
@@ -109,8 +114,20 @@ docker compose up -d --build
 curl http://localhost:8080/healthz
 # → {"status":"ok"}
 
-curl http://localhost:9000/healthz
-# → {"status":"ok"}
+curl http://localhost:8000/api/v2/heartbeat
+# → {"nanosecond heartbeat":...}
+
+curl http://localhost:9000/health
+# → {"status":"ok","vector_store":{"ok":true,"detail":"chromadb http://chroma:8000"}}
+
+curl http://localhost:9000/vector/status
+# → collections / total_documents を含む JSON
+```
+
+`vector_store` が無い、または `/vector/status` が 404 の場合は旧イメージです。
+
+```sh
+make rag-rebuild
 ```
 
 ### ログ確認
@@ -118,7 +135,7 @@ curl http://localhost:9000/healthz
 ```sh
 docker compose logs -f app       # バックエンド
 docker compose logs -f frontend  # フロントエンド
-docker compose logs -f rag-review
+docker compose --profile rag logs -f chroma rag-review
 ```
 
 > **注意**: プロジェクトルートには `docker-compose.yml`（ハイフンあり）と `compose.yml` の2つが存在します。
