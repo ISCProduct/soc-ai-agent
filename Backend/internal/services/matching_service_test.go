@@ -55,3 +55,28 @@ func TestGenerateMatchReasonFallbackWhenAIClientNil(t *testing.T) {
 		t.Fatalf("expected company name in reason, got: %q", got)
 	}
 }
+
+func TestGenerateMatchReason_DefaultSkipsAI(t *testing.T) {
+	t.Setenv("MATCHING_REASON_USE_AI", "")
+	if matchingReasonUseAI() {
+		t.Fatal("AI should be off by default")
+	}
+	svc := &MatchingService{aiClient: nil}
+	match := &entity.UserCompanyMatch{
+		MatchScore: 70,
+		Company: &entity.Company{
+			ID: 2, Name: "DBのみ株式会社", Industry: "SI", MainBusiness: "受託開発",
+		},
+	}
+	got, err := svc.GenerateMatchReason(t.Context(), match, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "DBのみ株式会社") {
+		t.Fatalf("got %q", got)
+	}
+	if !strings.Contains(got, "受託開発") {
+		t.Fatalf("expected DB business fact, got %q", got)
+	}
+}
+
