@@ -55,6 +55,15 @@ func (s *InterviewService) findCompany(companyID uint, companyName string) *mode
 	return c
 }
 
+// resolveCompanyID は company_id=0（WEB検索・手入力）でも企業名が DB と一致すれば ID を解決する。
+// 解決できない場合は 0 のまま（カスタム質問・深掘りは無効）。
+func (s *InterviewService) resolveCompanyID(companyID uint, companyName string) uint {
+	if company := s.findCompany(companyID, companyName); company != nil {
+		return company.ID
+	}
+	return 0
+}
+
 // resolveCompanyReading は共有DBの NameReading を優先し、無ければモデル知識で補完する。
 func (s *InterviewService) resolveCompanyReading(ctx context.Context, companyID uint, companyName string) string {
 	if company := s.findCompany(companyID, companyName); company != nil {

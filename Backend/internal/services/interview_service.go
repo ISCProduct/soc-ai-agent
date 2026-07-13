@@ -527,12 +527,14 @@ func (s *InterviewService) estimateCost(start, end *time.Time) float64 {
 
 // TurnResult は1ターンの結果（AIテキスト + TTS音声バイト列）
 type TurnResult struct {
-	UserText         string
-	AIText           string
-	Audio            []byte
-	QuestionSource   string
-	QuestionCategory string
-	IsDeepening      bool
+	UserText               string
+	AIText                 string
+	Audio                  []byte
+	QuestionSource         string
+	QuestionCategory       string
+	IsDeepening            bool
+	ResolvedCompanyID      uint
+	CustomQuestionsEnabled bool
 }
 
 // Turn はユーザー音声を受け取り、STT→Chat→TTSを実行してTurnResultを返します
@@ -571,6 +573,9 @@ func (s *InterviewService) Turn(
 	if strings.TrimSpace(userText) == "" {
 		userText = "（聞き取れませんでした）"
 	}
+
+	// WEB検索・手入力で company_id=0 でも、企業名が DB 登録と一致すれば解決する (#567)
+	companyID = s.resolveCompanyID(companyID, companyName)
 
 	// 読み仮名: 共有DB優先。無い場合のみモデル知識（Searchではない）
 	if companyName != "" && companyReading == "" {
@@ -625,7 +630,13 @@ func (s *InterviewService) Turn(
 		return nil, fmt.Errorf("tts error: %w", err)
 	}
 
-	result := &TurnResult{UserText: userText, AIText: aiText, Audio: audio}
+	result := &TurnResult{
+		UserText:               userText,
+		AIText:                 aiText,
+		Audio:                  audio,
+		ResolvedCompanyID:      companyID,
+		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
+	}
 	if directive != nil {
 		result.QuestionSource = directive.Source
 		result.QuestionCategory = directive.Category
@@ -657,6 +668,9 @@ func (s *InterviewService) StartTurn(
 	if !s.isAllowed(userID, session.UserID) {
 		return nil, errors.New("forbidden")
 	}
+
+	// WEB検索・手入力で company_id=0 でも、企業名が DB 登録と一致すれば解決する (#567)
+	companyID = s.resolveCompanyID(companyID, companyName)
 
 	// 読み仮名: 共有DB優先。無い場合のみモデル知識（Searchではない）
 	if companyName != "" && companyReading == "" {
@@ -708,7 +722,12 @@ func (s *InterviewService) StartTurn(
 		return nil, fmt.Errorf("tts error: %w", err)
 	}
 
-	result := &TurnResult{AIText: aiText, Audio: audio}
+	result := &TurnResult{
+		AIText:                 aiText,
+		Audio:                  audio,
+		ResolvedCompanyID:      companyID,
+		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
+	}
 	if directive != nil {
 		result.QuestionSource = directive.Source
 		result.QuestionCategory = directive.Category
@@ -1441,7 +1460,9 @@ func ttsVoiceForGenderAndLang(gender, lang string) string {
 }
 
 // TTSVoiceForGenderAndLang is an exported wrapper for ttsVoiceForGenderAndLang for external tests.
-func TTSVoiceForGenderAndLang(gender, lang string) string { return ttsVoiceForGenderAndLang(gender, lang) }
+func TTSVoiceForGenderAndLang(gender, lang string) string {
+	return ttsVoiceForGenderAndLang(gender, lang)
+}
 
 // RealtimeVoiceForLangAndGender is an exported wrapper for realtimeVoiceForLangAndGender for external tests.
 func RealtimeVoiceForLangAndGender(lang, gender string) string {

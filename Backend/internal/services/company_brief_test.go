@@ -80,3 +80,21 @@ func TestResolveCompanyInfo_PrefersDBBrief(t *testing.T) {
 	got2 := svc.resolveCompanyInfo(42, "", "")
 	assert.Contains(t, got2, "中小SIテスト株式会社")
 }
+
+func TestResolveCompanyID_ByNameWhenZero(t *testing.T) {
+	repo := &briefRepoStub{
+		byID: map[uint]*models.Company{
+			42: {
+				ID:   42,
+				Name: "中小SIテスト株式会社",
+			},
+		},
+	}
+	svc := NewInterviewService(nil, nil, nil, nil, nil, nil, nil)
+	svc.SetCompanyRepo(repo)
+
+	assert.Equal(t, uint(42), svc.resolveCompanyID(0, "中小SIテスト株式会社"))
+	assert.Equal(t, uint(42), svc.resolveCompanyID(42, "別名"))
+	assert.Equal(t, uint(0), svc.resolveCompanyID(0, "存在しない会社XYZ"))
+	assert.Equal(t, uint(0), svc.resolveCompanyID(0, ""))
+}
