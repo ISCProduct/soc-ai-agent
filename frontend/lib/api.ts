@@ -105,22 +105,18 @@ export async function sendChatMessage(request: ChatRequest): Promise<ChatRespons
 }
 
 export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> {
-    try {
-        const response = await fetch(`${API_BASE}/chat/history?session_id=${sessionId}`, {
-            headers: authService.getUserFetchHeaders(),
-        })
+    const response = await fetch(`${API_BASE}/chat/history?session_id=${sessionId}`, {
+        headers: authService.getUserFetchHeaders(),
+    })
 
-        if (!response.ok) {
-            console.warn(`History API error: ${response.status}`)
-            return []
-        }
-
-        const raw = await response.json()
-        return unwrapArray<ChatHistory>(raw)
-    } catch (error) {
-        console.warn('Failed to fetch chat history:', error)
-        return []
+    if (!response.ok) {
+        const errorText = await response.text().catch(() => response.statusText)
+        console.error('[API] History error:', response.status, errorText)
+        throw new Error(`History API error: ${errorText || response.statusText}`)
     }
+
+    const raw = await response.json()
+    return unwrapArray<ChatHistory>(raw)
 }
 
 export async function getUserScores(sessionId: string): Promise<ChatScore[]> {

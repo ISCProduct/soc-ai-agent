@@ -14,6 +14,7 @@ import {
   Stack,
   CircularProgress,
   Button,
+  Alert,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -43,6 +44,9 @@ interface PhaseProgress {
 }
 
 const makeMessageId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+const INITIAL_GREETING =
+  'こんにちは！IT業界専門のキャリアエージェントです。\n\nこれから約10-15問の質問を通じて、あなたの適性を分析し、最適な企業をご提案します。\n質問は動的に生成されるため、あなたの回答に応じて変化します。\n\nまず、どのようなIT職種に興味がありますか？\n\n例：\n- Webエンジニア\n- インフラエンジニア\n- データサイエンティスト\n- セキュリティエンジニア\n- モバイルアプリ開発者'
 
 interface ChoiceOption {
   value: string
@@ -122,6 +126,8 @@ export function MuiChat() {
   const [showTerminationModal, setShowTerminationModal] = useState(false)
   const [otherChoiceActive, setOtherChoiceActive] = useState(false)
   const [phaseProgresses, setPhaseProgresses] = useState<PhaseProgress[] | null>(null)
+  const [historyLoadError, setHistoryLoadError] = useState<string | null>(null)
+  const [historyRetrying, setHistoryRetrying] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -148,6 +154,79 @@ export function MuiChat() {
   useEffect(() => {
     scrollToBottom()
   }, [messages, isLoading])
+
+  const applyHistoryOrGreeting = (history: Awaited<ReturnType<typeof getChatHistory>>) => {
+    setHistoryLoadError(null)
+    if (history && history.length > 0) {
+      const restoredMessages: Message[] = history.map((msg) => ({
+        id: String(msg.id),
+        role: msg.role,
+        content: msg.content,
+        timestamp: new Date(msg.created_at),
+      }))
+      setMessages(restoredMessages)
+      const userQuestionCount = history.filter(msg => msg.role === 'user').length
+      setQuestionCount(userQuestionCount)
+
+      const savedTotalQuestions = sessionStorage.getItem('totalQuestions')
+      const restoredTotalQuestions = savedTotalQuestions ? parseInt(savedTotalQuestions) : 15
+      setTotalQuestions(restoredTotalQuestions)
+      const savedPhases = sessionStorage.getItem('phaseProgress')
+      const restoredPhases = savedPhases ? JSON.parse(savedPhases) : null
+      if (Array.isArray(restoredPhases)) {
+        setPhaseProgresses(restoredPhases)
+      }
+
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('chatProgress', {
+          detail: {
+            messageCount: restoredMessages.length,
+            questionCount: userQuestionCount,
+            totalQuestions: restoredTotalQuestions,
+            phases: restoredPhases,
+          }
+        }))
+      }, 100)
+
+      const lastMessage = history[history.length - 1]
+      const isCompletionMessage = lastMessage?.content?.includes('分析が完了しました') ||
+        lastMessage?.content?.includes('全てのフェーズが完了') ||
+        lastMessage?.content?.includes('最適な企業をマッチング')
+
+      if (isCompletionMessage) {
+        setAnalysisComplete(true)
+        setAllPhasesCompleted(true)
+      }
+      return
+    }
+
+    // 履歴 0 件（新規セッション）: 従来どおり挨拶表示
+    setMessages([{
+      id: '0',
+      role: 'assistant',
+      content: INITIAL_GREETING,
+      timestamp: new Date(),
+    }])
+  }
+
+  const loadChatHistory = async (targetSessionId: string) => {
+    const history = await getChatHistory(targetSessionId)
+    applyHistoryOrGreeting(history)
+  }
+
+  const handleRetryHistoryLoad = async () => {
+    if (!sessionId || historyRetrying) return
+    setHistoryRetrying(true)
+    try {
+      await loadChatHistory(sessionId)
+    } catch (error) {
+      console.error('[MUI Chat] Failed to load history (retry):', error)
+      setHistoryLoadError('履歴の読み込みに失敗しました。通信状況を確認して、もう一度お試しください。')
+      setMessages([])
+    } finally {
+      setHistoryRetrying(false)
+    }
+  }
 
   useEffect(() => {
     setMounted(true)
@@ -183,83 +262,14 @@ export function MuiChat() {
       sessionStorage.setItem('chatSessionId', storedSessionId)
       setSessionId(storedSessionId)
       
-      // バックエンドからチャット履歴を取得
       try {
         console.log('[MUI Chat] Loading history for session:', storedSessionId)
-        const history = await getChatHistory(storedSessionId)
-        console.log('[MUI Chat] History loaded:', history?.length, 'messages')
-        
-        if (history && history.length > 0) {
-          // 履歴が存在する場合は復元
-          const restoredMessages: Message[] = history.map((msg) => ({
-            id: String(msg.id),
-            role: msg.role,
-            content: msg.content,
-            timestamp: new Date(msg.created_at),
-          }))
-          setMessages(restoredMessages)
-          const userQuestionCount = history.filter(msg => msg.role === 'user').length
-          setQuestionCount(userQuestionCount)
-          
-          // sessionStorageから総質問数を復元（なければデフォルト15）
-          const savedTotalQuestions = sessionStorage.getItem('totalQuestions')
-          const restoredTotalQuestions = savedTotalQuestions ? parseInt(savedTotalQuestions) : 15
-          setTotalQuestions(restoredTotalQuestions)
-          const savedPhases = sessionStorage.getItem('phaseProgress')
-          const restoredPhases = savedPhases ? JSON.parse(savedPhases) : null
-          if (Array.isArray(restoredPhases)) {
-            setPhaseProgresses(restoredPhases)
-          }
-          
-          // 進捗状況を通知（履歴復元時）
-          setTimeout(() => {
-            window.dispatchEvent(new CustomEvent('chatProgress', { 
-              detail: { 
-                messageCount: restoredMessages.length,
-                questionCount: userQuestionCount,
-                totalQuestions: restoredTotalQuestions,
-                phases: restoredPhases,
-              } 
-            }))
-            console.log('[MUI Chat] Progress restored:', userQuestionCount, '/', restoredTotalQuestions)
-          }, 100)
-          
-          // 最後のメッセージが完了メッセージかチェック
-          const lastMessage = history[history.length - 1]
-          const isCompletionMessage = lastMessage?.content?.includes('分析が完了しました') || 
-                                     lastMessage?.content?.includes('全てのフェーズが完了') ||
-                                     lastMessage?.content?.includes('最適な企業をマッチング')
-          
-          if (isCompletionMessage) {
-            console.log('[MUI Chat] Session already completed, showing completion state')
-            setAnalysisComplete(true)
-            setAllPhasesCompleted(true)
-          }
-        } else {
-          // 履歴がない場合: AIのあいさつメッセージを表示（バックエンドには送信しない）
-          console.log('[MUI Chat] No history found, displaying initial greeting')
-          
-          // AIのあいさつメッセージ（フロントエンドのみで表示）
-          const greetingMessage = 'こんにちは！IT業界専門のキャリアエージェントです。\n\nこれから約10-15問の質問を通じて、あなたの適性を分析し、最適な企業をご提案します。\n質問は動的に生成されるため、あなたの回答に応じて変化します。\n\nまず、どのようなIT職種に興味がありますか？\n\n例：\n- Webエンジニア\n- インフラエンジニア\n- データサイエンティスト\n- セキュリティエンジニア\n- モバイルアプリ開発者'
-          
-          const initialMessage: Message = {
-            id: '0',
-            role: 'assistant',
-            content: greetingMessage,
-            timestamp: new Date(),
-          }
-          setMessages([initialMessage])
-        }
+        await loadChatHistory(storedSessionId)
       } catch (error) {
         console.error('[MUI Chat] Failed to load history:', error)
-        // エラー時は初回メッセージを表示
-        const initialMessage: Message = {
-          id: '0',
-          role: 'assistant',
-          content: 'こんにちは！IT業界専門のキャリアエージェントです。\n\nこれから約10-15問の質問を通じて、あなたの適性を分析し、最適な企業をご提案します。\n質問は動的に生成されるため、あなたの回答に応じて変化します。\n\nまず、どのようなIT職種に興味がありますか？\n\n例：\n- Webエンジニア\n- インフラエンジニア\n- データサイエンティスト\n- セキュリティエンジニア\n- モバイルアプリ開発者',
-          timestamp: new Date(),
-        }
-        setMessages([initialMessage])
+        // #569: 失敗時は挨拶ではなくエラー UI（再試行で復元）
+        setHistoryLoadError('履歴の読み込みに失敗しました。通信状況を確認して、もう一度お試しください。')
+        setMessages([])
       }
     }
     
@@ -268,7 +278,7 @@ export function MuiChat() {
 
   const handleSend = async (overrideMessage?: string) => {
     const rawText = (overrideMessage ?? input).trim()
-    if (!rawText || isLoading || !sessionId || !userId) return
+    if (!rawText || isLoading || !sessionId || !userId || historyLoadError) return
 
     // ボタン送信はそのまま。自由入力は直近の選択肢ラベルを記号へ正規化する
     const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
@@ -724,7 +734,23 @@ export function MuiChat() {
           backgroundColor: '#fff',
         }}
       >
-        {messages.length === 0 && (
+        {historyLoadError && (
+          <Box sx={{ textAlign: 'center', mt: 8, px: 3 }}>
+            <Alert severity="error" sx={{ mb: 2, textAlign: 'left' }}>
+              {historyLoadError}
+            </Alert>
+            <Button
+              variant="contained"
+              onClick={handleRetryHistoryLoad}
+              disabled={historyRetrying}
+              startIcon={historyRetrying ? <CircularProgress size={16} color="inherit" /> : undefined}
+            >
+              {historyRetrying ? '再読み込み中...' : '再試行'}
+            </Button>
+          </Box>
+        )}
+
+        {messages.length === 0 && !historyLoadError && (
           <Box sx={{ textAlign: 'center', mt: 8 }}>
             <SmartToy sx={{ fontSize: 64, color: '#9e9e9e', mb: 2 }} />
             <Typography variant="h6" color="text.secondary" gutterBottom>
@@ -950,8 +976,7 @@ export function MuiChat() {
                     handleSend()
                   }
                 }}
-                disabled={isLoading}
-                variant="outlined"
+                disabled={isLoading || !!historyLoadError}
                 size="small"
                 inputRef={inputRef}
                 sx={{
@@ -963,7 +988,7 @@ export function MuiChat() {
               <IconButton
                 color="primary"
                 onClick={() => handleSend()}
-                disabled={!input.trim() || isLoading}
+                disabled={!input.trim() || isLoading || !!historyLoadError}
                 sx={{
                   bgcolor: '#1976d2',
                   color: '#fff',
