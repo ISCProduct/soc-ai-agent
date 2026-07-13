@@ -407,7 +407,7 @@ func (e *AnswerEvaluator) EvaluateHumanScoring(question, answer string, isChoice
 	signals := extractSignals(answer, category)
 	dimensionScores := scoreDimensions(rubric, signals, answer)
 	rawScore := scoreFromDimensions(rubric, dimensionScores)
-	score, penalties, boosts := applyPenaltiesAndBoosts(rawScore, signals)
+	score, penalties, boosts := applyPenaltiesAndBoosts(rawScore, signals, len([]rune(strings.TrimSpace(answer))))
 
 	return HumanScoreResult{
 		Action:          PrecheckScore,
@@ -418,6 +418,74 @@ func (e *AnswerEvaluator) EvaluateHumanScoring(question, answer string, isChoice
 		Penalties:       penalties,
 		Boosts:          boosts,
 	}
+}
+
+// shouldBlendLLMForHumanScore は短文または境界帯スコア時のみ LLM 合成する (#561 / #557)。
+func shouldBlendLLMForHumanScore(answer string, rule HumanScoreResult) bool {
+	if rule.Action != PrecheckScore {
+		return false
+	}
+	n := len([]rune(strings.TrimSpace(answer)))
+	if n > 0 && n <= 30 {
+		return true
+	}
+	return rule.Score >= 20 && rule.Score <= 55
+}
+
+// EvaluateHumanScoringWithContext はルール評価後、短文・境界値のみ LLM とハイブリッド合成する。
+// llmClient が nil の場合は EvaluateHumanScoring と同一。
+func (e *AnswerEvaluator) EvaluateHumanScoringWithContext(
+	ctx context.Context,
+	question, answer string,
+	isChoice, jobRoleSet bool,
+	meta *questionMeta,
+) HumanScoreResult {
+	rule := e.EvaluateHumanScoring(question, answer, isChoice, jobRoleSet, meta)
+	if e.llmClient == nil || isChoice || !shouldBlendLLMForHumanScore(answer, rule) {
+		return rule
+	}
+
+	llmResult := e.llmEvaluate(ctx, question, answer)
+	if llmResult == nil {
+		return rule
+	}
+
+	n := len([]rune(strings.TrimSpace(answer)))
+	ruleWeight := 0.55
+	if n > 0 && n <= 30 {
+		ruleWeight = 0.35 // 短文は LLM（内容品質）比重を上げる
+	}
+	blended := int(math.Round(ruleWeight*float64(rule.Score) + (1-ruleWeight)*float64(llmResult.Score)))
+	if blended < 0 {
+		blended = 0
+	}
+	if blended > 100 {
+		blended = 100
+	}
+	rule.Score = blended
+	rule.Boosts = append(rule.Boosts, "llm_hybrid")
+	if llmResult.Explanation != "" {
+		rule.Reason = llmResult.Explanation
+	}
+	return rule
+}
+
+// floorEngagedShortScore は関与のある短文が Score=0 で進捗から落ちないよう下限を設ける (#561)。
+func floorEngagedShortScore(answer string, result HumanScoreResult) HumanScoreResult {
+	if result.Action != PrecheckScore || result.Score > 0 {
+		return result
+	}
+	n := len([]rune(strings.TrimSpace(answer)))
+	if n == 0 || n > 30 {
+		return result
+	}
+	signals := extractSignals(answer, result.CategoryID)
+	if !signals.hasEngagement() {
+		return result
+	}
+	result.Score = 15
+	result.Boosts = append(result.Boosts, "engaged_short_floor")
+	return result
 }
 
 func (e *AnswerEvaluator) precheckHuman(answer string, isChoice bool, jobRoleSet bool) HumanScoreResult {
@@ -524,22 +592,43 @@ type signalSet struct {
 	hasResult            bool
 	hasReason            bool
 	hasNumbersOrTime     bool
+	hasEmotion           bool
 	hasCollaborationTerm bool
 	hasNonITTerm         bool
 	hasUxTerm            bool
 	contradiction        bool
 }
 
+// hasEngagement は関与シグナルが1つでもあるか（#561: too_generic 判定に使用）
+func (s signalSet) hasEngagement() bool {
+	return s.hasConcreteExample || s.hasAction || s.hasResult || s.hasReason ||
+		s.hasNumbersOrTime || s.hasEmotion || s.hasCollaborationTerm || s.hasUxTerm
+}
+
 func extractSignals(answer string, category string) signalSet {
 	lower := strings.ToLower(answer)
+	_ = category
 	return signalSet{
 		hasConcreteExample: containsAny(lower, []string{"例えば", "たとえば", "具体的", "実際に", "経験", "した時", "したとき"}),
-		hasAction:          containsAny(lower, []string{"取り組", "実施", "作成", "作った", "実装", "改善", "対応", "開発", "設計", "検証"}),
-		hasResult:          containsAny(lower, []string{"結果", "成果", "達成", "改善された", "向上", "成功", "失敗"}),
-		hasReason:          containsAny(lower, []string{"理由", "なぜ", "ので", "ため", "から", "だから"}),
-		hasNumbersOrTime:   regexp.MustCompile(`[0-9]`).MatchString(lower) || containsAny(lower, []string{"ヶ月", "年", "週間", "日間", "%", "人", "回"}),
+		// 凝縮表現（役割分担・リリース・出した等）も行動シグナルとして扱う (#561)
+		hasAction: containsAny(lower, []string{
+			"取り組", "実施", "作成", "作った", "実装", "改善", "対応", "開発", "設計", "検証",
+			"分担", "役割", "リリース", "出した", "進め", "仕上げ", "完了", "提出", "納品", "デプロイ",
+			"まとめた", "進めた", "対応した", "リリースした",
+		}),
+		hasResult: containsAny(lower, []string{
+			"結果", "成果", "達成", "改善された", "向上", "成功", "失敗",
+			"リリース", "出した", "出荷", "納品",
+		}),
+		hasReason: containsAny(lower, []string{"理由", "なぜ", "ので", "ため", "から", "だから"}),
+		hasNumbersOrTime: regexp.MustCompile(`[0-9]`).MatchString(lower) || containsAny(lower, []string{
+			"ヶ月", "年", "週間", "日間", "日で", "%", "人", "回",
+		}),
+		hasEmotion: containsAny(lower, []string{
+			"やりがい", "面白", "楽しい", "嬉しかっ", "充実", "役立", "人の役", "感動", "好き",
+		}),
 		hasCollaborationTerm: containsAny(lower, []string{
-			"合意", "調整", "衝突", "折衷", "意見", "まとめ",
+			"合意", "調整", "衝突", "折衷", "意見", "まとめ", "チーム", "分担",
 		}),
 		hasNonITTerm: containsAny(lower, []string{
 			"itに詳しくない", "非エンジニア", "職員", "現場", "利用者",
@@ -587,7 +676,7 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 
 	if signals.hasReason && (signals.hasAction || signals.hasResult) {
 		scores["reasoning"] = 3
-	} else if signals.hasReason {
+	} else if signals.hasReason || signals.hasEmotion {
 		scores["reasoning"] = 2
 	} else if signals.hasConcreteExample {
 		scores["reasoning"] = 1
@@ -599,7 +688,7 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 		scores["credibility"] = 1 // 理由・数値のない定型回答: 信頼度を落とす
 	} else if signals.hasNumbersOrTime {
 		scores["credibility"] = 3
-	} else if signals.hasConcreteExample {
+	} else if signals.hasConcreteExample || (signals.hasEmotion && signals.hasReason) {
 		scores["credibility"] = 2
 	}
 
@@ -638,12 +727,13 @@ func scoreFromDimensions(rubric string, dimensionScores map[string]int) int {
 	return int(math.Round(score))
 }
 
-func applyPenaltiesAndBoosts(score int, signals signalSet) (int, []string, []string) {
+func applyPenaltiesAndBoosts(score int, signals signalSet, answerLen int) (int, []string, []string) {
 	penalties := []string{}
 	boosts := []string{}
 	finalScore := score
 
-	if !signals.hasConcreteExample && !signals.hasAction {
+	// #561: 関与シグナルが1つでもあれば too_generic を適用しない
+	if !signals.hasEngagement() {
 		finalScore -= 5
 		penalties = append(penalties, "too_generic")
 	}
@@ -654,6 +744,11 @@ func applyPenaltiesAndBoosts(score int, signals signalSet) (int, []string, []str
 	if signals.hasNumbersOrTime {
 		finalScore += 5
 		boosts = append(boosts, "evidence")
+	}
+	// 短文でも行動・理由・感情などが凝縮されている場合はブースト (#561)
+	if answerLen > 0 && answerLen <= 30 && signals.hasEngagement() {
+		finalScore += 8
+		boosts = append(boosts, "condensed_engagement")
 	}
 
 	if finalScore < 0 {

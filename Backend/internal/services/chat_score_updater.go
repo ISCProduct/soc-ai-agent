@@ -49,7 +49,7 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 		// マッチしない自由記述（その他）は isChoice=false で文章採点する
 	}
 
-	result := s.answerEvaluator.EvaluateHumanScoring(lastQuestion, scoreAnswer, isChoice, jobCategoryID != 0, nil)
+	result := s.answerEvaluator.EvaluateHumanScoringWithContext(ctx, lastQuestion, scoreAnswer, isChoice, jobCategoryID != 0, nil)
 	if result.Action == PrecheckSkip {
 		// 「わかりません」などのスキップフレーズは進捗カウントしない
 		log.Printf("Skipping progress: skip phrase detected (%s)\n", result.Reason)
@@ -60,6 +60,7 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 		log.Printf("Skipping progress: answer ignored (%s)\n", result.Reason)
 		return false, nil
 	}
+	result = floorEngagedShortScore(scoreAnswer, result)
 	if result.Score <= 0 {
 		log.Printf("No human score applied (score=%d), not counting for progress\n", result.Score)
 		return false, nil

@@ -49,9 +49,9 @@ var goldStandard = []EvalSample{
 		Question:      "ITに興味を持った理由を教えてください。",
 		Answer:        "面白そうだと思ったから。",
 		IsChoice:      false,
-		ExpectedMin:   10,
-		ExpectedMax:   40,
-		ExpectedScore: 25,
+		ExpectedMin:   15,
+		ExpectedMax:   50, // #561: 感情+理由の短文は低〜中（凝縮ブースト込み）
+		ExpectedScore: 35,
 	},
 	{
 		Name:          "動機_長文かつ数値あり",
@@ -97,8 +97,8 @@ var goldStandard = []EvalSample{
 		Answer:        "リリース方針で意見が対立したとき、互いの懸念点を整理して折衷案を提案しました。合意形成のために1対1でも話し合いの場を設け、最終的にチーム全員で納得した方向でリリースできました。",
 		IsChoice:      false,
 		ExpectedMin:   60,
-		ExpectedMax:   95,
-		ExpectedScore: 78,
+		ExpectedMax:   100, // #561: 凝縮シグナル強化後は上限到達しうる
+		ExpectedScore: 85,
 	},
 	{
 		Name:          "協調_曖昧な回答",
@@ -108,6 +108,25 @@ var goldStandard = []EvalSample{
 		ExpectedMin:   0,
 		ExpectedMax:   25,
 		ExpectedScore: 12,
+	},
+	// ── 短文高関与 (#561) ───────────────────────────────────────────────────
+	{
+		Name:          "短文高関与_リリース経験",
+		Question:      "これまでの経験で工夫したことを教えてください。",
+		Answer:        "チームで役割分担して3日でリリースした。",
+		IsChoice:      false,
+		ExpectedMin:   50,
+		ExpectedMax:   90,
+		ExpectedScore: 70,
+	},
+	{
+		Name:          "短文高関与_やりがい理由",
+		Question:      "仕事でやりがいを感じた瞬間は？",
+		Answer:        "やりがいを感じた。人の役に立てたから。",
+		IsChoice:      false,
+		ExpectedMin:   45,
+		ExpectedMax:   85,
+		ExpectedScore: 60,
 	},
 	// ── 非IT説明系 ────────────────────────────────────────────────────────────
 	{
@@ -268,7 +287,7 @@ func TestAnswerEvaluator_CategoryInference(t *testing.T) {
 	evaluator := services.NewAnswerEvaluator()
 
 	cases := []struct {
-		Question        string
+		Question         string
 		ExpectedCategory string
 	}{
 		{"エンジニアを目指したきっかけは？", "motivation"},
