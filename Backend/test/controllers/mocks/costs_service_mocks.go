@@ -84,3 +84,21 @@ func (m *RealtimeUsageServiceMock) GetMonthlyUsage(nMonths int) ([]services.Real
 	}
 	return nil, args.Error(1)
 }
+
+// CompanySearchBudgetServiceMock CompanySearchBudgetService のモック（#587）
+type CompanySearchBudgetServiceMock struct {
+	mock.Mock
+}
+
+func (m *CompanySearchBudgetServiceMock) Status() (services.CompanySearchBudgetStatus, error) {
+	args := m.Called()
+	if v := args.Get(0); v != nil {
+		return v.(services.CompanySearchBudgetStatus), args.Error(1)
+	}
+	return services.CompanySearchBudgetStatus{}, args.Error(1)
+}
+
+func (m *CompanySearchBudgetServiceMock) AllowSearch() error {
+	args := m.Called()
+	return args.Error(0)
+}

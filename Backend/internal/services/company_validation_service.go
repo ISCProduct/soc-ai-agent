@@ -1,10 +1,12 @@
 package services
 
 import (
+	"Backend/internal/companyfetch"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -47,6 +49,8 @@ type companyValidationCacheEntry struct {
 type CompanyValidationService struct {
 	companyRepo  companyLookup
 	openaiClient *openai.Client
+	budget       companyfetch.SearchBudget
+	flight       *CompanySearchFlight
 	mu           sync.RWMutex
 	cache        map[string]companyValidationCacheEntry
 }
@@ -56,6 +60,20 @@ func NewCompanyValidationService(companyRepo companyLookup, client *openai.Clien
 		companyRepo:  companyRepo,
 		openaiClient: client,
 		cache:        make(map[string]companyValidationCacheEntry),
+	}
+}
+
+// SetSearchBudget は月次 Search 予算ガードを注入する。
+func (s *CompanyValidationService) SetSearchBudget(budget companyfetch.SearchBudget) {
+	if s != nil {
+		s.budget = budget
+	}
+}
+
+// SetSearchFlight は企業キー単位の singleflight を注入する。
+func (s *CompanyValidationService) SetSearchFlight(flight *CompanySearchFlight) {
+	if s != nil {
+		s.flight = flight
 	}
 }
 
@@ -195,7 +213,24 @@ func (s *CompanyValidationService) validateWithWebSearch(ctx context.Context, qu
 		}, nil
 	}
 
-	prompt := fmt.Sprintf(`日本の実在企業かどうかだけを判定してください。推測で企業を作らないでください。
+	run := func() (*CompanyValidationResult, error) {
+		if s.budget != nil {
+			if err := s.budget.AllowSearch(); err != nil {
+				if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
+					return &CompanyValidationResult{
+						Exists:        false,
+						CanonicalName: "",
+						Source:        "cache",
+						Confidence:    "low",
+						Query:         query,
+						Description:   "月次の企業Search上限に達したため、キャッシュのみで確認しています。しばらくしてから再度お試しください",
+					}, nil
+				}
+				return nil, err
+			}
+		}
+
+		prompt := fmt.Sprintf(`日本の実在企業かどうかだけを判定してください。推測で企業を作らないでください。
 検索対象: 「%s」
 
 次のJSONオブジェクトのみを返してください（説明文不要）:
@@ -203,43 +238,58 @@ func (s *CompanyValidationService) validateWithWebSearch(ctx context.Context, qu
 
 exists=false の場合は canonical_name を空文字、evidence_urls を空配列にしてください。`, query)
 
-	text, err := s.openaiClient.WebSearchJSON(ctx, prompt, companyValidationMaxTok)
+		text, err := s.openaiClient.WebSearchJSON(ctx, prompt, companyValidationMaxTok)
+		if err != nil {
+			log.Printf("[CompanyValidation] web search failed query=%q err=%v", query, err)
+			return &CompanyValidationResult{
+				Exists:        false,
+				CanonicalName: "",
+				Source:        "web_search",
+				Confidence:    "low",
+				Query:         query,
+				Description:   "WEB検索による実在確認に失敗しました。企業名を変えるか、しばらくしてから再度お試しください",
+			}, nil
+		}
+
+		parsed, parseErr := parseValidationJSON(text)
+		if parseErr != nil {
+			log.Printf("[CompanyValidation] parse failed query=%q raw=%q err=%v", query, truncateRunes(text, 200), parseErr)
+			return &CompanyValidationResult{
+				Exists:     false,
+				Source:     "web_search",
+				Confidence: "low",
+				Query:      query,
+			}, nil
+		}
+
+		parsed.Source = "web_search"
+		parsed.Query = query
+		parsed.TokensEstimate = companyValidationMaxTok
+		if parsed.Exists && strings.TrimSpace(parsed.CanonicalName) == "" {
+			parsed.CanonicalName = query
+		}
+		if parsed.EvidenceURLs == nil {
+			parsed.EvidenceURLs = []string{}
+		}
+		log.Printf("[CompanyValidation] web_search query=%q exists=%v canonical=%q confidence=%s",
+			query, parsed.Exists, parsed.CanonicalName, parsed.Confidence)
+		return parsed, nil
+	}
+
+	if s.flight == nil {
+		return run()
+	}
+	v, err := s.flight.Do("validate", normalizeCompanyKey(query), func() (any, error) {
+		return run()
+	})
 	if err != nil {
-		log.Printf("[CompanyValidation] web search failed query=%q err=%v", query, err)
-		// Search 失敗でも 500 にせず、未確認として呼び出し側で再試行できるようにする
-		return &CompanyValidationResult{
-			Exists:        false,
-			CanonicalName: "",
-			Source:        "web_search",
-			Confidence:    "low",
-			Query:         query,
-			Description:   "WEB検索による実在確認に失敗しました。企業名を変えるか、しばらくしてから再度お試しください",
-		}, nil
+		return nil, err
 	}
-
-	parsed, parseErr := parseValidationJSON(text)
-	if parseErr != nil {
-		log.Printf("[CompanyValidation] parse failed query=%q raw=%q err=%v", query, truncateRunes(text, 200), parseErr)
-		return &CompanyValidationResult{
-			Exists:     false,
-			Source:     "web_search",
-			Confidence: "low",
-			Query:      query,
-		}, nil
+	if v == nil {
+		return &CompanyValidationResult{Exists: false, Source: "web_search", Confidence: "low", Query: query}, nil
 	}
-
-	parsed.Source = "web_search"
-	parsed.Query = query
-	parsed.TokensEstimate = companyValidationMaxTok
-	if parsed.Exists && strings.TrimSpace(parsed.CanonicalName) == "" {
-		parsed.CanonicalName = query
-	}
-	if parsed.EvidenceURLs == nil {
-		parsed.EvidenceURLs = []string{}
-	}
-	log.Printf("[CompanyValidation] web_search query=%q exists=%v canonical=%q confidence=%s",
-		query, parsed.Exists, parsed.CanonicalName, parsed.Confidence)
-	return parsed, nil
+	result, _ := v.(*CompanyValidationResult)
+	return result, nil
 }
 
 func parseValidationJSON(text string) (*CompanyValidationResult, error) {

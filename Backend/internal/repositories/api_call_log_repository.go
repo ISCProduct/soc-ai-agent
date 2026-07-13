@@ -96,3 +96,13 @@ func (r *APICallLogRepository) TotalCostSince(since time.Time) (float64, error) 
 		Scan(&total).Error
 	return total, err
 }
+
+// CountSearchCallsSince は指定日時以降の Web Search 系モデル呼び出し回数を返す。
+// company Search 予算（#587）のカウントに使う。model に "search" を含む行を対象とする。
+func (r *APICallLogRepository) CountSearchCallsSince(since time.Time) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.APICallLog{}).
+		Where("called_at >= ? AND LOWER(model) LIKE ?", since, "%search%").
+		Count(&count).Error
+	return count, err
+}

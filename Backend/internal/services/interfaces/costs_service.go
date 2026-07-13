@@ -22,3 +22,9 @@ type RealtimeUsageService interface {
 	GetDailyUsage(nDays int) ([]services.RealtimeDailySummary, error)
 	GetMonthlyUsage(nMonths int) ([]services.RealtimeMonthlySummary, error)
 }
+
+// CompanySearchBudgetService 企業 Search 月次予算のインターフェース（#587）
+type CompanySearchBudgetService interface {
+	Status() (services.CompanySearchBudgetStatus, error)
+	AllowSearch() error
+}

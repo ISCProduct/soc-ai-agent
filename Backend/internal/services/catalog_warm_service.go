@@ -38,12 +38,16 @@ func NewCatalogWarmService(
 
 // L1Coverage は公開カタログの L1 充足率。
 type L1Coverage struct {
-	PublishedTotal int64   `json:"published_total"`
-	InfoFresh      int64   `json:"info_fresh"`
-	HasProfile     int64   `json:"has_profile"`
-	NeedsWarm      int64   `json:"needs_warm"`
-	InfoRate       float64 `json:"info_rate"`
-	ProfileRate    float64 `json:"profile_rate"`
+	PublishedTotal int64    `json:"published_total"`
+	InfoFresh      int64    `json:"info_fresh"`
+	HasProfile     int64    `json:"has_profile"`
+	NeedsWarm      int64    `json:"needs_warm"`
+	InfoRate       float64  `json:"info_rate"`
+	ProfileRate    float64  `json:"profile_rate"`
+	InfoTarget     float64  `json:"info_target"`
+	ProfileTarget  float64  `json:"profile_target"`
+	BelowTarget    bool     `json:"below_target"`
+	Alerts         []string `json:"alerts,omitempty"`
 }
 
 // L1WarmOptions はバッチ実行オプション。
@@ -94,10 +98,23 @@ func (s *CatalogWarmService) Coverage(ctx context.Context) (*L1Coverage, error) 
 		InfoFresh:      stats.InfoFresh,
 		HasProfile:     stats.HasProfile,
 		NeedsWarm:      stats.NeedsWarm,
+		InfoTarget:     0.80,
+		ProfileTarget:  0.95,
 	}
 	if stats.PublishedTotal > 0 {
 		cov.InfoRate = float64(stats.InfoFresh) / float64(stats.PublishedTotal)
 		cov.ProfileRate = float64(stats.HasProfile) / float64(stats.PublishedTotal)
+	}
+	if cov.InfoRate < cov.InfoTarget {
+		cov.BelowTarget = true
+		cov.Alerts = append(cov.Alerts, fmt.Sprintf("info_rate=%.0f%% < target %.0f%%", cov.InfoRate*100, cov.InfoTarget*100))
+	}
+	if cov.ProfileRate < cov.ProfileTarget {
+		cov.BelowTarget = true
+		cov.Alerts = append(cov.Alerts, fmt.Sprintf("profile_rate=%.0f%% < target %.0f%%", cov.ProfileRate*100, cov.ProfileTarget*100))
+	}
+	if cov.BelowTarget {
+		log.Printf("l1_coverage ALERT published=%d needs_warm=%d alerts=%v", cov.PublishedTotal, cov.NeedsWarm, cov.Alerts)
 	}
 	return cov, nil
 }

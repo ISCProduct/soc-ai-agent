@@ -150,29 +150,35 @@ func buildCompanyContext(company *entity.Company) string {
 	if company == nil {
 		return "事業内容や開発環境に合った適性が活かせる企業です。"
 	}
+	// DB に載っている事実のみ（Search / 都度 LLM 調査はしない）#588
 	parts := []string{}
 	if strings.TrimSpace(company.MainBusiness) != "" {
-		parts = append(parts, fmt.Sprintf("主な事業は「%s」です。", company.MainBusiness))
+		parts = append(parts, fmt.Sprintf("主な事業は「%s」です。", trimReasonText(company.MainBusiness, 120)))
+	} else if strings.TrimSpace(company.Description) != "" {
+		parts = append(parts, fmt.Sprintf("概要として「%s」が登録されています。", trimReasonText(company.Description, 120)))
 	}
 	if strings.TrimSpace(company.Culture) != "" {
-		parts = append(parts, fmt.Sprintf("企業文化として「%s」が特徴です。", company.Culture))
+		parts = append(parts, fmt.Sprintf("企業文化として「%s」が特徴です。", trimReasonText(company.Culture, 80)))
 	}
 	if strings.TrimSpace(company.WorkStyle) != "" {
-		parts = append(parts, fmt.Sprintf("働き方は「%s」を想定しています。", company.WorkStyle))
+		parts = append(parts, fmt.Sprintf("働き方は「%s」です。", company.WorkStyle))
 	}
-	if strings.TrimSpace(company.DevelopmentStyle) != "" {
-		parts = append(parts, fmt.Sprintf("開発スタイルは「%s」です。", company.DevelopmentStyle))
-	}
-	if strings.TrimSpace(company.TechStack) != "" {
-		stack := parseTechStack(company.TechStack)
-		if len(stack) > 0 {
-			parts = append(parts, fmt.Sprintf("技術スタックは%sが中心です。", strings.Join(stack, " / ")))
-		}
+	if strings.TrimSpace(company.TechStack) != "" && company.TechStack != "null" && company.TechStack != "[]" {
+		parts = append(parts, fmt.Sprintf("技術スタックには「%s」などがあります。", trimReasonText(company.TechStack, 80)))
 	}
 	if len(parts) == 0 {
-		return "事業内容や開発環境に合った適性が活かせる企業です。"
+		return "登録済みの企業プロファイルに基づき、志向の一致を重視した候補です。"
 	}
-	return strings.Join(parts, " ")
+	return strings.Join(parts, "")
+}
+
+func trimReasonText(s string, max int) string {
+	s = strings.TrimSpace(s)
+	r := []rune(s)
+	if max <= 0 || len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }
 
 func filterNonEmpty(parts []string) []string {

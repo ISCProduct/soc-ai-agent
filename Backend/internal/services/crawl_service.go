@@ -13,6 +13,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -137,11 +138,50 @@ func (s *CrawlService) RunSource(id uint) (*models.CrawlRun, error) {
 }
 
 func (s *CrawlService) StartScheduler() {
+	s.EnsureL1WarmCrawlSource()
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 	for range ticker.C {
 		s.runDueSources()
 	}
+}
+
+// EnsureL1WarmCrawlSource は日次 L1 温存ジョブが無ければ作成する（#586）。
+func (s *CrawlService) EnsureL1WarmCrawlSource() {
+	sources, err := s.repo.ListSources()
+	if err != nil {
+		log.Printf("ensure warm_l1_catalog: list failed: %v", err)
+		return
+	}
+	for _, src := range sources {
+		if src.TargetType == "warm_l1_catalog" {
+			return
+		}
+	}
+	timeOfDay := strings.TrimSpace(os.Getenv("L1_WARM_SCHEDULE_TIME"))
+	if timeOfDay == "" {
+		timeOfDay = "03:00"
+	}
+	source := &models.CrawlSource{
+		Name:         "L1 catalog daily warm",
+		TargetType:   "warm_l1_catalog",
+		SourceType:   "manual",
+		ScheduleType: "daily",
+		ScheduleDay:  0,
+		ScheduleTime: timeOfDay,
+		IsActive:     true,
+	}
+	if err := validateCrawlSource(source); err != nil {
+		log.Printf("ensure warm_l1_catalog: invalid: %v", err)
+		return
+	}
+	now := time.Now()
+	source.NextRunAt = computeNextRun(now, source)
+	if err := s.repo.CreateSource(source); err != nil {
+		log.Printf("ensure warm_l1_catalog: create failed: %v", err)
+		return
+	}
+	log.Printf("ensure warm_l1_catalog: created id=%d next_run_at=%v", source.ID, source.NextRunAt)
 }
 
 func (s *CrawlService) RunDueSources() {
@@ -250,14 +290,15 @@ func validateCrawlSource(source *models.CrawlSource) error {
 	if urlRequiredTypes[source.TargetType] && strings.TrimSpace(source.SourceURL) == "" {
 		return fmt.Errorf("source_url is required for %s", source.TargetType)
 	}
-	if source.ScheduleType != "weekly" && source.ScheduleType != "monthly" {
-		return errors.New("schedule_type must be weekly or monthly")
+	if source.ScheduleType != "daily" && source.ScheduleType != "weekly" && source.ScheduleType != "monthly" {
+		return errors.New("schedule_type must be daily, weekly or monthly")
 	}
 	if source.ScheduleType == "weekly" {
 		if source.ScheduleDay < 0 || source.ScheduleDay > 6 {
 			return errors.New("schedule_day must be 0-6 for weekly")
 		}
-	} else {
+	}
+	if source.ScheduleType == "monthly" {
 		if source.ScheduleDay < 1 || source.ScheduleDay > 31 {
 			return errors.New("schedule_day must be 1-31 for monthly")
 		}
@@ -1066,14 +1107,20 @@ func computeNextRun(now time.Time, source *models.CrawlSource) *time.Time {
 	min := hourMin.Minute()
 	loc := now.Location()
 	var next time.Time
-	if source.ScheduleType == "weekly" {
+	switch source.ScheduleType {
+	case "daily":
+		next = time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, loc)
+		if !next.After(now) {
+			next = next.AddDate(0, 0, 1)
+		}
+	case "weekly":
 		target := time.Weekday(source.ScheduleDay)
 		days := (int(target) - int(now.Weekday()) + 7) % 7
 		next = time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, loc).AddDate(0, 0, days)
 		if !next.After(now) {
 			next = next.AddDate(0, 0, 7)
 		}
-	} else {
+	default: // monthly
 		day := source.ScheduleDay
 		year, month := now.Year(), now.Month()
 		lastDay := lastDayOfMonth(year, month, loc)
