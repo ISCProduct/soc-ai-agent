@@ -319,7 +319,20 @@ func (s *RealtimeUsageService) checkAndNotifyThreshold() {
 
 func postSlackAlert(webhookURL, text string) error {
 	payload := map[string]string{"text": text}
-	b, _ := json.Marshal(payload)
+	return postWebhookJSON(webhookURL, payload)
+}
+
+// postDiscordAlert は Discord Incoming Webhook に content を送信する。
+func postDiscordAlert(webhookURL, content string) error {
+	payload := map[string]string{"content": content}
+	return postWebhookJSON(webhookURL, payload)
+}
+
+func postWebhookJSON(webhookURL string, payload any) error {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
 	req, err := http.NewRequest(http.MethodPost, webhookURL, bytes.NewReader(b))
 	if err != nil {
 		return err
