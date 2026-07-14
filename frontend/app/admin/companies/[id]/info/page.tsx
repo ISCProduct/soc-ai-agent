@@ -29,6 +29,7 @@ export default function AdminCompanyInfoEditPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
+  const [cacheLoading, setCacheLoading] = useState(false)
   const [forceLoading, setForceLoading] = useState(false)
 
   const [name, setName] = useState('')
@@ -126,6 +127,32 @@ export default function AdminCompanyInfoEditPage() {
     }
   }
 
+  const handleCacheFetch = async () => {
+    setCacheLoading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const res = await fetch(`/api/admin/companies/${id}/fetch-info`, {
+        method: 'POST',
+        headers: authService.getAdminFetchHeaders(),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data?.error || 'キャッシュ読込に失敗しました')
+        return
+      }
+      applyInfoPayload(data)
+      loadCompany()
+      if (data?.from_cache) {
+        setSuccess('DB キャッシュから読み込みました（LLM / Search 未実行）。')
+      } else {
+        setSuccess('TTL 切れのため不足分を取得して保存しました。')
+      }
+    } finally {
+      setCacheLoading(false)
+    }
+  }
+
   const handleForceFetchAndSave = async () => {
     setForceLoading(true)
     setError('')
@@ -142,7 +169,7 @@ export default function AdminCompanyInfoEditPage() {
       }
       applyInfoPayload(data)
       loadCompany()
-      setSuccess('DBへ強制再取得・保存しました。')
+      setSuccess('DBへ強制再取得・保存しました（LLM / Search を使用した可能性があります）。')
     } finally {
       setForceLoading(false)
     }
@@ -215,6 +242,15 @@ export default function AdminCompanyInfoEditPage() {
         <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
           <Button
             variant="outlined"
+            color="success"
+            onClick={handleCacheFetch}
+            disabled={cacheLoading || forceLoading}
+            startIcon={cacheLoading ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {cacheLoading ? '読込中...' : 'キャッシュから読込（安価）'}
+          </Button>
+          <Button
+            variant="outlined"
             color="secondary"
             onClick={handleAiFetch}
             disabled={!name.trim() || aiLoading}
@@ -224,14 +260,15 @@ export default function AdminCompanyInfoEditPage() {
           </Button>
           <Button
             variant="outlined"
+            color="warning"
             onClick={handleForceFetchAndSave}
-            disabled={forceLoading}
+            disabled={forceLoading || cacheLoading}
             startIcon={forceLoading ? <CircularProgress size={16} color="inherit" /> : null}
           >
-            {forceLoading ? '再取得中...' : '強制再取得して保存'}
+            {forceLoading ? '再取得中...' : '強制再取得して保存（高価）'}
           </Button>
           <Typography variant="caption" color="text.secondary">
-            gBiz不足時は AI Search Lite。壁打ち/面接はDB共有キャッシュを読む（都度Searchしない）
+            キャッシュ読込は TTL 内なら LLM/Search しません。強制再取得は都度コストが発生します。
           </Typography>
         </Stack>
 

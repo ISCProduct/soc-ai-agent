@@ -28,6 +28,7 @@ type CompanyInfoResult struct {
 	SourceURL     string `json:"source_url,omitempty"`
 	ModelUsed     string `json:"model_used,omitempty"`
 	Confidence    string `json:"confidence,omitempty"`
+	FromCache     bool   `json:"from_cache,omitempty"` // TTL 内の DB キャッシュ返却時 true（LLM/Search 未実行）
 }
 
 // CompanyInfoFetcher は gBizINFO を足がかりにしつつ、不足分は AI（安価 Search→Parse）で充足する。
@@ -366,6 +367,7 @@ func companyInfoFromModel(company *models.Company) *CompanyInfoResult {
 		SourceURL:     company.SourceURL,
 		ModelUsed:     company.LastModelUsed,
 		Confidence:    company.LastFetchConfidence,
+		FromCache:     true,
 	}
 }
 

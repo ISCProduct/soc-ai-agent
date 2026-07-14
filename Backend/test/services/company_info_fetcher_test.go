@@ -59,6 +59,7 @@ func TestCompanyInfoFetcher_FetchAndSave_TTLCache(t *testing.T) {
 	result, err := fetcher.FetchAndSave(context.Background(), 1, false)
 	require.NoError(t, err)
 	assert.Equal(t, "キャッシュ済み概要", result.Description)
+	assert.True(t, result.FromCache, "TTL 内は FromCache=true で LLM/Search をスキップ")
 	repo.AssertNotCalled(t, "Update", mock.Anything)
 }
 

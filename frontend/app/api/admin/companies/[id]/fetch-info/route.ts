@@ -9,7 +9,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/fetch-info`, {
+  const force = request.nextUrl.searchParams.get('force')
+  const qs = force ? `?force=${encodeURIComponent(force)}` : ''
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/fetch-info${qs}`, {
     method: 'POST',
     headers: {
       'X-Admin-Email': request.headers.get('x-admin-email') || '',

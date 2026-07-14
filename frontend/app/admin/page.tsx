@@ -156,6 +156,22 @@ export default function AdminDashboardPage() {
           </Card>
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
+          <Card sx={{ height: '100%', border: '2px solid', borderColor: 'primary.light' }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                AI / RAG 運用
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                コスト要約・VectorDB・L1シード/ウォームを一箇所で。DB/RAG キャッシュ優先で LLM コストを抑えます。
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Button variant="contained" component={Link} href="/admin/ai-ops">
+                AI / RAG 運用へ
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>

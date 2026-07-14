@@ -50,8 +50,54 @@ test.describe('管理者ダッシュボードフロー', () => {
     await page.goto('/admin')
     await page.waitForLoadState('networkidle')
     await expect(page.getByRole('heading', { name: '企業データ' })).toBeVisible({ timeout: 8000 })
+    await expect(page.getByRole('heading', { name: 'AI / RAG 運用' })).toBeVisible({ timeout: 8000 })
     await expect(page.getByRole('heading', { name: 'スコアダッシュボード' })).toBeVisible({ timeout: 8000 })
     await expect(page.getByRole('heading', { name: 'スコア精度検証' })).toBeVisible({ timeout: 8000 })
+  })
+
+  test('AI / RAG 運用ページに遷移できる', async ({ page }) => {
+    await page.route('**/api/admin/companies/l1-coverage', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          published_total: 10,
+          info_fresh: 8,
+          has_profile: 7,
+          needs_warm: 2,
+          info_rate: 0.8,
+          profile_rate: 0.7,
+        }),
+      })
+    })
+    await page.route('**/api/admin/vector/status**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          backend: 'chroma',
+          total_documents: 42,
+          collections: [{ name: 'company_research', exists: true, count: 42 }],
+        }),
+      })
+    })
+    await page.route('**/api/admin/costs**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          current_month_cost_usd: 12.5,
+          company_search: { month: '2026-07', count: 100, limit: 2000, remaining: 1900, enforce: true, exceeded: false },
+          realtime: { current_month_cost_usd: 1.2 },
+        }),
+      })
+    })
+
+    await page.goto('/admin/ai-ops')
+    await page.waitForLoadState('networkidle')
+    await expect(page.getByRole('heading', { name: 'AI / RAG 運用' })).toBeVisible({ timeout: 8000 })
+    await expect(page.getByText('コスト削減の基本方針')).toBeVisible({ timeout: 8000 })
+    await expect(page.getByRole('button', { name: 'ウォーム（キャッシュ優先・安価）' })).toBeVisible()
   })
 
   test('スコアダッシュボードページに遷移できる', async ({ page }) => {

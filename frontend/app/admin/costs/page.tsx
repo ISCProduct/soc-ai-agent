@@ -208,6 +208,14 @@ export default function AdminCostsPage() {
         </Alert>
       )}
 
+      <Alert severity="info" sx={{ mb: 2 }}>
+        DB / RAG に企業情報がある場合は再調査せずコストを抑えられます。運用ハブ:{' '}
+        <Button component={Link} href="/admin/ai-ops" size="small" sx={{ verticalAlign: 'baseline', minWidth: 0, p: 0, textTransform: 'none' }}>
+          AI / RAG 運用
+        </Button>
+        。月次目安閾値 $40（超過時はアラート連携 #604）。
+      </Alert>
+
       {/* KPI Cards */}
       <Stack direction="row" spacing={2} mb={3} flexWrap="wrap">
         <Card sx={{ flex: 1, minWidth: 200 }}>
