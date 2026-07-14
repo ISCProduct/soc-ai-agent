@@ -52,6 +52,22 @@ func (c *AdminVectorController) Reembed(ctx echo.Context) error {
 	return c.proxyJSON(ctx, http.MethodPost, c.ragBaseURL+"/vector/reembed", body)
 }
 
+// Stats handles GET /api/admin/vector/stats - RAG利用統計情報の取得
+func (c *AdminVectorController) Stats(ctx echo.Context) error {
+	if c.ragBaseURL == "" {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "RAG_REVIEW_URL is not configured")
+	}
+	return c.proxyJSON(ctx, http.MethodGet, c.ragBaseURL+"/vector/stats", nil)
+}
+
+// Collections handles GET /api/admin/vector/collections - RAG全コレクション情報の取得
+func (c *AdminVectorController) Collections(ctx echo.Context) error {
+	if c.ragBaseURL == "" {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "RAG_REVIEW_URL is not configured")
+	}
+	return c.proxyJSON(ctx, http.MethodGet, c.ragBaseURL+"/vector/collections", nil)
+}
+
 func (c *AdminVectorController) proxyJSON(ctx echo.Context, method, endpoint string, body []byte) error {
 	var reader io.Reader
 	if body != nil {
