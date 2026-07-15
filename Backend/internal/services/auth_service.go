@@ -28,6 +28,9 @@ type AuthService struct {
 	pendingRepo  repository.PendingRegistrationRepository
 	emailService *EmailService
 	db           *gorm.DB
+	object       ObjectDeleter
+	audit        auditRecorder
+	deletion     *UserDeletionService
 }
 
 func NewAuthService(userRepo repository.UserRepository, pendingRepo repository.PendingRegistrationRepository, emailService *EmailService) *AuthService {
@@ -37,137 +40,38 @@ func NewAuthService(userRepo repository.UserRepository, pendingRepo repository.P
 // SetDB はアカウント削除に使用する DB を設定する
 func (s *AuthService) SetDB(db *gorm.DB) {
 	s.db = db
+	s.rebuildDeletionService()
+}
+
+// SetObjectDeleter は退会時の S3 オブジェクト削除先を設定する
+func (s *AuthService) SetObjectDeleter(d ObjectDeleter) {
+	s.object = d
+	s.rebuildDeletionService()
+}
+
+// SetAuditLog は退会監査ログの出力先を設定する
+func (s *AuthService) SetAuditLog(audit auditRecorder) {
+	s.audit = audit
+	s.rebuildDeletionService()
+}
+
+func (s *AuthService) rebuildDeletionService() {
+	if s.db == nil {
+		s.deletion = nil
+		return
+	}
+	s.deletion = NewUserDeletionService(s.db, s.object, s.audit)
 }
 
 // DeleteAccount ユーザーアカウントとその全データを削除する（個人情報保護法第28条対応）
 func (s *AuthService) DeleteAccount(userID uint) error {
-	if s.db == nil {
+	if s.deletion == nil {
+		s.rebuildDeletionService()
+	}
+	if s.deletion == nil {
 		return errors.New("database not configured")
 	}
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		var user models.User
-		if err := tx.First(&user, userID).Error; err != nil {
-			return err
-		}
-
-		sessionIDs, err := collectUserSessionIDs(tx, userID)
-		if err != nil {
-			return err
-		}
-		if len(sessionIDs) > 0 {
-			if err := tx.Where("session_id IN ?", sessionIDs).Delete(&models.SessionValidation{}).Error; err != nil {
-				return err
-			}
-		}
-
-		interviewSessionIDs, err := collectInterviewSessionIDs(tx, userID)
-		if err != nil {
-			return err
-		}
-		if len(interviewSessionIDs) > 0 {
-			if err := tx.Where("interview_session_id IN ?", interviewSessionIDs).Delete(&models.RealtimeUsageLog{}).Error; err != nil {
-				return err
-			}
-			if err := tx.Where("session_id IN ?", interviewSessionIDs).Delete(&models.InterviewUtterance{}).Error; err != nil {
-				return err
-			}
-			if err := tx.Where("session_id IN ?", interviewSessionIDs).Delete(&models.InterviewReport{}).Error; err != nil {
-				return err
-			}
-			// InterviewVideo は後続の user_id = ? による一括削除でカバーされるため、ここでは削除しない
-		}
-
-		resumeDocumentIDs, err := collectResumeDocumentIDs(tx, userID)
-		if err != nil {
-			return err
-		}
-		if len(resumeDocumentIDs) > 0 {
-			resumeReviewIDs, err := collectResumeReviewIDs(tx, resumeDocumentIDs)
-			if err != nil {
-				return err
-			}
-			if len(resumeReviewIDs) > 0 {
-				if err := tx.Where("review_id IN ?", resumeReviewIDs).Delete(&models.ResumeReviewItem{}).Error; err != nil {
-					return err
-				}
-			}
-			if err := tx.Where("document_id IN ?", resumeDocumentIDs).Delete(&models.ResumeTextBlock{}).Error; err != nil {
-				return err
-			}
-			if err := tx.Where("document_id IN ?", resumeDocumentIDs).Delete(&models.ResumeReview{}).Error; err != nil {
-				return err
-			}
-		}
-
-		if err := tx.Where("user_id = ?", userID).Delete(&models.ChatMessage{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.AIGeneratedQuestion{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.ConversationContext{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.UserWeightScore{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.UserAnalysisProgress{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.UserEmbedding{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.VariantAssignment{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.UserCompanyMatch{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.UserApplicationStatus{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.CompanyReview{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.ResumeDocument{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.InterviewSession{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.InterviewVideo{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.RealtimeUsageLog{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.ScheduleEvent{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.SkillScore{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.GitHubRepoSummary{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.GitHubLanguageStat{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.GitHubRepo{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ?", userID).Delete(&models.GitHubProfile{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("email = ?", user.Email).Delete(&models.PendingRegistration{}).Error; err != nil {
-			return err
-		}
-
-		if err := tx.Delete(&models.User{}, userID).Error; err != nil {
-			return err
-		}
-		return nil
-	})
+	return s.deletion.DeleteUser(userID, UserDeletionActor{Kind: "self"})
 }
 
 func collectUserSessionIDs(tx *gorm.DB, userID uint) ([]string, error) {

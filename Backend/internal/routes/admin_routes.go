@@ -73,6 +73,7 @@ func SetupAdminRoutes(
 	// ユーザー管理
 	admin.GET("/users", adminUserController.List)
 	admin.PUT("/users/:id", adminUserController.Update)
+	admin.DELETE("/users/:id", adminUserController.Delete)
 
 	// 監査ログ
 	admin.GET("/audit-logs", adminAuditController.List)

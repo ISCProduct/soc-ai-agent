@@ -33,6 +33,10 @@ func SetupAuthRoutes(api *echo.Group, authController *controllers.AuthController
 	authProtected.PUT("/profile", authController.UpdateProfile)
 	authProtected.POST("/profile", authController.UpdateProfile) // POST互換（旧クライアント対応）
 	authProtected.DELETE("/account", authController.DeleteAccount)
+
+	// Issue #613: 明示的な本人退会パス（/api/auth/account と同等）
+	users := api.Group("/users", EchoUserAuth(userSecret))
+	users.DELETE("/me", authController.DeleteAccount)
 }
 
 // echoLoginRateLimit はログインエンドポイント用のEchoネイティブレート制限ミドルウェア

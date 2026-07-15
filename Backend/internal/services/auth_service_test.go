@@ -62,6 +62,14 @@ func TestDeleteAccount_CascadeDeleteQueries(t *testing.T) {
 		WithArgs(uint(1), 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "email"}).AddRow(1, "user@example.com"))
 
+	// collectUserObjectKeys
+	mock.ExpectQuery("SELECT \\* FROM `interview_videos` WHERE user_id = \\?").
+		WithArgs(uint(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "drive_file_id"}))
+	mock.ExpectQuery("SELECT \\* FROM `resume_documents` WHERE user_id = \\?").
+		WithArgs(uint(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "stored_path"}))
+
 	// collectUserSessionIDs
 	mock.ExpectQuery("SELECT DISTINCT `session_id` FROM `chat_messages` WHERE user_id = \\?").
 		WithArgs(uint(1)).
@@ -90,6 +98,9 @@ func TestDeleteAccount_CascadeDeleteQueries(t *testing.T) {
 		WithArgs(10).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("DELETE FROM `interview_reports` WHERE session_id IN \\(\\?\\)").
+		WithArgs(10).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("DELETE FROM `interview_question_states` WHERE session_id IN \\(\\?\\)").
 		WithArgs(10).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	// InterviewVideo は session_id IN ? では削除しない（#314修正済み）
@@ -133,7 +144,11 @@ func TestDeleteAccount_CascadeDeleteQueries(t *testing.T) {
 	expectDeleteByUserID(mock, "git_hub_language_stats")
 	expectDeleteByUserID(mock, "git_hub_repos")
 	expectDeleteByUserID(mock, "git_hub_profiles")
+	expectDeleteByUserID(mock, "user_google_tokens")
 
+	mock.ExpectExec("DELETE FROM `collective_insight_logs` WHERE anonymous_user_id = \\?").
+		WithArgs(collectiveAnonymousHash(1)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("DELETE FROM `pending_registrations` WHERE email = \\?").
 		WithArgs("user@example.com").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -164,6 +179,13 @@ func TestDeleteAccount_InterviewVideoDeletedByUserIDOnly(t *testing.T) {
 		WithArgs(uint(2), 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "email"}).AddRow(2, "test@example.com"))
 
+	mock.ExpectQuery("SELECT \\* FROM `interview_videos` WHERE user_id = \\?").
+		WithArgs(uint(2)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "drive_file_id"}))
+	mock.ExpectQuery("SELECT \\* FROM `resume_documents` WHERE user_id = \\?").
+		WithArgs(uint(2)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "stored_path"}))
+
 	// collectUserSessionIDs（全テーブル空返し）
 	for _, tbl := range []string{"chat_messages", "user_weight_scores", "conversation_contexts",
 		"ai_generated_questions", "user_analysis_progress", "user_embeddings",
@@ -178,7 +200,7 @@ func TestDeleteAccount_InterviewVideoDeletedByUserIDOnly(t *testing.T) {
 		WithArgs(uint(2)).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(20))
 
-	// session_id IN ? で削除されるのは utterance と report のみ（video はない）
+	// session_id IN ? で削除されるのは utterance / report / question_states（video はない）
 	mock.ExpectExec("DELETE FROM `realtime_usage_logs` WHERE interview_session_id IN \\(\\?\\)").
 		WithArgs(20).
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -186,6 +208,9 @@ func TestDeleteAccount_InterviewVideoDeletedByUserIDOnly(t *testing.T) {
 		WithArgs(20).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("DELETE FROM `interview_reports` WHERE session_id IN \\(\\?\\)").
+		WithArgs(20).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM `interview_question_states` WHERE session_id IN \\(\\?\\)").
 		WithArgs(20).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	// ここに interview_videos の session_id IN ? は来ないはず
@@ -202,11 +227,15 @@ func TestDeleteAccount_InterviewVideoDeletedByUserIDOnly(t *testing.T) {
 		"company_reviews", "resume_documents", "interview_sessions",
 		"interview_videos", // ここで1回だけ削除される
 		"realtime_usage_logs", "schedule_events", "skill_scores",
-		"git_hub_repo_summaries", "git_hub_language_stats", "git_hub_repos", "git_hub_profiles"} {
+		"git_hub_repo_summaries", "git_hub_language_stats", "git_hub_repos", "git_hub_profiles",
+		"user_google_tokens"} {
 		mock.ExpectExec("DELETE FROM `" + tbl + "` WHERE user_id = \\?").
 			WithArgs(uint(2)).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 	}
+	mock.ExpectExec("DELETE FROM `collective_insight_logs` WHERE anonymous_user_id = \\?").
+		WithArgs(collectiveAnonymousHash(2)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("DELETE FROM `pending_registrations` WHERE email = \\?").
 		WithArgs("test@example.com").
 		WillReturnResult(sqlmock.NewResult(0, 0))

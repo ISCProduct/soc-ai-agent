@@ -222,6 +222,7 @@ func main() {
 	crawlService.SetInfoFetcher(infoFetcher)
 	crawlService.SetJobFetcher(jobFetcher)
 	auditLogService := services.NewAuditLogService(auditLogRepo)
+	authService.SetAuditLog(auditLogService)
 	analysisService := services.NewAnalysisScoringService(
 		userWeightScoreRepo,
 		chatMessageRepo,
@@ -261,7 +262,6 @@ func main() {
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
 	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
 	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
-	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
 	adminAuditController := controllers.NewAdminAuditController(auditLogService)
 	// gBizINFO 公式 API を使った企業データ収集パイプライン
 	// Mynavi・Rikunabi・CareerTasu スクレイパーは利用規約違反リスクのため削除 (#178)
@@ -279,6 +279,14 @@ func main() {
 		slog.Warn("S3 upload service not available", "error", s3Err)
 		s3UploadService = nil
 	}
+	var objectDeleter services.ObjectDeleter
+	if s3UploadService != nil {
+		objectDeleter = s3UploadService
+		authService.SetObjectDeleter(s3UploadService)
+	}
+	userDeletionService := services.NewUserDeletionService(db, objectDeleter, auditLogService)
+	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
+	adminUserController.SetDeletionService(userDeletionService)
 	interviewController := controllers.NewInterviewController(interviewService, videoRepo, s3UploadService)
 	realtimeController := controllers.NewRealtimeController(interviewService, realtimeUsageService)
 	adminInterviewController := controllers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
