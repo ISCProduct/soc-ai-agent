@@ -207,7 +207,7 @@ func (c *AuthController) VerifyEmail(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, map[string]string{"message": "メールアドレスを確認しました。ログインしてください。"})
 }
 
-// DeleteAccount アカウントと全データを削除（個人情報保護法第28条対応）
+// DeleteAccount アカウントを退会処理する（論理削除。保持期間後に物理削除）
 // DELETE /api/auth/account
 func (c *AuthController) DeleteAccount(ctx echo.Context) error {
 	userID, ok := echoUserID(ctx)
@@ -219,5 +219,5 @@ func (c *AuthController) DeleteAccount(ctx echo.Context) error {
 		return echoInternalError(err)
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]string{"message": "アカウントを削除しました"})
+	return ctx.JSON(http.StatusOK, map[string]string{"message": "アカウントを退会処理しました"})
 }

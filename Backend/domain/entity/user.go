@@ -23,8 +23,15 @@ type User struct {
 	LastLoginAt              *time.Time
 	PasswordResetToken       string
 	PasswordResetExpiresAt   *time.Time
+	AllowCollectiveInsight   bool
+	WithdrawnAt              *time.Time
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
+}
+
+// IsWithdrawn は退会済みかどうか。
+func (u *User) IsWithdrawn() bool {
+	return u != nil && u.WithdrawnAt != nil
 }
 
 // IsNewGrad 新卒ユーザーかどうか

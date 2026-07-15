@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
@@ -144,7 +145,7 @@ func (c *AdminUserController) Update(ctx echo.Context) error {
 }
 
 // Delete DELETE /api/admin/users/:id
-// 管理者によるユーザー個人データの完全削除（DB + S3）
+// 管理者によるユーザー退会（論理削除）。関連データと S3 は保持期間後に物理削除される。
 func (c *AdminUserController) Delete(ctx echo.Context) error {
 	if c.deletion == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "user deletion is not configured")
@@ -157,17 +158,39 @@ func (c *AdminUserController) Delete(ctx echo.Context) error {
 	if err != nil || user == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "user not found")
 	}
+	if user.IsWithdrawn() {
+		return echo.NewHTTPError(http.StatusConflict, "account already withdrawn")
+	}
 	actor := strings.TrimSpace(ctx.Request().Header.Get("X-Admin-Email"))
 	if err := c.deletion.DeleteUser(uint(id), services.UserDeletionActor{Kind: "admin", Email: actor}); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "user not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete user")
+		if errors.Is(err, services.ErrAlreadyWithdrawn) {
+			return echo.NewHTTPError(http.StatusConflict, "account already withdrawn")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to withdraw user")
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
-		"message": "ユーザーを削除しました",
-		"id":      uint(id),
-		"email":   user.Email,
+		"message":         "ユーザーを退会処理しました（保持期間後に完全削除）",
+		"id":              uint(id),
+		"email":           user.Email,
+		"retention_days":  services.WithdrawalRetentionDays,
+	})
+}
+
+// PurgeExpired POST /api/admin/users/purge-expired
+// 保持期間を過ぎた退会ユーザーを物理削除する。
+func (c *AdminUserController) PurgeExpired(ctx echo.Context) error {
+	if c.deletion == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "user deletion is not configured")
+	}
+	n, err := c.deletion.PurgeExpiredWithdrawals(time.Time{})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to purge expired withdrawals")
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"purged": n,
 	})
 }
 

@@ -367,6 +367,9 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 	if user == nil {
 		return nil, errors.New("invalid email or password")
 	}
+	if user.IsWithdrawn() {
+		return nil, errors.New("account has been withdrawn")
+	}
 
 	// ゲストユーザーはログイン不可
 	if user.IsGuest {

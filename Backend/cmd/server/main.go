@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -293,6 +294,7 @@ func main() {
 	adminInterviewController.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	adminInterviewController.SetCompanyRepo(companyRepo)
 	adminInterviewController.SetOpenAIClient(aiClient)
+	adminInterviewController.SetUserAccessGuard(userDeletionService)
 	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminCostsController := controllers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
 	adminVectorController := controllers.NewAdminVectorController()
@@ -348,22 +350,42 @@ func main() {
 	api := e.Group("/api")
 
 	// ルーティング設定
-	routes.SetupAuthRoutes(api, authController, oauthController, cfg.UserSecret)
-	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret)
+	routes.SetupAuthRoutes(api, authController, oauthController, cfg.UserSecret, userDeletionService)
+	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret, userDeletionService)
 	routes.SetupCompanyRoutes(api, relationController)
 	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, adminVectorController, userRepo, cfg.AdminSecret)
-	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret)
-	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret)
-	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret)
+	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService)
+	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService)
+	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService)
 	routes.SetupESRoutes(api, esRewriteController, esReviewController)
 	routes.SetupScheduleRoutes(api, scheduleController)
-	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret)
-	routes.SetupApplicationRoutes(api, appController, cfg.UserSecret)
+	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret, userDeletionService)
+	routes.SetupApplicationRoutes(api, appController, cfg.UserSecret, userDeletionService)
 	routes.SetupUserRoutes(api, integratedProfileController)
-	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret)
+	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService)
 	api.POST("/company-entry", companyEntryController.Submit)
 
 	go crawlService.StartScheduler()
+
+	// 退会ユーザーの猶予期間経過後の物理削除（1日1回）
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		run := func() {
+			n, err := userDeletionService.PurgeExpiredWithdrawals(time.Now().UTC())
+			if err != nil {
+				slog.Error("purge expired withdrawals failed", "error", err)
+				return
+			}
+			if n > 0 {
+				slog.Info("purged expired withdrawals", "count", n)
+			}
+		}
+		run()
+		for range ticker.C {
+			run()
+		}
+	}()
 
 	// サーバー起動
 	port := cfg.ServerPort

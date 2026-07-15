@@ -74,6 +74,7 @@ func SetupAdminRoutes(
 	admin.GET("/users", adminUserController.List)
 	admin.PUT("/users/:id", adminUserController.Update)
 	admin.DELETE("/users/:id", adminUserController.Delete)
+	admin.POST("/users/purge-expired", adminUserController.PurgeExpired)
 
 	// 監査ログ
 	admin.GET("/audit-logs", adminAuditController.List)
