@@ -11,6 +11,7 @@ import (
 	"Backend/internal/routes"
 	"Backend/internal/scraper"
 	"Backend/internal/services"
+	"Backend/migrations"
 	"log"
 	"log/slog"
 	"net/http"
@@ -123,8 +124,8 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// マイグレーション実行
-	if err := models.AutoMigrate(db); err != nil {
+	// マイグレーション実行（バージョン管理型・多重起動は GET_LOCK で排他される #614）
+	if err := migrations.Up(cfg.DSN()); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
 	slog.Info("Database migration completed")
