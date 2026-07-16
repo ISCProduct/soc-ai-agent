@@ -46,48 +46,35 @@ export class CompanyDataFetchError extends Error {
   }
 }
 
-const demoCompanyNames = new Set([
-  '株式会社テックイノベーション',
-  'エンタープライズシステムズ株式会社',
-  'クリエイティブラボ株式会社',
-])
-
-function isDemoCompany(company?: Company): boolean {
-  if (!company) return true
-  const website = company.website_url || ''
-  if (website.includes('.example.com') || website === 'https://example.com') {
-    return true
-  }
-  if (demoCompanyNames.has(company.name)) {
-    return true
-  }
-  return false
-}
-
-function hasDemoEndpoint(relation: CapitalRelation): boolean {
-  if (relation.parent_id && isDemoCompany(relation.parent)) return true
-  if (relation.child_id && isDemoCompany(relation.child)) return true
-  if (relation.from_id && isDemoCompany(relation.from)) return true
-  if (relation.to_id && isDemoCompany(relation.to)) return true
-  return false
-}
-
-/** 企業関係データを Next.js プロキシ経由で取得（DB: company_relations） */
+/**
+ * 企業関係データを Next.js プロキシ経由で取得する（DB: company_relations）。
+ *
+ * 失敗時は空配列を返さず {@link CompanyDataFetchError} を throw する。
+ * 呼び出し側は try/catch で捕捉し、エラー UI を表示すること。
+ *
+ * @throws {CompanyDataFetchError} HTTP エラーまたはネットワーク失敗時
+ */
 export async function fetchCompanyRelations(): Promise<CapitalRelation[]> {
   try {
     const response = await fetch('/api/companies/relations', { cache: 'no-store' })
     if (!response.ok) {
       throw new CompanyDataFetchError('企業関係データの取得に失敗しました', response.status)
     }
-    const relations: CapitalRelation[] = await response.json()
-    return relations.filter((relation) => !hasDemoEndpoint(relation))
+    return response.json()
   } catch (error) {
     if (error instanceof CompanyDataFetchError) throw error
     throw new CompanyDataFetchError('企業関係データの取得中にエラーが発生しました')
   }
 }
 
-/** 企業市場情報を Next.js プロキシ経由で取得（DB: company_market_info） */
+/**
+ * 企業市場情報を Next.js プロキシ経由で取得する（DB: company_market_info）。
+ *
+ * 失敗時は空配列を返さず {@link CompanyDataFetchError} を throw する。
+ * 呼び出し側は try/catch で捕捉し、エラー UI を表示すること。
+ *
+ * @throws {CompanyDataFetchError} HTTP エラーまたはネットワーク失敗時
+ */
 export async function fetchCompanyMarketInfo(): Promise<CompanyMarketInfo[]> {
   try {
     const response = await fetch('/api/companies/market-info', { cache: 'no-store' })

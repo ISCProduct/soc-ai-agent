@@ -175,6 +175,30 @@ docker compose --profile rag logs --tail 80 chroma rag-review
 
 ## 5. データベース管理
 
+### デモ企業データのクリーンアップ（Issue #558）
+
+旧 Seed で投入された `example.com` 系のデモ企業は、起動時の `SeedData` 内で `CleanupDemoCompanies` が冪等実行され自動削除されます。既存環境で手動実行する場合:
+
+```sh
+cd Backend && go run ./cmd/migrate
+```
+
+`cmd/migrate` はスキーマ更新後に `SeedData` を呼び出すため、デモ企業・関連子テーブルも合わせてクリーンアップされます。サーバー起動時（`go run ./cmd/server`）でも同様に実行されます。
+
+**確認クエリ:**
+
+```sql
+SELECT id, name, website_url FROM companies
+WHERE website_url LIKE '%.example.com%'
+   OR website_url = 'https://example.com'
+   OR name IN (
+     '株式会社テックイノベーション',
+     'エンタープライズシステムズ株式会社',
+     'クリエイティブラボ株式会社'
+   );
+-- 0 件であること
+```
+
 ### バックアップ
 
 ```sh
