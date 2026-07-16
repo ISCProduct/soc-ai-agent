@@ -74,3 +74,15 @@ func (m *AuthServiceMock) VerifyEmail(token string) error {
 func (m *AuthServiceMock) DeleteAccount(userID uint) error {
 	return m.Called(userID).Error(0)
 }
+
+func (m *AuthServiceMock) RefreshSession(refreshToken string) (*services.AuthResponse, error) {
+	args := m.Called(refreshToken)
+	if resp, ok := args.Get(0).(*services.AuthResponse); ok {
+		return resp, args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *AuthServiceMock) LogoutSession(refreshToken string) error {
+	return m.Called(refreshToken).Error(0)
+}

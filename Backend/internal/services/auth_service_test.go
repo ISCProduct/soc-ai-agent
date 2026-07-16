@@ -62,6 +62,9 @@ func TestDeleteAccount_CascadeDeleteQueries(t *testing.T) {
 		WithArgs(uint(1), 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "email"}).AddRow(1, "user@example.com"))
 
+	// リフレッシュトークン削除（#616）
+	expectDeleteByUserID(mock, "user_refresh_tokens")
+
 	// collectUserSessionIDs
 	mock.ExpectQuery("SELECT DISTINCT `session_id` FROM `chat_messages` WHERE user_id = \\?").
 		WithArgs(uint(1)).
@@ -163,6 +166,11 @@ func TestDeleteAccount_InterviewVideoDeletedByUserIDOnly(t *testing.T) {
 	mock.ExpectQuery("SELECT \\* FROM `users` WHERE `users`.`id` = \\? ORDER BY `users`.`id` LIMIT \\?").
 		WithArgs(uint(2), 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "email"}).AddRow(2, "test@example.com"))
+
+	// リフレッシュトークン削除（#616）
+	mock.ExpectExec("DELETE FROM `user_refresh_tokens` WHERE user_id = \\?").
+		WithArgs(uint(2)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	// collectUserSessionIDs（全テーブル空返し）
 	for _, tbl := range []string{"chat_messages", "user_weight_scores", "conversation_contexts",

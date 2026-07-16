@@ -22,6 +22,9 @@ func SetupAuthRoutes(api *echo.Group, authController *controllers.AuthController
 	auth.GET("/verify-email", authController.VerifyEmail)
 	auth.POST("/forgot-password", authController.RequestPasswordReset, echoPasswordResetRateLimit())
 	auth.POST("/reset-password", authController.ResetPassword)
+	// トークンリフレッシュ・ログアウト（リフレッシュトークン自体が認証情報 #616）
+	auth.POST("/refresh", authController.Refresh)
+	auth.POST("/logout", authController.Logout)
 	auth.GET("/google", oauthController.GoogleLogin)
 	auth.GET("/google/callback", oauthController.GoogleCallback)
 	auth.GET("/github", oauthController.GitHubLogin)
