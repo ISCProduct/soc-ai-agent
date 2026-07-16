@@ -3,7 +3,7 @@ SOC AI Agent: 採用支援SaaS (Go + Next.js + Python RAG)
 
 ## コマンド
 ### Backend (Go)
-- `cd Backend && go run ./cmd/server` (8080) / `go test ./internal/...` / `go run ./cmd/migrate`
+- `cd Backend && go run ./cmd/server` (8080) / `go test ./internal/... ./migrations/...` / `go run ./cmd/migrate`（up/down/version/force）
 ### Frontend (Next.js)
 - `cd frontend && npm run dev` (3000) / `npm run build` / `npm run lint`
 ### RAG (Python)
@@ -34,6 +34,7 @@ SOC AI Agent: 採用支援SaaS (Go + Next.js + Python RAG)
 - **AI/LLM**: プロンプト版管理, ストリーミング, JSON出力検証, APIキー秘匿
 
 ## 注意点
+- **スキーマ変更は `Backend/migrations/` のup/down SQL必須**（GORM AutoMigrate禁止、`docs/wiki/migrations.md` 参照）。
 - RAG依存関係は `constraints.txt` 必須。
 - スコアは `user_weight_scores` (10カテゴリ×4フェーズ)。
 - マッチングは `UserWeightScore × CompanyWeightProfile`。

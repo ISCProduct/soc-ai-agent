@@ -14,4 +14,6 @@ type AuthService interface {
 	ResetPassword(token, newPassword string) error
 	VerifyEmail(token string) error
 	DeleteAccount(userID uint) error
+	RefreshSession(refreshToken string) (*services.AuthResponse, error)
+	LogoutSession(refreshToken string) error
 }
