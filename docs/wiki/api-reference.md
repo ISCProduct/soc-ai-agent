@@ -17,11 +17,21 @@
 | メソッド | パス | 概要 |
 |---------|------|------|
 | POST | `/api/auth/register` | メール登録 |
-| POST | `/api/auth/login` | ログイン |
+| POST | `/api/auth/login` | ログイン（`user_token` + `refresh_token` を返す） |
+| POST | `/api/auth/refresh` | トークンリフレッシュ（ローテーション #616） |
+| POST | `/api/auth/logout` | リフレッシュトークン失効 |
 | POST | `/api/auth/verify-email` | メール認証 |
 | POST | `/api/auth/forgot-password` | パスワードリセット要求 |
 | GET | `/api/auth/google` | Google OAuth開始 |
 | GET | `/api/auth/github` | GitHub OAuth開始 |
+
+### トークン仕様（#616）
+
+- **アクセストークン**（`user_token`）: JWT・有効期間 **1時間**。`X-User-Token` ヘッダーで送信
+- **リフレッシュトークン**（`refresh_token`）: 不透明トークン・有効期間 **30日**・DB管理（SHA-256ハッシュ保存）
+  - `/api/auth/refresh` のたびにローテーションされる（並行リクエスト対策で旧トークンは60秒の猶予あり）
+  - ログアウト・パスワードリセット・アカウント削除で失効する
+- フロントエンドは httpOnly Cookie（`user_token` / `refresh_token`）で保持し、`middleware.ts` が期限2分前に自動リフレッシュする
 
 ---
 

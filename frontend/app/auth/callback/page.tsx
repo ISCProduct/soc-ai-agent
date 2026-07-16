@@ -11,6 +11,7 @@ type OAuthUser = {
   name: string
   token?: string
   user_token?: string
+  refresh_token?: string
   is_guest: boolean
   target_level?: string
   is_admin?: boolean
@@ -33,6 +34,7 @@ function validateOAuthPayload(raw: unknown): OAuthUser {
     name: d.name,
     token: typeof d.token === 'string' ? d.token : undefined,
     user_token: typeof d.user_token === 'string' ? d.user_token : undefined,
+    refresh_token: typeof d.refresh_token === 'string' ? d.refresh_token : undefined,
     is_guest: typeof d.is_guest === 'boolean' ? d.is_guest : false,
     target_level: typeof d.target_level === 'string' ? d.target_level : '',
     is_admin: typeof d.is_admin === 'boolean' ? d.is_admin : undefined,

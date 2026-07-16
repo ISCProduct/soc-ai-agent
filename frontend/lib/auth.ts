@@ -79,6 +79,7 @@ export interface AuthResponse {
   avatar_url?: string
   token?: string
   user_token?: string
+  refresh_token?: string
 }
 
 export const authService = {
@@ -257,12 +258,17 @@ export const authService = {
     }
 
     // httpOnly CookieにトークンをセットしてDevTools経由の露出を防ぐ
+    // refresh_token はストレージには保存せず httpOnly Cookie のみで保持する (#616)
     if (authResponse.user_token) {
       const userId = typeof authResponse.user_id === 'string' ? Number(authResponse.user_id) : authResponse.user_id
       fetch('/api/auth/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, userToken: authResponse.user_token }),
+        body: JSON.stringify({
+          userId,
+          userToken: authResponse.user_token,
+          refreshToken: authResponse.refresh_token,
+        }),
       }).catch(() => {})
     }
   },

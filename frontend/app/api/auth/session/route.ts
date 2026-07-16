@@ -1,28 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict' as const,
-  path: '/',
-  maxAge: 60 * 60 * 24 * 7, // 7日間
-}
+import {
+  SERVER_BACKEND_URL,
+  clearSessionCookies,
+  setSessionCookies,
+} from '@/lib/session-cookies'
 
 export async function POST(request: NextRequest) {
-  const { userId, userToken } = await request.json()
+  const { userId, userToken, refreshToken } = await request.json()
   if (!userId || !userToken) {
     return NextResponse.json({ error: 'userId and userToken are required' }, { status: 400 })
   }
 
   const response = NextResponse.json({ ok: true })
-  response.cookies.set('user_id', String(userId), COOKIE_OPTIONS)
-  response.cookies.set('user_token', userToken, COOKIE_OPTIONS)
+  setSessionCookies(response, String(userId), userToken, refreshToken)
   return response
 }
 
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
+  // Backend側でリフレッシュトークンを失効させてからCookieを削除する (#616)
+  const refreshToken = request.cookies.get('refresh_token')?.value
+  if (refreshToken) {
+    try {
+      await fetch(`${SERVER_BACKEND_URL}/api/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      })
+    } catch {
+      // Backend不達でもCookie削除は続行する（トークンは期限切れで無効化される）
+    }
+  }
+
   const response = NextResponse.json({ ok: true })
-  response.cookies.delete('user_id')
-  response.cookies.delete('user_token')
+  clearSessionCookies(response)
   return response
 }
