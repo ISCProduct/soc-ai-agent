@@ -88,8 +88,12 @@ GET /api/admin/costs/monthly   # 月別コスト
 ```
 
 **アラート設定:**
-- `REALTIME_MONTHLY_ALERT_THRESHOLD_USD=200` を超えるとメール/Slackアラート
-- `REALTIME_ALERT_EMAILS` / `REALTIME_ALERT_SLACK_WEBHOOK_URL` で通知先設定
+- OpenAI API 全体（`api_call_logs`）: `OPENAI_COST_ALERT_THRESHOLD_USD=40`（UTC 月次）を超過すると Slack/Discord
+  - `OPENAI_COST_ALERT_SLACK_WEBHOOK_URL` / `OPENAI_COST_ALERT_DISCORD_WEBHOOK_URL`
+  - Slack 未設定時は `REALTIME_ALERT_SLACK_WEBHOOK_URL` へフォールバック
+  - 同一月は1回のみ通知
+- Realtime: `REALTIME_MONTHLY_ALERT_THRESHOLD_USD=200` を超えるとメール/Slack
+  - `REALTIME_ALERT_EMAILS` / `REALTIME_ALERT_SLACK_WEBHOOK_URL`
 
 ### 面接セッション監視
 
