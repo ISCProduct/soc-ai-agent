@@ -145,10 +145,14 @@ class TestRetrieveDocs:
 
 # ── 統合テスト（FastAPI TestClient） ────────────────────────────────────────
 
+def _auth_client():
+    """内部認証トークン付きの TestClient を返す (#615)"""
+    from fastapi.testclient import TestClient
+    return TestClient(main.app, headers={"X-Internal-Token": os.environ["RAG_INTERNAL_TOKEN"]})
+
 class TestReviewEndpoint:
     def test_health(self):
-        from fastapi.testclient import TestClient
-        client = TestClient(main.app)
+        client = _auth_client()
         resp = client.get("/health")
         assert resp.status_code == 200
         body = resp.json()
@@ -158,7 +162,6 @@ class TestReviewEndpoint:
         assert "detail" in body["vector_store"]
 
     def test_review_success_web_search_path(self):
-        from fastapi.testclient import TestClient
 
         with patch("main.get_cached_context", return_value=[]), \
              patch("main.USE_DEEP_RESEARCH", False), \
@@ -167,7 +170,7 @@ class TestReviewEndpoint:
              patch("main.set_cached_context"), \
              patch("main.run_crewai", return_value="【企業別レビュー報告書】\nレポート内容"):
 
-            client = TestClient(main.app)
+            client = _auth_client()
             resp = client.post("/resume/review", json={
                 "resume_text": "テスト経歴書の内容です。",
                 "company_name": "テスト株式会社",
@@ -180,14 +183,13 @@ class TestReviewEndpoint:
         assert len(body["report"]) > 0
 
     def test_review_uses_cache_on_second_call(self):
-        from fastapi.testclient import TestClient
 
         cached_docs = ["企業の採用価値観: チームワーク重視"]
 
         with patch("main.get_cached_context", return_value=cached_docs), \
              patch("main.run_crewai", return_value="キャッシュヒット時のレポート") as mock_crewai:
 
-            client = TestClient(main.app)
+            client = _auth_client()
             resp = client.post("/resume/review", json={
                 "resume_text": "経歴テスト",
                 "company_name": "キャッシュ企業",
@@ -201,14 +203,13 @@ class TestReviewEndpoint:
 
     def test_review_no_context_fallback(self):
         """Deep Research・Web Search 両方無効時もコンテキストなしでレポートを返す。"""
-        from fastapi.testclient import TestClient
 
         with patch("main.get_cached_context", return_value=[]), \
              patch("main.USE_DEEP_RESEARCH", False), \
              patch("main.ALLOW_WEB_SEARCH_FALLBACK", False), \
              patch("main.run_crewai", return_value="外部コンテキストなしのレポート") as mock_crewai:
 
-            client = TestClient(main.app)
+            client = _auth_client()
             resp = client.post("/resume/review", json={
                 "resume_text": "経歴テスト",
                 "company_name": "テスト企業",
@@ -220,7 +221,6 @@ class TestReviewEndpoint:
 
     def test_review_prefers_company_context_over_web_search(self):
         """Backend brief（company_context）があるとき Search しない。"""
-        from fastapi.testclient import TestClient
 
         with patch("main.get_cached_context", return_value=[]) as mock_cache, \
              patch("main.USE_DEEP_RESEARCH", True), \
@@ -229,7 +229,7 @@ class TestReviewEndpoint:
              patch("main.set_cached_context"), \
              patch("main.run_crewai", return_value="brief利用レポート") as mock_crewai:
 
-            client = TestClient(main.app)
+            client = _auth_client()
             resp = client.post("/resume/review", json={
                 "resume_text": "経歴テスト",
                 "company_name": "テスト企業",
@@ -244,8 +244,7 @@ class TestReviewEndpoint:
         assert call_kwargs.kwargs.get("context_docs") == ["企業名: テスト企業\n事業: SaaS"]
 
     def test_review_missing_resume_text(self):
-        from fastapi.testclient import TestClient
-        client = TestClient(main.app)
+        client = _auth_client()
         resp = client.post("/resume/review", json={
             "resume_text": "",
             "company_name": "テスト株式会社",
@@ -253,7 +252,6 @@ class TestReviewEndpoint:
         assert resp.status_code == 422
 
     def test_hints_skips_web_search_when_fallback_disabled(self):
-        from fastapi.testclient import TestClient
 
         with patch("main.get_cached_context", return_value=[]), \
              patch("main.ALLOW_WEB_SEARCH_FALLBACK", False), \
@@ -262,7 +260,7 @@ class TestReviewEndpoint:
                  style_tags=[], top_questions=[], cached=False
              )) as mock_parse:
 
-            client = TestClient(main.app)
+            client = _auth_client()
             resp = client.post("/company/hints", json={
                 "company_name": "テスト企業",
                 "position": "エンジニア",
@@ -273,8 +271,7 @@ class TestReviewEndpoint:
         mock_parse.assert_called_once()
 
     def test_review_missing_company_name(self):
-        from fastapi.testclient import TestClient
-        client = TestClient(main.app)
+        client = _auth_client()
         resp = client.post("/resume/review", json={
             "resume_text": "経歴テスト",
             "company_name": "",
@@ -286,12 +283,11 @@ class TestReviewEndpoint:
 class TestFailureCases:
     def test_chromadb_connection_failure_fallback(self):
         """ChromaDB 接続で例外が出てもエンドポイントが 200 を返すことを確認する。"""
-        from fastapi.testclient import TestClient
 
         with patch("main.get_cached_context", side_effect=Exception("ChromaDB connection failed")), \
              patch("main.run_crewai", return_value="外部依存失敗時のレポート") as mock_crewai:
 
-            client = TestClient(main.app)
+            client = _auth_client()
             resp = client.post("/resume/review", json={
                 "resume_text": "経歴テスト",
                 "company_name": "接続失敗企業",

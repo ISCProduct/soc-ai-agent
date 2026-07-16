@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/ragclient"
 	"bufio"
 	"bytes"
 	"context"
@@ -34,7 +35,7 @@ var ErrForbidden = errors.New("forbidden")
 
 // allowedMIMETypes はアップロード可能なファイルタイプ
 var allowedMIMETypes = map[string]bool{
-	"application/pdf":  true,
+	"application/pdf":    true,
 	"application/msword": true,
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
 }
@@ -58,7 +59,7 @@ func validateFileUpload(fileHeader *multipart.FileHeader) error {
 
 	magicOK := bytes.HasPrefix(buf, pdfMagicBytes) ||
 		bytes.HasPrefix(buf, []byte{0x50, 0x4B, 0x03, 0x04}) || // DOCX (ZIP)
-		bytes.HasPrefix(buf, []byte{0xD0, 0xCF, 0x11, 0xE0})     // DOC (OLE2)
+		bytes.HasPrefix(buf, []byte{0xD0, 0xCF, 0x11, 0xE0}) // DOC (OLE2)
 	if magicOK {
 		return nil
 	}
@@ -824,10 +825,10 @@ type aiReviewItem struct {
 }
 
 type ragReviewRequest struct {
-	ResumeText      string `json:"resume_text"`
-	CompanyName     string `json:"company_name"`
-	JobTitle        string `json:"job_title"`
-	CompanyContext  string `json:"company_context,omitempty"`
+	ResumeText     string `json:"resume_text"`
+	CompanyName    string `json:"company_name"`
+	JobTitle       string `json:"job_title"`
+	CompanyContext string `json:"company_context,omitempty"`
 }
 
 type ragReviewResponse struct {
@@ -859,6 +860,7 @@ func (s *ResumeService) fetchRAGReport(resumeText, companyName, jobTitle string)
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	ragclient.SetAuthHeader(req)
 
 	client := &http.Client{Timeout: 45 * time.Second}
 	resp, err := client.Do(req)
@@ -912,6 +914,7 @@ func (s *ResumeService) fetchRAGReportStream(ctx context.Context, resumeText, co
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
+	ragclient.SetAuthHeader(req)
 
 	// ストリーミングのためタイムアウトなし
 	resp, err := (&http.Client{}).Do(req)
