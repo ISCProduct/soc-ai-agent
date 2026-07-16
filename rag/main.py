@@ -1,6 +1,7 @@
 import asyncio
 import contextvars
 import datetime
+import hmac
 import json
 import logging
 import math
@@ -62,6 +63,34 @@ app = FastAPI()
 # Training export endpoints (registered from training_api.py)
 import training_api
 training_api.register(app)
+
+# ── 内部サービス認証 (#615) ──────────────────────────────────────────────────
+# Backend からの呼び出しのみを許可するため X-Internal-Token を検証する。
+# ヘルスチェックのみ除外。トークン未設定時はフェイルクローズ（503）で全リクエストを拒否する。
+INTERNAL_TOKEN_HEADER = "X-Internal-Token"
+_INTERNAL_AUTH_EXEMPT_PATHS = frozenset({"/health", "/healthz"})
+
+
+@app.middleware("http")
+async def _internal_auth_middleware(request: Request, call_next: Callable) -> Any:
+    if request.url.path in _INTERNAL_AUTH_EXEMPT_PATHS:
+        return await call_next(request)
+
+    expected = os.getenv("RAG_INTERNAL_TOKEN", "").strip()
+    if not expected:
+        logger.error("RAG_INTERNAL_TOKEN が未設定のためリクエストを拒否します（フェイルクローズ）")
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Service Unavailable: internal authentication not configured"},
+        )
+
+    provided = request.headers.get(INTERNAL_TOKEN_HEADER, "")
+    if not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
+        logger.warning("内部認証トークンが不正なリクエストを拒否しました path=%s", request.url.path)
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+    return await call_next(request)
+
 
 @app.middleware("http")
 async def _trace_id_middleware(request: Request, call_next: Callable) -> Any:

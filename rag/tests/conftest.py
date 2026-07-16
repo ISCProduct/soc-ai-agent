@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # テストで必要な環境変数を設定（テスト用ダミーキー）
 os.environ.setdefault("OPENAI_API_KEY", "sk-test")
+os.environ.setdefault("RAG_INTERNAL_TOKEN", "test-internal-token")
 
 # crewai をスタブ化（requirements.txt から除外済みのため、ローカルで未インストール）
 _crewai_mock = types.ModuleType("crewai")
@@ -38,8 +39,11 @@ import main
 
 @pytest.fixture
 def client():
-    """TestClient を返すフィクスチャ"""
-    return TestClient(main.app)
+    """TestClient を返すフィクスチャ（内部認証トークン付き #615）"""
+    return TestClient(
+        main.app,
+        headers={"X-Internal-Token": os.environ["RAG_INTERNAL_TOKEN"]},
+    )
 
 
 @pytest.fixture(autouse=True)
