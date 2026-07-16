@@ -86,3 +86,18 @@ func (s *S3UploadService) PresignGetURL(ctx context.Context, key string, expires
 	}
 	return req.URL, nil
 }
+
+// DeleteObject は S3 オブジェクトを削除する（退会時の PII 削除用）。
+func (s *S3UploadService) DeleteObject(ctx context.Context, key string) error {
+	if s == nil || s.client == nil {
+		return fmt.Errorf("s3 client not configured")
+	}
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("s3 delete: %w", err)
+	}
+	return nil
+}

@@ -29,6 +29,8 @@ func UserToEntity(m *models.User) *entity.User {
 		LastLoginAt:              m.LastLoginAt,
 		PasswordResetToken:       m.PasswordResetToken,
 		PasswordResetExpiresAt:   m.PasswordResetExpiresAt,
+		AllowCollectiveInsight:   m.AllowCollectiveInsight,
+		WithdrawnAt:              m.WithdrawnAt,
 		CreatedAt:                m.CreatedAt,
 		UpdatedAt:                m.UpdatedAt,
 	}
@@ -58,6 +60,8 @@ func UserFromEntity(e *entity.User) *models.User {
 		LastLoginAt:              e.LastLoginAt,
 		PasswordResetToken:       e.PasswordResetToken,
 		PasswordResetExpiresAt:   e.PasswordResetExpiresAt,
+		AllowCollectiveInsight:   e.AllowCollectiveInsight,
+		WithdrawnAt:              e.WithdrawnAt,
 		CreatedAt:                e.CreatedAt,
 		UpdatedAt:                e.UpdatedAt,
 	}

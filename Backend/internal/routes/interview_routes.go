@@ -2,13 +2,14 @@ package routes
 
 import (
 	"Backend/internal/controllers"
+	"Backend/internal/services"
 
 	"github.com/labstack/echo/v4"
 )
 
 // SetupInterviewRoutes 面接関連のルーティング設定
-func SetupInterviewRoutes(api *echo.Group, interviewController *controllers.InterviewController, realtimeController *controllers.RealtimeController, userSecret string) {
-	interviews := api.Group("/interviews", EchoUserAuth(userSecret))
+func SetupInterviewRoutes(api *echo.Group, interviewController *controllers.InterviewController, realtimeController *controllers.RealtimeController, userSecret string, access services.UserAccessGuard) {
+	interviews := api.Group("/interviews", EchoUserAuth(userSecret, access))
 	// /trend は /:id より先にEchoのルーターが解決するため先に登録する
 	interviews.GET("/trend", interviewController.GetTrend)
 	interviews.GET("", interviewController.List)
@@ -24,7 +25,7 @@ func SetupInterviewRoutes(api *echo.Group, interviewController *controllers.Inte
 	interviews.POST("/:id/turn", interviewController.Turn)
 	interviews.POST("/:id/start-turn", interviewController.StartTurn)
 
-	realtime := api.Group("/realtime", EchoUserAuth(userSecret))
+	realtime := api.Group("/realtime", EchoUserAuth(userSecret, access))
 	realtime.POST("/token", realtimeController.Token)
 	realtime.GET("/session-info", realtimeController.SessionInfo)
 }

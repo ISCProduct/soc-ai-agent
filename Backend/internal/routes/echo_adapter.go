@@ -3,7 +3,9 @@ package routes
 import (
 	"Backend/internal/middleware"
 	"Backend/internal/repositories"
+	"Backend/internal/services"
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -11,7 +13,12 @@ import (
 
 // EchoUserAuth はX-User-Token JWTを検証するEcho nativeミドルウェアを返す。
 // userSecret が未設定の場合はフェイルクローズ（503）として動作する。
-func EchoUserAuth(userSecret string) echo.MiddlewareFunc {
+// access が非 nil の場合、退会済みユーザーを遮断する。
+func EchoUserAuth(userSecret string, access ...services.UserAccessGuard) echo.MiddlewareFunc {
+	var guard services.UserAccessGuard
+	if len(access) > 0 {
+		guard = access[0]
+	}
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			if userSecret == "" {
@@ -25,7 +32,14 @@ func EchoUserAuth(userSecret string) echo.MiddlewareFunc {
 			if err != nil {
 				return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 			}
-			// ユーザーIDをリクエストコンテキストに保存
+			if guard != nil {
+				if err := guard.EnsureActiveUser(userID); err != nil {
+					if errors.Is(err, services.ErrAccountWithdrawn) {
+						return echo.NewHTTPError(http.StatusForbidden, "account has been withdrawn")
+					}
+					return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+				}
+			}
 			ctx := context.WithValue(c.Request().Context(), middleware.UserIDContextKey, userID)
 			c.SetRequest(c.Request().WithContext(ctx))
 			return next(c)

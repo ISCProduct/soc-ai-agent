@@ -72,7 +72,7 @@ func (r *UserRepository) ListUsersPaged(limit, offset int, query string) ([]enti
 	var ms []models.User
 	var total int64
 
-	q := r.db.Model(&models.User{})
+	q := r.db.Model(&models.User{}).Where("withdrawn_at IS NULL")
 	if query != "" {
 		like := "%" + query + "%"
 		q = q.Where("name LIKE ? OR email LIKE ? OR school_name LIKE ?", like, like, like)
