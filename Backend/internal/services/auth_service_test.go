@@ -54,6 +54,9 @@ func TestDeleteAccount_SoftWithdraw(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("UPDATE `users` SET").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	// リフレッシュトークンの全端末失効（#616）
+	mock.ExpectExec("UPDATE `user_refresh_tokens` SET").
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	if err := svc.DeleteAccount(1); err != nil {

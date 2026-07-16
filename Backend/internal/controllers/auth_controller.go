@@ -3,6 +3,7 @@ package controllers
 import (
 	"Backend/internal/services"
 	"Backend/internal/services/interfaces"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -220,4 +221,46 @@ func (c *AuthController) DeleteAccount(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{"message": "アカウントを退会処理しました"})
+}
+
+// refreshRequest はリフレッシュ/ログアウトのリクエストボディ (#616)
+type refreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+// Refresh リフレッシュトークンをローテーションして新しいトークンペアを返す
+// POST /api/auth/refresh
+func (c *AuthController) Refresh(ctx echo.Context) error {
+	var req refreshRequest
+	if err := ctx.Bind(&req); err != nil {
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+	}
+	if req.RefreshToken == "" {
+		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "refresh_token is required")
+	}
+
+	resp, err := c.authService.RefreshSession(req.RefreshToken)
+	if err != nil {
+		if errors.Is(err, services.ErrInvalidRefreshToken) {
+			return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "invalid refresh token")
+		}
+		return echoInternalError(err)
+	}
+
+	return ctx.JSON(http.StatusOK, resp)
+}
+
+// Logout リフレッシュトークンを失効させる
+// POST /api/auth/logout
+func (c *AuthController) Logout(ctx echo.Context) error {
+	var req refreshRequest
+	if err := ctx.Bind(&req); err != nil {
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+	}
+
+	if err := c.authService.LogoutSession(req.RefreshToken); err != nil {
+		return echoInternalError(err)
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]string{"message": "ログアウトしました"})
 }

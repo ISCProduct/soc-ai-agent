@@ -5,6 +5,7 @@ import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/ragclient"
 	"Backend/internal/scraper"
 	"bytes"
 	"context"
@@ -204,6 +205,7 @@ func (s *JobFetchService) pushContextToRAG(companyName, contextType, content str
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	ragclient.SetAuthHeader(req)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	req = req.WithContext(ctx)

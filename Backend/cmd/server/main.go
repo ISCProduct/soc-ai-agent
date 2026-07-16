@@ -11,6 +11,7 @@ import (
 	"Backend/internal/routes"
 	"Backend/internal/scraper"
 	"Backend/internal/services"
+	"Backend/migrations"
 	"log"
 	"log/slog"
 	"net/http"
@@ -124,8 +125,8 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// マイグレーション実行
-	if err := models.AutoMigrate(db); err != nil {
+	// マイグレーション実行（バージョン管理型・多重起動は GET_LOCK で排他される #614）
+	if err := migrations.Up(cfg.DSN()); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
 	slog.Info("Database migration completed")
@@ -204,9 +205,14 @@ func main() {
 	}
 	authService := services.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	authService.SetDB(db)
+	// リフレッシュトークン管理 (#616)
+	refreshTokenRepo := repositories.NewUserRefreshTokenRepository(db)
+	refreshTokenService := services.NewRefreshTokenService(refreshTokenRepo)
+	authService.SetRefreshTokenService(refreshTokenService)
 	skillScoreService := services.NewSkillScoreService(skillScoreRepo)
 	githubService := services.NewGitHubService(githubRepo, skillScoreService, aiClient)
 	oauthService := services.NewOAuthService(userRepo, oauthConfig, githubService)
+	oauthService.SetRefreshTokenService(refreshTokenService)
 	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 	matchingService := services.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)

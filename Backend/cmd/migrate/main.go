@@ -1,117 +1,146 @@
+// cmd/migrate はバージョン管理型DBマイグレーションのCLI (#614)
+//
+// Usage:
+//
+//	go run ./cmd/migrate            # up: 未適用のマイグレーションをすべて適用（デフォルト）
+//	go run ./cmd/migrate up         # 同上
+//	go run ./cmd/migrate down       # 直近のマイグレーションを1つロールバック
+//	go run ./cmd/migrate version    # 現在のバージョンと dirty フラグを表示
+//	go run ./cmd/migrate force <N>  # バージョンを強制設定（dirty 状態からの復旧用）
+//
+// SEED_DATA=true を指定すると up 実行後に初期データを投入する。
 package main
 
 import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
 	"Backend/internal/models"
+	"Backend/migrations"
 )
 
 func main() {
-	env := os.Getenv("APP_ENV")
+	loadEnv()
+	dsn := buildDSN()
 
-	if env != "production" {
-		// ローカル開発環境では .env ファイルを読み込む
-		envPaths := []string{
-			".env",
-			"../.env",
-			"../../.env",
+	cmd := "up"
+	if len(os.Args) > 1 {
+		cmd = os.Args[1]
+	}
+
+	switch cmd {
+	case "up":
+		log.Println("Applying migrations...")
+		if err := migrations.Up(dsn); err != nil {
+			log.Fatalf("Failed to apply migrations: %v", err)
 		}
+		log.Println("✓ Migrations applied successfully")
+		printVersion(dsn)
 
-		envLoaded := false
-		for _, envPath := range envPaths {
-			if err := godotenv.Load(envPath); err == nil {
-				log.Printf("Loaded .env file from: %s", envPath)
-				envLoaded = true
-				break
+		if os.Getenv("SEED_DATA") == "true" {
+			if err := runSeed(dsn); err != nil {
+				log.Fatalf("Failed to seed data: %v", err)
 			}
+			log.Println("✓ Data seeding completed successfully")
 		}
 
-		if !envLoaded {
-			log.Println("Warning: .env file not found. Skipping.")
+	case "down":
+		log.Println("Rolling back last migration...")
+		if err := migrations.Down(dsn); err != nil {
+			log.Fatalf("Failed to rollback: %v", err)
 		}
-	}
+		log.Println("✓ Rollback completed successfully")
+		printVersion(dsn)
 
-	// データベース接続
-	db, err := connectDB()
-	if err != nil {
-		log.Fatal("Failed to connect to database:", err)
-	}
+	case "version":
+		printVersion(dsn)
 
-	// マイグレーション実行
-	log.Println("Starting database migration...")
-
-	if err := models.AutoMigrate(db); err != nil {
-		log.Fatal("Failed to migrate database:", err)
-	}
-
-	// Ensure allowed_phases column exists for predefined_questions (backfill for older DBs)
-	if err := ensureAllowedPhasesColumn(db); err != nil {
-		log.Fatalf("Failed to ensure allowed_phases column: %v", err)
-	}
-
-	log.Println("✓ Database migration completed successfully")
-
-	// 初期データ投入(オプション)
-	if os.Getenv("SEED_DATA") == "true" {
-		log.Println("Seeding initial data...")
-		if err := seedData(db); err != nil {
-			log.Fatal("Failed to seed data:", err)
+	case "force":
+		if len(os.Args) < 3 {
+			log.Fatal("Usage: migrate force <version>")
 		}
-		// 追加: SeedData も呼び出す（その中で SeedPredefinedQuestions も呼ばれる）
-		if err := models.SeedData(db); err != nil {
-			log.Fatal("Failed to seed full data:", err)
+		v, err := strconv.Atoi(os.Args[2])
+		if err != nil {
+			log.Fatalf("Invalid version %q: %v", os.Args[2], err)
 		}
-		log.Println("✓ Data seeding completed successfully")
+		if err := migrations.Force(dsn, v); err != nil {
+			log.Fatalf("Failed to force version: %v", err)
+		}
+		log.Printf("✓ Forced version to %d", v)
+
+	default:
+		log.Fatalf("Unknown command %q (available: up, down, version, force)", cmd)
 	}
 }
 
-func connectDB() (*gorm.DB, error) {
-	// デフォルト値を設定
-	host := os.Getenv("DB_HOST")
-	if host == "" {
-		host = "localhost"
+func loadEnv() {
+	if os.Getenv("APP_ENV") == "production" {
+		return
 	}
-
-	port := os.Getenv("DB_PORT")
-	if port == "" {
-		port = "3306"
+	// ローカル開発環境では .env ファイルを読み込む
+	for _, envPath := range []string{".env", "../.env", "../../.env"} {
+		if err := godotenv.Load(envPath); err == nil {
+			log.Printf("Loaded .env file from: %s", envPath)
+			return
+		}
 	}
+	log.Println("Warning: .env file not found. Skipping.")
+}
 
+func buildDSN() string {
+	host := getEnv("DB_HOST", "localhost")
+	port := getEnv("DB_PORT", "3306")
 	user := os.Getenv("DB_USER")
 	if user == "" {
 		log.Fatal("DB_USER is required")
 	}
-
 	password := os.Getenv("DB_PASSWORD")
 	dbname := os.Getenv("DB_NAME")
 	if dbname == "" {
 		log.Fatal("DB_NAME is required")
 	}
 
-	log.Printf("Connecting to database: %s@tcp(%s:%s)/%s", user, host, port, dbname)
-
-	dsn := fmt.Sprintf(
+	log.Printf("Target database: %s@tcp(%s:%s)/%s", user, host, port, dbname)
+	return fmt.Sprintf(
 		"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-		user,
-		password,
-		host,
-		port,
-		dbname,
+		user, password, host, port, dbname,
 	)
+}
 
+func getEnv(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func printVersion(dsn string) {
+	version, dirty, err := migrations.Version(dsn)
+	if err != nil {
+		log.Fatalf("Failed to get version: %v", err)
+	}
+	log.Printf("Current version: %d (dirty: %v)", version, dirty)
+}
+
+// runSeed は初期データを投入する（スキーマ変更は行わない）
+func runSeed(dsn string) error {
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("シード用DB接続に失敗: %w", err)
 	}
 
-	log.Println("✓ Database connected successfully")
-	return db, nil
+	log.Println("Seeding initial data...")
+	if err := seedData(db); err != nil {
+		return err
+	}
+	// SeedData の中で SeedPredefinedQuestions も呼ばれる
+	return models.SeedData(db)
 }
 
 func seedData(db *gorm.DB) error {
@@ -170,61 +199,5 @@ func seedData(db *gorm.DB) error {
 		}
 	}
 
-	return nil
-}
-
-// ensureAllowedPhasesColumn checks if the predefined_questions.allowed_phases column exists; if not, it adds it.
-func ensureAllowedPhasesColumn(db *gorm.DB) error {
-	var count int64
-	// Query information_schema for the column
-	err := db.Raw("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'predefined_questions' AND COLUMN_NAME = 'allowed_phases'").Scan(&count).Error
-	if err != nil {
-		return err
-	}
-	if count == 0 {
-		log.Println("allowed_phases column not found, adding column...")
-		// Add JSON column (nullable)
-		if err := db.Exec("ALTER TABLE predefined_questions ADD COLUMN allowed_phases JSON NULL").Error; err != nil {
-			return err
-		}
-		log.Println("added allowed_phases column to predefined_questions")
-	} else {
-		log.Println("allowed_phases column already exists, skipping")
-	}
-	// Backfill default allowed_phases for existing rows where null or empty
-	if err := backfillAllowedPhases(db); err != nil {
-		return err
-	}
-	return nil
-}
-
-// backfillAllowedPhases sets a sensible default for existing rows where allowed_phases is NULL or empty
-func backfillAllowedPhases(db *gorm.DB) error {
-	// default phases: all four phases
-	defaultJSON := "[\"job_analysis\",\"interest_analysis\",\"aptitude_analysis\",\"future_analysis\"]"
-
-	var before int64
-	err := db.Raw("SELECT COUNT(*) FROM predefined_questions WHERE allowed_phases IS NULL OR allowed_phases = ''").Scan(&before).Error
-	if err != nil {
-		return err
-	}
-	log.Printf("predefined_questions rows needing backfill: %d", before)
-
-	if before > 0 {
-		res := db.Exec("UPDATE predefined_questions SET allowed_phases = ? WHERE allowed_phases IS NULL OR allowed_phases = ''", defaultJSON)
-		if res.Error != nil {
-			return res.Error
-		}
-		log.Printf("backfilled allowed_phases for %d rows", res.RowsAffected)
-	} else {
-		log.Println("no backfill needed for predefined_questions")
-	}
-
-	var after int64
-	err = db.Raw("SELECT COUNT(*) FROM predefined_questions WHERE allowed_phases IS NULL OR allowed_phases = ''").Scan(&after).Error
-	if err != nil {
-		return err
-	}
-	log.Printf("remaining rows with empty allowed_phases: %d", after)
 	return nil
 }

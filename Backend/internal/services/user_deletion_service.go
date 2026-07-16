@@ -115,7 +115,14 @@ func (s *UserDeletionService) DeleteUser(userID uint, actor UserDeletionActor) e
 		user.EmailVerificationToken = ""
 		user.PasswordResetToken = ""
 		user.IsAdmin = false
-		return tx.Save(&user).Error
+		if err := tx.Save(&user).Error; err != nil {
+			return err
+		}
+
+		// 全端末のリフレッシュトークンを即時失効させる（self/admin 両経路 #616）
+		return tx.Model(&models.UserRefreshToken{}).
+			Where("user_id = ? AND revoked_at IS NULL", userID).
+			Update("revoked_at", now).Error
 	})
 	if err != nil {
 		return err
@@ -229,6 +236,11 @@ func hardDeleteUserData(tx *gorm.DB, userID uint) error {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
 		}
+		return err
+	}
+
+	// リフレッシュトークンを削除（#616）
+	if err := tx.Where("user_id = ?", userID).Delete(&models.UserRefreshToken{}).Error; err != nil {
 		return err
 	}
 

@@ -24,13 +24,14 @@ import (
 const bcryptCost = 12
 
 type AuthService struct {
-	userRepo     repository.UserRepository
-	pendingRepo  repository.PendingRegistrationRepository
-	emailService *EmailService
-	db           *gorm.DB
-	object       ObjectDeleter
-	audit        auditRecorder
-	deletion     *UserDeletionService
+	userRepo      repository.UserRepository
+	pendingRepo   repository.PendingRegistrationRepository
+	emailService  *EmailService
+	db            *gorm.DB
+	object        ObjectDeleter
+	audit         auditRecorder
+	deletion      *UserDeletionService
+	refreshTokens *RefreshTokenService
 }
 
 func NewAuthService(userRepo repository.UserRepository, pendingRepo repository.PendingRegistrationRepository, emailService *EmailService) *AuthService {
@@ -63,6 +64,24 @@ func (s *AuthService) rebuildDeletionService() {
 	s.deletion = NewUserDeletionService(s.db, s.object, s.audit)
 }
 
+// SetRefreshTokenService はリフレッシュトークン管理サービスを注入する (#616)
+func (s *AuthService) SetRefreshTokenService(rts *RefreshTokenService) {
+	s.refreshTokens = rts
+}
+
+// issueRefreshToken はリフレッシュトークンを発行する（サービス未注入時は空文字を返す）
+func (s *AuthService) issueRefreshToken(userID uint) string {
+	if s.refreshTokens == nil {
+		return ""
+	}
+	token, err := s.refreshTokens.Issue(userID)
+	if err != nil {
+		log.Printf("refresh token issue failed user_id=%d error=%v", userID, err)
+		return ""
+	}
+	return token
+}
+
 // DeleteAccount ユーザーアカウントとその全データを削除する（個人情報保護法第28条対応）
 func (s *AuthService) DeleteAccount(userID uint) error {
 	if s.deletion == nil {
@@ -71,6 +90,7 @@ func (s *AuthService) DeleteAccount(userID uint) error {
 	if s.deletion == nil {
 		return errors.New("database not configured")
 	}
+	// リフレッシュトークンの失効は DeleteUser のトランザクション内で行われる (#616)
 	return s.deletion.DeleteUser(userID, UserDeletionActor{Kind: "self"})
 }
 
@@ -199,7 +219,8 @@ type AuthResponse struct {
 	AvatarURL                string `json:"avatar_url,omitempty"`
 	OAuthProvider            string `json:"oauth_provider,omitempty"` // OAuth連携プロバイダ
 	Token                    string `json:"token,omitempty"`          // 管理者トークン（管理者ユーザーのみ）
-	UserToken                string `json:"user_token,omitempty"`     // ユーザー認証トークン（全ユーザー）
+	UserToken                string `json:"user_token,omitempty"`     // ユーザー認証トークン（全ユーザー・短TTL）
+	RefreshToken             string `json:"refresh_token,omitempty"`  // リフレッシュトークン (#616)
 	EmailVerified            bool   `json:"email_verified"`
 	RequiresReVerification   bool   `json:"requires_re_verification,omitempty"`
 }
@@ -448,6 +469,7 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 	// 全ユーザーにユーザー認証トークンを付与する
 	if userSecret != "" {
 		resp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, userSecret)
+		resp.RefreshToken = s.issueRefreshToken(user.ID)
 	}
 	return resp, nil
 }
@@ -489,8 +511,52 @@ func (s *AuthService) CreateGuestUser() (*AuthResponse, error) {
 	userSecret := os.Getenv("USER_SECRET")
 	if userSecret != "" {
 		resp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, userSecret)
+		resp.RefreshToken = s.issueRefreshToken(user.ID)
 	}
 	return resp, nil
+}
+
+// RefreshSession はリフレッシュトークンをローテーションし、新しいトークンペアを返す (#616)
+func (s *AuthService) RefreshSession(refreshToken string) (*AuthResponse, error) {
+	if s.refreshTokens == nil {
+		return nil, errors.New("refresh token service not configured")
+	}
+	userSecret := os.Getenv("USER_SECRET")
+	if userSecret == "" {
+		return nil, errors.New("USER_SECRET is not configured")
+	}
+
+	userID, newRefreshToken, err := s.refreshTokens.Rotate(refreshToken)
+	if err != nil {
+		return nil, err
+	}
+
+	user, err := s.userRepo.GetUserByID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+	// 退会済みユーザーはリフレッシュ不可 (#613)
+	if user == nil || user.IsWithdrawn() {
+		return nil, ErrInvalidRefreshToken
+	}
+
+	return &AuthResponse{
+		UserID:       user.ID,
+		Email:        user.Email,
+		Name:         user.Name,
+		IsGuest:      user.IsGuest,
+		IsAdmin:      user.IsAdmin,
+		UserToken:    middleware.GenerateUserToken(user.ID, user.Email, userSecret),
+		RefreshToken: newRefreshToken,
+	}, nil
+}
+
+// LogoutSession はリフレッシュトークンを失効させる (#616)
+func (s *AuthService) LogoutSession(refreshToken string) error {
+	if s.refreshTokens == nil || refreshToken == "" {
+		return nil
+	}
+	return s.refreshTokens.Revoke(refreshToken)
 }
 
 // GetUser ユーザー情報取得
@@ -620,7 +686,17 @@ func (s *AuthService) ResetPassword(token, newPassword string) error {
 	user.PasswordResetToken = ""
 	user.PasswordResetExpiresAt = nil
 
-	return s.userRepo.UpdateUser(user)
+	if err := s.userRepo.UpdateUser(user); err != nil {
+		return err
+	}
+
+	// パスワード変更時は全端末のリフレッシュトークンを失効させる (#616)
+	if s.refreshTokens != nil {
+		if err := s.refreshTokens.RevokeAllForUser(user.ID); err != nil {
+			log.Printf("refresh token revoke all failed user_id=%d error=%v", user.ID, err)
+		}
+	}
+	return nil
 }
 
 // VerifyEmail トークンを検証してメールを認証済みにする（#330: 有効期限チェック追加）

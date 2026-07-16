@@ -21,6 +21,25 @@ type OAuthService struct {
 	userRepo      repository.UserRepository
 	oauthConfig   *config.OAuthConfig
 	githubService *GitHubService
+	refreshTokens *RefreshTokenService
+}
+
+// SetRefreshTokenService はリフレッシュトークン管理サービスを注入する (#616)
+func (s *OAuthService) SetRefreshTokenService(rts *RefreshTokenService) {
+	s.refreshTokens = rts
+}
+
+// issueRefreshToken はリフレッシュトークンを発行する（サービス未注入時は空文字を返す）
+func (s *OAuthService) issueRefreshToken(userID uint) string {
+	if s.refreshTokens == nil {
+		return ""
+	}
+	token, err := s.refreshTokens.Issue(userID)
+	if err != nil {
+		log.Printf("refresh token issue failed user_id=%d error=%v", userID, err)
+		return ""
+	}
+	return token
 }
 
 func NewOAuthService(userRepo repository.UserRepository, oauthConfig *config.OAuthConfig, githubService *GitHubService) *OAuthService {
@@ -156,6 +175,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 	}
 	if userSecret := os.Getenv("USER_SECRET"); userSecret != "" {
 		authResp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, userSecret)
+		authResp.RefreshToken = s.issueRefreshToken(user.ID)
 	}
 	return authResp, nil
 }
@@ -278,6 +298,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 	}
 	if userSecret := os.Getenv("USER_SECRET"); userSecret != "" {
 		authResp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, userSecret)
+		authResp.RefreshToken = s.issueRefreshToken(user.ID)
 	}
 	if user.IsAdmin {
 		if adminSecret := os.Getenv("ADMIN_SECRET"); adminSecret != "" {
