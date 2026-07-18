@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Box,
   Button,
@@ -16,7 +16,9 @@ import {
   Card,
   CardContent,
   Chip,
+  IconButton,
 } from '@mui/material'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService } from '@/lib/auth'
 import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
 
@@ -55,6 +57,7 @@ const severityConfig: Record<string, { color: 'error' | 'warning' | 'info'; labe
 }
 
 function ResumeContent() {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const [userId, setUserId] = useState('')
   const [sessionId, setSessionId] = useState('')
@@ -388,9 +391,19 @@ function ResumeContent() {
 
   return (
     <Box sx={{ p: { xs: 2, sm: 4 }, maxWidth: 900, mx: 'auto' }}>
-      <Typography variant="h4" fontWeight="bold" gutterBottom sx={{ fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>
-        履歴書・エントリシート レビュー
-      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+        <IconButton
+          onClick={() => router.back()}
+          size="small"
+          aria-label="前のページに戻る"
+          sx={{ bgcolor: '#f1f5f9', color: '#475569' }}
+        >
+          <ArrowBackIcon />
+        </IconButton>
+        <Typography variant="h4" fontWeight="bold" sx={{ fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>
+          履歴書・エントリシート レビュー
+        </Typography>
+      </Box>
       <Typography variant="body1" color="text.secondary" sx={{ mb: prefilledCompany ? 1.5 : 3 }}>
         PDF/DOCX/Google Docsをアップロードして、注釈付きPDFを生成します。
       </Typography>
