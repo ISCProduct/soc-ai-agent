@@ -12,6 +12,7 @@ func UserToEntity(m *models.User) *entity.User {
 	}
 	return &entity.User{
 		ID:                       m.ID,
+		OrganizationID:           m.OrganizationID,
 		Email:                    m.Email,
 		Password:                 m.Password,
 		Name:                     m.Name,
@@ -43,6 +44,7 @@ func UserFromEntity(e *entity.User) *models.User {
 	}
 	return &models.User{
 		ID:                       e.ID,
+		OrganizationID:           e.OrganizationID,
 		Email:                    e.Email,
 		Password:                 e.Password,
 		Name:                     e.Name,

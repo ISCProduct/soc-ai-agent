@@ -17,6 +17,9 @@ func NewInterviewVideoRepository(db *gorm.DB) *InterviewVideoRepository {
 }
 
 func (r *InterviewVideoRepository) Create(ctx context.Context, v *models.InterviewVideo) error {
+	if err := fillOrganizationID(r.db, v.UserID, &v.OrganizationID); err != nil {
+		return err
+	}
 	return r.db.WithContext(ctx).Create(v).Error
 }
 

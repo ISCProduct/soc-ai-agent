@@ -5,6 +5,7 @@ import "time"
 // ChatMessage チャット履歴を保存
 type ChatMessage struct {
 	ID               uint      `gorm:"primaryKey" json:"id"`
+	OrganizationID   uint      `gorm:"not null;index;column:organization_id" json:"organization_id"`
 	SessionID        string    `gorm:"size:100;not null;index" json:"session_id"`
 	UserID           uint      `gorm:"not null;index" json:"user_id"`
 	Role             string    `gorm:"size:20;not null" json:"role"` // "user" or "assistant"

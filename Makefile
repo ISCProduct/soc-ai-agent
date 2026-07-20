@@ -11,6 +11,7 @@ help:
 
 core-up:
 	docker compose up -d --build db app frontend
+	@echo "Migrations run automatically via app entrypoint (see Backend/scripts/docker-entrypoint.dev.sh)"
 
 rag-up:
 	./scripts/dev-rag-up.sh

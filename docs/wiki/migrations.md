@@ -9,14 +9,37 @@ GORM AutoMigrate は廃止済みで、**スキーマ変更は必ず `Backend/mig
 - サーバー起動時に未適用のマイグレーションが自動適用される（MySQLの `GET_LOCK` により複数インスタンスの同時起動でも安全）
 - 適用状態は `schema_migrations` テーブルで管理される
 
-## コマンド
+## Docker Compose での自動適用
+
+ローカル開発（`compose.yml`）では `app` コンテナ起動時に
+
+`Backend/scripts/docker-entrypoint.dev.sh` → `go run ./cmd/migrate up` → `air`
+
+の順でマイグレーションが自動実行されます。
+
+```bash
+docker compose up -d --build db app frontend
+# または
+make core-up
+```
+
+dirty 状態で止まっている場合も、当該バージョンのスキーマが揃っていれば自動修復して続行します。
+手動確認は次のとおりです。
+
+```bash
+docker compose --profile tools run --rm migrate
+# またはコンテナ内
+docker compose exec app go run ./cmd/migrate version
+```
+
+## コマンド（ホストから直接）
 
 ```bash
 cd Backend
-go run ./cmd/migrate            # up: 未適用のマイグレーションをすべて適用（デフォルト）
-go run ./cmd/migrate down       # 直近のマイグレーションを1つロールバック
-go run ./cmd/migrate version    # 現在のバージョンと dirty フラグを表示
-go run ./cmd/migrate force <N>  # バージョンを強制設定（dirty 復旧用・通常は使わない）
+DB_HOST=127.0.0.1 go run ./cmd/migrate            # up: 未適用のマイグレーションをすべて適用（デフォルト）
+DB_HOST=127.0.0.1 go run ./cmd/migrate down       # 直近のマイグレーションを1つロールバック
+DB_HOST=127.0.0.1 go run ./cmd/migrate version    # 現在のバージョンと dirty フラグを表示
+DB_HOST=127.0.0.1 go run ./cmd/migrate force <N>  # バージョンを強制設定（dirty 復旧用・通常は使わない）
 ```
 
 `SEED_DATA=true go run ./cmd/migrate` で up 後に初期データを投入します。
@@ -84,3 +107,13 @@ go run ./cmd/migrate force 1   # version 2 を取り消した状態に補修し�
 `000001_init_schema.up.sql` は、AutoMigrate廃止時点（2026-07-15）のモデル定義を
 空のMySQL 8.0に適用し `mysqldump --no-data` から整形して生成したものです（63テーブル）。
 以後のスキーマ変更はすべて `000002` 以降の差分ファイルで行います。
+
+## マイグレーション一覧
+
+| Version | 内容 |
+|---------|------|
+| 1 | 初期スキーマスナップショット |
+| 2 | `user_refresh_tokens` |
+| 3 | 退会（`withdrawn_at` / `withdrawn_users`） |
+| 4 | マルチテナント（`organizations` / memberships / 主要テーブルの `organization_id`）→ [multitenancy.md](./multitenancy.md) |
+| 5 | 主要テーブル `organization_id` への FK 制約 |

@@ -189,9 +189,10 @@ func TestCreateGuest_Integration(t *testing.T) {
 	db, mock := newIntegrationDB(t)
 	authController := newAuthController(t, db)
 
-	// CreateUser: INSERT INTO users
+	// CreateUser: INSERT INTO users + organization_memberships
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO `users`").WillReturnResult(sqlmock.NewResult(42, 1))
+	mock.ExpectExec("INSERT INTO `organization_memberships`").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/guest", nil)

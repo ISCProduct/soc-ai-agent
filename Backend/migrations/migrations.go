@@ -10,6 +10,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/golang-migrate/migrate/v4"
 	migratemysql "github.com/golang-migrate/migrate/v4/database/mysql"
@@ -53,7 +54,13 @@ func New(db *sql.DB) (*migrate.Migrate, error) {
 // Up は未適用のマイグレーションをすべて適用する。
 // AutoMigrate 時代に構築された既存DBは、初期スナップショット(version 1)を
 // 適用済みとして記録（ベースライン）してから差分のみ適用する。
+// dirty かつ当該バージョンのスキーマが揃っている場合は自動修復して再試行する
+// （Docker Compose 起動時の途中失敗からの復旧用）。
 func Up(dsn string) error {
+	return up(dsn, true)
+}
+
+func up(dsn string, allowDirtyRepair bool) error {
 	db, err := Open(dsn)
 	if err != nil {
 		return err
@@ -69,6 +76,17 @@ func Up(dsn string) error {
 		return err
 	}
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		var dirtyErr migrate.ErrDirty
+		if allowDirtyRepair && errors.As(err, &dirtyErr) {
+			repaired, rerr := repairDirtyIfSafe(db, dirtyErr.Version)
+			if rerr != nil {
+				return fmt.Errorf("マイグレーション dirty 修復に失敗 (version %d): %w", dirtyErr.Version, rerr)
+			}
+			if repaired {
+				log.Printf("[migrations] dirty version %d をスキーマ確認のうえ修復し、再適用します", dirtyErr.Version)
+				return up(dsn, false)
+			}
+		}
 		return fmt.Errorf("マイグレーション適用に失敗: %w", err)
 	}
 	return nil
@@ -154,6 +172,99 @@ func ensureBaseline(db *sql.DB) error {
 		return fmt.Errorf("既存DBのベースライン記録に失敗: %w", err)
 	}
 	return nil
+}
+
+// repairDirtyIfSafe は dirty バージョンのスキーマが揃っているときだけ Force で dirty を解除する。
+// 途中失敗（テーブル欠落）の場合は修復せず false を返す。
+func repairDirtyIfSafe(db *sql.DB, version int) (bool, error) {
+	ok, err := versionLooksApplied(db, version)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil
+	}
+	m, err := New(db)
+	if err != nil {
+		return false, err
+	}
+	if err := m.Force(version); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// versionLooksApplied は各マイグレーション完了の目印となるオブジェクトの有無を確認する。
+// 部分適用を完了扱いしないよう、version 4 は関連テーブル／列まで確認する。
+func versionLooksApplied(db *sql.DB, version int) (bool, error) {
+	switch version {
+	case 1:
+		return tableExists(db, "users")
+	case 2:
+		return tableExists(db, "user_refresh_tokens")
+	case 3:
+		return tableExists(db, "withdrawn_users")
+	case 4:
+		checks := []struct {
+			table  string
+			column string
+		}{
+			{"organizations", ""},
+			{"organization_memberships", ""},
+			{"users", "organization_id"},
+			{"chat_messages", "organization_id"},
+			{"user_weight_scores", "organization_id"},
+			{"interview_sessions", "organization_id"},
+			{"interview_videos", "organization_id"},
+			{"resume_documents", "organization_id"},
+		}
+		for _, c := range checks {
+			ok, err := tableExists(db, c.table)
+			if err != nil || !ok {
+				return ok, err
+			}
+			if c.column != "" {
+				ok, err = columnExists(db, c.table, c.column)
+				if err != nil || !ok {
+					return ok, err
+				}
+			}
+		}
+		return true, nil
+	case 5:
+		// FK 制約は information_schema で確認（テーブル/列は version 4 で保証済み）
+		return foreignKeyExists(db, "chat_messages", "fk_chat_messages_organization")
+	default:
+		// 未知バージョンは自動修復しない
+		return false, nil
+	}
+}
+
+// foreignKeyExists は指定名の外部キーが存在するか確認する。
+func foreignKeyExists(db *sql.DB, table, constraint string) (bool, error) {
+	var count int
+	err := db.QueryRow(
+		`SELECT COUNT(*) FROM information_schema.table_constraints
+		 WHERE table_schema = DATABASE() AND table_name = ? AND constraint_name = ? AND constraint_type = 'FOREIGN KEY'`,
+		table, constraint,
+	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("FK存在確認に失敗 (%s.%s): %w", table, constraint, err)
+	}
+	return count > 0, nil
+}
+
+// columnExists は現在のデータベースに列が存在するか確認する
+func columnExists(db *sql.DB, table, column string) (bool, error) {
+	var count int
+	err := db.QueryRow(
+		"SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?",
+		table, column,
+	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("列存在確認に失敗 (%s.%s): %w", table, column, err)
+	}
+	return count > 0, nil
 }
 
 // tableExists は現在のデータベースにテーブルが存在するか確認する

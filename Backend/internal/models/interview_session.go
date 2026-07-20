@@ -5,6 +5,7 @@ import "time"
 // InterviewSession 面接セッション
 type InterviewSession struct {
 	ID                uint       `gorm:"primaryKey"`
+	OrganizationID    uint       `gorm:"not null;index;column:organization_id" json:"organization_id"`
 	UserID            uint       `gorm:"index;not null"`
 	Status            string     `gorm:"size:32;index;not null"`
 	Language          string     `gorm:"size:16;not null;default:'ja'"`

@@ -10,7 +10,7 @@ import (
 )
 
 // SetupAuthRoutes 認証関連のルーティング設定
-func SetupAuthRoutes(api *echo.Group, authController *controllers.AuthController, oauthController *controllers.OAuthController, userSecret string, access services.UserAccessGuard) {
+func SetupAuthRoutes(api *echo.Group, authController *controllers.AuthController, oauthController *controllers.OAuthController, userSecret string, access services.UserAccessGuard, orgs OrganizationIDResolver) {
 	auth := api.Group("/auth")
 
 	// 認証不要エンドポイント
@@ -32,14 +32,14 @@ func SetupAuthRoutes(api *echo.Group, authController *controllers.AuthController
 	auth.GET("/github/callback", oauthController.GitHubCallback)
 
 	// 認証必須エンドポイント（X-User-Token JWTヘッダーが必要）
-	authProtected := api.Group("/auth", EchoUserAuth(userSecret, access))
+	authProtected := api.Group("/auth", EchoUserAuth(userSecret, access, orgs))
 	authProtected.GET("/user", authController.GetUser)
 	authProtected.PUT("/profile", authController.UpdateProfile)
 	authProtected.POST("/profile", authController.UpdateProfile) // POST互換（旧クライアント対応）
 	authProtected.DELETE("/account", authController.DeleteAccount)
 
 	// Issue #613: 明示的な本人退会パス（/api/auth/account と同等）
-	users := api.Group("/users", EchoUserAuth(userSecret, access))
+	users := api.Group("/users", EchoUserAuth(userSecret, access, orgs))
 	users.DELETE("/me", authController.DeleteAccount)
 }
 

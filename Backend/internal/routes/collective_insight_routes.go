@@ -7,8 +7,8 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-func SetupCollectiveInsightRoutes(api *echo.Group, controller *controllers.CollectiveInsightController, userSecret string, access services.UserAccessGuard) {
-	ci := api.Group("/collective-insights", EchoUserAuth(userSecret, access))
+func SetupCollectiveInsightRoutes(api *echo.Group, controller *controllers.CollectiveInsightController, userSecret string, access services.UserAccessGuard, orgs OrganizationIDResolver) {
+	ci := api.Group("/collective-insights", EchoUserAuth(userSecret, access, orgs))
 	ci.GET("/recommendations", controller.GetRecommendations)
 	ci.GET("/top-companies", controller.GetTopPassRateCompanies)
 	ci.PUT("/consent", controller.UpdateConsent)

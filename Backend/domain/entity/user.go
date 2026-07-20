@@ -5,6 +5,7 @@ import "time"
 // User ドメインエンティティ（GORM依存なし）
 type User struct {
 	ID                       uint
+	OrganizationID           uint
 	Email                    string
 	Password                 string
 	Name                     string

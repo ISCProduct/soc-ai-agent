@@ -5,6 +5,7 @@ import "time"
 // User ユーザー情報
 type User struct {
 	ID                       uint   `gorm:"primaryKey"`
+	OrganizationID           uint   `gorm:"not null;index;default:1;column:organization_id" json:"organization_id"`
 	Email                    string `gorm:"size:255;uniqueIndex;not null"`
 	Password                 string `gorm:"size:255"` // ハッシュ化されたパスワード (OAuth時は空)
 	Name                     string `gorm:"size:100"`

@@ -8,6 +8,14 @@ import (
 type contextKey string
 
 const UserIDContextKey contextKey = "userID"
+const OrganizationIDContextKey contextKey = "organizationID"
+
+// OrganizationIDFromContext はコンテキストから組織IDを取り出す。
+func OrganizationIDFromContext(ctx context.Context) (uint, bool) {
+	v := ctx.Value(OrganizationIDContextKey)
+	id, ok := v.(uint)
+	return id, ok && id > 0
+}
 
 // GenerateUserToken はJWTユーザートークンを生成する
 func GenerateUserToken(userID uint, email, secret string) string {
