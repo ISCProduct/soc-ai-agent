@@ -5,6 +5,7 @@ services:
       context: ./Backend
       dockerfile: Dockerfile
     container_name: soc-ai-agent-backend
+    restart: unless-stopped
     ports:
       - "${HOST_PORT:-8080}:8080"
     volumes:
@@ -60,6 +61,7 @@ services:
   db:
     image: mysql:8.0
     container_name: soc-ai-db
+    restart: unless-stopped
     ports:
       - "${DB_HOST_BIND:-127.0.0.1}:3306:3306"
     env_file:
@@ -92,7 +94,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: soc-ai-agent-frontend
-    restart: 'always'
+    restart: unless-stopped
     volumes:
       - ./frontend:/app
       - /app/node_modules
