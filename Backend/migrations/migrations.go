@@ -10,6 +10,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/golang-migrate/migrate/v4"
 	migratemysql "github.com/golang-migrate/migrate/v4/database/mysql"
@@ -53,7 +54,13 @@ func New(db *sql.DB) (*migrate.Migrate, error) {
 // Up は未適用のマイグレーションをすべて適用する。
 // AutoMigrate 時代に構築された既存DBは、初期スナップショット(version 1)を
 // 適用済みとして記録（ベースライン）してから差分のみ適用する。
+// dirty かつ当該バージョンのスキーマが揃っている場合は自動修復して再試行する
+// （Docker Compose 起動時の途中失敗からの復旧用）。
 func Up(dsn string) error {
+	return up(dsn, true)
+}
+
+func up(dsn string, allowDirtyRepair bool) error {
 	db, err := Open(dsn)
 	if err != nil {
 		return err
@@ -69,6 +76,17 @@ func Up(dsn string) error {
 		return err
 	}
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		var dirtyErr migrate.ErrDirty
+		if allowDirtyRepair && errors.As(err, &dirtyErr) {
+			repaired, rerr := repairDirtyIfSafe(db, dirtyErr.Version)
+			if rerr != nil {
+				return fmt.Errorf("マイグレーション dirty 修復に失敗 (version %d): %w", dirtyErr.Version, rerr)
+			}
+			if repaired {
+				log.Printf("[migrations] dirty version %d をスキーマ確認のうえ修復し、再適用します", dirtyErr.Version)
+				return up(dsn, false)
+			}
+		}
 		return fmt.Errorf("マイグレーション適用に失敗: %w", err)
 	}
 	return nil
@@ -154,6 +172,43 @@ func ensureBaseline(db *sql.DB) error {
 		return fmt.Errorf("既存DBのベースライン記録に失敗: %w", err)
 	}
 	return nil
+}
+
+// repairDirtyIfSafe は dirty バージョンのスキーマが揃っているときだけ Force で dirty を解除する。
+// 途中失敗（テーブル欠落）の場合は修復せず false を返す。
+func repairDirtyIfSafe(db *sql.DB, version int) (bool, error) {
+	ok, err := versionLooksApplied(db, version)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil
+	}
+	m, err := New(db)
+	if err != nil {
+		return false, err
+	}
+	if err := m.Force(version); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// versionLooksApplied は各マイグレーション完了の目印となるオブジェクトの有無を確認する。
+func versionLooksApplied(db *sql.DB, version int) (bool, error) {
+	switch version {
+	case 1:
+		return tableExists(db, "users")
+	case 2:
+		return tableExists(db, "user_refresh_tokens")
+	case 3:
+		return tableExists(db, "withdrawn_users")
+	case 4:
+		return tableExists(db, "organizations")
+	default:
+		// 未知バージョンは自動修復しない
+		return false, nil
+	}
 }
 
 // tableExists は現在のデータベースにテーブルが存在するか確認する
