@@ -323,6 +323,10 @@ func hardDeleteUserData(tx *gorm.DB, userID uint) error {
 			return err
 		}
 	}
+	// organization_memberships は users への FK があるため、ユーザー削除前に除去する
+	if err := tx.Where("user_id = ?", userID).Delete(&models.OrganizationMembership{}).Error; err != nil {
+		return err
+	}
 	if err := tx.Where("anonymous_user_id = ?", collectiveAnonymousHash(userID)).Delete(&models.CollectiveInsightLog{}).Error; err != nil {
 		return err
 	}

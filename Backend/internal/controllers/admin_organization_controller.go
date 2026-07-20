@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -50,7 +49,7 @@ func (c *AdminOrganizationController) List(ctx echo.Context) error {
 	}
 	orgs, total, err := c.orgs.List(limit, offset)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list organizations")
+		return echoInternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"organizations": orgs,
@@ -77,7 +76,7 @@ func (c *AdminOrganizationController) Create(ctx echo.Context) error {
 func (c *AdminOrganizationController) Get(ctx echo.Context) error {
 	id, err := echoUintParam(ctx, "id")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid organization id")
+		return err
 	}
 	org, err := c.orgs.Get(id)
 	if err != nil {
@@ -90,7 +89,7 @@ func (c *AdminOrganizationController) Get(ctx echo.Context) error {
 func (c *AdminOrganizationController) Update(ctx echo.Context) error {
 	id, err := echoUintParam(ctx, "id")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid organization id")
+		return err
 	}
 	var req updateOrganizationRequest
 	if err := ctx.Bind(&req); err != nil {
@@ -107,7 +106,7 @@ func (c *AdminOrganizationController) Update(ctx echo.Context) error {
 func (c *AdminOrganizationController) ListMembers(ctx echo.Context) error {
 	id, err := echoUintParam(ctx, "id")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid organization id")
+		return err
 	}
 	members, err := c.orgs.ListMembers(id)
 	if err != nil {
@@ -120,7 +119,7 @@ func (c *AdminOrganizationController) ListMembers(ctx echo.Context) error {
 func (c *AdminOrganizationController) AddMember(ctx echo.Context) error {
 	id, err := echoUintParam(ctx, "id")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid organization id")
+		return err
 	}
 	var req addMemberRequest
 	if err := ctx.Bind(&req); err != nil {
@@ -144,11 +143,11 @@ func (c *AdminOrganizationController) AddMember(ctx echo.Context) error {
 func (c *AdminOrganizationController) UpdateMember(ctx echo.Context) error {
 	orgID, err := echoUintParam(ctx, "id")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid organization id")
+		return err
 	}
 	userID, err := echoUintParam(ctx, "user_id")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid user id")
+		return err
 	}
 	var req updateMemberRequest
 	if err := ctx.Bind(&req); err != nil {
@@ -165,11 +164,11 @@ func (c *AdminOrganizationController) UpdateMember(ctx echo.Context) error {
 func (c *AdminOrganizationController) RemoveMember(ctx echo.Context) error {
 	orgID, err := echoUintParam(ctx, "id")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid organization id")
+		return err
 	}
 	userID, err := echoUintParam(ctx, "user_id")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid user id")
+		return err
 	}
 	if err := c.orgs.RemoveMember(orgID, userID); err != nil {
 		return mapOrgError(err)
@@ -177,20 +176,20 @@ func (c *AdminOrganizationController) RemoveMember(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, map[string]string{"message": "member removed"})
 }
 
-func mapOrgError(err error) *echo.HTTPError {
+func mapOrgError(err error) error {
 	switch {
 	case errors.Is(err, services.ErrOrganizationNotFound), errors.Is(err, services.ErrMembershipNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	case errors.Is(err, services.ErrOrgSlugTaken), errors.Is(err, services.ErrUserAlreadyInOrg):
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
-	case errors.Is(err, services.ErrInvalidOrgSlug), errors.Is(err, services.ErrInvalidOrgRole):
+	case errors.Is(err, services.ErrInvalidOrgSlug),
+		errors.Is(err, services.ErrInvalidOrgRole),
+		errors.Is(err, services.ErrNameRequired),
+		errors.Is(err, services.ErrInvalidOrgStatus):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	case errors.Is(err, services.ErrCrossOrganization):
+	case errors.Is(err, services.ErrCrossOrganization), errors.Is(err, services.ErrOrganizationDisabled):
 		return echo.NewHTTPError(http.StatusForbidden, err.Error())
 	default:
-		if err != nil && (strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "must be")) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "organization operation failed")
+		return echoInternalError(err)
 	}
 }

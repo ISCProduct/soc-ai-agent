@@ -25,7 +25,9 @@ func (r *UserWeightScoreRepository) SetScore(userID uint, sessionID, category st
 		WeightCategory: category,
 		Score:          absoluteScore,
 	}
-	fillOrganizationID(r.db, userID, &score.OrganizationID)
+	if err := fillOrganizationID(r.db, userID, &score.OrganizationID); err != nil {
+		return err
+	}
 	return r.db.Create(&score).Error
 }
 

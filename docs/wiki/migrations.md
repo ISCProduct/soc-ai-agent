@@ -116,3 +116,4 @@ go run ./cmd/migrate force 1   # version 2 を取り消した状態に補修し�
 | 2 | `user_refresh_tokens` |
 | 3 | 退会（`withdrawn_at` / `withdrawn_users`） |
 | 4 | マルチテナント（`organizations` / memberships / 主要テーブルの `organization_id`）→ [multitenancy.md](./multitenancy.md) |
+| 5 | 主要テーブル `organization_id` への FK 制約 |

@@ -195,6 +195,7 @@ func repairDirtyIfSafe(db *sql.DB, version int) (bool, error) {
 }
 
 // versionLooksApplied は各マイグレーション完了の目印となるオブジェクトの有無を確認する。
+// 部分適用を完了扱いしないよう、version 4 は関連テーブル／列まで確認する。
 func versionLooksApplied(db *sql.DB, version int) (bool, error) {
 	switch version {
 	case 1:
@@ -204,11 +205,66 @@ func versionLooksApplied(db *sql.DB, version int) (bool, error) {
 	case 3:
 		return tableExists(db, "withdrawn_users")
 	case 4:
-		return tableExists(db, "organizations")
+		checks := []struct {
+			table  string
+			column string
+		}{
+			{"organizations", ""},
+			{"organization_memberships", ""},
+			{"users", "organization_id"},
+			{"chat_messages", "organization_id"},
+			{"user_weight_scores", "organization_id"},
+			{"interview_sessions", "organization_id"},
+			{"interview_videos", "organization_id"},
+			{"resume_documents", "organization_id"},
+		}
+		for _, c := range checks {
+			ok, err := tableExists(db, c.table)
+			if err != nil || !ok {
+				return ok, err
+			}
+			if c.column != "" {
+				ok, err = columnExists(db, c.table, c.column)
+				if err != nil || !ok {
+					return ok, err
+				}
+			}
+		}
+		return true, nil
+	case 5:
+		// FK 制約は information_schema で確認（テーブル/列は version 4 で保証済み）
+		return foreignKeyExists(db, "chat_messages", "fk_chat_messages_organization")
 	default:
 		// 未知バージョンは自動修復しない
 		return false, nil
 	}
+}
+
+// foreignKeyExists は指定名の外部キーが存在するか確認する。
+func foreignKeyExists(db *sql.DB, table, constraint string) (bool, error) {
+	var count int
+	err := db.QueryRow(
+		`SELECT COUNT(*) FROM information_schema.table_constraints
+		 WHERE table_schema = DATABASE() AND table_name = ? AND constraint_name = ? AND constraint_type = 'FOREIGN KEY'`,
+		table, constraint,
+	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("FK存在確認に失敗 (%s.%s): %w", table, constraint, err)
+	}
+	return count > 0, nil
+}
+
+// columnExists は現在のデータベースに列が存在するか確認する
+func columnExists(db *sql.DB, table, column string) (bool, error) {
+	var count int
+	err := db.QueryRow(
+		"SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?",
+		table, column,
+	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("列存在確認に失敗 (%s.%s): %w", table, column, err)
+	}
+	return count > 0, nil
 }
 
 // tableExists は現在のデータベースにテーブルが存在するか確認する

@@ -15,7 +15,9 @@ func NewResumeRepository(db *gorm.DB) *ResumeRepository {
 }
 
 func (r *ResumeRepository) CreateDocument(doc *models.ResumeDocument) error {
-	fillOrganizationID(r.db, doc.UserID, &doc.OrganizationID)
+	if err := fillOrganizationID(r.db, doc.UserID, &doc.OrganizationID); err != nil {
+		return err
+	}
 	return r.db.Create(doc).Error
 }
 

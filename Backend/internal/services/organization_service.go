@@ -1,12 +1,15 @@
 package services
 
 import (
+	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+
+	"gorm.io/gorm"
 )
 
 var (
@@ -17,16 +20,19 @@ var (
 	ErrInvalidOrgSlug       = errors.New("invalid organization slug")
 	ErrOrgSlugTaken         = errors.New("organization slug already taken")
 	ErrUserAlreadyInOrg     = errors.New("user already belongs to an organization")
+	ErrNameRequired         = errors.New("name is required")
+	ErrInvalidOrgStatus     = errors.New("status must be active or disabled")
+	ErrOrganizationDisabled = errors.New("organization is disabled")
 )
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,98}[a-z0-9])?$`)
 
 // OrganizationService はテナント（組織）とメンバーシップを管理する。
 type OrganizationService struct {
-	repo *repositories.OrganizationRepository
+	repo repository.OrganizationRepository
 }
 
-func NewOrganizationService(repo *repositories.OrganizationRepository) *OrganizationService {
+func NewOrganizationService(repo repository.OrganizationRepository) *OrganizationService {
 	return &OrganizationService{repo: repo}
 }
 
@@ -50,7 +56,7 @@ func (s *OrganizationService) Create(input CreateOrganizationInput) (*models.Org
 	name := strings.TrimSpace(input.Name)
 	slug := repositories.NormalizeOrgSlug(input.Slug)
 	if name == "" {
-		return nil, errors.New("name is required")
+		return nil, ErrNameRequired
 	}
 	if !slugPattern.MatchString(slug) {
 		return nil, ErrInvalidOrgSlug
@@ -84,14 +90,14 @@ func (s *OrganizationService) Update(id uint, input UpdateOrganizationInput) (*m
 	if input.Name != nil {
 		name := strings.TrimSpace(*input.Name)
 		if name == "" {
-			return nil, errors.New("name is required")
+			return nil, ErrNameRequired
 		}
 		org.Name = name
 	}
 	if input.Status != nil {
 		status := strings.TrimSpace(*input.Status)
 		if status != models.OrgStatusActive && status != models.OrgStatusDisabled {
-			return nil, errors.New("status must be active or disabled")
+			return nil, ErrInvalidOrgStatus
 		}
 		org.Status = status
 	}
@@ -154,10 +160,7 @@ func (s *OrganizationService) AddMember(input AddMemberInput) (*models.Organizat
 		UserID:         input.UserID,
 		Role:           role,
 	}
-	if err := s.repo.CreateMembership(m); err != nil {
-		return nil, err
-	}
-	if err := s.repo.SetUserOrganizationID(input.UserID, input.OrganizationID); err != nil {
+	if err := s.repo.AddMemberTransactional(m); err != nil {
 		return nil, err
 	}
 	return m, nil
@@ -190,19 +193,44 @@ func (s *OrganizationService) RemoveMember(organizationID, userID uint) error {
 	if m == nil {
 		return ErrMembershipNotFound
 	}
-	return s.repo.DeleteMembership(organizationID, userID)
+	if err := s.repo.RemoveMemberTransactional(organizationID, userID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrMembershipNotFound
+		}
+		return err
+	}
+	return nil
 }
 
-// ResolveOrganizationID はユーザーの所属組織IDを返す。
+// ResolveOrganizationID はユーザーの所属組織IDを返す。無効組織は拒否する。
 func (s *OrganizationService) ResolveOrganizationID(userID uint) (uint, error) {
+	var orgID uint
 	m, err := s.repo.FindMembershipByUserID(userID)
 	if err != nil {
 		return 0, err
 	}
 	if m != nil {
-		return m.OrganizationID, nil
+		orgID = m.OrganizationID
+	} else {
+		orgID, err = s.repo.GetUserOrganizationID(userID)
+		if err != nil {
+			return 0, err
+		}
 	}
-	return s.repo.GetUserOrganizationID(userID)
+	if orgID == 0 {
+		return 0, ErrOrganizationNotFound
+	}
+	org, err := s.repo.FindByID(orgID)
+	if err != nil {
+		return 0, err
+	}
+	if org == nil {
+		return 0, ErrOrganizationNotFound
+	}
+	if org.Status == models.OrgStatusDisabled {
+		return 0, ErrOrganizationDisabled
+	}
+	return orgID, nil
 }
 
 // EnsureSameOrganization は actor と resource の組織が一致することを検証する。

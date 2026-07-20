@@ -48,9 +48,17 @@ func EchoUserAuth(userSecret string, access services.UserAccessGuard, orgs ...Or
 			}
 			ctx := context.WithValue(c.Request().Context(), middleware.UserIDContextKey, userID)
 			if resolver != nil {
-				if orgID, err := resolver.ResolveOrganizationID(userID); err == nil && orgID > 0 {
-					ctx = context.WithValue(ctx, middleware.OrganizationIDContextKey, orgID)
+				orgID, err := resolver.ResolveOrganizationID(userID)
+				if err != nil {
+					if errors.Is(err, services.ErrOrganizationDisabled) {
+						return echo.NewHTTPError(http.StatusForbidden, "organization is disabled")
+					}
+					return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve organization")
 				}
+				if orgID == 0 {
+					return echo.NewHTTPError(http.StatusForbidden, "organization not found")
+				}
+				ctx = context.WithValue(ctx, middleware.OrganizationIDContextKey, orgID)
 			}
 			c.SetRequest(c.Request().WithContext(ctx))
 			return next(c)

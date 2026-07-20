@@ -1,9 +1,9 @@
 package services_test
 
 import (
+	"errors"
 	"testing"
 
-	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"Backend/internal/services"
 
@@ -30,44 +30,43 @@ func newOrgTestDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 	return db, mock
 }
 
-func TestOrganizationService_CrossOrgInterviewAccessDenied(t *testing.T) {
-	db, mock := newOrgTestDB(t)
-	repo := repositories.NewOrganizationRepository(db)
-	svc := services.NewOrganizationService(repo)
-
-	// org 1 から org 2 の面接セッションを参照 → 見つからない
-	mock.ExpectQuery("SELECT \\* FROM `interview_sessions` WHERE id = \\? AND organization_id = \\? ORDER BY `interview_sessions`.`id` LIMIT \\?").
-		WithArgs(uint(99), uint(1), 1).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "organization_id", "user_id"}))
-
-	_, err := svc.GetInterviewSessionForOrganization(1, 99)
-	if err != services.ErrCrossOrganization {
-		t.Fatalf("expected ErrCrossOrganization, got %v", err)
+func TestOrganizationService_InterviewAccess(t *testing.T) {
+	tests := []struct {
+		name    string
+		orgID   uint
+		sessID  uint
+		rows    bool
+		wantErr error
+	}{
+		{name: "cross org denied", orgID: 1, sessID: 99, rows: false, wantErr: services.ErrCrossOrganization},
+		{name: "same org allowed", orgID: 2, sessID: 10, rows: true, wantErr: nil},
 	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("sql: %v", err)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock := newOrgTestDB(t)
+			repo := repositories.NewOrganizationRepository(db)
+			svc := services.NewOrganizationService(repo)
 
-func TestOrganizationService_SameOrgInterviewAccessAllowed(t *testing.T) {
-	db, mock := newOrgTestDB(t)
-	repo := repositories.NewOrganizationRepository(db)
-	svc := services.NewOrganizationService(repo)
+			q := mock.ExpectQuery("SELECT \\* FROM `interview_sessions` WHERE id = \\? AND organization_id = \\? ORDER BY `interview_sessions`.`id` LIMIT \\?").
+				WithArgs(tt.sessID, tt.orgID, 1)
+			cols := sqlmock.NewRows([]string{"id", "organization_id", "user_id"})
+			if tt.rows {
+				cols = cols.AddRow(tt.sessID, tt.orgID, 5)
+			}
+			q.WillReturnRows(cols)
 
-	mock.ExpectQuery("SELECT \\* FROM `interview_sessions` WHERE id = \\? AND organization_id = \\? ORDER BY `interview_sessions`.`id` LIMIT \\?").
-		WithArgs(uint(10), uint(2), 1).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "organization_id", "user_id"}).
-			AddRow(10, 2, 5))
-
-	session, err := svc.GetInterviewSessionForOrganization(2, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if session == nil || session.OrganizationID != 2 {
-		t.Fatalf("unexpected session: %+v", session)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("sql: %v", err)
+			_, err := svc.GetInterviewSessionForOrganization(tt.orgID, tt.sessID)
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			} else if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("got %v want %v", err, tt.wantErr)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("sql: %v", err)
+			}
+		})
 	}
 }
 
@@ -81,7 +80,7 @@ func TestOrganizationService_CrossOrgResumeAccessDenied(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "organization_id", "user_id"}))
 
 	_, err := svc.GetResumeDocumentForOrganization(1, 7)
-	if err != services.ErrCrossOrganization {
+	if !errors.Is(err, services.ErrCrossOrganization) {
 		t.Fatalf("expected ErrCrossOrganization, got %v", err)
 	}
 }
@@ -96,7 +95,7 @@ func TestOrganizationService_CrossOrgChatAccessDenied(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "organization_id", "user_id"}))
 
 	_, err := svc.GetChatMessageForOrganization(1, 3)
-	if err != services.ErrCrossOrganization {
+	if !errors.Is(err, services.ErrCrossOrganization) {
 		t.Fatalf("expected ErrCrossOrganization, got %v", err)
 	}
 }
@@ -107,11 +106,10 @@ func TestOrganizationService_CreateRejectsBadSlug(t *testing.T) {
 	svc := services.NewOrganizationService(repo)
 
 	_, err := svc.Create(services.CreateOrganizationInput{Name: "Acme", Slug: "-bad"})
-	if err != services.ErrInvalidOrgSlug {
+	if !errors.Is(err, services.ErrInvalidOrgSlug) {
 		t.Fatalf("expected ErrInvalidOrgSlug, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("no SQL expected: %v", err)
 	}
-	_ = models.DefaultOrganizationID
 }

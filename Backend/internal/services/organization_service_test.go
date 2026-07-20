@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"testing"
 
 	"Backend/internal/models"
@@ -8,29 +9,49 @@ import (
 
 func TestOrganizationService_EnsureSameOrganization(t *testing.T) {
 	svc := &OrganizationService{}
-	if err := svc.EnsureSameOrganization(1, 1); err != nil {
-		t.Fatalf("same org should pass: %v", err)
+	tests := []struct {
+		name         string
+		actorOrgID   uint
+		resourceOrgID uint
+		wantErr      error
+	}{
+		{name: "same org", actorOrgID: 1, resourceOrgID: 1, wantErr: nil},
+		{name: "different org", actorOrgID: 1, resourceOrgID: 2, wantErr: ErrCrossOrganization},
+		{name: "zero actor", actorOrgID: 0, resourceOrgID: 1, wantErr: ErrCrossOrganization},
 	}
-	if err := svc.EnsureSameOrganization(1, 2); err != ErrCrossOrganization {
-		t.Fatalf("expected ErrCrossOrganization, got %v", err)
-	}
-	if err := svc.EnsureSameOrganization(0, 1); err != ErrCrossOrganization {
-		t.Fatalf("expected ErrCrossOrganization for zero actor, got %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := svc.EnsureSameOrganization(tt.actorOrgID, tt.resourceOrgID)
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("got %v want %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
 func TestValidOrgRole(t *testing.T) {
-	cases := map[string]bool{
-		models.OrgRoleOwner:  true,
-		models.OrgRoleAdmin:  true,
-		models.OrgRoleMember: true,
-		"viewer":             false,
-		"":                   false,
+	cases := []struct {
+		role string
+		want bool
+	}{
+		{models.OrgRoleOwner, true},
+		{models.OrgRoleAdmin, true},
+		{models.OrgRoleMember, true},
+		{"viewer", false},
+		{"", false},
 	}
-	for role, want := range cases {
-		if got := validOrgRole(role); got != want {
-			t.Fatalf("role %q: got %v want %v", role, got, want)
-		}
+	for _, tt := range cases {
+		t.Run(tt.role, func(t *testing.T) {
+			if got := validOrgRole(tt.role); got != tt.want {
+				t.Fatalf("role %q: got %v want %v", tt.role, got, tt.want)
+			}
+		})
 	}
 }
 

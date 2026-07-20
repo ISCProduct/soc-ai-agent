@@ -175,3 +175,53 @@ func NormalizeOrgSlug(slug string) string {
 	slug = strings.ReplaceAll(slug, " ", "-")
 	return slug
 }
+
+// AddMemberTransactional はメンバー追加と users / 関連行の organization_id 更新を同一 TX で行う。
+func (r *OrganizationRepository) AddMemberTransactional(m *models.OrganizationMembership) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(m).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.User{}).Where("id = ?", m.UserID).
+			Update("organization_id", m.OrganizationID).Error; err != nil {
+			return err
+		}
+		return reassignUserScopedOrganizationID(tx, m.UserID, m.OrganizationID)
+	})
+}
+
+// RemoveMemberTransactional はメンバー削除と users.organization_id のデフォルト復帰を同一 TX で行う。
+func (r *OrganizationRepository) RemoveMemberTransactional(organizationID, userID uint) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Where("organization_id = ? AND user_id = ?", organizationID, userID).
+			Delete(&models.OrganizationMembership{})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		if err := tx.Model(&models.User{}).Where("id = ?", userID).
+			Update("organization_id", models.DefaultOrganizationID).Error; err != nil {
+			return err
+		}
+		return reassignUserScopedOrganizationID(tx, userID, models.DefaultOrganizationID)
+	})
+}
+
+func reassignUserScopedOrganizationID(tx *gorm.DB, userID, organizationID uint) error {
+	tables := []any{
+		&models.ChatMessage{},
+		&models.UserWeightScore{},
+		&models.InterviewSession{},
+		&models.InterviewVideo{},
+		&models.ResumeDocument{},
+	}
+	for _, m := range tables {
+		if err := tx.Model(m).Where("user_id = ?", userID).
+			Update("organization_id", organizationID).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
