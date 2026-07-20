@@ -84,3 +84,12 @@ go run ./cmd/migrate force 1   # version 2 を取り消した状態に補修し�
 `000001_init_schema.up.sql` は、AutoMigrate廃止時点（2026-07-15）のモデル定義を
 空のMySQL 8.0に適用し `mysqldump --no-data` から整形して生成したものです（63テーブル）。
 以後のスキーマ変更はすべて `000002` 以降の差分ファイルで行います。
+
+## マイグレーション一覧
+
+| Version | 内容 |
+|---------|------|
+| 1 | 初期スキーマスナップショット |
+| 2 | `user_refresh_tokens` |
+| 3 | 退会（`withdrawn_at` / `withdrawn_users`） |
+| 4 | マルチテナント（`organizations` / memberships / 主要テーブルの `organization_id`）→ [multitenancy.md](./multitenancy.md) |

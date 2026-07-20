@@ -13,6 +13,7 @@ func SetupAdminRoutes(
 	adminCrawlController *controllers.AdminCrawlController,
 	adminJobController *controllers.AdminJobController,
 	adminUserController *controllers.AdminUserController,
+	adminOrganizationController *controllers.AdminOrganizationController,
 	adminAuditController *controllers.AdminAuditController,
 	adminCompanyGraphController *controllers.AdminCompanyGraphController,
 	adminInterviewController *controllers.AdminInterviewController,
@@ -75,6 +76,16 @@ func SetupAdminRoutes(
 	admin.PUT("/users/:id", adminUserController.Update)
 	admin.DELETE("/users/:id", adminUserController.Delete)
 	admin.POST("/users/purge-expired", adminUserController.PurgeExpired)
+
+	// 組織（テナント）管理 (#611)
+	admin.GET("/organizations", adminOrganizationController.List)
+	admin.POST("/organizations", adminOrganizationController.Create)
+	admin.GET("/organizations/:id", adminOrganizationController.Get)
+	admin.PUT("/organizations/:id", adminOrganizationController.Update)
+	admin.GET("/organizations/:id/members", adminOrganizationController.ListMembers)
+	admin.POST("/organizations/:id/members", adminOrganizationController.AddMember)
+	admin.PUT("/organizations/:id/members/:user_id", adminOrganizationController.UpdateMember)
+	admin.DELETE("/organizations/:id/members/:user_id", adminOrganizationController.RemoveMember)
 
 	// 監査ログ
 	admin.GET("/audit-logs", adminAuditController.List)

@@ -17,15 +17,31 @@ func NewUserRepository(db *gorm.DB) *UserRepository {
 	return &UserRepository{db: db}
 }
 
-// CreateUser 新規ユーザー作成
+// CreateUser 新規ユーザー作成（デフォルト組織へ所属）
 func (r *UserRepository) CreateUser(user *entity.User) error {
 	m := mapper.UserFromEntity(user)
-	if err := r.db.Create(m).Error; err != nil {
-		return err
+	if m.OrganizationID == 0 {
+		m.OrganizationID = models.DefaultOrganizationID
 	}
-	// 生成された ID などを entity に反映
-	*user = *mapper.UserToEntity(m)
-	return nil
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(m).Error; err != nil {
+			return err
+		}
+		role := models.OrgRoleMember
+		if m.IsAdmin {
+			role = models.OrgRoleOwner
+		}
+		membership := models.OrganizationMembership{
+			OrganizationID: m.OrganizationID,
+			UserID:         m.ID,
+			Role:           role,
+		}
+		if err := tx.Create(&membership).Error; err != nil {
+			return err
+		}
+		*user = *mapper.UserToEntity(m)
+		return nil
+	})
 }
 
 // GetUserByEmail メールアドレスでユーザー取得

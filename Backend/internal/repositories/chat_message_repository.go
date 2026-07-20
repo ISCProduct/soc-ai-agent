@@ -16,6 +16,7 @@ func NewChatMessageRepository(db *gorm.DB) *ChatMessageRepository {
 
 // Create チャットメッセージを保存
 func (r *ChatMessageRepository) Create(msg *models.ChatMessage) error {
+	fillOrganizationID(r.db, msg.UserID, &msg.OrganizationID)
 	return r.db.Create(msg).Error
 }
 

@@ -8,9 +8,9 @@ import (
 )
 
 // SetupChatRoutes チャット関連のルーティング設定
-func SetupChatRoutes(api *echo.Group, chatController *controllers.ChatController, questionController *controllers.QuestionController, userSecret string, access services.UserAccessGuard) {
+func SetupChatRoutes(api *echo.Group, chatController *controllers.ChatController, questionController *controllers.QuestionController, userSecret string, access services.UserAccessGuard, orgs OrganizationIDResolver) {
 	// チャットエンドポイント（認証必須）
-	chat := api.Group("/chat", EchoUserAuth(userSecret, access))
+	chat := api.Group("/chat", EchoUserAuth(userSecret, access, orgs))
 	chat.POST("", chatController.Chat)
 	chat.GET("/history", chatController.GetHistory)
 	chat.GET("/scores", chatController.GetScores)
@@ -21,7 +21,7 @@ func SetupChatRoutes(api *echo.Group, chatController *controllers.ChatController
 	chat.POST("/favorite", chatController.ToggleFavorite)
 
 	// 質問管理エンドポイント（認証必須）
-	questions := api.Group("/questions", EchoUserAuth(userSecret, access))
+	questions := api.Group("/questions", EchoUserAuth(userSecret, access, orgs))
 	questions.POST("/generate", questionController.GenerateQuestions)
 	questions.POST("/create", questionController.CreateQuestion)
 	questions.GET("/list", questionController.GetQuestionsByCategory)

@@ -8,8 +8,8 @@ import (
 )
 
 // SetupApplicationRoutes 応募・選考ステータス管理のルーティング設定
-func SetupApplicationRoutes(api *echo.Group, appController *controllers.ApplicationController, userSecret string, access services.UserAccessGuard) {
-	applications := api.Group("/applications", EchoUserAuth(userSecret, access))
+func SetupApplicationRoutes(api *echo.Group, appController *controllers.ApplicationController, userSecret string, access services.UserAccessGuard, orgs OrganizationIDResolver) {
+	applications := api.Group("/applications", EchoUserAuth(userSecret, access, orgs))
 	// POST /api/applications       → 応募登録
 	// GET  /api/applications       → 応募一覧取得
 	applications.POST("", appController.Apply)

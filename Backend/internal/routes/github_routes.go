@@ -8,8 +8,8 @@ import (
 )
 
 // SetupGitHubRoutes GitHub連携関連のルーティング設定
-func SetupGitHubRoutes(api *echo.Group, githubController *controllers.GitHubController, userSecret string, access services.UserAccessGuard) {
-	github := api.Group("/github", EchoUserAuth(userSecret, access))
+func SetupGitHubRoutes(api *echo.Group, githubController *controllers.GitHubController, userSecret string, access services.UserAccessGuard, orgs OrganizationIDResolver) {
+	github := api.Group("/github", EchoUserAuth(userSecret, access, orgs))
 	github.GET("/profile", githubController.GetProfile)
 	github.POST("/sync", githubController.Sync)
 	github.POST("/sync/wait", githubController.SyncAndWait)

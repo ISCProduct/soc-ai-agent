@@ -16,6 +16,7 @@ func NewInterviewSessionRepository(db *gorm.DB) *InterviewSessionRepository {
 }
 
 func (r *InterviewSessionRepository) Create(session *models.InterviewSession) error {
+	fillOrganizationID(r.db, session.UserID, &session.OrganizationID)
 	return r.db.Create(session).Error
 }
 
