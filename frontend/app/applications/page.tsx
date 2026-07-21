@@ -23,6 +23,7 @@ import {
 } from '@mui/material'
 import { ArrowBack, Edit, Check } from '@mui/icons-material'
 import { authService } from '@/lib/auth'
+import { getResultsPathOrChat } from '@/lib/results-navigation'
 
 const STATUS_LABELS: Record<string, string> = {
   applied: '応募済み',
@@ -154,7 +155,7 @@ function ApplicationsContent() {
       {applications.length === 0 ? (
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <Typography color="text.secondary">応募した企業はまだありません</Typography>
-          <Button variant="contained" sx={{ mt: 2 }} onClick={() => router.push('/results')}>
+          <Button variant="contained" sx={{ mt: 2 }} onClick={() => router.push(getResultsPathOrChat())}>
             マッチング結果に戻る
           </Button>
         </Paper>

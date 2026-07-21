@@ -23,6 +23,7 @@ import {
 import { Send, SmartToy, Person, Refresh, Business, LocationOn, People, TrendingUp as TrendingUpIcon } from '@mui/icons-material'
 import { sendChatMessage, getChatHistory, getUserScores, ChatRequest, ChatResponse } from '@/lib/api'
 import { authService } from '@/lib/auth'
+import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
 import { resolveChatOutgoingMessage } from '@/lib/chat-choices'
 
 interface Message {
@@ -510,7 +511,15 @@ export function MuiChat() {
 
   const handleViewResults = () => {
     setShowCompletionModal(false)
-    router.push(`/results?user_id=${userId}&session_id=${sessionId}`)
+    const context =
+      userId && sessionId
+        ? { userId: String(userId), sessionId }
+        : getResultsSessionContext()
+    if (context) {
+      router.push(buildResultsPath(context))
+      return
+    }
+    router.push('/')
   }
 
   const handleContinueChat = () => {

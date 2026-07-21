@@ -22,6 +22,7 @@ import BusinessIcon from '@mui/icons-material/Business'
 import MicIcon from '@mui/icons-material/Mic'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import { getResultsPathOrChat } from '@/lib/results-navigation'
 
 const STEPS = [
   {
@@ -68,6 +69,10 @@ export default function OnboardingPage() {
 
   const handleStart = (path: string) => {
     localStorage.setItem('onboarding_completed', 'true')
+    if (path === '/results') {
+      router.push(getResultsPathOrChat())
+      return
+    }
     router.push(path)
   }
 

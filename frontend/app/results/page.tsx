@@ -23,6 +23,7 @@ import {
 import { ArrowBack, LocationOn, People, TrendingUp as TrendingUpIcon, Refresh, Email, Favorite, FavoriteBorder } from '@mui/icons-material'
 import { sendAnalysisReport } from '@/lib/api'
 import { authService } from '@/lib/auth'
+import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
 import ReactFlow, {
   Node,
   Edge,
@@ -182,11 +183,21 @@ function ResultsContent() {
   }, [])
 
   useEffect(() => {
+    if (!mounted) return
+
+    if (userId && sessionId) return
+
+    const context = getResultsSessionContext()
+    if (context) {
+      router.replace(buildResultsPath(context))
+      return
+    }
+
+    router.replace('/')
+  }, [mounted, userId, sessionId, router])
+
+  useEffect(() => {
     if (!mounted || !userId || !sessionId) {
-      if (mounted && (!userId || !sessionId)) {
-        setError('セッション情報が見つかりません')
-        setLoading(false)
-      }
       return
     }
 
