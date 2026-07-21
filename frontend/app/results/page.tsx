@@ -24,6 +24,7 @@ import { ArrowBack, LocationOn, People, TrendingUp as TrendingUpIcon, Refresh, E
 import { sendAnalysisReport } from '@/lib/api'
 import { authService } from '@/lib/auth'
 import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
+import { PageLoading } from '@/components/common/PageLoading'
 import ReactFlow, {
   Node,
   Edge,
@@ -578,8 +579,8 @@ function ResultsContent() {
     setBusinessEdges(businessDiagram.edges)
   }, [selectedCompanyId, detailTab, businessDiagram, setBusinessNodes, setBusinessEdges])
 
-  if (!mounted) {
-    return null
+  if (!mounted || !userId || !sessionId) {
+    return <PageLoading message="マッチング結果を準備しています..." />
   }
 
   if (loading) {
