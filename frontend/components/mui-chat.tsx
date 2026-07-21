@@ -25,6 +25,7 @@ import { sendChatMessage, getChatHistory, getUserScores, ChatRequest, ChatRespon
 import { authService } from '@/lib/auth'
 import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
 import { resolveChatOutgoingMessage } from '@/lib/chat-choices'
+import { PageLoading } from '@/components/common/PageLoading'
 
 interface Message {
   id: string
@@ -562,7 +563,7 @@ export function MuiChat() {
   }, [showChoiceButtons])
 
   if (!mounted) {
-    return null
+    return <PageLoading fullScreen={false} showBrand={false} message="チャットを準備しています..." />
   }
 
   return (

@@ -20,6 +20,7 @@ import {
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService } from '@/lib/auth'
+import { PageLoading } from '@/components/common/PageLoading'
 import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
 
 type ReviewItem = {
@@ -690,7 +691,7 @@ function ResumeContent() {
 
 export default function ResumePage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<PageLoading message="履歴書画面を準備しています..." />}>
       <ResumeContent />
     </Suspense>
   )

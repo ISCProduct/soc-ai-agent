@@ -31,10 +31,11 @@ import { authService, User } from '@/lib/auth'
 import { BACKEND_URL } from '@/lib/backend-url'
 import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '@/lib/profile'
 import GitHubSkills from '@/components/github-skills'
+import { PageLoading } from '@/components/common/PageLoading'
 
 export default function ProfilePage() {
   return (
-    <Suspense>
+    <Suspense fallback={<PageLoading message="プロフィールを読み込んでいます..." />}>
       <ProfilePageContent />
     </Suspense>
   )
@@ -44,6 +45,7 @@ function ProfilePageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [user, setUser] = useState<User | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
   const [name, setName] = useState('')
   const [targetLevel, setTargetLevel] = useState('新卒')
   const [schoolName, setSchoolName] = useState('')
@@ -108,6 +110,8 @@ function ProfilePageContent() {
     } else if (calendarErrorParam) {
       setCalendarMessage('Googleカレンダーの連携に失敗しました')
     }
+
+    setAuthLoading(false)
   }, [router, searchParams])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -197,7 +201,9 @@ function ProfilePageContent() {
     }
   }
 
-  if (!user) return null
+  if (authLoading || !user) {
+    return <PageLoading message="プロフィールを読み込んでいます..." />
+  }
 
   const avatarLetter = name ? name[0].toUpperCase() : user.email[0].toUpperCase()
   const isGitHubUser = user.oauth_provider === 'github'
