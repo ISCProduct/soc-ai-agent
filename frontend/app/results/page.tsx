@@ -656,7 +656,7 @@ function ResultsContent() {
           </Button>
           <Button
             variant="outlined"
-            onClick={() => router.push('/chat')}
+            onClick={handleBack}
           >
             チャットに戻る
           </Button>
