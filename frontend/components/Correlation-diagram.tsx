@@ -387,6 +387,16 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
         );
     }
 
+    if (relations.length === 0) {
+        return (
+            <Box sx={{ width: '100%', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Typography color="text.secondary">
+                    企業関係データがありません。管理画面から企業情報の取得・関連付けを行ってください。
+                </Typography>
+            </Box>
+        );
+    }
+
     return (
         <Box sx={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column' }}>
             <Box sx={{ p: 2, bgcolor: '#f5f5f5', borderBottom: '1px solid #ddd' }}>

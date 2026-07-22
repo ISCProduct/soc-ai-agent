@@ -46,6 +46,17 @@ export class CompanyDataFetchError extends Error {
   }
 }
 
+/** プロキシ経由の配列レスポンスを正規化する（レガシー `{ data: [] }` も許容） */
+export function unwrapProxyArray<T>(payload: unknown): T[] {
+  if (Array.isArray(payload)) {
+    return payload as T[]
+  }
+  if (payload && typeof payload === 'object' && Array.isArray((payload as { data?: unknown }).data)) {
+    return (payload as { data: T[] }).data
+  }
+  return []
+}
+
 /**
  * 企業関係データを Next.js プロキシ経由で取得する（DB: company_relations）。
  *
@@ -60,7 +71,8 @@ export async function fetchCompanyRelations(): Promise<CapitalRelation[]> {
     if (!response.ok) {
       throw new CompanyDataFetchError('企業関係データの取得に失敗しました', response.status)
     }
-    return response.json()
+    const payload: unknown = await response.json()
+    return unwrapProxyArray<CapitalRelation>(payload)
   } catch (error) {
     if (error instanceof CompanyDataFetchError) throw error
     throw new CompanyDataFetchError('企業関係データの取得中にエラーが発生しました')
@@ -81,7 +93,8 @@ export async function fetchCompanyMarketInfo(): Promise<CompanyMarketInfo[]> {
     if (!response.ok) {
       throw new CompanyDataFetchError('市場情報の取得に失敗しました', response.status)
     }
-    return response.json()
+    const payload: unknown = await response.json()
+    return unwrapProxyArray<CompanyMarketInfo>(payload)
   } catch (error) {
     if (error instanceof CompanyDataFetchError) throw error
     throw new CompanyDataFetchError('市場情報の取得中にエラーが発生しました')

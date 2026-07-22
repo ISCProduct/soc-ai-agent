@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { parseProxyResponse, type ProxyResponseData } from '@/lib/proxy-response'
+import { parseProxyResponse, type ParsedProxyResponse, type ProxyResponseData } from '@/lib/proxy-response'
 
 export interface ProxyErrorBody {
   error: string
@@ -15,16 +15,24 @@ function getString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined
 }
 
-function getErrorText(data: ProxyResponseData): string {
+function isProxyErrorObject(data: ParsedProxyResponse): data is ProxyResponseData {
+  return !!data && typeof data === 'object' && !Array.isArray(data)
+}
+
+function getErrorText(data: ParsedProxyResponse): string {
+  if (!isProxyErrorObject(data)) {
+    return 'Upstream API error'
+  }
   return getString(data.error) ?? getString(data.message) ?? 'Upstream API error'
 }
 
-function getDetailText(data: ProxyResponseData, raw: string): string | undefined {
-  const detail =
-    getString(data.detail) ??
-    getString(data.details) ??
-    getString(data.message) ??
-    getString(raw)
+function getDetailText(data: ParsedProxyResponse, raw: string): string | undefined {
+  const detail = isProxyErrorObject(data)
+    ? getString(data.detail) ??
+      getString(data.details) ??
+      getString(data.message) ??
+      getString(raw)
+    : getString(raw)
   return detail
 }
 
