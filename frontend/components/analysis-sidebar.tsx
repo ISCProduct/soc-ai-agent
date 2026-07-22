@@ -18,6 +18,7 @@ import
     IconButton,
     useTheme,
     useMediaQuery,
+    Tooltip,
 }
     from '@mui/material'
 import {
@@ -37,9 +38,12 @@ import {
     RecordVoiceOver,
     EditNote,
     CalendarMonth,
+    Business,
+    Assignment,
 } from '@mui/icons-material'
 import {authService, User} from '@/lib/auth'
 import {useRouter} from 'next/navigation'
+import { getResultsPathOrChat } from '@/lib/results-navigation'
 
 const DRAWER_WIDTH = 280
 
@@ -244,13 +248,36 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         <Typography variant="caption" sx={{ fontWeight: 700, color: '#ec5b13', display: 'block', mb: 0.5 }}>
                             今日やること
                         </Typography>
-                        <Typography variant="body2" sx={{ fontSize: '0.8rem', color: '#555' }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.8rem', color: '#555', mb: progress.overall >= 80 ? 1 : 0 }}>
                             {progress.overall === 0
                                 ? '① 自己分析チャットを始めましょう'
                                 : progress.overall < 80
                                     ? '① チャットを続けて分析を完成させましょう'
                                     : '② マッチング結果を確認しましょう'}
                         </Typography>
+                        {progress.overall >= 80 && (
+                            <ListItemButton
+                                onClick={() => {
+                                    router.push(getResultsPathOrChat())
+                                    onMobileClose?.()
+                                }}
+                                sx={{
+                                    borderRadius: 1,
+                                    bgcolor: '#ec5b13',
+                                    color: '#fff',
+                                    py: 0.75,
+                                    '&:hover': { bgcolor: '#c44d0e' },
+                                }}
+                            >
+                                <ListItemIcon sx={{ minWidth: 32, color: '#fff' }}>
+                                    <Business fontSize="small" />
+                                </ListItemIcon>
+                                <ListItemText
+                                    primary="マッチング結果を見る"
+                                    primaryTypographyProps={{ fontSize: '0.8rem', fontWeight: 600 }}
+                                />
+                            </ListItemButton>
+                        )}
                     </Box>
                 )}
 
@@ -328,6 +355,61 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
 
 
                 <Divider sx={{my: 2}}/>
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => {
+                            router.push(getResultsPathOrChat())
+                            onMobileClose?.()
+                        }}
+                        sx={{ borderRadius: 1 }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <Business color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="マッチング結果"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <Tooltip
+                        title={user.is_guest ? '選考管理はログイン後に利用できます' : ''}
+                        disableHoverListener={!user.is_guest}
+                    >
+                        <ListItemButton
+                            onClick={() => {
+                                if (user.is_guest) {
+                                    router.push('/login')
+                                } else {
+                                    router.push('/applications')
+                                }
+                                onMobileClose?.()
+                            }}
+                            sx={{ borderRadius: 1 }}
+                        >
+                            <ListItemIcon sx={{minWidth: 36}}>
+                                <Assignment color="primary"/>
+                            </ListItemIcon>
+                            <ListItemText
+                                primary="選考管理"
+                                secondary={user.is_guest ? 'ログインが必要です' : undefined}
+                                primaryTypographyProps={{
+                                    fontSize: '0.875rem',
+                                    fontWeight: 500,
+                                }}
+                                secondaryTypographyProps={{
+                                    fontSize: '0.7rem',
+                                }}
+                            />
+                        </ListItemButton>
+                    </Tooltip>
+                </ListItem>
+
                 <ListItem disablePadding>
                     <ListItemButton
                         onClick={() => router.push('/Correlation-diagram')}
