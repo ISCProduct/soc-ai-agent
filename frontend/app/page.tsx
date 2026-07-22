@@ -6,6 +6,7 @@ import { Box, IconButton, AppBar, Toolbar, Typography } from '@mui/material'
 import { Menu as MenuIcon } from '@mui/icons-material'
 import { AnalysisSidebar } from '@/components/analysis-sidebar'
 import { MuiChat } from '@/components/mui-chat'
+import { PageLoading } from '@/components/common/PageLoading'
 import { authService, User } from '@/lib/auth'
 import styles from './page.module.css'
 
@@ -32,7 +33,7 @@ export default function Home() {
   }
 
   if (loading || !user) {
-    return null
+    return <PageLoading message="チャット画面を準備しています..." />
   }
 
   return (

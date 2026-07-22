@@ -47,6 +47,7 @@ import { formatSeconds, parseJsonSafe, parseMediaError, parseMultipartResponse }
 import ThreeAvatar from './components/ThreeAvatar'
 import InterviewSummary from './components/InterviewSummary'
 import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
+import { PageLoading } from '@/components/common/PageLoading'
 
 const PRIMARY = '#ec5b13'
 const BG_LIGHT = '#f8f6f6'
@@ -780,7 +781,9 @@ function InterviewContent() {
     setCameraEnabled(next)
   }
 
-  if (loading || !user) return null
+  if (loading || !user) {
+    return <PageLoading message="面接画面を準備しています..." />
+  }
 
   const isActive = status === 'connecting' || status === 'connected'
   const isConnected = status === 'connected'
@@ -1929,7 +1932,7 @@ function getNextAvatarGender(): 'male' | 'female' {
 
 export default function InterviewPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<PageLoading message="面接画面を準備しています..." />}>
       <InterviewContent />
     </Suspense>
   )
