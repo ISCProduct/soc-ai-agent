@@ -26,9 +26,11 @@ import { authService } from '@/lib/auth'
 import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
 import { PageLoading } from '@/components/common/PageLoading'
 import {
+  GUEST_APPLICATIONS_DISABLED_REASON,
   GUEST_EMAIL_DISABLED_REASON,
   GUEST_REGISTER_CTA_LABEL,
   GUEST_REGISTER_PATH,
+  getGuestApplicationsButtonProps,
   getGuestEmailButtonProps,
 } from '@/lib/guest-limits'
 import ReactFlow, {
@@ -380,6 +382,11 @@ function ResultsContent() {
 
   const handleApply = async (e: React.MouseEvent, company: Company) => {
     e.stopPropagation()
+    const user = authService.getStoredUser()
+    if (!user || user.is_guest) {
+      setSnackbar({ open: true, message: GUEST_APPLICATIONS_DISABLED_REASON, severity: 'error' })
+      return
+    }
     if (!company.matchId || company.isApplied || applyingId !== null) return
     setApplyingId(company.matchId)
     try {
@@ -610,6 +617,7 @@ function ResultsContent() {
   const storedUser = authService.getStoredUser()
   const isGuestUser = storedUser?.is_guest === true
   const guestEmailProps = getGuestEmailButtonProps(isGuestUser)
+  const guestApplicationsProps = getGuestApplicationsButtonProps(isGuestUser)
   if (empty) {
     return (
       <Box sx={{ 
@@ -1315,15 +1323,23 @@ function ResultsContent() {
                     >
                       ES・職務経歴書を添削
                     </Button>
-                    <Button
-                      variant={company.isApplied ? 'contained' : 'outlined'}
-                      size="small"
-                      color="primary"
-                      disabled={company.isApplied || applyingId === company.matchId}
-                      onClick={(e) => handleApply(e, company)}
-                    >
-                      {company.isApplied ? '応募済み' : applyingId === company.matchId ? '応募中...' : '応募する'}
-                    </Button>
+                    <Tooltip title={guestApplicationsProps.title} disableHoverListener={!guestApplicationsProps.disabled}>
+                      <span>
+                        <Button
+                          variant={company.isApplied ? 'contained' : 'outlined'}
+                          size="small"
+                          color="primary"
+                          disabled={
+                            company.isApplied
+                            || applyingId === company.matchId
+                            || guestApplicationsProps.disabled
+                          }
+                          onClick={(e) => handleApply(e, company)}
+                        >
+                          {company.isApplied ? '応募済み' : applyingId === company.matchId ? '応募中...' : '応募する'}
+                        </Button>
+                      </span>
+                    </Tooltip>
                     <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold' }}>
                       クリックして詳細を見る →
                     </Typography>
@@ -1352,13 +1368,18 @@ function ResultsContent() {
                   {GUEST_REGISTER_CTA_LABEL}
                 </Button>
               )}
-              <Button
-                variant="outlined"
-                size="large"
-                onClick={() => router.push('/applications')}
-              >
-                選考管理を見る
-              </Button>
+              <Tooltip title={guestApplicationsProps.title} disableHoverListener={!guestApplicationsProps.disabled}>
+                <span>
+                  <Button
+                    variant="outlined"
+                    size="large"
+                    disabled={guestApplicationsProps.disabled}
+                    onClick={() => router.push('/applications')}
+                  >
+                    選考管理を見る
+                  </Button>
+                </span>
+              </Tooltip>
               <Button variant="outlined" size="large" startIcon={<Refresh />} onClick={handleReset}>
                 最初からやり直す
               </Button>

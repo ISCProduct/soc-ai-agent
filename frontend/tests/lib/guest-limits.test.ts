@@ -1,9 +1,13 @@
 import {
   GUEST_LIMITATIONS,
   GUEST_EMAIL_DISABLED_REASON,
+  GUEST_APPLICATIONS_DISABLED_REASON,
   GUEST_REGISTER_PATH,
+  LOGIN_REGISTER_TAB_VALUE,
   canGuestSendEmail,
   getGuestEmailButtonProps,
+  getGuestApplicationsButtonProps,
+  isLoginRegisterTab,
 } from '@/lib/guest-limits'
 
 describe('guest-limits', () => {
@@ -36,7 +40,21 @@ describe('guest-limits', () => {
     })
   })
 
-  it('登録導線はログイン画面', () => {
-    expect(GUEST_REGISTER_PATH).toBe('/login')
+  it('getGuestApplicationsButtonProps はゲスト時に disabled + 理由', () => {
+    expect(getGuestApplicationsButtonProps(true)).toEqual({
+      disabled: true,
+      title: GUEST_APPLICATIONS_DISABLED_REASON,
+    })
+    expect(getGuestApplicationsButtonProps(false)).toEqual({
+      disabled: false,
+      title: '',
+    })
+  })
+
+  it('登録導線はログイン画面の新規登録タブ', () => {
+    expect(GUEST_REGISTER_PATH).toBe(`/login?tab=${LOGIN_REGISTER_TAB_VALUE}`)
+    expect(isLoginRegisterTab('register')).toBe(true)
+    expect(isLoginRegisterTab('login')).toBe(false)
+    expect(isLoginRegisterTab(null)).toBe(false)
   })
 })
