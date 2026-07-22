@@ -7010,3 +7010,4 @@ mysql/logs/
 rag/.venv/
 __pycache__/
 *.pyc
+.tools/
