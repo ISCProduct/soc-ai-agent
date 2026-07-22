@@ -18,6 +18,7 @@ import GoogleIcon from '@mui/icons-material/Google'
 import Link from 'next/link'
 import { authService, AuthResponse } from '@/lib/auth'
 import { BACKEND_URL } from '@/lib/backend-url'
+import { GUEST_LIMITATIONS } from '@/lib/guest-limits'
 
 interface LoginPageProps {
   onAuthSuccess: (authResponse: AuthResponse) => void
@@ -214,6 +215,10 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
             >
               ゲストとして続ける
             </Button>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', px: 0.5 }}>
+              ゲストでは以下が利用できません: {GUEST_LIMITATIONS.join(' / ')}。
+              あとからアカウント登録すると解放されます。
+            </Typography>
           </Box>
         </CardContent>
       </Card>

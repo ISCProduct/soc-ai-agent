@@ -48,6 +48,12 @@ import ThreeAvatar from './components/ThreeAvatar'
 import InterviewSummary from './components/InterviewSummary'
 import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
 import { PageLoading } from '@/components/common/PageLoading'
+import {
+  GUEST_EMAIL_DISABLED_REASON,
+  GUEST_REGISTER_CTA_LABEL,
+  GUEST_REGISTER_PATH,
+  getGuestEmailButtonProps,
+} from '@/lib/guest-limits'
 
 const PRIMARY = '#ec5b13'
 const BG_LIGHT = '#f8f6f6'
@@ -1528,26 +1534,52 @@ function InterviewContent() {
                 title="面接結果がプロフィールスコアに反映されました"
               />
               <InterviewSummary report={report} userId={user?.user_id} theme="dark" />
-              <Button
-                variant="outlined"
-                fullWidth
-                disabled={emailSending || emailSent || !user || user.is_guest}
-                onClick={async () => {
-                  if (!session || !user) return
-                  setEmailSending(true)
-                  try {
-                    await interviewApi.sendReportEmail(session.id, user.user_id)
-                    setEmailSent(true)
-                  } catch {
-                    // ignore
-                  } finally {
-                    setEmailSending(false)
-                  }
-                }}
-                sx={{ color: emailSent ? '#34a853' : PRIMARY, borderColor: emailSent ? '#34a853' : PRIMARY, '&:hover': { borderColor: PRIMARY, bgcolor: 'rgba(236,91,19,0.08)' } }}
-              >
-                {emailSent ? '✓ メールを送信しました' : emailSending ? '送信中...' : 'レポートをメールで受け取る'}
-              </Button>
+              {(() => {
+                const guestEmailProps = getGuestEmailButtonProps(user?.is_guest)
+                return (
+                  <Stack spacing={1}>
+                    <Tooltip title={guestEmailProps.title} disableHoverListener={!guestEmailProps.disabled}>
+                      <span>
+                        <Button
+                          variant="outlined"
+                          fullWidth
+                          disabled={emailSending || emailSent || !user || guestEmailProps.disabled}
+                          onClick={async () => {
+                            if (!session || !user) return
+                            setEmailSending(true)
+                            setErrorMessage(null)
+                            try {
+                              await interviewApi.sendReportEmail(session.id, user.user_id)
+                              setEmailSent(true)
+                            } catch (e) {
+                              setErrorMessage(
+                                e instanceof Error ? e.message : 'レポートのメール送信に失敗しました'
+                              )
+                            } finally {
+                              setEmailSending(false)
+                            }
+                          }}
+                          sx={{ color: emailSent ? '#34a853' : PRIMARY, borderColor: emailSent ? '#34a853' : PRIMARY, '&:hover': { borderColor: PRIMARY, bgcolor: 'rgba(236,91,19,0.08)' } }}
+                        >
+                          {emailSent ? '✓ メールを送信しました' : emailSending ? '送信中...' : 'レポートをメールで受け取る'}
+                        </Button>
+                      </span>
+                    </Tooltip>
+                    {user?.is_guest && (
+                      <Typography variant="caption" sx={{ color: '#9aa0a6', textAlign: 'center' }}>
+                        {GUEST_EMAIL_DISABLED_REASON}{' '}
+                        <Button
+                          size="small"
+                          onClick={() => router.push(GUEST_REGISTER_PATH)}
+                          sx={{ color: PRIMARY, textTransform: 'none', p: 0, minWidth: 0, verticalAlign: 'baseline' }}
+                        >
+                          {GUEST_REGISTER_CTA_LABEL}
+                        </Button>
+                      </Typography>
+                    )}
+                  </Stack>
+                )
+              })()}
             </Stack>
           )}
 

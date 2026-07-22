@@ -25,6 +25,12 @@ import { sendAnalysisReport } from '@/lib/api'
 import { authService } from '@/lib/auth'
 import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
 import { PageLoading } from '@/components/common/PageLoading'
+import {
+  GUEST_EMAIL_DISABLED_REASON,
+  GUEST_REGISTER_CTA_LABEL,
+  GUEST_REGISTER_PATH,
+  getGuestEmailButtonProps,
+} from '@/lib/guest-limits'
 import ReactFlow, {
   Node,
   Edge,
@@ -326,7 +332,7 @@ function ResultsContent() {
   const handleSendEmail = async () => {
     const user = authService.getStoredUser()
     if (!user || user.is_guest) {
-      setSnackbar({ open: true, message: 'ゲストユーザーはメール送信できません', severity: 'error' })
+      setSnackbar({ open: true, message: GUEST_EMAIL_DISABLED_REASON, severity: 'error' })
       return
     }
     if (!userId || !sessionId) return
@@ -600,6 +606,10 @@ function ResultsContent() {
       </Box>
     )
   }
+
+  const storedUser = authService.getStoredUser()
+  const isGuestUser = storedUser?.is_guest === true
+  const guestEmailProps = getGuestEmailButtonProps(isGuestUser)
   if (empty) {
     return (
       <Box sx={{ 
@@ -997,16 +1007,33 @@ function ResultsContent() {
           <Button variant="outlined" startIcon={<ArrowBack />} onClick={handleBack}>
             チャットに戻る
           </Button>
-          <Button
-            variant="contained"
-            startIcon={<Email />}
-            onClick={handleSendEmail}
-            disabled={emailSending}
-            sx={{ width: { xs: '100%', sm: 'auto' } }}
-          >
-            {emailSending ? '送信中...' : '結果をメールで受け取る'}
-          </Button>
+          <Tooltip title={guestEmailProps.title} disableHoverListener={!guestEmailProps.disabled}>
+            <span>
+              <Button
+                variant="contained"
+                startIcon={<Email />}
+                onClick={handleSendEmail}
+                disabled={emailSending || guestEmailProps.disabled}
+                sx={{ width: { xs: '100%', sm: 'auto' } }}
+              >
+                {emailSending ? '送信中...' : '結果をメールで受け取る'}
+              </Button>
+            </span>
+          </Tooltip>
         </Box>
+        {isGuestUser && (
+          <Alert
+            severity="info"
+            sx={{ mb: 2 }}
+            action={
+              <Button color="inherit" size="small" onClick={() => router.push(GUEST_REGISTER_PATH)}>
+                {GUEST_REGISTER_CTA_LABEL}
+              </Button>
+            }
+          >
+            ゲスト利用中です。メール送信や選考管理はアカウント登録後に利用できます。
+          </Alert>
+        )}
         <Box sx={{ textAlign: 'center' }}>
           <Typography variant="h4" fontWeight="bold" gutterBottom sx={{ fontSize: { xs: '1.2rem', sm: '2.125rem' } }}>
             🎉 AI分析完了！適合企業を{companies.length}社に絞り込みました
@@ -1307,10 +1334,24 @@ function ResultsContent() {
           </Stack>
 
           <Box sx={{ textAlign: 'center', mt: 4, mb: 4 }}>
-            <Stack direction="row" spacing={2} justifyContent="center" flexWrap="wrap">
-              <Button variant="contained" startIcon={<Email />} onClick={handleSendEmail} disabled={emailSending}>
-                {emailSending ? '送信中...' : '結果をメールで受け取る'}
-              </Button>
+            <Stack direction="row" spacing={2} justifyContent="center" flexWrap="wrap" useFlexGap>
+              <Tooltip title={guestEmailProps.title} disableHoverListener={!guestEmailProps.disabled}>
+                <span>
+                  <Button
+                    variant="contained"
+                    startIcon={<Email />}
+                    onClick={handleSendEmail}
+                    disabled={emailSending || guestEmailProps.disabled}
+                  >
+                    {emailSending ? '送信中...' : '結果をメールで受け取る'}
+                  </Button>
+                </span>
+              </Tooltip>
+              {isGuestUser && (
+                <Button variant="contained" color="secondary" onClick={() => router.push(GUEST_REGISTER_PATH)}>
+                  {GUEST_REGISTER_CTA_LABEL}
+                </Button>
+              )}
               <Button
                 variant="outlined"
                 size="large"
