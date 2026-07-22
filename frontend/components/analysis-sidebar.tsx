@@ -44,6 +44,11 @@ import {
 import {authService, User} from '@/lib/auth'
 import {useRouter} from 'next/navigation'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
+import {
+  getApplicationsNavTarget,
+  getTodayActionLabel,
+  shouldShowResultsCta,
+} from '@/lib/sidebar-navigation'
 
 const DRAWER_WIDTH = 280
 
@@ -248,14 +253,10 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         <Typography variant="caption" sx={{ fontWeight: 700, color: '#ec5b13', display: 'block', mb: 0.5 }}>
                             今日やること
                         </Typography>
-                        <Typography variant="body2" sx={{ fontSize: '0.8rem', color: '#555', mb: progress.overall >= 80 ? 1 : 0 }}>
-                            {progress.overall === 0
-                                ? '① 自己分析チャットを始めましょう'
-                                : progress.overall < 80
-                                    ? '① チャットを続けて分析を完成させましょう'
-                                    : '② マッチング結果を確認しましょう'}
+                        <Typography variant="body2" sx={{ fontSize: '0.8rem', color: '#555', mb: shouldShowResultsCta(progress.overall) ? 1 : 0 }}>
+                            {getTodayActionLabel(progress.overall)}
                         </Typography>
-                        {progress.overall >= 80 && (
+                        {shouldShowResultsCta(progress.overall) && (
                             <ListItemButton
                                 onClick={() => {
                                     router.push(getResultsPathOrChat())
@@ -383,11 +384,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                     >
                         <ListItemButton
                             onClick={() => {
-                                if (user.is_guest) {
-                                    router.push('/login')
-                                } else {
-                                    router.push('/applications')
-                                }
+                                router.push(getApplicationsNavTarget(user.is_guest))
                                 onMobileClose?.()
                             }}
                             sx={{ borderRadius: 1 }}
