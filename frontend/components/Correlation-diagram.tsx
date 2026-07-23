@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import ReactFlow, {
     Node,
     Edge,
@@ -11,10 +12,11 @@ import ReactFlow, {
     useEdgesState,
     MarkerType,
     EdgeTypes,
+    type NodeMouseHandler,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Card, CardContent } from '@/components/ui/card';
-import { Box, Typography, ToggleButtonGroup, ToggleButton, Chip, Select, MenuItem, FormControl, InputLabel } from '@mui/material';
+import { Box, Typography, ToggleButtonGroup, ToggleButton, Chip, Select, MenuItem, FormControl, InputLabel, Button } from '@mui/material';
 import {
     fetchCompanyRelations,
     fetchCompanyMarketInfo,
@@ -24,6 +26,10 @@ import {
     type CompanyMarketInfo,
     type MarketType,
 } from '@/lib/company-data';
+import {
+    buildCompanyDetailPath,
+    getCompanyDetailPathFromNode,
+} from '@/lib/correlation-diagram-navigation';
 
 type DiagramType = 'capital' | 'business';
 
@@ -102,6 +108,7 @@ interface CorrelationDiagramProps {
 }
 
 export default function CorrelationDiagram({ initialCompanyId = null }: CorrelationDiagramProps) {
+    const router = useRouter();
     const [diagramType, setDiagramType] = useState<DiagramType>('capital');
     const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(initialCompanyId);
     const [relations, setRelations] = useState<CapitalRelation[]>([]);
@@ -185,6 +192,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                     type: 'default',
                     position: { x: col * 300, y: row * 180 },
                     data: {
+                        companyId: id,
                         label: (
                             <Box sx={{ textAlign: 'center', p: 1, minWidth: '140px' }}>
                                 <Typography
@@ -223,6 +231,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                         padding: '8px',
                         minWidth: '160px',
                         boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                        cursor: 'pointer',
                     },
                 });
             });
@@ -261,6 +270,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                     y: 400 + radius * Math.sin(idx * angle),
                 },
                 data: {
+                    companyId: compId,
                     label: (
                         <Box sx={{ textAlign: 'center', p: 1.5, minWidth: '140px' }}>
                             <Typography
@@ -296,6 +306,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                     padding: isFocusCompany ? '10px' : '8px',
                     minWidth: isFocusCompany ? '180px' : '160px',
                     boxShadow: isFocusCompany ? '0 4px 12px rgba(255,167,38,0.3)' : '0 2px 8px rgba(0,0,0,0.1)',
+                    cursor: 'pointer',
                 },
             });
         });
@@ -371,6 +382,17 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
         setFlowEdges(edges);
     }, [nodes, edges, setFlowNodes, setFlowEdges]);
 
+    const handleNodeClick: NodeMouseHandler = useCallback((_event, node) => {
+        const path = getCompanyDetailPathFromNode(node);
+        if (!path) return;
+        router.push(path);
+    }, [router]);
+
+    const handleOpenSelectedCompanyDetail = useCallback(() => {
+        if (!selectedCompanyId) return;
+        router.push(buildCompanyDetailPath(selectedCompanyId));
+    }, [router, selectedCompanyId]);
+
     if (loading) {
         return (
             <Box sx={{ width: '100%', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -415,6 +437,19 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                         </Select>
                     </FormControl>
 
+                    <Button
+                        variant="outlined"
+                        size="small"
+                        disabled={!selectedCompanyId}
+                        onClick={handleOpenSelectedCompanyDetail}
+                    >
+                        選択企業の詳細
+                    </Button>
+
+                    <Typography variant="caption" color="text.secondary">
+                        企業ノードをクリックすると詳細を表示します
+                    </Typography>
+
                     <Box sx={{ display: 'flex', gap: 2, ml: 'auto' }}>
                         {Object.entries(marketLabels).map(([key, label]) => (
                             <Box key={key} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -446,6 +481,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                         edges={flowEdges}
                         onNodesChange={onNodesChange}
                         onEdgesChange={onEdgesChange}
+                        onNodeClick={handleNodeClick}
                         edgeTypes={edgeTypes}
                         fitView
                         minZoom={0.05}
