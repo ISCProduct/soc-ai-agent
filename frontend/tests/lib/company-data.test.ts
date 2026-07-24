@@ -2,6 +2,7 @@ import {
   unwrapCompanyListResponse,
   fetchCompanyRelations,
   fetchCompanyMarketInfo,
+  fetchCompanySummary,
   CompanyDataFetchError,
 } from '@/lib/company-data'
 
@@ -67,5 +68,45 @@ describe('fetchCompanyMarketInfo', () => {
     }) as unknown as typeof fetch
 
     await expect(fetchCompanyMarketInfo()).resolves.toEqual(market)
+  })
+})
+
+describe('fetchCompanySummary', () => {
+  const originalFetch = global.fetch
+
+  afterEach(() => {
+    global.fetch = originalFetch
+  })
+
+  it('maps company detail fields for the side panel', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 3,
+        name: 'テスト株式会社',
+        industry: 'IT',
+        location: '東京',
+        description: '概要',
+        employee_count: 100,
+        founded_year: 2000,
+        website_url: 'https://example.com',
+      }),
+    }) as unknown as typeof fetch
+
+    await expect(fetchCompanySummary(3)).resolves.toMatchObject({
+      id: 3,
+      name: 'テスト株式会社',
+      industry: 'IT',
+      location: '東京',
+    })
+  })
+
+  it('throws on HTTP failure', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+    }) as unknown as typeof fetch
+
+    await expect(fetchCompanySummary(999)).rejects.toBeInstanceOf(CompanyDataFetchError)
   })
 })

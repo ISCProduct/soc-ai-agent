@@ -1,6 +1,7 @@
 import {
   parseCompanyId,
   buildCompanyDetailPath,
+  getCompanyIdFromNode,
   getCompanyDetailPathFromNode,
 } from '@/lib/correlation-diagram-navigation'
 
@@ -35,8 +36,28 @@ describe('correlation-diagram-navigation', () => {
     })
   })
 
-  describe('getCompanyDetailPathFromNode', () => {
+  describe('getCompanyIdFromNode', () => {
     it('prefers data.companyId over node.id', () => {
+      expect(
+        getCompanyIdFromNode({
+          id: '99',
+          data: { companyId: 15 },
+        })
+      ).toBe(15)
+    })
+
+    it('falls back to node.id', () => {
+      expect(getCompanyIdFromNode({ id: '8' })).toBe(8)
+    })
+
+    it('returns null for invalid ids', () => {
+      expect(getCompanyIdFromNode({ id: 'invalid' })).toBeNull()
+      expect(getCompanyIdFromNode({ id: '0' })).toBeNull()
+    })
+  })
+
+  describe('getCompanyDetailPathFromNode', () => {
+    it('builds path from node company id', () => {
       expect(
         getCompanyDetailPathFromNode({
           id: '99',
@@ -45,18 +66,13 @@ describe('correlation-diagram-navigation', () => {
       ).toBe('/company/15')
     })
 
-    it('falls back to node.id when data.companyId is missing', () => {
-      expect(getCompanyDetailPathFromNode({ id: '8' })).toBe('/company/8')
-    })
-
-    it('returns null when both id sources are invalid', () => {
+    it('returns null when id is invalid', () => {
       expect(
         getCompanyDetailPathFromNode({
           id: 'invalid',
           data: { companyId: 'x' },
         })
       ).toBeNull()
-      expect(getCompanyDetailPathFromNode({ id: '0' })).toBeNull()
     })
   })
 })

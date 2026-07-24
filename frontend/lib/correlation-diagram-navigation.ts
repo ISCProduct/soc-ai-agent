@@ -27,20 +27,25 @@ export function buildCompanyDetailPath(companyId: number): string {
 }
 
 /**
- * React Flow ノードから企業詳細パスを得る。
+ * React Flow ノードから企業 ID を得る。
  * data.companyId を優先し、なければ node.id を解釈する。
- * 無効な ID の場合は null（遷移しない）。
+ */
+export function getCompanyIdFromNode(
+  node: CorrelationDiagramNodeLike
+): number | null {
+  const fromData = parseCompanyId(node.data?.companyId)
+  if (fromData !== null) return fromData
+  return parseCompanyId(node.id)
+}
+
+/**
+ * React Flow ノードから企業詳細パスを得る。
+ * 無効な ID の場合は null。
  */
 export function getCompanyDetailPathFromNode(
   node: CorrelationDiagramNodeLike
 ): string | null {
-  const fromData = parseCompanyId(node.data?.companyId)
-  if (fromData !== null) {
-    return buildCompanyDetailPath(fromData)
-  }
-  const fromId = parseCompanyId(node.id)
-  if (fromId !== null) {
-    return buildCompanyDetailPath(fromId)
-  }
-  return null
+  const companyId = getCompanyIdFromNode(node)
+  if (companyId === null) return null
+  return buildCompanyDetailPath(companyId)
 }
