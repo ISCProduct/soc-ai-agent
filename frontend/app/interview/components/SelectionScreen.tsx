@@ -24,7 +24,7 @@ import type { User } from '@/lib/auth'
 import { interviewLimits } from '@/lib/interview'
 import { PRIMARY, BG_LIGHT, POSITIONS } from '../constants'
 import type { InterviewCompany, Position } from '../types'
-import { resolveCompanyByName } from '../utils'
+import { resolveCompanyByName, mergeResolvedCompany } from '../utils'
 
 const COMPANY_RESOLVE_DEBOUNCE_MS = 400
 
@@ -116,7 +116,7 @@ export default function SelectionScreen({
 
     const timer = window.setTimeout(() => {
       void resolveCompanyByName(trimmed).then((resolved) => {
-        setInterviewCompany((prev) => (prev?.name === trimmed ? resolved : prev))
+        setInterviewCompany((prev) => mergeResolvedCompany(prev, trimmed, resolved))
       })
     }, COMPANY_RESOLVE_DEBOUNCE_MS)
 
@@ -125,14 +125,15 @@ export default function SelectionScreen({
 
   /**
    * デバウンス待機中にロビーへ進むと resolve がキャンセルされ id:0 のまま残るため、
-   * 開始直前に登録企業解決を確定する（Bugbot: Debounced resolve skips ID lookup）。
+   * 開始直前に登録企業解決を確定する。
+   * await 中に選択が変わった場合は stale な結果で上書きしない。
    */
   const handleStartInterview = async () => {
     const trimmed = (companySearch.trim() || interviewCompany?.name || '').trim()
     if (interviewCompany && interviewCompany.id === 0 && trimmed) {
       const local = allCompanies.find((c) => c.name === trimmed)
       const resolved = local ?? await resolveCompanyByName(trimmed, interviewCompany)
-      setInterviewCompany(resolved)
+      setInterviewCompany((prev) => mergeResolvedCompany(prev, trimmed, resolved))
     }
     onStartInterview()
   }
@@ -330,7 +331,7 @@ export default function SelectionScreen({
                             setInterviewCompany({ id: 0, name: result.name, description: result.description })
                             void resolveCompanyByName(result.name, { description: result.description }).then((resolved) => {
                               setInterviewCompany((prev) =>
-                                prev?.name === result.name ? resolved : prev,
+                                mergeResolvedCompany(prev, result.name, resolved),
                               )
                             })
                           }

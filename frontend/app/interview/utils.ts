@@ -33,6 +33,21 @@ export async function resolveCompanyByName(
 }
 
 /**
+ * 非同期の企業名解決結果を既存選択へ安全にマージする。
+ * - 選択名が変わっている（stale）→ 無視
+ * - 既に正の id があるのに resolved が id:0 → 正の id を潰さない
+ */
+export function mergeResolvedCompany(
+  prev: InterviewCompany | null,
+  expectedName: string,
+  resolved: InterviewCompany,
+): InterviewCompany | null {
+  if (!prev || prev.name !== expectedName) return prev
+  if (prev.id > 0 && resolved.id === 0) return prev
+  return resolved
+}
+
+/**
  * 面接アバターの性別を交互に切り替える。
  * localStorage のカウンタを進め、偶数目は female / 奇数目は male。
  */

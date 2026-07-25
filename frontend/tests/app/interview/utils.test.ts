@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { resolveCompanyByName, getNextAvatarGender } from '@/app/interview/utils'
+import { resolveCompanyByName, getNextAvatarGender, mergeResolvedCompany } from '@/app/interview/utils'
 
 describe('resolveCompanyByName', () => {
   const originalFetch = global.fetch
@@ -73,6 +73,31 @@ describe('resolveCompanyByName', () => {
     const result = await resolveCompanyByName('失敗企業')
 
     expect(result).toEqual({ id: 0, name: '失敗企業' })
+  })
+})
+
+describe('mergeResolvedCompany', () => {
+  it('選択名が変わっている場合は prev を維持する', () => {
+    // await 中にユーザーが別企業へ切り替えたケース
+    expect(
+      mergeResolvedCompany({ id: 0, name: 'B社' }, 'A社', { id: 2, name: 'A社' }),
+    ).toEqual({ id: 0, name: 'B社' })
+  })
+
+  it('正の id を id:0 の失敗結果で上書きしない', () => {
+    const prev = { id: 99, name: '登録株式会社' }
+    const resolved = { id: 0, name: '登録株式会社' }
+    expect(mergeResolvedCompany(prev, '登録株式会社', resolved)).toEqual(prev)
+  })
+
+  it('名前が一致し resolved が正の id なら更新する', () => {
+    const prev = { id: 0, name: '登録株式会社' }
+    const resolved = { id: 42, name: '登録株式会社', industry: 'IT' }
+    expect(mergeResolvedCompany(prev, '登録株式会社', resolved)).toEqual(resolved)
+  })
+
+  it('prev が null なら null のまま', () => {
+    expect(mergeResolvedCompany(null, 'X', { id: 1, name: 'X' })).toBeNull()
   })
 })
 

@@ -1,13 +1,18 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import SelectionScreen from '@/app/interview/components/SelectionScreen'
 import { POSITIONS } from '@/app/interview/constants'
 import type { User } from '@/lib/auth'
 
 describe('SelectionScreen', () => {
   const user: User = { user_id: 1, name: 'テストユーザー' } as User
+  const originalFetch = global.fetch
+
+  afterEach(() => {
+    global.fetch = originalFetch
+  })
 
   const noop = () => {}
 
@@ -87,7 +92,12 @@ describe('SelectionScreen', () => {
 
   it('開始ボタン押下時に id:0 なら企業解決を確定してから進む', async () => {
     const onStartInterview = jest.fn()
-    const setInterviewCompany = jest.fn()
+    const setInterviewCompany = jest.fn((updater) => {
+      if (typeof updater === 'function') {
+        return updater({ id: 0, name: '開始前解決株式会社' })
+      }
+      return updater
+    })
     const registered = { id: 7, name: '開始前解決株式会社' }
 
     global.fetch = jest.fn().mockResolvedValue({
@@ -105,13 +115,16 @@ describe('SelectionScreen', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '面接を開始する' }))
 
-    await screen.findByRole('button', { name: '面接を開始する' })
-    await Promise.resolve()
-    await Promise.resolve()
-
-    expect(setInterviewCompany).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 7, name: '開始前解決株式会社' }),
-    )
-    expect(onStartInterview).toHaveBeenCalled()
+    await waitFor(() => {
+      expect(setInterviewCompany).toHaveBeenCalled()
+      const updater = setInterviewCompany.mock.calls.find(
+        (call) => typeof call[0] === 'function',
+      )?.[0]
+      expect(updater).toEqual(expect.any(Function))
+      expect(updater({ id: 0, name: '開始前解決株式会社' })).toEqual(
+        expect.objectContaining({ id: 7, name: '開始前解決株式会社' }),
+      )
+      expect(onStartInterview).toHaveBeenCalled()
+    })
   })
 })
