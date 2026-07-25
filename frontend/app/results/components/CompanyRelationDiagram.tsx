@@ -148,7 +148,8 @@ export default function CompanyRelationDiagram({
           <MiniMap
             nodeColor={(node) => {
               const border = node.style?.border as string
-              if (border?.includes('#FFA726')) return '#FFA726'
+              // createDiagramData のフォーカス枠色（#FFC107）と一致させる
+              if (border?.includes('#FFC107')) return '#FFC107'
               return '#2196F3'
             }}
             maskColor="rgba(0, 0, 0, 0.1)"

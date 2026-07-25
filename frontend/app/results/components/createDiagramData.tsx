@@ -25,23 +25,11 @@ export function createDiagramData(
   relations: CapitalRelation[],
   marketInfo: CompanyMarketInfo[],
 ): { nodes: Node[]; edges: Edge[] } {
-  const compId = parseInt(companyId)
+  const compId = Number.parseInt(companyId, 10)
+  if (Number.isNaN(compId)) {
+    return { nodes: [], edges: [] }
+  }
   const relatedIds = collectRelatedCompanyIds(compId, type, relations)
-
-  console.log(`[Diagram] Creating ${type} diagram for company ${compId}`)
-  console.log(`[Diagram] Total relations available:`, relations.length)
-
-  let matchedRelations = 0
-  relations.forEach((rel) => {
-    if (type === 'capital' && rel.relation_type.startsWith('capital')) {
-      if (rel.parent_id === compId || rel.child_id === compId) matchedRelations++
-    } else if (type === 'business' && rel.relation_type.startsWith('business')) {
-      if (rel.from_id === compId || rel.to_id === compId) matchedRelations++
-    }
-  })
-
-  console.log(`[Diagram] Matched ${matchedRelations} ${type} relations for company ${compId}`)
-  console.log(`[Diagram] Related company IDs:`, Array.from(relatedIds))
 
   const getMarketType = (id: number): MarketType => {
     const info = marketInfo.find((m) => m.company_id === id)

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type MouseEvent } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { sendAnalysisReport } from '@/lib/api'
 import { authService } from '@/lib/auth'
@@ -32,7 +32,6 @@ export function useResultsData() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [empty, setEmpty] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [isProvisional, setIsProvisional] = useState(false)
   const [jobSuitabilityComment, setJobSuitabilityComment] = useState('')
@@ -83,8 +82,8 @@ export function useResultsData() {
     const fetchCompanies = async () => {
       try {
         setLoading(true)
-        console.log('[Results] Fetching recommendations for user:', userId, 'session:', sessionId)
-
+        // 再フェッチ時に前回の error が残ると一覧が描画されない（Bugbot）
+        setError(null)
         // 職種適性コメントを取得
         fetch(`/api/chat/analysis?session_id=${sessionId}`, { headers: authService.getUserFetchHeaders() })
           .then((r) => (r.ok ? r.json() : null))
@@ -113,14 +112,13 @@ export function useResultsData() {
         }
 
         const data = await response.json()
-        console.log('[Results] API Response:', data)
 
         setIsProvisional(Boolean(data?.is_provisional))
 
         if (!data || !data.recommendations || !Array.isArray(data.recommendations) || data.recommendations.length === 0) {
-          console.error('[Results] No recommendations available')
           const reason = data?.reason || 'matching_results_empty'
           const diagnostics = data?.diagnostics
+          setCompanies([])
           setError(buildEmptyRecommendationsMessage(reason, diagnostics))
           setLoading(false)
           return
@@ -129,19 +127,14 @@ export function useResultsData() {
         if (data && data.recommendations && Array.isArray(data.recommendations)) {
           const mappedCompanies = data.recommendations.map(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any -- API レスポンス
-            (rec: any, index: number) => {
-              console.log('[Results] Mapping company data:', rec)
-              return mapRecommendationToCompany(rec, index)
-            },
+            (rec: any, index: number) => mapRecommendationToCompany(rec, index),
           )
-          console.log('[Results] Mapped companies:', mappedCompanies)
           setCompanies(mappedCompanies)
+          setError(null)
         } else {
-          console.error('[Results] Invalid data format:', data)
           setError('企業データの形式が正しくありません')
         }
       } catch (err) {
-        console.error('[Results] 企業データ取得エラー:', err)
         setError(err instanceof Error ? err.message : '不明なエラー')
       } finally {
         setLoading(false)
@@ -204,7 +197,7 @@ export function useResultsData() {
     router.push('/')
   }
 
-  const handleToggleFavorite = async (e: React.MouseEvent, company: Company) => {
+  const handleToggleFavorite = async (e: MouseEvent, company: Company) => {
     e.stopPropagation()
     if (!company.matchId || favoritingId !== null) return
     setFavoritingId(company.matchId)
@@ -223,13 +216,17 @@ export function useResultsData() {
           message: company.isFavorited ? 'お気に入りを解除しました' : 'お気に入りに追加しました',
           severity: 'success',
         })
+      } else {
+        setSnackbar({ open: true, message: 'お気に入りの更新に失敗しました', severity: 'error' })
       }
+    } catch {
+      setSnackbar({ open: true, message: 'お気に入りの更新に失敗しました', severity: 'error' })
     } finally {
       setFavoritingId(null)
     }
   }
 
-  const handleApply = async (e: React.MouseEvent, company: Company) => {
+  const handleApply = async (e: MouseEvent, company: Company) => {
     e.stopPropagation()
     if (!company.matchId || company.isApplied || applyingId !== null) return
     setApplyingId(company.matchId)
@@ -252,9 +249,15 @@ export function useResultsData() {
         ))
         setSnackbar({ open: true, message: `${company.name} に応募しました`, severity: 'success' })
       } else {
-        const err = await res.json()
-        setSnackbar({ open: true, message: err.error || '応募に失敗しました', severity: 'error' })
+        let message = '応募に失敗しました'
+        try {
+          const err = await res.json()
+          if (err?.error) message = err.error
+        } catch { /* ignore */ }
+        setSnackbar({ open: true, message, severity: 'error' })
       }
+    } catch {
+      setSnackbar({ open: true, message: '応募に失敗しました', severity: 'error' })
     } finally {
       setApplyingId(null)
     }
@@ -280,7 +283,6 @@ export function useResultsData() {
     companies,
     loading,
     error,
-    empty,
     isProvisional,
     jobSuitabilityComment,
     suggestedRoles,

@@ -1,5 +1,6 @@
 'use client'
 
+import type { MouseEvent } from 'react'
 import {
   Box,
   Typography,
@@ -43,8 +44,8 @@ export interface ResultsListViewProps {
   onReset: () => void
   onSendEmail: () => void
   onSelectCompany: (company: Company) => void
-  onToggleFavorite: (e: React.MouseEvent, company: Company) => void
-  onApply: (e: React.MouseEvent, company: Company) => void
+  onToggleFavorite: (e: MouseEvent, company: Company) => void
+  onApply: (e: MouseEvent, company: Company) => void
   onNavigate: (path: string) => void
 }
 
@@ -196,7 +197,16 @@ export default function ResultsListView({
                   />
                   <Chip label="企業詳細を確認する" variant="outlined" size="small" onClick={() => onSelectCompany(companies[0])} />
                   {companies.some((c) => !c.isFavorited) && (
-                    <Chip label="気になる企業をお気に入り登録" variant="outlined" size="small" color="error" />
+                    <Chip
+                      label="気になる企業をお気に入り登録"
+                      variant="outlined"
+                      size="small"
+                      color="error"
+                      onClick={(e) => {
+                        const target = companies.find((c) => !c.isFavorited && c.matchId)
+                        if (target) onToggleFavorite(e, target)
+                      }}
+                    />
                   )}
                 </Stack>
               </CardContent>

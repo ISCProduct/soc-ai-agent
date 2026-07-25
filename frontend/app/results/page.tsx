@@ -6,7 +6,6 @@ import { PageLoading } from '@/components/common/PageLoading'
 import { useResultsData } from './hooks/useResultsData'
 import {
   ResultsLoadingView,
-  ResultsEmptyView,
   ResultsErrorView,
   ResultsNoMatchView,
 } from './components/ResultsStatusViews'
@@ -25,7 +24,6 @@ function ResultsContent() {
     companies,
     loading,
     error,
-    empty,
     isProvisional,
     jobSuitabilityComment,
     suggestedRoles,
@@ -59,10 +57,6 @@ function ResultsContent() {
 
   if (loading) {
     return <ResultsLoadingView />
-  }
-
-  if (empty) {
-    return <ResultsEmptyView onBackToChat={() => navigate('/')} />
   }
 
   if (error) {

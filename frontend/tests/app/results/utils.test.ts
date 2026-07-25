@@ -46,11 +46,18 @@ describe('mapRecommendationToCompany', () => {
       matchScore: 87,
       tags: ['成長'],
       techStack: ['Go'],
-      categoryScores: { technical: 80 },
+      categoryScores: expect.objectContaining({ technical: 80, teamwork: 0 }),
       isFavorited: true,
       isApplied: true,
       applicationId: 5,
     })
+  })
+
+  it('部分的な category_scores を 0 埋めする', () => {
+    const company = mapRecommendationToCompany({ category_scores: { technical: 80 } }, 0)
+    expect(company.categoryScores?.technical).toBe(80)
+    expect(company.categoryScores?.teamwork).toBe(0)
+    expect(company.categoryScores?.communication).toBe(0)
   })
 
   it('欠落フィールドにフォールバックを適用する', () => {
@@ -96,6 +103,16 @@ describe('buildEmptyRecommendationsMessage', () => {
     expect(message).toContain('スコア数: 1')
     expect(message).toContain('企業数: 2')
     expect(message).toContain('プロファイル数: 3')
+  })
+
+  it('diagnostics 欠損フィールドは - で表示する', () => {
+    const message = buildEmptyRecommendationsMessage('matching_results_empty', {
+      user_score_count: 1,
+    })
+    expect(message).toContain('スコア数: 1')
+    expect(message).toContain('企業数: -')
+    expect(message).toContain('プロファイル数: -')
+    expect(message).not.toContain('undefined')
   })
 })
 

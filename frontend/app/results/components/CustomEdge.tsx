@@ -1,13 +1,11 @@
 'use client'
 
-import type { EdgeTypes } from 'reactflow'
+import type { EdgeProps, EdgeTypes } from 'reactflow'
 
 /**
  * ReactFlow のカスタムエッジ（直線 + 回転ラベル）。
- * 既存実装の any プロップを維持する。
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- ReactFlow EdgeProps 互換の緩い型
-export const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, label }: any) => {
+export const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, label }: EdgeProps) => {
   const edgePath = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`
 
   // ラベルの位置を計算（中点）
