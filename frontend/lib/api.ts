@@ -104,6 +104,13 @@ export async function sendChatMessage(request: ChatRequest): Promise<ChatRespons
     }
 }
 
+export class ApiError extends Error {
+    constructor(message: string, public readonly httpStatus: number) {
+        super(message)
+        this.name = 'ApiError'
+    }
+}
+
 export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> {
     const response = await fetch(`${API_BASE}/chat/history?session_id=${sessionId}`, {
         headers: authService.getUserFetchHeaders(),
@@ -112,7 +119,7 @@ export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> 
     if (!response.ok) {
         const errorText = await response.text().catch(() => response.statusText)
         console.error('[API] History error:', response.status, errorText)
-        throw new Error(`History API error: ${errorText || response.statusText}`)
+        throw new ApiError(`History API error: ${errorText || response.statusText}`, response.status)
     }
 
     const raw = await response.json()
