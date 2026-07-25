@@ -21,7 +21,7 @@ import {
   DialogActions,
 } from '@mui/material'
 import { Send, SmartToy, Person, Refresh, Business, LocationOn, People, TrendingUp as TrendingUpIcon } from '@mui/icons-material'
-import { sendChatMessage, getChatHistory, getUserScores, ChatRequest, ChatResponse } from '@/lib/api'
+import { sendChatMessage, getChatHistory, getUserScores, ChatRequest, ChatResponse, ApiError } from '@/lib/api'
 import { authService } from '@/lib/auth'
 import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
 import { resolveChatOutgoingMessage } from '@/lib/chat-choices'
@@ -223,6 +223,11 @@ export function MuiChat() {
       await loadChatHistory(sessionId)
     } catch (error) {
       console.error('[MUI Chat] Failed to load history (retry):', error)
+      if (error instanceof ApiError && error.httpStatus === 401) {
+        authService.logout()
+        router.replace('/login')
+        return
+      }
       setHistoryLoadError('履歴の読み込みに失敗しました。通信状況を確認して、もう一度お試しください。')
       setMessages([])
     } finally {
@@ -269,6 +274,11 @@ export function MuiChat() {
         await loadChatHistory(storedSessionId)
       } catch (error) {
         console.error('[MUI Chat] Failed to load history:', error)
+        if (error instanceof ApiError && error.httpStatus === 401) {
+          authService.logout()
+          router.replace('/login')
+          return
+        }
         // #569: 失敗時は挨拶ではなくエラー UI（再試行で復元）
         setHistoryLoadError('履歴の読み込みに失敗しました。通信状況を確認して、もう一度お試しください。')
         setMessages([])

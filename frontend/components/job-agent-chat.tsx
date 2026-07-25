@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import styles from "./job-agent-chat.module.css"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -10,7 +11,8 @@ import { Progress } from "@/components/ui/progress"
 import { Send, Bot, User } from "lucide-react"
 import { CompanyResults } from "@/components/company-results"
 import { AnalysisLoading } from "@/components/analysis-loading"
-import { sendChatMessage, getChatHistory, getUserScores, type ChatResponse, type ChatScore } from "@/lib/api"
+import { sendChatMessage, getChatHistory, getUserScores, ApiError, type ChatResponse, type ChatScore } from "@/lib/api"
+import { authService } from "@/lib/auth"
 
 type Message = {
   id: string
@@ -54,6 +56,8 @@ function extractChoices(content: string): { choices: ChoiceOption[], mainText: s
 }
 
 export function JobAgentChat() {
+  const router = useRouter()
+
   // セッションIDを最初に初期化（他のstateより先に）
   const [sessionId, setSessionId] = useState<string>(() => {
     if (typeof window !== 'undefined') {
@@ -194,6 +198,11 @@ export function JobAgentChat() {
         history = await getChatHistory(sessionId)
       } catch (error) {
         console.error("Failed to load chat history:", error)
+        if (error instanceof ApiError && error.httpStatus === 401) {
+          authService.logout()
+          router.replace('/login')
+          return
+        }
         // #569: 履歴取得失敗時は挨拶ではなくエラー UI
         setHistoryLoadError('履歴の読み込みに失敗しました。通信状況を確認して、もう一度お試しください。')
         setMessages([])
@@ -220,6 +229,11 @@ export function JobAgentChat() {
         history = await getChatHistory(sessionId)
       } catch (error) {
         console.error("Failed to load history (retry):", error)
+        if (error instanceof ApiError && error.httpStatus === 401) {
+          authService.logout()
+          router.replace('/login')
+          return
+        }
         setHistoryLoadError('履歴の読み込みに失敗しました。通信状況を確認して、もう一度お試しください。')
         setMessages([])
         return
