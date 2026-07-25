@@ -62,4 +62,26 @@ describe('SelectionScreen', () => {
     fireEvent.keyDown(radios[1], { key: 'Enter' })
     expect(setSelectedPosition).toHaveBeenCalled()
   })
+
+  it('DB一覧に名前一致があるとき id:0 の仮選択を登録企業へ昇格する', () => {
+    const setInterviewCompany = jest.fn((updater) => {
+      if (typeof updater === 'function') {
+        return updater({ id: 0, name: '登録株式会社' })
+      }
+      return updater
+    })
+    const registered = { id: 42, name: '登録株式会社', industry: 'IT' }
+
+    renderScreen({
+      companySearch: '登録株式会社',
+      interviewCompany: { id: 0, name: '登録株式会社' },
+      allCompanies: [registered],
+      setInterviewCompany,
+    })
+
+    expect(setInterviewCompany).toHaveBeenCalled()
+    const updater = setInterviewCompany.mock.calls[0][0]
+    expect(typeof updater).toBe('function')
+    expect(updater({ id: 0, name: '登録株式会社' })).toEqual(registered)
+  })
 })

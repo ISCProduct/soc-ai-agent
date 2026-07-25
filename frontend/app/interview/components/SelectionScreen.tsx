@@ -95,12 +95,24 @@ export default function SelectionScreen({
   questionDurationSeconds,
   onStartInterview,
 }: SelectionScreenProps) {
-  // 入力中の企業名解決は親の一覧取得と同様にデバウンスし、1文字ごとの API 連打を避ける
+  // 入力中の企業名解決は親の一覧取得と同様にデバウンスし、1文字ごとの API 連打を避ける。
+  // allCompanies に名前一致がある場合は API を呼ばず、id:0 の仮選択を登録企業へ昇格させる。
   useEffect(() => {
     if (companySourceTab !== 'db') return
     const trimmed = companySearch.trim()
     if (!trimmed) return
-    if (allCompanies.some((c) => c.name === trimmed)) return
+
+    const local = allCompanies.find((c) => c.name === trimmed)
+    if (local) {
+      setInterviewCompany((prev) => {
+        if (prev?.id === local.id && prev.name === local.name) return prev
+        if (!prev || prev.name !== trimmed || prev.id === 0 || prev.id !== local.id) {
+          return local
+        }
+        return prev
+      })
+      return
+    }
 
     const timer = window.setTimeout(() => {
       void resolveCompanyByName(trimmed).then((resolved) => {
