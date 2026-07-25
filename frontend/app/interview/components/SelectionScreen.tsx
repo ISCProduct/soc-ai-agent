@@ -123,6 +123,20 @@ export default function SelectionScreen({
     return () => window.clearTimeout(timer)
   }, [companySearch, companySourceTab, allCompanies, setInterviewCompany])
 
+  /**
+   * デバウンス待機中にロビーへ進むと resolve がキャンセルされ id:0 のまま残るため、
+   * 開始直前に登録企業解決を確定する（Bugbot: Debounced resolve skips ID lookup）。
+   */
+  const handleStartInterview = async () => {
+    const trimmed = (companySearch.trim() || interviewCompany?.name || '').trim()
+    if (interviewCompany && interviewCompany.id === 0 && trimmed) {
+      const local = allCompanies.find((c) => c.name === trimmed)
+      const resolved = local ?? await resolveCompanyByName(trimmed, interviewCompany)
+      setInterviewCompany(resolved)
+    }
+    onStartInterview()
+  }
+
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: BG_LIGHT }}>
       {/* Header */}
@@ -544,7 +558,7 @@ export default function SelectionScreen({
                 fullWidth
                 endIcon={<ArrowForwardIcon />}
                 disabled={!interviewCompany}
-                onClick={onStartInterview}
+                onClick={() => { void handleStartInterview() }}
                 sx={{
                   bgcolor: PRIMARY, '&:hover': { bgcolor: `${PRIMARY}e0` },
                   borderRadius: 2, py: 1.8, fontWeight: 700, fontSize: 16,

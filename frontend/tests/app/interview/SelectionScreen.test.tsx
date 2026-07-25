@@ -84,4 +84,34 @@ describe('SelectionScreen', () => {
     expect(typeof updater).toBe('function')
     expect(updater({ id: 0, name: '登録株式会社' })).toEqual(registered)
   })
+
+  it('開始ボタン押下時に id:0 なら企業解決を確定してから進む', async () => {
+    const onStartInterview = jest.fn()
+    const setInterviewCompany = jest.fn()
+    const registered = { id: 7, name: '開始前解決株式会社' }
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ companies: [registered] }),
+    }) as unknown as typeof fetch
+
+    renderScreen({
+      companySearch: '開始前解決株式会社',
+      interviewCompany: { id: 0, name: '開始前解決株式会社' },
+      allCompanies: [],
+      setInterviewCompany,
+      onStartInterview,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '面接を開始する' }))
+
+    await screen.findByRole('button', { name: '面接を開始する' })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(setInterviewCompany).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 7, name: '開始前解決株式会社' }),
+    )
+    expect(onStartInterview).toHaveBeenCalled()
+  })
 })
