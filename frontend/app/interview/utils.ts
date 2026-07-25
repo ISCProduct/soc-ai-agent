@@ -1,10 +1,12 @@
 /**
- * Pure/side-effectful helper functions for the interview feature that are
- * independent of React state — safe to unit test in isolation.
+ * 面接機能向けのヘルパー（React state 非依存。単体テストしやすい境界）。
  */
 import type { InterviewCompany } from './types'
 
-/** DB 登録企業と企業名が一致すれば id を解決。未登録なら id=0 のまま返す (#567) */
+/**
+ * DB 登録企業と企業名が一致すれば id を解決する。
+ * 未登録・検索失敗時は `id=0` のまま名前だけ返す（#567）。
+ */
 export async function resolveCompanyByName(
   name: string,
   fallback?: Partial<InterviewCompany>,
@@ -30,6 +32,10 @@ export async function resolveCompanyByName(
   return { id: 0, name: trimmed, ...fallback }
 }
 
+/**
+ * 面接アバターの性別を交互に切り替える。
+ * localStorage のカウンタを進め、偶数目は female / 奇数目は male。
+ */
 export function getNextAvatarGender(): 'male' | 'female' {
   try {
     const key = 'interview_avatar_index'

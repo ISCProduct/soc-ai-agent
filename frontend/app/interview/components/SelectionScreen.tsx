@@ -1,6 +1,6 @@
 'use client'
 
-import type { Dispatch, SetStateAction } from 'react'
+import { useEffect, type Dispatch, type KeyboardEvent, type SetStateAction } from 'react'
 import {
   Box,
   Button,
@@ -25,6 +25,15 @@ import { interviewLimits } from '@/lib/interview'
 import { PRIMARY, BG_LIGHT, POSITIONS } from '../constants'
 import type { InterviewCompany, Position } from '../types'
 import { resolveCompanyByName } from '../utils'
+
+const COMPANY_RESOLVE_DEBOUNCE_MS = 400
+
+function activateOnEnterOrSpace(event: KeyboardEvent, action: () => void) {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    action()
+  }
+}
 
 export interface CompanyHints {
   style_tags: string[]
@@ -86,8 +95,21 @@ export default function SelectionScreen({
   questionDurationSeconds,
   onStartInterview,
 }: SelectionScreenProps) {
-  // allCompanies is already filtered by server-side search, no client-side filter needed
-  const filteredCompanies = allCompanies
+  // 入力中の企業名解決は親の一覧取得と同様にデバウンスし、1文字ごとの API 連打を避ける
+  useEffect(() => {
+    if (companySourceTab !== 'db') return
+    const trimmed = companySearch.trim()
+    if (!trimmed) return
+    if (allCompanies.some((c) => c.name === trimmed)) return
+
+    const timer = window.setTimeout(() => {
+      void resolveCompanyByName(trimmed).then((resolved) => {
+        setInterviewCompany((prev) => (prev?.name === trimmed ? resolved : prev))
+      })
+    }, COMPANY_RESOLVE_DEBOUNCE_MS)
+
+    return () => window.clearTimeout(timer)
+  }, [companySearch, companySourceTab, allCompanies, setInterviewCompany])
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: BG_LIGHT }}>
@@ -183,12 +205,8 @@ export default function SelectionScreen({
                         if (local) {
                           setInterviewCompany(local)
                         } else {
+                          // 即時は id=0 の仮選択。DB 解決は上記 useEffect でデバウンス
                           setInterviewCompany({ id: 0, name: value.trim() })
-                          void resolveCompanyByName(value.trim()).then((resolved) => {
-                            setInterviewCompany((prev) =>
-                              prev?.name === value.trim() ? resolved : prev,
-                            )
-                          })
                         }
                       }
                     }}
@@ -235,7 +253,8 @@ export default function SelectionScreen({
                       <LinearProgress sx={{ borderRadius: 1 }} />
                     ) : (
                       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
-                        {filteredCompanies.map(c => {
+                        {/* allCompanies はサーバ側検索済みのため、追加のクライアントフィルタは不要 */}
+                        {allCompanies.map(c => {
                           const isSelected = interviewCompany?.id === c.id
                           return (
                             <Button
@@ -255,7 +274,7 @@ export default function SelectionScreen({
                             </Button>
                           )
                         })}
-                        {filteredCompanies.length === 0 && !companiesLoading && !companySearch.trim() && (
+                        {allCompanies.length === 0 && !companiesLoading && !companySearch.trim() && (
                           <Typography sx={{ color: '#94a3b8', fontSize: 13 }}>登録企業が見つかりません</Typography>
                         )}
                       </Box>
@@ -272,32 +291,38 @@ export default function SelectionScreen({
                     {webSearchLoading ? (
                       <LinearProgress sx={{ borderRadius: 1 }} />
                     ) : (
-                      <Stack spacing={1}>
+                      <Stack spacing={1} role="listbox" aria-label="WEB検索結果">
                         {webSearchResults.map((result, i) => {
                           const isSelected = interviewCompany?.name === result.name
+                          const selectResult = () => {
+                            setCompanySearch(result.name)
+                            const local = allCompanies.find((c) => c.name === result.name)
+                            if (local) {
+                              setInterviewCompany({ ...local, description: result.description })
+                              return
+                            }
+                            setInterviewCompany({ id: 0, name: result.name, description: result.description })
+                            void resolveCompanyByName(result.name, { description: result.description }).then((resolved) => {
+                              setInterviewCompany((prev) =>
+                                prev?.name === result.name ? resolved : prev,
+                              )
+                            })
+                          }
                           return (
                             <Box
                               key={i}
-                              onClick={() => {
-                                setCompanySearch(result.name)
-                                const local = allCompanies.find((c) => c.name === result.name)
-                                if (local) {
-                                  setInterviewCompany({ ...local, description: result.description })
-                                  return
-                                }
-                                setInterviewCompany({ id: 0, name: result.name, description: result.description })
-                                void resolveCompanyByName(result.name, { description: result.description }).then((resolved) => {
-                                  setInterviewCompany((prev) =>
-                                    prev?.name === result.name ? resolved : prev,
-                                  )
-                                })
-                              }}
+                              role="option"
+                              aria-selected={isSelected}
+                              tabIndex={0}
+                              onClick={selectResult}
+                              onKeyDown={(e) => activateOnEnterOrSpace(e, selectResult)}
                               sx={{
                                 p: 1.5, borderRadius: 2, cursor: 'pointer',
                                 border: `2px solid ${isSelected ? PRIMARY : '#e2e8f0'}`,
                                 bgcolor: isSelected ? `${PRIMARY}08` : '#f8fafc',
                                 transition: 'all 0.15s',
                                 '&:hover': { borderColor: PRIMARY, bgcolor: `${PRIMARY}05` },
+                                '&:focus-visible': { outline: `2px solid ${PRIMARY}`, outlineOffset: 2 },
                               }}
                             >
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -346,7 +371,10 @@ export default function SelectionScreen({
                     size="small"
                     onClick={() => {
                       setPositionCategory('sier')
-                      if (selectedPosition.category === 'general') setSelectedPosition(POSITIONS.find(p => p.category === 'sier')!)
+                      if (selectedPosition.category === 'general') {
+                        const firstSier = POSITIONS.find((p) => p.category === 'sier')
+                        if (firstSier) setSelectedPosition(firstSier)
+                      }
                     }}
                     sx={{
                       px: 2, py: 0.6, borderRadius: 2, textTransform: 'none', fontWeight: 600, fontSize: 13,
@@ -359,13 +387,21 @@ export default function SelectionScreen({
                   </Button>
                 </Box>
 
-                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
+                <Box
+                  role="radiogroup"
+                  aria-label="応募職種"
+                  sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}
+                >
                   {POSITIONS.filter(p => p.category === positionCategory).map(pos => {
                     const isSelected = selectedPosition.id === pos.id
                     return (
                       <Box
                         key={pos.id}
+                        role="radio"
+                        aria-checked={isSelected}
+                        tabIndex={0}
                         onClick={() => setSelectedPosition(pos)}
+                        onKeyDown={(e) => activateOnEnterOrSpace(e, () => setSelectedPosition(pos))}
                         sx={{
                           position: 'relative', display: 'flex', alignItems: 'center', gap: 1.5,
                           p: 2, borderRadius: 2, cursor: 'pointer',
@@ -373,6 +409,7 @@ export default function SelectionScreen({
                           bgcolor: isSelected ? `${PRIMARY}08` : '#f8fafc',
                           transition: 'all 0.15s',
                           '&:hover': { borderColor: isSelected ? PRIMARY : '#cbd5e1' },
+                          '&:focus-visible': { outline: `2px solid ${PRIMARY}`, outlineOffset: 2 },
                         }}
                       >
                         <Typography sx={{ fontSize: 22 }}>{pos.icon}</Typography>

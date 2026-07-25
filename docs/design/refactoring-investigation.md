@@ -29,7 +29,7 @@
 
 | 領域 | パス | 備考 |
 |------|------|------|
-| Backend | `Backend/` | Go、migrations 含む |
+| Backend | `Backend/` | Go ソースが主対象。SQL migrations は規模合計には含めず、ホットスポット表のみ別記 |
 | Frontend | `frontend/` | `node_modules` / `.next` 除外 |
 | RAG | `rag/` | `.venv` 除外 |
 
@@ -41,12 +41,13 @@
 
 ### 2.3 方法
 
-- 拡張子 `.go` / `.ts` / `.tsx` / `.py` の行数集計
+- **規模サマリー・層別 LOC** の集計対象拡張子: `.go` / `.ts` / `.tsx` / `.py` のみ
+- **SQL migrations（`.sql`）** は規模合計・ファイル数には含めない。初期スキーマなど巨大なものはホットスポット表に参考掲載する
 - 層別（services / controllers / app pages 等）の内訳
 - 800 行超ファイルの抽出と責務密度の簡易指標（メソッド数、`useState` 数など）
 - テストファイル数の比較（網羅率の精密計測ではない）
 
-> 行数は 2026-07-25 時点のローカルワークツリー計測。ブランチ差分により前後する。
+> 行数は **2026-07-25 時点・リファクタ着手前** のローカルワークツリー計測を基準値とする。以降の分割 PR により数値は変化する（例: `interview/page.tsx` は基準 1939 行 → Phase1 後は約 1409 行）。
 
 ---
 
@@ -110,9 +111,9 @@ FE ページは約 **44**。FE の `*.test.ts(x)` は約 **9** と少なく、**
 
 ### 5.1 800 行超（優先監視）
 
-| LOC | パス | 簡易指標 | 主な責務仮説 |
-|-----|------|----------|--------------|
-| 1939 | `frontend/app/interview/page.tsx` | useState≈49 / useEffect≈12 | 面接 UI・メディア・同意・レポート・状態遷移 |
+| LOC（基準日） | パス | 簡易指標 | 主な責務仮説 |
+|---------------|------|----------|--------------|
+| 1939（着手前） | `frontend/app/interview/page.tsx` | useState≈49 / useEffect≈12 | 面接 UI・メディア・同意・レポート・状態遷移。※Phase1（#653）後は約 1409 行 |
 | 1575 | `Backend/internal/services/resume_service.go` | methods≈27 | アップロード・PDF 正規化・レビュー・企業検証 |
 | 1515 | `rag/main.py` | defs≈50 | HTTP API・RAG 処理の入口集約 |
 | 1500 | `Backend/internal/services/interview_service.go` | methods≈31 | セッション・発話・ワーカー・管理一覧 |
@@ -179,10 +180,10 @@ FE ページは約 **44**。FE の `*.test.ts(x)` は約 **9** と少なく、**
 
 ## 8. 成功指標（リファクタ開始後に測る）
 
-| 指標 | 現状（概算） | 目標イメージ |
-|------|--------------|--------------|
+| 指標 | 基準値（2026-07-25・着手前） | 目標イメージ |
+|------|-------------------------------|--------------|
 | 800 行超のアプリコードファイル数 | 10（SQL 除く） | 段階的に半減 |
-| 面接 page の LOC / useState 数 | ~1939 / ~49 | 分割後 page は薄いオーケストレーションに |
+| 面接 page の LOC / useState 数 | ~1939 / ~49 | 分割後 page は薄いオーケストレーションに（Phase1 時点で ~1409 行） |
 | FE ユニットテストファイル数 | ~9 | 分割対象ドメインごとに追加 |
 | 分割 PR のレビュー可能行数 | — | 目安 400 行前後の差分を上限意識 |
 
@@ -200,12 +201,32 @@ FE ページは約 **44**。FE の `*.test.ts(x)` は約 **9** と少なく、**
 ## 10. 付録: 計測コマンド（再計測用）
 
 ```bash
-# 依存を除いた主要コードの行数再計測（例）
+# 依存を除いた主要コードの行数再計測（規模サマリーと同一条件）
+# ※ .sql は含めない（ホットスポット参考のみ）
 python3 - <<'PY'
 from pathlib import Path
-skip = {'node_modules','.next','.venv','venv','__pycache__'}
-exts = {'.go','.ts','.tsx','.py'}
-# ... Path.rglob で集計
+
+skip = {'node_modules', '.next', '.venv', 'venv', '__pycache__', 'vendor', 'dist', 'coverage'}
+exts = {'.go', '.ts', '.tsx', '.py'}
+
+def ok(path: Path) -> bool:
+    return not any(part in skip for part in path.parts)
+
+def line_count(path: Path) -> int:
+    text = path.read_text(encoding='utf-8', errors='ignore')
+    if not text:
+        return 0
+    return text.count('\n') + (0 if text.endswith('\n') else 1)
+
+for root in (Path('Backend'), Path('frontend'), Path('rag')):
+    if not root.exists():
+        continue
+    files = [
+        path for path in root.rglob('*')
+        if path.is_file() and path.suffix in exts and ok(path)
+    ]
+    loc = sum(line_count(path) for path in files)
+    print(f'{root}: {len(files)} files, {loc} LOC')
 PY
 ```
 
