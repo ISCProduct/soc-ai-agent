@@ -62,3 +62,16 @@ export function getNextAvatarGender(): 'male' | 'female' {
     return 'male'
   }
 }
+
+/**
+ * start-turn / turn に渡す企業情報テキストを組み立てる。
+ */
+export function buildCompanyInfo(company: InterviewCompany | null | undefined): string {
+  return [
+    company?.description,
+    company?.main_business,
+    company?.culture && `企業文化: ${company.culture}`,
+    company?.work_style && `働き方: ${company.work_style}`,
+    company?.welfare_details && `福利厚生: ${company.welfare_details}`,
+  ].filter(Boolean).join(' / ')
+}
