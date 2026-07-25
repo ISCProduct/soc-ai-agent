@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { resolveCompanyByName, getNextAvatarGender, mergeResolvedCompany } from '@/app/interview/utils'
+import { resolveCompanyByName, getNextAvatarGender, mergeResolvedCompany, buildCompanyInfo } from '@/app/interview/utils'
 
 describe('resolveCompanyByName', () => {
   const originalFetch = global.fetch
@@ -127,5 +127,36 @@ describe('getNextAvatarGender', () => {
     })
     expect(getNextAvatarGender()).toBe('male')
     spy.mockRestore()
+  })
+})
+
+describe('buildCompanyInfo', () => {
+  it('null / undefined の場合は空文字を返す', () => {
+    expect(buildCompanyInfo(null)).toBe('')
+    expect(buildCompanyInfo(undefined)).toBe('')
+  })
+
+  it('企業フィールドを / 区切りで結合する', () => {
+    expect(
+      buildCompanyInfo({
+        id: 1,
+        name: 'テスト社',
+        description: '説明',
+        main_business: '事業',
+        culture: '文化',
+        work_style: 'リモート',
+        welfare_details: '住宅手当',
+      }),
+    ).toBe('説明 / 事業 / 企業文化: 文化 / 働き方: リモート / 福利厚生: 住宅手当')
+  })
+
+  it('空のフィールドは除外する', () => {
+    expect(
+      buildCompanyInfo({
+        id: 1,
+        name: 'テスト社',
+        description: '説明のみ',
+      }),
+    ).toBe('説明のみ')
   })
 })
