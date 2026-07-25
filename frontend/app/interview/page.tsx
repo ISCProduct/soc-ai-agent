@@ -9,32 +9,27 @@ import {
   CircularProgress,
   IconButton,
   LinearProgress,
-  Paper,
-  Stack,
   Tooltip,
   Typography,
 } from '@mui/material'
 import MicIcon from '@mui/icons-material/Mic'
-import MicOffIcon from '@mui/icons-material/MicOff'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import VideocamIcon from '@mui/icons-material/Videocam'
 import VideocamOffIcon from '@mui/icons-material/VideocamOff'
-import WarningAmberIcon from '@mui/icons-material/WarningAmber'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import ClosedCaptionIcon from '@mui/icons-material/ClosedCaption'
-import PsychologyIcon from '@mui/icons-material/Psychology'
 import { BACKEND_URL } from '@/lib/backend-url'
 import { authService, User } from '@/lib/auth'
 import { interviewApi, interviewLimits, InterviewReport, InterviewSession } from '@/lib/interview'
 import { formatSeconds, parseJsonSafe, parseMediaError, parseMultipartResponse } from '@/lib/interview-utils'
 import ThreeAvatar from './components/ThreeAvatar'
-import InterviewSummary from './components/InterviewSummary'
 import ConsentDialog from './components/ConsentDialog'
 import SelectionScreen from './components/SelectionScreen'
-import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
+import LobbyScreen from './components/LobbyScreen'
+import ReportScreen from './components/ReportScreen'
+import { WeightScore } from '@/components/ScoreUpdateBanner'
 import { PageLoading } from '@/components/common/PageLoading'
-import { PRIMARY, BG_LIGHT, BG_DARK, POSITIONS } from './constants'
+import { PRIMARY, POSITIONS } from './constants'
 import type { Utterance, InterviewCompany, Position, InterviewStatus } from './types'
 import { resolveCompanyByName, getNextAvatarGender } from './utils'
 
@@ -778,200 +773,22 @@ function InterviewContent() {
   // ─────────────────────────────────────────────
   if (status === 'lobby') {
     return (
-      <Box sx={{ minHeight: '100vh', bgcolor: BG_LIGHT, display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
-        <Box component="header" sx={{ px: 3, py: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: PRIMARY, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <PsychologyIcon sx={{ color: '#fff', fontSize: 24 }} />
-            </Box>
-            <Box>
-              <Typography sx={{ fontWeight: 700, fontSize: 16, lineHeight: 1.2 }}>AI面接練習</Typography>
-              <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>セッション: {companyName}</Typography>
-            </Box>
-          </Box>
-          <IconButton size="small" onClick={() => router.push('/')}>
-            <ArrowBackIcon fontSize="small" />
-          </IconButton>
-        </Box>
-
-        {/* Content */}
-        <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', p: { xs: 2, md: 6 } }}>
-          <Box sx={{ maxWidth: 960, width: '100%', display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '7fr 5fr' }, gap: { xs: 4, lg: 8 }, alignItems: 'center' }}>
-
-            {/* Camera preview */}
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-              <Box sx={{ position: 'relative', width: '100%', aspectRatio: '16/9', bgcolor: '#202124', borderRadius: 2, overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {lobbyPermissionError ? (
-                  <Box sx={{ textAlign: 'center', p: 3 }}>
-                    <Typography sx={{ color: '#f28b82', mb: 1.5, fontSize: 14 }}>{lobbyPermissionError}</Typography>
-                    <Box sx={{ mb: 2, textAlign: 'left', bgcolor: 'rgba(0,0,0,0.4)', borderRadius: 1, p: 1.5 }}>
-                      <Typography sx={{ color: '#e8eaed', fontSize: 12, mb: 0.5 }}>【ブラウザの許可】</Typography>
-                      <Typography sx={{ color: '#9aa0a6', fontSize: 12, lineHeight: 1.8, mb: 1 }}>
-                        アドレスバー左端の 🔒 → カメラ・マイクを「許可」
-                      </Typography>
-                      <Typography sx={{ color: '#e8eaed', fontSize: 12, mb: 0.5 }}>【Mac のシステム設定】</Typography>
-                      <Typography sx={{ color: '#9aa0a6', fontSize: 12, lineHeight: 1.8 }}>
-                        システム設定 → プライバシーとセキュリティ<br />
-                        → カメラ / マイク → 使用中のブラウザをオン
-                      </Typography>
-                    </Box>
-                    <Button size="small" startIcon={<RefreshIcon />} onClick={() => { setLobbyPermissionError(null); window.location.reload() }} sx={{ color: '#8ab4f8' }}>
-                      再試行
-                    </Button>
-                  </Box>
-                ) : (
-                  <video
-                    ref={lobbyVideoRef}
-                    muted
-                    playsInline
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', display: cameraEnabled ? 'block' : 'none' }}
-                  />
-                )}
-                {!lobbyPermissionError && !cameraEnabled && (
-                  <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <VideocamOffIcon sx={{ color: '#9aa0a6', fontSize: 48 }} />
-                  </Box>
-                )}
-
-                {/* Camera label */}
-                <Box sx={{ position: 'absolute', top: 12, left: 12, bgcolor: 'rgba(0,0,0,0.5)', px: 1.5, py: 0.5, borderRadius: 1 }}>
-                  <Typography sx={{ color: '#fff', fontSize: 13 }}>{user.name || 'あなた'}</Typography>
-                </Box>
-
-                {/* Controls overlay */}
-                <Box sx={{ position: 'absolute', bottom: 16, left: 0, right: 0, display: 'flex', justifyContent: 'center', gap: 2 }}>
-                  <Tooltip title={micEnabled ? 'マイクをオフ' : 'マイクをオン'}>
-                    <IconButton
-                      onClick={() => {
-                        if (!streamRef.current) return
-                        const next = !micEnabled
-                        streamRef.current.getAudioTracks().forEach(t => { t.enabled = next })
-                        setMicEnabled(next)
-                      }}
-                      sx={{ bgcolor: micEnabled ? 'rgba(255,255,255,0.15)' : '#ea4335', border: '1px solid rgba(255,255,255,0.3)', '&:hover': { bgcolor: micEnabled ? 'rgba(255,255,255,0.25)' : '#c5221f' } }}
-                    >
-                      {micEnabled ? <MicIcon sx={{ color: '#fff' }} /> : <MicOffIcon sx={{ color: '#fff' }} />}
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title={cameraEnabled ? 'カメラをオフ' : 'カメラをオン'}>
-                    <IconButton
-                      onClick={() => {
-                        if (!streamRef.current) return
-                        const next = !cameraEnabled
-                        streamRef.current.getVideoTracks().forEach(t => { t.enabled = next })
-                        setCameraEnabled(next)
-                      }}
-                      sx={{ bgcolor: cameraEnabled ? 'rgba(255,255,255,0.15)' : '#ea4335', border: '1px solid rgba(255,255,255,0.3)', '&:hover': { bgcolor: cameraEnabled ? 'rgba(255,255,255,0.25)' : '#c5221f' } }}
-                    >
-                      {cameraEnabled ? <VideocamIcon sx={{ color: '#fff' }} /> : <VideocamOffIcon sx={{ color: '#fff' }} />}
-                    </IconButton>
-                  </Tooltip>
-                </Box>
-              </Box>
-
-              <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: 13 }}>
-                カメラとマイクの確認が完了したら「面接に参加」を押してください
-              </Typography>
-            </Box>
-
-            {/* Join panel */}
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: { xs: 'center', lg: 'flex-start' }, textAlign: { xs: 'center', lg: 'left' } }}>
-              {searchParams.get('company_name') && (
-                <Box sx={{ mb: 2, px: 2, py: 1, bgcolor: '#e8f5e9', borderRadius: 2, border: '1px solid #a5d6a7', width: '100%', maxWidth: 340 }}>
-                  <Typography sx={{ fontSize: 13, color: '#2e7d32', fontWeight: 600 }}>
-                    {interviewCompany?.name}（{interviewCompany?.industry || '業種未設定'}）向けの面接練習を始めます
-                  </Typography>
-                </Box>
-              )}
-              <Typography variant="h4" sx={{ fontWeight: 400, color: '#202124', mb: 1 }}>
-                準備はできましたか？
-              </Typography>
-              <Typography sx={{ color: 'text.secondary', mb: 1, fontSize: 15 }}>
-                {companyName}
-              </Typography>
-              {interviewCompany && interviewCompany.id === 0 && interviewCompany.name.trim() && (
-                <Box sx={{ mb: 2, px: 2, py: 1.5, bgcolor: '#fff8e1', borderRadius: 2, border: '1px solid #ffe082', width: '100%', maxWidth: 340, textAlign: 'left' }}>
-                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-                    <WarningAmberIcon sx={{ color: '#f9a825', fontSize: 18, mt: 0.2, flexShrink: 0 }} />
-                    <Box>
-                      <Typography sx={{ fontSize: 13, color: '#f57f17', fontWeight: 600 }}>
-                        カスタム質問・深掘りは無効です
-                      </Typography>
-                      <Typography sx={{ fontSize: 12, color: '#795548', mt: 0.5, lineHeight: 1.5 }}>
-                        企業管理に未登録のため、一般的な面接練習のみ行えます。登録企業を選ぶとカスタム質問が有効になります。
-                      </Typography>
-                    </Box>
-                  </Box>
-                </Box>
-              )}
-              <Box sx={{ mb: 3, px: 2, py: 1, bgcolor: '#e3f2fd', borderRadius: 1, border: '1px solid #90caf9' }}>
-                <Typography sx={{ fontSize: 13, color: '#1565c0' }}>
-                  ⏱ このセッションは最大{interviewLimits.maxMinutes}分です
-                </Typography>
-              </Box>
-
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ width: '100%', maxWidth: 340 }}>
-                <Button
-                  variant="contained"
-                  onClick={handleJoinWithConsent}
-                  sx={{
-                    flex: 1,
-                    bgcolor: '#1a73e8',
-                    '&:hover': { bgcolor: '#1557b0' },
-                    borderRadius: 9999,
-                    py: 1.2,
-                    fontWeight: 500,
-                    fontSize: 15,
-                    textTransform: 'none',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                  }}
-                >
-                  面接に参加
-                </Button>
-              </Stack>
-
-              {/* 企業特徴プレビュー */}
-              {interviewCompany && (interviewCompany.culture || interviewCompany.work_style || interviewCompany.welfare_details) && (
-                <Box sx={{ mt: 3, width: '100%', maxWidth: 340 }}>
-                  <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1, fontWeight: 600 }}>企業情報</Typography>
-                  <Stack spacing={1}>
-                    {interviewCompany.culture && (
-                      <Box sx={{ p: 1.5, bgcolor: '#f0f4ff', borderRadius: 2, border: '1px solid #c7d7f0' }}>
-                        <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#3b5bdb', mb: 0.3, textTransform: 'uppercase', letterSpacing: 0.5 }}>企業文化</Typography>
-                        <Typography sx={{ fontSize: 13, color: '#1e3a8a', lineHeight: 1.5 }}>{interviewCompany.culture}</Typography>
-                      </Box>
-                    )}
-                    {interviewCompany.work_style && (
-                      <Box sx={{ p: 1.5, bgcolor: '#f0fff4', borderRadius: 2, border: '1px solid #b2dfdb' }}>
-                        <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#2e7d32', mb: 0.3, textTransform: 'uppercase', letterSpacing: 0.5 }}>働き方</Typography>
-                        <Typography sx={{ fontSize: 13, color: '#1b5e20', lineHeight: 1.5 }}>{interviewCompany.work_style}</Typography>
-                      </Box>
-                    )}
-                    {interviewCompany.welfare_details && (
-                      <Box sx={{ p: 1.5, bgcolor: '#fff8f0', borderRadius: 2, border: '1px solid #ffcc80' }}>
-                        <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#e65100', mb: 0.3, textTransform: 'uppercase', letterSpacing: 0.5 }}>福利厚生</Typography>
-                        <Typography sx={{ fontSize: 13, color: '#bf360c', lineHeight: 1.5 }}>{interviewCompany.welfare_details}</Typography>
-                      </Box>
-                    )}
-                  </Stack>
-                </Box>
-              )}
-            </Box>
-          </Box>
-        </Box>
-
-        {/* Footer */}
-        <Box component="footer" sx={{ py: 2.5, display: 'flex', justifyContent: 'center', gap: 4 }}>
-          {['プライバシー', '利用規約', 'ヘルプ'].map(label => (
-            <Typography key={label} variant="body2" sx={{ color: 'text.secondary', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}>
-              {label}
-            </Typography>
-          ))}
-        </Box>
-
-        {consentDialog}
-      </Box>
+      <LobbyScreen
+        userName={user.name}
+        companyName={companyName}
+        interviewCompany={interviewCompany}
+        fromMatchingResults={Boolean(searchParams.get('company_name'))}
+        lobbyPermissionError={lobbyPermissionError}
+        onRetryPermissions={() => { setLobbyPermissionError(null); window.location.reload() }}
+        micEnabled={micEnabled}
+        cameraEnabled={cameraEnabled}
+        onToggleMic={toggleMic}
+        onToggleCamera={toggleCamera}
+        lobbyVideoRef={lobbyVideoRef}
+        onBack={() => router.push('/')}
+        onJoinWithConsent={handleJoinWithConsent}
+        consentDialog={consentDialog}
+      />
     )
   }
 
@@ -980,89 +797,34 @@ function InterviewContent() {
   // ─────────────────────────────────────────────
   if (status === 'finished') {
     return (
-      <Box sx={{ minHeight: '100vh', bgcolor: BG_DARK, color: '#e8eaed', overflowY: 'auto', p: { xs: 2, md: 4 } }}>
-        <Box sx={{ maxWidth: 720, mx: 'auto' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 4 }}>
-            <IconButton sx={{ color: '#bdc1c6' }} onClick={() => router.push('/')}>
-              <ArrowBackIcon />
-            </IconButton>
-            <Typography variant="h5" sx={{ fontWeight: 700, color: '#e8eaed' }}>面接レポート</Typography>
-          </Box>
-
-          {errorMessage && (
-            <Paper sx={{ bgcolor: 'rgba(234,67,53,0.15)', border: '1px solid rgba(234,67,53,0.4)', p: 2, mb: 2, borderRadius: 2 }}>
-              <Typography variant="body2" sx={{ color: '#f28b82' }}>{errorMessage}</Typography>
-            </Paper>
-          )}
-
-          {reportStatus === 'pending' && (
-            <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(255,255,255,0.08)', p: 3, borderRadius: 2 }}>
-              <Typography sx={{ color: '#e8eaed', mb: 1.5 }}>レポートを生成中です...</Typography>
-              <LinearProgress sx={{ bgcolor: '#3c4043', '& .MuiLinearProgress-bar': { bgcolor: '#4285f4' } }} />
-            </Paper>
-          )}
-
-          {reportStatus === 'ready' && report && (
-            <Stack spacing={2}>
-              <ScoreUpdateBanner
-                beforeScores={scoresBefore}
-                afterScores={scoresAfter}
-                title="面接結果がプロフィールスコアに反映されました"
-              />
-              <InterviewSummary report={report} userId={user?.user_id} theme="dark" />
-              <Button
-                variant="outlined"
-                fullWidth
-                disabled={emailSending || emailSent || !user || user.is_guest}
-                onClick={async () => {
-                  if (!session || !user) return
-                  setEmailSending(true)
-                  try {
-                    await interviewApi.sendReportEmail(session.id, user.user_id)
-                    setEmailSent(true)
-                  } catch {
-                    // ignore
-                  } finally {
-                    setEmailSending(false)
-                  }
-                }}
-                sx={{ color: emailSent ? '#34a853' : PRIMARY, borderColor: emailSent ? '#34a853' : PRIMARY, '&:hover': { borderColor: PRIMARY, bgcolor: 'rgba(236,91,19,0.08)' } }}
-              >
-                {emailSent ? '✓ メールを送信しました' : emailSending ? '送信中...' : 'レポートをメールで受け取る'}
-              </Button>
-            </Stack>
-          )}
-
-          {reportStatus === 'error' && (
-            <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(234,67,53,0.3)', p: 3, borderRadius: 2 }}>
-              <Typography variant="body2" sx={{ color: '#f28b82' }}>レポート生成に失敗しました。</Typography>
-            </Paper>
-          )}
-
-          {/* Video upload status */}
-          {videoUploadStatus !== 'idle' && (
-            <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(255,255,255,0.1)', p: 2, borderRadius: 2 }}>
-              {videoSizeWarning && (
-                <Typography variant="caption" sx={{ color: '#fdd663', display: 'block', mb: 1 }}>
-                  ⚠ {videoSizeWarning}
-                </Typography>
-              )}
-              <Typography variant="body2" sx={{ color: videoUploadStatus === 'done' ? '#34a853' : videoUploadStatus === 'error' ? '#f28b82' : '#9aa0a6', mb: videoUploadStatus === 'uploading' ? 1 : 0 }}>
-                {videoUploadStatus === 'uploading' && `動画をアップロード中... ${videoUploadProgress}%`}
-                {videoUploadStatus === 'done' && '✓ 動画のアップロードが完了しました'}
-                {videoUploadStatus === 'error' && '動画のアップロードに失敗しました。ネットワーク接続を確認してください'}
-              </Typography>
-              {videoUploadStatus === 'uploading' && (
-                <LinearProgress
-                  variant="determinate"
-                  value={videoUploadProgress}
-                  sx={{ height: 6, borderRadius: 3, bgcolor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { bgcolor: PRIMARY } }}
-                />
-              )}
-            </Paper>
-          )}
-        </Box>
-      </Box>
+      <ReportScreen
+        onBack={() => router.push('/')}
+        errorMessage={errorMessage}
+        reportStatus={reportStatus}
+        report={report}
+        scoresBefore={scoresBefore}
+        scoresAfter={scoresAfter}
+        session={session}
+        userId={user?.user_id}
+        emailSending={emailSending}
+        emailSent={emailSent}
+        isGuest={!user || user.is_guest}
+        onSendEmail={async () => {
+          if (!session || !user) return
+          setEmailSending(true)
+          try {
+            await interviewApi.sendReportEmail(session.id, user.user_id)
+            setEmailSent(true)
+          } catch {
+            // ignore
+          } finally {
+            setEmailSending(false)
+          }
+        }}
+        videoUploadStatus={videoUploadStatus}
+        videoUploadProgress={videoUploadProgress}
+        videoSizeWarning={videoSizeWarning}
+      />
     )
   }
 
