@@ -244,6 +244,7 @@ function InterviewContent() {
         emailSent={session.emailSent}
         isGuest={!user || user.is_guest}
         onSendEmail={session.sendReportEmail}
+        onRetryReport={session.retryReportPolling}
         videoUploadStatus={session.videoUploadStatus}
         videoUploadProgress={session.videoUploadProgress}
         videoSizeWarning={session.videoSizeWarning}
