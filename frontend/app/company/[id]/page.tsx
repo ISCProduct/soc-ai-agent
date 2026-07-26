@@ -11,7 +11,16 @@ import {
   DollarSign, Star, Clock, Target, GitBranch, Network
 } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import CompanyDiagram from "@/components/company-diagram"
+import dynamic from "next/dynamic"
+
+const CompanyDiagram = dynamic(() => import("@/components/company-diagram"), {
+  ssr: false,
+  loading: () => (
+    <div style={{ padding: 24, textAlign: "center", color: "#64748b" }}>
+      相関図を読み込み中...
+    </div>
+  ),
+})
 
 type Company = {
   id: number

@@ -3,7 +3,13 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, Box } from '@mui/material';
 import { Suspense } from 'react';
-import CorrelationDiagram from '@/components/Correlation-diagram';
+import dynamic from 'next/dynamic';
+import { PageLoading } from '@/components/common/PageLoading';
+
+const CorrelationDiagram = dynamic(() => import('@/components/Correlation-diagram'), {
+    ssr: false,
+    loading: () => <PageLoading message="企業相関図を準備しています..." />,
+});
 
 function CorrelationDiagramContent() {
     const router = useRouter();

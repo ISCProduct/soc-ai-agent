@@ -9,7 +9,14 @@ import { WeightScore } from '@/components/ScoreUpdateBanner'
 import type { InterviewMedia } from './useInterviewMedia'
 import { useHandsFreeVad } from './useHandsFreeVad'
 import { buildCompanyInfo, getNextAvatarGender } from '../utils'
+import {
+  evaluateReportPollTick,
+  REPORT_POLL_INTERVAL_MS,
+  REPORT_POLL_TIMEOUT_MS,
+} from '../reportPolling'
 import type { Utterance, InterviewCompany, Position, InterviewStatus } from '../types'
+
+export type ReportStatus = 'idle' | 'pending' | 'ready' | 'error' | 'timeout'
 
 type UseInterviewSessionArgs = {
   user: User | null
@@ -45,7 +52,7 @@ export function useInterviewSession({
   const [sessionWarningShown, setSessionWarningShown] = useState(false)
   const [session, setSession] = useState<InterviewSession | null>(null)
   const [report, setReport] = useState<InterviewReport | null>(null)
-  const [reportStatus, setReportStatus] = useState<'idle' | 'pending' | 'ready' | 'error'>('idle')
+  const [reportStatus, setReportStatus] = useState<ReportStatus>('idle')
   const [emailSending, setEmailSending] = useState(false)
   const [emailSent, setEmailSent] = useState(false)
   const [aiLevel, setAiLevel] = useState(0)
@@ -71,6 +78,10 @@ export function useInterviewSession({
   const aiLevelRafRef = useRef<number | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollStartedAtRef = useRef<number | null>(null)
+  const pollSessionRef = useRef<{ sessionId: number; userId: number } | null>(null)
+  /** 再試行時に古い tick の結果を破棄するための世代カウンタ */
+  const pollGenerationRef = useRef(0)
   const sessionStartRef = useRef<number | null>(null)
   const transcriptEndRef = useRef<HTMLDivElement | null>(null)
   const isRecordingRef = useRef(false)
@@ -329,23 +340,89 @@ export function useInterviewSession({
     }
   }
 
+  const stopReportPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+  }
+
+  const loadScoresAfter = async (userId: number) => {
+    const scoreSessionId = `interview-${userId}`
+    try {
+      const res = await fetch(`/api/user/weight-scores?user_id=${userId}&session_id=${encodeURIComponent(scoreSessionId)}`)
+      const data = await res.json()
+      setScoresAfter(data.weight_scores ?? null)
+    } catch { /* ignore */ }
+  }
+
   const startReportPolling = (sessionId: number, userId: number) => {
-    if (pollRef.current) clearInterval(pollRef.current)
-    pollRef.current = setInterval(async () => {
+    stopReportPolling()
+    const generation = ++pollGenerationRef.current
+    pollSessionRef.current = { sessionId, userId }
+    pollStartedAtRef.current = Date.now()
+    setReportStatus('pending')
+
+    const tick = async () => {
+      if (generation !== pollGenerationRef.current) return
+
+      const startedAt = pollStartedAtRef.current ?? Date.now()
+      let hasReport = false
+      let fetchFailed = false
+      let reportPayload: InterviewReport | null = null
+
       try {
         const detail = await interviewApi.getDetail(sessionId, userId)
         if (detail.report) {
-          setReport(detail.report); setReportStatus('ready')
-          clearInterval(pollRef.current!); pollRef.current = null
-          const scoreSessionId = `interview-${userId}`
-          try {
-            const res = await fetch(`/api/user/weight-scores?user_id=${userId}&session_id=${encodeURIComponent(scoreSessionId)}`)
-            const data = await res.json()
-            setScoresAfter(data.weight_scores ?? null)
-          } catch { /* ignore */ }
+          hasReport = true
+          reportPayload = detail.report
         }
-      } catch { setReportStatus('error') }
-    }, 3000)
+      } catch {
+        fetchFailed = true
+      }
+
+      if (generation !== pollGenerationRef.current) return
+
+      const outcome = evaluateReportPollTick({
+        startedAtMs: startedAt,
+        nowMs: Date.now(),
+        timeoutMs: REPORT_POLL_TIMEOUT_MS,
+        hasReport,
+        fetchFailed,
+      })
+
+      if (outcome === 'ready' && reportPayload) {
+        setReport(reportPayload)
+        setReportStatus('ready')
+        stopReportPolling()
+        await loadScoresAfter(userId)
+        return
+      }
+      if (outcome === 'error') {
+        setReportStatus('error')
+        stopReportPolling()
+        return
+      }
+      if (outcome === 'timeout') {
+        setReportStatus('timeout')
+        stopReportPolling()
+      }
+    }
+
+    // 初回は即時、以降は interval
+    void tick()
+    pollRef.current = setInterval(() => { void tick() }, REPORT_POLL_INTERVAL_MS)
+  }
+
+  const retryReportPolling = () => {
+    const target = pollSessionRef.current
+    if (!target) {
+      if (session && user) {
+        startReportPolling(session.id, user.user_id)
+      }
+      return
+    }
+    startReportPolling(target.sessionId, target.userId)
   }
 
   const startRecording = () => {
@@ -450,6 +527,7 @@ export function useInterviewSession({
     session,
     report,
     reportStatus,
+    retryReportPolling,
     emailSending,
     emailSent,
     aiLevel,

@@ -110,6 +110,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
     const [marketInfo, setMarketInfo] = useState<CompanyMarketInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
+    const [reloadToken, setReloadToken] = useState(0);
 
     useEffect(() => {
         async function loadData() {
@@ -131,7 +132,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
             }
         }
         void loadData();
-    }, []);
+    }, [reloadToken]);
 
     const uniqueCompanies = useMemo(() => {
         const companyMap = new Map<number, string>();

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { InterviewStatus } from '../types'
+import { shouldStartInterviewMediaPreview } from './mediaPreviewGate'
 
 /** getUserMedia 共通制約（ロビープレビュー / ensureStream で共有） */
 export const MEDIA_CONSTRAINTS: MediaStreamConstraints = {
@@ -39,9 +40,9 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
   const videoRecorderRef = useRef<MediaRecorder | null>(null)
   const videoChunksRef = useRef<Blob[]>([])
 
-  // Lobby camera preview
+  // Lobby camera preview — 選択画面では getUserMedia しない（遷移直後の遅延を避ける）
   useEffect(() => {
-    if (loading) return
+    if (!shouldStartInterviewMediaPreview({ loading, status })) return
     let stream: MediaStream | null = null
     const startPreview = async () => {
       try {
@@ -70,7 +71,7 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
     return () => {
       // stream is kept in streamRef for reuse during interview
     }
-  }, [loading])
+  }, [loading, status])
 
   // Attach stream to session video when connected
   useEffect(() => {

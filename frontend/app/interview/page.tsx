@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, Suspense } from 'react'
+import dynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { interviewLimits } from '@/lib/interview'
 import { authService, User } from '@/lib/auth'
@@ -8,13 +9,18 @@ import ConsentDialog from './components/ConsentDialog'
 import SelectionScreen from './components/SelectionScreen'
 import LobbyScreen from './components/LobbyScreen'
 import ReportScreen from './components/ReportScreen'
-import SessionScreen from './components/SessionScreen'
 import { PageLoading } from '@/components/common/PageLoading'
 import { POSITIONS } from './constants'
 import type { InterviewCompany, Position, InterviewStatus } from './types'
 import { resolveCompanyByName } from './utils'
 import { useInterviewMedia } from './hooks/useInterviewMedia'
 import { useInterviewSession } from './hooks/useInterviewSession'
+
+/** three.js 依存の SessionScreen は選択/ロビーでは不要のため遅延ロード */
+const SessionScreen = dynamic(() => import('./components/SessionScreen'), {
+  ssr: false,
+  loading: () => <PageLoading message="面接セッションを準備しています..." />,
+})
 
 function InterviewContent() {
   const router = useRouter()
@@ -244,6 +250,7 @@ function InterviewContent() {
         emailSent={session.emailSent}
         isGuest={!user || user.is_guest}
         onSendEmail={session.sendReportEmail}
+        onRetryReport={session.retryReportPolling}
         videoUploadStatus={session.videoUploadStatus}
         videoUploadProgress={session.videoUploadProgress}
         videoSizeWarning={session.videoSizeWarning}

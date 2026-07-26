@@ -14,11 +14,12 @@ import { InterviewReport, InterviewSession } from '@/lib/interview'
 import InterviewSummary from './InterviewSummary'
 import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
 import { PRIMARY, BG_DARK } from '../constants'
+import type { ReportStatus } from '../hooks/useInterviewSession'
 
 export interface ReportScreenProps {
   onBack: () => void
   errorMessage: string | null
-  reportStatus: 'idle' | 'pending' | 'ready' | 'error'
+  reportStatus: ReportStatus
   report: InterviewReport | null
   scoresBefore: WeightScore[] | null
   scoresAfter: WeightScore[] | null
@@ -28,6 +29,8 @@ export interface ReportScreenProps {
   emailSending: boolean
   emailSent: boolean
   onSendEmail: () => void
+  /** タイムアウト / エラー時の再ポーリング */
+  onRetryReport?: () => void
   /** ゲストユーザーはメール送信不可 */
   isGuest: boolean
   videoUploadStatus: 'idle' | 'uploading' | 'done' | 'error'
@@ -52,6 +55,7 @@ export default function ReportScreen({
   emailSending,
   emailSent,
   onSendEmail,
+  onRetryReport,
   isGuest,
   videoUploadStatus,
   videoUploadProgress,
@@ -100,9 +104,22 @@ export default function ReportScreen({
           </Stack>
         )}
 
-        {reportStatus === 'error' && (
+        {(reportStatus === 'error' || reportStatus === 'timeout') && (
           <Paper sx={{ bgcolor: '#2d2e31', border: '1px solid rgba(234,67,53,0.3)', p: 3, borderRadius: 2 }}>
-            <Typography variant="body2" sx={{ color: '#f28b82' }}>レポート生成に失敗しました。</Typography>
+            <Typography variant="body2" sx={{ color: '#f28b82', mb: onRetryReport ? 2 : 0 }}>
+              {reportStatus === 'timeout'
+                ? 'レポート生成がタイムアウトしました。時間をおいて再試行してください。'
+                : 'レポート生成に失敗しました。'}
+            </Typography>
+            {onRetryReport && (
+              <Button
+                variant="contained"
+                onClick={onRetryReport}
+                sx={{ bgcolor: PRIMARY, '&:hover': { bgcolor: '#d14f10' } }}
+              >
+                再試行
+              </Button>
+            )}
           </Paper>
         )}
 

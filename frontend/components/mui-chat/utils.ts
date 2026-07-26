@@ -43,3 +43,21 @@ export const JOB_QUICK_OPTIONS = [
   '両方に興味がある',
   'まだ決めていない',
 ] as const
+
+/**
+ * チャット終了時にセッション ID とメッセージ／キャッシュを削除する。
+ * sessionId は remove 前に取得する（先に消すと chat_cache_ が残る）。
+ */
+export function clearChatSessionOnEnd(storage: {
+  sessionStorage: Pick<Storage, 'getItem' | 'removeItem'>
+  localStorage: Pick<Storage, 'removeItem'>
+}): void {
+  const currentSessionId = storage.sessionStorage.getItem('chatSessionId')
+  if (currentSessionId) {
+    storage.localStorage.removeItem(`chat_cache_${currentSessionId}`)
+  }
+  storage.sessionStorage.removeItem('chatSessionId')
+  storage.sessionStorage.removeItem('chatMessages')
+  storage.localStorage.removeItem('chatMessages')
+  storage.localStorage.removeItem('chat_session_id')
+}

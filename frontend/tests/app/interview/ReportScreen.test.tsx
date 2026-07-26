@@ -43,4 +43,29 @@ describe('ReportScreen', () => {
 
     expect(screen.getByText('レポートを生成中です...')).toBeInTheDocument()
   })
+
+  it('timeout の場合はタイムアウト文言と再試行ボタンを表示する', () => {
+    const onRetryReport = jest.fn()
+    renderScreen({ reportStatus: 'timeout', onRetryReport })
+
+    expect(
+      screen.getByText('レポート生成がタイムアウトしました。時間をおいて再試行してください。'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '再試行' })).toBeInTheDocument()
+  })
+
+  it('error の場合は失敗文言と再試行ボタンを表示する', () => {
+    renderScreen({ reportStatus: 'error', onRetryReport: jest.fn() })
+
+    expect(screen.getByText('レポート生成に失敗しました。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '再試行' })).toBeInTheDocument()
+  })
+
+  it('再試行ボタン押下で onRetryReport が呼ばれる', () => {
+    const onRetryReport = jest.fn()
+    renderScreen({ reportStatus: 'timeout', onRetryReport })
+
+    screen.getByRole('button', { name: '再試行' }).click()
+    expect(onRetryReport).toHaveBeenCalledTimes(1)
+  })
 })

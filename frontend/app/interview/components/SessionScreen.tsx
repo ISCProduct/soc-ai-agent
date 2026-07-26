@@ -17,10 +17,19 @@ import VideocamIcon from '@mui/icons-material/Videocam'
 import VideocamOffIcon from '@mui/icons-material/VideocamOff'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import ClosedCaptionIcon from '@mui/icons-material/ClosedCaption'
-import ThreeAvatar from './ThreeAvatar'
+import dynamic from 'next/dynamic'
 import { PRIMARY } from '../constants'
 import { formatSeconds } from '@/lib/interview-utils'
 import type { Utterance } from '../types'
+
+const ThreeAvatar = dynamic(() => import('./ThreeAvatar'), {
+  ssr: false,
+  loading: () => (
+    <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <CircularProgress size={36} sx={{ color: PRIMARY }} />
+    </Box>
+  ),
+})
 
 const waveHeights = [5, 8, 13, 18, 25, 34, 42, 48, 44, 36, 28, 20, 14, 9, 6, 7, 11, 18, 27, 36, 44, 48, 42, 34, 26, 18, 12, 8, 5, 7, 10, 14]
 
