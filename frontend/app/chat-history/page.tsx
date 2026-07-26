@@ -1,60 +1,56 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Box, Container, Typography, Paper, List, ListItem, ListItemButton, ListItemText, Divider, CircularProgress, Button } from '@mui/material'
+import { useState, useEffect, useCallback } from 'react'
+import { Box, Container, Typography, Paper, List, ListItem, ListItemButton, ListItemText, Divider, CircularProgress, Button, Stack } from '@mui/material'
 import { useRouter } from 'next/navigation'
 import { authService } from '@/lib/auth'
 import ChatIcon from '@mui/icons-material/Chat'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
-
-interface ChatSession {
-  session_id: string
-  user_id: number
-  started_at: string
-  last_message_at: string
-  message_count: number
-}
+import { parseChatSessionsResponse, type ChatSessionSummary } from './parseSessions'
 
 export default function ChatHistoryPage() {
-  const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [sessions, setSessions] = useState<ChatSessionSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [authError, setAuthError] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const router = useRouter()
 
-  useEffect(() => {
-    const user = authService.getStoredUser()
-    if (!user) {
-      router.push('/')
-      return
-    }
-    fetchSessions()
-  }, [router])
-
-  const fetchSessions = async () => {
+  const fetchSessions = useCallback(async () => {
+    setLoading(true)
+    setLoadError(null)
+    setAuthError(false)
     try {
       const response = await fetch('/api/chat/sessions', {
         headers: authService.getUserFetchHeaders(),
       })
       if (response.status === 401 || response.status === 403) {
         setAuthError(true)
+        setSessions([])
         return
       }
       if (!response.ok) {
-        console.error('Failed to fetch sessions:', response.status)
+        setLoadError('チャット履歴の取得に失敗しました。')
         setSessions([])
         return
       }
       const raw = await response.json()
-      // buildProxyJsonResponse は配列を { data: [...] } にラップするため両形式に対応
-      const data: ChatSession[] = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : []
-      setSessions(data)
-    } catch (error) {
-      console.error('Error fetching sessions:', error)
+      setSessions(parseChatSessionsResponse(raw))
+    } catch {
+      setLoadError('チャット履歴の取得に失敗しました。')
       setSessions([])
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    const user = authService.getStoredUser()
+    if (!user) {
+      router.push('/login')
+      return
+    }
+    void fetchSessions()
+  }, [router, fetchSessions])
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr)
@@ -91,7 +87,7 @@ export default function ChatHistoryPage() {
           <Typography color="text.secondary" sx={{ mb: 2 }}>
             セッションが期限切れです。再度ログインしてください。
           </Typography>
-          <Button variant="contained" onClick={() => { authService.logout(); router.push('/') }}>
+          <Button variant="contained" onClick={() => { authService.logout(); router.push('/login') }}>
             ログインページへ
           </Button>
         </Paper>
@@ -113,7 +109,19 @@ export default function ChatHistoryPage() {
         チャット履歴
       </Typography>
 
-      {sessions.length === 0 ? (
+      {loadError ? (
+        <Paper sx={{ p: 4, textAlign: 'center' }}>
+          <Stack spacing={2} alignItems="center">
+            <Typography color="error">{loadError}</Typography>
+            <Typography variant="body2" color="text.secondary">
+              空の履歴ではなく、読み込みエラーです。時間をおいて再試行してください。
+            </Typography>
+            <Button variant="contained" onClick={() => { void fetchSessions() }}>
+              再試行
+            </Button>
+          </Stack>
+        </Paper>
+      ) : sessions.length === 0 ? (
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <Typography color="text.secondary">
             チャット履歴がありません

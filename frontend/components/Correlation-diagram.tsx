@@ -14,7 +14,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Card, CardContent } from '@/components/ui/card';
-import { Box, Typography, ToggleButtonGroup, ToggleButton, Chip, Select, MenuItem, FormControl, InputLabel } from '@mui/material';
+import { Box, Typography, ToggleButtonGroup, ToggleButton, Chip, Select, MenuItem, FormControl, InputLabel, Button, Stack } from '@mui/material';
 import {
     fetchCompanyRelations,
     fetchCompanyMarketInfo,
@@ -108,6 +108,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
     const [marketInfo, setMarketInfo] = useState<CompanyMarketInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
+    const [reloadToken, setReloadToken] = useState(0);
 
     useEffect(() => {
         async function loadData() {
@@ -129,7 +130,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
             }
         }
         void loadData();
-    }, []);
+    }, [reloadToken]);
 
     const uniqueCompanies = useMemo(() => {
         const companyMap = new Map();
@@ -381,8 +382,32 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
 
     if (loadError) {
         return (
-            <Box sx={{ width: '100%', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Typography color="error">{loadError}</Typography>
+            <Box sx={{ width: '100%', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3 }}>
+                <Stack spacing={2} alignItems="center" sx={{ maxWidth: 480, textAlign: 'center' }}>
+                    <Typography color="error">企業相関データの取得に失敗しました。</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                        ネットワーク接続を確認のうえ、再試行してください。
+                    </Typography>
+                    <Button variant="contained" onClick={() => setReloadToken((n) => n + 1)}>
+                        再試行
+                    </Button>
+                </Stack>
+            </Box>
+        );
+    }
+
+    if (relations.length === 0) {
+        return (
+            <Box sx={{ width: '100%', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3 }}>
+                <Stack spacing={2} alignItems="center" sx={{ maxWidth: 480, textAlign: 'center' }}>
+                    <Typography>表示できる企業の関連データがまだありません。</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                        データが準備され次第、ここに相関図が表示されます。しばらくしてから再度お試しください。
+                    </Typography>
+                    <Button variant="outlined" onClick={() => setReloadToken((n) => n + 1)}>
+                        再読み込み
+                    </Button>
+                </Stack>
             </Box>
         );
     }
