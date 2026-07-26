@@ -28,6 +28,8 @@ export function parseApiErrorMessage(errText: string, defaultMessage: string): s
 
 /** DB 企業検索 API のレスポンスを候補一覧に変換する */
 export function mapDbCompanyResults(data: unknown): CompanyCandidate[] {
+  if (!data || typeof data !== 'object') return []
+
   const payload = data as { companies?: unknown } | unknown[]
   const companies = (Array.isArray(payload)
     ? payload
@@ -51,6 +53,8 @@ export function mapDbCompanyResults(data: unknown): CompanyCandidate[] {
 
 /** WEB 企業検索 API のレスポンスを候補一覧に変換する */
 export function mapWebSearchResults(data: unknown): CompanyCandidate[] {
+  if (!data || typeof data !== 'object') return []
+
   const results = (data as { results?: unknown }).results as {
     name?: string
     description?: string
@@ -77,11 +81,14 @@ export function mapWebSearchResults(data: unknown): CompanyCandidate[] {
 /**
  * 注釈 PDF レスポンスかどうかをヘッダーとステータスから判定する。
  * Content-Type が application/octet-stream でも Range 成功なら実体ありとみなす。
+ * status 200 のみの場合は content-length / content-range の存在を要求する。
  */
 export function isAnnotatedPdfResponse(
   contentType: string,
   contentDisposition: string,
   status: number,
+  contentLength?: string | null,
+  contentRange?: string | null,
 ): boolean {
   const normalizedType = contentType.toLowerCase()
   if (normalizedType.includes('application/pdf')) return true
@@ -89,5 +96,9 @@ export function isAnnotatedPdfResponse(
   const normalizedDisposition = contentDisposition.toLowerCase()
   if (normalizedDisposition.includes('.pdf')) return true
 
-  return status === 206 || status === 200
+  if (status === 206) return true
+  if (status === 200) {
+    return Boolean(contentLength || contentRange)
+  }
+  return false
 }

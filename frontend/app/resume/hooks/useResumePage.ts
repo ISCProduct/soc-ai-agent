@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { authService } from '@/lib/auth'
 import type { WeightScore } from '@/components/ScoreUpdateBanner'
 import type { CompanyCandidate, ReviewResult } from '../types'
@@ -16,7 +16,6 @@ import {
  * 履歴書レビューページの state・副作用・イベントハンドラ。
  */
 export function useResumePage() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const [userId, setUserId] = useState('')
   const [sessionId, setSessionId] = useState('')
@@ -42,6 +41,7 @@ export function useResumePage() {
   const [ragReport, setRagReport] = useState('')
   const [scoresBefore, setScoresBefore] = useState<WeightScore[] | null>(null)
   const [scoresAfter, setScoresAfter] = useState<WeightScore[] | null>(null)
+  const reviewAbortRef = useRef<AbortController | null>(null)
 
   const prefilledCompany = searchParams.get('company_name') || ''
   const prefilledIndustry = searchParams.get('industry') || ''
@@ -56,6 +56,8 @@ export function useResumePage() {
         response.headers.get('content-type') || '',
         response.headers.get('content-disposition') || '',
         response.status,
+        response.headers.get('content-length'),
+        response.headers.get('content-range'),
       )
     } catch {
       return false
@@ -81,6 +83,12 @@ export function useResumePage() {
       setSelectedCompanyMeta(null)
     }
   }, [prefilledCompany])
+
+  useEffect(() => {
+    return () => {
+      reviewAbortRef.current?.abort()
+    }
+  }, [])
 
   const selectCompany = (candidate: CompanyCandidate) => {
     setCompanyName(candidate.name)
@@ -205,6 +213,11 @@ export function useResumePage() {
       setReviewError('企業を検索して候補から選択するか、「WEBで実在確認」を実行してください')
       return
     }
+
+    reviewAbortRef.current?.abort()
+    const abortController = new AbortController()
+    reviewAbortRef.current = abortController
+
     setReviewError('')
     setAnnotateError('')
     setReview(null)
@@ -214,10 +227,18 @@ export function useResumePage() {
 
     if (userId && sessionId) {
       try {
-        const res = await fetch(`/api/user/weight-scores?user_id=${userId}&session_id=${encodeURIComponent(sessionId)}`)
+        const res = await fetch(`/api/user/weight-scores?user_id=${userId}&session_id=${encodeURIComponent(sessionId)}`, {
+          signal: abortController.signal,
+        })
         const data = await res.json()
         setScoresBefore(data.weight_scores ?? null)
-      } catch { /* ignore */ }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          setReviewLoading(false)
+          return
+        }
+        /* ignore */
+      }
     }
 
     try {
@@ -229,6 +250,7 @@ export function useResumePage() {
           job_title: jobTitle,
           candidate_type: candidateType,
         }),
+        signal: abortController.signal,
       })
 
       if (!response.ok || !response.body) {
@@ -241,6 +263,11 @@ export function useResumePage() {
       let buffer = ''
 
       while (true) {
+        if (abortController.signal.aborted) {
+          await reader.cancel().catch(() => undefined)
+          break
+        }
+
         const { done, value } = await reader.read()
         if (done) break
 
@@ -250,37 +277,63 @@ export function useResumePage() {
 
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
+
+          let data: {
+            type?: string
+            text?: string
+            review?: ReviewResult['review']
+            items?: ReviewResult['items']
+            annotated_available?: boolean
+            message?: string
+          }
           try {
-            const data = JSON.parse(line.slice(6))
-            if (data.type === 'chunk') {
-              setRagReport((prev) => prev + data.text)
-            } else if (data.type === 'complete') {
-              const backendAnnotated = data.annotated_available === true
-              const annotatedAvailable = backendAnnotated || (documentId ? await checkAnnotatedPdfAvailable(documentId) : false)
-              setReview({ review: data.review, items: data.items, annotated_available: annotatedAvailable })
-              if (userId && sessionId) {
-                try {
-                  const res = await fetch(`/api/user/weight-scores?user_id=${userId}&session_id=${encodeURIComponent(sessionId)}`)
-                  const scoreData = await res.json()
+            data = JSON.parse(line.slice(6))
+          } catch {
+            // 不完全・不正な行はスキップ
+            continue
+          }
+
+          if (data.type === 'chunk') {
+            setRagReport((prev) => prev + (data.text ?? ''))
+          } else if (data.type === 'complete') {
+            const backendAnnotated = data.annotated_available === true
+            const annotatedAvailable = backendAnnotated || (documentId ? await checkAnnotatedPdfAvailable(documentId) : false)
+            if (abortController.signal.aborted) return
+            setReview({
+              review: data.review as ReviewResult['review'],
+              items: data.items ?? [],
+              annotated_available: annotatedAvailable,
+            })
+            if (userId && sessionId) {
+              try {
+                const res = await fetch(`/api/user/weight-scores?user_id=${userId}&session_id=${encodeURIComponent(sessionId)}`, {
+                  signal: abortController.signal,
+                })
+                const scoreData = await res.json()
+                if (!abortController.signal.aborted) {
                   setScoresAfter(scoreData.weight_scores ?? null)
-                } catch { /* ignore */ }
+                }
+              } catch (err) {
+                if (err instanceof DOMException && err.name === 'AbortError') return
+                /* ignore */
               }
-            } else if (data.type === 'annotate_error') {
-              setAnnotateError(data.message)
-            } else if (data.type === 'error') {
-              throw new Error(data.message)
             }
-          } catch (parseErr) {
-            if (parseErr instanceof Error && parseErr.message !== 'Unexpected token') {
-              throw parseErr
-            }
+          } else if (data.type === 'annotate_error') {
+            setAnnotateError(String(data.message ?? ''))
+          } else if (data.type === 'error') {
+            throw new Error(String(data.message ?? 'Review failed'))
           }
         }
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return
+      }
       setReviewError(err instanceof Error ? err.message : 'Review failed')
     } finally {
-      setReviewLoading(false)
+      if (!abortController.signal.aborted) {
+        setReviewLoading(false)
+      }
     }
   }
 
@@ -310,7 +363,6 @@ export function useResumePage() {
   }
 
   return {
-    router,
     prefilledCompany,
     prefilledIndustry,
     sourceType,

@@ -59,7 +59,7 @@ export function ResumeReviewResults({
         </Box>
         <Divider sx={{ mb: 3 }} />
         <Stack spacing={2}>
-          {review.items.map((item) => {
+          {(review.items ?? []).map((item) => {
             const config = getSeverityConfig(item.severity)
             return (
               <Card

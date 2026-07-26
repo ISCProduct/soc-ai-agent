@@ -2,15 +2,16 @@
 
 import { Box, IconButton, Typography } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
-import type { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.shared-runtime'
+import { useRouter } from 'next/navigation'
 
 type ResumePageHeaderProps = {
-  router: AppRouterInstance
   prefilledCompany: string
   prefilledIndustry: string
 }
 
-export function ResumePageHeader({ router, prefilledCompany, prefilledIndustry }: ResumePageHeaderProps) {
+export function ResumePageHeader({ prefilledCompany, prefilledIndustry }: ResumePageHeaderProps) {
+  const router = useRouter()
+
   return (
     <>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>

@@ -5,6 +5,7 @@ import {
   Box,
   Button,
   Card,
+  CardActionArea,
   CardContent,
   Chip,
   LinearProgress,
@@ -25,7 +26,7 @@ type ResumeReviewFormProps = {
   companySearchError: string
   selectedCompanyMeta: CompanyCandidate | null
   companyCandidates: CompanyCandidate[]
-  onSearchCompanies: (includeWebSearch: boolean) => void
+  onSearchCompanies: (includeWebSearch: boolean) => void | Promise<void>
   onSelectCompany: (candidate: CompanyCandidate) => void
   onClearSelectedCompany: () => void
   jobTitle: string
@@ -125,18 +126,19 @@ export function ResumeReviewForm({
               <Card
                 key={`${c.source}-${c.company_id ?? c.name}`}
                 variant="outlined"
-                sx={{ cursor: 'pointer', '&:hover': { borderColor: 'primary.main' } }}
-                onClick={() => onSelectCompany(c)}
+                sx={{ '&:hover': { borderColor: 'primary.main' } }}
               >
-                <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-                  <Typography fontWeight="bold">{c.name}</Typography>
-                  {c.description && (
-                    <Typography variant="body2" color="text.secondary">
-                      {c.description}
-                    </Typography>
-                  )}
-                  <Chip size="small" label={c.source} sx={{ mt: 0.5 }} />
-                </CardContent>
+                <CardActionArea onClick={() => onSelectCompany(c)}>
+                  <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                    <Typography fontWeight="bold">{c.name}</Typography>
+                    {c.description && (
+                      <Typography variant="body2" color="text.secondary">
+                        {c.description}
+                      </Typography>
+                    )}
+                    <Chip size="small" label={c.source} sx={{ mt: 0.5 }} />
+                  </CardContent>
+                </CardActionArea>
               </Card>
             ))}
           </Stack>

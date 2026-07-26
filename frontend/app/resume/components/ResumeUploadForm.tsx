@@ -86,7 +86,7 @@ export function ResumeUploadForm({
         {uploadError && (
           <Alert severity="error">{uploadError}</Alert>
         )}
-        {documentId && (
+        {documentId !== null && (
           <Alert severity="success">
             アップロード完了！下のフォームでレビューを実行してください。
           </Alert>

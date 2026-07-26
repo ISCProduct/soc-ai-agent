@@ -130,6 +130,12 @@ describe('mapWebSearchResults', () => {
   it('source 省略時は web_search を使う', () => {
     expect(mapWebSearchResults({ results: [{ name: 'A' }] })[0].source).toBe('web_search')
   })
+  it('null / 非オブジェクトは空配列', () => {
+    expect(mapDbCompanyResults(null)).toEqual([])
+    expect(mapDbCompanyResults('x')).toEqual([])
+    expect(mapWebSearchResults(null)).toEqual([])
+    expect(mapWebSearchResults(undefined)).toEqual([])
+  })
 })
 
 describe('isAnnotatedPdfResponse', () => {
@@ -141,9 +147,11 @@ describe('isAnnotatedPdfResponse', () => {
     expect(isAnnotatedPdfResponse('application/octet-stream', 'attachment; filename="a.pdf"', 200)).toBe(true)
   })
 
-  it('206/200 ステータスでも PDF ありと判定する', () => {
+  it('206 または content-length/range 付き 200 を PDF ありと判定する', () => {
     expect(isAnnotatedPdfResponse('application/octet-stream', '', 206)).toBe(true)
-    expect(isAnnotatedPdfResponse('application/octet-stream', '', 200)).toBe(true)
+    expect(isAnnotatedPdfResponse('application/octet-stream', '', 200, '1', null)).toBe(true)
+    expect(isAnnotatedPdfResponse('application/octet-stream', '', 200, null, 'bytes 0-0/10')).toBe(true)
+    expect(isAnnotatedPdfResponse('application/octet-stream', '', 200)).toBe(false)
   })
 
   it('PDF でない応答は false', () => {

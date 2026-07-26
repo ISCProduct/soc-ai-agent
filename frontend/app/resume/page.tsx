@@ -16,7 +16,6 @@ import { ResumeReviewResults } from './components/ResumeReviewResults'
  */
 function ResumeContent() {
   const {
-    router,
     prefilledCompany,
     prefilledIndustry,
     sourceType,
@@ -58,7 +57,6 @@ function ResumeContent() {
   return (
     <Box sx={{ p: { xs: 2, sm: 4 }, maxWidth: 900, mx: 'auto' }}>
       <ResumePageHeader
-        router={router}
         prefilledCompany={prefilledCompany}
         prefilledIndustry={prefilledIndustry}
       />
