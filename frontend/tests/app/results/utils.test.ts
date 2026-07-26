@@ -94,25 +94,35 @@ describe('buildEmptyRecommendationsMessage', () => {
     expect(buildEmptyRecommendationsMessage('insufficient_company_data')).toContain('公開済みの企業データがありません')
   })
 
-  it('diagnostics を末尾に付与する', () => {
-    const message = buildEmptyRecommendationsMessage('matching_results_empty', {
+  it('diagnostics はユーザー向けメッセージに含めず debug ログに出す', () => {
+    const debugSpy = jest.spyOn(console, 'debug').mockImplementation(() => {})
+    const diagnostics = {
       user_score_count: 1,
       active_company_count: 2,
       weight_profile_count: 3,
+    }
+    const message = buildEmptyRecommendationsMessage('matching_results_empty', diagnostics)
+
+    expect(message).not.toContain('スコア数')
+    expect(message).not.toContain('企業数')
+    expect(message).not.toContain('プロファイル数')
+    expect(message).toContain('データがありません')
+    expect(debugSpy).toHaveBeenCalledWith('[recommendations empty]', {
+      reason: 'matching_results_empty',
+      diagnostics,
     })
-    expect(message).toContain('スコア数: 1')
-    expect(message).toContain('企業数: 2')
-    expect(message).toContain('プロファイル数: 3')
+    debugSpy.mockRestore()
   })
 
-  it('diagnostics 欠損フィールドは - で表示する', () => {
+  it('diagnostics 欠損時もメッセージは日本語のみ', () => {
+    const debugSpy = jest.spyOn(console, 'debug').mockImplementation(() => {})
     const message = buildEmptyRecommendationsMessage('matching_results_empty', {
       user_score_count: 1,
     })
-    expect(message).toContain('スコア数: 1')
-    expect(message).toContain('企業数: -')
-    expect(message).toContain('プロファイル数: -')
+    expect(message).not.toContain('スコア数')
     expect(message).not.toContain('undefined')
+    expect(debugSpy).toHaveBeenCalled()
+    debugSpy.mockRestore()
   })
 })
 

@@ -67,6 +67,7 @@ export function normalizeCategoryScores(
 
 /**
  * 推薦が空のときのユーザー向けメッセージを組み立てる。
+ * diagnostics は開発向けログのみ（本番 UI には出さない）。
  */
 export function buildEmptyRecommendationsMessage(
   reason?: string,
@@ -78,11 +79,8 @@ export function buildEmptyRecommendationsMessage(
   } else if (reason === 'insufficient_company_data') {
     message = '現在、公開済みの企業データがありません。管理者が企業情報を公開するまでお待ちください。'
   }
-  if (diagnostics) {
-    const scoreCount = diagnostics.user_score_count ?? '-'
-    const companyCount = diagnostics.active_company_count ?? '-'
-    const profileCount = diagnostics.weight_profile_count ?? '-'
-    message += `\n\nスコア数: ${scoreCount}, 企業数: ${companyCount}, プロファイル数: ${profileCount}`
+  if (diagnostics && typeof console !== 'undefined' && typeof console.debug === 'function') {
+    console.debug('[recommendations empty]', { reason, diagnostics })
   }
   return message
 }
