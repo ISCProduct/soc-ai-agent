@@ -1,6 +1,7 @@
 'use client'
 
 import { Suspense } from 'react'
+import dynamic from 'next/dynamic'
 import { Box, CircularProgress } from '@mui/material'
 import { PageLoading } from '@/components/common/PageLoading'
 import { useResultsData } from './hooks/useResultsData'
@@ -9,8 +10,17 @@ import {
   ResultsErrorView,
   ResultsNoMatchView,
 } from './components/ResultsStatusViews'
-import CompanyDetailView from './components/CompanyDetailView'
 import ResultsListView from './components/ResultsListView'
+
+/** ReactFlow 依存の詳細ビューは一覧表示では不要のため遅延ロード */
+const CompanyDetailView = dynamic(() => import('./components/CompanyDetailView'), {
+  ssr: false,
+  loading: () => (
+    <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <CircularProgress />
+    </Box>
+  ),
+})
 
 /**
  * マッチング結果ページのオーケストレーション。

@@ -11,11 +11,21 @@ import {
   Chip,
   Tabs,
   Tab,
+  CircularProgress,
 } from '@mui/material'
 import { ArrowBack, LocationOn, People, TrendingUp as TrendingUpIcon } from '@mui/icons-material'
+import dynamic from 'next/dynamic'
 import type { CapitalRelation, CompanyMarketInfo } from '@/lib/company-data'
 import type { Company } from '../types'
-import CompanyRelationDiagram from './CompanyRelationDiagram'
+
+const CompanyRelationDiagram = dynamic(() => import('./CompanyRelationDiagram'), {
+  ssr: false,
+  loading: () => (
+    <Box sx={{ height: 360, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <CircularProgress size={32} />
+    </Box>
+  ),
+})
 
 export interface CompanyDetailViewProps {
   company: Company
