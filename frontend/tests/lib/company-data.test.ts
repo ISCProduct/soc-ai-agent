@@ -43,6 +43,16 @@ describe('fetchCompanyRelations', () => {
     await expect(fetchCompanyRelations()).resolves.toEqual(relations)
   })
 
+  it('accepts a raw array payload', async () => {
+    const relations = [{ id: 2, relation_type: 'capital_parent', description: '' }]
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => relations,
+    }) as unknown as typeof fetch
+
+    await expect(fetchCompanyRelations()).resolves.toEqual(relations)
+  })
+
   it('throws CompanyDataFetchError on HTTP failure', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: false,
@@ -65,6 +75,16 @@ describe('fetchCompanyMarketInfo', () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ data: market }),
+    }) as unknown as typeof fetch
+
+    await expect(fetchCompanyMarketInfo()).resolves.toEqual(market)
+  })
+
+  it('accepts a raw array payload', async () => {
+    const market = [{ id: 2, company_id: 10, market_type: 'standard', is_listed: true }]
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => market,
     }) as unknown as typeof fetch
 
     await expect(fetchCompanyMarketInfo()).resolves.toEqual(market)

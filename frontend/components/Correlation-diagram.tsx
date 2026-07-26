@@ -35,7 +35,7 @@ import {
     type CompanyMarketInfo,
     type MarketType,
 } from '@/lib/company-data';
-import { getCompanyIdFromNode } from '@/lib/correlation-diagram-navigation';
+import { getCompanyIdFromNode, parseCompanyId } from '@/lib/correlation-diagram-navigation';
 import CorrelationCompanyDetailPanel, {
     CORRELATION_DETAIL_PANEL_WIDTH,
 } from '@/components/CorrelationCompanyDetailPanel';
@@ -181,7 +181,6 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                 const row = Math.floor(idx / cols);
                 const col = idx % cols;
                 const marketType = getMarketType(id);
-                const isDetail = detailCompanyId === id;
 
                 nodes.push({
                     id: String(id),
@@ -220,8 +219,8 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                         ),
                     },
                     style: {
-                        background: isDetail ? '#E3F2FD' : '#fff',
-                        border: `${isDetail ? 3 : 2}px solid ${isDetail ? '#1976D2' : marketColors[marketType]}`,
+                        background: '#fff',
+                        border: `2px solid ${marketColors[marketType]}`,
                         borderRadius: '8px',
                         padding: '8px',
                         minWidth: '160px',
@@ -255,7 +254,6 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
 
         ids.forEach((compId, idx) => {
             const isFocusCompany = compId === focusCompanyId;
-            const isDetail = detailCompanyId === compId;
             const marketType = getMarketType(compId);
 
             nodes.push({
@@ -296,9 +294,9 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                     ),
                 },
                 style: {
-                    background: isFocusCompany ? '#FFF3CD' : isDetail ? '#E3F2FD' : '#fff',
-                    border: `${isFocusCompany || isDetail ? 3 : 2}px solid ${
-                        isFocusCompany ? '#FFA726' : isDetail ? '#1976D2' : marketColors[marketType]
+                    background: isFocusCompany ? '#FFF3CD' : '#fff',
+                    border: `${isFocusCompany ? 3 : 2}px solid ${
+                        isFocusCompany ? '#FFA726' : marketColors[marketType]
                     }`,
                     borderRadius: '8px',
                     padding: isFocusCompany ? '10px' : '8px',
@@ -312,7 +310,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
         });
 
         return nodes;
-    }, [relations, getMarketType, getCompanyName, detailCompanyId]);
+    }, [relations, getMarketType, getCompanyName]);
 
     const createEdges = useCallback((focusCompanyId: number | null, type: DiagramType): Edge[] => {
         const edges: Edge[] = [];
@@ -382,6 +380,29 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
         setFlowEdges(edges);
     }, [nodes, edges, setFlowNodes, setFlowEdges]);
 
+    // 詳細選択のハイライトだけ更新し、ドラッグ済みの位置は保持する
+    useEffect(() => {
+        setFlowNodes((current) =>
+            current.map((node) => {
+                const id = getCompanyIdFromNode(node);
+                const isDetail = detailCompanyId !== null && id === detailCompanyId;
+                const isFocus = selectedCompanyId !== null && id === selectedCompanyId;
+                const marketType = id !== null ? getMarketType(id) : ('unlisted' as MarketType);
+                const prev = node.style ?? {};
+                return {
+                    ...node,
+                    style: {
+                        ...prev,
+                        background: isFocus ? '#FFF3CD' : isDetail ? '#E3F2FD' : '#fff',
+                        border: `${isFocus || isDetail ? 3 : 2}px solid ${
+                            isFocus ? '#FFA726' : isDetail ? '#1976D2' : marketColors[marketType]
+                        }`,
+                    },
+                };
+            })
+        );
+    }, [detailCompanyId, selectedCompanyId, getMarketType, setFlowNodes]);
+
     const handleNodeClick: NodeMouseHandler = useCallback((_event, node) => {
         const companyId = getCompanyIdFromNode(node);
         if (companyId === null) return;
@@ -389,13 +410,16 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
     }, []);
 
     const handleOpenSelectedCompanyDetail = useCallback(() => {
-        if (!selectedCompanyId) return;
-        setDetailCompanyId(selectedCompanyId);
+        const companyId = parseCompanyId(selectedCompanyId);
+        if (companyId === null) return;
+        setDetailCompanyId(companyId);
     }, [selectedCompanyId]);
 
     const handleCloseDetailPanel = useCallback(() => {
         setDetailCompanyId(null);
     }, []);
+
+    const canOpenSelectedCompanyDetail = parseCompanyId(selectedCompanyId) !== null;
 
     if (loading) {
         return (
@@ -465,7 +489,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                     <Button
                         variant="outlined"
                         size="small"
-                        disabled={!selectedCompanyId}
+                        disabled={!canOpenSelectedCompanyDetail}
                         onClick={handleOpenSelectedCompanyDetail}
                     >
                         選択企業の情報
