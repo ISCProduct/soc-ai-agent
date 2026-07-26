@@ -19,7 +19,7 @@ type jobListingExtraction struct {
 		Description     string `json:"description"`
 		EmploymentType  string `json:"employment_type"`
 		WorkLocation    string `json:"work_location"`
-		RemoteOption    bool   `json:"remote_option"`
+		RemoteOption    *bool  `json:"remote_option,omitempty"` // nil = 未検出（既存値を保持）
 		MinSalary       int    `json:"min_salary"`
 		MaxSalary       int    `json:"max_salary"`
 		RequiredSkills  string `json:"required_skills"`
@@ -80,13 +80,17 @@ func (s *CrawlService) executeJobListingCrawl(source *models.CrawlSource) error 
 			return err
 		}
 		if existing == nil || errors.Is(err, gorm.ErrRecordNotFound) {
+			remote := false
+			if p.RemoteOption != nil {
+				remote = *p.RemoteOption
+			}
 			pos := &models.CompanyJobPosition{
 				CompanyID:       company.ID,
 				Title:           title,
 				Description:     p.Description,
 				EmploymentType:  p.EmploymentType,
 				WorkLocation:    p.WorkLocation,
-				RemoteOption:    p.RemoteOption,
+				RemoteOption:    remote,
 				MinSalary:       p.MinSalary,
 				MaxSalary:       p.MaxSalary,
 				RequiredSkills:  p.RequiredSkills,
@@ -106,7 +110,9 @@ func (s *CrawlService) executeJobListingCrawl(source *models.CrawlSource) error 
 			if p.WorkLocation != "" {
 				existing.WorkLocation = p.WorkLocation
 			}
-			existing.RemoteOption = p.RemoteOption
+			if p.RemoteOption != nil {
+				existing.RemoteOption = *p.RemoteOption
+			}
 			if p.MinSalary > 0 {
 				existing.MinSalary = p.MinSalary
 			}
@@ -154,6 +160,7 @@ Return JSON with the following shape:
 Rules:
 - Return 0 for salary fields not found in the text.
 - Return "" for string fields not found in the text.
+- Omit remote_option or set it to null when remote work is not mentioned in the text.
 - required_skills and preferred_skills must be JSON arrays serialized as a string (e.g. "[\"Java\"]"), or "" if not found.
 - min_salary and max_salary are annual salary in 万円 (integer).
 - Do not fabricate data.
@@ -161,7 +168,9 @@ Rules:
 Text:
 %s`, clean)
 
-	content, err := s.aiClient.ChatCompletionJSON(context.Background(), systemPrompt, userPrompt, 0.2, 1200)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	content, err := s.aiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.2, 1200)
 	if err != nil {
 		return nil, err
 	}

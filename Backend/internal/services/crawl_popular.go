@@ -108,7 +108,9 @@ Rules:
 Text:
 %s`, clean)
 
-	content, err := s.aiClient.ChatCompletionJSON(context.Background(), systemPrompt, userPrompt, 0.2, 800)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	content, err := s.aiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.2, 800)
 	if err != nil {
 		return nil, err
 	}

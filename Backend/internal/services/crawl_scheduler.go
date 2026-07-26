@@ -2,6 +2,7 @@ package services
 
 import (
 	"Backend/internal/models"
+	"log"
 	"time"
 )
 
@@ -24,10 +25,13 @@ func (s *CrawlService) runDueSources() {
 	now := time.Now()
 	sources, err := s.repo.ListDueSources(now)
 	if err != nil {
+		log.Printf("[Crawl] ListDueSources failed: %v", err)
 		return
 	}
 	for i := range sources {
-		_, _ = s.runSource(&sources[i])
+		if _, err := s.runSource(&sources[i]); err != nil {
+			log.Printf("[Crawl] runSource failed source=%d: %v", sources[i].ID, err)
+		}
 	}
 }
 
@@ -70,7 +74,8 @@ func computeNextRun(now time.Time, source *models.CrawlSource) *time.Time {
 		}
 		next = time.Date(year, month, day, hour, min, 0, 0, loc)
 		if !next.After(now) {
-			nextMonth := next.AddDate(0, 1, 0)
+			// 月末日に AddDate(0,1,0) すると月スキップするため、月初基準で翌月へ進める
+			nextMonth := time.Date(year, month, 1, 0, 0, 0, 0, loc).AddDate(0, 1, 0)
 			year, month = nextMonth.Year(), nextMonth.Month()
 			day = source.ScheduleDay
 			lastDay = lastDayOfMonth(year, month, loc)

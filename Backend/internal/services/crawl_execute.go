@@ -37,11 +37,15 @@ func (s *CrawlService) runSource(source *models.CrawlSource) (*models.CrawlRun, 
 	run.Message = message
 	finished := time.Now()
 	run.EndedAt = &finished
-	_ = s.repo.UpdateRun(run)
+	if err := s.repo.UpdateRun(run); err != nil {
+		log.Printf("[Crawl] UpdateRun failed source=%d run=%d: %v", source.ID, run.ID, err)
+	}
 
 	source.LastRunAt = &finished
 	source.NextRunAt = computeNextRun(finished, source)
-	_ = s.repo.UpdateSource(source)
+	if err := s.repo.UpdateSource(source); err != nil {
+		log.Printf("[Crawl] UpdateSource failed source=%d: %v", source.ID, err)
+	}
 
 	return run, nil
 }
@@ -162,8 +166,6 @@ func (s *CrawlService) forEachActiveCompanyPage(pageSize int, fn func(models.Com
 	if pageSize <= 0 {
 		pageSize = 200
 	}
-	ctx := context.Background()
-	_ = ctx
 	var errs []string
 	processed := 0
 	for offset := 0; ; offset += pageSize {
@@ -188,5 +190,9 @@ func (s *CrawlService) forEachActiveCompanyPage(pageSize int, fn func(models.Com
 		log.Printf("%s: %d errors: %s", label, len(errs), strings.Join(errs, "; "))
 	}
 	log.Printf("%s: processed %d companies, errors=%d", label, processed, len(errs))
+	// 全件失敗は success 扱いにしない（部分失敗は継続しつつログ済み）
+	if processed > 0 && len(errs) == processed {
+		return fmt.Errorf("%s: 全 %d 件の処理に失敗しました", label, processed)
+	}
 	return nil
 }
