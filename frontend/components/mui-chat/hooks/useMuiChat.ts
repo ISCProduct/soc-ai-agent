@@ -11,6 +11,7 @@ import {
   makeMessageId,
   INITIAL_GREETING,
   RESET_GREETING,
+  clearChatSessionOnEnd,
 } from '../utils'
 import type { Message, PhaseProgress, ProgressTotals, ChoiceOption } from '../types'
 
@@ -433,17 +434,7 @@ export function useMuiChat() {
   }
 
   const handleConfirmEndChat = () => {
-    // セッションとキャッシュを完全にクリア
-    sessionStorage.removeItem('chatSessionId')
-    sessionStorage.removeItem('chatMessages')
-    localStorage.removeItem('chatMessages')
-
-    // チャット履歴のキャッシュも削除
-    const currentSessionId = sessionStorage.getItem('chatSessionId')
-    if (currentSessionId) {
-      localStorage.removeItem(`chat_cache_${currentSessionId}`)
-    }
-    localStorage.removeItem('chat_session_id')
+    clearChatSessionOnEnd({ sessionStorage, localStorage })
 
     // ページをリロードして新しいセッションを開始
     window.location.reload()
