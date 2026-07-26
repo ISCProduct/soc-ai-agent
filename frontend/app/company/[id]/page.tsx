@@ -9,7 +9,6 @@ import {
   Card,
   CardContent,
   Chip,
-  CircularProgress,
   Stack,
   Tab,
   Tabs,
@@ -108,11 +107,8 @@ export default function CompanyDetailPage() {
 
   if (loading) {
     return (
-      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Stack spacing={2} alignItems="center">
-          <CircularProgress />
-          <Typography color="text.secondary">読み込み中...</Typography>
-        </Stack>
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#f5f7fa' }}>
+        <Typography color="text.secondary">読み込み中...</Typography>
       </Box>
     )
   }
