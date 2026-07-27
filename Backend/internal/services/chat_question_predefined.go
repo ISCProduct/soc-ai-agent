@@ -55,19 +55,7 @@ func (s *ChatService) tryGetPredefinedQuestion(userID uint, sessionID string, pr
 }
 
 func (s *ChatService) isJobSelectionQuestion(text string) bool {
-	if strings.TrimSpace(text) == "" {
-		return false
-	}
-	keywords := []string{
-		"職種", "どの職種", "IT職種", "興味がありますか", "選んでください",
-		"まだ決めていない", "番号で答えても",
-	}
-	for _, keyword := range keywords {
-		if strings.Contains(text, keyword) {
-			return true
-		}
-	}
-	return false
+	return isJobSelectionQuestionText(text)
 }
 
 func (s *ChatService) shouldValidateJobCategory(history []models.ChatMessage) bool {

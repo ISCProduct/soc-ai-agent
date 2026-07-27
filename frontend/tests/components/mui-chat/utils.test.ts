@@ -3,6 +3,10 @@ import {
   makeMessageId,
   INITIAL_GREETING,
   clearChatSessionOnEnd,
+  readStoredJobCategoryId,
+  writeStoredJobCategoryId,
+  shouldSendChatOnKeyDown,
+  jobCategoryStorageKey,
 } from '@/components/mui-chat/utils'
 
 describe('extractChoices', () => {
@@ -83,6 +87,9 @@ describe('clearChatSessionOnEnd', () => {
     const store = { ...initial }
     return {
       getItem: (key: string) => (key in store ? store[key] : null),
+      setItem: (key: string, value: string) => {
+        store[key] = value
+      },
       removeItem: (key: string) => {
         delete store[key]
       },
@@ -90,10 +97,11 @@ describe('clearChatSessionOnEnd', () => {
     }
   }
 
-  it('sessionId 削除前に chat_cache_ を消す', () => {
+  it('sessionId 削除前に chat_cache_ と職種IDを消す', () => {
     const sessionStorage = createMemoryStorage({
       chatSessionId: 'sess-42',
       chatMessages: '[]',
+      [jobCategoryStorageKey('sess-42')]: '3',
     })
     const localStorage = createMemoryStorage({
       'chat_cache_sess-42': 'cached',
@@ -104,6 +112,7 @@ describe('clearChatSessionOnEnd', () => {
     clearChatSessionOnEnd({ sessionStorage, localStorage })
 
     expect(localStorage._store['chat_cache_sess-42']).toBeUndefined()
+    expect(sessionStorage._store[jobCategoryStorageKey('sess-42')]).toBeUndefined()
     expect(sessionStorage._store.chatSessionId).toBeUndefined()
     expect(sessionStorage._store.chatMessages).toBeUndefined()
     expect(localStorage._store.chatMessages).toBeUndefined()
@@ -121,5 +130,51 @@ describe('clearChatSessionOnEnd', () => {
 
     expect(sessionStorage._store.chatMessages).toBeUndefined()
     expect(localStorage._store.chat_session_id).toBeUndefined()
+  })
+})
+
+describe('job category storage', () => {
+  function createMemoryStorage(initial: Record<string, string> = {}) {
+    const store = { ...initial }
+    return {
+      getItem: (key: string) => (key in store ? store[key] : null),
+      setItem: (key: string, value: string) => {
+        store[key] = value
+      },
+      removeItem: (key: string) => {
+        delete store[key]
+      },
+      _store: store,
+    }
+  }
+
+  it('職種IDを読み書きできる', () => {
+    const storage = createMemoryStorage()
+    writeStoredJobCategoryId('s1', 7, storage)
+    expect(readStoredJobCategoryId('s1', storage)).toBe(7)
+    writeStoredJobCategoryId('s1', 0, storage)
+    expect(readStoredJobCategoryId('s1', storage)).toBe(0)
+  })
+})
+
+describe('shouldSendChatOnKeyDown', () => {
+  it('Enter 単独では送信しない', () => {
+    expect(shouldSendChatOnKeyDown({ key: 'Enter', ctrlKey: false, metaKey: false })).toBe(false)
+  })
+
+  it('Ctrl+Enter / Meta+Enter で送信する', () => {
+    expect(shouldSendChatOnKeyDown({ key: 'Enter', ctrlKey: true, metaKey: false })).toBe(true)
+    expect(shouldSendChatOnKeyDown({ key: 'Enter', ctrlKey: false, metaKey: true })).toBe(true)
+  })
+
+  it('IME 変換中は送信しない', () => {
+    expect(
+      shouldSendChatOnKeyDown({
+        key: 'Enter',
+        ctrlKey: true,
+        metaKey: false,
+        isComposing: true,
+      }),
+    ).toBe(false)
   })
 })

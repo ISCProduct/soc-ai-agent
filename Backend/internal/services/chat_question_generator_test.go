@@ -18,6 +18,8 @@ func TestIsJobSelectionQuestion(t *testing.T) {
 		{"select keyword", "以下から選んでください", true},
 		{"number hint", "番号で答えても職種名でも構いません", true},
 		{"undecided", "まだ決めていない場合も教えてください", true},
+		{"preference clarification", "どんな作業が好きですか？", true},
+		{"closest option", "どれが近いですか？", true},
 		{"unrelated", "最近頑張ったことを教えてください", false},
 	}
 	for _, tc := range cases {

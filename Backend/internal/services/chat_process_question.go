@@ -276,6 +276,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 		EvaluatedCategories: len(evaluatedCategories),
 		TotalCategories:     10,
 		Summary:             sessionSummary,
+		JobCategoryID:       jobCategoryID,
 	}, nil
 }
 

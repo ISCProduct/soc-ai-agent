@@ -55,9 +55,52 @@ export function clearChatSessionOnEnd(storage: {
   const currentSessionId = storage.sessionStorage.getItem('chatSessionId')
   if (currentSessionId) {
     storage.localStorage.removeItem(`chat_cache_${currentSessionId}`)
+    storage.sessionStorage.removeItem(jobCategoryStorageKey(currentSessionId))
   }
   storage.sessionStorage.removeItem('chatSessionId')
   storage.sessionStorage.removeItem('chatMessages')
   storage.localStorage.removeItem('chatMessages')
   storage.localStorage.removeItem('chat_session_id')
+}
+
+export function jobCategoryStorageKey(sessionId: string): string {
+  return `chat_job_category_id_${sessionId}`
+}
+
+export function readStoredJobCategoryId(
+  sessionId: string,
+  storage: Pick<Storage, 'getItem'> = sessionStorage,
+): number {
+  if (!sessionId) return 0
+  const raw = storage.getItem(jobCategoryStorageKey(sessionId))
+  const n = raw ? Number(raw) : 0
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+export function writeStoredJobCategoryId(
+  sessionId: string,
+  jobCategoryId: number,
+  storage: Pick<Storage, 'setItem' | 'removeItem'> = sessionStorage,
+): void {
+  if (!sessionId) return
+  const key = jobCategoryStorageKey(sessionId)
+  if (jobCategoryId > 0) {
+    storage.setItem(key, String(jobCategoryId))
+  } else {
+    storage.removeItem(key)
+  }
+}
+
+/** Ctrl+Enter / ⌘+Enter で送信。Enter 単独は改行。 */
+export function shouldSendChatOnKeyDown(e: {
+  key: string
+  ctrlKey: boolean
+  metaKey: boolean
+  nativeEvent?: { isComposing?: boolean }
+  isComposing?: boolean
+}): boolean {
+  if (e.key !== 'Enter') return false
+  const composing = e.isComposing || e.nativeEvent?.isComposing
+  if (composing) return false
+  return e.ctrlKey || e.metaKey
 }

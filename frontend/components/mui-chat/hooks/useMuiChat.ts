@@ -12,6 +12,8 @@ import {
   INITIAL_GREETING,
   RESET_GREETING,
   clearChatSessionOnEnd,
+  readStoredJobCategoryId,
+  writeStoredJobCategoryId,
 } from '../utils'
 import type { Message, PhaseProgress, ProgressTotals, ChoiceOption } from '../types'
 
@@ -38,8 +40,9 @@ export function useMuiChat() {
   const [phaseProgresses, setPhaseProgresses] = useState<PhaseProgress[] | null>(null)
   const [historyLoadError, setHistoryLoadError] = useState<string | null>(null)
   const [historyRetrying, setHistoryRetrying] = useState(false)
+  const [jobCategoryId, setJobCategoryId] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
   const progressTotals: ProgressTotals | null = (() => {
     if (!phaseProgresses || phaseProgresses.length === 0) return null
@@ -183,6 +186,7 @@ export function useMuiChat() {
 
       sessionStorage.setItem('chatSessionId', storedSessionId)
       setSessionId(storedSessionId)
+      setJobCategoryId(readStoredJobCategoryId(storedSessionId))
 
       try {
         console.log('[MUI Chat] Loading history for session:', storedSessionId)
@@ -239,10 +243,15 @@ export function useMuiChat() {
         session_id: sessionId,
         message: messageText,
         industry_id: 1, // IT業界
-        job_category_id: 0, // 未設定（バックエンドで判定）
+        job_category_id: jobCategoryId,
       }
 
       const response: ChatResponse = await sendChatMessage(chatRequest)
+
+      if (typeof response.job_category_id === 'number' && response.job_category_id > 0) {
+        setJobCategoryId(response.job_category_id)
+        writeStoredJobCategoryId(sessionId, response.job_category_id)
+      }
 
       const assistantMessage: Message = {
         id: makeMessageId(),
@@ -408,6 +417,8 @@ export function useMuiChat() {
     const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`
     setSessionId(newSessionId)
     sessionStorage.setItem('chatSessionId', newSessionId)
+    setJobCategoryId(0)
+    writeStoredJobCategoryId(newSessionId, 0)
 
     // 初回メッセージを再設定
     const initialMessage: Message = {
@@ -465,13 +476,7 @@ export function useMuiChat() {
     console.log('[MUI Chat] After reset - modal closed, analysisComplete set to false')
     // 入力フィールドを有効化するためにフォーカス
     setTimeout(() => {
-      const inputElement = document.querySelector('input[type="text"]') as HTMLInputElement | null
-      if (inputElement) {
-        console.log('[MUI Chat] Input field found, focusing')
-        inputElement.focus()
-      } else {
-        console.log('[MUI Chat] Input field not found')
-      }
+      inputRef.current?.focus()
     }, 100)
   }
 

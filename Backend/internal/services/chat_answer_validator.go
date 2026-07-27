@@ -517,8 +517,11 @@ func isJobSelectionQuestionText(text string) bool {
 		return false
 	}
 	keywords := []string{
-		"職種", "どの職種", "IT職種", "興味がありますか", "選んでください",
-		"まだ決めていない", "番号で答えても",
+		"職種", "どの職種", "IT職種",
+		"興味がありますか", "興味の方向", "どれに興味",
+		"選んでください", "まだ決めていない", "番号で答えても",
+		"どれが近い", "近いですか",
+		"好きな作業", "どんな作業", "作業が好き",
 	}
 	for _, keyword := range keywords {
 		if strings.Contains(text, keyword) {
