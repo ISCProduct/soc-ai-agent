@@ -12,32 +12,45 @@ import (
 	"unicode"
 )
 
+// isValidationFeedbackMessage: 無効回答の警告・強制終了メッセージか。
+// これらを「直近の質問」と誤認すると、再回答が職種選択扱いなどになり連鎖で無効になる。
+func isValidationFeedbackMessage(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return false
+	}
+	return strings.Contains(trimmed, "書かれた内容にはお答えできません") ||
+		strings.Contains(trimmed, "質問と関係のない内容が3回続いた")
+}
+
+// findLastAssistantQuestion: 警告・終了メッセージを飛ばし、履歴上の直近の質問文を返す。
+// 見つからない場合は空文字（呼び出し側で初回職種選択フォールバック）。
+func findLastAssistantQuestion(history []models.ChatMessage) string {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role != "assistant" {
+			continue
+		}
+		content := history[i].Content
+		if isValidationFeedbackMessage(content) {
+			continue
+		}
+		if isQuestion(content) {
+			return content
+		}
+	}
+	return ""
+}
+
 // checkAnswerValidity: 直近の assistant メッセージが質問かを判定し、ユーザー入力がその質問に対する有効な回答かを判定する。
 // 無効な場合はアシスタントの「書かれた内容にはお答えできません」メッセージを保存して true を返す。
 // 3回連続で無効な場合はセッションを強制終了する。
 // 戻り値: handled(bool) - true の場合は処理を終了してよい、response(string) - 保存したアシスタント応答（ある場合）、error
 func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.ChatMessage, userMessage string, userID uint, sessionID string) (bool, string, error) {
-	// 直近の assistant メッセージを探す
-	var lastAssistant *models.ChatMessage
-	for i := len(history) - 1; i >= 0; i-- {
-		if history[i].Role == "assistant" {
-			lastAssistant = &history[i]
-			break
-		}
-	}
-
-	// アシスタントメッセージがない場合、またはそれが質問でない場合
-	// → これは初回や説明メッセージの直後なので、職種に関する回答を期待する
-	var questionText string
-	if lastAssistant == nil {
-		// 履歴がない場合は、初回の職種選択を期待
+	// 警告メッセージを飛ばして実質の質問を特定する（1回ミス後の再回答が別質問扱いになるのを防ぐ）
+	questionText := findLastAssistantQuestion(history)
+	if questionText == "" {
+		// 履歴に質問が無い初回などは職種選択を期待
 		questionText = "どのようなIT職種に興味がありますか？"
-	} else if !isQuestion(lastAssistant.Content) {
-		// 質問ではない場合（説明文など）も、職種に関する回答を期待
-		questionText = "IT業界のどのような職種に興味がありますか？"
-	} else {
-		// 通常の質問の場合
-		questionText = lastAssistant.Content
 	}
 
 	// ユーザー回答が質問に対する答えかどうか判定
@@ -134,6 +147,11 @@ func (s *ChatService) validateAnswerRelevance(ctx context.Context, question, ans
 
 			// 閾値は運用で調整。0.30 を採用（緩めに設定して誤検知を抑える）
 			if cos >= 0.30 {
+				return true, nil
+			}
+			// 埋め込み不一致でも実質的な回答なら受理（誤字修正の再送・観点ズレを過剰に落とさない）
+			if isLikelyAnswer(answer, question) {
+				log.Printf("[Validation] Embedding below threshold but fallback accepted\n")
 				return true, nil
 			}
 			return false, nil

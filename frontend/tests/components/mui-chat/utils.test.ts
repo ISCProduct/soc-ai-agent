@@ -11,6 +11,7 @@ import {
   computeProgressTotals,
   shouldAutoScrollToBottom,
   CHAT_BRAND,
+  findLastAssistantQuestionMessage,
 } from '@/components/mui-chat/utils'
 
 describe('extractChoices', () => {
@@ -245,5 +246,19 @@ describe('shouldAutoScrollToBottom', () => {
 describe('CHAT_BRAND', () => {
   it('プライマリ青である', () => {
     expect(CHAT_BRAND).toBe('#1976d2')
+  })
+})
+
+describe('findLastAssistantQuestionMessage', () => {
+  it('警告メッセージを飛ばして直前の質問を返す', () => {
+    const messages = [
+      { role: 'assistant', content: 'A) はい\nB) いいえ' },
+      { role: 'user', content: 'typo' },
+      {
+        role: 'assistant',
+        content: '書かれた内容にはお答えできません。質問に回答してください。（1/3回目の警告）',
+      },
+    ]
+    expect(findLastAssistantQuestionMessage(messages)?.content).toBe('A) はい\nB) いいえ')
   })
 })

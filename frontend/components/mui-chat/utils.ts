@@ -172,3 +172,27 @@ export function shouldSendChatOnKeyDown(e: {
   if (composing) return false
   return e.ctrlKey || e.metaKey
 }
+
+/** 無効回答の警告・強制終了メッセージか（選択肢抽出の対象外） */
+export function isValidationFeedbackMessage(content: string): boolean {
+  const trimmed = content.trim()
+  if (!trimmed) return false
+  return (
+    trimmed.includes('書かれた内容にはお答えできません') ||
+    trimmed.includes('質問と関係のない内容が3回続いた')
+  )
+}
+
+/** 警告を飛ばして直近のアシスタント質問メッセージを返す */
+export function findLastAssistantQuestionMessage<T extends { role: string; content: string }>(
+  messages: T[],
+): T | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg.role !== 'assistant') continue
+    if (isValidationFeedbackMessage(msg.content)) continue
+    return msg
+  }
+  return undefined
+}
+

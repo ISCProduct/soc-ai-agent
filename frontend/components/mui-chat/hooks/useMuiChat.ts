@@ -16,6 +16,7 @@ import {
   writeStoredJobCategoryId,
   computeProgressTotals,
   shouldAutoScrollToBottom,
+  findLastAssistantQuestionMessage,
 } from '../utils'
 import type { Message, PhaseProgress, ProgressTotals, ChoiceOption } from '../types'
 
@@ -213,7 +214,7 @@ export function useMuiChat() {
     if (!rawText || isLoading || !sessionId || !userId || historyLoadError) return
 
     // ボタン送信はそのまま。自由入力は直近の選択肢ラベルを記号へ正規化する
-    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
+    const lastAssistant = findLastAssistantQuestionMessage(messages)
     const currentChoices = lastAssistant ? extractChoices(lastAssistant.content) : []
     const messageText =
       overrideMessage !== undefined
@@ -482,7 +483,7 @@ export function useMuiChat() {
     }, 100)
   }
 
-  const lastAssistantMessage = [...messages].reverse().find((msg) => msg.role === 'assistant')
+  const lastAssistantMessage = findLastAssistantQuestionMessage(messages)
   const choiceOptions: ChoiceOption[] = lastAssistantMessage
     ? extractChoices(lastAssistantMessage.content)
     : []
