@@ -15,11 +15,14 @@ func TestIsJobSelectionQuestion(t *testing.T) {
 		{"empty", "", false},
 		{"whitespace", "   ", false},
 		{"job keyword", "どの職種に興味がありますか？", true},
-		{"select keyword", "以下から選んでください", true},
+		{"select with job context", "以下の職種から選んでください", true},
+		{"select without job context", "以下から選んでください", false},
 		{"number hint", "番号で答えても職種名でも構いません", true},
 		{"undecided", "まだ決めていない場合も教えてください", true},
 		{"preference clarification", "どんな作業が好きですか？", true},
-		{"closest option", "どれが近いですか？", true},
+		{"closest with job options", "どれが近いですか？\n1. エンジニア\n2. 営業", true},
+		{"closest without job context", "どれが近いですか？", false},
+		{"interview mcq closest", "その方向性で作るときに一番モヤっとしたのはどれですか？（一番近いものを選んでください）", false},
 		{"unrelated", "最近頑張ったことを教えてください", false},
 	}
 	for _, tc := range cases {
@@ -56,6 +59,16 @@ func TestShouldValidateJobCategory(t *testing.T) {
 			history: []models.ChatMessage{
 				{Role: "assistant", Content: "最近頑張ったことを教えてください"},
 				{Role: "user", Content: "ハッカソンに参加しました"},
+			},
+			want: false,
+		},
+		{
+			name: "interview choice after experience must not re-enter job validation",
+			history: []models.ChatMessage{
+				{Role: "assistant", Content: "経験について具体的に教えてください。"},
+				{Role: "user", Content: "児童養護施設向けのUIを作りました"},
+				{Role: "assistant", Content: "一番モヤっとしたのはどれですか？（一番近いものを選んでください）\nA) 要件が曖昧\nB) 技術制約\nC) ステークホルダー調整"},
+				{Role: "user", Content: "A"},
 			},
 			want: false,
 		},

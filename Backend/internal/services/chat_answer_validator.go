@@ -534,15 +534,43 @@ func isJobSelectionQuestionText(text string) bool {
 	if strings.TrimSpace(text) == "" {
 		return false
 	}
-	keywords := []string{
-		"職種", "どの職種", "IT職種",
+	// 職種・興味の明示。これだけで職種選択とみなしてよい。
+	primary := []string{
+		"職種", "IT職種", "どの職種",
 		"興味がありますか", "興味の方向", "どれに興味",
-		"選んでください", "まだ決めていない", "番号で答えても",
-		"どれが近い", "近いですか",
+		"まだ決めていない", "番号で答えても",
 		"好きな作業", "どんな作業", "作業が好き",
 	}
-	for _, keyword := range keywords {
+	for _, keyword := range primary {
 		if strings.Contains(text, keyword) {
+			return true
+		}
+	}
+
+	// 「選んでください」「近いですか」は通常の面接MCQにも出るため、
+	// 職種・役割の文脈があるときだけ職種選択とみなす。
+	selectionCue := strings.Contains(text, "選んでください") ||
+		strings.Contains(text, "どれが近い") ||
+		strings.Contains(text, "近いですか") ||
+		strings.Contains(text, "一番近い")
+	if !selectionCue {
+		return false
+	}
+	return containsJobSelectionContext(text)
+}
+
+// containsJobSelectionContext: 職種clarification系の選択質問かどうかを文脈語で判定する。
+// 「開発」「データ」など経験談MCQにも出る語は入れない（誤って職種判定に再突入するのを防ぐ）。
+func containsJobSelectionContext(text string) bool {
+	cues := []string{
+		"職種", "興味", "まだ決めていない",
+		"エンジニア", "営業", "マーケ", "人事", "デザイナー",
+		"作業が好き", "好きな作業", "どんな作業",
+		"どの分野", "どの領域", "キャリアの方向", "仕事の向き",
+		"役割", "ポジション",
+	}
+	for _, cue := range cues {
+		if strings.Contains(text, cue) {
 			return true
 		}
 	}

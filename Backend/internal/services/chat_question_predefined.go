@@ -59,9 +59,14 @@ func (s *ChatService) isJobSelectionQuestion(text string) bool {
 }
 
 func (s *ChatService) shouldValidateJobCategory(history []models.ChatMessage) bool {
-	lastAssistant := s.getLastAssistantMessage(history)
+	// 警告メッセージを飛ばし、実質の直前質問で判定する
+	lastAssistant := findLastAssistantQuestion(history)
 	if strings.TrimSpace(lastAssistant) == "" {
-		return true
+		// 質問がまだ無い初回のみ職種判定へ
+		if s.getLastAssistantMessage(history) == "" {
+			return true
+		}
+		return false
 	}
 	return s.isJobSelectionQuestion(lastAssistant)
 }
