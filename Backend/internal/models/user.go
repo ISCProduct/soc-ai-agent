@@ -5,6 +5,7 @@ import "time"
 // User ユーザー情報
 type User struct {
 	ID                       uint   `gorm:"primaryKey"`
+	OrganizationID           uint   `gorm:"not null;index;default:1;column:organization_id" json:"organization_id"`
 	Email                    string `gorm:"size:255;uniqueIndex;not null"`
 	Password                 string `gorm:"size:255"` // ハッシュ化されたパスワード (OAuth時は空)
 	Name                     string `gorm:"size:100"`
@@ -25,6 +26,12 @@ type User struct {
 	PasswordResetToken       string     `gorm:"size:255;column:password_reset_token"`        // パスワードリセットトークン
 	PasswordResetExpiresAt   *time.Time `gorm:"column:password_reset_expires_at"`            // パスワードリセットトークン有効期限
 	AllowCollectiveInsight   bool       `gorm:"default:true;column:allow_collective_insight"` // 集合知レコメンドへの参加同意
+	WithdrawnAt              *time.Time `gorm:"index;column:withdrawn_at" json:"withdrawn_at,omitempty"` // 退会日時（論理削除）
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
+}
+
+// IsWithdrawn は退会済み（猶予期間中含む）かどうか。
+func (u *User) IsWithdrawn() bool {
+	return u != nil && u.WithdrawnAt != nil
 }

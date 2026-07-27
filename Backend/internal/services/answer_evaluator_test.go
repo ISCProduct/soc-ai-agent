@@ -1,6 +1,7 @@
 package services
 
 import (
+	"Backend/internal/models"
 	"slices"
 	"testing"
 )
@@ -376,5 +377,96 @@ func TestShouldBlendLLMForHumanScore(t *testing.T) {
 	border := HumanScoreResult{Action: PrecheckScore, Score: 40}
 	if !shouldBlendLLMForHumanScore(longAnswer, border) {
 		t.Fatal("境界帯スコアは LLM blend 対象であるべき")
+	}
+}
+
+func TestMergeConfidence(t *testing.T) {
+	cases := []struct {
+		a, b, want string
+	}{
+		{"low", "medium", "medium"},
+		{"high", "low", "high"},
+		{"medium", "medium", "medium"},
+		{"low", "low", "low"},
+		{"high", "medium", "high"},
+	}
+	for _, tc := range cases {
+		got := MergeConfidence(tc.a, tc.b)
+		if got != tc.want {
+			t.Fatalf("MergeConfidence(%q,%q)=%q want %q", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+func TestEvaluateRule_Table(t *testing.T) {
+	e := NewAnswerEvaluator()
+	cases := []struct {
+		name   string
+		rule   models.ScoreRule
+		answer string
+		want   bool
+	}{
+		{
+			name:   "contains_any hit",
+			rule:   models.ScoreRule{Condition: "contains_any", Keywords: []string{"改善", "実装"}},
+			answer: "システムを改善しました",
+			want:   true,
+		},
+		{
+			name:   "contains_any miss",
+			rule:   models.ScoreRule{Condition: "contains_any", Keywords: []string{"改善"}},
+			answer: "特にありません",
+			want:   false,
+		},
+		{
+			name:   "contains_all hit",
+			rule:   models.ScoreRule{Condition: "contains_all", Keywords: []string{"チーム", "協力"}},
+			answer: "チームで協力しました",
+			want:   true,
+		},
+		{
+			name:   "length_gt",
+			rule:   models.ScoreRule{Condition: "length_gt", Keywords: []string{"5"}},
+			answer: "123456",
+			want:   true,
+		},
+		{
+			name:   "has_example",
+			rule:   models.ScoreRule{Condition: "has_example"},
+			answer: "例えばインターンで実装しました",
+			want:   true,
+		},
+		{
+			name:   "unknown condition",
+			rule:   models.ScoreRule{Condition: "unknown"},
+			answer: "anything",
+			want:   false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := e.evaluateRule(tc.rule, tc.answer, len(tc.answer))
+			if got != tc.want {
+				t.Fatalf("got %v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGetConfidenceLevel(t *testing.T) {
+	e := NewAnswerEvaluator()
+	cases := []struct {
+		score, keywords int
+		want            string
+	}{
+		{8, 3, "high"},
+		{5, 1, "medium"},
+		{2, 0, "low"},
+	}
+	for _, tc := range cases {
+		got := e.GetConfidenceLevel(tc.score, tc.keywords)
+		if got != tc.want {
+			t.Fatalf("score=%d kw=%d got=%q want %q", tc.score, tc.keywords, got, tc.want)
+		}
 	}
 }

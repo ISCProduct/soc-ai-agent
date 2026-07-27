@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/ragclient"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -80,6 +81,7 @@ func (c *AdminVectorController) proxyJSON(ctx echo.Context, method, endpoint str
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	ragclient.SetAuthHeader(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

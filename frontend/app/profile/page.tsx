@@ -31,10 +31,11 @@ import { authService, User } from '@/lib/auth'
 import { BACKEND_URL } from '@/lib/backend-url'
 import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '@/lib/profile'
 import GitHubSkills from '@/components/github-skills'
+import { PageLoading } from '@/components/common/PageLoading'
 
 export default function ProfilePage() {
   return (
-    <Suspense>
+    <Suspense fallback={<PageLoading message="プロフィールを読み込んでいます..." />}>
       <ProfilePageContent />
     </Suspense>
   )
@@ -44,6 +45,7 @@ function ProfilePageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [user, setUser] = useState<User | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
   const [name, setName] = useState('')
   const [targetLevel, setTargetLevel] = useState('新卒')
   const [schoolName, setSchoolName] = useState('')
@@ -108,6 +110,8 @@ function ProfilePageContent() {
     } else if (calendarErrorParam) {
       setCalendarMessage('Googleカレンダーの連携に失敗しました')
     }
+
+    setAuthLoading(false)
   }, [router, searchParams])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -197,7 +201,9 @@ function ProfilePageContent() {
     }
   }
 
-  if (!user) return null
+  if (authLoading || !user) {
+    return <PageLoading message="プロフィールを読み込んでいます..." />
+  }
 
   const avatarLetter = name ? name[0].toUpperCase() : user.email[0].toUpperCase()
   const isGitHubUser = user.oauth_provider === 'github'
@@ -496,24 +502,24 @@ function ProfilePageContent() {
             size="small"
             onClick={() => setDeleteDialogOpen(true)}
           >
-            アカウントを削除する
+            アカウントを退会する
           </Button>
         </Box>
       </Container>
 
       {/* アカウント削除確認ダイアログ */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>アカウントを削除しますか？</DialogTitle>
+        <DialogTitle>アカウントを退会しますか？</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary">
-            この操作は取り消せません。以下のデータがすべて完全に削除されます。
+            退会後すぐにログインできなくなり、サービス上でのデータ閲覧もできなくなります。
+            保管データ（チャット・面接録画・職務経歴書など）は約30日後に完全削除されます。この操作は取り消せません。
           </Typography>
           <Typography variant="body2" component="ul" sx={{ pl: 2, mt: 1, color: 'text.secondary' }}>
-            <li>チャット履歴・就職軸スコア</li>
-            <li>マッチング結果</li>
-            <li>面接練習の録画・レポート</li>
-            <li>職務経歴書</li>
-            <li>アカウント情報</li>
+            <li>退会直後: ログイン不可・データ閲覧不可</li>
+            <li>約30日後: チャット・スコア・マッチング結果を完全削除</li>
+            <li>約30日後: 面接練習の録画・レポートを完全削除</li>
+            <li>約30日後: 職務経歴書・アカウント情報を完全削除</li>
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
@@ -526,7 +532,7 @@ function ProfilePageContent() {
             variant="contained"
             disabled={deleting}
           >
-            {deleting ? '削除中...' : '削除する'}
+            {deleting ? '退会処理中...' : '退会する'}
           </Button>
         </DialogActions>
       </Dialog>

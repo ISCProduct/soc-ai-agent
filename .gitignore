@@ -17,6 +17,8 @@
 database/
 *.sql
 *.sqlite
+# マイグレーションファイルはバージョン管理対象 (#614)
+!Backend/migrations/*.sql
 
 # Logs
 *.log
@@ -7008,3 +7010,4 @@ mysql/logs/
 rag/.venv/
 __pycache__/
 *.pyc
+.tools/

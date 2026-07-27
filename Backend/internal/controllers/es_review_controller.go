@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/ragclient"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -58,6 +59,7 @@ func (c *ESReviewController) Review(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to create RAG request")
 	}
 	ragReq.Header.Set("Content-Type", "application/json")
+	ragclient.SetAuthHeader(ragReq)
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(ragReq)

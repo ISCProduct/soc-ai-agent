@@ -5,6 +5,7 @@ services:
       context: ./Backend
       dockerfile: Dockerfile
     container_name: soc-ai-agent-backend
+    restart: unless-stopped
     ports:
       - "${HOST_PORT:-8080}:8080"
     volumes:
@@ -12,6 +13,8 @@ services:
       - ./Backend:/app
       - go_mod_cache:/go/pkg/mod
       - go_build_cache:/root/.cache/go-build
+    # compose up 時に migrate → air の順で起動（スキーマ未適用で API が落ちないようにする）
+    entrypoint: ["/bin/sh", "/app/scripts/docker-entrypoint.dev.sh"]
     command: ["air", "-c", ".air.toml"]
     env_file:
       - ${ENV_FILE:-./Backend/.env}
@@ -30,10 +33,35 @@ services:
       - ANNOTATION_FONT_PATH=${ANNOTATION_FONT_PATH:-/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc}
       - RAG_REVIEW_URL=${RAG_REVIEW_URL:-http://rag-review:9000}
 
+  # 明示的な migrate ワンショット（app 起動前にも実行可能: docker compose run --rm migrate）
+  migrate:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: soc-ai-migrate
+    volumes:
+      - ./Backend:/app
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+    working_dir: /app
+    command: ["go", "run", "./cmd/migrate", "up"]
+    env_file:
+      - ${ENV_FILE:-./Backend/.env}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - soc-ai-network
+    restart: "no"
+    profiles:
+      - tools
+
+
   # MySQL Database
   db:
     image: mysql:8.0
     container_name: soc-ai-db
+    restart: unless-stopped
     ports:
       - "${DB_HOST_BIND:-127.0.0.1}:3306:3306"
     env_file:
@@ -66,7 +94,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: soc-ai-agent-frontend
-    restart: 'always'
+    restart: unless-stopped
     volumes:
       - ./frontend:/app
       - /app/node_modules

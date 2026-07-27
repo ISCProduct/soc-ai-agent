@@ -59,7 +59,7 @@ export default function PrivacyPage() {
 
         <Typography variant="h6" component="h2" fontWeight="bold">4. データの保持期間</Typography>
         <Typography variant="body1">
-          アカウントが有効な期間中、データを保持します。アカウント削除後は30日以内にすべてのデータを完全削除します。
+          アカウントが有効な期間中、データを保持します。退会後は即座にログイン・閲覧ができなくなり、約30日後にすべてのデータを完全削除します。
           面接動画は録画後90日で自動削除されます。
         </Typography>
 
@@ -70,7 +70,7 @@ export default function PrivacyPage() {
         <Typography variant="body1" component="ul" sx={{ pl: 3 }}>
           <li>保有する個人データの開示請求</li>
           <li>個人データの訂正・追加・削除請求</li>
-          <li>アカウントの完全削除（プロフィールページから実行可能）</li>
+          <li>アカウントの退会（プロフィールページから実行可能。保持期間後に完全削除）</li>
         </Typography>
 
         <Typography variant="h6" component="h2" fontWeight="bold">6. セキュリティ</Typography>

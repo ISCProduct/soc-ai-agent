@@ -8,6 +8,10 @@ const demoCompanySubquery = `(SELECT id FROM (SELECT id FROM companies WHERE web
 
 // CleanupDemoCompanies 過去のシードで投入されたデモ企業と関連データを削除する。
 // デモ企業が存在しない場合は何もしない（冪等）。
+//
+// company_relations は両端がデモ企業の行のみ削除する。
+// 実在企業とデモ企業の混在関係は行を残し、デモ側 FK を NULL にしてから企業を削除する
+// （片端のみデモの関係を丸ごと消すと、実在企業側の関係データが失われるため）。
 func CleanupDemoCompanies(db *gorm.DB) error {
 	// 外部キー制約に従い、子テーブルから順に削除する
 	stmts := []string{
@@ -25,10 +29,15 @@ func CleanupDemoCompanies(db *gorm.DB) error {
 		`DELETE FROM company_reviews WHERE company_id IN ` + demoCompanySubquery,
 		`DELETE FROM g_biz_company_profiles WHERE company_id IN ` + demoCompanySubquery,
 		`DELETE FROM user_application_statuses WHERE company_id IN ` + demoCompanySubquery,
-		`DELETE FROM company_relations WHERE parent_id IN ` + demoCompanySubquery +
-			` OR child_id IN ` + demoCompanySubquery +
-			` OR from_id IN ` + demoCompanySubquery +
-			` OR to_id IN ` + demoCompanySubquery,
+		// 両端ともデモ企業の関係のみ削除（資本: parent+child / ビジネス: from+to）
+		`DELETE FROM company_relations WHERE ` +
+			`(parent_id IS NOT NULL AND child_id IS NOT NULL AND parent_id IN ` + demoCompanySubquery + ` AND child_id IN ` + demoCompanySubquery + `) OR ` +
+			`(from_id IS NOT NULL AND to_id IS NOT NULL AND from_id IN ` + demoCompanySubquery + ` AND to_id IN ` + demoCompanySubquery + `)`,
+		// 混在関係はデモ側 FK を外し、実在企業側の行を残す
+		`UPDATE company_relations SET parent_id = NULL WHERE parent_id IN ` + demoCompanySubquery,
+		`UPDATE company_relations SET child_id = NULL WHERE child_id IN ` + demoCompanySubquery,
+		`UPDATE company_relations SET from_id = NULL WHERE from_id IN ` + demoCompanySubquery,
+		`UPDATE company_relations SET to_id = NULL WHERE to_id IN ` + demoCompanySubquery,
 		`DELETE FROM companies WHERE id IN ` + demoCompanySubquery,
 	}
 

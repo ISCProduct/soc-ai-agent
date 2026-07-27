@@ -11,11 +11,13 @@ import (
 	"Backend/internal/routes"
 	"Backend/internal/scraper"
 	"Backend/internal/services"
+	"Backend/migrations"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -123,8 +125,8 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// マイグレーション実行
-	if err := models.AutoMigrate(db); err != nil {
+	// マイグレーション実行（バージョン管理型・多重起動は GET_LOCK で排他される #614）
+	if err := migrations.Up(cfg.DSN()); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
 	slog.Info("Database migration completed")
@@ -203,9 +205,14 @@ func main() {
 	}
 	authService := services.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	authService.SetDB(db)
+	// リフレッシュトークン管理 (#616)
+	refreshTokenRepo := repositories.NewUserRefreshTokenRepository(db)
+	refreshTokenService := services.NewRefreshTokenService(refreshTokenRepo)
+	authService.SetRefreshTokenService(refreshTokenService)
 	skillScoreService := services.NewSkillScoreService(skillScoreRepo)
 	githubService := services.NewGitHubService(githubRepo, skillScoreService, aiClient)
 	oauthService := services.NewOAuthService(userRepo, oauthConfig, githubService)
+	oauthService.SetRefreshTokenService(refreshTokenService)
 	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 	matchingService := services.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)
@@ -222,6 +229,7 @@ func main() {
 	crawlService.SetInfoFetcher(infoFetcher)
 	crawlService.SetJobFetcher(jobFetcher)
 	auditLogService := services.NewAuditLogService(auditLogRepo)
+	authService.SetAuditLog(auditLogService)
 	analysisService := services.NewAnalysisScoringService(
 		userWeightScoreRepo,
 		chatMessageRepo,
@@ -261,7 +269,6 @@ func main() {
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
 	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
 	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
-	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
 	adminAuditController := controllers.NewAdminAuditController(auditLogService)
 	// gBizINFO 公式 API を使った企業データ収集パイプライン
 	// Mynavi・Rikunabi・CareerTasu スクレイパーは利用規約違反リスクのため削除 (#178)
@@ -279,12 +286,24 @@ func main() {
 		slog.Warn("S3 upload service not available", "error", s3Err)
 		s3UploadService = nil
 	}
+	var objectDeleter services.ObjectDeleter
+	if s3UploadService != nil {
+		objectDeleter = s3UploadService
+		authService.SetObjectDeleter(s3UploadService)
+	}
+	userDeletionService := services.NewUserDeletionService(db, objectDeleter, auditLogService)
+	organizationRepo := repositories.NewOrganizationRepository(db)
+	organizationService := services.NewOrganizationService(organizationRepo)
+	adminOrganizationController := controllers.NewAdminOrganizationController(organizationService)
+	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
+	adminUserController.SetDeletionService(userDeletionService)
 	interviewController := controllers.NewInterviewController(interviewService, videoRepo, s3UploadService)
 	realtimeController := controllers.NewRealtimeController(interviewService, realtimeUsageService)
 	adminInterviewController := controllers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
 	adminInterviewController.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	adminInterviewController.SetCompanyRepo(companyRepo)
 	adminInterviewController.SetOpenAIClient(aiClient)
+	adminInterviewController.SetUserAccessGuard(userDeletionService)
 	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminCostsController := controllers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
 	adminVectorController := controllers.NewAdminVectorController()
@@ -340,22 +359,42 @@ func main() {
 	api := e.Group("/api")
 
 	// ルーティング設定
-	routes.SetupAuthRoutes(api, authController, oauthController, cfg.UserSecret)
-	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret)
+	routes.SetupAuthRoutes(api, authController, oauthController, cfg.UserSecret, userDeletionService, organizationService)
+	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCompanyRoutes(api, relationController)
-	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, adminVectorController, userRepo, cfg.AdminSecret)
-	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret)
-	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret)
-	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret)
+	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, adminVectorController, userRepo, cfg.AdminSecret)
+	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
+	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService)
+	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupESRoutes(api, esRewriteController, esReviewController)
 	routes.SetupScheduleRoutes(api, scheduleController)
-	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret)
-	routes.SetupApplicationRoutes(api, appController, cfg.UserSecret)
+	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret, userDeletionService, organizationService)
+	routes.SetupApplicationRoutes(api, appController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupUserRoutes(api, integratedProfileController)
-	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret)
+	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit)
 
 	go crawlService.StartScheduler()
+
+	// 退会ユーザーの猶予期間経過後の物理削除（1日1回）
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		run := func() {
+			n, err := userDeletionService.PurgeExpiredWithdrawals(time.Now().UTC())
+			if err != nil {
+				slog.Error("purge expired withdrawals failed", "error", err)
+				return
+			}
+			if n > 0 {
+				slog.Info("purged expired withdrawals", "count", n)
+			}
+		}
+		run()
+		for range ticker.C {
+			run()
+		}
+	}()
 
 	// サーバー起動
 	port := cfg.ServerPort

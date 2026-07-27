@@ -7,6 +7,7 @@ import (
 	"Backend/internal/services"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -24,6 +25,7 @@ type AdminInterviewController struct {
 	companyQuestionRepo repository.InterviewCompanyQuestionRepository
 	companyRepo         repository.CompanyRepository
 	openaiClient        *openai.Client
+	access              services.UserAccessGuard
 }
 
 func NewAdminInterviewController(
@@ -51,6 +53,11 @@ func (c *AdminInterviewController) SetCompanyRepo(r repository.CompanyRepository
 // SetOpenAIClient OpenAIクライアントを注入する
 func (c *AdminInterviewController) SetOpenAIClient(client *openai.Client) {
 	c.openaiClient = client
+}
+
+// SetUserAccessGuard 退会済みユーザーの動画閲覧を遮断するために注入する
+func (c *AdminInterviewController) SetUserAccessGuard(guard services.UserAccessGuard) {
+	c.access = guard
 }
 
 // ListCompanyQuestions GET /api/admin/companies/:id/interview-questions
@@ -377,6 +384,15 @@ func (c *AdminInterviewController) VideoURL(ctx echo.Context) error {
 
 	if video.Status != "done" || video.DriveFileID == "" {
 		return echo.NewHTTPError(http.StatusUnprocessableEntity, "Video is not available yet")
+	}
+
+	if c.access != nil {
+		if err := c.access.EnsureActiveUser(video.UserID); err != nil {
+			if errors.Is(err, services.ErrAccountWithdrawn) {
+				return echo.NewHTTPError(http.StatusForbidden, "account has been withdrawn")
+			}
+			return echoInternalError(err)
+		}
 	}
 
 	if c.s3Service == nil {

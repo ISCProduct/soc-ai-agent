@@ -88,8 +88,12 @@ GET /api/admin/costs/monthly   # 月別コスト
 ```
 
 **アラート設定:**
-- `REALTIME_MONTHLY_ALERT_THRESHOLD_USD=200` を超えるとメール/Slackアラート
-- `REALTIME_ALERT_EMAILS` / `REALTIME_ALERT_SLACK_WEBHOOK_URL` で通知先設定
+- OpenAI API 全体（`api_call_logs`）: `OPENAI_COST_ALERT_THRESHOLD_USD=40`（UTC 月次）を超過すると Slack/Discord
+  - `OPENAI_COST_ALERT_SLACK_WEBHOOK_URL` / `OPENAI_COST_ALERT_DISCORD_WEBHOOK_URL`
+  - Slack 未設定時は `REALTIME_ALERT_SLACK_WEBHOOK_URL` へフォールバック
+  - 同一月は1回のみ通知
+- Realtime: `REALTIME_MONTHLY_ALERT_THRESHOLD_USD=200` を超えるとメール/Slack
+  - `REALTIME_ALERT_EMAILS` / `REALTIME_ALERT_SLACK_WEBHOOK_URL`
 
 ### 面接セッション監視
 
@@ -170,6 +174,30 @@ docker compose --profile rag logs --tail 80 chroma rag-review
 ---
 
 ## 5. データベース管理
+
+### デモ企業データのクリーンアップ（Issue #558）
+
+旧 Seed で投入された `example.com` 系のデモ企業は、起動時の `SeedData` 内で `CleanupDemoCompanies` が冪等実行され自動削除されます。既存環境で手動実行する場合:
+
+```sh
+cd Backend && go run ./cmd/migrate
+```
+
+`cmd/migrate` はスキーマ更新後に `SeedData` を呼び出すため、デモ企業・関連子テーブルも合わせてクリーンアップされます。サーバー起動時（`go run ./cmd/server`）でも同様に実行されます。
+
+**確認クエリ:**
+
+```sql
+SELECT id, name, website_url FROM companies
+WHERE website_url LIKE '%.example.com%'
+   OR website_url = 'https://example.com'
+   OR name IN (
+     '株式会社テックイノベーション',
+     'エンタープライズシステムズ株式会社',
+     'クリエイティブラボ株式会社'
+   );
+-- 0 件であること
+```
 
 ### バックアップ
 

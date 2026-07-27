@@ -3,12 +3,13 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Box, Typography } from '@mui/material'
+import { getResultsPathOrChat } from '@/lib/results-navigation'
 
 export default function CompanyResultsRedirectPage() {
   const router = useRouter()
 
   useEffect(() => {
-    router.replace('/results')
+    router.replace(getResultsPathOrChat())
   }, [router])
 
   return (

@@ -12,6 +12,7 @@ func UserToEntity(m *models.User) *entity.User {
 	}
 	return &entity.User{
 		ID:                       m.ID,
+		OrganizationID:           m.OrganizationID,
 		Email:                    m.Email,
 		Password:                 m.Password,
 		Name:                     m.Name,
@@ -29,6 +30,8 @@ func UserToEntity(m *models.User) *entity.User {
 		LastLoginAt:              m.LastLoginAt,
 		PasswordResetToken:       m.PasswordResetToken,
 		PasswordResetExpiresAt:   m.PasswordResetExpiresAt,
+		AllowCollectiveInsight:   m.AllowCollectiveInsight,
+		WithdrawnAt:              m.WithdrawnAt,
 		CreatedAt:                m.CreatedAt,
 		UpdatedAt:                m.UpdatedAt,
 	}
@@ -41,6 +44,7 @@ func UserFromEntity(e *entity.User) *models.User {
 	}
 	return &models.User{
 		ID:                       e.ID,
+		OrganizationID:           e.OrganizationID,
 		Email:                    e.Email,
 		Password:                 e.Password,
 		Name:                     e.Name,
@@ -58,6 +62,8 @@ func UserFromEntity(e *entity.User) *models.User {
 		LastLoginAt:              e.LastLoginAt,
 		PasswordResetToken:       e.PasswordResetToken,
 		PasswordResetExpiresAt:   e.PasswordResetExpiresAt,
+		AllowCollectiveInsight:   e.AllowCollectiveInsight,
+		WithdrawnAt:              e.WithdrawnAt,
 		CreatedAt:                e.CreatedAt,
 		UpdatedAt:                e.UpdatedAt,
 	}

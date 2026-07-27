@@ -54,6 +54,21 @@ SOC AI Agent の RAG（Retrieval-Augmented Generation）サービスは Python /
 | GET | `/vector/status` | ベクトルインデックス状況 |
 | POST | `/vector/reembed` | 企業ベクトル削除・再埋め込み |
 
+## 内部サービス認証（#615）
+
+`/health` / `/healthz` を除く全エンドポイントは、Backend からの内部認証ヘッダー `X-Internal-Token` を要求します。
+
+- トークンは環境変数 `RAG_INTERNAL_TOKEN` で設定し、**Backend と RAG で同一の値**を使う（docker compose では両サービスが `Backend/.env` を読むため1箇所の設定で足りる）
+- `RAG_INTERNAL_TOKEN` 未設定時はフェイルクローズ: ヘルスチェック以外の全リクエストを 503 で拒否する
+- トークン不一致は 401
+- 本番のトークンは `openssl rand -hex 32` などで生成する
+- Backend 側は `internal/ragclient.SetAuthHeader` がリクエストへ自動付与する（RAG 呼び出しを追加する際は必ずこれを通すこと）
+
+```bash
+# 手動でエンドポイントを叩く場合
+curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/status
+```
+
 ### `/resume/review` リクエスト例
 
 ```json

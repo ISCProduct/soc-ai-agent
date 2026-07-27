@@ -3,13 +3,14 @@ package routes
 import (
 	"Backend/internal/controllers"
 	"Backend/internal/middleware"
+	"Backend/internal/services"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
 )
 
 // SetupAuthRoutes 認証関連のルーティング設定
-func SetupAuthRoutes(api *echo.Group, authController *controllers.AuthController, oauthController *controllers.OAuthController, userSecret string) {
+func SetupAuthRoutes(api *echo.Group, authController *controllers.AuthController, oauthController *controllers.OAuthController, userSecret string, access services.UserAccessGuard, orgs OrganizationIDResolver) {
 	auth := api.Group("/auth")
 
 	// 認証不要エンドポイント
@@ -22,17 +23,24 @@ func SetupAuthRoutes(api *echo.Group, authController *controllers.AuthController
 	auth.GET("/verify-email", authController.VerifyEmail)
 	auth.POST("/forgot-password", authController.RequestPasswordReset, echoPasswordResetRateLimit())
 	auth.POST("/reset-password", authController.ResetPassword)
+	// トークンリフレッシュ・ログアウト（リフレッシュトークン自体が認証情報 #616）
+	auth.POST("/refresh", authController.Refresh)
+	auth.POST("/logout", authController.Logout)
 	auth.GET("/google", oauthController.GoogleLogin)
 	auth.GET("/google/callback", oauthController.GoogleCallback)
 	auth.GET("/github", oauthController.GitHubLogin)
 	auth.GET("/github/callback", oauthController.GitHubCallback)
 
 	// 認証必須エンドポイント（X-User-Token JWTヘッダーが必要）
-	authProtected := api.Group("/auth", EchoUserAuth(userSecret))
+	authProtected := api.Group("/auth", EchoUserAuth(userSecret, access, orgs))
 	authProtected.GET("/user", authController.GetUser)
 	authProtected.PUT("/profile", authController.UpdateProfile)
 	authProtected.POST("/profile", authController.UpdateProfile) // POST互換（旧クライアント対応）
 	authProtected.DELETE("/account", authController.DeleteAccount)
+
+	// Issue #613: 明示的な本人退会パス（/api/auth/account と同等）
+	users := api.Group("/users", EchoUserAuth(userSecret, access, orgs))
+	users.DELETE("/me", authController.DeleteAccount)
 }
 
 // echoLoginRateLimit はログインエンドポイント用のEchoネイティブレート制限ミドルウェア

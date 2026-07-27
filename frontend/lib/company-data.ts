@@ -36,6 +36,19 @@ export interface CompanyMarketInfo {
   company?: Company
 }
 
+/** 相関図サイドパネル用の企業サマリー */
+export interface CompanySummary {
+  id: number
+  name: string
+  industry?: string
+  location?: string
+  description?: string
+  main_business?: string
+  employee_count?: number
+  founded_year?: number
+  website_url?: string
+}
+
 export class CompanyDataFetchError extends Error {
   constructor(
     message: string,
@@ -46,58 +59,94 @@ export class CompanyDataFetchError extends Error {
   }
 }
 
-const demoCompanyNames = new Set([
-  '株式会社テックイノベーション',
-  'エンタープライズシステムズ株式会社',
-  'クリエイティブラボ株式会社',
-])
-
-function isDemoCompany(company?: Company): boolean {
-  if (!company) return true
-  const website = company.website_url || ''
-  if (website.includes('.example.com') || website === 'https://example.com') {
-    return true
+/**
+ * プロキシが配列を `{ data: [...] }` にラップする場合と、生配列の両方を配列に正規化する。
+ * @see parseProxyResponse / buildProxyJsonResponse
+ */
+export function unwrapCompanyListResponse<T>(raw: unknown): T[] {
+  if (Array.isArray(raw)) return raw as T[]
+  if (raw && typeof raw === 'object') {
+    const data = (raw as { data?: unknown }).data
+    if (Array.isArray(data)) return data as T[]
   }
-  if (demoCompanyNames.has(company.name)) {
-    return true
-  }
-  return false
+  return []
 }
 
-function hasDemoEndpoint(relation: CapitalRelation): boolean {
-  if (relation.parent_id && isDemoCompany(relation.parent)) return true
-  if (relation.child_id && isDemoCompany(relation.child)) return true
-  if (relation.from_id && isDemoCompany(relation.from)) return true
-  if (relation.to_id && isDemoCompany(relation.to)) return true
-  return false
-}
-
-/** 企業関係データを Next.js プロキシ経由で取得（DB: company_relations） */
+/**
+ * 企業関係データを Next.js プロキシ経由で取得する（DB: company_relations）。
+ *
+ * 失敗時は空配列を返さず {@link CompanyDataFetchError} を throw する。
+ * 呼び出し側は try/catch で捕捉し、エラー UI を表示すること。
+ *
+ * @throws {CompanyDataFetchError} HTTP エラーまたはネットワーク失敗時
+ */
 export async function fetchCompanyRelations(): Promise<CapitalRelation[]> {
   try {
     const response = await fetch('/api/companies/relations', { cache: 'no-store' })
     if (!response.ok) {
       throw new CompanyDataFetchError('企業関係データの取得に失敗しました', response.status)
     }
-    const relations: CapitalRelation[] = await response.json()
-    return relations.filter((relation) => !hasDemoEndpoint(relation))
+    const raw: unknown = await response.json()
+    return unwrapCompanyListResponse<CapitalRelation>(raw)
   } catch (error) {
     if (error instanceof CompanyDataFetchError) throw error
     throw new CompanyDataFetchError('企業関係データの取得中にエラーが発生しました')
   }
 }
 
-/** 企業市場情報を Next.js プロキシ経由で取得（DB: company_market_info） */
+/**
+ * 企業市場情報を Next.js プロキシ経由で取得する（DB: company_market_info）。
+ *
+ * 失敗時は空配列を返さず {@link CompanyDataFetchError} を throw する。
+ * 呼び出し側は try/catch で捕捉し、エラー UI を表示すること。
+ *
+ * @throws {CompanyDataFetchError} HTTP エラーまたはネットワーク失敗時
+ */
 export async function fetchCompanyMarketInfo(): Promise<CompanyMarketInfo[]> {
   try {
     const response = await fetch('/api/companies/market-info', { cache: 'no-store' })
     if (!response.ok) {
       throw new CompanyDataFetchError('市場情報の取得に失敗しました', response.status)
     }
-    return response.json()
+    const raw: unknown = await response.json()
+    return unwrapCompanyListResponse<CompanyMarketInfo>(raw)
   } catch (error) {
     if (error instanceof CompanyDataFetchError) throw error
     throw new CompanyDataFetchError('市場情報の取得中にエラーが発生しました')
+  }
+}
+
+/**
+ * 企業詳細（サマリー）を取得する。
+ * @throws {CompanyDataFetchError} HTTP エラーまたはネットワーク失敗時
+ */
+export async function fetchCompanySummary(companyId: number): Promise<CompanySummary> {
+  try {
+    const response = await fetch(`/api/companies/${companyId}`, { cache: 'no-store' })
+    if (!response.ok) {
+      throw new CompanyDataFetchError('企業情報の取得に失敗しました', response.status)
+    }
+    const raw: unknown = await response.json()
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new CompanyDataFetchError('企業情報の形式が不正です')
+    }
+    const data = raw as Record<string, unknown>
+    const id = typeof data.id === 'number' ? data.id : companyId
+    const name = typeof data.name === 'string' ? data.name : `企業 ${companyId}`
+    return {
+      id,
+      name,
+      industry: typeof data.industry === 'string' ? data.industry : undefined,
+      location: typeof data.location === 'string' ? data.location : undefined,
+      description: typeof data.description === 'string' ? data.description : undefined,
+      main_business: typeof data.main_business === 'string' ? data.main_business : undefined,
+      employee_count: typeof data.employee_count === 'number' ? data.employee_count : undefined,
+      founded_year: typeof data.founded_year === 'number' ? data.founded_year : undefined,
+      website_url: typeof data.website_url === 'string' ? data.website_url : undefined,
+    }
+  } catch (error) {
+    if (error instanceof CompanyDataFetchError) throw error
+    throw new CompanyDataFetchError('企業情報の取得中にエラーが発生しました')
   }
 }
 

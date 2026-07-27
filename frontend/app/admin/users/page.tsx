@@ -98,6 +98,27 @@ export default function AdminUsersPage() {
     setLoading(false)
   }
 
+  const handleDeleteUser = async (user: AdminUser) => {
+    if (!window.confirm(`${user.email} を完全削除します。履歴書・面接動画を含む個人データは復元できません。よろしいですか？`)) {
+      return
+    }
+    setLoading(true)
+    setError('')
+    const response = await fetch(`/api/admin/users/${user.id}`, {
+      method: 'DELETE',
+      headers: authService.getAdminFetchHeaders(),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      setError((data as { error?: string })?.error || 'ユーザー削除に失敗しました')
+      setLoading(false)
+      return
+    }
+    setUsers((prev) => prev.filter((item) => item.id !== user.id))
+    setTotal((prev) => Math.max(0, prev - 1))
+    setLoading(false)
+  }
+
   const handleQueryChange = (value: string) => {
     setQuery(value)
     setPage(0) // 検索時はページを先頭に戻す
@@ -182,14 +203,25 @@ export default function AdminUsersPage() {
                         </TableCell>
                         <TableCell>{user.updated_at}</TableCell>
                         <TableCell align="right">
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            disabled={loading}
-                            onClick={() => handleToggleAdmin(user)}
-                          >
-                            {user.is_admin ? '管理者権限を外す' : '管理者にする'}
-                          </Button>
+                          <Stack direction="row" spacing={1} justifyContent="flex-end">
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              disabled={loading}
+                              onClick={() => handleToggleAdmin(user)}
+                            >
+                              {user.is_admin ? '管理者権限を外す' : '管理者にする'}
+                            </Button>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="error"
+                              disabled={loading}
+                              onClick={() => handleDeleteUser(user)}
+                            >
+                              削除
+                            </Button>
+                          </Stack>
                         </TableCell>
                       </TableRow>
                     ))}

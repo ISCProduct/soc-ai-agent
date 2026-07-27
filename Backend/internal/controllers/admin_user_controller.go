@@ -2,23 +2,33 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/services"
 	"Backend/internal/services/interfaces"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
+	"gorm.io/gorm"
 )
 
 const maxAdminUsersOffset = 10000
 
 type AdminUserController struct {
-	repo  repository.UserRepository
-	audit interfaces.AuditLogService
+	repo     repository.UserRepository
+	audit    interfaces.AuditLogService
+	deletion *services.UserDeletionService
 }
 
 func NewAdminUserController(repo repository.UserRepository, audit interfaces.AuditLogService) *AdminUserController {
 	return &AdminUserController{repo: repo, audit: audit}
+}
+
+// SetDeletionService は管理者によるユーザー削除で使用するカスケードサービスを設定する
+func (c *AdminUserController) SetDeletionService(deletion *services.UserDeletionService) {
+	c.deletion = deletion
 }
 
 type adminUserResponse struct {
@@ -131,6 +141,56 @@ func (c *AdminUserController) Update(ctx echo.Context) error {
 		SchoolName:  user.SchoolName,
 		CreatedAt:   user.CreatedAt.Format(timeLayout()),
 		UpdatedAt:   user.UpdatedAt.Format(timeLayout()),
+	})
+}
+
+// Delete DELETE /api/admin/users/:id
+// 管理者によるユーザー退会（論理削除）。関連データと S3 は保持期間後に物理削除される。
+func (c *AdminUserController) Delete(ctx echo.Context) error {
+	if c.deletion == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "user deletion is not configured")
+	}
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid user id")
+	}
+	user, err := c.repo.GetUserByID(uint(id))
+	if err != nil || user == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "user not found")
+	}
+	if user.IsWithdrawn() {
+		return echo.NewHTTPError(http.StatusConflict, "account already withdrawn")
+	}
+	actor := strings.TrimSpace(ctx.Request().Header.Get("X-Admin-Email"))
+	if err := c.deletion.DeleteUser(uint(id), services.UserDeletionActor{Kind: "admin", Email: actor}); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "user not found")
+		}
+		if errors.Is(err, services.ErrAlreadyWithdrawn) {
+			return echo.NewHTTPError(http.StatusConflict, "account already withdrawn")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to withdraw user")
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"message":         "ユーザーを退会処理しました（保持期間後に完全削除）",
+		"id":              uint(id),
+		"email":           user.Email,
+		"retention_days":  services.WithdrawalRetentionDays,
+	})
+}
+
+// PurgeExpired POST /api/admin/users/purge-expired
+// 保持期間を過ぎた退会ユーザーを物理削除する。
+func (c *AdminUserController) PurgeExpired(ctx echo.Context) error {
+	if c.deletion == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "user deletion is not configured")
+	}
+	n, err := c.deletion.PurgeExpiredWithdrawals(time.Time{})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to purge expired withdrawals")
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"purged": n,
 	})
 }
 
