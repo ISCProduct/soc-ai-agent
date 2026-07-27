@@ -15,7 +15,13 @@ import {
 import { Person, SmartToy } from '@mui/icons-material'
 import styles from '../../mui-chat.module.css'
 import { TypingIndicator } from './TypingIndicator'
-import { JOB_QUICK_OPTIONS } from '../utils'
+import {
+  CHAT_BRAND,
+  CHAT_BRAND_HOVER,
+  extractChoices,
+  JOB_QUICK_OPTIONS,
+  stripChoiceLines,
+} from '../utils'
 import type { Message } from '../types'
 
 type ChatMessageListProps = {
@@ -24,6 +30,7 @@ type ChatMessageListProps = {
   historyLoadError: string | null
   historyRetrying: boolean
   messagesEndRef: React.RefObject<HTMLDivElement | null>
+  messagesAreaRef: React.RefObject<HTMLDivElement | null>
   onRetryHistoryLoad: () => void
   onQuickSelect: (option: string) => void
 }
@@ -35,20 +42,26 @@ export function ChatMessageList({
   historyLoadError,
   historyRetrying,
   messagesEndRef,
+  messagesAreaRef,
   onRetryHistoryLoad,
   onQuickSelect,
 }: ChatMessageListProps) {
+  const hasUserMessage = messages.some((m) => m.role === 'user')
+  const showQuickSelect = !historyLoadError && !hasUserMessage && messages.length > 0
+
   return (
     <Box
+      ref={messagesAreaRef}
       className={styles.messagesArea}
       sx={{
         flexGrow: 1,
+        minHeight: 0,
         overflowY: 'auto',
         backgroundColor: '#fff',
       }}
     >
       {historyLoadError && (
-        <Box sx={{ textAlign: 'center', mt: 8, px: 3 }}>
+        <Box sx={{ textAlign: 'center', mt: 4, px: 2 }}>
           <Alert severity="error" sx={{ mb: 2, textAlign: 'left' }}>
             {historyLoadError}
           </Alert>
@@ -57,23 +70,10 @@ export function ChatMessageList({
             onClick={onRetryHistoryLoad}
             disabled={historyRetrying}
             startIcon={historyRetrying ? <CircularProgress size={16} color="inherit" /> : undefined}
+            sx={{ bgcolor: CHAT_BRAND, '&:hover': { bgcolor: CHAT_BRAND_HOVER } }}
           >
             {historyRetrying ? '再読み込み中...' : '再試行'}
           </Button>
-        </Box>
-      )}
-
-      {messages.length === 0 && !historyLoadError && (
-        <Box sx={{ textAlign: 'center', mt: 8 }}>
-          <SmartToy sx={{ fontSize: 64, color: '#9e9e9e', mb: 2 }} />
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            こんにちは！IT業界専門のキャリアエージェントです。
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            4万社余りのIT企業の中から、あなたに最適な企業を選定いたします。
-            <br />
-            まず、どのような職種を希望されますか？
-          </Typography>
         </Box>
       )}
 
@@ -88,12 +88,17 @@ export function ChatMessageList({
           message.role === 'assistant' &&
           message.content.includes('チャットを終了させていただきます')
 
+        const choices =
+          message.role === 'assistant' ? extractChoices(message.content) : []
+        const displayContent =
+          choices.length > 0 ? stripChoiceLines(message.content) : message.content
+
         return (
           <Box
             key={message.id}
             sx={{
               display: 'flex',
-              mb: 3,
+              mb: { xs: 2, md: 2.5 },
               justifyContent: message.role === 'user' ? 'flex-end' : 'flex-start',
             }}
           >
@@ -104,98 +109,100 @@ export function ChatMessageList({
                     ? '#d32f2f'
                     : isValidationError
                       ? '#f57c00'
-                      : '#1976d2',
-                  width: 36,
-                  height: 36,
-                  mr: 2,
+                      : CHAT_BRAND,
+                  width: 32,
+                  height: 32,
+                  mr: 1.5,
+                  flexShrink: 0,
                 }}
               >
-                <SmartToy sx={{ fontSize: 20 }} />
+                <SmartToy sx={{ fontSize: 18 }} />
               </Avatar>
             )}
             <Paper
-              elevation={1}
+              elevation={0}
               className={styles.messageBubble}
               sx={{
                 backgroundColor:
                   message.role === 'user'
-                    ? '#1976d2'
+                    ? CHAT_BRAND
                     : isTerminationMessage
                       ? '#ffebee'
                       : isValidationError
                         ? '#fff3e0'
                         : '#f5f5f5',
-                color: message.role === 'user' ? '#fff' : '#000',
+                color: message.role === 'user' ? '#fff' : '#1a1a1a',
                 border: isTerminationMessage
                   ? '2px solid #d32f2f'
                   : isValidationError
                     ? '2px solid #f57c00'
-                    : 'none',
+                    : message.role === 'assistant'
+                      ? '1px solid #ebebeb'
+                      : 'none',
               }}
             >
-              <Typography variant="body1">{message.content}</Typography>
+              <Typography
+                variant="body1"
+                sx={{ whiteSpace: 'pre-line', lineHeight: 1.65, fontSize: { xs: '0.9375rem', md: '1rem' } }}
+              >
+                {displayContent}
+              </Typography>
             </Paper>
             {message.role === 'user' && (
               <Avatar
                 sx={{
                   bgcolor: '#757575',
-                  width: 36,
-                  height: 36,
-                  ml: 2,
+                  width: 32,
+                  height: 32,
+                  ml: 1.5,
+                  flexShrink: 0,
                 }}
               >
-                <Person sx={{ fontSize: 20 }} />
+                <Person sx={{ fontSize: 18 }} />
               </Avatar>
             )}
           </Box>
         )
       })}
 
-      {/* ローディングインジケーター */}
       {isLoading && (
-        <Box
-          sx={{
-            display: 'flex',
-            mb: 3,
-            justifyContent: 'flex-start',
-          }}
-        >
+        <Box sx={{ display: 'flex', mb: 2, justifyContent: 'flex-start' }}>
           <Avatar
             sx={{
-              bgcolor: '#1976d2',
-              width: 36,
-              height: 36,
-              mr: 2,
+              bgcolor: CHAT_BRAND,
+              width: 32,
+              height: 32,
+              mr: 1.5,
+              flexShrink: 0,
             }}
           >
-            <SmartToy sx={{ fontSize: 20 }} />
+            <SmartToy sx={{ fontSize: 18 }} />
           </Avatar>
           <Paper
-            elevation={1}
+            elevation={0}
             className={styles.messageBubble}
-            sx={{
-              backgroundColor: '#f5f5f5',
-            }}
+            sx={{ backgroundColor: '#f5f5f5', border: '1px solid #ebebeb' }}
           >
             <TypingIndicator />
           </Paper>
         </Box>
       )}
 
-      {messages.length === 0 && (
-        <Box sx={{ mt: 4 }}>
+      {showQuickSelect && (
+        <Box sx={{ mt: 1, mb: 2, px: 1 }}>
           <Typography
             variant="body2"
             color="text.secondary"
-            sx={{ mb: 2, textAlign: 'center' }}
+            sx={{ mb: 1.5, textAlign: 'center' }}
           >
-            クイック選択：
+            クイック選択（タップで送信）
           </Typography>
           <Stack
             direction="row"
             spacing={1}
             justifyContent="center"
             flexWrap="wrap"
+            useFlexGap
             gap={1}
           >
             {JOB_QUICK_OPTIONS.map((option) => (
@@ -203,7 +210,13 @@ export function ChatMessageList({
                 key={option}
                 label={option}
                 onClick={() => onQuickSelect(option)}
-                sx={{ cursor: 'pointer' }}
+                clickable
+                sx={{
+                  cursor: 'pointer',
+                  borderColor: CHAT_BRAND,
+                  '&:hover': { bgcolor: 'rgba(236,91,19,0.08)' },
+                }}
+                variant="outlined"
               />
             ))}
           </Stack>

@@ -3,6 +3,7 @@ package services
 import (
 	"Backend/internal/models"
 	"context"
+	"fmt"
 	"log"
 )
 
@@ -20,15 +21,20 @@ func (s *ChatService) resolveJobCategoryForChat(ctx context.Context, req ChatReq
 	if s.conversationContextRepo != nil {
 		if id, err := s.conversationContextRepo.GetJobCategoryID(req.SessionID); err == nil {
 			storedJobCategoryID = id
+		} else {
+			log.Printf("[JobValidation] failed to load stored job category: %v\n", err)
 		}
 	}
+	// リクエスト未指定時はセッション保存値を優先
 	if jobCategoryID == 0 {
 		jobCategoryID = storedJobCategoryID
 	}
+	// クライアント側で保持している ID をセッションへ同期
 	if jobCategoryID != 0 && s.conversationContextRepo != nil && storedJobCategoryID != jobCategoryID {
 		if err := s.conversationContextRepo.SetJobCategoryID(req.UserID, req.SessionID, jobCategoryID); err != nil {
-			log.Printf("Warning: failed to store job category: %v\n", err)
+			return nil, fmt.Errorf("failed to store job category: %w", err)
 		}
+		storedJobCategoryID = jobCategoryID
 	}
 
 	if jobCategoryID == 0 && s.shouldValidateJobCategory(history) {
@@ -36,20 +42,18 @@ func (s *ChatService) resolveJobCategoryForChat(ctx context.Context, req ChatReq
 		jobValidation, err := s.jobValidator.ValidateJobCategory(ctx, req.Message)
 		if err != nil {
 			log.Printf("[JobValidation] Error: %v\n", err)
-			// エラーでも続行
+			// 判定エラーでも会話は続行（職種未設定のまま）
 		} else if jobValidation != nil {
 			if jobValidation.IsValid && len(jobValidation.MatchedCategories) > 0 {
-				// 明確に職種が特定できた場合
 				log.Printf("[JobValidation] Valid job category matched: %d categories\n", len(jobValidation.MatchedCategories))
 				jobCategoryID = jobValidation.MatchedCategories[0].ID
 				result.jobJustResolved = true
 				if s.conversationContextRepo != nil {
 					if err := s.conversationContextRepo.SetJobCategoryID(req.UserID, req.SessionID, jobCategoryID); err != nil {
-						log.Printf("Warning: failed to store job category: %v\n", err)
+						return nil, fmt.Errorf("failed to store resolved job category: %w", err)
 					}
 				}
 			} else if jobValidation.NeedsClarification && jobValidation.SuggestedQuestion != "" {
-				// 職種が曖昧な場合は選択肢を提示
 				log.Printf("[JobValidation] Needs clarification, presenting options\n")
 
 				assistantMsg := &models.ChatMessage{
@@ -67,6 +71,7 @@ func (s *ChatService) resolveJobCategoryForChat(ctx context.Context, req ChatReq
 					IsComplete:        false,
 					TotalQuestions:    15,
 					AnsweredQuestions: 0,
+					JobCategoryID:     0,
 				}
 				return result, nil
 			}

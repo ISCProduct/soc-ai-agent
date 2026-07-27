@@ -13,6 +13,7 @@ import {
 import { Send } from '@mui/icons-material'
 import styles from '../../mui-chat.module.css'
 import type { ChoiceOption } from '../types'
+import { CHAT_BRAND, CHAT_BRAND_HOVER, shouldSendChatOnKeyDown } from '../utils'
 
 type ChatInputBarProps = {
   analysisComplete: boolean
@@ -22,7 +23,7 @@ type ChatInputBarProps = {
   inputPlaceholder: string
   isLoading: boolean
   historyLoadError: string | null
-  inputRef: React.RefObject<HTMLInputElement | null>
+  inputRef: React.RefObject<HTMLTextAreaElement | null>
   onInputChange: (value: string) => void
   onSend: (overrideMessage?: string) => void
   onOtherChoice: () => void
@@ -66,6 +67,8 @@ export function ChatInputBar({
               px: 4,
               fontSize: '1.1rem',
               fontWeight: 'bold',
+              bgcolor: CHAT_BRAND,
+              '&:hover': { bgcolor: CHAT_BRAND_HOVER },
             }}
           >
             🎉 分析完了！結果を見る
@@ -114,16 +117,19 @@ export function ChatInputBar({
               </Stack>
             </Paper>
           )}
-          <Box sx={{ display: 'flex', gap: 1 }}>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
             <TextField
               fullWidth
+              multiline
+              minRows={2}
+              maxRows={6}
               placeholder={inputPlaceholder}
               value={input}
               onChange={(e) => {
                 onInputChange(e.target.value)
               }}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+              onKeyDown={(e) => {
+                if (shouldSendChatOnKeyDown(e)) {
                   e.preventDefault()
                   onSend()
                 }
@@ -131,9 +137,12 @@ export function ChatInputBar({
               disabled={isLoading || !!historyLoadError}
               size="small"
               inputRef={inputRef}
+              helperText="改行: Enter　／　送信: Ctrl+Enter（Mac は ⌘+Enter）"
+              FormHelperTextProps={{ sx: { mx: 0.5 } }}
               sx={{
                 '& .MuiOutlinedInput-root': {
                   borderRadius: 2,
+                  alignItems: 'flex-start',
                 },
               }}
             />
@@ -142,10 +151,11 @@ export function ChatInputBar({
               onClick={() => onSend()}
               disabled={!input.trim() || isLoading || !!historyLoadError}
               sx={{
-                bgcolor: '#1976d2',
+                bgcolor: CHAT_BRAND,
                 color: '#fff',
+                mb: 2.5,
                 '&:hover': {
-                  bgcolor: '#1565c0',
+                  bgcolor: CHAT_BRAND_HOVER,
                 },
                 '&.Mui-disabled': {
                   bgcolor: '#e0e0e0',

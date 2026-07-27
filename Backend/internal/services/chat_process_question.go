@@ -33,13 +33,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	// 3. ユーザーの回答から重み係数を判定・更新し、回答品質に応じてフェーズ進捗を更新
 	// isQualityAnswer: スキップフレーズ・極短回答・スコア0でなければ true（進捗カウント対象）
 	trimmedAnswer := strings.TrimSpace(req.Message)
-	lastAssistantQuestion := ""
-	for i := len(history) - 1; i >= 0; i-- {
-		if history[i].Role == "assistant" {
-			lastAssistantQuestion = history[i].Content
-			break
-		}
-	}
+	lastAssistantQuestion := findLastAssistantQuestion(history)
 	resolved := ResolveChoiceAnswer(lastAssistantQuestion, trimmedAnswer)
 	log.Printf("[ProcessChat] Checking answer: raw=%q resolved_choice=%v letter=%q free_text=%v\n",
 		trimmedAnswer, resolved.IsChoice, resolved.Letter, resolved.IsFreeText)
@@ -276,6 +270,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 		EvaluatedCategories: len(evaluatedCategories),
 		TotalCategories:     10,
 		Summary:             sessionSummary,
+		JobCategoryID:       jobCategoryID,
 	}, nil
 }
 

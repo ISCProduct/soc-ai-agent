@@ -89,6 +89,7 @@ type ChatResponse struct {
 	EvaluatedCategories int                      `json:"evaluated_categories"`
 	TotalCategories     int                      `json:"total_categories"`
 	Summary             *SessionSummary          `json:"summary,omitempty"`
+	JobCategoryID       uint                     `json:"job_category_id,omitempty"`
 }
 
 // PhaseProgress フェーズ進捗情報

@@ -55,25 +55,18 @@ func (s *ChatService) tryGetPredefinedQuestion(userID uint, sessionID string, pr
 }
 
 func (s *ChatService) isJobSelectionQuestion(text string) bool {
-	if strings.TrimSpace(text) == "" {
-		return false
-	}
-	keywords := []string{
-		"職種", "どの職種", "IT職種", "興味がありますか", "選んでください",
-		"まだ決めていない", "番号で答えても",
-	}
-	for _, keyword := range keywords {
-		if strings.Contains(text, keyword) {
-			return true
-		}
-	}
-	return false
+	return isJobSelectionQuestionText(text)
 }
 
 func (s *ChatService) shouldValidateJobCategory(history []models.ChatMessage) bool {
-	lastAssistant := s.getLastAssistantMessage(history)
+	// 警告メッセージを飛ばし、実質の直前質問で判定する
+	lastAssistant := findLastAssistantQuestion(history)
 	if strings.TrimSpace(lastAssistant) == "" {
-		return true
+		// 質問がまだ無い初回のみ職種判定へ
+		if s.getLastAssistantMessage(history) == "" {
+			return true
+		}
+		return false
 	}
 	return s.isJobSelectionQuestion(lastAssistant)
 }

@@ -3,6 +3,16 @@ import {
   makeMessageId,
   INITIAL_GREETING,
   clearChatSessionOnEnd,
+  readStoredJobCategoryId,
+  writeStoredJobCategoryId,
+  shouldSendChatOnKeyDown,
+  jobCategoryStorageKey,
+  stripChoiceLines,
+  computeProgressTotals,
+  shouldAutoScrollToBottom,
+  CHAT_BRAND,
+  findLastAssistantQuestionMessage,
+  isValidationFeedbackMessage,
 } from '@/components/mui-chat/utils'
 
 describe('extractChoices', () => {
@@ -83,6 +93,9 @@ describe('clearChatSessionOnEnd', () => {
     const store = { ...initial }
     return {
       getItem: (key: string) => (key in store ? store[key] : null),
+      setItem: (key: string, value: string) => {
+        store[key] = value
+      },
       removeItem: (key: string) => {
         delete store[key]
       },
@@ -90,10 +103,11 @@ describe('clearChatSessionOnEnd', () => {
     }
   }
 
-  it('sessionId 削除前に chat_cache_ を消す', () => {
+  it('sessionId 削除前に chat_cache_ と職種IDを消す', () => {
     const sessionStorage = createMemoryStorage({
       chatSessionId: 'sess-42',
       chatMessages: '[]',
+      [jobCategoryStorageKey('sess-42')]: '3',
     })
     const localStorage = createMemoryStorage({
       'chat_cache_sess-42': 'cached',
@@ -104,6 +118,7 @@ describe('clearChatSessionOnEnd', () => {
     clearChatSessionOnEnd({ sessionStorage, localStorage })
 
     expect(localStorage._store['chat_cache_sess-42']).toBeUndefined()
+    expect(sessionStorage._store[jobCategoryStorageKey('sess-42')]).toBeUndefined()
     expect(sessionStorage._store.chatSessionId).toBeUndefined()
     expect(sessionStorage._store.chatMessages).toBeUndefined()
     expect(localStorage._store.chatMessages).toBeUndefined()
@@ -121,5 +136,162 @@ describe('clearChatSessionOnEnd', () => {
 
     expect(sessionStorage._store.chatMessages).toBeUndefined()
     expect(localStorage._store.chat_session_id).toBeUndefined()
+  })
+})
+
+describe('job category storage', () => {
+  function createMemoryStorage(initial: Record<string, string> = {}) {
+    const store = { ...initial }
+    return {
+      getItem: (key: string) => (key in store ? store[key] : null),
+      setItem: (key: string, value: string) => {
+        store[key] = value
+      },
+      removeItem: (key: string) => {
+        delete store[key]
+      },
+      _store: store,
+    }
+  }
+
+  it('職種IDを読み書きできる', () => {
+    const storage = createMemoryStorage()
+    writeStoredJobCategoryId('s1', 7, storage)
+    expect(readStoredJobCategoryId('s1', storage)).toBe(7)
+    writeStoredJobCategoryId('s1', 0, storage)
+    expect(readStoredJobCategoryId('s1', storage)).toBe(0)
+  })
+})
+
+describe('shouldSendChatOnKeyDown', () => {
+  it('Enter 単独では送信しない', () => {
+    expect(shouldSendChatOnKeyDown({ key: 'Enter', ctrlKey: false, metaKey: false })).toBe(false)
+  })
+
+  it('Ctrl+Enter / Meta+Enter で送信する', () => {
+    expect(shouldSendChatOnKeyDown({ key: 'Enter', ctrlKey: true, metaKey: false })).toBe(true)
+    expect(shouldSendChatOnKeyDown({ key: 'Enter', ctrlKey: false, metaKey: true })).toBe(true)
+  })
+
+  it('IME 変換中は送信しない', () => {
+    expect(
+      shouldSendChatOnKeyDown({
+        key: 'Enter',
+        ctrlKey: true,
+        metaKey: false,
+        isComposing: true,
+      }),
+    ).toBe(false)
+  })
+})
+
+describe('stripChoiceLines', () => {
+  it('選択肢行を除去して質問文を残す', () => {
+    const content = [
+      'どの働き方が好みですか？',
+      '',
+      'A) リモート中心',
+      'B) オフィス中心',
+      '補足です',
+    ].join('\n')
+    expect(stripChoiceLines(content)).toBe('どの働き方が好みですか？\n\n補足です')
+  })
+})
+
+describe('computeProgressTotals', () => {
+  it('フェーズの想定総数を required に使う（asked ではない）', () => {
+    const totals = computeProgressTotals({
+      phases: [
+        { valid_answers: 2, questions_asked: 2, min_questions: 3, max_questions: 5 },
+        { valid_answers: 0, questions_asked: 0, min_questions: 2, max_questions: 4 },
+      ],
+      questionCount: 2,
+      totalQuestions: 15,
+    })
+    expect(totals.required).toBe(9)
+    expect(totals.valid).toBe(2)
+    expect(totals.percent).toBe(Math.round((2 / 9) * 100))
+  })
+
+  it('フェーズ無しなら totalQuestions ベース', () => {
+    expect(
+      computeProgressTotals({ phases: null, questionCount: 3, totalQuestions: 15 }),
+    ).toEqual({ valid: 3, required: 15, percent: 20 })
+  })
+})
+
+describe('shouldAutoScrollToBottom', () => {
+  it('下部付近なら true', () => {
+    expect(
+      shouldAutoScrollToBottom({
+        scrollHeight: 1000,
+        scrollTop: 900,
+        clientHeight: 100,
+        thresholdPx: 120,
+      }),
+    ).toBe(true)
+  })
+
+  it('上部を見ているときは false', () => {
+    expect(
+      shouldAutoScrollToBottom({
+        scrollHeight: 1000,
+        scrollTop: 0,
+        clientHeight: 100,
+        thresholdPx: 120,
+      }),
+    ).toBe(false)
+  })
+})
+
+describe('CHAT_BRAND', () => {
+  it('プライマリ青である', () => {
+    expect(CHAT_BRAND).toBe('#1976d2')
+  })
+})
+
+describe('findLastAssistantQuestionMessage', () => {
+  it('警告メッセージを飛ばして直前の質問を返す', () => {
+    const messages = [
+      { role: 'assistant', content: 'A) はい\nB) いいえ' },
+      { role: 'user', content: 'typo' },
+      {
+        role: 'assistant',
+        content: '書かれた内容にはお答えできません。質問に回答してください。（1/3回目の警告）',
+      },
+    ]
+    expect(findLastAssistantQuestionMessage(messages)?.content).toBe('A) はい\nB) いいえ')
+  })
+
+  it('警告が複数あっても最初の質問を返す', () => {
+    const q = 'A) 要件が曖昧\nB) 技術制約'
+    const messages = [
+      { role: 'assistant', content: q },
+      { role: 'user', content: 'あ' },
+      {
+        role: 'assistant',
+        content: '書かれた内容にはお答えできません。質問に回答してください。（1/3回目の警告）',
+      },
+      { role: 'user', content: 'ああ' },
+      {
+        role: 'assistant',
+        content: '書かれた内容にはお答えできません。質問に回答してください。（2/3回目の警告）',
+      },
+    ]
+    expect(findLastAssistantQuestionMessage(messages)?.content).toBe(q)
+  })
+})
+
+describe('isValidationFeedbackMessage', () => {
+  it('警告と終了メッセージを判定する', () => {
+    expect(
+      isValidationFeedbackMessage(
+        '書かれた内容にはお答えできません。質問に回答してください。（1/3回目の警告）',
+      ),
+    ).toBe(true)
+    expect(
+      isValidationFeedbackMessage('質問と関係のない内容が3回続いたため、チャットを終了させていただきます。'),
+    ).toBe(true)
+    expect(isValidationFeedbackMessage('一番近いものを選んでください')).toBe(false)
   })
 })

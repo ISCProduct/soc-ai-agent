@@ -44,6 +44,74 @@ export const JOB_QUICK_OPTIONS = [
   'まだ決めていない',
 ] as const
 
+/** チャット画面のアクセント（MUI primary 青） */
+export const CHAT_BRAND = '#1976d2'
+export const CHAT_BRAND_HOVER = '#1565c0'
+
+/**
+ * 選択肢行（A) / 1. など）を本文から除き、バブルとボタンの二重表示を防ぐ。
+ */
+export function stripChoiceLines(content: string): string {
+  const kept = content.split('\n').filter((line) => {
+    const trimmed = line.trim()
+    if (!trimmed) return true
+    if (/^([A-E])\)\s*.+$/.test(trimmed)) return false
+    if (/^([A-E])[：、.．]\s*.+$/.test(trimmed)) return false
+    if (/^(\d+)[\.\)．]\s*.+$/.test(trimmed)) return false
+    return true
+  })
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/**
+ * ヘッダー進捗をサイドバーと同じ「想定総質問数」ベースで計算する。
+ * asked ベースだと途中で 100% に見える問題を避ける。
+ */
+export function computeProgressTotals(args: {
+  phases: { questions_asked?: number; valid_answers?: number; min_questions?: number; max_questions?: number }[] | null
+  questionCount: number
+  totalQuestions: number
+}): { valid: number; required: number; percent: number } {
+  const totalFallback = Math.max(1, args.totalQuestions || 15)
+  if (args.phases && args.phases.length > 0) {
+    let valid = 0
+    let required = 0
+    for (const phase of args.phases) {
+      valid += phase.valid_answers || 0
+      const need =
+        (phase.max_questions && phase.max_questions > 0
+          ? phase.max_questions
+          : phase.min_questions) || 0
+      required += need
+    }
+    if (required <= 0) required = totalFallback
+    return {
+      valid,
+      required,
+      percent: Math.min(100, Math.round((valid / required) * 100)),
+    }
+  }
+  return {
+    valid: args.questionCount,
+    required: totalFallback,
+    percent: Math.min(100, Math.round((args.questionCount / totalFallback) * 100)),
+  }
+}
+
+/**
+ * メッセージ一覧の自動スクロールを「下部付近にいるときだけ」許可する。
+ */
+export function shouldAutoScrollToBottom(args: {
+  scrollHeight: number
+  scrollTop: number
+  clientHeight: number
+  thresholdPx?: number
+}): boolean {
+  const threshold = args.thresholdPx ?? 120
+  const distanceFromBottom = args.scrollHeight - args.scrollTop - args.clientHeight
+  return distanceFromBottom <= threshold
+}
+
 /**
  * チャット終了時にセッション ID とメッセージ／キャッシュを削除する。
  * sessionId は remove 前に取得する（先に消すと chat_cache_ が残る）。
@@ -55,9 +123,76 @@ export function clearChatSessionOnEnd(storage: {
   const currentSessionId = storage.sessionStorage.getItem('chatSessionId')
   if (currentSessionId) {
     storage.localStorage.removeItem(`chat_cache_${currentSessionId}`)
+    storage.sessionStorage.removeItem(jobCategoryStorageKey(currentSessionId))
   }
   storage.sessionStorage.removeItem('chatSessionId')
   storage.sessionStorage.removeItem('chatMessages')
   storage.localStorage.removeItem('chatMessages')
   storage.localStorage.removeItem('chat_session_id')
 }
+
+export function jobCategoryStorageKey(sessionId: string): string {
+  return `chat_job_category_id_${sessionId}`
+}
+
+export function readStoredJobCategoryId(
+  sessionId: string,
+  storage: Pick<Storage, 'getItem'> = sessionStorage,
+): number {
+  if (!sessionId) return 0
+  const raw = storage.getItem(jobCategoryStorageKey(sessionId))
+  const n = raw ? Number(raw) : 0
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+export function writeStoredJobCategoryId(
+  sessionId: string,
+  jobCategoryId: number,
+  storage: Pick<Storage, 'setItem' | 'removeItem'> = sessionStorage,
+): void {
+  if (!sessionId) return
+  const key = jobCategoryStorageKey(sessionId)
+  if (jobCategoryId > 0) {
+    storage.setItem(key, String(jobCategoryId))
+  } else {
+    storage.removeItem(key)
+  }
+}
+
+/** Ctrl+Enter / ⌘+Enter で送信。Enter 単独は改行。 */
+export function shouldSendChatOnKeyDown(e: {
+  key: string
+  ctrlKey: boolean
+  metaKey: boolean
+  nativeEvent?: { isComposing?: boolean }
+  isComposing?: boolean
+}): boolean {
+  if (e.key !== 'Enter') return false
+  const composing = e.isComposing || e.nativeEvent?.isComposing
+  if (composing) return false
+  return e.ctrlKey || e.metaKey
+}
+
+/** 無効回答の警告・強制終了メッセージか（選択肢抽出の対象外） */
+export function isValidationFeedbackMessage(content: string): boolean {
+  const trimmed = content.trim()
+  if (!trimmed) return false
+  return (
+    trimmed.includes('書かれた内容にはお答えできません') ||
+    trimmed.includes('質問と関係のない内容が3回続いた')
+  )
+}
+
+/** 警告を飛ばして直近のアシスタント質問メッセージを返す */
+export function findLastAssistantQuestionMessage<T extends { role: string; content: string }>(
+  messages: T[],
+): T | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg.role !== 'assistant') continue
+    if (isValidationFeedbackMessage(msg.content)) continue
+    return msg
+  }
+  return undefined
+}
+
