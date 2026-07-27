@@ -310,6 +310,37 @@ func (c *AdminCompanyController) FetchCompanyInfo(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, result)
 }
 
+// ConfirmCompanyInfo POST /api/admin/companies/:id/confirm-info
+// プレビュー済みの構造化結果を LLM 再実行なしで DB に確定保存する。
+func (c *AdminCompanyController) ConfirmCompanyInfo(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	if c.infoFetcher == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
+	}
+
+	var req services.CompanyInfoResult
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
+	}
+
+	result, err := c.infoFetcher.ConfirmAndSave(uint(id), &req)
+	if err != nil {
+		return echoInternalError(err)
+	}
+
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.confirm_info", "company", uint(id), map[string]any{
+		"source":     result.Source,
+		"model":      result.ModelUsed,
+		"confidence": result.Confidence,
+	})
+
+	return ctx.JSON(http.StatusOK, result)
+}
+
 // FetchJobs POST /api/admin/companies/:id/fetch-jobs
 // ?force=true を付けると DB キャッシュを無視して AI で再取得する。
 func (c *AdminCompanyController) FetchJobs(ctx echo.Context) error {

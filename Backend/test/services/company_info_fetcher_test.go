@@ -22,7 +22,7 @@ import (
 )
 
 func validCompanyInfoJSON() string {
-	return `{"description":"テスト企業の概要","industry":"IT・ソフトウェア","location":"東京都渋谷区","website_url":"https://example.com","founded_year":2010,"employee_count":500,"main_business":"クラウドサービスの開発","culture":"フラットな組織文化","work_style":"ハイブリッド"}`
+	return `{"description":"テスト企業の概要","industry":"IT・ソフトウェア","location":"東京都渋谷区","website_url":"https://example.com","founded_year":2010,"employee_count":500,"main_business":"クラウドサービスの開発","culture":"フラットな組織文化","work_style":"ハイブリッド","tech_stack":"Go, TypeScript","welfare_details":"リモート可・住宅手当"}`
 }
 
 func makeChatCompletionsServer(t *testing.T, responseText string) *httptest.Server {
@@ -119,3 +119,67 @@ func TestCompanyInfoFetcher_Acquire_InvalidJSON(t *testing.T) {
 	_, err := fetcher.Acquire(context.Background(), "テスト株式会社", "")
 	require.Error(t, err)
 }
+
+func TestCompanyInfoFetcher_ConfirmAndSave(t *testing.T) {
+	repo := &mocks.CompanyRepositoryMock{}
+	repo.On("FindByID", uint(1)).Return(&models.Company{
+		ID:   1,
+		Name: "テスト株式会社",
+	}, nil)
+	repo.On("Update", mock.AnythingOfType("*models.Company")).Return(nil).Run(func(args mock.Arguments) {
+		c := args.Get(0).(*models.Company)
+		assert.Equal(t, "クラウドサービスの開発", c.MainBusiness)
+		assert.Equal(t, "Go, TypeScript", c.TechStack)
+		assert.Equal(t, "リモート可・住宅手当", c.WelfareDetails)
+		assert.Equal(t, "web_search", c.SourceType)
+		assert.Equal(t, "gpt-4o-mini", c.LastModelUsed)
+		assert.Equal(t, "medium", c.LastFetchConfidence)
+		assert.NotNil(t, c.InfoFetchedAt)
+	})
+
+	fetcher := services.NewCompanyInfoFetcher(repo, nil)
+	result, err := fetcher.ConfirmAndSave(1, &services.CompanyInfoResult{
+		Description:    "テスト企業の概要",
+		Industry:       "IT・ソフトウェア",
+		MainBusiness:   "クラウドサービスの開発",
+		TechStack:      "Go, TypeScript",
+		WelfareDetails: "リモート可・住宅手当",
+		Source:         "web_search",
+		ModelUsed:      "gpt-4o-mini",
+		Confidence:     "medium",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "クラウドサービスの開発", result.MainBusiness)
+	assert.Equal(t, "Go, TypeScript", result.TechStack)
+	assert.Equal(t, "web_search", result.Source)
+}
+
+func TestCompanyInfoFetcher_ConfirmAndSave_NilResult(t *testing.T) {
+	fetcher := services.NewCompanyInfoFetcher(&mocks.CompanyRepositoryMock{}, nil)
+	_, err := fetcher.ConfirmAndSave(1, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "result is required")
+}
+
+func TestCompanyInfoFetcher_FetchAndSave_PersistsTechAndWelfare(t *testing.T) {
+	srv := makeChatCompletionsServer(t, validCompanyInfoJSON())
+	defer srv.Close()
+
+	repo := &mocks.CompanyRepositoryMock{}
+	repo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "テスト株式会社"}, nil)
+	repo.On("Update", mock.AnythingOfType("*models.Company")).Return(nil).Run(func(args mock.Arguments) {
+		c := args.Get(0).(*models.Company)
+		assert.Equal(t, "Go, TypeScript", c.TechStack)
+		assert.Equal(t, "リモート可・住宅手当", c.WelfareDetails)
+		assert.NotNil(t, c.InfoFetchedAt)
+		assert.Equal(t, "medium", c.LastFetchConfidence)
+	})
+
+	client := openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")
+	fetcher := services.NewCompanyInfoFetcher(repo, client)
+	result, err := fetcher.FetchAndSave(context.Background(), 1, true)
+	require.NoError(t, err)
+	assert.Equal(t, "Go, TypeScript", result.TechStack)
+	assert.Equal(t, "リモート可・住宅手当", result.WelfareDetails)
+}
+
