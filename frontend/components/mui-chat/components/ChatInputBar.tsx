@@ -13,6 +13,7 @@ import {
 import { Send } from '@mui/icons-material'
 import styles from '../../mui-chat.module.css'
 import type { ChoiceOption } from '../types'
+import { CHAT_BRAND, CHAT_BRAND_HOVER } from '../utils'
 
 type ChatInputBarProps = {
   analysisComplete: boolean
@@ -66,6 +67,8 @@ export function ChatInputBar({
               px: 4,
               fontSize: '1.1rem',
               fontWeight: 'bold',
+              bgcolor: CHAT_BRAND,
+              '&:hover': { bgcolor: CHAT_BRAND_HOVER },
             }}
           >
             🎉 分析完了！結果を見る
@@ -142,10 +145,10 @@ export function ChatInputBar({
               onClick={() => onSend()}
               disabled={!input.trim() || isLoading || !!historyLoadError}
               sx={{
-                bgcolor: '#1976d2',
+                bgcolor: CHAT_BRAND,
                 color: '#fff',
                 '&:hover': {
-                  bgcolor: '#1565c0',
+                  bgcolor: CHAT_BRAND_HOVER,
                 },
                 '&.Mui-disabled': {
                   bgcolor: '#e0e0e0',

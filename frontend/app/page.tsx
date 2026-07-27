@@ -37,7 +37,7 @@ export default function Home() {
   }
 
   return (
-    <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+    <Box sx={{ display: 'flex', height: '100dvh', maxHeight: '100dvh', overflow: 'hidden' }}>
       <AnalysisSidebar
         user={user}
         onLogout={handleLogout}

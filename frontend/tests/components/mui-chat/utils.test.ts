@@ -3,6 +3,10 @@ import {
   makeMessageId,
   INITIAL_GREETING,
   clearChatSessionOnEnd,
+  stripChoiceLines,
+  computeProgressTotals,
+  shouldAutoScrollToBottom,
+  CHAT_BRAND,
 } from '@/components/mui-chat/utils'
 
 describe('extractChoices', () => {
@@ -121,5 +125,70 @@ describe('clearChatSessionOnEnd', () => {
 
     expect(sessionStorage._store.chatMessages).toBeUndefined()
     expect(localStorage._store.chat_session_id).toBeUndefined()
+  })
+})
+
+describe('stripChoiceLines', () => {
+  it('選択肢行を除去して質問文を残す', () => {
+    const content = [
+      'どの働き方が好みですか？',
+      '',
+      'A) リモート中心',
+      'B) オフィス中心',
+      '補足です',
+    ].join('\n')
+    expect(stripChoiceLines(content)).toBe('どの働き方が好みですか？\n\n補足です')
+  })
+})
+
+describe('computeProgressTotals', () => {
+  it('フェーズの想定総数を required に使う（asked ではない）', () => {
+    const totals = computeProgressTotals({
+      phases: [
+        { valid_answers: 2, questions_asked: 2, min_questions: 3, max_questions: 5 },
+        { valid_answers: 0, questions_asked: 0, min_questions: 2, max_questions: 4 },
+      ],
+      questionCount: 2,
+      totalQuestions: 15,
+    })
+    expect(totals.required).toBe(9)
+    expect(totals.valid).toBe(2)
+    expect(totals.percent).toBe(Math.round((2 / 9) * 100))
+  })
+
+  it('フェーズ無しなら totalQuestions ベース', () => {
+    expect(
+      computeProgressTotals({ phases: null, questionCount: 3, totalQuestions: 15 }),
+    ).toEqual({ valid: 3, required: 15, percent: 20 })
+  })
+})
+
+describe('shouldAutoScrollToBottom', () => {
+  it('下部付近なら true', () => {
+    expect(
+      shouldAutoScrollToBottom({
+        scrollHeight: 1000,
+        scrollTop: 900,
+        clientHeight: 100,
+        thresholdPx: 120,
+      }),
+    ).toBe(true)
+  })
+
+  it('上部を見ているときは false', () => {
+    expect(
+      shouldAutoScrollToBottom({
+        scrollHeight: 1000,
+        scrollTop: 0,
+        clientHeight: 100,
+        thresholdPx: 120,
+      }),
+    ).toBe(false)
+  })
+})
+
+describe('CHAT_BRAND', () => {
+  it('ブランドオレンジである', () => {
+    expect(CHAT_BRAND).toBe('#ec5b13')
   })
 })
