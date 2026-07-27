@@ -53,7 +53,7 @@ func (s *InterviewService) EvaluateAndPersist(userID uint, sessionID string, spe
 		_, err := s.userWeightScoreRepo.FindByUserSessionAndCategory(userID, sessionID, cat)
 		if err != nil {
 			// not found -> create with baseline 50 +/- delta
-			abs := clampScore(50+delta, 0, 100)
+			abs := evalLocalClamp(50+delta, 0, 100)
 			if err2 := s.userWeightScoreRepo.SetScore(userID, sessionID, cat, abs); err2 != nil {
 				return fmt.Errorf("set score failed: %w", err2)
 			}
@@ -66,7 +66,7 @@ func (s *InterviewService) EvaluateAndPersist(userID uint, sessionID string, spe
 	return nil
 }
 
-func clampScore(v, lo, hi int) int {
+func evalLocalClamp(v, lo, hi int) int {
 	if v < lo {
 		return lo
 	}
