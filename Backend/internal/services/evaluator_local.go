@@ -1,19 +1,18 @@
 package services
 
 import (
-	"Backend/domain/repository"
 	"fmt"
 	"strings"
 )
 
-// EvaluationResult はローカル評価の差分を表す（カテゴリ -> delta）
-type EvaluationResult map[string]int
+// LocalEvaluationResult はローカル評価の差分を表す（カテゴリ -> delta）
+type LocalEvaluationResult map[string]int
 
 // EvaluateSpeechHeuristic は簡易ルールベースで発話からカテゴリ差分を算出する。
 // 重点: LLM 呼び出しを行わずに速やかにスコア差分を得るための暫定実装。
-func EvaluateSpeechHeuristic(speech string) EvaluationResult {
+func EvaluateSpeechHeuristic(speech string) LocalEvaluationResult {
 	low := strings.ToLower(speech)
-	res := EvaluationResult{}
+	res := LocalEvaluationResult{}
 
 	// キーワードマップ（小さなステップで拡張可能）
 	keywords := map[string][]string{
