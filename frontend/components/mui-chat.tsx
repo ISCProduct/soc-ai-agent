@@ -49,8 +49,11 @@ export function MuiChat() {
           historyLoadError={chat.historyLoadError}
           historyRetrying={chat.historyRetrying}
           messagesEndRef={chat.messagesEndRef}
+          messagesAreaRef={chat.messagesAreaRef}
           onRetryHistoryLoad={chat.handleRetryHistoryLoad}
-          onQuickSelect={chat.setInput}
+          onQuickSelect={(option) => {
+            void chat.handleSend(option)
+          }}
         />
 
         <ChatInputBar

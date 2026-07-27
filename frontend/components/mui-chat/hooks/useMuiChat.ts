@@ -14,6 +14,8 @@ import {
   clearChatSessionOnEnd,
   readStoredJobCategoryId,
   writeStoredJobCategoryId,
+  computeProgressTotals,
+  shouldAutoScrollToBottom,
 } from '../utils'
 import type { Message, PhaseProgress, ProgressTotals, ChoiceOption } from '../types'
 
@@ -42,30 +44,30 @@ export function useMuiChat() {
   const [historyRetrying, setHistoryRetrying] = useState(false)
   const [jobCategoryId, setJobCategoryId] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesAreaRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  const progressTotals: ProgressTotals | null = (() => {
-    if (!phaseProgresses || phaseProgresses.length === 0) return null
-    let valid = 0
-    let asked = 0
-    for (const phase of phaseProgresses) {
-      asked += phase.questions_asked || 0
-      valid += phase.valid_answers || 0
-    }
-    if (asked <= 0) return null
-    return {
-      valid,
-      required: asked,
-      percent: Math.round((valid / asked) * 100),
-    }
-  })()
+  const progressTotals: ProgressTotals = computeProgressTotals({
+    phases: phaseProgresses,
+    questionCount,
+    totalQuestions,
+  })
 
-  const scrollToBottom = () => {
+  const scrollToBottomIfNeeded = () => {
+    const area = messagesAreaRef.current
+    if (area) {
+      const allow = shouldAutoScrollToBottom({
+        scrollHeight: area.scrollHeight,
+        scrollTop: area.scrollTop,
+        clientHeight: area.clientHeight,
+      })
+      if (!allow) return
+    }
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
   useEffect(() => {
-    scrollToBottom()
+    scrollToBottomIfNeeded()
   }, [messages, isLoading])
 
   const applyHistoryOrGreeting = useCallback((history: Awaited<ReturnType<typeof getChatHistory>>) => {
@@ -521,6 +523,7 @@ export function useMuiChat() {
     historyLoadError,
     historyRetrying,
     messagesEndRef,
+    messagesAreaRef,
     inputRef,
     progressTotals,
     choiceOptions,
