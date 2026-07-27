@@ -24,6 +24,7 @@ func SetupAdminRoutes(
 	collectiveInsightController *controllers.CollectiveInsightController,
 	scraperSessionController *controllers.AdminScraperSessionController,
 	adminVectorController *controllers.AdminVectorController,
+	adminAIController *controllers.AdminAIController,
 	userRepo *repositories.UserRepository,
 	adminSecret string,
 ) {
@@ -145,4 +146,9 @@ func SetupAdminRoutes(
 	admin.POST("/vector/reembed", adminVectorController.Reembed)
 	admin.GET("/vector/stats", adminVectorController.Stats)
 	admin.GET("/vector/collections", adminVectorController.Collections)
+
+	// AI / RAG 運用
+	admin.GET("/ai-rag/summary", adminAIController.Summary)
+	admin.POST("/ai-rag/reembed", adminAIController.Reembed)
+	admin.POST("/ai-rag/force-resync", adminAIController.ForceResync)
 }

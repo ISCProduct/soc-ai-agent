@@ -307,6 +307,10 @@ func main() {
 	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminCostsController := controllers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
 	adminVectorController := controllers.NewAdminVectorController()
+	// Admin AI/RAG service + controller
+	adminAIService := services.NewAdminAIService()
+	adminAIController := controllers.NewAdminAIController(adminAIService)
+
 	profileRecalcService := services.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
 	profileRecalcController := controllers.NewAdminProfileRecalculationController(profileRecalcService)
 	companyEntryController := controllers.NewCompanyEntryController(companyRepo, graduateRepo)
@@ -362,7 +366,7 @@ func main() {
 	routes.SetupAuthRoutes(api, authController, oauthController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCompanyRoutes(api, relationController)
-	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, adminVectorController, userRepo, cfg.AdminSecret)
+	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, adminVectorController, adminAIController, userRepo, cfg.AdminSecret)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService)
