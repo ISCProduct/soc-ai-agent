@@ -1,18 +1,26 @@
 package controllers
 
 import (
+	"context"
 	"Backend/internal/services"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
 )
 
-// AdminAIController は管理者向け AI / RAG 運用用の軽量コントローラです。
-type AdminAIController struct {
-	service *services.AdminAIService
+// adminAIService はテストで差し替え可能な最小インターフェース
+type adminAIService interface {
+	GetSummary(ctx context.Context) (*services.AdminAIMetrics, error)
+	TriggerReembed(ctx context.Context) error
+	ForceResync(ctx context.Context) error
 }
 
-func NewAdminAIController(s *services.AdminAIService) *AdminAIController {
+// AdminAIController は管理者向け AI / RAG 運用用の軽量コントローラです。
+type AdminAIController struct {
+	service adminAIService
+}
+
+func NewAdminAIController(s adminAIService) *AdminAIController {
 	return &AdminAIController{service: s}
 }
 

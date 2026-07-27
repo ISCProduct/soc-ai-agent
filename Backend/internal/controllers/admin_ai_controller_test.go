@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"Backend/internal/middleware"
 	"Backend/internal/services"
 	"encoding/json"
@@ -15,28 +16,28 @@ import (
 
 // mock service
 type mockAdminAIService struct {
-	getSummaryFn    func() (*services.AdminAIMetrics, error)
-	triggerReembedFn func() error
-	forceResyncFn   func() error
+	getSummaryFn     func(ctx context.Context) (*services.AdminAIMetrics, error)
+	triggerReembedFn func(ctx context.Context) error
+	forceResyncFn    func(ctx context.Context) error
 }
 
-func (m *mockAdminAIService) GetSummary(ctxReq interface{}) (*services.AdminAIMetrics, error) {
+func (m *mockAdminAIService) GetSummary(ctx context.Context) (*services.AdminAIMetrics, error) {
 	if m.getSummaryFn != nil {
-		return m.getSummaryFn()
+		return m.getSummaryFn(ctx)
 	}
 	return &services.AdminAIMetrics{}, nil
 }
 
-func (m *mockAdminAIService) TriggerReembed(ctxReq interface{}) error {
+func (m *mockAdminAIService) TriggerReembed(ctx context.Context) error {
 	if m.triggerReembedFn != nil {
-		return m.triggerReembedFn()
+		return m.triggerReembedFn(ctx)
 	}
 	return nil
 }
 
-func (m *mockAdminAIService) ForceResync(ctxReq interface{}) error {
+func (m *mockAdminAIService) ForceResync(ctx context.Context) error {
 	if m.forceResyncFn != nil {
-		return m.forceResyncFn()
+		return m.forceResyncFn(ctx)
 	}
 	return nil
 }
@@ -45,16 +46,8 @@ func (m *mockAdminAIService) ForceResync(ctxReq interface{}) error {
 func newAdminAITestServer(svc *mockAdminAIService) (*echo.Echo, *AdminAIController) {
 	e := echo.New()
 	e.HTTPErrorHandler = middleware.CustomHTTPErrorHandler
-	// wrap service into expected type
-	wrapped := &services.AdminAIService{}
-	// we will not use wrapped methods during test because controller calls our mock via interface,
-	// so create controller manually and inject mock via field (using type assertion)
-	ctrl := &AdminAIController{service: nil}
-	// replace service field via type interface by using reflection is heavy; instead create controller directly
-	// but controller expects *services.AdminAIService; to avoid changing controller, we'll create a thin adapter
-	// Adapter implements the methods the controller uses by delegating to mock
 	adapter := &adminAIServiceAdapter{mock: svc}
-	ctrl = &AdminAIController{service: adapter}
+	ctrl := &AdminAIController{service: adapter}
 	return e, ctrl
 }
 
@@ -63,18 +56,27 @@ type adminAIServiceAdapter struct{
 	mock *mockAdminAIService
 }
 
-func (a *adminAIServiceAdapter) GetSummary(ctxReq interface{}) (*services.AdminAIMetrics, error) {
-	return a.mock.getSummaryFn()
+func (a *adminAIServiceAdapter) GetSummary(ctx context.Context) (*services.AdminAIMetrics, error) {
+	if a.mock.getSummaryFn != nil {
+		return a.mock.getSummaryFn(ctx)
+	}
+	return &services.AdminAIMetrics{}, nil
 }
-func (a *adminAIServiceAdapter) TriggerReembed(ctxReq interface{}) error {
-	return a.mock.triggerReembedFn()
+func (a *adminAIServiceAdapter) TriggerReembed(ctx context.Context) error {
+	if a.mock.triggerReembedFn != nil {
+		return a.mock.triggerReembedFn(ctx)
+	}
+	return nil
 }
-func (a *adminAIServiceAdapter) ForceResync(ctxReq interface{}) error {
-	return a.mock.forceResyncFn()
+func (a *adminAIServiceAdapter) ForceResync(ctx context.Context) error {
+	if a.mock.forceResyncFn != nil {
+		return a.mock.forceResyncFn(ctx)
+	}
+	return nil
 }
 
-// serve helpers copied pattern
-func serveGet(e *echo.Echo, path string, handler echo.HandlerFunc) *httptest.ResponseRecorder {
+// serve helpers with unique names to avoid collisions
+func serveGetAdminAI(e *echo.Echo, path string, handler echo.HandlerFunc) *httptest.ResponseRecorder {
 	e.GET(path, handler)
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	rec := httptest.NewRecorder()
@@ -82,7 +84,7 @@ func serveGet(e *echo.Echo, path string, handler echo.HandlerFunc) *httptest.Res
 	return rec
 }
 
-func servePost(e *echo.Echo, path, body string, handler echo.HandlerFunc) *httptest.ResponseRecorder {
+func servePostAdminAI(e *echo.Echo, path, body string, handler echo.HandlerFunc) *httptest.ResponseRecorder {
 	e.POST(path, handler)
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -94,7 +96,7 @@ func servePost(e *echo.Echo, path, body string, handler echo.HandlerFunc) *httpt
 func TestAdminAI_Summary_Success(t *testing.T) {
 	now := time.Now().UTC()
 	mock := &mockAdminAIService{
-		getSummaryFn: func() (*services.AdminAIMetrics, error) {
+		getSummaryFn: func(ctx context.Context) (*services.AdminAIMetrics, error) {
 			return &services.AdminAIMetrics{
 				CollectionCount: 5,
 				LastUpdated:     now,
@@ -104,7 +106,7 @@ func TestAdminAI_Summary_Success(t *testing.T) {
 		},
 	}
 	e, ctrl := newAdminAITestServer(mock)
-	rec := serveGet(e, "/admin/ai-rag/summary", ctrl.Summary)
+	rec := serveGetAdminAI(e, "/admin/ai-rag/summary", ctrl.Summary)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -121,10 +123,10 @@ func TestAdminAI_Summary_Success(t *testing.T) {
 func TestAdminAI_Reembed_TriggersAccepted(t *testing.T) {
 	called := false
 	mock := &mockAdminAIService{
-		triggerReembedFn: func() error { called = true; return nil },
+		triggerReembedFn: func(ctx context.Context) error { called = true; return nil },
 	}
 	e, ctrl := newAdminAITestServer(mock)
-	rec := servePost(e, "/admin/ai-rag/reembed", `{}` , ctrl.Reembed)
+	rec := servePostAdminAI(e, "/admin/ai-rag/reembed", `{}` , ctrl.Reembed)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusAccepted)
 	}
@@ -136,10 +138,10 @@ func TestAdminAI_Reembed_TriggersAccepted(t *testing.T) {
 func TestAdminAI_ForceResync_TriggersAccepted(t *testing.T) {
 	called := false
 	mock := &mockAdminAIService{
-		forceResyncFn: func() error { called = true; return nil },
+		forceResyncFn: func(ctx context.Context) error { called = true; return nil },
 	}
 	e, ctrl := newAdminAITestServer(mock)
-	rec := servePost(e, "/admin/ai-rag/force-resync", `{}` , ctrl.ForceResync)
+	rec := servePostAdminAI(e, "/admin/ai-rag/force-resync", `{}` , ctrl.ForceResync)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusAccepted)
 	}
