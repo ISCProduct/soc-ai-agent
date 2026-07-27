@@ -243,7 +243,7 @@ describe('shouldAutoScrollToBottom', () => {
 })
 
 describe('CHAT_BRAND', () => {
-  it('ブランドオレンジである', () => {
-    expect(CHAT_BRAND).toBe('#ec5b13')
+  it('プライマリ青である', () => {
+    expect(CHAT_BRAND).toBe('#1976d2')
   })
 })

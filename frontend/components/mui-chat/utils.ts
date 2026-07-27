@@ -44,9 +44,9 @@ export const JOB_QUICK_OPTIONS = [
   'まだ決めていない',
 ] as const
 
-/** チャット画面のブランドアクセント（サイドバーと揃える） */
-export const CHAT_BRAND = '#ec5b13'
-export const CHAT_BRAND_HOVER = '#d14f10'
+/** チャット画面のアクセント（MUI primary 青） */
+export const CHAT_BRAND = '#1976d2'
+export const CHAT_BRAND_HOVER = '#1565c0'
 
 /**
  * 選択肢行（A) / 1. など）を本文から除き、バブルとボタンの二重表示を防ぐ。

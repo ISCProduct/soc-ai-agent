@@ -17,6 +17,7 @@ import styles from '../../mui-chat.module.css'
 import { TypingIndicator } from './TypingIndicator'
 import {
   CHAT_BRAND,
+  CHAT_BRAND_HOVER,
   extractChoices,
   JOB_QUICK_OPTIONS,
   stripChoiceLines,
@@ -69,7 +70,7 @@ export function ChatMessageList({
             onClick={onRetryHistoryLoad}
             disabled={historyRetrying}
             startIcon={historyRetrying ? <CircularProgress size={16} color="inherit" /> : undefined}
-            sx={{ bgcolor: CHAT_BRAND, '&:hover': { bgcolor: '#d14f10' } }}
+            sx={{ bgcolor: CHAT_BRAND, '&:hover': { bgcolor: CHAT_BRAND_HOVER } }}
           >
             {historyRetrying ? '再読み込み中...' : '再試行'}
           </Button>
