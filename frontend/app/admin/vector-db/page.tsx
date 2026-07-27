@@ -119,11 +119,13 @@ export default function AdminVectorPage() {
       const data = await res.json()
       if (!res.ok) {
         console.warn('Stats API not available:', data?.message || data?.error)
+        setStats(null)
         return
       }
       setStats(data as VectorStats)
     } catch (err) {
       console.warn('Failed to load stats:', err instanceof Error ? err.message : '不明なエラー')
+      setStats(null)
     } finally {
       setStatsLoading(false)
     }
@@ -164,6 +166,7 @@ export default function AdminVectorPage() {
         `削除 ${data.deleted ?? 0} 件 / refreshed=${Boolean(data.refreshed)} / sources=${(data.sources || []).join(',') || '-'}`,
       )
       await loadStatus()
+      await loadStats()
     } catch (err) {
       setReembedResult(err instanceof Error ? err.message : '再埋め込みに失敗しました')
     } finally {
@@ -181,7 +184,11 @@ export default function AdminVectorPage() {
           AI/RAG 運用管理
         </Typography>
         <Box sx={{ ml: 'auto' }}>
-          <IconButton onClick={() => { void loadStatus(); void loadStats() }} disabled={loading || statsLoading}>
+          <IconButton
+            aria-label="統計とステータスを更新"
+            onClick={() => { void loadStatus(); void loadStats() }}
+            disabled={loading || statsLoading}
+          >
             <RefreshIcon />
           </IconButton>
         </Box>

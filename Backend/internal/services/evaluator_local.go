@@ -1,26 +1,37 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+
+	"Backend/domain/valueobject"
+
+	"gorm.io/gorm"
 )
 
-// LocalEvaluationResult はローカル評価の差分を表す（カテゴリ -> delta）
+// LocalEvaluationResult はローカル評価の差分を表す（weight_category -> delta）
 type LocalEvaluationResult map[string]int
 
 // EvaluateSpeechHeuristic は簡易ルールベースで発話からカテゴリ差分を算出する。
-// 重点: LLM 呼び出しを行わずに速やかにスコア差分を得るための暫定実装。
+// LLM 非依存の暫定実装。永続化キーは user_weight_scores.weight_category（10カテゴリ）に揃える。
+// 注: 4フェーズは analysis progress 側で管理し、スコア行自体はセッション×カテゴリ単位。
 func EvaluateSpeechHeuristic(speech string) LocalEvaluationResult {
 	low := strings.ToLower(speech)
 	res := LocalEvaluationResult{}
 
-	// キーワードマップ（小さなステップで拡張可能）
+	// 10カテゴリ（CompanyWeightProfile / マッチングと同一名称）へのキーワード対応
 	keywords := map[string][]string{
-		"logic":       {"だから", "そのため", "つまり", "because", "therefore"},
-		"specificity": {"例えば", "具体的", "経験", "実績", "回"},
-		"ownership":   {"私が", "自分で", "担当した", "やった", "i did"},
-		"communication": {"わかりやす", "明確", "整理", "簡潔"},
-		"enthusiasm":  {"やる気", "熱意", "志望", "興味"},
+		string(valueobject.CategoryTechnical):     {"技術", "プログラミング", "コード", "システム", "エンジニア", "開発"},
+		string(valueobject.CategoryTeamwork):      {"チーム", "協力", "一緒に", "メンバー", "連携"},
+		string(valueobject.CategoryLeadership):    {"リーダー", "引っ張", "主導", "まとめ", "マネジメント"},
+		string(valueobject.CategoryCreativity):    {"アイデア", "創造", "工夫", "発想", "新しい"},
+		string(valueobject.CategoryStability):     {"安定", "確実", "計画的", "継続", "コツコツ"},
+		string(valueobject.CategoryGrowth):        {"成長", "学び", "学習", "スキルアップ", "向上"},
+		string(valueobject.CategoryWorkLife):      {"ワークライフ", "プライベート", "残業", "バランス", "働き方"},
+		string(valueobject.CategoryChallenge):     {"挑戦", "チャレンジ", "難しい", "新規", "未知"},
+		string(valueobject.CategoryDetail):        {"具体的", "例えば", "詳細", "丁寧", "正確", "実績", "回"},
+		string(valueobject.CategoryCommunication): {"わかりやす", "明確", "説明", "伝え", "プレゼン", "対話", "コミュニケーション"},
 	}
 
 	for cat, kws := range keywords {
@@ -49,29 +60,22 @@ func (s *InterviewService) EvaluateAndPersist(userID uint, sessionID string, spe
 		if delta == 0 {
 			continue
 		}
-		// check existing
+		// 既存スコアの有無を確認
 		_, err := s.userWeightScoreRepo.FindByUserSessionAndCategory(userID, sessionID, cat)
 		if err != nil {
-			// not found -> create with baseline 50 +/- delta
-			abs := clamp(50+delta, 0, 100)
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("find score failed: %w", err)
+			}
+			// 未登録なら基準点50に差分を加えた絶対値で新規作成
+			abs := clampInt(50+delta, 0, 100)
 			if err2 := s.userWeightScoreRepo.SetScore(userID, sessionID, cat, abs); err2 != nil {
 				return fmt.Errorf("set score failed: %w", err2)
 			}
-		} else {
-			if err2 := s.userWeightScoreRepo.AddScore(userID, sessionID, cat, delta); err2 != nil {
-				return fmt.Errorf("add score failed: %w", err2)
-			}
+			continue
+		}
+		if err2 := s.userWeightScoreRepo.AddScore(userID, sessionID, cat, delta); err2 != nil {
+			return fmt.Errorf("add score failed: %w", err2)
 		}
 	}
 	return nil
-}
-
-func clamp(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
 }
