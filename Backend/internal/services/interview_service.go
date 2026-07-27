@@ -31,6 +31,7 @@ type InterviewService struct {
 	questionStateRepo    repository.InterviewQuestionStateRepository
 	skillScoreRepo       SkillScoreReader
 	companyRepo          CompanyBriefReader
+	userWeightScoreRepo  repository.UserWeightScoreRepository
 	jobCh                chan uint
 	workerOnce           sync.Once
 }
@@ -79,6 +80,11 @@ func (s *InterviewService) SetSkillScoreRepo(r SkillScoreReader) {
 // SetCompanyRepo 企業共有キャッシュ参照用リポジトリを注入する（オプション）
 func (s *InterviewService) SetCompanyRepo(r CompanyBriefReader) {
 	s.companyRepo = r
+}
+
+// SetUserWeightScoreRepo ユーザー重みスコアリポジトリを注入する（オプション）
+func (s *InterviewService) SetUserWeightScoreRepo(r repository.UserWeightScoreRepository) {
+	s.userWeightScoreRepo = r
 }
 
 // SetCrossFeatureService 機能間連携サービスを注入する（オプション）
