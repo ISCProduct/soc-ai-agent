@@ -12,6 +12,7 @@ import {
   shouldAutoScrollToBottom,
   CHAT_BRAND,
   findLastAssistantQuestionMessage,
+  isValidationFeedbackMessage,
 } from '@/components/mui-chat/utils'
 
 describe('extractChoices', () => {
@@ -260,5 +261,37 @@ describe('findLastAssistantQuestionMessage', () => {
       },
     ]
     expect(findLastAssistantQuestionMessage(messages)?.content).toBe('A) はい\nB) いいえ')
+  })
+
+  it('警告が複数あっても最初の質問を返す', () => {
+    const q = 'A) 要件が曖昧\nB) 技術制約'
+    const messages = [
+      { role: 'assistant', content: q },
+      { role: 'user', content: 'あ' },
+      {
+        role: 'assistant',
+        content: '書かれた内容にはお答えできません。質問に回答してください。（1/3回目の警告）',
+      },
+      { role: 'user', content: 'ああ' },
+      {
+        role: 'assistant',
+        content: '書かれた内容にはお答えできません。質問に回答してください。（2/3回目の警告）',
+      },
+    ]
+    expect(findLastAssistantQuestionMessage(messages)?.content).toBe(q)
+  })
+})
+
+describe('isValidationFeedbackMessage', () => {
+  it('警告と終了メッセージを判定する', () => {
+    expect(
+      isValidationFeedbackMessage(
+        '書かれた内容にはお答えできません。質問に回答してください。（1/3回目の警告）',
+      ),
+    ).toBe(true)
+    expect(
+      isValidationFeedbackMessage('質問と関係のない内容が3回続いたため、チャットを終了させていただきます。'),
+    ).toBe(true)
+    expect(isValidationFeedbackMessage('一番近いものを選んでください')).toBe(false)
   })
 })
