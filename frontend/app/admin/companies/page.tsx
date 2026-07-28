@@ -164,26 +164,28 @@ export default function AdminCompaniesPage() {
   }
 
   const handlePublish = async (companyId: number) => {
+    setError('')
     const res = await fetch(`/api/admin/companies/${companyId}/publish`, {
       method: 'PATCH',
       headers: authService.getAdminFetchHeaders(),
     })
     if (!res.ok) {
-      const data = await res.json()
-      setError(data?.error || '承認に失敗しました')
+      const data = await res.json().catch(() => ({}))
+      setError(data?.error || `承認に失敗しました (${res.status})`)
       return
     }
     fetchCompanies(page)
   }
 
   const handleReject = async (companyId: number) => {
+    setError('')
     const res = await fetch(`/api/admin/companies/${companyId}/reject`, {
       method: 'PATCH',
       headers: authService.getAdminFetchHeaders(),
     })
     if (!res.ok) {
-      const data = await res.json()
-      setError(data?.error || '却下に失敗しました')
+      const data = await res.json().catch(() => ({}))
+      setError(data?.error || `却下に失敗しました (${res.status})`)
       return
     }
     fetchCompanies(page)
@@ -218,7 +220,7 @@ export default function AdminCompaniesPage() {
         </Stack>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        企業情報の公開ステータスを管理します。（全 {total.toLocaleString()} 件）
+        企業情報の公開ステータスを管理します。公開済みでも「基本情報・URL取得」から AI 取得・更新できます。（全 {total.toLocaleString()} 件）
       </Typography>
 
       <ErrorAlert error={error} />
@@ -317,14 +319,14 @@ export default function AdminCompaniesPage() {
                       {company.industry || '業種未設定'} / {company.location || '所在地未設定'}
                     </Typography>
                   </Box>
-                  <Stack direction="row" spacing={1}>
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                     <Button
-                      variant="outlined"
+                      variant="contained"
                       size="small"
                       component={Link}
                       href={`/admin/companies/${company.id}/info`}
                     >
-                      基本情報編集
+                      基本情報・URL取得
                     </Button>
                     <Button
                       variant="outlined"
@@ -342,7 +344,7 @@ export default function AdminCompaniesPage() {
                     >
                       技術スタック編集
                     </Button>
-                    {company.data_status !== 'published' && (
+                    {company.data_status !== 'published' ? (
                       <>
                         <Button
                           variant="contained"
@@ -361,6 +363,8 @@ export default function AdminCompaniesPage() {
                           却下
                         </Button>
                       </>
+                    ) : (
+                      <Chip size="small" color="success" label="公開中（情報取得可）" />
                     )}
                   </Stack>
                 </Stack>

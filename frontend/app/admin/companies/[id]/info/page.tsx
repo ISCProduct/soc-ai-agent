@@ -274,6 +274,11 @@ export default function AdminCompanyInfoEditPage() {
           プレビュー未確定です。「確定して保存」で DB と取得メタデータ（info_fetched_at 等）を更新します。
         </Alert>
       )}
+      {dataStatus === 'published' && (
+        <Alert severity="success" sx={{ mb: 2 }}>
+          この企業は公開中です。公開状態のままプレビュー取得・強制再取得で企業情報や公式URLを更新できます。
+        </Alert>
+      )}
 
       <Stack spacing={2}>
         <TextField label="企業名" value={name} onChange={(e) => setName(e.target.value)} required />

@@ -107,6 +107,11 @@ func (c *AdminCompanyController) Create(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
 	}
 	applyCompanyDefaults(&payload)
+	// AI プレビュー経由で作成した場合は取得メタを残し、公開後も再取得判断できるようにする
+	if strings.TrimSpace(payload.LastModelUsed) != "" && payload.InfoFetchedAt == nil {
+		now := time.Now()
+		payload.InfoFetchedAt = &now
+	}
 	if err := c.repo.Create(&payload); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create company")
 	}
