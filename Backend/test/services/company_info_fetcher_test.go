@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"Backend/internal/companyfetch"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services"
@@ -59,6 +60,38 @@ func TestCompanyInfoFetcher_FetchAndSave_TTLCache(t *testing.T) {
 	result, err := fetcher.FetchAndSave(context.Background(), 1, false)
 	require.NoError(t, err)
 	assert.Equal(t, "キャッシュ済み概要", result.Description)
+	assert.True(t, result.FromCache)
+	assert.Equal(t, "ttl", result.SkipReason)
+	assert.False(t, result.BudgetExceeded)
+	repo.AssertNotCalled(t, "Update", mock.Anything)
+}
+
+type denySearchBudget struct{}
+
+func (denySearchBudget) AllowSearch() error { return companyfetch.ErrSearchBudgetExceeded }
+
+func TestCompanyInfoFetcher_FetchAndSave_BudgetExceededUsesCache(t *testing.T) {
+	srv := makeChatCompletionsServer(t, validCompanyInfoJSON())
+	defer srv.Close()
+
+	repo := &mocks.CompanyRepositoryMock{}
+	repo.On("FindByID", uint(1)).Return(&models.Company{
+		ID:          1,
+		Name:        "テスト株式会社",
+		Description: "既存キャッシュ",
+		SourceType:  "web_search",
+	}, nil)
+
+	client := openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")
+	fetcher := services.NewCompanyInfoFetcher(repo, client)
+	fetcher.SetSearchBudget(denySearchBudget{})
+
+	result, err := fetcher.FetchAndSave(context.Background(), 1, true)
+	require.NoError(t, err)
+	assert.Equal(t, "既存キャッシュ", result.Description)
+	assert.True(t, result.FromCache)
+	assert.True(t, result.BudgetExceeded)
+	assert.Equal(t, "budget", result.SkipReason)
 	repo.AssertNotCalled(t, "Update", mock.Anything)
 }
 

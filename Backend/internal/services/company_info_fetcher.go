@@ -30,6 +30,10 @@ type CompanyInfoResult struct {
 	SourceURL      string `json:"source_url,omitempty"`
 	ModelUsed      string `json:"model_used,omitempty"`
 	Confidence     string `json:"confidence,omitempty"`
+	// Phase 3 運用メタ: TTL / 予算ガードで Search をスキップしたとき
+	FromCache      bool   `json:"from_cache,omitempty"`
+	BudgetExceeded bool   `json:"budget_exceeded,omitempty"`
+	SkipReason     string `json:"skip_reason,omitempty"` // ttl | budget
 }
 
 // CompanyInfoFetcher は gBizINFO を足がかりにしつつ、不足分は AI（安価 Search→Parse）で充足する。
@@ -90,7 +94,7 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 	}
 
 	if !forceRefresh && companyfetch.IsFresh(company.InfoFetchedAt, companyfetch.TTLInfo) {
-		return companyInfoFromModel(company), nil
+		return markInfoCacheSkip(companyInfoFromModel(company), "ttl", false), nil
 	}
 
 	run := func() (any, error) {
@@ -109,7 +113,7 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 	if err != nil {
 		if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
 			// 超過時はキャッシュ（既存DB）のみで継続
-			return companyInfoFromModel(company), nil
+			return markInfoCacheSkip(companyInfoFromModel(company), "budget", true), nil
 		}
 		return nil, err
 	}
@@ -413,6 +417,16 @@ func companyInfoFromModel(company *models.Company) *CompanyInfoResult {
 		ModelUsed:      company.LastModelUsed,
 		Confidence:     company.LastFetchConfidence,
 	}
+}
+
+func markInfoCacheSkip(r *CompanyInfoResult, reason string, budgetExceeded bool) *CompanyInfoResult {
+	if r == nil {
+		r = &CompanyInfoResult{}
+	}
+	r.FromCache = true
+	r.SkipReason = reason
+	r.BudgetExceeded = budgetExceeded
+	return r
 }
 
 func applyCompanyInfoResult(company *models.Company, result *CompanyInfoResult) {

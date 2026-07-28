@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"Backend/internal/companyfetch"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services"
@@ -87,6 +88,8 @@ func TestCompanyRelationsFetcher_FetchAndSave_TTLCache(t *testing.T) {
 	assert.Len(t, result.Relations, 1)
 	assert.Equal(t, "子会社A", result.Relations[0].Name)
 	assert.Equal(t, "4755", result.MarketInfo.StockCode)
+	assert.True(t, result.FromCache)
+	assert.Equal(t, "ttl", result.SkipReason)
 	repo.AssertNotCalled(t, "Update", mock.Anything)
 }
 
@@ -158,6 +161,47 @@ func TestCompanyRelationsFetcher_ConfirmAndSave_NilResult(t *testing.T) {
 	_, err := fetcher.ConfirmAndSave(1, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "result is required")
+}
+
+type denyRelationsBudget struct{}
+
+func (denyRelationsBudget) AllowSearch() error {
+	return companyfetch.ErrSearchBudgetExceeded
+}
+
+func TestCompanyRelationsFetcher_FetchAndSave_BudgetExceededUsesCache(t *testing.T) {
+	srv := makeChatCompletionsServer(t, validCompanyRelationsJSON())
+	defer srv.Close()
+
+	repo := &mocks.CompanyRepositoryMock{}
+	repo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "テスト株式会社"}, nil)
+
+	relRepo := &relationRepoMock{}
+	childID := uint(2)
+	relRepo.On("GetRelationsByCompanyID", uint(1)).Return([]models.CompanyRelation{
+		{
+			ParentID:     ptrUint(1),
+			ChildID:      &childID,
+			RelationType: "capital_subsidiary",
+			Child:        &models.Company{ID: 2, Name: "キャッシュ子会社"},
+		},
+	}, nil)
+	relRepo.On("GetMarketInfoByCompanyID", uint(1)).Return(&models.CompanyMarketInfo{
+		CompanyID:  1,
+		MarketType: "unlisted",
+	}, nil)
+
+	client := openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")
+	fetcher := services.NewCompanyRelationsFetcher(repo, relRepo, client)
+	fetcher.SetSearchBudget(denyRelationsBudget{})
+
+	result, err := fetcher.FetchAndSave(context.Background(), 1, true)
+	require.NoError(t, err)
+	assert.True(t, result.FromCache)
+	assert.True(t, result.BudgetExceeded)
+	assert.Equal(t, "budget", result.SkipReason)
+	assert.Equal(t, "キャッシュ子会社", result.Relations[0].Name)
+	repo.AssertNotCalled(t, "Update", mock.Anything)
 }
 
 func ptrUint(v uint) *uint { return &v }

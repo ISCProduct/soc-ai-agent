@@ -156,7 +156,13 @@ export default function AdminCompanyRelationsPage() {
       }
       applyRelationsPayload(data)
       loadCompany()
-      setSuccess(`DBへ強制再取得・保存しました（${data.saved_count ?? 0}件）。`)
+      if (data.budget_exceeded) {
+        setSuccess('月次 Search 予算超過のため、既存キャッシュのみ返却しました（新規 Search なし）。コスト画面を確認してください。')
+      } else if (data.from_cache && data.skip_reason === 'ttl') {
+        setSuccess('TTL 内のためキャッシュを返却しました。再取得する場合は「強制再取得して保存」を使ってください。')
+      } else {
+        setSuccess(`DBへ強制再取得・保存しました（${data.saved_count ?? 0}件）。`)
+      }
     } finally {
       setForceLoading(false)
     }
@@ -268,6 +274,9 @@ export default function AdminCompanyRelationsPage() {
         </Stack>
         <Typography variant="body2" color="text.secondary">
           relations: {formatTs(relationsFetchedAt)}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          TTL: 関係・市場情報 60日。同一企業の同時取得は singleflight で1本化。月次 Search 上限はコスト画面で確認できます。
         </Typography>
 
         <Divider />

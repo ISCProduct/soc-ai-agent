@@ -152,7 +152,13 @@ export default function AdminCompanyInfoEditPage() {
       }
       applyInfoPayload(data)
       loadCompany()
-      setSuccess('DBへ強制再取得・保存しました。')
+      if (data.budget_exceeded) {
+        setSuccess('月次 Search 予算超過のため、既存キャッシュのみ返却しました（新規 Search なし）。コスト画面を確認してください。')
+      } else if (data.from_cache && data.skip_reason === 'ttl') {
+        setSuccess('TTL 内のためキャッシュを返却しました。再取得する場合は「強制再取得して保存」を使ってください。')
+      } else {
+        setSuccess('DBへ強制再取得・保存しました。')
+      }
     } finally {
       setForceLoading(false)
     }
@@ -311,6 +317,9 @@ export default function AdminCompanyInfoEditPage() {
         </Stack>
         <Typography variant="body2" color="text.secondary">
           info: {formatTs(infoFetchedAt)} / jobs: {formatTs(jobsFetchedAt)} / tech: {formatTs(techFetchedAt)}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          TTL: 基本情報 90日 / 求人 7日 / Tech 30日。月次 Search 上限はコスト画面で確認できます。
         </Typography>
 
         <Divider />

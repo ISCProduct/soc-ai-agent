@@ -282,6 +282,7 @@ func main() {
 		Threshold: config.CompanyGraphThreshold(),
 	}
 	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService, aiClient)
+	adminCompanyGraphController.SetRelationsFetcher(relationsFetcher)
 	resumeController := controllers.NewResumeController(resumeService)
 
 	// S3 upload service for interview videos (optional — skipped if env vars are not set)

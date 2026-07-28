@@ -39,6 +39,10 @@ type CompanyRelationsResult struct {
 	ModelUsed  string                   `json:"model_used,omitempty"`
 	Confidence string                   `json:"confidence,omitempty"`
 	SavedCount int                      `json:"saved_count,omitempty"`
+	// Phase 3 運用メタ: TTL / 予算ガードで Search をスキップしたとき
+	FromCache      bool   `json:"from_cache,omitempty"`
+	BudgetExceeded bool   `json:"budget_exceeded,omitempty"`
+	SkipReason     string `json:"skip_reason,omitempty"` // ttl | budget
 }
 
 // CompanyRelationsFetcher は gBizINFO を優先し、不足分のみ AI Search で関係・市場情報を取得する。
@@ -102,7 +106,11 @@ func (f *CompanyRelationsFetcher) FetchAndSave(ctx context.Context, companyID ui
 	}
 
 	if !forceRefresh && companyfetch.IsFresh(company.RelationsFetchedAt, companyfetch.TTLRelations) {
-		return f.resultFromDB(company, companyfetch.SourceGBiz, "gbizinfo+cache", companyfetch.ConfidenceHigh)
+		result, err := f.resultFromDB(company, companyfetch.SourceGBiz, "gbizinfo+cache", companyfetch.ConfidenceHigh)
+		if err != nil {
+			return nil, err
+		}
+		return markRelationsCacheSkip(result, "ttl", false), nil
 	}
 
 	run := func() (any, error) {
@@ -120,7 +128,11 @@ func (f *CompanyRelationsFetcher) FetchAndSave(ctx context.Context, companyID ui
 	}
 	if err != nil {
 		if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
-			return f.resultFromDB(company, companyfetch.SourceGBiz, "cache", companyfetch.ConfidenceMedium)
+			cached, cerr := f.resultFromDB(company, companyfetch.SourceGBiz, "cache", companyfetch.ConfidenceMedium)
+			if cerr != nil {
+				return nil, cerr
+			}
+			return markRelationsCacheSkip(cached, "budget", true), nil
 		}
 		return nil, err
 	}
@@ -224,6 +236,10 @@ func (f *CompanyRelationsFetcher) acquireForCompany(ctx context.Context, company
 
 	ai, err := f.acquireViaAISearch(ctx, company.Name, company.WebsiteURL)
 	if err != nil {
+		// 予算超過は呼び出し元でキャッシュ継続＋メタ付与するため伝播する
+		if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
+			return nil, err
+		}
 		if len(existingNames) > 0 || marketInfo != nil {
 			return f.buildResultFromExisting(company, existingNames, marketInfo, source, modelUsed, confidence)
 		}
@@ -590,4 +606,14 @@ func normalizeMarketType(marketType string, isListed bool) string {
 		return "standard"
 	}
 	return "unlisted"
+}
+
+func markRelationsCacheSkip(r *CompanyRelationsResult, reason string, budgetExceeded bool) *CompanyRelationsResult {
+	if r == nil {
+		r = &CompanyRelationsResult{}
+	}
+	r.FromCache = true
+	r.SkipReason = reason
+	r.BudgetExceeded = budgetExceeded
+	return r
 }
