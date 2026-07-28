@@ -9,8 +9,8 @@ SOC AI Agent: 採用支援SaaS (Go + Next.js + Python RAG)
 ### RAG (Python)
 - `cd rag && pip install -r constraints.txt && python3 main.py` (9000)
 ### Docker
-- `docker compose up -d`（core: backend/frontend/db）
-- RAG + Chroma（必須 profile）: `make rag-up` または `docker compose --profile rag up -d --build chroma rag-review`
+- `docker compose up -d`（db/app/frontend/rag-review/chroma/company-graphを含む全サービスを起動。`docker compose stop` / `down` で全停止・削除可）
+- RAGのみ起動/リビルド: `make rag-up` または `docker compose up -d --build chroma rag-review`
 - スモーク: `make rag-smoke`（`/health` の `vector_store.ok` と Chroma heartbeat）
 - 旧イメージ疑い: `make rag-rebuild`
 
