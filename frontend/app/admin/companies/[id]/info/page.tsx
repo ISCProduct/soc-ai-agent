@@ -31,6 +31,7 @@ export default function AdminCompanyInfoEditPage() {
   const [aiLoading, setAiLoading] = useState(false)
   const [forceLoading, setForceLoading] = useState(false)
   const [confirmLoading, setConfirmLoading] = useState(false)
+  const [fetchAllLoading, setFetchAllLoading] = useState(false)
   const [previewPending, setPreviewPending] = useState(false)
 
   const [name, setName] = useState('')
@@ -164,6 +165,50 @@ export default function AdminCompanyInfoEditPage() {
     }
   }
 
+  const handleFetchAllMissing = async () => {
+    setFetchAllLoading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const res = await fetch(`/api/admin/companies/${id}/fetch-all`, {
+        method: 'POST',
+        headers: authService.getAdminFetchHeaders(),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data?.error || '一括取得に失敗しました')
+        return
+      }
+      const parts: string[] = []
+      const pushStep = (key: string, label: string) => {
+        const step = data[key] as { status?: string; count?: number; detail?: string } | undefined
+        if (!step?.status) return
+        if (step.status === 'fetched') {
+          parts.push(step.count != null ? `${label}取得(${step.count})` : `${label}取得`)
+        } else if (step.status === 'skipped') {
+          parts.push(`${label}スキップ`)
+        } else if (step.status === 'error') {
+          parts.push(`${label}失敗`)
+        }
+      }
+      pushStep('info_step', '基本情報')
+      pushStep('jobs_step', '求人')
+      pushStep('tech_step', 'Tech')
+      pushStep('relations_step', '関係')
+      if (Array.isArray(data.errors) && data.errors.length > 0) {
+        setError(`一部失敗: ${(data.errors as string[]).join('; ')}`)
+      }
+      if (data.info && typeof data.info === 'object') {
+        applyInfoPayload(data.info as Record<string, unknown>)
+      }
+      loadCompany()
+      setSuccess(parts.length > 0 ? `不足情報の一括取得完了: ${parts.join(' / ')}` : '一括取得完了')
+      setPreviewPending(false)
+    } finally {
+      setFetchAllLoading(false)
+    }
+  }
+
   const handleConfirmSave = async () => {
     setConfirmLoading(true)
     setError('')
@@ -285,10 +330,19 @@ export default function AdminCompanyInfoEditPage() {
 
         <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
           <Button
+            variant="contained"
+            color="secondary"
+            onClick={handleFetchAllMissing}
+            disabled={fetchAllLoading || aiLoading || forceLoading}
+            startIcon={fetchAllLoading ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {fetchAllLoading ? '一括取得中...' : '不足情報を一括取得（基本情報・求人など）'}
+          </Button>
+          <Button
             variant="outlined"
             color="secondary"
             onClick={handleAiFetch}
-            disabled={!name.trim() || aiLoading}
+            disabled={!name.trim() || aiLoading || fetchAllLoading}
             startIcon={aiLoading ? <CircularProgress size={16} color="inherit" /> : null}
           >
             {aiLoading ? '取得中...' : 'プレビュー取得（未保存）'}
@@ -305,13 +359,13 @@ export default function AdminCompanyInfoEditPage() {
           <Button
             variant="outlined"
             onClick={handleForceFetchAndSave}
-            disabled={forceLoading}
+            disabled={forceLoading || fetchAllLoading}
             startIcon={forceLoading ? <CircularProgress size={16} color="inherit" /> : null}
           >
             {forceLoading ? '再取得中...' : '強制再取得して保存'}
           </Button>
           <Typography variant="caption" color="text.secondary">
-            gBiz不足時は AI Search Lite。壁打ち/面接はDB共有キャッシュを読む（都度Searchしない）
+            一括取得は TTL 内の項目をスキップし、未取得の基本情報・求人・Tech・関係のみ取得します。
           </Typography>
         </Stack>
 

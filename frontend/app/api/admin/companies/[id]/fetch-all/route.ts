@@ -11,13 +11,14 @@ export async function POST(
   const { id } = await params
   const force = request.nextUrl.searchParams.get('force')
   const qs = force === 'true' ? '?force=true' : ''
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/fetch-tech-stack${qs}`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/fetch-all${qs}`, {
     method: 'POST',
     headers: {
       'X-Admin-Email': request.headers.get('x-admin-email') || '',
       'X-Admin-Token': request.headers.get('x-admin-token') || '',
     },
-    signal: AbortSignal.timeout(120_000),
+    // 基本情報 + 求人 + Tech + 関係で長時間になりうる
+    signal: AbortSignal.timeout(300_000),
   })
   const raw = await response.text()
   let data: Record<string, unknown> = {}

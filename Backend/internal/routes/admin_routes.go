@@ -41,6 +41,7 @@ func SetupAdminRoutes(
 	admin.GET("/companies/names", adminCompanyController.Names)
 	admin.GET("/companies/l1-coverage", adminCompanyController.GetL1Coverage)
 	admin.POST("/companies/warm-l1", adminCompanyController.WarmL1Catalog)
+	admin.POST("/companies/fetch-missing-batch", adminCompanyController.FetchMissingBatch)
 	admin.POST("/companies/seed-l1", adminCompanyController.SeedL1Catalog)
 	admin.GET("/companies/:id", adminCompanyController.Get)
 	admin.PUT("/companies/:id", adminCompanyController.Update)
@@ -57,6 +58,7 @@ func SetupAdminRoutes(
 	admin.POST("/companies/:id/confirm-relations", adminCompanyController.ConfirmCompanyRelations)
 	admin.POST("/companies/:id/fetch-jobs", adminCompanyController.FetchJobs)
 	admin.POST("/companies/:id/fetch-persona", adminCompanyController.FetchPersona)
+	admin.POST("/companies/:id/fetch-all", adminCompanyController.FetchAllMissing)
 
 	// クロールソース管理
 	admin.GET("/crawl-sources", adminCrawlController.ListSources)

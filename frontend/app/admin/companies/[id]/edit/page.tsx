@@ -7,6 +7,7 @@ import {
   Box,
   Button,
   Chip,
+  CircularProgress,
   MenuItem,
   Stack,
   TextField,
@@ -69,6 +70,11 @@ function parseJsonArray(s: string): string[] {
   }
 }
 
+function asStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  return v.map((x) => String(x).trim()).filter(Boolean)
+}
+
 export default function AdminCompanyEditPage() {
   const params = useParams()
   const router = useRouter()
@@ -81,13 +87,15 @@ export default function AdminCompanyEditPage() {
 
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [fetchLoading, setFetchLoading] = useState(false)
   const [name, setName] = useState('')
   const [techStack, setTechStack] = useState<string[]>([])
   const [infraStack, setInfraStack] = useState<string[]>([])
   const [cicdTools, setCicdTools] = useState<string[]>([])
   const [devStyle, setDevStyle] = useState('')
+  const [techFetchedAt, setTechFetchedAt] = useState<string | null>(null)
 
-  useEffect(() => {
+  const loadCompany = () => {
     fetch(`/api/admin/companies/${id}`, {
       headers: authService.getAdminFetchHeaders(),
     })
@@ -98,9 +106,49 @@ export default function AdminCompanyEditPage() {
         setInfraStack(parseJsonArray(data.infra_stack || ''))
         setCicdTools(parseJsonArray(data.cicd_tools || ''))
         setDevStyle(data.development_style || '')
+        setTechFetchedAt(data.tech_fetched_at || null)
       })
       .catch(() => setError('企業情報の取得に失敗しました'))
+  }
+
+  useEffect(() => {
+    loadCompany()
   }, [id])
+
+  const handleAiFetch = async (force = false) => {
+    setFetchLoading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const qs = force ? '?force=true' : ''
+      const res = await fetch(`/api/admin/companies/${id}/tech-stack-search${qs}`, {
+        method: 'POST',
+        headers: authService.getAdminFetchHeaders(),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data?.error || `技術スタック取得に失敗しました (${res.status})`)
+        return
+      }
+      const nextTech = asStringArray(data.tech_stack)
+      const nextInfra = asStringArray(data.infra_stack)
+      const nextCicd = asStringArray(data.cicd_tools)
+      if (nextTech.length > 0) setTechStack(nextTech)
+      if (nextInfra.length > 0) setInfraStack(nextInfra)
+      if (nextCicd.length > 0) setCicdTools(nextCicd)
+      if (typeof data.development_style === 'string' && data.development_style) {
+        setDevStyle(data.development_style)
+      }
+      loadCompany()
+      if (nextTech.length === 0 && nextInfra.length === 0 && nextCicd.length === 0) {
+        setSuccess('取得は完了しましたが、公開情報から技術スタックを特定できませんでした。手入力するか強制再取得を試してください。')
+      } else {
+        setSuccess(force ? '技術スタックを強制再取得して保存しました。' : '技術スタックを取得して保存しました。')
+      }
+    } finally {
+      setFetchLoading(false)
+    }
+  }
 
   const handleSave = async () => {
     setError('')
@@ -126,6 +174,12 @@ export default function AdminCompanyEditPage() {
     setSuccess('保存しました')
   }
 
+  const formatTs = (v: string | null) => {
+    if (!v) return '未取得'
+    const d = new Date(v)
+    return Number.isNaN(d.getTime()) ? v : d.toLocaleString('ja-JP')
+  }
+
   return (
     <AdminFormContainer
       title={`技術スタック編集: ${name}`}
@@ -135,6 +189,10 @@ export default function AdminCompanyEditPage() {
     >
       <ErrorAlert error={error} />
       {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
+      <Alert severity="info" sx={{ mb: 2 }}>
+        「AIで技術スタック取得」で採用ページ・技術ブログ等から言語/インフラ/CI・CDを取得します（TTL 30日）。
+        最終取得: {formatTs(techFetchedAt)}
+      </Alert>
 
       <Box sx={{ mb: 3, p: 2, bgcolor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Box>
@@ -152,6 +210,25 @@ export default function AdminCompanyEditPage() {
       </Box>
 
       <Stack spacing={3}>
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          <Button
+            variant="contained"
+            color="secondary"
+            onClick={() => handleAiFetch(false)}
+            disabled={fetchLoading}
+            startIcon={fetchLoading ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {fetchLoading ? '取得中...' : 'AIで技術スタック取得'}
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={() => handleAiFetch(true)}
+            disabled={fetchLoading}
+          >
+            強制再取得
+          </Button>
+        </Stack>
+
         <ChipEditor
           label="言語・フレームワーク（例: Go, React, TypeScript）"
           values={techStack}

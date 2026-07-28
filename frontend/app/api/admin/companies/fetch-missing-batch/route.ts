@@ -4,20 +4,18 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
 export const dynamic = 'force-dynamic'
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const { id } = await params
-  const force = request.nextUrl.searchParams.get('force')
-  const qs = force === 'true' ? '?force=true' : ''
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/fetch-tech-stack${qs}`, {
+export async function POST(request: NextRequest) {
+  const body = await request.text()
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/fetch-missing-batch`, {
     method: 'POST',
     headers: {
+      'Content-Type': 'application/json',
       'X-Admin-Email': request.headers.get('x-admin-email') || '',
       'X-Admin-Token': request.headers.get('x-admin-token') || '',
     },
-    signal: AbortSignal.timeout(120_000),
+    body: body || '{}',
+    // 最大50社 × 複数取得のため長め
+    signal: AbortSignal.timeout(600_000),
   })
   const raw = await response.text()
   let data: Record<string, unknown> = {}

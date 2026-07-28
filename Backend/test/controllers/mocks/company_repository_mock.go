@@ -155,3 +155,11 @@ func (m *CompanyRepositoryMock) CountL1Coverage(infoTTL time.Duration) (*models.
 	}
 	return nil, args.Error(1)
 }
+
+func (m *CompanyRepositoryMock) ListActiveMissingFetchCandidates(limit int) ([]models.Company, error) {
+	args := m.Called(limit)
+	if v := args.Get(0); v != nil {
+		return v.([]models.Company), args.Error(1)
+	}
+	return nil, args.Error(1)
+}

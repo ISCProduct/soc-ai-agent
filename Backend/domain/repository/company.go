@@ -40,6 +40,8 @@ type CompanyRepository interface {
 	CountWeightProfiles() (int64, error)
 	ListPublishedL1WarmCandidates(limit int, infoTTL time.Duration) ([]models.CompanyL1WarmRow, error)
 	CountL1Coverage(infoTTL time.Duration) (*models.L1CoverageStats, error)
+	// ListActiveMissingFetchCandidates は基本情報/求人/Tech/関係のいずれかが不足しているアクティブ企業を返す。
+	ListActiveMissingFetchCandidates(limit int) ([]models.Company, error)
 }
 
 // CompanyRelationRepository は企業間関係の永続化インターフェース。

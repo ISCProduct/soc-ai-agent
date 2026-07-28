@@ -21,15 +21,16 @@ import (
 )
 
 type AdminCompanyController struct {
-	repo         repository.CompanyRepository
-	audit        ifaces.AuditLogService
-	gbiz         *services.GBizInfoService
-	openaiClient *openai.Client
+	repo             repository.CompanyRepository
+	audit            ifaces.AuditLogService
+	gbiz             *services.GBizInfoService
+	openaiClient     *openai.Client
 	infoFetcher      *services.CompanyInfoFetcher
 	relationsFetcher *services.CompanyRelationsFetcher
 	jobFetcher       *services.JobFetchService
-	techFetcher  *services.TechStackFetcher
-	catalogWarm  *services.CatalogWarmService
+	techFetcher      *services.TechStackFetcher
+	catalogWarm      *services.CatalogWarmService
+	missingBatch     *services.CompanyMissingBatchService
 }
 
 func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.AuditLogService, gbiz *services.GBizInfoService, openaiClient ...*openai.Client) *AdminCompanyController {
@@ -40,6 +41,9 @@ func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.A
 		ctrl.jobFetcher = services.NewJobFetchService(repo, openaiClient[0])
 		ctrl.techFetcher = services.NewTechStackFetcher(repo, openaiClient[0])
 		ctrl.catalogWarm = services.NewCatalogWarmService(repo, ctrl.infoFetcher, ctrl.jobFetcher)
+		ctrl.missingBatch = services.NewCompanyMissingBatchService(
+			repo, ctrl.infoFetcher, ctrl.jobFetcher, ctrl.techFetcher, nil,
+		)
 	}
 	return ctrl
 }
@@ -48,6 +52,15 @@ func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.A
 func (c *AdminCompanyController) SetRelationsFetcher(fetcher *services.CompanyRelationsFetcher) {
 	if c != nil {
 		c.relationsFetcher = fetcher
+		if c.missingBatch != nil {
+			c.missingBatch = services.NewCompanyMissingBatchService(
+				c.repo, c.infoFetcher, c.jobFetcher, c.techFetcher, fetcher,
+			)
+		} else if c.infoFetcher != nil {
+			c.missingBatch = services.NewCompanyMissingBatchService(
+				c.repo, c.infoFetcher, c.jobFetcher, c.techFetcher, fetcher,
+			)
+		}
 	}
 }
 
@@ -503,6 +516,146 @@ func (c *AdminCompanyController) FetchPersona(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, profile)
 }
 
+// FetchAllMissing POST /api/admin/companies/:id/fetch-all
+// 未取得（TTL切れ含む）の基本情報・求人・技術スタック・関係情報をまとめて取得する。
+// ?force=true で TTL を無視して再取得。個別失敗は errors に積み、全体は 200 で返す。
+func (c *AdminCompanyController) FetchAllMissing(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	forceRefresh := ctx.QueryParam("force") == "true"
+	companyID := uint(id)
+	reqCtx := ctx.Request().Context()
+
+	company, err := c.repo.FindByID(companyID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "company not found")
+	}
+
+	type stepResult struct {
+		Status  string `json:"status"` // fetched | skipped | error
+		Detail  string `json:"detail,omitempty"`
+		Count   int    `json:"count,omitempty"`
+		Skipped bool   `json:"skipped,omitempty"`
+	}
+	payload := map[string]any{
+		"company_id":   companyID,
+		"company_name": company.Name,
+		"force":        forceRefresh,
+	}
+	var errs []string
+
+	// 1) 基本情報
+	infoStep := stepResult{Status: "skipped", Skipped: true, Detail: "fetcher unavailable"}
+	if c.infoFetcher != nil {
+		needInfo := forceRefresh || !companyfetch.IsFresh(company.InfoFetchedAt, companyfetch.TTLInfo) ||
+			strings.TrimSpace(company.Description) == "" || strings.TrimSpace(company.WebsiteURL) == ""
+		if !needInfo {
+			infoStep = stepResult{Status: "skipped", Skipped: true, Detail: "ttl_fresh"}
+		} else {
+			result, ferr := c.infoFetcher.FetchAndSave(reqCtx, companyID, forceRefresh)
+			if ferr != nil {
+				infoStep = stepResult{Status: "error", Detail: ferr.Error()}
+				errs = append(errs, "info: "+ferr.Error())
+			} else if result != nil && result.FromCache {
+				infoStep = stepResult{Status: "skipped", Skipped: true, Detail: result.SkipReason}
+				payload["info"] = result
+			} else {
+				infoStep = stepResult{Status: "fetched", Detail: "ok"}
+				payload["info"] = result
+			}
+		}
+	}
+	payload["info_step"] = infoStep
+
+	// 2) 求人
+	jobsStep := stepResult{Status: "skipped", Skipped: true, Detail: "fetcher unavailable"}
+	if c.jobFetcher != nil {
+		needJobs := forceRefresh || !companyfetch.IsFresh(company.JobsFetchedAt, companyfetch.TTLJobs)
+		if !needJobs {
+			existing, _ := c.repo.ListJobPositions(&companyID, 100)
+			if len(existing) == 0 {
+				needJobs = true
+			} else {
+				jobsStep = stepResult{Status: "skipped", Skipped: true, Detail: "ttl_fresh", Count: len(existing)}
+			}
+		}
+		if needJobs {
+			positions, jerr := c.jobFetcher.FetchAndSaveJobs(reqCtx, companyID, forceRefresh)
+			if jerr != nil {
+				jobsStep = stepResult{Status: "error", Detail: jerr.Error()}
+				errs = append(errs, "jobs: "+jerr.Error())
+			} else {
+				jobsStep = stepResult{Status: "fetched", Detail: "ok", Count: len(positions)}
+				payload["jobs_total"] = len(positions)
+			}
+		}
+	}
+	payload["jobs_step"] = jobsStep
+
+	// 3) 技術スタック（未取得時のみ）
+	techStep := stepResult{Status: "skipped", Skipped: true, Detail: "fetcher unavailable"}
+	if c.techFetcher != nil {
+		needTech := forceRefresh || !companyfetch.IsFresh(company.TechFetchedAt, companyfetch.TTLTech) ||
+			strings.TrimSpace(company.TechStack) == ""
+		if !needTech {
+			techStep = stepResult{Status: "skipped", Skipped: true, Detail: "ttl_fresh"}
+		} else {
+			result, terr := c.techFetcher.FetchAndSave(reqCtx, companyID, forceRefresh)
+			if terr != nil {
+				techStep = stepResult{Status: "error", Detail: terr.Error()}
+				errs = append(errs, "tech: "+terr.Error())
+			} else {
+				techStep = stepResult{Status: "fetched", Detail: "ok"}
+				payload["tech"] = result
+			}
+		}
+	}
+	payload["tech_step"] = techStep
+
+	// 4) 関係・市場（未取得時のみ）
+	relationsStep := stepResult{Status: "skipped", Skipped: true, Detail: "fetcher unavailable"}
+	if c.relationsFetcher != nil {
+		needRel := forceRefresh || !companyfetch.IsFresh(company.RelationsFetchedAt, companyfetch.TTLRelations)
+		if !needRel {
+			relationsStep = stepResult{Status: "skipped", Skipped: true, Detail: "ttl_fresh"}
+		} else {
+			result, rerr := c.relationsFetcher.FetchAndSave(reqCtx, companyID, forceRefresh)
+			if rerr != nil {
+				relationsStep = stepResult{Status: "error", Detail: rerr.Error()}
+				errs = append(errs, "relations: "+rerr.Error())
+			} else if result != nil && result.FromCache {
+				relationsStep = stepResult{Status: "skipped", Skipped: true, Detail: result.SkipReason, Count: result.SavedCount}
+				payload["relations"] = result
+			} else {
+				count := 0
+				if result != nil {
+					count = result.SavedCount
+				}
+				relationsStep = stepResult{Status: "fetched", Detail: "ok", Count: count}
+				payload["relations"] = result
+			}
+		}
+	}
+	payload["relations_step"] = relationsStep
+
+	if len(errs) > 0 {
+		payload["errors"] = errs
+		payload["ok"] = false
+	} else {
+		payload["ok"] = true
+	}
+
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.fetch_all", "company", companyID, map[string]any{
+		"force": forceRefresh,
+		"ok":    payload["ok"],
+	})
+
+	return ctx.JSON(http.StatusOK, payload)
+}
+
 // SeedL1Catalog POST /api/admin/companies/seed-l1
 // multipart file=csv または body に CSV テキスト。未指定時は sample CSV を読む。
 func (c *AdminCompanyController) SeedL1Catalog(ctx echo.Context) error {
@@ -592,6 +745,39 @@ func (c *AdminCompanyController) WarmL1Catalog(ctx echo.Context) error {
 		"info_ok":    result.InfoOK,
 		"persona_ok": result.PersonaOK,
 		"errors":     result.Errors,
+	})
+	return ctx.JSON(http.StatusOK, result)
+}
+
+// FetchMissingBatch POST /api/admin/companies/fetch-missing-batch
+// Body: { "limit": 20, "dry_run": true }
+// アクティブ企業のうち不足フィールド（基本情報/求人/Tech/関係）だけを上限付きで埋める。
+func (c *AdminCompanyController) FetchMissingBatch(ctx echo.Context) error {
+	if c.missingBatch == nil {
+		c.missingBatch = services.NewCompanyMissingBatchService(
+			c.repo, c.infoFetcher, c.jobFetcher, c.techFetcher, c.relationsFetcher,
+		)
+	}
+	var opts services.MissingBatchOptions
+	opts.Limit = 20
+	if err := ctx.Bind(&opts); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
+	}
+	result, err := c.missingBatch.Run(ctx.Request().Context(), opts)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.fetch_missing_batch", "company", 0, map[string]any{
+		"dry_run":       result.DryRun,
+		"limit":         result.Limit,
+		"candidate_n":   result.CandidateN,
+		"processed":     result.Processed,
+		"info_ok":       result.InfoOK,
+		"jobs_ok":       result.JobsOK,
+		"tech_ok":       result.TechOK,
+		"relations_ok":  result.RelationsOK,
+		"errors":        result.Errors,
 	})
 	return ctx.JSON(http.StatusOK, result)
 }

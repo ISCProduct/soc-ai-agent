@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
+  Alert,
   Box,
   Button,
   Card,
@@ -32,6 +33,12 @@ type Company = {
   source_type?: string
   is_provisional?: boolean
   data_status?: string
+  info_fetched_at?: string | null
+  jobs_fetched_at?: string | null
+  tech_fetched_at?: string | null
+  relations_fetched_at?: string | null
+  website_url?: string
+  description?: string
 }
 
 type L1Coverage = {
@@ -71,6 +78,9 @@ export default function AdminCompaniesPage() {
   const [coverage, setCoverage] = useState<L1Coverage | null>(null)
   const [warming, setWarming] = useState(false)
   const [warmMessage, setWarmMessage] = useState('')
+  const [fetchAllId, setFetchAllId] = useState<number | null>(null)
+  const [fetchAllMessage, setFetchAllMessage] = useState('')
+  const [missingBatchLoading, setMissingBatchLoading] = useState(false)
 
   const fetchCoverage = useCallback(async () => {
     const res = await fetch('/api/admin/companies/l1-coverage', {
@@ -163,6 +173,52 @@ export default function AdminCompaniesPage() {
     }
   }
 
+  const handleFetchMissingBatch = async (dryRun: boolean) => {
+    setMissingBatchLoading(true)
+    setFetchAllMessage('')
+    setError('')
+    try {
+      const res = await fetch('/api/admin/companies/fetch-missing-batch', {
+        method: 'POST',
+        headers: {
+          ...authService.getAdminFetchHeaders(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ limit: 20, dry_run: dryRun }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data?.error || data?.message || `不足データ一括取得に失敗しました (${res.status})`)
+        return
+      }
+      if (dryRun) {
+        const names = Array.isArray(data.items)
+          ? (data.items as { name?: string }[]).slice(0, 5).map((i) => i.name).filter(Boolean).join(', ')
+          : ''
+        setFetchAllMessage(
+          `不足データ対象: ${data.candidate_n ?? 0} 社（上限 ${data.limit}）` +
+            (names ? ` — 例: ${names}${(data.candidate_n ?? 0) > 5 ? ' …' : ''}` : ''),
+        )
+      } else {
+        setFetchAllMessage(
+          `不足データ一括取得完了: 処理 ${data.processed ?? 0} 社` +
+            ` / 基本情報 ${data.info_ok ?? 0}` +
+            ` / 求人 ${data.jobs_ok ?? 0}` +
+            ` / Tech ${data.tech_ok ?? 0}` +
+            ` / 関係 ${data.relations_ok ?? 0}` +
+            ` / エラー ${data.errors ?? 0}`,
+        )
+        if ((data.errors ?? 0) > 0) {
+          setError(`一部の企業で取得に失敗しました（エラー ${data.errors} 件）。詳細はサーバーログを確認してください。`)
+        }
+        await fetchCompanies(page)
+        await fetchCoverage()
+      }
+    } finally {
+      setMissingBatchLoading(false)
+    }
+  }
+
   const handlePublish = async (companyId: number) => {
     setError('')
     const res = await fetch(`/api/admin/companies/${companyId}/publish`, {
@@ -189,6 +245,62 @@ export default function AdminCompaniesPage() {
       return
     }
     fetchCompanies(page)
+  }
+
+  const summarizeFetchAll = (data: Record<string, unknown>) => {
+    const stepLabel = (key: string, label: string) => {
+      const step = data[key] as { status?: string; detail?: string; count?: number } | undefined
+      if (!step?.status) return null
+      if (step.status === 'fetched') {
+        return step.count != null ? `${label}取得(${step.count})` : `${label}取得`
+      }
+      if (step.status === 'skipped') return `${label}スキップ`
+      if (step.status === 'error') return `${label}失敗`
+      return null
+    }
+    return [
+      stepLabel('info_step', '基本情報'),
+      stepLabel('jobs_step', '求人'),
+      stepLabel('tech_step', 'Tech'),
+      stepLabel('relations_step', '関係'),
+    ]
+      .filter(Boolean)
+      .join(' / ')
+  }
+
+  const handleFetchAll = async (companyId: number) => {
+    setError('')
+    setFetchAllMessage('')
+    setFetchAllId(companyId)
+    try {
+      const res = await fetch(`/api/admin/companies/${companyId}/fetch-all`, {
+        method: 'POST',
+        headers: authService.getAdminFetchHeaders(),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data?.error || `一括取得に失敗しました (${res.status})`)
+        return
+      }
+      const summary = summarizeFetchAll(data)
+      if (data.ok === false && Array.isArray(data.errors) && data.errors.length > 0) {
+        setError(`一部失敗: ${(data.errors as string[]).join('; ')}`)
+      }
+      setFetchAllMessage(summary ? `一括取得完了: ${summary}` : '一括取得完了')
+      await fetchCompanies(page)
+      await fetchCoverage()
+    } finally {
+      setFetchAllId(null)
+    }
+  }
+
+  const missingLabels = (c: Company) => {
+    const labels: string[] = []
+    if (!c.info_fetched_at || !c.description) labels.push('基本情報')
+    if (!c.jobs_fetched_at) labels.push('求人')
+    if (!c.tech_fetched_at) labels.push('Tech')
+    if (!c.relations_fetched_at) labels.push('関係')
+    return labels
   }
 
   const filteredCompanies = companies.filter((c) => {
@@ -224,10 +336,45 @@ export default function AdminCompaniesPage() {
       </Typography>
 
       <ErrorAlert error={error} />
+      {fetchAllMessage && (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setFetchAllMessage('')}>
+          {fetchAllMessage}
+        </Alert>
+      )}
 
       <Card sx={{ mb: 2 }}>
         <CardContent>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} justifyContent="space-between">
+          <Stack spacing={2}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} justifyContent="space-between">
+              <Box>
+                <Typography variant="h6" sx={{ mb: 0.5 }}>不足データの一括取得</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  未取得／TTL切れの基本情報・求人・Tech・関係だけを埋めます（1回あたり最大20社・公開優先）。
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={missingBatchLoading || warming}
+                  onClick={() => handleFetchMissingBatch(true)}
+                >
+                  対象確認
+                </Button>
+                <Button
+                  variant="contained"
+                  color="secondary"
+                  size="small"
+                  disabled={missingBatchLoading || warming}
+                  onClick={() => handleFetchMissingBatch(false)}
+                  startIcon={missingBatchLoading ? <CircularProgress size={14} color="inherit" /> : null}
+                >
+                  {missingBatchLoading ? '一括取得中...' : '不足データを一括取得'}
+                </Button>
+              </Stack>
+            </Stack>
+            <Divider />
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} justifyContent="space-between">
             <Box>
               <Typography variant="h6" sx={{ mb: 0.5 }}>L1 カタログ充足（マッチング用）</Typography>
               <Typography variant="body2" color="text.secondary">
@@ -279,6 +426,7 @@ export default function AdminCompaniesPage() {
               </Button>
             </Stack>
           </Stack>
+          </Stack>
         </CardContent>
       </Card>
 
@@ -318,8 +466,25 @@ export default function AdminCompaniesPage() {
                     <Typography variant="body2" color="text.secondary">
                       {company.industry || '業種未設定'} / {company.location || '所在地未設定'}
                     </Typography>
+                    {missingLabels(company).length > 0 && (
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                        {missingLabels(company).map((label) => (
+                          <Chip key={label} size="small" color="warning" variant="outlined" label={`未取得: ${label}`} />
+                        ))}
+                      </Stack>
+                    )}
                   </Box>
                   <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    <Button
+                      variant="contained"
+                      color="secondary"
+                      size="small"
+                      onClick={() => handleFetchAll(company.id)}
+                      disabled={fetchAllId === company.id || warming}
+                      startIcon={fetchAllId === company.id ? <CircularProgress size={14} color="inherit" /> : null}
+                    >
+                      {fetchAllId === company.id ? '一括取得中...' : '不足情報を一括取得'}
+                    </Button>
                     <Button
                       variant="contained"
                       size="small"
