@@ -15,15 +15,24 @@ export async function POST(
   const { id } = await params
   const force = request.nextUrl.searchParams.get('force')
   const qs = force === 'true' ? '?force=true' : ''
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/fetch-primary${qs}`, {
-    method: 'POST',
-    headers: {
-      'X-Admin-Email': request.headers.get('x-admin-email') || '',
-      'X-Admin-Token': request.headers.get('x-admin-token') || '',
-    },
-    // 基本 + 技術 + 関係で長時間になりうる
-    signal: AbortSignal.timeout(300_000),
-  })
+  let response: Response
+  try {
+    response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/fetch-primary${qs}`, {
+      method: 'POST',
+      headers: {
+        'X-Admin-Email': request.headers.get('x-admin-email') || '',
+        'X-Admin-Token': request.headers.get('x-admin-token') || '',
+      },
+      // 基本 + 技術 + 関係で長時間になりうる
+      signal: AbortSignal.timeout(300_000),
+    })
+  } catch (error) {
+    const message =
+      error instanceof Error && error.name === 'TimeoutError'
+        ? '企業情報の取得がタイムアウトしました'
+        : '企業情報取得中に通信エラーが発生しました'
+    return NextResponse.json({ error: message }, { status: 504 })
+  }
   const raw = await response.text()
   let data: Record<string, unknown> = {}
   if (raw) {

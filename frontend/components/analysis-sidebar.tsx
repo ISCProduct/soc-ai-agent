@@ -99,7 +99,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
     const [isAdmin, setIsAdmin] = useState(!!user.is_admin)
     const theme = useTheme()
     const isMobile = useMediaQuery(theme.breakpoints.down('md'))
-    const router = useRouter()
 
     useEffect(() => {
         setIsAdmin(!!user.is_admin)

@@ -96,7 +96,7 @@ func (c *GitHubController) SyncAndWait(ctx echo.Context) error {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
 		if strings.Contains(err.Error(), "github profile not found") {
-			return echo.NewHTTPError(http.StatusNotFound, "github profile not found: please connect your GitHub account")
+			return echo.NewHTTPError(http.StatusNotFound, "GitHubプロフィールが見つかりません。GitHubアカウントを連携してください。")
 		}
 		return echoInternalError(err)
 	}
