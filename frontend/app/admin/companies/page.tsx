@@ -330,6 +330,14 @@ export default function AdminCompaniesPage() {
                       variant="outlined"
                       size="small"
                       component={Link}
+                      href={`/admin/companies/${company.id}/relations`}
+                    >
+                      関係・市場
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      component={Link}
                       href={`/admin/companies/${company.id}/edit`}
                     >
                       技術スタック編集

@@ -25,8 +25,9 @@ type AdminCompanyController struct {
 	audit        ifaces.AuditLogService
 	gbiz         *services.GBizInfoService
 	openaiClient *openai.Client
-	infoFetcher  *services.CompanyInfoFetcher
-	jobFetcher   *services.JobFetchService
+	infoFetcher      *services.CompanyInfoFetcher
+	relationsFetcher *services.CompanyRelationsFetcher
+	jobFetcher       *services.JobFetchService
 	techFetcher  *services.TechStackFetcher
 	catalogWarm  *services.CatalogWarmService
 }
@@ -41,6 +42,13 @@ func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.A
 		ctrl.catalogWarm = services.NewCatalogWarmService(repo, ctrl.infoFetcher, ctrl.jobFetcher)
 	}
 	return ctrl
+}
+
+// SetRelationsFetcher は企業関係・市場情報取得サービスを注入する（#633 Phase 2）。
+func (c *AdminCompanyController) SetRelationsFetcher(fetcher *services.CompanyRelationsFetcher) {
+	if c != nil {
+		c.relationsFetcher = fetcher
+	}
 }
 
 // SetCompanySearchGuards は FirstTouch Search の予算・singleflight を注入する（#587）。
@@ -59,6 +67,10 @@ func (c *AdminCompanyController) SetCompanySearchGuards(budget companyfetch.Sear
 	if c.techFetcher != nil {
 		c.techFetcher.SetSearchBudget(budget)
 		c.techFetcher.SetSearchFlight(flight)
+	}
+	if c.relationsFetcher != nil {
+		c.relationsFetcher.SetSearchBudget(budget)
+		c.relationsFetcher.SetSearchFlight(flight)
 	}
 }
 
@@ -333,6 +345,97 @@ func (c *AdminCompanyController) ConfirmCompanyInfo(ctx echo.Context) error {
 
 	actor := ctx.Request().Header.Get("X-Admin-Email")
 	c.audit.Record(actor, "company.confirm_info", "company", uint(id), map[string]any{
+		"source":     result.Source,
+		"model":      result.ModelUsed,
+		"confidence": result.Confidence,
+	})
+
+	return ctx.JSON(http.StatusOK, result)
+}
+
+// WebSearchCompanyRelations POST /api/admin/companies/web-search-relations
+// 企業名をもとに Search→Parse で関係・市場情報をプレビュー用に返す（DB非更新）
+func (c *AdminCompanyController) WebSearchCompanyRelations(ctx echo.Context) error {
+	var req struct {
+		Name       string `json:"name"`
+		WebsiteURL string `json:"website_url"`
+	}
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+	}
+	if c.relationsFetcher == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
+	}
+
+	result, err := c.relationsFetcher.Acquire(ctx.Request().Context(), req.Name, req.WebsiteURL)
+	if err != nil {
+		return echoInternalError(err)
+	}
+
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.web_search_relations", "company", 0, map[string]any{
+		"name":   req.Name,
+		"source": result.Source,
+		"model":  result.ModelUsed,
+	})
+
+	return ctx.JSON(http.StatusOK, result)
+}
+
+// FetchCompanyRelations POST /api/admin/companies/:id/fetch-relations
+// ?force=true を付けると DB キャッシュを無視して AI で再取得する。
+func (c *AdminCompanyController) FetchCompanyRelations(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	if c.relationsFetcher == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
+	}
+
+	forceRefresh := ctx.QueryParam("force") == "true"
+	result, err := c.relationsFetcher.FetchAndSave(ctx.Request().Context(), uint(id), forceRefresh)
+	if err != nil {
+		return echoInternalError(err)
+	}
+
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.fetch_relations", "company", uint(id), map[string]any{
+		"saved":  result.SavedCount,
+		"force":  forceRefresh,
+		"source": result.Source,
+	})
+
+	return ctx.JSON(http.StatusOK, result)
+}
+
+// ConfirmCompanyRelations POST /api/admin/companies/:id/confirm-relations
+// プレビュー済みの関係・市場情報を LLM 再実行なしで DB に確定保存する。
+func (c *AdminCompanyController) ConfirmCompanyRelations(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	if c.relationsFetcher == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
+	}
+
+	var req services.CompanyRelationsResult
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
+	}
+
+	result, err := c.relationsFetcher.ConfirmAndSave(uint(id), &req)
+	if err != nil {
+		return echoInternalError(err)
+	}
+
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.confirm_relations", "company", uint(id), map[string]any{
+		"saved":      result.SavedCount,
 		"source":     result.Source,
 		"model":      result.ModelUsed,
 		"confidence": result.Confidence,
