@@ -40,6 +40,8 @@ type CompanyRepository interface {
 	CountWeightProfiles() (int64, error)
 	ListPublishedL1WarmCandidates(limit int, infoTTL time.Duration) ([]models.CompanyL1WarmRow, error)
 	CountL1Coverage(infoTTL time.Duration) (*models.L1CoverageStats, error)
+	// ListActiveMissingFetchCandidates は基本情報/求人/Tech/関係のいずれかが不足しているアクティブ企業を返す。
+	ListActiveMissingFetchCandidates(limit int) ([]models.Company, error)
 }
 
 // CompanyRelationRepository は企業間関係の永続化インターフェース。
@@ -47,6 +49,9 @@ type CompanyRelationRepository interface {
 	UpsertBusinessRelation(fromID, toID uint, relationType, description string) error
 	// UpsertCapitalRelation は資本関係を parent_id/child_id で保存する（資本図表示用）。
 	UpsertCapitalRelation(parentID, childID uint, relationType string, ratio *float64, description string) error
+	GetRelationsByCompanyID(companyID uint) ([]models.CompanyRelation, error)
+	GetMarketInfoByCompanyID(companyID uint) (*models.CompanyMarketInfo, error)
+	UpsertMarketInfo(info *models.CompanyMarketInfo) error
 }
 
 // CompanyPopularityRepository は企業人気情報の永続化インターフェース。

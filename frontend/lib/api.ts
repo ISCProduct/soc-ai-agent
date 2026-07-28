@@ -43,6 +43,7 @@ export interface ChatResponse {
     answered_questions: number
     evaluated_categories?: number
     total_categories?: number
+    job_category_id?: number
     current_phase?: PhaseProgress
     all_phases?: PhaseProgress[]
     current_scores?: Array<{

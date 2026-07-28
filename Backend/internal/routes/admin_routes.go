@@ -41,18 +41,24 @@ func SetupAdminRoutes(
 	admin.GET("/companies/names", adminCompanyController.Names)
 	admin.GET("/companies/l1-coverage", adminCompanyController.GetL1Coverage)
 	admin.POST("/companies/warm-l1", adminCompanyController.WarmL1Catalog)
+	admin.POST("/companies/fetch-missing-batch", adminCompanyController.FetchMissingBatch)
 	admin.POST("/companies/seed-l1", adminCompanyController.SeedL1Catalog)
 	admin.GET("/companies/:id", adminCompanyController.Get)
 	admin.PUT("/companies/:id", adminCompanyController.Update)
-	admin.POST("/companies/:id/publish", adminCompanyController.Publish)
-	admin.POST("/companies/:id/reject", adminCompanyController.Reject)
+	admin.PATCH("/companies/:id/publish", adminCompanyController.Publish)
+	admin.PATCH("/companies/:id/reject", adminCompanyController.Reject)
 	admin.POST("/companies/web-search", adminCompanyController.WebSearchCompanyInfo)
+	admin.POST("/companies/web-search-relations", adminCompanyController.WebSearchCompanyRelations)
 	admin.GET("/companies/:id/gbiz-search", adminCompanyController.SearchGBiz)
 	admin.POST("/companies/:id/gbiz-sync", adminCompanyController.SyncGBiz)
 	admin.POST("/companies/:id/fetch-tech-stack", adminCompanyController.FetchTechStack)
 	admin.POST("/companies/:id/fetch-info", adminCompanyController.FetchCompanyInfo)
+	admin.POST("/companies/:id/confirm-info", adminCompanyController.ConfirmCompanyInfo)
+	admin.POST("/companies/:id/fetch-relations", adminCompanyController.FetchCompanyRelations)
+	admin.POST("/companies/:id/confirm-relations", adminCompanyController.ConfirmCompanyRelations)
 	admin.POST("/companies/:id/fetch-jobs", adminCompanyController.FetchJobs)
 	admin.POST("/companies/:id/fetch-persona", adminCompanyController.FetchPersona)
+	admin.POST("/companies/:id/fetch-all", adminCompanyController.FetchAllMissing)
 
 	// クロールソース管理
 	admin.GET("/crawl-sources", adminCrawlController.ListSources)
@@ -143,4 +149,6 @@ func SetupAdminRoutes(
 	// ベクトルDB管理（#573 Phase 3）
 	admin.GET("/vector/status", adminVectorController.Status)
 	admin.POST("/vector/reembed", adminVectorController.Reembed)
+	admin.GET("/vector/stats", adminVectorController.Stats)
+	admin.GET("/vector/collections", adminVectorController.Collections)
 }

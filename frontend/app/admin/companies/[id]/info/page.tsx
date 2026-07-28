@@ -30,6 +30,9 @@ export default function AdminCompanyInfoEditPage() {
   const [success, setSuccess] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
   const [forceLoading, setForceLoading] = useState(false)
+  const [confirmLoading, setConfirmLoading] = useState(false)
+  const [fetchAllLoading, setFetchAllLoading] = useState(false)
+  const [previewPending, setPreviewPending] = useState(false)
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -41,6 +44,8 @@ export default function AdminCompanyInfoEditPage() {
   const [mainBusiness, setMainBusiness] = useState('')
   const [culture, setCulture] = useState('')
   const [workStyle, setWorkStyle] = useState('')
+  const [techStack, setTechStack] = useState('')
+  const [welfareDetails, setWelfareDetails] = useState('')
   const [sourceType, setSourceType] = useState('manual')
   const [sourceUrl, setSourceUrl] = useState('')
   const [dataStatus, setDataStatus] = useState('draft')
@@ -67,6 +72,8 @@ export default function AdminCompanyInfoEditPage() {
         setMainBusiness(data.main_business || '')
         setCulture(data.culture || '')
         setWorkStyle(data.work_style || '')
+        setTechStack(data.tech_stack || '')
+        setWelfareDetails(data.welfare_details || '')
         setSourceType(data.source_type || 'manual')
         setSourceUrl(data.source_url || '')
         setDataStatus(data.data_status || 'draft')
@@ -76,6 +83,7 @@ export default function AdminCompanyInfoEditPage() {
         setTechFetchedAt(data.tech_fetched_at || null)
         setLastModelUsed(data.last_model_used || '')
         setLastFetchConfidence(data.last_fetch_confidence || '')
+        setPreviewPending(false)
       })
       .catch(() => setError('企業情報の取得に失敗しました'))
   }
@@ -94,6 +102,8 @@ export default function AdminCompanyInfoEditPage() {
     if (typeof data.main_business === 'string' && data.main_business) setMainBusiness(data.main_business)
     if (typeof data.culture === 'string' && data.culture) setCulture(data.culture)
     if (typeof data.work_style === 'string' && data.work_style) setWorkStyle(data.work_style)
+    if (typeof data.tech_stack === 'string' && data.tech_stack) setTechStack(data.tech_stack)
+    if (typeof data.welfare_details === 'string' && data.welfare_details) setWelfareDetails(data.welfare_details)
     if (typeof data.source === 'string' && data.source) setSourceType(data.source)
     if (typeof data.source_url === 'string' && data.source_url) setSourceUrl(data.source_url)
     if (typeof data.model_used === 'string' && data.model_used) setLastModelUsed(data.model_used)
@@ -120,7 +130,8 @@ export default function AdminCompanyInfoEditPage() {
         return
       }
       applyInfoPayload(data)
-      setSuccess('プレビュー取得が完了しました。内容を確認・修正してから保存してください。')
+      setPreviewPending(true)
+      setSuccess('プレビュー取得が完了しました。内容を確認・修正してから「確定して保存」してください。')
     } finally {
       setAiLoading(false)
     }
@@ -142,9 +153,101 @@ export default function AdminCompanyInfoEditPage() {
       }
       applyInfoPayload(data)
       loadCompany()
-      setSuccess('DBへ強制再取得・保存しました。')
+      if (data.budget_exceeded) {
+        setSuccess('月次 Search 予算超過のため、既存キャッシュのみ返却しました（新規 Search なし）。コスト画面を確認してください。')
+      } else if (data.from_cache && data.skip_reason === 'ttl') {
+        setSuccess('TTL 内のためキャッシュを返却しました。再取得する場合は「強制再取得して保存」を使ってください。')
+      } else {
+        setSuccess('DBへ強制再取得・保存しました。')
+      }
     } finally {
       setForceLoading(false)
+    }
+  }
+
+  const handleFetchAllMissing = async () => {
+    setFetchAllLoading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const res = await fetch(`/api/admin/companies/${id}/fetch-all`, {
+        method: 'POST',
+        headers: authService.getAdminFetchHeaders(),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data?.error || '一括取得に失敗しました')
+        return
+      }
+      const parts: string[] = []
+      const pushStep = (key: string, label: string) => {
+        const step = data[key] as { status?: string; count?: number; detail?: string } | undefined
+        if (!step?.status) return
+        if (step.status === 'fetched') {
+          parts.push(step.count != null ? `${label}取得(${step.count})` : `${label}取得`)
+        } else if (step.status === 'skipped') {
+          parts.push(`${label}スキップ`)
+        } else if (step.status === 'error') {
+          parts.push(`${label}失敗`)
+        }
+      }
+      pushStep('info_step', '基本情報')
+      pushStep('jobs_step', '求人')
+      pushStep('tech_step', 'Tech')
+      pushStep('relations_step', '関係')
+      if (Array.isArray(data.errors) && data.errors.length > 0) {
+        setError(`一部失敗: ${(data.errors as string[]).join('; ')}`)
+      }
+      if (data.info && typeof data.info === 'object') {
+        applyInfoPayload(data.info as Record<string, unknown>)
+      }
+      loadCompany()
+      setSuccess(parts.length > 0 ? `不足情報の一括取得完了: ${parts.join(' / ')}` : '一括取得完了')
+      setPreviewPending(false)
+    } finally {
+      setFetchAllLoading(false)
+    }
+  }
+
+  const handleConfirmSave = async () => {
+    setConfirmLoading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const res = await fetch(`/api/admin/companies/${id}/confirm-info`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authService.getAdminFetchHeaders(),
+        },
+        body: JSON.stringify({
+          description,
+          industry,
+          location,
+          website_url: websiteUrl,
+          founded_year: foundedYear ? parseInt(foundedYear, 10) : 0,
+          employee_count: employeeCount ? parseInt(employeeCount, 10) : 0,
+          main_business: mainBusiness,
+          culture,
+          work_style: workStyle,
+          tech_stack: techStack,
+          welfare_details: welfareDetails,
+          source: sourceType,
+          source_url: sourceUrl,
+          model_used: lastModelUsed,
+          confidence: lastFetchConfidence,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data?.error || '確定保存に失敗しました')
+        return
+      }
+      applyInfoPayload(data)
+      loadCompany()
+      setSuccess('プレビュー内容を確定して保存しました（取得メタデータも更新済み）。')
+    } finally {
+      setConfirmLoading(false)
     }
   }
 
@@ -168,6 +271,8 @@ export default function AdminCompanyInfoEditPage() {
         main_business: mainBusiness,
         culture,
         work_style: workStyle,
+        tech_stack: techStack,
+        welfare_details: welfareDetails,
         source_type: sourceType,
         source_url: sourceUrl,
         is_provisional: isProvisional,
@@ -179,6 +284,7 @@ export default function AdminCompanyInfoEditPage() {
       setError(d?.error || '保存に失敗しました')
       return
     }
+    setPreviewPending(false)
     setSuccess('保存しました')
   }
 
@@ -208,30 +314,58 @@ export default function AdminCompanyInfoEditPage() {
           出典がモデル知識由来、または信頼度が low です。公式サイトURLを設定して強制再取得してください。
         </Alert>
       )}
+      {previewPending && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          プレビュー未確定です。「確定して保存」で DB と取得メタデータ（info_fetched_at 等）を更新します。
+        </Alert>
+      )}
+      {dataStatus === 'published' && (
+        <Alert severity="success" sx={{ mb: 2 }}>
+          この企業は公開中です。公開状態のままプレビュー取得・強制再取得で企業情報や公式URLを更新できます。
+        </Alert>
+      )}
 
       <Stack spacing={2}>
         <TextField label="企業名" value={name} onChange={(e) => setName(e.target.value)} required />
 
         <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
           <Button
+            variant="contained"
+            color="secondary"
+            onClick={handleFetchAllMissing}
+            disabled={fetchAllLoading || aiLoading || forceLoading}
+            startIcon={fetchAllLoading ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {fetchAllLoading ? '一括取得中...' : '不足情報を一括取得（基本情報・求人など）'}
+          </Button>
+          <Button
             variant="outlined"
             color="secondary"
             onClick={handleAiFetch}
-            disabled={!name.trim() || aiLoading}
+            disabled={!name.trim() || aiLoading || fetchAllLoading}
             startIcon={aiLoading ? <CircularProgress size={16} color="inherit" /> : null}
           >
             {aiLoading ? '取得中...' : 'プレビュー取得（未保存）'}
           </Button>
           <Button
+            variant="contained"
+            color="primary"
+            onClick={handleConfirmSave}
+            disabled={!previewPending || confirmLoading || !name.trim()}
+            startIcon={confirmLoading ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {confirmLoading ? '確定中...' : '確定して保存'}
+          </Button>
+          <Button
             variant="outlined"
             onClick={handleForceFetchAndSave}
-            disabled={forceLoading}
+            disabled={forceLoading || fetchAllLoading}
             startIcon={forceLoading ? <CircularProgress size={16} color="inherit" /> : null}
           >
             {forceLoading ? '再取得中...' : '強制再取得して保存'}
           </Button>
           <Typography variant="caption" color="text.secondary">
-            gBiz不足時は AI Search Lite。壁打ち/面接はDB共有キャッシュを読む（都度Searchしない）
+            一括取得は TTL 内の項目をスキップし、未取得の基本情報・求人・Tech・関係のみ取得します。
           </Typography>
         </Stack>
 
@@ -242,6 +376,9 @@ export default function AdminCompanyInfoEditPage() {
         </Stack>
         <Typography variant="body2" color="text.secondary">
           info: {formatTs(infoFetchedAt)} / jobs: {formatTs(jobsFetchedAt)} / tech: {formatTs(techFetchedAt)}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          TTL: 基本情報 90日 / 求人 7日 / Tech 30日。月次 Search 上限はコスト画面で確認できます。
         </Typography>
 
         <Divider />
@@ -297,6 +434,21 @@ export default function AdminCompanyInfoEditPage() {
           <MenuItem value="ハイブリッド">ハイブリッド</MenuItem>
           <MenuItem value="オフィス">オフィス</MenuItem>
         </TextField>
+        <TextField
+          label="技術スタック"
+          value={techStack}
+          onChange={(e) => setTechStack(e.target.value)}
+          placeholder="例: Go, TypeScript, React"
+          multiline
+          minRows={1}
+        />
+        <TextField
+          label="福利厚生"
+          value={welfareDetails}
+          onChange={(e) => setWelfareDetails(e.target.value)}
+          multiline
+          minRows={2}
+        />
 
         <Divider />
 
@@ -325,8 +477,8 @@ export default function AdminCompanyInfoEditPage() {
           <MenuItem value="no">確定</MenuItem>
         </TextField>
 
-        <Button variant="contained" onClick={handleSave} disabled={!name.trim()}>
-          保存する
+        <Button variant="outlined" onClick={handleSave} disabled={!name.trim()}>
+          手入力のみ保存（メタデータ更新なし）
         </Button>
       </Stack>
     </AdminFormContainer>

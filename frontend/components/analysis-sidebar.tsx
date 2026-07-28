@@ -1,5 +1,6 @@
 'use client'
 import React, {useState, useEffect} from 'react'
+import Link from 'next/link'
 import styles from './analysis-sidebar.module.css'
 import
 {
@@ -52,6 +53,16 @@ import {
 
 const DRAWER_WIDTH = 280
 
+const NAV_ICONS: Record<(typeof SIDEBAR_NAV_ITEMS)[number]['href'], React.ReactNode> = {
+    '/Correlation-diagram': <BorderAll color="primary"/>,
+    '/chat-history': <History color="primary"/>,
+    '/resume': <Description color="primary"/>,
+    '/interview': <RecordVoiceOver color="primary"/>,
+    '/es-rewrite': <EditNote color="primary"/>,
+    '/schedule': <CalendarMonth color="primary"/>,
+    '/profile': <ManageAccounts color="primary"/>,
+}
+
 interface AnalysisStep {
     id: string
     label: string
@@ -84,7 +95,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
     const [totalQuestions, setTotalQuestions] = useState(15)
     const [phases, setPhases] = useState<PhaseProgress[] | null>(null)
     const [isAdmin, setIsAdmin] = useState(!!user.is_admin)
-    const router = useRouter()
     const theme = useTheme()
     const isMobile = useMediaQuery(theme.breakpoints.down('md'))
 
@@ -552,7 +562,10 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                 {isAdmin && (
                     <ListItem disablePadding>
                         <ListItemButton
-                            onClick={() => router.push('/admin')}
+                            component={Link}
+                            href={SIDEBAR_ADMIN_NAV.href}
+                            prefetch
+                            onClick={onMobileClose}
                             sx={{
                                 borderRadius: 1,
                             }}
@@ -561,7 +574,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                                 <AdminPanelSettings color="primary"/>
                             </ListItemIcon>
                             <ListItemText
-                                primary="管理者機能"
+                                primary={SIDEBAR_ADMIN_NAV.label}
                                 primaryTypographyProps={{
                                     fontSize: '0.875rem',
                                     fontWeight: 600,

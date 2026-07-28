@@ -6,10 +6,8 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
 )
 
 type ChatService struct {
@@ -90,7 +88,8 @@ type ChatResponse struct {
 	AnsweredQuestions   int                      `json:"answered_questions"`
 	EvaluatedCategories int                      `json:"evaluated_categories"`
 	TotalCategories     int                      `json:"total_categories"`
-	Summary             *SessionSummary         `json:"summary,omitempty"`
+	Summary             *SessionSummary          `json:"summary,omitempty"`
+	JobCategoryID       uint                     `json:"job_category_id,omitempty"`
 }
 
 // PhaseProgress フェーズ進捗情報
@@ -161,68 +160,12 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	}
 
 	// 2-1. 職種の解決（未設定なら判定し、セッションに保存）
-	jobCategoryID := req.JobCategoryID
-	storedJobCategoryID := uint(0)
-	if s.conversationContextRepo != nil {
-		if id, err := s.conversationContextRepo.GetJobCategoryID(req.SessionID); err == nil {
-			storedJobCategoryID = id
-		}
+	jobResolution, err := s.resolveJobCategoryForChat(ctx, req, history)
+	if err != nil {
+		return nil, err
 	}
-	if jobCategoryID == 0 {
-		jobCategoryID = storedJobCategoryID
-	}
-	if jobCategoryID != 0 && s.conversationContextRepo != nil && storedJobCategoryID != jobCategoryID {
-		if err := s.conversationContextRepo.SetJobCategoryID(req.UserID, req.SessionID, jobCategoryID); err != nil {
-			log.Printf("Warning: failed to store job category: %v\n", err)
-		}
-	}
-
-	jobJustResolved := false
-	if jobCategoryID == 0 && s.shouldValidateJobCategory(history) {
-		log.Printf("[JobValidation] Validating job category answer: %s\n", req.Message)
-		jobValidation, err := s.jobValidator.ValidateJobCategory(ctx, req.Message)
-		if err != nil {
-			log.Printf("[JobValidation] Error: %v\n", err)
-			// エラーでも続行
-		} else if jobValidation != nil {
-			if jobValidation.IsValid && len(jobValidation.MatchedCategories) > 0 {
-				// 明確に職種が特定できた場合
-				log.Printf("[JobValidation] Valid job category matched: %d categories\n", len(jobValidation.MatchedCategories))
-				jobCategoryID = jobValidation.MatchedCategories[0].ID
-				jobJustResolved = true
-				if s.conversationContextRepo != nil {
-					if err := s.conversationContextRepo.SetJobCategoryID(req.UserID, req.SessionID, jobCategoryID); err != nil {
-						log.Printf("Warning: failed to store job category: %v\n", err)
-					}
-				}
-			} else if jobValidation.NeedsClarification && jobValidation.SuggestedQuestion != "" {
-				// 職種が曖昧な場合は選択肢を提示
-				log.Printf("[JobValidation] Needs clarification, presenting options\n")
-
-				assistantMsg := &models.ChatMessage{
-					SessionID: req.SessionID,
-					UserID:    req.UserID,
-					Role:      "assistant",
-					Content:   jobValidation.SuggestedQuestion,
-				}
-				if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
-					log.Printf("Warning: failed to save assistant message: %v\n", err)
-				}
-
-				return &ChatResponse{
-					Response:          jobValidation.SuggestedQuestion,
-					IsComplete:        false,
-					TotalQuestions:    15,
-					AnsweredQuestions: 0,
-				}, nil
-			}
-		}
-	}
-
-	if jobCategoryID != 0 {
-		if err := s.completeJobAnalysisPhase(req.UserID, req.SessionID); err != nil {
-			log.Printf("Warning: failed to complete job analysis phase: %v\n", err)
-		}
+	if jobResolution.earlyResponse != nil {
+		return jobResolution.earlyResponse, nil
 	}
 
 	// 2.5. 回答の妥当性チェック（保存後のhistoryを使用）
@@ -230,77 +173,16 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	if err != nil {
 		return nil, err
 	}
-
-	// 無効な回答の場合は、ここで処理を終了
 	if handled {
-		currentPhase, phaseErr := s.getCurrentOrNextPhase(ctx, req.UserID, req.SessionID)
-		if phaseErr == nil {
-			if err := s.updatePhaseProgress(currentPhase, false); err != nil {
-				log.Printf("Warning: failed to update phase progress for invalid answer: %v\n", err)
-			}
-		}
-
-		validation, err := s.sessionValidationRepo.GetOrCreate(req.SessionID)
-		if err != nil {
-			log.Printf("Warning: failed to get validation: %v\n", err)
-		}
-
-		allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
-
-		chatResponse := &ChatResponse{
-			Response:          response,
-			IsComplete:        false,
-			TotalQuestions:    15,
-			AnsweredQuestions: len(history) / 2,
-			AllPhases:         allPhases,
-			CurrentPhase:      currentPhaseInfo,
-		}
-
-		if validation != nil {
-			chatResponse.InvalidAnswerCount = validation.InvalidAnswerCount
-			chatResponse.IsTerminated = validation.IsTerminated
-
-			// 3回目の無効回答の場合は完了フラグを立てる
-			if validation.IsTerminated {
-				chatResponse.IsComplete = true
-			}
-		}
-
-		return chatResponse, nil
+		return s.handleInvalidAnswerFlow(ctx, req, history, response)
 	}
 
 	// 有効な回答の場合のみ、以降の処理を実行
 	// 2.6. 現在のフェーズを取得または開始
 	currentPhase, err := s.getCurrentOrNextPhase(ctx, req.UserID, req.SessionID)
 	if err != nil {
-		// 全フェーズ完了の場合は完了応答を返す
 		if err.Error() == "all phases completed" {
-			completionMsg := "分析が完了しました！あなたに最適な企業をマッチングしました。「結果を見る」ボタンから詳細をご確認ください。"
-
-			assistantMsg := &models.ChatMessage{
-				SessionID: req.SessionID,
-				UserID:    req.UserID,
-				Role:      "assistant",
-				Content:   completionMsg,
-			}
-			if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
-				log.Printf("Warning: failed to save completion message: %v\n", err)
-			}
-
-			allPhases, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
-			// ここで要約を生成して保存（failure を許容して応答は続行）
-			summary, _ := s.buildAndSaveSessionSummary(context.Background(), req.UserID, req.SessionID)
-			return &ChatResponse{
-				Response:            completionMsg,
-				IsComplete:          true,
-				TotalQuestions:      15,
-				AnsweredQuestions:   countUserAnswers(history),
-				EvaluatedCategories: 10,
-				TotalCategories:     10,
-				AllPhases:           allPhases,
-				CurrentPhase:        currentPhaseInfo,
-				Summary:             summary,
-			}, nil
+			return s.handleAllPhasesCompletedFromPhaseError(req, history)
 		}
 		return nil, fmt.Errorf("failed to get current phase: %w", err)
 	}
@@ -310,405 +192,22 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 		log.Printf("Warning: failed to get phases: %v\n", err)
 	}
 	completedProgresses, _ := s.progressRepo.FindByUserAndSession(req.UserID, req.SessionID)
-	completedPhaseCount := 0
 	phaseByID := make(map[uint]*entity.AnalysisPhase, len(allPhases))
 	for i := range allPhases {
 		phaseByID[allPhases[i].ID] = &allPhases[i]
 	}
-	for _, p := range completedProgresses {
-		phase := p.Phase
-		if phase == nil {
-			phase = phaseByID[p.PhaseID]
-		}
-		if isPhaseComplete(p.ValidAnswers, phase) {
-			completedPhaseCount++
-		}
-	}
-	if completedPhaseCount == len(allPhases) && len(allPhases) > 0 {
-		completionMsg := "分析が完了しました！あなたに最適な企業をマッチングしました。「結果を見る」ボタンから詳細をご確認ください。"
-		assistantMsg := &models.ChatMessage{
-			SessionID: req.SessionID,
-			UserID:    req.UserID,
-			Role:      "assistant",
-			Content:   completionMsg,
-		}
-		if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
-			log.Printf("Warning: failed to save completion message: %v\n", err)
-		}
-		allPhasesInfo, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
-		evaluatedCategoriesCount := 0
-		scores, err := s.userWeightScoreRepo.FindByUserAndSession(req.UserID, req.SessionID)
-		if err != nil {
-			log.Printf("Warning: failed to get scores for completion response: %v\n", err)
-		} else {
-			seenCategories := make(map[string]bool)
-			for _, score := range scores {
-				if score.Score != 0 {
-					seenCategories[score.WeightCategory] = true
-				}
-			}
-			evaluatedCategoriesCount = len(seenCategories)
-		}
-		totalMinQuestions := 0
-		for _, phase := range allPhases {
-			if phase.MaxQuestions > 0 {
-				totalMinQuestions += phase.MaxQuestions
-			} else {
-				totalMinQuestions += phase.MinQuestions
-			}
-		}
-		// ここで要約を生成して保存
-		summary, _ := s.buildAndSaveSessionSummary(context.Background(), req.UserID, req.SessionID)
-		return &ChatResponse{
-		Response:            completionMsg,
-		IsComplete:          true,
-		TotalQuestions:      totalMinQuestions,
-		AnsweredQuestions:   countUserAnswers(history),
-		EvaluatedCategories: evaluatedCategoriesCount,
-		TotalCategories:     10,
-		AllPhases:           allPhasesInfo,
-		CurrentPhase:        currentPhaseInfo,
-		Summary:             summary,
-		}, nil
+	if resp, handled := s.handleAllPhasesCompletedFromCount(req, history, allPhases, completedProgresses, phaseByID); handled {
+		return resp, nil
 	}
 
-	// 3. ユーザーの回答から重み係数を判定・更新し、回答品質に応じてフェーズ進捗を更新
-	// isQualityAnswer: スキップフレーズ・極短回答・スコア0でなければ true（進捗カウント対象）
-	trimmedAnswer := strings.TrimSpace(req.Message)
-	lastAssistantQuestion := ""
-	for i := len(history) - 1; i >= 0; i-- {
-		if history[i].Role == "assistant" {
-			lastAssistantQuestion = history[i].Content
-			break
-		}
-	}
-	resolved := ResolveChoiceAnswer(lastAssistantQuestion, trimmedAnswer)
-	log.Printf("[ProcessChat] Checking answer: raw=%q resolved_choice=%v letter=%q free_text=%v\n",
-		trimmedAnswer, resolved.IsChoice, resolved.Letter, resolved.IsFreeText)
-	isQualityAnswer := false
-	if resolved.IsChoice && s.isChoiceAnswer(resolved.Letter) {
-		log.Printf("[ProcessChat] Processing as choice answer\n")
-		var err error
-		isQualityAnswer, err = s.processChoiceAnswer(ctx, req.UserID, req.SessionID, resolved.Letter, history, jobCategoryID)
-		if err != nil {
-			log.Printf("Warning: failed to process choice answer: %v\n", err)
-		}
-	} else {
-		log.Printf("[ProcessChat] Processing as text answer\n")
-		var err error
-		isQualityAnswer, err = s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, resolved.Text, jobCategoryID)
-		if err != nil {
-			log.Printf("Warning: failed to update weights: %v\n", err)
-		}
-	}
-
-	// 品質回答のみ valid_answers をインクリメントして進捗を進める
-	if err := s.updatePhaseProgress(currentPhase, isQualityAnswer); err != nil {
-		log.Printf("Warning: failed to update phase progress: %v\n", err)
-	}
-
-	// 4. 既に聞いた質問を全て収集（重複防止を徹底）
-	askedTexts := make(map[string]bool)
-
-	// 4-1. AI生成質問テーブルから取得
-	askedQuestions, err := s.aiGeneratedQuestionRepo.FindByUserAndSession(req.UserID, req.SessionID)
-	if err != nil {
-		log.Printf("Warning: failed to get asked questions: %v\n", err)
-		askedQuestions = []models.AIGeneratedQuestion{}
-	}
-	for _, q := range askedQuestions {
-		questionText := normalizeQuestionText(q.QuestionText)
-		if questionText == "" {
-			questionText = strings.TrimSpace(q.QuestionText)
-		}
-		if questionText != "" {
-			askedTexts[questionText] = true
-		}
-	}
-
-	// 4-2. チャット履歴からもアシスタントの質問を収集
-	for _, msg := range history {
-		if msg.Role == "assistant" {
-			questionText := normalizeQuestionText(msg.Content)
-			if questionText != "" {
-				askedTexts[questionText] = true
-			}
-		}
-	}
-
-	log.Printf("Total asked questions for duplicate check: %d\n", len(askedTexts))
-
-	// 5. 現在のスコアを分析して、次に評価すべきカテゴリを決定
-	targetLevel := s.getUserTargetLevel(req.UserID)
-	scores, err := s.userWeightScoreRepo.FindByUserAndSession(req.UserID, req.SessionID)
-	if err != nil {
-		log.Printf("Warning: failed to get scores for question selection: %v\n", err)
-	}
-
-	// スコア分布を分析
-	scoreMap := make(map[string]int)
-	evaluatedCategories := make(map[string]bool)
-	for _, score := range scores {
-		scoreMap[score.WeightCategory] = score.Score
-		if score.Score != 0 {
-			evaluatedCategories[score.WeightCategory] = true
-		}
-	}
-
-	// 全カテゴリ（職種に応じて並び順を調整）
-	allCategories := s.getCategoryOrder(jobCategoryID)
-
-	// 未評価カテゴリを優先的に選択
-	var targetCategory string
-	unevaluatedCategories := []string{}
-	weaklyEvaluatedCategories := []string{}
-
-	for _, cat := range allCategories {
-		score, exists := scoreMap[cat]
-		if !exists || score == 0 {
-			unevaluatedCategories = append(unevaluatedCategories, cat)
-		} else if score > -3 && score < 3 {
-			// スコアが-3〜3の範囲は評価が曖昧
-			weaklyEvaluatedCategories = append(weaklyEvaluatedCategories, cat)
-		}
-	}
-
-	if len(unevaluatedCategories) > 0 {
-		targetCategory = unevaluatedCategories[0]
-		log.Printf("Targeting unevaluated category: %s\n", targetCategory)
-	} else if len(weaklyEvaluatedCategories) > 0 {
-		targetCategory = weaklyEvaluatedCategories[0]
-		log.Printf("Targeting weakly evaluated category: %s (score: %d)\n", targetCategory, scoreMap[targetCategory])
-	} else {
-		// 全カテゴリ評価済みなら、最もスコアが極端なものを深掘り
-		maxAbsScore := 0
-		for cat, score := range scoreMap {
-			absScore := score
-			if absScore < 0 {
-				absScore = -absScore
-			}
-			if absScore > maxAbsScore {
-				maxAbsScore = absScore
-				targetCategory = cat
-			}
-		}
-		log.Printf("All categories evaluated, deepening strongest: %s (score: %d)\n", targetCategory, scoreMap[targetCategory])
-	}
-
-	// 常にまずルールベース質問を試し、なければAIで生成
-	var questionWeightID uint
-	var aiResponse string
-
-	// 質問生成には最新10件の履歴のみ使用（文脈を保ちつつ、プロンプトを短く）
-	recentHistory := history
-	if len(history) > 10 {
-		recentHistory = history[len(history)-10:]
-	}
-
-	// まず、ルールベース質問から選択を試みる
-	log.Printf("[RuleBased] Attempting to get predefined question for category: %s\n", targetCategory)
-	currentPhaseName := ""
-	if currentPhase != nil && currentPhase.Phase != nil {
-		currentPhaseName = currentPhase.Phase.PhaseName
-	}
-	predefinedQ, err := s.tryGetPredefinedQuestion(req.UserID, req.SessionID, targetCategory, req.IndustryID, jobCategoryID, targetLevel, askedTexts, currentPhaseName)
-
-	if err == nil && predefinedQ != nil {
-		log.Printf("[RuleBased] Using predefined question (ID: %d) for category: %s\n", predefinedQ.ID, predefinedQ.Category)
-		aiResponse = predefinedQ.QuestionText
-		questionWeightID = predefinedQ.ID
-	} else {
-		// ルールベース質問がない場合、AIで生成
-		log.Printf("[AI] No predefined question available, generating with AI for category: %s (asked: %d questions)\n", targetCategory, len(askedTexts))
-		aiResponse, _, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, jobCategoryID, targetLevel, currentPhase)
-		if err != nil {
-			// エラーは致命的にせずフォールバック質問を設定
-			log.Printf("Warning: failed to generate question via AI: %v\n", err)
-			fallbackQuestion := s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
-			if fallbackQuestion != "" {
-				aiResponse = fallbackQuestion
-			} else {
-				aiResponse = "すみません、質問を生成できませんでした。少し時間をおいてからもう一度お試しください。"
-			}
-		}
-	}
-	if currentPhaseName != "" && isTextBasedQuestion(aiResponse) && !shouldForceTextQuestion(recentHistory, currentPhase) {
-		if currentPhaseName == "job_analysis" || currentPhaseName == "interest_analysis" || currentPhaseName == "aptitude_analysis" || currentPhaseName == "future_analysis" {
-			aiResponse = buildChoiceFallback(aiResponse, currentPhaseName)
-		}
-	}
-
-	// 5. フェーズベースの完了判定
-	// 全フェーズが完了しているかチェック
-	completedPhaseCount = 0
-	for _, p := range completedProgresses {
-		phase := p.Phase
-		if phase == nil {
-			phase = phaseByID[p.PhaseID]
-		}
-		if isPhaseComplete(p.ValidAnswers, phase) {
-			completedPhaseCount++
-		}
-	}
-
-	// 質問数を計算（進捗表示用）
-	answeredCount := countUserAnswers(history)
-	_ = allPhasesReachedMax(completedProgresses, allPhases)
-
-	// 完了判定: 全フェーズが完了していれば終了
-	isComplete := completedPhaseCount == len(allPhases)
-
-	log.Printf("Diagnosis progress: %d phases completed out of %d, %d questions asked, %d/10 categories evaluated, complete: %v\n",
-		completedPhaseCount, len(allPhases), answeredCount, len(evaluatedCategories), isComplete)
-
-	// 診断完了時のメッセージは追加しない（次の回答時に完了判定する）
-
-	// 6. AIの応答を保存
-	// Guard: do not save empty assistant messages
-	if strings.TrimSpace(aiResponse) != "" {
-		if jobJustResolved {
-			aiResponse = "ありがとうございます！それでは、適性診断を始めますね。\n\n" + aiResponse
-		}
-		if targetLevel == "新卒" && isVerboseQuestion(aiResponse) && isTextBasedQuestion(aiResponse) {
-			simple, err := s.simplifyQuestionWithAI(ctx, aiResponse)
-			if err != nil || strings.TrimSpace(simple) == "" {
-				simple = s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
-			}
-			if strings.TrimSpace(simple) == "" {
-				simple = simplifyNewGradQuestion(aiResponse)
-			}
-			aiResponse = simple
-		}
-		// 新卒向けに表現を調整（全フェーズ共通）
-		if targetLevel == "新卒" {
-			aiResponse = sanitizeForNewGrad(aiResponse)
-		}
-
-		assistantMsg := &models.ChatMessage{
-			SessionID:        req.SessionID,
-			UserID:           req.UserID,
-			Role:             "assistant",
-			Content:          aiResponse,
-			QuestionWeightID: questionWeightID,
-		}
-		if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
-			log.Printf("Warning: failed to save assistant message: %v\n", err)
-			// 続行は可能にする
-		}
-	} else {
-		// フォールバック: 空のAI応答の場合は簡易質問を返す
-		log.Printf("Warning: skipped saving empty assistant message for session %s user %d\n", req.SessionID, req.UserID)
-		aiResponse = "すみません、質問を生成できませんでした。少し時間をおいてからもう一度お試しください。"
-	}
-
-	if isComplete {
-		if err := s.ensureEmbeddings(ctx, req.UserID, req.SessionID, jobCategoryID); err != nil {
-			log.Printf("Warning: failed to ensure embeddings: %v\n", err)
-		}
-	}
-
-	// 7. 現在のスコアを取得
-	finalScores, err := s.userWeightScoreRepo.FindByUserAndSession(req.UserID, req.SessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get scores: %w", err)
-	}
-
-	// フェーズ情報を構築
-	allPhasesInfo, currentPhaseInfo, _ := s.buildPhaseProgressResponse(req.UserID, req.SessionID)
-
-	// フェーズの質問数合計を計算（最大が無い場合は最小を採用）
-	totalMaxQuestions := 0
-	for _, phase := range allPhases {
-		if phase.MaxQuestions > 0 {
-			totalMaxQuestions += phase.MaxQuestions
-		} else {
-			totalMaxQuestions += phase.MinQuestions
-		}
-	}
-
-	// 完了している場合は要約を生成して応答に含める
-	var sessionSummary *SessionSummary
-	if isComplete {
-		s, _ := s.buildAndSaveSessionSummary(context.Background(), req.UserID, req.SessionID)
-		sessionSummary = s
-	}
-	return &ChatResponse{
-		Response:            aiResponse,
-		QuestionWeightID:    questionWeightID,
-		CurrentScores:       finalScores,
-		CurrentPhase:        currentPhaseInfo,
-		AllPhases:           allPhasesInfo,
-		IsComplete:          isComplete,
-		TotalQuestions:      totalMaxQuestions, // 全フェーズの最低質問数合計（最大が無い場合）
-		AnsweredQuestions:   answeredCount,
-		EvaluatedCategories: len(evaluatedCategories),
-		TotalCategories:     10,
-		Summary:             sessionSummary,
-	}, nil
-}
-
-// buildAndSaveSessionSummary チャットセッションの要約（強み・注意点・おすすめの働き方）を生成し、DBに保存します。
-func (s *ChatService) buildAndSaveSessionSummary(ctx context.Context, userID uint, sessionID string) (*SessionSummary, error) {
-	if s.aiClient == nil || s.chatMessageRepo == nil || s.userWeightScoreRepo == nil || s.conversationContextRepo == nil {
-		return nil, fmt.Errorf("dependencies missing for summary generation")
-	}
-
-	// 直近のユーザーメッセージを収集
-	msgs, err := s.chatMessageRepo.FindRecentBySessionID(sessionID, 30)
-	if err != nil {
-		return nil, err
-	}
-	var lastUserTexts []string
-	for _, m := range msgs {
-		if m.Role == "user" && strings.TrimSpace(m.Content) != "" {
-			lastUserTexts = append(lastUserTexts, m.Content)
-		}
-	}
-	userContext := strings.Join(lastUserTexts, "\n---\n")
-
-	// スコア要約
-	scores, _ := s.userWeightScoreRepo.FindByUserAndSession(userID, sessionID)
-	// 簡易的に上位3カテゴリを列挙
-	topCats := ""
-	if len(scores) > 0 {
-		for i, sc := range scores {
-			if i >= 3 {
-				break
-			}
-			if i > 0 {
-				topCats += "\n"
-			}
-			topCats += fmt.Sprintf("- %s: %d", sc.WeightCategory, sc.Score)
-		}
-	}
-
-	contextBytes, _ := json.Marshal(map[string]any{
-		"top_scores": topCats,
+	return s.processAnswerAndNextQuestion(ctx, processQuestionInput{
+		req:                 req,
+		history:             history,
+		jobCategoryID:       jobResolution.jobCategoryID,
+		jobJustResolved:     jobResolution.jobJustResolved,
+		currentPhase:        currentPhase,
+		allPhases:           allPhases,
+		completedProgresses: completedProgresses,
+		phaseByID:           phaseByID,
 	})
-
-	systemPrompt := "あなたは就職適性診断の専門家です。以下の情報をもとに、ユーザー向けに短く親しみやすい日本語で要約を生成してください。出力は必ずJSONのみを返してください。フォーマット: {\"strengths\": \"...\", \"weaknesses\": \"...\", \"recommended_working_style\": \"...\"}。各項目は2〜3文、合計で200文字程度を目安にしてください。"
-	userPrompt := "解析情報: " + string(contextBytes) + "\n\n直近のユーザーメッセージ:\n" + userContext
-
-	raw, err := s.aiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.2, 400)
-	if err != nil {
-		log.Printf("LLM session summary generation failed: %v", err)
-		return nil, err
-	}
-	if strings.TrimSpace(raw) == "" {
-		return nil, fmt.Errorf("empty summary from LLM")
-	}
-
-	var parsed SessionSummary
-	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-		// JSONパースに失敗した場合は生テキストとして保存して終了
-		_ = s.conversationContextRepo.SetSessionSummary(userID, sessionID, raw)
-		return nil, fmt.Errorf("failed to parse summary json: %w", err)
-	}
-
-	// 永続化（生JSONを保存）
-	if err := s.conversationContextRepo.SetSessionSummary(userID, sessionID, raw); err != nil {
-		log.Printf("failed to persist session summary: %v", err)
-	}
-
-	return &parsed, nil
 }

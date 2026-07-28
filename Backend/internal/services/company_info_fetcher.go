@@ -15,19 +15,25 @@ import (
 
 // CompanyInfoResult は企業基本情報の取得結果。
 type CompanyInfoResult struct {
-	Description   string `json:"description"`
-	Industry      string `json:"industry"`
-	Location      string `json:"location"`
-	WebsiteURL    string `json:"website_url"`
-	FoundedYear   int    `json:"founded_year"`
-	EmployeeCount int    `json:"employee_count"`
-	MainBusiness  string `json:"main_business"`
-	Culture       string `json:"culture"`
-	WorkStyle     string `json:"work_style"`
-	Source        string `json:"source,omitempty"`
-	SourceURL     string `json:"source_url,omitempty"`
-	ModelUsed     string `json:"model_used,omitempty"`
-	Confidence    string `json:"confidence,omitempty"`
+	Description    string `json:"description"`
+	Industry       string `json:"industry"`
+	Location       string `json:"location"`
+	WebsiteURL     string `json:"website_url"`
+	FoundedYear    int    `json:"founded_year"`
+	EmployeeCount  int    `json:"employee_count"`
+	MainBusiness   string `json:"main_business"`
+	Culture        string `json:"culture"`
+	WorkStyle      string `json:"work_style"`
+	TechStack      string `json:"tech_stack,omitempty"`
+	WelfareDetails string `json:"welfare_details,omitempty"`
+	Source         string `json:"source,omitempty"`
+	SourceURL      string `json:"source_url,omitempty"`
+	ModelUsed      string `json:"model_used,omitempty"`
+	Confidence     string `json:"confidence,omitempty"`
+	// Phase 3 運用メタ: TTL / 予算ガードで Search をスキップしたとき
+	FromCache      bool   `json:"from_cache,omitempty"`
+	BudgetExceeded bool   `json:"budget_exceeded,omitempty"`
+	SkipReason     string `json:"skip_reason,omitempty"` // ttl | budget
 }
 
 // CompanyInfoFetcher は gBizINFO を足がかりにしつつ、不足分は AI（安価 Search→Parse）で充足する。
@@ -74,7 +80,9 @@ const companyInfoJSONSchema = `{
   "employee_count": 従業員数（整数、不明なら0）,
   "main_business": "主要事業内容（50〜100文字程度）",
   "culture": "企業文化・働き方の特徴（50〜100文字程度）",
-  "work_style": "勤務スタイル（リモート / ハイブリッド / オフィス のいずれか、不明なら空文字）"
+  "work_style": "勤務スタイル（リモート / ハイブリッド / オフィス のいずれか、不明なら空文字）",
+  "tech_stack": "主要技術スタック（カンマ区切り。不明なら空文字）",
+  "welfare_details": "福利厚生の要点（不明なら空文字）"
 }`
 
 // FetchAndSave は指定企業の基本情報を返す。
@@ -86,7 +94,7 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 	}
 
 	if !forceRefresh && companyfetch.IsFresh(company.InfoFetchedAt, companyfetch.TTLInfo) {
-		return companyInfoFromModel(company), nil
+		return markInfoCacheSkip(companyInfoFromModel(company), "ttl", false), nil
 	}
 
 	run := func() (any, error) {
@@ -105,7 +113,7 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 	if err != nil {
 		if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
 			// 超過時はキャッシュ（既存DB）のみで継続
-			return companyInfoFromModel(company), nil
+			return markInfoCacheSkip(companyInfoFromModel(company), "budget", true), nil
 		}
 		return nil, err
 	}
@@ -127,6 +135,40 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 		return nil, fmt.Errorf("failed to update company: %w", err)
 	}
 	return result, nil
+}
+
+// ConfirmAndSave はプレビュー済みの構造化結果を LLM 再実行なしで DB に確定保存する。
+// info_fetched_at / last_model_used / last_fetch_confidence も同時更新する。
+func (f *CompanyInfoFetcher) ConfirmAndSave(companyID uint, result *CompanyInfoResult) (*CompanyInfoResult, error) {
+	if result == nil {
+		return nil, fmt.Errorf("result is required")
+	}
+	company, err := f.repo.FindByID(companyID)
+	if err != nil {
+		return nil, fmt.Errorf("company not found: %w", err)
+	}
+
+	applyCompanyInfoResult(company, result)
+	now := time.Now()
+	if result.Source != "" {
+		company.SourceType = result.Source
+	}
+	if result.SourceURL != "" {
+		company.SourceURL = result.SourceURL
+	}
+	company.SourceFetchedAt = &now
+	company.InfoFetchedAt = &now
+	if result.ModelUsed != "" {
+		company.LastModelUsed = result.ModelUsed
+	}
+	if result.Confidence != "" {
+		company.LastFetchConfidence = result.Confidence
+	}
+
+	if err := f.repo.Update(company); err != nil {
+		return nil, fmt.Errorf("failed to update company: %w", err)
+	}
+	return companyInfoFromModel(company), nil
 }
 
 // Acquire は企業名から基本情報をプレビュー取得する（DB 非更新）。
@@ -249,7 +291,7 @@ func (f *CompanyInfoFetcher) acquireViaAISearch(ctx context.Context, companyName
 		siteHint = fmt.Sprintf("（参考公式URL: %s）", websiteURL)
 	}
 	searchPrompt := fmt.Sprintf(
-		`日本の企業「%s」%sについて、公開情報から確認できる事実だけを調べてください。対象: 企業概要・業種・本社所在地・公式サイトURL・設立年・従業員数・主要事業・企業文化・勤務スタイル。各事実の根拠URLを含めてください。不明な項目は推測せず「不明」と書いてください。非上場企業も含め、公式サイト・採用ページ・登記情報などから確認できる範囲のみ。`,
+		`日本の企業「%s」%sについて、公開情報から確認できる事実だけを調べてください。対象: 企業概要・業種・本社所在地・公式サイトURL・設立年・従業員数・主要事業・企業文化・勤務スタイル・技術スタック・福利厚生。各事実の根拠URLを含めてください。不明な項目は推測せず「不明」と書いてください。非上場企業も含め、公式サイト・採用ページ・登記情報などから確認できる範囲のみ。`,
 		companyName, siteHint,
 	)
 	parseUser := fmt.Sprintf(
@@ -298,6 +340,12 @@ func mergeCompanyInfoGaps(base, ai *CompanyInfoResult) {
 	}
 	if base.WorkStyle == "" {
 		base.WorkStyle = ai.WorkStyle
+	}
+	if base.TechStack == "" {
+		base.TechStack = ai.TechStack
+	}
+	if base.WelfareDetails == "" {
+		base.WelfareDetails = ai.WelfareDetails
 	}
 }
 
@@ -353,20 +401,32 @@ func parseCompanyInfoResult(text string) (*CompanyInfoResult, error) {
 
 func companyInfoFromModel(company *models.Company) *CompanyInfoResult {
 	return &CompanyInfoResult{
-		Description:   company.Description,
-		Industry:      company.Industry,
-		Location:      company.Location,
-		WebsiteURL:    company.WebsiteURL,
-		FoundedYear:   company.FoundedYear,
-		EmployeeCount: company.EmployeeCount,
-		MainBusiness:  company.MainBusiness,
-		Culture:       company.Culture,
-		WorkStyle:     company.WorkStyle,
-		Source:        company.SourceType,
-		SourceURL:     company.SourceURL,
-		ModelUsed:     company.LastModelUsed,
-		Confidence:    company.LastFetchConfidence,
+		Description:    company.Description,
+		Industry:       company.Industry,
+		Location:       company.Location,
+		WebsiteURL:     company.WebsiteURL,
+		FoundedYear:    company.FoundedYear,
+		EmployeeCount:  company.EmployeeCount,
+		MainBusiness:   company.MainBusiness,
+		Culture:        company.Culture,
+		WorkStyle:      company.WorkStyle,
+		TechStack:      company.TechStack,
+		WelfareDetails: company.WelfareDetails,
+		Source:         company.SourceType,
+		SourceURL:      company.SourceURL,
+		ModelUsed:      company.LastModelUsed,
+		Confidence:     company.LastFetchConfidence,
 	}
+}
+
+func markInfoCacheSkip(r *CompanyInfoResult, reason string, budgetExceeded bool) *CompanyInfoResult {
+	if r == nil {
+		r = &CompanyInfoResult{}
+	}
+	r.FromCache = true
+	r.SkipReason = reason
+	r.BudgetExceeded = budgetExceeded
+	return r
 }
 
 func applyCompanyInfoResult(company *models.Company, result *CompanyInfoResult) {
@@ -396,6 +456,12 @@ func applyCompanyInfoResult(company *models.Company, result *CompanyInfoResult) 
 	}
 	if result.WorkStyle != "" {
 		company.WorkStyle = result.WorkStyle
+	}
+	if result.TechStack != "" {
+		company.TechStack = result.TechStack
+	}
+	if result.WelfareDetails != "" {
+		company.WelfareDetails = result.WelfareDetails
 	}
 }
 
