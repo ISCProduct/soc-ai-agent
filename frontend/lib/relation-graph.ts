@@ -98,7 +98,8 @@ export interface CompanyRelationGraph {
   company_id: number
   nodes: RelationGraphNode[]
   capital_edges: RelationGraphCapitalEdge[]
-  business_relations: RelationGraphBusinessEntry[]
+  /** API は未設定時に null を返すことがある */
+  business_relations?: RelationGraphBusinessEntry[] | null
   truncated?: boolean
 }
 
@@ -125,7 +126,7 @@ export function layoutCapitalGraph(graph: Pick<CompanyRelationGraph, 'company_id
     if (!neighborDeltas.has(from)) neighborDeltas.set(from, [])
     neighborDeltas.get(from)!.push({ id: to, delta })
   }
-  for (const edge of graph.capital_edges) {
+  for (const edge of graph.capital_edges ?? []) {
     // parent -> child は子方向なので +1、child -> parent は親方向なので -1
     addNeighbor(edge.parent_id, edge.child_id, 1)
     addNeighbor(edge.child_id, edge.parent_id, -1)
@@ -145,7 +146,7 @@ export function layoutCapitalGraph(graph: Pick<CompanyRelationGraph, 'company_id
   }
 
   const nodesByLevel = new Map<number, number[]>()
-  for (const node of graph.nodes) {
+  for (const node of graph.nodes ?? []) {
     const level = levelById.get(node.id) ?? 0
     if (!nodesByLevel.has(level)) nodesByLevel.set(level, [])
     nodesByLevel.get(level)!.push(node.id)

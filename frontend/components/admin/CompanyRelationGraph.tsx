@@ -55,10 +55,18 @@ export default function CompanyRelationGraph({ companyId }: CompanyRelationGraph
   }, [companyId])
 
   const { nodes, edges } = useMemo<{ nodes: Node[]; edges: Edge[] }>(() => {
-    if (!graph || graph.nodes.length === 0) return { nodes: [], edges: [] }
-    const positions = layoutCapitalGraph(graph)
+    if (!graph) return { nodes: [], edges: [] }
+    const graphNodes = graph.nodes ?? []
+    const capitalEdges = graph.capital_edges ?? []
+    if (graphNodes.length === 0) return { nodes: [], edges: [] }
 
-    const flowNodes: Node[] = graph.nodes.map((n) => {
+    const positions = layoutCapitalGraph({
+      company_id: graph.company_id,
+      nodes: graphNodes,
+      capital_edges: capitalEdges,
+    })
+
+    const flowNodes: Node[] = graphNodes.map((n) => {
       const pos = positions.get(n.id) ?? { x: 0, y: 0, level: 0, column: 0 }
       const marketType = (n.market_type || 'unlisted') as MarketType
       return {
@@ -89,7 +97,7 @@ export default function CompanyRelationGraph({ companyId }: CompanyRelationGraph
       }
     })
 
-    const flowEdges: Edge[] = graph.capital_edges.map((e, idx) => ({
+    const flowEdges: Edge[] = capitalEdges.map((e, idx) => ({
       id: `capital-${idx}`,
       source: String(e.parent_id),
       target: String(e.child_id),
@@ -118,7 +126,10 @@ export default function CompanyRelationGraph({ companyId }: CompanyRelationGraph
     return <Alert severity="error">{error}</Alert>
   }
 
-  if (!graph || graph.nodes.length <= 1) {
+  const graphNodes = graph?.nodes ?? []
+  const businessRelations = graph?.business_relations ?? []
+
+  if (!graph || graphNodes.length <= 1) {
     return (
       <Typography variant="body2" color="text.secondary">
         保存済みの資本関係データがありません。関係を確定保存すると相関図が表示されます。
@@ -137,11 +148,11 @@ export default function CompanyRelationGraph({ companyId }: CompanyRelationGraph
           <Controls />
         </ReactFlow>
       </Box>
-      {graph.business_relations.length > 0 && (
+      {businessRelations.length > 0 && (
         <Box>
           <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 0.5 }}>取引関係</Typography>
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            {graph.business_relations.map((rel) => (
+            {businessRelations.map((rel) => (
               <Chip
                 key={`${rel.company_id}-${rel.relation_type}`}
                 size="small"

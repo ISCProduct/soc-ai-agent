@@ -43,7 +43,8 @@ type CompanyRepository interface {
 	ListPublishedL1WarmCandidates(limit int, infoTTL time.Duration) ([]models.CompanyL1WarmRow, error)
 	CountL1Coverage(infoTTL time.Duration) (*models.L1CoverageStats, error)
 	// ListActiveMissingFetchCandidates は基本情報/求人/Tech/関係のいずれかが不足しているアクティブ企業を返す。
-	ListActiveMissingFetchCandidates(limit int) ([]models.Company, error)
+	// primaryOnly=true のときは求人条件を除外し、主3種（基本・技術・関係）のみで候補を取る。
+	ListActiveMissingFetchCandidates(limit int, primaryOnly bool) ([]models.Company, error)
 }
 
 // CompanyRelationRepository は企業間関係の永続化インターフェース。

@@ -1,12 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import {
   Alert,
   Button,
-  Chip,
   CircularProgress,
   Divider,
   MenuItem,
@@ -16,8 +14,8 @@ import {
 } from '@mui/material'
 import { authService } from '@/lib/auth'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
+import { CompanyAspectTabs } from '@/components/admin/CompanyAspectTabs'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
-import { fetchCompanyPrimary, formatFetchPrimarySummary } from '@/lib/admin-company-fetch'
 
 export default function AdminCompanyInfoEditPage() {
   const params = useParams()
@@ -31,8 +29,8 @@ export default function AdminCompanyInfoEditPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
+  const [forceLoading, setForceLoading] = useState(false)
   const [confirmLoading, setConfirmLoading] = useState(false)
-  const [fetchAllLoading, setFetchAllLoading] = useState(false)
   const [previewPending, setPreviewPending] = useState(false)
 
   const [name, setName] = useState('')
@@ -140,42 +138,31 @@ export default function AdminCompanyInfoEditPage() {
     }
   }
 
-  const handleFetchPrimary = async (force = false) => {
-    setFetchAllLoading(true)
+  const handleForceFetchAndSave = async () => {
+    setForceLoading(true)
     setError('')
     setSuccess('')
     try {
-      const { ok, status, data } = await fetchCompanyPrimary(
-        id,
-        authService.getAdminFetchHeaders(),
-        force,
-      )
-      if (!ok) {
-        setError(data?.error || `主3種の取得に失敗しました (${status})`)
+      const res = await fetch(`/api/admin/companies/${id}/fetch-info?force=true`, {
+        method: 'POST',
+        headers: authService.getAdminFetchHeaders(),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data?.error || '強制再取得に失敗しました')
         return
       }
-      if (data.info) applyInfoPayload(data.info)
-      if (data.tech && Array.isArray(data.tech.tech_stack) && data.tech.tech_stack.length > 0) {
-        setTechStack(JSON.stringify(data.tech.tech_stack))
-      }
-      if (data.company) {
-        const company = data.company
-        if (typeof company.description === 'string') setDescription(company.description)
-        if (typeof company.website_url === 'string') setWebsiteUrl(company.website_url)
-        if (typeof company.tech_stack === 'string') setTechStack(company.tech_stack)
-        if (company.info_fetched_at) setInfoFetchedAt(String(company.info_fetched_at))
-        if (company.tech_fetched_at) setTechFetchedAt(String(company.tech_fetched_at))
-        if (company.relations_fetched_at) setRelationsFetchedAt(String(company.relations_fetched_at))
-      }
+      applyInfoPayload(data)
       loadCompany()
-      const summary = formatFetchPrimarySummary(data)
-      if (data.ok === false && Array.isArray(data.errors) && data.errors.length > 0) {
-        setError(`一部失敗: ${data.errors.join('; ')}`)
+      if (data.budget_exceeded) {
+        setSuccess('月次 Search 予算超過のため、既存キャッシュのみ返却しました（新規 Search なし）。コスト画面を確認してください。')
+      } else if (data.from_cache && data.skip_reason === 'ttl') {
+        setSuccess('TTL 内のためキャッシュを返却しました。再取得する場合は「強制再取得して保存」を使ってください。')
+      } else {
+        setSuccess('DBへ強制再取得・保存しました。')
       }
-      setSuccess(summary ? `主3種取得完了: ${summary}` : '主3種取得完了')
-      setPreviewPending(false)
     } finally {
-      setFetchAllLoading(false)
+      setForceLoading(false)
     }
   }
 
@@ -272,26 +259,28 @@ export default function AdminCompanyInfoEditPage() {
 
   return (
     <AdminFormContainer
-      title={`基本情報編集: ${name}`}
+      title={`${name || '企業'}（会社概要）`}
+      description="会社の基本情報を確認・編集します。"
       maxWidth={700}
       backLabel="企業一覧に戻る"
       backHref="/admin/companies"
     >
+      <CompanyAspectTabs companyId={id} active="info" />
       <ErrorAlert error={error} />
       {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
       {isLowTrust && (
         <Alert severity="warning" sx={{ mb: 2 }}>
-          出典がモデル知識由来、または信頼度が low です。公式サイトURLを設定して強制再取得してください。
+          出典の信頼度が低めです。公式サイトURLを設定してから、もう一度取得してください。
         </Alert>
       )}
       {previewPending && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          プレビュー未確定です。「確定して保存」で DB と取得メタデータ（info_fetched_at 等）を更新します。
+          まだ下書きの取得結果です。内容を確認してから「確定して保存」を押してください。
         </Alert>
       )}
       {dataStatus === 'published' && (
         <Alert severity="success" sx={{ mb: 2 }}>
-          この企業は公開中です。公開状態のままプレビュー取得・強制再取得で企業情報や公式URLを更新できます。
+          この企業は公開中です。公開したまま情報を更新できます。
         </Alert>
       )}
 
@@ -300,30 +289,13 @@ export default function AdminCompanyInfoEditPage() {
 
         <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
           <Button
-            variant="contained"
-            color="secondary"
-            onClick={() => handleFetchPrimary(false)}
-            disabled={fetchAllLoading || aiLoading}
-            startIcon={fetchAllLoading ? <CircularProgress size={16} color="inherit" /> : null}
-          >
-            {fetchAllLoading ? '取得中...' : '主3種をまとめて取得'}
-          </Button>
-          <Button
             variant="outlined"
             color="secondary"
-            onClick={() => handleFetchPrimary(true)}
-            disabled={fetchAllLoading || aiLoading}
-          >
-            主3種を強制再取得
-          </Button>
-          <Button
-            variant="outlined"
-            size="small"
             onClick={handleAiFetch}
-            disabled={!name.trim() || aiLoading || fetchAllLoading}
+            disabled={!name.trim() || aiLoading || forceLoading}
             startIcon={aiLoading ? <CircularProgress size={14} color="inherit" /> : null}
           >
-            {aiLoading ? '取得中...' : '基本のみプレビュー'}
+            {aiLoading ? '取得中...' : 'プレビュー取得（未保存）'}
           </Button>
           <Button
             variant="contained"
@@ -333,31 +305,21 @@ export default function AdminCompanyInfoEditPage() {
             disabled={!previewPending || confirmLoading || !name.trim()}
             startIcon={confirmLoading ? <CircularProgress size={14} color="inherit" /> : null}
           >
-            {confirmLoading ? '確定中...' : 'プレビュー確定'}
+            {confirmLoading ? '確定中...' : '確定して保存'}
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={handleForceFetchAndSave}
+            disabled={forceLoading || aiLoading}
+            startIcon={forceLoading ? <CircularProgress size={14} color="inherit" /> : null}
+          >
+            {forceLoading ? '再取得中...' : '強制再取得して保存'}
           </Button>
         </Stack>
 
-        {fetchAllLoading && (
-          <Alert severity="info">主3種（基本・技術・ビジネス関係）を1つのAPIで取得中...</Alert>
-        )}
-
-        <Typography variant="caption" color="text.secondary">
-          「主3種をまとめて取得」で基本・技術・ビジネス関係を1回のAPIで取得します。詳細編集は
-          <Link href={`/admin/companies/${id}/edit`}> 技術編集 </Link>/
-          <Link href={`/admin/companies/${id}/relations`}> 関係編集 </Link>
-          へ。
-        </Typography>
-
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          <Chip size="small" label={`source: ${sourceType || '-'}`} />
-          <Chip size="small" label={`confidence: ${lastFetchConfidence || '-'}`} color={isLowTrust ? 'warning' : 'default'} />
-          <Chip size="small" label={`model: ${lastModelUsed || '-'}`} />
-        </Stack>
         <Typography variant="body2" color="text.secondary">
-          基本情報: {formatTs(infoFetchedAt)} / 技術: {formatTs(techFetchedAt)} / ビジネス関係: {formatTs(relationsFetchedAt)} / 求人: {formatTs(jobsFetchedAt)}
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          TTL: 基本情報 90日 / 技術 30日 / ビジネス関係 60日 / 求人 7日。詳細な関係・市場は「ビジネス関係」画面、技術配列は「技術情報」画面で確認できます。
+          最終取得: 会社概要 {formatTs(infoFetchedAt)} ／ 技術 {formatTs(techFetchedAt)} ／ 取引先{' '}
+          {formatTs(relationsFetchedAt)}
         </Typography>
 
         <Divider />

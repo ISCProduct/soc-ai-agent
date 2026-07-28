@@ -313,8 +313,9 @@ WHERE c.is_active = ?
 }
 
 // ListActiveMissingFetchCandidates は info/jobs/tech/relations のいずれかが未取得または TTL 切れのアクティブ企業を返す。
+// primaryOnly=true のときは求人不足だけを理由に候補へ入れない（まとめて取得の主3種モード用）。
 // 公開企業を優先し、不足埋めバッチ（#633）で使う。
-func (r *CompanyRepository) ListActiveMissingFetchCandidates(limit int) ([]models.Company, error) {
+func (r *CompanyRepository) ListActiveMissingFetchCandidates(limit int, primaryOnly bool) ([]models.Company, error) {
 	if limit <= 0 {
 		limit = 60
 	}
@@ -324,38 +325,47 @@ func (r *CompanyRepository) ListActiveMissingFetchCandidates(limit int) ([]model
 	techCutoff := now.Add(-companyfetch.TTLTech)
 	relCutoff := now.Add(-companyfetch.TTLRelations)
 
-	var companies []models.Company
-	err := r.db.Where("is_active = ?", true).
-		Where(`
-			info_fetched_at IS NULL OR info_fetched_at < ? OR TRIM(COALESCE(description, '')) = '' OR TRIM(COALESCE(website_url, '')) = ''
+	primaryCond := `
+		info_fetched_at IS NULL OR info_fetched_at < ? OR TRIM(COALESCE(description, '')) = '' OR TRIM(COALESCE(website_url, '')) = ''
+		OR tech_fetched_at IS NULL OR tech_fetched_at < ?
+		OR TRIM(COALESCE(tech_stack, '')) = ''
+		OR TRIM(COALESCE(tech_stack, '')) IN ('[]', 'null', '{}')
+		OR relations_fetched_at IS NULL OR relations_fetched_at < ?
+		OR (
+			NOT EXISTS (
+				SELECT 1 FROM company_relations cr
+				WHERE cr.deleted_at IS NULL AND cr.is_active = 1 AND (
+					cr.parent_id = companies.id OR cr.child_id = companies.id
+					OR cr.from_id = companies.id OR cr.to_id = companies.id
+				)
+			)
+			AND NOT EXISTS (
+				SELECT 1 FROM company_market_info mi
+				WHERE mi.company_id = companies.id AND mi.deleted_at IS NULL
+				AND (
+					mi.is_listed = 1
+					OR TRIM(COALESCE(mi.stock_code, '')) <> ''
+					OR LOWER(TRIM(COALESCE(mi.market_type, ''))) IN ('prime', 'standard', 'growth')
+				)
+			)
+		)
+	`
+	args := []any{infoCutoff, techCutoff, relCutoff}
+	whereSQL := primaryCond
+	if !primaryOnly {
+		whereSQL = primaryCond + `
 			OR jobs_fetched_at IS NULL OR jobs_fetched_at < ?
 			OR NOT EXISTS (
 				SELECT 1 FROM company_job_positions jp
 				WHERE jp.company_id = companies.id AND jp.deleted_at IS NULL
 			)
-			OR tech_fetched_at IS NULL OR tech_fetched_at < ?
-			OR TRIM(COALESCE(tech_stack, '')) = ''
-			OR TRIM(COALESCE(tech_stack, '')) IN ('[]', 'null', '{}')
-			OR relations_fetched_at IS NULL OR relations_fetched_at < ?
-			OR (
-				NOT EXISTS (
-					SELECT 1 FROM company_relations cr
-					WHERE cr.deleted_at IS NULL AND cr.is_active = 1 AND (
-						cr.parent_id = companies.id OR cr.child_id = companies.id
-						OR cr.from_id = companies.id OR cr.to_id = companies.id
-					)
-				)
-				AND NOT EXISTS (
-					SELECT 1 FROM company_market_info mi
-					WHERE mi.company_id = companies.id AND mi.deleted_at IS NULL
-					AND (
-						mi.is_listed = 1
-						OR TRIM(COALESCE(mi.stock_code, '')) <> ''
-						OR LOWER(TRIM(COALESCE(mi.market_type, ''))) IN ('prime', 'standard', 'growth')
-					)
-				)
-			)
-		`, infoCutoff, jobsCutoff, techCutoff, relCutoff).
+		`
+		args = append(args, jobsCutoff)
+	}
+
+	var companies []models.Company
+	err := r.db.Where("is_active = ?", true).
+		Where(whereSQL, args...).
 		Order("CASE WHEN data_status = 'published' THEN 0 ELSE 1 END, id ASC").
 		Limit(limit).
 		Find(&companies).Error

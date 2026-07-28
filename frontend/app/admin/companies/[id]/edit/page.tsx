@@ -15,8 +15,8 @@ import {
 } from '@mui/material'
 import { authService } from '@/lib/auth'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
+import { CompanyAspectTabs } from '@/components/admin/CompanyAspectTabs'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
-import { fetchCompanyPrimary, formatFetchPrimarySummary } from '@/lib/admin-company-fetch'
 
 const DEV_STYLES = ['スクラム', 'ウォーターフォール', 'カンバン', 'アジャイル', 'その他']
 
@@ -89,7 +89,6 @@ export default function AdminCompanyEditPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [fetchLoading, setFetchLoading] = useState(false)
-  const [primaryLoading, setPrimaryLoading] = useState(false)
   const [name, setName] = useState('')
   const [techStack, setTechStack] = useState<string[]>([])
   const [infraStack, setInfraStack] = useState<string[]>([])
@@ -152,40 +151,6 @@ export default function AdminCompanyEditPage() {
     }
   }
 
-  const handleFetchPrimary = async (force = false) => {
-    setPrimaryLoading(true)
-    setError('')
-    setSuccess('')
-    try {
-      const { ok, status, data } = await fetchCompanyPrimary(
-        id,
-        authService.getAdminFetchHeaders(),
-        force,
-      )
-      if (!ok) {
-        setError(data?.error || `主3種の取得に失敗しました (${status})`)
-        return
-      }
-      if (data.company && typeof data.company === 'object') {
-        const company = data.company as Record<string, unknown>
-        setTechStack(parseJsonArray(String(company.tech_stack || '')))
-        setInfraStack(parseJsonArray(String(company.infra_stack || '')))
-        setCicdTools(parseJsonArray(String(company.cicd_tools || '')))
-        setDevStyle(String(company.development_style || ''))
-        setTechFetchedAt(company.tech_fetched_at ? String(company.tech_fetched_at) : null)
-      } else {
-        loadCompany()
-      }
-      if (data.ok === false && Array.isArray(data.errors) && data.errors.length > 0) {
-        setError(`一部失敗: ${data.errors.join('; ')}`)
-      }
-      const summary = formatFetchPrimarySummary(data)
-      setSuccess(summary ? `主3種取得完了: ${summary}` : '主3種取得完了')
-    } finally {
-      setPrimaryLoading(false)
-    }
-  }
-
   const handleSave = async () => {
     setError('')
     setSuccess('')
@@ -218,18 +183,18 @@ export default function AdminCompanyEditPage() {
 
   return (
     <AdminFormContainer
-      title={`技術スタック編集: ${name}`}
+      title={`${name || '企業'}（技術情報）`}
+      description="使っている技術や開発の様子を確認・編集します。"
       maxWidth={800}
       backLabel="企業一覧に戻る"
       backHref="/admin/companies"
-      onBack={() => router.back()}
     >
+      <CompanyAspectTabs companyId={id} active="tech" />
       <ErrorAlert error={error} />
       {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
       <Alert severity="info" sx={{ mb: 2 }}>
-        「主3種をまとめて取得」で Backend が基本・技術・ビジネス関係を順に取得して DB 保存します。
-        必要ならこの画面の個別取得で技術だけ再取得できます（TTL 30日）。
-        最終取得: {formatTs(techFetchedAt)}
+        「技術情報を取得」で、採用ページや技術ブログなどから言語・インフラ・開発手法を集めます。最終取得:{' '}
+        {formatTs(techFetchedAt)}
       </Alert>
 
       <Box sx={{ mb: 3, p: 2, bgcolor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -252,25 +217,8 @@ export default function AdminCompanyEditPage() {
           <Button
             variant="contained"
             color="secondary"
-            onClick={() => handleFetchPrimary(false)}
-            disabled={fetchLoading || primaryLoading}
-            startIcon={primaryLoading ? <CircularProgress size={16} color="inherit" /> : null}
-          >
-            {primaryLoading ? '取得中...' : '主3種をまとめて取得'}
-          </Button>
-          <Button
-            variant="outlined"
-            color="secondary"
-            onClick={() => handleFetchPrimary(true)}
-            disabled={fetchLoading || primaryLoading}
-          >
-            主3種を強制再取得
-          </Button>
-          <Button
-            variant="contained"
-            color="secondary"
             onClick={() => handleAiFetch(false)}
-            disabled={fetchLoading || primaryLoading}
+            disabled={fetchLoading}
             startIcon={fetchLoading ? <CircularProgress size={16} color="inherit" /> : null}
           >
             {fetchLoading ? '取得中...' : 'AIで技術スタック取得'}
@@ -278,7 +226,7 @@ export default function AdminCompanyEditPage() {
           <Button
             variant="outlined"
             onClick={() => handleAiFetch(true)}
-            disabled={fetchLoading || primaryLoading}
+            disabled={fetchLoading}
           >
             強制再取得
           </Button>

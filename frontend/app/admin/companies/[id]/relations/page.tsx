@@ -17,10 +17,10 @@ import {
 import { authService } from '@/lib/auth'
 import { formatRelationLabel } from '@/lib/relation-labels'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
+import { CompanyAspectTabs } from '@/components/admin/CompanyAspectTabs'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import CompanyRelationGraph from '@/components/admin/CompanyRelationGraph'
 import { groupRelationsByCategory, RELATION_CATEGORY_LABELS } from '@/lib/relation-graph'
-import { fetchCompanyPrimary, formatFetchPrimarySummary } from '@/lib/admin-company-fetch'
 
 type RelationEntry = {
   name: string
@@ -56,7 +56,6 @@ export default function AdminCompanyRelationsPage() {
   const [success, setSuccess] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
   const [forceLoading, setForceLoading] = useState(false)
-  const [primaryLoading, setPrimaryLoading] = useState(false)
   const [confirmLoading, setConfirmLoading] = useState(false)
   const [previewPending, setPreviewPending] = useState(false)
 
@@ -132,14 +131,19 @@ export default function AdminCompanyRelationsPage() {
         },
         body: JSON.stringify({ name, website_url: websiteUrl }),
       })
-      const data = await res.json()
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
       if (!res.ok) {
-        setError((data?.error as string) || '関係情報取得に失敗しました')
+        setError(
+          (typeof data.error === 'string' && data.error) ||
+            '関係情報の取得に失敗しました。時間をおいて再度お試しください。',
+        )
         return
       }
       applyRelationsPayload(data)
       setPreviewPending(true)
       setSuccess('プレビュー取得が完了しました。内容を確認・修正してから「確定して保存」してください。')
+    } catch {
+      setError('関係情報の取得中に通信エラーが発生しました。時間をおいて再度お試しください。')
     } finally {
       setAiLoading(false)
     }
@@ -154,9 +158,12 @@ export default function AdminCompanyRelationsPage() {
         method: 'POST',
         headers: authService.getAdminFetchHeaders(),
       })
-      const data = await res.json()
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
       if (!res.ok) {
-        setError((data?.error as string) || '強制再取得に失敗しました')
+        setError(
+          (typeof data.error === 'string' && data.error) ||
+            '強制再取得に失敗しました。時間をおいて再度お試しください。',
+        )
         return
       }
       applyRelationsPayload(data)
@@ -168,40 +175,10 @@ export default function AdminCompanyRelationsPage() {
       } else {
         setSuccess(`DBへ強制再取得・保存しました（${data.saved_count ?? 0}件）。`)
       }
+    } catch {
+      setError('強制再取得中に通信エラーが発生しました。時間をおいて再度お試しください。')
     } finally {
       setForceLoading(false)
-    }
-  }
-
-  const handleFetchPrimary = async (force = false) => {
-    setPrimaryLoading(true)
-    setError('')
-    setSuccess('')
-    try {
-      const { ok, status, data } = await fetchCompanyPrimary(
-        id,
-        authService.getAdminFetchHeaders(),
-        force,
-      )
-      if (!ok) {
-        setError(data?.error || `主3種の取得に失敗しました (${status})`)
-        return
-      }
-      if (data.relations) applyRelationsPayload(data.relations)
-      if (data.company && typeof data.company === 'object') {
-        const company = data.company as Record<string, unknown>
-        if (typeof company.website_url === 'string') setWebsiteUrl(company.website_url)
-        setRelationsFetchedAt(company.relations_fetched_at ? String(company.relations_fetched_at) : null)
-      } else {
-        loadCompany()
-      }
-      if (data.ok === false && Array.isArray(data.errors) && data.errors.length > 0) {
-        setError(`一部失敗: ${data.errors.join('; ')}`)
-      }
-      const summary = formatFetchPrimarySummary(data)
-      setSuccess(summary ? `主3種取得完了: ${summary}` : '主3種取得完了')
-    } finally {
-      setPrimaryLoading(false)
     }
   }
 
@@ -224,14 +201,19 @@ export default function AdminCompanyRelationsPage() {
           confidence: lastFetchConfidence,
         }),
       })
-      const data = await res.json()
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
       if (!res.ok) {
-        setError((data?.error as string) || '確定保存に失敗しました')
+        setError(
+          (typeof data.error === 'string' && data.error) ||
+            '確定保存に失敗しました。時間をおいて再度お試しください。',
+        )
         return
       }
       applyRelationsPayload(data)
       loadCompany()
-      setSuccess(`プレビュー内容を確定して保存しました（${data.saved_count ?? 0}件、relations_fetched_at 更新済み）。`)
+      setSuccess(`プレビュー内容を確定して保存しました（${data.saved_count ?? 0}件）。`)
+    } catch {
+      setError('確定保存中に通信エラーが発生しました。時間をおいて再度お試しください。')
     } finally {
       setConfirmLoading(false)
     }
@@ -260,48 +242,32 @@ export default function AdminCompanyRelationsPage() {
 
   return (
     <AdminFormContainer
-      title={`関係・市場情報: ${name}`}
+      title={`${name || '企業'}（関連企業）`}
+      description="関連企業や市場の情報を確認・編集します。"
       maxWidth={800}
       backLabel="企業一覧に戻る"
       backHref="/admin/companies"
     >
+      <CompanyAspectTabs companyId={id} active="relations" />
       <ErrorAlert error={error} />
       {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
       {previewPending && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          プレビュー未確定です。「確定して保存」で company_relations / company_market_info と relations_fetched_at を更新します。
+          まだ下書きの取得結果です。内容を確認してから「確定して保存」を押してください。
         </Alert>
       )}
 
       <Stack spacing={2}>
         <Typography variant="body2" color="text.secondary">
-          「主3種をまとめて取得」で Backend が基本・技術・ビジネス関係を順に取得して DB 保存します。
-          必要ならこの画面の個別取得で関係だけ再取得できます。
+          最終取得: {formatTs(relationsFetchedAt)}
         </Typography>
 
         <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
           <Button
-            variant="contained"
-            color="secondary"
-            onClick={() => handleFetchPrimary(false)}
-            disabled={aiLoading || forceLoading || primaryLoading}
-            startIcon={primaryLoading ? <CircularProgress size={16} color="inherit" /> : null}
-          >
-            {primaryLoading ? '取得中...' : '主3種をまとめて取得'}
-          </Button>
-          <Button
-            variant="outlined"
-            color="secondary"
-            onClick={() => handleFetchPrimary(true)}
-            disabled={aiLoading || forceLoading || primaryLoading}
-          >
-            主3種を強制再取得
-          </Button>
-          <Button
             variant="outlined"
             color="secondary"
             onClick={handleAiFetch}
-            disabled={!name.trim() || aiLoading || primaryLoading}
+            disabled={!name.trim() || aiLoading || forceLoading}
             startIcon={aiLoading ? <CircularProgress size={16} color="inherit" /> : null}
           >
             {aiLoading ? '取得中...' : 'プレビュー取得（未保存）'}
@@ -318,7 +284,7 @@ export default function AdminCompanyRelationsPage() {
           <Button
             variant="outlined"
             onClick={handleForceFetchAndSave}
-            disabled={forceLoading || primaryLoading}
+            disabled={forceLoading || aiLoading}
             startIcon={forceLoading ? <CircularProgress size={16} color="inherit" /> : null}
           >
             {forceLoading ? '再取得中...' : '強制再取得して保存'}

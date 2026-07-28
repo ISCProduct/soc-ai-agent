@@ -886,8 +886,9 @@ func (c *AdminCompanyController) WarmL1Catalog(ctx echo.Context) error {
 }
 
 // FetchMissingBatch POST /api/admin/companies/fetch-missing-batch
-// Body: { "limit": 20, "dry_run": true }
-// アクティブ企業のうち不足フィールド（基本情報/求人/Tech/関係）だけを上限付きで埋める。
+// Body: { "limit": 20, "dry_run": true, "primary_only": true, "concurrency": 4 }
+// アクティブ企業のうち不足フィールドだけを上限付きで埋める（企業間は並列）。
+// primary_only=true のときは主3種（基本・技術・関係）のみ（求人除外）。
 func (c *AdminCompanyController) FetchMissingBatch(ctx echo.Context) error {
 	if c.missingBatch == nil {
 		c.missingBatch = services.NewCompanyMissingBatchService(
@@ -907,6 +908,8 @@ func (c *AdminCompanyController) FetchMissingBatch(ctx echo.Context) error {
 	c.audit.Record(actor, "company.fetch_missing_batch", "company", 0, map[string]any{
 		"dry_run":       result.DryRun,
 		"limit":         result.Limit,
+		"primary_only":  result.PrimaryOnly,
+		"concurrency":   result.Concurrency,
 		"candidate_n":   result.CandidateN,
 		"processed":     result.Processed,
 		"info_ok":       result.InfoOK,
