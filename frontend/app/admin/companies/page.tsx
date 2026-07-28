@@ -28,12 +28,6 @@ import { AdminPanel } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { fetchCompanyPrimary, formatFetchPrimarySummary } from '@/lib/admin-company-fetch'
-import {
-  fetchCompanyAspect,
-  fetchCompanyAspects,
-  formatFetchAspectSummary,
-  type CompanyFetchKind,
-} from '@/lib/admin-company-fetch'
 
 const PAGE_SIZE = 50
 
