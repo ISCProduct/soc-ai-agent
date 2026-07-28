@@ -23,6 +23,8 @@ type TechStackResult struct {
 	SourceURL        string   `json:"source_url,omitempty"`
 	ModelUsed        string   `json:"model_used,omitempty"`
 	Confidence       string   `json:"confidence,omitempty"`
+	FromCache        bool     `json:"from_cache,omitempty"`
+	SkipReason       string   `json:"skip_reason,omitempty"`
 }
 
 // TechStackFetcher は安価な AI Search（mini-search→Parse）で技術スタックを取得する。
@@ -68,8 +70,13 @@ func (f *TechStackFetcher) FetchAndSave(ctx context.Context, companyID uint, for
 		return nil, fmt.Errorf("company not found: %w", err)
 	}
 
-	if !forceRefresh && companyfetch.IsFresh(company.TechFetchedAt, companyfetch.TTLTech) {
-		return techResultFromCompany(company), nil
+	// TTL内でも技術データが空なら再取得する（スタンプだけ進んだ残骸対策）
+	if !forceRefresh && companyfetch.IsFresh(company.TechFetchedAt, companyfetch.TTLTech) &&
+		companyfetch.HasTechData(company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle) {
+		result := techResultFromCompany(company)
+		result.FromCache = true
+		result.SkipReason = "ttl"
+		return result, nil
 	}
 
 	run := func() (any, error) {
@@ -87,7 +94,10 @@ func (f *TechStackFetcher) FetchAndSave(ctx context.Context, companyID uint, for
 	}
 	if err != nil {
 		if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
-			return techResultFromCompany(company), nil
+			cached := techResultFromCompany(company)
+			cached.FromCache = true
+			cached.SkipReason = "budget"
+			return cached, nil
 		}
 		return nil, err
 	}
@@ -112,7 +122,10 @@ func (f *TechStackFetcher) FetchAndSave(ctx context.Context, companyID uint, for
 	}
 
 	now := time.Now()
-	company.TechFetchedAt = &now
+	// 空のまま TechFetchedAt だけ進むと不足埋めが止まるため、中身があるときのみスタンプ
+	if companyfetch.HasTechData(company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle) {
+		company.TechFetchedAt = &now
+	}
 	company.SourceFetchedAt = &now
 	if result.Source != "" {
 		company.SourceType = result.Source
@@ -127,7 +140,7 @@ func (f *TechStackFetcher) FetchAndSave(ctx context.Context, companyID uint, for
 	return result, nil
 }
 
-// Acquire は DB 非更新で技術スタックを取得する（mini-search→Parse、deep なし）。
+// Acquire は DB 非更新で技術スタックを取得する（公式ページ抽出→不足時のみ Search）。
 func (f *TechStackFetcher) Acquire(ctx context.Context, companyName, websiteURL string) (*TechStackResult, error) {
 	if f.llm == nil || f.llm.Client == nil {
 		return nil, fmt.Errorf("openai client is nil")
@@ -135,17 +148,39 @@ func (f *TechStackFetcher) Acquire(ctx context.Context, companyName, websiteURL 
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	systemPrompt := `あなたは技術スタックの構造化アシスタントです。検索結果に明示された技術のみをJSON化してください。推測で埋めてはいけません。不明な項目は空配列または空文字にしてください。`
+	systemPrompt := `あなたは技術スタックの構造化アシスタントです。入力テキストに明示された技術のみをJSON化してください。推測で埋めてはいけません。不明な項目は空配列または空文字にしてください。`
+
+	// 1) 公式サイト／採用ページから直接抽出（Search 予算を使わず成功率も高い）
+	if strings.TrimSpace(websiteURL) != "" {
+		if pageText, sourceURL, ferr := companyfetch.FirstFetchableText(ctx, companyfetch.CandidateCareerURLs(websiteURL)); ferr == nil && pageText != "" {
+			parseUser := fmt.Sprintf(
+				"企業「%s」の公開ページ本文です。本文に明示された技術のみ次のJSON形式で抽出してください。推測禁止。\n%s\n\n---\n本文:\n%s",
+				companyName, techStackJSONSchema, pageText,
+			)
+			raw, model, err := f.llm.ExtractJSON(ctx, systemPrompt, parseUser, 400)
+			if err == nil {
+				if result, perr := parseTechStackResult(raw); perr == nil && techResultHasData(result) {
+					result.Source = companyfetch.SourceScrape
+					result.SourceURL = sourceURL
+					result.ModelUsed = model
+					result.Confidence = companyfetch.ConfidenceHigh
+					return result, nil
+				}
+			}
+		}
+	}
+
+	// 2) Search Lite → Parse
 	siteHint := websiteURL
 	if siteHint == "" {
 		siteHint = "不明"
 	}
 	searchPrompt := fmt.Sprintf(
-		`日本のIT企業「%s」が採用ページ・技術ブログ等で公開している技術スタック（言語・フレームワーク・インフラ・CI/CD・開発手法）を調べてください。公式サイト: %s。公開情報として確認できる事実と根拠URLのみをまとめ、推測はしないでください。非上場企業も含めます。`,
+		`日本のIT企業「%s」の技術スタックを調べてください。公式サイト: %s。採用ページ・技術ブログ・エンジニア向け情報・求人票に書かれている言語・フレームワーク・クラウド・CI/CD・開発手法を、根拠URL付きで列挙してください。公開情報として確認できる事実のみ。非上場企業も含めます。`,
 		companyName, siteHint,
 	)
 	parseUser := fmt.Sprintf(
-		"企業「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。推測禁止。\n%s",
+		"企業「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。検索結果に無い項目は空配列/空文字。推測禁止。\n%s",
 		companyName, techStackJSONSchema,
 	)
 	raw, modelsUsed, err := f.llm.SearchLiteThenParse(ctx, searchPrompt, systemPrompt, parseUser, 400)
@@ -172,7 +207,72 @@ func parseTechStackResult(text string) (*TechStackResult, error) {
 	if err := json.Unmarshal([]byte(obj), &result); err != nil {
 		return nil, fmt.Errorf("failed to parse tech stack json: %w", err)
 	}
+	// 代替キー（languages / frameworks 等）も吸収
+	if !techResultHasData(&result) {
+		var alt map[string]any
+		if json.Unmarshal([]byte(obj), &alt) == nil {
+			result.TechStack = append(result.TechStack, stringSliceFromAny(alt["languages"])...)
+			result.TechStack = append(result.TechStack, stringSliceFromAny(alt["frameworks"])...)
+			result.TechStack = append(result.TechStack, stringSliceFromAny(alt["technologies"])...)
+			if len(result.InfraStack) == 0 {
+				result.InfraStack = stringSliceFromAny(alt["infrastructure"])
+			}
+			if len(result.CicdTools) == 0 {
+				result.CicdTools = stringSliceFromAny(alt["ci_cd"])
+			}
+		}
+	}
+	result.TechStack = uniqueNonEmpty(result.TechStack)
+	result.InfraStack = uniqueNonEmpty(result.InfraStack)
+	result.CicdTools = uniqueNonEmpty(result.CicdTools)
 	return &result, nil
+}
+
+func techResultHasData(r *TechStackResult) bool {
+	if r == nil {
+		return false
+	}
+	return len(r.TechStack) > 0 || len(r.InfraStack) > 0 || len(r.CicdTools) > 0 || strings.TrimSpace(r.DevelopmentStyle) != ""
+}
+
+func stringSliceFromAny(v any) []string {
+	switch t := v.(type) {
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, item := range t {
+			if s, ok := item.(string); ok {
+				if s = strings.TrimSpace(s); s != "" {
+					out = append(out, s)
+				}
+			}
+		}
+		return out
+	case []string:
+		return uniqueNonEmpty(t)
+	case string:
+		if s := strings.TrimSpace(t); s != "" {
+			return []string{s}
+		}
+	}
+	return nil
+}
+
+func uniqueNonEmpty(in []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		key := strings.ToLower(s)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 func techResultFromCompany(company *models.Company) *TechStackResult {

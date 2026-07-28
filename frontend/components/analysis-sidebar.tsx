@@ -91,6 +91,7 @@ interface AnalysisSidebarProps {
 }
 
 export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClose}: AnalysisSidebarProps) {
+    const router = useRouter()
     const [messageCount, setMessageCount] = useState(0)
     const [questionCount, setQuestionCount] = useState(0)
     const [totalQuestions, setTotalQuestions] = useState(15)

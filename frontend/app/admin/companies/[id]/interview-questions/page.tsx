@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import {
   Alert,
   Box,
@@ -76,7 +76,6 @@ const EMPTY_FORM: QuestionForm = {
 
 export default function AdminInterviewQuestionsPage() {
   const params = useParams()
-  const router = useRouter()
   const id = params.id as string
 
   useEffect(() => {
@@ -245,8 +244,8 @@ export default function AdminInterviewQuestionsPage() {
     <AdminFormContainer
       title={`面接質問管理: ${companyName}`}
       maxWidth={960}
-      backLabel="← 戻る"
-      onBack={() => router.back()}
+      backHref="/admin/companies"
+      backLabel="企業一覧に戻る"
     >
       <ErrorAlert error={error} />
       {success && (

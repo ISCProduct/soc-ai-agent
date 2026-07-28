@@ -88,9 +88,9 @@ func (f *CompanyRelationsFetcher) SetSearchFlight(flight *CompanySearchFlight) {
 }
 
 const companyRelationsJSONSchema = `{
-  "subsidiaries": [{"name": "子会社・グループ会社名", "ratio": 出資比率（不明なら省略）}],
-  "affiliates": [{"name": "資本提携・関連会社名"}],
-  "business_partners": [{"name": "主要取引先名"}],
+  "subsidiaries": [{"name": "子会社・グループ会社名", "ratio": 出資比率（不明なら省略）, "description": "関係の説明（例: 完全子会社）"}],
+  "affiliates": [{"name": "資本提携・関連会社名", "description": "関係の説明（例: 資本提携）"}],
+  "business_partners": [{"name": "主要取引先名", "description": "取引内容の1行説明（例: クラウド基盤の共同開発）"}],
   "market_info": {
     "is_listed": true/false,
     "market_type": "prime|standard|growth|unlisted",
@@ -110,7 +110,10 @@ func (f *CompanyRelationsFetcher) FetchAndSave(ctx context.Context, companyID ui
 		if err != nil {
 			return nil, err
 		}
-		return markRelationsCacheSkip(result, "ttl", false), nil
+		// 関係・市場が空なら TTL 内でも再取得する
+		if relationsResultHasData(result) {
+			return markRelationsCacheSkip(result, "ttl", false), nil
+		}
 	}
 
 	run := func() (any, error) {
@@ -146,10 +149,13 @@ func (f *CompanyRelationsFetcher) FetchAndSave(ctx context.Context, companyID ui
 	}
 	result.SavedCount = saved
 
-	now := time.Now()
-	company.RelationsFetchedAt = &now
-	if err := f.companyRepo.Update(company); err != nil {
-		return nil, fmt.Errorf("failed to update company: %w", err)
+	// 空結果（関係0件 + unlistedのみ）で RelationsFetchedAt だけ進むと再取得不能になる
+	if relationsResultHasData(result) {
+		now := time.Now()
+		company.RelationsFetchedAt = &now
+		if err := f.companyRepo.Update(company); err != nil {
+			return nil, fmt.Errorf("failed to update company: %w", err)
+		}
 	}
 	return result, nil
 }
@@ -169,14 +175,15 @@ func (f *CompanyRelationsFetcher) ConfirmAndSave(companyID uint, result *Company
 		return nil, err
 	}
 
-	now := time.Now()
-	company.RelationsFetchedAt = &now
-	if err := f.companyRepo.Update(company); err != nil {
-		return nil, fmt.Errorf("failed to update company: %w", err)
-	}
-
 	out := *result
 	out.SavedCount = saved
+	if relationsResultHasData(&out) {
+		now := time.Now()
+		company.RelationsFetchedAt = &now
+		if err := f.companyRepo.Update(company); err != nil {
+			return nil, fmt.Errorf("failed to update company: %w", err)
+		}
+	}
 	return &out, nil
 }
 
@@ -382,10 +389,7 @@ func (f *CompanyRelationsFetcher) persistResult(company *models.Company, result 
 				continue
 			}
 		}
-		desc := entry.Description
-		if desc == "" {
-			desc = fmt.Sprintf("%s:%s", sourceTag, company.Name)
-		}
+		desc := companyfetch.NormalizeRelationDescription(entry.Description, entry.RelationType)
 		var upsertErr error
 		if models.IsCapitalRelationType(entry.RelationType) {
 			ratio := entry.Ratio
@@ -407,7 +411,9 @@ func (f *CompanyRelationsFetcher) persistResult(company *models.Company, result 
 		saved++
 	}
 
-	if result.MarketInfo != nil && (result.MarketInfo.IsListed || result.MarketInfo.MarketType != "" || result.MarketInfo.StockCode != "") {
+	if result.MarketInfo != nil && companyfetch.HasMeaningfulMarketInfo(
+		result.MarketInfo.IsListed, result.MarketInfo.MarketType, result.MarketInfo.StockCode,
+	) {
 		marketType := normalizeMarketType(result.MarketInfo.MarketType, result.MarketInfo.IsListed)
 		info := &models.CompanyMarketInfo{
 			CompanyID:  company.ID,
@@ -434,8 +440,9 @@ type aiRelationsPayload struct {
 }
 
 type aiRelationName struct {
-	Name  string   `json:"name"`
-	Ratio *float64 `json:"ratio"`
+	Name        string   `json:"name"`
+	Ratio       *float64 `json:"ratio"`
+	Description string   `json:"description"`
 }
 
 func parseCompanyRelationsResult(text string) (*CompanyRelationsResult, error) {
@@ -455,6 +462,7 @@ func parseCompanyRelationsResult(text string) (*CompanyRelationsResult, error) {
 				Name:         name,
 				RelationType: "capital_subsidiary",
 				Ratio:        item.Ratio,
+				Description:  strings.TrimSpace(item.Description),
 			})
 		}
 	}
@@ -463,6 +471,7 @@ func parseCompanyRelationsResult(text string) (*CompanyRelationsResult, error) {
 			result.Relations = append(result.Relations, RelationEntry{
 				Name:         name,
 				RelationType: "capital_affiliate",
+				Description:  strings.TrimSpace(item.Description),
 			})
 		}
 	}
@@ -471,6 +480,7 @@ func parseCompanyRelationsResult(text string) (*CompanyRelationsResult, error) {
 			result.Relations = append(result.Relations, RelationEntry{
 				Name:         name,
 				RelationType: "business_partner",
+				Description:  strings.TrimSpace(item.Description),
 			})
 		}
 	}
@@ -616,4 +626,40 @@ func markRelationsCacheSkip(r *CompanyRelationsResult, reason string, budgetExce
 	r.SkipReason = reason
 	r.BudgetExceeded = budgetExceeded
 	return r
+}
+
+// HasStoredData は DB に関係、または実質的な市場情報があるか。
+// market_type=unlisted のみは「データあり」とみなさない。
+func (f *CompanyRelationsFetcher) HasStoredData(companyID uint) bool {
+	if f == nil || f.relationRepo == nil {
+		return false
+	}
+	rels, err := f.relationRepo.GetRelationsByCompanyID(companyID)
+	if err == nil && len(rels) > 0 {
+		return true
+	}
+	info, err := f.relationRepo.GetMarketInfoByCompanyID(companyID)
+	if err != nil || info == nil {
+		return false
+	}
+	return companyfetch.HasMeaningfulMarketInfo(info.IsListed, info.MarketType, info.StockCode)
+}
+
+func relationsResultHasData(r *CompanyRelationsResult) bool {
+	if r == nil {
+		return false
+	}
+	if len(r.Relations) > 0 {
+		return true
+	}
+	if r.SavedCount > 0 {
+		// SavedCount は meaningful market / 関係の upsert 成功数のみを数える
+		return true
+	}
+	if r.MarketInfo == nil {
+		return false
+	}
+	return companyfetch.HasMeaningfulMarketInfo(
+		r.MarketInfo.IsListed, r.MarketInfo.MarketType, r.MarketInfo.StockCode,
+	)
 }

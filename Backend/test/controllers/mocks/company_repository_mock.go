@@ -33,6 +33,14 @@ func (m *CompanyRepositoryMock) CountActive() (int64, error) {
 	return args.Get(0).(int64), args.Error(1)
 }
 
+func (m *CompanyRepositoryMock) ListActiveFiltered(limit, offset int, name, status string) ([]models.Company, int64, error) {
+	args := m.Called(limit, offset, name, status)
+	if v := args.Get(0); v != nil {
+		return v.([]models.Company), args.Get(1).(int64), args.Error(2)
+	}
+	return nil, args.Get(1).(int64), args.Error(2)
+}
+
 func (m *CompanyRepositoryMock) FindAllPublished(limit, offset int) ([]models.Company, error) {
 	args := m.Called(limit, offset)
 	if v := args.Get(0); v != nil {

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import {
   Alert,
@@ -16,6 +17,7 @@ import {
 import { authService } from '@/lib/auth'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
+import { fetchCompanyPrimary, formatFetchPrimarySummary } from '@/lib/admin-company-fetch'
 
 export default function AdminCompanyInfoEditPage() {
   const params = useParams()
@@ -29,7 +31,6 @@ export default function AdminCompanyInfoEditPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
-  const [forceLoading, setForceLoading] = useState(false)
   const [confirmLoading, setConfirmLoading] = useState(false)
   const [fetchAllLoading, setFetchAllLoading] = useState(false)
   const [previewPending, setPreviewPending] = useState(false)
@@ -53,6 +54,7 @@ export default function AdminCompanyInfoEditPage() {
   const [infoFetchedAt, setInfoFetchedAt] = useState<string | null>(null)
   const [jobsFetchedAt, setJobsFetchedAt] = useState<string | null>(null)
   const [techFetchedAt, setTechFetchedAt] = useState<string | null>(null)
+  const [relationsFetchedAt, setRelationsFetchedAt] = useState<string | null>(null)
   const [lastModelUsed, setLastModelUsed] = useState('')
   const [lastFetchConfidence, setLastFetchConfidence] = useState('')
 
@@ -81,6 +83,7 @@ export default function AdminCompanyInfoEditPage() {
         setInfoFetchedAt(data.info_fetched_at || null)
         setJobsFetchedAt(data.jobs_fetched_at || null)
         setTechFetchedAt(data.tech_fetched_at || null)
+        setRelationsFetchedAt(data.relations_fetched_at || null)
         setLastModelUsed(data.last_model_used || '')
         setLastFetchConfidence(data.last_fetch_confidence || '')
         setPreviewPending(false)
@@ -137,72 +140,39 @@ export default function AdminCompanyInfoEditPage() {
     }
   }
 
-  const handleForceFetchAndSave = async () => {
-    setForceLoading(true)
-    setError('')
-    setSuccess('')
-    try {
-      const res = await fetch(`/api/admin/companies/${id}/fetch-info?force=true`, {
-        method: 'POST',
-        headers: authService.getAdminFetchHeaders(),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data?.error || '強制再取得に失敗しました')
-        return
-      }
-      applyInfoPayload(data)
-      loadCompany()
-      if (data.budget_exceeded) {
-        setSuccess('月次 Search 予算超過のため、既存キャッシュのみ返却しました（新規 Search なし）。コスト画面を確認してください。')
-      } else if (data.from_cache && data.skip_reason === 'ttl') {
-        setSuccess('TTL 内のためキャッシュを返却しました。再取得する場合は「強制再取得して保存」を使ってください。')
-      } else {
-        setSuccess('DBへ強制再取得・保存しました。')
-      }
-    } finally {
-      setForceLoading(false)
-    }
-  }
-
-  const handleFetchAllMissing = async () => {
+  const handleFetchPrimary = async (force = false) => {
     setFetchAllLoading(true)
     setError('')
     setSuccess('')
     try {
-      const res = await fetch(`/api/admin/companies/${id}/fetch-all`, {
-        method: 'POST',
-        headers: authService.getAdminFetchHeaders(),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setError(data?.error || '一括取得に失敗しました')
+      const { ok, status, data } = await fetchCompanyPrimary(
+        id,
+        authService.getAdminFetchHeaders(),
+        force,
+      )
+      if (!ok) {
+        setError(data?.error || `主3種の取得に失敗しました (${status})`)
         return
       }
-      const parts: string[] = []
-      const pushStep = (key: string, label: string) => {
-        const step = data[key] as { status?: string; count?: number; detail?: string } | undefined
-        if (!step?.status) return
-        if (step.status === 'fetched') {
-          parts.push(step.count != null ? `${label}取得(${step.count})` : `${label}取得`)
-        } else if (step.status === 'skipped') {
-          parts.push(`${label}スキップ`)
-        } else if (step.status === 'error') {
-          parts.push(`${label}失敗`)
-        }
+      if (data.info) applyInfoPayload(data.info)
+      if (data.tech && Array.isArray(data.tech.tech_stack) && data.tech.tech_stack.length > 0) {
+        setTechStack(JSON.stringify(data.tech.tech_stack))
       }
-      pushStep('info_step', '基本情報')
-      pushStep('jobs_step', '求人')
-      pushStep('tech_step', 'Tech')
-      pushStep('relations_step', '関係')
-      if (Array.isArray(data.errors) && data.errors.length > 0) {
-        setError(`一部失敗: ${(data.errors as string[]).join('; ')}`)
-      }
-      if (data.info && typeof data.info === 'object') {
-        applyInfoPayload(data.info as Record<string, unknown>)
+      if (data.company) {
+        const company = data.company
+        if (typeof company.description === 'string') setDescription(company.description)
+        if (typeof company.website_url === 'string') setWebsiteUrl(company.website_url)
+        if (typeof company.tech_stack === 'string') setTechStack(company.tech_stack)
+        if (company.info_fetched_at) setInfoFetchedAt(String(company.info_fetched_at))
+        if (company.tech_fetched_at) setTechFetchedAt(String(company.tech_fetched_at))
+        if (company.relations_fetched_at) setRelationsFetchedAt(String(company.relations_fetched_at))
       }
       loadCompany()
-      setSuccess(parts.length > 0 ? `不足情報の一括取得完了: ${parts.join(' / ')}` : '一括取得完了')
+      const summary = formatFetchPrimarySummary(data)
+      if (data.ok === false && Array.isArray(data.errors) && data.errors.length > 0) {
+        setError(`一部失敗: ${data.errors.join('; ')}`)
+      }
+      setSuccess(summary ? `主3種取得完了: ${summary}` : '主3種取得完了')
       setPreviewPending(false)
     } finally {
       setFetchAllLoading(false)
@@ -304,7 +274,7 @@ export default function AdminCompanyInfoEditPage() {
     <AdminFormContainer
       title={`基本情報編集: ${name}`}
       maxWidth={700}
-      backLabel="← 企業一覧に戻る"
+      backLabel="企業一覧に戻る"
       backHref="/admin/companies"
     >
       <ErrorAlert error={error} />
@@ -332,42 +302,51 @@ export default function AdminCompanyInfoEditPage() {
           <Button
             variant="contained"
             color="secondary"
-            onClick={handleFetchAllMissing}
-            disabled={fetchAllLoading || aiLoading || forceLoading}
+            onClick={() => handleFetchPrimary(false)}
+            disabled={fetchAllLoading || aiLoading}
             startIcon={fetchAllLoading ? <CircularProgress size={16} color="inherit" /> : null}
           >
-            {fetchAllLoading ? '一括取得中...' : '不足情報を一括取得（基本情報・求人など）'}
+            {fetchAllLoading ? '取得中...' : '主3種をまとめて取得'}
           </Button>
           <Button
             variant="outlined"
             color="secondary"
+            onClick={() => handleFetchPrimary(true)}
+            disabled={fetchAllLoading || aiLoading}
+          >
+            主3種を強制再取得
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
             onClick={handleAiFetch}
             disabled={!name.trim() || aiLoading || fetchAllLoading}
-            startIcon={aiLoading ? <CircularProgress size={16} color="inherit" /> : null}
+            startIcon={aiLoading ? <CircularProgress size={14} color="inherit" /> : null}
           >
-            {aiLoading ? '取得中...' : 'プレビュー取得（未保存）'}
+            {aiLoading ? '取得中...' : '基本のみプレビュー'}
           </Button>
           <Button
             variant="contained"
             color="primary"
+            size="small"
             onClick={handleConfirmSave}
             disabled={!previewPending || confirmLoading || !name.trim()}
-            startIcon={confirmLoading ? <CircularProgress size={16} color="inherit" /> : null}
+            startIcon={confirmLoading ? <CircularProgress size={14} color="inherit" /> : null}
           >
-            {confirmLoading ? '確定中...' : '確定して保存'}
+            {confirmLoading ? '確定中...' : 'プレビュー確定'}
           </Button>
-          <Button
-            variant="outlined"
-            onClick={handleForceFetchAndSave}
-            disabled={forceLoading || fetchAllLoading}
-            startIcon={forceLoading ? <CircularProgress size={16} color="inherit" /> : null}
-          >
-            {forceLoading ? '再取得中...' : '強制再取得して保存'}
-          </Button>
-          <Typography variant="caption" color="text.secondary">
-            一括取得は TTL 内の項目をスキップし、未取得の基本情報・求人・Tech・関係のみ取得します。
-          </Typography>
         </Stack>
+
+        {fetchAllLoading && (
+          <Alert severity="info">主3種（基本・技術・ビジネス関係）を1つのAPIで取得中...</Alert>
+        )}
+
+        <Typography variant="caption" color="text.secondary">
+          「主3種をまとめて取得」で基本・技術・ビジネス関係を1回のAPIで取得します。詳細編集は
+          <Link href={`/admin/companies/${id}/edit`}> 技術編集 </Link>/
+          <Link href={`/admin/companies/${id}/relations`}> 関係編集 </Link>
+          へ。
+        </Typography>
 
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
           <Chip size="small" label={`source: ${sourceType || '-'}`} />
@@ -375,10 +354,10 @@ export default function AdminCompanyInfoEditPage() {
           <Chip size="small" label={`model: ${lastModelUsed || '-'}`} />
         </Stack>
         <Typography variant="body2" color="text.secondary">
-          info: {formatTs(infoFetchedAt)} / jobs: {formatTs(jobsFetchedAt)} / tech: {formatTs(techFetchedAt)}
+          基本情報: {formatTs(infoFetchedAt)} / 技術: {formatTs(techFetchedAt)} / ビジネス関係: {formatTs(relationsFetchedAt)} / 求人: {formatTs(jobsFetchedAt)}
         </Typography>
         <Typography variant="caption" color="text.secondary">
-          TTL: 基本情報 90日 / 求人 7日 / Tech 30日。月次 Search 上限はコスト画面で確認できます。
+          TTL: 基本情報 90日 / 技術 30日 / ビジネス関係 60日 / 求人 7日。詳細な関係・市場は「ビジネス関係」画面、技術配列は「技術情報」画面で確認できます。
         </Typography>
 
         <Divider />

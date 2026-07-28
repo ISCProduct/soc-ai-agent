@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/companyfetch"
 	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/openai"
@@ -258,7 +259,7 @@ func (c *AdminCompanyGraphController) syncRelationsFromNodes(nodes map[string]*s
 						continue
 					}
 				}
-				desc := fmt.Sprintf("scraping:%s", node.OfficialName)
+				desc := companyfetch.NormalizeRelationDescription("", entry.relationType)
 				var upsertErr error
 				if models.IsCapitalRelationType(entry.relationType) {
 					// 資本関係は parent/child で保存（資本図表示用）
@@ -445,7 +446,7 @@ func (c *AdminCompanyGraphController) EnrichRelations(ctx echo.Context) error {
 					continue
 				}
 			}
-			desc := fmt.Sprintf("llm_web_search:%s", company.Name)
+			desc := companyfetch.NormalizeRelationDescription("", entry.relationType)
 			var upsertErr error
 			if models.IsCapitalRelationType(entry.relationType) {
 				var ratio *float64

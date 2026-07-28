@@ -156,6 +156,58 @@ func TestCompanyRelationsFetcher_ConfirmAndSave(t *testing.T) {
 	assert.Equal(t, 2, result.SavedCount)
 }
 
+func TestCompanyRelationsFetcher_FetchAndSave_EmptyUnlistedDoesNotStamp(t *testing.T) {
+	emptyJSON := `{"subsidiaries":[],"affiliates":[],"business_partners":[],"market_info":{"is_listed":false,"market_type":"unlisted","stock_code":""}}`
+	srv := makeChatCompletionsServer(t, emptyJSON)
+	defer srv.Close()
+
+	repo := &mocks.CompanyRepositoryMock{}
+	repo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "テスト株式会社"}, nil)
+
+	relRepo := &relationRepoMock{}
+	relRepo.On("GetRelationsByCompanyID", uint(1)).Return([]models.CompanyRelation{}, nil)
+	relRepo.On("GetMarketInfoByCompanyID", uint(1)).Return(nil, nil)
+
+	client := openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")
+	fetcher := services.NewCompanyRelationsFetcher(repo, relRepo, client)
+	result, err := fetcher.FetchAndSave(context.Background(), 1, true)
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.SavedCount)
+	assert.Empty(t, result.Relations)
+	repo.AssertNotCalled(t, "Update", mock.Anything)
+	assert.False(t, fetcher.HasStoredData(1))
+}
+
+func TestCompanyRelationsFetcher_TTLSkipsOnlyWhenMeaningfulData(t *testing.T) {
+	now := time.Now()
+	repo := &mocks.CompanyRepositoryMock{}
+	repo.On("FindByID", uint(1)).Return(&models.Company{
+		ID:                 1,
+		Name:               "テスト株式会社",
+		RelationsFetchedAt: &now,
+	}, nil)
+
+	relRepo := &relationRepoMock{}
+	relRepo.On("GetRelationsByCompanyID", uint(1)).Return([]models.CompanyRelation{}, nil).Maybe()
+	relRepo.On("GetMarketInfoByCompanyID", uint(1)).Return(&models.CompanyMarketInfo{
+		CompanyID:  1,
+		IsListed:   false,
+		MarketType: "unlisted",
+	}, nil).Maybe()
+
+	// unlisted のみなら TTL スキップせず Acquire に進むため LLM が必要
+	emptyJSON := `{"subsidiaries":[],"affiliates":[],"business_partners":[],"market_info":{"is_listed":false,"market_type":"unlisted","stock_code":""}}`
+	srv := makeChatCompletionsServer(t, emptyJSON)
+	defer srv.Close()
+	client := openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")
+	fetcher := services.NewCompanyRelationsFetcher(repo, relRepo, client)
+
+	result, err := fetcher.FetchAndSave(context.Background(), 1, false)
+	require.NoError(t, err)
+	assert.False(t, result.FromCache)
+	repo.AssertNotCalled(t, "Update", mock.Anything)
+}
+
 func TestCompanyRelationsFetcher_ConfirmAndSave_NilResult(t *testing.T) {
 	fetcher := services.NewCompanyRelationsFetcher(&mocks.CompanyRepositoryMock{}, &relationRepoMock{}, nil)
 	_, err := fetcher.ConfirmAndSave(1, nil)

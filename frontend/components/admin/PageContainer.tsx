@@ -4,13 +4,25 @@ type PageContainerProps = Omit<BoxProps, 'maxWidth'> & {
   maxWidth?: number | string
 }
 
-export function PageContainer({ maxWidth = 1000, sx, children, ...rest }: PageContainerProps) {
+/** 管理画面の標準ページ幅 */
+export const ADMIN_PAGE_WIDTH = {
+  form: 720,
+  standard: 1100,
+  wide: 1200,
+} as const
+
+export function PageContainer({
+  maxWidth = ADMIN_PAGE_WIDTH.standard,
+  sx,
+  children,
+  ...rest
+}: PageContainerProps) {
   const sxList = Array.isArray(sx) ? sx : [sx]
   return (
     <Box
       {...rest}
       sx={[
-        { p: 4, maxWidth, mx: 'auto' },
+        { p: { xs: 2, sm: 3, md: 4 }, maxWidth, mx: 'auto', width: '100%' },
         ...sxList,
       ]}
     >
@@ -18,4 +30,3 @@ export function PageContainer({ maxWidth = 1000, sx, children, ...rest }: PageCo
     </Box>
   )
 }
-

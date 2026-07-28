@@ -28,8 +28,11 @@ func (s *warmRepoStub) FindAllActive(int, int) ([]models.Company, error) { retur
 func (s *warmRepoStub) FindAllActiveNames(string) ([]models.CompanyName, error) {
 	return nil, nil
 }
-func (s *warmRepoStub) CountActive() (int64, error)                                { return 0, nil }
-func (s *warmRepoStub) FindAllPublished(int, int) ([]models.Company, error)        { return nil, nil }
+func (s *warmRepoStub) CountActive() (int64, error) { return 0, nil }
+func (s *warmRepoStub) ListActiveFiltered(int, int, string, string) ([]models.Company, int64, error) {
+	return nil, 0, nil
+}
+func (s *warmRepoStub) FindAllPublished(int, int) ([]models.Company, error) { return nil, nil }
 func (s *warmRepoStub) CountPublished() (int64, error)                             { return 0, nil }
 func (s *warmRepoStub) FindByID(uint) (*models.Company, error)                     { return nil, nil }
 func (s *warmRepoStub) FindByName(string) (*models.Company, error)                 { return nil, nil }

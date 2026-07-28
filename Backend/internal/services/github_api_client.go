@@ -39,7 +39,8 @@ func (s *GitHubService) fetchRepositories(ctx context.Context, client *http.Clie
 	allTypeRepos, err := s.FetchRepoPages(ctx, client, token,
 		fmt.Sprintf("%s/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&per_page=100", githubAPIBase))
 	if err != nil {
-		log.Printf("[GitHubService] fetchRepos(affiliation=all) warning: %v", err)
+		// 主取得の失敗（無効トークン・401 など）は握りつぶさず同期失敗として返す
+		return nil, fmt.Errorf("fetch repositories: %w", err)
 	}
 	allRepos := allTypeRepos
 	for _, r := range allTypeRepos {
@@ -97,6 +98,18 @@ type InsufficientScopesError struct {
 func (e *InsufficientScopesError) Error() string {
 	return fmt.Sprintf("GitHubトークンに必要なスコープが不足しています（%s）。GitHubアカウントを再連携してください。",
 		strings.Join(e.Missing, ", "))
+}
+
+// GitHubReauthRequiredError トークン失効・復号失敗などで再連携が必要なエラー
+type GitHubReauthRequiredError struct {
+	Reason string
+}
+
+func (e *GitHubReauthRequiredError) Error() string {
+	if e.Reason != "" {
+		return e.Reason
+	}
+	return "GitHub連携の再認証が必要です。GitHubアカウントを再連携してください。"
 }
 
 // hasScopes トークンが必要なスコープをすべて持っているか確認する

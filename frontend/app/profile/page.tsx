@@ -93,13 +93,20 @@ function ProfilePageContent() {
     setIsFirstTime(firstTime)
 
     // Googleカレンダー連携状態を取得
-    fetch(`${BACKEND_URL}/api/google-calendar/status`, {
-      headers: authService.getUserFetchHeaders(),
-      credentials: 'include',
-    })
-      .then((r) => r.json())
-      .then((d) => setCalendarConnected(d.connected === true))
-      .catch(() => {})
+    void (async () => {
+      try {
+        await authService.ensureFreshUserToken()
+        const r = await fetch(`${BACKEND_URL}/api/google-calendar/status`, {
+          headers: authService.getUserFetchHeaders(),
+          credentials: 'include',
+        })
+        if (!r.ok) return
+        const d = await r.json()
+        setCalendarConnected(d.connected === true)
+      } catch {
+        // 未ログイン・期限切れ時は連携状態を取得しない
+      }
+    })()
 
     // コールバック後のメッセージ処理
     const calendarConnectedParam = searchParams.get('calendar_connected')
@@ -147,6 +154,7 @@ function ProfilePageContent() {
     if (!user) return
     setDeleting(true)
     try {
+      await authService.ensureFreshUserToken()
       const res = await fetch(`/api/auth/account?user_id=${user.user_id}`, {
         method: 'DELETE',
         headers: authService.getUserFetchHeaders(),
@@ -166,17 +174,29 @@ function ProfilePageContent() {
 
   const handleCalendarConnect = async () => {
     if (!user) return
+    setCalendarMessage('')
     try {
+      await authService.ensureFreshUserToken()
       // バックエンドから認証URLを取得し、ブラウザをリダイレクト
       // credentials: 'include' でstateクッキーをブラウザに設定する
       const res = await fetch(`${BACKEND_URL}/api/google-calendar/connect`, {
         headers: { ...authService.getUserFetchHeaders(), Accept: 'application/json' },
         credentials: 'include',
       })
+      if (res.status === 401) {
+        setCalendarMessage('ログインの有効期限が切れました。再ログインしてください。')
+        return
+      }
       if (!res.ok) throw new Error('Failed to get auth URL')
       const data = await res.json()
+      if (!data?.auth_url) throw new Error('auth_url missing')
       window.location.href = data.auth_url
-    } catch {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : ''
+      if (msg.includes('Unauthorized') || msg.includes('再ログイン')) {
+        setCalendarMessage('ログインの有効期限が切れました。再ログインしてください。')
+        return
+      }
       setCalendarMessage('Googleカレンダー連携の開始に失敗しました')
     }
   }
@@ -185,6 +205,7 @@ function ProfilePageContent() {
     setCalendarLoading(true)
     setCalendarMessage('')
     try {
+      await authService.ensureFreshUserToken()
       const res = await fetch(`${BACKEND_URL}/api/google-calendar/disconnect`, {
         method: 'DELETE',
         headers: authService.getUserFetchHeaders(),
@@ -193,6 +214,15 @@ function ProfilePageContent() {
       if (res.ok) {
         setCalendarConnected(false)
         setCalendarMessage('Googleカレンダーの連携を解除しました')
+      } else if (res.status === 401) {
+        setCalendarMessage('ログインの有効期限が切れました。再ログインしてください。')
+      } else {
+        setCalendarMessage('連携解除に失敗しました')
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : ''
+      if (msg.includes('Unauthorized') || msg.includes('再ログイン')) {
+        setCalendarMessage('ログインの有効期限が切れました。再ログインしてください。')
       } else {
         setCalendarMessage('連携解除に失敗しました')
       }

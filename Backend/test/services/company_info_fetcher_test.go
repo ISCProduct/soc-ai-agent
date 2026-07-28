@@ -51,6 +51,7 @@ func TestCompanyInfoFetcher_FetchAndSave_TTLCache(t *testing.T) {
 		ID:            1,
 		Name:          "テスト株式会社",
 		Description:   "キャッシュ済み概要",
+		WebsiteURL:    "https://example.com",
 		Industry:      "IT",
 		InfoFetchedAt: &now,
 		SourceType:    "gbizinfo",
@@ -64,6 +65,34 @@ func TestCompanyInfoFetcher_FetchAndSave_TTLCache(t *testing.T) {
 	assert.Equal(t, "ttl", result.SkipReason)
 	assert.False(t, result.BudgetExceeded)
 	repo.AssertNotCalled(t, "Update", mock.Anything)
+}
+
+func TestCompanyInfoFetcher_FetchAndSave_EmptyDespiteTTLReFetches(t *testing.T) {
+	now := time.Now()
+	srv := makeChatCompletionsServer(t, validCompanyInfoJSON())
+	defer srv.Close()
+
+	repo := &mocks.CompanyRepositoryMock{}
+	repo.On("FindByID", uint(1)).Return(&models.Company{
+		ID:            1,
+		Name:          "テスト株式会社",
+		Description:   "",
+		WebsiteURL:    "",
+		InfoFetchedAt: &now, // スタンプ済みだが中身なし
+	}, nil)
+	repo.On("Update", mock.AnythingOfType("*models.Company")).Return(nil).Run(func(args mock.Arguments) {
+		c := args.Get(0).(*models.Company)
+		assert.NotEmpty(t, c.Description)
+		assert.NotEmpty(t, c.WebsiteURL)
+		assert.NotNil(t, c.InfoFetchedAt)
+	})
+
+	client := openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")
+	fetcher := services.NewCompanyInfoFetcher(repo, client)
+	result, err := fetcher.FetchAndSave(context.Background(), 1, false)
+	require.NoError(t, err)
+	assert.False(t, result.FromCache)
+	assert.NotEmpty(t, result.Description)
 }
 
 type denySearchBudget struct{}
@@ -174,6 +203,7 @@ func TestCompanyInfoFetcher_ConfirmAndSave(t *testing.T) {
 	result, err := fetcher.ConfirmAndSave(1, &services.CompanyInfoResult{
 		Description:    "テスト企業の概要",
 		Industry:       "IT・ソフトウェア",
+		WebsiteURL:     "https://example.com",
 		MainBusiness:   "クラウドサービスの開発",
 		TechStack:      "Go, TypeScript",
 		WelfareDetails: "リモート可・住宅手当",
@@ -184,6 +214,7 @@ func TestCompanyInfoFetcher_ConfirmAndSave(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "クラウドサービスの開発", result.MainBusiness)
 	assert.Equal(t, "Go, TypeScript", result.TechStack)
+	assert.Equal(t, "https://example.com", result.WebsiteURL)
 	assert.Equal(t, "web_search", result.Source)
 }
 

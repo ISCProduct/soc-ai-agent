@@ -69,9 +69,11 @@ func buildCORSMiddleware() func(http.Handler) http.Handler {
 			w.Header().Add("Vary", "Origin")
 			if isAllowedOrigin {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
+				// credentials: 'include' 付きのフロント直叩き（Googleカレンダー OAuth など）に必要
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID, X-User-Token, X-Admin-Email, X-Admin-Token")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-User-ID, X-User-Token, X-Admin-Email, X-Admin-Token")
 
 			if r.Method == "OPTIONS" {
 				if origin != "" && !isAllowedOrigin {

@@ -1,10 +1,8 @@
 'use client'
 
-import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import {
   Alert,
-  Box,
   Button,
   Card,
   CardContent,
@@ -15,7 +13,6 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
-  IconButton,
   Stack,
   Table,
   TableBody,
@@ -25,8 +22,9 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService } from '@/lib/auth'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 
 type RecalcResult = {
   company_id: number
@@ -164,22 +162,18 @@ export default function AdminProfileRecalculationPage() {
   }
 
   return (
-    <Box sx={{ p: 4, maxWidth: 960, mx: 'auto' }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-        <IconButton component={Link} href="/admin"><ArrowBackIcon /></IconButton>
-        <Typography variant="h4" fontWeight="bold">
-          プロファイル再計算
-        </Typography>
-      </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        企業マッチングプロファイルを再計算します。サンプル数が少ない企業はスキップされます。
-      </Typography>
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
+      <AdminPageHeader
+        title="プロファイル再計算"
+        description="企業マッチングプロファイルを再計算します。サンプル数が少ない企業はスキップされます。"
+        backHref="/admin"
+      />
 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>{success}</Alert>}
 
       <Stack spacing={3}>
-        <Card>
+        <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>一括再計算</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -237,7 +231,7 @@ export default function AdminProfileRecalculationPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>個別再計算</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -278,7 +272,7 @@ export default function AdminProfileRecalculationPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>再計算履歴</Typography>
             <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
@@ -350,6 +344,6 @@ export default function AdminProfileRecalculationPage() {
           </Button>
         </DialogActions>
       </Dialog>
-    </Box>
+    </PageContainer>
   )
 }

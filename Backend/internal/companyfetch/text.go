@@ -53,6 +53,39 @@ func IsFresh(fetchedAt *time.Time, ttl time.Duration) bool {
 	return time.Since(*fetchedAt) < ttl
 }
 
+// IsEmptyTechPayload は tech_stack が未設定／空配列相当なら true。
+func IsEmptyTechPayload(techStack string) bool {
+	t := strings.TrimSpace(techStack)
+	return t == "" || t == "[]" || t == "null" || t == "{}"
+}
+
+// HasTechData は技術・インフラ・CI/CD・開発手法のいずれかが入っているか。
+func HasTechData(techStack, infraStack, cicdTools, developmentStyle string) bool {
+	return !IsEmptyTechPayload(techStack) ||
+		!IsEmptyTechPayload(infraStack) ||
+		!IsEmptyTechPayload(cicdTools) ||
+		strings.TrimSpace(developmentStyle) != ""
+}
+
+// HasBasicInfo は基本情報として最低限の概要・公式URLがあるか。
+func HasBasicInfo(description, websiteURL string) bool {
+	return strings.TrimSpace(description) != "" && strings.TrimSpace(websiteURL) != ""
+}
+
+// HasMeaningfulMarketInfo は「非上場のみ」を除き、上場区分や証券コードなど実質的な市場情報があるか。
+// market_type=unlisted だけのレコードは取得成功とみなさない（再取得を止めてしまうため）。
+func HasMeaningfulMarketInfo(isListed bool, marketType, stockCode string) bool {
+	if isListed || strings.TrimSpace(stockCode) != "" {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(marketType)) {
+	case "prime", "standard", "growth":
+		return true
+	default:
+		return false
+	}
+}
+
 // NormalizeHTMLText は HTML をプレーンテキストへ正規化する。
 func NormalizeHTMLText(rawHTML string) string {
 	clean := scriptRe.ReplaceAllString(rawHTML, " ")

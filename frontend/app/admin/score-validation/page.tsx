@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
 import {
   Alert,
   Box,
@@ -12,8 +11,6 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  Divider,
-  IconButton,
   Paper,
   Stack,
   Tab,
@@ -27,11 +24,12 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import AddIcon from '@mui/icons-material/Add'
 import { authService } from '@/lib/auth'
 import { correlationLabel, correlationColor, formatPercent } from '@/lib/score-validation-utils'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 
 // ── 型定義 ──────────────────────────────────────────────────────────────────
 
@@ -531,17 +529,13 @@ export default function ScoreValidationPage() {
   }, [])
 
   return (
-    <Box sx={{ p: 4, maxWidth: 1200, mx: 'auto' }}>
-      <Stack direction="row" alignItems="center" spacing={2} mb={3}>
-        <IconButton component={Link} href="/admin">
-          <ArrowBackIcon />
-        </IconButton>
-        <Typography variant="h5" fontWeight={700} flex={1}>
-          スコア精度検証
-        </Typography>
-      </Stack>
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.wide}>
+      <AdminPageHeader
+        title="スコア精度検証"
+        backHref="/admin"
+      />
 
-      <Paper elevation={1}>
+      <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
         <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider', px: 2 }}>
           <Tab label="相関分析" />
           <Tab label="フェーズ別メトリクス" />
@@ -555,6 +549,6 @@ export default function ScoreValidationPage() {
           {tab === 3 && <CalibrationTab headers={headers} />}
         </Box>
       </Paper>
-    </Box>
+    </PageContainer>
   )
 }
