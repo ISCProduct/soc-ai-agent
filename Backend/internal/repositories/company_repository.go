@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"Backend/internal/companyfetch"
 	"Backend/internal/models"
 	"strings"
 	"time"
@@ -282,4 +283,30 @@ WHERE c.is_active = ?
 		return nil, err
 	}
 	return stats, nil
+}
+
+// ListActiveMissingFetchCandidates は info/jobs/tech/relations のいずれかが未取得または TTL 切れのアクティブ企業を返す。
+// 公開企業を優先し、不足埋めバッチ（#633）で使う。
+func (r *CompanyRepository) ListActiveMissingFetchCandidates(limit int) ([]models.Company, error) {
+	if limit <= 0 {
+		limit = 60
+	}
+	now := time.Now()
+	infoCutoff := now.Add(-companyfetch.TTLInfo)
+	jobsCutoff := now.Add(-companyfetch.TTLJobs)
+	techCutoff := now.Add(-companyfetch.TTLTech)
+	relCutoff := now.Add(-companyfetch.TTLRelations)
+
+	var companies []models.Company
+	err := r.db.Where("is_active = ?", true).
+		Where(`
+			info_fetched_at IS NULL OR info_fetched_at < ? OR TRIM(COALESCE(description, '')) = '' OR TRIM(COALESCE(website_url, '')) = ''
+			OR jobs_fetched_at IS NULL OR jobs_fetched_at < ?
+			OR tech_fetched_at IS NULL OR tech_fetched_at < ? OR TRIM(COALESCE(tech_stack, '')) = ''
+			OR relations_fetched_at IS NULL OR relations_fetched_at < ?
+		`, infoCutoff, jobsCutoff, techCutoff, relCutoff).
+		Order("CASE WHEN data_status = 'published' THEN 0 ELSE 1 END, id ASC").
+		Limit(limit).
+		Find(&companies).Error
+	return companies, err
 }

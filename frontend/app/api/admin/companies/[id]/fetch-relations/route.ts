@@ -11,7 +11,7 @@ export async function POST(
   const { id } = await params
   const force = request.nextUrl.searchParams.get('force')
   const qs = force === 'true' ? '?force=true' : ''
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/fetch-tech-stack${qs}`, {
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/fetch-relations${qs}`, {
     method: 'POST',
     headers: {
       'X-Admin-Email': request.headers.get('x-admin-email') || '',

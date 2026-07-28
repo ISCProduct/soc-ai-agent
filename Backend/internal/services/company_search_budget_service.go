@@ -141,6 +141,16 @@ func (s *CompanySearchBudgetService) notifyIfNeeded(status CompanySearchBudgetSt
 			}
 		}
 	}
+
+	if webhook := strings.TrimSpace(os.Getenv("COMPANY_SEARCH_ALERT_DISCORD_WEBHOOK_URL")); webhook != "" {
+		if err := postCompanySearchDiscordAlert(webhook, subject+"\n"+body); err != nil {
+			log.Printf("[CompanySearchBudget] discord alert failed: %v", err)
+		}
+	} else if webhook := strings.TrimSpace(os.Getenv("OPENAI_COST_ALERT_DISCORD_WEBHOOK_URL")); webhook != "" {
+		if err := postCompanySearchDiscordAlert(webhook, subject+"\n"+body); err != nil {
+			log.Printf("[CompanySearchBudget] discord alert (openai cost webhook) failed: %v", err)
+		}
+	}
 }
 
 func postCompanySearchSlackAlert(webhookURL, text string) error {
@@ -159,6 +169,30 @@ func postCompanySearchSlackAlert(webhookURL, text string) error {
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("slack webhook status=%d", resp.StatusCode)
+	}
+	return nil
+}
+
+func postCompanySearchDiscordAlert(webhookURL, text string) error {
+	// Discord Incoming Webhook: content 最大 2000 文字
+	if len(text) > 1900 {
+		text = text[:1900] + "…"
+	}
+	payload := map[string]string{"content": text}
+	b, _ := json.Marshal(payload)
+	req, err := http.NewRequest(http.MethodPost, webhookURL, bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("discord webhook status=%d", resp.StatusCode)
 	}
 	return nil
 }

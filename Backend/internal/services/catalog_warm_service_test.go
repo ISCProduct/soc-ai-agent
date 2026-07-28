@@ -53,6 +53,9 @@ func (s *warmRepoStub) ListJobPositions(*uint, int) ([]models.CompanyJobPosition
 }
 func (s *warmRepoStub) CreateOrUpdateWeightProfile(*models.CompanyWeightProfile) error { return nil }
 func (s *warmRepoStub) CountWeightProfiles() (int64, error)                            { return 0, nil }
+func (s *warmRepoStub) ListActiveMissingFetchCandidates(int) ([]models.Company, error) {
+	return nil, nil
+}
 
 func TestL1WarmPriority_SIFirst(t *testing.T) {
 	if got := L1WarmPriority("株式会社テスト", "情報サービス・SI"); got != 0 {

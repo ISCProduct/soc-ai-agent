@@ -223,6 +223,9 @@ func main() {
 	infoFetcher := services.NewCompanyInfoFetcher(companyRepo, aiClient, gbizInfoService)
 	infoFetcher.SetSearchBudget(companySearchBudget)
 	infoFetcher.SetSearchFlight(companySearchFlight)
+	relationsFetcher := services.NewCompanyRelationsFetcher(companyRepo, companyRelationRepo, aiClient, gbizInfoService)
+	relationsFetcher.SetSearchBudget(companySearchBudget)
+	relationsFetcher.SetSearchFlight(companySearchFlight)
 	jobFetcher := services.NewJobFetchService(companyRepo, aiClient)
 	jobFetcher.SetSearchBudget(companySearchBudget)
 	jobFetcher.SetSearchFlight(companySearchFlight)
@@ -267,6 +270,7 @@ func main() {
 	resumeService.SetCompanyRepo(companyRepo)
 	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
+	adminCompanyController.SetRelationsFetcher(relationsFetcher)
 	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
 	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
 	adminAuditController := controllers.NewAdminAuditController(auditLogService)
@@ -278,6 +282,7 @@ func main() {
 		Threshold: config.CompanyGraphThreshold(),
 	}
 	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService, aiClient)
+	adminCompanyGraphController.SetRelationsFetcher(relationsFetcher)
 	resumeController := controllers.NewResumeController(resumeService)
 
 	// S3 upload service for interview videos (optional — skipped if env vars are not set)

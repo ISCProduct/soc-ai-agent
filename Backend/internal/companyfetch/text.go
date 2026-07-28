@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	TTLInfo = 90 * 24 * time.Hour
-	TTLJobs = 7 * 24 * time.Hour
-	TTLTech = 30 * 24 * time.Hour
+	TTLInfo       = 90 * 24 * time.Hour
+	TTLJobs       = 7 * 24 * time.Hour
+	TTLTech       = 30 * 24 * time.Hour
+	TTLRelations  = 60 * 24 * time.Hour
 
 	ConfidenceHigh   = "high"
 	ConfidenceMedium = "medium"

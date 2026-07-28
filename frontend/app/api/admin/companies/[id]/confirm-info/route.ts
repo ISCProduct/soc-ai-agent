@@ -9,15 +9,16 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const force = request.nextUrl.searchParams.get('force')
-  const qs = force === 'true' ? '?force=true' : ''
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/fetch-tech-stack${qs}`, {
+  const body = await request.text()
+  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/confirm-info`, {
     method: 'POST',
     headers: {
+      'Content-Type': 'application/json',
       'X-Admin-Email': request.headers.get('x-admin-email') || '',
       'X-Admin-Token': request.headers.get('x-admin-token') || '',
     },
-    signal: AbortSignal.timeout(120_000),
+    body,
+    signal: AbortSignal.timeout(60_000),
   })
   const raw = await response.text()
   let data: Record<string, unknown> = {}
