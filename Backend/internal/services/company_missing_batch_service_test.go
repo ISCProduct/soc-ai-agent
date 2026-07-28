@@ -43,4 +43,32 @@ func TestMissingNeedsFromCompany(t *testing.T) {
 	if !info || jobs || tech || rel {
 		t.Fatalf("stale info only: info=%v jobs=%v tech=%v rel=%v", info, jobs, tech, rel)
 	}
+
+	emptyTech := &models.Company{
+		Description:        "概要",
+		WebsiteURL:         "https://example.com",
+		TechStack:          "[]",
+		InfoFetchedAt:      &now,
+		JobsFetchedAt:      &now,
+		TechFetchedAt:      &now,
+		RelationsFetchedAt: &now,
+	}
+	_, _, tech, _ = MissingNeedsFromCompany(emptyTech)
+	if !tech {
+		t.Fatal("empty tech payload [] should need tech")
+	}
+
+	emptyInfoDespiteStamp := &models.Company{
+		Description:        "",
+		WebsiteURL:         "",
+		TechStack:          `["Go"]`,
+		InfoFetchedAt:      &now,
+		JobsFetchedAt:      &now,
+		TechFetchedAt:      &now,
+		RelationsFetchedAt: &now,
+	}
+	info, _, _, _ = MissingNeedsFromCompany(emptyInfoDespiteStamp)
+	if !info {
+		t.Fatal("fresh InfoFetchedAt with empty description/url should still need info")
+	}
 }

@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
 import {
   Alert,
   Box,
@@ -10,7 +9,6 @@ import {
   CircularProgress,
   Divider,
   FormControlLabel,
-  IconButton,
   MenuItem,
   Paper,
   Stack,
@@ -24,8 +22,9 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService } from '@/lib/auth'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 
 type CollectionStatus = {
   name: string
@@ -137,20 +136,14 @@ export default function AdminVectorPage() {
   }
 
   return (
-    <Box sx={{ p: 4, maxWidth: 960, mx: 'auto' }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-        <IconButton component={Link} href="/admin">
-          <ArrowBackIcon />
-        </IconButton>
-        <Typography variant="h4" fontWeight="bold">
-          ベクトルDB管理
-        </Typography>
-      </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Chroma のコレクション件数確認と、企業単位の削除・再埋め込みを行います（#573 Phase 3）。
-      </Typography>
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
+      <AdminPageHeader
+        title="ベクトルDB管理"
+        description="Chroma のコレクション件数確認と、企業単位の削除・再埋め込みを行います（#573 Phase 3）。"
+        backHref="/admin"
+      />
 
-      <Paper sx={{ p: 3, mb: 3 }}>
+      <Paper elevation={0} sx={{ p: 3, mb: 3, border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
           <TextField
             label="企業名フィルタ（任意）"
@@ -208,7 +201,7 @@ export default function AdminVectorPage() {
         )}
       </Paper>
 
-      <Paper sx={{ p: 3 }}>
+      <Paper elevation={0} sx={{ p: 3, border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
         <Typography variant="h6" gutterBottom>
           再埋め込み
         </Typography>
@@ -247,6 +240,6 @@ export default function AdminVectorPage() {
           {reembedResult && <Alert severity="info">{reembedResult}</Alert>}
         </Stack>
       </Paper>
-    </Box>
+    </PageContainer>
   )
 }

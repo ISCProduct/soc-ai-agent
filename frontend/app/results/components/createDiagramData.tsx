@@ -13,6 +13,7 @@ import {
   type CompanyMarketInfo,
   type MarketType,
 } from '@/lib/company-data'
+import { formatRelationLabel } from '@/lib/relation-labels'
 import { collectRelatedCompanyIds, resolveCompanyNameFromRelations } from '../utils'
 
 /**
@@ -115,7 +116,7 @@ export function createDiagramData(
           source: String(rel.from_id),
           target: String(rel.to_id),
           type: 'custom',
-          label: rel.description || rel.relation_type,
+          label: formatRelationLabel(rel.description, rel.relation_type),
           animated: true,
           style: {
             stroke: '#2196F3',

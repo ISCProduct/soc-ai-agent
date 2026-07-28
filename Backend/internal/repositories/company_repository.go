@@ -40,6 +40,28 @@ func (r *CompanyRepository) CountActive() (int64, error) {
 	return count, err
 }
 
+// ListActiveFiltered は名前・公開ステータスで絞り込んだアクティブ企業を返す。
+// status は "draft" / "published" / ""（指定なし=すべて）。
+func (r *CompanyRepository) ListActiveFiltered(limit, offset int, name, status string) ([]models.Company, int64, error) {
+	q := r.db.Model(&models.Company{}).Where("is_active = ?", true)
+	if name = strings.TrimSpace(name); name != "" {
+		q = q.Where("name LIKE ?", "%"+name+"%")
+	}
+	switch strings.TrimSpace(status) {
+	case "draft", "published":
+		q = q.Where("data_status = ?", status)
+	}
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var companies []models.Company
+	err := q.Order("id desc").Limit(limit).Offset(offset).Find(&companies).Error
+	return companies, total, err
+}
+
 // FindAllActiveNames アクティブ企業のIDと名前を取得（フィルタ q で部分一致）
 func (r *CompanyRepository) FindAllActiveNames(q string) ([]models.CompanyName, error) {
 	var names []models.CompanyName
@@ -159,7 +181,12 @@ func (r *CompanyRepository) CreateJobPosition(position *models.CompanyJobPositio
 
 // UpdateJobPosition 募集職種を更新
 func (r *CompanyRepository) UpdateJobPosition(position *models.CompanyJobPosition) error {
-	return r.db.Save(position).Error
+	db := r.db.Omit("Company", "JobCategory")
+	if position.JobCategoryID == 0 {
+		// FK: job_category_id=0 は不正。未設定は NULL のまま維持する
+		db = db.Omit("JobCategoryID")
+	}
+	return db.Save(position).Error
 }
 
 // FindJobPositionsByCompany 企業の公開済み募集職種を取得（公開ユーザー向け）
@@ -302,8 +329,32 @@ func (r *CompanyRepository) ListActiveMissingFetchCandidates(limit int) ([]model
 		Where(`
 			info_fetched_at IS NULL OR info_fetched_at < ? OR TRIM(COALESCE(description, '')) = '' OR TRIM(COALESCE(website_url, '')) = ''
 			OR jobs_fetched_at IS NULL OR jobs_fetched_at < ?
-			OR tech_fetched_at IS NULL OR tech_fetched_at < ? OR TRIM(COALESCE(tech_stack, '')) = ''
+			OR NOT EXISTS (
+				SELECT 1 FROM company_job_positions jp
+				WHERE jp.company_id = companies.id AND jp.deleted_at IS NULL
+			)
+			OR tech_fetched_at IS NULL OR tech_fetched_at < ?
+			OR TRIM(COALESCE(tech_stack, '')) = ''
+			OR TRIM(COALESCE(tech_stack, '')) IN ('[]', 'null', '{}')
 			OR relations_fetched_at IS NULL OR relations_fetched_at < ?
+			OR (
+				NOT EXISTS (
+					SELECT 1 FROM company_relations cr
+					WHERE cr.deleted_at IS NULL AND cr.is_active = 1 AND (
+						cr.parent_id = companies.id OR cr.child_id = companies.id
+						OR cr.from_id = companies.id OR cr.to_id = companies.id
+					)
+				)
+				AND NOT EXISTS (
+					SELECT 1 FROM company_market_info mi
+					WHERE mi.company_id = companies.id AND mi.deleted_at IS NULL
+					AND (
+						mi.is_listed = 1
+						OR TRIM(COALESCE(mi.stock_code, '')) <> ''
+						OR LOWER(TRIM(COALESCE(mi.market_type, ''))) IN ('prime', 'standard', 'growth')
+					)
+				)
+			)
 		`, infoCutoff, jobsCutoff, techCutoff, relCutoff).
 		Order("CASE WHEN data_status = 'published' THEN 0 ELSE 1 END, id ASC").
 		Limit(limit).

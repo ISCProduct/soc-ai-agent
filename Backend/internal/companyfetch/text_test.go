@@ -23,6 +23,36 @@ func TestIsFresh(t *testing.T) {
 	assert.False(t, IsFresh(&stale, TTLJobs))
 }
 
+func TestIsEmptyTechPayload(t *testing.T) {
+	assert.True(t, IsEmptyTechPayload(""))
+	assert.True(t, IsEmptyTechPayload("  "))
+	assert.True(t, IsEmptyTechPayload("[]"))
+	assert.True(t, IsEmptyTechPayload("null"))
+	assert.True(t, IsEmptyTechPayload("{}"))
+	assert.False(t, IsEmptyTechPayload(`["Go"]`))
+	assert.False(t, IsEmptyTechPayload("Go, TypeScript"))
+}
+
+func TestHasTechData(t *testing.T) {
+	assert.False(t, HasTechData("", "", "", ""))
+	assert.False(t, HasTechData("[]", "", "", ""))
+	assert.True(t, HasTechData(`["Go"]`, "", "", ""))
+	assert.True(t, HasTechData("", `["AWS"]`, "", ""))
+	assert.True(t, HasTechData("", "", `["Actions"]`, ""))
+	assert.True(t, HasTechData("", "", "", "スクラム"))
+}
+
+func TestHasMeaningfulMarketInfo(t *testing.T) {
+	assert.False(t, HasMeaningfulMarketInfo(false, "", ""))
+	assert.False(t, HasMeaningfulMarketInfo(false, "unlisted", ""))
+	assert.False(t, HasMeaningfulMarketInfo(false, "UNLISTED", "  "))
+	assert.True(t, HasMeaningfulMarketInfo(true, "unlisted", ""))
+	assert.True(t, HasMeaningfulMarketInfo(false, "prime", ""))
+	assert.True(t, HasMeaningfulMarketInfo(false, "standard", ""))
+	assert.True(t, HasMeaningfulMarketInfo(false, "growth", ""))
+	assert.True(t, HasMeaningfulMarketInfo(false, "unlisted", "4755"))
+}
+
 func TestTrimText(t *testing.T) {
 	assert.Equal(t, "abc", TrimText("  abc  ", 10))
 	long := "あいうえおかきくけこ"

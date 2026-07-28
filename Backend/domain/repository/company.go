@@ -22,6 +22,8 @@ type CompanyRepository interface {
 	FindAllActive(limit, offset int) ([]models.Company, error)
 	FindAllActiveNames(q string) ([]models.CompanyName, error)
 	CountActive() (int64, error)
+	// ListActiveFiltered は名前・公開ステータスで絞り込んだアクティブ企業一覧と総件数を返す。
+	ListActiveFiltered(limit, offset int, name, status string) ([]models.Company, int64, error)
 	FindAllPublished(limit, offset int) ([]models.Company, error)
 	CountPublished() (int64, error)
 	FindByID(id uint) (*models.Company, error)

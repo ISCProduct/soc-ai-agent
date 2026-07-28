@@ -93,7 +93,8 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 		return nil, fmt.Errorf("company not found: %w", err)
 	}
 
-	if !forceRefresh && companyfetch.IsFresh(company.InfoFetchedAt, companyfetch.TTLInfo) {
+	if !forceRefresh && companyfetch.IsFresh(company.InfoFetchedAt, companyfetch.TTLInfo) &&
+		companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
 		return markInfoCacheSkip(companyInfoFromModel(company), "ttl", false), nil
 	}
 
@@ -127,7 +128,11 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 	// Search フォールバック時も SourceURL を明示更新し、旧スクレイプ URL の残存を防ぐ
 	company.SourceURL = result.SourceURL
 	company.SourceFetchedAt = &now
-	company.InfoFetchedAt = &now
+	// 空結果で InfoFetchedAt だけ進むと「取得済みだが中身なし」で再取得不能になるため、
+	// 最低限の基本情報が揃ったときのみスタンプする。
+	if companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
+		company.InfoFetchedAt = &now
+	}
 	company.LastModelUsed = result.ModelUsed
 	company.LastFetchConfidence = result.Confidence
 
@@ -157,7 +162,10 @@ func (f *CompanyInfoFetcher) ConfirmAndSave(companyID uint, result *CompanyInfoR
 		company.SourceURL = result.SourceURL
 	}
 	company.SourceFetchedAt = &now
-	company.InfoFetchedAt = &now
+	// 空プレビュー確定で InfoFetchedAt だけ進まないようにする
+	if companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
+		company.InfoFetchedAt = &now
+	}
 	if result.ModelUsed != "" {
 		company.LastModelUsed = result.ModelUsed
 	}

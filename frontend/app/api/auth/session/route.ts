@@ -5,6 +5,26 @@ import {
   setSessionCookies,
 } from '@/lib/session-cookies'
 
+// middleware が Cookie をリフレッシュしたあと、有効な user_token をクライアントへ返す。
+// 面接など Backend 直叩き API は sessionStorage の JWT を使うため、Cookie と同期する (#616)。
+export async function GET(request: NextRequest) {
+  const userId =
+    request.headers.get('X-User-ID') ||
+    request.cookies.get('user_id')?.value
+  const userToken =
+    request.headers.get('X-User-Token') ||
+    request.cookies.get('user_token')?.value
+
+  if (!userId || !userToken) {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  }
+
+  return NextResponse.json({
+    user_id: Number(userId),
+    user_token: userToken,
+  })
+}
+
 export async function POST(request: NextRequest) {
   const { userId, userToken, refreshToken } = await request.json()
   if (!userId || !userToken) {

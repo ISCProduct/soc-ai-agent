@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -89,6 +90,13 @@ func (c *GitHubController) SyncAndWait(ctx echo.Context) error {
 		var scopeErr *services.InsufficientScopesError
 		if errors.As(err, &scopeErr) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
+		var reauthErr *services.GitHubReauthRequiredError
+		if errors.As(err, &reauthErr) {
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
+		if strings.Contains(err.Error(), "github profile not found") {
+			return echo.NewHTTPError(http.StatusNotFound, "github profile not found: please connect your GitHub account")
 		}
 		return echoInternalError(err)
 	}

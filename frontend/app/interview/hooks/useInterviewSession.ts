@@ -213,6 +213,7 @@ export function useInterviewSession({
   }
 
   const doStartTurn = async (sessionId: number, userId: number) => {
+    await authService.ensureFreshUserToken()
     const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/start-turn`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
@@ -470,6 +471,7 @@ export function useInterviewSession({
     formData.append('company_type', selectedPosition?.category || 'general')
     formData.append('company_id', String(interviewCompany?.id || 0))
     try {
+      await authService.ensureFreshUserToken()
       const res = await fetch(`${BACKEND_URL}/api/interviews/${session.id}/turn`, {
         method: 'POST',
         headers: { ...authService.getUserFetchHeaders() },
@@ -492,8 +494,8 @@ export function useInterviewSession({
         try { await interviewApi.saveUtterance(session.id, user.user_id, 'ai', aiText) } catch (e) { console.error('[utterance save error]', e) }
       }
       await playAudioBlob(audio)
-    } catch (e: any) {
-      setErrorMessage(e.message || '通信エラーが発生しました')
+    } catch (e: unknown) {
+      setErrorMessage(parseMediaError(e))
     } finally {
       setTurnPending(false)
     }

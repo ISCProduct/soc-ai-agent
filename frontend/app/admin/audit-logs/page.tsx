@@ -1,19 +1,15 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import {
-  Card,
-  CardContent,
-  Divider,
-  IconButton,
   Stack,
   TextField,
   Typography,
 } from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService } from '@/lib/auth'
-import { PageContainer } from '@/components/admin/PageContainer'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminListCard } from '@/components/admin/AdminListCard'
 
@@ -75,36 +71,28 @@ export default function AdminAuditLogsPage() {
   }
 
   return (
-    <PageContainer maxWidth={1100}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-        <IconButton component={Link} href="/admin"><ArrowBackIcon /></IconButton>
-        <Typography variant="h4" fontWeight="bold">
-          監査ログ
-        </Typography>
-      </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        管理者操作の履歴を確認できます。
-      </Typography>
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
+      <AdminPageHeader
+        title="監査ログ"
+        description="管理者操作の履歴を確認できます。"
+        backHref="/admin"
+      />
 
       <ErrorAlert error={error} />
 
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
+      <AdminPanel title="検索" sx={{ mb: 3 }}>
+        <AdminPanelBody>
           <TextField
             label="検索 (アクション/操作者/対象)"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             fullWidth
           />
-        </CardContent>
-      </Card>
+        </AdminPanelBody>
+      </AdminPanel>
 
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            最新の操作履歴
-          </Typography>
-          <Divider sx={{ mb: 2 }} />
+      <AdminPanel title="最新の操作履歴">
+        <AdminPanelBody>
           <Stack spacing={2}>
             {filtered.length === 0 && (
               <Typography variant="body2" color="text.secondary">
@@ -130,8 +118,8 @@ export default function AdminAuditLogsPage() {
               </AdminListCard>
             ))}
           </Stack>
-        </CardContent>
-      </Card>
+        </AdminPanelBody>
+      </AdminPanel>
     </PageContainer>
   )
 }

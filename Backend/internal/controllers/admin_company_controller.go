@@ -7,6 +7,7 @@ import (
 	"Backend/internal/openai"
 	"Backend/internal/services"
 	ifaces "Backend/internal/services/interfaces"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -97,16 +98,19 @@ func (c *AdminCompanyController) List(ctx echo.Context) error {
 	if v, err := strconv.Atoi(ctx.QueryParam("offset")); err == nil && v >= 0 {
 		offset = v
 	}
-	companies, err := c.repo.FindAllActive(limit, offset)
+	name := strings.TrimSpace(ctx.QueryParam("name"))
+	status := strings.TrimSpace(ctx.QueryParam("status"))
+	companies, total, err := c.repo.ListActiveFiltered(limit, offset, name, status)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch companies")
 	}
-	total, _ := c.repo.CountActive()
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"companies": companies,
 		"total":     total,
 		"limit":     limit,
 		"offset":    offset,
+		"name":      name,
+		"status":    status,
 	})
 }
 
@@ -517,8 +521,9 @@ func (c *AdminCompanyController) FetchPersona(ctx echo.Context) error {
 }
 
 // FetchAllMissing POST /api/admin/companies/:id/fetch-all
-// 未取得（TTL切れ含む）の基本情報・求人・技術スタック・関係情報をまとめて取得する。
-// ?force=true で TTL を無視して再取得。個別失敗は errors に積み、全体は 200 で返す。
+// 企業管理の主取得: 基本情報 → 技術 → ビジネス関係（関係・市場）→ 求人。
+// 未取得／TTL切れ／空フィールドのみ。?force=true で TTL を無視して再取得。
+// 個別失敗は errors に積み、全体は 200 で返す。
 func (c *AdminCompanyController) FetchAllMissing(ctx echo.Context) error {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
 	if err != nil {
@@ -533,44 +538,13 @@ func (c *AdminCompanyController) FetchAllMissing(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "company not found")
 	}
 
-	type stepResult struct {
-		Status  string `json:"status"` // fetched | skipped | error
-		Detail  string `json:"detail,omitempty"`
-		Count   int    `json:"count,omitempty"`
-		Skipped bool   `json:"skipped,omitempty"`
+	payload, errs := c.runPrimaryAspectFetches(reqCtx, company, companyID, forceRefresh)
+	if latest, rerr := c.repo.FindByID(companyID); rerr == nil && latest != nil {
+		company = latest
 	}
-	payload := map[string]any{
-		"company_id":   companyID,
-		"company_name": company.Name,
-		"force":        forceRefresh,
-	}
-	var errs []string
 
-	// 1) 基本情報
-	infoStep := stepResult{Status: "skipped", Skipped: true, Detail: "fetcher unavailable"}
-	if c.infoFetcher != nil {
-		needInfo := forceRefresh || !companyfetch.IsFresh(company.InfoFetchedAt, companyfetch.TTLInfo) ||
-			strings.TrimSpace(company.Description) == "" || strings.TrimSpace(company.WebsiteURL) == ""
-		if !needInfo {
-			infoStep = stepResult{Status: "skipped", Skipped: true, Detail: "ttl_fresh"}
-		} else {
-			result, ferr := c.infoFetcher.FetchAndSave(reqCtx, companyID, forceRefresh)
-			if ferr != nil {
-				infoStep = stepResult{Status: "error", Detail: ferr.Error()}
-				errs = append(errs, "info: "+ferr.Error())
-			} else if result != nil && result.FromCache {
-				infoStep = stepResult{Status: "skipped", Skipped: true, Detail: result.SkipReason}
-				payload["info"] = result
-			} else {
-				infoStep = stepResult{Status: "fetched", Detail: "ok"}
-				payload["info"] = result
-			}
-		}
-	}
-	payload["info_step"] = infoStep
-
-	// 2) 求人
-	jobsStep := stepResult{Status: "skipped", Skipped: true, Detail: "fetcher unavailable"}
+	// 求人（補助。失敗しても主3種の結果は返す）
+	jobsStep := fetchStepResult{Status: "skipped", Skipped: true, Detail: "fetcher unavailable"}
 	if c.jobFetcher != nil {
 		needJobs := forceRefresh || !companyfetch.IsFresh(company.JobsFetchedAt, companyfetch.TTLJobs)
 		if !needJobs {
@@ -578,67 +552,21 @@ func (c *AdminCompanyController) FetchAllMissing(ctx echo.Context) error {
 			if len(existing) == 0 {
 				needJobs = true
 			} else {
-				jobsStep = stepResult{Status: "skipped", Skipped: true, Detail: "ttl_fresh", Count: len(existing)}
+				jobsStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: "ttl_fresh", Count: len(existing)}
 			}
 		}
 		if needJobs {
 			positions, jerr := c.jobFetcher.FetchAndSaveJobs(reqCtx, companyID, forceRefresh)
 			if jerr != nil {
-				jobsStep = stepResult{Status: "error", Detail: jerr.Error()}
+				jobsStep = fetchStepResult{Status: "error", Detail: jerr.Error()}
 				errs = append(errs, "jobs: "+jerr.Error())
 			} else {
-				jobsStep = stepResult{Status: "fetched", Detail: "ok", Count: len(positions)}
+				jobsStep = fetchStepResult{Status: "fetched", Detail: "ok", Count: len(positions)}
 				payload["jobs_total"] = len(positions)
 			}
 		}
 	}
 	payload["jobs_step"] = jobsStep
-
-	// 3) 技術スタック（未取得時のみ）
-	techStep := stepResult{Status: "skipped", Skipped: true, Detail: "fetcher unavailable"}
-	if c.techFetcher != nil {
-		needTech := forceRefresh || !companyfetch.IsFresh(company.TechFetchedAt, companyfetch.TTLTech) ||
-			strings.TrimSpace(company.TechStack) == ""
-		if !needTech {
-			techStep = stepResult{Status: "skipped", Skipped: true, Detail: "ttl_fresh"}
-		} else {
-			result, terr := c.techFetcher.FetchAndSave(reqCtx, companyID, forceRefresh)
-			if terr != nil {
-				techStep = stepResult{Status: "error", Detail: terr.Error()}
-				errs = append(errs, "tech: "+terr.Error())
-			} else {
-				techStep = stepResult{Status: "fetched", Detail: "ok"}
-				payload["tech"] = result
-			}
-		}
-	}
-	payload["tech_step"] = techStep
-
-	// 4) 関係・市場（未取得時のみ）
-	relationsStep := stepResult{Status: "skipped", Skipped: true, Detail: "fetcher unavailable"}
-	if c.relationsFetcher != nil {
-		needRel := forceRefresh || !companyfetch.IsFresh(company.RelationsFetchedAt, companyfetch.TTLRelations)
-		if !needRel {
-			relationsStep = stepResult{Status: "skipped", Skipped: true, Detail: "ttl_fresh"}
-		} else {
-			result, rerr := c.relationsFetcher.FetchAndSave(reqCtx, companyID, forceRefresh)
-			if rerr != nil {
-				relationsStep = stepResult{Status: "error", Detail: rerr.Error()}
-				errs = append(errs, "relations: "+rerr.Error())
-			} else if result != nil && result.FromCache {
-				relationsStep = stepResult{Status: "skipped", Skipped: true, Detail: result.SkipReason, Count: result.SavedCount}
-				payload["relations"] = result
-			} else {
-				count := 0
-				if result != nil {
-					count = result.SavedCount
-				}
-				relationsStep = stepResult{Status: "fetched", Detail: "ok", Count: count}
-				payload["relations"] = result
-			}
-		}
-	}
-	payload["relations_step"] = relationsStep
 
 	if len(errs) > 0 {
 		payload["errors"] = errs
@@ -654,6 +582,171 @@ func (c *AdminCompanyController) FetchAllMissing(ctx echo.Context) error {
 	})
 
 	return ctx.JSON(http.StatusOK, payload)
+}
+
+// FetchPrimary POST /api/admin/companies/:id/fetch-primary
+// 主3種（基本情報・技術・ビジネス関係）を1リクエストで取得・保存する専用 API。
+// 画面遷移や個別 API 呼び出しなしで、一覧/基本情報画面からまとめて取得するために使う。
+// ?force=true で TTL / 既存データを無視して再取得。
+func (c *AdminCompanyController) FetchPrimary(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	forceRefresh := ctx.QueryParam("force") == "true"
+	companyID := uint(id)
+	reqCtx := ctx.Request().Context()
+
+	company, err := c.repo.FindByID(companyID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "company not found")
+	}
+
+	payload, errs := c.runPrimaryAspectFetches(reqCtx, company, companyID, forceRefresh)
+	payload["aspects"] = []string{"info", "tech", "relations"}
+
+	if len(errs) > 0 {
+		payload["errors"] = errs
+		payload["ok"] = false
+	} else {
+		payload["ok"] = true
+	}
+
+	// 最新の企業スナップショットも返す（FE が再読込なしで反映できる）
+	if latest, rerr := c.repo.FindByID(companyID); rerr == nil && latest != nil {
+		payload["company"] = latest
+	}
+
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.fetch_primary", "company", companyID, map[string]any{
+		"force": forceRefresh,
+		"ok":    payload["ok"],
+	})
+
+	return ctx.JSON(http.StatusOK, payload)
+}
+
+type fetchStepResult struct {
+	Status  string `json:"status"` // fetched | skipped | empty | error
+	Detail  string `json:"detail,omitempty"`
+	Count   int    `json:"count,omitempty"`
+	Skipped bool   `json:"skipped,omitempty"`
+}
+
+// runPrimaryAspectFetches は基本・技術・ビジネス関係の取得を実行し、共通ペイロードを返す。
+func (c *AdminCompanyController) runPrimaryAspectFetches(
+	reqCtx context.Context,
+	company *models.Company,
+	companyID uint,
+	forceRefresh bool,
+) (map[string]any, []string) {
+	payload := map[string]any{
+		"company_id":   companyID,
+		"company_name": company.Name,
+		"force":        forceRefresh,
+	}
+	var errs []string
+
+	reload := func() {
+		if latest, rerr := c.repo.FindByID(companyID); rerr == nil && latest != nil {
+			company = latest
+		}
+	}
+
+	// 1) 基本情報
+	infoStep := fetchStepResult{Status: "skipped", Skipped: true, Detail: "fetcher unavailable"}
+	if c.infoFetcher != nil {
+		needInfo := forceRefresh || !companyfetch.IsFresh(company.InfoFetchedAt, companyfetch.TTLInfo) ||
+			!companyfetch.HasBasicInfo(company.Description, company.WebsiteURL)
+		if !needInfo {
+			infoStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: "ttl_fresh"}
+		} else {
+			result, ferr := c.infoFetcher.FetchAndSave(reqCtx, companyID, forceRefresh)
+			if ferr != nil {
+				infoStep = fetchStepResult{Status: "error", Detail: ferr.Error()}
+				errs = append(errs, "info: "+ferr.Error())
+			} else if result != nil && result.FromCache {
+				infoStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: result.SkipReason}
+				payload["info"] = result
+			} else {
+				reload()
+				if companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
+					infoStep = fetchStepResult{Status: "fetched", Detail: "ok"}
+				} else {
+					infoStep = fetchStepResult{Status: "empty", Detail: "no_basic_info"}
+					errs = append(errs, "info: acquired but basic info still empty")
+				}
+				payload["info"] = result
+			}
+			reload()
+		}
+	}
+	payload["info_step"] = infoStep
+
+	// 2) 技術
+	techStep := fetchStepResult{Status: "skipped", Skipped: true, Detail: "fetcher unavailable"}
+	if c.techFetcher != nil {
+		needTech := forceRefresh || !companyfetch.IsFresh(company.TechFetchedAt, companyfetch.TTLTech) ||
+			!companyfetch.HasTechData(company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle)
+		if !needTech {
+			techStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: "ttl_fresh"}
+		} else {
+			result, terr := c.techFetcher.FetchAndSave(reqCtx, companyID, forceRefresh)
+			if terr != nil {
+				techStep = fetchStepResult{Status: "error", Detail: terr.Error()}
+				errs = append(errs, "tech: "+terr.Error())
+			} else if result != nil && result.FromCache {
+				techStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: result.SkipReason}
+				payload["tech"] = result
+			} else {
+				reload()
+				if companyfetch.HasTechData(company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle) {
+					techStep = fetchStepResult{Status: "fetched", Detail: "ok"}
+				} else {
+					techStep = fetchStepResult{Status: "empty", Detail: "no_tech_stack"}
+					errs = append(errs, "tech: acquired but tech_stack still empty")
+				}
+				payload["tech"] = result
+			}
+			reload()
+		}
+	}
+	payload["tech_step"] = techStep
+
+	// 3) ビジネス関係
+	relationsStep := fetchStepResult{Status: "skipped", Skipped: true, Detail: "fetcher unavailable"}
+	if c.relationsFetcher != nil {
+		needRel := forceRefresh || !companyfetch.IsFresh(company.RelationsFetchedAt, companyfetch.TTLRelations) ||
+			!c.relationsFetcher.HasStoredData(companyID)
+		if !needRel {
+			relationsStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: "ttl_fresh"}
+		} else {
+			result, rerr := c.relationsFetcher.FetchAndSave(reqCtx, companyID, forceRefresh)
+			if rerr != nil {
+				relationsStep = fetchStepResult{Status: "error", Detail: rerr.Error()}
+				errs = append(errs, "relations: "+rerr.Error())
+			} else if result != nil && result.FromCache {
+				relationsStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: result.SkipReason, Count: result.SavedCount}
+				payload["relations"] = result
+			} else {
+				count := 0
+				if result != nil {
+					count = result.SavedCount
+				}
+				if count > 0 || (result != nil && len(result.Relations) > 0) {
+					relationsStep = fetchStepResult{Status: "fetched", Detail: "ok", Count: count}
+				} else {
+					relationsStep = fetchStepResult{Status: "empty", Detail: "no_relations", Count: 0}
+					errs = append(errs, "relations: acquired but no relations/market saved")
+				}
+				payload["relations"] = result
+			}
+			reload()
+		}
+	}
+	payload["relations_step"] = relationsStep
+
+	return payload, errs
 }
 
 // SeedL1Catalog POST /api/admin/companies/seed-l1

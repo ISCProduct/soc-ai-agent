@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
 import {
   Alert,
   Box,
@@ -10,7 +9,6 @@ import {
   Chip,
   CircularProgress,
   Divider,
-  IconButton,
   MenuItem,
   Paper,
   Stack,
@@ -24,9 +22,10 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import { authService } from '@/lib/auth'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 
 type DailyRow = {
   date: string
@@ -193,14 +192,12 @@ export default function AdminCostsPage() {
   const realtimeDailyCost = realtimeDaily.reduce((s, r) => s + r.total_cost_usd, 0)
 
   return (
-    <Box sx={{ p: 4, maxWidth: 1100, mx: 'auto' }}>
-      <Stack direction="row" alignItems="center" spacing={2} mb={3}>
-        <IconButton component={Link} href="/admin"><ArrowBackIcon /></IconButton>
-        <Typography variant="h5" fontWeight={700} flex={1}>
-          APIコストモニタリング
-        </Typography>
-        {loading && <CircularProgress size={20} />}
-      </Stack>
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
+      <AdminPageHeader
+        title="APIコストモニタリング"
+        backHref="/admin"
+        actions={loading ? <CircularProgress size={20} /> : undefined}
+      />
 
       {error && (
         <Alert severity="error" onClose={() => setError('')} sx={{ mb: 2 }}>
@@ -210,7 +207,7 @@ export default function AdminCostsPage() {
 
       {/* KPI Cards */}
       <Stack direction="row" spacing={2} mb={3} flexWrap="wrap">
-        <Card sx={{ flex: 1, minWidth: 200 }}>
+        <Card elevation={0} sx={{ flex: 1, minWidth: 200, border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
           <CardContent>
             <Typography variant="body2" color="text.secondary">今月の合計コスト</Typography>
             <Typography variant="h4" fontWeight={700} color={
@@ -222,7 +219,7 @@ export default function AdminCostsPage() {
           </CardContent>
         </Card>
 
-        <Card sx={{ flex: 1, minWidth: 200 }}>
+        <Card elevation={0} sx={{ flex: 1, minWidth: 200, border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
           <CardContent>
             <Typography variant="body2" color="text.secondary">
               過去{dailyDays}日合計コスト
@@ -233,7 +230,7 @@ export default function AdminCostsPage() {
           </CardContent>
         </Card>
 
-        <Card sx={{ flex: 1, minWidth: 200 }}>
+        <Card elevation={0} sx={{ flex: 1, minWidth: 200, border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
           <CardContent>
             <Typography variant="body2" color="text.secondary">
               過去{dailyDays}日 APIコール数
@@ -244,7 +241,7 @@ export default function AdminCostsPage() {
           </CardContent>
         </Card>
 
-        <Card sx={{ flex: 1, minWidth: 200 }}>
+        <Card elevation={0} sx={{ flex: 1, minWidth: 200, border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
           <CardContent>
             <Typography variant="body2" color="text.secondary">Realtime 今月コスト</Typography>
             <Typography variant="h4" fontWeight={700}>
@@ -256,7 +253,7 @@ export default function AdminCostsPage() {
           </CardContent>
         </Card>
 
-        <Card sx={{ flex: 1, minWidth: 200 }}>
+        <Card elevation={0} sx={{ flex: 1, minWidth: 200, border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
           <CardContent>
             <Typography variant="body2" color="text.secondary">企業 Search 今月</Typography>
             <Typography variant="h4" fontWeight={700} color={
@@ -277,7 +274,7 @@ export default function AdminCostsPage() {
       </Stack>
 
       {/* Daily cost chart */}
-      <Paper elevation={1} sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+      <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: '10px', border: '1px solid', borderColor: 'divider' }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" mb={2}>
           <Typography variant="h6" fontWeight={600}>日次コスト推移</Typography>
           <TextField
@@ -324,7 +321,7 @@ export default function AdminCostsPage() {
       </Paper>
 
       {/* Monthly chart */}
-      <Paper elevation={1} sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+      <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: '10px', border: '1px solid', borderColor: 'divider' }}>
         <Typography variant="h6" fontWeight={600} mb={2}>月次コスト推移（過去12ヶ月）</Typography>
         <MiniChart data={monthly} valueKey="total_cost_usd" labelKey="month" />
         <Divider sx={{ my: 2 }} />
@@ -360,7 +357,7 @@ export default function AdminCostsPage() {
       </Paper>
 
       {/* Realtime usage */}
-      <Paper elevation={1} sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+      <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: '10px', border: '1px solid', borderColor: 'divider' }}>
         <Stack direction="row" alignItems="center" spacing={1} mb={1}>
           <Typography variant="h6" fontWeight={600}>Realtime 利用状況</Typography>
           <Tooltip title="コスト計算方法: トークン使用量が記録されている場合はトークンベース（音声入力 $100/1M・出力 $200/1M、テキスト入力 $5/1M・出力 $15/1M）、記録がない場合は時間ベース（INTERVIEW_COST_PER_MIN_USD × 利用分数）で算出します。">
@@ -407,7 +404,7 @@ export default function AdminCostsPage() {
       </Paper>
 
       {/* Realtime users */}
-      <Paper elevation={1} sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+      <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: '10px', border: '1px solid', borderColor: 'divider' }}>
         <Typography variant="h6" fontWeight={600} mb={2}>Realtime ユーザー別利用（過去30日）</Typography>
         <TableContainer>
           <Table size="small">
@@ -442,7 +439,7 @@ export default function AdminCostsPage() {
       </Paper>
 
       {/* Model breakdown */}
-      <Paper elevation={1} sx={{ p: 3, borderRadius: 2 }}>
+      <Paper elevation={0} sx={{ p: 3, borderRadius: '10px', border: '1px solid', borderColor: 'divider' }}>
         <Typography variant="h6" fontWeight={600} mb={2}>モデル別コスト内訳（過去30日）</Typography>
         {(summary?.model_breakdown ?? []).length === 0 ? (
           <Typography color="text.secondary" textAlign="center" py={3}>データなし</Typography>
@@ -464,6 +461,6 @@ export default function AdminCostsPage() {
           </Stack>
         )}
       </Paper>
-    </Box>
+    </PageContainer>
   )
 }

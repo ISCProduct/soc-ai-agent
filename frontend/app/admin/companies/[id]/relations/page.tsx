@@ -15,6 +15,7 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { formatRelationLabel } from '@/lib/relation-labels'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 
@@ -95,7 +96,7 @@ export default function AdminCompanyRelationsPage() {
             name: item.name || '',
             relation_type: item.relation_type || 'business_partner',
             ratio: item.ratio,
-            description: item.description || '',
+            description: formatRelationLabel(item.description || '', item.relation_type || 'business_partner'),
           }
         }),
       )
@@ -222,7 +223,7 @@ export default function AdminCompanyRelationsPage() {
     <AdminFormContainer
       title={`関係・市場情報: ${name}`}
       maxWidth={800}
-      backLabel="← 企業一覧に戻る"
+      backLabel="企業一覧に戻る"
       backHref="/admin/companies"
     >
       <ErrorAlert error={error} />

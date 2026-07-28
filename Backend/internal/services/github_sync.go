@@ -3,10 +3,12 @@ package services
 import (
 	"Backend/internal/crypto"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -47,17 +49,24 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint, force boo
 		decrypted, err := crypto.DecryptToken(profile.AccessToken, encryptionKey)
 		if err != nil {
 			log.Printf("[GitHubService] failed to decrypt access token for user %d: %v", userID, err)
-			// 復号失敗時は平文として扱う（移行期対応）
-		} else {
-			token = decrypted
+			return &GitHubReauthRequiredError{Reason: "GitHubアクセストークンの復号に失敗しました。GitHubアカウントを再連携してください。"}
 		}
+		token = decrypted
 	}
 	login := profile.GitHubLogin
 
 	// 1. リポジトリ一覧取得（自分のリポジトリ + 所属組織のリポジトリ）
 	repos, err := s.fetchRepositories(ctx, client, token)
 	if err != nil {
-		return fmt.Errorf("fetch repositories: %w", err)
+		var scopeErr *InsufficientScopesError
+		if errors.As(err, &scopeErr) {
+			return scopeErr
+		}
+		// 無効・失効トークンは再連携を促す
+		if isGitHubAuthError(err) {
+			return &GitHubReauthRequiredError{Reason: "GitHubアクセストークンが無効です。GitHubアカウントを再連携してください。"}
+		}
+		return err
 	}
 
 	// 2. 言語使用比率集計
@@ -103,4 +112,15 @@ func (s *GitHubService) SyncUserData(ctx context.Context, userID uint, force boo
 
 	log.Printf("[GitHubService] user %d: sync completed (%d repos, %d contributions)", userID, len(repos), contributions)
 	return nil
+}
+
+func isGitHubAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "status 401") ||
+		strings.Contains(msg, "bad credentials") ||
+		strings.Contains(msg, "requires authentication") ||
+		strings.Contains(msg, "access token decrypt failed")
 }

@@ -35,6 +35,7 @@ import {
     type CompanyMarketInfo,
     type MarketType,
 } from '@/lib/company-data';
+import { formatRelationLabel } from '@/lib/relation-labels';
 import { getCompanyIdFromNode, parseCompanyId } from '@/lib/correlation-diagram-navigation';
 import CorrelationCompanyDetailPanel, {
     CORRELATION_DETAIL_PANEL_WIDTH,
@@ -345,7 +346,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                     source: String(rel.from_id),
                     target: String(rel.to_id),
                     type: 'custom',
-                    label: rel.description || rel.relation_type,
+                    label: formatRelationLabel(rel.description, rel.relation_type),
                     animated: true,
                     style: {
                         stroke: '#2196F3',

@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 )
 
 const (
@@ -98,12 +97,16 @@ func (s *CompanyMissingBatchService) Run(ctx context.Context, opts MissingBatchO
 			Name:       c.Name,
 			DataStatus: c.DataStatus,
 		}
-		item.NeedInfo = !companyfetch.IsFresh(c.InfoFetchedAt, companyfetch.TTLInfo) ||
-			strings.TrimSpace(c.Description) == "" || strings.TrimSpace(c.WebsiteURL) == ""
-		item.NeedJobs = !companyfetch.IsFresh(c.JobsFetchedAt, companyfetch.TTLJobs)
-		item.NeedTech = !companyfetch.IsFresh(c.TechFetchedAt, companyfetch.TTLTech) ||
-			strings.TrimSpace(c.TechStack) == ""
-		item.NeedRelations = !companyfetch.IsFresh(c.RelationsFetchedAt, companyfetch.TTLRelations)
+		item.NeedInfo, item.NeedJobs, item.NeedTech, item.NeedRelations = MissingNeedsFromCompany(&c)
+		// DB 実データの欠落も不足扱い（*_fetched_at だけ進んでいる残骸対策）
+		if !item.NeedJobs {
+			if jobs, err := s.repo.ListJobPositions(&c.ID, 1); err == nil && len(jobs) == 0 {
+				item.NeedJobs = true
+			}
+		}
+		if !item.NeedRelations && s.relationsFetcher != nil && !s.relationsFetcher.HasStoredData(c.ID) {
+			item.NeedRelations = true
+		}
 		if !item.NeedInfo && !item.NeedJobs && !item.NeedTech && !item.NeedRelations {
 			continue
 		}
@@ -142,17 +145,68 @@ func (s *CompanyMissingBatchService) Run(ctx context.Context, opts MissingBatchO
 }
 
 func (s *CompanyMissingBatchService) processItem(ctx context.Context, item *MissingBatchItem, result *MissingBatchResult) {
+	// 主3種: 基本情報 → 技術 → ビジネス関係。求人は最後。
 	if item.NeedInfo {
 		if s.infoFetcher == nil {
 			item.InfoStatus = "skipped_no_fetcher"
 			result.Skipped++
-		} else if _, err := s.infoFetcher.FetchAndSave(ctx, item.CompanyID, false); err != nil {
+		} else if res, err := s.infoFetcher.FetchAndSave(ctx, item.CompanyID, false); err != nil {
 			item.InfoStatus = "error"
 			item.Error = err.Error()
 			result.Errors++
-		} else {
+		} else if res != nil && res.FromCache {
+			item.InfoStatus = "skipped_cache"
+			result.Skipped++
+		} else if company, err := s.repo.FindByID(item.CompanyID); err == nil &&
+			companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
 			item.InfoStatus = "ok"
 			result.InfoOK++
+		} else {
+			item.InfoStatus = "empty"
+			result.Skipped++
+		}
+	}
+	if item.NeedTech {
+		if s.techFetcher == nil {
+			item.TechStatus = "skipped_no_fetcher"
+			result.Skipped++
+		} else if res, err := s.techFetcher.FetchAndSave(ctx, item.CompanyID, false); err != nil {
+			item.TechStatus = "error"
+			if item.Error == "" {
+				item.Error = err.Error()
+			}
+			result.Errors++
+		} else if res != nil && res.FromCache {
+			item.TechStatus = "skipped_cache"
+			result.Skipped++
+		} else if company, err := s.repo.FindByID(item.CompanyID); err == nil &&
+			companyfetch.HasTechData(company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle) {
+			item.TechStatus = "ok"
+			result.TechOK++
+		} else {
+			item.TechStatus = "empty"
+			result.Skipped++
+		}
+	}
+	if item.NeedRelations {
+		if s.relationsFetcher == nil {
+			item.RelationsStatus = "skipped_no_fetcher"
+			result.Skipped++
+		} else if res, err := s.relationsFetcher.FetchAndSave(ctx, item.CompanyID, false); err != nil {
+			item.RelationsStatus = "error"
+			if item.Error == "" {
+				item.Error = err.Error()
+			}
+			result.Errors++
+		} else if res != nil && res.FromCache {
+			item.RelationsStatus = "skipped_cache"
+			result.Skipped++
+		} else if s.relationsFetcher.HasStoredData(item.CompanyID) {
+			item.RelationsStatus = "ok"
+			result.RelationsOK++
+		} else {
+			item.RelationsStatus = "empty"
+			result.Skipped++
 		}
 	}
 	if item.NeedJobs {
@@ -165,53 +219,27 @@ func (s *CompanyMissingBatchService) processItem(ctx context.Context, item *Miss
 				item.Error = err.Error()
 			}
 			result.Errors++
+		} else if len(positions) == 0 {
+			item.JobsStatus = "empty"
+			result.Skipped++
 		} else {
 			item.JobsStatus = fmt.Sprintf("ok(%d)", len(positions))
 			result.JobsOK++
 		}
 	}
-	if item.NeedTech {
-		if s.techFetcher == nil {
-			item.TechStatus = "skipped_no_fetcher"
-			result.Skipped++
-		} else if _, err := s.techFetcher.FetchAndSave(ctx, item.CompanyID, false); err != nil {
-			item.TechStatus = "error"
-			if item.Error == "" {
-				item.Error = err.Error()
-			}
-			result.Errors++
-		} else {
-			item.TechStatus = "ok"
-			result.TechOK++
-		}
-	}
-	if item.NeedRelations {
-		if s.relationsFetcher == nil {
-			item.RelationsStatus = "skipped_no_fetcher"
-			result.Skipped++
-		} else if _, err := s.relationsFetcher.FetchAndSave(ctx, item.CompanyID, false); err != nil {
-			item.RelationsStatus = "error"
-			if item.Error == "" {
-				item.Error = err.Error()
-			}
-			result.Errors++
-		} else {
-			item.RelationsStatus = "ok"
-			result.RelationsOK++
-		}
-	}
 }
 
-// MissingNeedsFromCompany は単体テスト用の不足判定ヘルパ。
+// MissingNeedsFromCompany は不足判定ヘルパ（基本情報・技術・ビジネス関係・求人）。
+// タイムスタンプが新しくても、中身が空なら不足とみなす。
 func MissingNeedsFromCompany(c *models.Company) (needInfo, needJobs, needTech, needRelations bool) {
 	if c == nil {
 		return false, false, false, false
 	}
 	needInfo = !companyfetch.IsFresh(c.InfoFetchedAt, companyfetch.TTLInfo) ||
-		strings.TrimSpace(c.Description) == "" || strings.TrimSpace(c.WebsiteURL) == ""
+		!companyfetch.HasBasicInfo(c.Description, c.WebsiteURL)
 	needJobs = !companyfetch.IsFresh(c.JobsFetchedAt, companyfetch.TTLJobs)
 	needTech = !companyfetch.IsFresh(c.TechFetchedAt, companyfetch.TTLTech) ||
-		strings.TrimSpace(c.TechStack) == ""
+		!companyfetch.HasTechData(c.TechStack, c.InfraStack, c.CicdTools, c.DevelopmentStyle)
 	needRelations = !companyfetch.IsFresh(c.RelationsFetchedAt, companyfetch.TTLRelations)
 	return
 }

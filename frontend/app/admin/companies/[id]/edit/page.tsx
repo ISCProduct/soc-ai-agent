@@ -184,7 +184,8 @@ export default function AdminCompanyEditPage() {
     <AdminFormContainer
       title={`技術スタック編集: ${name}`}
       maxWidth={800}
-      backLabel="← 戻る"
+      backLabel="企業一覧に戻る"
+      backHref="/admin/companies"
       onBack={() => router.back()}
     >
       <ErrorAlert error={error} />

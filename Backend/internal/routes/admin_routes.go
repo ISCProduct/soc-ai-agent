@@ -59,6 +59,8 @@ func SetupAdminRoutes(
 	admin.POST("/companies/:id/fetch-jobs", adminCompanyController.FetchJobs)
 	admin.POST("/companies/:id/fetch-persona", adminCompanyController.FetchPersona)
 	admin.POST("/companies/:id/fetch-all", adminCompanyController.FetchAllMissing)
+	// 主3種（基本・技術・ビジネス関係）を1リクエストで取得する専用 API
+	admin.POST("/companies/:id/fetch-primary", adminCompanyController.FetchPrimary)
 
 	// クロールソース管理
 	admin.GET("/crawl-sources", adminCrawlController.ListSources)

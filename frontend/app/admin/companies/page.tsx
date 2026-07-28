@@ -3,25 +3,37 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Box,
   Button,
-  Card,
-  CardContent,
   Chip,
   CircularProgress,
-  Divider,
-  IconButton,
+  InputAdornment,
   Stack,
+  TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
   Pagination,
 } from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import SearchIcon from '@mui/icons-material/Search'
 import { authService } from '@/lib/auth'
-import { PageContainer } from '@/components/admin/PageContainer'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { AdminPanel } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
-import { AdminListCard } from '@/components/admin/AdminListCard'
 import { StatusBadge } from '@/components/admin/StatusBadge'
+import { fetchCompanyPrimary, formatFetchPrimarySummary } from '@/lib/admin-company-fetch'
+import {
+  fetchCompanyAspect,
+  fetchCompanyAspects,
+  formatFetchAspectSummary,
+  type CompanyFetchKind,
+} from '@/lib/admin-company-fetch'
 
 const PAGE_SIZE = 50
 
@@ -39,6 +51,7 @@ type Company = {
   relations_fetched_at?: string | null
   website_url?: string
   description?: string
+  tech_stack?: string
 }
 
 type L1Coverage = {
@@ -75,6 +88,8 @@ export default function AdminCompaniesPage() {
   const [page, setPage] = useState(1)
   const [error, setError] = useState('')
   const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'published'>('all')
+  const [searchInput, setSearchInput] = useState('')
+  const [searchName, setSearchName] = useState('')
   const [coverage, setCoverage] = useState<L1Coverage | null>(null)
   const [warming, setWarming] = useState(false)
   const [warmMessage, setWarmMessage] = useState('')
@@ -92,11 +107,19 @@ export default function AdminCompaniesPage() {
     setCoverage(data)
   }, [])
 
-  const fetchCompanies = async (p: number = page) => {
+  const fetchCompanies = useCallback(async (p: number, name: string, status: 'all' | 'draft' | 'published') => {
     setError('')
     const offset = (p - 1) * PAGE_SIZE
-    const res = await fetch(`/api/admin/companies?limit=${PAGE_SIZE}&offset=${offset}`, {
+    const params = new URLSearchParams({
+      limit: String(PAGE_SIZE),
+      offset: String(offset),
+    })
+    const trimmed = name.trim()
+    if (trimmed) params.set('name', trimmed)
+    if (status !== 'all') params.set('status', status)
+    const res = await fetch(`/api/admin/companies?${params}`, {
       headers: authService.getAdminFetchHeaders(),
+      cache: 'no-store',
     })
     const data = await res.json()
     if (!res.ok) {
@@ -105,16 +128,36 @@ export default function AdminCompaniesPage() {
     }
     setCompanies(data?.companies || [])
     setTotal(data?.total ?? 0)
-  }
+  }, [])
+
+  // 検索入力をデバウンスして反映
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const next = searchInput.trim()
+      setSearchName((prev) => {
+        if (prev !== next) {
+          setPage(1)
+        }
+        return next
+      })
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [searchInput])
 
   useEffect(() => {
-    fetchCompanies(1)
-    fetchCoverage()
+    void fetchCompanies(page, searchName, filterStatus)
+  }, [fetchCompanies, page, searchName, filterStatus])
+
+  useEffect(() => {
+    void fetchCoverage()
   }, [fetchCoverage])
 
   const handlePageChange = (_: React.ChangeEvent<unknown>, value: number) => {
     setPage(value)
-    fetchCompanies(value)
+  }
+
+  const reloadCurrentList = async () => {
+    await fetchCompanies(page, searchName, filterStatus)
   }
 
   const handleSeedL1 = async () => {
@@ -135,7 +178,7 @@ export default function AdminCompaniesPage() {
         `シード投入: 作成 ${data.created ?? 0} / 更新 ${data.updated ?? 0} / スキップ ${data.skipped ?? 0}`,
       )
       await fetchCoverage()
-      await fetchCompanies(page)
+      await reloadCurrentList()
     } finally {
       setWarming(false)
     }
@@ -201,17 +244,14 @@ export default function AdminCompaniesPage() {
         )
       } else {
         setFetchAllMessage(
-          `不足データ一括取得完了: 処理 ${data.processed ?? 0} 社` +
-            ` / 基本情報 ${data.info_ok ?? 0}` +
-            ` / 求人 ${data.jobs_ok ?? 0}` +
-            ` / Tech ${data.tech_ok ?? 0}` +
-            ` / 関係 ${data.relations_ok ?? 0}` +
+          `一括取得完了: ${data.processed ?? 0} 社` +
+            `（基本 ${data.info_ok ?? 0} / 技術 ${data.tech_ok ?? 0} / 関係 ${data.relations_ok ?? 0} / 求人 ${data.jobs_ok ?? 0}）` +
             ` / エラー ${data.errors ?? 0}`,
         )
         if ((data.errors ?? 0) > 0) {
-          setError(`一部の企業で取得に失敗しました（エラー ${data.errors} 件）。詳細はサーバーログを確認してください。`)
+          setError(`一部の企業で取得に失敗しました（エラー ${data.errors} 件）。`)
         }
-        await fetchCompanies(page)
+        await reloadCurrentList()
         await fetchCoverage()
       }
     } finally {
@@ -230,7 +270,7 @@ export default function AdminCompaniesPage() {
       setError(data?.error || `承認に失敗しました (${res.status})`)
       return
     }
-    fetchCompanies(page)
+    await reloadCurrentList()
   }
 
   const handleReject = async (companyId: number) => {
@@ -244,50 +284,33 @@ export default function AdminCompaniesPage() {
       setError(data?.error || `却下に失敗しました (${res.status})`)
       return
     }
-    fetchCompanies(page)
+    await reloadCurrentList()
   }
 
   const summarizeFetchAll = (data: Record<string, unknown>) => {
-    const stepLabel = (key: string, label: string) => {
-      const step = data[key] as { status?: string; detail?: string; count?: number } | undefined
-      if (!step?.status) return null
-      if (step.status === 'fetched') {
-        return step.count != null ? `${label}取得(${step.count})` : `${label}取得`
-      }
-      if (step.status === 'skipped') return `${label}スキップ`
-      if (step.status === 'error') return `${label}失敗`
-      return null
-    }
-    return [
-      stepLabel('info_step', '基本情報'),
-      stepLabel('jobs_step', '求人'),
-      stepLabel('tech_step', 'Tech'),
-      stepLabel('relations_step', '関係'),
-    ]
-      .filter(Boolean)
-      .join(' / ')
+    return formatFetchPrimarySummary(data as Parameters<typeof formatFetchPrimarySummary>[0])
   }
 
-  const handleFetchAll = async (companyId: number) => {
+  const handleFetchAll = async (companyId: number, force = false) => {
     setError('')
     setFetchAllMessage('')
     setFetchAllId(companyId)
     try {
-      const res = await fetch(`/api/admin/companies/${companyId}/fetch-all`, {
-        method: 'POST',
-        headers: authService.getAdminFetchHeaders(),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setError(data?.error || `一括取得に失敗しました (${res.status})`)
+      const { ok, status, data } = await fetchCompanyPrimary(
+        companyId,
+        authService.getAdminFetchHeaders(),
+        force,
+      )
+      if (!ok) {
+        setError(data?.error || `企業情報の取得に失敗しました (${status})`)
         return
       }
-      const summary = summarizeFetchAll(data)
+      const summary = summarizeFetchAll(data as Record<string, unknown>)
       if (data.ok === false && Array.isArray(data.errors) && data.errors.length > 0) {
-        setError(`一部失敗: ${(data.errors as string[]).join('; ')}`)
+        setError(`一部失敗: ${data.errors.join('; ')}`)
       }
-      setFetchAllMessage(summary ? `一括取得完了: ${summary}` : '一括取得完了')
-      await fetchCompanies(page)
+      setFetchAllMessage(summary ? `主3種取得完了: ${summary}` : '主3種取得完了')
+      await reloadCurrentList()
       await fetchCoverage()
     } finally {
       setFetchAllId(null)
@@ -296,44 +319,40 @@ export default function AdminCompaniesPage() {
 
   const missingLabels = (c: Company) => {
     const labels: string[] = []
-    if (!c.info_fetched_at || !c.description) labels.push('基本情報')
-    if (!c.jobs_fetched_at) labels.push('求人')
-    if (!c.tech_fetched_at) labels.push('Tech')
+    if (!c.info_fetched_at || !c.description || !c.website_url) labels.push('基本')
+    if (!c.tech_fetched_at || !c.tech_stack || c.tech_stack === '[]') labels.push('技術')
     if (!c.relations_fetched_at) labels.push('関係')
+    if (!c.jobs_fetched_at) labels.push('求人')
     return labels
   }
 
-  const filteredCompanies = companies.filter((c) => {
-    if (filterStatus === 'all') return true
-    return c.data_status === filterStatus
-  })
-
   const pageCount = Math.ceil(total / PAGE_SIZE)
+  const busy = warming || missingBatchLoading || fetchAllId !== null
 
   return (
-    <PageContainer maxWidth={1000}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-        <Stack direction="row" alignItems="center" spacing={1}>
-          <IconButton component={Link} href="/admin"><ArrowBackIcon /></IconButton>
-          <Typography variant="h4" fontWeight="bold">
-            企業管理
-          </Typography>
-        </Stack>
-        <Stack direction="row" spacing={1}>
-          <Button variant="outlined" size="small" component={Link} href="/admin/job-positions">
-            求人管理
-          </Button>
-          <Button variant="outlined" size="small" component={Link} href="/admin/graduate-employments">
-            就職情報管理
-          </Button>
-          <Button variant="contained" size="small" component={Link} href="/admin/companies/new">
-            + 企業を追加
-          </Button>
-        </Stack>
-      </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        企業情報の公開ステータスを管理します。公開済みでも「基本情報・URL取得」から AI 取得・更新できます。（全 {total.toLocaleString()} 件）
-      </Typography>
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
+      <AdminPageHeader
+        title="企業管理"
+        description={
+          searchName
+            ? `「${searchName}」の検索結果 ${total.toLocaleString()} 件`
+            : `公開ステータスと企業情報（基本・技術・ビジネス関係）を管理します。全 ${total.toLocaleString()} 件`
+        }
+        backHref="/admin"
+        actions={
+          <>
+            <Button component={Link} href="/admin/job-positions" size="small" color="inherit">
+              求人
+            </Button>
+            <Button component={Link} href="/admin/graduate-employments" size="small" color="inherit">
+              就職情報
+            </Button>
+            <Button variant="contained" component={Link} href="/admin/companies/new" disableElevation>
+              企業を追加
+            </Button>
+          </>
+        }
+      />
 
       <ErrorAlert error={error} />
       {fetchAllMessage && (
@@ -342,213 +361,297 @@ export default function AdminCompaniesPage() {
         </Alert>
       )}
 
-      <Card sx={{ mb: 2 }}>
-        <CardContent>
-          <Stack spacing={2}>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} justifyContent="space-between">
-              <Box>
-                <Typography variant="h6" sx={{ mb: 0.5 }}>不足データの一括取得</Typography>
+      <Accordion
+        disableGutters
+        elevation={0}
+        sx={{
+          mb: 2,
+          border: '1px solid',
+          borderColor: 'divider',
+          borderRadius: '10px !important',
+          '&:before': { display: 'none' },
+          overflow: 'hidden',
+        }}
+      >
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Stack spacing={0.25}>
+            <Typography fontWeight={600}>運用ツール</Typography>
+            <Typography variant="caption" color="text.secondary">
+              不足データの一括取得・L1カタログ温存
+              {coverage
+                ? `（公開 ${coverage.published_total} / Info ${pct(coverage.info_rate)} / Profile ${pct(coverage.profile_rate)}）`
+                : ''}
+            </Typography>
+          </Stack>
+        </AccordionSummary>
+        <AccordionDetails sx={{ pt: 0, borderTop: '1px solid', borderColor: 'divider' }}>
+          <Stack spacing={2.5} sx={{ py: 1.5 }}>
+            <Stack
+              direction={{ xs: 'column', md: 'row' }}
+              spacing={2}
+              alignItems={{ md: 'center' }}
+              justifyContent="space-between"
+            >
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="subtitle2" fontWeight={600}>
+                  不足データを一括取得
+                </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  未取得／TTL切れの基本情報・求人・Tech・関係だけを埋めます（1回あたり最大20社・公開優先）。
+                  未取得／TTL切れの基本・技術・ビジネス関係（＋求人）を最大20社まで埋めます。
                 </Typography>
               </Box>
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  disabled={missingBatchLoading || warming}
-                  onClick={() => handleFetchMissingBatch(true)}
-                >
+              <Stack direction="row" spacing={1} flexShrink={0}>
+                <Button variant="outlined" size="small" disabled={busy} onClick={() => handleFetchMissingBatch(true)}>
                   対象確認
                 </Button>
                 <Button
                   variant="contained"
-                  color="secondary"
                   size="small"
-                  disabled={missingBatchLoading || warming}
+                  color="secondary"
+                  disabled={busy}
                   onClick={() => handleFetchMissingBatch(false)}
                   startIcon={missingBatchLoading ? <CircularProgress size={14} color="inherit" /> : null}
+                  disableElevation
                 >
-                  {missingBatchLoading ? '一括取得中...' : '不足データを一括取得'}
+                  {missingBatchLoading ? '取得中…' : '一括取得'}
                 </Button>
               </Stack>
             </Stack>
-            <Divider />
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} justifyContent="space-between">
-            <Box>
-              <Typography variant="h6" sx={{ mb: 0.5 }}>L1 カタログ充足（マッチング用）</Typography>
-              <Typography variant="body2" color="text.secondary">
-                公開企業の基本情報 TTL 内 + WeightProfile。Core/中小SI を優先して日次温存します。
-              </Typography>
-              {coverage && (
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
-                  <Chip size="small" label={`公開 ${coverage.published_total}`} />
-                  <Chip
-                    size="small"
-                    color={coverage.info_rate < (coverage.info_target ?? 0.8) ? 'error' : 'success'}
-                    label={`Info ${pct(coverage.info_rate)} / 目標 ${pct(coverage.info_target ?? 0.8)}`}
-                  />
-                  <Chip
-                    size="small"
-                    color={coverage.profile_rate < (coverage.profile_target ?? 0.95) ? 'error' : 'info'}
-                    label={`Profile ${pct(coverage.profile_rate)} / 目標 ${pct(coverage.profile_target ?? 0.95)}`}
-                  />
-                  <Chip size="small" color="warning" label={`要温存 ${coverage.needs_warm}`} />
-                  {coverage.below_target && (
-                    <Chip size="small" color="error" label="閾値割れ" />
-                  )}
-                </Stack>
-              )}
-              {coverage?.alerts?.length ? (
-                <Typography variant="body2" color="error" sx={{ mt: 1 }}>
-                  {coverage.alerts.join(' / ')}
-                </Typography>
-              ) : null}
-              {warmMessage && (
-                <Typography variant="body2" sx={{ mt: 1 }}>{warmMessage}</Typography>
-              )}
-            </Box>
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              <Button variant="outlined" size="small" disabled={warming} onClick={() => handleSeedL1()}>
-                サンプルシード投入
-              </Button>
-              <Button variant="outlined" size="small" disabled={warming} onClick={() => handleWarmL1(true)}>
-                ドライラン
-              </Button>
-              <Button
-                variant="contained"
-                size="small"
-                disabled={warming}
-                onClick={() => handleWarmL1(false)}
-                startIcon={warming ? <CircularProgress size={14} color="inherit" /> : undefined}
-              >
-                L1温存（最大100社）
-              </Button>
-            </Stack>
-          </Stack>
-          </Stack>
-        </CardContent>
-      </Card>
 
-      <Card>
-        <CardContent>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
-            <Typography variant="h6">企業一覧</Typography>
-            <Stack direction="row" spacing={1}>
-              {(['all', 'draft', 'published'] as const).map((s) => (
-                <Chip
-                  key={s}
-                  label={s === 'all' ? 'すべて' : s === 'draft' ? '下書き' : '公開'}
-                  variant={filterStatus === s ? 'filled' : 'outlined'}
-                  color={s === 'published' ? 'success' : s === 'draft' ? 'warning' : 'default'}
-                  onClick={() => setFilterStatus(s)}
-                  clickable
-                />
-              ))}
-            </Stack>
+            <Box sx={{ borderTop: '1px solid', borderColor: 'divider', pt: 2 }}>
+              <Stack
+                direction={{ xs: 'column', md: 'row' }}
+                spacing={2}
+                alignItems={{ md: 'flex-start' }}
+                justifyContent="space-between"
+              >
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="subtitle2" fontWeight={600}>
+                    L1カタログ充足
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    マッチング用。公開企業の基本情報と WeightProfile を温存します。
+                  </Typography>
+                  {coverage && (
+                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                      <Chip size="small" variant="outlined" label={`公開 ${coverage.published_total}`} />
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        color={coverage.info_rate < (coverage.info_target ?? 0.8) ? 'error' : 'default'}
+                        label={`Info ${pct(coverage.info_rate)}`}
+                      />
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        color={coverage.profile_rate < (coverage.profile_target ?? 0.95) ? 'error' : 'default'}
+                        label={`Profile ${pct(coverage.profile_rate)}`}
+                      />
+                      <Chip size="small" variant="outlined" label={`要温存 ${coverage.needs_warm}`} />
+                    </Stack>
+                  )}
+                  {coverage?.alerts?.length ? (
+                    <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1 }}>
+                      {coverage.alerts.join(' / ')}
+                    </Typography>
+                  ) : null}
+                  {warmMessage && (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                      {warmMessage}
+                    </Typography>
+                  )}
+                </Box>
+                <Stack direction="row" spacing={1} flexShrink={0} flexWrap="wrap" useFlexGap>
+                  <Button variant="text" size="small" disabled={busy} onClick={() => handleSeedL1()}>
+                    シード投入
+                  </Button>
+                  <Button variant="outlined" size="small" disabled={busy} onClick={() => handleWarmL1(true)}>
+                    ドライラン
+                  </Button>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    disabled={busy}
+                    onClick={() => handleWarmL1(false)}
+                    startIcon={warming ? <CircularProgress size={14} color="inherit" /> : undefined}
+                    disableElevation
+                  >
+                    L1温存
+                  </Button>
+                </Stack>
+              </Stack>
+            </Box>
           </Stack>
-          <Divider sx={{ mb: 2 }} />
-          <Stack spacing={1}>
-            {filteredCompanies.map((company) => (
-              <AdminListCard key={company.id}>
-                <Stack direction="row" alignItems="center" justifyContent="space-between">
-                  <Box>
-                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-                      <Typography variant="subtitle1" fontWeight="bold">
+        </AccordionDetails>
+      </Accordion>
+
+      <AdminPanel
+        title="企業一覧"
+        headerRight={
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }}>
+            <TextField
+              size="small"
+              placeholder="企業名で検索"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              sx={{ minWidth: { sm: 240 } }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" color="action" />
+                  </InputAdornment>
+                ),
+              }}
+            />
+            <ToggleButtonGroup
+              exclusive
+              size="small"
+              value={filterStatus}
+              onChange={(_, v) => {
+                if (!v) return
+                setFilterStatus(v)
+                setPage(1)
+              }}
+              sx={{
+                '& .MuiToggleButton-root': {
+                  px: 1.5,
+                  textTransform: 'none',
+                  borderColor: 'divider',
+                },
+              }}
+            >
+              <ToggleButton value="all">すべて</ToggleButton>
+              <ToggleButton value="draft">下書き</ToggleButton>
+              <ToggleButton value="published">公開</ToggleButton>
+            </ToggleButtonGroup>
+          </Stack>
+        }
+      >
+        <Stack divider={<Box sx={{ borderBottom: '1px solid', borderColor: 'divider' }} />}>
+          {companies.length === 0 && (
+            <Box sx={{ px: 2.5, py: 6, textAlign: 'center' }}>
+              <Typography color="text.secondary">
+                {searchName ? `「${searchName}」に一致する企業がありません` : '該当する企業がありません'}
+              </Typography>
+            </Box>
+          )}
+
+          {companies.map((company) => {
+            const missing = missingLabels(company)
+            const fetching = fetchAllId === company.id
+            return (
+              <Box
+                key={company.id}
+                sx={{
+                  px: 2.5,
+                  py: 2,
+                  '&:hover': { bgcolor: 'action.hover' },
+                }}
+              >
+                <Stack
+                  direction={{ xs: 'column', md: 'row' }}
+                  spacing={2}
+                  alignItems={{ md: 'center' }}
+                  justifyContent="space-between"
+                >
+                  <Box sx={{ minWidth: 0, flex: 1 }}>
+                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+                      <Typography
+                        component={Link}
+                        href={`/admin/companies/${company.id}/info`}
+                        variant="subtitle1"
+                        fontWeight={700}
+                        sx={{
+                          color: 'text.primary',
+                          textDecoration: 'none',
+                          '&:hover': { color: 'primary.main' },
+                        }}
+                      >
                         {company.name}
                       </Typography>
                       <StatusBadge status={company.data_status} />
-                      <Chip label={sourceLabel(company.source_type)} size="small" variant="outlined" />
-                      {company.is_provisional && (
-                        <Chip label="暫定" size="small" color="default" variant="outlined" />
-                      )}
+                      <Typography variant="caption" color="text.secondary">
+                        {sourceLabel(company.source_type)}
+                        {company.is_provisional ? ' · 暫定' : ''}
+                      </Typography>
                     </Stack>
                     <Typography variant="body2" color="text.secondary">
-                      {company.industry || '業種未設定'} / {company.location || '所在地未設定'}
+                      {[company.industry || '業種未設定', company.location || '所在地未設定'].join('  ·  ')}
                     </Typography>
-                    {missingLabels(company).length > 0 && (
-                      <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
-                        {missingLabels(company).map((label) => (
-                          <Chip key={label} size="small" color="warning" variant="outlined" label={`未取得: ${label}`} />
-                        ))}
-                      </Stack>
+                    {missing.length > 0 && (
+                      <Typography variant="caption" sx={{ color: 'warning.dark', display: 'block', mt: 0.75 }}>
+                        未取得: {missing.join(' · ')}
+                      </Typography>
                     )}
                   </Box>
-                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+
+                  <Stack
+                    direction="row"
+                    spacing={0.75}
+                    flexWrap="wrap"
+                    useFlexGap
+                    alignItems="center"
+                    justifyContent={{ xs: 'flex-start', md: 'flex-end' }}
+                    sx={{ flexShrink: 0 }}
+                  >
                     <Button
                       variant="contained"
+                      size="small"
                       color="secondary"
-                      size="small"
                       onClick={() => handleFetchAll(company.id)}
-                      disabled={fetchAllId === company.id || warming}
-                      startIcon={fetchAllId === company.id ? <CircularProgress size={14} color="inherit" /> : null}
+                      disabled={busy}
+                      startIcon={fetching ? <CircularProgress size={14} color="inherit" /> : null}
+                      disableElevation
                     >
-                      {fetchAllId === company.id ? '一括取得中...' : '不足情報を一括取得'}
+                      {fetching ? '取得中…' : '主3種取得'}
                     </Button>
                     <Button
-                      variant="contained"
+                      variant="text"
                       size="small"
-                      component={Link}
-                      href={`/admin/companies/${company.id}/info`}
+                      color="inherit"
+                      onClick={() => handleFetchAll(company.id, true)}
+                      disabled={busy}
                     >
-                      基本情報・URL取得
+                      強制再取得
                     </Button>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      component={Link}
-                      href={`/admin/companies/${company.id}/relations`}
-                    >
-                      関係・市場
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      component={Link}
-                      href={`/admin/companies/${company.id}/edit`}
-                    >
-                      技術スタック編集
+                    <Button component={Link} href={`/admin/companies/${company.id}/info`} size="small" variant="text">
+                      編集
                     </Button>
                     {company.data_status !== 'published' ? (
                       <>
                         <Button
-                          variant="contained"
+                          variant="outlined"
                           color="success"
                           size="small"
                           onClick={() => handlePublish(company.id)}
+                          disabled={busy}
                         >
                           承認
                         </Button>
                         <Button
-                          variant="outlined"
+                          variant="text"
                           color="error"
                           size="small"
                           onClick={() => handleReject(company.id)}
+                          disabled={busy}
                         >
                           却下
                         </Button>
                       </>
-                    ) : (
-                      <Chip size="small" color="success" label="公開中（情報取得可）" />
-                    )}
+                    ) : null}
                   </Stack>
                 </Stack>
-              </AdminListCard>
-            ))}
-          </Stack>
+              </Box>
+            )
+          })}
+        </Stack>
 
-          {pageCount > 1 && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
-              <Pagination
-                count={pageCount}
-                page={page}
-                onChange={handlePageChange}
-                color="primary"
-              />
-            </Box>
-          )}
-        </CardContent>
-      </Card>
+        {pageCount > 1 && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 2.5, borderTop: '1px solid', borderColor: 'divider' }}>
+            <Pagination count={pageCount} page={page} onChange={handlePageChange} color="primary" />
+          </Box>
+        )}
+      </AdminPanel>
     </PageContainer>
   )
 }
