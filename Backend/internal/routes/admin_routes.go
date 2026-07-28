@@ -151,4 +151,6 @@ func SetupAdminRoutes(
 	// ベクトルDB管理（#573 Phase 3）
 	admin.GET("/vector/status", adminVectorController.Status)
 	admin.POST("/vector/reembed", adminVectorController.Reembed)
+	admin.GET("/vector/stats", adminVectorController.Stats)
+	admin.GET("/vector/collections", adminVectorController.Collections)
 }

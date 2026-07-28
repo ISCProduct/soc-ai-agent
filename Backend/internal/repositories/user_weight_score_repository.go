@@ -18,7 +18,14 @@ func NewUserWeightScoreRepository(db *gorm.DB) *UserWeightScoreRepository {
 
 // SetScore スコアを絶対値で新規作成する。
 // 呼び出し前に対象レコードが存在しないことを確認すること。
+// スコアは 0〜100 に丸める。
 func (r *UserWeightScoreRepository) SetScore(userID uint, sessionID, category string, absoluteScore int) error {
+	if absoluteScore < 0 {
+		absoluteScore = 0
+	}
+	if absoluteScore > 100 {
+		absoluteScore = 100
+	}
 	score := models.UserWeightScore{
 		UserID:         userID,
 		SessionID:      sessionID,
@@ -33,6 +40,7 @@ func (r *UserWeightScoreRepository) SetScore(userID uint, sessionID, category st
 
 // AddScore 既存スコアに差分を加算する。
 // レコードが存在しない場合はエラーを返す。
+// 加算結果は SQL 側で 0〜100 に丸め、競合時も範囲外にならないようにする。
 func (r *UserWeightScoreRepository) AddScore(userID uint, sessionID, category string, delta int) error {
 	var score models.UserWeightScore
 	err := r.db.Where("user_id = ? AND session_id = ? AND weight_category = ?",
@@ -40,7 +48,10 @@ func (r *UserWeightScoreRepository) AddScore(userID uint, sessionID, category st
 	if err != nil {
 		return err
 	}
-	return r.db.Model(&score).Update("score", gorm.Expr("score + ?", delta)).Error
+	return r.db.Model(&score).Update(
+		"score",
+		gorm.Expr("GREATEST(0, LEAST(100, score + ?))", delta),
+	).Error
 }
 
 // FindByUserAndSession ユーザーとセッションに紐づく全スコアを取得

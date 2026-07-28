@@ -1,14 +1,19 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
 import {
   Alert,
   Box,
   Button,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
   Divider,
   FormControlLabel,
+  Grid,
+  IconButton,
   MenuItem,
   Paper,
   Stack,
@@ -22,9 +27,19 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import RefreshIcon from '@mui/icons-material/Refresh'
 import { authService } from '@/lib/auth'
-import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
-import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
+
+type VectorStats = {
+  total_collections: number
+  total_documents: number
+  cache_hit_count: number
+  cache_miss_count: number
+  cache_hit_rate: number
+  estimated_savings_usd: number
+  last_updated: string
+}
 
 type CollectionStatus = {
   name: string
@@ -59,7 +74,9 @@ const DOC_TYPES = [
 export default function AdminVectorPage() {
   const [company, setCompany] = useState('')
   const [status, setStatus] = useState<VectorStatus | null>(null)
+  const [stats, setStats] = useState<VectorStats | null>(null)
   const [loading, setLoading] = useState(false)
+  const [statsLoading, setStatsLoading] = useState(false)
   const [error, setError] = useState('')
   const [reembedCompany, setReembedCompany] = useState('')
   const [docType, setDocType] = useState('')
@@ -94,9 +111,30 @@ export default function AdminVectorPage() {
     }
   }, [company])
 
+  const loadStats = useCallback(async () => {
+    setStatsLoading(true)
+    try {
+      const headers = authService.getAdminFetchHeaders()
+      const res = await fetch('/api/admin/vector/stats', { headers, cache: 'no-store' })
+      const data = await res.json()
+      if (!res.ok) {
+        console.warn('Stats API not available:', data?.message || data?.error)
+        setStats(null)
+        return
+      }
+      setStats(data as VectorStats)
+    } catch (err) {
+      console.warn('Failed to load stats:', err instanceof Error ? err.message : '不明なエラー')
+      setStats(null)
+    } finally {
+      setStatsLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     void loadStatus()
-  }, [loadStatus])
+    void loadStats()
+  }, [loadStatus, loadStats])
 
   const handleReembed = async () => {
     const name = reembedCompany.trim()
@@ -128,6 +166,7 @@ export default function AdminVectorPage() {
         `削除 ${data.deleted ?? 0} 件 / refreshed=${Boolean(data.refreshed)} / sources=${(data.sources || []).join(',') || '-'}`,
       )
       await loadStatus()
+      await loadStats()
     } catch (err) {
       setReembedResult(err instanceof Error ? err.message : '再埋め込みに失敗しました')
     } finally {
@@ -136,14 +175,110 @@ export default function AdminVectorPage() {
   }
 
   return (
-    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
-      <AdminPageHeader
-        title="ベクトルDB管理"
-        description="Chroma のコレクション件数確認と、企業単位の削除・再埋め込みを行います（#573 Phase 3）。"
-        backHref="/admin"
-      />
+    <Box sx={{ p: 4, maxWidth: 1200, mx: 'auto' }}>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+        <IconButton component={Link} href="/admin">
+          <ArrowBackIcon />
+        </IconButton>
+        <Typography variant="h4" fontWeight="bold">
+          AI/RAG 運用管理
+        </Typography>
+        <Box sx={{ ml: 'auto' }}>
+          <IconButton
+            aria-label="統計とステータスを更新"
+            onClick={() => { void loadStatus(); void loadStats() }}
+            disabled={loading || statsLoading}
+          >
+            <RefreshIcon />
+          </IconButton>
+        </Box>
+      </Stack>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        RAG ベクトルDB、キャッシュヒット率、コスト削減効果を一元管理します。
+      </Typography>
 
-      <Paper elevation={0} sx={{ p: 3, mb: 3, border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
+      {/* RAG 利用統計セクション */}
+      {stats && (
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h6" gutterBottom sx={{ mb: 2 }}>
+            RAG 利用統計
+          </Typography>
+          <Grid container spacing={2} sx={{ mb: 3 }}>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <Card>
+                <CardContent>
+                  <Typography color="textSecondary" gutterBottom>
+                    コレクション数
+                  </Typography>
+                  <Typography variant="h4">
+                    {stats.total_collections}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <Card>
+                <CardContent>
+                  <Typography color="textSecondary" gutterBottom>
+                    総ドキュメント数
+                  </Typography>
+                  <Typography variant="h4">
+                    {stats.total_documents.toLocaleString()}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <Card>
+                <CardContent>
+                  <Typography color="textSecondary" gutterBottom>
+                    キャッシュヒット率
+                  </Typography>
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <Typography variant="h4">
+                      {(stats.cache_hit_rate * 100).toFixed(1)}%
+                    </Typography>
+                    <Chip
+                      label={`${stats.cache_hit_count} hits`}
+                      size="small"
+                      color="primary"
+                      variant="outlined"
+                    />
+                  </Stack>
+                  <Typography variant="caption" color="textSecondary" sx={{ mt: 1, display: 'block' }}>
+                    キャッシュミス: {stats.cache_miss_count}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <Card>
+                <CardContent>
+                  <Typography color="textSecondary" gutterBottom>
+                    推定月次節約額
+                  </Typography>
+                  <Stack direction="row" alignItems="baseline" spacing={1}>
+                    <Typography variant="h4">
+                      ${stats.estimated_savings_usd.toFixed(2)}
+                    </Typography>
+                    <Typography variant="caption" color="success.main">
+                      RAG による削減
+                    </Typography>
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+        </Box>
+      )}
+
+      {statsLoading && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', p: 2, mb: 3 }}>
+          <CircularProgress size={24} />
+        </Box>
+      )}
+
+      <Paper sx={{ p: 3, mb: 3 }}>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
           <TextField
             label="企業名フィルタ（任意）"
@@ -201,7 +336,7 @@ export default function AdminVectorPage() {
         )}
       </Paper>
 
-      <Paper elevation={0} sx={{ p: 3, border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
+      <Paper sx={{ p: 3 }}>
         <Typography variant="h6" gutterBottom>
           再埋め込み
         </Typography>
@@ -240,6 +375,6 @@ export default function AdminVectorPage() {
           {reembedResult && <Alert severity="info">{reembedResult}</Alert>}
         </Stack>
       </Paper>
-    </PageContainer>
+    </Box>
   )
 }

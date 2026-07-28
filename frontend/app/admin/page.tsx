@@ -192,6 +192,22 @@ export default function AdminDashboardPage() {
           <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
+                AI/RAG 運用管理
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                RAG ベクトルDB、キャッシュヒット率、コスト削減効果を一元管理します。
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Button variant="contained" component={Link} href="/admin/vector-db">
+                RAG 運用へ
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
                 スコアダッシュボード
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
