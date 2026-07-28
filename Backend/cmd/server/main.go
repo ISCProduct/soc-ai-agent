@@ -311,7 +311,7 @@ func main() {
 	adminInterviewController.SetUserAccessGuard(userDeletionService)
 	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminCostsController := controllers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
-	adminVectorController := controllers.NewAdminVectorController()
+	adminVectorController := controllers.NewAdminVectorController(services.NewAdminVectorService())
 	profileRecalcService := services.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
 	profileRecalcController := controllers.NewAdminProfileRecalculationController(profileRecalcService)
 	companyEntryController := controllers.NewCompanyEntryController(companyRepo, graduateRepo)
