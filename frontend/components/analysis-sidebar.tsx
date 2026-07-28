@@ -50,6 +50,7 @@ import {
   getTodayActionLabel,
   shouldShowResultsCta,
 } from '@/lib/sidebar-navigation'
+import { SIDEBAR_ADMIN_NAV, SIDEBAR_NAV_ITEMS } from '@/lib/sidebar-nav'
 
 const DRAWER_WIDTH = 280
 
@@ -97,6 +98,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
     const [isAdmin, setIsAdmin] = useState(!!user.is_admin)
     const theme = useTheme()
     const isMobile = useMediaQuery(theme.breakpoints.down('md'))
+    const router = useRouter()
 
     useEffect(() => {
         setIsAdmin(!!user.is_admin)

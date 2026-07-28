@@ -56,6 +56,8 @@ func SetupAdminRoutes(
 	admin.POST("/companies/:id/confirm-info", adminCompanyController.ConfirmCompanyInfo)
 	admin.POST("/companies/:id/fetch-relations", adminCompanyController.FetchCompanyRelations)
 	admin.POST("/companies/:id/confirm-relations", adminCompanyController.ConfirmCompanyRelations)
+	// #720 資本関係の多段階可視化（親会社→子会社→孫会社等）
+	admin.GET("/companies/:id/relation-graph", adminCompanyGraphController.RelationGraph)
 	admin.POST("/companies/:id/fetch-jobs", adminCompanyController.FetchJobs)
 	admin.POST("/companies/:id/fetch-persona", adminCompanyController.FetchPersona)
 	admin.POST("/companies/:id/fetch-all", adminCompanyController.FetchAllMissing)
