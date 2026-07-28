@@ -480,6 +480,27 @@ func (c *AdminCompanyGraphController) EnrichRelations(ctx echo.Context) error {
 	})
 }
 
+// RelationGraph handles GET /api/admin/companies/:id/relation-graph
+// 起点企業から資本関係を親会社→子会社→孫会社等の多段階で辿ったグラフと、
+// 起点企業直接分の取引関係を返す（相関図表示用）。
+func (c *AdminCompanyGraphController) RelationGraph(ctx echo.Context) error {
+	companyID, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	if c.companyRepo == nil || c.relationRepo == nil {
+		return echoInternalError(errors.New("relation repository is not configured"))
+	}
+
+	graphService := services.NewCompanyRelationGraphService(c.companyRepo, c.relationRepo)
+	graph, err := graphService.BuildGraph(uint(companyID))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "company not found")
+	}
+
+	return ctx.JSON(http.StatusOK, graph)
+}
+
 // fetchRelationsWithLLM はAIモデルの知識から企業の関連会社・取引先を抽出する。
 func (c *AdminCompanyGraphController) fetchRelationsWithLLM(ctx context.Context, companyName, url string) (*llmExtractedRelations, error) {
 	if c.openaiClient == nil {

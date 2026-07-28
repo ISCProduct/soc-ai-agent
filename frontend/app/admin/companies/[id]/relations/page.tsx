@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import {
   Alert,
@@ -17,6 +17,8 @@ import {
 import { authService } from '@/lib/auth'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
+import CompanyRelationGraph from '@/components/admin/CompanyRelationGraph'
+import { groupRelationsByCategory, RELATION_CATEGORY_LABELS } from '@/lib/relation-graph'
 
 type RelationEntry = {
   name: string
@@ -218,6 +220,9 @@ export default function AdminCompanyRelationsPage() {
     return Number.isNaN(d.getTime()) ? v : d.toLocaleString('ja-JP')
   }
 
+  const groupedRelations = useMemo(() => groupRelationsByCategory(relations), [relations])
+  const numericId = Number(id)
+
   return (
     <AdminFormContainer
       title={`関係・市場情報: ${name}`}
@@ -315,6 +320,11 @@ export default function AdminCompanyRelationsPage() {
 
         <Divider />
 
+        <Typography variant="subtitle1" fontWeight="bold">相関図（保存済みデータ）</Typography>
+        {Number.isFinite(numericId) && numericId > 0 && <CompanyRelationGraph companyId={numericId} />}
+
+        <Divider />
+
         <Stack direction="row" alignItems="center" justifyContent="space-between">
           <Typography variant="subtitle1" fontWeight="bold">企業関係</Typography>
           <Button size="small" variant="outlined" onClick={addRelation}>行を追加</Button>
@@ -324,40 +334,60 @@ export default function AdminCompanyRelationsPage() {
           <Typography variant="body2" color="text.secondary">関係データがありません。プレビュー取得または行追加してください。</Typography>
         )}
 
-        {relations.map((rel, index) => (
-          <Box key={index} sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+        {groupedRelations.map((categoryGroup) => (
+          <Box key={categoryGroup.category} sx={{ mb: 1 }}>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+              {RELATION_CATEGORY_LABELS[categoryGroup.category]}
+            </Typography>
             <Stack spacing={1.5}>
-              <Stack direction="row" spacing={1}>
-                <TextField
-                  label="関連企業名"
-                  value={rel.name}
-                  onChange={(e) => updateRelation(index, { name: e.target.value })}
-                  sx={{ flex: 2 }}
-                />
-                <TextField
-                  select
-                  label="関係タイプ"
-                  value={rel.relation_type}
-                  onChange={(e) => updateRelation(index, { relation_type: e.target.value })}
-                  sx={{ flex: 1 }}
+              {categoryGroup.companies.map((companyGroup) => (
+                <Box
+                  key={companyGroup.name}
+                  sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}
                 >
-                  <MenuItem value="capital_subsidiary">子会社</MenuItem>
-                  <MenuItem value="capital_affiliate">関連会社</MenuItem>
-                  <MenuItem value="business_partner">取引先</MenuItem>
-                  <MenuItem value="business_procurement">調達（gBiz）</MenuItem>
-                  <MenuItem value="business_subsidy">補助金（gBiz）</MenuItem>
-                </TextField>
-              </Stack>
-              <Stack direction="row" spacing={1} alignItems="center">
-                <TextField
-                  label="説明"
-                  value={rel.description || ''}
-                  onChange={(e) => updateRelation(index, { description: e.target.value })}
-                  sx={{ flex: 1 }}
-                />
-                <Chip size="small" label={RELATION_LABELS[rel.relation_type] || rel.relation_type} />
-                <Button size="small" color="error" onClick={() => removeRelation(index)}>削除</Button>
-              </Stack>
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
+                    <Typography variant="body1" fontWeight="bold">{companyGroup.name}</Typography>
+                    <Chip size="small" label={`${companyGroup.entries.length}件`} />
+                  </Stack>
+                  <Stack spacing={1.5} divider={<Divider flexItem />}>
+                    {companyGroup.entries.map(({ index, relation: rel }) => (
+                      <Stack key={index} spacing={1.5}>
+                        <Stack direction="row" spacing={1}>
+                          <TextField
+                            label="関連企業名"
+                            value={rel.name}
+                            onChange={(e) => updateRelation(index, { name: e.target.value })}
+                            sx={{ flex: 2 }}
+                          />
+                          <TextField
+                            select
+                            label="関係タイプ"
+                            value={rel.relation_type}
+                            onChange={(e) => updateRelation(index, { relation_type: e.target.value })}
+                            sx={{ flex: 1 }}
+                          >
+                            <MenuItem value="capital_subsidiary">子会社</MenuItem>
+                            <MenuItem value="capital_affiliate">関連会社</MenuItem>
+                            <MenuItem value="business_partner">取引先</MenuItem>
+                            <MenuItem value="business_procurement">調達（gBiz）</MenuItem>
+                            <MenuItem value="business_subsidy">補助金（gBiz）</MenuItem>
+                          </TextField>
+                        </Stack>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <TextField
+                            label="説明"
+                            value={rel.description || ''}
+                            onChange={(e) => updateRelation(index, { description: e.target.value })}
+                            sx={{ flex: 1 }}
+                          />
+                          <Chip size="small" label={RELATION_LABELS[rel.relation_type] || rel.relation_type} />
+                          <Button size="small" color="error" onClick={() => removeRelation(index)}>削除</Button>
+                        </Stack>
+                      </Stack>
+                    ))}
+                  </Stack>
+                </Box>
+              ))}
             </Stack>
           </Box>
         ))}
