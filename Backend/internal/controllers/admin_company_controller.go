@@ -666,7 +666,23 @@ func (c *AdminCompanyController) runPrimaryAspectFetches(
 				infoStep = fetchStepResult{Status: "error", Detail: ferr.Error()}
 				errs = append(errs, "info: "+ferr.Error())
 			} else if result != nil && result.FromCache {
-				infoStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: result.SkipReason}
+				reload()
+				// 予算超過などで中身なしのまま FromCache になると「スキップ＝成功」に見えるため、
+				// 実データがあるときだけ skipped とする。
+				if companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
+					detail := result.SkipReason
+					if detail == "" {
+						detail = "cache"
+					}
+					infoStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: detail}
+				} else {
+					detail := result.SkipReason
+					if detail == "" {
+						detail = "cache_without_data"
+					}
+					infoStep = fetchStepResult{Status: "error", Detail: detail}
+					errs = append(errs, "info: cache returned without basic info ("+detail+")")
+				}
 				payload["info"] = result
 			} else {
 				reload()
@@ -696,7 +712,21 @@ func (c *AdminCompanyController) runPrimaryAspectFetches(
 				techStep = fetchStepResult{Status: "error", Detail: terr.Error()}
 				errs = append(errs, "tech: "+terr.Error())
 			} else if result != nil && result.FromCache {
-				techStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: result.SkipReason}
+				reload()
+				if companyfetch.HasTechData(company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle) {
+					detail := result.SkipReason
+					if detail == "" {
+						detail = "cache"
+					}
+					techStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: detail}
+				} else {
+					detail := result.SkipReason
+					if detail == "" {
+						detail = "cache_without_data"
+					}
+					techStep = fetchStepResult{Status: "error", Detail: detail}
+					errs = append(errs, "tech: cache returned without tech_stack ("+detail+")")
+				}
 				payload["tech"] = result
 			} else {
 				reload()
@@ -726,14 +756,27 @@ func (c *AdminCompanyController) runPrimaryAspectFetches(
 				relationsStep = fetchStepResult{Status: "error", Detail: rerr.Error()}
 				errs = append(errs, "relations: "+rerr.Error())
 			} else if result != nil && result.FromCache {
-				relationsStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: result.SkipReason, Count: result.SavedCount}
+				if c.relationsFetcher.HasStoredData(companyID) {
+					detail := result.SkipReason
+					if detail == "" {
+						detail = "cache"
+					}
+					relationsStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: detail, Count: result.SavedCount}
+				} else {
+					detail := result.SkipReason
+					if detail == "" {
+						detail = "cache_without_data"
+					}
+					relationsStep = fetchStepResult{Status: "error", Detail: detail, Count: result.SavedCount}
+					errs = append(errs, "relations: cache returned without stored data ("+detail+")")
+				}
 				payload["relations"] = result
 			} else {
 				count := 0
 				if result != nil {
 					count = result.SavedCount
 				}
-				if count > 0 || (result != nil && len(result.Relations) > 0) {
+				if count > 0 || c.relationsFetcher.HasStoredData(companyID) {
 					relationsStep = fetchStepResult{Status: "fetched", Detail: "ok", Count: count}
 				} else {
 					relationsStep = fetchStepResult{Status: "empty", Detail: "no_relations", Count: 0}

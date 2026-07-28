@@ -59,12 +59,12 @@ func IsEmptyTechPayload(techStack string) bool {
 	return t == "" || t == "[]" || t == "null" || t == "{}"
 }
 
-// HasTechData は技術・インフラ・CI/CD・開発手法のいずれかが入っているか。
+// HasTechData は tech_stack に実データがあるか。
+// infra / CI/CD / 開発手法だけ埋まっていても「技術取得済み」とはみなさない。
+// （管理UIの未取得表示・不足候補SQLと判定を揃える）
 func HasTechData(techStack, infraStack, cicdTools, developmentStyle string) bool {
-	return !IsEmptyTechPayload(techStack) ||
-		!IsEmptyTechPayload(infraStack) ||
-		!IsEmptyTechPayload(cicdTools) ||
-		strings.TrimSpace(developmentStyle) != ""
+	_, _, _ = infraStack, cicdTools, developmentStyle
+	return !IsEmptyTechPayload(techStack)
 }
 
 // HasBasicInfo は基本情報として最低限の概要・公式URLがあるか。

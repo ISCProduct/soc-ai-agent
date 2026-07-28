@@ -72,9 +72,27 @@ function stepLabel(step: FetchPrimaryStep | undefined, label: string): string | 
   if (step.status === 'fetched') {
     return step.count != null ? `${label}取得(${step.count})` : `${label}取得`
   }
-  if (step.status === 'skipped') return `${label}スキップ`
+  if (step.status === 'skipped') {
+    const reason =
+      step.detail === 'ttl' || step.detail === 'ttl_fresh'
+        ? '取得済み'
+        : step.detail === 'budget'
+          ? '予算超過'
+          : step.detail === 'fetcher unavailable'
+            ? '取得器なし'
+            : step.detail || ''
+    return reason ? `${label}スキップ(${reason})` : `${label}スキップ`
+  }
   if (step.status === 'empty') return `${label}取得ゼロ`
-  if (step.status === 'error') return `${label}失敗`
+  if (step.status === 'error') {
+    const reason =
+      step.detail === 'budget'
+        ? '予算超過'
+        : step.detail
+          ? `(${step.detail})`
+          : ''
+    return `${label}失敗${reason}`
+  }
   return `${label}${step.status}`
 }
 

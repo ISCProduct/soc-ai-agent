@@ -37,9 +37,11 @@ func TestHasTechData(t *testing.T) {
 	assert.False(t, HasTechData("", "", "", ""))
 	assert.False(t, HasTechData("[]", "", "", ""))
 	assert.True(t, HasTechData(`["Go"]`, "", "", ""))
-	assert.True(t, HasTechData("", `["AWS"]`, "", ""))
-	assert.True(t, HasTechData("", "", `["Actions"]`, ""))
-	assert.True(t, HasTechData("", "", "", "スクラム"))
+	// infra / CI/CD / 開発手法のみでは不足扱い（スキップしない）
+	assert.False(t, HasTechData("", `["AWS"]`, "", ""))
+	assert.False(t, HasTechData("", "", `["Actions"]`, ""))
+	assert.False(t, HasTechData("", "", "", "スクラム"))
+	assert.True(t, HasTechData(`["Go"]`, `["AWS"]`, `["Actions"]`, "スクラム"))
 }
 
 func TestHasMeaningfulMarketInfo(t *testing.T) {

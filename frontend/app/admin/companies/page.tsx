@@ -89,6 +89,7 @@ export default function AdminCompaniesPage() {
   const [warmMessage, setWarmMessage] = useState('')
   const [fetchAllId, setFetchAllId] = useState<number | null>(null)
   const [fetchAllMessage, setFetchAllMessage] = useState('')
+  const [fetchAllSeverity, setFetchAllSeverity] = useState<'success' | 'warning'>('success')
   const [missingBatchLoading, setMissingBatchLoading] = useState(false)
 
   const fetchCoverage = useCallback(async () => {
@@ -288,6 +289,7 @@ export default function AdminCompaniesPage() {
   const handleFetchAll = async (companyId: number, force = false) => {
     setError('')
     setFetchAllMessage('')
+    setFetchAllSeverity('success')
     setFetchAllId(companyId)
     try {
       const { ok, status, data } = await fetchCompanyPrimary(
@@ -303,6 +305,10 @@ export default function AdminCompaniesPage() {
       if (data.ok === false && Array.isArray(data.errors) && data.errors.length > 0) {
         setError(`一部失敗: ${data.errors.join('; ')}`)
       }
+      const steps = [data.info_step, data.tech_step, data.relations_step]
+      const allSkipped = steps.every((s) => s?.status === 'skipped')
+      const anyFailed = steps.some((s) => s?.status === 'error' || s?.status === 'empty')
+      setFetchAllSeverity(allSkipped || anyFailed ? 'warning' : 'success')
       setFetchAllMessage(summary ? `主3種取得完了: ${summary}` : '主3種取得完了')
       await reloadCurrentList()
       await fetchCoverage()
@@ -350,7 +356,7 @@ export default function AdminCompaniesPage() {
 
       <ErrorAlert error={error} />
       {fetchAllMessage && (
-        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setFetchAllMessage('')}>
+        <Alert severity={fetchAllSeverity} sx={{ mb: 2 }} onClose={() => setFetchAllMessage('')}>
           {fetchAllMessage}
         </Alert>
       )}

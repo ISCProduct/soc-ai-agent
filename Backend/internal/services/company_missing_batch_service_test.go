@@ -71,4 +71,21 @@ func TestMissingNeedsFromCompany(t *testing.T) {
 	if !info {
 		t.Fatal("fresh InfoFetchedAt with empty description/url should still need info")
 	}
+
+	// infra / 開発手法のみでは技術取得済みとみなさない
+	infraOnly := &models.Company{
+		Description:        "概要",
+		WebsiteURL:         "https://example.com",
+		TechStack:          "",
+		InfraStack:         `["AWS"]`,
+		DevelopmentStyle:   "スクラム",
+		InfoFetchedAt:      &now,
+		JobsFetchedAt:      &now,
+		TechFetchedAt:      &now,
+		RelationsFetchedAt: &now,
+	}
+	_, _, tech, _ = MissingNeedsFromCompany(infraOnly)
+	if !tech {
+		t.Fatal("infra/style only should still need tech_stack")
+	}
 }

@@ -231,6 +231,7 @@ func (s *CompanyMissingBatchService) processItem(ctx context.Context, item *Miss
 
 // MissingNeedsFromCompany は不足判定ヘルパ（基本情報・技術・ビジネス関係・求人）。
 // タイムスタンプが新しくても、中身が空なら不足とみなす。
+// 関係の DB 実体欠落は Run() 側で HasStoredData により追加判定する。
 func MissingNeedsFromCompany(c *models.Company) (needInfo, needJobs, needTech, needRelations bool) {
 	if c == nil {
 		return false, false, false, false
