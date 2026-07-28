@@ -149,8 +149,8 @@ func (f *CompanyRelationsFetcher) FetchAndSave(ctx context.Context, companyID ui
 	}
 	result.SavedCount = saved
 
-	// 空結果（関係0件 + unlistedのみ）で RelationsFetchedAt だけ進むと再取得不能になる
-	if relationsResultHasData(result) {
+	// AI が関係を返しても永続化が全失敗なら取得済みにしない。
+	if saved > 0 {
 		now := time.Now()
 		company.RelationsFetchedAt = &now
 		if err := f.companyRepo.Update(company); err != nil {
@@ -177,7 +177,7 @@ func (f *CompanyRelationsFetcher) ConfirmAndSave(companyID uint, result *Company
 
 	out := *result
 	out.SavedCount = saved
-	if relationsResultHasData(&out) {
+	if saved > 0 {
 		now := time.Now()
 		company.RelationsFetchedAt = &now
 		if err := f.companyRepo.Update(company); err != nil {
@@ -522,9 +522,7 @@ func mergeRelationsResult(
 
 	if baseMarket != nil {
 		out.MarketInfo = baseMarket
-	} else if ai != nil && ai.MarketInfo != nil {
-		out.MarketInfo = ai.MarketInfo
-	} else if baseMarket == nil && ai != nil {
+	} else if ai != nil {
 		out.MarketInfo = ai.MarketInfo
 	}
 	if out.MarketInfo == nil && ai != nil {

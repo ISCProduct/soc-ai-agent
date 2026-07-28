@@ -20,6 +20,7 @@ import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import CompanyRelationGraph from '@/components/admin/CompanyRelationGraph'
 import { groupRelationsByCategory, RELATION_CATEGORY_LABELS } from '@/lib/relation-graph'
+import { fetchCompanyPrimary, formatFetchPrimarySummary } from '@/lib/admin-company-fetch'
 
 type RelationEntry = {
   name: string
@@ -55,6 +56,7 @@ export default function AdminCompanyRelationsPage() {
   const [success, setSuccess] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
   const [forceLoading, setForceLoading] = useState(false)
+  const [primaryLoading, setPrimaryLoading] = useState(false)
   const [confirmLoading, setConfirmLoading] = useState(false)
   const [previewPending, setPreviewPending] = useState(false)
 
@@ -171,6 +173,38 @@ export default function AdminCompanyRelationsPage() {
     }
   }
 
+  const handleFetchPrimary = async (force = false) => {
+    setPrimaryLoading(true)
+    setError('')
+    setSuccess('')
+    try {
+      const { ok, status, data } = await fetchCompanyPrimary(
+        id,
+        authService.getAdminFetchHeaders(),
+        force,
+      )
+      if (!ok) {
+        setError(data?.error || `主3種の取得に失敗しました (${status})`)
+        return
+      }
+      if (data.relations) applyRelationsPayload(data.relations)
+      if (data.company && typeof data.company === 'object') {
+        const company = data.company as Record<string, unknown>
+        if (typeof company.website_url === 'string') setWebsiteUrl(company.website_url)
+        setRelationsFetchedAt(company.relations_fetched_at ? String(company.relations_fetched_at) : null)
+      } else {
+        loadCompany()
+      }
+      if (data.ok === false && Array.isArray(data.errors) && data.errors.length > 0) {
+        setError(`一部失敗: ${data.errors.join('; ')}`)
+      }
+      const summary = formatFetchPrimarySummary(data)
+      setSuccess(summary ? `主3種取得完了: ${summary}` : '主3種取得完了')
+    } finally {
+      setPrimaryLoading(false)
+    }
+  }
+
   const handleConfirmSave = async () => {
     setConfirmLoading(true)
     setError('')
@@ -241,15 +275,33 @@ export default function AdminCompanyRelationsPage() {
 
       <Stack spacing={2}>
         <Typography variant="body2" color="text.secondary">
-          gBizINFO の調達・補助金関係を優先し、不足分のみ AI Search Lite で補完します（#633 Phase 2）。
+          「主3種をまとめて取得」で Backend が基本・技術・ビジネス関係を順に取得して DB 保存します。
+          必要ならこの画面の個別取得で関係だけ再取得できます。
         </Typography>
 
         <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
           <Button
+            variant="contained"
+            color="secondary"
+            onClick={() => handleFetchPrimary(false)}
+            disabled={aiLoading || forceLoading || primaryLoading}
+            startIcon={primaryLoading ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {primaryLoading ? '取得中...' : '主3種をまとめて取得'}
+          </Button>
+          <Button
+            variant="outlined"
+            color="secondary"
+            onClick={() => handleFetchPrimary(true)}
+            disabled={aiLoading || forceLoading || primaryLoading}
+          >
+            主3種を強制再取得
+          </Button>
+          <Button
             variant="outlined"
             color="secondary"
             onClick={handleAiFetch}
-            disabled={!name.trim() || aiLoading}
+            disabled={!name.trim() || aiLoading || primaryLoading}
             startIcon={aiLoading ? <CircularProgress size={16} color="inherit" /> : null}
           >
             {aiLoading ? '取得中...' : 'プレビュー取得（未保存）'}
@@ -266,7 +318,7 @@ export default function AdminCompanyRelationsPage() {
           <Button
             variant="outlined"
             onClick={handleForceFetchAndSave}
-            disabled={forceLoading}
+            disabled={forceLoading || primaryLoading}
             startIcon={forceLoading ? <CircularProgress size={16} color="inherit" /> : null}
           >
             {forceLoading ? '再取得中...' : '強制再取得して保存'}

@@ -19,7 +19,22 @@ export function RelationEdge({
   const labelX = (sourceX + targetX) / 2
   const labelY = (sourceY + targetY) / 2
   const text = typeof label === 'string' ? label : label != null ? String(label) : ''
-  const pillWidth = Math.min(140, Math.max(36, text.length * 7.2 + 18))
+  const visualWidth = Array.from(text).reduce((sum, ch) => sum + (/[\u3000-\u30ff\u3400-\u9fff\uff00-\uffef]/.test(ch) ? 2 : 1), 0)
+  const maxVisualWidth = 16
+  const truncatedText = (() => {
+    if (visualWidth <= maxVisualWidth) return text
+    let used = 0
+    let out = ''
+    for (const ch of Array.from(text)) {
+      const width = /[\u3000-\u30ff\u3400-\u9fff\uff00-\uffef]/.test(ch) ? 2 : 1
+      if (used+ width > maxVisualWidth - 1) break
+      used += width
+      out += ch
+    }
+    return `${out}…`
+  })()
+  const truncatedWidth = Array.from(truncatedText).reduce((sum, ch) => sum + (/[\u3000-\u30ff\u3400-\u9fff\uff00-\uffef]/.test(ch) ? 2 : 1), 0)
+  const pillWidth = Math.min(140, Math.max(36, truncatedWidth * 7.2 + 18))
 
   return (
     <>
@@ -52,7 +67,7 @@ export function RelationEdge({
               letterSpacing: '0.01em',
             }}
           >
-            {text.length > 14 ? `${text.slice(0, 14)}…` : text}
+            {truncatedText}
           </text>
         </g>
       ) : null}

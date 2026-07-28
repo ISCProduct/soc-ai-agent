@@ -43,7 +43,7 @@ func (r *CompanyRepository) CountActive() (int64, error) {
 // ListActiveFiltered は名前・公開ステータスで絞り込んだアクティブ企業を返す。
 // status は "draft" / "published" / ""（指定なし=すべて）。
 func (r *CompanyRepository) ListActiveFiltered(limit, offset int, name, status string) ([]models.Company, int64, error) {
-	q := r.db.Model(&models.Company{}).Where("is_active = ?", true)
+	q := r.db.Model(&models.Company{}).Where("is_active = ?", true).Session(&gorm.Session{})
 	if name = strings.TrimSpace(name); name != "" {
 		q = q.Where("name LIKE ?", "%"+name+"%")
 	}
@@ -53,12 +53,12 @@ func (r *CompanyRepository) ListActiveFiltered(limit, offset int, name, status s
 	}
 
 	var total int64
-	if err := q.Count(&total).Error; err != nil {
+	if err := q.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	var companies []models.Company
-	err := q.Order("id desc").Limit(limit).Offset(offset).Find(&companies).Error
+	err := q.Session(&gorm.Session{}).Order("id desc").Limit(limit).Offset(offset).Find(&companies).Error
 	return companies, total, err
 }
 

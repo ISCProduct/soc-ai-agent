@@ -152,7 +152,13 @@ func (f *TechStackFetcher) Acquire(ctx context.Context, companyName, websiteURL 
 
 	// 1) 公式サイト／採用ページから直接抽出（Search 予算を使わず成功率も高い）
 	if strings.TrimSpace(websiteURL) != "" {
-		if pageText, sourceURL, ferr := companyfetch.FirstFetchableText(ctx, companyfetch.CandidateCareerURLs(websiteURL)); ferr == nil && pageText != "" {
+		scrapeCtx, scrapeCancel := context.WithTimeout(ctx, 25*time.Second)
+		defer scrapeCancel()
+		candidateURLs := companyfetch.CandidateCareerURLs(websiteURL)
+		if len(candidateURLs) > 3 {
+			candidateURLs = candidateURLs[:3]
+		}
+		if pageText, sourceURL, ferr := companyfetch.FirstFetchableText(scrapeCtx, candidateURLs); ferr == nil && pageText != "" {
 			parseUser := fmt.Sprintf(
 				"企業「%s」の公開ページ本文です。本文に明示された技術のみ次のJSON形式で抽出してください。推測禁止。\n%s\n\n---\n本文:\n%s",
 				companyName, techStackJSONSchema, pageText,

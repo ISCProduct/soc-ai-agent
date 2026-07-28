@@ -166,6 +166,8 @@ function ProfilePageContent() {
       }
       authService.logout?.()
       router.replace('/login?deleted=1')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'アカウント削除に失敗しました')
     } finally {
       setDeleting(false)
       setDeleteDialogOpen(false)

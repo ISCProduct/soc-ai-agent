@@ -27,6 +27,46 @@ export type FetchPrimaryResponse = {
   error?: string
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function toRecordOrUndefined(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined
+}
+
+function toStepOrUndefined(value: unknown): FetchPrimaryStep | undefined {
+  if (!isRecord(value)) return undefined
+  return {
+    status: typeof value.status === 'string' ? value.status : undefined,
+    detail: typeof value.detail === 'string' ? value.detail : undefined,
+    count: typeof value.count === 'number' ? value.count : undefined,
+    skipped: typeof value.skipped === 'boolean' ? value.skipped : undefined,
+  }
+}
+
+function parseFetchPrimaryResponse(value: unknown): FetchPrimaryResponse {
+  if (!isRecord(value)) {
+    return {}
+  }
+  return {
+    ok: typeof value.ok === 'boolean' ? value.ok : undefined,
+    force: typeof value.force === 'boolean' ? value.force : undefined,
+    company_id: typeof value.company_id === 'number' ? value.company_id : undefined,
+    company_name: typeof value.company_name === 'string' ? value.company_name : undefined,
+    aspects: Array.isArray(value.aspects) ? value.aspects.filter((v): v is string => typeof v === 'string') : undefined,
+    errors: Array.isArray(value.errors) ? value.errors.filter((v): v is string => typeof v === 'string') : undefined,
+    info_step: toStepOrUndefined(value.info_step),
+    tech_step: toStepOrUndefined(value.tech_step),
+    relations_step: toStepOrUndefined(value.relations_step),
+    info: toRecordOrUndefined(value.info),
+    tech: toRecordOrUndefined(value.tech),
+    relations: toRecordOrUndefined(value.relations),
+    company: toRecordOrUndefined(value.company),
+    error: typeof value.error === 'string' ? value.error : undefined,
+  }
+}
+
 function stepLabel(step: FetchPrimaryStep | undefined, label: string): string | null {
   if (!step?.status) return null
   if (step.status === 'fetched') {
@@ -59,6 +99,7 @@ export async function fetchCompanyPrimary(
     method: 'POST',
     headers,
   })
-  const data = (await res.json().catch(() => ({}))) as FetchPrimaryResponse
+  const raw: unknown = await res.json().catch(() => ({}))
+  const data = parseFetchPrimaryResponse(raw)
   return { ok: res.ok, status: res.status, data }
 }
