@@ -3,16 +3,21 @@ package services
 import (
 	"Backend/domain/repository"
 	"Backend/internal/companyfetch"
+	"Backend/internal/config"
 	"Backend/internal/models"
 	"fmt"
 )
 
-// 親会社→子会社→孫会社のように資本関係を辿る際の安全弁。
-// 深さ・ノード数のどちらかに達したら打ち切り、無限ループや巨大レスポンスを防ぐ。
-const (
+// RelationGraphMaxDepth/MaxNodes はデフォルト値。環境変数で上書き可能。
+var (
 	RelationGraphMaxDepth = 4
 	RelationGraphMaxNodes = 60
 )
+
+func init() {
+	RelationGraphMaxDepth = config.RelationGraphMaxDepth()
+	RelationGraphMaxNodes = config.RelationGraphMaxNodes()
+}
 
 // RelationGraphNode はグラフ上の1企業ノード。
 type RelationGraphNode struct {

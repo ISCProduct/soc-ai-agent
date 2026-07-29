@@ -2,6 +2,7 @@ package companyfetch
 
 import (
 	"Backend/internal/companyfields"
+	"Backend/internal/config"
 	"context"
 	"fmt"
 	"html"
@@ -15,11 +16,21 @@ import (
 	"unicode/utf8"
 )
 
+var (
+	TTLInfo      = 90 * 24 * time.Hour
+	TTLJobs      = 7 * 24 * time.Hour
+	TTLTech      = 30 * 24 * time.Hour
+	TTLRelations = 60 * 24 * time.Hour
+)
+
+func init() {
+	TTLInfo = time.Duration(config.CompanyTTLInfoDays()) * 24 * time.Hour
+	TTLJobs = time.Duration(config.CompanyTTLJobsDays()) * 24 * time.Hour
+	TTLTech = time.Duration(config.CompanyTTLTechDays()) * 24 * time.Hour
+	TTLRelations = time.Duration(config.CompanyTTLRelationsDays()) * 24 * time.Hour
+}
+
 const (
-	TTLInfo       = 90 * 24 * time.Hour
-	TTLJobs       = 7 * 24 * time.Hour
-	TTLTech       = 30 * 24 * time.Hour
-	TTLRelations  = 60 * 24 * time.Hour
 
 	ConfidenceHigh   = "high"
 	ConfidenceMedium = "medium"

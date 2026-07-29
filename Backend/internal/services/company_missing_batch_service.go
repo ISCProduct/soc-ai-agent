@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/companyfetch"
 	"Backend/internal/companyfields"
+	"Backend/internal/config"
 	"Backend/internal/models"
 	"context"
 	"fmt"
@@ -14,10 +15,7 @@ import (
 )
 
 const (
-	defaultMissingBatchLimit       = 20
-	maxMissingBatchLimit           = 50
 	defaultMissingBatchConcurrency = 4
-	maxMissingBatchConcurrency     = 8
 )
 
 // MissingBatchOptions は企業管理全体の不足データ一括取得オプション。
@@ -92,8 +90,8 @@ func clampMissingBatchConcurrency(n int) int {
 	if n <= 0 {
 		return defaultMissingBatchConcurrency
 	}
-	if n > maxMissingBatchConcurrency {
-		return maxMissingBatchConcurrency
+	if maxC := config.MissingBatchMaxConcurrency(); n > maxC {
+		return maxC
 	}
 	return n
 }
@@ -102,10 +100,10 @@ func clampMissingBatchConcurrency(n int) int {
 // 1社内の主3種は依存があるため直列、企業間は Concurrency 上限で並列化する。
 func (s *CompanyMissingBatchService) Run(ctx context.Context, opts MissingBatchOptions) (*MissingBatchResult, error) {
 	if opts.Limit <= 0 {
-		opts.Limit = defaultMissingBatchLimit
+		opts.Limit = config.MissingBatchDefaultLimit()
 	}
-	if opts.Limit > maxMissingBatchLimit {
-		opts.Limit = maxMissingBatchLimit
+	if maxL := config.MissingBatchMaxLimit(); opts.Limit > maxL {
+		opts.Limit = maxL
 	}
 	concurrency := clampMissingBatchConcurrency(opts.Concurrency)
 

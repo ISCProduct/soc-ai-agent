@@ -1,6 +1,7 @@
 package services
 
 import (
+	"Backend/internal/config"
 	"Backend/internal/models"
 	"context"
 	"testing"
@@ -132,7 +133,7 @@ func TestClampMissingBatchConcurrency(t *testing.T) {
 	}{
 		{"未指定はデフォルト", 0, defaultMissingBatchConcurrency},
 		{"範囲内はそのまま", 3, 3},
-		{"上限でクランプ", 100, maxMissingBatchConcurrency},
+		{"上限でクランプ", 100, config.MissingBatchMaxConcurrency()},
 		{"負数はデフォルト", -1, defaultMissingBatchConcurrency},
 	}
 	for _, tt := range tests {

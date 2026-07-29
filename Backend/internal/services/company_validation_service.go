@@ -2,6 +2,7 @@ package services
 
 import (
 	"Backend/internal/companyfetch"
+	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"context"
@@ -15,10 +16,13 @@ import (
 	"unicode"
 )
 
-const (
-	companyValidationCacheTTL = 30 * time.Minute
-	companyValidationMaxTok   = 200
-)
+var companyValidationCacheTTL = 30 * time.Minute
+
+const companyValidationMaxTok = 200
+
+func init() {
+	companyValidationCacheTTL = time.Duration(config.ValidationCacheTTLMinutes()) * time.Minute
+}
 
 // companyLookup は企業実在確認に必要な最小の参照インターフェース。
 type companyLookup interface {
