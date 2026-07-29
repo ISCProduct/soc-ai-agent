@@ -1,6 +1,7 @@
 package services
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
@@ -32,17 +33,18 @@ func TestNonEmptyURLs(t *testing.T) {
 	tests := []struct {
 		name string
 		url  string
-		want int
+		want []string
 	}{
-		{"空文字", "", 0},
-		{"空白のみ", "  ", 0},
-		{"有効URL", "https://example.com", 1},
+		{"空文字", "", []string{}},
+		{"空白のみ", "  ", []string{}},
+		{"有効URL", "https://example.com", []string{"https://example.com"}},
+		{"前後空白付きURL", "  https://example.com  ", []string{"https://example.com"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := nonEmptyURLs(tt.url)
-			if len(got) != tt.want {
-				t.Errorf("nonEmptyURLs(%q) len = %d, want %d", tt.url, len(got), tt.want)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("nonEmptyURLs(%q) = %v, want %v", tt.url, got, tt.want)
 			}
 		})
 	}
@@ -70,24 +72,72 @@ func TestTruncateRunes(t *testing.T) {
 }
 
 func TestPurgeExpired(t *testing.T) {
-	s := &CompanyValidationService{
-		cache: map[string]companyValidationCacheEntry{
-			"expired": {
-				result:    CompanyValidationResult{CanonicalName: "old"},
-				expiresAt: time.Now().Add(-1 * time.Hour),
+	now := time.Now()
+	tests := []struct {
+		name         string
+		cache        map[string]companyValidationCacheEntry
+		wantRemaining []string
+	}{
+		{
+			name: "期限切れと有効が混在",
+			cache: map[string]companyValidationCacheEntry{
+				"expired": {
+					result:    CompanyValidationResult{CanonicalName: "old"},
+					expiresAt: now.Add(-1 * time.Hour),
+				},
+				"valid": {
+					result:    CompanyValidationResult{CanonicalName: "new"},
+					expiresAt: now.Add(1 * time.Hour),
+				},
 			},
-			"valid": {
-				result:    CompanyValidationResult{CanonicalName: "new"},
-				expiresAt: time.Now().Add(1 * time.Hour),
+			wantRemaining: []string{"valid"},
+		},
+		{
+			name: "複数期限切れ",
+			cache: map[string]companyValidationCacheEntry{
+				"expired1": {
+					result:    CompanyValidationResult{CanonicalName: "a"},
+					expiresAt: now.Add(-2 * time.Hour),
+				},
+				"expired2": {
+					result:    CompanyValidationResult{CanonicalName: "b"},
+					expiresAt: now.Add(-30 * time.Minute),
+				},
+				"valid": {
+					result:    CompanyValidationResult{CanonicalName: "c"},
+					expiresAt: now.Add(1 * time.Hour),
+				},
 			},
+			wantRemaining: []string{"valid"},
+		},
+		{
+			name: "全て有効",
+			cache: map[string]companyValidationCacheEntry{
+				"a": {
+					result:    CompanyValidationResult{CanonicalName: "a"},
+					expiresAt: now.Add(1 * time.Hour),
+				},
+				"b": {
+					result:    CompanyValidationResult{CanonicalName: "b"},
+					expiresAt: now.Add(2 * time.Hour),
+				},
+			},
+			wantRemaining: []string{"a", "b"},
 		},
 	}
-	s.purgeExpired()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &CompanyValidationService{cache: tt.cache}
+			s.purgeExpired()
 
-	if _, ok := s.cache["expired"]; ok {
-		t.Error("expired entry should have been purged")
-	}
-	if _, ok := s.cache["valid"]; !ok {
-		t.Error("valid entry should not have been purged")
+			if len(s.cache) != len(tt.wantRemaining) {
+				t.Fatalf("remaining count = %d, want %d; cache=%v", len(s.cache), len(tt.wantRemaining), s.cache)
+			}
+			for _, key := range tt.wantRemaining {
+				if _, ok := s.cache[key]; !ok {
+					t.Errorf("expected key %q to remain", key)
+				}
+			}
+		})
 	}
 }

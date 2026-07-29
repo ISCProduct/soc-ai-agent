@@ -16,6 +16,7 @@ func TestSplitClearAgencyNames(t *testing.T) {
 		{"スラッシュ区切り", "株式会社テスト商事／株式会社サンプル技研", []string{"株式会社テスト商事", "株式会社サンプル技研"}},
 		{"カンマ区切り", "株式会社テスト商事、株式会社サンプル技研", []string{"株式会社テスト商事", "株式会社サンプル技研"}},
 		{"重複除去", "株式会社テスト商事/株式会社テスト商事", []string{"株式会社テスト商事"}},
+		{"大小文字違いの重複除去", "株式会社ABC/株式会社abc", []string{"株式会社ABC"}},
 		{"不明瞭な名前は除外", "A/株式会社テスト商事", []string{"株式会社テスト商事"}},
 		{"パイプ区切り", "株式会社テスト商事｜株式会社サンプル技研", []string{"株式会社テスト商事", "株式会社サンプル技研"}},
 		{"セミコロン区切り", "株式会社テスト商事；株式会社サンプル技研", []string{"株式会社テスト商事", "株式会社サンプル技研"}},
@@ -23,6 +24,9 @@ func TestSplitClearAgencyNames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := splitClearAgencyNames(tt.raw)
+			if (got == nil) != (tt.want == nil) {
+				t.Fatalf("splitClearAgencyNames(%q) nil-ness mismatch: got %v, want %v", tt.raw, got, tt.want)
+			}
 			if len(got) != len(tt.want) {
 				t.Fatalf("splitClearAgencyNames(%q) = %v, want %v", tt.raw, got, tt.want)
 			}
@@ -50,6 +54,9 @@ func TestParseJointSignatures(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := parseJointSignatures(tt.raw)
+			if (got == nil) != (tt.want == nil) {
+				t.Fatalf("parseJointSignatures(%q) nil-ness mismatch: got %v, want %v", tt.raw, got, tt.want)
+			}
 			if len(got) != len(tt.want) {
 				t.Fatalf("parseJointSignatures(%q) = %v, want %v", tt.raw, got, tt.want)
 			}

@@ -47,34 +47,119 @@ func TestGbizResultUseful(t *testing.T) {
 }
 
 func TestMergeCompanyInfoGaps(t *testing.T) {
-	base := &CompanyInfoResult{
-		Description: "既存概要",
-		Industry:    "",
-		Location:    "東京",
-		FoundedYear: 0,
+	tests := []struct {
+		name string
+		base *CompanyInfoResult
+		ai   *CompanyInfoResult
+		want *CompanyInfoResult
+	}{
+		{
+			name: "既存値保持と空欄補完",
+			base: &CompanyInfoResult{
+				Description: "既存概要",
+				Industry:    "",
+				Location:    "東京",
+				FoundedYear: 0,
+			},
+			ai: &CompanyInfoResult{
+				Description:  "AI概要",
+				Industry:     "IT",
+				Location:     "大阪",
+				FoundedYear:  1990,
+				MainBusiness: "ソフトウェア開発",
+			},
+			want: &CompanyInfoResult{
+				Description:  "既存概要",
+				Industry:     "IT",
+				Location:     "東京",
+				FoundedYear:  1990,
+				MainBusiness: "ソフトウェア開発",
+			},
+		},
+		{
+			name: "補完元が空",
+			base: &CompanyInfoResult{
+				Description: "既存概要",
+				Location:    "東京",
+			},
+			ai: &CompanyInfoResult{},
+			want: &CompanyInfoResult{
+				Description: "既存概要",
+				Location:    "東京",
+			},
+		},
+		{
+			name: "baseが全て空でAIから埋まる",
+			base: &CompanyInfoResult{},
+			ai: &CompanyInfoResult{
+				Description:   "AI概要",
+				Industry:      "IT",
+				Location:      "大阪",
+				WebsiteURL:    "https://example.com",
+				FoundedYear:   2000,
+				EmployeeCount: 50,
+				MainBusiness:  "開発",
+				Culture:       "フラット",
+				WorkStyle:     "リモート",
+				TechStack:     "Go",
+				WelfareDetails: "住宅手当",
+			},
+			want: &CompanyInfoResult{
+				Description:   "AI概要",
+				Industry:      "IT",
+				Location:      "大阪",
+				WebsiteURL:    "https://example.com",
+				FoundedYear:   2000,
+				EmployeeCount: 50,
+				MainBusiness:  "開発",
+				Culture:       "フラット",
+				WorkStyle:     "リモート",
+				TechStack:     "Go",
+				WelfareDetails: "住宅手当",
+			},
+		},
 	}
-	ai := &CompanyInfoResult{
-		Description: "AI概要",
-		Industry:    "IT",
-		Location:    "大阪",
-		FoundedYear: 1990,
-		MainBusiness: "ソフトウェア開発",
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mergeCompanyInfoGaps(tt.base, tt.ai)
+			assertCompanyInfoResult(t, tt.base, tt.want)
+		})
 	}
-	mergeCompanyInfoGaps(base, ai)
+}
 
-	if base.Description != "既存概要" {
-		t.Errorf("既存フィールドが上書きされた: %q", base.Description)
+func assertCompanyInfoResult(t *testing.T, got, want *CompanyInfoResult) {
+	t.Helper()
+	if got.Description != want.Description {
+		t.Errorf("Description = %q, want %q", got.Description, want.Description)
 	}
-	if base.Industry != "IT" {
-		t.Errorf("空欄が埋められなかった: Industry=%q", base.Industry)
+	if got.Industry != want.Industry {
+		t.Errorf("Industry = %q, want %q", got.Industry, want.Industry)
 	}
-	if base.Location != "東京" {
-		t.Errorf("既存Locationが上書きされた: %q", base.Location)
+	if got.Location != want.Location {
+		t.Errorf("Location = %q, want %q", got.Location, want.Location)
 	}
-	if base.FoundedYear != 1990 {
-		t.Errorf("FoundedYearが埋められなかった: %d", base.FoundedYear)
+	if got.WebsiteURL != want.WebsiteURL {
+		t.Errorf("WebsiteURL = %q, want %q", got.WebsiteURL, want.WebsiteURL)
 	}
-	if base.MainBusiness != "ソフトウェア開発" {
-		t.Errorf("MainBusinessが埋められなかった: %q", base.MainBusiness)
+	if got.FoundedYear != want.FoundedYear {
+		t.Errorf("FoundedYear = %d, want %d", got.FoundedYear, want.FoundedYear)
+	}
+	if got.EmployeeCount != want.EmployeeCount {
+		t.Errorf("EmployeeCount = %d, want %d", got.EmployeeCount, want.EmployeeCount)
+	}
+	if got.MainBusiness != want.MainBusiness {
+		t.Errorf("MainBusiness = %q, want %q", got.MainBusiness, want.MainBusiness)
+	}
+	if got.Culture != want.Culture {
+		t.Errorf("Culture = %q, want %q", got.Culture, want.Culture)
+	}
+	if got.WorkStyle != want.WorkStyle {
+		t.Errorf("WorkStyle = %q, want %q", got.WorkStyle, want.WorkStyle)
+	}
+	if got.TechStack != want.TechStack {
+		t.Errorf("TechStack = %q, want %q", got.TechStack, want.TechStack)
+	}
+	if got.WelfareDetails != want.WelfareDetails {
+		t.Errorf("WelfareDetails = %q, want %q", got.WelfareDetails, want.WelfareDetails)
 	}
 }
