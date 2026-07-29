@@ -3,6 +3,7 @@ package services
 import (
 	"Backend/domain/repository"
 	"Backend/internal/companyfetch"
+	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"context"
@@ -363,7 +364,7 @@ func (f *CompanyRelationsFetcher) enrichTransactionDescriptions(
 			continue
 		}
 		targets = append(targets, name)
-		if len(targets) >= 12 {
+		if len(targets) >= config.RelationEnrichMaxTargets() {
 			break
 		}
 	}
