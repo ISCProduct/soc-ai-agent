@@ -56,11 +56,13 @@ type CompanyValidationService struct {
 }
 
 func NewCompanyValidationService(companyRepo companyLookup, client *openai.Client) *CompanyValidationService {
-	return &CompanyValidationService{
+	s := &CompanyValidationService{
 		companyRepo:  companyRepo,
 		openaiClient: client,
 		cache:        make(map[string]companyValidationCacheEntry),
 	}
+	go s.purgeLoop()
+	return s
 }
 
 // SetSearchBudget は月次 Search 予算ガードを注入する。
@@ -313,6 +315,25 @@ func (s *CompanyValidationService) getCache(key string) (CompanyValidationResult
 		return CompanyValidationResult{}, false
 	}
 	return entry.result, true
+}
+
+func (s *CompanyValidationService) purgeLoop() {
+	ticker := time.NewTicker(companyValidationCacheTTL)
+	defer ticker.Stop()
+	for range ticker.C {
+		s.purgeExpired()
+	}
+}
+
+func (s *CompanyValidationService) purgeExpired() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	for k, v := range s.cache {
+		if now.After(v.expiresAt) {
+			delete(s.cache, k)
+		}
+	}
 }
 
 func (s *CompanyValidationService) putCache(key string, result CompanyValidationResult) {

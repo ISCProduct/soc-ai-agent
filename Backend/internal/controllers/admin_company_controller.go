@@ -54,11 +54,7 @@ func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.A
 func (c *AdminCompanyController) SetRelationsFetcher(fetcher *services.CompanyRelationsFetcher) {
 	if c != nil {
 		c.relationsFetcher = fetcher
-		if c.missingBatch != nil {
-			c.missingBatch = services.NewCompanyMissingBatchService(
-				c.repo, c.infoFetcher, c.jobFetcher, c.techFetcher, fetcher,
-			)
-		} else if c.infoFetcher != nil {
+		if c.missingBatch != nil || c.infoFetcher != nil {
 			c.missingBatch = services.NewCompanyMissingBatchService(
 				c.repo, c.infoFetcher, c.jobFetcher, c.techFetcher, fetcher,
 			)
