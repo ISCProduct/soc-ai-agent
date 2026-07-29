@@ -93,8 +93,8 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 		return nil, fmt.Errorf("company not found: %w", err)
 	}
 
-	if !forceRefresh && companyfetch.IsFresh(company.InfoFetchedAt, companyfetch.TTLInfo) &&
-		companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
+	// スタンプ済み（公開情報限定の確認済み含む）なら TTL 内は再取得しない。強制更新は force。
+	if !forceRefresh && companyfetch.IsFresh(company.InfoFetchedAt, companyfetch.TTLInfo) {
 		return markInfoCacheSkip(companyInfoFromModel(company), "ttl", false), nil
 	}
 
@@ -128,9 +128,9 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 	// Search フォールバック時も SourceURL を明示更新し、旧スクレイプ URL の残存を防ぐ
 	company.SourceURL = result.SourceURL
 	company.SourceFetchedAt = &now
-	// 空結果で InfoFetchedAt だけ進むと「取得済みだが中身なし」で再取得不能になるため、
-	// 最低限の基本情報が揃ったときのみスタンプする。
-	if companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
+	// 概要が無くても公式URL/所在地など手がかりがあれば確認済みとしてスタンプする。
+	// 完全に空の結果だけはスタンプせず再取得可能にする。
+	if companyfetch.HasBasicInfoFootprint(company.Description, company.WebsiteURL, company.Location) {
 		company.InfoFetchedAt = &now
 	}
 	company.LastModelUsed = result.ModelUsed
@@ -162,8 +162,7 @@ func (f *CompanyInfoFetcher) ConfirmAndSave(companyID uint, result *CompanyInfoR
 		company.SourceURL = result.SourceURL
 	}
 	company.SourceFetchedAt = &now
-	// 空プレビュー確定で InfoFetchedAt だけ進まないようにする
-	if companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
+	if companyfetch.HasBasicInfoFootprint(company.Description, company.WebsiteURL, company.Location) {
 		company.InfoFetchedAt = &now
 	}
 	if result.ModelUsed != "" {
@@ -276,7 +275,8 @@ func (f *CompanyInfoFetcher) enrichGapsWithAI(ctx context.Context, companyName, 
 	}
 	ai, err := f.acquireViaAISearch(ctx, companyName, firstNonEmpty(websiteURL, base.WebsiteURL))
 	if err != nil {
-		return base, nil // gBiz 分は活かす
+		// gBiz Sync 済みの法人データは DB に残る。AI 失敗は握りつぶさず呼び出し元へ返す。
+		return nil, fmt.Errorf("ai gap enrich: %w", err)
 	}
 	mergeCompanyInfoGaps(base, ai)
 	if ai.ModelUsed != "" {

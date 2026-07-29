@@ -1,28 +1,24 @@
-import { NextRequest, NextResponse } from 'next/server'
-
-const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
+import { NextRequest } from 'next/server'
+import {
+  adminProxyHeaders,
+  jsonFromProxyResult,
+  proxyAdminBackend,
+  proxyErrorResponse,
+} from '@/lib/admin-backend-proxy'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 180
 
 export async function POST(request: NextRequest) {
   const body = await request.text()
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/web-search`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Admin-Email': request.headers.get('x-admin-email') || '',
-      'X-Admin-Token': request.headers.get('x-admin-token') || '',
-    },
-    body,
-  })
-  const raw = await response.text()
-  let data: Record<string, unknown> = {}
-  if (raw) {
-    try {
-      data = JSON.parse(raw)
-    } catch {
-      data = response.ok ? { message: raw } : { error: raw }
-    }
+  try {
+    const result = await proxyAdminBackend('POST', '/api/admin/companies/web-search', {
+      headers: adminProxyHeaders(request.headers),
+      body,
+      timeoutMs: 180_000,
+    })
+    return jsonFromProxyResult(result)
+  } catch (err) {
+    return proxyErrorResponse(err)
   }
-  return NextResponse.json(data, { status: response.status })
 }

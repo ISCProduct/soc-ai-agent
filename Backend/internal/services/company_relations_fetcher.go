@@ -88,9 +88,9 @@ func (f *CompanyRelationsFetcher) SetSearchFlight(flight *CompanySearchFlight) {
 }
 
 const companyRelationsJSONSchema = `{
-  "subsidiaries": [{"name": "子会社・グループ会社名", "ratio": 出資比率（不明なら省略）, "description": "関係の説明（例: 完全子会社）"}],
-  "affiliates": [{"name": "資本提携・関連会社名", "description": "関係の説明（例: 資本提携）"}],
-  "business_partners": [{"name": "主要取引先名", "description": "取引内容の1行説明（例: クラウド基盤の共同開発）"}],
+  "subsidiaries": [{"name": "子会社・グループ会社名", "ratio": 出資比率（不明なら省略）, "description": "資本関係の具体内容（例: 完全子会社・議決権○%）"}],
+  "affiliates": [{"name": "資本提携・関連会社名", "description": "資本関係の具体内容（例: 資本業務提携・出資比率○%）"}],
+  "business_partners": [{"name": "はっきりした取引先名または省庁・自治体名（曖昧・JV・その他は禁止）", "description": "取引内容。公開事実が無くても業界・事業内容から妥当に推定できる内容を書いてよい。推定もできず種別しか分からない場合は空文字（表示は主要取引先）"}],
   "market_info": {
     "is_listed": true/false,
     "market_type": "prime|standard|growth|unlisted",
@@ -110,7 +110,8 @@ func (f *CompanyRelationsFetcher) FetchAndSave(ctx context.Context, companyID ui
 		if err != nil {
 			return nil, err
 		}
-		// 関係・市場が空なら TTL 内でも再取得する
+		// 取引内容が空でも「主要取引先」フォールバックとして確定済みなら TTL 内は再取得しない。
+		// 推定し直したい場合は force=true。
 		if relationsResultHasData(result) {
 			return markRelationsCacheSkip(result, "ttl", false), nil
 		}
@@ -195,20 +196,16 @@ func (f *CompanyRelationsFetcher) Acquire(ctx context.Context, companyName, webs
 }
 
 func (f *CompanyRelationsFetcher) acquireForCompany(ctx context.Context, company *models.Company) (*CompanyRelationsResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 
-	existingNames := map[string]struct{}{}
+	var existingEntries []RelationEntry
 	if f.relationRepo != nil {
 		relations, err := f.relationRepo.GetRelationsByCompanyID(company.ID)
 		if err != nil {
 			return nil, err
 		}
-		for _, rel := range relations {
-			for _, name := range relationPartnerNames(company.ID, rel) {
-				existingNames[normalizeRelationName(name)] = struct{}{}
-			}
-		}
+		existingEntries = relationsToEntries(company.ID, relations)
 	}
 
 	source := companyfetch.SourceGBiz
@@ -221,11 +218,7 @@ func (f *CompanyRelationsFetcher) acquireForCompany(ctx context.Context, company
 			if err != nil {
 				return nil, err
 			}
-			for _, rel := range relations {
-				for _, name := range relationPartnerNames(company.ID, rel) {
-					existingNames[normalizeRelationName(name)] = struct{}{}
-				}
-			}
+			existingEntries = relationsToEntries(company.ID, relations)
 		}
 	}
 
@@ -236,28 +229,29 @@ func (f *CompanyRelationsFetcher) acquireForCompany(ctx context.Context, company
 		}
 	}
 
-	needsAI := len(existingNames) == 0 || marketInfo == nil || marketInfo.StockCode == ""
+	// 取引先名があっても取引内容が空なら AI で補完する
+	needsAI := len(existingEntries) == 0 || marketInfo == nil || marketInfo.StockCode == "" ||
+		relationsNeedDescriptionEnrichment(existingEntries)
 	if !needsAI {
-		return f.buildResultFromExisting(company, existingNames, marketInfo, source, modelUsed, confidence)
+		return f.buildResultFromExisting(company, nil, marketInfo, source, modelUsed, confidence)
 	}
 
 	ai, err := f.acquireViaAISearch(ctx, company.Name, company.WebsiteURL)
 	if err != nil {
-		// 予算超過は呼び出し元でキャッシュ継続＋メタ付与するため伝播する
 		if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
 			return nil, err
 		}
-		if len(existingNames) > 0 || marketInfo != nil {
-			return f.buildResultFromExisting(company, existingNames, marketInfo, source, modelUsed, confidence)
+		if len(existingEntries) > 0 || marketInfo != nil {
+			return f.buildResultFromExisting(company, nil, marketInfo, source, modelUsed, confidence)
 		}
 		return nil, err
 	}
 
-	merged := mergeRelationsResult(existingNames, marketInfo, ai)
+	merged := mergeRelationsResult(existingEntries, marketInfo, ai)
 	if ai.ModelUsed != "" {
 		modelUsed = source + "+" + ai.ModelUsed
 	}
-	if len(existingNames) > 0 {
+	if len(existingEntries) > 0 {
 		source = companyfetch.SourceGBiz + "+" + companyfetch.SourceWebSearch
 		confidence = companyfetch.ConfidenceMedium
 	} else {
@@ -265,6 +259,17 @@ func (f *CompanyRelationsFetcher) acquireForCompany(ctx context.Context, company
 		confidence = ai.Confidence
 		modelUsed = ai.ModelUsed
 	}
+
+	// まだ取引内容が空の取引先があれば、取引内容に特化した追撃検索
+	if relationsNeedDescriptionEnrichment(merged.Relations) {
+		if enriched, eerr := f.enrichTransactionDescriptions(ctx, company.Name, company.WebsiteURL, merged.Relations); eerr == nil && enriched != nil {
+			merged = mergeRelationsResult(merged.Relations, merged.MarketInfo, enriched)
+			if enriched.ModelUsed != "" {
+				modelUsed = modelUsed + "+desc:" + enriched.ModelUsed
+			}
+		}
+	}
+
 	merged.Source = source
 	merged.ModelUsed = modelUsed
 	merged.Confidence = confidence
@@ -277,20 +282,30 @@ func (f *CompanyRelationsFetcher) acquireViaAISearch(ctx context.Context, compan
 		return nil, fmt.Errorf("openai client is nil")
 	}
 
-	systemPrompt := `あなたは日本企業の資本関係・取引関係・上場情報に詳しいアシスタントです。検索結果に明示された事実のみをJSON化してください。推測で企業名を作らないでください。`
+	systemPrompt := `あなたは日本企業の資本関係・取引関係・上場情報に詳しいアシスタントです。検索結果と、そこから妥当に導ける業界・事業上の推定をJSON化してください。
+重要な制約:
+- 実在がはっきりしない・曖昧な組織名（「共同企業体」「その他」「株式会社」のみ、「○○JV」など）は一切載せない。不明なら省略する。
+- 入札・調達・補助金の相手は、共同企業体名ではなく発注元の省庁・自治体・公的機関名を name に書く（例: デジタル庁、厚生労働省）。発注機関が不明ならその件は載せない。
+- 取引先の description は具体的な取引内容（推定可）。推定も弱く種別しか分からない場合は空文字（表示は主要取引先）。空の代わりに「主要取引先」と書かない。`
 	siteHint := ""
 	if websiteURL != "" {
 		siteHint = fmt.Sprintf("（参考公式URL: %s）", websiteURL)
 	}
 	searchPrompt := fmt.Sprintf(
-		`日本の企業「%s」%sについて、公開情報から確認できる子会社・グループ会社・資本提携先・主要取引先・上場区分・証券コードを調べてください。各事実の根拠URLを含めてください。不明な項目は推測せず空配列または空文字にしてください。`,
+		`日本の企業「%s」%sについて、公開情報から次を調べてください。
+1. 子会社・グループ会社と資本関係の内容（はっきりした社名のみ）
+2. 資本提携・関連会社と提携内容（はっきりした社名のみ）
+3. 取引先（顧客・仕入先・業務提携先など）と取引内容。曖昧な社名は載せない
+4. 入札・調達・補助金がある場合は発注元の省庁・自治体名（共同企業体名は載せない）
+5. 上場区分・証券コード
+根拠URLがあれば含めてください。組織名が不明・曖昧ならその件は省略してください。`,
 		companyName, siteHint,
 	)
 	parseUser := fmt.Sprintf(
-		"企業名「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。検索結果に無い項目は空配列または空文字。\n%s",
+		"企業名「%s」について次のJSON形式で回答してください。name ははっきりした組織名のみ（曖昧・JV・その他は禁止）。入札案件は省庁・自治体名。description は取引内容（推定可、弱ければ空）。\n%s",
 		companyName, companyRelationsJSONSchema,
 	)
-	raw, modelsUsed, err := f.llm.SearchLiteThenParse(ctx, searchPrompt, systemPrompt, parseUser, 800)
+	raw, modelsUsed, err := f.llm.SearchLiteThenParse(ctx, searchPrompt, systemPrompt, parseUser, 1200)
 	if err != nil {
 		return nil, fmt.Errorf("企業関係情報のAI取得失敗: %w", err)
 	}
@@ -300,6 +315,81 @@ func (f *CompanyRelationsFetcher) acquireViaAISearch(ctx context.Context, compan
 	}
 	result.Source = companyfetch.SourceWebSearch
 	result.SourceURL = strings.TrimSpace(websiteURL)
+	result.ModelUsed = modelsUsed
+	result.Confidence = companyfetch.ConfidenceMedium
+
+	// プレビュー取得でも取引内容が薄い場合は追撃する
+	if relationsNeedDescriptionEnrichment(result.Relations) {
+		if enriched, eerr := f.enrichTransactionDescriptions(ctx, companyName, websiteURL, result.Relations); eerr == nil && enriched != nil {
+			result = mergeRelationsResult(result.Relations, result.MarketInfo, enriched)
+			if enriched.ModelUsed != "" {
+				result.ModelUsed = modelsUsed + "+desc:" + enriched.ModelUsed
+			}
+			result.Source = companyfetch.SourceWebSearch
+			result.Confidence = companyfetch.ConfidenceMedium
+		}
+	}
+	return result, nil
+}
+
+// enrichTransactionDescriptions は取引先名は分かっているが取引内容が空の件を、取引内容に特化した検索で埋める。
+func (f *CompanyRelationsFetcher) enrichTransactionDescriptions(
+	ctx context.Context,
+	companyName, websiteURL string,
+	relations []RelationEntry,
+) (*CompanyRelationsResult, error) {
+	if f.llm == nil || f.llm.Client == nil {
+		return nil, fmt.Errorf("openai client is nil")
+	}
+	targets := make([]string, 0)
+	for _, rel := range relations {
+		if companyfetch.SanitizeRelationDescription(rel.Description) != "" {
+			continue
+		}
+		name := strings.TrimSpace(rel.Name)
+		if name == "" {
+			continue
+		}
+		targets = append(targets, name)
+		if len(targets) >= 12 {
+			break
+		}
+	}
+	if len(targets) == 0 {
+		return &CompanyRelationsResult{Relations: nil}, nil
+	}
+
+	siteHint := ""
+	if websiteURL != "" {
+		siteHint = fmt.Sprintf("（参考公式URL: %s）", websiteURL)
+	}
+	partnerList := strings.Join(targets, "、")
+	systemPrompt := `あなたは日本企業の取引関係に詳しいアシスタントです。検索結果と妥当な推定をJSON化してください。
+はっきりした組織名のみ載せる。曖昧名・共同企業体・「その他」は禁止。入札・調達の相手は省庁・自治体名。不明なら省略。
+description は具体的な取引内容（推定可）。弱い場合は空文字（『主要取引先』と書かない）。`
+	searchPrompt := fmt.Sprintf(
+		`日本の企業「%s」%sと、次の関連企業との関係について、公開情報および事業内容から妥当な取引・協業・資本関係の内容を調べてください: %s。各ペアについて「何を取引・提携しているか」を1行で示してください。根拠URLがあれば含めてください。推定もできないペアは省略するか description を空にしてください。`,
+		companyName, siteHint, partnerList,
+	)
+	parseSchema := `{
+  "business_partners": [{"name": "関連企業名", "description": "取引内容（推定可）。弱い場合は空文字"}],
+  "affiliates": [{"name": "関連企業名", "description": "資本・提携の具体内容"}],
+  "subsidiaries": [{"name": "関連企業名", "description": "資本関係の具体内容", "ratio": null}],
+  "market_info": {"is_listed": false, "market_type": "", "stock_code": ""}
+}`
+	parseUser := fmt.Sprintf(
+		"企業「%s」と関連企業（%s）について次のJSONを返してください。description は具体的な取引内容（推定可）。弱いフォールバックなら空文字（『主要取引先』と書かない）。\n%s",
+		companyName, partnerList, parseSchema,
+	)
+	raw, modelsUsed, err := f.llm.SearchLiteThenParse(ctx, searchPrompt, systemPrompt, parseUser, 1000)
+	if err != nil {
+		return nil, err
+	}
+	result, err := parseCompanyRelationsResult(raw)
+	if err != nil {
+		return nil, err
+	}
+	result.Source = companyfetch.SourceWebSearch
 	result.ModelUsed = modelsUsed
 	result.Confidence = companyfetch.ConfidenceMedium
 	return result, nil
@@ -329,7 +419,7 @@ func (f *CompanyRelationsFetcher) resultFromDB(company *models.Company, source, 
 
 func (f *CompanyRelationsFetcher) buildResultFromExisting(
 	company *models.Company,
-	existingNames map[string]struct{},
+	_ map[string]struct{},
 	marketInfo *CompanyMarketInfoResult,
 	source, modelUsed, confidence string,
 ) (*CompanyRelationsResult, error) {
@@ -370,7 +460,7 @@ func (f *CompanyRelationsFetcher) persistResult(company *models.Company, result 
 
 	for _, entry := range result.Relations {
 		name := strings.TrimSpace(entry.Name)
-		if name == "" {
+		if !companyfetch.IsClearOrganizationName(name) {
 			continue
 		}
 		toCompany, err := f.companyRepo.FindByName(name)
@@ -389,7 +479,8 @@ func (f *CompanyRelationsFetcher) persistResult(company *models.Company, result 
 				continue
 			}
 		}
-		desc := companyfetch.NormalizeRelationDescription(entry.Description, entry.RelationType)
+		// 種別ラベル（主要取引先など）は保存せず、具体的な取引内容のみ残す
+		desc := companyfetch.SanitizeRelationDescription(entry.Description)
 		var upsertErr error
 		if models.IsCapitalRelationType(entry.RelationType) {
 			ratio := entry.Ratio
@@ -457,30 +548,30 @@ func parseCompanyRelationsResult(text string) (*CompanyRelationsResult, error) {
 
 	result := &CompanyRelationsResult{}
 	for _, item := range payload.Subsidiaries {
-		if name := strings.TrimSpace(item.Name); name != "" {
+		if name := strings.TrimSpace(item.Name); companyfetch.IsClearOrganizationName(name) {
 			result.Relations = append(result.Relations, RelationEntry{
 				Name:         name,
 				RelationType: "capital_subsidiary",
 				Ratio:        item.Ratio,
-				Description:  strings.TrimSpace(item.Description),
+				Description:  companyfetch.SanitizeRelationDescription(item.Description),
 			})
 		}
 	}
 	for _, item := range payload.Affiliates {
-		if name := strings.TrimSpace(item.Name); name != "" {
+		if name := strings.TrimSpace(item.Name); companyfetch.IsClearOrganizationName(name) {
 			result.Relations = append(result.Relations, RelationEntry{
 				Name:         name,
 				RelationType: "capital_affiliate",
-				Description:  strings.TrimSpace(item.Description),
+				Description:  companyfetch.SanitizeRelationDescription(item.Description),
 			})
 		}
 	}
 	for _, item := range payload.BusinessPartners {
-		if name := strings.TrimSpace(item.Name); name != "" {
+		if name := strings.TrimSpace(item.Name); companyfetch.IsClearOrganizationName(name) {
 			result.Relations = append(result.Relations, RelationEntry{
 				Name:         name,
 				RelationType: "business_partner",
-				Description:  strings.TrimSpace(item.Description),
+				Description:  companyfetch.SanitizeRelationDescription(item.Description),
 			})
 		}
 	}
@@ -494,31 +585,79 @@ func parseCompanyRelationsResult(text string) (*CompanyRelationsResult, error) {
 	return result, nil
 }
 
+func relationsNeedDescriptionEnrichment(relations []RelationEntry) bool {
+	for _, rel := range relations {
+		// 取引関係のみ、取引内容の欠落を再取得トリガーにする（資本関係の空説明は許容）
+		if !strings.HasPrefix(rel.RelationType, "business_") {
+			continue
+		}
+		if strings.TrimSpace(rel.Name) == "" {
+			continue
+		}
+		if companyfetch.SanitizeRelationDescription(rel.Description) == "" {
+			return true
+		}
+	}
+	return false
+}
+
 func mergeRelationsResult(
-	existingNames map[string]struct{},
+	existing []RelationEntry,
 	baseMarket *CompanyMarketInfoResult,
 	ai *CompanyRelationsResult,
 ) *CompanyRelationsResult {
 	out := &CompanyRelationsResult{}
-	seen := map[string]struct{}{}
-	for key := range existingNames {
-		seen[key] = struct{}{}
+	byKey := map[string]RelationEntry{}
+	order := make([]string, 0)
+
+	addOrMerge := func(entry RelationEntry) {
+		name := strings.TrimSpace(entry.Name)
+		if !companyfetch.IsClearOrganizationName(name) {
+			return
+		}
+		entry.Name = name
+		entry.Description = companyfetch.SanitizeRelationDescription(entry.Description)
+		key := normalizeRelationName(name) + "|" + entry.RelationType
+		if prev, ok := byKey[key]; ok {
+			if prev.Description == "" && entry.Description != "" {
+				prev.Description = entry.Description
+			}
+			if prev.Ratio == nil && entry.Ratio != nil {
+				prev.Ratio = entry.Ratio
+			}
+			byKey[key] = prev
+			return
+		}
+		// 同名で種別違いがある場合、空の説明だけ AI 内容で補完
+		norm := normalizeRelationName(name)
+		if entry.Description != "" {
+			for k, prev := range byKey {
+				if normalizeRelationName(prev.Name) != norm {
+					continue
+				}
+				if prev.Description == "" {
+					prev.Description = entry.Description
+					byKey[k] = prev
+				}
+			}
+		}
+		byKey[key] = entry
+		order = append(order, key)
 	}
 
+	for _, entry := range existing {
+		addOrMerge(entry)
+	}
 	if ai != nil {
 		for _, entry := range ai.Relations {
-			key := normalizeRelationName(entry.Name) + "|" + entry.RelationType
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			norm := normalizeRelationName(entry.Name)
-			if _, ok := existingNames[norm]; ok {
-				continue
-			}
-			out.Relations = append(out.Relations, entry)
-			seen[key] = struct{}{}
+			addOrMerge(entry)
 		}
 	}
+	for _, key := range order {
+		out.Relations = append(out.Relations, byKey[key])
+	}
+	// order に無い（AI 新規のみで addOrMerge が order に追加済み）— already in order via addOrMerge
+	// ただし既存に無く AI で新規追加されたものは order に入る。OK
 
 	if baseMarket != nil {
 		out.MarketInfo = baseMarket
@@ -555,7 +694,7 @@ func relationsToEntries(companyID uint, relations []models.CompanyRelation) []Re
 			Name:         name,
 			RelationType: relationType,
 			Ratio:        rel.Ratio,
-			Description:  rel.Description,
+			Description:  companyfetch.SanitizeRelationDescription(rel.Description),
 		})
 	}
 	return entries
@@ -626,8 +765,7 @@ func markRelationsCacheSkip(r *CompanyRelationsResult, reason string, budgetExce
 	return r
 }
 
-// HasStoredData は DB に関係、または実質的な市場情報があるか。
-// market_type=unlisted のみは「データあり」とみなさない。
+// HasStoredData は DB に関係、または確定した市場情報（上場・非上場）があるか。
 func (f *CompanyRelationsFetcher) HasStoredData(companyID uint) bool {
 	if f == nil || f.relationRepo == nil {
 		return false

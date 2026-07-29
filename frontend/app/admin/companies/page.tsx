@@ -12,11 +12,14 @@ import {
   Checkbox,
   Chip,
   CircularProgress,
+  FormControl,
   FormControlLabel,
   IconButton,
   InputAdornment,
+  InputLabel,
   Menu,
   MenuItem,
+  Select,
   Stack,
   TextField,
   ToggleButton,
@@ -38,11 +41,14 @@ import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { companyAspectHref, type CompanyAspect } from '@/components/admin/CompanyAspectTabs'
-import { fetchCompanyPrimary, formatFetchPrimarySummary } from '@/lib/admin-company-fetch'
+import { fetchCompanyPrimary, formatFetchPrimarySummary, formatFetchPrimaryEmptyAspects, hasActionableSoftEmpty } from '@/lib/admin-company-fetch'
+import { resolveIndustryFieldProfile } from '@/lib/admin-company-field-profile'
 
 const PAGE_SIZE = 50
 /** 並列取得（Backend concurrency=4）前提。タイムアウト回避のため上限は控えめ */
 const GLOBAL_BATCH_LIMIT = 20
+/** Backend の業界未設定フィルタ用センチネル */
+const INDUSTRY_UNSET = '__unset__'
 
 type Company = {
   id: number
@@ -60,6 +66,9 @@ type Company = {
   description?: string
   tech_stack?: string
 }
+
+type FilterStatus = 'all' | 'draft' | 'published'
+type FilterReadiness = 'all' | 'ready' | 'missing'
 
 type L1Coverage = {
   published_total: number
@@ -90,18 +99,31 @@ const ASPECT_PAGE: Partial<Record<AspectKey, CompanyAspect>> = {
 }
 
 function missingAspects(c: Company): AspectKey[] {
+  const profile = resolveIndustryFieldProfile(c.industry)
   const missing: AspectKey[] = []
   if (!c.info_fetched_at || !c.description || !c.website_url) missing.push('info')
-  if (!c.tech_fetched_at || !c.tech_stack || c.tech_stack === '[]') missing.push('tech')
+  if (
+    profile.requireTechForPublish &&
+    (!c.tech_fetched_at || !c.tech_stack || c.tech_stack === '[]')
+  ) {
+    missing.push('tech')
+  }
   if (!c.relations_fetched_at) missing.push('relations')
   if (!c.jobs_fetched_at) missing.push('jobs')
   return missing
 }
 
-/** 公開前かつ主3種がそろっている企業だけ一括公開の対象にする。 */
+/** 公開前かつ主情報がそろっている企業だけ一括公開の対象にする。 */
 function canSelectForPublish(c: Company): boolean {
   if (c.data_status === 'published') return false
   return missingAspects(c).filter((k) => k !== 'jobs').length === 0
+}
+
+function aspectLabel(key: AspectKey, industry?: string): string {
+  if (key === 'tech') {
+    return resolveIndustryFieldProfile(industry).techAspectLabel
+  }
+  return ASPECT_LABEL[key]
 }
 
 function subtitleLine(c: Company): string {
@@ -119,6 +141,27 @@ function pct(rate: number) {
   return `${Math.round((rate || 0) * 100)}%`
 }
 
+function industryGroupLabel(industry?: string): string {
+  const trimmed = industry?.trim()
+  return trimmed ? trimmed : '業界未設定'
+}
+
+function groupCompaniesByIndustry(companies: Company[]): { key: string; label: string; items: Company[] }[] {
+  const groups: { key: string; label: string; items: Company[] }[] = []
+  const indexByKey = new Map<string, number>()
+  for (const company of companies) {
+    const key = company.industry?.trim() || INDUSTRY_UNSET
+    const existing = indexByKey.get(key)
+    if (existing === undefined) {
+      indexByKey.set(key, groups.length)
+      groups.push({ key, label: industryGroupLabel(company.industry), items: [company] })
+    } else {
+      groups[existing].items.push(company)
+    }
+  }
+  return groups
+}
+
 export default function AdminCompaniesPage() {
   useEffect(() => {
     const user = authService.getStoredUser()
@@ -131,7 +174,11 @@ export default function AdminCompaniesPage() {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [error, setError] = useState('')
-  const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'published'>('all')
+  const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
+  const [filterIndustry, setFilterIndustry] = useState('')
+  const [filterReadiness, setFilterReadiness] = useState<FilterReadiness>('all')
+  const [groupByIndustry, setGroupByIndustry] = useState(false)
+  const [industries, setIndustries] = useState<string[]>([])
   const [searchInput, setSearchInput] = useState('')
   const [searchName, setSearchName] = useState('')
   const [coverage, setCoverage] = useState<L1Coverage | null>(null)
@@ -155,28 +202,51 @@ export default function AdminCompaniesPage() {
     setCoverage(data)
   }, [])
 
-  const fetchCompanies = useCallback(async (p: number, name: string, status: 'all' | 'draft' | 'published') => {
-    setError('')
-    const offset = (p - 1) * PAGE_SIZE
-    const params = new URLSearchParams({
-      limit: String(PAGE_SIZE),
-      offset: String(offset),
-    })
-    const trimmed = name.trim()
-    if (trimmed) params.set('name', trimmed)
-    if (status !== 'all') params.set('status', status)
-    const res = await fetch(`/api/admin/companies?${params}`, {
+  const fetchIndustries = useCallback(async () => {
+    const res = await fetch('/api/admin/companies/industries', {
       headers: authService.getAdminFetchHeaders(),
       cache: 'no-store',
     })
+    if (!res.ok) return
     const data = await res.json()
-    if (!res.ok) {
-      setError(data?.error || '企業一覧の取得に失敗しました')
-      return
-    }
-    setCompanies(data?.companies || [])
-    setTotal(data?.total ?? 0)
+    setIndustries(Array.isArray(data?.industries) ? data.industries : [])
   }, [])
+
+  const fetchCompanies = useCallback(
+    async (
+      p: number,
+      name: string,
+      status: FilterStatus,
+      industry: string,
+      readiness: FilterReadiness,
+      groupIndustry: boolean,
+    ) => {
+      setError('')
+      const offset = (p - 1) * PAGE_SIZE
+      const params = new URLSearchParams({
+        limit: String(PAGE_SIZE),
+        offset: String(offset),
+      })
+      const trimmed = name.trim()
+      if (trimmed) params.set('name', trimmed)
+      if (status !== 'all') params.set('status', status)
+      if (industry) params.set('industry', industry)
+      if (readiness !== 'all') params.set('readiness', readiness)
+      if (groupIndustry) params.set('order', 'industry')
+      const res = await fetch(`/api/admin/companies?${params}`, {
+        headers: authService.getAdminFetchHeaders(),
+        cache: 'no-store',
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data?.error || '企業一覧の取得に失敗しました')
+        return
+      }
+      setCompanies(data?.companies || [])
+      setTotal(data?.total ?? 0)
+    },
+    [],
+  )
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -190,12 +260,12 @@ export default function AdminCompaniesPage() {
   }, [searchInput])
 
   useEffect(() => {
-    void fetchCompanies(page, searchName, filterStatus)
-  }, [fetchCompanies, page, searchName, filterStatus])
+    void fetchCompanies(page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry)
+  }, [fetchCompanies, page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry])
 
   useEffect(() => {
     setSelectedIds([])
-  }, [page, searchName, filterStatus])
+  }, [page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry])
 
   useEffect(() => {
     // 取得後に情報が足りなくなった選択は外す（中身が同じなら state を更新しない）
@@ -211,15 +281,49 @@ export default function AdminCompaniesPage() {
 
   useEffect(() => {
     void fetchCoverage()
-  }, [fetchCoverage])
+    void fetchIndustries()
+  }, [fetchCoverage, fetchIndustries])
 
   const handlePageChange = (_: React.ChangeEvent<unknown>, value: number) => {
     setPage(value)
   }
 
   const reloadCurrentList = async () => {
-    await fetchCompanies(page, searchName, filterStatus)
+    await fetchCompanies(page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry)
+    await fetchIndustries()
   }
+
+  const resetFilters = () => {
+    setSearchInput('')
+    setSearchName('')
+    setFilterStatus('all')
+    setFilterIndustry('')
+    setFilterReadiness('all')
+    setGroupByIndustry(false)
+    setPage(1)
+  }
+
+  const hasActiveFilters =
+    Boolean(searchName) ||
+    filterStatus !== 'all' ||
+    Boolean(filterIndustry) ||
+    filterReadiness !== 'all' ||
+    groupByIndustry
+
+  const companyGroups = groupByIndustry
+    ? groupCompaniesByIndustry(companies)
+    : [{ key: 'all', label: '', items: companies }]
+
+  const filterSummaryParts: string[] = []
+  if (searchName) filterSummaryParts.push(`「${searchName}」`)
+  if (filterStatus === 'draft') filterSummaryParts.push('公開前')
+  if (filterStatus === 'published') filterSummaryParts.push('学生に公開中')
+  if (filterIndustry === INDUSTRY_UNSET) filterSummaryParts.push('業界未設定')
+  else if (filterIndustry) filterSummaryParts.push(filterIndustry)
+  if (filterReadiness === 'ready') filterSummaryParts.push('情報がそろっている')
+  if (filterReadiness === 'missing') filterSummaryParts.push('情報が足りない')
+  if (groupByIndustry) filterSummaryParts.push('業界別に表示')
+  const filterSummary = filterSummaryParts.join(' / ')
 
   const handleSeedL1 = async () => {
     setWarming(true)
@@ -466,6 +570,7 @@ export default function AdminCompaniesPage() {
     setFetchSeverity('success')
     setFetchPrimaryId(companyId)
     setMenuAnchor(null)
+    const knownIndustry = companies.find((c) => c.id === companyId)?.industry
     try {
       const { ok, status, data } = await fetchCompanyPrimary(
         companyId,
@@ -480,14 +585,15 @@ export default function AdminCompaniesPage() {
       const fetched = steps.filter((s) => s?.status === 'fetched').length
       const allSkipped = steps.every((s) => s?.status === 'skipped')
       const hardFailed = steps.some((s) => s?.status === 'error')
-      const softEmpty = steps.some((s) => s?.status === 'empty')
+      const softEmpty = hasActionableSoftEmpty(data, knownIndustry)
       const budgetHit = steps.some((s) => s?.detail === 'budget') ||
         (Array.isArray(data.errors) && data.errors.some((e) => e.includes('budget')))
+      const summary = formatFetchPrimarySummary(data, knownIndustry)
 
       if (budgetHit) {
         setFetchSeverity('warning')
         setError('月次の情報取得上限に達しているため、新しい取得ができませんでした。コスト画面を確認するか、時間をおいて再度お試しください。')
-        setFetchMessage(formatFetchPrimarySummary(data) || '予算超過のため取得をスキップしました。')
+        setFetchMessage(summary || '予算超過のため取得をスキップしました。')
       } else if (hardFailed) {
         setFetchSeverity('warning')
         setError(
@@ -496,22 +602,25 @@ export default function AdminCompaniesPage() {
             : '一部の情報取得に失敗しました。',
         )
         setFetchMessage(
-          `情報の取得が一部失敗しました（${formatFetchPrimarySummary(data)}）。「最新の情報に更新」で再試行できます。`,
+          `情報の取得が一部失敗しました（${summary}）。「最新の情報に更新」で再試行できます。`,
         )
       } else if (softEmpty) {
+        const emptyAspects = formatFetchPrimaryEmptyAspects(data, knownIndustry)
         setFetchSeverity('warning')
         setFetchMessage(
-          `取得を試しましたが、公開情報から特定できない項目がありました（${formatFetchPrimarySummary(data)}）。手入力するか、時間をおいて再度お試しください。`,
+          emptyAspects
+            ? `${emptyAspects}は公開情報から特定できませんでした（${summary}）。手入力するか、時間をおいて再度お試しください。`
+            : `取得を試しましたが、公開情報から特定できない項目がありました（${summary}）。手入力するか、時間をおいて再度お試しください。`,
         )
       } else if (allSkipped) {
         setFetchSeverity('warning')
-        setFetchMessage('すでに新しい情報があるため、取得をスキップしました。')
+        setFetchMessage(`すでに新しい情報があるか、業種により対象外のためスキップしました（${summary}）。`)
       } else {
         setFetchSeverity('success')
         setFetchMessage(
           force
-            ? `情報を更新しました（${fetched} 項目）。`
-            : `情報を取得しました（${fetched} 項目）。内容を確認して問題なければ「学生に公開」できます。`,
+            ? `情報を更新しました（${fetched} 項目）。${summary}`
+            : `情報を取得しました（${fetched} 項目）。${summary} 内容を確認して問題なければ「学生に公開」できます。`,
         )
       }
       await reloadCurrentList()
@@ -532,8 +641,8 @@ export default function AdminCompaniesPage() {
       <AdminPageHeader
         title="企業情報の管理"
         description={
-          searchName
-            ? `「${searchName}」の検索結果 ${total.toLocaleString()} 件`
+          filterSummary
+            ? `${filterSummary} の結果 ${total.toLocaleString()} 件`
             : `学生課の先生が、学生に見せる企業情報を登録・確認・公開するための画面です。登録 ${total.toLocaleString()} 社`
         }
         backHref="/admin"
@@ -621,48 +730,136 @@ export default function AdminCompaniesPage() {
         </Stack>
       </Box>
 
-      <AdminPanel
-        title="企業一覧"
-        headerRight={
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }}>
-            <TextField
-              size="small"
-              placeholder="企業名で探す"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              sx={{ minWidth: { sm: 240 } }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon fontSize="small" color="action" />
-                  </InputAdornment>
-                ),
-              }}
-            />
-            <ToggleButtonGroup
-              exclusive
-              size="small"
-              value={filterStatus}
-              onChange={(_, v) => {
-                if (!v) return
-                setFilterStatus(v)
-                setPage(1)
-              }}
-              sx={{
-                '& .MuiToggleButton-root': {
-                  px: 1.75,
-                  textTransform: 'none',
-                  borderColor: 'divider',
-                },
-              }}
+      <AdminPanel title="企業一覧">
+        <Box
+          sx={{
+            px: 2.5,
+            py: 1.75,
+            borderBottom: '1px solid',
+            borderColor: 'divider',
+            bgcolor: 'grey.50',
+          }}
+        >
+          <Stack spacing={1.5}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }}>
+              <TextField
+                size="small"
+                placeholder="企業名で探す"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                sx={{ minWidth: { sm: 240 }, bgcolor: 'background.paper' }}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon fontSize="small" color="action" />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+              <FormControl size="small" sx={{ minWidth: { sm: 220 }, bgcolor: 'background.paper' }}>
+                <InputLabel id="filter-industry-label">業界</InputLabel>
+                <Select
+                  labelId="filter-industry-label"
+                  label="業界"
+                  value={filterIndustry}
+                  onChange={(e) => {
+                    setFilterIndustry(e.target.value)
+                    setPage(1)
+                  }}
+                >
+                  <MenuItem value="">すべての業界</MenuItem>
+                  <MenuItem value={INDUSTRY_UNSET}>業界未設定</MenuItem>
+                  {industries.map((industry) => (
+                    <MenuItem key={industry} value={industry}>
+                      {industry}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              {hasActiveFilters && (
+                <Button size="small" variant="text" onClick={resetFilters} sx={{ alignSelf: { xs: 'flex-start', sm: 'center' } }}>
+                  絞り込みを解除
+                </Button>
+              )}
+            </Stack>
+            <Stack
+              direction={{ xs: 'column', md: 'row' }}
+              spacing={1.5}
+              alignItems={{ md: 'center' }}
+              flexWrap="wrap"
+              useFlexGap
             >
-              <ToggleButton value="all">すべて</ToggleButton>
-              <ToggleButton value="draft">公開前</ToggleButton>
-              <ToggleButton value="published">学生に公開中</ToggleButton>
-            </ToggleButtonGroup>
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                  公開の状態
+                </Typography>
+                <ToggleButtonGroup
+                  exclusive
+                  size="small"
+                  value={filterStatus}
+                  onChange={(_, v: FilterStatus | null) => {
+                    if (!v) return
+                    setFilterStatus(v)
+                    setPage(1)
+                  }}
+                  sx={{
+                    bgcolor: 'background.paper',
+                    '& .MuiToggleButton-root': {
+                      px: 1.5,
+                      textTransform: 'none',
+                      borderColor: 'divider',
+                    },
+                  }}
+                >
+                  <ToggleButton value="all">すべて</ToggleButton>
+                  <ToggleButton value="draft">公開前</ToggleButton>
+                  <ToggleButton value="published">学生に公開中</ToggleButton>
+                </ToggleButtonGroup>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                  情報のそろい具合
+                </Typography>
+                <ToggleButtonGroup
+                  exclusive
+                  size="small"
+                  value={filterReadiness}
+                  onChange={(_, v: FilterReadiness | null) => {
+                    if (!v) return
+                    setFilterReadiness(v)
+                    setPage(1)
+                  }}
+                  sx={{
+                    bgcolor: 'background.paper',
+                    '& .MuiToggleButton-root': {
+                      px: 1.5,
+                      textTransform: 'none',
+                      borderColor: 'divider',
+                    },
+                  }}
+                >
+                  <ToggleButton value="all">すべて</ToggleButton>
+                  <ToggleButton value="missing">足りない</ToggleButton>
+                  <ToggleButton value="ready">そろっている</ToggleButton>
+                </ToggleButtonGroup>
+              </Box>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={groupByIndustry}
+                    onChange={(e) => {
+                      setGroupByIndustry(e.target.checked)
+                      setPage(1)
+                    }}
+                    size="small"
+                  />
+                }
+                label="業界別に分けて表示"
+                sx={{ ml: 0, mr: 0, alignSelf: { xs: 'flex-start', md: 'flex-end' }, pb: { md: 0.25 } }}
+              />
+            </Stack>
           </Stack>
-        }
-      >
+        </Box>
         {selectableOnPage.length > 0 ? (
           <Box
             sx={{
@@ -738,9 +935,15 @@ export default function AdminCompaniesPage() {
           {companies.length === 0 && (
             <Box sx={{ px: 2.5, py: 6, textAlign: 'center' }}>
               <Typography color="text.secondary" sx={{ mb: 1 }}>
-                {searchName ? `「${searchName}」に一致する企業がありません` : '該当する企業がありません'}
+                {hasActiveFilters
+                  ? '条件に一致する企業がありません。絞り込みを変えてみてください。'
+                  : '該当する企業がありません'}
               </Typography>
-              {!searchName && (
+              {hasActiveFilters ? (
+                <Button variant="outlined" size="small" onClick={resetFilters}>
+                  絞り込みを解除
+                </Button>
+              ) : (
                 <Button component={Link} href="/admin/companies/new" variant="outlined" size="small">
                   最初の企業を追加
                 </Button>
@@ -748,177 +951,239 @@ export default function AdminCompaniesPage() {
             </Box>
           )}
 
-          {companies.map((company) => {
-            const missing = missingAspects(company)
-            const primaryMissing = missing.filter((k) => k !== 'jobs')
-            const ready = primaryMissing.length === 0
-            const fetching = fetchPrimaryId === company.id
-            const isDraft = company.data_status !== 'published'
-            const meta = subtitleLine(company)
-            const status = statusLabel(company.data_status)
-            const selected = selectedIds.includes(company.id)
-
-            return (
-              <Box
-                key={company.id}
-                sx={{
-                  px: 2.5,
-                  py: 2,
-                  bgcolor: selected ? 'action.selected' : undefined,
-                  '&:hover': { bgcolor: selected ? 'action.selected' : 'action.hover' },
-                }}
-              >
-                <Stack
-                  direction={{ xs: 'column', md: 'row' }}
-                  spacing={1.5}
-                  alignItems={{ md: 'center' }}
-                  justifyContent="space-between"
+          {companyGroups.map((group) => (
+            <Box key={group.key}>
+              {groupByIndustry && group.label ? (
+                <Box
+                  sx={{
+                    px: 2.5,
+                    py: 1,
+                    bgcolor: 'grey.100',
+                    borderBottom: '1px solid',
+                    borderColor: 'divider',
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 1,
+                  }}
                 >
-                  <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ minWidth: 0, flex: 1 }}>
-                    <Checkbox
-                      checked={selected}
-                      onChange={() => toggleSelect(company.id)}
-                      disabled={busy || !canSelectForPublish(company)}
-                      inputProps={{ 'aria-label': `${company.name}を選択` }}
-                      sx={{ mt: -0.5 }}
-                    />
-                    <Box sx={{ minWidth: 0, flex: 1 }}>
-                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-                        <Typography
-                          component={Link}
-                          href={companyAspectHref(company.id, 'info')}
-                          variant="subtitle1"
-                          fontWeight={700}
-                          sx={{
-                            color: 'text.primary',
-                            textDecoration: 'none',
-                            '&:hover': { color: 'primary.main' },
-                          }}
-                        >
-                          {company.name}
-                        </Typography>
-                        <Chip label={status.label} color={status.color} size="small" />
-                      </Stack>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Typography variant="subtitle2" fontWeight={700}>
+                      {group.label}
+                    </Typography>
+                    <Chip size="small" label={`${group.items.length} 社`} variant="outlined" />
+                  </Stack>
+                </Box>
+              ) : null}
 
-                      {meta ? (
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 0.75 }}>
-                          {meta}
-                        </Typography>
-                      ) : null}
+              <Stack divider={<Box sx={{ borderBottom: '1px solid', borderColor: 'divider' }} />}>
+                {group.items.map((company) => {
+                  const missing = missingAspects(company)
+                  const primaryMissing = missing.filter((k) => k !== 'jobs')
+                  const ready = primaryMissing.length === 0
+                  const fetching = fetchPrimaryId === company.id
+                  const isDraft = company.data_status !== 'published'
+                  const industryLabel = company.industry?.trim() || ''
+                  const locationLabel = company.location?.trim() || ''
+                  const meta =
+                    groupByIndustry || !industryLabel
+                      ? subtitleLine(company)
+                      : locationLabel
+                  const status = statusLabel(company.data_status)
+                  const selected = selectedIds.includes(company.id)
 
-                      <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-                        {ready ? (
-                          <Chip
-                            size="small"
-                            icon={<CheckCircleOutlineIcon />}
-                            label="公開の準備ができています"
-                            color="success"
-                            variant="outlined"
+                  return (
+                    <Box
+                      key={company.id}
+                      sx={{
+                        px: 2.5,
+                        py: 2,
+                        bgcolor: selected ? 'action.selected' : undefined,
+                        '&:hover': { bgcolor: selected ? 'action.selected' : 'action.hover' },
+                      }}
+                    >
+                      <Stack
+                        direction={{ xs: 'column', md: 'row' }}
+                        spacing={1.5}
+                        alignItems={{ md: 'center' }}
+                        justifyContent="space-between"
+                      >
+                        <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ minWidth: 0, flex: 1 }}>
+                          <Checkbox
+                            checked={selected}
+                            onChange={() => toggleSelect(company.id)}
+                            disabled={busy || !canSelectForPublish(company)}
+                            inputProps={{ 'aria-label': `${company.name}を選択` }}
+                            sx={{ mt: -0.5 }}
                           />
-                        ) : (
-                          <>
-                            <Chip
-                              size="small"
-                              icon={<ErrorOutlineIcon />}
-                              label="まだ足りない情報があります"
-                              color="warning"
-                              variant="outlined"
-                            />
-                            {primaryMissing.map((key) => {
-                              const page = ASPECT_PAGE[key]
-                              if (!page) {
-                                return <Chip key={key} size="small" label={ASPECT_LABEL[key]} variant="outlined" />
-                              }
-                              return (
+                          <Box sx={{ minWidth: 0, flex: 1 }}>
+                            <Stack
+                              direction="row"
+                              spacing={1}
+                              alignItems="center"
+                              flexWrap="wrap"
+                              useFlexGap
+                              sx={{ mb: 0.5 }}
+                            >
+                              <Typography
+                                component={Link}
+                                href={companyAspectHref(company.id, 'info')}
+                                variant="subtitle1"
+                                fontWeight={700}
+                                sx={{
+                                  color: 'text.primary',
+                                  textDecoration: 'none',
+                                  '&:hover': { color: 'primary.main' },
+                                }}
+                              >
+                                {company.name}
+                              </Typography>
+                              <Chip label={status.label} color={status.color} size="small" />
+                              {!groupByIndustry && industryLabel ? (
                                 <Chip
-                                  key={key}
                                   size="small"
-                                  label={ASPECT_LABEL[key]}
+                                  label={industryLabel}
                                   variant="outlined"
-                                  component={Link}
-                                  href={companyAspectHref(company.id, page)}
-                                  clickable
+                                  onClick={() => {
+                                    setFilterIndustry(industryLabel)
+                                    setPage(1)
+                                  }}
+                                  sx={{ cursor: 'pointer' }}
                                 />
-                              )
-                            })}
-                          </>
-                        )}
-                      </Stack>
+                              ) : null}
+                            </Stack>
 
-                      <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-                        <Button
-                          component={Link}
-                          href={companyAspectHref(company.id, 'info')}
-                          size="small"
-                          variant="text"
+                            {meta ? (
+                              <Typography variant="body2" color="text.secondary" sx={{ mb: 0.75 }}>
+                                {meta}
+                              </Typography>
+                            ) : null}
+
+                            <Stack
+                              direction="row"
+                              spacing={0.75}
+                              alignItems="center"
+                              flexWrap="wrap"
+                              useFlexGap
+                              sx={{ mb: 1 }}
+                            >
+                              {ready ? (
+                                <Chip
+                                  size="small"
+                                  icon={<CheckCircleOutlineIcon />}
+                                  label="公開の準備ができています"
+                                  color="success"
+                                  variant="outlined"
+                                />
+                              ) : (
+                                <>
+                                  <Chip
+                                    size="small"
+                                    icon={<ErrorOutlineIcon />}
+                                    label="まだ足りない情報があります"
+                                    color="warning"
+                                    variant="outlined"
+                                  />
+                                  {primaryMissing.map((key) => {
+                                    const page = ASPECT_PAGE[key]
+                                    const label = aspectLabel(key, company.industry)
+                                    if (!page) {
+                                      return (
+                                        <Chip key={key} size="small" label={label} variant="outlined" />
+                                      )
+                                    }
+                                    return (
+                                      <Chip
+                                        key={key}
+                                        size="small"
+                                        label={label}
+                                        variant="outlined"
+                                        component={Link}
+                                        href={companyAspectHref(company.id, page)}
+                                        clickable
+                                      />
+                                    )
+                                  })}
+                                </>
+                              )}
+                            </Stack>
+
+                            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                              <Button
+                                component={Link}
+                                href={companyAspectHref(company.id, 'info')}
+                                size="small"
+                                variant="text"
+                              >
+                                会社概要
+                              </Button>
+                              <Button
+                                component={Link}
+                                href={companyAspectHref(company.id, 'tech')}
+                                size="small"
+                                variant="text"
+                              >
+                                技術情報
+                              </Button>
+                              <Button
+                                component={Link}
+                                href={companyAspectHref(company.id, 'relations')}
+                                size="small"
+                                variant="text"
+                              >
+                                関連企業
+                              </Button>
+                            </Stack>
+                          </Box>
+                        </Stack>
+
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          alignItems="center"
+                          justifyContent={{ xs: 'flex-start', md: 'flex-end' }}
+                          sx={{ flexShrink: 0, pl: { xs: 5, md: 0 } }}
                         >
-                          会社概要
-                        </Button>
-                        <Button
-                          component={Link}
-                          href={companyAspectHref(company.id, 'tech')}
-                          size="small"
-                          variant="text"
-                        >
-                          技術情報
-                        </Button>
-                        <Button
-                          component={Link}
-                          href={companyAspectHref(company.id, 'relations')}
-                          size="small"
-                          variant="text"
-                        >
-                          関連企業
-                        </Button>
+                          {!ready ? (
+                            <Button
+                              variant="contained"
+                              size="small"
+                              color="secondary"
+                              onClick={() => handleFetchPrimary(company.id, true)}
+                              disabled={busy}
+                              startIcon={fetching ? <CircularProgress size={14} color="inherit" /> : null}
+                              disableElevation
+                            >
+                              {fetching ? '取得中…' : '情報を取得'}
+                            </Button>
+                          ) : isDraft ? (
+                            <Button
+                              variant="contained"
+                              size="small"
+                              color="success"
+                              onClick={() => handlePublish(company.id)}
+                              disabled={busy}
+                              disableElevation
+                            >
+                              学生に公開
+                            </Button>
+                          ) : null}
+
+                          <IconButton
+                            size="small"
+                            aria-label={`${company.name}のその他の操作`}
+                            disabled={busy && !fetching}
+                            onClick={(e) => setMenuAnchor({ el: e.currentTarget, company })}
+                          >
+                            <MoreVertIcon fontSize="small" />
+                          </IconButton>
+                        </Stack>
                       </Stack>
                     </Box>
-                  </Stack>
-
-                  <Stack
-                    direction="row"
-                    spacing={1}
-                    alignItems="center"
-                    justifyContent={{ xs: 'flex-start', md: 'flex-end' }}
-                    sx={{ flexShrink: 0, pl: { xs: 5, md: 0 } }}
-                  >
-                    {!ready ? (
-                      <Button
-                        variant="contained"
-                        size="small"
-                        color="secondary"
-                        onClick={() => handleFetchPrimary(company.id, true)}
-                        disabled={busy}
-                        startIcon={fetching ? <CircularProgress size={14} color="inherit" /> : null}
-                        disableElevation
-                      >
-                        {fetching ? '取得中…' : '情報を取得'}
-                      </Button>
-                    ) : isDraft ? (
-                      <Button
-                        variant="contained"
-                        size="small"
-                        color="success"
-                        onClick={() => handlePublish(company.id)}
-                        disabled={busy}
-                        disableElevation
-                      >
-                        学生に公開
-                      </Button>
-                    ) : null}
-
-                    <IconButton
-                      size="small"
-                      aria-label={`${company.name}のその他の操作`}
-                      disabled={busy && !fetching}
-                      onClick={(e) => setMenuAnchor({ el: e.currentTarget, company })}
-                    >
-                      <MoreVertIcon fontSize="small" />
-                    </IconButton>
-                  </Stack>
-                </Stack>
-              </Box>
-            )
-          })}
+                  )
+                })}
+              </Stack>
+            </Box>
+          ))}
         </Stack>
 
         {pageCount > 1 && (

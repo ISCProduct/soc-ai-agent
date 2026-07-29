@@ -3,6 +3,7 @@ package controllers
 import (
 	"Backend/domain/repository"
 	"Backend/internal/companyfetch"
+	"Backend/internal/companyfields"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services"
@@ -100,7 +101,10 @@ func (c *AdminCompanyController) List(ctx echo.Context) error {
 	}
 	name := strings.TrimSpace(ctx.QueryParam("name"))
 	status := strings.TrimSpace(ctx.QueryParam("status"))
-	companies, total, err := c.repo.ListActiveFiltered(limit, offset, name, status)
+	industry := strings.TrimSpace(ctx.QueryParam("industry"))
+	readiness := strings.TrimSpace(ctx.QueryParam("readiness"))
+	orderBy := strings.TrimSpace(ctx.QueryParam("order"))
+	companies, total, err := c.repo.ListActiveFiltered(limit, offset, name, status, industry, readiness, orderBy)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch companies")
 	}
@@ -111,7 +115,23 @@ func (c *AdminCompanyController) List(ctx echo.Context) error {
 		"offset":    offset,
 		"name":      name,
 		"status":    status,
+		"industry":  industry,
+		"readiness": readiness,
+		"order":     orderBy,
 	})
+}
+
+// Industries GET /api/admin/companies/industries
+// アクティブ企業に付いている業界名の一覧を返す（絞り込み用）。
+func (c *AdminCompanyController) Industries(ctx echo.Context) error {
+	industries, err := c.repo.ListActiveIndustries()
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch industries")
+	}
+	if industries == nil {
+		industries = []string{}
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{"industries": industries})
 }
 
 // Create POST /api/admin/companies
@@ -656,8 +676,7 @@ func (c *AdminCompanyController) runPrimaryAspectFetches(
 	// 1) 基本情報
 	infoStep := fetchStepResult{Status: "skipped", Skipped: true, Detail: "fetcher unavailable"}
 	if c.infoFetcher != nil {
-		needInfo := forceRefresh || !companyfetch.IsFresh(company.InfoFetchedAt, companyfetch.TTLInfo) ||
-			!companyfetch.HasBasicInfo(company.Description, company.WebsiteURL)
+		needInfo := forceRefresh || !companyfetch.IsFresh(company.InfoFetchedAt, companyfetch.TTLInfo)
 		if !needInfo {
 			infoStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: "ttl_fresh"}
 		} else {
@@ -688,6 +707,9 @@ func (c *AdminCompanyController) runPrimaryAspectFetches(
 				reload()
 				if companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
 					infoStep = fetchStepResult{Status: "fetched", Detail: "ok"}
+				} else if companyfetch.HasBasicInfoFootprint(company.Description, company.WebsiteURL, company.Location) {
+					// AI/gBiz は成功したが概要など公開事実が無い → 未取得ではなく確認済み（公開情報限定）
+					infoStep = fetchStepResult{Status: "empty", Detail: "public_info_sparse"}
 				} else {
 					infoStep = fetchStepResult{Status: "empty", Detail: "no_basic_info"}
 					errs = append(errs, "info: acquired but basic info still empty")
@@ -699,11 +721,13 @@ func (c *AdminCompanyController) runPrimaryAspectFetches(
 	}
 	payload["info_step"] = infoStep
 
-	// 2) 技術
+	// 2) 技術（業界プロファイルで不要な場合はスキップ）
 	techStep := fetchStepResult{Status: "skipped", Skipped: true, Detail: "fetcher unavailable"}
-	if c.techFetcher != nil {
+	if !companyfields.TechAspectEnabled(company.Industry) {
+		techStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: "industry_not_applicable"}
+	} else if c.techFetcher != nil {
 		needTech := forceRefresh || !companyfetch.IsFresh(company.TechFetchedAt, companyfetch.TTLTech) ||
-			!companyfetch.HasTechData(company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle)
+			!companyfetch.HasTechDataForIndustry(company.Industry, company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle)
 		if !needTech {
 			techStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: "ttl_fresh"}
 		} else {
@@ -713,12 +737,15 @@ func (c *AdminCompanyController) runPrimaryAspectFetches(
 				errs = append(errs, "tech: "+terr.Error())
 			} else if result != nil && result.FromCache {
 				reload()
-				if companyfetch.HasTechData(company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle) {
+				if companyfetch.HasTechDataForIndustry(company.Industry, company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle) {
 					detail := result.SkipReason
 					if detail == "" {
 						detail = "cache"
 					}
 					techStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: detail}
+				} else if !companyfields.RequiresTech(company.Industry) {
+					// 公開必須でない業種は空でも失敗扱いにしない
+					techStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: "optional_empty"}
 				} else {
 					detail := result.SkipReason
 					if detail == "" {
@@ -730,11 +757,14 @@ func (c *AdminCompanyController) runPrimaryAspectFetches(
 				payload["tech"] = result
 			} else {
 				reload()
-				if companyfetch.HasTechData(company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle) {
+				if companyfetch.HasTechDataForIndustry(company.Industry, company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle) {
 					techStep = fetchStepResult{Status: "fetched", Detail: "ok"}
 				} else {
-					techStep = fetchStepResult{Status: "empty", Detail: "no_tech_stack"}
-					errs = append(errs, "tech: acquired but tech_stack still empty")
+					status, detail, asErr := companyfields.TechEmptyStepStatus(company.Industry)
+					techStep = fetchStepResult{Status: status, Skipped: status == "skipped", Detail: detail}
+					if asErr {
+						errs = append(errs, "tech: acquired but tech_stack still empty")
+					}
 				}
 				payload["tech"] = result
 			}
@@ -777,7 +807,12 @@ func (c *AdminCompanyController) runPrimaryAspectFetches(
 					count = result.SavedCount
 				}
 				if count > 0 || c.relationsFetcher.HasStoredData(companyID) {
-					relationsStep = fetchStepResult{Status: "fetched", Detail: "ok", Count: count}
+					detail := "ok"
+					if result != nil && len(result.Relations) == 0 && result.MarketInfo != nil &&
+						companyfetch.IsConfirmedUnlisted(result.MarketInfo.IsListed, result.MarketInfo.MarketType, result.MarketInfo.StockCode) {
+						detail = "confirmed_unlisted"
+					}
+					relationsStep = fetchStepResult{Status: "fetched", Detail: detail, Count: count}
 				} else {
 					relationsStep = fetchStepResult{Status: "empty", Detail: "no_relations", Count: 0}
 					errs = append(errs, "relations: acquired but no relations/market saved")

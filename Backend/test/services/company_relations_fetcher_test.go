@@ -53,7 +53,7 @@ func (m *relationRepoMock) UpsertMarketInfo(info *models.CompanyMarketInfo) erro
 }
 
 func validCompanyRelationsJSON() string {
-	return `{"subsidiaries":[{"name":"子会社A","ratio":100}],"affiliates":[{"name":"関連会社B"}],"business_partners":[{"name":"取引先C"}],"market_info":{"is_listed":true,"market_type":"prime","stock_code":"4755"}}`
+	return `{"subsidiaries":[{"name":"子会社A","ratio":100,"description":"完全子会社"}],"affiliates":[{"name":"関連会社B","description":"資本業務提携"}],"business_partners":[{"name":"取引先C","description":"決済代行"}],"market_info":{"is_listed":true,"market_type":"prime","stock_code":"4755"}}`
 }
 
 func TestCompanyRelationsFetcher_FetchAndSave_TTLCache(t *testing.T) {
@@ -156,29 +156,41 @@ func TestCompanyRelationsFetcher_ConfirmAndSave(t *testing.T) {
 	assert.Equal(t, 2, result.SavedCount)
 }
 
-func TestCompanyRelationsFetcher_FetchAndSave_EmptyUnlistedDoesNotStamp(t *testing.T) {
+func TestCompanyRelationsFetcher_FetchAndSave_EmptyUnlistedStamps(t *testing.T) {
 	emptyJSON := `{"subsidiaries":[],"affiliates":[],"business_partners":[],"market_info":{"is_listed":false,"market_type":"unlisted","stock_code":""}}`
 	srv := makeChatCompletionsServer(t, emptyJSON)
 	defer srv.Close()
 
 	repo := &mocks.CompanyRepositoryMock{}
 	repo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "テスト株式会社"}, nil)
+	repo.On("Update", mock.AnythingOfType("*models.Company")).Return(nil).Run(func(args mock.Arguments) {
+		c := args.Get(0).(*models.Company)
+		assert.NotNil(t, c.RelationsFetchedAt)
+	})
 
 	relRepo := &relationRepoMock{}
 	relRepo.On("GetRelationsByCompanyID", uint(1)).Return([]models.CompanyRelation{}, nil)
-	relRepo.On("GetMarketInfoByCompanyID", uint(1)).Return(nil, nil)
+	relRepo.On("GetMarketInfoByCompanyID", uint(1)).Return(nil, nil).Once()
+	relRepo.On("GetMarketInfoByCompanyID", uint(1)).Return(&models.CompanyMarketInfo{
+		CompanyID:  1,
+		IsListed:   false,
+		MarketType: "unlisted",
+	}, nil).Maybe()
+	relRepo.On("UpsertMarketInfo", mock.MatchedBy(func(info *models.CompanyMarketInfo) bool {
+		return info != nil && info.CompanyID == 1 && info.MarketType == "unlisted" && !info.IsListed
+	})).Return(nil)
 
 	client := openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")
 	fetcher := services.NewCompanyRelationsFetcher(repo, relRepo, client)
 	result, err := fetcher.FetchAndSave(context.Background(), 1, true)
 	require.NoError(t, err)
-	assert.Equal(t, 0, result.SavedCount)
+	assert.Equal(t, 1, result.SavedCount)
 	assert.Empty(t, result.Relations)
-	repo.AssertNotCalled(t, "Update", mock.Anything)
-	assert.False(t, fetcher.HasStoredData(1))
+	assert.True(t, fetcher.HasStoredData(1))
+	repo.AssertCalled(t, "Update", mock.AnythingOfType("*models.Company"))
 }
 
-func TestCompanyRelationsFetcher_TTLSkipsOnlyWhenMeaningfulData(t *testing.T) {
+func TestCompanyRelationsFetcher_TTLSkipsWhenConfirmedUnlisted(t *testing.T) {
 	now := time.Now()
 	repo := &mocks.CompanyRepositoryMock{}
 	repo.On("FindByID", uint(1)).Return(&models.Company{
@@ -188,23 +200,18 @@ func TestCompanyRelationsFetcher_TTLSkipsOnlyWhenMeaningfulData(t *testing.T) {
 	}, nil)
 
 	relRepo := &relationRepoMock{}
-	relRepo.On("GetRelationsByCompanyID", uint(1)).Return([]models.CompanyRelation{}, nil).Maybe()
+	relRepo.On("GetRelationsByCompanyID", uint(1)).Return([]models.CompanyRelation{}, nil)
 	relRepo.On("GetMarketInfoByCompanyID", uint(1)).Return(&models.CompanyMarketInfo{
 		CompanyID:  1,
 		IsListed:   false,
 		MarketType: "unlisted",
-	}, nil).Maybe()
+	}, nil)
 
-	// unlisted のみなら TTL スキップせず Acquire に進むため LLM が必要
-	emptyJSON := `{"subsidiaries":[],"affiliates":[],"business_partners":[],"market_info":{"is_listed":false,"market_type":"unlisted","stock_code":""}}`
-	srv := makeChatCompletionsServer(t, emptyJSON)
-	defer srv.Close()
-	client := openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")
-	fetcher := services.NewCompanyRelationsFetcher(repo, relRepo, client)
-
+	fetcher := services.NewCompanyRelationsFetcher(repo, relRepo, nil)
 	result, err := fetcher.FetchAndSave(context.Background(), 1, false)
 	require.NoError(t, err)
-	assert.False(t, result.FromCache)
+	assert.True(t, result.FromCache)
+	assert.Equal(t, "ttl", result.SkipReason)
 	repo.AssertNotCalled(t, "Update", mock.Anything)
 }
 

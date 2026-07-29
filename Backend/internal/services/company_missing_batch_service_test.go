@@ -13,6 +13,7 @@ func TestMissingNeedsFromCompany(t *testing.T) {
 	stale := now.Add(-200 * 24 * time.Hour)
 
 	fresh := &models.Company{
+		Industry:           "IT・ソフトウェア",
 		Description:        "概要",
 		WebsiteURL:         "https://example.com",
 		TechStack:          `["Go"]`,
@@ -26,13 +27,26 @@ func TestMissingNeedsFromCompany(t *testing.T) {
 		t.Fatalf("fresh company should need nothing, got info=%v jobs=%v tech=%v rel=%v", info, jobs, tech, rel)
 	}
 
-	empty := &models.Company{}
+	empty := &models.Company{Industry: "IT・ソフトウェア"}
 	info, jobs, tech, rel = MissingNeedsFromCompany(empty)
 	if !info || !jobs || !tech || !rel {
-		t.Fatalf("empty company should need all, got info=%v jobs=%v tech=%v rel=%v", info, jobs, tech, rel)
+		t.Fatalf("empty IT company should need all, got info=%v jobs=%v tech=%v rel=%v", info, jobs, tech, rel)
+	}
+
+	financeEmpty := &models.Company{Industry: "金融・保険業"}
+	_, _, tech, _ = MissingNeedsFromCompany(financeEmpty)
+	if tech {
+		t.Fatal("finance company should not need tech stack")
+	}
+
+	mfgEmpty := &models.Company{Industry: "製造業"}
+	_, _, tech, _ = MissingNeedsFromCompany(mfgEmpty)
+	if tech {
+		t.Fatal("manufacturing company should not require tech for publish/missing batch")
 	}
 
 	staleInfo := &models.Company{
+		Industry:           "IT・ソフトウェア",
 		Description:        "概要",
 		WebsiteURL:         "https://example.com",
 		TechStack:          `["Go"]`,
@@ -47,6 +61,7 @@ func TestMissingNeedsFromCompany(t *testing.T) {
 	}
 
 	emptyTech := &models.Company{
+		Industry:           "IT・ソフトウェア",
 		Description:        "概要",
 		WebsiteURL:         "https://example.com",
 		TechStack:          "[]",
@@ -61,6 +76,7 @@ func TestMissingNeedsFromCompany(t *testing.T) {
 	}
 
 	emptyInfoDespiteStamp := &models.Company{
+		Industry:           "IT・ソフトウェア",
 		Description:        "",
 		WebsiteURL:         "",
 		TechStack:          `["Go"]`,
@@ -70,12 +86,29 @@ func TestMissingNeedsFromCompany(t *testing.T) {
 		RelationsFetchedAt: &now,
 	}
 	info, _, _, _ = MissingNeedsFromCompany(emptyInfoDespiteStamp)
-	if !info {
-		t.Fatal("fresh InfoFetchedAt with empty description/url should still need info")
+	if info {
+		t.Fatal("fresh InfoFetchedAt should not need info even without description (confirmed sparse)")
+	}
+
+	sparseFootprintStamped := &models.Company{
+		Industry:           "IT・ソフトウェア",
+		Description:        "",
+		WebsiteURL:         "https://example.com",
+		Location:           "東京都",
+		TechStack:          `["Go"]`,
+		InfoFetchedAt:      &now,
+		JobsFetchedAt:      &now,
+		TechFetchedAt:      &now,
+		RelationsFetchedAt: &now,
+	}
+	info, _, _, _ = MissingNeedsFromCompany(sparseFootprintStamped)
+	if info {
+		t.Fatal("stamped sparse basic info should not need refetch until TTL")
 	}
 
 	// infra / 開発手法のみでは技術取得済みとみなさない
 	infraOnly := &models.Company{
+		Industry:           "IT・ソフトウェア",
 		Description:        "概要",
 		WebsiteURL:         "https://example.com",
 		TechStack:          "",

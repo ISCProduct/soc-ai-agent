@@ -12,11 +12,11 @@
 
 # --- LangChain エコシステム ---
 # crewai は依存衝突のため requirements.txt から除外済み（langchain 上限は crewai 制約によらない）。
-# 2026-03 に 0.3.x 系列へ移行（#135）。0.4.0 以降は破壊的変更のリスクがあるため上限を設定。
-langchain>=0.2.16,<0.4.0
-langchain-community>=0.4.2,<0.5.0
+# 2026-03 に 0.3.x 系列へ移行（#135）。
+# 注意: langchain-community 0.4+ は langchain-core 1.x を要求するため、0.3.x に揃える。
+langchain>=0.3.0,<0.4.0
+langchain-community>=0.3.0,<0.4.0
 langchain-core>=0.3.86,<0.4.0
-# langchain-openai 0.3.x が langchain 0.3.x + openai 2.x に対応するバージョン系列
 langchain-openai>=0.3.0,<0.4.0
 langchain-text-splitters>=0.3.11,<0.4.0
 

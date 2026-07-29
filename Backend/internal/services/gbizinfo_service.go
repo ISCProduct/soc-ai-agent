@@ -2,6 +2,7 @@ package services
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/companyfetch"
 	"Backend/internal/config"
 	"Backend/internal/models"
 	"context"
@@ -358,48 +359,66 @@ func (s *GBizInfoService) updateBusinessRelations(company *models.Company, procu
 		return nil
 	}
 	for _, item := range procurements {
-		if err := s.createRelationsFromJointSignatures(company, item.Title, item.DateOfOrder, item.JointSignatures, "business_procurement"); err != nil {
+		// 入札・調達の相手は発注元の省庁・自治体を記載する。曖昧な共同企業体名は入れない。
+		if err := s.upsertProcurementStyleRelation(
+			company,
+			item.GovernmentDepartments,
+			item.Title,
+			item.DateOfOrder,
+			"business_procurement",
+		); err != nil {
 			return err
 		}
 	}
 	for _, item := range subsidies {
-		if err := s.createRelationsFromJointSignatures(company, item.Title, item.DateOfApproval, item.JointSignatures, "business_subsidy"); err != nil {
+		if err := s.upsertProcurementStyleRelation(
+			company,
+			item.GovernmentDepartments,
+			item.Title,
+			item.DateOfApproval,
+			"business_subsidy",
+		); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *GBizInfoService) createRelationsFromJointSignatures(company *models.Company, title, date, jointSignatures, relationType string) error {
-	partners := parseJointSignatures(jointSignatures)
-	for _, partner := range partners {
-		name := strings.TrimSpace(partner)
-		if name == "" || company == nil || strings.EqualFold(name, company.Name) {
-			continue
+// upsertProcurementStyleRelation は調達・補助金の関係先として、はっきりした省庁・発注機関名のみを保存する。
+func (s *GBizInfoService) upsertProcurementStyleRelation(company *models.Company, agency, title, date, relationType string) error {
+	name := strings.TrimSpace(agency)
+	if company == nil || !companyfetch.IsClearOrganizationName(name) {
+		return nil
+	}
+	if strings.EqualFold(name, company.Name) {
+		return nil
+	}
+	partnerCompany, err := s.companyRepo.FindByName(name)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	if partnerCompany == nil || errors.Is(err, gorm.ErrRecordNotFound) {
+		now := time.Now()
+		partnerCompany = &models.Company{
+			Name:            name,
+			SourceType:      "gbizinfo",
+			SourceFetchedAt: &now,
+			IsProvisional:   true,
+			DataStatus:      "draft",
 		}
-		partnerCompany, err := s.companyRepo.FindByName(name)
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		if partnerCompany == nil || errors.Is(err, gorm.ErrRecordNotFound) {
-			now := time.Now()
-			partnerCompany = &models.Company{
-				Name:            name,
-				SourceType:      "gbizinfo",
-				SourceFetchedAt: &now,
-				IsProvisional:   true,
-				DataStatus:      "draft",
-			}
-			if err := s.companyRepo.Create(partnerCompany); err != nil {
-				return err
-			}
-		}
-		description := fmt.Sprintf("%s (%s)", strings.TrimSpace(title), strings.TrimSpace(date))
-		if err := s.relationRepo.UpsertBusinessRelation(company.ID, partnerCompany.ID, relationType, description); err != nil {
+		if err := s.companyRepo.Create(partnerCompany); err != nil {
 			return err
 		}
 	}
-	return nil
+	parts := make([]string, 0, 2)
+	if t := strings.TrimSpace(title); t != "" {
+		parts = append(parts, t)
+	}
+	if d := strings.TrimSpace(date); d != "" {
+		parts = append(parts, d)
+	}
+	description := strings.Join(parts, " / ")
+	return s.relationRepo.UpsertBusinessRelation(company.ID, partnerCompany.ID, relationType, description)
 }
 
 func parseJointSignatures(raw string) []string {

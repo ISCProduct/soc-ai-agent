@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"math/rand"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -112,8 +113,21 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 	return "", lastErr
 }
 
+// isRetryableAPIErr は 429 / 5xx など再試行すれば成功しうるエラーか判定する。
+func isRetryableAPIErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *openai.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.HTTPStatusCode == http.StatusTooManyRequests || apiErr.HTTPStatusCode >= 500
+	}
+	return false
+}
+
 // WebSearchJSON は OpenAI Web Search モデルで 1 クエリだけ実行し、短い JSON テキストを返す。
 // 企業実在確認などトークンを抑えた検証用途向け。RAG の多段調査パイプラインは使わない。
+// gpt-4o(-mini)-search-preview は一時的な 5xx / 429 が出やすいため、Parse 系と同様にリトライする。
 func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxTokens int, modelOverride ...string) (string, error) {
 	if cli == nil || cli.c == nil {
 		return "", errors.New("openai client is nil")
@@ -130,9 +144,6 @@ func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxToke
 		model = "gpt-4o-search-preview"
 	}
 
-	ctxReq, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
-
 	req := openai.ChatCompletionRequest{
 		Model: model,
 		Messages: []openai.ChatCompletionMessage{
@@ -142,20 +153,42 @@ func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxToke
 		MaxCompletionTokens: maxTokens,
 	}
 
-	resp, err := cli.c.CreateChatCompletion(ctxReq, req)
-	if err != nil {
-		return "", err
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		ctxReq, cancel := context.WithTimeout(ctx, 45*time.Second)
+		resp, err := cli.c.CreateChatCompletion(ctxReq, req)
+		cancel()
+
+		if err == nil && len(resp.Choices) > 0 {
+			content := strings.TrimSpace(resp.Choices[0].Message.Content)
+			if cli.OnUsage != nil {
+				cli.OnUsage(model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+			}
+			log.Printf("[openai] web_search model=%s prompt_tokens=%d completion_tokens=%d",
+				model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+			return content, nil
+		}
+		if err == nil {
+			lastErr = errors.New("no response from web search model")
+		} else {
+			lastErr = err
+			if !isRetryableAPIErr(err) {
+				return "", err
+			}
+		}
+		if attempt == maxAttempts {
+			break
+		}
+		backoff := time.Duration(1<<attempt) * time.Second
+		jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(backoff + jitter):
+		}
 	}
-	if len(resp.Choices) == 0 {
-		return "", errors.New("no response from web search model")
-	}
-	content := strings.TrimSpace(resp.Choices[0].Message.Content)
-	if cli.OnUsage != nil {
-		cli.OnUsage(model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
-	}
-	log.Printf("[openai] web_search model=%s prompt_tokens=%d completion_tokens=%d",
-		model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
-	return content, nil
+	return "", lastErr
 }
 
 // ResponsesWithMaxTokens は Responses API を使い、maxOutputTokens を指定してテキストを取得します。

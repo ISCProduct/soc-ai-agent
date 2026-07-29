@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/companyfetch"
+	"Backend/internal/companyfields"
 	"Backend/internal/models"
 	"strings"
 	"time"
@@ -40,9 +41,12 @@ func (r *CompanyRepository) CountActive() (int64, error) {
 	return count, err
 }
 
-// ListActiveFiltered は名前・公開ステータスで絞り込んだアクティブ企業を返す。
+// ListActiveFiltered は名前・公開ステータス・業界・情報充足で絞り込んだアクティブ企業を返す。
 // status は "draft" / "published" / ""（指定なし=すべて）。
-func (r *CompanyRepository) ListActiveFiltered(limit, offset int, name, status string) ([]models.Company, int64, error) {
+// industry が "__unset__" のときは業界未設定のみ。
+// readiness は "ready"（主3種そろい）/ "missing"（主3種不足）/ ""。
+// orderBy が "industry" のときは業界順、それ以外は id desc。
+func (r *CompanyRepository) ListActiveFiltered(limit, offset int, name, status, industry, readiness, orderBy string) ([]models.Company, int64, error) {
 	q := r.db.Model(&models.Company{}).Where("is_active = ?", true).Session(&gorm.Session{})
 	if name = strings.TrimSpace(name); name != "" {
 		q = q.Where("name LIKE ?", "%"+name+"%")
@@ -51,15 +55,53 @@ func (r *CompanyRepository) ListActiveFiltered(limit, offset int, name, status s
 	case "draft", "published":
 		q = q.Where("data_status = ?", status)
 	}
+	switch industry = strings.TrimSpace(industry); industry {
+	case "":
+		// no-op
+	case "__unset__":
+		q = q.Where("(industry IS NULL OR industry = '')")
+	default:
+		q = q.Where("industry = ?", industry)
+	}
+	const (
+		infoReady = `(info_fetched_at IS NOT NULL AND COALESCE(description, '') <> '' AND COALESCE(website_url, '') <> '')`
+		techReady = `(tech_fetched_at IS NOT NULL AND COALESCE(tech_stack, '') <> '' AND tech_stack <> '[]')`
+		relReady  = `(relations_fetched_at IS NOT NULL)`
+	)
+	techRequiredSQL, techRequiredArgs := companyfields.TechRequiredIndustrySQL("industry")
+	// 技術必須業界のみ techReady を要求。それ以外は会社概要+関連企業で充足とみなす。
+	primaryReady := "(" + infoReady + " AND " + relReady + " AND (" + techReady + " OR NOT " + techRequiredSQL + "))"
+	switch strings.TrimSpace(readiness) {
+	case "ready":
+		q = q.Where(primaryReady, techRequiredArgs...)
+	case "missing":
+		q = q.Where("NOT "+primaryReady, techRequiredArgs...)
+	}
 
 	var total int64
 	if err := q.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
+	order := "id desc"
+	if strings.TrimSpace(orderBy) == "industry" {
+		order = "CASE WHEN industry IS NULL OR industry = '' THEN 1 ELSE 0 END ASC, industry ASC, id DESC"
+	}
+
 	var companies []models.Company
-	err := q.Session(&gorm.Session{}).Order("id desc").Limit(limit).Offset(offset).Find(&companies).Error
+	err := q.Session(&gorm.Session{}).Order(order).Limit(limit).Offset(offset).Find(&companies).Error
 	return companies, total, err
+}
+
+// ListActiveIndustries はアクティブ企業に設定されている業界名の重複なし一覧を返す。
+func (r *CompanyRepository) ListActiveIndustries() ([]string, error) {
+	var industries []string
+	err := r.db.Model(&models.Company{}).
+		Where("is_active = ? AND industry IS NOT NULL AND industry <> ''", true).
+		Distinct().
+		Order("industry ASC").
+		Pluck("industry", &industries).Error
+	return industries, err
 }
 
 // FindAllActiveNames アクティブ企業のIDと名前を取得（フィルタ q で部分一致）
@@ -325,11 +367,17 @@ func (r *CompanyRepository) ListActiveMissingFetchCandidates(limit int, primaryO
 	techCutoff := now.Add(-companyfetch.TTLTech)
 	relCutoff := now.Add(-companyfetch.TTLRelations)
 
+	techRequiredSQL, techRequiredArgs := companyfields.TechRequiredIndustrySQL("industry")
 	primaryCond := `
 		info_fetched_at IS NULL OR info_fetched_at < ? OR TRIM(COALESCE(description, '')) = '' OR TRIM(COALESCE(website_url, '')) = ''
-		OR tech_fetched_at IS NULL OR tech_fetched_at < ?
-		OR TRIM(COALESCE(tech_stack, '')) = ''
-		OR TRIM(COALESCE(tech_stack, '')) IN ('[]', 'null', '{}')
+		OR (
+			(` + techRequiredSQL + `)
+			AND (
+				tech_fetched_at IS NULL OR tech_fetched_at < ?
+				OR TRIM(COALESCE(tech_stack, '')) = ''
+				OR TRIM(COALESCE(tech_stack, '')) IN ('[]', 'null', '{}')
+			)
+		)
 		OR relations_fetched_at IS NULL OR relations_fetched_at < ?
 		OR (
 			NOT EXISTS (
@@ -350,7 +398,9 @@ func (r *CompanyRepository) ListActiveMissingFetchCandidates(limit int, primaryO
 			)
 		)
 	`
-	args := []any{infoCutoff, techCutoff, relCutoff}
+	args := []any{infoCutoff}
+	args = append(args, techRequiredArgs...)
+	args = append(args, techCutoff, relCutoff)
 	whereSQL := primaryCond
 	if !primaryOnly {
 		whereSQL = primaryCond + `

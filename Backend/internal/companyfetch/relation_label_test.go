@@ -20,7 +20,16 @@ func TestIsSourceTagDescription(t *testing.T) {
 	assert.False(t, IsSourceTagDescription("調達契約 (2024-01-01)"))
 }
 
+func TestSanitizeRelationDescription(t *testing.T) {
+	assert.Equal(t, "", SanitizeRelationDescription("web_search:sky株式会社"))
+	assert.Equal(t, "", SanitizeRelationDescription("主要取引先"))
+	assert.Equal(t, "", SanitizeRelationDescription("取引先"))
+	assert.Equal(t, "決済代行", SanitizeRelationDescription("決済代行"))
+	assert.Equal(t, "クラウド基盤の共同開発", SanitizeRelationDescription("  クラウド基盤の共同開発  "))
+}
+
 func TestNormalizeRelationDescription(t *testing.T) {
 	assert.Equal(t, "主要取引先", NormalizeRelationDescription("web_search:sky株式会社", "business_partner"))
+	assert.Equal(t, "主要取引先", NormalizeRelationDescription("主要取引先", "business_partner"))
 	assert.Equal(t, "決済代行", NormalizeRelationDescription("決済代行", "business_partner"))
 }

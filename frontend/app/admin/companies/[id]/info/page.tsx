@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import {
   Alert,
@@ -13,6 +13,7 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { infoFieldEnabled, resolveIndustryFieldProfile } from '@/lib/admin-company-field-profile'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { CompanyAspectTabs } from '@/components/admin/CompanyAspectTabs'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
@@ -125,14 +126,19 @@ export default function AdminCompanyInfoEditPage() {
         },
         body: JSON.stringify({ name, website_url: websiteUrl }),
       })
-      const data = await res.json()
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
       if (!res.ok) {
-        setError(data?.error || '企業情報取得に失敗しました')
+        setError(
+          (typeof data.error === 'string' && data.error) ||
+            '企業情報の取得に失敗しました。時間をおいて再度お試しください。',
+        )
         return
       }
       applyInfoPayload(data)
       setPreviewPending(true)
       setSuccess('プレビュー取得が完了しました。内容を確認・修正してから「確定して保存」してください。')
+    } catch {
+      setError('企業情報の取得中に通信エラーが発生しました。時間をおいて再度お試しください。')
     } finally {
       setAiLoading(false)
     }
@@ -147,9 +153,12 @@ export default function AdminCompanyInfoEditPage() {
         method: 'POST',
         headers: authService.getAdminFetchHeaders(),
       })
-      const data = await res.json()
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
       if (!res.ok) {
-        setError(data?.error || '強制再取得に失敗しました')
+        setError(
+          (typeof data.error === 'string' && data.error) ||
+            '強制再取得に失敗しました。時間をおいて再度お試しください。',
+        )
         return
       }
       applyInfoPayload(data)
@@ -161,6 +170,8 @@ export default function AdminCompanyInfoEditPage() {
       } else {
         setSuccess('DBへ強制再取得・保存しました。')
       }
+    } catch {
+      setError('強制再取得中に通信エラーが発生しました。時間をおいて再度お試しください。')
     } finally {
       setForceLoading(false)
     }
@@ -195,14 +206,19 @@ export default function AdminCompanyInfoEditPage() {
           confidence: lastFetchConfidence,
         }),
       })
-      const data = await res.json()
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
       if (!res.ok) {
-        setError(data?.error || '確定保存に失敗しました')
+        setError(
+          (typeof data.error === 'string' && data.error) ||
+            '確定保存に失敗しました。時間をおいて再度お試しください。',
+        )
         return
       }
       applyInfoPayload(data)
       loadCompany()
-      setSuccess('プレビュー内容を確定して保存しました（取得メタデータも更新済み）。')
+      setSuccess('プレビュー内容を確定して保存しました。')
+    } catch {
+      setError('確定保存中に通信エラーが発生しました。時間をおいて再度お試しください。')
     } finally {
       setConfirmLoading(false)
     }
@@ -257,15 +273,18 @@ export default function AdminCompanyInfoEditPage() {
     return Number.isNaN(d.getTime()) ? v : d.toLocaleString('ja-JP')
   }
 
+  const profile = useMemo(() => resolveIndustryFieldProfile(industry), [industry])
+  const show = (key: Parameters<typeof infoFieldEnabled>[1]) => infoFieldEnabled(profile, key)
+
   return (
     <AdminFormContainer
       title={`${name || '企業'}（会社概要）`}
-      description="会社の基本情報を確認・編集します。"
-      maxWidth={700}
+      description={`会社の基本情報を確認・編集します。業種「${profile.label}」に合わせて、関連する入力画面が変わります。`}
+      maxWidth={900}
       backLabel="企業一覧に戻る"
       backHref="/admin/companies"
     >
-      <CompanyAspectTabs companyId={id} active="info" />
+      <CompanyAspectTabs companyId={id} active="info" industry={industry} />
       <ErrorAlert error={error} />
       {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
       {isLowTrust && (
@@ -281,6 +300,11 @@ export default function AdminCompanyInfoEditPage() {
       {dataStatus === 'published' && (
         <Alert severity="success" sx={{ mb: 2 }}>
           この企業は公開中です。公開したまま情報を更新できます。
+        </Alert>
+      )}
+      {!profile.techAspectEnabled && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          この業種では「技術情報」の登録は不要です。会社概要と関連企業を確認すれば公開準備ができます。
         </Alert>
       )}
 
@@ -318,78 +342,108 @@ export default function AdminCompanyInfoEditPage() {
         </Stack>
 
         <Typography variant="body2" color="text.secondary">
-          最終取得: 会社概要 {formatTs(infoFetchedAt)} ／ 技術 {formatTs(techFetchedAt)} ／ 取引先{' '}
-          {formatTs(relationsFetchedAt)}
+          最終取得: 会社概要 {formatTs(infoFetchedAt)}
+          {profile.techAspectEnabled ? ` ／ ${profile.techAspectLabel} ${formatTs(techFetchedAt)}` : ''}
+          {' ／ '}関連企業 {formatTs(relationsFetchedAt)}
         </Typography>
 
         <Divider />
 
-        <TextField
-          label="企業概要"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          multiline
-          minRows={2}
-        />
-        <TextField label="業種" value={industry} onChange={(e) => setIndustry(e.target.value)} />
-        <TextField label="所在地" value={location} onChange={(e) => setLocation(e.target.value)} />
-        <TextField label="公式サイトURL" value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} />
-        <Stack direction="row" spacing={2}>
+        {show('description') && (
           <TextField
-            label="設立年"
-            value={foundedYear}
-            onChange={(e) => setFoundedYear(e.target.value)}
-            type="number"
-            sx={{ flex: 1 }}
+            label="企業概要"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            multiline
+            minRows={2}
           />
+        )}
+        {show('industry') && (
           <TextField
-            label="従業員数"
-            value={employeeCount}
-            onChange={(e) => setEmployeeCount(e.target.value)}
-            type="number"
-            sx={{ flex: 1 }}
+            label="業種"
+            value={industry}
+            onChange={(e) => setIndustry(e.target.value)}
+            helperText={`判定中のプロファイル: ${profile.label}${profile.techAspectEnabled ? `（「${profile.techAspectLabel}」タブあり）` : '（技術タブなし）'}`}
           />
-        </Stack>
-        <TextField
-          label="主要事業内容"
-          value={mainBusiness}
-          onChange={(e) => setMainBusiness(e.target.value)}
-          multiline
-          minRows={2}
-        />
-        <TextField
-          label="企業文化"
-          value={culture}
-          onChange={(e) => setCulture(e.target.value)}
-          multiline
-          minRows={2}
-        />
-        <TextField
-          select
-          label="勤務スタイル"
-          value={workStyle}
-          onChange={(e) => setWorkStyle(e.target.value)}
-        >
-          <MenuItem value="">未設定</MenuItem>
-          <MenuItem value="リモート">リモート</MenuItem>
-          <MenuItem value="ハイブリッド">ハイブリッド</MenuItem>
-          <MenuItem value="オフィス">オフィス</MenuItem>
-        </TextField>
-        <TextField
-          label="技術スタック"
-          value={techStack}
-          onChange={(e) => setTechStack(e.target.value)}
-          placeholder="例: Go, TypeScript, React"
-          multiline
-          minRows={1}
-        />
-        <TextField
-          label="福利厚生"
-          value={welfareDetails}
-          onChange={(e) => setWelfareDetails(e.target.value)}
-          multiline
-          minRows={2}
-        />
+        )}
+        {show('location') && (
+          <TextField label="所在地" value={location} onChange={(e) => setLocation(e.target.value)} />
+        )}
+        {show('website_url') && (
+          <TextField label="公式サイトURL" value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} />
+        )}
+        {(show('founded_year') || show('employee_count')) && (
+          <Stack direction="row" spacing={2}>
+            {show('founded_year') && (
+              <TextField
+                label="設立年"
+                value={foundedYear}
+                onChange={(e) => setFoundedYear(e.target.value)}
+                type="number"
+                sx={{ flex: 1 }}
+              />
+            )}
+            {show('employee_count') && (
+              <TextField
+                label="従業員数"
+                value={employeeCount}
+                onChange={(e) => setEmployeeCount(e.target.value)}
+                type="number"
+                sx={{ flex: 1 }}
+              />
+            )}
+          </Stack>
+        )}
+        {show('main_business') && (
+          <TextField
+            label="主要事業内容"
+            value={mainBusiness}
+            onChange={(e) => setMainBusiness(e.target.value)}
+            multiline
+            minRows={2}
+          />
+        )}
+        {show('culture') && (
+          <TextField
+            label="企業文化"
+            value={culture}
+            onChange={(e) => setCulture(e.target.value)}
+            multiline
+            minRows={2}
+          />
+        )}
+        {show('work_style') && (
+          <TextField
+            select
+            label="勤務スタイル"
+            value={workStyle}
+            onChange={(e) => setWorkStyle(e.target.value)}
+          >
+            <MenuItem value="">未設定</MenuItem>
+            <MenuItem value="リモート">リモート</MenuItem>
+            <MenuItem value="ハイブリッド">ハイブリッド</MenuItem>
+            <MenuItem value="オフィス">オフィス</MenuItem>
+          </TextField>
+        )}
+        {show('tech_stack') && (
+          <TextField
+            label="技術スタック"
+            value={techStack}
+            onChange={(e) => setTechStack(e.target.value)}
+            placeholder="例: Go, TypeScript, React"
+            multiline
+            minRows={1}
+          />
+        )}
+        {show('welfare_details') && (
+          <TextField
+            label="福利厚生"
+            value={welfareDetails}
+            onChange={(e) => setWelfareDetails(e.target.value)}
+            multiline
+            minRows={2}
+          />
+        )}
 
         <Divider />
 

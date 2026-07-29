@@ -2,6 +2,7 @@ package services
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/companyfetch"
 	"Backend/internal/models"
 	"fmt"
 )
@@ -196,7 +197,7 @@ func (s *CompanyRelationGraphService) BuildGraph(companyID uint) (*CompanyRelati
 				CompanyID:    partnerID,
 				Name:         partner.Name,
 				RelationType: rel.RelationType,
-				Description:  rel.Description,
+				Description:  companyfetch.SanitizeRelationDescription(rel.Description),
 			})
 		}
 	}

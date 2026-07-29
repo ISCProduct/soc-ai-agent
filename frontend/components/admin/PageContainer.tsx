@@ -9,6 +9,8 @@ export const ADMIN_PAGE_WIDTH = {
   form: 720,
   standard: 1100,
   wide: 1200,
+  /** 相関図など横に広い可視化向け */
+  full: 1600,
 } as const
 
 export function PageContainer({

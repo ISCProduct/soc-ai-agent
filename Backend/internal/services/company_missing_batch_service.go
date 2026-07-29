@@ -3,6 +3,7 @@ package services
 import (
 	"Backend/domain/repository"
 	"Backend/internal/companyfetch"
+	"Backend/internal/companyfields"
 	"Backend/internal/models"
 	"context"
 	"fmt"
@@ -206,6 +207,9 @@ func (s *CompanyMissingBatchService) processItem(ctx context.Context, item *Miss
 			if company != nil && companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
 				item.InfoStatus = "skipped_cache"
 				inc(func() { result.Skipped++ })
+			} else if company != nil && companyfetch.HasBasicInfoFootprint(company.Description, company.WebsiteURL, company.Location) {
+				item.InfoStatus = "empty"
+				inc(func() { result.Skipped++ })
 			} else {
 				detail := "cache_without_data"
 				if res.SkipReason != "" {
@@ -220,6 +224,7 @@ func (s *CompanyMissingBatchService) processItem(ctx context.Context, item *Miss
 			item.InfoStatus = "ok"
 			inc(func() { result.InfoOK++ })
 		} else {
+			// 公開情報限定（概要なし）も empty として扱う（エラーではない）
 			item.InfoStatus = "empty"
 			inc(func() { result.Skipped++ })
 		}
@@ -236,7 +241,7 @@ func (s *CompanyMissingBatchService) processItem(ctx context.Context, item *Miss
 			inc(func() { result.Errors++ })
 		} else if res != nil && res.FromCache {
 			company, _ := s.repo.FindByID(item.CompanyID)
-			if company != nil && companyfetch.HasTechData(company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle) {
+			if company != nil && companyfetch.HasTechDataForIndustry(company.Industry, company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle) {
 				item.TechStatus = "skipped_cache"
 				inc(func() { result.Skipped++ })
 			} else {
@@ -251,7 +256,7 @@ func (s *CompanyMissingBatchService) processItem(ctx context.Context, item *Miss
 				inc(func() { result.Errors++ })
 			}
 		} else if company, err := s.repo.FindByID(item.CompanyID); err == nil &&
-			companyfetch.HasTechData(company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle) {
+			companyfetch.HasTechDataForIndustry(company.Industry, company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle) {
 			item.TechStatus = "ok"
 			inc(func() { result.TechOK++ })
 		} else {
@@ -313,17 +318,17 @@ func (s *CompanyMissingBatchService) processItem(ctx context.Context, item *Miss
 }
 
 // MissingNeedsFromCompany は不足判定ヘルパ（基本情報・技術・ビジネス関係・求人）。
-// タイムスタンプが新しくても、中身が空なら不足とみなす。
-// 関係の DB 実体欠落は Run() 側で HasStoredData により追加判定する。
+// InfoFetchedAt / RelationsFetchedAt が TTL 内なら、公開情報限定の確認済みも含め再取得不要。
+// 技術は中身が空なら不足とみなす。関係の DB 実体欠落は Run() 側で HasStoredData により追加判定する。
 func MissingNeedsFromCompany(c *models.Company) (needInfo, needJobs, needTech, needRelations bool) {
 	if c == nil {
 		return false, false, false, false
 	}
-	needInfo = !companyfetch.IsFresh(c.InfoFetchedAt, companyfetch.TTLInfo) ||
-		!companyfetch.HasBasicInfo(c.Description, c.WebsiteURL)
+	needInfo = !companyfetch.IsFresh(c.InfoFetchedAt, companyfetch.TTLInfo)
 	needJobs = !companyfetch.IsFresh(c.JobsFetchedAt, companyfetch.TTLJobs)
-	needTech = !companyfetch.IsFresh(c.TechFetchedAt, companyfetch.TTLTech) ||
-		!companyfetch.HasTechData(c.TechStack, c.InfraStack, c.CicdTools, c.DevelopmentStyle)
+	needTech = companyfields.RequiresTech(c.Industry) &&
+		(!companyfetch.IsFresh(c.TechFetchedAt, companyfetch.TTLTech) ||
+			!companyfetch.HasTechDataForIndustry(c.Industry, c.TechStack, c.InfraStack, c.CicdTools, c.DevelopmentStyle))
 	needRelations = !companyfetch.IsFresh(c.RelationsFetchedAt, companyfetch.TTLRelations)
 	return
 }

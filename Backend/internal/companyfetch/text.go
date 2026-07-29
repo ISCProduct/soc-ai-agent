@@ -1,6 +1,7 @@
 package companyfetch
 
 import (
+	"Backend/internal/companyfields"
 	"context"
 	"fmt"
 	"html"
@@ -59,31 +60,68 @@ func IsEmptyTechPayload(techStack string) bool {
 	return t == "" || t == "[]" || t == "null" || t == "{}"
 }
 
-// HasTechData は tech_stack に実データがあるか。
+// HasTechData は IT 向け: tech_stack に実データがあるか。
 // infra / CI/CD / 開発手法だけ埋まっていても「技術取得済み」とはみなさない。
-// （管理UIの未取得表示・不足候補SQLと判定を揃える）
+// 業界別判定は HasTechDataForIndustry を使うこと。
 func HasTechData(techStack, infraStack, cicdTools, developmentStyle string) bool {
 	_, _, _ = infraStack, cicdTools, developmentStyle
 	return !IsEmptyTechPayload(techStack)
 }
 
-// HasBasicInfo は基本情報として最低限の概要・公式URLがあるか。
+// HasTechDataForIndustry は業界プロファイルに応じた技術・専門情報の充足判定。
+// 技術タブ非対象業種は常に true（不足扱いにしない）。
+func HasTechDataForIndustry(industry, techStack, infraStack, cicdTools, developmentStyle string) bool {
+	profile := companyfields.Resolve(industry)
+	if !profile.TechAspectEnabled {
+		return true
+	}
+	switch profile.ID {
+	case companyfields.ProfileManufacturing:
+		// 製造業: 主要技術・設備・生産方式のいずれかがあれば充足
+		return !IsEmptyTechPayload(techStack) ||
+			!IsEmptyTechPayload(infraStack) ||
+			strings.TrimSpace(developmentStyle) != ""
+	default:
+		// IT など: 言語・フレームワーク（tech_stack）必須
+		return HasTechData(techStack, infraStack, cicdTools, developmentStyle)
+	}
+}
+
+// HasBasicInfo は公開向けに十分な基本情報（概要・公式URL）があるか。
 func HasBasicInfo(description, websiteURL string) bool {
 	return strings.TrimSpace(description) != "" && strings.TrimSpace(websiteURL) != ""
 }
 
-// HasMeaningfulMarketInfo は「非上場のみ」を除き、上場区分や証券コードなど実質的な市場情報があるか。
-// market_type=unlisted だけのレコードは取得成功とみなさない（再取得を止めてしまうため）。
+// HasBasicInfoFootprint は取得フロー上の手がかり（概要+URL、または公式URL/所在地）があるか。
+// 非上場などで概要が公開事実として取れない場合でも、再取得ループを止める判定に使う。
+func HasBasicInfoFootprint(description, websiteURL, location string) bool {
+	if HasBasicInfo(description, websiteURL) {
+		return true
+	}
+	return strings.TrimSpace(websiteURL) != "" || strings.TrimSpace(location) != ""
+}
+
+// HasMeaningfulMarketInfo は市場区分が確定しているか（上場・非上場どちらも含む）。
+// unlisted 確定も取得成功とみなし、RelationsFetchedAt のスタンプ対象にする。
+// 再取得は force / TTL 切れで行う。
 func HasMeaningfulMarketInfo(isListed bool, marketType, stockCode string) bool {
 	if isListed || strings.TrimSpace(stockCode) != "" {
 		return true
 	}
 	switch strings.ToLower(strings.TrimSpace(marketType)) {
-	case "prime", "standard", "growth":
+	case "prime", "standard", "growth", "unlisted":
 		return true
 	default:
 		return false
 	}
+}
+
+// IsConfirmedUnlisted は証券コードなしの非上場確定か。
+func IsConfirmedUnlisted(isListed bool, marketType, stockCode string) bool {
+	if isListed || strings.TrimSpace(stockCode) != "" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(marketType), "unlisted")
 }
 
 // NormalizeHTMLText は HTML をプレーンテキストへ正規化する。

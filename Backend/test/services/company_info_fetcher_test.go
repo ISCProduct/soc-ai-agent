@@ -67,32 +67,24 @@ func TestCompanyInfoFetcher_FetchAndSave_TTLCache(t *testing.T) {
 	repo.AssertNotCalled(t, "Update", mock.Anything)
 }
 
-func TestCompanyInfoFetcher_FetchAndSave_EmptyDespiteTTLReFetches(t *testing.T) {
+func TestCompanyInfoFetcher_FetchAndSave_StampedSparseUsesTTL(t *testing.T) {
 	now := time.Now()
-	srv := makeChatCompletionsServer(t, validCompanyInfoJSON())
-	defer srv.Close()
-
 	repo := &mocks.CompanyRepositoryMock{}
 	repo.On("FindByID", uint(1)).Return(&models.Company{
 		ID:            1,
 		Name:          "テスト株式会社",
 		Description:   "",
-		WebsiteURL:    "",
-		InfoFetchedAt: &now, // スタンプ済みだが中身なし
+		WebsiteURL:    "https://example.com",
+		Location:      "東京都",
+		InfoFetchedAt: &now, // 公開情報限定でもスタンプ済みなら TTL スキップ
 	}, nil)
-	repo.On("Update", mock.AnythingOfType("*models.Company")).Return(nil).Run(func(args mock.Arguments) {
-		c := args.Get(0).(*models.Company)
-		assert.NotEmpty(t, c.Description)
-		assert.NotEmpty(t, c.WebsiteURL)
-		assert.NotNil(t, c.InfoFetchedAt)
-	})
 
-	client := openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")
-	fetcher := services.NewCompanyInfoFetcher(repo, client)
+	fetcher := services.NewCompanyInfoFetcher(repo, nil)
 	result, err := fetcher.FetchAndSave(context.Background(), 1, false)
 	require.NoError(t, err)
-	assert.False(t, result.FromCache)
-	assert.NotEmpty(t, result.Description)
+	assert.True(t, result.FromCache)
+	assert.Equal(t, "ttl", result.SkipReason)
+	repo.AssertNotCalled(t, "Update", mock.Anything)
 }
 
 type denySearchBudget struct{}

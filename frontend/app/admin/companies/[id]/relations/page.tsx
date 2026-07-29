@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Box,
   Button,
@@ -14,9 +17,12 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { authService } from '@/lib/auth'
-import { formatRelationLabel } from '@/lib/relation-labels'
-import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
+import { sanitizeRelationDescription, isClearOrganizationName } from '@/lib/relation-labels'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { AdminPanel } from '@/components/admin/AdminPanel'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { CompanyAspectTabs } from '@/components/admin/CompanyAspectTabs'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import CompanyRelationGraph from '@/components/admin/CompanyRelationGraph'
@@ -60,6 +66,7 @@ export default function AdminCompanyRelationsPage() {
   const [previewPending, setPreviewPending] = useState(false)
 
   const [name, setName] = useState('')
+  const [industry, setIndustry] = useState('')
   const [websiteUrl, setWebsiteUrl] = useState('')
   const [relations, setRelations] = useState<RelationEntry[]>([])
   const [marketInfo, setMarketInfo] = useState<MarketInfo>({
@@ -71,6 +78,7 @@ export default function AdminCompanyRelationsPage() {
   const [lastModelUsed, setLastModelUsed] = useState('')
   const [lastFetchConfidence, setLastFetchConfidence] = useState('')
   const [relationsFetchedAt, setRelationsFetchedAt] = useState<string | null>(null)
+  const [graphRefreshKey, setGraphRefreshKey] = useState(0)
 
   const loadCompany = () => {
     fetch(`/api/admin/companies/${id}`, {
@@ -79,6 +87,7 @@ export default function AdminCompanyRelationsPage() {
       .then((r) => r.json())
       .then((data) => {
         setName(data.name || '')
+        setIndustry(data.industry || '')
         setWebsiteUrl(data.website_url || '')
         setRelationsFetchedAt(data.relations_fetched_at || null)
         setPreviewPending(false)
@@ -86,22 +95,21 @@ export default function AdminCompanyRelationsPage() {
       .catch(() => setError('企業情報の取得に失敗しました'))
   }
 
-  useEffect(() => {
-    loadCompany()
-  }, [id])
-
   const applyRelationsPayload = (data: Record<string, unknown>) => {
     if (Array.isArray(data.relations)) {
       setRelations(
-        data.relations.map((r) => {
-          const item = r as RelationEntry
-          return {
-            name: item.name || '',
-            relation_type: item.relation_type || 'business_partner',
-            ratio: item.ratio,
-            description: formatRelationLabel(item.description || '', item.relation_type || 'business_partner'),
-          }
-        }),
+        data.relations
+          .map((r) => {
+            const item = r as RelationEntry
+            return {
+              name: item.name || '',
+              relation_type: item.relation_type || 'business_partner',
+              ratio: item.ratio,
+              // 種別ラベル（主要取引先など）は説明欄に入れない。取引内容だけ残す。
+              description: sanitizeRelationDescription(item.description || ''),
+            }
+          })
+          .filter((r) => isClearOrganizationName(r.name)),
       )
     }
     if (data.market_info && typeof data.market_info === 'object') {
@@ -116,6 +124,25 @@ export default function AdminCompanyRelationsPage() {
     if (typeof data.model_used === 'string' && data.model_used) setLastModelUsed(data.model_used)
     if (typeof data.confidence === 'string' && data.confidence) setLastFetchConfidence(data.confidence)
   }
+
+  const loadSavedRelations = () => {
+    fetch(`/api/admin/companies/${id}/fetch-relations`, {
+      method: 'POST',
+      headers: authService.getAdminFetchHeaders(),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: Record<string, unknown> | null) => {
+        if (data) applyRelationsPayload(data)
+      })
+      .catch(() => {
+        // 保存済みが無い場合は空のまま
+      })
+  }
+
+  useEffect(() => {
+    loadCompany()
+    loadSavedRelations()
+  }, [id])
 
   const handleAiFetch = async () => {
     if (!name.trim()) return
@@ -168,12 +195,13 @@ export default function AdminCompanyRelationsPage() {
       }
       applyRelationsPayload(data)
       loadCompany()
+      setGraphRefreshKey((k) => k + 1)
       if (data.budget_exceeded) {
-        setSuccess('月次 Search 予算超過のため、既存キャッシュのみ返却しました（新規 Search なし）。コスト画面を確認してください。')
+        setSuccess('月次の情報取得上限に達しているため、保存済みの情報のみ表示しています。コスト画面を確認するか、時間をおいて再度お試しください。')
       } else if (data.from_cache && data.skip_reason === 'ttl') {
-        setSuccess('TTL 内のためキャッシュを返却しました。再取得する場合は「強制再取得して保存」を使ってください。')
+        setSuccess('最近取得した情報があるため、保存済みの内容を表示しています。最新にしたい場合は「最新の情報に更新」を使ってください。')
       } else {
-        setSuccess(`DBへ強制再取得・保存しました（${data.saved_count ?? 0}件）。`)
+        setSuccess(`関連企業情報を更新して保存しました（${data.saved_count ?? 0}件）。`)
       }
     } catch {
       setError('強制再取得中に通信エラーが発生しました。時間をおいて再度お試しください。')
@@ -194,7 +222,12 @@ export default function AdminCompanyRelationsPage() {
           ...authService.getAdminFetchHeaders(),
         },
         body: JSON.stringify({
-          relations,
+          relations: relations
+            .filter((r) => isClearOrganizationName(r.name || ''))
+            .map((r) => ({
+              ...r,
+              description: sanitizeRelationDescription(r.description || ''),
+            })),
           market_info: marketInfo,
           source: sourceType,
           model_used: lastModelUsed,
@@ -211,7 +244,9 @@ export default function AdminCompanyRelationsPage() {
       }
       applyRelationsPayload(data)
       loadCompany()
-      setSuccess(`プレビュー内容を確定して保存しました（${data.saved_count ?? 0}件）。`)
+      setGraphRefreshKey((k) => k + 1)
+      setSuccess(`内容を確定して保存しました（${data.saved_count ?? 0}件）。`)
+      setPreviewPending(false)
     } catch {
       setError('確定保存中に通信エラーが発生しました。時間をおいて再度お試しください。')
     } finally {
@@ -239,178 +274,298 @@ export default function AdminCompanyRelationsPage() {
 
   const groupedRelations = useMemo(() => groupRelationsByCategory(relations), [relations])
   const numericId = Number(id)
+  const busy = aiLoading || forceLoading || confirmLoading
 
   return (
-    <AdminFormContainer
-      title={`${name || '企業'}（関連企業）`}
-      description="関連企業や市場の情報を確認・編集します。"
-      maxWidth={800}
-      backLabel="企業一覧に戻る"
-      backHref="/admin/companies"
-    >
-      <CompanyAspectTabs companyId={id} active="relations" />
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.full}>
+      <AdminPageHeader
+        title={`${name || '企業'}（関連企業）`}
+        description="関連企業のつながりを図で確認し、必要なら一覧で修正して保存します。"
+        backHref="/admin/companies"
+        backAriaLabel="企業一覧に戻る"
+      />
+
+      <CompanyAspectTabs companyId={id} active="relations" industry={industry} />
       <ErrorAlert error={error} />
-      {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
+      {success && (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>
+          {success}
+        </Alert>
+      )}
       {previewPending && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          まだ下書きの取得結果です。内容を確認してから「確定して保存」を押してください。
+          まだ下書きの取得結果です。内容を確認してから「確定して保存」を押してください。下書きの間は上の相関図は更新されません。
         </Alert>
       )}
 
-      <Stack spacing={2}>
-        <Typography variant="body2" color="text.secondary">
-          最終取得: {formatTs(relationsFetchedAt)}
-        </Typography>
-
-        <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
-          <Button
-            variant="outlined"
-            color="secondary"
-            onClick={handleAiFetch}
-            disabled={!name.trim() || aiLoading || forceLoading}
-            startIcon={aiLoading ? <CircularProgress size={16} color="inherit" /> : null}
-          >
-            {aiLoading ? '取得中...' : 'プレビュー取得（未保存）'}
-          </Button>
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={handleConfirmSave}
-            disabled={!previewPending || confirmLoading}
-            startIcon={confirmLoading ? <CircularProgress size={16} color="inherit" /> : null}
-          >
-            {confirmLoading ? '確定中...' : '確定して保存'}
-          </Button>
-          <Button
-            variant="outlined"
-            onClick={handleForceFetchAndSave}
-            disabled={forceLoading || aiLoading}
-            startIcon={forceLoading ? <CircularProgress size={16} color="inherit" /> : null}
-          >
-            {forceLoading ? '再取得中...' : '強制再取得して保存'}
-          </Button>
-        </Stack>
-
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          <Chip size="small" label={`source: ${sourceType || '-'}`} />
-          <Chip size="small" label={`confidence: ${lastFetchConfidence || '-'}`} />
-          <Chip size="small" label={`model: ${lastModelUsed || '-'}`} />
-        </Stack>
-        <Typography variant="body2" color="text.secondary">
-          relations: {formatTs(relationsFetchedAt)}
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          TTL: 関係・市場情報 60日。同一企業の同時取得は singleflight で1本化。月次 Search 上限はコスト画面で確認できます。
-        </Typography>
-
-        <Divider />
-
-        <Typography variant="subtitle1" fontWeight="bold">市場情報（任意）</Typography>
-        <Stack direction="row" spacing={2}>
-          <TextField
-            select
-            label="上場区分"
-            value={marketInfo.market_type}
-            onChange={(e) => setMarketInfo({ ...marketInfo, market_type: e.target.value })}
-            sx={{ flex: 1 }}
-          >
-            <MenuItem value="unlisted">非上場</MenuItem>
-            <MenuItem value="prime">プライム</MenuItem>
-            <MenuItem value="standard">スタンダード</MenuItem>
-            <MenuItem value="growth">グロース</MenuItem>
-          </TextField>
-          <TextField
-            label="証券コード"
-            value={marketInfo.stock_code || ''}
-            onChange={(e) => setMarketInfo({ ...marketInfo, stock_code: e.target.value })}
-            sx={{ flex: 1 }}
-          />
-          <TextField
-            select
-            label="上場"
-            value={marketInfo.is_listed ? 'yes' : 'no'}
-            onChange={(e) => setMarketInfo({ ...marketInfo, is_listed: e.target.value === 'yes' })}
-            sx={{ flex: 1 }}
-          >
-            <MenuItem value="no">非上場</MenuItem>
-            <MenuItem value="yes">上場</MenuItem>
-          </TextField>
-        </Stack>
-
-        <Divider />
-
-        <Typography variant="subtitle1" fontWeight="bold">相関図（保存済みデータ）</Typography>
-        {Number.isFinite(numericId) && numericId > 0 && <CompanyRelationGraph companyId={numericId} />}
-
-        <Divider />
-
-        <Stack direction="row" alignItems="center" justifyContent="space-between">
-          <Typography variant="subtitle1" fontWeight="bold">企業関係</Typography>
-          <Button size="small" variant="outlined" onClick={addRelation}>行を追加</Button>
-        </Stack>
-
-        {relations.length === 0 && (
-          <Typography variant="body2" color="text.secondary">関係データがありません。プレビュー取得または行追加してください。</Typography>
-        )}
-
-        {groupedRelations.map((categoryGroup) => (
-          <Box key={categoryGroup.category} sx={{ mb: 1 }}>
-            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-              {RELATION_CATEGORY_LABELS[categoryGroup.category]}
+      <Box
+        sx={{
+          mb: 2,
+          p: 2,
+          border: '1px solid',
+          borderColor: 'divider',
+          borderRadius: '10px',
+          bgcolor: 'background.paper',
+        }}
+      >
+        <Stack
+          direction={{ xs: 'column', md: 'row' }}
+          spacing={2}
+          alignItems={{ md: 'center' }}
+          justifyContent="space-between"
+        >
+          <Box sx={{ minWidth: 0 }}>
+            <Typography fontWeight={700} sx={{ mb: 0.25 }}>
+              情報の取得・保存
             </Typography>
-            <Stack spacing={1.5}>
-              {categoryGroup.companies.map((companyGroup) => (
-                <Box
-                  key={companyGroup.name}
-                  sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}
-                >
-                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-                    <Typography variant="body1" fontWeight="bold">{companyGroup.name}</Typography>
-                    <Chip size="small" label={`${companyGroup.entries.length}件`} />
-                  </Stack>
-                  <Stack spacing={1.5} divider={<Divider flexItem />}>
-                    {companyGroup.entries.map(({ index, relation: rel }) => (
-                      <Stack key={index} spacing={1.5}>
-                        <Stack direction="row" spacing={1}>
-                          <TextField
-                            label="関連企業名"
-                            value={rel.name}
-                            onChange={(e) => updateRelation(index, { name: e.target.value })}
-                            sx={{ flex: 2 }}
-                          />
-                          <TextField
-                            select
-                            label="関係タイプ"
-                            value={rel.relation_type}
-                            onChange={(e) => updateRelation(index, { relation_type: e.target.value })}
-                            sx={{ flex: 1 }}
-                          >
-                            <MenuItem value="capital_subsidiary">子会社</MenuItem>
-                            <MenuItem value="capital_affiliate">関連会社</MenuItem>
-                            <MenuItem value="business_partner">取引先</MenuItem>
-                            <MenuItem value="business_procurement">調達（gBiz）</MenuItem>
-                            <MenuItem value="business_subsidy">補助金（gBiz）</MenuItem>
-                          </TextField>
-                        </Stack>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <TextField
-                            label="説明"
-                            value={rel.description || ''}
-                            onChange={(e) => updateRelation(index, { description: e.target.value })}
-                            sx={{ flex: 1 }}
-                          />
-                          <Chip size="small" label={RELATION_LABELS[rel.relation_type] || rel.relation_type} />
-                          <Button size="small" color="error" onClick={() => removeRelation(index)}>削除</Button>
-                        </Stack>
-                      </Stack>
-                    ))}
-                  </Stack>
-                </Box>
-              ))}
-            </Stack>
+            <Typography variant="body2" color="text.secondary">
+              最終取得: {formatTs(relationsFetchedAt)}
+              {previewPending ? ' ／ いまは下書きを編集中です' : ''}
+            </Typography>
           </Box>
-        ))}
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Button
+              variant="outlined"
+              color="secondary"
+              onClick={handleAiFetch}
+              disabled={!name.trim() || busy}
+              startIcon={aiLoading ? <CircularProgress size={16} color="inherit" /> : null}
+            >
+              {aiLoading ? '取得中…' : '情報を取得して確認'}
+            </Button>
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={handleConfirmSave}
+              disabled={!previewPending || busy}
+              startIcon={confirmLoading ? <CircularProgress size={16} color="inherit" /> : null}
+              disableElevation
+            >
+              {confirmLoading ? '保存中…' : '確定して保存'}
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={handleForceFetchAndSave}
+              disabled={busy}
+              startIcon={forceLoading ? <CircularProgress size={16} color="inherit" /> : null}
+            >
+              {forceLoading ? '更新中…' : '最新の情報に更新'}
+            </Button>
+          </Stack>
+        </Stack>
+      </Box>
+
+      <Stack spacing={2.5}>
+        <AdminPanel
+          title="関連企業のつながり"
+          headerRight={
+            <Typography variant="body2" color="text.secondary">
+              保存済みの資本関係を図で表示します
+            </Typography>
+          }
+        >
+          <Box sx={{ px: { xs: 1.5, sm: 2 }, py: 2 }}>
+            {Number.isFinite(numericId) && numericId > 0 ? (
+              <CompanyRelationGraph key={graphRefreshKey} companyId={numericId} />
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                企業を読み込み中です…
+              </Typography>
+            )}
+          </Box>
+        </AdminPanel>
+
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.6fr) minmax(280px, 0.9fr)' },
+            gap: 2.5,
+            alignItems: 'start',
+          }}
+        >
+          <AdminPanel
+            title="関連企業の一覧"
+            headerRight={
+              <Button size="small" variant="outlined" onClick={addRelation} disabled={busy}>
+                行を追加
+              </Button>
+            }
+          >
+            <Box sx={{ px: 2.5, py: 2 }}>
+              {relations.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  まだ関連企業がありません。「情報を取得して確認」か「行を追加」で登録できます。
+                </Typography>
+              ) : (
+                <Stack spacing={2}>
+                  {groupedRelations.map((categoryGroup) => (
+                    <Box key={categoryGroup.category}>
+                      <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+                        {RELATION_CATEGORY_LABELS[categoryGroup.category]}
+                      </Typography>
+                      <Stack spacing={1.5}>
+                        {categoryGroup.companies.map((companyGroup) => (
+                          <Box
+                            key={companyGroup.name}
+                            sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}
+                          >
+                            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
+                              <Typography variant="body1" fontWeight={700}>
+                                {companyGroup.name}
+                              </Typography>
+                              <Chip size="small" label={`${companyGroup.entries.length}件`} />
+                            </Stack>
+                            <Stack spacing={1.5} divider={<Divider flexItem />}>
+                              {companyGroup.entries.map(({ index, relation: rel }) => (
+                                <Stack key={index} spacing={1.5}>
+                                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                                    <TextField
+                                      label="関連企業名"
+                                      value={rel.name}
+                                      onChange={(e) => updateRelation(index, { name: e.target.value })}
+                                      sx={{ flex: 2 }}
+                                      size="small"
+                                    />
+                                    <TextField
+                                      select
+                                      label="関係の種類"
+                                      value={rel.relation_type}
+                                      onChange={(e) => updateRelation(index, { relation_type: e.target.value })}
+                                      sx={{ flex: 1, minWidth: 140 }}
+                                      size="small"
+                                    >
+                                      <MenuItem value="capital_subsidiary">子会社</MenuItem>
+                                      <MenuItem value="capital_affiliate">関連会社</MenuItem>
+                                      <MenuItem value="business_partner">取引先</MenuItem>
+                                      <MenuItem value="business_procurement">調達（gBiz）</MenuItem>
+                                      <MenuItem value="business_subsidy">補助金（gBiz）</MenuItem>
+                                    </TextField>
+                                  </Stack>
+                                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'flex-start' }}>
+                                    <TextField
+                                      label="取引内容・関係の内容"
+                                      value={rel.description || ''}
+                                      onChange={(e) => updateRelation(index, { description: e.target.value })}
+                                      placeholder={
+                                        rel.relation_type === 'business_partner'
+                                          ? '例: 決済代行（空なら表示は「主要取引先」）'
+                                          : '例: 完全子会社'
+                                      }
+                                      helperText={
+                                        rel.relation_type === 'business_partner'
+                                          ? rel.description?.trim()
+                                            ? '具体的な取引内容（推定でも可）'
+                                            : '未入力のため一覧・図では「主要取引先」と表示されます'
+                                          : '出資比率・提携内容など、分かる範囲で具体的に'
+                                      }
+                                      sx={{ flex: 1 }}
+                                      size="small"
+                                      multiline
+                                      minRows={2}
+                                    />
+                                    <Chip
+                                      size="small"
+                                      label={
+                                        rel.relation_type === 'business_partner' && !rel.description?.trim()
+                                          ? '主要取引先'
+                                          : RELATION_LABELS[rel.relation_type] || rel.relation_type
+                                      }
+                                      sx={{ mt: { sm: 1 } }}
+                                    />
+                                    <Button size="small" color="error" onClick={() => removeRelation(index)} sx={{ mt: { sm: 1 } }}>
+                                      削除
+                                    </Button>
+                                  </Stack>
+                                </Stack>
+                              ))}
+                            </Stack>
+                          </Box>
+                        ))}
+                      </Stack>
+                    </Box>
+                  ))}
+                </Stack>
+              )}
+            </Box>
+          </AdminPanel>
+
+          <Stack spacing={2.5}>
+            <AdminPanel title="市場情報（任意）">
+              <Box sx={{ px: 2.5, py: 2 }}>
+                <Stack spacing={2}>
+                  <TextField
+                    select
+                    label="上場区分"
+                    value={marketInfo.market_type}
+                    onChange={(e) => setMarketInfo({ ...marketInfo, market_type: e.target.value })}
+                    fullWidth
+                    size="small"
+                  >
+                    <MenuItem value="unlisted">非上場</MenuItem>
+                    <MenuItem value="prime">プライム</MenuItem>
+                    <MenuItem value="standard">スタンダード</MenuItem>
+                    <MenuItem value="growth">グロース</MenuItem>
+                  </TextField>
+                  <TextField
+                    label="証券コード"
+                    value={marketInfo.stock_code || ''}
+                    onChange={(e) => setMarketInfo({ ...marketInfo, stock_code: e.target.value })}
+                    fullWidth
+                    size="small"
+                  />
+                  <TextField
+                    select
+                    label="上場"
+                    value={marketInfo.is_listed ? 'yes' : 'no'}
+                    onChange={(e) => setMarketInfo({ ...marketInfo, is_listed: e.target.value === 'yes' })}
+                    fullWidth
+                    size="small"
+                  >
+                    <MenuItem value="no">非上場</MenuItem>
+                    <MenuItem value="yes">上場</MenuItem>
+                  </TextField>
+                </Stack>
+              </Box>
+            </AdminPanel>
+
+            <Accordion
+              disableGutters
+              elevation={0}
+              sx={{
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: '10px !important',
+                '&:before': { display: 'none' },
+                overflow: 'hidden',
+              }}
+            >
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Box>
+                  <Typography fontWeight={700}>詳しい取得情報</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    通常は開かなくて大丈夫です
+                  </Typography>
+                </Box>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Stack spacing={1}>
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    <Chip size="small" label={`取得元: ${sourceType || '-'}`} />
+                    <Chip size="small" label={`確信度: ${lastFetchConfidence || '-'}`} />
+                    <Chip size="small" label={`モデル: ${lastModelUsed || '-'}`} />
+                  </Stack>
+                  <Typography variant="body2" color="text.secondary">
+                    関連情報の最終取得: {formatTs(relationsFetchedAt)}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    関係・市場情報は約60日間キャッシュされます。月次の情報取得上限はコスト画面で確認できます。
+                  </Typography>
+                </Stack>
+              </AccordionDetails>
+            </Accordion>
+          </Stack>
+        </Box>
       </Stack>
-    </AdminFormContainer>
+    </PageContainer>
   )
 }
