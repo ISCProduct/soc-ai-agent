@@ -70,6 +70,14 @@ func (m *CompanyRepositoryMock) FindByID(id uint) (*models.Company, error) {
 	return nil, args.Error(1)
 }
 
+func (m *CompanyRepositoryMock) FindByIDs(ids []uint) ([]models.Company, error) {
+	args := m.Called(ids)
+	if v := args.Get(0); v != nil {
+		return v.([]models.Company), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
 func (m *CompanyRepositoryMock) FindByName(name string) (*models.Company, error) {
 	args := m.Called(name)
 	if v := args.Get(0); v != nil {

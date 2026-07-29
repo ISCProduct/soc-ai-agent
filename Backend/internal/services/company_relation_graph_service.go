@@ -45,8 +45,7 @@ type CompanyRelationGraph struct {
 	Nodes             []RelationGraphNode          `json:"nodes"`
 	CapitalEdges      []RelationGraphCapitalEdge   `json:"capital_edges"`
 	BusinessRelations []RelationGraphBusinessEntry `json:"business_relations"`
-	// Truncated はノード数上限に達し、一部の資本関係を打ち切ったことを示す。
-	Truncated bool `json:"truncated"`
+	Truncated         bool                         `json:"truncated"`
 }
 
 // CompanyRelationGraphService は起点企業から資本関係を多段階（親会社→子会社→孫会社等）に辿り、
@@ -73,22 +72,34 @@ func (s *CompanyRelationGraphService) BuildGraph(companyID uint) (*CompanyRelati
 	capitalEdgeSeen := map[string]struct{}{}
 	businessSeen := map[string]struct{}{}
 
-	// addNode は id をグラフに追加する。既に追加済みなら true、上限到達で追加できなければ false を返す。
-	addNode := func(id uint) (bool, error) {
+	// companyCache は FindByIDs でバッチ取得した企業をキャッシュする。
+	companyCache := map[uint]*models.Company{}
+	// marketInfoCache は GetMarketInfoByCompanyIDs でバッチ取得した市場情報をキャッシュする。
+	marketInfoCache := map[uint]*models.CompanyMarketInfo{}
+
+	// 起点企業の取得
+	focusCompany, err := s.companyRepo.FindByID(companyID)
+	if err != nil {
+		return nil, fmt.Errorf("company not found (id=%d): %w", companyID, err)
+	}
+	companyCache[companyID] = focusCompany
+
+	// addNode はキャッシュ済みの企業データでグラフにノードを追加する。
+	addNode := func(id uint) bool {
 		if _, ok := nodeSeen[id]; ok {
-			return true, nil
+			return true
 		}
 		if len(nodeSeen) >= RelationGraphMaxNodes {
 			graph.Truncated = true
-			return false, nil
+			return false
 		}
-		company, err := s.companyRepo.FindByID(id)
-		if err != nil {
-			return false, fmt.Errorf("company not found (id=%d): %w", id, err)
+		company, ok := companyCache[id]
+		if !ok {
+			return false
 		}
 		marketType := ""
 		isListed := false
-		if info, err := s.relationRepo.GetMarketInfoByCompanyID(id); err == nil && info != nil {
+		if info, ok := marketInfoCache[id]; ok && info != nil {
 			marketType = info.MarketType
 			isListed = info.IsListed
 		}
@@ -100,12 +111,17 @@ func (s *CompanyRelationGraphService) BuildGraph(companyID uint) (*CompanyRelati
 			IsListed:   isListed,
 			IsFocus:    id == companyID,
 		})
-		return true, nil
+		return true
 	}
 
-	if _, err := addNode(companyID); err != nil {
-		return nil, err
+	// 起点の市場情報もバッチで取得
+	initMarket, err := s.relationRepo.GetMarketInfoByCompanyIDs([]uint{companyID})
+	if err == nil {
+		for k, v := range initMarket {
+			marketInfoCache[k] = v
+		}
 	}
+	addNode(companyID)
 
 	type queueItem struct {
 		id    uint
@@ -115,90 +131,141 @@ func (s *CompanyRelationGraphService) BuildGraph(companyID uint) (*CompanyRelati
 	queue := []queueItem{{id: companyID, depth: 0}}
 
 	for len(queue) > 0 {
-		item := queue[0]
-		queue = queue[1:]
-		if len(nodeSeen) >= RelationGraphMaxNodes {
-			graph.Truncated = true
+		// BFS の各段で、キュー内の全ノードの関係をバッチ取得する
+		var currentBatch []queueItem
+		for len(queue) > 0 && len(nodeSeen) < RelationGraphMaxNodes {
+			currentBatch = append(currentBatch, queue[0])
+			queue = queue[1:]
+		}
+		if len(currentBatch) == 0 {
 			break
 		}
 
-		relations, err := s.relationRepo.GetRelationsByCompanyID(item.id)
+		batchIDs := make([]uint, len(currentBatch))
+		for i, item := range currentBatch {
+			batchIDs[i] = item.id
+		}
+
+		// このバッチの全関係をまとめて取得（N+1 → 1クエリ）
+		allRelations, err := s.relationRepo.GetRelationsByCompanyIDs(batchIDs)
 		if err != nil {
 			return nil, err
 		}
 
-		for _, rel := range relations {
-			if models.IsCapitalRelationType(rel.RelationType) {
-				if rel.ParentID == nil || rel.ChildID == nil {
-					continue
+		// 関係に出現する企業IDを収集し、未取得分をバッチで取得
+		needIDs := map[uint]struct{}{}
+		for _, rel := range allRelations {
+			for _, id := range rel.CompanyIDs() {
+				if _, ok := companyCache[id]; !ok {
+					needIDs[id] = struct{}{}
 				}
-				edgeKey := fmt.Sprintf("%d-%d-%s", *rel.ParentID, *rel.ChildID, rel.RelationType)
-				if _, ok := capitalEdgeSeen[edgeKey]; !ok {
-					capitalEdgeSeen[edgeKey] = struct{}{}
-					graph.CapitalEdges = append(graph.CapitalEdges, RelationGraphCapitalEdge{
-						ParentID:     *rel.ParentID,
-						ChildID:      *rel.ChildID,
-						RelationType: rel.RelationType,
-						Ratio:        rel.Ratio,
-					})
+			}
+		}
+		if len(needIDs) > 0 {
+			ids := make([]uint, 0, len(needIDs))
+			for id := range needIDs {
+				ids = append(ids, id)
+			}
+			companies, err := s.companyRepo.FindByIDs(ids)
+			if err != nil {
+				return nil, err
+			}
+			for i := range companies {
+				companyCache[companies[i].ID] = &companies[i]
+			}
+			marketInfos, err := s.relationRepo.GetMarketInfoByCompanyIDs(ids)
+			if err == nil {
+				for k, v := range marketInfos {
+					marketInfoCache[k] = v
 				}
-				if item.depth >= RelationGraphMaxDepth {
-					for _, nextID := range []uint{*rel.ParentID, *rel.ChildID} {
-						if nextID != item.id {
-							if _, ok := nodeSeen[nextID]; !ok {
-								graph.Truncated = true
+			}
+		}
+
+		// 関係をグループ化して各ノードの処理
+		relByCompany := map[uint][]models.CompanyRelation{}
+		for _, rel := range allRelations {
+			for _, id := range batchIDs {
+				if rel.InvolvesCompany(id) {
+					relByCompany[id] = append(relByCompany[id], rel)
+				}
+			}
+		}
+
+		for _, item := range currentBatch {
+			if len(nodeSeen) >= RelationGraphMaxNodes {
+				graph.Truncated = true
+				break
+			}
+
+			for _, rel := range relByCompany[item.id] {
+				if models.IsCapitalRelationType(rel.RelationType) {
+					if rel.ParentID == nil || rel.ChildID == nil {
+						continue
+					}
+					edgeKey := fmt.Sprintf("%d-%d-%s", *rel.ParentID, *rel.ChildID, rel.RelationType)
+					if _, ok := capitalEdgeSeen[edgeKey]; !ok {
+						capitalEdgeSeen[edgeKey] = struct{}{}
+						graph.CapitalEdges = append(graph.CapitalEdges, RelationGraphCapitalEdge{
+							ParentID:     *rel.ParentID,
+							ChildID:      *rel.ChildID,
+							RelationType: rel.RelationType,
+							Ratio:        rel.Ratio,
+						})
+					}
+					if item.depth >= RelationGraphMaxDepth {
+						for _, nextID := range []uint{*rel.ParentID, *rel.ChildID} {
+							if nextID != item.id {
+								if _, ok := nodeSeen[nextID]; !ok {
+									graph.Truncated = true
+								}
 							}
+						}
+						continue
+					}
+					for _, nextID := range []uint{*rel.ParentID, *rel.ChildID} {
+						if nextID == item.id {
+							continue
+						}
+						if !addNode(nextID) {
+							continue
+						}
+						if _, ok := queued[nextID]; !ok {
+							queued[nextID] = struct{}{}
+							queue = append(queue, queueItem{id: nextID, depth: item.depth + 1})
 						}
 					}
 					continue
 				}
-				for _, nextID := range []uint{*rel.ParentID, *rel.ChildID} {
-					if nextID == item.id {
-						continue
-					}
-					added, err := addNode(nextID)
-					if err != nil {
-						return nil, err
-					}
-					if !added {
-						continue
-					}
-					if _, ok := queued[nextID]; !ok {
-						queued[nextID] = struct{}{}
-						queue = append(queue, queueItem{id: nextID, depth: item.depth + 1})
-					}
-				}
-				continue
-			}
 
-			// 取引関係は起点企業から直接分のみ採用する。
-			if item.id != companyID {
-				continue
+				// 取引関係は起点企業から直接分のみ採用する。
+				if item.id != companyID {
+					continue
+				}
+				var partnerID uint
+				switch {
+				case rel.FromID != nil && *rel.FromID == companyID && rel.ToID != nil:
+					partnerID = *rel.ToID
+				case rel.ToID != nil && *rel.ToID == companyID && rel.FromID != nil:
+					partnerID = *rel.FromID
+				default:
+					continue
+				}
+				key := fmt.Sprintf("%d-%s", partnerID, rel.RelationType)
+				if _, ok := businessSeen[key]; ok {
+					continue
+				}
+				partner, ok := companyCache[partnerID]
+				if !ok {
+					continue
+				}
+				businessSeen[key] = struct{}{}
+				graph.BusinessRelations = append(graph.BusinessRelations, RelationGraphBusinessEntry{
+					CompanyID:    partnerID,
+					Name:         partner.Name,
+					RelationType: rel.RelationType,
+					Description:  companyfetch.SanitizeRelationDescription(rel.Description),
+				})
 			}
-			var partnerID uint
-			switch {
-			case rel.FromID != nil && *rel.FromID == companyID && rel.ToID != nil:
-				partnerID = *rel.ToID
-			case rel.ToID != nil && *rel.ToID == companyID && rel.FromID != nil:
-				partnerID = *rel.FromID
-			default:
-				continue
-			}
-			key := fmt.Sprintf("%d-%s", partnerID, rel.RelationType)
-			if _, ok := businessSeen[key]; ok {
-				continue
-			}
-			partner, err := s.companyRepo.FindByID(partnerID)
-			if err != nil {
-				continue
-			}
-			businessSeen[key] = struct{}{}
-			graph.BusinessRelations = append(graph.BusinessRelations, RelationGraphBusinessEntry{
-				CompanyID:    partnerID,
-				Name:         partner.Name,
-				RelationType: rel.RelationType,
-				Description:  companyfetch.SanitizeRelationDescription(rel.Description),
-			})
 		}
 	}
 

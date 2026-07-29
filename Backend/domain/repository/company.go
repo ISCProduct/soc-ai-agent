@@ -31,6 +31,7 @@ type CompanyRepository interface {
 	FindAllPublished(limit, offset int) ([]models.Company, error)
 	CountPublished() (int64, error)
 	FindByID(id uint) (*models.Company, error)
+	FindByIDs(ids []uint) ([]models.Company, error)
 	FindByName(name string) (*models.Company, error)
 	FindByCorporateNumber(corporateNumber string) (*models.Company, error)
 	GetWeightProfile(companyID uint, jobPositionID *uint) (*models.CompanyWeightProfile, error)
@@ -57,7 +58,9 @@ type CompanyRelationRepository interface {
 	// UpsertCapitalRelation は資本関係を parent_id/child_id で保存する（資本図表示用）。
 	UpsertCapitalRelation(parentID, childID uint, relationType string, ratio *float64, description string) error
 	GetRelationsByCompanyID(companyID uint) ([]models.CompanyRelation, error)
+	GetRelationsByCompanyIDs(companyIDs []uint) ([]models.CompanyRelation, error)
 	GetMarketInfoByCompanyID(companyID uint) (*models.CompanyMarketInfo, error)
+	GetMarketInfoByCompanyIDs(companyIDs []uint) (map[uint]*models.CompanyMarketInfo, error)
 	UpsertMarketInfo(info *models.CompanyMarketInfo) error
 }
 

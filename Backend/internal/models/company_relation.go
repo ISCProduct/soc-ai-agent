@@ -55,6 +55,32 @@ func (CompanyMarketInfo) TableName() string {
 	return "company_market_info"
 }
 
+// CompanyIDs は関係に含まれる全企業IDを返す（nil は除外）。
+func (r CompanyRelation) CompanyIDs() []uint {
+	ids := make([]uint, 0, 4)
+	if r.ParentID != nil {
+		ids = append(ids, *r.ParentID)
+	}
+	if r.ChildID != nil {
+		ids = append(ids, *r.ChildID)
+	}
+	if r.FromID != nil {
+		ids = append(ids, *r.FromID)
+	}
+	if r.ToID != nil {
+		ids = append(ids, *r.ToID)
+	}
+	return ids
+}
+
+// InvolvesCompany は関係が指定企業IDに関わるかどうかを返す。
+func (r CompanyRelation) InvolvesCompany(id uint) bool {
+	return (r.ParentID != nil && *r.ParentID == id) ||
+		(r.ChildID != nil && *r.ChildID == id) ||
+		(r.FromID != nil && *r.FromID == id) ||
+		(r.ToID != nil && *r.ToID == id)
+}
+
 // IsCapitalRelationType は資本関係（parent/child で保存・表示する）かどうかを返す。
 func IsCapitalRelationType(relationType string) bool {
 	return strings.HasPrefix(relationType, "capital_")

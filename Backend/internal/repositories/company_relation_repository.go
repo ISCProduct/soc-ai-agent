@@ -85,6 +85,35 @@ func (r *CompanyRelationRepository) GetRelationsByCompanyID(companyID uint) ([]m
 	return relations, err
 }
 
+// GetRelationsByCompanyIDs は複数企業に関連する関係をバッチ取得する。
+func (r *CompanyRelationRepository) GetRelationsByCompanyIDs(companyIDs []uint) ([]models.CompanyRelation, error) {
+	if len(companyIDs) == 0 {
+		return nil, nil
+	}
+	var relations []models.CompanyRelation
+	err := r.db.
+		Where("(parent_id IN ? OR child_id IN ? OR from_id IN ? OR to_id IN ?) AND is_active = ?",
+			companyIDs, companyIDs, companyIDs, companyIDs, true).
+		Find(&relations).Error
+	return relations, err
+}
+
+// GetMarketInfoByCompanyIDs は複数企業の市場情報をバッチ取得する。
+func (r *CompanyRelationRepository) GetMarketInfoByCompanyIDs(companyIDs []uint) (map[uint]*models.CompanyMarketInfo, error) {
+	if len(companyIDs) == 0 {
+		return map[uint]*models.CompanyMarketInfo{}, nil
+	}
+	var infos []models.CompanyMarketInfo
+	if err := r.db.Where("company_id IN ?", companyIDs).Find(&infos).Error; err != nil {
+		return nil, err
+	}
+	result := make(map[uint]*models.CompanyMarketInfo, len(infos))
+	for i := range infos {
+		result[infos[i].CompanyID] = &infos[i]
+	}
+	return result, nil
+}
+
 // GetMarketInfoByCompanyID は指定企業の市場情報を返す。
 func (r *CompanyRelationRepository) GetMarketInfoByCompanyID(companyID uint) (*models.CompanyMarketInfo, error) {
 	var info models.CompanyMarketInfo

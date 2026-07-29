@@ -39,10 +39,26 @@ func (m *relationRepoMock) GetRelationsByCompanyID(companyID uint) ([]models.Com
 	return nil, args.Error(1)
 }
 
+func (m *relationRepoMock) GetRelationsByCompanyIDs(companyIDs []uint) ([]models.CompanyRelation, error) {
+	args := m.Called(companyIDs)
+	if v := args.Get(0); v != nil {
+		return v.([]models.CompanyRelation), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
 func (m *relationRepoMock) GetMarketInfoByCompanyID(companyID uint) (*models.CompanyMarketInfo, error) {
 	args := m.Called(companyID)
 	if v := args.Get(0); v != nil {
 		return v.(*models.CompanyMarketInfo), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *relationRepoMock) GetMarketInfoByCompanyIDs(companyIDs []uint) (map[uint]*models.CompanyMarketInfo, error) {
+	args := m.Called(companyIDs)
+	if v := args.Get(0); v != nil {
+		return v.(map[uint]*models.CompanyMarketInfo), args.Error(1)
 	}
 	return nil, args.Error(1)
 }

@@ -35,7 +35,8 @@ func (s *warmRepoStub) ListActiveFiltered(int, int, string, string, string, stri
 func (s *warmRepoStub) ListActiveIndustries() ([]string, error) { return nil, nil }
 func (s *warmRepoStub) FindAllPublished(int, int) ([]models.Company, error) { return nil, nil }
 func (s *warmRepoStub) CountPublished() (int64, error)                             { return 0, nil }
-func (s *warmRepoStub) FindByID(uint) (*models.Company, error)                     { return nil, nil }
+func (s *warmRepoStub) FindByID(uint) (*models.Company, error)   { return nil, nil }
+func (s *warmRepoStub) FindByIDs([]uint) ([]models.Company, error) { return nil, nil }
 func (s *warmRepoStub) FindByName(string) (*models.Company, error)                 { return nil, nil }
 func (s *warmRepoStub) FindByCorporateNumber(string) (*models.Company, error)      { return nil, nil }
 func (s *warmRepoStub) GetWeightProfile(uint, *uint) (*models.CompanyWeightProfile, error) {
