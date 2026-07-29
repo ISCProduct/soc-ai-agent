@@ -422,7 +422,10 @@ func (c *AdminCompanyController) runPrimaryAspectFetches(
 	// 1) 基本情報
 	infoStep := fetchStepResult{Status: "skipped", Skipped: true, Detail: "fetcher unavailable"}
 	if c.infoFetcher != nil {
-		needInfo := forceRefresh || !companyfetch.IsFresh(company.InfoFetchedAt, companyfetch.TTLInfo)
+		// FE missingAspects（概要+公式URL）と揃え、スタンプ済みでも中身不足なら再取得する。
+		needInfo := forceRefresh ||
+			!companyfetch.IsFresh(company.InfoFetchedAt, companyfetch.TTLInfo) ||
+			!companyfetch.HasBasicInfo(company.Description, company.WebsiteURL)
 		if !needInfo {
 			infoStep = fetchStepResult{Status: "skipped", Skipped: true, Detail: "ttl_fresh"}
 		} else {

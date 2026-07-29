@@ -93,8 +93,10 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 		return nil, fmt.Errorf("company not found: %w", err)
 	}
 
-	// スタンプ済み（公開情報限定の確認済み含む）なら TTL 内は再取得しない。強制更新は force。
-	if !forceRefresh && companyfetch.IsFresh(company.InfoFetchedAt, companyfetch.TTLInfo) {
+	// TTL 内でも概要+公式URLが揃っていなければ再取得する（スタンプだけ進んだ残骸・FE不足表示との整合）。
+	// 技術取得と同様。強制更新は force。
+	if !forceRefresh && companyfetch.IsFresh(company.InfoFetchedAt, companyfetch.TTLInfo) &&
+		companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
 		return markInfoCacheSkip(companyInfoFromModel(company), "ttl", false), nil
 	}
 
@@ -129,7 +131,8 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 	company.SourceURL = result.SourceURL
 	company.SourceFetchedAt = &now
 	// 更新後の company（今回の取得結果＋既存の URL/所在地など）で判定する。
-	// 手がかりが残っていれば疎データでもスタンプし、TTL 内の無駄な再取得を避ける。
+	// 手がかりがあれば疎データでもスタンプする（取得試行の記録）。
+	// ただし再取得スキップは HasBasicInfo（概要+公式URL）揃い時のみ（FetchAndSave 先頭参照）。
 	if companyfetch.HasBasicInfoFootprint(company.Description, company.WebsiteURL, company.Location) {
 		company.InfoFetchedAt = &now
 	}

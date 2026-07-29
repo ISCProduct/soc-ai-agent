@@ -202,20 +202,13 @@ func (s *CompanyMissingBatchService) processItem(ctx context.Context, item *Miss
 			inc(func() { result.Errors++ })
 		} else if res != nil && res.FromCache {
 			company, _ := s.repo.FindByID(item.CompanyID)
-			if company != nil && companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
-				item.InfoStatus = "skipped_cache"
-				inc(func() { result.Skipped++ })
-			} else if company != nil && companyfetch.HasBasicInfoFootprint(company.Description, company.WebsiteURL, company.Location) {
-				item.InfoStatus = "empty"
-				inc(func() { result.Skipped++ })
-			} else {
-				detail := "cache_without_data"
-				if res.SkipReason != "" {
-					detail = res.SkipReason
-				}
-				item.InfoStatus = "error"
-				item.Error = "info: " + detail
+			status, errMsg := classifyInfoCacheResult(res, company)
+			item.InfoStatus = status
+			if status == "error" {
+				item.Error = errMsg
 				inc(func() { result.Errors++ })
+			} else {
+				inc(func() { result.Skipped++ })
 			}
 		} else if company, err := s.repo.FindByID(item.CompanyID); err == nil && company != nil &&
 			companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
@@ -315,14 +308,34 @@ func (s *CompanyMissingBatchService) processItem(ctx context.Context, item *Miss
 	}
 }
 
+// classifyInfoCacheResult は FetchAndSave の FromCache 結果をバッチ用ステータスへ変換する。
+// 予算超過は公開情報不足（empty）より先に判定し、警告経路を落とさない。
+func classifyInfoCacheResult(res *CompanyInfoResult, company *models.Company) (status, errMsg string) {
+	if res != nil && (res.BudgetExceeded || res.SkipReason == "budget") {
+		return "error", "info: budget"
+	}
+	if company != nil && companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
+		return "skipped_cache", ""
+	}
+	if company != nil && companyfetch.HasBasicInfoFootprint(company.Description, company.WebsiteURL, company.Location) {
+		return "empty", ""
+	}
+	detail := "cache_without_data"
+	if res != nil && res.SkipReason != "" {
+		detail = res.SkipReason
+	}
+	return "error", "info: " + detail
+}
+
 // MissingNeedsFromCompany は不足判定ヘルパ（基本情報・技術・ビジネス関係・求人）。
-// InfoFetchedAt / RelationsFetchedAt が TTL 内なら、公開情報限定の確認済みも含め再取得不要。
+// 基本情報は TTL 切れ、または概要+公式URLが揃っていない場合に不足（FE missingAspects と揃える）。
 // 技術は中身が空なら不足とみなす。関係の DB 実体欠落は Run() 側で HasStoredData により追加判定する。
 func MissingNeedsFromCompany(c *models.Company) (needInfo, needJobs, needTech, needRelations bool) {
 	if c == nil {
 		return false, false, false, false
 	}
-	needInfo = !companyfetch.IsFresh(c.InfoFetchedAt, companyfetch.TTLInfo)
+	needInfo = !companyfetch.IsFresh(c.InfoFetchedAt, companyfetch.TTLInfo) ||
+		!companyfetch.HasBasicInfo(c.Description, c.WebsiteURL)
 	needJobs = !companyfetch.IsFresh(c.JobsFetchedAt, companyfetch.TTLJobs)
 	needTech = companyfields.RequiresTech(c.Industry) &&
 		(!companyfetch.IsFresh(c.TechFetchedAt, companyfetch.TTLTech) ||

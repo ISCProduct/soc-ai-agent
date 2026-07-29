@@ -86,8 +86,8 @@ func TestMissingNeedsFromCompany(t *testing.T) {
 		RelationsFetchedAt: &now,
 	}
 	info, _, _, _ = MissingNeedsFromCompany(emptyInfoDespiteStamp)
-	if info {
-		t.Fatal("fresh InfoFetchedAt should not need info even without description (confirmed sparse)")
+	if !info {
+		t.Fatal("fresh InfoFetchedAt without description/website should still need info (FE missingAspects)")
 	}
 
 	sparseFootprintStamped := &models.Company{
@@ -102,8 +102,8 @@ func TestMissingNeedsFromCompany(t *testing.T) {
 		RelationsFetchedAt: &now,
 	}
 	info, _, _, _ = MissingNeedsFromCompany(sparseFootprintStamped)
-	if info {
-		t.Fatal("stamped sparse basic info should not need refetch until TTL")
+	if !info {
+		t.Fatal("stamped sparse basic info (no description) should need refetch to match FE")
 	}
 
 	// infra / 開発手法のみでは技術取得済みとみなさない
@@ -140,6 +140,88 @@ func TestClampMissingBatchConcurrency(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := clampMissingBatchConcurrency(tt.in); got != tt.want {
 				t.Fatalf("%d -> %d want %d", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClassifyInfoCacheResult(t *testing.T) {
+	sparse := &models.Company{
+		Description: "",
+		WebsiteURL:  "https://example.com",
+		Location:    "東京都",
+	}
+	full := &models.Company{
+		Description: "概要",
+		WebsiteURL:  "https://example.com",
+	}
+	empty := &models.Company{}
+
+	tests := []struct {
+		name       string
+		res        *CompanyInfoResult
+		company    *models.Company
+		wantStatus string
+		wantErr    string
+	}{
+		{
+			name: "予算超過は footprint より先に error",
+			res: &CompanyInfoResult{
+				FromCache:      true,
+				BudgetExceeded: true,
+				SkipReason:     "budget",
+			},
+			company:    sparse,
+			wantStatus: "error",
+			wantErr:    "info: budget",
+		},
+		{
+			name: "SkipReason=budget のみでも error",
+			res: &CompanyInfoResult{
+				FromCache:  true,
+				SkipReason: "budget",
+			},
+			company:    sparse,
+			wantStatus: "error",
+			wantErr:    "info: budget",
+		},
+		{
+			name: "充足キャッシュは skipped_cache",
+			res: &CompanyInfoResult{
+				FromCache:  true,
+				SkipReason: "ttl",
+			},
+			company:    full,
+			wantStatus: "skipped_cache",
+		},
+		{
+			name: "疎データは empty",
+			res: &CompanyInfoResult{
+				FromCache:  true,
+				SkipReason: "ttl",
+			},
+			company:    sparse,
+			wantStatus: "empty",
+		},
+		{
+			name: "手がかりなしは error",
+			res: &CompanyInfoResult{
+				FromCache:  true,
+				SkipReason: "ttl",
+			},
+			company:    empty,
+			wantStatus: "error",
+			wantErr:    "info: ttl",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, errMsg := classifyInfoCacheResult(tt.res, tt.company)
+			if status != tt.wantStatus {
+				t.Fatalf("status=%q want %q", status, tt.wantStatus)
+			}
+			if errMsg != tt.wantErr {
+				t.Fatalf("errMsg=%q want %q", errMsg, tt.wantErr)
 			}
 		})
 	}
