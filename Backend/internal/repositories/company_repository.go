@@ -144,6 +144,16 @@ func (r *CompanyRepository) FindByID(id uint) (*models.Company, error) {
 	return &company, nil
 }
 
+// FindByIDs は複数IDの企業をバッチ取得する。
+func (r *CompanyRepository) FindByIDs(ids []uint) ([]models.Company, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var companies []models.Company
+	err := r.db.Where("id IN ?", ids).Find(&companies).Error
+	return companies, err
+}
+
 // FindByName 企業名で取得
 func (r *CompanyRepository) FindByName(name string) (*models.Company, error) {
 	var company models.Company

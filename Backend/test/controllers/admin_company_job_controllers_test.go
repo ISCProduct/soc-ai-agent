@@ -27,8 +27,7 @@ func newAdminCompanyController(repo *mocks.CompanyRepositoryMock, audit *mocks.A
 
 func TestAdminCompanyController_List_ServiceError(t *testing.T) {
 	repo := &mocks.CompanyRepositoryMock{}
-	repo.On("FindAllActive", 50, 0).Return(nil, errors.New("db error"))
-	repo.On("CountActive").Return(int64(0), nil)
+	repo.On("ListActiveFiltered", 50, 0, "", "", "", "", "").Return(nil, int64(0), errors.New("db error"))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/companies", nil)
 	rec := httptest.NewRecorder()
@@ -37,8 +36,7 @@ func TestAdminCompanyController_List_ServiceError(t *testing.T) {
 
 func TestAdminCompanyController_List_Success(t *testing.T) {
 	repo := &mocks.CompanyRepositoryMock{}
-	repo.On("FindAllActive", 50, 0).Return([]models.Company{{Name: "Test Corp"}}, nil)
-	repo.On("CountActive").Return(int64(1), nil)
+	repo.On("ListActiveFiltered", 50, 0, "", "", "", "", "").Return([]models.Company{{Name: "Test Corp"}}, int64(1), nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/companies", nil)
 	rec := httptest.NewRecorder()
