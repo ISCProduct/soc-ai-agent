@@ -170,12 +170,12 @@ func TestCompanyRelationsFetcher_FetchAndSave_EmptyUnlistedStamps(t *testing.T) 
 
 	relRepo := &relationRepoMock{}
 	relRepo.On("GetRelationsByCompanyID", uint(1)).Return([]models.CompanyRelation{}, nil)
-	relRepo.On("GetMarketInfoByCompanyID", uint(1)).Return(nil, nil).Once()
+	// HasStoredData / acquire 双方から呼ばれるため、非上場情報を一貫して返す
 	relRepo.On("GetMarketInfoByCompanyID", uint(1)).Return(&models.CompanyMarketInfo{
 		CompanyID:  1,
 		IsListed:   false,
 		MarketType: "unlisted",
-	}, nil).Maybe()
+	}, nil)
 	relRepo.On("UpsertMarketInfo", mock.MatchedBy(func(info *models.CompanyMarketInfo) bool {
 		return info != nil && info.CompanyID == 1 && info.MarketType == "unlisted" && !info.IsListed
 	})).Return(nil)

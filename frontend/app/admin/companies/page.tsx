@@ -102,9 +102,10 @@ function missingAspects(c: Company): AspectKey[] {
   const profile = resolveIndustryFieldProfile(c.industry)
   const missing: AspectKey[] = []
   if (!c.info_fetched_at || !c.description || !c.website_url) missing.push('info')
+  const tech = (c.tech_stack ?? '').trim()
   if (
     profile.requireTechForPublish &&
-    (!c.tech_fetched_at || !c.tech_stack || c.tech_stack === '[]')
+    (!c.tech_fetched_at || !tech || tech === '[]' || tech === 'null' || tech === '{}')
   ) {
     missing.push('tech')
   }
@@ -1148,7 +1149,7 @@ export default function AdminCompaniesPage() {
                               variant="contained"
                               size="small"
                               color="secondary"
-                              onClick={() => handleFetchPrimary(company.id, true)}
+                              onClick={() => handleFetchPrimary(company.id, false)}
                               disabled={busy}
                               startIcon={fetching ? <CircularProgress size={14} color="inherit" /> : null}
                               disableElevation
@@ -1202,7 +1203,7 @@ export default function AdminCompaniesPage() {
       >
         <MenuItem
           disabled={busy}
-          onClick={() => menuAnchor && handleFetchPrimary(menuAnchor.company.id, true)}
+          onClick={() => menuAnchor && handleFetchPrimary(menuAnchor.company.id, false)}
         >
           <ListItemIcon>
             <RefreshIcon fontSize="small" />

@@ -3,7 +3,6 @@ package services
 import (
 	"Backend/internal/models"
 	"context"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -126,22 +125,28 @@ func TestMissingNeedsFromCompany(t *testing.T) {
 }
 
 func TestClampMissingBatchConcurrency(t *testing.T) {
-	if got := clampMissingBatchConcurrency(0); got != defaultMissingBatchConcurrency {
-		t.Fatalf("0 -> %d want %d", got, defaultMissingBatchConcurrency)
+	tests := []struct {
+		name string
+		in   int
+		want int
+	}{
+		{"未指定はデフォルト", 0, defaultMissingBatchConcurrency},
+		{"範囲内はそのまま", 3, 3},
+		{"上限でクランプ", 100, maxMissingBatchConcurrency},
+		{"負数はデフォルト", -1, defaultMissingBatchConcurrency},
 	}
-	if got := clampMissingBatchConcurrency(3); got != 3 {
-		t.Fatalf("3 -> %d", got)
-	}
-	if got := clampMissingBatchConcurrency(100); got != maxMissingBatchConcurrency {
-		t.Fatalf("100 -> %d want %d", got, maxMissingBatchConcurrency)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clampMissingBatchConcurrency(tt.in); got != tt.want {
+				t.Fatalf("%d -> %d want %d", tt.in, got, tt.want)
+			}
+		})
 	}
 }
 
 type missingBatchRepoStub struct {
 	warmRepoStub
 	companies []models.Company
-	inFlight  atomic.Int32
-	peak      atomic.Int32
 }
 
 func (s *missingBatchRepoStub) ListActiveMissingFetchCandidates(limit int, _ bool) ([]models.Company, error) {
@@ -152,15 +157,6 @@ func (s *missingBatchRepoStub) ListActiveMissingFetchCandidates(limit int, _ boo
 }
 
 func (s *missingBatchRepoStub) FindByID(id uint) (*models.Company, error) {
-	cur := s.inFlight.Add(1)
-	defer s.inFlight.Add(-1)
-	for {
-		prev := s.peak.Load()
-		if cur <= prev || s.peak.CompareAndSwap(prev, cur) {
-			break
-		}
-	}
-	time.Sleep(20 * time.Millisecond)
 	for i := range s.companies {
 		if s.companies[i].ID == id {
 			c := s.companies[i]

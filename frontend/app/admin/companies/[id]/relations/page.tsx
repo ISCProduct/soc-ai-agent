@@ -126,7 +126,7 @@ export default function AdminCompanyRelationsPage() {
   }
 
   const loadSavedRelations = () => {
-    fetch(`/api/admin/companies/${id}/fetch-relations`, {
+    fetch(`/api/admin/companies/${id}/fetch-relations?cache_only=true`, {
       method: 'POST',
       headers: authService.getAdminFetchHeaders(),
     })
@@ -215,6 +215,13 @@ export default function AdminCompanyRelationsPage() {
     setError('')
     setSuccess('')
     try {
+      const excludedCount = relations.filter((r) => !isClearOrganizationName(r.name || '')).length
+      const clearRelations = relations
+        .filter((r) => isClearOrganizationName(r.name || ''))
+        .map((r) => ({
+          ...r,
+          description: sanitizeRelationDescription(r.description || ''),
+        }))
       const res = await fetch(`/api/admin/companies/${id}/confirm-relations`, {
         method: 'POST',
         headers: {
@@ -222,12 +229,7 @@ export default function AdminCompanyRelationsPage() {
           ...authService.getAdminFetchHeaders(),
         },
         body: JSON.stringify({
-          relations: relations
-            .filter((r) => isClearOrganizationName(r.name || ''))
-            .map((r) => ({
-              ...r,
-              description: sanitizeRelationDescription(r.description || ''),
-            })),
+          relations: clearRelations,
           market_info: marketInfo,
           source: sourceType,
           model_used: lastModelUsed,
@@ -245,7 +247,11 @@ export default function AdminCompanyRelationsPage() {
       applyRelationsPayload(data)
       loadCompany()
       setGraphRefreshKey((k) => k + 1)
-      setSuccess(`内容を確定して保存しました（${data.saved_count ?? 0}件）。`)
+      const excludedNote =
+        excludedCount > 0
+          ? `（曖昧な社名 ${excludedCount} 件は保存対象外としました）`
+          : ''
+      setSuccess(`内容を確定して保存しました（${data.saved_count ?? 0}件）${excludedNote}。`)
       setPreviewPending(false)
     } catch {
       setError('確定保存中に通信エラーが発生しました。時間をおいて再度お試しください。')

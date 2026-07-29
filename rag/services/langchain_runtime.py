@@ -1,6 +1,7 @@
 """LangChain ランタイム（埋め込み・今後の Chat / Retriever 共通入口）。
 
 FastAPI エンドポイントはそのままに、LLM/埋め込み実装を LangChain へ寄せるための薄いファサード。
+再試行は外側（embed_texts の EMBED_MAX_RETRIES）に集約し、LangChain 側は max_retries=0。
 """
 from __future__ import annotations
 
@@ -8,6 +9,9 @@ import os
 from functools import lru_cache
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+
+# 外側リトライと二重にしない。タイムアウトはハング防止用。
+_DEFAULT_REQUEST_TIMEOUT_SEC = float(os.getenv("RAG_OPENAI_TIMEOUT_SEC", "60"))
 
 
 def embedding_model_name() -> str:
@@ -27,6 +31,8 @@ def get_embeddings(model: str | None = None) -> OpenAIEmbeddings:
     return OpenAIEmbeddings(
         model=model or embedding_model_name(),
         api_key=api_key,
+        max_retries=0,
+        request_timeout=_DEFAULT_REQUEST_TIMEOUT_SEC,
     )
 
 
@@ -39,4 +45,6 @@ def get_chat_model(model: str | None = None, temperature: float = 0.2) -> ChatOp
         model=model or chat_model_name(),
         api_key=api_key,
         temperature=temperature,
+        max_retries=0,
+        request_timeout=_DEFAULT_REQUEST_TIMEOUT_SEC,
     )

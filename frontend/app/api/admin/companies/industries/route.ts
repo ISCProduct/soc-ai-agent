@@ -1,25 +1,22 @@
-import { NextRequest, NextResponse } from 'next/server'
-
-const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
+import { NextRequest } from 'next/server'
+import {
+  adminProxyHeaders,
+  jsonFromProxyResult,
+  proxyAdminBackend,
+  proxyErrorResponse,
+} from '@/lib/admin-backend-proxy'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 30
 
 export async function GET(request: NextRequest) {
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/industries`, {
-    headers: {
-      'X-Admin-Email': request.headers.get('x-admin-email') || '',
-      'X-Admin-Token': request.headers.get('x-admin-token') || '',
-    },
-    cache: 'no-store',
-  })
-  const raw = await response.text()
-  let data: unknown = {}
-  if (raw) {
-    try {
-      data = JSON.parse(raw)
-    } catch {
-      data = response.ok ? { message: raw } : { error: raw }
-    }
+  try {
+    const result = await proxyAdminBackend('GET', '/api/admin/companies/industries', {
+      headers: adminProxyHeaders(request.headers),
+      timeoutMs: 15_000,
+    })
+    return jsonFromProxyResult(result)
+  } catch (err) {
+    return proxyErrorResponse(err)
   }
-  return NextResponse.json(data, { status: response.status })
 }

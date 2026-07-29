@@ -429,6 +429,7 @@ func (c *AdminCompanyController) WebSearchCompanyRelations(ctx echo.Context) err
 
 // FetchCompanyRelations POST /api/admin/companies/:id/fetch-relations
 // ?force=true を付けると DB キャッシュを無視して AI で再取得する。
+// ?cache_only=true を付けると DB の保存済みデータのみ返す（AI 再取得なし）。
 func (c *AdminCompanyController) FetchCompanyRelations(ctx echo.Context) error {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
 	if err != nil {
@@ -436,6 +437,14 @@ func (c *AdminCompanyController) FetchCompanyRelations(ctx echo.Context) error {
 	}
 	if c.relationsFetcher == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
+	}
+
+	if ctx.QueryParam("cache_only") == "true" {
+		result, err := c.relationsFetcher.LoadSaved(uint(id))
+		if err != nil {
+			return echoInternalError(err)
+		}
+		return ctx.JSON(http.StatusOK, result)
 	}
 
 	forceRefresh := ctx.QueryParam("force") == "true"

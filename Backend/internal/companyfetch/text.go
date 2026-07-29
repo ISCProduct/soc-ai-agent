@@ -64,7 +64,6 @@ func IsEmptyTechPayload(techStack string) bool {
 // infra / CI/CD / 開発手法だけ埋まっていても「技術取得済み」とはみなさない。
 // 業界別判定は HasTechDataForIndustry を使うこと。
 func HasTechData(techStack, infraStack, cicdTools, developmentStyle string) bool {
-	_, _, _ = infraStack, cicdTools, developmentStyle
 	return !IsEmptyTechPayload(techStack)
 }
 

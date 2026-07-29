@@ -386,39 +386,95 @@ func (s *GBizInfoService) updateBusinessRelations(company *models.Company, procu
 
 // upsertProcurementStyleRelation は調達・補助金の関係先として、はっきりした省庁・発注機関名のみを保存する。
 func (s *GBizInfoService) upsertProcurementStyleRelation(company *models.Company, agency, title, date, relationType string) error {
-	name := strings.TrimSpace(agency)
-	if company == nil || !companyfetch.IsClearOrganizationName(name) {
+	if company == nil {
 		return nil
 	}
-	if strings.EqualFold(name, company.Name) {
-		return nil
-	}
-	partnerCompany, err := s.companyRepo.FindByName(name)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
-	}
-	if partnerCompany == nil || errors.Is(err, gorm.ErrRecordNotFound) {
-		now := time.Now()
-		partnerCompany = &models.Company{
-			Name:            name,
-			SourceType:      "gbizinfo",
-			SourceFetchedAt: &now,
-			IsProvisional:   true,
-			DataStatus:      "draft",
+	for _, name := range splitClearAgencyNames(agency) {
+		if strings.EqualFold(name, company.Name) {
+			continue
 		}
-		if err := s.companyRepo.Create(partnerCompany); err != nil {
+		partnerCompany, err := s.findOrCreateProvisionalPartner(name)
+		if err != nil {
+			return err
+		}
+		if partnerCompany == nil {
+			continue
+		}
+		parts := make([]string, 0, 2)
+		if t := strings.TrimSpace(title); t != "" {
+			parts = append(parts, t)
+		}
+		if d := strings.TrimSpace(date); d != "" {
+			parts = append(parts, d)
+		}
+		description := strings.Join(parts, " / ")
+		if err := s.relationRepo.UpsertBusinessRelation(company.ID, partnerCompany.ID, relationType, description); err != nil {
 			return err
 		}
 	}
-	parts := make([]string, 0, 2)
-	if t := strings.TrimSpace(title); t != "" {
-		parts = append(parts, t)
+	return nil
+}
+
+// splitClearAgencyNames は「デジタル庁／厚労省」のような連結表記を分割し、明確な単一機関名だけ返す。
+func splitClearAgencyNames(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
 	}
-	if d := strings.TrimSpace(date); d != "" {
-		parts = append(parts, d)
+	seps := func(r rune) bool {
+		switch r {
+		case '/', '／', '、', ',', '，', ';', '；', '|', '｜':
+			return true
+		default:
+			return false
+		}
 	}
-	description := strings.Join(parts, " / ")
-	return s.relationRepo.UpsertBusinessRelation(company.ID, partnerCompany.ID, relationType, description)
+	parts := strings.FieldsFunc(raw, seps)
+	if len(parts) == 0 {
+		parts = []string{raw}
+	}
+	out := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, p := range parts {
+		name := strings.TrimSpace(p)
+		if !companyfetch.IsClearOrganizationName(name) {
+			continue
+		}
+		key := strings.ToLower(name)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
+func (s *GBizInfoService) findOrCreateProvisionalPartner(name string) (*models.Company, error) {
+	partnerCompany, err := s.companyRepo.FindByName(name)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	if partnerCompany != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return partnerCompany, nil
+	}
+	now := time.Now()
+	partnerCompany = &models.Company{
+		Name:            name,
+		SourceType:      "gbizinfo",
+		SourceFetchedAt: &now,
+		IsProvisional:   true,
+		DataStatus:      "draft",
+	}
+	if err := s.companyRepo.Create(partnerCompany); err != nil {
+		// 並列同期で同名作成が競合した場合は再取得を試みる
+		existing, findErr := s.companyRepo.FindByName(name)
+		if findErr == nil && existing != nil {
+			return existing, nil
+		}
+		return nil, err
+	}
+	return partnerCompany, nil
 }
 
 func parseJointSignatures(raw string) []string {

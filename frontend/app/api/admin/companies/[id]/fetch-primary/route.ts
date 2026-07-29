@@ -23,7 +23,8 @@ export async function POST(
   try {
     const result = await proxyAdminBackend('POST', `/api/admin/companies/${id}/fetch-primary${qs}`, {
       headers: adminProxyHeaders(request.headers),
-      timeoutMs: 300_000,
+      // maxDuration より短くし、タイムアウト時に整形エラーを返せるようにする
+      timeoutMs: 270_000,
     })
     return jsonFromProxyResult(result)
   } catch (err) {

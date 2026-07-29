@@ -19,7 +19,7 @@ export async function POST(
   try {
     const result = await proxyAdminBackend('POST', `/api/admin/companies/${id}/fetch-info${qs}`, {
       headers: adminProxyHeaders(request.headers),
-      timeoutMs: 180_000,
+      timeoutMs: 120_000,
     })
     return jsonFromProxyResult(result)
   } catch (err) {

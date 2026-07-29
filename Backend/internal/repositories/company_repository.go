@@ -65,7 +65,7 @@ func (r *CompanyRepository) ListActiveFiltered(limit, offset int, name, status, 
 	}
 	const (
 		infoReady = `(info_fetched_at IS NOT NULL AND COALESCE(description, '') <> '' AND COALESCE(website_url, '') <> '')`
-		techReady = `(tech_fetched_at IS NOT NULL AND COALESCE(tech_stack, '') <> '' AND tech_stack <> '[]')`
+		techReady = `(tech_fetched_at IS NOT NULL AND TRIM(COALESCE(tech_stack, '')) <> '' AND TRIM(COALESCE(tech_stack, '')) NOT IN ('[]', 'null', '{}'))`
 		relReady  = `(relations_fetched_at IS NOT NULL)`
 	)
 	techRequiredSQL, techRequiredArgs := companyfields.TechRequiredIndustrySQL("industry")

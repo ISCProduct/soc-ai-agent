@@ -51,6 +51,7 @@ function requestOnce(
       (res) => {
         const chunks: Buffer[] = []
         res.on('data', (chunk: Buffer) => chunks.push(chunk))
+        res.on('error', reject)
         res.on('end', () => {
           resolve({
             status: res.statusCode ?? 502,
@@ -71,7 +72,23 @@ function requestOnce(
   })
 }
 
-/** Backend への転送。再起動中の切断は1回だけリトライする。 */
+function isPreConnectTransientError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err
+      ? String((err as { code?: string }).code || '')
+      : ''
+  const msg = err.message.toLowerCase()
+  // 接続確立前の拒否のみ再試行（送信済み POST の二重実行を避ける）
+  return code === 'ECONNREFUSED' || msg.includes('econnrefused')
+}
+
+function isIdempotentMethod(method: string): boolean {
+  const m = method.toUpperCase()
+  return m === 'GET' || m === 'HEAD' || m === 'OPTIONS'
+}
+
+/** Backend への転送。再起動中の切断は安全な場合のみ1回リトライする。 */
 export async function proxyAdminBackend(
   method: string,
   path: string,
@@ -87,7 +104,10 @@ export async function proxyAdminBackend(
   try {
     return await requestOnce(method, url, headers, options.body, timeoutMs)
   } catch (err) {
-    if (!isTransientSocketError(err)) throw err
+    const canRetry =
+      isTransientSocketError(err) &&
+      (isIdempotentMethod(method) || isPreConnectTransientError(err))
+    if (!canRetry) throw err
     // air 再起動などで接続が切れた場合、少し待って再試行
     await new Promise((r) => setTimeout(r, 800))
     return requestOnce(method, url, headers, options.body, timeoutMs)

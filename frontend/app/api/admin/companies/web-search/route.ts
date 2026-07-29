@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     const result = await proxyAdminBackend('POST', '/api/admin/companies/web-search', {
       headers: adminProxyHeaders(request.headers),
       body,
-      timeoutMs: 180_000,
+      timeoutMs: 120_000,
     })
     return jsonFromProxyResult(result)
   } catch (err) {

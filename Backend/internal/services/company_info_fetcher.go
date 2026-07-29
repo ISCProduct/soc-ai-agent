@@ -128,8 +128,8 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 	// Search フォールバック時も SourceURL を明示更新し、旧スクレイプ URL の残存を防ぐ
 	company.SourceURL = result.SourceURL
 	company.SourceFetchedAt = &now
-	// 概要が無くても公式URL/所在地など手がかりがあれば確認済みとしてスタンプする。
-	// 完全に空の結果だけはスタンプせず再取得可能にする。
+	// 更新後の company（今回の取得結果＋既存の URL/所在地など）で判定する。
+	// 手がかりが残っていれば疎データでもスタンプし、TTL 内の無駄な再取得を避ける。
 	if companyfetch.HasBasicInfoFootprint(company.Description, company.WebsiteURL, company.Location) {
 		company.InfoFetchedAt = &now
 	}

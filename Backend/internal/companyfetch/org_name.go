@@ -57,10 +57,11 @@ func IsClearOrganizationName(name string) bool {
 	if utf8.RuneCountInString(core) < 2 {
 		return false
 	}
-	// 記号・数字だけの名前は除外
+	// 記号・数字だけの名前は除外（全角英数字も含める）
 	letters := 0
 	for _, r := range core {
 		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') ||
+			(r >= 0xff21 && r <= 0xff3a) || (r >= 0xff41 && r <= 0xff5a) || (r >= 0xff10 && r <= 0xff19) ||
 			(r >= 0x3040 && r <= 0x30ff) || (r >= 0x4e00 && r <= 0x9fff) || (r >= 0xff66 && r <= 0xff9d) {
 			letters++
 		}

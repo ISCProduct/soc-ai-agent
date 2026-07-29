@@ -12,6 +12,8 @@ func TestIsClearOrganizationName(t *testing.T) {
 	assert.True(t, IsClearOrganizationName("株式会社パートナーA"))
 	assert.True(t, IsClearOrganizationName("トヨタ自動車株式会社"))
 	assert.True(t, IsClearOrganizationName("東京都"))
+	assert.True(t, IsClearOrganizationName("ＮＥＣ"))
+	assert.True(t, IsClearOrganizationName("ＡＢＣ株式会社"))
 
 	assert.False(t, IsClearOrganizationName(""))
 	assert.False(t, IsClearOrganizationName("不明"))

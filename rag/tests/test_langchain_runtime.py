@@ -39,4 +39,19 @@ def test_langchain_runtime_get_embeddings_cached(monkeypatch):
         b = runtime.get_embeddings("text-embedding-3-small")
         assert a is b
         assert mock_cls.call_count == 1
+        kwargs = mock_cls.call_args.kwargs
+        assert kwargs["max_retries"] == 0
+        assert kwargs["request_timeout"] == runtime._DEFAULT_REQUEST_TIMEOUT_SEC
     runtime.get_embeddings.cache_clear()
+
+
+def test_langchain_runtime_get_chat_model_disables_inner_retries(monkeypatch):
+    from services import langchain_runtime as runtime
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    with patch("services.langchain_runtime.ChatOpenAI") as mock_cls:
+        mock_cls.return_value = MagicMock(name="chat")
+        runtime.get_chat_model("gpt-4o-mini")
+        kwargs = mock_cls.call_args.kwargs
+        assert kwargs["max_retries"] == 0
+        assert kwargs["request_timeout"] == runtime._DEFAULT_REQUEST_TIMEOUT_SEC

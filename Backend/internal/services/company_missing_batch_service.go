@@ -98,7 +98,7 @@ func clampMissingBatchConcurrency(n int) int {
 	return n
 }
 
-// Run は不足企業を最大 Limit 社まで並列処理する（force なし＝TTL内はスキップ）。
+// Run は不足企業を最大 Limit 社まで並列処理する（不足判定済みの項目は force=true で取得）。
 // 1社内の主3種は依存があるため直列、企業間は Concurrency 上限で並列化する。
 func (s *CompanyMissingBatchService) Run(ctx context.Context, opts MissingBatchOptions) (*MissingBatchResult, error) {
 	if opts.Limit <= 0 {
@@ -219,7 +219,7 @@ func (s *CompanyMissingBatchService) processItem(ctx context.Context, item *Miss
 				item.Error = "info: " + detail
 				inc(func() { result.Errors++ })
 			}
-		} else if company, err := s.repo.FindByID(item.CompanyID); err == nil &&
+		} else if company, err := s.repo.FindByID(item.CompanyID); err == nil && company != nil &&
 			companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
 			item.InfoStatus = "ok"
 			inc(func() { result.InfoOK++ })
@@ -255,7 +255,7 @@ func (s *CompanyMissingBatchService) processItem(ctx context.Context, item *Miss
 				}
 				inc(func() { result.Errors++ })
 			}
-		} else if company, err := s.repo.FindByID(item.CompanyID); err == nil &&
+		} else if company, err := s.repo.FindByID(item.CompanyID); err == nil && company != nil &&
 			companyfetch.HasTechDataForIndustry(company.Industry, company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle) {
 			item.TechStatus = "ok"
 			inc(func() { result.TechOK++ })

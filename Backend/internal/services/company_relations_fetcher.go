@@ -161,6 +161,15 @@ func (f *CompanyRelationsFetcher) FetchAndSave(ctx context.Context, companyID ui
 	return result, nil
 }
 
+// LoadSaved は DB に保存済みの関係・市場情報だけを返す（AI 再取得なし）。
+func (f *CompanyRelationsFetcher) LoadSaved(companyID uint) (*CompanyRelationsResult, error) {
+	company, err := f.companyRepo.FindByID(companyID)
+	if err != nil {
+		return nil, fmt.Errorf("company not found: %w", err)
+	}
+	return f.resultFromDB(company, companyfetch.SourceGBiz, "db", companyfetch.ConfidenceHigh)
+}
+
 // ConfirmAndSave はプレビュー済みの関係・市場情報を LLM 再実行なしで DB に確定保存する。
 func (f *CompanyRelationsFetcher) ConfirmAndSave(companyID uint, result *CompanyRelationsResult) (*CompanyRelationsResult, error) {
 	if result == nil {
@@ -192,7 +201,21 @@ func (f *CompanyRelationsFetcher) ConfirmAndSave(companyID uint, result *Company
 func (f *CompanyRelationsFetcher) Acquire(ctx context.Context, companyName, websiteURL string) (*CompanyRelationsResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	return f.acquireViaAISearch(ctx, companyName, websiteURL)
+	result, err := f.acquireViaAISearch(ctx, companyName, websiteURL)
+	if err != nil {
+		return nil, err
+	}
+	if result != nil && relationsNeedDescriptionEnrichment(result.Relations) {
+		if enriched, eerr := f.enrichTransactionDescriptions(ctx, companyName, websiteURL, result.Relations); eerr == nil && enriched != nil {
+			result = mergeRelationsResult(result.Relations, result.MarketInfo, enriched)
+			if enriched.ModelUsed != "" {
+				result.ModelUsed = result.ModelUsed + "+desc:" + enriched.ModelUsed
+			}
+			result.Source = companyfetch.SourceWebSearch
+			result.Confidence = companyfetch.ConfidenceMedium
+		}
+	}
+	return result, nil
 }
 
 func (f *CompanyRelationsFetcher) acquireForCompany(ctx context.Context, company *models.Company) (*CompanyRelationsResult, error) {
@@ -317,18 +340,7 @@ func (f *CompanyRelationsFetcher) acquireViaAISearch(ctx context.Context, compan
 	result.SourceURL = strings.TrimSpace(websiteURL)
 	result.ModelUsed = modelsUsed
 	result.Confidence = companyfetch.ConfidenceMedium
-
-	// プレビュー取得でも取引内容が薄い場合は追撃する
-	if relationsNeedDescriptionEnrichment(result.Relations) {
-		if enriched, eerr := f.enrichTransactionDescriptions(ctx, companyName, websiteURL, result.Relations); eerr == nil && enriched != nil {
-			result = mergeRelationsResult(result.Relations, result.MarketInfo, enriched)
-			if enriched.ModelUsed != "" {
-				result.ModelUsed = modelsUsed + "+desc:" + enriched.ModelUsed
-			}
-			result.Source = companyfetch.SourceWebSearch
-			result.Confidence = companyfetch.ConfidenceMedium
-		}
-	}
+	// 取引内容の追撃は acquireForCompany 側（既存関係マージ後）に集約し、二重 LLM を避ける。
 	return result, nil
 }
 

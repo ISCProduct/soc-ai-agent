@@ -15,11 +15,15 @@ export async function POST(
 ) {
   const { id } = await params
   const force = request.nextUrl.searchParams.get('force')
-  const qs = force === 'true' ? '?force=true' : ''
+  const cacheOnly = request.nextUrl.searchParams.get('cache_only')
+  const qs = new URLSearchParams()
+  if (force === 'true') qs.set('force', 'true')
+  if (cacheOnly === 'true') qs.set('cache_only', 'true')
+  const query = qs.toString() ? `?${qs.toString()}` : ''
   try {
-    const result = await proxyAdminBackend('POST', `/api/admin/companies/${id}/fetch-relations${qs}`, {
+    const result = await proxyAdminBackend('POST', `/api/admin/companies/${id}/fetch-relations${query}`, {
       headers: adminProxyHeaders(request.headers),
-      timeoutMs: 180_000,
+      timeoutMs: 120_000,
     })
     return jsonFromProxyResult(result)
   } catch (err) {

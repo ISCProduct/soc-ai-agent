@@ -162,14 +162,16 @@ func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxToke
 
 		if err == nil && len(resp.Choices) > 0 {
 			content := strings.TrimSpace(resp.Choices[0].Message.Content)
-			if cli.OnUsage != nil {
-				cli.OnUsage(model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+			if content != "" {
+				if cli.OnUsage != nil {
+					cli.OnUsage(model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+				}
+				log.Printf("[openai] web_search model=%s prompt_tokens=%d completion_tokens=%d",
+					model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+				return content, nil
 			}
-			log.Printf("[openai] web_search model=%s prompt_tokens=%d completion_tokens=%d",
-				model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
-			return content, nil
-		}
-		if err == nil {
+			lastErr = errors.New("empty response from web search model")
+		} else if err == nil {
 			lastErr = errors.New("no response from web search model")
 		} else {
 			lastErr = err

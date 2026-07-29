@@ -129,11 +129,13 @@ export default function CompanyRelationGraph({ companyId }: CompanyRelationGraph
 
   const graphNodes = graph?.nodes ?? []
   const businessRelations = graph?.business_relations ?? []
+  const hasCapitalGraph = graphNodes.length > 1
+  const hasBusinessRelations = businessRelations.length > 0
 
-  if (!graph || graphNodes.length <= 1) {
+  if (!graph || (!hasCapitalGraph && !hasBusinessRelations)) {
     return (
       <Typography variant="body2" color="text.secondary">
-        保存済みの資本関係データがありません。関係を確定保存すると相関図が表示されます。
+        保存済みの関係データがありません。関係を確定保存すると相関図・取引関係が表示されます。
       </Typography>
     )
   }
@@ -143,23 +145,30 @@ export default function CompanyRelationGraph({ companyId }: CompanyRelationGraph
       {graph.truncated && (
         <Alert severity="warning">関係の件数が多いため一部を省略して表示しています。</Alert>
       )}
-      <Box
-        sx={{
-          width: '100%',
-          height: { xs: 480, sm: 560, md: 'min(72vh, 720px)' },
-          minHeight: 420,
-          border: '1px solid',
-          borderColor: 'divider',
-          borderRadius: 1,
-          bgcolor: 'grey.50',
-        }}
-      >
-        <ReactFlow nodes={nodes} edges={edges} fitView minZoom={0.1} maxZoom={2} nodesDraggable nodesConnectable={false}>
-          <Background />
-          <Controls />
-        </ReactFlow>
-      </Box>
-      {businessRelations.length > 0 && (
+      {hasCapitalGraph && (
+        <Box
+          sx={{
+            width: '100%',
+            height: { xs: 480, sm: 560, md: 'min(72vh, 720px)' },
+            minHeight: 420,
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: 1,
+            bgcolor: 'grey.50',
+          }}
+        >
+          <ReactFlow nodes={nodes} edges={edges} fitView minZoom={0.1} maxZoom={2} nodesDraggable nodesConnectable={false}>
+            <Background />
+            <Controls />
+          </ReactFlow>
+        </Box>
+      )}
+      {!hasCapitalGraph && hasBusinessRelations && (
+        <Typography variant="body2" color="text.secondary">
+          資本関係データはありません。取引関係のみ表示しています。
+        </Typography>
+      )}
+      {hasBusinessRelations && (
         <Box>
           <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1 }}>
             取引関係
