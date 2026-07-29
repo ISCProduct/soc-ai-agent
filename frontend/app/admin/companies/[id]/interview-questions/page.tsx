@@ -164,8 +164,8 @@ export default function AdminInterviewQuestionsPage() {
       setSuccess(editingId ? '質問を更新しました' : '質問を追加しました')
       setDialogOpen(false)
       fetchQuestions()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setSaving(false)
     }
@@ -185,8 +185,8 @@ export default function AdminInterviewQuestionsPage() {
       setGeneratedQuestions(qs)
       setSelectedIndices(new Set(qs.map((_, i) => i)))
       setGenerateDialogOpen(true)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setGenerating(false)
     }
@@ -235,8 +235,8 @@ export default function AdminInterviewQuestionsPage() {
       setSuccess('質問を削除しました')
       setDeleteConfirmId(null)
       fetchQuestions()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
     }
   }
 
