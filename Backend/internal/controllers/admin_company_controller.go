@@ -91,10 +91,11 @@ func (c *AdminCompanyController) SetCompanySearchGuards(budget companyfetch.Sear
 
 // List GET /api/admin/companies
 func (c *AdminCompanyController) List(ctx echo.Context) error {
+	const maxListLimit = 200
 	limit := 50
 	offset := 0
 	if v, err := strconv.Atoi(ctx.QueryParam("limit")); err == nil && v > 0 {
-		limit = v
+		limit = min(v, maxListLimit)
 	}
 	if v, err := strconv.Atoi(ctx.QueryParam("offset")); err == nil && v >= 0 {
 		offset = v

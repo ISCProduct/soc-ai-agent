@@ -316,7 +316,7 @@ func main() {
 	adminVectorController := controllers.NewAdminVectorController(services.NewAdminVectorService())
 	profileRecalcService := services.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
 	profileRecalcController := controllers.NewAdminProfileRecalculationController(profileRecalcService)
-	companyEntryController := controllers.NewCompanyEntryController(companyRepo, graduateRepo)
+	companyEntryController := controllers.NewCompanyEntryController(db, companyRepo, graduateRepo)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := controllers.NewESRewriteController(aiClient)
 	scheduleRepo := repositories.NewScheduleRepository(db)
