@@ -86,8 +86,8 @@ func TestMissingNeedsFromCompany(t *testing.T) {
 		RelationsFetchedAt: &now,
 	}
 	info, _, _, _ = MissingNeedsFromCompany(emptyInfoDespiteStamp)
-	if info {
-		t.Fatal("fresh InfoFetchedAt should not need info even without description (confirmed sparse)")
+	if !info {
+		t.Fatal("fresh InfoFetchedAt without description/website should still need info (FE missingAspects)")
 	}
 
 	sparseFootprintStamped := &models.Company{
@@ -102,8 +102,8 @@ func TestMissingNeedsFromCompany(t *testing.T) {
 		RelationsFetchedAt: &now,
 	}
 	info, _, _, _ = MissingNeedsFromCompany(sparseFootprintStamped)
-	if info {
-		t.Fatal("stamped sparse basic info should not need refetch until TTL")
+	if !info {
+		t.Fatal("stamped sparse basic info (no description) should need refetch to match FE")
 	}
 
 	// infra / 開発手法のみでは技術取得済みとみなさない

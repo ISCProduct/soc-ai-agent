@@ -316,13 +316,14 @@ func (s *CompanyMissingBatchService) processItem(ctx context.Context, item *Miss
 }
 
 // MissingNeedsFromCompany は不足判定ヘルパ（基本情報・技術・ビジネス関係・求人）。
-// InfoFetchedAt / RelationsFetchedAt が TTL 内なら、公開情報限定の確認済みも含め再取得不要。
+// 基本情報は TTL 切れ、または概要+公式URLが揃っていない場合に不足（FE missingAspects と揃える）。
 // 技術は中身が空なら不足とみなす。関係の DB 実体欠落は Run() 側で HasStoredData により追加判定する。
 func MissingNeedsFromCompany(c *models.Company) (needInfo, needJobs, needTech, needRelations bool) {
 	if c == nil {
 		return false, false, false, false
 	}
-	needInfo = !companyfetch.IsFresh(c.InfoFetchedAt, companyfetch.TTLInfo)
+	needInfo = !companyfetch.IsFresh(c.InfoFetchedAt, companyfetch.TTLInfo) ||
+		!companyfetch.HasBasicInfo(c.Description, c.WebsiteURL)
 	needJobs = !companyfetch.IsFresh(c.JobsFetchedAt, companyfetch.TTLJobs)
 	needTech = companyfields.RequiresTech(c.Industry) &&
 		(!companyfetch.IsFresh(c.TechFetchedAt, companyfetch.TTLTech) ||

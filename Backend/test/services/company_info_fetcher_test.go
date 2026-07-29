@@ -67,7 +67,7 @@ func TestCompanyInfoFetcher_FetchAndSave_TTLCache(t *testing.T) {
 	repo.AssertNotCalled(t, "Update", mock.Anything)
 }
 
-func TestCompanyInfoFetcher_FetchAndSave_StampedSparseUsesTTL(t *testing.T) {
+func TestCompanyInfoFetcher_FetchAndSave_StampedSparseDoesNotSkipTTL(t *testing.T) {
 	now := time.Now()
 	repo := &mocks.CompanyRepositoryMock{}
 	repo.On("FindByID", uint(1)).Return(&models.Company{
@@ -76,14 +76,13 @@ func TestCompanyInfoFetcher_FetchAndSave_StampedSparseUsesTTL(t *testing.T) {
 		Description:   "",
 		WebsiteURL:    "https://example.com",
 		Location:      "東京都",
-		InfoFetchedAt: &now, // 公開情報限定でもスタンプ済みなら TTL スキップ
+		InfoFetchedAt: &now, // スタンプ済みでも概要が空なら TTL スキップしない
 	}, nil)
 
 	fetcher := services.NewCompanyInfoFetcher(repo, nil)
-	result, err := fetcher.FetchAndSave(context.Background(), 1, false)
-	require.NoError(t, err)
-	assert.True(t, result.FromCache)
-	assert.Equal(t, "ttl", result.SkipReason)
+	_, err := fetcher.FetchAndSave(context.Background(), 1, false)
+	// openai client なしで取得を試みるためエラーになる＝TTL だけで短絡していないことの証明
+	require.Error(t, err)
 	repo.AssertNotCalled(t, "Update", mock.Anything)
 }
 
