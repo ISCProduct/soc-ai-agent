@@ -202,20 +202,13 @@ func (s *CompanyMissingBatchService) processItem(ctx context.Context, item *Miss
 			inc(func() { result.Errors++ })
 		} else if res != nil && res.FromCache {
 			company, _ := s.repo.FindByID(item.CompanyID)
-			if company != nil && companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
-				item.InfoStatus = "skipped_cache"
-				inc(func() { result.Skipped++ })
-			} else if company != nil && companyfetch.HasBasicInfoFootprint(company.Description, company.WebsiteURL, company.Location) {
-				item.InfoStatus = "empty"
-				inc(func() { result.Skipped++ })
-			} else {
-				detail := "cache_without_data"
-				if res.SkipReason != "" {
-					detail = res.SkipReason
-				}
-				item.InfoStatus = "error"
-				item.Error = "info: " + detail
+			status, errMsg := classifyInfoCacheResult(res, company)
+			item.InfoStatus = status
+			if status == "error" {
+				item.Error = errMsg
 				inc(func() { result.Errors++ })
+			} else {
+				inc(func() { result.Skipped++ })
 			}
 		} else if company, err := s.repo.FindByID(item.CompanyID); err == nil && company != nil &&
 			companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
@@ -313,6 +306,25 @@ func (s *CompanyMissingBatchService) processItem(ctx context.Context, item *Miss
 			inc(func() { result.JobsOK++ })
 		}
 	}
+}
+
+// classifyInfoCacheResult は FetchAndSave の FromCache 結果をバッチ用ステータスへ変換する。
+// 予算超過は公開情報不足（empty）より先に判定し、警告経路を落とさない。
+func classifyInfoCacheResult(res *CompanyInfoResult, company *models.Company) (status, errMsg string) {
+	if res != nil && (res.BudgetExceeded || res.SkipReason == "budget") {
+		return "error", "info: budget"
+	}
+	if company != nil && companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
+		return "skipped_cache", ""
+	}
+	if company != nil && companyfetch.HasBasicInfoFootprint(company.Description, company.WebsiteURL, company.Location) {
+		return "empty", ""
+	}
+	detail := "cache_without_data"
+	if res != nil && res.SkipReason != "" {
+		detail = res.SkipReason
+	}
+	return "error", "info: " + detail
 }
 
 // MissingNeedsFromCompany は不足判定ヘルパ（基本情報・技術・ビジネス関係・求人）。
