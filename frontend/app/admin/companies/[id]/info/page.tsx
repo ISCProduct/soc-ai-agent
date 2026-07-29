@@ -17,6 +17,7 @@ import { infoFieldEnabled, resolveIndustryFieldProfile } from '@/lib/admin-compa
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { CompanyAspectTabs } from '@/components/admin/CompanyAspectTabs'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
+import { applyInfoPayload, WORK_STYLE_OPTIONS } from '@/lib/admin-company-form'
 
 export default function AdminCompanyInfoEditPage() {
   const params = useParams()
@@ -94,22 +95,11 @@ export default function AdminCompanyInfoEditPage() {
     loadCompany()
   }, [id])
 
-  const applyInfoPayload = (data: Record<string, unknown>) => {
-    if (typeof data.description === 'string' && data.description) setDescription(data.description)
-    if (typeof data.industry === 'string' && data.industry) setIndustry(data.industry)
-    if (typeof data.location === 'string' && data.location) setLocation(data.location)
-    if (typeof data.website_url === 'string' && data.website_url) setWebsiteUrl(data.website_url)
-    if (typeof data.founded_year === 'number' && data.founded_year) setFoundedYear(String(data.founded_year))
-    if (typeof data.employee_count === 'number' && data.employee_count) setEmployeeCount(String(data.employee_count))
-    if (typeof data.main_business === 'string' && data.main_business) setMainBusiness(data.main_business)
-    if (typeof data.culture === 'string' && data.culture) setCulture(data.culture)
-    if (typeof data.work_style === 'string' && data.work_style) setWorkStyle(data.work_style)
-    if (typeof data.tech_stack === 'string' && data.tech_stack) setTechStack(data.tech_stack)
-    if (typeof data.welfare_details === 'string' && data.welfare_details) setWelfareDetails(data.welfare_details)
-    if (typeof data.source === 'string' && data.source) setSourceType(data.source)
-    if (typeof data.source_url === 'string' && data.source_url) setSourceUrl(data.source_url)
-    if (typeof data.model_used === 'string' && data.model_used) setLastModelUsed(data.model_used)
-    if (typeof data.confidence === 'string' && data.confidence) setLastFetchConfidence(data.confidence)
+  const infoSetters = {
+    setDescription, setIndustry, setLocation, setWebsiteUrl,
+    setFoundedYear, setEmployeeCount, setMainBusiness, setCulture,
+    setWorkStyle, setTechStack, setWelfareDetails, setSourceType,
+    setSourceUrl, setLastModelUsed, setLastFetchConfidence,
   }
 
   const handleAiFetch = async () => {
@@ -134,7 +124,7 @@ export default function AdminCompanyInfoEditPage() {
         )
         return
       }
-      applyInfoPayload(data)
+      applyInfoPayload(data, infoSetters)
       setPreviewPending(true)
       setSuccess('プレビュー取得が完了しました。内容を確認・修正してから「確定して保存」してください。')
     } catch {
@@ -161,7 +151,7 @@ export default function AdminCompanyInfoEditPage() {
         )
         return
       }
-      applyInfoPayload(data)
+      applyInfoPayload(data, infoSetters)
       loadCompany()
       if (data.budget_exceeded) {
         setSuccess('月次 Search 予算超過のため、既存キャッシュのみ返却しました（新規 Search なし）。コスト画面を確認してください。')
@@ -214,7 +204,7 @@ export default function AdminCompanyInfoEditPage() {
         )
         return
       }
-      applyInfoPayload(data)
+      applyInfoPayload(data, infoSetters)
       loadCompany()
       setSuccess('プレビュー内容を確定して保存しました。')
     } catch {
@@ -420,9 +410,9 @@ export default function AdminCompanyInfoEditPage() {
             onChange={(e) => setWorkStyle(e.target.value)}
           >
             <MenuItem value="">未設定</MenuItem>
-            <MenuItem value="リモート">リモート</MenuItem>
-            <MenuItem value="ハイブリッド">ハイブリッド</MenuItem>
-            <MenuItem value="オフィス">オフィス</MenuItem>
+            {WORK_STYLE_OPTIONS.map((opt) => (
+              <MenuItem key={opt} value={opt}>{opt}</MenuItem>
+            ))}
           </TextField>
         )}
         {show('tech_stack') && (
