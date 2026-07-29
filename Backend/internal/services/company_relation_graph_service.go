@@ -2,6 +2,7 @@ package services
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/companyfetch"
 	"Backend/internal/models"
 	"fmt"
 )
@@ -62,7 +63,12 @@ func NewCompanyRelationGraphService(companyRepo repository.CompanyRepository, re
 // BuildGraph は companyID を起点に資本関係を BFS で辿ったグラフを返す。
 // 取引関係は起点企業から直接分のみ付加する（取引先の取引先までは辿らない）。
 func (s *CompanyRelationGraphService) BuildGraph(companyID uint) (*CompanyRelationGraph, error) {
-	graph := &CompanyRelationGraph{CompanyID: companyID}
+	graph := &CompanyRelationGraph{
+		CompanyID:         companyID,
+		Nodes:             []RelationGraphNode{},
+		CapitalEdges:      []RelationGraphCapitalEdge{},
+		BusinessRelations: []RelationGraphBusinessEntry{},
+	}
 	nodeSeen := map[uint]struct{}{}
 	capitalEdgeSeen := map[string]struct{}{}
 	businessSeen := map[string]struct{}{}
@@ -191,7 +197,7 @@ func (s *CompanyRelationGraphService) BuildGraph(companyID uint) (*CompanyRelati
 				CompanyID:    partnerID,
 				Name:         partner.Name,
 				RelationType: rel.RelationType,
-				Description:  rel.Description,
+				Description:  companyfetch.SanitizeRelationDescription(rel.Description),
 			})
 		}
 	}

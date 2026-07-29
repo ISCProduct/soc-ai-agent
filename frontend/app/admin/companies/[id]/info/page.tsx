@@ -1,12 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import Link from 'next/link'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import {
   Alert,
   Button,
-  Chip,
   CircularProgress,
   Divider,
   MenuItem,
@@ -15,9 +13,10 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { infoFieldEnabled, resolveIndustryFieldProfile } from '@/lib/admin-company-field-profile'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
+import { CompanyAspectTabs } from '@/components/admin/CompanyAspectTabs'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
-import { fetchCompanyPrimary, formatFetchPrimarySummary } from '@/lib/admin-company-fetch'
 
 export default function AdminCompanyInfoEditPage() {
   const params = useParams()
@@ -31,8 +30,8 @@ export default function AdminCompanyInfoEditPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
+  const [forceLoading, setForceLoading] = useState(false)
   const [confirmLoading, setConfirmLoading] = useState(false)
-  const [fetchAllLoading, setFetchAllLoading] = useState(false)
   const [previewPending, setPreviewPending] = useState(false)
 
   const [name, setName] = useState('')
@@ -127,55 +126,54 @@ export default function AdminCompanyInfoEditPage() {
         },
         body: JSON.stringify({ name, website_url: websiteUrl }),
       })
-      const data = await res.json()
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
       if (!res.ok) {
-        setError(data?.error || '企業情報取得に失敗しました')
+        setError(
+          (typeof data.error === 'string' && data.error) ||
+            '企業情報の取得に失敗しました。時間をおいて再度お試しください。',
+        )
         return
       }
       applyInfoPayload(data)
       setPreviewPending(true)
       setSuccess('プレビュー取得が完了しました。内容を確認・修正してから「確定して保存」してください。')
+    } catch {
+      setError('企業情報の取得中に通信エラーが発生しました。時間をおいて再度お試しください。')
     } finally {
       setAiLoading(false)
     }
   }
 
-  const handleFetchPrimary = async (force = false) => {
-    setFetchAllLoading(true)
+  const handleForceFetchAndSave = async () => {
+    setForceLoading(true)
     setError('')
     setSuccess('')
     try {
-      const { ok, status, data } = await fetchCompanyPrimary(
-        id,
-        authService.getAdminFetchHeaders(),
-        force,
-      )
-      if (!ok) {
-        setError(data?.error || `主3種の取得に失敗しました (${status})`)
+      const res = await fetch(`/api/admin/companies/${id}/fetch-info?force=true`, {
+        method: 'POST',
+        headers: authService.getAdminFetchHeaders(),
+      })
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
+      if (!res.ok) {
+        setError(
+          (typeof data.error === 'string' && data.error) ||
+            '強制再取得に失敗しました。時間をおいて再度お試しください。',
+        )
         return
       }
-      if (data.info) applyInfoPayload(data.info)
-      if (data.tech && Array.isArray(data.tech.tech_stack) && data.tech.tech_stack.length > 0) {
-        setTechStack(JSON.stringify(data.tech.tech_stack))
-      }
-      if (data.company) {
-        const company = data.company
-        if (typeof company.description === 'string') setDescription(company.description)
-        if (typeof company.website_url === 'string') setWebsiteUrl(company.website_url)
-        if (typeof company.tech_stack === 'string') setTechStack(company.tech_stack)
-        if (company.info_fetched_at) setInfoFetchedAt(String(company.info_fetched_at))
-        if (company.tech_fetched_at) setTechFetchedAt(String(company.tech_fetched_at))
-        if (company.relations_fetched_at) setRelationsFetchedAt(String(company.relations_fetched_at))
-      }
+      applyInfoPayload(data)
       loadCompany()
-      const summary = formatFetchPrimarySummary(data)
-      if (data.ok === false && Array.isArray(data.errors) && data.errors.length > 0) {
-        setError(`一部失敗: ${data.errors.join('; ')}`)
+      if (data.budget_exceeded) {
+        setSuccess('月次 Search 予算超過のため、既存キャッシュのみ返却しました（新規 Search なし）。コスト画面を確認してください。')
+      } else if (data.from_cache && data.skip_reason === 'ttl') {
+        setSuccess('TTL 内のためキャッシュを返却しました。再取得する場合は「強制再取得して保存」を使ってください。')
+      } else {
+        setSuccess('DBへ強制再取得・保存しました。')
       }
-      setSuccess(summary ? `主3種取得完了: ${summary}` : '主3種取得完了')
-      setPreviewPending(false)
+    } catch {
+      setError('強制再取得中に通信エラーが発生しました。時間をおいて再度お試しください。')
     } finally {
-      setFetchAllLoading(false)
+      setForceLoading(false)
     }
   }
 
@@ -208,14 +206,19 @@ export default function AdminCompanyInfoEditPage() {
           confidence: lastFetchConfidence,
         }),
       })
-      const data = await res.json()
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
       if (!res.ok) {
-        setError(data?.error || '確定保存に失敗しました')
+        setError(
+          (typeof data.error === 'string' && data.error) ||
+            '確定保存に失敗しました。時間をおいて再度お試しください。',
+        )
         return
       }
       applyInfoPayload(data)
       loadCompany()
-      setSuccess('プレビュー内容を確定して保存しました（取得メタデータも更新済み）。')
+      setSuccess('プレビュー内容を確定して保存しました。')
+    } catch {
+      setError('確定保存中に通信エラーが発生しました。時間をおいて再度お試しください。')
     } finally {
       setConfirmLoading(false)
     }
@@ -270,28 +273,38 @@ export default function AdminCompanyInfoEditPage() {
     return Number.isNaN(d.getTime()) ? v : d.toLocaleString('ja-JP')
   }
 
+  const profile = useMemo(() => resolveIndustryFieldProfile(industry), [industry])
+  const show = (key: Parameters<typeof infoFieldEnabled>[1]) => infoFieldEnabled(profile, key)
+
   return (
     <AdminFormContainer
-      title={`基本情報編集: ${name}`}
-      maxWidth={700}
+      title={`${name || '企業'}（会社概要）`}
+      description={`会社の基本情報を確認・編集します。業種「${profile.label}」に合わせて、関連する入力画面が変わります。`}
+      maxWidth={900}
       backLabel="企業一覧に戻る"
       backHref="/admin/companies"
     >
+      <CompanyAspectTabs companyId={id} active="info" industry={industry} />
       <ErrorAlert error={error} />
       {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
       {isLowTrust && (
         <Alert severity="warning" sx={{ mb: 2 }}>
-          出典がモデル知識由来、または信頼度が low です。公式サイトURLを設定して強制再取得してください。
+          出典の信頼度が低めです。公式サイトURLを設定してから、もう一度取得してください。
         </Alert>
       )}
       {previewPending && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          プレビュー未確定です。「確定して保存」で DB と取得メタデータ（info_fetched_at 等）を更新します。
+          まだ下書きの取得結果です。内容を確認してから「確定して保存」を押してください。
         </Alert>
       )}
       {dataStatus === 'published' && (
         <Alert severity="success" sx={{ mb: 2 }}>
-          この企業は公開中です。公開状態のままプレビュー取得・強制再取得で企業情報や公式URLを更新できます。
+          この企業は公開中です。公開したまま情報を更新できます。
+        </Alert>
+      )}
+      {!profile.techAspectEnabled && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          この業種では「技術情報」の登録は不要です。会社概要と関連企業を確認すれば公開準備ができます。
         </Alert>
       )}
 
@@ -300,30 +313,13 @@ export default function AdminCompanyInfoEditPage() {
 
         <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
           <Button
-            variant="contained"
-            color="secondary"
-            onClick={() => handleFetchPrimary(false)}
-            disabled={fetchAllLoading || aiLoading}
-            startIcon={fetchAllLoading ? <CircularProgress size={16} color="inherit" /> : null}
-          >
-            {fetchAllLoading ? '取得中...' : '主3種をまとめて取得'}
-          </Button>
-          <Button
             variant="outlined"
             color="secondary"
-            onClick={() => handleFetchPrimary(true)}
-            disabled={fetchAllLoading || aiLoading}
-          >
-            主3種を強制再取得
-          </Button>
-          <Button
-            variant="outlined"
-            size="small"
             onClick={handleAiFetch}
-            disabled={!name.trim() || aiLoading || fetchAllLoading}
+            disabled={!name.trim() || aiLoading || forceLoading}
             startIcon={aiLoading ? <CircularProgress size={14} color="inherit" /> : null}
           >
-            {aiLoading ? '取得中...' : '基本のみプレビュー'}
+            {aiLoading ? '取得中...' : 'プレビュー取得（未保存）'}
           </Button>
           <Button
             variant="contained"
@@ -333,101 +329,121 @@ export default function AdminCompanyInfoEditPage() {
             disabled={!previewPending || confirmLoading || !name.trim()}
             startIcon={confirmLoading ? <CircularProgress size={14} color="inherit" /> : null}
           >
-            {confirmLoading ? '確定中...' : 'プレビュー確定'}
+            {confirmLoading ? '確定中...' : '確定して保存'}
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={handleForceFetchAndSave}
+            disabled={forceLoading || aiLoading}
+            startIcon={forceLoading ? <CircularProgress size={14} color="inherit" /> : null}
+          >
+            {forceLoading ? '再取得中...' : '強制再取得して保存'}
           </Button>
         </Stack>
 
-        {fetchAllLoading && (
-          <Alert severity="info">主3種（基本・技術・ビジネス関係）を1つのAPIで取得中...</Alert>
-        )}
-
-        <Typography variant="caption" color="text.secondary">
-          「主3種をまとめて取得」で基本・技術・ビジネス関係を1回のAPIで取得します。詳細編集は
-          <Link href={`/admin/companies/${id}/edit`}> 技術編集 </Link>/
-          <Link href={`/admin/companies/${id}/relations`}> 関係編集 </Link>
-          へ。
-        </Typography>
-
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          <Chip size="small" label={`source: ${sourceType || '-'}`} />
-          <Chip size="small" label={`confidence: ${lastFetchConfidence || '-'}`} color={isLowTrust ? 'warning' : 'default'} />
-          <Chip size="small" label={`model: ${lastModelUsed || '-'}`} />
-        </Stack>
         <Typography variant="body2" color="text.secondary">
-          基本情報: {formatTs(infoFetchedAt)} / 技術: {formatTs(techFetchedAt)} / ビジネス関係: {formatTs(relationsFetchedAt)} / 求人: {formatTs(jobsFetchedAt)}
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          TTL: 基本情報 90日 / 技術 30日 / ビジネス関係 60日 / 求人 7日。詳細な関係・市場は「ビジネス関係」画面、技術配列は「技術情報」画面で確認できます。
+          最終取得: 会社概要 {formatTs(infoFetchedAt)}
+          {profile.techAspectEnabled ? ` ／ ${profile.techAspectLabel} ${formatTs(techFetchedAt)}` : ''}
+          {' ／ '}関連企業 {formatTs(relationsFetchedAt)}
         </Typography>
 
         <Divider />
 
-        <TextField
-          label="企業概要"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          multiline
-          minRows={2}
-        />
-        <TextField label="業種" value={industry} onChange={(e) => setIndustry(e.target.value)} />
-        <TextField label="所在地" value={location} onChange={(e) => setLocation(e.target.value)} />
-        <TextField label="公式サイトURL" value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} />
-        <Stack direction="row" spacing={2}>
+        {show('description') && (
           <TextField
-            label="設立年"
-            value={foundedYear}
-            onChange={(e) => setFoundedYear(e.target.value)}
-            type="number"
-            sx={{ flex: 1 }}
+            label="企業概要"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            multiline
+            minRows={2}
           />
+        )}
+        {show('industry') && (
           <TextField
-            label="従業員数"
-            value={employeeCount}
-            onChange={(e) => setEmployeeCount(e.target.value)}
-            type="number"
-            sx={{ flex: 1 }}
+            label="業種"
+            value={industry}
+            onChange={(e) => setIndustry(e.target.value)}
+            helperText={`判定中のプロファイル: ${profile.label}${profile.techAspectEnabled ? `（「${profile.techAspectLabel}」タブあり）` : '（技術タブなし）'}`}
           />
-        </Stack>
-        <TextField
-          label="主要事業内容"
-          value={mainBusiness}
-          onChange={(e) => setMainBusiness(e.target.value)}
-          multiline
-          minRows={2}
-        />
-        <TextField
-          label="企業文化"
-          value={culture}
-          onChange={(e) => setCulture(e.target.value)}
-          multiline
-          minRows={2}
-        />
-        <TextField
-          select
-          label="勤務スタイル"
-          value={workStyle}
-          onChange={(e) => setWorkStyle(e.target.value)}
-        >
-          <MenuItem value="">未設定</MenuItem>
-          <MenuItem value="リモート">リモート</MenuItem>
-          <MenuItem value="ハイブリッド">ハイブリッド</MenuItem>
-          <MenuItem value="オフィス">オフィス</MenuItem>
-        </TextField>
-        <TextField
-          label="技術スタック"
-          value={techStack}
-          onChange={(e) => setTechStack(e.target.value)}
-          placeholder="例: Go, TypeScript, React"
-          multiline
-          minRows={1}
-        />
-        <TextField
-          label="福利厚生"
-          value={welfareDetails}
-          onChange={(e) => setWelfareDetails(e.target.value)}
-          multiline
-          minRows={2}
-        />
+        )}
+        {show('location') && (
+          <TextField label="所在地" value={location} onChange={(e) => setLocation(e.target.value)} />
+        )}
+        {show('website_url') && (
+          <TextField label="公式サイトURL" value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} />
+        )}
+        {(show('founded_year') || show('employee_count')) && (
+          <Stack direction="row" spacing={2}>
+            {show('founded_year') && (
+              <TextField
+                label="設立年"
+                value={foundedYear}
+                onChange={(e) => setFoundedYear(e.target.value)}
+                type="number"
+                sx={{ flex: 1 }}
+              />
+            )}
+            {show('employee_count') && (
+              <TextField
+                label="従業員数"
+                value={employeeCount}
+                onChange={(e) => setEmployeeCount(e.target.value)}
+                type="number"
+                sx={{ flex: 1 }}
+              />
+            )}
+          </Stack>
+        )}
+        {show('main_business') && (
+          <TextField
+            label="主要事業内容"
+            value={mainBusiness}
+            onChange={(e) => setMainBusiness(e.target.value)}
+            multiline
+            minRows={2}
+          />
+        )}
+        {show('culture') && (
+          <TextField
+            label="企業文化"
+            value={culture}
+            onChange={(e) => setCulture(e.target.value)}
+            multiline
+            minRows={2}
+          />
+        )}
+        {show('work_style') && (
+          <TextField
+            select
+            label="勤務スタイル"
+            value={workStyle}
+            onChange={(e) => setWorkStyle(e.target.value)}
+          >
+            <MenuItem value="">未設定</MenuItem>
+            <MenuItem value="リモート">リモート</MenuItem>
+            <MenuItem value="ハイブリッド">ハイブリッド</MenuItem>
+            <MenuItem value="オフィス">オフィス</MenuItem>
+          </TextField>
+        )}
+        {show('tech_stack') && (
+          <TextField
+            label="技術スタック"
+            value={techStack}
+            onChange={(e) => setTechStack(e.target.value)}
+            placeholder="例: Go, TypeScript, React"
+            multiline
+            minRows={1}
+          />
+        )}
+        {show('welfare_details') && (
+          <TextField
+            label="福利厚生"
+            value={welfareDetails}
+            onChange={(e) => setWelfareDetails(e.target.value)}
+            multiline
+            minRows={2}
+          />
+        )}
 
         <Divider />
 

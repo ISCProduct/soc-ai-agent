@@ -49,8 +49,8 @@ export default function AdminDashboardPage() {
   return (
     <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
       <AdminPageHeader
-        title="管理者ダッシュボード"
-        description="管理者向けの操作メニューです。権限がない場合は表示されません。"
+        title="管理メニュー"
+        description="学生課の先生向けに、企業情報や求人・就職情報を管理できます。"
         backHref="/"
       />
 
@@ -59,10 +59,10 @@ export default function AdminDashboardPage() {
           <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                企業データ
+                企業情報
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                企業プロフィールの追加・更新、公開ステータスの管理を行います。
+                学生に見せる企業の登録・確認・公開を行います。
               </Typography>
               <Chip
                 label={companyCount === null ? '読み込み中' : `登録数 ${companyCount}`}
@@ -71,7 +71,7 @@ export default function AdminDashboardPage() {
               />
               <Divider sx={{ mb: 2 }} />
               <Button variant="contained" component={Link} href="/admin/companies">
-                企業管理へ
+                企業情報の管理へ
               </Button>
             </CardContent>
           </Card>

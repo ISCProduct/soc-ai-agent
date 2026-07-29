@@ -7,15 +7,13 @@ import {
 } from '@/lib/admin-backend-proxy'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 180
+export const maxDuration = 30
 
-export async function POST(request: NextRequest) {
-  const body = await request.text()
+export async function GET(request: NextRequest) {
   try {
-    const result = await proxyAdminBackend('POST', '/api/admin/companies/web-search', {
+    const result = await proxyAdminBackend('GET', '/api/admin/companies/industries', {
       headers: adminProxyHeaders(request.headers),
-      body,
-      timeoutMs: 120_000,
+      timeoutMs: 15_000,
     })
     return jsonFromProxyResult(result)
   } catch (err) {

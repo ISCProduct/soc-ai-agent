@@ -1,7 +1,8 @@
 """埋め込み・類似度・ドキュメント取得。
 
-patch("main.OpenAI") / patch("main.EMBED_MAX_RETRIES") / patch("main.embed_texts")
-との互換のため、実行時に main モジュール上のシンボルを参照する。
+埋め込みは LangChain（langchain-openai.OpenAIEmbeddings）経由。
+patch("main.embed_texts") / patch("main.EMBED_MAX_RETRIES") 互換のため、
+実行時に main モジュール上のシンボルも参照する。
 """
 from __future__ import annotations
 
@@ -13,6 +14,9 @@ from typing import List
 
 import tiktoken
 from fastapi import HTTPException
+from langchain_core.documents import Document
+
+from services.langchain_runtime import get_embeddings
 
 logger = logging.getLogger("main")
 
@@ -33,7 +37,7 @@ def _truncate_text(text: str, model: str) -> str:
             m.MAX_EMBED_TOKENS,
             model,
         )
-        return enc.decode(tokens[:m.MAX_EMBED_TOKENS])
+        return enc.decode(tokens[: m.MAX_EMBED_TOKENS])
     return text
 
 
@@ -45,16 +49,15 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is required")
 
     embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
-    client = m.OpenAI(api_key=api_key)
-
-    # トークン上限チェック
     texts = [_truncate_text(t, embedding_model) for t in texts]
+
+    # get_embeddings は api_key 欠如で ValueError。上で既にチェック済み。
+    embeddings = get_embeddings(embedding_model)
 
     last_err: Exception = RuntimeError("embed_texts: no attempts made")
     for attempt in range(1, m.EMBED_MAX_RETRIES + 1):
         try:
-            response = client.embeddings.create(model=embedding_model, input=texts)
-            return [item.embedding for item in response.data]
+            return embeddings.embed_documents(texts)
         except Exception as exc:
             last_err = exc
             if attempt < m.EMBED_MAX_RETRIES:
@@ -83,17 +86,20 @@ def cosine_similarity(a: List[float], b: List[float]) -> float:
 
 
 def retrieve_docs(docs: List[str], query: str) -> List[str]:
+    """クエリに近いドキュメント上位を返す（LangChain Document + 埋め込み類似度）。"""
     import main as m
 
     if not docs:
         return []
-    embeddings = m.embed_texts(docs + [query])
+
+    # Document 化して LC 上の単位を揃える（本文は page_content）
+    documents = [Document(page_content=doc) for doc in docs]
+    embeddings = m.embed_texts([d.page_content for d in documents] + [query])
     doc_embeddings = embeddings[:-1]
     query_embedding = embeddings[-1]
 
-    scored = []
-    for doc, emb in zip(docs, doc_embeddings):
-        scored.append((m.cosine_similarity(query_embedding, emb), doc))
+    scored: list[tuple[float, str]] = []
+    for doc, emb in zip(documents, doc_embeddings):
+        scored.append((m.cosine_similarity(query_embedding, emb), doc.page_content))
     scored.sort(key=lambda item: item[0], reverse=True)
-    top_docs = [doc for _, doc in scored[: min(5, len(scored))]]
-    return top_docs
+    return [doc for _, doc in scored[: min(5, len(scored))]]

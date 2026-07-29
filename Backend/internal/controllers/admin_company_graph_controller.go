@@ -259,7 +259,7 @@ func (c *AdminCompanyGraphController) syncRelationsFromNodes(nodes map[string]*s
 						continue
 					}
 				}
-				desc := companyfetch.NormalizeRelationDescription("", entry.relationType)
+				desc := companyfetch.SanitizeRelationDescription("")
 				var upsertErr error
 				if models.IsCapitalRelationType(entry.relationType) {
 					// 資本関係は parent/child で保存（資本図表示用）
@@ -446,7 +446,7 @@ func (c *AdminCompanyGraphController) EnrichRelations(ctx echo.Context) error {
 					continue
 				}
 			}
-			desc := companyfetch.NormalizeRelationDescription("", entry.relationType)
+			desc := companyfetch.SanitizeRelationDescription("")
 			var upsertErr error
 			if models.IsCapitalRelationType(entry.relationType) {
 				var ratio *float64

@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
+import { useParams } from 'next/navigation'
 import {
   Alert,
   Box,
@@ -14,20 +15,26 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
-import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
+import {
+  resolveIndustryFieldProfile,
+  type TechFieldKey,
+} from '@/lib/admin-company-field-profile'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { AdminPanel } from '@/components/admin/AdminPanel'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
+import { CompanyAspectTabs } from '@/components/admin/CompanyAspectTabs'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
-import { fetchCompanyPrimary, formatFetchPrimarySummary } from '@/lib/admin-company-fetch'
-
-const DEV_STYLES = ['スクラム', 'ウォーターフォール', 'カンバン', 'アジャイル', 'その他']
 
 function ChipEditor({
   label,
   values,
   onChange,
+  placeholder,
 }: {
   label: string
   values: string[]
   onChange: (v: string[]) => void
+  placeholder?: string
 }) {
   const [input, setInput] = useState('')
   const add = () => {
@@ -44,6 +51,11 @@ function ChipEditor({
         {values.map((v) => (
           <Chip key={v} label={v} onDelete={() => onChange(values.filter((x) => x !== v))} size="small" />
         ))}
+        {values.length === 0 && (
+          <Typography variant="body2" color="text.secondary">
+            まだ登録がありません
+          </Typography>
+        )}
       </Stack>
       <Stack direction="row" spacing={1}>
         <TextField
@@ -51,7 +63,7 @@ function ChipEditor({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && add()}
-          placeholder="入力してEnter"
+          placeholder={placeholder || '入力してEnter'}
           sx={{ flex: 1 }}
         />
         <Button variant="outlined" size="small" onClick={add}>
@@ -78,7 +90,6 @@ function asStringArray(v: unknown): string[] {
 
 export default function AdminCompanyEditPage() {
   const params = useParams()
-  const router = useRouter()
   const id = params.id as string
 
   useEffect(() => {
@@ -89,13 +100,16 @@ export default function AdminCompanyEditPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [fetchLoading, setFetchLoading] = useState(false)
-  const [primaryLoading, setPrimaryLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [name, setName] = useState('')
+  const [industry, setIndustry] = useState('')
   const [techStack, setTechStack] = useState<string[]>([])
   const [infraStack, setInfraStack] = useState<string[]>([])
   const [cicdTools, setCicdTools] = useState<string[]>([])
   const [devStyle, setDevStyle] = useState('')
   const [techFetchedAt, setTechFetchedAt] = useState<string | null>(null)
+
+  const profile = useMemo(() => resolveIndustryFieldProfile(industry), [industry])
 
   const loadCompany = () => {
     fetch(`/api/admin/companies/${id}`, {
@@ -104,6 +118,7 @@ export default function AdminCompanyEditPage() {
       .then((r) => r.json())
       .then((data) => {
         setName(data.name || '')
+        setIndustry(data.industry || '')
         setTechStack(parseJsonArray(data.tech_stack || ''))
         setInfraStack(parseJsonArray(data.infra_stack || ''))
         setCicdTools(parseJsonArray(data.cicd_tools || ''))
@@ -129,7 +144,7 @@ export default function AdminCompanyEditPage() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setError(data?.error || `技術スタック取得に失敗しました (${res.status})`)
+        setError(data?.error || `技術情報の取得に失敗しました (${res.status})`)
         return
       }
       const nextTech = asStringArray(data.tech_stack)
@@ -143,71 +158,44 @@ export default function AdminCompanyEditPage() {
       }
       loadCompany()
       if (nextTech.length === 0 && nextInfra.length === 0 && nextCicd.length === 0) {
-        setSuccess('取得は完了しましたが、公開情報から技術スタックを特定できませんでした。手入力するか強制再取得を試してください。')
+        setSuccess(
+          '取得は完了しましたが、公開情報から内容を特定できませんでした。手入力するか「最新の情報に更新」を試してください。',
+        )
       } else {
-        setSuccess(force ? '技術スタックを強制再取得して保存しました。' : '技術スタックを取得して保存しました。')
+        setSuccess(force ? '情報を更新して保存しました。' : '情報を取得して保存しました。')
       }
     } finally {
       setFetchLoading(false)
     }
   }
 
-  const handleFetchPrimary = async (force = false) => {
-    setPrimaryLoading(true)
-    setError('')
-    setSuccess('')
-    try {
-      const { ok, status, data } = await fetchCompanyPrimary(
-        id,
-        authService.getAdminFetchHeaders(),
-        force,
-      )
-      if (!ok) {
-        setError(data?.error || `主3種の取得に失敗しました (${status})`)
-        return
-      }
-      if (data.company && typeof data.company === 'object') {
-        const company = data.company as Record<string, unknown>
-        setTechStack(parseJsonArray(String(company.tech_stack || '')))
-        setInfraStack(parseJsonArray(String(company.infra_stack || '')))
-        setCicdTools(parseJsonArray(String(company.cicd_tools || '')))
-        setDevStyle(String(company.development_style || ''))
-        setTechFetchedAt(company.tech_fetched_at ? String(company.tech_fetched_at) : null)
-      } else {
-        loadCompany()
-      }
-      if (data.ok === false && Array.isArray(data.errors) && data.errors.length > 0) {
-        setError(`一部失敗: ${data.errors.join('; ')}`)
-      }
-      const summary = formatFetchPrimarySummary(data)
-      setSuccess(summary ? `主3種取得完了: ${summary}` : '主3種取得完了')
-    } finally {
-      setPrimaryLoading(false)
-    }
-  }
-
   const handleSave = async () => {
     setError('')
     setSuccess('')
-    const res = await fetch(`/api/admin/companies/${id}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        ...authService.getAdminFetchHeaders(),
-      },
-      body: JSON.stringify({
-        tech_stack: JSON.stringify(techStack),
-        infra_stack: JSON.stringify(infraStack),
-        cicd_tools: JSON.stringify(cicdTools),
-        development_style: devStyle,
-      }),
-    })
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}))
-      setError(d?.error || '保存に失敗しました')
-      return
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/admin/companies/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authService.getAdminFetchHeaders(),
+        },
+        body: JSON.stringify({
+          tech_stack: JSON.stringify(techStack),
+          infra_stack: JSON.stringify(infraStack),
+          cicd_tools: JSON.stringify(cicdTools),
+          development_style: devStyle,
+        }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        setError(d?.error || '保存に失敗しました')
+        return
+      }
+      setSuccess('保存しました')
+    } finally {
+      setSaving(false)
     }
-    setSuccess('保存しました')
   }
 
   const formatTs = (v: string | null) => {
@@ -216,106 +204,178 @@ export default function AdminCompanyEditPage() {
     return Number.isNaN(d.getTime()) ? v : d.toLocaleString('ja-JP')
   }
 
+  const busy = fetchLoading || saving
+  const chipValues: Record<Exclude<TechFieldKey, 'development_style'>, string[]> = {
+    tech_stack: techStack,
+    infra_stack: infraStack,
+    cicd_tools: cicdTools,
+  }
+  const chipSetters: Record<Exclude<TechFieldKey, 'development_style'>, (v: string[]) => void> = {
+    tech_stack: setTechStack,
+    infra_stack: setInfraStack,
+    cicd_tools: setCicdTools,
+  }
+
   return (
-    <AdminFormContainer
-      title={`技術スタック編集: ${name}`}
-      maxWidth={800}
-      backLabel="企業一覧に戻る"
-      backHref="/admin/companies"
-      onBack={() => router.back()}
-    >
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.full}>
+      <AdminPageHeader
+        title={`${name || '企業'}（${profile.techAspectLabel}）`}
+        description={
+          profile.techAspectEnabled
+            ? `${profile.label}向けの項目を表示しています。業種を変えると入力できる内容も変わります。`
+            : 'この業界ではこの画面の登録は不要です。'
+        }
+        backHref="/admin/companies"
+        backAriaLabel="企業一覧に戻る"
+        actions={
+          profile.techAspectEnabled ? (
+            <Button variant="contained" onClick={handleSave} disabled={busy} disableElevation>
+              {saving ? '保存中…' : '保存'}
+            </Button>
+          ) : null
+        }
+      />
+
+      <CompanyAspectTabs companyId={id} active="tech" industry={industry} />
       <ErrorAlert error={error} />
-      {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
-      <Alert severity="info" sx={{ mb: 2 }}>
-        「主3種をまとめて取得」で Backend が基本・技術・ビジネス関係を順に取得して DB 保存します。
-        必要ならこの画面の個別取得で技術だけ再取得できます（TTL 30日）。
-        最終取得: {formatTs(techFetchedAt)}
-      </Alert>
+      {success && (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>
+          {success}
+        </Alert>
+      )}
 
-      <Box sx={{ mb: 3, p: 2, bgcolor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Box>
-          <Typography sx={{ fontWeight: 700, fontSize: 14, color: '#0c4a6e' }}>面接カスタム質問</Typography>
-          <Typography sx={{ fontSize: 13, color: '#075985' }}>AI面接で使用する企業別の質問リストを管理できます</Typography>
-        </Box>
-        <Button
-          variant="outlined"
-          size="small"
-          onClick={() => router.push(`/admin/companies/${id}/interview-questions`)}
-          sx={{ borderColor: '#0284c7', color: '#0284c7', whiteSpace: 'nowrap' }}
-        >
-          質問を管理 →
-        </Button>
-      </Box>
+      {!profile.techAspectEnabled ? (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          {profile.techDisabledMessage || 'この業界では技術情報の登録は不要です。'}
+          <Box sx={{ mt: 1.5 }}>
+            <Button component={Link} href={`/admin/companies/${id}/info`} variant="outlined" size="small">
+              会社概要へ
+            </Button>
+          </Box>
+        </Alert>
+      ) : (
+        <>
+          <Box
+            sx={{
+              mb: 2,
+              p: 2,
+              border: '1px solid',
+              borderColor: 'divider',
+              borderRadius: '10px',
+              bgcolor: 'background.paper',
+            }}
+          >
+            <Stack
+              direction={{ xs: 'column', md: 'row' }}
+              spacing={2}
+              alignItems={{ md: 'center' }}
+              justifyContent="space-between"
+            >
+              <Box sx={{ minWidth: 0 }}>
+                <Typography fontWeight={700} sx={{ mb: 0.25 }}>
+                  情報の取得・保存
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  業種: {industry || '未設定'}（{profile.label}）／ 最終取得: {formatTs(techFetchedAt)}
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <Button
+                  variant="outlined"
+                  color="secondary"
+                  onClick={() => handleAiFetch(false)}
+                  disabled={busy}
+                  startIcon={fetchLoading ? <CircularProgress size={16} color="inherit" /> : null}
+                >
+                  {fetchLoading ? '取得中…' : `${profile.techAspectLabel}を取得`}
+                </Button>
+                <Button variant="outlined" onClick={() => handleAiFetch(true)} disabled={busy}>
+                  最新の情報に更新
+                </Button>
+                <Button variant="contained" onClick={handleSave} disabled={busy} disableElevation>
+                  {saving ? '保存中…' : '保存'}
+                </Button>
+              </Stack>
+            </Stack>
+          </Box>
 
-      <Stack spacing={3}>
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          <Button
-            variant="contained"
-            color="secondary"
-            onClick={() => handleFetchPrimary(false)}
-            disabled={fetchLoading || primaryLoading}
-            startIcon={primaryLoading ? <CircularProgress size={16} color="inherit" /> : null}
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.7fr) minmax(280px, 0.9fr)' },
+              gap: 2.5,
+              alignItems: 'start',
+            }}
           >
-            {primaryLoading ? '取得中...' : '主3種をまとめて取得'}
-          </Button>
-          <Button
-            variant="outlined"
-            color="secondary"
-            onClick={() => handleFetchPrimary(true)}
-            disabled={fetchLoading || primaryLoading}
-          >
-            主3種を強制再取得
-          </Button>
-          <Button
-            variant="contained"
-            color="secondary"
-            onClick={() => handleAiFetch(false)}
-            disabled={fetchLoading || primaryLoading}
-            startIcon={fetchLoading ? <CircularProgress size={16} color="inherit" /> : null}
-          >
-            {fetchLoading ? '取得中...' : 'AIで技術スタック取得'}
-          </Button>
-          <Button
-            variant="outlined"
-            onClick={() => handleAiFetch(true)}
-            disabled={fetchLoading || primaryLoading}
-          >
-            強制再取得
-          </Button>
-        </Stack>
+            <AdminPanel title={profile.techAspectLabel}>
+              <Box sx={{ px: 2.5, py: 2 }}>
+                <Stack spacing={3}>
+                  {profile.techFields.map((field) => {
+                    if (field.key === 'development_style') {
+                      return (
+                        <TextField
+                          key={field.key}
+                          select
+                          label={field.label}
+                          value={devStyle}
+                          onChange={(e) => setDevStyle(e.target.value)}
+                          size="small"
+                          fullWidth
+                        >
+                          <MenuItem value="">未設定</MenuItem>
+                          {(field.options || []).map((s) => (
+                            <MenuItem key={s} value={s}>
+                              {s}
+                            </MenuItem>
+                          ))}
+                        </TextField>
+                      )
+                    }
+                    return (
+                      <ChipEditor
+                        key={field.key}
+                        label={field.label}
+                        values={chipValues[field.key]}
+                        onChange={chipSetters[field.key]}
+                        placeholder={field.placeholder}
+                      />
+                    )
+                  })}
+                </Stack>
+              </Box>
+            </AdminPanel>
 
-        <ChipEditor
-          label="言語・フレームワーク（例: Go, React, TypeScript）"
-          values={techStack}
-          onChange={setTechStack}
-        />
-        <ChipEditor
-          label="インフラ（例: AWS, GCP, Azure, オンプレ）"
-          values={infraStack}
-          onChange={setInfraStack}
-        />
-        <ChipEditor
-          label="CI/CDツール（例: GitHub Actions, Jenkins, CircleCI）"
-          values={cicdTools}
-          onChange={setCicdTools}
-        />
-        <TextField
-          select
-          label="開発手法"
-          value={devStyle}
-          onChange={(e) => setDevStyle(e.target.value)}
-          size="small"
-        >
-          <MenuItem value="">未設定</MenuItem>
-          {DEV_STYLES.map((s) => (
-            <MenuItem key={s} value={s}>{s}</MenuItem>
-          ))}
-        </TextField>
+            <Stack spacing={2.5}>
+              <AdminPanel title="業種について">
+                <Box sx={{ px: 2.5, py: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                    表示項目は会社概要の「業種」に合わせて変わります。業種を変更する場合は会社概要で編集してください。
+                  </Typography>
+                  <Button component={Link} href={`/admin/companies/${id}/info`} variant="outlined" size="small">
+                    会社概要で業種を変更
+                  </Button>
+                </Box>
+              </AdminPanel>
 
-        <Button variant="contained" onClick={handleSave} sx={{ alignSelf: 'flex-end' }}>
-          保存
-        </Button>
-      </Stack>
-    </AdminFormContainer>
+              <AdminPanel title="面接カスタム質問">
+                <Box sx={{ px: 2.5, py: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                    AI面接で使う、この企業向けの質問リストを管理できます。
+                  </Typography>
+                  <Button
+                    component={Link}
+                    href={`/admin/companies/${id}/interview-questions`}
+                    variant="outlined"
+                    size="small"
+                  >
+                    質問を管理
+                  </Button>
+                </Box>
+              </AdminPanel>
+            </Stack>
+          </Box>
+        </>
+      )}
+    </PageContainer>
   )
 }

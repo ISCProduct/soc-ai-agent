@@ -22,8 +22,12 @@ type CompanyRepository interface {
 	FindAllActive(limit, offset int) ([]models.Company, error)
 	FindAllActiveNames(q string) ([]models.CompanyName, error)
 	CountActive() (int64, error)
-	// ListActiveFiltered は名前・公開ステータスで絞り込んだアクティブ企業一覧と総件数を返す。
-	ListActiveFiltered(limit, offset int, name, status string) ([]models.Company, int64, error)
+	// ListActiveFiltered は名前・公開ステータス・業界・情報充足で絞り込んだアクティブ企業一覧と総件数を返す。
+	// industry が "__unset__" のときは業界未設定のみ。readiness は "ready" / "missing" / ""。
+	// orderBy は "industry" のとき業界順、それ以外は id desc。
+	ListActiveFiltered(limit, offset int, name, status, industry, readiness, orderBy string) ([]models.Company, int64, error)
+	// ListActiveIndustries はアクティブ企業に付いている業界名の重複なし一覧を返す。
+	ListActiveIndustries() ([]string, error)
 	FindAllPublished(limit, offset int) ([]models.Company, error)
 	CountPublished() (int64, error)
 	FindByID(id uint) (*models.Company, error)
@@ -43,7 +47,8 @@ type CompanyRepository interface {
 	ListPublishedL1WarmCandidates(limit int, infoTTL time.Duration) ([]models.CompanyL1WarmRow, error)
 	CountL1Coverage(infoTTL time.Duration) (*models.L1CoverageStats, error)
 	// ListActiveMissingFetchCandidates は基本情報/求人/Tech/関係のいずれかが不足しているアクティブ企業を返す。
-	ListActiveMissingFetchCandidates(limit int) ([]models.Company, error)
+	// primaryOnly=true のときは求人条件を除外し、主3種（基本・技術・関係）のみで候補を取る。
+	ListActiveMissingFetchCandidates(limit int, primaryOnly bool) ([]models.Company, error)
 }
 
 // CompanyRelationRepository は企業間関係の永続化インターフェース。

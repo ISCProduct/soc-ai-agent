@@ -15,21 +15,20 @@ class TestEmbedTextsRetry429:
         class RateLimitError(Exception):
             pass
 
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.data = [MagicMock(embedding=[0.9])]
-
-        # 1回目は 429 相当の例外、2回目で成功
-        mock_client.embeddings.create.side_effect = [RateLimitError("429 Too Many Requests"), mock_response]
+        mock_emb = MagicMock()
+        mock_emb.embed_documents.side_effect = [
+            RateLimitError("429 Too Many Requests"),
+            [[0.9]],
+        ]
 
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
-            with patch("main.OpenAI", return_value=mock_client):
+            with patch("services.embed.get_embeddings", return_value=mock_emb):
                 with patch("main.EMBED_MAX_RETRIES", 2):
                     with patch("time.sleep"):
                         result = main.embed_texts(["hello"])
 
         assert result == [[0.9]]
-        assert mock_client.embeddings.create.call_count == 2
+        assert mock_emb.embed_documents.call_count == 2
 
 
 class TestCacheBehavior:

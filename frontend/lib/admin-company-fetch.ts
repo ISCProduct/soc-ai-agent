@@ -3,6 +3,8 @@
  * Backend 専用 API POST /api/admin/companies/:id/fetch-primary を呼ぶ。
  */
 
+import { resolveIndustryFieldProfile } from '@/lib/admin-company-field-profile'
+
 export type FetchPrimaryStep = {
   status?: string
   detail?: string
@@ -67,25 +69,124 @@ function parseFetchPrimaryResponse(value: unknown): FetchPrimaryResponse {
   }
 }
 
+function industryFromResponse(data: FetchPrimaryResponse, fallbackIndustry?: string | null): string {
+  const fromCompany = data.company?.industry
+  if (typeof fromCompany === 'string' && fromCompany.trim()) return fromCompany
+  return fallbackIndustry?.trim() || ''
+}
+
+function techLabelForIndustry(industry?: string | null): string {
+  return resolveIndustryFieldProfile(industry).techAspectLabel
+}
+
+function skipReasonLabel(detail?: string): string {
+  switch (detail) {
+    case 'ttl':
+    case 'ttl_fresh':
+      return '取得済み'
+    case 'budget':
+      return '予算超過'
+    case 'fetcher unavailable':
+      return '取得器なし'
+    case 'industry_not_applicable':
+      return '業種対象外'
+    case 'optional_empty':
+      return '任意・未特定'
+    case 'public_info_sparse':
+      return '公開情報限定'
+    case 'confirmed_unlisted':
+      return '非上場・関係なし'
+    default:
+      return detail || ''
+  }
+}
+
 function stepLabel(step: FetchPrimaryStep | undefined, label: string): string | null {
   if (!step?.status) return null
   if (step.status === 'fetched') {
+    if (step.detail === 'confirmed_unlisted') {
+      return `${label}確認済(非上場・関係なし)`
+    }
     return step.count != null ? `${label}取得(${step.count})` : `${label}取得`
   }
-  if (step.status === 'skipped') return `${label}スキップ`
-  if (step.status === 'empty') return `${label}取得ゼロ`
-  if (step.status === 'error') return `${label}失敗`
+  if (step.status === 'skipped') {
+    const reason = skipReasonLabel(step.detail)
+    return reason ? `${label}スキップ(${reason})` : `${label}スキップ`
+  }
+  if (step.status === 'empty') {
+    if (step.detail === 'public_info_sparse') {
+      return `${label}確認済(概要未特定)`
+    }
+    return `${label}取得ゼロ`
+  }
+  if (step.status === 'error') {
+    const reason =
+      step.detail === 'budget'
+        ? '予算超過'
+        : step.detail
+          ? `(${step.detail})`
+          : ''
+    return `${label}失敗${reason}`
+  }
   return `${label}${step.status}`
 }
 
-export function formatFetchPrimarySummary(data: FetchPrimaryResponse): string {
+/** 業界制約を踏まえ、警告対象の empty ステップか。 */
+export function isActionableEmptyStep(
+  step: FetchPrimaryStep | undefined,
+  aspect: 'info' | 'tech' | 'relations',
+  industry?: string | null,
+): boolean {
+  if (step?.status !== 'empty') return false
+  // 公開情報から概要が取れなかった確認済みは、手入力検討のソフト警告対象
+  if (aspect === 'info' && step.detail === 'public_info_sparse') return true
+  if (aspect === 'tech') {
+    return resolveIndustryFieldProfile(industry).requireTechForPublish
+  }
+  return true
+}
+
+export function hasActionableSoftEmpty(
+  data: FetchPrimaryResponse,
+  fallbackIndustry?: string | null,
+): boolean {
+  const industry = industryFromResponse(data, fallbackIndustry)
+  return (
+    isActionableEmptyStep(data.info_step, 'info', industry) ||
+    isActionableEmptyStep(data.tech_step, 'tech', industry) ||
+    isActionableEmptyStep(data.relations_step, 'relations', industry)
+  )
+}
+
+export function formatFetchPrimarySummary(
+  data: FetchPrimaryResponse,
+  fallbackIndustry?: string | null,
+): string {
+  const industry = industryFromResponse(data, fallbackIndustry)
+  const techLabel = techLabelForIndustry(industry)
   return [
     stepLabel(data.info_step, '基本'),
-    stepLabel(data.tech_step, '技術'),
+    stepLabel(data.tech_step, techLabel),
     stepLabel(data.relations_step, '関係'),
   ]
     .filter(Boolean)
     .join(' / ')
+}
+
+/** empty になった項目だけを短く列挙（警告文用）。 */
+export function formatFetchPrimaryEmptyAspects(
+  data: FetchPrimaryResponse,
+  fallbackIndustry?: string | null,
+): string {
+  const industry = industryFromResponse(data, fallbackIndustry)
+  const techLabel = techLabelForIndustry(industry)
+  const parts: string[] = []
+  if (isActionableEmptyStep(data.info_step, 'info', industry)) {
+    parts.push(data.info_step?.detail === 'public_info_sparse' ? '会社概要（公開情報から未特定）' : '会社概要')
+  }
+  if (isActionableEmptyStep(data.tech_step, 'tech', industry)) parts.push(techLabel)
+  if (isActionableEmptyStep(data.relations_step, 'relations', industry)) parts.push('関連企業')
+  return parts.join('・')
 }
 
 /** 主3種を1 API で取得する。 */

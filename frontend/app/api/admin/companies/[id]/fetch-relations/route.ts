@@ -1,8 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server'
-
-const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
+import { NextRequest } from 'next/server'
+import {
+  adminProxyHeaders,
+  jsonFromProxyResult,
+  proxyAdminBackend,
+  proxyErrorResponse,
+} from '@/lib/admin-backend-proxy'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 180
 
 export async function POST(
   request: NextRequest,
@@ -10,23 +15,18 @@ export async function POST(
 ) {
   const { id } = await params
   const force = request.nextUrl.searchParams.get('force')
-  const qs = force === 'true' ? '?force=true' : ''
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}/fetch-relations${qs}`, {
-    method: 'POST',
-    headers: {
-      'X-Admin-Email': request.headers.get('x-admin-email') || '',
-      'X-Admin-Token': request.headers.get('x-admin-token') || '',
-    },
-    signal: AbortSignal.timeout(120_000),
-  })
-  const raw = await response.text()
-  let data: Record<string, unknown> = {}
-  if (raw) {
-    try {
-      data = JSON.parse(raw)
-    } catch {
-      data = response.ok ? { message: raw } : { error: raw }
-    }
+  const cacheOnly = request.nextUrl.searchParams.get('cache_only')
+  const qs = new URLSearchParams()
+  if (force === 'true') qs.set('force', 'true')
+  if (cacheOnly === 'true') qs.set('cache_only', 'true')
+  const query = qs.toString() ? `?${qs.toString()}` : ''
+  try {
+    const result = await proxyAdminBackend('POST', `/api/admin/companies/${id}/fetch-relations${query}`, {
+      headers: adminProxyHeaders(request.headers),
+      timeoutMs: 120_000,
+    })
+    return jsonFromProxyResult(result)
+  } catch (err) {
+    return proxyErrorResponse(err)
   }
-  return NextResponse.json(data, { status: response.status })
 }

@@ -37,20 +37,48 @@ func TestHasTechData(t *testing.T) {
 	assert.False(t, HasTechData("", "", "", ""))
 	assert.False(t, HasTechData("[]", "", "", ""))
 	assert.True(t, HasTechData(`["Go"]`, "", "", ""))
-	assert.True(t, HasTechData("", `["AWS"]`, "", ""))
-	assert.True(t, HasTechData("", "", `["Actions"]`, ""))
-	assert.True(t, HasTechData("", "", "", "スクラム"))
+	// infra / CI/CD / 開発手法のみでは不足扱い（スキップしない）
+	assert.False(t, HasTechData("", `["AWS"]`, "", ""))
+	assert.False(t, HasTechData("", "", `["Actions"]`, ""))
+	assert.False(t, HasTechData("", "", "", "スクラム"))
+	assert.True(t, HasTechData(`["Go"]`, `["AWS"]`, `["Actions"]`, "スクラム"))
+}
+
+func TestHasTechDataForIndustry(t *testing.T) {
+	assert.True(t, HasTechDataForIndustry("金融・保険業", "", "", "", ""))
+	assert.True(t, HasTechDataForIndustry("", "", "", "", "")) // general: tech aspect off
+	assert.False(t, HasTechDataForIndustry("IT・ソフトウェア", "", `["AWS"]`, "", ""))
+	assert.True(t, HasTechDataForIndustry("IT・ソフトウェア", `["Go"]`, "", "", ""))
+	assert.True(t, HasTechDataForIndustry("製造業", "", `["国内工場"]`, "", ""))
+	assert.True(t, HasTechDataForIndustry("自動車製造", "", "", "", "セル生産"))
+	assert.False(t, HasTechDataForIndustry("製造業", "", "", "", ""))
+}
+
+func TestHasBasicInfoFootprint(t *testing.T) {
+	assert.True(t, HasBasicInfoFootprint("概要", "https://example.com", ""))
+	assert.True(t, HasBasicInfoFootprint("", "https://example.com", ""))
+	assert.True(t, HasBasicInfoFootprint("", "", "東京都"))
+	assert.False(t, HasBasicInfoFootprint("", "", ""))
 }
 
 func TestHasMeaningfulMarketInfo(t *testing.T) {
 	assert.False(t, HasMeaningfulMarketInfo(false, "", ""))
-	assert.False(t, HasMeaningfulMarketInfo(false, "unlisted", ""))
-	assert.False(t, HasMeaningfulMarketInfo(false, "UNLISTED", "  "))
+	assert.True(t, HasMeaningfulMarketInfo(false, "unlisted", ""))
+	assert.True(t, HasMeaningfulMarketInfo(false, "UNLISTED", "  "))
 	assert.True(t, HasMeaningfulMarketInfo(true, "unlisted", ""))
 	assert.True(t, HasMeaningfulMarketInfo(false, "prime", ""))
 	assert.True(t, HasMeaningfulMarketInfo(false, "standard", ""))
 	assert.True(t, HasMeaningfulMarketInfo(false, "growth", ""))
 	assert.True(t, HasMeaningfulMarketInfo(false, "unlisted", "4755"))
+}
+
+func TestIsConfirmedUnlisted(t *testing.T) {
+	assert.True(t, IsConfirmedUnlisted(false, "unlisted", ""))
+	assert.True(t, IsConfirmedUnlisted(false, "UNLISTED", "  "))
+	assert.False(t, IsConfirmedUnlisted(true, "unlisted", ""))
+	assert.False(t, IsConfirmedUnlisted(false, "unlisted", "4755"))
+	assert.False(t, IsConfirmedUnlisted(false, "prime", ""))
+	assert.False(t, IsConfirmedUnlisted(false, "", ""))
 }
 
 func TestTrimText(t *testing.T) {

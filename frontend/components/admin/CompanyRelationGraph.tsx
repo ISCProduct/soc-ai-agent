@@ -13,6 +13,7 @@ import { Alert, Box, Chip, CircularProgress, Stack, Typography } from '@mui/mate
 import { authService } from '@/lib/auth'
 import { marketColors, marketLabels, type MarketType } from '@/lib/company-data'
 import { layoutCapitalGraph, type CompanyRelationGraph as RelationGraphData } from '@/lib/relation-graph'
+import { sanitizeRelationDescription, displayRelationDescription, isRelationDescriptionFallback } from '@/lib/relation-labels'
 
 interface CompanyRelationGraphProps {
   companyId: number
@@ -55,10 +56,18 @@ export default function CompanyRelationGraph({ companyId }: CompanyRelationGraph
   }, [companyId])
 
   const { nodes, edges } = useMemo<{ nodes: Node[]; edges: Edge[] }>(() => {
-    if (!graph || graph.nodes.length === 0) return { nodes: [], edges: [] }
-    const positions = layoutCapitalGraph(graph)
+    if (!graph) return { nodes: [], edges: [] }
+    const graphNodes = graph.nodes ?? []
+    const capitalEdges = graph.capital_edges ?? []
+    if (graphNodes.length === 0) return { nodes: [], edges: [] }
 
-    const flowNodes: Node[] = graph.nodes.map((n) => {
+    const positions = layoutCapitalGraph({
+      company_id: graph.company_id,
+      nodes: graphNodes,
+      capital_edges: capitalEdges,
+    })
+
+    const flowNodes: Node[] = graphNodes.map((n) => {
       const pos = positions.get(n.id) ?? { x: 0, y: 0, level: 0, column: 0 }
       const marketType = (n.market_type || 'unlisted') as MarketType
       return {
@@ -89,7 +98,7 @@ export default function CompanyRelationGraph({ companyId }: CompanyRelationGraph
       }
     })
 
-    const flowEdges: Edge[] = graph.capital_edges.map((e, idx) => ({
+    const flowEdges: Edge[] = capitalEdges.map((e, idx) => ({
       id: `capital-${idx}`,
       source: String(e.parent_id),
       target: String(e.child_id),
@@ -118,10 +127,15 @@ export default function CompanyRelationGraph({ companyId }: CompanyRelationGraph
     return <Alert severity="error">{error}</Alert>
   }
 
-  if (!graph || graph.nodes.length <= 1) {
+  const graphNodes = graph?.nodes ?? []
+  const businessRelations = graph?.business_relations ?? []
+  const hasCapitalGraph = graphNodes.length > 1
+  const hasBusinessRelations = businessRelations.length > 0
+
+  if (!graph || (!hasCapitalGraph && !hasBusinessRelations)) {
     return (
       <Typography variant="body2" color="text.secondary">
-        保存済みの資本関係データがありません。関係を確定保存すると相関図が表示されます。
+        保存済みの関係データがありません。関係を確定保存すると相関図・取引関係が表示されます。
       </Typography>
     )
   }
@@ -131,23 +145,64 @@ export default function CompanyRelationGraph({ companyId }: CompanyRelationGraph
       {graph.truncated && (
         <Alert severity="warning">関係の件数が多いため一部を省略して表示しています。</Alert>
       )}
-      <Box sx={{ width: '100%', height: 420, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-        <ReactFlow nodes={nodes} edges={edges} fitView minZoom={0.1} maxZoom={2} nodesDraggable nodesConnectable={false}>
-          <Background />
-          <Controls />
-        </ReactFlow>
-      </Box>
-      {graph.business_relations.length > 0 && (
+      {hasCapitalGraph && (
+        <Box
+          sx={{
+            width: '100%',
+            height: { xs: 480, sm: 560, md: 'min(72vh, 720px)' },
+            minHeight: 420,
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: 1,
+            bgcolor: 'grey.50',
+          }}
+        >
+          <ReactFlow nodes={nodes} edges={edges} fitView minZoom={0.1} maxZoom={2} nodesDraggable nodesConnectable={false}>
+            <Background />
+            <Controls />
+          </ReactFlow>
+        </Box>
+      )}
+      {!hasCapitalGraph && hasBusinessRelations && (
+        <Typography variant="body2" color="text.secondary">
+          資本関係データはありません。取引関係のみ表示しています。
+        </Typography>
+      )}
+      {hasBusinessRelations && (
         <Box>
-          <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 0.5 }}>取引関係</Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            {graph.business_relations.map((rel) => (
-              <Chip
-                key={`${rel.company_id}-${rel.relation_type}`}
-                size="small"
-                label={`${rel.name}（${RELATION_TYPE_LABELS[rel.relation_type] || rel.relation_type}）`}
-              />
-            ))}
+          <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1 }}>
+            取引関係
+          </Typography>
+          <Stack spacing={1}>
+            {businessRelations.map((rel) => {
+              const detail = displayRelationDescription(rel.description || '', rel.relation_type)
+              const isFallback = isRelationDescriptionFallback(rel.description || '')
+              const typeLabel = RELATION_TYPE_LABELS[rel.relation_type] || rel.relation_type
+              return (
+                <Box
+                  key={`${rel.company_id}-${rel.relation_type}-${rel.name}`}
+                  sx={{
+                    px: 1.5,
+                    py: 1,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    borderRadius: '8px',
+                    bgcolor: 'background.paper',
+                  }}
+                >
+                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                    <Typography variant="body2" fontWeight={700}>
+                      {rel.name}
+                    </Typography>
+                    <Chip size="small" label={typeLabel} />
+                    {isFallback && <Chip size="small" variant="outlined" label="内容未特定" />}
+                  </Stack>
+                  <Typography variant="body2" color={isFallback ? 'text.secondary' : 'text.primary'} sx={{ mt: 0.5 }}>
+                    {detail}
+                  </Typography>
+                </Box>
+              )
+            })}
           </Stack>
         </Box>
       )}
