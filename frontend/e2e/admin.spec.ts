@@ -68,13 +68,13 @@ test.describe('管理者ダッシュボードフロー', () => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ generated_at: new Date().toISOString(), total_candidates: 0, categories: [] }),
+          body: JSON.stringify({ rows: [], top_correlated: [], low_correlated: [], total_samples: 0 }),
         })
       } else if (url.includes('/phase-metrics')) {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ generated_at: new Date().toISOString(), phases: [] }),
+          body: JSON.stringify({ phases: [], overall_pass_rate: 0 }),
         })
       } else {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) })
