@@ -43,33 +43,55 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
   // Lobby camera preview — 選択画面では getUserMedia しない（遷移直後の遅延を避ける）
   useEffect(() => {
     if (!shouldStartInterviewMediaPreview({ loading, status })) return
-    let stream: MediaStream | null = null
+    let cancelled = false
     const startPreview = async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia(MEDIA_CONSTRAINTS)
-        streamRef.current = stream
-        if (lobbyVideoRef.current) {
+        let stream = streamRef.current
+        const needsNew =
+          !stream || stream.getTracks().length === 0 || stream.getTracks().every((t) => t.readyState === 'ended')
+        if (needsNew) {
+          stream = await navigator.mediaDevices.getUserMedia(MEDIA_CONSTRAINTS)
+          if (cancelled) {
+            stream.getTracks().forEach((t) => t.stop())
+            return
+          }
+          streamRef.current = stream
+        }
+        if (lobbyVideoRef.current && stream) {
           lobbyVideoRef.current.srcObject = stream
           lobbyVideoRef.current.play().catch(() => undefined)
         }
-      } catch (err: any) {
-        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-          // カメラとマイクを個別に試してどちらがブロックされているか特定する
+        setLobbyPermissionError(null)
+      } catch (err: unknown) {
+        if (cancelled) return
+        const name = err instanceof DOMException ? err.name : err instanceof Error ? err.name : ''
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
           const blocked: string[] = []
-          await navigator.mediaDevices.getUserMedia({ video: true }).then(s => s.getTracks().forEach(t => t.stop())).catch(() => { blocked.push('カメラ') })
-          await navigator.mediaDevices.getUserMedia({ audio: true }).then(s => s.getTracks().forEach(t => t.stop())).catch(() => { blocked.push('マイク') })
+          await navigator.mediaDevices
+            .getUserMedia({ video: true })
+            .then((s) => s.getTracks().forEach((t) => t.stop()))
+            .catch(() => {
+              blocked.push('カメラ')
+            })
+          await navigator.mediaDevices
+            .getUserMedia({ audio: true })
+            .then((s) => s.getTracks().forEach((t) => t.stop()))
+            .catch(() => {
+              blocked.push('マイク')
+            })
           const target = blocked.length > 0 ? blocked.join('と') : 'マイクとカメラ'
           setLobbyPermissionError(`${target}へのアクセスが拒否されました。`)
-        } else if (err.name === 'NotFoundError') {
+        } else if (name === 'NotFoundError') {
           setLobbyPermissionError('マイクまたはカメラが見つかりません。デバイスを確認してください。')
         } else {
           setLobbyPermissionError('カメラの起動に失敗しました。')
         }
       }
     }
-    startPreview()
+    void startPreview()
     return () => {
-      // stream is kept in streamRef for reuse during interview
+      cancelled = true
+      // stream は面接中再利用のため streamRef に残す
     }
   }, [loading, status])
 
@@ -81,14 +103,63 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
     }
   }, [status])
 
+  const classifyMediaError = async (err: unknown): Promise<string> => {
+    const name = err instanceof DOMException ? err.name : err instanceof Error ? err.name : ''
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+      const blocked: string[] = []
+      await navigator.mediaDevices
+        .getUserMedia({ video: true })
+        .then((s) => s.getTracks().forEach((t) => t.stop()))
+        .catch(() => {
+          blocked.push('カメラ')
+        })
+      await navigator.mediaDevices
+        .getUserMedia({ audio: true })
+        .then((s) => s.getTracks().forEach((t) => t.stop()))
+        .catch(() => {
+          blocked.push('マイク')
+        })
+      const target = blocked.length > 0 ? blocked.join('と') : 'マイクとカメラ'
+      return `${target}へのアクセスが拒否されました。`
+    }
+    if (name === 'NotFoundError') {
+      return 'マイクまたはカメラが見つかりません。デバイスを確認してください。'
+    }
+    return 'カメラの起動に失敗しました。'
+  }
+
+  /** ページリロードせず getUserMedia を再実行する（会社選択状態を維持）。 */
+  const retryLobbyPreview = async () => {
+    setLobbyPermissionError(null)
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop())
+      streamRef.current = null
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(MEDIA_CONSTRAINTS)
+      streamRef.current = stream
+      // エラー UI 解除後に video がマウントされるのを待つ
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      })
+      if (lobbyVideoRef.current) {
+        lobbyVideoRef.current.srcObject = stream
+        await lobbyVideoRef.current.play().catch(() => undefined)
+      }
+    } catch (err: unknown) {
+      setLobbyPermissionError(await classifyMediaError(err))
+    }
+  }
+
   const ensureStream = async (): Promise<MediaStream> => {
     let stream = streamRef.current
-    if (!stream) {
+    if (!stream || stream.getTracks().every((t) => t.readyState === 'ended')) {
       try {
         stream = await navigator.mediaDevices.getUserMedia(MEDIA_CONSTRAINTS)
-      } catch (err: any) {
-        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') throw new Error('NotAllowedError')
-        if (err.name === 'NotFoundError') throw new Error('NotFoundError')
+      } catch (err: unknown) {
+        const name = err instanceof DOMException ? err.name : err instanceof Error ? err.name : ''
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') throw new Error('NotAllowedError')
+        if (name === 'NotFoundError') throw new Error('NotFoundError')
         throw err
       }
       streamRef.current = stream
@@ -168,6 +239,7 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
     stopStream,
     startVideoRecording,
     stopAndCollectVideoBlob,
+    retryLobbyPreview,
   }
 }
 
