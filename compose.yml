@@ -120,8 +120,7 @@ services:
       context: ./tools/company-graph
       dockerfile: Dockerfile
     container_name: soc-ai-company-graph
-    profiles:
-      - company-graph
+    restart: unless-stopped
     ports:
       - "${COMPANY_GRAPH_PORT:-9100}:9100"
     environment:
@@ -130,14 +129,13 @@ services:
     networks:
       - soc-ai-network
 
-  # Resume review RAG（profile=rag 必須。make rag-up 推奨）
+  # Resume review RAG
   rag-review:
     build:
       context: ./rag
       dockerfile: Dockerfile
     container_name: soc-ai-rag-review
-    profiles:
-      - rag
+    restart: unless-stopped
     ports:
       - "${RAG_REVIEW_PORT:-9000}:9000"
     env_file:
@@ -163,8 +161,7 @@ services:
   chroma:
     image: chromadb/chroma:0.6.3
     container_name: soc-ai-chroma
-    profiles:
-      - rag
+    restart: unless-stopped
     ports:
       - "${CHROMA_HOST_PORT:-8000}:8000"
     volumes:

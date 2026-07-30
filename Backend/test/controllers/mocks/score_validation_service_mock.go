@@ -61,6 +61,14 @@ func (m *ScoreValidationServiceMock) ListExperiments() ([]string, error) {
 	return nil, args.Error(1)
 }
 
+func (m *ScoreValidationServiceMock) ListAllVariants() ([]models.QuestionVariant, error) {
+	args := m.Called()
+	if v := args.Get(0); v != nil {
+		return v.([]models.QuestionVariant), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
 func (m *ScoreValidationServiceMock) CreateVariant(experimentName, variantName, description string, trafficRatio float64) (*models.QuestionVariant, error) {
 	args := m.Called(experimentName, variantName, description, trafficRatio)
 	if v := args.Get(0); v != nil {

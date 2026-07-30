@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import {
   Alert,
   Box,
@@ -76,7 +76,6 @@ const EMPTY_FORM: QuestionForm = {
 
 export default function AdminInterviewQuestionsPage() {
   const params = useParams()
-  const router = useRouter()
   const id = params.id as string
 
   useEffect(() => {
@@ -165,8 +164,8 @@ export default function AdminInterviewQuestionsPage() {
       setSuccess(editingId ? '質問を更新しました' : '質問を追加しました')
       setDialogOpen(false)
       fetchQuestions()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setSaving(false)
     }
@@ -186,8 +185,8 @@ export default function AdminInterviewQuestionsPage() {
       setGeneratedQuestions(qs)
       setSelectedIndices(new Set(qs.map((_, i) => i)))
       setGenerateDialogOpen(true)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setGenerating(false)
     }
@@ -236,8 +235,8 @@ export default function AdminInterviewQuestionsPage() {
       setSuccess('質問を削除しました')
       setDeleteConfirmId(null)
       fetchQuestions()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -245,8 +244,8 @@ export default function AdminInterviewQuestionsPage() {
     <AdminFormContainer
       title={`面接質問管理: ${companyName}`}
       maxWidth={960}
-      backLabel="← 戻る"
-      onBack={() => router.back()}
+      backHref="/admin/companies"
+      backLabel="企業一覧に戻る"
     >
       <ErrorAlert error={error} />
       {success && (

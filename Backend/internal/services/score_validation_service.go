@@ -194,6 +194,11 @@ func (s *ScoreValidationService) ListExperiments() ([]string, error) {
 	return s.repo.ListAllExperiments()
 }
 
+// ListAllVariants 全実験・全バリアントの詳細一覧を返す（管理画面の一覧表示用）
+func (s *ScoreValidationService) ListAllVariants() ([]models.QuestionVariant, error) {
+	return s.repo.ListAllVariants()
+}
+
 // ── スコアキャリブレーション ──────────────────────────────────────────────────
 
 // CalibrationResult キャリブレーション実行結果

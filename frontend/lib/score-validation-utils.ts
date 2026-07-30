@@ -17,3 +17,9 @@ export function correlationColor(r: number): string {
 export function formatPercent(v: number): string {
   return `${(v * 100).toFixed(1)}%`
 }
+
+// バックエンドが 0-100 のパーセント値として返すフィールド（pass_rate, avg_completion 等）用。
+// formatPercent は 0-1 の比率（traffic_ratio 等）専用なので使い分けること。
+export function formatRate(v: number): string {
+  return `${v.toFixed(1)}%`
+}

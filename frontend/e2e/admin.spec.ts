@@ -43,13 +43,13 @@ test.describe('管理者ダッシュボードフロー', () => {
   test('管理者ダッシュボードが表示される', async ({ page }) => {
     await page.goto('/admin')
     await page.waitForLoadState('networkidle')
-    await expect(page.getByText('管理者ダッシュボード')).toBeVisible({ timeout: 8000 })
+    await expect(page.getByText('管理メニュー')).toBeVisible({ timeout: 8000 })
   })
 
   test('管理者ダッシュボードにメニューカードが表示される', async ({ page }) => {
     await page.goto('/admin')
     await page.waitForLoadState('networkidle')
-    await expect(page.getByRole('heading', { name: '企業データ' })).toBeVisible({ timeout: 8000 })
+    await expect(page.getByRole('heading', { name: '企業情報' })).toBeVisible({ timeout: 8000 })
     await expect(page.getByRole('heading', { name: 'スコアダッシュボード' })).toBeVisible({ timeout: 8000 })
     await expect(page.getByRole('heading', { name: 'スコア精度検証' })).toBeVisible({ timeout: 8000 })
   })
@@ -68,13 +68,13 @@ test.describe('管理者ダッシュボードフロー', () => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ generated_at: new Date().toISOString(), total_candidates: 0, categories: [] }),
+          body: JSON.stringify({ rows: [], top_correlated: [], low_correlated: [], total_samples: 0 }),
         })
       } else if (url.includes('/phase-metrics')) {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ generated_at: new Date().toISOString(), phases: [] }),
+          body: JSON.stringify({ phases: [], overall_pass_rate: 0 }),
         })
       } else {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) })

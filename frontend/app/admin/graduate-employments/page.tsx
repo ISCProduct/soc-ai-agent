@@ -5,16 +5,13 @@ import Link from 'next/link'
 import {
   Box,
   Button,
-  Card,
-  CardContent,
-  Divider,
-  IconButton,
   Stack,
   Typography,
 } from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService } from '@/lib/auth'
-import { PageContainer } from '@/components/admin/PageContainer'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { AdminListCard } from '@/components/admin/AdminListCard'
 
 type GraduateEmployment = {
@@ -51,36 +48,34 @@ export default function AdminGraduateEmploymentsPage() {
   }, [])
 
   return (
-    <PageContainer maxWidth={1000}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-        <Stack direction="row" alignItems="center" spacing={1}>
-          <IconButton component={Link} href="/admin"><ArrowBackIcon /></IconButton>
-          <Typography variant="h4" fontWeight="bold">
-            卒業生の就職情報管理
-          </Typography>
-        </Stack>
-        <Stack direction="row" spacing={1}>
-          <Button variant="outlined" size="small" component={Link} href="/admin/companies">
-            企業管理
-          </Button>
-          <Button variant="outlined" size="small" component={Link} href="/admin/job-positions">
-            求人管理
-          </Button>
-          <Button variant="contained" size="small" component={Link} href="/admin/graduate-employments/new">
-            + 新規登録
-          </Button>
-        </Stack>
-      </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        卒業生の就職先情報を確認・編集します。
-      </Typography>
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
+      <AdminPageHeader
+        title="卒業生の就職情報管理"
+        description="卒業生の就職先情報を確認・編集します。"
+        backHref="/admin"
+        actions={
+          <>
+            <Button variant="outlined" size="small" component={Link} href="/admin/companies">
+              企業管理
+            </Button>
+            <Button variant="outlined" size="small" component={Link} href="/admin/job-positions">
+              求人管理
+            </Button>
+            <Button
+              variant="contained"
+              size="small"
+              component={Link}
+              href="/admin/graduate-employments/new"
+              disableElevation
+            >
+              + 新規登録
+            </Button>
+          </>
+        }
+      />
 
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            就職情報一覧
-          </Typography>
-          <Divider sx={{ mb: 2 }} />
+      <AdminPanel title="就職情報一覧">
+        <AdminPanelBody>
           <Stack spacing={1}>
             {graduateEntries.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
@@ -117,8 +112,8 @@ export default function AdminGraduateEmploymentsPage() {
               ))
             )}
           </Stack>
-        </CardContent>
-      </Card>
+        </AdminPanelBody>
+      </AdminPanel>
     </PageContainer>
   )
 }

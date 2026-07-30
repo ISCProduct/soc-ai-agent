@@ -69,9 +69,11 @@ func buildCORSMiddleware() func(http.Handler) http.Handler {
 			w.Header().Add("Vary", "Origin")
 			if isAllowedOrigin {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
+				// credentials: 'include' 付きのフロント直叩き（Googleカレンダー OAuth など）に必要
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID, X-User-Token, X-Admin-Email, X-Admin-Token")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-User-ID, X-User-Token, X-Admin-Email, X-Admin-Token")
 
 			if r.Method == "OPTIONS" {
 				if origin != "" && !isAllowedOrigin {
@@ -223,6 +225,9 @@ func main() {
 	infoFetcher := services.NewCompanyInfoFetcher(companyRepo, aiClient, gbizInfoService)
 	infoFetcher.SetSearchBudget(companySearchBudget)
 	infoFetcher.SetSearchFlight(companySearchFlight)
+	relationsFetcher := services.NewCompanyRelationsFetcher(companyRepo, companyRelationRepo, aiClient, gbizInfoService)
+	relationsFetcher.SetSearchBudget(companySearchBudget)
+	relationsFetcher.SetSearchFlight(companySearchFlight)
 	jobFetcher := services.NewJobFetchService(companyRepo, aiClient)
 	jobFetcher.SetSearchBudget(companySearchBudget)
 	jobFetcher.SetSearchFlight(companySearchFlight)
@@ -267,6 +272,7 @@ func main() {
 	resumeService.SetCompanyRepo(companyRepo)
 	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
+	adminCompanyController.SetRelationsFetcher(relationsFetcher)
 	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
 	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
 	adminAuditController := controllers.NewAdminAuditController(auditLogService)
@@ -278,6 +284,7 @@ func main() {
 		Threshold: config.CompanyGraphThreshold(),
 	}
 	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService, aiClient)
+	adminCompanyGraphController.SetRelationsFetcher(relationsFetcher)
 	resumeController := controllers.NewResumeController(resumeService)
 
 	// S3 upload service for interview videos (optional — skipped if env vars are not set)
@@ -306,10 +313,10 @@ func main() {
 	adminInterviewController.SetUserAccessGuard(userDeletionService)
 	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminCostsController := controllers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
-	adminVectorController := controllers.NewAdminVectorController()
+	adminVectorController := controllers.NewAdminVectorController(services.NewAdminVectorService())
 	profileRecalcService := services.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
 	profileRecalcController := controllers.NewAdminProfileRecalculationController(profileRecalcService)
-	companyEntryController := controllers.NewCompanyEntryController(companyRepo, graduateRepo)
+	companyEntryController := controllers.NewCompanyEntryController(db, companyRepo, graduateRepo)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := controllers.NewESRewriteController(aiClient)
 	scheduleRepo := repositories.NewScheduleRepository(db)

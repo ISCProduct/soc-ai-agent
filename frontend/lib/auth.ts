@@ -50,6 +50,30 @@ function migrateAuthValue(key: string): string | null {
   return null
 }
 
+// middleware と同じマージン（期限2分前に同期・リフレッシュする）
+const USER_TOKEN_REFRESH_MARGIN_SECONDS = 120
+
+function persistUserToken(token: string) {
+  getSessionStorage()?.setItem(AUTH_USER_TOKEN_KEY, token)
+  getLocalStorage()?.setItem(AUTH_USER_TOKEN_KEY, token)
+}
+
+/** JWT の exp を検証なしで読み、期限切れ（または間もなく期限切れ）か判定する */
+function userTokenNeedsRefresh(token: string): boolean {
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return true
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
+    const decoded: unknown = JSON.parse(atob(padded))
+    const exp = (decoded as { exp?: unknown }).exp
+    if (typeof exp !== 'number') return true
+    return exp - Date.now() / 1000 < USER_TOKEN_REFRESH_MARGIN_SECONDS
+  } catch {
+    return true
+  }
+}
+
 export interface User {
   user_id: number
   email: string
@@ -299,6 +323,32 @@ export const authService = {
     return {
       'X-User-Token': token || '',
     }
+  },
+
+  /**
+   * httpOnly Cookie（+ middleware 自動リフレッシュ）から有効な user_token を取得し、
+   * sessionStorage / localStorage へ同期する。
+   * Backend 直叩き（面接など）はストレージの JWT を使うため、参加前に呼ぶ。
+   */
+  async ensureFreshUserToken(): Promise<void> {
+    const current = this.getStoredUserToken()
+    if (current && !userTokenNeedsRefresh(current)) {
+      return
+    }
+
+    const res = await fetch('/api/auth/session', {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'same-origin',
+    })
+    if (!res.ok) {
+      throw new Error('Unauthorized: ログインの有効期限が切れました。再ログインしてください。')
+    }
+    const data: { user_token?: string } = await res.json()
+    if (!data.user_token) {
+      throw new Error('Unauthorized: ログインの有効期限が切れました。再ログインしてください。')
+    }
+    persistUserToken(data.user_token)
   },
 
   // 管理者APIリクエスト用のヘッダーを返す（X-Admin-Email + X-Admin-Token）

@@ -11,10 +11,21 @@ import ReactFlow, {
     useEdgesState,
     MarkerType,
     EdgeTypes,
+    type NodeMouseHandler,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Card, CardContent } from '@/components/ui/card';
-import { Box, Typography, ToggleButtonGroup, ToggleButton, Chip, Select, MenuItem, FormControl, InputLabel } from '@mui/material';
+import {
+    Box,
+    Typography,
+    ToggleButtonGroup,
+    ToggleButton,
+    Chip,
+    Select,
+    MenuItem,
+    FormControl,
+    InputLabel,
+    Button,
+} from '@mui/material';
 import {
     fetchCompanyRelations,
     fetchCompanyMarketInfo,
@@ -24,20 +35,19 @@ import {
     type CompanyMarketInfo,
     type MarketType,
 } from '@/lib/company-data';
+import { formatRelationLabel } from '@/lib/relation-labels';
+import { getCompanyIdFromNode, parseCompanyId } from '@/lib/correlation-diagram-navigation';
+import CorrelationCompanyDetailPanel, {
+    CORRELATION_DETAIL_PANEL_WIDTH,
+} from '@/components/CorrelationCompanyDetailPanel';
 
 type DiagramType = 'capital' | 'business';
 
 const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, label }: any) => {
     const edgePath = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
-
-    // ラベルの位置を計算（中点）
     const labelX = (sourceX + targetX) / 2;
     const labelY = (sourceY + targetY) / 2;
-
-    // エッジの角度を計算
     const angle = Math.atan2(targetY - sourceY, targetX - sourceX) * (180 / Math.PI);
-
-    // テキストが逆さまにならないように調整（-90度〜90度の範囲に収める）
     const adjustedAngle = angle > 90 || angle < -90 ? angle + 180 : angle;
 
     return (
@@ -63,7 +73,6 @@ const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, 
                     dominantBaseline="middle"
                     transform={`rotate(${adjustedAngle}, ${labelX}, ${labelY})`}
                 >
-                    {/* 白い縁取り（背景） */}
                     <tspan
                         x={labelX}
                         dy="0"
@@ -77,14 +86,7 @@ const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, 
                     >
                         {label}
                     </tspan>
-                    {/* メインテキスト */}
-                    <tspan
-                        x={labelX}
-                        dy="0"
-                        style={{
-                            fill: '#333',
-                        }}
-                    >
+                    <tspan x={labelX} dy="0" style={{ fill: '#333' }}>
                         {label}
                     </tspan>
                 </text>
@@ -104,10 +106,12 @@ interface CorrelationDiagramProps {
 export default function CorrelationDiagram({ initialCompanyId = null }: CorrelationDiagramProps) {
     const [diagramType, setDiagramType] = useState<DiagramType>('capital');
     const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(initialCompanyId);
+    const [detailCompanyId, setDetailCompanyId] = useState<number | null>(null);
     const [relations, setRelations] = useState<CapitalRelation[]>([]);
     const [marketInfo, setMarketInfo] = useState<CompanyMarketInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
+    const [reloadToken, setReloadToken] = useState(0);
 
     useEffect(() => {
         async function loadData() {
@@ -116,7 +120,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
             try {
                 const [relationsData, marketData] = await Promise.all([
                     fetchCompanyRelations(),
-                    fetchCompanyMarketInfo()
+                    fetchCompanyMarketInfo(),
                 ]);
                 setRelations(relationsData);
                 setMarketInfo(marketData);
@@ -129,11 +133,11 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
             }
         }
         void loadData();
-    }, []);
+    }, [reloadToken]);
 
     const uniqueCompanies = useMemo(() => {
-        const companyMap = new Map();
-        relations.forEach(rel => {
+        const companyMap = new Map<number, string>();
+        relations.forEach((rel) => {
             if (rel.parent) companyMap.set(rel.parent.id, rel.parent.name);
             if (rel.child) companyMap.set(rel.child.id, rel.child.name);
             if (rel.from) companyMap.set(rel.from.id, rel.from.name);
@@ -143,7 +147,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
     }, [relations]);
 
     const getMarketType = useCallback((compId: number): MarketType => {
-        const info = marketInfo.find(m => m.company_id === compId);
+        const info = marketInfo.find((m) => m.company_id === compId);
         return info?.market_type || 'unlisted';
     }, [marketInfo]);
 
@@ -161,7 +165,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
         if (!focusCompanyId) {
             const limitedRelations = relations.slice(0, 100);
             const companyIds = new Set<number>();
-            limitedRelations.forEach(rel => {
+            limitedRelations.forEach((rel) => {
                 if (type === 'capital') {
                     if (rel.parent_id) companyIds.add(rel.parent_id);
                     if (rel.child_id) companyIds.add(rel.child_id);
@@ -173,7 +177,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
 
             const nodes: Node[] = [];
             const ids = Array.from(companyIds);
-            const cols = Math.ceil(Math.sqrt(ids.length));
+            const cols = Math.ceil(Math.sqrt(ids.length)) || 1;
 
             ids.forEach((id, idx) => {
                 const row = Math.floor(idx / cols);
@@ -185,6 +189,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                     type: 'default',
                     position: { x: col * 300, y: row * 180 },
                     data: {
+                        companyId: id,
                         label: (
                             <Box sx={{ textAlign: 'center', p: 1, minWidth: '140px' }}>
                                 <Typography
@@ -198,9 +203,8 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                                     }}
                                 >
                                     {getCompanyName(id).length > 20
-                                        ? getCompanyName(id).substring(0, 20) + '...'
-                                        : getCompanyName(id)
-                                    }
+                                        ? `${getCompanyName(id).substring(0, 20)}...`
+                                        : getCompanyName(id)}
                                 </Typography>
                                 <Chip
                                     label={marketLabels[marketType]}
@@ -223,6 +227,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                         padding: '8px',
                         minWidth: '160px',
                         boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                        cursor: 'pointer',
                     },
                 });
             });
@@ -232,7 +237,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
 
         const relatedIds = new Set([focusCompanyId]);
 
-        relations.forEach(rel => {
+        relations.forEach((rel) => {
             if (type === 'capital' && rel.relation_type.startsWith('capital')) {
                 if (rel.parent_id === focusCompanyId || rel.child_id === focusCompanyId) {
                     if (rel.parent_id) relatedIds.add(rel.parent_id);
@@ -261,6 +266,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                     y: 400 + radius * Math.sin(idx * angle),
                 },
                 data: {
+                    companyId: compId,
                     label: (
                         <Box sx={{ textAlign: 'center', p: 1.5, minWidth: '140px' }}>
                             <Typography
@@ -291,11 +297,16 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                 },
                 style: {
                     background: isFocusCompany ? '#FFF3CD' : '#fff',
-                    border: `${isFocusCompany ? 3 : 2}px solid ${isFocusCompany ? '#FFA726' : marketColors[marketType]}`,
+                    border: `${isFocusCompany ? 3 : 2}px solid ${
+                        isFocusCompany ? '#FFA726' : marketColors[marketType]
+                    }`,
                     borderRadius: '8px',
                     padding: isFocusCompany ? '10px' : '8px',
                     minWidth: isFocusCompany ? '180px' : '160px',
-                    boxShadow: isFocusCompany ? '0 4px 12px rgba(255,167,38,0.3)' : '0 2px 8px rgba(0,0,0,0.1)',
+                    boxShadow: isFocusCompany
+                        ? '0 4px 12px rgba(255,167,38,0.3)'
+                        : '0 2px 8px rgba(0,0,0,0.1)',
+                    cursor: 'pointer',
                 },
             });
         });
@@ -335,7 +346,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                     source: String(rel.from_id),
                     target: String(rel.to_id),
                     type: 'custom',
-                    label: rel.description || rel.relation_type,
+                    label: formatRelationLabel(rel.description, rel.relation_type),
                     animated: true,
                     style: {
                         stroke: '#2196F3',
@@ -366,14 +377,55 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
     const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(nodes);
     const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState(edges);
 
-    useMemo(() => {
+    useEffect(() => {
         setFlowNodes(nodes);
         setFlowEdges(edges);
     }, [nodes, edges, setFlowNodes, setFlowEdges]);
 
+    // 詳細選択のハイライトだけ更新し、ドラッグ済みの位置は保持する
+    useEffect(() => {
+        setFlowNodes((current) =>
+            current.map((node) => {
+                const id = getCompanyIdFromNode(node);
+                const isDetail = detailCompanyId !== null && id === detailCompanyId;
+                const isFocus = selectedCompanyId !== null && id === selectedCompanyId;
+                const marketType = id !== null ? getMarketType(id) : ('unlisted' as MarketType);
+                const prev = node.style ?? {};
+                return {
+                    ...node,
+                    style: {
+                        ...prev,
+                        background: isFocus ? '#FFF3CD' : isDetail ? '#E3F2FD' : '#fff',
+                        border: `${isFocus || isDetail ? 3 : 2}px solid ${
+                            isFocus ? '#FFA726' : isDetail ? '#1976D2' : marketColors[marketType]
+                        }`,
+                    },
+                };
+            })
+        );
+    }, [detailCompanyId, selectedCompanyId, getMarketType, setFlowNodes]);
+
+    const handleNodeClick: NodeMouseHandler = useCallback((_event, node) => {
+        const companyId = getCompanyIdFromNode(node);
+        if (companyId === null) return;
+        setDetailCompanyId(companyId);
+    }, []);
+
+    const handleOpenSelectedCompanyDetail = useCallback(() => {
+        const companyId = parseCompanyId(selectedCompanyId);
+        if (companyId === null) return;
+        setDetailCompanyId(companyId);
+    }, [selectedCompanyId]);
+
+    const handleCloseDetailPanel = useCallback(() => {
+        setDetailCompanyId(null);
+    }, []);
+
+    const canOpenSelectedCompanyDetail = parseCompanyId(selectedCompanyId) !== null;
+
     if (loading) {
         return (
-            <Box sx={{ width: '100%', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Typography>読み込み中...</Typography>
             </Box>
         );
@@ -381,7 +433,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
 
     if (loadError) {
         return (
-            <Box sx={{ width: '100%', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', px: 2 }}>
                 <Typography color="error">{loadError}</Typography>
             </Box>
         );
@@ -389,33 +441,45 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
 
     if (relations.length === 0) {
         return (
-            <Box sx={{ width: '100%', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Typography color="text.secondary">
+            <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', px: 2 }}>
+                <Typography color="text.secondary" align="center">
                     企業関係データがありません。管理画面から企業情報の取得・関連付けを行ってください。
                 </Typography>
             </Box>
         );
     }
 
+    const showDetailPanel = detailCompanyId !== null;
+
+
     return (
-        <Box sx={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column' }}>
-            <Box sx={{ p: 2, bgcolor: '#f5f5f5', borderBottom: '1px solid #ddd' }}>
-                <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Box
+            sx={{
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                bgcolor: '#fafafa',
+            }}
+        >
+            <Box sx={{ px: 2, py: 1.5, bgcolor: '#f5f5f5', borderBottom: '1px solid #ddd', flexShrink: 0 }}>
+                <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
                     <ToggleButtonGroup
                         value={diagramType}
                         exclusive
-                        onChange={(e, value) => value && setDiagramType(value)}
+                        onChange={(_e, value) => value && setDiagramType(value)}
                         size="small"
                     >
                         <ToggleButton value="capital">資本関連図</ToggleButton>
                         <ToggleButton value="business">ビジネス関連図</ToggleButton>
                     </ToggleButtonGroup>
 
-                    <FormControl size="small" sx={{ minWidth: 300 }}>
+                    <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 260 }, maxWidth: 360 }}>
                         <InputLabel>企業選択</InputLabel>
                         <Select
                             value={selectedCompanyId || ''}
-                            onChange={(e) => setSelectedCompanyId(e.target.value as number || null)}
+                            onChange={(e) => setSelectedCompanyId((e.target.value as number) || null)}
                             label="企業選択"
                         >
                             <MenuItem value="">全体表示</MenuItem>
@@ -425,10 +489,23 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                         </Select>
                     </FormControl>
 
-                    <Box sx={{ display: 'flex', gap: 2, ml: 'auto' }}>
+                    <Button
+                        variant="outlined"
+                        size="small"
+                        disabled={!canOpenSelectedCompanyDetail}
+                        onClick={handleOpenSelectedCompanyDetail}
+                    >
+                        選択企業の情報
+                    </Button>
+
+                    <Typography variant="caption" color="text.secondary" sx={{ flexBasis: { xs: '100%', md: 'auto' } }}>
+                        企業ノードをクリックすると右側に情報を表示します
+                    </Typography>
+
+                    <Box sx={{ display: 'flex', gap: 1.5, ml: { md: 'auto' }, flexWrap: 'wrap' }}>
                         {Object.entries(marketLabels).map(([key, label]) => (
                             <Box key={key} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                <Box sx={{ width: 16, height: 16, bgcolor: marketColors[key as MarketType], borderRadius: '50%' }} />
+                                <Box sx={{ width: 14, height: 14, bgcolor: marketColors[key as MarketType], borderRadius: '50%' }} />
                                 <Typography variant="caption">{label}</Typography>
                             </Box>
                         ))}
@@ -436,7 +513,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                 </Box>
 
                 {diagramType === 'capital' && (
-                    <Box sx={{ mt: 1, display: 'flex', gap: 3, fontSize: '12px' }}>
+                    <Box sx={{ mt: 1, display: 'flex', gap: 3, fontSize: '12px', flexWrap: 'wrap' }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                             <Box sx={{ width: 40, height: 2, bgcolor: '#555' }} />
                             <span>子会社（実線）</span>
@@ -449,13 +526,31 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                 )}
             </Box>
 
-            <Card style={{ height: 'calc(100% - 100px)', flex: 1 }}>
-                <CardContent style={{ height: '100%', padding: 0 }}>
+            <Box
+                sx={{
+                    flex: 1,
+                    minHeight: 0,
+                    display: 'flex',
+                    flexDirection: { xs: 'column', md: 'row' },
+                    overflow: 'hidden',
+                }}
+            >
+                <Box
+                    sx={{
+                        flex: 1,
+                        minWidth: 0,
+                        minHeight: { xs: showDetailPanel ? 280 : 0, md: 0 },
+                        height: { xs: showDetailPanel ? '55%' : '100%', md: '100%' },
+                        position: 'relative',
+                        bgcolor: '#fff',
+                    }}
+                >
                     <ReactFlow
                         nodes={flowNodes}
                         edges={flowEdges}
                         onNodesChange={onNodesChange}
                         onEdgesChange={onEdgesChange}
+                        onNodeClick={handleNodeClick}
                         edgeTypes={edgeTypes}
                         fitView
                         minZoom={0.05}
@@ -465,6 +560,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                         nodesDraggable={true}
                         nodesConnectable={false}
                         elementsSelectable={true}
+                        style={{ width: '100%', height: '100%' }}
                     >
                         <Background color="#aaa" gap={16} />
                         <Controls
@@ -477,14 +573,35 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                             nodeColor={(node) => {
                                 const border = node.style?.border as string;
                                 if (border?.includes('#FFA726')) return '#FFA726';
+                                if (border?.includes('#1976D2')) return '#1976D2';
                                 return '#2196F3';
                             }}
                             maskColor="rgba(0, 0, 0, 0.1)"
                             position="bottom-left"
+                            style={{
+                                marginRight: showDetailPanel ? undefined : undefined,
+                            }}
                         />
                     </ReactFlow>
-                </CardContent>
-            </Card>
+                </Box>
+
+                {showDetailPanel && (
+                    <Box
+                        sx={{
+                            width: { xs: '100%', md: CORRELATION_DETAIL_PANEL_WIDTH },
+                            height: { xs: '45%', md: '100%' },
+                            flexShrink: 0,
+                            minHeight: { xs: 240, md: 0 },
+                        }}
+                    >
+                        <CorrelationCompanyDetailPanel
+                            companyId={detailCompanyId}
+                            marketType={getMarketType(detailCompanyId)}
+                            onClose={handleCloseDetailPanel}
+                        />
+                    </Box>
+                )}
+            </Box>
         </Box>
     );
 }

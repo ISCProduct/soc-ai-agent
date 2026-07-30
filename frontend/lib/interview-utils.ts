@@ -25,12 +25,21 @@ export function parseJsonSafe(value?: string): unknown {
  */
 export function parseMediaError(error: unknown): string {
   const msg: string = (error as { message?: string })?.message || ''
-  if (msg.includes('NotAllowedError') || msg.toLowerCase().includes('denied'))
+  const lower = msg.toLowerCase()
+  if (msg.includes('NotAllowedError') || lower.includes('denied'))
     return 'マイクとカメラへのアクセスが拒否されました。ブラウザのアドレスバー横から権限を許可してください。'
   if (msg.includes('NotFoundError'))
     return 'マイクまたはカメラが見つかりません。デバイスが正しく接続されているか確認してください。'
-  if (msg.toLowerCase().includes('unauthorized') || msg.includes('401'))
+  // OpenAI 側の 401（chat/tts/whisper error 401 など）のみ API キー案内にする。
+  // セッション JWT の Unauthorized を誤って API キー不足と表示しない。
+  if (
+    /(?:chat|tts|whisper|openai).*error\s*401/i.test(msg) ||
+    (lower.includes('openai') && (lower.includes('unauthorized') || msg.includes('401')))
+  ) {
     return 'AIサービスへの接続に失敗しました。（OpenAI APIキーを確認してください）'
+  }
+  if (lower.includes('unauthorized') || /\b401\b/.test(msg))
+    return 'ログインの有効期限が切れました。再ログインしてから面接を開始してください。'
   return msg || '接続に失敗しました。ネットワークを確認して再試行してください。'
 }
 

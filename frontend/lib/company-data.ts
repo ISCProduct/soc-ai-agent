@@ -36,6 +36,19 @@ export interface CompanyMarketInfo {
   company?: Company
 }
 
+/** 相関図サイドパネル用の企業サマリー */
+export interface CompanySummary {
+  id: number
+  name: string
+  industry?: string
+  location?: string
+  description?: string
+  main_business?: string
+  employee_count?: number
+  founded_year?: number
+  website_url?: string
+}
+
 export class CompanyDataFetchError extends Error {
   constructor(
     message: string,
@@ -46,13 +59,15 @@ export class CompanyDataFetchError extends Error {
   }
 }
 
-/** プロキシ経由の配列レスポンスを正規化する（レガシー `{ data: [] }` も許容） */
-export function unwrapProxyArray<T>(payload: unknown): T[] {
-  if (Array.isArray(payload)) {
-    return payload as T[]
-  }
-  if (payload && typeof payload === 'object' && Array.isArray((payload as { data?: unknown }).data)) {
-    return (payload as { data: T[] }).data
+/**
+ * プロキシが配列を `{ data: [...] }` にラップする場合と、生配列の両方を配列に正規化する。
+ * @see parseProxyResponse / buildProxyJsonResponse
+ */
+export function unwrapCompanyListResponse<T>(raw: unknown): T[] {
+  if (Array.isArray(raw)) return raw as T[]
+  if (raw && typeof raw === 'object') {
+    const data = (raw as { data?: unknown }).data
+    if (Array.isArray(data)) return data as T[]
   }
   return []
 }
@@ -71,8 +86,8 @@ export async function fetchCompanyRelations(): Promise<CapitalRelation[]> {
     if (!response.ok) {
       throw new CompanyDataFetchError('企業関係データの取得に失敗しました', response.status)
     }
-    const payload: unknown = await response.json()
-    return unwrapProxyArray<CapitalRelation>(payload)
+    const raw: unknown = await response.json()
+    return unwrapCompanyListResponse<CapitalRelation>(raw)
   } catch (error) {
     if (error instanceof CompanyDataFetchError) throw error
     throw new CompanyDataFetchError('企業関係データの取得中にエラーが発生しました')
@@ -93,19 +108,53 @@ export async function fetchCompanyMarketInfo(): Promise<CompanyMarketInfo[]> {
     if (!response.ok) {
       throw new CompanyDataFetchError('市場情報の取得に失敗しました', response.status)
     }
-    const payload: unknown = await response.json()
-    return unwrapProxyArray<CompanyMarketInfo>(payload)
+    const raw: unknown = await response.json()
+    return unwrapCompanyListResponse<CompanyMarketInfo>(raw)
   } catch (error) {
     if (error instanceof CompanyDataFetchError) throw error
     throw new CompanyDataFetchError('市場情報の取得中にエラーが発生しました')
   }
 }
 
+/**
+ * 企業詳細（サマリー）を取得する。
+ * @throws {CompanyDataFetchError} HTTP エラーまたはネットワーク失敗時
+ */
+export async function fetchCompanySummary(companyId: number): Promise<CompanySummary> {
+  try {
+    const response = await fetch(`/api/companies/${companyId}`, { cache: 'no-store' })
+    if (!response.ok) {
+      throw new CompanyDataFetchError('企業情報の取得に失敗しました', response.status)
+    }
+    const raw: unknown = await response.json()
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new CompanyDataFetchError('企業情報の形式が不正です')
+    }
+    const data = raw as Record<string, unknown>
+    const id = typeof data.id === 'number' ? data.id : companyId
+    const name = typeof data.name === 'string' ? data.name : `企業 ${companyId}`
+    return {
+      id,
+      name,
+      industry: typeof data.industry === 'string' ? data.industry : undefined,
+      location: typeof data.location === 'string' ? data.location : undefined,
+      description: typeof data.description === 'string' ? data.description : undefined,
+      main_business: typeof data.main_business === 'string' ? data.main_business : undefined,
+      employee_count: typeof data.employee_count === 'number' ? data.employee_count : undefined,
+      founded_year: typeof data.founded_year === 'number' ? data.founded_year : undefined,
+      website_url: typeof data.website_url === 'string' ? data.website_url : undefined,
+    }
+  } catch (error) {
+    if (error instanceof CompanyDataFetchError) throw error
+    throw new CompanyDataFetchError('企業情報の取得中にエラーが発生しました')
+  }
+}
+
 export const marketColors: Record<MarketType, string> = {
-  prime: '#4169E1',
-  standard: '#32CD32',
-  growth: '#FF6347',
-  unlisted: '#9E9E9E',
+  prime: '#3B6FD9',
+  standard: '#2F9E44',
+  growth: '#E8590C',
+  unlisted: '#94A3B8',
 }
 
 export const marketLabels: Record<MarketType, string> = {

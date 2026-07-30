@@ -5,8 +5,6 @@ import Link from 'next/link'
 import {
   Box,
   Button,
-  Card,
-  CardContent,
   Chip,
   Collapse,
   Divider,
@@ -15,12 +13,13 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import { authService } from '@/lib/auth'
-import { PageContainer } from '@/components/admin/PageContainer'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminListCard } from '@/components/admin/AdminListCard'
 import { StatusBadge } from '@/components/admin/StatusBadge'
@@ -117,6 +116,7 @@ function JobPositionCard({
                 variant="contained"
                 color="success"
                 size="small"
+                disableElevation
                 onClick={() => onPublish(position.id)}
               >
                 承認
@@ -286,52 +286,43 @@ export default function AdminJobPositionsPage() {
   })
 
   return (
-    <PageContainer maxWidth={1000}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-        <Stack direction="row" alignItems="center" spacing={1}>
-          <IconButton component={Link} href="/admin"><ArrowBackIcon /></IconButton>
-          <Typography variant="h4" fontWeight="bold">
-            求人管理
-          </Typography>
-        </Stack>
-        <Stack direction="row" spacing={1}>
-          <Button variant="outlined" size="small" component={Link} href="/admin/companies">
-            企業管理
-          </Button>
-          <Button variant="outlined" size="small" component={Link} href="/admin/graduate-employments">
-            就職情報管理
-          </Button>
-        </Stack>
-      </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        クローリングで取得した求人情報を審査・公開します。各求人の▼ボタンでクロール元URL・スキル・職務内容を確認できます。
-      </Typography>
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
+      <AdminPageHeader
+        title="求人管理"
+        description="クローリングで取得した求人情報を審査・公開します。各求人の▼ボタンでクロール元URL・スキル・職務内容を確認できます。"
+        backHref="/admin"
+        actions={
+          <>
+            <Button variant="outlined" size="small" component={Link} href="/admin/companies">
+              企業管理
+            </Button>
+            <Button variant="outlined" size="small" component={Link} href="/admin/graduate-employments">
+              就職情報管理
+            </Button>
+          </>
+        }
+      />
 
       <ErrorAlert error={error} />
 
-      <Card>
-        <CardContent>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
-            <Typography variant="h6">
-              求人一覧
-              <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 1 }}>
-                ({filtered.length}件)
-              </Typography>
-            </Typography>
-            <Stack direction="row" spacing={1}>
-              {(['all', 'draft', 'published', 'rejected'] as const).map((s) => (
-                <Chip
-                  key={s}
-                  label={s === 'all' ? 'すべて' : s === 'draft' ? '審査中' : s === 'published' ? '公開' : '却下'}
-                  variant={filterStatus === s ? 'filled' : 'outlined'}
-                  color={s === 'published' ? 'success' : s === 'rejected' ? 'error' : s === 'draft' ? 'warning' : 'default'}
-                  onClick={() => setFilterStatus(s)}
-                  clickable
-                />
-              ))}
-            </Stack>
+      <AdminPanel
+        title={`求人一覧 (${filtered.length}件)`}
+        headerRight={
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            {(['all', 'draft', 'published', 'rejected'] as const).map((s) => (
+              <Chip
+                key={s}
+                label={s === 'all' ? 'すべて' : s === 'draft' ? '審査中' : s === 'published' ? '公開' : '却下'}
+                variant={filterStatus === s ? 'filled' : 'outlined'}
+                color={s === 'published' ? 'success' : s === 'rejected' ? 'error' : s === 'draft' ? 'warning' : 'default'}
+                onClick={() => setFilterStatus(s)}
+                clickable
+              />
+            ))}
           </Stack>
-          <Divider sx={{ mb: 2 }} />
+        }
+      >
+        <AdminPanelBody>
           <Stack spacing={1}>
             {filtered.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
@@ -348,8 +339,8 @@ export default function AdminJobPositionsPage() {
               ))
             )}
           </Stack>
-        </CardContent>
-      </Card>
+        </AdminPanelBody>
+      </AdminPanel>
     </PageContainer>
   )
 }

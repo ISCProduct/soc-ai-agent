@@ -5,10 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-PROFILE_ARGS=(--profile rag)
-
-echo "==> Building and starting chroma + rag-review (compose.yml, profile=rag)"
-docker compose "${PROFILE_ARGS[@]}" up -d --build chroma rag-review
+echo "==> Building and starting chroma + rag-review (compose.yml)"
+docker compose up -d --build chroma rag-review
 
 echo "==> Waiting for health endpoints"
 for i in 1 2 3 4 5 6 7 8 9 10; do
@@ -31,15 +29,15 @@ echo "RAG /vector/status: ${STATUS:-FAILED}"
 if ! echo "${HEALTH}" | grep -q '"vector_store"'; then
   echo ""
   echo "ERROR: /health に vector_store がありません。旧 RAG イメージの可能性があります。"
-  echo "  docker compose --profile rag up -d --build --force-recreate rag-review"
+  echo "  docker compose up -d --build --force-recreate rag-review"
   exit 1
 fi
 
 if ! echo "${HEALTH}" | grep -q '"ok":true'; then
   echo ""
   echo "ERROR: vector_store.ok が true ではありません。Chroma 接続を確認してください。"
-  echo "  docker compose --profile rag ps"
-  echo "  docker compose --profile rag logs --tail 50 chroma rag-review"
+  echo "  docker compose ps"
+  echo "  docker compose logs --tail 50 chroma rag-review"
   exit 1
 fi
 

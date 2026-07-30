@@ -1,20 +1,17 @@
 'use client'
 
-import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import {
   Alert,
-  Box,
   Button,
   Card,
   CardContent,
   CircularProgress,
-  IconButton,
-  Stack,
   Typography,
 } from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService } from '@/lib/auth'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 
 export default function AdminCollectiveInsightsPage() {
   const [loading, setLoading] = useState(false)
@@ -52,21 +49,17 @@ export default function AdminCollectiveInsightsPage() {
   }
 
   return (
-    <Box sx={{ p: 4, maxWidth: 720, mx: 'auto' }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-        <IconButton component={Link} href="/admin"><ArrowBackIcon /></IconButton>
-        <Typography variant="h4" fontWeight="bold">
-          集合知サマリー管理
-        </Typography>
-      </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        ユーザー行動データをもとに全企業の集合知サマリーを再集計します。
-      </Typography>
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.form}>
+      <AdminPageHeader
+        title="集合知サマリー管理"
+        description="ユーザー行動データをもとに全企業の集合知サマリーを再集計します。"
+        backHref="/admin"
+      />
 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>{success}</Alert>}
 
-      <Card>
+      <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>サマリー再構築</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
@@ -84,6 +77,6 @@ export default function AdminCollectiveInsightsPage() {
           </Button>
         </CardContent>
       </Card>
-    </Box>
+    </PageContainer>
   )
 }

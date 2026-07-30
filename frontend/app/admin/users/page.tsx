@@ -1,14 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import {
   Button,
-  Card,
-  CardContent,
   Chip,
-  Divider,
-  IconButton,
   Stack,
   TableBody,
   TableCell,
@@ -18,9 +13,10 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService } from '@/lib/auth'
-import { PageContainer } from '@/components/admin/PageContainer'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 
@@ -132,38 +128,28 @@ export default function AdminUsersPage() {
   }
 
   return (
-    <PageContainer maxWidth={1100}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-        <IconButton component={Link} href="/admin"><ArrowBackIcon /></IconButton>
-        <Typography variant="h4" fontWeight="bold">
-          ユーザー管理
-        </Typography>
-      </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        管理者権限の付与やユーザー情報の確認を行います。
-      </Typography>
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
+      <AdminPageHeader
+        title="ユーザー管理"
+        description="管理者権限の付与やユーザー情報の確認を行います。"
+        backHref="/admin"
+      />
 
       <ErrorAlert error={error} />
 
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Stack spacing={2}>
-            <TextField
-              label="検索 (メール/名前/学校名)"
-              value={query}
-              onChange={(e) => handleQueryChange(e.target.value)}
-              fullWidth
-            />
-          </Stack>
-        </CardContent>
-      </Card>
+      <AdminPanel title="検索" sx={{ mb: 3 }}>
+        <AdminPanelBody>
+          <TextField
+            label="検索 (メール/名前/学校名)"
+            value={query}
+            onChange={(e) => handleQueryChange(e.target.value)}
+            fullWidth
+          />
+        </AdminPanelBody>
+      </AdminPanel>
 
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            ユーザー一覧
-          </Typography>
-          <Divider sx={{ mb: 2 }} />
+      <AdminPanel title="ユーザー一覧">
+        <AdminPanelBody>
           {users.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
               該当するユーザーがいません。
@@ -240,8 +226,8 @@ export default function AdminUsersPage() {
               />
             </>
           )}
-        </CardContent>
-      </Card>
+        </AdminPanelBody>
+      </AdminPanel>
     </PageContainer>
   )
 }
