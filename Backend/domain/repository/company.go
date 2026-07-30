@@ -35,6 +35,8 @@ type CompanyRepository interface {
 	FindByName(name string) (*models.Company, error)
 	FindByCorporateNumber(corporateNumber string) (*models.Company, error)
 	GetWeightProfile(companyID uint, jobPositionID *uint) (*models.CompanyWeightProfile, error)
+	// GetWeightProfilesByCompanyIDs は企業ID群の会社単位プロファイル（job_position_id IS NULL）を一括取得する。
+	GetWeightProfilesByCompanyIDs(companyIDs []uint) (map[uint]*models.CompanyWeightProfile, error)
 	Create(company *models.Company) error
 	Update(company *models.Company) error
 	FindJobPositionByCompanyAndTitle(companyID uint, title string) (*models.CompanyJobPosition, error)

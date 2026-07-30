@@ -42,6 +42,9 @@ func (s *warmRepoStub) FindByCorporateNumber(string) (*models.Company, error)   
 func (s *warmRepoStub) GetWeightProfile(uint, *uint) (*models.CompanyWeightProfile, error) {
 	return nil, nil
 }
+func (s *warmRepoStub) GetWeightProfilesByCompanyIDs([]uint) (map[uint]*models.CompanyWeightProfile, error) {
+	return map[uint]*models.CompanyWeightProfile{}, nil
+}
 func (s *warmRepoStub) Create(*models.Company) error { return nil }
 func (s *warmRepoStub) Update(*models.Company) error { return nil }
 func (s *warmRepoStub) FindJobPositionByCompanyAndTitle(uint, string) (*models.CompanyJobPosition, error) {

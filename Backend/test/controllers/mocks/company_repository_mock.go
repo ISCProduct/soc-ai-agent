@@ -102,6 +102,14 @@ func (m *CompanyRepositoryMock) GetWeightProfile(companyID uint, jobPositionID *
 	return nil, args.Error(1)
 }
 
+func (m *CompanyRepositoryMock) GetWeightProfilesByCompanyIDs(companyIDs []uint) (map[uint]*models.CompanyWeightProfile, error) {
+	args := m.Called(companyIDs)
+	if v := args.Get(0); v != nil {
+		return v.(map[uint]*models.CompanyWeightProfile), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
 func (m *CompanyRepositoryMock) Create(company *models.Company) error {
 	args := m.Called(company)
 	return args.Error(0)
