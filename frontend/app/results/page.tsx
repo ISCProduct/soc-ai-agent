@@ -51,6 +51,7 @@ function ResultsContent() {
     favoritingId,
     applyingId,
     snackbar,
+    isGuestUser,
     handleSendEmail,
     handleBack,
     handleReset,
@@ -110,6 +111,7 @@ function ResultsContent() {
       favoritingId={favoritingId}
       applyingId={applyingId}
       snackbar={snackbar}
+      isGuestUser={isGuestUser}
       onCloseSnackbar={handleCloseSnackbar}
       onBack={handleBack}
       onReset={handleReset}

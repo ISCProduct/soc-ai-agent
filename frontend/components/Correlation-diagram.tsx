@@ -451,6 +451,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
 
     const showDetailPanel = detailCompanyId !== null;
 
+
     return (
         <Box
             sx={{

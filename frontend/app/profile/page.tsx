@@ -32,6 +32,11 @@ import { BACKEND_URL } from '@/lib/backend-url'
 import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '@/lib/profile'
 import GitHubSkills from '@/components/github-skills'
 import { PageLoading } from '@/components/common/PageLoading'
+import {
+  GUEST_LIMITATIONS,
+  GUEST_REGISTER_CTA_LABEL,
+  GUEST_REGISTER_PATH,
+} from '@/lib/guest-limits'
 
 export default function ProfilePage() {
   return (
@@ -284,6 +289,14 @@ function ProfilePageContent() {
                       sx={{ bgcolor: '#24292e', color: 'white', fontSize: '0.7rem' }}
                     />
                   )}
+                  {isGuest && (
+                    <Chip
+                      label="ゲスト"
+                      size="small"
+                      color="default"
+                      variant="outlined"
+                    />
+                  )}
                   {(targetLevel === '新卒' || targetLevel === '中途') && (
                     <Chip
                       label={targetLevel}
@@ -303,6 +316,19 @@ function ProfilePageContent() {
                 )}
               </Box>
             </Box>
+            {isGuest && (
+              <Alert
+                severity="info"
+                sx={{ mt: 2 }}
+                action={
+                  <Button color="inherit" size="small" onClick={() => router.push(GUEST_REGISTER_PATH)}>
+                    {GUEST_REGISTER_CTA_LABEL}
+                  </Button>
+                }
+              >
+                ゲストでは次の機能が制限されています: {GUEST_LIMITATIONS.join('、')}。
+              </Alert>
+            )}
           </CardContent>
         </Card>
 

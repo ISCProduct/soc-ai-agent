@@ -10,6 +10,7 @@ import SelectionScreen from './components/SelectionScreen'
 import LobbyScreen from './components/LobbyScreen'
 import ReportScreen from './components/ReportScreen'
 import { PageLoading } from '@/components/common/PageLoading'
+import { GUEST_REGISTER_PATH } from '@/lib/guest-limits'
 import { POSITIONS } from './constants'
 import type { InterviewCompany, Position, InterviewStatus } from './types'
 import { resolveCompanyByName } from './utils'
@@ -249,6 +250,7 @@ function InterviewContent() {
         emailSending={session.emailSending}
         emailSent={session.emailSent}
         isGuest={!user || user.is_guest}
+        onRegisterClick={() => router.push(GUEST_REGISTER_PATH)}
         onSendEmail={session.sendReportEmail}
         onRetryReport={session.retryReportPolling}
         videoUploadStatus={session.videoUploadStatus}
