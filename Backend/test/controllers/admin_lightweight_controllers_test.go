@@ -195,7 +195,10 @@ func TestAdminScoreValidationController_RunCalibration_Success(t *testing.T) {
 
 func TestAdminScoreValidationController_ListVariants_Success(t *testing.T) {
 	svc := &mocks.ScoreValidationServiceMock{}
-	svc.On("ListExperiments").Return([]string{"exp-a", "exp-b"}, nil)
+	svc.On("ListAllVariants").Return([]models.QuestionVariant{
+		{ExperimentName: "exp-a", VariantName: "control"},
+		{ExperimentName: "exp-b", VariantName: "treatment"},
+	}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/score-validation/variants", nil)
 	rec := httptest.NewRecorder()

@@ -78,12 +78,13 @@ func (c *AdminScoreValidationController) GetCalibrationHistory(ctx echo.Context)
 }
 
 // ListVariants GET /api/admin/score-validation/variants
+// 全実験・全バリアントの詳細一覧を返す（管理画面のテーブル表示用）。
 func (c *AdminScoreValidationController) ListVariants(ctx echo.Context) error {
-	experiments, err := c.svc.ListExperiments()
+	variants, err := c.svc.ListAllVariants()
 	if err != nil {
 		return echoInternalError(err)
 	}
-	return ctx.JSON(http.StatusOK, map[string]any{"experiments": experiments})
+	return ctx.JSON(http.StatusOK, map[string]any{"experiments": variants})
 }
 
 // CreateVariant POST /api/admin/score-validation/variants
