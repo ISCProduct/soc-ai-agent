@@ -75,10 +75,12 @@ func PendingRegistrationToEntity(m *models.PendingRegistration) *entity.PendingR
 		return nil
 	}
 	return &entity.PendingRegistration{
-		Token:     m.Token,
-		Email:     m.Email,
-		ExpiresAt: m.ExpiresAt,
-		CreatedAt: m.CreatedAt,
+		Token:        m.Token,
+		Email:        m.Email,
+		CompanyID:    m.CompanyID,
+		SubmissionID: m.SubmissionID,
+		ExpiresAt:    m.ExpiresAt,
+		CreatedAt:    m.CreatedAt,
 	}
 }
 
@@ -88,9 +90,11 @@ func PendingRegistrationFromEntity(e *entity.PendingRegistration) *models.Pendin
 		return nil
 	}
 	return &models.PendingRegistration{
-		Token:     e.Token,
-		Email:     e.Email,
-		ExpiresAt: e.ExpiresAt,
-		CreatedAt: e.CreatedAt,
+		Token:        e.Token,
+		Email:        e.Email,
+		CompanyID:    e.CompanyID,
+		SubmissionID: e.SubmissionID,
+		ExpiresAt:    e.ExpiresAt,
+		CreatedAt:    e.CreatedAt,
 	}
 }

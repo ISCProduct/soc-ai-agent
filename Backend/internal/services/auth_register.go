@@ -75,6 +75,7 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 	}
 
 	// トークン検証
+	var claimCompanyID, claimSubmissionID *uint
 	if req.RegistrationToken != "" {
 		pending, err := s.pendingRepo.FindByToken(req.RegistrationToken)
 		if err != nil {
@@ -83,6 +84,8 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 		if pending == nil || pending.Email != req.Email {
 			return nil, errors.New("invalid or expired registration token")
 		}
+		claimCompanyID = pending.CompanyID
+		claimSubmissionID = pending.SubmissionID
 		// 使用済みトークンを削除
 		if err := s.pendingRepo.DeleteByEmail(req.Email); err != nil {
 			log.Printf("[AuthService] failed to delete used registration token for %s: %v", req.Email, err)
@@ -137,6 +140,10 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 
 	if err := s.userRepo.CreateUser(user); err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)
+	}
+
+	if s.ownershipClaimer != nil {
+		s.ownershipClaimer.ClaimOwnershipOnRegister(user.ID, claimCompanyID, claimSubmissionID)
 	}
 
 	// 認証メール送信（失敗しても登録は成功扱い）

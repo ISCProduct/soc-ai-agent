@@ -9,6 +9,7 @@ import (
 	"net/smtp"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -491,3 +492,56 @@ func (s *EmailService) SendSystemAlertEmail(recipients []string, subject, body s
 	}
 	return nil
 }
+
+// SendCompanyEntryThankYouAndInvite 企業情報投稿への感謝と本登録依頼メール（#754）
+// inviteToken が空の場合はログイン案内のみ（既に会員の場合）。
+func (s *EmailService) SendCompanyEntryThankYouAndInvite(email, companyName, inviteToken string) error {
+	appURL := os.Getenv("FRONTEND_URL")
+	if appURL == "" {
+		appURL = "http://localhost:3000"
+	}
+	companyName = strings.TrimSpace(companyName)
+	if companyName == "" {
+		companyName = "貴社"
+	}
+
+	var ctaBlock string
+	if inviteToken != "" {
+		registerURL := appURL + "/register/confirm?token=" + inviteToken
+		ctaBlock = fmt.Sprintf(`
+<p>引き続き、求人票の正式掲載・編集や企業情報の更新を行うには、システムへの会員登録をお願いします。</p>
+<a href="%s" style="display:inline-block;background:#1976D2;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:16px 0;">会員登録を完了する</a>
+<p style="color:#888;font-size:12px;">このリンクは24時間有効です。</p>`, registerURL)
+	} else {
+		loginURL := appURL + "/login"
+		ctaBlock = fmt.Sprintf(`
+<p>すでにアカウントをお持ちの場合は、ログインのうえ管理画面から掲載状況をご確認ください。</p>
+<a href="%s" style="display:inline-block;background:#1976D2;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:16px 0;">ログインする</a>`, loginURL)
+	}
+
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="ja"><head><meta charset="UTF-8"><title>企業情報のご登録ありがとうございます</title></head>
+<body style="font-family:sans-serif;background:#f5f5f5;padding:20px;">
+<div style="max-width:560px;margin:0 auto;background:#fff;border-radius:8px;padding:32px;">
+<h2 style="color:#1976D2;">企業情報のご提供ありがとうございます</h2>
+<p>%s の情報を受け付けました。</p>
+<p>内容を確認のうえ掲載審査を行います。公開は審査完了後となります（自動公開ではありません）。</p>
+%s
+<p style="color:#888;font-size:12px;">このメールはAI就活エージェントから自動送信されました。</p>
+</div>
+</body></html>`, companyName, ctaBlock)
+
+	if s.host == "" {
+		log.Printf("[EmailService] Company entry thank-you for %s (company=%s, invite=%v)\n", email, companyName, inviteToken != "")
+		return nil
+	}
+
+	msg := fmt.Sprintf(
+		"From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
+		s.from, email, "【AI就活エージェント】企業情報のご登録ありがとうございます", body,
+	)
+	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	auth := smtp.PlainAuth("", s.user, s.password, s.host)
+	return smtp.SendMail(addr, auth, s.from, []string{email}, []byte(msg))
+}
+
