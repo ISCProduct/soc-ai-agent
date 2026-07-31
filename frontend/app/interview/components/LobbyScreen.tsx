@@ -87,10 +87,22 @@ export default function LobbyScreen({
           {/* Camera preview */}
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
             <Box sx={{ position: 'relative', width: '100%', aspectRatio: '16/9', bgcolor: '#202124', borderRadius: 2, overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <video
+                ref={lobbyVideoRef}
+                muted
+                playsInline
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  transform: 'scaleX(-1)',
+                  display: lobbyPermissionError || !cameraEnabled ? 'none' : 'block',
+                }}
+              />
               {lobbyPermissionError ? (
-                <Box sx={{ textAlign: 'center', p: 3 }}>
+                <Box sx={{ textAlign: 'center', p: 3, position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
                   <Typography sx={{ color: '#f28b82', mb: 1.5, fontSize: 14 }}>{lobbyPermissionError}</Typography>
-                  <Box sx={{ mb: 2, textAlign: 'left', bgcolor: 'rgba(0,0,0,0.4)', borderRadius: 1, p: 1.5 }}>
+                  <Box sx={{ mb: 2, textAlign: 'left', bgcolor: 'rgba(0,0,0,0.4)', borderRadius: 1, p: 1.5, width: '100%', maxWidth: 360 }}>
                     <Typography sx={{ color: '#e8eaed', fontSize: 12, mb: 0.5 }}>【ブラウザの許可】</Typography>
                     <Typography sx={{ color: '#9aa0a6', fontSize: 12, lineHeight: 1.8, mb: 1 }}>
                       アドレスバー左端の 🔒 → カメラ・マイクを「許可」
@@ -105,14 +117,7 @@ export default function LobbyScreen({
                     再試行
                   </Button>
                 </Box>
-              ) : (
-                <video
-                  ref={lobbyVideoRef}
-                  muted
-                  playsInline
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', display: cameraEnabled ? 'block' : 'none' }}
-                />
-              )}
+              ) : null}
               {!lobbyPermissionError && !cameraEnabled && (
                 <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <VideocamOffIcon sx={{ color: '#9aa0a6', fontSize: 48 }} />
