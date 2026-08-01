@@ -165,6 +165,24 @@ class TestConstraintsCommentConsistency:
                 )
 
 
+# ── LangChain が requirements に載っていること ───────────────────────────────
+
+class TestLangchainInRequirements:
+    def test_langchain_packages_listed_in_requirements(self):
+        required = [
+            "langchain",
+            "langchain-core",
+            "langchain-openai",
+            "langchain-community",
+            "langchain-text-splitters",
+        ]
+        for pkg in required:
+            spec = _parse_version_spec(_REQUIREMENTS_TXT, pkg)
+            assert spec is not None, f"requirements.txt に {pkg} が無い。LangChain 導入を反映すること。"
+            con = _parse_version_spec(_CONSTRAINTS_TXT, pkg)
+            assert con is not None, f"constraints.txt に {pkg} が無い"
+
+
 # ── Frontend: package.json バージョン整合性 ────────────────────────────────
 
 class TestFrontendReactVersionConsistency:

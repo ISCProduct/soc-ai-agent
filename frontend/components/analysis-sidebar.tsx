@@ -19,6 +19,7 @@ import
     IconButton,
     useTheme,
     useMediaQuery,
+    Tooltip,
 }
     from '@mui/material'
 import {
@@ -38,9 +39,18 @@ import {
     RecordVoiceOver,
     EditNote,
     CalendarMonth,
+    Business,
+    Assignment,
 } from '@mui/icons-material'
 import {authService, User} from '@/lib/auth'
-import {SIDEBAR_ADMIN_NAV, SIDEBAR_NAV_ITEMS} from '@/lib/sidebar-nav'
+import {useRouter} from 'next/navigation'
+import { getResultsPathOrChat } from '@/lib/results-navigation'
+import {
+  getApplicationsNavTarget,
+  getTodayActionLabel,
+  shouldShowResultsCta,
+} from '@/lib/sidebar-navigation'
+import { SIDEBAR_ADMIN_NAV, SIDEBAR_NAV_ITEMS } from '@/lib/sidebar-nav'
 
 const DRAWER_WIDTH = 280
 
@@ -81,6 +91,7 @@ interface AnalysisSidebarProps {
 }
 
 export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClose}: AnalysisSidebarProps) {
+    const router = useRouter()
     const [messageCount, setMessageCount] = useState(0)
     const [questionCount, setQuestionCount] = useState(0)
     const [totalQuestions, setTotalQuestions] = useState(15)
@@ -254,13 +265,32 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         <Typography variant="caption" sx={{ fontWeight: 700, color: '#ec5b13', display: 'block', mb: 0.5 }}>
                             今日やること
                         </Typography>
-                        <Typography variant="body2" sx={{ fontSize: '0.8rem', color: '#555' }}>
-                            {progress.overall === 0
-                                ? '① 自己分析チャットを始めましょう'
-                                : progress.overall < 80
-                                    ? '① チャットを続けて分析を完成させましょう'
-                                    : '② マッチング結果を確認しましょう'}
+                        <Typography variant="body2" sx={{ fontSize: '0.8rem', color: '#555', mb: shouldShowResultsCta(progress.overall) ? 1 : 0 }}>
+                            {getTodayActionLabel(progress.overall)}
                         </Typography>
+                        {shouldShowResultsCta(progress.overall) && (
+                            <ListItemButton
+                                onClick={() => {
+                                    router.push(getResultsPathOrChat())
+                                    onMobileClose?.()
+                                }}
+                                sx={{
+                                    borderRadius: 1,
+                                    bgcolor: '#ec5b13',
+                                    color: '#fff',
+                                    py: 0.75,
+                                    '&:hover': { bgcolor: '#c44d0e' },
+                                }}
+                            >
+                                <ListItemIcon sx={{ minWidth: 32, color: '#fff' }}>
+                                    <Business fontSize="small" />
+                                </ListItemIcon>
+                                <ListItemText
+                                    primary="マッチング結果を見る"
+                                    primaryTypographyProps={{ fontSize: '0.8rem', fontWeight: 600 }}
+                                />
+                            </ListItemButton>
+                        )}
                     </Box>
                 )}
 
@@ -338,33 +368,198 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
 
 
                 <Divider sx={{my: 2}}/>
-                {SIDEBAR_NAV_ITEMS.map((item, index) => (
-                    <React.Fragment key={item.href}>
-                        {index === 1 && <Divider sx={{my: 2}}/>}
-                        <ListItem disablePadding>
-                            <ListItemButton
-                                component={Link}
-                                href={item.href}
-                                prefetch
-                                onClick={onMobileClose}
-                                sx={{
-                                    borderRadius: 1,
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => {
+                            router.push(getResultsPathOrChat())
+                            onMobileClose?.()
+                        }}
+                        sx={{ borderRadius: 1 }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <Business color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="マッチング結果"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <Tooltip
+                        title={user.is_guest ? '選考管理はログイン後に利用できます' : ''}
+                        disableHoverListener={!user.is_guest}
+                    >
+                        <ListItemButton
+                            onClick={() => {
+                                router.push(getApplicationsNavTarget(user.is_guest))
+                                onMobileClose?.()
+                            }}
+                            sx={{ borderRadius: 1 }}
+                        >
+                            <ListItemIcon sx={{minWidth: 36}}>
+                                <Assignment color="primary"/>
+                            </ListItemIcon>
+                            <ListItemText
+                                primary="選考管理"
+                                secondary={user.is_guest ? 'ログインが必要です' : undefined}
+                                primaryTypographyProps={{
+                                    fontSize: '0.875rem',
+                                    fontWeight: 500,
                                 }}
-                            >
-                                <ListItemIcon sx={{minWidth: 36}}>
-                                    {NAV_ICONS[item.href]}
-                                </ListItemIcon>
-                                <ListItemText
-                                    primary={item.label}
-                                    primaryTypographyProps={{
-                                        fontSize: '0.875rem',
-                                        fontWeight: 500,
-                                    }}
-                                />
-                            </ListItemButton>
-                        </ListItem>
-                    </React.Fragment>
-                ))}
+                                secondaryTypographyProps={{
+                                    fontSize: '0.7rem',
+                                }}
+                            />
+                        </ListItemButton>
+                    </Tooltip>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => router.push('/Correlation-diagram')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <BorderAll color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="企業相関図"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <Divider sx={{my: 2}}/>
+
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => router.push('/chat-history')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <History color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="チャット履歴"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => router.push('/resume')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <Description color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="履歴書レビュー"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => router.push('/interview')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <RecordVoiceOver color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="面接練習"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => router.push('/es-rewrite')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <EditNote color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="ESリライト・添削"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => router.push('/schedule')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <CalendarMonth color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="選考スケジュール"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => router.push('/profile')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <ManageAccounts color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="プロフィール設定"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
 
                 {isAdmin && (
                     <ListItem disablePadding>

@@ -56,58 +56,58 @@ class TestSanitizeCollectionName:
         assert 3 <= len(name) <= 63
 
 
-# ── embed_texts テスト（OpenAI モック） ─────────────────────────────────────
+# ── embed_texts テスト（LangChain OpenAIEmbeddings モック） ─────────────────
 
 class TestEmbedTexts:
-    def _make_mock_client(self, embeddings: list):
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.data = [MagicMock(embedding=emb) for emb in embeddings]
-        mock_client.embeddings.create.return_value = mock_response
-        return mock_client
+    def _patch_embeddings(self, embed_documents_side_effect=None, return_value=None):
+        mock_emb = MagicMock()
+        if embed_documents_side_effect is not None:
+            mock_emb.embed_documents.side_effect = embed_documents_side_effect
+        else:
+            mock_emb.embed_documents.return_value = return_value
+        return patch("services.embed.get_embeddings", return_value=mock_emb), mock_emb
 
     def test_returns_embeddings(self):
-        mock_client = self._make_mock_client([[0.1, 0.2, 0.3]])
+        p, mock_emb = self._patch_embeddings(return_value=[[0.1, 0.2, 0.3]])
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
-            with patch("main.OpenAI", return_value=mock_client):
+            with p:
                 result = main.embed_texts(["hello world"])
         assert result == [[0.1, 0.2, 0.3]]
-        mock_client.embeddings.create.assert_called_once()
+        mock_emb.embed_documents.assert_called_once()
 
     def test_multiple_texts(self):
-        mock_client = self._make_mock_client([[0.1], [0.2]])
+        p, mock_emb = self._patch_embeddings(return_value=[[0.1], [0.2]])
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
-            with patch("main.OpenAI", return_value=mock_client):
+            with p:
                 result = main.embed_texts(["text1", "text2"])
         assert len(result) == 2
+        mock_emb.embed_documents.assert_called_once()
 
     def test_retries_on_failure_then_succeeds(self):
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.data = [MagicMock(embedding=[0.5])]
-        mock_client.embeddings.create.side_effect = [Exception("timeout"), mock_response]
-
+        p, mock_emb = self._patch_embeddings(
+            embed_documents_side_effect=[Exception("timeout"), [[0.5]]],
+        )
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
-            with patch("main.OpenAI", return_value=mock_client):
+            with p:
                 with patch("main.EMBED_MAX_RETRIES", 2):
                     with patch("time.sleep"):
                         result = main.embed_texts(["test"])
 
         assert result == [[0.5]]
-        assert mock_client.embeddings.create.call_count == 2
+        assert mock_emb.embed_documents.call_count == 2
 
     def test_raises_after_max_retries(self):
-        mock_client = MagicMock()
-        mock_client.embeddings.create.side_effect = Exception("persistent error")
-
+        p, mock_emb = self._patch_embeddings(
+            embed_documents_side_effect=Exception("persistent error"),
+        )
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
-            with patch("main.OpenAI", return_value=mock_client):
+            with p:
                 with patch("main.EMBED_MAX_RETRIES", 2):
                     with patch("time.sleep"):
                         with pytest.raises(Exception, match="persistent error"):
                             main.embed_texts(["test"])
 
-        assert mock_client.embeddings.create.call_count == 2
+        assert mock_emb.embed_documents.call_count == 2
 
     def test_raises_without_api_key(self):
         from fastapi import HTTPException

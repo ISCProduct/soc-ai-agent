@@ -21,12 +21,12 @@ func NewScoreValidationRepository(db *gorm.DB) *ScoreValidationRepository {
 
 // CategoryCorrelationRow カテゴリ別スコア vs 通過率の相関行データ
 type CategoryCorrelationRow struct {
-	Category    string
-	ScoreBand   string // "0-20", "21-40", "41-60", "61-80", "81-100"
-	TotalCount  int
-	PassCount   int    // document_passed / interview / offered / accepted のいずれか
-	PassRate    float64
-	AvgScore    float64
+	Category   string  `json:"category"`
+	ScoreBand  string  `json:"score_band"` // "0-20", "21-40", "41-60", "61-80", "81-100"
+	TotalCount int     `json:"total_count"`
+	PassCount  int     `json:"pass_count"` // document_passed / interview / offered / accepted のいずれか
+	PassRate   float64 `json:"pass_rate"`  // 0-100 のパーセント値
+	AvgScore   float64 `json:"avg_score"`
 }
 
 // GetCategoryPassRateCorrelation カテゴリ別スコア帯と選考通過率の相関を集計する
@@ -88,11 +88,11 @@ func (r *ScoreValidationRepository) GetCategoryPassRateCorrelation() ([]Category
 
 // PhasePrecisionRow フェーズ別精度メトリクス行
 type PhasePrecisionRow struct {
-	PhaseName      string
-	SessionCount   int
-	AvgCompletion  float64
-	PassCount      int
-	PassRate       float64
+	PhaseName     string  `json:"phase_name"`
+	SessionCount  int     `json:"session_count"`
+	AvgCompletion float64 `json:"avg_completion"` // 0-100
+	PassCount     int     `json:"pass_count"`
+	PassRate      float64 `json:"pass_rate"` // 0-100 のパーセント値
 }
 
 // GetPhasePrecisionMetrics フェーズ別の完了率・通過率相関を集計する
@@ -155,34 +155,43 @@ func (r *ScoreValidationRepository) FindAssignment(userID uint, sessionID string
 
 // VariantResultRow A/Bテスト結果比較行
 type VariantResultRow struct {
-	ExperimentName  string
-	VariantName     string
-	SessionCount    int
-	PassCount       int
-	PassRate        float64
-	AvgScoreSum     float64
+	ExperimentName string  `json:"experiment_name"`
+	VariantName    string  `json:"variant_name"`
+	SampleCount    int     `json:"sample_count"`
+	PassCount      int     `json:"pass_count"`
+	PassRate       float64 `json:"pass_rate"` // 0-100 のパーセント値
+	AvgScore       float64 `json:"avg_score"` // 割り当てセッションの平均完了スコア（0-100）
 }
 
-// GetVariantResults 実験バリアント別の通過率を集計する
+// GetVariantResults 実験バリアント別の通過率・平均完了スコアを集計する
 func (r *ScoreValidationRepository) GetVariantResults(experimentName string) ([]VariantResultRow, error) {
 	rows := []VariantResultRow{}
 	err := r.db.Raw(`
 		SELECT
 			va.experiment_name,
 			va.assigned_variant AS variant_name,
-			COUNT(DISTINCT va.session_id) AS session_count,
+			COUNT(DISTINCT va.session_id) AS sample_count,
 			COUNT(DISTINCT CASE WHEN uas.status IN ('document_passed','interview','offered','accepted') THEN uas.user_id END) AS pass_count,
 			CASE
 				WHEN COUNT(DISTINCT va.user_id) = 0 THEN 0
 				ELSE CAST(COUNT(DISTINCT CASE WHEN uas.status IN ('document_passed','interview','offered','accepted') THEN uas.user_id END) AS FLOAT) /
 					COUNT(DISTINCT va.user_id) * 100
-			END AS pass_rate
+			END AS pass_rate,
+			COALESCE(AVG(uap.completion_score), 0) AS avg_score
 		FROM variant_assignments va
 		LEFT JOIN user_application_statuses uas ON uas.user_id = va.user_id
+		LEFT JOIN user_analysis_progress uap ON uap.session_id = va.session_id
 		WHERE va.experiment_name = ?
 		GROUP BY va.experiment_name, va.assigned_variant
 	`, experimentName).Scan(&rows).Error
 	return rows, err
+}
+
+// ListAllVariants 全実験・全バリアントの詳細一覧を返す（管理画面の一覧表示用）。
+func (r *ScoreValidationRepository) ListAllVariants() ([]models.QuestionVariant, error) {
+	var variants []models.QuestionVariant
+	err := r.db.Order("experiment_name ASC, created_at ASC").Find(&variants).Error
+	return variants, err
 }
 
 // ── キャリブレーション ────────────────────────────────────────────────────────

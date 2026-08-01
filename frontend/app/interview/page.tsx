@@ -10,9 +10,16 @@ import SelectionScreen from './components/SelectionScreen'
 import LobbyScreen from './components/LobbyScreen'
 import ReportScreen from './components/ReportScreen'
 import { PageLoading } from '@/components/common/PageLoading'
+import { GUEST_REGISTER_PATH } from '@/lib/guest-limits'
 import { POSITIONS } from './constants'
 import type { InterviewCompany, Position, InterviewStatus } from './types'
 import { resolveCompanyByName } from './utils'
+import {
+  clearInterviewLobbyDraft,
+  loadInterviewLobbyDraft,
+  resolvePositionFromDraft,
+  saveInterviewLobbyDraft,
+} from './lobbyDraft'
 import { useInterviewMedia } from './hooks/useInterviewMedia'
 import { useInterviewSession } from './hooks/useInterviewSession'
 
@@ -82,6 +89,34 @@ function InterviewContent() {
       })
     }
   }, [loading, searchParams])
+
+  // リロード時: sessionStorage の下書きからロビー（企業・職種）を復元する
+  useEffect(() => {
+    if (loading) return
+    if (searchParams.get('company_name')) return
+    const draft = loadInterviewLobbyDraft()
+    if (!draft) return
+    setInterviewCompany(draft.company)
+    setSelectedPosition(resolvePositionFromDraft(draft.positionId, draft.positionCategory))
+    setPositionCategory(draft.positionCategory)
+    setStatus('lobby')
+  }, [loading, searchParams])
+
+  // ロビー以降は下書きを保持（リロードで会社選択へ戻らないようにする）
+  useEffect(() => {
+    if (status !== 'lobby' && status !== 'connecting' && status !== 'connected') return
+    if (!interviewCompany?.name) return
+    saveInterviewLobbyDraft({
+      company: interviewCompany,
+      positionId: selectedPosition.id,
+      positionCategory,
+    })
+  }, [status, interviewCompany, selectedPosition.id, positionCategory])
+
+  // 面接完了後は下書きを破棄（次回は選択画面から）
+  useEffect(() => {
+    if (status === 'finished') clearInterviewLobbyDraft()
+  }, [status])
 
   // Load company list for selection screen (initial fetch + debounced search)
   useEffect(() => {
@@ -190,7 +225,16 @@ function InterviewContent() {
         companyHints={companyHints}
         hintsLoading={hintsLoading}
         questionDurationSeconds={questionDurationSeconds}
-        onStartInterview={() => setStatus('lobby')}
+        onStartInterview={() => {
+          if (interviewCompany?.name) {
+            saveInterviewLobbyDraft({
+              company: interviewCompany,
+              positionId: selectedPosition.id,
+              positionCategory,
+            })
+          }
+          setStatus('lobby')
+        }}
       />
     )
   }
@@ -219,7 +263,7 @@ function InterviewContent() {
         interviewCompany={interviewCompany}
         fromMatchingResults={Boolean(searchParams.get('company_name'))}
         lobbyPermissionError={media.lobbyPermissionError}
-        onRetryPermissions={() => { media.setLobbyPermissionError(null); window.location.reload() }}
+        onRetryPermissions={() => { void media.retryLobbyPreview() }}
         micEnabled={media.micEnabled}
         cameraEnabled={media.cameraEnabled}
         onToggleMic={media.toggleMic}
@@ -249,6 +293,7 @@ function InterviewContent() {
         emailSending={session.emailSending}
         emailSent={session.emailSent}
         isGuest={!user || user.is_guest}
+        onRegisterClick={() => router.push(GUEST_REGISTER_PATH)}
         onSendEmail={session.sendReportEmail}
         onRetryReport={session.retryReportPolling}
         videoUploadStatus={session.videoUploadStatus}

@@ -3,8 +3,8 @@
 
 help:
 	@echo "Targets:"
-	@echo "  make core-up      # db + app + frontend"
-	@echo "  make rag-up       # chroma + rag-review (profile=rag, --build)"
+	@echo "  make core-up      # db + app + frontend (docker compose up -d で全サービス起動可)"
+	@echo "  make rag-up       # chroma + rag-review (--build)"
 	@echo "  make rag-smoke    # /health vector_store + chroma heartbeat"
 	@echo "  make rag-rebuild  # force-recreate rag-review image"
 	@echo "  make rag-down     # stop chroma + rag-review"
@@ -17,10 +17,10 @@ rag-up:
 	./scripts/dev-rag-up.sh
 
 rag-down:
-	docker compose --profile rag stop chroma rag-review
+	docker compose stop chroma rag-review
 
 rag-rebuild:
-	docker compose --profile rag up -d --build --force-recreate chroma rag-review
+	docker compose up -d --build --force-recreate chroma rag-review
 	$(MAKE) rag-smoke
 
 rag-smoke:

@@ -36,6 +36,7 @@ describe('ResultsListView', () => {
         favoritingId={null}
         applyingId={null}
         snackbar={{ open: false, message: '', severity: 'success' }}
+        isGuestUser={false}
         onCloseSnackbar={noop}
         onBack={noop}
         onReset={noop}

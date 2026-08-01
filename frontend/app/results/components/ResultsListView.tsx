@@ -27,6 +27,12 @@ import {
 } from '@mui/icons-material'
 import type { AnalysisScores, Company, SnackbarState, SuggestedRole } from '../types'
 import { buildInterviewQuery, buildResumeQuery, getTopCategoryScores } from '../utils'
+import {
+  GUEST_REGISTER_CTA_LABEL,
+  GUEST_REGISTER_PATH,
+  getGuestApplicationsButtonProps,
+  getGuestEmailButtonProps,
+} from '@/lib/guest-limits'
 
 export interface ResultsListViewProps {
   companies: Company[]
@@ -39,6 +45,7 @@ export interface ResultsListViewProps {
   favoritingId: number | null
   applyingId: number | null
   snackbar: SnackbarState
+  isGuestUser: boolean
   onCloseSnackbar: () => void
   onBack: () => void
   onReset: () => void
@@ -63,6 +70,7 @@ export default function ResultsListView({
   favoritingId,
   applyingId,
   snackbar,
+  isGuestUser,
   onCloseSnackbar,
   onBack,
   onReset,
@@ -72,6 +80,8 @@ export default function ResultsListView({
   onApply,
   onNavigate,
 }: ResultsListViewProps) {
+  const guestEmailProps = getGuestEmailButtonProps(isGuestUser)
+  const guestApplicationsProps = getGuestApplicationsButtonProps(isGuestUser)
   return (
     <Box sx={{
       height: '100vh',
@@ -91,16 +101,33 @@ export default function ResultsListView({
           <Button variant="outlined" startIcon={<ArrowBack />} onClick={onBack}>
             チャットに戻る
           </Button>
-          <Button
-            variant="contained"
-            startIcon={<Email />}
-            onClick={onSendEmail}
-            disabled={emailSending}
-            sx={{ width: { xs: '100%', sm: 'auto' } }}
-          >
-            {emailSending ? '送信中...' : '結果をメールで受け取る'}
-          </Button>
+          <Tooltip title={guestEmailProps.title} disableHoverListener={!guestEmailProps.disabled}>
+            <span>
+              <Button
+                variant="contained"
+                startIcon={<Email />}
+                onClick={onSendEmail}
+                disabled={emailSending || guestEmailProps.disabled}
+                sx={{ width: { xs: '100%', sm: 'auto' } }}
+              >
+                {emailSending ? '送信中...' : '結果をメールで受け取る'}
+              </Button>
+            </span>
+          </Tooltip>
         </Box>
+        {isGuestUser && (
+          <Alert
+            severity="info"
+            sx={{ mb: 2 }}
+            action={
+              <Button color="inherit" size="small" onClick={() => onNavigate(GUEST_REGISTER_PATH)}>
+                {GUEST_REGISTER_CTA_LABEL}
+              </Button>
+            }
+          >
+            ゲスト利用中です。メール送信や選考管理はアカウント登録後に利用できます。
+          </Alert>
+        )}
         <Box sx={{ textAlign: 'center' }}>
           <Typography variant="h4" fontWeight="bold" gutterBottom sx={{ fontSize: { xs: '1.2rem', sm: '2.125rem' } }}>
             🎉 AI分析完了！適合企業を{companies.length}社に絞り込みました
@@ -370,15 +397,19 @@ export default function ResultsListView({
                     >
                       ES・職務経歴書を添削
                     </Button>
-                    <Button
-                      variant={company.isApplied ? 'contained' : 'outlined'}
-                      size="small"
-                      color="primary"
-                      disabled={company.isApplied || applyingId === company.matchId}
-                      onClick={(e) => onApply(e, company)}
-                    >
-                      {company.isApplied ? '応募済み' : applyingId === company.matchId ? '応募中...' : '応募する'}
-                    </Button>
+                    <Tooltip title={guestApplicationsProps.title} disableHoverListener={!guestApplicationsProps.disabled}>
+                      <span>
+                        <Button
+                          variant={company.isApplied ? 'contained' : 'outlined'}
+                          size="small"
+                          color="primary"
+                          disabled={company.isApplied || applyingId === company.matchId || guestApplicationsProps.disabled}
+                          onClick={(e) => onApply(e, company)}
+                        >
+                          {company.isApplied ? '応募済み' : applyingId === company.matchId ? '応募中...' : '応募する'}
+                        </Button>
+                      </span>
+                    </Tooltip>
                     <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold' }}>
                       クリックして詳細を見る →
                     </Typography>
@@ -389,17 +420,36 @@ export default function ResultsListView({
           </Stack>
 
           <Box sx={{ textAlign: 'center', mt: 4, mb: 4 }}>
-            <Stack direction="row" spacing={2} justifyContent="center" flexWrap="wrap">
-              <Button variant="contained" startIcon={<Email />} onClick={onSendEmail} disabled={emailSending}>
-                {emailSending ? '送信中...' : '結果をメールで受け取る'}
-              </Button>
-              <Button
-                variant="outlined"
-                size="large"
-                onClick={() => onNavigate('/applications')}
-              >
-                選考管理を見る
-              </Button>
+            <Stack direction="row" spacing={2} justifyContent="center" flexWrap="wrap" useFlexGap>
+              <Tooltip title={guestEmailProps.title} disableHoverListener={!guestEmailProps.disabled}>
+                <span>
+                  <Button
+                    variant="contained"
+                    startIcon={<Email />}
+                    onClick={onSendEmail}
+                    disabled={emailSending || guestEmailProps.disabled}
+                  >
+                    {emailSending ? '送信中...' : '結果をメールで受け取る'}
+                  </Button>
+                </span>
+              </Tooltip>
+              {isGuestUser && (
+                <Button variant="contained" color="secondary" onClick={() => onNavigate(GUEST_REGISTER_PATH)}>
+                  {GUEST_REGISTER_CTA_LABEL}
+                </Button>
+              )}
+              <Tooltip title={guestApplicationsProps.title} disableHoverListener={!guestApplicationsProps.disabled}>
+                <span>
+                  <Button
+                    variant="outlined"
+                    size="large"
+                    disabled={guestApplicationsProps.disabled}
+                    onClick={() => onNavigate('/applications')}
+                  >
+                    選考管理を見る
+                  </Button>
+                </span>
+              </Tooltip>
               <Button variant="outlined" size="large" startIcon={<Refresh />} onClick={onReset}>
                 最初からやり直す
               </Button>

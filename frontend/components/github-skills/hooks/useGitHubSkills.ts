@@ -6,6 +6,22 @@ import { authService } from '@/lib/auth'
 import { sortLanguageStats, upsertRepoSummary } from '../utils'
 import type { GitHubProfile, GitHubRepo, LanguageStat, RepoSummary, SkillScore } from '../types'
 
+function parseGitHubErrorBody(body: string): string {
+  const trimmed = body.trim()
+  if (!trimmed) return ''
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    if (parsed && typeof parsed === 'object') {
+      const obj = parsed as { error?: unknown; message?: unknown; detail?: unknown; msg?: unknown }
+      const candidate = obj.detail ?? obj.message ?? obj.msg ?? obj.error
+      if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
+    }
+  } catch {
+    // raw text
+  }
+  return trimmed
+}
+
 /**
  * GitHubSkills の状態・副作用・ハンドラを集約するフック。
  */
@@ -35,12 +51,18 @@ export function useGitHubSkills(userId: number, targetRole: string) {
     setProfileError(false)
     setSummariesError(false)
     try {
+      await authService.ensureFreshUserToken()
       const headers = authService.getUserFetchHeaders()
       const [skillsRes, profileRes, summariesRes] = await Promise.all([
         fetch(`${BACKEND_URL}/api/github/skills?user_id=${userId}`, { headers }),
         fetch(`${BACKEND_URL}/api/github/profile?user_id=${userId}`, { headers }),
         fetch(`${BACKEND_URL}/api/github/repo/summaries?user_id=${userId}`, { headers }),
       ])
+
+      if (skillsRes.status === 401 || profileRes.status === 401) {
+        setError('ログインの有効期限が切れました。再ログインしてください。')
+        return
+      }
 
       if (skillsRes.ok) {
         const data = await skillsRes.json()
@@ -71,12 +93,17 @@ export function useGitHubSkills(userId: number, targetRole: string) {
       } else if (summariesRes.status !== 401) {
         setSummariesError(true)
       }
-    } catch {
-      // 通信障害時は各セクションを「データなし」ではなくエラー扱いにする
-      setError('データの取得に失敗しました')
-      setSkillsError(true)
-      setProfileError(true)
-      setSummariesError(true)
+} catch (e) {
+      const msg = e instanceof Error ? e.message : ''
+      if (msg.toLowerCase().includes('unauthorized')) {
+        setError('ログインの有効期限が切れました。再ログインしてください。')
+      } else {
+        // 通信障害時は各セクションを「データなし」ではなくエラー扱いにする
+        setError('データの取得に失敗しました')
+        setSkillsError(true)
+        setProfileError(true)
+        setSummariesError(true)
+      }
     } finally {
       setLoading(false)
     }
@@ -90,6 +117,7 @@ export function useGitHubSkills(userId: number, targetRole: string) {
     setSummarizingRepo(fullName)
     setError(null)
     try {
+      await authService.ensureFreshUserToken()
       const res = await fetch(`${BACKEND_URL}/api/github/repo/summarize?user_id=${userId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
@@ -118,23 +146,34 @@ export function useGitHubSkills(userId: number, targetRole: string) {
     setError(null)
     setNeedsReauth(false)
     try {
+      await authService.ensureFreshUserToken()
       const res = await fetch(`${BACKEND_URL}/api/github/sync/wait?user_id=${userId}`, {
         method: 'POST',
         headers: authService.getUserFetchHeaders(),
       })
+      if (res.status === 401) {
+        setError('ログインの有効期限が切れました。再ログインしてください。')
+        return
+      }
       if (res.status === 403) {
         const msg = await res.text()
         setNeedsReauth(true)
-        setError(msg)
+        setError(parseGitHubErrorBody(msg) || 'GitHub連携の再認証が必要です')
         return
       }
       if (!res.ok) {
-        setError('同期に失敗しました')
+        const body = await res.text()
+        setError(parseGitHubErrorBody(body) || '同期に失敗しました')
         return
       }
       await fetchAll()
-    } catch {
-      setError('同期に失敗しました')
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : ''
+      if (msg.toLowerCase().includes('unauthorized')) {
+        setError('ログインの有効期限が切れました。再ログインしてください。')
+      } else {
+        setError('同期に失敗しました')
+      }
     } finally {
       setSyncing(false)
     }

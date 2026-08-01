@@ -112,7 +112,7 @@ func (c *AdminJobController) JobPositionAction(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "unknown action")
 	}
 	if err := c.companyRepo.UpdateJobPosition(position); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update")
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update job position")
 	}
 	c.audit.Record(actor, "job_position."+action, "company_job_position", position.ID, map[string]any{
 		"data_status": position.DataStatus,

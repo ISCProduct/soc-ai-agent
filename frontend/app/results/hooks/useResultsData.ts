@@ -6,6 +6,10 @@ import { sendAnalysisReport } from '@/lib/api'
 import { authService } from '@/lib/auth'
 import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
 import {
+  GUEST_APPLICATIONS_DISABLED_REASON,
+  GUEST_EMAIL_DISABLED_REASON,
+} from '@/lib/guest-limits'
+import {
   fetchCompanyRelations,
   fetchCompanyMarketInfo,
   type CapitalRelation,
@@ -55,6 +59,7 @@ export function useResultsData() {
 
   const userId = searchParams.get('user_id')
   const sessionId = searchParams.get('session_id')
+  const isGuestUser = authService.getStoredUser()?.is_guest === true
 
   useEffect(() => {
     setMounted(true)
@@ -172,7 +177,7 @@ export function useResultsData() {
   const handleSendEmail = async () => {
     const user = authService.getStoredUser()
     if (!user || user.is_guest) {
-      setSnackbar({ open: true, message: 'ゲストユーザーはメール送信できません', severity: 'error' })
+      setSnackbar({ open: true, message: GUEST_EMAIL_DISABLED_REASON, severity: 'error' })
       return
     }
     if (!userId || !sessionId) return
@@ -228,6 +233,11 @@ export function useResultsData() {
 
   const handleApply = async (e: MouseEvent, company: Company) => {
     e.stopPropagation()
+    const user = authService.getStoredUser()
+    if (!user || user.is_guest) {
+      setSnackbar({ open: true, message: GUEST_APPLICATIONS_DISABLED_REASON, severity: 'error' })
+      return
+    }
     if (!company.matchId || company.isApplied || applyingId !== null) return
     setApplyingId(company.matchId)
     try {
@@ -300,6 +310,7 @@ export function useResultsData() {
     favoritingId,
     applyingId,
     snackbar,
+    isGuestUser,
     handleSendEmail,
     handleBack,
     handleReset,

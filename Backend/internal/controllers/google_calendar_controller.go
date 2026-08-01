@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -52,7 +53,8 @@ func (c *GoogleCalendarController) ConnectStart(ctx echo.Context) error {
 
 	authURL := c.calendarSync.GetAuthURL(state)
 
-	if ctx.Request().Header.Get("Accept") == "application/json" {
+	accept := ctx.Request().Header.Get("Accept")
+	if strings.Contains(accept, "application/json") {
 		return ctx.JSON(http.StatusOK, map[string]string{"auth_url": authURL})
 	}
 	return ctx.Redirect(http.StatusTemporaryRedirect, authURL)

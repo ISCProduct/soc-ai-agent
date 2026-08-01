@@ -151,10 +151,10 @@ export async function fetchCompanySummary(companyId: number): Promise<CompanySum
 }
 
 export const marketColors: Record<MarketType, string> = {
-  prime: '#4169E1',
-  standard: '#32CD32',
-  growth: '#FF6347',
-  unlisted: '#9E9E9E',
+  prime: '#3B6FD9',
+  standard: '#2F9E44',
+  growth: '#E8590C',
+  unlisted: '#94A3B8',
 }
 
 export const marketLabels: Record<MarketType, string> = {

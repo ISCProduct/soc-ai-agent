@@ -14,6 +14,7 @@ type ScoreValidationService interface {
 	GetCalibrationHistory(limit int) ([]models.ScoreCalibrationWeight, error)
 	RunCalibration() (*services.CalibrationResult, error)
 	ListExperiments() ([]string, error)
+	ListAllVariants() ([]models.QuestionVariant, error)
 	CreateVariant(experimentName, variantName, description string, trafficRatio float64) (*models.QuestionVariant, error)
 	GetVariantResults(experimentName string) ([]repositories.VariantResultRow, error)
 }

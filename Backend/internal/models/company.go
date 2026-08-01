@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 // Company 企業情報
 type Company struct {
@@ -28,6 +32,7 @@ type Company struct {
 	InfoFetchedAt        *time.Time `json:"info_fetched_at,omitempty"`
 	JobsFetchedAt        *time.Time `json:"jobs_fetched_at,omitempty"`
 	TechFetchedAt        *time.Time `json:"tech_fetched_at,omitempty"`
+	RelationsFetchedAt   *time.Time `json:"relations_fetched_at,omitempty"`
 	LastModelUsed        string     `gorm:"type:varchar(64)" json:"last_model_used,omitempty"`
 	LastFetchConfidence  string     `gorm:"type:varchar(16)" json:"last_fetch_confidence,omitempty"` // high|medium|low
 
@@ -53,7 +58,7 @@ type Company struct {
 
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
-	DeletedAt *time.Time `gorm:"index"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 }
 
 // CompanyJobPosition 企業の募集職種
@@ -87,7 +92,7 @@ type CompanyJobPosition struct {
 
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
-	DeletedAt *time.Time `gorm:"index" json:"-"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 }
 
 // CompanyWeightProfile 企業の適性プロファイル（10カテゴリの重視度）
@@ -230,7 +235,7 @@ type CompanyReview struct {
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
-	DeletedAt *time.Time `gorm:"index"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 }
 
 // CompanyBenefit 企業の福利厚生

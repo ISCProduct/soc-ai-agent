@@ -24,6 +24,7 @@ describe('ReportScreen', () => {
         emailSent={false}
         onSendEmail={noop}
         isGuest={false}
+        onRegisterClick={noop}
         videoUploadStatus="idle"
         videoUploadProgress={0}
         videoSizeWarning={null}

@@ -3,23 +3,33 @@ package controllers
 import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"gorm.io/gorm"
+)
+
+const (
+	maxEntryJobPositions = 50
+	maxEntryGraduates    = 30
 )
 
 type CompanyEntryController struct {
+	db           *gorm.DB
 	companyRepo  repository.CompanyRepository
 	graduateRepo repository.GraduateEmploymentRepository
 }
 
 func NewCompanyEntryController(
+	db *gorm.DB,
 	companyRepo repository.CompanyRepository,
 	graduateRepo repository.GraduateEmploymentRepository,
 ) *CompanyEntryController {
 	return &CompanyEntryController{
+		db:           db,
 		companyRepo:  companyRepo,
 		graduateRepo: graduateRepo,
 	}
@@ -103,6 +113,12 @@ func (c *CompanyEntryController) Submit(ctx echo.Context) error {
 	if strings.TrimSpace(req.Name) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
 	}
+	if len(req.JobPositions) > maxEntryJobPositions {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("job_positions must be %d or fewer", maxEntryJobPositions))
+	}
+	if len(req.Graduates) > maxEntryGraduates {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("graduates must be %d or fewer", maxEntryGraduates))
+	}
 
 	now := time.Now()
 	company := &models.Company{
@@ -130,74 +146,77 @@ func (c *CompanyEntryController) Submit(ctx echo.Context) error {
 		SourceFetchedAt:  &now,
 	}
 
-	if err := c.companyRepo.Create(company); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create company")
-	}
+	err := c.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(company).Error; err != nil {
+			return fmt.Errorf("create company: %w", err)
+		}
 
-	// 求人情報の保存
-	for _, jp := range req.JobPositions {
-		if strings.TrimSpace(jp.Title) == "" {
-			continue
-		}
-		position := &models.CompanyJobPosition{
-			CompanyID:       company.ID,
-			Title:           strings.TrimSpace(jp.Title),
-			Description:     jp.Description,
-			JobCategoryID:   jp.JobCategoryID,
-			MinSalary:       jp.MinSalary,
-			MaxSalary:       jp.MaxSalary,
-			EmploymentType:  jp.EmploymentType,
-			WorkLocation:    jp.WorkLocation,
-			RemoteOption:    jp.RemoteOption,
-			RequiredSkills:  jp.RequiredSkills,
-			PreferredSkills: jp.PreferredSkills,
-			IsActive:        true,
-		}
-		if err := c.companyRepo.CreateJobPosition(position); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to create job position")
-		}
-	}
-
-	// WeightProfile の保存
-	if req.WeightProfile != nil {
-		profile := &models.CompanyWeightProfile{
-			CompanyID:             company.ID,
-			TechnicalOrientation:  req.WeightProfile.TechnicalOrientation,
-			TeamworkOrientation:   req.WeightProfile.TeamworkOrientation,
-			LeadershipOrientation: req.WeightProfile.LeadershipOrientation,
-			CreativityOrientation: req.WeightProfile.CreativityOrientation,
-			StabilityOrientation:  req.WeightProfile.StabilityOrientation,
-			GrowthOrientation:     req.WeightProfile.GrowthOrientation,
-			WorkLifeBalance:       req.WeightProfile.WorkLifeBalance,
-			ChallengeSeeking:      req.WeightProfile.ChallengeSeeking,
-			DetailOrientation:     req.WeightProfile.DetailOrientation,
-			CommunicationSkill:    req.WeightProfile.CommunicationSkill,
-		}
-		if err := c.companyRepo.CreateOrUpdateWeightProfile(profile); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to create weight profile")
-		}
-	}
-
-	// 卒業生就職情報の保存
-	for _, g := range req.Graduates {
-		var hiredAt *time.Time
-		if strings.TrimSpace(g.HiredAt) != "" {
-			if parsed, err := time.Parse("2006-01-02", g.HiredAt); err == nil {
-				hiredAt = &parsed
+		for _, jp := range req.JobPositions {
+			if strings.TrimSpace(jp.Title) == "" {
+				continue
+			}
+			position := &models.CompanyJobPosition{
+				CompanyID:       company.ID,
+				Title:           strings.TrimSpace(jp.Title),
+				Description:     jp.Description,
+				JobCategoryID:   jp.JobCategoryID,
+				MinSalary:       jp.MinSalary,
+				MaxSalary:       jp.MaxSalary,
+				EmploymentType:  jp.EmploymentType,
+				WorkLocation:    jp.WorkLocation,
+				RemoteOption:    jp.RemoteOption,
+				RequiredSkills:  jp.RequiredSkills,
+				PreferredSkills: jp.PreferredSkills,
+				IsActive:        true,
+			}
+			if err := tx.Create(position).Error; err != nil {
+				return fmt.Errorf("create job position: %w", err)
 			}
 		}
-		entry := &models.GraduateEmployment{
-			CompanyID:      company.ID,
-			GraduateName:   strings.TrimSpace(g.GraduateName),
-			GraduationYear: g.GraduationYear,
-			SchoolName:     strings.TrimSpace(g.SchoolName),
-			Department:     strings.TrimSpace(g.Department),
-			HiredAt:        hiredAt,
-			Note:           strings.TrimSpace(g.Note),
+
+		if req.WeightProfile != nil {
+			profile := &models.CompanyWeightProfile{
+				CompanyID:             company.ID,
+				TechnicalOrientation:  req.WeightProfile.TechnicalOrientation,
+				TeamworkOrientation:   req.WeightProfile.TeamworkOrientation,
+				LeadershipOrientation: req.WeightProfile.LeadershipOrientation,
+				CreativityOrientation: req.WeightProfile.CreativityOrientation,
+				StabilityOrientation:  req.WeightProfile.StabilityOrientation,
+				GrowthOrientation:     req.WeightProfile.GrowthOrientation,
+				WorkLifeBalance:       req.WeightProfile.WorkLifeBalance,
+				ChallengeSeeking:      req.WeightProfile.ChallengeSeeking,
+				DetailOrientation:     req.WeightProfile.DetailOrientation,
+				CommunicationSkill:    req.WeightProfile.CommunicationSkill,
+			}
+			if err := tx.Save(profile).Error; err != nil {
+				return fmt.Errorf("create weight profile: %w", err)
+			}
 		}
-		if err := c.graduateRepo.Create(entry); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to create graduate employment")
+
+		for _, g := range req.Graduates {
+			var hiredAt *time.Time
+			if strings.TrimSpace(g.HiredAt) != "" {
+				if parsed, err := time.Parse("2006-01-02", g.HiredAt); err == nil {
+					hiredAt = &parsed
+				}
+			}
+			entry := &models.GraduateEmployment{
+				CompanyID:      company.ID,
+				GraduateName:   strings.TrimSpace(g.GraduateName),
+				GraduationYear: g.GraduationYear,
+				SchoolName:     strings.TrimSpace(g.SchoolName),
+				Department:     strings.TrimSpace(g.Department),
+				HiredAt:        hiredAt,
+				Note:           strings.TrimSpace(g.Note),
+			}
+			if err := tx.Create(entry).Error; err != nil {
+				return fmt.Errorf("create graduate employment: %w", err)
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create company")
 	}
 
 	return ctx.JSON(http.StatusCreated, map[string]any{

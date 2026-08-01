@@ -162,7 +162,23 @@ export function useInterviewSession({
     setAiSpeaking(true)
 
     let rafId: number | null = null
-    let routedThroughCtx = false
+
+    const cleanup = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId)
+        rafId = null
+      }
+      if (aiLevelRafRef.current !== null) {
+        cancelAnimationFrame(aiLevelRafRef.current)
+        aiLevelRafRef.current = null
+      }
+      setAiLevel(0)
+      setAiSpeaking(false)
+      URL.revokeObjectURL(url)
+      if (aiAudioRef.current === el) aiAudioRef.current = null
+      el.removeAttribute('src')
+      el.load()
+    }
 
     try {
       if (!aiAudioCtxRef.current || aiAudioCtxRef.current.state === 'closed') {
@@ -172,8 +188,7 @@ export function useInterviewSession({
       // resume を await して running 状態を確実に待つ（suspended のまま再生すると無音になる）
       await ctx.resume()
 
-      const source   = ctx.createMediaElementSource(el)
-      routedThroughCtx = true
+      const source = ctx.createMediaElementSource(el)
       const analyser = ctx.createAnalyser()
       analyser.fftSize = 512
       analyser.smoothingTimeConstant = 0.6
@@ -184,35 +199,41 @@ export function useInterviewSession({
       const trackLevel = () => {
         analyser.getByteTimeDomainData(timeData)
         let sum = 0
-        for (const v of timeData) { const n = (v - 128) / 128; sum += n * n }
+        for (const v of timeData) {
+          const n = (v - 128) / 128
+          sum += n * n
+        }
         const rms = Math.sqrt(sum / timeData.length)
         setAiLevel(Math.min(1, rms * 6))
         rafId = requestAnimationFrame(trackLevel)
       }
       rafId = requestAnimationFrame(trackLevel)
       aiLevelRafRef.current = rafId
-    } catch {
-      // AudioContext 未対応またはセキュリティポリシーで拒否された場合はリップシンク無効で続行
-      if (!routedThroughCtx) {
-        // AudioContext を経由していないので Audio 要素がデフォルト出力に直接流れる
-      }
-    }
-
-    const cleanup = () => {
-      if (rafId !== null) cancelAnimationFrame(rafId)
-      if (aiLevelRafRef.current !== null) cancelAnimationFrame(aiLevelRafRef.current)
-      aiLevelRafRef.current = null
-      setAiLevel(0)
+    } catch (err) {
+      // AudioContext 未対応時は Audio 要素のデフォルト出力にフォールバック（リップシンクなし）
+      console.warn('[Interview] AudioContext routing unavailable; playing via element output', err)
     }
 
     return new Promise<void>((resolve) => {
-      el.onended = () => { cleanup(); setAiSpeaking(false); URL.revokeObjectURL(url); resolve() }
-      el.onerror = () => { cleanup(); setAiSpeaking(false); URL.revokeObjectURL(url); resolve() }
-      el.play().catch(() => { cleanup(); setAiSpeaking(false); resolve() })
+      el.onended = () => {
+        cleanup()
+        resolve()
+      }
+      el.onerror = () => {
+        console.error('[Interview] AI audio element error', el.error)
+        cleanup()
+        resolve()
+      }
+      el.play().catch((err) => {
+        console.error('[Interview] AI audio play() failed (check CSP media-src / autoplay)', err)
+        cleanup()
+        resolve()
+      })
     })
   }
 
   const doStartTurn = async (sessionId: number, userId: number) => {
+    await authService.ensureFreshUserToken()
     const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/start-turn`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
@@ -470,6 +491,7 @@ export function useInterviewSession({
     formData.append('company_type', selectedPosition?.category || 'general')
     formData.append('company_id', String(interviewCompany?.id || 0))
     try {
+      await authService.ensureFreshUserToken()
       const res = await fetch(`${BACKEND_URL}/api/interviews/${session.id}/turn`, {
         method: 'POST',
         headers: { ...authService.getUserFetchHeaders() },
@@ -492,8 +514,8 @@ export function useInterviewSession({
         try { await interviewApi.saveUtterance(session.id, user.user_id, 'ai', aiText) } catch (e) { console.error('[utterance save error]', e) }
       }
       await playAudioBlob(audio)
-    } catch (e: any) {
-      setErrorMessage(e.message || '通信エラーが発生しました')
+    } catch (e: unknown) {
+      setErrorMessage(parseMediaError(e))
     } finally {
       setTurnPending(false)
     }

@@ -3,19 +3,24 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import {
-  Box,
   Button,
   Card,
   CardContent,
   Chip,
   Divider,
-  IconButton,
-  Stack,
   Typography,
 } from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import Grid from '@mui/material/Grid'
 import { authService } from '@/lib/auth'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
+
+const cardSx = {
+  height: '100%',
+  border: '1px solid',
+  borderColor: 'divider',
+  borderRadius: '10px',
+} as const
 
 export default function AdminDashboardPage() {
   const [companyCount, setCompanyCount] = useState<number | null>(null)
@@ -42,26 +47,22 @@ export default function AdminDashboardPage() {
   }, [])
 
   return (
-    <Box sx={{ p: 4, maxWidth: 960, mx: 'auto' }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-        <IconButton component={Link} href="/"><ArrowBackIcon /></IconButton>
-        <Typography variant="h4" fontWeight="bold">
-          管理者ダッシュボード
-        </Typography>
-      </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        管理者向けの操作メニューです。権限がない場合は表示されません。
-      </Typography>
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
+      <AdminPageHeader
+        title="管理メニュー"
+        description="学生課の先生向けに、企業情報や求人・就職情報を管理できます。"
+        backHref="/"
+      />
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Card sx={{ height: '100%' }}>
+          <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                企業データ
+                企業情報
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                企業プロフィールの追加・更新、公開ステータスの管理を行います。
+                学生に見せる企業の登録・確認・公開を行います。
               </Typography>
               <Chip
                 label={companyCount === null ? '読み込み中' : `登録数 ${companyCount}`}
@@ -70,13 +71,13 @@ export default function AdminDashboardPage() {
               />
               <Divider sx={{ mb: 2 }} />
               <Button variant="contained" component={Link} href="/admin/companies">
-                企業管理へ
+                企業情報の管理へ
               </Button>
             </CardContent>
           </Card>
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Card sx={{ height: '100%' }}>
+          <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 求人管理
@@ -92,7 +93,7 @@ export default function AdminDashboardPage() {
           </Card>
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Card sx={{ height: '100%' }}>
+          <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 卒業生の就職情報
@@ -108,7 +109,7 @@ export default function AdminDashboardPage() {
           </Card>
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Card sx={{ height: '100%' }}>
+          <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 ユーザー管理
@@ -124,7 +125,7 @@ export default function AdminDashboardPage() {
           </Card>
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Card sx={{ height: '100%' }}>
+          <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 監査ログ
@@ -140,7 +141,7 @@ export default function AdminDashboardPage() {
           </Card>
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Card sx={{ height: '100%' }}>
+          <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 面接管理
@@ -156,7 +157,7 @@ export default function AdminDashboardPage() {
           </Card>
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Card sx={{ height: '100%' }}>
+          <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 ベクトルDB
@@ -172,7 +173,7 @@ export default function AdminDashboardPage() {
           </Card>
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Card sx={{ height: '100%' }}>
+          <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 APIコストモニタリング
@@ -183,6 +184,22 @@ export default function AdminDashboardPage() {
               <Divider sx={{ mb: 2 }} />
               <Button variant="contained" component={Link} href="/admin/costs">
                 コスト管理へ
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card elevation={0} sx={cardSx}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                AI/RAG 運用管理
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                RAG ベクトルDB、キャッシュヒット率、コスト削減効果を一元管理します。
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Button variant="contained" component={Link} href="/admin/vector-db">
+                RAG 運用へ
               </Button>
             </CardContent>
           </Card>
@@ -204,7 +221,7 @@ export default function AdminDashboardPage() {
           </Card>
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Card sx={{ height: '100%' }}>
+          <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 スコア精度検証
@@ -220,7 +237,7 @@ export default function AdminDashboardPage() {
           </Card>
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Card sx={{ height: '100%' }}>
+          <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 プロファイル再計算
@@ -236,7 +253,7 @@ export default function AdminDashboardPage() {
           </Card>
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Card sx={{ height: '100%' }}>
+          <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 集合知サマリー再構築
@@ -252,7 +269,7 @@ export default function AdminDashboardPage() {
           </Card>
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Card sx={{ height: '100%' }}>
+          <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 スクレイパーセッション
@@ -268,6 +285,6 @@ export default function AdminDashboardPage() {
           </Card>
         </Grid>
       </Grid>
-    </Box>
+    </PageContainer>
   )
 }

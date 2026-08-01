@@ -1,10 +1,8 @@
 'use client'
 
-import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import {
   Alert,
-  Box,
   Button,
   Card,
   CardContent,
@@ -25,9 +23,10 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import DeleteIcon from '@mui/icons-material/Delete'
 import { authService } from '@/lib/auth'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 
 type ScraperSession = {
   id: number
@@ -141,22 +140,18 @@ export default function AdminScraperSessionsPage() {
   }
 
   return (
-    <Box sx={{ p: 4, maxWidth: 960, mx: 'auto' }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-        <IconButton component={Link} href="/admin"><ArrowBackIcon /></IconButton>
-        <Typography variant="h4" fontWeight="bold">
-          スクレイパーセッション管理
-        </Typography>
-      </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        クローリングに使用するサイトごとのセッション（Cookie）を管理します。
-      </Typography>
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
+      <AdminPageHeader
+        title="スクレイパーセッション管理"
+        description="クローリングに使用するサイトごとのセッション（Cookie）を管理します。"
+        backHref="/admin"
+      />
 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>{success}</Alert>}
 
       <Stack spacing={3}>
-        <Card>
+        <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>セッション一覧</Typography>
             {loading ? (
@@ -206,7 +201,7 @@ export default function AdminScraperSessionsPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>セッションを追加・更新</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -272,6 +267,6 @@ export default function AdminScraperSessionsPage() {
           </Button>
         </DialogActions>
       </Dialog>
-    </Box>
+    </PageContainer>
   )
 }

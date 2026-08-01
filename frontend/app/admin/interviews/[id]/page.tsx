@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
-import Link from 'next/link'
 import {
   Alert,
   Box,
@@ -22,6 +21,8 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 
 type InterviewVideo = {
   id: number
@@ -105,15 +106,11 @@ export default function AdminInterviewDetailPage() {
   }
 
   return (
-    <Box sx={{ p: 4, maxWidth: 1100, mx: 'auto' }}>
-      <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 1 }}>
-        <Button variant="text" component={Link} href="/admin/interviews" size="small">
-          ← 一覧へ戻る
-        </Button>
-      </Stack>
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
-        面接セッション #{sessionId} — 動画一覧
-      </Typography>
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
+      <AdminPageHeader
+        title={`面接セッション #${sessionId} — 動画一覧`}
+        backHref="/admin/interviews"
+      />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -127,7 +124,7 @@ export default function AdminInterviewDetailPage() {
       )}
 
       {playingURL && (
-        <Card sx={{ mb: 3, border: '1px solid', borderColor: 'primary.main' }}>
+        <Card elevation={0} sx={{ mb: 3, border: '1px solid', borderColor: 'primary.main', borderRadius: '10px' }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>
               動画プレイヤー
@@ -150,7 +147,7 @@ export default function AdminInterviewDetailPage() {
         </Card>
       )}
 
-      <Card>
+      <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>
             録画動画
@@ -242,6 +239,6 @@ export default function AdminInterviewDetailPage() {
           )}
         </CardContent>
       </Card>
-    </Box>
+    </PageContainer>
   )
 }

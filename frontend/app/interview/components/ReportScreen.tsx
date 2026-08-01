@@ -7,6 +7,7 @@ import {
   LinearProgress,
   Paper,
   Stack,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
@@ -15,6 +16,11 @@ import InterviewSummary from './InterviewSummary'
 import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
 import { PRIMARY, BG_DARK } from '../constants'
 import type { ReportStatus } from '../hooks/useInterviewSession'
+import {
+  GUEST_EMAIL_DISABLED_REASON,
+  GUEST_REGISTER_CTA_LABEL,
+  getGuestEmailButtonProps,
+} from '@/lib/guest-limits'
 
 export interface ReportScreenProps {
   onBack: () => void
@@ -33,6 +39,8 @@ export interface ReportScreenProps {
   onRetryReport?: () => void
   /** ゲストユーザーはメール送信不可 */
   isGuest: boolean
+  /** ゲスト向け登録導線への遷移 */
+  onRegisterClick: () => void
   videoUploadStatus: 'idle' | 'uploading' | 'done' | 'error'
   videoUploadProgress: number
   videoSizeWarning: string | null
@@ -57,6 +65,7 @@ export default function ReportScreen({
   onSendEmail,
   onRetryReport,
   isGuest,
+  onRegisterClick,
   videoUploadStatus,
   videoUploadProgress,
   videoSizeWarning,
@@ -92,15 +101,38 @@ export default function ReportScreen({
               title="面接結果がプロフィールスコアに反映されました"
             />
             <InterviewSummary report={report} userId={userId} theme="dark" />
-            <Button
-              variant="outlined"
-              fullWidth
-              disabled={emailSending || emailSent || isGuest}
-              onClick={onSendEmail}
-              sx={{ color: emailSent ? '#34a853' : PRIMARY, borderColor: emailSent ? '#34a853' : PRIMARY, '&:hover': { borderColor: PRIMARY, bgcolor: 'rgba(236,91,19,0.08)' } }}
-            >
-              {emailSent ? '✓ メールを送信しました' : emailSending ? '送信中...' : 'レポートをメールで受け取る'}
-            </Button>
+            {(() => {
+              const guestEmailProps = getGuestEmailButtonProps(isGuest)
+              return (
+                <Stack spacing={1}>
+                  <Tooltip title={guestEmailProps.title} disableHoverListener={!guestEmailProps.disabled}>
+                    <span>
+                      <Button
+                        variant="outlined"
+                        fullWidth
+                        disabled={emailSending || emailSent || guestEmailProps.disabled}
+                        onClick={onSendEmail}
+                        sx={{ color: emailSent ? '#34a853' : PRIMARY, borderColor: emailSent ? '#34a853' : PRIMARY, '&:hover': { borderColor: PRIMARY, bgcolor: 'rgba(236,91,19,0.08)' } }}
+                      >
+                        {emailSent ? '✓ メールを送信しました' : emailSending ? '送信中...' : 'レポートをメールで受け取る'}
+                      </Button>
+                    </span>
+                  </Tooltip>
+                  {isGuest && (
+                    <Typography variant="caption" sx={{ color: '#9aa0a6', textAlign: 'center' }}>
+                      {GUEST_EMAIL_DISABLED_REASON}{' '}
+                      <Button
+                        size="small"
+                        onClick={onRegisterClick}
+                        sx={{ color: PRIMARY, textTransform: 'none', p: 0, minWidth: 0, verticalAlign: 'baseline' }}
+                      >
+                        {GUEST_REGISTER_CTA_LABEL}
+                      </Button>
+                    </Typography>
+                  )}
+                </Stack>
+              )
+            })()}
           </Stack>
         )}
 

@@ -8,11 +8,7 @@ import (
 	"Backend/internal/services"
 	ifaces "Backend/internal/services/interfaces"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -21,14 +17,16 @@ import (
 )
 
 type AdminCompanyController struct {
-	repo         repository.CompanyRepository
-	audit        ifaces.AuditLogService
-	gbiz         *services.GBizInfoService
-	openaiClient *openai.Client
-	infoFetcher  *services.CompanyInfoFetcher
-	jobFetcher   *services.JobFetchService
-	techFetcher  *services.TechStackFetcher
-	catalogWarm  *services.CatalogWarmService
+	repo             repository.CompanyRepository
+	audit            ifaces.AuditLogService
+	gbiz             *services.GBizInfoService
+	openaiClient     *openai.Client
+	infoFetcher      *services.CompanyInfoFetcher
+	relationsFetcher *services.CompanyRelationsFetcher
+	jobFetcher       *services.JobFetchService
+	techFetcher      *services.TechStackFetcher
+	catalogWarm      *services.CatalogWarmService
+	missingBatch     *services.CompanyMissingBatchService
 }
 
 func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.AuditLogService, gbiz *services.GBizInfoService, openaiClient ...*openai.Client) *AdminCompanyController {
@@ -39,8 +37,23 @@ func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.A
 		ctrl.jobFetcher = services.NewJobFetchService(repo, openaiClient[0])
 		ctrl.techFetcher = services.NewTechStackFetcher(repo, openaiClient[0])
 		ctrl.catalogWarm = services.NewCatalogWarmService(repo, ctrl.infoFetcher, ctrl.jobFetcher)
+		ctrl.missingBatch = services.NewCompanyMissingBatchService(
+			repo, ctrl.infoFetcher, ctrl.jobFetcher, ctrl.techFetcher, nil,
+		)
 	}
 	return ctrl
+}
+
+// SetRelationsFetcher は企業関係・市場情報取得サービスを注入する（#633 Phase 2）。
+func (c *AdminCompanyController) SetRelationsFetcher(fetcher *services.CompanyRelationsFetcher) {
+	if c != nil {
+		c.relationsFetcher = fetcher
+		if c.missingBatch != nil || c.infoFetcher != nil {
+			c.missingBatch = services.NewCompanyMissingBatchService(
+				c.repo, c.infoFetcher, c.jobFetcher, c.techFetcher, fetcher,
+			)
+		}
+	}
 }
 
 // SetCompanySearchGuards は FirstTouch Search の予算・singleflight を注入する（#587）。
@@ -60,29 +73,56 @@ func (c *AdminCompanyController) SetCompanySearchGuards(budget companyfetch.Sear
 		c.techFetcher.SetSearchBudget(budget)
 		c.techFetcher.SetSearchFlight(flight)
 	}
+	if c.relationsFetcher != nil {
+		c.relationsFetcher.SetSearchBudget(budget)
+		c.relationsFetcher.SetSearchFlight(flight)
+	}
 }
 
 // List GET /api/admin/companies
 func (c *AdminCompanyController) List(ctx echo.Context) error {
+	const maxListLimit = 200
 	limit := 50
 	offset := 0
 	if v, err := strconv.Atoi(ctx.QueryParam("limit")); err == nil && v > 0 {
-		limit = v
+		limit = min(v, maxListLimit)
 	}
 	if v, err := strconv.Atoi(ctx.QueryParam("offset")); err == nil && v >= 0 {
 		offset = v
 	}
-	companies, err := c.repo.FindAllActive(limit, offset)
+	name := strings.TrimSpace(ctx.QueryParam("name"))
+	status := strings.TrimSpace(ctx.QueryParam("status"))
+	industry := strings.TrimSpace(ctx.QueryParam("industry"))
+	readiness := strings.TrimSpace(ctx.QueryParam("readiness"))
+	orderBy := strings.TrimSpace(ctx.QueryParam("order"))
+	companies, total, err := c.repo.ListActiveFiltered(limit, offset, name, status, industry, readiness, orderBy)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch companies")
 	}
-	total, _ := c.repo.CountActive()
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"companies": companies,
 		"total":     total,
 		"limit":     limit,
 		"offset":    offset,
+		"name":      name,
+		"status":    status,
+		"industry":  industry,
+		"readiness": readiness,
+		"order":     orderBy,
 	})
+}
+
+// Industries GET /api/admin/companies/industries
+// アクティブ企業に付いている業界名の一覧を返す（絞り込み用）。
+func (c *AdminCompanyController) Industries(ctx echo.Context) error {
+	industries, err := c.repo.ListActiveIndustries()
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch industries")
+	}
+	if industries == nil {
+		industries = []string{}
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{"industries": industries})
 }
 
 // Create POST /api/admin/companies
@@ -95,6 +135,11 @@ func (c *AdminCompanyController) Create(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
 	}
 	applyCompanyDefaults(&payload)
+	// AI プレビュー経由で作成した場合は取得メタを残し、公開後も再取得判断できるようにする
+	if strings.TrimSpace(payload.LastModelUsed) != "" && payload.InfoFetchedAt == nil {
+		now := time.Now()
+		payload.InfoFetchedAt = &now
+	}
 	if err := c.repo.Create(&payload); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create company")
 	}
@@ -221,238 +266,6 @@ func (c *AdminCompanyController) SyncGBiz(ctx echo.Context) error {
 	actor := ctx.Request().Header.Get("X-Admin-Email")
 	c.audit.Record(actor, "company.gbiz_sync", "company", uint(id), map[string]any{
 		"status": result.Status,
-	})
-	return ctx.JSON(http.StatusOK, result)
-}
-
-// WebSearchCompanyInfo POST /api/admin/companies/web-search
-// 企業名をもとにスクレイプ/Search→Parse で企業情報をプレビュー用に返す（DB非更新）
-func (c *AdminCompanyController) WebSearchCompanyInfo(ctx echo.Context) error {
-	var req struct {
-		Name       string `json:"name"`
-		WebsiteURL string `json:"website_url"`
-	}
-	if err := ctx.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
-	}
-	if strings.TrimSpace(req.Name) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
-	}
-	if c.infoFetcher == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
-	}
-
-	result, err := c.infoFetcher.Acquire(ctx.Request().Context(), req.Name, req.WebsiteURL)
-	if err != nil {
-		return echoInternalError(err)
-	}
-
-	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.web_search", "company", 0, map[string]any{
-		"name":   req.Name,
-		"source": result.Source,
-		"model":  result.ModelUsed,
-	})
-
-	return ctx.JSON(http.StatusOK, result)
-}
-
-// FetchTechStack POST /api/admin/companies/:id/tech-stack-search
-// スクレイプ/Search から技術スタックを取得してDBを更新する
-func (c *AdminCompanyController) FetchTechStack(ctx echo.Context) error {
-	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
-	}
-	if c.techFetcher == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
-	}
-
-	forceRefresh := ctx.QueryParam("force") == "true"
-	result, err := c.techFetcher.FetchAndSave(ctx.Request().Context(), uint(id), forceRefresh)
-	if err != nil {
-		return echoInternalError(err)
-	}
-
-	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.fetch_tech_stack", "company", uint(id), map[string]any{
-		"force":  forceRefresh,
-		"source": result.Source,
-		"model":  result.ModelUsed,
-	})
-
-	return ctx.JSON(http.StatusOK, result)
-}
-
-// FetchCompanyInfo POST /api/admin/companies/:id/fetch-info
-// ?force=true を付けると DB キャッシュを無視して AI で再取得する。
-func (c *AdminCompanyController) FetchCompanyInfo(ctx echo.Context) error {
-	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
-	}
-	if c.infoFetcher == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
-	}
-
-	forceRefresh := ctx.QueryParam("force") == "true"
-	result, err := c.infoFetcher.FetchAndSave(ctx.Request().Context(), uint(id), forceRefresh)
-	if err != nil {
-		return echoInternalError(err)
-	}
-
-	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.fetch_info", "company", uint(id), map[string]any{
-		"industry": result.Industry,
-		"force":    forceRefresh,
-	})
-
-	return ctx.JSON(http.StatusOK, result)
-}
-
-// FetchJobs POST /api/admin/companies/:id/fetch-jobs
-// ?force=true を付けると DB キャッシュを無視して AI で再取得する。
-func (c *AdminCompanyController) FetchJobs(ctx echo.Context) error {
-	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
-	}
-	if c.jobFetcher == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
-	}
-
-	forceRefresh := ctx.QueryParam("force") == "true"
-	positions, err := c.jobFetcher.FetchAndSaveJobs(ctx.Request().Context(), uint(id), forceRefresh)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-
-	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.fetch_jobs", "company", uint(id), map[string]any{
-		"count": len(positions),
-		"force": forceRefresh,
-	})
-
-	return ctx.JSON(http.StatusOK, map[string]any{
-		"positions": positions,
-		"total":     len(positions),
-	})
-}
-
-// FetchPersona POST /api/admin/companies/:id/fetch-persona
-// ?force=true を付けると DB キャッシュを無視して AI で再取得する。
-func (c *AdminCompanyController) FetchPersona(ctx echo.Context) error {
-	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
-	}
-	if c.jobFetcher == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
-	}
-
-	forceRefresh := ctx.QueryParam("force") == "true"
-	profile, err := c.jobFetcher.FetchAndSavePersona(ctx.Request().Context(), uint(id), forceRefresh)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-
-	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.fetch_persona", "company", uint(id), map[string]any{
-		"force": forceRefresh,
-	})
-
-	return ctx.JSON(http.StatusOK, profile)
-}
-
-// SeedL1Catalog POST /api/admin/companies/seed-l1
-// multipart file=csv または body に CSV テキスト。未指定時は sample CSV を読む。
-func (c *AdminCompanyController) SeedL1Catalog(ctx echo.Context) error {
-	var reader io.Reader
-	file, err := ctx.FormFile("file")
-	if err == nil && file != nil {
-		f, openErr := file.Open()
-		if openErr != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, openErr.Error())
-		}
-		defer f.Close()
-		reader = f
-	} else if body := ctx.Request().Body; body != nil && ctx.Request().ContentLength > 0 &&
-		strings.Contains(ctx.Request().Header.Get("Content-Type"), "text/csv") {
-		reader = body
-	} else {
-		path := strings.TrimSpace(ctx.QueryParam("path"))
-		if path == "" {
-			path = "config/l1_catalog_seed.sample.csv"
-		}
-		f, openErr := os.Open(path)
-		if openErr != nil {
-			// Backend 作業ディレクトリ差を吸収
-			alt := filepath.Join("Backend", path)
-			f2, err2 := os.Open(alt)
-			if err2 != nil {
-				return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("seed file not found: %v", openErr))
-			}
-			defer f2.Close()
-			reader = f2
-		} else {
-			defer f.Close()
-			reader = f
-		}
-	}
-	rows, err := services.ParseL1SeedCSV(reader)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	result, err := services.ImportL1Seed(c.repo, rows)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.seed_l1", "company", 0, map[string]any{
-		"total":   result.Total,
-		"created": result.Created,
-		"updated": result.Updated,
-	})
-	return ctx.JSON(http.StatusOK, result)
-}
-
-// GetL1Coverage GET /api/admin/companies/l1-coverage
-func (c *AdminCompanyController) GetL1Coverage(ctx echo.Context) error {
-	if c.catalogWarm == nil {
-		c.catalogWarm = services.NewCatalogWarmService(c.repo, c.infoFetcher, c.jobFetcher)
-	}
-	cov, err := c.catalogWarm.Coverage(ctx.Request().Context())
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return ctx.JSON(http.StatusOK, cov)
-}
-
-// WarmL1Catalog POST /api/admin/companies/warm-l1
-// Body: { "limit": 100, "dry_run": true, "force": false, "include_info": true, "include_persona": true }
-func (c *AdminCompanyController) WarmL1Catalog(ctx echo.Context) error {
-	if c.catalogWarm == nil {
-		c.catalogWarm = services.NewCatalogWarmService(c.repo, c.infoFetcher, c.jobFetcher)
-	}
-	var opts services.L1WarmOptions
-	opts.IncludeInfo = true
-	opts.IncludePersona = true
-	if err := ctx.Bind(&opts); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
-	}
-	// Bind で false が欠落した場合の既定は normalize 側でも補完する
-	result, err := c.catalogWarm.WarmL1(ctx.Request().Context(), opts)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.warm_l1", "company", 0, map[string]any{
-		"dry_run":    result.DryRun,
-		"limit":      result.Limit,
-		"processed":  result.Processed,
-		"info_ok":    result.InfoOK,
-		"persona_ok": result.PersonaOK,
-		"errors":     result.Errors,
 	})
 	return ctx.JSON(http.StatusOK, result)
 }

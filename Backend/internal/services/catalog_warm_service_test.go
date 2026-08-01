@@ -28,10 +28,15 @@ func (s *warmRepoStub) FindAllActive(int, int) ([]models.Company, error) { retur
 func (s *warmRepoStub) FindAllActiveNames(string) ([]models.CompanyName, error) {
 	return nil, nil
 }
-func (s *warmRepoStub) CountActive() (int64, error)                                { return 0, nil }
-func (s *warmRepoStub) FindAllPublished(int, int) ([]models.Company, error)        { return nil, nil }
+func (s *warmRepoStub) CountActive() (int64, error) { return 0, nil }
+func (s *warmRepoStub) ListActiveFiltered(int, int, string, string, string, string, string) ([]models.Company, int64, error) {
+	return nil, 0, nil
+}
+func (s *warmRepoStub) ListActiveIndustries() ([]string, error) { return nil, nil }
+func (s *warmRepoStub) FindAllPublished(int, int) ([]models.Company, error) { return nil, nil }
 func (s *warmRepoStub) CountPublished() (int64, error)                             { return 0, nil }
-func (s *warmRepoStub) FindByID(uint) (*models.Company, error)                     { return nil, nil }
+func (s *warmRepoStub) FindByID(uint) (*models.Company, error)   { return nil, nil }
+func (s *warmRepoStub) FindByIDs([]uint) ([]models.Company, error) { return nil, nil }
 func (s *warmRepoStub) FindByName(string) (*models.Company, error)                 { return nil, nil }
 func (s *warmRepoStub) FindByCorporateNumber(string) (*models.Company, error)      { return nil, nil }
 func (s *warmRepoStub) GetWeightProfile(uint, *uint) (*models.CompanyWeightProfile, error) {
@@ -53,6 +58,9 @@ func (s *warmRepoStub) ListJobPositions(*uint, int) ([]models.CompanyJobPosition
 }
 func (s *warmRepoStub) CreateOrUpdateWeightProfile(*models.CompanyWeightProfile) error { return nil }
 func (s *warmRepoStub) CountWeightProfiles() (int64, error)                            { return 0, nil }
+func (s *warmRepoStub) ListActiveMissingFetchCandidates(int, bool) ([]models.Company, error) {
+	return nil, nil
+}
 
 func TestL1WarmPriority_SIFirst(t *testing.T) {
 	if got := L1WarmPriority("株式会社テスト", "情報サービス・SI"); got != 0 {

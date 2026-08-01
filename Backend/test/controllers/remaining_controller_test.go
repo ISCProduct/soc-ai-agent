@@ -138,7 +138,7 @@ func TestScheduleController_ExportICS_MissingUserID(t *testing.T) {
 // ---- CompanyEntryController ----
 
 func TestCompanyEntryController_Submit_MissingName(t *testing.T) {
-	c := controllers.NewCompanyEntryController(nil, nil)
+	c := controllers.NewCompanyEntryController(nil, nil, nil)
 	body, _ := json.Marshal(map[string]any{"name": ""})
 	req := httptest.NewRequest(http.MethodPost, "/api/companies/entry", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")

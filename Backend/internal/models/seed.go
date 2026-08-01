@@ -49,6 +49,11 @@ func SeedData(db *gorm.DB) error {
 		return err
 	}
 
+	// 相関図用: 公開情報に基づく実在企業の関係（空のときのみ）
+	if err := seedCompanyRelations(db); err != nil {
+		return err
+	}
+
 	return nil
 }
 

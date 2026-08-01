@@ -4,11 +4,6 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
   Button,
-  Card,
-  CardContent,
-  Divider,
-  IconButton,
-  Stack,
   TableBody,
   TableCell,
   TableHead,
@@ -16,9 +11,10 @@ import {
   TableRow,
   Typography,
 } from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService } from '@/lib/auth'
-import { PageContainer } from '@/components/admin/PageContainer'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { StatusBadge } from '@/components/admin/StatusBadge'
@@ -86,25 +82,17 @@ export default function AdminInterviewsPage() {
   }
 
   return (
-    <PageContainer maxWidth={1200}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-        <IconButton component={Link} href="/admin"><ArrowBackIcon /></IconButton>
-        <Typography variant="h4" fontWeight="bold">
-          面接管理
-        </Typography>
-      </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        全ユーザーの面接セッション一覧です。動画を確認するには詳細ページを開いてください。
-      </Typography>
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.wide}>
+      <AdminPageHeader
+        title="面接管理"
+        description="全ユーザーの面接セッション一覧です。動画を確認するには詳細ページを開いてください。"
+        backHref="/admin"
+      />
 
       <ErrorAlert error={error} />
 
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            セッション一覧
-          </Typography>
-          <Divider sx={{ mb: 2 }} />
+      <AdminPanel title="セッション一覧">
+        <AdminPanelBody>
           {sessions.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
               面接セッションがありません。
@@ -172,8 +160,8 @@ export default function AdminInterviewsPage() {
               />
             </>
           )}
-        </CardContent>
-      </Card>
+        </AdminPanelBody>
+      </AdminPanel>
     </PageContainer>
   )
 }

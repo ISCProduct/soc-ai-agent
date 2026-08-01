@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
 import {
   Alert,
   Box,
@@ -11,7 +10,6 @@ import {
   Dialog,
   DialogContent,
   DialogTitle,
-  Divider,
   IconButton,
   InputAdornment,
   MenuItem,
@@ -24,16 +22,16 @@ import {
   TableHead,
   TablePagination,
   TableRow,
-  TableSortLabel,
   TextField,
   Tooltip,
   Typography,
 } from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import SearchIcon from '@mui/icons-material/Search'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { authService } from '@/lib/auth'
+import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
+import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 
 type UserSummary = {
   user_id: number
@@ -167,23 +165,20 @@ export default function AdminScoreDashboardPage() {
   }
 
   return (
-    <Box sx={{ p: 4, maxWidth: 1200, mx: 'auto' }}>
-      {/* Header */}
-      <Stack direction="row" alignItems="center" spacing={2} mb={3}>
-        <IconButton component={Link} href="/admin">
-          <ArrowBackIcon />
-        </IconButton>
-        <Typography variant="h5" fontWeight={700} flex={1}>
-          ユーザー別スコアダッシュボード
-        </Typography>
-        <Button
-          variant="outlined"
-          startIcon={<FileDownloadIcon />}
-          onClick={handleExport}
-        >
-          CSV エクスポート
-        </Button>
-      </Stack>
+    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.wide}>
+      <AdminPageHeader
+        title="ユーザー別スコアダッシュボード"
+        backHref="/admin"
+        actions={
+          <Button
+            variant="outlined"
+            startIcon={<FileDownloadIcon />}
+            onClick={handleExport}
+          >
+            CSV エクスポート
+          </Button>
+        }
+      />
 
       {error && (
         <Alert severity="error" onClose={() => setError('')} sx={{ mb: 2 }}>
@@ -218,7 +213,7 @@ export default function AdminScoreDashboardPage() {
       </Stack>
 
       {/* Table */}
-      <Paper elevation={1}>
+      <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
         <TableContainer>
           <Table size="small">
             <TableHead>
@@ -344,6 +339,6 @@ export default function AdminScoreDashboardPage() {
           )}
         </DialogContent>
       </Dialog>
-    </Box>
+    </PageContainer>
   )
 }
