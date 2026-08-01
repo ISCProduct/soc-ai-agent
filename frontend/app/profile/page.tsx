@@ -35,9 +35,9 @@ import { PageLoading } from '@/components/common/PageLoading'
 
 export default function ProfilePage() {
   return (
-    <Suspense fallback={<PageLoading message="プロフィールを読み込んでいます..." />}>
-      <ProfilePageContent />
-    </Suspense>
+      <Suspense fallback={<PageLoading message="プロフィールを読み込んでいます..." />}>
+        <ProfilePageContent />
+      </Suspense>
   )
 }
 
@@ -61,6 +61,34 @@ function ProfilePageContent() {
   const [calendarConnected, setCalendarConnected] = useState(false)
   const [calendarLoading, setCalendarLoading] = useState(false)
   const [calendarMessage, setCalendarMessage] = useState('')
+  const [calendarStatusError, setCalendarStatusError] = useState(false)
+  const [calendarStatusLoading, setCalendarStatusLoading] = useState(true)
+
+  const fetchCalendarStatus = async () => {
+    setCalendarStatusLoading(true)
+    setCalendarStatusError(false)
+    try {
+      const r = await fetch(`${BACKEND_URL}/api/google-calendar/status`, {
+        headers: authService.getUserFetchHeaders(),
+        credentials: 'include',
+      })
+      if (r.status === 401) {
+        // 未ログイン・セッション切れ時は連携状態を取得しない（エラー表示はしない）
+        return
+      }
+      if (!r.ok) {
+        setCalendarStatusError(true)
+        return
+      }
+      const d = await r.json()
+      setCalendarConnected(d.connected === true)
+    } catch {
+      // 通信障害時は「未連携」と誤表示せず、エラー状態を示す
+      setCalendarStatusError(true)
+    } finally {
+      setCalendarStatusLoading(false)
+    }
+  }
 
   useEffect(() => {
     const storedUser = authService.getStoredUser()
@@ -93,13 +121,7 @@ function ProfilePageContent() {
     setIsFirstTime(firstTime)
 
     // Googleカレンダー連携状態を取得
-    fetch(`${BACKEND_URL}/api/google-calendar/status`, {
-      headers: authService.getUserFetchHeaders(),
-      credentials: 'include',
-    })
-      .then((r) => r.json())
-      .then((d) => setCalendarConnected(d.connected === true))
-      .catch(() => {})
+    fetchCalendarStatus()
 
     // コールバック後のメッセージ処理
     const calendarConnectedParam = searchParams.get('calendar_connected')
@@ -123,12 +145,12 @@ function ProfilePageContent() {
     try {
       const finalSchoolName = schoolOption === 'other' ? schoolName : schoolOption
       const response = await authService.updateProfile(
-        user.user_id,
-        name,
-        targetLevel,
-        finalSchoolName,
-        joinCertifications(certificationsAcquired),
-        certificationsInProgress,
+          user.user_id,
+          name,
+          targetLevel,
+          finalSchoolName,
+          joinCertifications(certificationsAcquired),
+          certificationsInProgress,
       )
       authService.saveAuth(response)
       setUser(authService.getStoredUser())
@@ -210,341 +232,353 @@ function ProfilePageContent() {
   const isGuest = user.is_guest === true
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f5f7fa' }}>
-      {/* ページヘッダー */}
-      <Box sx={{ bgcolor: 'white', borderBottom: '1px solid #e0e0e0', px: { xs: 2, sm: 3 }, py: 1.5 }}>
-        <Container maxWidth="lg">
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Typography variant="h6" fontWeight="bold" color="primary">
-              プロフィール
-            </Typography>
-            <Button
-              startIcon={<ArrowBackIcon />}
-              onClick={() => router.push('/')}
-              size="small"
-            >
-              ホームへ戻る
-            </Button>
-          </Box>
-        </Container>
-      </Box>
-
-      <Container maxWidth="lg" sx={{ py: 4 }}>
-        {/* ユーザーヘッダーカード */}
-        <Card sx={{ mb: 3, borderRadius: 2 }}>
-          <CardContent sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2.5, flexWrap: 'wrap' }}>
-              <Avatar
-                src={user.avatar_url || undefined}
-                sx={{ width: 72, height: 72, fontSize: '1.8rem', bgcolor: 'primary.main' }}
-              >
-                {!user.avatar_url && avatarLetter}
-              </Avatar>
-              <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
-                  <Typography variant="h5" fontWeight="bold" noWrap>
-                    {name || '（名前未設定）'}
-                  </Typography>
-                  {isGitHubUser && (
-                    <Chip
-                      label="GitHub連携済み"
-                      size="small"
-                      sx={{ bgcolor: '#24292e', color: 'white', fontSize: '0.7rem' }}
-                    />
-                  )}
-                  {(targetLevel === '新卒' || targetLevel === '中途') && (
-                    <Chip
-                      label={targetLevel}
-                      size="small"
-                      color="primary"
-                      variant="outlined"
-                    />
-                  )}
-                </Box>
-                <Typography variant="body2" color="text.secondary">
-                  {user.email}
-                </Typography>
-                {schoolName && (
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-                    {schoolOption === 'other' ? schoolName : schoolOption}
-                  </Typography>
-                )}
-              </Box>
-            </Box>
-          </CardContent>
-        </Card>
-
-        {/* メインコンテンツ */}
-        <Box sx={{ display: 'flex', gap: 3, alignItems: 'flex-start', flexWrap: { xs: 'wrap', md: 'nowrap' } }}>
-          {/* 左カラム: プロフィール編集フォーム */}
-          <Box sx={{ width: { xs: '100%', md: 420 }, flexShrink: 0 }}>
-            <Card sx={{ borderRadius: 2, height: '100%' }}>
-              <CardContent sx={{ p: 3 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
-                  <PersonIcon color="primary" />
-                  <Typography variant="h6" fontWeight="bold">
-                    {isFirstTime ? 'はじめに情報を入力してください' : 'プロフィール編集'}
-                  </Typography>
-                </Box>
-
-                {isFirstTime && (
-                  <Alert severity="info" sx={{ mb: 2 }}>
-                    診断の質問内容を最適化するために必要です。
-                  </Alert>
-                )}
-
-                {error && (
-                  <Alert severity="error" sx={{ mb: 2 }}>
-                    {error}
-                  </Alert>
-                )}
-
-                <Box component="form" onSubmit={handleSubmit}>
-                  {/* 基本情報 */}
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-                    <PersonIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                    <Typography variant="body2" fontWeight="bold" color="text.secondary">
-                      基本情報
-                    </Typography>
-                  </Box>
-                  <TextField
-                    fullWidth
-                    label="名前"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                    size="small"
-                    sx={{ mb: 2 }}
-                  />
-                  <TextField
-                    fullWidth
-                    select
-                    label="区分"
-                    value={targetLevel}
-                    onChange={(e) => setTargetLevel(e.target.value)}
-                    size="small"
-                    sx={{ mb: 3 }}
-                  >
-                    <MenuItem value="新卒">新卒</MenuItem>
-                    <MenuItem value="中途">中途</MenuItem>
-                  </TextField>
-
-                  <Divider sx={{ mb: 2 }} />
-
-                  {/* 学校情報 */}
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-                    <SchoolIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                    <Typography variant="body2" fontWeight="bold" color="text.secondary">
-                      学校
-                    </Typography>
-                  </Box>
-                  <TextField
-                    fullWidth
-                    select
-                    label="学校名"
-                    value={schoolOption}
-                    onChange={(e) => setSchoolOption(e.target.value)}
-                    required
-                    size="small"
-                    sx={{ mb: 2 }}
-                  >
-                    <MenuItem value="学校法人岩崎学園情報科学専門学校">
-                      学校法人岩崎学園情報科学専門学校
-                    </MenuItem>
-                    <MenuItem value="other">その他</MenuItem>
-                  </TextField>
-                  {schoolOption === 'other' && (
-                    <TextField
-                      fullWidth
-                      label="学校名（その他）"
-                      value={schoolName}
-                      onChange={(e) => setSchoolName(e.target.value)}
-                      required
-                      size="small"
-                      sx={{ mb: 2 }}
-                    />
-                  )}
-
-                  <Divider sx={{ mb: 2 }} />
-
-                  {/* 資格 */}
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-                    <EmojiEventsIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                    <Typography variant="body2" fontWeight="bold" color="text.secondary">
-                      資格
-                    </Typography>
-                  </Box>
-                  <TextField
-                    fullWidth
-                    select
-                    label="取得資格"
-                    value={certificationsAcquired}
-                    onChange={(e) =>
-                      setCertificationsAcquired(
-                        typeof e.target.value === 'string' ? e.target.value.split(',') : (e.target.value as string[]),
-                      )
-                    }
-                    SelectProps={{
-                      multiple: true,
-                      renderValue: (selected) => (selected as string[]).join(', '),
-                    }}
-                    helperText="複数選択可"
-                    size="small"
-                    sx={{ mb: 2 }}
-                  >
-                    {CERTIFICATION_OPTIONS.map((option) => (
-                      <MenuItem key={option} value={option}>
-                        {option}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                  <TextField
-                    fullWidth
-                    label="勉強中の資格"
-                    value={certificationsInProgress}
-                    onChange={(e) => setCertificationsInProgress(e.target.value)}
-                    placeholder="例: 応用情報技術者、AWS SAA（改行区切り可）"
-                    multiline
-                    minRows={2}
-                    size="small"
-                    sx={{ mb: 3 }}
-                  />
-
-                  <Button
-                    type="submit"
-                    fullWidth
-                    variant="contained"
-                    size="large"
-                    disabled={loading}
-                    startIcon={<SaveIcon />}
-                  >
-                    {loading ? '保存中...' : isFirstTime ? '登録して診断を始める' : '保存する'}
-                  </Button>
-                </Box>
-              </CardContent>
-            </Card>
-          </Box>
-
-          {/* 右カラム: GitHub スキル分析（ゲストアカウントは非表示） */}
-          {!isGuest && (
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <GitHubSkills userId={user.user_id} targetRole={user.target_level} />
-            </Box>
-          )}
-        </Box>
-      </Container>
-
-      {/* Googleカレンダー連携セクション */}
-      {!isGuest && (
-        <Container maxWidth="lg" sx={{ mb: 4 }}>
-          <Card sx={{ borderRadius: 2 }}>
-            <CardContent sx={{ p: 3 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                <WorkIcon color="primary" />
-                <Typography variant="h6" fontWeight="bold">
-                  Googleカレンダー連携
-                </Typography>
-                {calendarConnected && (
-                  <Chip label="連携済み" size="small" color="success" />
-                )}
-              </Box>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                連携することで、面接スケジュールを登録・変更・キャンセルした際にGoogleカレンダーへ自動同期されます。
+      <Box sx={{ minHeight: '100vh', bgcolor: '#f5f7fa' }}>
+        {/* ページヘッダー */}
+        <Box sx={{ bgcolor: 'white', borderBottom: '1px solid #e0e0e0', px: { xs: 2, sm: 3 }, py: 1.5 }}>
+          <Container maxWidth="lg">
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Typography variant="h6" fontWeight="bold" color="primary">
+                プロフィール
               </Typography>
-              {calendarMessage && (
-                <Alert
-                  severity={calendarConnected && calendarMessage.includes('連携しました') ? 'success' : calendarMessage.includes('解除') ? 'info' : 'error'}
-                  sx={{ mb: 2 }}
-                >
-                  {calendarMessage}
-                </Alert>
-              )}
-              {calendarConnected ? (
-                <Button
-                  variant="outlined"
-                  color="error"
+              <Button
+                  startIcon={<ArrowBackIcon />}
+                  onClick={() => router.push('/')}
                   size="small"
-                  onClick={handleCalendarDisconnect}
-                  disabled={calendarLoading}
+              >
+                ホームへ戻る
+              </Button>
+            </Box>
+          </Container>
+        </Box>
+
+        <Container maxWidth="lg" sx={{ py: 4 }}>
+          {/* ユーザーヘッダーカード */}
+          <Card sx={{ mb: 3, borderRadius: 2 }}>
+            <CardContent sx={{ p: 3 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2.5, flexWrap: 'wrap' }}>
+                <Avatar
+                    src={user.avatar_url || undefined}
+                    sx={{ width: 72, height: 72, fontSize: '1.8rem', bgcolor: 'primary.main' }}
                 >
-                  {calendarLoading ? '解除中...' : '連携を解除する'}
-                </Button>
-              ) : (
-                <Button
-                  variant="contained"
-                  size="small"
-                  onClick={handleCalendarConnect}
-                  sx={{ bgcolor: '#4285F4', '&:hover': { bgcolor: '#3367D6' } }}
-                >
-                  Googleカレンダーと連携する
-                </Button>
-              )}
+                  {!user.avatar_url && avatarLetter}
+                </Avatar>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
+                    <Typography variant="h5" fontWeight="bold" noWrap>
+                      {name || '（名前未設定）'}
+                    </Typography>
+                    {isGitHubUser && (
+                        <Chip
+                            label="GitHub連携済み"
+                            size="small"
+                            sx={{ bgcolor: '#24292e', color: 'white', fontSize: '0.7rem' }}
+                        />
+                    )}
+                    {(targetLevel === '新卒' || targetLevel === '中途') && (
+                        <Chip
+                            label={targetLevel}
+                            size="small"
+                            color="primary"
+                            variant="outlined"
+                        />
+                    )}
+                  </Box>
+                  <Typography variant="body2" color="text.secondary">
+                    {user.email}
+                  </Typography>
+                  {schoolName && (
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+                        {schoolOption === 'other' ? schoolName : schoolOption}
+                      </Typography>
+                  )}
+                </Box>
+              </Box>
             </CardContent>
           </Card>
-        </Container>
-      )}
 
-      {/* アカウント管理セクション */}
-      <Container maxWidth="lg" sx={{ pb: 6 }}>
-        <Divider sx={{ my: 4 }} />
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
-          <Box>
-            <Typography variant="body2" color="text.secondary">
-              プライバシーポリシー・データ利用について
-            </Typography>
-            <Button size="small" onClick={() => router.push('/privacy')} sx={{ p: 0, minWidth: 0, textDecoration: 'underline' }}>
-              プライバシーポリシーを確認
+          {/* メインコンテンツ */}
+          <Box sx={{ display: 'flex', gap: 3, alignItems: 'flex-start', flexWrap: { xs: 'wrap', md: 'nowrap' } }}>
+            {/* 左カラム: プロフィール編集フォーム */}
+            <Box sx={{ width: { xs: '100%', md: 420 }, flexShrink: 0 }}>
+              <Card sx={{ borderRadius: 2, height: '100%' }}>
+                <CardContent sx={{ p: 3 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
+                    <PersonIcon color="primary" />
+                    <Typography variant="h6" fontWeight="bold">
+                      {isFirstTime ? 'はじめに情報を入力してください' : 'プロフィール編集'}
+                    </Typography>
+                  </Box>
+
+                  {isFirstTime && (
+                      <Alert severity="info" sx={{ mb: 2 }}>
+                        診断の質問内容を最適化するために必要です。
+                      </Alert>
+                  )}
+
+                  {error && (
+                      <Alert severity="error" sx={{ mb: 2 }}>
+                        {error}
+                      </Alert>
+                  )}
+
+                  <Box component="form" onSubmit={handleSubmit}>
+                    {/* 基本情報 */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                      <PersonIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                      <Typography variant="body2" fontWeight="bold" color="text.secondary">
+                        基本情報
+                      </Typography>
+                    </Box>
+                    <TextField
+                        fullWidth
+                        label="名前"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        required
+                        size="small"
+                        sx={{ mb: 2 }}
+                    />
+                    <TextField
+                        fullWidth
+                        select
+                        label="区分"
+                        value={targetLevel}
+                        onChange={(e) => setTargetLevel(e.target.value)}
+                        size="small"
+                        sx={{ mb: 3 }}
+                    >
+                      <MenuItem value="新卒">新卒</MenuItem>
+                      <MenuItem value="中途">中途</MenuItem>
+                    </TextField>
+
+                    <Divider sx={{ mb: 2 }} />
+
+                    {/* 学校情報 */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                      <SchoolIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                      <Typography variant="body2" fontWeight="bold" color="text.secondary">
+                        学校
+                      </Typography>
+                    </Box>
+                    <TextField
+                        fullWidth
+                        select
+                        label="学校名"
+                        value={schoolOption}
+                        onChange={(e) => setSchoolOption(e.target.value)}
+                        required
+                        size="small"
+                        sx={{ mb: 2 }}
+                    >
+                      <MenuItem value="学校法人岩崎学園情報科学専門学校">
+                        学校法人岩崎学園情報科学専門学校
+                      </MenuItem>
+                      <MenuItem value="other">その他</MenuItem>
+                    </TextField>
+                    {schoolOption === 'other' && (
+                        <TextField
+                            fullWidth
+                            label="学校名（その他）"
+                            value={schoolName}
+                            onChange={(e) => setSchoolName(e.target.value)}
+                            required
+                            size="small"
+                            sx={{ mb: 2 }}
+                        />
+                    )}
+
+                    <Divider sx={{ mb: 2 }} />
+
+                    {/* 資格 */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                      <EmojiEventsIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                      <Typography variant="body2" fontWeight="bold" color="text.secondary">
+                        資格
+                      </Typography>
+                    </Box>
+                    <TextField
+                        fullWidth
+                        select
+                        label="取得資格"
+                        value={certificationsAcquired}
+                        onChange={(e) =>
+                            setCertificationsAcquired(
+                                typeof e.target.value === 'string' ? e.target.value.split(',') : (e.target.value as string[]),
+                            )
+                        }
+                        SelectProps={{
+                          multiple: true,
+                          renderValue: (selected) => (selected as string[]).join(', '),
+                        }}
+                        helperText="複数選択可"
+                        size="small"
+                        sx={{ mb: 2 }}
+                    >
+                      {CERTIFICATION_OPTIONS.map((option) => (
+                          <MenuItem key={option} value={option}>
+                            {option}
+                          </MenuItem>
+                      ))}
+                    </TextField>
+                    <TextField
+                        fullWidth
+                        label="勉強中の資格"
+                        value={certificationsInProgress}
+                        onChange={(e) => setCertificationsInProgress(e.target.value)}
+                        placeholder="例: 応用情報技術者、AWS SAA（改行区切り可）"
+                        multiline
+                        minRows={2}
+                        size="small"
+                        sx={{ mb: 3 }}
+                    />
+
+                    <Button
+                        type="submit"
+                        fullWidth
+                        variant="contained"
+                        size="large"
+                        disabled={loading}
+                        startIcon={<SaveIcon />}
+                    >
+                      {loading ? '保存中...' : isFirstTime ? '登録して診断を始める' : '保存する'}
+                    </Button>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Box>
+
+            {/* 右カラム: GitHub スキル分析（ゲストアカウントは非表示） */}
+            {!isGuest && (
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <GitHubSkills userId={user.user_id} targetRole={user.target_level} />
+                </Box>
+            )}
+          </Box>
+        </Container>
+
+        {/* Googleカレンダー連携セクション */}
+        {!isGuest && (
+            <Container maxWidth="lg" sx={{ mb: 4 }}>
+              <Card sx={{ borderRadius: 2 }}>
+                <CardContent sx={{ p: 3 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                    <WorkIcon color="primary" />
+                    <Typography variant="h6" fontWeight="bold">
+                      Googleカレンダー連携
+                    </Typography>
+                    {calendarConnected && (
+                        <Chip label="連携済み" size="small" color="success" />
+                    )}
+                  </Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    連携することで、面接スケジュールを登録・変更・キャンセルした際にGoogleカレンダーへ自動同期されます。
+                  </Typography>
+                  {calendarMessage && (
+                      <Alert
+                          severity={calendarConnected && calendarMessage.includes('連携しました') ? 'success' : calendarMessage.includes('解除') ? 'info' : 'error'}
+                          sx={{ mb: 2 }}
+                      >
+                        {calendarMessage}
+                      </Alert>
+                  )}
+                  {calendarStatusError ? (
+                      <Alert
+                          severity="warning"
+                          sx={{ mb: 2 }}
+                          action={
+                            <Button color="inherit" size="small" onClick={fetchCalendarStatus} disabled={calendarStatusLoading}>
+                              {calendarStatusLoading ? '再試行中...' : '再試行'}
+                            </Button>
+                          }
+                      >
+                        連携状態を確認できませんでした。通信状況をご確認のうえ、再試行してください。
+                      </Alert>
+                  ) : calendarConnected ? (
+                      <Button
+                          variant="outlined"
+                          color="error"
+                          size="small"
+                          onClick={handleCalendarDisconnect}
+                          disabled={calendarLoading}
+                      >
+                        {calendarLoading ? '解除中...' : '連携を解除する'}
+                      </Button>
+                  ) : (
+                      <Button
+                          variant="contained"
+                          size="small"
+                          onClick={handleCalendarConnect}
+                          sx={{ bgcolor: '#4285F4', '&:hover': { bgcolor: '#3367D6' } }}
+                      >
+                        Googleカレンダーと連携する
+                      </Button>
+                  )}
+                </CardContent>
+              </Card>
+            </Container>
+        )}
+
+        {/* アカウント管理セクション */}
+        <Container maxWidth="lg" sx={{ pb: 6 }}>
+          <Divider sx={{ my: 4 }} />
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                プライバシーポリシー・データ利用について
+              </Typography>
+              <Button size="small" onClick={() => router.push('/privacy')} sx={{ p: 0, minWidth: 0, textDecoration: 'underline' }}>
+                プライバシーポリシーを確認
+              </Button>
+            </Box>
+            <Button
+                variant="outlined"
+                color="error"
+                size="small"
+                onClick={() => setDeleteDialogOpen(true)}
+            >
+              アカウントを退会する
             </Button>
           </Box>
-          <Button
-            variant="outlined"
-            color="error"
-            size="small"
-            onClick={() => setDeleteDialogOpen(true)}
-          >
-            アカウントを退会する
-          </Button>
-        </Box>
-      </Container>
+        </Container>
 
-      {/* アカウント削除確認ダイアログ */}
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>アカウントを退会しますか？</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary">
-            退会後すぐにログインできなくなり、サービス上でのデータ閲覧もできなくなります。
-            保管データ（チャット・面接録画・職務経歴書など）は約30日後に完全削除されます。この操作は取り消せません。
-          </Typography>
-          <Typography variant="body2" component="ul" sx={{ pl: 2, mt: 1, color: 'text.secondary' }}>
-            <li>退会直後: ログイン不可・データ閲覧不可</li>
-            <li>約30日後: チャット・スコア・マッチング結果を完全削除</li>
-            <li>約30日後: 面接練習の録画・レポートを完全削除</li>
-            <li>約30日後: 職務経歴書・アカウント情報を完全削除</li>
-          </Typography>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>
-            キャンセル
-          </Button>
-          <Button
-            onClick={handleDeleteAccount}
-            color="error"
-            variant="contained"
-            disabled={deleting}
-          >
-            {deleting ? '退会処理中...' : '退会する'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        {/* アカウント削除確認ダイアログ */}
+        <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} maxWidth="xs" fullWidth>
+          <DialogTitle>アカウントを退会しますか？</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" color="text.secondary">
+              退会後すぐにログインできなくなり、サービス上でのデータ閲覧もできなくなります。
+              保管データ（チャット・面接録画・職務経歴書など）は約30日後に完全削除されます。この操作は取り消せません。
+            </Typography>
+            <Typography variant="body2" component="ul" sx={{ pl: 2, mt: 1, color: 'text.secondary' }}>
+              <li>退会直後: ログイン不可・データ閲覧不可</li>
+              <li>約30日後: チャット・スコア・マッチング結果を完全削除</li>
+              <li>約30日後: 面接練習の録画・レポートを完全削除</li>
+              <li>約30日後: 職務経歴書・アカウント情報を完全削除</li>
+            </Typography>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 2 }}>
+            <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>
+              キャンセル
+            </Button>
+            <Button
+                onClick={handleDeleteAccount}
+                color="error"
+                variant="contained"
+                disabled={deleting}
+            >
+              {deleting ? '退会処理中...' : '退会する'}
+            </Button>
+          </DialogActions>
+        </Dialog>
 
-      {/* 保存成功トースト */}
-      <Snackbar
-        open={saved}
-        autoHideDuration={3000}
-        onClose={() => setSaved(false)}
-        message="プロフィールを保存しました"
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      />
-    </Box>
+        {/* 保存成功トースト */}
+        <Snackbar
+            open={saved}
+            autoHideDuration={3000}
+            onClose={() => setSaved(false)}
+            message="プロフィールを保存しました"
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        />
+      </Box>
   )
 }
