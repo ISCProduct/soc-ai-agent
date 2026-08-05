@@ -81,3 +81,21 @@ variable "additional_secret_arns" {
   description = "Extra secret ARNs the backend execution role may read"
   default     = []
 }
+
+variable "domain_name" {
+  type        = string
+  description = "購入済みドメイン（同名の Route53 ホストゾーンが既に存在すること）"
+  default     = "shukatsu-ai.jp"
+}
+
+variable "staging_subdomain" {
+  type        = string
+  description = "staging フロントエンド用サブドメインラベル"
+  default     = "stg"
+}
+
+variable "staging_api_subdomain" {
+  type        = string
+  description = "staging バックエンドAPI用サブドメインラベル"
+  default     = "api-stg"
+}

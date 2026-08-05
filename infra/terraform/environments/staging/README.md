@@ -11,6 +11,7 @@
 - ECS Service: `backend` (:8080) / `frontend` (:3000)
 - RDS MySQL（`db.t4g.micro`）
 - S3 + Secrets Manager
+- Route53: `stg.<domain_name>`（frontend） / `api-stg.<domain_name>`（backend）を ECS EIP に A レコードで紐付け（既定 `domain_name=shukatsu-ai.jp`）
 
 詳細計画: `docs/architecture/aws-terraform-staging-implementation-plan.md`
 
@@ -69,8 +70,10 @@ terraform output
 
 公開 URL:
 
-- Frontend: `http://<ecs_public_ip>:3000`
-- Backend: `http://<ecs_public_ip>:8080`
+- Frontend: `http://<ecs_public_ip>:3000` / `http://stg.shukatsu-ai.jp:3000`
+- Backend: `http://<ecs_public_ip>:8080` / `http://api-stg.shukatsu-ai.jp:8080`
+
+`domain_name`（既定 `shukatsu-ai.jp`）の Route53 ホストゾーンが対象 AWS アカウントに存在しない場合、`aws_route53_zone` の data lookup で apply が失敗する。その場合はゾーンを先に用意するか、`domain_name` を保有ドメインに合わせて上書きすること。
 
 ### 5. 破棄（検証後）
 

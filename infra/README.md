@@ -4,8 +4,8 @@
 
 | 環境 | 場所 | 備考 |
 |------|------|------|
-| **staging** | `terraform/environments/staging`（**AWS ECS**） | **常時起動**が正 |
-| **production** | AWS ECS（今後 `environments/prod` を ECS 化） | **既定は停止**。本番反映時に明示起動。**指定日は終日稼働** |
+| **staging** | `terraform/environments/staging`（**AWS ECS**） | **常時起動**が正。`stg.shukatsu-ai.jp` / `api-stg.shukatsu-ai.jp` に紐付け |
+| **production** | `terraform/environments/prod`（**AWS ECS**） | **既定は停止**（`ecs_desired_capacity=0`）。本番反映時に明示起動。指定日終日稼働の自動化は別タスク。`shukatsu-ai.jp` / `api.shukatsu-ai.jp` に紐付け |
 | OCI | `terraform/environments/oci` | **現行では使わない** |
 
 決定の詳細: [`docs/architecture/infra-decision-oci-stg-aws-prod.md`](../docs/architecture/infra-decision-oci-stg-aws-prod.md)
@@ -18,7 +18,7 @@ infra/
     bootstrap/           # AWS remote state
     environments/
       staging/           # ★ staging（AWS ECS・常時）
-      prod/              # 本番（今後 ECS 化。現状は旧 EC2 雛形）
+      prod/              # 本番（AWS ECS・既定停止）
       oci/               # 非正（アーカイブ候補）
     modules/
       network, rds, s3, secrets, ecs_*   # AWS

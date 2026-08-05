@@ -105,9 +105,15 @@ staging と本番が同じクラウド（AWS ECS）になるため、環境差�
 |------|----------|
 | `infra/terraform/environments/staging` | **★ staging 正（常時）** |
 | `infra/terraform/bootstrap` | AWS remote state |
-| `infra/terraform/modules/{network,rds,s3,secrets,ecs_*}` | staging / 将来 prod 共用 |
-| `infra/terraform/environments/prod` | 将来の本番 root（現状は旧 EC2 雛形。ECS 化時に刷新） |
+| `infra/terraform/modules/{network,rds,s3,secrets,ecs_*}` | staging / prod 共用 |
+| `infra/terraform/environments/prod` | **本番 root（ECS 化済み）**。既定 `ecs_desired_capacity=0`（停止） |
 | `infra/terraform/environments/oci` | **非正**（使わない。整理時に archive） |
+
+## ドメイン紐付け
+
+- staging: `stg.shukatsu-ai.jp`（frontend） / `api-stg.shukatsu-ai.jp`（backend）
+- production: `shukatsu-ai.jp`（frontend） / `api.shukatsu-ai.jp`（backend）
+- いずれも既存 Route53 ホストゾーン（`shukatsu-ai.jp`）内に A レコードで ECS EIP を指す。ALB なし構成のためポート付きアクセス（`:3000` / `:8080`）。常時 443 化する場合は別途 ALB + ACM の追加が必要
 
 ## リスクと緩和
 
@@ -116,11 +122,11 @@ staging と本番が同じクラウド（AWS ECS）になるため、環境差�
 | staging 常時の月額 | NAT/ALB なし構成を維持。不要リソースを作らない |
 | 本番指定日の入れ忘れ | 展示前チェックリストに uptime dates を入れる |
 | 反映中の自動停止 | maintenance lock |
-| `prod` ディレクトリが旧 EC2 | 本番着手時に ECS 化 or staging をベースに作り直し |
+| 既存の旧 EC2 本番に対して ECS 版 `prod` を apply すると破壊的移行になる | 事前に `terraform plan` をレビューし、チームで移行タイミングを合意してから apply |
 
 ## 次のアクション
 
 1. **AWS staging を常時で apply**（bootstrap → staging）。OCI は触らない
 2. staging にアプリ（ECR イメージ）を載せて常時検証できる状態にする
-3. **本番**: `environments/prod` を ECS 化し、明示起動 + 指定日終日の制御を追加
+3. **本番**: `environments/prod`（ECS 化・ドメイン紐付け済み）を実際にレビュー→ apply。明示起動 + 指定日終日の自動制御は別タスクとして残っている（現状は `ecs_desired_capacity` の手動 apply で起動/停止）
 4. infra 整理: OCI を `archive/` へ（任意・後続）

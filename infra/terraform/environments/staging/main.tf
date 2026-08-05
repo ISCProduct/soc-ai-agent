@@ -140,7 +140,29 @@ module "frontend" {
   region                 = var.region
   environment = {
     APP_ENV                  = "staging"
-    NEXT_PUBLIC_API_BASE_URL = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "http://${module.ecs_cluster.eip_public_ip}:8080"
+    NEXT_PUBLIC_API_BASE_URL = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "http://${var.staging_api_subdomain}.${var.domain_name}:8080"
   }
   tags = local.tags
+}
+
+# --- ドメイン紐付け（既存 Route53 ホストゾーンを使用） ---
+# ALB なし構成のため、独自ドメインでも :3000 / :8080 のポート付きアクセスになる。
+data "aws_route53_zone" "selected" {
+  name = var.domain_name
+}
+
+resource "aws_route53_record" "frontend" {
+  zone_id = data.aws_route53_zone.selected.zone_id
+  name    = "${var.staging_subdomain}.${var.domain_name}"
+  type    = "A"
+  ttl     = 300
+  records = [module.ecs_cluster.eip_public_ip]
+}
+
+resource "aws_route53_record" "backend" {
+  zone_id = data.aws_route53_zone.selected.zone_id
+  name    = "${var.staging_api_subdomain}.${var.domain_name}"
+  type    = "A"
+  ttl     = 300
+  records = [module.ecs_cluster.eip_public_ip]
 }
