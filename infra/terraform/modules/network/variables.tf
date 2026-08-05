@@ -39,3 +39,21 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "enable_alb" {
+  type        = bool
+  description = "true の場合、ALB用SGとFargateタスク用SG（ALBからのみ許可）を追加作成する（prod/Fargate向け）"
+  default     = false
+}
+
+variable "alb_ingress_cidrs" {
+  type        = list(string)
+  description = "ALBの80/443へアクセスを許可するCIDR"
+  default     = ["0.0.0.0/0"]
+}
+
+variable "fargate_container_ports" {
+  type        = list(number)
+  description = "ALBからFargateタスクへ許可するコンテナポート"
+  default     = [3000, 8080]
+}

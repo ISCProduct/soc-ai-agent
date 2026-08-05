@@ -1,10 +1,9 @@
-region        = "ap-northeast-1"
-project_name  = "soc-app"
-vpc_cidr      = "10.20.0.0/16"
-instance_type = "t4g.small"
+region       = "ap-northeast-1"
+project_name = "soc-app"
+vpc_cidr     = "10.20.0.0/16"
 
 db_instance_class = "db.t4g.micro"
-db_name            = "app_db"
+db_name           = "app_db"
 
 domain_name = "shukatsu-ai.jp"
 
@@ -18,7 +17,13 @@ frontend_image = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:l
 # 可能なら社内/VPN CIDR に制限する
 # allowed_http_cidrs = ["x.x.x.x/32"]
 
-# --- 起動/停止（既定は停止 = 0） ---
+# --- 起動/停止（既定は停止 = 0。Fargateなので稼働時間分のみ課金） ---
 # 本番反映・展示などで起動する場合のみ 1 以上にして apply する
-# ecs_desired_capacity = 1
-# ecs_min_size         = 1
+# backend_desired_count  = 1
+# frontend_desired_count = 1
+
+# タスクサイズ（Fargateの有効な組み合わせに従うこと）
+# backend_cpu    = 256
+# backend_memory = 512
+# frontend_cpu    = 256
+# frontend_memory = 512

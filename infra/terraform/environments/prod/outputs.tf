@@ -2,17 +2,16 @@ output "vpc_id" {
   value = module.network.vpc_id
 }
 
-output "ecs_public_ip" {
-  description = "Production public IP (EIP). FE :3000 / BE :8080"
-  value       = module.ecs_cluster.eip_public_ip
+output "alb_dns_name" {
+  value = module.alb.alb_dns_name
 }
 
 output "frontend_url" {
-  value = "http://${var.domain_name}:3000"
+  value = "https://${var.domain_name}"
 }
 
 output "backend_url" {
-  value = "http://api.${var.domain_name}:8080"
+  value = "https://api.${var.domain_name}"
 }
 
 output "rds_endpoint" {
@@ -28,7 +27,7 @@ output "db_secret_arn" {
 }
 
 output "ecs_cluster_name" {
-  value = module.ecs_cluster.cluster_name
+  value = aws_ecs_cluster.this.name
 }
 
 output "backend_service_name" {

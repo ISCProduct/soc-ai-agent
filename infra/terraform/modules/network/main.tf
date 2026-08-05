@@ -54,39 +54,52 @@ resource "aws_route_table_association" "public" {
 
 resource "aws_security_group" "ecs" {
   name        = "${var.project_name}-ecs-sg"
-  description = "ECS EC2 hosts (ALB-less staging)"
+  description = "ECS EC2 hosts"
   vpc_id      = aws_vpc.this.id
 
-  ingress {
-    description = "HTTP"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = var.allowed_http_cidrs
+  # ALB を使う場合はALB経由のみとし、直接ポート公開はしない（二重露出防止）
+  dynamic "ingress" {
+    for_each = var.enable_alb ? [] : [80]
+    content {
+      description = "HTTP"
+      from_port   = ingress.value
+      to_port     = ingress.value
+      protocol    = "tcp"
+      cidr_blocks = var.allowed_http_cidrs
+    }
   }
 
-  ingress {
-    description = "HTTPS"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = var.allowed_http_cidrs
+  dynamic "ingress" {
+    for_each = var.enable_alb ? [] : [443]
+    content {
+      description = "HTTPS"
+      from_port   = ingress.value
+      to_port     = ingress.value
+      protocol    = "tcp"
+      cidr_blocks = var.allowed_http_cidrs
+    }
   }
 
-  ingress {
-    description = "Frontend"
-    from_port   = 3000
-    to_port     = 3000
-    protocol    = "tcp"
-    cidr_blocks = var.allowed_http_cidrs
+  dynamic "ingress" {
+    for_each = var.enable_alb ? [] : [3000]
+    content {
+      description = "Frontend"
+      from_port   = ingress.value
+      to_port     = ingress.value
+      protocol    = "tcp"
+      cidr_blocks = var.allowed_http_cidrs
+    }
   }
 
-  ingress {
-    description = "Backend"
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "tcp"
-    cidr_blocks = var.allowed_http_cidrs
+  dynamic "ingress" {
+    for_each = var.enable_alb ? [] : [8080]
+    content {
+      description = "Backend"
+      from_port   = ingress.value
+      to_port     = ingress.value
+      protocol    = "tcp"
+      cidr_blocks = var.allowed_http_cidrs
+    }
   }
 
   dynamic "ingress" {
@@ -135,4 +148,95 @@ resource "aws_security_group" "rds" {
   tags = merge(var.tags, {
     Name = "${var.project_name}-rds-sg"
   })
+}
+
+# --- ALB + Fargate 向け（enable_alb=true のときだけ作成。EC2/ALBなしのstagingには影響しない） ---
+
+resource "aws_security_group" "alb" {
+  count = var.enable_alb ? 1 : 0
+
+  name        = "${var.project_name}-alb-sg"
+  description = "ALB (public 80/443)"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description = "HTTP"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = var.alb_ingress_cidrs
+  }
+
+  ingress {
+    description = "HTTPS"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = var.alb_ingress_cidrs
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-alb-sg"
+  })
+}
+
+resource "aws_security_group" "fargate" {
+  count = var.enable_alb ? 1 : 0
+
+  name        = "${var.project_name}-fargate-sg"
+  description = "Fargate tasks - ALB only"
+  vpc_id      = aws_vpc.this.id
+
+  dynamic "ingress" {
+    for_each = var.fargate_container_ports
+    content {
+      description     = "From ALB"
+      from_port       = ingress.value
+      to_port         = ingress.value
+      protocol        = "tcp"
+      security_groups = [aws_security_group.alb[0].id]
+    }
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-fargate-sg"
+  })
+}
+
+resource "aws_security_group_rule" "ecs_dynamic_ports_from_alb" {
+  count = var.enable_alb ? 1 : 0
+
+  type                     = "ingress"
+  description              = "ALB to ECS on EC2 dynamic host port mapping"
+  from_port                = 32768
+  to_port                  = 65535
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ecs.id
+  source_security_group_id = aws_security_group.alb[0].id
+}
+
+resource "aws_security_group_rule" "rds_from_fargate" {
+  count = var.enable_alb ? 1 : 0
+
+  type                     = "ingress"
+  description              = "MySQL from Fargate tasks"
+  from_port                = 3306
+  to_port                  = 3306
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.rds.id
+  source_security_group_id = aws_security_group.fargate[0].id
 }

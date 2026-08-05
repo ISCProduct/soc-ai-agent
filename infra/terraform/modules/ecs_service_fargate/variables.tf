@@ -1,6 +1,6 @@
 variable "project_name" {
   type        = string
-  description = "Used for naming log groups / roles when not overridden"
+  description = "Used for naming log groups / roles"
 }
 
 variable "service_name" {
@@ -11,8 +11,19 @@ variable "cluster_id" {
   type = string
 }
 
-variable "capacity_provider_name" {
+variable "subnet_ids" {
+  type        = list(string)
+  description = "タスクを配置するサブネット"
+}
+
+variable "security_group_id" {
   type = string
+}
+
+variable "assign_public_ip" {
+  type        = bool
+  description = "NATなしのpublic subnetではECR/CloudWatchへの到達にtrueが必要"
+  default     = true
 }
 
 variable "container_name" {
@@ -27,33 +38,26 @@ variable "container_port" {
   type = number
 }
 
-variable "host_port" {
-  type        = number
-  description = "target_group_arn 未指定時のみ使用（固定ポート直公開）。ALB使用時は動的割当のため無視される"
-  default     = 0
-}
-
-variable "target_group_arn" {
-  type        = string
-  description = "指定するとALBターゲットグループに登録し、hostPortは動的割当になる"
-  default     = ""
-}
-
 variable "cpu" {
   type        = number
-  description = "Task CPU units (EC2)"
+  description = "タスクCPUユニット（Fargateの有効な組み合わせに従うこと。例: 256/512/1024）"
   default     = 256
 }
 
 variable "memory" {
   type        = number
-  description = "Task memory MiB (EC2)"
+  description = "タスクメモリMiB（Fargateの有効な組み合わせに従うこと。例: 512/1024/2048）"
   default     = 512
 }
 
 variable "desired_count" {
   type    = number
-  default = 1
+  default = 0
+}
+
+variable "target_group_arn" {
+  type        = string
+  description = "ALBターゲットグループARN"
 }
 
 variable "environment" {

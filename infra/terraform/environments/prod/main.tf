@@ -4,6 +4,9 @@ locals {
     Env     = "production"
   }
 
+  frontend_domain = var.domain_name
+  backend_domain  = "api.${var.domain_name}"
+
   backend_secret_arns = compact(concat(
     [module.secrets.db_secret_arn],
     var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
@@ -50,8 +53,8 @@ module "network" {
   azs                 = var.azs
   public_subnet_cidrs = var.public_subnet_cidrs
   allowed_http_cidrs  = var.allowed_http_cidrs
-  enable_ssh          = var.enable_ssh
-  allowed_ssh_cidrs   = var.allowed_ssh_cidrs
+  enable_alb          = true
+  alb_ingress_cidrs   = var.allowed_http_cidrs
   tags                = local.tags
 }
 
@@ -89,36 +92,71 @@ module "secrets" {
   tags         = local.tags
 }
 
-module "ecs_cluster" {
-  source = "../../modules/ecs_cluster"
+# Fargateはインスタンス/ASGを持たないため、クラスタはこの1リソースのみ
+resource "aws_ecs_cluster" "this" {
+  name = var.project_name
 
-  project_name      = var.project_name
-  subnet_ids        = module.network.public_subnet_ids
-  security_group_id = module.network.ecs_security_group_id
-  instance_type     = var.instance_type
-  desired_capacity  = var.ecs_desired_capacity
-  min_size          = var.ecs_min_size
-  max_size          = var.ecs_max_size
-  tags              = local.tags
+  setting {
+    name  = "containerInsights"
+    value = "disabled"
+  }
+
+  tags = merge(local.tags, {
+    Name = var.project_name
+  })
+}
+
+resource "aws_ecs_cluster_capacity_providers" "this" {
+  cluster_name       = aws_ecs_cluster.this.name
+  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
+
+  default_capacity_provider_strategy {
+    capacity_provider = "FARGATE"
+    weight            = 1
+  }
+}
+
+# --- ドメイン紐付け（既存 Route53 ホストゾーンを使用） ---
+data "aws_route53_zone" "selected" {
+  name = var.domain_name
+}
+
+module "alb" {
+  source = "../../modules/alb"
+
+  project_name         = var.project_name
+  vpc_id               = module.network.vpc_id
+  subnet_ids           = module.network.public_subnet_ids
+  security_group_id    = module.network.alb_security_group_id
+  route53_zone_id      = data.aws_route53_zone.selected.zone_id
+  frontend_domain_name = local.frontend_domain
+  backend_domain_name  = local.backend_domain
+  frontend_target_port = 3000
+  backend_target_port  = 8080
+  target_type          = "ip"
+  tags                 = local.tags
 }
 
 module "backend" {
-  source = "../../modules/ecs_service"
+  source = "../../modules/ecs_service_fargate"
 
-  project_name           = var.project_name
-  service_name           = "backend"
-  cluster_id             = module.ecs_cluster.cluster_id
-  capacity_provider_name = module.ecs_cluster.capacity_provider_name
-  container_name         = "soc-backend"
-  container_image        = var.backend_image
-  container_port         = 8080
-  host_port              = 8080
-  cpu                    = 256
-  memory                 = 512
-  region                 = var.region
-  s3_bucket_arn          = module.s3.bucket_arn
-  secret_arns            = local.backend_secret_arns
-  secrets                = local.backend_secrets
+  project_name      = var.project_name
+  service_name      = "backend"
+  cluster_id        = aws_ecs_cluster.this.id
+  subnet_ids        = module.network.public_subnet_ids
+  security_group_id = module.network.fargate_security_group_id
+  assign_public_ip  = true
+  container_name    = "soc-backend"
+  container_image   = var.backend_image
+  container_port    = 8080
+  cpu               = var.backend_cpu
+  memory            = var.backend_memory
+  desired_count     = var.backend_desired_count
+  target_group_arn  = module.alb.backend_target_group_arn
+  region            = var.region
+  s3_bucket_arn     = module.s3.bucket_arn
+  secret_arns       = local.backend_secret_arns
+  secrets           = local.backend_secrets
   environment = {
     APP_ENV       = "production"
     AWS_REGION    = var.region
@@ -128,45 +166,49 @@ module "backend" {
 }
 
 module "frontend" {
-  source = "../../modules/ecs_service"
+  source = "../../modules/ecs_service_fargate"
 
-  project_name           = var.project_name
-  service_name           = "frontend"
-  cluster_id             = module.ecs_cluster.cluster_id
-  capacity_provider_name = module.ecs_cluster.capacity_provider_name
-  container_name         = "soc-frontend"
-  container_image        = var.frontend_image
-  container_port         = 3000
-  host_port              = 3000
-  cpu                    = 256
-  memory                 = 512
-  region                 = var.region
+  project_name      = var.project_name
+  service_name      = "frontend"
+  cluster_id        = aws_ecs_cluster.this.id
+  subnet_ids        = module.network.public_subnet_ids
+  security_group_id = module.network.fargate_security_group_id
+  assign_public_ip  = true
+  container_name    = "soc-frontend"
+  container_image   = var.frontend_image
+  container_port    = 3000
+  cpu               = var.frontend_cpu
+  memory            = var.frontend_memory
+  desired_count     = var.frontend_desired_count
+  target_group_arn  = module.alb.frontend_target_group_arn
+  region            = var.region
   environment = {
     APP_ENV                  = "production"
-    NEXT_PUBLIC_API_BASE_URL = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "http://api.${var.domain_name}:8080"
+    NEXT_PUBLIC_API_BASE_URL = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
   }
   tags = local.tags
 }
 
-# --- ドメイン紐付け（既存 Route53 ホストゾーンを使用） ---
-# ALB なし構成のため、独自ドメインでも :3000 / :8080 のポート付きアクセスになる。
-# TLS/常時443化が必要になったら ALB + ACM の追加を検討する。
-data "aws_route53_zone" "selected" {
-  name = var.domain_name
-}
-
 resource "aws_route53_record" "frontend" {
   zone_id = data.aws_route53_zone.selected.zone_id
-  name    = var.domain_name
+  name    = local.frontend_domain
   type    = "A"
-  ttl     = 300
-  records = [module.ecs_cluster.eip_public_ip]
+
+  alias {
+    name                   = module.alb.alb_dns_name
+    zone_id                = module.alb.alb_zone_id
+    evaluate_target_health = true
+  }
 }
 
 resource "aws_route53_record" "backend" {
   zone_id = data.aws_route53_zone.selected.zone_id
-  name    = "api.${var.domain_name}"
+  name    = local.backend_domain
   type    = "A"
-  ttl     = 300
-  records = [module.ecs_cluster.eip_public_ip]
+
+  alias {
+    name                   = module.alb.alb_dns_name
+    zone_id                = module.alb.alb_zone_id
+    evaluate_target_health = true
+  }
 }

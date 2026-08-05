@@ -8,10 +8,11 @@
 
 - VPC public subnet（NAT Gateway なし）
 - ECS Cluster + ASG（`t4g.small` 目安）+ EIP
-- ECS Service: `backend` (:8080) / `frontend` (:3000)
+- ALB（HTTP→HTTPSリダイレクト、ACM証明書DNS検証、ホストヘッダーでfrontend/backendにルーティング）
+- ECS Service: `backend` (:8080) / `frontend` (:3000)。ALB配下のため直接ポート公開はしない
 - RDS MySQL（`db.t4g.micro`）
 - S3 + Secrets Manager
-- Route53: `stg.<domain_name>`（frontend） / `api-stg.<domain_name>`（backend）を ECS EIP に A レコードで紐付け（既定 `domain_name=shukatsu-ai.jp`）
+- Route53: `stg.<domain_name>`（frontend） / `api-stg.<domain_name>`（backend）を ALB に ALIAS レコードで紐付け（既定 `domain_name=shukatsu-ai.jp`）
 
 詳細計画: `docs/architecture/aws-terraform-staging-implementation-plan.md`
 
@@ -68,12 +69,14 @@ terraform apply stg.plan
 terraform output
 ```
 
-公開 URL:
+公開 URL（ALB経由・HTTPS）:
 
-- Frontend: `http://<ecs_public_ip>:3000` / `http://stg.shukatsu-ai.jp:3000`
-- Backend: `http://<ecs_public_ip>:8080` / `http://api-stg.shukatsu-ai.jp:8080`
+- Frontend: `https://stg.shukatsu-ai.jp`
+- Backend: `https://api-stg.shukatsu-ai.jp`
 
-`domain_name`（既定 `shukatsu-ai.jp`）の Route53 ホストゾーンが対象 AWS アカウントに存在しない場合、`aws_route53_zone` の data lookup で apply が失敗する。その場合はゾーンを先に用意するか、`domain_name` を保有ドメインに合わせて上書きすること。
+`domain_name`（既定 `shukatsu-ai.jp`）の Route53 ホストゾーンが対象 AWS アカウントに存在しない場合、`aws_route53_zone` の data lookup と ACM 証明書のDNS検証レコード作成で apply が失敗する。その場合はゾーンを先に用意するか、`domain_name` を保有ドメインに合わせて上書きすること。
+
+ALB追加により月額コストが staging に上乗せされる（目安 $16〜20/月、常時起動）。`aws-ecs-ec2-cost-estimate.md` は ALBなし試算のため要再計算。
 
 ### 5. 破棄（検証後）
 

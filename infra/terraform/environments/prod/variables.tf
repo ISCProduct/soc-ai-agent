@@ -25,41 +25,42 @@ variable "public_subnet_cidrs" {
 
 variable "allowed_http_cidrs" {
   type        = list(string)
-  description = "Restrict to office/VPN CIDRs in real use when possible"
+  description = "ALBの80/443へアクセスを許可するCIDR。可能なら制限すること"
   default     = ["0.0.0.0/0"]
 }
 
-variable "enable_ssh" {
-  type    = bool
-  default = false
-}
-
-variable "allowed_ssh_cidrs" {
-  type    = list(string)
-  default = []
-}
-
-variable "instance_type" {
-  type    = string
-  default = "t4g.small"
-}
-
 # 本番は既定停止（指定起動）方針: docs/architecture/infra-decision-oci-stg-aws-prod.md 参照。
-# 起動する際は tfvars か -var で desired/min を 1 以上に上げて apply する。
-variable "ecs_desired_capacity" {
-  type        = number
-  description = "既定は0（停止）。起動時のみ1以上にする"
-  default     = 0
-}
-
-variable "ecs_min_size" {
+# Fargateはタスク稼働時間分のみ課金されるため、既定 desired_count=0（完全停止）。
+# 起動する際は tfvars か -var で 1 以上に上げて apply する。
+variable "backend_desired_count" {
   type    = number
   default = 0
 }
 
-variable "ecs_max_size" {
+variable "frontend_desired_count" {
   type    = number
-  default = 2
+  default = 0
+}
+
+variable "backend_cpu" {
+  type        = number
+  description = "Fargateの有効な組み合わせに従うこと（例: 256/512/1024）"
+  default     = 256
+}
+
+variable "backend_memory" {
+  type    = number
+  default = 512
+}
+
+variable "frontend_cpu" {
+  type    = number
+  default = 256
+}
+
+variable "frontend_memory" {
+  type    = number
+  default = 512
 }
 
 variable "db_instance_class" {
@@ -111,7 +112,7 @@ variable "additional_secret_arns" {
 
 variable "frontend_api_base_url" {
   type        = string
-  description = "NEXT_PUBLIC_API_BASE_URL。未指定なら http://api.<domain_name>:8080 を使用"
+  description = "NEXT_PUBLIC_API_BASE_URL。未指定なら https://api.<domain_name> を使用"
   default     = ""
 }
 

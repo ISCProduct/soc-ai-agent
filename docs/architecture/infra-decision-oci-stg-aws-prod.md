@@ -6,16 +6,17 @@
 
 | 環境 | 基盤 | 運用 |
 |------|------|------|
-| **staging** | **AWS ECS on EC2**（`infra/terraform/environments/staging`） | **常時起動**。開発・検証の正環境 |
-| **production** | **AWS ECS on EC2** | **既定は停止**。本番反映時に明示起動。**指定した日付はその日終日（24時間）起動** |
+| **staging** | **AWS ECS on EC2 + ALB**（`infra/terraform/environments/staging`） | **常時起動**。開発・検証の正環境 |
+| **production** | **AWS ECS on Fargate + ALB** | **既定は停止**（Fargateタスクdesired=0。ALB自体は常時課金）。本番反映時に明示起動。**指定した日付はその日終日（24時間）起動** |
 
 ### 以前の方針からの変更
 
 - ~~staging = OCI~~ → **staging = AWS（常時起動）**
 - ~~本番の平日昼間定期 cron~~ → **本番反映時の明示起動 + 指定日は終日稼働**（変更なし）
+- ~~本番 = ECS on EC2~~ → **本番 = ECS on Fargate**（展示会・説明会時のみ起動する断続運用のため、稼働時間分のみ課金されるFargateを採用。EC2/ASGだと停止管理やインスタンス保守が残る）
 - OCI（`environments/oci`）は **現行 staging としては使わない**（アーカイブ / 将来の実験用）
 
-staging と本番が同じクラウド（AWS ECS）になるため、環境差分が小さくなり予行しやすい。
+staging と本番は同じクラウド（AWS）だが、コンピュートは用途で分ける: staging=常時稼働向けのECS on EC2、production=断続稼働向けのECS on Fargate。両者ともALBでドメイン/HTTPSを提供する点は共通。
 
 ## 意図
 
@@ -46,21 +47,21 @@ staging と本番が同じクラウド（AWS ECS）になるため、環境差�
 ### 方針
 
 - Terraform: `infra/terraform/environments/staging`（既存実装を正とする）
-- コンピュート: ECS on EC2、NAT なし、RDS あり
+- コンピュート: ECS on EC2、NAT なし、RDS あり、ALB あり（ドメイン/HTTPS用）
 - **常時 `desired>=1`**（コスト優先構成のまま止めない）
 - 手順: `infra/terraform/environments/staging/README.md`
 
 ### 受け入れ条件
 
-- [ ] `terraform apply` で staging の VPC / RDS / S3 / ECS が立つ
-- [ ] FE/BE が常時到達できる
+- [ ] `terraform apply` で staging の VPC / RDS / S3 / ECS / ALB が立つ
+- [ ] FE/BE が常時到達できる（`https://stg.shukatsu-ai.jp` / `https://api-stg.shukatsu-ai.jp`）
 - [ ] NAT Gateway が無い
 - [ ] 既存本番（現行 EC2 等）を誤って変更しない
 
 ### コスト目安
 
-- 常時 staging: おおよそ **¥8,000〜15,000 / 月**（ALB なし・NAT なし）
-- 詳細: `aws-ecs-ec2-cost-estimate.md`
+- 常時 staging: おおよそ **¥8,000〜15,000 / 月**（NATなし）+ ALB追加分（目安 $16〜20/月）
+- 詳細: `aws-ecs-ec2-cost-estimate.md`（**ALBなし試算のため要再計算**）
 
 ---
 
@@ -103,26 +104,30 @@ staging と本番が同じクラウド（AWS ECS）になるため、環境差�
 
 | パス | 位置づけ |
 |------|----------|
-| `infra/terraform/environments/staging` | **★ staging 正（常時）** |
+| `infra/terraform/environments/staging` | **★ staging 正（常時・ECS on EC2 + ALB）** |
 | `infra/terraform/bootstrap` | AWS remote state |
-| `infra/terraform/modules/{network,rds,s3,secrets,ecs_*}` | staging / prod 共用 |
-| `infra/terraform/environments/prod` | **本番 root（ECS 化済み）**。既定 `ecs_desired_capacity=0`（停止） |
+| `infra/terraform/modules/{network,rds,s3,secrets,alb}` | staging / prod 共用 |
+| `infra/terraform/modules/ecs_cluster` / `ecs_service` | staging専用（EC2/ASG） |
+| `infra/terraform/modules/ecs_service_fargate` | prod専用（Fargate） |
+| `infra/terraform/environments/prod` | **本番 root（ECS on Fargate 化済み）**。既定 `*_desired_count=0`（停止） |
 | `infra/terraform/environments/oci` | **非正**（使わない。整理時に archive） |
 
 ## ドメイン紐付け
 
 - staging: `stg.shukatsu-ai.jp`（frontend） / `api-stg.shukatsu-ai.jp`（backend）
 - production: `shukatsu-ai.jp`（frontend） / `api.shukatsu-ai.jp`（backend）
-- いずれも既存 Route53 ホストゾーン（`shukatsu-ai.jp`）内に A レコードで ECS EIP を指す。ALB なし構成のためポート付きアクセス（`:3000` / `:8080`）。常時 443 化する場合は別途 ALB + ACM の追加が必要
+- いずれも既存 Route53 ホストゾーン（`shukatsu-ai.jp`）内に ALIAS レコードで ALB を指す。ALBがACM証明書(DNS検証)でHTTPS終端し、ホストヘッダーでfrontend/backendにルーティングする
+- Fargateはタスク再起動のたびにIPが変わるため、固定DNSを得るにはALBが実質必須という判断（staging/prod共通化）
 
 ## リスクと緩和
 
 | リスク | 緩和 |
 |--------|------|
-| staging 常時の月額 | NAT/ALB なし構成を維持。不要リソースを作らない |
+| staging 常時の月額 + ALB固定課金 | NAT なし構成は維持。ALBは常時課金だがドメイン安定化のためのトレードオフとして受容 |
 | 本番指定日の入れ忘れ | 展示前チェックリストに uptime dates を入れる |
 | 反映中の自動停止 | maintenance lock |
-| 既存の旧 EC2 本番に対して ECS 版 `prod` を apply すると破壊的移行になる | 事前に `terraform plan` をレビューし、チームで移行タイミングを合意してから apply |
+| 既存の旧 EC2 本番に対して Fargate 版 `prod` を apply すると破壊的移行になる | 事前に `terraform plan` をレビューし、チームで移行タイミングを合意してから apply |
+| 本番停止中もALBは課金され続ける（「動いた分だけ課金」の効果が部分的に相殺される） | 許容範囲として明示。完全ゼロ化したい場合はALBごとdestroy/re-applyする運用も選択肢（次回起動が遅くなるトレードオフ） |
 
 ## 次のアクション
 

@@ -3,24 +3,20 @@ output "vpc_id" {
 }
 
 output "ecs_public_ip" {
-  description = "Staging public IP (EIP). FE :3000 / BE :8080"
+  description = "Staging ECS EC2ホストのEIP（ALB配下。直接アクセスはできない）"
   value       = module.ecs_cluster.eip_public_ip
 }
 
+output "alb_dns_name" {
+  value = module.alb.alb_dns_name
+}
+
 output "frontend_url" {
-  value = "http://${module.ecs_cluster.eip_public_ip}:3000"
+  value = "https://${aws_route53_record.frontend.name}"
 }
 
 output "backend_url" {
-  value = "http://${module.ecs_cluster.eip_public_ip}:8080"
-}
-
-output "frontend_domain_url" {
-  value = "http://${aws_route53_record.frontend.name}:3000"
-}
-
-output "backend_domain_url" {
-  value = "http://${aws_route53_record.backend.name}:8080"
+  value = "https://${aws_route53_record.backend.name}"
 }
 
 output "rds_endpoint" {

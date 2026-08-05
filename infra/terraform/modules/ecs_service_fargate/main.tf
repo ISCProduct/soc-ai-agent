@@ -93,8 +93,8 @@ locals {
 
 resource "aws_ecs_task_definition" "this" {
   family                   = "${var.project_name}-${var.service_name}"
-  requires_compatibilities = ["EC2"]
-  network_mode             = "bridge"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
   cpu                      = var.cpu
   memory                   = var.memory
   execution_role_arn       = aws_iam_role.execution.arn
@@ -105,12 +105,9 @@ resource "aws_ecs_task_definition" "this" {
       name      = var.container_name
       image     = var.container_image
       essential = true
-      cpu       = var.cpu
-      memory    = var.memory
       portMappings = [
         {
           containerPort = var.container_port
-          hostPort      = var.target_group_arn != "" ? 0 : var.host_port
           protocol      = "tcp"
         }
       ]
@@ -135,33 +132,23 @@ resource "aws_ecs_service" "this" {
   cluster         = var.cluster_id
   task_definition = aws_ecs_task_definition.this.arn
   desired_count   = var.desired_count
-  launch_type     = null
+  launch_type     = "FARGATE"
 
-  capacity_provider_strategy {
-    capacity_provider = var.capacity_provider_name
-    weight            = 1
-    base              = 1
+  network_configuration {
+    subnets          = var.subnet_ids
+    security_groups  = [var.security_group_id]
+    assign_public_ip = var.assign_public_ip
   }
 
+  load_balancer {
+    target_group_arn = var.target_group_arn
+    container_name   = var.container_name
+    container_port   = var.container_port
+  }
+
+  health_check_grace_period_seconds  = 60
   deployment_minimum_healthy_percent = 0
   deployment_maximum_percent         = 100
-
-  health_check_grace_period_seconds = var.target_group_arn != "" ? 60 : null
-
-  dynamic "load_balancer" {
-    for_each = var.target_group_arn != "" ? [1] : []
-    content {
-      target_group_arn = var.target_group_arn
-      container_name   = var.container_name
-      container_port   = var.container_port
-    }
-  }
-
-  # hostPort 固定のため同一ホストで複数起動しない（ALB利用時は動的ポートのためbinpackは主にメモリ効率目的）
-  ordered_placement_strategy {
-    type  = "binpack"
-    field = "memory"
-  }
 
   lifecycle {
     ignore_changes = [desired_count]

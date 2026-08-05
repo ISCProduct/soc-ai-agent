@@ -4,6 +4,9 @@ locals {
     Env     = "staging"
   }
 
+  frontend_domain = "${var.staging_subdomain}.${var.domain_name}"
+  backend_domain  = "${var.staging_api_subdomain}.${var.domain_name}"
+
   backend_secret_arns = compact(concat(
     [module.secrets.db_secret_arn],
     var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
@@ -52,6 +55,8 @@ module "network" {
   allowed_http_cidrs  = var.allowed_http_cidrs
   enable_ssh          = var.enable_ssh
   allowed_ssh_cidrs   = var.allowed_ssh_cidrs
+  enable_alb          = true
+  alb_ingress_cidrs   = var.allowed_http_cidrs
   tags                = local.tags
 }
 
@@ -99,6 +104,27 @@ module "ecs_cluster" {
   tags              = local.tags
 }
 
+# --- ドメイン紐付け（既存 Route53 ホストゾーンを使用） ---
+data "aws_route53_zone" "selected" {
+  name = var.domain_name
+}
+
+module "alb" {
+  source = "../../modules/alb"
+
+  project_name         = var.project_name
+  vpc_id               = module.network.vpc_id
+  subnet_ids           = module.network.public_subnet_ids
+  security_group_id    = module.network.alb_security_group_id
+  route53_zone_id      = data.aws_route53_zone.selected.zone_id
+  frontend_domain_name = local.frontend_domain
+  backend_domain_name  = local.backend_domain
+  frontend_target_port = 3000
+  backend_target_port  = 8080
+  target_type          = "instance"
+  tags                 = local.tags
+}
+
 module "backend" {
   source = "../../modules/ecs_service"
 
@@ -109,7 +135,7 @@ module "backend" {
   container_name         = "soc-backend"
   container_image        = var.backend_image
   container_port         = 8080
-  host_port              = 8080
+  target_group_arn       = module.alb.backend_target_group_arn
   cpu                    = 256
   memory                 = 512
   region                 = var.region
@@ -134,35 +160,37 @@ module "frontend" {
   container_name         = "soc-frontend"
   container_image        = var.frontend_image
   container_port         = 3000
-  host_port              = 3000
+  target_group_arn       = module.alb.frontend_target_group_arn
   cpu                    = 256
   memory                 = 512
   region                 = var.region
   environment = {
     APP_ENV                  = "staging"
-    NEXT_PUBLIC_API_BASE_URL = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "http://${var.staging_api_subdomain}.${var.domain_name}:8080"
+    NEXT_PUBLIC_API_BASE_URL = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
   }
   tags = local.tags
 }
 
-# --- ドメイン紐付け（既存 Route53 ホストゾーンを使用） ---
-# ALB なし構成のため、独自ドメインでも :3000 / :8080 のポート付きアクセスになる。
-data "aws_route53_zone" "selected" {
-  name = var.domain_name
-}
-
 resource "aws_route53_record" "frontend" {
   zone_id = data.aws_route53_zone.selected.zone_id
-  name    = "${var.staging_subdomain}.${var.domain_name}"
+  name    = local.frontend_domain
   type    = "A"
-  ttl     = 300
-  records = [module.ecs_cluster.eip_public_ip]
+
+  alias {
+    name                   = module.alb.alb_dns_name
+    zone_id                = module.alb.alb_zone_id
+    evaluate_target_health = true
+  }
 }
 
 resource "aws_route53_record" "backend" {
   zone_id = data.aws_route53_zone.selected.zone_id
-  name    = "${var.staging_api_subdomain}.${var.domain_name}"
+  name    = local.backend_domain
   type    = "A"
-  ttl     = 300
-  records = [module.ecs_cluster.eip_public_ip]
+
+  alias {
+    name                   = module.alb.alb_dns_name
+    zone_id                = module.alb.alb_zone_id
+    evaluate_target_health = true
+  }
 }
