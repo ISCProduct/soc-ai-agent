@@ -12,14 +12,14 @@ provider "aws" {
 }
 
 module "network" {
-  source           = "../../modules/network"
+  source           = "../../modules/network_legacy"
   project_name     = var.project_name
   vpc_cidr         = var.vpc_cidr
   allowed_ssh_cidr = var.allowed_ssh_cidr
 }
 
 module "compute" {
-  source            = "../../modules/compute"
+  source            = "../../modules/compute_legacy"
   project_name      = var.project_name
   instance_type     = var.instance_type
   subnet_id         = module.network.public_subnet_id

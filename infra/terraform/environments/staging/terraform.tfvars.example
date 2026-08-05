@@ -1,0 +1,19 @@
+region           = "ap-northeast-1"
+project_name     = "soc-stg"
+vpc_cidr         = "10.10.0.0/16"
+instance_type    = "t4g.small"
+db_instance_class = "db.t4g.micro"
+db_name          = "app_db"
+
+# 既存 ECR のイメージ（タグは staging 用を推奨）
+backend_image  = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-backend:staging"
+frontend_image = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:staging"
+
+# staging 用 OpenAI キーの Secrets Manager ARN（未設定でも apply は可能だが BE の AI 機能は動かない）
+# openai_secret_arn = "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:stg/openai/api-key-xxxxxx"
+
+# 可能なら社内/VPN CIDR に制限する
+# allowed_http_cidrs = ["x.x.x.x/32"]
+
+# enable_ssh = true
+# allowed_ssh_cidrs = ["x.x.x.x/32"]
