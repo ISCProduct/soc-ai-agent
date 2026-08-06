@@ -5,7 +5,7 @@ import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/models"
 	"Backend/internal/openai"
-	"Backend/internal/services"
+	"Backend/internal/services/company"
 	"Backend/internal/services/gbizinfo"
 	ifaces "Backend/internal/services/interfaces"
 	"errors"
@@ -22,23 +22,23 @@ type AdminCompanyController struct {
 	audit            ifaces.AuditLogService
 	gbiz             *gbizinfo.GBizInfoService
 	openaiClient     *openai.Client
-	infoFetcher      *services.CompanyInfoFetcher
-	relationsFetcher *services.CompanyRelationsFetcher
-	jobFetcher       *services.JobFetchService
-	techFetcher      *services.TechStackFetcher
-	catalogWarm      *services.CatalogWarmService
-	missingBatch     *services.CompanyMissingBatchService
+	infoFetcher      *company.CompanyInfoFetcher
+	relationsFetcher *company.CompanyRelationsFetcher
+	jobFetcher       *company.JobFetchService
+	techFetcher      *company.TechStackFetcher
+	catalogWarm      *company.CatalogWarmService
+	missingBatch     *company.CompanyMissingBatchService
 }
 
 func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.AuditLogService, gbiz *gbizinfo.GBizInfoService, openaiClient ...*openai.Client) *AdminCompanyController {
 	ctrl := &AdminCompanyController{repo: repo, audit: audit, gbiz: gbiz}
 	if len(openaiClient) > 0 {
 		ctrl.openaiClient = openaiClient[0]
-		ctrl.infoFetcher = services.NewCompanyInfoFetcher(repo, openaiClient[0], gbiz)
-		ctrl.jobFetcher = services.NewJobFetchService(repo, openaiClient[0])
-		ctrl.techFetcher = services.NewTechStackFetcher(repo, openaiClient[0])
-		ctrl.catalogWarm = services.NewCatalogWarmService(repo, ctrl.infoFetcher, ctrl.jobFetcher)
-		ctrl.missingBatch = services.NewCompanyMissingBatchService(
+		ctrl.infoFetcher = company.NewCompanyInfoFetcher(repo, openaiClient[0], gbiz)
+		ctrl.jobFetcher = company.NewJobFetchService(repo, openaiClient[0])
+		ctrl.techFetcher = company.NewTechStackFetcher(repo, openaiClient[0])
+		ctrl.catalogWarm = company.NewCatalogWarmService(repo, ctrl.infoFetcher, ctrl.jobFetcher)
+		ctrl.missingBatch = company.NewCompanyMissingBatchService(
 			repo, ctrl.infoFetcher, ctrl.jobFetcher, ctrl.techFetcher, nil,
 		)
 	}
@@ -46,11 +46,11 @@ func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.A
 }
 
 // SetRelationsFetcher は企業関係・市場情報取得サービスを注入する（#633 Phase 2）。
-func (c *AdminCompanyController) SetRelationsFetcher(fetcher *services.CompanyRelationsFetcher) {
+func (c *AdminCompanyController) SetRelationsFetcher(fetcher *company.CompanyRelationsFetcher) {
 	if c != nil {
 		c.relationsFetcher = fetcher
 		if c.missingBatch != nil || c.infoFetcher != nil {
-			c.missingBatch = services.NewCompanyMissingBatchService(
+			c.missingBatch = company.NewCompanyMissingBatchService(
 				c.repo, c.infoFetcher, c.jobFetcher, c.techFetcher, fetcher,
 			)
 		}
@@ -58,7 +58,7 @@ func (c *AdminCompanyController) SetRelationsFetcher(fetcher *services.CompanyRe
 }
 
 // SetCompanySearchGuards は FirstTouch Search の予算・singleflight を注入する（#587）。
-func (c *AdminCompanyController) SetCompanySearchGuards(budget companyfetch.SearchBudget, flight *services.CompanySearchFlight) {
+func (c *AdminCompanyController) SetCompanySearchGuards(budget companyfetch.SearchBudget, flight *company.CompanySearchFlight) {
 	if c == nil {
 		return
 	}

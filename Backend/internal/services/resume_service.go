@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/services/company"
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/shared"
 	"bytes"
@@ -16,13 +17,6 @@ import (
 	"path/filepath"
 	"strings"
 )
-
-// ValidationError はユーザー入力起因のエラーを表す。controller で 422 を返すために使用する。
-type ValidationError struct {
-	Message string
-}
-
-func (e *ValidationError) Error() string { return e.Message }
 
 // allowedMIMETypes はアップロード可能なファイルタイプ
 var allowedMIMETypes = map[string]bool{
@@ -45,7 +39,7 @@ func validateFileUpload(fileHeader *multipart.FileHeader) error {
 
 	buf := make([]byte, 4)
 	if _, err := io.ReadFull(f, buf); err != nil {
-		return &ValidationError{Message: "ファイルが小さすぎるか破損しています"}
+		return &shared.ValidationError{Message: "ファイルが小さすぎるか破損しています"}
 	}
 
 	magicOK := bytes.HasPrefix(buf, pdfMagicBytes) ||
@@ -57,9 +51,9 @@ func validateFileUpload(fileHeader *multipart.FileHeader) error {
 
 	mimeType := fileHeader.Header.Get("Content-Type")
 	if allowedMIMETypes[mimeType] {
-		return &ValidationError{Message: "ファイル内容が PDF / Word 形式と一致しません"}
+		return &shared.ValidationError{Message: "ファイル内容が PDF / Word 形式と一致しません"}
 	}
-	return &ValidationError{Message: "PDF または Word（.doc/.docx）のみアップロードできます"}
+	return &shared.ValidationError{Message: "PDF または Word（.doc/.docx）のみアップロードできます"}
 }
 
 // validateURL はSSRF対策のためURLスキームとIPアドレス範囲を検証する
@@ -69,12 +63,12 @@ func validateURL(rawURL string) error {
 		return fmt.Errorf("invalid URL: %w", err)
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return &ValidationError{Message: "only http/https URLs are allowed"}
+		return &shared.ValidationError{Message: "only http/https URLs are allowed"}
 	}
 	host := parsed.Hostname()
 	ip := net.ParseIP(host)
 	if ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()) {
-		return &ValidationError{Message: "requests to internal IP addresses are not allowed"}
+		return &shared.ValidationError{Message: "requests to internal IP addresses are not allowed"}
 	}
 	return nil
 }
@@ -96,7 +90,7 @@ type ResumeService struct {
 	s3           *s3Storage
 	s3Err        error
 	crossFeature *flywheel.CrossFeatureIntegrationService
-	validator    *CompanyValidationService
+	validator    *company.CompanyValidationService
 	companyRepo  shared.CompanyBriefReader
 }
 
@@ -106,7 +100,7 @@ func (s *ResumeService) SetCrossFeatureService(cf *flywheel.CrossFeatureIntegrat
 }
 
 // SetCompanyValidator 企業実在確認サービスを注入する（オプション）
-func (s *ResumeService) SetCompanyValidator(v *CompanyValidationService) {
+func (s *ResumeService) SetCompanyValidator(v *company.CompanyValidationService) {
 	s.validator = v
 }
 
@@ -123,15 +117,15 @@ func (s *ResumeService) lookupCompanyBriefFromCache(companyName string) string {
 	if name == "" {
 		return ""
 	}
-	company, err := s.companyRepo.FindByName(name)
-	if err != nil || company == nil {
+	comp, err := s.companyRepo.FindByName(name)
+	if err != nil || comp == nil {
 		return ""
 	}
 	var profile *models.CompanyWeightProfile
-	if p, err := s.companyRepo.GetWeightProfile(company.ID, nil); err == nil {
+	if p, err := s.companyRepo.GetWeightProfile(comp.ID, nil); err == nil {
 		profile = p
 	}
-	return BuildCompanyBrief(company, profile)
+	return company.BuildCompanyBrief(comp, profile)
 }
 
 func NewResumeService(repo repository.ResumeRepository, storageDir string, aiClient *openai.Client) *ResumeService {
@@ -171,14 +165,14 @@ func (s *ResumeService) ensureRealCompany(ctx context.Context, companyName strin
 		return "", nil
 	}
 	if s.validator == nil {
-		return "", &ValidationError{Message: "企業の実在確認機能が利用できません。しばらくしてから再度お試しください"}
+		return "", &shared.ValidationError{Message: "企業の実在確認機能が利用できません。しばらくしてから再度お試しください"}
 	}
 	result, err := s.validator.Validate(ctx, name)
 	if err != nil {
 		return "", err
 	}
 	if !result.Exists {
-		return "", &ValidationError{Message: "実在が確認できない企業名です。企業を検索して候補から選択してください"}
+		return "", &shared.ValidationError{Message: "実在が確認できない企業名です。企業を検索して候補から選択してください"}
 	}
 	if strings.TrimSpace(result.CanonicalName) != "" {
 		return result.CanonicalName, nil

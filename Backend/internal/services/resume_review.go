@@ -28,7 +28,7 @@ func (s *ResumeService) ReviewDocument(documentID uint, requestingUserID uint, c
 		return nil, nil, shared.ErrForbidden
 	}
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
-		return nil, nil, &ValidationError{Message: "応募企業名または応募職種を入力してください"}
+		return nil, nil, &shared.ValidationError{Message: "応募企業名または応募職種を入力してください"}
 	}
 	canonicalName, err := s.ensureRealCompany(context.Background(), companyName)
 	if err != nil {
@@ -67,7 +67,7 @@ func (s *ResumeService) ReviewDocument(documentID uint, requestingUserID uint, c
 		}
 	}
 	if !hasText {
-		return nil, nil, &ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
+		return nil, nil, &shared.ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
 	}
 	if err := s.repo.ReplaceTextBlocks(doc.ID, blocks); err != nil {
 		return nil, nil, err
@@ -260,7 +260,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	canonicalName, err := s.ensureRealCompany(ctx, companyName)
 	if err != nil {
 		msg := err.Error()
-		var ve *ValidationError
+		var ve *shared.ValidationError
 		if errors.As(err, &ve) {
 			msg = ve.Message
 		}
@@ -326,7 +326,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	review, items, err := s.buildReviewScoreItems(blocks, companyName, jobTitle, candidateType, ragReport)
 	if err != nil {
 		log.Printf("resume_review_stream: build score failed: %v", err)
-		var ve *ValidationError
+		var ve *shared.ValidationError
 		if errors.As(err, &ve) {
 			sendEvent(map[string]any{"type": "error", "message": ve.Message})
 		} else {
@@ -400,7 +400,7 @@ func relaySSEChunks(body io.Reader, w io.Writer, flusher http.Flusher) (string, 
 func (s *ResumeService) buildResumeReviewWithAI(blocks []models.ResumeTextBlock, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
 	text := buildResumeText(blocks, 30000)
 	if strings.TrimSpace(text) == "" {
-		return nil, nil, &ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
+		return nil, nil, &shared.ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
 	}
 	if s.aiClient == nil {
 		return nil, nil, fmt.Errorf("AIクライアントが初期化されていません")

@@ -17,6 +17,7 @@ import (
 	"Backend/internal/services/analysis"
 	"Backend/internal/services/application"
 	"Backend/internal/services/auth"
+	"Backend/internal/services/company"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/email"
 	"Backend/internal/services/flywheel"
@@ -235,7 +236,7 @@ func main() {
 	apiCostService := costs.NewAPICostService(apiCallLogRepo)
 	realtimeUsageService := costs.NewRealtimeUsageService(realtimeUsageRepo, emailService)
 	companySearchBudget := costs.NewCompanySearchBudgetService(apiCallLogRepo, emailService)
-	companySearchFlight := services.NewCompanySearchFlight()
+	companySearchFlight := company.NewCompanySearchFlight()
 	// OpenAI APIコール時にトークン使用量をロギング
 	aiClient.OnUsage = func(model string, promptTokens, completionTokens int) {
 		apiCostService.LogCall(model, promptTokens, completionTokens)
@@ -257,16 +258,16 @@ func main() {
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 	matchingService := matching.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)
 	resumeService := services.NewResumeService(resumeRepo, "storage/resumes", aiClient)
-	crawlService := services.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
+	crawlService := company.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
 	gbizInfoRepo := repositories.NewGBizInfoRepository(db)
 	gbizInfoService := gbizinfo.NewGBizInfoService(cfg, gbizInfoRepo, companyRepo, companyRelationRepo)
-	infoFetcher := services.NewCompanyInfoFetcher(companyRepo, aiClient, gbizInfoService)
+	infoFetcher := company.NewCompanyInfoFetcher(companyRepo, aiClient, gbizInfoService)
 	infoFetcher.SetSearchBudget(companySearchBudget)
 	infoFetcher.SetSearchFlight(companySearchFlight)
-	relationsFetcher := services.NewCompanyRelationsFetcher(companyRepo, companyRelationRepo, aiClient, gbizInfoService)
+	relationsFetcher := company.NewCompanyRelationsFetcher(companyRepo, companyRelationRepo, aiClient, gbizInfoService)
 	relationsFetcher.SetSearchBudget(companySearchBudget)
 	relationsFetcher.SetSearchFlight(companySearchFlight)
-	jobFetcher := services.NewJobFetchService(companyRepo, aiClient)
+	jobFetcher := company.NewJobFetchService(companyRepo, aiClient)
 	jobFetcher.SetSearchBudget(companySearchBudget)
 	jobFetcher.SetSearchFlight(companySearchFlight)
 	crawlService.SetInfoFetcher(infoFetcher)
@@ -312,7 +313,7 @@ func main() {
 	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := controllers.NewCompanyRelationController(companyQueryRepo, aiClient)
-	companyValidator := services.NewCompanyValidationService(companyRepo, aiClient)
+	companyValidator := company.NewCompanyValidationService(companyRepo, aiClient)
 	companyValidator.SetSearchBudget(companySearchBudget)
 	companyValidator.SetSearchFlight(companySearchFlight)
 	relationController.SetCompanyValidator(companyValidator)

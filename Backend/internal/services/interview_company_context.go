@@ -2,6 +2,7 @@ package services
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/company"
 	"context"
 	"strings"
 )
@@ -22,17 +23,17 @@ func (s *InterviewService) resolveCompanyInfo(companyID uint, companyName, clien
 // lookupCompanyProfile は共有キャッシュ（companies）から企業スナップショットを読む。
 // Search / LLM による企業調査は行わない。未登録・未整備なら空文字。
 func (s *InterviewService) lookupCompanyProfile(companyID uint, companyName string) string {
-	company := s.findCompany(companyID, companyName)
-	if company == nil {
+	comp := s.findCompany(companyID, companyName)
+	if comp == nil {
 		return ""
 	}
 	var profile *models.CompanyWeightProfile
 	if s.companyRepo != nil {
-		if p, err := s.companyRepo.GetWeightProfile(company.ID, nil); err == nil {
+		if p, err := s.companyRepo.GetWeightProfile(comp.ID, nil); err == nil {
 			profile = p
 		}
 	}
-	return BuildCompanyBrief(company, profile)
+	return company.BuildCompanyBrief(comp, profile)
 }
 
 func (s *InterviewService) findCompany(companyID uint, companyName string) *models.Company {

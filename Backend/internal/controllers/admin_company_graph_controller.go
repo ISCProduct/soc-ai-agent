@@ -7,7 +7,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/scraper"
-	"Backend/internal/services"
+	"Backend/internal/services/company"
 	ifaces "Backend/internal/services/interfaces"
 	"bytes"
 	"context"
@@ -33,7 +33,7 @@ type AdminCompanyGraphController struct {
 	relationRepo     repository.CompanyRelationRepository
 	audit            ifaces.AuditLogService
 	openaiClient     *openai.Client
-	relationsFetcher *services.CompanyRelationsFetcher
+	relationsFetcher *company.CompanyRelationsFetcher
 }
 
 func NewAdminCompanyGraphController(pipeline *scraper.Pipeline, companyRepo repository.CompanyRepository, relationRepo repository.CompanyRelationRepository, audit ifaces.AuditLogService, openaiClient *openai.Client) *AdminCompanyGraphController {
@@ -41,7 +41,7 @@ func NewAdminCompanyGraphController(pipeline *scraper.Pipeline, companyRepo repo
 }
 
 // SetRelationsFetcher は Phase 2/3 の関係取得サービスを注入する（予算ガード・singleflight・TTL 付き）。
-func (c *AdminCompanyGraphController) SetRelationsFetcher(fetcher *services.CompanyRelationsFetcher) {
+func (c *AdminCompanyGraphController) SetRelationsFetcher(fetcher *company.CompanyRelationsFetcher) {
 	if c != nil {
 		c.relationsFetcher = fetcher
 	}
@@ -493,7 +493,7 @@ func (c *AdminCompanyGraphController) RelationGraph(ctx echo.Context) error {
 		return echoInternalError(errors.New("relation repository is not configured"))
 	}
 
-	graphService := services.NewCompanyRelationGraphService(c.companyRepo, c.relationRepo)
+	graphService := company.NewCompanyRelationGraphService(c.companyRepo, c.relationRepo)
 	graph, err := graphService.BuildGraph(uint(companyID))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "company not found")

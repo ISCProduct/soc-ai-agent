@@ -1,6 +1,7 @@
 package services
 
 import (
+	"Backend/internal/services/shared"
 	"bytes"
 	"context"
 	"fmt"
@@ -21,7 +22,7 @@ func (s *ResumeService) Upload(userID uint, sessionID, sourceType, sourceURL str
 		sourceType = "pdf"
 	}
 	if fileHeader == nil && strings.TrimSpace(sourceURL) == "" {
-		return nil, &ValidationError{Message: "ファイルまたは source_url が必要です"}
+		return nil, &shared.ValidationError{Message: "ファイルまたは source_url が必要です"}
 	}
 
 	doc := &models.ResumeDocument{
@@ -86,7 +87,7 @@ func (s *ResumeService) Upload(userID uint, sessionID, sourceType, sourceURL str
 func (s *ResumeService) persistUploadedFile(doc *models.ResumeDocument, localPath, filename string) (string, error) {
 	if s.s3 != nil && s.s3.isEnabled() {
 		if err := s.ensureS3Available(); err != nil {
-			return "", &ValidationError{Message: "ファイルストレージの準備に失敗しました。しばらくしてから再度お試しください"}
+			return "", &shared.ValidationError{Message: "ファイルストレージの準備に失敗しました。しばらくしてから再度お試しください"}
 		}
 		return s.uploadToS3(context.Background(), doc, localPath, filename)
 	}

@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"Backend/internal/services"
 	"Backend/internal/services/interfaces"
 	"Backend/internal/services/shared"
 	"errors"
@@ -56,7 +55,7 @@ func (c *ResumeController) Upload(ctx echo.Context) error {
 
 	result, err := c.resumeService.Upload(uint(userID), sessionID, sourceType, sourceURL, fileHeader)
 	if err != nil {
-		var ve *services.ValidationError
+		var ve *shared.ValidationError
 		if errors.As(err, &ve) {
 			return echo.NewHTTPError(http.StatusUnprocessableEntity, ve.Message)
 		}
@@ -107,7 +106,7 @@ func (c *ResumeController) Review(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
-		var ve *services.ValidationError
+		var ve *shared.ValidationError
 		if errors.As(err, &ve) {
 			return echo.NewHTTPError(http.StatusUnprocessableEntity, ve.Message)
 		}

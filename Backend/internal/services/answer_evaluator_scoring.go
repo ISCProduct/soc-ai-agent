@@ -1,6 +1,7 @@
 package services
 
 import (
+	"Backend/internal/services/shared"
 	"math"
 	"regexp"
 	"strings"
@@ -12,19 +13,19 @@ func (e *AnswerEvaluator) InferCategory(question string) string {
 
 func (e *AnswerEvaluator) categorizeQuestion(question string) string {
 	q := strings.ToLower(question)
-	if containsAny(q, []string{"興味", "きっかけ", "理由", "魅力", "なぜ"}) {
+	if shared.ContainsAny(q, []string{"興味", "きっかけ", "理由", "魅力", "なぜ"}) {
 		return "motivation"
 	}
-	if containsAny(q, []string{"作った", "開発", "実装", "制作", "プロジェクト", "成果物", "github"}) {
+	if shared.ContainsAny(q, []string{"作った", "開発", "実装", "制作", "プロジェクト", "成果物", "github"}) {
 		return "experience"
 	}
-	if containsAny(q, []string{"意見", "食い違い", "合意", "調整", "衝突", "まとめ", "折衷", "合意形成"}) {
+	if shared.ContainsAny(q, []string{"意見", "食い違い", "合意", "調整", "衝突", "まとめ", "折衷", "合意形成"}) {
 		return "collaboration"
 	}
-	if containsAny(q, []string{"itに詳しくない", "職員", "説明", "理解確認", "伝え方", "使い方", "現場"}) {
+	if shared.ContainsAny(q, []string{"itに詳しくない", "職員", "説明", "理解確認", "伝え方", "使い方", "現場"}) {
 		return "communication_non_it"
 	}
-	if containsAny(q, []string{"ui", "ux", "使いやすさ", "試して", "ユーザ", "改善", "反応", "導線"}) {
+	if shared.ContainsAny(q, []string{"ui", "ux", "使いやすさ", "試して", "ユーザ", "改善", "反応", "導線"}) {
 		return "ui_ux"
 	}
 	return "generic"
@@ -66,31 +67,31 @@ func extractSignals(answer string, category string) signalSet {
 	lower := strings.ToLower(answer)
 	_ = category
 	return signalSet{
-		hasConcreteExample: containsAny(lower, []string{"例えば", "たとえば", "具体的", "実際に", "経験", "した時", "したとき"}),
+		hasConcreteExample: shared.ContainsAny(lower, []string{"例えば", "たとえば", "具体的", "実際に", "経験", "した時", "したとき"}),
 		// 凝縮表現（役割分担・リリース・出した等）も行動シグナルとして扱う (#561)
-		hasAction: containsAny(lower, []string{
+		hasAction: shared.ContainsAny(lower, []string{
 			"取り組", "実施", "作成", "作った", "実装", "改善", "対応", "開発", "設計", "検証",
 			"分担", "役割", "リリース", "出した", "進め", "仕上げ", "完了", "提出", "納品", "デプロイ",
 			"まとめた", "進めた", "対応した", "リリースした",
 		}),
-		hasResult: containsAny(lower, []string{
+		hasResult: shared.ContainsAny(lower, []string{
 			"結果", "成果", "達成", "改善された", "向上", "成功", "失敗",
 			"リリース", "出した", "出荷", "納品",
 		}),
-		hasReason: containsAny(lower, []string{"理由", "なぜ", "ので", "ため", "から", "だから"}),
-		hasNumbersOrTime: regexp.MustCompile(`[0-9]`).MatchString(lower) || containsAny(lower, []string{
+		hasReason: shared.ContainsAny(lower, []string{"理由", "なぜ", "ので", "ため", "から", "だから"}),
+		hasNumbersOrTime: regexp.MustCompile(`[0-9]`).MatchString(lower) || shared.ContainsAny(lower, []string{
 			"ヶ月", "年", "週間", "日間", "日で", "%", "人", "回",
 		}),
-		hasEmotion: containsAny(lower, []string{
+		hasEmotion: shared.ContainsAny(lower, []string{
 			"やりがい", "面白", "楽しい", "嬉しかっ", "充実", "役立", "人の役", "感動", "好き",
 		}),
-		hasCollaborationTerm: containsAny(lower, []string{
+		hasCollaborationTerm: shared.ContainsAny(lower, []string{
 			"合意", "調整", "衝突", "折衷", "意見", "まとめ", "チーム", "分担",
 		}),
-		hasNonITTerm: containsAny(lower, []string{
+		hasNonITTerm: shared.ContainsAny(lower, []string{
 			"itに詳しくない", "非エンジニア", "職員", "現場", "利用者",
 		}),
-		hasUxTerm: containsAny(lower, []string{
+		hasUxTerm: shared.ContainsAny(lower, []string{
 			"ui", "ux", "ユーザ", "導線", "使いやす", "反応", "テスト",
 		}),
 		contradiction: false,
@@ -252,11 +253,3 @@ func mapChoice(choice string, values []int) int {
 	}
 }
 
-func containsAny(s string, terms []string) bool {
-	for _, term := range terms {
-		if strings.Contains(s, strings.ToLower(term)) {
-			return true
-		}
-	}
-	return false
-}

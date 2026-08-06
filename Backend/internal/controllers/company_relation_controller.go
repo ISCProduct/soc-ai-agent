@@ -3,7 +3,8 @@ package controllers
 import (
 	"Backend/domain/repository"
 	"Backend/internal/openai"
-	"Backend/internal/services"
+	"Backend/internal/services/company"
+	"Backend/internal/services/shared"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,14 +20,14 @@ import (
 type CompanyRelationController struct {
 	repo         repository.CompanyRelationQueryRepository
 	openaiClient *openai.Client
-	validator    *services.CompanyValidationService
+	validator    *company.CompanyValidationService
 }
 
 func NewCompanyRelationController(repo repository.CompanyRelationQueryRepository, openaiClient *openai.Client) *CompanyRelationController {
 	return &CompanyRelationController{repo: repo, openaiClient: openaiClient}
 }
 
-func (ctrl *CompanyRelationController) SetCompanyValidator(v *services.CompanyValidationService) {
+func (ctrl *CompanyRelationController) SetCompanyValidator(v *company.CompanyValidationService) {
 	ctrl.validator = v
 }
 
@@ -189,7 +190,7 @@ func (ctrl *CompanyRelationController) GetCompanyBrief(ctx echo.Context) error {
 	}
 	c := companies[0]
 	return ctx.JSON(http.StatusOK, map[string]any{
-		"brief":      services.BuildCompanyBrief(&c, nil),
+		"brief":      company.BuildCompanyBrief(&c, nil),
 		"found":      true,
 		"company_id": c.ID,
 		"name":       c.Name,
@@ -207,7 +208,7 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(ctx echo.Context) erro
 	if ctrl.validator != nil {
 		results, err := ctrl.validator.SearchCandidates(ctx.Request().Context(), query, true)
 		if err != nil {
-			var ve *services.ValidationError
+			var ve *shared.ValidationError
 			if errors.As(err, &ve) {
 				return echo.NewHTTPError(http.StatusBadRequest, ve.Message)
 			}
@@ -251,7 +252,7 @@ func (ctrl *CompanyRelationController) ValidateCompany(ctx echo.Context) error {
 	}
 	result, err := ctrl.validator.Validate(ctx.Request().Context(), payload.Query)
 	if err != nil {
-		var ve *services.ValidationError
+		var ve *shared.ValidationError
 		if errors.As(err, &ve) {
 			return echo.NewHTTPError(http.StatusBadRequest, ve.Message)
 		}

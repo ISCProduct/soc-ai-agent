@@ -173,7 +173,7 @@ func TestValidateFileUpload_AllowsOctetStreamWithPDFMagic(t *testing.T) {
 func TestValidateFileUpload_RejectsNonDocument(t *testing.T) {
 	fh := makeUploadedFileHeader(t, "notes.txt", []byte("hello world text"), "text/plain")
 	err := validateFileUpload(fh)
-	var ve *ValidationError
+	var ve *shared.ValidationError
 	if !errors.As(err, &ve) {
 		t.Fatalf("ValidationError を期待: got %v", err)
 	}
