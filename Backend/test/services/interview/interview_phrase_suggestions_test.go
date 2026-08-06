@@ -1,4 +1,4 @@
-package services_test
+package interview_test
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"Backend/domain/entity"
 	"Backend/internal/models"
 	openaiPkg "Backend/internal/openai"
-	"Backend/internal/services"
+	"Backend/internal/services/interview"
 
 	openai "github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
@@ -89,8 +89,8 @@ func newTestInterviewService(
 	utterRepo *mockInterviewUtterRepo,
 	userRepo *mockUserRepo2,
 	aiClient *openaiPkg.Client,
-) *services.InterviewService {
-	return services.NewInterviewService(sessionRepo, utterRepo, nil, userRepo, nil, aiClient, nil)
+) *interview.InterviewService {
+	return interview.NewInterviewService(sessionRepo, utterRepo, nil, userRepo, nil, aiClient, nil)
 }
 
 // newOpenAITestServer はOpenAI Chat Completions レスポンスを返すテストHTTPサーバーを起動する。
@@ -120,7 +120,7 @@ func newOpenAITestServer(t *testing.T, responseBody string) (*httptest.Server, *
 // ─── BuildTranscript ─────────────────────────────────────────────────────────
 
 func TestBuildTranscript_Empty(t *testing.T) {
-	result := services.BuildTranscript(nil)
+	result := interview.BuildTranscript(nil)
 	assert.Equal(t, "", result)
 }
 
@@ -129,7 +129,7 @@ func TestBuildTranscript_UserOnly(t *testing.T) {
 		{Role: "user", Text: "チームでの開発経験があります。"},
 		{Role: "user", Text: "リーダーを担当しました。"},
 	}
-	result := services.BuildTranscript(utterances)
+	result := interview.BuildTranscript(utterances)
 	assert.Contains(t, result, "User: チームでの開発経験があります。")
 	assert.Contains(t, result, "User: リーダーを担当しました。")
 }
@@ -141,7 +141,7 @@ func TestBuildTranscript_MixedRoles(t *testing.T) {
 		{Role: "ai", Text: "志望動機を聞かせてください。"},
 		{Role: "user", Text: "御社に興味があります。"},
 	}
-	result := services.BuildTranscript(utterances)
+	result := interview.BuildTranscript(utterances)
 	assert.Contains(t, result, "Interviewer: 自己紹介をお願いします。")
 	assert.Contains(t, result, "User: 田中と申します。")
 	assert.Contains(t, result, "Interviewer: 志望動機を聞かせてください。")
@@ -152,7 +152,7 @@ func TestBuildTranscript_TrimsWhitespace(t *testing.T) {
 	utterances := []models.InterviewUtterance{
 		{Role: "user", Text: "  スペースあり  "},
 	}
-	result := services.BuildTranscript(utterances)
+	result := interview.BuildTranscript(utterances)
 	assert.Contains(t, result, "User: スペースあり")
 }
 
@@ -160,25 +160,25 @@ func TestBuildTranscript_TrimsWhitespace(t *testing.T) {
 
 func TestExtractJSONObject_Clean(t *testing.T) {
 	input := `{"suggestions": [{"original": "頑張りました", "suggestions": ["尽力しました"]}]}`
-	result := services.ExtractJSONObject(input)
+	result := interview.ExtractJSONObject(input)
 	assert.Equal(t, input, result)
 }
 
 func TestExtractJSONObject_WithMarkdownFence(t *testing.T) {
 	input := "```json\n{\"key\": \"value\"}\n```"
-	result := services.ExtractJSONObject(input)
+	result := interview.ExtractJSONObject(input)
 	assert.Equal(t, `{"key": "value"}`, result)
 }
 
 func TestExtractJSONObject_WithLeadingText(t *testing.T) {
 	// ExtractJSONObject は先頭のテキストと末尾のテキストを両方除去する
 	input := `以下がJSONです: {"key": "value"} 終わり`
-	result := services.ExtractJSONObject(input)
+	result := interview.ExtractJSONObject(input)
 	assert.Equal(t, `{"key": "value"}`, result)
 }
 
 func TestExtractJSONObject_Empty(t *testing.T) {
-	result := services.ExtractJSONObject("")
+	result := interview.ExtractJSONObject("")
 	assert.Equal(t, "", result)
 }
 

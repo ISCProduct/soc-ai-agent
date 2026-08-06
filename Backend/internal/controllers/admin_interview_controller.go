@@ -4,8 +4,8 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
-	"Backend/internal/services"
 	"Backend/internal/services/auth"
+	"Backend/internal/services/interview"
 	"Backend/internal/services/storage"
 	"context"
 	"encoding/json"
@@ -21,7 +21,7 @@ import (
 
 // AdminInterviewController provides admin endpoints for viewing interview sessions and videos.
 type AdminInterviewController struct {
-	interviewService    *services.InterviewService
+	interviewService    *interview.InterviewService
 	videoRepo           repository.InterviewVideoRepository
 	s3Service           *storage.S3UploadService
 	companyQuestionRepo repository.InterviewCompanyQuestionRepository
@@ -31,7 +31,7 @@ type AdminInterviewController struct {
 }
 
 func NewAdminInterviewController(
-	interviewService *services.InterviewService,
+	interviewService *interview.InterviewService,
 	videoRepo repository.InterviewVideoRepository,
 	s3Service *storage.S3UploadService,
 ) *AdminInterviewController {

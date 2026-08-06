@@ -1,4 +1,4 @@
-package services
+package interview
 
 import (
 	"Backend/domain/repository"

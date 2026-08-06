@@ -1,10 +1,10 @@
-package services_test
+package interview_test
 
 import (
 	"Backend/domain/entity"
 	"Backend/internal/models"
 	"Backend/internal/openai"
-	"Backend/internal/services"
+	"Backend/internal/services/interview"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -115,7 +115,7 @@ func (m *mockUserRepo) GetUserByOAuth(p, o string) (*entity.User, error) {
 func TestInterviewService_CreateSession(t *testing.T) {
 	sRepo := new(mockSessionRepo)
 	uRepo := new(mockUserRepo)
-	svc := services.NewInterviewService(sRepo, nil, nil, uRepo, nil, nil, nil)
+	svc := interview.NewInterviewService(sRepo, nil, nil, uRepo, nil, nil, nil)
 
 	t.Run("Success male", func(t *testing.T) {
 		uRepo.On("GetUserByID", uint(1)).Return(&entity.User{ID: 1}, nil).Once()
@@ -166,7 +166,7 @@ func TestInterviewService_TTSVoiceSelection(t *testing.T) {
 		defer server.Close()
 
 		client := openai.NewWithBaseURL(server.URL, "gpt-4o-mini")
-		svc := services.NewInterviewService(sRepo, nil, nil, uRepo, nil, client, nil)
+		svc := interview.NewInterviewService(sRepo, nil, nil, uRepo, nil, client, nil)
 
 		session := &models.InterviewSession{
 			ID:                100,
@@ -199,7 +199,7 @@ func TestInterviewService_TTSVoiceSelection(t *testing.T) {
 		defer server.Close()
 
 		client := openai.NewWithBaseURL(server.URL, "gpt-4o-mini")
-		svc := services.NewInterviewService(sRepo, nil, nil, uRepo, nil, client, nil)
+		svc := interview.NewInterviewService(sRepo, nil, nil, uRepo, nil, client, nil)
 
 		session := &models.InterviewSession{
 			ID:                101,

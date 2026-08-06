@@ -23,6 +23,7 @@ import (
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/gbizinfo"
 	"Backend/internal/services/github"
+	"Backend/internal/services/interview"
 	"Backend/internal/services/matching"
 	"Backend/internal/services/oauth"
 	"Backend/internal/services/organization"
@@ -286,7 +287,7 @@ func main() {
 		aiClient,
 		nil,
 	)
-	interviewService := services.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)
+	interviewService := interview.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)
 	if jobEnqueuer != nil {
 		interviewService.SetJobEnqueuer(jobEnqueuer)
 	}
