@@ -5,6 +5,7 @@ import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/services/gbizinfo"
 	"context"
 	"encoding/json"
 	"errors"
@@ -41,11 +42,11 @@ type CompanyInfoResult struct {
 type CompanyInfoFetcher struct {
 	repo   repository.CompanyRepository
 	llm    *companyfetch.LLM
-	gbiz   *GBizInfoService
+	gbiz   *gbizinfo.GBizInfoService
 	flight *CompanySearchFlight
 }
 
-func NewCompanyInfoFetcher(repo repository.CompanyRepository, client *openai.Client, gbiz ...*GBizInfoService) *CompanyInfoFetcher {
+func NewCompanyInfoFetcher(repo repository.CompanyRepository, client *openai.Client, gbiz ...*gbizinfo.GBizInfoService) *CompanyInfoFetcher {
 	f := &CompanyInfoFetcher{repo: repo, llm: companyfetch.NewLLM(client)}
 	if len(gbiz) > 0 {
 		f.gbiz = gbiz[0]

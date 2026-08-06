@@ -1,9 +1,10 @@
-package services
+package costs
 
 import (
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"Backend/internal/services/email"
+	"Backend/internal/services/shared"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -39,11 +40,11 @@ type realtimeTokenRates struct {
 
 func loadTokenRates() realtimeTokenRates {
 	return realtimeTokenRates{
-		textInput:        getFloatEnv("REALTIME_TEXT_INPUT_COST_PER_1M_USD", 5.0),
-		textOutput:       getFloatEnv("REALTIME_TEXT_OUTPUT_COST_PER_1M_USD", 15.0),
-		audioInput:       getFloatEnv("REALTIME_AUDIO_INPUT_COST_PER_1M_USD", 100.0),
-		audioOutput:      getFloatEnv("REALTIME_AUDIO_OUTPUT_COST_PER_1M_USD", 200.0),
-		cachedAudioInput: getFloatEnv("REALTIME_CACHED_AUDIO_INPUT_COST_PER_1M_USD", 20.0),
+		textInput:        shared.GetFloatEnv("REALTIME_TEXT_INPUT_COST_PER_1M_USD", 5.0),
+		textOutput:       shared.GetFloatEnv("REALTIME_TEXT_OUTPUT_COST_PER_1M_USD", 15.0),
+		audioInput:       shared.GetFloatEnv("REALTIME_AUDIO_INPUT_COST_PER_1M_USD", 100.0),
+		audioOutput:      shared.GetFloatEnv("REALTIME_AUDIO_OUTPUT_COST_PER_1M_USD", 200.0),
+		cachedAudioInput: shared.GetFloatEnv("REALTIME_CACHED_AUDIO_INPUT_COST_PER_1M_USD", 20.0),
 	}
 }
 
@@ -110,13 +111,13 @@ type RealtimeUsageService struct {
 }
 
 func NewRealtimeUsageService(repo *repositories.RealtimeUsageRepository, emailService *email.EmailService) *RealtimeUsageService {
-	threshold := getFloatEnv("REALTIME_MONTHLY_ALERT_THRESHOLD_USD", 200.0)
-	maxConcurrent := int64(getIntEnv("REALTIME_MAX_CONCURRENT_CONNECTIONS", 30))
+	threshold := shared.GetFloatEnv("REALTIME_MONTHLY_ALERT_THRESHOLD_USD", 200.0)
+	maxConcurrent := int64(shared.GetIntEnv("REALTIME_MAX_CONCURRENT_CONNECTIONS", 30))
 	if maxConcurrent <= 0 {
 		maxConcurrent = 30
 	}
-	rate := getFloatEnv("INTERVIEW_COST_PER_MIN_USD", 0.18)
-	sessionMinutes := getIntEnv("INTERVIEW_SESSION_MINUTES", 10)
+	rate := shared.GetFloatEnv("INTERVIEW_COST_PER_MIN_USD", 0.18)
+	sessionMinutes := shared.GetIntEnv("INTERVIEW_SESSION_MINUTES", 10)
 	if sessionMinutes <= 0 {
 		sessionMinutes = 10
 	}

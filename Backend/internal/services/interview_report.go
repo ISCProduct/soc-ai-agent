@@ -3,6 +3,7 @@ package services
 import (
 	"Backend/internal/models"
 	"Backend/internal/services/email"
+	"Backend/internal/services/shared"
 	"context"
 	"encoding/json"
 	"errors"
@@ -127,7 +128,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 Interview transcript:
 %s`, lang, transcript)
 
-	model := getEnv("INTERVIEW_REPORT_MODEL", "")
+	model := shared.GetEnv("INTERVIEW_REPORT_MODEL", "")
 	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 2000, model)
 	if err != nil {
 		return err

@@ -6,6 +6,7 @@ import (
 	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/services/gbizinfo"
 	"context"
 	"encoding/json"
 	"errors"
@@ -51,7 +52,7 @@ type CompanyRelationsFetcher struct {
 	companyRepo  repository.CompanyRepository
 	relationRepo repository.CompanyRelationRepository
 	llm          *companyfetch.LLM
-	gbiz         *GBizInfoService
+	gbiz         *gbizinfo.GBizInfoService
 	flight       *CompanySearchFlight
 }
 
@@ -59,7 +60,7 @@ func NewCompanyRelationsFetcher(
 	companyRepo repository.CompanyRepository,
 	relationRepo repository.CompanyRelationRepository,
 	client *openai.Client,
-	gbiz ...*GBizInfoService,
+	gbiz ...*gbizinfo.GBizInfoService,
 ) *CompanyRelationsFetcher {
 	f := &CompanyRelationsFetcher{
 		companyRepo:  companyRepo,

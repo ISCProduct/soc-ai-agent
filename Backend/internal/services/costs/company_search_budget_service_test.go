@@ -1,4 +1,4 @@
-package services
+package costs
 
 import (
 	"encoding/json"

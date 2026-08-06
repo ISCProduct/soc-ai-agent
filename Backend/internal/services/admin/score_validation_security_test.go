@@ -1,4 +1,4 @@
-package services
+package admin
 
 // スコアバリデーション相関係数のテスト（Issue #313）
 // 実行: cd Backend && go test ./internal/services/... -run TestCorrelation -v

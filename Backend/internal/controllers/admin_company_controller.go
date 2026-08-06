@@ -6,6 +6,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services"
+	"Backend/internal/services/gbizinfo"
 	ifaces "Backend/internal/services/interfaces"
 	"errors"
 	"net/http"
@@ -19,7 +20,7 @@ import (
 type AdminCompanyController struct {
 	repo             repository.CompanyRepository
 	audit            ifaces.AuditLogService
-	gbiz             *services.GBizInfoService
+	gbiz             *gbizinfo.GBizInfoService
 	openaiClient     *openai.Client
 	infoFetcher      *services.CompanyInfoFetcher
 	relationsFetcher *services.CompanyRelationsFetcher
@@ -29,7 +30,7 @@ type AdminCompanyController struct {
 	missingBatch     *services.CompanyMissingBatchService
 }
 
-func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.AuditLogService, gbiz *services.GBizInfoService, openaiClient ...*openai.Client) *AdminCompanyController {
+func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.AuditLogService, gbiz *gbizinfo.GBizInfoService, openaiClient ...*openai.Client) *AdminCompanyController {
 	ctrl := &AdminCompanyController{repo: repo, audit: audit, gbiz: gbiz}
 	if len(openaiClient) > 0 {
 		ctrl.openaiClient = openaiClient[0]

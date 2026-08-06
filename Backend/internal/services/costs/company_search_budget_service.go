@@ -1,9 +1,10 @@
-package services
+package costs
 
 import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/repositories"
 	"Backend/internal/services/email"
+	"Backend/internal/services/shared"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -39,11 +40,11 @@ type CompanySearchBudgetService struct {
 }
 
 func NewCompanySearchBudgetService(repo *repositories.APICallLogRepository, emailService *email.EmailService) *CompanySearchBudgetService {
-	limit := int64(getIntEnv("COMPANY_SEARCH_MONTHLY_LIMIT", 2000))
+	limit := int64(shared.GetIntEnv("COMPANY_SEARCH_MONTHLY_LIMIT", 2000))
 	if limit <= 0 {
 		limit = 2000
 	}
-	alert := int64(getIntEnv("COMPANY_SEARCH_ALERT_THRESHOLD", int(limit)))
+	alert := int64(shared.GetIntEnv("COMPANY_SEARCH_ALERT_THRESHOLD", int(limit)))
 	if alert <= 0 {
 		alert = limit
 	}

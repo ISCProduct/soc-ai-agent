@@ -3,6 +3,7 @@ package services
 import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/services/shared"
 	"context"
 	"encoding/json"
 	"errors"
@@ -66,7 +67,7 @@ func (s *InterviewService) GetPhraseSuggestions(ctx context.Context, userID uint
 応募者発言:
 %s`, transcript)
 
-	model := getEnv("INTERVIEW_REPORT_MODEL", "")
+	model := shared.GetEnv("INTERVIEW_REPORT_MODEL", "")
 	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.5, 1000, model)
 	if err != nil {
 		return nil, err
@@ -165,13 +166,13 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 	if gender == "" {
 		gender = "female"
 	}
-	model := getEnv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview")
+	model := shared.GetEnv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview")
 	voice := realtimeVoiceForLangAndGender(lang, gender)
-	transcribeModel := getEnv("OPENAI_REALTIME_TRANSCRIBE_MODEL", "")
+	transcribeModel := shared.GetEnv("OPENAI_REALTIME_TRANSCRIBE_MODEL", "")
 	if transcribeModel == "" {
 		transcribeModel = "gpt-4o-transcribe"
 	}
-	maxTokens := getIntEnv("OPENAI_REALTIME_MAX_OUTPUT_TOKENS", 120)
+	maxTokens := shared.GetIntEnv("OPENAI_REALTIME_MAX_OUTPUT_TOKENS", 120)
 	req := openai.RealtimeSessionRequest{
 		Model:        model,
 		Modalities:   []string{"audio"},
@@ -233,7 +234,7 @@ func RealtimeVoiceForLangAndGender(lang, gender string) string {
 // realtimeVoiceForLangAndGender 言語・性別コードに応じた推奨ボイスを返す。
 // 環境変数 OPENAI_REALTIME_VOICE が設定されている場合はそちらを優先する。
 func realtimeVoiceForLangAndGender(lang, gender string) string {
-	if v := getEnv("OPENAI_REALTIME_VOICE", ""); v != "" {
+	if v := shared.GetEnv("OPENAI_REALTIME_VOICE", ""); v != "" {
 		return v
 	}
 	return ttsVoiceForGenderAndLang(gender, lang)

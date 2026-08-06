@@ -79,3 +79,13 @@ func (s *InterviewService) EvaluateAndPersist(userID uint, sessionID string, spe
 	}
 	return nil
 }
+
+func clampInt(v, min, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}

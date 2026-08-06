@@ -1,4 +1,4 @@
-package services
+package gbizinfo
 
 import (
 	"context"

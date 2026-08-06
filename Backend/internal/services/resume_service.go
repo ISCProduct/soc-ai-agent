@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/services/flywheel"
 	"Backend/internal/services/shared"
 	"bytes"
 	"context"
@@ -94,13 +95,13 @@ type ResumeService struct {
 	aiClient     *openai.Client
 	s3           *s3Storage
 	s3Err        error
-	crossFeature *CrossFeatureIntegrationService
+	crossFeature *flywheel.CrossFeatureIntegrationService
 	validator    *CompanyValidationService
 	companyRepo  shared.CompanyBriefReader
 }
 
 // SetCrossFeatureService 機能間連携サービスを注入する（オプション）
-func (s *ResumeService) SetCrossFeatureService(cf *CrossFeatureIntegrationService) {
+func (s *ResumeService) SetCrossFeatureService(cf *flywheel.CrossFeatureIntegrationService) {
 	s.crossFeature = cf
 }
 

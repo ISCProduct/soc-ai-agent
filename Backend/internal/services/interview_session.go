@@ -2,6 +2,7 @@ package services
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/shared"
 	"errors"
 	"strings"
 	"time"
@@ -25,7 +26,7 @@ func (s *InterviewService) CreateSession(userID uint, language string, interview
 		Status:            "ready",
 		Language:          language,
 		InterviewerGender: interviewerGender,
-		TemplateVersion:   getEnv("INTERVIEW_TEMPLATE_VERSION", "v1"),
+		TemplateVersion:   shared.GetEnv("INTERVIEW_TEMPLATE_VERSION", "v1"),
 	}
 	if err := s.sessionRepo.Create(session); err != nil {
 		return nil, err

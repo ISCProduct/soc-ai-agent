@@ -1,8 +1,9 @@
-package services
+package costs
 
 import (
 	"Backend/internal/models"
 	"Backend/internal/repositories"
+	"Backend/internal/services/shared"
 	"fmt"
 	"log"
 	"os"
@@ -68,9 +69,9 @@ type APICostService struct {
 
 func NewAPICostService(repo *repositories.APICallLogRepository) *APICostService {
 	// OPENAI_COST_ALERT_THRESHOLD_USD を優先、未設定時は旧 API_COST_ALERT_THRESHOLD_USD、最終既定 $40
-	threshold := getFloatEnv("OPENAI_COST_ALERT_THRESHOLD_USD", 0)
+	threshold := shared.GetFloatEnv("OPENAI_COST_ALERT_THRESHOLD_USD", 0)
 	if threshold <= 0 {
-		threshold = getFloatEnv("API_COST_ALERT_THRESHOLD_USD", 40)
+		threshold = shared.GetFloatEnv("API_COST_ALERT_THRESHOLD_USD", 40)
 	}
 	return &APICostService{repo: repo, alertThresholdUSD: threshold}
 }

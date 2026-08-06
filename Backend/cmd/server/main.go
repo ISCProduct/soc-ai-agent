@@ -13,9 +13,13 @@ import (
 	"Backend/internal/routes"
 	"Backend/internal/scraper"
 	"Backend/internal/services"
+	"Backend/internal/services/admin"
 	"Backend/internal/services/analysis"
 	"Backend/internal/services/application"
+	"Backend/internal/services/costs"
 	"Backend/internal/services/email"
+	"Backend/internal/services/flywheel"
+	"Backend/internal/services/gbizinfo"
 	"Backend/internal/services/matching"
 	"Backend/internal/services/organization"
 	"Backend/internal/services/refreshtoken"
@@ -223,9 +227,9 @@ func main() {
 		jobEnqueuer = &queue.EnqueuerAdapter{Client: qClient}
 	}
 
-	apiCostService := services.NewAPICostService(apiCallLogRepo)
-	realtimeUsageService := services.NewRealtimeUsageService(realtimeUsageRepo, emailService)
-	companySearchBudget := services.NewCompanySearchBudgetService(apiCallLogRepo, emailService)
+	apiCostService := costs.NewAPICostService(apiCallLogRepo)
+	realtimeUsageService := costs.NewRealtimeUsageService(realtimeUsageRepo, emailService)
+	companySearchBudget := costs.NewCompanySearchBudgetService(apiCallLogRepo, emailService)
 	companySearchFlight := services.NewCompanySearchFlight()
 	// OpenAI APIコール時にトークン使用量をロギング
 	aiClient.OnUsage = func(model string, promptTokens, completionTokens int) {
@@ -250,7 +254,7 @@ func main() {
 	resumeService := services.NewResumeService(resumeRepo, "storage/resumes", aiClient)
 	crawlService := services.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
 	gbizInfoRepo := repositories.NewGBizInfoRepository(db)
-	gbizInfoService := services.NewGBizInfoService(cfg, gbizInfoRepo, companyRepo, companyRelationRepo)
+	gbizInfoService := gbizinfo.NewGBizInfoService(cfg, gbizInfoRepo, companyRepo, companyRelationRepo)
 	infoFetcher := services.NewCompanyInfoFetcher(companyRepo, aiClient, gbizInfoService)
 	infoFetcher.SetSearchBudget(companySearchBudget)
 	infoFetcher.SetSearchFlight(companySearchFlight)
@@ -262,7 +266,7 @@ func main() {
 	jobFetcher.SetSearchFlight(companySearchFlight)
 	crawlService.SetInfoFetcher(infoFetcher)
 	crawlService.SetJobFetcher(jobFetcher)
-	auditLogService := services.NewAuditLogService(auditLogRepo)
+	auditLogService := admin.NewAuditLogService(auditLogRepo)
 	authService.SetAuditLog(auditLogService)
 	analysisService := analysis.NewAnalysisScoringService(
 		userWeightScoreRepo,
@@ -289,7 +293,7 @@ func main() {
 	}
 
 	// クロス機能連携サービス（チャットスコア↔面接/職務経歴書レビュー）
-	crossFeatureService := services.NewCrossFeatureIntegrationService(userWeightScoreRepo)
+	crossFeatureService := flywheel.NewCrossFeatureIntegrationService(userWeightScoreRepo)
 	interviewService.SetCrossFeatureService(crossFeatureService)
 	interviewService.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
@@ -352,8 +356,8 @@ func main() {
 	adminInterviewController.SetUserAccessGuard(userDeletionService)
 	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminCostsController := controllers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
-	adminVectorController := controllers.NewAdminVectorController(services.NewAdminVectorService())
-	profileRecalcService := services.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
+	adminVectorController := controllers.NewAdminVectorController(admin.NewAdminVectorService())
+	profileRecalcService := flywheel.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
 	profileRecalcController := controllers.NewAdminProfileRecalculationController(profileRecalcService)
 	companyEntryController := controllers.NewCompanyEntryController(db, companyRepo, graduateRepo)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
@@ -371,12 +375,12 @@ func main() {
 	appController := controllers.NewApplicationController(appService)
 	integratedProfileController := controllers.NewIntegratedProfileController(crossFeatureService, interviewSessionRepo, resumeRepo)
 	scoreValidationRepo := repositories.NewScoreValidationRepository(db)
-	scoreValidationService := services.NewScoreValidationService(scoreValidationRepo)
+	scoreValidationService := admin.NewScoreValidationService(scoreValidationRepo)
 	scoreValidationController := controllers.NewAdminScoreValidationController(scoreValidationService)
 	collectiveInsightRepo := repositories.NewCollectiveInsightRepository(db)
-	collectiveInsightService := services.NewCollectiveInsightService(collectiveInsightRepo, userWeightScoreRepo)
+	collectiveInsightService := flywheel.NewCollectiveInsightService(collectiveInsightRepo, userWeightScoreRepo)
 	collectiveInsightController := controllers.NewCollectiveInsightController(collectiveInsightService)
-	scraperSessionService := services.NewScraperSessionService(scraperSessionRepo)
+	scraperSessionService := admin.NewScraperSessionService(scraperSessionRepo)
 	scraperSessionController := controllers.NewAdminScraperSessionController(scraperSessionService)
 
 	// Echo初期化

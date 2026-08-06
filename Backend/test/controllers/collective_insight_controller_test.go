@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"Backend/internal/controllers"
-	"Backend/internal/services"
+	"Backend/internal/services/flywheel"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
@@ -53,7 +53,7 @@ func TestCollectiveInsightController_GetRecommendations_ServiceError(t *testing.
 
 func TestCollectiveInsightController_GetRecommendations_Success(t *testing.T) {
 	svc := &mocks.CollectiveInsightServiceMock{}
-	items := []services.CollectiveRecommendItem{
+	items := []flywheel.CollectiveRecommendItem{
 		{CompanyID: 10, CompanyName: "テスト株式会社", PassCount: 8, SimilarUsers: 10},
 	}
 	svc.On("GetCollectiveRecommendations", uint(1), "sess-abc", []uint(nil)).Return(items, nil)

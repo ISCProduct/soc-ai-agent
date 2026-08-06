@@ -1,4 +1,4 @@
-package services
+package flywheel
 
 import (
 	"Backend/domain/entity"

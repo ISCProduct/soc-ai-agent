@@ -1,4 +1,4 @@
-package services_test
+package costs_test
 
 // 実行: cd Backend && go test ./test/services/... -run 'TestAPICostAlert|TestNewAPICostService' -v
 
@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"Backend/internal/services"
+	"Backend/internal/services/costs"
 )
 
 func TestAPICostAlert_ThresholdAndMonthlyDedupe(t *testing.T) {
@@ -73,7 +73,7 @@ func TestAPICostAlert_ThresholdAndMonthlyDedupe(t *testing.T) {
 				lastSlack    string
 			)
 
-			svc := services.NewAPICostService(nil)
+			svc := costs.NewAPICostService(nil)
 			svc.SetAlertHooksForTest(tt.threshold,
 				func(text string) error {
 					mu.Lock()
@@ -127,7 +127,7 @@ func TestAPICostAlert_WebhookUnsetDoesNotPanic(t *testing.T) {
 	t.Setenv("OPENAI_COST_ALERT_DISCORD_WEBHOOK_URL", "")
 	t.Setenv("REALTIME_ALERT_SLACK_WEBHOOK_URL", "")
 
-	svc := services.NewAPICostService(nil)
+	svc := costs.NewAPICostService(nil)
 	svc.SetAlertHooksForTest(40, nil, nil)
 
 	if !svc.NotifyIfMonthCostExceeded(50, "2026-07") {
@@ -141,7 +141,7 @@ func TestAPICostAlert_WebhookUnsetDoesNotPanic(t *testing.T) {
 func TestNewAPICostService_DefaultThreshold40(t *testing.T) {
 	t.Setenv("OPENAI_COST_ALERT_THRESHOLD_USD", "")
 	t.Setenv("API_COST_ALERT_THRESHOLD_USD", "")
-	svc := services.NewAPICostService(nil)
+	svc := costs.NewAPICostService(nil)
 	if got := svc.AlertThresholdUSD(); got != 40 {
 		t.Fatalf("default threshold=%v want=40", got)
 	}
@@ -150,7 +150,7 @@ func TestNewAPICostService_DefaultThreshold40(t *testing.T) {
 func TestNewAPICostService_OpenAIEnvOverrides(t *testing.T) {
 	t.Setenv("OPENAI_COST_ALERT_THRESHOLD_USD", "25.5")
 	t.Setenv("API_COST_ALERT_THRESHOLD_USD", "100")
-	svc := services.NewAPICostService(nil)
+	svc := costs.NewAPICostService(nil)
 	if got := svc.AlertThresholdUSD(); got != 25.5 {
 		t.Fatalf("threshold=%v want=25.5", got)
 	}
@@ -159,7 +159,7 @@ func TestNewAPICostService_OpenAIEnvOverrides(t *testing.T) {
 func TestNewAPICostService_LegacyEnvFallback(t *testing.T) {
 	t.Setenv("OPENAI_COST_ALERT_THRESHOLD_USD", "")
 	t.Setenv("API_COST_ALERT_THRESHOLD_USD", "80")
-	svc := services.NewAPICostService(nil)
+	svc := costs.NewAPICostService(nil)
 	if got := svc.AlertThresholdUSD(); got != 80 {
 		t.Fatalf("threshold=%v want=80", got)
 	}

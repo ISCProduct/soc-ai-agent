@@ -4,13 +4,12 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/services/costs"
 	"Backend/internal/services/email"
+	"Backend/internal/services/flywheel"
 	"Backend/internal/services/shared"
 	"context"
 	"log"
-	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -22,8 +21,8 @@ type InterviewService struct {
 	userRepo             repository.UserRepository
 	emailService         *email.EmailService
 	openaiClient         *openai.Client
-	realtimeUsageService *RealtimeUsageService
-	crossFeature         *CrossFeatureIntegrationService
+	realtimeUsageService *costs.RealtimeUsageService
+	crossFeature         *flywheel.CrossFeatureIntegrationService
 	companyQuestionRepo  repository.InterviewCompanyQuestionRepository
 	questionStateRepo    repository.InterviewQuestionStateRepository
 	skillScoreRepo       SkillScoreReader
@@ -46,7 +45,7 @@ func NewInterviewService(
 	userRepo repository.UserRepository,
 	emailService *email.EmailService,
 	openaiClient *openai.Client,
-	realtimeUsageService *RealtimeUsageService,
+	realtimeUsageService *costs.RealtimeUsageService,
 ) *InterviewService {
 	return &InterviewService{
 		sessionRepo:          sessionRepo,
@@ -86,7 +85,7 @@ func (s *InterviewService) SetUserWeightScoreRepo(r repository.UserWeightScoreRe
 }
 
 // SetCrossFeatureService 機能間連携サービスを注入する（オプション）
-func (s *InterviewService) SetCrossFeatureService(cf *CrossFeatureIntegrationService) {
+func (s *InterviewService) SetCrossFeatureService(cf *flywheel.CrossFeatureIntegrationService) {
 	s.crossFeature = cf
 }
 
@@ -170,7 +169,7 @@ func (s *InterviewService) estimateCost(start, end *time.Time) float64 {
 	if minutes < 0 {
 		return 0
 	}
-	rate := getFloatEnv("INTERVIEW_COST_PER_MIN_USD", 0.18)
+	rate := shared.GetFloatEnv("INTERVIEW_COST_PER_MIN_USD", 0.18)
 	return minutes * rate
 }
 
@@ -217,34 +216,3 @@ func toSessionResponses(sessions []models.InterviewSession) []InterviewSessionRe
 	return out
 }
 
-func getEnv(key, def string) string {
-	v := os.Getenv(key)
-	if strings.TrimSpace(v) == "" {
-		return def
-	}
-	return v
-}
-
-func getIntEnv(key string, def int) int {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return def
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return def
-	}
-	return n
-}
-
-func getFloatEnv(key string, def float64) float64 {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return def
-	}
-	n, err := strconv.ParseFloat(v, 64)
-	if err != nil {
-		return def
-	}
-	return n
-}

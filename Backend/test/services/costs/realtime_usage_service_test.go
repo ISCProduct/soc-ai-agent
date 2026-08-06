@@ -1,4 +1,4 @@
-package services_test
+package costs_test
 
 // 実行: cd Backend && go test ./test/services/... -run TestRealtime -v
 
@@ -6,19 +6,19 @@ import (
 	"math"
 	"testing"
 
-	"Backend/internal/services"
+	"Backend/internal/services/costs"
 )
 
 func TestRealtimeTokenRatesCalcCost(t *testing.T) {
 	tests := []struct {
 		name     string
 		envs     map[string]string
-		usage    services.TokenUsage
+		usage    costs.TokenUsage
 		wantCost float64
 	}{
 		{
 			name: "テキストのみ",
-			usage: services.TokenUsage{
+			usage: costs.TokenUsage{
 				InputTextTokens:  1_000_000,
 				OutputTextTokens: 1_000_000,
 			},
@@ -27,7 +27,7 @@ func TestRealtimeTokenRatesCalcCost(t *testing.T) {
 		},
 		{
 			name: "音声のみ",
-			usage: services.TokenUsage{
+			usage: costs.TokenUsage{
 				InputAudioTokens:  1_000_000,
 				OutputAudioTokens: 1_000_000,
 			},
@@ -36,7 +36,7 @@ func TestRealtimeTokenRatesCalcCost(t *testing.T) {
 		},
 		{
 			name: "キャッシュ済み音声入力",
-			usage: services.TokenUsage{
+			usage: costs.TokenUsage{
 				InputCachedAudioTokens: 1_000_000,
 			},
 			// デフォルト単価: $20
@@ -44,7 +44,7 @@ func TestRealtimeTokenRatesCalcCost(t *testing.T) {
 		},
 		{
 			name: "混合トークン",
-			usage: services.TokenUsage{
+			usage: costs.TokenUsage{
 				InputTextTokens:        500_000,
 				OutputTextTokens:       500_000,
 				InputAudioTokens:       100_000,
@@ -59,14 +59,14 @@ func TestRealtimeTokenRatesCalcCost(t *testing.T) {
 		},
 		{
 			name:     "トークン0はコスト0",
-			usage:    services.TokenUsage{},
+			usage:    costs.TokenUsage{},
 			wantCost: 0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := services.CalcTokenCost(tt.usage)
+			got := costs.CalcTokenCost(tt.usage)
 			if math.Abs(got-tt.wantCost) > 1e-6 {
 				t.Fatalf("cost mismatch: got=%.6f want=%.6f", got, tt.wantCost)
 			}
@@ -77,7 +77,7 @@ func TestRealtimeTokenRatesCalcCost(t *testing.T) {
 func TestCloseSessionTokenBasedFallback(t *testing.T) {
 	tests := []struct {
 		name           string
-		tokens         *services.TokenUsage
+		tokens         *costs.TokenUsage
 		durationSec    int64
 		wantTokenBased bool
 	}{
@@ -89,7 +89,7 @@ func TestCloseSessionTokenBasedFallback(t *testing.T) {
 		},
 		{
 			name: "tokensが非nilのときトークンベース",
-			tokens: &services.TokenUsage{
+			tokens: &costs.TokenUsage{
 				InputAudioTokens:  500_000,
 				OutputAudioTokens: 300_000,
 			},
