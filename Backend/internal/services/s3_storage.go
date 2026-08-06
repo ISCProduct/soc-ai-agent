@@ -99,18 +99,6 @@ func (s *s3Storage) getObject(ctx context.Context, key string) (*s3.GetObjectOut
 	})
 }
 
-func parseS3URI(uri string) (string, string, bool) {
-	if !strings.HasPrefix(uri, "s3://") {
-		return "", "", false
-	}
-	trimmed := strings.TrimPrefix(uri, "s3://")
-	parts := strings.SplitN(trimmed, "/", 2)
-	if len(parts) != 2 {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
-}
-
 func contentTypeForPath(path string) string {
 	ext := strings.ToLower(path)
 	if strings.HasSuffix(ext, ".pdf") {

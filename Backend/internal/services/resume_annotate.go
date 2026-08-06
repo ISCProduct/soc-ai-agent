@@ -48,7 +48,7 @@ func (s *ResumeService) OpenAnnotatedFile(documentID uint, requestingUserID uint
 	if err := s.ensureS3Available(); err != nil {
 		return nil, err
 	}
-	bucket, key, ok := parseS3URI(doc.AnnotatedPath)
+	bucket, key, ok := shared.ParseS3URI(doc.AnnotatedPath)
 	if !ok {
 		return nil, errors.New("invalid s3 path")
 	}

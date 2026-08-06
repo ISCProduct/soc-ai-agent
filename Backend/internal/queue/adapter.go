@@ -1,8 +1,8 @@
 package queue
 
-import "Backend/internal/services"
+import "Backend/internal/services/shared"
 
-// EnqueuerAdapter は queue.Client を services.JobEnqueuer に適合させる（#617）。
+// EnqueuerAdapter は queue.Client を shared.JobEnqueuer に適合させる（#617）。
 type EnqueuerAdapter struct {
 	Client *Client
 }
@@ -32,4 +32,4 @@ func (a *EnqueuerAdapter) EnqueueInterviewReport(sessionID uint) error {
 }
 
 // コンパイル時チェック
-var _ services.JobEnqueuer = (*EnqueuerAdapter)(nil)
+var _ shared.JobEnqueuer = (*EnqueuerAdapter)(nil)

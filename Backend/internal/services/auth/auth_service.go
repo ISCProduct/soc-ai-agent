@@ -1,9 +1,10 @@
-package services
+package auth
 
 import (
 	"Backend/domain/repository"
 	"Backend/internal/services/email"
 	"Backend/internal/services/refreshtoken"
+	"Backend/internal/services/shared"
 	"log"
 
 	"gorm.io/gorm"
@@ -22,16 +23,7 @@ type AuthService struct {
 	audit         auditRecorder
 	deletion      *UserDeletionService
 	refreshTokens *refreshtoken.RefreshTokenService
-	jobs          JobEnqueuer
-}
-
-// JobEnqueuer は永続ジョブキューへの投入面（#617）。未設定時は従来どおり同期/go func。
-type JobEnqueuer interface {
-	EnqueueEmailVerification(userID uint, email, name, token, appURL string) error
-	EnqueueEmailReVerification(userID uint, email, name, token, appURL string) error
-	EnqueueEmailRegistration(email, token string) error
-	EnqueueEmailPasswordReset(email, token, appURL string) error
-	EnqueueInterviewReport(sessionID uint) error
+	jobs          shared.JobEnqueuer
 }
 
 func NewAuthService(userRepo repository.UserRepository, pendingRepo repository.PendingRegistrationRepository, emailService *email.EmailService) *AuthService {
@@ -39,7 +31,7 @@ func NewAuthService(userRepo repository.UserRepository, pendingRepo repository.P
 }
 
 // SetJobEnqueuer はメール送信等の非同期ジョブ投入先を設定する（#617）。
-func (s *AuthService) SetJobEnqueuer(j JobEnqueuer) {
+func (s *AuthService) SetJobEnqueuer(j shared.JobEnqueuer) {
 	s.jobs = j
 }
 

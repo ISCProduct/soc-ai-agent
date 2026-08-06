@@ -3,7 +3,7 @@ package routes
 import (
 	"Backend/internal/middleware"
 	"Backend/internal/repositories"
-	"Backend/internal/services"
+	"Backend/internal/services/auth"
 	"Backend/internal/services/organization"
 	"context"
 	"errors"
@@ -21,7 +21,7 @@ type OrganizationIDResolver interface {
 // userSecret が未設定の場合はフェイルクローズ（503）として動作する。
 // access が非 nil の場合、退会済みユーザーを遮断する。
 // orgs が非 nil の場合、organization_id をリクエストコンテキストへ載せる。
-func EchoUserAuth(userSecret string, access services.UserAccessGuard, orgs ...OrganizationIDResolver) echo.MiddlewareFunc {
+func EchoUserAuth(userSecret string, access auth.UserAccessGuard, orgs ...OrganizationIDResolver) echo.MiddlewareFunc {
 	var resolver OrganizationIDResolver
 	if len(orgs) > 0 {
 		resolver = orgs[0]
@@ -41,7 +41,7 @@ func EchoUserAuth(userSecret string, access services.UserAccessGuard, orgs ...Or
 			}
 			if access != nil {
 				if err := access.EnsureActiveUser(userID); err != nil {
-					if errors.Is(err, services.ErrAccountWithdrawn) {
+					if errors.Is(err, auth.ErrAccountWithdrawn) {
 						return echo.NewHTTPError(http.StatusForbidden, "account has been withdrawn")
 					}
 					return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")

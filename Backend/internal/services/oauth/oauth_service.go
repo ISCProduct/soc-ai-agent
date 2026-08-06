@@ -5,7 +5,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/config"
 	"Backend/internal/middleware"
-	"Backend/internal/services"
+	"Backend/internal/services/auth"
 	"Backend/internal/services/github"
 	"Backend/internal/services/refreshtoken"
 	"context"
@@ -90,7 +90,7 @@ func (s *OAuthService) GetGitHubAuthURL(state string) string {
 }
 
 // HandleGoogleCallback Google OAuth認証後のコールバック処理
-func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*services.AuthResponse, error) {
+func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*auth.AuthResponse, error) {
 	token, err := s.oauthConfig.Google.Exchange(ctx, code)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange token: %w", err)
@@ -163,7 +163,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 		}
 	}
 
-	authResp := &services.AuthResponse{
+	authResp := &auth.AuthResponse{
 		UserID:                   user.ID,
 		Email:                    user.Email,
 		Name:                     user.Name,
@@ -184,7 +184,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 }
 
 // HandleGitHubCallback GitHub OAuth認証後のコールバック処理
-func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*services.AuthResponse, error) {
+func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*auth.AuthResponse, error) {
 	token, err := s.oauthConfig.GitHub.Exchange(ctx, code)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange token: %w", err)
@@ -286,7 +286,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 		}
 	}
 
-	authResp := &services.AuthResponse{
+	authResp := &auth.AuthResponse{
 		UserID:                   user.ID,
 		Email:                    user.Email,
 		Name:                     user.Name,

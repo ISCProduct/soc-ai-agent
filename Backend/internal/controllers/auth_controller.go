@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/auth"
 	"Backend/internal/services/interfaces"
 	"Backend/internal/services/refreshtoken"
 	"errors"
@@ -25,7 +25,7 @@ func NewAuthController(authService interfaces.AuthService) *AuthController {
 
 // Register 新規ユーザー登録
 func (c *AuthController) Register(ctx echo.Context) error {
-	var req services.RegisterRequest
+	var req auth.RegisterRequest
 	if err := ctx.Bind(&req); err != nil {
 		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
 	}
@@ -51,7 +51,7 @@ func (c *AuthController) Register(ctx echo.Context) error {
 
 // Login ログイン
 func (c *AuthController) Login(ctx echo.Context) error {
-	var req services.LoginRequest
+	var req auth.LoginRequest
 	if err := ctx.Bind(&req); err != nil {
 		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
 	}
@@ -144,7 +144,7 @@ func (c *AuthController) UpdateProfile(ctx echo.Context) error {
 		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
 	}
 
-	var req services.UpdateProfileRequest
+	var req auth.UpdateProfileRequest
 	if err := ctx.Bind(&req); err != nil {
 		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
 	}

@@ -30,7 +30,7 @@ type InterviewService struct {
 	userWeightScoreRepo  repository.UserWeightScoreRepository
 	jobCh                chan uint
 	workerOnce           sync.Once
-	jobs                 JobEnqueuer
+	jobs                 shared.JobEnqueuer
 }
 
 // SkillScoreReader はGitHubスキルスコア取得の最小インターフェース。
@@ -90,7 +90,7 @@ func (s *InterviewService) SetCrossFeatureService(cf *flywheel.CrossFeatureInteg
 }
 
 // SetJobEnqueuer は面接レポート等の永続キュー投入先を設定する（#617）。
-func (s *InterviewService) SetJobEnqueuer(j JobEnqueuer) {
+func (s *InterviewService) SetJobEnqueuer(j shared.JobEnqueuer) {
 	s.jobs = j
 }
 

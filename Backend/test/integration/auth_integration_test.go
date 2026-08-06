@@ -22,7 +22,7 @@ import (
 
 	"Backend/internal/controllers"
 	"Backend/internal/repositories"
-	"Backend/internal/services"
+	"Backend/internal/services/auth"
 	"Backend/internal/services/email"
 )
 
@@ -51,7 +51,7 @@ func newAuthController(t *testing.T, db *gorm.DB) *controllers.AuthController {
 	userRepo := repositories.NewUserRepository(db)
 	pendingRepo := repositories.NewPendingRegistrationRepository(db)
 	emailService := email.NewEmailService() // SMTP未設定時はログ出力のみ
-	authService := services.NewAuthService(userRepo, pendingRepo, emailService)
+	authService := auth.NewAuthService(userRepo, pendingRepo, emailService)
 	return controllers.NewAuthController(authService)
 }
 

@@ -1,7 +1,8 @@
-package services
+package auth
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/shared"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -369,7 +370,7 @@ func collectUserObjectKeys(tx *gorm.DB, userID uint) ([]string, error) {
 		if raw == "" {
 			return
 		}
-		if _, key, ok := parseS3URI(raw); ok {
+		if _, key, ok := shared.ParseS3URI(raw); ok {
 			raw = key
 		}
 		if raw == "" {

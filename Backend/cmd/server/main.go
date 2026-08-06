@@ -16,6 +16,7 @@ import (
 	"Backend/internal/services/admin"
 	"Backend/internal/services/analysis"
 	"Backend/internal/services/application"
+	"Backend/internal/services/auth"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/email"
 	"Backend/internal/services/flywheel"
@@ -26,6 +27,7 @@ import (
 	"Backend/internal/services/organization"
 	"Backend/internal/services/refreshtoken"
 	"Backend/internal/services/schedule"
+	"Backend/internal/services/shared"
 	"Backend/internal/services/skillscore"
 	"Backend/internal/services/storage"
 	"Backend/migrations"
@@ -223,7 +225,7 @@ func main() {
 			middleware.NewRedisRateLimiter(rdb, "password_reset", time.Hour, 5),
 		)
 	}
-	var jobEnqueuer services.JobEnqueuer
+	var jobEnqueuer shared.JobEnqueuer
 	var queueServer *queue.Server
 	if rdb != nil {
 		qClient := queue.NewClient(rdb)
@@ -238,7 +240,7 @@ func main() {
 	aiClient.OnUsage = func(model string, promptTokens, completionTokens int) {
 		apiCostService.LogCall(model, promptTokens, completionTokens)
 	}
-	authService := services.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
+	authService := auth.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	authService.SetDB(db)
 	if jobEnqueuer != nil {
 		authService.SetJobEnqueuer(jobEnqueuer)
@@ -339,12 +341,12 @@ func main() {
 		slog.Warn("S3 upload service not available", "error", s3Err)
 		s3UploadService = nil
 	}
-	var objectDeleter services.ObjectDeleter
+	var objectDeleter auth.ObjectDeleter
 	if s3UploadService != nil {
 		objectDeleter = s3UploadService
 		authService.SetObjectDeleter(s3UploadService)
 	}
-	userDeletionService := services.NewUserDeletionService(db, objectDeleter, auditLogService)
+	userDeletionService := auth.NewUserDeletionService(db, objectDeleter, auditLogService)
 	organizationRepo := repositories.NewOrganizationRepository(db)
 	organizationService := organization.NewOrganizationService(organizationRepo)
 	adminOrganizationController := controllers.NewAdminOrganizationController(organizationService)

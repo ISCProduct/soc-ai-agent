@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"Backend/internal/models"
+	"Backend/internal/services/shared"
 )
 
 func (s *ResumeService) ensureS3Available() error {
@@ -46,7 +47,7 @@ func (s *ResumeService) resolveLocalPath(doc *models.ResumeDocument, workDir str
 	if s.s3 == nil || !s.s3.isEnabled() {
 		return "", errors.New("s3 is not configured")
 	}
-	bucket, key, ok := parseS3URI(doc.StoredPath)
+	bucket, key, ok := shared.ParseS3URI(doc.StoredPath)
 	if !ok {
 		return "", errors.New("invalid s3 path")
 	}
