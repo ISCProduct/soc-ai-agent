@@ -14,7 +14,7 @@ import (
 
 	"Backend/internal/controllers"
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/resume"
 	"Backend/internal/services/shared"
 	"Backend/test/controllers/mocks"
 
@@ -71,7 +71,7 @@ func TestResumeController_Upload_Success(t *testing.T) {
 	svc := &mocks.ResumeServiceMock{}
 	doc := &models.ResumeDocument{SourceType: "text"}
 	svc.On("Upload", uint(1), "sess-1", "text", "", (*multipart.FileHeader)(nil)).
-		Return(&services.ResumeUploadResult{Document: doc}, nil)
+		Return(&resume.ResumeUploadResult{Document: doc}, nil)
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)

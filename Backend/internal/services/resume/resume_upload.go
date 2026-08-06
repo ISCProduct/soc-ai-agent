@@ -1,4 +1,4 @@
-package services
+package resume
 
 import (
 	"Backend/internal/services/shared"

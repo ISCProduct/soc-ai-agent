@@ -27,6 +27,7 @@ import (
 	"Backend/internal/services/oauth"
 	"Backend/internal/services/organization"
 	"Backend/internal/services/refreshtoken"
+	"Backend/internal/services/resume"
 	"Backend/internal/services/schedule"
 	"Backend/internal/services/shared"
 	"Backend/internal/services/skillscore"
@@ -257,7 +258,7 @@ func main() {
 	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 	matchingService := matching.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)
-	resumeService := services.NewResumeService(resumeRepo, "storage/resumes", aiClient)
+	resumeService := resume.NewResumeService(resumeRepo, "storage/resumes", aiClient)
 	crawlService := company.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
 	gbizInfoRepo := repositories.NewGBizInfoRepository(db)
 	gbizInfoService := gbizinfo.NewGBizInfoService(cfg, gbizInfoRepo, companyRepo, companyRelationRepo)

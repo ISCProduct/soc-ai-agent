@@ -1,4 +1,4 @@
-package services
+package resume
 
 // newSeekableReader のメモリ上限テスト（Issue #312）
 // 実行: cd Backend && go test ./internal/services/... -run TestSeekableReader -v
