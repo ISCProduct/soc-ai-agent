@@ -1,4 +1,4 @@
-package services
+package schedule
 
 // ICS 行折り返しのテスト（Issue #320）
 // 実行: cd Backend && go test ./internal/services/... -run TestFoldICSLine -v

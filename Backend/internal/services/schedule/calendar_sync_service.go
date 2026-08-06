@@ -1,4 +1,4 @@
-package services
+package schedule
 
 import (
 	"Backend/domain/repository"

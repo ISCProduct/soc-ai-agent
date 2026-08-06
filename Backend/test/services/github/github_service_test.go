@@ -1,4 +1,4 @@
-package services_test
+package github_test
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/github"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,7 +29,7 @@ type githubAPIRepositoryTest struct {
 // --- aggregateLanguages ---
 
 func TestAggregateLanguages_Empty(t *testing.T) {
-	stats := services.AggregateLanguages(1, nil)
+	stats := github.AggregateLanguages(1, nil)
 	assert.Nil(t, stats)
 }
 
@@ -38,7 +38,7 @@ func TestAggregateLanguages_SkipsBlankLanguage(t *testing.T) {
 		{Language: ""},
 		{Language: ""},
 	}
-	stats := services.AggregateLanguages(1, repos)
+	stats := github.AggregateLanguages(1, repos)
 	assert.Nil(t, stats, "repos with no language should produce no stats")
 }
 
@@ -48,7 +48,7 @@ func TestAggregateLanguages_SingleLanguage(t *testing.T) {
 		{Language: "Go"},
 		{Language: "Go"},
 	}
-	stats := services.AggregateLanguages(1, repos)
+	stats := github.AggregateLanguages(1, repos)
 	require.Len(t, stats, 1)
 	assert.Equal(t, "Go", stats[0].Language)
 	assert.Equal(t, int64(3), stats[0].Bytes)
@@ -63,7 +63,7 @@ func TestAggregateLanguages_MultipleLanguages(t *testing.T) {
 		{Language: "TypeScript"},
 		{Language: "Python"},
 	}
-	stats := services.AggregateLanguages(1, repos)
+	stats := github.AggregateLanguages(1, repos)
 	require.Len(t, stats, 3)
 
 	statMap := make(map[string]models.GitHubLanguageStat)
@@ -83,7 +83,7 @@ func TestAggregateLanguages_MixedWithBlank(t *testing.T) {
 		{Language: ""},
 		{Language: "Python"},
 	}
-	stats := services.AggregateLanguages(1, repos)
+	stats := github.AggregateLanguages(1, repos)
 	require.Len(t, stats, 2)
 	statMap := make(map[string]models.GitHubLanguageStat)
 	for _, s := range stats {
@@ -97,21 +97,21 @@ func TestAggregateLanguages_MixedWithBlank(t *testing.T) {
 
 func TestCheckRateLimit_NoRateLimit(t *testing.T) {
 	resp := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header)}
-	assert.NoError(t, services.CheckRateLimit(resp))
+	assert.NoError(t, github.CheckRateLimit(resp))
 }
 
 func TestCheckRateLimit_404NotRateLimited(t *testing.T) {
 	resp := &http.Response{StatusCode: http.StatusNotFound, Header: make(http.Header)}
-	assert.NoError(t, services.CheckRateLimit(resp))
+	assert.NoError(t, github.CheckRateLimit(resp))
 }
 
 func TestCheckRateLimit_429(t *testing.T) {
 	h := make(http.Header)
 	h.Set("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(time.Hour).Unix()))
 	resp := &http.Response{StatusCode: http.StatusTooManyRequests, Header: h}
-	err := services.CheckRateLimit(resp)
+	err := github.CheckRateLimit(resp)
 	require.Error(t, err)
-	assert.True(t, services.IsRateLimitError(err))
+	assert.True(t, github.IsRateLimitError(err))
 }
 
 func TestCheckRateLimit_403WithRemainingZero(t *testing.T) {
@@ -119,16 +119,16 @@ func TestCheckRateLimit_403WithRemainingZero(t *testing.T) {
 	h.Set("X-RateLimit-Remaining", "0")
 	h.Set("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(time.Hour).Unix()))
 	resp := &http.Response{StatusCode: http.StatusForbidden, Header: h}
-	err := services.CheckRateLimit(resp)
+	err := github.CheckRateLimit(resp)
 	require.Error(t, err)
-	assert.True(t, services.IsRateLimitError(err))
+	assert.True(t, github.IsRateLimitError(err))
 }
 
 func TestCheckRateLimit_403WithRemainingNonZero(t *testing.T) {
 	h := make(http.Header)
 	h.Set("X-RateLimit-Remaining", "50")
 	resp := &http.Response{StatusCode: http.StatusForbidden, Header: h}
-	err := services.CheckRateLimit(resp)
+	err := github.CheckRateLimit(resp)
 	assert.NoError(t, err)
 }
 
@@ -144,7 +144,7 @@ func TestFetchRepoPages_SinglePage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := services.NewGitHubServiceForTest("")
+	svc := github.NewGitHubServiceForTest("")
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	repos, err := svc.FetchRepoPages(context.Background(), client, "token", server.URL+"/repos?per_page=100")
@@ -177,7 +177,7 @@ func TestFetchRepoPages_MultiPage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := services.NewGitHubServiceForTest("")
+	svc := github.NewGitHubServiceForTest("")
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	repos, err := svc.FetchRepoPages(context.Background(), client, "token", server.URL+"/repos?per_page=100")
@@ -192,7 +192,7 @@ func TestFetchRepoPages_EmptyResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := services.NewGitHubServiceForTest("")
+	svc := github.NewGitHubServiceForTest("")
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	repos, err := svc.FetchRepoPages(context.Background(), client, "token", server.URL+"/repos?per_page=100")
@@ -206,7 +206,7 @@ func TestFetchRepoPages_APIError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := services.NewGitHubServiceForTest("")
+	svc := github.NewGitHubServiceForTest("")
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -226,7 +226,7 @@ func TestFetchTotalContributions_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := services.NewGitHubServiceForTest(server.URL)
+	svc := github.NewGitHubServiceForTest(server.URL)
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	count, err := svc.FetchTotalContributions(context.Background(), client, "token", "user")
@@ -242,7 +242,7 @@ func TestFetchTotalContributions_GraphQLError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := services.NewGitHubServiceForTest(server.URL)
+	svc := github.NewGitHubServiceForTest(server.URL)
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	_, err := svc.FetchTotalContributions(context.Background(), client, "token", "unknown")

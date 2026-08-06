@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/github"
 	ifaces "Backend/internal/services/interfaces"
 	"context"
 	"errors"
@@ -87,11 +87,11 @@ func (c *GitHubController) SyncAndWait(ctx echo.Context) error {
 	}
 
 	if err := c.githubService.SyncUserData(context.Background(), userID, true); err != nil {
-		var scopeErr *services.InsufficientScopesError
+		var scopeErr *github.InsufficientScopesError
 		if errors.As(err, &scopeErr) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
-		var reauthErr *services.GitHubReauthRequiredError
+		var reauthErr *github.GitHubReauthRequiredError
 		if errors.As(err, &reauthErr) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}

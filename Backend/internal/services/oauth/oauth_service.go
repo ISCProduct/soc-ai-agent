@@ -1,10 +1,12 @@
-package services
+package oauth
 
 import (
 	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/config"
 	"Backend/internal/middleware"
+	"Backend/internal/services"
+	"Backend/internal/services/github"
 	"Backend/internal/services/refreshtoken"
 	"context"
 	"encoding/json"
@@ -21,7 +23,7 @@ import (
 type OAuthService struct {
 	userRepo      repository.UserRepository
 	oauthConfig   *config.OAuthConfig
-	githubService *GitHubService
+	githubService *github.GitHubService
 	refreshTokens *refreshtoken.RefreshTokenService
 }
 
@@ -43,7 +45,7 @@ func (s *OAuthService) issueRefreshToken(userID uint) string {
 	return token
 }
 
-func NewOAuthService(userRepo repository.UserRepository, oauthConfig *config.OAuthConfig, githubService *GitHubService) *OAuthService {
+func NewOAuthService(userRepo repository.UserRepository, oauthConfig *config.OAuthConfig, githubService *github.GitHubService) *OAuthService {
 	return &OAuthService{
 		userRepo:      userRepo,
 		oauthConfig:   oauthConfig,
@@ -88,7 +90,7 @@ func (s *OAuthService) GetGitHubAuthURL(state string) string {
 }
 
 // HandleGoogleCallback Google OAuth認証後のコールバック処理
-func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*AuthResponse, error) {
+func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*services.AuthResponse, error) {
 	token, err := s.oauthConfig.Google.Exchange(ctx, code)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange token: %w", err)
@@ -161,7 +163,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 		}
 	}
 
-	authResp := &AuthResponse{
+	authResp := &services.AuthResponse{
 		UserID:                   user.ID,
 		Email:                    user.Email,
 		Name:                     user.Name,
@@ -182,7 +184,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 }
 
 // HandleGitHubCallback GitHub OAuth認証後のコールバック処理
-func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*AuthResponse, error) {
+func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*services.AuthResponse, error) {
 	token, err := s.oauthConfig.GitHub.Exchange(ctx, code)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange token: %w", err)
@@ -284,7 +286,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 		}
 	}
 
-	authResp := &AuthResponse{
+	authResp := &services.AuthResponse{
 		UserID:                   user.ID,
 		Email:                    user.Email,
 		Name:                     user.Name,

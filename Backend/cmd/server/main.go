@@ -20,9 +20,12 @@ import (
 	"Backend/internal/services/email"
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/gbizinfo"
+	"Backend/internal/services/github"
 	"Backend/internal/services/matching"
+	"Backend/internal/services/oauth"
 	"Backend/internal/services/organization"
 	"Backend/internal/services/refreshtoken"
+	"Backend/internal/services/schedule"
 	"Backend/internal/services/skillscore"
 	"Backend/internal/services/storage"
 	"Backend/migrations"
@@ -245,8 +248,8 @@ func main() {
 	refreshTokenService := refreshtoken.NewRefreshTokenService(refreshTokenRepo)
 	authService.SetRefreshTokenService(refreshTokenService)
 	skillScoreService := skillscore.NewSkillScoreService(skillScoreRepo)
-	githubService := services.NewGitHubService(githubRepo, skillScoreService, aiClient)
-	oauthService := services.NewOAuthService(userRepo, oauthConfig, githubService)
+	githubService := github.NewGitHubService(githubRepo, skillScoreService, aiClient)
+	oauthService := oauth.NewOAuthService(userRepo, oauthConfig, githubService)
 	oauthService.SetRefreshTokenService(refreshTokenService)
 	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
@@ -363,10 +366,10 @@ func main() {
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := controllers.NewESRewriteController(aiClient)
 	scheduleRepo := repositories.NewScheduleRepository(db)
-	scheduleService := services.NewScheduleService(scheduleRepo)
+	scheduleService := schedule.NewScheduleService(scheduleRepo)
 	// Googleカレンダー連携
 	googleTokenRepo := repositories.NewUserGoogleTokenRepository(db)
-	calendarSyncService := services.NewCalendarSyncService(googleTokenRepo, scheduleRepo, oauthConfig)
+	calendarSyncService := schedule.NewCalendarSyncService(googleTokenRepo, scheduleRepo, oauthConfig)
 	scheduleService.SetCalendarSyncService(calendarSyncService)
 	googleCalendarController := controllers.NewGoogleCalendarController(calendarSyncService)
 	scheduleController := controllers.NewScheduleController(scheduleService)

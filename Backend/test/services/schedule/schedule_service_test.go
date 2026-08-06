@@ -1,4 +1,4 @@
-package services_test
+package schedule_test
 
 // スケジュールサービスのユニットテスト (Issue #188)
 //
@@ -6,7 +6,7 @@ package services_test
 
 import (
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/schedule"
 	"errors"
 	"testing"
 	"time"
@@ -83,7 +83,7 @@ func (r *mockScheduleRepo) ListByUserAndRange(userID uint, from, to time.Time) (
 
 func TestScheduleService_Create_Success(t *testing.T) {
 	repo := newMockScheduleRepo()
-	svc := services.NewScheduleService(repo)
+	svc := schedule.NewScheduleService(repo)
 
 	ev, err := svc.Create(1, "株式会社テスト", "es", "ES提出", time.Now().Add(24*time.Hour), "")
 	require.NoError(t, err)
@@ -93,7 +93,7 @@ func TestScheduleService_Create_Success(t *testing.T) {
 
 func TestScheduleService_Create_MissingCompanyName(t *testing.T) {
 	repo := newMockScheduleRepo()
-	svc := services.NewScheduleService(repo)
+	svc := schedule.NewScheduleService(repo)
 
 	_, err := svc.Create(1, "  ", "es", "ES提出", time.Now().Add(24*time.Hour), "")
 	assert.Error(t, err, "company_nameが空の場合はエラー")
@@ -102,7 +102,7 @@ func TestScheduleService_Create_MissingCompanyName(t *testing.T) {
 
 func TestScheduleService_Create_MissingScheduledAt(t *testing.T) {
 	repo := newMockScheduleRepo()
-	svc := services.NewScheduleService(repo)
+	svc := schedule.NewScheduleService(repo)
 
 	_, err := svc.Create(1, "テスト", "es", "ES提出", time.Time{}, "")
 	assert.Error(t, err, "scheduled_atがゼロの場合はエラー")
@@ -111,7 +111,7 @@ func TestScheduleService_Create_MissingScheduledAt(t *testing.T) {
 
 func TestScheduleService_Get_ForbiddenForOtherUser(t *testing.T) {
 	repo := newMockScheduleRepo()
-	svc := services.NewScheduleService(repo)
+	svc := schedule.NewScheduleService(repo)
 
 	ev, err := svc.Create(1, "テスト", "es", "ES提出", time.Now().Add(time.Hour), "")
 	require.NoError(t, err)
@@ -124,7 +124,7 @@ func TestScheduleService_Get_ForbiddenForOtherUser(t *testing.T) {
 
 func TestScheduleService_Get_Success(t *testing.T) {
 	repo := newMockScheduleRepo()
-	svc := services.NewScheduleService(repo)
+	svc := schedule.NewScheduleService(repo)
 
 	ev, err := svc.Create(1, "テスト", "es", "ES提出", time.Now().Add(time.Hour), "")
 	require.NoError(t, err)
@@ -136,7 +136,7 @@ func TestScheduleService_Get_Success(t *testing.T) {
 
 func TestScheduleService_Delete_ForbiddenForOtherUser(t *testing.T) {
 	repo := newMockScheduleRepo()
-	svc := services.NewScheduleService(repo)
+	svc := schedule.NewScheduleService(repo)
 
 	ev, err := svc.Create(1, "テスト", "es", "ES提出", time.Now().Add(time.Hour), "")
 	require.NoError(t, err)
@@ -148,7 +148,7 @@ func TestScheduleService_Delete_ForbiddenForOtherUser(t *testing.T) {
 
 func TestScheduleService_Delete_Success(t *testing.T) {
 	repo := newMockScheduleRepo()
-	svc := services.NewScheduleService(repo)
+	svc := schedule.NewScheduleService(repo)
 
 	ev, err := svc.Create(1, "テスト", "es", "ES提出", time.Now().Add(time.Hour), "")
 	require.NoError(t, err)
@@ -163,7 +163,7 @@ func TestScheduleService_Delete_Success(t *testing.T) {
 
 func TestScheduleService_Update_ForbiddenForOtherUser(t *testing.T) {
 	repo := newMockScheduleRepo()
-	svc := services.NewScheduleService(repo)
+	svc := schedule.NewScheduleService(repo)
 
 	ev, err := svc.Create(1, "テスト", "es", "ES提出", time.Now().Add(time.Hour), "")
 	require.NoError(t, err)

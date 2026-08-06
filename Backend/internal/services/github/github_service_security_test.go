@@ -1,4 +1,4 @@
-package services
+package github
 
 // GitHub GraphQL インジェクション対策のテスト（Issue #311）
 // 実行: cd Backend && go test ./internal/services/... -run TestGitHub -v
