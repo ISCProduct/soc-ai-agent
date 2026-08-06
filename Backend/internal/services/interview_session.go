@@ -80,7 +80,7 @@ func (s *InterviewService) FinishSession(userID uint, sessionID uint) (*Intervie
 	if err := s.sessionRepo.Update(session); err != nil {
 		return nil, err
 	}
-	s.jobCh <- sessionID
+	s.enqueueReportGeneration(sessionID)
 	return toSessionResponse(session), nil
 }
 

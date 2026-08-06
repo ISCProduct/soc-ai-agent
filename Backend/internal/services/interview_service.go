@@ -4,6 +4,8 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"context"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -34,6 +36,7 @@ type InterviewService struct {
 	userWeightScoreRepo  repository.UserWeightScoreRepository
 	jobCh                chan uint
 	workerOnce           sync.Once
+	jobs                 JobEnqueuer
 }
 
 // SkillScoreReader はGitHubスキルスコア取得の最小インターフェース。
@@ -90,6 +93,29 @@ func (s *InterviewService) SetUserWeightScoreRepo(r repository.UserWeightScoreRe
 // SetCrossFeatureService 機能間連携サービスを注入する（オプション）
 func (s *InterviewService) SetCrossFeatureService(cf *CrossFeatureIntegrationService) {
 	s.crossFeature = cf
+}
+
+// SetJobEnqueuer は面接レポート等の永続キュー投入先を設定する（#617）。
+func (s *InterviewService) SetJobEnqueuer(j JobEnqueuer) {
+	s.jobs = j
+}
+
+// GenerateReportForSession はキューワーカーから呼ばれるレポート生成エントリ（#617）。
+func (s *InterviewService) GenerateReportForSession(ctx context.Context, sessionID uint) error {
+	return s.generateReport(ctx, sessionID)
+}
+
+// enqueueReportGeneration は Redis キュー優先、未設定時は in-process channel。
+func (s *InterviewService) enqueueReportGeneration(sessionID uint) {
+	if s.jobs != nil {
+		if err := s.jobs.EnqueueInterviewReport(sessionID); err != nil {
+			log.Printf("[Interview] enqueue report failed, fallback channel: %v", err)
+			s.jobCh <- sessionID
+			return
+		}
+		return
+	}
+	s.jobCh <- sessionID
 }
 
 type InterviewSessionResponse struct {

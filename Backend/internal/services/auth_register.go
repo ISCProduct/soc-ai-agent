@@ -49,6 +49,13 @@ func (s *AuthService) RequestRegistration(email string) error {
 		return fmt.Errorf("failed to save pending registration: %w", err)
 	}
 
+	if s.jobs != nil {
+		if err := s.jobs.EnqueueEmailRegistration(email, token); err != nil {
+			log.Printf("[AuthService] enqueue registration email failed, fallback sync: %v", err)
+			return s.emailService.SendRegistrationEmail(email, token)
+		}
+		return nil
+	}
 	return s.emailService.SendRegistrationEmail(email, token)
 }
 
@@ -141,11 +148,22 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 
 	// 認証メール送信（失敗しても登録は成功扱い）
 	appURL := config.AppURL()
-	go func() {
-		if err := s.emailService.SendVerificationEmail(user, user.EmailVerificationToken, appURL); err != nil {
-			log.Printf("[AuthService] failed to send verification email to %s: %v", user.Email, err)
+	if s.jobs != nil {
+		if err := s.jobs.EnqueueEmailVerification(user.ID, user.Email, user.Name, user.EmailVerificationToken, appURL); err != nil {
+			log.Printf("[AuthService] enqueue verification email failed, fallback goroutine: %v", err)
+			go func() {
+				if err := s.emailService.SendVerificationEmail(user, user.EmailVerificationToken, appURL); err != nil {
+					log.Printf("[AuthService] failed to send verification email to %s: %v", user.Email, err)
+				}
+			}()
 		}
-	}()
+	} else {
+		go func() {
+			if err := s.emailService.SendVerificationEmail(user, user.EmailVerificationToken, appURL); err != nil {
+				log.Printf("[AuthService] failed to send verification email to %s: %v", user.Email, err)
+			}
+		}()
+	}
 
 	return &AuthResponse{
 		UserID:                   user.ID,

@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -72,7 +73,14 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 			user.EmailVerifiedAt = nil
 			s.userRepo.UpdateUser(user)
 			appURL := config.AppURL()
-			go s.emailService.SendReVerificationEmail(user, user.EmailVerificationToken, appURL)
+			if s.jobs != nil {
+				if err := s.jobs.EnqueueEmailReVerification(user.ID, user.Email, user.Name, user.EmailVerificationToken, appURL); err != nil {
+					log.Printf("[AuthService] enqueue re-verification email failed, fallback goroutine: %v", err)
+					go s.emailService.SendReVerificationEmail(user, user.EmailVerificationToken, appURL)
+				}
+			} else {
+				go s.emailService.SendReVerificationEmail(user, user.EmailVerificationToken, appURL)
+			}
 			requiresReVerification = true
 			return nil, errors.New("re_verification_required")
 		}

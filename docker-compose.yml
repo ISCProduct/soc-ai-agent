@@ -8,8 +8,11 @@ services:
       DB_HOST: ${DB_HOST:-localhost}
       DB_PORT: "3306"
       APP_ENV: production
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     env_file:
       - .env
+    depends_on:
+      - redis
 
   frontend:
     image: 970835573274.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:latest
@@ -22,6 +25,16 @@ services:
       COMPANY_GRAPH_URL: http://company-graph:9100
     depends_on:
       - backend
+
+  # Redis（#617: レート制限共有・永続ジョブキュー）。Backend とは別コンテナ。
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
 
   # Resume review RAG (DuckDuckGo + CrewAI)
   rag-review:
@@ -65,3 +78,4 @@ services:
 
 volumes:
   chroma_data:
+  redis_data:

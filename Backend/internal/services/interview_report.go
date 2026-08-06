@@ -11,6 +11,7 @@ import (
 )
 
 func (s *InterviewService) StartWorker() {
+	// Redis キュー利用時は asynq worker が処理する。フォールバック用 channel worker は常に起動。
 	s.workerOnce.Do(func() {
 		go s.runWorker()
 	})

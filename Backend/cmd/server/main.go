@@ -3,10 +3,12 @@ package main
 import (
 	"Backend/internal/config"
 	"Backend/internal/controllers"
+	"Backend/internal/infrastructure/redisx"
 	"Backend/internal/logger"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/queue"
 	"Backend/internal/repositories"
 	"Backend/internal/routes"
 	"Backend/internal/scraper"
@@ -197,6 +199,22 @@ func main() {
 
 	// サービス層の初期化
 	emailService := services.NewEmailService()
+
+	// Redis（#617）: レート制限共有 + 永続ジョブキュー。未設定時はインメモリ/go func フォールバック。
+	rdb := redisx.NewFromEnv()
+	if rdb != nil {
+		middleware.ConfigureRateLimiters(
+			middleware.NewRedisRateLimiter(rdb, "login", time.Minute, 20),
+			middleware.NewRedisRateLimiter(rdb, "password_reset", time.Hour, 5),
+		)
+	}
+	var jobEnqueuer services.JobEnqueuer
+	var queueServer *queue.Server
+	if rdb != nil {
+		qClient := queue.NewClient(rdb)
+		jobEnqueuer = &queue.EnqueuerAdapter{Client: qClient}
+	}
+
 	apiCostService := services.NewAPICostService(apiCallLogRepo)
 	realtimeUsageService := services.NewRealtimeUsageService(realtimeUsageRepo, emailService)
 	companySearchBudget := services.NewCompanySearchBudgetService(apiCallLogRepo, emailService)
@@ -207,6 +225,9 @@ func main() {
 	}
 	authService := services.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	authService.SetDB(db)
+	if jobEnqueuer != nil {
+		authService.SetJobEnqueuer(jobEnqueuer)
+	}
 	// リフレッシュトークン管理 (#616)
 	refreshTokenRepo := repositories.NewUserRefreshTokenRepository(db)
 	refreshTokenService := services.NewRefreshTokenService(refreshTokenRepo)
@@ -247,7 +268,17 @@ func main() {
 		nil,
 	)
 	interviewService := services.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)
+	if jobEnqueuer != nil {
+		interviewService.SetJobEnqueuer(jobEnqueuer)
+	}
 	interviewService.StartWorker()
+	if rdb != nil {
+		queueServer = queue.NewServer(rdb)
+		queueServer.RegisterHandlers(emailService, interviewService)
+		if err := queueServer.Start(); err != nil {
+			log.Printf("[queue] failed to start worker: %v", err)
+		}
+	}
 
 	// クロス機能連携サービス（チャットスコア↔面接/職務経歴書レビュー）
 	crossFeatureService := services.NewCrossFeatureIntegrationService(userWeightScoreRepo)

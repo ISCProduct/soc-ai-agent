@@ -110,6 +110,13 @@ func (s *AuthService) RequestPasswordReset(email string) error {
 	}
 
 	appURL := config.AppURL()
+	if s.jobs != nil {
+		if err := s.jobs.EnqueueEmailPasswordReset(user.Email, token, appURL); err != nil {
+			log.Printf("[AuthService] enqueue password reset email failed, fallback sync: %v", err)
+			return s.emailService.SendPasswordResetEmail(user.Email, token, appURL)
+		}
+		return nil
+	}
 	return s.emailService.SendPasswordResetEmail(user.Email, token, appURL)
 }
 

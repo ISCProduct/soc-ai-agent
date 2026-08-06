@@ -20,10 +20,25 @@ type AuthService struct {
 	audit         auditRecorder
 	deletion      *UserDeletionService
 	refreshTokens *RefreshTokenService
+	jobs          JobEnqueuer
+}
+
+// JobEnqueuer は永続ジョブキューへの投入面（#617）。未設定時は従来どおり同期/go func。
+type JobEnqueuer interface {
+	EnqueueEmailVerification(userID uint, email, name, token, appURL string) error
+	EnqueueEmailReVerification(userID uint, email, name, token, appURL string) error
+	EnqueueEmailRegistration(email, token string) error
+	EnqueueEmailPasswordReset(email, token, appURL string) error
+	EnqueueInterviewReport(sessionID uint) error
 }
 
 func NewAuthService(userRepo repository.UserRepository, pendingRepo repository.PendingRegistrationRepository, emailService *EmailService) *AuthService {
 	return &AuthService{userRepo: userRepo, pendingRepo: pendingRepo, emailService: emailService}
+}
+
+// SetJobEnqueuer はメール送信等の非同期ジョブ投入先を設定する（#617）。
+func (s *AuthService) SetJobEnqueuer(j JobEnqueuer) {
+	s.jobs = j
 }
 
 // SetDB はアカウント削除に使用する DB を設定する
