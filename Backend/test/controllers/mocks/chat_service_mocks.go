@@ -3,7 +3,7 @@ package mocks
 import (
 	"Backend/domain/entity"
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/chat"
 	"Backend/internal/services/analysis"
 	"Backend/internal/services/email"
 	"Backend/internal/services/matching"
@@ -17,10 +17,10 @@ type ChatServiceMock struct {
 	mock.Mock
 }
 
-func (m *ChatServiceMock) ProcessChat(ctx context.Context, req services.ChatRequest) (*services.ChatResponse, error) {
+func (m *ChatServiceMock) ProcessChat(ctx context.Context, req chat.ChatRequest) (*chat.ChatResponse, error) {
 	args := m.Called(ctx, req)
 	if v := args.Get(0); v != nil {
-		return v.(*services.ChatResponse), args.Error(1)
+		return v.(*chat.ChatResponse), args.Error(1)
 	}
 	return nil, args.Error(1)
 }

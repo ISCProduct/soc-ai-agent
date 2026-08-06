@@ -3,7 +3,7 @@ package interfaces
 import (
 	"Backend/domain/entity"
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/chat"
 	"Backend/internal/services/analysis"
 	"Backend/internal/services/email"
 	"Backend/internal/services/matching"
@@ -12,7 +12,7 @@ import (
 
 // ChatService チャットサービスのインターフェース
 type ChatService interface {
-	ProcessChat(ctx context.Context, req services.ChatRequest) (*services.ChatResponse, error)
+	ProcessChat(ctx context.Context, req chat.ChatRequest) (*chat.ChatResponse, error)
 	GetChatHistory(sessionID string) ([]models.ChatMessage, error)
 	GetUserScores(userID uint, sessionID string) ([]entity.UserWeightScore, error)
 	GetUserChatSessions(userID uint) ([]models.ChatSession, error)

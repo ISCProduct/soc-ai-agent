@@ -12,7 +12,6 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/routes"
 	"Backend/internal/scraper"
-	"Backend/internal/services"
 	"Backend/internal/services/admin"
 	"Backend/internal/services/analysis"
 	"Backend/internal/services/application"
@@ -23,6 +22,7 @@ import (
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/gbizinfo"
 	"Backend/internal/services/github"
+	"Backend/internal/services/chat"
 	"Backend/internal/services/interview"
 	"Backend/internal/services/matching"
 	"Backend/internal/services/oauth"
@@ -256,8 +256,8 @@ func main() {
 	githubService := github.NewGitHubService(githubRepo, skillScoreService, aiClient)
 	oauthService := oauth.NewOAuthService(userRepo, oauthConfig, githubService)
 	oauthService.SetRefreshTokenService(refreshTokenService)
-	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
-	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
+	chatService := chat.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
+	questionService := chat.NewQuestionGeneratorService(aiClient, questionWeightRepo)
 	matchingService := matching.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)
 	resumeService := resume.NewResumeService(resumeRepo, "storage/resumes", aiClient)
 	crawlService := company.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)

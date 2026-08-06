@@ -3,7 +3,7 @@ package controllers
 import (
 	"Backend/domain/entity"
 	"Backend/domain/repository"
-	"Backend/internal/services"
+	"Backend/internal/services/chat"
 	"Backend/internal/services/email"
 	ifaces "Backend/internal/services/interfaces"
 	"Backend/internal/services/matching"
@@ -138,7 +138,7 @@ func (c *ChatController) Chat(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
-	var req services.ChatRequest
+	var req chat.ChatRequest
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
