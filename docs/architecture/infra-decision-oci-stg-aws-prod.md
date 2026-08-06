@@ -24,16 +24,25 @@ staging と本番は同じクラウド（AWS）だが、コンピュートは用
 - 本番は使わない日は止めてコスト抑制
 - 展示・説明会などは指定日リストで終日 ON
 
-## 構成イメージ
+## 構成図
+
+正本は draw.io（AWS 公式アイコン）:
+
+| 図 | ファイル |
+|----|----------|
+| 全体像 | [`aws-infra-overview.drawio.xml`](./aws-infra-overview.drawio.xml) |
+| Staging 詳細 | [`aws-staging-architecture.drawio.xml`](./aws-staging-architecture.drawio.xml) |
+| Production 詳細 | [`aws-production-architecture.drawio.xml`](./aws-production-architecture.drawio.xml) |
+| PNG 書き出し | [`notion-diagrams/`](./notion-diagrams/) |
 
 ```text
 [開発・検証] 常時
-  GitHub → ECR → AWS staging ECS + RDS + S3
+  GitHub → ECR → AWS staging ECS on EC2 + ALB + RDS + S3
            infra/terraform/environments/staging
-           NAT なし / ALB なし可 / EIP 公開
+           NAT なし / ALB あり
 
 [本番] 既定停止
-  GitHub → ECR → AWS prod ECS + RDS + S3
+  GitHub → ECR → AWS prod ECS on Fargate + ALB + RDS + S3
   起動:
     (A) 本番反映で明示指定 → 起動してデプロイ
     (B) 指定日リスト → その暦日(JST)は終日起動
