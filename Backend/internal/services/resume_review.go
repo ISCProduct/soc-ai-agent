@@ -1,6 +1,7 @@
 package services
 
 import (
+	"Backend/internal/services/shared"
 	"bufio"
 	"bytes"
 	"context"
@@ -24,7 +25,7 @@ func (s *ResumeService) ReviewDocument(documentID uint, requestingUserID uint, c
 		return nil, nil, err
 	}
 	if doc.UserID != requestingUserID {
-		return nil, nil, ErrForbidden
+		return nil, nil, shared.ErrForbidden
 	}
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
 		return nil, nil, &ValidationError{Message: "応募企業名または応募職種を入力してください"}
@@ -249,7 +250,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	}
 	if doc.UserID != requestingUserID {
 		sendEvent(map[string]any{"type": "error", "message": "forbidden"})
-		return ErrForbidden
+		return shared.ErrForbidden
 	}
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
 		msg := "応募企業名または応募職種を入力してください"

@@ -1,4 +1,4 @@
-package services
+package email
 
 // メールサービスのXSSセキュリティテスト（Issue #310）
 // 実行: cd Backend && go test ./internal/services/... -run TestEmail -v

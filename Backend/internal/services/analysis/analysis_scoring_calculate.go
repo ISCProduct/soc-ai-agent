@@ -1,4 +1,4 @@
-package services
+package analysis
 
 func (s *AnalysisScoringService) calculateJobScore(userID uint, sessionID string) (float64, error) {
 	if s.userEmbeddingRepo == nil || s.jobEmbeddingRepo == nil || s.conversationContextRepo == nil {

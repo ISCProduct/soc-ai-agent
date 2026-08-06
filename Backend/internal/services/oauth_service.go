@@ -5,6 +5,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/config"
 	"Backend/internal/middleware"
+	"Backend/internal/services/refreshtoken"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,11 +22,11 @@ type OAuthService struct {
 	userRepo      repository.UserRepository
 	oauthConfig   *config.OAuthConfig
 	githubService *GitHubService
-	refreshTokens *RefreshTokenService
+	refreshTokens *refreshtoken.RefreshTokenService
 }
 
 // SetRefreshTokenService はリフレッシュトークン管理サービスを注入する (#616)
-func (s *OAuthService) SetRefreshTokenService(rts *RefreshTokenService) {
+func (s *OAuthService) SetRefreshTokenService(rts *refreshtoken.RefreshTokenService) {
 	s.refreshTokens = rts
 }
 

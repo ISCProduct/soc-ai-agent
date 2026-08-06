@@ -1,4 +1,4 @@
-package services_test
+package matching_test
 
 // マッチングサービス内部ロジックのユニットテスト
 // 実行: cd Backend && go test ./test/services/... -run TestFormatTopUserScores -v
@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"Backend/domain/entity"
-	"Backend/internal/services"
+	"Backend/internal/services/matching"
 )
 
 func TestFormatTopUserScores(t *testing.T) {
@@ -19,7 +19,7 @@ func TestFormatTopUserScores(t *testing.T) {
 		{WeightCategory: "安定志向", Score: 40},
 	}
 
-	got := services.FormatTopUserScores(scores)
+	got := matching.FormatTopUserScores(scores)
 	wantParts := []string{"技術志向:90", "チームワーク志向:81", "成長志向:72"}
 	for _, part := range wantParts {
 		if !strings.Contains(got, part) {
@@ -29,7 +29,7 @@ func TestFormatTopUserScores(t *testing.T) {
 }
 
 func TestGenerateMatchReasonFallbackWhenAIClientNil(t *testing.T) {
-	svc := services.NewMatchingServiceForTest()
+	svc := matching.NewMatchingServiceForTest()
 	match := &entity.UserCompanyMatch{
 		MatchScore: 88.5,
 		Company: &entity.Company{

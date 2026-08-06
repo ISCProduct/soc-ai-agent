@@ -1,4 +1,4 @@
-package services
+package matching
 
 import (
 	"Backend/domain/entity"
@@ -7,6 +7,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/prompts"
+	"Backend/internal/services/shared"
 	"context"
 	"fmt"
 	"log"
@@ -173,7 +174,7 @@ func (s *MatchingService) ToggleFavorite(matchID uint, userID uint) error {
 		return err
 	}
 	if match.UserID != userID {
-		return ErrForbidden
+		return shared.ErrForbidden
 	}
 	return s.matchRepo.ToggleFavorite(matchID)
 }

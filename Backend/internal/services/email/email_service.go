@@ -1,7 +1,8 @@
-package services
+package email
 
 import (
 	"Backend/domain/entity"
+	"Backend/internal/services/analysis"
 	"bytes"
 	"fmt"
 	"html/template"
@@ -186,7 +187,7 @@ const reportEmailTemplate = `<!DOCTYPE html>
 // SendAnalysisReport はAI就活分析レポートをユーザーのメールアドレスへ送信する。
 // summary にはスコア・進捗・AIコメント、companies にはおすすめ企業リストを渡す。
 // SMTP未設定時はログ出力のみでエラーを返さない（開発環境フォールバック）。
-func (s *EmailService) SendAnalysisReport(user *entity.User, summary *AnalysisSummary, companies []EmailReportCompany, sessionID string) error {
+func (s *EmailService) SendAnalysisReport(user *entity.User, summary *analysis.AnalysisSummary, companies []EmailReportCompany, sessionID string) error {
 	tmpl, err := template.New("report").Parse(reportEmailTemplate)
 	if err != nil {
 		return fmt.Errorf("failed to parse email template: %w", err)

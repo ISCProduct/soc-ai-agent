@@ -1,4 +1,4 @@
-package services
+package skillscore
 
 import (
 	"Backend/internal/models"

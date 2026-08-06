@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"Backend/internal/models"
+	"Backend/internal/services/shared"
 )
 
 func (s *ResumeService) OpenAnnotatedFile(documentID uint, requestingUserID uint) (*AnnotatedFile, error) {
@@ -21,7 +22,7 @@ func (s *ResumeService) OpenAnnotatedFile(documentID uint, requestingUserID uint
 		return nil, err
 	}
 	if doc.UserID != requestingUserID {
-		return nil, ErrForbidden
+		return nil, shared.ErrForbidden
 	}
 	if strings.TrimSpace(doc.AnnotatedPath) == "" {
 		return nil, errors.New("annotated file not ready")

@@ -1,11 +1,11 @@
-package services_test
+package organization_test
 
 import (
 	"errors"
 	"testing"
 
 	"Backend/internal/repositories"
-	"Backend/internal/services"
+	"Backend/internal/services/organization"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"gorm.io/driver/mysql"
@@ -38,14 +38,14 @@ func TestOrganizationService_InterviewAccess(t *testing.T) {
 		rows    bool
 		wantErr error
 	}{
-		{name: "cross org denied", orgID: 1, sessID: 99, rows: false, wantErr: services.ErrCrossOrganization},
+		{name: "cross org denied", orgID: 1, sessID: 99, rows: false, wantErr: organization.ErrCrossOrganization},
 		{name: "same org allowed", orgID: 2, sessID: 10, rows: true, wantErr: nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			db, mock := newOrgTestDB(t)
 			repo := repositories.NewOrganizationRepository(db)
-			svc := services.NewOrganizationService(repo)
+			svc := organization.NewOrganizationService(repo)
 
 			q := mock.ExpectQuery("SELECT \\* FROM `interview_sessions` WHERE id = \\? AND organization_id = \\? ORDER BY `interview_sessions`.`id` LIMIT \\?").
 				WithArgs(tt.sessID, tt.orgID, 1)
@@ -73,14 +73,14 @@ func TestOrganizationService_InterviewAccess(t *testing.T) {
 func TestOrganizationService_CrossOrgResumeAccessDenied(t *testing.T) {
 	db, mock := newOrgTestDB(t)
 	repo := repositories.NewOrganizationRepository(db)
-	svc := services.NewOrganizationService(repo)
+	svc := organization.NewOrganizationService(repo)
 
 	mock.ExpectQuery("SELECT \\* FROM `resume_documents` WHERE id = \\? AND organization_id = \\? ORDER BY `resume_documents`.`id` LIMIT \\?").
 		WithArgs(uint(7), uint(1), 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "organization_id", "user_id"}))
 
 	_, err := svc.GetResumeDocumentForOrganization(1, 7)
-	if !errors.Is(err, services.ErrCrossOrganization) {
+	if !errors.Is(err, organization.ErrCrossOrganization) {
 		t.Fatalf("expected ErrCrossOrganization, got %v", err)
 	}
 }
@@ -88,14 +88,14 @@ func TestOrganizationService_CrossOrgResumeAccessDenied(t *testing.T) {
 func TestOrganizationService_CrossOrgChatAccessDenied(t *testing.T) {
 	db, mock := newOrgTestDB(t)
 	repo := repositories.NewOrganizationRepository(db)
-	svc := services.NewOrganizationService(repo)
+	svc := organization.NewOrganizationService(repo)
 
 	mock.ExpectQuery("SELECT \\* FROM `chat_messages` WHERE id = \\? AND organization_id = \\? ORDER BY `chat_messages`.`id` LIMIT \\?").
 		WithArgs(uint(3), uint(1), 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "organization_id", "user_id"}))
 
 	_, err := svc.GetChatMessageForOrganization(1, 3)
-	if !errors.Is(err, services.ErrCrossOrganization) {
+	if !errors.Is(err, organization.ErrCrossOrganization) {
 		t.Fatalf("expected ErrCrossOrganization, got %v", err)
 	}
 }
@@ -103,10 +103,10 @@ func TestOrganizationService_CrossOrgChatAccessDenied(t *testing.T) {
 func TestOrganizationService_CreateRejectsBadSlug(t *testing.T) {
 	db, mock := newOrgTestDB(t)
 	repo := repositories.NewOrganizationRepository(db)
-	svc := services.NewOrganizationService(repo)
+	svc := organization.NewOrganizationService(repo)
 
-	_, err := svc.Create(services.CreateOrganizationInput{Name: "Acme", Slug: "-bad"})
-	if !errors.Is(err, services.ErrInvalidOrgSlug) {
+	_, err := svc.Create(organization.CreateOrganizationInput{Name: "Acme", Slug: "-bad"})
+	if !errors.Is(err, organization.ErrInvalidOrgSlug) {
 		t.Fatalf("expected ErrInvalidOrgSlug, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

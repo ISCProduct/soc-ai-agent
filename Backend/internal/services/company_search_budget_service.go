@@ -3,6 +3,7 @@ package services
 import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/repositories"
+	"Backend/internal/services/email"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -28,7 +29,7 @@ type CompanySearchBudgetStatus struct {
 // CompanySearchBudgetService は企業 FirstTouch / Write Search の月次上限とアラートを担当する。
 type CompanySearchBudgetService struct {
 	repo           *repositories.APICallLogRepository
-	emailService   *EmailService
+	emailService   *email.EmailService
 	limit          int64
 	alertThreshold int64
 	enforce        bool
@@ -37,7 +38,7 @@ type CompanySearchBudgetService struct {
 	lastAlertMonthID string
 }
 
-func NewCompanySearchBudgetService(repo *repositories.APICallLogRepository, emailService *EmailService) *CompanySearchBudgetService {
+func NewCompanySearchBudgetService(repo *repositories.APICallLogRepository, emailService *email.EmailService) *CompanySearchBudgetService {
 	limit := int64(getIntEnv("COMPANY_SEARCH_MONTHLY_LIMIT", 2000))
 	if limit <= 0 {
 		limit = 2000

@@ -3,6 +3,7 @@ package controllers
 import (
 	"Backend/internal/services"
 	"Backend/internal/services/interfaces"
+	"Backend/internal/services/refreshtoken"
 	"errors"
 	"log"
 	"net/http"
@@ -241,7 +242,7 @@ func (c *AuthController) Refresh(ctx echo.Context) error {
 
 	resp, err := c.authService.RefreshSession(req.RefreshToken)
 	if err != nil {
-		if errors.Is(err, services.ErrInvalidRefreshToken) {
+		if errors.Is(err, refreshtoken.ErrInvalidRefreshToken) {
 			return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "invalid refresh token")
 		}
 		return echoInternalError(err)

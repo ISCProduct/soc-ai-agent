@@ -2,6 +2,8 @@ package services
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/services/email"
+	"Backend/internal/services/refreshtoken"
 	"log"
 
 	"gorm.io/gorm"
@@ -14,12 +16,12 @@ const bcryptCost = 12
 type AuthService struct {
 	userRepo      repository.UserRepository
 	pendingRepo   repository.PendingRegistrationRepository
-	emailService  *EmailService
+	emailService  *email.EmailService
 	db            *gorm.DB
 	object        ObjectDeleter
 	audit         auditRecorder
 	deletion      *UserDeletionService
-	refreshTokens *RefreshTokenService
+	refreshTokens *refreshtoken.RefreshTokenService
 	jobs          JobEnqueuer
 }
 
@@ -32,7 +34,7 @@ type JobEnqueuer interface {
 	EnqueueInterviewReport(sessionID uint) error
 }
 
-func NewAuthService(userRepo repository.UserRepository, pendingRepo repository.PendingRegistrationRepository, emailService *EmailService) *AuthService {
+func NewAuthService(userRepo repository.UserRepository, pendingRepo repository.PendingRegistrationRepository, emailService *email.EmailService) *AuthService {
 	return &AuthService{userRepo: userRepo, pendingRepo: pendingRepo, emailService: emailService}
 }
 
@@ -68,7 +70,7 @@ func (s *AuthService) rebuildDeletionService() {
 }
 
 // SetRefreshTokenService はリフレッシュトークン管理サービスを注入する (#616)
-func (s *AuthService) SetRefreshTokenService(rts *RefreshTokenService) {
+func (s *AuthService) SetRefreshTokenService(rts *refreshtoken.RefreshTokenService) {
 	s.refreshTokens = rts
 }
 

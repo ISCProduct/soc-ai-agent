@@ -5,6 +5,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services"
+	"Backend/internal/services/storage"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,7 +22,7 @@ import (
 type AdminInterviewController struct {
 	interviewService    *services.InterviewService
 	videoRepo           repository.InterviewVideoRepository
-	s3Service           *services.S3UploadService
+	s3Service           *storage.S3UploadService
 	companyQuestionRepo repository.InterviewCompanyQuestionRepository
 	companyRepo         repository.CompanyRepository
 	openaiClient        *openai.Client
@@ -31,7 +32,7 @@ type AdminInterviewController struct {
 func NewAdminInterviewController(
 	interviewService *services.InterviewService,
 	videoRepo repository.InterviewVideoRepository,
-	s3Service *services.S3UploadService,
+	s3Service *storage.S3UploadService,
 ) *AdminInterviewController {
 	return &AdminInterviewController{
 		interviewService: interviewService,

@@ -4,6 +4,8 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/services/email"
+	"Backend/internal/services/shared"
 	"context"
 	"log"
 	"os"
@@ -13,26 +15,19 @@ import (
 	"time"
 )
 
-// CompanyBriefReader は面接・レビュー用の共有企業キャッシュ参照の最小面。
-type CompanyBriefReader interface {
-	FindByID(id uint) (*models.Company, error)
-	FindByName(name string) (*models.Company, error)
-	GetWeightProfile(companyID uint, jobPositionID *uint) (*models.CompanyWeightProfile, error)
-}
-
 type InterviewService struct {
 	sessionRepo          repository.InterviewSessionRepository
 	utterRepo            repository.InterviewUtteranceRepository
 	reportRepo           repository.InterviewReportRepository
 	userRepo             repository.UserRepository
-	emailService         *EmailService
+	emailService         *email.EmailService
 	openaiClient         *openai.Client
 	realtimeUsageService *RealtimeUsageService
 	crossFeature         *CrossFeatureIntegrationService
 	companyQuestionRepo  repository.InterviewCompanyQuestionRepository
 	questionStateRepo    repository.InterviewQuestionStateRepository
 	skillScoreRepo       SkillScoreReader
-	companyRepo          CompanyBriefReader
+	companyRepo          shared.CompanyBriefReader
 	userWeightScoreRepo  repository.UserWeightScoreRepository
 	jobCh                chan uint
 	workerOnce           sync.Once
@@ -49,7 +44,7 @@ func NewInterviewService(
 	utterRepo repository.InterviewUtteranceRepository,
 	reportRepo repository.InterviewReportRepository,
 	userRepo repository.UserRepository,
-	emailService *EmailService,
+	emailService *email.EmailService,
 	openaiClient *openai.Client,
 	realtimeUsageService *RealtimeUsageService,
 ) *InterviewService {
@@ -81,7 +76,7 @@ func (s *InterviewService) SetSkillScoreRepo(r SkillScoreReader) {
 }
 
 // SetCompanyRepo 企業共有キャッシュ参照用リポジトリを注入する（オプション）
-func (s *InterviewService) SetCompanyRepo(r CompanyBriefReader) {
+func (s *InterviewService) SetCompanyRepo(r shared.CompanyBriefReader) {
 	s.companyRepo = r
 }
 

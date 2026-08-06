@@ -3,6 +3,7 @@ package services
 import (
 	"Backend/internal/models"
 	"Backend/internal/repositories"
+	"Backend/internal/services/email"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -97,7 +98,7 @@ type RealtimeUserSummary struct {
 
 type RealtimeUsageService struct {
 	repo                   *repositories.RealtimeUsageRepository
-	emailService           *EmailService
+	emailService           *email.EmailService
 	alertThresholdUSD      float64
 	maxConcurrent          int64
 	ratePerMinuteUSD       float64
@@ -108,7 +109,7 @@ type RealtimeUsageService struct {
 	lastAlertMonthID string
 }
 
-func NewRealtimeUsageService(repo *repositories.RealtimeUsageRepository, emailService *EmailService) *RealtimeUsageService {
+func NewRealtimeUsageService(repo *repositories.RealtimeUsageRepository, emailService *email.EmailService) *RealtimeUsageService {
 	threshold := getFloatEnv("REALTIME_MONTHLY_ALERT_THRESHOLD_USD", 200.0)
 	maxConcurrent := int64(getIntEnv("REALTIME_MAX_CONCURRENT_CONNECTIONS", 30))
 	if maxConcurrent <= 0 {

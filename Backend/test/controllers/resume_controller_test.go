@@ -15,6 +15,7 @@ import (
 	"Backend/internal/controllers"
 	"Backend/internal/models"
 	"Backend/internal/services"
+	"Backend/internal/services/shared"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
@@ -102,7 +103,7 @@ func TestResumeController_Review_Unauthorized(t *testing.T) {
 
 func TestResumeController_Review_Forbidden(t *testing.T) {
 	svc := &mocks.ResumeServiceMock{}
-	svc.On("EnsureDocumentOwner", uint(1), uint(1)).Return(services.ErrForbidden)
+	svc.On("EnsureDocumentOwner", uint(1), uint(1)).Return(shared.ErrForbidden)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/resumes/review?document_id=1", nil)
 	req = withUserID(req, 1)
@@ -141,7 +142,7 @@ func TestResumeController_Annotated_Unauthorized(t *testing.T) {
 
 func TestResumeController_Annotated_Forbidden(t *testing.T) {
 	svc := &mocks.ResumeServiceMock{}
-	svc.On("OpenAnnotatedFile", uint(1), uint(1)).Return(nil, services.ErrForbidden)
+	svc.On("OpenAnnotatedFile", uint(1), uint(1)).Return(nil, shared.ErrForbidden)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/resumes/annotated?document_id=1", nil)
 	req = withUserID(req, 1)
@@ -177,7 +178,7 @@ func TestResumeController_ReviewStream_Unauthorized(t *testing.T) {
 
 func TestResumeController_ReviewStream_Forbidden(t *testing.T) {
 	svc := &mocks.ResumeServiceMock{}
-	svc.On("EnsureDocumentOwner", uint(1), uint(1)).Return(services.ErrForbidden)
+	svc.On("EnsureDocumentOwner", uint(1), uint(1)).Return(shared.ErrForbidden)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/resumes/review/stream?document_id=1", nil)
 	req = withUserID(req, 1)

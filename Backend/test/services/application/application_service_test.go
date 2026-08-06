@@ -1,4 +1,4 @@
-package services_test
+package application_test
 
 // ApplicationServiceの状態遷移エンジンテスト
 //
@@ -7,7 +7,7 @@ package services_test
 import (
 	"testing"
 
-	"Backend/internal/services"
+	"Backend/internal/services/application"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -28,14 +28,14 @@ func TestApplicationService_ValidStatuses_ContainsExpected(t *testing.T) {
 		"rejected",
 	}
 	for _, s := range expected {
-		assert.Contains(t, services.ValidStatuses, s, "ValidStatuses に %s が含まれていない", s)
+		assert.Contains(t, application.ValidStatuses, s, "ValidStatuses に %s が含まれていない", s)
 	}
 }
 
 func TestApplicationService_ValidStatuses_DoesNotContainLegacy(t *testing.T) {
 	legacy := []string{"interview", "declined"}
 	for _, s := range legacy {
-		assert.NotContains(t, services.ValidStatuses, s, "ValidStatuses に廃止ステータス %s が含まれている", s)
+		assert.NotContains(t, application.ValidStatuses, s, "ValidStatuses に廃止ステータス %s が含まれている", s)
 	}
 }
 
@@ -76,7 +76,7 @@ func TestCanTransition_UserTransitions(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := services.CanTransition(tc.current, tc.next, tc.isAdmin)
+			got := application.CanTransition(tc.current, tc.next, tc.isAdmin)
 			assert.Equal(t, tc.allowed, got)
 		})
 	}
@@ -109,7 +109,7 @@ func TestCanTransition_AdminTransitions(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := services.CanTransition(tc.current, tc.next, tc.isAdmin)
+			got := application.CanTransition(tc.current, tc.next, tc.isAdmin)
 			assert.Equal(t, tc.allowed, got)
 		})
 	}
@@ -122,8 +122,8 @@ func TestCanTransition_TerminalStatuses(t *testing.T) {
 	for _, terminal := range terminals {
 		for _, next := range nexts {
 			t.Run(terminal+"→"+next, func(t *testing.T) {
-				assert.False(t, services.CanTransition(terminal, next, false))
-				assert.False(t, services.CanTransition(terminal, next, true))
+				assert.False(t, application.CanTransition(terminal, next, false))
+				assert.False(t, application.CanTransition(terminal, next, true))
 			})
 		}
 	}

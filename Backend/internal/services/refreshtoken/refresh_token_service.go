@@ -1,4 +1,4 @@
-package services
+package refreshtoken
 
 import (
 	"crypto/rand"

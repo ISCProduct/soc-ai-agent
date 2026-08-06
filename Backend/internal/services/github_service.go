@@ -4,6 +4,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/repositories"
+	"Backend/internal/services/skillscore"
 	"time"
 )
 
@@ -22,13 +23,13 @@ const (
 // GitHubService GitHub API連携サービス
 type GitHubService struct {
 	githubRepo        *repositories.GitHubRepository
-	skillScoreService *SkillScoreService
+	skillScoreService *skillscore.SkillScoreService
 	apiBaseURL        string // テスト用オーバーライド（空なら githubAPIBase を使用）
 	graphQLURL        string // テスト用オーバーライド（空なら githubGraphQLURL を使用）
 	openaiClient      *openai.Client
 }
 
-func NewGitHubService(githubRepo *repositories.GitHubRepository, skillScoreService *SkillScoreService, openaiClient *openai.Client) *GitHubService {
+func NewGitHubService(githubRepo *repositories.GitHubRepository, skillScoreService *skillscore.SkillScoreService, openaiClient *openai.Client) *GitHubService {
 	return &GitHubService{
 		githubRepo:        githubRepo,
 		skillScoreService: skillScoreService,

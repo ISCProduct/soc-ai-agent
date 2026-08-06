@@ -1,11 +1,11 @@
-package services_test
+package skillscore_test
 
 import (
 	"math"
 	"testing"
 
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/skillscore"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -15,41 +15,41 @@ import (
 func TestClassifyLanguage_Frontend(t *testing.T) {
 	langs := []string{"JavaScript", "TypeScript", "HTML", "CSS", "Vue", "Svelte", "Dart"}
 	for _, lang := range langs {
-		assert.Equal(t, models.SkillCategoryFrontend, services.ClassifyLanguage(lang), "expected Frontend for %s", lang)
+		assert.Equal(t, models.SkillCategoryFrontend, skillscore.ClassifyLanguage(lang), "expected Frontend for %s", lang)
 	}
 }
 
 func TestClassifyLanguage_Backend(t *testing.T) {
 	langs := []string{"Go", "Python", "Ruby", "PHP", "Java", "Kotlin", "Rust", "C#"}
 	for _, lang := range langs {
-		assert.Equal(t, models.SkillCategoryBackend, services.ClassifyLanguage(lang), "expected Backend for %s", lang)
+		assert.Equal(t, models.SkillCategoryBackend, skillscore.ClassifyLanguage(lang), "expected Backend for %s", lang)
 	}
 }
 
 func TestClassifyLanguage_Infra(t *testing.T) {
 	langs := []string{"Shell", "Dockerfile", "HCL", "Makefile"}
 	for _, lang := range langs {
-		assert.Equal(t, models.SkillCategoryInfra, services.ClassifyLanguage(lang), "expected Infra for %s", lang)
+		assert.Equal(t, models.SkillCategoryInfra, skillscore.ClassifyLanguage(lang), "expected Infra for %s", lang)
 	}
 }
 
 func TestClassifyLanguage_DB(t *testing.T) {
 	langs := []string{"SQL", "PLpgSQL", "PLSQL", "TSQL"}
 	for _, lang := range langs {
-		assert.Equal(t, models.SkillCategoryDB, services.ClassifyLanguage(lang), "expected DB for %s", lang)
+		assert.Equal(t, models.SkillCategoryDB, skillscore.ClassifyLanguage(lang), "expected DB for %s", lang)
 	}
 }
 
 func TestClassifyLanguage_Unknown(t *testing.T) {
-	assert.Equal(t, models.SkillCategoryOther, services.ClassifyLanguage("UnknownLang"))
-	assert.Equal(t, models.SkillCategoryOther, services.ClassifyLanguage(""))
-	assert.Equal(t, models.SkillCategoryOther, services.ClassifyLanguage("COBOL"))
+	assert.Equal(t, models.SkillCategoryOther, skillscore.ClassifyLanguage("UnknownLang"))
+	assert.Equal(t, models.SkillCategoryOther, skillscore.ClassifyLanguage(""))
+	assert.Equal(t, models.SkillCategoryOther, skillscore.ClassifyLanguage("COBOL"))
 }
 
 // --- CalculateScores ---
 
 func TestCalculateScores_Empty(t *testing.T) {
-	scores := services.CalculateScores(1, nil, nil, 0)
+	scores := skillscore.CalculateScores(1, nil, nil, 0)
 	assert.Len(t, scores, 5, "should return scores for all 5 categories")
 	for _, s := range scores {
 		assert.Equal(t, float64(0), s.Score)
@@ -63,7 +63,7 @@ func TestCalculateScores_FrontendOnly(t *testing.T) {
 	repos := []models.GitHubRepo{
 		{Language: "TypeScript", Stars: 10},
 	}
-	scores := services.CalculateScores(1, langStats, repos, 0)
+	scores := skillscore.CalculateScores(1, langStats, repos, 0)
 
 	var fe *models.SkillScore
 	for i := range scores {
@@ -88,7 +88,7 @@ func TestCalculateScores_MultipleCategories(t *testing.T) {
 		{Language: "Go", Stars: 5},
 		{Language: "TypeScript", Stars: 3},
 	}
-	scores := services.CalculateScores(1, langStats, repos, 100)
+	scores := skillscore.CalculateScores(1, langStats, repos, 100)
 
 	scoreMap := make(map[models.SkillCategory]float64)
 	for _, s := range scores {
@@ -102,8 +102,8 @@ func TestCalculateScores_MultipleCategories(t *testing.T) {
 
 func TestCalculateScores_ContributionBonus(t *testing.T) {
 	// contributions=0 vs contributions=500 でスコアが上がることを確認
-	scores0 := services.CalculateScores(1, nil, nil, 0)
-	scores500 := services.CalculateScores(1, nil, nil, 500)
+	scores0 := skillscore.CalculateScores(1, nil, nil, 0)
+	scores500 := skillscore.CalculateScores(1, nil, nil, 500)
 
 	for i := range scores0 {
 		assert.Greater(t, scores500[i].Score, scores0[i].Score,
@@ -120,7 +120,7 @@ func TestCalculateScores_ScoreCappedAt100(t *testing.T) {
 	for i := range repos {
 		repos[i] = models.GitHubRepo{Language: "Go", Stars: 1000}
 	}
-	scores := services.CalculateScores(1, langStats, repos, 10000)
+	scores := skillscore.CalculateScores(1, langStats, repos, 10000)
 
 	for _, s := range scores {
 		assert.LessOrEqual(t, s.Score, 100.0, "score should not exceed 100 for category %s", s.Category)
@@ -131,7 +131,7 @@ func TestCalculateScores_RoundingToOneDecimal(t *testing.T) {
 	langStats := []models.GitHubLanguageStat{
 		{UserID: 1, Language: "Go", Percentage: 33.333},
 	}
-	scores := services.CalculateScores(1, langStats, nil, 0)
+	scores := skillscore.CalculateScores(1, langStats, nil, 0)
 
 	for _, s := range scores {
 		// 小数第1位に丸められていること
@@ -141,7 +141,7 @@ func TestCalculateScores_RoundingToOneDecimal(t *testing.T) {
 }
 
 func TestCalculateScores_UserIDPropagated(t *testing.T) {
-	scores := services.CalculateScores(42, nil, nil, 0)
+	scores := skillscore.CalculateScores(42, nil, nil, 0)
 	for _, s := range scores {
 		assert.Equal(t, uint(42), s.UserID)
 	}

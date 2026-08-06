@@ -4,6 +4,7 @@ import (
 	"Backend/domain/entity"
 	"Backend/internal/config"
 	"Backend/internal/middleware"
+	"Backend/internal/services/refreshtoken"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -185,7 +186,7 @@ func (s *AuthService) RefreshSession(refreshToken string) (*AuthResponse, error)
 	}
 	// 退会済みユーザーはリフレッシュ不可 (#613)
 	if user == nil || user.IsWithdrawn() {
-		return nil, ErrInvalidRefreshToken
+		return nil, refreshtoken.ErrInvalidRefreshToken
 	}
 
 	return &AuthResponse{

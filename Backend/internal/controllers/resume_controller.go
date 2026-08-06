@@ -3,6 +3,7 @@ package controllers
 import (
 	"Backend/internal/services"
 	"Backend/internal/services/interfaces"
+	"Backend/internal/services/shared"
 	"errors"
 	"log"
 	"mime/multipart"
@@ -79,7 +80,7 @@ func (c *ResumeController) Review(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "user_id is required")
 	}
 	if err := c.resumeService.EnsureDocumentOwner(uint(docID), userID); err != nil {
-		if errors.Is(err, services.ErrForbidden) {
+		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
 		return echoInternalError(err)
@@ -103,7 +104,7 @@ func (c *ResumeController) Review(ctx echo.Context) error {
 	review, items, err := c.resumeService.ReviewDocument(uint(docID), userID, payload.CompanyName, payload.JobTitle, payload.CandidateType)
 	if err != nil {
 		log.Printf("resume_review: failed document_id=%d err=%v", docID, err)
-		if errors.Is(err, services.ErrForbidden) {
+		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
 		var ve *services.ValidationError
@@ -134,7 +135,7 @@ func (c *ResumeController) ReviewStream(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "user_id is required")
 	}
 	if err := c.resumeService.EnsureDocumentOwner(uint(docID), userID); err != nil {
-		if errors.Is(err, services.ErrForbidden) {
+		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
 		return echoInternalError(err)
@@ -180,7 +181,7 @@ func (c *ResumeController) Annotated(ctx echo.Context) error {
 
 	file, err := c.resumeService.OpenAnnotatedFile(uint(docID), userID)
 	if err != nil {
-		if errors.Is(err, services.ErrForbidden) {
+		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())

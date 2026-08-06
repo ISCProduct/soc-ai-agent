@@ -4,6 +4,7 @@ import (
 	"Backend/internal/middleware"
 	"Backend/internal/repositories"
 	"Backend/internal/services"
+	"Backend/internal/services/organization"
 	"context"
 	"errors"
 	"net/http"
@@ -50,7 +51,7 @@ func EchoUserAuth(userSecret string, access services.UserAccessGuard, orgs ...Or
 			if resolver != nil {
 				orgID, err := resolver.ResolveOrganizationID(userID)
 				if err != nil {
-					if errors.Is(err, services.ErrOrganizationDisabled) {
+					if errors.Is(err, organization.ErrOrganizationDisabled) {
 						return echo.NewHTTPError(http.StatusForbidden, "organization is disabled")
 					}
 					return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve organization")

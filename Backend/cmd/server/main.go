@@ -13,6 +13,14 @@ import (
 	"Backend/internal/routes"
 	"Backend/internal/scraper"
 	"Backend/internal/services"
+	"Backend/internal/services/analysis"
+	"Backend/internal/services/application"
+	"Backend/internal/services/email"
+	"Backend/internal/services/matching"
+	"Backend/internal/services/organization"
+	"Backend/internal/services/refreshtoken"
+	"Backend/internal/services/skillscore"
+	"Backend/internal/services/storage"
 	"Backend/migrations"
 	"log"
 	"log/slog"
@@ -198,7 +206,7 @@ func main() {
 	realtimeUsageRepo := repositories.NewRealtimeUsageRepository(db)
 
 	// サービス層の初期化
-	emailService := services.NewEmailService()
+	emailService := email.NewEmailService()
 
 	// Redis（#617）: レート制限共有 + 永続ジョブキュー。未設定時はインメモリ/go func フォールバック。
 	rdb := redisx.NewFromEnv()
@@ -230,15 +238,15 @@ func main() {
 	}
 	// リフレッシュトークン管理 (#616)
 	refreshTokenRepo := repositories.NewUserRefreshTokenRepository(db)
-	refreshTokenService := services.NewRefreshTokenService(refreshTokenRepo)
+	refreshTokenService := refreshtoken.NewRefreshTokenService(refreshTokenRepo)
 	authService.SetRefreshTokenService(refreshTokenService)
-	skillScoreService := services.NewSkillScoreService(skillScoreRepo)
+	skillScoreService := skillscore.NewSkillScoreService(skillScoreRepo)
 	githubService := services.NewGitHubService(githubRepo, skillScoreService, aiClient)
 	oauthService := services.NewOAuthService(userRepo, oauthConfig, githubService)
 	oauthService.SetRefreshTokenService(refreshTokenService)
 	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
 	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
-	matchingService := services.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)
+	matchingService := matching.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)
 	resumeService := services.NewResumeService(resumeRepo, "storage/resumes", aiClient)
 	crawlService := services.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
 	gbizInfoRepo := repositories.NewGBizInfoRepository(db)
@@ -256,7 +264,7 @@ func main() {
 	crawlService.SetJobFetcher(jobFetcher)
 	auditLogService := services.NewAuditLogService(auditLogRepo)
 	authService.SetAuditLog(auditLogService)
-	analysisService := services.NewAnalysisScoringService(
+	analysisService := analysis.NewAnalysisScoringService(
 		userWeightScoreRepo,
 		chatMessageRepo,
 		progressRepo,
@@ -319,7 +327,7 @@ func main() {
 	resumeController := controllers.NewResumeController(resumeService)
 
 	// S3 upload service for interview videos (optional — skipped if env vars are not set)
-	s3UploadService, s3Err := services.NewS3UploadService()
+	s3UploadService, s3Err := storage.NewS3UploadService()
 	if s3Err != nil {
 		slog.Warn("S3 upload service not available", "error", s3Err)
 		s3UploadService = nil
@@ -331,7 +339,7 @@ func main() {
 	}
 	userDeletionService := services.NewUserDeletionService(db, objectDeleter, auditLogService)
 	organizationRepo := repositories.NewOrganizationRepository(db)
-	organizationService := services.NewOrganizationService(organizationRepo)
+	organizationService := organization.NewOrganizationService(organizationRepo)
 	adminOrganizationController := controllers.NewAdminOrganizationController(organizationService)
 	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
 	adminUserController.SetDeletionService(userDeletionService)
@@ -359,7 +367,7 @@ func main() {
 	googleCalendarController := controllers.NewGoogleCalendarController(calendarSyncService)
 	scheduleController := controllers.NewScheduleController(scheduleService)
 	esReviewController := controllers.NewESReviewController()
-	appService := services.NewApplicationService(appStatusRepo, matchRepo)
+	appService := application.NewApplicationService(appStatusRepo, matchRepo)
 	appController := controllers.NewApplicationController(appService)
 	integratedProfileController := controllers.NewIntegratedProfileController(crossFeatureService, interviewSessionRepo, resumeRepo)
 	scoreValidationRepo := repositories.NewScoreValidationRepository(db)

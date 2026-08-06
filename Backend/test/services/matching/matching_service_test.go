@@ -1,4 +1,4 @@
-package services_test
+package matching_test
 
 // マッチングサービスのユニットテスト (Issue #188)
 //

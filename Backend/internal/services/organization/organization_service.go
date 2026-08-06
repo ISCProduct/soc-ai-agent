@@ -1,4 +1,4 @@
-package services
+package organization
 
 import (
 	"Backend/domain/repository"

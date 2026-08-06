@@ -4,9 +4,9 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/services/shared"
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -22,8 +22,6 @@ type ValidationError struct {
 }
 
 func (e *ValidationError) Error() string { return e.Message }
-
-var ErrForbidden = errors.New("forbidden")
 
 // allowedMIMETypes はアップロード可能なファイルタイプ
 var allowedMIMETypes = map[string]bool{
@@ -98,7 +96,7 @@ type ResumeService struct {
 	s3Err        error
 	crossFeature *CrossFeatureIntegrationService
 	validator    *CompanyValidationService
-	companyRepo  CompanyBriefReader
+	companyRepo  shared.CompanyBriefReader
 }
 
 // SetCrossFeatureService 機能間連携サービスを注入する（オプション）
@@ -112,7 +110,7 @@ func (s *ResumeService) SetCompanyValidator(v *CompanyValidationService) {
 }
 
 // SetCompanyRepo 企業共有キャッシュ参照用リポジトリを注入する（オプション）
-func (s *ResumeService) SetCompanyRepo(r CompanyBriefReader) {
+func (s *ResumeService) SetCompanyRepo(r shared.CompanyBriefReader) {
 	s.companyRepo = r
 }
 
@@ -159,7 +157,7 @@ func (s *ResumeService) EnsureDocumentOwner(documentID uint, requestingUserID ui
 		return err
 	}
 	if doc.UserID != requestingUserID {
-		return ErrForbidden
+		return shared.ErrForbidden
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package services
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/email"
 	"context"
 	"encoding/json"
 	"errors"
@@ -220,7 +221,7 @@ func (s *InterviewService) SendReportEmail(userID, sessionID uint) error {
 		}
 	}
 
-	data := InterviewReportEmailData{
+	data := email.InterviewReportEmailData{
 		SessionID:  fmt.Sprintf("%d", sessionID),
 		Summary:    filtered,
 		LogicScore: scores["logic"],

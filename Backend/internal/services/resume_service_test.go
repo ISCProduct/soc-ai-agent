@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"Backend/internal/models"
+	"Backend/internal/services/shared"
 )
 
 func makeUploadedFileHeader(t *testing.T, filename string, content []byte, contentType string) *multipart.FileHeader {
@@ -214,7 +215,7 @@ func TestResumeService_OpenAnnotatedFileRejectsOtherUser(t *testing.T) {
 	}, "", nil)
 
 	_, err := service.OpenAnnotatedFile(10, 2)
-	if !errors.Is(err, ErrForbidden) {
+	if !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("他ユーザーの注釈PDF取得は forbidden であるべき: got %v", err)
 	}
 }
@@ -228,7 +229,7 @@ func TestResumeService_ReviewDocumentRejectsOtherUser(t *testing.T) {
 	}, "", nil)
 
 	_, _, err := service.ReviewDocument(10, 2, "ACME", "Engineer", "new_grad")
-	if !errors.Is(err, ErrForbidden) {
+	if !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("他ユーザーのレビュー実行は forbidden であるべき: got %v", err)
 	}
 }
@@ -243,7 +244,7 @@ func TestResumeService_ReviewDocumentStreamRejectsOtherUser(t *testing.T) {
 	rr := httptest.NewRecorder()
 
 	err := service.ReviewDocumentStream(context.Background(), 10, 2, "ACME", "Engineer", "new_grad", rr)
-	if !errors.Is(err, ErrForbidden) {
+	if !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("他ユーザーのストリーミングレビューは forbidden であるべき: got %v", err)
 	}
 	if !strings.Contains(rr.Body.String(), "forbidden") {
