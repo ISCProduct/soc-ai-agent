@@ -237,4 +237,3 @@ func TestCompanyInfoFetcher_FetchAndSave_PersistsTechAndWelfare(t *testing.T) {
 	assert.Equal(t, "Go, TypeScript", result.TechStack)
 	assert.Equal(t, "リモート可・住宅手当", result.WelfareDetails)
 }
-

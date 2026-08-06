@@ -10,10 +10,10 @@ import (
 func TestOrganizationService_EnsureSameOrganization(t *testing.T) {
 	svc := &OrganizationService{}
 	tests := []struct {
-		name         string
-		actorOrgID   uint
+		name          string
+		actorOrgID    uint
 		resourceOrgID uint
-		wantErr      error
+		wantErr       error
 	}{
 		{name: "same org", actorOrgID: 1, resourceOrgID: 1, wantErr: nil},
 		{name: "different org", actorOrgID: 1, resourceOrgID: 2, wantErr: ErrCrossOrganization},

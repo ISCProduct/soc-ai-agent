@@ -21,10 +21,10 @@ type L1SeedRow struct {
 
 // L1SeedResult は投入結果。
 type L1SeedResult struct {
-	Total   int `json:"total"`
-	Created int `json:"created"`
-	Updated int `json:"updated"`
-	Skipped int `json:"skipped"`
+	Total   int      `json:"total"`
+	Created int      `json:"created"`
+	Updated int      `json:"updated"`
+	Skipped int      `json:"skipped"`
 	Errors  []string `json:"errors,omitempty"`
 }
 

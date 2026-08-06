@@ -79,4 +79,3 @@ func TestGenerateMatchReason_DefaultSkipsAI(t *testing.T) {
 		t.Fatalf("expected DB business fact, got %q", got)
 	}
 }
-

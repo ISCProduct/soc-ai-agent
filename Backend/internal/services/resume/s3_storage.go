@@ -15,10 +15,10 @@ import (
 )
 
 type s3Storage struct {
-	client      *s3.Client
-	tmClient    *transfermanager.Client
-	bucket      string
-	prefix      string
+	client   *s3.Client
+	tmClient *transfermanager.Client
+	bucket   string
+	prefix   string
 }
 
 func newS3StorageFromEnv(ctx context.Context) (*s3Storage, error) {

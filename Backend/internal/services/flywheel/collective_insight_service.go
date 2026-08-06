@@ -61,9 +61,9 @@ func (s *CollectiveInsightService) UpdateConsent(userID uint, allow bool) error 
 type CollectiveRecommendItem struct {
 	CompanyID       uint    `json:"company_id"`
 	CompanyName     string  `json:"company_name"`
-	PassCount       int     `json:"pass_count"`        // 類似ユーザーの通過人数
-	SimilarUsers    int     `json:"similar_users"`     // 類似ユーザー数
-	CollectiveScore float64 `json:"collective_score"`  // 集合知スコア（0-100）
+	PassCount       int     `json:"pass_count"`       // 類似ユーザーの通過人数
+	SimilarUsers    int     `json:"similar_users"`    // 類似ユーザー数
+	CollectiveScore float64 `json:"collective_score"` // 集合知スコア（0-100）
 	Reason          string  `json:"reason"`
 }
 

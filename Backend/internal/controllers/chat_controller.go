@@ -256,7 +256,7 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		}
 
 		type RecommendationResponse struct {
-			Recommendations     []any                 `json:"recommendations"`
+			Recommendations     []any                         `json:"recommendations"`
 			Reason              string                        `json:"reason,omitempty"`
 			Diagnostics         *matching.MatchingDiagnostics `json:"diagnostics,omitempty"`
 			EvaluatedCategories int                           `json:"evaluated_categories"`

@@ -25,10 +25,10 @@ func NewScoreValidationService(repo *repositories.ScoreValidationRepository) *Sc
 
 // CorrelationReport 相関分析レポート
 type CorrelationReport struct {
-	Rows            []repositories.CategoryCorrelationRow `json:"rows"`
-	TopCorrelated   []string                              `json:"top_correlated"`   // 通過率との相関が高いカテゴリ
-	LowCorrelated   []string                              `json:"low_correlated"`   // 相関が低いカテゴリ（改善候補）
-	TotalSamples    int                                   `json:"total_samples"`
+	Rows          []repositories.CategoryCorrelationRow `json:"rows"`
+	TopCorrelated []string                              `json:"top_correlated"` // 通過率との相関が高いカテゴリ
+	LowCorrelated []string                              `json:"low_correlated"` // 相関が低いカテゴリ（改善候補）
+	TotalSamples  int                                   `json:"total_samples"`
 }
 
 // GetCorrelationReport スコアと選考通過率の相関レポートを生成する
@@ -203,9 +203,9 @@ func (s *ScoreValidationService) ListAllVariants() ([]models.QuestionVariant, er
 
 // CalibrationResult キャリブレーション実行結果
 type CalibrationResult struct {
-	Version  int                           `json:"version"`
-	Weights  []models.ScoreCalibrationWeight `json:"weights"`
-	Message  string                        `json:"message"`
+	Version int                             `json:"version"`
+	Weights []models.ScoreCalibrationWeight `json:"weights"`
+	Message string                          `json:"message"`
 }
 
 // RunCalibration 実績データからスコア重みを再計算して保存する
@@ -259,9 +259,9 @@ func (s *ScoreValidationService) RunCalibration() (*CalibrationResult, error) {
 	}
 
 	return &CalibrationResult{
-		Version:  nextVersion,
-		Weights:  weights,
-		Message:  fmt.Sprintf("キャリブレーション完了: %d カテゴリ、サンプル合計 %d 件", len(weights), totalSampleCount(stats)),
+		Version: nextVersion,
+		Weights: weights,
+		Message: fmt.Sprintf("キャリブレーション完了: %d カテゴリ、サンプル合計 %d 件", len(weights), totalSampleCount(stats)),
 	}, nil
 }
 

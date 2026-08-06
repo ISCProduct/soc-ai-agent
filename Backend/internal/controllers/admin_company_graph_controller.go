@@ -379,25 +379,25 @@ func (c *AdminCompanyGraphController) EnrichRelations(ctx echo.Context) error {
 		adminEmail := ctx.Request().Header.Get("X-Admin-Email")
 		if adminEmail != "" && c.audit != nil {
 			c.audit.Record(adminEmail, "company_graph_enrich_relations", "company", req.CompanyID, map[string]any{
-				"saved":            result.SavedCount,
-				"source":           result.Source,
-				"from_cache":       result.FromCache,
-				"budget_exceeded":  result.BudgetExceeded,
-				"force":            forceRefresh,
+				"saved":           result.SavedCount,
+				"source":          result.Source,
+				"from_cache":      result.FromCache,
+				"budget_exceeded": result.BudgetExceeded,
+				"force":           forceRefresh,
 			})
 		}
 		return ctx.JSON(http.StatusOK, map[string]any{
-			"ok":               true,
-			"company_id":       req.CompanyID,
-			"saved":            result.SavedCount,
-			"relations":        result.Relations,
-			"market_info":      result.MarketInfo,
-			"source":           result.Source,
-			"model_used":       result.ModelUsed,
-			"confidence":       result.Confidence,
-			"from_cache":       result.FromCache,
-			"budget_exceeded":  result.BudgetExceeded,
-			"skip_reason":      result.SkipReason,
+			"ok":              true,
+			"company_id":      req.CompanyID,
+			"saved":           result.SavedCount,
+			"relations":       result.Relations,
+			"market_info":     result.MarketInfo,
+			"source":          result.Source,
+			"model_used":      result.ModelUsed,
+			"confidence":      result.Confidence,
+			"from_cache":      result.FromCache,
+			"budget_exceeded": result.BudgetExceeded,
+			"skip_reason":     result.SkipReason,
 		})
 	}
 

@@ -252,4 +252,3 @@ func mapChoice(choice string, values []int) int {
 		return 60
 	}
 }
-

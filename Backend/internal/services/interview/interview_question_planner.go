@@ -17,8 +17,8 @@ const (
 	questionStatusAsked    = "asked"
 	questionStatusAnswered = "answered"
 
-	maxFollowUpDepth   = 2
-	minDeepeningRunes  = 40
+	maxFollowUpDepth  = 2
+	minDeepeningRunes = 40
 )
 
 var abstractAnswerKeywords = []string{
@@ -171,15 +171,15 @@ func buildQuestionCoverage(states []models.InterviewQuestionState) map[string]an
 
 	return map[string]any{
 		"custom_questions_coverage": map[string]any{
-			"required_total":     requiredTotal,
-			"required_asked":     requiredAsked,
-			"required_answered":  requiredAnswered,
-			"required_coverage":  coverageRate,
-			"custom_total":       customTotal,
-			"custom_asked":       customAsked,
+			"required_total":    requiredTotal,
+			"required_asked":    requiredAsked,
+			"required_answered": requiredAnswered,
+			"required_coverage": coverageRate,
+			"custom_total":      customTotal,
+			"custom_asked":      customAsked,
 		},
-		"deepening_count":             deepeningCount,
-		"unasked_required_questions":  unaskedRequired,
+		"deepening_count":            deepeningCount,
+		"unasked_required_questions": unaskedRequired,
 	}
 }
 

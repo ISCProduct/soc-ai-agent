@@ -25,7 +25,7 @@ func NewScraperSessionService(repo *repositories.ScraperSessionRepository) *Scra
 
 type ScraperSessionPayload struct {
 	SiteKey   string     `json:"site_key"`
-	Cookies   string     `json:"cookies"`    // "key=value; key2=value2" または JSON 配列
+	Cookies   string     `json:"cookies"` // "key=value; key2=value2" または JSON 配列
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 

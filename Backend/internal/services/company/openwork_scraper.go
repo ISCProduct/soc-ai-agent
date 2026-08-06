@@ -22,11 +22,11 @@ import (
 
 // openworkScores OpenWorkから取得した評価スコアを保持する
 type openworkScores struct {
-	Overall  float64 `json:"overall"`   // 総合評価（5点満点）
-	Welfare  float64 `json:"welfare"`   // 待遇面の満足度
-	Morale   float64 `json:"morale"`    // 社員の士気
-	Openness float64 `json:"openness"`  // 風通しの良さ
-	Growth   float64 `json:"growth"`    // 20代成長環境
+	Overall  float64 `json:"overall"`  // 総合評価（5点満点）
+	Welfare  float64 `json:"welfare"`  // 待遇面の満足度
+	Morale   float64 `json:"morale"`   // 社員の士気
+	Openness float64 `json:"openness"` // 風通しの良さ
+	Growth   float64 `json:"growth"`   // 20代成長環境
 }
 
 // openworkCompanyData OpenWorkページからパースしたデータ
@@ -350,10 +350,12 @@ type OpenworkCompanyData = openworkCompanyData
 func ParseOpenworkCompanyPage(htmlBytes []byte) (*OpenworkCompanyData, error) {
 	return parseOpenworkCompanyPage(htmlBytes)
 }
-func ParseOpenworkScore(s string) float64                    { return parseOpenworkScore(s) }
-func ParseOpenworkSalary(s string) int                       { return parseOpenworkSalary(s) }
-func ParseOpenworkReviewCount(s string) int                  { return parseOpenworkReviewCount(s) }
-func BuildOpenworkCultureJSON(scores OpenworkScores) string  { return buildOpenworkCultureJSON(scores) }
-func BuildOpenworkWelfareText(welfareScore float64) string   { return buildOpenworkWelfareText(welfareScore) }
-func BuildOpenworkSalaryText(salary int) string              { return buildOpenworkSalaryText(salary) }
-func ExtractOpenworkCharset(contentType string) string       { return extractOpenworkCharset(contentType) }
+func ParseOpenworkScore(s string) float64                   { return parseOpenworkScore(s) }
+func ParseOpenworkSalary(s string) int                      { return parseOpenworkSalary(s) }
+func ParseOpenworkReviewCount(s string) int                 { return parseOpenworkReviewCount(s) }
+func BuildOpenworkCultureJSON(scores OpenworkScores) string { return buildOpenworkCultureJSON(scores) }
+func BuildOpenworkWelfareText(welfareScore float64) string {
+	return buildOpenworkWelfareText(welfareScore)
+}
+func BuildOpenworkSalaryText(salary int) string        { return buildOpenworkSalaryText(salary) }
+func ExtractOpenworkCharset(contentType string) string { return extractOpenworkCharset(contentType) }

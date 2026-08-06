@@ -155,10 +155,10 @@ func (ctrl *CompanyRelationController) GetCompanies(ctx echo.Context) error {
 	}
 
 	type CompanyResponse struct {
-		Companies any `json:"companies"`
-		Total     int64       `json:"total"`
-		Limit     int         `json:"limit"`
-		Offset    int         `json:"offset"`
+		Companies any   `json:"companies"`
+		Total     int64 `json:"total"`
+		Limit     int   `json:"limit"`
+		Offset    int   `json:"offset"`
 	}
 
 	response := CompanyResponse{
@@ -295,4 +295,3 @@ func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Con
 	}
 	return parsed.Results
 }
-

@@ -172,10 +172,10 @@ func (c *AdminUserController) Delete(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to withdraw user")
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
-		"message":         "ユーザーを退会処理しました（保持期間後に完全削除）",
-		"id":              uint(id),
-		"email":           user.Email,
-		"retention_days":  auth.WithdrawalRetentionDays,
+		"message":        "ユーザーを退会処理しました（保持期間後に完全削除）",
+		"id":             uint(id),
+		"email":          user.Email,
+		"retention_days": auth.WithdrawalRetentionDays,
 	})
 }
 

@@ -61,15 +61,15 @@ type L1WarmOptions struct {
 
 // L1WarmItem は 1 社分の処理結果。
 type L1WarmItem struct {
-	CompanyID   uint   `json:"company_id"`
-	Name        string `json:"name"`
-	Industry    string `json:"industry"`
-	Priority    int    `json:"priority"`
-	NeedInfo    bool   `json:"need_info"`
-	NeedPersona bool   `json:"need_persona"`
-	InfoStatus  string `json:"info_status,omitempty"`
+	CompanyID     uint   `json:"company_id"`
+	Name          string `json:"name"`
+	Industry      string `json:"industry"`
+	Priority      int    `json:"priority"`
+	NeedInfo      bool   `json:"need_info"`
+	NeedPersona   bool   `json:"need_persona"`
+	InfoStatus    string `json:"info_status,omitempty"`
 	PersonaStatus string `json:"persona_status,omitempty"`
-	Error       string `json:"error,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 // L1WarmResult はバッチ全体の結果。

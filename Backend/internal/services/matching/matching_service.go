@@ -156,7 +156,7 @@ func calculateCategoryMatch(userScore, companyWeight float64) float64 {
 	sim := 1.0 - diff/100.0
 	// ロジスティック関数でスケーリング。中心を 0.5、スロープを適度に設定して差の小さい領域で緩やかに変化するようにする。
 	k := 12.0
-	x := k*(sim-0.5)
+	x := k * (sim - 0.5)
 	s := 1.0 / (1.0 + math.Exp(-x))
 	return math.Max(0.0, math.Min(100.0, 100.0*s))
 }

@@ -63,38 +63,38 @@ func CalcTokenCost(u TokenUsage) float64 {
 }
 
 type RealtimeDailySummary struct {
-	Date                       string  `json:"date"`
-	TotalCostUSD               float64 `json:"total_cost_usd"`
-	TotalDurationSeconds       int64   `json:"total_duration_seconds"`
-	SessionCount               int64   `json:"session_count"`
-	UserCount                  int64   `json:"user_count"`
-	TotalInputAudioTokens      int64   `json:"total_input_audio_tokens"`
-	TotalOutputAudioTokens     int64   `json:"total_output_audio_tokens"`
-	TotalInputTextTokens       int64   `json:"total_input_text_tokens"`
-	TotalOutputTextTokens      int64   `json:"total_output_text_tokens"`
+	Date                   string  `json:"date"`
+	TotalCostUSD           float64 `json:"total_cost_usd"`
+	TotalDurationSeconds   int64   `json:"total_duration_seconds"`
+	SessionCount           int64   `json:"session_count"`
+	UserCount              int64   `json:"user_count"`
+	TotalInputAudioTokens  int64   `json:"total_input_audio_tokens"`
+	TotalOutputAudioTokens int64   `json:"total_output_audio_tokens"`
+	TotalInputTextTokens   int64   `json:"total_input_text_tokens"`
+	TotalOutputTextTokens  int64   `json:"total_output_text_tokens"`
 }
 
 type RealtimeMonthlySummary struct {
-	Month                      string  `json:"month"`
-	TotalCostUSD               float64 `json:"total_cost_usd"`
-	TotalDurationSeconds       int64   `json:"total_duration_seconds"`
-	SessionCount               int64   `json:"session_count"`
-	UserCount                  int64   `json:"user_count"`
-	TotalInputAudioTokens      int64   `json:"total_input_audio_tokens"`
-	TotalOutputAudioTokens     int64   `json:"total_output_audio_tokens"`
-	TotalInputTextTokens       int64   `json:"total_input_text_tokens"`
-	TotalOutputTextTokens      int64   `json:"total_output_text_tokens"`
+	Month                  string  `json:"month"`
+	TotalCostUSD           float64 `json:"total_cost_usd"`
+	TotalDurationSeconds   int64   `json:"total_duration_seconds"`
+	SessionCount           int64   `json:"session_count"`
+	UserCount              int64   `json:"user_count"`
+	TotalInputAudioTokens  int64   `json:"total_input_audio_tokens"`
+	TotalOutputAudioTokens int64   `json:"total_output_audio_tokens"`
+	TotalInputTextTokens   int64   `json:"total_input_text_tokens"`
+	TotalOutputTextTokens  int64   `json:"total_output_text_tokens"`
 }
 
 type RealtimeUserSummary struct {
-	UserID                     uint    `json:"user_id"`
-	TotalCostUSD               float64 `json:"total_cost_usd"`
-	TotalDurationSeconds       int64   `json:"total_duration_seconds"`
-	SessionCount               int64   `json:"session_count"`
-	TotalInputAudioTokens      int64   `json:"total_input_audio_tokens"`
-	TotalOutputAudioTokens     int64   `json:"total_output_audio_tokens"`
-	TotalInputTextTokens       int64   `json:"total_input_text_tokens"`
-	TotalOutputTextTokens      int64   `json:"total_output_text_tokens"`
+	UserID                 uint    `json:"user_id"`
+	TotalCostUSD           float64 `json:"total_cost_usd"`
+	TotalDurationSeconds   int64   `json:"total_duration_seconds"`
+	SessionCount           int64   `json:"session_count"`
+	TotalInputAudioTokens  int64   `json:"total_input_audio_tokens"`
+	TotalOutputAudioTokens int64   `json:"total_output_audio_tokens"`
+	TotalInputTextTokens   int64   `json:"total_input_text_tokens"`
+	TotalOutputTextTokens  int64   `json:"total_output_text_tokens"`
 }
 
 type RealtimeUsageService struct {

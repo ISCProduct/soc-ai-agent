@@ -74,8 +74,8 @@ func TestTruncateRunes(t *testing.T) {
 func TestPurgeExpired(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
-		name         string
-		cache        map[string]companyValidationCacheEntry
+		name          string
+		cache         map[string]companyValidationCacheEntry
 		wantRemaining []string
 	}{
 		{

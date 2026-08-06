@@ -28,11 +28,11 @@ func NewProfileRecalculationService(
 
 // RecalculationResult 再計算結果レポート
 type RecalculationResult struct {
-	CompanyID   uint    `json:"company_id"`
-	CompanyName string  `json:"company_name"`
-	SampleCount int     `json:"sample_count"`
-	Updated     bool    `json:"updated"`
-	SkipReason  string  `json:"skip_reason,omitempty"`
+	CompanyID   uint   `json:"company_id"`
+	CompanyName string `json:"company_name"`
+	SampleCount int    `json:"sample_count"`
+	Updated     bool   `json:"updated"`
+	SkipReason  string `json:"skip_reason,omitempty"`
 }
 
 // RecalculateAll 実績が閾値以上の全企業のプロファイルを一括再計算する
@@ -101,16 +101,16 @@ func (s *ProfileRecalculationService) recalculateSingle(companyID uint, minSampl
 
 	// 通過者の平均スコアをプロファイルに反映（0-100 に丸め）
 	newProfile := *currentProfile
-	newProfile.TechnicalOrientation  = clamp(scores.AvgTechnical)
-	newProfile.TeamworkOrientation   = clamp(scores.AvgTeamwork)
+	newProfile.TechnicalOrientation = clamp(scores.AvgTechnical)
+	newProfile.TeamworkOrientation = clamp(scores.AvgTeamwork)
 	newProfile.LeadershipOrientation = clamp(scores.AvgLeadership)
 	newProfile.CreativityOrientation = clamp(scores.AvgCreativity)
-	newProfile.StabilityOrientation  = clamp(scores.AvgStability)
-	newProfile.GrowthOrientation     = clamp(scores.AvgGrowth)
-	newProfile.WorkLifeBalance       = clamp(scores.AvgWorkLife)
-	newProfile.ChallengeSeeking      = clamp(scores.AvgChallenge)
-	newProfile.DetailOrientation     = clamp(scores.AvgDetail)
-	newProfile.CommunicationSkill    = clamp(scores.AvgCommunication)
+	newProfile.StabilityOrientation = clamp(scores.AvgStability)
+	newProfile.GrowthOrientation = clamp(scores.AvgGrowth)
+	newProfile.WorkLifeBalance = clamp(scores.AvgWorkLife)
+	newProfile.ChallengeSeeking = clamp(scores.AvgChallenge)
+	newProfile.DetailOrientation = clamp(scores.AvgDetail)
+	newProfile.CommunicationSkill = clamp(scores.AvgCommunication)
 
 	// 変更がない場合はスキップ
 	if profilesEqual(&prevProfile, &newProfile) {

@@ -61,10 +61,10 @@ type APICostService struct {
 	lastAlertMonthID string // "2006-01" UTC。同一月は1回のみ通知
 
 	// テスト用フック（nil なら本番実装を使う）
-	totalCostFn     func() (float64, error)
+	totalCostFn      func() (float64, error)
 	modelBreakdownFn func(since time.Time) ([]ModelCostSummary, error)
-	notifySlackFn   func(text string) error
-	notifyDiscordFn func(content string) error
+	notifySlackFn    func(text string) error
+	notifyDiscordFn  func(content string) error
 }
 
 func NewAPICostService(repo *repositories.APICallLogRepository) *APICostService {

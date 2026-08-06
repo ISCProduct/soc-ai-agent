@@ -3,8 +3,8 @@ package interfaces
 import (
 	"Backend/domain/entity"
 	"Backend/internal/models"
-	"Backend/internal/services/chat"
 	"Backend/internal/services/analysis"
+	"Backend/internal/services/chat"
 	"Backend/internal/services/email"
 	"Backend/internal/services/matching"
 	"context"

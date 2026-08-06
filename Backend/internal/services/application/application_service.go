@@ -37,7 +37,7 @@ var ValidStatuses = []string{
 
 // terminalStatuses 終了状態：原則として通常更新を受け付けない
 var terminalStatuses = map[string]bool{
-	"accepted": true,
+	"accepted":  true,
 	"withdrawn": true,
 	"rejected":  true,
 }

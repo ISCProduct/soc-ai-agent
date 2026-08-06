@@ -215,4 +215,3 @@ func toSessionResponses(sessions []models.InterviewSession) []InterviewSessionRe
 	}
 	return out
 }
-

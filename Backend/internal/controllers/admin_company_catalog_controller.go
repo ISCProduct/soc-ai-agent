@@ -129,17 +129,17 @@ func (c *AdminCompanyController) FetchMissingBatch(ctx echo.Context) error {
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
 	c.audit.Record(actor, "company.fetch_missing_batch", "company", 0, map[string]any{
-		"dry_run":       result.DryRun,
-		"limit":         result.Limit,
-		"primary_only":  result.PrimaryOnly,
-		"concurrency":   result.Concurrency,
-		"candidate_n":   result.CandidateN,
-		"processed":     result.Processed,
-		"info_ok":       result.InfoOK,
-		"jobs_ok":       result.JobsOK,
-		"tech_ok":       result.TechOK,
-		"relations_ok":  result.RelationsOK,
-		"errors":        result.Errors,
+		"dry_run":      result.DryRun,
+		"limit":        result.Limit,
+		"primary_only": result.PrimaryOnly,
+		"concurrency":  result.Concurrency,
+		"candidate_n":  result.CandidateN,
+		"processed":    result.Processed,
+		"info_ok":      result.InfoOK,
+		"jobs_ok":      result.JobsOK,
+		"tech_ok":      result.TechOK,
+		"relations_ok": result.RelationsOK,
+		"errors":       result.Errors,
 	})
 	return ctx.JSON(http.StatusOK, result)
 }

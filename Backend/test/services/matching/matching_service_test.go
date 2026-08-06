@@ -74,7 +74,7 @@ func TestScoredMatch_CategoryPresent(t *testing.T) {
 // TestAverageMatchScore は複数カテゴリの平均スコアが正しいことを検証
 func TestAverageMatchScore_MultiCategory(t *testing.T) {
 	userScores := map[string]float64{
-		"技術志向":       80,
+		"技術志向":      80,
 		"チームワーク志向":  60,
 		"リーダーシップ志向": 40,
 	}
@@ -82,8 +82,8 @@ func TestAverageMatchScore_MultiCategory(t *testing.T) {
 		name   string
 		weight float64
 	}{
-		{"技術志向", 80},       // diff=0  → 100
-		{"チームワーク志向", 80}, // diff=20 → 80
+		{"技術志向", 80},      // diff=0  → 100
+		{"チームワーク志向", 80},  // diff=20 → 80
 		{"リーダーシップ志向", 80}, // diff=40 → 60
 	}
 

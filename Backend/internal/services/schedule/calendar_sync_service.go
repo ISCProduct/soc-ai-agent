@@ -134,10 +134,10 @@ func (s *CalendarSyncService) getOAuthClient(ctx context.Context, userID uint) (
 }
 
 type calendarEventBody struct {
-	Summary     string              `json:"summary"`
-	Description string              `json:"description,omitempty"`
-	Start       calendarEventTime   `json:"start"`
-	End         calendarEventTime   `json:"end"`
+	Summary     string            `json:"summary"`
+	Description string            `json:"description,omitempty"`
+	Start       calendarEventTime `json:"start"`
+	End         calendarEventTime `json:"end"`
 }
 
 type calendarEventTime struct {
