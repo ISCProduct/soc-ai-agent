@@ -42,3 +42,20 @@ output "backend_service_name" {
 output "frontend_service_name" {
   value = module.frontend.service_name
 }
+
+output "ecr_repository_urls" {
+  value = module.ecr.repository_urls
+}
+
+output "ecr_push_commands" {
+  description = "初回イメージ push の例（AWS CLI 要ログイン）"
+  value       = <<-EOT
+    aws ecr get-login-password --region ${var.region} | docker login --username AWS --password-stdin ${module.ecr.registry_id}.dkr.ecr.${var.region}.amazonaws.com
+    docker tag soc-backend:local ${module.ecr.repository_urls["soc-backend"]}:${var.image_tag}
+    docker push ${module.ecr.repository_urls["soc-backend"]}:${var.image_tag}
+    docker tag soc-frontend:local ${module.ecr.repository_urls["soc-frontend"]}:${var.image_tag}
+    docker push ${module.ecr.repository_urls["soc-frontend"]}:${var.image_tag}
+    aws ecs update-service --cluster ${module.ecs_cluster.cluster_name} --service ${module.backend.service_name} --force-new-deployment --region ${var.region}
+    aws ecs update-service --cluster ${module.ecs_cluster.cluster_name} --service ${module.frontend.service_name} --force-new-deployment --region ${var.region}
+  EOT
+}

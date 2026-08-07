@@ -7,6 +7,11 @@ locals {
   frontend_domain = var.domain_name
   backend_domain  = "api.${var.domain_name}"
 
+  ecr_backend_url  = var.manage_ecr ? module.ecr[0].repository_urls["soc-backend"] : data.aws_ecr_repository.backend[0].repository_url
+  ecr_frontend_url = var.manage_ecr ? module.ecr[0].repository_urls["soc-frontend"] : data.aws_ecr_repository.frontend[0].repository_url
+  backend_image    = var.backend_image != "" ? var.backend_image : "${local.ecr_backend_url}:${var.image_tag}"
+  frontend_image   = var.frontend_image != "" ? var.frontend_image : "${local.ecr_frontend_url}:${var.image_tag}"
+
   backend_secret_arns = compact(concat(
     [module.secrets.db_secret_arn],
     var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
@@ -56,6 +61,28 @@ module "network" {
   enable_alb          = true
   alb_ingress_cidrs   = var.allowed_http_cidrs
   tags                = local.tags
+}
+
+# 同一アカウントでは staging で ECR を作成済み想定（manage_ecr=false）。
+# 別アカウントの本番だけ true にする。
+module "ecr" {
+  count  = var.manage_ecr ? 1 : 0
+  source = "../../modules/ecr"
+
+  repository_names     = var.ecr_repository_names
+  force_delete         = false
+  lifecycle_keep_count = var.ecr_lifecycle_keep_count
+  tags                 = local.tags
+}
+
+data "aws_ecr_repository" "backend" {
+  count = var.manage_ecr ? 0 : 1
+  name  = "soc-backend"
+}
+
+data "aws_ecr_repository" "frontend" {
+  count = var.manage_ecr ? 0 : 1
+  name  = "soc-frontend"
 }
 
 module "s3" {
@@ -147,7 +174,7 @@ module "backend" {
   security_group_id = module.network.fargate_security_group_id
   assign_public_ip  = true
   container_name    = "soc-backend"
-  container_image   = var.backend_image
+  container_image   = local.backend_image
   container_port    = 8080
   cpu               = var.backend_cpu
   memory            = var.backend_memory
@@ -175,7 +202,7 @@ module "frontend" {
   security_group_id = module.network.fargate_security_group_id
   assign_public_ip  = true
   container_name    = "soc-frontend"
-  container_image   = var.frontend_image
+  container_image   = local.frontend_image
   container_port    = 3000
   cpu               = var.frontend_cpu
   memory            = var.frontend_memory

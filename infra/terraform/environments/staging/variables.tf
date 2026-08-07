@@ -56,12 +56,36 @@ variable "db_name" {
 
 variable "backend_image" {
   type        = string
-  description = "ECR image URI for backend (tag included)"
+  description = "上書き用。空なら module.ecr の soc-backend + image_tag"
+  default     = ""
 }
 
 variable "frontend_image" {
   type        = string
-  description = "ECR image URI for frontend (tag included)"
+  description = "上書き用。空なら module.ecr の soc-frontend + image_tag"
+  default     = ""
+}
+
+variable "image_tag" {
+  type        = string
+  description = "ECR に push するタグ（backend_image/frontend_image 未指定時）"
+  default     = "staging"
+}
+
+variable "ecr_repository_names" {
+  type    = list(string)
+  default = ["soc-backend", "soc-frontend"]
+}
+
+variable "ecr_force_delete" {
+  type        = bool
+  description = "staging では destroy しやすく true 推奨"
+  default     = true
+}
+
+variable "ecr_lifecycle_keep_count" {
+  type    = number
+  default = 20
 }
 
 variable "openai_secret_arn" {

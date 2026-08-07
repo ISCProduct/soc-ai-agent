@@ -90,12 +90,35 @@ variable "rds_backup_retention_period" {
 
 variable "backend_image" {
   type        = string
-  description = "ECR image URI for backend (tag included)"
+  description = "上書き用。空なら ECR + image_tag"
+  default     = ""
 }
 
 variable "frontend_image" {
   type        = string
-  description = "ECR image URI for frontend (tag included)"
+  description = "上書き用。空なら ECR + image_tag"
+  default     = ""
+}
+
+variable "image_tag" {
+  type    = string
+  default = "latest"
+}
+
+variable "manage_ecr" {
+  type        = bool
+  description = "true でこのスタックが ECR を作成。同一アカウントでは false（staging 作成分を参照）"
+  default     = false
+}
+
+variable "ecr_repository_names" {
+  type    = list(string)
+  default = ["soc-backend", "soc-frontend"]
+}
+
+variable "ecr_lifecycle_keep_count" {
+  type    = number
+  default = 30
 }
 
 variable "openai_secret_arn" {

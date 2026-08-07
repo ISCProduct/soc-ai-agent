@@ -7,6 +7,10 @@ locals {
   frontend_domain = "${var.staging_subdomain}.${var.domain_name}"
   backend_domain  = "${var.staging_api_subdomain}.${var.domain_name}"
 
+  # 空なら Terraform 作成の ECR + image_tag を使う
+  backend_image  = var.backend_image != "" ? var.backend_image : "${module.ecr.repository_urls["soc-backend"]}:${var.image_tag}"
+  frontend_image = var.frontend_image != "" ? var.frontend_image : "${module.ecr.repository_urls["soc-frontend"]}:${var.image_tag}"
+
   backend_secret_arns = compact(concat(
     [module.secrets.db_secret_arn],
     var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
@@ -58,6 +62,15 @@ module "network" {
   enable_alb          = true
   alb_ingress_cidrs   = var.allowed_http_cidrs
   tags                = local.tags
+}
+
+module "ecr" {
+  source = "../../modules/ecr"
+
+  repository_names     = var.ecr_repository_names
+  force_delete         = var.ecr_force_delete
+  lifecycle_keep_count = var.ecr_lifecycle_keep_count
+  tags                 = local.tags
 }
 
 module "s3" {
@@ -133,7 +146,7 @@ module "backend" {
   cluster_id             = module.ecs_cluster.cluster_id
   capacity_provider_name = module.ecs_cluster.capacity_provider_name
   container_name         = "soc-backend"
-  container_image        = var.backend_image
+  container_image        = local.backend_image
   container_port         = 8080
   target_group_arn       = module.alb.backend_target_group_arn
   cpu                    = 256
@@ -158,7 +171,7 @@ module "frontend" {
   cluster_id             = module.ecs_cluster.cluster_id
   capacity_provider_name = module.ecs_cluster.capacity_provider_name
   container_name         = "soc-frontend"
-  container_image        = var.frontend_image
+  container_image        = local.frontend_image
   container_port         = 3000
   target_group_arn       = module.alb.frontend_target_group_arn
   cpu                    = 256
