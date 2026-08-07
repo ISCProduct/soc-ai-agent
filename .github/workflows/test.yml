@@ -6,6 +6,8 @@ on:
       - main
   pull_request:
     branches:
+      - develop
+      - release
       - main
 
 concurrency:
