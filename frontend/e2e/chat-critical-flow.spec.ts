@@ -122,11 +122,10 @@ test.describe('チャット主要機能（職種・選択肢・送信）', () =>
     })
 
     await page.goto('/')
-    await expect(page.getByText('キャリアエージェント', { exact: false })).toBeVisible({
+    const input = page.getByPlaceholder(/メッセージを入力|選択肢と同じ内容/)
+    await expect(input).toBeVisible({
       timeout: 15000,
     })
-
-    const input = page.getByPlaceholder(/メッセージを入力|選択肢と同じ内容/)
     await input.fill('Webエンジニアに興味があります')
     await input.press('Enter')
     await page.waitForTimeout(400)
