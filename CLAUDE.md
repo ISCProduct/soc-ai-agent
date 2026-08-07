@@ -24,7 +24,9 @@ SOC AI Agent: 採用支援SaaS (Go + Next.js + Python RAG)
 - FE: `NEXT_PUBLIC_BACKEND_URL=http://localhost:8080`
 
 ## CI/CD
-- PR時: Go/FEのLint & Test。Main push時: ECR/EC2へ自動デプロイ。
+- ブランチフロー: `feature/* → develop → release → main`（各ブランチPRレビュー必須）
+- PR時(develop/release/main宛): Go/FEのLint & Test
+- push時: develop→staging(ECS on EC2)へ自動デプロイ / main→本番(ECS on Fargate)へ自動デプロイ。releaseは中間ゲート（自動デプロイなし）
 
 ## コード規約
 - **共通**: 日本語(コメント/コミット), UTF-8/LF, camelCase(Go/TS), snake_case(Py)
