@@ -1,6 +1,6 @@
 # Terraform bootstrap（AWS remote state）
 
-staging / 将来の prod 共通の **S3 + DynamoDB lock** を作成する。
+staging / 将来の prod 共通の **S3（stateバケット、ロックはS3ネイティブロック）** を作成する。
 
 ```bash
 terraform init
