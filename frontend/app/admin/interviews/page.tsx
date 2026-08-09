@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
   Button,
+  Stack,
   TableBody,
   TableCell,
   TableHead,
@@ -18,6 +19,7 @@ import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { StatusBadge } from '@/components/admin/StatusBadge'
+import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
 
 type InterviewSession = {
   id: number
@@ -46,6 +48,7 @@ export default function AdminInterviewsPage() {
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
   const [error, setError] = useState('')
+  const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
 
   useEffect(() => {
     const user = authService.getStoredUser()
@@ -61,6 +64,7 @@ export default function AdminInterviewsPage() {
         page: String(page + 1),
         limit: String(rowsPerPage),
       })
+      if (schoolId !== undefined) params.set('school_id', String(schoolId))
       const response = await fetch(`/api/admin/interviews?${params}`, {
         headers: authService.getAdminFetchHeaders(),
       })
@@ -73,7 +77,7 @@ export default function AdminInterviewsPage() {
       setTotal(data?.total ?? 0)
     }
     fetchSessions()
-  }, [page, rowsPerPage])
+  }, [page, rowsPerPage, schoolId])
 
   const handleChangePage = (_: unknown, newPage: number) => setPage(newPage)
   const handleChangeRowsPerPage = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -93,6 +97,9 @@ export default function AdminInterviewsPage() {
 
       <AdminPanel title="セッション一覧">
         <AdminPanelBody>
+          <Stack sx={{ mb: 2 }}>
+            <SchoolFilterSelect value={schoolId} onChange={(id) => { setSchoolId(id); setPage(0) }} />
+          </Stack>
           {sessions.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
               面接セッションがありません。

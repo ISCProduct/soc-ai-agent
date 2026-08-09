@@ -13,6 +13,7 @@ type User struct {
 	IsAdmin                  bool
 	TargetLevel              string // 新卒 or 中途
 	SchoolName               string
+	SchoolID                 *uint
 	OAuthProvider            string
 	OAuthID                  string
 	AvatarURL                string

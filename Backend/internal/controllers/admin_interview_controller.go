@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services"
@@ -338,8 +339,9 @@ func (c *AdminInterviewController) ListSessions(ctx echo.Context) error {
 		limit = 100
 	}
 	offset := (page - 1) * limit
+	schoolID, _ := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
 
-	sessions, total, err := c.interviewService.ListAllSessionsAdmin(limit, offset)
+	sessions, total, err := c.interviewService.ListAllSessionsAdmin(limit, offset, schoolID)
 	if err != nil {
 		return echoInternalError(err)
 	}

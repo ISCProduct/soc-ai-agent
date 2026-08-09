@@ -3,6 +3,7 @@ package routes
 import (
 	"Backend/internal/controllers"
 	"Backend/internal/repositories"
+	"Backend/internal/services"
 
 	"github.com/labstack/echo/v4"
 )
@@ -14,6 +15,7 @@ func SetupAdminRoutes(
 	adminJobController *controllers.AdminJobController,
 	adminUserController *controllers.AdminUserController,
 	adminOrganizationController *controllers.AdminOrganizationController,
+	adminSchoolController *controllers.AdminSchoolController,
 	adminAuditController *controllers.AdminAuditController,
 	adminCompanyGraphController *controllers.AdminCompanyGraphController,
 	adminInterviewController *controllers.AdminInterviewController,
@@ -25,6 +27,7 @@ func SetupAdminRoutes(
 	scraperSessionController *controllers.AdminScraperSessionController,
 	adminVectorController *controllers.AdminVectorController,
 	userRepo *repositories.UserRepository,
+	schoolService *services.SchoolService,
 	adminSecret string,
 ) {
 	// 認証不要（公開）エンドポイント
@@ -33,8 +36,13 @@ func SetupAdminRoutes(
 
 	// 管理者認証必須エンドポイント
 	admin := api.Group("/admin", EchoAdminAuth(userRepo, adminSecret))
+	// 個別校での絞り込み対象(#798): ユーザー・卒業生就職情報・面接・ダッシュボード・企業・求人のみ。
+	// 他のadmin機能(組織/監査ログ/コスト等)はschool_idを要求しない。
+	schoolScope := EchoAdminSchoolScope(schoolService)
 
 	// 企業管理
+	// 企業カタログ自体は学園横断で共有のため school_id での閲覧制限はしない。
+	// school_id は「その学校向けに承認済みの企業だけを見る」任意の絞り込みとして機能する(新規承認のため全件閲覧は誰でも可能)。
 	admin.GET("/companies", adminCompanyController.List)
 	admin.POST("/companies", adminCompanyController.Create)
 	admin.GET("/companies/industries", adminCompanyController.Industries)
@@ -77,13 +85,13 @@ func SetupAdminRoutes(
 	admin.GET("/job-positions", adminJobController.JobPositions)
 	admin.POST("/job-positions", adminJobController.CreateJobPosition)
 	admin.Any("/job-positions/:id/:action", adminJobController.JobPositionAction)
-	admin.GET("/graduate-employments", adminJobController.GraduateEmployments)
+	admin.GET("/graduate-employments", adminJobController.GraduateEmployments, schoolScope)
 	admin.POST("/graduate-employments", adminJobController.CreateGraduateEmployment)
 	admin.GET("/graduate-employments/:id", adminJobController.GetGraduateEmployment)
 	admin.PUT("/graduate-employments/:id", adminJobController.UpdateGraduateEmployment)
 
 	// ユーザー管理
-	admin.GET("/users", adminUserController.List)
+	admin.GET("/users", adminUserController.List, schoolScope)
 	admin.PUT("/users/:id", adminUserController.Update)
 	admin.DELETE("/users/:id", adminUserController.Delete)
 	admin.POST("/users/purge-expired", adminUserController.PurgeExpired)
@@ -98,6 +106,17 @@ func SetupAdminRoutes(
 	admin.PUT("/organizations/:id/members/:user_id", adminOrganizationController.UpdateMember)
 	admin.DELETE("/organizations/:id/members/:user_id", adminOrganizationController.RemoveMember)
 
+	// 個別校管理(#798)
+	admin.GET("/schools", adminSchoolController.List)
+	admin.POST("/schools", adminSchoolController.Create)
+	admin.GET("/schools/:id", adminSchoolController.Get)
+	admin.POST("/schools/:id/members", adminSchoolController.AddMember)
+	admin.DELETE("/schools/:id/members/:user_id", adminSchoolController.RemoveMember)
+	admin.GET("/schools/:id/company-approvals", adminSchoolController.ListCompanyApprovals)
+	admin.POST("/schools/:id/company-approvals", adminSchoolController.AddCompanyApproval)
+	admin.DELETE("/schools/:id/company-approvals/:company_id", adminSchoolController.RemoveCompanyApproval)
+	admin.GET("/me/school-access", adminSchoolController.MySchoolAccess)
+
 	// 監査ログ
 	admin.GET("/audit-logs", adminAuditController.List)
 
@@ -106,7 +125,7 @@ func SetupAdminRoutes(
 	admin.POST("/company-graph/enrich-relations", adminCompanyGraphController.EnrichRelations)
 
 	// 面接管理
-	admin.GET("/interviews", adminInterviewController.ListSessions)
+	admin.GET("/interviews", adminInterviewController.ListSessions, schoolScope)
 	admin.GET("/interviews/:id/videos", adminInterviewController.ListVideos)
 	admin.GET("/interviews/videos/:video_id/url", adminInterviewController.VideoURL)
 
@@ -118,9 +137,9 @@ func SetupAdminRoutes(
 	admin.DELETE("/companies/:id/interview-questions/:qid", adminInterviewController.DeleteCompanyQuestion)
 
 	// ダッシュボード
-	admin.GET("/dashboard/users", adminDashboardController.ListUsers)
+	admin.GET("/dashboard/users", adminDashboardController.ListUsers, schoolScope)
 	admin.GET("/dashboard/users/:id", adminDashboardController.UserSessions)
-	admin.GET("/dashboard/export/csv", adminDashboardController.ExportCSV)
+	admin.GET("/dashboard/export/csv", adminDashboardController.ExportCSV, schoolScope)
 
 	// コスト管理
 	admin.GET("/costs/summary", adminCostsController.Summary)

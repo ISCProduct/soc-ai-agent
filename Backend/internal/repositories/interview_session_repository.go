@@ -46,9 +46,15 @@ func (r *InterviewSessionRepository) ListByUser(userID uint, limit int, offset i
 	return sessions, nil
 }
 
-func (r *InterviewSessionRepository) ListAll(limit int, offset int) ([]models.InterviewSession, error) {
+// ListAll は全ユーザーの面接セッションを返す(管理画面用)。
+// schoolID が非nilの場合は usersとJOINして個別校で絞り込む。
+func (r *InterviewSessionRepository) ListAll(limit int, offset int, schoolID *uint) ([]models.InterviewSession, error) {
 	var sessions []models.InterviewSession
-	query := r.db.Order("created_at DESC")
+	query := r.db.Order("interview_sessions.created_at DESC")
+	if schoolID != nil {
+		query = query.Joins("JOIN users ON users.id = interview_sessions.user_id").
+			Where("users.school_id = ?", *schoolID)
+	}
 	if limit > 0 {
 		query = query.Limit(limit).Offset(offset)
 	}
@@ -64,9 +70,14 @@ func (r *InterviewSessionRepository) CountByUser(userID uint) (int64, error) {
 	return count, err
 }
 
-func (r *InterviewSessionRepository) CountAll() (int64, error) {
+func (r *InterviewSessionRepository) CountAll(schoolID *uint) (int64, error) {
 	var count int64
-	err := r.db.Model(&models.InterviewSession{}).Count(&count).Error
+	query := r.db.Model(&models.InterviewSession{})
+	if schoolID != nil {
+		query = query.Joins("JOIN users ON users.id = interview_sessions.user_id").
+			Where("users.school_id = ?", *schoolID)
+	}
+	err := query.Count(&count).Error
 	return count, err
 }
 

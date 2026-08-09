@@ -43,6 +43,7 @@ import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { companyAspectHref, type CompanyAspect } from '@/components/admin/CompanyAspectTabs'
 import { fetchCompanyPrimary, formatFetchPrimarySummary, formatFetchPrimaryEmptyAspects, hasActionableSoftEmpty } from '@/lib/admin-company-fetch'
 import { resolveIndustryFieldProfile } from '@/lib/admin-company-field-profile'
+import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
 
 const PAGE_SIZE = 50
 /** 並列取得（Backend concurrency=4）前提。タイムアウト回避のため上限は控えめ */
@@ -192,6 +193,9 @@ export default function AdminCompaniesPage() {
   const [menuAnchor, setMenuAnchor] = useState<{ el: HTMLElement; company: Company } | null>(null)
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [bulkPublishing, setBulkPublishing] = useState(false)
+  const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
+  const [approvedCompanyIds, setApprovedCompanyIds] = useState<Set<number>>(new Set())
+  const [approvalBusyId, setApprovalBusyId] = useState<number | null>(null)
 
   const fetchCoverage = useCallback(async () => {
     const res = await fetch('/api/admin/companies/l1-coverage', {
@@ -221,6 +225,7 @@ export default function AdminCompaniesPage() {
       industry: string,
       readiness: FilterReadiness,
       groupIndustry: boolean,
+      schoolFilter?: number,
     ) => {
       setError('')
       const offset = (p - 1) * PAGE_SIZE
@@ -234,6 +239,8 @@ export default function AdminCompaniesPage() {
       if (industry) params.set('industry', industry)
       if (readiness !== 'all') params.set('readiness', readiness)
       if (groupIndustry) params.set('order', 'industry')
+      // 企業カタログは共有のため一覧自体は絞り込まない。schoolFilterは承認トグルの対象校選択にのみ使う。
+      void schoolFilter
       const res = await fetch(`/api/admin/companies?${params}`, {
         headers: authService.getAdminFetchHeaders(),
         cache: 'no-store',
@@ -261,12 +268,12 @@ export default function AdminCompaniesPage() {
   }, [searchInput])
 
   useEffect(() => {
-    void fetchCompanies(page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry)
-  }, [fetchCompanies, page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry])
+    void fetchCompanies(page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry, schoolId)
+  }, [fetchCompanies, page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry, schoolId])
 
   useEffect(() => {
     setSelectedIds([])
-  }, [page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry])
+  }, [page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry, schoolId])
 
   useEffect(() => {
     // 取得後に情報が足りなくなった選択は外す（中身が同じなら state を更新しない）
@@ -285,12 +292,51 @@ export default function AdminCompaniesPage() {
     void fetchIndustries()
   }, [fetchCoverage, fetchIndustries])
 
+  useEffect(() => {
+    if (schoolId === undefined) {
+      setApprovedCompanyIds(new Set())
+      return
+    }
+    let cancelled = false
+    fetch(`/api/admin/schools/${schoolId}/company-approvals`, {
+      headers: authService.getAdminFetchHeaders(),
+      cache: 'no-store',
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled) setApprovedCompanyIds(new Set(data?.company_ids || []))
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [schoolId])
+
+  const toggleCompanyApproval = async (companyId: number, approved: boolean) => {
+    if (schoolId === undefined) return
+    setApprovalBusyId(companyId)
+    try {
+      const res = await fetch(`/api/admin/schools/${schoolId}/company-approvals${approved ? `/${companyId}` : ''}`, {
+        method: approved ? 'DELETE' : 'POST',
+        headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
+        body: approved ? undefined : JSON.stringify({ company_id: companyId }),
+      })
+      if (!res.ok) return
+      setApprovedCompanyIds((prev) => {
+        const next = new Set(prev)
+        if (approved) next.delete(companyId)
+        else next.add(companyId)
+        return next
+      })
+    } finally {
+      setApprovalBusyId(null)
+    }
+  }
+
   const handlePageChange = (_: React.ChangeEvent<unknown>, value: number) => {
     setPage(value)
   }
 
   const reloadCurrentList = async () => {
-    await fetchCompanies(page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry)
+    await fetchCompanies(page, searchName, filterStatus, filterIndustry, filterReadiness, groupByIndustry, schoolId)
     await fetchIndustries()
   }
 
@@ -777,6 +823,7 @@ export default function AdminCompaniesPage() {
                   ))}
                 </Select>
               </FormControl>
+              <SchoolFilterSelect value={schoolId} onChange={(id) => { setSchoolId(id); setPage(1) }} />
               {hasActiveFilters && (
                 <Button size="small" variant="text" onClick={resetFilters} sx={{ alignSelf: { xs: 'flex-start', sm: 'center' } }}>
                   絞り込みを解除
@@ -1039,6 +1086,17 @@ export default function AdminCompaniesPage() {
                                 {company.name}
                               </Typography>
                               <Chip label={status.label} color={status.color} size="small" />
+                              {schoolId !== undefined ? (
+                                <Chip
+                                  label={approvedCompanyIds.has(company.id) ? '承認済み' : '未承認'}
+                                  color={approvedCompanyIds.has(company.id) ? 'success' : 'default'}
+                                  variant={approvedCompanyIds.has(company.id) ? 'filled' : 'outlined'}
+                                  size="small"
+                                  disabled={approvalBusyId === company.id}
+                                  onClick={() => toggleCompanyApproval(company.id, approvedCompanyIds.has(company.id))}
+                                  sx={{ cursor: 'pointer' }}
+                                />
+                              ) : null}
                               {!groupByIndustry && industryLabel ? (
                                 <Chip
                                   size="small"

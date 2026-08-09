@@ -9,12 +9,28 @@ type contextKey string
 
 const UserIDContextKey contextKey = "userID"
 const OrganizationIDContextKey contextKey = "organizationID"
+const AdminUserIDContextKey contextKey = "adminUserID"
+const AdminSchoolFilterContextKey contextKey = "adminSchoolFilter"
 
 // OrganizationIDFromContext はコンテキストから組織IDを取り出す。
 func OrganizationIDFromContext(ctx context.Context) (uint, bool) {
 	v := ctx.Value(OrganizationIDContextKey)
 	id, ok := v.(uint)
 	return id, ok && id > 0
+}
+
+// AdminUserIDFromContext はコンテキストから認証済み管理者のユーザーIDを取り出す。
+func AdminUserIDFromContext(ctx context.Context) (uint, bool) {
+	v := ctx.Value(AdminUserIDContextKey)
+	id, ok := v.(uint)
+	return id, ok && id > 0
+}
+
+// AdminSchoolFilterFromContext はコンテキストから絞り込み対象の学校ID(nilは絞り込みなし)を取り出す。
+func AdminSchoolFilterFromContext(ctx context.Context) (*uint, bool) {
+	v := ctx.Value(AdminSchoolFilterContextKey)
+	filter, ok := v.(*uint)
+	return filter, ok
 }
 
 // GenerateUserToken はJWTユーザートークンを生成する

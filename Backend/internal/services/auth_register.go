@@ -121,6 +121,7 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 		IsGuest:                  false,
 		TargetLevel:              req.TargetLevel,
 		SchoolName:               req.SchoolName,
+		SchoolID:                 s.resolveSchoolID(req.SchoolName),
 		IsAdmin:                  false,
 		CertificationsAcquired:   req.CertificationsAcquired,
 		CertificationsInProgress: req.CertificationsInProgress,
