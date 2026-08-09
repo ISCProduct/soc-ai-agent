@@ -1,15 +1,9 @@
 import { NextRequest } from 'next/server'
+import { extractUserAuthHeaders } from '@/lib/api-proxy'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
 export const dynamic = 'force-dynamic'
-
-function userHeaders(request: NextRequest): Record<string, string> {
-  return {
-    'X-User-ID': request.headers.get('X-User-ID') || '',
-    'X-User-Token': request.headers.get('X-User-Token') || '',
-  }
-}
 
 export async function POST(request: NextRequest) {
   const { searchParams } = new URL(request.url)
@@ -24,7 +18,7 @@ export async function POST(request: NextRequest) {
     `${BACKEND_URL}/api/resume/review/stream?document_id=${documentId}`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...userHeaders(request) },
+      headers: { 'Content-Type': 'application/json', ...extractUserAuthHeaders(request) },
       body: body || undefined,
     }
   )

@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	oauthStateCookieName = "oauth_state"
-	oauthStateTTL        = 10 * time.Minute // OAuth フローは10分以内に完了すべき
+	oauthStateCookieName  = "oauth_state"
+	oauthStateTTL         = 10 * time.Minute // OAuth フローは10分以内に完了すべき
+	oauthTenantCookieName = "oauth_tenant_slug"
 )
 
 // GenerateOAuthState はランダムな state 値を生成し、HMAC 署名付き Cookie にセットして state 文字列を返す。
@@ -67,6 +68,42 @@ func VerifyOAuthState(w http.ResponseWriter, r *http.Request) bool {
 	// Cookie の値は "state.signature" 形式
 	expected := signState(stateParam)
 	return hmac.Equal([]byte(cookie.Value), []byte(expected))
+}
+
+// SetOAuthTenantSlug はOAuthフロー開始時に学園サブドメインslugを使い捨てCookieへ保存する。
+// state Cookieと同様、ブラウザのOAuthプロバイダ往復をまたいでテナント情報を引き継ぐために使う。
+func SetOAuthTenantSlug(w http.ResponseWriter, slug string) {
+	if slug == "" {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     oauthTenantCookieName,
+		Value:    slug,
+		Path:     "/",
+		MaxAge:   int(oauthStateTTL.Seconds()),
+		HttpOnly: true,
+		Secure:   os.Getenv("APP_ENV") == "production",
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// ConsumeOAuthTenantSlug はOAuthコールバック時にテナントslug Cookieを読み取り、削除する（使い捨て）。
+// Cookieが無ければ空文字を返す（テナント制約なしのOAuthフロー）。
+func ConsumeOAuthTenantSlug(w http.ResponseWriter, r *http.Request) string {
+	cookie, err := r.Cookie(oauthTenantCookieName)
+	http.SetCookie(w, &http.Cookie{
+		Name:     oauthTenantCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   os.Getenv("APP_ENV") == "production",
+		SameSite: http.SameSiteLaxMode,
+	})
+	if err != nil {
+		return ""
+	}
+	return cookie.Value
 }
 
 // signState は state 値を HMAC-SHA256 で署名し "state.signature" 形式の文字列を返す

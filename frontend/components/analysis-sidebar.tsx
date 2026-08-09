@@ -241,6 +241,11 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         <Typography variant="subtitle2" noWrap sx={{fontWeight: 600}}>
                             {user.name}
                         </Typography>
+                        {user.school_name && (
+                            <Typography variant="caption" noWrap color="text.secondary" sx={{display: 'block'}}>
+                                {user.school_name}
+                            </Typography>
+                        )}
                         {user.is_guest && (
                             <Chip label="ゲスト" size="small" sx={{height: 18, fontSize: '0.7rem'}}/>
                         )}

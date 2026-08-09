@@ -158,10 +158,11 @@ module "alb" {
   route53_zone_id      = data.aws_route53_zone.selected.zone_id
   frontend_domain_name = local.frontend_domain
   backend_domain_name  = local.backend_domain
-  frontend_target_port = 3000
-  backend_target_port  = 8080
-  target_type          = "ip"
-  tags                 = local.tags
+  frontend_target_port        = 3000
+  backend_target_port         = 8080
+  target_type                 = "ip"
+  additional_certificate_sans = ["*.${var.domain_name}"]
+  tags                        = local.tags
 }
 
 module "backend" {
@@ -231,6 +232,19 @@ resource "aws_route53_record" "frontend" {
 resource "aws_route53_record" "backend" {
   zone_id = data.aws_route53_zone.selected.zone_id
   name    = local.backend_domain
+  type    = "A"
+
+  alias {
+    name                   = module.alb.alb_dns_name
+    zone_id                = module.alb.alb_zone_id
+    evaluate_target_health = true
+  }
+}
+
+# 学園ごとのマルチテナントサブドメイン（<学園名>.shukatsu-ai.jp）をワイルドカードでまとめて受ける
+resource "aws_route53_record" "wildcard" {
+  zone_id = data.aws_route53_zone.selected.zone_id
+  name    = "*.${var.domain_name}"
   type    = "A"
 
   alias {

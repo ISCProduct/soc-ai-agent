@@ -65,7 +65,8 @@ func (s *AuthService) ValidateRegistrationToken(token string) (string, error) {
 }
 
 // Register 新規ユーザー登録
-func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
+// tenantOrgID はHostサブドメインから解決された組織ID（0の場合はデフォルト組織へ所属）。
+func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint) (*AuthResponse, error) {
 	// バリデーション
 	if req.Email == "" || req.Password == "" {
 		return nil, errors.New("email and password are required")
@@ -124,6 +125,7 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 		IsAdmin:                  false,
 		CertificationsAcquired:   req.CertificationsAcquired,
 		CertificationsInProgress: req.CertificationsInProgress,
+		OrganizationID:           tenantOrgID,
 	}
 
 	// メール認証トークン生成（有効期限 24 時間）（#330）
