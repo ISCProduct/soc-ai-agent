@@ -8,7 +8,7 @@ locals {
   backend_domain  = "api.${var.domain_name}"
 
   backend_secret_arns = compact(concat(
-    [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn],
+    [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn, aws_secretsmanager_secret.email.arn],
     var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
     var.additional_secret_arns
   ))
@@ -59,6 +59,12 @@ locals {
         name      = "GITHUB_CLIENT_SECRET"
         valueFrom = "${aws_secretsmanager_secret.oauth.arn}:github_client_secret::"
       }
+    ],
+    [
+      {
+        name      = "RESEND_API_KEY"
+        valueFrom = "${aws_secretsmanager_secret.email.arn}:resend_api_key::"
+      }
     ]
   )
 }
@@ -76,6 +82,19 @@ resource "aws_secretsmanager_secret_version" "oauth" {
     google_client_secret = var.google_client_secret
     github_client_id     = var.github_client_id
     github_client_secret = var.github_client_secret
+  })
+}
+
+# Resend(メール送信)APIキー(#756: EMAIL_PROVIDER未設定でもRESEND_API_KEYがあれば自動選択される)
+resource "aws_secretsmanager_secret" "email" {
+  name = "${var.project_name}/email"
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "email" {
+  secret_id = aws_secretsmanager_secret.email.id
+  secret_string = jsonencode({
+    resend_api_key = var.resend_api_key
   })
 }
 

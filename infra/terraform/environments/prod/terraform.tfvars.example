@@ -14,6 +14,9 @@ frontend_image = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:l
 # 本番用 OpenAI キーの Secrets Manager ARN
 # openai_secret_arn = "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:prod/openai/api-key-xxxxxx"
 
+# Resend(メール送信)APIキー(#756)
+# resend_api_key = "re_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
 # 可能なら社内/VPN CIDR に制限する
 # allowed_http_cidrs = ["x.x.x.x/32"]
 

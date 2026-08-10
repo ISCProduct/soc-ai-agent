@@ -128,6 +128,13 @@ variable "github_client_secret" {
   default   = ""
 }
 
+variable "resend_api_key" {
+  type        = string
+  description = "Resend(メール送信)のAPIキー(#756)"
+  sensitive   = true
+  default     = ""
+}
+
 variable "additional_secret_arns" {
   type        = list(string)
   description = "Extra secret ARNs the backend execution role may read"
