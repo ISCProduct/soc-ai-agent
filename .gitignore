@@ -3,6 +3,7 @@
 .env.local
 .env.production
 .env.*.local
+.backlog.env
 
 # Terraform（シークレットを含む可能性があるため管理外）
 *.tfvars
