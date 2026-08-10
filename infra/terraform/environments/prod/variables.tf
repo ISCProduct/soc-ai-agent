@@ -104,6 +104,30 @@ variable "openai_secret_arn" {
   default     = ""
 }
 
+variable "google_client_id" {
+  type        = string
+  description = "Google OAuthクライアントID。コールバックURL https://api.<domain_name>/api/auth/google/callback をGoogle Cloud Console側で許可しておくこと"
+  default     = ""
+}
+
+variable "google_client_secret" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "github_client_id" {
+  type        = string
+  description = "GitHub OAuth AppのクライアントID。コールバックURL https://api.<domain_name>/api/auth/github/callback をGitHub側で許可しておくこと"
+  default     = ""
+}
+
+variable "github_client_secret" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
 variable "additional_secret_arns" {
   type        = list(string)
   description = "Extra secret ARNs the backend execution role may read"

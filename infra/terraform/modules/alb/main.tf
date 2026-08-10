@@ -18,7 +18,7 @@ resource "aws_lb_target_group" "frontend" {
   target_type = var.target_type
 
   health_check {
-    path                = var.health_check_path
+    path                = var.frontend_health_check_path
     matcher             = "200"
     healthy_threshold   = 2
     unhealthy_threshold = 3

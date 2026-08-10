@@ -8,7 +8,7 @@ locals {
   backend_domain  = "api.${var.domain_name}"
 
   backend_secret_arns = compact(concat(
-    [module.secrets.db_secret_arn],
+    [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn],
     var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
     var.additional_secret_arns
   ))
@@ -41,8 +41,42 @@ locals {
         name      = "OPENAI_API_KEY"
         valueFrom = var.openai_secret_arn
       }
-    ] : []
+    ] : [],
+    [
+      {
+        name      = "GOOGLE_CLIENT_ID"
+        valueFrom = "${aws_secretsmanager_secret.oauth.arn}:google_client_id::"
+      },
+      {
+        name      = "GOOGLE_CLIENT_SECRET"
+        valueFrom = "${aws_secretsmanager_secret.oauth.arn}:google_client_secret::"
+      },
+      {
+        name      = "GITHUB_CLIENT_ID"
+        valueFrom = "${aws_secretsmanager_secret.oauth.arn}:github_client_id::"
+      },
+      {
+        name      = "GITHUB_CLIENT_SECRET"
+        valueFrom = "${aws_secretsmanager_secret.oauth.arn}:github_client_secret::"
+      }
+    ]
   )
+}
+
+# Google/GitHub OAuthクライアント認証情報(DB同様、Secrets Managerで管理しECSタスク実行ロール経由で注入)
+resource "aws_secretsmanager_secret" "oauth" {
+  name = "${var.project_name}/oauth"
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "oauth" {
+  secret_id = aws_secretsmanager_secret.oauth.id
+  secret_string = jsonencode({
+    google_client_id     = var.google_client_id
+    google_client_secret = var.google_client_secret
+    github_client_id     = var.github_client_id
+    github_client_secret = var.github_client_secret
+  })
 }
 
 module "network" {
@@ -183,8 +217,13 @@ module "frontend" {
   target_group_arn  = module.alb.frontend_target_group_arn
   region            = var.region
   environment = {
-    APP_ENV                  = "production"
-    NEXT_PUBLIC_API_BASE_URL = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
+    APP_ENV = "production"
+    # NEXT_PUBLIC_*はクライアントバンドルにビルド時埋め込みされるため実行時のこの値では
+    # login-page.tsx等のクライアントコードには効かない(GitHub Actions側のdocker build
+    # --build-argで焼き込む必要がある)。ここではサーバー側コード(middleware.tsの
+    # セッションリフレッシュ等)がprocess.envを実行時に読む経路のために設定する。
+    BACKEND_URL              = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
+    NEXT_PUBLIC_BACKEND_URL  = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
   }
   tags = local.tags
 }

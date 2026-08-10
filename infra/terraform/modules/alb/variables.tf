@@ -53,8 +53,14 @@ variable "target_type" {
 
 variable "health_check_path" {
   type        = string
-  description = "frontend/backend共通のヘルスチェックパス（両サービスとも /healthz を実装済み）"
+  description = "backend用ヘルスチェックパス（/healthz を実装済み）"
   default     = "/healthz"
+}
+
+variable "frontend_health_check_path" {
+  type        = string
+  description = "frontend用ヘルスチェックパス（Next.jsは/api/healthzにのみ実装、/healthzは404になるため別変数）"
+  default     = "/api/healthz"
 }
 
 variable "tags" {
