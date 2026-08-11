@@ -1,5 +1,9 @@
 # OCI Terraform 環境
 
+> **方針 (2026-08-05):** アプリケーション **staging の正は AWS**（`../staging`）です。  
+> 本 OCI 環境は **現行では使いません**（アーカイブ候補）。  
+> 詳細: [`docs/architecture/infra-decision-oci-stg-aws-prod.md`](../../../docs/architecture/infra-decision-oci-stg-aws-prod.md)
+
 Oracle Cloud Infrastructure (OCI) へのインフラデプロイ用 Terraform 設定。
 
 ## 構成リソース

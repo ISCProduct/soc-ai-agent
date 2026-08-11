@@ -1,16 +1,15 @@
 locals {
   tags = {
     Project = "soc-ai-agent"
-    Env     = "production"
+    Env     = "staging"
   }
 
-  frontend_domain = var.domain_name
-  backend_domain  = "api.${var.domain_name}"
+  frontend_domain = "${var.staging_subdomain}.${var.domain_name}"
+  backend_domain  = "${var.staging_api_subdomain}.${var.domain_name}"
 
-  ecr_backend_url  = var.manage_ecr ? module.ecr[0].repository_urls["soc-backend"] : data.aws_ecr_repository.backend[0].repository_url
-  ecr_frontend_url = var.manage_ecr ? module.ecr[0].repository_urls["soc-frontend"] : data.aws_ecr_repository.frontend[0].repository_url
-  backend_image    = var.backend_image != "" ? var.backend_image : "${local.ecr_backend_url}:${var.image_tag}"
-  frontend_image   = var.frontend_image != "" ? var.frontend_image : "${local.ecr_frontend_url}:${var.image_tag}"
+  # 空なら Terraform 作成の ECR + image_tag を使う
+  backend_image  = var.backend_image != "" ? var.backend_image : "${module.ecr.repository_urls["soc-backend"]}:${var.image_tag}"
+  frontend_image = var.frontend_image != "" ? var.frontend_image : "${module.ecr.repository_urls["soc-frontend"]}:${var.image_tag}"
 
   backend_secret_arns = compact(concat(
     [module.secrets.db_secret_arn],
@@ -58,53 +57,39 @@ module "network" {
   azs                 = var.azs
   public_subnet_cidrs = var.public_subnet_cidrs
   allowed_http_cidrs  = var.allowed_http_cidrs
+  enable_ssh          = var.enable_ssh
+  allowed_ssh_cidrs   = var.allowed_ssh_cidrs
   enable_alb          = true
   alb_ingress_cidrs   = var.allowed_http_cidrs
   tags                = local.tags
 }
 
-# 同一アカウントでは staging で ECR を作成済み想定（manage_ecr=false）。
-# 別アカウントの本番だけ true にする。
 module "ecr" {
-  count  = var.manage_ecr ? 1 : 0
   source = "../../modules/ecr"
 
   repository_names     = var.ecr_repository_names
-  force_delete         = false
+  force_delete         = var.ecr_force_delete
   lifecycle_keep_count = var.ecr_lifecycle_keep_count
   tags                 = local.tags
-}
-
-data "aws_ecr_repository" "backend" {
-  count = var.manage_ecr ? 0 : 1
-  name  = "soc-backend"
-}
-
-data "aws_ecr_repository" "frontend" {
-  count = var.manage_ecr ? 0 : 1
-  name  = "soc-frontend"
 }
 
 module "s3" {
   source = "../../modules/s3"
 
   project_name  = var.project_name
-  force_destroy = false
+  force_destroy = true
   tags          = local.tags
 }
 
 module "rds" {
   source = "../../modules/rds"
 
-  project_name            = var.project_name
-  subnet_ids              = module.network.public_subnet_ids
-  security_group_ids      = [module.network.rds_security_group_id]
-  instance_class          = var.db_instance_class
-  db_name                 = var.db_name
-  deletion_protection     = var.rds_deletion_protection
-  skip_final_snapshot     = var.rds_skip_final_snapshot
-  backup_retention_period = var.rds_backup_retention_period
-  tags                    = local.tags
+  project_name       = var.project_name
+  subnet_ids         = module.network.public_subnet_ids
+  security_group_ids = [module.network.rds_security_group_id]
+  instance_class     = var.db_instance_class
+  db_name            = var.db_name
+  tags               = local.tags
 }
 
 module "secrets" {
@@ -119,28 +104,17 @@ module "secrets" {
   tags         = local.tags
 }
 
-# Fargateはインスタンス/ASGを持たないため、クラスタはこの1リソースのみ
-resource "aws_ecs_cluster" "this" {
-  name = var.project_name
+module "ecs_cluster" {
+  source = "../../modules/ecs_cluster"
 
-  setting {
-    name  = "containerInsights"
-    value = "disabled"
-  }
-
-  tags = merge(local.tags, {
-    Name = var.project_name
-  })
-}
-
-resource "aws_ecs_cluster_capacity_providers" "this" {
-  cluster_name       = aws_ecs_cluster.this.name
-  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
-
-  default_capacity_provider_strategy {
-    capacity_provider = "FARGATE"
-    weight            = 1
-  }
+  project_name      = var.project_name
+  subnet_ids        = module.network.public_subnet_ids
+  security_group_id = module.network.ecs_security_group_id
+  instance_type     = var.instance_type
+  desired_capacity  = 1
+  min_size          = 1
+  max_size          = 2
+  tags              = local.tags
 }
 
 # --- ドメイン紐付け（既存 Route53 ホストゾーンを使用） ---
@@ -160,32 +134,29 @@ module "alb" {
   backend_domain_name  = local.backend_domain
   frontend_target_port = 3000
   backend_target_port  = 8080
-  target_type          = "ip"
+  target_type          = "instance"
   tags                 = local.tags
 }
 
 module "backend" {
-  source = "../../modules/ecs_service_fargate"
+  source = "../../modules/ecs_service"
 
-  project_name      = var.project_name
-  service_name      = "backend"
-  cluster_id        = aws_ecs_cluster.this.id
-  subnet_ids        = module.network.public_subnet_ids
-  security_group_id = module.network.fargate_security_group_id
-  assign_public_ip  = true
-  container_name    = "soc-backend"
-  container_image   = local.backend_image
-  container_port    = 8080
-  cpu               = var.backend_cpu
-  memory            = var.backend_memory
-  desired_count     = var.backend_desired_count
-  target_group_arn  = module.alb.backend_target_group_arn
-  region            = var.region
-  s3_bucket_arn     = module.s3.bucket_arn
-  secret_arns       = local.backend_secret_arns
-  secrets           = local.backend_secrets
+  project_name           = var.project_name
+  service_name           = "backend"
+  cluster_id             = module.ecs_cluster.cluster_id
+  capacity_provider_name = module.ecs_cluster.capacity_provider_name
+  container_name         = "soc-backend"
+  container_image        = local.backend_image
+  container_port         = 8080
+  target_group_arn       = module.alb.backend_target_group_arn
+  cpu                    = 256
+  memory                 = 512
+  region                 = var.region
+  s3_bucket_arn          = module.s3.bucket_arn
+  secret_arns            = local.backend_secret_arns
+  secrets                = local.backend_secrets
   environment = {
-    APP_ENV       = "production"
+    APP_ENV       = "staging"
     AWS_REGION    = var.region
     AWS_S3_BUCKET = module.s3.bucket_id
   }
@@ -193,24 +164,21 @@ module "backend" {
 }
 
 module "frontend" {
-  source = "../../modules/ecs_service_fargate"
+  source = "../../modules/ecs_service"
 
-  project_name      = var.project_name
-  service_name      = "frontend"
-  cluster_id        = aws_ecs_cluster.this.id
-  subnet_ids        = module.network.public_subnet_ids
-  security_group_id = module.network.fargate_security_group_id
-  assign_public_ip  = true
-  container_name    = "soc-frontend"
-  container_image   = local.frontend_image
-  container_port    = 3000
-  cpu               = var.frontend_cpu
-  memory            = var.frontend_memory
-  desired_count     = var.frontend_desired_count
-  target_group_arn  = module.alb.frontend_target_group_arn
-  region            = var.region
+  project_name           = var.project_name
+  service_name           = "frontend"
+  cluster_id             = module.ecs_cluster.cluster_id
+  capacity_provider_name = module.ecs_cluster.capacity_provider_name
+  container_name         = "soc-frontend"
+  container_image        = local.frontend_image
+  container_port         = 3000
+  target_group_arn       = module.alb.frontend_target_group_arn
+  cpu                    = 256
+  memory                 = 512
+  region                 = var.region
   environment = {
-    APP_ENV                  = "production"
+    APP_ENV                  = "staging"
     NEXT_PUBLIC_API_BASE_URL = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
   }
   tags = local.tags
