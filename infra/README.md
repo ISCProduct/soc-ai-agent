@@ -4,8 +4,8 @@
 
 | 環境 | 場所 | 備考 |
 |------|------|------|
-| **staging** | `terraform/environments/staging`（**AWS ECS on EC2 + ALB**） | **常時起動**が正。ECR(`soc-backend`/`soc-frontend`)もここで作成。`stg.shukatsu-ai.jp` / `api-stg.shukatsu-ai.jp` |
-| **production** | `terraform/environments/prod`（**AWS ECS on Fargate + ALB**） | **既定は停止**。同一アカウントでは staging の ECR を参照（`manage_ecr=false`） |
+| **staging** | `terraform/environments/staging`（**AWS ECS on EC2 + ALB**） | **常時起動**が正。`stg.shukatsu-ai.jp` / `api-stg.shukatsu-ai.jp` をALB経由でHTTPS紐付け |
+| **production** | `terraform/environments/prod`（**AWS ECS on Fargate + ALB**） | **既定は停止**（`*_desired_count=0`。ALB自体は常時課金）。本番反映時に明示起動。指定日終日稼働の自動化は別タスク。`shukatsu-ai.jp` / `api.shukatsu-ai.jp` をALB経由でHTTPS紐付け |
 | OCI | `terraform/environments/oci` | **現行では使わない** |
 
 決定の詳細: [`docs/architecture/infra-decision-oci-stg-aws-prod.md`](../docs/architecture/infra-decision-oci-stg-aws-prod.md)

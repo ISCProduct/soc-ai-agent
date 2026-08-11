@@ -36,6 +36,9 @@ export function useGitHubSkills(userId: number, targetRole: string) {
   const [notLinked, setNotLinked] = useState(false)
   const [needsReauth, setNeedsReauth] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [skillsError, setSkillsError] = useState(false)
+  const [profileError, setProfileError] = useState(false)
+  const [summariesError, setSummariesError] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [summarizingRepo, setSummarizingRepo] = useState<string | null>(null)
   const [expandedRepo, setExpandedRepo] = useState<string | false>(false)
@@ -44,6 +47,9 @@ export function useGitHubSkills(userId: number, targetRole: string) {
     setLoading(true)
     setError(null)
     setNotLinked(false)
+    setSkillsError(false)
+    setProfileError(false)
+    setSummariesError(false)
     try {
       await authService.ensureFreshUserToken()
       const headers = authService.getUserFetchHeaders()
@@ -61,31 +67,42 @@ export function useGitHubSkills(userId: number, targetRole: string) {
       if (skillsRes.ok) {
         const data = await skillsRes.json()
         setScores(Array.isArray(data) ? data : [])
+      } else if (skillsRes.status !== 401) {
+        // 401（未ログイン・期限切れ）以外は取得失敗としてセクション単位でエラー表示する
+        setSkillsError(true)
       }
 
       if (profileRes.ok) {
         const data = await profileRes.json()
         setProfile(data.profile ?? null)
         setLangStats(
-          Array.isArray(data.language_stats)
-            ? sortLanguageStats(data.language_stats)
-            : [],
+            Array.isArray(data.language_stats)
+                ? sortLanguageStats(data.language_stats)
+                : [],
         )
         setRepos(Array.isArray(data.repositories) ? data.repositories : [])
       } else if (profileRes.status === 404) {
         setNotLinked(true)
+      } else if (profileRes.status !== 401) {
+        setProfileError(true)
       }
 
       if (summariesRes.ok) {
         const data = await summariesRes.json()
         setSummaries(Array.isArray(data) ? data : [])
+      } else if (summariesRes.status !== 401) {
+        setSummariesError(true)
       }
-    } catch (e) {
+} catch (e) {
       const msg = e instanceof Error ? e.message : ''
       if (msg.toLowerCase().includes('unauthorized')) {
         setError('ログインの有効期限が切れました。再ログインしてください。')
       } else {
+        // 通信障害時は各セクションを「データなし」ではなくエラー扱いにする
         setError('データの取得に失敗しました')
+        setSkillsError(true)
+        setProfileError(true)
+        setSummariesError(true)
       }
     } finally {
       setLoading(false)
@@ -178,6 +195,9 @@ export function useGitHubSkills(userId: number, targetRole: string) {
     notLinked,
     needsReauth,
     error,
+    skillsError,
+    profileError,
+    summariesError,
     connecting,
     summarizingRepo,
     expandedRepo,
@@ -186,5 +206,6 @@ export function useGitHubSkills(userId: number, targetRole: string) {
     handleConnect,
     handleSync,
     clearError,
+    refetch: fetchAll,
   }
 }

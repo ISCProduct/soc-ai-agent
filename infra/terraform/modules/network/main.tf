@@ -102,17 +102,6 @@ resource "aws_security_group" "ecs" {
     }
   }
 
-  dynamic "ingress" {
-    for_each = var.enable_ssh ? [1] : []
-    content {
-      description = "SSH"
-      from_port   = 22
-      to_port     = 22
-      protocol    = "tcp"
-      cidr_blocks = var.allowed_ssh_cidrs
-    }
-  }
-
   egress {
     from_port   = 0
     to_port     = 0
@@ -125,18 +114,25 @@ resource "aws_security_group" "ecs" {
   })
 }
 
+# ponytail: SSHはインラインingressにせず別リソース化。aws_security_groupのインラインingressと
+# aws_security_group_ruleを同一SGに混在させると、インライン側が「正」として扱われ、
+# apply毎に別リソースで追加したルール(ALBからのアクセス等)が消される既知の問題があるため。
+resource "aws_security_group_rule" "ecs_ssh" {
+  count = var.enable_ssh ? 1 : 0
+
+  type              = "ingress"
+  description       = "SSH"
+  from_port         = 22
+  to_port           = 22
+  protocol          = "tcp"
+  cidr_blocks       = var.allowed_ssh_cidrs
+  security_group_id = aws_security_group.ecs.id
+}
+
 resource "aws_security_group" "rds" {
   name        = "${var.project_name}-rds-sg"
   description = "RDS MySQL - ECS hosts only"
   vpc_id      = aws_vpc.this.id
-
-  ingress {
-    description     = "MySQL from ECS"
-    from_port       = 3306
-    to_port         = 3306
-    protocol        = "tcp"
-    security_groups = [aws_security_group.ecs.id]
-  }
 
   egress {
     from_port   = 0
@@ -148,6 +144,17 @@ resource "aws_security_group" "rds" {
   tags = merge(var.tags, {
     Name = "${var.project_name}-rds-sg"
   })
+}
+
+# 上のecs_ssh同様、インラインingressとの混在を避けるため別リソース化
+resource "aws_security_group_rule" "rds_from_ecs" {
+  type                     = "ingress"
+  description              = "MySQL from ECS"
+  from_port                = 3306
+  to_port                  = 3306
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.rds.id
+  source_security_group_id = aws_security_group.ecs.id
 }
 
 # --- ALB + Fargate 向け（enable_alb=true のときだけ作成。EC2/ALBなしのstagingには影響しない） ---
