@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, Suspense } from 'react'
+import { useEffect, useState, Suspense, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { interviewLimits } from '@/lib/interview'
@@ -42,6 +42,8 @@ function InterviewContent() {
   // Selection screen state
   const [allCompanies, setAllCompanies] = useState<InterviewCompany[]>([])
   const [companiesLoading, setCompaniesLoading] = useState(false)
+  const [companiesLoadError, setCompaniesLoadError] = useState<string | null>(null)
+  const [companiesRefreshKey, setCompaniesRefreshKey] = useState(0)
   const [companySearch, setCompanySearch] = useState('')
   const [companySourceTab, setCompanySourceTab] = useState<'db' | 'web'>('db')
   const [webSearchResults, setWebSearchResults] = useState<{ name: string; description: string }[]>([])
@@ -118,27 +120,39 @@ function InterviewContent() {
     if (status === 'finished') clearInterviewLobbyDraft()
   }, [status])
 
+  const retryCompaniesLoad = useCallback(() => {
+    setCompaniesRefreshKey(k => k + 1)
+  }, [])
+
   // Load company list for selection screen (initial fetch + debounced search)
   useEffect(() => {
     if (loading || companySourceTab !== 'db') return
     let cancelled = false
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       setCompaniesLoading(true)
-      const params = new URLSearchParams({ limit: '50', offset: '0' })
-      if (companySearch.trim()) params.set('name', companySearch.trim())
-      fetch(`/api/companies?${params}`, { cache: 'no-store' })
-        .then(r => r.ok ? r.json() : null)
-        .then(data => {
-          if (cancelled) return
-          const list: InterviewCompany[] = Array.isArray(data?.companies) ? data.companies : []
-          setAllCompanies(list)
-          if (list.length > 0 && !interviewCompany) setInterviewCompany(list[0])
-        })
-        .catch(() => { /* ignore */ })
-        .finally(() => { if (!cancelled) setCompaniesLoading(false) })
+      setCompaniesLoadError(null)
+      try {
+        const params = new URLSearchParams({ limit: '50', offset: '0' })
+        if (companySearch.trim()) params.set('name', companySearch.trim())
+        const r = await fetch(`/api/companies?${params}`, { cache: 'no-store' })
+        if (cancelled) return
+        if (!r.ok) throw new Error('企業一覧の取得に失敗しました')
+        const data = await r.json()
+        const list: InterviewCompany[] = Array.isArray(data?.companies) ? data.companies : []
+        setAllCompanies(list)
+        if (list.length > 0 && !interviewCompany) setInterviewCompany(list[0])
+      } catch (e) {
+        if (cancelled) return
+        setCompaniesLoadError(
+          e instanceof Error ? e.message : '企業一覧の取得に失敗しました',
+        )
+        setAllCompanies([])
+      } finally {
+        if (!cancelled) setCompaniesLoading(false)
+      }
     }, companySearch ? 400 : 0)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [loading, companySearch, companySourceTab]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loading, companySearch, companySourceTab, companiesRefreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 企業別面接傾向ヒント取得
   useEffect(() => {
@@ -215,6 +229,8 @@ function InterviewContent() {
         allCompanies={allCompanies}
         setAllCompanies={setAllCompanies}
         companiesLoading={companiesLoading}
+        companiesLoadError={companiesLoadError}
+        onRetryCompaniesLoad={retryCompaniesLoad}
         webSearchResults={webSearchResults}
         setWebSearchResults={setWebSearchResults}
         webSearchLoading={webSearchLoading}

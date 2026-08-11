@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, Suspense, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Box,
@@ -62,6 +62,7 @@ function ApplicationsContent() {
 
   const [applications, setApplications] = useState<Application[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editStatus, setEditStatus] = useState('')
   const [editNotes, setEditNotes] = useState('')
@@ -72,30 +73,33 @@ function ApplicationsContent() {
     severity: 'success',
   })
 
+  const loadApplications = useCallback(async () => {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const res = await fetch('/api/applications', {
+        headers: authService.getUserFetchHeaders(),
+        cache: 'no-store',
+      })
+      if (!res.ok) throw new Error('取得失敗')
+      const data = await res.json()
+      setApplications(data.applications || [])
+    } catch {
+      setLoadError('応募データの取得に失敗しました')
+      setApplications([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     const user = authService.getStoredUser()
     if (!user || user.is_guest) {
       router.replace('/login')
       return
     }
-
-    const load = async () => {
-      try {
-        const res = await fetch('/api/applications', {
-          headers: authService.getUserFetchHeaders(),
-          cache: 'no-store',
-        })
-        if (!res.ok) throw new Error('取得失敗')
-        const data = await res.json()
-        setApplications(data.applications || [])
-      } catch {
-        setSnackbar({ open: true, message: '応募データの取得に失敗しました', severity: 'error' })
-      } finally {
-        setLoading(false)
-      }
-    }
-    void load()
-  }, [router])
+    void loadApplications()
+  }, [router, loadApplications])
 
   const startEdit = (app: Application) => {
     setEditingId(app.id)
@@ -152,7 +156,14 @@ function ApplicationsContent() {
         </Typography>
       </Stack>
 
-      {applications.length === 0 ? (
+      {loadError ? (
+        <Paper sx={{ p: 4, textAlign: 'center' }}>
+          <Alert severity="error" sx={{ mb: 2 }}>{loadError}</Alert>
+          <Button variant="contained" onClick={() => void loadApplications()}>
+            再試行
+          </Button>
+        </Paper>
+      ) : applications.length === 0 ? (
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <Typography color="text.secondary">応募した企業はまだありません</Typography>
           <Button variant="contained" sx={{ mt: 2 }} onClick={() => router.push(getResultsPathOrChat())}>
