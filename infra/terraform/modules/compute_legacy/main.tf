@@ -47,12 +47,12 @@ resource "aws_iam_instance_profile" "ec2" {
 }
 
 resource "aws_instance" "app" {
-  ami                  = data.aws_ami.ubuntu.id
-  instance_type        = var.instance_type
-  subnet_id            = var.subnet_id
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = var.instance_type
+  subnet_id              = var.subnet_id
   vpc_security_group_ids = [var.security_group_id]
-  key_name             = var.key_name
-  iam_instance_profile = aws_iam_instance_profile.ec2.name
+  key_name               = var.key_name
+  iam_instance_profile   = aws_iam_instance_profile.ec2.name
 
   root_block_device {
     volume_size = 20

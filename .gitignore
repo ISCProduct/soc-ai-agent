@@ -8,8 +8,11 @@
 # Terraform（シークレットを含む可能性があるため管理外）
 *.tfvars
 *.tfvars.json
+backend.hcl
 .terraform/
 .terraform.lock.hcl
+*.plan
+stg.plan
 *.tfstate
 *.tfstate.backup
 *.tfplan

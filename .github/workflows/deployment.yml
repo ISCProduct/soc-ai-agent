@@ -54,6 +54,8 @@ jobs:
         working-directory: ./frontend
         run: |
           docker buildx build --platform linux/amd64 \
+            --build-arg NODE_ENV=production \
+            --build-arg NEXT_PUBLIC_BACKEND_URL=https://api.shukatsu-ai.jp \
             -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG \
             --push .
 
