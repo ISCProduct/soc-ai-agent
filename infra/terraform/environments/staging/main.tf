@@ -240,6 +240,12 @@ resource "aws_autoscaling_group" "app" {
     strategy = "Rolling"
   }
 
+  # デプロイ後1時間で自動停止/次回デプロイ時に自動起動する運用のため、
+  # CIが変更するdesired_capacityをterraform applyで巻き戻さない
+  lifecycle {
+    ignore_changes = [desired_capacity]
+  }
+
   tag {
     key                 = "Name"
     value               = "${var.project_name}-app"
