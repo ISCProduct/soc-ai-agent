@@ -117,11 +117,6 @@ jobs:
               cd /opt/app
               docker compose pull
               docker compose up -d
-              sleep 10
-              echo "=== compose ps ==="
-              docker compose ps
-              echo "=== backend logs ==="
-              docker logs --tail 100 app-backend-1
             '
 
       - name: Revoke runner IP for SSH
