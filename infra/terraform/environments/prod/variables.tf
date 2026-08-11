@@ -90,40 +90,48 @@ variable "rds_backup_retention_period" {
 
 variable "backend_image" {
   type        = string
-  description = "上書き用。空なら ECR + image_tag"
-  default     = ""
+  description = "ECR image URI for backend (tag included)"
 }
 
 variable "frontend_image" {
   type        = string
-  description = "上書き用。空なら ECR + image_tag"
-  default     = ""
-}
-
-variable "image_tag" {
-  type    = string
-  default = "latest"
-}
-
-variable "manage_ecr" {
-  type        = bool
-  description = "true でこのスタックが ECR を作成。同一アカウントでは false（staging 作成分を参照）"
-  default     = false
-}
-
-variable "ecr_repository_names" {
-  type    = list(string)
-  default = ["soc-backend", "soc-frontend"]
-}
-
-variable "ecr_lifecycle_keep_count" {
-  type    = number
-  default = 30
+  description = "ECR image URI for frontend (tag included)"
 }
 
 variable "openai_secret_arn" {
   type        = string
   description = "Secrets Manager ARN for OPENAI_API_KEY"
+  default     = ""
+}
+
+variable "google_client_id" {
+  type        = string
+  description = "Google OAuthクライアントID。コールバックURL https://api.<domain_name>/api/auth/google/callback をGoogle Cloud Console側で許可しておくこと"
+  default     = ""
+}
+
+variable "google_client_secret" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "github_client_id" {
+  type        = string
+  description = "GitHub OAuth AppのクライアントID。コールバックURL https://api.<domain_name>/api/auth/github/callback をGitHub側で許可しておくこと"
+  default     = ""
+}
+
+variable "github_client_secret" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "resend_api_key" {
+  type        = string
+  description = "Resend(メール送信)のAPIキー(#756)"
+  sensitive   = true
   default     = ""
 }
 

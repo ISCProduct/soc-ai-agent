@@ -18,7 +18,7 @@ resource "aws_lb_target_group" "frontend" {
   target_type = var.target_type
 
   health_check {
-    path                = var.health_check_path
+    path                = var.frontend_health_check_path
     matcher             = "200"
     healthy_threshold   = 2
     unhealthy_threshold = 3
@@ -56,7 +56,7 @@ resource "aws_lb_target_group" "backend" {
 
 resource "aws_acm_certificate" "this" {
   domain_name               = var.frontend_domain_name
-  subject_alternative_names = concat([var.backend_domain_name], var.additional_certificate_sans)
+  subject_alternative_names = [var.backend_domain_name]
   validation_method         = "DNS"
 
   lifecycle {

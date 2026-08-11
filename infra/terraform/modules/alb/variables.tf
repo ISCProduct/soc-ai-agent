@@ -30,12 +30,6 @@ variable "backend_domain_name" {
   description = "backend用ドメイン名（例: api.shukatsu-ai.jp / api-stg.shukatsu-ai.jp）"
 }
 
-variable "additional_certificate_sans" {
-  type        = list(string)
-  description = "証明書に追加するSAN（例: マルチテナント用ワイルドカード \"*.shukatsu-ai.jp\"）"
-  default     = []
-}
-
 variable "frontend_target_port" {
   type    = number
   default = 3000
@@ -59,8 +53,14 @@ variable "target_type" {
 
 variable "health_check_path" {
   type        = string
-  description = "frontend/backend共通のヘルスチェックパス（両サービスとも /healthz を実装済み）"
+  description = "backend用ヘルスチェックパス（/healthz を実装済み）"
   default     = "/healthz"
+}
+
+variable "frontend_health_check_path" {
+  type        = string
+  description = "frontend用ヘルスチェックパス（Next.jsは/api/healthzにのみ実装、/healthzは404になるため別変数）"
+  default     = "/api/healthz"
 }
 
 variable "tags" {

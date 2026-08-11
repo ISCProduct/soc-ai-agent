@@ -12,16 +12,15 @@
 - ECS Service: `backend` (:8080) / `frontend` (:3000)。ALB配下のため直接ポート公開はしない
 - RDS MySQL（`db.t4g.micro`）
 - S3 + Secrets Manager
-- **ECR**（`soc-backend` / `soc-frontend` を Terraform が作成）
 - Route53: `stg.<domain_name>`（frontend） / `api-stg.<domain_name>`（backend）を ALB に ALIAS レコードで紐付け（既定 `domain_name=shukatsu-ai.jp`）
 
 詳細計画: `docs/architecture/aws-terraform-staging-implementation-plan.md`
 
 ## 前提
 
-- AWS CLI 認証済み（`ap-northeast-1`）※ `aws --version` で確認。未導入なら `brew install awscli`
+- AWS CLI 認証済み（`ap-northeast-1`）
 - Terraform >= 1.5
-- 初回は **ECR 作成 → docker push → ECS が Pull 成功** の順（イメージ無しだとサービスが unhealthy）
+- ECR に backend / frontend イメージがあること
 
 ## 手順
 
@@ -34,14 +33,14 @@ terraform apply
 terraform output backend_hcl_example
 ```
 
-出力の bucket を控える。
+出力の bucket / dynamodb_table を控える。
 
 ### 2. staging の tfvars
 
 ```bash
 cd ../environments/staging
 cp terraform.tfvars.example terraform.tfvars
-# 通常は image 指定不要（ECR を TF が作り image_tag=staging を参照）
+# ACCOUNT_ID / イメージタグ / openai_secret_arn を編集
 ```
 
 `*.tfvars` は gitignore 済み。
@@ -52,7 +51,7 @@ cp terraform.tfvars.example terraform.tfvars
 
 ```bash
 cp backend.hcl.example backend.hcl
-# bucket を bootstrap 出力に合わせて編集
+# bucket / dynamodb_table を bootstrap 出力に合わせて編集
 terraform init -backend-config=backend.hcl
 ```
 
@@ -68,19 +67,6 @@ terraform init
 terraform plan -out=stg.plan
 terraform apply stg.plan
 terraform output
-terraform output -raw ecr_push_commands
-```
-
-### 5. 初回イメージ push（必須）
-
-```bash
-aws sts get-caller-identity   # Account が 508897596159 であること
-# 上記 output の ecr_push_commands に従うか、例:
-aws ecr get-login-password --region ap-northeast-1 | \
-  docker login --username AWS --password-stdin 508897596159.dkr.ecr.ap-northeast-1.amazonaws.com
-docker build -t soc-backend:local ./Backend
-docker build -t soc-frontend:local ./frontend
-# tag / push / force-new-deployment は terraform output ecr_push_commands を参照
 ```
 
 公開 URL（ALB経由・HTTPS）:
