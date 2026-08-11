@@ -45,28 +45,37 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build and push frontend image
-        working-directory: ./frontend
+      # GitHub Actionsキャッシュ(type=gha)でレイヤーを再利用しつつ、3イメージを並列ビルドする
+      - name: Build and push images (frontend/backend/rag-review, parallel)
         run: |
-          docker buildx build --platform linux/amd64 \
+          set -e
+          pids=()
+
+          (cd frontend && docker buildx build --platform linux/amd64 \
             --build-arg NODE_ENV=production \
             --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }} \
-            -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG \
-            --push .
+            --cache-from type=gha,scope=frontend-staging \
+            --cache-to type=gha,mode=max,scope=frontend-staging \
+            -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &
+          pids+=($!)
 
-      - name: Build and push backend image
-        working-directory: ./Backend
-        run: |
-          docker buildx build --platform linux/amd64 \
-            -t $ECR_REGISTRY/soc-backend:$IMAGE_TAG \
-            --push .
+          (cd Backend && docker buildx build --platform linux/amd64 \
+            --cache-from type=gha,scope=backend-staging \
+            --cache-to type=gha,mode=max,scope=backend-staging \
+            -t $ECR_REGISTRY/soc-backend:$IMAGE_TAG --push .) &
+          pids+=($!)
 
-      - name: Build and push rag-review image
-        working-directory: ./rag
-        run: |
-          docker buildx build --platform linux/amd64 \
-            -t $ECR_REGISTRY/soc-rag-review:$IMAGE_TAG \
-            --push .
+          (cd rag && docker buildx build --platform linux/amd64 \
+            --cache-from type=gha,scope=rag-staging \
+            --cache-to type=gha,mode=max,scope=rag-staging \
+            -t $ECR_REGISTRY/soc-rag-review:$IMAGE_TAG --push .) &
+          pids+=($!)
+
+          fail=0
+          for pid in "${pids[@]}"; do
+            wait "$pid" || fail=1
+          done
+          exit $fail
 
       - name: Resolve staging instance IP
         id: instance
@@ -147,21 +156,31 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build and push frontend image
-        working-directory: ./frontend
+      # GitHub Actionsキャッシュ(type=gha)でレイヤーを再利用しつつ、2イメージを並列ビルドする
+      - name: Build and push images (frontend/backend, parallel)
         run: |
-          docker buildx build --platform linux/amd64 \
+          set -e
+          pids=()
+
+          (cd frontend && docker buildx build --platform linux/amd64 \
             --build-arg NODE_ENV=production \
             --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }} \
-            -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG \
-            --push .
+            --cache-from type=gha,scope=frontend-production \
+            --cache-to type=gha,mode=max,scope=frontend-production \
+            -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &
+          pids+=($!)
 
-      - name: Build and push backend image
-        working-directory: ./Backend
-        run: |
-          docker buildx build --platform linux/amd64 \
-            -t $ECR_REGISTRY/soc-backend:$IMAGE_TAG \
-            --push .
+          (cd Backend && docker buildx build --platform linux/amd64 \
+            --cache-from type=gha,scope=backend-production \
+            --cache-to type=gha,mode=max,scope=backend-production \
+            -t $ECR_REGISTRY/soc-backend:$IMAGE_TAG --push .) &
+          pids+=($!)
+
+          fail=0
+          for pid in "${pids[@]}"; do
+            wait "$pid" || fail=1
+          done
+          exit $fail
 
       # ECS Fargateのタスク定義はTerraformが管理する。CIはTerraform applyを
       # 行わず、現在のタスク定義のimageだけ差し替えて新リビジョンを登録する
