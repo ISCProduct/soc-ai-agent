@@ -1,11 +1,17 @@
-name: Deploy Frontend & Backend to ECS (disabled)
+name: Deploy Frontend & Backend to ECS
 
 on:
+  push:
+    branches:
+      - develop
+      - main
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # develop -> staging (ECS on EC2) / main -> production (ECS on Fargate, 展示会時起動)
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
 
     env:
       AWS_REGION: ${{ secrets.AWS_REGION }}
@@ -48,6 +54,8 @@ jobs:
         working-directory: ./frontend
         run: |
           docker buildx build --platform linux/amd64 \
+            --build-arg NODE_ENV=production \
+            --build-arg NEXT_PUBLIC_BACKEND_URL=https://api.shukatsu-ai.jp \
             -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG \
             --push .
 

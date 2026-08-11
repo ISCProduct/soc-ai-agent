@@ -6,38 +6,120 @@ import (
 	"fmt"
 	"html/template"
 	"log"
-	"net/smtp"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/resend/resend-go/v3"
 )
 
-// EmailService はSMTPを介してメール送信を担うサービス。
-// SMTP_HOST 環境変数が未設定の場合は開発用フォールバックとしてログ出力のみを行う。
+// EmailService はトランザクションメール送信を担うサービス（#756）。
+// EMAIL_PROVIDER=resend|smtp|log でバックエンドを切替える。未設定時は
+// RESEND_API_KEY → SMTP_HOST → log の順で自動選択する。
 type EmailService struct {
-	host     string
-	port     int
-	user     string
-	password string
-	from     string
+	provider  string
+	from      string
+	transport mailTransport
 }
 
-// NewEmailService は環境変数からSMTP設定を読み込み EmailService を生成する。
-// SMTP_HOST が空の場合は実送信を行わず、標準出力へのログ出力のみで動作する（開発環境フォールバック）。
-// SMTP_PORT が未設定または不正値の場合はデフォルト 587 ポートを使用する。
+// NewEmailService は環境変数から送信プロバイダを解決して EmailService を生成する。
 func NewEmailService() *EmailService {
-	port, _ := strconv.Atoi(os.Getenv("SMTP_PORT"))
-	if port == 0 {
-		port = 587
+	from := firstNonEmptyEnv(
+		os.Getenv("EMAIL_FROM"),
+		os.Getenv("RESEND_FROM"),
+		os.Getenv("SMTP_FROM"),
+		"noreply@example.com",
+	)
+	provider := strings.ToLower(strings.TrimSpace(os.Getenv("EMAIL_PROVIDER")))
+	if provider == "" {
+		switch {
+		case strings.TrimSpace(os.Getenv("RESEND_API_KEY")) != "":
+			provider = "resend"
+		case strings.TrimSpace(os.Getenv("SMTP_HOST")) != "":
+			provider = "smtp"
+		default:
+			provider = "log"
+		}
 	}
-	return &EmailService{
-		host:     os.Getenv("SMTP_HOST"),
-		port:     port,
-		user:     os.Getenv("SMTP_USER"),
-		password: os.Getenv("SMTP_PASSWORD"),
-		from:     os.Getenv("SMTP_FROM"),
+
+	svc := &EmailService{provider: provider, from: from}
+	switch provider {
+	case "resend":
+		apiKey := strings.TrimSpace(os.Getenv("RESEND_API_KEY"))
+		if apiKey == "" {
+			log.Printf("[EmailService] EMAIL_PROVIDER=resend だが RESEND_API_KEY 未設定のため log にフォールバックします")
+			svc.provider = "log"
+			svc.transport = &logMailTransport{}
+			break
+		}
+		svc.transport = &resendMailTransport{client: resend.NewClient(apiKey)}
+	case "smtp":
+		port, _ := strconv.Atoi(os.Getenv("SMTP_PORT"))
+		if port == 0 {
+			port = 587
+		}
+		host := strings.TrimSpace(os.Getenv("SMTP_HOST"))
+		if host == "" {
+			log.Printf("[EmailService] EMAIL_PROVIDER=smtp だが SMTP_HOST 未設定のため log にフォールバックします")
+			svc.provider = "log"
+			svc.transport = &logMailTransport{}
+			break
+		}
+		svc.transport = &smtpMailTransport{
+			host:     host,
+			port:     port,
+			user:     os.Getenv("SMTP_USER"),
+			password: os.Getenv("SMTP_PASSWORD"),
+		}
+	default:
+		svc.provider = "log"
+		svc.transport = &logMailTransport{}
 	}
+	log.Printf("[EmailService] provider=%s from=%s\n", svc.provider, svc.from)
+	return svc
+}
+
+func firstNonEmptyEnv(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// Provider は現在の送信バックエンド名を返す（テスト・診断用）。
+func (s *EmailService) Provider() string {
+	if s == nil || s.provider == "" {
+		return "log"
+	}
+	return s.provider
+}
+
+func (s *EmailService) sendHTML(to []string, subject, htmlBody string) error {
+	return s.dispatch(mailMessage{From: s.from, To: to, Subject: subject, HTML: htmlBody})
+}
+
+func (s *EmailService) sendText(to []string, subject, textBody string) error {
+	return s.dispatch(mailMessage{From: s.from, To: to, Subject: subject, Text: textBody})
+}
+
+func (s *EmailService) dispatch(msg mailMessage) error {
+	if s == nil {
+		return fmt.Errorf("email service is nil")
+	}
+	if s.transport == nil {
+		s.transport = &logMailTransport{}
+		s.provider = "log"
+	}
+	if msg.From == "" {
+		msg.From = s.from
+	}
+	if len(msg.To) == 0 {
+		return nil
+	}
+	return s.transport.Send(msg)
 }
 
 // EmailReportCompany は分析レポートメールに含めるおすすめ企業1件分のデータ。
@@ -220,27 +302,7 @@ func (s *EmailService) SendAnalysisReport(user *entity.User, summary *AnalysisSu
 	}
 
 	htmlBody := buf.String()
-
-	// SMTP未設定の場合はログ出力のみ（開発環境向け）
-	if s.host == "" {
-		log.Printf("[EmailService] SMTP not configured. Simulating send to %s (body: %d bytes)\n", user.Email, len(htmlBody))
-		return nil
-	}
-
-	// MIMEヘッダーとHTMLボディを組み立ててSMTP送信
-	msg := fmt.Sprintf(
-		"From: %s\r\nTo: %s\r\nSubject: AI就活分析レポート\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
-		s.from, user.Email, htmlBody,
-	)
-	addr := fmt.Sprintf("%s:%d", s.host, s.port)
-	auth := smtp.PlainAuth("", s.user, s.password, s.host)
-
-	if err := smtp.SendMail(addr, auth, s.from, []string{user.Email}, []byte(msg)); err != nil {
-		return fmt.Errorf("failed to send email: %w", err)
-	}
-
-	log.Printf("[EmailService] Email sent successfully to %s\n", user.Email)
-	return nil
+	return s.sendHTML([]string{user.Email}, "AI就活分析レポート", htmlBody)
 }
 
 // SendVerificationEmail メール認証用のメールを送信
@@ -259,18 +321,7 @@ func (s *EmailService) SendVerificationEmail(user *entity.User, token, appURL st
 </div>
 </body></html>`, safeName, verifyURL)
 
-	if s.host == "" {
-		log.Printf("[EmailService] Verification email for %s: %s\n", user.Email, verifyURL)
-		return nil
-	}
-
-	msg := fmt.Sprintf(
-		"From: %s\r\nTo: %s\r\nSubject: メールアドレスの確認\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
-		s.from, user.Email, body,
-	)
-	addr := fmt.Sprintf("%s:%d", s.host, s.port)
-	auth := smtp.PlainAuth("", s.user, s.password, s.host)
-	return smtp.SendMail(addr, auth, s.from, []string{user.Email}, []byte(msg))
+	return s.sendHTML([]string{user.Email}, "メールアドレスの確認", body)
 }
 
 // SendReVerificationEmail 再認証メールを送信
@@ -289,18 +340,7 @@ func (s *EmailService) SendReVerificationEmail(user *entity.User, token, appURL 
 </div>
 </body></html>`, safeName, verifyURL)
 
-	if s.host == "" {
-		log.Printf("[EmailService] Re-verification email for %s: %s\n", user.Email, verifyURL)
-		return nil
-	}
-
-	msg := fmt.Sprintf(
-		"From: %s\r\nTo: %s\r\nSubject: ログイン再認証のお願い\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
-		s.from, user.Email, body,
-	)
-	addr := fmt.Sprintf("%s:%d", s.host, s.port)
-	auth := smtp.PlainAuth("", s.user, s.password, s.host)
-	return smtp.SendMail(addr, auth, s.from, []string{user.Email}, []byte(msg))
+	return s.sendHTML([]string{user.Email}, "ログイン再認証のお願い", body)
 }
 
 // InterviewReportEmailData 面接レポートメールのデータ
@@ -396,18 +436,7 @@ func (s *EmailService) SendRegistrationEmail(email, token string) error {
 </div>
 </body></html>`, registerURL)
 
-	if s.host == "" {
-		log.Printf("[EmailService] Registration email for %s: %s\n", email, registerURL)
-		return nil
-	}
-
-	msg := fmt.Sprintf(
-		"From: %s\r\nTo: %s\r\nSubject: 会員登録の確認\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
-		s.from, email, body,
-	)
-	addr := fmt.Sprintf("%s:%d", s.host, s.port)
-	auth := smtp.PlainAuth("", s.user, s.password, s.host)
-	return smtp.SendMail(addr, auth, s.from, []string{email}, []byte(msg))
+	return s.sendHTML([]string{email}, "会員登録の確認", body)
 }
 
 // SendPasswordResetEmail パスワードリセットメールを送信
@@ -425,18 +454,7 @@ func (s *EmailService) SendPasswordResetEmail(email, token, appURL string) error
 </div>
 </body></html>`, resetURL)
 
-	if s.host == "" {
-		log.Printf("[EmailService] Password reset email for %s: %s\n", email, resetURL)
-		return nil
-	}
-
-	msg := fmt.Sprintf(
-		"From: %s\r\nTo: %s\r\nSubject: パスワードのリセット\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
-		s.from, email, body,
-	)
-	addr := fmt.Sprintf("%s:%d", s.host, s.port)
-	auth := smtp.PlainAuth("", s.user, s.password, s.host)
-	return smtp.SendMail(addr, auth, s.from, []string{email}, []byte(msg))
+	return s.sendHTML([]string{email}, "パスワードのリセット", body)
 }
 
 // SendInterviewReport 面接練習レポートをメールで送信
@@ -454,23 +472,7 @@ func (s *EmailService) SendInterviewReport(user *entity.User, data InterviewRepo
 		return fmt.Errorf("failed to render template: %w", err)
 	}
 	htmlBody := buf.String()
-
-	if s.host == "" {
-		log.Printf("[EmailService] SMTP not configured. Simulating interview report send to %s (body: %d bytes)\n", user.Email, len(htmlBody))
-		return nil
-	}
-
-	msg := fmt.Sprintf(
-		"From: %s\r\nTo: %s\r\nSubject: AI面接練習レポート\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
-		s.from, user.Email, htmlBody,
-	)
-	addr := fmt.Sprintf("%s:%d", s.host, s.port)
-	auth := smtp.PlainAuth("", s.user, s.password, s.host)
-	if err := smtp.SendMail(addr, auth, s.from, []string{user.Email}, []byte(msg)); err != nil {
-		return fmt.Errorf("failed to send email: %w", err)
-	}
-	log.Printf("[EmailService] Interview report email sent successfully to %s\n", user.Email)
-	return nil
+	return s.sendHTML([]string{user.Email}, "AI面接練習レポート", htmlBody)
 }
 
 // SendSystemAlertEmail sends a plain-text operational alert email to multiple recipients.
@@ -478,19 +480,7 @@ func (s *EmailService) SendSystemAlertEmail(recipients []string, subject, body s
 	if len(recipients) == 0 {
 		return nil
 	}
-	if s.host == "" || s.user == "" || s.password == "" || s.from == "" {
-		log.Printf("[EmailService] SMTP not configured. Simulating alert send to %v\n", recipients)
-		return nil
-	}
-
-	addr := fmt.Sprintf("%s:%d", s.host, s.port)
-	auth := smtp.PlainAuth("", s.user, s.password, s.host)
-	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s",
-		s.from, recipients[0], subject, body)
-	if err := smtp.SendMail(addr, auth, s.from, recipients, []byte(msg)); err != nil {
-		return fmt.Errorf("failed to send alert email: %w", err)
-	}
-	return nil
+	return s.sendText(recipients, subject, body)
 }
 
 // SendCompanyEntryThankYouAndInvite 企業情報投稿への感謝と本登録依頼メール（#754）
