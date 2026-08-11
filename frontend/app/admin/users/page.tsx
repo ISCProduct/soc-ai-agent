@@ -19,6 +19,7 @@ import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
+import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
 
 type AdminUser = {
   id: number
@@ -42,6 +43,7 @@ export default function AdminUsersPage() {
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
   const [loading, setLoading] = useState(false)
+  const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
 
   useEffect(() => {
     const user = authService.getStoredUser()
@@ -59,6 +61,7 @@ export default function AdminUsersPage() {
         offset: String(page * rowsPerPage),
       })
       if (query.trim()) params.set('q', query.trim())
+      if (schoolId !== undefined) params.set('school_id', String(schoolId))
 
       const response = await fetch(`/api/admin/users?${params}`, {
         headers: authService.getAdminFetchHeaders(),
@@ -73,7 +76,7 @@ export default function AdminUsersPage() {
       setTotal(data?.total ?? 0)
     }, query ? 400 : 0)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [page, rowsPerPage, query])
+  }, [page, rowsPerPage, query, schoolId])
 
   const handleToggleAdmin = async (user: AdminUser) => {
     const admin = authService.getStoredUser()
@@ -139,12 +142,15 @@ export default function AdminUsersPage() {
 
       <AdminPanel title="検索" sx={{ mb: 3 }}>
         <AdminPanelBody>
-          <TextField
-            label="検索 (メール/名前/学校名)"
-            value={query}
-            onChange={(e) => handleQueryChange(e.target.value)}
-            fullWidth
-          />
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+            <TextField
+              label="検索 (メール/名前/学校名)"
+              value={query}
+              onChange={(e) => handleQueryChange(e.target.value)}
+              fullWidth
+            />
+            <SchoolFilterSelect value={schoolId} onChange={(id) => { setSchoolId(id); setPage(0) }} />
+          </Stack>
         </AdminPanelBody>
       </AdminPanel>
 

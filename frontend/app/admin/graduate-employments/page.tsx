@@ -13,6 +13,7 @@ import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContaine
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { AdminListCard } from '@/components/admin/AdminListCard'
+import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
 
 type GraduateEmployment = {
   id: number
@@ -37,15 +38,18 @@ export default function AdminGraduateEmploymentsPage() {
   }, [])
 
   const [graduateEntries, setGraduateEntries] = useState<GraduateEmployment[]>([])
+  const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
 
   useEffect(() => {
-    fetch('/api/admin/graduate-employments?limit=100', {
+    const params = new URLSearchParams({ limit: '100' })
+    if (schoolId !== undefined) params.set('school_id', String(schoolId))
+    fetch(`/api/admin/graduate-employments?${params}`, {
       headers: authService.getAdminFetchHeaders(),
     })
       .then((r) => r.json())
       .then((data) => setGraduateEntries(data?.entries || []))
       .catch(() => {})
-  }, [])
+  }, [schoolId])
 
   return (
     <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
@@ -76,7 +80,9 @@ export default function AdminGraduateEmploymentsPage() {
 
       <AdminPanel title="就職情報一覧">
         <AdminPanelBody>
-          <Stack spacing={1}>
+          <Stack spacing={2}>
+            <SchoolFilterSelect value={schoolId} onChange={setSchoolId} />
+            <Stack spacing={1}>
             {graduateEntries.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
                 まだ就職情報がありません。
@@ -111,6 +117,7 @@ export default function AdminGraduateEmploymentsPage() {
                 </AdminListCard>
               ))
             )}
+            </Stack>
           </Stack>
         </AdminPanelBody>
       </AdminPanel>

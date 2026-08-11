@@ -38,6 +38,15 @@ test.describe('管理者ダッシュボードフロー', () => {
         }),
       })
     })
+
+    // SchoolFilterSelect が呼ぶ。未モックだと Backend 不在の CI でハングし networkidle がタイムアウトする
+    await page.route('**/api/admin/me/school-access*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ restricted: false, schools: [] }),
+      })
+    })
   })
 
   test('管理者ダッシュボードが表示される', async ({ page }) => {
@@ -56,8 +65,7 @@ test.describe('管理者ダッシュボードフロー', () => {
 
   test('スコアダッシュボードページに遷移できる', async ({ page }) => {
     await page.goto('/admin/dashboard')
-    await page.waitForLoadState('networkidle')
-    await expect(page.getByText('ユーザー別スコアダッシュボード')).toBeVisible({ timeout: 8000 })
+    await expect(page.getByText('ユーザー別スコアダッシュボード')).toBeVisible({ timeout: 15000 })
     await expect(page.getByText('ユーザー1')).toBeVisible({ timeout: 8000 })
   })
 

@@ -292,7 +292,7 @@ func TestAdminProfileRecalculationController_GetHistory_Success(t *testing.T) {
 
 func TestAdminUserController_List_ServiceError(t *testing.T) {
 	repo := &mocks.UserRepositoryMock{}
-	repo.On("ListUsersPaged", 25, 0, "").Return(nil, int64(0), errors.New("db error"))
+	repo.On("ListUsersPaged", 25, 0, "", mock.Anything).Return(nil, int64(0), errors.New("db error"))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
 	rec := httptest.NewRecorder()
@@ -303,7 +303,7 @@ func TestAdminUserController_List_ServiceError(t *testing.T) {
 func TestAdminUserController_List_Success(t *testing.T) {
 	repo := &mocks.UserRepositoryMock{}
 	users := []entity.User{{Email: "user@example.com"}}
-	repo.On("ListUsersPaged", 25, 0, "").Return(users, int64(1), nil)
+	repo.On("ListUsersPaged", 25, 0, "", mock.Anything).Return(users, int64(1), nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
 	rec := httptest.NewRecorder()

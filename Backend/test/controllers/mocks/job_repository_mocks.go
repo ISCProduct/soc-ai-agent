@@ -74,8 +74,8 @@ func (m *GraduateEmploymentRepositoryMock) Update(entry *models.GraduateEmployme
 	return args.Error(0)
 }
 
-func (m *GraduateEmploymentRepositoryMock) List(companyID *uint, limit int) ([]models.GraduateEmployment, error) {
-	args := m.Called(companyID, limit)
+func (m *GraduateEmploymentRepositoryMock) List(companyID, schoolID *uint, limit int) ([]models.GraduateEmployment, error) {
+	args := m.Called(companyID, schoolID, limit)
 	if v := args.Get(0); v != nil {
 		return v.([]models.GraduateEmployment), args.Error(1)
 	}
