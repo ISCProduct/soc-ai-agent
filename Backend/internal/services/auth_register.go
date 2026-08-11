@@ -122,6 +122,7 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint) (*AuthResp
 		IsGuest:                  false,
 		TargetLevel:              req.TargetLevel,
 		SchoolName:               req.SchoolName,
+		SchoolID:                 s.resolveSchoolID(req.SchoolName),
 		IsAdmin:                  false,
 		CertificationsAcquired:   req.CertificationsAcquired,
 		CertificationsInProgress: req.CertificationsInProgress,

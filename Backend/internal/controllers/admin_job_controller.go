@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/services/interfaces"
 	"net/http"
@@ -54,7 +55,15 @@ func (c *AdminJobController) JobPositions(ctx echo.Context) error {
 			limit = v
 		}
 	}
-	positions, err := c.companyRepo.ListJobPositions(companyID, limit)
+	// 求人カタログは共有のため school_id は「承認済み企業の求人だけ見る」任意の絞り込み(閲覧制限ではない)。
+	var jobSchoolID *uint
+	if raw := strings.TrimSpace(ctx.QueryParam("school_id")); raw != "" {
+		if id, err := strconv.ParseUint(raw, 10, 64); err == nil {
+			v := uint(id)
+			jobSchoolID = &v
+		}
+	}
+	positions, err := c.companyRepo.ListJobPositions(companyID, jobSchoolID, limit)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch job positions")
 	}
@@ -135,7 +144,8 @@ func (c *AdminJobController) GraduateEmployments(ctx echo.Context) error {
 			limit = v
 		}
 	}
-	entries, err := c.graduateRepo.List(companyID, limit)
+	schoolID, _ := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
+	entries, err := c.graduateRepo.List(companyID, schoolID, limit)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch graduate employments")
 	}

@@ -26,7 +26,7 @@ func (r *userRepoAuthStub) GetUserByEmail(email string) (*entity.User, error) {
 }
 func (r *userRepoAuthStub) GetUserByID(id uint) (*entity.User, error) { return nil, nil }
 func (r *userRepoAuthStub) ListUsers() ([]entity.User, error)         { return nil, nil }
-func (r *userRepoAuthStub) ListUsersPaged(limit, offset int, query string) ([]entity.User, int64, error) {
+func (r *userRepoAuthStub) ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
 	return nil, 0, nil
 }
 func (r *userRepoAuthStub) UpdateUser(user *entity.User) error {

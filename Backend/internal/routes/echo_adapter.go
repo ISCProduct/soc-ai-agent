@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/labstack/echo/v4"
 )
@@ -91,6 +92,7 @@ func EchoTenantResolver(orgs *services.OrganizationService) echo.MiddlewareFunc 
 }
 
 // EchoAdminAuth はX-Admin-Email / X-Admin-Tokenヘッダーを検証するEcho nativeミドルウェアを返す。
+// 検証済み管理者のユーザーIDを AdminUserIDContextKey へ格納する(後続のEchoAdminSchoolScope等が利用する)。
 func EchoAdminAuth(userRepo *repositories.UserRepository, adminSecret string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -110,6 +112,56 @@ func EchoAdminAuth(userRepo *repositories.UserRepository, adminSecret string) ec
 			if token == "" || !middleware.VerifyAdminToken(token, user.ID, user.Email, adminSecret) {
 				return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
 			}
+			ctx := context.WithValue(c.Request().Context(), middleware.AdminUserIDContextKey, user.ID)
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	}
+}
+
+// EchoAdminSchoolScope は管理者(先生)の担当校にもとづき、クエリパラメータ school_id を検証し
+// AdminSchoolFilterContextKey へ絞り込み対象(nilは絞り込みなし)を格納するEcho nativeミドルウェア。
+// EchoAdminAuth より後段に配置すること(AdminUserIDContextKeyに依存する)。
+func EchoAdminSchoolScope(schools *services.SchoolService) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			adminUserID, ok := middleware.AdminUserIDFromContext(c.Request().Context())
+			if !ok {
+				return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+			}
+			restricted, allowedSchoolIDs, err := schools.ResolveAdminAccess(adminUserID)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
+			}
+
+			var schoolID *uint
+			if raw := c.QueryParam("school_id"); raw != "" {
+				id, err := strconv.ParseUint(raw, 10, 64)
+				if err != nil {
+					return echo.NewHTTPError(http.StatusBadRequest, "invalid school_id")
+				}
+				v := uint(id)
+				schoolID = &v
+			}
+
+			if restricted {
+				if schoolID == nil {
+					return echo.NewHTTPError(http.StatusBadRequest, "school_id is required")
+				}
+				allowed := false
+				for _, id := range allowedSchoolIDs {
+					if id == *schoolID {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					return echo.NewHTTPError(http.StatusForbidden, "school access denied")
+				}
+			}
+
+			ctx := context.WithValue(c.Request().Context(), middleware.AdminSchoolFilterContextKey, schoolID)
+			c.SetRequest(c.Request().WithContext(ctx))
 			return next(c)
 		}
 	}

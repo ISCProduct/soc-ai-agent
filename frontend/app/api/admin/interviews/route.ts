@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const params = new URLSearchParams()
-  for (const key of ['page', 'limit']) {
+  for (const key of ['page', 'limit', 'school_id']) {
     const v = searchParams.get(key)
     if (v !== null) params.set(key, v)
   }

@@ -27,7 +27,7 @@ func newAdminCompanyController(repo *mocks.CompanyRepositoryMock, audit *mocks.A
 
 func TestAdminCompanyController_List_ServiceError(t *testing.T) {
 	repo := &mocks.CompanyRepositoryMock{}
-	repo.On("ListActiveFiltered", 50, 0, "", "", "", "", "").Return(nil, int64(0), errors.New("db error"))
+	repo.On("ListActiveFiltered", 50, 0, "", "", "", "", "", mock.Anything).Return(nil, int64(0), errors.New("db error"))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/companies", nil)
 	rec := httptest.NewRecorder()
@@ -36,7 +36,7 @@ func TestAdminCompanyController_List_ServiceError(t *testing.T) {
 
 func TestAdminCompanyController_List_Success(t *testing.T) {
 	repo := &mocks.CompanyRepositoryMock{}
-	repo.On("ListActiveFiltered", 50, 0, "", "", "", "", "").Return([]models.Company{{Name: "Test Corp"}}, int64(1), nil)
+	repo.On("ListActiveFiltered", 50, 0, "", "", "", "", "", mock.Anything).Return([]models.Company{{Name: "Test Corp"}}, int64(1), nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/companies", nil)
 	rec := httptest.NewRecorder()
@@ -205,7 +205,7 @@ func TestAdminJobController_JobCategories_Success(t *testing.T) {
 func TestAdminJobController_JobPositions_List_Success(t *testing.T) {
 	companyRepo := &mocks.CompanyRepositoryMock{}
 	positions := []models.CompanyJobPosition{{Title: "Software Engineer"}}
-	companyRepo.On("ListJobPositions", (*uint)(nil), 50).Return(positions, nil)
+	companyRepo.On("ListJobPositions", (*uint)(nil), (*uint)(nil), 50).Return(positions, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/job-positions", nil)
 	rec := httptest.NewRecorder()
@@ -216,7 +216,7 @@ func TestAdminJobController_JobPositions_List_Success(t *testing.T) {
 func TestAdminJobController_GraduateEmployments_List_Success(t *testing.T) {
 	gradRepo := &mocks.GraduateEmploymentRepositoryMock{}
 	entries := []models.GraduateEmployment{{GraduateName: "Test User"}}
-	gradRepo.On("List", (*uint)(nil), 50).Return(entries, nil)
+	gradRepo.On("List", (*uint)(nil), (*uint)(nil), 50).Return(entries, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments", nil)
 	rec := httptest.NewRecorder()
