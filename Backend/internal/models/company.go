@@ -12,7 +12,7 @@ type Company struct {
 	Name             string     `gorm:"type:varchar(255);not null" json:"name"`
 	NameReading      string     `gorm:"type:varchar(255)" json:"name_reading"` // 企業名の読み仮名（ふりがな）
 	Description      string     `gorm:"type:text" json:"description"`
-	Industry         string     `gorm:"type:varchar(100)" json:"industry"`
+	Industry         string     `gorm:"type:varchar(100);index:idx_companies_active_status_industry,priority:3" json:"industry"`
 	EmployeeCount    int        `gorm:"default:0" json:"employee_count"`
 	FoundedYear      int        `json:"founded_year"`
 	Location         string     `gorm:"type:varchar(255)" json:"location"`
@@ -23,7 +23,7 @@ type Company struct {
 	SourceURL        string     `gorm:"type:varchar(500)" json:"source_url"`
 	SourceFetchedAt  *time.Time `json:"source_fetched_at,omitempty"`
 	IsProvisional    bool       `gorm:"default:true" json:"is_provisional"`
-	DataStatus       string     `gorm:"type:varchar(20);default:'draft'" json:"data_status"` // draft, published
+	DataStatus       string     `gorm:"type:varchar(20);default:'draft';index:idx_companies_active_status_industry,priority:2;index:idx_companies_active_status_id,priority:2" json:"data_status"` // draft, published
 	GBizLastSyncedAt *time.Time `json:"gbiz_last_synced_at,omitempty"`
 	GBizSyncStatus   string     `gorm:"type:varchar(20)" json:"gbiz_sync_status"` // success, failed
 	GBizSyncMessage  string     `gorm:"type:text" json:"gbiz_sync_message"`
@@ -53,7 +53,7 @@ type Company struct {
 	FemaleRatio  float64 `json:"female_ratio"`                   // 女性比率（%）
 
 	// 評価・ステータス
-	IsActive   bool `gorm:"default:true" json:"is_active"`
+	IsActive   bool `gorm:"default:true;index:idx_companies_active_status_industry,priority:1;index:idx_companies_active_status_id,priority:1" json:"is_active"`
 	IsVerified bool `gorm:"default:false" json:"is_verified"` // 認証済み企業フラグ
 
 	CreatedAt time.Time  `json:"created_at"`
@@ -87,8 +87,8 @@ type CompanyJobPosition struct {
 	PreferredSkills string `gorm:"type:text" json:"preferred_skills"` // JSON形式
 
 	// 募集ステータス
-	IsActive   bool   `gorm:"default:true" json:"is_active"`
-	DataStatus string `gorm:"type:varchar(20);default:'draft'" json:"data_status"` // draft, published, rejected
+	IsActive   bool   `gorm:"default:true;index:idx_company_job_positions_active_status,priority:1" json:"is_active"`
+	DataStatus string `gorm:"type:varchar(20);default:'draft';index:idx_company_job_positions_active_status,priority:2" json:"data_status"` // draft, published, rejected
 
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
