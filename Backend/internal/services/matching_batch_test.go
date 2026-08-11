@@ -25,7 +25,7 @@ func (s *matchingCompanyRepo) FindAllActiveNames(string) ([]models.CompanyName, 
 	return nil, nil
 }
 func (s *matchingCompanyRepo) CountActive() (int64, error) { return 0, nil }
-func (s *matchingCompanyRepo) ListActiveFiltered(int, int, string, string, string, string, string) ([]models.Company, int64, error) {
+func (s *matchingCompanyRepo) ListActiveFiltered(int, int, string, string, string, string, string, *uint) ([]models.Company, int64, error) {
 	return nil, 0, nil
 }
 func (s *matchingCompanyRepo) ListActiveIndustries() ([]string, error) { return nil, nil }
@@ -52,7 +52,7 @@ func (s *matchingCompanyRepo) UpdateJobPosition(*models.CompanyJobPosition) erro
 func (s *matchingCompanyRepo) FindJobPositionsByCompany(uint) ([]models.CompanyJobPosition, error) {
 	return nil, nil
 }
-func (s *matchingCompanyRepo) ListJobPositions(*uint, int) ([]models.CompanyJobPosition, error) {
+func (s *matchingCompanyRepo) ListJobPositions(*uint, *uint, int) ([]models.CompanyJobPosition, error) {
 	return nil, nil
 }
 func (s *matchingCompanyRepo) CreateOrUpdateWeightProfile(*models.CompanyWeightProfile) error {
