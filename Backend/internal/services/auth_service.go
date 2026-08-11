@@ -12,19 +12,30 @@ import (
 const bcryptCost = 12
 
 type AuthService struct {
-	userRepo      repository.UserRepository
-	pendingRepo   repository.PendingRegistrationRepository
-	emailService  *EmailService
-	db            *gorm.DB
-	object        ObjectDeleter
-	audit         auditRecorder
-	deletion      *UserDeletionService
-	refreshTokens *RefreshTokenService
-	schoolRepo    repository.SchoolRepository
+	userRepo         repository.UserRepository
+	pendingRepo      repository.PendingRegistrationRepository
+	emailService     *EmailService
+	db               *gorm.DB
+	object           ObjectDeleter
+	audit            auditRecorder
+	deletion         *UserDeletionService
+	refreshTokens    *RefreshTokenService
+	ownershipClaimer CompanyOwnershipClaimer
+	schoolRepo       repository.SchoolRepository
+}
+
+// CompanyOwnershipClaimer は本登録時に企業クレームを行う（#754）
+type CompanyOwnershipClaimer interface {
+	ClaimOwnershipOnRegister(userID uint, companyID, submissionID *uint)
 }
 
 func NewAuthService(userRepo repository.UserRepository, pendingRepo repository.PendingRegistrationRepository, emailService *EmailService) *AuthService {
 	return &AuthService{userRepo: userRepo, pendingRepo: pendingRepo, emailService: emailService}
+}
+
+// SetCompanyOwnershipClaimer は企業クレーム処理を注入する
+func (s *AuthService) SetCompanyOwnershipClaimer(c CompanyOwnershipClaimer) {
+	s.ownershipClaimer = c
 }
 
 // SetDB はアカウント削除に使用する DB を設定する

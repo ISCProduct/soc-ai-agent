@@ -7,8 +7,11 @@ import {
   Button,
   Card,
   CardContent,
+  Checkbox,
   Divider,
+  FormControlLabel,
   IconButton,
+  Link,
   MenuItem,
   Slider,
   Stack,
@@ -108,6 +111,12 @@ export default function CompanyEntryPage() {
   // 卒業生就職情報
   const [graduates, setGraduates] = useState<GraduateForm[]>([])
 
+  // 人事連絡先（#754）
+  const [contactEmail, setContactEmail] = useState('')
+  const [contactName, setContactName] = useState('')
+  const [privacyConsent, setPrivacyConsent] = useState(false)
+  const [companyFax, setCompanyFax] = useState('') // honeypot
+
   const updateJob = (index: number, field: keyof JobPositionForm, value: string | boolean) => {
     setJobPositions((prev) => prev.map((j, i) => (i === index ? { ...j, [field]: value } : j)))
   }
@@ -120,6 +129,14 @@ export default function CompanyEntryPage() {
     setError('')
     if (!name.trim()) {
       setError('企業名は必須です')
+      return
+    }
+    if (!contactEmail.trim()) {
+      setError('担当者メールアドレスは必須です')
+      return
+    }
+    if (!privacyConsent) {
+      setError('個人情報の取り扱いへの同意が必要です')
       return
     }
     setLoading(true)
@@ -142,6 +159,10 @@ export default function CompanyEntryPage() {
         tech_stack: techStack,
         development_style: developmentStyle,
         main_business: mainBusiness,
+        contact_email: contactEmail.trim(),
+        contact_name: contactName.trim(),
+        privacy_consent: privacyConsent,
+        company_fax: companyFax,
         job_positions: jobPositions
           .filter((j) => j.title.trim())
           .map((j) => ({
@@ -161,8 +182,8 @@ export default function CompanyEntryPage() {
         body: JSON.stringify(payload),
       })
       if (!res.ok) {
-        const data = await res.json()
-        setError(data?.error || '送信に失敗しました')
+        const data = await res.json().catch(() => null)
+        setError(data?.error || data?.message || '送信に失敗しました')
         return
       }
       setSubmitted(true)
@@ -178,8 +199,11 @@ export default function CompanyEntryPage() {
           <Typography variant="h6" gutterBottom>
             送信が完了しました
           </Typography>
+          <Typography sx={{ mb: 1 }}>
+            内容を確認の上、掲載審査を行います。公開は審査完了後です（自動公開ではありません）。
+          </Typography>
           <Typography>
-            内容を確認の上、掲載審査を行います。審査完了後に公開いたします。
+            ご入力のメールアドレスに、お礼と会員登録のご案内をお送りしました。迷惑メールフォルダもご確認ください。
           </Typography>
         </Alert>
       </Box>
@@ -192,7 +216,8 @@ export default function CompanyEntryPage() {
         企業情報登録フォーム
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
-        貴社の情報を入力してください。送信後、内容を確認の上、掲載審査を行います。ログイン不要でご利用いただけます。
+        貴社の情報を入力してください。ログイン不要でご利用いただけます。送信後に掲載審査を行い、公開は審査完了後となります。
+        担当者メールアドレス宛に、お礼と本サービスの会員登録ご案内をお送りします。
       </Typography>
 
       {error && (
@@ -200,6 +225,62 @@ export default function CompanyEntryPage() {
           {error}
         </Alert>
       )}
+
+      {/* 担当者連絡先 */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            担当者連絡先
+          </Typography>
+          <Stack spacing={2}>
+            <TextField
+              label="担当者メールアドレス *"
+              type="email"
+              value={contactEmail}
+              onChange={(e) => setContactEmail(e.target.value)}
+              required
+              helperText="感謝メールおよび会員登録のご案内に使用します"
+            />
+            <TextField
+              label="担当者氏名"
+              value={contactName}
+              onChange={(e) => setContactName(e.target.value)}
+            />
+            {/* honeypot: 視覚的に隠す */}
+            <TextField
+              label="FAX"
+              value={companyFax}
+              onChange={(e) => setCompanyFax(e.target.value)}
+              tabIndex={-1}
+              autoComplete="off"
+              sx={{
+                position: 'absolute',
+                left: '-10000px',
+                height: 0,
+                width: 0,
+                overflow: 'hidden',
+              }}
+              inputProps={{ 'aria-hidden': true }}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={privacyConsent}
+                  onChange={(e) => setPrivacyConsent(e.target.checked)}
+                />
+              }
+              label={
+                <Typography variant="body2">
+                  <Link href="/privacy" target="_blank" rel="noopener noreferrer">
+                    プライバシーポリシー
+                  </Link>
+                  に同意し、連絡先メールの保存・感謝メール／会員登録案内の送信に同意します *
+                </Typography>
+              }
+            />
+          </Stack>
+        </CardContent>
+      </Card>
 
       {/* 企業基本情報 */}
       <Card sx={{ mb: 3 }}>

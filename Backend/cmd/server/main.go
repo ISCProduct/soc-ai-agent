@@ -320,7 +320,9 @@ func main() {
 	adminVectorController := controllers.NewAdminVectorController(services.NewAdminVectorService())
 	profileRecalcService := services.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
 	profileRecalcController := controllers.NewAdminProfileRecalculationController(profileRecalcService)
-	companyEntryController := controllers.NewCompanyEntryController(db, companyRepo, graduateRepo)
+	companyEntryService := services.NewCompanyEntryService(db, userRepo, pendingRegistrationRepo, emailService)
+	authService.SetCompanyOwnershipClaimer(companyEntryService)
+	companyEntryController := controllers.NewCompanyEntryController(companyEntryService)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := controllers.NewESRewriteController(aiClient)
 	scheduleRepo := repositories.NewScheduleRepository(db)
@@ -384,7 +386,9 @@ func main() {
 	routes.SetupApplicationRoutes(api, appController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupUserRoutes(api, integratedProfileController)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
-	api.POST("/company-entry", companyEntryController.Submit)
+	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())
+	adminEntry := api.Group("/admin", routes.EchoAdminAuth(userRepo, cfg.AdminSecret))
+	adminEntry.POST("/company-entry-submissions/:id/resend-email", companyEntryController.ResendEmail)
 
 	go crawlService.StartScheduler()
 
@@ -417,5 +421,17 @@ func main() {
 	slog.Info("Starting server", "port", port)
 	if err := e.Start(":" + port); err != nil {
 		log.Fatalf("Server failed: %v", err)
+	}
+}
+
+func echoCompanyEntryRateLimit() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ip := middleware.GetClientIP(c.Request())
+			if !middleware.CompanyEntryRateLimiter.Allow(ip) {
+				return echo.NewHTTPError(http.StatusTooManyRequests, "Too Many Requests: 投稿回数の上限に達しました。しばらく待ってから再試行してください。")
+			}
+			return next(c)
+		}
 	}
 }
