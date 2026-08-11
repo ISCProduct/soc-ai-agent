@@ -1,12 +1,7 @@
 output "repository_urls" {
-  description = "name => repository URL (without tag)"
-  value       = { for k, r in aws_ecr_repository.this : k => r.repository_url }
-}
-
-output "repository_arns" {
-  value = { for k, r in aws_ecr_repository.this : k => r.arn }
+  value = { for name, repo in aws_ecr_repository.this : name => repo.repository_url }
 }
 
 output "registry_id" {
-  value = try(values(aws_ecr_repository.this)[0].registry_id, "")
+  value = length(aws_ecr_repository.this) > 0 ? values(aws_ecr_repository.this)[0].registry_id : ""
 }

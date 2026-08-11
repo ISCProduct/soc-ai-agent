@@ -52,7 +52,7 @@ cp terraform.tfvars.example terraform.tfvars
 
 ```bash
 cp backend.hcl.example backend.hcl
-# bucket を bootstrap 出力に合わせて編集（key は prod/terraform.tfstate）
+# bucket / dynamodb_table を bootstrap 出力に合わせて編集（key は prod/terraform.tfstate）
 terraform init -backend-config=backend.hcl
 ```
 

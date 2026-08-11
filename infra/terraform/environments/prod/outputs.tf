@@ -37,11 +37,3 @@ output "backend_service_name" {
 output "frontend_service_name" {
   value = module.frontend.service_name
 }
-
-output "ecr_backend_url" {
-  value = local.ecr_backend_url
-}
-
-output "ecr_frontend_url" {
-  value = local.ecr_frontend_url
-}

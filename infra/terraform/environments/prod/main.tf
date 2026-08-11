@@ -7,13 +7,8 @@ locals {
   frontend_domain = var.domain_name
   backend_domain  = "api.${var.domain_name}"
 
-  ecr_backend_url  = var.manage_ecr ? module.ecr[0].repository_urls["soc-backend"] : data.aws_ecr_repository.backend[0].repository_url
-  ecr_frontend_url = var.manage_ecr ? module.ecr[0].repository_urls["soc-frontend"] : data.aws_ecr_repository.frontend[0].repository_url
-  backend_image    = var.backend_image != "" ? var.backend_image : "${local.ecr_backend_url}:${var.image_tag}"
-  frontend_image   = var.frontend_image != "" ? var.frontend_image : "${local.ecr_frontend_url}:${var.image_tag}"
-
   backend_secret_arns = compact(concat(
-    [module.secrets.db_secret_arn],
+    [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn, aws_secretsmanager_secret.email.arn],
     var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
     var.additional_secret_arns
   ))
@@ -46,8 +41,61 @@ locals {
         name      = "OPENAI_API_KEY"
         valueFrom = var.openai_secret_arn
       }
-    ] : []
+    ] : [],
+    [
+      {
+        name      = "GOOGLE_CLIENT_ID"
+        valueFrom = "${aws_secretsmanager_secret.oauth.arn}:google_client_id::"
+      },
+      {
+        name      = "GOOGLE_CLIENT_SECRET"
+        valueFrom = "${aws_secretsmanager_secret.oauth.arn}:google_client_secret::"
+      },
+      {
+        name      = "GITHUB_CLIENT_ID"
+        valueFrom = "${aws_secretsmanager_secret.oauth.arn}:github_client_id::"
+      },
+      {
+        name      = "GITHUB_CLIENT_SECRET"
+        valueFrom = "${aws_secretsmanager_secret.oauth.arn}:github_client_secret::"
+      }
+    ],
+    [
+      {
+        name      = "RESEND_API_KEY"
+        valueFrom = "${aws_secretsmanager_secret.email.arn}:resend_api_key::"
+      }
+    ]
   )
+}
+
+# Google/GitHub OAuthクライアント認証情報(DB同様、Secrets Managerで管理しECSタスク実行ロール経由で注入)
+resource "aws_secretsmanager_secret" "oauth" {
+  name = "${var.project_name}/oauth"
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "oauth" {
+  secret_id = aws_secretsmanager_secret.oauth.id
+  secret_string = jsonencode({
+    google_client_id     = var.google_client_id
+    google_client_secret = var.google_client_secret
+    github_client_id     = var.github_client_id
+    github_client_secret = var.github_client_secret
+  })
+}
+
+# Resend(メール送信)APIキー(#756: EMAIL_PROVIDER未設定でもRESEND_API_KEYがあれば自動選択される)
+resource "aws_secretsmanager_secret" "email" {
+  name = "${var.project_name}/email"
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "email" {
+  secret_id = aws_secretsmanager_secret.email.id
+  secret_string = jsonencode({
+    resend_api_key = var.resend_api_key
+  })
 }
 
 module "network" {
@@ -61,28 +109,6 @@ module "network" {
   enable_alb          = true
   alb_ingress_cidrs   = var.allowed_http_cidrs
   tags                = local.tags
-}
-
-# 同一アカウントでは staging で ECR を作成済み想定（manage_ecr=false）。
-# 別アカウントの本番だけ true にする。
-module "ecr" {
-  count  = var.manage_ecr ? 1 : 0
-  source = "../../modules/ecr"
-
-  repository_names     = var.ecr_repository_names
-  force_delete         = false
-  lifecycle_keep_count = var.ecr_lifecycle_keep_count
-  tags                 = local.tags
-}
-
-data "aws_ecr_repository" "backend" {
-  count = var.manage_ecr ? 0 : 1
-  name  = "soc-backend"
-}
-
-data "aws_ecr_repository" "frontend" {
-  count = var.manage_ecr ? 0 : 1
-  name  = "soc-frontend"
 }
 
 module "s3" {
@@ -158,11 +184,10 @@ module "alb" {
   route53_zone_id      = data.aws_route53_zone.selected.zone_id
   frontend_domain_name = local.frontend_domain
   backend_domain_name  = local.backend_domain
-  frontend_target_port        = 3000
-  backend_target_port         = 8080
-  target_type                 = "ip"
-  additional_certificate_sans = ["*.${var.domain_name}"]
-  tags                        = local.tags
+  frontend_target_port = 3000
+  backend_target_port  = 8080
+  target_type          = "ip"
+  tags                 = local.tags
 }
 
 module "backend" {
@@ -175,7 +200,7 @@ module "backend" {
   security_group_id = module.network.fargate_security_group_id
   assign_public_ip  = true
   container_name    = "soc-backend"
-  container_image   = local.backend_image
+  container_image   = var.backend_image
   container_port    = 8080
   cpu               = var.backend_cpu
   memory            = var.backend_memory
@@ -203,7 +228,7 @@ module "frontend" {
   security_group_id = module.network.fargate_security_group_id
   assign_public_ip  = true
   container_name    = "soc-frontend"
-  container_image   = local.frontend_image
+  container_image   = var.frontend_image
   container_port    = 3000
   cpu               = var.frontend_cpu
   memory            = var.frontend_memory
@@ -211,8 +236,13 @@ module "frontend" {
   target_group_arn  = module.alb.frontend_target_group_arn
   region            = var.region
   environment = {
-    APP_ENV                  = "production"
-    NEXT_PUBLIC_API_BASE_URL = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
+    APP_ENV = "production"
+    # NEXT_PUBLIC_*はクライアントバンドルにビルド時埋め込みされるため実行時のこの値では
+    # login-page.tsx等のクライアントコードには効かない(GitHub Actions側のdocker build
+    # --build-argで焼き込む必要がある)。ここではサーバー側コード(middleware.tsの
+    # セッションリフレッシュ等)がprocess.envを実行時に読む経路のために設定する。
+    BACKEND_URL              = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
+    NEXT_PUBLIC_BACKEND_URL  = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
   }
   tags = local.tags
 }
@@ -232,19 +262,6 @@ resource "aws_route53_record" "frontend" {
 resource "aws_route53_record" "backend" {
   zone_id = data.aws_route53_zone.selected.zone_id
   name    = local.backend_domain
-  type    = "A"
-
-  alias {
-    name                   = module.alb.alb_dns_name
-    zone_id                = module.alb.alb_zone_id
-    evaluate_target_health = true
-  }
-}
-
-# 学園ごとのマルチテナントサブドメイン（<学園名>.shukatsu-ai.jp）をワイルドカードでまとめて受ける
-resource "aws_route53_record" "wildcard" {
-  zone_id = data.aws_route53_zone.selected.zone_id
-  name    = "*.${var.domain_name}"
   type    = "A"
 
   alias {

@@ -2,9 +2,8 @@ resource "aws_cloudwatch_log_group" "this" {
   name              = "/ecs/${var.project_name}/${var.service_name}"
   retention_in_days = var.log_retention_days
 
-  tags = merge(var.tags, {
-    Name = "${var.project_name}-${var.service_name}-logs"
-  })
+  # ponytail: タグ付けにはlogs:TagResourceが別途必要になり、IAM権限が限られた
+  # 環境ではCreateLogGroup自体が失敗する。タグ無しでの作成に留める。
 }
 
 resource "aws_iam_role" "execution" {
@@ -28,7 +27,7 @@ resource "aws_iam_role_policy_attachment" "execution" {
 }
 
 resource "aws_iam_role_policy" "execution_secrets" {
-  count = length(var.secret_arns) > 0 ? 1 : 0
+  count = var.create_secrets_policy ? 1 : 0
 
   name = "${var.project_name}-${var.service_name}-secrets"
   role = aws_iam_role.execution.id
@@ -59,7 +58,7 @@ resource "aws_iam_role" "task" {
 }
 
 resource "aws_iam_role_policy" "task_s3" {
-  count = var.s3_bucket_arn != "" ? 1 : 0
+  count = var.create_s3_policy ? 1 : 0
 
   name = "${var.project_name}-${var.service_name}-s3"
   role = aws_iam_role.task.id

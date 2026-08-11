@@ -2,6 +2,10 @@ import type { NextConfig } from 'next'
 
 const isDev = process.env.NODE_ENV === 'development'
 
+// クライアントから直接叩くバックエンドのオリジン(headers()はリクエスト時に実行されるため
+// ビルド時焼き込み不要、コンテナのランタイム環境変数をそのまま読める)
+const backendOrigin = process.env.NEXT_PUBLIC_BACKEND_URL || process.env.BACKEND_URL || ''
+
 const securityHeaders = [
   {
     key: 'Content-Security-Policy',
@@ -19,7 +23,7 @@ const securityHeaders = [
       // 開発モードでは webpack HMR の WebSocket 接続を許可
       isDev
         ? "connect-src 'self' blob: http://localhost:* https://api.openai.com ws://localhost:* wss://localhost:*"
-        : "connect-src 'self' blob: https://api.openai.com",
+        : `connect-src 'self' blob: https://api.openai.com${backendOrigin ? ` ${backendOrigin}` : ''}`,
       "frame-ancestors 'none'",
     ].join('; '),
   },

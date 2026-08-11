@@ -1,4 +1,5 @@
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -24,6 +25,9 @@ type GitHubSkillsViewProps = {
   syncing: boolean
   needsReauth: boolean
   error: string | null
+  skillsError: boolean
+  profileError: boolean
+  summariesError: boolean
   connecting: boolean
   summarizingRepo: string | null
   expandedRepo: string | false
@@ -32,6 +36,24 @@ type GitHubSkillsViewProps = {
   handleConnect: () => void
   handleSync: () => void
   clearError: () => void
+  refetch: () => void
+}
+
+/** セクション単位の取得失敗を示す、再試行ボタン付きの警告バー */
+function SectionErrorAlert({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <Alert
+      severity="warning"
+      sx={{ mb: 2 }}
+      action={
+        <Button color="inherit" size="small" onClick={onRetry}>
+          再試行
+        </Button>
+      }
+    >
+      {message}
+    </Alert>
+  )
 }
 
 export function GitHubSkillsView({
@@ -44,6 +66,9 @@ export function GitHubSkillsView({
   syncing,
   needsReauth,
   error,
+  skillsError,
+  profileError,
+  summariesError,
   connecting,
   summarizingRepo,
   expandedRepo,
@@ -52,6 +77,7 @@ export function GitHubSkillsView({
   handleConnect,
   handleSync,
   clearError,
+  refetch,
 }: GitHubSkillsViewProps) {
   const showScores = hasSkillScores(scores)
 
@@ -93,6 +119,13 @@ export function GitHubSkillsView({
         </Box>
       </Box>
 
+      {profileError && (
+        <SectionErrorAlert
+          message="プロフィール情報の取得に失敗しました。通信状況をご確認のうえ、再試行してください。"
+          onRetry={refetch}
+        />
+      )}
+
       {profile && (
         <Box sx={{ display: 'flex', gap: 3, mb: 3 }}>
           {[
@@ -110,6 +143,13 @@ export function GitHubSkillsView({
             </Box>
           ))}
         </Box>
+      )}
+
+      {skillsError && (
+        <SectionErrorAlert
+          message="スキルスコアの取得に失敗しました。通信状況をご確認のうえ、再試行してください。"
+          onRetry={refetch}
+        />
       )}
 
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, alignItems: 'flex-start' }}>
@@ -172,10 +212,19 @@ export function GitHubSkillsView({
         />
       )}
 
-      {!showScores && !loading && (
+      {!showScores && !loading && !skillsError && (
         <Typography variant="body2" sx={{ color: '#64748b', textAlign: 'center', py: 2 }}>
           スキルデータがありません。「同期」ボタンでGitHubデータを取得してください。
         </Typography>
+      )}
+
+      {summariesError && (
+        <Box sx={{ mt: 2 }}>
+          <SectionErrorAlert
+            message="リポジトリ要約の取得に失敗しました。通信状況をご確認のうえ、再試行してください。"
+            onRetry={refetch}
+          />
+        </Box>
       )}
 
       {profile && (
