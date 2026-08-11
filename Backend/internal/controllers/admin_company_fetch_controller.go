@@ -314,7 +314,7 @@ func (c *AdminCompanyController) FetchAllMissing(ctx echo.Context) error {
 	if c.jobFetcher != nil {
 		needJobs := forceRefresh || !companyfetch.IsFresh(company.JobsFetchedAt, companyfetch.TTLJobs)
 		if !needJobs {
-			existing, _ := c.repo.ListJobPositions(&companyID, 100)
+			existing, _ := c.repo.ListJobPositions(&companyID, nil, 100)
 			if len(existing) == 0 {
 				needJobs = true
 			} else {

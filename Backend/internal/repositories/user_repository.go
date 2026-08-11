@@ -84,7 +84,8 @@ func (r *UserRepository) ListUsers() ([]entity.User, error) {
 }
 
 // ListUsersPaged ページング付きユーザー一覧を取得
-func (r *UserRepository) ListUsersPaged(limit, offset int, query string) ([]entity.User, int64, error) {
+// schoolID が非nilの場合は個別校で絞り込む。
+func (r *UserRepository) ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
 	var ms []models.User
 	var total int64
 
@@ -92,6 +93,9 @@ func (r *UserRepository) ListUsersPaged(limit, offset int, query string) ([]enti
 	if query != "" {
 		like := "%" + query + "%"
 		q = q.Where("name LIKE ? OR email LIKE ? OR school_name LIKE ?", like, like, like)
+	}
+	if schoolID != nil {
+		q = q.Where("school_id = ?", *schoolID)
 	}
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err

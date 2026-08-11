@@ -122,7 +122,7 @@ func (s *CompanyMissingBatchService) Run(ctx context.Context, opts MissingBatchO
 		item.NeedInfo, item.NeedJobs, item.NeedTech, item.NeedRelations = MissingNeedsFromCompany(&c)
 		// DB 実データの欠落も不足扱い（*_fetched_at だけ進んでいる残骸対策）
 		if !opts.PrimaryOnly && !item.NeedJobs {
-			if jobs, err := s.repo.ListJobPositions(&c.ID, 1); err == nil && len(jobs) == 0 {
+			if jobs, err := s.repo.ListJobPositions(&c.ID, nil, 1); err == nil && len(jobs) == 0 {
 				item.NeedJobs = true
 			}
 		}

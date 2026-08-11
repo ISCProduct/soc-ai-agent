@@ -32,8 +32,8 @@ func (m *mockSessionRepo) ListByUser(userID uint, limit, offset int) ([]models.I
 	args := m.Called(userID, limit, offset)
 	return args.Get(0).([]models.InterviewSession), args.Error(1)
 }
-func (m *mockSessionRepo) ListAll(limit, offset int) ([]models.InterviewSession, error) {
-	args := m.Called(limit, offset)
+func (m *mockSessionRepo) ListAll(limit, offset int, schoolID *uint) ([]models.InterviewSession, error) {
+	args := m.Called(limit, offset, schoolID)
 	return args.Get(0).([]models.InterviewSession), args.Error(1)
 }
 func (m *mockSessionRepo) ListFinishedByUser(userID uint, limit int) ([]models.InterviewSession, error) {
@@ -44,8 +44,8 @@ func (m *mockSessionRepo) CountByUser(userID uint) (int64, error) {
 	args := m.Called(userID)
 	return args.Get(0).(int64), args.Error(1)
 }
-func (m *mockSessionRepo) CountAll() (int64, error) {
-	args := m.Called()
+func (m *mockSessionRepo) CountAll(schoolID *uint) (int64, error) {
+	args := m.Called(schoolID)
 	return args.Get(0).(int64), args.Error(1)
 }
 func (m *mockSessionRepo) CountByUserAndDay(userID uint, day time.Time) (int64, error) {
@@ -93,8 +93,8 @@ func (m *mockUserRepo) ListUsers() ([]entity.User, error) {
 	args := m.Called()
 	return args.Get(0).([]entity.User), args.Error(1)
 }
-func (m *mockUserRepo) ListUsersPaged(l, o int, q string) ([]entity.User, int64, error) {
-	args := m.Called(l, o, q)
+func (m *mockUserRepo) ListUsersPaged(l, o int, q string, schoolID *uint) ([]entity.User, int64, error) {
+	args := m.Called(l, o, q, schoolID)
 	return args.Get(0).([]entity.User), args.Get(1).(int64), args.Error(2)
 }
 func (m *mockUserRepo) UpdateUser(u *entity.User) error { return m.Called(u).Error(0) }

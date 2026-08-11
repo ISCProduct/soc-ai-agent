@@ -12,7 +12,8 @@ type User struct {
 	IsGuest                  bool   `gorm:"default:false"`                               // ゲストユーザーフラグ
 	Role                     string `gorm:"size:20;default:'student'" json:"role"`       // ユーザーロール: student / teacher
 	TargetLevel              string `gorm:"size:20;default:'新卒'"`                        // 新卒 or 中途
-	SchoolName               string `gorm:"size:255;column:school_name"`                 // 学校名
+	SchoolName               string `gorm:"size:255;column:school_name"`                 // 学校名(自由記述)
+	SchoolID                 *uint  `gorm:"column:school_id;index" json:"school_id,omitempty"` // 個別校(構造化、既存データはNULLのまま)
 	IsAdmin                  bool   `gorm:"default:false" json:"is_admin"`               // 管理者フラグ
 	OAuthProvider            string `gorm:"size:50;column:oauth_provider"`               // OAuth提供者 (google, github, など)
 	OAuthID                  string `gorm:"size:255;index;column:oauth_id"`              // OAuth提供者のユーザーID

@@ -216,7 +216,7 @@ func TestGitHubController_SummarizeRepo_Success(t *testing.T) {
 // ========== OAuthController ==========
 
 func newOAuthController(svc *mocks.OAuthServiceMock) *controllers.OAuthController {
-	return controllers.NewOAuthController(svc)
+	return controllers.NewOAuthController(svc, nil)
 }
 
 // ---- GoogleLogin ----

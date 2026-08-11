@@ -95,7 +95,15 @@ func (c *AdminCompanyController) List(ctx echo.Context) error {
 	industry := strings.TrimSpace(ctx.QueryParam("industry"))
 	readiness := strings.TrimSpace(ctx.QueryParam("readiness"))
 	orderBy := strings.TrimSpace(ctx.QueryParam("order"))
-	companies, total, err := c.repo.ListActiveFiltered(limit, offset, name, status, industry, readiness, orderBy)
+	// 企業カタログは共有のため school_id は「承認済みだけ見る」任意の絞り込み(閲覧制限ではない)。
+	var schoolID *uint
+	if raw := ctx.QueryParam("school_id"); raw != "" {
+		if id, err := strconv.ParseUint(raw, 10, 64); err == nil {
+			v := uint(id)
+			schoolID = &v
+		}
+	}
+	companies, total, err := c.repo.ListActiveFiltered(limit, offset, name, status, industry, readiness, orderBy, schoolID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch companies")
 	}

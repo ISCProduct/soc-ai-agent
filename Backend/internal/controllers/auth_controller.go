@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/middleware"
 	"Backend/internal/services"
 	"Backend/internal/services/interfaces"
 	"errors"
@@ -10,6 +11,12 @@ import (
 
 	"github.com/labstack/echo/v4"
 )
+
+// tenantOrgID はリクエストcontextからテナント解決済み組織ID(0の場合はテナント制約なし)を取り出す。
+func tenantOrgID(ctx echo.Context) uint {
+	id, _ := middleware.TenantOrganizationIDFromContext(ctx.Request().Context())
+	return id
+}
 
 // isProduction は APP_ENV=production のときのみ true を返す。
 func isProduction() bool { return os.Getenv("APP_ENV") == "production" }
@@ -29,7 +36,7 @@ func (c *AuthController) Register(ctx echo.Context) error {
 		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
 	}
 
-	resp, err := c.authService.Register(req)
+	resp, err := c.authService.Register(req, tenantOrgID(ctx))
 	if err != nil {
 		if err.Error() == "email already exists" {
 			if isProduction() {
@@ -55,13 +62,16 @@ func (c *AuthController) Login(ctx echo.Context) error {
 		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
 	}
 
-	resp, err := c.authService.Login(req)
+	resp, err := c.authService.Login(req, tenantOrgID(ctx))
 	if err != nil {
 		msg := err.Error()
 		if msg == "invalid email or password" || msg == "guest users cannot login" {
 			return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, msg)
 		}
 		if msg == "email_not_verified" || msg == "re_verification_required" {
+			return newAPIError(http.StatusForbidden, ErrCodeForbidden, msg)
+		}
+		if msg == "tenant mismatch" {
 			return newAPIError(http.StatusForbidden, ErrCodeForbidden, msg)
 		}
 		return echoInternalError(err)
@@ -72,7 +82,7 @@ func (c *AuthController) Login(ctx echo.Context) error {
 
 // CreateGuest ゲストユーザー作成
 func (c *AuthController) CreateGuest(ctx echo.Context) error {
-	resp, err := c.authService.CreateGuestUser()
+	resp, err := c.authService.CreateGuestUser(tenantOrgID(ctx))
 	if err != nil {
 		return echoInternalError(err)
 	}

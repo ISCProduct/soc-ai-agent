@@ -46,8 +46,11 @@ func (r *CompanyRepository) CountActive() (int64, error) {
 // industry が "__unset__" のときは業界未設定のみ。
 // readiness は "ready"（主3種そろい）/ "missing"（主3種不足）/ ""。
 // orderBy が "industry" のときは業界順、それ以外は id desc。
-func (r *CompanyRepository) ListActiveFiltered(limit, offset int, name, status, industry, readiness, orderBy string) ([]models.Company, int64, error) {
+func (r *CompanyRepository) ListActiveFiltered(limit, offset int, name, status, industry, readiness, orderBy string, schoolID *uint) ([]models.Company, int64, error) {
 	q := r.db.Model(&models.Company{}).Where("is_active = ?", true).Session(&gorm.Session{})
+	if schoolID != nil {
+		q = q.Joins("JOIN school_company_approvals ON school_company_approvals.company_id = companies.id AND school_company_approvals.school_id = ?", *schoolID)
+	}
 	if name = strings.TrimSpace(name); name != "" {
 		q = q.Where("name LIKE ?", "%"+name+"%")
 	}
@@ -251,7 +254,8 @@ func (r *CompanyRepository) FindJobPositionsByCompany(companyID uint) ([]models.
 }
 
 // ListJobPositions 募集職種を一覧取得
-func (r *CompanyRepository) ListJobPositions(companyID *uint, limit int) ([]models.CompanyJobPosition, error) {
+// ListJobPositions は求人一覧を返す。schoolID が非nilの場合は学校ごとの掲載承認リストで絞り込む。
+func (r *CompanyRepository) ListJobPositions(companyID, schoolID *uint, limit int) ([]models.CompanyJobPosition, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -259,6 +263,9 @@ func (r *CompanyRepository) ListJobPositions(companyID *uint, limit int) ([]mode
 	query := r.db.Preload("JobCategory").Preload("Company")
 	if companyID != nil {
 		query = query.Where("company_id = ?", *companyID)
+	}
+	if schoolID != nil {
+		query = query.Joins("JOIN school_company_approvals ON school_company_approvals.company_id = company_job_positions.company_id AND school_company_approvals.school_id = ?", *schoolID)
 	}
 	err := query.Order("created_at desc").Limit(limit).Find(&positions).Error
 	return positions, err
