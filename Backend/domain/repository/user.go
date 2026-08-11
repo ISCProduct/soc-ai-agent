@@ -10,7 +10,8 @@ type UserRepository interface {
 	GetUserByEmail(email string) (*entity.User, error)
 	GetUserByID(id uint) (*entity.User, error)
 	ListUsers() ([]entity.User, error)
-	ListUsersPaged(limit, offset int, query string) ([]entity.User, int64, error)
+	// schoolID が非nilの場合は個別校で絞り込む。
+	ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error)
 	UpdateUser(user *entity.User) error
 	DeleteUser(id uint) error
 	GetUserByVerificationToken(token string) (*entity.User, error)

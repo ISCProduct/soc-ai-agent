@@ -14,7 +14,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
+// Login はメール・パスワードでログインする。
+// tenantOrgID はHostサブドメインから解決された組織ID（0の場合はテナント制約なし）。
+func (s *AuthService) Login(req LoginRequest, tenantOrgID uint) (*AuthResponse, error) {
 	// バリデーション
 	if req.Email == "" || req.Password == "" {
 		return nil, errors.New("email and password are required")
@@ -30,6 +32,9 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 	}
 	if user.IsWithdrawn() {
 		return nil, errors.New("account has been withdrawn")
+	}
+	if tenantOrgID != 0 && user.OrganizationID != tenantOrgID {
+		return nil, errors.New("tenant mismatch")
 	}
 
 	// ゲストユーザーはログイン不可
@@ -115,7 +120,8 @@ func (s *AuthService) Login(req LoginRequest) (*AuthResponse, error) {
 }
 
 // CreateGuestUser ゲストユーザー作成
-func (s *AuthService) CreateGuestUser() (*AuthResponse, error) {
+// tenantOrgID はHostサブドメインから解決された組織ID（0の場合はデフォルト組織へ所属）。
+func (s *AuthService) CreateGuestUser(tenantOrgID uint) (*AuthResponse, error) {
 	// ランダムなゲストID生成
 	randomBytes := make([]byte, 16)
 	if _, err := rand.Read(randomBytes); err != nil {
@@ -124,12 +130,13 @@ func (s *AuthService) CreateGuestUser() (*AuthResponse, error) {
 	guestID := base64.URLEncoding.EncodeToString(randomBytes)
 
 	user := &entity.User{
-		Email:       fmt.Sprintf("guest_%s@%s", guestID, config.GuestEmailDomain()),
-		Password:    "", // ゲストユーザーはパスワード不要
-		Name:        fmt.Sprintf("Guest_%s", guestID[:8]),
-		IsGuest:     true,
-		TargetLevel: "未設定",
-		SchoolName:  config.SchoolName(),
+		Email:          fmt.Sprintf("guest_%s@%s", guestID, config.GuestEmailDomain()),
+		Password:       "", // ゲストユーザーはパスワード不要
+		Name:           fmt.Sprintf("Guest_%s", guestID[:8]),
+		IsGuest:        true,
+		TargetLevel:    "未設定",
+		SchoolName:     config.SchoolName(),
+		OrganizationID: tenantOrgID,
 	}
 
 	if err := s.userRepo.CreateUser(user); err != nil {

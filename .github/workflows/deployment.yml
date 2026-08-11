@@ -1,5 +1,7 @@
-name: Deploy Frontend & Backend to ECS
+name: Deploy
 
+# develop -> staging（IAMロール無しEC2 + Docker Compose、SSHでpull/up）
+# main    -> production（ECS on Fargate、展示会時起動。desired_countは変更しない）
 on:
   push:
     branches:
@@ -7,25 +9,24 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
-  deploy:
+  deploy-staging:
+    if: github.ref_name == 'develop'
+    name: Deploy to staging
     runs-on: ubuntu-latest
-    # develop -> staging (ECS on EC2) / main -> production (ECS on Fargate, 展示会時起動)
-    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    environment: staging
 
     env:
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-
-      # ECR
-      ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
-      ECR_REPOSITORY_FRONTEND: ${{ secrets.ECR_REPOSITORY_FRONTEND }}
-      ECR_REPOSITORY_BACKEND: ${{ secrets.ECR_REPOSITORY_BACKEND }}
-      IMAGE_TAG: ${{ github.sha }}
-
-      # ECS
-      ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
-      ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
-      ECS_TASK_FAMILY: ${{ secrets.ECS_TASK_FAMILY }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
+      ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+      # staging EC2上のdocker-compose.ymlはこのタグを固定で参照しているため、
+      # SHAタグではなく固定タグにする（pull => 中身が更新される）
+      IMAGE_TAG: staging
+      PROJECT_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}
 
     steps:
       - name: Checkout
@@ -41,63 +42,150 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # =========================
-      # Buildx のセットアップ
-      # =========================
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # =========================
-      # フロントエンドのビルドとプッシュ
-      # =========================
-      - name: Build frontend image
+      - name: Build and push frontend image
         working-directory: ./frontend
         run: |
           docker buildx build --platform linux/amd64 \
             --build-arg NODE_ENV=production \
-            --build-arg NEXT_PUBLIC_BACKEND_URL=https://api.shukatsu-ai.jp \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG \
+            --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }} \
+            -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG \
             --push .
 
-      # =========================
-      # バックエンドのビルドとプッシュ
-      # =========================
-      - name: Build backend image
+      - name: Build and push backend image
         working-directory: ./Backend
         run: |
           docker buildx build --platform linux/amd64 \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG \
+            -t $ECR_REGISTRY/soc-backend:$IMAGE_TAG \
             --push .
 
-      # =========================
-      # タスク定義の更新（フロント）
-      # =========================
-      - name: Render task definition (frontend)
-        id: render-frontend
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: .aws/task-definition-template.json
-          container-name: soc-frontend
-          image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ env.IMAGE_TAG }}
+      - name: Build and push rag-review image
+        working-directory: ./rag
+        run: |
+          docker buildx build --platform linux/amd64 \
+            -t $ECR_REGISTRY/soc-rag-review:$IMAGE_TAG \
+            --push .
 
-      # =========================
-      # タスク定義の更新（バックエンド）
-      # =========================
-      - name: Render task definition (backend)
+      - name: Resolve staging instance IP
+        id: instance
+        run: |
+          IP=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=${PROJECT_NAME}-app" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+          if [ -z "$IP" ] || [ "$IP" == "None" ]; then
+            echo "staging instance not found (ASG未起動、またはタグ不一致)" >&2
+            exit 1
+          fi
+          echo "ip=$IP" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy via SSH (docker compose pull && up -d)
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ steps.instance.outputs.ip }}
+          username: ubuntu
+          key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            sudo bash -c '
+              aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
+              cd /opt/app
+              docker compose pull
+              docker compose up -d
+            '
+
+  deploy-production:
+    if: github.ref_name == 'main'
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    environment: production
+
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
+      ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+      IMAGE_TAG: ${{ github.sha }}
+      # ECSクラスタ名・タスク定義family接頭辞はともにTerraformのproject_name（既定soc-app）由来
+      PROJECT_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push frontend image
+        working-directory: ./frontend
+        run: |
+          docker buildx build --platform linux/amd64 \
+            --build-arg NODE_ENV=production \
+            --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }} \
+            -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG \
+            --push .
+
+      - name: Build and push backend image
+        working-directory: ./Backend
+        run: |
+          docker buildx build --platform linux/amd64 \
+            -t $ECR_REGISTRY/soc-backend:$IMAGE_TAG \
+            --push .
+
+      # ECS Fargateのタスク定義はTerraformが管理する。CIはTerraform applyを
+      # 行わず、現在のタスク定義のimageだけ差し替えて新リビジョンを登録する
+      # （実行/タスクロールのIAM操作が不要なため、デプロイ用の最小権限で完結する）。
+      - name: Fetch current backend task definition
+        run: |
+          aws ecs describe-task-definition --task-definition "${PROJECT_NAME}-backend" \
+            --query 'taskDefinition' \
+            | jq 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' \
+            > backend-task-def.json
+
+      - name: Render backend task definition
         id: render-backend
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: ${{ steps.render-frontend.outputs.task-definition }}
+          task-definition: backend-task-def.json
           container-name: soc-backend
-          image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_BACKEND }}:${{ env.IMAGE_TAG }}
+          image: ${{ env.ECR_REGISTRY }}/soc-backend:${{ env.IMAGE_TAG }}
 
-      # =========================
-      # ECS デプロイ
-      # =========================
-      - name: Deploy to Amazon ECS
+      - name: Deploy backend service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-backend.outputs.task-definition }}
-          service: ${{ env.ECS_SERVICE }}
-          cluster: ${{ env.ECS_CLUSTER }}
+          service: backend
+          cluster: ${{ env.PROJECT_NAME }}
+          wait-for-service-stability: true
+
+      - name: Fetch current frontend task definition
+        run: |
+          aws ecs describe-task-definition --task-definition "${PROJECT_NAME}-frontend" \
+            --query 'taskDefinition' \
+            | jq 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' \
+            > frontend-task-def.json
+
+      - name: Render frontend task definition
+        id: render-frontend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: frontend-task-def.json
+          container-name: soc-frontend
+          image: ${{ env.ECR_REGISTRY }}/soc-frontend:${{ env.IMAGE_TAG }}
+
+      - name: Deploy frontend service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-frontend.outputs.task-definition }}
+          service: frontend
+          cluster: ${{ env.PROJECT_NAME }}
           wait-for-service-stability: true

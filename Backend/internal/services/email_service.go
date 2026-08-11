@@ -521,17 +521,6 @@ func (s *EmailService) SendCompanyEntryThankYouAndInvite(email, companyName, inv
 </div>
 </body></html>`, companyName, ctaBlock)
 
-	if s.host == "" {
-		log.Printf("[EmailService] Company entry thank-you for %s (company=%s, invite=%v)\n", email, companyName, inviteToken != "")
-		return nil
-	}
-
-	msg := fmt.Sprintf(
-		"From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
-		s.from, email, "【AI就活エージェント】企業情報のご登録ありがとうございます", body,
-	)
-	addr := fmt.Sprintf("%s:%d", s.host, s.port)
-	auth := smtp.PlainAuth("", s.user, s.password, s.host)
-	return smtp.SendMail(addr, auth, s.from, []string{email}, []byte(msg))
+	return s.sendHTML([]string{email}, "【AI就活エージェント】企業情報のご登録ありがとうございます", body)
 }
 

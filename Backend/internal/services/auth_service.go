@@ -12,15 +12,16 @@ import (
 const bcryptCost = 12
 
 type AuthService struct {
-	userRepo      repository.UserRepository
-	pendingRepo   repository.PendingRegistrationRepository
-	emailService  *EmailService
-	db            *gorm.DB
-	object        ObjectDeleter
-	audit         auditRecorder
-	deletion      *UserDeletionService
-	refreshTokens *RefreshTokenService
+	userRepo         repository.UserRepository
+	pendingRepo      repository.PendingRegistrationRepository
+	emailService     *EmailService
+	db               *gorm.DB
+	object           ObjectDeleter
+	audit            auditRecorder
+	deletion         *UserDeletionService
+	refreshTokens    *RefreshTokenService
 	ownershipClaimer CompanyOwnershipClaimer
+	schoolRepo       repository.SchoolRepository
 }
 
 // CompanyOwnershipClaimer は本登録時に企業クレームを行う（#754）
@@ -66,6 +67,24 @@ func (s *AuthService) rebuildDeletionService() {
 // SetRefreshTokenService はリフレッシュトークン管理サービスを注入する (#616)
 func (s *AuthService) SetRefreshTokenService(rts *RefreshTokenService) {
 	s.refreshTokens = rts
+}
+
+// SetSchoolRepo は個別校の自動解決に使うリポジトリを注入する。未設定なら解決をスキップする。
+func (s *AuthService) SetSchoolRepo(repo repository.SchoolRepository) {
+	s.schoolRepo = repo
+}
+
+// resolveSchoolID は school_name が既存の学校名と完全一致した場合にのみ school_id を返す(ベストエフォート)。
+// 一致しない・未設定・エラー時は nil を返し、呼び出し側の処理を止めない。
+func (s *AuthService) resolveSchoolID(schoolName string) *uint {
+	if s.schoolRepo == nil || schoolName == "" {
+		return nil
+	}
+	school, err := s.schoolRepo.FindByName(schoolName)
+	if err != nil || school == nil {
+		return nil
+	}
+	return &school.ID
 }
 
 // issueRefreshToken はリフレッシュトークンを発行する（サービス未注入時は空文字を返す）

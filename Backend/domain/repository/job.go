@@ -16,5 +16,6 @@ type GraduateEmploymentRepository interface {
 	Create(entry *models.GraduateEmployment) error
 	FindByID(id uint) (*models.GraduateEmployment, error)
 	Update(entry *models.GraduateEmployment) error
-	List(companyID *uint, limit int) ([]models.GraduateEmployment, error)
+	// schoolID が非nilの場合は個別校で絞り込む。
+	List(companyID, schoolID *uint, limit int) ([]models.GraduateEmployment, error)
 }

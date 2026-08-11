@@ -42,7 +42,7 @@ func TestListActiveFiltered_ByNameAndStatus(t *testing.T) {
 			AddRow(2, "ソニー損保", "draft", true).
 			AddRow(1, "ソニー株式会社", "published", true))
 
-	all, total, err := repo.ListActiveFiltered(50, 0, "ソニー", "", "", "", "")
+	all, total, err := repo.ListActiveFiltered(50, 0, "ソニー", "", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestListActiveFiltered_ByNameAndStatus(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "data_status", "is_active"}).
 			AddRow(1, "ソニー株式会社", "published", true))
 
-	published, total, err := repo.ListActiveFiltered(50, 0, "ソニー", "published", "", "", "")
+	published, total, err := repo.ListActiveFiltered(50, 0, "ソニー", "published", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestListActiveFiltered_ByIndustryAndReadiness(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "industry", "is_active"}).
 			AddRow(1, "サンプルIT", "IT・ソフトウェア", true))
 
-	byIndustry, total, err := repo.ListActiveFiltered(50, 0, "", "", "IT・ソフトウェア", "", "")
+	byIndustry, total, err := repo.ListActiveFiltered(50, 0, "", "", "IT・ソフトウェア", "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestListActiveFiltered_ByIndustryAndReadiness(t *testing.T) {
 		WithArgs(true, 50).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
 
-	unset, total, err := repo.ListActiveFiltered(50, 0, "", "", "__unset__", "", "")
+	unset, total, err := repo.ListActiveFiltered(50, 0, "", "", "__unset__", "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

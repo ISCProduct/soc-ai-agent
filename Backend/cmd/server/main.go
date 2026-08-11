@@ -205,8 +205,11 @@ func main() {
 	aiClient.OnUsage = func(model string, promptTokens, completionTokens int) {
 		apiCostService.LogCall(model, promptTokens, completionTokens)
 	}
+	schoolRepo := repositories.NewSchoolRepository(db)
+	schoolService := services.NewSchoolService(schoolRepo)
 	authService := services.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	authService.SetDB(db)
+	authService.SetSchoolRepo(schoolRepo)
 	// リフレッシュトークン管理 (#616)
 	refreshTokenRepo := repositories.NewUserRefreshTokenRepository(db)
 	refreshTokenService := services.NewRefreshTokenService(refreshTokenRepo)
@@ -259,8 +262,10 @@ func main() {
 	resumeService.SetCrossFeatureService(crossFeatureService)
 
 	// コントローラー層の初期化
+	organizationRepo := repositories.NewOrganizationRepository(db)
+	organizationService := services.NewOrganizationService(organizationRepo)
 	authController := controllers.NewAuthController(authService)
-	oauthController := controllers.NewOAuthController(oauthService)
+	oauthController := controllers.NewOAuthController(oauthService, organizationService)
 	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := controllers.NewCompanyRelationController(companyQueryRepo, aiClient)
@@ -299,9 +304,8 @@ func main() {
 		authService.SetObjectDeleter(s3UploadService)
 	}
 	userDeletionService := services.NewUserDeletionService(db, objectDeleter, auditLogService)
-	organizationRepo := repositories.NewOrganizationRepository(db)
-	organizationService := services.NewOrganizationService(organizationRepo)
 	adminOrganizationController := controllers.NewAdminOrganizationController(organizationService)
+	adminSchoolController := controllers.NewAdminSchoolController(schoolService)
 	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
 	adminUserController.SetDeletionService(userDeletionService)
 	interviewController := controllers.NewInterviewController(interviewService, videoRepo, s3UploadService)
@@ -354,6 +358,7 @@ func main() {
 	e.Use(echo.WrapMiddleware(middleware.RequestLoggerMiddleware))
 	e.Use(echo.WrapMiddleware(securityHeadersMiddleware))
 	e.Use(echo.WrapMiddleware(buildCORSMiddleware()))
+	e.Use(routes.EchoTenantResolver(organizationService))
 
 	// ヘルスチェックエンドポイント
 	// /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス
@@ -371,7 +376,7 @@ func main() {
 	routes.SetupAuthRoutes(api, authController, oauthController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCompanyRoutes(api, relationController)
-	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, adminVectorController, userRepo, cfg.AdminSecret)
+	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, adminVectorController, userRepo, schoolService, cfg.AdminSecret)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService)

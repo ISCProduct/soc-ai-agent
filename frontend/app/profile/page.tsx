@@ -100,7 +100,7 @@ function ProfilePageContent() {
     setName(storedUser.name || '')
 
     const storedSchool = storedUser.school_name || ''
-    const predefinedSchools = ['学校法人岩崎学園情報科学専門学校']
+    const predefinedSchools = ['学校法人岩崎学園情報科学専門学校', '横浜デジタルアーツ専門学校']
     if (predefinedSchools.includes(storedSchool)) {
       setSchoolOption(storedSchool)
       setSchoolName(storedSchool)
@@ -372,6 +372,9 @@ function ProfilePageContent() {
                   >
                     <MenuItem value="学校法人岩崎学園情報科学専門学校">
                       学校法人岩崎学園情報科学専門学校
+                    </MenuItem>
+                    <MenuItem value="横浜デジタルアーツ専門学校">
+                      横浜デジタルアーツ専門学校
                     </MenuItem>
                     <MenuItem value="other">その他</MenuItem>
                   </TextField>

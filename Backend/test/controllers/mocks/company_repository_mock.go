@@ -33,8 +33,8 @@ func (m *CompanyRepositoryMock) CountActive() (int64, error) {
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *CompanyRepositoryMock) ListActiveFiltered(limit, offset int, name, status, industry, readiness, orderBy string) ([]models.Company, int64, error) {
-	args := m.Called(limit, offset, name, status, industry, readiness, orderBy)
+func (m *CompanyRepositoryMock) ListActiveFiltered(limit, offset int, name, status, industry, readiness, orderBy string, schoolID *uint) ([]models.Company, int64, error) {
+	args := m.Called(limit, offset, name, status, industry, readiness, orderBy, schoolID)
 	if v := args.Get(0); v != nil {
 		return v.([]models.Company), args.Get(1).(int64), args.Error(2)
 	}
@@ -146,8 +146,8 @@ func (m *CompanyRepositoryMock) FindJobPositionsByCompany(companyID uint) ([]mod
 	return nil, args.Error(1)
 }
 
-func (m *CompanyRepositoryMock) ListJobPositions(companyID *uint, limit int) ([]models.CompanyJobPosition, error) {
-	args := m.Called(companyID, limit)
+func (m *CompanyRepositoryMock) ListJobPositions(companyID, schoolID *uint, limit int) ([]models.CompanyJobPosition, error) {
+	args := m.Called(companyID, schoolID, limit)
 	if v := args.Get(0); v != nil {
 		return v.([]models.CompanyJobPosition), args.Error(1)
 	}

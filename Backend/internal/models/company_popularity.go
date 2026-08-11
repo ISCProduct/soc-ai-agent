@@ -27,6 +27,7 @@ type GraduateEmployment struct {
 	GraduateName   string              `gorm:"type:varchar(255)" json:"graduate_name"`
 	GraduationYear int                 `json:"graduation_year"`
 	SchoolName     string              `gorm:"type:varchar(255)" json:"school_name"`
+	SchoolID       *uint               `gorm:"index" json:"school_id,omitempty"`
 	Department     string              `gorm:"type:varchar(255)" json:"department"`
 	HiredAt        *time.Time          `json:"hired_at,omitempty"`
 	Note           string              `gorm:"type:text" json:"note"`

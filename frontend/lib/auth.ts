@@ -1,4 +1,12 @@
 import { BACKEND_URL } from './backend-url'
+import { extractTenantSlug } from './tenant'
+
+// middleware.tsを経由しない直接Backend fetch用に、現在のHostから学園slugヘッダーを組み立てる
+function getTenantHeaders(): Record<string, string> {
+  if (typeof window === 'undefined') return {}
+  const slug = extractTenantSlug(window.location.hostname)
+  return slug ? { 'X-Tenant-Slug': slug } : {}
+}
 const AUTH_USER_KEY = 'user'
 const AUTH_TOKEN_KEY = 'token'
 const AUTH_USER_TOKEN_KEY = 'user_token'
@@ -110,7 +118,7 @@ export const authService = {
   async login(email: string, password: string): Promise<AuthResponse> {
     const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getTenantHeaders() },
       body: JSON.stringify({ email, password }),
     })
     if (!res.ok) {
@@ -156,7 +164,7 @@ export const authService = {
   ): Promise<AuthResponse> {
     const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getTenantHeaders() },
       body: JSON.stringify({
         email,
         password,
@@ -177,6 +185,7 @@ export const authService = {
   async createGuest(): Promise<AuthResponse> {
     const res = await fetch(`${BACKEND_URL}/api/auth/guest`, {
       method: 'POST',
+      headers: getTenantHeaders(),
     })
     if (!res.ok) throw new Error('Failed to create guest user')
     return res.json()
@@ -322,6 +331,7 @@ export const authService = {
     const token = this.getStoredUserToken()
     return {
       'X-User-Token': token || '',
+      ...getTenantHeaders(),
     }
   },
 

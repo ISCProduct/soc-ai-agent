@@ -52,30 +52,10 @@ terraform plan
 terraform apply
 ```
 
-## CI/CD (GitHub Actions)
+## CI/CD
 
-`.github/workflows/terraform-oci.yml` により自動実行されます。
-
-| イベント | 動作 |
-|---|---|
-| PR作成・更新 (`infra/terraform/**` 変更時) | `terraform plan` を実行してプランを確認 |
-| `main` へのマージ | `terraform apply` を実行してインフラを更新 |
-
-### 必要な GitHub Secrets
-
-| Secret 名 | 内容 |
-|---|---|
-| `OCI_TENANCY_OCID` | テナンシーの OCID |
-| `OCI_USER_OCID` | ユーザーの OCID |
-| `OCI_FINGERPRINT` | API キーのフィンガープリント |
-| `OCI_PRIVATE_KEY` | API 秘密鍵の内容 (PEM全体) |
-| `OCI_REGION` | リージョン (例: `ap-tokyo-1`) |
-| `OCI_COMPARTMENT_ID` | コンパートメントの OCID (空でもOK) |
-| `OCI_AVAILABILITY_DOMAIN` | 可用性ドメイン名 |
-| `OCI_SSH_PUBLIC_KEY` | Compute Instance の SSH 公開鍵 |
-| `OCI_IMAGE_ID` | イメージの OCID |
-| `OCI_DB_ADMIN_PASSWORD` | MySQL 管理者パスワード |
-| `OCI_STORAGE_NAMESPACE` | Object Storage ネームスペース |
+現行運用では OCI を使わないため、GitHub Actions（旧 `terraform-oci.yml`）は削除済み。
+必要になった場合はローカルで `terraform plan` / `apply` する。
 
 ## セキュリティ注意事項
 
