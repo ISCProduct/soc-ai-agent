@@ -1,0 +1,56 @@
+name: Deploy Smoke Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: '対象環境'
+        required: true
+        type: choice
+        options:
+          - staging
+        default: staging
+
+concurrency:
+  group: deploy-smoke-${{ github.event.inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Playwright Smoke (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./frontend
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: ./frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: ./frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run smoke tests
+        run: npx playwright test --config=playwright.smoke.config.ts
+        env:
+          CI: true
+          PLAYWRIGHT_BASE_URL: ${{ vars.STAGING_BASE_URL || 'https://stg.shukatsu-ai.jp' }}
+          PLAYWRIGHT_API_BASE_URL: ${{ vars.STAGING_API_BASE_URL || 'https://api-stg.shukatsu-ai.jp' }}
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.event.inputs.environment }}
+          path: frontend/playwright-report/
+          retention-days: 7
