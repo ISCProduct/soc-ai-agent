@@ -32,11 +32,6 @@ import { BACKEND_URL } from '@/lib/backend-url'
 import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '@/lib/profile'
 import GitHubSkills from '@/components/github-skills'
 import { PageLoading } from '@/components/common/PageLoading'
-import {
-  GUEST_LIMITATIONS,
-  GUEST_REGISTER_CTA_LABEL,
-  GUEST_REGISTER_PATH,
-} from '@/lib/guest-limits'
 
 export default function ProfilePage() {
   return (
@@ -66,6 +61,34 @@ function ProfilePageContent() {
   const [calendarConnected, setCalendarConnected] = useState(false)
   const [calendarLoading, setCalendarLoading] = useState(false)
   const [calendarMessage, setCalendarMessage] = useState('')
+  const [calendarStatusError, setCalendarStatusError] = useState(false)
+  const [calendarStatusLoading, setCalendarStatusLoading] = useState(true)
+
+  const fetchCalendarStatus = async () => {
+    setCalendarStatusLoading(true)
+    setCalendarStatusError(false)
+    try {
+      const r = await fetch(`${BACKEND_URL}/api/google-calendar/status`, {
+        headers: authService.getUserFetchHeaders(),
+        credentials: 'include',
+      })
+      if (r.status === 401) {
+        // 未ログイン・セッション切れ時は連携状態を取得しない（エラー表示はしない）
+        return
+      }
+      if (!r.ok) {
+        setCalendarStatusError(true)
+        return
+      }
+      const d = await r.json()
+      setCalendarConnected(d.connected === true)
+    } catch {
+      // 通信障害時は「未連携」と誤表示せず、エラー状態を示す
+      setCalendarStatusError(true)
+    } finally {
+      setCalendarStatusLoading(false)
+    }
+  }
 
   useEffect(() => {
     const storedUser = authService.getStoredUser()
@@ -98,20 +121,7 @@ function ProfilePageContent() {
     setIsFirstTime(firstTime)
 
     // Googleカレンダー連携状態を取得
-    void (async () => {
-      try {
-        await authService.ensureFreshUserToken()
-        const r = await fetch(`${BACKEND_URL}/api/google-calendar/status`, {
-          headers: authService.getUserFetchHeaders(),
-          credentials: 'include',
-        })
-        if (!r.ok) return
-        const d = await r.json()
-        setCalendarConnected(d.connected === true)
-      } catch {
-        // 未ログイン・期限切れ時は連携状態を取得しない
-      }
-    })()
+    fetchCalendarStatus()
 
     // コールバック後のメッセージ処理
     const calendarConnectedParam = searchParams.get('calendar_connected')
@@ -159,7 +169,6 @@ function ProfilePageContent() {
     if (!user) return
     setDeleting(true)
     try {
-      await authService.ensureFreshUserToken()
       const res = await fetch(`/api/auth/account?user_id=${user.user_id}`, {
         method: 'DELETE',
         headers: authService.getUserFetchHeaders(),
@@ -171,8 +180,6 @@ function ProfilePageContent() {
       }
       authService.logout?.()
       router.replace('/login?deleted=1')
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'アカウント削除に失敗しました')
     } finally {
       setDeleting(false)
       setDeleteDialogOpen(false)
@@ -181,29 +188,17 @@ function ProfilePageContent() {
 
   const handleCalendarConnect = async () => {
     if (!user) return
-    setCalendarMessage('')
     try {
-      await authService.ensureFreshUserToken()
       // バックエンドから認証URLを取得し、ブラウザをリダイレクト
       // credentials: 'include' でstateクッキーをブラウザに設定する
       const res = await fetch(`${BACKEND_URL}/api/google-calendar/connect`, {
         headers: { ...authService.getUserFetchHeaders(), Accept: 'application/json' },
         credentials: 'include',
       })
-      if (res.status === 401) {
-        setCalendarMessage('ログインの有効期限が切れました。再ログインしてください。')
-        return
-      }
       if (!res.ok) throw new Error('Failed to get auth URL')
       const data = await res.json()
-      if (!data?.auth_url) throw new Error('auth_url missing')
       window.location.href = data.auth_url
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : ''
-      if (msg.includes('Unauthorized') || msg.includes('再ログイン')) {
-        setCalendarMessage('ログインの有効期限が切れました。再ログインしてください。')
-        return
-      }
+    } catch {
       setCalendarMessage('Googleカレンダー連携の開始に失敗しました')
     }
   }
@@ -212,7 +207,6 @@ function ProfilePageContent() {
     setCalendarLoading(true)
     setCalendarMessage('')
     try {
-      await authService.ensureFreshUserToken()
       const res = await fetch(`${BACKEND_URL}/api/google-calendar/disconnect`, {
         method: 'DELETE',
         headers: authService.getUserFetchHeaders(),
@@ -221,15 +215,6 @@ function ProfilePageContent() {
       if (res.ok) {
         setCalendarConnected(false)
         setCalendarMessage('Googleカレンダーの連携を解除しました')
-      } else if (res.status === 401) {
-        setCalendarMessage('ログインの有効期限が切れました。再ログインしてください。')
-      } else {
-        setCalendarMessage('連携解除に失敗しました')
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : ''
-      if (msg.includes('Unauthorized') || msg.includes('再ログイン')) {
-        setCalendarMessage('ログインの有効期限が切れました。再ログインしてください。')
       } else {
         setCalendarMessage('連携解除に失敗しました')
       }
@@ -289,14 +274,6 @@ function ProfilePageContent() {
                       sx={{ bgcolor: '#24292e', color: 'white', fontSize: '0.7rem' }}
                     />
                   )}
-                  {isGuest && (
-                    <Chip
-                      label="ゲスト"
-                      size="small"
-                      color="default"
-                      variant="outlined"
-                    />
-                  )}
                   {(targetLevel === '新卒' || targetLevel === '中途') && (
                     <Chip
                       label={targetLevel}
@@ -316,19 +293,6 @@ function ProfilePageContent() {
                 )}
               </Box>
             </Box>
-            {isGuest && (
-              <Alert
-                severity="info"
-                sx={{ mt: 2 }}
-                action={
-                  <Button color="inherit" size="small" onClick={() => router.push(GUEST_REGISTER_PATH)}>
-                    {GUEST_REGISTER_CTA_LABEL}
-                  </Button>
-                }
-              >
-                ゲストでは次の機能が制限されています: {GUEST_LIMITATIONS.join('、')}。
-              </Alert>
-            )}
           </CardContent>
         </Card>
 
@@ -517,7 +481,19 @@ function ProfilePageContent() {
                   {calendarMessage}
                 </Alert>
               )}
-              {calendarConnected ? (
+              {calendarStatusError ? (
+                <Alert
+                  severity="warning"
+                  sx={{ mb: 2 }}
+                  action={
+                    <Button color="inherit" size="small" onClick={fetchCalendarStatus} disabled={calendarStatusLoading}>
+                      {calendarStatusLoading ? '再試行中...' : '再試行'}
+                    </Button>
+                  }
+                >
+                  連携状態を確認できませんでした。通信状況をご確認のうえ、再試行してください。
+                </Alert>
+              ) : calendarConnected ? (
                 <Button
                   variant="outlined"
                   color="error"
