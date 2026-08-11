@@ -19,6 +19,7 @@ import Link from 'next/link'
 import { authService, AuthResponse } from '@/lib/auth'
 import { BACKEND_URL } from '@/lib/backend-url'
 import { GUEST_LIMITATIONS } from '@/lib/guest-limits'
+import { extractTenantSlug } from '@/lib/tenant'
 
 interface LoginPageProps {
   onAuthSuccess: (authResponse: AuthResponse) => void
@@ -92,7 +93,9 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
   const handleOAuthLogin = (provider: 'google' | 'github') => {
     // バックエンドのOAuthエンドポイントへ直接遷移する
     // fetch経由ではなく直接ナビゲートすることでクッキーが同一オリジンで正しく設定される
-    window.location.href = `${BACKEND_URL}/api/auth/${provider}`
+    const slug = extractTenantSlug(window.location.hostname)
+    const tenantParam = slug ? `?tenant=${encodeURIComponent(slug)}` : ''
+    window.location.href = `${BACKEND_URL}/api/auth/${provider}${tenantParam}`
   }
 
   return (

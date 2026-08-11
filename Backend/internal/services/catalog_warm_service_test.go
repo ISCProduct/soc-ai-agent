@@ -29,7 +29,7 @@ func (s *warmRepoStub) FindAllActiveNames(string) ([]models.CompanyName, error) 
 	return nil, nil
 }
 func (s *warmRepoStub) CountActive() (int64, error) { return 0, nil }
-func (s *warmRepoStub) ListActiveFiltered(int, int, string, string, string, string, string) ([]models.Company, int64, error) {
+func (s *warmRepoStub) ListActiveFiltered(int, int, string, string, string, string, string, *uint) ([]models.Company, int64, error) {
 	return nil, 0, nil
 }
 func (s *warmRepoStub) ListActiveIndustries() ([]string, error) { return nil, nil }
@@ -53,7 +53,7 @@ func (s *warmRepoStub) UpdateJobPosition(*models.CompanyJobPosition) error      
 func (s *warmRepoStub) FindJobPositionsByCompany(uint) ([]models.CompanyJobPosition, error) {
 	return nil, nil
 }
-func (s *warmRepoStub) ListJobPositions(*uint, int) ([]models.CompanyJobPosition, error) {
+func (s *warmRepoStub) ListJobPositions(*uint, *uint, int) ([]models.CompanyJobPosition, error) {
 	return nil, nil
 }
 func (s *warmRepoStub) CreateOrUpdateWeightProfile(*models.CompanyWeightProfile) error { return nil }

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/middleware"
 	"Backend/internal/models"
 	ifaces "Backend/internal/services/interfaces"
 	"encoding/json"
@@ -83,8 +84,9 @@ func (c *AdminDashboardController) ListUsers(ctx echo.Context) error {
 	offset := (echoIntQuery(ctx, "page", 1) - 1) * limit
 	query := ctx.QueryParam("query")
 	sort := ctx.QueryParam("sort") // avg_score_asc | avg_score_desc | session_count_desc | registered_desc
+	schoolID, _ := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
 
-	users, total, err := c.userRepo.ListUsersPaged(limit, offset, query)
+	users, total, err := c.userRepo.ListUsersPaged(limit, offset, query, schoolID)
 	if err != nil {
 		return echoInternalError(err)
 	}
@@ -232,7 +234,8 @@ func (c *AdminDashboardController) UserSessions(ctx echo.Context) error {
 
 // ExportCSV handles GET /api/admin/dashboard/export/csv
 func (c *AdminDashboardController) ExportCSV(ctx echo.Context) error {
-	users, _, err := c.userRepo.ListUsersPaged(10000, 0, "")
+	schoolID, _ := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
+	users, _, err := c.userRepo.ListUsersPaged(10000, 0, "", schoolID)
 	if err != nil {
 		return echoInternalError(err)
 	}

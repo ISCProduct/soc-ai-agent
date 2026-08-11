@@ -40,8 +40,10 @@ export function extractUserAuthHeaders(request: NextRequest): Record<string, str
   const headers: Record<string, string> = {}
   const xUserId = request.headers.get('X-User-ID')
   const xUserToken = request.headers.get('X-User-Token')
+  const xTenantSlug = request.headers.get('X-Tenant-Slug')
   if (xUserId) headers['X-User-ID'] = xUserId
   if (xUserToken) headers['X-User-Token'] = xUserToken
+  if (xTenantSlug) headers['X-Tenant-Slug'] = xTenantSlug
   return headers
 }
 

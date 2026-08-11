@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { extractUserAuthHeaders } from '@/lib/api-proxy'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
@@ -10,15 +11,9 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'user_id is required' }, { status: 400 })
     }
 
-    const userID = request.headers.get('X-User-ID') || ''
-    const userToken = request.headers.get('X-User-Token') || ''
-
     const response = await fetch(`${BACKEND_URL}/api/auth/account?user_id=${userId}`, {
       method: 'DELETE',
-      headers: {
-        'X-User-ID': userID,
-        'X-User-Token': userToken,
-      },
+      headers: extractUserAuthHeaders(request),
     })
 
     const text = await response.text()
