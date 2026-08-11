@@ -19,23 +19,23 @@ import (
 
 type mockAuthService struct {
 	interfaces.AuthService
-	registerFn            func(req services.RegisterRequest) (*services.AuthResponse, error)
-	loginFn               func(req services.LoginRequest) (*services.AuthResponse, error)
+	registerFn            func(req services.RegisterRequest, tenantOrgID uint) (*services.AuthResponse, error)
+	loginFn               func(req services.LoginRequest, tenantOrgID uint) (*services.AuthResponse, error)
 	getUserFn             func(userID uint) (*services.AuthResponse, error)
 	requestRegistrationFn func(email string) error
 	validateRegTokenFn    func(token string) (string, error)
 	updateProfileFn       func(req services.UpdateProfileRequest) (*services.AuthResponse, error)
 	resetPasswordFn       func(token, pw string) error
 	verifyEmailFn         func(token string) error
-	createGuestFn         func() (*services.AuthResponse, error)
+	createGuestFn         func(tenantOrgID uint) (*services.AuthResponse, error)
 	deleteAccountFn       func(userID uint) error
 }
 
-func (m *mockAuthService) Register(req services.RegisterRequest) (*services.AuthResponse, error) {
-	return m.registerFn(req)
+func (m *mockAuthService) Register(req services.RegisterRequest, tenantOrgID uint) (*services.AuthResponse, error) {
+	return m.registerFn(req, tenantOrgID)
 }
-func (m *mockAuthService) Login(req services.LoginRequest) (*services.AuthResponse, error) {
-	return m.loginFn(req)
+func (m *mockAuthService) Login(req services.LoginRequest, tenantOrgID uint) (*services.AuthResponse, error) {
+	return m.loginFn(req, tenantOrgID)
 }
 func (m *mockAuthService) GetUser(userID uint) (*services.AuthResponse, error) {
 	return m.getUserFn(userID)
@@ -55,8 +55,8 @@ func (m *mockAuthService) ResetPassword(token, pw string) error {
 func (m *mockAuthService) VerifyEmail(token string) error {
 	return m.verifyEmailFn(token)
 }
-func (m *mockAuthService) CreateGuestUser() (*services.AuthResponse, error) {
-	return m.createGuestFn()
+func (m *mockAuthService) CreateGuestUser(tenantOrgID uint) (*services.AuthResponse, error) {
+	return m.createGuestFn(tenantOrgID)
 }
 func (m *mockAuthService) DeleteAccount(userID uint) error {
 	return m.deleteAccountFn(userID)
@@ -112,7 +112,7 @@ func decodeAuthErrResp(t *testing.T, rec *httptest.ResponseRecorder) middleware.
 
 func TestRegister_DuplicateEmail_ReturnsDuplicateEmailCode(t *testing.T) {
 	svc := &mockAuthService{
-		registerFn: func(_ services.RegisterRequest) (*services.AuthResponse, error) {
+		registerFn: func(_ services.RegisterRequest, _ uint) (*services.AuthResponse, error) {
 			return nil, errors.New("email already exists")
 		},
 	}
@@ -144,7 +144,7 @@ func TestRegister_InvalidBody_ReturnsValidationError(t *testing.T) {
 
 func TestRegister_OtherError_ReturnsValidationError(t *testing.T) {
 	svc := &mockAuthService{
-		registerFn: func(_ services.RegisterRequest) (*services.AuthResponse, error) {
+		registerFn: func(_ services.RegisterRequest, _ uint) (*services.AuthResponse, error) {
 			return nil, errors.New("weak password")
 		},
 	}
@@ -162,7 +162,7 @@ func TestRegister_OtherError_ReturnsValidationError(t *testing.T) {
 
 func TestRegister_Success(t *testing.T) {
 	svc := &mockAuthService{
-		registerFn: func(_ services.RegisterRequest) (*services.AuthResponse, error) {
+		registerFn: func(_ services.RegisterRequest, _ uint) (*services.AuthResponse, error) {
 			return &services.AuthResponse{}, nil
 		},
 	}
@@ -178,7 +178,7 @@ func TestRegister_Success(t *testing.T) {
 
 func TestLogin_InvalidCredentials_ReturnsUnauthorized(t *testing.T) {
 	svc := &mockAuthService{
-		loginFn: func(_ services.LoginRequest) (*services.AuthResponse, error) {
+		loginFn: func(_ services.LoginRequest, _ uint) (*services.AuthResponse, error) {
 			return nil, errors.New("invalid email or password")
 		},
 	}
@@ -198,7 +198,7 @@ func TestLogin_EmailNotVerified_ReturnsForbidden(t *testing.T) {
 	for _, msg := range []string{"email_not_verified", "re_verification_required"} {
 		t.Run(msg, func(t *testing.T) {
 			svc := &mockAuthService{
-				loginFn: func(_ services.LoginRequest) (*services.AuthResponse, error) {
+				loginFn: func(_ services.LoginRequest, _ uint) (*services.AuthResponse, error) {
 					return nil, errors.New(msg)
 				},
 			}
@@ -218,7 +218,7 @@ func TestLogin_EmailNotVerified_ReturnsForbidden(t *testing.T) {
 
 func TestLogin_Success(t *testing.T) {
 	svc := &mockAuthService{
-		loginFn: func(_ services.LoginRequest) (*services.AuthResponse, error) {
+		loginFn: func(_ services.LoginRequest, _ uint) (*services.AuthResponse, error) {
 			return &services.AuthResponse{}, nil
 		},
 	}

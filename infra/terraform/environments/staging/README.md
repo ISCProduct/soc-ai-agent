@@ -34,7 +34,7 @@ terraform apply
 terraform output backend_hcl_example
 ```
 
-出力の bucket / dynamodb_table を控える。
+出力の bucket を控える。
 
 ### 2. staging の tfvars
 
@@ -52,7 +52,7 @@ cp terraform.tfvars.example terraform.tfvars
 
 ```bash
 cp backend.hcl.example backend.hcl
-# bucket / dynamodb_table を bootstrap 出力に合わせて編集
+# bucket を bootstrap 出力に合わせて編集
 terraform init -backend-config=backend.hcl
 ```
 

@@ -14,7 +14,10 @@ type userRepoAuthStub struct {
 	user *entity.User
 }
 
-func (r *userRepoAuthStub) CreateUser(user *entity.User) error { return nil }
+func (r *userRepoAuthStub) CreateUser(user *entity.User) error {
+	r.user = user
+	return nil
+}
 func (r *userRepoAuthStub) GetUserByEmail(email string) (*entity.User, error) {
 	if r.user != nil && r.user.Email == email {
 		return r.user, nil
@@ -69,7 +72,7 @@ func TestAuthServiceLoginUsesUserSecretForUserToken(t *testing.T) {
 	}
 	service := NewAuthService(&userRepoAuthStub{user: user}, &pendingRepoAuthStub{}, nil)
 
-	resp, err := service.Login(LoginRequest{Email: user.Email, Password: "password123"})
+	resp, err := service.Login(LoginRequest{Email: user.Email, Password: "password123"}, 0)
 	if err != nil {
 		t.Fatalf("login failed: %v", err)
 	}

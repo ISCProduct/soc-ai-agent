@@ -262,8 +262,10 @@ func main() {
 	resumeService.SetCrossFeatureService(crossFeatureService)
 
 	// コントローラー層の初期化
+	organizationRepo := repositories.NewOrganizationRepository(db)
+	organizationService := services.NewOrganizationService(organizationRepo)
 	authController := controllers.NewAuthController(authService)
-	oauthController := controllers.NewOAuthController(oauthService)
+	oauthController := controllers.NewOAuthController(oauthService, organizationService)
 	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := controllers.NewCompanyRelationController(companyQueryRepo, aiClient)
@@ -302,8 +304,6 @@ func main() {
 		authService.SetObjectDeleter(s3UploadService)
 	}
 	userDeletionService := services.NewUserDeletionService(db, objectDeleter, auditLogService)
-	organizationRepo := repositories.NewOrganizationRepository(db)
-	organizationService := services.NewOrganizationService(organizationRepo)
 	adminOrganizationController := controllers.NewAdminOrganizationController(organizationService)
 	adminSchoolController := controllers.NewAdminSchoolController(schoolService)
 	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
@@ -356,6 +356,7 @@ func main() {
 	e.Use(echo.WrapMiddleware(middleware.RequestLoggerMiddleware))
 	e.Use(echo.WrapMiddleware(securityHeadersMiddleware))
 	e.Use(echo.WrapMiddleware(buildCORSMiddleware()))
+	e.Use(routes.EchoTenantResolver(organizationService))
 
 	// ヘルスチェックエンドポイント
 	// /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス

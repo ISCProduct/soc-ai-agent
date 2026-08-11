@@ -60,7 +60,31 @@ func EchoUserAuth(userSecret string, access services.UserAccessGuard, orgs ...Or
 					return echo.NewHTTPError(http.StatusForbidden, "organization not found")
 				}
 				ctx = context.WithValue(ctx, middleware.OrganizationIDContextKey, orgID)
+				if tenantOrgID, ok := middleware.TenantOrganizationIDFromContext(ctx); ok && tenantOrgID != orgID {
+					return echo.NewHTTPError(http.StatusForbidden, "tenant mismatch")
+				}
 			}
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	}
+}
+
+// EchoTenantResolver は X-Tenant-Slug ヘッダー(学園サブドメインラベル)から組織を解決し、
+// リクエストコンテキストへ載せるEcho nativeミドルウェア。
+// ヘッダー未指定の場合は何もしない（テナント概念のないアクセスとの後方互換のため）。
+func EchoTenantResolver(orgs *services.OrganizationService) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			slug := c.Request().Header.Get("X-Tenant-Slug")
+			if slug == "" {
+				return next(c)
+			}
+			org, err := orgs.ResolveBySlug(slug)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusForbidden, "unknown tenant")
+			}
+			ctx := context.WithValue(c.Request().Context(), middleware.TenantOrganizationIDContextKey, org.ID)
 			c.SetRequest(c.Request().WithContext(ctx))
 			return next(c)
 		}

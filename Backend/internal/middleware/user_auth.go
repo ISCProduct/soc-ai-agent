@@ -9,12 +9,20 @@ type contextKey string
 
 const UserIDContextKey contextKey = "userID"
 const OrganizationIDContextKey contextKey = "organizationID"
+const TenantOrganizationIDContextKey contextKey = "tenantOrganizationID"
 const AdminUserIDContextKey contextKey = "adminUserID"
 const AdminSchoolFilterContextKey contextKey = "adminSchoolFilter"
 
 // OrganizationIDFromContext はコンテキストから組織IDを取り出す。
 func OrganizationIDFromContext(ctx context.Context) (uint, bool) {
 	v := ctx.Value(OrganizationIDContextKey)
+	id, ok := v.(uint)
+	return id, ok && id > 0
+}
+
+// TenantOrganizationIDFromContext はHostサブドメイン(X-Tenant-Slug)から解決された組織IDを取り出す。
+func TenantOrganizationIDFromContext(ctx context.Context) (uint, bool) {
+	v := ctx.Value(TenantOrganizationIDContextKey)
 	id, ok := v.(uint)
 	return id, ok && id > 0
 }
