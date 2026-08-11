@@ -80,6 +80,21 @@ jobs:
           fi
           echo "ip=$IP" >> "$GITHUB_OUTPUT"
 
+          SG_ID=$(aws ec2 describe-security-groups \
+            --filters "Name=group-name,Values=${PROJECT_NAME}-ecs-sg" \
+            --query 'SecurityGroups[0].GroupId' --output text)
+          echo "sg_id=$SG_ID" >> "$GITHUB_OUTPUT"
+
+      # GitHub Actionsランナーは固定IPを持たないため、SSHステップの前後だけ
+      # ランナー自身のIPをSGへ動的に許可する（常時0.0.0.0/0で開けない）
+      - name: Allow runner IP for SSH
+        run: |
+          RUNNER_IP=$(curl -s https://checkip.amazonaws.com)
+          echo "runner_ip=$RUNNER_IP" >> "$GITHUB_ENV"
+          aws ec2 authorize-security-group-ingress \
+            --group-id ${{ steps.instance.outputs.sg_id }} \
+            --protocol tcp --port 22 --cidr "${RUNNER_IP}/32"
+
       - name: Deploy via SSH (docker compose pull && up -d)
         uses: appleboy/ssh-action@v1
         with:
@@ -94,6 +109,13 @@ jobs:
               docker compose pull
               docker compose up -d
             '
+
+      - name: Revoke runner IP for SSH
+        if: always()
+        run: |
+          aws ec2 revoke-security-group-ingress \
+            --group-id ${{ steps.instance.outputs.sg_id }} \
+            --protocol tcp --port 22 --cidr "${{ env.runner_ip }}/32" || true
 
   deploy-production:
     if: github.ref_name == 'main'
