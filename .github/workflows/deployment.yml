@@ -94,13 +94,18 @@ jobs:
           done
           exit $fail
 
-      # ビルド中に裏で進めた起動を待ち合わせる（RDSは停止からだと最大10分程度かかる）
+      # ビルド中に裏で進めた起動を待ち合わせる（RDSは停止からだと最大10分程度かかる）。
+      # 直前のauto-stopとレースして"stopping"の間は起動キックが素通りすることがあるため、
+      # ここでも stopped を検知したら都度start-db-instanceを呼び直す（自己修復）。
       - name: Wait for staging infra ready
         run: |
           for i in $(seq 1 40); do
             STATUS=$(aws rds describe-db-instances --db-instance-identifier ${PROJECT_NAME}-mysql \
               --query 'DBInstances[0].DBInstanceStatus' --output text)
             [ "$STATUS" == "available" ] && break
+            if [ "$STATUS" == "stopped" ]; then
+              aws rds start-db-instance --db-instance-identifier ${PROJECT_NAME}-mysql || true
+            fi
             echo "RDS status: $STATUS (waiting...)"
             sleep 15
           done
