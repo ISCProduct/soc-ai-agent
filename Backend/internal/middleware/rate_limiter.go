@@ -112,6 +112,10 @@ var LoginRateLimiter = NewRateLimiter(time.Minute, 20)
 // IP単位: 1時間に5回まで（メールサーバー保護）
 var PasswordResetRateLimiter = NewRateLimiter(time.Hour, 5)
 
+// CompanyEntryRateLimiter は企業情報ゲスト投稿のレート制限器（#754）
+// IP単位: 1時間に5回まで
+var CompanyEntryRateLimiter = NewRateLimiter(time.Hour, 5)
+
 // LoginRateLimit はログインエンドポイントのレート制限ミドルウェア
 func LoginRateLimit(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

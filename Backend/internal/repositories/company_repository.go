@@ -41,6 +41,12 @@ func (r *CompanyRepository) CountActive() (int64, error) {
 	return count, err
 }
 
+// companyListSelectColumns は管理画面一覧向けの軽量カラム（text 過取得を避ける）。
+// description / tech_stack は不足判定に必要なため残す。
+const companyListSelectColumns = "id, name, industry, location, source_type, is_provisional, data_status, " +
+	"info_fetched_at, jobs_fetched_at, tech_fetched_at, relations_fetched_at, " +
+	"website_url, description, tech_stack, created_at, updated_at"
+
 // ListActiveFiltered は名前・公開ステータス・業界・情報充足で絞り込んだアクティブ企業を返す。
 // status は "draft" / "published" / ""（指定なし=すべて）。
 // industry が "__unset__" のときは業界未設定のみ。
@@ -92,7 +98,8 @@ func (r *CompanyRepository) ListActiveFiltered(limit, offset int, name, status, 
 	}
 
 	var companies []models.Company
-	err := q.Session(&gorm.Session{}).Order(order).Limit(limit).Offset(offset).Find(&companies).Error
+	err := q.Session(&gorm.Session{}).Select(companyListSelectColumns).
+		Order(order).Limit(limit).Offset(offset).Find(&companies).Error
 	return companies, total, err
 }
 
@@ -193,6 +200,23 @@ func (r *CompanyRepository) GetWeightProfile(companyID uint, jobPositionID *uint
 		return nil, err
 	}
 	return &profile, nil
+}
+
+// GetWeightProfilesByCompanyIDs は会社単位プロファイル（job_position_id IS NULL）を一括取得する。
+func (r *CompanyRepository) GetWeightProfilesByCompanyIDs(companyIDs []uint) (map[uint]*models.CompanyWeightProfile, error) {
+	out := make(map[uint]*models.CompanyWeightProfile, len(companyIDs))
+	if len(companyIDs) == 0 {
+		return out, nil
+	}
+	var profiles []models.CompanyWeightProfile
+	err := r.db.Where("company_id IN ? AND job_position_id IS NULL", companyIDs).Find(&profiles).Error
+	if err != nil {
+		return nil, err
+	}
+	for i := range profiles {
+		out[profiles[i].CompanyID] = &profiles[i]
+	}
+	return out, nil
 }
 
 // Create 企業を作成

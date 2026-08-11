@@ -32,6 +32,8 @@ type UserAnalysisProgressRepository interface {
 // UserCompanyMatchRepository はユーザーと企業のマッチング結果の永続化インターフェース。
 type UserCompanyMatchRepository interface {
 	CreateOrUpdate(match *entity.UserCompanyMatch) error
+	// CreateOrUpdateBatch は同一 user/session のマッチ結果を一括 upsert する（既存のお気に入り等フラグは保持）。
+	CreateOrUpdateBatch(matches []*entity.UserCompanyMatch) (int, error)
 	FindTopMatchesByUserAndSession(userID uint, sessionID string, limit int) ([]*entity.UserCompanyMatch, error)
 	FindByID(id uint) (*entity.UserCompanyMatch, error)
 	MarkAsViewed(matchID uint) error

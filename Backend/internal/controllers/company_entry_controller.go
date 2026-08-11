@@ -1,38 +1,22 @@
 package controllers
 
 import (
-	"Backend/domain/repository"
-	"Backend/internal/models"
-	"fmt"
+	"Backend/internal/middleware"
+	"Backend/internal/services"
+	"errors"
 	"net/http"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/labstack/echo/v4"
-	"gorm.io/gorm"
-)
-
-const (
-	maxEntryJobPositions = 50
-	maxEntryGraduates    = 30
 )
 
 type CompanyEntryController struct {
-	db           *gorm.DB
-	companyRepo  repository.CompanyRepository
-	graduateRepo repository.GraduateEmploymentRepository
+	service *services.CompanyEntryService
 }
 
-func NewCompanyEntryController(
-	db *gorm.DB,
-	companyRepo repository.CompanyRepository,
-	graduateRepo repository.GraduateEmploymentRepository,
-) *CompanyEntryController {
-	return &CompanyEntryController{
-		db:           db,
-		companyRepo:  companyRepo,
-		graduateRepo: graduateRepo,
-	}
+func NewCompanyEntryController(service *services.CompanyEntryService) *CompanyEntryController {
+	return &CompanyEntryController{service: service}
 }
 
 type companyEntryJobPosition struct {
@@ -71,37 +55,32 @@ type companyEntryGraduate struct {
 }
 
 type companyEntryRequest struct {
-	// 企業基本情報
-	Name            string `json:"name"`
-	Description     string `json:"description"`
-	Industry        string `json:"industry"`
-	Location        string `json:"location"`
-	WebsiteURL      string `json:"website_url"`
-	LogoURL         string `json:"logo_url"`
-	CorporateNumber string `json:"corporate_number"`
-
-	// 従業員情報
-	EmployeeCount int     `json:"employee_count"`
-	FoundedYear   int     `json:"founded_year"`
-	AverageAge    float64 `json:"average_age"`
-	FemaleRatio   float64 `json:"female_ratio"`
-
-	// 企業文化・働き方
-	Culture        string `json:"culture"`
-	WorkStyle      string `json:"work_style"`
-	WelfareDetails string `json:"welfare_details"`
-
-	// 技術情報
+	Name             string `json:"name"`
+	Description      string `json:"description"`
+	Industry         string `json:"industry"`
+	Location         string `json:"location"`
+	WebsiteURL       string `json:"website_url"`
+	LogoURL          string `json:"logo_url"`
+	CorporateNumber  string `json:"corporate_number"`
+	EmployeeCount    int    `json:"employee_count"`
+	FoundedYear      int    `json:"founded_year"`
+	AverageAge       float64 `json:"average_age"`
+	FemaleRatio      float64 `json:"female_ratio"`
+	Culture          string `json:"culture"`
+	WorkStyle        string `json:"work_style"`
+	WelfareDetails   string `json:"welfare_details"`
 	TechStack        string `json:"tech_stack"`
 	DevelopmentStyle string `json:"development_style"`
+	MainBusiness     string `json:"main_business"`
+	JobPositions     []companyEntryJobPosition  `json:"job_positions"`
+	WeightProfile    *companyEntryWeightProfile `json:"weight_profile"`
+	Graduates        []companyEntryGraduate     `json:"graduates"`
 
-	// 事業内容
-	MainBusiness string `json:"main_business"`
-
-	// 関連データ
-	JobPositions  []companyEntryJobPosition  `json:"job_positions"`
-	WeightProfile *companyEntryWeightProfile `json:"weight_profile"`
-	Graduates     []companyEntryGraduate     `json:"graduates"`
+	ContactEmail   string `json:"contact_email"`
+	ContactName    string `json:"contact_name"`
+	PrivacyConsent bool   `json:"privacy_consent"`
+	// ハニーポット（見た目は非表示）。ボットが埋めると拒否する
+	CompanyFax string `json:"company_fax"`
 }
 
 // Submit POST /api/company-entry
@@ -110,19 +89,9 @@ func (c *CompanyEntryController) Submit(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
 	}
-	if strings.TrimSpace(req.Name) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
-	}
-	if len(req.JobPositions) > maxEntryJobPositions {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("job_positions must be %d or fewer", maxEntryJobPositions))
-	}
-	if len(req.Graduates) > maxEntryGraduates {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("graduates must be %d or fewer", maxEntryGraduates))
-	}
 
-	now := time.Now()
-	company := &models.Company{
-		Name:             strings.TrimSpace(req.Name),
+	in := services.CompanyEntryInput{
+		Name:             req.Name,
 		Description:      req.Description,
 		Industry:         req.Industry,
 		Location:         req.Location,
@@ -139,88 +108,84 @@ func (c *CompanyEntryController) Submit(ctx echo.Context) error {
 		TechStack:        req.TechStack,
 		DevelopmentStyle: req.DevelopmentStyle,
 		MainBusiness:     req.MainBusiness,
-		SourceType:       "manual",
-		DataStatus:       "draft",
-		IsProvisional:    true,
-		IsActive:         true,
-		SourceFetchedAt:  &now,
+		ContactEmail:     req.ContactEmail,
+		ContactName:      req.ContactName,
+		PrivacyConsent:   req.PrivacyConsent,
+		Honeypot:         req.CompanyFax,
+		SourceIP:         middleware.GetClientIP(ctx.Request()),
+	}
+	for _, jp := range req.JobPositions {
+		in.JobPositions = append(in.JobPositions, services.CompanyEntryJobInput{
+			Title:           jp.Title,
+			Description:     jp.Description,
+			JobCategoryID:   jp.JobCategoryID,
+			MinSalary:       jp.MinSalary,
+			MaxSalary:       jp.MaxSalary,
+			EmploymentType:  jp.EmploymentType,
+			WorkLocation:    jp.WorkLocation,
+			RemoteOption:    jp.RemoteOption,
+			RequiredSkills:  jp.RequiredSkills,
+			PreferredSkills: jp.PreferredSkills,
+		})
+	}
+	if req.WeightProfile != nil {
+		in.WeightProfile = &services.CompanyEntryWeightInput{
+			TechnicalOrientation:  req.WeightProfile.TechnicalOrientation,
+			TeamworkOrientation:   req.WeightProfile.TeamworkOrientation,
+			LeadershipOrientation: req.WeightProfile.LeadershipOrientation,
+			CreativityOrientation: req.WeightProfile.CreativityOrientation,
+			StabilityOrientation:  req.WeightProfile.StabilityOrientation,
+			GrowthOrientation:     req.WeightProfile.GrowthOrientation,
+			WorkLifeBalance:       req.WeightProfile.WorkLifeBalance,
+			ChallengeSeeking:      req.WeightProfile.ChallengeSeeking,
+			DetailOrientation:     req.WeightProfile.DetailOrientation,
+			CommunicationSkill:    req.WeightProfile.CommunicationSkill,
+		}
+	}
+	for _, g := range req.Graduates {
+		in.Graduates = append(in.Graduates, services.CompanyEntryGraduateInput{
+			GraduateName:   g.GraduateName,
+			GraduationYear: g.GraduationYear,
+			SchoolName:     g.SchoolName,
+			Department:     g.Department,
+			HiredAt:        g.HiredAt,
+			Note:           g.Note,
+		})
 	}
 
-	err := c.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(company).Error; err != nil {
-			return fmt.Errorf("create company: %w", err)
-		}
-
-		for _, jp := range req.JobPositions {
-			if strings.TrimSpace(jp.Title) == "" {
-				continue
-			}
-			position := &models.CompanyJobPosition{
-				CompanyID:       company.ID,
-				Title:           strings.TrimSpace(jp.Title),
-				Description:     jp.Description,
-				JobCategoryID:   jp.JobCategoryID,
-				MinSalary:       jp.MinSalary,
-				MaxSalary:       jp.MaxSalary,
-				EmploymentType:  jp.EmploymentType,
-				WorkLocation:    jp.WorkLocation,
-				RemoteOption:    jp.RemoteOption,
-				RequiredSkills:  jp.RequiredSkills,
-				PreferredSkills: jp.PreferredSkills,
-				IsActive:        true,
-			}
-			if err := tx.Create(position).Error; err != nil {
-				return fmt.Errorf("create job position: %w", err)
-			}
-		}
-
-		if req.WeightProfile != nil {
-			profile := &models.CompanyWeightProfile{
-				CompanyID:             company.ID,
-				TechnicalOrientation:  req.WeightProfile.TechnicalOrientation,
-				TeamworkOrientation:   req.WeightProfile.TeamworkOrientation,
-				LeadershipOrientation: req.WeightProfile.LeadershipOrientation,
-				CreativityOrientation: req.WeightProfile.CreativityOrientation,
-				StabilityOrientation:  req.WeightProfile.StabilityOrientation,
-				GrowthOrientation:     req.WeightProfile.GrowthOrientation,
-				WorkLifeBalance:       req.WeightProfile.WorkLifeBalance,
-				ChallengeSeeking:      req.WeightProfile.ChallengeSeeking,
-				DetailOrientation:     req.WeightProfile.DetailOrientation,
-				CommunicationSkill:    req.WeightProfile.CommunicationSkill,
-			}
-			if err := tx.Save(profile).Error; err != nil {
-				return fmt.Errorf("create weight profile: %w", err)
-			}
-		}
-
-		for _, g := range req.Graduates {
-			var hiredAt *time.Time
-			if strings.TrimSpace(g.HiredAt) != "" {
-				if parsed, err := time.Parse("2006-01-02", g.HiredAt); err == nil {
-					hiredAt = &parsed
-				}
-			}
-			entry := &models.GraduateEmployment{
-				CompanyID:      company.ID,
-				GraduateName:   strings.TrimSpace(g.GraduateName),
-				GraduationYear: g.GraduationYear,
-				SchoolName:     strings.TrimSpace(g.SchoolName),
-				Department:     strings.TrimSpace(g.Department),
-				HiredAt:        hiredAt,
-				Note:           strings.TrimSpace(g.Note),
-			}
-			if err := tx.Create(entry).Error; err != nil {
-				return fmt.Errorf("create graduate employment: %w", err)
-			}
-		}
-		return nil
-	})
+	result, err := c.service.Submit(in)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create company")
+		msg := err.Error()
+		switch {
+		case msg == "rejected":
+			// ハニーポットは成功風に返す（ボットにヒントを与えない）
+			return ctx.JSON(http.StatusCreated, map[string]any{"message": "送信が完了しました。"})
+		case strings.Contains(msg, "required"), strings.Contains(msg, "invalid"), strings.Contains(msg, "must be"):
+			return echo.NewHTTPError(http.StatusBadRequest, msg)
+		default:
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to create company")
+		}
 	}
 
 	return ctx.JSON(http.StatusCreated, map[string]any{
-		"message":    "送信が完了しました。内容を確認の上、掲載審査を行います。",
-		"company_id": company.ID,
+		"message":       result.Message,
+		"company_id":    result.CompanyID,
+		"submission_id": result.SubmissionID,
+		"email_queued":  result.EmailQueued,
 	})
+}
+
+// ResendEmail POST /api/admin/company-entry-submissions/:id/resend-email
+func (c *CompanyEntryController) ResendEmail(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
+	}
+	if err := c.service.ResendEmail(uint(id)); err != nil {
+		if errors.Is(err, services.ErrCompanyEntrySubmissionNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "submission not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return ctx.JSON(http.StatusOK, map[string]string{"message": "email resent"})
 }

@@ -68,22 +68,31 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 
 	log.Printf("[CalculateMatching] Found %d published companies\n", len(companies))
 
-	// 3. 各企業とのマッチングを計算
-	matchCount := 0
-	for _, company := range companies {
-		// 企業のweightプロファイルを取得
-		profile, err := s.companyRepo.GetWeightProfile(company.ID, nil)
-		if err != nil {
-			log.Printf("[CalculateMatching] Warning: No profile for company %d: %v\n", company.ID, err)
+	companyIDs := make([]uint, len(companies))
+	for i := range companies {
+		companyIDs[i] = companies[i].ID
+	}
+	profiles, err := s.companyRepo.GetWeightProfilesByCompanyIDs(companyIDs)
+	if err != nil {
+		return fmt.Errorf("failed to get weight profiles: %w", err)
+	}
+	log.Printf("[CalculateMatching] Loaded %d weight profiles\n", len(profiles))
+
+	// 3. 各企業とのマッチングを計算（プロファイルはメモリ上で参照）
+	pending := make([]*entity.UserCompanyMatch, 0, len(companies))
+	for i := range companies {
+		company := &companies[i]
+		profile, ok := profiles[company.ID]
+		if !ok || profile == nil {
+			log.Printf("[CalculateMatching] Warning: No profile for company %d\n", company.ID)
 			continue
 		}
 
-		// マッチングスコアを計算
 		match := s.calculateMatchScore(scoreMap, profile)
 		match.UserID = userID
 		match.SessionID = sessionID
 		match.CompanyID = company.ID
-		match.Company = mapper.CompanyToEntity(&company)
+		match.Company = mapper.CompanyToEntity(company)
 
 		reason, err := s.GenerateMatchReason(ctx, match, userScores)
 		if err != nil {
@@ -91,13 +100,12 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 			reason = BuildMatchReason(match, userScores)
 		}
 		match.MatchReason = reason
+		pending = append(pending, match)
+	}
 
-		// マッチング結果を保存
-		if err := s.matchRepo.CreateOrUpdate(match); err != nil {
-			log.Printf("[CalculateMatching] Warning: Failed to save match for company %d: %v\n", company.ID, err)
-			continue
-		}
-		matchCount++
+	matchCount, err := s.matchRepo.CreateOrUpdateBatch(pending)
+	if err != nil {
+		return fmt.Errorf("failed to save matches: %w", err)
 	}
 
 	log.Printf("[CalculateMatching] Completed: %d matches created for user %d, session %s\n", matchCount, userID, sessionID)
