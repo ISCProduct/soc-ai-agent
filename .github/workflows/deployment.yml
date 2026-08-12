@@ -186,15 +186,6 @@ jobs:
               docker image prune -af
               docker compose pull
               docker compose up -d
-              sleep 15
-              echo "=== compose ps ==="
-              docker compose ps
-              echo "=== backend env (SERVER_PORT check) ==="
-              docker exec app-backend-1 env | grep -i server_port || echo "SERVER_PORT not in container env"
-              echo "=== backend logs ==="
-              docker logs --tail 60 app-backend-1
-              echo "=== curl inside instance to backend:8080/healthz ==="
-              curl -sv --max-time 5 http://localhost:8080/healthz || true
             '
 
       - name: Revoke runner IP for SSH
