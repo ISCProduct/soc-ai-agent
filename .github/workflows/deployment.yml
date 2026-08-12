@@ -167,6 +167,16 @@ jobs:
             sleep 15
           done
 
+      - name: Sync edge nginx (503 時の OGP 付き静的 HTML)
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ steps.instance.outputs.ip }}
+          username: ubuntu
+          key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          source: "infra/nginx/staging-edge.conf,infra/static/service-unavailable.html,infra/staging/ensure-edge-compose.sh"
+          target: /tmp/edge-sync
+          strip_components: 2
+
       - name: Deploy via SSH (docker compose pull && up -d)
         uses: appleboy/ssh-action@v1
         with:
@@ -182,6 +192,11 @@ jobs:
                 sleep 15
               done
               aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
+              mkdir -p /opt/app/nginx/static
+              cp /tmp/edge-sync/staging-edge.conf /opt/app/nginx/staging-edge.conf
+              cp /tmp/edge-sync/service-unavailable.html /opt/app/nginx/static/service-unavailable.html
+              chmod +x /tmp/edge-sync/ensure-edge-compose.sh
+              /tmp/edge-sync/ensure-edge-compose.sh /opt/app/docker-compose.yml
               cd /opt/app
               docker image prune -af
               docker compose pull
@@ -194,6 +209,14 @@ jobs:
           aws ec2 revoke-security-group-ingress \
             --group-id ${{ steps.instance.outputs.sg_id }} \
             --protocol tcp --port 22 --cidr "${{ env.runner_ip }}/32" || true
+
+  deploy-staging-smoke:
+    needs: deploy-staging
+    if: github.ref_name == 'develop' && success()
+    uses: ./.github/workflows/deploy-smoke.yml
+    with:
+      environment: staging
+    secrets: inherit
 
   # デプロイから1時間、新たなデプロイが無ければstagingを自動停止する（コスト削減）。
   # 1時間以内に次のdeploy-staging(→本ジョブ)が走ると、同じconcurrency groupで

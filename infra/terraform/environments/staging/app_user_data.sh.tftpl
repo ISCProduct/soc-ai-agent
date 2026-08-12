@@ -29,6 +29,14 @@ EOF
 
 aws ecr get-login-password --region ${aws_region} | docker login --username AWS --password-stdin "$(echo ${backend_image} | cut -d/ -f1)"
 
+mkdir -p /opt/app/nginx/static
+cat > /opt/app/nginx/staging-edge.conf <<'NGINXEOF'
+${edge_nginx_conf}
+NGINXEOF
+cat > /opt/app/nginx/static/service-unavailable.html <<'HTMLEOF'
+${service_unavailable_html}
+HTMLEOF
+
 mkdir -p /opt/app
 cat > /opt/app/.env <<EOF
 SERVER_PORT=8080
@@ -75,8 +83,18 @@ services:
     image: ${frontend_image}
     restart: always
     env_file: .env
+    expose:
+      - "3000"
+  edge:
+    image: nginx:1.27-alpine
+    restart: always
     ports:
-      - "3000:3000"
+      - "3000:80"
+    volumes:
+      - ./nginx/staging-edge.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/static:/usr/share/nginx/html/static:ro
+    depends_on:
+      - frontend
   rag-review:
     image: ${rag_image}
     restart: always

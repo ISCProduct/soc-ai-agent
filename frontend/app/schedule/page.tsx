@@ -28,6 +28,7 @@ import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
 import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import { authService } from '@/lib/auth'
+import { datetimeLocalToISO, formatLocalDateKey, isoToDatetimeLocal } from '@/lib/datetime-local'
 
 const STAGE_OPTIONS = [
   { value: '書類選考', label: '書類選考', color: '#9c27b0' },
@@ -68,16 +69,6 @@ const EMPTY_FORM: EventFormState = {
 
 function stageColor(stage: string): string {
   return STAGE_OPTIONS.find(s => s.value === stage)?.color ?? '#757575'
-}
-
-function isoToDatetimeLocal(iso: string): string {
-  if (!iso) return ''
-  return iso.slice(0, 16)
-}
-
-function datetimeLocalToISO(local: string): string {
-  if (!local) return ''
-  return new Date(local).toISOString()
 }
 
 function getDaysInMonth(year: number, month: number): Date[] {
@@ -162,7 +153,7 @@ export default function SchedulePage() {
     setEditingId(null)
     setForm({
       ...EMPTY_FORM,
-      scheduled_at: date ? `${date.toISOString().slice(0, 10)}T10:00` : '',
+      scheduled_at: date ? `${formatLocalDateKey(date)}T10:00` : '',
     })
     setDialogOpen(true)
   }

@@ -76,6 +76,12 @@ variable "asg_target_cpu_percent" {
   default     = 60
 }
 
+variable "enable_error_fallback" {
+  type        = bool
+  description = "CloudFront+S3の503フェイルオーバー（cloudfront:* IAM権限が必要）"
+  default     = false
+}
+
 variable "db_instance_class" {
   type    = string
   default = "db.t4g.micro"
