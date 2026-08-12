@@ -13,7 +13,7 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 systemctl enable --now docker
 
 # --- AWS CLI（埋め込みIAMユーザー認証情報。ponytail: 長期キー、IAMロール権限が使えるようになり次第ロールに置換） ---
-curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o /tmp/awscliv2.zip
+curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip
 unzip -q /tmp/awscliv2.zip -d /tmp
 /tmp/aws/install
 mkdir -p /root/.aws
