@@ -128,20 +128,22 @@ module "alb" {
 }
 
 # ALB ターゲット全滅時（EC2停止等）に Route53 がフェイルオーバーする OGP 付き静的エラーページ
+# ponytail: cloudfront:Create* 権限が無い環境では enable_error_fallback=false のまま
 module "error_fallback" {
+  count  = var.enable_error_fallback ? 1 : 0
   source = "../../modules/error_fallback"
 
   providers = {
     aws.us_east_1 = aws.us_east_1
   }
 
-  project_name              = var.project_name
-  env                       = "staging"
-  domain_name               = local.frontend_domain
-  aliases                   = [local.frontend_domain]
-  route53_zone_id           = data.aws_route53_zone.selected.zone_id
-  service_unavailable_html  = file("${path.module}/../../../static/service-unavailable.html")
-  tags                      = local.tags
+  project_name             = var.project_name
+  env                      = "staging"
+  domain_name              = local.frontend_domain
+  aliases                  = [local.frontend_domain]
+  route53_zone_id          = data.aws_route53_zone.selected.zone_id
+  service_unavailable_html = file("${path.module}/../../../static/service-unavailable.html")
+  tags                     = local.tags
 }
 
 # --- アプリ実行用EC2（IAMロール作成権限が無い環境向けの暫定構成） ---
@@ -175,7 +177,7 @@ data "aws_ami" "app" {
 
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-arm64-server-*"]
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
   }
 }
 
@@ -310,8 +312,22 @@ resource "aws_security_group_rule" "app_frontend_from_alb" {
   source_security_group_id = module.network.alb_security_group_id
 }
 
-# 平常時: ALB。ターゲット全滅時: CloudFront 静的エラーページ（OGP 付き）へフェイルオーバー
+resource "aws_route53_record" "frontend" {
+  count   = var.enable_error_fallback ? 0 : 1
+  zone_id = data.aws_route53_zone.selected.zone_id
+  name    = local.frontend_domain
+  type    = "A"
+
+  alias {
+    name                   = module.alb.alb_dns_name
+    zone_id                = module.alb.alb_zone_id
+    evaluate_target_health = true
+  }
+}
+
+# enable_error_fallback=true: ALB → CloudFront(S3) フェイルオーバー
 resource "aws_route53_record" "frontend_primary" {
+  count   = var.enable_error_fallback ? 1 : 0
   zone_id = data.aws_route53_zone.selected.zone_id
   name    = local.frontend_domain
   type    = "A"
@@ -330,6 +346,7 @@ resource "aws_route53_record" "frontend_primary" {
 }
 
 resource "aws_route53_record" "frontend_secondary" {
+  count   = var.enable_error_fallback ? 1 : 0
   zone_id = data.aws_route53_zone.selected.zone_id
   name    = local.frontend_domain
   type    = "A"
@@ -341,8 +358,8 @@ resource "aws_route53_record" "frontend_secondary" {
   }
 
   alias {
-    name                   = module.error_fallback.cloudfront_domain_name
-    zone_id                = module.error_fallback.cloudfront_hosted_zone_id
+    name                   = module.error_fallback[0].cloudfront_domain_name
+    zone_id                = module.error_fallback[0].cloudfront_hosted_zone_id
     evaluate_target_health = false
   }
 }
