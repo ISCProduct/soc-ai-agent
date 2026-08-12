@@ -9,16 +9,18 @@ on:
       - main
   workflow_dispatch:
 
-concurrency:
-  group: deploy-${{ github.ref_name }}
-  cancel-in-progress: false
-
 jobs:
   deploy-staging:
     if: github.ref_name == 'develop'
     name: Deploy to staging
     runs-on: ubuntu-latest
     environment: staging
+    # staging-auto-stopジョブ(最大1時間スリープ)は別concurrency groupなので、
+    # ここをジョブ単位にしないとワークフロー全体のrunが1時間ブロックされ、
+    # 次のデプロイが開始できなくなる
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
 
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
@@ -239,6 +241,9 @@ jobs:
     name: Deploy to production
     runs-on: ubuntu-latest
     environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
 
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
