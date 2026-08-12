@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Box,
@@ -13,6 +13,7 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Typography,
+  Alert,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import PsychologyIcon from '@mui/icons-material/Psychology'
@@ -51,6 +52,9 @@ export default function InterviewHistoryPage() {
   const [trendPoints, setTrendPoints] = useState<InterviewTrendPoint[]>([])
   const [trendLimit, setTrendLimit] = useState<number>(10)
   const [trendLoading, setTrendLoading] = useState(false)
+  const [listError, setListError] = useState<string | null>(null)
+  const [detailError, setDetailError] = useState<string | null>(null)
+  const [trendError, setTrendError] = useState<string | null>(null)
 
   const limit = 10
 
@@ -60,23 +64,39 @@ export default function InterviewHistoryPage() {
     setUser(storedUser)
   }, [router])
 
-  useEffect(() => {
+  const loadSessions = useCallback(async () => {
     if (!user) return
     setLoading(true)
-    interviewApi.listSessions(user.user_id, page, limit)
-      .then(data => { setSessions(data.sessions); setTotal(data.total) })
-      .catch(() => {})
-      .finally(() => setLoading(false))
+    setListError(null)
+    try {
+      const data = await interviewApi.listSessions(user.user_id, page, limit)
+      setSessions(data.sessions)
+      setTotal(data.total)
+    } catch {
+      setListError('面接履歴の取得に失敗しました')
+      setSessions([])
+      setTotal(0)
+    } finally {
+      setLoading(false)
+    }
   }, [user, page])
 
-  useEffect(() => {
+  const loadTrend = useCallback(async () => {
     if (!user) return
     setTrendLoading(true)
-    interviewApi.getTrend(user.user_id, trendLimit)
-      .then(points => setTrendPoints(points))
-      .catch(() => setTrendPoints([]))
-      .finally(() => setTrendLoading(false))
+    setTrendError(null)
+    try {
+      setTrendPoints(await interviewApi.getTrend(user.user_id, trendLimit))
+    } catch {
+      setTrendError('トレンドの取得に失敗しました')
+      setTrendPoints([])
+    } finally {
+      setTrendLoading(false)
+    }
   }, [user, trendLimit])
+
+  useEffect(() => { void loadSessions() }, [loadSessions])
+  useEffect(() => { void loadTrend() }, [loadTrend])
 
   const isTeacher = user?.role === 'teacher'
 
@@ -84,11 +104,13 @@ export default function InterviewHistoryPage() {
     if (!user) return
     setDetailLoading(true)
     setSelectedDetail(null)
+    setDetailError(null)
     try {
       const detail = await interviewApi.getDetail(session.id, user.user_id, user.role)
       setSelectedDetail(detail)
-    } catch { /* ignore */ }
-    finally { setDetailLoading(false) }
+    } catch {
+      setDetailError('面接詳細の取得に失敗しました')
+    } finally { setDetailLoading(false) }
   }
 
   const totalPages = Math.ceil(total / limit)
@@ -129,6 +151,11 @@ export default function InterviewHistoryPage() {
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
               <CircularProgress size={28} sx={{ color: PRIMARY }} />
             </Box>
+          ) : trendError ? (
+            <Stack spacing={1} alignItems="flex-start">
+              <Alert severity="error">{trendError}</Alert>
+              <Button size="small" variant="outlined" onClick={() => void loadTrend()}>再試行</Button>
+            </Stack>
           ) : trendPoints.length === 0 ? (
             <Typography color="text.secondary" fontSize={14} sx={{ py: 3, textAlign: 'center' }}>
               完了した面接がないためトレンドを表示できません。
@@ -147,6 +174,11 @@ export default function InterviewHistoryPage() {
           <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>セッション一覧</Typography>
           {loading ? (
             <CircularProgress size={32} sx={{ color: PRIMARY }} />
+          ) : listError ? (
+            <Stack spacing={1} alignItems="flex-start">
+              <Alert severity="error">{listError}</Alert>
+              <Button size="small" variant="outlined" onClick={() => void loadSessions()}>再試行</Button>
+            </Stack>
           ) : sessions.length === 0 ? (
             <Typography color="text.secondary">面接履歴がありません。</Typography>
           ) : (
@@ -207,6 +239,10 @@ export default function InterviewHistoryPage() {
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
               <CircularProgress size={32} sx={{ color: PRIMARY }} />
             </Box>
+          ) : detailError ? (
+            <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
+              <Alert severity="error" sx={{ mb: 1 }}>{detailError}</Alert>
+            </Paper>
           ) : !selectedDetail ? (
             <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
               <Typography color="text.secondary" fontSize={14}>左のセッションを選択すると詳細が表示されます。</Typography>

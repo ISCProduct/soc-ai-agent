@@ -24,26 +24,12 @@ import {
 import { ArrowBack, Edit, Check } from '@mui/icons-material'
 import { authService } from '@/lib/auth'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
-
-const STATUS_LABELS: Record<string, string> = {
-  applied: '応募済み',
-  document_passed: '書類通過',
-  interview: '面接中',
-  offered: '内定',
-  accepted: '内定承諾',
-  declined: '辞退',
-  rejected: '不合格',
-}
-
-const STATUS_COLORS: Record<string, 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning'> = {
-  applied: 'default',
-  document_passed: 'info',
-  interview: 'primary',
-  offered: 'success',
-  accepted: 'success',
-  declined: 'default',
-  rejected: 'error',
-}
+import {
+  STATUS_COLORS,
+  STATUS_LABELS,
+  isTerminalStatus,
+  userNextStatuses,
+} from '@/lib/application-status'
 
 interface Application {
   id: number
@@ -102,8 +88,9 @@ function ApplicationsContent() {
   }, [router, loadApplications])
 
   const startEdit = (app: Application) => {
+    const next = userNextStatuses(app.status)
     setEditingId(app.id)
-    setEditStatus(app.status)
+    setEditStatus(next[0] ?? app.status)
     setEditNotes(app.notes || '')
   }
 
@@ -206,9 +193,9 @@ function ApplicationsContent() {
                         label="選考ステータス"
                         onChange={e => setEditStatus(e.target.value)}
                       >
-                        {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                        {userNextStatuses(app.status).map(value => (
                           <MenuItem key={value} value={value}>
-                            {label}
+                            {STATUS_LABELS[value] || value}
                           </MenuItem>
                         ))}
                       </Select>
@@ -245,13 +232,15 @@ function ApplicationsContent() {
                         {app.notes}
                       </Typography>
                     )}
-                    <Button
-                      size="small"
-                      startIcon={<Edit />}
-                      onClick={() => startEdit(app)}
-                    >
-                      ステータスを更新
-                    </Button>
+                    {!isTerminalStatus(app.status) && userNextStatuses(app.status).length > 0 && (
+                      <Button
+                        size="small"
+                        startIcon={<Edit />}
+                        onClick={() => startEdit(app)}
+                      >
+                        ステータスを更新
+                      </Button>
+                    )}
                   </Box>
                 )}
               </CardContent>
