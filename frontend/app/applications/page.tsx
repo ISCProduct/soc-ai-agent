@@ -24,6 +24,7 @@ import {
 import { ArrowBack, Edit, Check } from '@mui/icons-material'
 import { authService } from '@/lib/auth'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
+import { fetchWithTimeout } from '@/lib/fetch-timeout'
 import {
   STATUS_COLORS,
   STATUS_LABELS,
@@ -63,7 +64,7 @@ function ApplicationsContent() {
     setLoading(true)
     setLoadError(null)
     try {
-      const res = await fetch('/api/applications', {
+      const res = await fetchWithTimeout('/api/applications', {
         headers: authService.getUserFetchHeaders(),
         cache: 'no-store',
       })

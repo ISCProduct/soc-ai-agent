@@ -113,17 +113,35 @@ data "aws_route53_zone" "selected" {
 module "alb" {
   source = "../../modules/alb"
 
-  project_name         = var.project_name
-  vpc_id               = module.network.vpc_id
-  subnet_ids           = module.network.public_subnet_ids
-  security_group_id    = module.network.alb_security_group_id
-  route53_zone_id      = data.aws_route53_zone.selected.zone_id
-  frontend_domain_name = local.frontend_domain
-  backend_domain_name  = local.backend_domain
-  frontend_target_port = 3000
-  backend_target_port  = 8080
-  target_type          = "instance"
-  tags                 = local.tags
+  project_name               = var.project_name
+  vpc_id                     = module.network.vpc_id
+  subnet_ids                 = module.network.public_subnet_ids
+  security_group_id          = module.network.alb_security_group_id
+  route53_zone_id            = data.aws_route53_zone.selected.zone_id
+  frontend_domain_name       = local.frontend_domain
+  backend_domain_name        = local.backend_domain
+  frontend_target_port       = 3000
+  backend_target_port        = 8080
+  frontend_health_check_path = "/edge-healthz"
+  target_type                = "instance"
+  tags                       = local.tags
+}
+
+# ALB ターゲット全滅時（EC2停止等）に Route53 がフェイルオーバーする OGP 付き静的エラーページ
+module "error_fallback" {
+  source = "../../modules/error_fallback"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  project_name              = var.project_name
+  env                       = "staging"
+  domain_name               = local.frontend_domain
+  aliases                   = [local.frontend_domain]
+  route53_zone_id           = data.aws_route53_zone.selected.zone_id
+  service_unavailable_html  = file("${path.module}/../../../static/service-unavailable.html")
+  tags                      = local.tags
 }
 
 # --- アプリ実行用EC2（IAMロール作成権限が無い環境向けの暫定構成） ---
@@ -182,29 +200,31 @@ resource "aws_launch_template" "app" {
   }
 
   user_data = base64encode(templatefile("${path.module}/app_user_data.sh.tftpl", {
-    aws_region            = var.region
-    aws_access_key_id     = var.aws_access_key_id
-    aws_secret_access_key = var.aws_secret_access_key
-    backend_image         = local.backend_image
-    frontend_image        = local.frontend_image
-    rag_image             = local.rag_image
-    db_host               = module.rds.address
-    db_port               = module.rds.port
-    db_name               = module.rds.db_name
-    db_user               = module.rds.master_username
-    db_password           = module.rds.master_password
-    s3_bucket             = module.s3.bucket_id
-    openai_api_key        = var.openai_api_key_plain
-    google_client_id      = var.google_client_id
-    google_client_secret  = var.google_client_secret
-    github_client_id      = var.github_client_id
-    github_client_secret  = var.github_client_secret
-    backend_domain        = local.backend_domain
-    frontend_domain       = local.frontend_domain
-    user_secret           = random_password.user_secret.result
-    admin_secret          = random_password.admin_secret.result
-    oauth_state_secret    = random_password.oauth_state_secret.result
-    token_encryption_key  = random_id.token_encryption_key.hex
+    aws_region               = var.region
+    aws_access_key_id        = var.aws_access_key_id
+    aws_secret_access_key    = var.aws_secret_access_key
+    backend_image            = local.backend_image
+    frontend_image           = local.frontend_image
+    rag_image                = local.rag_image
+    db_host                  = module.rds.address
+    db_port                  = module.rds.port
+    db_name                  = module.rds.db_name
+    db_user                  = module.rds.master_username
+    db_password              = module.rds.master_password
+    s3_bucket                = module.s3.bucket_id
+    openai_api_key           = var.openai_api_key_plain
+    google_client_id         = var.google_client_id
+    google_client_secret     = var.google_client_secret
+    github_client_id         = var.github_client_id
+    github_client_secret     = var.github_client_secret
+    backend_domain           = local.backend_domain
+    frontend_domain          = local.frontend_domain
+    user_secret              = random_password.user_secret.result
+    admin_secret             = random_password.admin_secret.result
+    oauth_state_secret       = random_password.oauth_state_secret.result
+    token_encryption_key     = random_id.token_encryption_key.hex
+    edge_nginx_conf          = file("${path.module}/../../../nginx/staging-edge.conf")
+    service_unavailable_html = file("${path.module}/../../../static/service-unavailable.html")
   }))
 
   tag_specifications {
@@ -290,15 +310,40 @@ resource "aws_security_group_rule" "app_frontend_from_alb" {
   source_security_group_id = module.network.alb_security_group_id
 }
 
-resource "aws_route53_record" "frontend" {
+# 平常時: ALB。ターゲット全滅時: CloudFront 静的エラーページ（OGP 付き）へフェイルオーバー
+resource "aws_route53_record" "frontend_primary" {
   zone_id = data.aws_route53_zone.selected.zone_id
   name    = local.frontend_domain
   type    = "A"
+
+  set_identifier = "primary"
+
+  failover_routing_policy {
+    type = "PRIMARY"
+  }
 
   alias {
     name                   = module.alb.alb_dns_name
     zone_id                = module.alb.alb_zone_id
     evaluate_target_health = true
+  }
+}
+
+resource "aws_route53_record" "frontend_secondary" {
+  zone_id = data.aws_route53_zone.selected.zone_id
+  name    = local.frontend_domain
+  type    = "A"
+
+  set_identifier = "secondary"
+
+  failover_routing_policy {
+    type = "SECONDARY"
+  }
+
+  alias {
+    name                   = module.error_fallback.cloudfront_domain_name
+    zone_id                = module.error_fallback.cloudfront_hosted_zone_id
+    evaluate_target_health = false
   }
 }
 

@@ -14,6 +14,7 @@ import { GUEST_REGISTER_PATH } from '@/lib/guest-limits'
 import { POSITIONS } from './constants'
 import type { InterviewCompany, Position, InterviewStatus } from './types'
 import { resolveCompanyByName } from './utils'
+import { fetchWithTimeout } from '@/lib/fetch-timeout'
 import {
   clearInterviewLobbyDraft,
   loadInterviewLobbyDraft,
@@ -134,7 +135,7 @@ function InterviewContent() {
       try {
         const params = new URLSearchParams({ limit: '50', offset: '0' })
         if (companySearch.trim()) params.set('name', companySearch.trim())
-        const r = await fetch(`/api/companies?${params}`, { cache: 'no-store' })
+        const r = await fetchWithTimeout(`/api/companies?${params}`, { cache: 'no-store' })
         if (cancelled) return
         if (!r.ok) throw new Error('企業一覧の取得に失敗しました')
         const data = await r.json()

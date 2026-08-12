@@ -12,7 +12,11 @@ output "alb_dns_name" {
 }
 
 output "frontend_url" {
-  value = "https://${aws_route53_record.frontend.name}"
+  value = "https://${aws_route53_record.frontend_primary.name}"
+}
+
+output "error_fallback_cloudfront_id" {
+  value = module.error_fallback.cloudfront_distribution_id
 }
 
 output "backend_url" {

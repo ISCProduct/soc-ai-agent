@@ -34,6 +34,7 @@ import {
   parseJsonArray,
   type CompanyDetailViewModel,
 } from './companyDetailUtils'
+import { fetchWithTimeout } from '@/lib/fetch-timeout'
 
 const CompanyDiagram = dynamic(() => import('@/components/company-diagram'), {
   ssr: false,
@@ -67,7 +68,7 @@ export default function CompanyDetailPage() {
     const companyId = String(params.id)
     setLoadStatus('loading')
     try {
-      const response = await fetch(`/api/companies/${companyId}`)
+      const response = await fetchWithTimeout(`/api/companies/${companyId}`)
       if (response.status === 404) {
         setCompany(null)
         setLoadStatus('not_found')

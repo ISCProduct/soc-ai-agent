@@ -80,6 +80,16 @@ jobs:
           fi
           echo "ip=$IP" >> "$GITHUB_OUTPUT"
 
+      - name: Sync edge nginx (503 時の OGP 付き静的 HTML)
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ steps.instance.outputs.ip }}
+          username: ubuntu
+          key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          source: "infra/nginx/staging-edge.conf,infra/static/service-unavailable.html,infra/staging/ensure-edge-compose.sh"
+          target: /tmp/edge-sync
+          strip_components: 2
+
       - name: Deploy via SSH (docker compose pull && up -d)
         uses: appleboy/ssh-action@v1
         with:
@@ -90,6 +100,11 @@ jobs:
             set -e
             sudo bash -c '
               aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
+              mkdir -p /opt/app/nginx/static
+              cp /tmp/edge-sync/staging-edge.conf /opt/app/nginx/staging-edge.conf
+              cp /tmp/edge-sync/service-unavailable.html /opt/app/nginx/static/service-unavailable.html
+              chmod +x /tmp/edge-sync/ensure-edge-compose.sh
+              /tmp/edge-sync/ensure-edge-compose.sh /opt/app/docker-compose.yml
               cd /opt/app
               docker compose pull
               docker compose up -d

@@ -3,6 +3,7 @@
 import { useState, useEffect, type MouseEvent } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { sendAnalysisReport } from '@/lib/api'
+import { fetchWithTimeout } from '@/lib/fetch-timeout'
 import { authService } from '@/lib/auth'
 import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
 import {
@@ -108,7 +109,7 @@ export function useResultsData() {
           })
           .catch(() => { /* サイレント失敗 */ })
 
-        const response = await fetch(`/api/chat/recommendations?session_id=${sessionId}&limit=10`, {
+        const response = await fetchWithTimeout(`/api/chat/recommendations?session_id=${sessionId}&limit=10`, {
           headers: authService.getUserFetchHeaders(),
         })
 
