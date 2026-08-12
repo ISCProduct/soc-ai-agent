@@ -5,11 +5,10 @@ import {
 } from '@/lib/datetime-local'
 
 describe('datetime-local', () => {
-  it('formatLocalDateKey はローカル暦日を返す（UTC の toISOString と一致しないケース）', () => {
-    // 2024-01-01 00:30 JST = 2023-12-31 15:30 UTC
-    const date = new Date('2024-01-01T00:30:00+09:00')
+  it('formatLocalDateKey はローカル暦日を返す（UTC の toISOString は使わない）', () => {
+    // Date(y, m, d, h, min) はランナーのローカル時刻で解釈されるため TZ 非依存
+    const date = new Date(2024, 0, 1, 0, 30)
     expect(formatLocalDateKey(date)).toBe('2024-01-01')
-    expect(date.toISOString().slice(0, 10)).toBe('2023-12-31')
   })
 
   it('isoToDatetimeLocal は UTC ISO をローカル datetime-local 形式へ変換する', () => {
