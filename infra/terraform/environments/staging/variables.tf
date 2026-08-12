@@ -46,8 +46,9 @@ variable "ssh_public_key" {
 }
 
 variable "instance_type" {
-  type    = string
-  default = "t4g.small"
+  type = string
+  # amd64（CIビルドと同一アーキテクチャに揃え、QEMUクロスビルドを避ける）
+  default = "t3.small"
 }
 
 # --- 平常時は最小構成、負荷試験時にオートスケールするための設定 ---
