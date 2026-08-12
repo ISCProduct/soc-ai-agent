@@ -186,13 +186,6 @@ jobs:
               docker image prune -af
               docker compose pull
               docker compose up -d
-              sleep 15
-              echo "=== compose ps ==="
-              docker compose ps
-              echo "=== backend logs ==="
-              docker logs --tail 100 app-backend-1
-              echo "=== disk usage ==="
-              df -h /
             '
 
       - name: Revoke runner IP for SSH
