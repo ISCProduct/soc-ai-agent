@@ -196,7 +196,9 @@ resource "aws_launch_template" "app" {
   block_device_mappings {
     device_name = "/dev/sda1"
     ebs {
-      volume_size = 20
+      # backend/frontend/rag-review(chromadb・onnxruntime等)の3イメージ分で
+      # 20GBは逼迫しdocker pullが「no space left on device」で失敗したため増量
+      volume_size = 30
       volume_type = "gp3"
     }
   }
@@ -260,6 +262,12 @@ resource "aws_autoscaling_group" "app" {
 
   instance_refresh {
     strategy = "Rolling"
+  }
+
+  # デプロイ後1時間で自動停止/次回デプロイ時に自動起動する運用のため、
+  # CIが変更するdesired_capacityをterraform applyで巻き戻さない
+  lifecycle {
+    ignore_changes = [desired_capacity]
   }
 
   tag {

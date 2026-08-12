@@ -39,6 +39,7 @@ HTMLEOF
 
 mkdir -p /opt/app
 cat > /opt/app/.env <<EOF
+SERVER_PORT=8080
 DB_HOST=${db_host}
 DB_PORT=${db_port}
 DB_NAME=${db_name}
