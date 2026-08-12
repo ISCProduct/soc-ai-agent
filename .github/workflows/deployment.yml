@@ -95,6 +95,14 @@ jobs:
               docker compose up -d
             '
 
+  deploy-staging-smoke:
+    needs: deploy-staging
+    if: github.ref_name == 'develop' && success()
+    uses: ./.github/workflows/deploy-smoke.yml
+    with:
+      environment: staging
+    secrets: inherit
+
   deploy-production:
     if: github.ref_name == 'main'
     name: Deploy to production
