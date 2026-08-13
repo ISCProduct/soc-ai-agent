@@ -116,7 +116,19 @@ jobs:
               bl_status_id = issue["status"]["id"]
 
               if "GitHub Issue:" in bl_desc:
-                  print(f"  スキップ（GitHub 起源）: {bl_key}", flush=True)
+                  # GitHub起源の課題はタイトル/本文を書き換えるとループするためスキップするが、
+                  # Backlog側で直接ステータス変更された場合に状態(open/closed)だけは反映する。
+                  existing_gh = gh_search_issue(bl_key)
+                  if existing_gh is None:
+                      print(f"  スキップ（GitHub 起源、対応Issue未検出）: {bl_key}", flush=True)
+                      continue
+                  gh_num = existing_gh["number"]
+                  new_state = "closed" if bl_status_id in CLOSED_STATUS_IDS else "open"
+                  if existing_gh["state"] != new_state:
+                      gh_request("PATCH", f"/repos/{GH_REPO}/issues/{gh_num}", {"state": new_state})
+                      print(f"  GitHub Issue の状態を同期しました（GitHub 起源）: #{gh_num} ← {bl_key} (state: {new_state})", flush=True)
+                  else:
+                      print(f"  スキップ（GitHub 起源、状態変更なし）: {bl_key}", flush=True)
                   continue
 
               gh_title = f"[{bl_key}] {bl_summary}"
