@@ -30,6 +30,8 @@ describe('ResultsListView', () => {
         isProvisional={false}
         analysisScores={null}
         scoreComment=""
+        analysisError={null}
+        onRetryAnalysis={noop}
         jobSuitabilityComment=""
         suggestedRoles={[]}
         emailSending={false}
@@ -70,5 +72,19 @@ describe('ResultsListView', () => {
   it('暫定評価チップを表示する', () => {
     renderList({ isProvisional: true })
     expect(screen.getByText('暫定評価')).toBeInTheDocument()
+  })
+
+  it('分析データ取得失敗時に警告と再読み込みボタンを表示する', () => {
+    const onRetryAnalysis = jest.fn()
+    renderList({ analysisError: '分析データの取得に失敗しました', onRetryAnalysis })
+
+    expect(screen.getByText(/分析データの取得に失敗しました/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '再読み込み' }))
+    expect(onRetryAnalysis).toHaveBeenCalledTimes(1)
+  })
+
+  it('分析エラーがない場合は警告を表示しない', () => {
+    renderList()
+    expect(screen.queryByRole('button', { name: '再読み込み' })).not.toBeInTheDocument()
   })
 })
