@@ -12,6 +12,7 @@ import {
   Stack,
   Tooltip,
   Typography,
+  Alert,
 } from '@mui/material'
 import CheckIcon from '@mui/icons-material/Check'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
@@ -45,14 +46,19 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
 
   const [suggestions, setSuggestions] = useState<PhraseSuggestion[] | null>(null)
   const [suggestionsLoading, setSuggestionsLoading] = useState(false)
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null)
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
 
   useEffect(() => {
     if (!userId || !report.session_id) return
     setSuggestionsLoading(true)
+    setSuggestionsError(null)
     interviewApi.getPhraseSuggestions(report.session_id, userId)
       .then(setSuggestions)
-      .catch(() => setSuggestions([]))
+      .catch(() => {
+        setSuggestions(null)
+        setSuggestionsError('言い換え提案の取得に失敗しました')
+      })
       .finally(() => setSuggestionsLoading(false))
   }, [report.session_id, userId])
 
@@ -168,6 +174,8 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
               <CircularProgress size={18} sx={{ color: PRIMARY }} />
               <Typography variant="body2" sx={{ color: textMuted }}>分析中...</Typography>
             </Box>
+          ) : suggestionsError ? (
+            <Alert severity="error">{suggestionsError}</Alert>
           ) : suggestions && suggestions.length > 0 ? (
             <Stack spacing={2}>
               {suggestions.map((item, i) => (

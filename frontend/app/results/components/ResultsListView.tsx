@@ -39,6 +39,8 @@ export interface ResultsListViewProps {
   isProvisional: boolean
   analysisScores: AnalysisScores | null
   scoreComment: string
+  analysisError: string | null
+  onRetryAnalysis: () => void
   jobSuitabilityComment: string
   suggestedRoles: SuggestedRole[]
   emailSending: boolean
@@ -64,6 +66,8 @@ export default function ResultsListView({
   isProvisional,
   analysisScores,
   scoreComment,
+  analysisError,
+  onRetryAnalysis,
   jobSuitabilityComment,
   suggestedRoles,
   emailSending,
@@ -149,6 +153,21 @@ export default function ResultsListView({
         backgroundColor: '#fafafa',
       }}>
         <Box sx={{ maxWidth: 1200, mx: 'auto' }}>
+          {/* 分析データの部分取得失敗（サイレント失敗させず明示する） */}
+          {analysisError && (
+            <Alert
+              severity="warning"
+              sx={{ mb: 3 }}
+              action={
+                <Button color="inherit" size="small" startIcon={<Refresh />} onClick={onRetryAnalysis}>
+                  再読み込み
+                </Button>
+              }
+            >
+              {analysisError}（4分析スコア・向いている職種は表示されません）
+            </Alert>
+          )}
+
           {/* 4分析スコアと総合コメント */}
           {(scoreComment || analysisScores) && (
             <Card elevation={2} sx={{ mb: 3, border: '2px solid', borderColor: 'primary.light', backgroundColor: '#f0f4ff' }}>

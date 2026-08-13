@@ -2,7 +2,8 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { sendChatMessage, getChatHistory, UnauthorizedError, type ChatRequest, type ChatResponse } from '@/lib/api'
+import { sendChatMessage, getChatHistory, type ChatRequest, type ChatResponse } from '@/lib/api'
+import { UserFacingApiError, gatewayErrorPath } from '@/lib/user-facing-error'
 import { authService } from '@/lib/auth'
 import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
 import { resolveChatOutgoingMessage } from '@/lib/chat-choices'
@@ -59,6 +60,9 @@ export function useMuiChat() {
     authService.logout()
     router.replace('/login')
   }, [router])
+
+  const isSessionExpiredError = (error: unknown): boolean =>
+    error instanceof UserFacingApiError && (error.status === 401 || error.status === 403)
 
   const scrollToBottomIfNeeded = () => {
     const area = messagesAreaRef.current
@@ -152,7 +156,7 @@ export function useMuiChat() {
     try {
       await loadChatHistory(sessionId)
     } catch (error) {
-      if (error instanceof UnauthorizedError) {
+      if (isSessionExpiredError(error)) {
         redirectToLoginForExpiredSession()
         return
       }
@@ -205,7 +209,7 @@ export function useMuiChat() {
         console.log('[MUI Chat] Loading history for session:', storedSessionId)
         await loadChatHistory(storedSessionId)
       } catch (error) {
-        if (error instanceof UnauthorizedError) {
+        if (isSessionExpiredError(error)) {
           redirectToLoginForExpiredSession()
           return
         }
@@ -387,7 +391,7 @@ export function useMuiChat() {
         return newMessages
       })
     } catch (error) {
-      if (error instanceof UnauthorizedError) {
+      if (isSessionExpiredError(error)) {
         redirectToLoginForExpiredSession()
         return
       }
@@ -410,14 +414,13 @@ export function useMuiChat() {
           timestamp: new Date(),
         }
         setMessages((prev) => [...prev, completionMessage])
+      } else if (error instanceof UserFacingApiError && error.gateway) {
+        router.replace(gatewayErrorPath(error.status))
       } else {
-        // その他のエラー
         const errorMsg: Message = {
           id: makeMessageId(),
           role: 'assistant',
-          content:
-            'バックエンドとの接続に失敗しました。後ほど再試行してください。\n\nエラー: ' +
-            errorMessage,
+          content: '送信に失敗しました。しばらくしてから再試行してください。',
           timestamp: new Date(),
         }
         setMessages((prev) => [...prev, errorMsg])

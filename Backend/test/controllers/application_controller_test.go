@@ -159,6 +159,40 @@ func TestApplicationController_UpdateStatus_Success(t *testing.T) {
 	svc.AssertExpectations(t)
 }
 
+func TestApplicationController_UpdateStatus_InvalidTransitionConflict(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	svc.On("UpdateStatus", uint(1), uint(1), "accepted", "", false).
+		Return(nil, errors.New("invalid_status_transition: applied から accepted への遷移は許可されていません"))
+
+	body, _ := json.Marshal(map[string]any{"status": "accepted"})
+	req := httptest.NewRequest(http.MethodPut, "/api/applications/1", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("1")
+	assertStatus(t, newApplicationController(svc).UpdateStatus, c, http.StatusConflict)
+	svc.AssertExpectations(t)
+}
+
+func TestApplicationController_UpdateStatus_ClosedConflict(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	svc.On("UpdateStatus", uint(1), uint(1), "applied", "", false).
+		Return(nil, errors.New("application_already_closed: ステータス accepted は終了状態のため更新できません"))
+
+	body, _ := json.Marshal(map[string]any{"status": "applied"})
+	req := httptest.NewRequest(http.MethodPut, "/api/applications/1", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("1")
+	assertStatus(t, newApplicationController(svc).UpdateStatus, c, http.StatusConflict)
+	svc.AssertExpectations(t)
+}
+
 func TestApplicationController_UpdateStatus_IgnoresClientIsAdmin(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
 	app := &entity.UserApplicationStatus{Status: "document_screening", Notes: "書類選考開始"}

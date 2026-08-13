@@ -3,14 +3,23 @@ name: PR → Backlog 同期
 # PR に Backlog 課題キー（例: SOCAIAGENT-8）が含まれる場合に Backlog 課題を自動更新します。
 #
 # 動作:
-#   - PR オープン/更新時 : ステータスを「処理中」に変更し、説明に PR URL を追記
-#   - PR マージ時        : ステータスを「完了」に変更
-#   - PR クローズ（非マージ）: ステータスを「未対応」に戻す
+#   - PR オープン/更新時          : ステータスを「処理中」に変更し、説明に PR URL を追記
+#   - PR クローズ（非マージ）      : ステータスを「未対応」に戻す
+#   - PR マージ時（マージ先ブランチに応じて切替。develop→release→main の
+#     プロモーションPRは複数 feature PR の束ねマージのため、各コミットが
+#     参照する元PR番号からも Backlog キーを解決し、まとめて更新する）:
+#       - develop へマージ : 「ステージング環境反映」
+#       - release へマージ : 「リリース待ち」
+#       - main    へマージ : 「完了」
+#     ※「ステージング環境反映」「リリース待ち」は Backlog 側で事前にカスタム
+#       ステータスとして作成しておく必要がある（名前からIDを動的解決するため
+#       完全一致必須）。未作成の場合はジョブがエラーで停止し、作成を促すログを出す。
 #
 # 課題キーの検出場所（優先順）:
 #   1. PR タイトルの [PROJ-N] プレフィックス
 #   2. PR 本文の <!-- backlog-key:PROJ-N --> マーカー
 #   3. PR 本文の「Backlog: PROJ-N」記述
+#   4. PR 本文の Closes/Fixes/Resolves #N が指す GitHub Issue から解決
 #
 # 必要な GitHub Secrets:
 #   BACKLOG_SPACE_ID    : スペースID（例: myspace ← myspace.backlog.jp の場合）
@@ -39,10 +48,12 @@ jobs:
           BACKLOG_SPACE_ID: ${{ secrets.BACKLOG_SPACE_ID }}
           BACKLOG_PROJECT_KEY: ${{ secrets.BACKLOG_PROJECT_KEY }}
           BACKLOG_DOMAIN: ${{ secrets.BACKLOG_DOMAIN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           PR_MERGED: ${{ github.event.pull_request.merged }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
           ACTION: ${{ github.event.action }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -54,13 +65,22 @@ jobs:
           from backlog_client import load_backlog_env, resolve_bl_base, bl_request as _bl_request
 
           API_KEY, SPACE_ID, PROJ_KEY, DOMAIN = load_backlog_env()
-          PR_TITLE  = os.environ.get('PR_TITLE', '')
-          PR_BODY   = os.environ.get('PR_BODY') or ''
-          PR_URL    = os.environ['PR_URL']
-          PR_MERGED = os.environ.get('PR_MERGED', 'false').lower() == 'true'
-          ACTION    = os.environ['ACTION']
-          GH_TOKEN  = os.environ.get('GH_TOKEN', '')
-          GH_REPO   = os.environ.get('GH_REPO', '')
+          PR_NUMBER   = os.environ.get('PR_NUMBER', '')
+          PR_TITLE    = os.environ.get('PR_TITLE', '')
+          PR_BODY     = os.environ.get('PR_BODY') or ''
+          PR_URL      = os.environ['PR_URL']
+          PR_MERGED   = os.environ.get('PR_MERGED', 'false').lower() == 'true'
+          PR_BASE_REF = os.environ.get('PR_BASE_REF', '')
+          ACTION      = os.environ['ACTION']
+          GH_TOKEN    = os.environ.get('GH_TOKEN', '')
+          GH_REPO     = os.environ.get('GH_REPO', '')
+
+          # マージ先ブランチ → Backlog ステータス名（このブランチに現れない場合は対象外）
+          MERGE_STATUS_NAME_BY_BRANCH = {
+              'develop': 'ステージング環境反映',
+              'release': 'リリース待ち',
+              'main':    '完了',
+          }
 
           BL_BASE, BL_DOMAIN = resolve_bl_base(SPACE_ID, API_KEY, DOMAIN)
 
@@ -107,43 +127,132 @@ jobs:
                       return bl_key
               return None
 
-          bl_key = extract_bl_key(PR_TITLE, PR_BODY)
-          if not bl_key:
-              bl_key = resolve_bl_key_from_gh_issue(PR_BODY)
-          if not bl_key:
+          def gh_get_issue_or_pr(number):
+              """PR番号もGitHub上ではIssue番号として扱えるため issues API で取得する"""
+              url = f"https://api.github.com/repos/{GH_REPO}/issues/{number}"
+              req = urllib.request.Request(url)
+              req.add_header('Authorization', f'Bearer {GH_TOKEN}')
+              req.add_header('Accept', 'application/vnd.github+json')
+              req.add_header('X-GitHub-Api-Version', '2022-11-28')
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return json.loads(r.read())
+              except Exception:
+                  return None
+
+          def resolve_bl_keys_from_commits(pr_number):
+              """develop→release→main のプロモーションPRは複数 feature PR の束ねマージのため、
+              各コミットメッセージが参照する元PR番号からも Backlog キーを解決する"""
+              if not GH_TOKEN or not GH_REPO or not pr_number:
+                  return set()
+              url = f"https://api.github.com/repos/{GH_REPO}/pulls/{pr_number}/commits?per_page=250"
+              req = urllib.request.Request(url)
+              req.add_header('Authorization', f'Bearer {GH_TOKEN}')
+              req.add_header('Accept', 'application/vnd.github+json')
+              req.add_header('X-GitHub-Api-Version', '2022-11-28')
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      commits = json.loads(r.read())
+              except Exception as e:
+                  print(f"コミット一覧の取得に失敗しました: {e}", file=sys.stderr)
+                  return set()
+
+              keys = set()
+              seen_numbers = set()
+              for c in commits:
+                  headline = (c.get('commit', {}).get('message') or '').split('\n', 1)[0]
+                  for m in re.finditer(r'#(\d+)', headline):
+                      num = m.group(1)
+                      if num in seen_numbers or num == str(pr_number):
+                          continue
+                      seen_numbers.add(num)
+                      sub = gh_get_issue_or_pr(num)
+                      if not sub:
+                          continue
+                      k = extract_bl_key(sub.get('title', ''), sub.get('body') or '')
+                      if k:
+                          keys.add(k)
+              return keys
+
+          def load_status_id_map():
+              statuses = bl_request('GET', f"/projects/{PROJ_KEY}/statuses")
+              return {s['name']: s['id'] for s in (statuses or [])}
+
+          def resolve_merge_status(status_map, base_ref):
+              """戻り値: (status_id, status_name)。対象外ブランチなら (None, None)。
+              名前解決失敗なら (False, status_name) を返す（「完了」は既定ステータスのため id=4 にフォールバック）"""
+              name = MERGE_STATUS_NAME_BY_BRANCH.get(base_ref)
+              if name is None:
+                  return None, None
+              if name in status_map:
+                  return status_map[name], name
+              if name == '完了':
+                  return 4, name
+              return False, name
+
+          def update_backlog_status(bl_key, status_id, *, pr_url_section=None):
+              data = {'statusId': status_id}
+              if pr_url_section:
+                  issue = bl_request('GET', f"/issues/{bl_key}")
+                  if issue:
+                      current_desc = issue.get('description') or ''
+                      pr_pattern = r'\n*## GitHub PR\n[^\n]*'
+                      if re.search(pr_pattern, current_desc):
+                          data['description'] = re.sub(pr_pattern, pr_url_section, current_desc)
+                      else:
+                          data['description'] = current_desc.rstrip() + pr_url_section
+              result = bl_request('PATCH', f"/issues/{bl_key}", data)
+              return result is not None
+
+          own_key = extract_bl_key(PR_TITLE, PR_BODY)
+          if not own_key:
+              own_key = resolve_bl_key_from_gh_issue(PR_BODY)
+
+          # ---- PR オープン/更新時: 処理中 ----
+          if ACTION != 'closed':
+              if not own_key:
+                  print("Backlog 課題キーが見つかりません。スキップします。")
+                  sys.exit(0)
+              pr_section = f'\n\n## GitHub PR\n{PR_URL}'
+              if update_backlog_status(own_key, 2, pr_url_section=pr_section):
+                  print(f"Backlog 課題を更新しました: {own_key} (ステータス: 処理中、PR URL を追記)")
+              sys.exit(0)
+
+          # ---- PR クローズ（非マージ）: 未対応に戻す ----
+          if not PR_MERGED:
+              if not own_key:
+                  print("Backlog 課題キーが見つかりません。スキップします。")
+                  sys.exit(0)
+              if update_backlog_status(own_key, 1):
+                  print(f"Backlog 課題を更新しました: {own_key} (ステータス: 未対応)")
+              sys.exit(0)
+
+          # ---- PR マージ時: マージ先ブランチに応じたステータスへ ----
+          status_map = load_status_id_map()
+          status_id, status_name = resolve_merge_status(status_map, PR_BASE_REF)
+          if status_id is None:
+              print(f"対象外のマージ先ブランチ '{PR_BASE_REF}' のため Backlog ステータス更新をスキップします。")
+              sys.exit(0)
+          if status_id is False:
+              print(
+                  f"エラー: Backlog にステータス '{status_name}' が見つかりません。"
+                  f" Backlog のプロジェクト設定でカスタムステータスとして追加してください"
+                  f"（既存ステータス: {', '.join(status_map.keys())}）。",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          keys = set(resolve_bl_keys_from_commits(PR_NUMBER))
+          if own_key:
+              keys.add(own_key)
+          if not keys:
               print("Backlog 課題キーが見つかりません。スキップします。")
               sys.exit(0)
 
-          print(f"検出した Backlog 課題キー: {bl_key}")
-
-          # 現在の課題情報を取得
-          issue = bl_request('GET', f"/issues/{bl_key}")
-          if not issue:
-              print(f"Backlog 課題 {bl_key} が見つかりません。")
-              sys.exit(0)
-
-          # 説明に PR URL セクションを追記（すでにあれば上書き）
-          current_desc = issue.get('description') or ''
+          print(f"検出した Backlog 課題キー: {', '.join(sorted(keys))}")
           pr_section = f'\n\n## GitHub PR\n{PR_URL}'
-          pr_pattern  = r'\n*## GitHub PR\n[^\n]*'
-          if re.search(pr_pattern, current_desc):
-              new_desc = re.sub(pr_pattern, pr_section, current_desc)
-          else:
-              new_desc = current_desc.rstrip() + pr_section
-
-          # ステータスID の決定
-          # 1=未対応 / 2=処理中 / 3=処理済み / 4=完了
-          if ACTION == 'closed':
-              status_id    = 4 if PR_MERGED else 1
-              status_label = '完了' if PR_MERGED else '未対応'
-          else:
-              status_id    = 2
-              status_label = '処理中'
-
-          result = bl_request('PATCH', f"/issues/{bl_key}", {
-              'description': new_desc,
-              'statusId':    status_id,
-          })
-          if result:
-              print(f"Backlog 課題を更新しました: {bl_key} (ステータス: {status_label}、PR URL を追記)")
+          for key in sorted(keys):
+              ok = update_backlog_status(key, status_id, pr_url_section=pr_section if key == own_key else None)
+              if ok:
+                  print(f"Backlog 課題を更新しました: {key} (ステータス: {status_name})")
           PYEOF

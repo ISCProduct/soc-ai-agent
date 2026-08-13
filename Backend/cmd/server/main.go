@@ -414,10 +414,6 @@ func main() {
 
 	// サーバー起動
 	port := cfg.ServerPort
-	if port == "" {
-		port = "80"
-	}
-
 	slog.Info("Starting server", "port", port)
 	if err := e.Start(":" + port); err != nil {
 		log.Fatalf("Server failed: %v", err)
