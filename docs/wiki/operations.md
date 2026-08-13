@@ -26,6 +26,18 @@ docker compose restart app
 docker compose logs -f app
 ```
 
+### メール送信（Resend / #758）
+
+本番・staging は独自ドメインを使う。`soc-ai-agent.com` ではなく検証済みの `shukatsu-ai.jp`。
+
+```env
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=re_xxxxxxxxx
+EMAIL_FROM=noreply@shukatsu-ai.jp
+```
+
+Resend ダッシュボードで `shukatsu-ai.jp` が Verified であること。API キーは Secrets のみ（リポジトリに置かない）。試験送信は登録確認メールで確認する。
+
 ### ヘルスチェック確認
 
 ```sh

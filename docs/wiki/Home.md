@@ -17,6 +17,7 @@
 | [RAG サービス詳細](./rag-service.md) | 開発者 | ChromaDB・Web Search・Deep Research の仕組み |
 | [スコアリング・マッチング](./scoring.md) | 開発者 | 10カテゴリスコア定義・マッチングアルゴリズム |
 | [データプライバシー設計](./data-privacy.md) | 開発者・法務 | 匿名化・同意管理の設計方針 |
+| [料金プラン × 機能](./plan-entitlements.md) | 開発者 | プラン別エンタイトルメント（#810） |
 
 ### 運用担当向け
 

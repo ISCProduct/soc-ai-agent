@@ -33,6 +33,8 @@ describe('SelectionScreen', () => {
         allCompanies={[]}
         setAllCompanies={noop}
         companiesLoading={false}
+        companiesLoadError={null}
+        onRetryCompaniesLoad={noop}
         webSearchResults={[]}
         setWebSearchResults={noop}
         webSearchLoading={false}
@@ -66,6 +68,23 @@ describe('SelectionScreen', () => {
 
     fireEvent.keyDown(radios[1], { key: 'Enter' })
     expect(setSelectedPosition).toHaveBeenCalled()
+  })
+
+  it('企業一覧の取得失敗時はエラーと再試行を表示する', () => {
+    const onRetry = jest.fn()
+    renderScreen({
+      companiesLoadError: '企業一覧の取得に失敗しました',
+      onRetryCompaniesLoad: onRetry,
+    })
+
+    expect(screen.getByText('企業一覧の取得に失敗しました')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '再試行' }))
+    expect(onRetry).toHaveBeenCalled()
+  })
+
+  it('取得成功かつ0件のときだけ登録企業が見つかりませんを表示する', () => {
+    renderScreen({ allCompanies: [], companiesLoadError: null })
+    expect(screen.getByText('登録企業が見つかりません')).toBeInTheDocument()
   })
 
   it('DB一覧に名前一致があるとき id:0 の仮選択を登録企業へ昇格する', () => {

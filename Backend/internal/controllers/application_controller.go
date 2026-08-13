@@ -4,6 +4,7 @@ import (
 	"Backend/internal/services/interfaces"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -79,7 +80,11 @@ func (c *ApplicationController) UpdateStatus(ctx echo.Context) error {
 
 	app, err := c.appService.UpdateStatus(uint(id), userID, req.Status, req.Notes, false)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		msg := err.Error()
+		if strings.Contains(msg, "invalid_status_transition") || strings.Contains(msg, "application_already_closed") {
+			return echo.NewHTTPError(http.StatusConflict, msg)
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, msg)
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]any{

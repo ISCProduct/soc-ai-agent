@@ -113,17 +113,37 @@ data "aws_route53_zone" "selected" {
 module "alb" {
   source = "../../modules/alb"
 
-  project_name         = var.project_name
-  vpc_id               = module.network.vpc_id
-  subnet_ids           = module.network.public_subnet_ids
-  security_group_id    = module.network.alb_security_group_id
-  route53_zone_id      = data.aws_route53_zone.selected.zone_id
-  frontend_domain_name = local.frontend_domain
-  backend_domain_name  = local.backend_domain
-  frontend_target_port = 3000
-  backend_target_port  = 8080
-  target_type          = "instance"
-  tags                 = local.tags
+  project_name               = var.project_name
+  vpc_id                     = module.network.vpc_id
+  subnet_ids                 = module.network.public_subnet_ids
+  security_group_id          = module.network.alb_security_group_id
+  route53_zone_id            = data.aws_route53_zone.selected.zone_id
+  frontend_domain_name       = local.frontend_domain
+  backend_domain_name        = local.backend_domain
+  frontend_target_port       = 3000
+  backend_target_port        = 8080
+  frontend_health_check_path = "/edge-healthz"
+  target_type                = "instance"
+  tags                       = local.tags
+}
+
+# ALB ターゲット全滅時（EC2停止等）に Route53 がフェイルオーバーする OGP 付き静的エラーページ
+# ponytail: cloudfront:Create* 権限が無い環境では enable_error_fallback=false のまま
+module "error_fallback" {
+  count  = var.enable_error_fallback ? 1 : 0
+  source = "../../modules/error_fallback"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  project_name             = var.project_name
+  env                      = "staging"
+  domain_name              = local.frontend_domain
+  aliases                  = [local.frontend_domain]
+  route53_zone_id          = data.aws_route53_zone.selected.zone_id
+  service_unavailable_html = file("${path.module}/../../../static/service-unavailable.html")
+  tags                     = local.tags
 }
 
 # --- アプリ実行用EC2（IAMロール作成権限が無い環境向けの暫定構成） ---
@@ -157,7 +177,7 @@ data "aws_ami" "app" {
 
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-arm64-server-*"]
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
   }
 }
 
@@ -176,35 +196,39 @@ resource "aws_launch_template" "app" {
   block_device_mappings {
     device_name = "/dev/sda1"
     ebs {
-      volume_size = 20
+      # backend/frontend/rag-review(chromadb・onnxruntime等)の3イメージ分で
+      # 20GBは逼迫しdocker pullが「no space left on device」で失敗したため増量
+      volume_size = 30
       volume_type = "gp3"
     }
   }
 
   user_data = base64encode(templatefile("${path.module}/app_user_data.sh.tftpl", {
-    aws_region            = var.region
-    aws_access_key_id     = var.aws_access_key_id
-    aws_secret_access_key = var.aws_secret_access_key
-    backend_image         = local.backend_image
-    frontend_image        = local.frontend_image
-    rag_image             = local.rag_image
-    db_host               = module.rds.address
-    db_port               = module.rds.port
-    db_name               = module.rds.db_name
-    db_user               = module.rds.master_username
-    db_password           = module.rds.master_password
-    s3_bucket             = module.s3.bucket_id
-    openai_api_key        = var.openai_api_key_plain
-    google_client_id      = var.google_client_id
-    google_client_secret  = var.google_client_secret
-    github_client_id      = var.github_client_id
-    github_client_secret  = var.github_client_secret
-    backend_domain        = local.backend_domain
-    frontend_domain       = local.frontend_domain
-    user_secret           = random_password.user_secret.result
-    admin_secret          = random_password.admin_secret.result
-    oauth_state_secret    = random_password.oauth_state_secret.result
-    token_encryption_key  = random_id.token_encryption_key.hex
+    aws_region               = var.region
+    aws_access_key_id        = var.aws_access_key_id
+    aws_secret_access_key    = var.aws_secret_access_key
+    backend_image            = local.backend_image
+    frontend_image           = local.frontend_image
+    rag_image                = local.rag_image
+    db_host                  = module.rds.address
+    db_port                  = module.rds.port
+    db_name                  = module.rds.db_name
+    db_user                  = module.rds.master_username
+    db_password              = module.rds.master_password
+    s3_bucket                = module.s3.bucket_id
+    openai_api_key           = var.openai_api_key_plain
+    google_client_id         = var.google_client_id
+    google_client_secret     = var.google_client_secret
+    github_client_id         = var.github_client_id
+    github_client_secret     = var.github_client_secret
+    backend_domain           = local.backend_domain
+    frontend_domain          = local.frontend_domain
+    user_secret              = random_password.user_secret.result
+    admin_secret             = random_password.admin_secret.result
+    oauth_state_secret       = random_password.oauth_state_secret.result
+    token_encryption_key     = random_id.token_encryption_key.hex
+    edge_nginx_conf          = file("${path.module}/../../../nginx/staging-edge.conf")
+    service_unavailable_html = file("${path.module}/../../../static/service-unavailable.html")
   }))
 
   tag_specifications {
@@ -238,6 +262,12 @@ resource "aws_autoscaling_group" "app" {
 
   instance_refresh {
     strategy = "Rolling"
+  }
+
+  # デプロイ後1時間で自動停止/次回デプロイ時に自動起動する運用のため、
+  # CIが変更するdesired_capacityをterraform applyで巻き戻さない
+  lifecycle {
+    ignore_changes = [desired_capacity]
   }
 
   tag {
@@ -291,6 +321,7 @@ resource "aws_security_group_rule" "app_frontend_from_alb" {
 }
 
 resource "aws_route53_record" "frontend" {
+  count   = var.enable_error_fallback ? 0 : 1
   zone_id = data.aws_route53_zone.selected.zone_id
   name    = local.frontend_domain
   type    = "A"
@@ -299,6 +330,45 @@ resource "aws_route53_record" "frontend" {
     name                   = module.alb.alb_dns_name
     zone_id                = module.alb.alb_zone_id
     evaluate_target_health = true
+  }
+}
+
+# enable_error_fallback=true: ALB → CloudFront(S3) フェイルオーバー
+resource "aws_route53_record" "frontend_primary" {
+  count   = var.enable_error_fallback ? 1 : 0
+  zone_id = data.aws_route53_zone.selected.zone_id
+  name    = local.frontend_domain
+  type    = "A"
+
+  set_identifier = "primary"
+
+  failover_routing_policy {
+    type = "PRIMARY"
+  }
+
+  alias {
+    name                   = module.alb.alb_dns_name
+    zone_id                = module.alb.alb_zone_id
+    evaluate_target_health = true
+  }
+}
+
+resource "aws_route53_record" "frontend_secondary" {
+  count   = var.enable_error_fallback ? 1 : 0
+  zone_id = data.aws_route53_zone.selected.zone_id
+  name    = local.frontend_domain
+  type    = "A"
+
+  set_identifier = "secondary"
+
+  failover_routing_policy {
+    type = "SECONDARY"
+  }
+
+  alias {
+    name                   = module.error_fallback[0].cloudfront_domain_name
+    zone_id                = module.error_fallback[0].cloudfront_hosted_zone_id
+    evaluate_target_health = false
   }
 }
 

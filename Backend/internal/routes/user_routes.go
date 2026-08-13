@@ -9,4 +9,5 @@ import (
 func SetupUserRoutes(api *echo.Group, profileController *controllers.IntegratedProfileController) {
 	user := api.Group("/user")
 	user.GET("/profile", profileController.GetProfile)
+	api.GET("/entitlements", controllers.GetEntitlements)
 }

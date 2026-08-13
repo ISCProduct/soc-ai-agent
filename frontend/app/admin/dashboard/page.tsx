@@ -33,6 +33,7 @@ import { authService } from '@/lib/auth'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
+import { canUseFeature, fetchEntitlements, type Entitlements } from '@/lib/entitlements'
 
 type UserSummary = {
   user_id: number
@@ -91,6 +92,7 @@ export default function AdminScoreDashboardPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
+  const [entitlements, setEntitlements] = useState<Entitlements | null>(null)
 
   const [detailUser, setDetailUser] = useState<UserSummary | null>(null)
   const [detailSessions, setDetailSessions] = useState<SessionEntry[]>([])
@@ -103,6 +105,7 @@ export default function AdminScoreDashboardPage() {
       return
     }
     setAdminEmail(user.email)
+    void fetchEntitlements().then(setEntitlements).catch(() => setEntitlements(null))
   }, [])
 
   const fetchUsers = useCallback(async () => {
@@ -176,13 +179,18 @@ export default function AdminScoreDashboardPage() {
         title="ユーザー別スコアダッシュボード"
         backHref="/admin"
         actions={
-          <Button
-            variant="outlined"
-            startIcon={<FileDownloadIcon />}
-            onClick={handleExport}
-          >
-            CSV エクスポート
-          </Button>
+          <Tooltip title={canUseFeature(entitlements, 'export') ? '' : 'Pro プランで利用できます'}>
+            <span>
+              <Button
+                variant="outlined"
+                startIcon={<FileDownloadIcon />}
+                onClick={handleExport}
+                disabled={!canUseFeature(entitlements, 'export')}
+              >
+                CSV エクスポート
+              </Button>
+            </span>
+          </Tooltip>
         }
       />
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { useParams, useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import {
   Box,
@@ -34,6 +34,7 @@ import {
   parseJsonArray,
   type CompanyDetailViewModel,
 } from './companyDetailUtils'
+import { fetchWithTimeout } from '@/lib/fetch-timeout'
 
 const CompanyDiagram = dynamic(() => import('@/components/company-diagram'), {
   ssr: false,
@@ -53,33 +54,43 @@ type JobPosition = {
   job_category?: { name: string }
 }
 
+type LoadStatus = 'loading' | 'ok' | 'not_found' | 'error'
+
 export default function CompanyDetailPage() {
   const params = useParams()
   const router = useRouter()
   const [company, setCompany] = useState<CompanyDetailViewModel | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loadStatus, setLoadStatus] = useState<LoadStatus>('loading')
   const [activeTab, setActiveTab] = useState<'capital' | 'business'>('capital')
   const [jobPositions, setJobPositions] = useState<JobPosition[]>([])
 
+  const fetchCompanyDetail = useCallback(async () => {
+    const companyId = String(params.id)
+    setLoadStatus('loading')
+    try {
+      const response = await fetchWithTimeout(`/api/companies/${companyId}`)
+      if (response.status === 404) {
+        setCompany(null)
+        setLoadStatus('not_found')
+        return
+      }
+      if (!response.ok) {
+        setCompany(null)
+        setLoadStatus('error')
+        return
+      }
+      const raw: unknown = await response.json()
+      setCompany(mapCompanyApiToViewModel(raw))
+      setLoadStatus('ok')
+    } catch (error) {
+      console.error('Failed to fetch company details:', error)
+      setCompany(null)
+      setLoadStatus('error')
+    }
+  }, [params.id])
+
   useEffect(() => {
     const companyId = String(params.id)
-
-    const fetchCompanyDetail = async () => {
-      try {
-        const response = await fetch(`/api/companies/${companyId}`)
-        if (!response.ok) {
-          setCompany(null)
-          return
-        }
-        const raw: unknown = await response.json()
-        setCompany(mapCompanyApiToViewModel(raw))
-      } catch (error) {
-        console.error('Failed to fetch company details:', error)
-        setCompany(null)
-      } finally {
-        setLoading(false)
-      }
-    }
 
     const fetchJobPositions = async () => {
       try {
@@ -103,9 +114,9 @@ export default function CompanyDetailPage() {
 
     void fetchCompanyDetail()
     void fetchJobPositions()
-  }, [params.id])
+  }, [params.id, fetchCompanyDetail])
 
-  if (loading) {
+  if (loadStatus === 'loading') {
     return (
       <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#f5f7fa' }}>
         <Typography color="text.secondary">読み込み中...</Typography>
@@ -113,7 +124,26 @@ export default function CompanyDetailPage() {
     )
   }
 
-  if (!company) {
+  if (loadStatus === 'error') {
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Stack spacing={2} alignItems="center">
+          <Typography variant="h5" fontWeight={700}>企業情報の取得に失敗しました</Typography>
+          <Typography color="text.secondary">ネットワークまたはサーバーエラーが発生しました</Typography>
+          <Stack direction="row" spacing={1}>
+            <Button variant="contained" onClick={() => void fetchCompanyDetail()}>
+              再試行
+            </Button>
+            <Button startIcon={<ArrowBackIcon />} variant="outlined" onClick={() => router.back()}>
+              戻る
+            </Button>
+          </Stack>
+        </Stack>
+      </Box>
+    )
+  }
+
+  if (loadStatus === 'not_found' || !company) {
     return (
       <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <Stack spacing={2} alignItems="center">

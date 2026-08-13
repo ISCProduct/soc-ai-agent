@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { parseProxyResponse, type ParsedProxyResponse, type ProxyResponseData } from '@/lib/proxy-response'
+import { looksLikeHtml, userFacingApiMessage } from '@/lib/user-facing-error'
 
 export interface ProxyErrorBody {
   error: string
@@ -17,13 +18,6 @@ function getString(value: unknown): string | undefined {
 
 function isProxyErrorObject(data: ParsedProxyResponse): data is ProxyResponseData {
   return !!data && typeof data === 'object' && !Array.isArray(data)
-}
-
-function getErrorText(data: ParsedProxyResponse): string {
-  if (!isProxyErrorObject(data)) {
-    return 'Upstream API error'
-  }
-  return getString(data.error) ?? getString(data.message) ?? 'Upstream API error'
 }
 
 function getDetailText(data: ParsedProxyResponse, raw: string): string | undefined {
@@ -55,12 +49,13 @@ export async function buildProxyJsonResponse(response: Response): Promise<NextRe
     return NextResponse.json(data, { status: response.status })
   }
 
-  const error = getErrorText(data)
-  const detail = getDetailText(data, raw)
+  const rawForUser = looksLikeHtml(raw) ? '' : raw
+  const error = userFacingApiMessage(response.status, raw)
+  const detail = looksLikeHtml(raw) ? undefined : getDetailText(data, rawForUser)
   const body: ProxyErrorBody = {
     error,
     status: response.status,
-    ...(detail && detail !== error ? { detail } : {}),
+    ...(detail && detail !== error && !looksLikeHtml(detail) ? { detail } : {}),
   }
   return NextResponse.json(body, { status: response.status })
 }
