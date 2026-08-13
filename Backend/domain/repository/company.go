@@ -25,7 +25,8 @@ type CompanyRepository interface {
 	// ListActiveFiltered は名前・公開ステータス・業界・情報充足で絞り込んだアクティブ企業一覧と総件数を返す。
 	// industry が "__unset__" のときは業界未設定のみ。readiness は "ready" / "missing" / ""。
 	// orderBy は "industry" のとき業界順、それ以外は id desc。
-	ListActiveFiltered(limit, offset int, name, status, industry, readiness, orderBy string) ([]models.Company, int64, error)
+	// schoolID が非nilの場合は学校ごとの掲載承認リスト(school_company_approvals)で絞り込む。
+	ListActiveFiltered(limit, offset int, name, status, industry, readiness, orderBy string, schoolID *uint) ([]models.Company, int64, error)
 	// ListActiveIndustries はアクティブ企業に付いている業界名の重複なし一覧を返す。
 	ListActiveIndustries() ([]string, error)
 	FindAllPublished(limit, offset int) ([]models.Company, error)
@@ -35,6 +36,8 @@ type CompanyRepository interface {
 	FindByName(name string) (*models.Company, error)
 	FindByCorporateNumber(corporateNumber string) (*models.Company, error)
 	GetWeightProfile(companyID uint, jobPositionID *uint) (*models.CompanyWeightProfile, error)
+	// GetWeightProfilesByCompanyIDs は企業ID群の会社単位プロファイル（job_position_id IS NULL）を一括取得する。
+	GetWeightProfilesByCompanyIDs(companyIDs []uint) (map[uint]*models.CompanyWeightProfile, error)
 	Create(company *models.Company) error
 	Update(company *models.Company) error
 	FindJobPositionByCompanyAndTitle(companyID uint, title string) (*models.CompanyJobPosition, error)
@@ -42,7 +45,8 @@ type CompanyRepository interface {
 	CreateJobPosition(position *models.CompanyJobPosition) error
 	UpdateJobPosition(position *models.CompanyJobPosition) error
 	FindJobPositionsByCompany(companyID uint) ([]models.CompanyJobPosition, error)
-	ListJobPositions(companyID *uint, limit int) ([]models.CompanyJobPosition, error)
+	// schoolID が非nilの場合は学校ごとの掲載承認リスト(school_company_approvals)で絞り込む。
+	ListJobPositions(companyID, schoolID *uint, limit int) ([]models.CompanyJobPosition, error)
 	CreateOrUpdateWeightProfile(profile *models.CompanyWeightProfile) error
 	CountWeightProfiles() (int64, error)
 	ListPublishedL1WarmCandidates(limit int, infoTTL time.Duration) ([]models.CompanyL1WarmRow, error)

@@ -51,7 +51,7 @@ func TestGetCompaniesFiltered_Order(t *testing.T) {
 				mock.ExpectQuery("SELECT count\\(\\*\\) FROM `companies` WHERE is_active = \\?").
 					WithArgs(true).
 					WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
-				mock.ExpectQuery("SELECT \\* FROM `companies` WHERE is_active = \\? ORDER BY updated_at DESC, id ASC LIMIT \\?").
+				mock.ExpectQuery("SELECT \\* FROM `companies` WHERE is_active = \\? AND `companies`.`deleted_at` IS NULL ORDER BY updated_at DESC, id ASC LIMIT \\?").
 					WithArgs(true, 10).
 					WillReturnRows(sqlmock.NewRows([]string{"id", "name", "is_active"}).
 						AddRow(2, "B社", true).
@@ -69,7 +69,7 @@ func TestGetCompaniesFiltered_Order(t *testing.T) {
 				mock.ExpectQuery("SELECT count\\(\\*\\) FROM `companies` WHERE is_active = \\? AND name LIKE \\?").
 					WithArgs(true, "%テック%").
 					WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-				mock.ExpectQuery("SELECT \\* FROM `companies` WHERE is_active = \\? AND name LIKE \\? ORDER BY name ASC LIMIT \\?").
+				mock.ExpectQuery("SELECT \\* FROM `companies` WHERE is_active = \\? AND name LIKE \\? AND `companies`.`deleted_at` IS NULL ORDER BY name ASC LIMIT \\?").
 					WithArgs(true, "%テック%", 10).
 					WillReturnRows(sqlmock.NewRows([]string{"id", "name", "is_active"}).
 						AddRow(1, "テック株式会社", true))

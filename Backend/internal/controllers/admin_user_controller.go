@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/middleware"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/interfaces"
 	"errors"
@@ -65,8 +66,9 @@ func (c *AdminUserController) List(ctx echo.Context) error {
 		offset = o
 	}
 	query := strings.TrimSpace(ctx.QueryParam("q"))
+	schoolID, _ := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
 
-	users, total, err := c.repo.ListUsersPaged(limit, offset, query)
+	users, total, err := c.repo.ListUsersPaged(limit, offset, query, schoolID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch users")
 	}

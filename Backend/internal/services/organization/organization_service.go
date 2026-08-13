@@ -233,6 +233,21 @@ func (s *OrganizationService) ResolveOrganizationID(userID uint) (uint, error) {
 	return orgID, nil
 }
 
+// ResolveBySlug はサブドメインラベル(slug)から組織を解決する。無効組織は拒否する。
+func (s *OrganizationService) ResolveBySlug(slug string) (*models.Organization, error) {
+	org, err := s.repo.FindBySlug(repositories.NormalizeOrgSlug(slug))
+	if err != nil {
+		return nil, err
+	}
+	if org == nil {
+		return nil, ErrOrganizationNotFound
+	}
+	if org.Status == models.OrgStatusDisabled {
+		return nil, ErrOrganizationDisabled
+	}
+	return org, nil
+}
+
 // EnsureSameOrganization は actor と resource の組織が一致することを検証する。
 func (s *OrganizationService) EnsureSameOrganization(actorOrgID, resourceOrgID uint) error {
 	if actorOrgID == 0 || resourceOrgID == 0 {

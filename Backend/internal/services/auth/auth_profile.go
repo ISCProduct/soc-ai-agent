@@ -62,6 +62,7 @@ func (s *AuthService) UpdateProfile(req UpdateProfileRequest) (*AuthResponse, er
 	}
 	// Always persist the provided school name, even when it is an empty string.
 	user.SchoolName = req.SchoolName
+	user.SchoolID = s.resolveSchoolID(req.SchoolName)
 	user.CertificationsAcquired = req.CertificationsAcquired
 	user.CertificationsInProgress = req.CertificationsInProgress
 

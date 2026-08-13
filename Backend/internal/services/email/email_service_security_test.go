@@ -10,9 +10,13 @@ import (
 	"Backend/domain/entity"
 )
 
-// newEmailServiceForTest はSMTPホスト未設定でテスト用のEmailServiceを返す
+// newEmailServiceForTest は log プロバイダでテスト用の EmailService を返す
 func newEmailServiceForTest() *EmailService {
-	return &EmailService{host: "", from: "noreply@example.com"}
+	return &EmailService{
+		provider:  "log",
+		from:      "noreply@example.com",
+		transport: &logMailTransport{},
+	}
 }
 
 // captureLogs は EmailService のログ出力を捕捉するため、host="" でログのみ実行して body を返す

@@ -41,13 +41,22 @@ func (r *CompanyRepository) CountActive() (int64, error) {
 	return count, err
 }
 
+// companyListSelectColumns は管理画面一覧向けの軽量カラム（text 過取得を避ける）。
+// description / tech_stack は不足判定に必要なため残す。
+const companyListSelectColumns = "id, name, industry, location, source_type, is_provisional, data_status, " +
+	"info_fetched_at, jobs_fetched_at, tech_fetched_at, relations_fetched_at, " +
+	"website_url, description, tech_stack, created_at, updated_at"
+
 // ListActiveFiltered は名前・公開ステータス・業界・情報充足で絞り込んだアクティブ企業を返す。
 // status は "draft" / "published" / ""（指定なし=すべて）。
 // industry が "__unset__" のときは業界未設定のみ。
 // readiness は "ready"（主3種そろい）/ "missing"（主3種不足）/ ""。
 // orderBy が "industry" のときは業界順、それ以外は id desc。
-func (r *CompanyRepository) ListActiveFiltered(limit, offset int, name, status, industry, readiness, orderBy string) ([]models.Company, int64, error) {
+func (r *CompanyRepository) ListActiveFiltered(limit, offset int, name, status, industry, readiness, orderBy string, schoolID *uint) ([]models.Company, int64, error) {
 	q := r.db.Model(&models.Company{}).Where("is_active = ?", true).Session(&gorm.Session{})
+	if schoolID != nil {
+		q = q.Joins("JOIN school_company_approvals ON school_company_approvals.company_id = companies.id AND school_company_approvals.school_id = ?", *schoolID)
+	}
 	if name = strings.TrimSpace(name); name != "" {
 		q = q.Where("name LIKE ?", "%"+name+"%")
 	}
@@ -89,7 +98,8 @@ func (r *CompanyRepository) ListActiveFiltered(limit, offset int, name, status, 
 	}
 
 	var companies []models.Company
-	err := q.Session(&gorm.Session{}).Order(order).Limit(limit).Offset(offset).Find(&companies).Error
+	err := q.Session(&gorm.Session{}).Select(companyListSelectColumns).
+		Order(order).Limit(limit).Offset(offset).Find(&companies).Error
 	return companies, total, err
 }
 
@@ -192,6 +202,23 @@ func (r *CompanyRepository) GetWeightProfile(companyID uint, jobPositionID *uint
 	return &profile, nil
 }
 
+// GetWeightProfilesByCompanyIDs は会社単位プロファイル（job_position_id IS NULL）を一括取得する。
+func (r *CompanyRepository) GetWeightProfilesByCompanyIDs(companyIDs []uint) (map[uint]*models.CompanyWeightProfile, error) {
+	out := make(map[uint]*models.CompanyWeightProfile, len(companyIDs))
+	if len(companyIDs) == 0 {
+		return out, nil
+	}
+	var profiles []models.CompanyWeightProfile
+	err := r.db.Where("company_id IN ? AND job_position_id IS NULL", companyIDs).Find(&profiles).Error
+	if err != nil {
+		return nil, err
+	}
+	for i := range profiles {
+		out[profiles[i].CompanyID] = &profiles[i]
+	}
+	return out, nil
+}
+
 // Create 企業を作成
 func (r *CompanyRepository) Create(company *models.Company) error {
 	return r.db.Create(company).Error
@@ -251,7 +278,8 @@ func (r *CompanyRepository) FindJobPositionsByCompany(companyID uint) ([]models.
 }
 
 // ListJobPositions 募集職種を一覧取得
-func (r *CompanyRepository) ListJobPositions(companyID *uint, limit int) ([]models.CompanyJobPosition, error) {
+// ListJobPositions は求人一覧を返す。schoolID が非nilの場合は学校ごとの掲載承認リストで絞り込む。
+func (r *CompanyRepository) ListJobPositions(companyID, schoolID *uint, limit int) ([]models.CompanyJobPosition, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -259,6 +287,9 @@ func (r *CompanyRepository) ListJobPositions(companyID *uint, limit int) ([]mode
 	query := r.db.Preload("JobCategory").Preload("Company")
 	if companyID != nil {
 		query = query.Where("company_id = ?", *companyID)
+	}
+	if schoolID != nil {
+		query = query.Joins("JOIN school_company_approvals ON school_company_approvals.company_id = company_job_positions.company_id AND school_company_approvals.school_id = ?", *schoolID)
 	}
 	err := query.Order("created_at desc").Limit(limit).Find(&positions).Error
 	return positions, err

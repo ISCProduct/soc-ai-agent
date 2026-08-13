@@ -12,6 +12,7 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/routes"
 	"Backend/internal/scraper"
+	"Backend/internal/services"
 	"Backend/internal/services/admin"
 	"Backend/internal/services/analysis"
 	"Backend/internal/services/application"
@@ -243,8 +244,11 @@ func main() {
 	aiClient.OnUsage = func(model string, promptTokens, completionTokens int) {
 		apiCostService.LogCall(model, promptTokens, completionTokens)
 	}
+	schoolRepo := repositories.NewSchoolRepository(db)
+	schoolService := services.NewSchoolService(schoolRepo)
 	authService := auth.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	authService.SetDB(db)
+	authService.SetSchoolRepo(schoolRepo)
 	if jobEnqueuer != nil {
 		authService.SetJobEnqueuer(jobEnqueuer)
 	}
@@ -310,8 +314,10 @@ func main() {
 	resumeService.SetCrossFeatureService(crossFeatureService)
 
 	// コントローラー層の初期化
+	organizationRepo := repositories.NewOrganizationRepository(db)
+	organizationService := organization.NewOrganizationService(organizationRepo)
 	authController := controllers.NewAuthController(authService)
-	oauthController := controllers.NewOAuthController(oauthService)
+	oauthController := controllers.NewOAuthController(oauthService, organizationService)
 	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := controllers.NewCompanyRelationController(companyQueryRepo, aiClient)
@@ -350,9 +356,8 @@ func main() {
 		authService.SetObjectDeleter(s3UploadService)
 	}
 	userDeletionService := auth.NewUserDeletionService(db, objectDeleter, auditLogService)
-	organizationRepo := repositories.NewOrganizationRepository(db)
-	organizationService := organization.NewOrganizationService(organizationRepo)
 	adminOrganizationController := controllers.NewAdminOrganizationController(organizationService)
+	adminSchoolController := controllers.NewAdminSchoolController(schoolService)
 	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
 	adminUserController.SetDeletionService(userDeletionService)
 	interviewController := controllers.NewInterviewController(interviewService, videoRepo, s3UploadService)
@@ -367,7 +372,9 @@ func main() {
 	adminVectorController := controllers.NewAdminVectorController(admin.NewAdminVectorService())
 	profileRecalcService := flywheel.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
 	profileRecalcController := controllers.NewAdminProfileRecalculationController(profileRecalcService)
-	companyEntryController := controllers.NewCompanyEntryController(db, companyRepo, graduateRepo)
+	companyEntryService := services.NewCompanyEntryService(db, userRepo, pendingRegistrationRepo, emailService)
+	authService.SetCompanyOwnershipClaimer(companyEntryService)
+	companyEntryController := controllers.NewCompanyEntryController(companyEntryService)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := controllers.NewESRewriteController(aiClient)
 	scheduleRepo := repositories.NewScheduleRepository(db)
@@ -403,6 +410,7 @@ func main() {
 	e.Use(echo.WrapMiddleware(middleware.RequestLoggerMiddleware))
 	e.Use(echo.WrapMiddleware(securityHeadersMiddleware))
 	e.Use(echo.WrapMiddleware(buildCORSMiddleware()))
+	e.Use(routes.EchoTenantResolver(organizationService))
 
 	// ヘルスチェックエンドポイント
 	// /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス
@@ -420,7 +428,7 @@ func main() {
 	routes.SetupAuthRoutes(api, authController, oauthController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCompanyRoutes(api, relationController)
-	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, adminVectorController, userRepo, cfg.AdminSecret)
+	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, adminVectorController, userRepo, schoolService, cfg.AdminSecret)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService)
@@ -430,7 +438,9 @@ func main() {
 	routes.SetupApplicationRoutes(api, appController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupUserRoutes(api, integratedProfileController)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
-	api.POST("/company-entry", companyEntryController.Submit)
+	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())
+	adminEntry := api.Group("/admin", routes.EchoAdminAuth(userRepo, cfg.AdminSecret))
+	adminEntry.POST("/company-entry-submissions/:id/resend-email", companyEntryController.ResendEmail)
 
 	go crawlService.StartScheduler()
 
@@ -463,5 +473,17 @@ func main() {
 	slog.Info("Starting server", "port", port)
 	if err := e.Start(":" + port); err != nil {
 		log.Fatalf("Server failed: %v", err)
+	}
+}
+
+func echoCompanyEntryRateLimit() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ip := middleware.GetClientIP(c.Request())
+			if !middleware.CompanyEntryRateLimiter.Allow(ip) {
+				return echo.NewHTTPError(http.StatusTooManyRequests, "Too Many Requests: 投稿回数の上限に達しました。しばらく待ってから再試行してください。")
+			}
+			return next(c)
+		}
 	}
 }

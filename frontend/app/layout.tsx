@@ -2,6 +2,8 @@ import './globals.css'
 import type { Metadata } from 'next'
 import { MuiProvider } from '@/components/mui-provider'
 import { Analytics } from '@vercel/analytics/react'
+// Vercelでホスティングされるまで実データは収集されない(AWS ECSデプロイのため現状は未計測)
+import { SpeedInsights } from '@vercel/speed-insights/next'
 
 export const metadata: Metadata = {
   title: 'IT企業エージェント',
@@ -23,6 +25,7 @@ export default function RootLayout({
           {children}
         </MuiProvider>
         <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   )

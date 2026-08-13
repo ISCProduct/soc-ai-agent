@@ -14,7 +14,10 @@ type userRepoAuthStub struct {
 	user *entity.User
 }
 
-func (r *userRepoAuthStub) CreateUser(user *entity.User) error { return nil }
+func (r *userRepoAuthStub) CreateUser(user *entity.User) error {
+	r.user = user
+	return nil
+}
 func (r *userRepoAuthStub) GetUserByEmail(email string) (*entity.User, error) {
 	if r.user != nil && r.user.Email == email {
 		return r.user, nil
@@ -23,7 +26,7 @@ func (r *userRepoAuthStub) GetUserByEmail(email string) (*entity.User, error) {
 }
 func (r *userRepoAuthStub) GetUserByID(id uint) (*entity.User, error) { return nil, nil }
 func (r *userRepoAuthStub) ListUsers() ([]entity.User, error)         { return nil, nil }
-func (r *userRepoAuthStub) ListUsersPaged(limit, offset int, query string) ([]entity.User, int64, error) {
+func (r *userRepoAuthStub) ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
 	return nil, 0, nil
 }
 func (r *userRepoAuthStub) UpdateUser(user *entity.User) error {
@@ -69,7 +72,7 @@ func TestAuthServiceLoginUsesUserSecretForUserToken(t *testing.T) {
 	}
 	service := NewAuthService(&userRepoAuthStub{user: user}, &pendingRepoAuthStub{}, nil)
 
-	resp, err := service.Login(LoginRequest{Email: user.Email, Password: "password123"})
+	resp, err := service.Login(LoginRequest{Email: user.Email, Password: "password123"}, 0)
 	if err != nil {
 		t.Fatalf("login failed: %v", err)
 	}

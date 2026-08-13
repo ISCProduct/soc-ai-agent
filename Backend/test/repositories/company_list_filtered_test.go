@@ -36,13 +36,13 @@ func TestListActiveFiltered_ByNameAndStatus(t *testing.T) {
 	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `companies` WHERE is_active = \\? AND name LIKE \\?").
 		WithArgs(true, "%ソニー%").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
-	mock.ExpectQuery("SELECT \\* FROM `companies` WHERE is_active = \\? AND name LIKE \\? ORDER BY id desc LIMIT \\?").
+	mock.ExpectQuery("SELECT id, name, industry, location, source_type, is_provisional, data_status, info_fetched_at, jobs_fetched_at, tech_fetched_at, relations_fetched_at, website_url, description, tech_stack, created_at, updated_at FROM `companies` WHERE is_active = \\? AND name LIKE \\?").
 		WithArgs(true, "%ソニー%", 50).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "data_status", "is_active"}).
 			AddRow(2, "ソニー損保", "draft", true).
 			AddRow(1, "ソニー株式会社", "published", true))
 
-	all, total, err := repo.ListActiveFiltered(50, 0, "ソニー", "", "", "", "")
+	all, total, err := repo.ListActiveFiltered(50, 0, "ソニー", "", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -53,12 +53,12 @@ func TestListActiveFiltered_ByNameAndStatus(t *testing.T) {
 	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `companies` WHERE is_active = \\? AND name LIKE \\? AND data_status = \\?").
 		WithArgs(true, "%ソニー%", "published").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery("SELECT \\* FROM `companies` WHERE is_active = \\? AND name LIKE \\? AND data_status = \\? ORDER BY id desc LIMIT \\?").
+	mock.ExpectQuery("SELECT id, name, industry, location, source_type, is_provisional, data_status, info_fetched_at, jobs_fetched_at, tech_fetched_at, relations_fetched_at, website_url, description, tech_stack, created_at, updated_at FROM `companies` WHERE is_active = \\? AND name LIKE \\? AND data_status = \\?").
 		WithArgs(true, "%ソニー%", "published", 50).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "data_status", "is_active"}).
 			AddRow(1, "ソニー株式会社", "published", true))
 
-	published, total, err := repo.ListActiveFiltered(50, 0, "ソニー", "published", "", "", "")
+	published, total, err := repo.ListActiveFiltered(50, 0, "ソニー", "published", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -77,12 +77,12 @@ func TestListActiveFiltered_ByIndustryAndReadiness(t *testing.T) {
 	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `companies` WHERE is_active = \\? AND industry = \\?").
 		WithArgs(true, "IT・ソフトウェア").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery("SELECT \\* FROM `companies` WHERE is_active = \\? AND industry = \\? ORDER BY id desc LIMIT \\?").
+	mock.ExpectQuery("SELECT id, name, industry, location, source_type, is_provisional, data_status, info_fetched_at, jobs_fetched_at, tech_fetched_at, relations_fetched_at, website_url, description, tech_stack, created_at, updated_at FROM `companies` WHERE is_active = \\? AND industry = \\?").
 		WithArgs(true, "IT・ソフトウェア", 50).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "industry", "is_active"}).
 			AddRow(1, "サンプルIT", "IT・ソフトウェア", true))
 
-	byIndustry, total, err := repo.ListActiveFiltered(50, 0, "", "", "IT・ソフトウェア", "", "")
+	byIndustry, total, err := repo.ListActiveFiltered(50, 0, "", "", "IT・ソフトウェア", "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -93,11 +93,11 @@ func TestListActiveFiltered_ByIndustryAndReadiness(t *testing.T) {
 	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `companies` WHERE is_active = \\? AND \\(\\(industry IS NULL OR industry = ''\\)\\)").
 		WithArgs(true).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectQuery("SELECT \\* FROM `companies` WHERE is_active = \\? AND \\(\\(industry IS NULL OR industry = ''\\)\\) ORDER BY id desc LIMIT \\?").
+	mock.ExpectQuery("SELECT id, name, industry, location, source_type, is_provisional, data_status, info_fetched_at, jobs_fetched_at, tech_fetched_at, relations_fetched_at, website_url, description, tech_stack, created_at, updated_at FROM `companies` WHERE is_active = \\? AND \\(\\(industry IS NULL OR industry = ''\\)\\)").
 		WithArgs(true, 50).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
 
-	unset, total, err := repo.ListActiveFiltered(50, 0, "", "", "__unset__", "", "")
+	unset, total, err := repo.ListActiveFiltered(50, 0, "", "", "__unset__", "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

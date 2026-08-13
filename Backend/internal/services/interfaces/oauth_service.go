@@ -8,6 +8,6 @@ import (
 type OAuthService interface {
 	GetGoogleAuthURL(state string) string
 	GetGitHubAuthURL(state string) string
-	HandleGoogleCallback(ctx context.Context, code string) (*auth.AuthResponse, error)
-	HandleGitHubCallback(ctx context.Context, code string) (*auth.AuthResponse, error)
+	HandleGoogleCallback(ctx context.Context, code string, tenantOrgID uint) (*auth.AuthResponse, error)
+	HandleGitHubCallback(ctx context.Context, code string, tenantOrgID uint) (*auth.AuthResponse, error)
 }

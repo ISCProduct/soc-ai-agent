@@ -90,7 +90,8 @@ func (s *OAuthService) GetGitHubAuthURL(state string) string {
 }
 
 // HandleGoogleCallback Google OAuth認証後のコールバック処理
-func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*auth.AuthResponse, error) {
+// tenantOrgID はHostサブドメインから解決された組織ID（0の場合はテナント制約なし）。
+func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, tenantOrgID uint) (*auth.AuthResponse, error) {
 	token, err := s.oauthConfig.Google.Exchange(ctx, code)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange token: %w", err)
@@ -133,6 +134,9 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 		}
 
 		if existingUser != nil {
+			if tenantOrgID != 0 && existingUser.OrganizationID != tenantOrgID {
+				return nil, errors.New("tenant mismatch")
+			}
 			// 既存ユーザーにOAuth情報を紐付け
 			existingUser.OAuthProvider = "google"
 			existingUser.OAuthID = userInfo.ID
@@ -147,20 +151,23 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 		} else {
 			// 新規ユーザー作成
 			user = &entity.User{
-				Email:         userInfo.Email,
-				Name:          userInfo.Name,
-				OAuthProvider: "google",
-				OAuthID:       userInfo.ID,
-				AvatarURL:     userInfo.Picture,
-				IsGuest:       false,
-				TargetLevel:   "未設定",
-				SchoolName:    config.SchoolName(),
-				IsAdmin:       false,
+				Email:          userInfo.Email,
+				Name:           userInfo.Name,
+				OAuthProvider:  "google",
+				OAuthID:        userInfo.ID,
+				AvatarURL:      userInfo.Picture,
+				IsGuest:        false,
+				TargetLevel:    "未設定",
+				SchoolName:     config.SchoolName(),
+				IsAdmin:        false,
+				OrganizationID: tenantOrgID,
 			}
 			if err := s.userRepo.CreateUser(user); err != nil {
 				return nil, fmt.Errorf("failed to create user: %w", err)
 			}
 		}
+	} else if tenantOrgID != 0 && user.OrganizationID != tenantOrgID {
+		return nil, errors.New("tenant mismatch")
 	}
 
 	authResp := &auth.AuthResponse{
@@ -184,7 +191,8 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string) (*
 }
 
 // HandleGitHubCallback GitHub OAuth認証後のコールバック処理
-func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*auth.AuthResponse, error) {
+// tenantOrgID はHostサブドメインから解決された組織ID（0の場合はテナント制約なし）。
+func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string, tenantOrgID uint) (*auth.AuthResponse, error) {
 	token, err := s.oauthConfig.GitHub.Exchange(ctx, code)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange token: %w", err)
@@ -237,6 +245,9 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 		}
 
 		if existingUser != nil {
+			if tenantOrgID != 0 && existingUser.OrganizationID != tenantOrgID {
+				return nil, errors.New("tenant mismatch")
+			}
 			// 既存ユーザーにOAuth情報を紐付け
 			existingUser.OAuthProvider = "github"
 			existingUser.OAuthID = oauthID
@@ -259,20 +270,23 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string) (*
 				name = userInfo.Login
 			}
 			user = &entity.User{
-				Email:         email,
-				Name:          name,
-				OAuthProvider: "github",
-				OAuthID:       oauthID,
-				AvatarURL:     userInfo.AvatarURL,
-				IsGuest:       false,
-				TargetLevel:   "未設定",
-				SchoolName:    config.SchoolName(),
-				IsAdmin:       false,
+				Email:          email,
+				Name:           name,
+				OAuthProvider:  "github",
+				OAuthID:        oauthID,
+				AvatarURL:      userInfo.AvatarURL,
+				IsGuest:        false,
+				TargetLevel:    "未設定",
+				SchoolName:     config.SchoolName(),
+				IsAdmin:        false,
+				OrganizationID: tenantOrgID,
 			}
 			if err := s.userRepo.CreateUser(user); err != nil {
 				return nil, fmt.Errorf("failed to create user: %w", err)
 			}
 		}
+	} else if tenantOrgID != 0 && user.OrganizationID != tenantOrgID {
+		return nil, errors.New("tenant mismatch")
 	}
 
 	// アクセストークン保存 & 非同期データ同期

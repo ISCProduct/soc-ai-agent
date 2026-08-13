@@ -3,6 +3,7 @@ import {
   SERVER_BACKEND_URL,
   setSessionCookies,
 } from '@/lib/session-cookies'
+import { extractTenantSlug } from '@/lib/tenant'
 
 // アクセストークンの残り有効期間がこの秒数を下回ったらリフレッシュする (#616)
 const REFRESH_MARGIN_SECONDS = 120
@@ -57,6 +58,10 @@ export async function middleware(request: NextRequest) {
 
   const requestHeaders = new Headers(request.headers)
   let refreshed: RefreshedSession | null = null
+
+  // 学園サブドメイン(<学園slug>.shukatsu-ai.jp)をBackendへ引き継ぐ
+  const tenantSlug = extractTenantSlug(request.headers.get('host') ?? '')
+  if (tenantSlug) requestHeaders.set('X-Tenant-Slug', tenantSlug)
 
   if (userId && userToken) {
     let effectiveUserId = userId

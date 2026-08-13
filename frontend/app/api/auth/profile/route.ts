@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { extractUserAuthHeaders } from '@/lib/api-proxy'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
 async function handleProfile(request: NextRequest) {
   try {
     const body = await request.json()
-    const userToken = request.headers.get('X-User-Token') || ''
+    const authHeaders = extractUserAuthHeaders(request)
 
     // バックエンドのルートは PUT と POST の両方に対応（バージョンによって異なる）
     // まず POST で試みる（旧バージョン互換）
@@ -13,7 +14,7 @@ async function handleProfile(request: NextRequest) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-User-Token': userToken,
+        ...authHeaders,
       },
       body: JSON.stringify(body),
     })
@@ -24,7 +25,7 @@ async function handleProfile(request: NextRequest) {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'X-User-Token': userToken,
+          ...authHeaders,
         },
         body: JSON.stringify(body),
       })

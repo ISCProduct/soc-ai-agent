@@ -4,6 +4,7 @@ import (
 	"Backend/internal/config"
 	"Backend/internal/middleware"
 	ifaces "Backend/internal/services/interfaces"
+	"Backend/internal/services/organization"
 	"encoding/base64"
 	"encoding/json"
 	"log"
@@ -13,11 +14,25 @@ import (
 )
 
 type OAuthController struct {
-	oauthService ifaces.OAuthService
+	oauthService  ifaces.OAuthService
+	organizations *organization.OrganizationService
 }
 
-func NewOAuthController(oauthService ifaces.OAuthService) *OAuthController {
-	return &OAuthController{oauthService: oauthService}
+func NewOAuthController(oauthService ifaces.OAuthService, organizations *organization.OrganizationService) *OAuthController {
+	return &OAuthController{oauthService: oauthService, organizations: organizations}
+}
+
+// resolveTenantOrgID はテナントslugからOrganizationIDを解決する。
+// slugが空、または解決に失敗した場合は0（テナント制約なし）を返す。
+func (c *OAuthController) resolveTenantOrgID(slug string) uint {
+	if slug == "" || c.organizations == nil {
+		return 0
+	}
+	org, err := c.organizations.ResolveBySlug(slug)
+	if err != nil {
+		return 0
+	}
+	return org.ID
 }
 
 // GoogleLogin Google OAuth認証開始
@@ -28,6 +43,8 @@ func (c *OAuthController) GoogleLogin(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Internal Server Error")
 	}
+	// 学園サブドメインのテナントslugをCookieに保存し、コールバック時に引き継ぐ
+	middleware.SetOAuthTenantSlug(ctx.Response().Writer, ctx.QueryParam("tenant"))
 
 	url := c.oauthService.GetGoogleAuthURL(state)
 
@@ -50,7 +67,8 @@ func (c *OAuthController) GoogleCallback(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Authorization code not found")
 	}
 
-	resp, err := c.oauthService.HandleGoogleCallback(ctx.Request().Context(), code)
+	tenantSlug := middleware.ConsumeOAuthTenantSlug(ctx.Response().Writer, ctx.Request())
+	resp, err := c.oauthService.HandleGoogleCallback(ctx.Request().Context(), code, c.resolveTenantOrgID(tenantSlug))
 	if err != nil {
 		// エラー詳細はサーバーログにのみ記録し、クライアントには汎用コードを返す（#329）
 		log.Printf("[OAuth] Google callback error: %v", err)
@@ -70,6 +88,8 @@ func (c *OAuthController) GitHubLogin(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Internal Server Error")
 	}
+	// 学園サブドメインのテナントslugをCookieに保存し、コールバック時に引き継ぐ
+	middleware.SetOAuthTenantSlug(ctx.Response().Writer, ctx.QueryParam("tenant"))
 
 	url := c.oauthService.GetGitHubAuthURL(state)
 
@@ -99,7 +119,8 @@ func (c *OAuthController) GitHubCallback(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Authorization code not found")
 	}
 
-	resp, err := c.oauthService.HandleGitHubCallback(ctx.Request().Context(), code)
+	tenantSlug := middleware.ConsumeOAuthTenantSlug(ctx.Response().Writer, ctx.Request())
+	resp, err := c.oauthService.HandleGitHubCallback(ctx.Request().Context(), code, c.resolveTenantOrgID(tenantSlug))
 	if err != nil {
 		// エラー詳細はサーバーログにのみ記録し、クライアントには汎用コードを返す（#329）
 		log.Printf("[OAuth] GitHub callback error: %v", err)

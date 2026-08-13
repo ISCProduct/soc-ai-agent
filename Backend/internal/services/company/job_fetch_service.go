@@ -62,7 +62,7 @@ func (s *JobFetchService) FetchAndSaveJobs(ctx context.Context, companyID uint, 
 	}
 
 	if !forceRefresh && companyfetch.IsFresh(company.JobsFetchedAt, companyfetch.TTLJobs) {
-		existing, _ := s.repo.ListJobPositions(&companyID, 100)
+		existing, _ := s.repo.ListJobPositions(&companyID, nil, 100)
 		if len(existing) > 0 {
 			return existing, nil
 		}
@@ -86,7 +86,7 @@ func (s *JobFetchService) FetchAndSaveJobs(ctx context.Context, companyID uint, 
 	}
 	if err != nil {
 		if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
-			existing, _ := s.repo.ListJobPositions(&companyID, 100)
+			existing, _ := s.repo.ListJobPositions(&companyID, nil, 100)
 			return existing, nil
 		}
 		return nil, err

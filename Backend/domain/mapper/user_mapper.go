@@ -20,6 +20,7 @@ func UserToEntity(m *models.User) *entity.User {
 		IsAdmin:                  m.IsAdmin,
 		TargetLevel:              m.TargetLevel,
 		SchoolName:               m.SchoolName,
+		SchoolID:                 m.SchoolID,
 		OAuthProvider:            m.OAuthProvider,
 		OAuthID:                  m.OAuthID,
 		AvatarURL:                m.AvatarURL,
@@ -52,6 +53,7 @@ func UserFromEntity(e *entity.User) *models.User {
 		IsAdmin:                  e.IsAdmin,
 		TargetLevel:              e.TargetLevel,
 		SchoolName:               e.SchoolName,
+		SchoolID:                 e.SchoolID,
 		OAuthProvider:            e.OAuthProvider,
 		OAuthID:                  e.OAuthID,
 		AvatarURL:                e.AvatarURL,
@@ -75,10 +77,12 @@ func PendingRegistrationToEntity(m *models.PendingRegistration) *entity.PendingR
 		return nil
 	}
 	return &entity.PendingRegistration{
-		Token:     m.Token,
-		Email:     m.Email,
-		ExpiresAt: m.ExpiresAt,
-		CreatedAt: m.CreatedAt,
+		Token:        m.Token,
+		Email:        m.Email,
+		CompanyID:    m.CompanyID,
+		SubmissionID: m.SubmissionID,
+		ExpiresAt:    m.ExpiresAt,
+		CreatedAt:    m.CreatedAt,
 	}
 }
 
@@ -88,9 +92,11 @@ func PendingRegistrationFromEntity(e *entity.PendingRegistration) *models.Pendin
 		return nil
 	}
 	return &models.PendingRegistration{
-		Token:     e.Token,
-		Email:     e.Email,
-		ExpiresAt: e.ExpiresAt,
-		CreatedAt: e.CreatedAt,
+		Token:        e.Token,
+		Email:        e.Email,
+		CompanyID:    e.CompanyID,
+		SubmissionID: e.SubmissionID,
+		ExpiresAt:    e.ExpiresAt,
+		CreatedAt:    e.CreatedAt,
 	}
 }

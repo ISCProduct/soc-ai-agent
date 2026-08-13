@@ -19,6 +19,7 @@ import (
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 // ========== AdminDashboardController ==========
@@ -104,7 +105,7 @@ func TestAdminDashboardController_ListUsers_UserRepoError(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	userRepo := &mocks.UserRepositoryMock{}
-	userRepo.On("ListUsersPaged", 25, 0, "").Return([]entity.User{}, int64(0), errors.New("db error"))
+	userRepo.On("ListUsersPaged", 25, 0, "", mock.Anything).Return([]entity.User{}, int64(0), errors.New("db error"))
 	assertStatus(t, newAdminDashboardController(userRepo, nil, nil).ListUsers, newCtx(req, rec), http.StatusInternalServerError)
 	userRepo.AssertExpectations(t)
 }
@@ -118,7 +119,7 @@ func TestAdminDashboardController_ListUsers_Success(t *testing.T) {
 	sessRepo := &mocks.DashboardSessionRepoMock{}
 	repRepo := &mocks.DashboardReportRepoMock{}
 
-	userRepo.On("ListUsersPaged", 10, 0, "").Return(users, int64(1), nil)
+	userRepo.On("ListUsersPaged", 10, 0, "", mock.Anything).Return(users, int64(1), nil)
 	sessRepo.On("GetUserStatsBatch", []uint{1}).Return(map[uint]repositories.UserSessionStat{
 		1: {UserID: 1, SessionCount: 3},
 	}, nil)
@@ -141,7 +142,7 @@ func TestAdminDashboardController_ListUsers_SessionStatError(t *testing.T) {
 	userRepo := &mocks.UserRepositoryMock{}
 	sessRepo := &mocks.DashboardSessionRepoMock{}
 
-	userRepo.On("ListUsersPaged", 25, 0, "").Return(users, int64(1), nil)
+	userRepo.On("ListUsersPaged", 25, 0, "", mock.Anything).Return(users, int64(1), nil)
 	sessRepo.On("GetUserStatsBatch", []uint{1}).Return(nil, errors.New("db error"))
 	assertStatus(t, newAdminDashboardController(userRepo, sessRepo, nil).ListUsers, newCtx(req, rec), http.StatusInternalServerError)
 }
@@ -153,7 +154,7 @@ func TestAdminDashboardController_ExportCSV_UserRepoError(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	userRepo := &mocks.UserRepositoryMock{}
-	userRepo.On("ListUsersPaged", 10000, 0, "").Return([]entity.User{}, int64(0), errors.New("db error"))
+	userRepo.On("ListUsersPaged", 10000, 0, "", mock.Anything).Return([]entity.User{}, int64(0), errors.New("db error"))
 	assertStatus(t, newAdminDashboardController(userRepo, nil, nil).ExportCSV, newCtx(req, rec), http.StatusInternalServerError)
 }
 
@@ -168,7 +169,7 @@ func TestAdminDashboardController_ExportCSV_Success(t *testing.T) {
 	sessRepo := &mocks.DashboardSessionRepoMock{}
 	repRepo := &mocks.DashboardReportRepoMock{}
 
-	userRepo.On("ListUsersPaged", 10000, 0, "").Return(users, int64(1), nil)
+	userRepo.On("ListUsersPaged", 10000, 0, "", mock.Anything).Return(users, int64(1), nil)
 	sessRepo.On("GetUserStatsBatch", []uint{1}).Return(map[uint]repositories.UserSessionStat{}, nil)
 	sessRepo.On("ListFinishedSessionIDsByUser", uint(1)).Return([]uint{}, nil)
 	repRepo.On("FindBySessionIDs", []uint(nil)).Return([]models.InterviewReport{}, nil)

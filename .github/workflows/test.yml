@@ -2,10 +2,10 @@ name: Test
 
 on:
   push:
-    branches-ignore:
-      - main
   pull_request:
     branches:
+      - develop
+      - release
       - main
 
 concurrency:

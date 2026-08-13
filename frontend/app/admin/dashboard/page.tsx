@@ -32,6 +32,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { authService } from '@/lib/auth'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
+import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
 
 type UserSummary = {
   user_id: number
@@ -89,6 +90,7 @@ export default function AdminScoreDashboardPage() {
   const [sort, setSort] = useState('registered_desc')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
 
   const [detailUser, setDetailUser] = useState<UserSummary | null>(null)
   const [detailSessions, setDetailSessions] = useState<SessionEntry[]>([])
@@ -113,6 +115,7 @@ export default function AdminScoreDashboardPage() {
         limit: String(rowsPerPage),
         sort,
         ...(query ? { query } : {}),
+        ...(schoolId !== undefined ? { school_id: String(schoolId) } : {}),
       })
       const res = await fetch(`/api/admin/dashboard/users?${params}`, {
         headers: { 'X-Admin-Email': adminEmail, 'X-Admin-Token': authService.getStoredToken() || '' },
@@ -126,17 +129,20 @@ export default function AdminScoreDashboardPage() {
     } finally {
       setLoading(false)
     }
-  }, [adminEmail, page, rowsPerPage, sort, query])
+  }, [adminEmail, page, rowsPerPage, sort, query, schoolId])
 
   useEffect(() => {
     fetchUsers()
   }, [fetchUsers])
 
   const handleExport = () => {
+    const exportUrl = schoolId !== undefined
+      ? `/api/admin/dashboard/export?school_id=${schoolId}`
+      : '/api/admin/dashboard/export'
     const link = document.createElement('a')
-    link.href = '/api/admin/dashboard/export'
+    link.href = exportUrl
     const headers = new Headers({ 'X-Admin-Email': adminEmail, 'X-Admin-Token': authService.getStoredToken() || '' })
-    fetch('/api/admin/dashboard/export', { headers })
+    fetch(exportUrl, { headers })
       .then(res => res.blob())
       .then(blob => {
         const url = URL.createObjectURL(blob)
@@ -210,6 +216,7 @@ export default function AdminScoreDashboardPage() {
             <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
           ))}
         </TextField>
+        <SchoolFilterSelect value={schoolId} onChange={(id) => { setSchoolId(id); setPage(0) }} />
       </Stack>
 
       {/* Table */}

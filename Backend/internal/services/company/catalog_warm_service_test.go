@@ -29,7 +29,7 @@ func (s *warmRepoStub) FindAllActiveNames(string) ([]models.CompanyName, error) 
 	return nil, nil
 }
 func (s *warmRepoStub) CountActive() (int64, error) { return 0, nil }
-func (s *warmRepoStub) ListActiveFiltered(int, int, string, string, string, string, string) ([]models.Company, int64, error) {
+func (s *warmRepoStub) ListActiveFiltered(int, int, string, string, string, string, string, *uint) ([]models.Company, int64, error) {
 	return nil, 0, nil
 }
 func (s *warmRepoStub) ListActiveIndustries() ([]string, error)               { return nil, nil }
@@ -42,6 +42,9 @@ func (s *warmRepoStub) FindByCorporateNumber(string) (*models.Company, error) { 
 func (s *warmRepoStub) GetWeightProfile(uint, *uint) (*models.CompanyWeightProfile, error) {
 	return nil, nil
 }
+func (s *warmRepoStub) GetWeightProfilesByCompanyIDs([]uint) (map[uint]*models.CompanyWeightProfile, error) {
+	return map[uint]*models.CompanyWeightProfile{}, nil
+}
 func (s *warmRepoStub) Create(*models.Company) error { return nil }
 func (s *warmRepoStub) Update(*models.Company) error { return nil }
 func (s *warmRepoStub) FindJobPositionByCompanyAndTitle(uint, string) (*models.CompanyJobPosition, error) {
@@ -53,7 +56,7 @@ func (s *warmRepoStub) UpdateJobPosition(*models.CompanyJobPosition) error      
 func (s *warmRepoStub) FindJobPositionsByCompany(uint) ([]models.CompanyJobPosition, error) {
 	return nil, nil
 }
-func (s *warmRepoStub) ListJobPositions(*uint, int) ([]models.CompanyJobPosition, error) {
+func (s *warmRepoStub) ListJobPositions(*uint, *uint, int) ([]models.CompanyJobPosition, error) {
 	return nil, nil
 }
 func (s *warmRepoStub) CreateOrUpdateWeightProfile(*models.CompanyWeightProfile) error { return nil }
