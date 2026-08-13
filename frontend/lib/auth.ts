@@ -30,6 +30,32 @@ function fixMojibake(s: string): string {
   })() : s
 }
 
+// バックエンドが返す既知の英語エラーメッセージ(error_response.go)を日本語に変換する。
+// 未知のメッセージはそのまま使わず、呼び出し側が渡すフォールバック文言を使う。
+const ERROR_MESSAGE_JA: Record<string, string> = {
+  'invalid email or password': 'メールアドレスまたはパスワードが正しくありません。',
+  'guest users cannot login': 'ゲストアカウントではログインできません。',
+  'tenant mismatch': 'このメールアドレスは別の組織に登録されています。',
+  'email already exists': 'このメールアドレスは既に登録されています。',
+  'Registration failed': '登録に失敗しました。時間をおいて再度お試しください。',
+  'Invalid request body': '入力内容を確認してください。',
+}
+
+// レスポンスの JSON エラーボディ({error, code, detail})からユーザー向けメッセージを取り出す。
+// JSON でない/未知のメッセージの場合はフォールバック文言(日本語)を返す。
+export async function extractErrorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const data: unknown = await res.json()
+    const raw = (data as { error?: unknown })?.error
+    if (typeof raw === 'string' && raw) {
+      return ERROR_MESSAGE_JA[raw] || fallback
+    }
+  } catch {
+    // JSON でないレスポンス
+  }
+  return fallback
+}
+
 function getSessionStorage(): Storage | null {
   if (typeof window === 'undefined') return null
   return window.sessionStorage
@@ -126,8 +152,7 @@ export const authService = {
         const data = await res.json().catch(() => ({}))
         throw new Error(data.error || 'email_not_verified')
       }
-      const error = await res.text()
-      throw new Error(error || 'Login failed')
+      throw new Error(await extractErrorMessage(res, 'ログインに失敗しました。時間をおいて再度お試しください。'))
     }
     return res.json()
   },
@@ -135,8 +160,7 @@ export const authService = {
   async verifyRegistration(token: string): Promise<{ email: string; token: string }> {
     const res = await fetch(`${BACKEND_URL}/api/auth/verify-registration?token=${encodeURIComponent(token)}`)
     if (!res.ok) {
-      const error = await res.text()
-      throw new Error(error || '無効または期限切れのトークンです')
+      throw new Error(await extractErrorMessage(res, '無効または期限切れのトークンです。'))
     }
     return res.json()
   },
@@ -148,8 +172,7 @@ export const authService = {
       body: JSON.stringify({ email }),
     })
     if (!res.ok) {
-      const error = await res.text()
-      throw new Error(error || 'Failed to send registration email')
+      throw new Error(await extractErrorMessage(res, '確認メールの送信に失敗しました。時間をおいて再度お試しください。'))
     }
   },
 
@@ -176,8 +199,7 @@ export const authService = {
       }),
     })
     if (!res.ok) {
-      const error = await res.text()
-      throw new Error(error || 'Registration failed')
+      throw new Error(await extractErrorMessage(res, '登録に失敗しました。時間をおいて再度お試しください。'))
     }
     return res.json()
   },
@@ -187,7 +209,7 @@ export const authService = {
       method: 'POST',
       headers: getTenantHeaders(),
     })
-    if (!res.ok) throw new Error('Failed to create guest user')
+    if (!res.ok) throw new Error(await extractErrorMessage(res, 'ゲストログインに失敗しました。時間をおいて再度お試しください。'))
     return res.json()
   },
 
@@ -195,7 +217,7 @@ export const authService = {
     const res = await fetch(`${BACKEND_URL}/api/auth/user`, {
       headers: this.getUserFetchHeaders(),
     })
-    if (!res.ok) throw new Error('Failed to get user')
+    if (!res.ok) throw new Error(await extractErrorMessage(res, 'ユーザー情報の取得に失敗しました。'))
     return res.json()
   },
 
@@ -219,8 +241,7 @@ export const authService = {
       }),
     })
     if (!res.ok) {
-      const error = await res.text()
-      throw new Error(error || 'Failed to update profile')
+      throw new Error(await extractErrorMessage(res, 'プロフィールの更新に失敗しました。'))
     }
     return res.json()
   },
@@ -232,8 +253,7 @@ export const authService = {
       body: JSON.stringify({ email }),
     })
     if (!res.ok) {
-      const error = await res.text()
-      throw new Error(error || 'Failed to send password reset email')
+      throw new Error(await extractErrorMessage(res, 'パスワード再設定メールの送信に失敗しました。'))
     }
   },
 
@@ -244,20 +264,19 @@ export const authService = {
       body: JSON.stringify({ token, password }),
     })
     if (!res.ok) {
-      const error = await res.text()
-      throw new Error(error || 'Failed to reset password')
+      throw new Error(await extractErrorMessage(res, 'パスワードの再設定に失敗しました。'))
     }
   },
 
   async getGoogleAuthUrl(): Promise<{ auth_url: string; state: string }> {
     const res = await fetch(`${BACKEND_URL}/api/auth/google`)
-    if (!res.ok) throw new Error('Failed to get Google auth URL')
+    if (!res.ok) throw new Error(await extractErrorMessage(res, 'Google認証の開始に失敗しました。'))
     return res.json()
   },
 
   async getGithubAuthUrl(): Promise<{ auth_url: string; state: string }> {
     const res = await fetch(`${BACKEND_URL}/api/auth/github`)
-    if (!res.ok) throw new Error('Failed to get GitHub auth URL')
+    if (!res.ok) throw new Error(await extractErrorMessage(res, 'GitHub認証の開始に失敗しました。'))
     return res.json()
   },
 

@@ -2,15 +2,23 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Building2, MapPin, Users, TrendingUp, ExternalLink } from "lucide-react"
+import { authService } from "@/lib/auth"
+import { getGuestApplicationsButtonProps } from "@/lib/guest-limits"
 import type { Company } from "../types"
 
 type CompanyCardProps = {
   company: Company
   index: number
+  isApplying: boolean
   onShowDetail: (company: Company) => void
+  onApply: (company: Company) => void
 }
 
-export function CompanyCard({ company, index, onShowDetail }: CompanyCardProps) {
+export function CompanyCard({ company, index, isApplying, onShowDetail, onApply }: CompanyCardProps) {
+  const isGuest = authService.getStoredUser()?.is_guest
+  const guestButtonProps = getGuestApplicationsButtonProps(isGuest)
+  const applyDisabled = company.isApplied || isApplying || guestButtonProps.disabled
+
   return (
     <Card className="border-2 hover:border-primary/50 transition-all">
       <CardHeader>
@@ -75,8 +83,14 @@ export function CompanyCard({ company, index, onShowDetail }: CompanyCardProps) 
             <ExternalLink className="w-4 h-4 mr-2" />
             詳細ページへ
           </Button>
-          <Button variant="outline" className="flex-1 md:flex-initial">
-            応募する
+          <Button
+            variant={company.isApplied ? "default" : "outline"}
+            className="flex-1 md:flex-initial"
+            disabled={applyDisabled}
+            title={guestButtonProps.title || undefined}
+            onClick={() => onApply(company)}
+          >
+            {company.isApplied ? "応募済み" : isApplying ? "応募中..." : "応募する"}
           </Button>
         </div>
       </CardContent>

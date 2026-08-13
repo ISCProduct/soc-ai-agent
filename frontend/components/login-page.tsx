@@ -21,6 +21,8 @@ import { BACKEND_URL } from '@/lib/backend-url'
 import { GUEST_LIMITATIONS } from '@/lib/guest-limits'
 import { extractTenantSlug } from '@/lib/tenant'
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 interface LoginPageProps {
   onAuthSuccess: (authResponse: AuthResponse) => void
   /** 0: ログイン, 1: 新規登録 */
@@ -31,10 +33,13 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
   const [tabValue, setTabValue] = useState(initialTab)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [emailTouched, setEmailTouched] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   // 新規登録: メール送信完了状態
   const [registrationEmailSent, setRegistrationEmailSent] = useState(false)
+
+  const emailInvalid = emailTouched && email !== '' && !EMAIL_PATTERN.test(email)
 
   useEffect(() => {
     setTabValue(initialTab)
@@ -137,6 +142,9 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onBlur={() => setEmailTouched(true)}
+                error={emailInvalid}
+                helperText={emailInvalid ? 'メールアドレスの形式が正しくありません' : ' '}
                 required
                 sx={{ mb: 2 }}
               />
@@ -159,7 +167,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
                 fullWidth
                 variant="contained"
                 size="large"
-                disabled={loading}
+                disabled={loading || emailInvalid}
               >
                 ログイン
               </Button>
@@ -180,6 +188,9 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onBlur={() => setEmailTouched(true)}
+                error={emailInvalid}
+                helperText={emailInvalid ? 'メールアドレスの形式が正しくありません' : ' '}
                 required
                 sx={{ mb: 3 }}
               />
@@ -188,7 +199,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
                 fullWidth
                 variant="contained"
                 size="large"
-                disabled={loading}
+                disabled={loading || emailInvalid}
               >
                 確認メールを送る
               </Button>

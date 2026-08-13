@@ -10,7 +10,9 @@ type CompanyResultsContentProps = {
   userData: UserData
   companies: Company[]
   isProvisional: boolean
+  applyingId: number | null
   onShowDetail: (company: Company) => void
+  onApply: (company: Company) => void
   onResetAction: () => void
 }
 
@@ -18,14 +20,16 @@ export function CompanyResultsContent({
   userData,
   companies,
   isProvisional,
+  applyingId,
   onShowDetail,
+  onApply,
   onResetAction,
 }: CompanyResultsContentProps) {
   return (
     <>
       <CompanyResultsHeader isProvisional={isProvisional} />
       <AnalysisReportCard userData={userData} />
-      <CompanyList companies={companies} onShowDetail={onShowDetail} />
+      <CompanyList companies={companies} applyingId={applyingId} onShowDetail={onShowDetail} onApply={onApply} />
       <IndustryMapPlaceholder />
 
       <div className="text-center">
