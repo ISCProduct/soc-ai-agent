@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/entitlement"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	ifaces "Backend/internal/services/interfaces"
@@ -234,6 +235,9 @@ func (c *AdminDashboardController) UserSessions(ctx echo.Context) error {
 
 // ExportCSV handles GET /api/admin/dashboard/export/csv
 func (c *AdminDashboardController) ExportCSV(ctx echo.Context) error {
+	if !entitlement.Can(entitlement.CurrentPlan(), entitlement.FeatureExport) {
+		return echo.NewHTTPError(http.StatusForbidden, "plan_feature_required")
+	}
 	schoolID, _ := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
 	users, _, err := c.userRepo.ListUsersPaged(10000, 0, "", schoolID)
 	if err != nil {

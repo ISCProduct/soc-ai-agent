@@ -46,8 +46,9 @@ variable "ssh_public_key" {
 }
 
 variable "instance_type" {
-  type    = string
-  default = "t4g.small"
+  type = string
+  # amd64（CIビルドと同一アーキテクチャに揃え、QEMUクロスビルドを避ける）
+  default = "t3.small"
 }
 
 # --- 平常時は最小構成、負荷試験時にオートスケールするための設定 ---
@@ -73,6 +74,12 @@ variable "asg_target_cpu_percent" {
   type        = number
   description = "ターゲット追跡スケーリングのCPU使用率目標値"
   default     = 60
+}
+
+variable "enable_error_fallback" {
+  type        = bool
+  description = "CloudFront+S3の503フェイルオーバー（cloudfront:* IAM権限が必要）"
+  default     = false
 }
 
 variable "db_instance_class" {

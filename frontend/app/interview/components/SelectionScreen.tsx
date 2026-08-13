@@ -53,6 +53,8 @@ export interface SelectionScreenProps {
   allCompanies: InterviewCompany[]
   setAllCompanies: Dispatch<SetStateAction<InterviewCompany[]>>
   companiesLoading: boolean
+  companiesLoadError: string | null
+  onRetryCompaniesLoad: () => void
   webSearchResults: { name: string; description: string }[]
   setWebSearchResults: Dispatch<SetStateAction<{ name: string; description: string }[]>>
   webSearchLoading: boolean
@@ -83,6 +85,8 @@ export default function SelectionScreen({
   allCompanies,
   setAllCompanies,
   companiesLoading,
+  companiesLoadError,
+  onRetryCompaniesLoad,
   webSearchResults,
   setWebSearchResults,
   webSearchLoading,
@@ -301,9 +305,16 @@ export default function SelectionScreen({
                             </Button>
                           )
                         })}
-                        {allCompanies.length === 0 && !companiesLoading && !companySearch.trim() && (
+                        {companiesLoadError ? (
+                          <Stack spacing={1} alignItems="flex-start">
+                            <Typography sx={{ color: '#dc2626', fontSize: 13 }}>{companiesLoadError}</Typography>
+                            <Button size="small" variant="outlined" onClick={onRetryCompaniesLoad}>
+                              再試行
+                            </Button>
+                          </Stack>
+                        ) : allCompanies.length === 0 && !companiesLoading && !companySearch.trim() ? (
                           <Typography sx={{ color: '#94a3b8', fontSize: 13 }}>登録企業が見つかりません</Typography>
-                        )}
+                        ) : null}
                       </Box>
                     )}
                   </>

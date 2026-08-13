@@ -1,4 +1,5 @@
 import { authService } from '@/lib/auth'
+import { UserFacingApiError, userFacingApiMessage } from '@/lib/user-facing-error'
 
 const API_BASE = '/api'
 
@@ -93,9 +94,9 @@ export async function sendChatMessage(request: ChatRequest): Promise<ChatRespons
         })
 
         if (!response.ok) {
-            const errorText = await response.text().catch(() => response.statusText)
-            console.error('[API] Chat error:', response.status, errorText)
-            throw new Error(`Chat API error: ${errorText || response.statusText}`)
+            const errorText = await response.text().catch(() => '')
+            console.error('[API] Chat error:', response.status, errorText.slice(0, 200))
+            throw new UserFacingApiError(userFacingApiMessage(response.status, errorText), response.status)
         }
 
         return response.json()
@@ -111,9 +112,9 @@ export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> 
     })
 
     if (!response.ok) {
-        const errorText = await response.text().catch(() => response.statusText)
-        console.error('[API] History error:', response.status, errorText)
-        throw new Error(`History API error: ${errorText || response.statusText}`)
+        const errorText = await response.text().catch(() => '')
+        console.error('[API] History error:', response.status, errorText.slice(0, 200))
+        throw new UserFacingApiError(userFacingApiMessage(response.status, errorText), response.status)
     }
 
     const raw = await response.json()
