@@ -70,11 +70,18 @@ EOF
 chmod 600 /opt/app/.env
 
 cat > /opt/app/docker-compose.yml <<EOF
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   backend:
     image: ${backend_image}
     restart: always
     env_file: .env
+    logging: *default-logging
     ports:
       - "8080:8080"
     depends_on:
@@ -83,11 +90,13 @@ services:
     image: ${frontend_image}
     restart: always
     env_file: .env
+    logging: *default-logging
     expose:
       - "3000"
   edge:
     image: nginx:1.27-alpine
     restart: always
+    logging: *default-logging
     ports:
       - "3000:80"
     volumes:
@@ -99,11 +108,13 @@ services:
     image: ${rag_image}
     restart: always
     env_file: .env
+    logging: *default-logging
     depends_on:
       - chroma
   chroma:
     image: chromadb/chroma:0.6.3
     restart: always
+    logging: *default-logging
     volumes:
       - chroma_data:/chroma/chroma
     environment:
