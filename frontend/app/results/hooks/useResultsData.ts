@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, type MouseEvent } from 'react'
+import { useState, useEffect, useCallback, type MouseEvent } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { sendAnalysisReport } from '@/lib/api'
 import { fetchWithTimeout } from '@/lib/fetch-timeout'
@@ -43,6 +43,7 @@ export function useResultsData() {
   const [suggestedRoles, setSuggestedRoles] = useState<SuggestedRole[]>([])
   const [scoreComment, setScoreComment] = useState('')
   const [analysisScores, setAnalysisScores] = useState<AnalysisScores | null>(null)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
   const [detailTab, setDetailTab] = useState(0)
   const [relations, setRelations] = useState<CapitalRelation[]>([])
@@ -80,6 +81,32 @@ export function useResultsData() {
     router.replace('/')
   }, [mounted, userId, sessionId, router])
 
+  const fetchAnalysis = useCallback(async () => {
+    if (!sessionId) return
+    setAnalysisError(null)
+    try {
+      const res = await fetch(`/api/chat/analysis?session_id=${sessionId}`, {
+        headers: authService.getUserFetchHeaders(),
+      })
+      if (!res.ok) throw new Error('分析データの取得に失敗しました')
+      const data = await res.json()
+      if (data?.job_suitability_comment) {
+        setJobSuitabilityComment(data.job_suitability_comment)
+      }
+      if (data?.suggested_roles) {
+        setSuggestedRoles(data.suggested_roles)
+      }
+      if (data?.score_comment) {
+        setScoreComment(data.score_comment)
+      }
+      if (data?.scores) {
+        setAnalysisScores(mapAnalysisScores(data.scores))
+      }
+    } catch {
+      setAnalysisError('分析データの取得に失敗しました')
+    }
+  }, [sessionId])
+
   useEffect(() => {
     if (!mounted || !userId || !sessionId) {
       return
@@ -90,24 +117,7 @@ export function useResultsData() {
         setLoading(true)
         // 再フェッチ時に前回の error が残ると一覧が描画されない（Bugbot）
         setError(null)
-        // 職種適性コメントを取得
-        fetch(`/api/chat/analysis?session_id=${sessionId}`, { headers: authService.getUserFetchHeaders() })
-          .then((r) => (r.ok ? r.json() : null))
-          .then((data) => {
-            if (data?.job_suitability_comment) {
-              setJobSuitabilityComment(data.job_suitability_comment)
-            }
-            if (data?.suggested_roles) {
-              setSuggestedRoles(data.suggested_roles)
-            }
-            if (data?.score_comment) {
-              setScoreComment(data.score_comment)
-            }
-            if (data?.scores) {
-              setAnalysisScores(mapAnalysisScores(data.scores))
-            }
-          })
-          .catch(() => { /* サイレント失敗 */ })
+        void fetchAnalysis()
 
         const response = await fetchWithTimeout(`/api/chat/recommendations?session_id=${sessionId}&limit=10`, {
           headers: authService.getUserFetchHeaders(),
@@ -148,7 +158,7 @@ export function useResultsData() {
     }
 
     fetchCompanies()
-  }, [mounted, userId, sessionId])
+  }, [mounted, userId, sessionId, fetchAnalysis])
 
   // 企業詳細を開いたときに関係図データを取得
   useEffect(() => {
@@ -299,6 +309,8 @@ export function useResultsData() {
     suggestedRoles,
     scoreComment,
     analysisScores,
+    analysisError,
+    handleRetryAnalysis: fetchAnalysis,
     selectedCompany,
     setSelectedCompany,
     detailTab,

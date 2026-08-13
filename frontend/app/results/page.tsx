@@ -39,6 +39,8 @@ function ResultsContent() {
     suggestedRoles,
     scoreComment,
     analysisScores,
+    analysisError,
+    handleRetryAnalysis,
     selectedCompany,
     setSelectedCompany,
     detailTab,
@@ -105,6 +107,8 @@ function ResultsContent() {
       isProvisional={isProvisional}
       analysisScores={analysisScores}
       scoreComment={scoreComment}
+      analysisError={analysisError}
+      onRetryAnalysis={handleRetryAnalysis}
       jobSuitabilityComment={jobSuitabilityComment}
       suggestedRoles={suggestedRoles}
       emailSending={emailSending}
