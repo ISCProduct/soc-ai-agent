@@ -55,7 +55,7 @@ function VerifyEmailContent() {
               認証完了
             </Typography>
             <Typography color="text.secondary" sx={{ mb: 3 }}>{message}</Typography>
-            <Button variant="contained" onClick={() => router.push('/login')} sx={{ bgcolor: '#1976D2' }}>
+            <Button variant="contained" onClick={() => router.push('/login')}>
               ログインする
             </Button>
           </>
