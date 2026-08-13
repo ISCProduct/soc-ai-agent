@@ -2,6 +2,15 @@ import { authService } from '@/lib/auth'
 
 const API_BASE = '/api'
 
+// セッション切れ(401)を他のAPIエラーと区別するための専用エラー。
+// 呼び出し側はこれを検知してログイン画面へリダイレクトする。
+export class UnauthorizedError extends Error {
+    constructor(message = 'Unauthorized') {
+        super(message)
+        this.name = 'UnauthorizedError'
+    }
+}
+
 function unwrapArray<T>(raw: unknown): T[] {
     if (Array.isArray(raw)) return raw as T[]
     const obj = raw as Record<string, unknown>
@@ -93,6 +102,7 @@ export async function sendChatMessage(request: ChatRequest): Promise<ChatRespons
         })
 
         if (!response.ok) {
+            if (response.status === 401) throw new UnauthorizedError()
             const errorText = await response.text().catch(() => response.statusText)
             console.error('[API] Chat error:', response.status, errorText)
             throw new Error(`Chat API error: ${errorText || response.statusText}`)
@@ -111,6 +121,7 @@ export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> 
     })
 
     if (!response.ok) {
+        if (response.status === 401) throw new UnauthorizedError()
         const errorText = await response.text().catch(() => response.statusText)
         console.error('[API] History error:', response.status, errorText)
         throw new Error(`History API error: ${errorText || response.statusText}`)

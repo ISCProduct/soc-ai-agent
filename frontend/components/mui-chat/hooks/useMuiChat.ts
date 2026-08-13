@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { sendChatMessage, getChatHistory, type ChatRequest, type ChatResponse } from '@/lib/api'
+import { sendChatMessage, getChatHistory, UnauthorizedError, type ChatRequest, type ChatResponse } from '@/lib/api'
 import { authService } from '@/lib/auth'
 import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
 import { resolveChatOutgoingMessage } from '@/lib/chat-choices'
@@ -53,6 +53,12 @@ export function useMuiChat() {
     questionCount,
     totalQuestions,
   })
+
+  // セッション切れ(401)を検知した際、無効な認証情報を破棄してログイン画面へ戻す
+  const redirectToLoginForExpiredSession = useCallback(() => {
+    authService.logout()
+    router.replace('/login')
+  }, [router])
 
   const scrollToBottomIfNeeded = () => {
     const area = messagesAreaRef.current
@@ -146,6 +152,10 @@ export function useMuiChat() {
     try {
       await loadChatHistory(sessionId)
     } catch (error) {
+      if (error instanceof UnauthorizedError) {
+        redirectToLoginForExpiredSession()
+        return
+      }
       console.error('[MUI Chat] Failed to load history (retry):', error)
       setHistoryLoadError(
         '履歴の読み込みに失敗しました。通信状況を確認して、もう一度お試しください。',
@@ -195,6 +205,10 @@ export function useMuiChat() {
         console.log('[MUI Chat] Loading history for session:', storedSessionId)
         await loadChatHistory(storedSessionId)
       } catch (error) {
+        if (error instanceof UnauthorizedError) {
+          redirectToLoginForExpiredSession()
+          return
+        }
         console.error('[MUI Chat] Failed to load history:', error)
         // #569: 失敗時は挨拶ではなくエラー UI（再試行で復元）
         setHistoryLoadError(
@@ -373,6 +387,10 @@ export function useMuiChat() {
         return newMessages
       })
     } catch (error) {
+      if (error instanceof UnauthorizedError) {
+        redirectToLoginForExpiredSession()
+        return
+      }
       console.error('[MUI Chat] Backend error:', error)
 
       // "all phases completed"エラーの場合は分析完了として扱う
