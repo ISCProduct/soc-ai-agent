@@ -72,7 +72,7 @@ func LoadConfig() (*Config, error) {
 		DBHost:           os.Getenv("DB_HOST"),
 		DBPort:           os.Getenv("DB_PORT"),
 		DBName:           os.Getenv("DB_NAME"),
-		ServerPort:       get("SERVER_PORT", "80"),
+		ServerPort:       get("SERVER_PORT", "8080"),
 		GBizInfoBaseURL:  get("GBIZINFO_BASE_URL", ""),
 		GBizInfoToken:    getFirst("GBIZINFO_API_KEY", "GBIZINFO_API_TOKEN"),
 		AdminSecret:      adminSecret,
