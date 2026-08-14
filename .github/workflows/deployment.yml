@@ -183,6 +183,7 @@ jobs:
           host: ${{ steps.instance.outputs.ip }}
           username: ubuntu
           key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          script_stop: true
           script: |
             set -e
             sudo bash -c '
@@ -199,13 +200,20 @@ jobs:
               /tmp/edge-sync/ensure-edge-compose.sh /opt/app/docker-compose.yml
               cd /opt/app
               df -h /
-              # image prune だけでは未使用ビルドキャッシュ・停止コンテナ等が残り続け
-              # ディスク枯渇(no space left on device)を招くため system prune に強化。
-              # named volume(chroma_data)は --volumes を付けない限り対象外で消えない。
+              # 稼働中イメージは prune できない。先に down してから空ける。
+              # named volume(chroma_data)は --volumes を付けない限り残る。
+              docker compose down --remove-orphans || true
               docker system prune -af
               docker compose pull
               docker compose up -d
               df -h /
+              for s in frontend backend edge; do
+                docker compose ps --status running --services | grep -qx "$s" || {
+                  echo "service $s is not running" >&2
+                  docker compose ps -a
+                  exit 1
+                }
+              done
             '
 
       - name: Revoke runner IP for SSH
