@@ -52,6 +52,7 @@ import {
   shouldShowResultsCta,
 } from '@/lib/sidebar-navigation'
 import { SIDEBAR_ADMIN_NAV, SIDEBAR_NAV_ITEMS } from '@/lib/sidebar-nav'
+import { computeProgressTotals } from './mui-chat/utils'
 
 const DRAWER_WIDTH = 280
 
@@ -188,6 +189,8 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
         overall: phases ? Math.floor((phasePercents.job + phasePercents.interest + phasePercents.aptitude + phasePercents.future) / 4) : fallbackOverall,
         ...phasePercents,
     }
+    // ヘッダー（ChatHeader）と同じ算出ロジックを使い、「X/Y 完了」の表示が一致するようにする
+    const progressTotals = computeProgressTotals({ phases, questionCount, totalQuestions })
 
     const analysisSteps: AnalysisStep[] = [
         {
@@ -304,7 +307,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                     AI分析進捗
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{mb: 2}}>
-                    質問: {questionCount}/{expectedTotalQuestions} 完了 (想定{expectedTotalQuestions}問・{progress.overall}%)
+                    質問: {progressTotals.valid}/{progressTotals.required} 完了 (想定{progressTotals.required}問・{progressTotals.percent}%)
                 </Typography>
 
                 <List sx={{p: 0}}>

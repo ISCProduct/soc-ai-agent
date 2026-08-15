@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import {
   Alert,
   Box,
@@ -64,6 +65,7 @@ export function ResumeReviewForm({
   reviewCompleted,
   onReview,
 }: ResumeReviewFormProps) {
+  const [jobTitleTouched, setJobTitleTouched] = useState(false)
   return (
     <Paper sx={{ p: 3 }} elevation={2}>
       <Stack spacing={2}>
@@ -147,9 +149,10 @@ export function ResumeReviewForm({
           label={companyName.trim() ? '応募職種 (任意)' : '応募職種 (企業名未選択の場合は必須)'}
           value={jobTitle}
           onChange={(e) => onJobTitleChange(e.target.value)}
+          onBlur={() => setJobTitleTouched(true)}
           fullWidth
           required={!companyName.trim()}
-          error={!companyName.trim() && !jobTitle.trim()}
+          error={jobTitleTouched && !companyName.trim() && !jobTitle.trim()}
           helperText={!companyName.trim() ? '企業未選択の場合は職種を入力すると一般レビューが実行されます' : ''}
         />
         <TextField

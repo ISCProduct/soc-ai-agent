@@ -3,10 +3,12 @@ import { CompanyCard } from "./CompanyCard"
 
 type CompanyListProps = {
   companies: Company[]
+  applyingId: number | null
   onShowDetail: (company: Company) => void
+  onApply: (company: Company) => void
 }
 
-export function CompanyList({ companies, onShowDetail }: CompanyListProps) {
+export function CompanyList({ companies, applyingId, onShowDetail, onApply }: CompanyListProps) {
   return (
     <>
       <div className="mb-4">
@@ -19,7 +21,9 @@ export function CompanyList({ companies, onShowDetail }: CompanyListProps) {
             key={company.id}
             company={company}
             index={index}
+            isApplying={applyingId === company.matchId}
             onShowDetail={onShowDetail}
+            onApply={onApply}
           />
         ))}
       </div>

@@ -48,7 +48,9 @@ test.describe('認証フロー', () => {
     await page.locator('input[type="password"]').fill('wrongpassword')
     await page.getByRole('button', { name: 'ログイン', exact: true }).click()
 
-    const errorAlert = page.getByRole('alert').filter({ hasText: /invalid email or password/ })
+    const errorAlert = page.getByRole('alert').filter({
+      hasText: /メールアドレスまたはパスワードが正しくありません/,
+    })
     await expect(errorAlert).toBeVisible({ timeout: 5000 })
   })
 
