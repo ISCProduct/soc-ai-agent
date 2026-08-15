@@ -217,6 +217,7 @@ resource "aws_launch_template" "app" {
     db_password              = module.rds.master_password
     s3_bucket                = module.s3.bucket_id
     openai_api_key           = var.openai_api_key_plain
+    resend_api_key           = var.resend_api_key_plain
     google_client_id         = var.google_client_id
     google_client_secret     = var.google_client_secret
     github_client_id         = var.github_client_id
