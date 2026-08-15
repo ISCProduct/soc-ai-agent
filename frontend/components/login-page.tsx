@@ -20,6 +20,7 @@ import { authService, AuthResponse } from '@/lib/auth'
 import { BACKEND_URL } from '@/lib/backend-url'
 import { GUEST_LIMITATIONS } from '@/lib/guest-limits'
 import { StudentThemeToggle } from '@/components/student-theme-toggle'
+import { extractTenantSlug } from '@/lib/tenant'
 
 interface LoginPageProps {
   onAuthSuccess: (authResponse: AuthResponse) => void
