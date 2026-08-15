@@ -157,11 +157,6 @@ resource "random_password" "user_secret" {
   special = false
 }
 
-resource "random_password" "admin_secret" {
-  length  = 48
-  special = false
-}
-
 resource "random_password" "oauth_state_secret" {
   length  = 32
   special = false
@@ -225,7 +220,7 @@ resource "aws_launch_template" "app" {
     backend_domain           = local.backend_domain
     frontend_domain          = local.frontend_domain
     user_secret              = random_password.user_secret.result
-    admin_secret             = random_password.admin_secret.result
+    admin_secret             = var.admin_secret_plain
     oauth_state_secret       = random_password.oauth_state_secret.result
     token_encryption_key     = random_id.token_encryption_key.hex
     edge_nginx_conf          = file("${path.module}/../../../nginx/staging-edge.conf")
