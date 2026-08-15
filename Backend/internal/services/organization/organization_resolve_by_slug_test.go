@@ -1,4 +1,4 @@
-package services_test
+package organization_test
 
 import (
 	"errors"
@@ -31,7 +31,7 @@ func TestOrganizationService_ResolveBySlug(t *testing.T) {
 			name:    "disabled organization is rejected",
 			slug:    "closed-univ",
 			rows:    sqlmock.NewRows(cols).AddRow(6, "旧学園", "closed-univ", "disabled"),
-			wantErr: services.ErrOrganizationDisabled,
+			wantErr: organization.ErrOrganizationDisabled,
 		},
 		{
 			name:    "unknown slug is rejected",
