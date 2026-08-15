@@ -3,8 +3,11 @@ package controllers
 import (
 	"Backend/domain/entity"
 	"Backend/domain/repository"
-	"Backend/internal/services"
+	"Backend/internal/services/chat"
+	"Backend/internal/services/email"
 	ifaces "Backend/internal/services/interfaces"
+	"Backend/internal/services/matching"
+	"Backend/internal/services/shared"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -135,7 +138,7 @@ func (c *ChatController) Chat(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
-	var req services.ChatRequest
+	var req chat.ChatRequest
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
@@ -253,9 +256,9 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		}
 
 		type RecommendationResponse struct {
-			Recommendations     []any                 `json:"recommendations"`
+			Recommendations     []any                         `json:"recommendations"`
 			Reason              string                        `json:"reason,omitempty"`
-			Diagnostics         *services.MatchingDiagnostics `json:"diagnostics,omitempty"`
+			Diagnostics         *matching.MatchingDiagnostics `json:"diagnostics,omitempty"`
 			EvaluatedCategories int                           `json:"evaluated_categories"`
 			IsProvisional       bool                          `json:"is_provisional"`
 		}
@@ -338,7 +341,7 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 			MatchID:      match.ID,
 			CategoryName: match.Company.Name,
 			Score:        int(match.MatchScore),
-			Reason:       services.BuildMatchReason(match, userScores),
+			Reason:       matching.BuildMatchReason(match, userScores),
 			Industry:     match.Company.Industry,
 			Location:     match.Company.Location,
 			Employees:    employeeCount,
@@ -384,7 +387,7 @@ func (c *ChatController) ToggleFavorite(ctx echo.Context) error {
 	}
 
 	if err := c.matchingService.ToggleFavorite(req.MatchID, userID); err != nil {
-		if err == services.ErrForbidden {
+		if err == shared.ErrForbidden {
 			return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
 		}
 		return echoInternalError(err)
@@ -548,16 +551,16 @@ func (c *ChatController) SendReport(ctx echo.Context) error {
 	matches, _ := c.matchingService.GetTopMatches(ctx.Request().Context(), userID, req.SessionID, 5)
 	userScores, _ := c.chatService.GetUserScores(userID, req.SessionID)
 
-	var companies []services.EmailReportCompany
+	var companies []email.EmailReportCompany
 	for i, match := range matches {
 		if match.Company == nil || match.Company.ID == 0 {
 			continue
 		}
-		companies = append(companies, services.EmailReportCompany{
+		companies = append(companies, email.EmailReportCompany{
 			Rank:   i + 1,
 			Name:   match.Company.Name,
 			Score:  int(match.MatchScore),
-			Reason: services.BuildMatchReason(match, userScores),
+			Reason: matching.BuildMatchReason(match, userScores),
 		})
 	}
 

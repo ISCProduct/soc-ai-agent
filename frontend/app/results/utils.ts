@@ -79,10 +79,8 @@ export function buildEmptyRecommendationsMessage(
     message = '現在、公開済みの企業データがありません。管理者が企業情報を公開するまでお待ちください。'
   }
   if (diagnostics) {
-    const scoreCount = diagnostics.user_score_count ?? '-'
-    const companyCount = diagnostics.active_company_count ?? '-'
-    const profileCount = diagnostics.weight_profile_count ?? '-'
-    message += `\n\nスコア数: ${scoreCount}, 企業数: ${companyCount}, プロファイル数: ${profileCount}`
+    // 内部指標はエンドユーザー向け文言に混在させず、調査用にconsoleへ出力するのみに留める
+    console.debug('[results] empty recommendations diagnostics', diagnostics)
   }
   return message
 }

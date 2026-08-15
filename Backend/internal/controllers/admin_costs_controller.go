@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/costs"
 	"Backend/internal/services/interfaces"
 	"net/http"
 	"time"
@@ -34,7 +34,7 @@ func (c *AdminCostsController) Summary(ctx echo.Context) error {
 	}
 	realtimeMonthTotal := 0.0
 	activeConnections := int64(0)
-	realtimeUsers := []services.RealtimeUserSummary{}
+	realtimeUsers := []costs.RealtimeUserSummary{}
 	if c.realtimeUsageService != nil {
 		realtimeMonthTotal, err = c.realtimeUsageService.CurrentMonthTotalCost()
 		if err != nil {
@@ -84,7 +84,7 @@ func (c *AdminCostsController) Daily(ctx echo.Context) error {
 	if err != nil {
 		return echoInternalError(err)
 	}
-	realtimeRows := []services.RealtimeDailySummary{}
+	realtimeRows := []costs.RealtimeDailySummary{}
 	if c.realtimeUsageService != nil {
 		realtimeRows, err = c.realtimeUsageService.GetDailyUsage(days)
 		if err != nil {
@@ -107,7 +107,7 @@ func (c *AdminCostsController) Monthly(ctx echo.Context) error {
 	if err != nil {
 		return echoInternalError(err)
 	}
-	realtimeRows := []services.RealtimeMonthlySummary{}
+	realtimeRows := []costs.RealtimeMonthlySummary{}
 	if c.realtimeUsageService != nil {
 		realtimeRows, err = c.realtimeUsageService.GetMonthlyUsage(months)
 		if err != nil {

@@ -55,6 +55,15 @@ export function useMuiChat() {
     totalQuestions,
   })
 
+  // セッション切れ(401)を検知した際、無効な認証情報を破棄してログイン画面へ戻す
+  const redirectToLoginForExpiredSession = useCallback(() => {
+    authService.logout()
+    router.replace('/login')
+  }, [router])
+
+  const isSessionExpiredError = (error: unknown): boolean =>
+    error instanceof UserFacingApiError && (error.status === 401 || error.status === 403)
+
   const scrollToBottomIfNeeded = () => {
     const area = messagesAreaRef.current
     if (area) {
@@ -147,6 +156,10 @@ export function useMuiChat() {
     try {
       await loadChatHistory(sessionId)
     } catch (error) {
+      if (isSessionExpiredError(error)) {
+        redirectToLoginForExpiredSession()
+        return
+      }
       console.error('[MUI Chat] Failed to load history (retry):', error)
       setHistoryLoadError(
         '履歴の読み込みに失敗しました。通信状況を確認して、もう一度お試しください。',
@@ -196,6 +209,10 @@ export function useMuiChat() {
         console.log('[MUI Chat] Loading history for session:', storedSessionId)
         await loadChatHistory(storedSessionId)
       } catch (error) {
+        if (isSessionExpiredError(error)) {
+          redirectToLoginForExpiredSession()
+          return
+        }
         console.error('[MUI Chat] Failed to load history:', error)
         // #569: 失敗時は挨拶ではなくエラー UI（再試行で復元）
         setHistoryLoadError(
@@ -374,6 +391,10 @@ export function useMuiChat() {
         return newMessages
       })
     } catch (error) {
+      if (isSessionExpiredError(error)) {
+        redirectToLoginForExpiredSession()
+        return
+      }
       console.error('[MUI Chat] Backend error:', error)
 
       // "all phases completed"エラーの場合は分析完了として扱う

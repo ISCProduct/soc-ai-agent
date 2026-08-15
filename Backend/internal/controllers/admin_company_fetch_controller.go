@@ -7,7 +7,7 @@ import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/companyfields"
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/company"
 	"context"
 	"net/http"
 	"strconv"
@@ -112,7 +112,7 @@ func (c *AdminCompanyController) ConfirmCompanyInfo(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
 	}
 
-	var req services.CompanyInfoResult
+	var req company.CompanyInfoResult
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
 	}
@@ -211,7 +211,7 @@ func (c *AdminCompanyController) ConfirmCompanyRelations(ctx echo.Context) error
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
 	}
 
-	var req services.CompanyRelationsResult
+	var req company.CompanyRelationsResult
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
 	}

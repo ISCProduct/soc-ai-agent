@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/flywheel"
 	"Backend/internal/services/interfaces"
 	"net/http"
 	"strconv"
@@ -47,7 +47,7 @@ func (c *CollectiveInsightController) GetRecommendations(ctx echo.Context) error
 		return echoInternalError(err)
 	}
 	if items == nil {
-		items = []services.CollectiveRecommendItem{}
+		items = []flywheel.CollectiveRecommendItem{}
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]any{

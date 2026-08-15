@@ -1,8 +1,7 @@
 package middleware
 
-// インメモリ スライディングウィンドウ方式のレート制限ミドルウェア（Issue #325）
-// 外部依存なし（sync.Map + time）で実装。
-// キー単位（IP:email など）で window 内の試行回数を管理する。
+// レート制限ミドルウェア（Issue #325 / #617）
+// 既定はインメモリ。REDIS_URL 利用時は Redis スライディングウィンドウに切替可能。
 
 import (
 	"net"
@@ -11,22 +10,25 @@ import (
 	"time"
 )
 
+// KeyRateLimiter はキー単位のレート制限インターフェース（#617）。
+type KeyRateLimiter interface {
+	Allow(key string) bool
+}
+
 // rateLimitEntry は1つのキーに対するリクエスト履歴を保持する
 type rateLimitEntry struct {
-	mu        sync.Mutex
+	mu         sync.Mutex
 	timestamps []time.Time
 }
 
-// RateLimiter はスライディングウィンドウ方式のレート制限器
+// RateLimiter はスライディングウィンドウ方式のインメモリレート制限器
 type RateLimiter struct {
-	entries  sync.Map
-	window   time.Duration
-	maxReqs  int
-	// クリーンアップ間隔（ゴルーティンで定期実行）
+	entries sync.Map
+	window  time.Duration
+	maxReqs int
 }
 
-// NewRateLimiter は新しい RateLimiter を生成する
-// window: 計測ウィンドウ幅, maxReqs: window 内の最大リクエスト数
+// NewRateLimiter は新しいインメモリ RateLimiter を生成する
 func NewRateLimiter(window time.Duration, maxReqs int) *RateLimiter {
 	rl := &RateLimiter{window: window, maxReqs: maxReqs}
 	go rl.cleanupLoop()
@@ -44,7 +46,6 @@ func (rl *RateLimiter) Allow(key string) bool {
 	now := time.Now()
 	cutoff := now.Add(-rl.window)
 
-	// 期限切れタイムスタンプを除去
 	valid := entry.timestamps[:0]
 	for _, t := range entry.timestamps {
 		if t.After(cutoff) {
@@ -60,7 +61,6 @@ func (rl *RateLimiter) Allow(key string) bool {
 	return true
 }
 
-// cleanupLoop は期限切れエントリを定期削除してメモリリークを防ぐ
 func (rl *RateLimiter) cleanupLoop() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
@@ -104,13 +104,23 @@ func GetClientIP(r *http.Request) string {
 	return ip
 }
 
-// LoginRateLimiter はログイン試行のレート制限器
-// IP単位: 1分間に20回まで（正常ユーザーの誤入力を許容しつつ攻撃を防ぐ）
-var LoginRateLimiter = NewRateLimiter(time.Minute, 20)
+// LoginRateLimiter はログイン試行のレート制限器（差し替え可能）
+// IP単位: 1分間に20回まで
+var LoginRateLimiter KeyRateLimiter = NewRateLimiter(time.Minute, 20)
 
-// PasswordResetRateLimiter はパスワードリセット要求のレート制限器
-// IP単位: 1時間に5回まで（メールサーバー保護）
-var PasswordResetRateLimiter = NewRateLimiter(time.Hour, 5)
+// PasswordResetRateLimiter はパスワードリセット要求のレート制限器（差し替え可能）
+// IP単位: 1時間に5回まで
+var PasswordResetRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, 5)
+
+// ConfigureRateLimiters は外部 KeyRateLimiter でグローバル制限器を差し替える（#617）。
+func ConfigureRateLimiters(login, passwordReset KeyRateLimiter) {
+	if login != nil {
+		LoginRateLimiter = login
+	}
+	if passwordReset != nil {
+		PasswordResetRateLimiter = passwordReset
+	}
+}
 
 // CompanyEntryRateLimiter は企業情報ゲスト投稿のレート制限器（#754）
 // IP単位: 1時間に5回まで

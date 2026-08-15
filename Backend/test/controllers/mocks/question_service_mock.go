@@ -2,7 +2,7 @@ package mocks
 
 import (
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/chat"
 	"context"
 
 	"github.com/stretchr/testify/mock"
@@ -13,7 +13,7 @@ type QuestionServiceMock struct {
 	mock.Mock
 }
 
-func (m *QuestionServiceMock) GenerateAndSaveQuestions(ctx context.Context, req services.GenerateQuestionsRequest) ([]models.QuestionWeight, error) {
+func (m *QuestionServiceMock) GenerateAndSaveQuestions(ctx context.Context, req chat.GenerateQuestionsRequest) ([]models.QuestionWeight, error) {
 	args := m.Called(ctx, req)
 	if v := args.Get(0); v != nil {
 		return v.([]models.QuestionWeight), args.Error(1)

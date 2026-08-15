@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/organization"
 	"errors"
 	"net/http"
 	"strconv"
@@ -11,10 +11,10 @@ import (
 
 // AdminOrganizationController はプラットフォーム管理者向け組織 CRUD。
 type AdminOrganizationController struct {
-	orgs *services.OrganizationService
+	orgs *organization.OrganizationService
 }
 
-func NewAdminOrganizationController(orgs *services.OrganizationService) *AdminOrganizationController {
+func NewAdminOrganizationController(orgs *organization.OrganizationService) *AdminOrganizationController {
 	return &AdminOrganizationController{orgs: orgs}
 }
 
@@ -65,7 +65,7 @@ func (c *AdminOrganizationController) Create(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
-	org, err := c.orgs.Create(services.CreateOrganizationInput{Name: req.Name, Slug: req.Slug})
+	org, err := c.orgs.Create(organization.CreateOrganizationInput{Name: req.Name, Slug: req.Slug})
 	if err != nil {
 		return mapOrgError(err)
 	}
@@ -95,7 +95,7 @@ func (c *AdminOrganizationController) Update(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
-	org, err := c.orgs.Update(id, services.UpdateOrganizationInput{Name: req.Name, Status: req.Status})
+	org, err := c.orgs.Update(id, organization.UpdateOrganizationInput{Name: req.Name, Status: req.Status})
 	if err != nil {
 		return mapOrgError(err)
 	}
@@ -128,7 +128,7 @@ func (c *AdminOrganizationController) AddMember(ctx echo.Context) error {
 	if req.UserID == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "user_id is required")
 	}
-	member, err := c.orgs.AddMember(services.AddMemberInput{
+	member, err := c.orgs.AddMember(organization.AddMemberInput{
 		OrganizationID: id,
 		UserID:         req.UserID,
 		Role:           req.Role,
@@ -178,16 +178,16 @@ func (c *AdminOrganizationController) RemoveMember(ctx echo.Context) error {
 
 func mapOrgError(err error) error {
 	switch {
-	case errors.Is(err, services.ErrOrganizationNotFound), errors.Is(err, services.ErrMembershipNotFound):
+	case errors.Is(err, organization.ErrOrganizationNotFound), errors.Is(err, organization.ErrMembershipNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
-	case errors.Is(err, services.ErrOrgSlugTaken), errors.Is(err, services.ErrUserAlreadyInOrg):
+	case errors.Is(err, organization.ErrOrgSlugTaken), errors.Is(err, organization.ErrUserAlreadyInOrg):
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
-	case errors.Is(err, services.ErrInvalidOrgSlug),
-		errors.Is(err, services.ErrInvalidOrgRole),
-		errors.Is(err, services.ErrNameRequired),
-		errors.Is(err, services.ErrInvalidOrgStatus):
+	case errors.Is(err, organization.ErrInvalidOrgSlug),
+		errors.Is(err, organization.ErrInvalidOrgRole),
+		errors.Is(err, organization.ErrNameRequired),
+		errors.Is(err, organization.ErrInvalidOrgStatus):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	case errors.Is(err, services.ErrCrossOrganization), errors.Is(err, services.ErrOrganizationDisabled):
+	case errors.Is(err, organization.ErrCrossOrganization), errors.Is(err, organization.ErrOrganizationDisabled):
 		return echo.NewHTTPError(http.StatusForbidden, err.Error())
 	default:
 		return echoInternalError(err)

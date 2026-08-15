@@ -14,7 +14,7 @@ import (
 
 	"Backend/internal/controllers"
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/chat"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/mock"
@@ -35,7 +35,7 @@ func TestQuestionController_GenerateQuestions_InvalidBody(t *testing.T) {
 
 func TestQuestionController_GenerateQuestions_DefaultCount(t *testing.T) {
 	svc := &mocks.QuestionServiceMock{}
-	expected := services.GenerateQuestionsRequest{Category: "technical", Count: 5}
+	expected := chat.GenerateQuestionsRequest{Category: "technical", Count: 5}
 	questions := []models.QuestionWeight{{Question: "test question"}}
 	svc.On("GenerateAndSaveQuestions", mock.Anything, expected).Return(questions, nil)
 

@@ -33,6 +33,7 @@ export function useGitHubSkills(userId: number, targetRole: string) {
   const [summaries, setSummaries] = useState<RepoSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
+  const [syncElapsedSeconds, setSyncElapsedSeconds] = useState(0)
   const [notLinked, setNotLinked] = useState(false)
   const [needsReauth, setNeedsReauth] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -141,15 +142,26 @@ export function useGitHubSkills(userId: number, targetRole: string) {
     window.location.href = `${BACKEND_URL}/api/auth/github`
   }
 
+  // ponytail: バックエンドの同期処理は進捗を返さない単一のブロッキングAPIのため、
+  // 経過時間表示とタイムアウトでの中断のみをクライアント側で補う。真の進捗表示にはバックエンド側の対応が必要。
+  const SYNC_TIMEOUT_MS = 90_000
+
   const handleSync = async () => {
     setSyncing(true)
+    setSyncElapsedSeconds(0)
     setError(null)
     setNeedsReauth(false)
+    const elapsedTimer = setInterval(() => {
+      setSyncElapsedSeconds((prev) => prev + 1)
+    }, 1000)
+    const controller = new AbortController()
+    const timeoutTimer = setTimeout(() => controller.abort(), SYNC_TIMEOUT_MS)
     try {
       await authService.ensureFreshUserToken()
       const res = await fetch(`${BACKEND_URL}/api/github/sync/wait?user_id=${userId}`, {
         method: 'POST',
         headers: authService.getUserFetchHeaders(),
+        signal: controller.signal,
       })
       if (res.status === 401) {
         setError('ログインの有効期限が切れました。再ログインしてください。')
@@ -168,6 +180,10 @@ export function useGitHubSkills(userId: number, targetRole: string) {
       }
       await fetchAll()
     } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        setError('同期に時間がかかっています。バックグラウンドで処理が続いている可能性があります。しばらくしてから再読み込みしてください。')
+        return
+      }
       const msg = e instanceof Error ? e.message : ''
       if (msg.toLowerCase().includes('unauthorized')) {
         setError('ログインの有効期限が切れました。再ログインしてください。')
@@ -175,6 +191,8 @@ export function useGitHubSkills(userId: number, targetRole: string) {
         setError('同期に失敗しました')
       }
     } finally {
+      clearInterval(elapsedTimer)
+      clearTimeout(timeoutTimer)
       setSyncing(false)
     }
   }
@@ -192,6 +210,7 @@ export function useGitHubSkills(userId: number, targetRole: string) {
     summaries,
     loading,
     syncing,
+    syncElapsedSeconds,
     notLinked,
     needsReauth,
     error,

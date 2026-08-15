@@ -3,6 +3,8 @@ package services
 import (
 	"strings"
 	"testing"
+
+	"Backend/internal/services/email"
 )
 
 func TestCompanyEntryService_SubmitValidation(t *testing.T) {
@@ -70,7 +72,7 @@ func TestCompanyEntryService_SubmitValidation(t *testing.T) {
 }
 
 func TestEmailService_SendCompanyEntryThankYouAndInvite_LogFallback(t *testing.T) {
-	svc := &EmailService{} // host empty → log only
+	svc := &email.EmailService{} // host empty → log only
 	if err := svc.SendCompanyEntryThankYouAndInvite("hr@example.com", "テスト株式会社", "token123"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

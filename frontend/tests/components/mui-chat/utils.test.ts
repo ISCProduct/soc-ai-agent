@@ -245,8 +245,8 @@ describe('shouldAutoScrollToBottom', () => {
 })
 
 describe('CHAT_BRAND', () => {
-  it('プライマリ青である', () => {
-    expect(CHAT_BRAND).toBe('#1976d2')
+  it('サイドバー等と同じブランドオレンジである', () => {
+    expect(CHAT_BRAND).toBe('#ec5b13')
   })
 })
 

@@ -2,13 +2,13 @@ package routes
 
 import (
 	"Backend/internal/controllers"
-	"Backend/internal/services"
+	"Backend/internal/services/auth"
 
 	"github.com/labstack/echo/v4"
 )
 
 // SetupApplicationRoutes 応募・選考ステータス管理のルーティング設定
-func SetupApplicationRoutes(api *echo.Group, appController *controllers.ApplicationController, userSecret string, access services.UserAccessGuard, orgs OrganizationIDResolver) {
+func SetupApplicationRoutes(api *echo.Group, appController *controllers.ApplicationController, userSecret string, access auth.UserAccessGuard, orgs OrganizationIDResolver) {
 	applications := api.Group("/applications", EchoUserAuth(userSecret, access, orgs))
 	// POST /api/applications       → 応募登録
 	// GET  /api/applications       → 応募一覧取得
