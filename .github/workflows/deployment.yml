@@ -64,7 +64,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # GitHub Actionsキャッシュ(type=gha)でレイヤーを再利用しつつ、3イメージを並列ビルドする。
+      # レイヤーキャッシュはECRへ保存するtype=registryを使う(type=ghaはリポジトリ全体で
+      # 10GB共有・LRU退避されるため、他イメージのビルドで頻繁に追い出されて無関係な変更でも
+      # apt-get等の重いレイヤーから毎回リビルドされてしまう)。3イメージを並列ビルドする。
       # staging EC2はamd64（instance_type変更済み、旧t4g.small/ARM64からの移行に伴う）。
       - name: Build and push images (frontend/backend/rag-review, parallel)
         run: |
@@ -74,20 +76,20 @@ jobs:
           (cd frontend && docker buildx build --platform linux/amd64 \
             --build-arg NODE_ENV=production \
             --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }} \
-            --cache-from type=gha,scope=frontend-staging \
-            --cache-to type=gha,mode=max,scope=frontend-staging \
+            --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging \
+            --cache-to type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging,mode=max \
             -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &
           pids+=($!)
 
           (cd Backend && docker buildx build --platform linux/amd64 \
-            --cache-from type=gha,scope=backend-staging \
-            --cache-to type=gha,mode=max,scope=backend-staging \
+            --cache-from type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-staging \
+            --cache-to type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-staging,mode=max \
             -t $ECR_REGISTRY/soc-backend:$IMAGE_TAG --push .) &
           pids+=($!)
 
           (cd rag && docker buildx build --platform linux/amd64 \
-            --cache-from type=gha,scope=rag-staging \
-            --cache-to type=gha,mode=max,scope=rag-staging \
+            --cache-from type=registry,ref=$ECR_REGISTRY/soc-rag-review:buildcache-staging \
+            --cache-to type=registry,ref=$ECR_REGISTRY/soc-rag-review:buildcache-staging,mode=max \
             -t $ECR_REGISTRY/soc-rag-review:$IMAGE_TAG --push .) &
           pids+=($!)
 
@@ -302,7 +304,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # GitHub Actionsキャッシュ(type=gha)でレイヤーを再利用しつつ、2イメージを並列ビルドする
+      # レイヤーキャッシュはECRへ保存するtype=registryを使う(type=ghaはリポジトリ全体で
+      # 10GB共有・LRU退避されるため、他イメージのビルドで頻繁に追い出されて無関係な変更でも
+      # apt-get等の重いレイヤーから毎回リビルドされてしまう)。2イメージを並列ビルドする
       - name: Build and push images (frontend/backend, parallel)
         run: |
           set -e
@@ -311,14 +315,14 @@ jobs:
           (cd frontend && docker buildx build --platform linux/amd64 \
             --build-arg NODE_ENV=production \
             --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }} \
-            --cache-from type=gha,scope=frontend-production \
-            --cache-to type=gha,mode=max,scope=frontend-production \
+            --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production \
+            --cache-to type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production,mode=max \
             -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &
           pids+=($!)
 
           (cd Backend && docker buildx build --platform linux/amd64 \
-            --cache-from type=gha,scope=backend-production \
-            --cache-to type=gha,mode=max,scope=backend-production \
+            --cache-from type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-production \
+            --cache-to type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-production,mode=max \
             -t $ECR_REGISTRY/soc-backend:$IMAGE_TAG --push .) &
           pids+=($!)
 
