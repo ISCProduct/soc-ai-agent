@@ -281,6 +281,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	_ = s.repo.UpdateDocument(doc)
 
 	if err := validatePathInDir(pdfPath, workDir); err != nil {
+		log.Printf("resume_review_stream: pdf path outside workDir pdf=%q workDir=%q err=%v", pdfPath, workDir, err)
 		sendEvent(map[string]any{"type": "error", "message": "document processing failed"})
 		return fmt.Errorf("invalid pdf path: %w", err)
 	}

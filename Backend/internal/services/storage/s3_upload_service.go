@@ -12,6 +12,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+
+	"Backend/internal/services/shared"
 )
 
 // S3UploadService uploads files to AWS S3.
@@ -25,7 +27,7 @@ type S3UploadService struct {
 // NewS3UploadService initialises the service from environment variables
 // (AWS_REGION, AWS_S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY).
 func NewS3UploadService() (*S3UploadService, error) {
-	bucket := os.Getenv("AWS_S3_BUCKET")
+	bucket := shared.S3BucketFromEnv()
 	region := os.Getenv("AWS_REGION")
 	if bucket == "" {
 		return nil, fmt.Errorf("AWS_S3_BUCKET is not set")

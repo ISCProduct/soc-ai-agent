@@ -12,6 +12,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+
+	"Backend/internal/services/shared"
 )
 
 type s3Storage struct {
@@ -22,7 +24,7 @@ type s3Storage struct {
 }
 
 func newS3StorageFromEnv(ctx context.Context) (*s3Storage, error) {
-	bucket := strings.TrimSpace(os.Getenv("AWS_S3_BUCKET"))
+	bucket := shared.S3BucketFromEnv()
 	if bucket == "" {
 		return nil, nil
 	}

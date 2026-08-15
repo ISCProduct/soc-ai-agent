@@ -173,6 +173,13 @@ variable "openai_api_key_plain" {
   default     = ""
 }
 
+variable "resend_api_key_plain" {
+  type        = string
+  description = "Resend APIキー(平文、Secrets Manager未使用のためuser_dataに直接埋め込む)。未設定時はEMAIL_PROVIDERがlogにフォールバックする"
+  sensitive   = true
+  default     = ""
+}
+
 variable "google_client_id" {
   type        = string
   description = "Google OAuthクライアントID。コールバックURL https://<api_domain>/api/auth/google/callback をGoogle Cloud Console側で許可しておくこと"

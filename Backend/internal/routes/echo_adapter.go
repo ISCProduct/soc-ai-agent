@@ -7,6 +7,7 @@ import (
 	"Backend/internal/services/auth"
 	"Backend/internal/services/organization"
 	"context"
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"strconv"
@@ -95,6 +96,23 @@ func EchoTenantResolver(orgs *organization.OrganizationService) echo.MiddlewareF
 
 // EchoAdminAuth はX-Admin-Email / X-Admin-Tokenヘッダーを検証するEcho nativeミドルウェアを返す。
 // 検証済み管理者のユーザーIDを AdminUserIDContextKey へ格納する(後続のEchoAdminSchoolScope等が利用する)。
+// EchoStaticSecretAuth はログインユーザーを介さないサービス間呼び出し（CI等）向けの
+// 単純な共有シークレット認証。X-Admin-Secretヘッダーの値をadminSecretと定数時間比較する。
+func EchoStaticSecretAuth(adminSecret string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if adminSecret == "" {
+				return echo.NewHTTPError(http.StatusServiceUnavailable, "Service Unavailable: admin authentication not configured")
+			}
+			token := c.Request().Header.Get("X-Admin-Secret")
+			if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(adminSecret)) != 1 {
+				return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
+			}
+			return next(c)
+		}
+	}
+}
+
 func EchoAdminAuth(userRepo *repositories.UserRepository, adminSecret string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {

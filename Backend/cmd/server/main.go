@@ -375,6 +375,8 @@ func main() {
 	companyEntryService := services.NewCompanyEntryService(db, userRepo, pendingRegistrationRepo, emailService)
 	authService.SetCompanyOwnershipClaimer(companyEntryService)
 	companyEntryController := controllers.NewCompanyEntryController(companyEntryService)
+	releaseNoteService := services.NewReleaseNoteService(db, aiClient)
+	releaseNoteController := controllers.NewReleaseNoteController(releaseNoteService)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := controllers.NewESRewriteController(aiClient)
 	scheduleRepo := repositories.NewScheduleRepository(db)
@@ -439,8 +441,12 @@ func main() {
 	routes.SetupUserRoutes(api, integratedProfileController)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())
+	api.GET("/whats-new", releaseNoteController.List)
 	adminEntry := api.Group("/admin", routes.EchoAdminAuth(userRepo, cfg.AdminSecret))
 	adminEntry.POST("/company-entry-submissions/:id/resend-email", companyEntryController.ResendEmail)
+	// CI(GitHub Actions)からのマシン間呼び出しのため、ログインユーザー前提のEchoAdminAuthではなく
+	// 共有シークレットのみで認証する(#861)
+	api.POST("/admin/whats-new/ingest", releaseNoteController.Ingest, routes.EchoStaticSecretAuth(cfg.AdminSecret))
 
 	go crawlService.StartScheduler()
 
@@ -466,10 +472,6 @@ func main() {
 
 	// サーバー起動
 	port := cfg.ServerPort
-	if port == "" {
-		port = "80"
-	}
-
 	slog.Info("Starting server", "port", port)
 	if err := e.Start(":" + port); err != nil {
 		log.Fatalf("Server failed: %v", err)

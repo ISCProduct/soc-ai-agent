@@ -12,6 +12,8 @@ export type UserScore = {
 
 export type Company = {
   id: number
+  matchId?: number
+  isApplied?: boolean
   name: string
   industry: string
   location: string

@@ -94,24 +94,15 @@ describe('buildEmptyRecommendationsMessage', () => {
     expect(buildEmptyRecommendationsMessage('insufficient_company_data')).toContain('公開済みの企業データがありません')
   })
 
-  it('diagnostics を末尾に付与する', () => {
+  it('diagnostics が渡されてもユーザー向けメッセージに内部指標を含めない', () => {
     const message = buildEmptyRecommendationsMessage('matching_results_empty', {
       user_score_count: 1,
       active_company_count: 2,
       weight_profile_count: 3,
     })
-    expect(message).toContain('スコア数: 1')
-    expect(message).toContain('企業数: 2')
-    expect(message).toContain('プロファイル数: 3')
-  })
-
-  it('diagnostics 欠損フィールドは - で表示する', () => {
-    const message = buildEmptyRecommendationsMessage('matching_results_empty', {
-      user_score_count: 1,
-    })
-    expect(message).toContain('スコア数: 1')
-    expect(message).toContain('企業数: -')
-    expect(message).toContain('プロファイル数: -')
+    expect(message).not.toContain('スコア数')
+    expect(message).not.toContain('企業数')
+    expect(message).not.toContain('プロファイル数')
     expect(message).not.toContain('undefined')
   })
 })

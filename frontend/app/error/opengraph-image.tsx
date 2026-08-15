@@ -1,4 +1,5 @@
 import { ImageResponse } from 'next/og'
+import { BRAND_LOGO_COLOR } from '@/lib/brand'
 
 export const alt = '接続できません'
 export const size = { width: 1200, height: 630 }
@@ -19,7 +20,7 @@ export default function OpenGraphImage() {
           color: '#0f172a',
         }}
       >
-        <div style={{ fontSize: 28, fontWeight: 700, color: '#ec5b13' }}>就活AI</div>
+        <div style={{ fontSize: 28, fontWeight: 700, color: BRAND_LOGO_COLOR }}>就活AI</div>
         <div style={{ fontSize: 64, fontWeight: 800, marginTop: 24 }}>接続できません</div>
         <div style={{ fontSize: 32, color: '#475569', marginTop: 16 }}>
           しばらくしてから再試行してください

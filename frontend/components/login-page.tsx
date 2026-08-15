@@ -19,7 +19,10 @@ import Link from 'next/link'
 import { authService, AuthResponse } from '@/lib/auth'
 import { BACKEND_URL } from '@/lib/backend-url'
 import { GUEST_LIMITATIONS } from '@/lib/guest-limits'
+import { StudentThemeToggle } from '@/components/student-theme-toggle'
 import { extractTenantSlug } from '@/lib/tenant'
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 interface LoginPageProps {
   onAuthSuccess: (authResponse: AuthResponse) => void
@@ -31,10 +34,13 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
   const [tabValue, setTabValue] = useState(initialTab)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [emailTouched, setEmailTouched] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   // 新規登録: メール送信完了状態
   const [registrationEmailSent, setRegistrationEmailSent] = useState(false)
+
+  const emailInvalid = emailTouched && email !== '' && !EMAIL_PATTERN.test(email)
 
   useEffect(() => {
     setTabValue(initialTab)
@@ -106,11 +112,11 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
         justifyContent: 'center',
         minHeight: '100vh',
         bgcolor: 'background.default',
-        p: 2,
+        p: { xs: 2, sm: 3 },
       }}
     >
-      <Card sx={{ maxWidth: 450, width: '100%' }}>
-        <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
+      <Card sx={{ maxWidth: 520, width: '100%' }}>
+        <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
           <Typography variant="h4" align="center" gutterBottom fontWeight="bold">
             IT業界キャリアエージェント
           </Typography>
@@ -137,6 +143,9 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onBlur={() => setEmailTouched(true)}
+                error={emailInvalid}
+                helperText={emailInvalid ? 'メールアドレスの形式が正しくありません' : ' '}
                 required
                 sx={{ mb: 2 }}
               />
@@ -150,7 +159,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
                 sx={{ mb: 1 }}
               />
               <Box sx={{ textAlign: 'right', mt: -1, mb: 2 }}>
-                <Link href="/forgot-password" style={{ fontSize: '0.875rem', color: '#1976D2' }}>
+                <Link href="/forgot-password" style={{ fontSize: '0.875rem' }}>
                   パスワードをお忘れですか？
                 </Link>
               </Box>
@@ -159,7 +168,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
                 fullWidth
                 variant="contained"
                 size="large"
-                disabled={loading}
+                disabled={loading || emailInvalid}
               >
                 ログイン
               </Button>
@@ -180,6 +189,9 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onBlur={() => setEmailTouched(true)}
+                error={emailInvalid}
+                helperText={emailInvalid ? 'メールアドレスの形式が正しくありません' : ' '}
                 required
                 sx={{ mb: 3 }}
               />
@@ -188,7 +200,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
                 fullWidth
                 variant="contained"
                 size="large"
-                disabled={loading}
+                disabled={loading || emailInvalid}
               >
                 確認メールを送る
               </Button>
@@ -229,6 +241,9 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
               あとからアカウント登録すると解放されます。
             </Typography>
           </Box>
+
+          <Divider sx={{ my: 3 }} />
+          <StudentThemeToggle />
         </CardContent>
       </Card>
     </Box>

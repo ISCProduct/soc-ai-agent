@@ -11,8 +11,7 @@ import {
   YAxis,
 } from 'recharts'
 import type { InterviewTrendPoint } from '@/lib/interview'
-
-const PRIMARY = '#ec5b13'
+import { PRIMARY } from '../constants'
 
 type InterviewTrendChartProps = {
   points: InterviewTrendPoint[]

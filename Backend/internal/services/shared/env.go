@@ -40,3 +40,13 @@ func GetFloatEnv(key string, def float64) float64 {
 	}
 	return n
 }
+
+// S3BucketFromEnv はS3バケット名を環境変数から取得する。
+func S3BucketFromEnv() string {
+	b := strings.TrimSpace(os.Getenv("AWS_S3_BUCKET"))
+	if b == "" {
+		// staging user_data は歴史的に S3_BUCKET のみ渡していた
+		b = strings.TrimSpace(os.Getenv("S3_BUCKET"))
+	}
+	return b
+}
