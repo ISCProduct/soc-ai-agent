@@ -23,7 +23,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CheckIcon from '@mui/icons-material/Check'
 import EditNoteIcon from '@mui/icons-material/EditNote'
 import RateReviewIcon from '@mui/icons-material/RateReview'
-const PRIMARY = '#ec5b13'
+import { PRIMARY } from '@/app/interview/constants'
 
 const QUESTION_TYPES = ['志望動機', '自己PR', '学チカ', 'ガクチカ', 'その他']
 

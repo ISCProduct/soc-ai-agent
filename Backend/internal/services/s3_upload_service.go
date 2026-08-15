@@ -25,7 +25,7 @@ type S3UploadService struct {
 // NewS3UploadService initialises the service from environment variables
 // (AWS_REGION, AWS_S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY).
 func NewS3UploadService() (*S3UploadService, error) {
-	bucket := os.Getenv("AWS_S3_BUCKET")
+	bucket := s3BucketFromEnv()
 	region := os.Getenv("AWS_REGION")
 	if bucket == "" {
 		return nil, fmt.Errorf("AWS_S3_BUCKET is not set")
