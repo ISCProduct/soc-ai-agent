@@ -41,6 +41,7 @@ import {
     CalendarMonth,
     Business,
     Assignment,
+    NewReleases,
 } from '@mui/icons-material'
 import {authService, User} from '@/lib/auth'
 import {useRouter} from 'next/navigation'
@@ -567,6 +568,29 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         </ListItemIcon>
                         <ListItemText
                             primary="プロフィール設定"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => {
+                            router.push('/whats-new')
+                            onMobileClose?.()
+                        }}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <NewReleases color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="更新情報"
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,
