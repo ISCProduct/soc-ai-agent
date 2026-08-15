@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"net/http/httptest"
 	"net/textproto"
 	"os"
@@ -248,5 +249,33 @@ func TestResumeService_ReviewDocumentStreamRejectsOtherUser(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "forbidden") {
 		t.Fatalf("SSE エラーに forbidden が含まれるべき: got %q", rr.Body.String())
+	}
+}
+
+// echo 相当: Flush は panic、Unwrap で実体の writer に届く (#855)
+type panicFlushWriter struct {
+	http.ResponseWriter
+}
+
+func (w panicFlushWriter) Flush() {
+	panic("echo: response writer does not support flushing")
+}
+
+func (w panicFlushWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+func TestRelaySSEChunks_DoesNotPanicWhenFlushPanics(t *testing.T) {
+	body := strings.NewReader("data: {\"type\":\"chunk\",\"text\":\"hello\"}\n\ndata: {\"type\":\"done\"}\n\n")
+	rr := httptest.NewRecorder()
+	got, err := relaySSEChunks(body, panicFlushWriter{ResponseWriter: rr})
+	if err != nil {
+		t.Fatalf("relaySSEChunks: %v", err)
+	}
+	if got != "hello" {
+		t.Fatalf("accum: got %q", got)
+	}
+	if !strings.Contains(rr.Body.String(), "hello") {
+		t.Fatalf("body: %q", rr.Body.String())
 	}
 }
