@@ -211,9 +211,11 @@ module "backend" {
   secret_arns       = local.backend_secret_arns
   secrets           = local.backend_secrets
   environment = {
-    APP_ENV       = "production"
-    AWS_REGION    = var.region
-    AWS_S3_BUCKET = module.s3.bucket_id
+    APP_ENV        = "production"
+    AWS_REGION     = var.region
+    AWS_S3_BUCKET  = module.s3.bucket_id
+    EMAIL_PROVIDER = "resend"
+    EMAIL_FROM     = "noreply@shukatsu-ai.jp"
   }
   tags = local.tags
 }

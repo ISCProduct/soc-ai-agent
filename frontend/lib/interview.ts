@@ -1,5 +1,6 @@
 import { BACKEND_URL } from './backend-url'
 import { authService } from './auth'
+import { fetchWithTimeout, LIST_FETCH_TIMEOUT_MS } from './fetch-timeout'
 
 const DEFAULT_INTERVIEW_MAX_MINUTES = 30
 const DEFAULT_INTERVIEW_QUESTION_DURATION_SECONDS = 180
@@ -87,12 +88,13 @@ export type PhraseSuggestion = {
   suggestions: string[]
 }
 
-async function interviewFetch(input: string, init?: RequestInit): Promise<Response> {
+async function interviewFetch(input: string, init?: RequestInit, timeoutMs?: number): Promise<Response> {
   await authService.ensureFreshUserToken()
   const headers = new Headers(init?.headers)
   const authHeaders = authService.getUserFetchHeaders()
   Object.entries(authHeaders).forEach(([k, v]) => headers.set(k, v))
-  return fetch(input, { ...init, headers })
+  const next = { ...init, headers }
+  return timeoutMs ? fetchWithTimeout(input, next, timeoutMs) : fetch(input, next)
 }
 
 export const interviewApi = {
@@ -137,7 +139,7 @@ export const interviewApi = {
 
   async getDetail(sessionId: number, userId: number, role?: string): Promise<InterviewDetail> {
     const roleParam = role ? `&role=${role}` : ''
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}?user_id=${userId}${roleParam}`)
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}?user_id=${userId}${roleParam}`, undefined, LIST_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(await res.text())
     return res.json()
   },
@@ -150,7 +152,7 @@ export const interviewApi = {
   },
 
   async listSessions(userId: number, page = 1, limit = 20): Promise<{ sessions: InterviewSession[]; total: number }> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews?user_id=${userId}&page=${page}&limit=${limit}`)
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews?user_id=${userId}&page=${page}&limit=${limit}`, undefined, LIST_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(await res.text())
     return res.json()
   },
@@ -167,7 +169,7 @@ export const interviewApi = {
   },
 
   async getPhraseSuggestions(sessionId: number, userId: number): Promise<PhraseSuggestion[]> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/phrase-suggestions?user_id=${userId}`)
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/phrase-suggestions?user_id=${userId}`, undefined, LIST_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(await res.text())
     const data = await res.json()
     return data.suggestions as PhraseSuggestion[]
@@ -175,7 +177,7 @@ export const interviewApi = {
 
   async getTrend(userId: number, limit = 0): Promise<InterviewTrendPoint[]> {
     const params = limit > 0 ? `?user_id=${userId}&limit=${limit}` : `?user_id=${userId}`
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/trend${params}`)
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/trend${params}`, undefined, LIST_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(await res.text())
     const data = await res.json()
     return data.points as InterviewTrendPoint[]

@@ -232,15 +232,10 @@ func (s *ResumeService) fetchRAGReportStream(ctx context.Context, resumeText, co
 // ReviewDocumentStream はドキュメントを前処理した後、SSEでRAGレポートをストリーミングし、
 // 最後にスコア・指摘事項を complete イベントとして送信する。
 func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uint, requestingUserID uint, companyName, jobTitle, candidateType string, w http.ResponseWriter) error {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		return fmt.Errorf("streaming not supported")
-	}
-
 	sendEvent := func(v map[string]any) {
 		data, _ := json.Marshal(v)
 		fmt.Fprintf(w, "data: %s\n\n", data)
-		flusher.Flush()
+		flushSSE(w)
 	}
 
 	doc, err := s.repo.FindDocumentByID(documentID)
@@ -315,7 +310,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	if strings.TrimSpace(companyName) != "" {
 		ragBody, ragErr := s.fetchRAGReportStream(ctx, text, companyName, jobTitle)
 		if ragErr == nil {
-			ragReport, _ = relaySSEChunks(ragBody, w, flusher)
+			ragReport, _ = relaySSEChunks(ragBody, w)
 			ragBody.Close()
 		} else {
 			log.Printf("resume_review_stream: rag stream failed: %v", ragErr)
@@ -360,9 +355,28 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	return nil
 }
 
+// flushSSE はバッファを送出する。Echo の Response.Flush は WrapMiddleware 配下で
+// panic するため使わず、Unwrap して実体の Flusher を探す (#855)。
+func flushSSE(w http.ResponseWriter) {
+	rw := w
+	for range 8 {
+		u, unwraps := rw.(interface{ Unwrap() http.ResponseWriter })
+		if unwraps {
+			if next := u.Unwrap(); next != nil && next != rw {
+				rw = next
+				continue
+			}
+		}
+		if f, ok := rw.(http.Flusher); ok {
+			f.Flush()
+		}
+		return
+	}
+}
+
 // relaySSEChunks はFastAPIからのSSEストリームを読み取り、chunk イベントをそのまま
 // クライアントに転送しつつ、全テキストを返す。
-func relaySSEChunks(body io.Reader, w io.Writer, flusher http.Flusher) (string, error) {
+func relaySSEChunks(body io.Reader, w http.ResponseWriter) (string, error) {
 	var accum strings.Builder
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 64*1024), 64*1024)
@@ -387,7 +401,7 @@ func relaySSEChunks(body io.Reader, w io.Writer, flusher http.Flusher) (string, 
 		case "chunk":
 			accum.WriteString(event.Text)
 			fmt.Fprintf(w, "data: %s\n\n", payload)
-			flusher.Flush()
+			flushSSE(w)
 		case "done":
 			return accum.String(), nil
 		case "error":

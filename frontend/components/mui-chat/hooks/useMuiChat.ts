@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { sendChatMessage, getChatHistory, type ChatRequest, type ChatResponse } from '@/lib/api'
+import { UserFacingApiError, gatewayErrorPath } from '@/lib/user-facing-error'
 import { authService } from '@/lib/auth'
 import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
 import { resolveChatOutgoingMessage } from '@/lib/chat-choices'
@@ -392,14 +393,13 @@ export function useMuiChat() {
           timestamp: new Date(),
         }
         setMessages((prev) => [...prev, completionMessage])
+      } else if (error instanceof UserFacingApiError && error.gateway) {
+        router.replace(gatewayErrorPath(error.status))
       } else {
-        // その他のエラー
         const errorMsg: Message = {
           id: makeMessageId(),
           role: 'assistant',
-          content:
-            'バックエンドとの接続に失敗しました。後ほど再試行してください。\n\nエラー: ' +
-            errorMessage,
+          content: '送信に失敗しました。しばらくしてから再試行してください。',
           timestamp: new Date(),
         }
         setMessages((prev) => [...prev, errorMsg])

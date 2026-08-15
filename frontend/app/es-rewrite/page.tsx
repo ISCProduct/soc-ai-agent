@@ -23,7 +23,6 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CheckIcon from '@mui/icons-material/Check'
 import EditNoteIcon from '@mui/icons-material/EditNote'
 import RateReviewIcon from '@mui/icons-material/RateReview'
-import { BACKEND_URL } from '@/lib/backend-url'
 const PRIMARY = '#ec5b13'
 
 const QUESTION_TYPES = ['志望動機', '自己PR', '学チカ', 'ガクチカ', 'その他']
@@ -85,7 +84,7 @@ export default function ESRewritePage() {
     setRewriteResult(null)
 
     try {
-      const res = await fetch(`${BACKEND_URL}/api/es/rewrite`, {
+      const res = await fetch('/api/es/rewrite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -111,7 +110,7 @@ export default function ESRewritePage() {
     setReviewResult(null)
 
     try {
-      const res = await fetch(`${BACKEND_URL}/api/es/review`, {
+      const res = await fetch('/api/es/review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -63,6 +63,7 @@ func TestCanTransition_UserTransitions(t *testing.T) {
 		// 許可: ユーザーによる内定承諾
 		{"offered→accepted", "offered", "accepted", false, true},
 		// 禁止: ユーザーは選考進捗を進められない
+		{"applied→accepted (user)", "applied", "accepted", false, false},
 		{"applied→document_screening (user)", "applied", "document_screening", false, false},
 		{"document_screening→document_passed (user)", "document_screening", "document_passed", false, false},
 		{"document_passed→interview_scheduled (user)", "document_passed", "interview_scheduled", false, false},
