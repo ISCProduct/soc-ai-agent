@@ -19,7 +19,8 @@ import (
 	"Backend/domain/entity"
 	"Backend/internal/controllers"
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/admin"
+	"Backend/internal/services/flywheel"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/mock"
@@ -155,7 +156,7 @@ func TestAdminScraperSessionController_SessionDetail_Success(t *testing.T) {
 
 func TestAdminScoreValidationController_GetCorrelation_Success(t *testing.T) {
 	svc := &mocks.ScoreValidationServiceMock{}
-	svc.On("GetCorrelationReport").Return(&services.CorrelationReport{}, nil)
+	svc.On("GetCorrelationReport").Return(&admin.CorrelationReport{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/score-validation/correlation", nil)
 	rec := httptest.NewRecorder()
@@ -185,7 +186,7 @@ func TestAdminScoreValidationController_GetCalibration_Success(t *testing.T) {
 
 func TestAdminScoreValidationController_RunCalibration_Success(t *testing.T) {
 	svc := &mocks.ScoreValidationServiceMock{}
-	svc.On("RunCalibration").Return(&services.CalibrationResult{}, nil)
+	svc.On("RunCalibration").Return(&admin.CalibrationResult{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/score-validation/calibration/run", nil)
 	rec := httptest.NewRecorder()
@@ -241,7 +242,7 @@ func TestAdminProfileRecalculationController_RecalculateOne_InvalidCompanyID(t *
 
 func TestAdminProfileRecalculationController_RecalculateAll_Success(t *testing.T) {
 	svc := &mocks.ProfileRecalculationServiceMock{}
-	svc.On("RecalculateAll", 0).Return([]*services.RecalculationResult{}, nil)
+	svc.On("RecalculateAll", 0).Return([]*flywheel.RecalculationResult{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/profile-recalculation", nil)
 	rec := httptest.NewRecorder()
@@ -251,7 +252,7 @@ func TestAdminProfileRecalculationController_RecalculateAll_Success(t *testing.T
 
 func TestAdminProfileRecalculationController_RecalculateOne_Success(t *testing.T) {
 	svc := &mocks.ProfileRecalculationServiceMock{}
-	svc.On("RecalculateCompany", uint(1), 0).Return(&services.RecalculationResult{CompanyID: 1}, nil)
+	svc.On("RecalculateCompany", uint(1), 0).Return(&flywheel.RecalculationResult{CompanyID: 1}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/profile-recalculation/1", nil)
 	rec := httptest.NewRecorder()

@@ -22,8 +22,7 @@ import { authService, User } from '@/lib/auth'
 import { interviewApi, InterviewDetail, InterviewSession, InterviewTrendPoint, TeacherReport } from '@/lib/interview'
 import InterviewSummary from '../components/InterviewSummary'
 import { parseJsonSafe } from '@/lib/interview-utils'
-
-const PRIMARY = '#ec5b13'
+import { PRIMARY } from '../constants'
 
 const InterviewTrendChart = dynamic(() => import('./InterviewTrendChart'), {
   ssr: false,

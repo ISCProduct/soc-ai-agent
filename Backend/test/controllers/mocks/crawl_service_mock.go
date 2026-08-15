@@ -2,7 +2,7 @@ package mocks
 
 import (
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/company"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -28,7 +28,7 @@ func (m *CrawlServiceMock) ListRuns(sourceID uint, limit int) ([]models.CrawlRun
 	return nil, args.Error(1)
 }
 
-func (m *CrawlServiceMock) CreateSource(payload services.CrawlSourcePayload) (*models.CrawlSource, error) {
+func (m *CrawlServiceMock) CreateSource(payload company.CrawlSourcePayload) (*models.CrawlSource, error) {
 	args := m.Called(payload)
 	if v := args.Get(0); v != nil {
 		return v.(*models.CrawlSource), args.Error(1)
@@ -36,7 +36,7 @@ func (m *CrawlServiceMock) CreateSource(payload services.CrawlSourcePayload) (*m
 	return nil, args.Error(1)
 }
 
-func (m *CrawlServiceMock) UpdateSource(id uint, payload services.CrawlSourcePayload) (*models.CrawlSource, error) {
+func (m *CrawlServiceMock) UpdateSource(id uint, payload company.CrawlSourcePayload) (*models.CrawlSource, error) {
 	args := m.Called(id, payload)
 	if v := args.Get(0); v != nil {
 		return v.(*models.CrawlSource), args.Error(1)

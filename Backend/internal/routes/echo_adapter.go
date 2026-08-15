@@ -4,7 +4,10 @@ import (
 	"Backend/internal/middleware"
 	"Backend/internal/repositories"
 	"Backend/internal/services"
+	"Backend/internal/services/auth"
+	"Backend/internal/services/organization"
 	"context"
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"strconv"
@@ -21,7 +24,7 @@ type OrganizationIDResolver interface {
 // userSecret が未設定の場合はフェイルクローズ（503）として動作する。
 // access が非 nil の場合、退会済みユーザーを遮断する。
 // orgs が非 nil の場合、organization_id をリクエストコンテキストへ載せる。
-func EchoUserAuth(userSecret string, access services.UserAccessGuard, orgs ...OrganizationIDResolver) echo.MiddlewareFunc {
+func EchoUserAuth(userSecret string, access auth.UserAccessGuard, orgs ...OrganizationIDResolver) echo.MiddlewareFunc {
 	var resolver OrganizationIDResolver
 	if len(orgs) > 0 {
 		resolver = orgs[0]
@@ -41,7 +44,7 @@ func EchoUserAuth(userSecret string, access services.UserAccessGuard, orgs ...Or
 			}
 			if access != nil {
 				if err := access.EnsureActiveUser(userID); err != nil {
-					if errors.Is(err, services.ErrAccountWithdrawn) {
+					if errors.Is(err, auth.ErrAccountWithdrawn) {
 						return echo.NewHTTPError(http.StatusForbidden, "account has been withdrawn")
 					}
 					return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
@@ -51,7 +54,7 @@ func EchoUserAuth(userSecret string, access services.UserAccessGuard, orgs ...Or
 			if resolver != nil {
 				orgID, err := resolver.ResolveOrganizationID(userID)
 				if err != nil {
-					if errors.Is(err, services.ErrOrganizationDisabled) {
+					if errors.Is(err, organization.ErrOrganizationDisabled) {
 						return echo.NewHTTPError(http.StatusForbidden, "organization is disabled")
 					}
 					return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve organization")
@@ -73,7 +76,7 @@ func EchoUserAuth(userSecret string, access services.UserAccessGuard, orgs ...Or
 // EchoTenantResolver は X-Tenant-Slug ヘッダー(学園サブドメインラベル)から組織を解決し、
 // リクエストコンテキストへ載せるEcho nativeミドルウェア。
 // ヘッダー未指定の場合は何もしない（テナント概念のないアクセスとの後方互換のため）。
-func EchoTenantResolver(orgs *services.OrganizationService) echo.MiddlewareFunc {
+func EchoTenantResolver(orgs *organization.OrganizationService) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			slug := c.Request().Header.Get("X-Tenant-Slug")
@@ -93,6 +96,23 @@ func EchoTenantResolver(orgs *services.OrganizationService) echo.MiddlewareFunc 
 
 // EchoAdminAuth はX-Admin-Email / X-Admin-Tokenヘッダーを検証するEcho nativeミドルウェアを返す。
 // 検証済み管理者のユーザーIDを AdminUserIDContextKey へ格納する(後続のEchoAdminSchoolScope等が利用する)。
+// EchoStaticSecretAuth はログインユーザーを介さないサービス間呼び出し（CI等）向けの
+// 単純な共有シークレット認証。X-Admin-Secretヘッダーの値をadminSecretと定数時間比較する。
+func EchoStaticSecretAuth(adminSecret string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if adminSecret == "" {
+				return echo.NewHTTPError(http.StatusServiceUnavailable, "Service Unavailable: admin authentication not configured")
+			}
+			token := c.Request().Header.Get("X-Admin-Secret")
+			if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(adminSecret)) != 1 {
+				return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
+			}
+			return next(c)
+		}
+	}
+}
+
 func EchoAdminAuth(userRepo *repositories.UserRepository, adminSecret string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {

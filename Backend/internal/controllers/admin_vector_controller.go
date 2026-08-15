@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/admin"
 	"io"
 	"net/http"
 	"strings"
@@ -12,12 +12,12 @@ import (
 // AdminVectorController は RAG ベクトルDB管理 API の HTTP 入口。
 // 外部呼び出しは AdminVectorService に委譲する。
 type AdminVectorController struct {
-	svc *services.AdminVectorService
+	svc *admin.AdminVectorService
 }
 
-func NewAdminVectorController(svc *services.AdminVectorService) *AdminVectorController {
+func NewAdminVectorController(svc *admin.AdminVectorService) *AdminVectorController {
 	if svc == nil {
-		svc = services.NewAdminVectorService()
+		svc = admin.NewAdminVectorService()
 	}
 	return &AdminVectorController{svc: svc}
 }

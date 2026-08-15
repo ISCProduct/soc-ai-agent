@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Box, IconButton, AppBar, Toolbar, Typography } from '@mui/material'
+import { Box, IconButton, AppBar, Toolbar, Typography, Alert } from '@mui/material'
 import { Menu as MenuIcon } from '@mui/icons-material'
 import { AnalysisSidebar } from '@/components/analysis-sidebar'
 import { MuiChat } from '@/components/mui-chat'
 import { PageLoading } from '@/components/common/PageLoading'
 import { authService, User } from '@/lib/auth'
+import { WhatsNewEntry, fetchWhatsNewEntries, hasUnreadWhatsNew, markWhatsNewAsSeen } from '@/lib/whats-new-data'
 import styles from './page.module.css'
 
 export default function Home() {
@@ -15,6 +16,8 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [whatsNewEntries, setWhatsNewEntries] = useState<WhatsNewEntry[]>([])
+  const [showWhatsNewBanner, setShowWhatsNewBanner] = useState(false)
 
   useEffect(() => {
     const storedUser = authService.getStoredUser()
@@ -24,7 +27,20 @@ export default function Home() {
     }
     setUser(storedUser)
     setLoading(false)
+    fetchWhatsNewEntries()
+      .then((entries) => {
+        setWhatsNewEntries(entries)
+        setShowWhatsNewBanner(hasUnreadWhatsNew(entries))
+      })
+      .catch(() => {
+        // 更新情報の取得失敗はチャット画面の利用を妨げない
+      })
   }, [router])
+
+  const dismissWhatsNewBanner = () => {
+    markWhatsNewAsSeen(whatsNewEntries)
+    setShowWhatsNewBanner(false)
+  }
 
   const handleLogout = () => {
     authService.logout()
@@ -66,6 +82,24 @@ export default function Home() {
             </Typography>
           </Toolbar>
         </AppBar>
+        {showWhatsNewBanner && whatsNewEntries.length > 0 && (
+          <Alert
+            severity="info"
+            onClose={dismissWhatsNewBanner}
+            sx={{ borderRadius: 0 }}
+            action={
+              <Box
+                component="a"
+                href="/whats-new"
+                sx={{ fontSize: '0.8rem', fontWeight: 600, color: 'inherit', textDecoration: 'underline', mr: 1, alignSelf: 'center' }}
+              >
+                詳しく見る
+              </Box>
+            }
+          >
+            新着情報: {whatsNewEntries[0].title}
+          </Alert>
+        )}
         <div className={styles.chatWrapper}>
           <MuiChat />
         </div>

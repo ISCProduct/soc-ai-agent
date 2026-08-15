@@ -150,6 +150,7 @@ export function ChatInputBar({
               color="primary"
               onClick={() => onSend()}
               disabled={!input.trim() || isLoading || !!historyLoadError}
+              aria-label="メッセージを送信"
               sx={{
                 bgcolor: CHAT_BRAND,
                 color: '#fff',

@@ -3,14 +3,14 @@ package routes
 import (
 	"Backend/internal/controllers"
 	"Backend/internal/middleware"
-	"Backend/internal/services"
+	"Backend/internal/services/auth"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
 )
 
 // SetupAuthRoutes 認証関連のルーティング設定
-func SetupAuthRoutes(api *echo.Group, authController *controllers.AuthController, oauthController *controllers.OAuthController, userSecret string, access services.UserAccessGuard, orgs OrganizationIDResolver) {
+func SetupAuthRoutes(api *echo.Group, authController *controllers.AuthController, oauthController *controllers.OAuthController, userSecret string, access auth.UserAccessGuard, orgs OrganizationIDResolver) {
 	auth := api.Group("/auth")
 
 	// 認証不要エンドポイント

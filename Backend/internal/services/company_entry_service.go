@@ -5,6 +5,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/config"
 	"Backend/internal/models"
+	"Backend/internal/services/email"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -105,14 +106,14 @@ type CompanyEntryService struct {
 	db          *gorm.DB
 	userRepo    repository.UserRepository
 	pendingRepo repository.PendingRegistrationRepository
-	email       *EmailService
+	email       *email.EmailService
 }
 
 func NewCompanyEntryService(
 	db *gorm.DB,
 	userRepo repository.UserRepository,
 	pendingRepo repository.PendingRegistrationRepository,
-	email *EmailService,
+	email *email.EmailService,
 ) *CompanyEntryService {
 	return &CompanyEntryService{
 		db:          db,

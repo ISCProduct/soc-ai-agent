@@ -12,7 +12,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
-import { Person, SmartToy } from '@mui/icons-material'
+import { ErrorOutline, Person, SmartToy, WarningAmber } from '@mui/icons-material'
 import styles from '../../mui-chat.module.css'
 import { TypingIndicator } from './TypingIndicator'
 import {
@@ -53,6 +53,9 @@ export function ChatMessageList({
     <Box
       ref={messagesAreaRef}
       className={styles.messagesArea}
+      role="log"
+      aria-live="polite"
+      aria-relevant="additions"
       sx={{
         flexGrow: 1,
         minHeight: 0,
@@ -141,6 +144,21 @@ export function ChatMessageList({
                       : 'none',
               }}
             >
+              {(isTerminationMessage || isValidationError) && (
+                <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 0.5 }}>
+                  {isTerminationMessage ? (
+                    <ErrorOutline sx={{ fontSize: 16, color: '#d32f2f' }} />
+                  ) : (
+                    <WarningAmber sx={{ fontSize: 16, color: '#f57c00' }} />
+                  )}
+                  <Typography
+                    variant="caption"
+                    sx={{ fontWeight: 700, color: isTerminationMessage ? '#d32f2f' : '#f57c00' }}
+                  >
+                    {isTerminationMessage ? 'チャット終了' : '注意'}
+                  </Typography>
+                </Stack>
+              )}
               <Typography
                 variant="body1"
                 sx={{ whiteSpace: 'pre-line', lineHeight: 1.65, fontSize: { xs: '0.9375rem', md: '1rem' } }}
@@ -166,7 +184,7 @@ export function ChatMessageList({
       })}
 
       {isLoading && (
-        <Box sx={{ display: 'flex', mb: 2, justifyContent: 'flex-start' }}>
+        <Box sx={{ display: 'flex', mb: 2, justifyContent: 'flex-start' }} role="status" aria-label="エージェントが入力中です">
           <Avatar
             sx={{
               bgcolor: CHAT_BRAND,

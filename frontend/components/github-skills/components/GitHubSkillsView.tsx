@@ -23,6 +23,7 @@ type GitHubSkillsViewProps = {
   summaries: RepoSummary[]
   loading: boolean
   syncing: boolean
+  syncElapsedSeconds: number
   needsReauth: boolean
   error: string | null
   skillsError: boolean
@@ -64,6 +65,7 @@ export function GitHubSkillsView({
   summaries,
   loading,
   syncing,
+  syncElapsedSeconds,
   needsReauth,
   error,
   skillsError,
@@ -114,10 +116,16 @@ export function GitHubSkillsView({
             disabled={syncing}
             sx={{ color: '#64748b', fontSize: '0.75rem' }}
           >
-            {syncing ? '同期中...' : '同期'}
+            {syncing ? `同期中...(${syncElapsedSeconds}秒)` : '同期'}
           </Button>
         </Box>
       </Box>
+
+      {syncing && syncElapsedSeconds >= 10 && (
+        <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mb: 2 }}>
+          リポジトリ数によっては1分ほどかかることがあります。しばらくお待ちください。
+        </Typography>
+      )}
 
       {profileError && (
         <SectionErrorAlert

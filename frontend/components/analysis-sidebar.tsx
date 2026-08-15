@@ -41,6 +41,7 @@ import {
     CalendarMonth,
     Business,
     Assignment,
+    NewReleases,
 } from '@mui/icons-material'
 import {authService, User} from '@/lib/auth'
 import {useRouter} from 'next/navigation'
@@ -51,6 +52,7 @@ import {
   shouldShowResultsCta,
 } from '@/lib/sidebar-navigation'
 import { SIDEBAR_ADMIN_NAV, SIDEBAR_NAV_ITEMS } from '@/lib/sidebar-nav'
+import { computeProgressTotals } from './mui-chat/utils'
 
 const DRAWER_WIDTH = 280
 
@@ -187,6 +189,8 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
         overall: phases ? Math.floor((phasePercents.job + phasePercents.interest + phasePercents.aptitude + phasePercents.future) / 4) : fallbackOverall,
         ...phasePercents,
     }
+    // ヘッダー（ChatHeader）と同じ算出ロジックを使い、「X/Y 完了」の表示が一致するようにする
+    const progressTotals = computeProgressTotals({ phases, questionCount, totalQuestions })
 
     const analysisSteps: AnalysisStep[] = [
         {
@@ -266,11 +270,11 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
 
                 {/* 今日やること（推奨フロー） */}
                 {progress.overall < 100 && (
-                    <Box sx={{ mb: 2, p: 1.5, bgcolor: '#fff8f5', borderRadius: 1, border: '1px solid #ffcc99' }}>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: '#ec5b13', display: 'block', mb: 0.5 }}>
+                    <Box sx={{ mb: 2, p: 1.5, bgcolor: 'action.hover', borderRadius: 1, border: '2px solid', borderColor: 'primary.main' }}>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: 'primary.main', display: 'block', mb: 0.5 }}>
                             今日やること
                         </Typography>
-                        <Typography variant="body2" sx={{ fontSize: '0.8rem', color: '#555', mb: shouldShowResultsCta(progress.overall) ? 1 : 0 }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.8rem', color: 'text.secondary', mb: shouldShowResultsCta(progress.overall) ? 1 : 0 }}>
                             {getTodayActionLabel(progress.overall)}
                         </Typography>
                         {shouldShowResultsCta(progress.overall) && (
@@ -281,13 +285,13 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                                 }}
                                 sx={{
                                     borderRadius: 1,
-                                    bgcolor: '#ec5b13',
-                                    color: '#fff',
+                                    bgcolor: 'primary.main',
+                                    color: 'primary.contrastText',
                                     py: 0.75,
-                                    '&:hover': { bgcolor: '#c44d0e' },
+                                    '&:hover': { bgcolor: 'primary.dark' },
                                 }}
                             >
-                                <ListItemIcon sx={{ minWidth: 32, color: '#fff' }}>
+                                <ListItemIcon sx={{ minWidth: 32, color: 'inherit' }}>
                                     <Business fontSize="small" />
                                 </ListItemIcon>
                                 <ListItemText
@@ -303,7 +307,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                     AI分析進捗
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{mb: 2}}>
-                    質問: {questionCount}/{expectedTotalQuestions} 完了 (想定{expectedTotalQuestions}問・{progress.overall}%)
+                    質問: {progressTotals.valid}/{progressTotals.required} 完了 (想定{progressTotals.required}問・{progressTotals.percent}%)
                 </Typography>
 
                 <List sx={{p: 0}}>
@@ -321,16 +325,17 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             >
                                 <ListItemIcon sx={{minWidth: 36}}>
                                     {step.completed ? (
-                                        <CheckCircle color="success"/>
+                                        <CheckCircle color="success" aria-label="完了" />
                                     ) : (
-                                        <RadioButtonUnchecked color="action"/>
+                                        <RadioButtonUnchecked color="action" aria-label="未完了" />
                                     )}
                                 </ListItemIcon>
                                 <ListItemText
                                     primary={step.label}
+                                    secondary={step.completed ? '完了' : '未完了'}
                                     primaryTypographyProps={{
-                                        fontSize: '0.875rem',
-                                        fontWeight: step.completed ? 500 : 400,
+                                        fontSize: '0.95rem',
+                                        fontWeight: step.completed ? 700 : 500,
                                     }}
                                 />
                             </ListItem>
@@ -339,7 +344,15 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                                     <LinearProgress
                                         variant="determinate"
                                         value={step.progress}
-                                        sx={{height: 6, borderRadius: 3}}
+                                        aria-label={`${step.label} ${step.progress}%`}
+                                        sx={{
+                                          height: 10,
+                                          borderRadius: 1,
+                                          bgcolor: 'action.selected',
+                                          '& .MuiLinearProgress-bar': {
+                                            backgroundImage: 'repeating-linear-gradient(90deg, transparent, transparent 4px, rgba(255,255,255,0.35) 4px, rgba(255,255,255,0.35) 8px)',
+                                          },
+                                        }}
                                     />
                                     <Typography
                                         variant="caption"
@@ -558,6 +571,29 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         </ListItemIcon>
                         <ListItemText
                             primary="プロフィール設定"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => {
+                            router.push('/whats-new')
+                            onMobileClose?.()
+                        }}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <NewReleases color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="更新情報"
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,

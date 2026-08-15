@@ -3,7 +3,7 @@ package mocks
 import (
 	"Backend/internal/models"
 	"Backend/internal/repositories"
-	"Backend/internal/services"
+	"Backend/internal/services/admin"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -13,18 +13,18 @@ type ScoreValidationServiceMock struct {
 	mock.Mock
 }
 
-func (m *ScoreValidationServiceMock) GetCorrelationReport() (*services.CorrelationReport, error) {
+func (m *ScoreValidationServiceMock) GetCorrelationReport() (*admin.CorrelationReport, error) {
 	args := m.Called()
 	if v := args.Get(0); v != nil {
-		return v.(*services.CorrelationReport), args.Error(1)
+		return v.(*admin.CorrelationReport), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
 
-func (m *ScoreValidationServiceMock) GetPhasePrecisionReport() (*services.PhasePrecisionReport, error) {
+func (m *ScoreValidationServiceMock) GetPhasePrecisionReport() (*admin.PhasePrecisionReport, error) {
 	args := m.Called()
 	if v := args.Get(0); v != nil {
-		return v.(*services.PhasePrecisionReport), args.Error(1)
+		return v.(*admin.PhasePrecisionReport), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
@@ -45,10 +45,10 @@ func (m *ScoreValidationServiceMock) GetCalibrationHistory(limit int) ([]models.
 	return nil, args.Error(1)
 }
 
-func (m *ScoreValidationServiceMock) RunCalibration() (*services.CalibrationResult, error) {
+func (m *ScoreValidationServiceMock) RunCalibration() (*admin.CalibrationResult, error) {
 	args := m.Called()
 	if v := args.Get(0); v != nil {
-		return v.(*services.CalibrationResult), args.Error(1)
+		return v.(*admin.CalibrationResult), args.Error(1)
 	}
 	return nil, args.Error(1)
 }

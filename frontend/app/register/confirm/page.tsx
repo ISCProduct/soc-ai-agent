@@ -23,10 +23,15 @@ function RegisterConfirmForm() {
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordTouched, setPasswordTouched] = useState(false)
+  const [confirmTouched, setConfirmTouched] = useState(false)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [tokenError, setTokenError] = useState('')
+
+  const passwordTooShort = passwordTouched && password !== '' && password.length < 8
+  const passwordMismatch = confirmTouched && confirmPassword !== '' && password !== confirmPassword
 
   useEffect(() => {
     if (!token) {
@@ -119,8 +124,10 @@ function RegisterConfirmForm() {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  onBlur={() => setPasswordTouched(true)}
                   required
-                  helperText="8文字以上で入力してください"
+                  error={passwordTooShort}
+                  helperText={passwordTooShort ? 'パスワードは8文字以上で入力してください' : '8文字以上で入力してください'}
                   sx={{ mb: 2 }}
                 />
                 <TextField
@@ -129,7 +136,10 @@ function RegisterConfirmForm() {
                   type="password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
+                  onBlur={() => setConfirmTouched(true)}
                   required
+                  error={passwordMismatch}
+                  helperText={passwordMismatch ? 'パスワードが一致しません' : ' '}
                   sx={{ mb: 3 }}
                 />
                 <Button
@@ -137,7 +147,7 @@ function RegisterConfirmForm() {
                   fullWidth
                   variant="contained"
                   size="large"
-                  disabled={submitting}
+                  disabled={submitting || password.length < 8 || password !== confirmPassword}
                 >
                   登録を完了する
                 </Button>

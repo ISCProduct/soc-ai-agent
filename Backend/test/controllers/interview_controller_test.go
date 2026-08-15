@@ -14,7 +14,7 @@ import (
 
 	"Backend/internal/controllers"
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/interview"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
@@ -48,7 +48,7 @@ func TestInterviewController_Create_Success(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("CreateSession", uint(1), "ja", "female").Return(&services.InterviewSessionResponse{ID: 10}, nil)
+	svc.On("CreateSession", uint(1), "ja", "female").Return(&interview.InterviewSessionResponse{ID: 10}, nil)
 	assertStatus(t, newInterviewController(svc).Create, newCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -79,7 +79,7 @@ func TestInterviewController_List_Success(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("ListSessions", uint(1), false, 10, 0).Return([]services.InterviewSessionResponse{{ID: 1}}, int64(1), nil)
+	svc.On("ListSessions", uint(1), false, 10, 0).Return([]interview.InterviewSessionResponse{{ID: 1}}, int64(1), nil)
 	assertStatus(t, newInterviewController(svc).List, newCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -91,7 +91,7 @@ func TestInterviewController_List_LimitCapped(t *testing.T) {
 
 	svc := &mocks.InterviewServiceMock{}
 	// limit は100に切り捨てられる
-	svc.On("ListSessions", uint(1), false, 100, 0).Return([]services.InterviewSessionResponse{}, int64(0), nil)
+	svc.On("ListSessions", uint(1), false, 100, 0).Return([]interview.InterviewSessionResponse{}, int64(0), nil)
 	assertStatus(t, newInterviewController(svc).List, newCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -102,7 +102,7 @@ func TestInterviewController_List_Forbidden(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("ListSessions", uint(1), false, 20, 0).Return([]services.InterviewSessionResponse{}, int64(0), errors.New("forbidden"))
+	svc.On("ListSessions", uint(1), false, 20, 0).Return([]interview.InterviewSessionResponse{}, int64(0), errors.New("forbidden"))
 	assertStatus(t, newInterviewController(svc).List, newCtx(req, rec), http.StatusForbidden)
 }
 
@@ -136,7 +136,7 @@ func TestInterviewController_Get_Success(t *testing.T) {
 	c.SetParamValues("5")
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("GetSessionDetailWithRole", uint(1), uint(5), "student").Return(&services.InterviewDetailResponse{}, nil)
+	svc.On("GetSessionDetailWithRole", uint(1), uint(5), "student").Return(&interview.InterviewDetailResponse{}, nil)
 	assertStatus(t, newInterviewController(svc).Get, c, http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -174,7 +174,7 @@ func TestInterviewController_Start_Success(t *testing.T) {
 	c.SetParamValues("3")
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("StartSession", uint(1), uint(3)).Return(&services.InterviewSessionResponse{ID: 3}, nil)
+	svc.On("StartSession", uint(1), uint(3)).Return(&interview.InterviewSessionResponse{ID: 3}, nil)
 	assertStatus(t, newInterviewController(svc).Start, c, http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -212,7 +212,7 @@ func TestInterviewController_Finish_Success(t *testing.T) {
 	c.SetParamValues("3")
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("FinishSession", uint(1), uint(3)).Return(&services.InterviewSessionResponse{ID: 3}, nil)
+	svc.On("FinishSession", uint(1), uint(3)).Return(&interview.InterviewSessionResponse{ID: 3}, nil)
 	assertStatus(t, newInterviewController(svc).Finish, c, http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -244,7 +244,7 @@ func TestInterviewController_GetTrend_Success(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("GetTrend", uint(1), 5).Return([]services.InterviewTrendPoint{{SessionID: 1}}, nil)
+	svc.On("GetTrend", uint(1), 5).Return([]interview.InterviewTrendPoint{{SessionID: 1}}, nil)
 	assertStatus(t, newInterviewController(svc).GetTrend, newCtx(req, rec), http.StatusOK)
 
 	var body map[string]any
@@ -418,7 +418,7 @@ func TestInterviewController_GetPhraseSuggestions_Success(t *testing.T) {
 
 	svc := &mocks.InterviewServiceMock{}
 	svc.On("GetPhraseSuggestions", req.Context(), uint(1), uint(2)).
-		Return([]services.PhraseSuggestion{{Original: "頑張ります", Suggestions: []string{"尽力します"}}}, nil)
+		Return([]interview.PhraseSuggestion{{Original: "頑張ります", Suggestions: []string{"尽力します"}}}, nil)
 	assertStatus(t, newInterviewController(svc).GetPhraseSuggestions, c, http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -433,7 +433,7 @@ func TestInterviewController_GetPhraseSuggestions_Forbidden(t *testing.T) {
 
 	svc := &mocks.InterviewServiceMock{}
 	svc.On("GetPhraseSuggestions", req.Context(), uint(1), uint(2)).
-		Return([]services.PhraseSuggestion{}, errors.New("forbidden"))
+		Return([]interview.PhraseSuggestion{}, errors.New("forbidden"))
 	assertStatus(t, newInterviewController(svc).GetPhraseSuggestions, c, http.StatusForbidden)
 }
 

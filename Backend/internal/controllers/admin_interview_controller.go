@@ -5,7 +5,9 @@ import (
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
-	"Backend/internal/services"
+	"Backend/internal/services/auth"
+	"Backend/internal/services/interview"
+	"Backend/internal/services/storage"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,19 +22,19 @@ import (
 
 // AdminInterviewController provides admin endpoints for viewing interview sessions and videos.
 type AdminInterviewController struct {
-	interviewService    *services.InterviewService
+	interviewService    *interview.InterviewService
 	videoRepo           repository.InterviewVideoRepository
-	s3Service           *services.S3UploadService
+	s3Service           *storage.S3UploadService
 	companyQuestionRepo repository.InterviewCompanyQuestionRepository
 	companyRepo         repository.CompanyRepository
 	openaiClient        *openai.Client
-	access              services.UserAccessGuard
+	access              auth.UserAccessGuard
 }
 
 func NewAdminInterviewController(
-	interviewService *services.InterviewService,
+	interviewService *interview.InterviewService,
 	videoRepo repository.InterviewVideoRepository,
-	s3Service *services.S3UploadService,
+	s3Service *storage.S3UploadService,
 ) *AdminInterviewController {
 	return &AdminInterviewController{
 		interviewService: interviewService,
@@ -57,7 +59,7 @@ func (c *AdminInterviewController) SetOpenAIClient(client *openai.Client) {
 }
 
 // SetUserAccessGuard 退会済みユーザーの動画閲覧を遮断するために注入する
-func (c *AdminInterviewController) SetUserAccessGuard(guard services.UserAccessGuard) {
+func (c *AdminInterviewController) SetUserAccessGuard(guard auth.UserAccessGuard) {
 	c.access = guard
 }
 
@@ -390,7 +392,7 @@ func (c *AdminInterviewController) VideoURL(ctx echo.Context) error {
 
 	if c.access != nil {
 		if err := c.access.EnsureActiveUser(video.UserID); err != nil {
-			if errors.Is(err, services.ErrAccountWithdrawn) {
+			if errors.Is(err, auth.ErrAccountWithdrawn) {
 				return echo.NewHTTPError(http.StatusForbidden, "account has been withdrawn")
 			}
 			return echoInternalError(err)

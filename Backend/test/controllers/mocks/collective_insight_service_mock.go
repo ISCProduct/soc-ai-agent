@@ -2,7 +2,7 @@ package mocks
 
 import (
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/flywheel"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -11,12 +11,12 @@ type CollectiveInsightServiceMock struct {
 	mock.Mock
 }
 
-func (m *CollectiveInsightServiceMock) GetCollectiveRecommendations(userID uint, sessionID string, excludeCompanyIDs []uint) ([]services.CollectiveRecommendItem, error) {
+func (m *CollectiveInsightServiceMock) GetCollectiveRecommendations(userID uint, sessionID string, excludeCompanyIDs []uint) ([]flywheel.CollectiveRecommendItem, error) {
 	args := m.Called(userID, sessionID, excludeCompanyIDs)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).([]services.CollectiveRecommendItem), args.Error(1)
+	return args.Get(0).([]flywheel.CollectiveRecommendItem), args.Error(1)
 }
 
 func (m *CollectiveInsightServiceMock) GetTopPassRateCompanies(limit int) ([]models.AnonymizedBehaviorSummary, error) {

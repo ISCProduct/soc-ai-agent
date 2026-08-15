@@ -3,7 +3,7 @@ package controllers
 import (
 	"Backend/domain/repository"
 	"Backend/internal/middleware"
-	"Backend/internal/services"
+	"Backend/internal/services/auth"
 	"Backend/internal/services/interfaces"
 	"errors"
 	"net/http"
@@ -20,7 +20,7 @@ const maxAdminUsersOffset = 10000
 type AdminUserController struct {
 	repo     repository.UserRepository
 	audit    interfaces.AuditLogService
-	deletion *services.UserDeletionService
+	deletion *auth.UserDeletionService
 }
 
 func NewAdminUserController(repo repository.UserRepository, audit interfaces.AuditLogService) *AdminUserController {
@@ -28,7 +28,7 @@ func NewAdminUserController(repo repository.UserRepository, audit interfaces.Aud
 }
 
 // SetDeletionService は管理者によるユーザー削除で使用するカスケードサービスを設定する
-func (c *AdminUserController) SetDeletionService(deletion *services.UserDeletionService) {
+func (c *AdminUserController) SetDeletionService(deletion *auth.UserDeletionService) {
 	c.deletion = deletion
 }
 
@@ -164,20 +164,20 @@ func (c *AdminUserController) Delete(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusConflict, "account already withdrawn")
 	}
 	actor := strings.TrimSpace(ctx.Request().Header.Get("X-Admin-Email"))
-	if err := c.deletion.DeleteUser(uint(id), services.UserDeletionActor{Kind: "admin", Email: actor}); err != nil {
+	if err := c.deletion.DeleteUser(uint(id), auth.UserDeletionActor{Kind: "admin", Email: actor}); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "user not found")
 		}
-		if errors.Is(err, services.ErrAlreadyWithdrawn) {
+		if errors.Is(err, auth.ErrAlreadyWithdrawn) {
 			return echo.NewHTTPError(http.StatusConflict, "account already withdrawn")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to withdraw user")
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
-		"message":         "ユーザーを退会処理しました（保持期間後に完全削除）",
-		"id":              uint(id),
-		"email":           user.Email,
-		"retention_days":  services.WithdrawalRetentionDays,
+		"message":        "ユーザーを退会処理しました（保持期間後に完全削除）",
+		"id":             uint(id),
+		"email":          user.Email,
+		"retention_days": auth.WithdrawalRetentionDays,
 	})
 }
 

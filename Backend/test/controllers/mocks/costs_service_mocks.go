@@ -1,7 +1,7 @@
 package mocks
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/costs"
 	"time"
 
 	"github.com/stretchr/testify/mock"
@@ -17,26 +17,26 @@ func (m *APICostServiceMock) GetCurrentMonthTotal() (float64, error) {
 	return args.Get(0).(float64), args.Error(1)
 }
 
-func (m *APICostServiceMock) GetModelBreakdown(since time.Time) ([]services.ModelCostSummary, error) {
+func (m *APICostServiceMock) GetModelBreakdown(since time.Time) ([]costs.ModelCostSummary, error) {
 	args := m.Called(since)
 	if v := args.Get(0); v != nil {
-		return v.([]services.ModelCostSummary), args.Error(1)
+		return v.([]costs.ModelCostSummary), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
 
-func (m *APICostServiceMock) GetDailyCosts(nDays int) ([]services.DailyCostSummary, error) {
+func (m *APICostServiceMock) GetDailyCosts(nDays int) ([]costs.DailyCostSummary, error) {
 	args := m.Called(nDays)
 	if v := args.Get(0); v != nil {
-		return v.([]services.DailyCostSummary), args.Error(1)
+		return v.([]costs.DailyCostSummary), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
 
-func (m *APICostServiceMock) GetMonthlyCosts(nMonths int) ([]services.MonthlyCostSummary, error) {
+func (m *APICostServiceMock) GetMonthlyCosts(nMonths int) ([]costs.MonthlyCostSummary, error) {
 	args := m.Called(nMonths)
 	if v := args.Get(0); v != nil {
-		return v.([]services.MonthlyCostSummary), args.Error(1)
+		return v.([]costs.MonthlyCostSummary), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
@@ -61,26 +61,26 @@ func (m *RealtimeUsageServiceMock) CurrentActiveCount() (int64, error) {
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *RealtimeUsageServiceMock) GetUserBreakdown(days int, limit int) ([]services.RealtimeUserSummary, error) {
+func (m *RealtimeUsageServiceMock) GetUserBreakdown(days int, limit int) ([]costs.RealtimeUserSummary, error) {
 	args := m.Called(days, limit)
 	if v := args.Get(0); v != nil {
-		return v.([]services.RealtimeUserSummary), args.Error(1)
+		return v.([]costs.RealtimeUserSummary), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
 
-func (m *RealtimeUsageServiceMock) GetDailyUsage(nDays int) ([]services.RealtimeDailySummary, error) {
+func (m *RealtimeUsageServiceMock) GetDailyUsage(nDays int) ([]costs.RealtimeDailySummary, error) {
 	args := m.Called(nDays)
 	if v := args.Get(0); v != nil {
-		return v.([]services.RealtimeDailySummary), args.Error(1)
+		return v.([]costs.RealtimeDailySummary), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
 
-func (m *RealtimeUsageServiceMock) GetMonthlyUsage(nMonths int) ([]services.RealtimeMonthlySummary, error) {
+func (m *RealtimeUsageServiceMock) GetMonthlyUsage(nMonths int) ([]costs.RealtimeMonthlySummary, error) {
 	args := m.Called(nMonths)
 	if v := args.Get(0); v != nil {
-		return v.([]services.RealtimeMonthlySummary), args.Error(1)
+		return v.([]costs.RealtimeMonthlySummary), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
@@ -90,12 +90,12 @@ type CompanySearchBudgetServiceMock struct {
 	mock.Mock
 }
 
-func (m *CompanySearchBudgetServiceMock) Status() (services.CompanySearchBudgetStatus, error) {
+func (m *CompanySearchBudgetServiceMock) Status() (costs.CompanySearchBudgetStatus, error) {
 	args := m.Called()
 	if v := args.Get(0); v != nil {
-		return v.(services.CompanySearchBudgetStatus), args.Error(1)
+		return v.(costs.CompanySearchBudgetStatus), args.Error(1)
 	}
-	return services.CompanySearchBudgetStatus{}, args.Error(1)
+	return costs.CompanySearchBudgetStatus{}, args.Error(1)
 }
 
 func (m *CompanySearchBudgetServiceMock) AllowSearch() error {

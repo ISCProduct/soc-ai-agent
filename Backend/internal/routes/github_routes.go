@@ -2,13 +2,13 @@ package routes
 
 import (
 	"Backend/internal/controllers"
-	"Backend/internal/services"
+	"Backend/internal/services/auth"
 
 	"github.com/labstack/echo/v4"
 )
 
 // SetupGitHubRoutes GitHub連携関連のルーティング設定
-func SetupGitHubRoutes(api *echo.Group, githubController *controllers.GitHubController, userSecret string, access services.UserAccessGuard, orgs OrganizationIDResolver) {
+func SetupGitHubRoutes(api *echo.Group, githubController *controllers.GitHubController, userSecret string, access auth.UserAccessGuard, orgs OrganizationIDResolver) {
 	github := api.Group("/github", EchoUserAuth(userSecret, access, orgs))
 	github.GET("/profile", githubController.GetProfile)
 	github.POST("/sync", githubController.Sync)

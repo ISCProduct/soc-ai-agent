@@ -196,9 +196,9 @@ resource "aws_launch_template" "app" {
   block_device_mappings {
     device_name = "/dev/sda1"
     ebs {
-      # backend/frontend/rag-review(chromadb・onnxruntime等)の3イメージ分で
-      # 20GBは逼迫しdocker pullが「no space left on device」で失敗したため増量
-      volume_size = 30
+      # backend/frontend/rag-review の同時 pull で 20GB は不足。
+      # 30GB でも旧イメージ稼働中の pull で逼迫するため 40GB。
+      volume_size = 40
       volume_type = "gp3"
     }
   }
@@ -217,6 +217,7 @@ resource "aws_launch_template" "app" {
     db_password              = module.rds.master_password
     s3_bucket                = module.s3.bucket_id
     openai_api_key           = var.openai_api_key_plain
+    resend_api_key           = var.resend_api_key_plain
     google_client_id         = var.google_client_id
     google_client_secret     = var.google_client_secret
     github_client_id         = var.github_client_id

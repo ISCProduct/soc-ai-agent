@@ -3,7 +3,7 @@ package controllers
 import (
 	"Backend/internal/config"
 	"Backend/internal/middleware"
-	"Backend/internal/services"
+	"Backend/internal/services/schedule"
 	"fmt"
 	"log"
 	"net/http"
@@ -18,10 +18,10 @@ import (
 const gcalUserIDCookie = "gcal_uid"
 
 type GoogleCalendarController struct {
-	calendarSync *services.CalendarSyncService
+	calendarSync *schedule.CalendarSyncService
 }
 
-func NewGoogleCalendarController(calendarSync *services.CalendarSyncService) *GoogleCalendarController {
+func NewGoogleCalendarController(calendarSync *schedule.CalendarSyncService) *GoogleCalendarController {
 	return &GoogleCalendarController{calendarSync: calendarSync}
 }
 

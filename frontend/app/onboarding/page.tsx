@@ -26,7 +26,7 @@ import { getResultsPathOrChat } from '@/lib/results-navigation'
 
 const STEPS = [
   {
-    icon: <ChatIcon sx={{ fontSize: 32, color: '#ec5b13' }} />,
+    icon: <ChatIcon sx={{ fontSize: 32, color: 'primary.main' }} />,
     title: '自己分析チャット',
     description: 'AIとの会話を通じて、あなたの強み・志向・経験を整理します。まずここから始めましょう。',
     action: 'チャットを始める',
@@ -122,7 +122,8 @@ export default function OnboardingPage() {
                 key={step.title}
                 variant="outlined"
                 sx={{
-                  border: isDone ? '2px solid #388e3c' : isActive ? '2px solid #ec5b13' : '1px solid #e0e0e0',
+                  border: '2px solid',
+                  borderColor: isDone ? 'success.main' : isActive ? 'primary.main' : 'divider',
                   bgcolor: isDone ? '#f1f8f1' : isActive ? '#fff8f5' : '#fff',
                 }}
               >
@@ -149,7 +150,7 @@ export default function OnboardingPage() {
                       flexShrink: 0,
                       width: { xs: '100%', sm: 'auto' },
                       ...(isActive && !isDone
-                        ? { bgcolor: '#ec5b13', '&:hover': { bgcolor: '#c44d0e' }, color: '#fff' }
+                        ? { bgcolor: 'primary.main', '&:hover': { bgcolor: 'primary.dark' }, color: 'primary.contrastText' }
                         : {}),
                       textTransform: 'none',
                       borderRadius: 9999,

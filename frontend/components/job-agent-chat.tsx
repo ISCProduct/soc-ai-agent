@@ -5,6 +5,7 @@ import styles from "./job-agent-chat.module.css"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Progress } from "@/components/ui/progress"
 import { Send, Bot, User } from "lucide-react"
@@ -98,6 +99,7 @@ export function JobAgentChat() {
   const [showCustomInput, setShowCustomInput] = useState(false) // カスタム入力モード
   const [historyLoadError, setHistoryLoadError] = useState<string | null>(null)
   const [historyRetrying, setHistoryRetrying] = useState(false)
+  const [confirmAction, setConfirmAction] = useState<'reset' | 'end' | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // メッセージが更新されたらキャッシュに保存
@@ -329,32 +331,40 @@ export function JobAgentChat() {
     }
   }
 
-  const handleReset = () => {
+  const performReset = () => {
     // 古いキャッシュをクリア
     if (typeof window !== 'undefined') {
       localStorage.removeItem(`chat_cache_${sessionId}`)
     }
-    
+
     // 新しいセッションID生成
     const newSessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
     if (typeof window !== 'undefined') {
       localStorage.setItem('chat_session_id', newSessionId)
     }
-    
+
     // ページをリロード（バックエンドには古いセッションが残る）
     window.location.reload()
   }
 
-  const handleEndChat = () => {
+  const performEndChat = () => {
     // セッションとキャッシュを完全にクリア
     if (typeof window !== 'undefined') {
       localStorage.removeItem(`chat_cache_${sessionId}`)
       localStorage.removeItem('chat_session_id')
     }
-    
+
     // ページをリロードして新しいセッションを開始
     window.location.reload()
   }
+
+  const handleReset = () => setConfirmAction('reset')
+  const handleEndChat = () => setConfirmAction('end')
+
+  const confirmDialogText =
+    confirmAction === 'reset'
+      ? { title: '最初からやり直しますか？', body: 'これまでの回答・チャット履歴はすべて削除されます。この操作は取り消せません。' }
+      : { title: 'チャットを終了しますか？', body: 'これまでの回答・チャット履歴はすべて削除されます。この操作は取り消せません。' }
 
   const handleAnalysisComplete = () => {
     setIsAnalyzing(false)
@@ -365,8 +375,35 @@ export function JobAgentChat() {
     return <AnalysisLoading onCompleteAction={handleAnalysisComplete} />
   }
 
+  const confirmDialog = (
+    <Dialog open={confirmAction !== null} onOpenChange={(open) => !open && setConfirmAction(null)}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{confirmDialogText.title}</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground mb-6">{confirmDialogText.body}</p>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setConfirmAction(null)}>
+            キャンセル
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={() => (confirmAction === 'reset' ? performReset() : performEndChat())}
+          >
+            {confirmAction === 'reset' ? 'やり直す' : '終了する'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+
   if (isComplete) {
-    return <CompanyResults userData={{ scores: userScores }} onResetAction={handleReset} />
+    return (
+      <>
+        <CompanyResults userData={{ scores: userScores }} onResetAction={handleReset} />
+        {confirmDialog}
+      </>
+    )
   }
 
   // 最後のメッセージに選択肢があるかチェック
@@ -376,6 +413,7 @@ export function JobAgentChat() {
     : false
 
   return (
+    <>
       <div className={`flex justify-center bg-background overflow-hidden ${styles.chatWrapper}`}>
         <Card className={`flex flex-col w-full max-w-4xl ${styles.chatCard}`}>
           <div className={`border-b bg-muted/50 ${styles.header}`}>
@@ -429,7 +467,12 @@ export function JobAgentChat() {
             </div>
           </div>
 
-          <div className={`flex-1 overflow-y-auto space-y-4 ${styles.messagesArea}`}>
+          <div
+            className={`flex-1 overflow-y-auto space-y-4 ${styles.messagesArea}`}
+            role="log"
+            aria-live="polite"
+            aria-relevant="additions"
+          >
             {isInitializing ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center space-y-2">
@@ -507,7 +550,7 @@ export function JobAgentChat() {
                   )
                 })}
                 {isTyping && (
-                    <div className="flex gap-3">
+                    <div className="flex gap-3" role="status" aria-label="エージェントが入力中です">
                       <Avatar className="w-10 h-10 bg-primary flex-shrink-0">
                         <AvatarFallback>
                           <Bot className="w-5 h-5 text-primary-foreground" />
@@ -557,7 +600,7 @@ export function JobAgentChat() {
                     disabled={isLoadingFromBackend || isInitializing}
                     autoFocus={showCustomInput} // カスタム入力モード時は自動フォーカス
                 />
-                <Button type="submit" size="icon" disabled={isLoadingFromBackend || !inputValue.trim() || isInitializing}>
+                <Button type="submit" size="icon" disabled={isLoadingFromBackend || !inputValue.trim() || isInitializing} aria-label="メッセージを送信">
                   <Send className="w-4 h-4" />
                 </Button>
                 {/* カスタム入力モード時はキャンセルボタンを表示 */}
@@ -578,5 +621,7 @@ export function JobAgentChat() {
           </div>
         </Card>
       </div>
+      {confirmDialog}
+    </>
   )
 }

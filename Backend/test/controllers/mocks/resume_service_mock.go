@@ -2,7 +2,7 @@ package mocks
 
 import (
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/resume"
 	"context"
 	"mime/multipart"
 	"net/http"
@@ -14,12 +14,12 @@ type ResumeServiceMock struct {
 	mock.Mock
 }
 
-func (m *ResumeServiceMock) Upload(userID uint, sessionID, sourceType, sourceURL string, fileHeader *multipart.FileHeader) (*services.ResumeUploadResult, error) {
+func (m *ResumeServiceMock) Upload(userID uint, sessionID, sourceType, sourceURL string, fileHeader *multipart.FileHeader) (*resume.ResumeUploadResult, error) {
 	args := m.Called(userID, sessionID, sourceType, sourceURL, fileHeader)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*services.ResumeUploadResult), args.Error(1)
+	return args.Get(0).(*resume.ResumeUploadResult), args.Error(1)
 }
 
 func (m *ResumeServiceMock) EnsureDocumentOwner(documentID uint, requestingUserID uint) error {
@@ -43,10 +43,10 @@ func (m *ResumeServiceMock) ReviewDocumentStream(ctx context.Context, documentID
 	return m.Called(ctx, documentID, requestingUserID, companyName, jobTitle, candidateType, w).Error(0)
 }
 
-func (m *ResumeServiceMock) OpenAnnotatedFile(documentID uint, requestingUserID uint) (*services.AnnotatedFile, error) {
+func (m *ResumeServiceMock) OpenAnnotatedFile(documentID uint, requestingUserID uint) (*resume.AnnotatedFile, error) {
 	args := m.Called(documentID, requestingUserID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*services.AnnotatedFile), args.Error(1)
+	return args.Get(0).(*resume.AnnotatedFile), args.Error(1)
 }

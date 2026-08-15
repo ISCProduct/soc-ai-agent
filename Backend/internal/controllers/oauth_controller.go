@@ -3,8 +3,8 @@ package controllers
 import (
 	"Backend/internal/config"
 	"Backend/internal/middleware"
-	"Backend/internal/services"
 	ifaces "Backend/internal/services/interfaces"
+	"Backend/internal/services/organization"
 	"encoding/base64"
 	"encoding/json"
 	"log"
@@ -15,10 +15,10 @@ import (
 
 type OAuthController struct {
 	oauthService  ifaces.OAuthService
-	organizations *services.OrganizationService
+	organizations *organization.OrganizationService
 }
 
-func NewOAuthController(oauthService ifaces.OAuthService, organizations *services.OrganizationService) *OAuthController {
+func NewOAuthController(oauthService ifaces.OAuthService, organizations *organization.OrganizationService) *OAuthController {
 	return &OAuthController{oauthService: oauthService, organizations: organizations}
 }
 

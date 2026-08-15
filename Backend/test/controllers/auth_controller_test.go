@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"Backend/internal/controllers"
-	"Backend/internal/services"
+	"Backend/internal/services/auth"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
@@ -35,7 +35,7 @@ func TestAuthController_Register_InvalidBody(t *testing.T) {
 
 func TestAuthController_Register_EmailExists(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	regReq := services.RegisterRequest{Email: "dup@example.com", Password: "pass1234", Name: "テスト"}
+	regReq := auth.RegisterRequest{Email: "dup@example.com", Password: "pass1234", Name: "テスト"}
 	svc.On("Register", regReq, uint(0)).Return(nil, errors.New("email already exists"))
 
 	body, _ := json.Marshal(regReq)
@@ -48,8 +48,8 @@ func TestAuthController_Register_EmailExists(t *testing.T) {
 
 func TestAuthController_Register_Success(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	regReq := services.RegisterRequest{Email: "new@example.com", Password: "pass1234", Name: "テスト"}
-	resp := &services.AuthResponse{Token: "tok"}
+	regReq := auth.RegisterRequest{Email: "new@example.com", Password: "pass1234", Name: "テスト"}
+	resp := &auth.AuthResponse{Token: "tok"}
 	svc.On("Register", regReq, uint(0)).Return(resp, nil)
 
 	body, _ := json.Marshal(regReq)
@@ -71,7 +71,7 @@ func TestAuthController_Login_InvalidBody(t *testing.T) {
 
 func TestAuthController_Login_InvalidCredentials(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	loginReq := services.LoginRequest{Email: "a@example.com", Password: "wrong"}
+	loginReq := auth.LoginRequest{Email: "a@example.com", Password: "wrong"}
 	svc.On("Login", loginReq, uint(0)).Return(nil, errors.New("invalid email or password"))
 
 	body, _ := json.Marshal(loginReq)
@@ -84,7 +84,7 @@ func TestAuthController_Login_InvalidCredentials(t *testing.T) {
 
 func TestAuthController_Login_EmailNotVerified(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	loginReq := services.LoginRequest{Email: "a@example.com", Password: "pass1234"}
+	loginReq := auth.LoginRequest{Email: "a@example.com", Password: "pass1234"}
 	svc.On("Login", loginReq, uint(0)).Return(nil, errors.New("email_not_verified"))
 
 	body, _ := json.Marshal(loginReq)
@@ -97,8 +97,8 @@ func TestAuthController_Login_EmailNotVerified(t *testing.T) {
 
 func TestAuthController_Login_Success(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	loginReq := services.LoginRequest{Email: "a@example.com", Password: "pass1234"}
-	resp := &services.AuthResponse{Token: "jwt-token"}
+	loginReq := auth.LoginRequest{Email: "a@example.com", Password: "pass1234"}
+	resp := &auth.AuthResponse{Token: "jwt-token"}
 	svc.On("Login", loginReq, uint(0)).Return(resp, nil)
 
 	body, _ := json.Marshal(loginReq)
@@ -113,7 +113,7 @@ func TestAuthController_Login_Success(t *testing.T) {
 
 func TestAuthController_CreateGuest_Success(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	svc.On("CreateGuestUser", uint(0)).Return(&services.AuthResponse{Token: "guest-tok"}, nil)
+	svc.On("CreateGuestUser", uint(0)).Return(&auth.AuthResponse{Token: "guest-tok"}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/guest", nil)
 	rec := httptest.NewRecorder()
@@ -142,7 +142,7 @@ func TestAuthController_GetUser_NotFound(t *testing.T) {
 
 func TestAuthController_GetUser_Success(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	svc.On("GetUser", uint(1)).Return(&services.AuthResponse{Token: "tok"}, nil)
+	svc.On("GetUser", uint(1)).Return(&auth.AuthResponse{Token: "tok"}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/user", nil)
 	req = withUserID(req, 1)
@@ -223,8 +223,8 @@ func TestAuthController_UpdateProfile_Unauthorized(t *testing.T) {
 
 func TestAuthController_UpdateProfile_Success(t *testing.T) {
 	svc := &mocks.AuthServiceMock{}
-	updateReq := services.UpdateProfileRequest{UserID: 1, Name: "更新太郎"}
-	svc.On("UpdateProfile", updateReq).Return(&services.AuthResponse{Token: "tok"}, nil)
+	updateReq := auth.UpdateProfileRequest{UserID: 1, Name: "更新太郎"}
+	svc.On("UpdateProfile", updateReq).Return(&auth.AuthResponse{Token: "tok"}, nil)
 
 	body, _ := json.Marshal(map[string]any{"name": "更新太郎"})
 	req := httptest.NewRequest(http.MethodPut, "/api/auth/profile", bytes.NewBuffer(body))

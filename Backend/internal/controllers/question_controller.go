@@ -2,7 +2,7 @@ package controllers
 
 import (
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/chat"
 	"Backend/internal/services/interfaces"
 	"net/http"
 
@@ -20,7 +20,7 @@ func NewQuestionController(questionService interfaces.QuestionGeneratorService) 
 // GenerateQuestions AIで質問を生成
 // POST /api/questions/generate
 func (c *QuestionController) GenerateQuestions(ctx echo.Context) error {
-	var req services.GenerateQuestionsRequest
+	var req chat.GenerateQuestionsRequest
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}

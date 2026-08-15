@@ -22,7 +22,8 @@ import (
 
 	"Backend/internal/controllers"
 	"Backend/internal/repositories"
-	"Backend/internal/services"
+	"Backend/internal/services/auth"
+	"Backend/internal/services/email"
 )
 
 func newIntegrationDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
@@ -49,8 +50,8 @@ func newAuthController(t *testing.T, db *gorm.DB) *controllers.AuthController {
 	t.Helper()
 	userRepo := repositories.NewUserRepository(db)
 	pendingRepo := repositories.NewPendingRegistrationRepository(db)
-	emailService := services.NewEmailService() // SMTP未設定時はログ出力のみ
-	authService := services.NewAuthService(userRepo, pendingRepo, emailService)
+	emailService := email.NewEmailService() // SMTP未設定時はログ出力のみ
+	authService := auth.NewAuthService(userRepo, pendingRepo, emailService)
 	return controllers.NewAuthController(authService)
 }
 

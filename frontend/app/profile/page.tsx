@@ -32,6 +32,7 @@ import { BACKEND_URL } from '@/lib/backend-url'
 import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '@/lib/profile'
 import GitHubSkills from '@/components/github-skills'
 import { PageLoading } from '@/components/common/PageLoading'
+import { StudentThemeToggle } from '@/components/student-theme-toggle'
 
 export default function ProfilePage() {
   return (
@@ -251,7 +252,12 @@ function ProfilePageContent() {
         </Container>
       </Box>
 
-      <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Container maxWidth="lg" sx={{ py: 4, pb: { xs: 12, md: 4 } }}>
+        <Card sx={{ mb: 3, borderRadius: 2 }}>
+          <CardContent sx={{ p: 3 }}>
+            <StudentThemeToggle />
+          </CardContent>
+        </Card>
         {/* ユーザーヘッダーカード */}
         <Card sx={{ mb: 3, borderRadius: 2 }}>
           <CardContent sx={{ p: 3 }}>

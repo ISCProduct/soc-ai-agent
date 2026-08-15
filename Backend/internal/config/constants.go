@@ -7,10 +7,13 @@ import (
 )
 
 const (
-	DefaultOAuthBaseURL            = "http://localhost:8080"
-	DefaultAppURL                  = "http://localhost:3000"
-	DefaultGuestEmailDomain        = "temp.local"
-	DefaultSchoolName              = "学校法人岩崎学園情報科学専門学校"
+	DefaultOAuthBaseURL     = "http://localhost:8080"
+	DefaultAppURL           = "http://localhost:3000"
+	DefaultGuestEmailDomain = "temp.local"
+	// DefaultSchoolName はテナント（学園サブドメイン）が解決できない場合のフォールバック。
+	// 特定の実在校名を入れると無関係なユーザーにその学校が紐付いて見えるため空にする。
+	// 学園専用インスタンスとして固定したい場合のみ DEFAULT_SCHOOL_NAME 環境変数で明示的に設定する。
+	DefaultSchoolName              = ""
 	DefaultCompanyGraphThreshold   = 0.75
 	PendingRegistrationTokenTTL    = 24 * time.Hour
 	ReVerificationInactiveDuration = 10 * 24 * time.Hour
@@ -47,13 +50,13 @@ func CompanyGraphThreshold() float64 {
 
 // --- 企業管理系定数 ---
 
-func CompanyTTLInfoDays() int       { return getIntOrDefault("COMPANY_TTL_INFO_DAYS", 90) }
-func CompanyTTLJobsDays() int       { return getIntOrDefault("COMPANY_TTL_JOBS_DAYS", 7) }
-func CompanyTTLTechDays() int       { return getIntOrDefault("COMPANY_TTL_TECH_DAYS", 30) }
-func CompanyTTLRelationsDays() int  { return getIntOrDefault("COMPANY_TTL_RELATIONS_DAYS", 60) }
+func CompanyTTLInfoDays() int      { return getIntOrDefault("COMPANY_TTL_INFO_DAYS", 90) }
+func CompanyTTLJobsDays() int      { return getIntOrDefault("COMPANY_TTL_JOBS_DAYS", 7) }
+func CompanyTTLTechDays() int      { return getIntOrDefault("COMPANY_TTL_TECH_DAYS", 30) }
+func CompanyTTLRelationsDays() int { return getIntOrDefault("COMPANY_TTL_RELATIONS_DAYS", 60) }
 
-func MissingBatchDefaultLimit() int { return getIntOrDefault("MISSING_BATCH_DEFAULT_LIMIT", 20) }
-func MissingBatchMaxLimit() int     { return getIntOrDefault("MISSING_BATCH_MAX_LIMIT", 50) }
+func MissingBatchDefaultLimit() int   { return getIntOrDefault("MISSING_BATCH_DEFAULT_LIMIT", 20) }
+func MissingBatchMaxLimit() int       { return getIntOrDefault("MISSING_BATCH_MAX_LIMIT", 50) }
 func MissingBatchMaxConcurrency() int { return getIntOrDefault("MISSING_BATCH_MAX_CONCURRENCY", 8) }
 
 func RelationGraphMaxDepth() int { return getIntOrDefault("RELATION_GRAPH_MAX_DEPTH", 4) }
