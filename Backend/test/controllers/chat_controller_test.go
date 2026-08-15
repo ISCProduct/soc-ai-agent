@@ -15,7 +15,8 @@ import (
 	"Backend/domain/entity"
 	"Backend/internal/controllers"
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/analysis"
+	"Backend/internal/services/shared"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/mock"
@@ -150,7 +151,7 @@ func TestChatController_ToggleFavorite_MissingMatchID(t *testing.T) {
 
 func TestChatController_ToggleFavorite_Forbidden(t *testing.T) {
 	matchSvc := &mocks.MatchingServiceMock{}
-	matchSvc.On("ToggleFavorite", uint(5), uint(1)).Return(services.ErrForbidden)
+	matchSvc.On("ToggleFavorite", uint(5), uint(1)).Return(shared.ErrForbidden)
 
 	body, _ := json.Marshal(map[string]uint{"match_id": 5})
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/favorite", bytes.NewReader(body))
@@ -224,7 +225,7 @@ func TestChatController_GetAnalysisSummary_ServiceError(t *testing.T) {
 
 func TestChatController_GetAnalysisSummary_Success(t *testing.T) {
 	analysisSvc := &mocks.AnalysisScoringServiceMock{}
-	summary := &services.AnalysisSummary{}
+	summary := &analysis.AnalysisSummary{}
 	analysisSvc.On("BuildAnalysisSummary", mock.Anything, uint(1), "s1").Return(summary, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/analysis?session_id=s1", nil)
@@ -311,7 +312,7 @@ func TestChatController_SendReport_Success(t *testing.T) {
 	emailSvc := &mocks.EmailServiceMock{}
 
 	user := &entity.User{Email: "test@example.com", IsGuest: false}
-	summary := &services.AnalysisSummary{}
+	summary := &analysis.AnalysisSummary{}
 	userRepo.On("GetUserByID", uint(1)).Return(user, nil)
 	analysisSvc.On("BuildAnalysisSummary", mock.Anything, uint(1), "s1").Return(summary, nil)
 	matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", 5).Return([]*entity.UserCompanyMatch{}, nil)

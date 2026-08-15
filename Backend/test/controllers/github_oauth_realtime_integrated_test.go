@@ -14,7 +14,7 @@ import (
 
 	"Backend/internal/controllers"
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/flywheel"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
@@ -379,7 +379,7 @@ func TestIntegratedProfileController_GetProfile_Success(t *testing.T) {
 
 	sc.On("CountByUser", uint(1)).Return(int64(3), nil)
 	rd.On("FindDocumentsByUserID", uint(1)).Return([]models.ResumeDocument{{Status: "reviewed"}}, nil)
-	cf.On("BuildIntegratedProfile", uint(1), "sess-abc", 3, true).Return(&services.UserIntegratedProfile{UserID: 1}, nil)
+	cf.On("BuildIntegratedProfile", uint(1), "sess-abc", 3, true).Return(&flywheel.UserIntegratedProfile{UserID: 1}, nil)
 
 	assertStatus(t, newIntegratedProfileController(cf, sc, rd).GetProfile, newCtx(req, rec), http.StatusOK)
 

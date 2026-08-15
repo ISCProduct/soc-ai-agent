@@ -4,7 +4,7 @@ import (
 	"Backend/internal/config"
 	"Backend/internal/openai"
 	"Backend/internal/repositories"
-	"Backend/internal/services"
+	"Backend/internal/services/company"
 	"log"
 )
 
@@ -26,7 +26,7 @@ func main() {
 	crawlRepo := repositories.NewCrawlRepository(db)
 	companyRepo := repositories.NewCompanyRepository(db)
 	popularityRepo := repositories.NewCompanyPopularityRepository(db)
-	service := services.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
+	service := company.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
 
 	service.RunDueSources()
 	log.Println("Crawl runner completed")

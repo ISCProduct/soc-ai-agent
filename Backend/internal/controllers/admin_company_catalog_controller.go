@@ -4,7 +4,7 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/company"
 	"fmt"
 	"io"
 	"net/http"
@@ -50,11 +50,11 @@ func (c *AdminCompanyController) SeedL1Catalog(ctx echo.Context) error {
 			reader = f
 		}
 	}
-	rows, err := services.ParseL1SeedCSV(reader)
+	rows, err := company.ParseL1SeedCSV(reader)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	result, err := services.ImportL1Seed(c.repo, rows)
+	result, err := company.ImportL1Seed(c.repo, rows)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -70,7 +70,7 @@ func (c *AdminCompanyController) SeedL1Catalog(ctx echo.Context) error {
 // GetL1Coverage GET /api/admin/companies/l1-coverage
 func (c *AdminCompanyController) GetL1Coverage(ctx echo.Context) error {
 	if c.catalogWarm == nil {
-		c.catalogWarm = services.NewCatalogWarmService(c.repo, c.infoFetcher, c.jobFetcher)
+		c.catalogWarm = company.NewCatalogWarmService(c.repo, c.infoFetcher, c.jobFetcher)
 	}
 	cov, err := c.catalogWarm.Coverage(ctx.Request().Context())
 	if err != nil {
@@ -83,9 +83,9 @@ func (c *AdminCompanyController) GetL1Coverage(ctx echo.Context) error {
 // Body: { "limit": 100, "dry_run": true, "force": false, "include_info": true, "include_persona": true }
 func (c *AdminCompanyController) WarmL1Catalog(ctx echo.Context) error {
 	if c.catalogWarm == nil {
-		c.catalogWarm = services.NewCatalogWarmService(c.repo, c.infoFetcher, c.jobFetcher)
+		c.catalogWarm = company.NewCatalogWarmService(c.repo, c.infoFetcher, c.jobFetcher)
 	}
-	var opts services.L1WarmOptions
+	var opts company.L1WarmOptions
 	opts.IncludeInfo = true
 	opts.IncludePersona = true
 	if err := ctx.Bind(&opts); err != nil {
@@ -114,11 +114,11 @@ func (c *AdminCompanyController) WarmL1Catalog(ctx echo.Context) error {
 // primary_only=true のときは主3種（基本・技術・関係）のみ（求人除外）。
 func (c *AdminCompanyController) FetchMissingBatch(ctx echo.Context) error {
 	if c.missingBatch == nil {
-		c.missingBatch = services.NewCompanyMissingBatchService(
+		c.missingBatch = company.NewCompanyMissingBatchService(
 			c.repo, c.infoFetcher, c.jobFetcher, c.techFetcher, c.relationsFetcher,
 		)
 	}
-	var opts services.MissingBatchOptions
+	var opts company.MissingBatchOptions
 	opts.Limit = 20
 	if err := ctx.Bind(&opts); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
@@ -129,17 +129,17 @@ func (c *AdminCompanyController) FetchMissingBatch(ctx echo.Context) error {
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
 	c.audit.Record(actor, "company.fetch_missing_batch", "company", 0, map[string]any{
-		"dry_run":       result.DryRun,
-		"limit":         result.Limit,
-		"primary_only":  result.PrimaryOnly,
-		"concurrency":   result.Concurrency,
-		"candidate_n":   result.CandidateN,
-		"processed":     result.Processed,
-		"info_ok":       result.InfoOK,
-		"jobs_ok":       result.JobsOK,
-		"tech_ok":       result.TechOK,
-		"relations_ok":  result.RelationsOK,
-		"errors":        result.Errors,
+		"dry_run":      result.DryRun,
+		"limit":        result.Limit,
+		"primary_only": result.PrimaryOnly,
+		"concurrency":  result.Concurrency,
+		"candidate_n":  result.CandidateN,
+		"processed":    result.Processed,
+		"info_ok":      result.InfoOK,
+		"jobs_ok":      result.JobsOK,
+		"tech_ok":      result.TechOK,
+		"relations_ok": result.RelationsOK,
+		"errors":       result.Errors,
 	})
 	return ctx.JSON(http.StatusOK, result)
 }

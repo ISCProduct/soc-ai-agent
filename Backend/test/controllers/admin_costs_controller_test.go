@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"Backend/internal/controllers"
-	"Backend/internal/services"
+	"Backend/internal/services/costs"
 	ifaces "Backend/internal/services/interfaces"
 	"Backend/test/controllers/mocks"
 
@@ -49,7 +49,7 @@ func TestAdminCostsController_Summary_ModelBreakdownError(t *testing.T) {
 func TestAdminCostsController_Summary_Success_NoRealtime(t *testing.T) {
 	cost := &mocks.APICostServiceMock{}
 	cost.On("GetCurrentMonthTotal").Return(1.5, nil)
-	cost.On("GetModelBreakdown", mock.Anything).Return([]services.ModelCostSummary{}, nil)
+	cost.On("GetModelBreakdown", mock.Anything).Return([]costs.ModelCostSummary{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/summary", nil)
 	rec := httptest.NewRecorder()
@@ -61,10 +61,10 @@ func TestAdminCostsController_Summary_Success_WithRealtime(t *testing.T) {
 	cost := &mocks.APICostServiceMock{}
 	realtime := &mocks.RealtimeUsageServiceMock{}
 	cost.On("GetCurrentMonthTotal").Return(1.5, nil)
-	cost.On("GetModelBreakdown", mock.Anything).Return([]services.ModelCostSummary{}, nil)
+	cost.On("GetModelBreakdown", mock.Anything).Return([]costs.ModelCostSummary{}, nil)
 	realtime.On("CurrentMonthTotalCost").Return(0.5, nil)
 	realtime.On("CurrentActiveCount").Return(int64(3), nil)
-	realtime.On("GetUserBreakdown", 30, 20).Return([]services.RealtimeUserSummary{}, nil)
+	realtime.On("GetUserBreakdown", 30, 20).Return([]costs.RealtimeUserSummary{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/summary", nil)
 	rec := httptest.NewRecorder()
@@ -77,8 +77,8 @@ func TestAdminCostsController_Summary_IncludesCompanySearch(t *testing.T) {
 	cost := &mocks.APICostServiceMock{}
 	budget := &mocks.CompanySearchBudgetServiceMock{}
 	cost.On("GetCurrentMonthTotal").Return(1.5, nil)
-	cost.On("GetModelBreakdown", mock.Anything).Return([]services.ModelCostSummary{}, nil)
-	budget.On("Status").Return(services.CompanySearchBudgetStatus{
+	cost.On("GetModelBreakdown", mock.Anything).Return([]costs.ModelCostSummary{}, nil)
+	budget.On("Status").Return(costs.CompanySearchBudgetStatus{
 		Month: "2026-07", Count: 12, Limit: 2000, Remaining: 1988, Enforce: true, Exceeded: false,
 	}, nil)
 
@@ -112,7 +112,7 @@ func TestAdminCostsController_Daily_ServiceError(t *testing.T) {
 
 func TestAdminCostsController_Daily_Success_NoRealtime(t *testing.T) {
 	cost := &mocks.APICostServiceMock{}
-	cost.On("GetDailyCosts", 30).Return([]services.DailyCostSummary{}, nil)
+	cost.On("GetDailyCosts", 30).Return([]costs.DailyCostSummary{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/daily", nil)
 	rec := httptest.NewRecorder()
@@ -123,8 +123,8 @@ func TestAdminCostsController_Daily_Success_NoRealtime(t *testing.T) {
 func TestAdminCostsController_Daily_Success_WithRealtime(t *testing.T) {
 	cost := &mocks.APICostServiceMock{}
 	realtime := &mocks.RealtimeUsageServiceMock{}
-	cost.On("GetDailyCosts", 30).Return([]services.DailyCostSummary{}, nil)
-	realtime.On("GetDailyUsage", 30).Return([]services.RealtimeDailySummary{}, nil)
+	cost.On("GetDailyCosts", 30).Return([]costs.DailyCostSummary{}, nil)
+	realtime.On("GetDailyUsage", 30).Return([]costs.RealtimeDailySummary{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/daily", nil)
 	rec := httptest.NewRecorder()
@@ -145,7 +145,7 @@ func TestAdminCostsController_Monthly_ServiceError(t *testing.T) {
 
 func TestAdminCostsController_Monthly_Success_NoRealtime(t *testing.T) {
 	cost := &mocks.APICostServiceMock{}
-	cost.On("GetMonthlyCosts", 12).Return([]services.MonthlyCostSummary{}, nil)
+	cost.On("GetMonthlyCosts", 12).Return([]costs.MonthlyCostSummary{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/monthly", nil)
 	rec := httptest.NewRecorder()
@@ -156,8 +156,8 @@ func TestAdminCostsController_Monthly_Success_NoRealtime(t *testing.T) {
 func TestAdminCostsController_Monthly_Success_WithRealtime(t *testing.T) {
 	cost := &mocks.APICostServiceMock{}
 	realtime := &mocks.RealtimeUsageServiceMock{}
-	cost.On("GetMonthlyCosts", 12).Return([]services.MonthlyCostSummary{}, nil)
-	realtime.On("GetMonthlyUsage", 12).Return([]services.RealtimeMonthlySummary{}, nil)
+	cost.On("GetMonthlyCosts", 12).Return([]costs.MonthlyCostSummary{}, nil)
+	realtime.On("GetMonthlyUsage", 12).Return([]costs.RealtimeMonthlySummary{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/monthly", nil)
 	rec := httptest.NewRecorder()

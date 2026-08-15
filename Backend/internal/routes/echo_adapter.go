@@ -4,6 +4,8 @@ import (
 	"Backend/internal/middleware"
 	"Backend/internal/repositories"
 	"Backend/internal/services"
+	"Backend/internal/services/auth"
+	"Backend/internal/services/organization"
 	"context"
 	"crypto/subtle"
 	"errors"
@@ -22,7 +24,7 @@ type OrganizationIDResolver interface {
 // userSecret が未設定の場合はフェイルクローズ（503）として動作する。
 // access が非 nil の場合、退会済みユーザーを遮断する。
 // orgs が非 nil の場合、organization_id をリクエストコンテキストへ載せる。
-func EchoUserAuth(userSecret string, access services.UserAccessGuard, orgs ...OrganizationIDResolver) echo.MiddlewareFunc {
+func EchoUserAuth(userSecret string, access auth.UserAccessGuard, orgs ...OrganizationIDResolver) echo.MiddlewareFunc {
 	var resolver OrganizationIDResolver
 	if len(orgs) > 0 {
 		resolver = orgs[0]
@@ -42,7 +44,7 @@ func EchoUserAuth(userSecret string, access services.UserAccessGuard, orgs ...Or
 			}
 			if access != nil {
 				if err := access.EnsureActiveUser(userID); err != nil {
-					if errors.Is(err, services.ErrAccountWithdrawn) {
+					if errors.Is(err, auth.ErrAccountWithdrawn) {
 						return echo.NewHTTPError(http.StatusForbidden, "account has been withdrawn")
 					}
 					return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
@@ -52,7 +54,7 @@ func EchoUserAuth(userSecret string, access services.UserAccessGuard, orgs ...Or
 			if resolver != nil {
 				orgID, err := resolver.ResolveOrganizationID(userID)
 				if err != nil {
-					if errors.Is(err, services.ErrOrganizationDisabled) {
+					if errors.Is(err, organization.ErrOrganizationDisabled) {
 						return echo.NewHTTPError(http.StatusForbidden, "organization is disabled")
 					}
 					return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve organization")
@@ -74,7 +76,7 @@ func EchoUserAuth(userSecret string, access services.UserAccessGuard, orgs ...Or
 // EchoTenantResolver は X-Tenant-Slug ヘッダー(学園サブドメインラベル)から組織を解決し、
 // リクエストコンテキストへ載せるEcho nativeミドルウェア。
 // ヘッダー未指定の場合は何もしない（テナント概念のないアクセスとの後方互換のため）。
-func EchoTenantResolver(orgs *services.OrganizationService) echo.MiddlewareFunc {
+func EchoTenantResolver(orgs *organization.OrganizationService) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			slug := c.Request().Header.Get("X-Tenant-Slug")

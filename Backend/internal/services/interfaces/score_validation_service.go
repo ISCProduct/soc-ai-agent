@@ -3,16 +3,16 @@ package interfaces
 import (
 	"Backend/internal/models"
 	"Backend/internal/repositories"
-	"Backend/internal/services"
+	"Backend/internal/services/admin"
 )
 
 // ScoreValidationService スコア精度検証サービスのインターフェース
 type ScoreValidationService interface {
-	GetCorrelationReport() (*services.CorrelationReport, error)
-	GetPhasePrecisionReport() (*services.PhasePrecisionReport, error)
+	GetCorrelationReport() (*admin.CorrelationReport, error)
+	GetPhasePrecisionReport() (*admin.PhasePrecisionReport, error)
 	GetCurrentCalibration() ([]models.ScoreCalibrationWeight, error)
 	GetCalibrationHistory(limit int) ([]models.ScoreCalibrationWeight, error)
-	RunCalibration() (*services.CalibrationResult, error)
+	RunCalibration() (*admin.CalibrationResult, error)
 	ListExperiments() ([]string, error)
 	ListAllVariants() ([]models.QuestionVariant, error)
 	CreateVariant(experimentName, variantName, description string, trafficRatio float64) (*models.QuestionVariant, error)

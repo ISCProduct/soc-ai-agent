@@ -2,12 +2,12 @@ package routes
 
 import (
 	"Backend/internal/controllers"
-	"Backend/internal/services"
+	"Backend/internal/services/auth"
 
 	"github.com/labstack/echo/v4"
 )
 
-func SetupResumeRoutes(api *echo.Group, resumeController *controllers.ResumeController, userSecret string, access services.UserAccessGuard, orgs OrganizationIDResolver) {
+func SetupResumeRoutes(api *echo.Group, resumeController *controllers.ResumeController, userSecret string, access auth.UserAccessGuard, orgs OrganizationIDResolver) {
 	resume := api.Group("/resume", EchoUserAuth(userSecret, access, orgs))
 	resume.POST("/upload", resumeController.Upload)
 	resume.POST("/review", resumeController.Review)

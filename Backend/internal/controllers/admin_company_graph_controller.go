@@ -7,7 +7,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/scraper"
-	"Backend/internal/services"
+	"Backend/internal/services/company"
 	ifaces "Backend/internal/services/interfaces"
 	"bytes"
 	"context"
@@ -33,7 +33,7 @@ type AdminCompanyGraphController struct {
 	relationRepo     repository.CompanyRelationRepository
 	audit            ifaces.AuditLogService
 	openaiClient     *openai.Client
-	relationsFetcher *services.CompanyRelationsFetcher
+	relationsFetcher *company.CompanyRelationsFetcher
 }
 
 func NewAdminCompanyGraphController(pipeline *scraper.Pipeline, companyRepo repository.CompanyRepository, relationRepo repository.CompanyRelationRepository, audit ifaces.AuditLogService, openaiClient *openai.Client) *AdminCompanyGraphController {
@@ -41,7 +41,7 @@ func NewAdminCompanyGraphController(pipeline *scraper.Pipeline, companyRepo repo
 }
 
 // SetRelationsFetcher は Phase 2/3 の関係取得サービスを注入する（予算ガード・singleflight・TTL 付き）。
-func (c *AdminCompanyGraphController) SetRelationsFetcher(fetcher *services.CompanyRelationsFetcher) {
+func (c *AdminCompanyGraphController) SetRelationsFetcher(fetcher *company.CompanyRelationsFetcher) {
 	if c != nil {
 		c.relationsFetcher = fetcher
 	}
@@ -379,25 +379,25 @@ func (c *AdminCompanyGraphController) EnrichRelations(ctx echo.Context) error {
 		adminEmail := ctx.Request().Header.Get("X-Admin-Email")
 		if adminEmail != "" && c.audit != nil {
 			c.audit.Record(adminEmail, "company_graph_enrich_relations", "company", req.CompanyID, map[string]any{
-				"saved":            result.SavedCount,
-				"source":           result.Source,
-				"from_cache":       result.FromCache,
-				"budget_exceeded":  result.BudgetExceeded,
-				"force":            forceRefresh,
+				"saved":           result.SavedCount,
+				"source":          result.Source,
+				"from_cache":      result.FromCache,
+				"budget_exceeded": result.BudgetExceeded,
+				"force":           forceRefresh,
 			})
 		}
 		return ctx.JSON(http.StatusOK, map[string]any{
-			"ok":               true,
-			"company_id":       req.CompanyID,
-			"saved":            result.SavedCount,
-			"relations":        result.Relations,
-			"market_info":      result.MarketInfo,
-			"source":           result.Source,
-			"model_used":       result.ModelUsed,
-			"confidence":       result.Confidence,
-			"from_cache":       result.FromCache,
-			"budget_exceeded":  result.BudgetExceeded,
-			"skip_reason":      result.SkipReason,
+			"ok":              true,
+			"company_id":      req.CompanyID,
+			"saved":           result.SavedCount,
+			"relations":       result.Relations,
+			"market_info":     result.MarketInfo,
+			"source":          result.Source,
+			"model_used":      result.ModelUsed,
+			"confidence":      result.Confidence,
+			"from_cache":      result.FromCache,
+			"budget_exceeded": result.BudgetExceeded,
+			"skip_reason":     result.SkipReason,
 		})
 	}
 
@@ -493,7 +493,7 @@ func (c *AdminCompanyGraphController) RelationGraph(ctx echo.Context) error {
 		return echoInternalError(errors.New("relation repository is not configured"))
 	}
 
-	graphService := services.NewCompanyRelationGraphService(c.companyRepo, c.relationRepo)
+	graphService := company.NewCompanyRelationGraphService(c.companyRepo, c.relationRepo)
 	graph, err := graphService.BuildGraph(uint(companyID))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "company not found")

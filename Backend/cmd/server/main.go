@@ -3,14 +3,37 @@ package main
 import (
 	"Backend/internal/config"
 	"Backend/internal/controllers"
+	"Backend/internal/infrastructure/redisx"
 	"Backend/internal/logger"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/queue"
 	"Backend/internal/repositories"
 	"Backend/internal/routes"
 	"Backend/internal/scraper"
 	"Backend/internal/services"
+	"Backend/internal/services/admin"
+	"Backend/internal/services/analysis"
+	"Backend/internal/services/application"
+	"Backend/internal/services/auth"
+	"Backend/internal/services/chat"
+	"Backend/internal/services/company"
+	"Backend/internal/services/costs"
+	"Backend/internal/services/email"
+	"Backend/internal/services/flywheel"
+	"Backend/internal/services/gbizinfo"
+	"Backend/internal/services/github"
+	"Backend/internal/services/interview"
+	"Backend/internal/services/matching"
+	"Backend/internal/services/oauth"
+	"Backend/internal/services/organization"
+	"Backend/internal/services/refreshtoken"
+	"Backend/internal/services/resume"
+	"Backend/internal/services/schedule"
+	"Backend/internal/services/shared"
+	"Backend/internal/services/skillscore"
+	"Backend/internal/services/storage"
 	"Backend/migrations"
 	"log"
 	"log/slog"
@@ -196,49 +219,68 @@ func main() {
 	realtimeUsageRepo := repositories.NewRealtimeUsageRepository(db)
 
 	// サービス層の初期化
-	emailService := services.NewEmailService()
-	apiCostService := services.NewAPICostService(apiCallLogRepo)
-	realtimeUsageService := services.NewRealtimeUsageService(realtimeUsageRepo, emailService)
-	companySearchBudget := services.NewCompanySearchBudgetService(apiCallLogRepo, emailService)
-	companySearchFlight := services.NewCompanySearchFlight()
+	emailService := email.NewEmailService()
+
+	// Redis（#617）: レート制限共有 + 永続ジョブキュー。未設定時はインメモリ/go func フォールバック。
+	rdb := redisx.NewFromEnv()
+	if rdb != nil {
+		middleware.ConfigureRateLimiters(
+			middleware.NewRedisRateLimiter(rdb, "login", time.Minute, 20),
+			middleware.NewRedisRateLimiter(rdb, "password_reset", time.Hour, 5),
+		)
+	}
+	var jobEnqueuer shared.JobEnqueuer
+	var queueServer *queue.Server
+	if rdb != nil {
+		qClient := queue.NewClient(rdb)
+		jobEnqueuer = &queue.EnqueuerAdapter{Client: qClient}
+	}
+
+	apiCostService := costs.NewAPICostService(apiCallLogRepo)
+	realtimeUsageService := costs.NewRealtimeUsageService(realtimeUsageRepo, emailService)
+	companySearchBudget := costs.NewCompanySearchBudgetService(apiCallLogRepo, emailService)
+	companySearchFlight := company.NewCompanySearchFlight()
 	// OpenAI APIコール時にトークン使用量をロギング
 	aiClient.OnUsage = func(model string, promptTokens, completionTokens int) {
 		apiCostService.LogCall(model, promptTokens, completionTokens)
 	}
 	schoolRepo := repositories.NewSchoolRepository(db)
 	schoolService := services.NewSchoolService(schoolRepo)
-	authService := services.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
+	authService := auth.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	authService.SetDB(db)
 	authService.SetSchoolRepo(schoolRepo)
+	if jobEnqueuer != nil {
+		authService.SetJobEnqueuer(jobEnqueuer)
+	}
 	// リフレッシュトークン管理 (#616)
 	refreshTokenRepo := repositories.NewUserRefreshTokenRepository(db)
-	refreshTokenService := services.NewRefreshTokenService(refreshTokenRepo)
+	refreshTokenService := refreshtoken.NewRefreshTokenService(refreshTokenRepo)
 	authService.SetRefreshTokenService(refreshTokenService)
-	skillScoreService := services.NewSkillScoreService(skillScoreRepo)
-	githubService := services.NewGitHubService(githubRepo, skillScoreService, aiClient)
-	oauthService := services.NewOAuthService(userRepo, oauthConfig, githubService)
+	skillScoreService := skillscore.NewSkillScoreService(skillScoreRepo)
+	githubService := github.NewGitHubService(githubRepo, skillScoreService, aiClient)
+	oauthService := oauth.NewOAuthService(userRepo, oauthConfig, githubService)
 	oauthService.SetRefreshTokenService(refreshTokenService)
-	chatService := services.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
-	questionService := services.NewQuestionGeneratorService(aiClient, questionWeightRepo)
-	matchingService := services.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)
-	resumeService := services.NewResumeService(resumeRepo, "storage/resumes", aiClient)
-	crawlService := services.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
+	chatService := chat.NewChatService(aiClient, questionWeightRepo, chatMessageRepo, userWeightScoreRepo, aiGeneratedQuestionRepo, predefinedQuestionRepo, jobCategoryRepo, userRepo, userEmbeddingRepo, jobEmbeddingRepo, phaseRepo, progressRepo, sessionValidationRepo, conversationContextRepo)
+	questionService := chat.NewQuestionGeneratorService(aiClient, questionWeightRepo)
+	matchingService := matching.NewMatchingService(userWeightScoreRepo, companyRepo, matchRepo, aiClient)
+	resumeService := resume.NewResumeService(resumeRepo, "storage/resumes", aiClient)
+	crawlService := company.NewCrawlService(crawlRepo, companyRepo, popularityRepo, aiClient)
 	gbizInfoRepo := repositories.NewGBizInfoRepository(db)
-	gbizInfoService := services.NewGBizInfoService(cfg, gbizInfoRepo, companyRepo, companyRelationRepo)
-	infoFetcher := services.NewCompanyInfoFetcher(companyRepo, aiClient, gbizInfoService)
+	gbizInfoService := gbizinfo.NewGBizInfoService(cfg, gbizInfoRepo, companyRepo, companyRelationRepo)
+	infoFetcher := company.NewCompanyInfoFetcher(companyRepo, aiClient, gbizInfoService)
 	infoFetcher.SetSearchBudget(companySearchBudget)
 	infoFetcher.SetSearchFlight(companySearchFlight)
-	relationsFetcher := services.NewCompanyRelationsFetcher(companyRepo, companyRelationRepo, aiClient, gbizInfoService)
+	relationsFetcher := company.NewCompanyRelationsFetcher(companyRepo, companyRelationRepo, aiClient, gbizInfoService)
 	relationsFetcher.SetSearchBudget(companySearchBudget)
 	relationsFetcher.SetSearchFlight(companySearchFlight)
-	jobFetcher := services.NewJobFetchService(companyRepo, aiClient)
+	jobFetcher := company.NewJobFetchService(companyRepo, aiClient)
 	jobFetcher.SetSearchBudget(companySearchBudget)
 	jobFetcher.SetSearchFlight(companySearchFlight)
 	crawlService.SetInfoFetcher(infoFetcher)
 	crawlService.SetJobFetcher(jobFetcher)
-	auditLogService := services.NewAuditLogService(auditLogRepo)
+	auditLogService := admin.NewAuditLogService(auditLogRepo)
 	authService.SetAuditLog(auditLogService)
-	analysisService := services.NewAnalysisScoringService(
+	analysisService := analysis.NewAnalysisScoringService(
 		userWeightScoreRepo,
 		chatMessageRepo,
 		progressRepo,
@@ -249,11 +291,21 @@ func main() {
 		aiClient,
 		nil,
 	)
-	interviewService := services.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)
+	interviewService := interview.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)
+	if jobEnqueuer != nil {
+		interviewService.SetJobEnqueuer(jobEnqueuer)
+	}
 	interviewService.StartWorker()
+	if rdb != nil {
+		queueServer = queue.NewServer(rdb)
+		queueServer.RegisterHandlers(emailService, interviewService)
+		if err := queueServer.Start(); err != nil {
+			log.Printf("[queue] failed to start worker: %v", err)
+		}
+	}
 
 	// クロス機能連携サービス（チャットスコア↔面接/職務経歴書レビュー）
-	crossFeatureService := services.NewCrossFeatureIntegrationService(userWeightScoreRepo)
+	crossFeatureService := flywheel.NewCrossFeatureIntegrationService(userWeightScoreRepo)
 	interviewService.SetCrossFeatureService(crossFeatureService)
 	interviewService.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
@@ -263,13 +315,13 @@ func main() {
 
 	// コントローラー層の初期化
 	organizationRepo := repositories.NewOrganizationRepository(db)
-	organizationService := services.NewOrganizationService(organizationRepo)
+	organizationService := organization.NewOrganizationService(organizationRepo)
 	authController := controllers.NewAuthController(authService)
 	oauthController := controllers.NewOAuthController(oauthService, organizationService)
 	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := controllers.NewCompanyRelationController(companyQueryRepo, aiClient)
-	companyValidator := services.NewCompanyValidationService(companyRepo, aiClient)
+	companyValidator := company.NewCompanyValidationService(companyRepo, aiClient)
 	companyValidator.SetSearchBudget(companySearchBudget)
 	companyValidator.SetSearchFlight(companySearchFlight)
 	relationController.SetCompanyValidator(companyValidator)
@@ -293,17 +345,17 @@ func main() {
 	resumeController := controllers.NewResumeController(resumeService)
 
 	// S3 upload service for interview videos (optional — skipped if env vars are not set)
-	s3UploadService, s3Err := services.NewS3UploadService()
+	s3UploadService, s3Err := storage.NewS3UploadService()
 	if s3Err != nil {
 		slog.Warn("S3 upload service not available", "error", s3Err)
 		s3UploadService = nil
 	}
-	var objectDeleter services.ObjectDeleter
+	var objectDeleter auth.ObjectDeleter
 	if s3UploadService != nil {
 		objectDeleter = s3UploadService
 		authService.SetObjectDeleter(s3UploadService)
 	}
-	userDeletionService := services.NewUserDeletionService(db, objectDeleter, auditLogService)
+	userDeletionService := auth.NewUserDeletionService(db, objectDeleter, auditLogService)
 	adminOrganizationController := controllers.NewAdminOrganizationController(organizationService)
 	adminSchoolController := controllers.NewAdminSchoolController(schoolService)
 	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
@@ -317,8 +369,8 @@ func main() {
 	adminInterviewController.SetUserAccessGuard(userDeletionService)
 	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminCostsController := controllers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
-	adminVectorController := controllers.NewAdminVectorController(services.NewAdminVectorService())
-	profileRecalcService := services.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
+	adminVectorController := controllers.NewAdminVectorController(admin.NewAdminVectorService())
+	profileRecalcService := flywheel.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
 	profileRecalcController := controllers.NewAdminProfileRecalculationController(profileRecalcService)
 	companyEntryService := services.NewCompanyEntryService(db, userRepo, pendingRegistrationRepo, emailService)
 	authService.SetCompanyOwnershipClaimer(companyEntryService)
@@ -328,24 +380,24 @@ func main() {
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := controllers.NewESRewriteController(aiClient)
 	scheduleRepo := repositories.NewScheduleRepository(db)
-	scheduleService := services.NewScheduleService(scheduleRepo)
+	scheduleService := schedule.NewScheduleService(scheduleRepo)
 	// Googleカレンダー連携
 	googleTokenRepo := repositories.NewUserGoogleTokenRepository(db)
-	calendarSyncService := services.NewCalendarSyncService(googleTokenRepo, scheduleRepo, oauthConfig)
+	calendarSyncService := schedule.NewCalendarSyncService(googleTokenRepo, scheduleRepo, oauthConfig)
 	scheduleService.SetCalendarSyncService(calendarSyncService)
 	googleCalendarController := controllers.NewGoogleCalendarController(calendarSyncService)
 	scheduleController := controllers.NewScheduleController(scheduleService)
 	esReviewController := controllers.NewESReviewController()
-	appService := services.NewApplicationService(appStatusRepo, matchRepo)
+	appService := application.NewApplicationService(appStatusRepo, matchRepo)
 	appController := controllers.NewApplicationController(appService)
 	integratedProfileController := controllers.NewIntegratedProfileController(crossFeatureService, interviewSessionRepo, resumeRepo)
 	scoreValidationRepo := repositories.NewScoreValidationRepository(db)
-	scoreValidationService := services.NewScoreValidationService(scoreValidationRepo)
+	scoreValidationService := admin.NewScoreValidationService(scoreValidationRepo)
 	scoreValidationController := controllers.NewAdminScoreValidationController(scoreValidationService)
 	collectiveInsightRepo := repositories.NewCollectiveInsightRepository(db)
-	collectiveInsightService := services.NewCollectiveInsightService(collectiveInsightRepo, userWeightScoreRepo)
+	collectiveInsightService := flywheel.NewCollectiveInsightService(collectiveInsightRepo, userWeightScoreRepo)
 	collectiveInsightController := controllers.NewCollectiveInsightController(collectiveInsightService)
-	scraperSessionService := services.NewScraperSessionService(scraperSessionRepo)
+	scraperSessionService := admin.NewScraperSessionService(scraperSessionRepo)
 	scraperSessionController := controllers.NewAdminScraperSessionController(scraperSessionService)
 
 	// Echo初期化

@@ -2,19 +2,19 @@ package interfaces
 
 import (
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/interview"
 	"context"
 )
 
 type InterviewService interface {
-	CreateSession(userID uint, language string, interviewerGender string) (*services.InterviewSessionResponse, error)
-	StartSession(userID uint, sessionID uint) (*services.InterviewSessionResponse, error)
-	FinishSession(userID uint, sessionID uint) (*services.InterviewSessionResponse, error)
-	ListSessions(userID uint, all bool, limit int, offset int) ([]services.InterviewSessionResponse, int64, error)
-	GetSessionDetailWithRole(userID uint, sessionID uint, role string) (*services.InterviewDetailResponse, error)
+	CreateSession(userID uint, language string, interviewerGender string) (*interview.InterviewSessionResponse, error)
+	StartSession(userID uint, sessionID uint) (*interview.InterviewSessionResponse, error)
+	FinishSession(userID uint, sessionID uint) (*interview.InterviewSessionResponse, error)
+	ListSessions(userID uint, all bool, limit int, offset int) ([]interview.InterviewSessionResponse, int64, error)
+	GetSessionDetailWithRole(userID uint, sessionID uint, role string) (*interview.InterviewDetailResponse, error)
 	GetReport(userID uint, sessionID uint) (*models.InterviewReport, error)
-	GetPhraseSuggestions(ctx context.Context, userID uint, sessionID uint) ([]services.PhraseSuggestion, error)
-	GetTrend(userID uint, limit int) ([]services.InterviewTrendPoint, error)
+	GetPhraseSuggestions(ctx context.Context, userID uint, sessionID uint) ([]interview.PhraseSuggestion, error)
+	GetTrend(userID uint, limit int) ([]interview.InterviewTrendPoint, error)
 	SendReportEmail(userID, sessionID uint) error
 	SaveUtterance(userID uint, sessionID uint, role string, text string) error
 	CreateRealtimeToken(ctx context.Context, userID uint, sessionID uint) (string, error)
@@ -27,7 +27,7 @@ type InterviewService interface {
 		companyName, companyReading, position, companyInfo, companyType string,
 		companyID uint,
 		turnCount, remainingSeconds, questionIndex, totalQuestions, questionElapsedSeconds, questionDurationSeconds int,
-	) (*services.TurnResult, error)
+	) (*interview.TurnResult, error)
 	StartTurn(
 		ctx context.Context,
 		userID uint,
@@ -35,5 +35,5 @@ type InterviewService interface {
 		companyName, companyReading, position, companyInfo, companyType string,
 		companyID uint,
 		questionIndex, totalQuestions, questionElapsedSeconds, questionDurationSeconds int,
-	) (*services.TurnResult, error)
+	) (*interview.TurnResult, error)
 }

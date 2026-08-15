@@ -9,7 +9,7 @@ import (
 	"Backend/internal/middleware"
 	"Backend/internal/repositories"
 	"Backend/internal/routes"
-	"Backend/internal/services"
+	"Backend/internal/services/organization"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/echo/v4"
@@ -47,7 +47,7 @@ func newRoutesTestDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 
 func TestEchoTenantResolver_UnknownSlugRejected(t *testing.T) {
 	db, mock := newRoutesTestDB(t)
-	orgs := services.NewOrganizationService(repositories.NewOrganizationRepository(db))
+	orgs := organization.NewOrganizationService(repositories.NewOrganizationRepository(db))
 
 	mock.ExpectQuery("SELECT \\* FROM `organizations` WHERE slug = \\?").
 		WithArgs("no-such-univ", 1).
@@ -69,7 +69,7 @@ func TestEchoTenantResolver_UnknownSlugRejected(t *testing.T) {
 
 func TestEchoTenantResolver_NoHeaderPassesThrough(t *testing.T) {
 	db, _ := newRoutesTestDB(t)
-	orgs := services.NewOrganizationService(repositories.NewOrganizationRepository(db))
+	orgs := organization.NewOrganizationService(repositories.NewOrganizationRepository(db))
 
 	e := echo.New()
 	e.Use(routes.EchoTenantResolver(orgs))
