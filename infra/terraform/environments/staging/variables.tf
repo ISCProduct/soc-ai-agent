@@ -180,6 +180,13 @@ variable "resend_api_key_plain" {
   default     = ""
 }
 
+variable "admin_secret_plain" {
+  type        = string
+  description = "管理者認証シークレット(平文)。CI(sync-whats-newジョブ等)から既知の値で呼び出せるよう、random_passwordではなく固定値にする"
+  sensitive   = true
+  default     = ""
+}
+
 variable "google_client_id" {
   type        = string
   description = "Google OAuthクライアントID。コールバックURL https://<api_domain>/api/auth/google/callback をGoogle Cloud Console側で許可しておくこと"

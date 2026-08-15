@@ -381,6 +381,7 @@ jobs:
   # 本番(Fargate)は展示会時のみ起動(desired_countは変更しない)のため、
   # デプロイ直後に到達できない場合がある。pr_numberでべき等なので、
   # 失敗しても後続の実行(展示会起動時など)で取りこぼしなく再取り込みされる。
+  # stagingにも同じmain由来の内容を反映し、本番が停止中でもstagingで確認できるようにする。
   sync-whats-new:
     needs: deploy-production
     if: github.ref_name == 'main' && always() && needs.deploy-production.result == 'success'
@@ -392,14 +393,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
-          API_BASE: https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }}
+          PROD_API_BASE: https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }}
+          STAGING_API_BASE: https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }}
         run: |
-          set -e
           sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base main --limit 20 \
             --json number,title,body,mergedAt \
             --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
-          curl -sf -X POST "$API_BASE/api/admin/whats-new/ingest" \
+
+          curl -sf -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $ADMIN_SECRET" \
             -d "{\"sources\": $sources}" \
-            --max-time 60
+            --max-time 60 \
+            || echo "本番への取り込みに失敗しました(停止中の可能性)。スキップします。"
+
+          curl -sf -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Secret: $ADMIN_SECRET" \
+            -d "{\"sources\": $sources}" \
+            --max-time 60 \
+            || echo "stagingへの取り込みに失敗しました(停止中の可能性)。スキップします。"

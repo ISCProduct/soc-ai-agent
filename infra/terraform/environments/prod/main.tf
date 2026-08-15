@@ -8,7 +8,7 @@ locals {
   backend_domain  = "api.${var.domain_name}"
 
   backend_secret_arns = compact(concat(
-    [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn, aws_secretsmanager_secret.email.arn],
+    [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn, aws_secretsmanager_secret.email.arn, aws_secretsmanager_secret.admin.arn],
     var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
     var.additional_secret_arns
   ))
@@ -65,6 +65,12 @@ locals {
         name      = "RESEND_API_KEY"
         valueFrom = "${aws_secretsmanager_secret.email.arn}:resend_api_key::"
       }
+    ],
+    [
+      {
+        name      = "ADMIN_SECRET"
+        valueFrom = "${aws_secretsmanager_secret.admin.arn}:admin_secret::"
+      }
     ]
   )
 }
@@ -95,6 +101,19 @@ resource "aws_secretsmanager_secret_version" "email" {
   secret_id = aws_secretsmanager_secret.email.id
   secret_string = jsonencode({
     resend_api_key = var.resend_api_key
+  })
+}
+
+# 管理者認証シークレット(sync-whats-newジョブ等、CIからのサービス間呼び出しに使用)
+resource "aws_secretsmanager_secret" "admin" {
+  name = "${var.project_name}/admin"
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "admin" {
+  secret_id = aws_secretsmanager_secret.admin.id
+  secret_string = jsonencode({
+    admin_secret = var.admin_secret
   })
 }
 

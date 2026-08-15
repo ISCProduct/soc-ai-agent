@@ -135,6 +135,13 @@ variable "resend_api_key" {
   default     = ""
 }
 
+variable "admin_secret" {
+  type        = string
+  description = "管理者認証シークレット。CI(sync-whats-newジョブ等)から既知の値で呼び出すため、stagingのadmin_secret_plainと同じ値を設定すること"
+  sensitive   = true
+  default     = ""
+}
+
 variable "additional_secret_arns" {
   type        = list(string)
   description = "Extra secret ARNs the backend execution role may read"
