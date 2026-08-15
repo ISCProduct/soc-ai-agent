@@ -279,3 +279,25 @@ func TestRelaySSEChunks_DoesNotPanicWhenFlushPanics(t *testing.T) {
 		t.Fatalf("body: %q", rr.Body.String())
 	}
 }
+
+func TestResolveLocalPathCopiesStoredFileIntoWorkDir(t *testing.T) {
+	storage := t.TempDir()
+	work := t.TempDir()
+	src := filepath.Join(storage, "resume.pdf")
+	if err := os.WriteFile(src, []byte("%PDF-1.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := (&ResumeService{}).resolveLocalPath(&models.ResumeDocument{
+		StoredPath:       src,
+		OriginalFilename: "resume.pdf",
+	}, work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == src {
+		t.Fatal("永続パスをそのまま返してはいけない")
+	}
+	if err := validatePathInDir(got, work); err != nil {
+		t.Fatalf("workDir 配下であるべき: %v", err)
+	}
+}

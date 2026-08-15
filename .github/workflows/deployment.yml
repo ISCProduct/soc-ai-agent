@@ -199,6 +199,10 @@ jobs:
               chmod +x /tmp/edge-sync/ensure-edge-compose.sh
               /tmp/edge-sync/ensure-edge-compose.sh /opt/app/docker-compose.yml
               cd /opt/app
+              # 既存インスタンスの .env は S3_BUCKET のみ。アプリは AWS_S3_BUCKET を読む。
+              if [ -f .env ] && grep -q '^S3_BUCKET=' .env && ! grep -q '^AWS_S3_BUCKET=' .env; then
+                echo "AWS_S3_BUCKET=$(grep '^S3_BUCKET=' .env | cut -d= -f2-)" >> .env
+              fi
               df -h /
               # 稼働中イメージは prune できない。先に down してから空ける。
               # named volume(chroma_data)は --volumes を付けない限り残る。

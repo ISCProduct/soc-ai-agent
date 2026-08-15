@@ -38,7 +38,19 @@ func (s *ResumeService) resolveLocalPath(doc *models.ResumeDocument, workDir str
 			}
 			return downloaded, nil
 		}
-		return doc.StoredPath, nil
+		// 永続パスは workDir 配下ではない。検証・OCR用にコピーする。
+		ext := strings.ToLower(filepath.Ext(doc.OriginalFilename))
+		if ext == "" {
+			ext = strings.ToLower(filepath.Ext(doc.StoredPath))
+		}
+		if ext == "" {
+			ext = ".pdf"
+		}
+		dest := filepath.Join(workDir, "original"+ext)
+		if err := copyFile(doc.StoredPath, dest); err != nil {
+			return "", fmt.Errorf("failed to load stored resume: %w", err)
+		}
+		return dest, nil
 	}
 	if err := s.ensureS3Available(); err != nil {
 		return "", err
