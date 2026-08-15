@@ -2,8 +2,9 @@
  * Shared constants for the interview feature.
  */
 import type { Position } from './types'
+import { COMFORTABLE_PRIMARY } from '@/lib/student-theme'
 
-export const PRIMARY = '#ec5b13'
+export const PRIMARY = COMFORTABLE_PRIMARY
 export const BG_LIGHT = '#f8f6f6'
 export const BG_DARK = '#221610'
 

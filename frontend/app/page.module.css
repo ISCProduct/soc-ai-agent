@@ -19,6 +19,13 @@
     min-width: 0;
     min-height: 0;
     overflow: hidden;
+    padding-bottom: 56px;
+}
+
+@media (min-width: 900px) {
+    .mainContent {
+        padding-bottom: 0;
+    }
 }
 
 .chatWrapper {

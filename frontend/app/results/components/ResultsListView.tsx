@@ -92,7 +92,8 @@ export default function ResultsListView({
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      backgroundColor: '#fff',
+      backgroundColor: 'background.default',
+      pb: { xs: 7, md: 0 },
     }}>
       {/* ヘッダー部分 */}
       <Box sx={{
@@ -149,8 +150,8 @@ export default function ResultsListView({
       <Box sx={{
         flexGrow: 1,
         overflowY: 'auto',
-        p: { xs: 2, sm: 3 },
-        backgroundColor: '#fafafa',
+        p: { xs: 2, sm: 4 },
+        backgroundColor: 'background.default',
       }}>
         <Box sx={{ maxWidth: 1200, mx: 'auto' }}>
           {/* 分析データの部分取得失敗（サイレント失敗させず明示する） */}
@@ -259,20 +260,24 @@ export default function ResultsListView({
             </Card>
           )}
 
-          <Stack spacing={3}>
+          <Stack spacing={4}>
             {companies.map((company, index) => (
               <Card
                 key={`${company.id}-${index}`}
-                elevation={3}
+                elevation={0}
                 sx={{
                   border: '2px solid',
-                  borderColor: 'primary.light',
+                  borderColor: 'divider',
+                  borderRadius: 3,
                   cursor: 'pointer',
-                  transition: 'all 0.3s ease',
+                  p: { xs: 0.5, sm: 1 },
                   '&:hover': {
                     borderColor: 'primary.main',
-                    transform: 'translateY(-4px)',
-                    boxShadow: 6,
+                    boxShadow: 3,
+                  },
+                  '&:focus-visible': {
+                    outline: '3px solid',
+                    outlineColor: 'primary.main',
                   },
                 }}
                 onClick={() => onSelectCompany(company)}
@@ -280,7 +285,7 @@ export default function ResultsListView({
                 <CardContent>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <Avatar sx={{ bgcolor: 'primary.main', width: 40, height: 40, fontWeight: 'bold' }}>
+                      <Avatar sx={{ bgcolor: 'primary.main', width: 56, height: 56, fontWeight: 'bold' }}>
                         {index + 1}
                       </Avatar>
                       <Box>
