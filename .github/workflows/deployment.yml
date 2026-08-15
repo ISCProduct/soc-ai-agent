@@ -372,3 +372,30 @@ jobs:
           service: frontend
           cluster: ${{ env.PROJECT_NAME }}
           wait-for-service-stability: true
+
+  # 更新情報(#861): mainへの直近マージPRをAI要約してDBへ取り込む。
+  # 本番(Fargate)は展示会時のみ起動(desired_countは変更しない)のため、
+  # デプロイ直後に到達できない場合がある。pr_numberでべき等なので、
+  # 失敗しても後続の実行(展示会起動時など)で取りこぼしなく再取り込みされる。
+  sync-whats-new:
+    needs: deploy-production
+    if: github.ref_name == 'main' && always() && needs.deploy-production.result == 'success'
+    name: Sync whats-new from merged PRs
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Fetch recently merged PRs and ingest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          API_BASE: https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }}
+        run: |
+          set -e
+          sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base main --limit 20 \
+            --json number,title,body,mergedAt \
+            --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
+          curl -sf -X POST "$API_BASE/api/admin/whats-new/ingest" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Secret: $ADMIN_SECRET" \
+            -d "{\"sources\": $sources}" \
+            --max-time 60
