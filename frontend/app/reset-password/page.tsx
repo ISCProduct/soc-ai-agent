@@ -125,7 +125,7 @@ function ResetPasswordForm() {
           )}
 
           <Box sx={{ textAlign: 'center', mt: 2 }}>
-            <Link href="/login" style={{ fontSize: '0.875rem', color: '#ec5b13' }}>
+            <Link href="/login" style={{ fontSize: '0.875rem' }}>
               ログインページへ戻る
             </Link>
           </Box>

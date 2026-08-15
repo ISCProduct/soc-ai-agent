@@ -19,6 +19,7 @@ import Link from 'next/link'
 import { authService, AuthResponse } from '@/lib/auth'
 import { BACKEND_URL } from '@/lib/backend-url'
 import { GUEST_LIMITATIONS } from '@/lib/guest-limits'
+import { StudentThemeToggle } from '@/components/student-theme-toggle'
 import { extractTenantSlug } from '@/lib/tenant'
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -111,11 +112,11 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
         justifyContent: 'center',
         minHeight: '100vh',
         bgcolor: 'background.default',
-        p: 2,
+        p: { xs: 2, sm: 3 },
       }}
     >
-      <Card sx={{ maxWidth: 450, width: '100%' }}>
-        <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
+      <Card sx={{ maxWidth: 520, width: '100%' }}>
+        <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
           <Typography variant="h4" align="center" gutterBottom fontWeight="bold">
             IT業界キャリアエージェント
           </Typography>
@@ -158,7 +159,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
                 sx={{ mb: 1 }}
               />
               <Box sx={{ textAlign: 'right', mt: -1, mb: 2 }}>
-                <Link href="/forgot-password" style={{ fontSize: '0.875rem', color: '#ec5b13' }}>
+                <Link href="/forgot-password" style={{ fontSize: '0.875rem' }}>
                   パスワードをお忘れですか？
                 </Link>
               </Box>
@@ -240,6 +241,9 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
               あとからアカウント登録すると解放されます。
             </Typography>
           </Box>
+
+          <Divider sx={{ my: 3 }} />
+          <StudentThemeToggle />
         </CardContent>
       </Card>
     </Box>

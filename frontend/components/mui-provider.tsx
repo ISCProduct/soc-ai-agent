@@ -1,39 +1,71 @@
 'use client'
 
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { usePathname } from 'next/navigation'
 import { ThemeProvider, createTheme } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import { AppRouterCacheProvider } from '@mui/material-nextjs/v15-appRouter'
+import {
+  createStudentMuiTheme,
+  readStudentThemeMode,
+  writeStudentThemeMode,
+  type StudentThemeMode,
+} from '@/lib/student-theme'
 
-// ブランドカラー: サイドバー・ローディング画面・面接練習・ES添削で既に使われているオレンジに統一する
-const BRAND_PRIMARY = '#ec5b13'
-
-// app/globals.css で読み込んでいる日本語フォント。指定しないとMUIのCssBaselineが
-// 既定のRoboto系にフォールバックし、globals.cssの指定を上書きしてしまう。
-const FONT_FAMILY =
-  "'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
-
-const theme = createTheme({
-  palette: {
-    mode: 'light',
-    primary: {
-      main: BRAND_PRIMARY,
-    },
-    secondary: {
-      main: '#dc004e',
-    },
-  },
-  typography: {
-    fontFamily: FONT_FAMILY,
-  },
+const ADMIN_THEME = createTheme({
+  palette: { mode: 'light', primary: { main: '#1976d2' } },
 })
 
-export function MuiProvider({ children }: { children: React.ReactNode }) {
+type StudentThemeContextValue = {
+  mode: StudentThemeMode
+  setMode: (mode: StudentThemeMode) => void
+}
+
+const StudentThemeContext = createContext<StudentThemeContextValue | null>(null)
+
+export function useStudentTheme(): StudentThemeContextValue {
+  const ctx = useContext(StudentThemeContext)
+  if (!ctx) {
+    return {
+      mode: 'comfortable',
+      setMode: () => {},
+    }
+  }
+  return ctx
+}
+
+function storage(): Storage | null {
+  if (typeof window === 'undefined') return null
+  return window.localStorage
+}
+
+export function MuiProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname() || ''
+  const isAdmin = pathname.startsWith('/admin')
+  const [mode, setModeState] = useState<StudentThemeMode>('comfortable')
+
+  useEffect(() => {
+    setModeState(readStudentThemeMode(storage()))
+  }, [])
+
+  const setMode = useCallback((next: StudentThemeMode) => {
+    setModeState(next)
+    writeStudentThemeMode(next, storage())
+  }, [])
+
+  const theme = useMemo(
+    () => (isAdmin ? ADMIN_THEME : createStudentMuiTheme(mode)),
+    [isAdmin, mode],
+  )
+
   return (
     <AppRouterCacheProvider>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        {children}
-      </ThemeProvider>
+      <StudentThemeContext.Provider value={{ mode, setMode }}>
+        <ThemeProvider theme={theme}>
+          <CssBaseline />
+          {children}
+        </ThemeProvider>
+      </StudentThemeContext.Provider>
     </AppRouterCacheProvider>
   )
 }

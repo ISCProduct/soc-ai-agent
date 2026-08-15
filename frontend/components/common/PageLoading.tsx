@@ -27,11 +27,11 @@ export function PageLoading({
       }}
     >
       {showBrand && (
-        <Typography variant="h6" sx={{ fontWeight: 700, color: '#ec5b13' }}>
+        <Typography variant="h6" sx={{ fontWeight: 700, color: 'primary.main' }}>
           IT業界キャリアエージェント
         </Typography>
       )}
-      <CircularProgress sx={{ color: '#ec5b13' }} />
+      <CircularProgress color="primary" />
       <Typography variant="body2" color="text.secondary">
         {message}
       </Typography>

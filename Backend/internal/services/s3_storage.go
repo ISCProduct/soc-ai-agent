@@ -21,8 +21,17 @@ type s3Storage struct {
 	prefix      string
 }
 
+func s3BucketFromEnv() string {
+	b := strings.TrimSpace(os.Getenv("AWS_S3_BUCKET"))
+	if b == "" {
+		// staging user_data は歴史的に S3_BUCKET のみ渡していた
+		b = strings.TrimSpace(os.Getenv("S3_BUCKET"))
+	}
+	return b
+}
+
 func newS3StorageFromEnv(ctx context.Context) (*s3Storage, error) {
-	bucket := strings.TrimSpace(os.Getenv("AWS_S3_BUCKET"))
+	bucket := s3BucketFromEnv()
 	if bucket == "" {
 		return nil, nil
 	}
