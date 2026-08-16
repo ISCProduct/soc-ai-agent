@@ -21,11 +21,9 @@ const (
 	minDeepeningRunes = 40
 )
 
-var abstractAnswerKeywords = []string{
-	"頑張", "チームワーク", "コミュニケーション", "協力", "努力", "学び", "真面目", "前向き",
-}
-
-var specificSignalPattern = regexp.MustCompile(`\d|[％%]|万円|件|人|プロジェクト|担当|実装|開発|リリース|改善`)
+// specificSignalPattern は回答に具体性（数値・固有の取り組み内容）があるかを判定する。
+// #881: 「件」「人」は「案件」「個人」等の部分一致で誤検知するため単独文字は含めない。
+var specificSignalPattern = regexp.MustCompile(`\d|[％%]|万円|プロジェクト|担当|実装|開発|リリース|改善`)
 
 type questionDirective struct {
 	Text        string
@@ -90,17 +88,13 @@ func NeedsDeepening(answer string, depth int) bool {
 	return isAbstractOnlyAnswer(trimmed)
 }
 
+// isAbstractOnlyAnswer は回答が具体性シグナル（数値・固有の取り組み内容）を
+// 一つも含まないかを判定する。
+// #881: 従来は限定的な8キーワード（頑張・チームワーク等）に一致した場合のみ
+// 抽象回答とみなしていたため、これらの語を含まない曖昧な回答（例:
+// 「御社のビジョンに共感し貢献したい」等の定型文）が深掘りされずに素通りしていた。
+// 特定キーワードへの一致に頼らず、具体性シグナルの欠如そのものを判定基準にする。
 func isAbstractOnlyAnswer(answer string) bool {
-	hasAbstract := false
-	for _, kw := range abstractAnswerKeywords {
-		if strings.Contains(answer, kw) {
-			hasAbstract = true
-			break
-		}
-	}
-	if !hasAbstract {
-		return false
-	}
 	return !specificSignalPattern.MatchString(answer)
 }
 
