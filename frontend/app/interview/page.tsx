@@ -141,7 +141,6 @@ function InterviewContent() {
         const data = await r.json()
         const list: InterviewCompany[] = Array.isArray(data?.companies) ? data.companies : []
         setAllCompanies(list)
-        if (list.length > 0 && !interviewCompany) setInterviewCompany(list[0])
       } catch (e) {
         if (cancelled) return
         setCompaniesLoadError(

@@ -94,9 +94,9 @@ func (s *InterviewService) Turn(
 		return nil, fmt.Errorf("chat error: %w", err)
 	}
 
-	// TTS: AI返答を音声化
+	// TTS: AI返答を音声化（企業名は読み仮名に置換して誤読を防ぐ。表示用のaiTextはそのまま保持）
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
-	audio, err := s.openaiClient.TTS(ctx, aiText, voice)
+	audio, err := s.openaiClient.TTS(ctx, applyCompanyReadingForTTS(aiText, companyName, companyReading), voice)
 	if err != nil {
 		return nil, fmt.Errorf("tts error: %w", err)
 	}
@@ -187,8 +187,9 @@ func (s *InterviewService) StartTurn(
 		return nil, fmt.Errorf("chat error: %w", err)
 	}
 
+	// TTS: 企業名は読み仮名に置換して誤読を防ぐ（表示用のaiTextはそのまま保持）
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
-	audio, err := s.openaiClient.TTS(ctx, aiText, voice)
+	audio, err := s.openaiClient.TTS(ctx, applyCompanyReadingForTTS(aiText, companyName, companyReading), voice)
 	if err != nil {
 		return nil, fmt.Errorf("tts error: %w", err)
 	}
@@ -205,4 +206,16 @@ func (s *InterviewService) StartTurn(
 		result.IsDeepening = directive.IsDeepening
 	}
 	return result, nil
+}
+
+// applyCompanyReadingForTTS はTTS読み上げ用に、AI発話中の企業名（漢字等の表記）を
+// 読み仮名に置換する。Chatモデルが読み仮名を無視して漢字表記のまま出力しても、
+// TTSには常に正しい読みが渡るようにするための対策（表示用テキストは変更しない）。
+func applyCompanyReadingForTTS(text, companyName, companyReading string) string {
+	companyName = strings.TrimSpace(companyName)
+	companyReading = strings.TrimSpace(companyReading)
+	if companyName == "" || companyReading == "" || companyName == companyReading {
+		return text
+	}
+	return strings.ReplaceAll(text, companyName, companyReading)
 }
