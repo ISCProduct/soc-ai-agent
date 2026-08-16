@@ -452,7 +452,7 @@ export function useInterviewSession({
     if (audioTracks.length === 0) return
     const micStream = new MediaStream(audioTracks)
     audioChunksRef.current = []
-    const mr = new MediaRecorder(micStream, { mimeType: 'audio/webm' })
+    const mr = new MediaRecorder(micStream, { mimeType: 'audio/webm', audioBitsPerSecond: 128000 })
     mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
     mr.onstop = () => { void sendTurn() }
     mediaRecorderRef.current = mr
