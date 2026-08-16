@@ -21,11 +21,19 @@ const (
 	minDeepeningRunes = 40
 )
 
-var abstractAnswerKeywords = []string{
-	"頑張", "チームワーク", "コミュニケーション", "協力", "努力", "学び", "真面目", "前向き",
-}
+// strongSignalPattern はそれだけで回答の具体性を裏付ける強いシグナル
+// （数値・固有の取り組み内容）。
+var strongSignalPattern = regexp.MustCompile(`\d|[％%]|万円|プロジェクト|実装|リリース`)
 
-var specificSignalPattern = regexp.MustCompile(`\d|[％%]|万円|件|人|プロジェクト|担当|実装|開発|リリース|改善`)
+// weakSignalPattern は「開発に興味がある」「業務改善に貢献したい」のように
+// 決意表明・抽象的な志望動機でも使われがちな動詞的シグナル。
+// 単独では具体性の裏付けにならず、複数含まれる場合のみ具体的とみなす（#882）。
+var weakSignalPattern = regexp.MustCompile(`担当|開発|改善`)
+
+// numberedCountPattern は数字（半角・全角・漢数字）直後の「件」「人」のみを
+// 数量表現として検出する。「案件」「個人」等への部分一致誤検知を避けるため、
+// 単独の「件」「人」はシグナルに含めない（#881/#882）。
+var numberedCountPattern = regexp.MustCompile(`[0-9０-９一二三四五六七八九十百千万]+\s*(件|人)`)
 
 type questionDirective struct {
 	Text        string
@@ -90,18 +98,29 @@ func NeedsDeepening(answer string, depth int) bool {
 	return isAbstractOnlyAnswer(trimmed)
 }
 
+// isAbstractOnlyAnswer は回答が具体性シグナル（数値・固有の取り組み内容）を
+// 一つも含まないかを判定する。
+// #881: 従来は限定的な8キーワード（頑張・チームワーク等）に一致した場合のみ
+// 抽象回答とみなしていたため、これらの語を含まない曖昧な回答（例:
+// 「御社のビジョンに共感し貢献したい」等の定型文）が深掘りされずに素通りしていた。
+// 特定キーワードへの一致に頼らず、具体性シグナルの欠如そのものを判定基準にする。
+//
+// #882: ただし「担当」「開発」「改善」等は「業務改善に貢献したい」のような
+// 抽象的な決意表明にも使われる弱いシグナルのため、これらの単独一致だけでは
+// 具体的と判定しない（強いシグナルとの併用、または弱いシグナルが複数ある
+// 場合のみ具体的とみなす）。数量表現は「案件」「個人」等との部分一致を
+// 避けるため、数字直後の「件」「人」のみを検出する。
 func isAbstractOnlyAnswer(answer string) bool {
-	hasAbstract := false
-	for _, kw := range abstractAnswerKeywords {
-		if strings.Contains(answer, kw) {
-			hasAbstract = true
-			break
-		}
-	}
-	if !hasAbstract {
+	if strongSignalPattern.MatchString(answer) {
 		return false
 	}
-	return !specificSignalPattern.MatchString(answer)
+	if numberedCountPattern.MatchString(answer) {
+		return false
+	}
+	if len(weakSignalPattern.FindAllString(answer, -1)) >= 2 {
+		return false
+	}
+	return true
 }
 
 // BuildFollowUpQuestionText は深掘り追質問のテンプレート文を返す。

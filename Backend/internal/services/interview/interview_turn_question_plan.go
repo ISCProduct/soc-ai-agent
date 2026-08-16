@@ -16,7 +16,9 @@ func (s *InterviewService) advanceQuestionPlan(
 	position, companyName, userAnswer string,
 	isStart bool,
 ) (*questionDirective, error) {
-	if s.questionStateRepo == nil || companyID == 0 {
+	// companyID==0（WEB検索・手入力企業でDB未登録）でも標準トピック・深掘り機構は動かす。
+	// カスタム質問取得のみ内部で companyID==0 をガードして空を返す（#881）。
+	if s.questionStateRepo == nil {
 		return nil, nil
 	}
 
