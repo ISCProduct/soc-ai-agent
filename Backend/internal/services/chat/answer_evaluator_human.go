@@ -3,6 +3,8 @@ package chat
 import (
 	"context"
 	"math"
+	"os"
+	"strconv"
 	"strings"
 )
 
@@ -51,7 +53,7 @@ func (e *AnswerEvaluator) EvaluateHumanScoring(question, answer string, isChoice
 	category := e.categorizeQuestion(question)
 	rubric := rubricForCategory(category)
 	signals := extractSignals(answer, category)
-	dimensionScores := scoreDimensions(rubric, signals, answer)
+	dimensionScores := scoreDimensions(rubric, category, signals, answer)
 	rawScore := scoreFromDimensions(rubric, dimensionScores)
 	score, penalties, boosts := applyPenaltiesAndBoosts(rawScore, signals, len([]rune(strings.TrimSpace(answer))))
 
@@ -101,6 +103,7 @@ func (e *AnswerEvaluator) EvaluateHumanScoringWithContext(
 	if n > 0 && n <= 30 {
 		ruleWeight = 0.35 // 短文は LLM（内容品質）比重を上げる
 	}
+	ruleWeight = configuredRuleWeight(ruleWeight)
 	blended := int(math.Round(ruleWeight*float64(rule.Score) + (1-ruleWeight)*float64(llmResult.Score)))
 	if blended < 0 {
 		blended = 0
@@ -114,6 +117,22 @@ func (e *AnswerEvaluator) EvaluateHumanScoringWithContext(
 		rule.Reason = llmResult.Explanation
 	}
 	return rule
+}
+
+// configuredRuleWeight は CHAT_EVAL_RULE_WEIGHT 環境変数（0.0〜1.0）で
+// ハイブリッド評価のルールベース比重を上書きする（#522）。未設定・不正値なら fallback を返す。
+func configuredRuleWeight(fallback float64) float64 {
+	raw := strings.TrimSpace(os.Getenv("CHAT_EVAL_RULE_WEIGHT"))
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	// ParseFloat は "NaN" をエラーなしで返し、NaN との比較は常に false になるため
+	// v<0/v>1 の範囲チェックをすり抜けてしまう。NaN/Inf は明示的に弾く。
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1 {
+		return fallback
+	}
+	return v
 }
 
 // floorEngagedShortScore は関与のある短文が Score=0 で進捗から落ちないよう下限を設ける (#561)。

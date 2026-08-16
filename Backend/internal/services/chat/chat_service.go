@@ -83,6 +83,7 @@ type ChatResponse struct {
 	AllPhases           []PhaseProgress          `json:"all_phases,omitempty"`
 	IsComplete          bool                     `json:"is_complete"`
 	IsTerminated        bool                     `json:"is_terminated,omitempty"`
+	SuggestRestart      bool                     `json:"suggest_restart,omitempty"`
 	InvalidAnswerCount  int                      `json:"invalid_answer_count,omitempty"`
 	TotalQuestions      int                      `json:"total_questions"`
 	AnsweredQuestions   int                      `json:"answered_questions"`
