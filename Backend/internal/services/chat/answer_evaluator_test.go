@@ -542,6 +542,11 @@ func TestConfiguredRuleWeight(t *testing.T) {
 		{"範囲外(負)は fallback を返す", "-0.1", 0.55, 0.55},
 		{"範囲外(1超)は fallback を返す", "1.5", 0.55, 0.55},
 		{"パース不能な値は fallback を返す", "abc", 0.55, 0.55},
+		// ParseFloatは"NaN"/"Inf"をエラーなしで返し、NaNとの比較は常にfalseになるため
+		// 範囲チェックをすり抜けないことを確認する
+		{"NaNは fallback を返す", "NaN", 0.55, 0.55},
+		{"+Infは fallback を返す", "+Inf", 0.55, 0.55},
+		{"-Infは fallback を返す", "-Inf", 0.55, 0.55},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

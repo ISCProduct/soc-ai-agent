@@ -127,7 +127,9 @@ func configuredRuleWeight(fallback float64) float64 {
 		return fallback
 	}
 	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil || v < 0 || v > 1 {
+	// ParseFloat は "NaN" をエラーなしで返し、NaN との比較は常に false になるため
+	// v<0/v>1 の範囲チェックをすり抜けてしまう。NaN/Inf は明示的に弾く。
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1 {
 		return fallback
 	}
 	return v
