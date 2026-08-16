@@ -146,12 +146,67 @@ module "error_fallback" {
   tags                     = local.tags
 }
 
-# --- アプリ実行用EC2（IAMロール作成権限が無い環境向けの暫定構成） ---
-# 本来はECS on EC2(IAMロール必須)だが、iam:CreateRole / logs:TagResource が
-# 使えないため、IAMロールを一切使わないプレーンEC2 + Docker Composeで代替する。
-# ECR pull・S3・RDSアクセスはインスタンスに埋め込んだIAMユーザーの認証情報で行う。
-# ponytail: 長期アクセスキーをuser_dataに埋め込む簡易構成。IAM権限が使えるようになり次第、
-#           ECS on EC2 + IAMロールの構成(このファイルのgit履歴を参照)に戻すこと。
+# --- アプリ実行用EC2（プレーンEC2 + Docker Compose） ---
+# ECS on EC2(IAMロール必須)への移行は別途検討として、ECR pull・S3アクセスは
+# インスタンスプロファイル経由のIAMロールで行う（#829: 旧・長期アクセスキー埋め込みから移行）。
+resource "aws_iam_role" "app" {
+  name = "${var.project_name}-app-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy" "app" {
+  name = "${var.project_name}-app-policy"
+  role = aws_iam_role.app.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "EcrAuth"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      {
+        Sid    = "EcrPull"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchCheckLayerAvailability",
+        ]
+        Resource = values(module.ecr.repository_arns)
+      },
+      {
+        Sid    = "AppS3Access"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket",
+        ]
+        Resource = [module.s3.bucket_arn, "${module.s3.bucket_arn}/*"]
+      },
+    ]
+  })
+}
+
+resource "aws_iam_instance_profile" "app" {
+  name = "${var.project_name}-app-profile"
+  role = aws_iam_role.app.name
+}
+
 resource "random_password" "user_secret" {
   length  = 48
   special = false
@@ -188,6 +243,10 @@ resource "aws_launch_template" "app" {
   key_name               = aws_key_pair.app.key_name
   vpc_security_group_ids = [module.network.ecs_security_group_id]
 
+  iam_instance_profile {
+    name = aws_iam_instance_profile.app.name
+  }
+
   block_device_mappings {
     device_name = "/dev/sda1"
     ebs {
@@ -200,8 +259,6 @@ resource "aws_launch_template" "app" {
 
   user_data = base64encode(templatefile("${path.module}/app_user_data.sh.tftpl", {
     aws_region               = var.region
-    aws_access_key_id        = var.aws_access_key_id
-    aws_secret_access_key    = var.aws_secret_access_key
     backend_image            = local.backend_image
     frontend_image           = local.frontend_image
     rag_image                = local.rag_image
@@ -212,6 +269,7 @@ resource "aws_launch_template" "app" {
     db_password              = module.rds.master_password
     s3_bucket                = module.s3.bucket_id
     openai_api_key           = var.openai_api_key_plain
+    openai_model             = var.openai_model
     resend_api_key           = var.resend_api_key_plain
     google_client_id         = var.google_client_id
     google_client_secret     = var.google_client_secret

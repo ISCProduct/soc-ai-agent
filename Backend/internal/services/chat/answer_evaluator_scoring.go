@@ -72,13 +72,15 @@ func extractSignals(answer string, category string) signalSet {
 		hasAction: shared.ContainsAny(lower, []string{
 			"取り組", "実施", "作成", "作った", "実装", "改善", "対応", "開発", "設計", "検証",
 			"分担", "役割", "リリース", "出した", "進め", "仕上げ", "完了", "提出", "納品", "デプロイ",
-			"まとめた", "進めた", "対応した", "リリースした",
+			"まとめた", "進めた", "対応した", "リリースした", "推進", "展開", // #522: 同義表現拡充
 		}),
 		hasResult: shared.ContainsAny(lower, []string{
 			"結果", "成果", "達成", "改善された", "向上", "成功", "失敗",
-			"リリース", "出した", "出荷", "納品",
+			"リリース", "出した", "出荷", "納品", "実現", "改善でき", // #522: 同義表現拡充
 		}),
-		hasReason: shared.ContainsAny(lower, []string{"理由", "なぜ", "ので", "ため", "から", "だから"}),
+		hasReason: shared.ContainsAny(lower, []string{
+			"理由", "なぜ", "ので", "ため", "から", "だから", "背景", "きっかけ", // #522: 同義表現拡充
+		}),
 		hasNumbersOrTime: regexp.MustCompile(`[0-9]`).MatchString(lower) || shared.ContainsAny(lower, []string{
 			"ヶ月", "年", "週間", "日間", "日で", "%", "人", "回",
 		}),
@@ -98,7 +100,15 @@ func extractSignals(answer string, category string) signalSet {
 	}
 }
 
-func scoreDimensions(rubric string, signals signalSet, answer string) map[string]int {
+// isTooPerfectRelaxedCategories は数値・時間表現を使わない回答が自然な職種カテゴリ。
+// これらのカテゴリでは isTooPerfect（定型文疑い）を適用しない（#522: 誤検知対策）。
+var isTooPerfectRelaxedCategories = map[string]bool{
+	"motivation":           true,
+	"communication_non_it": true,
+	"ui_ux":                true,
+}
+
+func scoreDimensions(rubric string, category string, signals signalSet, answer string) map[string]int {
 	length := len([]rune(strings.TrimSpace(answer)))
 	scores := map[string]int{
 		"relevance":   1,
@@ -107,8 +117,11 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 		"credibility": 1,
 	}
 
-	// 理想的・定型的な回答に対するペナルティ
-	isTooPerfect := !signals.hasReason && !signals.hasNumbersOrTime && length > 50 && signals.hasAction && signals.hasResult
+	// 理想的・定型的な回答に対するペナルティ。
+	// motivation・communication_non_it・ui_ux は数値表現を使わない回答が自然なため、
+	// この判定自体を適用しない（#522）。
+	isTooPerfect := !isTooPerfectRelaxedCategories[category] &&
+		!signals.hasReason && !signals.hasNumbersOrTime && length > 50 && signals.hasAction && signals.hasResult
 
 	if rubric == "collaboration_rubric" && !signals.hasCollaborationTerm {
 		scores["relevance"] = 1
@@ -143,7 +156,7 @@ func scoreDimensions(rubric string, signals signalSet, answer string) map[string
 	if signals.contradiction {
 		scores["credibility"] = 0 // 矛盾あり: 最低評価
 	} else if isTooPerfect {
-		scores["credibility"] = 1 // 理由・数値のない定型回答: 信頼度を落とす
+		scores["credibility"] = 2 // 理由・数値のない定型回答: 減点はするが完全ゼロ評価は避ける（#522）
 	} else if signals.hasNumbersOrTime {
 		scores["credibility"] = 3
 	} else if signals.hasConcreteExample || (signals.hasEmotion && signals.hasReason) {

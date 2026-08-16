@@ -518,7 +518,7 @@ func (c *AdminCompanyGraphController) fetchRelationsWithLLM(ctx context.Context,
 	ctxTimeout, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	text, err := c.openaiClient.ChatCompletionJSON(ctxTimeout, systemPrompt, userPrompt, 0.2, 800)
+	text, err := c.openaiClient.ChatCompletionJSON(ctxTimeout, systemPrompt, userPrompt, 0.2, 800, companyfetch.ExtractModel())
 	if err != nil {
 		return nil, fmt.Errorf("企業関係情報の取得失敗: %w", err)
 	}
