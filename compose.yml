@@ -21,6 +21,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - soc-ai-network
     logging:
@@ -32,6 +34,7 @@ services:
       - NODE_ENV=${NODE_ENV:-development}
       - ANNOTATION_FONT_PATH=${ANNOTATION_FONT_PATH:-/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc}
       - RAG_REVIEW_URL=${RAG_REVIEW_URL:-http://rag-review:9000}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
 
   # 明示的な migrate ワンショット（app 起動前にも実行可能: docker compose run --rm migrate）
   migrate:
@@ -80,6 +83,24 @@ services:
       --collation-server=utf8mb4_unicode_ci
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILE:-3}"
+
+  # レート制限(#617)・asynqキューのバックエンド。未起動でもBackendはインメモリにフォールバックする
+  redis:
+    image: redis:7-alpine
+    container_name: soc-ai-redis
+    restart: unless-stopped
+    networks:
+      - soc-ai-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
