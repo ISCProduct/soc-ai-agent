@@ -157,6 +157,12 @@ variable "openai_api_key_plain" {
   default     = ""
 }
 
+variable "openai_model" {
+  type        = string
+  description = "チャット採点・要約・面接進行など汎用タスクのデフォルトモデル。未設定時はコード側でgpt-4o-miniにフォールバックするが、環境変数の設定漏れ・実験用設定の残留による意図しない高コストモデル化を防ぐため明示的に固定する"
+  default     = "gpt-4o-mini"
+}
+
 variable "resend_api_key_plain" {
   type        = string
   description = "Resend APIキー(平文、Secrets Manager未使用のためuser_dataに直接埋め込む)。未設定時はEMAIL_PROVIDERがlogにフォールバックする"
