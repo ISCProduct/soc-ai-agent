@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/companyfetch"
 	"Backend/internal/openai"
 	"Backend/internal/services/company"
 	"Backend/internal/services/shared"
@@ -273,7 +274,7 @@ func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Con
 	ctxTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	text, err := ctrl.openaiClient.ChatCompletionJSON(ctxTimeout, systemPrompt, userPrompt, 0.2, 500)
+	text, err := ctrl.openaiClient.ChatCompletionJSON(ctxTimeout, systemPrompt, userPrompt, 0.2, 500, companyfetch.ExtractModel())
 	if err != nil {
 		return []map[string]string{}
 	}
