@@ -57,14 +57,15 @@ func TestExtractSignals_noSignals(t *testing.T) {
 // ──────────────────────────────────────────────
 
 // isTooPerfect の条件:
-//   !hasReason && !hasNumbersOrTime && length > 50 && hasAction && hasResult
+//   !isTooPerfectRelaxedCategories[category] && !hasReason && !hasNumbersOrTime && length > 50 && hasAction && hasResult
+// （#522: motivation/communication_non_it/ui_ux カテゴリでは適用しない）
 
-// 定型的・優等生的な回答（理由・数値なし、行動+結果あり、50文字超） → credibility = 1
+// 定型的・優等生的な回答（理由・数値なし、行動+結果あり、50文字超） → credibility = 2
 func TestScoreDimensions_isTooPerfect_appliesPenalty(t *testing.T) {
 	// 理由・数値なし、行動（取り組み）・結果（成果）あり、50文字超
 	answer := "チームで積極的に取り組み、プロジェクトを成功させ素晴らしい成果と達成を収めることができました。大変良い経験でした。"
 	signals := extractSignals(answer, "")
-	scores := scoreDimensions("generic_rubric", signals, answer)
+	scores := scoreDimensions("generic_rubric", "", signals, answer)
 
 	// hasAction と hasResult が検出されていることを前提確認
 	if !signals.hasAction || !signals.hasResult {
@@ -75,9 +76,9 @@ func TestScoreDimensions_isTooPerfect_appliesPenalty(t *testing.T) {
 		t.Skip("テスト用回答に理由・数値が含まれているためスキップ")
 	}
 
-	// credibility は 1（ペナルティ適用）であること
-	if scores["credibility"] != 1 {
-		t.Errorf("isTooPerfect 判定で credibility=1 を期待したが %d が返った", scores["credibility"])
+	// credibility は 2（ペナルティ適用、完全ゼロ評価は避ける #522）であること
+	if scores["credibility"] != 2 {
+		t.Errorf("isTooPerfect 判定で credibility=2 を期待したが %d が返った", scores["credibility"])
 	}
 }
 
@@ -85,7 +86,7 @@ func TestScoreDimensions_isTooPerfect_appliesPenalty(t *testing.T) {
 func TestScoreDimensions_hasReason_notTooPerfect(t *testing.T) {
 	answer := "効率化のために積極的に取り組み、プロジェクトを成功させ素晴らしい成果と達成を収めることができました。大変良い経験でした。"
 	signals := extractSignals(answer, "")
-	scores := scoreDimensions("generic_rubric", signals, answer)
+	scores := scoreDimensions("generic_rubric", "", signals, answer)
 
 	if !signals.hasReason {
 		t.Skip("テスト用回答に「ため」が含まれていない")
@@ -100,7 +101,7 @@ func TestScoreDimensions_hasReason_notTooPerfect(t *testing.T) {
 func TestScoreDimensions_hasNumbersOrTime_notTooPerfect(t *testing.T) {
 	answer := "3ヶ月かけて積極的に取り組み、プロジェクトを成功させ素晴らしい成果と達成を収めることができました。大変良い経験でした。"
 	signals := extractSignals(answer, "")
-	scores := scoreDimensions("generic_rubric", signals, answer)
+	scores := scoreDimensions("generic_rubric", "", signals, answer)
 
 	if !signals.hasNumbersOrTime {
 		t.Skip("テスト用回答に数値・時間が含まれていない")
@@ -115,7 +116,7 @@ func TestScoreDimensions_hasNumbersOrTime_notTooPerfect(t *testing.T) {
 func TestScoreDimensions_shortAnswer_notTooPerfect(t *testing.T) {
 	answer := "取り組み、成果が出ました。" // 50文字未満
 	signals := extractSignals(answer, "")
-	scores := scoreDimensions("generic_rubric", signals, answer)
+	scores := scoreDimensions("generic_rubric", "", signals, answer)
 
 	// 50文字以下なら isTooPerfect は false のはず → credibility が 1 でも別の理由（初期値）
 	// ただし contradiction もないので 0 にはならないことを確認
@@ -134,10 +135,67 @@ func TestScoreDimensions_contradiction_credibilityZero(t *testing.T) {
 		contradiction:    true,
 	}
 	answer := "取り組み、成果と達成と向上を収めました。チームで実施しました。成功しました。大変良い経験でした。"
-	scores := scoreDimensions("generic_rubric", signals, answer)
+	scores := scoreDimensions("generic_rubric", "", signals, answer)
 
 	if scores["credibility"] != 0 {
 		t.Errorf("contradiction ありの場合は credibility=0 を期待したが %d が返った", scores["credibility"])
+	}
+}
+
+// isTooPerfect のカテゴリ別緩和テスト（#522）:
+// motivation・communication_non_it・ui_ux では理由・数値が無い定型回答でも
+// isTooPerfect ペナルティ（credibility=2）を適用せず、デフォルト値(1)のままとする。
+// experience・collaboration・generic では従来どおり厳格適用する。
+func TestScoreDimensions_isTooPerfect_categoryRelaxation(t *testing.T) {
+	// 理由・数値・具体例なし、行動+結果あり、50文字超（isTooPerfect の前提を満たす回答）
+	answer := "チームで施策を推進し、業務プロセスを改善して大きな成果を出すことができました。皆で協力して乗り越えました。"
+	signals := extractSignals(answer, "")
+	if signals.hasReason || signals.hasNumbersOrTime || signals.hasConcreteExample || !signals.hasAction || !signals.hasResult {
+		t.Fatal("テスト用回答の前提シグナルが崩れている")
+	}
+
+	tests := []struct {
+		name     string
+		category string
+		want     int
+	}{
+		{"motivation is relaxed", "motivation", 1},
+		{"communication_non_it is relaxed", "communication_non_it", 1},
+		{"ui_ux is relaxed", "ui_ux", 1},
+		{"experience stays strict", "experience", 2},
+		{"collaboration stays strict", "collaboration", 2},
+		{"generic stays strict", "generic", 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scores := scoreDimensions(rubricForCategory(tt.category), tt.category, signals, answer)
+			if scores["credibility"] != tt.want {
+				t.Errorf("category=%s: credibility=%d を期待したが %d が返った", tt.category, tt.want, scores["credibility"])
+			}
+		})
+	}
+}
+
+// #522: extractSignals の同義表現拡充テスト
+func TestExtractSignals_synonymExpansion(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer string
+		check  func(signalSet) bool
+	}{
+		{"hasAction: 推進した", "新しい施策を推進した", func(s signalSet) bool { return s.hasAction }},
+		{"hasAction: 展開した", "全社に展開した", func(s signalSet) bool { return s.hasAction }},
+		{"hasResult: 実現した", "業務効率化を実現した", func(s signalSet) bool { return s.hasResult }},
+		{"hasResult: 改善できた", "顧客対応を改善できた", func(s signalSet) bool { return s.hasResult }},
+		{"hasReason: 背景として", "背景として人手不足がありました", func(s signalSet) bool { return s.hasReason }},
+		{"hasReason: きっかけは", "きっかけは先輩の一言でした", func(s signalSet) bool { return s.hasReason }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !tt.check(extractSignals(tt.answer, "")) {
+				t.Fatalf("signal not detected for %q", tt.answer)
+			}
+		})
 	}
 }
 
@@ -162,9 +220,9 @@ func TestEvaluateHumanScoring_tooPerfectAnswer_lowScore(t *testing.T) {
 	if !ok {
 		t.Error("DimensionScores に credibility が含まれていない")
 	}
-	// isTooPerfect が適用されれば credibility <= 1
-	if credibility > 1 {
-		t.Errorf("優等生的回答で credibility=%d（期待: <=1）", credibility)
+	// isTooPerfect が適用されれば credibility <= 2（#522: 1→2に緩和し完全ゼロ評価を避ける）
+	if credibility > 2 {
+		t.Errorf("優等生的回答で credibility=%d（期待: <=2）", credibility)
 	}
 }
 
@@ -468,5 +526,30 @@ func TestGetConfidenceLevel(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("score=%d kw=%d got=%q want %q", tc.score, tc.keywords, got, tc.want)
 		}
+	}
+}
+
+// #522: CHAT_EVAL_RULE_WEIGHT によるハイブリッド評価の ruleWeight 上書きテスト
+func TestConfiguredRuleWeight(t *testing.T) {
+	cases := []struct {
+		name     string
+		envValue string
+		fallback float64
+		want     float64
+	}{
+		{"未設定なら fallback を返す", "", 0.55, 0.55},
+		{"有効な値で上書きされる", "0.7", 0.55, 0.7},
+		{"範囲外(負)は fallback を返す", "-0.1", 0.55, 0.55},
+		{"範囲外(1超)は fallback を返す", "1.5", 0.55, 0.55},
+		{"パース不能な値は fallback を返す", "abc", 0.55, 0.55},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CHAT_EVAL_RULE_WEIGHT", tc.envValue)
+			got := configuredRuleWeight(tc.fallback)
+			if got != tc.want {
+				t.Errorf("got=%v want=%v", got, tc.want)
+			}
+		})
 	}
 }

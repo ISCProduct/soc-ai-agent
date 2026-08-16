@@ -35,9 +35,10 @@ func (s *ChatService) handleInvalidAnswerFlow(ctx context.Context, req ChatReque
 		chatResponse.InvalidAnswerCount = validation.InvalidAnswerCount
 		chatResponse.IsTerminated = validation.IsTerminated
 
-		// 3回目の無効回答の場合は完了フラグを立てる
+		// 3回目の無効回答の場合は完了フラグを立て、やり直し/スキップを提案する（#522）
 		if validation.IsTerminated {
 			chatResponse.IsComplete = true
+			chatResponse.SuggestRestart = true
 		}
 	}
 

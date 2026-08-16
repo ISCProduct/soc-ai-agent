@@ -87,7 +87,7 @@ func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.
 		if err := s.sessionValidationRepo.TerminateSession(sessionID); err != nil {
 			log.Printf("Warning: failed to terminate session: %v\n", err)
 		}
-		assistantText = "申し訳ございませんが、質問と関係のない内容が3回続いたため、チャットを終了させていただきます。新しいセッションで最初からやり直してください。"
+		assistantText = "申し訳ございませんが、質問と関係のない内容が3回続いたため、チャットを終了させていただきます。「最初からやり直す」から新しいセッションを開始するか、この質問をスキップして別の話題からお試しください。"
 	} else {
 		// 1-2回目の無効回答 -> 警告メッセージ
 		assistantText = fmt.Sprintf("書かれた内容にはお答えできません。質問に回答してください。（%d/3回目の警告）", validation.InvalidAnswerCount)
