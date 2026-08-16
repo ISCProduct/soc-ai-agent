@@ -417,3 +417,32 @@ jobs:
             -d "{\"sources\": $sources}" \
             --max-time 60 \
             || echo "stagingへの取り込みに失敗しました(停止中の可能性)。スキップします。"
+
+  # developへのマージPRもstagingでは即時確認できるようにする（本番には反映しない）。
+  # pr_numberでべき等のため、後日releaseブランチ経由でmainへ入った際に
+  # sync-whats-new(main)が別途取り込んでも問題ない。ただしmain側のマージPR番号は
+  # develop側の個別PR番号とは別物になるため、同一変更が粒度違いで2件表示される
+  # ことがある（許容: 実害は軽微、必要になれば重複排除を後日検討）。
+  sync-whats-new-develop:
+    needs: deploy-staging
+    if: github.ref_name == 'develop' && always() && needs.deploy-staging.result == 'success'
+    name: Sync whats-new from merged PRs (develop → staging)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Fetch recently merged PRs (base develop) and ingest into staging
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          STAGING_API_BASE: https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }}
+        run: |
+          sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base develop --limit 20 \
+            --json number,title,body,mergedAt \
+            --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
+
+          curl -sf -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Secret: $ADMIN_SECRET" \
+            -d "{\"sources\": $sources}" \
+            --max-time 60 \
+            || echo "stagingへの取り込みに失敗しました(停止中の可能性)。スキップします。"
