@@ -12,16 +12,11 @@ apt-get update -y
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 systemctl enable --now docker
 
-# --- AWS CLI（埋め込みIAMユーザー認証情報。ponytail: 長期キー、IAMロール権限が使えるようになり次第ロールに置換） ---
+# --- AWS CLI（認証情報はインスタンスプロファイル経由のIAMロールを使用。#829） ---
 curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip
 unzip -q /tmp/awscliv2.zip -d /tmp
 /tmp/aws/install
 mkdir -p /root/.aws
-cat > /root/.aws/credentials <<EOF
-[default]
-aws_access_key_id = ${aws_access_key_id}
-aws_secret_access_key = ${aws_secret_access_key}
-EOF
 cat > /root/.aws/config <<EOF
 [default]
 region = ${aws_region}
@@ -46,8 +41,6 @@ DB_NAME=${db_name}
 DB_USER=${db_user}
 DB_PASSWORD=${db_password}
 AWS_REGION=${aws_region}
-AWS_ACCESS_KEY_ID=${aws_access_key_id}
-AWS_SECRET_ACCESS_KEY=${aws_secret_access_key}
 AWS_S3_BUCKET=${s3_bucket}
 S3_BUCKET=${s3_bucket}
 OPENAI_API_KEY=${openai_api_key}
@@ -71,6 +64,7 @@ RAG_REVIEW_URL=http://rag-review:9000
 CHROMA_HOST=chroma
 CHROMA_PORT=8000
 SERVER_PORT=8080
+REDIS_URL=redis://redis:6379/0
 EOF
 chmod 600 /opt/app/.env
 
@@ -91,6 +85,7 @@ services:
       - "8080:8080"
     depends_on:
       - rag-review
+      - redis
   frontend:
     image: ${frontend_image}
     restart: always
@@ -125,6 +120,10 @@ services:
     environment:
       IS_PERSISTENT: "TRUE"
       ANONYMIZED_TELEMETRY: "FALSE"
+  redis:
+    image: redis:7-alpine
+    restart: always
+    logging: *default-logging
 
 volumes:
   chroma_data:

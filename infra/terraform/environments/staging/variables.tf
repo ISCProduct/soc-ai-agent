@@ -150,22 +150,6 @@ variable "additional_secret_arns" {
   default     = []
 }
 
-# --- IAMロールなしのプレーンEC2構成用(main.tfのaws_instance.app参照) ---
-
-variable "aws_access_key_id" {
-  type        = string
-  description = "EC2にIAMロールを付与できないため、user_dataに埋め込むIAMユーザーのアクセスキー(必ずterraform.tfvars、gitignore対象)"
-  sensitive   = true
-  default     = ""
-}
-
-variable "aws_secret_access_key" {
-  type        = string
-  description = "上記のシークレットキー"
-  sensitive   = true
-  default     = ""
-}
-
 variable "openai_api_key_plain" {
   type        = string
   description = "OpenAI APIキー(平文、Secrets Manager未使用のためuser_dataに直接埋め込む)。未設定でも apply 可"
@@ -194,9 +178,9 @@ variable "google_client_id" {
 }
 
 variable "google_client_secret" {
-  type        = string
-  sensitive   = true
-  default     = ""
+  type      = string
+  sensitive = true
+  default   = ""
 }
 
 variable "github_client_id" {
@@ -206,9 +190,9 @@ variable "github_client_id" {
 }
 
 variable "github_client_secret" {
-  type        = string
-  sensitive   = true
-  default     = ""
+  type      = string
+  sensitive = true
+  default   = ""
 }
 
 variable "domain_name" {
