@@ -22,7 +22,7 @@ func (cli *Client) Transcribe(ctx context.Context, audio []byte, filename string
 
 	model := os.Getenv("OPENAI_WHISPER_MODEL")
 	if model == "" {
-		model = "whisper-1"
+		model = "gpt-4o-transcribe"
 	}
 
 	var buf bytes.Buffer
