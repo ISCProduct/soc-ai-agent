@@ -177,6 +177,18 @@ variable "admin_secret_plain" {
   default     = ""
 }
 
+variable "discord_public_key" {
+  type        = string
+  description = "Discord Application の Public Key。Interactions Endpoint署名検証に使用。未設定時はDiscord連携機能を無効化"
+  default     = ""
+}
+
+variable "discord_allowed_role_id" {
+  type        = string
+  description = "本番の指定日終日起動コマンド(/prod-uptime)を実行できるDiscordロールID"
+  default     = ""
+}
+
 variable "google_client_id" {
   type        = string
   description = "Google OAuthクライアントID。コールバックURL https://<api_domain>/api/auth/google/callback をGoogle Cloud Console側で許可しておくこと"
