@@ -16,7 +16,7 @@
 # 注意: langchain-community 0.4+ は langchain-core 1.x を要求し langchain-core<0.4.0 の
 # 制約と衝突するため、langchain-core を0.3.x系に保つ間は langchain-community も<0.4.0に揃える。
 langchain>=0.3.0,<0.4.0
-langchain-community>=0.3.0,<0.4.0
+langchain-community>=0.4.2,<0.5.0
 langchain-core>=0.3.86,<0.4.0
 langchain-openai>=0.3.0,<0.4.0
 langchain-text-splitters>=0.3.11,<0.4.0
