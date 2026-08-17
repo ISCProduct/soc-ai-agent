@@ -272,6 +272,9 @@ resource "aws_route53_record" "frontend" {
   zone_id = data.aws_route53_zone.selected.zone_id
   name    = local.frontend_domain
   type    = "A"
+  # ドメイン取得直後のレジストラ(お名前.com)パーキングページ用レコードが
+  # 既に存在するため、ALB向けレコードで明示的に上書きする。
+  allow_overwrite = true
 
   alias {
     name                   = module.alb.alb_dns_name
@@ -284,6 +287,9 @@ resource "aws_route53_record" "backend" {
   zone_id = data.aws_route53_zone.selected.zone_id
   name    = local.backend_domain
   type    = "A"
+  # ドメイン取得直後のレジストラ(お名前.com)パーキングページ用レコードが
+  # 既に存在するため、ALB向けレコードで明示的に上書きする。
+  allow_overwrite = true
 
   alias {
     name                   = module.alb.alb_dns_name
