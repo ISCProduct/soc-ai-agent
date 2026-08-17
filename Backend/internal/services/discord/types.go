@@ -14,9 +14,10 @@ const (
 type ResponseType int
 
 const (
-	ResponseTypePong                     ResponseType = 1
-	ResponseTypeChannelMessageWithSource ResponseType = 4
-	ResponseTypeModal                    ResponseType = 9
+	ResponseTypePong                             ResponseType = 1
+	ResponseTypeChannelMessageWithSource         ResponseType = 4
+	ResponseTypeDeferredChannelMessageWithSource ResponseType = 5
+	ResponseTypeModal                            ResponseType = 9
 )
 
 type ComponentType int
@@ -33,10 +34,14 @@ const (
 )
 
 // Interaction はDiscordから届くリクエストボディ。
+// ApplicationID/Token は、type=5(deferred)で即時応答した後にフォローアップメッセージを
+// 送る(PATCH /webhooks/{application_id}/{token}/messages/@original)際に必要。
 type Interaction struct {
-	Type   InteractionType  `json:"type"`
-	Member *Member          `json:"member"`
-	Data   *InteractionData `json:"data"`
+	Type          InteractionType  `json:"type"`
+	ApplicationID string           `json:"application_id"`
+	Token         string           `json:"token"`
+	Member        *Member          `json:"member"`
+	Data          *InteractionData `json:"data"`
 }
 
 type Member struct {

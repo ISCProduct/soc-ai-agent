@@ -2,11 +2,13 @@ package discord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -25,6 +27,10 @@ var dateOnlyPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 type UptimeService struct {
 	client        *ssm.Client
 	parameterName string
+	// ponytail: read-modify-writeの排他はプロセス内mutexのみ。
+	// staging EC2は単一インスタンス運用(#829)のため実害はないが、複数インスタンス化する場合は
+	// SSM単体にCAS機構が無いため、DynamoDB等を使った分散ロックへの置き換えが必要。
+	mu sync.Mutex
 }
 
 // NewUptimeServiceFromEnv はAWSデフォルトクレデンシャルチェーン(IAMロール等)でクライアントを構築する。
@@ -63,6 +69,9 @@ func (s *UptimeService) AddDate(ctx context.Context, date string) ([]string, err
 		return nil, fmt.Errorf("過去の日付は指定できません（今日: %s）", today)
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	dates, err := s.listDates(ctx)
 	if err != nil {
 		return nil, err
@@ -91,7 +100,8 @@ func (s *UptimeService) AddDate(ctx context.Context, date string) ([]string, err
 func (s *UptimeService) listDates(ctx context.Context) ([]string, error) {
 	out, err := s.client.GetParameter(ctx, &ssm.GetParameterInput{Name: aws.String(s.parameterName)})
 	if err != nil {
-		if strings.Contains(err.Error(), "ParameterNotFound") {
+		var notFound *ssmtypes.ParameterNotFound
+		if errors.As(err, &notFound) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("SSM parameter取得に失敗しました: %w", err)

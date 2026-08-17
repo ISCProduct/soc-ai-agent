@@ -2,11 +2,13 @@ package controllers
 
 import (
 	"Backend/internal/services/discord"
+	"context"
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -29,11 +31,17 @@ func NewDiscordInteractionController(uptimeService *discord.UptimeService) *Disc
 	}
 }
 
+// maxInteractionBodyBytes はDiscord Interactionペイロードの許容上限。
+// 実際のペイロード(モーダル1入力分)は数百バイト程度なので十分な余裕を持たせつつ、
+// 署名検証前の無制限読み取りによるDoSを防ぐ。
+const maxInteractionBodyBytes = 1 << 20 // 1MiB
+
 // Interactions POST /api/discord/interactions
 func (c *DiscordInteractionController) Interactions(ctx echo.Context) error {
+	ctx.Request().Body = http.MaxBytesReader(ctx.Response(), ctx.Request().Body, maxInteractionBodyBytes)
 	body, err := io.ReadAll(ctx.Request().Body)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "failed to read body")
+		return echo.NewHTTPError(http.StatusRequestEntityTooLarge, "request body too large")
 	}
 
 	signature := ctx.Request().Header.Get("X-Signature-Ed25519")
@@ -135,22 +143,31 @@ func (c *DiscordInteractionController) handleModalSubmit(ctx echo.Context, inter
 		})
 	}
 
-	dates, err := c.uptimeService.AddDate(ctx.Request().Context(), date)
-	if err != nil {
-		log.Printf("[Discord] prod-uptime add error: %v", err)
-		return ctx.JSON(http.StatusOK, discord.InteractionResponse{
-			Type: discord.ResponseTypeChannelMessageWithSource,
-			Data: &discord.InteractionResponseData{Content: err.Error(), Flags: discord.EphemeralFlag},
-		})
-	}
+	// SSMへの読み書きがDiscordの3秒応答制限を超える可能性があるため、
+	// 先にdeferred応答(type=5)を返し、実処理は非同期でフォローアップメッセージとして送る。
+	applicationID, token := interaction.ApplicationID, interaction.Token
+	go c.addDateAndFollowUp(applicationID, token, date)
 
 	return ctx.JSON(http.StatusOK, discord.InteractionResponse{
-		Type: discord.ResponseTypeChannelMessageWithSource,
-		Data: &discord.InteractionResponseData{
-			Content: "✅ " + date + " を本番終日起動の対象日に追加しました。\n登録済みの日付: " + joinDates(dates),
-			Flags:   discord.EphemeralFlag,
-		},
+		Type: discord.ResponseTypeDeferredChannelMessageWithSource,
+		Data: &discord.InteractionResponseData{Flags: discord.EphemeralFlag},
 	})
+}
+
+func (c *DiscordInteractionController) addDateAndFollowUp(applicationID, token, date string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dates, err := c.uptimeService.AddDate(ctx, date)
+	content := "✅ " + date + " を本番終日起動の対象日に追加しました。\n登録済みの日付: " + joinDates(dates)
+	if err != nil {
+		log.Printf("[Discord] prod-uptime add error: %v", err)
+		content = err.Error()
+	}
+
+	if err := discord.EditOriginalResponse(applicationID, token, content); err != nil {
+		log.Printf("[Discord] prod-uptime followup error: %v", err)
+	}
 }
 
 func (c *DiscordInteractionController) hasAllowedRole(interaction *discord.Interaction) bool {
