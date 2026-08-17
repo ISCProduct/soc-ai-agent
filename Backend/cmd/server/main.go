@@ -20,6 +20,7 @@ import (
 	"Backend/internal/services/chat"
 	"Backend/internal/services/company"
 	"Backend/internal/services/costs"
+	"Backend/internal/services/discord"
 	"Backend/internal/services/email"
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/gbizinfo"
@@ -35,6 +36,7 @@ import (
 	"Backend/internal/services/skillscore"
 	"Backend/internal/services/storage"
 	"Backend/migrations"
+	"context"
 	"log"
 	"log/slog"
 	"net/http"
@@ -377,6 +379,14 @@ func main() {
 	companyEntryController := controllers.NewCompanyEntryController(companyEntryService)
 	releaseNoteService := services.NewReleaseNoteService(db, aiClient)
 	releaseNoteController := controllers.NewReleaseNoteController(releaseNoteService)
+	// Discord経由での本番「指定日終日起動」登録(#829台のインフラ方針参照)。
+	// AWS認証情報が取れない環境(ローカル等)でも起動は継続し、機能のみ無効化する。
+	discordUptimeService, discordErr := discord.NewUptimeServiceFromEnv(context.Background())
+	if discordErr != nil {
+		log.Printf("[Discord] uptime service disabled: %v", discordErr)
+		discordUptimeService = nil
+	}
+	discordInteractionController := controllers.NewDiscordInteractionController(discordUptimeService)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := controllers.NewESRewriteController(aiClient)
 	scheduleRepo := repositories.NewScheduleRepository(db)
@@ -447,6 +457,9 @@ func main() {
 	// CI(GitHub Actions)からのマシン間呼び出しのため、ログインユーザー前提のEchoAdminAuthではなく
 	// 共有シークレットのみで認証する(#861)
 	api.POST("/admin/whats-new/ingest", releaseNoteController.Ingest, routes.EchoStaticSecretAuth(cfg.AdminSecret))
+	// Discord Interactions Endpoint。認証はEd25519署名検証(DISCORD_PUBLIC_KEY)で行うため
+	// 通常のuser/adminミドルウェアは使わない。
+	api.POST("/discord/interactions", discordInteractionController.Interactions)
 
 	go crawlService.StartScheduler()
 
