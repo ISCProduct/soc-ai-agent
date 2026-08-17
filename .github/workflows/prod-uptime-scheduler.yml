@@ -1,0 +1,58 @@
+name: Prod uptime scheduler
+
+# 本番(ECS Fargate)の「指定日は終日起動」ポリシーを毎時照合する。
+# docs/architecture/infra-decision-oci-stg-aws-prod.md の (B) 指定日終日起動 を実現する。
+# 日付リストはDiscordの /prod-uptime コマンド(Backend: /api/discord/interactions)で
+# SSM Parameter Store (/soc-app/prod-uptime-dates, カンマ区切り) に追加される。
+#
+# ponytail: デプロイ中(deployment.yml)との競合を防ぐロックは未実装。
+# 反映作業と本ジョブの実行が重なった場合、一時的にdesired_countが競合する可能性がある。
+# 実運用で問題になれば、SSM Parameterへのメンテナンスロックフラグ追加を検討する。
+
+on:
+  schedule:
+    - cron: "5 * * * *" # 毎時5分(UTC)
+  workflow_dispatch:
+
+jobs:
+  sync-prod-uptime:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
+      PROJECT_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Determine desired state and apply
+        run: |
+          set -e
+
+          TODAY_JST=$(TZ=Asia/Tokyo date +%F)
+
+          DATES=$(aws ssm get-parameter --name "/${PROJECT_NAME}/prod-uptime-dates" \
+            --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+
+          DESIRED=0
+          if echo ",$DATES," | grep -q ",$TODAY_JST,"; then
+            DESIRED=1
+            echo "today ($TODAY_JST) is an uptime date -> desired_count=1"
+          else
+            echo "today ($TODAY_JST) is not an uptime date -> desired_count=0"
+          fi
+
+          for SERVICE in backend frontend; do
+            CURRENT=$(aws ecs describe-services --cluster "$PROJECT_NAME" --services "$SERVICE" \
+              --query 'services[0].desiredCount' --output text 2>/dev/null || echo "")
+            if [ "$CURRENT" == "$DESIRED" ]; then
+              echo "$SERVICE already at desired_count=$DESIRED, skipping"
+              continue
+            fi
+            aws ecs update-service --cluster "$PROJECT_NAME" --service "$SERVICE" \
+              --desired-count "$DESIRED" > /dev/null
+            echo "$SERVICE updated: $CURRENT -> $DESIRED"
+          done
