@@ -74,7 +74,18 @@ func (c *DiscordInteractionController) Interactions(ctx echo.Context) error {
 }
 
 func (c *DiscordInteractionController) handleCommand(ctx echo.Context, interaction *discord.Interaction) error {
-	if interaction.Data == nil || interaction.Data.Name != discord.CommandNameProdUptime {
+	if interaction.Data == nil {
+		return ctx.JSON(http.StatusOK, discord.InteractionResponse{
+			Type: discord.ResponseTypeChannelMessageWithSource,
+			Data: &discord.InteractionResponseData{Content: "不明なコマンドです。", Flags: discord.EphemeralFlag},
+		})
+	}
+
+	if interaction.Data.Name == discord.CommandNameProdUptimeList {
+		return c.handleListCommand(ctx)
+	}
+
+	if interaction.Data.Name != discord.CommandNameProdUptime {
 		return ctx.JSON(http.StatusOK, discord.InteractionResponse{
 			Type: discord.ResponseTypeChannelMessageWithSource,
 			Data: &discord.InteractionResponseData{Content: "不明なコマンドです。", Flags: discord.EphemeralFlag},
@@ -107,6 +118,33 @@ func (c *DiscordInteractionController) handleCommand(ctx echo.Context, interacti
 					},
 				},
 			},
+		},
+	})
+}
+
+// handleListCommand は登録済み日付一覧を返す(閲覧専用、ロール制限なし)。
+func (c *DiscordInteractionController) handleListCommand(ctx echo.Context) error {
+	if c.uptimeService == nil {
+		return ctx.JSON(http.StatusOK, discord.InteractionResponse{
+			Type: discord.ResponseTypeChannelMessageWithSource,
+			Data: &discord.InteractionResponseData{Content: "現在この機能は利用できません(未設定)。", Flags: discord.EphemeralFlag},
+		})
+	}
+
+	dates, err := c.uptimeService.ListDates(ctx.Request().Context())
+	if err != nil {
+		log.Printf("[Discord] prod-uptime list error: %v", err)
+		return ctx.JSON(http.StatusOK, discord.InteractionResponse{
+			Type: discord.ResponseTypeChannelMessageWithSource,
+			Data: &discord.InteractionResponseData{Content: err.Error(), Flags: discord.EphemeralFlag},
+		})
+	}
+
+	return ctx.JSON(http.StatusOK, discord.InteractionResponse{
+		Type: discord.ResponseTypeChannelMessageWithSource,
+		Data: &discord.InteractionResponseData{
+			Content: "本番終日起動の登録済み日付: " + joinDates(dates),
+			Flags:   discord.EphemeralFlag,
 		},
 	})
 }
