@@ -35,6 +35,31 @@ func TestAuthServiceLogin_TenantMismatchRejected(t *testing.T) {
 	}
 }
 
+// プラットフォーム管理者(is_admin)は所属組織と異なる学園サブドメインからでも
+// tenant mismatchで弾かれない。
+func TestAuthServiceLogin_TenantMismatchAllowedForAdmin(t *testing.T) {
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("password123"), bcryptCost)
+	if err != nil {
+		t.Fatalf("password hash failed: %v", err)
+	}
+	now := time.Now()
+	admin := &entity.User{
+		ID:              1,
+		Email:           "admin@example.com",
+		Password:        string(passwordHash),
+		Name:            "Admin",
+		TargetLevel:     "新卒",
+		OrganizationID:  1,
+		IsAdmin:         true,
+		EmailVerifiedAt: &now,
+	}
+	service := NewAuthService(&userRepoAuthStub{user: admin}, &pendingRepoAuthStub{}, nil)
+
+	if _, err := service.Login(LoginRequest{Email: admin.Email, Password: "password123"}, 2); err != nil {
+		t.Fatalf("expected admin login to succeed across tenants, got: %v", err)
+	}
+}
+
 func TestAuthServiceRegister_AssignsTenantOrganization(t *testing.T) {
 	repo := &userRepoAuthStub{}
 	service := NewAuthService(repo, &pendingRepoAuthStub{}, &email.EmailService{})

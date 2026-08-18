@@ -134,7 +134,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, te
 		}
 
 		if existingUser != nil {
-			if tenantOrgID != 0 && existingUser.OrganizationID != tenantOrgID {
+			if tenantOrgID != 0 && !existingUser.IsAdmin && existingUser.OrganizationID != tenantOrgID {
 				return nil, errors.New("tenant mismatch")
 			}
 			// 既存ユーザーにOAuth情報を紐付け
@@ -166,7 +166,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, te
 				return nil, fmt.Errorf("failed to create user: %w", err)
 			}
 		}
-	} else if tenantOrgID != 0 && user.OrganizationID != tenantOrgID {
+	} else if tenantOrgID != 0 && !user.IsAdmin && user.OrganizationID != tenantOrgID {
 		return nil, errors.New("tenant mismatch")
 	}
 
@@ -245,7 +245,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string, te
 		}
 
 		if existingUser != nil {
-			if tenantOrgID != 0 && existingUser.OrganizationID != tenantOrgID {
+			if tenantOrgID != 0 && !existingUser.IsAdmin && existingUser.OrganizationID != tenantOrgID {
 				return nil, errors.New("tenant mismatch")
 			}
 			// 既存ユーザーにOAuth情報を紐付け
@@ -285,7 +285,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string, te
 				return nil, fmt.Errorf("failed to create user: %w", err)
 			}
 		}
-	} else if tenantOrgID != 0 && user.OrganizationID != tenantOrgID {
+	} else if tenantOrgID != 0 && !user.IsAdmin && user.OrganizationID != tenantOrgID {
 		return nil, errors.New("tenant mismatch")
 	}
 
