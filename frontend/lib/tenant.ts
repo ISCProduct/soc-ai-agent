@@ -13,6 +13,8 @@ export function extractTenantSlug(host: string): string | undefined {
 }
 
 // admin.shukatsu-ai.jp からのアクセスかどうか(管理画面サブドメイン)。
+// 完全一致のみ許可する(admin.example.com や admin.foo.shukatsu-ai.jp、
+// administrator.shukatsu-ai.jp のような紛らわしいホストを誤って管理画面扱いしないため)。
 export function isAdminHost(host: string): boolean {
-  return host.split(':')[0].split('.')[0] === 'admin'
+  return host.split(':')[0] === 'admin.shukatsu-ai.jp'
 }
