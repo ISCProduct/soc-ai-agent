@@ -59,6 +59,22 @@ export default function AdminDashboardPage() {
           <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
+                学園(組織)管理
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                学園サブドメインの登録・契約プラン・契約期間を管理します。
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Button variant="contained" component={Link} href="/admin/organizations">
+                学園管理へ
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card elevation={0} sx={cardSx}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
                 企業情報
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
