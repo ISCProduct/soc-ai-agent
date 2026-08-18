@@ -301,9 +301,13 @@ func main() {
 	infoFetcher := company.NewCompanyInfoFetcher(companyRepo, aiClient, gbizInfoService)
 	infoFetcher.SetSearchBudget(companySearchBudget)
 	infoFetcher.SetSearchFlight(companySearchFlight)
+	// 関連企業として新規作成された会社(gbizinfo経由/AI検索経由の両方)にも
+	// infoFetcherで詳細情報を充填する(空データの企業が量産される問題への対応)。
+	gbizInfoService.SetDetailFetcher(infoFetcher)
 	relationsFetcher := company.NewCompanyRelationsFetcher(companyRepo, companyRelationRepo, aiClient, gbizInfoService)
 	relationsFetcher.SetSearchBudget(companySearchBudget)
 	relationsFetcher.SetSearchFlight(companySearchFlight)
+	relationsFetcher.SetInfoFetcher(infoFetcher)
 	jobFetcher := company.NewJobFetchService(companyRepo, aiClient)
 	jobFetcher.SetSearchBudget(companySearchBudget)
 	jobFetcher.SetSearchFlight(companySearchFlight)

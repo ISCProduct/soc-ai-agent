@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -20,12 +21,28 @@ import (
 )
 
 type GBizInfoService struct {
-	baseURL      string
-	token        string
-	client       *http.Client
-	repo         repository.GBizInfoRepository
-	companyRepo  repository.CompanyRepository
-	relationRepo repository.CompanyRelationRepository
+	baseURL       string
+	token         string
+	client        *http.Client
+	repo          repository.GBizInfoRepository
+	companyRepo   repository.CompanyRepository
+	relationRepo  repository.CompanyRelationRepository
+	detailFetcher CompanyDetailFetcher
+}
+
+// CompanyDetailFetcher は関連企業として新規作成した会社の詳細情報(業種・住所・URL等)を
+// 取得・保存する。company.CompanyInfoFetcher が実装する(company側から注入する。
+// gbizinfoパッケージはcompanyパッケージをimportできない循環依存のため、最小限の
+// インターフェースをここで宣言する)。
+type CompanyDetailFetcher interface {
+	FetchAndSaveDetails(ctx context.Context, companyID uint) error
+}
+
+// SetDetailFetcher は関連企業の詳細情報を充填するfetcherを注入する(未設定なら空データのまま)。
+func (s *GBizInfoService) SetDetailFetcher(f CompanyDetailFetcher) {
+	if s != nil {
+		s.detailFetcher = f
+	}
 }
 
 type GBizSearchResult struct {
@@ -142,7 +159,7 @@ func (s *GBizInfoService) SyncCompany(ctx context.Context, companyID uint) (*GBi
 		}
 		workplaceUpdated = true
 	}
-	if err := s.updateBusinessRelations(company, procurements, subsidies); err != nil {
+	if err := s.updateBusinessRelations(ctx, company, procurements, subsidies); err != nil {
 		return s.syncFailed(company, err.Error())
 	}
 
@@ -354,13 +371,14 @@ func applyGBizProfile(company *models.Company, profile *models.GBizCompanyProfil
 	}
 }
 
-func (s *GBizInfoService) updateBusinessRelations(company *models.Company, procurements []models.GBizProcurement, subsidies []models.GBizSubsidy) error {
+func (s *GBizInfoService) updateBusinessRelations(ctx context.Context, company *models.Company, procurements []models.GBizProcurement, subsidies []models.GBizSubsidy) error {
 	if s.relationRepo == nil {
 		return nil
 	}
 	for _, item := range procurements {
 		// 入札・調達の相手は発注元の省庁・自治体を記載する。曖昧な共同企業体名は入れない。
 		if err := s.upsertProcurementStyleRelation(
+			ctx,
 			company,
 			item.GovernmentDepartments,
 			item.Title,
@@ -372,6 +390,7 @@ func (s *GBizInfoService) updateBusinessRelations(company *models.Company, procu
 	}
 	for _, item := range subsidies {
 		if err := s.upsertProcurementStyleRelation(
+			ctx,
 			company,
 			item.GovernmentDepartments,
 			item.Title,
@@ -385,7 +404,7 @@ func (s *GBizInfoService) updateBusinessRelations(company *models.Company, procu
 }
 
 // upsertProcurementStyleRelation は調達・補助金の関係先として、はっきりした省庁・発注機関名のみを保存する。
-func (s *GBizInfoService) upsertProcurementStyleRelation(company *models.Company, agency, title, date, relationType string) error {
+func (s *GBizInfoService) upsertProcurementStyleRelation(ctx context.Context, company *models.Company, agency, title, date, relationType string) error {
 	if company == nil {
 		return nil
 	}
@@ -393,7 +412,7 @@ func (s *GBizInfoService) upsertProcurementStyleRelation(company *models.Company
 		if strings.EqualFold(name, company.Name) {
 			continue
 		}
-		partnerCompany, err := s.findOrCreateProvisionalPartner(name)
+		partnerCompany, err := s.findOrCreateProvisionalPartner(ctx, name)
 		if err != nil {
 			return err
 		}
@@ -450,7 +469,7 @@ func splitClearAgencyNames(raw string) []string {
 	return out
 }
 
-func (s *GBizInfoService) findOrCreateProvisionalPartner(name string) (*models.Company, error) {
+func (s *GBizInfoService) findOrCreateProvisionalPartner(ctx context.Context, name string) (*models.Company, error) {
 	partnerCompany, err := s.companyRepo.FindByName(name)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
@@ -473,6 +492,14 @@ func (s *GBizInfoService) findOrCreateProvisionalPartner(name string) (*models.C
 			return existing, nil
 		}
 		return nil, err
+	}
+	// 新規作成した関連企業自体の詳細情報(業種・住所・URL等)を埋める。
+	// 失敗しても関係の保存自体はブロックしない(空データのまま残るがdraft/is_provisionalで
+	// 識別でき、後から個別に再取得できるため)。
+	if s.detailFetcher != nil {
+		if err := s.detailFetcher.FetchAndSaveDetails(ctx, partnerCompany.ID); err != nil {
+			log.Printf("[GBizInfo] 関連企業%q(id=%d)の詳細情報取得に失敗: %v", name, partnerCompany.ID, err)
+		}
 	}
 	return partnerCompany, nil
 }
