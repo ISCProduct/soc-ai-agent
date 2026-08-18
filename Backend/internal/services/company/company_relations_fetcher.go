@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -54,6 +55,15 @@ type CompanyRelationsFetcher struct {
 	llm          *companyfetch.LLM
 	gbiz         *gbizinfo.GBizInfoService
 	flight       *CompanySearchFlight
+	infoFetcher  *CompanyInfoFetcher
+}
+
+// SetInfoFetcher は関連企業として新規作成した会社の詳細情報(業種・住所・URL等)を
+// 埋めるためのfetcherを注入する(未設定なら空データのまま作成される)。
+func (f *CompanyRelationsFetcher) SetInfoFetcher(infoFetcher *CompanyInfoFetcher) {
+	if f != nil {
+		f.infoFetcher = infoFetcher
+	}
 }
 
 func NewCompanyRelationsFetcher(
@@ -146,7 +156,7 @@ func (f *CompanyRelationsFetcher) FetchAndSave(ctx context.Context, companyID ui
 		return nil, fmt.Errorf("company relations acquire returned nil")
 	}
 
-	saved, err := f.persistResult(company, result)
+	saved, err := f.persistResult(ctx, company, result)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +183,7 @@ func (f *CompanyRelationsFetcher) LoadSaved(companyID uint) (*CompanyRelationsRe
 }
 
 // ConfirmAndSave はプレビュー済みの関係・市場情報を LLM 再実行なしで DB に確定保存する。
-func (f *CompanyRelationsFetcher) ConfirmAndSave(companyID uint, result *CompanyRelationsResult) (*CompanyRelationsResult, error) {
+func (f *CompanyRelationsFetcher) ConfirmAndSave(ctx context.Context, companyID uint, result *CompanyRelationsResult) (*CompanyRelationsResult, error) {
 	if result == nil {
 		return nil, fmt.Errorf("result is required")
 	}
@@ -182,7 +192,7 @@ func (f *CompanyRelationsFetcher) ConfirmAndSave(companyID uint, result *Company
 		return nil, fmt.Errorf("company not found: %w", err)
 	}
 
-	saved, err := f.persistResult(company, result)
+	saved, err := f.persistResult(ctx, company, result)
 	if err != nil {
 		return nil, err
 	}
@@ -461,7 +471,7 @@ func (f *CompanyRelationsFetcher) buildResultFromExisting(
 	}, nil
 }
 
-func (f *CompanyRelationsFetcher) persistResult(company *models.Company, result *CompanyRelationsResult) (int, error) {
+func (f *CompanyRelationsFetcher) persistResult(ctx context.Context, company *models.Company, result *CompanyRelationsResult) (int, error) {
 	if f.relationRepo == nil {
 		return 0, fmt.Errorf("relation repository is nil")
 	}
@@ -491,6 +501,14 @@ func (f *CompanyRelationsFetcher) persistResult(company *models.Company, result 
 			}
 			if err := f.companyRepo.Create(toCompany); err != nil {
 				continue
+			}
+			// 新規作成した関連企業自体の詳細情報(業種・住所・URL等)を埋める。
+			// 失敗しても関係の保存自体はブロックしない(空データのまま残るがdraft/is_provisionalで
+			// 識別でき、後から個別に再取得できるため)。
+			if f.infoFetcher != nil {
+				if _, err := f.infoFetcher.FetchAndSave(ctx, toCompany.ID, false); err != nil {
+					log.Printf("[CompanyRelations] 関連企業%q(id=%d)の詳細情報取得に失敗: %v", name, toCompany.ID, err)
+				}
 			}
 		}
 		// 種別ラベル（主要取引先など）は保存せず、具体的な取引内容のみ残す

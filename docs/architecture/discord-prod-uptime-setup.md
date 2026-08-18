@@ -5,6 +5,9 @@
 `infra-decision-oci-stg-aws-prod.md` の本番起動ポリシー「(B) 指定日は終日起動」を、
 Discordのスラッシュコマンド `/prod-uptime` から操作できるようにする機能のセットアップ手順。
 
+- `/prod-uptime`: 日付の追加(モーダル入力)。`DISCORD_ALLOWED_ROLE_ID`のロール保有者のみ実行可
+- `/prod-uptime-list`: 登録済み日付一覧の表示。ロール制限なし(サーバー参加者なら誰でも閲覧可)
+
 ## 仕組み
 
 ```
