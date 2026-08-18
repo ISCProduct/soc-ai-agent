@@ -100,7 +100,9 @@ func (c *OAuthController) GoogleCallback(ctx echo.Context) error {
 
 	code := ctx.QueryParam("code")
 	if code == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "Authorization code not found")
+		// ユーザーがOAuth同意画面で拒否した場合等、プロバイダはcodeの代わりに
+		// error=access_denied等を返す。他のエラーと同様にテナントへリダイレクトする。
+		return ctx.Redirect(http.StatusTemporaryRedirect, redirectBase+"?error=auth_failed")
 	}
 
 	resp, err := c.oauthService.HandleGoogleCallback(ctx.Request().Context(), code, c.resolveTenantOrgID(tenantSlug))
@@ -156,7 +158,9 @@ func (c *OAuthController) GitHubCallback(ctx echo.Context) error {
 
 	code := ctx.QueryParam("code")
 	if code == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "Authorization code not found")
+		// ユーザーがOAuth同意画面で拒否した場合等、プロバイダはcodeの代わりに
+		// error=access_denied等を返す。他のエラーと同様にテナントへリダイレクトする。
+		return ctx.Redirect(http.StatusTemporaryRedirect, redirectBase+"?error=auth_failed")
 	}
 
 	resp, err := c.oauthService.HandleGitHubCallback(ctx.Request().Context(), code, c.resolveTenantOrgID(tenantSlug))
