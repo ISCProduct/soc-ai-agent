@@ -19,6 +19,10 @@ permissions: {}
 jobs:
   sync-prod-uptime:
     runs-on: ubuntu-latest
+    # ECS(本番)へのアクセスにはproduction環境のAWS認証情報が必要。
+    # 未指定だとリポジトリ既定のAWS_ACCESS_KEY_ID(旧・ECSクラスタ作成前の認証情報)が使われ、
+    # ClusterNotFoundExceptionになる(実際に発生した障害)。
+    environment: production
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
       PROJECT_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}
