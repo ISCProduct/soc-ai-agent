@@ -161,6 +161,17 @@ resource "aws_secretsmanager_secret_version" "openai" {
   secret_string = jsonencode({
     openai_api_key = var.openai_api_key
   })
+
+  lifecycle {
+    # openai_api_key/openai_secret_arnの両方が空のままapplyされると、OPENAI_API_KEYが
+    # 空文字で本番backendが起動時にクラッシュする(過去に実際発生した障害)。
+    # variable validationでのvar間参照はTerraform 1.9+が必要(このリポジトリの
+    # required_version >= 1.5.0と非互換)なため、resourceのpreconditionで検証する。
+    precondition {
+      condition     = var.openai_api_key != "" || var.openai_secret_arn != ""
+      error_message = "openai_api_key と openai_secret_arn のいずれかを設定してください(両方空だと本番backendが起動できません)。"
+    }
+  }
 }
 
 module "network" {
@@ -295,10 +306,15 @@ module "backend" {
   }
   extra_container_definitions = [
     {
-      name         = "redis"
-      image        = "redis:7-alpine"
-      essential    = false
-      memory       = 64
+      name      = "redis"
+      image     = "redis:7-alpine"
+      essential = false
+      memory    = 64
+      # コンテナのメモリハードリミット(64MiB)を超えるとOOM Killされるため、Redis自体の
+      # maxmemoryはプロセスオーバーヘッド分の余裕を見て低めに設定する。noevictionにして、
+      # 上限到達時はデータ(asynqのキュー・レートリミット用キー)を黙って捨てず書き込みエラーに
+      # する(キュー済みジョブの消失より、書き込み失敗で気づける方を優先)。
+      command      = ["redis-server", "--maxmemory", "48mb", "--maxmemory-policy", "noeviction"]
       portMappings = []
     }
   ]
