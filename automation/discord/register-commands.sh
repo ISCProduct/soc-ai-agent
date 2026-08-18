@@ -25,6 +25,11 @@ curl -sf -X PUT \
       "name": "prod-uptime",
       "description": "本番を終日起動する日付を追加します",
       "type": 1
+    },
+    {
+      "name": "prod-uptime-list",
+      "description": "本番終日起動の登録済み日付を表示します(誰でも閲覧可)",
+      "type": 1
     }
   ]'
 
