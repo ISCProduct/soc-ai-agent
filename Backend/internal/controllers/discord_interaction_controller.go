@@ -4,6 +4,8 @@ import (
 	"Backend/internal/services/discord"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -74,7 +76,18 @@ func (c *DiscordInteractionController) Interactions(ctx echo.Context) error {
 }
 
 func (c *DiscordInteractionController) handleCommand(ctx echo.Context, interaction *discord.Interaction) error {
-	if interaction.Data == nil || interaction.Data.Name != discord.CommandNameProdUptime {
+	if interaction.Data == nil {
+		return ctx.JSON(http.StatusOK, discord.InteractionResponse{
+			Type: discord.ResponseTypeChannelMessageWithSource,
+			Data: &discord.InteractionResponseData{Content: "不明なコマンドです。", Flags: discord.EphemeralFlag},
+		})
+	}
+
+	if interaction.Data.Name == discord.CommandNameProdUptimeList {
+		return c.handleListCommand(interaction, ctx)
+	}
+
+	if interaction.Data.Name != discord.CommandNameProdUptime {
 		return ctx.JSON(http.StatusOK, discord.InteractionResponse{
 			Type: discord.ResponseTypeChannelMessageWithSource,
 			Data: &discord.InteractionResponseData{Content: "不明なコマンドです。", Flags: discord.EphemeralFlag},
@@ -109,6 +122,43 @@ func (c *DiscordInteractionController) handleCommand(ctx echo.Context, interacti
 			},
 		},
 	})
+}
+
+// handleListCommand は登録済み日付一覧を返す(閲覧専用、ロール制限なし)。
+// SSM読み取りがDiscordの3秒応答制限を超える可能性があるため、handleModalSubmitと
+// 同様にdeferred応答(type=5)を返し、実処理は非同期でフォローアップメッセージとして送る。
+func (c *DiscordInteractionController) handleListCommand(interaction *discord.Interaction, ctx echo.Context) error {
+	if c.uptimeService == nil {
+		return ctx.JSON(http.StatusOK, discord.InteractionResponse{
+			Type: discord.ResponseTypeChannelMessageWithSource,
+			Data: &discord.InteractionResponseData{Content: "現在この機能は利用できません(未設定)。", Flags: discord.EphemeralFlag},
+		})
+	}
+
+	applicationID, token := interaction.ApplicationID, interaction.Token
+	go c.listDatesAndFollowUp(applicationID, token)
+
+	return ctx.JSON(http.StatusOK, discord.InteractionResponse{
+		Type: discord.ResponseTypeDeferredChannelMessageWithSource,
+		Data: &discord.InteractionResponseData{Flags: discord.EphemeralFlag},
+	})
+}
+
+func (c *DiscordInteractionController) listDatesAndFollowUp(applicationID, token string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dates, err := c.uptimeService.ListDates(ctx)
+	// SSMのエラー内容(ARN等の内部情報を含みうる)はDiscordへ返さずログにのみ残す。
+	content := "本番終日起動の登録済み日付: " + joinDates(dates)
+	if err != nil {
+		log.Printf("[Discord] prod-uptime list error: %v", err)
+		content = "日付一覧の取得に失敗しました。時間を置いて再度お試しください。"
+	}
+
+	if err := discord.EditOriginalResponse(applicationID, token, content); err != nil {
+		log.Printf("[Discord] prod-uptime list followup error: %v", err)
+	}
 }
 
 func (c *DiscordInteractionController) handleModalSubmit(ctx echo.Context, interaction *discord.Interaction) error {
@@ -162,7 +212,7 @@ func (c *DiscordInteractionController) addDateAndFollowUp(applicationID, token, 
 	content := "✅ " + date + " を本番終日起動の対象日に追加しました。\n登録済みの日付: " + joinDates(dates)
 	if err != nil {
 		log.Printf("[Discord] prod-uptime add error: %v", err)
-		content = err.Error()
+		content = userFacingErrorMessage(err)
 	}
 
 	if err := discord.EditOriginalResponse(applicationID, token, content); err != nil {
@@ -182,12 +232,32 @@ func (c *DiscordInteractionController) hasAllowedRole(interaction *discord.Inter
 	return false
 }
 
+// userFacingErrorMessage はDiscordへそのまま見せてよいエラーメッセージを判定する。
+// uptimeServiceの入力検証エラー(日付形式・過去日等)は日本語の固定文言のみでラップされて
+// いないため安全だが、SSMアクセス失敗等の内部エラーは%wでラップされ、ARN等の内部情報を
+// 含みうるため一般的な文言に差し替える。
+func userFacingErrorMessage(err error) string {
+	if errors.Unwrap(err) != nil {
+		return "処理に失敗しました。時間を置いて再度お試しください。"
+	}
+	return err.Error()
+}
+
+// joinDatesMaxChars はjoinDatesが返す文字列の上限。Discordのメッセージ本文は最大2000文字
+// (content フィールド単体の上限で、プレフィックス文言と合わせても収まるよう余裕を持たせる)。
+const joinDatesMaxChars = 1500
+
 func joinDates(dates []string) string {
 	if len(dates) == 0 {
 		return "(なし)"
 	}
 	out := dates[0]
-	for _, d := range dates[1:] {
+	for i, d := range dates[1:] {
+		if len(out) > joinDatesMaxChars {
+			remaining := len(dates) - 1 - i
+			out += fmt.Sprintf(", ...(他%d件)", remaining)
+			return out
+		}
 		out += ", " + d
 	}
 	return out

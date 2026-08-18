@@ -85,9 +85,10 @@ const EphemeralFlag = 1 << 6
 
 // ModalCustomIDProdUptime / TextInputCustomIDDate はコマンド・モーダル間の識別子。
 const (
-	CommandNameProdUptime   = "prod-uptime"
-	ModalCustomIDProdUptime = "prod_uptime_modal"
-	TextInputCustomIDDate   = "prod_uptime_date"
+	CommandNameProdUptime     = "prod-uptime"
+	CommandNameProdUptimeList = "prod-uptime-list"
+	ModalCustomIDProdUptime   = "prod_uptime_modal"
+	TextInputCustomIDDate     = "prod_uptime_date"
 )
 
 // FindComponentValue はモーダル送信データのネストしたComponentsから指定custom_idの入力値を探す。

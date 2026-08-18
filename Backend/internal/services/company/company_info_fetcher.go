@@ -146,6 +146,15 @@ func (f *CompanyInfoFetcher) FetchAndSave(ctx context.Context, companyID uint, f
 	return result, nil
 }
 
+// FetchAndSaveDetails は FetchAndSave の結果を捨てるアダプタ。
+// gbizinfo.CompanyDetailFetcher インターフェースを満たすために用意している
+// (gbizinfoパッケージはcompanyパッケージをimportできないため、company側から
+// このシグネチャで注入する)。
+func (f *CompanyInfoFetcher) FetchAndSaveDetails(ctx context.Context, companyID uint) error {
+	_, err := f.FetchAndSave(ctx, companyID, false)
+	return err
+}
+
 // ConfirmAndSave はプレビュー済みの構造化結果を LLM 再実行なしで DB に確定保存する。
 // info_fetched_at / last_model_used / last_fetch_confidence も同時更新する。
 func (f *CompanyInfoFetcher) ConfirmAndSave(companyID uint, result *CompanyInfoResult) (*CompanyInfoResult, error) {

@@ -100,7 +100,14 @@ variable "frontend_image" {
 
 variable "openai_secret_arn" {
   type        = string
-  description = "Secrets Manager ARN for OPENAI_API_KEY"
+  description = "既存のSecrets Manager ARNを使う場合(openai_api_key未指定時のフォールバック)"
+  default     = ""
+}
+
+variable "openai_api_key" {
+  type        = string
+  description = "OpenAI APIキー(平文)。指定するとTerraform管理のSecrets Manager経由でOPENAI_API_KEYとして注入される"
+  sensitive   = true
   default     = ""
 }
 

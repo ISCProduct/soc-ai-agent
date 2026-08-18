@@ -97,6 +97,11 @@ func (s *UptimeService) AddDate(ctx context.Context, date string) ([]string, err
 	return dates, nil
 }
 
+// ListDates は登録済みの日付一覧を返す(閲覧専用、ロール制限なしのコマンドから利用)。
+func (s *UptimeService) ListDates(ctx context.Context) ([]string, error) {
+	return s.listDates(ctx)
+}
+
 func (s *UptimeService) listDates(ctx context.Context) ([]string, error) {
 	out, err := s.client.GetParameter(ctx, &ssm.GetParameterInput{Name: aws.String(s.parameterName)})
 	if err != nil {

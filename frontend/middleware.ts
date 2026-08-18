@@ -3,7 +3,7 @@ import {
   SERVER_BACKEND_URL,
   setSessionCookies,
 } from '@/lib/session-cookies'
-import { extractTenantSlug } from '@/lib/tenant'
+import { extractTenantSlug, isAdminHost } from '@/lib/tenant'
 
 // アクセストークンの残り有効期間がこの秒数を下回ったらリフレッシュする (#616)
 const REFRESH_MARGIN_SECONDS = 120
@@ -51,7 +51,20 @@ async function refreshSession(refreshToken: string): Promise<RefreshedSession | 
   }
 }
 
+// pathnameが既に /admin 配下(自身を含む)かどうか。前方一致だと /administrator 等の
+// 無関係なパスまで「rewrite不要」と誤判定してしまうため、セグメント単位で比較する。
+function isUnderAdminPath(pathname: string): boolean {
+  return pathname === '/admin' || pathname.startsWith('/admin/')
+}
+
 export async function middleware(request: NextRequest) {
+  const host = request.headers.get('host') ?? ''
+  const pathname = request.nextUrl.pathname
+  // admin.shukatsu-ai.jp は /admin 配下へ内部的にrewriteする(URLバーの表示は変えない)。
+  // /api配下はNext.jsのAPI Route Handlerであり/admin/api/...という実体は存在しないため対象外。
+  const needsAdminRewrite =
+    isAdminHost(host) && !pathname.startsWith('/api') && !isUnderAdminPath(pathname)
+
   const userId = request.cookies.get('user_id')?.value
   const userToken = request.cookies.get('user_token')?.value
   const refreshToken = request.cookies.get('refresh_token')?.value
@@ -81,9 +94,14 @@ export async function middleware(request: NextRequest) {
     requestHeaders.set('X-User-Token', effectiveToken)
   }
 
-  const response = NextResponse.next({
-    request: { headers: requestHeaders },
-  })
+  let response: NextResponse
+  if (needsAdminRewrite) {
+    const url = request.nextUrl.clone()
+    url.pathname = `/admin${pathname}`
+    response = NextResponse.rewrite(url, { request: { headers: requestHeaders } })
+  } else {
+    response = NextResponse.next({ request: { headers: requestHeaders } })
+  }
 
   // ローテーションされた新しいトークンペアをCookieへ反映
   if (refreshed) {
@@ -94,5 +112,9 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: '/api/:path*',
+  // admin.shukatsu-ai.jpのrewriteはページ遷移でも必要なため、静的アセットを除く全パスに
+  // マッチさせる。public/配下の拡張子付きファイル(3Dモデル・画像等)も対象外にする。
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|glb|gltf|mp3|mp4|woff|woff2)$).*)',
+  ],
 }

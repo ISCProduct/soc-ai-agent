@@ -2,7 +2,10 @@ package company_test
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -15,6 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 type relationRepoMock struct {
@@ -115,9 +119,9 @@ func TestCompanyRelationsFetcher_FetchAndSave_AISearch(t *testing.T) {
 
 	repo := &mocks.CompanyRepositoryMock{}
 	repo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "テスト株式会社"}, nil)
-	repo.On("FindByName", "子会社A").Return(nil, errors.New("record not found"))
-	repo.On("FindByName", "関連会社B").Return(nil, errors.New("record not found"))
-	repo.On("FindByName", "取引先C").Return(nil, errors.New("record not found"))
+	repo.On("FindByName", "子会社A").Return(nil, gorm.ErrRecordNotFound)
+	repo.On("FindByName", "関連会社B").Return(nil, gorm.ErrRecordNotFound)
+	repo.On("FindByName", "取引先C").Return(nil, gorm.ErrRecordNotFound)
 	repo.On("Create", mock.AnythingOfType("*models.Company")).Return(nil).Times(3)
 	repo.On("Update", mock.AnythingOfType("*models.Company")).Return(nil).Run(func(args mock.Arguments) {
 		c := args.Get(0).(*models.Company)
@@ -139,6 +143,89 @@ func TestCompanyRelationsFetcher_FetchAndSave_AISearch(t *testing.T) {
 	assert.Len(t, result.Relations, 3)
 	assert.Equal(t, "prime", result.MarketInfo.MarketType)
 	assert.Equal(t, "web_search", result.Source)
+	repo.AssertNumberOfCalls(t, "Create", 3)
+}
+
+// 関連企業として新規作成された会社にも、infoFetcherを注入していれば詳細情報が
+// 自動で埋まることを確認する(空データの企業が量産される問題への回帰テスト)。
+// 詳細取得が失敗した場合でも、関連企業自体の保存(SavedCount/UpsertCapitalRelation)は
+// ブロックされないことも合わせて検証する。
+func TestCompanyRelationsFetcher_FetchAndSave_FillsNewRelatedCompanyDetails(t *testing.T) {
+	relationsJSON := `{"subsidiaries":[{"name":"子会社A","ratio":100,"description":"完全子会社"}],"affiliates":[],"business_partners":[],"market_info":{"is_listed":false,"market_type":"unlisted","stock_code":""}}`
+
+	tests := []struct {
+		name              string
+		infoServerHandler http.HandlerFunc
+		wantChildUpdated  bool
+	}{
+		{
+			name: "詳細取得に成功する場合",
+			infoServerHandler: func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.ReadAll(r.Body)
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"choices": []map[string]any{
+						{"message": map[string]any{"role": "assistant", "content": validCompanyInfoJSON()}},
+					},
+					"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 20},
+				})
+			},
+			wantChildUpdated: true,
+		},
+		{
+			name: "詳細取得に失敗する場合でも関係の保存はブロックされない",
+			infoServerHandler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+			},
+			wantChildUpdated: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			relationsSrv := makeChatCompletionsServer(t, relationsJSON)
+			defer relationsSrv.Close()
+			infoSrv := httptest.NewServer(tt.infoServerHandler)
+			defer infoSrv.Close()
+
+			repo := &mocks.CompanyRepositoryMock{}
+			repo.On("FindByID", uint(1)).Return(&models.Company{ID: 1, Name: "テスト株式会社"}, nil)
+			repo.On("FindByName", "子会社A").Return(nil, gorm.ErrRecordNotFound)
+			repo.On("Create", mock.AnythingOfType("*models.Company")).Return(nil).Run(func(args mock.Arguments) {
+				c := args.Get(0).(*models.Company)
+				c.ID = 2
+			})
+			repo.On("FindByID", uint(2)).Return(&models.Company{ID: 2, Name: "子会社A"}, nil)
+
+			childUpdated := false
+			repo.On("Update", mock.AnythingOfType("*models.Company")).Return(nil).Run(func(args mock.Arguments) {
+				c := args.Get(0).(*models.Company)
+				if c.ID == 2 {
+					childUpdated = true
+					assert.Equal(t, "テスト企業の概要", c.Description)
+					assert.Equal(t, "IT・ソフトウェア", c.Industry)
+				}
+			})
+
+			relRepo := &relationRepoMock{}
+			relRepo.On("GetRelationsByCompanyID", uint(1)).Return([]models.CompanyRelation{}, nil)
+			relRepo.On("GetMarketInfoByCompanyID", uint(1)).Return(nil, nil)
+			relRepo.On("UpsertCapitalRelation", uint(1), uint(2), "capital_subsidiary", mock.Anything, mock.Anything).Return(nil)
+			relRepo.On("UpsertMarketInfo", mock.AnythingOfType("*models.CompanyMarketInfo")).Return(nil)
+
+			relationsClient := openai.NewWithBaseURL(relationsSrv.URL, "gpt-4o-mini")
+			fetcher := company.NewCompanyRelationsFetcher(repo, relRepo, relationsClient)
+
+			infoClient := openai.NewWithBaseURL(infoSrv.URL, "gpt-4o-mini")
+			fetcher.SetInfoFetcher(company.NewCompanyInfoFetcher(repo, infoClient))
+
+			result, err := fetcher.FetchAndSave(context.Background(), 1, true)
+			require.NoError(t, err)
+			assert.Equal(t, 2, result.SavedCount, "関係1件+市場情報1件が保存されるべき")
+			relRepo.AssertNumberOfCalls(t, "UpsertCapitalRelation", 1)
+			assert.Equal(t, tt.wantChildUpdated, childUpdated)
+		})
+	}
 }
 
 func TestCompanyRelationsFetcher_ConfirmAndSave(t *testing.T) {
@@ -155,7 +242,7 @@ func TestCompanyRelationsFetcher_ConfirmAndSave(t *testing.T) {
 	relRepo.On("UpsertMarketInfo", mock.AnythingOfType("*models.CompanyMarketInfo")).Return(nil)
 
 	fetcher := company.NewCompanyRelationsFetcher(repo, relRepo, nil)
-	result, err := fetcher.ConfirmAndSave(1, &company.CompanyRelationsResult{
+	result, err := fetcher.ConfirmAndSave(context.Background(), 1, &company.CompanyRelationsResult{
 		Relations: []company.RelationEntry{
 			{Name: "子会社A", RelationType: "capital_subsidiary"},
 		},
@@ -233,7 +320,7 @@ func TestCompanyRelationsFetcher_TTLSkipsWhenConfirmedUnlisted(t *testing.T) {
 
 func TestCompanyRelationsFetcher_ConfirmAndSave_NilResult(t *testing.T) {
 	fetcher := company.NewCompanyRelationsFetcher(&mocks.CompanyRepositoryMock{}, &relationRepoMock{}, nil)
-	_, err := fetcher.ConfirmAndSave(1, nil)
+	_, err := fetcher.ConfirmAndSave(context.Background(), 1, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "result is required")
 }

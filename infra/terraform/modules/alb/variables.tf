@@ -63,6 +63,12 @@ variable "frontend_health_check_path" {
   default     = "/api/healthz"
 }
 
+variable "additional_san_domains" {
+  type        = list(string)
+  description = "ACM証明書に追加するSAN(例: 学校別サブドメイン用の \"*.shukatsu-ai.jp\")"
+  default     = []
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
