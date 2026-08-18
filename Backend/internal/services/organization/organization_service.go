@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -23,6 +24,9 @@ var (
 	ErrNameRequired         = errors.New("name is required")
 	ErrInvalidOrgStatus     = errors.New("status must be active or disabled")
 	ErrOrganizationDisabled = errors.New("organization is disabled")
+	ErrInvalidOrgPlan       = errors.New("plan must be free, standard, or pro")
+	ErrInvalidContractDate  = errors.New("contract dates must be in YYYY-MM-DD format")
+	ErrContractDateRange    = errors.New("contract_end_date must not be before contract_start_date")
 )
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,98}[a-z0-9])?$`)
@@ -37,13 +41,19 @@ func NewOrganizationService(repo repository.OrganizationRepository) *Organizatio
 }
 
 type CreateOrganizationInput struct {
-	Name string
-	Slug string
+	Name              string
+	Slug              string
+	Plan              string
+	ContractStartDate string
+	ContractEndDate   string
 }
 
 type UpdateOrganizationInput struct {
-	Name   *string
-	Status *string
+	Name              *string
+	Status            *string
+	Plan              *string
+	ContractStartDate *string
+	ContractEndDate   *string
 }
 
 type AddMemberInput struct {
@@ -61,6 +71,24 @@ func (s *OrganizationService) Create(input CreateOrganizationInput) (*models.Org
 	if !slugPattern.MatchString(slug) {
 		return nil, ErrInvalidOrgSlug
 	}
+	plan := strings.TrimSpace(input.Plan)
+	if plan == "" {
+		plan = models.OrgPlanFree
+	}
+	if !validOrgPlan(plan) {
+		return nil, ErrInvalidOrgPlan
+	}
+	startDate, err := parseContractDate(input.ContractStartDate)
+	if err != nil {
+		return nil, err
+	}
+	endDate, err := parseContractDate(input.ContractEndDate)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateContractDateRange(startDate, endDate); err != nil {
+		return nil, err
+	}
 	existing, err := s.repo.FindBySlug(slug)
 	if err != nil {
 		return nil, err
@@ -69,9 +97,12 @@ func (s *OrganizationService) Create(input CreateOrganizationInput) (*models.Org
 		return nil, ErrOrgSlugTaken
 	}
 	org := &models.Organization{
-		Name:   name,
-		Slug:   slug,
-		Status: models.OrgStatusActive,
+		Name:              name,
+		Slug:              slug,
+		Status:            models.OrgStatusActive,
+		Plan:              plan,
+		ContractStartDate: startDate,
+		ContractEndDate:   endDate,
 	}
 	if err := s.repo.Create(org); err != nil {
 		return nil, err
@@ -101,6 +132,34 @@ func (s *OrganizationService) Update(id uint, input UpdateOrganizationInput) (*m
 		}
 		org.Status = status
 	}
+	if input.Plan != nil {
+		plan := strings.TrimSpace(*input.Plan)
+		if !validOrgPlan(plan) {
+			return nil, ErrInvalidOrgPlan
+		}
+		org.Plan = plan
+	}
+	startDate := org.ContractStartDate
+	if input.ContractStartDate != nil {
+		d, err := parseContractDate(*input.ContractStartDate)
+		if err != nil {
+			return nil, err
+		}
+		startDate = d
+	}
+	endDate := org.ContractEndDate
+	if input.ContractEndDate != nil {
+		d, err := parseContractDate(*input.ContractEndDate)
+		if err != nil {
+			return nil, err
+		}
+		endDate = d
+	}
+	if err := validateContractDateRange(startDate, endDate); err != nil {
+		return nil, err
+	}
+	org.ContractStartDate = startDate
+	org.ContractEndDate = endDate
 	if err := s.repo.Update(org); err != nil {
 		return nil, err
 	}
@@ -322,6 +381,35 @@ func (s *OrganizationService) AssignUserToDefaultOrganization(userID uint, asAdm
 		return nil
 	}
 	return err
+}
+
+func validOrgPlan(plan string) bool {
+	switch plan {
+	case models.OrgPlanFree, models.OrgPlanStandard, models.OrgPlanPro:
+		return true
+	default:
+		return false
+	}
+}
+
+// parseContractDate は "YYYY-MM-DD" 文字列を *time.Time に変換する。空文字はnil(未設定/クリア)。
+func parseContractDate(raw string) (*time.Time, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+	t, err := time.Parse("2006-01-02", trimmed)
+	if err != nil {
+		return nil, ErrInvalidContractDate
+	}
+	return &t, nil
+}
+
+func validateContractDateRange(start, end *time.Time) error {
+	if start != nil && end != nil && end.Before(*start) {
+		return ErrContractDateRange
+	}
+	return nil
 }
 
 func validOrgRole(role string) bool {

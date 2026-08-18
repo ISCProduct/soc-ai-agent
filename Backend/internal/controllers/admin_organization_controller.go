@@ -19,13 +19,19 @@ func NewAdminOrganizationController(orgs *organization.OrganizationService) *Adm
 }
 
 type createOrganizationRequest struct {
-	Name string `json:"name"`
-	Slug string `json:"slug"`
+	Name              string `json:"name"`
+	Slug              string `json:"slug"`
+	Plan              string `json:"plan"`
+	ContractStartDate string `json:"contract_start_date"`
+	ContractEndDate   string `json:"contract_end_date"`
 }
 
 type updateOrganizationRequest struct {
-	Name   *string `json:"name"`
-	Status *string `json:"status"`
+	Name              *string `json:"name"`
+	Status            *string `json:"status"`
+	Plan              *string `json:"plan"`
+	ContractStartDate *string `json:"contract_start_date"`
+	ContractEndDate   *string `json:"contract_end_date"`
 }
 
 type addMemberRequest struct {
@@ -65,7 +71,13 @@ func (c *AdminOrganizationController) Create(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
-	org, err := c.orgs.Create(organization.CreateOrganizationInput{Name: req.Name, Slug: req.Slug})
+	org, err := c.orgs.Create(organization.CreateOrganizationInput{
+		Name:              req.Name,
+		Slug:              req.Slug,
+		Plan:              req.Plan,
+		ContractStartDate: req.ContractStartDate,
+		ContractEndDate:   req.ContractEndDate,
+	})
 	if err != nil {
 		return mapOrgError(err)
 	}
@@ -95,7 +107,13 @@ func (c *AdminOrganizationController) Update(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
-	org, err := c.orgs.Update(id, organization.UpdateOrganizationInput{Name: req.Name, Status: req.Status})
+	org, err := c.orgs.Update(id, organization.UpdateOrganizationInput{
+		Name:              req.Name,
+		Status:            req.Status,
+		Plan:              req.Plan,
+		ContractStartDate: req.ContractStartDate,
+		ContractEndDate:   req.ContractEndDate,
+	})
 	if err != nil {
 		return mapOrgError(err)
 	}
@@ -185,7 +203,10 @@ func mapOrgError(err error) error {
 	case errors.Is(err, organization.ErrInvalidOrgSlug),
 		errors.Is(err, organization.ErrInvalidOrgRole),
 		errors.Is(err, organization.ErrNameRequired),
-		errors.Is(err, organization.ErrInvalidOrgStatus):
+		errors.Is(err, organization.ErrInvalidOrgStatus),
+		errors.Is(err, organization.ErrInvalidOrgPlan),
+		errors.Is(err, organization.ErrInvalidContractDate),
+		errors.Is(err, organization.ErrContractDateRange):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	case errors.Is(err, organization.ErrCrossOrganization), errors.Is(err, organization.ErrOrganizationDisabled):
 		return echo.NewHTTPError(http.StatusForbidden, err.Error())
