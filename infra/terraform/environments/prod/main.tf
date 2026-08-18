@@ -8,7 +8,7 @@ locals {
   backend_domain  = "api.${var.domain_name}"
 
   backend_secret_arns = compact(concat(
-    [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn, aws_secretsmanager_secret.email.arn, aws_secretsmanager_secret.admin.arn],
+    [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn, aws_secretsmanager_secret.email.arn, aws_secretsmanager_secret.admin.arn, aws_secretsmanager_secret.openai.arn],
     var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
     var.additional_secret_arns
   ))
@@ -36,12 +36,12 @@ locals {
         valueFrom = "${module.secrets.db_secret_arn}:password::"
       }
     ],
-    var.openai_secret_arn != "" ? [
+    [
       {
         name      = "OPENAI_API_KEY"
-        valueFrom = var.openai_secret_arn
+        valueFrom = var.openai_api_key != "" ? "${aws_secretsmanager_secret.openai.arn}:openai_api_key::" : var.openai_secret_arn
       }
-    ] : [],
+    ],
     [
       {
         name      = "GOOGLE_CLIENT_ID"
@@ -70,9 +70,39 @@ locals {
       {
         name      = "ADMIN_SECRET"
         valueFrom = "${aws_secretsmanager_secret.admin.arn}:admin_secret::"
+      },
+      {
+        name      = "USER_SECRET"
+        valueFrom = "${aws_secretsmanager_secret.admin.arn}:user_secret::"
+      },
+      {
+        name      = "OAUTH_STATE_SECRET"
+        valueFrom = "${aws_secretsmanager_secret.admin.arn}:oauth_state_secret::"
+      },
+      {
+        name      = "TOKEN_ENCRYPTION_KEY"
+        valueFrom = "${aws_secretsmanager_secret.admin.arn}:token_encryption_key::"
       }
     ]
   )
+}
+
+# 本番未起動状態の初回構築時に見落とされていた認証系シークレット。
+# staging(app_user_data.sh.tftpl)と同じくrandom_passwordで自動生成する。
+# ADMIN_SECRETのみCI(sync-whats-newジョブ)から既知の値で呼べる必要があるため
+# var.admin_secret(固定値、stagingと同じ値を設定)を使う。
+resource "random_password" "user_secret" {
+  length  = 48
+  special = false
+}
+
+resource "random_password" "oauth_state_secret" {
+  length  = 32
+  special = false
+}
+
+resource "random_id" "token_encryption_key" {
+  byte_length = 32
 }
 
 # Google/GitHub OAuthクライアント認証情報(DB同様、Secrets Managerで管理しECSタスク実行ロール経由で注入)
@@ -113,7 +143,23 @@ resource "aws_secretsmanager_secret" "admin" {
 resource "aws_secretsmanager_secret_version" "admin" {
   secret_id = aws_secretsmanager_secret.admin.id
   secret_string = jsonencode({
-    admin_secret = var.admin_secret
+    admin_secret         = var.admin_secret
+    user_secret          = random_password.user_secret.result
+    oauth_state_secret   = random_password.oauth_state_secret.result
+    token_encryption_key = random_id.token_encryption_key.hex
+  })
+}
+
+# OpenAI APIキー(DB/OAuth同様、Secrets Managerで管理しECSタスク実行ロール経由で注入)
+resource "aws_secretsmanager_secret" "openai" {
+  name = "${var.project_name}/openai"
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "openai" {
+  secret_id = aws_secretsmanager_secret.openai.id
+  secret_string = jsonencode({
+    openai_api_key = var.openai_api_key
   })
 }
 
@@ -206,7 +252,9 @@ module "alb" {
   frontend_target_port = 3000
   backend_target_port  = 8080
   target_type          = "ip"
-  tags                 = local.tags
+  # 学園マルチテナント(<学園slug>.shukatsu-ai.jp)とadmin.shukatsu-ai.jp用のワイルドカードSAN
+  additional_san_domains = ["*.${var.domain_name}"]
+  tags                   = local.tags
 }
 
 module "backend" {
@@ -235,7 +283,25 @@ module "backend" {
     AWS_S3_BUCKET  = module.s3.bucket_id
     EMAIL_PROVIDER = "resend"
     EMAIL_FROM     = "noreply@shukatsu-ai.jp"
+    # 未設定だとOAuthコールバックURLがlocalhost:8080にフォールバックし、
+    # 本番でOAuthログインが機能しなくなる(実際に発生した障害)。
+    BASE_URL = "https://${local.backend_domain}"
+    APP_URL  = "https://${local.frontend_domain}"
+    # 学園マルチテナントサブドメイン・admin.shukatsu-ai.jpからの直接アクセスを許可
+    ALLOWED_ORIGINS = "https://${local.frontend_domain},https://*.${var.domain_name}"
+    # 同一タスク内のredisサイドカーへlocalhost経由で接続(awsvpcモードはコンテナ間で
+    # ネットワーク名前空間を共有するため)
+    REDIS_URL = "redis://localhost:6379/0"
   }
+  extra_container_definitions = [
+    {
+      name         = "redis"
+      image        = "redis:7-alpine"
+      essential    = false
+      memory       = 64
+      portMappings = []
+    }
+  ]
   tags = local.tags
 }
 
@@ -262,8 +328,8 @@ module "frontend" {
     # login-page.tsx等のクライアントコードには効かない(GitHub Actions側のdocker build
     # --build-argで焼き込む必要がある)。ここではサーバー側コード(middleware.tsの
     # セッションリフレッシュ等)がprocess.envを実行時に読む経路のために設定する。
-    BACKEND_URL              = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
-    NEXT_PUBLIC_BACKEND_URL  = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
+    BACKEND_URL             = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
+    NEXT_PUBLIC_BACKEND_URL = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
   }
   tags = local.tags
 }
@@ -283,6 +349,20 @@ resource "aws_route53_record" "frontend" {
 resource "aws_route53_record" "backend" {
   zone_id = data.aws_route53_zone.selected.zone_id
   name    = local.backend_domain
+  type    = "A"
+
+  alias {
+    name                   = module.alb.alb_dns_name
+    zone_id                = module.alb.alb_zone_id
+    evaluate_target_health = true
+  }
+}
+
+# 学園マルチテナント(<学園slug>.shukatsu-ai.jp)とadmin.shukatsu-ai.jp用のワイルドカードDNS。
+# デフォルトアクション(frontendへforward)がそのまま使われるため、ALB側のルーティング追加は不要。
+resource "aws_route53_record" "wildcard" {
+  zone_id = data.aws_route53_zone.selected.zone_id
+  name    = "*.${var.domain_name}"
   type    = "A"
 
   alias {

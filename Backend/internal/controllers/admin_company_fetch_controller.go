@@ -216,7 +216,7 @@ func (c *AdminCompanyController) ConfirmCompanyRelations(ctx echo.Context) error
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
 	}
 
-	result, err := c.relationsFetcher.ConfirmAndSave(uint(id), &req)
+	result, err := c.relationsFetcher.ConfirmAndSave(ctx.Request().Context(), uint(id), &req)
 	if err != nil {
 		return echoInternalError(err)
 	}

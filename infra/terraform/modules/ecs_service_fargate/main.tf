@@ -100,7 +100,7 @@ resource "aws_ecs_task_definition" "this" {
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = aws_iam_role.task.arn
 
-  container_definitions = jsonencode([
+  container_definitions = jsonencode(concat([
     {
       name      = var.container_name
       image     = var.container_image
@@ -122,7 +122,7 @@ resource "aws_ecs_task_definition" "this" {
         }
       }
     }
-  ])
+  ], var.extra_container_definitions))
 
   tags = var.tags
 }

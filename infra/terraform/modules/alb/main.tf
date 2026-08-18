@@ -56,7 +56,7 @@ resource "aws_lb_target_group" "backend" {
 
 resource "aws_acm_certificate" "this" {
   domain_name               = var.frontend_domain_name
-  subject_alternative_names = [var.backend_domain_name]
+  subject_alternative_names = concat([var.backend_domain_name], var.additional_san_domains)
   validation_method         = "DNS"
 
   lifecycle {

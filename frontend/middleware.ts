@@ -3,7 +3,7 @@ import {
   SERVER_BACKEND_URL,
   setSessionCookies,
 } from '@/lib/session-cookies'
-import { extractTenantSlug } from '@/lib/tenant'
+import { extractTenantSlug, isAdminHost } from '@/lib/tenant'
 
 // アクセストークンの残り有効期間がこの秒数を下回ったらリフレッシュする (#616)
 const REFRESH_MARGIN_SECONDS = 120
@@ -52,6 +52,14 @@ async function refreshSession(refreshToken: string): Promise<RefreshedSession | 
 }
 
 export async function middleware(request: NextRequest) {
+  // admin.shukatsu-ai.jp は /admin 配下へ内部的にrewriteする(URLバーの表示は変えない)。
+  const host = request.headers.get('host') ?? ''
+  if (isAdminHost(host) && !request.nextUrl.pathname.startsWith('/admin')) {
+    const url = request.nextUrl.clone()
+    url.pathname = `/admin${request.nextUrl.pathname}`
+    return NextResponse.rewrite(url)
+  }
+
   const userId = request.cookies.get('user_id')?.value
   const userToken = request.cookies.get('user_token')?.value
   const refreshToken = request.cookies.get('refresh_token')?.value
@@ -94,5 +102,6 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: '/api/:path*',
+  // admin.shukatsu-ai.jpのrewriteはページ遷移でも必要なため、静的アセットを除く全パスにマッチさせる。
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 }

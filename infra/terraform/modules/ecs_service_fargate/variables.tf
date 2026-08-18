@@ -98,3 +98,9 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "extra_container_definitions" {
+  type        = list(any)
+  description = "同一タスクに追加するサイドカーコンテナ定義(例: Redis)。ECSのcontainer definition形式をそのまま渡す"
+  default     = []
+}
