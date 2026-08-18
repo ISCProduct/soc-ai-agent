@@ -1,5 +1,5 @@
 #!/bin/bash
-# Discordスラッシュコマンド /prod-uptime をアプリケーションに登録する。
+# Discordスラッシュコマンド /prod-uptime と /prod-uptime-list をアプリケーションに登録する。
 # 一度実行すれば以後は再実行不要（コマンド内容を変更したときのみ再実行）。
 #
 # 必要な環境変数:
@@ -34,4 +34,4 @@ curl -sf -X PUT \
   ]'
 
 echo
-echo "コマンド登録完了。Discordサーバーで /prod-uptime が使えるようになります(反映まで数分かかる場合があります)。"
+echo "コマンド登録完了。Discordサーバーで /prod-uptime と /prod-uptime-list が使えるようになります(反映まで数分かかる場合があります)。"

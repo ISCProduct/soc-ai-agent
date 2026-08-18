@@ -26,5 +26,11 @@ describe('tenant', () => {
       expect(isAdminHost('shukatsu-ai.jp')).toBe(false)
       expect(isAdminHost('my-school.shukatsu-ai.jp')).toBe(false)
     })
+
+    it('紛らわしい類似ホストを誤って管理画面扱いしない', () => {
+      expect(isAdminHost('admin.example.com')).toBe(false)
+      expect(isAdminHost('admin.foo.shukatsu-ai.jp')).toBe(false)
+      expect(isAdminHost('administrator.shukatsu-ai.jp')).toBe(false)
+    })
   })
 })
