@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 const (
 	OrgStatusActive   = "active"
@@ -36,6 +39,28 @@ type Organization struct {
 
 func (Organization) TableName() string {
 	return "organizations"
+}
+
+// MarshalJSON は契約日を "YYYY-MM-DD" 形式で返す(更新APIの入力形式と一致させるため)。
+func (o Organization) MarshalJSON() ([]byte, error) {
+	type alias Organization
+	return json.Marshal(struct {
+		alias
+		ContractStartDate *string `json:"contract_start_date,omitempty"`
+		ContractEndDate   *string `json:"contract_end_date,omitempty"`
+	}{
+		alias:             alias(o),
+		ContractStartDate: formatDateOnly(o.ContractStartDate),
+		ContractEndDate:   formatDateOnly(o.ContractEndDate),
+	})
+}
+
+func formatDateOnly(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	s := t.Format("2006-01-02")
+	return &s
 }
 
 // OrganizationMembership はユーザーと組織の所属関係・ロール。

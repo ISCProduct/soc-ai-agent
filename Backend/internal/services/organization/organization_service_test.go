@@ -77,31 +77,40 @@ func TestValidOrgPlan(t *testing.T) {
 }
 
 func TestParseContractDate(t *testing.T) {
-	t.Run("空文字はnil", func(t *testing.T) {
-		got, err := parseContractDate("")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got != nil {
-			t.Fatalf("expected nil, got %v", got)
-		}
-	})
-
-	t.Run("YYYY-MM-DDを解釈する", func(t *testing.T) {
-		got, err := parseContractDate("2026-04-01")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got == nil || !got.Equal(time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)) {
-			t.Fatalf("got %v", got)
-		}
-	})
-
-	t.Run("不正な形式はエラー", func(t *testing.T) {
-		if _, err := parseContractDate("2026/04/01"); !errors.Is(err, ErrInvalidContractDate) {
-			t.Fatalf("got %v want ErrInvalidContractDate", err)
-		}
-	})
+	want := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name    string
+		raw     string
+		want    *time.Time
+		wantErr error
+	}{
+		{"空文字はnil", "", nil, nil},
+		{"YYYY-MM-DDを解釈する", "2026-04-01", &want, nil},
+		{"不正な形式はエラー", "2026/04/01", nil, ErrInvalidContractDate},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseContractDate(tt.raw)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("got %v want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.want == nil {
+				if got != nil {
+					t.Fatalf("expected nil, got %v", got)
+				}
+				return
+			}
+			if got == nil || !got.Equal(*tt.want) {
+				t.Fatalf("got %v want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestValidateContractDateRange(t *testing.T) {
@@ -109,14 +118,29 @@ func TestValidateContractDateRange(t *testing.T) {
 	before := time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC)
 	after := time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
 
-	if err := validateContractDateRange(nil, nil); err != nil {
-		t.Fatalf("both nil should be valid: %v", err)
+	cases := []struct {
+		name    string
+		start   *time.Time
+		end     *time.Time
+		wantErr error
+	}{
+		{"両方nilは有効", nil, nil, nil},
+		{"開始日が終了日より前は有効", &start, &after, nil},
+		{"終了日が開始日より前はエラー", &start, &before, ErrContractDateRange},
 	}
-	if err := validateContractDateRange(&start, &after); err != nil {
-		t.Fatalf("start before end should be valid: %v", err)
-	}
-	if err := validateContractDateRange(&start, &before); !errors.Is(err, ErrContractDateRange) {
-		t.Fatalf("got %v want ErrContractDateRange", err)
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateContractDateRange(tt.start, tt.end)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("got %v want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }
 

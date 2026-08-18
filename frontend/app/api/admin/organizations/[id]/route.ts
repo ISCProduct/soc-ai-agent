@@ -1,41 +1,37 @@
-import { NextRequest, NextResponse } from 'next/server'
-
-const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
+import { NextRequest } from 'next/server'
+import {
+  proxyAdminBackend,
+  jsonFromProxyResult,
+  proxyErrorResponse,
+  adminProxyHeaders,
+} from '@/lib/admin-backend-proxy'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const response = await fetch(`${BACKEND_URL}/api/admin/organizations/${id}`, {
-    headers: {
-      'X-Admin-Email': req.headers.get('x-admin-email') || '',
-      'X-Admin-Token': req.headers.get('x-admin-token') || '',
-    },
-  })
-  const raw = await response.text()
-  let data: any = {}
-  if (raw) {
-    try { data = JSON.parse(raw) } catch { data = { error: raw } }
+  try {
+    const result = await proxyAdminBackend('GET', `/api/admin/organizations/${id}`, {
+      headers: adminProxyHeaders(request.headers),
+      timeoutMs: 15_000,
+    })
+    return jsonFromProxyResult(result)
+  } catch (err) {
+    return proxyErrorResponse(err)
   }
-  return NextResponse.json(data, { status: response.status })
 }
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const body = await request.text()
-  const response = await fetch(`${BACKEND_URL}/api/admin/organizations/${id}`, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Admin-Email': request.headers.get('x-admin-email') || '',
-      'X-Admin-Token': request.headers.get('x-admin-token') || '',
-    },
-    body,
-  })
-  const raw = await response.text()
-  let data: any = {}
-  if (raw) {
-    try { data = JSON.parse(raw) } catch { data = response.ok ? { message: raw } : { error: raw } }
+  try {
+    const result = await proxyAdminBackend('PUT', `/api/admin/organizations/${id}`, {
+      headers: adminProxyHeaders(request.headers),
+      body,
+      timeoutMs: 30_000,
+    })
+    return jsonFromProxyResult(result)
+  } catch (err) {
+    return proxyErrorResponse(err)
   }
-  return NextResponse.json(data, { status: response.status })
 }

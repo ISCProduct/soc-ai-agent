@@ -38,40 +38,50 @@ export default function AdminOrganizationEditPage() {
   useEffect(() => {
     if (!id) return
     fetch(`/api/admin/organizations/${id}`, { headers: authService.getAdminFetchHeaders() })
-      .then((r) => r.json())
-      .then((org) => {
-        if (org?.id) {
-          setName(org.name || '')
-          setSlug(org.slug || '')
-          setStatus(org.status || 'active')
-          setPlan(org.plan || 'free')
-          setContractStartDate(org.contract_start_date ? org.contract_start_date.slice(0, 10) : '')
-          setContractEndDate(org.contract_end_date ? org.contract_end_date.slice(0, 10) : '')
+      .then(async (r) => {
+        const org = await r.json()
+        if (!r.ok || !org?.id) {
+          setError(org?.error || '学園情報の取得に失敗しました')
+          setLoading(false)
+          return
         }
+        setName(org.name || '')
+        setSlug(org.slug || '')
+        setStatus(org.status || 'active')
+        setPlan(org.plan || 'free')
+        setContractStartDate(org.contract_start_date ? org.contract_start_date.slice(0, 10) : '')
+        setContractEndDate(org.contract_end_date ? org.contract_end_date.slice(0, 10) : '')
         setLoading(false)
       })
-      .catch(() => setLoading(false))
+      .catch(() => {
+        setError('学園情報の取得に失敗しました')
+        setLoading(false)
+      })
   }, [id])
 
   const handleUpdate = async () => {
     setError('')
-    const res = await fetch(`/api/admin/organizations/${id}`, {
-      method: 'PUT',
-      headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        status,
-        plan,
-        contract_start_date: contractStartDate,
-        contract_end_date: contractEndDate,
-      }),
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      setError(data?.error || '更新に失敗しました')
-      return
+    try {
+      const res = await fetch(`/api/admin/organizations/${id}`, {
+        method: 'PUT',
+        headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          status,
+          plan,
+          contract_start_date: contractStartDate,
+          contract_end_date: contractEndDate,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data?.error || '更新に失敗しました')
+        return
+      }
+      router.push('/admin/organizations')
+    } catch {
+      setError('更新に失敗しました')
     }
-    router.push('/admin/organizations')
   }
 
   if (loading) {

@@ -14,6 +14,7 @@ import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContaine
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { AdminListCard } from '@/components/admin/AdminListCard'
+import { ErrorAlert } from '@/components/common/ErrorAlert'
 
 type Organization = {
   id: number
@@ -45,14 +46,21 @@ export default function AdminOrganizationsPage() {
   }, [])
 
   const [organizations, setOrganizations] = useState<Organization[]>([])
+  const [error, setError] = useState('')
 
   useEffect(() => {
     fetch('/api/admin/organizations?limit=100', {
       headers: authService.getAdminFetchHeaders(),
     })
-      .then((r) => r.json())
-      .then((data) => setOrganizations(data?.organizations || []))
-      .catch(() => {})
+      .then(async (r) => {
+        const data = await r.json()
+        if (!r.ok) {
+          setError(data?.error || '学園一覧の取得に失敗しました')
+          return
+        }
+        setOrganizations(data?.organizations || [])
+      })
+      .catch(() => setError('学園一覧の取得に失敗しました'))
   }, [])
 
   return (
@@ -76,6 +84,7 @@ export default function AdminOrganizationsPage() {
 
       <AdminPanel title="学園一覧">
         <AdminPanelBody>
+          <ErrorAlert error={error} />
           <Stack spacing={1}>
             {organizations.length === 0 ? (
               <Typography variant="body2" color="text.secondary">

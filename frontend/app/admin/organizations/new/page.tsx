@@ -30,23 +30,27 @@ export default function AdminOrganizationNewPage() {
 
   const handleCreate = async () => {
     setError('')
-    const res = await fetch('/api/admin/organizations', {
-      method: 'POST',
-      headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        slug,
-        plan,
-        contract_start_date: contractStartDate,
-        contract_end_date: contractEndDate,
-      }),
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      setError(data?.error || '学園の登録に失敗しました')
-      return
+    try {
+      const res = await fetch('/api/admin/organizations', {
+        method: 'POST',
+        headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          slug,
+          plan,
+          contract_start_date: contractStartDate,
+          contract_end_date: contractEndDate,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data?.error || '学園の登録に失敗しました')
+        return
+      }
+      router.push('/admin/organizations')
+    } catch {
+      setError('学園の登録に失敗しました')
     }
-    router.push('/admin/organizations')
   }
 
   return (
