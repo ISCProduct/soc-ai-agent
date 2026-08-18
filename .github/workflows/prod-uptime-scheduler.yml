@@ -1,6 +1,6 @@
 name: Prod uptime scheduler
 
-# 本番(ECS Fargate)の「指定日は終日起動」ポリシーを毎時照合する。
+# 本番(ECS Fargate + RDS)の「指定日は終日起動」ポリシーを毎時照合する。
 # docs/architecture/infra-decision-oci-stg-aws-prod.md の (B) 指定日終日起動 を実現する。
 # 日付リストはDiscordの /prod-uptime コマンド(Backend: /api/discord/interactions)で
 # SSM Parameter Store (/soc-app/prod-uptime-dates, カンマ区切り) に追加される。
@@ -60,6 +60,33 @@ jobs:
             echo "today ($TODAY_JST) is not an uptime date -> desired_count=0"
           fi
 
+          DB_ID="${PROJECT_NAME}-mysql"
+
+          if [ "$DESIRED" == "1" ]; then
+            # RDSを先に起動し、利用可能になってからECSを起動する
+            # (backendがDB未起動のままタスク起動してクラッシュループするのを防ぐ。staging側の
+            # deployment.ymlの起動待ちループと同じパターン)
+            RDS_STATUS=$(aws rds describe-db-instances --db-instance-identifier "$DB_ID" \
+              --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null || echo "unknown")
+            if [ "$RDS_STATUS" == "stopped" ]; then
+              aws rds start-db-instance --db-instance-identifier "$DB_ID"
+            fi
+            for i in $(seq 1 40); do
+              STATUS=$(aws rds describe-db-instances --db-instance-identifier "$DB_ID" \
+                --query 'DBInstances[0].DBInstanceStatus' --output text)
+              [ "$STATUS" == "available" ] && break
+              if [ "$STATUS" == "stopped" ]; then
+                aws rds start-db-instance --db-instance-identifier "$DB_ID" || true
+              fi
+              echo "RDS status: $STATUS (waiting...)"
+              sleep 15
+            done
+            if [ "$STATUS" != "available" ]; then
+              echo "RDS did not become available in time" >&2
+              exit 1
+            fi
+          fi
+
           for SERVICE in backend frontend; do
             CURRENT=$(aws ecs describe-services --cluster "$PROJECT_NAME" --services "$SERVICE" \
               --query 'services[0].desiredCount' --output text 2>/dev/null || echo "")
@@ -71,3 +98,16 @@ jobs:
               --desired-count "$DESIRED" > /dev/null
             echo "$SERVICE updated: $CURRENT -> $DESIRED"
           done
+
+          if [ "$DESIRED" == "0" ]; then
+            # ECSを先に0にしてから(上のループで完了済み)RDSを止める。
+            # 起動中(available)の時だけ止める。starting/stopping等の遷移中に叩くとエラーになるため
+            RDS_STATUS=$(aws rds describe-db-instances --db-instance-identifier "$DB_ID" \
+              --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null || echo "unknown")
+            if [ "$RDS_STATUS" == "available" ]; then
+              aws rds stop-db-instance --db-instance-identifier "$DB_ID"
+              echo "RDS stopped"
+            else
+              echo "RDS status: $RDS_STATUS, skipping stop"
+            fi
+          fi
