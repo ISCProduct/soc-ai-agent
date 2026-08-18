@@ -47,8 +47,19 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-func buildAllowedOrigins() map[string]struct{} {
-	allowedOrigins := make(map[string]struct{})
+// wildcardPattern は "https://*.shukatsu-ai.jp" のようなオリジンパターンの前後を保持する。
+type wildcardPattern struct {
+	prefix string
+	suffix string
+}
+
+func (p wildcardPattern) matches(origin string) bool {
+	return len(origin) >= len(p.prefix)+len(p.suffix) &&
+		strings.HasPrefix(origin, p.prefix) && strings.HasSuffix(origin, p.suffix)
+}
+
+func buildAllowedOrigins() (exact map[string]struct{}, wildcards []wildcardPattern) {
+	exact = make(map[string]struct{})
 	raw := os.Getenv("ALLOWED_ORIGINS")
 
 	for _, origin := range strings.Split(raw, ",") {
@@ -56,17 +67,35 @@ func buildAllowedOrigins() map[string]struct{} {
 		if trimmed == "" {
 			continue
 		}
-		allowedOrigins[trimmed] = struct{}{}
+		// "https://*.shukatsu-ai.jp" のようなワイルドカードエントリは学園マルチテナント
+		// サブドメイン(<学園slug>.shukatsu-ai.jp)やadmin.shukatsu-ai.jpからの直接アクセスを許可する。
+		if idx := strings.IndexByte(trimmed, '*'); idx != -1 {
+			wildcards = append(wildcards, wildcardPattern{prefix: trimmed[:idx], suffix: trimmed[idx+1:]})
+			continue
+		}
+		exact[trimmed] = struct{}{}
 	}
 
 	// フェイルセーフ: ALLOWED_ORIGINS 未設定時は全オリジン拒否（#327）
 	// ローカル開発時は .env に ALLOWED_ORIGINS=http://localhost:3000 を明示設定してください。
-	if len(allowedOrigins) == 0 {
+	if len(exact) == 0 && len(wildcards) == 0 {
 		slog.Warn("ALLOWED_ORIGINS が未設定のため、全クロスオリジンリクエストを拒否します",
 			"hint", "ローカル開発時は .env に ALLOWED_ORIGINS=http://localhost:3000 を設定してください")
 	}
 
-	return allowedOrigins
+	return exact, wildcards
+}
+
+func isAllowedOrigin(origin string, exact map[string]struct{}, wildcards []wildcardPattern) bool {
+	if _, ok := exact[origin]; ok {
+		return true
+	}
+	for _, w := range wildcards {
+		if w.matches(origin) {
+			return true
+		}
+	}
+	return false
 }
 
 func securityHeadersMiddleware(next http.Handler) http.Handler {
@@ -84,15 +113,15 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 
 // buildCORSMiddleware は許可オリジンを一度だけ構築してCORSミドルウェアを返す
 func buildCORSMiddleware() func(http.Handler) http.Handler {
-	allowedOrigins := buildAllowedOrigins()
+	exact, wildcards := buildAllowedOrigins()
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := strings.TrimSpace(r.Header.Get("Origin"))
-			_, isAllowedOrigin := allowedOrigins[origin]
+			allowed := isAllowedOrigin(origin, exact, wildcards)
 
 			w.Header().Add("Vary", "Origin")
-			if isAllowedOrigin {
+			if allowed {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				// credentials: 'include' 付きのフロント直叩き（Googleカレンダー OAuth など）に必要
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -101,7 +130,7 @@ func buildCORSMiddleware() func(http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-User-ID, X-User-Token, X-Admin-Email, X-Admin-Token")
 
 			if r.Method == "OPTIONS" {
-				if origin != "" && !isAllowedOrigin {
+				if origin != "" && !allowed {
 					w.WriteHeader(http.StatusForbidden)
 					return
 				}
