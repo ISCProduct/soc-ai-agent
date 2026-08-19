@@ -19,10 +19,9 @@ import {
     ToggleButtonGroup,
     ToggleButton,
     Chip,
-    Select,
-    MenuItem,
+    Autocomplete,
+    TextField,
     FormControl,
-    InputLabel,
     Button,
 } from '@mui/material';
 import {
@@ -35,12 +34,13 @@ import {
     type MarketType,
 } from '@/lib/company-data';
 import { formatRelationLabel } from '@/lib/relation-labels';
-import { layoutBusinessGraph, layoutCapitalGraphFromEdges, groupIdsByConnectedComponent } from '@/lib/relation-graph';
+import { layoutBusinessGraph, layoutCapitalGraphFromEdges, computeRelationClusters, type RelationCluster } from '@/lib/relation-graph';
 import { getCompanyIdFromNode, parseCompanyId } from '@/lib/correlation-diagram-navigation';
 import CorrelationCompanyDetailPanel, {
     CORRELATION_DETAIL_PANEL_WIDTH,
 } from '@/components/CorrelationCompanyDetailPanel';
 import { edgeTypes } from '@/components/diagram/RelationEdge';
+import ClusterExplorer from '@/components/diagram/ClusterExplorer';
 
 type DiagramType = 'capital' | 'business';
 
@@ -80,6 +80,9 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
         void loadData();
     }, [reloadToken]);
 
+    // 企業選択の検索候補。#970フォローアップ: 以前は先頭100件のみ(登録順=ID順)に
+    // 切り詰めていたため、それ以降に登録された企業が検索・選択できなかった。
+    // Autocompleteは大量の選択肢でも検索(タイプ絞り込み)で実用的に扱えるため上限を設けない。
     const uniqueCompanies = useMemo(() => {
         const companyMap = new Map<number, string>();
         relations.forEach((rel) => {
@@ -88,7 +91,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
             if (rel.from) companyMap.set(rel.from.id, rel.from.name);
             if (rel.to) companyMap.set(rel.to.id, rel.to.name);
         });
-        return Array.from(companyMap.entries()).sort((a, b) => a[0] - b[0]);
+        return Array.from(companyMap.entries()).sort((a, b) => a[1].localeCompare(b[1], 'ja'));
     }, [relations]);
 
     const getMarketType = useCallback((compId: number): MarketType => {
@@ -107,78 +110,11 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
     }, [relations]);
 
     const createNodes = useCallback((focusCompanyId: number | null, type: DiagramType): Node[] => {
+        // #970フォローアップ: 起点企業を指定しない「全体表示」は、ReactFlowで数百社を
+        // まとめて描画すると本質的に読みにくい(ハブ企業由来の交差エッジ、fitViewの過剰縮小)ため、
+        // ClusterExplorer(クラスタカード一覧)に置き換えた。ここでは起点企業がある場合のみ描画する。
         if (!focusCompanyId) {
-            const limitedRelations = relations.slice(0, 100);
-            const companyIds = new Set<number>();
-            limitedRelations.forEach((rel) => {
-                if (type === 'capital') {
-                    if (rel.parent_id) companyIds.add(rel.parent_id);
-                    if (rel.child_id) companyIds.add(rel.child_id);
-                } else {
-                    if (rel.from_id) companyIds.add(rel.from_id);
-                    if (rel.to_id) companyIds.add(rel.to_id);
-                }
-            });
-
-            const nodes: Node[] = [];
-            // #970: 単純な登録順ではなく、関連する企業同士が連番で並ぶよう連結成分ごとにまとめる
-            const ids = groupIdsByConnectedComponent(Array.from(companyIds), limitedRelations);
-            const cols = Math.ceil(Math.sqrt(ids.length)) || 1;
-
-            ids.forEach((id, idx) => {
-                const row = Math.floor(idx / cols);
-                const col = idx % cols;
-                const marketType = getMarketType(id);
-
-                nodes.push({
-                    id: String(id),
-                    type: 'default',
-                    position: { x: col * 300, y: row * 180 },
-                    data: {
-                        companyId: id,
-                        label: (
-                            <Box sx={{ textAlign: 'center', p: 1, minWidth: '140px' }}>
-                                <Typography
-                                    variant="body2"
-                                    sx={{
-                                        fontSize: '13px',
-                                        fontWeight: 500,
-                                        lineHeight: 1.3,
-                                        mb: 0.5,
-                                        wordBreak: 'break-word',
-                                    }}
-                                >
-                                    {getCompanyName(id).length > 20
-                                        ? `${getCompanyName(id).substring(0, 20)}...`
-                                        : getCompanyName(id)}
-                                </Typography>
-                                <Chip
-                                    label={marketLabels[marketType]}
-                                    size="small"
-                                    sx={{
-                                        bgcolor: marketColors[marketType],
-                                        color: 'white',
-                                        fontSize: '10px',
-                                        height: '18px',
-                                        fontWeight: 500,
-                                    }}
-                                />
-                            </Box>
-                        ),
-                    },
-                    style: {
-                        background: '#fff',
-                        border: `2px solid ${marketColors[marketType]}`,
-                        borderRadius: '8px',
-                        padding: '8px',
-                        minWidth: '160px',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                        cursor: 'pointer',
-                    },
-                });
-            });
-
-            return nodes;
+            return [];
         }
 
         const relatedIds = new Set([focusCompanyId]);
@@ -262,14 +198,12 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
     }, [relations, getMarketType, getCompanyName]);
 
     const createEdges = useCallback((focusCompanyId: number | null, type: DiagramType): Edge[] => {
-        const edges: Edge[] = [];
-        let relevantRelations = relations;
-
         if (!focusCompanyId) {
-            relevantRelations = relations.slice(0, 100);
+            return [];
         }
+        const edges: Edge[] = [];
 
-        relevantRelations.forEach((rel, idx) => {
+        relations.forEach((rel, idx) => {
             if (type === 'capital' && rel.relation_type.startsWith('capital') && rel.parent_id && rel.child_id) {
                 edges.push({
                     id: `capital-${idx}`,
@@ -423,17 +357,17 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                     </ToggleButtonGroup>
 
                     <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 260 }, maxWidth: 360 }}>
-                        <InputLabel>企業選択</InputLabel>
-                        <Select
-                            value={selectedCompanyId || ''}
-                            onChange={(e) => setSelectedCompanyId((e.target.value as number) || null)}
-                            label="企業選択"
-                        >
-                            <MenuItem value="">全体表示</MenuItem>
-                            {uniqueCompanies.slice(0, 100).map(([id, name]) => (
-                                <MenuItem key={id} value={id}>{name}</MenuItem>
-                            ))}
-                        </Select>
+                        <Autocomplete
+                            size="small"
+                            options={uniqueCompanies}
+                            getOptionLabel={([, name]) => name}
+                            isOptionEqualToValue={([idA], [idB]) => idA === idB}
+                            value={uniqueCompanies.find(([id]) => id === selectedCompanyId) ?? null}
+                            onChange={(_e, option) => setSelectedCompanyId(option ? option[0] : null)}
+                            renderInput={(params) => (
+                                <TextField {...params} label="企業を検索" placeholder="全体表示(クラスタ一覧)" />
+                            )}
+                        />
                     </FormControl>
 
                     <Button
@@ -492,44 +426,51 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                         bgcolor: '#fff',
                     }}
                 >
-                    <ReactFlow
-                        nodes={flowNodes}
-                        edges={flowEdges}
-                        onNodesChange={onNodesChange}
-                        onEdgesChange={onEdgesChange}
-                        onNodeClick={handleNodeClick}
-                        edgeTypes={edgeTypes}
-                        fitView
-                        minZoom={0.05}
-                        maxZoom={3}
-                        defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
-                        attributionPosition="bottom-right"
-                        nodesDraggable={true}
-                        nodesConnectable={false}
-                        elementsSelectable={true}
-                        style={{ width: '100%', height: '100%' }}
-                    >
-                        <Background color="#aaa" gap={16} />
-                        <Controls
-                            showZoom={true}
-                            showFitView={true}
-                            showInteractive={true}
-                            position="top-right"
+                    {selectedCompanyId === null ? (
+                        <ClusterExplorer
+                            relations={relations}
+                            diagramType={diagramType}
+                            getCompanyName={getCompanyName}
+                            getMarketType={getMarketType}
+                            onSelectCompany={setSelectedCompanyId}
                         />
-                        <MiniMap
-                            nodeColor={(node) => {
-                                const border = node.style?.border as string;
-                                if (border?.includes('#FFA726')) return '#FFA726';
-                                if (border?.includes('#1976D2')) return '#1976D2';
-                                return '#2196F3';
-                            }}
-                            maskColor="rgba(0, 0, 0, 0.1)"
-                            position="bottom-left"
-                            style={{
-                                marginRight: showDetailPanel ? undefined : undefined,
-                            }}
-                        />
-                    </ReactFlow>
+                    ) : (
+                        <ReactFlow
+                            nodes={flowNodes}
+                            edges={flowEdges}
+                            onNodesChange={onNodesChange}
+                            onEdgesChange={onEdgesChange}
+                            onNodeClick={handleNodeClick}
+                            edgeTypes={edgeTypes}
+                            fitView
+                            minZoom={0.05}
+                            maxZoom={3}
+                            defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
+                            attributionPosition="bottom-right"
+                            nodesDraggable={true}
+                            nodesConnectable={false}
+                            elementsSelectable={true}
+                            style={{ width: '100%', height: '100%' }}
+                        >
+                            <Background color="#aaa" gap={16} />
+                            <Controls
+                                showZoom={true}
+                                showFitView={true}
+                                showInteractive={true}
+                                position="top-right"
+                            />
+                            <MiniMap
+                                nodeColor={(node) => {
+                                    const border = node.style?.border as string;
+                                    if (border?.includes('#FFA726')) return '#FFA726';
+                                    if (border?.includes('#1976D2')) return '#1976D2';
+                                    return '#2196F3';
+                                }}
+                                maskColor="rgba(0, 0, 0, 0.1)"
+                                position="bottom-left"
+                            />
+                        </ReactFlow>
+                    )}
                 </Box>
 
                 {showDetailPanel && (
