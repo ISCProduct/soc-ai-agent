@@ -1,6 +1,9 @@
 import {
   groupRelationsByCategory,
   layoutCapitalGraph,
+  layoutCapitalGraphFromEdges,
+  layoutBusinessGraph,
+  computeRelationClusters,
   type RelationEntry,
   type CompanyRelationGraph,
 } from '@/lib/relation-graph'
@@ -119,6 +122,151 @@ describe('relation-graph', () => {
       expect(focusX).not.toBe(siblingX)
       expect(positions.get(2)!.y).toBeGreaterThan(positions.get(1)!.y)
       expect(positions.get(4)!.y).toBeLessThan(positions.get(1)!.y)
+    })
+  })
+
+  // #970: 登録順の円形/グリッド配置ではなく、関係性(BFS距離)ベースの配置になることを検証する。
+  describe('layoutCapitalGraphFromEdges', () => {
+    it('CapitalRelation形式の配列から直接levelを算出できる', () => {
+      const positions = layoutCapitalGraphFromEdges(1, [1, 2, 3], [
+        { parent_id: 1, child_id: 2 },
+        { parent_id: 2, child_id: 3 },
+      ])
+      expect(positions.get(1)?.level).toBe(0)
+      expect(positions.get(2)?.level).toBe(1)
+      expect(positions.get(3)?.level).toBe(2)
+    })
+
+    it('資本関係にない企業(relation_typeがbusiness等)は無視して0除算(NaN角度)を起こさない', () => {
+      const positions = layoutCapitalGraphFromEdges(1, [1], [])
+      expect(positions.get(1)).toEqual({ level: 0, column: 0, x: 0, y: 0 })
+    })
+  })
+
+  describe('layoutBusinessGraph', () => {
+    it('起点企業から直接つながる企業をlevel1、2ホップ先をlevel2に配置する', () => {
+      const positions = layoutBusinessGraph(1, [1, 2, 3], [
+        { from_id: 1, to_id: 2 },
+        { from_id: 2, to_id: 3 },
+      ])
+      expect(positions.get(1)?.level).toBe(0)
+      expect(positions.get(2)?.level).toBe(1)
+      expect(positions.get(3)?.level).toBe(2)
+    })
+
+    it('to_id起点で登録されていても双方向に隣接とみなす', () => {
+      const positions = layoutBusinessGraph(2, [1, 2], [{ from_id: 1, to_id: 2 }])
+      expect(positions.get(1)?.level).toBe(1)
+    })
+
+    it('起点から辿れない企業(別の連結成分)はlevel0として扱いnodeIdsに含まれる全企業の座標を返す', () => {
+      const positions = layoutBusinessGraph(1, [1, 2, 99], [{ from_id: 1, to_id: 2 }])
+      expect(positions.size).toBe(3)
+      expect(positions.get(99)?.level).toBe(0)
+    })
+  })
+
+  // #970フォローアップ: 子会社が多い企業でも1行に並べず複数行に折り返すことで、
+  // fitViewで極端に縮小されてテキストが潰れる「醜い」表示を避ける。
+  describe('layoutCapitalGraphFromEdges (折り返しレイアウト)', () => {
+    it('兄弟ノードが少ない場合は1行のまま(既存の見た目を壊さない)', () => {
+      const positions = layoutCapitalGraphFromEdges(
+        1,
+        [1, 2, 3, 4],
+        [1, 2, 3, 4].slice(1).map((childId) => ({ parent_id: 1, child_id: childId })),
+      )
+      const ys = [2, 3, 4].map((id) => positions.get(id)!.y)
+      expect(new Set(ys).size).toBe(1) // 全員同じ行(同じy)
+    })
+
+    it('兄弟ノードが多い場合は複数行に折り返し、同じ行に収まらない', () => {
+      const childIds = Array.from({ length: 37 }, (_, i) => i + 2)
+      const positions = layoutCapitalGraphFromEdges(
+        1,
+        [1, ...childIds],
+        childIds.map((childId) => ({ parent_id: 1, child_id: childId })),
+      )
+      const ys = new Set(childIds.map((id) => positions.get(id)!.y))
+      // 37社を1行(6社まで)に収めることはできないので、複数行に分かれること
+      expect(ys.size).toBeGreaterThan(1)
+      // 各行の最大幅が無制限に伸び続けないこと(1行あたりの最大x幅が一定以下)
+      const xs = childIds.map((id) => positions.get(id)!.x)
+      const xRange = Math.max(...xs) - Math.min(...xs)
+      expect(xRange).toBeLessThan(2000)
+    })
+
+    it('折り返しが発生しても親→子のlevel順（y座標の大小）は保たれる', () => {
+      const childIds = Array.from({ length: 20 }, (_, i) => i + 2)
+      const positions = layoutCapitalGraphFromEdges(
+        1,
+        [1, ...childIds],
+        childIds.map((childId) => ({ parent_id: 1, child_id: childId })),
+      )
+      const focusY = positions.get(1)!.y
+      for (const id of childIds) {
+        expect(positions.get(id)!.y).toBeGreaterThan(focusY)
+      }
+    })
+
+    it('折り返した各行は起点を中心に左右対称に配置される', () => {
+      const childIds = Array.from({ length: 8 }, (_, i) => i + 2) // 6+2 -> 2行
+      const positions = layoutCapitalGraphFromEdges(
+        1,
+        [1, ...childIds],
+        childIds.map((childId) => ({ parent_id: 1, child_id: childId })),
+      )
+      const secondRowXs = childIds.slice(6).map((id) => positions.get(id)!.x)
+      const center = secondRowXs.reduce((a, b) => a + b, 0) / secondRowXs.length
+      expect(Math.abs(center)).toBeLessThan(1)
+    })
+  })
+
+  describe('computeRelationClusters', () => {
+    it('つながっている企業同士を同じクラスタにまとめる', () => {
+      // 1-2が資本関係、3-4が事業関係で繋がっているが、元の配列では1,3,2,4の順で登録されている
+      const clusters = computeRelationClusters(
+        [1, 3, 2, 4],
+        [
+          { parent_id: 1, child_id: 2 },
+          { from_id: 3, to_id: 4 },
+        ],
+      )
+      expect(clusters).toHaveLength(2)
+      expect(clusters.map((c) => c.memberIds.slice().sort((a, b) => a - b))).toEqual(
+        expect.arrayContaining([[1, 2], [3, 4]]),
+      )
+    })
+
+    it('関係を持たない企業もサイズ1のクラスタとして含める', () => {
+      const clusters = computeRelationClusters([1, 2], [])
+      expect(clusters).toHaveLength(2)
+      expect(clusters.every((c) => c.memberIds.length === 1)).toBe(true)
+    })
+
+    it('クラスタをメンバー数の多い順にソートする', () => {
+      const clusters = computeRelationClusters(
+        [1, 2, 10, 11, 12, 13],
+        [
+          { parent_id: 1, child_id: 2 }, // クラスタA: 2社
+          { parent_id: 10, child_id: 11 },
+          { parent_id: 10, child_id: 12 },
+          { parent_id: 10, child_id: 13 }, // クラスタB: 4社
+        ],
+      )
+      expect(clusters[0].memberIds).toHaveLength(4)
+      expect(clusters[1].memberIds).toHaveLength(2)
+    })
+
+    it('クラスタの代表企業(hubId)は次数(接続数)が最大のノードになる', () => {
+      const clusters = computeRelationClusters(
+        [10, 11, 12, 13],
+        [
+          { parent_id: 10, child_id: 11 },
+          { parent_id: 10, child_id: 12 },
+          { parent_id: 10, child_id: 13 },
+        ],
+      )
+      expect(clusters[0].hubId).toBe(10) // 10は3社と接続、他は1社のみ
     })
   })
 })

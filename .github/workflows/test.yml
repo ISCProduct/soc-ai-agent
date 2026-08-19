@@ -125,7 +125,11 @@ jobs:
         run: npm ci
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        # --with-deps は内部でapt-get updateを実行するが、ubuntuパッケージミラーへの
+        # 接続がハングし15分タイムアウトに達するまで進まなくなる事象が頻発したため外した。
+        # ubuntu-latestランナーには元々Chromiumヘッドレス実行に必要な共有ライブラリが
+        # ほぼ揃っており、欠けていれば後続のE2Eテスト実行時に明確なエラーとして検知できる。
+        run: npx playwright install chromium
 
       - name: Run E2E tests
         run: npx playwright test

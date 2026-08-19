@@ -14,6 +14,7 @@ import {
   type MarketType,
 } from '@/lib/company-data'
 import { formatRelationLabel } from '@/lib/relation-labels'
+import { layoutBusinessGraph, layoutCapitalGraphFromEdges } from '@/lib/relation-graph'
 import { collectRelatedCompanyIds, resolveCompanyNameFromRelations } from '../utils'
 
 /**
@@ -38,22 +39,23 @@ export function createDiagramData(
   }
 
   // ノード生成
+  // #970: 登録順の円形配置ではなく、起点企業からの関係性(BFS距離)に基づいて配置する
   const nodes: Node[] = []
   const ids = Array.from(relatedIds)
-  const angle = (2 * Math.PI) / ids.length
-  const radius = Math.max(200, ids.length * 40)
+  const positions =
+    type === 'capital'
+      ? layoutCapitalGraphFromEdges(compId, ids, relations)
+      : layoutBusinessGraph(compId, ids, relations)
 
-  ids.forEach((id, idx) => {
+  ids.forEach((id) => {
     const isFocusCompany = id === compId
     const marketType = getMarketType(id)
+    const pos = positions.get(id) ?? { x: 0, y: 0 }
 
     nodes.push({
       id: String(id),
       type: 'default',
-      position: {
-        x: 400 + radius * Math.cos(idx * angle),
-        y: 300 + radius * Math.sin(idx * angle),
-      },
+      position: { x: pos.x, y: pos.y },
       data: {
         label: (
           <Box sx={{ textAlign: 'center', p: 1 }}>
