@@ -171,6 +171,8 @@ export function useResumePage() {
     setScoresBefore(null)
     setScoresAfter(null)
     setAnnotateError('')
+    setReviewError('')
+    setReviewLoading(false)
     setLoading(true)
     try {
       if (!userId) {
