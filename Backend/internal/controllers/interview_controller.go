@@ -144,15 +144,23 @@ func (c *InterviewController) UploadVideo(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "video upload service not configured")
 	}
 
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+
+	// IDOR対策: セッションが自分のものかを、ファイル解析/S3アップロードの前に検証する
+	if err := c.interviewService.EnsureSessionOwnership(userID, sessionID); err != nil {
+		if err.Error() == "forbidden" {
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
 	// メモリには最大 10 MB を確保し、それ以上は一時ファイルに書き出す
 	r := ctx.Request()
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "リクエストの解析に失敗しました。ファイルが破損しているか、サイズが大きすぎます")
-	}
-
-	userID, ok := echoUserID(ctx)
-	if !ok {
-		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
 	file, header, err := r.FormFile("video")

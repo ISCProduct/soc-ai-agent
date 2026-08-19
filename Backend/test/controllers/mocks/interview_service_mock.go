@@ -75,6 +75,10 @@ func (m *InterviewServiceMock) SaveUtterance(userID uint, sessionID uint, role s
 	return m.Called(userID, sessionID, role, text).Error(0)
 }
 
+func (m *InterviewServiceMock) EnsureSessionOwnership(userID uint, sessionID uint) error {
+	return m.Called(userID, sessionID).Error(0)
+}
+
 func (m *InterviewServiceMock) CreateRealtimeToken(ctx context.Context, userID uint, sessionID uint) (string, error) {
 	args := m.Called(ctx, userID, sessionID)
 	return args.String(0), args.Error(1)
