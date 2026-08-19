@@ -408,6 +408,8 @@ export const authService = {
     localStorage.removeItem('chat_session_id')
     if (typeof window !== 'undefined') {
       clearChatSessionOnEnd({ sessionStorage: window.sessionStorage, localStorage: window.localStorage })
+      // chat-history選択画面が一時的に載せる引き継ぎ用キー(#947: clearChatSessionOnEndの対象外)
+      window.localStorage.removeItem('currentSessionId')
     }
 
     // httpOnly Cookieを削除

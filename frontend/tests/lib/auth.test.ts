@@ -56,6 +56,7 @@ describe('authService.logout', () => {
         chat_cache_sess42: 'legacy-cache',
         chat_session_id: 'sess42',
         'chat_cache_sess-42': 'cache',
+        currentSessionId: 'sess-history-99',
       }),
       configurable: true,
     })
@@ -72,6 +73,8 @@ describe('authService.logout', () => {
     // 稼働中のチャット機能（useMuiChat）が使うキー
     expect(sessionStorage.getItem('chatSessionId')).toBeNull()
     expect(localStorage.getItem('chat_cache_sess-42')).toBeNull()
+    // chat-history選択画面が一時的に載せる引き継ぎ用キーも消える(#947)
+    expect(localStorage.getItem('currentSessionId')).toBeNull()
 
     // レガシーキーも引き続きクリアされる
     expect(localStorage.getItem('chat_cache_sess42')).toBeNull()
