@@ -87,6 +87,10 @@ export function useInterviewSession({
   const isRecordingRef = useRef(false)
   const turnPendingRef = useRef(false)
   const aiSpeakingRef = useRef(false)
+  // タイマーのsetIntervalコールバックがstale closureでhandleStop実行時点の
+  // session/userを読んでしまう(#926)のを防ぐため、常に最新値を反映するrefを使う
+  const sessionRef = useRef<InterviewSession | null>(null)
+  const userRef = useRef<User | null>(null)
   // VAD effect は hooks 順序のため先に登録し、実装は ref 経由で呼ぶ
   const startRecordingRef = useRef<() => void>(() => {})
   const stopRecordingRef = useRef<() => void>(() => {})
@@ -106,6 +110,8 @@ export function useInterviewSession({
     startRecording: () => startRecordingRef.current(),
     stopRecording: () => stopRecordingRef.current(),
   })
+
+  useEffect(() => { userRef.current = user }, [user])
 
   // Cleanup on unmount
   useEffect(() => () => cleanupConnection(), [])
@@ -302,6 +308,7 @@ export function useInterviewSession({
       const stream = await media.ensureStream()
 
       const created = await interviewApi.createSession(user.user_id, 'ja', nextGender)
+      sessionRef.current = created
       setSession(created)
       await interviewApi.startSession(created.id, user.user_id)
       setStatus('connected')
@@ -323,8 +330,9 @@ export function useInterviewSession({
     const videoBlob = await media.stopAndCollectVideoBlob()
 
     cleanupConnection()
-    const currentSession = session
-    const currentUser = user
+    // タイマーのsetIntervalから呼ばれた場合でも最新値を読むため、stateではなくrefを使う(#926)
+    const currentSession = sessionRef.current
+    const currentUser = userRef.current
     if (currentUser && currentSession) {
       const scoreSessionId = `interview-${currentUser.user_id}`
       try {
