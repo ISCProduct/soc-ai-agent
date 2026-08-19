@@ -10,7 +10,6 @@ import ReactFlow, {
     useNodesState,
     useEdgesState,
     MarkerType,
-    EdgeTypes,
     type NodeMouseHandler,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
@@ -41,64 +40,9 @@ import { getCompanyIdFromNode, parseCompanyId } from '@/lib/correlation-diagram-
 import CorrelationCompanyDetailPanel, {
     CORRELATION_DETAIL_PANEL_WIDTH,
 } from '@/components/CorrelationCompanyDetailPanel';
+import { edgeTypes } from '@/components/diagram/RelationEdge';
 
 type DiagramType = 'capital' | 'business';
-
-const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, label }: any) => {
-    const edgePath = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
-    const labelX = (sourceX + targetX) / 2;
-    const labelY = (sourceY + targetY) / 2;
-    const angle = Math.atan2(targetY - sourceY, targetX - sourceX) * (180 / Math.PI);
-    const adjustedAngle = angle > 90 || angle < -90 ? angle + 180 : angle;
-
-    return (
-        <>
-            <path
-                id={id}
-                style={style}
-                className="react-flow__edge-path"
-                d={edgePath}
-                markerEnd={markerEnd}
-            />
-            {label && (
-                <text
-                    x={labelX}
-                    y={labelY}
-                    style={{
-                        fontSize: '13px',
-                        fill: '#333',
-                        fontWeight: 600,
-                        pointerEvents: 'none',
-                    }}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    transform={`rotate(${adjustedAngle}, ${labelX}, ${labelY})`}
-                >
-                    <tspan
-                        x={labelX}
-                        dy="0"
-                        style={{
-                            fill: 'none',
-                            stroke: '#fff',
-                            strokeWidth: 4,
-                            strokeLinejoin: 'round',
-                            paintOrder: 'stroke',
-                        }}
-                    >
-                        {label}
-                    </tspan>
-                    <tspan x={labelX} dy="0" style={{ fill: '#333' }}>
-                        {label}
-                    </tspan>
-                </text>
-            )}
-        </>
-    );
-};
-
-const edgeTypes: EdgeTypes = {
-    custom: CustomEdge,
-};
 
 interface CorrelationDiagramProps {
     initialCompanyId?: number | null
