@@ -1,7 +1,13 @@
 /**
  * @jest-environment jsdom
  */
-import { hasUnreadWhatsNew, markWhatsNewAsSeen, type WhatsNewEntry } from '@/lib/whats-new-data'
+import { hasUnreadWhatsNew, markWhatsNewAsSeen, fetchWhatsNewEntries, type WhatsNewEntry } from '@/lib/whats-new-data'
+
+jest.mock('@/lib/auth', () => ({
+  authService: {
+    getUserFetchHeaders: () => ({ 'X-User-Token': 'user-jwt' }),
+  },
+}))
 
 describe('whats-new-data', () => {
   const entries: WhatsNewEntry[] = [
@@ -33,5 +39,17 @@ describe('whats-new-data', () => {
       ...entries,
     ]
     expect(hasUnreadWhatsNew(withNew)).toBe(true)
+  })
+
+  it('取得時にユーザー認証ヘッダーを付与する', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => [] })
+    await fetchWhatsNewEntries()
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/whats-new',
+      expect.objectContaining({
+        cache: 'no-store',
+        headers: expect.objectContaining({ 'X-User-Token': 'user-jwt' }),
+      }),
+    )
   })
 })

@@ -11,6 +11,7 @@ type User struct {
 	Name                     string
 	IsGuest                  bool
 	IsAdmin                  bool
+	Role                     string // student / teacher
 	TargetLevel              string // 新卒 or 中途
 	SchoolName               string
 	SchoolID                 *uint

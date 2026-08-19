@@ -1,3 +1,5 @@
+import { authService } from '@/lib/auth'
+
 export interface WhatsNewEntry {
   title: string
   summary: string
@@ -5,7 +7,10 @@ export interface WhatsNewEntry {
 }
 
 export async function fetchWhatsNewEntries(): Promise<WhatsNewEntry[]> {
-  const res = await fetch('/api/whats-new', { cache: 'no-store' })
+  const res = await fetch('/api/whats-new', {
+    cache: 'no-store',
+    headers: authService.getUserFetchHeaders(),
+  })
   if (!res.ok) throw new Error('whats-new')
   return res.json() as Promise<WhatsNewEntry[]>
 }
