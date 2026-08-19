@@ -166,6 +166,7 @@ export function useResumePage() {
     // 進行中ストリームによる上書きを防ぐため、レビュー関連stateを初期化する
     reviewAbortRef.current?.abort()
     setUploadError('')
+    setDocumentId(null)
     setReview(null)
     setRagReport('')
     setScoresBefore(null)

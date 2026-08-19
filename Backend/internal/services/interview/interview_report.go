@@ -201,7 +201,7 @@ func (s *InterviewService) SendReportEmail(userID, sessionID uint) error {
 		return err
 	}
 	if !s.isAllowed(userID, session.UserID) {
-		return errors.New("forbidden")
+		return shared.ErrForbidden
 	}
 
 	user, err := s.userRepo.GetUserByID(userID)

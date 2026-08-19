@@ -58,7 +58,7 @@ func (s *ResumeService) Upload(userID uint, sessionID, sourceType, sourceURL str
 		if err := validateURL(sourceURL); err != nil {
 			return nil, err
 		}
-		downloaded, filename, err := downloadSourceFile(sourceURL, workDir)
+		downloaded, filename, err := downloadSourceFile(context.Background(), sourceURL, workDir)
 		if err != nil {
 			return nil, err
 		}
@@ -202,11 +202,22 @@ func ssrfSafeDialContext(ctx context.Context, network, addr string) (net.Conn, e
 			return nil, fmt.Errorf("blocked request to internal address: %s", host)
 		}
 	}
-	return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+	var lastErr error
+	for _, ip := range ips {
+		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("failed to resolve host: %s", host)
+	}
+	return nil, lastErr
 }
 
-func downloadSourceFile(url, storagePath string) (string, string, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+func downloadSourceFile(ctx context.Context, url, storagePath string) (string, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", "", err
 	}

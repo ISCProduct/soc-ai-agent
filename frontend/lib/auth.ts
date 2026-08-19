@@ -400,15 +400,13 @@ export const authService = {
     getLocalStorage()?.removeItem(AUTH_TOKEN_KEY)
     getLocalStorage()?.removeItem(AUTH_USER_TOKEN_KEY)
 
-    // チャットキャッシュを削除（レガシーキー + 実運用中のチャット機能が使うキー #947）
-    const sessionId = localStorage.getItem('chat_session_id')
-    if (sessionId) {
-      localStorage.removeItem(`chat_cache_${sessionId}`)
-    }
-    localStorage.removeItem('chat_session_id')
     if (typeof window !== 'undefined') {
+      const sessionId = window.localStorage.getItem('chat_session_id')
+      if (sessionId) {
+        window.localStorage.removeItem(`chat_cache_${sessionId}`)
+      }
+      window.localStorage.removeItem('chat_session_id')
       clearChatSessionOnEnd({ sessionStorage: window.sessionStorage, localStorage: window.localStorage })
-      // chat-history選択画面が一時的に載せる引き継ぎ用キー(#947: clearChatSessionOnEndの対象外)
       window.localStorage.removeItem('currentSessionId')
     }
 

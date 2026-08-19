@@ -2,6 +2,8 @@ package controllers
 
 import (
 	ifaces "Backend/internal/services/interfaces"
+	"Backend/internal/services/shared"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -37,7 +39,7 @@ func (c *RealtimeController) Token(ctx echo.Context) error {
 	}
 	secret, err := c.interviewService.CreateRealtimeToken(ctx.Request().Context(), req.UserID, req.InterviewID)
 	if err != nil {
-		if err.Error() == "forbidden" {
+		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
 		if strings.Contains(err.Error(), "realtime capacity exceeded") {
