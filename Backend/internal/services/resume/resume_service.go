@@ -59,9 +59,9 @@ func validateFileUpload(fileHeader *multipart.FileHeader) error {
 // lookupIP はホスト名からIPアドレスを解決する。テストでモック可能にするため変数にしている。
 var lookupIP = net.LookupIP
 
-// isInternalIP はループバック/プライベート/リンクローカルのいずれかを判定する（SSRF対策）
+// isInternalIP はループバック/プライベート/リンクローカル/未指定アドレスのいずれかを判定する（SSRF対策）
 func isInternalIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
 }
 
 // validateURL はSSRF対策のためURLスキームとIPアドレス範囲を検証する。
