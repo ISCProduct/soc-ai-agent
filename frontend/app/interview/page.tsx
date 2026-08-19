@@ -192,6 +192,13 @@ function InterviewContent() {
     return () => { cancelled = true; clearTimeout(timer) }
   }, [loading, companySearch, companySourceTab]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const handleBackToSelection = useCallback(() => {
+    clearInterviewLobbyDraft()
+    media.stopStream()
+    setStatus('selection')
+    router.replace('/interview')
+  }, [router, setStatus, media])
+
   if (loading || !user) {
     return <PageLoading message="面接画面を準備しています..." />
   }
@@ -271,12 +278,6 @@ function InterviewContent() {
   // ─────────────────────────────────────────────
   // LOBBY SCREEN
   // ─────────────────────────────────────────────
-  const handleBackToSelection = useCallback(() => {
-    clearInterviewLobbyDraft()
-    setStatus('selection')
-    router.replace('/interview')
-  }, [router, setStatus])
-
   if (status === 'lobby') {
     return (
       <LobbyScreen
