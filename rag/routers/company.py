@@ -12,7 +12,7 @@ from models import (
     CompanyHintsResponse,
 )
 from services.sanitize import _sanitize_company_name_for_query
-from vector_store import upsert_by_doc_type
+from vector_store import build_cache_key, upsert_by_doc_type
 
 logger = logging.getLogger("main")
 
@@ -26,8 +26,9 @@ def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
     # 入力値サニタイズ（#331: クエリインジェクション対策）
     safe_company_name = _sanitize_company_name_for_query(request.company_name)
     role_label = request.position or "一般職"
-    cache_key = "hints::{company}::{role}".format(
-        company=safe_company_name, role=role_label
+    # #938: キャッシュキーはサニタイズ前の企業名のハッシュで衝突回避する
+    cache_key = build_cache_key(
+        "interview_hints", safe_company_name, role_label, company_original=request.company_name
     )
 
     # Backend 共有 brief があれば Search せず構造化（Phase 1B）
@@ -99,6 +100,7 @@ def upsert_company_context(request: CompanyContextRequest) -> CompanyContextResp
             docs=docs,
             embeddings=embeddings,
             source=source,
+            company_original=request.company_name,
         )
         keys_updated += 1
 
