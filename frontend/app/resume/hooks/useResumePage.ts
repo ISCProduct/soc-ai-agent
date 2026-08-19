@@ -162,8 +162,17 @@ export function useResumePage() {
   }
 
   const handleUpload = async () => {
+    // 別文書の再アップロード時、直前のレビュー結果の残存や
+    // 進行中ストリームによる上書きを防ぐため、レビュー関連stateを初期化する
+    reviewAbortRef.current?.abort()
     setUploadError('')
     setReview(null)
+    setRagReport('')
+    setScoresBefore(null)
+    setScoresAfter(null)
+    setAnnotateError('')
+    setReviewError('')
+    setReviewLoading(false)
     setLoading(true)
     try {
       if (!userId) {
