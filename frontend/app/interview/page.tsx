@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, Suspense, useCallback } from 'react'
+import { useCallback, useEffect, useState, Suspense } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { interviewLimits } from '@/lib/interview'
@@ -271,6 +271,12 @@ function InterviewContent() {
   // ─────────────────────────────────────────────
   // LOBBY SCREEN
   // ─────────────────────────────────────────────
+  const handleBackToSelection = useCallback(() => {
+    clearInterviewLobbyDraft()
+    setStatus('selection')
+    router.replace('/interview')
+  }, [router, setStatus])
+
   if (status === 'lobby') {
     return (
       <LobbyScreen
@@ -285,7 +291,7 @@ function InterviewContent() {
         onToggleMic={media.toggleMic}
         onToggleCamera={media.toggleCamera}
         lobbyVideoRef={media.lobbyVideoRef}
-        onBack={() => router.push('/')}
+        onBack={handleBackToSelection}
         onJoinWithConsent={session.handleJoinWithConsent}
         consentDialog={consentDialog}
       />

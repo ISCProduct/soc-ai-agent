@@ -165,16 +165,16 @@ export default function ResultsListView({
                 </Button>
               }
             >
-              {analysisError}（4分析スコア・向いている職種は表示されません）
+              {analysisError}（4段階分析スコア・向いている職種は表示されません）
             </Alert>
           )}
 
-          {/* 4分析スコアと総合コメント */}
+          {/* 4段階分析スコアと総合コメント */}
           {(scoreComment || analysisScores) && (
             <Card elevation={2} sx={{ mb: 3, border: '2px solid', borderColor: 'primary.light', backgroundColor: '#f0f4ff' }}>
               <CardContent>
                 <Typography variant="h6" fontWeight="bold" gutterBottom>
-                  📊 4分析スコア
+                  📊 4段階分析スコア
                 </Typography>
                 {analysisScores && (
                   <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)' }, gap: 2, mb: 2 }}>

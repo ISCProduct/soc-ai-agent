@@ -11,6 +11,7 @@ import {
   ResultsNoMatchView,
 } from './components/ResultsStatusViews'
 import ResultsListView from './components/ResultsListView'
+import AnalysisScoreCard from './components/AnalysisScoreCard'
 
 /** ReactFlow 依存の詳細ビューは一覧表示では不要のため遅延ロード */
 const CompanyDetailView = dynamic(() => import('./components/CompanyDetailView'), {
@@ -74,16 +75,34 @@ function ResultsContent() {
 
   if (error) {
     return (
-      <ResultsErrorView
-        error={error}
-        onBack={handleBack}
-        onReset={handleReset}
-      />
+      <>
+        <AnalysisScoreCard
+          analysisScores={analysisScores}
+          scoreComment={scoreComment}
+          analysisError={analysisError}
+          onRetryAnalysis={handleRetryAnalysis}
+        />
+        <ResultsErrorView
+          error={error}
+          onBack={handleBack}
+          onReset={handleReset}
+        />
+      </>
     )
   }
 
   if (companies.length === 0) {
-    return <ResultsNoMatchView onReset={handleReset} />
+    return (
+      <>
+        <AnalysisScoreCard
+          analysisScores={analysisScores}
+          scoreComment={scoreComment}
+          analysisError={analysisError}
+          onRetryAnalysis={handleRetryAnalysis}
+        />
+        <ResultsNoMatchView onReset={handleReset} />
+      </>
+    )
   }
 
   if (selectedCompany) {
