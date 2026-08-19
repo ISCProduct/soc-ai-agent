@@ -17,7 +17,7 @@ func TestInferCategoryFromQuestion_MatchesCanonicalCategories(t *testing.T) {
 		question string
 		want     valueobject.WeightCategory
 	}{
-		{"技術志向", "新しい技術についてどう学んでいますか", valueobject.CategoryTechnical},
+		{"技術志向", "プログラミングを学んだきっかけを教えてください", valueobject.CategoryTechnical},
 		{"チームワーク志向", "チームでの協力について教えてください", valueobject.CategoryTeamwork},
 		{"リーダーシップ志向", "リーダーとして意思決定した経験は", valueobject.CategoryLeadership},
 		{"創造性志向", "新しいアイデアを発想した経験は", valueobject.CategoryCreativity},
