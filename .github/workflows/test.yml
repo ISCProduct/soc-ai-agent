@@ -2,6 +2,10 @@ name: Test
 
 on:
   push:
+    branches:
+      - develop
+      - release
+      - main
   pull_request:
     branches:
       - develop
@@ -16,6 +20,7 @@ jobs:
   test-backend:
     name: Go Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     defaults:
       run:
@@ -48,6 +53,7 @@ jobs:
   audit-frontend:
     name: Frontend Security Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     defaults:
       run:
@@ -72,6 +78,7 @@ jobs:
   test-frontend-unit:
     name: Frontend Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     defaults:
       run:
@@ -96,6 +103,9 @@ jobs:
   e2e-frontend:
     name: Frontend E2E Tests (Playwright)
     runs-on: ubuntu-latest
+    # Playwrightのブラウザインストール(apt-get/ネットワーク)が稀にハングし、
+    # デフォルトの6時間上限まで実行され続けてランナー枠を圧迫することがあったため設定
+    timeout-minutes: 15
 
     defaults:
       run:
