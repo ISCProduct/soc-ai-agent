@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"gorm.io/gorm"
 )
 
 // MockRepositories
@@ -211,5 +212,74 @@ func TestInterviewService_TTSVoiceSelection(t *testing.T) {
 
 		_, err := svc.StartTurn(context.Background(), 1, 101, "", "", "", "", "", 0, 0, 0, 0, 0)
 		assert.NoError(t, err)
+	})
+}
+
+// TestInterviewService_EnsureSessionOwnership は #941 の回帰テスト。
+// UploadVideo等がセッション所有者チェックに使う EnsureSessionOwnership の
+// 許可/拒否ロジックをテーブル駆動で検証する。
+func TestInterviewService_EnsureSessionOwnership(t *testing.T) {
+	tests := []struct {
+		name      string
+		actorID   uint
+		sessionID uint
+		session   *models.InterviewSession
+		actor     *entity.User
+		wantErr   string // 空文字なら成功期待
+	}{
+		{
+			name:      "本人のセッションは許可",
+			actorID:   1,
+			sessionID: 100,
+			session:   &models.InterviewSession{ID: 100, UserID: 1},
+			wantErr:   "",
+		},
+		{
+			name:      "他人のセッションは拒否",
+			actorID:   2,
+			sessionID: 100,
+			session:   &models.InterviewSession{ID: 100, UserID: 1},
+			actor:     &entity.User{IsAdmin: false},
+			wantErr:   "forbidden",
+		},
+		{
+			name:      "管理者は他人のセッションでも許可",
+			actorID:   2,
+			sessionID: 100,
+			session:   &models.InterviewSession{ID: 100, UserID: 1},
+			actor:     &entity.User{IsAdmin: true},
+			wantErr:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sRepo := new(mockSessionRepo)
+			uRepo := new(mockUserRepo)
+			svc := interview.NewInterviewService(sRepo, nil, nil, uRepo, nil, nil, nil)
+
+			sRepo.On("FindByID", tt.sessionID).Return(tt.session, nil)
+			if tt.actorID != tt.session.UserID {
+				uRepo.On("GetUserByID", tt.actorID).Return(tt.actor, nil)
+			}
+
+			err := svc.EnsureSessionOwnership(tt.actorID, tt.sessionID)
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.EqualError(t, err, tt.wantErr)
+			}
+		})
+	}
+
+	t.Run("セッションが存在しない場合はリポジトリのエラーをそのまま返す", func(t *testing.T) {
+		sRepo := new(mockSessionRepo)
+		uRepo := new(mockUserRepo)
+		svc := interview.NewInterviewService(sRepo, nil, nil, uRepo, nil, nil, nil)
+
+		sRepo.On("FindByID", uint(999)).Return(nil, gorm.ErrRecordNotFound)
+
+		err := svc.EnsureSessionOwnership(1, 999)
+		assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 	})
 }

@@ -85,6 +85,19 @@ func (s *InterviewService) FinishSession(userID uint, sessionID uint) (*Intervie
 	return toSessionResponse(session), nil
 }
 
+// EnsureSessionOwnership はセッションが userID の所有物（または管理者操作）であることを検証する。
+// IDOR対策: URLパスの sessionID を扱うハンドラは、実処理の前に必ずこれを呼び出すこと。
+func (s *InterviewService) EnsureSessionOwnership(userID uint, sessionID uint) error {
+	session, err := s.sessionRepo.FindByID(sessionID)
+	if err != nil {
+		return err
+	}
+	if !s.isAllowed(userID, session.UserID) {
+		return errors.New("forbidden")
+	}
+	return nil
+}
+
 func (s *InterviewService) SaveUtterance(userID uint, sessionID uint, role string, text string) error {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
