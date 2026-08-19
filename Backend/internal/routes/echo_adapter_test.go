@@ -22,11 +22,13 @@ const testUserSecret = "test-secret"
 
 // stubOrgResolver は EchoUserAuth の OrganizationIDResolver を固定値で返す。
 type stubOrgResolver struct {
-	orgID uint
-	err   error
+	orgID   uint
+	err     error
+	isAdmin bool
 }
 
 func (s stubOrgResolver) ResolveOrganizationID(uint) (uint, error) { return s.orgID, s.err }
+func (s stubOrgResolver) IsUserAdmin(uint) (bool, error)           { return s.isAdmin, nil }
 
 func newRoutesTestDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 	t.Helper()
@@ -128,6 +130,35 @@ func TestEchoUserAuth_TenantMatchAllowed(t *testing.T) {
 	})
 	e.GET("/me", func(c echo.Context) error { return c.String(http.StatusOK, "ok") },
 		routes.EchoUserAuth(testUserSecret, nil, stubOrgResolver{orgID: 1}))
+
+	req := httptest.NewRequest(http.MethodGet, "/me", nil)
+	req.Header.Set("X-User-Token", token)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+// プラットフォーム管理者(is_admin)は自身の所属組織と異なる学園サブドメインへの
+// アクセスでもtenant mismatchで弾かれない。
+func TestEchoUserAuth_TenantMismatchAllowedForAdmin(t *testing.T) {
+	token, err := middleware.GenerateJWT(1, "admin@example.com", testUserSecret)
+	if err != nil {
+		t.Fatalf("generate jwt: %v", err)
+	}
+
+	e := echo.New()
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ctx := context.WithValue(c.Request().Context(), middleware.TenantOrganizationIDContextKey, uint(2))
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	})
+	e.GET("/me", func(c echo.Context) error { return c.String(http.StatusOK, "ok") },
+		routes.EchoUserAuth(testUserSecret, nil, stubOrgResolver{orgID: 1, isAdmin: true}))
 
 	req := httptest.NewRequest(http.MethodGet, "/me", nil)
 	req.Header.Set("X-User-Token", token)

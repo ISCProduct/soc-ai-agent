@@ -18,6 +18,7 @@ import (
 // OrganizationIDResolver は認証済みユーザーの組織IDを解決する。
 type OrganizationIDResolver interface {
 	ResolveOrganizationID(userID uint) (uint, error)
+	IsUserAdmin(userID uint) (bool, error)
 }
 
 // EchoUserAuth はX-User-Token JWTを検証するEcho nativeミドルウェアを返す。
@@ -64,7 +65,15 @@ func EchoUserAuth(userSecret string, access auth.UserAccessGuard, orgs ...Organi
 				}
 				ctx = context.WithValue(ctx, middleware.OrganizationIDContextKey, orgID)
 				if tenantOrgID, ok := middleware.TenantOrganizationIDFromContext(ctx); ok && tenantOrgID != orgID {
-					return echo.NewHTTPError(http.StatusForbidden, "tenant mismatch")
+					isAdmin, err := resolver.IsUserAdmin(userID)
+					if err != nil {
+						return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve admin status")
+					}
+					if !isAdmin {
+						return echo.NewHTTPError(http.StatusForbidden, "tenant mismatch")
+					}
+					// プラットフォーム管理者は自身の所属組織に関わらずアクセス先の学園として扱う
+					ctx = context.WithValue(ctx, middleware.OrganizationIDContextKey, tenantOrgID)
 				}
 			}
 			c.SetRequest(c.Request().WithContext(ctx))
