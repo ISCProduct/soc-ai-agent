@@ -162,6 +162,19 @@ func TestChatController_ToggleFavorite_Forbidden(t *testing.T) {
 	matchSvc.AssertExpectations(t)
 }
 
+func TestChatController_ToggleFavorite_NotFound(t *testing.T) {
+	matchSvc := &mocks.MatchingServiceMock{}
+	matchSvc.On("ToggleFavorite", uint(5), uint(1)).Return(shared.ErrNotFound)
+
+	body, _ := json.Marshal(map[string]uint{"match_id": 5})
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/favorite", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(nil, matchSvc, nil, nil, nil).ToggleFavorite, newCtx(req, rec), http.StatusNotFound)
+	matchSvc.AssertExpectations(t)
+}
+
 func TestChatController_ToggleFavorite_ServiceError(t *testing.T) {
 	matchSvc := &mocks.MatchingServiceMock{}
 	matchSvc.On("ToggleFavorite", uint(5), uint(1)).Return(errors.New("db error"))

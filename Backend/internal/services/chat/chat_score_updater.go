@@ -3,10 +3,13 @@ package chat
 import (
 	"Backend/internal/models"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
 	"strings"
+
+	"gorm.io/gorm"
 )
 
 // analyzeAndUpdateWeights ユーザーの回答を分析し重み係数を更新する。
@@ -153,9 +156,9 @@ func (s *ChatService) convertChoiceToScore(choice string) int {
 func (s *ChatService) inferCategoryFromQuestion(question string) string {
 	categoryKeywords := map[string][]string{
 		"技術志向":       {"技術", "プログラミング", "コーディング", "アルゴリズム", "システム設計", "新しい技術", "技術的"},
-		"チームワーク":     {"チーム", "協力", "協働", "連携", "メンバー", "共同"},
-		"リーダーシップ":    {"リーダー", "指導", "率いる", "マネジメント", "方向性", "意思決定"},
-		"創造性":        {"創造", "アイデア", "発想", "革新", "イノベーション", "新しい"},
+		"チームワーク志向":   {"チーム", "協力", "協働", "連携", "メンバー", "共同"},
+		"リーダーシップ志向":  {"リーダー", "指導", "率いる", "マネジメント", "方向性", "意思決定"},
+		"創造性志向":      {"創造", "アイデア", "発想", "革新", "イノベーション", "新しい"},
 		"安定志向":       {"安定", "確実", "堅実", "リスク回避", "慎重"},
 		"成長志向":       {"成長", "キャリア", "昇進", "スキルアップ", "学習"},
 		"ワークライフバランス": {"ワークライフ", "残業", "休日", "プライベート", "働き方"},
@@ -180,8 +183,11 @@ func (s *ChatService) inferCategoryFromQuestion(question string) string {
 func (s *ChatService) updateCategoryScore(userID uint, sessionID, category string, score int) error {
 	// 既存のスコアを取得
 	existingScore, err := s.userWeightScoreRepo.FindByUserSessionAndCategory(userID, sessionID, category)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("failed to get existing score: %w", err)
+	}
 
-	if err != nil || existingScore == nil {
+	if existingScore == nil {
 		// 新規作成: 絶対値でセット
 		if err := s.userWeightScoreRepo.SetScore(userID, sessionID, category, score); err != nil {
 			return fmt.Errorf("failed to create score: %w", err)

@@ -2,9 +2,21 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional
 from unittest.mock import MagicMock, patch
 
 import vector_store as vs
+
+
+def _where_value(where: Dict[str, Any], key: str) -> Optional[Any]:
+    # _build_where は複数キーを{"$and": [{k: v}, ...]}でラップするため、
+    # フラット/$and両方の形状からキーを取り出せるようにする。
+    if key in where:
+        return where[key]
+    for clause in where.get("$and", []):
+        if key in clause:
+            return clause[key]
+    return None
 
 
 def test_parse_cache_key_hints():
@@ -45,7 +57,7 @@ def test_set_and_get_cached_documents_roundtrip():
 
     def query_side_effect(**kwargs):
         where = kwargs.get("where") or {}
-        if where.get("role") == "別職種":
+        if _where_value(where, "role") == "別職種":
             return {"documents": [[]], "metadatas": [[]]}
         return {
             "documents": [["採用方針のメモ"]],
@@ -87,6 +99,73 @@ def test_set_and_get_cached_documents_roundtrip():
     assert collection.query.call_count >= 2
 
 
+def test_query_with_where_falls_back_to_scoped_filter_on_error():
+    # whereクエリ自体が例外を投げる環境でも、フィルタを完全に外すのではなく
+    # fallback_where(companyのみ)でスコープを維持したまま再試行すること。
+    collection = MagicMock()
+    calls = []
+
+    def query_side_effect(**kwargs):
+        calls.append(kwargs.get("where"))
+        if kwargs.get("where") == {"$and": [{"company": "Acme"}, {"role": "エンジニア"}]}:
+            raise ValueError("Expected where to have exactly one operator")
+        return {"documents": [["Acme社のメモ"]], "metadatas": [[{"fetched_at": None}]]}
+
+    collection.query.side_effect = query_side_effect
+
+    docs = vs._query_with_where(
+        collection,
+        [0.1, 0.2, 0.3],
+        where=vs._build_where({"company": "Acme", "role": "エンジニア"}),
+        n_results=5,
+        fallback_where=vs._build_where({"company": "Acme"}),
+    )
+
+    assert calls == [
+        {"$and": [{"company": "Acme"}, {"role": "エンジニア"}]},
+        {"company": "Acme"},
+    ]
+    assert docs == ["Acme社のメモ"]
+
+
+def test_query_with_where_never_falls_back_to_unfiltered_query():
+    # company scopeを維持できない場合、他社データ混入を避けるため
+    # フィルタ無しの無絞り込み検索は一切行わずキャッシュミス(空リスト)を返すこと。
+    collection = MagicMock()
+    calls = []
+
+    def query_side_effect(**kwargs):
+        calls.append(kwargs.get("where"))
+        raise ValueError("where filter unsupported")
+
+    collection.query.side_effect = query_side_effect
+
+    docs = vs._query_with_where(
+        collection,
+        [0.1, 0.2, 0.3],
+        where=vs._build_where({"company": "Acme", "role": "エンジニア"}),
+        n_results=5,
+        fallback_where=vs._build_where({"company": "Acme"}),
+    )
+
+    # whereとfallback_whereの2回だけ試行し、where無しの呼び出しは一切発生しない
+    assert calls == [
+        {"$and": [{"company": "Acme"}, {"role": "エンジニア"}]},
+        {"company": "Acme"},
+    ]
+    assert docs == []
+
+
+def test_build_where_wraps_multi_key_filters():
+    # ChromaDBはフラットな複数キーのwhereを許可しない(1オペレータのみ)ため、
+    # 2キー以上は$andでラップする必要がある。
+    assert vs._build_where({"company": "Acme"}) == {"company": "Acme"}
+    assert vs._build_where({}) == {}
+    assert vs._build_where({"company": "Acme", "role": "エンジニア"}) == {
+        "$and": [{"company": "Acme"}, {"role": "エンジニア"}]
+    }
+
+
 def test_describe_backend_http(monkeypatch):
     monkeypatch.setattr(vs, "CHROMA_HOST", "chroma")
     monkeypatch.setattr(vs, "CHROMA_PORT", 8000)
@@ -113,7 +192,7 @@ def test_company_context_fallback_not_only_hints():
 
     def query_side_effect(**kwargs):
         where = kwargs.get("where") or {}
-        if where.get("role") == "エンジニア":
+        if _where_value(where, "role") == "エンジニア":
             return {"documents": [[]], "metadatas": [[]]}
         return {
             "documents": [["企業共通メモ"]],
@@ -139,6 +218,40 @@ def test_company_context_fallback_not_only_hints():
             allow_company_fallback=True,
         )
     assert docs == ["企業共通メモ"]
+    # company+roleが空振りし、company-onlyの再試行が実際に行われたことを確認する
+    assert collection.query.call_count >= 2
+
+
+def test_get_cached_documents_no_fallback_when_disallowed_even_on_exception():
+    # allow_company_fallback=Falseの場合、company+roleクエリが例外になっても
+    # company単独スコープへ緩めてはならない(呼び出し元が職種条件を維持したい
+    # 意図を無視してしまうため)。
+    vs.reset_chroma_client_for_tests()
+    collection = MagicMock()
+    collection.count.return_value = 1
+    calls = []
+
+    def query_side_effect(**kwargs):
+        calls.append(kwargs.get("where"))
+        raise ValueError("Expected where to have exactly one operator")
+
+    collection.query.side_effect = query_side_effect
+    col_obj = MagicMock()
+    col_obj.name = vs.COLLECTION_COMPANY_CONTEXT
+    client = MagicMock()
+    client.list_collections.return_value = [col_obj]
+    client.get_collection.return_value = collection
+
+    with patch.object(vs, "get_chroma_client", return_value=client):
+        docs = vs.get_cached_documents(
+            "Acme::エンジニア",
+            query_embedding=[0.1, 0.2, 0.3],
+            allow_company_fallback=False,
+        )
+
+    assert docs == []
+    # company+roleクエリの1回のみ。company単独への再試行が発生していないこと
+    assert collection.query.call_count == 1
 
 
 def test_get_index_status_and_delete():

@@ -112,14 +112,21 @@ function ApplicationsContent() {
         },
         body: JSON.stringify({ status: editStatus, notes: editNotes }),
       })
-      if (!res.ok) throw new Error('更新失敗')
+      if (!res.ok) {
+        let message = 'ステータスの更新に失敗しました'
+        try {
+          const body = await res.json()
+          if (body?.error) message = body.error
+        } catch { /* ignore parse error */ }
+        throw new Error(message)
+      }
       setApplications(prev =>
         prev.map(a => (a.id === appId ? { ...a, status: editStatus, notes: editNotes } : a))
       )
       setSnackbar({ open: true, message: 'ステータスを更新しました', severity: 'success' })
       cancelEdit()
-    } catch {
-      setSnackbar({ open: true, message: 'ステータスの更新に失敗しました', severity: 'error' })
+    } catch (e) {
+      setSnackbar({ open: true, message: e instanceof Error ? e.message : 'ステータスの更新に失敗しました', severity: 'error' })
     } finally {
       setSaving(false)
     }
