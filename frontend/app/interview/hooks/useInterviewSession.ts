@@ -184,12 +184,13 @@ export function useInterviewSession({
       el.load()
     }
 
+    if (gen !== audioGenerationRef.current) { cleanup(); return }
+
     try {
       if (!aiAudioCtxRef.current || aiAudioCtxRef.current.state === 'closed') {
         aiAudioCtxRef.current = new AudioContext()
       }
       const ctx = aiAudioCtxRef.current
-      // resume を await して running 状態を確実に待つ（suspended のまま再生すると無音になる）
       await ctx.resume()
 
       const source = ctx.createMediaElementSource(el)
@@ -217,8 +218,6 @@ export function useInterviewSession({
       // AudioContext 未対応時は Audio 要素のデフォルト出力にフォールバック（リップシンクなし）
       console.warn('[Interview] AudioContext routing unavailable; playing via element output', err)
     }
-
-    if (gen !== audioGenerationRef.current) { cleanup(); return }
 
     return new Promise<void>((resolve) => {
       el.onended = () => {

@@ -20,11 +20,11 @@ export default function AnalysisScoreCard({
   if (!scoreComment && !analysisScores && !analysisError) return null
 
   return (
-    <Box sx={{ maxWidth: 1200, mx: 'auto', p: { xs: 2, sm: 4 }, pb: 0 }}>
+    <>
       {analysisError && (
         <Alert
           severity="warning"
-          sx={{ mb: 2 }}
+          sx={{ mb: 3 }}
           action={
             <Button color="inherit" size="small" startIcon={<Refresh />} onClick={onRetryAnalysis}>
               再読み込み
@@ -36,7 +36,7 @@ export default function AnalysisScoreCard({
       )}
 
       {(scoreComment || analysisScores) && (
-        <Card elevation={2} sx={{ mb: 2, border: '2px solid', borderColor: 'primary.light', backgroundColor: '#f0f4ff' }}>
+        <Card elevation={2} sx={{ mb: 3, border: '2px solid', borderColor: 'primary.light', backgroundColor: '#f0f4ff' }}>
           <CardContent>
             <Typography variant="h6" fontWeight="bold" gutterBottom>
               📊 4段階分析スコア
@@ -64,6 +64,6 @@ export default function AnalysisScoreCard({
           </CardContent>
         </Card>
       )}
-    </Box>
+    </>
   )
 }

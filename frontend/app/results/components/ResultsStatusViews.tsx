@@ -76,7 +76,8 @@ export function ResultsErrorView({
 }) {
   return (
     <Box sx={{
-      height: '100vh',
+      flex: 1,
+      minHeight: 0,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -117,7 +118,8 @@ export function ResultsErrorView({
 export function ResultsNoMatchView({ onReset }: { onReset: NavigateHandler }) {
   return (
     <Box sx={{
-      height: '100vh',
+      flex: 1,
+      minHeight: 0,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
