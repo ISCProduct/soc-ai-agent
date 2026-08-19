@@ -36,6 +36,7 @@ import {
     type MarketType,
 } from '@/lib/company-data';
 import { formatRelationLabel } from '@/lib/relation-labels';
+import { layoutBusinessGraph, layoutCapitalGraphFromEdges, groupIdsByConnectedComponent } from '@/lib/relation-graph';
 import { getCompanyIdFromNode, parseCompanyId } from '@/lib/correlation-diagram-navigation';
 import CorrelationCompanyDetailPanel, {
     CORRELATION_DETAIL_PANEL_WIDTH,
@@ -176,7 +177,8 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
             });
 
             const nodes: Node[] = [];
-            const ids = Array.from(companyIds);
+            // #970: 単純な登録順ではなく、関連する企業同士が連番で並ぶよう連結成分ごとにまとめる
+            const ids = groupIdsByConnectedComponent(Array.from(companyIds), limitedRelations);
             const cols = Math.ceil(Math.sqrt(ids.length)) || 1;
 
             ids.forEach((id, idx) => {
@@ -251,20 +253,21 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
 
         const nodes: Node[] = [];
         const ids = Array.from(relatedIds);
-        const angle = (2 * Math.PI) / ids.length;
-        const radius = 250;
+        // #970: 登録順の円形配置ではなく、起点企業からの関係性(BFS距離)に基づいて配置する
+        const positions =
+            type === 'capital'
+                ? layoutCapitalGraphFromEdges(focusCompanyId, ids, relations)
+                : layoutBusinessGraph(focusCompanyId, ids, relations);
 
-        ids.forEach((compId, idx) => {
+        ids.forEach((compId) => {
             const isFocusCompany = compId === focusCompanyId;
             const marketType = getMarketType(compId);
+            const pos = positions.get(compId) ?? { x: 0, y: 0 };
 
             nodes.push({
                 id: String(compId),
                 type: 'default',
-                position: {
-                    x: 500 + radius * Math.cos(idx * angle),
-                    y: 400 + radius * Math.sin(idx * angle),
-                },
+                position: { x: pos.x, y: pos.y },
                 data: {
                     companyId: compId,
                     label: (

@@ -25,6 +25,7 @@ import {
     type MarketType,
 } from '@/lib/company-data';
 import { formatRelationLabel } from '@/lib/relation-labels';
+import { layoutBusinessGraph } from '@/lib/relation-graph';
 
 type DiagramType = 'capital' | 'business';
 
@@ -272,21 +273,19 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
             }
         });
 
+        // #970: 登録順の円形配置ではなく、起点企業からの関係性(BFS距離)に基づいて配置する
         const involvedCompanies = Array.from(relatedIds);
-        const angle = (2 * Math.PI) / involvedCompanies.length;
-        const radius = 250;
+        const positions = layoutBusinessGraph(focusCompanyId, involvedCompanies, relations);
 
-        return involvedCompanies.map((compId, idx) => {
+        return involvedCompanies.map((compId) => {
             const isFocusCompany = compId === focusCompanyId;
             const marketType = getMarketType(compId);
+            const pos = positions.get(compId) ?? { x: 0, y: 0 };
 
             return {
                 id: String(compId),
                 type: 'default',
-                position: {
-                    x: 400 + radius * Math.cos(idx * angle),
-                    y: 300 + radius * Math.sin(idx * angle),
-                },
+                position: { x: pos.x, y: pos.y },
                 data: {
                     label: (
                         <Box sx={{ textAlign: 'center', p: 1 }}>
