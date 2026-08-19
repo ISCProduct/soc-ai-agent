@@ -82,6 +82,8 @@ export function useInterviewSession({
   const pollSessionRef = useRef<{ sessionId: number; userId: number } | null>(null)
   /** 再試行時に古い tick の結果を破棄するための世代カウンタ */
   const pollGenerationRef = useRef(0)
+  /** playAudioBlob の世代。cleanupConnection で increment し、古い再生を破棄する */
+  const audioGenerationRef = useRef(0)
   const sessionStartRef = useRef<number | null>(null)
   const transcriptEndRef = useRef<HTMLDivElement | null>(null)
   const isRecordingRef = useRef(false)
@@ -122,6 +124,7 @@ export function useInterviewSession({
   }, [utterances, partialAi])
 
   const cleanupConnection = () => {
+    audioGenerationRef.current++
     ;[timerRef, pollRef].forEach(r => { if (r.current) { clearInterval(r.current); r.current = null } })
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop(); mediaRecorderRef.current = null
@@ -161,6 +164,7 @@ export function useInterviewSession({
   }
 
   const playAudioBlob = async (blob: Blob): Promise<void> => {
+    const gen = audioGenerationRef.current
     const url = URL.createObjectURL(blob)
     const el = new Audio()
     aiAudioRef.current = el
@@ -186,12 +190,13 @@ export function useInterviewSession({
       el.load()
     }
 
+    if (gen !== audioGenerationRef.current) { cleanup(); return }
+
     try {
       if (!aiAudioCtxRef.current || aiAudioCtxRef.current.state === 'closed') {
         aiAudioCtxRef.current = new AudioContext()
       }
       const ctx = aiAudioCtxRef.current
-      // resume を await して running 状態を確実に待つ（suspended のまま再生すると無音になる）
       await ctx.resume()
 
       const source = ctx.createMediaElementSource(el)

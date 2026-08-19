@@ -11,6 +11,7 @@ import {
   ResultsNoMatchView,
 } from './components/ResultsStatusViews'
 import ResultsListView from './components/ResultsListView'
+import AnalysisScoreCard from './components/AnalysisScoreCard'
 
 /** ReactFlow 依存の詳細ビューは一覧表示では不要のため遅延ロード */
 const CompanyDetailView = dynamic(() => import('./components/CompanyDetailView'), {
@@ -74,16 +75,38 @@ function ResultsContent() {
 
   if (error) {
     return (
-      <ResultsErrorView
-        error={error}
-        onBack={handleBack}
-        onReset={handleReset}
-      />
+      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+        <Box sx={{ maxWidth: 1200, mx: 'auto', p: { xs: 2, sm: 4 }, pb: 0, width: '100%' }}>
+          <AnalysisScoreCard
+            analysisScores={analysisScores}
+            scoreComment={scoreComment}
+            analysisError={analysisError}
+            onRetryAnalysis={handleRetryAnalysis}
+          />
+        </Box>
+        <ResultsErrorView
+          error={error}
+          onBack={handleBack}
+          onReset={handleReset}
+        />
+      </Box>
     )
   }
 
   if (companies.length === 0) {
-    return <ResultsNoMatchView onReset={handleReset} />
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+        <Box sx={{ maxWidth: 1200, mx: 'auto', p: { xs: 2, sm: 4 }, pb: 0, width: '100%' }}>
+          <AnalysisScoreCard
+            analysisScores={analysisScores}
+            scoreComment={scoreComment}
+            analysisError={analysisError}
+            onRetryAnalysis={handleRetryAnalysis}
+          />
+        </Box>
+        <ResultsNoMatchView onReset={handleReset} />
+      </Box>
+    )
   }
 
   if (selectedCompany) {

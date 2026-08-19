@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, Suspense, useCallback } from 'react'
+import { useCallback, useEffect, useState, Suspense } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { interviewLimits } from '@/lib/interview'
@@ -192,6 +192,13 @@ function InterviewContent() {
     return () => { cancelled = true; clearTimeout(timer) }
   }, [loading, companySearch, companySourceTab]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const handleBackToSelection = useCallback(() => {
+    clearInterviewLobbyDraft()
+    media.stopStream()
+    setStatus('selection')
+    router.replace('/interview')
+  }, [router, setStatus, media])
+
   if (loading || !user) {
     return <PageLoading message="面接画面を準備しています..." />
   }
@@ -285,7 +292,7 @@ function InterviewContent() {
         onToggleMic={media.toggleMic}
         onToggleCamera={media.toggleCamera}
         lobbyVideoRef={media.lobbyVideoRef}
-        onBack={() => router.push('/')}
+        onBack={handleBackToSelection}
         onJoinWithConsent={session.handleJoinWithConsent}
         consentDialog={consentDialog}
       />

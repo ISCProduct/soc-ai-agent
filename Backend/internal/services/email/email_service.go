@@ -190,7 +190,7 @@ const reportEmailTemplate = `<!DOCTYPE html>
   </div>
 
   <div class="section">
-    <h2>📊 4分析スコア</h2>
+    <h2>📊 4段階分析スコア</h2>
     <div class="scores-grid">
       <div class="score-card">
         <div class="score-label">職種分析</div>
