@@ -238,13 +238,12 @@ def _query_with_where(
     n_results: int,
     fallback_where: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
-    def _run(w: Optional[Dict[str, Any]]) -> Any:
-        kwargs: Dict[str, Any] = {"where": w} if w else {}
+    def _run(w: Dict[str, Any]) -> Any:
         return collection.query(
             query_embeddings=[query_embedding],
             n_results=n_results,
+            where=w,
             include=["documents", "metadatas"],
-            **kwargs,
         )
 
     try:
@@ -252,12 +251,14 @@ def _query_with_where(
     except Exception:
         # whereフィルタが失敗した場合でも、他社のデータが混入しないよう
         # fallback_where(通常はcompanyのみ)でスコープを維持したまま再試行する。
-        # それも失敗する場合のみ、フィルタ無しにフォールバックする
-        # (whereフィルタ自体が非対応の環境向け)。
+        # スコープを維持できない場合は、フィルタ無し検索(他社データ混入の
+        # リスクがある)は行わずキャッシュミス扱いにする。
+        if not fallback_where:
+            return []
         try:
-            results = _run(fallback_where) if fallback_where else _run(None)
+            results = _run(fallback_where)
         except Exception:
-            results = _run(None)
+            return []
 
     documents: List[str] = results.get("documents", [[]])[0] or []
     metadatas: List[Dict[str, Any]] = results.get("metadatas", [[]])[0] or []

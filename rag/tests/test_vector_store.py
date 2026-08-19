@@ -7,6 +7,17 @@ from unittest.mock import MagicMock, patch
 import vector_store as vs
 
 
+def _where_value(where, key):
+    # _build_where は複数キーを{"$and": [{k: v}, ...]}でラップするため、
+    # フラット/$and両方の形状からキーを取り出せるようにする。
+    if key in where:
+        return where[key]
+    for clause in where.get("$and", []):
+        if key in clause:
+            return clause[key]
+    return None
+
+
 def test_parse_cache_key_hints():
     meta = vs.parse_cache_key("hints::Acme::エンジニア")
     assert meta["collection"] == vs.COLLECTION_INTERVIEW_HINTS
@@ -42,16 +53,6 @@ def test_set_and_get_cached_documents_roundtrip():
     collection = MagicMock()
     collection.count.return_value = 1
     fetched = datetime.now(timezone.utc).isoformat()
-
-    def _where_value(where, key):
-        # _build_where は複数キーを{"$and": [{k: v}, ...]}でラップするため、
-        # フラット/$and両方の形状からキーを取り出せるようにする。
-        if key in where:
-            return where[key]
-        for clause in where.get("$and", []):
-            if key in clause:
-                return clause[key]
-        return None
 
     def query_side_effect(**kwargs):
         where = kwargs.get("where") or {}
@@ -126,6 +127,34 @@ def test_query_with_where_falls_back_to_scoped_filter_on_error():
     assert docs == ["Acme社のメモ"]
 
 
+def test_query_with_where_never_falls_back_to_unfiltered_query():
+    # company scopeを維持できない場合、他社データ混入を避けるため
+    # フィルタ無しの無絞り込み検索は一切行わずキャッシュミス(空リスト)を返すこと。
+    collection = MagicMock()
+    calls = []
+
+    def query_side_effect(**kwargs):
+        calls.append(kwargs.get("where"))
+        raise ValueError("where filter unsupported")
+
+    collection.query.side_effect = query_side_effect
+
+    docs = vs._query_with_where(
+        collection,
+        [0.1, 0.2, 0.3],
+        where=vs._build_where({"company": "Acme", "role": "エンジニア"}),
+        n_results=5,
+        fallback_where=vs._build_where({"company": "Acme"}),
+    )
+
+    # whereとfallback_whereの2回だけ試行し、where無しの呼び出しは一切発生しない
+    assert calls == [
+        {"$and": [{"company": "Acme"}, {"role": "エンジニア"}]},
+        {"company": "Acme"},
+    ]
+    assert docs == []
+
+
 def test_build_where_wraps_multi_key_filters():
     # ChromaDBはフラットな複数キーのwhereを許可しない(1オペレータのみ)ため、
     # 2キー以上は$andでラップする必要がある。
@@ -162,7 +191,7 @@ def test_company_context_fallback_not_only_hints():
 
     def query_side_effect(**kwargs):
         where = kwargs.get("where") or {}
-        if where.get("role") == "エンジニア":
+        if _where_value(where, "role") == "エンジニア":
             return {"documents": [[]], "metadatas": [[]]}
         return {
             "documents": [["企業共通メモ"]],
@@ -188,6 +217,8 @@ def test_company_context_fallback_not_only_hints():
             allow_company_fallback=True,
         )
     assert docs == ["企業共通メモ"]
+    # company+roleが空振りし、company-onlyの再試行が実際に行われたことを確認する
+    assert collection.query.call_count >= 2
 
 
 def test_get_index_status_and_delete():
