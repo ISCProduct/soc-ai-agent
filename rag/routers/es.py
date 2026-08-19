@@ -8,6 +8,7 @@ from fastapi import APIRouter
 
 from models import ESReviewRequest, ESReviewResponse
 from services.sanitize import _sanitize_company_name_for_query
+from vector_store import build_cache_key
 
 logger = logging.getLogger("main")
 
@@ -22,7 +23,10 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
     safe_company_name = ""
     if request.company_name.strip():
         safe_company_name = _sanitize_company_name_for_query(request.company_name)
-        cache_key = "{company}::es_review".format(company=safe_company_name)
+        # #938: キャッシュキーはサニタイズ前の企業名のハッシュで衝突回避する
+        cache_key = build_cache_key(
+            "es_review", safe_company_name, company_original=request.company_name
+        )
         if request.company_context:
             context_docs = [request.company_context]
             m.set_cached_context(
