@@ -92,7 +92,7 @@ def _sanitize_collection_name(name: str) -> str:
 
 
 def _company_hash(company_original: Optional[str]) -> str:
-    """サニタイズ前の企業名をNFKC正規化してSHA-256ハッシュの短縮値を返す (#938)。
+    """サニタイズ前の企業名をNFKC正規化してSHA-256ハッシュを返す (#938)。
 
     `_sanitize_company_name_for_query` は許可文字以外を区切りなしで単純除去するため、
     表記の異なる企業名（例: "H.I.S." と "HIS"）が同一のサニタイズ結果へ収束しうる。
@@ -103,7 +103,7 @@ def _company_hash(company_original: Optional[str]) -> str:
     normalized = unicodedata.normalize("NFKC", (company_original or "").strip())
     if not normalized:
         return ""
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:10]
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def _company_segment(company: str, company_original: Optional[str] = None) -> str:
@@ -407,8 +407,13 @@ def upsert_by_doc_type(
 def delete_company_documents(
     company: str,
     doc_type: Optional[str] = None,
+    company_original: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """企業に紐づくベクトルを削除する。doc_type 指定時はその用途のみ。"""
+    """企業に紐づくベクトルを削除する。doc_type 指定時はその用途のみ。
+
+    company_original を渡すと保存時と同じ company_hash で絞り、
+    サニタイズ後の表示名が衝突する別企業の文書を消さない。
+    """
     company = (company or "").strip()
     if not company:
         return {"deleted": 0, "collections": {}}
@@ -422,6 +427,9 @@ def delete_company_documents(
     existing = _collection_names(client)
     deleted_total = 0
     per_collection: Dict[str, int] = {}
+    where = _build_where(
+        _company_filter({"company": company, "company_hash": _company_hash(company_original)})
+    )
 
     for name in collections:
         if name not in existing:
@@ -429,12 +437,11 @@ def delete_company_documents(
             continue
         collection = client.get_collection(name)
         try:
-            # Chroma の where 削除。未対応環境では get→delete ids にフォールバック。
             before = collection.count()
             try:
-                collection.delete(where={"company": company})
+                collection.delete(where=where)
             except Exception:
-                got = collection.get(where={"company": company}, include=[])
+                got = collection.get(where=where, include=[])
                 ids = got.get("ids") or []
                 if ids:
                     collection.delete(ids=ids)

@@ -15,6 +15,7 @@ import (
 	"Backend/internal/controllers"
 	"Backend/internal/models"
 	"Backend/internal/services/flywheel"
+	"Backend/internal/services/shared"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
@@ -282,7 +283,7 @@ func TestRealtimeController_Token_Forbidden(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("CreateRealtimeToken", tmock.Anything, uint(1), uint(2)).Return("", errors.New("forbidden"))
+	svc.On("CreateRealtimeToken", tmock.Anything, uint(1), uint(2)).Return("", shared.ErrForbidden)
 	assertStatus(t, newRealtimeController(svc, nil).Token, newCtx(req, rec), http.StatusForbidden)
 }
 

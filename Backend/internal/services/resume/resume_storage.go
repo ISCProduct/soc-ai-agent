@@ -33,7 +33,7 @@ func (s *ResumeService) resolveLocalPath(doc *models.ResumeDocument, workDir str
 			if err := validateURL(doc.SourceURL); err != nil {
 				return "", err
 			}
-			downloaded, _, err := downloadSourceFile(doc.SourceURL, workDir)
+			downloaded, _, err := downloadSourceFile(context.Background(), doc.SourceURL, workDir)
 			if err != nil {
 				return "", err
 			}

@@ -139,7 +139,10 @@ func (c *ChatController) checkSessionOwnership(sessionID string, userID uint) ([
 	if err != nil {
 		return nil, err
 	}
-	if len(history) > 0 && history[0].UserID != 0 && history[0].UserID != userID {
+	if len(history) == 0 {
+		return history, nil
+	}
+	if history[0].UserID == 0 || history[0].UserID != userID {
 		return nil, shared.ErrForbidden
 	}
 	return history, nil

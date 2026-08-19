@@ -1,8 +1,8 @@
 package interview
 
 import (
+	"Backend/internal/services/shared"
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -33,7 +33,7 @@ func (s *InterviewService) Turn(
 		return nil, err
 	}
 	if !s.isAllowed(userID, session.UserID) {
-		return nil, errors.New("forbidden")
+		return nil, shared.ErrForbidden
 	}
 
 	// STT: Whisper でユーザー音声をテキスト化
@@ -137,7 +137,7 @@ func (s *InterviewService) StartTurn(
 		return nil, err
 	}
 	if !s.isAllowed(userID, session.UserID) {
-		return nil, errors.New("forbidden")
+		return nil, shared.ErrForbidden
 	}
 
 	// WEB検索・手入力で company_id=0 でも、企業名が DB 登録と一致すれば解決する (#567)

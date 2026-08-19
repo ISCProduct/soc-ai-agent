@@ -16,14 +16,15 @@ jest.mock('@/lib/auth', () => ({
 }))
 
 describe('useResumePage handleUpload (#948)', () => {
+  const originalFetch = global.fetch
+
   afterEach(() => {
-    jest.restoreAllMocks()
+    global.fetch = originalFetch
   })
 
   it('再アップロード時に直前のレビュー関連stateを全てリセットする', async () => {
     const { result } = renderHook(() => useResumePage())
 
-    // documentId未設定でhandleReviewを呼び、reviewErrorを非空にしておく
     await act(async () => {
       await result.current.handleReview()
     })
@@ -32,7 +33,7 @@ describe('useResumePage handleUpload (#948)', () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ document: { id: 1 } }),
-    })
+    } as unknown as Response)
 
     await act(async () => {
       await result.current.handleUpload()
@@ -44,5 +45,16 @@ describe('useResumePage handleUpload (#948)', () => {
     expect(result.current.ragReport).toBe('')
     expect(result.current.scoresBefore).toBeNull()
     expect(result.current.scoresAfter).toBeNull()
+    expect(result.current.documentId).toBe(1)
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      text: async () => 'upload failed',
+    } as unknown as Response)
+
+    await act(async () => {
+      await result.current.handleUpload()
+    })
+    expect(result.current.documentId).toBeNull()
   })
 })

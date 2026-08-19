@@ -44,7 +44,9 @@ def vector_reembed(request: VectorReembedRequest) -> VectorReembedResponse:
         raise HTTPException(status_code=400, detail="invalid doc_type")
 
     try:
-        deleted_info = delete_company_documents(safe_company, doc_type=doc_type)
+        deleted_info = delete_company_documents(
+            safe_company, doc_type=doc_type, company_original=request.company_name
+        )
     except Exception as exc:
         logger.exception("vector delete failed company=%s error=%s", safe_company, exc)
         raise HTTPException(status_code=503, detail=f"vector delete failed: {exc}") from exc

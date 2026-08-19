@@ -427,3 +427,46 @@ def test_set_cached_documents_doc_type_override():
     assert meta["doc_type"] == "resume_review"
     assert meta["source"] == "web_search"
     client.get_or_create_collection.assert_called_with(vs.COLLECTION_COMPANY_CONTEXT)
+
+
+def test_company_hash_uses_full_sha256_digest():
+    digest = vs._company_hash("H.I.S.")
+    assert len(digest) == 64
+    assert digest != vs._company_hash("HIS")
+
+
+def test_delete_company_documents_keeps_punctuation_variant():
+    vs.reset_chroma_client_for_tests()
+    store: Dict[str, Dict[str, Any]] = {}
+    hash_dotted = vs._company_hash("H.I.S.")
+    hash_plain = vs._company_hash("HIS")
+    store["dotted"] = {"company": "HIS", "company_hash": hash_dotted}
+    store["plain"] = {"company": "HIS", "company_hash": hash_plain}
+
+    def delete_side_effect(**kwargs):
+        where = kwargs.get("where") or {}
+        wanted = _where_value(where, "company_hash")
+        for key in list(store):
+            md = store[key]
+            if md.get("company") != _where_value(where, "company"):
+                continue
+            if wanted is not None and md.get("company_hash") != wanted:
+                continue
+            del store[key]
+
+    collection = MagicMock()
+    collection.count.side_effect = lambda: len(store)
+    collection.delete.side_effect = delete_side_effect
+    col_obj = MagicMock()
+    col_obj.name = vs.COLLECTION_COMPANY_CONTEXT
+    client = MagicMock()
+    client.list_collections.return_value = [col_obj]
+    client.get_collection.return_value = collection
+
+    with patch.object(vs, "get_chroma_client", return_value=client):
+        vs.delete_company_documents("HIS", doc_type="company_research", company_original="H.I.S.")
+
+    assert "dotted" not in store
+    assert "plain" in store
+    assert store["plain"]["company_hash"] == hash_plain
+

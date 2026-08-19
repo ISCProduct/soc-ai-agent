@@ -62,7 +62,7 @@ func TestChatController_GetHistory_ServiceError(t *testing.T) {
 
 func TestChatController_GetHistory_Success(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
-	history := []models.ChatMessage{{SessionID: "s1", Role: "user"}}
+	history := []models.ChatMessage{{UserID: 1, SessionID: "s1", Role: "user"}}
 	chatSvc.On("GetChatHistory", "s1").Return(history, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/history?session_id=s1", nil)
@@ -89,11 +89,25 @@ func TestChatController_GetHistory_Forbidden(t *testing.T) {
 
 func TestChatController_Chat_Forbidden_ExistingSessionOwnedByAnotherUser(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
-	// session s1 は既にuserID=2のメッセージが存在する
 	history := []models.ChatMessage{{UserID: 2, SessionID: "s1", Role: "user"}}
 	chatSvc.On("GetChatHistory", "s1").Return(history, nil)
 
 	body := `{"session_id":"s1","message":"hello"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newChatController(chatSvc, nil, nil, nil, nil).Chat, newCtx(req, rec), http.StatusForbidden)
+	chatSvc.AssertExpectations(t)
+	chatSvc.AssertNotCalled(t, "ProcessChat", mock.Anything, mock.Anything)
+}
+
+func TestChatController_Chat_Forbidden_ExistingSessionWithUnsetOwner(t *testing.T) {
+	chatSvc := &mocks.ChatServiceMock{}
+	history := []models.ChatMessage{{UserID: 0, SessionID: "s0", Role: "user"}}
+	chatSvc.On("GetChatHistory", "s0").Return(history, nil)
+
+	body := `{"session_id":"s0","message":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/chat", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req = withUserID(req, 1)

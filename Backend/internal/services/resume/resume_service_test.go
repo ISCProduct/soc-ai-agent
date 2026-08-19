@@ -317,6 +317,12 @@ func TestValidateURL(t *testing.T) {
 			wantError: false,
 		},
 		{
+			name:      "公開IPと内部IPが混在する場合は拒否される",
+			rawURL:    "http://mixed.example.com/x",
+			mockIPs:   []net.IP{net.ParseIP("93.184.216.34"), net.ParseIP("169.254.169.254")},
+			wantError: true,
+		},
+		{
 			name:      "名前解決できないホスト名は拒否される",
 			rawURL:    "http://unresolvable.example.com/x",
 			mockErr:   errors.New("no such host"),
@@ -366,6 +372,11 @@ func TestSsrfSafeDialContext_BlocksInternalAddresses(t *testing.T) {
 			name:    "内部IPに解決されるホスト名へのdialはブロックされる(DNSリバインディング対策)",
 			addr:    "internal.example.com:80",
 			mockIPs: []net.IP{net.ParseIP("169.254.169.254")},
+		},
+		{
+			name:    "公開IPと内部IPが混在するホスト名へのdialはブロックされる",
+			addr:    "mixed.example.com:80",
+			mockIPs: []net.IP{net.ParseIP("93.184.216.34"), net.ParseIP("169.254.169.254")},
 		},
 		{
 			name:    "名前解決に失敗した場合はブロックされる",
