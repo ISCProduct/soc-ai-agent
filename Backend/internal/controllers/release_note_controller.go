@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/repositories"
 	"Backend/internal/services"
 	"net/http"
 	"time"
@@ -9,11 +10,12 @@ import (
 )
 
 type ReleaseNoteController struct {
-	service *services.ReleaseNoteService
+	service  *services.ReleaseNoteService
+	userRepo *repositories.UserRepository
 }
 
-func NewReleaseNoteController(service *services.ReleaseNoteService) *ReleaseNoteController {
-	return &ReleaseNoteController{service: service}
+func NewReleaseNoteController(service *services.ReleaseNoteService, userRepo *repositories.UserRepository) *ReleaseNoteController {
+	return &ReleaseNoteController{service: service, userRepo: userRepo}
 }
 
 type releaseNoteResponse struct {
@@ -24,7 +26,16 @@ type releaseNoteResponse struct {
 
 // List GET /api/whats-new
 func (c *ReleaseNoteController) List(ctx echo.Context) error {
-	notes, err := c.service.List(ctx.Request().Context(), 20)
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	user, err := c.userRepo.GetUserByID(userID)
+	if err != nil || user == nil {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+
+	notes, err := c.service.List(ctx.Request().Context(), 20, user.Role, user.IsAdmin)
 	if err != nil {
 		return echoInternalError(err)
 	}
