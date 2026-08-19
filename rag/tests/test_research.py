@@ -35,6 +35,8 @@ def test_domain_trust_score_japanese_company_name_not_in_domain():
 def _make_response(text: str) -> MagicMock:
     resp = MagicMock()
     resp.output_text = text
+    resp.choices = None
+    resp.output = None
     return resp
 
 
