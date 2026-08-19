@@ -116,6 +116,9 @@ func (c *InterviewController) SendReport(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 	if err := c.interviewService.SendReportEmail(userID, sessionID); err != nil {
+		if err.Error() == "forbidden" {
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
 		if err.Error() == "user not found" || err.Error() == "report not found" {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}

@@ -355,6 +355,20 @@ func TestInterviewController_SendReport_GuestForbidden(t *testing.T) {
 	assertStatus(t, newInterviewController(svc).SendReport, c, http.StatusForbidden)
 }
 
+// #939: 他ユーザーのセッションを指定した場合はサービス層が返す forbidden エラーを403にマッピングする。
+func TestInterviewController_SendReport_Forbidden(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/interviews/2/send-report", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("2")
+
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("SendReportEmail", uint(1), uint(2)).Return(errors.New("forbidden"))
+	assertStatus(t, newInterviewController(svc).SendReport, c, http.StatusForbidden)
+}
+
 // ---- AddUtterance ----
 
 func TestInterviewController_AddUtterance_Unauthorized(t *testing.T) {
