@@ -3,6 +3,7 @@ package controllers
 import (
 	"Backend/domain/entity"
 	"Backend/domain/repository"
+	"Backend/internal/models"
 	"Backend/internal/services/chat"
 	"Backend/internal/services/email"
 	ifaces "Backend/internal/services/interfaces"
@@ -131,6 +132,22 @@ func (c *ChatController) scheduleBackgroundMatching(userID uint, sessionID strin
 	c.matchingTimers.Store(sessionID, timer)
 }
 
+// checkSessionOwnership は session_id が既存セッションの場合、最初のメッセージの UserID と
+// userID が一致するか検証する。メッセージが1件も無い新規セッションは誰でも開始できるため許可する。
+func (c *ChatController) checkSessionOwnership(sessionID string, userID uint) ([]models.ChatMessage, error) {
+	history, err := c.chatService.GetChatHistory(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(history) == 0 {
+		return history, nil
+	}
+	if history[0].UserID == 0 || history[0].UserID != userID {
+		return nil, shared.ErrForbidden
+	}
+	return history, nil
+}
+
 // Chat チャット処理
 func (c *ChatController) Chat(ctx echo.Context) error {
 	userID, ok := echoUserID(ctx)
@@ -148,6 +165,14 @@ func (c *ChatController) Chat(ctx echo.Context) error {
 
 	if req.SessionID == "" || req.Message == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "Missing required fields")
+	}
+
+	// 既存セッションへの書き込みの場合、他ユーザーのセッションでないことを検証する（#946 IDOR対策）
+	if _, err := c.checkSessionOwnership(req.SessionID, userID); err != nil {
+		if err == shared.ErrForbidden {
+			return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
+		}
+		return echoInternalError(err)
 	}
 
 	resp, err := c.chatService.ProcessChat(ctx.Request().Context(), req)
@@ -173,14 +198,12 @@ func (c *ChatController) GetHistory(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
 	}
 
-	history, err := c.chatService.GetChatHistory(sessionID)
+	history, err := c.checkSessionOwnership(sessionID, userID)
 	if err != nil {
+		if err == shared.ErrForbidden {
+			return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
+		}
 		return echoInternalError(err)
-	}
-
-	// セッション所有者チェック：最初のメッセージの UserID と照合
-	if len(history) > 0 && history[0].UserID != 0 && history[0].UserID != userID {
-		return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
 	}
 
 	return ctx.JSON(http.StatusOK, history)

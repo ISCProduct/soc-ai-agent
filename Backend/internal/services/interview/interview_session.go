@@ -40,7 +40,7 @@ func (s *InterviewService) StartSession(userID uint, sessionID uint) (*Interview
 		return nil, err
 	}
 	if !s.isAllowed(userID, session.UserID) {
-		return nil, errors.New("forbidden")
+		return nil, shared.ErrForbidden
 	}
 	if session.Status == "finished" {
 		return nil, errors.New("session already finished")
@@ -62,7 +62,7 @@ func (s *InterviewService) FinishSession(userID uint, sessionID uint) (*Intervie
 		return nil, err
 	}
 	if !s.isAllowed(userID, session.UserID) {
-		return nil, errors.New("forbidden")
+		return nil, shared.ErrForbidden
 	}
 	if session.EndedAt == nil {
 		now := time.Now()
@@ -85,13 +85,26 @@ func (s *InterviewService) FinishSession(userID uint, sessionID uint) (*Intervie
 	return toSessionResponse(session), nil
 }
 
+// EnsureSessionOwnership はセッションが userID の所有物（または管理者操作）であることを検証する。
+// IDOR対策: URLパスの sessionID を扱うハンドラは、実処理の前に必ずこれを呼び出すこと。
+func (s *InterviewService) EnsureSessionOwnership(userID uint, sessionID uint) error {
+	session, err := s.sessionRepo.FindByID(sessionID)
+	if err != nil {
+		return err
+	}
+	if !s.isAllowed(userID, session.UserID) {
+		return shared.ErrForbidden
+	}
+	return nil
+}
+
 func (s *InterviewService) SaveUtterance(userID uint, sessionID uint, role string, text string) error {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return err
 	}
 	if !s.isAllowed(userID, session.UserID) {
-		return errors.New("forbidden")
+		return shared.ErrForbidden
 	}
 	role = strings.ToLower(strings.TrimSpace(role))
 	if role != "user" && role != "ai" {
@@ -127,7 +140,7 @@ func (s *InterviewService) ListSessions(userID uint, all bool, limit int, offset
 	if all {
 		user, err := s.userRepo.GetUserByID(userID)
 		if err != nil || user == nil || !user.IsAdmin {
-			return nil, 0, errors.New("forbidden")
+			return nil, 0, shared.ErrForbidden
 		}
 		total, err := s.sessionRepo.CountAll(nil)
 		if err != nil {
@@ -160,7 +173,7 @@ func (s *InterviewService) GetSessionDetailWithRole(userID uint, sessionID uint,
 		return nil, err
 	}
 	if !s.isAllowed(userID, session.UserID) {
-		return nil, errors.New("forbidden")
+		return nil, shared.ErrForbidden
 	}
 	utterances, err := s.utterRepo.FindBySessionID(sessionID)
 	if err != nil {

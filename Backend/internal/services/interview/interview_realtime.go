@@ -19,7 +19,7 @@ func (s *InterviewService) GetReport(userID uint, sessionID uint) (*models.Inter
 		return nil, err
 	}
 	if !s.isAllowed(userID, session.UserID) {
-		return nil, errors.New("forbidden")
+		return nil, shared.ErrForbidden
 	}
 	report, err := s.reportRepo.FindBySessionID(sessionID)
 	if err != nil {
@@ -38,7 +38,7 @@ func (s *InterviewService) GetPhraseSuggestions(ctx context.Context, userID uint
 		return nil, err
 	}
 	if !s.isAllowed(userID, session.UserID) {
-		return nil, errors.New("forbidden")
+		return nil, shared.ErrForbidden
 	}
 	utterances, err := s.utterRepo.FindBySessionID(sessionID)
 	if err != nil {
@@ -144,7 +144,7 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 		return "", err
 	}
 	if !s.isAllowed(userID, session.UserID) {
-		return "", errors.New("forbidden")
+		return "", shared.ErrForbidden
 	}
 	if session.Status == "finished" {
 		return "", errors.New("session already finished")

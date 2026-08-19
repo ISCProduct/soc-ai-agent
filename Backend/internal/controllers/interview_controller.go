@@ -4,9 +4,11 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	ifaces "Backend/internal/services/interfaces"
+	"Backend/internal/services/shared"
 	"Backend/internal/services/storage"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"gorm.io/gorm"
 )
 
 type InterviewController struct {
@@ -72,7 +75,7 @@ func (c *InterviewController) GetReport(ctx echo.Context) error {
 	}
 	report, err := c.interviewService.GetReport(userID, sessionID)
 	if err != nil {
-		if err.Error() == "forbidden" {
+		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
 		return echoInternalError(err)
@@ -95,7 +98,7 @@ func (c *InterviewController) GetPhraseSuggestions(ctx echo.Context) error {
 	}
 	suggestions, err := c.interviewService.GetPhraseSuggestions(ctx.Request().Context(), userID, sessionID)
 	if err != nil {
-		if err.Error() == "forbidden" {
+		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
 		return echoInternalError(err)
@@ -116,6 +119,9 @@ func (c *InterviewController) SendReport(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 	if err := c.interviewService.SendReportEmail(userID, sessionID); err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
 		if err.Error() == "user not found" || err.Error() == "report not found" {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
@@ -141,15 +147,26 @@ func (c *InterviewController) UploadVideo(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "video upload service not configured")
 	}
 
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+
+	// IDOR対策: セッションが自分のものかを、ファイル解析/S3アップロードの前に検証する
+	if err := c.interviewService.EnsureSessionOwnership(userID, sessionID); err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		}
+		return echoInternalError(err)
+	}
+
 	// メモリには最大 10 MB を確保し、それ以上は一時ファイルに書き出す
 	r := ctx.Request()
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "リクエストの解析に失敗しました。ファイルが破損しているか、サイズが大きすぎます")
-	}
-
-	userID, ok := echoUserID(ctx)
-	if !ok {
-		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
 	file, header, err := r.FormFile("video")
@@ -392,7 +409,7 @@ func (c *InterviewController) Start(ctx echo.Context) error {
 	}
 	resp, err := c.interviewService.StartSession(userID, sessionID)
 	if err != nil {
-		if err.Error() == "forbidden" {
+		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -412,7 +429,7 @@ func (c *InterviewController) Finish(ctx echo.Context) error {
 	}
 	resp, err := c.interviewService.FinishSession(userID, sessionID)
 	if err != nil {
-		if err.Error() == "forbidden" {
+		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -436,7 +453,7 @@ func (c *InterviewController) List(ctx echo.Context) error {
 	all := allStr == "1" || strings.ToLower(allStr) == "true"
 	sessions, total, err := c.interviewService.ListSessions(userID, all, limit, offset)
 	if err != nil {
-		if err.Error() == "forbidden" {
+		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -465,7 +482,7 @@ func (c *InterviewController) Get(ctx echo.Context) error {
 	}
 	resp, err := c.interviewService.GetSessionDetailWithRole(userID, sessionID, role)
 	if err != nil {
-		if err.Error() == "forbidden" {
+		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -488,7 +505,7 @@ func (c *InterviewController) AddUtterance(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
 	if err := c.interviewService.SaveUtterance(userID, sessionID, req.Role, req.Text); err != nil {
-		if err.Error() == "forbidden" {
+		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())

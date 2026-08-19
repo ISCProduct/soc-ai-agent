@@ -1,5 +1,6 @@
 import { BACKEND_URL } from './backend-url'
 import { extractTenantSlug } from './tenant'
+import { clearChatSessionOnEnd } from '@/components/mui-chat/utils'
 
 // middleware.tsを経由しない直接Backend fetch用に、現在のHostから学園slugヘッダーを組み立てる
 function getTenantHeaders(): Record<string, string> {
@@ -399,12 +400,15 @@ export const authService = {
     getLocalStorage()?.removeItem(AUTH_TOKEN_KEY)
     getLocalStorage()?.removeItem(AUTH_USER_TOKEN_KEY)
 
-    // チャットキャッシュを削除
-    const sessionId = localStorage.getItem('chat_session_id')
-    if (sessionId) {
-      localStorage.removeItem(`chat_cache_${sessionId}`)
+    if (typeof window !== 'undefined') {
+      const sessionId = window.localStorage.getItem('chat_session_id')
+      if (sessionId) {
+        window.localStorage.removeItem(`chat_cache_${sessionId}`)
+      }
+      window.localStorage.removeItem('chat_session_id')
+      clearChatSessionOnEnd({ sessionStorage: window.sessionStorage, localStorage: window.localStorage })
+      window.localStorage.removeItem('currentSessionId')
     }
-    localStorage.removeItem('chat_session_id')
 
     // httpOnly Cookieを削除
     fetch('/api/auth/session', { method: 'DELETE' }).catch(() => {})

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, type MouseEvent } from 'react'
+import { useState, useEffect, useCallback, useRef, type MouseEvent } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { sendAnalysisReport } from '@/lib/api'
 import { fetchWithTimeout } from '@/lib/fetch-timeout'
@@ -62,6 +62,7 @@ export function useResultsData() {
   const userId = searchParams.get('user_id')
   const sessionId = searchParams.get('session_id')
   const isGuestUser = authService.getStoredUser()?.is_guest === true
+  const analysisAbortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     setMounted(true)
@@ -83,13 +84,24 @@ export function useResultsData() {
 
   const fetchAnalysis = useCallback(async () => {
     if (!sessionId) return
+    analysisAbortRef.current?.abort()
+    const abortController = new AbortController()
+    analysisAbortRef.current = abortController
     setAnalysisError(null)
+    // session_id変更時に前セッションの分析テキスト/スコアが新セッションの企業一覧と
+    // 並んで残存しないよう、fetch実行前に初期値へリセットする（Issue #949）
+    setJobSuitabilityComment('')
+    setSuggestedRoles([])
+    setScoreComment('')
+    setAnalysisScores(null)
     try {
       const res = await fetch(`/api/chat/analysis?session_id=${sessionId}`, {
         headers: authService.getUserFetchHeaders(),
+        signal: abortController.signal,
       })
       if (!res.ok) throw new Error('分析データの取得に失敗しました')
       const data = await res.json()
+      if (abortController.signal.aborted) return
       if (data?.job_suitability_comment) {
         setJobSuitabilityComment(data.job_suitability_comment)
       }
@@ -102,7 +114,10 @@ export function useResultsData() {
       if (data?.scores) {
         setAnalysisScores(mapAnalysisScores(data.scores))
       }
-    } catch {
+    } catch (err) {
+      if (abortController.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+        return
+      }
       setAnalysisError('分析データの取得に失敗しました')
     }
   }, [sessionId])

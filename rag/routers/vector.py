@@ -44,7 +44,9 @@ def vector_reembed(request: VectorReembedRequest) -> VectorReembedResponse:
         raise HTTPException(status_code=400, detail="invalid doc_type")
 
     try:
-        deleted_info = delete_company_documents(safe_company, doc_type=doc_type)
+        deleted_info = delete_company_documents(
+            safe_company, doc_type=doc_type, company_original=request.company_name
+        )
     except Exception as exc:
         logger.exception("vector delete failed company=%s error=%s", safe_company, exc)
         raise HTTPException(status_code=503, detail=f"vector delete failed: {exc}") from exc
@@ -57,7 +59,10 @@ def vector_reembed(request: VectorReembedRequest) -> VectorReembedResponse:
                 summary = m._run_async(m._run_web_search_pipeline, safe_company, "指定なし")
                 if summary:
                     m.set_cached_context(
-                        build_cache_key("company_research", safe_company, "指定なし"),
+                        build_cache_key(
+                            "company_research", safe_company, "指定なし",
+                            company_original=request.company_name,
+                        ),
                         [summary],
                         source="web_search",
                         doc_type="company_research",
@@ -68,7 +73,10 @@ def vector_reembed(request: VectorReembedRequest) -> VectorReembedResponse:
                 hints_text = m._run_hints_web_search(safe_company, "一般職")
                 if hints_text:
                     m.set_cached_context(
-                        build_cache_key("interview_hints", safe_company, "一般職"),
+                        build_cache_key(
+                            "interview_hints", safe_company, "一般職",
+                            company_original=request.company_name,
+                        ),
                         [hints_text],
                         source="web_search",
                         doc_type="interview_hints",
@@ -79,7 +87,9 @@ def vector_reembed(request: VectorReembedRequest) -> VectorReembedResponse:
                 summary = m._run_async(m._run_web_search_pipeline, safe_company, "")
                 if summary:
                     m.set_cached_context(
-                        build_cache_key("es_review", safe_company),
+                        build_cache_key(
+                            "es_review", safe_company, company_original=request.company_name
+                        ),
                         [summary],
                         source="web_search",
                         doc_type="es_review",

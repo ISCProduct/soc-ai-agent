@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -57,7 +58,7 @@ func (s *ResumeService) Upload(userID uint, sessionID, sourceType, sourceURL str
 		if err := validateURL(sourceURL); err != nil {
 			return nil, err
 		}
-		downloaded, filename, err := downloadSourceFile(sourceURL, workDir)
+		downloaded, filename, err := downloadSourceFile(context.Background(), sourceURL, workDir)
 		if err != nil {
 			return nil, err
 		}
@@ -177,12 +178,53 @@ func saveUploadedFile(fileHeader *multipart.FileHeader, dest string) error {
 	return nil
 }
 
-func downloadSourceFile(url, storagePath string) (string, string, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+// ssrfSafeDialContext は接続直前に実際に使うIPを再検証するDialContext。
+// validateURLでの検証後にDNSレコードが書き換わる（DNSリバインディング）TOCTOUを防ぐため、
+// ここで解決したIPをそのまま宛先に使い、標準ダイヤラに再度ホスト名解決させない。
+func ssrfSafeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if isInternalIP(ip) {
+			return nil, fmt.Errorf("blocked request to internal address: %s", host)
+		}
+		return dialer.DialContext(ctx, network, addr)
+	}
+	ips, err := lookupIP(host)
+	if err != nil || len(ips) == 0 {
+		return nil, fmt.Errorf("failed to resolve host: %s", host)
+	}
+	for _, ip := range ips {
+		if isInternalIP(ip) {
+			return nil, fmt.Errorf("blocked request to internal address: %s", host)
+		}
+	}
+	var lastErr error
+	for _, ip := range ips {
+		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("failed to resolve host: %s", host)
+	}
+	return nil, lastErr
+}
+
+func downloadSourceFile(ctx context.Context, url, storagePath string) (string, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", "", err
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: &http.Transport{DialContext: ssrfSafeDialContext},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", "", err

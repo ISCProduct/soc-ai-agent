@@ -72,8 +72,6 @@ def run_deep_research(company_name: str, job_title: str) -> str:
         "職種: {role}\n"
         "出力は日本語で、箇条書きを含む短いレポート形式にしてください。"
     ).format(company=safe_company, role=role)
-    last_err = None
-
     def request_response(use_tools: bool, model_name: str):
         kwargs = {
             "model": model_name,
@@ -85,37 +83,33 @@ def run_deep_research(company_name: str, job_title: str) -> str:
             kwargs["tools"] = [{"type": "web_search"}]
         return client.responses.create(**kwargs)
 
-    for attempt in range(1, 3):
-        try:
-            response = request_response(True, model)
-            output = extract_output_text(response)
-            logger.info("deep research finished chars=%d attempt=%d", len(output), attempt)
-            if output:
-                return output
-            logger.warning("deep research returned empty result attempt=%d", attempt)
-        except Exception as exc:
-            last_err = exc
-            logger.warning("deep research failed attempt=%d error=%s", attempt, exc)
-            if attempt == 1:
-                fallback_name = fallback_model or model
-                try:
-                    response = request_response(False, fallback_name)
-                    output = extract_output_text(response)
-                    logger.info(
-                        "deep research fallback finished chars=%d model=%s",
-                        len(output),
-                        fallback_name,
-                    )
-                    if output:
-                        return output
-                    logger.warning("deep research fallback returned empty result model=%s", fallback_name)
-                except Exception as fallback_exc:
-                    last_err = fallback_exc
-                    logger.warning(
-                        "deep research fallback failed model=%s error=%s",
-                        fallback_name,
-                        fallback_exc,
-                    )
+    # 1回目: メインリクエスト（tools有効・メインモデル）
+    try:
+        response = request_response(True, model)
+        output = extract_output_text(response)
+        logger.info("deep research finished chars=%d", len(output))
+        if output:
+            return output
+        logger.warning("deep research returned empty result")
+        last_err = HTTPException(status_code=502, detail="Deep Research returned empty result")
+    except Exception as exc:
+        last_err = exc
+        logger.warning("deep research failed error=%s", exc)
+
+    # 2回目（最後の砦）: フォールバックリクエスト（tools無効・フォールバックモデル）
+    fallback_name = fallback_model or model
+    try:
+        response = request_response(False, fallback_name)
+        output = extract_output_text(response)
+        logger.info("deep research fallback finished chars=%d model=%s", len(output), fallback_name)
+        if output:
+            return output
+        logger.warning("deep research fallback returned empty result model=%s", fallback_name)
+        last_err = HTTPException(status_code=502, detail="Deep Research fallback returned empty result")
+    except Exception as fallback_exc:
+        last_err = fallback_exc
+        logger.warning("deep research fallback failed model=%s error=%s", fallback_name, fallback_exc)
+
     raise last_err
 
 
@@ -138,7 +132,9 @@ def _domain_trust_score(domain: str, company_name: str) -> float:
     if not domain:
         return 0.5
     d = domain.lower()
-    cn = re.sub(r"[^a-z0-9]", "", company_name.lower())
+    # 日本語文字（ひらがな・カタカナ・漢字）も保持する（sanitize.py の許可文字集合と揃える）。
+    # そうしないと日本語企業名では cn が常に空文字列になり、公式ドメインの信頼度ブーストが機能しない。
+    cn = re.sub(r"[^0-9a-zぁ-んァ-ン一-龥ー々〆ヵヶ]", "", company_name.lower())
     # 高評価: 企業名がドメインに含まれる（公式サイトの可能性）
     if cn and cn in d:
         return 0.95

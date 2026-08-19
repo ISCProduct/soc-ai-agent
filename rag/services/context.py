@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from models import ReviewRequest
 from services.sanitize import _sanitize_company_name_for_query
+from vector_store import build_cache_key
 
 logger = logging.getLogger("main")
 
@@ -21,7 +22,10 @@ def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
 
     safe_company_name = _sanitize_company_name_for_query(request.company_name)
     role_label = request.job_title or "指定なし"
-    cache_key = "{company}::{role}".format(company=safe_company_name, role=role_label)
+    # #938: キャッシュキーはサニタイズ前の企業名のハッシュで衝突回避する
+    cache_key = build_cache_key(
+        "resume_review", safe_company_name, role_label, company_original=request.company_name
+    )
 
     if request.company_context:
         docs = [request.company_context]

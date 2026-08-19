@@ -411,7 +411,7 @@ func main() {
 	authService.SetCompanyOwnershipClaimer(companyEntryService)
 	companyEntryController := controllers.NewCompanyEntryController(companyEntryService)
 	releaseNoteService := services.NewReleaseNoteService(db, aiClient)
-	releaseNoteController := controllers.NewReleaseNoteController(releaseNoteService)
+	releaseNoteController := controllers.NewReleaseNoteController(releaseNoteService, userRepo)
 	// Discord経由での本番「指定日終日起動」登録(#829台のインフラ方針参照)。
 	// AWS認証情報が取れない環境(ローカル等)でも起動は継続し、機能のみ無効化する。
 	discordUptimeService, discordErr := discord.NewUptimeServiceFromEnv(context.Background())
@@ -484,7 +484,7 @@ func main() {
 	routes.SetupUserRoutes(api, integratedProfileController)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())
-	api.GET("/whats-new", releaseNoteController.List)
+	api.GET("/whats-new", releaseNoteController.List, routes.EchoUserAuth(cfg.UserSecret, userDeletionService))
 	adminEntry := api.Group("/admin", routes.EchoAdminAuth(userRepo, cfg.AdminSecret))
 	adminEntry.POST("/company-entry-submissions/:id/resend-email", companyEntryController.ResendEmail)
 	// CI(GitHub Actions)からのマシン間呼び出しのため、ログインユーザー前提のEchoAdminAuthではなく

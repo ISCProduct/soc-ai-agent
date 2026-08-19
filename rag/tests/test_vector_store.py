@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 from unittest.mock import MagicMock, patch
 
 import vector_store as vs
+from services.sanitize import _sanitize_company_name_for_query
 
 
 def _where_value(where: Dict[str, Any], key: str) -> Optional[Any]:
@@ -184,6 +185,113 @@ def test_build_cache_key():
     assert vs.build_cache_key("company_research", "Acme", "指定なし") == "Acme::指定なし"
 
 
+def test_sanitize_still_collapses_punctuation_variants():
+    # 根本原因の再確認: _sanitize_company_name_for_query 自体は区切り文字を挿入せず
+    # 除去するだけなので、表記の異なる企業名が同一の表示名に収束する。
+    # （表示・プロンプト用としては許容する。衝突回避はキャッシュキー側で行う。）
+    assert _sanitize_company_name_for_query("H.I.S.") == _sanitize_company_name_for_query("HIS")
+
+
+def test_build_cache_key_disambiguates_punctuation_variants():
+    # #938: "H.I.S." と "HIS" はどちらもサニタイズ後は "HIS" に収束するが、
+    # サニタイズ前の原文（company_original）が異なるためキーは分岐しなければならない。
+    key_dotted = vs.build_cache_key(
+        "company_research", "HIS", "指定なし", company_original="H.I.S."
+    )
+    key_plain = vs.build_cache_key(
+        "company_research", "HIS", "指定なし", company_original="HIS"
+    )
+    assert key_dotted != key_plain
+    # サニタイズ済みの表示名部分は両方とも人間に読める "HIS" プレフィックスを保つ
+    assert key_dotted.startswith("HIS~")
+    assert key_plain.startswith("HIS~")
+
+
+def test_build_cache_key_stable_and_parseable_for_same_company():
+    # 同一企業名からは常に同じキーが生成され、parse_cache_key で正しく分解できること
+    key1 = vs.build_cache_key("interview_hints", "Acme", "エンジニア", company_original="Acme")
+    key2 = vs.build_cache_key("interview_hints", "Acme", "エンジニア", company_original="Acme")
+    assert key1 == key2
+
+    meta = vs.parse_cache_key(key1)
+    assert meta["collection"] == vs.COLLECTION_INTERVIEW_HINTS
+    assert meta["company"] == "Acme"
+    assert meta["role"] == "エンジニア"
+    assert meta["company_hash"] != ""
+
+
+def test_build_cache_key_without_original_keeps_legacy_format():
+    # company_original を渡さない既存呼び出しは、従来通りハッシュ無しのキーを生成する
+    assert vs.build_cache_key("company_research", "Acme", "指定なし") == "Acme::指定なし"
+    meta = vs.parse_cache_key("Acme::指定なし")
+    assert meta["company_hash"] == ""
+
+
+def test_get_cached_documents_does_not_leak_across_punctuation_variants():
+    # #938 再現テスト: "H.I.S." と "HIS" はサニタイズ後に同じ表示名へ収束するが、
+    # company_original 由来のハッシュにより別企業として区別され、互いのキャッシュが
+    # 混入しないこと。
+    vs.reset_chroma_client_for_tests()
+
+    key_dotted = vs.build_cache_key(
+        "company_research", "HIS", "指定なし", company_original="H.I.S."
+    )
+    key_plain = vs.build_cache_key(
+        "company_research", "HIS", "指定なし", company_original="HIS"
+    )
+    fetched = datetime.now(timezone.utc).isoformat()
+
+    store: Dict[str, Dict[str, Any]] = {}
+
+    def upsert_side_effect(**kwargs):
+        for doc_id, doc, md in zip(kwargs["ids"], kwargs["documents"], kwargs["metadatas"]):
+            store[doc_id] = {"document": doc, "metadata": md}
+
+    def query_side_effect(**kwargs):
+        where = kwargs.get("where") or {}
+        wanted_hash = _where_value(where, "company_hash")
+        documents, metadatas = [], []
+        for entry in store.values():
+            md = entry["metadata"]
+            if md.get("company") != _where_value(where, "company"):
+                continue
+            if wanted_hash is not None and md.get("company_hash") != wanted_hash:
+                continue
+            documents.append(entry["document"])
+            metadatas.append(md)
+        return {"documents": [documents], "metadatas": [metadatas]}
+
+    collection = MagicMock()
+    collection.count.return_value = 1
+    collection.upsert.side_effect = upsert_side_effect
+    collection.query.side_effect = query_side_effect
+
+    col_obj = MagicMock()
+    col_obj.name = vs.COLLECTION_COMPANY_CONTEXT
+    client = MagicMock()
+    client.list_collections.return_value = [col_obj]
+    client.get_collection.return_value = collection
+    client.get_or_create_collection.return_value = collection
+
+    with patch.object(vs, "get_chroma_client", return_value=client):
+        vs.set_cached_documents(
+            key_dotted, ["H.I.S.社の企業研究メモ"], [[0.1, 0.2, 0.3]], source="web_search"
+        )
+        vs.set_cached_documents(
+            key_plain, ["HIS社（別企業）の企業研究メモ"], [[0.1, 0.2, 0.3]], source="web_search"
+        )
+
+        docs_for_dotted = vs.get_cached_documents(
+            key_dotted, query_embedding=[0.1, 0.2, 0.3], allow_company_fallback=True
+        )
+        docs_for_plain = vs.get_cached_documents(
+            key_plain, query_embedding=[0.1, 0.2, 0.3], allow_company_fallback=True
+        )
+
+    assert docs_for_dotted == ["H.I.S.社の企業研究メモ"]
+    assert docs_for_plain == ["HIS社（別企業）の企業研究メモ"]
+
+
 def test_company_context_fallback_not_only_hints():
     vs.reset_chroma_client_for_tests()
     collection = MagicMock()
@@ -319,3 +427,46 @@ def test_set_cached_documents_doc_type_override():
     assert meta["doc_type"] == "resume_review"
     assert meta["source"] == "web_search"
     client.get_or_create_collection.assert_called_with(vs.COLLECTION_COMPANY_CONTEXT)
+
+
+def test_company_hash_uses_full_sha256_digest():
+    digest = vs._company_hash("H.I.S.")
+    assert len(digest) == 64
+    assert digest != vs._company_hash("HIS")
+
+
+def test_delete_company_documents_keeps_punctuation_variant():
+    vs.reset_chroma_client_for_tests()
+    store: Dict[str, Dict[str, Any]] = {}
+    hash_dotted = vs._company_hash("H.I.S.")
+    hash_plain = vs._company_hash("HIS")
+    store["dotted"] = {"company": "HIS", "company_hash": hash_dotted}
+    store["plain"] = {"company": "HIS", "company_hash": hash_plain}
+
+    def delete_side_effect(**kwargs):
+        where = kwargs.get("where") or {}
+        wanted = _where_value(where, "company_hash")
+        for key in list(store):
+            md = store[key]
+            if md.get("company") != _where_value(where, "company"):
+                continue
+            if wanted is not None and md.get("company_hash") != wanted:
+                continue
+            del store[key]
+
+    collection = MagicMock()
+    collection.count.side_effect = lambda: len(store)
+    collection.delete.side_effect = delete_side_effect
+    col_obj = MagicMock()
+    col_obj.name = vs.COLLECTION_COMPANY_CONTEXT
+    client = MagicMock()
+    client.list_collections.return_value = [col_obj]
+    client.get_collection.return_value = collection
+
+    with patch.object(vs, "get_chroma_client", return_value=client):
+        vs.delete_company_documents("HIS", doc_type="company_research", company_original="H.I.S.")
+
+    assert "dotted" not in store
+    assert "plain" in store
+    assert store["plain"]["company_hash"] == hash_plain
+

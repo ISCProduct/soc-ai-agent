@@ -196,6 +196,14 @@ Interview transcript:
 
 // SendReportEmail 面接レポートをメールで送信
 func (s *InterviewService) SendReportEmail(userID, sessionID uint) error {
+	session, err := s.sessionRepo.FindByID(sessionID)
+	if err != nil {
+		return err
+	}
+	if !s.isAllowed(userID, session.UserID) {
+		return shared.ErrForbidden
+	}
+
 	user, err := s.userRepo.GetUserByID(userID)
 	if err != nil || user == nil {
 		return errors.New("user not found")
