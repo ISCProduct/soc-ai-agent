@@ -21,15 +21,15 @@ audience は以下のいずれかにしてください:
 - "student": 就活中の学生ユーザーが画面や機能として体験できる新機能・UI改善・不具合修正・パフォーマンス向上
 - "teacher": 教員が使う機能（学生の指導・面談・進捗確認など教員向け画面）の変更
 - "admin": システム管理者・学校管理者が管理画面（admin）で使う機能の変更
-- "all": 学生・教員・管理者いずれにも関係する全体向けの変更
+- "all": 学生・教員・管理者の全員が同じ画面で体験できる変更のみ。開発者向けの変更を all にしてはいけない
 
-以下は誰の目にも触れない・直接使わない変更のため、summary を空文字にしてください（開発部門・運用担当者のみが関わる内容はユーザーに提供しない）:
+以下は誰の目にも触れない変更のため、summary は必ず空文字にしてください（開発部門・運用担当者のみが関わる内容はユーザーに提供しない）:
 - インフラ・運用・デプロイ関連（AWS/ECS/Terraform構成、起動停止設定、コスト最適化、サーバー移行など）
-- 社内ツール連携・開発フロー（Notion/Backlog/Slack通知連携、CI/CD、コードレビュー体制など）
+- 社内ツール連携・開発フロー（Notion/Backlog/Slack通知連携、CI/CD、コードレビュー体制、レビュー指摘対応など）
 - リファクタリング・依存関係更新・セキュリティパッチ（ユーザーの体験に見た目上の変化がないもの）
 - 開発者向けドキュメント整備
 
-summaryを書いてよいのは、いずれかのaudienceのユーザーが実際に体験できる新機能・UI改善・不具合修正・パフォーマンス向上のみです。迷ったら空文字にしてください。audienceが判断できない場合は"all"にしてください。
+summaryを書いてよいのは、いずれかのaudienceのユーザーが実際に体験できる新機能・UI改善・不具合修正・パフォーマンス向上のみです。迷ったら空文字にしてください。
 
 JSON形式のみで出力し、他のテキストは含めないでください。`
 
@@ -40,6 +40,56 @@ var validReleaseNoteAudiences = map[string]bool{
 	"teacher": true,
 	"admin":   true,
 	"all":     true,
+}
+
+var developerOnlyReleaseNoteNeedles = []string{
+	"terraform",
+	"github actions",
+	".github/workflows",
+	"coderabbit",
+	"fargate",
+	"docker compose",
+	"infra/",
+	"レビュー指摘",
+	"インフラ構成",
+	"デプロイパイプライン",
+	"ci/cd",
+}
+
+func isDeveloperOnlyReleaseNote(title, body string) bool {
+	lowerTitle := strings.ToLower(strings.TrimSpace(title))
+	for _, prefix := range []string{"ci:", "chore:", "ops:"} {
+		if strings.HasPrefix(lowerTitle, prefix) {
+			return true
+		}
+	}
+	text := strings.ToLower(title + "\n" + body)
+	for _, needle := range developerOnlyReleaseNoteNeedles {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *ReleaseNoteService) deleteByPRNumber(ctx context.Context, prNumber uint) error {
+	return s.db.WithContext(ctx).Where("pr_number = ?", prNumber).Delete(&models.ReleaseNote{}).Error
+}
+
+func (s *ReleaseNoteService) purgeStoredDeveloperOnlyNotes(ctx context.Context) error {
+	var notes []models.ReleaseNote
+	if err := s.db.WithContext(ctx).Find(&notes).Error; err != nil {
+		return fmt.Errorf("list release notes for purge: %w", err)
+	}
+	for _, note := range notes {
+		if !isDeveloperOnlyReleaseNote(note.Title, note.Summary) {
+			continue
+		}
+		if err := s.db.WithContext(ctx).Delete(&note).Error; err != nil {
+			return fmt.Errorf("purge developer-only release note pr=%d: %w", note.PRNumber, err)
+		}
+	}
+	return nil
 }
 
 // ReleaseNoteSource は取り込み対象のマージ済みPR情報。
@@ -66,14 +116,24 @@ func NewReleaseNoteService(db *gorm.DB, llm *openai.Client) *ReleaseNoteService 
 }
 
 // IngestMergedPRs は未取り込みのPRのみAIで要約しDBへ保存する（pr_numberでべき等）。
-// 戻り値は新規に保存された件数。
+// 開発者向け（インフラ/CI等）は新規保存せず、既に載っている行があれば削除する（#969）。
 func (s *ReleaseNoteService) IngestMergedPRs(ctx context.Context, sources []ReleaseNoteSource) (int, error) {
+	if err := s.purgeStoredDeveloperOnlyNotes(ctx); err != nil {
+		return 0, err
+	}
 	if s.llm == nil {
 		return 0, ErrReleaseNoteLLMClientNil
 	}
 
 	saved := 0
 	for _, src := range sources {
+		if isDeveloperOnlyReleaseNote(src.Title, src.Body) {
+			if err := s.deleteByPRNumber(ctx, src.PRNumber); err != nil {
+				return saved, fmt.Errorf("delete developer-only release note PR #%d: %w", src.PRNumber, err)
+			}
+			continue
+		}
+
 		var count int64
 		if err := s.db.Model(&models.ReleaseNote{}).Where("pr_number = ?", src.PRNumber).Count(&count).Error; err != nil {
 			return saved, fmt.Errorf("check existing release note: %w", err)
@@ -87,13 +147,11 @@ func (s *ReleaseNoteService) IngestMergedPRs(ctx context.Context, sources []Rele
 			return saved, fmt.Errorf("summarize PR #%d: %w", src.PRNumber, err)
 		}
 		if strings.TrimSpace(result.Summary) == "" {
-			// ユーザーに関係ない変更として要約対象外
 			continue
 		}
 
 		audience := strings.TrimSpace(result.Audience)
 		if !validReleaseNoteAudiences[audience] {
-			// 未知/空のaudienceは誰にも表示されなくなる事態を避けるため全員向けにフォールバック
 			audience = models.ReleaseNoteAudienceAll
 		}
 
