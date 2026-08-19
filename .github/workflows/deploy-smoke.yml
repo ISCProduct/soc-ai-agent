@@ -61,7 +61,10 @@ jobs:
         run: npm ci
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        # --with-deps は内部でapt-get updateを実行するが、ubuntuパッケージミラーへの
+        # 接続がハングしタイムアウトに達するまで進まなくなる事象が頻発したため外した
+        # (test.ymlのe2e-frontendと同様)。
+        run: npx playwright install chromium
 
       - name: Run smoke tests
         id: playwright
