@@ -56,7 +56,17 @@ func validateFileUpload(fileHeader *multipart.FileHeader) error {
 	return &shared.ValidationError{Message: "PDF または Word（.doc/.docx）のみアップロードできます"}
 }
 
-// validateURL はSSRF対策のためURLスキームとIPアドレス範囲を検証する
+// lookupIP はホスト名からIPアドレスを解決する。テストでモック可能にするため変数にしている。
+var lookupIP = net.LookupIP
+
+// isInternalIP はループバック/プライベート/リンクローカル/未指定アドレスのいずれかを判定する（SSRF対策）
+func isInternalIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
+}
+
+// validateURL はSSRF対策のためURLスキームとIPアドレス範囲を検証する。
+// ホスト名がIPリテラルでない場合は名前解決を行い、解決された全IPを検証する
+// （ホスト名だけを見て素通りさせないことで内部IPへのDNS解決を防ぐ）。
 func validateURL(rawURL string) error {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -66,9 +76,20 @@ func validateURL(rawURL string) error {
 		return &shared.ValidationError{Message: "only http/https URLs are allowed"}
 	}
 	host := parsed.Hostname()
-	ip := net.ParseIP(host)
-	if ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()) {
-		return &shared.ValidationError{Message: "requests to internal IP addresses are not allowed"}
+	if ip := net.ParseIP(host); ip != nil {
+		if isInternalIP(ip) {
+			return &shared.ValidationError{Message: "requests to internal IP addresses are not allowed"}
+		}
+		return nil
+	}
+	ips, err := lookupIP(host)
+	if err != nil {
+		return &shared.ValidationError{Message: "failed to resolve host"}
+	}
+	for _, ip := range ips {
+		if isInternalIP(ip) {
+			return &shared.ValidationError{Message: "requests to internal IP addresses are not allowed"}
+		}
 	}
 	return nil
 }
