@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
@@ -278,6 +279,111 @@ func TestRelaySSEChunks_DoesNotPanicWhenFlushPanics(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "hello") {
 		t.Fatalf("body: %q", rr.Body.String())
+	}
+}
+
+// TestValidateURL はSSRF対策（#940: ホスト名解決後のIP検証）をテーブル駆動で検証する
+func TestValidateURL(t *testing.T) {
+	originalLookup := lookupIP
+	defer func() { lookupIP = originalLookup }()
+
+	tests := []struct {
+		name      string
+		rawURL    string
+		mockIPs   []net.IP
+		mockErr   error
+		wantError bool
+	}{
+		{
+			name:      "リテラル内部IP(loopback)は拒否される",
+			rawURL:    "http://127.0.0.1/x",
+			wantError: true,
+		},
+		{
+			name:      "リテラル公開IPは許可される",
+			rawURL:    "http://93.184.216.34/x",
+			wantError: false,
+		},
+		{
+			name:      "内部IPに解決されるホスト名は拒否される(regression #940)",
+			rawURL:    "http://internal.example.com/x",
+			mockIPs:   []net.IP{net.ParseIP("169.254.169.254")},
+			wantError: true,
+		},
+		{
+			name:      "公開IPに解決されるホスト名は許可される",
+			rawURL:    "http://public.example.com/x",
+			mockIPs:   []net.IP{net.ParseIP("93.184.216.34")},
+			wantError: false,
+		},
+		{
+			name:      "名前解決できないホスト名は拒否される",
+			rawURL:    "http://unresolvable.example.com/x",
+			mockErr:   errors.New("no such host"),
+			wantError: true,
+		},
+		{
+			name:      "http/https以外のスキームは拒否される",
+			rawURL:    "ftp://public.example.com/x",
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lookupIP = func(host string) ([]net.IP, error) {
+				return tt.mockIPs, tt.mockErr
+			}
+			err := validateURL(tt.rawURL)
+			if tt.wantError && err == nil {
+				t.Errorf("エラーを期待したが nil だった: url=%s", tt.rawURL)
+			}
+			if !tt.wantError && err != nil {
+				t.Errorf("エラーなしを期待したが発生した: url=%s, err=%v", tt.rawURL, err)
+			}
+		})
+	}
+}
+
+// TestSsrfSafeDialContext_BlocksInternalAddresses はDNSリバインディング対策の
+// DialContextガードが内部IPへの接続を拒否することを検証する（#940）。
+// 実際に外部ネットワークへ接続する成功系は統合/手動テストでカバーする（ここではユニットテスト化しない）。
+func TestSsrfSafeDialContext_BlocksInternalAddresses(t *testing.T) {
+	originalLookup := lookupIP
+	defer func() { lookupIP = originalLookup }()
+
+	tests := []struct {
+		name    string
+		addr    string
+		mockIPs []net.IP
+		mockErr error
+	}{
+		{
+			name: "リテラル内部IPへのdialはブロックされる",
+			addr: "127.0.0.1:80",
+		},
+		{
+			name:    "内部IPに解決されるホスト名へのdialはブロックされる(DNSリバインディング対策)",
+			addr:    "internal.example.com:80",
+			mockIPs: []net.IP{net.ParseIP("169.254.169.254")},
+		},
+		{
+			name:    "名前解決に失敗した場合はブロックされる",
+			addr:    "unresolvable.example.com:80",
+			mockErr: errors.New("no such host"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lookupIP = func(host string) ([]net.IP, error) {
+				return tt.mockIPs, tt.mockErr
+			}
+			_, err := ssrfSafeDialContext(context.Background(), "tcp", tt.addr)
+			if err == nil {
+				t.Errorf("内部アドレスへのdialはエラーになるべき: addr=%s", tt.addr)
+			}
+		})
 	}
 }
 

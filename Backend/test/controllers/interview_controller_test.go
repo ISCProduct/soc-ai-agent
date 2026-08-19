@@ -15,9 +15,11 @@ import (
 	"Backend/internal/controllers"
 	"Backend/internal/models"
 	"Backend/internal/services/interview"
+	"Backend/internal/services/storage"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 func newInterviewController(svc *mocks.InterviewServiceMock) *controllers.InterviewController {
@@ -355,6 +357,20 @@ func TestInterviewController_SendReport_GuestForbidden(t *testing.T) {
 	assertStatus(t, newInterviewController(svc).SendReport, c, http.StatusForbidden)
 }
 
+// #939: 他ユーザーのセッションを指定した場合はサービス層が返す forbidden エラーを403にマッピングする。
+func TestInterviewController_SendReport_Forbidden(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/interviews/2/send-report", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("2")
+
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("SendReportEmail", uint(1), uint(2)).Return(errors.New("forbidden"))
+	assertStatus(t, newInterviewController(svc).SendReport, c, http.StatusForbidden)
+}
+
 // ---- AddUtterance ----
 
 func TestInterviewController_AddUtterance_Unauthorized(t *testing.T) {
@@ -464,4 +480,49 @@ func TestInterviewController_UploadVideo_ServiceUnavailable(t *testing.T) {
 	// videoRepo/s3Service がnilのとき ServiceUnavailable を返す
 	ctrl := controllers.NewInterviewController(nil, nil, nil)
 	assertStatus(t, ctrl.UploadVideo, c, http.StatusServiceUnavailable)
+}
+
+// TestInterviewController_UploadVideo_Forbidden は #941 の回帰テスト。
+// 他人の面接セッションIDを指定した場合、ファイル解析やS3アップロードに進む前に
+// 403を返し、動画レコードも作成されないことを検証する。
+func TestInterviewController_UploadVideo_Forbidden(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/interviews/9/upload-video", bytes.NewBufferString(""))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=xxx")
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("9")
+
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("EnsureSessionOwnership", uint(1), uint(9)).Return(errors.New("forbidden"))
+	videoRepo := &mocks.InterviewVideoRepositoryMock{}
+	// S3UploadServiceは未設定でもゼロ値で構築できる（メソッド呼び出しに到達しないことを検証するため）
+	ctrl := controllers.NewInterviewController(svc, videoRepo, &storage.S3UploadService{})
+
+	assertStatus(t, ctrl.UploadVideo, c, http.StatusForbidden)
+	svc.AssertExpectations(t)
+	// 所有権チェックで弾かれるため、動画レコード作成は一切行われない
+	videoRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+}
+
+// TestInterviewController_UploadVideo_OwnershipCheckError はセッション取得失敗時(NotFound等)に
+// forbidden以外のエラーとして400を返すことを検証する。
+func TestInterviewController_UploadVideo_OwnershipCheckError(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/interviews/9/upload-video", bytes.NewBufferString(""))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=xxx")
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("9")
+
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("EnsureSessionOwnership", uint(1), uint(9)).Return(errors.New("record not found"))
+	videoRepo := &mocks.InterviewVideoRepositoryMock{}
+	ctrl := controllers.NewInterviewController(svc, videoRepo, &storage.S3UploadService{})
+
+	assertStatus(t, ctrl.UploadVideo, c, http.StatusBadRequest)
+	svc.AssertExpectations(t)
+	videoRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
 }

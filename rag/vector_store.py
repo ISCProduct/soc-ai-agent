@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import threading
+import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -90,35 +91,69 @@ def _sanitize_collection_name(name: str) -> str:
     return cleaned[:63]
 
 
+def _company_hash(company_original: Optional[str]) -> str:
+    """サニタイズ前の企業名をNFKC正規化してSHA-256ハッシュの短縮値を返す (#938)。
+
+    `_sanitize_company_name_for_query` は許可文字以外を区切りなしで単純除去するため、
+    表記の異なる企業名（例: "H.I.S." と "HIS"）が同一のサニタイズ結果へ収束しうる。
+    サニタイズ前の原文をハッシュ化してキャッシュキーへ付与することで、
+    表示用の企業名が衝突してもキャッシュキー自体は分岐させる。
+    company_original が空/未指定の場合は空文字を返し、従来のキー形式を維持する。
+    """
+    normalized = unicodedata.normalize("NFKC", (company_original or "").strip())
+    if not normalized:
+        return ""
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:10]
+
+
+def _company_segment(company: str, company_original: Optional[str] = None) -> str:
+    """キャッシュキーの企業セグメント（表示用企業名 [+ ~ハッシュ]）を組み立てる。"""
+    company = (company or "unknown").strip() or "unknown"
+    company_hash = _company_hash(company_original)
+    return f"{company}~{company_hash}" if company_hash else company
+
+
+def _split_company_segment(segment: str) -> Tuple[str, str]:
+    """企業セグメントを (表示用企業名, ハッシュ) に分解する。ハッシュ無しの旧キーは空文字。"""
+    if "~" in segment:
+        company, company_hash = segment.split("~", 1)
+        return company or "unknown", company_hash
+    return segment or "unknown", ""
+
+
 def parse_cache_key(cache_key: str) -> Dict[str, str]:
     """旧キャッシュキーをメタデータに分解する。
 
     例:
-      hints::Acme::エンジニア → interview_hints / company=Acme / role=エンジニア
-      Acme::es_review → es_review
-      Acme::一般職 → company_context
+      hints::Acme~ab12cd34ef::エンジニア → interview_hints / company=Acme / company_hash=ab12cd34ef / role=エンジニア
+      Acme~ab12cd34ef::es_review → es_review
+      Acme::一般職 → company_context（ハッシュ無しの旧形式。company_hash=""）
     """
     key = (cache_key or "").strip()
     if key.startswith("hints::"):
         parts = key.split("::", 2)
-        company = parts[1] if len(parts) > 1 else ""
+        company_segment = parts[1] if len(parts) > 1 else ""
         role = parts[2] if len(parts) > 2 else "general"
+        company, company_hash = _split_company_segment(company_segment)
         return {
             "collection": COLLECTION_INTERVIEW_HINTS,
             "doc_type": "interview_hints",
             "company": company or "unknown",
+            "company_hash": company_hash,
             "role": role or "general",
             "cache_key": key,
         }
 
     parts = key.split("::", 1)
-    company = parts[0] if parts else "unknown"
+    company_segment = parts[0] if parts else "unknown"
     role = parts[1] if len(parts) > 1 else "general"
+    company, company_hash = _split_company_segment(company_segment)
     if role == "es_review":
         return {
             "collection": COLLECTION_ES_REVIEW,
             "doc_type": "es_review",
             "company": company or "unknown",
+            "company_hash": company_hash,
             "role": "general",
             "cache_key": key,
         }
@@ -127,20 +162,30 @@ def parse_cache_key(cache_key: str) -> Dict[str, str]:
         "collection": COLLECTION_COMPANY_CONTEXT,
         "doc_type": "company_research",
         "company": company or "unknown",
+        "company_hash": company_hash,
         "role": role or "general",
         "cache_key": key,
     }
 
 
-def build_cache_key(doc_type: str, company: str, role: str = "general") -> str:
-    """doc_type / company / role から互換キャッシュキーを組み立てる。"""
-    company = (company or "unknown").strip() or "unknown"
+def build_cache_key(
+    doc_type: str,
+    company: str,
+    role: str = "general",
+    company_original: Optional[str] = None,
+) -> str:
+    """doc_type / company / role から互換キャッシュキーを組み立てる。
+
+    company_original（サニタイズ前の企業名）を渡すと、そのハッシュを企業セグメントに
+    付与し、表記違いの企業名が同一キーに収束する衝突（#938）を防ぐ。
+    """
+    company_segment = _company_segment(company, company_original)
     role = (role or "general").strip() or "general"
     if doc_type == "interview_hints":
-        return f"hints::{company}::{role}"
+        return f"hints::{company_segment}::{role}"
     if doc_type == "es_review":
-        return f"{company}::es_review"
-    return f"{company}::{role}"
+        return f"{company_segment}::es_review"
+    return f"{company_segment}::{role}"
 
 
 def _is_fresh(fetched_at: Optional[str], ttl_seconds: int = CACHE_TTL_SECONDS) -> bool:
@@ -157,6 +202,20 @@ def _is_fresh(fetched_at: Optional[str], ttl_seconds: int = CACHE_TTL_SECONDS) -
 def _doc_ids(cache_key: str, count: int) -> List[str]:
     digest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:16]
     return [f"{digest}_{i}" for i in range(count)]
+
+
+def _company_filter(meta: Dict[str, str], *, role: Optional[str] = None) -> Dict[str, str]:
+    """meta（parse_cache_keyの戻り値）から company [+ company_hash] [+ role] のフィルタ辞書を作る。
+
+    company_hash が空（ハッシュ無しの旧キー）の場合は company のみで従来通り絞り込む。
+    company_hash がある場合は必ず含めて、表記違いの企業名がwhere句で衝突しないようにする(#938)。
+    """
+    filters: Dict[str, str] = {"company": meta["company"]}
+    if meta.get("company_hash"):
+        filters["company_hash"] = meta["company_hash"]
+    if role is not None:
+        filters["role"] = role
+    return filters
 
 
 def get_cached_documents(
@@ -186,12 +245,12 @@ def get_cached_documents(
         docs = _query_with_where(
             collection,
             query_embedding,
-            where=_build_where({"company": meta["company"], "role": meta["role"]}),
+            where=_build_where(_company_filter(meta, role=meta["role"])),
             n_results=n_results,
             # allow_company_fallback=Falseの場合、例外時の再試行でも職種条件を
             # 落とさない(会社単独スコープへの意図しないフォールバックを防ぐ)
             fallback_where=(
-                _build_where({"company": meta["company"]}) if allow_company_fallback else None
+                _build_where(_company_filter(meta)) if allow_company_fallback else None
             ),
         )
         if docs:
@@ -208,7 +267,7 @@ def get_cached_documents(
             docs = _query_with_where(
                 collection,
                 query_embedding,
-                where={"company": meta["company"]},
+                where=_build_where(_company_filter(meta)),
                 n_results=n_results,
             )
             if docs:
@@ -301,6 +360,7 @@ def set_cached_documents(
         metadatas = [
             {
                 "company": meta["company"],
+                "company_hash": meta.get("company_hash", ""),
                 "role": meta["role"],
                 "doc_type": meta["doc_type"],
                 "source": source,
@@ -334,9 +394,10 @@ def upsert_by_doc_type(
     docs: List[str],
     embeddings: List[List[float]],
     source: str = "unknown",
+    company_original: Optional[str] = None,
 ) -> str:
     """company / role / doc_type で統一書き込みし、使用したキャッシュキーを返す。"""
-    cache_key = build_cache_key(doc_type, company, role)
+    cache_key = build_cache_key(doc_type, company, role, company_original=company_original)
     set_cached_documents(
         cache_key, docs, embeddings, source=source, doc_type=doc_type
     )

@@ -23,17 +23,25 @@ def chat_model_name() -> str:
 
 
 @lru_cache(maxsize=4)
-def get_embeddings(model: str | None = None) -> OpenAIEmbeddings:
-    """OpenAI Embeddings（LangChain）。API キーは環境変数 OPENAI_API_KEY。"""
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY is required")
+def _get_embeddings_cached(model: str, api_key: str) -> OpenAIEmbeddings:
     return OpenAIEmbeddings(
-        model=model or embedding_model_name(),
+        model=model,
         api_key=api_key,
         max_retries=0,
         request_timeout=_DEFAULT_REQUEST_TIMEOUT_SEC,
     )
+
+
+def get_embeddings(model: str | None = None) -> OpenAIEmbeddings:
+    """OpenAI Embeddings（LangChain）。API キーは環境変数 OPENAI_API_KEY。
+
+    api_key をキャッシュキーに含めることで、Secrets Manager 等によるローテーション後も
+    プロセス再起動なしで新しいキーが使われる（古いキーのエントリは maxsize=4 で自然に押し出される）。
+    """
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY is required")
+    return _get_embeddings_cached(model or embedding_model_name(), api_key)
 
 
 def get_chat_model(model: str | None = None, temperature: float = 0.2) -> ChatOpenAI:

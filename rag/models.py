@@ -46,7 +46,7 @@ class CompanyHintsResponse(BaseModel):
 
 
 class ESReviewRequest(BaseModel):
-    es_text: str = Field(min_length=1)
+    es_text: str = Field(min_length=1, max_length=10000)
     question_type: str = Field(default="その他")
     company_name: str = Field(default="")
     company_context: str = Field(default="")
