@@ -84,6 +84,12 @@ export function useResultsData() {
   const fetchAnalysis = useCallback(async () => {
     if (!sessionId) return
     setAnalysisError(null)
+    // session_id変更時に前セッションの分析テキスト/スコアが新セッションの企業一覧と
+    // 並んで残存しないよう、fetch実行前に初期値へリセットする（Issue #949）
+    setJobSuitabilityComment('')
+    setSuggestedRoles([])
+    setScoreComment('')
+    setAnalysisScores(null)
     try {
       const res = await fetch(`/api/chat/analysis?session_id=${sessionId}`, {
         headers: authService.getUserFetchHeaders(),
