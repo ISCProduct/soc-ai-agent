@@ -5,9 +5,12 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
+
+	"gorm.io/gorm"
 )
 
 // CrossFeatureIntegrationService 機能間データ連携サービス
@@ -288,7 +291,10 @@ func (s *CrossFeatureIntegrationService) applyMovingAverage(
 	userID uint, sessionID, category string, newValue int,
 ) error {
 	existing, err := s.weightScoreRepo.FindByUserSessionAndCategory(userID, sessionID, category)
-	if err != nil || existing == nil {
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("スコア取得エラー: %w", err)
+	}
+	if existing == nil {
 		// 新規: 絶対値でセット
 		return s.weightScoreRepo.SetScore(userID, sessionID, category, newValue)
 	}

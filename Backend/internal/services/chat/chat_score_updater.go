@@ -3,10 +3,13 @@ package chat
 import (
 	"Backend/internal/models"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
 	"strings"
+
+	"gorm.io/gorm"
 )
 
 // analyzeAndUpdateWeights ユーザーの回答を分析し重み係数を更新する。
@@ -180,8 +183,11 @@ func (s *ChatService) inferCategoryFromQuestion(question string) string {
 func (s *ChatService) updateCategoryScore(userID uint, sessionID, category string, score int) error {
 	// 既存のスコアを取得
 	existingScore, err := s.userWeightScoreRepo.FindByUserSessionAndCategory(userID, sessionID, category)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("failed to get existing score: %w", err)
+	}
 
-	if err != nil || existingScore == nil {
+	if existingScore == nil {
 		// 新規作成: 絶対値でセット
 		if err := s.userWeightScoreRepo.SetScore(userID, sessionID, category, score); err != nil {
 			return fmt.Errorf("failed to create score: %w", err)
