@@ -271,16 +271,8 @@ export function layoutBusinessGraph(
   )
 }
 
-/**
- * 単一の起点企業がない「全体表示」向け。企業ID一覧を、資本/事業関係で繋がっている者同士が
- * 連番で隣り合うよう連結成分(connected component)ごとに並べ替える。グリッド配置と組み合わせることで、
- * 無関係な登録順による配置のばらつきを避け、関連企業が視覚的に近くまとまるようにする。
- * 元のids配列内での最初の登場順は、成分の出現順・成分内の探索順として維持する。
- */
-export function groupIdsByConnectedComponent(
-  ids: number[],
-  edges: Array<CapitalEdgeLike & BusinessEdgeLike>,
-): number[] {
+/** 資本/事業関係の隣接リストを構築する内部ヘルパー。 */
+function buildNeighborMap(edges: Array<CapitalEdgeLike & BusinessEdgeLike>): Map<number, number[]> {
   const neighbors = new Map<number, number[]>()
   const addNeighbor = (a: number, b: number) => {
     if (!neighbors.has(a)) neighbors.set(a, [])
@@ -293,23 +285,55 @@ export function groupIdsByConnectedComponent(
     addNeighbor(a, b)
     addNeighbor(b, a)
   }
+  return neighbors
+}
 
+export interface RelationCluster {
+  /** クラスタ内で最も接続数(次数)が多い企業ID。起点企業表示への遷移先として使う。 */
+  hubId: number
+  /** クラスタに含まれる全企業ID（探索順）。 */
+  memberIds: number[]
+}
+
+/**
+ * 単一の起点企業を指定しない「全体表示」向け。企業ID一覧を資本/事業関係の連結成分
+ * (connected component)ごとにまとめ、各成分の代表企業(次数最大=ハブ企業)を求める。
+ * 成分はメンバー数の多い順にソートする。
+ *
+ * #970フォローアップ: 数百社をまとめて1枚のグラフに描画すると、ハブ企業(メガバンク等)が
+ * 複数クラスタにまたがる関係を持つため、レイアウトを工夫してもエッジが画面を横断してしまい
+ * 本質的に読みにくい。「全部を1枚に描く」のをやめ、クラスタ単位のカード一覧として提示し、
+ * カードを選ぶとそのクラスタの代表企業を起点にした（すでに読みやすい）単一企業表示に遷移する
+ * 設計に変更した。この関数はそのカード一覧のデータを作る。
+ */
+export function computeRelationClusters(
+  ids: number[],
+  edges: Array<CapitalEdgeLike & BusinessEdgeLike>,
+): RelationCluster[] {
+  const neighbors = buildNeighborMap(edges)
   const idSet = new Set(ids)
   const visited = new Set<number>()
-  const result: number[] = []
+  const clusters: RelationCluster[] = []
+
   for (const start of ids) {
     if (visited.has(start)) continue
+    const memberIds: number[] = []
     const queue = [start]
     visited.add(start)
     while (queue.length > 0) {
       const current = queue.shift()!
-      result.push(current)
+      memberIds.push(current)
       for (const neighborId of neighbors.get(current) ?? []) {
         if (visited.has(neighborId) || !idSet.has(neighborId)) continue
         visited.add(neighborId)
         queue.push(neighborId)
       }
     }
+    const hubId = memberIds.reduce((best, id) =>
+      (neighbors.get(id)?.length ?? 0) > (neighbors.get(best)?.length ?? 0) ? id : best,
+    memberIds[0])
+    clusters.push({ hubId, memberIds })
   }
-  return result
+
+  return clusters.sort((a, b) => b.memberIds.length - a.memberIds.length)
 }

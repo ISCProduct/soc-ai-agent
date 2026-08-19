@@ -3,7 +3,7 @@ import {
   layoutCapitalGraph,
   layoutCapitalGraphFromEdges,
   layoutBusinessGraph,
-  groupIdsByConnectedComponent,
+  computeRelationClusters,
   type RelationEntry,
   type CompanyRelationGraph,
 } from '@/lib/relation-graph'
@@ -221,24 +221,52 @@ describe('relation-graph', () => {
     })
   })
 
-  describe('groupIdsByConnectedComponent', () => {
-    it('つながっている企業同士を隣接させる(登録順のばらばらな配置を避ける)', () => {
+  describe('computeRelationClusters', () => {
+    it('つながっている企業同士を同じクラスタにまとめる', () => {
       // 1-2が資本関係、3-4が事業関係で繋がっているが、元の配列では1,3,2,4の順で登録されている
-      const ordered = groupIdsByConnectedComponent(
+      const clusters = computeRelationClusters(
         [1, 3, 2, 4],
         [
           { parent_id: 1, child_id: 2 },
           { from_id: 3, to_id: 4 },
         ],
       )
-      // 1の直後に(元は離れていた)2が来て、同じ成分がまとまること
-      expect(ordered.indexOf(2)).toBe(ordered.indexOf(1) + 1)
-      expect(ordered.indexOf(4)).toBe(ordered.indexOf(3) + 1)
+      expect(clusters).toHaveLength(2)
+      expect(clusters.map((c) => c.memberIds.slice().sort((a, b) => a - b))).toEqual(
+        expect.arrayContaining([[1, 2], [3, 4]]),
+      )
     })
 
-    it('関係を持たない企業も結果に含める', () => {
-      const ordered = groupIdsByConnectedComponent([1, 2], [])
-      expect(ordered.sort()).toEqual([1, 2])
+    it('関係を持たない企業もサイズ1のクラスタとして含める', () => {
+      const clusters = computeRelationClusters([1, 2], [])
+      expect(clusters).toHaveLength(2)
+      expect(clusters.every((c) => c.memberIds.length === 1)).toBe(true)
+    })
+
+    it('クラスタをメンバー数の多い順にソートする', () => {
+      const clusters = computeRelationClusters(
+        [1, 2, 10, 11, 12, 13],
+        [
+          { parent_id: 1, child_id: 2 }, // クラスタA: 2社
+          { parent_id: 10, child_id: 11 },
+          { parent_id: 10, child_id: 12 },
+          { parent_id: 10, child_id: 13 }, // クラスタB: 4社
+        ],
+      )
+      expect(clusters[0].memberIds).toHaveLength(4)
+      expect(clusters[1].memberIds).toHaveLength(2)
+    })
+
+    it('クラスタの代表企業(hubId)は次数(接続数)が最大のノードになる', () => {
+      const clusters = computeRelationClusters(
+        [10, 11, 12, 13],
+        [
+          { parent_id: 10, child_id: 11 },
+          { parent_id: 10, child_id: 12 },
+          { parent_id: 10, child_id: 13 },
+        ],
+      )
+      expect(clusters[0].hubId).toBe(10) // 10は3社と接続、他は1社のみ
     })
   })
 })
