@@ -20,6 +20,7 @@ type OrganizationRepository interface {
 	GetUserOrganizationID(userID uint) (uint, error)
 	SetUserOrganizationID(userID, organizationID uint) error
 	FindUserInOrganization(organizationID, userID uint) (*models.User, error)
+	IsUserAdmin(userID uint) (bool, error)
 
 	// AddMemberTransactional は membership 作成・users.organization_id 更新・関連行の org 付け替えを同一 TX で行う。
 	AddMemberTransactional(m *models.OrganizationMembership) error

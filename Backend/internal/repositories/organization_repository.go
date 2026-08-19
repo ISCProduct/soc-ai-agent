@@ -117,6 +117,16 @@ func (r *OrganizationRepository) GetUserOrganizationID(userID uint) (uint, error
 	return orgID, nil
 }
 
+// IsUserAdmin は users.is_admin を返す(プラットフォーム管理者はテナント制約を受けない)。
+func (r *OrganizationRepository) IsUserAdmin(userID uint) (bool, error) {
+	var isAdmin bool
+	err := r.db.Model(&models.User{}).Select("is_admin").Where("id = ?", userID).Scan(&isAdmin).Error
+	if err != nil {
+		return false, err
+	}
+	return isAdmin, nil
+}
+
 // SetUserOrganizationID はユーザーの所属組織を更新する。
 func (r *OrganizationRepository) SetUserOrganizationID(userID, organizationID uint) error {
 	return r.db.Model(&models.User{}).Where("id = ?", userID).Update("organization_id", organizationID).Error
