@@ -10,7 +10,6 @@ import ReactFlow, {
     useNodesState,
     useEdgesState,
     MarkerType,
-    EdgeTypes,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Box, Typography, Chip } from '@mui/material';
@@ -26,35 +25,9 @@ import {
 } from '@/lib/company-data';
 import { formatRelationLabel } from '@/lib/relation-labels';
 import { layoutBusinessGraph } from '@/lib/relation-graph';
+import { edgeTypes } from '@/components/diagram/RelationEdge';
 
 type DiagramType = 'capital' | 'business';
-
-const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, label }: any) => {
-    const edgePath = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
-
-    return (
-        <>
-            <path
-                id={id}
-                style={style}
-                className="react-flow__edge-path"
-                d={edgePath}
-                markerEnd={markerEnd}
-            />
-            {label && (
-                <text>
-                    <textPath href={`#${id}`} startOffset="50%" textAnchor="middle" style={{ fontSize: '12px', fill: '#555' }}>
-                        {label}
-                    </textPath>
-                </text>
-            )}
-        </>
-    );
-};
-
-const edgeTypes: EdgeTypes = {
-    custom: CustomEdge,
-};
 
 interface CompanyDiagramProps {
     companyId: number;
