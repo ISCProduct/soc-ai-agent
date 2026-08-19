@@ -292,6 +292,12 @@ func (s *OrganizationService) ResolveOrganizationID(userID uint) (uint, error) {
 	return orgID, nil
 }
 
+// IsUserAdmin はプラットフォーム管理者(users.is_admin)かどうかを返す。
+// 管理者は学園サブドメインをまたいだテナント制約チェックを免除される。
+func (s *OrganizationService) IsUserAdmin(userID uint) (bool, error) {
+	return s.repo.IsUserAdmin(userID)
+}
+
 // ResolveBySlug はサブドメインラベル(slug)から組織を解決する。無効組織は拒否する。
 func (s *OrganizationService) ResolveBySlug(slug string) (*models.Organization, error) {
 	org, err := s.repo.FindBySlug(repositories.NormalizeOrgSlug(slug))

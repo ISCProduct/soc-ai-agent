@@ -35,7 +35,7 @@ func (s *AuthService) Login(req LoginRequest, tenantOrgID uint) (*AuthResponse, 
 	if user.IsWithdrawn() {
 		return nil, errors.New("account has been withdrawn")
 	}
-	if tenantOrgID != 0 && user.OrganizationID != tenantOrgID {
+	if tenantOrgID != 0 && !user.IsAdmin && user.OrganizationID != tenantOrgID {
 		return nil, errors.New("tenant mismatch")
 	}
 
