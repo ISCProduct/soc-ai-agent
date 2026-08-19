@@ -1,6 +1,9 @@
 import {
   groupRelationsByCategory,
   layoutCapitalGraph,
+  layoutCapitalGraphFromEdges,
+  layoutBusinessGraph,
+  groupIdsByConnectedComponent,
   type RelationEntry,
   type CompanyRelationGraph,
 } from '@/lib/relation-graph'
@@ -119,6 +122,68 @@ describe('relation-graph', () => {
       expect(focusX).not.toBe(siblingX)
       expect(positions.get(2)!.y).toBeGreaterThan(positions.get(1)!.y)
       expect(positions.get(4)!.y).toBeLessThan(positions.get(1)!.y)
+    })
+  })
+
+  // #970: 登録順の円形/グリッド配置ではなく、関係性(BFS距離)ベースの配置になることを検証する。
+  describe('layoutCapitalGraphFromEdges', () => {
+    it('CapitalRelation形式の配列から直接levelを算出できる', () => {
+      const positions = layoutCapitalGraphFromEdges(1, [1, 2, 3], [
+        { parent_id: 1, child_id: 2 },
+        { parent_id: 2, child_id: 3 },
+      ])
+      expect(positions.get(1)?.level).toBe(0)
+      expect(positions.get(2)?.level).toBe(1)
+      expect(positions.get(3)?.level).toBe(2)
+    })
+
+    it('資本関係にない企業(relation_typeがbusiness等)は無視して0除算(NaN角度)を起こさない', () => {
+      const positions = layoutCapitalGraphFromEdges(1, [1], [])
+      expect(positions.get(1)).toEqual({ level: 0, column: 0, x: 0, y: 0 })
+    })
+  })
+
+  describe('layoutBusinessGraph', () => {
+    it('起点企業から直接つながる企業をlevel1、2ホップ先をlevel2に配置する', () => {
+      const positions = layoutBusinessGraph(1, [1, 2, 3], [
+        { from_id: 1, to_id: 2 },
+        { from_id: 2, to_id: 3 },
+      ])
+      expect(positions.get(1)?.level).toBe(0)
+      expect(positions.get(2)?.level).toBe(1)
+      expect(positions.get(3)?.level).toBe(2)
+    })
+
+    it('to_id起点で登録されていても双方向に隣接とみなす', () => {
+      const positions = layoutBusinessGraph(2, [1, 2], [{ from_id: 1, to_id: 2 }])
+      expect(positions.get(1)?.level).toBe(1)
+    })
+
+    it('起点から辿れない企業(別の連結成分)はlevel0として扱いnodeIdsに含まれる全企業の座標を返す', () => {
+      const positions = layoutBusinessGraph(1, [1, 2, 99], [{ from_id: 1, to_id: 2 }])
+      expect(positions.size).toBe(3)
+      expect(positions.get(99)?.level).toBe(0)
+    })
+  })
+
+  describe('groupIdsByConnectedComponent', () => {
+    it('つながっている企業同士を隣接させる(登録順のばらばらな配置を避ける)', () => {
+      // 1-2が資本関係、3-4が事業関係で繋がっているが、元の配列では1,3,2,4の順で登録されている
+      const ordered = groupIdsByConnectedComponent(
+        [1, 3, 2, 4],
+        [
+          { parent_id: 1, child_id: 2 },
+          { from_id: 3, to_id: 4 },
+        ],
+      )
+      // 1の直後に(元は離れていた)2が来て、同じ成分がまとまること
+      expect(ordered.indexOf(2)).toBe(ordered.indexOf(1) + 1)
+      expect(ordered.indexOf(4)).toBe(ordered.indexOf(3) + 1)
+    })
+
+    it('関係を持たない企業も結果に含める', () => {
+      const ordered = groupIdsByConnectedComponent([1, 2], [])
+      expect(ordered.sort()).toEqual([1, 2])
     })
   })
 })
