@@ -9,12 +9,15 @@ import (
 	"Backend/internal/services/prompts"
 	"Backend/internal/services/shared"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
 	"os"
 	"sort"
 	"strings"
+
+	"gorm.io/gorm"
 )
 
 type MatchingService struct {
@@ -179,6 +182,9 @@ func (s *MatchingService) GetTopMatches(ctx context.Context, userID uint, sessio
 func (s *MatchingService) ToggleFavorite(matchID uint, userID uint) error {
 	match, err := s.matchRepo.FindByID(matchID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return shared.ErrNotFound
+		}
 		return err
 	}
 	if match.UserID != userID {

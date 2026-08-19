@@ -390,6 +390,9 @@ func (c *ChatController) ToggleFavorite(ctx echo.Context) error {
 		if err == shared.ErrForbidden {
 			return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
 		}
+		if err == shared.ErrNotFound {
+			return echo.NewHTTPError(http.StatusNotFound, "match not found")
+		}
 		return echoInternalError(err)
 	}
 
