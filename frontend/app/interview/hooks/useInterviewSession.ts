@@ -178,14 +178,20 @@ export function useInterviewSession({
         cancelAnimationFrame(rafId)
         rafId = null
       }
-      if (aiLevelRafRef.current !== null) {
-        cancelAnimationFrame(aiLevelRafRef.current)
-        aiLevelRafRef.current = null
+      // この要素が現在共有されている再生対象でない場合(=より新しいターンの
+      // 音声に切り替わった後の古いクリーンアップ)は、新しい方の再生状態
+      // (aiSpeaking/aiLevel/RAF)を巻き戻さないよう、自身のリソース解放のみ行う
+      const isCurrent = aiAudioRef.current === el
+      if (isCurrent) {
+        if (aiLevelRafRef.current !== null) {
+          cancelAnimationFrame(aiLevelRafRef.current)
+          aiLevelRafRef.current = null
+        }
+        setAiLevel(0)
+        setAiSpeaking(false)
+        aiAudioRef.current = null
       }
-      setAiLevel(0)
-      setAiSpeaking(false)
       URL.revokeObjectURL(url)
-      if (aiAudioRef.current === el) aiAudioRef.current = null
       el.removeAttribute('src')
       el.load()
     }
@@ -198,6 +204,8 @@ export function useInterviewSession({
       }
       const ctx = aiAudioCtxRef.current
       await ctx.resume()
+      // await中に次のターンが始まっていれば、この古い音声は再生せず破棄する
+      if (gen !== audioGenerationRef.current) { cleanup(); return }
 
       const source = ctx.createMediaElementSource(el)
       const analyser = ctx.createAnalyser()
@@ -224,6 +232,9 @@ export function useInterviewSession({
       // AudioContext 未対応時は Audio 要素のデフォルト出力にフォールバック（リップシンクなし）
       console.warn('[Interview] AudioContext routing unavailable; playing via element output', err)
     }
+
+    // AudioContext設定中に次のターンが始まっていれば、ここでも再生せず破棄する
+    if (gen !== audioGenerationRef.current) { cleanup(); return }
 
     return new Promise<void>((resolve) => {
       el.onended = () => {

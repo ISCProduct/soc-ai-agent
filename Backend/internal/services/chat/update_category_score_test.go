@@ -77,7 +77,7 @@ func TestUpdateCategoryScore_UpdatesExisting(t *testing.T) {
 	if !repo.addCalled {
 		t.Fatal("expected AddScore to be called for existing record")
 	}
-	// blended = 50*0.7 + 80*0.3 = 59, delta = 9
+	// 移動平均 = 50*0.7 + 80*0.3 = 59、差分delta = 9
 	if repo.addDelta != 9 {
 		t.Fatalf("addDelta = %d, want 9", repo.addDelta)
 	}

@@ -188,7 +188,11 @@ def get_cached_documents(
             query_embedding,
             where=_build_where({"company": meta["company"], "role": meta["role"]}),
             n_results=n_results,
-            fallback_where=_build_where({"company": meta["company"]}),
+            # allow_company_fallback=Falseの場合、例外時の再試行でも職種条件を
+            # 落とさない(会社単独スコープへの意図しないフォールバックを防ぐ)
+            fallback_where=(
+                _build_where({"company": meta["company"]}) if allow_company_fallback else None
+            ),
         )
         if docs:
             logger.info(

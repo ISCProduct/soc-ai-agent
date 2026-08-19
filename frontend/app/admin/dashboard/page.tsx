@@ -128,8 +128,8 @@ export default function AdminScoreDashboardPage() {
       if (isCancelled?.()) return
       setUsers(data.users ?? [])
       setTotal(data.total ?? 0)
-    } catch (e: any) {
-      if (!isCancelled?.()) setError(e.message)
+    } catch (e: unknown) {
+      if (!isCancelled?.()) setError(e instanceof Error ? e.message : 'データの取得に失敗しました')
     } finally {
       if (!isCancelled?.()) setLoading(false)
     }
