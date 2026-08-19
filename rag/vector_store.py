@@ -186,8 +186,9 @@ def get_cached_documents(
         docs = _query_with_where(
             collection,
             query_embedding,
-            where={"company": meta["company"], "role": meta["role"]},
+            where=_build_where({"company": meta["company"], "role": meta["role"]}),
             n_results=n_results,
+            fallback_where=_build_where({"company": meta["company"]}),
         )
         if docs:
             logger.info(
@@ -222,26 +223,41 @@ def get_cached_documents(
         return []
 
 
+def _build_where(filters: Dict[str, str]) -> Dict[str, Any]:
+    """ChromaDBはフラットな複数キーのwhereを許可しない(1オペレータのみ)ため、
+    2キー以上ある場合は$andでラップする。1キー以下ならそのまま返す。"""
+    if len(filters) <= 1:
+        return dict(filters)
+    return {"$and": [{k: v} for k, v in filters.items()]}
+
+
 def _query_with_where(
     collection: Any,
     query_embedding: List[float],
-    where: Dict[str, str],
+    where: Dict[str, Any],
     n_results: int,
+    fallback_where: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
+    def _run(w: Optional[Dict[str, Any]]) -> Any:
+        kwargs: Dict[str, Any] = {"where": w} if w else {}
+        return collection.query(
+            query_embeddings=[query_embedding],
+            n_results=n_results,
+            include=["documents", "metadatas"],
+            **kwargs,
+        )
+
     try:
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            where=where,
-            include=["documents", "metadatas"],
-        )
+        results = _run(where)
     except Exception:
-        # where フィルタ非対応環境向けフォールバック
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            include=["documents", "metadatas"],
-        )
+        # whereフィルタが失敗した場合でも、他社のデータが混入しないよう
+        # fallback_where(通常はcompanyのみ)でスコープを維持したまま再試行する。
+        # それも失敗する場合のみ、フィルタ無しにフォールバックする
+        # (whereフィルタ自体が非対応の環境向け)。
+        try:
+            results = _run(fallback_where) if fallback_where else _run(None)
+        except Exception:
+            results = _run(None)
 
     documents: List[str] = results.get("documents", [[]])[0] or []
     metadatas: List[Dict[str, Any]] = results.get("metadatas", [[]])[0] or []

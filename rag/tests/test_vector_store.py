@@ -43,9 +43,19 @@ def test_set_and_get_cached_documents_roundtrip():
     collection.count.return_value = 1
     fetched = datetime.now(timezone.utc).isoformat()
 
+    def _where_value(where, key):
+        # _build_where は複数キーを{"$and": [{k: v}, ...]}でラップするため、
+        # フラット/$and両方の形状からキーを取り出せるようにする。
+        if key in where:
+            return where[key]
+        for clause in where.get("$and", []):
+            if key in clause:
+                return clause[key]
+        return None
+
     def query_side_effect(**kwargs):
         where = kwargs.get("where") or {}
-        if where.get("role") == "別職種":
+        if _where_value(where, "role") == "別職種":
             return {"documents": [[]], "metadatas": [[]]}
         return {
             "documents": [["採用方針のメモ"]],
@@ -85,6 +95,45 @@ def test_set_and_get_cached_documents_roundtrip():
     assert "fetched_at" in upsert_kwargs["metadatas"][0]
     assert docs == ["採用方針のメモ"]
     assert collection.query.call_count >= 2
+
+
+def test_query_with_where_falls_back_to_scoped_filter_on_error():
+    # whereクエリ自体が例外を投げる環境でも、フィルタを完全に外すのではなく
+    # fallback_where(companyのみ)でスコープを維持したまま再試行すること。
+    collection = MagicMock()
+    calls = []
+
+    def query_side_effect(**kwargs):
+        calls.append(kwargs.get("where"))
+        if kwargs.get("where") == {"$and": [{"company": "Acme"}, {"role": "エンジニア"}]}:
+            raise ValueError("Expected where to have exactly one operator")
+        return {"documents": [["Acme社のメモ"]], "metadatas": [[{"fetched_at": None}]]}
+
+    collection.query.side_effect = query_side_effect
+
+    docs = vs._query_with_where(
+        collection,
+        [0.1, 0.2, 0.3],
+        where=vs._build_where({"company": "Acme", "role": "エンジニア"}),
+        n_results=5,
+        fallback_where=vs._build_where({"company": "Acme"}),
+    )
+
+    assert calls == [
+        {"$and": [{"company": "Acme"}, {"role": "エンジニア"}]},
+        {"company": "Acme"},
+    ]
+    assert docs == ["Acme社のメモ"]
+
+
+def test_build_where_wraps_multi_key_filters():
+    # ChromaDBはフラットな複数キーのwhereを許可しない(1オペレータのみ)ため、
+    # 2キー以上は$andでラップする必要がある。
+    assert vs._build_where({"company": "Acme"}) == {"company": "Acme"}
+    assert vs._build_where({}) == {}
+    assert vs._build_where({"company": "Acme", "role": "エンジニア"}) == {
+        "$and": [{"company": "Acme"}, {"role": "エンジニア"}]
+    }
 
 
 def test_describe_backend_http(monkeypatch):
