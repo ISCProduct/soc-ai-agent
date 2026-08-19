@@ -82,11 +82,17 @@ export function useInterviewSession({
   const pollSessionRef = useRef<{ sessionId: number; userId: number } | null>(null)
   /** 再試行時に古い tick の結果を破棄するための世代カウンタ */
   const pollGenerationRef = useRef(0)
+  /** playAudioBlob の世代。cleanupConnection で increment し、古い再生を破棄する */
+  const audioGenerationRef = useRef(0)
   const sessionStartRef = useRef<number | null>(null)
   const transcriptEndRef = useRef<HTMLDivElement | null>(null)
   const isRecordingRef = useRef(false)
   const turnPendingRef = useRef(false)
   const aiSpeakingRef = useRef(false)
+  // タイマーのsetIntervalコールバックがstale closureでhandleStop実行時点の
+  // session/userを読んでしまう(#926)のを防ぐため、常に最新値を反映するrefを使う
+  const sessionRef = useRef<InterviewSession | null>(null)
+  const userRef = useRef<User | null>(null)
   // VAD effect は hooks 順序のため先に登録し、実装は ref 経由で呼ぶ
   const startRecordingRef = useRef<() => void>(() => {})
   const stopRecordingRef = useRef<() => void>(() => {})
@@ -107,6 +113,8 @@ export function useInterviewSession({
     stopRecording: () => stopRecordingRef.current(),
   })
 
+  useEffect(() => { userRef.current = user }, [user])
+
   // Cleanup on unmount
   useEffect(() => () => cleanupConnection(), [])
 
@@ -116,6 +124,7 @@ export function useInterviewSession({
   }, [utterances, partialAi])
 
   const cleanupConnection = () => {
+    audioGenerationRef.current++
     ;[timerRef, pollRef].forEach(r => { if (r.current) { clearInterval(r.current); r.current = null } })
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop(); mediaRecorderRef.current = null
@@ -155,6 +164,7 @@ export function useInterviewSession({
   }
 
   const playAudioBlob = async (blob: Blob): Promise<void> => {
+    const gen = audioGenerationRef.current
     const url = URL.createObjectURL(blob)
     const el = new Audio()
     aiAudioRef.current = el
@@ -168,25 +178,34 @@ export function useInterviewSession({
         cancelAnimationFrame(rafId)
         rafId = null
       }
-      if (aiLevelRafRef.current !== null) {
-        cancelAnimationFrame(aiLevelRafRef.current)
-        aiLevelRafRef.current = null
+      // この要素が現在共有されている再生対象でない場合(=より新しいターンの
+      // 音声に切り替わった後の古いクリーンアップ)は、新しい方の再生状態
+      // (aiSpeaking/aiLevel/RAF)を巻き戻さないよう、自身のリソース解放のみ行う
+      const isCurrent = aiAudioRef.current === el
+      if (isCurrent) {
+        if (aiLevelRafRef.current !== null) {
+          cancelAnimationFrame(aiLevelRafRef.current)
+          aiLevelRafRef.current = null
+        }
+        setAiLevel(0)
+        setAiSpeaking(false)
+        aiAudioRef.current = null
       }
-      setAiLevel(0)
-      setAiSpeaking(false)
       URL.revokeObjectURL(url)
-      if (aiAudioRef.current === el) aiAudioRef.current = null
       el.removeAttribute('src')
       el.load()
     }
+
+    if (gen !== audioGenerationRef.current) { cleanup(); return }
 
     try {
       if (!aiAudioCtxRef.current || aiAudioCtxRef.current.state === 'closed') {
         aiAudioCtxRef.current = new AudioContext()
       }
       const ctx = aiAudioCtxRef.current
-      // resume を await して running 状態を確実に待つ（suspended のまま再生すると無音になる）
       await ctx.resume()
+      // await中に次のターンが始まっていれば、この古い音声は再生せず破棄する
+      if (gen !== audioGenerationRef.current) { cleanup(); return }
 
       const source = ctx.createMediaElementSource(el)
       const analyser = ctx.createAnalyser()
@@ -213,6 +232,9 @@ export function useInterviewSession({
       // AudioContext 未対応時は Audio 要素のデフォルト出力にフォールバック（リップシンクなし）
       console.warn('[Interview] AudioContext routing unavailable; playing via element output', err)
     }
+
+    // AudioContext設定中に次のターンが始まっていれば、ここでも再生せず破棄する
+    if (gen !== audioGenerationRef.current) { cleanup(); return }
 
     return new Promise<void>((resolve) => {
       el.onended = () => {
@@ -302,6 +324,7 @@ export function useInterviewSession({
       const stream = await media.ensureStream()
 
       const created = await interviewApi.createSession(user.user_id, 'ja', nextGender)
+      sessionRef.current = created
       setSession(created)
       await interviewApi.startSession(created.id, user.user_id)
       setStatus('connected')
@@ -323,8 +346,9 @@ export function useInterviewSession({
     const videoBlob = await media.stopAndCollectVideoBlob()
 
     cleanupConnection()
-    const currentSession = session
-    const currentUser = user
+    // タイマーのsetIntervalから呼ばれた場合でも最新値を読むため、stateではなくrefを使う(#926)
+    const currentSession = sessionRef.current
+    const currentUser = userRef.current
     if (currentUser && currentSession) {
       const scoreSessionId = `interview-${currentUser.user_id}`
       try {

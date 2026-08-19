@@ -108,7 +108,7 @@ export default function AdminScoreDashboardPage() {
     void fetchEntitlements().then(setEntitlements).catch(() => setEntitlements(null))
   }, [])
 
-  const fetchUsers = useCallback(async () => {
+  const fetchUsers = useCallback(async (isCancelled?: () => boolean) => {
     if (!adminEmail) return
     setLoading(true)
     setError('')
@@ -125,18 +125,25 @@ export default function AdminScoreDashboardPage() {
       })
       if (!res.ok) throw new Error('データの取得に失敗しました')
       const data = await res.json()
+      if (isCancelled?.()) return
       setUsers(data.users ?? [])
       setTotal(data.total ?? 0)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      if (!isCancelled?.()) setError(e instanceof Error ? e.message : 'データの取得に失敗しました')
     } finally {
-      setLoading(false)
+      if (!isCancelled?.()) setLoading(false)
     }
   }, [adminEmail, page, rowsPerPage, sort, query, schoolId])
 
+  // 検索クエリ入力のたびに即座にリクエストすると、ネットワークの揺らぎで古い
+  // レスポンスが新しい検索結果を上書きすることがあるため、デバウンス+キャンセルする
   useEffect(() => {
-    fetchUsers()
-  }, [fetchUsers])
+    let cancelled = false
+    const timer = setTimeout(() => {
+      fetchUsers(() => cancelled)
+    }, query ? 400 : 0)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [fetchUsers, query])
 
   const handleExport = () => {
     const exportUrl = schoolId !== undefined
