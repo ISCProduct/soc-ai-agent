@@ -166,6 +166,61 @@ describe('relation-graph', () => {
     })
   })
 
+  // #970フォローアップ: 子会社が多い企業でも1行に並べず複数行に折り返すことで、
+  // fitViewで極端に縮小されてテキストが潰れる「醜い」表示を避ける。
+  describe('layoutCapitalGraphFromEdges (折り返しレイアウト)', () => {
+    it('兄弟ノードが少ない場合は1行のまま(既存の見た目を壊さない)', () => {
+      const positions = layoutCapitalGraphFromEdges(
+        1,
+        [1, 2, 3, 4],
+        [1, 2, 3, 4].slice(1).map((childId) => ({ parent_id: 1, child_id: childId })),
+      )
+      const ys = [2, 3, 4].map((id) => positions.get(id)!.y)
+      expect(new Set(ys).size).toBe(1) // 全員同じ行(同じy)
+    })
+
+    it('兄弟ノードが多い場合は複数行に折り返し、同じ行に収まらない', () => {
+      const childIds = Array.from({ length: 37 }, (_, i) => i + 2)
+      const positions = layoutCapitalGraphFromEdges(
+        1,
+        [1, ...childIds],
+        childIds.map((childId) => ({ parent_id: 1, child_id: childId })),
+      )
+      const ys = new Set(childIds.map((id) => positions.get(id)!.y))
+      // 37社を1行(6社まで)に収めることはできないので、複数行に分かれること
+      expect(ys.size).toBeGreaterThan(1)
+      // 各行の最大幅が無制限に伸び続けないこと(1行あたりの最大x幅が一定以下)
+      const xs = childIds.map((id) => positions.get(id)!.x)
+      const xRange = Math.max(...xs) - Math.min(...xs)
+      expect(xRange).toBeLessThan(2000)
+    })
+
+    it('折り返しが発生しても親→子のlevel順（y座標の大小）は保たれる', () => {
+      const childIds = Array.from({ length: 20 }, (_, i) => i + 2)
+      const positions = layoutCapitalGraphFromEdges(
+        1,
+        [1, ...childIds],
+        childIds.map((childId) => ({ parent_id: 1, child_id: childId })),
+      )
+      const focusY = positions.get(1)!.y
+      for (const id of childIds) {
+        expect(positions.get(id)!.y).toBeGreaterThan(focusY)
+      }
+    })
+
+    it('折り返した各行は起点を中心に左右対称に配置される', () => {
+      const childIds = Array.from({ length: 8 }, (_, i) => i + 2) // 6+2 -> 2行
+      const positions = layoutCapitalGraphFromEdges(
+        1,
+        [1, ...childIds],
+        childIds.map((childId) => ({ parent_id: 1, child_id: childId })),
+      )
+      const secondRowXs = childIds.slice(6).map((id) => positions.get(id)!.x)
+      const center = secondRowXs.reduce((a, b) => a + b, 0) / secondRowXs.length
+      expect(Math.abs(center)).toBeLessThan(1)
+    })
+  })
+
   describe('groupIdsByConnectedComponent', () => {
     it('つながっている企業同士を隣接させる(登録順のばらばらな配置を避ける)', () => {
       // 1-2が資本関係、3-4が事業関係で繋がっているが、元の配列では1,3,2,4の順で登録されている

@@ -112,13 +112,21 @@ export interface CapitalGraphPosition {
   y: number
 }
 
-const LEVEL_HEIGHT = 160
 const COLUMN_WIDTH = 220
+/** 同一levelの兄弟ノードをこの数を超えたら複数行に折り返す。子会社が多い企業でも
+ * 1行に並べてfitViewが極端に縮小されテキストが潰れる事態を避けるため（#970フォローアップ）。 */
+const MAX_NODES_PER_ROW = 6
+/** 折り返した行同士の縦間隔。levelをまたぐ間隔(LEVEL_GAP)より詰めて、
+ * 「同じ世代の折り返し」と「世代の切り替わり」を視覚的に区別できるようにする。 */
+const WRAPPED_ROW_HEIGHT = 130
+/** 世代(level)が切り替わる際に追加する縦の余白。 */
+const LEVEL_GAP = 60
 
 /**
- * 起点ノードからのBFSで各ノードにlevel(世代/距離)を割り当て、同じlevel内では列(column)で
- * 横に並べてX/Y座標を確定する汎用ロジック。#970: 相関図の各コンポーネントが個別に持っていた
- * 円形/登録順配置を、関係性に基づく配置へ統一するための共通処理。
+ * 起点ノードからのBFSで各ノードにlevel(世代/距離)を割り当て、X/Y座標を確定する汎用ロジック。
+ * #970: 相関図の各コンポーネントが個別に持っていた円形/登録順配置を、関係性に基づく配置へ統一する。
+ * さらに、同じlevelの兄弟ノードが多い場合（例: 子会社が数十社ある企業）は複数行に折り返し、
+ * 1行に並べてfitViewが極端に縮小される問題を避ける（#970フォローアップ）。
  * neighborsOf は、あるノードIDから見た隣接ノードと世代差分(delta)の一覧を返す関数。
  * 有向関係（資本関係の親→子など）はdeltaで向きを表し、無向関係（取引関係など）は常に+1にする。
  * 起点から辿り着けないノード（別の連結成分）はlevel 0として扱う。
@@ -149,16 +157,33 @@ function layoutFromFocus(
     nodesByLevel.get(level)!.push(id)
   }
 
+  // level の昇順（親方向の負値→起点0→子方向の正値）に、折り返しで使った行数分だけ
+  // 縦位置を積み上げていく。折り返しが発生したlevelは複数行分の高さを消費するため、
+  // 固定間隔ではなく累積オフセットで次levelの開始Y座標を決める。
+  const sortedLevels = Array.from(nodesByLevel.keys()).sort((a, b) => a - b)
   const positions = new Map<number, CapitalGraphPosition>()
-  for (const [level, ids] of nodesByLevel.entries()) {
-    ids.forEach((id, column) => {
+  let y = 0
+  for (const level of sortedLevels) {
+    const ids = nodesByLevel.get(level)!
+    const rowCount = Math.max(1, Math.ceil(ids.length / MAX_NODES_PER_ROW))
+
+    ids.forEach((id, index) => {
+      const rowIndex = Math.floor(index / MAX_NODES_PER_ROW)
+      const rowStart = rowIndex * MAX_NODES_PER_ROW
+      const nodesInThisRow = Math.min(MAX_NODES_PER_ROW, ids.length - rowStart)
+      const indexInRow = index - rowStart
+      // 各行は起点(x=0)を中心に左右対称になるよう配置し、行ごとの企業数が違っても
+      // 上位levelのノードと視覚的に揃って見えるようにする。
+      const rowWidth = (nodesInThisRow - 1) * COLUMN_WIDTH
       positions.set(id, {
         level,
-        column,
-        x: column * COLUMN_WIDTH,
-        y: level * LEVEL_HEIGHT,
+        column: index,
+        x: indexInRow * COLUMN_WIDTH - rowWidth / 2,
+        y: y + rowIndex * WRAPPED_ROW_HEIGHT,
       })
     })
+
+    y += rowCount * WRAPPED_ROW_HEIGHT + LEVEL_GAP
   }
 
   return positions
