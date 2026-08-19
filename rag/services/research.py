@@ -132,7 +132,9 @@ def _domain_trust_score(domain: str, company_name: str) -> float:
     if not domain:
         return 0.5
     d = domain.lower()
-    cn = re.sub(r"[^a-z0-9]", "", company_name.lower())
+    # 日本語文字（ひらがな・カタカナ・漢字）も保持する（sanitize.py の許可文字集合と揃える）。
+    # そうしないと日本語企業名では cn が常に空文字列になり、公式ドメインの信頼度ブーストが機能しない。
+    cn = re.sub(r"[^0-9a-zぁ-んァ-ン一-龥ー々〆ヵヶ]", "", company_name.lower())
     # 高評価: 企業名がドメインに含まれる（公式サイトの可能性）
     if cn and cn in d:
         return 0.95

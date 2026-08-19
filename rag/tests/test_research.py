@@ -1,12 +1,33 @@
-"""run_deep_research のリトライロジックのテスト（#945）。
+"""services/research.py のテスト（Issue #942, #945）。
 
-メインリクエスト成功時はフォールバックを呼ばないこと、
-メイン失敗時はフォールバックを1回だけ試すこと、
-両方失敗した場合はフォールバックの例外が送出されることを検証する。
+- #942: 日本語企業名を正規化すると全文字が除去され、公式ドメインの信頼度ブースト
+  （0.95）が常に発火しないバグの再発防止。
+- #945: run_deep_research のリトライロジック。メインリクエスト成功時はフォールバックを
+  呼ばないこと、メイン失敗時はフォールバックを1回だけ試すこと、両方失敗した場合は
+  フォールバックの例外が送出されることを検証する。
 """
 from unittest.mock import MagicMock, patch
 
 import main
+
+
+def test_domain_trust_score_japanese_company_name_matches_domain():
+    """日本語企業名の正規化結果がドメインに含まれる場合は0.95になること。"""
+    score = main._domain_trust_score("www.テスト商事.co.jp", "テスト商事")
+    assert score == 0.95
+
+
+def test_domain_trust_score_ascii_company_name_matches_domain():
+    """ASCII企業名でのマッチングは引き続き0.95になること（回帰確認）。"""
+    score = main._domain_trust_score("toyota.co.jp", "Toyota")
+    assert score == 0.95
+
+
+def test_domain_trust_score_japanese_company_name_not_in_domain():
+    """日本語企業名がドメインに含まれない場合は0.95のブーストを受けないこと。"""
+    score = main._domain_trust_score("example.com", "テスト商事")
+    assert score != 0.95
+    assert score == 0.5
 
 
 def _make_response(text: str):
