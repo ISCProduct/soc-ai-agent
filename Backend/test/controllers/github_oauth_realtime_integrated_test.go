@@ -352,26 +352,24 @@ func newIntegratedProfileController(
 	return controllers.NewIntegratedProfileController(cf, sc, rd)
 }
 
-func TestIntegratedProfileController_GetProfile_MissingUserID(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/user/profile", nil)
+// user_idは認証済みユーザーID(EchoUserAuth経由のリクエストコンテキスト)から取得する。
+// 以前はクエリのuser_idを未検証で信頼しており、認証なしで任意ユーザーの
+// プロファイルを取得できた。
+
+func TestIntegratedProfileController_GetProfile_Unauthenticated(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/user/profile?user_id=1&session_id=sess-1", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newIntegratedProfileController(nil, nil, nil).GetProfile, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, newIntegratedProfileController(nil, nil, nil).GetProfile, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestIntegratedProfileController_GetProfile_MissingSessionID(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/user/profile?user_id=1", nil)
-	rec := httptest.NewRecorder()
-	assertStatus(t, newIntegratedProfileController(nil, nil, nil).GetProfile, newCtx(req, rec), http.StatusBadRequest)
-}
-
-func TestIntegratedProfileController_GetProfile_InvalidUserID(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/user/profile?user_id=abc&session_id=sess-1", nil)
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/user/profile", nil), 1)
 	rec := httptest.NewRecorder()
 	assertStatus(t, newIntegratedProfileController(nil, nil, nil).GetProfile, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestIntegratedProfileController_GetProfile_Success(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/user/profile?user_id=1&session_id=sess-abc", nil)
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/user/profile?session_id=sess-abc", nil), 1)
 	rec := httptest.NewRecorder()
 
 	cf := &mocks.CrossFeatureServiceMock{}
@@ -391,8 +389,25 @@ func TestIntegratedProfileController_GetProfile_Success(t *testing.T) {
 	rd.AssertExpectations(t)
 }
 
+// クエリのuser_idは無視され、認証済みユーザーIDが使われること。
+func TestIntegratedProfileController_GetProfile_IgnoresQueryUserID(t *testing.T) {
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/user/profile?user_id=999&session_id=sess-abc", nil), 1)
+	rec := httptest.NewRecorder()
+
+	cf := &mocks.CrossFeatureServiceMock{}
+	sc := &mocks.InterviewSessionCounterMock{}
+	rd := &mocks.ResumeDocumentFinderMock{}
+
+	sc.On("CountByUser", uint(1)).Return(int64(0), nil)
+	rd.On("FindDocumentsByUserID", uint(1)).Return([]models.ResumeDocument{}, nil)
+	cf.On("BuildIntegratedProfile", uint(1), "sess-abc", 0, false).Return(&flywheel.UserIntegratedProfile{UserID: 1}, nil)
+
+	assertStatus(t, newIntegratedProfileController(cf, sc, rd).GetProfile, newCtx(req, rec), http.StatusOK)
+	cf.AssertExpectations(t)
+}
+
 func TestIntegratedProfileController_GetProfile_ServiceError(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/user/profile?user_id=1&session_id=sess-abc", nil)
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/user/profile?session_id=sess-abc", nil), 1)
 	rec := httptest.NewRecorder()
 
 	cf := &mocks.CrossFeatureServiceMock{}

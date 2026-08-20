@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"Backend/internal/middleware"
+	"Backend/internal/services"
 
 	"github.com/labstack/echo/v4"
 )
@@ -65,6 +66,28 @@ func echoInternalError(err error) error {
 func echoUserID(c echo.Context) (uint, bool) {
 	userID, ok := c.Request().Context().Value(middleware.UserIDContextKey).(uint)
 	return userID, ok && userID != 0
+}
+
+// ensureAdminSchoolAccess は、対象リソースの学校ID(未割当ならnil)に対して、
+// 呼び出し元admin(担当校制限がある場合)がアクセスしてよいかを検証する共通ヘルパー
+// (#980/#981/#982/#984で同一ロジックが3コントローラーに重複していたのを統合)。
+// schoolsが未設定(呼び出し元でのDI漏れ)の場合はfail-closedで拒否する。
+func ensureAdminSchoolAccess(ctx echo.Context, schools *services.SchoolService, targetSchoolID *uint) error {
+	if schools == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "school access check is not configured")
+	}
+	adminUserID, ok := middleware.AdminUserIDFromContext(ctx.Request().Context())
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	allowed, err := schools.CanAdminAccessSchool(adminUserID, targetSchoolID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
+	}
+	if !allowed {
+		return echo.NewHTTPError(http.StatusForbidden, "school access denied")
+	}
+	return nil
 }
 
 // echoIntQuery はクエリパラメータを整数として取得し、取得できない場合はデフォルト値を返す。
