@@ -86,30 +86,22 @@ terraform destroy
 
 RDS は staging 既定で `skip_final_snapshot=true`。本番では変更すること。
 
-## 503 フェイルオーバー（staging 停止 / 起動前）
+## エラーページ（staging 停止 / 起動中）
 
-EC2 停止時や起動前は ALB が生の 503 を返す。以下の 2 段構成で OGP 付き HTML を返す。
+**現行方針:** CloudFront は使わず、**nginx edge のみ**で OGP 付き HTML を返す。
 
-| 状態 | 経路 | ページ |
-|------|------|--------|
-| EC2 停止・起動前（ALB ターゲット全滅） | Route53 PRIMARY(ALB) → SECONDARY(CloudFront+S3) | `service-unavailable.html` |
-| EC2 起動中（nginx は UP、frontend 未応答） | nginx edge の `error_page` | `service-starting.html` |
+| 状態 | 経路 | 表示 |
+|------|------|------|
+| EC2 停止（ALB ターゲット全滅） | ALB | **生 503**（意図的に許容） |
+| EC2 起動中（nginx UP、frontend 未応答） | nginx `error_page` | `service-starting.html`（OGP 付き） |
 
-### 有効化
-
-1. Terraform 実行 IAM に `iam-error-fallback-policy.json` を付与
-2. `terraform.tfvars` で `enable_error_fallback = true`
-3. `terraform apply`
+CloudFront+S3 フェイルオーバー用モジュール（`enable_error_fallback`）はコード上残しているが、当面 `false` のまま。
 
 ### 検証
 
 ```bash
 # ローカル: 静的 HTML の OGP タグ
 bash infra/scripts/verify-error-pages.sh
-
-# staging 停止中
-curl -sI https://stg.shukatsu-ai.jp/interview | head
-curl -s https://stg.shukatsu-ai.jp/interview | grep -E 'og:title|接続できません'
 
 # 起動直後（EC2 は UP、frontend 起動待ち）
 curl -s https://stg.shukatsu-ai.jp/ | grep -E 'og:title|起動'
