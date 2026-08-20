@@ -219,7 +219,25 @@ export const authService = {
       headers: this.getUserFetchHeaders(),
     })
     if (!res.ok) throw new Error(await extractErrorMessage(res, 'ユーザー情報の取得に失敗しました。'))
-    return res.json()
+    const data = await res.json()
+    // is_admin 付与後の再ログインなしでも管理者トークンを同期する (#857)
+    if (data.token) {
+      getSessionStorage()?.setItem(AUTH_TOKEN_KEY, data.token)
+      getLocalStorage()?.setItem(AUTH_TOKEN_KEY, data.token)
+    }
+    return {
+      user_id: typeof data.user_id === 'string' ? Number(data.user_id) : data.user_id,
+      email: data.email,
+      name: fixMojibake(data.name),
+      is_guest: data.is_guest,
+      target_level: data.target_level,
+      school_name: data.school_name,
+      is_admin: data.is_admin,
+      certifications_acquired: data.certifications_acquired,
+      certifications_in_progress: data.certifications_in_progress,
+      oauth_provider: data.oauth_provider,
+      avatar_url: data.avatar_url,
+    }
   },
 
   async updateProfile(

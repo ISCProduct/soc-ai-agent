@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"Backend/internal/models"
+	"Backend/internal/util"
 
 	"gorm.io/gorm"
 )
@@ -37,13 +38,27 @@ func (r *SchoolRepository) FindByID(id uint) (*models.School, error) {
 
 func (r *SchoolRepository) FindByName(name string) (*models.School, error) {
 	var school models.School
-	if err := r.db.Where("name = ?", name).First(&school).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
+	if err := r.db.Where("name = ?", name).First(&school).Error; err == nil {
+		return &school, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-	return &school, nil
+
+	normalized := util.NormalizeSchoolName(name)
+	if normalized == "" {
+		return nil, nil
+	}
+
+	var schools []models.School
+	if err := r.db.Where("status = ?", models.SchoolStatusActive).Find(&schools).Error; err != nil {
+		return nil, err
+	}
+	for i := range schools {
+		if util.NormalizeSchoolName(schools[i].Name) == normalized {
+			return &schools[i], nil
+		}
+	}
+	return nil, nil
 }
 
 func (r *SchoolRepository) List(limit, offset int) ([]models.School, int64, error) {

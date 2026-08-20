@@ -22,7 +22,7 @@ func (s *AuthService) GetUser(userID uint) (*AuthResponse, error) {
 		return nil, errors.New("user not found")
 	}
 
-	return &AuthResponse{
+	resp := &AuthResponse{
 		UserID:                   user.ID,
 		Email:                    user.Email,
 		Name:                     user.Name,
@@ -34,7 +34,9 @@ func (s *AuthService) GetUser(userID uint) (*AuthResponse, error) {
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
 		OAuthProvider:            user.OAuthProvider,
-	}, nil
+	}
+	s.attachAuthTokens(resp, user, false)
+	return resp, nil
 }
 
 // UpdateProfile ユーザープロフィール更新
@@ -70,7 +72,7 @@ func (s *AuthService) UpdateProfile(req UpdateProfileRequest) (*AuthResponse, er
 		return nil, fmt.Errorf("failed to update user: %w", err)
 	}
 
-	return &AuthResponse{
+	resp := &AuthResponse{
 		UserID:                   user.ID,
 		Email:                    user.Email,
 		Name:                     user.Name,
@@ -81,7 +83,9 @@ func (s *AuthService) UpdateProfile(req UpdateProfileRequest) (*AuthResponse, er
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
-	}, nil
+	}
+	s.attachAuthTokens(resp, user, false)
+	return resp, nil
 }
 
 // RequestPasswordReset パスワードリセットメールを送信
