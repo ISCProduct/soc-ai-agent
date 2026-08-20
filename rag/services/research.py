@@ -65,7 +65,7 @@ def run_deep_research(company_name: str, job_title: str) -> str:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is required")
     model = os.getenv("OPENAI_DEEP_RESEARCH_MODEL", "o3-deep-research")
     fallback_model = os.getenv("OPENAI_DEEP_RESEARCH_FALLBACK_MODEL", "").strip()
-    client = m.OpenAI(api_key=api_key)
+    client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
     if not hasattr(client, "responses"):
         raise HTTPException(
             status_code=500,
@@ -244,7 +244,7 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
     # LLM からの生成を試みる
     if api_key:
         try:
-            client = m.OpenAI(api_key=api_key)
+            client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
             prompt = (
                 "以下の企業と職種について、採用情報を調査するための検索クエリを3〜5個生成してください。\n\n"
                 "企業名: {company}\n"
@@ -287,7 +287,7 @@ def _web_search_openai(query: str) -> str:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return ""
-    client = m.OpenAI(api_key=api_key)
+    client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
     try:
         response = client.chat.completions.create(
             model=m.WEB_SEARCH_MODEL,
@@ -311,7 +311,7 @@ def _summarize_for_hiring(company_name: str, job_title: str, raw_texts: List[str
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return "\n\n".join(raw_texts)
-    client = m.OpenAI(api_key=api_key)
+    client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
     safe_company = _sanitize_company_name_for_query(company_name)
     role_text = _sanitize_job_title(job_title) if job_title else "一般職"
     combined = "\n\n---\n\n".join(raw_texts)[:6000]

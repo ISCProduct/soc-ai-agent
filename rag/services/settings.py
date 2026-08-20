@@ -8,6 +8,11 @@ DEFAULT_MAX_EMBED_TOKENS = 8191
 DEFAULT_EMBED_MAX_RETRIES = 3
 DEFAULT_HINTS_PARSE_MAX_TOKENS = 600
 DEFAULT_RESUME_REVIEW_INPUT_CHAR_LIMIT = 10000
+# #996: embeddings経路(langchain_runtime.py)は既にRAG_OPENAI_TIMEOUT_SEC経由で
+# タイムアウトを設定済みだったが、chat.completions.create/responses.create系
+# (research.py/es_review.py/hints.py/resume.py)は未設定でOpenAI側の応答が
+# 極端に遅延するとハングしうる状態だった。同じ環境変数・既定値で統一する。
+DEFAULT_OPENAI_TIMEOUT_SEC = 60.0
 
 DEFAULT_WEB_SEARCH_MODEL = "gpt-4o-search-preview"
 DEFAULT_SEARCH_LOG_DIR = "/app/search_logs"
@@ -23,6 +28,7 @@ STRICT_DEEP_RESEARCH = os.getenv("RAG_DEEP_RESEARCH_STRICT", "false").lower() ==
 CREWAI_VERBOSE = os.getenv("RAG_CREWAI_VERBOSE", "false").lower() == "true"
 MAX_EMBED_TOKENS = int(os.getenv("RAG_MAX_EMBED_TOKENS", str(DEFAULT_MAX_EMBED_TOKENS)))
 EMBED_MAX_RETRIES = int(os.getenv("RAG_EMBED_MAX_RETRIES", str(DEFAULT_EMBED_MAX_RETRIES)))
+OPENAI_TIMEOUT_SEC = float(os.getenv("RAG_OPENAI_TIMEOUT_SEC", str(DEFAULT_OPENAI_TIMEOUT_SEC)))
 HINTS_PARSE_MAX_TOKENS = int(os.getenv("RAG_HINTS_PARSE_MAX_TOKENS", str(DEFAULT_HINTS_PARSE_MAX_TOKENS)))
 RESUME_REVIEW_INPUT_CHAR_LIMIT = int(
     os.getenv("RAG_REVIEW_RESUME_CHAR_LIMIT", str(DEFAULT_RESUME_REVIEW_INPUT_CHAR_LIMIT)))

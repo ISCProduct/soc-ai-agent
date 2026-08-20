@@ -12,6 +12,7 @@ from openai import OpenAI
 
 from models import ReviewRequest, ReviewResponse
 from services.sanitize import _sanitize_company_name_for_query, _sanitize_job_title, _wrap_untrusted_text
+from services.settings import OPENAI_TIMEOUT_SEC
 
 logger = logging.getLogger("main")
 
@@ -77,7 +78,7 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
         )
 
         try:
-            client = OpenAI(api_key=api_key)
+            client = OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT_SEC)
             stream = client.chat.completions.create(
                 model=model,
                 messages=[

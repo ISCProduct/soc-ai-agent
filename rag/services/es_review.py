@@ -25,7 +25,7 @@ def _run_es_review(
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is required")
-    client = m.OpenAI(api_key=api_key)
+    client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
     model = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o")
     has_company = bool(company_name.strip())
     context_text = "\n\n".join(context_docs) if context_docs else ""

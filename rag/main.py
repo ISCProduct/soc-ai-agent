@@ -84,6 +84,7 @@ from services.settings import (  # noqa: F401 — re-export; patches target main
     HINTS_PARSE_MAX_TOKENS,
     INTERNAL_TOKEN_HEADER,
     MAX_EMBED_TOKENS,
+    OPENAI_TIMEOUT_SEC,
     RESUME_REVIEW_INPUT_CHAR_LIMIT,
     SEARCH_LOG_DIR,
     STRICT_DEEP_RESEARCH,
