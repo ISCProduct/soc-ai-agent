@@ -83,8 +83,8 @@ func (s *AuthService) SetSchoolRepo(repo repository.SchoolRepository) {
 	s.schoolRepo = repo
 }
 
-// resolveSchoolID は school_name が既存の学校名と完全一致した場合にのみ school_id を返す(ベストエフォート)。
-// 一致しない・未設定・エラー時は nil を返し、呼び出し側の処理を止めない。
+// resolveSchoolID は school_name から school_id をベストエフォートで解決する。
+// 完全一致のあと正規化した表記ゆれでも照合する。一致しない・未設定・エラー時は nil。
 func (s *AuthService) resolveSchoolID(schoolName string) *uint {
 	if s.schoolRepo == nil || schoolName == "" {
 		return nil

@@ -470,3 +470,41 @@ def test_delete_company_documents_keeps_punctuation_variant():
     assert "plain" in store
     assert store["plain"]["company_hash"] == hash_plain
 
+
+def test_get_index_status_scopes_by_company_hash():
+    vs.reset_chroma_client_for_tests()
+    hash_dotted = vs._company_hash("H.I.S.")
+    hash_plain = vs._company_hash("HIS")
+    collection = MagicMock()
+    collection.count.return_value = 2
+
+    def get_side_effect(**kwargs):
+        where = kwargs.get("where") or {}
+        wanted_hash = _where_value(where, "company_hash")
+        if wanted_hash == hash_dotted:
+            return {
+                "metadatas": [{
+                    "company": "HIS",
+                    "source": "web_search",
+                    "doc_type": "company_research",
+                    "fetched_at": "2026-01-01T00:00:00+00:00",
+                }],
+                "ids": ["dotted"],
+            }
+        return {"metadatas": [], "ids": []}
+
+    collection.get.side_effect = get_side_effect
+    col_obj = MagicMock()
+    col_obj.name = vs.COLLECTION_COMPANY_CONTEXT
+    client = MagicMock()
+    client.list_collections.return_value = [col_obj]
+    client.get_collection.return_value = collection
+
+    with patch.object(vs, "get_chroma_client", return_value=client):
+        status = vs.get_index_status("HIS", company_original="H.I.S.")
+
+    info = status["collections"][0]
+    assert info["company_count"] == 1
+    assert info["sources"] == ["web_search"]
+    assert hash_dotted != hash_plain
+

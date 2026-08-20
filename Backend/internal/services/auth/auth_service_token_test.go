@@ -24,7 +24,12 @@ func (r *userRepoAuthStub) GetUserByEmail(email string) (*entity.User, error) {
 	}
 	return nil, nil
 }
-func (r *userRepoAuthStub) GetUserByID(id uint) (*entity.User, error) { return nil, nil }
+func (r *userRepoAuthStub) GetUserByID(id uint) (*entity.User, error) {
+	if r.user != nil && r.user.ID == id {
+		return r.user, nil
+	}
+	return nil, nil
+}
 func (r *userRepoAuthStub) ListUsers() ([]entity.User, error)         { return nil, nil }
 func (r *userRepoAuthStub) ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
 	return nil, 0, nil
@@ -85,5 +90,31 @@ func TestAuthServiceLoginUsesUserSecretForUserToken(t *testing.T) {
 	}
 	if middleware.VerifyUserToken(resp.UserToken, user.ID, user.Email, os.Getenv("ADMIN_SECRET")) {
 		t.Fatal("user token must not verify with ADMIN_SECRET")
+	}
+}
+
+func TestAuthServiceGetUserIssuesAdminToken(t *testing.T) {
+	t.Setenv("ADMIN_SECRET", "admin-secret")
+	t.Setenv("USER_SECRET", "user-secret")
+
+	user := &entity.User{
+		ID:      7,
+		Email:   "admin@example.com",
+		Name:    "Admin",
+		IsAdmin: true,
+	}
+	repo := &userRepoAuthStub{}
+	repo.user = user
+	service := NewAuthService(repo, &pendingRepoAuthStub{}, nil)
+
+	resp, err := service.GetUser(user.ID)
+	if err != nil {
+		t.Fatalf("GetUser failed: %v", err)
+	}
+	if resp.Token == "" {
+		t.Fatal("admin token should be issued on GetUser")
+	}
+	if !middleware.VerifyAdminToken(resp.Token, user.ID, user.Email, os.Getenv("ADMIN_SECRET")) {
+		t.Fatal("admin token should verify")
 	}
 }

@@ -161,7 +161,7 @@ class TestConstraintsCommentConsistency:
             if in_litellm_section and line.strip().startswith("#"):
                 assert "crewai の推移的依存" not in line, (
                     f"litellm コメントに古い 'crewai の推移的依存' が残っている: {line.strip()!r}。"
-                    "crewai は除外済みのため 'langchain-community の推移的依存' に更新すること。"
+                    "crewai は除外済みのため更新すること。"
                 )
 
 
@@ -173,7 +173,6 @@ class TestLangchainInRequirements:
             "langchain",
             "langchain-core",
             "langchain-openai",
-            "langchain-community",
             "langchain-text-splitters",
         ]
         for pkg in required:
@@ -181,6 +180,25 @@ class TestLangchainInRequirements:
             assert spec is not None, f"requirements.txt に {pkg} が無い。LangChain 導入を反映すること。"
             con = _parse_version_spec(_CONSTRAINTS_TXT, pkg)
             assert con is not None, f"constraints.txt に {pkg} が無い"
+
+    def test_langchain_major_version_is_1x(self):
+        """requirements と constraints の langchain 系下限が 1.x である。"""
+        for pkg in ("langchain", "langchain-core", "langchain-openai", "langchain-text-splitters"):
+            lower = _extract_lower_bound(_REQUIREMENTS_TXT, pkg)
+            assert lower is not None, f"requirements.txt に {pkg} の下限が無い"
+            assert Version(lower) >= Version("1.0"), (
+                f"{pkg} の下限 {lower} が 1.x 未満。LangChain 1.x 移行 (#894) を反映すること。"
+            )
+            req_upper = _extract_upper_bound(_REQUIREMENTS_TXT, pkg)
+            con_upper = _extract_upper_bound(_CONSTRAINTS_TXT, pkg)
+            assert req_upper == con_upper, (
+                f"{pkg}: requirements (<{req_upper}) と constraints (<{con_upper}) の上限不一致"
+            )
+
+    def test_langchain_community_not_listed(self):
+        """未使用の langchain-community は requirements から削除済み。"""
+        assert _parse_version_spec(_REQUIREMENTS_TXT, "langchain-community") is None
+        assert _parse_version_spec(_CONSTRAINTS_TXT, "langchain-community") is None
 
 
 # ── Frontend: package.json バージョン整合性 ────────────────────────────────

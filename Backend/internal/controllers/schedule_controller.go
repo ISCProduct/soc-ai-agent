@@ -2,10 +2,12 @@ package controllers
 
 import (
 	"Backend/internal/services/interfaces"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"gorm.io/gorm"
 )
 
 type ScheduleController struct {
@@ -53,6 +55,9 @@ func (c *ScheduleController) Create(ctx echo.Context) error {
 	}
 	event, err := c.service.Create(userID, req.CompanyName, req.Stage, req.Title, scheduledAt, req.Notes)
 	if err != nil {
+		if mapped := mapScheduleServiceError(err); mapped != nil {
+			return mapped
+		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return ctx.JSON(http.StatusCreated, event)
@@ -101,8 +106,8 @@ func (c *ScheduleController) Update(ctx echo.Context) error {
 	}
 	event, err := c.service.Update(userID, eventID, req.CompanyName, req.Stage, req.Title, scheduledAt, req.Notes)
 	if err != nil {
-		if err.Error() == "forbidden" {
-			return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
+		if mapped := mapScheduleServiceError(err); mapped != nil {
+			return mapped
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -152,4 +157,17 @@ func echoScheduleUserID(ctx echo.Context) (uint, error) {
 		return 0, echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 	return userID, nil
+}
+
+func mapScheduleServiceError(err error) *echo.HTTPError {
+	if err == nil {
+		return nil
+	}
+	if err.Error() == "forbidden" {
+		return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return echo.NewHTTPError(http.StatusNotFound, "not found")
+	}
+	return nil
 }

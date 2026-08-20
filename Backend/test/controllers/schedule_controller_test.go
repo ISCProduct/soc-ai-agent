@@ -22,6 +22,7 @@ import (
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
+	"gorm.io/gorm"
 )
 
 func newScheduleController(svc *mocks.ScheduleServiceMock) *controllers.ScheduleController {
@@ -212,6 +213,26 @@ func TestScheduleController_Update_Forbidden(t *testing.T) {
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
 	assertStatus(t, newScheduleController(svc).Update, ctx, http.StatusForbidden)
+	svc.AssertExpectations(t)
+}
+
+func TestScheduleController_Update_NotFound(t *testing.T) {
+	svc := &mocks.ScheduleServiceMock{}
+	scheduledAt, _ := time.Parse(time.RFC3339, "2025-01-01T10:00:00Z")
+	svc.On("Update", uint(1), uint(99), "Test Co", "", "", scheduledAt, "").
+		Return(nil, gorm.ErrRecordNotFound)
+
+	body, _ := json.Marshal(map[string]string{
+		"company_name": "Test Co",
+		"scheduled_at": "2025-01-01T10:00:00Z",
+	})
+	req := withUserID(httptest.NewRequest(http.MethodPut, "/api/schedule/99", bytes.NewReader(body)), 1)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	ctx := newCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("99")
+	assertStatus(t, newScheduleController(svc).Update, ctx, http.StatusNotFound)
 	svc.AssertExpectations(t)
 }
 

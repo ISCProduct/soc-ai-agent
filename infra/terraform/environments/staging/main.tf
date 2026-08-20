@@ -127,8 +127,9 @@ module "alb" {
   tags                       = local.tags
 }
 
-# ALB ターゲット全滅時（EC2停止等）に Route53 がフェイルオーバーする OGP 付き静的エラーページ
-# ponytail: cloudfront:Create* 権限が無い環境では enable_error_fallback=false のまま
+# ALB ターゲット全滅時用の CloudFront+S3 フェイルオーバー（任意）。
+# 現行運用は nginx edge のみ。停止時は ALB 生 503 を許容する（#827）。
+# ponytail: cloudfront:* IAM とコストのため enable_error_fallback=false のまま
 module "error_fallback" {
   count  = var.enable_error_fallback ? 1 : 0
   source = "../../modules/error_fallback"
@@ -298,6 +299,7 @@ resource "aws_launch_template" "app" {
     token_encryption_key     = random_id.token_encryption_key.hex
     edge_nginx_conf          = file("${path.module}/../../../nginx/staging-edge.conf")
     service_unavailable_html = file("${path.module}/../../../static/service-unavailable.html")
+    service_starting_html    = file("${path.module}/../../../static/service-starting.html")
   }))
 
   tag_specifications {
