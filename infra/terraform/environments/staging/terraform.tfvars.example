@@ -23,6 +23,7 @@ frontend_image = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:s
 # enable_ssh = true
 # allowed_ssh_cidrs = ["x.x.x.x/32"]
 
-# EC2 停止時(ALB 503)に CloudFront+S3 の OGP 付きエラーページへ Route53 フェイルオーバー (#827)
-# 初回 apply 前に iam-error-fallback-policy.json を Terraform 実行 IAM に付与すること
-enable_error_fallback = true
+# CloudFront+S3 フェイルオーバーは当面使わない（#827）。
+# 起動中の OGP 付き HTML は nginx edge（service-starting.html）で返す。
+# EC2 停止中は ALB 生 503 のまま。後から有効化する場合のみ true。
+# enable_error_fallback = false
