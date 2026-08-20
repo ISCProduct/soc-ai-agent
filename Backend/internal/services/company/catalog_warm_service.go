@@ -3,6 +3,7 @@ package company
 import (
 	"Backend/domain/repository"
 	"Backend/internal/companyfetch"
+	"Backend/internal/config"
 	"context"
 	"fmt"
 	"log"
@@ -10,11 +11,15 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+
+	"golang.org/x/sync/errgroup"
 )
 
 const (
-	defaultL1WarmLimit = 100
-	maxL1WarmLimit     = 300
+	defaultL1WarmLimit       = 100
+	maxL1WarmLimit           = 300
+	defaultL1WarmConcurrency = 4
 )
 
 // CatalogWarmService はマッチング用 L1 カタログ（基本情報 + WeightProfile）を温存する。
@@ -57,6 +62,8 @@ type L1WarmOptions struct {
 	Force          bool `json:"force"`
 	IncludeInfo    bool `json:"include_info"`
 	IncludePersona bool `json:"include_persona"`
+	// Concurrency は同時に処理する企業数（未指定時は defaultL1WarmConcurrency）。
+	Concurrency int `json:"concurrency"`
 }
 
 // L1WarmItem は 1 社分の処理結果。
@@ -74,16 +81,17 @@ type L1WarmItem struct {
 
 // L1WarmResult はバッチ全体の結果。
 type L1WarmResult struct {
-	DryRun     bool         `json:"dry_run"`
-	Limit      int          `json:"limit"`
-	CandidateN int          `json:"candidate_count"`
-	Processed  int          `json:"processed"`
-	InfoOK     int          `json:"info_ok"`
-	PersonaOK  int          `json:"persona_ok"`
-	Skipped    int          `json:"skipped"`
-	Errors     int          `json:"errors"`
-	Items      []L1WarmItem `json:"items"`
-	Coverage   *L1Coverage  `json:"coverage,omitempty"`
+	DryRun      bool         `json:"dry_run"`
+	Limit       int          `json:"limit"`
+	Concurrency int          `json:"concurrency"`
+	CandidateN  int          `json:"candidate_count"`
+	Processed   int          `json:"processed"`
+	InfoOK      int          `json:"info_ok"`
+	PersonaOK   int          `json:"persona_ok"`
+	Skipped     int          `json:"skipped"`
+	Errors      int          `json:"errors"`
+	Items       []L1WarmItem `json:"items"`
+	Coverage    *L1Coverage  `json:"coverage,omitempty"`
 }
 
 // Coverage は公開企業の L1 充足率を返す。
@@ -147,11 +155,13 @@ func (s *CatalogWarmService) WarmL1(ctx context.Context, opts L1WarmOptions) (*L
 		scored = scored[:opts.Limit]
 	}
 
+	concurrency := clampL1WarmConcurrency(opts.Concurrency)
 	result := &L1WarmResult{
-		DryRun:     opts.DryRun,
-		Limit:      opts.Limit,
-		CandidateN: len(scored),
-		Items:      scored,
+		DryRun:      opts.DryRun,
+		Limit:       opts.Limit,
+		Concurrency: concurrency,
+		CandidateN:  len(scored),
+		Items:       scored,
 	}
 	if opts.DryRun {
 		cov, _ := s.Coverage(ctx)
@@ -159,53 +169,94 @@ func (s *CatalogWarmService) WarmL1(ctx context.Context, opts L1WarmOptions) (*L
 		return result, nil
 	}
 
+	// 企業ごとにgbizinfo/OpenAIへの外部呼び出しを伴うため、直列だと100社で長時間化する。
+	// company_missing_batch_service.go と同じerrgroupパターンで企業間を並列化する
+	// （1社内のinfo/personaは依存が無いためそのまま直列で構わない）。
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(concurrency)
+	var mu sync.Mutex
+
 	for i := range result.Items {
 		item := &result.Items[i]
-		if err := ctx.Err(); err != nil {
-			item.Error = err.Error()
-			result.Errors++
-			break
-		}
-		result.Processed++
-		if item.NeedInfo {
-			if s.infoFetcher == nil {
-				item.InfoStatus = "skipped_no_fetcher"
-				result.Skipped++
-			} else if _, err := s.infoFetcher.FetchAndSave(ctx, item.CompanyID, opts.Force); err != nil {
-				item.InfoStatus = "error"
+		g.Go(func() error {
+			if err := gctx.Err(); err != nil {
+				mu.Lock()
 				item.Error = err.Error()
 				result.Errors++
-				log.Printf("warm_l1: info failed id=%d: %v", item.CompanyID, err)
-			} else {
-				item.InfoStatus = "ok"
-				result.InfoOK++
+				mu.Unlock()
+				return nil
 			}
-		}
-		if item.NeedPersona {
-			if s.jobFetcher == nil {
-				item.PersonaStatus = "skipped_no_fetcher"
-				result.Skipped++
-			} else if _, err := s.jobFetcher.FetchAndSavePersona(ctx, item.CompanyID, opts.Force); err != nil {
-				item.PersonaStatus = "error"
-				if item.Error == "" {
-					item.Error = err.Error()
-				}
-				result.Errors++
-				log.Printf("warm_l1: persona failed id=%d: %v", item.CompanyID, err)
-			} else {
-				item.PersonaStatus = "ok"
-				result.PersonaOK++
-			}
-		}
+			mu.Lock()
+			result.Processed++
+			mu.Unlock()
+			s.processItem(gctx, item, opts.Force, result, &mu)
+			return nil
+		})
 	}
+	_ = g.Wait()
 
 	cov, _ := s.Coverage(ctx)
 	result.Coverage = cov
 	log.Printf(
-		"warm_l1: processed=%d info_ok=%d persona_ok=%d errors=%d",
-		result.Processed, result.InfoOK, result.PersonaOK, result.Errors,
+		"warm_l1: concurrency=%d processed=%d info_ok=%d persona_ok=%d errors=%d",
+		concurrency, result.Processed, result.InfoOK, result.PersonaOK, result.Errors,
 	)
 	return result, nil
+}
+
+func (s *CatalogWarmService) processItem(ctx context.Context, item *L1WarmItem, force bool, result *L1WarmResult, mu *sync.Mutex) {
+	if item.NeedInfo {
+		if s.infoFetcher == nil {
+			mu.Lock()
+			item.InfoStatus = "skipped_no_fetcher"
+			result.Skipped++
+			mu.Unlock()
+		} else if _, err := s.infoFetcher.FetchAndSave(ctx, item.CompanyID, force); err != nil {
+			mu.Lock()
+			item.InfoStatus = "error"
+			item.Error = err.Error()
+			result.Errors++
+			mu.Unlock()
+			log.Printf("warm_l1: info failed id=%d: %v", item.CompanyID, err)
+		} else {
+			mu.Lock()
+			item.InfoStatus = "ok"
+			result.InfoOK++
+			mu.Unlock()
+		}
+	}
+	if item.NeedPersona {
+		if s.jobFetcher == nil {
+			mu.Lock()
+			item.PersonaStatus = "skipped_no_fetcher"
+			result.Skipped++
+			mu.Unlock()
+		} else if _, err := s.jobFetcher.FetchAndSavePersona(ctx, item.CompanyID, force); err != nil {
+			mu.Lock()
+			item.PersonaStatus = "error"
+			if item.Error == "" {
+				item.Error = err.Error()
+			}
+			result.Errors++
+			mu.Unlock()
+			log.Printf("warm_l1: persona failed id=%d: %v", item.CompanyID, err)
+		} else {
+			mu.Lock()
+			item.PersonaStatus = "ok"
+			result.PersonaOK++
+			mu.Unlock()
+		}
+	}
+}
+
+func clampL1WarmConcurrency(n int) int {
+	if n <= 0 {
+		return defaultL1WarmConcurrency
+	}
+	if maxC := config.MissingBatchMaxConcurrency(); n > maxC {
+		return maxC
+	}
+	return n
 }
 
 func normalizeL1WarmOptions(opts L1WarmOptions) L1WarmOptions {
