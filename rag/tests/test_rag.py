@@ -96,6 +96,23 @@ class TestEmbedTexts:
         assert result == [[0.5]]
         assert mock_emb.embed_documents.call_count == 2
 
+    def test_retry_wait_is_capped(self):
+        """#994: 指数バックオフの待機時間が上限(5秒)で頭打ちになること
+        (スレッドプール専有時間を抑えるため)。上限なしなら2**5=32秒になるはずの
+        6回目の待機が5秒に切り詰められることを確認する。"""
+        p, _mock_emb = self._patch_embeddings(
+            embed_documents_side_effect=[Exception(f"e{i}") for i in range(6)] + [[[0.5]]],
+        )
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
+            with p:
+                with patch("main.EMBED_MAX_RETRIES", 7):
+                    with patch("time.sleep") as mock_sleep:
+                        main.embed_texts(["test"])
+
+        waits = [call.args[0] for call in mock_sleep.call_args_list]
+        assert waits == [1, 2, 4, 5, 5, 5]  # 2**0..2**5(1,2,4,8,16,32)のうち8以降は5に頭打ち
+        assert all(w <= 5 for w in waits)
+
     def test_raises_after_max_retries(self):
         p, mock_emb = self._patch_embeddings(
             embed_documents_side_effect=Exception("persistent error"),

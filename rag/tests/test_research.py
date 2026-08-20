@@ -32,11 +32,12 @@ def test_domain_trust_score_japanese_company_name_not_in_domain():
     assert score == 0.5
 
 
-def _make_response(text: str) -> MagicMock:
+def _make_response(text: str, status: str = "completed") -> MagicMock:
     resp = MagicMock()
     resp.output_text = text
     resp.choices = None
     resp.output = None
+    resp.status = status
     return resp
 
 
@@ -89,6 +90,24 @@ def test_run_deep_research_falls_back_once_on_empty_primary_response(monkeypatch
     second_call_kwargs = mock_client.responses.create.call_args_list[1].kwargs
     assert second_call_kwargs["model"] == "gpt-4o"
     assert "tools" not in second_call_kwargs
+
+
+def test_run_deep_research_falls_back_once_on_truncated_primary_response(monkeypatch):
+    """#992: max_output_tokensで打ち切られた応答(status=incomplete)は、
+    出力テキストが非空でも成功扱いにせずフォールバックすること。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("OPENAI_DEEP_RESEARCH_FALLBACK_MODEL", "gpt-4o")
+    mock_client = MagicMock()
+    mock_client.responses.create.side_effect = [
+        _make_response("途中で切れたレポート...", status="incomplete"),
+        _make_response("フォールバック結果", status="completed"),
+    ]
+
+    with patch("main.OpenAI", return_value=mock_client):
+        result = main.run_deep_research("テスト社", "エンジニア")
+
+    assert result == "フォールバック結果"
+    assert mock_client.responses.create.call_count == 2
 
 
 def test_run_deep_research_raises_fallback_error_when_both_fail(monkeypatch):

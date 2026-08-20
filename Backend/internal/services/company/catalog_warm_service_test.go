@@ -1,6 +1,7 @@
 package company
 
 import (
+	"Backend/internal/config"
 	"Backend/internal/models"
 	"context"
 	"testing"
@@ -95,6 +96,69 @@ func TestWarmL1_DryRunOrdersSIFirst(t *testing.T) {
 	}
 	if res.Items[0].CompanyID != 2 {
 		t.Fatalf("first=%d want SI company 2", res.Items[0].CompanyID)
+	}
+}
+
+// #warm-l1-parallel: WarmL1が並列(errgroup)で全候補を処理し、concurrencyを
+// レスポンスへ反映すること。fetcherがnilのケースで並列処理そのもの(集計・
+// mutex排他)を検証する(company_missing_batch_service_testと同じ手法)。
+func TestWarmL1_RunsInParallelWithNilFetchers(t *testing.T) {
+	rows := make([]models.CompanyL1WarmRow, 8)
+	for i := range rows {
+		rows[i] = models.CompanyL1WarmRow{
+			Company:          models.Company{ID: uint(i + 1), Name: "社", Industry: "製造"},
+			HasWeightProfile: false,
+		}
+	}
+	repo := &warmRepoStub{
+		rows:  rows,
+		stats: &models.L1CoverageStats{PublishedTotal: 8, NeedsWarm: 8},
+	}
+	svc := NewCatalogWarmService(repo, nil, nil)
+
+	result, err := svc.WarmL1(context.Background(), L1WarmOptions{
+		Limit:          8,
+		IncludeInfo:    true,
+		IncludePersona: true,
+		Concurrency:    4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Concurrency != 4 {
+		t.Fatalf("concurrency=%d want 4", result.Concurrency)
+	}
+	if result.Processed != 8 {
+		t.Fatalf("processed=%d want 8", result.Processed)
+	}
+	// info/persona 双方 skipped_no_fetcher = 1社あたり2件
+	if result.Skipped != 16 {
+		t.Fatalf("skipped=%d want 16 (nil fetchers)", result.Skipped)
+	}
+	for _, item := range result.Items {
+		if item.InfoStatus != "skipped_no_fetcher" || item.PersonaStatus != "skipped_no_fetcher" {
+			t.Fatalf("company=%d info=%q persona=%q", item.CompanyID, item.InfoStatus, item.PersonaStatus)
+		}
+	}
+}
+
+func TestClampL1WarmConcurrency(t *testing.T) {
+	tests := []struct {
+		name string
+		in   int
+		want int
+	}{
+		{"未指定はデフォルト", 0, defaultL1WarmConcurrency},
+		{"範囲内はそのまま", 3, 3},
+		{"上限でクランプ", 100, config.MissingBatchMaxConcurrency()},
+		{"負数はデフォルト", -1, defaultL1WarmConcurrency},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clampL1WarmConcurrency(tt.in); got != tt.want {
+				t.Fatalf("%d -> %d want %d", tt.in, got, tt.want)
+			}
+		})
 	}
 }
 

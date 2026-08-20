@@ -104,6 +104,31 @@ func (s *SchoolService) ResolveAdminAccess(userID uint) (restricted bool, school
 	return true, ids, nil
 }
 
+// CanAdminAccessSchool は、対象リソースの学校ID(未割当ならnil)に対して指定の管理者が
+// アクセスしてよいかを判定する。無制限admin(担当校未割当)は常にtrue。担当校ありの
+// 制限adminは、対象のtargetSchoolIDがnilの場合および担当校一覧に含まれない場合はfalseを
+// 返す(fail-closed)。Update/Delete/詳細取得など、school_idクエリパラメータを介さず
+// パスパラメータで単一リソースを直接指定するエンドポイントで、対象リソースをロードした後に
+// 呼び出すことを想定する(#980/#981/#982/#984)。
+func (s *SchoolService) CanAdminAccessSchool(adminUserID uint, targetSchoolID *uint) (bool, error) {
+	restricted, allowedSchoolIDs, err := s.ResolveAdminAccess(adminUserID)
+	if err != nil {
+		return false, err
+	}
+	if !restricted {
+		return true, nil
+	}
+	if targetSchoolID == nil {
+		return false, nil
+	}
+	for _, id := range allowedSchoolIDs {
+		if id == *targetSchoolID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // ListAccessibleSchools は管理者がフィルタUIで選べる学校一覧を返す。
 // 担当校がある管理者にはその学校群を、無制限(未割当)管理者には全学校を返す。
 func (s *SchoolService) ListAccessibleSchools(userID uint) (restricted bool, schools []models.School, err error) {

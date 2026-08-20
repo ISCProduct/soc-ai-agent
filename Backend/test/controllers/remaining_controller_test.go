@@ -11,7 +11,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"Backend/domain/entity"
 	"Backend/internal/controllers"
+	"Backend/internal/models"
+	"Backend/internal/services"
+	"Backend/test/controllers/mocks"
+
+	"github.com/stretchr/testify/mock"
 )
 
 // ---- AdminCrawlController ----
@@ -55,6 +61,75 @@ func TestAdminInterviewController_VideoURL_InvalidID(t *testing.T) {
 	assertStatus(t, c.VideoURL, ctx, http.StatusBadRequest)
 }
 
+// #982: school scope制限のあるadminは、担当校外のユーザーのセッション動画一覧を取得できない(403)。
+func TestAdminInterviewController_ListVideos_SchoolAccessDenied(t *testing.T) {
+	c := controllers.NewAdminInterviewController(nil, nil, nil)
+	otherSchoolID := uint(99)
+	sessionRepo := &mocks.InterviewSessionRepositoryMock{}
+	sessionRepo.On("FindByID", uint(5)).Return(&models.InterviewSession{ID: 5, UserID: 3}, nil)
+	userRepo := &mocks.UserRepositoryMock{}
+	userRepo.On("GetUserByID", uint(3)).Return(&entity.User{Email: "u3@example.com", SchoolID: &otherSchoolID}, nil)
+	schoolRepo := &mocks.SchoolRepositoryMock{}
+	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
+	c.SetSchoolAccess(userRepo, sessionRepo, services.NewSchoolService(schoolRepo))
+
+	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/interview/sessions/5/videos", nil), 42)
+	rec := httptest.NewRecorder()
+	ctx := newCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("5")
+	assertStatus(t, c.ListVideos, ctx, http.StatusForbidden)
+	sessionRepo.AssertExpectations(t)
+	userRepo.AssertExpectations(t)
+}
+
+// #982: 担当校が一致すればセッション動画一覧を取得できる。
+func TestAdminInterviewController_ListVideos_SchoolAccessAllowed(t *testing.T) {
+	videoRepo := &mocks.InterviewVideoRepositoryMock{}
+	c := controllers.NewAdminInterviewController(nil, videoRepo, nil)
+	ownSchoolID := uint(1)
+	sessionRepo := &mocks.InterviewSessionRepositoryMock{}
+	sessionRepo.On("FindByID", uint(5)).Return(&models.InterviewSession{ID: 5, UserID: 3}, nil)
+	userRepo := &mocks.UserRepositoryMock{}
+	userRepo.On("GetUserByID", uint(3)).Return(&entity.User{Email: "u3@example.com", SchoolID: &ownSchoolID}, nil)
+	schoolRepo := &mocks.SchoolRepositoryMock{}
+	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
+	c.SetSchoolAccess(userRepo, sessionRepo, services.NewSchoolService(schoolRepo))
+	videoRepo.On("FindBySessionID", mock.Anything, uint(5)).Return([]models.InterviewVideo{}, nil)
+
+	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/interview/sessions/5/videos", nil), 42)
+	rec := httptest.NewRecorder()
+	ctx := newCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("5")
+	assertStatus(t, c.ListVideos, ctx, http.StatusOK)
+	sessionRepo.AssertExpectations(t)
+	userRepo.AssertExpectations(t)
+	videoRepo.AssertExpectations(t)
+}
+
+// #982: school scope制限のあるadminは、担当校外のユーザーの動画URLを取得できない(403)。
+func TestAdminInterviewController_VideoURL_SchoolAccessDenied(t *testing.T) {
+	videoRepo := &mocks.InterviewVideoRepositoryMock{}
+	c := controllers.NewAdminInterviewController(nil, videoRepo, nil)
+	otherSchoolID := uint(99)
+	videoRepo.On("FindByID", mock.Anything, uint(7)).Return(&models.InterviewVideo{ID: 7, UserID: 3, Status: "done", DriveFileID: "f1"}, nil)
+	userRepo := &mocks.UserRepositoryMock{}
+	userRepo.On("GetUserByID", uint(3)).Return(&entity.User{Email: "u3@example.com", SchoolID: &otherSchoolID}, nil)
+	schoolRepo := &mocks.SchoolRepositoryMock{}
+	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
+	c.SetSchoolAccess(userRepo, nil, services.NewSchoolService(schoolRepo))
+
+	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/interview/videos/7/url", nil), 42)
+	rec := httptest.NewRecorder()
+	ctx := newCtx(req, rec)
+	ctx.SetParamNames("video_id")
+	ctx.SetParamValues("7")
+	assertStatus(t, c.VideoURL, ctx, http.StatusForbidden)
+	videoRepo.AssertExpectations(t)
+	userRepo.AssertExpectations(t)
+}
+
 // ---- QuestionController ----
 
 func TestQuestionController_GenerateQuestions_MissingCategory(t *testing.T) {
@@ -83,56 +158,58 @@ func TestQuestionController_GetQuestionsByCategory_MissingCategory(t *testing.T)
 }
 
 // ---- ScheduleController ----
+// #983: 認証済みユーザーIDはリクエストコンテキスト(EchoUserAuth経由)から取得するため、
+// 未認証(コンテキストにユーザーIDが無い)場合は401を返す。
 
-func TestScheduleController_List_MissingUserID(t *testing.T) {
+func TestScheduleController_List_Unauthenticated(t *testing.T) {
 	c := controllers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/schedules", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.List, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, c.List, newCtx(req, rec), http.StatusUnauthorized)
 }
 
-func TestScheduleController_Create_MissingUserID(t *testing.T) {
+func TestScheduleController_Create_Unauthenticated(t *testing.T) {
 	c := controllers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/schedules", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.Create, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, c.Create, newCtx(req, rec), http.StatusUnauthorized)
 }
 
-func TestScheduleController_Get_MissingUserID(t *testing.T) {
+func TestScheduleController_Get_Unauthenticated(t *testing.T) {
 	c := controllers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/schedules/1", nil)
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, c.Get, ctx, http.StatusBadRequest)
+	assertStatus(t, c.Get, ctx, http.StatusUnauthorized)
 }
 
-func TestScheduleController_Update_MissingUserID(t *testing.T) {
+func TestScheduleController_Update_Unauthenticated(t *testing.T) {
 	c := controllers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodPut, "/api/schedules/1", nil)
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, c.Update, ctx, http.StatusBadRequest)
+	assertStatus(t, c.Update, ctx, http.StatusUnauthorized)
 }
 
-func TestScheduleController_Delete_MissingUserID(t *testing.T) {
+func TestScheduleController_Delete_Unauthenticated(t *testing.T) {
 	c := controllers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodDelete, "/api/schedules/1", nil)
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, c.Delete, ctx, http.StatusBadRequest)
+	assertStatus(t, c.Delete, ctx, http.StatusUnauthorized)
 }
 
-func TestScheduleController_ExportICS_MissingUserID(t *testing.T) {
+func TestScheduleController_ExportICS_Unauthenticated(t *testing.T) {
 	c := controllers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/schedules/export.ics", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.ExportICS, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, c.ExportICS, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 // ---- CompanyEntryController ----

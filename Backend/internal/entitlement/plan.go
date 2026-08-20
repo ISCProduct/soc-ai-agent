@@ -3,6 +3,7 @@ package entitlement
 import (
 	"os"
 	"strings"
+	"time"
 )
 
 type PlanID string
@@ -49,6 +50,23 @@ func CurrentPlan() PlanID {
 		return PlanStandard
 	default:
 		return PlanPro
+	}
+}
+
+// PlanForOrganization は組織のplan文字列と契約終了日から適用プランを決定する(#985)。
+// 契約終了日が過去の場合、またはplan文字列が不正/未設定の場合は安全側のFreeにフォールバックする
+// (グローバル環境変数DEFAULT_PLAN基準だと、契約が切れた組織でも機能が使え続けてしまっていた)。
+func PlanForOrganization(planStr string, contractEndDate *time.Time) PlanID {
+	if contractEndDate != nil && contractEndDate.Before(time.Now()) {
+		return PlanFree
+	}
+	switch strings.ToLower(strings.TrimSpace(planStr)) {
+	case "standard":
+		return PlanStandard
+	case "pro":
+		return PlanPro
+	default:
+		return PlanFree
 	}
 }
 

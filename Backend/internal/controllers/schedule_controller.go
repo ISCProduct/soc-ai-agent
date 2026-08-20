@@ -3,7 +3,6 @@ package controllers
 import (
 	"Backend/internal/services/interfaces"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -25,11 +24,11 @@ type scheduleRequest struct {
 	Notes       string `json:"notes"`
 }
 
-// List GET /api/schedule?user_id=X
+// List GET /api/schedule
 func (c *ScheduleController) List(ctx echo.Context) error {
 	userID, err := echoScheduleUserID(ctx)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	events, err := c.service.List(userID)
 	if err != nil {
@@ -38,11 +37,11 @@ func (c *ScheduleController) List(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, events)
 }
 
-// Create POST /api/schedule?user_id=X
+// Create POST /api/schedule
 func (c *ScheduleController) Create(ctx echo.Context) error {
 	userID, err := echoScheduleUserID(ctx)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	var req scheduleRequest
 	if err := ctx.Bind(&req); err != nil {
@@ -59,11 +58,11 @@ func (c *ScheduleController) Create(ctx echo.Context) error {
 	return ctx.JSON(http.StatusCreated, event)
 }
 
-// Get GET /api/schedule/:id?user_id=X
+// Get GET /api/schedule/:id
 func (c *ScheduleController) Get(ctx echo.Context) error {
 	userID, err := echoScheduleUserID(ctx)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	eventID, err := echoUintParam(ctx, "id")
 	if err != nil {
@@ -79,11 +78,11 @@ func (c *ScheduleController) Get(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, event)
 }
 
-// Update PUT /api/schedule/:id?user_id=X
+// Update PUT /api/schedule/:id
 func (c *ScheduleController) Update(ctx echo.Context) error {
 	userID, err := echoScheduleUserID(ctx)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	eventID, err := echoUintParam(ctx, "id")
 	if err != nil {
@@ -110,11 +109,11 @@ func (c *ScheduleController) Update(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, event)
 }
 
-// Delete DELETE /api/schedule/:id?user_id=X
+// Delete DELETE /api/schedule/:id
 func (c *ScheduleController) Delete(ctx echo.Context) error {
 	userID, err := echoScheduleUserID(ctx)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	eventID, err := echoUintParam(ctx, "id")
 	if err != nil {
@@ -129,11 +128,11 @@ func (c *ScheduleController) Delete(ctx echo.Context) error {
 	return ctx.NoContent(http.StatusNoContent)
 }
 
-// ExportICS GET /api/schedule/export/ics?user_id=X
+// ExportICS GET /api/schedule/export/ics
 func (c *ScheduleController) ExportICS(ctx echo.Context) error {
 	userID, err := echoScheduleUserID(ctx)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	ics, err := c.service.ExportICS(userID)
 	if err != nil {
@@ -144,15 +143,13 @@ func (c *ScheduleController) ExportICS(ctx echo.Context) error {
 	return ctx.String(http.StatusOK, ics)
 }
 
-// echoScheduleUserID はクエリパラメータ user_id をユーザーIDとして取得する。
+// echoScheduleUserID は認証済みユーザーID(JWT検証済み、EchoUserAuth経由)を取得する。
+// クライアント指定のuser_idクエリパラメータは信用しない(#983: 以前はここが未検証で
+// 任意ユーザーの予定にアクセスできた)。
 func echoScheduleUserID(ctx echo.Context) (uint, error) {
-	userIDStr := ctx.QueryParam("user_id")
-	if userIDStr == "" {
-		return 0, echo.NewHTTPError(http.StatusBadRequest, "user_id is required")
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return 0, echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	id, err := strconv.ParseUint(userIDStr, 10, 64)
-	if err != nil {
-		return 0, echo.NewHTTPError(http.StatusBadRequest, "invalid user_id")
-	}
-	return uint(id), nil
+	return userID, nil
 }
