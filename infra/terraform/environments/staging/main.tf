@@ -298,6 +298,7 @@ resource "aws_launch_template" "app" {
     token_encryption_key     = random_id.token_encryption_key.hex
     edge_nginx_conf          = file("${path.module}/../../../nginx/staging-edge.conf")
     service_unavailable_html = file("${path.module}/../../../static/service-unavailable.html")
+    service_starting_html    = file("${path.module}/../../../static/service-starting.html")
   }))
 
   tag_specifications {
