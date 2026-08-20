@@ -5,6 +5,7 @@ import (
 	"Backend/internal/entitlement"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
+	"Backend/internal/services"
 	ifaces "Backend/internal/services/interfaces"
 	"encoding/json"
 	"fmt"
@@ -20,6 +21,7 @@ type AdminDashboardController struct {
 	userRepo    repository.UserRepository
 	sessionRepo ifaces.DashboardSessionRepo
 	reportRepo  ifaces.DashboardReportRepo
+	schools     *services.SchoolService
 }
 
 func NewAdminDashboardController(
@@ -32,6 +34,11 @@ func NewAdminDashboardController(
 		sessionRepo: sessionRepo,
 		reportRepo:  reportRepo,
 	}
+}
+
+// SetSchoolService は担当校スコープの検証に使うサービスを設定する(#984)
+func (c *AdminDashboardController) SetSchoolService(schools *services.SchoolService) {
+	c.schools = schools
 }
 
 type UserScoreSummary struct {
@@ -198,6 +205,25 @@ func (c *AdminDashboardController) UserSessions(ctx echo.Context) error {
 	var userID uint
 	if _, err := fmt.Sscanf(ctx.Param("id"), "%d", &userID); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid user id")
+	}
+
+	if c.schools == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "school access check is not configured")
+	}
+	target, err := c.userRepo.GetUserByID(userID)
+	if err != nil || target == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "user not found")
+	}
+	adminUserID, ok := middleware.AdminUserIDFromContext(ctx.Request().Context())
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	allowed, err := c.schools.CanAdminAccessSchool(adminUserID, target.SchoolID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
+	}
+	if !allowed {
+		return echo.NewHTTPError(http.StatusForbidden, "school access denied")
 	}
 
 	sessionIDs, err := c.sessionRepo.ListFinishedSessionIDsByUser(userID)

@@ -16,6 +16,7 @@ import (
 	"Backend/internal/controllers"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
+	"Backend/internal/services"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
@@ -44,26 +45,32 @@ func TestAdminDashboardController_UserSessions_InvalidID(t *testing.T) {
 }
 
 func TestAdminDashboardController_UserSessions_SessionRepoError(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/1/sessions", nil)
+	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/1/sessions", nil), 42)
 	rec := httptest.NewRecorder()
 	c := newCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
 
+	userRepo := &mocks.UserRepositoryMock{}
+	userRepo.On("GetUserByID", uint(1)).Return(&entity.User{Email: "user@example.com"}, nil)
 	sessRepo := &mocks.DashboardSessionRepoMock{}
 	sessRepo.On("ListFinishedSessionIDsByUser", uint(1)).Return([]uint{}, errors.New("db error"))
-	assertStatus(t, newAdminDashboardController(nil, sessRepo, nil).UserSessions, c, http.StatusInternalServerError)
+	ctrl := newAdminDashboardController(userRepo, sessRepo, nil)
+	ctrl.SetSchoolService(newUnrestrictedSchoolService(42))
+	assertStatus(t, ctrl.UserSessions, c, http.StatusInternalServerError)
 	sessRepo.AssertExpectations(t)
 }
 
 func TestAdminDashboardController_UserSessions_Success(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/2/sessions", nil)
+	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/2/sessions", nil), 42)
 	rec := httptest.NewRecorder()
 	c := newCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("2")
 
 	now := time.Now()
+	userRepo := &mocks.UserRepositoryMock{}
+	userRepo.On("GetUserByID", uint(2)).Return(&entity.User{Email: "user2@example.com"}, nil)
 	sessRepo := &mocks.DashboardSessionRepoMock{}
 	repRepo := &mocks.DashboardReportRepoMock{}
 	sessRepo.On("ListFinishedSessionIDsByUser", uint(2)).Return([]uint{10, 11}, nil)
@@ -75,7 +82,9 @@ func TestAdminDashboardController_UserSessions_Success(t *testing.T) {
 		{ID: 11, EndedAt: &now},
 	}, nil)
 
-	assertStatus(t, newAdminDashboardController(nil, sessRepo, repRepo).UserSessions, c, http.StatusOK)
+	ctrl := newAdminDashboardController(userRepo, sessRepo, repRepo)
+	ctrl.SetSchoolService(newUnrestrictedSchoolService(42))
+	assertStatus(t, ctrl.UserSessions, c, http.StatusOK)
 
 	var body map[string]any
 	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
@@ -84,18 +93,42 @@ func TestAdminDashboardController_UserSessions_Success(t *testing.T) {
 	repRepo.AssertExpectations(t)
 }
 
-func TestAdminDashboardController_UserSessions_ReportRepoError(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/3/sessions", nil)
+// #984: school scope制限のあるadminは、担当校外のユーザーのセッションを閲覧できない(403)。
+func TestAdminDashboardController_UserSessions_SchoolAccessDenied(t *testing.T) {
+	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/3/sessions", nil), 42)
 	rec := httptest.NewRecorder()
 	c := newCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("3")
 
+	otherSchoolID := uint(99)
+	userRepo := &mocks.UserRepositoryMock{}
+	userRepo.On("GetUserByID", uint(3)).Return(&entity.User{Email: "user3@example.com", SchoolID: &otherSchoolID}, nil)
+	schoolRepo := &mocks.SchoolRepositoryMock{}
+	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
+
+	ctrl := newAdminDashboardController(userRepo, nil, nil)
+	ctrl.SetSchoolService(services.NewSchoolService(schoolRepo))
+	assertStatus(t, ctrl.UserSessions, c, http.StatusForbidden)
+	userRepo.AssertExpectations(t)
+}
+
+func TestAdminDashboardController_UserSessions_ReportRepoError(t *testing.T) {
+	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/3/sessions", nil), 42)
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("3")
+
+	userRepo := &mocks.UserRepositoryMock{}
+	userRepo.On("GetUserByID", uint(3)).Return(&entity.User{Email: "user3@example.com"}, nil)
 	sessRepo := &mocks.DashboardSessionRepoMock{}
 	repRepo := &mocks.DashboardReportRepoMock{}
 	sessRepo.On("ListFinishedSessionIDsByUser", uint(3)).Return([]uint{20}, nil)
 	repRepo.On("FindBySessionIDs", []uint{20}).Return([]models.InterviewReport{}, errors.New("db error"))
-	assertStatus(t, newAdminDashboardController(nil, sessRepo, repRepo).UserSessions, c, http.StatusInternalServerError)
+	ctrl := newAdminDashboardController(userRepo, sessRepo, repRepo)
+	ctrl.SetSchoolService(newUnrestrictedSchoolService(42))
+	assertStatus(t, ctrl.UserSessions, c, http.StatusInternalServerError)
 }
 
 // ---- ListUsers ----

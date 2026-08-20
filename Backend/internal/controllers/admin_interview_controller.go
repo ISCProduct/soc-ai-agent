@@ -5,6 +5,7 @@ import (
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/services"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/interview"
 	"Backend/internal/services/storage"
@@ -29,6 +30,9 @@ type AdminInterviewController struct {
 	companyRepo         repository.CompanyRepository
 	openaiClient        *openai.Client
 	access              auth.UserAccessGuard
+	userRepo            repository.UserRepository
+	sessionRepo         repository.InterviewSessionRepository
+	schools             *services.SchoolService
 }
 
 func NewAdminInterviewController(
@@ -51,6 +55,37 @@ func (c *AdminInterviewController) SetCompanyQuestionRepo(r repository.Interview
 // SetCompanyRepo 企業リポジトリを注入する
 func (c *AdminInterviewController) SetCompanyRepo(r repository.CompanyRepository) {
 	c.companyRepo = r
+}
+
+// SetSchoolAccess は担当校スコープの検証に使うリポジトリ/サービスを設定する(#982)
+func (c *AdminInterviewController) SetSchoolAccess(userRepo repository.UserRepository, sessionRepo repository.InterviewSessionRepository, schools *services.SchoolService) {
+	c.userRepo = userRepo
+	c.sessionRepo = sessionRepo
+	c.schools = schools
+}
+
+// ensureSchoolAccessForUser は動画/セッションの所有ユーザーが、呼び出し元admin(担当校制限が
+// ある場合)の担当校に属するかを検証する。userRepo/schoolsが未設定の場合はfail-closedで拒否する。
+func (c *AdminInterviewController) ensureSchoolAccessForUser(ctx echo.Context, ownerUserID uint) error {
+	if c.userRepo == nil || c.schools == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "school access check is not configured")
+	}
+	adminUserID, ok := middleware.AdminUserIDFromContext(ctx.Request().Context())
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	owner, err := c.userRepo.GetUserByID(ownerUserID)
+	if err != nil || owner == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "user not found")
+	}
+	allowed, err := c.schools.CanAdminAccessSchool(adminUserID, owner.SchoolID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
+	}
+	if !allowed {
+		return echo.NewHTTPError(http.StatusForbidden, "school access denied")
+	}
+	return nil
 }
 
 // SetOpenAIClient OpenAIクライアントを注入する
@@ -363,6 +398,17 @@ func (c *AdminInterviewController) ListVideos(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
 	}
 
+	if c.sessionRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "school access check is not configured")
+	}
+	session, err := c.sessionRepo.FindByID(uint(sessionID))
+	if err != nil || session == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	if err := c.ensureSchoolAccessForUser(ctx, session.UserID); err != nil {
+		return err
+	}
+
 	videos, err := c.videoRepo.FindBySessionID(ctx.Request().Context(), uint(sessionID))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch videos")
@@ -384,6 +430,10 @@ func (c *AdminInterviewController) VideoURL(ctx echo.Context) error {
 	video, err := c.videoRepo.FindByID(ctx.Request().Context(), uint(videoID))
 	if err != nil || video == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "Video not found")
+	}
+
+	if err := c.ensureSchoolAccessForUser(ctx, video.UserID); err != nil {
+		return err
 	}
 
 	if video.Status != "done" || video.DriveFileID == "" {
