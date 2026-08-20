@@ -63,7 +63,8 @@ def mask_pii(text: str) -> str:
     text = re.sub(r"((?:氏名|名前|Name|Full ?Name)[:：])\s*[^\n,。;]+", r"\1 <PERSON>", text)
 
     # 日本語の名前+敬称（例: 山田太郎さん -> <PERSON>さん）
-    text = re.sub(r"([\u4E00-\u9FFF]{2,4})(さん|様|君|ちゃん)", r"<PERSON>\2", text)
+    # #993: 漢字のみを対象としており、カタカナ/ひらがな表記の氏名（例: タナカタロウさん、たなかたろうさん）を見逃していたため文字種を追加する。
+    text = re.sub(r"([\u3041-\u3096\u30A1-\u30FA\u4E00-\u9FFF\u30FC]{2,6})(さん|様|君|ちゃん)", r"<PERSON>\2", text)
 
     # 英語のフルネーム (例: John Doe) -> <PERSON>
     text = re.sub(r"\b[A-Z][a-z]{1,}(?:\s+[A-Z][a-z]{1,})+\b", "<PERSON>", text)
