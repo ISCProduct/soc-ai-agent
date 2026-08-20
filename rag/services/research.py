@@ -47,7 +47,7 @@ def extract_output_text(response) -> str:
     return "\n".join(parts).strip()
 
 
-def _is_incomplete_response(response) -> bool:
+def _is_incomplete_response(response: object) -> bool:
     """max_output_tokens等で打ち切られた応答かどうかを判定する(#992)。
 
     出力テキストが非空かどうかだけを見ると、途中で切れた不完全なレポートも

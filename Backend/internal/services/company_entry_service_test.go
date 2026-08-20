@@ -68,11 +68,13 @@ func TestClaimOwnershipOnRegister_NewOwnership(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO `company_ownerships`").
+		WithArgs(companyID, requestingUserID, "owner", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE `company_entry_submissions`").
+		WithArgs("claimed", sqlmock.AnyArg(), submissionID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 

@@ -8,7 +8,7 @@ from typing import List
 from fastapi import HTTPException
 
 from models import ESReviewResponse
-from services.sanitize import _wrap_untrusted_text
+from services.sanitize import _sanitize_company_name_for_query, _wrap_untrusted_text
 
 logger = logging.getLogger("main")
 
@@ -27,7 +27,10 @@ def _run_es_review(
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is required")
     client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
     model = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o")
+    # 呼び出し元(routers/es.py)で既にサニタイズ済みだが、本関数単体でも安全性を
+    # 保証するため防御的にもう一度サニタイズする(呼び出し元の実装変更に依存しない)。
     has_company = bool(company_name.strip())
+    safe_company_name = _sanitize_company_name_for_query(company_name) if has_company else ""
     context_text = "\n\n".join(context_docs) if context_docs else ""
     company_section = (
         f"\n\n【企業情報】\n{context_text[:2000]}" if context_text else ""
@@ -46,7 +49,7 @@ def _run_es_review(
     user_prompt = (
             f"【質問種別】{_wrap_untrusted_text(question_type, '質問種別')}\n"
             f"【ES文章】\n{_wrap_untrusted_text(es_text, 'ES文章')}"
-            + (f"\n\n【志望企業】{company_name}" if has_company else "")
+            + (f"\n\n【志望企業】{safe_company_name}" if has_company else "")
             + company_section
             + f"""
 

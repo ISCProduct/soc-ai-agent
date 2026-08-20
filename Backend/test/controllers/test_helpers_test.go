@@ -22,7 +22,6 @@ func withUserID(r *http.Request, userID uint) *http.Request {
 	return r.WithContext(ctx)
 }
 
-// withAdminUserID はリクエストコンテキストに認証済み管理者のuserIDを設定するヘルパー
 func withAdminUserID(r *http.Request, adminUserID uint) *http.Request {
 	ctx := context.WithValue(r.Context(), middleware.AdminUserIDContextKey, adminUserID)
 	return r.WithContext(ctx)

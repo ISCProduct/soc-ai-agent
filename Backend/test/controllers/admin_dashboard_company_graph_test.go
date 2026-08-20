@@ -17,6 +17,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"Backend/internal/services"
+	"Backend/internal/services/organization"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
@@ -178,6 +179,48 @@ func TestAdminDashboardController_ListUsers_SessionStatError(t *testing.T) {
 	userRepo.On("ListUsersPaged", 25, 0, "", mock.Anything).Return(users, int64(1), nil)
 	sessRepo.On("GetUserStatsBatch", []uint{1}).Return(nil, errors.New("db error"))
 	assertStatus(t, newAdminDashboardController(userRepo, sessRepo, nil).ListUsers, newCtx(req, rec), http.StatusInternalServerError)
+}
+
+// ---- ExportCSV / currentAdminPlan fail-closed (#985 CodeRabbit指摘) ----
+// 組織解決に失敗した場合、entitlement.CurrentPlan()(DEFAULT_PLAN未設定時はPlanPro)へ
+// フォールバックすると特権機能(CSVエクスポート)が一時障害で素通りしてしまうため、
+// fail-closed(PlanFree=export不可)であることを確認する。
+
+func TestAdminDashboardController_ExportCSV_AdminIDMissing_FailsClosed(t *testing.T) {
+	repo := &mocks.OrganizationRepositoryMock{}
+	ctrl := newAdminDashboardController(nil, nil, nil)
+	ctrl.SetOrganizationService(organization.NewOrganizationService(repo))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, ctrl.ExportCSV, newCtx(req, rec), http.StatusForbidden)
+}
+
+func TestAdminDashboardController_ExportCSV_OrgLookupError_FailsClosed(t *testing.T) {
+	repo := &mocks.OrganizationRepositoryMock{}
+	repo.On("FindMembershipByUserID", uint(42)).Return(nil, errors.New("db error"))
+	ctrl := newAdminDashboardController(nil, nil, nil)
+	ctrl.SetOrganizationService(organization.NewOrganizationService(repo))
+
+	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), 42)
+	rec := httptest.NewRecorder()
+	assertStatus(t, ctrl.ExportCSV, newCtx(req, rec), http.StatusForbidden)
+}
+
+func TestAdminDashboardController_ExportCSV_OrgUnassigned_UsesGlobalDefault(t *testing.T) {
+	orgRepo := &mocks.OrganizationRepositoryMock{}
+	orgRepo.On("FindMembershipByUserID", uint(42)).Return(nil, nil)
+	orgRepo.On("GetUserOrganizationID", uint(42)).Return(uint(0), nil)
+	userRepo := &mocks.UserRepositoryMock{}
+	userRepo.On("ListUsersPaged", 10000, 0, "", mock.Anything).Return([]entity.User{}, int64(0), errors.New("unrelated db error"))
+	ctrl := newAdminDashboardController(userRepo, nil, nil)
+	ctrl.SetOrganizationService(organization.NewOrganizationService(orgRepo))
+
+	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), 42)
+	rec := httptest.NewRecorder()
+	// orgID==0(プラットフォーム管理者)はCurrentPlan()(既定PlanPro)にフォールバックするため
+	// export自体は許可される(fail-closedで403にはならない)。以降はuserRepoのエラーで500。
+	assertStatus(t, ctrl.ExportCSV, newCtx(req, rec), http.StatusInternalServerError)
 }
 
 // ---- ExportCSV ----

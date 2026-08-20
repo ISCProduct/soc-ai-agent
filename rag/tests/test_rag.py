@@ -100,7 +100,7 @@ class TestEmbedTexts:
         """#994: 指数バックオフの待機時間が上限(5秒)で頭打ちになること
         (スレッドプール専有時間を抑えるため)。上限なしなら2**5=32秒になるはずの
         6回目の待機が5秒に切り詰められることを確認する。"""
-        p, mock_emb = self._patch_embeddings(
+        p, _mock_emb = self._patch_embeddings(
             embed_documents_side_effect=[Exception(f"e{i}") for i in range(6)] + [[[0.5]]],
         )
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):

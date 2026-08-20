@@ -9,6 +9,7 @@ import (
 	ifaces "Backend/internal/services/interfaces"
 	"Backend/internal/services/organization"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -51,22 +52,30 @@ func (c *AdminDashboardController) SetOrganizationService(orgs *organization.Org
 // currentAdminPlan は呼び出し元adminが所属する組織の契約プランを返す(#985)。
 // グローバル環境変数DEFAULT_PLAN基準だと、契約が切れた/標準プランの組織でも
 // pro相当の機能(CSVエクスポート等)が使え続けてしまっていた。
-// 組織が解決できない場合はCurrentPlan()(DEFAULT_PLAN)にフォールバックする。
+// 組織未所属(ErrOrganizationNotFound、プラットフォーム管理者)はCurrentPlan()(DEFAULT_PLAN)に
+// フォールバックするが、それ以外のエラー経路(DB障害等)はfail-closed(PlanFree)にする。
+// CurrentPlan()はDEFAULT_PLAN未設定時にPlanProを返すため、エラー経路でも
+// CurrentPlan()にフォールバックすると、組織解決の一時的な失敗でPro機能が
+// 素通りしてしまう(#985の意図を回避する経路になる)。
 func (c *AdminDashboardController) currentAdminPlan(ctx echo.Context) entitlement.PlanID {
 	if c.orgs == nil {
 		return entitlement.CurrentPlan()
 	}
 	adminUserID, ok := middleware.AdminUserIDFromContext(ctx.Request().Context())
 	if !ok {
-		return entitlement.CurrentPlan()
+		return entitlement.PlanFree
 	}
 	orgID, err := c.orgs.ResolveOrganizationID(adminUserID)
-	if err != nil || orgID == 0 {
+	if errors.Is(err, organization.ErrOrganizationNotFound) {
+		// 担当組織が無いプラットフォーム管理者は、既存動作どおりグローバル既定プランで判定する。
 		return entitlement.CurrentPlan()
+	}
+	if err != nil {
+		return entitlement.PlanFree
 	}
 	org, err := c.orgs.Get(orgID)
 	if err != nil || org == nil {
-		return entitlement.CurrentPlan()
+		return entitlement.PlanFree
 	}
 	return entitlement.PlanForOrganization(org.Plan, org.ContractEndDate)
 }
@@ -237,23 +246,12 @@ func (c *AdminDashboardController) UserSessions(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid user id")
 	}
 
-	if c.schools == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "school access check is not configured")
-	}
 	target, err := c.userRepo.GetUserByID(userID)
 	if err != nil || target == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "user not found")
 	}
-	adminUserID, ok := middleware.AdminUserIDFromContext(ctx.Request().Context())
-	if !ok {
-		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
-	}
-	allowed, err := c.schools.CanAdminAccessSchool(adminUserID, target.SchoolID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
-	}
-	if !allowed {
-		return echo.NewHTTPError(http.StatusForbidden, "school access denied")
+	if err := ensureAdminSchoolAccess(ctx, c.schools, target.SchoolID); err != nil {
+		return err
 	}
 
 	sessionIDs, err := c.sessionRepo.ListFinishedSessionIDsByUser(userID)

@@ -57,7 +57,7 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
     # #994: FastAPIの同期routeはStarletteのスレッドプール(既定サイズに上限あり)で
     # 実行されるため、ここのtime.sleepはイベントループ自体はブロックしないが、
     # OpenAI側が不安定な間に同時リクエストが多いとプールを専有し得る。
-    # ponytail: 最大待機時間を明示的に上限(MAX_RETRY_WAIT_SECONDS)で頭打ちにして
+    # 暫定対応として、最大待機時間を明示的に上限で頭打ちにして
     # 1リクエストあたりの専有時間を抑える運用でしのぐ。根本対応(非同期化)が必要に
     # なったら、embed_texts自体をasync defにしてasyncio.sleepへ切り替え、
     # 呼び出し元(company.py/cache.py等)もawaitするよう連鎖的に変更する。

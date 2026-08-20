@@ -50,21 +50,36 @@ def mask_pii(text: str) -> str:
     if not text:
         return text
 
-    # Emails
+    # メールアドレス
     text = re.sub(r"[\w\.-]+@[\w\.-]+\.[A-Za-z]{2,}", "<EMAIL>", text)
 
-    # URLs
+    # URL
     text = re.sub(r"https?://\S+", "<URL>", text)
 
-    # Phone numbers (simple heuristic: international +81 or sequences of digits with separators)
+    # 電話番号(簡易ヒューリスティック: 国際表記+81や区切り文字付きの数字列)
     text = re.sub(r"\+?\d[\d\-\s()]{6,}\d", "<PHONE>", text)
 
     # 名前フィールド: 氏名: 山田太郎 -> 氏名: <PERSON>
     text = re.sub(r"((?:氏名|名前|Name|Full ?Name)[:：])\s*[^\n,。;]+", r"\1 <PERSON>", text)
 
-    # 日本語の名前+敬称（例: 山田太郎さん -> <PERSON>さん）
-    # #993: 漢字のみを対象としており、カタカナ/ひらがな表記の氏名（例: タナカタロウさん、たなかたろうさん）を見逃していたため文字種を追加する。
-    text = re.sub(r"([\u3041-\u3096\u30A1-\u30FA\u4E00-\u9FFF\u30FC]{2,6})(さん|様|君|ちゃん)", r"<PERSON>\2", text)
+    # 日本語の名前+敬称（例: 山田太郎さん -> <PERSON>さん）。
+    # #993: 漢字のみを対象としており、カタカナ/ひらがな表記の氏名
+    # （例: タナカタロウさん、たなかたろうさん）を見逃していたため文字種を追加した。
+    #
+    # 文字種ごとに別パターンにする(1つの文字クラスに混在させない)。混在させると
+    # 「今日は田中さん」のように漢字とひらがな(助詞)が連続する箇所で「今日は田中」を
+    # まとめて氏名と誤認識し、学習データの本文が不可逆に失われる(#993フォローアップ)。
+    # 漢字のみ・カタカナのみの連続なら通常語境界と一致するため従来どおり許可する。
+    # ひらがなのみは助詞と紛れやすいため、直前が文頭/空白/句読点の場合に限定する
+    # (境界が無い箇所の氏名は検出漏れになりうるが、本文破壊より実害が小さい)。
+    text = re.sub(r"([\u4E00-\u9FFF]{2,4})(さん|様|君|ちゃん)", r"<PERSON>\2", text)
+    text = re.sub(r"([\u30A1-\u30FA\u30FC]{2,6})(さん|様|君|ちゃん)", r"<PERSON>\2", text)
+    _hiragana_boundary = r"(?:^|(?<=[\s\u3001\u3002\uff01\uff1f!?\u300c\u300d\u300e\u300f\uff08\uff09()\u30fb\n]))"
+    text = re.sub(
+        _hiragana_boundary + r"([\u3041-\u3096]{2,6})(さん|様|君|ちゃん)",
+        r"<PERSON>\2",
+        text,
+    )
 
     # 英語のフルネーム (例: John Doe) -> <PERSON>
     text = re.sub(r"\b[A-Z][a-z]{1,}(?:\s+[A-Z][a-z]{1,})+\b", "<PERSON>", text)
@@ -72,7 +87,7 @@ def mask_pii(text: str) -> str:
     # 単一の英語名（タイトルあり）: Dr. Smith -> Dr. <PERSON>
     text = re.sub(r"\b(Mr|Mrs|Ms|Dr|Prof)\.\s*[A-Z][a-z]+\b", lambda m: f"{m.group(1)}. <PERSON>", text)
 
-    # simple email-like tokens inside <>
+    # <>で囲まれたmailto形式のメールアドレス
     text = re.sub(r"<mailto:[^>]+>", "<EMAIL>", text)
 
     return text

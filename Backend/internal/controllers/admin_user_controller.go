@@ -41,23 +41,9 @@ func (c *AdminUserController) SetSchoolService(schools *services.SchoolService) 
 }
 
 // ensureSchoolAccess は、対象ユーザーが呼び出し元admin(担当校制限がある場合)の担当校に
-// 属するかを検証する。schoolsが未設定(呼び出し元でのDI漏れ)の場合はfail-closedで拒否する。
+// 属するかを検証する共通ヘルパーへの薄いラッパー。
 func (c *AdminUserController) ensureSchoolAccess(ctx echo.Context, target *entity.User) error {
-	if c.schools == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "school access check is not configured")
-	}
-	adminUserID, ok := middleware.AdminUserIDFromContext(ctx.Request().Context())
-	if !ok {
-		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
-	}
-	allowed, err := c.schools.CanAdminAccessSchool(adminUserID, target.SchoolID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
-	}
-	if !allowed {
-		return echo.NewHTTPError(http.StatusForbidden, "school access denied")
-	}
-	return nil
+	return ensureAdminSchoolAccess(ctx, c.schools, target.SchoolID)
 }
 
 type adminUserResponse struct {
