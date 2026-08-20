@@ -70,6 +70,12 @@ export async function middleware(request: NextRequest) {
   const refreshToken = request.cookies.get('refresh_token')?.value
 
   const requestHeaders = new Headers(request.headers)
+  // クライアントが直接送ってきた可能性のあるなりすましヘッダーを必ず除去してから、
+  // 以降で信頼できる情報源(httpOnly Cookie / サブドメイン解決)からのみ設定し直す。
+  // cookie不在やテナント未解決の場合にクライアント指定値がそのまま後段へ通過していた(#987)。
+  requestHeaders.delete('X-User-ID')
+  requestHeaders.delete('X-User-Token')
+  requestHeaders.delete('X-Tenant-Slug')
   let refreshed: RefreshedSession | null = null
 
   // 学園サブドメイン(<学園slug>.shukatsu-ai.jp)をBackendへ引き継ぐ

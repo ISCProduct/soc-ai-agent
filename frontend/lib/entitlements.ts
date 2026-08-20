@@ -13,9 +13,13 @@ export type Entitlements = {
   features: Partial<Record<FeatureKey, boolean>>
 }
 
+// #989: entitlements未取得/取得失敗時に機能を許可するfail-open実装は、
+// バックエンドが独立して同じ制限を課すため実データ漏洩には至らないものの、
+// UI上は本来無効な機能が一時的に有効表示されてしまっていた。fail-closedにし、
+// 明示的にtrueが返る場合のみ許可する。
 export function canUseFeature(ent: Entitlements | null, feature: FeatureKey): boolean {
-  if (!ent) return true
-  return ent.features[feature] !== false
+  if (!ent) return false
+  return ent.features[feature] === true
 }
 
 export async function fetchEntitlements(): Promise<Entitlements> {
