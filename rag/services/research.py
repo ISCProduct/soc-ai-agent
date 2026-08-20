@@ -47,6 +47,16 @@ def extract_output_text(response) -> str:
     return "\n".join(parts).strip()
 
 
+def _is_incomplete_response(response) -> bool:
+    """max_output_tokens等で打ち切られた応答かどうかを判定する(#992)。
+
+    出力テキストが非空かどうかだけを見ると、途中で切れた不完全なレポートも
+    「成功」と誤判定され、そのまま24hキャッシュされて配信され続けてしまう。
+    OpenAI Responses APIはstatus="incomplete"でこれを明示するので、それを見る。
+    """
+    return getattr(response, "status", None) == "incomplete"
+
+
 def run_deep_research(company_name: str, job_title: str) -> str:
     import main as m
 
@@ -87,11 +97,15 @@ def run_deep_research(company_name: str, job_title: str) -> str:
     try:
         response = request_response(True, model)
         output = extract_output_text(response)
-        logger.info("deep research finished chars=%d", len(output))
-        if output:
+        if output and not _is_incomplete_response(response):
+            logger.info("deep research finished chars=%d", len(output))
             return output
-        logger.warning("deep research returned empty result")
-        last_err = HTTPException(status_code=502, detail="Deep Research returned empty result")
+        if output:
+            logger.warning("deep research response truncated (incomplete), treating as failure chars=%d", len(output))
+            last_err = HTTPException(status_code=502, detail="Deep Research response was truncated")
+        else:
+            logger.warning("deep research returned empty result")
+            last_err = HTTPException(status_code=502, detail="Deep Research returned empty result")
     except Exception as exc:
         last_err = exc
         logger.warning("deep research failed error=%s", exc)
@@ -101,11 +115,17 @@ def run_deep_research(company_name: str, job_title: str) -> str:
     try:
         response = request_response(False, fallback_name)
         output = extract_output_text(response)
-        logger.info("deep research fallback finished chars=%d model=%s", len(output), fallback_name)
-        if output:
+        if output and not _is_incomplete_response(response):
+            logger.info("deep research fallback finished chars=%d model=%s", len(output), fallback_name)
             return output
-        logger.warning("deep research fallback returned empty result model=%s", fallback_name)
-        last_err = HTTPException(status_code=502, detail="Deep Research fallback returned empty result")
+        if output:
+            logger.warning(
+                "deep research fallback response truncated (incomplete) model=%s chars=%d", fallback_name, len(output)
+            )
+            last_err = HTTPException(status_code=502, detail="Deep Research fallback response was truncated")
+        else:
+            logger.warning("deep research fallback returned empty result model=%s", fallback_name)
+            last_err = HTTPException(status_code=502, detail="Deep Research fallback returned empty result")
     except Exception as fallback_exc:
         last_err = fallback_exc
         logger.warning("deep research fallback failed model=%s error=%s", fallback_name, fallback_exc)
