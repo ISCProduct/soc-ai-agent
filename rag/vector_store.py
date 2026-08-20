@@ -456,7 +456,10 @@ def delete_company_documents(
     return {"deleted": deleted_total, "collections": per_collection}
 
 
-def get_index_status(company: Optional[str] = None) -> Dict[str, Any]:
+def get_index_status(
+    company: Optional[str] = None,
+    company_original: Optional[str] = None,
+) -> Dict[str, Any]:
     """インデックス状況（コレクション件数・任意で企業フィルタ概要）を返す。"""
     client = get_chroma_client()
     existing = _collection_names(client)
@@ -470,16 +473,19 @@ def get_index_status(company: Optional[str] = None) -> Dict[str, Any]:
         collection = client.get_collection(name)
         info["count"] = collection.count()
         if company:
+            where = _build_where(
+                _company_filter({"company": company, "company_hash": _company_hash(company_original)})
+            )
             try:
                 try:
                     got = collection.get(
-                        where={"company": company},
+                        where=where,
                         include=["metadatas"],
                         limit=20,
                     )
                 except TypeError:
                     got = collection.get(
-                        where={"company": company},
+                        where=where,
                         include=["metadatas"],
                     )
                 metas = (got.get("metadatas") or [])[:20]

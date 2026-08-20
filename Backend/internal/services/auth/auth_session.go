@@ -3,7 +3,6 @@ package auth
 import (
 	"Backend/domain/entity"
 	"Backend/internal/config"
-	"Backend/internal/middleware"
 	"Backend/internal/services/refreshtoken"
 	"crypto/rand"
 	"encoding/base64"
@@ -114,17 +113,7 @@ func (s *AuthService) Login(req LoginRequest, tenantOrgID uint) (*AuthResponse, 
 		EmailVerified:            emailVerified,
 		RequiresReVerification:   requiresReVerification,
 	}
-	adminSecret := os.Getenv("ADMIN_SECRET")
-	userSecret := os.Getenv("USER_SECRET")
-	// 管理者ユーザーにはHMACトークンを付与する
-	if user.IsAdmin && adminSecret != "" {
-		resp.Token = middleware.GenerateAdminToken(user.ID, user.Email, adminSecret)
-	}
-	// 全ユーザーにユーザー認証トークンを付与する
-	if userSecret != "" {
-		resp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, userSecret)
-		resp.RefreshToken = s.issueRefreshToken(user.ID)
-	}
+	s.attachAuthTokens(resp, user, true)
 	return resp, nil
 }
 
@@ -164,11 +153,7 @@ func (s *AuthService) CreateGuestUser(tenantOrgID uint) (*AuthResponse, error) {
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
 	}
-	userSecret := os.Getenv("USER_SECRET")
-	if userSecret != "" {
-		resp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, userSecret)
-		resp.RefreshToken = s.issueRefreshToken(user.ID)
-	}
+	s.attachAuthTokens(resp, user, true)
 	return resp, nil
 }
 
@@ -196,15 +181,16 @@ func (s *AuthService) RefreshSession(refreshToken string) (*AuthResponse, error)
 		return nil, refreshtoken.ErrInvalidRefreshToken
 	}
 
-	return &AuthResponse{
+	resp := &AuthResponse{
 		UserID:       user.ID,
 		Email:        user.Email,
 		Name:         user.Name,
 		IsGuest:      user.IsGuest,
 		IsAdmin:      user.IsAdmin,
-		UserToken:    middleware.GenerateUserToken(user.ID, user.Email, userSecret),
 		RefreshToken: newRefreshToken,
-	}, nil
+	}
+	s.attachAuthTokens(resp, user, false)
+	return resp, nil
 }
 
 // LogoutSession はリフレッシュトークンを失効させる (#616)

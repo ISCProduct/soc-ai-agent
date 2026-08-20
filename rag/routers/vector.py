@@ -18,11 +18,10 @@ router = APIRouter()
 @router.get("/vector/status", response_model=VectorStatusResponse)
 def vector_status(company: Optional[str] = None) -> dict:
     """ベクトルDBのインデックス状況を返す（管理・監視用）。"""
-    company_filter = None
-    if company and company.strip():
-        company_filter = _sanitize_company_name_for_query(company)
+    company_original = company.strip() if company else None
+    company_filter = _sanitize_company_name_for_query(company_original) if company_original else None
     try:
-        return get_index_status(company_filter)
+        return get_index_status(company_filter, company_original=company_original)
     except Exception as exc:
         logger.exception("vector status failed error=%s", exc)
         raise HTTPException(status_code=503, detail=f"vector status failed: {exc}") from exc

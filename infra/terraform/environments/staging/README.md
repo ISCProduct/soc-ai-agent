@@ -86,6 +86,27 @@ terraform destroy
 
 RDS は staging 既定で `skip_final_snapshot=true`。本番では変更すること。
 
+## エラーページ（staging 停止 / 起動中）
+
+**現行方針:** CloudFront は使わず、**nginx edge のみ**で OGP 付き HTML を返す。
+
+| 状態 | 経路 | 表示 |
+|------|------|------|
+| EC2 停止（ALB ターゲット全滅） | ALB | **生 503**（意図的に許容） |
+| EC2 起動中（nginx UP、frontend 未応答） | nginx `error_page` | `service-starting.html`（OGP 付き） |
+
+CloudFront+S3 フェイルオーバー用モジュール（`enable_error_fallback`）はコード上残しているが、当面 `false` のまま。
+
+### 検証
+
+```bash
+# ローカル: 静的 HTML の OGP タグ
+bash infra/scripts/verify-error-pages.sh
+
+# 起動直後（EC2 は UP、frontend 起動待ち）
+curl -s https://stg.shukatsu-ai.jp/ | grep -E 'og:title|起動'
+```
+
 ## 注意
 
 - **既存本番 EC2 / RDS は触らない**（staging 新規作成）

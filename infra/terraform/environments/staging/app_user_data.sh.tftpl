@@ -31,6 +31,9 @@ NGINXEOF
 cat > /opt/app/nginx/static/service-unavailable.html <<'HTMLEOF'
 ${service_unavailable_html}
 HTMLEOF
+cat > /opt/app/nginx/static/service-starting.html <<'HTMLEOF'
+${service_starting_html}
+HTMLEOF
 
 mkdir -p /opt/app
 cat > /opt/app/.env <<EOF
