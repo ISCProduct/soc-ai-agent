@@ -7,6 +7,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/services"
 	ifaces "Backend/internal/services/interfaces"
+	"Backend/internal/services/organization"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -22,6 +23,7 @@ type AdminDashboardController struct {
 	sessionRepo ifaces.DashboardSessionRepo
 	reportRepo  ifaces.DashboardReportRepo
 	schools     *services.SchoolService
+	orgs        *organization.OrganizationService
 }
 
 func NewAdminDashboardController(
@@ -39,6 +41,34 @@ func NewAdminDashboardController(
 // SetSchoolService は担当校スコープの検証に使うサービスを設定する(#984)
 func (c *AdminDashboardController) SetSchoolService(schools *services.SchoolService) {
 	c.schools = schools
+}
+
+// SetOrganizationService はプラン判定(組織ごとのplan/contract_end_date)に使うサービスを設定する(#985)
+func (c *AdminDashboardController) SetOrganizationService(orgs *organization.OrganizationService) {
+	c.orgs = orgs
+}
+
+// currentAdminPlan は呼び出し元adminが所属する組織の契約プランを返す(#985)。
+// グローバル環境変数DEFAULT_PLAN基準だと、契約が切れた/標準プランの組織でも
+// pro相当の機能(CSVエクスポート等)が使え続けてしまっていた。
+// 組織が解決できない場合はCurrentPlan()(DEFAULT_PLAN)にフォールバックする。
+func (c *AdminDashboardController) currentAdminPlan(ctx echo.Context) entitlement.PlanID {
+	if c.orgs == nil {
+		return entitlement.CurrentPlan()
+	}
+	adminUserID, ok := middleware.AdminUserIDFromContext(ctx.Request().Context())
+	if !ok {
+		return entitlement.CurrentPlan()
+	}
+	orgID, err := c.orgs.ResolveOrganizationID(adminUserID)
+	if err != nil || orgID == 0 {
+		return entitlement.CurrentPlan()
+	}
+	org, err := c.orgs.Get(orgID)
+	if err != nil || org == nil {
+		return entitlement.CurrentPlan()
+	}
+	return entitlement.PlanForOrganization(org.Plan, org.ContractEndDate)
 }
 
 type UserScoreSummary struct {
@@ -261,7 +291,7 @@ func (c *AdminDashboardController) UserSessions(ctx echo.Context) error {
 
 // ExportCSV handles GET /api/admin/dashboard/export/csv
 func (c *AdminDashboardController) ExportCSV(ctx echo.Context) error {
-	if !entitlement.Can(entitlement.CurrentPlan(), entitlement.FeatureExport) {
+	if !entitlement.Can(c.currentAdminPlan(ctx), entitlement.FeatureExport) {
 		return echo.NewHTTPError(http.StatusForbidden, "plan_feature_required")
 	}
 	schoolID, _ := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())

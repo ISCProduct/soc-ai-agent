@@ -361,6 +361,14 @@ func (s *CompanyEntryService) ClaimOwnershipOnRegister(userID uint, companyID, s
 		log.Printf("[CompanyEntry] claim ownership failed company=%d user=%d: %v", *companyID, userID, err)
 		return
 	}
+	// #986: company_idにユニーク制約があるため、既に別ユーザーが所有している場合
+	// FirstOrCreateはエラーを返さず、その既存レコード(別ユーザーのUserID)を
+	// ownershipへ詰めて返す。この場合は所有権を取得できていないので、
+	// 提出物を「claimed」にしてはいけない。
+	if ownership.UserID != userID {
+		log.Printf("[CompanyEntry] company=%d already owned by user=%d, skip claim for user=%d", *companyID, ownership.UserID, userID)
+		return
+	}
 	if submissionID != nil && *submissionID != 0 {
 		_ = s.db.Model(&models.CompanyEntrySubmission{}).Where("id = ?", *submissionID).Update("status", "claimed").Error
 	}

@@ -5,7 +5,83 @@ import (
 	"testing"
 
 	"Backend/internal/services/email"
+
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
+
+func newCompanyEntryTestDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
+	t.Helper()
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	db, err := gorm.Open(mysql.New(mysql.Config{
+		Conn:                      sqlDB,
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("gorm: %v", err)
+	}
+	return db, mock
+}
+
+// #986: 会社が既に別ユーザーに所有されている場合、FirstOrCreateはエラーを返さず
+// 既存レコード(別ユーザーのUserID)を返す。この場合、提出物をclaimed状態に
+// 更新してはいけない(=UPDATEが発行されないこと)。
+func TestClaimOwnershipOnRegister_AlreadyOwnedByAnotherUser(t *testing.T) {
+	db, mock := newCompanyEntryTestDB(t)
+	svc := &CompanyEntryService{db: db}
+
+	companyID := uint(10)
+	submissionID := uint(20)
+	requestingUserID := uint(42)
+	existingOwnerID := uint(99)
+
+	mock.ExpectQuery("SELECT \\* FROM `company_ownerships`").
+		WithArgs(companyID, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "company_id", "user_id", "role"}).
+			AddRow(1, companyID, existingOwnerID, "owner"))
+
+	svc.ClaimOwnershipOnRegister(requestingUserID, &companyID, &submissionID)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected DB calls: %v", err)
+	}
+}
+
+// #986: 会社が未所有(新規)の場合は正常にクレームされ、提出物もclaimed状態に更新される。
+func TestClaimOwnershipOnRegister_NewOwnership(t *testing.T) {
+	db, mock := newCompanyEntryTestDB(t)
+	svc := &CompanyEntryService{db: db}
+
+	companyID := uint(11)
+	submissionID := uint(21)
+	requestingUserID := uint(42)
+
+	mock.ExpectQuery("SELECT \\* FROM `company_ownerships`").
+		WithArgs(companyID, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "company_id", "user_id", "role"}))
+
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO `company_ownerships`").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `company_entry_submissions`").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	svc.ClaimOwnershipOnRegister(requestingUserID, &companyID, &submissionID)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected DB calls: %v", err)
+	}
+}
 
 func TestCompanyEntryService_SubmitValidation(t *testing.T) {
 	svc := &CompanyEntryService{}
