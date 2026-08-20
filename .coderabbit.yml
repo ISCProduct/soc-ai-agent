@@ -11,6 +11,13 @@ reviews:
   review_status: true
   collapse_walkthrough: false
 
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "develop"
+      - "release/.*"
+
   path_filters:
     - "!**/__pycache__/**"
     - "!**/*.pyc"
