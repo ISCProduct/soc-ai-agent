@@ -47,6 +47,16 @@ def extract_output_text(response) -> str:
     return "\n".join(parts).strip()
 
 
+def _is_incomplete_response(response: object) -> bool:
+    """max_output_tokens等で打ち切られた応答かどうかを判定する(#992)。
+
+    出力テキストが非空かどうかだけを見ると、途中で切れた不完全なレポートも
+    「成功」と誤判定され、そのまま24hキャッシュされて配信され続けてしまう。
+    OpenAI Responses APIはstatus="incomplete"でこれを明示するので、それを見る。
+    """
+    return getattr(response, "status", None) == "incomplete"
+
+
 def run_deep_research(company_name: str, job_title: str) -> str:
     import main as m
 
@@ -55,7 +65,7 @@ def run_deep_research(company_name: str, job_title: str) -> str:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is required")
     model = os.getenv("OPENAI_DEEP_RESEARCH_MODEL", "o3-deep-research")
     fallback_model = os.getenv("OPENAI_DEEP_RESEARCH_FALLBACK_MODEL", "").strip()
-    client = m.OpenAI(api_key=api_key)
+    client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
     if not hasattr(client, "responses"):
         raise HTTPException(
             status_code=500,
@@ -87,11 +97,15 @@ def run_deep_research(company_name: str, job_title: str) -> str:
     try:
         response = request_response(True, model)
         output = extract_output_text(response)
-        logger.info("deep research finished chars=%d", len(output))
-        if output:
+        if output and not _is_incomplete_response(response):
+            logger.info("deep research finished chars=%d", len(output))
             return output
-        logger.warning("deep research returned empty result")
-        last_err = HTTPException(status_code=502, detail="Deep Research returned empty result")
+        if output:
+            logger.warning("deep research response truncated (incomplete), treating as failure chars=%d", len(output))
+            last_err = HTTPException(status_code=502, detail="Deep Research response was truncated")
+        else:
+            logger.warning("deep research returned empty result")
+            last_err = HTTPException(status_code=502, detail="Deep Research returned empty result")
     except Exception as exc:
         last_err = exc
         logger.warning("deep research failed error=%s", exc)
@@ -101,11 +115,17 @@ def run_deep_research(company_name: str, job_title: str) -> str:
     try:
         response = request_response(False, fallback_name)
         output = extract_output_text(response)
-        logger.info("deep research fallback finished chars=%d model=%s", len(output), fallback_name)
-        if output:
+        if output and not _is_incomplete_response(response):
+            logger.info("deep research fallback finished chars=%d model=%s", len(output), fallback_name)
             return output
-        logger.warning("deep research fallback returned empty result model=%s", fallback_name)
-        last_err = HTTPException(status_code=502, detail="Deep Research fallback returned empty result")
+        if output:
+            logger.warning(
+                "deep research fallback response truncated (incomplete) model=%s chars=%d", fallback_name, len(output)
+            )
+            last_err = HTTPException(status_code=502, detail="Deep Research fallback response was truncated")
+        else:
+            logger.warning("deep research fallback returned empty result model=%s", fallback_name)
+            last_err = HTTPException(status_code=502, detail="Deep Research fallback returned empty result")
     except Exception as fallback_exc:
         last_err = fallback_exc
         logger.warning("deep research fallback failed model=%s error=%s", fallback_name, fallback_exc)
@@ -224,7 +244,7 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
     # LLM からの生成を試みる
     if api_key:
         try:
-            client = m.OpenAI(api_key=api_key)
+            client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
             prompt = (
                 "以下の企業と職種について、採用情報を調査するための検索クエリを3〜5個生成してください。\n\n"
                 "企業名: {company}\n"
@@ -267,7 +287,7 @@ def _web_search_openai(query: str) -> str:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return ""
-    client = m.OpenAI(api_key=api_key)
+    client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
     try:
         response = client.chat.completions.create(
             model=m.WEB_SEARCH_MODEL,
@@ -291,7 +311,7 @@ def _summarize_for_hiring(company_name: str, job_title: str, raw_texts: List[str
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return "\n\n".join(raw_texts)
-    client = m.OpenAI(api_key=api_key)
+    client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
     safe_company = _sanitize_company_name_for_query(company_name)
     role_text = _sanitize_job_title(job_title) if job_title else "一般職"
     combined = "\n\n---\n\n".join(raw_texts)[:6000]

@@ -127,6 +127,11 @@ export function useResultsData() {
       return
     }
 
+    // #988: session_id変更で古いリクエストがまだ飛んでいる間に新しいリクエストが
+    // 始まると、後から解決した古いレスポンスが新しいセッションの表示を上書きして
+    // しまうことがあった。ignoreフラグで古いレスポンスの反映を止める。
+    let ignore = false
+
     const fetchCompanies = async () => {
       try {
         setLoading(true)
@@ -138,11 +143,15 @@ export function useResultsData() {
           headers: authService.getUserFetchHeaders(),
         })
 
+        if (ignore) return
+
         if (!response.ok) {
           throw new Error('企業データの取得に失敗しました')
         }
 
         const data = await response.json()
+
+        if (ignore) return
 
         setIsProvisional(Boolean(data?.is_provisional))
 
@@ -166,13 +175,18 @@ export function useResultsData() {
           setError('企業データの形式が正しくありません')
         }
       } catch (err) {
+        if (ignore) return
         setError(err instanceof Error ? err.message : '不明なエラー')
       } finally {
-        setLoading(false)
+        if (!ignore) setLoading(false)
       }
     }
 
     fetchCompanies()
+
+    return () => {
+      ignore = true
+    }
   }, [mounted, userId, sessionId, fetchAnalysis])
 
   // 企業詳細を開いたときに関係図データを取得

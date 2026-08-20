@@ -54,6 +54,14 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
     # get_embeddings は api_key 欠如で ValueError。上で既にチェック済み。
     embeddings = get_embeddings(embedding_model)
 
+    # #994: FastAPIの同期routeはStarletteのスレッドプール(既定サイズに上限あり)で
+    # 実行されるため、ここのtime.sleepはイベントループ自体はブロックしないが、
+    # OpenAI側が不安定な間に同時リクエストが多いとプールを専有し得る。
+    # 暫定対応として、最大待機時間を明示的に上限で頭打ちにして
+    # 1リクエストあたりの専有時間を抑える運用でしのぐ。根本対応(非同期化)が必要に
+    # なったら、embed_texts自体をasync defにしてasyncio.sleepへ切り替え、
+    # 呼び出し元(company.py/cache.py等)もawaitするよう連鎖的に変更する。
+    max_retry_wait_seconds = 5
     last_err: Exception = RuntimeError("embed_texts: no attempts made")
     for attempt in range(1, m.EMBED_MAX_RETRIES + 1):
         try:
@@ -61,7 +69,7 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
         except Exception as exc:
             last_err = exc
             if attempt < m.EMBED_MAX_RETRIES:
-                wait = 2 ** (attempt - 1)
+                wait = min(2 ** (attempt - 1), max_retry_wait_seconds)
                 logger.warning(
                     "embed_texts failed attempt=%d retrying in %ds error=%s",
                     attempt,

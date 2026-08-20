@@ -19,6 +19,7 @@ import (
 	"Backend/domain/entity"
 	"Backend/internal/controllers"
 	"Backend/internal/models"
+	"Backend/internal/services"
 	"Backend/internal/services/admin"
 	"Backend/internal/services/flywheel"
 	"Backend/test/controllers/mocks"
@@ -353,13 +354,15 @@ func TestAdminUserController_Update_InvalidTargetLevel(t *testing.T) {
 
 	targetLevel := "invalid"
 	body, _ := json.Marshal(map[string]*string{"target_level": &targetLevel})
-	req := httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body))
+	req := withAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body)), 42)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, controllers.NewAdminUserController(repo, nil).Update, ctx, http.StatusBadRequest)
+	ctrl := controllers.NewAdminUserController(repo, nil)
+	ctrl.SetSchoolService(newUnrestrictedSchoolService(42))
+	assertStatus(t, ctrl.Update, ctx, http.StatusBadRequest)
 	repo.AssertExpectations(t)
 }
 
@@ -373,13 +376,39 @@ func TestAdminUserController_Update_Success(t *testing.T) {
 
 	isAdmin := true
 	body, _ := json.Marshal(map[string]*bool{"is_admin": &isAdmin})
-	req := httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body))
+	req := withAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body)), 42)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, controllers.NewAdminUserController(repo, audit).Update, ctx, http.StatusOK)
+	ctrl := controllers.NewAdminUserController(repo, audit)
+	ctrl.SetSchoolService(newUnrestrictedSchoolService(42))
+	assertStatus(t, ctrl.Update, ctx, http.StatusOK)
 	repo.AssertExpectations(t)
 	audit.AssertExpectations(t)
+}
+
+// #980: school scope制限のあるadminは、担当校外のユーザーを更新できない(403)。
+func TestAdminUserController_Update_SchoolAccessDenied(t *testing.T) {
+	repo := &mocks.UserRepositoryMock{}
+	otherSchoolID := uint(99)
+	user := &entity.User{Email: "user@example.com", SchoolID: &otherSchoolID}
+	repo.On("GetUserByID", uint(1)).Return(user, nil)
+
+	schoolRepo := &mocks.SchoolRepositoryMock{}
+	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
+
+	isAdmin := true
+	body, _ := json.Marshal(map[string]*bool{"is_admin": &isAdmin})
+	req := withAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body)), 42)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	ctx := newCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("1")
+	ctrl := controllers.NewAdminUserController(repo, nil)
+	ctrl.SetSchoolService(services.NewSchoolService(schoolRepo))
+	assertStatus(t, ctrl.Update, ctx, http.StatusForbidden)
+	repo.AssertExpectations(t)
 }

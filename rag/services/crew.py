@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel
 
-from services.sanitize import _sanitize_company_name_for_query, _sanitize_job_title
+from services.sanitize import _sanitize_company_name_for_query, _sanitize_job_title, _wrap_untrusted_text
 
 logger = logging.getLogger("main")
 
@@ -100,7 +100,7 @@ def run_crewai(
         ).format(
             company=safe_company,
             role=safe_job_title,
-            resume=resume_text,
+            resume=_wrap_untrusted_text(resume_text, "履歴書テキスト"),
             source=source_label,
         ),
         expected_output="Final Japanese report in the requested format",

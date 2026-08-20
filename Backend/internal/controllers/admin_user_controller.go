@@ -1,8 +1,10 @@
 package controllers
 
 import (
+	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/middleware"
+	"Backend/internal/services"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/interfaces"
 	"errors"
@@ -21,6 +23,7 @@ type AdminUserController struct {
 	repo     repository.UserRepository
 	audit    interfaces.AuditLogService
 	deletion *auth.UserDeletionService
+	schools  *services.SchoolService
 }
 
 func NewAdminUserController(repo repository.UserRepository, audit interfaces.AuditLogService) *AdminUserController {
@@ -30,6 +33,17 @@ func NewAdminUserController(repo repository.UserRepository, audit interfaces.Aud
 // SetDeletionService は管理者によるユーザー削除で使用するカスケードサービスを設定する
 func (c *AdminUserController) SetDeletionService(deletion *auth.UserDeletionService) {
 	c.deletion = deletion
+}
+
+// SetSchoolService は担当校スコープの検証に使うサービスを設定する(#980/#981)
+func (c *AdminUserController) SetSchoolService(schools *services.SchoolService) {
+	c.schools = schools
+}
+
+// ensureSchoolAccess は、対象ユーザーが呼び出し元admin(担当校制限がある場合)の担当校に
+// 属するかを検証する共通ヘルパーへの薄いラッパー。
+func (c *AdminUserController) ensureSchoolAccess(ctx echo.Context, target *entity.User) error {
+	return ensureAdminSchoolAccess(ctx, c.schools, target.SchoolID)
 }
 
 type adminUserResponse struct {
@@ -108,6 +122,9 @@ func (c *AdminUserController) Update(ctx echo.Context) error {
 	if err != nil || user == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "user not found")
 	}
+	if err := c.ensureSchoolAccess(ctx, user); err != nil {
+		return err
+	}
 	if payload.IsAdmin != nil {
 		user.IsAdmin = *payload.IsAdmin
 	}
@@ -159,6 +176,9 @@ func (c *AdminUserController) Delete(ctx echo.Context) error {
 	user, err := c.repo.GetUserByID(uint(id))
 	if err != nil || user == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "user not found")
+	}
+	if err := c.ensureSchoolAccess(ctx, user); err != nil {
+		return err
 	}
 	if user.IsWithdrawn() {
 		return echo.NewHTTPError(http.StatusConflict, "account already withdrawn")

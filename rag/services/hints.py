@@ -60,7 +60,7 @@ async def _run_hints_web_search_pipeline(
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return "\n\n".join(raw_results)
-    client = m.OpenAI(api_key=api_key)
+    client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
     combined = "\n\n---\n\n".join(raw_results)[:5000]
     prompt = (
                  "企業名: {company}\n"
@@ -104,7 +104,7 @@ def _parse_hints_from_text(company_name: str, position: str, research_text: str)
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return CompanyHintsResponse(style_tags=[], top_questions=[])
-    client = m.OpenAI(api_key=api_key)
+    client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
     # 構造化JSON抽出には通常の chat モデルを使用（search-preview は json_object 非対応）
     model = os.getenv("OPENAI_HINTS_PARSE_MODEL", "gpt-4o")
     role_text = position or "一般職"
