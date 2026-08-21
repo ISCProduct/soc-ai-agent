@@ -221,6 +221,19 @@ jobs:
                   exit 1
                 }
               done
+
+              # DBマイグレーション適用(#618)。backend起動直後はDB接続が間に合わない
+              # ことがあるためリトライする。
+              MIGRATE_OK=0
+              for i in $(seq 1 10); do
+                docker compose exec -T backend /bin/migrate up && { MIGRATE_OK=1; break; }
+                echo "migrate retry ($i)..."
+                sleep 5
+              done
+              if [ "$MIGRATE_OK" != "1" ]; then
+                echo "migration failed" >&2
+                exit 1
+              fi
             '
 
       - name: Revoke runner IP for SSH
@@ -350,6 +363,40 @@ jobs:
           task-definition: backend-task-def.json
           container-name: soc-backend
           image: ${{ env.ECR_REGISTRY }}/soc-backend:${{ env.IMAGE_TAG }}
+
+      # DBマイグレーション適用(#618)。新イメージのタスク定義を先に登録し、
+      # backendサービスと同じネットワーク設定でワンオフタスクとしてmigrateを
+      # 実行する。失敗したらここでジョブを止め、サービスは更新しない。
+      - name: Register backend task definition (for migration)
+        id: register-backend
+        run: |
+          TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://${{ steps.render-backend.outputs.task-definition }} \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "task_def_arn=$TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
+
+      - name: Run DB migration (production)
+        run: |
+          NETWORK_CONFIG=$(aws ecs describe-services --cluster "${PROJECT_NAME}" --services backend \
+            --query 'services[0].networkConfiguration' --output json)
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "${PROJECT_NAME}" \
+            --task-definition "${{ steps.register-backend.outputs.task_def_arn }}" \
+            --launch-type FARGATE \
+            --network-configuration "$NETWORK_CONFIG" \
+            --overrides '{"containerOverrides":[{"name":"soc-backend","command":["/bin/migrate","up"]}]}' \
+            --query 'tasks[0].taskArn' --output text)
+          echo "Migration task: $TASK_ARN"
+          aws ecs wait tasks-stopped --cluster "${PROJECT_NAME}" --tasks "$TASK_ARN"
+          EXIT_CODE=$(aws ecs describe-tasks --cluster "${PROJECT_NAME}" --tasks "$TASK_ARN" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration failed (exit code: $EXIT_CODE)" >&2
+            aws ecs describe-tasks --cluster "${PROJECT_NAME}" --tasks "$TASK_ARN" \
+              --query 'tasks[0].containers[0].reason' --output text >&2
+            exit 1
+          fi
+          echo "✓ Migration applied successfully"
 
       - name: Deploy backend service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
