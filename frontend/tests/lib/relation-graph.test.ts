@@ -79,19 +79,21 @@ describe('relation-graph', () => {
       expect(positions.get(3)?.level).toBe(2)
     })
 
-    it('assigns negative levels going up to the parent', () => {
+    // #1022: 起点企業が子会社であっても親会社が常に上に固定されないよう、
+    // 資本関係の向き(parent/child)に関わらず起点からのホップ数のみでlevelを決める。
+    it('assigns positive levels going up to the parent too (direction is not reflected)', () => {
       const positions = layoutCapitalGraph(baseGraph())
-      expect(positions.get(4)?.level).toBe(-1)
+      expect(positions.get(4)?.level).toBe(1)
     })
 
-    it('places siblings sharing a parent at the same level as the focus company', () => {
+    it('places siblings sharing a parent one hop away from the focus company', () => {
       const graph = baseGraph()
-      // 4(親) の別の子会社 5 を追加 -> 起点企業(1)の兄弟にあたるので level 0 になるはず
+      // 4(親) の別の子会社 5 を追加 -> 起点企業(1)から見て2ホップ(1→4→5)なのでlevel 2になるはず
       graph.nodes.push({ id: 5, name: '兄弟会社', is_listed: false, is_focus: false })
       graph.capital_edges.push({ parent_id: 4, child_id: 5, relation_type: 'capital_subsidiary' })
 
       const positions = layoutCapitalGraph(graph)
-      expect(positions.get(5)?.level).toBe(0)
+      expect(positions.get(5)?.level).toBe(2)
     })
 
     it('does not loop forever when the edges contain a cycle', () => {
@@ -111,17 +113,19 @@ describe('relation-graph', () => {
       expect(positions.get(1)?.level).toBe(0)
     })
 
-    it('assigns distinct x within the same level and level-based y', () => {
+    it('assigns distinct x within the same level and level-based y, with the focus company always on top', () => {
       const graph = baseGraph()
-      graph.nodes.push({ id: 5, name: '兄弟会社', is_listed: false, is_focus: false })
-      graph.capital_edges.push({ parent_id: 4, child_id: 5, relation_type: 'capital_subsidiary' })
+      // 2(子会社) の別ノード6を追加 -> 起点(1)から見て同じlevel1になるはず
+      graph.nodes.push({ id: 6, name: '別の子会社', is_listed: false, is_focus: false })
+      graph.capital_edges.push({ parent_id: 1, child_id: 6, relation_type: 'capital_subsidiary' })
 
       const positions = layoutCapitalGraph(graph)
-      const focusX = positions.get(1)!.x
-      const siblingX = positions.get(5)!.x
-      expect(focusX).not.toBe(siblingX)
+      const childX = positions.get(2)!.x
+      const otherChildX = positions.get(6)!.x
+      expect(childX).not.toBe(otherChildX)
+      // 親会社(4)も子会社(2)も起点(1)より1ホップなので、どちらも起点より下に配置される
       expect(positions.get(2)!.y).toBeGreaterThan(positions.get(1)!.y)
-      expect(positions.get(4)!.y).toBeLessThan(positions.get(1)!.y)
+      expect(positions.get(4)!.y).toBeGreaterThan(positions.get(1)!.y)
     })
   })
 
@@ -140,6 +144,13 @@ describe('relation-graph', () => {
     it('資本関係にない企業(relation_typeがbusiness等)は無視して0除算(NaN角度)を起こさない', () => {
       const positions = layoutCapitalGraphFromEdges(1, [1], [])
       expect(positions.get(1)).toEqual({ level: 0, column: 0, x: 0, y: 0 })
+    })
+
+    // #1022: 子会社を起点にしても親会社が上に固定表示されないことを保証する回帰テスト。
+    it('起点企業が子会社側でも、親会社は起点より下(level 1)に配置される', () => {
+      const positions = layoutCapitalGraphFromEdges(2, [1, 2], [{ parent_id: 1, child_id: 2 }])
+      expect(positions.get(2)?.level).toBe(0)
+      expect(positions.get(1)?.level).toBe(1)
     })
   })
 

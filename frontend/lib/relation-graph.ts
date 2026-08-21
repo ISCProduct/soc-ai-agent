@@ -104,7 +104,7 @@ export interface CompanyRelationGraph {
 }
 
 export interface CapitalGraphPosition {
-  /** 起点企業からの世代差。0=起点企業、負値=親方向、正値=子方向。 */
+  /** 起点企業からのBFS距離。0=起点企業、1以上=親/子/関連を問わず起点からのホップ数。 */
   level: number
   /** 同じ level 内での並び順（0始まり）。 */
   column: number
@@ -128,7 +128,9 @@ const LEVEL_GAP = 60
  * さらに、同じlevelの兄弟ノードが多い場合（例: 子会社が数十社ある企業）は複数行に折り返し、
  * 1行に並べてfitViewが極端に縮小される問題を避ける（#970フォローアップ）。
  * neighborsOf は、あるノードIDから見た隣接ノードと世代差分(delta)の一覧を返す関数。
- * 有向関係（資本関係の親→子など）はdeltaで向きを表し、無向関係（取引関係など）は常に+1にする。
+ * #1022: 資本関係(親/子)も含め、隣接ノードのdeltaは常に+1（起点からのホップ数）にする。
+ * 親会社が常に上に固定される（起点が子会社でも親が最上段になる）挙動を避けるため、
+ * 資本関係の向きはlevel計算には反映せず、起点ノードを常に最上位(level 0)に固定する。
  * 起点から辿り着けないノード（別の連結成分）はlevel 0として扱う。
  * 循環関係があっても各ノードは最初に到達した時点のlevelで確定し無限ループしない。
  */
@@ -190,8 +192,10 @@ function layoutFromFocus(
 }
 
 /**
- * 資本関係グラフのノードに、起点企業を基準とした世代(level)とX/Y座標を割り当てる。
- * 子会社方向は正の level、親会社方向は負の level になる（同じ親を持つ兄弟会社は同じ level）。
+ * 資本関係グラフのノードに、起点企業を基準とした距離(level)とX/Y座標を割り当てる。
+ * 起点企業を常にlevel 0（最上位）とし、親会社・子会社を問わず起点からのホップ数で
+ * level（同じ距離の企業は同じ level）を決める。#1022: 起点が子会社でも親会社が
+ * 常に上に固定されないよう、資本関係の向き(parent/child)はlevelに反映しない。
  */
 export function layoutCapitalGraph(graph: {
   company_id: number
@@ -204,9 +208,9 @@ export function layoutCapitalGraph(graph: {
     neighborDeltas.get(from)!.push({ id: to, delta })
   }
   for (const edge of graph.capital_edges ?? []) {
-    // parent -> child は子方向なので +1、child -> parent は親方向なので -1
+    // 向きに関わらず起点からのホップ数を+1する（親/子いずれも起点より下位に配置）
     addNeighbor(edge.parent_id, edge.child_id, 1)
-    addNeighbor(edge.child_id, edge.parent_id, -1)
+    addNeighbor(edge.child_id, edge.parent_id, 1)
   }
 
   return layoutFromFocus(
