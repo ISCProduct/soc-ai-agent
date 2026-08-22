@@ -43,7 +43,7 @@ func (s *InterviewService) StartSession(userID uint, sessionID uint) (*Interview
 		return nil, shared.ErrForbidden
 	}
 	if session.Status == "finished" {
-		return nil, errors.New("session already finished")
+		return nil, shared.ErrSessionFinished
 	}
 	if session.StartedAt == nil {
 		now := time.Now()
@@ -63,6 +63,10 @@ func (s *InterviewService) FinishSession(userID uint, sessionID uint) (*Intervie
 	}
 	if !s.isAllowed(userID, session.UserID) {
 		return nil, shared.ErrForbidden
+	}
+	if session.Status == "finished" {
+		// 既に終了済み: レポート再キューなどの副作用を起こさず、現在の状態をそのまま返す(#1019, 冪等)。
+		return toSessionResponse(session), nil
 	}
 	if session.EndedAt == nil {
 		now := time.Now()
