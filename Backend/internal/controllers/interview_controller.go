@@ -291,6 +291,12 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		questionDurationSeconds,
 	)
 	if err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
+		if errors.Is(err, shared.ErrSessionFinished) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 		return echoInternalError(err)
 	}
 
@@ -357,6 +363,12 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 		req.QuestionDurationSeconds,
 	)
 	if err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
+		if errors.Is(err, shared.ErrSessionFinished) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 		return echoInternalError(err)
 	}
 
