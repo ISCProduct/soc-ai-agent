@@ -35,6 +35,9 @@ func (s *InterviewService) Turn(
 	if !s.isAllowed(userID, session.UserID) {
 		return nil, shared.ErrForbidden
 	}
+	if session.Status == "finished" {
+		return nil, shared.ErrSessionFinished
+	}
 
 	// STT: Whisper でユーザー音声をテキスト化
 	userText, err := s.openaiClient.Transcribe(ctx, audioData, "audio.webm")
@@ -138,6 +141,9 @@ func (s *InterviewService) StartTurn(
 	}
 	if !s.isAllowed(userID, session.UserID) {
 		return nil, shared.ErrForbidden
+	}
+	if session.Status == "finished" {
+		return nil, shared.ErrSessionFinished
 	}
 
 	// WEB検索・手入力で company_id=0 でも、企業名が DB 登録と一致すれば解決する (#567)

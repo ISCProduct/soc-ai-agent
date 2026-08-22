@@ -147,7 +147,7 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 		return "", shared.ErrForbidden
 	}
 	if session.Status == "finished" {
-		return "", errors.New("session already finished")
+		return "", shared.ErrSessionFinished
 	}
 	if s.realtimeUsageService != nil {
 		allowed, active, maxAllowed, err := s.realtimeUsageService.CanOpenNewConnection()
