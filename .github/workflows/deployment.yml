@@ -429,6 +429,23 @@ jobs:
           cluster: ${{ env.PROJECT_NAME }}
           wait-for-service-stability: true
 
+      # backend/frontend両方のECSデプロイが安定するまで待った後(=本番反映が実際に完了した後)に通知する。
+      # DISCORD_RELEASE_WEBHOOK_URL未設定でもデプロイ自体は失敗させない(automation/deploy-smoke/notify-discord.shと同じ方針)。
+      - name: Notify Discord release
+        env:
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+        run: |
+          if [ -z "${DISCORD_RELEASE_WEBHOOK_URL:-}" ]; then
+            echo "DISCORD_RELEASE_WEBHOOK_URL is not set; skip Discord notify"
+            exit 0
+          fi
+          COMMIT_MSG="$(git log -1 --format=%s)"
+          COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          CONTENT="$(printf '🚀 **本番リリース速報**\n%s\n\nCommit: %s\nRun: %s\nBy: %s' "$COMMIT_MSG" "$COMMIT_URL" "$RUN_URL" "${{ github.actor }}")"
+          PAYLOAD="$(python3 -c "import json,sys; print(json.dumps({'content': sys.argv[1]}))" "$CONTENT")"
+          curl -sS -X POST -H 'Content-Type: application/json' -d "$PAYLOAD" "$DISCORD_RELEASE_WEBHOOK_URL"
+
   # 更新情報(#861): mainへの直近マージPRをAI要約してDBへ取り込む。
   # 本番(Fargate)は展示会時のみ起動(desired_countは変更しない)のため、
   # デプロイ直後に到達できない場合がある。pr_numberでべき等なので、
