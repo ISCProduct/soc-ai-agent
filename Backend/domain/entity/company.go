@@ -41,7 +41,7 @@ type UserApplicationStatus struct {
 	CompanyID       uint
 	Company         *Company
 	MatchID         uint
-	Status          string // applied / document_passed / interview / offered / accepted / declined / rejected
+	Status          string // ValidStatuses: not_applied / applied / document_screening / document_passed / interview_scheduled / interview_in_progress / offered / accepted / withdrawn / rejected
 	Notes           string
 	AppliedAt       *time.Time
 	StatusUpdatedAt *time.Time

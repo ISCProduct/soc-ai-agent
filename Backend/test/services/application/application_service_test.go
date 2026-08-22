@@ -7,6 +7,7 @@ package application_test
 import (
 	"testing"
 
+	"Backend/internal/models"
 	"Backend/internal/services/application"
 
 	"github.com/stretchr/testify/assert"
@@ -36,6 +37,26 @@ func TestApplicationService_ValidStatuses_DoesNotContainLegacy(t *testing.T) {
 	legacy := []string{"interview", "declined"}
 	for _, s := range legacy {
 		assert.NotContains(t, application.ValidStatuses, s, "ValidStatuses に廃止ステータス %s が含まれている", s)
+	}
+}
+
+func TestFlywheelPassedStatuses_AlignedWithValidStatuses(t *testing.T) {
+	notPassed := map[string]bool{
+		"not_applied":        true,
+		"applied":            true,
+		"document_screening": true,
+		"withdrawn":          true,
+		"rejected":           true,
+	}
+	for _, s := range application.ValidStatuses {
+		if notPassed[s] {
+			assert.NotContains(t, models.FlywheelPassedStatuses, s, "非通過 %s が通過定数に入っている", s)
+			continue
+		}
+		assert.Contains(t, models.FlywheelPassedStatuses, s, "ValidStatuses の %s が通過定数に無い", s)
+	}
+	for _, s := range models.FlywheelPassedStatuses {
+		assert.Contains(t, application.ValidStatuses, s, "通過定数 %s が ValidStatuses に無い", s)
 	}
 }
 
