@@ -55,8 +55,10 @@ func CompanyTTLJobsDays() int      { return getIntOrDefault("COMPANY_TTL_JOBS_DA
 func CompanyTTLTechDays() int      { return getIntOrDefault("COMPANY_TTL_TECH_DAYS", 30) }
 func CompanyTTLRelationsDays() int { return getIntOrDefault("COMPANY_TTL_RELATIONS_DAYS", 60) }
 
-func MissingBatchDefaultLimit() int   { return getIntOrDefault("MISSING_BATCH_DEFAULT_LIMIT", 20) }
-func MissingBatchMaxLimit() int       { return getIntOrDefault("MISSING_BATCH_MAX_LIMIT", 50) }
+func MissingBatchDefaultLimit() int { return getIntOrDefault("MISSING_BATCH_DEFAULT_LIMIT", 30) }
+func MissingBatchMaxLimit() int     { return getIntOrDefault("MISSING_BATCH_MAX_LIMIT", 50) }
+
+// MissingBatchMaxConcurrency は企業間並列の上限。既定8は Fargate 0.25vCPU/512MB と OpenAI RPM の天井。
 func MissingBatchMaxConcurrency() int { return getIntOrDefault("MISSING_BATCH_MAX_CONCURRENCY", 8) }
 
 func RelationGraphMaxDepth() int { return getIntOrDefault("RELATION_GRAPH_MAX_DEPTH", 4) }

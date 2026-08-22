@@ -32,7 +32,7 @@ def review_resume_stream(request: ReviewRequest) -> StreamingResponse:
 
     source_labels = {
         "deep_research": "OpenAI Deep Research（o3-deep-research）",
-        "web_search": "OpenAI Web Search（gpt-4o-search-preview）",
+        "web_search": "OpenAI Web Search（gpt-4o-mini + web_search）",
         "cache": "ベクトルDBキャッシュ（Chroma / 以前の検索結果）",
         "none": "事前学習データのみ（外部検索なし）",
     }

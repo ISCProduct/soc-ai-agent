@@ -14,6 +14,30 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 )
 
+// Responses API の web_search + 安価モデル。Chat Completions の search-preview / search-api は使わない。
+const defaultWebSearchModel = "gpt-4o-mini"
+
+func isChatCompletionsSearchModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return strings.Contains(m, "search-preview") || strings.Contains(m, "search-api")
+}
+
+func resolveWebSearchModel(override string) string {
+	for _, m := range []string{
+		override,
+		os.Getenv("OPENAI_WEB_SEARCH_MODEL"),
+		os.Getenv("OPENAI_COMPANY_SEARCH_MODEL"),
+		defaultWebSearchModel,
+	} {
+		m = strings.TrimSpace(m)
+		if m == "" || isChatCompletionsSearchModel(m) {
+			continue
+		}
+		return m
+	}
+	return defaultWebSearchModel
+}
+
 func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxTokens int, modelOverride ...string) (string, error) {
 	if cli == nil || cli.c == nil {
 		return "", errors.New("openai client is nil")
@@ -125,59 +149,52 @@ func isRetryableAPIErr(err error) bool {
 	return false
 }
 
-// WebSearchJSON は OpenAI Web Search モデルで 1 クエリだけ実行し、短い JSON テキストを返す。
-// 企業実在確認などトークンを抑えた検証用途向け。RAG の多段調査パイプラインは使わない。
-// gpt-4o(-mini)-search-preview は一時的な 5xx / 429 が出やすいため、Parse 系と同様にリトライする。
+// WebSearchJSON は Responses API の web_search で 1 クエリだけ実行する。
+// Chat Completions の search-preview / gpt-5-search-api は使わない（高トークン・高額）。
 func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxTokens int, modelOverride ...string) (string, error) {
 	if cli == nil || cli.c == nil {
 		return "", errors.New("openai client is nil")
 	}
-	if maxTokens <= 0 {
-		maxTokens = 200
+	if maxTokens < 600 {
+		maxTokens = 600
 	}
-
-	model := os.Getenv("OPENAI_WEB_SEARCH_MODEL")
-	if len(modelOverride) > 0 && modelOverride[0] != "" {
-		model = modelOverride[0]
+	requested := ""
+	if len(modelOverride) > 0 {
+		requested = modelOverride[0]
 	}
-	if strings.TrimSpace(model) == "" {
-		model = "gpt-4o-search-preview"
-	}
-
-	req := openai.ChatCompletionRequest{
-		Model: model,
-		Messages: []openai.ChatCompletionMessage{
-			{Role: openai.ChatMessageRoleUser, Content: userPrompt},
-		},
-		MaxTokens:           0,
-		MaxCompletionTokens: maxTokens,
+	model := resolveWebSearchModel(requested)
+	if requested != "" && isChatCompletionsSearchModel(requested) {
+		log.Printf("[openai] web_search ignore retired model=%s use=%s", requested, model)
 	}
 
 	const maxAttempts = 3
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		started := time.Now()
 		ctxReq, cancel := context.WithTimeout(ctx, 45*time.Second)
-		resp, err := cli.c.CreateChatCompletion(ctxReq, req)
+		text, err := cli.doResponses(ctxReq, responsesRequest{
+			Model:           model,
+			Input:           userPrompt,
+			MaxOutputTokens: maxTokens,
+			Tools: []map[string]any{{
+				"type":                "web_search",
+				"search_context_size": "high",
+			}},
+			ToolChoice: "required",
+		})
+		elapsedMs := time.Since(started).Milliseconds()
 		cancel()
-
-		if err == nil && len(resp.Choices) > 0 {
-			content := strings.TrimSpace(resp.Choices[0].Message.Content)
-			if content != "" {
-				if cli.OnUsage != nil {
-					cli.OnUsage(model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
-				}
-				log.Printf("[openai] web_search model=%s prompt_tokens=%d completion_tokens=%d",
-					model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
-				return content, nil
-			}
-			lastErr = errors.New("empty response from web search model")
-		} else if err == nil {
-			lastErr = errors.New("no response from web search model")
-		} else {
+		if err == nil && strings.TrimSpace(text) != "" {
+			log.Printf("[openai] web_search model=%s elapsed_ms=%d attempt=%d", model, elapsedMs, attempt)
+			return strings.TrimSpace(text), nil
+		}
+		if err != nil {
 			lastErr = err
-			if !isRetryableAPIErr(err) {
+			if !isRetryableAPIErr(err) && !strings.Contains(strings.ToLower(err.Error()), "empty response") {
 				return "", err
 			}
+		} else {
+			lastErr = errors.New("empty response from web search")
 		}
 		if attempt == maxAttempts {
 			break
@@ -189,6 +206,9 @@ func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxToke
 			return "", ctx.Err()
 		case <-time.After(backoff + jitter):
 		}
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no response from web search")
 	}
 	return "", lastErr
 }

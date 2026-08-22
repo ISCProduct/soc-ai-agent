@@ -90,6 +90,25 @@ type RealtimeUserRow = {
 
 const DAY_RANGES = [7, 30, 90] as const
 
+async function readCostJson(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text()
+  if (!text.trim()) {
+    throw new Error(
+      res.ok ? 'サーバーから空の応答が返りました' : `コストの取得に失敗しました (${res.status})`,
+    )
+  }
+  try {
+    return JSON.parse(text) as Record<string, unknown>
+  } catch {
+    throw new Error(`コストの取得に失敗しました (${res.status})`)
+  }
+}
+
+function costErrorMessage(data: Record<string, unknown>): string {
+  const err = data.error ?? data.message
+  return typeof err === 'string' && err ? err : ''
+}
+
 function Spinner({ className }: { className?: string }) {
   return (
     <div
@@ -195,12 +214,19 @@ export default function AdminCostsPage() {
         fetch('/api/admin/costs/monthly?months=12', { headers: h }),
       ])
       const [sumData, dailyData, monthlyData] = await Promise.all([
-        sumRes.json(), dailyRes.json(), monthlyRes.json(),
+        readCostJson(sumRes),
+        readCostJson(dailyRes),
+        readCostJson(monthlyRes),
       ])
-      setSummary(sumData)
-      setDaily(dailyData.daily ?? [])
-      setMonthly(monthlyData.monthly ?? [])
-      setRealtimeDaily(dailyData.realtime_daily ?? [])
+      const fail = costErrorMessage(sumData) || costErrorMessage(dailyData) || costErrorMessage(monthlyData)
+      if (fail) {
+        setError(fail)
+        return
+      }
+      setSummary(sumData as Summary)
+      setDaily((dailyData.daily as DailyRow[] | undefined) ?? [])
+      setMonthly((monthlyData.monthly as MonthlyRow[] | undefined) ?? [])
+      setRealtimeDaily((dailyData.realtime_daily as RealtimeDailyRow[] | undefined) ?? [])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '取得に失敗しました')
     } finally {

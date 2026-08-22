@@ -80,7 +80,7 @@ func (c *AdminCompanyController) GetL1Coverage(ctx echo.Context) error {
 }
 
 // WarmL1Catalog POST /api/admin/companies/warm-l1
-// Body: { "limit": 100, "dry_run": true, "force": false, "include_info": true, "include_persona": true, "concurrency": 4 }
+// Body: { "limit": 100, "dry_run": true, "force": false, "include_info": true, "include_persona": true, "concurrency": 6 }
 // 企業間はconcurrency上限で並列処理する（1社内のinfo/personaは直列）。
 func (c *AdminCompanyController) WarmL1Catalog(ctx echo.Context) error {
 	if c.catalogWarm == nil {
@@ -110,7 +110,7 @@ func (c *AdminCompanyController) WarmL1Catalog(ctx echo.Context) error {
 }
 
 // FetchMissingBatch POST /api/admin/companies/fetch-missing-batch
-// Body: { "limit": 20, "dry_run": true, "primary_only": true, "concurrency": 4 }
+// Body: { "limit": 30, "dry_run": true, "primary_only": true, "concurrency": 6 }
 // アクティブ企業のうち不足フィールドだけを上限付きで埋める（企業間は並列）。
 // primary_only=true のときは主3種（基本・技術・関係）のみ（求人除外）。
 func (c *AdminCompanyController) FetchMissingBatch(ctx echo.Context) error {
@@ -120,7 +120,6 @@ func (c *AdminCompanyController) FetchMissingBatch(ctx echo.Context) error {
 		)
 	}
 	var opts company.MissingBatchOptions
-	opts.Limit = 20
 	if err := ctx.Bind(&opts); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
 	}
@@ -141,6 +140,8 @@ func (c *AdminCompanyController) FetchMissingBatch(ctx echo.Context) error {
 		"tech_ok":      result.TechOK,
 		"relations_ok": result.RelationsOK,
 		"errors":       result.Errors,
+		"stop_reason":  result.StopReason,
+		"failures":     result.FailureSamples(20),
 	})
 	return ctx.JSON(http.StatusOK, result)
 }

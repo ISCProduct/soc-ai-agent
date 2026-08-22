@@ -349,8 +349,8 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		}
 
 		employeeCount := "未定"
-		if match.Company.EmployeeCount > 0 {
-			employeeCount = strconv.Itoa(match.Company.EmployeeCount) + "名"
+		if label := models.FormatEmployeeCount(match.Company.EmployeeCount, match.Company.EmployeeCountBasis); label != "" {
+			employeeCount = label
 		}
 
 		techStack := []string{}
