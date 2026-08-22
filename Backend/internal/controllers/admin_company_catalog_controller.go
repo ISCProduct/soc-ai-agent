@@ -80,7 +80,7 @@ func (c *AdminCompanyController) GetL1Coverage(ctx echo.Context) error {
 }
 
 // WarmL1Catalog POST /api/admin/companies/warm-l1
-// Body: { "limit": 100, "dry_run": true, "force": false, "include_info": true, "include_persona": true, "concurrency": 6 }
+// Body: { "limit": 100, "dry_run": true, "force": false, "include_info": true, "include_persona": true, "concurrency": 8 }
 // 企業間はconcurrency上限で並列処理する（1社内のinfo/personaは直列）。
 func (c *AdminCompanyController) WarmL1Catalog(ctx echo.Context) error {
 	if c.catalogWarm == nil {
