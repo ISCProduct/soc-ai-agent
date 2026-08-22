@@ -5,17 +5,21 @@ import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/companyfields"
 	"Backend/internal/config"
+	"Backend/internal/logger"
 	"Backend/internal/models"
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
+	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 )
 
 const (
-	defaultMissingBatchConcurrency = 4
+	// 企業取得は gBiz/OpenAI 待ちが支配的。6→8 は CPU をほぼ増やさず壁時計を短縮する。
+	defaultMissingBatchConcurrency = 8
 )
 
 // MissingBatchOptions は企業管理全体の不足データ一括取得オプション。
@@ -58,6 +62,7 @@ type MissingBatchResult struct {
 	RelationsOK int                `json:"relations_ok"`
 	Skipped     int                `json:"skipped"`
 	Errors      int                `json:"errors"`
+	StopReason  string             `json:"stop_reason,omitempty"`
 	Items       []MissingBatchItem `json:"items"`
 }
 
@@ -97,7 +102,7 @@ func clampMissingBatchConcurrency(n int) int {
 }
 
 // Run は不足企業を最大 Limit 社まで並列処理する（不足判定済みの項目は force=true で取得）。
-// 1社内の主3種は依存があるため直列、企業間は Concurrency 上限で並列化する。
+// 概要を先に取り、技術・関連・求人は企業内で並列。企業間は Concurrency 上限。
 func (s *CompanyMissingBatchService) Run(ctx context.Context, opts MissingBatchOptions) (*MissingBatchResult, error) {
 	if opts.Limit <= 0 {
 		opts.Limit = config.MissingBatchDefaultLimit()
@@ -150,9 +155,11 @@ func (s *CompanyMissingBatchService) Run(ctx context.Context, opts MissingBatchO
 		Items:       items,
 	}
 	if opts.DryRun {
+		result.StopReason = missingBatchStopReason(result)
 		return result, nil
 	}
 
+	started := time.Now()
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(concurrency)
 	var mu sync.Mutex
@@ -165,6 +172,12 @@ func (s *CompanyMissingBatchService) Run(ctx context.Context, opts MissingBatchO
 				item.Error = err.Error()
 				result.Errors++
 				mu.Unlock()
+				slog.Warn("fetch_missing_batch item",
+					"company_id", item.CompanyID,
+					"name", item.Name,
+					"error", item.Error,
+					"cancelled", true,
+				)
 				return nil
 			}
 			mu.Lock()
@@ -176,10 +189,8 @@ func (s *CompanyMissingBatchService) Run(ctx context.Context, opts MissingBatchO
 	}
 	_ = g.Wait()
 
-	log.Printf(
-		"fetch_missing_batch: concurrency=%d processed=%d info_ok=%d jobs_ok=%d tech_ok=%d relations_ok=%d errors=%d",
-		concurrency, result.Processed, result.InfoOK, result.JobsOK, result.TechOK, result.RelationsOK, result.Errors,
-	)
+	result.StopReason = missingBatchStopReason(result)
+	logMissingBatchResult(result, time.Since(started))
 	return result, nil
 }
 
@@ -190,122 +201,328 @@ func (s *CompanyMissingBatchService) processItem(ctx context.Context, item *Miss
 		apply()
 	}
 
-	// 不足判定済みの項目は force=true で取りに行く。
-	// force=false だと予算超過時に空キャッシュを「スキップ」扱いして実質未取得のまま終わるため。
-	if item.NeedInfo {
-		if s.infoFetcher == nil {
+	// 概要が公式URLを埋めるので先に取る。技術・関連・求人は独立なので並列。
+	s.runInfoFetch(ctx, item, result, inc)
+	g, gctx := errgroup.WithContext(ctx)
+	if item.NeedTech {
+		g.Go(func() error {
+			s.runTechFetch(gctx, item, result, inc)
+			return nil
+		})
+	}
+	if item.NeedRelations {
+		g.Go(func() error {
+			s.runRelationsFetch(gctx, item, result, inc)
+			return nil
+		})
+	}
+	if item.NeedJobs {
+		g.Go(func() error {
+			s.runJobsFetch(gctx, item, result, inc)
+			return nil
+		})
+	}
+	_ = g.Wait()
+	logMissingBatchItem(item)
+}
+
+func (s *CompanyMissingBatchService) runInfoFetch(ctx context.Context, item *MissingBatchItem, result *MissingBatchResult, inc func(func())) {
+	if !item.NeedInfo {
+		return
+	}
+	if s.infoFetcher == nil {
+		inc(func() {
 			item.InfoStatus = "skipped_no_fetcher"
-			inc(func() { result.Skipped++ })
-		} else if res, err := s.infoFetcher.FetchAndSave(ctx, item.CompanyID, true); err != nil {
+			result.Skipped++
+		})
+		return
+	}
+	res, err := s.infoFetcher.FetchAndSave(ctx, item.CompanyID, true)
+	inc(func() {
+		if err != nil {
 			item.InfoStatus = "error"
 			item.Error = err.Error()
-			inc(func() { result.Errors++ })
-		} else if res != nil && res.FromCache {
+			result.Errors++
+			return
+		}
+		if res != nil && res.FromCache {
 			company, _ := s.repo.FindByID(item.CompanyID)
 			status, errMsg := classifyInfoCacheResult(res, company)
 			item.InfoStatus = status
 			if status == "error" {
 				item.Error = errMsg
-				inc(func() { result.Errors++ })
+				result.Errors++
 			} else {
-				inc(func() { result.Skipped++ })
+				result.Skipped++
 			}
-		} else if company, err := s.repo.FindByID(item.CompanyID); err == nil && company != nil &&
-			companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
-			item.InfoStatus = "ok"
-			inc(func() { result.InfoOK++ })
-		} else {
-			// 公開情報限定（概要なし）も empty として扱う（エラーではない）
-			item.InfoStatus = "empty"
-			inc(func() { result.Skipped++ })
+			return
 		}
-	}
-	if item.NeedTech {
-		if s.techFetcher == nil {
+		company, findErr := s.repo.FindByID(item.CompanyID)
+		if findErr == nil && company != nil && companyfetch.HasBasicInfo(company.Description, company.WebsiteURL) {
+			item.InfoStatus = "ok"
+			result.InfoOK++
+			return
+		}
+		item.InfoStatus = "empty"
+		result.Skipped++
+	})
+}
+
+func (s *CompanyMissingBatchService) runTechFetch(ctx context.Context, item *MissingBatchItem, result *MissingBatchResult, inc func(func())) {
+	if s.techFetcher == nil {
+		inc(func() {
 			item.TechStatus = "skipped_no_fetcher"
-			inc(func() { result.Skipped++ })
-		} else if res, err := s.techFetcher.FetchAndSave(ctx, item.CompanyID, true); err != nil {
+			result.Skipped++
+		})
+		return
+	}
+	res, err := s.techFetcher.FetchAndSave(ctx, item.CompanyID, true)
+	inc(func() {
+		if err != nil {
 			item.TechStatus = "error"
 			if item.Error == "" {
 				item.Error = err.Error()
 			}
-			inc(func() { result.Errors++ })
-		} else if res != nil && res.FromCache {
+			result.Errors++
+			return
+		}
+		if res != nil && res.FromCache {
 			company, _ := s.repo.FindByID(item.CompanyID)
 			if company != nil && companyfetch.HasTechDataForIndustry(company.Industry, company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle) {
 				item.TechStatus = "skipped_cache"
-				inc(func() { result.Skipped++ })
-			} else {
-				detail := "cache_without_data"
-				if res.SkipReason != "" {
-					detail = res.SkipReason
-				}
-				item.TechStatus = "error"
-				if item.Error == "" {
-					item.Error = "tech: " + detail
-				}
-				inc(func() { result.Errors++ })
+				result.Skipped++
+				return
 			}
-		} else if company, err := s.repo.FindByID(item.CompanyID); err == nil && company != nil &&
+			detail := "cache_without_data"
+			if res.SkipReason != "" {
+				detail = res.SkipReason
+			}
+			item.TechStatus = "error"
+			if item.Error == "" {
+				item.Error = "tech: " + detail
+			}
+			result.Errors++
+			return
+		}
+		company, findErr := s.repo.FindByID(item.CompanyID)
+		if findErr == nil && company != nil &&
 			companyfetch.HasTechDataForIndustry(company.Industry, company.TechStack, company.InfraStack, company.CicdTools, company.DevelopmentStyle) {
 			item.TechStatus = "ok"
-			inc(func() { result.TechOK++ })
-		} else {
-			item.TechStatus = "empty"
-			inc(func() { result.Skipped++ })
+			result.TechOK++
+			return
 		}
-	}
-	if item.NeedRelations {
-		if s.relationsFetcher == nil {
+		item.TechStatus = "empty"
+		result.Skipped++
+	})
+}
+
+func (s *CompanyMissingBatchService) runRelationsFetch(ctx context.Context, item *MissingBatchItem, result *MissingBatchResult, inc func(func())) {
+	if s.relationsFetcher == nil {
+		inc(func() {
 			item.RelationsStatus = "skipped_no_fetcher"
-			inc(func() { result.Skipped++ })
-		} else if res, err := s.relationsFetcher.FetchAndSave(ctx, item.CompanyID, true); err != nil {
+			result.Skipped++
+		})
+		return
+	}
+	res, err := s.relationsFetcher.FetchAndSave(ctx, item.CompanyID, true)
+	inc(func() {
+		if err != nil {
 			item.RelationsStatus = "error"
 			if item.Error == "" {
 				item.Error = err.Error()
 			}
-			inc(func() { result.Errors++ })
-		} else if res != nil && res.FromCache {
+			result.Errors++
+			return
+		}
+		if res != nil && res.FromCache {
 			if s.relationsFetcher.HasStoredData(item.CompanyID) {
 				item.RelationsStatus = "skipped_cache"
-				inc(func() { result.Skipped++ })
-			} else {
-				detail := "cache_without_data"
-				if res.SkipReason != "" {
-					detail = res.SkipReason
-				}
-				item.RelationsStatus = "error"
-				if item.Error == "" {
-					item.Error = "relations: " + detail
-				}
-				inc(func() { result.Errors++ })
+				result.Skipped++
+				return
 			}
-		} else if s.relationsFetcher.HasStoredData(item.CompanyID) {
-			item.RelationsStatus = "ok"
-			inc(func() { result.RelationsOK++ })
-		} else {
-			item.RelationsStatus = "empty"
-			inc(func() { result.Skipped++ })
+			detail := "cache_without_data"
+			if res.SkipReason != "" {
+				detail = res.SkipReason
+			}
+			item.RelationsStatus = "error"
+			if item.Error == "" {
+				item.Error = "relations: " + detail
+			}
+			result.Errors++
+			return
 		}
-	}
-	if item.NeedJobs {
-		if s.jobFetcher == nil {
+		if s.relationsFetcher.HasStoredData(item.CompanyID) {
+			item.RelationsStatus = "ok"
+			result.RelationsOK++
+			return
+		}
+		item.RelationsStatus = "empty"
+		result.Skipped++
+	})
+}
+
+func (s *CompanyMissingBatchService) runJobsFetch(ctx context.Context, item *MissingBatchItem, result *MissingBatchResult, inc func(func())) {
+	if s.jobFetcher == nil {
+		inc(func() {
 			item.JobsStatus = "skipped_no_fetcher"
-			inc(func() { result.Skipped++ })
-		} else if positions, err := s.jobFetcher.FetchAndSaveJobs(ctx, item.CompanyID, true); err != nil {
+			result.Skipped++
+		})
+		return
+	}
+	positions, err := s.jobFetcher.FetchAndSaveJobs(ctx, item.CompanyID, true)
+	inc(func() {
+		if err != nil {
 			item.JobsStatus = "error"
 			if item.Error == "" {
 				item.Error = err.Error()
 			}
-			inc(func() { result.Errors++ })
-		} else if len(positions) == 0 {
+			result.Errors++
+			return
+		}
+		if len(positions) == 0 {
 			item.JobsStatus = "empty"
-			inc(func() { result.Skipped++ })
-		} else {
-			item.JobsStatus = fmt.Sprintf("ok(%d)", len(positions))
-			inc(func() { result.JobsOK++ })
+			result.Skipped++
+			return
+		}
+		item.JobsStatus = fmt.Sprintf("ok(%d)", len(positions))
+		result.JobsOK++
+	})
+}
+
+// missingBatchStopReason は FE が波を打ち切るか・なぜ止まったかをログで辿るための理由。
+func missingBatchStopReason(r *MissingBatchResult) string {
+	if r == nil {
+		return "empty_result"
+	}
+	if r.DryRun {
+		return "dry_run"
+	}
+	filled := r.InfoOK + r.JobsOK + r.TechOK + r.RelationsOK
+	switch {
+	case r.Processed == 0:
+		return "no_candidates"
+	case r.Errors > 0 && filled == 0:
+		return "all_failed"
+	case filled == 0:
+		return "no_fills"
+	case r.Limit > 0 && r.Processed < r.Limit:
+		return "partial_wave"
+	default:
+		return "wave_full"
+	}
+}
+
+func missingBatchItemNeedsLog(item MissingBatchItem) bool {
+	if item.Error != "" {
+		return true
+	}
+	for _, st := range []string{item.InfoStatus, item.TechStatus, item.RelationsStatus, item.JobsStatus} {
+		if st == "error" || st == "empty" || strings.HasPrefix(st, "skipped") {
+			return true
 		}
 	}
+	return false
+}
+
+func logMissingBatchItem(item *MissingBatchItem) {
+	if item == nil || !missingBatchItemNeedsLog(*item) {
+		return
+	}
+	slog.Warn("fetch_missing_batch item",
+		"company_id", item.CompanyID,
+		"name", item.Name,
+		"need_info", item.NeedInfo,
+		"need_tech", item.NeedTech,
+		"need_relations", item.NeedRelations,
+		"info", item.InfoStatus,
+		"tech", item.TechStatus,
+		"relations", item.RelationsStatus,
+		"jobs", item.JobsStatus,
+		"error", item.Error,
+	)
+}
+
+func logMissingBatchResult(result *MissingBatchResult, elapsed time.Duration) {
+	if result == nil {
+		return
+	}
+	attrs := []any{
+		"stop_reason", result.StopReason,
+		"elapsed_ms", elapsed.Milliseconds(),
+		"processed", result.Processed,
+		"limit", result.Limit,
+		"concurrency", result.Concurrency,
+		"info_ok", result.InfoOK,
+		"tech_ok", result.TechOK,
+		"relations_ok", result.RelationsOK,
+		"jobs_ok", result.JobsOK,
+		"skipped", result.Skipped,
+		"errors", result.Errors,
+		"failures", missingBatchFailureLog(result.Items, 20),
+	}
+	if result.Errors > 0 {
+		if key := logger.PutErrorJSON("fetch_missing_batch", map[string]any{
+			"stop_reason":  result.StopReason,
+			"processed":    result.Processed,
+			"limit":        result.Limit,
+			"concurrency":  result.Concurrency,
+			"info_ok":      result.InfoOK,
+			"tech_ok":      result.TechOK,
+			"relations_ok": result.RelationsOK,
+			"jobs_ok":      result.JobsOK,
+			"skipped":      result.Skipped,
+			"errors":       result.Errors,
+			"failures":     result.FailureSamples(50),
+		}); key != "" {
+			attrs = append(attrs, "s3_key", key)
+		}
+	}
+	if result.StopReason == "all_failed" || result.StopReason == "no_fills" || result.Errors > 0 {
+		slog.Warn("fetch_missing_batch done", attrs...)
+		return
+	}
+	slog.Info("fetch_missing_batch done", attrs...)
+}
+
+func missingBatchFailureLog(items []MissingBatchItem, max int) string {
+	if max <= 0 {
+		max = 20
+	}
+	parts := make([]string, 0, max)
+	for _, it := range items {
+		if it.Error == "" {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("id=%d %s: %s", it.CompanyID, it.Name, it.Error))
+		if len(parts) >= max {
+			break
+		}
+	}
+	return strings.Join(parts, " | ")
+}
+
+func (r *MissingBatchResult) FailureSamples(max int) []map[string]any {
+	if r == nil || max <= 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, max)
+	for _, it := range r.Items {
+		if it.Error == "" {
+			continue
+		}
+		out = append(out, map[string]any{
+			"company_id": it.CompanyID,
+			"name":       it.Name,
+			"error":      it.Error,
+			"info":       it.InfoStatus,
+			"tech":       it.TechStatus,
+			"relations":  it.RelationsStatus,
+		})
+		if len(out) >= max {
+			break
+		}
+	}
+	return out
 }
 
 // classifyInfoCacheResult は FetchAndSave の FromCache 結果をバッチ用ステータスへ変換する。

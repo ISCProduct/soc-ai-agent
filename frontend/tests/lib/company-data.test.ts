@@ -3,8 +3,18 @@ import {
   fetchCompanyRelations,
   fetchCompanyMarketInfo,
   fetchCompanySummary,
+  formatEmployeeCount,
   CompanyDataFetchError,
 } from '@/lib/company-data'
+
+describe('formatEmployeeCount', () => {
+  it('labels consolidated and standalone counts', () => {
+    expect(formatEmployeeCount(101800, 'consolidated')).toBe('101,800名（連結）')
+    expect(formatEmployeeCount(21934, 'standalone')).toBe('21,934名（単体）')
+    expect(formatEmployeeCount(100)).toBe('100名')
+    expect(formatEmployeeCount(0, 'consolidated')).toBe('')
+  })
+})
 
 describe('unwrapCompanyListResponse', () => {
   it('returns a raw array as-is', () => {

@@ -314,6 +314,9 @@ func mergeCompany(existing *models.Company, payload *models.Company) error {
 	if payload.EmployeeCount > 0 {
 		existing.EmployeeCount = payload.EmployeeCount
 	}
+	if basis := models.NormalizeEmployeeCountBasis(payload.EmployeeCountBasis); basis != "" {
+		existing.EmployeeCountBasis = basis
+	}
 	if payload.FoundedYear > 0 {
 		existing.FoundedYear = payload.FoundedYear
 	}

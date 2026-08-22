@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strconv"
 
+	"Backend/internal/logger"
 	"Backend/internal/middleware"
 	"Backend/internal/services"
 
@@ -16,16 +17,16 @@ import (
 // ── エラーコード定数 ──────────────────────────────────────────────────────────
 
 const (
-	ErrCodeDuplicateEmail   = "DUPLICATE_EMAIL"
-	ErrCodeNotFound         = "NOT_FOUND"
-	ErrCodeValidationError  = "VALIDATION_ERROR"
-	ErrCodeUnauthorized     = "UNAUTHORIZED"
-	ErrCodeForbidden        = "FORBIDDEN"
-	ErrCodeInvalidStatus    = "INVALID_STATUS"
-	ErrCodeInternalError    = "INTERNAL_ERROR"
-	ErrCodeServiceUnavail   = "SERVICE_UNAVAILABLE"
-	ErrCodeConflict         = "CONFLICT"
-	ErrCodeTooManyRequests  = "TOO_MANY_REQUESTS"
+	ErrCodeDuplicateEmail  = "DUPLICATE_EMAIL"
+	ErrCodeNotFound        = "NOT_FOUND"
+	ErrCodeValidationError = "VALIDATION_ERROR"
+	ErrCodeUnauthorized    = "UNAUTHORIZED"
+	ErrCodeForbidden       = "FORBIDDEN"
+	ErrCodeInvalidStatus   = "INVALID_STATUS"
+	ErrCodeInternalError   = "INTERNAL_ERROR"
+	ErrCodeServiceUnavail  = "SERVICE_UNAVAILABLE"
+	ErrCodeConflict        = "CONFLICT"
+	ErrCodeTooManyRequests = "TOO_MANY_REQUESTS"
 )
 
 // ── ヘルパー関数 ──────────────────────────────────────────────────────────────
@@ -111,15 +112,22 @@ func NewAPIError(status int, code, message string, detail ...string) error {
 	return newAPIError(status, code, message, detail...)
 }
 func EchoUintParam(c echo.Context, key string) (uint, error) { return echoUintParam(c, key) }
-func EchoInternalError(err error) error                       { return echoInternalError(err) }
+func EchoInternalError(err error) error                      { return echoInternalError(err) }
 
 func logError(err error) {
 	if err == nil {
 		return
 	}
-	if _, file, line, ok := runtime.Caller(2); ok {
-		log.Printf("[ERROR] %s:%d %v", filepath.Base(file), line, err)
+	file, line := "", 0
+	if _, f, l, ok := runtime.Caller(2); ok {
+		file, line = filepath.Base(f), l
+		log.Printf("[ERROR] %s:%d %v", file, line, err)
 	} else {
 		log.Printf("[ERROR] %v", err)
 	}
+	logger.PutErrorJSON("internal", map[string]any{
+		"error": err.Error(),
+		"file":  file,
+		"line":  line,
+	})
 }

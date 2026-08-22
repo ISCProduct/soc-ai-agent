@@ -55,7 +55,7 @@ services:
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
-      OPENAI_HINTS_MODEL: ${OPENAI_HINTS_MODEL:-gpt-4o-search-preview}
+      OPENAI_HINTS_MODEL: ${OPENAI_HINTS_MODEL:-gpt-4o-mini}
       OPENAI_HINTS_PARSE_MODEL: ${OPENAI_HINTS_PARSE_MODEL:-gpt-4o}
 
   company-graph:

@@ -380,6 +380,7 @@ export default function AdminCompanyInfoEditPage() {
                 onChange={(e) => setEmployeeCount(e.target.value)}
                 type="number"
                 sx={{ flex: 1 }}
+                helperText="取得時は連結を優先し、単体／連結を保存します"
               />
             )}
           </Stack>

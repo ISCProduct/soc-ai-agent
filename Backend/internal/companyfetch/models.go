@@ -6,9 +6,10 @@ import (
 )
 
 const (
-	defaultExtractModel    = "gpt-4o-mini"
-	defaultSearchModel     = "gpt-4o-mini-search-preview"
-	defaultDeepSearchModel = "gpt-4o-search-preview"
+	defaultExtractModel = "gpt-4o-mini"
+	// Responses API の web_search + mini。Chat Completions の search-preview / search-api は使わない。
+	defaultSearchModel     = "gpt-4o-mini"
+	defaultDeepSearchModel = "gpt-4o-mini"
 	defaultParseModel      = "gpt-4o-mini"
 	defaultParseAdvanced   = "gpt-4o"
 )

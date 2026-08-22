@@ -281,24 +281,30 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
 
 
 def _web_search_openai(query: str) -> str:
-    """OpenAI Web Search APIで1クエリを実行し、結果テキストを返す。"""
+    """Responses API の web_search で 1 クエリを実行し、結果テキストを返す。"""
     import main as m
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return ""
+    model = (m.WEB_SEARCH_MODEL or "").strip()
+    lowered = model.lower()
+    if not model or "search-preview" in lowered or "search-api" in lowered:
+        model = "gpt-4o-mini"
     client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
     try:
-        response = client.chat.completions.create(
-            model=m.WEB_SEARCH_MODEL,
-            messages=[{"role": "user", "content": query}],
-            max_tokens=1000,
+        response = client.responses.create(
+            model=model,
+            input=query,
+            tools=[{"type": "web_search", "search_context_size": "high"}],
+            tool_choice="required",
+            max_output_tokens=1000,
         )
-        text = response.choices[0].message.content or ""
-        logger.info("web search query=%s chars=%d model=%s", query[:60], len(text), m.WEB_SEARCH_MODEL)
+        text = extract_output_text(response)
+        logger.info("web search query=%s chars=%d model=%s", query[:60], len(text), model)
         return text.strip()
     except Exception as exc:
-        logger.warning("web search failed query=%s model=%s error=%s", query[:60], m.WEB_SEARCH_MODEL, exc)
+        logger.warning("web search failed query=%s model=%s error=%s", query[:60], model, exc)
         return ""
 
 

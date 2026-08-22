@@ -61,6 +61,16 @@ describe('mapCompanyApiToViewModel', () => {
     })
   })
 
+  it('従業員数に連結/単体を付ける', () => {
+    const vm = mapCompanyApiToViewModel({
+      id: 1,
+      name: 'NEC',
+      employee_count: 101800,
+      employee_count_basis: 'consolidated',
+    })
+    expect(vm?.employees).toBe('101,800名（連結）')
+  })
+
   it('ラップされたレスポンスも扱える', () => {
     const vm = mapCompanyApiToViewModel({
       data: { id: 1, name: 'Wrapped' },

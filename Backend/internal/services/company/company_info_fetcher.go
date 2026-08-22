@@ -10,27 +10,29 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
 
 // CompanyInfoResult は企業基本情報の取得結果。
 type CompanyInfoResult struct {
-	Description    string `json:"description"`
-	Industry       string `json:"industry"`
-	Location       string `json:"location"`
-	WebsiteURL     string `json:"website_url"`
-	FoundedYear    int    `json:"founded_year"`
-	EmployeeCount  int    `json:"employee_count"`
-	MainBusiness   string `json:"main_business"`
-	Culture        string `json:"culture"`
-	WorkStyle      string `json:"work_style"`
-	TechStack      string `json:"tech_stack,omitempty"`
-	WelfareDetails string `json:"welfare_details,omitempty"`
-	Source         string `json:"source,omitempty"`
-	SourceURL      string `json:"source_url,omitempty"`
-	ModelUsed      string `json:"model_used,omitempty"`
-	Confidence     string `json:"confidence,omitempty"`
+	Description        string `json:"description"`
+	Industry           string `json:"industry"`
+	Location           string `json:"location"`
+	WebsiteURL         string `json:"website_url"`
+	FoundedYear        int    `json:"founded_year"`
+	EmployeeCount      int    `json:"employee_count"`
+	EmployeeCountBasis string `json:"employee_count_basis,omitempty"` // consolidated|standalone
+	MainBusiness       string `json:"main_business"`
+	Culture            string `json:"culture"`
+	WorkStyle          string `json:"work_style"`
+	TechStack          string `json:"tech_stack,omitempty"`
+	WelfareDetails     string `json:"welfare_details,omitempty"`
+	Source             string `json:"source,omitempty"`
+	SourceURL          string `json:"source_url,omitempty"`
+	ModelUsed          string `json:"model_used,omitempty"`
+	Confidence         string `json:"confidence,omitempty"`
 	// Phase 3 運用メタ: TTL / 予算ガードで Search をスキップしたとき
 	FromCache      bool   `json:"from_cache,omitempty"`
 	BudgetExceeded bool   `json:"budget_exceeded,omitempty"`
@@ -38,7 +40,7 @@ type CompanyInfoResult struct {
 }
 
 // CompanyInfoFetcher は gBizINFO を足がかりにしつつ、不足分は AI（安価 Search→Parse）で充足する。
-// 高額な gpt-4o-search-preview（deep）は使わない。非上場など gBiz で足りない企業を AI 取得で補う。
+// 高額な deep search は使わない。非上場など gBiz で足りない企業を AI 取得で補う。
 type CompanyInfoFetcher struct {
 	repo   repository.CompanyRepository
 	llm    *companyfetch.LLM
@@ -78,7 +80,8 @@ const companyInfoJSONSchema = `{
   "location": "本社所在地（例: 東京都渋谷区）",
   "website_url": "公式サイトURL（https://から始まる）",
   "founded_year": 設立年（整数、不明なら0）,
-  "employee_count": 従業員数（整数、不明なら0）,
+  "employee_count": 直近有価証券報告書の連結従業員数（整数。非上場で連結が無いときだけ単体。不明なら0）,
+  "employee_count_basis": "consolidated（連結）または standalone（単体）",
   "main_business": "主要事業内容（50〜100文字程度）",
   "culture": "企業文化・働き方の特徴（50〜100文字程度）",
   "work_style": "勤務スタイル（リモート / ハイブリッド / オフィス のいずれか、不明なら空文字）",
@@ -233,6 +236,7 @@ func (f *CompanyInfoFetcher) acquireFromGBizCompany(ctx context.Context, company
 		}
 		if company.EmployeeCount == 0 && hits[0].EmployeeNumber > 0 {
 			company.EmployeeCount = hits[0].EmployeeNumber
+			company.EmployeeCountBasis = models.EmployeeCountBasisStandalone
 		}
 		_ = f.repo.Update(company)
 	}
@@ -262,13 +266,18 @@ func (f *CompanyInfoFetcher) acquireFromGBizName(ctx context.Context, companyNam
 		return nil, fmt.Errorf("gbizinfo: no match for %s", companyName)
 	}
 	hit := hits[0]
+	basis := ""
+	if hit.EmployeeNumber > 0 {
+		basis = models.EmployeeCountBasisStandalone
+	}
 	return &CompanyInfoResult{
-		Location:      hit.Location,
-		WebsiteURL:    hit.CompanyURL,
-		EmployeeCount: hit.EmployeeNumber,
-		Source:        companyfetch.SourceGBiz,
-		Confidence:    companyfetch.ConfidenceHigh,
-		ModelUsed:     "gbizinfo",
+		Location:           hit.Location,
+		WebsiteURL:         hit.CompanyURL,
+		EmployeeCount:      hit.EmployeeNumber,
+		EmployeeCountBasis: basis,
+		Source:             companyfetch.SourceGBiz,
+		Confidence:         companyfetch.ConfidenceHigh,
+		ModelUsed:          "gbizinfo",
 	}, nil
 }
 
@@ -288,8 +297,14 @@ func (f *CompanyInfoFetcher) enrichGapsWithAI(ctx context.Context, companyName, 
 	}
 	ai, err := f.acquireViaAISearch(ctx, companyName, firstNonEmpty(websiteURL, base.WebsiteURL))
 	if err != nil {
-		// gBiz Sync 済みの法人データは DB に残る。AI 失敗は握りつぶさず呼び出し元へ返す。
-		return nil, fmt.Errorf("ai gap enrich: %w", err)
+		// Search モデル廃止などで AI が落ちても、gBiz の法人データは返す。
+		// ここで error にするとバッチが「失敗 N」になり、保存済み gBiz も無かったことになる。
+		log.Printf("ai gap enrich failed company=%s: %v (keeping gbiz)", companyName, err)
+		if base.ModelUsed == "" {
+			base.ModelUsed = "gbizinfo"
+		}
+		base.ModelUsed += "+ai_enrich_failed"
+		return base, nil
 	}
 	mergeCompanyInfoGaps(base, ai)
 	if ai.ModelUsed != "" {
@@ -306,13 +321,13 @@ func (f *CompanyInfoFetcher) acquireViaAISearch(ctx context.Context, companyName
 		return nil, fmt.Errorf("openai client is nil")
 	}
 
-	systemPrompt := `あなたは企業情報の構造化アシスタントです。検索結果に明示された事実のみをJSON化してください。検索結果に無い項目は空文字または0。モデルの事前知識や推測で埋めてはいけません。`
+	systemPrompt := `あなたは企業情報の構造化アシスタントです。検索結果に明示された事実のみをJSON化してください。検索結果に無い項目は空文字または0。モデルの事前知識や推測で埋めてはいけません。従業員数は連結と単体を混ぜず、employee_count_basis に定義を必ず入れる。`
 	siteHint := ""
 	if websiteURL != "" {
 		siteHint = fmt.Sprintf("（参考公式URL: %s）", websiteURL)
 	}
 	searchPrompt := fmt.Sprintf(
-		`日本の企業「%s」%sについて、公開情報から確認できる事実だけを調べてください。対象: 企業概要・業種・本社所在地・公式サイトURL・設立年・従業員数・主要事業・企業文化・勤務スタイル・技術スタック・福利厚生。各事実の根拠URLを含めてください。不明な項目は推測せず「不明」と書いてください。非上場企業も含め、公式サイト・採用ページ・登記情報などから確認できる範囲のみ。`,
+		`日本の企業「%s」%sについて、公開情報から確認できる事実だけを調べてください。対象: 企業概要・業種・本社所在地・公式サイトURL・設立年・従業員数・主要事業・企業文化・勤務スタイル・技術スタック・福利厚生。従業員数は直近有価証券報告書の連結を優先し、連結なら連結、単体しか無ければ単体と明記してください。各事実の根拠URLを含めてください。不明な項目は推測せず「不明」と書いてください。非上場企業も含め、公式サイト・採用ページ・登記情報などから確認できる範囲のみ。`,
 		companyName, siteHint,
 	)
 	parseUser := fmt.Sprintf(
@@ -350,8 +365,11 @@ func mergeCompanyInfoGaps(base, ai *CompanyInfoResult) {
 	if base.FoundedYear == 0 {
 		base.FoundedYear = ai.FoundedYear
 	}
-	if base.EmployeeCount == 0 {
+	if ai.EmployeeCount > 0 {
 		base.EmployeeCount = ai.EmployeeCount
+		base.EmployeeCountBasis = firstNonEmpty(models.NormalizeEmployeeCountBasis(ai.EmployeeCountBasis), models.EmployeeCountBasisConsolidated)
+	} else if base.EmployeeCount > 0 && base.EmployeeCountBasis == "" {
+		base.EmployeeCountBasis = models.EmployeeCountBasisStandalone
 	}
 	if base.MainBusiness == "" {
 		base.MainBusiness = ai.MainBusiness
@@ -417,26 +435,31 @@ func parseCompanyInfoResult(text string) (*CompanyInfoResult, error) {
 	if err := json.Unmarshal([]byte(obj), &result); err != nil {
 		return nil, fmt.Errorf("failed to parse company info json: %w", err)
 	}
+	result.EmployeeCountBasis = models.NormalizeEmployeeCountBasis(result.EmployeeCountBasis)
+	if result.EmployeeCount > 0 && result.EmployeeCountBasis == "" {
+		result.EmployeeCountBasis = models.EmployeeCountBasisConsolidated
+	}
 	return &result, nil
 }
 
 func companyInfoFromModel(company *models.Company) *CompanyInfoResult {
 	return &CompanyInfoResult{
-		Description:    company.Description,
-		Industry:       company.Industry,
-		Location:       company.Location,
-		WebsiteURL:     company.WebsiteURL,
-		FoundedYear:    company.FoundedYear,
-		EmployeeCount:  company.EmployeeCount,
-		MainBusiness:   company.MainBusiness,
-		Culture:        company.Culture,
-		WorkStyle:      company.WorkStyle,
-		TechStack:      company.TechStack,
-		WelfareDetails: company.WelfareDetails,
-		Source:         company.SourceType,
-		SourceURL:      company.SourceURL,
-		ModelUsed:      company.LastModelUsed,
-		Confidence:     company.LastFetchConfidence,
+		Description:        company.Description,
+		Industry:           company.Industry,
+		Location:           company.Location,
+		WebsiteURL:         company.WebsiteURL,
+		FoundedYear:        company.FoundedYear,
+		EmployeeCount:      company.EmployeeCount,
+		EmployeeCountBasis: company.EmployeeCountBasis,
+		MainBusiness:       company.MainBusiness,
+		Culture:            company.Culture,
+		WorkStyle:          company.WorkStyle,
+		TechStack:          company.TechStack,
+		WelfareDetails:     company.WelfareDetails,
+		Source:             company.SourceType,
+		SourceURL:          company.SourceURL,
+		ModelUsed:          company.LastModelUsed,
+		Confidence:         company.LastFetchConfidence,
 	}
 }
 
@@ -468,6 +491,9 @@ func applyCompanyInfoResult(company *models.Company, result *CompanyInfoResult) 
 	}
 	if result.EmployeeCount > 0 {
 		company.EmployeeCount = result.EmployeeCount
+		if basis := models.NormalizeEmployeeCountBasis(result.EmployeeCountBasis); basis != "" {
+			company.EmployeeCountBasis = basis
+		}
 	}
 	if result.MainBusiness != "" {
 		company.MainBusiness = result.MainBusiness
@@ -502,7 +528,7 @@ func buildCompanyFactsText(company *models.Company) string {
 		fmt.Fprintf(&b, "設立年: %d\n", company.FoundedYear)
 	}
 	if company.EmployeeCount > 0 {
-		fmt.Fprintf(&b, "従業員数: %d\n", company.EmployeeCount)
+		fmt.Fprintf(&b, "従業員数: %s\n", models.FormatEmployeeCount(company.EmployeeCount, company.EmployeeCountBasis))
 	}
 	if company.Industry != "" {
 		fmt.Fprintf(&b, "業種: %s\n", company.Industry)

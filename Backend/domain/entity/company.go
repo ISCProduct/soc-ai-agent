@@ -4,33 +4,34 @@ import "time"
 
 // Company 企業ドメインエンティティ
 type Company struct {
-	ID               uint
-	Name             string
-	Description      string
-	Industry         string
-	EmployeeCount    int
-	FoundedYear      int
-	Location         string
-	WebsiteURL       string
-	LogoURL          string
-	CorporateNumber  string
-	SourceType       string
-	SourceURL        string
-	SourceFetchedAt  *time.Time
-	IsProvisional    bool
-	DataStatus       string // draft, published
-	Culture          string
-	WorkStyle        string
-	WelfareDetails   string
-	TechStack        string
-	DevelopmentStyle string
-	MainBusiness     string
-	AverageAge       float64
-	FemaleRatio      float64
-	IsActive         bool
-	IsVerified       bool
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                 uint
+	Name               string
+	Description        string
+	Industry           string
+	EmployeeCount      int
+	EmployeeCountBasis string
+	FoundedYear        int
+	Location           string
+	WebsiteURL         string
+	LogoURL            string
+	CorporateNumber    string
+	SourceType         string
+	SourceURL          string
+	SourceFetchedAt    *time.Time
+	IsProvisional      bool
+	DataStatus         string // draft, published
+	Culture            string
+	WorkStyle          string
+	WelfareDetails     string
+	TechStack          string
+	DevelopmentStyle   string
+	MainBusiness       string
+	AverageAge         float64
+	FemaleRatio        float64
+	IsActive           bool
+	IsVerified         bool
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 // UserApplicationStatus 応募・選考ステータスエンティティ
