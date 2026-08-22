@@ -105,18 +105,25 @@ func TestMergeCompanyInfoGaps(t *testing.T) {
 				WelfareDetails: "住宅手当",
 			},
 			want: &CompanyInfoResult{
-				Description:    "AI概要",
-				Industry:       "IT",
-				Location:       "大阪",
-				WebsiteURL:     "https://example.com",
-				FoundedYear:    2000,
-				EmployeeCount:  50,
-				MainBusiness:   "開発",
-				Culture:        "フラット",
-				WorkStyle:      "リモート",
-				TechStack:      "Go",
-				WelfareDetails: "住宅手当",
+				Description:        "AI概要",
+				Industry:           "IT",
+				Location:           "大阪",
+				WebsiteURL:         "https://example.com",
+				FoundedYear:        2000,
+				EmployeeCount:      50,
+				EmployeeCountBasis: "consolidated",
+				MainBusiness:       "開発",
+				Culture:            "フラット",
+				WorkStyle:          "リモート",
+				TechStack:          "Go",
+				WelfareDetails:     "住宅手当",
 			},
+		},
+		{
+			name: "AIの連結がgBiz単体を上書き",
+			base: &CompanyInfoResult{EmployeeCount: 21934, EmployeeCountBasis: "standalone"},
+			ai:   &CompanyInfoResult{EmployeeCount: 101800, EmployeeCountBasis: "consolidated"},
+			want: &CompanyInfoResult{EmployeeCount: 101800, EmployeeCountBasis: "consolidated"},
 		},
 	}
 	for _, tt := range tests {
@@ -146,6 +153,9 @@ func assertCompanyInfoResult(t *testing.T, got, want *CompanyInfoResult) {
 	}
 	if got.EmployeeCount != want.EmployeeCount {
 		t.Errorf("EmployeeCount = %d, want %d", got.EmployeeCount, want.EmployeeCount)
+	}
+	if got.EmployeeCountBasis != want.EmployeeCountBasis {
+		t.Errorf("EmployeeCountBasis = %q, want %q", got.EmployeeCountBasis, want.EmployeeCountBasis)
 	}
 	if got.MainBusiness != want.MainBusiness {
 		t.Errorf("MainBusiness = %q, want %q", got.MainBusiness, want.MainBusiness)

@@ -389,6 +389,7 @@ func main() {
 	if s3UploadService != nil {
 		objectDeleter = s3UploadService
 		authService.SetObjectDeleter(s3UploadService)
+		logger.EnableS3ErrorArchive(s3UploadService)
 	}
 	userDeletionService := auth.NewUserDeletionService(db, objectDeleter, auditLogService)
 	adminOrganizationController := controllers.NewAdminOrganizationController(organizationService)

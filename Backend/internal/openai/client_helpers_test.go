@@ -5,6 +5,18 @@ import (
 	"testing"
 )
 
+func TestResolveWebSearchModel_SkipsChatCompletionsSearch(t *testing.T) {
+	t.Setenv("OPENAI_WEB_SEARCH_MODEL", "gpt-5-search-api")
+	t.Setenv("OPENAI_COMPANY_SEARCH_MODEL", "gpt-4o-mini-search-preview")
+	if got := resolveWebSearchModel("gpt-4o-search-preview"); got != defaultWebSearchModel {
+		t.Fatalf("got %s want %s", got, defaultWebSearchModel)
+	}
+	t.Setenv("OPENAI_WEB_SEARCH_MODEL", "gpt-4.1-mini")
+	if got := resolveWebSearchModel(""); got != "gpt-4.1-mini" {
+		t.Fatalf("got %s", got)
+	}
+}
+
 func TestIsReasoningModel(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

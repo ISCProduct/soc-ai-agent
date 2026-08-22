@@ -8,33 +8,34 @@ import (
 
 // Company 企業情報
 type Company struct {
-	ID               uint       `gorm:"primaryKey" json:"id"`
-	Name             string     `gorm:"type:varchar(255);not null" json:"name"`
-	NameReading      string     `gorm:"type:varchar(255)" json:"name_reading"` // 企業名の読み仮名（ふりがな）
-	Description      string     `gorm:"type:text" json:"description"`
-	Industry         string     `gorm:"type:varchar(100);index:idx_companies_active_status_industry,priority:3" json:"industry"`
-	EmployeeCount    int        `gorm:"default:0" json:"employee_count"`
-	FoundedYear      int        `json:"founded_year"`
-	Location         string     `gorm:"type:varchar(255)" json:"location"`
-	WebsiteURL       string     `gorm:"type:varchar(500)" json:"website_url"`
-	LogoURL          string     `gorm:"type:varchar(500)" json:"logo_url"`
-	CorporateNumber  string     `gorm:"type:varchar(13);index" json:"corporate_number"`
-	SourceType       string     `gorm:"type:varchar(50)" json:"source_type"` // official, job_site, manual, scrape, web_search
-	SourceURL        string     `gorm:"type:varchar(500)" json:"source_url"`
-	SourceFetchedAt  *time.Time `json:"source_fetched_at,omitempty"`
-	IsProvisional    bool       `gorm:"default:true" json:"is_provisional"`
-	DataStatus       string     `gorm:"type:varchar(20);default:'draft';index:idx_companies_active_status_industry,priority:2;index:idx_companies_active_status_id,priority:2" json:"data_status"` // draft, published
-	GBizLastSyncedAt *time.Time `json:"gbiz_last_synced_at,omitempty"`
-	GBizSyncStatus   string     `gorm:"type:varchar(20)" json:"gbiz_sync_status"` // success, failed
-	GBizSyncMessage  string     `gorm:"type:text" json:"gbiz_sync_message"`
+	ID                 uint       `gorm:"primaryKey" json:"id"`
+	Name               string     `gorm:"type:varchar(255);not null" json:"name"`
+	NameReading        string     `gorm:"type:varchar(255)" json:"name_reading"` // 企業名の読み仮名（ふりがな）
+	Description        string     `gorm:"type:text" json:"description"`
+	Industry           string     `gorm:"type:varchar(100);index:idx_companies_active_status_industry,priority:3" json:"industry"`
+	EmployeeCount      int        `gorm:"default:0" json:"employee_count"`
+	EmployeeCountBasis string     `gorm:"type:varchar(16);not null;default:''" json:"employee_count_basis,omitempty"` // consolidated|standalone
+	FoundedYear        int        `json:"founded_year"`
+	Location           string     `gorm:"type:varchar(255)" json:"location"`
+	WebsiteURL         string     `gorm:"type:varchar(500)" json:"website_url"`
+	LogoURL            string     `gorm:"type:varchar(500)" json:"logo_url"`
+	CorporateNumber    string     `gorm:"type:varchar(13);index" json:"corporate_number"`
+	SourceType         string     `gorm:"type:varchar(50)" json:"source_type"` // official, job_site, manual, scrape, web_search
+	SourceURL          string     `gorm:"type:varchar(500)" json:"source_url"`
+	SourceFetchedAt    *time.Time `json:"source_fetched_at,omitempty"`
+	IsProvisional      bool       `gorm:"default:true" json:"is_provisional"`
+	DataStatus         string     `gorm:"type:varchar(20);default:'draft';index:idx_companies_active_status_industry,priority:2;index:idx_companies_active_status_id,priority:2" json:"data_status"` // draft, published
+	GBizLastSyncedAt   *time.Time `json:"gbiz_last_synced_at,omitempty"`
+	GBizSyncStatus     string     `gorm:"type:varchar(20)" json:"gbiz_sync_status"` // success, failed
+	GBizSyncMessage    string     `gorm:"type:text" json:"gbiz_sync_message"`
 
 	// #557 フィールド別鮮度・provenance
-	InfoFetchedAt        *time.Time `json:"info_fetched_at,omitempty"`
-	JobsFetchedAt        *time.Time `json:"jobs_fetched_at,omitempty"`
-	TechFetchedAt        *time.Time `json:"tech_fetched_at,omitempty"`
-	RelationsFetchedAt   *time.Time `json:"relations_fetched_at,omitempty"`
-	LastModelUsed        string     `gorm:"type:varchar(64)" json:"last_model_used,omitempty"`
-	LastFetchConfidence  string     `gorm:"type:varchar(16)" json:"last_fetch_confidence,omitempty"` // high|medium|low
+	InfoFetchedAt       *time.Time `json:"info_fetched_at,omitempty"`
+	JobsFetchedAt       *time.Time `json:"jobs_fetched_at,omitempty"`
+	TechFetchedAt       *time.Time `json:"tech_fetched_at,omitempty"`
+	RelationsFetchedAt  *time.Time `json:"relations_fetched_at,omitempty"`
+	LastModelUsed       string     `gorm:"type:varchar(64)" json:"last_model_used,omitempty"`
+	LastFetchConfidence string     `gorm:"type:varchar(16)" json:"last_fetch_confidence,omitempty"` // high|medium|low
 
 	// 企業の特徴・文化
 	Culture        string `gorm:"type:text" json:"culture"`            // 企業文化の説明
@@ -56,8 +57,8 @@ type Company struct {
 	IsActive   bool `gorm:"default:true;index:idx_companies_active_status_industry,priority:1;index:idx_companies_active_status_id,priority:1" json:"is_active"`
 	IsVerified bool `gorm:"default:false" json:"is_verified"` // 認証済み企業フラグ
 
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 }
 
@@ -90,8 +91,8 @@ type CompanyJobPosition struct {
 	IsActive   bool   `gorm:"default:true;index:idx_company_job_positions_active_status,priority:1" json:"is_active"`
 	DataStatus string `gorm:"type:varchar(20);default:'draft';index:idx_company_job_positions_active_status,priority:2" json:"data_status"` // draft, published, rejected
 
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 }
 

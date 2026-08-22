@@ -12,6 +12,7 @@ import {
   Checkbox,
   Chip,
   CircularProgress,
+  LinearProgress,
   FormControl,
   FormControlLabel,
   IconButton,
@@ -42,12 +43,30 @@ import { AdminPanel } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { companyAspectHref, type CompanyAspect } from '@/components/admin/CompanyAspectTabs'
 import { fetchCompanyPrimary, formatFetchPrimarySummary, formatFetchPrimaryEmptyAspects, hasActionableSoftEmpty } from '@/lib/admin-company-fetch'
+import {
+  applyBatchWave,
+  batchItemFailuresFromResponse,
+  batchProgressPercent,
+  batchWaveFromResponse,
+  candidateCountFromResponse,
+  emptyBatchProgress,
+  formatBatchFailureDetail,
+  formatBatchProgressLabel,
+  shouldContinueBatch,
+  type BatchItemFailure,
+  type BatchProgress,
+} from '@/lib/admin-company-batch-progress'
 import { resolveIndustryFieldProfile } from '@/lib/admin-company-field-profile'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
 
 const PAGE_SIZE = 50
-/** 並列取得（Backend concurrency=4）前提。タイムアウト回避のため上限は控えめ */
-const GLOBAL_BATCH_LIMIT = 20
+/** 企業間並列。I/O待ちなので 8 まで。それ以上は OpenAI RPM が先に壊れる。 */
+const GLOBAL_BATCH_CONCURRENCY = 8
+/** 1リクエスト内でワーカープールを回す。6社区切りだと早い社が次を待てない。 */
+const GLOBAL_BATCH_WAVE_LIMIT = 24
+const GLOBAL_BATCH_PREVIEW_LIMIT = 50
+const GLOBAL_BATCH_MAX_ROUNDS = 20
+const WARM_L1_WAVE_LIMIT = 30
 /** Backend の業界未設定フィルタ用センチネル */
 const INDUSTRY_UNSET = '__unset__'
 
@@ -190,6 +209,7 @@ export default function AdminCompaniesPage() {
   const [fetchMessage, setFetchMessage] = useState('')
   const [fetchSeverity, setFetchSeverity] = useState<'success' | 'warning'>('success')
   const [missingBatchLoading, setMissingBatchLoading] = useState(false)
+  const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null)
   const [menuAnchor, setMenuAnchor] = useState<{ el: HTMLElement; company: Company } | null>(null)
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [bulkPublishing, setBulkPublishing] = useState(false)
@@ -396,34 +416,87 @@ export default function AdminCompaniesPage() {
     }
   }
 
+  const postCompanyBatch = async (
+    path: '/api/admin/companies/fetch-missing-batch' | '/api/admin/companies/warm-l1',
+    body: Record<string, unknown>,
+  ): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> => {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: {
+        ...authService.getAdminFetchHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
+    return { ok: res.ok, status: res.status, data }
+  }
+
   const handleWarmL1 = async (dryRun: boolean) => {
     setWarming(true)
     setWarmMessage('')
+    setBatchProgress(null)
     setError('')
     try {
-      const res = await fetch('/api/admin/companies/warm-l1', {
-        method: 'POST',
-        headers: {
-          ...authService.getAdminFetchHeaders(),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ limit: 100, dry_run: dryRun, include_info: true, include_persona: true }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data?.error || data?.message || 'マッチング用データの更新に失敗しました')
+      if (dryRun) {
+        const { ok, data } = await postCompanyBatch('/api/admin/companies/warm-l1', {
+          limit: 100,
+          dry_run: true,
+          include_info: true,
+          include_persona: true,
+          concurrency: GLOBAL_BATCH_CONCURRENCY,
+        })
+        if (!ok) {
+          setError(String(data.error || data.message || 'マッチング用データの更新に失敗しました'))
+          return
+        }
+        setWarmMessage(`確認のみ: 対象は約 ${candidateCountFromResponse(data)} 社です（一度に最大 ${data.limit ?? 100} 社）`)
+        if (data.coverage && typeof data.coverage === 'object') {
+          setCoverage(data.coverage as L1Coverage)
+        }
         return
       }
-      if (dryRun) {
-        setWarmMessage(`確認のみ: 対象は約 ${data.candidate_count ?? 0} 社です（一度に最大 ${data.limit} 社）`)
-      } else {
-        setWarmMessage(
-          `更新完了: ${data.processed ?? 0} 社を処理しました` +
-            `（会社情報 ${data.info_ok ?? 0} / マッチング情報 ${data.persona_ok ?? 0} / 失敗 ${data.errors ?? 0}）`,
-        )
+
+      const preview = await postCompanyBatch('/api/admin/companies/warm-l1', {
+        limit: 100,
+        dry_run: true,
+        include_info: true,
+        include_persona: true,
+      })
+      let progress = emptyBatchProgress(
+        Math.max(candidateCountFromResponse(preview.data), coverage?.needs_warm ?? 0),
+      )
+      setBatchProgress(progress)
+      setWarmMessage(formatBatchProgressLabel(progress, true))
+
+      for (;;) {
+        const { ok, data } = await postCompanyBatch('/api/admin/companies/warm-l1', {
+          limit: WARM_L1_WAVE_LIMIT,
+          dry_run: false,
+          include_info: true,
+          include_persona: true,
+          concurrency: GLOBAL_BATCH_CONCURRENCY,
+        })
+        if (!ok) {
+          setError(String(data.error || data.message || 'マッチング用データの更新に失敗しました'))
+          break
+        }
+        const wave = {
+          ...batchWaveFromResponse(data),
+          persona_ok: Number(data.persona_ok ?? 0),
+        }
+        progress = applyBatchWave(progress, wave, WARM_L1_WAVE_LIMIT)
+        setBatchProgress(progress)
+        setWarmMessage(formatBatchProgressLabel(progress, true))
+        if (data.coverage && typeof data.coverage === 'object') {
+          setCoverage(data.coverage as L1Coverage)
+        }
+        if (!shouldContinueBatch(wave, WARM_L1_WAVE_LIMIT, progress.rounds, GLOBAL_BATCH_MAX_ROUNDS)) {
+          break
+        }
       }
-      if (data.coverage) setCoverage(data.coverage)
-      else await fetchCoverage()
+      setWarmMessage(formatBatchProgressLabel(progress, false))
+      await fetchCoverage()
     } finally {
       setWarming(false)
     }
@@ -433,27 +506,20 @@ export default function AdminCompaniesPage() {
     setMissingBatchLoading(true)
     setFetchMessage('')
     setFetchSeverity('success')
+    setBatchProgress(null)
     setError('')
     try {
-      const res = await fetch('/api/admin/companies/fetch-missing-batch', {
-        method: 'POST',
-        headers: {
-          ...authService.getAdminFetchHeaders(),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          limit: GLOBAL_BATCH_LIMIT,
-          dry_run: dryRun,
-          primary_only: true,
-          concurrency: 4,
-        }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setError(data?.error || data?.message || `まとめて取得に失敗しました (${res.status})`)
-        return
-      }
       if (dryRun) {
+        const { ok, status, data } = await postCompanyBatch('/api/admin/companies/fetch-missing-batch', {
+          limit: GLOBAL_BATCH_PREVIEW_LIMIT,
+          dry_run: true,
+          primary_only: true,
+          concurrency: GLOBAL_BATCH_CONCURRENCY,
+        })
+        if (!ok) {
+          setError(String(data.error || data.message || `まとめて取得に失敗しました (${status})`))
+          return
+        }
         const names = Array.isArray(data.items)
           ? (data.items as { name?: string }[])
               .slice(0, 5)
@@ -461,51 +527,68 @@ export default function AdminCompaniesPage() {
               .filter(Boolean)
               .join('、')
           : ''
-        const n = Number(data.candidate_n ?? 0)
+        const n = candidateCountFromResponse(data)
         if (n === 0) {
           setFetchSeverity('warning')
           setFetchMessage('いま取得対象になる企業はありません（会社概要・技術情報・関連企業がすでにそろっているか、対象候補が見つかりませんでした）。')
         } else {
           setFetchMessage(
-            `情報が足りない企業は ${n} 社です` +
+            `情報が足りない企業は ${n}${n >= GLOBAL_BATCH_PREVIEW_LIMIT ? ' 社以上' : ' 社'}です` +
               (names ? `（例: ${names}${n > 5 ? ' など' : ''}）` : '') +
-              `。一度に最大 ${data.limit} 社まで取得できます。`,
+              '。取得を始めると件数の進捗が表示されます。',
           )
         }
-      } else {
-        const errs = Number(data.errors ?? 0)
-        const processed = Number(data.processed ?? 0)
-        const infoOk = Number(data.info_ok ?? 0)
-        const techOk = Number(data.tech_ok ?? 0)
-        const relOk = Number(data.relations_ok ?? 0)
-        const skipped = Number(data.skipped ?? 0)
-        const filled = infoOk + techOk + relOk
-        if (processed === 0) {
-          setFetchSeverity('warning')
-          setFetchMessage('取得対象の企業が見つかりませんでした。一覧で「まだ足りない情報があります」と出ている企業がある場合は、時間をおいて再度お試しください。')
-        } else if (filled === 0) {
-          setFetchSeverity('warning')
-          setFetchMessage(
-            `${processed} 社を処理しましたが、新しく保存できた情報はありません` +
-              `（スキップ ${skipped} / エラー ${errs}）。すでに取得済みか、取得に失敗した可能性があります。`,
-          )
-          if (errs > 0) {
-            setError(`${errs} 社で取得に失敗しました。時間をおいて再度お試しください。`)
-          }
-        } else {
-          setFetchSeverity(errs > 0 ? 'warning' : 'success')
-          setFetchMessage(
-            `${processed} 社を処理し、会社概要 ${infoOk} / 技術 ${techOk} / 関連企業 ${relOk} を更新しました` +
-              (skipped > 0 ? `（スキップ ${skipped}）` : '') +
-              (errs > 0 ? `。${errs} 社はうまく取得できませんでした。` : '。内容を確認してから公開してください。'),
-          )
-          if (errs > 0) {
-            setError(`${errs} 社で取得に失敗しました。時間をおいて再度お試しください。`)
-          }
-        }
-        await reloadCurrentList()
-        await fetchCoverage()
+        return
       }
+
+      const preview = await postCompanyBatch('/api/admin/companies/fetch-missing-batch', {
+        limit: GLOBAL_BATCH_PREVIEW_LIMIT,
+        dry_run: true,
+        primary_only: true,
+        concurrency: GLOBAL_BATCH_CONCURRENCY,
+      })
+      let progress = emptyBatchProgress(candidateCountFromResponse(preview.data))
+      setBatchProgress(progress)
+      setFetchMessage(formatBatchProgressLabel(progress, true))
+      const failures: BatchItemFailure[] = []
+
+      for (;;) {
+        const { ok, status, data } = await postCompanyBatch('/api/admin/companies/fetch-missing-batch', {
+          limit: GLOBAL_BATCH_WAVE_LIMIT,
+          dry_run: false,
+          primary_only: true,
+          concurrency: GLOBAL_BATCH_CONCURRENCY,
+        })
+        if (!ok) {
+          setError(String(data.error || data.message || `まとめて取得に失敗しました (${status})`))
+          break
+        }
+        const wave = batchWaveFromResponse(data)
+        progress = applyBatchWave(progress, wave, GLOBAL_BATCH_WAVE_LIMIT)
+        failures.push(...batchItemFailuresFromResponse(data))
+        setBatchProgress(progress)
+        setFetchSeverity(progress.errors > 0 ? 'warning' : 'success')
+        setFetchMessage(formatBatchProgressLabel(progress, true))
+        if (!shouldContinueBatch(wave, GLOBAL_BATCH_WAVE_LIMIT, progress.rounds, GLOBAL_BATCH_MAX_ROUNDS)) {
+          break
+        }
+      }
+
+      if (progress.processed === 0) {
+        setFetchSeverity('warning')
+        setFetchMessage('取得対象の企業が見つかりませんでした。一覧で「まだ足りない情報があります」と出ている企業がある場合は、時間をおいて再度お試しください。')
+      } else {
+        setFetchSeverity(progress.errors > 0 ? 'warning' : 'success')
+        setFetchMessage(formatBatchProgressLabel(progress, false) + '。内容を確認してから公開してください。')
+        if (progress.errors > 0) {
+          setError(
+            formatBatchFailureDetail(failures) ||
+              `${progress.errors} 社で取得に失敗しました。時間をおいて再度お試しください。`,
+          )
+        }
+      }
+      await reloadCurrentList()
+      await fetchCoverage()
     } finally {
       setMissingBatchLoading(false)
     }
@@ -683,6 +766,27 @@ export default function AdminCompaniesPage() {
   const busy = warming || missingBatchLoading || fetchPrimaryId !== null || bulkPublishing
   const selectedCount = selectedIds.length
 
+  useEffect(() => {
+    if (!busy) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    const onClick = (e: MouseEvent) => {
+      const el = e.target
+      if (!(el instanceof Element)) return
+      if (!el.closest('a[href]')) return
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    document.addEventListener('click', onClick, true)
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload)
+      document.removeEventListener('click', onClick, true)
+    }
+  }, [busy])
+
   return (
     <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>
       <AdminPageHeader
@@ -692,9 +796,15 @@ export default function AdminCompaniesPage() {
             ? `${filterSummary} の結果 ${total.toLocaleString()} 件`
             : `学生課の先生が、学生に見せる企業情報を登録・確認・公開するための画面です。登録 ${total.toLocaleString()} 社`
         }
-        backHref="/admin"
+        backHref={busy ? undefined : '/admin'}
         actions={
-          <Button variant="contained" component={Link} href="/admin/companies/new" disableElevation>
+          <Button
+            variant="contained"
+            component={Link}
+            href="/admin/companies/new"
+            disableElevation
+            disabled={busy}
+          >
             企業を追加
           </Button>
         }
@@ -754,10 +864,25 @@ export default function AdminCompaniesPage() {
               足りない情報をまとめて取得
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              まだそろっていない会社概要・技術情報・関連企業を、一度に最大 {GLOBAL_BATCH_LIMIT}{' '}
-              社まで自動で集めます（複数社を同時に取得します。足りなければ繰り返してください）。
+              まだそろっていない会社概要・技術情報・関連企業を自動で集めます。
+              処理した社数と内訳が進捗バーに出ます。足りなければ続きから再度実行できます。
               取得後は必ず内容を確認してから公開してください。
             </Typography>
+            {missingBatchLoading && batchProgress && (
+              <Box sx={{ mt: 1.5 }}>
+                <LinearProgress
+                  variant="determinate"
+                  value={batchProgressPercent(batchProgress)}
+                  sx={{ height: 8, borderRadius: 4 }}
+                />
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+                  {formatBatchProgressLabel(batchProgress, true)}
+                </Typography>
+                <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 0.25 }}>
+                  取得中はページを更新・移動しないでください。途中結果の表示が消えます。
+                </Typography>
+              </Box>
+            )}
           </Box>
           <Stack direction="row" spacing={1} flexShrink={0}>
             <Button variant="outlined" disabled={busy} onClick={() => handleFetchMissingBatch(true)}>
@@ -771,7 +896,7 @@ export default function AdminCompaniesPage() {
               startIcon={missingBatchLoading ? <CircularProgress size={16} color="inherit" /> : <RefreshIcon />}
               disableElevation
             >
-              {missingBatchLoading ? '取得中…' : 'まとめて取得'}
+              {missingBatchLoading ? `取得中 ${batchProgressPercent(batchProgress ?? emptyBatchProgress())}%` : 'まとめて取得'}
             </Button>
           </Stack>
         </Stack>
@@ -1337,6 +1462,18 @@ export default function AdminCompaniesPage() {
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
                   {warmMessage}
                 </Typography>
+              )}
+              {warming && batchProgress && (
+                <Box sx={{ mb: 1 }}>
+                  <LinearProgress
+                    variant="determinate"
+                    value={batchProgressPercent(batchProgress)}
+                    sx={{ height: 6, borderRadius: 3 }}
+                  />
+                  <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 0.5 }}>
+                    更新中はページを更新・移動しないでください。途中結果の表示が消えます。
+                  </Typography>
+                </Box>
               )}
               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                 <Button variant="text" size="small" disabled={busy} onClick={() => handleSeedL1()}>

@@ -45,6 +45,7 @@ export interface CompanySummary {
   description?: string
   main_business?: string
   employee_count?: number
+  employee_count_basis?: 'consolidated' | 'standalone' | string
   founded_year?: number
   website_url?: string
 }
@@ -116,6 +117,17 @@ export async function fetchCompanyMarketInfo(): Promise<CompanyMarketInfo[]> {
   }
 }
 
+export function formatEmployeeCount(
+  count?: number | null,
+  basis?: string | null,
+): string {
+  if (count == null || count <= 0) return ''
+  const n = count.toLocaleString()
+  if (basis === 'consolidated') return `${n}名（連結）`
+  if (basis === 'standalone') return `${n}名（単体）`
+  return `${n}名`
+}
+
 /**
  * 企業詳細（サマリー）を取得する。
  * @throws {CompanyDataFetchError} HTTP エラーまたはネットワーク失敗時
@@ -141,6 +153,10 @@ export async function fetchCompanySummary(companyId: number): Promise<CompanySum
       description: typeof data.description === 'string' ? data.description : undefined,
       main_business: typeof data.main_business === 'string' ? data.main_business : undefined,
       employee_count: typeof data.employee_count === 'number' ? data.employee_count : undefined,
+      employee_count_basis:
+        data.employee_count_basis === 'consolidated' || data.employee_count_basis === 'standalone'
+          ? data.employee_count_basis
+          : undefined,
       founded_year: typeof data.founded_year === 'number' ? data.founded_year : undefined,
       website_url: typeof data.website_url === 'string' ? data.website_url : undefined,
     }
