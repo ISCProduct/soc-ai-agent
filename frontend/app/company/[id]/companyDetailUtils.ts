@@ -12,6 +12,8 @@ export function parseJsonArray(s?: string): string[] {
   }
 }
 
+import { formatEmployeeCount } from '@/lib/company-data'
+
 /** API / プロキシ応答から企業オブジェクトを取り出す */
 export function unwrapCompanyRecord(raw: unknown): Record<string, unknown> | null {
   if (!raw || typeof raw !== 'object') return null
@@ -64,7 +66,9 @@ export function mapCompanyApiToViewModel(raw: unknown): CompanyDetailViewModel |
       : []
 
   const employeeCount = typeof data.employee_count === 'number' ? data.employee_count : undefined
+  const employeeBasis = typeof data.employee_count_basis === 'string' ? data.employee_count_basis : undefined
   const foundedYear = typeof data.founded_year === 'number' ? data.founded_year : undefined
+  const employees = formatEmployeeCount(employeeCount, employeeBasis)
 
   return {
     id,
@@ -85,8 +89,8 @@ export function mapCompanyApiToViewModel(raw: unknown): CompanyDetailViewModel |
     culture,
     founded: foundedYear ? `${foundedYear}年` : '',
     website: typeof data.website_url === 'string' ? data.website_url : '',
-    employees: employeeCount ? `${employeeCount}名` : '',
-    size: employeeCount ? `${employeeCount}名規模` : '',
+    employees,
+    size: employees ? `${employees}規模` : '',
     parentCompany: typeof data.parentCompany === 'string' ? data.parentCompany : undefined,
     subsidiaries: Array.isArray(data.subsidiaries) ? data.subsidiaries.map(String) : undefined,
     partnerships: Array.isArray(data.partnerships) ? data.partnerships.map(String) : undefined,

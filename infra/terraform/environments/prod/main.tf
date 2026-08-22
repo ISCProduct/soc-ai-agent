@@ -289,11 +289,14 @@ module "backend" {
   secret_arns       = local.backend_secret_arns
   secrets           = local.backend_secrets
   environment = {
-    APP_ENV        = "production"
-    AWS_REGION     = var.region
-    AWS_S3_BUCKET  = module.s3.bucket_id
-    EMAIL_PROVIDER = "resend"
-    EMAIL_FROM     = "noreply@shukatsu-ai.jp"
+    APP_ENV                       = "production"
+    AWS_REGION                    = var.region
+    AWS_S3_BUCKET                 = module.s3.bucket_id
+    EMAIL_PROVIDER                = "resend"
+    EMAIL_FROM                    = "noreply@shukatsu-ai.jp"
+    OPENAI_WEB_SEARCH_MODEL       = "gpt-4o-mini"
+    OPENAI_COMPANY_SEARCH_MODEL   = "gpt-4o-mini"
+    OPENAI_HINTS_MODEL            = "gpt-4o-mini"
     # 未設定だとOAuthコールバックURLがlocalhost:8080にフォールバックし、
     # 本番でOAuthログインが機能しなくなる(実際に発生した障害)。
     BASE_URL = "https://${local.backend_domain}"

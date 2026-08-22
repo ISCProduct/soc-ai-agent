@@ -350,6 +350,9 @@ func applyGBizProfile(company *models.Company, profile *models.GBizCompanyProfil
 	}
 	if company.EmployeeCount == 0 && profile.EmployeeNumber > 0 {
 		company.EmployeeCount = profile.EmployeeNumber
+		if company.EmployeeCountBasis == "" {
+			company.EmployeeCountBasis = models.EmployeeCountBasisStandalone
+		}
 	}
 	if company.FoundedYear == 0 && len(profile.DateEstablished) >= 4 {
 		if year, err := strconv.Atoi(profile.DateEstablished[:4]); err == nil {

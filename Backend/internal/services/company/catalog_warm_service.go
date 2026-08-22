@@ -19,7 +19,7 @@ import (
 const (
 	defaultL1WarmLimit       = 100
 	maxL1WarmLimit           = 300
-	defaultL1WarmConcurrency = 4
+	defaultL1WarmConcurrency = 8
 )
 
 // CatalogWarmService はマッチング用 L1 カタログ（基本情報 + WeightProfile）を温存する。

@@ -13,20 +13,18 @@ import (
 	"time"
 )
 
+type responsesRequest struct {
+	Model           string           `json:"model"`
+	Input           any              `json:"input"`
+	MaxOutputTokens int              `json:"max_output_tokens,omitempty"`
+	Temperature     *float32         `json:"temperature,omitempty"`
+	Text            any              `json:"text,omitempty"`
+	Reasoning       any              `json:"reasoning,omitempty"`
+	Tools           []map[string]any `json:"tools,omitempty"`
+	ToolChoice      any              `json:"tool_choice,omitempty"`
+}
+
 func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string, temperature *float32, maxOutputTokens int, includeTextFormat bool) (string, error) {
-	if cli.apiKey == "" {
-		return "", errors.New("openai api key is not set")
-	}
-
-	type responsesRequest struct {
-		Model           string   `json:"model"`
-		Input           any      `json:"input"`
-		MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
-		Temperature     *float32 `json:"temperature,omitempty"`
-		Text            any      `json:"text,omitempty"`
-		Reasoning       any      `json:"reasoning,omitempty"`
-	}
-
 	payload := responsesRequest{
 		Model:           model,
 		Input:           input,
@@ -45,6 +43,14 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 			},
 		}
 	}
+	return cli.doResponses(ctx, payload)
+}
+
+func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (string, error) {
+	if cli.apiKey == "" {
+		return "", errors.New("openai api key is not set")
+	}
+
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
@@ -108,7 +114,7 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 		return "", err
 	}
 	if cli.OnUsage != nil && (parsed.Usage.InputTokens > 0 || parsed.Usage.OutputTokens > 0) {
-		cli.OnUsage(model, parsed.Usage.InputTokens, parsed.Usage.OutputTokens)
+		cli.OnUsage(payload.Model, parsed.Usage.InputTokens, parsed.Usage.OutputTokens)
 		if parsed.Usage.PromptTokensDetails != nil {
 			cached := parsed.Usage.PromptTokensDetails.CachedTokens
 			var hit float64
@@ -117,14 +123,14 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 			}
 			// 日本語プレーンテキストログ: 見込まれる改善率、キャッシュ利用、ヒット率
 			if cached > 0 && parsed.Usage.InputTokens > 0 {
-				log.Printf("[openai] model=%s OpenAIプロンプトキャッシュ: 見込まれる改善率=%.2f%% キャッシュ利用=%d/%d ヒット率=%.2f", model, hit*100, cached, parsed.Usage.InputTokens, hit)
+				log.Printf("[openai] model=%s OpenAIプロンプトキャッシュ: 見込まれる改善率=%.2f%% キャッシュ利用=%d/%d ヒット率=%.2f", payload.Model, hit*100, cached, parsed.Usage.InputTokens, hit)
 			} else {
-				log.Printf("[openai] model=%s OpenAIプロンプトキャッシュ: 見込まれる改善率=0.00%% キャッシュ利用=%d/%d ヒット率=0.00", model, cached, parsed.Usage.InputTokens)
+				log.Printf("[openai] model=%s OpenAIプロンプトキャッシュ: 見込まれる改善率=0.00%% キャッシュ利用=%d/%d ヒット率=0.00", payload.Model, cached, parsed.Usage.InputTokens)
 			}
 			// JSON structured log for machines
 			if jl, err := json.Marshal(map[string]any{
 				"event":          "openai_prompt_cache",
-				"model":          model,
+				"model":          payload.Model,
 				"cached_tokens":  cached,
 				"input_tokens":   parsed.Usage.InputTokens,
 				"cache_hit_rate": hit,

@@ -4,6 +4,7 @@ import (
 	"Backend/internal/config"
 	"Backend/internal/models"
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -122,6 +123,32 @@ func TestMissingNeedsFromCompany(t *testing.T) {
 	_, _, tech, _ = MissingNeedsFromCompany(infraOnly)
 	if !tech {
 		t.Fatal("infra/style only should still need tech_stack")
+	}
+}
+
+func TestMissingBatchDefaults(t *testing.T) {
+	if defaultMissingBatchConcurrency != 8 {
+		t.Fatalf("default concurrency=%d want 8", defaultMissingBatchConcurrency)
+	}
+	if got := config.MissingBatchDefaultLimit(); got != 30 {
+		t.Fatalf("default limit=%d want 30", got)
+	}
+	if got := config.MissingBatchMaxConcurrency(); got != 8 {
+		t.Fatalf("max concurrency=%d want 8", got)
+	}
+}
+
+func TestRun_UsesDefaultConcurrencyAndLimit(t *testing.T) {
+	svc := NewCompanyMissingBatchService(&missingBatchRepoStub{}, nil, nil, nil, nil)
+	result, err := svc.Run(context.Background(), MissingBatchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Concurrency != defaultMissingBatchConcurrency {
+		t.Fatalf("concurrency=%d want %d", result.Concurrency, defaultMissingBatchConcurrency)
+	}
+	if result.Limit != config.MissingBatchDefaultLimit() {
+		t.Fatalf("limit=%d want %d", result.Limit, config.MissingBatchDefaultLimit())
 	}
 }
 
@@ -278,5 +305,68 @@ func TestCompanyMissingBatchService_RunParallelNilFetchers(t *testing.T) {
 		if item.InfoStatus != "skipped_no_fetcher" {
 			t.Fatalf("info_status=%q", item.InfoStatus)
 		}
+	}
+	if result.StopReason != "no_fills" {
+		t.Fatalf("stop_reason=%q want no_fills", result.StopReason)
+	}
+}
+
+func TestMissingBatchStopReason(t *testing.T) {
+	tests := []struct {
+		name string
+		in   *MissingBatchResult
+		want string
+	}{
+		{"nil", nil, "empty_result"},
+		{"dry_run", &MissingBatchResult{DryRun: true, Processed: 6}, "dry_run"},
+		{"no_candidates", &MissingBatchResult{Limit: 6}, "no_candidates"},
+		{"all_failed", &MissingBatchResult{Processed: 6, Errors: 6, Limit: 6}, "all_failed"},
+		{"no_fills", &MissingBatchResult{Processed: 6, Skipped: 6, Limit: 6}, "no_fills"},
+		{"partial_wave", &MissingBatchResult{Processed: 2, InfoOK: 2, Limit: 6}, "partial_wave"},
+		{"wave_full", &MissingBatchResult{Processed: 6, InfoOK: 3, Limit: 6}, "wave_full"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := missingBatchStopReason(tt.in); got != tt.want {
+				t.Fatalf("got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMissingBatchFailureLog(t *testing.T) {
+	got := missingBatchFailureLog([]MissingBatchItem{
+		{CompanyID: 1, Name: "A社", Error: "info: budget"},
+		{CompanyID: 2, Name: "B社", Error: ""},
+		{CompanyID: 3, Name: "C社", Error: "openai client is nil"},
+	}, 20)
+	if !strings.Contains(got, "id=1 A社: info: budget") {
+		t.Fatalf("missing first failure: %s", got)
+	}
+	if !strings.Contains(got, "id=3 C社: openai client is nil") {
+		t.Fatalf("missing third failure: %s", got)
+	}
+	if strings.Contains(got, "B社") {
+		t.Fatalf("empty error should be omitted: %s", got)
+	}
+}
+
+func TestEnrichGapsWithAI_KeepsGBizWhenSearchFails(t *testing.T) {
+	f := NewCompanyInfoFetcher(nil, nil)
+	base := &CompanyInfoResult{
+		Location:   "東京都千代田区",
+		WebsiteURL: "https://example.co.jp",
+		Source:     "gbizinfo",
+		ModelUsed:  "gbizinfo",
+	}
+	got, err := f.enrichGapsWithAI(context.Background(), "テスト株式会社", "", base)
+	if err != nil {
+		t.Fatalf("gBiz result must not be discarded: %v", err)
+	}
+	if got.Location != "東京都千代田区" || got.WebsiteURL != "https://example.co.jp" {
+		t.Fatalf("lost gbiz fields: %+v", got)
+	}
+	if !strings.Contains(got.ModelUsed, "ai_enrich_failed") {
+		t.Fatalf("model_used=%q", got.ModelUsed)
 	}
 }

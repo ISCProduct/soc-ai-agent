@@ -142,6 +142,22 @@ func TestWarmL1_RunsInParallelWithNilFetchers(t *testing.T) {
 	}
 }
 
+func TestL1WarmDefaultConcurrency(t *testing.T) {
+	if defaultL1WarmConcurrency != 8 {
+		t.Fatalf("default concurrency=%d want 8", defaultL1WarmConcurrency)
+	}
+	svc := NewCatalogWarmService(&warmRepoStub{
+		stats: &models.L1CoverageStats{},
+	}, nil, nil)
+	result, err := svc.WarmL1(context.Background(), L1WarmOptions{DryRun: true, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Concurrency != defaultL1WarmConcurrency {
+		t.Fatalf("concurrency=%d want %d", result.Concurrency, defaultL1WarmConcurrency)
+	}
+}
+
 func TestClampL1WarmConcurrency(t *testing.T) {
 	tests := []struct {
 		name string

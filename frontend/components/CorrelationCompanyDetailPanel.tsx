@@ -17,6 +17,7 @@ import {
 } from '@/lib/correlation-diagram-navigation'
 import {
   fetchCompanySummary,
+  formatEmployeeCount,
   marketColors,
   marketLabels,
   type CompanySummary,
@@ -145,11 +146,7 @@ export default function CorrelationCompanyDetailPanel({
             <InfoRow label="所在地" value={company.location} />
             <InfoRow
               label="従業員数"
-              value={
-                company.employee_count != null
-                  ? `${company.employee_count.toLocaleString()}名`
-                  : undefined
-              }
+              value={formatEmployeeCount(company.employee_count, company.employee_count_basis) || undefined}
             />
             <InfoRow
               label="設立"

@@ -100,9 +100,9 @@ func (f *CompanyRelationsFetcher) SetSearchFlight(flight *CompanySearchFlight) {
 }
 
 const companyRelationsJSONSchema = `{
-  "subsidiaries": [{"name": "子会社・グループ会社名", "ratio": 出資比率（不明なら省略）, "description": "資本関係の具体内容（例: 完全子会社・議決権○%）"}],
-  "affiliates": [{"name": "資本提携・関連会社名", "description": "資本関係の具体内容（例: 資本業務提携・出資比率○%）"}],
-  "business_partners": [{"name": "はっきりした取引先名または省庁・自治体名（曖昧・JV・その他は禁止）", "description": "取引内容。公開事実が無くても業界・事業内容から妥当に推定できる内容を書いてよい。推定もできず種別しか分からない場合は空文字（表示は主要取引先）"}],
+  "subsidiaries": [{"name": "議決権50%以上の子会社名", "ratio": 出資比率パーセント（不明なら省略）, "description": "資本関係の具体内容（例: 完全子会社・議決権○%）"}],
+  "affiliates": [{"name": "議決権50%未満の資本提携・関連会社名", "ratio": 出資比率パーセント（不明なら省略）, "description": "資本関係の具体内容（例: 資本業務提携・出資比率○%）"}],
+  "business_partners": [{"name": "資本関係が無い取引先・業務提携先または省庁・自治体名（曖昧・JV・その他は禁止）", "description": "取引内容。公開事実が無くても業界・事業内容から妥当に推定できる内容を書いてよい。推定もできず種別しか分からない場合は空文字（表示は主要取引先）"}],
   "market_info": {
     "is_listed": true/false,
     "market_type": "prime|standard|growth|unlisted",
@@ -321,23 +321,25 @@ func (f *CompanyRelationsFetcher) acquireViaAISearch(ctx context.Context, compan
 重要な制約:
 - 実在がはっきりしない・曖昧な組織名（「共同企業体」「その他」「株式会社」のみ、「○○JV」など）は一切載せない。不明なら省略する。
 - 入札・調達・補助金の相手は、共同企業体名ではなく発注元の省庁・自治体・公的機関名を name に書く（例: デジタル庁、厚生労働省）。発注機関が不明ならその件は載せない。
-- 取引先の description は具体的な取引内容（推定可）。推定も弱く種別しか分からない場合は空文字（表示は主要取引先）。空の代わりに「主要取引先」と書かない。`
+- 取引先の description は具体的な取引内容（推定可）。推定も弱く種別しか分からない場合は空文字（表示は主要取引先）。空の代わりに「主要取引先」と書かない。
+- subsidiaries は議決権50%以上の子会社・完全子会社のみ。独立した上場企業は、出資が50%未満なら affiliates、資本関係が無ければ business_partners。
+- 出資比率が分かる場合は必ず ratio に入れる（パーセント、例: 100, 51, 5.02）。`
 	siteHint := ""
 	if websiteURL != "" {
 		siteHint = fmt.Sprintf("（参考公式URL: %s）", websiteURL)
 	}
 	searchPrompt := fmt.Sprintf(
 		`日本の企業「%s」%sについて、公開情報から次を調べてください。
-1. 子会社・グループ会社と資本関係の内容（はっきりした社名のみ）
-2. 資本提携・関連会社と提携内容（はっきりした社名のみ）
-3. 取引先（顧客・仕入先・業務提携先など）と取引内容。曖昧な社名は載せない
+1. 子会社・グループ会社（議決権50%%以上）と資本関係の内容。出資比率が分かればパーセントで
+2. 資本提携・関連会社（議決権50%%未満の出資）と提携内容
+3. 取引先・業務提携先（資本関係が無い相手。独立上場企業の協業含む）と取引内容。曖昧な社名は載せない
 4. 入札・調達・補助金がある場合は発注元の省庁・自治体名（共同企業体名は載せない）
 5. 上場区分・証券コード
 根拠URLがあれば含めてください。組織名が不明・曖昧ならその件は省略してください。`,
 		companyName, siteHint,
 	)
 	parseUser := fmt.Sprintf(
-		"企業名「%s」について次のJSON形式で回答してください。name ははっきりした組織名のみ（曖昧・JV・その他は禁止）。入札案件は省庁・自治体名。description は取引内容（推定可、弱ければ空）。\n%s",
+		"企業名「%s」について次のJSON形式で回答してください。name ははっきりした組織名のみ（曖昧・JV・その他は禁止）。subsidiaries は議決権50%%以上のみ。50%%未満の出資は affiliates。資本関係が無い相手は business_partners。入札案件は省庁・自治体名。ratio はパーセント。description は取引内容（推定可、弱ければ空）。\n%s",
 		companyName, companyRelationsJSONSchema,
 	)
 	raw, modelsUsed, err := f.llm.SearchLiteThenParse(ctx, searchPrompt, systemPrompt, parseUser, 1200)
@@ -568,6 +570,38 @@ type aiRelationName struct {
 	Description string   `json:"description"`
 }
 
+// capitalRelationType は出資比率を優先し、LLM の桶分けを上書きする。
+// 50%以上は子会社、0より大きく50未満は関連会社。比率不明なら申告どおり。
+func capitalRelationType(claimed string, ratio *float64) string {
+	if ratio != nil {
+		if *ratio >= 50 {
+			return "capital_subsidiary"
+		}
+		if *ratio > 0 {
+			return "capital_affiliate"
+		}
+	}
+	switch claimed {
+	case "capital_subsidiary", "capital_affiliate", "business_partner":
+		return claimed
+	default:
+		return "business_partner"
+	}
+}
+
+func appendParsedRelation(result *CompanyRelationsResult, item aiRelationName, claimed string) {
+	name := strings.TrimSpace(item.Name)
+	if !companyfetch.IsClearOrganizationName(name) {
+		return
+	}
+	result.Relations = append(result.Relations, RelationEntry{
+		Name:         name,
+		RelationType: capitalRelationType(claimed, item.Ratio),
+		Ratio:        item.Ratio,
+		Description:  companyfetch.SanitizeRelationDescription(item.Description),
+	})
+}
+
 func parseCompanyRelationsResult(text string) (*CompanyRelationsResult, error) {
 	obj, err := companyfetch.ExtractJSONObject(text)
 	if err != nil {
@@ -580,32 +614,13 @@ func parseCompanyRelationsResult(text string) (*CompanyRelationsResult, error) {
 
 	result := &CompanyRelationsResult{}
 	for _, item := range payload.Subsidiaries {
-		if name := strings.TrimSpace(item.Name); companyfetch.IsClearOrganizationName(name) {
-			result.Relations = append(result.Relations, RelationEntry{
-				Name:         name,
-				RelationType: "capital_subsidiary",
-				Ratio:        item.Ratio,
-				Description:  companyfetch.SanitizeRelationDescription(item.Description),
-			})
-		}
+		appendParsedRelation(result, item, "capital_subsidiary")
 	}
 	for _, item := range payload.Affiliates {
-		if name := strings.TrimSpace(item.Name); companyfetch.IsClearOrganizationName(name) {
-			result.Relations = append(result.Relations, RelationEntry{
-				Name:         name,
-				RelationType: "capital_affiliate",
-				Description:  companyfetch.SanitizeRelationDescription(item.Description),
-			})
-		}
+		appendParsedRelation(result, item, "capital_affiliate")
 	}
 	for _, item := range payload.BusinessPartners {
-		if name := strings.TrimSpace(item.Name); companyfetch.IsClearOrganizationName(name) {
-			result.Relations = append(result.Relations, RelationEntry{
-				Name:         name,
-				RelationType: "business_partner",
-				Description:  companyfetch.SanitizeRelationDescription(item.Description),
-			})
-		}
+		appendParsedRelation(result, item, "business_partner")
 	}
 	if payload.MarketInfo.MarketType != "" || payload.MarketInfo.StockCode != "" || payload.MarketInfo.IsListed {
 		result.MarketInfo = &CompanyMarketInfoResult{
