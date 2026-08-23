@@ -189,6 +189,11 @@ type UserApplicationStatus struct {
 	AppliedAt       *time.Time // 応募日
 	StatusUpdatedAt *time.Time // ステータス最終更新日
 
+	// ActiveDedupKey はDB生成列（#1017）。終了状態(withdrawn/rejected/accepted)ではNULLになり、
+	// それ以外は "user_id-company_id" になる。UNIQUE制約により進行中の重複応募をDBレベルで防ぐ。
+	// 読み取り専用（アプリ側から書き込まない）。
+	ActiveDedupKey *string `gorm:"column:active_dedup_key;->"`
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
