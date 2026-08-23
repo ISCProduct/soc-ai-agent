@@ -69,4 +69,30 @@ describe('ReportScreen', () => {
     screen.getByRole('button', { name: '再試行' }).click()
     expect(onRetryReport).toHaveBeenCalledTimes(1)
   })
+
+  it('finishFailed の場合、finishSession失敗のエラー文言と再試行ボタンを表示する(#1015)', () => {
+    const onRetryFinish = jest.fn()
+    renderScreen({
+      errorMessage: '面接の終了処理に失敗しました。お手数ですが再試行してください。',
+      finishFailed: true,
+      onRetryFinish,
+    })
+
+    expect(
+      screen.getByText('面接の終了処理に失敗しました。お手数ですが再試行してください。'),
+    ).toBeInTheDocument()
+    const retryButton = screen.getByRole('button', { name: '再試行' })
+    retryButton.click()
+    expect(onRetryFinish).toHaveBeenCalledTimes(1)
+  })
+
+  it('finishFailed が false の場合、errorMessageがあっても再試行ボタンは出さない', () => {
+    renderScreen({
+      errorMessage: '時間上限に達したため面接を終了しました。',
+      finishFailed: false,
+    })
+
+    expect(screen.getByText('時間上限に達したため面接を終了しました。')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '再試行' })).not.toBeInTheDocument()
+  })
 })

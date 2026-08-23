@@ -14,6 +14,7 @@ import {
   REPORT_POLL_INTERVAL_MS,
   REPORT_POLL_TIMEOUT_MS,
 } from '../reportPolling'
+import { resolveFinishOutcomeMessage } from '../finishOutcome'
 import type { Utterance, InterviewCompany, Position, InterviewStatus } from '../types'
 
 export type ReportStatus = 'idle' | 'pending' | 'ready' | 'error' | 'timeout'
@@ -69,6 +70,8 @@ export function useInterviewSession({
   const [videoSizeWarning, setVideoSizeWarning] = useState<string | null>(null)
   const [scoresBefore, setScoresBefore] = useState<WeightScore[] | null>(null)
   const [scoresAfter, setScoresAfter] = useState<WeightScore[] | null>(null)
+  /** 面接終了API(finishSession)が失敗したかどうか。true の間はレポート画面に再試行UIを出す(#1015) */
+  const [finishFailed, setFinishFailed] = useState(false)
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
@@ -349,18 +352,28 @@ export function useInterviewSession({
     // タイマーのsetIntervalから呼ばれた場合でも最新値を読むため、stateではなくrefを使う(#926)
     const currentSession = sessionRef.current
     const currentUser = userRef.current
+    let didFinishFail = false
     if (currentUser && currentSession) {
       const scoreSessionId = `interview-${currentUser.user_id}`
       try {
         const res = await fetch(`/api/user/weight-scores?user_id=${currentUser.user_id}&session_id=${encodeURIComponent(scoreSessionId)}`)
         const data = await res.json()
         setScoresBefore(data.weight_scores ?? null)
-      } catch { /* ignore */ }
-      try { await interviewApi.finishSession(currentSession.id, currentUser.user_id) } catch { /* ignore */ }
+      } catch {
+        // 取得失敗時は scoresBefore=null のまま。ScoreUpdateBanner側で「スコア比較なし」と表示する(#1015)
+        setScoresBefore(null)
+      }
+      try {
+        await interviewApi.finishSession(currentSession.id, currentUser.user_id)
+      } catch {
+        // 終了APIの失敗を握りつぶさず、レポート画面にエラーと再試行手段を出す(#1015)
+        didFinishFail = true
+      }
     }
+    setFinishFailed(didFinishFail)
     setStatus('finished')
     setReportStatus('pending')
-    if (forced) setErrorMessage('時間上限に達したため面接を終了しました。')
+    setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: didFinishFail, forced }))
     if (currentSession && currentUser) {
       startReportPolling(currentSession.id, currentUser.user_id)
 
@@ -382,6 +395,21 @@ export function useInterviewSession({
           .then(() => { setVideoUploadStatus('done'); setVideoSizeWarning(null) })
           .catch(() => setVideoUploadStatus('error'))
       }
+    }
+  }
+
+  /** finishSession失敗時にレポート画面から再試行するための関数(#1015) */
+  const retryFinish = async () => {
+    const currentSession = sessionRef.current
+    const currentUser = userRef.current
+    if (!currentSession || !currentUser) return
+    try {
+      await interviewApi.finishSession(currentSession.id, currentUser.user_id)
+      setFinishFailed(false)
+      setErrorMessage(null)
+    } catch {
+      setFinishFailed(true)
+      setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: true, forced: false }))
     }
   }
 
@@ -594,6 +622,8 @@ export function useInterviewSession({
     videoSizeWarning,
     scoresBefore,
     scoresAfter,
+    finishFailed,
+    retryFinish,
     aiAudioRef,
     transcriptEndRef,
     handleJoin,
