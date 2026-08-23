@@ -42,6 +42,7 @@ import {
     Business,
     Assignment,
     NewReleases,
+    Assessment,
 } from '@mui/icons-material'
 import {authService, User} from '@/lib/auth'
 import {useRouter} from 'next/navigation'
@@ -61,8 +62,10 @@ const NAV_ICONS: Record<(typeof SIDEBAR_NAV_ITEMS)[number]['href'], React.ReactN
     '/chat-history': <History color="primary"/>,
     '/resume': <Description color="primary"/>,
     '/interview': <RecordVoiceOver color="primary"/>,
+    '/interview/history': <Assessment color="primary"/>,
     '/es-rewrite': <EditNote color="primary"/>,
     '/schedule': <CalendarMonth color="primary"/>,
+    '/applications': <Assignment color="primary"/>,
     '/profile': <ManageAccounts color="primary"/>,
 }
 
@@ -511,6 +514,26 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         </ListItemIcon>
                         <ListItemText
                             primary="面接練習"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => router.push('/interview/history')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <Assessment color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="面接履歴"
                             primaryTypographyProps={{
                                 fontSize: '0.875rem',
                                 fontWeight: 500,

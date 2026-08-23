@@ -7,8 +7,10 @@ export const SIDEBAR_NAV_ITEMS = [
   { href: '/chat-history', label: 'チャット履歴' },
   { href: '/resume', label: '履歴書レビュー' },
   { href: '/interview', label: '面接練習' },
+  { href: '/interview/history', label: '面接履歴' },
   { href: '/es-rewrite', label: 'ESリライト・添削' },
   { href: '/schedule', label: '選考スケジュール' },
+  { href: '/applications', label: '選考管理' },
   { href: '/profile', label: 'プロフィール設定' },
 ] as const
 
@@ -42,3 +44,6 @@ const HIDE_BOTTOM_NAV = [
 export function shouldShowStudentBottomNav(pathname: string): boolean {
   return !HIDE_BOTTOM_NAV.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 }
+
+/** モバイルの Bottom nav（固定表示）の実高さ相当。スクロール末尾の余白確保に使う。 */
+export const BOTTOM_NAV_HEIGHT = 'calc(56px + env(safe-area-inset-bottom))'

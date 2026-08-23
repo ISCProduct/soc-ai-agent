@@ -28,7 +28,6 @@ import EmojiEventsIcon from '@mui/icons-material/EmojiEvents'
 import SaveIcon from '@mui/icons-material/Save'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService, User } from '@/lib/auth'
-import { BACKEND_URL } from '@/lib/backend-url'
 import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '@/lib/profile'
 import GitHubSkills from '@/components/github-skills'
 import { PageLoading } from '@/components/common/PageLoading'
@@ -69,9 +68,8 @@ function ProfilePageContent() {
     setCalendarStatusLoading(true)
     setCalendarStatusError(false)
     try {
-      const r = await fetch(`${BACKEND_URL}/api/google-calendar/status`, {
+      const r = await fetch('/api/google-calendar/status', {
         headers: authService.getUserFetchHeaders(),
-        credentials: 'include',
       })
       if (r.status === 401) {
         // 未ログイン・セッション切れ時は連携状態を取得しない（エラー表示はしない）
@@ -190,11 +188,9 @@ function ProfilePageContent() {
   const handleCalendarConnect = async () => {
     if (!user) return
     try {
-      // バックエンドから認証URLを取得し、ブラウザをリダイレクト
-      // credentials: 'include' でstateクッキーをブラウザに設定する
-      const res = await fetch(`${BACKEND_URL}/api/google-calendar/connect`, {
-        headers: { ...authService.getUserFetchHeaders(), Accept: 'application/json' },
-        credentials: 'include',
+      // Next.jsプロキシ経由で認証URLを取得し、ブラウザをリダイレクトする
+      const res = await fetch('/api/google-calendar/connect', {
+        headers: authService.getUserFetchHeaders(),
       })
       if (!res.ok) throw new Error('Failed to get auth URL')
       const data = await res.json()
@@ -208,10 +204,9 @@ function ProfilePageContent() {
     setCalendarLoading(true)
     setCalendarMessage('')
     try {
-      const res = await fetch(`${BACKEND_URL}/api/google-calendar/disconnect`, {
+      const res = await fetch('/api/google-calendar/disconnect', {
         method: 'DELETE',
         headers: authService.getUserFetchHeaders(),
-        credentials: 'include',
       })
       if (res.ok) {
         setCalendarConnected(false)

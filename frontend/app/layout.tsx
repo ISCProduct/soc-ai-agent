@@ -2,6 +2,7 @@ import './globals.css'
 import type { Metadata } from 'next'
 import { MuiProvider } from '@/components/mui-provider'
 import { StudentBottomNav } from '@/components/student-bottom-nav'
+import { GlobalNavMenu } from '@/components/global-nav-menu'
 import { Analytics } from '@vercel/analytics/react'
 // Vercelでホスティングされるまで実データは収集されない(AWS ECSデプロイのため現状は未計測)
 import { SpeedInsights } from '@vercel/speed-insights/next'
@@ -40,6 +41,7 @@ export default function RootLayout({
       <body style={{ margin: 0, padding: 0 }}>
         <MuiProvider>
           {children}
+          <GlobalNavMenu />
           <StudentBottomNav />
         </MuiProvider>
         <Analytics />
