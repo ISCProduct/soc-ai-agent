@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"Backend/internal/services/interfaces"
+	"Backend/internal/services/shared"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -39,7 +41,16 @@ func (c *ApplicationController) Apply(ctx echo.Context) error {
 
 	app, err := c.appService.Apply(userID, req.CompanyID, req.MatchID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		switch {
+		case errors.Is(err, shared.ErrNotFound):
+			return echo.NewHTTPError(http.StatusNotFound, "match not found")
+		case errors.Is(err, shared.ErrForbidden):
+			return echo.NewHTTPError(http.StatusForbidden, "他人のmatchには応募できません")
+		case errors.Is(err, shared.ErrDuplicateActiveApplication):
+			return echo.NewHTTPError(http.StatusConflict, "duplicate_active_application")
+		default:
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 	}
 
 	return ctx.JSON(http.StatusCreated, map[string]any{

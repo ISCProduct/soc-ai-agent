@@ -436,7 +436,7 @@ func main() {
 	googleCalendarController := controllers.NewGoogleCalendarController(calendarSyncService)
 	scheduleController := controllers.NewScheduleController(scheduleService)
 	esReviewController := controllers.NewESReviewController()
-	appService := application.NewApplicationService(appStatusRepo, matchRepo)
+	appService := application.NewApplicationService(appStatusRepo, matchRepo, db)
 	appController := controllers.NewApplicationController(appService)
 	integratedProfileController := controllers.NewIntegratedProfileController(crossFeatureService, interviewSessionRepo, resumeRepo)
 	entitlementController := controllers.NewEntitlementController(organizationService)
