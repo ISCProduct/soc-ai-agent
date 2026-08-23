@@ -287,18 +287,6 @@ export const authService = {
     }
   },
 
-  async getGoogleAuthUrl(): Promise<{ auth_url: string; state: string }> {
-    const res = await fetch(`${BACKEND_URL}/api/auth/google`)
-    if (!res.ok) throw new Error(await extractErrorMessage(res, 'Google認証の開始に失敗しました。'))
-    return res.json()
-  },
-
-  async getGithubAuthUrl(): Promise<{ auth_url: string; state: string }> {
-    const res = await fetch(`${BACKEND_URL}/api/auth/github`)
-    if (!res.ok) throw new Error(await extractErrorMessage(res, 'GitHub認証の開始に失敗しました。'))
-    return res.json()
-  },
-
   saveAuth(authResponse: AuthResponse) {
     const user: User = {
       user_id: typeof authResponse.user_id === 'string' ? Number(authResponse.user_id) : authResponse.user_id,

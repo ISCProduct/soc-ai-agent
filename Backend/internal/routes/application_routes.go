@@ -16,6 +16,10 @@ func SetupApplicationRoutes(api *echo.Group, appController *controllers.Applicat
 	applications.GET("", appController.List)
 	// GET  /api/applications/correlation → 相関分析データ
 	applications.GET("/correlation", appController.GetCorrelation)
-	// PUT  /api/applications/:id  → ステータス更新
+	// PUT  /api/applications/:id  → ステータス更新（互換維持。isAdminは常にfalse）
 	applications.PUT("/:id", appController.UpdateStatus)
+	// POST /api/applications/:id/withdraw → 選考辞退
+	// POST /api/applications/:id/accept   → 内定承諾
+	applications.POST("/:id/withdraw", appController.Withdraw)
+	applications.POST("/:id/accept", appController.Accept)
 }

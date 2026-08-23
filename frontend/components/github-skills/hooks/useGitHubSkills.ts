@@ -55,9 +55,9 @@ export function useGitHubSkills(userId: number, targetRole: string) {
       await authService.ensureFreshUserToken()
       const headers = authService.getUserFetchHeaders()
       const [skillsRes, profileRes, summariesRes] = await Promise.all([
-        fetch(`${BACKEND_URL}/api/github/skills?user_id=${userId}`, { headers }),
-        fetch(`${BACKEND_URL}/api/github/profile?user_id=${userId}`, { headers }),
-        fetch(`${BACKEND_URL}/api/github/repo/summaries?user_id=${userId}`, { headers }),
+        fetch(`/api/github/skills?user_id=${userId}`, { headers }),
+        fetch(`/api/github/profile?user_id=${userId}`, { headers }),
+        fetch(`/api/github/repo/summaries?user_id=${userId}`, { headers }),
       ])
 
       if (skillsRes.status === 401 || profileRes.status === 401) {
@@ -119,7 +119,7 @@ export function useGitHubSkills(userId: number, targetRole: string) {
     setError(null)
     try {
       await authService.ensureFreshUserToken()
-      const res = await fetch(`${BACKEND_URL}/api/github/repo/summarize?user_id=${userId}`, {
+      const res = await fetch(`/api/github/repo/summarize?user_id=${userId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
         body: JSON.stringify({ full_name: fullName, target_role: targetRole }),
@@ -158,7 +158,7 @@ export function useGitHubSkills(userId: number, targetRole: string) {
     const timeoutTimer = setTimeout(() => controller.abort(), SYNC_TIMEOUT_MS)
     try {
       await authService.ensureFreshUserToken()
-      const res = await fetch(`${BACKEND_URL}/api/github/sync/wait?user_id=${userId}`, {
+      const res = await fetch(`/api/github/sync/wait?user_id=${userId}`, {
         method: 'POST',
         headers: authService.getUserFetchHeaders(),
         signal: controller.signal,

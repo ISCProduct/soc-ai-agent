@@ -319,6 +319,8 @@ function InterviewContent() {
         onRegisterClick={() => router.push(GUEST_REGISTER_PATH)}
         onSendEmail={session.sendReportEmail}
         onRetryReport={session.retryReportPolling}
+        finishFailed={session.finishFailed}
+        onRetryFinish={session.retryFinish}
         videoUploadStatus={session.videoUploadStatus}
         videoUploadProgress={session.videoUploadProgress}
         videoSizeWarning={session.videoSizeWarning}

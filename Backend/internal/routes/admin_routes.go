@@ -26,6 +26,7 @@ func SetupAdminRoutes(
 	collectiveInsightController *controllers.CollectiveInsightController,
 	scraperSessionController *controllers.AdminScraperSessionController,
 	adminVectorController *controllers.AdminVectorController,
+	appController *controllers.ApplicationController,
 	userRepo *repositories.UserRepository,
 	schoolService *services.SchoolService,
 	adminSecret string,
@@ -175,4 +176,9 @@ func SetupAdminRoutes(
 	admin.POST("/vector/reembed", adminVectorController.Reembed)
 	admin.GET("/vector/stats", adminVectorController.Stats)
 	admin.GET("/vector/collections", adminVectorController.Collections)
+
+	// 選考ステータス管理(#1016): user_id/company_id/statusで絞り込み可能な一覧、
+	// および進捗更新（isAdminは常にtrue固定。サービス層の遷移表が正）
+	admin.GET("/applications", appController.AdminList)
+	admin.PATCH("/applications/:id/status", appController.AdminUpdateStatus)
 }
