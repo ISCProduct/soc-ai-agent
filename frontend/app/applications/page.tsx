@@ -29,6 +29,7 @@ import {
   STATUS_COLORS,
   STATUS_LABELS,
   isTerminalStatus,
+  nextActionLabel,
   userNextStatuses,
 } from '@/lib/application-status'
 
@@ -240,14 +241,20 @@ function ApplicationsContent() {
                         {app.notes}
                       </Typography>
                     )}
-                    {!isTerminalStatus(app.status) && userNextStatuses(app.status).length > 0 && (
-                      <Button
-                        size="small"
-                        startIcon={<Edit />}
-                        onClick={() => startEdit(app)}
-                      >
-                        ステータスを更新
-                      </Button>
+                    {!isTerminalStatus(app.status) && (
+                      userNextStatuses(app.status).length > 0 ? (
+                        <Button
+                          size="small"
+                          startIcon={<Edit />}
+                          onClick={() => startEdit(app)}
+                        >
+                          {nextActionLabel(app.status)}
+                        </Button>
+                      ) : (
+                        <Typography variant="caption" color="text.secondary">
+                          選考結果の反映待ちです（担当者が更新します）
+                        </Typography>
+                      )
                     )}
                   </Box>
                 )}
