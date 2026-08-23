@@ -22,7 +22,9 @@ import BusinessIcon from '@mui/icons-material/Business'
 import MicIcon from '@mui/icons-material/Mic'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
-import { getResultsPathOrChat } from '@/lib/results-navigation'
+import { getResultsPathOrChat, getResultsSessionContext } from '@/lib/results-navigation'
+import { authService } from '@/lib/auth'
+import { resolveActiveStep, resolveOnboardingSteps, type OnboardingStepFlags } from './steps'
 
 const STEPS = [
   {
@@ -54,17 +56,37 @@ const STEPS = [
 export default function OnboardingPage() {
   const router = useRouter()
   const [activeStep, setActiveStep] = useState(0)
-  const [completedSteps, setCompletedSteps] = useState<boolean[]>([false, false, false])
+  const [completedSteps, setCompletedSteps] = useState<OnboardingStepFlags>([false, false, false])
 
   useEffect(() => {
-    const hasChatSession = !!(sessionStorage.getItem('chatSessionId') || localStorage.getItem('currentSessionId'))
-    const hasResults = hasChatSession // マッチング結果はチャット完了後に閲覧可能
+    let ignore = false
+    const context = getResultsSessionContext()
+    const hasChatSession = !!context
     const hasInterview = !!localStorage.getItem('interview_session_id')
-    const completed = [hasChatSession, hasResults, hasInterview]
-    setCompletedSteps(completed)
-    // 最初の未完了ステップをアクティブに設定
-    const nextStep = completed.findIndex((c) => !c)
-    setActiveStep(nextStep === -1 ? STEPS.length - 1 : nextStep)
+
+    const applyCompleted = (hasMatchingResults: boolean) => {
+      if (ignore) return
+      const completed = resolveOnboardingSteps({ hasChatSession, hasMatchingResults, hasInterview })
+      setCompletedSteps(completed)
+      setActiveStep(resolveActiveStep(completed))
+    }
+
+    if (!context) {
+      applyCompleted(false)
+      return
+    }
+
+    // マッチング結果（recommendations）が1件以上あれば閲覧可能とみなす（#1015）
+    fetch(`/api/chat/recommendations?session_id=${encodeURIComponent(context.sessionId)}&limit=1`, {
+      headers: authService.getUserFetchHeaders(),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => applyCompleted(Array.isArray(data?.recommendations) && data.recommendations.length > 0))
+      .catch(() => applyCompleted(false))
+
+    return () => {
+      ignore = true
+    }
   }, [])
 
   const handleStart = (path: string) => {
