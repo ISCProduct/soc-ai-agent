@@ -48,6 +48,9 @@ export interface SnackbarState {
   open: boolean
   message: string
   severity: 'success' | 'error'
+  /** snackbar内に導線ボタンを出す場合の遷移先（例: 応募後の選考管理画面） */
+  actionHref?: string
+  actionLabel?: string
 }
 
 /** recommendations API の空レスポンス時に付く診断情報 */

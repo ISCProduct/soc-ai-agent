@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Alert,
   Box,
@@ -24,6 +24,7 @@ import CheckIcon from '@mui/icons-material/Check'
 import EditNoteIcon from '@mui/icons-material/EditNote'
 import RateReviewIcon from '@mui/icons-material/RateReview'
 import { PRIMARY } from '@/app/interview/constants'
+import { PageLoading } from '@/components/common/PageLoading'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 
 const QUESTION_TYPES = ['志望動機', '自己PR', '学チカ', 'ガクチカ', 'その他']
@@ -77,14 +78,15 @@ const SCORE_ITEMS: { key: keyof Omit<ReviewResult, 'feedback' | 'improved_text'>
   { key: 'length_balance_score', label: '文字数バランス', color: '#10b981' },
 ]
 
-export default function ESRewritePage() {
+function ESRewriteContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   const [mode, setMode] = useState<'rewrite' | 'review'>('rewrite')
   const [originalText, setOriginalText] = useState('')
   const [questionType, setQuestionType] = useState('学チカ')
   const [techStack, setTechStack] = useState('')
-  const [companyName, setCompanyName] = useState('')
+  const [companyName, setCompanyName] = useState(searchParams.get('company_name') || '')
   const [loading, setLoading] = useState(false)
   const [rewriteResult, setRewriteResult] = useState<RewriteResult | null>(null)
   const [reviewResult, setReviewResult] = useState<ReviewResult | null>(null)
@@ -494,5 +496,13 @@ export default function ESRewritePage() {
       </Box>
       <BottomNavSpacer />
     </Box>
+  )
+}
+
+export default function ESRewritePage() {
+  return (
+    <Suspense fallback={<PageLoading message="ES添削・リライト画面を準備しています..." />}>
+      <ESRewriteContent />
+    </Suspense>
   )
 }

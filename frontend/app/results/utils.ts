@@ -126,13 +126,10 @@ export function buildInterviewQuery(company: Pick<Company, 'id' | 'name' | 'indu
 }
 
 /**
- * ES・職務経歴書添削ページへのクエリ文字列を組み立てる。
+ * ES添削・リライトページへのクエリ文字列を組み立てる（企業名プリフィル用）。
  */
-export function buildResumeQuery(company: Pick<Company, 'name' | 'industry'>): string {
-  const params = new URLSearchParams({
-    company_name: company.name,
-    industry: company.industry,
-  })
+export function buildEsRewriteQuery(company: Pick<Company, 'name'>): string {
+  const params = new URLSearchParams({ company_name: company.name })
   return params.toString()
 }
 

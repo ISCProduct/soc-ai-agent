@@ -75,3 +75,14 @@ export function userNextStatuses(current: string): string[] {
 export function canUserTransition(current: string, next: string): boolean {
   return userNextStatuses(current).includes(normalizeApplicationStatus(next))
 }
+
+/**
+ * 選考ステータス変更ボタンのラベル。「ステータスを更新」ではなく、
+ * 実際に選べる操作（辞退する 等）が分かるように具体化する。
+ */
+export function nextActionLabel(current: string): string {
+  const next = userNextStatuses(current)
+  if (next.length === 0) return ''
+  if (next.length === 1) return `${STATUS_LABELS[next[0]] || next[0]}する`
+  return `${next.map((s) => STATUS_LABELS[s] || s).join('・')}を選ぶ`
+}
