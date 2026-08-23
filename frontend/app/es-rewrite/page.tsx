@@ -24,6 +24,7 @@ import CheckIcon from '@mui/icons-material/Check'
 import EditNoteIcon from '@mui/icons-material/EditNote'
 import RateReviewIcon from '@mui/icons-material/RateReview'
 import { PRIMARY } from '@/app/interview/constants'
+import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 
 const QUESTION_TYPES = ['志望動機', '自己PR', '学チカ', 'ガクチカ', 'その他']
 
@@ -491,6 +492,7 @@ export default function ESRewritePage() {
           )}
         </Box>
       </Box>
+      <BottomNavSpacer />
     </Box>
   )
 }

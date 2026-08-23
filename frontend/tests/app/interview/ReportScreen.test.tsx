@@ -39,6 +39,15 @@ describe('ReportScreen', () => {
     expect(screen.getByText('面接レポート')).toBeInTheDocument()
   })
 
+  it('面接履歴への導線を表示する（#1011: レポート画面から/interview/historyへ遷移できる）', () => {
+    renderScreen()
+
+    expect(screen.getByRole('link', { name: /面接履歴を見る/ })).toHaveAttribute(
+      'href',
+      '/interview/history',
+    )
+  })
+
   it('pending の場合はレポート生成中の文言を表示する', () => {
     renderScreen({ reportStatus: 'pending' })
 
