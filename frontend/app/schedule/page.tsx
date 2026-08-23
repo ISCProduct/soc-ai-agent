@@ -29,6 +29,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import { authService } from '@/lib/auth'
 import { datetimeLocalToISO, formatLocalDateKey, isoToDatetimeLocal } from '@/lib/datetime-local'
+import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 
 const STAGE_OPTIONS = [
   { value: '書類選考', label: '書類選考', color: '#9c27b0' },
@@ -471,6 +472,7 @@ export default function SchedulePage() {
           </Button>
         </DialogActions>
       </Dialog>
+      <BottomNavSpacer />
     </Box>
   )
 }

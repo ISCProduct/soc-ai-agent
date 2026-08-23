@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import {
   Box,
   Button,
@@ -11,6 +12,7 @@ import {
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import HistoryIcon from '@mui/icons-material/History'
 import { InterviewReport, InterviewSession } from '@/lib/interview'
 import InterviewSummary from './InterviewSummary'
 import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
@@ -77,7 +79,16 @@ export default function ReportScreen({
           <IconButton sx={{ color: '#bdc1c6' }} onClick={onBack}>
             <ArrowBackIcon />
           </IconButton>
-          <Typography variant="h5" sx={{ fontWeight: 700, color: '#e8eaed' }}>面接レポート</Typography>
+          <Typography variant="h5" sx={{ fontWeight: 700, color: '#e8eaed', flex: 1 }}>面接レポート</Typography>
+          <Button
+            component={Link}
+            href="/interview/history"
+            size="small"
+            startIcon={<HistoryIcon />}
+            sx={{ color: '#bdc1c6', textTransform: 'none' }}
+          >
+            面接履歴を見る
+          </Button>
         </Box>
 
         {errorMessage && (

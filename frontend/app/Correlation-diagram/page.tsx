@@ -5,6 +5,7 @@ import { Button, Box } from '@mui/material';
 import { Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { PageLoading } from '@/components/common/PageLoading';
+import { BottomNavSpacer } from '@/components/common/BottomNavSpacer';
 
 const CorrelationDiagram = dynamic(() => import('@/components/Correlation-diagram'), {
     ssr: false,
@@ -47,6 +48,7 @@ function CorrelationDiagramContent() {
                     <CorrelationDiagram initialCompanyId={initialCompanyId} />
                 </Box>
             </Box>
+            <BottomNavSpacer />
         </Box>
     );
 }
