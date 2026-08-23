@@ -181,8 +181,8 @@ export default function SchedulePage() {
         scheduled_at: datetimeLocalToISO(form.scheduled_at),
       }
       const url = editingId
-        ? `/api/schedule/${editingId}?user_id=${userId}`
-        : `/api/schedule?user_id=${userId}`
+        ? `/api/schedule/${editingId}`
+        : `/api/schedule`
       const method = editingId ? 'PUT' : 'POST'
       const res = await fetch(url, {
         method,
@@ -206,7 +206,7 @@ export default function SchedulePage() {
     if (!userId) return
     if (!confirm('このイベントを削除しますか？')) return
     try {
-      const res = await fetch(`/api/schedule/${id}?user_id=${userId}`, { method: 'DELETE' })
+      const res = await fetch(`/api/schedule/${id}`, { method: 'DELETE' })
       if (!res.ok && res.status !== 204) throw new Error('削除に失敗しました')
       await fetchEvents()
     } catch (e: any) {
@@ -216,7 +216,7 @@ export default function SchedulePage() {
 
   const handleExport = () => {
     if (!userId) return
-    window.location.href = `/api/schedule/export?user_id=${userId}`
+    window.location.href = `/api/schedule/export`
   }
 
   const weeks = getCalendarGrid(viewYear, viewMonth)
