@@ -71,6 +71,30 @@ func (r *UserApplicationStatusRepository) FindByUserID(userID uint) ([]*entity.U
 	return result, nil
 }
 
+// FindAll 条件を指定して応募一覧を取得する（管理者向け。§10.5）。
+// userID/companyID が 0、status が空文字の場合はその条件で絞り込まない。
+func (r *UserApplicationStatusRepository) FindAll(userID, companyID uint, status string) ([]*entity.UserApplicationStatus, error) {
+	q := r.db.Preload("Company")
+	if userID != 0 {
+		q = q.Where("user_id = ?", userID)
+	}
+	if companyID != 0 {
+		q = q.Where("company_id = ?", companyID)
+	}
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
+	var ms []*models.UserApplicationStatus
+	if err := q.Order("created_at DESC").Find(&ms).Error; err != nil {
+		return nil, err
+	}
+	result := make([]*entity.UserApplicationStatus, len(ms))
+	for i, m := range ms {
+		result[i] = mapper.UserApplicationStatusToEntity(m)
+	}
+	return result, nil
+}
+
 // UpdateStatus 選考ステータスを更新
 func (r *UserApplicationStatusRepository) UpdateStatus(id uint, status, notes string) error {
 	now := time.Now()
