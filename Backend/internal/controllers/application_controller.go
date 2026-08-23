@@ -20,6 +20,29 @@ func NewApplicationController(appService interfaces.ApplicationService) *Applica
 	return &ApplicationController{appService: appService}
 }
 
+// applicationErrorStatus はサービス層エラーメッセージの先頭コード（application_service.go参照。
+// docs/requirements/application-status-transition.md §11 準拠）と対応するHTTPステータス。
+var applicationErrorStatus = map[string]int{
+	"application_not_found":        http.StatusNotFound,
+	"forbidden":                    http.StatusForbidden,
+	"application_already_closed":   http.StatusConflict,
+	"invalid_status_transition":    http.StatusConflict,
+	"application_not_offered":      http.StatusConflict,
+	"duplicate_active_application": http.StatusConflict,
+}
+
+// mapApplicationError はサービス層エラー（"コード: 詳細" 形式）を、JSONの code フィールドが
+// 一致する echo.HTTPError に変換する。未知のエラーは 400 Bad Request にフォールバックする。
+func mapApplicationError(err error) error {
+	msg := err.Error()
+	for code, status := range applicationErrorStatus {
+		if strings.HasPrefix(msg, code+":") {
+			return newAPIError(status, code, msg)
+		}
+	}
+	return echo.NewHTTPError(http.StatusBadRequest, msg)
+}
+
 // Apply POST /api/applications - 企業への応募登録
 func (c *ApplicationController) Apply(ctx echo.Context) error {
 	userID, ok := echoUserID(ctx)
@@ -91,17 +114,146 @@ func (c *ApplicationController) UpdateStatus(ctx echo.Context) error {
 
 	app, err := c.appService.UpdateStatus(uint(id), userID, req.Status, req.Notes, false)
 	if err != nil {
-		msg := err.Error()
-		if strings.Contains(msg, "invalid_status_transition") || strings.Contains(msg, "application_already_closed") {
-			return echo.NewHTTPError(http.StatusConflict, msg)
-		}
-		return echo.NewHTTPError(http.StatusBadRequest, msg)
+		return mapApplicationError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"id":     app.ID,
 		"status": app.Status,
 		"notes":  app.Notes,
+	})
+}
+
+// AdminUpdateStatus PATCH /api/admin/applications/{id}/status - 管理者による選考ステータス更新。
+// isAdmin は常に true 固定（クライアント入力からは取らない。#1016）。
+func (c *ApplicationController) AdminUpdateStatus(ctx echo.Context) error {
+	id, err := echoUintParam(ctx, "id")
+	if err != nil {
+		return err
+	}
+
+	var req struct {
+		Status string `json:"status"`
+		Notes  string `json:"notes"`
+	}
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
+	}
+	if req.Status == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "status は必須です")
+	}
+
+	app, err := c.appService.UpdateStatus(id, 0, req.Status, req.Notes, true)
+	if err != nil {
+		return mapApplicationError(err)
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"id":     app.ID,
+		"status": app.Status,
+		"notes":  app.Notes,
+	})
+}
+
+// Withdraw POST /api/applications/{id}/withdraw - ユーザーによる選考辞退（§10.3）
+func (c *ApplicationController) Withdraw(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
+	}
+	id, err := echoUintParam(ctx, "id")
+	if err != nil {
+		return err
+	}
+
+	app, err := c.appService.Withdraw(id, userID, false)
+	if err != nil {
+		return mapApplicationError(err)
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"id":     app.ID,
+		"status": app.Status,
+	})
+}
+
+// Accept POST /api/applications/{id}/accept - ユーザーによる内定承諾（§10.4）
+func (c *ApplicationController) Accept(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
+	}
+	id, err := echoUintParam(ctx, "id")
+	if err != nil {
+		return err
+	}
+
+	app, err := c.appService.Accept(id, userID, false)
+	if err != nil {
+		return mapApplicationError(err)
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"id":     app.ID,
+		"status": app.Status,
+	})
+}
+
+// AdminList GET /api/admin/applications - 管理者による選考一覧取得。
+// user_id / company_id / status クエリパラメータで絞り込める（§10.5）。
+func (c *ApplicationController) AdminList(ctx echo.Context) error {
+	var userID, companyID uint
+	if v := ctx.QueryParam("user_id"); v != "" {
+		id, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid user_id")
+		}
+		userID = uint(id)
+	}
+	if v := ctx.QueryParam("company_id"); v != "" {
+		id, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid company_id")
+		}
+		companyID = uint(id)
+	}
+	status := ctx.QueryParam("status")
+
+	apps, err := c.appService.ListForAdmin(userID, companyID, status)
+	if err != nil {
+		return echoInternalError(err)
+	}
+
+	type AdminAppResponse struct {
+		ID          uint   `json:"id"`
+		UserID      uint   `json:"user_id"`
+		CompanyID   uint   `json:"company_id"`
+		CompanyName string `json:"company_name"`
+		Status      string `json:"status"`
+		Notes       string `json:"notes"`
+		AppliedAt   any    `json:"applied_at"`
+	}
+
+	resp := make([]AdminAppResponse, len(apps))
+	for i, app := range apps {
+		name := ""
+		if app.Company != nil {
+			name = app.Company.Name
+		}
+		resp[i] = AdminAppResponse{
+			ID:          app.ID,
+			UserID:      app.UserID,
+			CompanyID:   app.CompanyID,
+			CompanyName: name,
+			Status:      app.Status,
+			Notes:       app.Notes,
+			AppliedAt:   app.AppliedAt,
+		}
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"applications": resp,
+		"total":        len(resp),
 	})
 }
 

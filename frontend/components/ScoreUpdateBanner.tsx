@@ -49,6 +49,9 @@ export default function ScoreUpdateBanner({ beforeScores, afterScores, title = '
 
   const deltas = beforeScores ? computeScoreDeltas(beforeScores, afterScores) : []
   const hasChanges = deltas.length > 0
+  // beforeScores取得APIが失敗した場合はnullのまま渡ってくる。
+  // 「変化なし」と区別し、比較不能であることを利用者に伝える(#1015)
+  const noComparisonData = beforeScores === null
 
   return (
     <Collapse in={open}>
@@ -81,6 +84,10 @@ export default function ScoreUpdateBanner({ beforeScores, afterScores, title = '
                   <DeltaChip key={d.category} delta={d} />
                 ))}
               </Stack>
+            ) : noComparisonData ? (
+              <Typography variant="body2" color="text.secondary" mt={0.5}>
+                スコア比較なし（更新前のスコア取得に失敗しました）
+              </Typography>
             ) : (
               <Typography variant="body2" color="text.secondary" mt={0.5}>
                 今回のセッション結果がプロフィールに反映されました。

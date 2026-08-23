@@ -162,19 +162,19 @@ func isDuplicateEntryErr(err error) bool {
 }
 
 // UpdateStatus 選考ステータスを更新する
-// isAdmin=true の場合は管理者権限の遷移が許可される
+// isAdmin=true の場合は管理者権限の遷移が許可される（コントローラー側でクライアント入力から isAdmin を取らないこと）
 func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, status, notes string, isAdmin bool) (*entity.UserApplicationStatus, error) {
 	if !isValidStatus(status) {
-		return nil, fmt.Errorf("無効なステータス: %s", status)
+		return nil, fmt.Errorf("invalid_status: 無効なステータス %s", status)
 	}
 
 	// 所有権確認（非管理者は自分の応募のみ更新可能）
 	app, err := s.appRepo.FindByID(applicationID)
 	if err != nil {
-		return nil, fmt.Errorf("応募データが見つかりません: %w", err)
+		return nil, fmt.Errorf("application_not_found: 応募データが見つかりません: %w", err)
 	}
 	if !isAdmin && app.UserID != userID {
-		return nil, fmt.Errorf("権限がありません")
+		return nil, fmt.Errorf("forbidden: 権限がありません")
 	}
 
 	// 終了状態チェック（管理者による訂正は別エンドポイントで対応予定）
@@ -196,9 +196,36 @@ func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, statu
 	return app, nil
 }
 
+// Withdraw 選考を辞退する（ユーザー本人または管理者。§10.3）
+// 遷移表・終了状態チェックは UpdateStatus に委譲する（単一の正とするため）。
+func (s *ApplicationService) Withdraw(applicationID, userID uint, isAdmin bool) (*entity.UserApplicationStatus, error) {
+	return s.UpdateStatus(applicationID, userID, "withdrawn", "", isAdmin)
+}
+
+// Accept 内定を承諾する（§10.4）。offered 以外は application_not_offered を返す。
+func (s *ApplicationService) Accept(applicationID, userID uint, isAdmin bool) (*entity.UserApplicationStatus, error) {
+	app, err := s.appRepo.FindByID(applicationID)
+	if err != nil {
+		return nil, fmt.Errorf("application_not_found: 応募データが見つかりません: %w", err)
+	}
+	if !isAdmin && app.UserID != userID {
+		return nil, fmt.Errorf("forbidden: 権限がありません")
+	}
+	if app.Status != "offered" {
+		return nil, fmt.Errorf("application_not_offered: 内定状態でないため承諾できません（現在: %s）", app.Status)
+	}
+	return s.UpdateStatus(applicationID, userID, "accepted", "", isAdmin)
+}
+
 // GetApplicationsByUser ユーザーの応募一覧を取得する
 func (s *ApplicationService) GetApplicationsByUser(userID uint) ([]*entity.UserApplicationStatus, error) {
 	return s.appRepo.FindByUserID(userID)
+}
+
+// ListForAdmin 管理者向けに条件を指定して応募一覧を取得する（§10.5）。
+// userID/companyID が 0、status が空文字の場合はその条件を絞り込まない。
+func (s *ApplicationService) ListForAdmin(userID, companyID uint, status string) ([]*entity.UserApplicationStatus, error) {
+	return s.appRepo.FindAll(userID, companyID, status)
 }
 
 // GetCorrelation マッチングスコアと選考通過率の相関データを取得する

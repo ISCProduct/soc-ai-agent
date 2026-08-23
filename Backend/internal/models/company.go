@@ -179,9 +179,10 @@ type UserApplicationStatus struct {
 	Company   Company `gorm:"foreignKey:CompanyID"`
 	MatchID   uint    `gorm:"not null;index"` // UserCompanyMatch との紐付け
 
-	// 選考ステータス
-	// applied: 応募済み / document_passed: 書類通過 / interview: 面接中 /
-	// offered: 内定 / accepted: 内定承諾 / declined: 辞退 / rejected: 不合格
+	// 選考ステータス（ValidStatuses: docs/requirements/application-status-transition.md）
+	// not_applied / applied / document_screening / document_passed /
+	// interview_scheduled / interview_in_progress / offered / accepted /
+	// withdrawn / rejected
 	Status string `gorm:"type:varchar(50);not null;default:'applied'"`
 	Notes  string `gorm:"type:text"` // メモ・備考
 

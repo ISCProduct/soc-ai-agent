@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -108,9 +109,51 @@ func ConsumeOAuthTenantSlug(w http.ResponseWriter, r *http.Request) string {
 
 // signState は state 値を HMAC-SHA256 で署名し "state.signature" 形式の文字列を返す
 func signState(state string) string {
+	return state + "." + hmacHex(state)
+}
+
+func hmacHex(data string) string {
 	secret := os.Getenv("OAUTH_STATE_SECRET")
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(state))
-	sig := hex.EncodeToString(mac.Sum(nil))
-	return strings.Join([]string{state, sig}, ".")
+	mac.Write([]byte(data))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// GenerateSignedState はCookieを使わず、任意のペイロード（例: ユーザーID）を
+// HMAC署名付きstate文字列に埋め込んで返す。Next.jsプロキシ経由などCookieが
+// コールバック先（別オリジンのBackend）まで届かないOAuthフロー向け。
+func GenerateSignedState(payload string) (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	nonce := hex.EncodeToString(b)
+	body := strings.Join([]string{payload, nonce, strconv.FormatInt(time.Now().Unix(), 10)}, "|")
+	return body + "." + hmacHex(body), nil
+}
+
+// VerifySignedState はGenerateSignedStateで生成されたstate文字列を検証し、
+// 有効なら埋め込まれたペイロードを返す。署名不一致・期限切れ・不正な形式は失敗として扱う。
+func VerifySignedState(state string) (payload string, ok bool) {
+	idx := strings.LastIndex(state, ".")
+	if idx < 0 {
+		return "", false
+	}
+	body, sig := state[:idx], state[idx+1:]
+	if !hmac.Equal([]byte(sig), []byte(hmacHex(body))) {
+		return "", false
+	}
+
+	parts := strings.SplitN(body, "|", 3)
+	if len(parts) != 3 {
+		return "", false
+	}
+	ts, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		return "", false
+	}
+	if time.Since(time.Unix(ts, 0)) > oauthStateTTL {
+		return "", false
+	}
+	return parts[0], true
 }
