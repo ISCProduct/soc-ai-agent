@@ -7,15 +7,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/labstack/echo/v4"
 )
-
-const gcalUserIDCookie = "gcal_uid"
 
 type GoogleCalendarController struct {
 	calendarSync *schedule.CalendarSyncService
@@ -28,28 +24,20 @@ func NewGoogleCalendarController(calendarSync *schedule.CalendarSyncService) *Go
 // ConnectStart GET /api/google-calendar/connect
 // Googleカレンダー連携のOAuth認証を開始する（ユーザー認証必須）。
 // Accept: application/json の場合は URL を JSON で返す（フロント側で window.location.href をセットするため）。
+//
+// FE(Next.jsプロキシ) ≠ Backend オリジンの本番では、Cookieに頼るstate検証は
+// コールバック（Googleから直接Backendへ）まで届かず壊れるため、ユーザーIDと
+// タイムスタンプを署名付きstateパラメータ自体に埋め込む（Cookie不要）。
 func (c *GoogleCalendarController) ConnectStart(ctx echo.Context) error {
 	userID, ok := echoUserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
 	}
 
-	state, err := middleware.GenerateOAuthState(ctx.Response().Writer)
+	state, err := middleware.GenerateSignedState(fmt.Sprintf("%d", userID))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate state")
 	}
-
-	// userIDをHttpOnly Cookieに保存してコールバック時に取り出す（CSRF保護に加えてユーザー特定のため）
-	secure := os.Getenv("APP_ENV") == "production"
-	http.SetCookie(ctx.Response().Writer, &http.Cookie{
-		Name:     gcalUserIDCookie,
-		Value:    fmt.Sprintf("%d", userID),
-		Path:     "/",
-		MaxAge:   int((10 * time.Minute).Seconds()),
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-	})
 
 	authURL := c.calendarSync.GetAuthURL(state)
 
@@ -63,8 +51,9 @@ func (c *GoogleCalendarController) ConnectStart(ctx echo.Context) error {
 // ConnectCallback GET /api/google-calendar/callback
 // GoogleカレンダーOAuthコールバック処理。
 func (c *GoogleCalendarController) ConnectCallback(ctx echo.Context) error {
-	if !middleware.VerifyOAuthState(ctx.Response().Writer, ctx.Request()) {
-		log.Printf("[GoogleCalendar] callback: invalid or missing state")
+	userIDStr, ok := middleware.VerifySignedState(ctx.QueryParam("state"))
+	if !ok {
+		log.Printf("[GoogleCalendar] callback: invalid or expired state")
 		return ctx.Redirect(http.StatusTemporaryRedirect, config.AppURL()+"/profile?calendar_error=auth_failed")
 	}
 
@@ -73,29 +62,11 @@ func (c *GoogleCalendarController) ConnectCallback(ctx echo.Context) error {
 		return ctx.Redirect(http.StatusTemporaryRedirect, config.AppURL()+"/profile?calendar_error=no_code")
 	}
 
-	// gcal_uid CookieからユーザーIDを取り出す
-	uidCookie, err := ctx.Request().Cookie(gcalUserIDCookie)
-	if err != nil || uidCookie.Value == "" {
-		log.Printf("[GoogleCalendar] callback: missing gcal_uid cookie")
-		return ctx.Redirect(http.StatusTemporaryRedirect, config.AppURL()+"/profile?calendar_error=missing_user")
-	}
-	uid64, err := strconv.ParseUint(uidCookie.Value, 10, 64)
+	uid64, err := strconv.ParseUint(userIDStr, 10, 64)
 	if err != nil {
 		return ctx.Redirect(http.StatusTemporaryRedirect, config.AppURL()+"/profile?calendar_error=invalid_user")
 	}
 	userID := uint(uid64)
-
-	// Cookieを削除（使い捨て）
-	secure := os.Getenv("APP_ENV") == "production"
-	http.SetCookie(ctx.Response().Writer, &http.Cookie{
-		Name:     gcalUserIDCookie,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-	})
 
 	if err := c.calendarSync.ExchangeAndSave(ctx.Request().Context(), userID, code); err != nil {
 		log.Printf("[GoogleCalendar] ExchangeAndSave error for user %d: %v", userID, err)
