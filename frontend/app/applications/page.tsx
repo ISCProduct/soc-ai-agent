@@ -25,6 +25,7 @@ import { ArrowBack, Edit, Check } from '@mui/icons-material'
 import { authService } from '@/lib/auth'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import { fetchWithTimeout } from '@/lib/fetch-timeout'
+import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import {
   STATUS_COLORS,
   STATUS_LABELS,
@@ -274,6 +275,7 @@ function ApplicationsContent() {
           {snackbar.message}
         </Alert>
       </Snackbar>
+      <BottomNavSpacer />
     </Box>
   )
 }

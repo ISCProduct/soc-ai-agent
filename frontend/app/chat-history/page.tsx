@@ -7,6 +7,7 @@ import { authService } from '@/lib/auth'
 import ChatIcon from '@mui/icons-material/Chat'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { parseChatSessionsResponse, type ChatSessionSummary } from './parseSessions'
+import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 
 export default function ChatHistoryPage() {
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([])
@@ -157,6 +158,7 @@ export default function ChatHistoryPage() {
           </List>
         </Paper>
       )}
+      <BottomNavSpacer />
     </Container>
   )
 }

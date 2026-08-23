@@ -34,9 +34,6 @@ type PassedApplicantScores struct {
 	AvgCommunication   float64
 }
 
-// passedStatuses 選考通過とみなすステータス一覧
-var passedStatuses = []string{"document_passed", "interview", "offered", "accepted"}
-
 // GetPassedApplicantScores 企業ごとの通過実績スコアを集計
 func (r *ProfileRecalculationRepository) GetPassedApplicantScores(companyID uint) (*PassedApplicantScores, error) {
 	type row struct {
@@ -69,7 +66,7 @@ func (r *ProfileRecalculationRepository) GetPassedApplicantScores(companyID uint
 			AVG(ucm.communication_match) AS avg_communication
 		`).
 		Joins("JOIN user_company_matches ucm ON ucm.id = uas.match_id").
-		Where("uas.company_id = ? AND uas.status IN ?", companyID, passedStatuses).
+		Where("uas.company_id = ? AND uas.status IN ?", companyID, models.FlywheelPassedStatusFilter()).
 		Scan(&result).Error
 	if err != nil {
 		return nil, fmt.Errorf("集計クエリエラー: %w", err)
@@ -96,7 +93,7 @@ func (r *ProfileRecalculationRepository) GetAllCompanyIDsWithPassedApplicants() 
 	var ids []uint
 	err := r.db.Table("user_application_statuses").
 		Select("DISTINCT company_id").
-		Where("status IN ?", passedStatuses).
+		Where("status IN ?", models.FlywheelPassedStatusFilter()).
 		Pluck("company_id", &ids).Error
 	return ids, err
 }

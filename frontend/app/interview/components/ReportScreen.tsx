@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import {
   Box,
   Button,
@@ -11,6 +12,7 @@ import {
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import HistoryIcon from '@mui/icons-material/History'
 import { InterviewReport, InterviewSession } from '@/lib/interview'
 import InterviewSummary from './InterviewSummary'
 import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
@@ -37,6 +39,10 @@ export interface ReportScreenProps {
   onSendEmail: () => void
   /** タイムアウト / エラー時の再ポーリング */
   onRetryReport?: () => void
+  /** 面接終了API(finishSession)が失敗したか(#1015) */
+  finishFailed?: boolean
+  /** finishSession失敗時の再試行 */
+  onRetryFinish?: () => void
   /** ゲストユーザーはメール送信不可 */
   isGuest: boolean
   /** ゲスト向け登録導線への遷移 */
@@ -64,6 +70,8 @@ export default function ReportScreen({
   emailSent,
   onSendEmail,
   onRetryReport,
+  finishFailed,
+  onRetryFinish,
   isGuest,
   onRegisterClick,
   videoUploadStatus,
@@ -77,12 +85,30 @@ export default function ReportScreen({
           <IconButton sx={{ color: '#bdc1c6' }} onClick={onBack}>
             <ArrowBackIcon />
           </IconButton>
-          <Typography variant="h5" sx={{ fontWeight: 700, color: '#e8eaed' }}>面接レポート</Typography>
+          <Typography variant="h5" sx={{ fontWeight: 700, color: '#e8eaed', flex: 1 }}>面接レポート</Typography>
+          <Button
+            component={Link}
+            href="/interview/history"
+            size="small"
+            startIcon={<HistoryIcon />}
+            sx={{ color: '#bdc1c6', textTransform: 'none' }}
+          >
+            面接履歴を見る
+          </Button>
         </Box>
 
         {errorMessage && (
           <Paper sx={{ bgcolor: 'rgba(234,67,53,0.15)', border: '1px solid rgba(234,67,53,0.4)', p: 2, mb: 2, borderRadius: 2 }}>
-            <Typography variant="body2" sx={{ color: '#f28b82' }}>{errorMessage}</Typography>
+            <Typography variant="body2" sx={{ color: '#f28b82', mb: finishFailed && onRetryFinish ? 1.5 : 0 }}>{errorMessage}</Typography>
+            {finishFailed && onRetryFinish && (
+              <Button
+                variant="contained"
+                onClick={onRetryFinish}
+                sx={{ bgcolor: PRIMARY, '&:hover': { bgcolor: '#d14f10' } }}
+              >
+                再試行
+              </Button>
+            )}
           </Paper>
         )}
 

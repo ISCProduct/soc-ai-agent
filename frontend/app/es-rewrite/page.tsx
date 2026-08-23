@@ -25,8 +25,22 @@ import EditNoteIcon from '@mui/icons-material/EditNote'
 import RateReviewIcon from '@mui/icons-material/RateReview'
 import { PRIMARY } from '@/app/interview/constants'
 import { PageLoading } from '@/components/common/PageLoading'
+import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 
 const QUESTION_TYPES = ['志望動機', '自己PR', '学チカ', 'ガクチカ', 'その他']
+
+/**
+ * APIプロキシのエラーレスポンス（{ error, status, detail }想定）から
+ * 日本語の短いメッセージを取り出す。生JSON/HTMLをそのまま表示しないため(#1015)。
+ */
+async function readApiErrorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const data: unknown = await res.json()
+    const error = (data as { error?: unknown })?.error
+    if (typeof error === 'string' && error) return error
+  } catch { /* ignore */ }
+  return fallback
+}
 
 type StarBreakdown = {
   situation: string
@@ -96,7 +110,7 @@ function ESRewriteContent() {
       company_name: companyName,
     }),
   })
-  if (!res.ok) throw new Error(await res.text())
+  if (!res.ok) throw new Error(await readApiErrorMessage(res, 'リライトに失敗しました。再試行してください。'))
   setRewriteResult(await res.json())
     } catch (e: unknown) {
   setError(e instanceof Error ? e.message : 'リライトに失敗しました。再試行してください。')
@@ -121,7 +135,7 @@ function ESRewriteContent() {
           company_name: companyName,
         }),
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, '添削に失敗しました。再試行してください。'))
       setReviewResult(await res.json())
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '添削に失敗しました。再試行してください。')
@@ -480,6 +494,7 @@ function ESRewriteContent() {
           )}
         </Box>
       </Box>
+      <BottomNavSpacer />
     </Box>
   )
 }
