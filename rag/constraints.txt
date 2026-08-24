@@ -15,7 +15,7 @@
 # crewai は依存衝突のため requirements.txt から除外済み（langchain 上限は crewai 制約によらない）。
 # 2026-08 に 1.x 系列へ移行（#894）。langchain-community は未使用のため削除。
 langchain>=1.0,<2.0
-langchain-core>=1.0,<2.0
+langchain-core>=1.6.0,<2.0
 langchain-openai>=1.0,<2.0
 langchain-text-splitters>=1.0,<2.0
 
