@@ -3,10 +3,13 @@ package interview
 import (
 	"Backend/internal/services/shared"
 	"context"
-	"fmt"
 	"log"
 	"strings"
 )
+
+// interviewFallbackReplyText はChat失敗時に返す面接官としての言い換え応答。
+// 生のAPIエラーをユーザーに見せず、面接を自然に継続させるためのフォールバック(#910)。
+const interviewFallbackReplyText = "すみません、うまく聞き取れませんでした。もう一度お答えいただけますか？"
 
 // Turn はユーザー音声を受け取り、STT→Chat→TTSを実行してTurnResultを返します
 func (s *InterviewService) Turn(
@@ -39,10 +42,13 @@ func (s *InterviewService) Turn(
 		return nil, shared.ErrSessionFinished
 	}
 
-	// STT: Whisper でユーザー音声をテキスト化
+	// STT: Whisper でユーザー音声をテキスト化。
+	// 破損音声・無音・タイムアウト等でTranscribe自体が失敗しても、ターンを
+	// 中断させず「聞き取れなかった」扱いで継続する（既存の空文字フォールバックに合流、#910）。
 	userText, err := s.openaiClient.Transcribe(ctx, audioData, "audio.webm")
 	if err != nil {
-		return nil, fmt.Errorf("transcribe error: %w", err)
+		log.Printf("[Interview] transcribe error: %v", err)
+		userText = ""
 	}
 	if strings.TrimSpace(userText) == "" {
 		userText = "（聞き取れませんでした）"
@@ -92,16 +98,20 @@ func (s *InterviewService) Turn(
 			systemPrompt = profileCtx + "\n" + systemPrompt
 		}
 	}
+	// Chat失敗時も面接官としての言い換え応答にフォールバックし、ターンを中断させない（#910）
 	aiText, err := s.openaiClient.ChatInterview(ctx, systemPrompt, history)
 	if err != nil {
-		return nil, fmt.Errorf("chat error: %w", err)
+		log.Printf("[Interview] chat error: %v", err)
+		aiText = interviewFallbackReplyText
 	}
 
-	// TTS: AI返答を音声化（企業名は読み仮名に置換して誤読を防ぐ。表示用のaiTextはそのまま保持）
+	// TTS: AI返答を音声化（企業名は読み仮名に置換して誤読を防ぐ。表示用のaiTextはそのまま保持）。
+	// TTS失敗時もターンは中断させず、音声なし（テキストのみ）で返す（#910）。
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
 	audio, err := s.openaiClient.TTS(ctx, applyCompanyReadingForTTS(aiText, companyName, companyReading), voice)
 	if err != nil {
-		return nil, fmt.Errorf("tts error: %w", err)
+		log.Printf("[Interview] tts error: %v", err)
+		audio = nil
 	}
 
 	result := &TurnResult{
@@ -186,18 +196,22 @@ func (s *InterviewService) StartTurn(
 			systemPromptStart = profileCtx + "\n" + systemPromptStart
 		}
 	}
+	// Chat失敗時も面接開始を中断させず、定型の冒頭挨拶にフォールバックする（#910）
 	aiText, err := s.openaiClient.ChatInterview(ctx, systemPromptStart, []map[string]string{
 		{"role": "user", "content": "面接を開始してください。最初の自己紹介・志望動機の質問からお願いします。"},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("chat error: %w", err)
+		log.Printf("[Interview] chat error: %v", err)
+		aiText = "本日はよろしくお願いします。早速ですが、簡単に自己紹介をお願いできますか？"
 	}
 
-	// TTS: 企業名は読み仮名に置換して誤読を防ぐ（表示用のaiTextはそのまま保持）
+	// TTS: 企業名は読み仮名に置換して誤読を防ぐ（表示用のaiTextはそのまま保持）。
+	// TTS失敗時もターンは中断させず、音声なし（テキストのみ）で返す（#910）。
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
 	audio, err := s.openaiClient.TTS(ctx, applyCompanyReadingForTTS(aiText, companyName, companyReading), voice)
 	if err != nil {
-		return nil, fmt.Errorf("tts error: %w", err)
+		log.Printf("[Interview] tts error: %v", err)
+		audio = nil
 	}
 
 	result := &TurnResult{
