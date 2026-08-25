@@ -367,7 +367,17 @@ func (c *AdminInterviewController) ListSessions(ctx echo.Context) error {
 	offset := (page - 1) * limit
 	schoolID, _ := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
 
-	sessions, total, err := c.interviewService.ListAllSessionsAdmin(limit, offset, schoolID)
+	var companyID *uint
+	if raw := ctx.QueryParam("company_id"); raw != "" {
+		id, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid company_id")
+		}
+		v := uint(id)
+		companyID = &v
+	}
+
+	sessions, total, err := c.interviewService.ListAllSessionsAdmin(limit, offset, schoolID, companyID)
 	if err != nil {
 		return echoInternalError(err)
 	}
