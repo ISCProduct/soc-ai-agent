@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/domain/entity"
 	"Backend/internal/services/interfaces"
 	"Backend/internal/services/shared"
 	"errors"
@@ -223,7 +224,65 @@ func (c *ApplicationController) AdminList(ctx echo.Context) error {
 	if err != nil {
 		return echoInternalError(err)
 	}
+	return jsonAdminApplicationList(ctx, apps)
+}
 
+// HRList GET /api/hr/applications?company_id= - 企業オーナー向け応募一覧（#1083）
+func (c *ApplicationController) HRList(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
+	}
+	companyID, err := echoRequiredUintQuery(ctx, "company_id")
+	if err != nil {
+		return err
+	}
+	status := ctx.QueryParam("status")
+	apps, err := c.appService.ListForOwner(userID, companyID, status)
+	if err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, "企業の所有権がありません")
+		}
+		return echoInternalError(err)
+	}
+	return jsonAdminApplicationList(ctx, apps)
+}
+
+// HRUpdateStatus PATCH /api/hr/applications/:id/status - 企業オーナーによる選考ステータス更新（#1083）
+func (c *ApplicationController) HRUpdateStatus(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
+	}
+	id, err := echoUintParam(ctx, "id")
+	if err != nil {
+		return err
+	}
+	var req struct {
+		Status string `json:"status"`
+		Notes  string `json:"notes"`
+	}
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
+	}
+	if req.Status == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "status は必須です")
+	}
+	app, err := c.appService.UpdateStatusAsOwner(id, userID, req.Status, req.Notes)
+	if err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, "企業の所有権がありません")
+		}
+		return mapApplicationError(err)
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"id":     app.ID,
+		"status": app.Status,
+		"notes":  app.Notes,
+	})
+}
+
+func jsonAdminApplicationList(ctx echo.Context, apps []*entity.UserApplicationStatus) error {
 	type AdminAppResponse struct {
 		ID          uint   `json:"id"`
 		UserID      uint   `json:"user_id"`
@@ -270,15 +329,15 @@ func (c *ApplicationController) List(ctx echo.Context) error {
 	}
 
 	type AppResponse struct {
-		ID              uint `json:"id"`
-		CompanyID       uint `json:"company_id"`
+		ID              uint   `json:"id"`
+		CompanyID       uint   `json:"company_id"`
 		CompanyName     string `json:"company_name"`
 		CompanyIndustry string `json:"company_industry"`
-		MatchID         uint `json:"match_id"`
+		MatchID         uint   `json:"match_id"`
 		Status          string `json:"status"`
 		Notes           string `json:"notes"`
-		AppliedAt       any `json:"applied_at"`
-		StatusUpdatedAt any `json:"status_updated_at"`
+		AppliedAt       any    `json:"applied_at"`
+		StatusUpdatedAt any    `json:"status_updated_at"`
 	}
 
 	resp := make([]AppResponse, len(apps))
@@ -310,7 +369,8 @@ func (c *ApplicationController) List(ctx echo.Context) error {
 
 // GetCorrelation GET /api/applications/correlation?company_id=X - 相関分析データ取得
 func (c *ApplicationController) GetCorrelation(ctx echo.Context) error {
-	if _, ok := echoUserID(ctx); !ok {
+	userID, ok := echoUserID(ctx)
+	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
 	}
 
@@ -318,13 +378,17 @@ func (c *ApplicationController) GetCorrelation(ctx echo.Context) error {
 	var companyID uint
 	if companyIDStr != "" {
 		id, err := strconv.ParseUint(companyIDStr, 10, 64)
-		if err == nil {
-			companyID = uint(id)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid company_id")
 		}
+		companyID = uint(id)
 	}
 
-	data, err := c.appService.GetCorrelation(companyID)
+	data, err := c.appService.GetCorrelation(userID, companyID)
 	if err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, "相関データの参照権限がありません")
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "相関データ取得エラー")
 	}
 

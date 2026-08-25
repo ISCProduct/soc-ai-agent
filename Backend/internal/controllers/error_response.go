@@ -91,6 +91,19 @@ func ensureAdminSchoolAccess(ctx echo.Context, schools *services.SchoolService, 
 	return nil
 }
 
+// echoRequiredUintQuery は必須の正の整数クエリパラメータを返す。欠落・不正は 400。
+func echoRequiredUintQuery(c echo.Context, key string) (uint, error) {
+	raw := c.QueryParam(key)
+	if raw == "" {
+		return 0, echo.NewHTTPError(http.StatusBadRequest, key+" is required")
+	}
+	id, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || id == 0 {
+		return 0, echo.NewHTTPError(http.StatusBadRequest, "invalid "+key)
+	}
+	return uint(id), nil
+}
+
 // echoIntQuery はクエリパラメータを整数として取得し、取得できない場合はデフォルト値を返す。
 func echoIntQuery(c echo.Context, key string, def int) int {
 	v := c.QueryParam(key)

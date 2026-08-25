@@ -15,8 +15,9 @@ import (
 // sessionRepoStub は InterviewSessionRepository の最小実装。
 // FinishSession/StartSession/Turn/StartTurn の状態機械テスト(#1019)専用。
 type sessionRepoStub struct {
-	sessions    map[uint]*models.InterviewSession
-	updateCalls int
+	sessions      map[uint]*models.InterviewSession
+	updateCalls   int
+	lastCompanyID *uint
 }
 
 func newSessionRepoStub(sessions ...*models.InterviewSession) *sessionRepoStub {
@@ -49,7 +50,8 @@ func (r *sessionRepoStub) ListByUser(userID uint, limit int, offset int) ([]mode
 	return nil, nil
 }
 
-func (r *sessionRepoStub) ListAll(limit int, offset int, schoolID *uint) ([]models.InterviewSession, error) {
+func (r *sessionRepoStub) ListAll(limit int, offset int, schoolID *uint, companyID *uint) ([]models.InterviewSession, error) {
+	r.lastCompanyID = companyID
 	return nil, nil
 }
 
@@ -58,7 +60,10 @@ func (r *sessionRepoStub) ListFinishedByUser(userID uint, limit int) ([]models.I
 }
 
 func (r *sessionRepoStub) CountByUser(userID uint) (int64, error) { return 0, nil }
-func (r *sessionRepoStub) CountAll(schoolID *uint) (int64, error) { return 0, nil }
+func (r *sessionRepoStub) CountAll(schoolID *uint, companyID *uint) (int64, error) {
+	r.lastCompanyID = companyID
+	return 0, nil
+}
 func (r *sessionRepoStub) CountByUserAndDay(userID uint, day time.Time) (int64, error) {
 	return 0, nil
 }
@@ -148,4 +153,30 @@ func TestTurn_AllowsInProgressSession_UpToFinishedCheck(t *testing.T) {
 	}()
 	_, _ = svc.Turn(context.Background(), 10, 1, []byte("audio"), nil,
 		"企業名", "", "position", "info", "general", 0, 0, 60, 0, 0, 0, 0)
+}
+
+func TestListSessionsForOwner_ForbiddenWhenCheckerMissing(t *testing.T) {
+	svc := newTestInterviewService(newSessionRepoStub())
+	_, _, err := svc.ListSessionsForOwner(1, 10, 20, 0)
+	assert.ErrorIs(t, err, shared.ErrForbidden)
+}
+
+func TestListSessionsForOwner_ForbiddenWhenNotOwner(t *testing.T) {
+	svc := newTestInterviewService(newSessionRepoStub())
+	svc.SetCompanyOwnerChecker(func(uint, uint) (bool, error) { return false, nil })
+	_, _, err := svc.ListSessionsForOwner(1, 99, 20, 0)
+	assert.ErrorIs(t, err, shared.ErrForbidden)
+}
+
+func TestListSessionsForOwner_FiltersCompanyID(t *testing.T) {
+	repo := newSessionRepoStub()
+	svc := newTestInterviewService(repo)
+	svc.SetCompanyOwnerChecker(func(userID, companyID uint) (bool, error) {
+		return userID == 1 && companyID == 10, nil
+	})
+	_, _, err := svc.ListSessionsForOwner(1, 10, 20, 0)
+	assert.NoError(t, err)
+	if repo.lastCompanyID == nil || *repo.lastCompanyID != 10 {
+		t.Fatalf("company_id filter = %v want 10", repo.lastCompanyID)
+	}
 }

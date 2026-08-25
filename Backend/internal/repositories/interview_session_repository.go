@@ -48,13 +48,10 @@ func (r *InterviewSessionRepository) ListByUser(userID uint, limit int, offset i
 
 // ListAll は全ユーザーの面接セッションを返す(管理画面用)。
 // schoolID が非nilの場合は usersとJOINして個別校で絞り込む。
-func (r *InterviewSessionRepository) ListAll(limit int, offset int, schoolID *uint) ([]models.InterviewSession, error) {
+// companyID が非nilの場合は interview_sessions.company_id で絞り込む。
+func (r *InterviewSessionRepository) ListAll(limit int, offset int, schoolID *uint, companyID *uint) ([]models.InterviewSession, error) {
 	var sessions []models.InterviewSession
-	query := r.db.Order("interview_sessions.created_at DESC")
-	if schoolID != nil {
-		query = query.Joins("JOIN users ON users.id = interview_sessions.user_id").
-			Where("users.school_id = ?", *schoolID)
-	}
+	query := applyInterviewSessionFilters(r.db.Order("interview_sessions.created_at DESC"), schoolID, companyID)
 	if limit > 0 {
 		query = query.Limit(limit).Offset(offset)
 	}
@@ -70,15 +67,22 @@ func (r *InterviewSessionRepository) CountByUser(userID uint) (int64, error) {
 	return count, err
 }
 
-func (r *InterviewSessionRepository) CountAll(schoolID *uint) (int64, error) {
+func (r *InterviewSessionRepository) CountAll(schoolID *uint, companyID *uint) (int64, error) {
 	var count int64
-	query := r.db.Model(&models.InterviewSession{})
+	query := applyInterviewSessionFilters(r.db.Model(&models.InterviewSession{}), schoolID, companyID)
+	err := query.Count(&count).Error
+	return count, err
+}
+
+func applyInterviewSessionFilters(query *gorm.DB, schoolID, companyID *uint) *gorm.DB {
 	if schoolID != nil {
 		query = query.Joins("JOIN users ON users.id = interview_sessions.user_id").
 			Where("users.school_id = ?", *schoolID)
 	}
-	err := query.Count(&count).Error
-	return count, err
+	if companyID != nil {
+		query = query.Where("interview_sessions.company_id = ?", *companyID)
+	}
+	return query
 }
 
 func (r *InterviewSessionRepository) ListFinishedByUser(userID uint, limit int) ([]models.InterviewSession, error) {

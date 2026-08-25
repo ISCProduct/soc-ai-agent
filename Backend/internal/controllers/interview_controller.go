@@ -478,6 +478,37 @@ func (c *InterviewController) List(ctx echo.Context) error {
 	})
 }
 
+// HRList GET /api/hr/interviews?company_id= - 企業オーナー向け面接一覧（#1083）
+func (c *InterviewController) HRList(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	companyID, err := echoRequiredUintQuery(ctx, "company_id")
+	if err != nil {
+		return err
+	}
+	page := echoIntQuery(ctx, "page", 1)
+	limit := echoIntQuery(ctx, "limit", 20)
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+	sessions, total, err := c.interviewService.ListSessionsForOwner(userID, companyID, limit, offset)
+	if err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"sessions": sessions,
+		"total":    total,
+		"page":     page,
+		"limit":    limit,
+	})
+}
+
 // Get GET /api/interviews/:id
 func (c *InterviewController) Get(ctx echo.Context) error {
 	sessionID, err := echoUintParam(ctx, "id")

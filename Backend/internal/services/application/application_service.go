@@ -228,10 +228,76 @@ func (s *ApplicationService) ListForAdmin(userID, companyID uint, status string)
 	return s.appRepo.FindAll(userID, companyID, status)
 }
 
-// GetCorrelation マッチングスコアと選考通過率の相関データを取得する
-func (s *ApplicationService) GetCorrelation(companyID uint) ([]map[string]any, error) {
+// ListForOwner は企業オーナー向け応募一覧。company_id 必須、所有権がなければ 403。
+// プラットフォーム管理者は /api/admin/applications を使う（HRスコープと混ぜない）。
+func (s *ApplicationService) ListForOwner(userID, companyID uint, status string) ([]*entity.UserApplicationStatus, error) {
+	if err := s.requireCompanyOwner(userID, companyID); err != nil {
+		return nil, err
+	}
+	return s.appRepo.FindAll(0, companyID, status)
+}
+
+// UpdateStatusAsOwner は企業オーナーによる選考ステータス更新。
+// 応募の company_id の所有者のみ許可し、遷移表は管理者相当を使う。
+func (s *ApplicationService) UpdateStatusAsOwner(applicationID, userID uint, status, notes string) (*entity.UserApplicationStatus, error) {
+	app, err := s.appRepo.FindByID(applicationID)
+	if err != nil {
+		return nil, fmt.Errorf("application_not_found: 応募データが見つかりません: %w", err)
+	}
+	if err := s.requireCompanyOwner(userID, app.CompanyID); err != nil {
+		return nil, err
+	}
+	return s.UpdateStatus(applicationID, userID, status, notes, true)
+}
+
+// requireCompanyOwner は company_ownerships の所有者のみ通す。platform admin は通さない。
+func (s *ApplicationService) requireCompanyOwner(userID, companyID uint) error {
+	if companyID == 0 {
+		return shared.ErrForbidden
+	}
+	owns, err := shared.UserOwnsCompany(s.db, userID, companyID)
+	if err != nil {
+		return err
+	}
+	if !owns {
+		return shared.ErrForbidden
+	}
+	return nil
+}
+
+// GetCorrelation マッチングスコアと選考通過率の相関データを取得する。
+// company_id 省略はプラットフォーム管理者のみ全社データを返す。一般ユーザーは 403。
+// 指定時は管理者または当該企業の所有者のみ。
+func (s *ApplicationService) GetCorrelation(userID, companyID uint) ([]map[string]any, error) {
+	if err := s.authorizeCorrelation(userID, companyID); err != nil {
+		return nil, err
+	}
 	if companyID > 0 {
 		return s.appRepo.GetCorrelationByCompany(companyID)
 	}
 	return s.appRepo.GetGlobalCorrelation()
+}
+
+func (s *ApplicationService) authorizeCorrelation(userID, companyID uint) error {
+	isAdmin, err := shared.UserIsAdmin(s.db, userID)
+	if err != nil {
+		return err
+	}
+	if companyID == 0 {
+		if isAdmin {
+			return nil
+		}
+		return shared.ErrForbidden
+	}
+	if isAdmin {
+		return nil
+	}
+	owns, err := shared.UserOwnsCompany(s.db, userID, companyID)
+	if err != nil {
+		return err
+	}
+	if !owns {
+		return shared.ErrForbidden
+	}
+	return nil
 }

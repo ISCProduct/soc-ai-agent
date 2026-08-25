@@ -28,4 +28,7 @@ func SetupInterviewRoutes(api *echo.Group, interviewController *controllers.Inte
 	realtime := api.Group("/realtime", EchoUserAuth(userSecret, access, orgs))
 	realtime.POST("/token", realtimeController.Token)
 	realtime.GET("/session-info", realtimeController.SessionInfo)
+
+	hr := api.Group("/hr", EchoUserAuth(userSecret, access, orgs))
+	hr.GET("/interviews", interviewController.HRList)
 }

@@ -16,6 +16,7 @@ import (
 	"Backend/domain/entity"
 	"Backend/internal/controllers"
 	"Backend/internal/middleware"
+	"Backend/internal/services/shared"
 	"Backend/test/controllers/mocks"
 
 	"github.com/labstack/echo/v4"
@@ -504,7 +505,7 @@ func TestApplicationController_GetCorrelation_Unauthorized(t *testing.T) {
 func TestApplicationController_GetCorrelation_Success(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
 	data := []map[string]any{{"company_id": 1, "pass_rate": 0.75}}
-	svc.On("GetCorrelation", uint(0)).Return(data, nil)
+	svc.On("GetCorrelation", uint(1), uint(0)).Return(data, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/applications/correlation", nil)
 	req = withUserID(req, 1)
@@ -515,4 +516,76 @@ func TestApplicationController_GetCorrelation_Success(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.Equal(t, float64(1), resp["total"])
 	svc.AssertExpectations(t)
+}
+
+func TestApplicationController_GetCorrelation_Forbidden(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	svc.On("GetCorrelation", uint(1), uint(99)).Return(nil, shared.ErrForbidden)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/applications/correlation?company_id=99", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newApplicationController(svc).GetCorrelation, newCtx(req, rec), http.StatusForbidden)
+	svc.AssertExpectations(t)
+}
+
+func TestApplicationController_GetCorrelation_OwnerCompany(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	data := []map[string]any{{"match_score": 0.8, "status": "offered"}}
+	svc.On("GetCorrelation", uint(1), uint(10)).Return(data, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/applications/correlation?company_id=10", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newApplicationController(svc).GetCorrelation, newCtx(req, rec), http.StatusOK)
+	svc.AssertExpectations(t)
+}
+
+// ---- HR applications (#1083) ----
+
+func TestApplicationController_HRList_Unauthorized(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/hr/applications?company_id=10", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewApplicationController(nil).HRList, newCtx(req, rec), http.StatusUnauthorized)
+}
+
+func TestApplicationController_HRList_MissingCompanyID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/hr/applications", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewApplicationController(nil).HRList, newCtx(req, rec), http.StatusBadRequest)
+}
+
+func TestApplicationController_HRList_Forbidden(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	svc.On("ListForOwner", uint(1), uint(99), "").Return(nil, shared.ErrForbidden)
+	req := httptest.NewRequest(http.MethodGet, "/api/hr/applications?company_id=99", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newApplicationController(svc).HRList, newCtx(req, rec), http.StatusForbidden)
+	svc.AssertExpectations(t)
+}
+
+func TestApplicationController_HRUpdateStatus_Forbidden(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	svc.On("UpdateStatusAsOwner", uint(5), uint(1), "document_screening", "").Return(nil, shared.ErrForbidden)
+	body, _ := json.Marshal(map[string]string{"status": "document_screening"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/hr/applications/5/status", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("5")
+	assertStatus(t, newApplicationController(svc).HRUpdateStatus, c, http.StatusForbidden)
+	svc.AssertExpectations(t)
+}
+
+func TestApplicationController_HRUpdateStatus_Unauthorized(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPatch, "/api/hr/applications/5/status", nil)
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("5")
+	assertStatus(t, controllers.NewApplicationController(nil).HRUpdateStatus, c, http.StatusUnauthorized)
 }
