@@ -1,6 +1,7 @@
 import { BACKEND_URL } from './backend-url'
 import { authService } from './auth'
 import { fetchWithTimeout, LIST_FETCH_TIMEOUT_MS } from './fetch-timeout'
+import { extractApiErrorMessage } from './interview-utils'
 
 const DEFAULT_INTERVIEW_MAX_MINUTES = 30
 const DEFAULT_INTERVIEW_QUESTION_DURATION_SECONDS = 180
@@ -104,7 +105,7 @@ export const interviewApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId, language, interviewer_gender: interviewerGender }),
     })
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
@@ -114,7 +115,7 @@ export const interviewApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId }),
     })
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
@@ -124,7 +125,7 @@ export const interviewApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId }),
     })
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
@@ -134,26 +135,26 @@ export const interviewApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId, role, text }),
     })
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
   },
 
   async getDetail(sessionId: number, userId: number, role?: string): Promise<InterviewDetail> {
     const roleParam = role ? `&role=${role}` : ''
     const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}?user_id=${userId}${roleParam}`, undefined, LIST_FETCH_TIMEOUT_MS)
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
   async getReport(sessionId: number, userId: number): Promise<InterviewReport | null> {
     const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/report?user_id=${userId}`)
     if (res.status === 404) return null
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
   async listSessions(userId: number, page = 1, limit = 20): Promise<{ sessions: InterviewSession[]; total: number }> {
     const res = await interviewFetch(`${BACKEND_URL}/api/interviews?user_id=${userId}&page=${page}&limit=${limit}`, undefined, LIST_FETCH_TIMEOUT_MS)
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
@@ -163,14 +164,14 @@ export const interviewApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId, interview_id: interviewId }),
     })
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     const data = await res.json()
     return data.client_secret
   },
 
   async getPhraseSuggestions(sessionId: number, userId: number): Promise<PhraseSuggestion[]> {
     const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/phrase-suggestions?user_id=${userId}`, undefined, LIST_FETCH_TIMEOUT_MS)
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     const data = await res.json()
     return data.suggestions as PhraseSuggestion[]
   },
@@ -178,7 +179,7 @@ export const interviewApi = {
   async getTrend(userId: number, limit = 0): Promise<InterviewTrendPoint[]> {
     const params = limit > 0 ? `?user_id=${userId}&limit=${limit}` : `?user_id=${userId}`
     const res = await interviewFetch(`${BACKEND_URL}/api/interviews/trend${params}`, undefined, LIST_FETCH_TIMEOUT_MS)
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     const data = await res.json()
     return data.points as InterviewTrendPoint[]
   },
@@ -189,7 +190,7 @@ export const interviewApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId }),
     })
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 

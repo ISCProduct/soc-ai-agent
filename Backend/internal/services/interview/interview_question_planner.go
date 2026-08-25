@@ -17,7 +17,9 @@ const (
 	questionStatusAsked    = "asked"
 	questionStatusAnswered = "answered"
 
-	maxFollowUpDepth  = 2
+	// maxFollowUpDepth は1トピックあたりの深掘り回数の上限。
+	// 元は2（合計3ターン）だったが、体感が長すぎるという報告(#910)を受けて1に短縮した。
+	maxFollowUpDepth  = 1
 	minDeepeningRunes = 40
 )
 
