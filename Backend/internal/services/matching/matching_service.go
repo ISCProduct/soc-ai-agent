@@ -64,13 +64,13 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 
 	log.Printf("[CalculateMatching] User scores: %v\n", scoreMap)
 
-	// 2. 公開済み企業のプロファイルを取得（ダミー企業を除外）
-	companies, err := s.companyRepo.FindAllPublished(10000, 0)
+	// 2. 公開済み企業のプロファイルを取得（ダミー企業を除外）。ページングで全件走査する（#1063）
+	companies, err := s.loadAllPublishedCompanies()
 	if err != nil {
-		return fmt.Errorf("failed to get companies: %w", err)
+		return err
 	}
 
-	log.Printf("[CalculateMatching] Found %d published companies\n", len(companies))
+	log.Printf("[CalculateMatching] Found %d published companies (paginated)\n", len(companies))
 
 	companyIDs := make([]uint, len(companies))
 	for i := range companies {
@@ -114,6 +114,35 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 
 	log.Printf("[CalculateMatching] Completed: %d matches created for user %d, session %s\n", matchCount, userID, sessionID)
 	return nil
+}
+
+// matchingPublishedPageSize はマッチング対象企業の1ページあたり取得件数。
+// 既存呼び出しの 10000 を踏襲する（#1063）。
+const matchingPublishedPageSize = 10000
+
+// loadAllPublishedCompanies は公開企業をページングで全件取得する。
+// CountPublished で総件数を先に取り、必要なページ数だけ FindAllPublished する。
+// 途中ページで失敗したら部分結果は捨ててエラーを返す。
+func (s *MatchingService) loadAllPublishedCompanies() ([]models.Company, error) {
+	total, err := s.companyRepo.CountPublished()
+	if err != nil {
+		return nil, fmt.Errorf("failed to count companies: %w", err)
+	}
+	var companies []models.Company
+	if total > 0 {
+		companies = make([]models.Company, 0, int(total))
+	}
+	for offset := 0; offset < int(total); offset += matchingPublishedPageSize {
+		page, err := s.companyRepo.FindAllPublished(matchingPublishedPageSize, offset)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get companies (offset=%d): %w", offset, err)
+		}
+		companies = append(companies, page...)
+		if len(page) < matchingPublishedPageSize {
+			break
+		}
+	}
+	return companies, nil
 }
 
 // calculateMatchScore ユーザースコアと企業プロファイルからマッチングスコアを計算

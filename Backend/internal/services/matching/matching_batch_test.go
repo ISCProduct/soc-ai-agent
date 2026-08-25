@@ -4,18 +4,38 @@ import (
 	"Backend/domain/entity"
 	"Backend/internal/models"
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
 
 // matchingCompanyRepo は CalculateMatching 用の最小スタブ。
 type matchingCompanyRepo struct {
-	companies []models.Company
-	profiles  map[uint]*models.CompanyWeightProfile
+	companies           []models.Company
+	profiles            map[uint]*models.CompanyWeightProfile
+	findPublishedCalls  int
+	findPublishedErr    error
+	countPublishedErr   error
+	findPublishedOffset []int
 }
 
-func (s *matchingCompanyRepo) FindAllPublished(int, int) ([]models.Company, error) {
-	return s.companies, nil
+func (s *matchingCompanyRepo) FindAllPublished(limit, offset int) ([]models.Company, error) {
+	s.findPublishedCalls++
+	s.findPublishedOffset = append(s.findPublishedOffset, offset)
+	if s.findPublishedErr != nil {
+		return nil, s.findPublishedErr
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(s.companies) {
+		return nil, nil
+	}
+	end := len(s.companies)
+	if limit > 0 && offset+limit < end {
+		end = offset + limit
+	}
+	return s.companies[offset:end], nil
 }
 func (s *matchingCompanyRepo) GetWeightProfilesByCompanyIDs([]uint) (map[uint]*models.CompanyWeightProfile, error) {
 	return s.profiles, nil
@@ -29,8 +49,13 @@ func (s *matchingCompanyRepo) ListActiveFiltered(int, int, string, string, strin
 	return nil, 0, nil
 }
 func (s *matchingCompanyRepo) ListActiveIndustries() ([]string, error) { return nil, nil }
-func (s *matchingCompanyRepo) CountPublished() (int64, error)          { return int64(len(s.companies)), nil }
-func (s *matchingCompanyRepo) FindByID(uint) (*models.Company, error)  { return nil, nil }
+func (s *matchingCompanyRepo) CountPublished() (int64, error) {
+	if s.countPublishedErr != nil {
+		return 0, s.countPublishedErr
+	}
+	return int64(len(s.companies)), nil
+}
+func (s *matchingCompanyRepo) FindByID(uint) (*models.Company, error) { return nil, nil }
 func (s *matchingCompanyRepo) FindByIDs([]uint) ([]models.Company, error) {
 	return nil, nil
 }
@@ -143,5 +168,76 @@ func TestCalculateMatching_UsesBatchProfileAndUpsert(t *testing.T) {
 	}
 	if matchRepo.saved != 2 {
 		t.Fatalf("saved matches=%d want 2 (skip company without profile)", matchRepo.saved)
+	}
+}
+
+func publishedCompanies(n int) []models.Company {
+	cs := make([]models.Company, n)
+	for i := range cs {
+		cs[i] = models.Company{ID: uint(i + 1)}
+	}
+	return cs
+}
+
+func TestLoadAllPublishedCompanies_PaginatesBeyondPageSize(t *testing.T) {
+	repo := &matchingCompanyRepo{companies: publishedCompanies(matchingPublishedPageSize + 1)}
+	svc := NewMatchingService(nil, repo, nil, nil)
+	got, err := svc.loadAllPublishedCompanies()
+	if err != nil {
+		t.Fatalf("loadAllPublishedCompanies: %v", err)
+	}
+	if len(got) != matchingPublishedPageSize+1 {
+		t.Fatalf("got %d companies, want %d", len(got), matchingPublishedPageSize+1)
+	}
+	if repo.findPublishedCalls != 2 {
+		t.Fatalf("FindAllPublished calls=%d want 2", repo.findPublishedCalls)
+	}
+	if len(repo.findPublishedOffset) != 2 || repo.findPublishedOffset[0] != 0 || repo.findPublishedOffset[1] != matchingPublishedPageSize {
+		t.Fatalf("offsets=%v want [0 %d]", repo.findPublishedOffset, matchingPublishedPageSize)
+	}
+}
+
+func TestLoadAllPublishedCompanies_ExactPageSizeDoesNotFetchNext(t *testing.T) {
+	repo := &matchingCompanyRepo{companies: publishedCompanies(matchingPublishedPageSize)}
+	svc := NewMatchingService(nil, repo, nil, nil)
+	got, err := svc.loadAllPublishedCompanies()
+	if err != nil {
+		t.Fatalf("loadAllPublishedCompanies: %v", err)
+	}
+	if len(got) != matchingPublishedPageSize {
+		t.Fatalf("got %d companies, want %d", len(got), matchingPublishedPageSize)
+	}
+	if repo.findPublishedCalls != 1 {
+		t.Fatalf("FindAllPublished calls=%d want 1 (no empty second page)", repo.findPublishedCalls)
+	}
+}
+
+func TestLoadAllPublishedCompanies_Empty(t *testing.T) {
+	repo := &matchingCompanyRepo{}
+	svc := NewMatchingService(nil, repo, nil, nil)
+	got, err := svc.loadAllPublishedCompanies()
+	if err != nil {
+		t.Fatalf("loadAllPublishedCompanies: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %d companies, want 0", len(got))
+	}
+	if repo.findPublishedCalls != 0 {
+		t.Fatalf("FindAllPublished calls=%d want 0", repo.findPublishedCalls)
+	}
+}
+
+func TestLoadAllPublishedCompanies_FetchErrorDropsPartial(t *testing.T) {
+	repo := &matchingCompanyRepo{
+		companies:        publishedCompanies(matchingPublishedPageSize + 1),
+		findPublishedErr: errors.New("db down"),
+	}
+	svc := NewMatchingService(nil, repo, nil, nil)
+	got, err := svc.loadAllPublishedCompanies()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if got != nil {
+		t.Fatalf("partial result leaked: %d companies", len(got))
 	}
 }
