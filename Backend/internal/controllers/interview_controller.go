@@ -499,7 +499,7 @@ func (c *InterviewController) HRList(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return echoInternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"sessions": sessions,

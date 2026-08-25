@@ -15,7 +15,12 @@ func newOwnerTestDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
 	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
+	t.Cleanup(func() {
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("sqlmock: %v", err)
+		}
+		_ = sqlDB.Close()
+	})
 	db, err := gorm.Open(mysql.New(mysql.Config{
 		Conn:                      sqlDB,
 		SkipInitializeWithVersion: true,

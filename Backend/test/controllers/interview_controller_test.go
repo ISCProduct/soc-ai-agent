@@ -143,6 +143,16 @@ func TestInterviewController_HRList_Success(t *testing.T) {
 	svc.AssertExpectations(t)
 }
 
+func TestInterviewController_HRList_InternalError(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/hr/interviews?company_id=10", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("ListSessionsForOwner", uint(1), uint(10), 20, 0).Return([]interview.InterviewSessionResponse{}, int64(0), errors.New("db down"))
+	assertStatus(t, newInterviewController(svc).HRList, newCtx(req, rec), http.StatusInternalServerError)
+	svc.AssertExpectations(t)
+}
+
 // ---- Get ----
 
 func TestInterviewController_Get_Unauthorized(t *testing.T) {
