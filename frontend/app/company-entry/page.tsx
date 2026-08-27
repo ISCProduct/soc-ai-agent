@@ -78,6 +78,7 @@ const weightLabels: { key: string; label: string }[] = [
 
 export default function CompanyEntryPage() {
   const [submitted, setSubmitted] = useState(false)
+  const [emailQueued, setEmailQueued] = useState(true)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -186,7 +187,11 @@ export default function CompanyEntryPage() {
         setError(data?.error || data?.message || '送信に失敗しました')
         return
       }
+      const data = await res.json().catch(() => null)
+      setEmailQueued(data?.email_queued !== false)
       setSubmitted(true)
+    } catch {
+      setError('送信に失敗しました。時間をおいて再度お試しください。')
     } finally {
       setLoading(false)
     }
@@ -202,9 +207,15 @@ export default function CompanyEntryPage() {
           <Typography sx={{ mb: 1 }}>
             内容を確認の上、掲載審査を行います。公開は審査完了後です（自動公開ではありません）。
           </Typography>
-          <Typography>
-            ご入力のメールアドレスに、お礼と会員登録のご案内をお送りしました。迷惑メールフォルダもご確認ください。
-          </Typography>
+          {emailQueued ? (
+            <Typography>
+              ご入力のメールアドレスに、お礼と会員登録のご案内をお送りしました。迷惑メールフォルダもご確認ください。
+            </Typography>
+          ) : (
+            <Typography>
+              投稿は受け付けましたが、案内メールの送信に失敗しました。届かない場合は管理者へ再送を依頼してください。
+            </Typography>
+          )}
         </Alert>
       </Box>
     )

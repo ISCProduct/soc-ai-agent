@@ -16,7 +16,6 @@ import {
   MenuItem,
   FormControl,
   InputLabel,
-  TextField,
   Snackbar,
   Alert,
   IconButton,
@@ -54,7 +53,6 @@ function ApplicationsContent() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editStatus, setEditStatus] = useState('')
-  const [editNotes, setEditNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
     open: false,
@@ -94,13 +92,11 @@ function ApplicationsContent() {
     const next = userNextStatuses(app.status)
     setEditingId(app.id)
     setEditStatus(next[0] ?? app.status)
-    setEditNotes(app.notes || '')
   }
 
   const cancelEdit = () => {
     setEditingId(null)
     setEditStatus('')
-    setEditNotes('')
   }
 
   const saveEdit = async (appId: number) => {
@@ -112,7 +108,7 @@ function ApplicationsContent() {
           'Content-Type': 'application/json',
           ...authService.getUserFetchHeaders(),
         },
-        body: JSON.stringify({ status: editStatus, notes: editNotes }),
+        body: JSON.stringify({ status: editStatus }),
       })
       if (!res.ok) {
         let message = 'ステータスの更新に失敗しました'
@@ -123,7 +119,7 @@ function ApplicationsContent() {
         throw new Error(message)
       }
       setApplications(prev =>
-        prev.map(a => (a.id === appId ? { ...a, status: editStatus, notes: editNotes } : a))
+        prev.map(a => (a.id === appId ? { ...a, status: editStatus } : a))
       )
       setSnackbar({ open: true, message: 'ステータスを更新しました', severity: 'success' })
       cancelEdit()
@@ -210,16 +206,6 @@ function ApplicationsContent() {
                         ))}
                       </Select>
                     </FormControl>
-                    <TextField
-                      fullWidth
-                      size="small"
-                      label="メモ"
-                      multiline
-                      rows={2}
-                      value={editNotes}
-                      onChange={e => setEditNotes(e.target.value)}
-                      sx={{ mb: 2 }}
-                    />
                     <Stack direction="row" spacing={1}>
                       <Button
                         variant="contained"

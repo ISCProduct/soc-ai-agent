@@ -95,17 +95,20 @@ func (r *UserApplicationStatusRepository) FindAll(userID, companyID uint, status
 	return result, nil
 }
 
-// UpdateStatus 選考ステータスを更新
-func (r *UserApplicationStatusRepository) UpdateStatus(id uint, status, notes string) error {
+// UpdateStatus 選考ステータスを更新する。notes が nil ならメモは変更しない（#1084）。
+func (r *UserApplicationStatusRepository) UpdateStatus(id uint, status string, notes *string) error {
 	now := time.Now()
+	updates := map[string]any{
+		"status":            status,
+		"status_updated_at": now,
+		"updated_at":        now,
+	}
+	if notes != nil {
+		updates["notes"] = *notes
+	}
 	return r.db.Model(&models.UserApplicationStatus{}).
 		Where("id = ?", id).
-		Updates(map[string]any{
-			"status":            status,
-			"notes":             notes,
-			"status_updated_at": now,
-			"updated_at":        now,
-		}).Error
+		Updates(updates).Error
 }
 
 // GetCorrelationByCompany 企業ごとのマッチングスコア×選考通過率の相関データを取得

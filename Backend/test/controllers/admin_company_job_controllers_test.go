@@ -17,6 +17,7 @@ import (
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/mock"
+	"gorm.io/gorm"
 )
 
 // ===== AdminCompanyController =====
@@ -132,8 +133,16 @@ func TestAdminCompanyController_Publish_Success(t *testing.T) {
 	repo := &mocks.CompanyRepositoryMock{}
 	audit := &mocks.AuditLogServiceMock{}
 	company := &models.Company{Name: "Test Corp"}
+	cid := uint(1)
 	repo.On("FindByID", uint(1)).Return(company, nil)
+	repo.On("GetWeightProfile", uint(1), (*uint)(nil)).Return(&models.CompanyWeightProfile{CompanyID: 1}, nil)
 	repo.On("Update", mock.Anything).Return(nil)
+	repo.On("ListJobPositions", &cid, (*uint)(nil), 1000).Return([]models.CompanyJobPosition{
+		{ID: 9, CompanyID: 1, DataStatus: "draft"},
+	}, nil)
+	repo.On("UpdateJobPosition", mock.MatchedBy(func(p *models.CompanyJobPosition) bool {
+		return p.ID == 9 && p.DataStatus == "published"
+	})).Return(nil)
 	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/admin/companies/1/publish", nil)
@@ -142,6 +151,21 @@ func TestAdminCompanyController_Publish_Success(t *testing.T) {
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
 	assertStatus(t, newAdminCompanyController(repo, audit).Publish, ctx, http.StatusOK)
+	repo.AssertExpectations(t)
+}
+
+func TestAdminCompanyController_Publish_RequiresWeightProfile(t *testing.T) {
+	repo := &mocks.CompanyRepositoryMock{}
+	company := &models.Company{Name: "Test Corp"}
+	repo.On("FindByID", uint(1)).Return(company, nil)
+	repo.On("GetWeightProfile", uint(1), (*uint)(nil)).Return(nil, gorm.ErrRecordNotFound)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/companies/1/publish", nil)
+	rec := httptest.NewRecorder()
+	ctx := newCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("1")
+	assertStatus(t, newAdminCompanyController(repo, nil).Publish, ctx, http.StatusBadRequest)
 	repo.AssertExpectations(t)
 }
 

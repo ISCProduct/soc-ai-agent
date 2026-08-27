@@ -112,6 +112,22 @@ export default function AdminDashboardPage() {
           <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
+                応募・選考管理
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                学生の応募一覧を確認し、選考ステータスを更新します。
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Button variant="contained" component={Link} href="/admin/applications">
+                応募管理へ
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card elevation={0} sx={cardSx}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
                 卒業生の就職情報
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>

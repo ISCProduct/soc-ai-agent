@@ -145,7 +145,7 @@ func TestCalculateMatching_UsesBatchProfileAndUpsert(t *testing.T) {
 		companies: []models.Company{
 			{ID: 1, Name: "A社", Industry: "IT"},
 			{ID: 2, Name: "B社", Industry: "製造"},
-			{ID: 3, Name: "C社", Industry: "IT"}, // プロファイルなし → スキップ
+			{ID: 3, Name: "C社", Industry: "IT"}, // プロファイルなし → デフォルト重み
 		},
 		profiles: map[uint]*models.CompanyWeightProfile{
 			1: {CompanyID: 1, TechnicalOrientation: 80},
@@ -166,8 +166,8 @@ func TestCalculateMatching_UsesBatchProfileAndUpsert(t *testing.T) {
 	if matchRepo.batchCalls != 1 {
 		t.Fatalf("CreateOrUpdateBatch calls=%d want 1", matchRepo.batchCalls)
 	}
-	if matchRepo.saved != 2 {
-		t.Fatalf("saved matches=%d want 2 (skip company without profile)", matchRepo.saved)
+	if matchRepo.saved != 3 {
+		t.Fatalf("saved matches=%d want 3 (missing profile uses default weights)", matchRepo.saved)
 	}
 }
 
