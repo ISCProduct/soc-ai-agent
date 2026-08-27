@@ -159,7 +159,12 @@ export const authService = {
   },
 
   async verifyRegistration(token: string): Promise<{ email: string; token: string }> {
-    const res = await fetch(`${BACKEND_URL}/api/auth/verify-registration?token=${encodeURIComponent(token)}`)
+    // POST + Next プロキシ経由。BEは POST のみ。トークンは URL に載せない（#1079）。
+    const res = await fetch('/api/auth/verify-registration', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getTenantHeaders() },
+      body: JSON.stringify({ token }),
+    })
     if (!res.ok) {
       throw new Error(await extractErrorMessage(res, '無効または期限切れのトークンです。'))
     }
