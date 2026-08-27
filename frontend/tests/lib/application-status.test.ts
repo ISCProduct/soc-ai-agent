@@ -1,6 +1,7 @@
 import {
   canUserTransition,
   isTerminalStatus,
+  nextActionLabel,
   normalizeApplicationStatus,
   userNextStatuses,
 } from '@/lib/application-status'
@@ -27,5 +28,21 @@ describe('application-status', () => {
     expect(normalizeApplicationStatus('interview')).toBe('interview_in_progress')
     expect(normalizeApplicationStatus('declined')).toBe('withdrawn')
     expect(userNextStatuses('interview')).toEqual(['withdrawn'])
+  })
+})
+
+describe('nextActionLabel', () => {
+  it('選べる操作が1つなら「◯◯する」の具体的なラベルにする', () => {
+    expect(nextActionLabel('applied')).toBe('辞退する')
+    expect(nextActionLabel('interview_scheduled')).toBe('辞退する')
+  })
+
+  it('選べる操作が複数なら選択肢を列挙する', () => {
+    expect(nextActionLabel('offered')).toBe('内定承諾・辞退を選ぶ')
+  })
+
+  it('終了状態など次の操作がない場合は空文字を返す', () => {
+    expect(nextActionLabel('accepted')).toBe('')
+    expect(nextActionLabel('rejected')).toBe('')
   })
 })

@@ -346,6 +346,9 @@ func main() {
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
 	interviewService.SetCompanyRepo(companyRepo)
+	interviewService.SetCompanyOwnerChecker(func(userID, companyID uint) (bool, error) {
+		return shared.UserOwnsCompany(db, userID, companyID)
+	})
 	resumeService.SetCrossFeatureService(crossFeatureService)
 
 	// コントローラー層の初期化
@@ -436,7 +439,7 @@ func main() {
 	googleCalendarController := controllers.NewGoogleCalendarController(calendarSyncService)
 	scheduleController := controllers.NewScheduleController(scheduleService)
 	esReviewController := controllers.NewESReviewController()
-	appService := application.NewApplicationService(appStatusRepo, matchRepo)
+	appService := application.NewApplicationService(appStatusRepo, matchRepo, db)
 	appController := controllers.NewApplicationController(appService)
 	integratedProfileController := controllers.NewIntegratedProfileController(crossFeatureService, interviewSessionRepo, resumeRepo)
 	entitlementController := controllers.NewEntitlementController(organizationService)

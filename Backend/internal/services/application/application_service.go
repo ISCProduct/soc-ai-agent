@@ -2,23 +2,33 @@ package application
 
 import (
 	"Backend/domain/entity"
+	"Backend/domain/mapper"
+	"Backend/domain/repository"
+	"Backend/internal/models"
 	"Backend/internal/repositories"
+	"Backend/internal/services/shared"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/go-sql-driver/mysql"
+	"gorm.io/gorm"
 )
 
 // ApplicationService 応募・選考ステータス管理サービス
 type ApplicationService struct {
 	appRepo   *repositories.UserApplicationStatusRepository
-	matchRepo *repositories.UserCompanyMatchRepository
+	matchRepo repository.UserCompanyMatchRepository
+	db        *gorm.DB
 }
 
 func NewApplicationService(
 	appRepo *repositories.UserApplicationStatusRepository,
-	matchRepo *repositories.UserCompanyMatchRepository,
+	matchRepo repository.UserCompanyMatchRepository,
+	db *gorm.DB,
 ) *ApplicationService {
-	return &ApplicationService{appRepo: appRepo, matchRepo: matchRepo}
+	return &ApplicationService{appRepo: appRepo, matchRepo: matchRepo, db: db}
 }
 
 // ValidStatuses 有効な選考ステータス一覧（docs/requirements/application-status-transition.md §6）
@@ -34,6 +44,9 @@ var ValidStatuses = []string{
 	"withdrawn",             // 辞退（終了状態）
 	"rejected",              // 不採用（終了状態）
 }
+
+// terminalStatusList 終了状態一覧（順序固定、DBクエリの IN 句にも使う）
+var terminalStatusList = []string{"accepted", "withdrawn", "rejected"}
 
 // terminalStatuses 終了状態：原則として通常更新を受け付けない
 var terminalStatuses = map[string]bool{
@@ -75,33 +88,77 @@ func CanTransition(current, next string, isAdmin bool) bool {
 	return slices.Contains(userAllowedTransitions[current], next)
 }
 
-// Apply 企業への応募を登録する
+// Apply 企業への応募を登録する（#1017）
+// match の所有権・企業一致を検証し、進行中の応募が既にある場合のみ重複エラーとする。
+// 応募作成とマッチの is_applied 更新は同一トランザクションで行い、
+// 片方が失敗した場合は両方ロールバックする。
 func (s *ApplicationService) Apply(userID, companyID, matchID uint) (*entity.UserApplicationStatus, error) {
-	// 重複チェック
-	existing, err := s.appRepo.FindByUserAndCompany(userID, companyID)
+	// match の所有権・企業一致チェック（ToggleFavorite と同じパターン: #924）
+	match, err := s.matchRepo.FindByID(matchID)
 	if err != nil {
-		return nil, fmt.Errorf("重複チェックエラー: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, shared.ErrNotFound
+		}
+		return nil, fmt.Errorf("マッチデータ取得エラー: %w", err)
 	}
-	if existing != nil {
-		return nil, fmt.Errorf("この企業にはすでに応募済みです")
+	if match.UserID != userID {
+		return nil, shared.ErrForbidden
 	}
-
-	now := time.Now()
-	app := &entity.UserApplicationStatus{
-		UserID:    userID,
-		CompanyID: companyID,
-		MatchID:   matchID,
-		Status:    "applied",
-		AppliedAt: &now,
-	}
-	if err := s.appRepo.Create(app); err != nil {
-		return nil, fmt.Errorf("応募登録エラー: %w", err)
+	if match.CompanyID != companyID {
+		return nil, fmt.Errorf("match_id と company_id が一致しません")
 	}
 
-	// UserCompanyMatch の IsApplied フラグも更新
-	_ = s.matchRepo.MarkAsApplied(matchID)
+	var app *entity.UserApplicationStatus
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		// 進行中（終了状態でない）の応募が既にあるか確認
+		var existing models.UserApplicationStatus
+		findErr := tx.Where("user_id = ? AND company_id = ? AND status NOT IN ?", userID, companyID, terminalStatusList).
+			First(&existing).Error
+		switch {
+		case findErr == nil:
+			return shared.ErrDuplicateActiveApplication
+		case errors.Is(findErr, gorm.ErrRecordNotFound):
+			// 進行中の応募なし。続行
+		default:
+			return fmt.Errorf("重複チェックエラー: %w", findErr)
+		}
+
+		now := time.Now()
+		m := &models.UserApplicationStatus{
+			UserID:    userID,
+			CompanyID: companyID,
+			MatchID:   matchID,
+			Status:    "applied",
+			AppliedAt: &now,
+		}
+		if createErr := tx.Create(m).Error; createErr != nil {
+			// 並行リクエストによる競合はDBのUNIQUE制約（active_dedup_key）で最終防御される
+			if isDuplicateEntryErr(createErr) {
+				return shared.ErrDuplicateActiveApplication
+			}
+			return fmt.Errorf("応募登録エラー: %w", createErr)
+		}
+
+		// UserCompanyMatch の IsApplied フラグも更新。失敗時は Create ごとロールバックする
+		if markErr := tx.Model(&models.UserCompanyMatch{}).Where("id = ?", matchID).Update("is_applied", true).Error; markErr != nil {
+			return fmt.Errorf("マッチのis_applied更新エラー: %w", markErr)
+		}
+
+		app = mapper.UserApplicationStatusToEntity(m)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	return app, nil
+}
+
+// isDuplicateEntryErr はMySQLの一意制約違反(Error 1062)かどうかを判定する。
+// school_service.go の同名関数と同じ判定ロジック。
+func isDuplicateEntryErr(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
 }
 
 // UpdateStatus 選考ステータスを更新する
@@ -171,10 +228,76 @@ func (s *ApplicationService) ListForAdmin(userID, companyID uint, status string)
 	return s.appRepo.FindAll(userID, companyID, status)
 }
 
-// GetCorrelation マッチングスコアと選考通過率の相関データを取得する
-func (s *ApplicationService) GetCorrelation(companyID uint) ([]map[string]any, error) {
+// ListForOwner は企業オーナー向け応募一覧。company_id 必須、所有権がなければ 403。
+// プラットフォーム管理者は /api/admin/applications を使う（HRスコープと混ぜない）。
+func (s *ApplicationService) ListForOwner(userID, companyID uint, status string) ([]*entity.UserApplicationStatus, error) {
+	if err := s.requireCompanyOwner(userID, companyID); err != nil {
+		return nil, err
+	}
+	return s.appRepo.FindAll(0, companyID, status)
+}
+
+// UpdateStatusAsOwner は企業オーナーによる選考ステータス更新。
+// 応募の company_id の所有者のみ許可し、遷移表は管理者相当を使う。
+func (s *ApplicationService) UpdateStatusAsOwner(applicationID, userID uint, status, notes string) (*entity.UserApplicationStatus, error) {
+	app, err := s.appRepo.FindByID(applicationID)
+	if err != nil {
+		return nil, fmt.Errorf("application_not_found: 応募データが見つかりません: %w", err)
+	}
+	if err := s.requireCompanyOwner(userID, app.CompanyID); err != nil {
+		return nil, err
+	}
+	return s.UpdateStatus(applicationID, userID, status, notes, true)
+}
+
+// requireCompanyOwner は company_ownerships の所有者のみ通す。platform admin は通さない。
+func (s *ApplicationService) requireCompanyOwner(userID, companyID uint) error {
+	if companyID == 0 {
+		return shared.ErrForbidden
+	}
+	owns, err := shared.UserOwnsCompany(s.db, userID, companyID)
+	if err != nil {
+		return err
+	}
+	if !owns {
+		return shared.ErrForbidden
+	}
+	return nil
+}
+
+// GetCorrelation マッチングスコアと選考通過率の相関データを取得する。
+// company_id 省略はプラットフォーム管理者のみ全社データを返す。一般ユーザーは 403。
+// 指定時は管理者または当該企業の所有者のみ。
+func (s *ApplicationService) GetCorrelation(userID, companyID uint) ([]map[string]any, error) {
+	if err := s.authorizeCorrelation(userID, companyID); err != nil {
+		return nil, err
+	}
 	if companyID > 0 {
 		return s.appRepo.GetCorrelationByCompany(companyID)
 	}
 	return s.appRepo.GetGlobalCorrelation()
+}
+
+func (s *ApplicationService) authorizeCorrelation(userID, companyID uint) error {
+	isAdmin, err := shared.UserIsAdmin(s.db, userID)
+	if err != nil {
+		return err
+	}
+	if companyID == 0 {
+		if isAdmin {
+			return nil
+		}
+		return shared.ErrForbidden
+	}
+	if isAdmin {
+		return nil
+	}
+	owns, err := shared.UserOwnsCompany(s.db, userID, companyID)
+	if err != nil {
+		return err
+	}
+	if !owns {
+		return shared.ErrForbidden
+	}
+	return nil
 }

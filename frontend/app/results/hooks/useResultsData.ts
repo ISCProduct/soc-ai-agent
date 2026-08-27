@@ -297,7 +297,13 @@ export function useResultsData() {
             ? { ...c, isApplied: true, applicationId: data.id }
             : c,
         ))
-        setSnackbar({ open: true, message: `${company.name} に応募しました`, severity: 'success' })
+        setSnackbar({
+          open: true,
+          message: `${company.name} に応募しました`,
+          severity: 'success',
+          actionHref: '/applications',
+          actionLabel: '選考管理を見る',
+        })
       } else {
         let message = '応募に失敗しました'
         try {

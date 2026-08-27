@@ -20,6 +20,22 @@ export function parseJsonSafe(value?: string): unknown {
 }
 
 /**
+ * Extracts the human-readable message from a backend error response body.
+ * Backend errors are JSON `{ error, code, detail? }` (see error_handler.go)
+ * with `error` already sanitized to a Japanese message server-side.
+ * Falls back to the raw body text if it isn't in that shape, so callers
+ * never lose information — they just avoid showing raw JSON to the user
+ * when the expected shape is present (#910).
+ */
+export function extractApiErrorMessage(bodyText: string): string {
+  const parsed = parseJsonSafe(bodyText)
+  if (parsed && typeof parsed === 'object' && typeof (parsed as { error?: unknown }).error === 'string') {
+    return (parsed as { error: string }).error
+  }
+  return bodyText
+}
+
+/**
  * Converts a media-device / API error into a user-friendly Japanese message.
  * Keeps error-message logic out of UI components.
  */

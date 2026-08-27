@@ -34,14 +34,16 @@ func (m *mockInterviewSessionRepo) Update(s *models.InterviewSession) error { re
 func (m *mockInterviewSessionRepo) ListByUser(userID uint, limit, offset int) ([]models.InterviewSession, error) {
 	return nil, nil
 }
-func (m *mockInterviewSessionRepo) ListAll(limit, offset int, schoolID *uint) ([]models.InterviewSession, error) {
+func (m *mockInterviewSessionRepo) ListAll(limit, offset int, schoolID *uint, companyID *uint) ([]models.InterviewSession, error) {
 	return nil, nil
 }
 func (m *mockInterviewSessionRepo) ListFinishedByUser(userID uint, limit int) ([]models.InterviewSession, error) {
 	return nil, nil
 }
 func (m *mockInterviewSessionRepo) CountByUser(userID uint) (int64, error) { return 0, nil }
-func (m *mockInterviewSessionRepo) CountAll(schoolID *uint) (int64, error) { return 0, nil }
+func (m *mockInterviewSessionRepo) CountAll(schoolID *uint, companyID *uint) (int64, error) {
+	return 0, nil
+}
 func (m *mockInterviewSessionRepo) CountByUserAndDay(userID uint, day time.Time) (int64, error) {
 	return 0, nil
 }

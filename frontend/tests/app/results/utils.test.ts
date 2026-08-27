@@ -5,6 +5,7 @@ import type { CapitalRelation } from '@/lib/company-data'
 import type { CategoryScores } from '@/app/results/types'
 import {
   buildEmptyRecommendationsMessage,
+  buildEsRewriteQuery,
   buildInterviewQuery,
   collectRelatedCompanyIds,
   getTopCategoryScores,
@@ -157,6 +158,14 @@ describe('buildInterviewQuery', () => {
       name: 'テスト株式会社',
       industry: 'IT',
     })).toBe('company_id=7&company_name=%E3%83%86%E3%82%B9%E3%83%88%E6%A0%AA%E5%BC%8F%E4%BC%9A%E7%A4%BE&industry=IT')
+  })
+})
+
+describe('buildEsRewriteQuery', () => {
+  it('ES添削・リライトページ用に企業名だけをクエリ化する', () => {
+    expect(buildEsRewriteQuery({ name: 'テスト株式会社' })).toBe(
+      'company_name=%E3%83%86%E3%82%B9%E3%83%88%E6%A0%AA%E5%BC%8F%E4%BC%9A%E7%A4%BE',
+    )
   })
 })
 

@@ -1,6 +1,22 @@
 package interview
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+// TestBuildInterviewSystemPromptToneGuideline は #910 の回帰テスト。
+// AIが叱責的なトーンで応答しないよう、プロンプトに中立トーンの指示が
+// 含まれていることを検証する。
+func TestBuildInterviewSystemPromptToneGuideline(t *testing.T) {
+	prompt := buildInterviewSystemPrompt(
+		"テスト株式会社", "", "エンジニア", "", "general",
+		nil, nil, 0, 0, 1, 5, 0, 180, nil,
+	)
+	if !strings.Contains(prompt, "叱責") {
+		t.Fatalf("prompt missing tone guideline (叱責禁止): %s", prompt)
+	}
+}
 
 func TestIsEngineerPosition(t *testing.T) {
 	tests := []struct {

@@ -33,6 +33,8 @@ func TestNeedsDeepening(t *testing.T) {
 		{name: "短い回答", answer: "頑張りました。", depth: 0, want: true},
 		{name: "具体性あり", answer: "3名チームでAPIを2週間以内にリリースし、レスポンスを40%改善しました。自分は設計とレビューを担当しました。", depth: 0, want: false},
 		{name: "深掘り上限", answer: "頑張りました。", depth: 2, want: false},
+		// #910: maxFollowUpDepth を 2→1 に短縮したため、depth=1 は既に上限扱い
+		{name: "深掘り上限（短縮後、depth=1で打ち切り）", answer: "頑張りました。", depth: 1, want: false},
 		// #881: 特定8キーワードに一致しない曖昧な定型回答（40文字以上）も深掘り対象にする
 		{name: "定型的な志望動機（キーワード非依存）", answer: "はい、御社のビジョンにとても共感しておりまして、これまでの経験を活かして貢献したいと考えております。", depth: 0, want: true},
 		{name: "定型的な協調性アピール（キーワード非依存）", answer: "周囲とうまく連携しながら、状況に応じて柔軟に対応することを心がけて業務に取り組んできました。", depth: 0, want: true},

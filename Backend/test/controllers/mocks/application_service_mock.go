@@ -50,6 +50,22 @@ func (m *ApplicationServiceMock) ListForAdmin(userID, companyID uint, status str
 	return args.Get(0).([]*entity.UserApplicationStatus), args.Error(1)
 }
 
+func (m *ApplicationServiceMock) ListForOwner(userID, companyID uint, status string) ([]*entity.UserApplicationStatus, error) {
+	args := m.Called(userID, companyID, status)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*entity.UserApplicationStatus), args.Error(1)
+}
+
+func (m *ApplicationServiceMock) UpdateStatusAsOwner(applicationID, userID uint, status, notes string) (*entity.UserApplicationStatus, error) {
+	args := m.Called(applicationID, userID, status, notes)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*entity.UserApplicationStatus), args.Error(1)
+}
+
 func (m *ApplicationServiceMock) GetApplicationsByUser(userID uint) ([]*entity.UserApplicationStatus, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
@@ -58,8 +74,8 @@ func (m *ApplicationServiceMock) GetApplicationsByUser(userID uint) ([]*entity.U
 	return args.Get(0).([]*entity.UserApplicationStatus), args.Error(1)
 }
 
-func (m *ApplicationServiceMock) GetCorrelation(companyID uint) ([]map[string]any, error) {
-	args := m.Called(companyID)
+func (m *ApplicationServiceMock) GetCorrelation(userID, companyID uint) ([]map[string]any, error) {
+	args := m.Called(userID, companyID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

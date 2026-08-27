@@ -41,6 +41,11 @@ func (m *InterviewServiceMock) ListSessions(userID uint, all bool, limit int, of
 	return args.Get(0).([]interview.InterviewSessionResponse), args.Get(1).(int64), args.Error(2)
 }
 
+func (m *InterviewServiceMock) ListSessionsForOwner(userID, companyID uint, limit int, offset int) ([]interview.InterviewSessionResponse, int64, error) {
+	args := m.Called(userID, companyID, limit, offset)
+	return args.Get(0).([]interview.InterviewSessionResponse), args.Get(1).(int64), args.Error(2)
+}
+
 func (m *InterviewServiceMock) GetSessionDetailWithRole(userID uint, sessionID uint, role string) (*interview.InterviewDetailResponse, error) {
 	args := m.Called(userID, sessionID, role)
 	if args.Get(0) == nil {

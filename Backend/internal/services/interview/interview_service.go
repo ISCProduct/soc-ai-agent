@@ -31,6 +31,7 @@ type InterviewService struct {
 	jobCh                chan uint
 	workerOnce           sync.Once
 	jobs                 shared.JobEnqueuer
+	ownsCompany          func(userID, companyID uint) (bool, error)
 }
 
 // SkillScoreReader はGitHubスキルスコア取得の最小インターフェース。
@@ -92,6 +93,11 @@ func (s *InterviewService) SetCrossFeatureService(cf *flywheel.CrossFeatureInteg
 // SetJobEnqueuer は面接レポート等の永続キュー投入先を設定する（#617）。
 func (s *InterviewService) SetJobEnqueuer(j shared.JobEnqueuer) {
 	s.jobs = j
+}
+
+// SetCompanyOwnerChecker は企業所有権判定を注入する（#1083 HR面接一覧）。未設定なら fail-closed。
+func (s *InterviewService) SetCompanyOwnerChecker(fn func(userID, companyID uint) (bool, error)) {
+	s.ownsCompany = fn
 }
 
 // GenerateReportForSession はキューワーカーから呼ばれるレポート生成エントリ（#617）。

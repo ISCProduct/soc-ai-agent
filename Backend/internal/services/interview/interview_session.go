@@ -128,16 +128,32 @@ func (s *InterviewService) SaveUtterance(userID uint, sessionID uint, role strin
 
 // ListAllSessionsAdmin lists all interview sessions without performing a user-level admin check.
 // The caller (admin middleware) is responsible for ensuring only admins can invoke this.
-func (s *InterviewService) ListAllSessionsAdmin(limit int, offset int, schoolID *uint) ([]InterviewSessionResponse, int64, error) {
-	total, err := s.sessionRepo.CountAll(schoolID)
+func (s *InterviewService) ListAllSessionsAdmin(limit int, offset int, schoolID *uint, companyID *uint) ([]InterviewSessionResponse, int64, error) {
+	total, err := s.sessionRepo.CountAll(schoolID, companyID)
 	if err != nil {
 		return nil, 0, err
 	}
-	sessions, err := s.sessionRepo.ListAll(limit, offset, schoolID)
+	sessions, err := s.sessionRepo.ListAll(limit, offset, schoolID, companyID)
 	if err != nil {
 		return nil, 0, err
 	}
 	return toSessionResponses(sessions), total, nil
+}
+
+// ListSessionsForOwner は企業オーナー向け面接一覧。company_id 必須、所有権がなければ 403。
+func (s *InterviewService) ListSessionsForOwner(userID, companyID uint, limit int, offset int) ([]InterviewSessionResponse, int64, error) {
+	if companyID == 0 || s.ownsCompany == nil {
+		return nil, 0, shared.ErrForbidden
+	}
+	ok, err := s.ownsCompany(userID, companyID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !ok {
+		return nil, 0, shared.ErrForbidden
+	}
+	cid := companyID
+	return s.ListAllSessionsAdmin(limit, offset, nil, &cid)
 }
 
 func (s *InterviewService) ListSessions(userID uint, all bool, limit int, offset int) ([]InterviewSessionResponse, int64, error) {
@@ -146,11 +162,11 @@ func (s *InterviewService) ListSessions(userID uint, all bool, limit int, offset
 		if err != nil || user == nil || !user.IsAdmin {
 			return nil, 0, shared.ErrForbidden
 		}
-		total, err := s.sessionRepo.CountAll(nil)
+		total, err := s.sessionRepo.CountAll(nil, nil)
 		if err != nil {
 			return nil, 0, err
 		}
-		sessions, err := s.sessionRepo.ListAll(limit, offset, nil)
+		sessions, err := s.sessionRepo.ListAll(limit, offset, nil, nil)
 		if err != nil {
 			return nil, 0, err
 		}
