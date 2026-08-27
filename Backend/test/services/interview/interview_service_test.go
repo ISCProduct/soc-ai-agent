@@ -33,8 +33,8 @@ func (m *mockSessionRepo) ListByUser(userID uint, limit, offset int) ([]models.I
 	args := m.Called(userID, limit, offset)
 	return args.Get(0).([]models.InterviewSession), args.Error(1)
 }
-func (m *mockSessionRepo) ListAll(limit, offset int, schoolID *uint) ([]models.InterviewSession, error) {
-	args := m.Called(limit, offset, schoolID)
+func (m *mockSessionRepo) ListAll(limit, offset int, schoolID *uint, companyID *uint) ([]models.InterviewSession, error) {
+	args := m.Called(limit, offset, schoolID, companyID)
 	return args.Get(0).([]models.InterviewSession), args.Error(1)
 }
 func (m *mockSessionRepo) ListFinishedByUser(userID uint, limit int) ([]models.InterviewSession, error) {
@@ -45,8 +45,8 @@ func (m *mockSessionRepo) CountByUser(userID uint) (int64, error) {
 	args := m.Called(userID)
 	return args.Get(0).(int64), args.Error(1)
 }
-func (m *mockSessionRepo) CountAll(schoolID *uint) (int64, error) {
-	args := m.Called(schoolID)
+func (m *mockSessionRepo) CountAll(schoolID *uint, companyID *uint) (int64, error) {
+	args := m.Called(schoolID, companyID)
 	return args.Get(0).(int64), args.Error(1)
 }
 func (m *mockSessionRepo) CountByUserAndDay(userID uint, day time.Time) (int64, error) {
@@ -212,6 +212,100 @@ func TestInterviewService_TTSVoiceSelection(t *testing.T) {
 
 		_, err := svc.StartTurn(context.Background(), 1, 101, "", "", "", "", "", 0, 0, 0, 0, 0)
 		assert.NoError(t, err)
+	})
+}
+
+// TestInterviewService_TurnDegradesGracefullyOnAPIFailure は #910 の回帰テスト。
+// Transcribe/ChatInterview/TTS のいずれかがAPIエラーを返しても、Turn は
+// エラーを返さず面接官としてのフォールバック応答で継続することを検証する。
+func TestInterviewService_TurnDegradesGracefullyOnAPIFailure(t *testing.T) {
+	newSession := func(id uint) *models.InterviewSession {
+		return &models.InterviewSession{ID: id, UserID: 1, InterviewerGender: "female", Language: "ja"}
+	}
+
+	t.Run("Transcribe失敗時は聞き取れなかった扱いで継続する", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/audio/transcriptions":
+				w.WriteHeader(http.StatusInternalServerError)
+			case "/audio/speech":
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("audio"))
+			default:
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"choices":[{"message":{"content":"次の質問です"}}],"text":"次の質問です"}`))
+			}
+		}))
+		defer server.Close()
+
+		sRepo := new(mockSessionRepo)
+		uRepo := new(mockUserRepo)
+		client := openai.NewWithBaseURL(server.URL, "gpt-4o-mini")
+		svc := interview.NewInterviewService(sRepo, nil, nil, uRepo, nil, client, nil)
+
+		session := newSession(200)
+		sRepo.On("FindByID", uint(200)).Return(session, nil)
+
+		result, err := svc.Turn(context.Background(), 1, 200, []byte("dummy-audio"), nil, "", "", "", "", "", 0, 1, 0, 1, 1, 0, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, "（聞き取れませんでした）", result.UserText)
+	})
+
+	t.Run("Chat失敗時は言い換え応答にフォールバックする", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/audio/transcriptions":
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"text":"わかりません"}`))
+			case "/chat/completions":
+				w.WriteHeader(http.StatusInternalServerError)
+			case "/audio/speech":
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("audio"))
+			}
+		}))
+		defer server.Close()
+
+		sRepo := new(mockSessionRepo)
+		uRepo := new(mockUserRepo)
+		client := openai.NewWithBaseURL(server.URL, "gpt-4o-mini")
+		svc := interview.NewInterviewService(sRepo, nil, nil, uRepo, nil, client, nil)
+
+		session := newSession(201)
+		sRepo.On("FindByID", uint(201)).Return(session, nil)
+
+		result, err := svc.Turn(context.Background(), 1, 201, []byte("dummy-audio"), nil, "", "", "", "", "", 0, 1, 0, 1, 1, 0, 0)
+		assert.NoError(t, err)
+		assert.NotEmpty(t, result.AIText)
+		assert.NotContains(t, result.AIText, "chat error")
+	})
+
+	t.Run("TTS失敗時は音声なしで継続する", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/audio/transcriptions":
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"text":"よろしくお願いします"}`))
+			case "/audio/speech":
+				w.WriteHeader(http.StatusInternalServerError)
+			default:
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"choices":[{"message":{"content":"次の質問です"}}],"text":"次の質問です"}`))
+			}
+		}))
+		defer server.Close()
+
+		sRepo := new(mockSessionRepo)
+		uRepo := new(mockUserRepo)
+		client := openai.NewWithBaseURL(server.URL, "gpt-4o-mini")
+		svc := interview.NewInterviewService(sRepo, nil, nil, uRepo, nil, client, nil)
+
+		session := newSession(202)
+		sRepo.On("FindByID", uint(202)).Return(session, nil)
+
+		result, err := svc.Turn(context.Background(), 1, 202, []byte("dummy-audio"), nil, "", "", "", "", "", 0, 1, 0, 1, 1, 0, 0)
+		assert.NoError(t, err)
+		assert.Empty(t, result.Audio)
 	})
 }
 

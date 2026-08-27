@@ -26,7 +26,7 @@ import {
   FavoriteBorder,
 } from '@mui/icons-material'
 import type { AnalysisScores, Company, SnackbarState, SuggestedRole } from '../types'
-import { buildInterviewQuery, buildResumeQuery, getTopCategoryScores } from '../utils'
+import { buildEsRewriteQuery, buildInterviewQuery, getTopCategoryScores } from '../utils'
 import AnalysisScoreCard from './AnalysisScoreCard'
 import {
   GUEST_REGISTER_CTA_LABEL,
@@ -350,7 +350,7 @@ export default function ResultsListView({
                     </Box>
                   )}
 
-                  <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Stack direction="row" spacing={1} sx={{ mt: 2, alignItems: 'center', flexWrap: 'wrap', gap: 1 }} useFlexGap>
                     <Button
                       variant="contained"
                       size="small"
@@ -378,10 +378,10 @@ export default function ResultsListView({
                       color="success"
                       onClick={(e) => {
                         e.stopPropagation()
-                        onNavigate(`/resume?${buildResumeQuery(company)}`)
+                        onNavigate(`/es-rewrite?${buildEsRewriteQuery(company)}`)
                       }}
                     >
-                      ES・職務経歴書を添削
+                      ES添削・リライト
                     </Button>
                     <Tooltip title={guestApplicationsProps.title} disableHoverListener={!guestApplicationsProps.disabled}>
                       <span>
@@ -399,7 +399,7 @@ export default function ResultsListView({
                     <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold' }}>
                       クリックして詳細を見る →
                     </Typography>
-                  </Box>
+                  </Stack>
                 </CardContent>
               </Card>
             ))}
@@ -450,7 +450,17 @@ export default function ResultsListView({
         onClose={onCloseSnackbar}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
-        <Alert severity={snackbar.severity} onClose={onCloseSnackbar}>
+        <Alert
+          severity={snackbar.severity}
+          onClose={onCloseSnackbar}
+          action={
+            snackbar.actionHref ? (
+              <Button color="inherit" size="small" onClick={() => onNavigate(snackbar.actionHref!)}>
+                {snackbar.actionLabel}
+              </Button>
+            ) : undefined
+          }
+        >
           {snackbar.message}
         </Alert>
       </Snackbar>

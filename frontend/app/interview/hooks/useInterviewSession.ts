@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { BACKEND_URL } from '@/lib/backend-url'
 import { authService, User } from '@/lib/auth'
 import { interviewApi, interviewLimits, InterviewReport, InterviewSession } from '@/lib/interview'
-import { parseMediaError, parseMultipartResponse } from '@/lib/interview-utils'
+import { extractApiErrorMessage, parseMediaError, parseMultipartResponse } from '@/lib/interview-utils'
 import { WeightScore } from '@/components/ScoreUpdateBanner'
 import type { InterviewMedia } from './useInterviewMedia'
 import { useHandsFreeVad } from './useHandsFreeVad'
@@ -276,7 +276,7 @@ export function useInterviewSession({
         question_duration_seconds: Math.max(60, interviewLimits.questionDurationSeconds || 180),
       }),
     })
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     const { meta, audio } = await parseMultipartResponse(res)
     const aiText: string = meta.ai_text || ''
     setIsDeepeningQuestion(Boolean(meta.is_deepening))
@@ -549,7 +549,7 @@ export function useInterviewSession({
         headers: { ...authService.getUserFetchHeaders() },
         body: formData,
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
       const { meta, audio } = await parseMultipartResponse(res)
       const userText: string = meta.user_text || ''
       const aiText: string = meta.ai_text || ''

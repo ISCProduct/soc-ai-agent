@@ -9,5 +9,7 @@ type ApplicationService interface {
 	Accept(applicationID, userID uint, isAdmin bool) (*entity.UserApplicationStatus, error)
 	GetApplicationsByUser(userID uint) ([]*entity.UserApplicationStatus, error)
 	ListForAdmin(userID, companyID uint, status string) ([]*entity.UserApplicationStatus, error)
-	GetCorrelation(companyID uint) ([]map[string]any, error)
+	ListForOwner(userID, companyID uint, status string) ([]*entity.UserApplicationStatus, error)
+	UpdateStatusAsOwner(applicationID, userID uint, status, notes string) (*entity.UserApplicationStatus, error)
+	GetCorrelation(userID, companyID uint) ([]map[string]any, error)
 }

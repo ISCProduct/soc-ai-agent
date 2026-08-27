@@ -36,8 +36,8 @@ func (m *InterviewSessionRepositoryMock) ListByUser(userID uint, limit int, offs
 	return nil, args.Error(1)
 }
 
-func (m *InterviewSessionRepositoryMock) ListAll(limit int, offset int, schoolID *uint) ([]models.InterviewSession, error) {
-	args := m.Called(limit, offset, schoolID)
+func (m *InterviewSessionRepositoryMock) ListAll(limit int, offset int, schoolID *uint, companyID *uint) ([]models.InterviewSession, error) {
+	args := m.Called(limit, offset, schoolID, companyID)
 	if v := args.Get(0); v != nil {
 		return v.([]models.InterviewSession), args.Error(1)
 	}
@@ -57,8 +57,8 @@ func (m *InterviewSessionRepositoryMock) CountByUser(userID uint) (int64, error)
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *InterviewSessionRepositoryMock) CountAll(schoolID *uint) (int64, error) {
-	args := m.Called(schoolID)
+func (m *InterviewSessionRepositoryMock) CountAll(schoolID *uint, companyID *uint) (int64, error) {
+	args := m.Called(schoolID, companyID)
 	return args.Get(0).(int64), args.Error(1)
 }
 

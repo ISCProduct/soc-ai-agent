@@ -110,6 +110,49 @@ func TestInterviewController_List_Forbidden(t *testing.T) {
 	assertStatus(t, newInterviewController(svc).List, newCtx(req, rec), http.StatusForbidden)
 }
 
+func TestInterviewController_HRList_Unauthorized(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/hr/interviews?company_id=10", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newInterviewController(nil).HRList, newCtx(req, rec), http.StatusUnauthorized)
+}
+
+func TestInterviewController_HRList_MissingCompanyID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/hr/interviews", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newInterviewController(nil).HRList, newCtx(req, rec), http.StatusBadRequest)
+}
+
+func TestInterviewController_HRList_Forbidden(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/hr/interviews?company_id=99", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("ListSessionsForOwner", uint(1), uint(99), 20, 0).Return([]interview.InterviewSessionResponse{}, int64(0), shared.ErrForbidden)
+	assertStatus(t, newInterviewController(svc).HRList, newCtx(req, rec), http.StatusForbidden)
+	svc.AssertExpectations(t)
+}
+
+func TestInterviewController_HRList_Success(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/hr/interviews?company_id=10", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("ListSessionsForOwner", uint(1), uint(10), 20, 0).Return([]interview.InterviewSessionResponse{{ID: 3}}, int64(1), nil)
+	assertStatus(t, newInterviewController(svc).HRList, newCtx(req, rec), http.StatusOK)
+	svc.AssertExpectations(t)
+}
+
+func TestInterviewController_HRList_InternalError(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/hr/interviews?company_id=10", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("ListSessionsForOwner", uint(1), uint(10), 20, 0).Return([]interview.InterviewSessionResponse{}, int64(0), errors.New("db down"))
+	assertStatus(t, newInterviewController(svc).HRList, newCtx(req, rec), http.StatusInternalServerError)
+	svc.AssertExpectations(t)
+}
+
 // ---- Get ----
 
 func TestInterviewController_Get_Unauthorized(t *testing.T) {

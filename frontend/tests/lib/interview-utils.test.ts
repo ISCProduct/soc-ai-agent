@@ -1,4 +1,4 @@
-import { parseMediaError } from '@/lib/interview-utils'
+import { extractApiErrorMessage, parseMediaError } from '@/lib/interview-utils'
 
 describe('parseMediaError', () => {
   it('maps session Unauthorized to re-login guidance', () => {
@@ -15,5 +15,23 @@ describe('parseMediaError', () => {
 
   it('maps media permission errors', () => {
     expect(parseMediaError(new Error('NotAllowedError'))).toContain('マイクとカメラ')
+  })
+})
+
+describe('extractApiErrorMessage', () => {
+  it('extracts the error field from backend JSON error responses', () => {
+    expect(extractApiErrorMessage('{"error":"内部エラーが発生しました","code":"INTERNAL_ERROR"}')).toBe(
+      '内部エラーが発生しました',
+    )
+  })
+
+  it('falls back to the raw body when it is not the expected JSON shape', () => {
+    expect(extractApiErrorMessage('transcribe error: context deadline exceeded')).toBe(
+      'transcribe error: context deadline exceeded',
+    )
+  })
+
+  it('falls back to the raw body for JSON without an error field', () => {
+    expect(extractApiErrorMessage('{"code":"INTERNAL_ERROR"}')).toBe('{"code":"INTERNAL_ERROR"}')
   })
 })

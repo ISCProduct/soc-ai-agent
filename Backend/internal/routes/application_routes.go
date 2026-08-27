@@ -22,4 +22,9 @@ func SetupApplicationRoutes(api *echo.Group, appController *controllers.Applicat
 	// POST /api/applications/:id/accept   → 内定承諾
 	applications.POST("/:id/withdraw", appController.Withdraw)
 	applications.POST("/:id/accept", appController.Accept)
+
+	// 企業オーナー向け（#1083）。company_id 必須、所有権がなければ 403。
+	hr := api.Group("/hr", EchoUserAuth(userSecret, access, orgs))
+	hr.GET("/applications", appController.HRList)
+	hr.PATCH("/applications/:id/status", appController.HRUpdateStatus)
 }
