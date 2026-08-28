@@ -19,6 +19,7 @@ import (
 	"Backend/internal/services/auth"
 	"Backend/internal/services/chat"
 	"Backend/internal/services/company"
+	"Backend/internal/services/companyauth"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/discord"
 	"Backend/internal/services/email"
@@ -127,7 +128,7 @@ func buildCORSMiddleware() func(http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-User-ID, X-User-Token, X-Admin-Email, X-Admin-Token")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-User-ID, X-User-Token, X-Admin-Email, X-Admin-Token, X-Company-User-ID, X-Company-User-Token")
 
 			if r.Method == "OPTIONS" {
 				if origin != "" && !allowed {
@@ -418,6 +419,12 @@ func main() {
 	companyEntryService := services.NewCompanyEntryService(db, userRepo, pendingRegistrationRepo, emailService)
 	authService.SetCompanyOwnershipClaimer(companyEntryService)
 	companyEntryController := controllers.NewCompanyEntryController(companyEntryService)
+	companyUserRepo := repositories.NewCompanyUserRepository(db)
+	companyUserRefreshRepo := repositories.NewCompanyUserRefreshTokenRepository(db)
+	companyUserService := companyauth.NewCompanyUserService(db, companyUserRepo, companyUserRefreshRepo, emailService, cfg.CompanyUserSecret)
+	companyAuthController := controllers.NewCompanyAuthController(companyUserService)
+	companyPortalController := controllers.NewCompanyPortalController(companyUserService)
+	adminCompanyUserController := controllers.NewAdminCompanyUserController(companyUserService)
 	releaseNoteService := services.NewReleaseNoteService(db, aiClient)
 	releaseNoteController := controllers.NewReleaseNoteController(releaseNoteService, userRepo)
 	// Discord経由での本番「指定日終日起動」登録(#829台のインフラ方針参照)。
@@ -490,12 +497,15 @@ func main() {
 	routes.SetupScheduleRoutes(api, scheduleController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupApplicationRoutes(api, appController, cfg.UserSecret, userDeletionService, organizationService)
+	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, cfg.CompanyUserSecret, companyUserRepo)
 	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())
 	api.GET("/whats-new", releaseNoteController.List, routes.EchoUserAuth(cfg.UserSecret, userDeletionService))
 	adminEntry := api.Group("/admin", routes.EchoAdminAuth(userRepo, cfg.AdminSecret))
 	adminEntry.POST("/company-entry-submissions/:id/resend-email", companyEntryController.ResendEmail)
+	adminEntry.POST("/companies/:id/company-users", adminCompanyUserController.Invite)
+	adminEntry.GET("/companies/:id/company-users", adminCompanyUserController.List)
 	// CI(GitHub Actions)からのマシン間呼び出しのため、ログインユーザー前提のEchoAdminAuthではなく
 	// 共有シークレットのみで認証する(#861)
 	api.POST("/admin/whats-new/ingest", releaseNoteController.Ingest, routes.EchoStaticSecretAuth(cfg.AdminSecret))
