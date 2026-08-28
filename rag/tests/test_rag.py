@@ -296,6 +296,127 @@ class TestReviewEndpoint:
         assert resp.status_code == 422
 
 
+# ── 履歴書レビュー/面接ヒントの検索結果クロスキャッシュ ──────────────────────
+# Web Search はツール呼び出し自体に加え検索結果が固定8,000トークン/callとして
+# 課金される（OpenAI web_search tool）。同一企業に対し resume_review と
+# interview_hints が別々に検索していたコストを、検索結果の共有で削減する。
+# 実運用へ一気に展開せず、まず少数社（1〜5社）で挙動を確認する。
+PILOT_COMPANIES = [
+    "パイロット企業A",
+    "パイロット企業B",
+    "パイロット企業C",
+    "パイロット企業D",
+    "パイロット企業E",
+]
+
+
+class TestCrossFeatureWebSearchCacheSharing:
+    """resume_review と interview_hints が Web 検索結果を共有し、
+    どちらか一方が先に調査済みならもう一方は Web 検索を行わないことを検証する。"""
+
+    @pytest.mark.parametrize("company_name", PILOT_COMPANIES)
+    def test_resume_web_search_result_reused_by_hints(self, company_name):
+        """resume/review で Web 検索した結果を、後続の company/hints がキャッシュヒットとして再利用する。"""
+        from vector_store import build_cache_key
+
+        role = "エンジニア"
+        resume_key = build_cache_key("resume_review", company_name, role, company_original=company_name)
+        hints_key = build_cache_key("interview_hints", company_name, role, company_original=company_name)
+        store: dict[str, list[str]] = {}
+
+        def fake_get(key, query="採用 価値観 求める人物像"):
+            return store.get(key, [])
+
+        def fake_set(key, docs, source="unknown", doc_type=None):
+            store[key] = docs
+
+        # 1回目: resume/review がキャッシュミスして Web 検索を実行する
+        with patch("main.get_cached_context", side_effect=fake_get), \
+             patch("main.set_cached_context", side_effect=fake_set), \
+             patch("main.USE_DEEP_RESEARCH", False), \
+             patch("main.ALLOW_WEB_SEARCH_FALLBACK", True), \
+             patch("main._run_async", return_value=f"{company_name}の採用情報: チームワークを重視"), \
+             patch("main.run_crewai", return_value="レポート"):
+
+            client = _auth_client()
+            resp = client.post("/resume/review", json={
+                "resume_text": "テスト経歴書の内容です。",
+                "company_name": company_name,
+                "job_title": role,
+            })
+        assert resp.status_code == 200
+
+        # Web検索結果が resume_review 側・interview_hints 側の両方のキーに保存されている
+        assert resume_key in store
+        assert hints_key in store
+        assert store[hints_key] == store[resume_key]
+
+        # 2回目: company/hints を呼んでも Web 検索は行われず、共有キャッシュから構造化するだけ
+        with patch("main.get_cached_context", side_effect=fake_get), \
+             patch("main.set_cached_context", side_effect=fake_set), \
+             patch("main.ALLOW_WEB_SEARCH_FALLBACK", True), \
+             patch("main._run_hints_web_search") as mock_search:
+
+            client = _auth_client()
+            resp = client.post("/company/hints", json={
+                "company_name": company_name,
+                "position": role,
+            })
+        assert resp.status_code == 200
+        mock_search.assert_not_called()
+
+    @pytest.mark.parametrize("company_name", PILOT_COMPANIES)
+    def test_hints_web_search_result_reused_by_resume(self, company_name):
+        """company/hints で Web 検索した結果を、後続の resume/review がキャッシュヒットとして再利用する。"""
+        from vector_store import build_cache_key
+
+        role = "エンジニア"
+        resume_key = build_cache_key("resume_review", company_name, role, company_original=company_name)
+        hints_key = build_cache_key("interview_hints", company_name, role, company_original=company_name)
+        store: dict[str, list[str]] = {}
+
+        def fake_get(key, query="採用 価値観 求める人物像"):
+            return store.get(key, [])
+
+        def fake_set(key, docs, source="unknown", doc_type=None):
+            store[key] = docs
+
+        # 1回目: company/hints がキャッシュミスして Web 検索を実行する
+        with patch("main.get_cached_context", side_effect=fake_get), \
+             patch("main.set_cached_context", side_effect=fake_set), \
+             patch("main.ALLOW_WEB_SEARCH_FALLBACK", True), \
+             patch("main._run_hints_web_search", return_value=f"{company_name}の面接情報: 深掘り質問が多い"):
+
+            client = _auth_client()
+            resp = client.post("/company/hints", json={
+                "company_name": company_name,
+                "position": role,
+            })
+        assert resp.status_code == 200
+
+        assert hints_key in store
+        assert resume_key in store
+        assert store[resume_key] == store[hints_key]
+
+        # 2回目: resume/review を呼んでも Web 検索は行われず、共有キャッシュを再利用するだけ
+        with patch("main.get_cached_context", side_effect=fake_get), \
+             patch("main.set_cached_context", side_effect=fake_set), \
+             patch("main.USE_DEEP_RESEARCH", False), \
+             patch("main.ALLOW_WEB_SEARCH_FALLBACK", True), \
+             patch("main._run_async") as mock_async, \
+             patch("main.run_crewai", return_value="レポート") as mock_crewai:
+
+            client = _auth_client()
+            resp = client.post("/resume/review", json={
+                "resume_text": "テスト経歴書の内容です。",
+                "company_name": company_name,
+                "job_title": role,
+            })
+        assert resp.status_code == 200
+        mock_async.assert_not_called()
+        call_kwargs = mock_crewai.call_args
+        assert call_kwargs.kwargs.get("context_source") == "cache"
+
 
 class TestFailureCases:
     def test_chromadb_connection_failure_fallback(self):

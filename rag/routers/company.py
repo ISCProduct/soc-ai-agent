@@ -30,6 +30,10 @@ def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
     cache_key = build_cache_key(
         "interview_hints", safe_company_name, role_label, company_original=request.company_name
     )
+    # 履歴書レビュー側(resume_review)が同一企業を既に調査済みならWeb検索コストを共有する
+    research_cache_key = build_cache_key(
+        "resume_review", safe_company_name, role_label, company_original=request.company_name
+    )
 
     # Backend 共有 brief があれば Search せず構造化（Phase 1B）
     if request.company_context:
@@ -41,10 +45,14 @@ def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
         )
         return m._parse_hints_from_text(safe_company_name, role_label, request.company_context)
 
-    # キャッシュヒット: そのまま構造化して返す
+    # キャッシュヒット: そのまま構造化して返す（自キー→履歴書レビュー側キーの順で確認）
     retrieved = m.get_cached_context(
         cache_key, query=f"{safe_company_name} 面接 よく聞かれる質問"
     )
+    if not retrieved:
+        retrieved = m.get_cached_context(
+            research_cache_key, query=f"{safe_company_name} 採用 求める人物像"
+        )
     if retrieved:
         result = m._parse_hints_from_text(safe_company_name, role_label, "\n\n".join(retrieved))
         result.cached = True
@@ -57,6 +65,10 @@ def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
         if research_text:
             m.set_cached_context(
                 cache_key, [research_text], source="web_search", doc_type="interview_hints"
+            )
+            # 履歴書レビュー側でも同じ検索結果を再利用できるよう書き込む（Web検索の二重実行を防ぐ）
+            m.set_cached_context(
+                research_cache_key, [research_text], source="web_search", doc_type="resume_review"
             )
     else:
         logger.info(
