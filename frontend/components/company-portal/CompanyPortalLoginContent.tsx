@@ -5,14 +5,14 @@ import { useRouter } from 'next/navigation'
 import { Alert, Button, Stack, TextField, Typography } from '@mui/material'
 import { companyAuthService } from '@/lib/company-auth'
 
-export default function CompanyPortalLoginPage() {
+export function CompanyPortalLoginContent() {
   const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const handleSubmit = async (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError('')
     setLoading(true)

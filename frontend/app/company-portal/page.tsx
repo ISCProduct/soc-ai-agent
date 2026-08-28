@@ -14,7 +14,7 @@ export default function CompanyPortalDashboardPage() {
   useEffect(() => {
     const stored = companyAuthService.getStoredUser()
     if (!stored) {
-      router.replace('/company-portal/login')
+      router.replace('/company-portal/sign-in')
       return
     }
     companyAuthService.fetchMe()
@@ -24,7 +24,7 @@ export default function CompanyPortalDashboardPage() {
       })
       .catch(() => {
         companyAuthService.logout()
-        router.replace('/company-portal/login')
+        router.replace('/company-portal/sign-in')
       })
       .finally(() => setLoading(false))
   }, [router])
@@ -46,7 +46,7 @@ export default function CompanyPortalDashboardPage() {
         variant="outlined"
         onClick={() => {
           companyAuthService.logout()
-          router.push('/company-portal/login')
+          router.push('/company-portal/sign-in')
         }}
       >
         ログアウト
