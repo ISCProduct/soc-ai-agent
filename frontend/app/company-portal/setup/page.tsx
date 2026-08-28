@@ -2,7 +2,16 @@
 
 import { FormEvent, Suspense, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Alert, Button, CircularProgress, Stack, TextField, Typography } from '@mui/material'
+import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  CircularProgress,
+  TextField,
+  Typography,
+} from '@mui/material'
 import { companyAuthService } from '@/lib/company-auth'
 
 function SetupContent() {
@@ -14,7 +23,7 @@ function SetupContent() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const handleSubmit = async (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!token) {
       setError('招待トークンが見つかりません')
@@ -33,34 +42,70 @@ function SetupContent() {
   }
 
   return (
-    <Stack spacing={3} component="form" onSubmit={handleSubmit}>
-      <Typography variant="h4">アカウント有効化</Typography>
-      {!token && <Alert severity="error">招待リンクが無効です</Alert>}
-      {error && <Alert severity="error">{error}</Alert>}
-      <TextField
-        label="お名前（任意）"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        fullWidth
-      />
-      <TextField
-        label="パスワード（8文字以上）"
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        required
-        fullWidth
-      />
-      <Button type="submit" variant="contained" disabled={loading || !token}>
-        有効化してログイン
-      </Button>
-    </Stack>
+    <Box
+      sx={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        minHeight: '100vh',
+        bgcolor: 'background.default',
+        p: 2,
+      }}
+    >
+      <Card sx={{ maxWidth: 450, width: '100%' }}>
+        <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
+          <Typography variant="h5" fontWeight="bold" gutterBottom>
+            企業アカウントの有効化
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            パスワードを設定してログインを完了してください。
+          </Typography>
+
+          {!token && <Alert severity="error" sx={{ mb: 2 }}>招待リンクが無効です</Alert>}
+          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+
+          <Box component="form" onSubmit={handleSubmit}>
+            <TextField
+              fullWidth
+              label="お名前（任意）"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              sx={{ mb: 2 }}
+            />
+            <TextField
+              fullWidth
+              label="パスワード（8文字以上）"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              sx={{ mb: 3 }}
+            />
+            <Button
+              type="submit"
+              fullWidth
+              variant="contained"
+              size="large"
+              disabled={loading || !token}
+            >
+              {loading ? <CircularProgress size={24} /> : '有効化してログイン'}
+            </Button>
+          </Box>
+        </CardContent>
+      </Card>
+    </Box>
   )
 }
 
 export default function CompanyPortalSetupPage() {
   return (
-    <Suspense fallback={<CircularProgress />}>
+    <Suspense
+      fallback={(
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+          <CircularProgress />
+        </Box>
+      )}
+    >
       <SetupContent />
     </Suspense>
   )

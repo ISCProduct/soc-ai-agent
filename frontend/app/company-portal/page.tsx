@@ -2,7 +2,15 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Button, CircularProgress, Stack, Typography } from '@mui/material'
+import {
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Typography,
+} from '@mui/material'
+import { PageContainer } from '@/components/admin/PageContainer'
+import { PageLoading } from '@/components/common/PageLoading'
 import { companyAuthService } from '@/lib/company-auth'
 
 export default function CompanyPortalDashboardPage() {
@@ -30,27 +38,43 @@ export default function CompanyPortalDashboardPage() {
   }, [router])
 
   if (loading) {
-    return <CircularProgress />
+    return <PageLoading message="ダッシュボードを読み込んでいます..." />
   }
 
   return (
-    <Stack spacing={3}>
-      <Typography variant="h4">ダッシュボード</Typography>
-      <Typography>
-        {userName} さん、ようこそ。自社ID: {companyId}
+    <PageContainer maxWidth={720}>
+      <Typography variant="h4" fontWeight="bold" gutterBottom>
+        企業ポータル
       </Typography>
-      <Typography color="text.secondary">
-        スカウト送信や学生検索などの機能は今後のIssueで追加されます。
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        採用担当者向けの管理画面です。
       </Typography>
-      <Button
-        variant="outlined"
-        onClick={() => {
-          companyAuthService.logout()
-          router.push('/company-portal/sign-in')
-        }}
-      >
-        ログアウト
-      </Button>
-    </Stack>
+
+      <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            ようこそ、{userName} さん
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            自社ID: {companyId}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            スカウト送信や学生検索などの機能は今後追加予定です。
+          </Typography>
+        </CardContent>
+      </Card>
+
+      <Box sx={{ mt: 3 }}>
+        <Button
+          variant="outlined"
+          onClick={() => {
+            companyAuthService.logout()
+            router.push('/company-portal/sign-in')
+          }}
+        >
+          ログアウト
+        </Button>
+      </Box>
+    </PageContainer>
   )
 }

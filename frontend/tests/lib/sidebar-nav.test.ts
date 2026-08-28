@@ -39,6 +39,7 @@ describe('sidebar-nav', () => {
   it('モバイル下ナビは5件でログインでは出さない', () => {
     expect(STUDENT_BOTTOM_NAV_ITEMS).toHaveLength(5)
     expect(shouldShowStudentBottomNav('/login')).toBe(false)
+    expect(shouldShowStudentBottomNav('/company-portal/sign-in')).toBe(false)
     expect(shouldShowStudentBottomNav('/admin/costs')).toBe(false)
     expect(shouldShowStudentBottomNav('/')).toBe(true)
     expect(shouldShowStudentBottomNav('/interview/history')).toBe(true)

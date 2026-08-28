@@ -37,6 +37,7 @@ const HIDE_BOTTOM_NAV = [
   '/auth',
   '/error',
   '/company-entry',
+  '/company-portal',
   '/admin',
   '/onboarding',
 ]
