@@ -23,6 +23,7 @@ import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminListCard } from '@/components/admin/AdminListCard'
 import { StatusBadge } from '@/components/admin/StatusBadge'
+import { isCompanyUnpublished } from '@/lib/company-draft'
 
 type JobPosition = {
   id: number
@@ -45,6 +46,7 @@ type JobPosition = {
     source_type?: string
     source_fetched_at?: string
     is_provisional?: boolean
+    data_status?: string
   }
   job_category?: { id: number; name: string }
 }
@@ -91,6 +93,9 @@ function JobPositionCard({
             <StatusBadge status={position.data_status || 'draft'} fallbackLabel="審査中" />
             {position.company?.is_provisional && (
               <Chip label="仮登録" size="small" variant="outlined" color="warning" />
+            )}
+            {isCompanyUnpublished(position.company) && (
+              <Chip label="企業未公開" size="small" variant="outlined" color="warning" />
             )}
           </Stack>
           <Typography variant="body2" color="text.secondary">
@@ -255,6 +260,13 @@ export default function AdminJobPositionsPage() {
   }, [])
 
   const handlePublish = async (id: number) => {
+    const position = jobPositions.find((p) => p.id === id)
+    if (isCompanyUnpublished(position?.company)) {
+      const ok = window.confirm(
+        'この企業はまだ公開されていません。求人だけ承認しても学生には表示されません。続行しますか？',
+      )
+      if (!ok) return
+    }
     const res = await fetch(`/api/admin/job-positions/${id}/publish`, {
       method: 'PATCH',
       headers: authService.getAdminFetchHeaders(),

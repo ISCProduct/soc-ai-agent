@@ -80,8 +80,22 @@ func isValidStatus(status string) bool {
 	return slices.Contains(ValidStatuses, status)
 }
 
+// normalizeLegacyStatus は旧ステータスを現行コードへ寄せる（#1084）。
+func normalizeLegacyStatus(status string) string {
+	switch status {
+	case "interview":
+		return "interview_in_progress"
+	case "declined":
+		return "withdrawn"
+	default:
+		return status
+	}
+}
+
 // CanTransition 現在のステータスから次のステータスへの遷移が許可されているか検証する
 func CanTransition(current, next string, isAdmin bool) bool {
+	current = normalizeLegacyStatus(current)
+	next = normalizeLegacyStatus(next)
 	if isAdmin {
 		return slices.Contains(adminAllowedTransitions[current], next)
 	}
@@ -163,12 +177,11 @@ func isDuplicateEntryErr(err error) bool {
 
 // UpdateStatus 選考ステータスを更新する
 // isAdmin=true の場合は管理者権限の遷移が許可される（コントローラー側でクライアント入力から isAdmin を取らないこと）
-func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, status, notes string, isAdmin bool) (*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, status string, notes *string, isAdmin bool) (*entity.UserApplicationStatus, error) {
 	if !isValidStatus(status) {
 		return nil, fmt.Errorf("invalid_status: 無効なステータス %s", status)
 	}
 
-	// 所有権確認（非管理者は自分の応募のみ更新可能）
 	app, err := s.appRepo.FindByID(applicationID)
 	if err != nil {
 		return nil, fmt.Errorf("application_not_found: 応募データが見つかりません: %w", err)
@@ -176,14 +189,15 @@ func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, statu
 	if !isAdmin && app.UserID != userID {
 		return nil, fmt.Errorf("forbidden: 権限がありません")
 	}
-
-	// 終了状態チェック（管理者による訂正は別エンドポイントで対応予定）
-	if terminalStatuses[app.Status] {
-		return nil, fmt.Errorf("application_already_closed: ステータス %s は終了状態のため更新できません", app.Status)
+	if !isAdmin {
+		notes = nil
 	}
 
-	// 状態遷移の検証
-	if !CanTransition(app.Status, status, isAdmin) {
+	current := normalizeLegacyStatus(app.Status)
+	if terminalStatuses[current] {
+		return nil, fmt.Errorf("application_already_closed: ステータス %s は終了状態のため更新できません", app.Status)
+	}
+	if !CanTransition(current, status, isAdmin) {
 		return nil, fmt.Errorf("invalid_status_transition: %s から %s への遷移は許可されていません", app.Status, status)
 	}
 
@@ -192,14 +206,14 @@ func (s *ApplicationService) UpdateStatus(applicationID uint, userID uint, statu
 	}
 
 	app.Status = status
-	app.Notes = notes
+	if notes != nil {
+		app.Notes = *notes
+	}
 	return app, nil
 }
 
-// Withdraw 選考を辞退する（ユーザー本人または管理者。§10.3）
-// 遷移表・終了状態チェックは UpdateStatus に委譲する（単一の正とするため）。
 func (s *ApplicationService) Withdraw(applicationID, userID uint, isAdmin bool) (*entity.UserApplicationStatus, error) {
-	return s.UpdateStatus(applicationID, userID, "withdrawn", "", isAdmin)
+	return s.UpdateStatus(applicationID, userID, "withdrawn", nil, isAdmin)
 }
 
 // Accept 内定を承諾する（§10.4）。offered 以外は application_not_offered を返す。
@@ -214,7 +228,7 @@ func (s *ApplicationService) Accept(applicationID, userID uint, isAdmin bool) (*
 	if app.Status != "offered" {
 		return nil, fmt.Errorf("application_not_offered: 内定状態でないため承諾できません（現在: %s）", app.Status)
 	}
-	return s.UpdateStatus(applicationID, userID, "accepted", "", isAdmin)
+	return s.UpdateStatus(applicationID, userID, "accepted", nil, isAdmin)
 }
 
 // GetApplicationsByUser ユーザーの応募一覧を取得する
@@ -239,7 +253,7 @@ func (s *ApplicationService) ListForOwner(userID, companyID uint, status string)
 
 // UpdateStatusAsOwner は企業オーナーによる選考ステータス更新。
 // 応募の company_id の所有者のみ許可し、遷移表は管理者相当を使う。
-func (s *ApplicationService) UpdateStatusAsOwner(applicationID, userID uint, status, notes string) (*entity.UserApplicationStatus, error) {
+func (s *ApplicationService) UpdateStatusAsOwner(applicationID, userID uint, status string, notes *string) (*entity.UserApplicationStatus, error) {
 	app, err := s.appRepo.FindByID(applicationID)
 	if err != nil {
 		return nil, fmt.Errorf("application_not_found: 応募データが見つかりません: %w", err)

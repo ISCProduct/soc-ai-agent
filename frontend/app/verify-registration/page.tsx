@@ -15,7 +15,6 @@ import {
   MenuItem,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
-import { BACKEND_URL } from '@/lib/backend-url'
 import { CERTIFICATION_OPTIONS, joinCertifications } from '@/lib/profile'
 
 function VerifyRegistrationContent() {
@@ -42,14 +41,7 @@ function VerifyRegistrationContent() {
       setVerifying(false)
       return
     }
-    fetch(`${BACKEND_URL}/api/auth/verify-registration?token=${encodeURIComponent(token)}`)
-      .then(async (res) => {
-        if (!res.ok) {
-          const text = await res.text()
-          throw new Error(text || 'トークンが無効または期限切れです。')
-        }
-        return res.json() as Promise<{ email: string; token: string }>
-      })
+    authService.verifyRegistration(token)
       .then((data) => {
         setEmail(data.email)
         setVerifying(false)
