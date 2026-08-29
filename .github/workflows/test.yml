@@ -137,6 +137,7 @@ jobs:
           CI: true
           NEXT_PUBLIC_BACKEND_URL: http://localhost:3000
           BACKEND_URL: http://localhost:3000
+          E2E_MOCK_AUTH: 'true'
 
       - name: Upload test results
         uses: actions/upload-artifact@v4

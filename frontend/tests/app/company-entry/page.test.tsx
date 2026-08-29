@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import CompanyEntryPage from '@/app/company-entry/page'
+import CompanyEntryPage from '@/app/company-entry/page-content'
 
 describe('CompanyEntryPage', () => {
   beforeEach(() => {
