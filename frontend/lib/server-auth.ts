@@ -22,6 +22,19 @@ function fixMojibake(s: string): string {
     : s
 }
 
+// ponytail: E2Eのみ。e2e/fixtures/auth.ts の TEST_USER / TEST_ADMIN と user_id を揃える
+const E2E_MOCK_USERS: Record<string, Pick<User, 'email' | 'name' | 'is_guest' | 'is_admin'>> = {
+  '1': { email: 'test@example.com', name: 'テストユーザー', is_guest: false, is_admin: false },
+  '99': { email: 'admin@example.com', name: '管理者', is_guest: false, is_admin: true },
+}
+
+function getE2eMockUser(creds: SessionCredentials): User | null {
+  if (process.env.E2E_MOCK_AUTH !== 'true') return null
+  const profile = E2E_MOCK_USERS[creds.userId]
+  if (!profile) return null
+  return { user_id: Number(creds.userId), ...profile }
+}
+
 function mapUser(data: Record<string, unknown>): User {
   const userId = data.user_id
   return {
@@ -70,8 +83,16 @@ export async function getServerUserAuthHeaders(): Promise<Record<string, string>
 }
 
 export async function getSessionUser(): Promise<User | null> {
-  const authHeaders = await getServerUserAuthHeaders()
-  if (!authHeaders?.['X-User-Token']) return null
+  const creds = await getSessionCredentials()
+  if (!creds) return null
+
+  const e2eUser = getE2eMockUser(creds)
+  if (e2eUser) return e2eUser
+
+  const headerStore = await headers()
+  const tenantSlug = extractTenantSlug(headerStore.get('host') ?? '')
+  const authHeaders = buildUserAuthHeaders(creds, tenantSlug || undefined)
+  if (!authHeaders['X-User-Token']) return null
 
   const res = await fetch(`${SERVER_BACKEND_URL}/api/auth/user`, {
     headers: authHeaders,
