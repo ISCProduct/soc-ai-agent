@@ -1,9 +1,21 @@
 import { authService } from '@/lib/auth'
+import { SERVER_BACKEND_URL } from '@/lib/session-cookies'
 
 export interface WhatsNewEntry {
   title: string
   summary: string
   merged_at: string
+}
+
+export async function fetchWhatsNewEntriesServer(
+  authHeaders: Record<string, string>,
+): Promise<WhatsNewEntry[]> {
+  const res = await fetch(`${SERVER_BACKEND_URL}/api/whats-new`, {
+    cache: 'no-store',
+    headers: authHeaders,
+  })
+  if (!res.ok) throw new Error('whats-new')
+  return res.json() as Promise<WhatsNewEntry[]>
 }
 
 export async function fetchWhatsNewEntries(): Promise<WhatsNewEntry[]> {
