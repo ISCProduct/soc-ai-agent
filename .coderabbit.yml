@@ -15,8 +15,9 @@ reviews:
     enabled: true
     drafts: false
     base_branches:
-      - "develop"
-      - "release/.*"
+      - "^develop$"
+      - "^release$"
+      - "^release/.*"
 
   path_filters:
     - "!**/__pycache__/**"
