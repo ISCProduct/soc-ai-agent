@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import ESRewritePage from '@/app/es-rewrite/page'
+import ESRewritePage from '@/app/es-rewrite/page-content'
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: jest.fn() }),
