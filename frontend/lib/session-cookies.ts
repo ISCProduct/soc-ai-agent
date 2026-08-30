@@ -34,3 +34,24 @@ export function clearSessionCookies(response: NextResponse): void {
   response.cookies.delete('user_token')
   response.cookies.delete('refresh_token')
 }
+
+// 企業ユーザー用セッションCookie（company_user_id / company_user_token / company_refresh_token）を設定する（#1091）
+export function setCompanySessionCookies(
+  response: NextResponse,
+  companyUserId: string,
+  companyUserToken: string,
+  companyRefreshToken?: string
+): void {
+  response.cookies.set('company_user_id', companyUserId, SESSION_COOKIE_OPTIONS)
+  response.cookies.set('company_user_token', companyUserToken, SESSION_COOKIE_OPTIONS)
+  if (companyRefreshToken) {
+    response.cookies.set('company_refresh_token', companyRefreshToken, SESSION_COOKIE_OPTIONS)
+  }
+}
+
+// 企業ユーザー用セッションCookieをすべて削除する
+export function clearCompanySessionCookies(response: NextResponse): void {
+  response.cookies.delete('company_user_id')
+  response.cookies.delete('company_user_token')
+  response.cookies.delete('company_refresh_token')
+}

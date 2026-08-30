@@ -127,6 +127,8 @@ func TestCanTransition_AdminTransitions(t *testing.T) {
 		{"accepted→applied (admin)", "accepted", "applied", true, false},
 		{"withdrawn→applied (admin)", "withdrawn", "applied", true, false},
 		{"rejected→applied (admin)", "rejected", "applied", true, false},
+		{"interview→offered (admin, legacy)", "interview", "offered", true, true},
+		{"declined→applied (admin, legacy terminal)", "declined", "applied", true, false},
 	}
 
 	for _, tc := range cases {

@@ -1,22 +1,7 @@
-'use client'
+import PageContent from './page-content'
+import { requireSessionUser } from '@/lib/server-auth'
 
-import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { Box, Typography } from '@mui/material'
-import { getResultsPathOrChat } from '@/lib/results-navigation'
-
-export default function CompanyResultsRedirectPage() {
-  const router = useRouter()
-
-  useEffect(() => {
-    router.replace(getResultsPathOrChat())
-  }, [router])
-
-  return (
-    <Box sx={{ p: 4 }}>
-      <Typography variant="body2" color="text.secondary">
-        結果ページへ移動中です...
-      </Typography>
-    </Box>
-  )
+export default async function Page() {
+  await requireSessionUser()
+  return <PageContent />
 }

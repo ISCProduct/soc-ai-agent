@@ -88,8 +88,8 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 		company := &companies[i]
 		profile, ok := profiles[company.ID]
 		if !ok || profile == nil {
-			log.Printf("[CalculateMatching] Warning: No profile for company %d\n", company.ID)
-			continue
+			log.Printf("[CalculateMatching] Warning: No profile for company %d; using default weights\n", company.ID)
+			profile = defaultCompanyWeightProfile(company.ID)
 		}
 
 		match := s.calculateMatchScore(scoreMap, profile)
@@ -175,6 +175,22 @@ func (s *MatchingService) calculateMatchScore(
 	}
 
 	return match
+}
+
+func defaultCompanyWeightProfile(companyID uint) *models.CompanyWeightProfile {
+	return &models.CompanyWeightProfile{
+		CompanyID:             companyID,
+		TechnicalOrientation:  50,
+		TeamworkOrientation:   50,
+		LeadershipOrientation: 50,
+		CreativityOrientation: 50,
+		StabilityOrientation:  50,
+		GrowthOrientation:     50,
+		WorkLifeBalance:       50,
+		ChallengeSeeking:      50,
+		DetailOrientation:     50,
+		CommunicationSkill:    50,
+	}
 }
 
 func scoredMatch(userScores map[string]float64, category string, companyWeight float64, evaluatedCount int, totalScore float64) (float64, int, float64) {

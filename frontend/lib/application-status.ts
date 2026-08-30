@@ -54,6 +54,16 @@ const USER_TRANSITIONS: Record<string, string[]> = {
   offered: ['accepted', 'withdrawn'],
 }
 
+const ADMIN_TRANSITIONS: Record<string, string[]> = {
+  not_applied: ['applied'],
+  applied: ['document_screening', 'withdrawn'],
+  document_screening: ['document_passed', 'rejected', 'withdrawn'],
+  document_passed: ['interview_scheduled', 'withdrawn'],
+  interview_scheduled: ['interview_in_progress', 'withdrawn'],
+  interview_in_progress: ['offered', 'rejected', 'withdrawn'],
+  offered: ['accepted', 'withdrawn'],
+}
+
 const TERMINAL = new Set(['accepted', 'withdrawn', 'rejected', 'declined'])
 
 /** レガシーコードを現行コードへ寄せる（表示・遷移判定用） */
@@ -74,6 +84,10 @@ export function userNextStatuses(current: string): string[] {
 
 export function canUserTransition(current: string, next: string): boolean {
   return userNextStatuses(current).includes(normalizeApplicationStatus(next))
+}
+
+export function adminNextStatuses(current: string): string[] {
+  return ADMIN_TRANSITIONS[normalizeApplicationStatus(current)] ?? []
 }
 
 /**
