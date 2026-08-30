@@ -119,3 +119,105 @@ func TestAcceptInvite_ExpiredToken(t *testing.T) {
 		t.Fatalf("unmet expectations: %v", err)
 	}
 }
+
+func TestRefreshSession_EmptyToken(t *testing.T) {
+	db, _ := newCompanyAuthTestDB(t)
+	svc := newTestService(t, db)
+
+	_, err := svc.RefreshSession("")
+	if err != ErrInvalidRefreshToken {
+		t.Fatalf("expected ErrInvalidRefreshToken, got %v", err)
+	}
+}
+
+func TestRefreshSession_UnknownToken(t *testing.T) {
+	db, mock := newCompanyAuthTestDB(t)
+	svc := newTestService(t, db)
+
+	mock.ExpectQuery("SELECT \\* FROM `company_user_refresh_tokens`").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	_, err := svc.RefreshSession("unknown-token")
+	if err != ErrInvalidRefreshToken {
+		t.Fatalf("expected ErrInvalidRefreshToken, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestRefreshSession_ExpiredToken(t *testing.T) {
+	db, mock := newCompanyAuthTestDB(t)
+	svc := newTestService(t, db)
+	svc.now = func() time.Time { return time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC) }
+	expired := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery("SELECT \\* FROM `company_user_refresh_tokens`").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "company_user_id", "token_hash", "expires_at"}).
+			AddRow(1, 1, "hash", expired))
+
+	_, err := svc.RefreshSession("expired-token")
+	if err != ErrInvalidRefreshToken {
+		t.Fatalf("expected ErrInvalidRefreshToken, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestLogoutSession_EmptyTokenIsNoop(t *testing.T) {
+	db, _ := newCompanyAuthTestDB(t)
+	svc := newTestService(t, db)
+
+	if err := svc.LogoutSession(""); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+}
+
+func TestLogoutSession_UnknownTokenIsNoop(t *testing.T) {
+	db, mock := newCompanyAuthTestDB(t)
+	svc := newTestService(t, db)
+
+	mock.ExpectQuery("SELECT \\* FROM `company_user_refresh_tokens`").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	if err := svc.LogoutSession("unknown-token"); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+// ログアウト直後にRefreshSessionのローテーション猶予期間(60秒)が誤って適用され、
+// 同じトークンでリフレッシュが成功してしまう回帰を防ぐ。
+func TestRefreshSession_RejectsTokenImmediatelyAfterLogout(t *testing.T) {
+	db, mock := newCompanyAuthTestDB(t)
+	svc := newTestService(t, db)
+	now := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+
+	mock.ExpectQuery("SELECT \\* FROM `company_user_refresh_tokens`").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+	mock.ExpectBegin()
+	mock.ExpectExec("DELETE FROM `company_user_refresh_tokens`").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	if err := svc.LogoutSession("logged-out-token"); err != nil {
+		t.Fatalf("logout failed: %v", err)
+	}
+
+	// ログアウト直後(猶予期間内)に同じトークンでリフレッシュしても、
+	// レコードごと削除済みなのでFindByHashはnilを返し、必ず拒否される。
+	mock.ExpectQuery("SELECT \\* FROM `company_user_refresh_tokens`").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	_, err := svc.RefreshSession("logged-out-token")
+	if err != ErrInvalidRefreshToken {
+		t.Fatalf("expected ErrInvalidRefreshToken after logout, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}

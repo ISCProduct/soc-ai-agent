@@ -22,15 +22,23 @@ import (
 	"gorm.io/gorm"
 )
 
-const bcryptCost = 12
+const (
+	bcryptCost = 12
+	// refreshTokenTTL はリフレッシュトークンの有効期間
+	refreshTokenTTL = 30 * 24 * time.Hour
+	// rotationGracePeriod はローテーション直後の旧トークンを許容する猶予。
+	// 並行リクエストが同時にリフレッシュした場合のログアウト事故を防ぐ。
+	rotationGracePeriod = 60 * time.Second
+)
 
 var (
-	ErrInvalidCredentials = errors.New("invalid email or password")
-	ErrInviteNotFound     = errors.New("invalid invite token")
-	ErrInviteExpired      = errors.New("invite token expired")
-	ErrEmailExists        = errors.New("email already exists")
-	ErrCompanyNotFound    = errors.New("company not found")
-	ErrCompanyNotVerified = errors.New("company is not verified")
+	ErrInvalidCredentials  = errors.New("invalid email or password")
+	ErrInviteNotFound      = errors.New("invalid invite token")
+	ErrInviteExpired       = errors.New("invite token expired")
+	ErrEmailExists         = errors.New("email already exists")
+	ErrCompanyNotFound     = errors.New("company not found")
+	ErrCompanyNotVerified  = errors.New("company is not verified")
+	ErrInvalidRefreshToken = errors.New("invalid refresh token")
 )
 
 type InviteRequest struct {
@@ -262,6 +270,58 @@ func (s *CompanyUserService) buildAuthResponse(user *models.CompanyUser, include
 	return resp, nil
 }
 
+// RefreshSession はリフレッシュトークンをローテーションして新しいトークンペアを返す (#616踏襲)
+func (s *CompanyUserService) RefreshSession(plain string) (*AuthResponse, error) {
+	if plain == "" || s.refresh == nil {
+		return nil, ErrInvalidRefreshToken
+	}
+	token, err := s.refresh.FindByHash(hashRefreshToken(plain))
+	if err != nil {
+		return nil, err
+	}
+	if token == nil {
+		return nil, ErrInvalidRefreshToken
+	}
+	now := s.now()
+	if now.After(token.ExpiresAt) {
+		return nil, ErrInvalidRefreshToken
+	}
+	if token.RevokedAt != nil && now.Sub(*token.RevokedAt) > rotationGracePeriod {
+		return nil, ErrInvalidRefreshToken
+	}
+	if token.RevokedAt == nil {
+		if err := s.refresh.Revoke(token.ID, now); err != nil {
+			return nil, err
+		}
+	}
+
+	user, err := s.users.FindByID(token.CompanyUserID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, ErrInvalidRefreshToken
+	}
+	return s.buildAuthResponse(user, true)
+}
+
+// LogoutSession はリフレッシュトークンを削除して即座に無効化する（見つからなくてもエラーにしない）。
+// Revoke ではなく Delete を使うのは、Revoke のローテーション猶予期間（並行リフレッシュ対策）が
+// 明示的なログアウトにも適用され、ログアウト直後の一定時間トークンが使えてしまうのを防ぐため。
+func (s *CompanyUserService) LogoutSession(plain string) error {
+	if plain == "" || s.refresh == nil {
+		return nil
+	}
+	token, err := s.refresh.FindByHash(hashRefreshToken(plain))
+	if err != nil {
+		return err
+	}
+	if token == nil {
+		return nil
+	}
+	return s.refresh.Delete(token.ID)
+}
+
 func (s *CompanyUserService) issueRefreshToken(companyUserID uint) (string, error) {
 	if s.refresh == nil {
 		return "", nil
@@ -275,7 +335,7 @@ func (s *CompanyUserService) issueRefreshToken(companyUserID uint) (string, erro
 	token := &models.CompanyUserRefreshToken{
 		CompanyUserID: companyUserID,
 		TokenHash:     hash,
-		ExpiresAt:     s.now().Add(30 * 24 * time.Hour),
+		ExpiresAt:     s.now().Add(refreshTokenTTL),
 	}
 	if err := s.refresh.Create(token); err != nil {
 		return "", err

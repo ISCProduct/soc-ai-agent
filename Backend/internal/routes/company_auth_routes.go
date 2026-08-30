@@ -52,7 +52,9 @@ func SetupCompanyAuthRoutes(
 ) {
 	auth := api.Group("/company-auth")
 	auth.POST("/login", authController.Login, echoLoginRateLimit())
-	auth.POST("/accept-invite", authController.AcceptInvite)
+	auth.POST("/accept-invite", authController.AcceptInvite, echoLoginRateLimit())
+	auth.POST("/refresh", authController.Refresh)
+	auth.POST("/logout", authController.Logout)
 
 	protected := api.Group("/company-auth", EchoCompanyAuth(companySecret, users))
 	protected.GET("/me", authController.Me)

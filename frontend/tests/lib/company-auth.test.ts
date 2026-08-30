@@ -40,9 +40,14 @@ describe('companyAuthService', () => {
 
     expect(companyAuthService.getStoredUser()?.email).toBe('hr@example.com')
     expect(companyAuthService.getStoredToken()).toBe('jwt-token')
+    // X-Company-User-ID は Backend の EchoCompanyAuth では参照されず、
+    // なりすまし防止のため httpOnly Cookie 経由でのみ注入する(クライアントJSからは送らない)
     expect(companyAuthService.getAuthHeaders()).toEqual({
-      'X-Company-User-ID': '1',
       'X-Company-User-Token': 'jwt-token',
     })
+  })
+
+  it('returns empty headers when no token is stored', () => {
+    expect(companyAuthService.getAuthHeaders()).toEqual({})
   })
 })

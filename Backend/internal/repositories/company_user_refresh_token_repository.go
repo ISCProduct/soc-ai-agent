@@ -43,3 +43,9 @@ func (r *CompanyUserRefreshTokenRepository) RevokeAllByCompanyUser(companyUserID
 		Where("company_user_id = ? AND revoked_at IS NULL", companyUserID).
 		Update("revoked_at", at).Error
 }
+
+// Delete はトークンを完全に削除する。明示的なログアウトで使用し、
+// Revoke のローテーション猶予期間（並行リフレッシュ対策）を適用させない。
+func (r *CompanyUserRefreshTokenRepository) Delete(id uint) error {
+	return r.db.Delete(&models.CompanyUserRefreshToken{}, id).Error
+}

@@ -43,6 +43,44 @@ func (c *CompanyAuthController) AcceptInvite(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, resp)
 }
 
+type companyRefreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+// Refresh リフレッシュトークンをローテーションして新しいトークンペアを返す
+// POST /api/company-auth/refresh
+func (c *CompanyAuthController) Refresh(ctx echo.Context) error {
+	var req companyRefreshRequest
+	if err := ctx.Bind(&req); err != nil {
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+	}
+	if req.RefreshToken == "" {
+		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "refresh_token is required")
+	}
+
+	resp, err := c.svc.RefreshSession(req.RefreshToken)
+	if err != nil {
+		if errors.Is(err, companyauth.ErrInvalidRefreshToken) {
+			return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "invalid refresh token")
+		}
+		return echoInternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, resp)
+}
+
+// Logout リフレッシュトークンを失効させる
+// POST /api/company-auth/logout
+func (c *CompanyAuthController) Logout(ctx echo.Context) error {
+	var req companyRefreshRequest
+	if err := ctx.Bind(&req); err != nil {
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+	}
+	if err := c.svc.LogoutSession(req.RefreshToken); err != nil {
+		return echoInternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, map[string]string{"message": "ログアウトしました"})
+}
+
 func (c *CompanyAuthController) Me(ctx echo.Context) error {
 	companyUserID, ok := echoCompanyUserID(ctx)
 	if !ok {
