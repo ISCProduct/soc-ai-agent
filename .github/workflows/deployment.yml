@@ -33,6 +33,33 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # 変更検知(git diff)で前回pushからの差分を見るためフル履歴を取得する
+          fetch-depth: 0
+
+      # Dockerfile/依存関係に変更が無いサービスまでビルド・ECRへpushしてしまうと、
+      # ビルド時間とECRストレージの両方が無駄になる。前回push(github.event.before)
+      # からの変更パスを見て、サービスごとにビルドが必要かどうかを判定する。
+      # before が取れない場合(workflow_dispatch手動実行・force push直後等)は
+      # 安全側に倒して全サービスをビルドする。
+      - name: Detect changed services
+        id: changes
+        run: |
+          BEFORE="${{ github.event.before }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ -z "$BEFORE" ] || \
+             [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            echo "before commit unavailable; building all services"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            echo "rag=true" >> "$GITHUB_OUTPUT"
+          else
+            CHANGED=$(git diff --name-only "$BEFORE" HEAD)
+            echo "changed files:"
+            echo "$CHANGED"
+            echo "frontend=$(echo "$CHANGED" | grep -q '^frontend/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            echo "backend=$(echo "$CHANGED" | grep -q '^Backend/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            echo "rag=$(echo "$CHANGED" | grep -q '^rag/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
@@ -73,25 +100,37 @@ jobs:
           set -e
           pids=()
 
-          (cd frontend && docker buildx build --platform linux/amd64 \
-            --build-arg NODE_ENV=production \
-            --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }} \
-            --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging \
-            --cache-to type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging,mode=max \
-            -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &
-          pids+=($!)
+          if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then
+            (cd frontend && docker buildx build --platform linux/amd64 \
+              --build-arg NODE_ENV=production \
+              --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }} \
+              --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging \
+              --cache-to type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging,mode=max \
+              -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &
+            pids+=($!)
+          else
+            echo "frontend unchanged, skip build/push"
+          fi
 
-          (cd Backend && docker buildx build --platform linux/amd64 \
-            --cache-from type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-staging \
-            --cache-to type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-staging,mode=max \
-            -t $ECR_REGISTRY/soc-backend:$IMAGE_TAG --push .) &
-          pids+=($!)
+          if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then
+            (cd Backend && docker buildx build --platform linux/amd64 \
+              --cache-from type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-staging \
+              --cache-to type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-staging,mode=max \
+              -t $ECR_REGISTRY/soc-backend:$IMAGE_TAG --push .) &
+            pids+=($!)
+          else
+            echo "backend unchanged, skip build/push"
+          fi
 
-          (cd rag && docker buildx build --platform linux/amd64 \
-            --cache-from type=registry,ref=$ECR_REGISTRY/soc-rag-review:buildcache-staging \
-            --cache-to type=registry,ref=$ECR_REGISTRY/soc-rag-review:buildcache-staging,mode=max \
-            -t $ECR_REGISTRY/soc-rag-review:$IMAGE_TAG --push .) &
-          pids+=($!)
+          if [ "${{ steps.changes.outputs.rag }}" = "true" ]; then
+            (cd rag && docker buildx build --platform linux/amd64 \
+              --cache-from type=registry,ref=$ECR_REGISTRY/soc-rag-review:buildcache-staging \
+              --cache-to type=registry,ref=$ECR_REGISTRY/soc-rag-review:buildcache-staging,mode=max \
+              -t $ECR_REGISTRY/soc-rag-review:$IMAGE_TAG --push .) &
+            pids+=($!)
+          else
+            echo "rag-review unchanged, skip build/push"
+          fi
 
           fail=0
           for pid in "${pids[@]}"; do
@@ -304,6 +343,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # 変更検知(git diff)で前回pushからの差分を見るためフル履歴を取得する
+          fetch-depth: 0
+
+      # Dockerfile/依存関係に変更が無いサービスまでビルド・ECRへpushしてしまうと、
+      # ビルド時間とECRストレージの両方が無駄になる。前回push(github.event.before)
+      # からの変更パスを見て、サービスごとにビルド・デプロイが必要かどうかを判定する。
+      # before が取れない場合(workflow_dispatch手動実行・force push直後等)は
+      # 安全側に倒して全サービスをビルド・デプロイする。
+      - name: Detect changed services
+        id: changes
+        run: |
+          BEFORE="${{ github.event.before }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ -z "$BEFORE" ] || \
+             [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            echo "before commit unavailable; building all services"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          else
+            CHANGED=$(git diff --name-only "$BEFORE" HEAD)
+            echo "changed files:"
+            echo "$CHANGED"
+            echo "frontend=$(echo "$CHANGED" | grep -q '^frontend/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            echo "backend=$(echo "$CHANGED" | grep -q '^Backend/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
@@ -326,19 +390,27 @@ jobs:
           set -e
           pids=()
 
-          (cd frontend && docker buildx build --platform linux/amd64 \
-            --build-arg NODE_ENV=production \
-            --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }} \
-            --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production \
-            --cache-to type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production,mode=max \
-            -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &
-          pids+=($!)
+          if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then
+            (cd frontend && docker buildx build --platform linux/amd64 \
+              --build-arg NODE_ENV=production \
+              --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }} \
+              --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production \
+              --cache-to type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production,mode=max \
+              -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &
+            pids+=($!)
+          else
+            echo "frontend unchanged, skip build/push"
+          fi
 
-          (cd Backend && docker buildx build --platform linux/amd64 \
-            --cache-from type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-production \
-            --cache-to type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-production,mode=max \
-            -t $ECR_REGISTRY/soc-backend:$IMAGE_TAG --push .) &
-          pids+=($!)
+          if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then
+            (cd Backend && docker buildx build --platform linux/amd64 \
+              --cache-from type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-production \
+              --cache-to type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-production,mode=max \
+              -t $ECR_REGISTRY/soc-backend:$IMAGE_TAG --push .) &
+            pids+=($!)
+          else
+            echo "backend unchanged, skip build/push"
+          fi
 
           fail=0
           for pid in "${pids[@]}"; do
@@ -350,6 +422,7 @@ jobs:
       # 行わず、現在のタスク定義のimageだけ差し替えて新リビジョンを登録する
       # （実行/タスクロールのIAM操作が不要なため、デプロイ用の最小権限で完結する）。
       - name: Fetch current backend task definition
+        if: steps.changes.outputs.backend == 'true'
         run: |
           aws ecs describe-task-definition --task-definition "${PROJECT_NAME}-backend" \
             --query 'taskDefinition' \
@@ -357,6 +430,7 @@ jobs:
             > backend-task-def.json
 
       - name: Render backend task definition
+        if: steps.changes.outputs.backend == 'true'
         id: render-backend
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
@@ -368,6 +442,7 @@ jobs:
       # backendサービスと同じネットワーク設定でワンオフタスクとしてmigrateを
       # 実行する。失敗したらここでジョブを止め、サービスは更新しない。
       - name: Register backend task definition (for migration)
+        if: steps.changes.outputs.backend == 'true'
         id: register-backend
         run: |
           TASK_DEF_ARN=$(aws ecs register-task-definition \
@@ -376,6 +451,7 @@ jobs:
           echo "task_def_arn=$TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
 
       - name: Run DB migration (production)
+        if: steps.changes.outputs.backend == 'true'
         run: |
           NETWORK_CONFIG=$(aws ecs describe-services --cluster "${PROJECT_NAME}" --services backend \
             --query 'services[0].networkConfiguration' --output json)
@@ -399,6 +475,7 @@ jobs:
           echo "✓ Migration applied successfully"
 
       - name: Deploy backend service
+        if: steps.changes.outputs.backend == 'true'
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-backend.outputs.task-definition }}
@@ -407,6 +484,7 @@ jobs:
           wait-for-service-stability: true
 
       - name: Fetch current frontend task definition
+        if: steps.changes.outputs.frontend == 'true'
         run: |
           aws ecs describe-task-definition --task-definition "${PROJECT_NAME}-frontend" \
             --query 'taskDefinition' \
@@ -414,6 +492,7 @@ jobs:
             > frontend-task-def.json
 
       - name: Render frontend task definition
+        if: steps.changes.outputs.frontend == 'true'
         id: render-frontend
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
@@ -422,6 +501,7 @@ jobs:
           image: ${{ env.ECR_REGISTRY }}/soc-frontend:${{ env.IMAGE_TAG }}
 
       - name: Deploy frontend service
+        if: steps.changes.outputs.frontend == 'true'
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-frontend.outputs.task-definition }}
