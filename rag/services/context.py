@@ -26,6 +26,10 @@ def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
     cache_key = build_cache_key(
         "resume_review", safe_company_name, role_label, company_original=request.company_name
     )
+    # 面接ヒント側(interview_hints)が同一企業を既に調査済みならWeb検索コストを共有する
+    hints_cache_key = build_cache_key(
+        "interview_hints", safe_company_name, role_label, company_original=request.company_name
+    )
 
     if request.company_context:
         docs = [request.company_context]
@@ -34,9 +38,11 @@ def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
         )
         return docs, "company_brief"
 
-    # キャッシュヒット: 即時返却
+    # キャッシュヒット: 即時返却（自キー→面接ヒント側キーの順で確認）
     try:
         retrieved = m.get_cached_context(cache_key)
+        if not retrieved:
+            retrieved = m.get_cached_context(hints_cache_key)
     except Exception as exc:
         logger.error("get_cached_context failed error=%s", exc, exc_info=True)
         retrieved = None
@@ -74,6 +80,13 @@ def _gather_context(request: ReviewRequest) -> Tuple[List[str], str]:
                     retrieved,
                     source="web_search",
                     doc_type="resume_review",
+                )
+                # 面接ヒント側でも同じ検索結果を再利用できるよう書き込む（Web検索の二重実行を防ぐ）
+                m.set_cached_context(
+                    hints_cache_key,
+                    retrieved,
+                    source="web_search",
+                    doc_type="interview_hints",
                 )
                 return retrieved, "web_search"
             logger.warning("web search pipeline returned empty result company=%s", safe_company_name)

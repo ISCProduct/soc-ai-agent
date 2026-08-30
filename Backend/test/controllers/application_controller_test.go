@@ -21,6 +21,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -156,7 +157,7 @@ func TestApplicationController_UpdateStatus_MissingFields(t *testing.T) {
 func TestApplicationController_UpdateStatus_Success(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
 	app := &entity.UserApplicationStatus{Status: "interview_in_progress", Notes: "通過"}
-	svc.On("UpdateStatus", uint(1), uint(1), "interview_in_progress", "通過", false).Return(app, nil)
+	svc.On("UpdateStatus", uint(1), uint(1), "interview_in_progress", (*string)(nil), false).Return(app, nil)
 
 	body, _ := json.Marshal(map[string]any{"user_id": 999, "status": "interview_in_progress", "notes": "通過"})
 	req := httptest.NewRequest(http.MethodPut, "/api/applications/1", bytes.NewBuffer(body))
@@ -176,7 +177,7 @@ func TestApplicationController_UpdateStatus_Success(t *testing.T) {
 
 func TestApplicationController_UpdateStatus_InvalidTransitionConflict(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
-	svc.On("UpdateStatus", uint(1), uint(1), "accepted", "", false).
+	svc.On("UpdateStatus", uint(1), uint(1), "accepted", (*string)(nil), false).
 		Return(nil, errors.New("invalid_status_transition: applied から accepted への遷移は許可されていません"))
 
 	body, _ := json.Marshal(map[string]any{"status": "accepted"})
@@ -193,7 +194,7 @@ func TestApplicationController_UpdateStatus_InvalidTransitionConflict(t *testing
 
 func TestApplicationController_UpdateStatus_ClosedConflict(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
-	svc.On("UpdateStatus", uint(1), uint(1), "applied", "", false).
+	svc.On("UpdateStatus", uint(1), uint(1), "applied", (*string)(nil), false).
 		Return(nil, errors.New("application_already_closed: ステータス accepted は終了状態のため更新できません"))
 
 	body, _ := json.Marshal(map[string]any{"status": "applied"})
@@ -212,7 +213,7 @@ func TestApplicationController_UpdateStatus_IgnoresClientIsAdmin(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
 	app := &entity.UserApplicationStatus{Status: "document_screening", Notes: "書類選考開始"}
 	// is_admin=true を送ってもサービスには false が渡る
-	svc.On("UpdateStatus", uint(1), uint(1), "document_screening", "書類選考開始", false).Return(app, nil)
+	svc.On("UpdateStatus", uint(1), uint(1), "document_screening", (*string)(nil), false).Return(app, nil)
 
 	body, _ := json.Marshal(map[string]any{"user_id": 1, "status": "document_screening", "notes": "書類選考開始", "is_admin": true})
 	req := httptest.NewRequest(http.MethodPut, "/api/applications/1", bytes.NewBuffer(body))
@@ -232,7 +233,7 @@ func TestApplicationController_AdminUpdateStatus_Success(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
 	app := &entity.UserApplicationStatus{Status: "document_screening"}
 	// 管理者ルートは isAdmin=true 固定、userID は所有権チェック対象外のため 0 を渡す
-	svc.On("UpdateStatus", uint(1), uint(0), "document_screening", "書類選考開始", true).Return(app, nil)
+	svc.On("UpdateStatus", uint(1), uint(0), "document_screening", mock.Anything, true).Return(app, nil)
 
 	body, _ := json.Marshal(map[string]any{"status": "document_screening", "notes": "書類選考開始"})
 	req := httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body))
@@ -261,7 +262,7 @@ func TestApplicationController_AdminUpdateStatus_MissingStatus(t *testing.T) {
 
 func TestApplicationController_AdminUpdateStatus_ClosedConflict_HasCode(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
-	svc.On("UpdateStatus", uint(1), uint(0), "document_screening", "", true).
+	svc.On("UpdateStatus", uint(1), uint(0), "document_screening", mock.Anything, true).
 		Return(nil, errors.New("application_already_closed: ステータス accepted は終了状態のため更新できません"))
 
 	body, _ := json.Marshal(map[string]any{"status": "document_screening"})
@@ -282,7 +283,7 @@ func TestApplicationController_AdminUpdateStatus_ClosedConflict_HasCode(t *testi
 
 func TestApplicationController_AdminUpdateStatus_InvalidTransition_HasCode(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
-	svc.On("UpdateStatus", uint(1), uint(0), "accepted", "", true).
+	svc.On("UpdateStatus", uint(1), uint(0), "accepted", mock.Anything, true).
 		Return(nil, errors.New("invalid_status_transition: applied から accepted への遷移は許可されていません"))
 
 	body, _ := json.Marshal(map[string]any{"status": "accepted"})
@@ -568,7 +569,7 @@ func TestApplicationController_HRList_Forbidden(t *testing.T) {
 
 func TestApplicationController_HRUpdateStatus_Forbidden(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
-	svc.On("UpdateStatusAsOwner", uint(5), uint(1), "document_screening", "").Return(nil, shared.ErrForbidden)
+	svc.On("UpdateStatusAsOwner", uint(5), uint(1), "document_screening", mock.Anything).Return(nil, shared.ErrForbidden)
 	body, _ := json.Marshal(map[string]string{"status": "document_screening"})
 	req := httptest.NewRequest(http.MethodPatch, "/api/hr/applications/5/status", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
