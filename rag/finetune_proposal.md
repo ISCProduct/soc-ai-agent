@@ -25,6 +25,9 @@ Issue #268: feat: OpenAI APIを使用した独自ファインチューニング�
 ## 注意点
 - 候補者データは匿名化/合意が取れるデータのみを使用
 - GPUコストを見積もる（検証用は小規模データ）
+- **蒸留禁止**: 教師ラベルは選考結果（`UserApplicationStatus`）のみ。AI生成物（チャット応答、
+  面接/ESスコア、マッチング理由文）を学習ラベルに使うことを禁止する。詳細は
+  [docs/finetune_design.md](../docs/finetune_design.md) を参照。
 
 ---
 作成者: Copilot (初期提案)
