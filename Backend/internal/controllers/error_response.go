@@ -69,6 +69,12 @@ func echoUserID(c echo.Context) (uint, bool) {
 	return userID, ok && userID != 0
 }
 
+// echoCompanyUserID は企業ポータル認証済みユーザーIDを取得する。
+func echoCompanyUserID(c echo.Context) (uint, bool) {
+	companyUserID, ok := middleware.CompanyUserIDFromContext(c.Request().Context())
+	return companyUserID, ok
+}
+
 // ensureAdminSchoolAccess は、対象リソースの学校ID(未割当ならnil)に対して、
 // 呼び出し元admin(担当校制限がある場合)がアクセスしてよいかを検証する共通ヘルパー
 // (#980/#981/#982/#984で同一ロジックが3コントローラーに重複していたのを統合)。
