@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -132,9 +133,10 @@ func (c *AuthController) RequestRegistration(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, map[string]string{"message": "confirmation email sent"})
 }
 
-// VerifyRegistration 仮登録トークンを検証してメールアドレスを返す
+// VerifyRegistration 仮登録トークンを検証してメールアドレスを返す。
+// トークンは query または JSON body `{ "token": "..." }` を受け付ける（#1079）。
 func (c *AuthController) VerifyRegistration(ctx echo.Context) error {
-	token := ctx.QueryParam("token")
+	token := registrationTokenFromRequest(ctx)
 	if token == "" {
 		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "token is required")
 	}
@@ -145,6 +147,17 @@ func (c *AuthController) VerifyRegistration(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{"email": email, "token": token})
+}
+
+func registrationTokenFromRequest(ctx echo.Context) string {
+	if t := strings.TrimSpace(ctx.QueryParam("token")); t != "" {
+		return t
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	_ = ctx.Bind(&body)
+	return strings.TrimSpace(body.Token)
 }
 
 // UpdateProfile ユーザープロフィール更新

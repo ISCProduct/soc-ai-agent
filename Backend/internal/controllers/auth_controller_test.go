@@ -296,6 +296,30 @@ func TestVerifyRegistration_MissingToken(t *testing.T) {
 	}
 }
 
+func TestVerifyRegistration_JSONBody(t *testing.T) {
+	svc := &mockAuthService{
+		validateRegTokenFn: func(token string) (string, error) {
+			if token != "valid-token" {
+				t.Errorf("token = %q, want valid-token", token)
+			}
+			return "user@example.com", nil
+		},
+	}
+	e, ctrl := newAuthTestServer(svc)
+	rec := servePost(e, "/verify", `{"token":"valid-token"}`, ctrl.VerifyRegistration)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if resp["email"] != "user@example.com" {
+		t.Errorf("email = %q, want user@example.com", resp["email"])
+	}
+}
+
 // ── ResetPassword ─────────────────────────────────────────────────────────────
 
 func TestResetPassword_InvalidToken_ReturnsValidationError(t *testing.T) {

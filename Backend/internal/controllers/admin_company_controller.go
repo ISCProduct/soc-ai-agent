@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"gorm.io/gorm"
 )
 
 type AdminCompanyController struct {
@@ -206,14 +207,39 @@ func (c *AdminCompanyController) Publish(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
 	}
-	company, err := c.repo.FindByID(uint(id))
+	companyID := uint(id)
+	company, err := c.repo.FindByID(companyID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "company not found")
+	}
+	profile, err := c.repo.GetWeightProfile(companyID, nil)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return echo.NewHTTPError(http.StatusBadRequest, "weight profile is required before publish")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load weight profile")
+	}
+	if profile == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "weight profile is required before publish")
 	}
 	company.DataStatus = "published"
 	company.IsProvisional = false
 	if err := c.repo.Update(company); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to publish company")
+	}
+	cid := companyID
+	jobs, err := c.repo.ListJobPositions(&cid, nil, 1000)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list job positions")
+	}
+	for i := range jobs {
+		if jobs[i].DataStatus != "draft" {
+			continue
+		}
+		jobs[i].DataStatus = "published"
+		if err := c.repo.UpdateJobPosition(&jobs[i]); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to publish job positions")
+		}
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
 	c.audit.Record(actor, "company.publish", "company", company.ID, map[string]any{

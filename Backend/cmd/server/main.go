@@ -26,6 +26,7 @@ import (
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/gbizinfo"
 	"Backend/internal/services/github"
+	"Backend/internal/services/hr"
 	"Backend/internal/services/interview"
 	"Backend/internal/services/matching"
 	"Backend/internal/services/oauth"
@@ -448,6 +449,17 @@ func main() {
 	esReviewController := controllers.NewESReviewController()
 	appService := application.NewApplicationService(appStatusRepo, matchRepo, db)
 	appController := controllers.NewApplicationController(appService)
+	hrStudentAnalysisService := hr.NewStudentAnalysisService(
+		db,
+		userRepo,
+		crossFeatureService,
+		userWeightScoreRepo,
+		conversationContextRepo,
+		interviewSessionRepo,
+		interviewReportRepo,
+		resumeRepo,
+	)
+	hrStudentAnalysisController := controllers.NewHRStudentAnalysisController(hrStudentAnalysisService)
 	integratedProfileController := controllers.NewIntegratedProfileController(crossFeatureService, interviewSessionRepo, resumeRepo)
 	entitlementController := controllers.NewEntitlementController(organizationService)
 	scoreValidationRepo := repositories.NewScoreValidationRepository(db)
@@ -496,7 +508,7 @@ func main() {
 	routes.SetupESRoutes(api, esRewriteController, esReviewController)
 	routes.SetupScheduleRoutes(api, scheduleController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret, userDeletionService, organizationService)
-	routes.SetupApplicationRoutes(api, appController, cfg.UserSecret, userDeletionService, organizationService)
+	routes.SetupApplicationRoutes(api, appController, hrStudentAnalysisController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, cfg.CompanyUserSecret, companyUserRepo)
 	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)

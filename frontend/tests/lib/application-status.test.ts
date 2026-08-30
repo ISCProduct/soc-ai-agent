@@ -1,4 +1,5 @@
 import {
+  adminNextStatuses,
   canUserTransition,
   isTerminalStatus,
   nextActionLabel,
@@ -28,6 +29,16 @@ describe('application-status', () => {
     expect(normalizeApplicationStatus('interview')).toBe('interview_in_progress')
     expect(normalizeApplicationStatus('declined')).toBe('withdrawn')
     expect(userNextStatuses('interview')).toEqual(['withdrawn'])
+  })
+})
+
+describe('adminNextStatuses', () => {
+  it('applied から書類選考と辞退へ進める', () => {
+    expect(adminNextStatuses('applied')).toEqual(['document_screening', 'withdrawn'])
+  })
+
+  it('レガシー interview は面接中として次ステータスを返す', () => {
+    expect(adminNextStatuses('interview')).toEqual(['offered', 'rejected', 'withdrawn'])
   })
 })
 

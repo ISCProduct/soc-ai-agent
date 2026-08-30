@@ -27,6 +27,7 @@ type User struct {
 	PasswordResetToken       string
 	PasswordResetExpiresAt   *time.Time
 	AllowCollectiveInsight   bool
+	AllowScoutVisibility     bool
 	WithdrawnAt              *time.Time
 	CreatedAt                time.Time
 	UpdatedAt                time.Time

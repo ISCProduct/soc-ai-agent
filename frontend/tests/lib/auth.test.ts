@@ -85,3 +85,28 @@ describe('authService.logout', () => {
     expect(localStorage.getItem('user')).toBeNull()
   })
 })
+
+describe('authService.verifyRegistration', () => {
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  it('POST /api/auth/verify-registration に token を body で送る', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ email: 'a@example.com', token: 'tok' }),
+    } as Response)
+
+    const got = await authService.verifyRegistration('tok')
+    expect(got.email).toBe('a@example.com')
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/auth/verify-registration',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ token: 'tok' }),
+      }),
+    )
+    const url = (global.fetch as jest.Mock).mock.calls[0][0] as string
+    expect(url).not.toContain('tok')
+  })
+})

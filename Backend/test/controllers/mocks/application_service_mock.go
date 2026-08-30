@@ -18,7 +18,7 @@ func (m *ApplicationServiceMock) Apply(userID, companyID, matchID uint) (*entity
 	return args.Get(0).(*entity.UserApplicationStatus), args.Error(1)
 }
 
-func (m *ApplicationServiceMock) UpdateStatus(applicationID uint, userID uint, status, notes string, isAdmin bool) (*entity.UserApplicationStatus, error) {
+func (m *ApplicationServiceMock) UpdateStatus(applicationID uint, userID uint, status string, notes *string, isAdmin bool) (*entity.UserApplicationStatus, error) {
 	args := m.Called(applicationID, userID, status, notes, isAdmin)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -58,7 +58,7 @@ func (m *ApplicationServiceMock) ListForOwner(userID, companyID uint, status str
 	return args.Get(0).([]*entity.UserApplicationStatus), args.Error(1)
 }
 
-func (m *ApplicationServiceMock) UpdateStatusAsOwner(applicationID, userID uint, status, notes string) (*entity.UserApplicationStatus, error) {
+func (m *ApplicationServiceMock) UpdateStatusAsOwner(applicationID, userID uint, status string, notes *string) (*entity.UserApplicationStatus, error) {
 	args := m.Called(applicationID, userID, status, notes)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)

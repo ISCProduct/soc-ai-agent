@@ -101,10 +101,10 @@ func (c *ApplicationController) UpdateStatus(ctx echo.Context) error {
 	}
 
 	var req struct {
-		UserID  uint   `json:"user_id"` // 互換のため受け取るが無視する
-		Status  string `json:"status"`
-		Notes   string `json:"notes"`
-		IsAdmin bool   `json:"is_admin"` // クライアント指定は無視（権限昇格防止）
+		UserID  uint    `json:"user_id"` // 互換のため受け取るが無視する
+		Status  string  `json:"status"`
+		Notes   *string `json:"notes"`
+		IsAdmin bool    `json:"is_admin"` // クライアント指定は無視（権限昇格防止）
 	}
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
@@ -113,7 +113,7 @@ func (c *ApplicationController) UpdateStatus(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "status は必須です")
 	}
 
-	app, err := c.appService.UpdateStatus(uint(id), userID, req.Status, req.Notes, false)
+	app, err := c.appService.UpdateStatus(uint(id), userID, req.Status, nil, false)
 	if err != nil {
 		return mapApplicationError(err)
 	}
@@ -134,8 +134,8 @@ func (c *ApplicationController) AdminUpdateStatus(ctx echo.Context) error {
 	}
 
 	var req struct {
-		Status string `json:"status"`
-		Notes  string `json:"notes"`
+		Status string  `json:"status"`
+		Notes  *string `json:"notes"`
 	}
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
@@ -259,8 +259,8 @@ func (c *ApplicationController) HRUpdateStatus(ctx echo.Context) error {
 		return err
 	}
 	var req struct {
-		Status string `json:"status"`
-		Notes  string `json:"notes"`
+		Status string  `json:"status"`
+		Notes  *string `json:"notes"`
 	}
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")

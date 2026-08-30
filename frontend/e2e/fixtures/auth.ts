@@ -31,6 +31,25 @@ export const TEST_ADMIN: MockUser = {
 }
 
 export async function setupAuth(page: Page, user: MockUser = TEST_USER) {
+  const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000'
+
+  await page.context().addCookies([
+    {
+      name: 'user_id',
+      value: String(user.user_id),
+      url: baseURL,
+      httpOnly: true,
+      sameSite: 'Lax',
+    },
+    {
+      name: 'user_token',
+      value: user.user_token,
+      url: baseURL,
+      httpOnly: true,
+      sameSite: 'Lax',
+    },
+  ])
+
   await page.addInitScript(
     ({ u }: { u: MockUser }) => {
       const userData = {
