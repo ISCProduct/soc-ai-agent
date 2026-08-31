@@ -57,7 +57,14 @@ variable "desired_count" {
 
 variable "target_group_arn" {
   type        = string
-  description = "ALBターゲットグループARN"
+  description = "ALBターゲットグループARN。空文字なら外部公開しない内部サービスとして作成する(load_balancerブロックを付けない)"
+  default     = ""
+}
+
+variable "service_discovery_registry_arn" {
+  type        = string
+  description = "Cloud Map(Service Discovery)のサービスARN。空文字なら登録しない"
+  default     = ""
 }
 
 variable "environment" {
@@ -102,5 +109,40 @@ variable "tags" {
 variable "extra_container_definitions" {
   type        = list(any)
   description = "同一タスクに追加するサイドカーコンテナ定義(例: Redis)。ECSのcontainer definition形式をそのまま渡す"
+  default     = []
+}
+
+variable "enable_execute_command" {
+  type        = bool
+  description = "ECS Exec(デバッグ用シェル接続)を有効にするか"
+  default     = false
+}
+
+variable "container_health_check" {
+  type = object({
+    command      = list(string)
+    interval     = number
+    timeout      = number
+    retries      = number
+    start_period = number
+  })
+  description = "メインコンテナのヘルスチェック定義。nullなら付けない"
+  default     = null
+}
+
+variable "container_mount_points" {
+  type        = list(any)
+  description = "メインコンテナのmountPoints(ECSのcontainer definition形式)"
+  default     = []
+}
+
+variable "efs_volumes" {
+  type = list(object({
+    name            = string
+    file_system_id  = string
+    file_system_arn = string
+    access_point_id = string
+  }))
+  description = "タスクにマウントするEFSボリューム(永続化が必要なサイドカー、例: chroma用)"
   default     = []
 }
