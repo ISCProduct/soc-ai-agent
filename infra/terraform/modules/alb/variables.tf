@@ -40,6 +40,12 @@ variable "backend_target_port" {
   default = 8080
 }
 
+variable "deregistration_delay" {
+  type        = number
+  description = "ターゲットグループのderegistration delay(秒)。AWSデフォルトは300"
+  default     = 300
+}
+
 variable "target_type" {
   type        = string
   description = "\"ip\"（Fargate/awsvpc）または \"instance\"（ECS on EC2/bridge, ホストポート動的割当）"

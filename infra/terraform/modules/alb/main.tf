@@ -11,11 +11,12 @@ resource "aws_lb" "this" {
 }
 
 resource "aws_lb_target_group" "frontend" {
-  name        = "${var.project_name}-fe-tg"
-  port        = var.frontend_target_port
-  protocol    = "HTTP"
-  vpc_id      = var.vpc_id
-  target_type = var.target_type
+  name                 = "${var.project_name}-fe-tg"
+  port                 = var.frontend_target_port
+  protocol             = "HTTP"
+  vpc_id               = var.vpc_id
+  target_type          = var.target_type
+  deregistration_delay = var.deregistration_delay
 
   health_check {
     path                = var.frontend_health_check_path
@@ -32,11 +33,12 @@ resource "aws_lb_target_group" "frontend" {
 }
 
 resource "aws_lb_target_group" "backend" {
-  name        = "${var.project_name}-be-tg"
-  port        = var.backend_target_port
-  protocol    = "HTTP"
-  vpc_id      = var.vpc_id
-  target_type = var.target_type
+  name                 = "${var.project_name}-be-tg"
+  port                 = var.backend_target_port
+  protocol             = "HTTP"
+  vpc_id               = var.vpc_id
+  target_type          = var.target_type
+  deregistration_delay = var.deregistration_delay
 
   health_check {
     path                = var.health_check_path

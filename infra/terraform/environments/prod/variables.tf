@@ -42,6 +42,11 @@ variable "frontend_desired_count" {
   default = 0
 }
 
+variable "rag_review_desired_count" {
+  type    = number
+  default = 0
+}
+
 variable "backend_cpu" {
   type        = number
   description = "Fargateの有効な組み合わせに従うこと（例: 256/512/1024）"
@@ -59,6 +64,16 @@ variable "frontend_cpu" {
 }
 
 variable "frontend_memory" {
+  type    = number
+  default = 512
+}
+
+variable "rag_review_cpu" {
+  type    = number
+  default = 256
+}
+
+variable "rag_review_memory" {
   type    = number
   default = 512
 }
@@ -96,6 +111,11 @@ variable "backend_image" {
 variable "frontend_image" {
   type        = string
   description = "ECR image URI for frontend (tag included)"
+}
+
+variable "rag_review_image" {
+  type        = string
+  description = "ECR image URI for rag-review (tag included)"
 }
 
 variable "openai_secret_arn" {
