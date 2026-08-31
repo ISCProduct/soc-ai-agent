@@ -186,3 +186,9 @@ variable "domain_name" {
   description = "購入済みドメイン（同名の Route53 ホストゾーンが既に存在すること）"
   default     = "shukatsu-ai.jp"
 }
+
+variable "enable_error_fallback" {
+  type        = bool
+  description = "frontendを常時CloudFront経由にし、ALBが500/502/503/504を返す場合(本番停止中を含む)にS3のOGP付き静的ページへフェイルオーバーするか"
+  default     = false
+}
