@@ -9,3 +9,17 @@ provider "aws" {
     }
   }
 }
+
+# CloudFront 用 ACM（us-east-1 必須）
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+
+  default_tags {
+    tags = {
+      Project   = "soc-ai-agent"
+      Env       = "production"
+      ManagedBy = "terraform"
+    }
+  }
+}
