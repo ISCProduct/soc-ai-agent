@@ -710,7 +710,13 @@ resource "aws_appautoscaling_policy" "frontend_cpu" {
   }
 }
 
+# frontend(学園マルチテナントサブドメイン含む)は常時CloudFrontを経由させ、
+# ALBが500/502/503/504を返す場合(意図的な停止desired_count=0を含む)は
+# S3のOGP付き静的ページへフェイルオーバーする(enable_error_fallback)。
+# backend(API)はJSONを返す前提のためHTML差し替えは不適切であり対象外、
+# 引き続きALB直接エイリアスのまま。
 resource "aws_route53_record" "frontend" {
+  count   = var.enable_error_fallback ? 0 : 1
   zone_id = data.aws_route53_zone.selected.zone_id
   name    = local.frontend_domain
   type    = "A"
@@ -722,9 +728,10 @@ resource "aws_route53_record" "frontend" {
   }
 }
 
-resource "aws_route53_record" "backend" {
+resource "aws_route53_record" "wildcard" {
+  count   = var.enable_error_fallback ? 0 : 1
   zone_id = data.aws_route53_zone.selected.zone_id
-  name    = local.backend_domain
+  name    = "*.${var.domain_name}"
   type    = "A"
 
   alias {
@@ -734,11 +741,55 @@ resource "aws_route53_record" "backend" {
   }
 }
 
+module "cloudfront_app_proxy" {
+  count  = var.enable_error_fallback ? 1 : 0
+  source = "../../modules/cloudfront_app_proxy"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  project_name              = var.project_name
+  env                       = "production"
+  domain_name               = local.frontend_domain
+  subject_alternative_names = ["*.${var.domain_name}"]
+  aliases                   = [local.frontend_domain, "*.${var.domain_name}"]
+  route53_zone_id           = data.aws_route53_zone.selected.zone_id
+  alb_dns_name              = module.alb.alb_dns_name
+  service_unavailable_html  = file("${path.module}/../../../static/service-unavailable.html")
+  tags                      = local.tags
+}
+
+resource "aws_route53_record" "frontend_cloudfront" {
+  count   = var.enable_error_fallback ? 1 : 0
+  zone_id = data.aws_route53_zone.selected.zone_id
+  name    = local.frontend_domain
+  type    = "A"
+
+  alias {
+    name                   = module.cloudfront_app_proxy[0].cloudfront_domain_name
+    zone_id                = module.cloudfront_app_proxy[0].cloudfront_hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
 # 学園マルチテナント(<学園slug>.shukatsu-ai.jp)とadmin.shukatsu-ai.jp用のワイルドカードDNS。
-# デフォルトアクション(frontendへforward)がそのまま使われるため、ALB側のルーティング追加は不要。
-resource "aws_route53_record" "wildcard" {
+resource "aws_route53_record" "wildcard_cloudfront" {
+  count   = var.enable_error_fallback ? 1 : 0
   zone_id = data.aws_route53_zone.selected.zone_id
   name    = "*.${var.domain_name}"
+  type    = "A"
+
+  alias {
+    name                   = module.cloudfront_app_proxy[0].cloudfront_domain_name
+    zone_id                = module.cloudfront_app_proxy[0].cloudfront_hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "backend" {
+  zone_id = data.aws_route53_zone.selected.zone_id
+  name    = local.backend_domain
   type    = "A"
 
   alias {
