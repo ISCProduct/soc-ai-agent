@@ -37,3 +37,11 @@ output "backend_service_name" {
 output "frontend_service_name" {
   value = module.frontend.service_name
 }
+
+output "rag_review_service_name" {
+  value = module.rag_review.service_name
+}
+
+output "chroma_service_name" {
+  value = module.chroma.service_name
+}
