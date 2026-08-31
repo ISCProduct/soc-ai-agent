@@ -17,7 +17,7 @@
 langchain>=1.0,<2.0
 langchain-core>=1.0,<2.0
 langchain-openai>=1.0,<2.0
-langchain-text-splitters>=1.0,<2.0
+langchain-text-splitters>=1.1.2,<2.0
 
 # --- ベクトルストア ---
 # vector_store.py で HttpClient（本番）/ PersistentClient（ローカル）と upsert / query を利用。
