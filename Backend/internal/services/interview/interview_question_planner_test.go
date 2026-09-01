@@ -82,6 +82,28 @@ func TestBuildQuestionCoverage(t *testing.T) {
 	}
 }
 
+func TestBuildFollowUpQuestionTextVariants(t *testing.T) {
+	original := "学生時代に力を入れたことは？"
+	answerForMotivation := "a" // followUpVariantIndex % 3 == 1
+	answerForContinuity := "aa" // followUpVariantIndex % 3 == 2
+	answerForRole := "aaa" // followUpVariantIndex % 3 == 0
+
+	gotMotivation := BuildFollowUpQuestionText(original, answerForMotivation)
+	if !strings.Contains(gotMotivation, "きっかけ") {
+		t.Fatalf("motivation variant missing きっかけ: %s", gotMotivation)
+	}
+
+	gotContinuity := BuildFollowUpQuestionText(original, answerForContinuity)
+	if !strings.Contains(gotContinuity, "継続") {
+		t.Fatalf("continuity variant missing 継続: %s", gotContinuity)
+	}
+
+	gotRole := BuildFollowUpQuestionText(original, answerForRole)
+	if !strings.Contains(gotRole, "役割") {
+		t.Fatalf("role variant missing 役割: %s", gotRole)
+	}
+}
+
 func TestBuildInterviewSystemPromptWithDirective(t *testing.T) {
 	prompt := buildInterviewSystemPrompt(
 		"テスト株式会社", "", "エンジニア", "", "general",
