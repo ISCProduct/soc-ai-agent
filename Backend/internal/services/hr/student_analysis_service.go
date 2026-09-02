@@ -62,11 +62,23 @@ func NewStudentAnalysisService(
 	}
 }
 
-// GetAnalysis 企業オーナー向けに学生の分析プロファイルを返す
+// GetAnalysis 企業オーナー向けに学生の分析プロファイルを返す（company_ownerships 経由）
 func (s *StudentAnalysisService) GetAnalysis(ownerUserID, companyID, targetUserID uint) (*StudentAnalysisResponse, error) {
 	if err := s.requireCompanyOwner(ownerUserID, companyID); err != nil {
 		return nil, err
 	}
+	return s.buildAnalysis(targetUserID)
+}
+
+// GetAnalysisForVisibleStudent は認可済みの呼び出し元向けに分析プロファイルを返す（#1094 企業ポータル）。
+// 企業ポータルJWTは company_id を直接持つため company_ownerships の確認は不要だが、
+// 学生の公開同意チェック（buildAnalysis 内）は共通で必ず通る。
+func (s *StudentAnalysisService) GetAnalysisForVisibleStudent(targetUserID uint) (*StudentAnalysisResponse, error) {
+	return s.buildAnalysis(targetUserID)
+}
+
+// buildAnalysis は認可後の共通組み立て処理。公開同意していない学生は ErrStudentNotVisible。
+func (s *StudentAnalysisService) buildAnalysis(targetUserID uint) (*StudentAnalysisResponse, error) {
 	student, err := s.userRepo.GetUserByID(targetUserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
