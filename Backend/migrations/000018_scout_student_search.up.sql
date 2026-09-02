@@ -1,12 +1,11 @@
 -- スカウト機能: 学生の希望条件と企業ごとの学生タグ（#1094）
 
--- 学生の希望条件。企業側のフィルタ軸（希望業界・希望勤務地・希望職種）を保持する。
+-- 学生の希望条件。企業側のフィルタ軸（希望業界・希望勤務地）を保持する。
 -- 既存 users テーブルには該当項目が無いため新設（1学生1レコード）。
 CREATE TABLE IF NOT EXISTS `user_preferences` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `user_id` bigint unsigned NOT NULL,
   `desired_industry_id` bigint unsigned DEFAULT NULL,
-  `desired_job_category_id` bigint unsigned DEFAULT NULL,
   `desired_location` varchar(100) NOT NULL DEFAULT '',
   `note` text,
   `created_at` datetime(3) DEFAULT NULL,

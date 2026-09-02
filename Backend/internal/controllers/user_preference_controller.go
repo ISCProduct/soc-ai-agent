@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"strings"
 
@@ -12,26 +11,25 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// studentVectorIndexer は学生プロフィールのベクトル登録・削除（RAG）。
-type studentVectorIndexer interface {
-	Index(ctx context.Context, userID uint, text string) error
-	Delete(ctx context.Context, userID uint) error
+// scoutIndexSyncer は学生プロフィールのベクトルを同期する（hr.StudentIndexSyncer）。
+type scoutIndexSyncer interface {
+	Sync(ctx context.Context, userID uint)
 }
 
 // UserPreferenceController は学生本人の希望条件の取得・更新（#1094）。
-// 企業向け学生検索のフィルタ軸（希望業界・希望勤務地・希望職種）を学生が入力する。
+// 企業向け学生検索のフィルタ軸（希望業界・希望勤務地）を学生が入力する。
 type UserPreferenceController struct {
 	repo       *repositories.UserPreferenceRepository
-	indexer    studentVectorIndexer
+	syncer     scoutIndexSyncer
 	industries industryLister
 }
 
 func NewUserPreferenceController(
 	repo *repositories.UserPreferenceRepository,
-	indexer studentVectorIndexer,
+	syncer scoutIndexSyncer,
 	industries industryLister,
 ) *UserPreferenceController {
-	return &UserPreferenceController{repo: repo, indexer: indexer, industries: industries}
+	return &UserPreferenceController{repo: repo, syncer: syncer, industries: industries}
 }
 
 // Industries GET /api/user/industries
@@ -48,10 +46,9 @@ func (c *UserPreferenceController) Industries(ctx echo.Context) error {
 }
 
 type userPreferenceBody struct {
-	DesiredIndustryID    *uint  `json:"desired_industry_id"`
-	DesiredJobCategoryID *uint  `json:"desired_job_category_id"`
-	DesiredLocation      string `json:"desired_location"`
-	Note                 string `json:"note"`
+	DesiredIndustryID *uint  `json:"desired_industry_id"`
+	DesiredLocation   string `json:"desired_location"`
+	Note              string `json:"note"`
 	// AllowScoutVisibility は企業への公開同意。nil なら現在値を変更しない。
 	AllowScoutVisibility *bool `json:"allow_scout_visibility"`
 }
@@ -100,11 +97,10 @@ func (c *UserPreferenceController) Put(ctx echo.Context) error {
 		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "希望勤務地が長すぎます")
 	}
 	pref := &models.UserPreference{
-		UserID:               userID,
-		DesiredIndustryID:    body.DesiredIndustryID,
-		DesiredJobCategoryID: body.DesiredJobCategoryID,
-		DesiredLocation:      location,
-		Note:                 strings.TrimSpace(body.Note),
+		UserID:            userID,
+		DesiredIndustryID: body.DesiredIndustryID,
+		DesiredLocation:   location,
+		Note:              strings.TrimSpace(body.Note),
 	}
 	if err := c.repo.Upsert(pref); err != nil {
 		return echoInternalError(err)
@@ -119,37 +115,10 @@ func (c *UserPreferenceController) Put(ctx echo.Context) error {
 	if err != nil {
 		return echoInternalError(err)
 	}
-	c.syncSearchIndex(ctx.Request().Context(), userID, allow)
+	// 希望条件はベクトル化対象なので、保存のたびに検索インデックスを同期する。
+	if c.syncer != nil {
+		c.syncer.Sync(ctx.Request().Context(), userID)
+	}
 
 	return ctx.JSON(http.StatusOK, userPreferenceResponse{UserPreference: pref, AllowScoutVisibility: allow})
-}
-
-// syncSearchIndex は同意状態に合わせてセマンティック検索のベクトルを同期する。
-// 同意ONなら最新プロフィールを再登録し、OFF（撤回）ならベクトルを削除する。
-// RAG が落ちていても希望条件の保存自体は成功させたいので、失敗はログのみに留める。
-func (c *UserPreferenceController) syncSearchIndex(ctx context.Context, userID uint, allow bool) {
-	if c.indexer == nil {
-		return
-	}
-	if !allow {
-		if err := c.indexer.Delete(ctx, userID); err != nil {
-			log.Printf("[WARN] student vector delete failed user_id=%d: %v", userID, err)
-		}
-		return
-	}
-	text, err := c.repo.ScoutProfileText(userID)
-	if err != nil {
-		log.Printf("[WARN] student profile text build failed user_id=%d: %v", userID, err)
-		return
-	}
-	if strings.TrimSpace(text) == "" {
-		// 公開できる情報が無い状態でベクトルだけ残らないよう削除する。
-		if err := c.indexer.Delete(ctx, userID); err != nil {
-			log.Printf("[WARN] student vector delete failed user_id=%d: %v", userID, err)
-		}
-		return
-	}
-	if err := c.indexer.Index(ctx, userID, text); err != nil {
-		log.Printf("[WARN] student vector index failed user_id=%d: %v", userID, err)
-	}
 }

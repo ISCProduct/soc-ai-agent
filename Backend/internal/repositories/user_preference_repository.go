@@ -36,7 +36,7 @@ func (r *UserPreferenceRepository) Upsert(pref *models.UserPreference) error {
 	return r.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "user_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"desired_industry_id", "desired_job_category_id", "desired_location", "note", "updated_at",
+			"desired_industry_id", "desired_location", "note", "updated_at",
 		}),
 	}).Create(pref).Error
 }
