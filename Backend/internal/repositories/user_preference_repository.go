@@ -49,13 +49,25 @@ func (r *UserPreferenceRepository) SetScoutVisibility(userID uint, allow bool) e
 		Update("allow_scout_visibility", allow).Error
 }
 
-// GetScoutVisibility は現在のスカウト公開同意フラグを返す。
+// GetScoutVisibility は学生本人が設定した公開同意フラグをそのまま返す。
+// 本人の設定画面へ現在値を返すためのもので、実際に企業へ公開されるかは
+// IsScoutVisible で判定すること。
 func (r *UserPreferenceRepository) GetScoutVisibility(userID uint) (bool, error) {
 	var allow bool
 	err := r.db.Model(&models.User{}).
 		Where("id = ?", userID).
 		Select("allow_scout_visibility").Scan(&allow).Error
 	return allow, err
+}
+
+// IsScoutVisible は実際に企業へ公開してよい状態かを返す（#1094）。
+//
+// 同意フラグだけでは足りない。退会しても allow_scout_visibility は 1 のまま
+// 残るため、フラグのみで判定すると退会済み学生をベクトル化し直してしまう。
+// 判定は検索側と同じ StudentSearchRepository.IsVisible へ委ね、
+// 「企業に公開してよい学生」の定義を一箇所に保つ。
+func (r *UserPreferenceRepository) IsScoutVisible(userID uint) (bool, error) {
+	return NewStudentSearchRepository(r.db).IsVisible(userID)
 }
 
 // ScoutProfileText は同意済み学生のベクトル化対象テキストを組み立てる（#1094）。
