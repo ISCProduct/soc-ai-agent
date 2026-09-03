@@ -146,6 +146,11 @@ func isRetryableAPIErr(err error) bool {
 	if errors.As(err, &apiErr) {
 		return apiErr.HTTPStatusCode == http.StatusTooManyRequests || apiErr.HTTPStatusCode >= 500
 	}
+	// Responses API は SDK を経由しないため独自エラー型で判定する。
+	var respErr *ResponsesAPIError
+	if errors.As(err, &respErr) {
+		return respErr.Retryable()
+	}
 	return false
 }
 
