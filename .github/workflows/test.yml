@@ -73,32 +73,33 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
-  audit-frontend:
-    name: Frontend Security Audit
+  # 旧 audit-frontend (npm audit) の置き換え (#1132)。
+  #
+  # npm audit は registry.npmjs.org の audit API に依存しており、同APIが停止すると
+  # CI が丸ごと落ちる。実際に 2026-09-04 に無応答(45秒でHTTP 000)→503 となり、
+  # 通常のレジストリは正常なのに監査だけが7分待たされた末に失敗した。
+  # pnpm では同エンドポイントの廃止も報告されており、恒久的に不安定とみなす。
+  #
+  # GitHub Advisory DB を参照する dependency-review-action へ移行する。
+  # 外部レジストリのAPIに依存せず、frontend(npm)だけでなく Backend(Go)・rag(pip) の
+  # 依存も一度にカバーできる。publicリポジトリのため GitHub Advanced Security は不要。
+  #
+  # 注意: 本アクションはPRの差分に対して「新規に持ち込まれた」脆弱性を検出する。
+  # 既存の脆弱性の検知は Dependabot alerts (有効済み) が担当する。
+  dependency-review:
+    name: Dependency Review
     runs-on: ubuntu-latest
-    # 3ジョブが同時に npm ci を実行するため競合し、npm ci だけで最大3分33秒かかる実測。
-    # 5分ではジョブ全体の予算を npm ci が食い潰し、後続ステップが打ち切られていた (#1132)
-    timeout-minutes: 10
-
-    defaults:
-      run:
-        working-directory: ./frontend
+    timeout-minutes: 5
+    # base/head の比較を行うアクションのため pull_request でのみ動作する
+    if: github.event_name == 'pull_request'
 
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
+      - name: Dependency Review (high severity)
+        uses: actions/dependency-review-action@v5
         with:
-          node-version-file: ./frontend/.nvmrc
-          cache: npm
-          cache-dependency-path: ./frontend/package-lock.json
-
-      # 監査は package-lock.json だけで完結するため npm ci は不要。
-      # 680パッケージのインストール(最大3分33秒)を省くことで、
-      # 3ジョブ同時実行時の競合そのものを減らす (#1132)
-      - name: npm audit (high severity)
-        run: npm audit --package-lock-only --audit-level=high
+          fail-on-severity: high
 
   test-frontend-unit:
     name: Frontend Unit Tests
