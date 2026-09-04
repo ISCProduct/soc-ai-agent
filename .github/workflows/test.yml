@@ -96,8 +96,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # 本アクションは浮動タグ(v5等)を公開していないため、完全バージョンで指定する
       - name: Dependency Review (high severity)
-        uses: actions/dependency-review-action@v5
+        uses: actions/dependency-review-action@v5.0.0
         with:
           fail-on-severity: high
 
