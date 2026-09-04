@@ -12,6 +12,11 @@ on:
       - release
       - main
 
+# 本ワークフローはチェックアウトとテスト実行のみで、リポジトリへの書き込みを行わない。
+# 既定の GITHUB_TOKEN 権限を継承せず、最小権限を明示する。
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
