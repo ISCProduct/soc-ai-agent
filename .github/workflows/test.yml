@@ -94,11 +94,11 @@ jobs:
           cache: npm
           cache-dependency-path: ./frontend/package-lock.json
 
-      - name: Install dependencies
-        run: npm ci
-
+      # 監査は package-lock.json だけで完結するため npm ci は不要。
+      # 680パッケージのインストール(最大3分33秒)を省くことで、
+      # 3ジョブ同時実行時の競合そのものを減らす (#1132)
       - name: npm audit (high severity)
-        run: npm audit --audit-level=high
+        run: npm audit --package-lock-only --audit-level=high
 
   test-frontend-unit:
     name: Frontend Unit Tests
