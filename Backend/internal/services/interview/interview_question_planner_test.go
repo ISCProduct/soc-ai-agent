@@ -84,9 +84,9 @@ func TestBuildQuestionCoverage(t *testing.T) {
 
 func TestBuildFollowUpQuestionTextVariants(t *testing.T) {
 	original := "学生時代に力を入れたことは？"
-	answerForMotivation := "a" // followUpVariantIndex % 3 == 1
+	answerForMotivation := "a"  // followUpVariantIndex % 3 == 1
 	answerForContinuity := "aa" // followUpVariantIndex % 3 == 2
-	answerForRole := "aaa" // followUpVariantIndex % 3 == 0
+	answerForRole := "aaa"      // followUpVariantIndex % 3 == 0
 
 	gotMotivation := BuildFollowUpQuestionText(original, answerForMotivation)
 	if !strings.Contains(gotMotivation, "きっかけ") {
