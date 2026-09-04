@@ -39,8 +39,26 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      # test/ 配下(69ファイル/672テスト)がCI対象外だったため、
+      # Responses API移行でモックが腐っていたことに長期間気づけなかった (#1132)
+      #
+      # -timeout はハング検出が目的であり性能予算ではない。bcrypt(cost=12)を使う
+      # ログイン系テストは -race 下で重く、60s ではランナーの状態次第で
+      # 偽の失敗になりうるため 300s へ引き上げる。
       - name: Run tests
-        run: go test ./internal/... ./migrations/... -v -race -timeout 60s
+        run: go test ./internal/... ./migrations/... ./test/... -v -race -timeout 300s
+
+      - name: Format check
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt が適用されていないファイルがあります:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
 
       - name: Build check
         run: go build ./...
