@@ -29,18 +29,26 @@ func validCompanyInfoJSON() string {
 func makeChatCompletionsServer(t *testing.T, responseText string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.URL.Path, "chat/completions") {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
 		_, _ = io.ReadAll(r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{
-				{"message": map[string]any{"role": "assistant", "content": responseText}},
-			},
-			"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 20},
-		})
+		switch {
+		// Web 検索（Search Lite）は Responses API を使う
+		case strings.Contains(r.URL.Path, "responses"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"output_text": responseText,
+				"usage":       map[string]any{"input_tokens": 10, "output_tokens": 20},
+			})
+		case strings.Contains(r.URL.Path, "chat/completions"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []map[string]any{
+					{"message": map[string]any{"role": "assistant", "content": responseText}},
+				},
+				"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 20},
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
 }
 

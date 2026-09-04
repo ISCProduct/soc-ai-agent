@@ -30,7 +30,7 @@ func (r *userRepoAuthStub) GetUserByID(id uint) (*entity.User, error) {
 	}
 	return nil, nil
 }
-func (r *userRepoAuthStub) ListUsers() ([]entity.User, error)         { return nil, nil }
+func (r *userRepoAuthStub) ListUsers() ([]entity.User, error) { return nil, nil }
 func (r *userRepoAuthStub) ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
 	return nil, 0, nil
 }

@@ -10,7 +10,7 @@ type CompanyEntrySubmission struct {
 	ContactName      string     `gorm:"type:varchar(255);not null;default:''" json:"contact_name"`
 	PrivacyConsentAt time.Time  `gorm:"not null" json:"privacy_consent_at"`
 	SourceIP         string     `gorm:"type:varchar(64);not null;default:''" json:"source_ip"`
-	Status           string     `gorm:"type:varchar(32);not null;default:'submitted'" json:"status"` // submitted, claimed, rejected
+	Status           string     `gorm:"type:varchar(32);not null;default:'submitted'" json:"status"`     // submitted, claimed, rejected
 	EmailStatus      string     `gorm:"type:varchar(32);not null;default:'pending'" json:"email_status"` // pending, sent, failed
 	EmailSentAt      *time.Time `json:"email_sent_at,omitempty"`
 	EmailLastError   string     `gorm:"type:text" json:"email_last_error,omitempty"`

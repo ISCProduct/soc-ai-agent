@@ -12,6 +12,11 @@ on:
       - release
       - main
 
+# 本ワークフローはチェックアウトとテスト実行のみで、リポジトリへの書き込みを行わない。
+# 既定の GITHUB_TOKEN 権限を継承せず、最小権限を明示する。
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
@@ -39,8 +44,26 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      # test/ 配下(69ファイル/672テスト)がCI対象外だったため、
+      # Responses API移行でモックが腐っていたことに長期間気づけなかった (#1132)
+      #
+      # -timeout はハング検出が目的であり性能予算ではない。bcrypt(cost=12)を使う
+      # ログイン系テストは -race 下で重く、60s ではランナーの状態次第で
+      # 偽の失敗になりうるため 300s へ引き上げる。
       - name: Run tests
-        run: go test ./internal/... ./migrations/... -v -race -timeout 60s
+        run: go test ./internal/... ./migrations/... ./test/... -v -race -timeout 300s
+
+      - name: Format check
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt が適用されていないファイルがあります:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
 
       - name: Build check
         run: go build ./...
@@ -50,35 +73,40 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
-  audit-frontend:
-    name: Frontend Security Audit
+  # 旧 audit-frontend (npm audit) の置き換え (#1132)。
+  #
+  # npm audit は registry.npmjs.org の audit API に依存しており、同APIが停止すると
+  # CI が丸ごと落ちる。実際に 2026-09-04 に無応答(45秒でHTTP 000)→503 となり、
+  # 通常のレジストリは正常なのに監査だけが7分待たされた末に失敗した。
+  # pnpm では同エンドポイントの廃止も報告されており、恒久的に不安定とみなす。
+  #
+  # GitHub Advisory DB を参照する dependency-review-action へ移行する。
+  # 外部レジストリのAPIに依存せず、frontend(npm)だけでなく Backend(Go)・rag(pip) の
+  # 依存も一度にカバーできる。publicリポジトリのため GitHub Advanced Security は不要。
+  #
+  # 注意: 本アクションはPRの差分に対して「新規に持ち込まれた」脆弱性を検出する。
+  # 既存の脆弱性の検知は Dependabot alerts (有効済み) が担当する。
+  dependency-review:
+    name: Dependency Review
     runs-on: ubuntu-latest
     timeout-minutes: 5
-
-    defaults:
-      run:
-        working-directory: ./frontend
+    # base/head の比較を行うアクションのため pull_request でのみ動作する
+    if: github.event_name == 'pull_request'
 
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
+      # 本アクションは浮動タグ(v5等)を公開していないため、完全バージョンで指定する
+      - name: Dependency Review (high severity)
+        uses: actions/dependency-review-action@v5.0.0
         with:
-          node-version-file: ./frontend/.nvmrc
-          cache: npm
-          cache-dependency-path: ./frontend/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: npm audit (high severity)
-        run: npm audit --audit-level=high
+          fail-on-severity: high
 
   test-frontend-unit:
     name: Frontend Unit Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # audit-frontend と同じ理由で 5分では不足する
+    timeout-minutes: 10
 
     defaults:
       run:

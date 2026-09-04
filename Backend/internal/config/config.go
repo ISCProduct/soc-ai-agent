@@ -9,17 +9,18 @@ import (
 )
 
 type Config struct {
-	DBUser           string
-	DBPass           string
-	DBHost           string
-	DBPort           string
-	DBName           string
-	ServerPort       string
-	GBizInfoBaseURL  string
-	GBizInfoToken    string
-	AdminSecret      string
-	UserSecret       string
-	OAuthStateSecret string
+	DBUser            string
+	DBPass            string
+	DBHost            string
+	DBPort            string
+	DBName            string
+	ServerPort        string
+	GBizInfoBaseURL   string
+	GBizInfoToken     string
+	AdminSecret       string
+	UserSecret        string
+	CompanyUserSecret string
+	OAuthStateSecret  string
 }
 
 func LoadConfig() (*Config, error) {
@@ -35,19 +36,22 @@ func LoadConfig() (*Config, error) {
 
 	adminSecret := os.Getenv("ADMIN_SECRET")
 	userSecret := os.Getenv("USER_SECRET")
+	companyUserSecret := os.Getenv("COMPANY_USER_SECRET")
 	oauthStateSecret := os.Getenv("OAUTH_STATE_SECRET")
 
 	if env == "production" {
 		// 本番環境: シークレット未設定・プレースホルダーのまま起動禁止
 		placeholders := map[string]string{
-			"ADMIN_SECRET":      "change-me-admin-secret",
-			"USER_SECRET":       "change-me-user-secret",
-			"OAUTH_STATE_SECRET": "change-me-oauth-state-secret",
+			"ADMIN_SECRET":        "change-me-admin-secret",
+			"USER_SECRET":         "change-me-user-secret",
+			"COMPANY_USER_SECRET": "change-me-company-user-secret",
+			"OAUTH_STATE_SECRET":  "change-me-oauth-state-secret",
 		}
 		vals := map[string]string{
-			"ADMIN_SECRET":      adminSecret,
-			"USER_SECRET":       userSecret,
-			"OAUTH_STATE_SECRET": oauthStateSecret,
+			"ADMIN_SECRET":        adminSecret,
+			"USER_SECRET":         userSecret,
+			"COMPANY_USER_SECRET": companyUserSecret,
+			"OAUTH_STATE_SECRET":  oauthStateSecret,
 		}
 		for key, val := range vals {
 			if val == "" || val == placeholders[key] {
@@ -61,23 +65,27 @@ func LoadConfig() (*Config, error) {
 		if userSecret == "" {
 			log.Println("WARNING: USER_SECRET が設定されていません。ユーザー認証が利用できません。本番環境では必ず設定してください。")
 		}
+		if companyUserSecret == "" {
+			log.Println("WARNING: COMPANY_USER_SECRET が設定されていません。企業ポータル認証が利用できません。本番環境では必ず設定してください。")
+		}
 		if oauthStateSecret == "" {
 			log.Fatal("OAUTH_STATE_SECRET が設定されていません。OAuth CSRF 対策が機能しないため起動を中止します。.env に OAUTH_STATE_SECRET を設定してください。")
 		}
 	}
 
 	cfg := &Config{
-		DBUser:           os.Getenv("DB_USER"),
-		DBPass:           os.Getenv("DB_PASSWORD"),
-		DBHost:           os.Getenv("DB_HOST"),
-		DBPort:           os.Getenv("DB_PORT"),
-		DBName:           os.Getenv("DB_NAME"),
-		ServerPort:       get("SERVER_PORT", "8080"),
-		GBizInfoBaseURL:  get("GBIZINFO_BASE_URL", ""),
-		GBizInfoToken:    getFirst("GBIZINFO_API_KEY", "GBIZINFO_API_TOKEN"),
-		AdminSecret:      adminSecret,
-		UserSecret:       userSecret,
-		OAuthStateSecret: oauthStateSecret,
+		DBUser:            os.Getenv("DB_USER"),
+		DBPass:            os.Getenv("DB_PASSWORD"),
+		DBHost:            os.Getenv("DB_HOST"),
+		DBPort:            os.Getenv("DB_PORT"),
+		DBName:            os.Getenv("DB_NAME"),
+		ServerPort:        get("SERVER_PORT", "8080"),
+		GBizInfoBaseURL:   get("GBIZINFO_BASE_URL", ""),
+		GBizInfoToken:     getFirst("GBIZINFO_API_KEY", "GBIZINFO_API_TOKEN"),
+		AdminSecret:       adminSecret,
+		UserSecret:        userSecret,
+		CompanyUserSecret: companyUserSecret,
+		OAuthStateSecret:  oauthStateSecret,
 	}
 
 	// 必須値チェック

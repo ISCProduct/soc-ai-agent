@@ -525,3 +525,27 @@ func (s *EmailService) SendCompanyEntryThankYouAndInvite(email, companyName, inv
 	return s.sendHTML([]string{email}, "【AI就活エージェント】企業情報のご登録ありがとうございます", body)
 }
 
+// SendCompanyUserInvite は企業ポータル招待メールを送る（#1091）。
+func (s *EmailService) SendCompanyUserInvite(email, companyName, inviteToken string) error {
+	appURL := os.Getenv("FRONTEND_URL")
+	if appURL == "" {
+		appURL = "http://localhost:3000"
+	}
+	companyName = strings.TrimSpace(companyName)
+	if companyName == "" {
+		companyName = "貴社"
+	}
+	setupURL := appURL + "/company-portal/setup?token=" + inviteToken
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="ja"><head><meta charset="UTF-8"><title>企業ポータルへのご招待</title></head>
+<body style="font-family:sans-serif;background:#f5f5f5;padding:20px;">
+<div style="max-width:560px;margin:0 auto;background:#fff;border-radius:8px;padding:32px;">
+<h2 style="color:#1976D2;">企業ポータルへのご招待</h2>
+<p>%s の採用担当者として、AI就活エージェント企業ポータルへ招待されました。</p>
+<p>以下のリンクからパスワードを設定し、ログインしてください。</p>
+<a href="%s" style="display:inline-block;background:#1976D2;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:16px 0;">アカウントを有効化する</a>
+<p style="color:#888;font-size:12px;">このリンクは24時間有効です。</p>
+</div>
+</body></html>`, companyName, setupURL)
+	return s.sendHTML([]string{email}, "【AI就活エージェント】企業ポータルへのご招待", body)
+}

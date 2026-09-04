@@ -55,23 +55,23 @@ type companyEntryGraduate struct {
 }
 
 type companyEntryRequest struct {
-	Name             string `json:"name"`
-	Description      string `json:"description"`
-	Industry         string `json:"industry"`
-	Location         string `json:"location"`
-	WebsiteURL       string `json:"website_url"`
-	LogoURL          string `json:"logo_url"`
-	CorporateNumber  string `json:"corporate_number"`
-	EmployeeCount    int    `json:"employee_count"`
-	FoundedYear      int    `json:"founded_year"`
-	AverageAge       float64 `json:"average_age"`
-	FemaleRatio      float64 `json:"female_ratio"`
-	Culture          string `json:"culture"`
-	WorkStyle        string `json:"work_style"`
-	WelfareDetails   string `json:"welfare_details"`
-	TechStack        string `json:"tech_stack"`
-	DevelopmentStyle string `json:"development_style"`
-	MainBusiness     string `json:"main_business"`
+	Name             string                     `json:"name"`
+	Description      string                     `json:"description"`
+	Industry         string                     `json:"industry"`
+	Location         string                     `json:"location"`
+	WebsiteURL       string                     `json:"website_url"`
+	LogoURL          string                     `json:"logo_url"`
+	CorporateNumber  string                     `json:"corporate_number"`
+	EmployeeCount    int                        `json:"employee_count"`
+	FoundedYear      int                        `json:"founded_year"`
+	AverageAge       float64                    `json:"average_age"`
+	FemaleRatio      float64                    `json:"female_ratio"`
+	Culture          string                     `json:"culture"`
+	WorkStyle        string                     `json:"work_style"`
+	WelfareDetails   string                     `json:"welfare_details"`
+	TechStack        string                     `json:"tech_stack"`
+	DevelopmentStyle string                     `json:"development_style"`
+	MainBusiness     string                     `json:"main_business"`
 	JobPositions     []companyEntryJobPosition  `json:"job_positions"`
 	WeightProfile    *companyEntryWeightProfile `json:"weight_profile"`
 	Graduates        []companyEntryGraduate     `json:"graduates"`

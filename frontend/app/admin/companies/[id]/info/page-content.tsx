@@ -18,6 +18,7 @@ import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { CompanyAspectTabs } from '@/components/admin/CompanyAspectTabs'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { applyInfoPayload, WORK_STYLE_OPTIONS } from '@/lib/admin-company-form'
+import { CompanyUsersPanel } from '@/components/admin/CompanyUsersPanel'
 
 export default function PageContent() {
   const params = useParams()
@@ -467,6 +468,7 @@ export default function PageContent() {
           手入力のみ保存（メタデータ更新なし）
         </Button>
       </Stack>
+      <CompanyUsersPanel companyId={id} />
     </AdminFormContainer>
   )
 }

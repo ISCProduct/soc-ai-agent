@@ -8,7 +8,7 @@ locals {
   backend_domain  = "api.${var.domain_name}"
 
   backend_secret_arns = compact(concat(
-    [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn, aws_secretsmanager_secret.email.arn, aws_secretsmanager_secret.admin.arn, aws_secretsmanager_secret.openai.arn],
+    [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn, aws_secretsmanager_secret.email.arn, aws_secretsmanager_secret.admin.arn, aws_secretsmanager_secret.openai.arn, aws_secretsmanager_secret.rag_internal.arn],
     var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
     var.additional_secret_arns
   ))
@@ -82,6 +82,12 @@ locals {
       {
         name      = "TOKEN_ENCRYPTION_KEY"
         valueFrom = "${aws_secretsmanager_secret.admin.arn}:token_encryption_key::"
+      }
+    ],
+    [
+      {
+        name      = "RAG_INTERNAL_TOKEN"
+        valueFrom = "${aws_secretsmanager_secret.rag_internal.arn}:rag_internal_token::"
       }
     ]
   )
@@ -245,6 +251,199 @@ resource "aws_ecs_cluster_capacity_providers" "this" {
   }
 }
 
+# rag-reviewはALBで外部公開せず、backend/chromaからのみ内部で到達できればよいため、
+# VPC内限定のPrivate DNS Namespace(Cloud Map)でサービスディスカバリする。
+resource "aws_service_discovery_private_dns_namespace" "internal" {
+  name = "internal.${var.project_name}.local"
+  vpc  = module.network.vpc_id
+  tags = local.tags
+}
+
+resource "aws_service_discovery_service" "rag_review" {
+  name = "rag-review"
+
+  dns_config {
+    namespace_id = aws_service_discovery_private_dns_namespace.internal.id
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+    routing_policy = "MULTIVALUE"
+  }
+
+  health_check_custom_config {
+    failure_threshold = 1
+  }
+
+  tags = local.tags
+}
+
+resource "aws_service_discovery_service" "chroma" {
+  name = "chroma"
+
+  dns_config {
+    namespace_id = aws_service_discovery_private_dns_namespace.internal.id
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+    routing_policy = "MULTIVALUE"
+  }
+
+  health_check_custom_config {
+    failure_threshold = 1
+  }
+
+  tags = local.tags
+}
+
+# 最小権限の1ホップ許可チェーン: fargate(backend/frontend) -> rag-review -> chroma -> EFS。
+# rag-review/chroma/EFSはALBで公開せず、それぞれ直前のホップからのみ到達可能にする。
+resource "aws_security_group" "rag_review" {
+  name_prefix = "${var.project_name}-rag-review-"
+  description = "Managed by Terraform"
+  vpc_id      = module.network.vpc_id
+
+  ingress {
+    from_port       = 9000
+    to_port         = 9000
+    protocol        = "tcp"
+    security_groups = [module.network.fargate_security_group_id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.tags, {
+    Name = "${var.project_name}-rag-review-sg"
+  })
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_security_group" "chroma_fargate" {
+  name_prefix = "${var.project_name}-chroma-"
+  description = "Managed by Terraform"
+  vpc_id      = module.network.vpc_id
+
+  ingress {
+    from_port       = 8000
+    to_port         = 8000
+    protocol        = "tcp"
+    security_groups = [aws_security_group.rag_review.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.tags, {
+    Name = "${var.project_name}-chroma-sg"
+  })
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_security_group" "efs_chroma" {
+  name_prefix = "${var.project_name}-efs-chroma-"
+  description = "Managed by Terraform"
+  vpc_id      = module.network.vpc_id
+
+  ingress {
+    from_port       = 2049
+    to_port         = 2049
+    protocol        = "tcp"
+    security_groups = [aws_security_group.chroma_fargate.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.tags, {
+    Name = "${var.project_name}-efs-chroma-sg"
+  })
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# chroma(ベクトルDB)は独立したECS Fargateサービスとして動かす。Fargateタスクの
+# ローカルストレージはタスク再起動で消えるため、EFSでエンベディングデータを永続化する。
+resource "aws_efs_file_system" "chroma" {
+  encrypted        = true
+  throughput_mode  = "bursting"
+  performance_mode = "generalPurpose"
+
+  tags = merge(local.tags, {
+    Name = "${var.project_name}-chroma"
+  })
+}
+
+resource "aws_efs_mount_target" "chroma" {
+  count = length(module.network.public_subnet_ids)
+
+  file_system_id  = aws_efs_file_system.chroma.id
+  subnet_id       = module.network.public_subnet_ids[count.index]
+  security_groups = [aws_security_group.efs_chroma.id]
+}
+
+resource "aws_efs_access_point" "chroma" {
+  file_system_id = aws_efs_file_system.chroma.id
+
+  posix_user {
+    uid = 0
+    gid = 0
+  }
+
+  root_directory {
+    path = "/chroma-data"
+    creation_info {
+      owner_uid   = 0
+      owner_gid   = 0
+      permissions = "0755"
+    }
+  }
+
+  tags = merge(local.tags, {
+    Name = "${var.project_name}-chroma"
+  })
+}
+
+# rag-reviewサービス間の内部認証トークン(#1091台のRAGインフラ初回構築で導入)。
+# Backend/RAGとも RAG_INTERNAL_TOKEN が一致しないとRAG側がリクエストを拒否する(fail-closed)。
+resource "random_password" "rag_internal_token" {
+  length  = 48
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "rag_internal" {
+  name = "${var.project_name}/rag-internal"
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "rag_internal" {
+  secret_id = aws_secretsmanager_secret.rag_internal.id
+  secret_string = jsonencode({
+    rag_internal_token = random_password.rag_internal_token.result
+  })
+}
+
 # --- ドメイン紐付け（既存 Route53 ホストゾーンを使用） ---
 data "aws_route53_zone" "selected" {
   name = var.domain_name
@@ -263,6 +462,8 @@ module "alb" {
   frontend_target_port = 3000
   backend_target_port  = 8080
   target_type          = "ip"
+  # 本番反映の切り替え待機を短縮する(デプロイ頻度が高いため #運用実績)
+  deregistration_delay = 10
   # 学園マルチテナント(<学園slug>.shukatsu-ai.jp)とadmin.shukatsu-ai.jp用のワイルドカードSAN
   additional_san_domains = ["*.${var.domain_name}"]
   tags                   = local.tags
@@ -289,14 +490,14 @@ module "backend" {
   secret_arns       = local.backend_secret_arns
   secrets           = local.backend_secrets
   environment = {
-    APP_ENV                       = "production"
-    AWS_REGION                    = var.region
-    AWS_S3_BUCKET                 = module.s3.bucket_id
-    EMAIL_PROVIDER                = "resend"
-    EMAIL_FROM                    = "noreply@shukatsu-ai.jp"
-    OPENAI_WEB_SEARCH_MODEL       = "gpt-4o-mini"
-    OPENAI_COMPANY_SEARCH_MODEL   = "gpt-4o-mini"
-    OPENAI_HINTS_MODEL            = "gpt-4o-mini"
+    APP_ENV                     = "production"
+    AWS_REGION                  = var.region
+    AWS_S3_BUCKET               = module.s3.bucket_id
+    EMAIL_PROVIDER              = "resend"
+    EMAIL_FROM                  = "noreply@shukatsu-ai.jp"
+    OPENAI_WEB_SEARCH_MODEL     = "gpt-4o-mini"
+    OPENAI_COMPANY_SEARCH_MODEL = "gpt-4o-mini"
+    OPENAI_HINTS_MODEL          = "gpt-4o-mini"
     # 未設定だとOAuthコールバックURLがlocalhost:8080にフォールバックし、
     # 本番でOAuthログインが機能しなくなる(実際に発生した障害)。
     BASE_URL = "https://${local.backend_domain}"
@@ -306,6 +507,8 @@ module "backend" {
     # 同一タスク内のredisサイドカーへlocalhost経由で接続(awsvpcモードはコンテナ間で
     # ネットワーク名前空間を共有するため)
     REDIS_URL = "redis://localhost:6379/0"
+    # Cloud Map(Service Discovery)経由でrag-reviewタスクへ到達する
+    RAG_REVIEW_URL = "http://rag-review.${aws_service_discovery_private_dns_namespace.internal.name}:9000"
   }
   extra_container_definitions = [
     {
@@ -353,7 +556,167 @@ module "frontend" {
   tags = local.tags
 }
 
+module "rag_review" {
+  source = "../../modules/ecs_service_fargate"
+
+  project_name                   = var.project_name
+  service_name                   = "rag-review"
+  cluster_id                     = aws_ecs_cluster.this.id
+  subnet_ids                     = module.network.public_subnet_ids
+  security_group_id              = aws_security_group.rag_review.id
+  assign_public_ip               = true
+  container_name                 = "rag-review"
+  container_image                = var.rag_review_image
+  container_port                 = 9000
+  cpu                            = var.rag_review_cpu
+  memory                         = var.rag_review_memory
+  desired_count                  = var.rag_review_desired_count
+  service_discovery_registry_arn = aws_service_discovery_service.rag_review.arn
+  enable_execute_command         = true
+  region                         = var.region
+  s3_bucket_arn                  = module.s3.bucket_arn
+  secret_arns                    = [aws_secretsmanager_secret.openai.arn, aws_secretsmanager_secret.rag_internal.arn]
+  secrets = [
+    {
+      name      = "OPENAI_API_KEY"
+      valueFrom = var.openai_api_key != "" ? "${aws_secretsmanager_secret.openai.arn}:openai_api_key::" : var.openai_secret_arn
+    },
+    {
+      name      = "RAG_INTERNAL_TOKEN"
+      valueFrom = "${aws_secretsmanager_secret.rag_internal.arn}:rag_internal_token::"
+    }
+  ]
+  environment = {
+    OPENAI_EMBEDDING_MODEL   = "text-embedding-3-small"
+    OPENAI_HINTS_MODEL       = "gpt-4o-mini"
+    OPENAI_HINTS_PARSE_MODEL = "gpt-4o"
+    # chromaは独立サービス。Cloud Map経由で名前解決する
+    CHROMA_HOST = "chroma.${aws_service_discovery_private_dns_namespace.internal.name}"
+    CHROMA_PORT = "8000"
+  }
+  container_health_check = {
+    command      = ["CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:9000/healthz',timeout=3).status==200 else 1)\""]
+    interval     = 30
+    timeout      = 5
+    retries      = 3
+    start_period = 30
+  }
+  tags = local.tags
+}
+
+module "chroma" {
+  source = "../../modules/ecs_service_fargate"
+
+  project_name                   = var.project_name
+  service_name                   = "chroma"
+  cluster_id                     = aws_ecs_cluster.this.id
+  subnet_ids                     = module.network.public_subnet_ids
+  security_group_id              = aws_security_group.chroma_fargate.id
+  assign_public_ip               = true
+  container_name                 = "chroma"
+  container_image                = "chromadb/chroma:0.6.3"
+  container_port                 = 8000
+  cpu                            = 512
+  memory                         = 1024
+  desired_count                  = var.rag_review_desired_count
+  service_discovery_registry_arn = aws_service_discovery_service.chroma.arn
+  enable_execute_command         = true
+  region                         = var.region
+  environment = {
+    IS_PERSISTENT        = "TRUE"
+    ANONYMIZED_TELEMETRY = "FALSE"
+  }
+  container_health_check = {
+    command      = ["CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/heartbeat',timeout=3).status==200 else 1)\""]
+    interval     = 30
+    timeout      = 5
+    retries      = 3
+    start_period = 30
+  }
+  efs_volumes = [
+    {
+      name            = "chroma-data"
+      file_system_id  = aws_efs_file_system.chroma.id
+      file_system_arn = aws_efs_file_system.chroma.arn
+      access_point_id = aws_efs_access_point.chroma.id
+    }
+  ]
+  container_mount_points = [
+    {
+      sourceVolume  = "chroma-data"
+      containerPath = "/chroma/chroma"
+      readOnly      = false
+    }
+  ]
+  tags = local.tags
+
+  depends_on = [aws_efs_mount_target.chroma]
+}
+
+# backend/frontendのCPU使用率に応じたオートスケーリング(0〜2タスク)。
+# 本番は既定停止(desired_count=0)方針のため、min_capacityも0にしておかないと
+# オートスケーリングが1へ引き戻してしまう(terraform.tfvarsの運用コメント参照)。
+resource "aws_appautoscaling_target" "backend" {
+  max_capacity       = 2
+  min_capacity       = var.backend_desired_count
+  resource_id        = "service/${var.project_name}/backend"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+
+  depends_on = [module.backend]
+}
+
+resource "aws_appautoscaling_policy" "backend_cpu" {
+  name               = "${var.project_name}-backend-cpu"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.backend.resource_id
+  scalable_dimension = aws_appautoscaling_target.backend.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.backend.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = 70
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
+  }
+}
+
+resource "aws_appautoscaling_target" "frontend" {
+  max_capacity       = 2
+  min_capacity       = var.frontend_desired_count
+  resource_id        = "service/${var.project_name}/frontend"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+
+  depends_on = [module.frontend]
+}
+
+resource "aws_appautoscaling_policy" "frontend_cpu" {
+  name               = "${var.project_name}-frontend-cpu"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.frontend.resource_id
+  scalable_dimension = aws_appautoscaling_target.frontend.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.frontend.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = 70
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
+  }
+}
+
+# frontend(学園マルチテナントサブドメイン含む)は常時CloudFrontを経由させ、
+# ALBが500/502/503/504を返す場合(意図的な停止desired_count=0を含む)は
+# S3のOGP付き静的ページへフェイルオーバーする(enable_error_fallback)。
+# backend(API)はJSONを返す前提のためHTML差し替えは不適切であり対象外、
+# 引き続きALB直接エイリアスのまま。
 resource "aws_route53_record" "frontend" {
+  count   = var.enable_error_fallback ? 0 : 1
   zone_id = data.aws_route53_zone.selected.zone_id
   name    = local.frontend_domain
   type    = "A"
@@ -365,9 +728,10 @@ resource "aws_route53_record" "frontend" {
   }
 }
 
-resource "aws_route53_record" "backend" {
+resource "aws_route53_record" "wildcard" {
+  count   = var.enable_error_fallback ? 0 : 1
   zone_id = data.aws_route53_zone.selected.zone_id
-  name    = local.backend_domain
+  name    = "*.${var.domain_name}"
   type    = "A"
 
   alias {
@@ -377,11 +741,55 @@ resource "aws_route53_record" "backend" {
   }
 }
 
+module "cloudfront_app_proxy" {
+  count  = var.enable_error_fallback ? 1 : 0
+  source = "../../modules/cloudfront_app_proxy"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  project_name              = var.project_name
+  env                       = "production"
+  domain_name               = local.frontend_domain
+  subject_alternative_names = ["*.${var.domain_name}"]
+  aliases                   = [local.frontend_domain, "*.${var.domain_name}"]
+  route53_zone_id           = data.aws_route53_zone.selected.zone_id
+  alb_dns_name              = module.alb.alb_dns_name
+  service_unavailable_html  = file("${path.module}/../../../static/service-unavailable.html")
+  tags                      = local.tags
+}
+
+resource "aws_route53_record" "frontend_cloudfront" {
+  count   = var.enable_error_fallback ? 1 : 0
+  zone_id = data.aws_route53_zone.selected.zone_id
+  name    = local.frontend_domain
+  type    = "A"
+
+  alias {
+    name                   = module.cloudfront_app_proxy[0].cloudfront_domain_name
+    zone_id                = module.cloudfront_app_proxy[0].cloudfront_hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
 # 学園マルチテナント(<学園slug>.shukatsu-ai.jp)とadmin.shukatsu-ai.jp用のワイルドカードDNS。
-# デフォルトアクション(frontendへforward)がそのまま使われるため、ALB側のルーティング追加は不要。
-resource "aws_route53_record" "wildcard" {
+resource "aws_route53_record" "wildcard_cloudfront" {
+  count   = var.enable_error_fallback ? 1 : 0
   zone_id = data.aws_route53_zone.selected.zone_id
   name    = "*.${var.domain_name}"
+  type    = "A"
+
+  alias {
+    name                   = module.cloudfront_app_proxy[0].cloudfront_domain_name
+    zone_id                = module.cloudfront_app_proxy[0].cloudfront_hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "backend" {
+  zone_id = data.aws_route53_zone.selected.zone_id
+  name    = local.backend_domain
   type    = "A"
 
   alias {
