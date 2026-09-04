@@ -76,7 +76,9 @@ jobs:
   audit-frontend:
     name: Frontend Security Audit
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 3ジョブが同時に npm ci を実行するため競合し、npm ci だけで最大3分33秒かかる実測。
+    # 5分ではジョブ全体の予算を npm ci が食い潰し、後続ステップが打ち切られていた (#1132)
+    timeout-minutes: 10
 
     defaults:
       run:
@@ -101,7 +103,8 @@ jobs:
   test-frontend-unit:
     name: Frontend Unit Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # audit-frontend と同じ理由で 5分では不足する
+    timeout-minutes: 10
 
     defaults:
       run:
