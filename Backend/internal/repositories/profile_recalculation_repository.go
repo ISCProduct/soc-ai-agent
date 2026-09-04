@@ -20,18 +20,18 @@ func NewProfileRecalculationRepository(db *gorm.DB) *ProfileRecalculationReposit
 
 // PassedApplicantScores 通過実績の集計結果
 type PassedApplicantScores struct {
-	CompanyID          uint
-	SampleCount        int
-	AvgTechnical       float64
-	AvgTeamwork        float64
-	AvgLeadership      float64
-	AvgCreativity      float64
-	AvgStability       float64
-	AvgGrowth          float64
-	AvgWorkLife        float64
-	AvgChallenge       float64
-	AvgDetail          float64
-	AvgCommunication   float64
+	CompanyID        uint
+	SampleCount      int
+	AvgTechnical     float64
+	AvgTeamwork      float64
+	AvgLeadership    float64
+	AvgCreativity    float64
+	AvgStability     float64
+	AvgGrowth        float64
+	AvgWorkLife      float64
+	AvgChallenge     float64
+	AvgDetail        float64
+	AvgCommunication float64
 }
 
 // GetPassedApplicantScores 企業ごとの通過実績スコアを集計

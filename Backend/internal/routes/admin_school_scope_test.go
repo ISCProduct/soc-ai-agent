@@ -19,13 +19,15 @@ type fakeSchoolRepo struct {
 	assigned map[uint][]models.School
 }
 
-func (f *fakeSchoolRepo) Create(*models.School) error                     { return nil }
-func (f *fakeSchoolRepo) Update(*models.School) error                     { return nil }
-func (f *fakeSchoolRepo) FindByID(id uint) (*models.School, error)        { return &models.School{ID: id}, nil }
-func (f *fakeSchoolRepo) FindByName(string) (*models.School, error)       { return nil, nil }
-func (f *fakeSchoolRepo) List(int, int) ([]models.School, int64, error)   { return nil, 0, nil }
-func (f *fakeSchoolRepo) AddMember(*models.AdminSchoolMembership) error   { return nil }
-func (f *fakeSchoolRepo) RemoveMember(uint, uint) error                   { return nil }
+func (f *fakeSchoolRepo) Create(*models.School) error { return nil }
+func (f *fakeSchoolRepo) Update(*models.School) error { return nil }
+func (f *fakeSchoolRepo) FindByID(id uint) (*models.School, error) {
+	return &models.School{ID: id}, nil
+}
+func (f *fakeSchoolRepo) FindByName(string) (*models.School, error)     { return nil, nil }
+func (f *fakeSchoolRepo) List(int, int) ([]models.School, int64, error) { return nil, 0, nil }
+func (f *fakeSchoolRepo) AddMember(*models.AdminSchoolMembership) error { return nil }
+func (f *fakeSchoolRepo) RemoveMember(uint, uint) error                 { return nil }
 func (f *fakeSchoolRepo) ListSchoolsForAdmin(userID uint) ([]models.School, error) {
 	return f.assigned[userID], nil
 }

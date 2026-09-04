@@ -85,4 +85,3 @@ func (r CompanyRelation) InvolvesCompany(id uint) bool {
 func IsCapitalRelationType(relationType string) bool {
 	return strings.HasPrefix(relationType, "capital_")
 }
-

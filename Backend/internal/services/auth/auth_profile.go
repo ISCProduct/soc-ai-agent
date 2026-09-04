@@ -2,6 +2,7 @@ package auth
 
 import (
 	"Backend/internal/config"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -70,6 +71,12 @@ func (s *AuthService) UpdateProfile(req UpdateProfileRequest) (*AuthResponse, er
 
 	if err := s.userRepo.UpdateUser(user); err != nil {
 		return nil, fmt.Errorf("failed to update user: %w", err)
+	}
+
+	// 資格情報はスカウト検索のベクトル化対象に含まれるため、
+	// 希望条件の保存だけでなくプロフィール更新でもインデックスを同期する (#1094)
+	if s.scoutIndexSyncer != nil {
+		s.scoutIndexSyncer.Sync(context.Background(), user.ID)
 	}
 
 	resp := &AuthResponse{
