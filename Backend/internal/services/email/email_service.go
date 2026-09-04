@@ -549,4 +549,3 @@ func (s *EmailService) SendCompanyUserInvite(email, companyName, inviteToken str
 </body></html>`, companyName, setupURL)
 	return s.sendHTML([]string{email}, "【AI就活エージェント】企業ポータルへのご招待", body)
 }
-

@@ -58,9 +58,12 @@ export default function CompanyPortalDashboardPage() {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             自社ID: {companyId}
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            スカウト送信や学生検索などの機能は今後追加予定です。
-          </Typography>
+          <Button
+            variant="contained"
+            onClick={() => router.push('/company-portal/students')}
+          >
+            学生を探す
+          </Button>
         </CardContent>
       </Card>
 

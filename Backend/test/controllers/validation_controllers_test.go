@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"Backend/internal/controllers"
-
 )
 
 // ---- ESReviewController ----
@@ -66,4 +65,3 @@ func TestCompanyRelationController_GetCompanyMarketInfo_InvalidID(t *testing.T) 
 	ctx.SetParamValues("abc")
 	assertStatus(t, controllers.NewCompanyRelationController(nil, nil).GetCompanyMarketInfo, ctx, http.StatusBadRequest)
 }
-

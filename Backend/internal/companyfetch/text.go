@@ -31,7 +31,6 @@ func init() {
 }
 
 const (
-
 	ConfidenceHigh   = "high"
 	ConfidenceMedium = "medium"
 	ConfidenceLow    = "low"

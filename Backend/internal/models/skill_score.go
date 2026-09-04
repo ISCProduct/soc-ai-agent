@@ -6,11 +6,11 @@ import "time"
 type SkillCategory string
 
 const (
-	SkillCategoryFrontend  SkillCategory = "Frontend"
-	SkillCategoryBackend   SkillCategory = "Backend"
-	SkillCategoryInfra     SkillCategory = "Infrastructure"
-	SkillCategoryDB        SkillCategory = "Database"
-	SkillCategoryOther     SkillCategory = "Other"
+	SkillCategoryFrontend SkillCategory = "Frontend"
+	SkillCategoryBackend  SkillCategory = "Backend"
+	SkillCategoryInfra    SkillCategory = "Infrastructure"
+	SkillCategoryDB       SkillCategory = "Database"
+	SkillCategoryOther    SkillCategory = "Other"
 )
 
 // SkillScore ユーザーのカテゴリ別スキルスコア
