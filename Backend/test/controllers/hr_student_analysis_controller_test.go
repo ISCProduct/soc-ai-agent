@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"Backend/internal/controllers"
-	hrsvc "Backend/internal/services/hr"
 	"Backend/internal/services/flywheel"
+	hrsvc "Backend/internal/services/hr"
 	"Backend/internal/services/shared"
 
 	"github.com/labstack/echo/v4"

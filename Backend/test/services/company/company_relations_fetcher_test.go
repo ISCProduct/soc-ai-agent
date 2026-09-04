@@ -2,8 +2,6 @@ package company_test
 
 import (
 	"context"
-	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -154,28 +152,24 @@ func TestCompanyRelationsFetcher_FetchAndSave_FillsNewRelatedCompanyDetails(t *t
 	relationsJSON := `{"subsidiaries":[{"name":"子会社A","ratio":100,"description":"完全子会社"}],"affiliates":[],"business_partners":[],"market_info":{"is_listed":false,"market_type":"unlisted","stock_code":""}}`
 
 	tests := []struct {
-		name              string
-		infoServerHandler http.HandlerFunc
-		wantChildUpdated  bool
+		name             string
+		infoServer       func(t *testing.T) *httptest.Server
+		wantChildUpdated bool
 	}{
 		{
 			name: "詳細取得に成功する場合",
-			infoServerHandler: func(w http.ResponseWriter, r *http.Request) {
-				_, _ = io.ReadAll(r.Body)
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"choices": []map[string]any{
-						{"message": map[string]any{"role": "assistant", "content": validCompanyInfoJSON()}},
-					},
-					"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 20},
-				})
+			infoServer: func(t *testing.T) *httptest.Server {
+				return makeChatCompletionsServer(t, validCompanyInfoJSON())
 			},
 			wantChildUpdated: true,
 		},
 		{
 			name: "詳細取得に失敗する場合でも関係の保存はブロックされない",
-			infoServerHandler: func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
+			// 404 は再試行対象外。500 にすると指数バックオフでテストが数秒待たされる。
+			infoServer: func(t *testing.T) *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusNotFound)
+				}))
 			},
 			wantChildUpdated: false,
 		},
@@ -185,7 +179,7 @@ func TestCompanyRelationsFetcher_FetchAndSave_FillsNewRelatedCompanyDetails(t *t
 		t.Run(tt.name, func(t *testing.T) {
 			relationsSrv := makeChatCompletionsServer(t, relationsJSON)
 			defer relationsSrv.Close()
-			infoSrv := httptest.NewServer(tt.infoServerHandler)
+			infoSrv := tt.infoServer(t)
 			defer infoSrv.Close()
 
 			repo := &mocks.CompanyRepositoryMock{}

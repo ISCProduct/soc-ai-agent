@@ -17,7 +17,7 @@ const (
 	TaskEmailPasswordReset  = "email:password_reset"
 	TaskInterviewReport     = "interview:report"
 
-	QueueDefault = "default"
+	QueueDefault  = "default"
 	QueueCritical = "critical"
 )
 
@@ -50,11 +50,11 @@ func (c *Client) Close() error {
 
 // EmailVerificationPayload は認証メールジョブのペイロード。
 type EmailVerificationPayload struct {
-	UserID  uint   `json:"user_id"`
-	Email   string `json:"email"`
-	Name    string `json:"name"`
-	Token   string `json:"token"`
-	AppURL  string `json:"app_url"`
+	UserID uint   `json:"user_id"`
+	Email  string `json:"email"`
+	Name   string `json:"name"`
+	Token  string `json:"token"`
+	AppURL string `json:"app_url"`
 }
 
 // EmailRegistrationPayload は仮登録メールジョブのペイロード。

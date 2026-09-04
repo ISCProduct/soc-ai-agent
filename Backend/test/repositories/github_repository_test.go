@@ -160,4 +160,3 @@ func TestReplaceRepositories_WithRepos(t *testing.T) {
 	require.NoError(t, err)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
-
