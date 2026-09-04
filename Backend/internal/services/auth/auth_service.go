@@ -59,6 +59,8 @@ func (s *AuthService) SetCompanyOwnershipClaimer(c CompanyOwnershipClaimer) {
 // 未設定の場合は同期を行わない（RAG未設定環境でもプロフィール更新は動作する）。
 func (s *AuthService) SetScoutIndexSyncer(syncer ScoutIndexSyncer) {
 	s.scoutIndexSyncer = syncer
+	// 退会時のベクトル削除にも同じ同期処理を使う（#1094）
+	s.rebuildDeletionService()
 }
 
 // SetDB はアカウント削除に使用する DB を設定する
@@ -85,6 +87,7 @@ func (s *AuthService) rebuildDeletionService() {
 		return
 	}
 	s.deletion = NewUserDeletionService(s.db, s.object, s.audit)
+	s.deletion.SetScoutIndexSyncer(s.scoutIndexSyncer)
 }
 
 // SetRefreshTokenService はリフレッシュトークン管理サービスを注入する (#616)

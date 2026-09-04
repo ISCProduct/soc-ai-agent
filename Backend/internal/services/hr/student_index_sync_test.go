@@ -16,7 +16,7 @@ type stubScoutProfiles struct {
 	textErr  error
 }
 
-func (s *stubScoutProfiles) GetScoutVisibility(uint) (bool, error) { return s.allow, s.allowErr }
+func (s *stubScoutProfiles) IsScoutVisible(uint) (bool, error)     { return s.allow, s.allowErr }
 func (s *stubScoutProfiles) ScoutProfileText(uint) (string, error) { return s.text, s.textErr }
 
 type stubIndexer struct {
