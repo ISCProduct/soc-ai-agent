@@ -10,10 +10,10 @@ var ErrStudentNotVisible = errors.New("student not visible")
 
 // StudentAnalysisResponse 企業向け学生分析プロファイル
 type StudentAnalysisResponse struct {
-	UserID            uint                           `json:"user_id"`
+	UserID            uint                            `json:"user_id"`
 	IntegratedProfile *flywheel.UserIntegratedProfile `json:"integrated_profile"`
-	ChatSummary       *ChatSummaryView               `json:"chat_summary,omitempty"`
-	InterviewReports  []InterviewReportView          `json:"interview_reports"`
+	ChatSummary       *ChatSummaryView                `json:"chat_summary,omitempty"`
+	InterviewReports  []InterviewReportView           `json:"interview_reports"`
 }
 
 // ChatSummaryView チャットセッションのLLM要約（企業公開用）

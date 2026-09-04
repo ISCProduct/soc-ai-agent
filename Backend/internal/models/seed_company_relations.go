@@ -103,7 +103,7 @@ var factBusinessRelations = []factBusinessRelationSpec{
 		fromCorpNum: "6010001008770", fromName: "三菱ＵＦＪ信託銀行株式会社",
 		toCorpNum: "8010001000016", toName: "三菱ＵＦＪニコス株式会社",
 		relationType: "business_partner",
-		note: "MUFGグループ内の金融サービス連携",
+		note:         "MUFGグループ内の金融サービス連携",
 	},
 }
 

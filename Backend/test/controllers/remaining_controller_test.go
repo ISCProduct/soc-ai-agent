@@ -276,4 +276,3 @@ func TestESRewriteController_Rewrite_InvalidBody(t *testing.T) {
 	rec := httptest.NewRecorder()
 	assertStatus(t, c.Rewrite, newCtx(req, rec), http.StatusBadRequest)
 }
-

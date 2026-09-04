@@ -20,8 +20,8 @@ func TestResponses_CachedTokensLogging(t *testing.T) {
 			resp := map[string]any{
 				"output_text": "hello",
 				"usage": map[string]any{
-					"input_tokens":  100,
-					"output_tokens": 10,
+					"input_tokens":          100,
+					"output_tokens":         10,
 					"prompt_tokens_details": map[string]int{"cached_tokens": 40},
 				},
 			}
@@ -57,8 +57,8 @@ func TestChatCompletion_CachedTokensLogging(t *testing.T) {
 					"message": map[string]string{"content": "hello"},
 				}},
 				"usage": map[string]any{
-					"prompt_tokens":     100,
-					"completion_tokens": 10,
+					"prompt_tokens":         100,
+					"completion_tokens":     10,
 					"prompt_tokens_details": map[string]int{"cached_tokens": 40},
 				},
 			}
