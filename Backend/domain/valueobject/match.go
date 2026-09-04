@@ -6,16 +6,16 @@ import "fmt"
 type WeightCategory string
 
 const (
-	CategoryTechnical      WeightCategory = "技術志向"
-	CategoryTeamwork       WeightCategory = "チームワーク志向"
-	CategoryLeadership     WeightCategory = "リーダーシップ志向"
-	CategoryCreativity     WeightCategory = "創造性志向"
-	CategoryStability      WeightCategory = "安定志向"
-	CategoryGrowth         WeightCategory = "成長志向"
-	CategoryWorkLife       WeightCategory = "ワークライフバランス"
-	CategoryChallenge      WeightCategory = "チャレンジ志向"
-	CategoryDetail         WeightCategory = "細部志向"
-	CategoryCommunication  WeightCategory = "コミュニケーション力"
+	CategoryTechnical     WeightCategory = "技術志向"
+	CategoryTeamwork      WeightCategory = "チームワーク志向"
+	CategoryLeadership    WeightCategory = "リーダーシップ志向"
+	CategoryCreativity    WeightCategory = "創造性志向"
+	CategoryStability     WeightCategory = "安定志向"
+	CategoryGrowth        WeightCategory = "成長志向"
+	CategoryWorkLife      WeightCategory = "ワークライフバランス"
+	CategoryChallenge     WeightCategory = "チャレンジ志向"
+	CategoryDetail        WeightCategory = "細部志向"
+	CategoryCommunication WeightCategory = "コミュニケーション力"
 )
 
 // AllWeightCategories 全カテゴリのリストを返す
@@ -36,10 +36,10 @@ func AllWeightCategories() []WeightCategory {
 
 // MatchScore ユーザーと企業のカテゴリ別マッチ度を表す値オブジェクト
 type MatchScore struct {
-	Category   WeightCategory
-	UserScore  float64 // ユーザースコア (0-100)
+	Category      WeightCategory
+	UserScore     float64 // ユーザースコア (0-100)
 	CompanyWeight float64 // 企業重視度 (0-100)
-	MatchDegree float64 // マッチ度 (0-100)
+	MatchDegree   float64 // マッチ度 (0-100)
 }
 
 // NewMatchScore カテゴリマッチ度を計算して生成する

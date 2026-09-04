@@ -165,6 +165,16 @@ export async function middleware(request: NextRequest) {
   if (refreshed) {
     setSessionCookies(response, refreshed.userId, refreshed.userToken, refreshed.refreshToken)
   }
+  // 企業ポータル側も同様に書き戻す。これが無いとリフレッシュトークンの
+  // ローテーション後に古い値がCookieへ残り、企業ユーザーがログアウトされる (#1091の取りこぼし)
+  if (companyRefreshed) {
+    setCompanySessionCookies(
+      response,
+      companyRefreshed.companyUserId,
+      companyRefreshed.companyUserToken,
+      companyRefreshed.companyRefreshToken,
+    )
+  }
 
   return response
 }

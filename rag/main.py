@@ -172,13 +172,14 @@ def log_openai_version() -> None:
 
 
 # ルーター登録
-from routers import company, es, health, resume, vector  # noqa: E402
+from routers import company, es, health, resume, student_search, vector  # noqa: E402
 
 app.include_router(health.router)
 app.include_router(resume.router)
 app.include_router(company.router)
 app.include_router(vector.router)
 app.include_router(es.router)
+app.include_router(student_search.router)
 
 # テスト互換: logging セットアップ別名
 _setup_logging = setup_logging

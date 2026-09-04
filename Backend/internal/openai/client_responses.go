@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"math/rand"
@@ -46,6 +47,27 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 	return cli.doResponses(ctx, payload)
 }
 
+// ResponsesAPIError は Responses API が 2xx 以外を返したときのエラー。
+// ステータスコードを保持することで、本文が空でもエラー内容が判別でき、
+// 429 / 5xx の再試行判定（isRetryableAPIErr）も機能する。
+type ResponsesAPIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *ResponsesAPIError) Error() string {
+	body := strings.TrimSpace(e.Body)
+	if body == "" {
+		return fmt.Sprintf("responses API がステータス %d を返しました（本文なし）", e.StatusCode)
+	}
+	return fmt.Sprintf("responses API がステータス %d を返しました: %s", e.StatusCode, body)
+}
+
+// Retryable は 429 / 5xx を再試行可能とみなす。
+func (e *ResponsesAPIError) Retryable() bool {
+	return e.StatusCode == http.StatusTooManyRequests || e.StatusCode >= 500
+}
+
 func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (string, error) {
 	if cli.apiKey == "" {
 		return "", errors.New("openai api key is not set")
@@ -75,7 +97,7 @@ func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (s
 		return "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", errors.New(string(respBody))
+		return "", &ResponsesAPIError{StatusCode: resp.StatusCode, Body: string(respBody)}
 	}
 
 	type responsesContent struct {
