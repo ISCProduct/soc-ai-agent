@@ -30,6 +30,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { authService, User } from '@/lib/auth'
 import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '@/lib/profile'
 import GitHubSkills from '@/components/github-skills'
+import { ScoutPreferencesCard } from '@/components/profile/ScoutPreferencesCard'
 import { PageLoading } from '@/components/common/PageLoading'
 import { StudentThemeToggle } from '@/components/student-theme-toggle'
 
@@ -459,6 +460,13 @@ function ProfilePageContent() {
           )}
         </Box>
       </Container>
+
+      {/* スカウト設定（希望条件・企業への公開同意）#1094。ゲストアカウントは非表示 */}
+      {!isGuest && (
+        <Container maxWidth="lg" sx={{ mb: 4 }}>
+          <ScoutPreferencesCard />
+        </Container>
+      )}
 
       {/* Googleカレンダー連携セクション */}
       {!isGuest && (
