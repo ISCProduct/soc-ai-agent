@@ -5,6 +5,7 @@ import (
 	"Backend/internal/services/email"
 	"Backend/internal/services/refreshtoken"
 	"Backend/internal/services/shared"
+	"context"
 	"log"
 
 	"gorm.io/gorm"
@@ -26,11 +27,18 @@ type AuthService struct {
 	jobs             shared.JobEnqueuer
 	ownershipClaimer CompanyOwnershipClaimer
 	schoolRepo       repository.SchoolRepository
+	scoutIndexSyncer ScoutIndexSyncer
 }
 
 // CompanyOwnershipClaimer は本登録時に企業クレームを行う（#754）
 type CompanyOwnershipClaimer interface {
 	ClaimOwnershipOnRegister(userID uint, companyID, submissionID *uint)
+}
+
+// ScoutIndexSyncer はプロフィール更新をスカウト検索インデックスへ反映する（#1094）。
+// 資格情報はベクトル化対象に含まれるため、プロフィール更新でも同期が必要。
+type ScoutIndexSyncer interface {
+	Sync(ctx context.Context, userID uint)
 }
 
 func NewAuthService(userRepo repository.UserRepository, pendingRepo repository.PendingRegistrationRepository, emailService *email.EmailService) *AuthService {
@@ -45,6 +53,12 @@ func (s *AuthService) SetJobEnqueuer(j shared.JobEnqueuer) {
 // SetCompanyOwnershipClaimer は企業クレーム処理を注入する
 func (s *AuthService) SetCompanyOwnershipClaimer(c CompanyOwnershipClaimer) {
 	s.ownershipClaimer = c
+}
+
+// SetScoutIndexSyncer はスカウト検索インデックスの同期処理を注入する（#1094）。
+// 未設定の場合は同期を行わない（RAG未設定環境でもプロフィール更新は動作する）。
+func (s *AuthService) SetScoutIndexSyncer(syncer ScoutIndexSyncer) {
+	s.scoutIndexSyncer = syncer
 }
 
 // SetDB はアカウント削除に使用する DB を設定する

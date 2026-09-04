@@ -5,10 +5,10 @@ import "testing"
 func TestIsDeveloperOnlyReleaseNote(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name   string
-		title  string
-		body   string
-		want   bool
+		name  string
+		title string
+		body  string
+		want  bool
 	}{
 		{name: "学生向け新機能は残す", title: "feat: 更新情報ページを追加", body: "学生が変更点を確認できる", want: false},
 		{name: "空の入力は残す", title: "", body: "", want: false},

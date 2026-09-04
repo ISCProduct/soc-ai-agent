@@ -47,6 +47,7 @@ func SetupCompanyAuthRoutes(
 	api *echo.Group,
 	authController *controllers.CompanyAuthController,
 	portalController *controllers.CompanyPortalController,
+	studentController *controllers.CompanyStudentController,
 	companySecret string,
 	users *repositories.CompanyUserRepository,
 ) {
@@ -61,4 +62,14 @@ func SetupCompanyAuthRoutes(
 
 	portal := api.Group("/company-portal", EchoCompanyAuth(companySecret, users))
 	portal.GET("/companies/:id", portalController.GetCompany)
+
+	// 学生検索・タグ管理 (#1094)。company_id はJWT由来のため、
+	// 他社データへ越境するクエリパラメータは受け付けない。
+	portal.GET("/students", studentController.List)
+	portal.POST("/students/semantic-search", studentController.SemanticSearch)
+	portal.GET("/students/:userID", studentController.Detail)
+	portal.POST("/students/:userID/tags", studentController.AddTag)
+	portal.DELETE("/students/:userID/tags/:tagID", studentController.RemoveTag)
+	portal.GET("/tags", studentController.ListTags)
+	portal.GET("/industries", studentController.Industries)
 }

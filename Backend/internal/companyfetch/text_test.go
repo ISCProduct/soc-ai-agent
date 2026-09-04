@@ -2,11 +2,11 @@ package companyfetch
 
 import (
 	"context"
-	"testing"
-	"time"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )

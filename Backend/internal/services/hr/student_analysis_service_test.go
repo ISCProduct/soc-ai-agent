@@ -7,6 +7,7 @@ import (
 	"Backend/internal/services/shared"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"
@@ -93,7 +94,7 @@ func TestStudentAnalysisService_GetAnalysis_Success(t *testing.T) {
 
 	svc := NewStudentAnalysisService(
 		db,
-		&stubUserRepo{user: &entity.User{ID: 5, AllowScoutVisibility: true}},
+		&stubUserRepo{user: &entity.User{ID: 5, AllowScoutVisibility: true, Role: "student"}},
 		&stubCrossFeature{profile: &flywheel.UserIntegratedProfile{UserID: 5}},
 		nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
 	)
@@ -132,4 +133,92 @@ func TestStudentAnalysisService_GetAnalysis_DBError(t *testing.T) {
 	_, err := svc.GetAnalysis(2, 10, 5)
 	assert.Error(t, err)
 	assert.False(t, errors.Is(err, shared.ErrForbidden))
+}
+
+// TestIsScoutVisible は企業へ公開してよい学生の条件を固定する。
+// 一覧検索(SQL)と詳細取得(Go)で条件が食い違うと認可が破れるため、
+// 退会済み・ゲスト・教員が公開同意していても公開されないことを明示的に検証する。
+func TestIsScoutVisible(t *testing.T) {
+	withdrawn := time.Now()
+	tests := []struct {
+		name string
+		user *entity.User
+		want bool
+	}{
+		{
+			name: "同意済みの学生は公開",
+			user: &entity.User{AllowScoutVisibility: true, Role: "student"},
+			want: true,
+		},
+		{
+			name: "未同意は非公開",
+			user: &entity.User{AllowScoutVisibility: false, Role: "student"},
+			want: false,
+		},
+		{
+			name: "退会済みは同意済みでも非公開",
+			user: &entity.User{AllowScoutVisibility: true, Role: "student", WithdrawnAt: &withdrawn},
+			want: false,
+		},
+		{
+			name: "ゲストは同意済みでも非公開",
+			user: &entity.User{AllowScoutVisibility: true, Role: "student", IsGuest: true},
+			want: false,
+		},
+		{
+			name: "教員は同意済みでも非公開",
+			user: &entity.User{AllowScoutVisibility: true, Role: "teacher"},
+			want: false,
+		},
+		{
+			name: "ロール未設定は非公開",
+			user: &entity.User{AllowScoutVisibility: true, Role: ""},
+			want: false,
+		},
+		{
+			name: "nilは非公開",
+			user: nil,
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsScoutVisible(tt.user))
+		})
+	}
+}
+
+// TestStudentAnalysisService_GetAnalysisForVisibleStudent_AppliesFullGuard は、
+// 企業ポータルの詳細取得が一覧検索と同じ公開条件を通ることを検証する。
+func TestStudentAnalysisService_GetAnalysisForVisibleStudent_AppliesFullGuard(t *testing.T) {
+	withdrawn := time.Now()
+	tests := []struct {
+		name    string
+		user    *entity.User
+		wantErr bool
+	}{
+		{name: "同意済みの学生は取得できる", user: &entity.User{ID: 5, AllowScoutVisibility: true, Role: "student"}},
+		{name: "退会済みはID直指定でも取得できない", user: &entity.User{ID: 5, AllowScoutVisibility: true, Role: "student", WithdrawnAt: &withdrawn}, wantErr: true},
+		{name: "ゲストはID直指定でも取得できない", user: &entity.User{ID: 5, AllowScoutVisibility: true, Role: "student", IsGuest: true}, wantErr: true},
+		{name: "教員はID直指定でも取得できない", user: &entity.User{ID: 5, AllowScoutVisibility: true, Role: "teacher"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, _ := newMockDB(t)
+			svc := NewStudentAnalysisService(
+				db,
+				&stubUserRepo{user: tt.user},
+				&stubCrossFeature{profile: &flywheel.UserIntegratedProfile{UserID: 5}},
+				nil, nil, stubInterviewSessions{}, stubInterviewReports{}, nil,
+			)
+			resp, err := svc.GetAnalysisForVisibleStudent(5)
+			if tt.wantErr {
+				assert.ErrorIs(t, err, ErrStudentNotVisible)
+				assert.Nil(t, resp)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, uint(5), resp.UserID)
+		})
+	}
 }
