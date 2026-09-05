@@ -97,7 +97,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 - specificity（具体性）: 具体的なエピソードや数値が含まれているか
 - ownership（主体性）: 「私が〜した」という自分起点の表現があるか
 - communication（コミュニケーション力）: 簡潔・明確に伝えられているか、聞き返しが少ないか
-- enthusiasm（積極性・熱意）: 志望動機や意欲が伝わっているか
+- enthusiasm（積極性・熱意）: 志望動機や意欲が伝わっているか。取り組みのきっかけや継続の姿勢も評価材料に含めてよい
 
 ## 出力フォーマット（このキーと型を厳守してください）
 {
@@ -108,7 +108,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
     "specificity": "具体性の根拠となった発言",
     "ownership": "主体性の根拠となった発言",
     "communication": "コミュニケーション力の根拠となった発言",
-    "enthusiasm": "積極性・熱意の根拠となった発言"
+    "enthusiasm": "積極性・熱意の根拠となった発言（きっかけや継続の姿勢を含めてよい）"
   },
   "strengths": ["強み1", "強み2", "強み3"],
   "improvements": ["改善点1", "改善点2", "改善点3"],

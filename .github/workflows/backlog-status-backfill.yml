@@ -1,0 +1,143 @@
+# 既に本番反映済みなのに Backlog のステータスが古いまま残っている課題を一括で進めるための
+# 手動実行ワークフロー (#1132 の調査で判明した滞留分の是正用)。
+#
+# 背景: pr-to-backlog.yml がプロモーションPR(develop→release, release→main)のコミットから
+# 関連課題のキーを辿る処理は後から追加されたため、それ以前にリリースされた課題は
+# 「ステージング環境反映」で止まったままになっている。本ワークフローはその積み残しを解消する。
+#
+# 既定はドライランで、実際に書き込むには dry_run=false を明示的に選ぶ必要がある。
+name: Backlog ステータス一括更新（滞留分の是正）
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_keys:
+        description: '対象の Backlog 課題キー（カンマ区切り。例: SOCAIAGENT-241,SOCAIAGENT-242）'
+        required: true
+        type: string
+      status_name:
+        description: '設定するステータス'
+        required: true
+        default: '完了'
+        type: choice
+        options:
+          - '完了'
+          - 'リリース待ち'
+          - 'ステージング環境反映'
+      dry_run:
+        description: 'ドライラン（true の間は Backlog へ書き込まない）'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Backlog ステータスを一括更新
+        env:
+          BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
+          BACKLOG_SPACE_ID: ${{ secrets.BACKLOG_SPACE_ID }}
+          BACKLOG_PROJECT_KEY: ${{ secrets.BACKLOG_PROJECT_KEY }}
+          BACKLOG_DOMAIN: ${{ secrets.BACKLOG_DOMAIN }}
+          ISSUE_KEYS: ${{ inputs.issue_keys }}
+          STATUS_NAME: ${{ inputs.status_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import sys
+          import urllib.parse
+          import urllib.request
+
+          API_KEY = (os.environ.get('BACKLOG_API_KEY') or '').strip()
+          SPACE_ID = (os.environ.get('BACKLOG_SPACE_ID') or '').strip()
+          PROJ_KEY = (os.environ.get('BACKLOG_PROJECT_KEY') or '').strip()
+          DOMAIN = (os.environ.get('BACKLOG_DOMAIN') or '').strip()
+          STATUS_NAME = (os.environ.get('STATUS_NAME') or '完了').strip()
+          DRY_RUN = (os.environ.get('DRY_RUN') or 'true').strip().lower() != 'false'
+
+          if not API_KEY or not SPACE_ID:
+              print("エラー: BACKLOG_API_KEY / BACKLOG_SPACE_ID が未設定です。", file=sys.stderr)
+              sys.exit(1)
+
+          keys = [k.strip() for k in (os.environ.get('ISSUE_KEYS') or '').split(',') if k.strip()]
+          if not keys:
+              print("エラー: issue_keys が空です。", file=sys.stderr)
+              sys.exit(1)
+
+          def base_url():
+              """backlog.com / backlog.jp のどちらかを自動判定する。"""
+              candidates = [DOMAIN] if DOMAIN else ['backlog.com', 'backlog.jp']
+              for d in candidates:
+                  url = f"https://{SPACE_ID}.{d}/api/v2/space?apiKey={urllib.parse.quote(API_KEY)}"
+                  try:
+                      with urllib.request.urlopen(url, timeout=20) as r:
+                          if r.status == 200:
+                              print(f"Backlog ドメイン: {d}")
+                              return f"https://{SPACE_ID}.{d}/api/v2"
+                  except Exception:
+                      continue
+              print("エラー: Backlog スペースに到達できません。", file=sys.stderr)
+              sys.exit(1)
+
+          BASE = base_url()
+
+          def request(method, path, data=None):
+              url = f"{BASE}{path}?apiKey={urllib.parse.quote(API_KEY)}"
+              body = urllib.parse.urlencode(data).encode() if data else None
+              req = urllib.request.Request(url, data=body, method=method)
+              if body:
+                  req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      return json.loads(r.read().decode() or '{}')
+              except urllib.error.HTTPError as e:
+                  print(f"  API エラー {e.code}: {e.read().decode()[:200]}", file=sys.stderr)
+                  return None
+              except Exception as e:
+                  print(f"  API 例外: {e}", file=sys.stderr)
+                  return None
+
+          statuses = request('GET', f"/projects/{PROJ_KEY}/statuses") or []
+          status_map = {s['name']: s['id'] for s in statuses}
+          if STATUS_NAME not in status_map:
+              print(f"エラー: ステータス '{STATUS_NAME}' がプロジェクトに存在しません。"
+                    f"利用可能: {', '.join(status_map)}", file=sys.stderr)
+              sys.exit(1)
+          target_id = status_map[STATUS_NAME]
+
+          print(f"{'[ドライラン] ' if DRY_RUN else ''}対象 {len(keys)} 件 → '{STATUS_NAME}' (id={target_id})\n")
+
+          changed = skipped = failed = 0
+          for key in keys:
+              issue = request('GET', f"/issues/{key}")
+              if issue is None:
+                  print(f"{key}: 取得失敗")
+                  failed += 1
+                  continue
+              current = (issue.get('status') or {}).get('name', '不明')
+              if current == STATUS_NAME:
+                  print(f"{key}: 既に '{current}' のためスキップ")
+                  skipped += 1
+                  continue
+              if DRY_RUN:
+                  print(f"{key}: '{current}' → '{STATUS_NAME}' (ドライランのため書き込みなし)")
+                  changed += 1
+                  continue
+              if request('PATCH', f"/issues/{key}", {'statusId': target_id}) is not None:
+                  print(f"{key}: '{current}' → '{STATUS_NAME}' 更新しました")
+                  changed += 1
+              else:
+                  print(f"{key}: 更新失敗")
+                  failed += 1
+
+          print(f"\n結果: 変更 {changed} / スキップ {skipped} / 失敗 {failed}")
+          if failed:
+              sys.exit(1)
+          PYEOF
