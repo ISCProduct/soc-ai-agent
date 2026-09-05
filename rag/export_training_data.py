@@ -104,38 +104,42 @@ def apply_mask_to_session(session: Dict[str, Any]) -> None:
             u["text"] = mask_pii(u["text"])
 
 
-def iter_examples_from_session(session: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
-    """セッションから単純な user->ai ペアを生成するジェネレータ。
-    session は最小で `utterances` を含むこと。
+# 教師ラベルとして許可する選考結果(UserApplicationStatus)のみ。
+# チャットのAI発話・面接/ESの自動採点・マッチング理由文などAI生成物は、
+# 他モデルの出力を教師信号にすること(蒸留)に該当するため学習ラベルに使用してはならない。
+# 詳細: docs/finetune_design.md
+OUTCOME_LABELS: Dict[str, str] = {
+    "rejected": "不通過",
+    "offered": "内定",
+    "accepted": "内定承諾",
+}
+
+
+def to_outcome_example(session: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """選考結果のみを教師ラベルとする学習用exampleを生成する(蒸留禁止)。
+
+    prompt はユーザー自身の発話のみから構成し、AI発話("role" が "ai"/"assistant")
+    は prompt・label のいずれにも一切含めない。session に有効な
+    `application_status`（OUTCOME_LABELS のキー）が無ければ None を返す。
     """
-    utterances = session.get("utterances") or []
-    # find pairs: user utterance followed by ai utterance
-    for i in range(len(utterances) - 1):
-        cur = utterances[i]
-        nxt = utterances[i + 1]
-        if cur.get("role") == "user" and nxt.get("role") in ("ai", "assistant"):
-            yield {
-                "prompt": cur.get("text", "").strip(),
-                "completion": nxt.get("text", "").strip(),
-                "session_id": session.get("id"),
-            }
+    status = session.get("application_status")
+    if status not in OUTCOME_LABELS:
+        return None
 
+    prompt_parts = [
+        u.get("text", "").strip()
+        for u in session.get("utterances", []) or []
+        if isinstance(u, dict) and u.get("role") == "user" and u.get("text")
+    ]
+    prompt = "\n".join(p for p in prompt_parts if p)
+    if not prompt:
+        return None
 
-def to_openai_chat(session: Dict[str, Any]) -> Dict[str, Any]:
-    messages: List[Dict[str, str]] = []
-    for u in session.get("utterances", []):
-        role = u.get("role", "user")
-        if role == "ai":
-            r = "assistant"
-        elif role == "user":
-            r = "user"
-        else:
-            r = role
-        text = u.get("text", "").strip()
-        if not text:
-            continue
-        messages.append({"role": r, "content": text})
-    return {"messages": messages, "metadata": {"session_id": session.get("id")}}
+    return {
+        "prompt": prompt,
+        "completion": OUTCOME_LABELS[status],
+        "session_id": session.get("id"),
+    }
 
 
 def to_openai_prompt(example: Dict[str, Any]) -> Dict[str, Any]:
@@ -152,9 +156,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(description="Export training data JSONL from sessions/utterances.")
     p.add_argument("--input", "-i", help="Input JSON file (array of sessions). If omitted reads stdin.")
     p.add_argument("--output", "-o", help="Output JSONL file. If omitted writes to stdout.")
-    p.add_argument("--format", "-f", choices=["openai_chat", "openai_prompt"], default="openai_prompt",
-                   help="Output format. openai_prompt produces prompt/completion pairs; openai_chat produces messages arrays.")
-    p.add_argument("--min-pairs", type=int, default=1, help="最低出力ペア数の閾値（openai_prompt 時）")
     p.add_argument("--no-mask-pii", action="store_true", default=False, help="Disable PII masking (by default masking is enabled)")
     args = p.parse_args(argv)
 
@@ -177,18 +178,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         if mask_enabled:
             apply_mask_to_session(session)
 
-        if args.format == "openai_chat":
-            obj = to_openai_chat(session)
-            # skip empty
-            if not obj.get("messages"):
-                continue
-            out_fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
-            total += 1
-        else:  # openai_prompt
-            for ex in iter_examples_from_session(session):
-                obj = to_openai_prompt(ex)
-                out_fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
-                total += 1
+        ex = to_outcome_example(session)
+        if ex is None:
+            continue
+        obj = to_openai_prompt(ex)
+        out_fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
+        total += 1
 
     if args.output:
         out_fh.close()

@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Box, CircularProgress, Typography, Alert } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { fixMojibake } from '@/lib/mojibake'
 
 type OAuthUser = {
   user_id: number | string
@@ -73,8 +74,6 @@ function OAuthCallbackContent() {
         const userDataRaw = JSON.parse(userDataString)
         // スキーマ検証: 不正な構造のペイロードを拒否
         const validatedData = validateOAuthPayload(userDataRaw)
-        // Fallback repair for mojibake in name
-        const fixMojibake = (s: string) => /[Ãå][^\s]/.test(s) ? decodeURIComponent(escape(s)) : s
         let userData = { ...validatedData, name: fixMojibake(validatedData.name) }
         try {
           const fresh = await authService.getUser()

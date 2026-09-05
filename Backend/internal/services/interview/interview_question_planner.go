@@ -126,6 +126,7 @@ func isAbstractOnlyAnswer(answer string) bool {
 }
 
 // BuildFollowUpQuestionText は深掘り追質問のテンプレート文を返す。
+// 回答内容のハッシュでバリエーションを選び、きっかけ・継続力の観点も一定確率で含める（#1093）。
 func BuildFollowUpQuestionText(originalQuestion, userAnswer string) string {
 	snippet := strings.TrimSpace(userAnswer)
 	if utf8.RuneCountInString(snippet) > 40 {
@@ -134,10 +135,32 @@ func BuildFollowUpQuestionText(originalQuestion, userAnswer string) string {
 	if snippet == "" {
 		snippet = "先ほどのお話"
 	}
-	if strings.TrimSpace(originalQuestion) != "" {
-		return "「" + snippet + "」について、もう少し具体的にお聞きします。" + originalQuestion + " の中で、あなた自身の役割や取った行動を教えてください。"
+
+	switch followUpVariantIndex(userAnswer) {
+	case 1:
+		if strings.TrimSpace(originalQuestion) != "" {
+			return "「" + snippet + "」について、もう少し具体的にお聞きします。" + originalQuestion + " の中で、なぜその取り組みを始めたのか（きっかけ）を教えてください。"
+		}
+		return "「" + snippet + "」について、なぜその取り組みを始めたのか（きっかけ）を教えてください。"
+	case 2:
+		if strings.TrimSpace(originalQuestion) != "" {
+			return "「" + snippet + "」について、もう少し具体的にお聞きします。" + originalQuestion + " の中で、困難な時期も含めてどう継続したかを教えてください。"
+		}
+		return "「" + snippet + "」について、困難な時期も含めてどう継続したかを教えてください。"
+	default:
+		if strings.TrimSpace(originalQuestion) != "" {
+			return "「" + snippet + "」について、もう少し具体的にお聞きします。" + originalQuestion + " の中で、あなた自身の役割や取った行動を教えてください。"
+		}
+		return "「" + snippet + "」について、具体的なエピソードやあなたの役割を教えてください。"
 	}
-	return "「" + snippet + "」について、具体的なエピソードやあなたの役割を教えてください。"
+}
+
+func followUpVariantIndex(answer string) int {
+	sum := 0
+	for _, r := range answer {
+		sum += int(r)
+	}
+	return sum % 3
 }
 
 func selectNextPending(states []models.InterviewQuestionState) *models.InterviewQuestionState {
