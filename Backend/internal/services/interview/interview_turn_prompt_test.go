@@ -18,6 +18,16 @@ func TestBuildInterviewSystemPromptToneGuideline(t *testing.T) {
 	}
 }
 
+func TestBuildInterviewSystemPromptDeepeningMotivationCriteria(t *testing.T) {
+	prompt := buildInterviewSystemPrompt(
+		"テスト株式会社", "", "エンジニア", "", "general",
+		nil, nil, 0, 0, 1, 5, 0, 180, nil,
+	)
+	if !strings.Contains(prompt, "きっかけ") || !strings.Contains(prompt, "継続") {
+		t.Fatalf("prompt missing motivation/continuity deepening criteria: %s", prompt)
+	}
+}
+
 func TestIsEngineerPosition(t *testing.T) {
 	tests := []struct {
 		name     string

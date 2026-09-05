@@ -122,7 +122,7 @@ func (s *InterviewService) generateFollowUpQuestion(ctx context.Context, origina
 	if s.openaiClient == nil {
 		return "", errors.New("openai client not configured")
 	}
-	systemPrompt := "あなたは就活面接官です。応募者の直前回答を踏まえ、具体性を引き出す追質問を1文だけ日本語で作成してください。余計な説明は不要です。"
+	systemPrompt := "あなたは就活面接官です。応募者の直前回答を踏まえ、具体性を引き出す追質問を1文だけ日本語で作成してください。必要に応じて、取り組みのきっかけや継続の方法にも触れてください。余計な説明は不要です。"
 	userPrompt := fmt.Sprintf("元の質問: %s\n応募者回答: %s", originalQuestion, userAnswer)
 	ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
