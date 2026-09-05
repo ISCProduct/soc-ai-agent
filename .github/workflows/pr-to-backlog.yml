@@ -196,18 +196,36 @@ jobs:
               return False, name
 
           def update_backlog_status(bl_key, status_id, *, pr_url_section=None):
-              data = {'statusId': status_id}
+              """ステータスを更新する。PR URL の追記は任意で、失敗してもステータス更新は守る。
+
+              以前は statusId と description を1回の PATCH でまとめて送っていたため、
+              description 側が Backlog に拒否されるとステータス更新まで巻き添えで失われた
+              (実際に SOCAIAGENT-286 が `No comment content.` (code 7) で更新されなかった)。
+              ステータス更新を先に確定させ、説明欄の追記は後続の任意処理として分離する。
+              """
+              result = bl_request('PATCH', f"/issues/{bl_key}", {'statusId': status_id})
+              if result is None:
+                  return False
+
               if pr_url_section:
-                  issue = bl_request('GET', f"/issues/{bl_key}")
-                  if issue:
-                      current_desc = issue.get('description') or ''
-                      pr_pattern = r'\n*## GitHub PR\n[^\n]*'
-                      if re.search(pr_pattern, current_desc):
-                          data['description'] = re.sub(pr_pattern, pr_url_section, current_desc)
-                      else:
-                          data['description'] = current_desc.rstrip() + pr_url_section
-              result = bl_request('PATCH', f"/issues/{bl_key}", data)
-              return result is not None
+                  try:
+                      issue = bl_request('GET', f"/issues/{bl_key}")
+                      if issue:
+                          current_desc = issue.get('description') or ''
+                          pr_pattern = r'\n*## GitHub PR\n[^\n]*'
+                          if re.search(pr_pattern, current_desc):
+                              new_desc = re.sub(pr_pattern, pr_url_section, current_desc)
+                          else:
+                              new_desc = current_desc.rstrip() + pr_url_section
+                          # 変化が無いなら PATCH しない(無変更更新は Backlog に拒否されうる)
+                          if new_desc.strip() and new_desc != current_desc:
+                              if bl_request('PATCH', f"/issues/{bl_key}", {'description': new_desc}) is None:
+                                  print(f"警告: {bl_key} の説明欄への PR URL 追記に失敗しました"
+                                        "(ステータス更新は成功しています)", file=sys.stderr)
+                  except Exception as e:
+                      print(f"警告: {bl_key} の説明欄更新で例外: {e}"
+                            "(ステータス更新は成功しています)", file=sys.stderr)
+              return True
 
           if not PR_NUMBER:
               print("PR番号が取得できません。スキップします。")
