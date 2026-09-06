@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24-bullseye AS builder
+FROM golang:1.24-bookworm AS builder
 
 WORKDIR /app
 
@@ -32,7 +32,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=1 go build -ldflags="-s -w" -o /bin/migrate ./cmd/migrate
 
 # Runtime stage
-FROM golang:1.24-bullseye
+FROM golang:1.24-bookworm
 
 WORKDIR /app
 
@@ -54,6 +54,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     chromium \
     chromium-driver \
+    swig \
+    build-essential \
+    python3-dev \
  && rm -rf /var/lib/apt/lists/*
 
 # Install Air for local Docker Compose hot reload.
@@ -72,10 +75,14 @@ COPY --from=builder /bin/migrate /bin/migrate
 RUN chmod +x /bin/server /bin/migrate
 
 # Install OCR dependencies (use local wheels if provided)
+# bookworm の pip は PEP 668 で externally-managed のため --break-system-packages が必要。
+# PyMuPDF 1.20.2 は cp311 の wheel を提供しておらず、上で入れた swig / build-essential /
+# python3-dev を使ってソースからビルドされる（paddleocr 2.7.0.3 が PyMuPDF<1.21.0 を要求するため
+# wheel のある新しい PyMuPDF へは上げられない）。#1142 参照。
 RUN if [ -d /app/scripts/wheels ] && [ "$(ls -A /app/scripts/wheels)" ]; then \
-      python3 -m pip install --no-index --find-links=/app/scripts/wheels -r /app/scripts/requirements.txt ; \
+      python3 -m pip install --break-system-packages --no-index --find-links=/app/scripts/wheels -r /app/scripts/requirements.txt ; \
     else \
-      python3 -m pip install --prefer-binary --default-timeout=300 --retries=5 -r /app/scripts/requirements.txt ; \
+      python3 -m pip install --break-system-packages --prefer-binary --default-timeout=600 --retries=8 -r /app/scripts/requirements.txt ; \
     fi
 
 EXPOSE 8080
