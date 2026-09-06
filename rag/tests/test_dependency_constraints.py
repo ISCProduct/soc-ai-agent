@@ -201,6 +201,45 @@ class TestLangchainInRequirements:
         assert _parse_version_spec(_CONSTRAINTS_TXT, "langchain-community") is None
 
 
+_LANGCHAIN_PACKAGES = (
+    "langchain",
+    "langchain-core",
+    "langchain-openai",
+    "langchain-text-splitters",
+)
+
+
+class TestLangchainInstalledVersionMatchesDeclaration:
+    """Issue #1067: langchain 系の「宣言」と「実インストール」の乖離を検知する。
+
+    既存の TestLangchainInRequirements は requirements.txt と constraints.txt の
+    宣言同士しか突き合わせておらず、宣言が 1.x なのに実環境へ 0.3.x が入ったまま、
+    という状態を検知できなかった。chromadb で既に確立している
+    test_installed_chromadb_within_* と同じ検証を langchain 系へ横展開する。
+    """
+
+    @pytest.mark.parametrize("package", _LANGCHAIN_PACKAGES)
+    def test_installed_langchain_within_lower_bound(self, package: str):
+        """インストール済みの langchain 系が requirements.txt の下限を満たしている。"""
+        installed = Version(importlib.metadata.version(package))
+        lower = _extract_lower_bound(_REQUIREMENTS_TXT, package)
+        assert lower is not None, f"requirements.txt に {package} の下限が設定されていない"
+        assert installed >= Version(lower), (
+            f"{package}: インストール済み {installed} が宣言下限 >={lower} を下回っている。"
+            "`pip install -r requirements.txt -c constraints.txt` で環境を作り直すこと (#1067)"
+        )
+
+    @pytest.mark.parametrize("package", _LANGCHAIN_PACKAGES)
+    def test_installed_langchain_within_upper_bound(self, package: str):
+        """インストール済みの langchain 系が constraints.txt の上限を満たしている。"""
+        installed = Version(importlib.metadata.version(package))
+        upper = _extract_upper_bound(_CONSTRAINTS_TXT, package)
+        assert upper is not None, f"constraints.txt に {package} の上限が設定されていない"
+        assert installed < Version(upper), (
+            f"{package}: インストール済み {installed} が宣言上限 <{upper} を超えている (#1067)"
+        )
+
+
 # ── Frontend: package.json バージョン整合性 ────────────────────────────────
 
 class TestFrontendReactVersionConsistency:
