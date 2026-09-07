@@ -493,7 +493,8 @@ jobs:
           task-definition: ${{ steps.render-backend.outputs.task-definition }}
           service: backend
           cluster: ${{ env.PROJECT_NAME }}
-          wait-for-service-stability: true
+          # 3サービスを同時に走らせ、安定待ちは後段でまとめて行う（直列だと合計待ちが積み上がる）
+          wait-for-service-stability: false
 
       - name: Fetch current frontend task definition
         if: steps.changes.outputs.frontend == 'true'
@@ -519,7 +520,8 @@ jobs:
           task-definition: ${{ steps.render-frontend.outputs.task-definition }}
           service: frontend
           cluster: ${{ env.PROJECT_NAME }}
-          wait-for-service-stability: true
+          # 3サービスを同時に走らせ、安定待ちは後段でまとめて行う（直列だと合計待ちが積み上がる）
+          wait-for-service-stability: false
 
       # rag-reviewはchroma(ベクトルDB)とのサイドカー構成で、DBを持たないため
       # マイグレーション相当のステップは無い。差し替えるのはrag-reviewコンテナの
@@ -548,10 +550,44 @@ jobs:
           task-definition: ${{ steps.render-rag-review.outputs.task-definition }}
           service: rag-review
           cluster: ${{ env.PROJECT_NAME }}
-          wait-for-service-stability: true
+          # 3サービスを同時に走らせ、安定待ちは後段でまとめて行う（直列だと合計待ちが積み上がる）
+          wait-for-service-stability: false
 
       # backend/frontend/rag-review全てのECSデプロイが安定するまで待った後(=本番反映が実際に完了した後)に通知する。
       # DISCORD_RELEASE_WEBHOOK_URL未設定でもデプロイ自体は失敗させない(automation/deploy-smoke/notify-discord.shと同じ方針)。
+      # 直列に待つと 588s + 302s + 88s と積み上がるため、3サービスの安定待ちを並列化する。
+      # 二重稼働は発生しない（デプロイ方式は従来どおり minimumHealthyPercent=0 のまま）。
+      - name: Wait for services to stabilize (parallel)
+        run: |
+          set -e
+          services=""
+          if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then services="$services backend"; fi
+          if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then services="$services frontend"; fi
+          if [ "${{ steps.changes.outputs.rag }}" = "true" ]; then services="$services rag-review"; fi
+          if [ -z "$services" ]; then
+            echo "no service deployed; nothing to wait for"
+            exit 0
+          fi
+
+          pids=()
+          for s in $services; do
+            (
+              started=$(date +%s)
+              aws ecs wait services-stable --cluster "$PROJECT_NAME" --services "$s"
+              echo "$s stable in $(( $(date +%s) - started ))s"
+            ) &
+            pids+=($!)
+          done
+
+          fail=0
+          for pid in "${pids[@]}"; do
+            wait "$pid" || fail=1
+          done
+          if [ "$fail" != "0" ]; then
+            echo "one or more services did not reach a stable state" >&2
+          fi
+          exit $fail
+
       - name: Notify Discord release
         env:
           DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
