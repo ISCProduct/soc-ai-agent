@@ -23,8 +23,10 @@ resource "aws_lb_target_group" "frontend" {
     matcher             = "200"
     healthy_threshold   = 2
     unhealthy_threshold = 3
-    interval            = 30
-    timeout             = 5
+    # 30秒間隔だと healthy 判定まで最短60秒かかり、デプロイの待ち時間に直接乗る。
+    # 10秒へ短縮して最短20秒にする（/healthz は軽量なので負荷増は無視できる）。
+    interval = 10
+    timeout  = 5
   }
 
   tags = merge(var.tags, {
@@ -45,8 +47,10 @@ resource "aws_lb_target_group" "backend" {
     matcher             = "200"
     healthy_threshold   = 2
     unhealthy_threshold = 3
-    interval            = 30
-    timeout             = 5
+    # 30秒間隔だと healthy 判定まで最短60秒かかり、デプロイの待ち時間に直接乗る。
+    # 10秒へ短縮して最短20秒にする（/healthz は軽量なので負荷増は無視できる）。
+    interval = 10
+    timeout  = 5
   }
 
   tags = merge(var.tags, {
