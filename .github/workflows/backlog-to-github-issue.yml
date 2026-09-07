@@ -118,19 +118,34 @@ jobs:
 
           # Backlog API の updatedSince は yyyy-MM-dd のみ受け付ける（ISO datetime は 400）
           since = (datetime.now(timezone.utc) - timedelta(minutes=MINUTES)).strftime("%Y-%m-%d")
-          issues = bl_request(
-              BL_BASE,
-              API_KEY,
-              "GET",
-              "/issues",
-              {
-                  "projectId[]": project_id,
-                  "updatedSince": since,
-                  "count": 100,
-                  "sort": "updated",
-                  "order": "desc",
-              },
-          )
+          # Backlog の /issues は1回あたり最大100件しか返さない。窓を広げても
+          # 「更新が新しい100件」で打ち切られ、古い課題が取りこぼされるため offset で辿る。
+          issues = []
+          offset = 0
+          while True:
+              page = bl_request(
+                  BL_BASE,
+                  API_KEY,
+                  "GET",
+                  "/issues",
+                  {
+                      "projectId[]": project_id,
+                      "updatedSince": since,
+                      "count": 100,
+                      "offset": offset,
+                      "sort": "updated",
+                      "order": "desc",
+                  },
+              )
+              if not page:
+                  break
+              issues.extend(page)
+              if len(page) < 100:
+                  break
+              offset += 100
+              if offset >= 2000:  # 暴走防止
+                  print("Backlog 課題の取得が2000件に達したため打ち切ります。", flush=True)
+                  break
 
           print(f"{len(issues)} 件の Backlog 課題を取得しました（updatedSince={since}, minutes_back={MINUTES}）。", flush=True)
 
