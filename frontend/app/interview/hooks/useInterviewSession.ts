@@ -56,6 +56,8 @@ export function useInterviewSession({
   const [reportStatus, setReportStatus] = useState<ReportStatus>('idle')
   const [emailSending, setEmailSending] = useState(false)
   const [emailSent, setEmailSent] = useState(false)
+  // メール送信失敗をUIへ伝えるためのメッセージ（#1056）
+  const [emailError, setEmailError] = useState('')
   const [aiLevel, setAiLevel] = useState(0)
   const [aiSpeaking, _setAiSpeaking] = useState(false)
   const [avatarGender, setAvatarGender] = useState<'male' | 'female'>('male')
@@ -580,11 +582,13 @@ export function useInterviewSession({
   const sendReportEmail = async () => {
     if (!session || !user) return
     setEmailSending(true)
+    setEmailError('')
     try {
       await interviewApi.sendReportEmail(session.id, user.user_id)
       setEmailSent(true)
     } catch {
-      // ignore
+      // 握り潰すとユーザーが送信成功と誤解するため、必ずUIへ伝える（#1056）
+      setEmailError('メールの送信に失敗しました。時間をおいて再度お試しください。')
     } finally {
       setEmailSending(false)
     }
@@ -608,6 +612,7 @@ export function useInterviewSession({
     retryReportPolling,
     emailSending,
     emailSent,
+    emailError,
     aiLevel,
     aiSpeaking,
     avatarGender,
