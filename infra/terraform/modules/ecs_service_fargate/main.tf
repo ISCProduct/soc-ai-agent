@@ -226,9 +226,15 @@ resource "aws_ecs_service" "this" {
   }
 
   # ALBのヘルスチェック猶予・デプロイサーキットブレーカーはALB配下のサービスにのみ設定する
-  health_check_grace_period_seconds  = var.target_group_arn != "" ? 120 : null
-  deployment_minimum_healthy_percent = 0
-  deployment_maximum_percent         = 100
+  # 起動から healthz 応答まで実測で数秒（マイグレーションとシード込み）。120秒は過大で、
+  # そのままデプロイの待ち時間に乗るため 60秒へ短縮する。
+  health_check_grace_period_seconds = var.target_group_arn != "" ? 60 : null
+  # 0/100 は「旧タスクを止めてから新タスクを起動する」直列切替で、切替のたびに
+  # 停止→起動→ヘルスチェックが積み上がり、かつ切替中は無応答になる。
+  # 100/200 にして新タスクが healthy になってから旧タスクを落とす（無停止・短時間）。
+  # デプロイ中のみタスクが一時的に2倍になるが、0.25vCPU×数分のため実費はごく僅か。
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
 
   deployment_circuit_breaker {
     enable   = var.target_group_arn != ""
