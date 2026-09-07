@@ -52,6 +52,19 @@ func TestResumeStatus_UsesAuthenticatedUserID(t *testing.T) {
 	}
 }
 
+func TestResumeStatus_ReviewNotRunIsNeedsAttention(t *testing.T) {
+	// 提出済み・レビュー未実施は要対応。未提出とは has_document で区別する。
+	svc := &mocks.ResumeServiceMock{}
+	svc.On("GetResumeStatus", uint(4)).
+		Return(&resume.ResumeStatus{HasDocument: true, LatestScore: nil, NeedsAttention: true}, nil)
+
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/resume/status", nil), 4)
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewResumeController(svc).Status, newCtx(req, rec), http.StatusOK)
+
+	assert.JSONEq(t, `{"has_document":true,"latest_score":null,"needs_attention":true}`, rec.Body.String())
+}
+
 func TestResumeStatus_NoDocumentSerializesNullScore(t *testing.T) {
 	// 未提出時に latest_score が JSON の null になること（フロントが null を期待する）。
 	svc := &mocks.ResumeServiceMock{}

@@ -16,21 +16,30 @@ type ResumeStatus struct {
 }
 
 // EvaluateResumeStatus は取得済みの事実から対応要否を判定する。
-//
-// DB へ触らない純関数にしてあるのは、教員向け一覧(#1027)でも同じ判定を
-// 使い回せるようにするため。一覧側は N+1 を避けて一括取得した結果を渡す。
+// DB へ触らない純関数なので、教員向け一覧(#1027)からも同じ判定を呼べる。
 //
 // 判定は3状態。
-//   - 未提出            -> 要対応(履歴書を作るよう促す)
-//   - 提出済み・レビュー未生成 -> 対応不要(処理中であり学生に打つ手がない)
-//   - 提出済み・スコアあり   -> 閾値未満なら要対応
+//   - 未提出              -> 要対応(履歴書を作るよう促す)
+//   - 提出済み・レビュー未実施 -> 要対応(レビューを実行するよう促す)
+//   - 提出済み・スコアあり    -> 閾値未満なら要対応
+//
+// 「レビュー未実施」を要対応にしている理由。
+// PRD はこの状態を「レビュー処理中なので対応不要」とし、どちらにするかは実装時に
+// 決めるとしていた。しかし実際のレビューは自動生成ではなく、学生が企業名か職種を
+// 入力して明示的に実行する操作である(resume_review.go:81 が唯一の CreateReview 経路)。
+// 対応不要にすると次の2つが起きる。
+//  1. アップロードしただけの学生に永久にリマインダーが出ない
+//  2. 低スコアで警告中の学生が新しい履歴書を上げると、最新ドキュメントに
+//     レビューが無いため警告が黙って消える
+//
+// どちらも本機能の目的に反するため、学生が行動できる状態として要対応にした。
 func EvaluateResumeStatus(hasDocument bool, latestScore *int, threshold int) ResumeStatus {
 	status := ResumeStatus{HasDocument: hasDocument, LatestScore: latestScore}
 	switch {
 	case !hasDocument:
 		status.NeedsAttention = true
 	case latestScore == nil:
-		status.NeedsAttention = false
+		status.NeedsAttention = true
 	default:
 		status.NeedsAttention = *latestScore < threshold
 	}

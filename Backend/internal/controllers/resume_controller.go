@@ -30,7 +30,9 @@ func (c *ResumeController) Status(ctx echo.Context) error {
 	}
 	status, err := c.resumeService.GetResumeStatus(userID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get resume status")
+		// 全ユーザーがホーム画面表示のたびに叩くため、DB劣化時は500が大量に出る。
+		// 原因追跡の起点を残す(他ハンドラと同じ echoInternalError を使う)。
+		return echoInternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, status)
 }

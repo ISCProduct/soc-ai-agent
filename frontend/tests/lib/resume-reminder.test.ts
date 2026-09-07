@@ -17,9 +17,10 @@ describe('resumeReminderMessage', () => {
       expected: '履歴書がまだ作成されていません',
     },
     {
-      name: 'アップ済みでレビュー処理中なら表示しない',
-      status: { has_document: true, latest_score: null, needs_attention: false },
-      expected: null,
+      // レビューは自動生成されず学生が実行する操作なので、未実施は促す対象。
+      name: 'アップ済みでレビュー未実施ならレビューを促す',
+      status: { has_document: true, latest_score: null, needs_attention: true },
+      expected: '履歴書のレビューをまだ受けていません',
     },
     {
       name: 'スコア59なら低スコアメッセージを表示する',
@@ -43,11 +44,7 @@ describe('resumeReminderMessage', () => {
       status: { has_document: true, latest_score: 70, needs_attention: true },
       expected: /評価が低めです.*70/,
     },
-    {
-      name: 'スコア未生成で要対応という契約違反でも黙らない',
-      status: { has_document: true, latest_score: null, needs_attention: true },
-      expected: '履歴書の評価を確認しましょう',
-    },
+
   ]
 
   it.each(cases)('$name', ({ status, expected }) => {

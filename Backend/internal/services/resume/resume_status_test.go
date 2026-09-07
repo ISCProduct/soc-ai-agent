@@ -31,10 +31,12 @@ func TestEvaluateResumeStatus(t *testing.T) {
 			wantScoreIsNil: true,
 		},
 		{
-			name:           "提出済みでレビュー未生成は対応不要(未提出と区別する)",
+			// レビューは自動生成されず学生が明示的に実行する操作なので、
+			// 未実施は「打つ手がない」ではなく「実行を促すべき」状態。
+			name:           "提出済みでレビュー未実施は要対応(未提出とは has_document で区別する)",
 			hasDocument:    true,
 			latestScore:    nil,
-			wantAttention:  false,
+			wantAttention:  true,
 			wantHasDoc:     true,
 			wantScoreIsNil: true,
 		},
@@ -110,6 +112,8 @@ func TestResumeCompletenessThreshold(t *testing.T) {
 		{name: "正常な値で上書きできる", env: "75", want: 75},
 		{name: "数値以外は既定に落ちる", env: "abc", want: 60},
 		{name: "0以下は既定に落ちる", env: "-1", want: 60},
+		{name: "100超は100へ丸める", env: "200", want: 100},
+		{name: "100ちょうどはそのまま", env: "100", want: 100},
 	}
 
 	for _, tt := range tests {
@@ -153,15 +157,50 @@ func TestGetResumeStatus(t *testing.T) {
 		}
 	})
 
-	t.Run("レビュー未生成はスコアnil・対応不要", func(t *testing.T) {
+	t.Run("レビュー未実施はスコアnil・要対応", func(t *testing.T) {
 		repo := &resumeRepoStub{latestDoc: &models.ResumeDocument{ID: 10, UserID: 1}}
 		svc := NewResumeService(repo, t.TempDir(), nil)
 		got, err := svc.GetResumeStatus(1)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !got.HasDocument || got.NeedsAttention || got.LatestScore != nil {
-			t.Errorf("got %+v, want has=true, attention=false, score=nil", got)
+		if !got.HasDocument || !got.NeedsAttention || got.LatestScore != nil {
+			t.Errorf("got %+v, want has=true, attention=true, score=nil", got)
+		}
+	})
+
+	// S2: 閾値の環境変数が GetResumeStatus まで実際に配線されていることを検証する。
+	// これが無いと config の getter を握り潰してリテラル60を書いてもテストが通ってしまう。
+	t.Run("閾値の環境変数がGetResumeStatusまで効いている", func(t *testing.T) {
+		t.Setenv("RESUME_COMPLETENESS_THRESHOLD", "40")
+		repo := &resumeRepoStub{
+			latestDoc:    &models.ResumeDocument{ID: 10, UserID: 1},
+			latestReview: &models.ResumeReview{ID: 5, DocumentID: 10, Score: 42},
+		}
+		svc := NewResumeService(repo, t.TempDir(), nil)
+		got, err := svc.GetResumeStatus(1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// 既定の60なら42は要対応になる。閾値40が効いていれば対応不要。
+		if got.NeedsAttention {
+			t.Errorf("NeedsAttention = true, want false (閾値40 > スコア42 のはず。環境変数が配線されていない)")
+		}
+	})
+
+	t.Run("閾値は100を超えない", func(t *testing.T) {
+		t.Setenv("RESUME_COMPLETENESS_THRESHOLD", "200")
+		repo := &resumeRepoStub{
+			latestDoc:    &models.ResumeDocument{ID: 10, UserID: 1},
+			latestReview: &models.ResumeReview{ID: 5, DocumentID: 10, Score: 100},
+		}
+		svc := NewResumeService(repo, t.TempDir(), nil)
+		got, err := svc.GetResumeStatus(1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.NeedsAttention {
+			t.Errorf("満点なのに要対応。閾値が100へ丸められていない")
 		}
 	})
 

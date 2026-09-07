@@ -16,9 +16,9 @@ export interface ResumeStatus {
 export function resumeReminderMessage(status: ResumeStatus): string | null {
   if (!status.needs_attention) return null
   if (!status.has_document) return '履歴書がまだ作成されていません'
-  // 提出済み・スコア未生成で要対応になるのは本来ありえないが、
-  // 契約が破れても文言なしで黙らないようにしておく。
-  if (status.latest_score === null) return '履歴書の評価を確認しましょう'
+  // 提出済みだがレビュー未実施。レビューは学生が明示的に実行する操作なので、
+  // 「待ってください」ではなく実行を促す文言にする。
+  if (status.latest_score === null) return '履歴書のレビューをまだ受けていません'
   return `履歴書の評価が低めです。改善しましょう（スコア: ${status.latest_score}）`
 }
 
