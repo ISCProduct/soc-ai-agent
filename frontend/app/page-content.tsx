@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Box, IconButton, AppBar, Toolbar, Typography, Alert } from '@mui/material'
+import { Box, IconButton, AppBar, Toolbar, Typography, Alert, Link as MuiLink } from '@mui/material'
+import NextLink from 'next/link'
 import { Menu as MenuIcon } from '@mui/icons-material'
 import { AnalysisSidebar } from '@/components/analysis-sidebar'
 import { MuiChat } from '@/components/mui-chat'
@@ -108,21 +109,17 @@ export default function PageContent() {
           </Alert>
         )}
         {resumeReminder && (
-          <Alert
-            severity="warning"
-            onClose={() => setResumeReminder(null)}
-            sx={{ borderRadius: 0 }}
-            action={
-              <Box
-                component="a"
-                href="/resume"
-                sx={{ fontSize: '0.8rem', fontWeight: 600, color: 'inherit', textDecoration: 'underline', mr: 1, alignSelf: 'center' }}
-              >
-                履歴書を確認する
-              </Box>
-            }
-          >
-            {resumeReminder}
+          // MUI の Alert は action を渡すと onClose の閉じるボタンを描画しないため
+          // (Alert.js: `action == null && onClose`)、導線は本文中に置いて閉じるボタンを残す。
+          <Alert severity="warning" onClose={() => setResumeReminder(null)} sx={{ borderRadius: 0 }}>
+            {resumeReminder}{' '}
+            <MuiLink
+              component={NextLink}
+              href="/resume"
+              sx={{ fontSize: '0.8rem', fontWeight: 600, color: 'inherit' }}
+            >
+              履歴書を確認する
+            </MuiLink>
           </Alert>
         )}
         <div className={styles.chatWrapper}>

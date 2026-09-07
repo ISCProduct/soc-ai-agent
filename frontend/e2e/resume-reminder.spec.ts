@@ -25,6 +25,19 @@ test.describe('履歴書リマインダーカード', () => {
     await expect(page.getByRole('link', { name: '履歴書を確認する' })).toHaveAttribute('href', '/resume')
   })
 
+  // MUI の Alert は action を渡すと閉じるボタンを描画しないため、本文に導線を置いている。
+  // action を戻すとこのテストが落ちる。
+  test('閉じるボタンでリマインダーを消せる', async ({ page }) => {
+    await mockResumeStatus(page, { has_document: true, latest_score: 45, needs_attention: true })
+
+    await page.goto('/')
+    const reminder = page.getByText(/評価が低めです/)
+    await expect(reminder).toBeVisible({ timeout: 10000 })
+
+    await page.getByRole('button', { name: 'Close' }).click()
+    await expect(reminder).toHaveCount(0)
+  })
+
   test('スコア80のときリマインダーは表示されない', async ({ page }) => {
     await mockResumeStatus(page, { has_document: true, latest_score: 80, needs_attention: false })
 

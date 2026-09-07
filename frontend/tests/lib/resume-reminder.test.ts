@@ -37,9 +37,16 @@ describe('resumeReminderMessage', () => {
       expected: null,
     },
     {
-      name: '閾値以上なのに needs_attention が立っていても表示しない',
-      status: { has_document: true, latest_score: 60, needs_attention: true },
-      expected: null,
+      name: '閾値を上げた運用（例:75）でスコア70が要対応なら表示する',
+      // 閾値は RESUME_COMPLETENESS_THRESHOLD で運用中に変更されうる。
+      // フロントで閾値をミラーすると、この組み合わせを握り潰してしまう。
+      status: { has_document: true, latest_score: 70, needs_attention: true },
+      expected: /評価が低めです.*70/,
+    },
+    {
+      name: 'スコア未生成で要対応という契約違反でも黙らない',
+      status: { has_document: true, latest_score: null, needs_attention: true },
+      expected: '履歴書の評価を確認しましょう',
     },
   ]
 

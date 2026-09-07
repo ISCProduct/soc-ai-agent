@@ -6,16 +6,19 @@ export interface ResumeStatus {
   needs_attention: boolean
 }
 
-/** バックエンドの判定閾値のミラー。食い違ったときは表示しない側に倒す */
-export const RESUME_SCORE_THRESHOLD = 60
-
 /**
  * リマインダーの表示要否と文言を判定する純関数。表示不要なら null を返す。
+ *
+ * 閾値判定は行わない。閾値は RESUME_COMPLETENESS_THRESHOLD で運用中に変更されうるため、
+ * バックエンドの needs_attention を唯一の判断根拠とする。ここで閾値をミラーすると、
+ * 例えば閾値を75へ上げたときにスコア70が握り潰される。
  */
 export function resumeReminderMessage(status: ResumeStatus): string | null {
   if (!status.needs_attention) return null
   if (!status.has_document) return '履歴書がまだ作成されていません'
-  if (status.latest_score === null || status.latest_score >= RESUME_SCORE_THRESHOLD) return null
+  // 提出済み・スコア未生成で要対応になるのは本来ありえないが、
+  // 契約が破れても文言なしで黙らないようにしておく。
+  if (status.latest_score === null) return '履歴書の評価を確認しましょう'
   return `履歴書の評価が低めです。改善しましょう（スコア: ${status.latest_score}）`
 }
 

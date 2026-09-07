@@ -56,7 +56,12 @@ func CompanyTTLTechDays() int      { return getIntOrDefault("COMPANY_TTL_TECH_DA
 func CompanyTTLRelationsDays() int { return getIntOrDefault("COMPANY_TTL_RELATIONS_DAYS", 60) }
 
 func MissingBatchDefaultLimit() int { return getIntOrDefault("MISSING_BATCH_DEFAULT_LIMIT", 30) }
-func MissingBatchMaxLimit() int     { return getIntOrDefault("MISSING_BATCH_MAX_LIMIT", 50) }
+
+// ResumeCompletenessThreshold は履歴書リマインダーの閾値(0-100)。
+// 最新レビューのスコアがこの値未満なら「要対応」と判定する(#1030)。
+// 0以下・数値以外を指定した場合は既定値に落ちる(getIntOrDefault の仕様)。
+func ResumeCompletenessThreshold() int { return getIntOrDefault("RESUME_COMPLETENESS_THRESHOLD", 60) }
+func MissingBatchMaxLimit() int        { return getIntOrDefault("MISSING_BATCH_MAX_LIMIT", 50) }
 
 // MissingBatchMaxConcurrency は企業間並列の上限。既定8は Fargate 0.25vCPU/512MB と OpenAI RPM の天井。
 func MissingBatchMaxConcurrency() int { return getIntOrDefault("MISSING_BATCH_MAX_CONCURRENCY", 8) }
