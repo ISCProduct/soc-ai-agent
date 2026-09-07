@@ -99,6 +99,15 @@ jobs:
               print("Backlog の認証に失敗しました。削除判定を行わず終了します。", file=sys.stderr)
               sys.exit(1)
 
+          # GitHub 側も先に確認する。ここが 401 のまま進むと Issue が1件も取れず、
+          # 「削除対象なし」と読める成功ログだけが残って不具合が見えなくなる。
+          if gh("GET", f"/repos/{GH_REPO}") is None:
+              print(
+                  "GitHub の認証に失敗しました。secrets.GH_TOKEN の有効期限と権限を確認してください。",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
           # ---- 2. backlog-key を持つ GitHub Issue を集める ----
           key_pat = re.compile(rf'<!--\s*backlog-key:({re.escape(PROJ_KEY)}-\d+)\s*-->')
           title_pat = re.compile(rf'^\[({re.escape(PROJ_KEY)}-\d+)\]\s')

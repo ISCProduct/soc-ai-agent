@@ -75,6 +75,16 @@ jobs:
                   print(f"GitHub API エラー {e.code}: {e.read().decode()}", file=sys.stderr)
                   return None
 
+          # 認証が切れていると全ての GitHub API が 401 になり、gh_request が None を返すため
+          # 「対応Issue未検出」として全件スキップされ、成功ログだけが残ってしまう。
+          # 先に疎通を確認して、失敗なら明示的に落とす。
+          if gh_request("GET", f"/repos/{GH_REPO}") is None:
+              print(
+                  "GitHub の認証に失敗しました。secrets.GH_TOKEN の有効期限と権限を確認してください。",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
           def gh_search_issue(bl_key):
               q = urllib.parse.quote(f"[{bl_key}] repo:{GH_REPO} in:title is:issue")
               result = gh_request("GET", f"/search/issues?q={q}&per_page=5")
