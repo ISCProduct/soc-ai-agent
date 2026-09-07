@@ -5,7 +5,7 @@ chromadb>=0.6.3,<0.7.0
 # crewai omitted due to dependency conflicts (embedchain/langchain). See Issue #273
 fastapi==0.141.1
 # LangChain（埋め込み・検索・今後のチェーン化）。1.x 系に固定（constraints.txt 参照）。
-langchain>=1.0,<2.0
+langchain>=1.4.0,<2.0
 langchain-core>=1.0,<2.0
 langchain-openai>=1.0,<2.0
 langchain-text-splitters>=1.0,<2.0
