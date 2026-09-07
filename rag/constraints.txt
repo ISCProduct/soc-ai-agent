@@ -14,7 +14,7 @@
 # --- LangChain エコシステム ---
 # crewai は依存衝突のため requirements.txt から除外済み（langchain 上限は crewai 制約によらない）。
 # 2026-08 に 1.x 系列へ移行（#894）。langchain-community は未使用のため削除。
-langchain>=1.0,<2.0
+langchain>=1.4.0,<2.0
 langchain-core>=1.0,<2.0
 langchain-openai>=1.0,<2.0
 langchain-text-splitters>=1.0,<2.0
@@ -31,7 +31,7 @@ numpy<3.0
 
 # --- LLM プロキシ ---
 # litellm は推移的依存。メジャーバージョン固定で API 互換性を保証。
-litellm>=1.96.2,<2.0
+litellm>=1.99.0,<2.0
 
 # --- OpenAI SDK ---
 # litellm>=1.83.7 が openai 2.x を要求するため 2.x 系列に移行。

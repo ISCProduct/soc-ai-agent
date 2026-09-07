@@ -56,6 +56,8 @@ export function useInterviewSession({
   const [reportStatus, setReportStatus] = useState<ReportStatus>('idle')
   const [emailSending, setEmailSending] = useState(false)
   const [emailSent, setEmailSent] = useState(false)
+  // メール送信失敗をUIへ伝えるためのメッセージ（#1056）
+  const [emailError, setEmailError] = useState('')
   const [aiLevel, setAiLevel] = useState(0)
   const [aiSpeaking, _setAiSpeaking] = useState(false)
   const [avatarGender, setAvatarGender] = useState<'male' | 'female'>('male')
@@ -85,6 +87,8 @@ export function useInterviewSession({
   const pollSessionRef = useRef<{ sessionId: number; userId: number } | null>(null)
   /** 再試行時に古い tick の結果を破棄するための世代カウンタ */
   const pollGenerationRef = useRef(0)
+  // レポートポーリングの連続fetch失敗数。成功したら0に戻す（#1057）
+  const pollFailureCountRef = useRef(0)
   /** playAudioBlob の世代。cleanupConnection で increment し、古い再生を破棄する */
   const audioGenerationRef = useRef(0)
   const sessionStartRef = useRef<number | null>(null)
@@ -434,6 +438,7 @@ export function useInterviewSession({
     const generation = ++pollGenerationRef.current
     pollSessionRef.current = { sessionId, userId }
     pollStartedAtRef.current = Date.now()
+    pollFailureCountRef.current = 0
     setReportStatus('pending')
 
     const tick = async () => {
@@ -441,17 +446,18 @@ export function useInterviewSession({
 
       const startedAt = pollStartedAtRef.current ?? Date.now()
       let hasReport = false
-      let fetchFailed = false
       let reportPayload: InterviewReport | null = null
 
       try {
         const detail = await interviewApi.getDetail(sessionId, userId)
+        // 通信が復帰したら連続失敗数をリセットする（#1057）
+        pollFailureCountRef.current = 0
         if (detail.report) {
           hasReport = true
           reportPayload = detail.report
         }
       } catch {
-        fetchFailed = true
+        pollFailureCountRef.current += 1
       }
 
       if (generation !== pollGenerationRef.current) return
@@ -461,7 +467,7 @@ export function useInterviewSession({
         nowMs: Date.now(),
         timeoutMs: REPORT_POLL_TIMEOUT_MS,
         hasReport,
-        fetchFailed,
+        consecutiveFailures: pollFailureCountRef.current,
       })
 
       if (outcome === 'ready' && reportPayload) {
@@ -576,11 +582,13 @@ export function useInterviewSession({
   const sendReportEmail = async () => {
     if (!session || !user) return
     setEmailSending(true)
+    setEmailError('')
     try {
       await interviewApi.sendReportEmail(session.id, user.user_id)
       setEmailSent(true)
     } catch {
-      // ignore
+      // 握り潰すとユーザーが送信成功と誤解するため、必ずUIへ伝える（#1056）
+      setEmailError('メールの送信に失敗しました。時間をおいて再度お試しください。')
     } finally {
       setEmailSending(false)
     }
@@ -604,6 +612,7 @@ export function useInterviewSession({
     retryReportPolling,
     emailSending,
     emailSent,
+    emailError,
     aiLevel,
     aiSpeaking,
     avatarGender,

@@ -6,6 +6,7 @@ package middleware
 import (
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -86,22 +87,36 @@ func (rl *RateLimiter) cleanupLoop() {
 	}
 }
 
-// GetClientIP は X-Forwarded-For / X-Real-IP を優先してクライアントIPを取得する
+// GetClientIP は X-Forwarded-For / X-Real-IP を優先してクライアントIPを取得する。
+//
+// X-Forwarded-For はクライアントが自由に詐称でき、ALB は「既存の値の末尾」へ実IPを追記する。
+// したがって信頼できるのは最後の要素のみ。以前は複数要素のときにカンマ区切り文字列を
+// そのまま返しており、攻撃者が先頭を書き換えるだけで無限に異なるキーを作れたため、
+// IP単位のレート制限(ログイン試行を含む)を完全に回避できた。
 func GetClientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if ip, _, err := net.SplitHostPort(xff); err == nil {
-			return ip
+		parts := strings.Split(xff, ",")
+		if last := strings.TrimSpace(parts[len(parts)-1]); last != "" {
+			return stripPort(last)
 		}
-		return xff
 	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
+	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+		return stripPort(xri)
 	}
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
 	}
 	return ip
+}
+
+// stripPort は "IP:port" 形式ならホスト部を返す。XFF の要素は通常IPのみだが、
+// ポート付きで送出する実装もあるため正規化してキーの重複を防ぐ。
+func stripPort(v string) string {
+	if host, _, err := net.SplitHostPort(v); err == nil {
+		return host
+	}
+	return v
 }
 
 // LoginRateLimiter はログイン試行のレート制限器（差し替え可能）

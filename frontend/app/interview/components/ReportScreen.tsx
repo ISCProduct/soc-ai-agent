@@ -16,6 +16,7 @@ import HistoryIcon from '@mui/icons-material/History'
 import { InterviewReport, InterviewSession } from '@/lib/interview'
 import InterviewSummary from './InterviewSummary'
 import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
+import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { PRIMARY, BG_DARK } from '../constants'
 import type { ReportStatus } from '../hooks/useInterviewSession'
 import {
@@ -36,6 +37,7 @@ export interface ReportScreenProps {
   userId?: number
   emailSending: boolean
   emailSent: boolean
+  emailError: string
   onSendEmail: () => void
   /** タイムアウト / エラー時の再ポーリング */
   onRetryReport?: () => void
@@ -68,6 +70,7 @@ export default function ReportScreen({
   userId,
   emailSending,
   emailSent,
+  emailError,
   onSendEmail,
   onRetryReport,
   finishFailed,
@@ -144,6 +147,7 @@ export default function ReportScreen({
                       </Button>
                     </span>
                   </Tooltip>
+                  <ErrorAlert error={emailError} sx={{ mb: 0 }} />
                   {isGuest && (
                     <Typography variant="caption" sx={{ color: '#9aa0a6', textAlign: 'center' }}>
                       {GUEST_EMAIL_DISABLED_REASON}{' '}

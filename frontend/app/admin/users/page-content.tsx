@@ -14,6 +14,7 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin-fetch'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
@@ -63,17 +64,19 @@ export default function PageContent() {
       if (query.trim()) params.set('q', query.trim())
       if (schoolId !== undefined) params.set('school_id', String(schoolId))
 
-      const response = await fetch(`/api/admin/users?${params}`, {
-        headers: authService.getAdminFetchHeaders(),
-      })
-      const data = await response.json()
-      if (cancelled) return
-      if (!response.ok) {
-        setError(data?.error || 'ユーザー一覧の取得に失敗しました')
-        return
+      try {
+        const data = await adminFetchJson<{ users?: AdminUser[]; total?: number }>(
+          `/api/admin/users?${params}`,
+          { headers: authService.getAdminFetchHeaders() },
+          'ユーザー一覧の取得に失敗しました',
+        )
+        if (cancelled) return
+        setUsers(data?.users || [])
+        setTotal(data?.total ?? 0)
+      } catch (e) {
+        if (cancelled) return
+        setError(toAdminErrorMessage(e))
       }
-      setUsers(data?.users || [])
-      setTotal(data?.total ?? 0)
     }, query ? 400 : 0)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [page, rowsPerPage, query, schoolId])
@@ -82,19 +85,23 @@ export default function PageContent() {
     const admin = authService.getStoredUser()
     if (!admin?.email) return
     setLoading(true)
-    const response = await fetch(`/api/admin/users/${user.id}`, {
-      method: 'PUT',
-      headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_admin: !user.is_admin }),
-    })
-    const data = await response.json()
-    if (!response.ok) {
-      setError(data?.error || '権限更新に失敗しました')
+    setError('')
+    try {
+      const data = await adminFetchJson<AdminUser>(
+        `/api/admin/users/${user.id}`,
+        {
+          method: 'PUT',
+          headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ is_admin: !user.is_admin }),
+        },
+        '権限更新に失敗しました',
+      )
+      setUsers((prev) => prev.map((item) => (item.id === user.id ? { ...item, ...data } : item)))
+    } catch (e) {
+      setError(toAdminErrorMessage(e))
+    } finally {
       setLoading(false)
-      return
     }
-    setUsers((prev) => prev.map((item) => (item.id === user.id ? { ...item, ...data } : item)))
-    setLoading(false)
   }
 
   const handleDeleteUser = async (user: AdminUser) => {
@@ -103,19 +110,19 @@ export default function PageContent() {
     }
     setLoading(true)
     setError('')
-    const response = await fetch(`/api/admin/users/${user.id}`, {
-      method: 'DELETE',
-      headers: authService.getAdminFetchHeaders(),
-    })
-    const data = await response.json().catch(() => ({}))
-    if (!response.ok) {
-      setError((data as { error?: string })?.error || 'ユーザー削除に失敗しました')
+    try {
+      await adminFetchJson(
+        `/api/admin/users/${user.id}`,
+        { method: 'DELETE', headers: authService.getAdminFetchHeaders() },
+        'ユーザー削除に失敗しました',
+      )
+      setUsers((prev) => prev.filter((item) => item.id !== user.id))
+      setTotal((prev) => Math.max(0, prev - 1))
+    } catch (e) {
+      setError(toAdminErrorMessage(e))
+    } finally {
       setLoading(false)
-      return
     }
-    setUsers((prev) => prev.filter((item) => item.id !== user.id))
-    setTotal((prev) => Math.max(0, prev - 1))
-    setLoading(false)
   }
 
   const handleQueryChange = (value: string) => {
