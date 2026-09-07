@@ -162,6 +162,14 @@ export function useResumePage() {
   }
 
   const handleUpload = async () => {
+    // ファイルもURLも無い状態で送ると、バックエンドの分かりにくいエラーがそのまま
+    // 表示される。リクエストを投げる前にフロント側で弾く（#1055）。
+    // 既存のレビュー結果もクリアしない（アップロードは開始されていないため）。
+    if (!file && !sourceUrl.trim()) {
+      setUploadError('ファイルを選択するかURLを入力してください')
+      return
+    }
+
     // 別文書の再アップロード時、直前のレビュー結果の残存や
     // 進行中ストリームによる上書きを防ぐため、レビュー関連stateを初期化する
     reviewAbortRef.current?.abort()
