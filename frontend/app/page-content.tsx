@@ -9,6 +9,7 @@ import { MuiChat } from '@/components/mui-chat'
 import { PageLoading } from '@/components/common/PageLoading'
 import { authService, User } from '@/lib/auth'
 import { WhatsNewEntry, fetchWhatsNewEntries, hasUnreadWhatsNew, markWhatsNewAsSeen } from '@/lib/whats-new-data'
+import { fetchResumeStatus, resumeReminderMessage } from '@/lib/resume-reminder'
 import styles from './page.module.css'
 
 export default function PageContent() {
@@ -18,6 +19,7 @@ export default function PageContent() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [whatsNewEntries, setWhatsNewEntries] = useState<WhatsNewEntry[]>([])
   const [showWhatsNewBanner, setShowWhatsNewBanner] = useState(false)
+  const [resumeReminder, setResumeReminder] = useState<string | null>(null)
 
   useEffect(() => {
     const storedUser = authService.getStoredUser()
@@ -34,6 +36,11 @@ export default function PageContent() {
       })
       .catch(() => {
         // 更新情報の取得失敗はチャット画面の利用を妨げない
+      })
+    fetchResumeStatus()
+      .then((status) => setResumeReminder(resumeReminderMessage(status)))
+      .catch(() => {
+        // 履歴書状態の取得失敗はホーム画面を壊さない（バナーを出さない）
       })
   }, [router])
 
@@ -98,6 +105,24 @@ export default function PageContent() {
             }
           >
             新着情報: {whatsNewEntries[0].title}
+          </Alert>
+        )}
+        {resumeReminder && (
+          <Alert
+            severity="warning"
+            onClose={() => setResumeReminder(null)}
+            sx={{ borderRadius: 0 }}
+            action={
+              <Box
+                component="a"
+                href="/resume"
+                sx={{ fontSize: '0.8rem', fontWeight: 600, color: 'inherit', textDecoration: 'underline', mr: 1, alignSelf: 'center' }}
+              >
+                履歴書を確認する
+              </Box>
+            }
+          >
+            {resumeReminder}
           </Alert>
         )}
         <div className={styles.chatWrapper}>
