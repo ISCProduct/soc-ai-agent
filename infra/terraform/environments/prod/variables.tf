@@ -190,5 +190,9 @@ variable "domain_name" {
 variable "enable_error_fallback" {
   type        = bool
   description = "frontendを常時CloudFront経由にし、ALBが500/502/503/504を返す場合(本番停止中を含む)にS3のOGP付き静的ページへフェイルオーバーするか"
-  default     = false
+  # 本番(shukatsu-ai.jp / *.shukatsu-ai.jp)は既にCloudFront経由で配信済みのため既定はtrue。
+  # falseにするとcloudfront_app_proxyモジュールがcount=0になり、planが本番の
+  # CloudFrontディストリビューション・ACM証明書・S3エラーページを破壊対象に含める。
+  # 実際に「IAM権限不足の回避」でfalseへ倒したまま放置され、applyできない状態が続いた。
+  default = true
 }

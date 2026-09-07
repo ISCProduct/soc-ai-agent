@@ -87,7 +87,33 @@ jobs:
             fi
           fi
 
+          AUTOSCALING_FAILED=""
           for SERVICE in backend frontend; do
+            # オートスケーリングの下限を desired と同じ値に合わせる。
+            # desired_count だけ更新しても min_capacity=0 のままだと CPU ターゲット追跡が
+            # 0 まで縮退させ、タスク0ではCPUメトリクスが出ないため自力復帰できない。
+            # 結果として稼働日でも本番APIが断続的に503になる。max は Terraform 側の
+            # 値をそのまま引き継ぐため AWS から読み取る(ハードコードすると乖離する)。
+            RESOURCE_ID="service/${PROJECT_NAME}/${SERVICE}"
+            if MAX=$(aws application-autoscaling describe-scalable-targets \
+              --service-namespace ecs --resource-ids "$RESOURCE_ID" \
+              --scalable-dimension ecs:service:DesiredCount \
+              --query 'ScalableTargets[0].MaxCapacity' --output text 2>/dev/null) \
+              && [ -n "$MAX" ] && [ "$MAX" != "None" ]; then
+              if aws application-autoscaling register-scalable-target \
+                --service-namespace ecs --resource-id "$RESOURCE_ID" \
+                --scalable-dimension ecs:service:DesiredCount \
+                --min-capacity "$DESIRED" --max-capacity "$MAX" > /dev/null; then
+                echo "$SERVICE min_capacity -> $DESIRED (max=$MAX)"
+              else
+                echo "$SERVICE: register-scalable-target に失敗(IAM権限を確認: application-autoscaling:RegisterScalableTarget)" >&2
+                AUTOSCALING_FAILED=1
+              fi
+            else
+              echo "$SERVICE: describe-scalable-targets に失敗(IAM権限を確認: application-autoscaling:DescribeScalableTargets)" >&2
+              AUTOSCALING_FAILED=1
+            fi
+
             CURRENT=$(aws ecs describe-services --cluster "$PROJECT_NAME" --services "$SERVICE" \
               --query 'services[0].desiredCount' --output text 2>/dev/null || echo "")
             if [ "$CURRENT" == "$DESIRED" ]; then
@@ -110,4 +136,11 @@ jobs:
             else
               echo "RDS status: $RDS_STATUS, skipping stop"
             fi
+          fi
+
+          # desired_count の反映は済ませたうえで、オートスケーリング下限の同期に
+          # 失敗していればジョブを失敗させる(放置すると稼働日に0へ縮退して気づけない)。
+          if [ -n "$AUTOSCALING_FAILED" ]; then
+            echo "オートスケーリング下限(min_capacity)の同期に失敗しました" >&2
+            exit 1
           fi

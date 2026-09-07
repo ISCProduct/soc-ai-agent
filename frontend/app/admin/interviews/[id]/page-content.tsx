@@ -21,6 +21,7 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin-fetch'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 
@@ -68,16 +69,18 @@ export default function PageContent() {
     const fetchVideos = async () => {
       setLoading(true)
       setError('')
-      const response = await fetch(`/api/admin/interviews/${sessionId}/videos`, {
-        headers: authService.getAdminFetchHeaders(),
-      })
-      const data = await response.json()
-      setLoading(false)
-      if (!response.ok) {
-        setError(data?.error || '動画一覧の取得に失敗しました')
-        return
+      try {
+        const data = await adminFetchJson<{ videos?: InterviewVideo[] }>(
+          `/api/admin/interviews/${sessionId}/videos`,
+          { headers: authService.getAdminFetchHeaders() },
+          '動画一覧の取得に失敗しました',
+        )
+        setVideos(data?.videos || [])
+      } catch (e) {
+        setError(toAdminErrorMessage(e))
+      } finally {
+        setLoading(false)
       }
-      setVideos(data?.videos || [])
     }
     fetchVideos()
   }, [sessionId])
@@ -87,16 +90,18 @@ export default function PageContent() {
     setUrlLoading(video.id)
     setUrlError('')
     setPlayingURL(null)
-    const response = await fetch(`/api/admin/interviews/${sessionId}/videos/${video.id}/url`, {
-      headers: authService.getAdminFetchHeaders(),
-    })
-    const data = await response.json()
-    setUrlLoading(null)
-    if (!response.ok) {
-      setUrlError(data?.error || 'URLの取得に失敗しました')
-      return
+    try {
+      const data = await adminFetchJson<{ url: string }>(
+        `/api/admin/interviews/${sessionId}/videos/${video.id}/url`,
+        { headers: authService.getAdminFetchHeaders() },
+        'URLの取得に失敗しました',
+      )
+      setPlayingURL(data.url)
+    } catch (e) {
+      setUrlError(toAdminErrorMessage(e))
+    } finally {
+      setUrlLoading(null)
     }
-    setPlayingURL(data.url)
   }
 
   const formatBytes = (bytes: number) => {

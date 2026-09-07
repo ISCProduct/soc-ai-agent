@@ -4,6 +4,7 @@ import (
 	"Backend/domain/entity"
 	"Backend/domain/mapper"
 	"Backend/domain/repository"
+	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/prompts"
@@ -98,14 +99,14 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 		match.CompanyID = company.ID
 		match.Company = mapper.CompanyToEntity(company)
 
-		reason, err := s.GenerateMatchReason(ctx, match, userScores)
-		if err != nil {
-			log.Printf("[CalculateMatching] Warning: Failed to generate AI reason for company %d: %v\n", company.ID, err)
-			reason = BuildMatchReason(match, userScores)
-		}
-		match.MatchReason = reason
+		// ここでは LLM を呼ばず、テンプレ+DB のみで理由を埋める（外部I/Oなし）
+		match.MatchReason = BuildMatchReason(match, userScores)
 		pending = append(pending, match)
 	}
+
+	// 4. 表示されるのは match_score 降順の上位のみ（FindTopMatchesByUserAndSession）。
+	//    AI 理由の生成もその範囲に限定する（#1061 / #588 のコスト・レイテンシ懸念）
+	s.applyAIReasonsToTopMatches(ctx, pending, userScores)
 
 	matchCount, err := s.matchRepo.CreateOrUpdateBatch(pending)
 	if err != nil {
@@ -114,6 +115,52 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 
 	log.Printf("[CalculateMatching] Completed: %d matches created for user %d, session %s\n", matchCount, userID, sessionID)
 	return nil
+}
+
+// applyAIReasonsToTopMatches はマッチ度上位N件だけ AI 理由で上書きする（#1061）。
+//
+// 表示側は match_score 降順の上位しか読まない（GetTopMatches の既定10件、レポート経路は5件）。
+// 全公開企業ぶん生成すると、本番想定 2,500〜4,000 社では大半が捨てられる LLM 呼び出しになり、
+// #588 が既定オフにした理由（コストとレイテンシ）がそのまま戻る。
+//
+// 呼び出し前に全件が BuildMatchReason で埋まっているため、AI 生成に失敗しても
+// テンプレ理由が残る。既定オフのときは何もしない。
+func (s *MatchingService) applyAIReasonsToTopMatches(
+	ctx context.Context, pending []*entity.UserCompanyMatch, userScores []entity.UserWeightScore,
+) {
+	if !matchingReasonUseAI() || s.aiClient == nil {
+		return
+	}
+
+	top := topMatchesByScore(pending, config.MatchingReasonAITopN())
+	log.Printf("[CalculateMatching] Generating AI reasons for top %d of %d matches\n", len(top), len(pending))
+
+	for _, match := range top {
+		reason, err := s.GenerateMatchReason(ctx, match, userScores)
+		if err != nil {
+			log.Printf("[CalculateMatching] Warning: Failed to generate AI reason for company %d: %v\n", match.CompanyID, err)
+			continue // BuildMatchReason で入れたテンプレ理由が残る
+		}
+		match.MatchReason = reason
+	}
+}
+
+// topMatchesByScore は MatchScore 降順の上位 limit 件を返す。
+// pending の並び順は保存順に影響するため変更せず、スライスだけ複製して並べ替える。
+// 同点時の順序を安定させるため SliceStable を使う。
+func topMatchesByScore(pending []*entity.UserCompanyMatch, limit int) []*entity.UserCompanyMatch {
+	if limit <= 0 || len(pending) == 0 {
+		return nil
+	}
+	sorted := make([]*entity.UserCompanyMatch, len(pending))
+	copy(sorted, pending)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].MatchScore > sorted[j].MatchScore
+	})
+	if limit > len(sorted) {
+		limit = len(sorted)
+	}
+	return sorted[:limit]
 }
 
 // matchingPublishedPageSize はマッチング対象企業の1ページあたり取得件数。

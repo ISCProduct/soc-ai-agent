@@ -236,7 +236,11 @@ resource "aws_ecs_service" "this" {
   }
 
   lifecycle {
-    ignore_changes = [desired_count]
+    # desired_count: uptimeスケジューラ(prod-uptime-scheduler.yml)が稼働日に応じて更新する。
+    # task_definition: デプロイ(deployment.yml)がregister-task-definitionで新リビジョンを
+    # 登録しサービスへ適用する。ここでignoreしないと、applyの度に稼働中のリビジョンが
+    # tfvarsのimage定義まで巻き戻り、デプロイ済みの変更が本番から消える。
+    ignore_changes = [desired_count, task_definition]
   }
 
   tags = var.tags
