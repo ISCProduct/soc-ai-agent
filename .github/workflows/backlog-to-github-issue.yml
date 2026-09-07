@@ -45,7 +45,7 @@ jobs:
           MINUTES_BACK: ${{ inputs.minutes_back || '20' }}
         run: |
           python3 - << 'PYEOF'
-          import os, sys, json, urllib.parse, urllib.request, urllib.error
+          import os, re, sys, json, urllib.parse, urllib.request, urllib.error
           from datetime import datetime, timezone, timedelta
 
           sys.path.insert(0, ".github/scripts")
@@ -85,15 +85,33 @@ jobs:
               )
               sys.exit(1)
 
+          # 課題1件ごとに Search API を呼ぶと、Search の制限(30回/分)にすぐ達して
+          # 403 になり、大半が「対応Issue未検出」として取りこぼされる。
+          # Issue 一覧を1回だけ取得して bl_key -> Issue の対応表を作る。
+          # 一覧は core API(5000回/時)なので、300件でも4リクエスト程度で済む。
+          def build_issue_index():
+              index = {}
+              page = 1
+              while True:
+                  items = gh_request("GET", f"/repos/{GH_REPO}/issues?state=all&per_page=100&page={page}")
+                  if not items:
+                      break
+                  for it in items:
+                      if "pull_request" in it:
+                          continue
+                      m = re.match(rf'^\[({re.escape(PROJ_KEY)}-\d+)\]\s', it.get("title") or "")
+                      if m:
+                          index.setdefault(m.group(1), it)
+                  if len(items) < 100:
+                      break
+                  page += 1
+              return index
+
+          ISSUE_INDEX = build_issue_index()
+          print(f"GitHub Issue の対応表を作成しました: {len(ISSUE_INDEX)} 件")
+
           def gh_search_issue(bl_key):
-              q = urllib.parse.quote(f"[{bl_key}] repo:{GH_REPO} in:title is:issue")
-              result = gh_request("GET", f"/search/issues?q={q}&per_page=5")
-              if not result:
-                  return None
-              for item in result.get("items", []):
-                  if item["title"].startswith(f"[{bl_key}]"):
-                      return item
-              return None
+              return ISSUE_INDEX.get(bl_key)
 
           project = bl_request(BL_BASE, API_KEY, "GET", f"/projects/{PROJ_KEY}")
           project_id = project["id"]
