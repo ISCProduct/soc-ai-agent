@@ -68,6 +68,11 @@ func RelationEnrichMaxTargets() int { return getIntOrDefault("RELATION_ENRICH_MA
 
 func ValidationCacheTTLMinutes() int { return getIntOrDefault("VALIDATION_CACHE_TTL_MINUTES", 30) }
 
+// MatchingReasonAITopN は AI マッチング理由を生成する上位件数（#1061）。
+// 表示側は match_score 降順の上位のみ読むため（GetTopMatches の既定10件、レポート経路は5件）、
+// 全公開企業ぶん生成しても大半が捨てられる。limit クエリでの上振れを吸収して 20 を既定とする。
+func MatchingReasonAITopN() int { return getIntOrDefault("MATCHING_REASON_AI_TOP_N", 20) }
+
 func getIntOrDefault(key string, def int) int {
 	raw := os.Getenv(key)
 	if raw == "" {
