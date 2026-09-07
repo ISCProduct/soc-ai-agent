@@ -588,18 +588,24 @@ jobs:
           fi
           exit $fail
 
+      # merge commit 件名（Merge pull request #N）ではなく、マージPRのタイトル
+      # （Release to production: ...）と本文の機能一覧を通知に使う。
       - name: Notify Discord release
         env:
           DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           if [ -z "${DISCORD_RELEASE_WEBHOOK_URL:-}" ]; then
             echo "DISCORD_RELEASE_WEBHOOK_URL is not set; skip Discord notify"
             exit 0
           fi
-          COMMIT_MSG="$(git log -1 --format=%s)"
-          COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          CONTENT="$(printf '🚀 **本番リリース速報**\n%s\n\nCommit: %s\nRun: %s\nBy: %s' "$COMMIT_MSG" "$COMMIT_URL" "$RUN_URL" "${{ github.actor }}")"
+          CONTENT="$(python3 automation/discord/build_release_notify.py \
+            --commit-subject "$(git log -1 --format=%s)" \
+            --commit-url "${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --actor "${{ github.actor }}" \
+            --repo "${{ github.repository }}")"
           PAYLOAD="$(python3 -c "import json,sys; print(json.dumps({'content': sys.argv[1]}))" "$CONTENT")"
           curl -sS -X POST -H 'Content-Type: application/json' -d "$PAYLOAD" "$DISCORD_RELEASE_WEBHOOK_URL"
 
