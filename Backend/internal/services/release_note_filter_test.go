@@ -29,6 +29,9 @@ func TestIsDeveloperOnlyReleaseNote(t *testing.T) {
 		{name: "デプロイパイプラインは除外", title: "改善", body: "デプロイパイプラインの安定化", want: true},
 		{name: "CI/CDは除外", title: "速度改善", body: "CI/CD の並列化", want: true},
 		{name: "保存済みのやさしい要約でもTerraformなら除外", title: "構成を更新しました", body: "Terraform構成を直しました。", want: true},
+		// Release 傘PRは本文に Fargate/Terraform 定型文があっても LLM に任せる
+		{name: "Release傘PRのFargate定型文は除外しない", title: "Release to production: 面接UX修正", body: "マージすると本番（ECS on Fargate）へ自動デプロイされます。", want: false},
+		{name: "Release傘PRのterraform言及は除外しない", title: "Release: 2026-09-07 レート制限回避ほか", body: "infra/terraform の修正を含む", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
