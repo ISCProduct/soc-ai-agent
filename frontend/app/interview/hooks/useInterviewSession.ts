@@ -85,6 +85,8 @@ export function useInterviewSession({
   const pollSessionRef = useRef<{ sessionId: number; userId: number } | null>(null)
   /** 再試行時に古い tick の結果を破棄するための世代カウンタ */
   const pollGenerationRef = useRef(0)
+  // レポートポーリングの連続fetch失敗数。成功したら0に戻す（#1057）
+  const pollFailureCountRef = useRef(0)
   /** playAudioBlob の世代。cleanupConnection で increment し、古い再生を破棄する */
   const audioGenerationRef = useRef(0)
   const sessionStartRef = useRef<number | null>(null)
@@ -434,6 +436,7 @@ export function useInterviewSession({
     const generation = ++pollGenerationRef.current
     pollSessionRef.current = { sessionId, userId }
     pollStartedAtRef.current = Date.now()
+    pollFailureCountRef.current = 0
     setReportStatus('pending')
 
     const tick = async () => {
@@ -441,17 +444,18 @@ export function useInterviewSession({
 
       const startedAt = pollStartedAtRef.current ?? Date.now()
       let hasReport = false
-      let fetchFailed = false
       let reportPayload: InterviewReport | null = null
 
       try {
         const detail = await interviewApi.getDetail(sessionId, userId)
+        // 通信が復帰したら連続失敗数をリセットする（#1057）
+        pollFailureCountRef.current = 0
         if (detail.report) {
           hasReport = true
           reportPayload = detail.report
         }
       } catch {
-        fetchFailed = true
+        pollFailureCountRef.current += 1
       }
 
       if (generation !== pollGenerationRef.current) return
@@ -461,7 +465,7 @@ export function useInterviewSession({
         nowMs: Date.now(),
         timeoutMs: REPORT_POLL_TIMEOUT_MS,
         hasReport,
-        fetchFailed,
+        consecutiveFailures: pollFailureCountRef.current,
       })
 
       if (outcome === 'ready' && reportPayload) {
