@@ -14,6 +14,10 @@ import (
 	"time"
 )
 
+// jobChBufferSize はフォールバック用レポート生成キューのバッファ長。
+// 満杯時はブロックせず捨てる（#1062、offerReportJob 参照）。
+const jobChBufferSize = 100
+
 type InterviewService struct {
 	sessionRepo          repository.InterviewSessionRepository
 	utterRepo            repository.InterviewUtteranceRepository
@@ -56,7 +60,7 @@ func NewInterviewService(
 		emailService:         emailService,
 		openaiClient:         openaiClient,
 		realtimeUsageService: realtimeUsageService,
-		jobCh:                make(chan uint, 100),
+		jobCh:                make(chan uint, jobChBufferSize),
 	}
 }
 
@@ -106,16 +110,36 @@ func (s *InterviewService) GenerateReportForSession(ctx context.Context, session
 }
 
 // enqueueReportGeneration は Redis キュー優先、未設定時は in-process channel。
+//
+// channel への送信は必ずノンブロッキングにする（#1062）。FinishSession は HTTP ハンドラから
+// 同期的に呼ばれるため、バッファ(jobChBufferSize)が埋まった状態でブロッキング送信すると
+// 面接終了APIがそのままハングし、goroutine が解放されない。
+// 溢れた場合はレポート生成を諦めてエラーログに残す（本番は Redis 経路が primary で、
+// そちらは asynq がジョブを永続化するため、この channel はフォールバック専用）。
 func (s *InterviewService) enqueueReportGeneration(sessionID uint) {
 	if s.jobs != nil {
 		if err := s.jobs.EnqueueInterviewReport(sessionID); err != nil {
 			log.Printf("[Interview] enqueue report failed, fallback channel: %v", err)
-			s.jobCh <- sessionID
+			s.offerReportJob(sessionID)
 			return
 		}
 		return
 	}
-	s.jobCh <- sessionID
+	s.offerReportJob(sessionID)
+}
+
+// offerReportJob は jobCh へノンブロッキングに投入する。投入できなければ false を返す。
+func (s *InterviewService) offerReportJob(sessionID uint) bool {
+	select {
+	case s.jobCh <- sessionID:
+		return true
+	default:
+		// バッファ満杯。ここで待つと呼び出し元(FinishSession)ごとハングするため捨てる。
+		// 手動で再生成できるよう sessionID をログに残す。
+		log.Printf("[Interview] ERROR: report job queue full (cap=%d), dropped report generation for session %d",
+			jobChBufferSize, sessionID)
+		return false
+	}
 }
 
 type InterviewSessionResponse struct {
