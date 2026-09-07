@@ -22,6 +22,7 @@ describe('ReportScreen', () => {
         userId={1}
         emailSending={false}
         emailSent={false}
+        emailError=""
         onSendEmail={noop}
         isGuest={false}
         onRegisterClick={noop}
@@ -103,5 +104,64 @@ describe('ReportScreen', () => {
 
     expect(screen.getByText('時間上限に達したため面接を終了しました。')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '再試行' })).not.toBeInTheDocument()
+  })
+})
+
+describe('ReportScreen メール送信エラー表示 (#1056)', () => {
+  const noop = () => {}
+
+  // メール送信ボタンは reportStatus==='ready' かつ report ありのときだけ描画される
+  const READY_REPORT = {
+    session_id: 1,
+    summary_text: '要約',
+    scores_json: '{}',
+    evidence_json: '{}',
+    created_at: '2026-09-07',
+    updated_at: '2026-09-07',
+  }
+
+  function renderWithEmailError(emailError: string) {
+    render(
+      <ReportScreen
+        onBack={noop}
+        errorMessage={null}
+        reportStatus="ready"
+        report={READY_REPORT}
+        scoresBefore={null}
+        scoresAfter={null}
+        session={null}
+        userId={1}
+        emailSending={false}
+        emailSent={false}
+        emailError={emailError}
+        onSendEmail={noop}
+        onRetryReport={noop}
+        onRegisterClick={noop}
+        isGuest={false}
+        videoUploadStatus="idle"
+        videoUploadProgress={0}
+        videoSizeWarning={null}
+      />,
+    )
+  }
+
+  it('emailError があればメッセージを表示する', () => {
+    renderWithEmailError('メールの送信に失敗しました。時間をおいて再度お試しください。')
+
+    expect(
+      screen.getByText('メールの送信に失敗しました。時間をおいて再度お試しください。'),
+    ).toBeInTheDocument()
+  })
+
+  it('emailError が空なら何も表示しない', () => {
+    renderWithEmailError('')
+
+    expect(screen.queryByText(/送信に失敗/)).not.toBeInTheDocument()
+  })
+
+  it('送信失敗後もボタンは押せる状態に戻っている', () => {
+    renderWithEmailError('メールの送信に失敗しました。時間をおいて再度お試しください。')
+
+    expect(screen.getByRole('button', { name: 'レポートをメールで受け取る' })).not.toBeDisabled()
   })
 })

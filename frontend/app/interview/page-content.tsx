@@ -315,6 +315,7 @@ function InterviewContent() {
         userId={user?.user_id}
         emailSending={session.emailSending}
         emailSent={session.emailSent}
+        emailError={session.emailError}
         isGuest={!user || user.is_guest}
         onRegisterClick={() => router.push(GUEST_REGISTER_PATH)}
         onSendEmail={session.sendReportEmail}
