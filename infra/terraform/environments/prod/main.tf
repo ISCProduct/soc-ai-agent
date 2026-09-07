@@ -76,6 +76,12 @@ locals {
         valueFrom = "${aws_secretsmanager_secret.admin.arn}:user_secret::"
       },
       {
+        # #1091の企業ポータル認証で本番必須(config.go:56のプレースホルダー検査で
+        # 未設定ならlog.Fatalfで起動失敗する)。追加漏れで本番が起動不能になった。
+        name      = "COMPANY_USER_SECRET"
+        valueFrom = "${aws_secretsmanager_secret.admin.arn}:company_user_secret::"
+      },
+      {
         name      = "OAUTH_STATE_SECRET"
         valueFrom = "${aws_secretsmanager_secret.admin.arn}:oauth_state_secret::"
       },
@@ -98,6 +104,11 @@ locals {
 # ADMIN_SECRETのみCI(sync-whats-newジョブ)から既知の値で呼べる必要があるため
 # var.admin_secret(固定値、stagingと同じ値を設定)を使う。
 resource "random_password" "user_secret" {
+  length  = 48
+  special = false
+}
+
+resource "random_password" "company_user_secret" {
   length  = 48
   special = false
 }
@@ -151,6 +162,7 @@ resource "aws_secretsmanager_secret_version" "admin" {
   secret_string = jsonencode({
     admin_secret         = var.admin_secret
     user_secret          = random_password.user_secret.result
+    company_user_secret  = random_password.company_user_secret.result
     oauth_state_secret   = random_password.oauth_state_secret.result
     token_encryption_key = random_id.token_encryption_key.hex
   })
@@ -654,14 +666,21 @@ module "chroma" {
 }
 
 # backend/frontendのCPU使用率に応じたオートスケーリング(0〜2タスク)。
-# 本番は既定停止(desired_count=0)方針のため、min_capacityも0にしておかないと
-# オートスケーリングが1へ引き戻してしまう(terraform.tfvarsの運用コメント参照)。
+# min_capacityの実値はuptimeスケジューラ(prod-uptime-scheduler.yml)が稼働日に応じて
+# 0/1へ更新するため、desired_countと同様にignore_changesで実態を尊重する。
+# ここをignoreしないと、稼働日にスケジューラがdesired_count=1にしても
+# min_capacity=0のままCPUターゲット追跡が0まで縮退させ、しかもタスク0では
+# CPUメトリクスが出ないため自力復帰できない(本番APIが断続的に503になる)。
 resource "aws_appautoscaling_target" "backend" {
   max_capacity       = 2
   min_capacity       = var.backend_desired_count
   resource_id        = "service/${var.project_name}/backend"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"
+
+  lifecycle {
+    ignore_changes = [min_capacity]
+  }
 
   depends_on = [module.backend]
 }
@@ -689,6 +708,10 @@ resource "aws_appautoscaling_target" "frontend" {
   resource_id        = "service/${var.project_name}/frontend"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"
+
+  lifecycle {
+    ignore_changes = [min_capacity]
+  }
 
   depends_on = [module.frontend]
 }
