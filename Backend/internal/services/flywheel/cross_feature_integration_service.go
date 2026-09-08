@@ -37,8 +37,8 @@ var interviewScoreMapping = []struct {
 	{"communication", []string{"コミュニケーション力"}},
 	{"logic", []string{"技術志向"}},
 	{"specificity", []string{"細部志向"}},
-	{"ownership", []string{"リーダーシップ", "チャレンジ志向"}},
-	{"enthusiasm", []string{"成長志向", "チームワーク"}},
+	{"ownership", []string{"リーダーシップ志向", "チャレンジ志向"}},
+	{"enthusiasm", []string{"成長志向", "チームワーク志向"}},
 }
 
 // UpdateScoresFromInterviewReport 面接レポートを元に UserWeightScore を更新する

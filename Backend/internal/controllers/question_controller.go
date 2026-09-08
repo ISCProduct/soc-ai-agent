@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/domain/valueobject"
 	"Backend/internal/models"
 	"Backend/internal/services/chat"
 	"Backend/internal/services/interfaces"
@@ -56,6 +57,14 @@ func (c *QuestionController) CreateQuestion(ctx echo.Context) error {
 	if qw.Question == "" || qw.WeightCategory == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "question and weight_category are required")
 	}
+	// 正典外のカテゴリを question_weights へ入れさせない（#929）。
+	// user_weight_scores 側はリポジトリで塞いだが、ここは API 入力から
+	// 任意文字列がそのまま保存される別経路だった。
+	normalized, err := valueobject.ParseWeightCategory(qw.WeightCategory)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	qw.WeightCategory = string(normalized)
 
 	if err := c.questionService.CreateQuestion(&qw); err != nil {
 		return echoInternalError(err)
