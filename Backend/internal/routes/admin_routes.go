@@ -27,6 +27,7 @@ func SetupAdminRoutes(
 	scraperSessionController *controllers.AdminScraperSessionController,
 	adminVectorController *controllers.AdminVectorController,
 	appController *controllers.ApplicationController,
+	teacherInsightController *controllers.TeacherStudentInsightController,
 	userRepo *repositories.UserRepository,
 	schoolService *services.SchoolService,
 	adminSecret string,
@@ -93,6 +94,10 @@ func SetupAdminRoutes(
 
 	// ユーザー管理
 	admin.GET("/users", adminUserController.List, schoolScope)
+
+	// 教員（担当校を持つ管理者）向けの生徒傾向分析（#1027）。
+	// schoolScope により、担当校を持つ管理者は自校の生徒しか見られない。
+	admin.GET("/teacher/students/tendency-analysis", teacherInsightController.TendencyAnalysis, schoolScope)
 	admin.PUT("/users/:id", adminUserController.Update)
 	admin.DELETE("/users/:id", adminUserController.Delete)
 	admin.POST("/users/purge-expired", adminUserController.PurgeExpired)

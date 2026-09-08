@@ -106,8 +106,9 @@ func TestAcceptInvite_ExpiredToken(t *testing.T) {
 	svc.now = func() time.Time { return time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC) }
 	expired := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
+	// 招待トークンは平文ではなく SHA-256 hex で照合される(#1196)。
 	mock.ExpectQuery("SELECT \\* FROM `company_users`").
-		WithArgs("tok", 1).
+		WithArgs(hashToken("tok"), 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "company_id", "email", "password", "invite_expires_at"}).
 			AddRow(1, 10, "hr@example.com", "", expired))
 

@@ -85,6 +85,17 @@ func (c *AdminJobController) CreateJobPosition(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "job_category_id is required")
 	}
 	payload.IsActive = true
+	// 求人の公開状態は所属企業に合わせる。
+	// DBデフォルトの draft のままだと、公開済み企業に管理者が求人を足しても
+	// 学生側のクエリ(data_status='published')に乗らず、別途 publish 操作が要る（#1074）。
+	//
+	// エラーを握り潰すと継承がスキップされて draft で作られ、
+	// 「公開済み企業に足したのに学生に出ない」が無言で再発する。
+	company, err := c.companyRepo.FindByID(payload.CompanyID)
+	if err != nil || company == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "company not found")
+	}
+	payload.DataStatus = company.DataStatus
 	if err := c.companyRepo.CreateJobPosition(&payload); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create job position")
 	}
@@ -112,6 +123,12 @@ func (c *AdminJobController) JobPositionAction(ctx echo.Context) error {
 	actor := ctx.Request().Header.Get("X-Admin-Email")
 	switch action {
 	case "publish":
+		// 企業が未公開のまま求人を publish しても学生側クエリで弾かれるが、
+		// ここでは止めない。63031830 で「FE が警告したうえで通す」という
+		// 製品判断が既に入っており（job-positions/page-content.tsx の確認ダイアログ）、
+		// サーバ側だけ 409 にすると「続行しますか？」に OK しても必ず失敗する
+		// 死んだ UI になるため。企業を公開すれば draft の求人はまとめて
+		// published になるので、実害も無い。
 		position.DataStatus = "published"
 		position.IsActive = true
 	case "reject":

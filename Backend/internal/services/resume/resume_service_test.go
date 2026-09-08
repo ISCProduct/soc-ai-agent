@@ -56,6 +56,18 @@ func makeUploadedFileHeader(t *testing.T, filename string, content []byte, conte
 
 type resumeRepoStub struct {
 	doc *models.ResumeDocument
+
+	// #1030 GetResumeStatus 用。latestDoc が nil なら「履歴書なし」を表す。
+	latestDoc    *models.ResumeDocument
+	latestReview *models.ResumeReview
+	latestErr    error
+}
+
+func (r *resumeRepoStub) FindLatestDocumentWithReview(userID uint) (*models.ResumeDocument, *models.ResumeReview, error) {
+	if r.latestErr != nil {
+		return nil, nil, r.latestErr
+	}
+	return r.latestDoc, r.latestReview, nil
 }
 
 func (r *resumeRepoStub) CreateDocument(doc *models.ResumeDocument) error {

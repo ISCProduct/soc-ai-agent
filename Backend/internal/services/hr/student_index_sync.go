@@ -6,9 +6,11 @@ import (
 	"strings"
 )
 
-// scoutProfileReader は同意状態と公開テキストの取得（repositories.UserPreferenceRepository）。
+// scoutProfileReader は公開可否と公開テキストの取得（repositories.UserPreferenceRepository）。
+// 同意フラグの生値ではなく実効的な公開可否を見るため IsScoutVisible を使う
+// （退会済みユーザーを再インデックスしないため）。
 type scoutProfileReader interface {
-	GetScoutVisibility(userID uint) (bool, error)
+	IsScoutVisible(userID uint) (bool, error)
 	ScoutProfileText(userID uint) (string, error)
 }
 
@@ -38,7 +40,7 @@ func (s *StudentIndexSyncer) Sync(ctx context.Context, userID uint) {
 	if s == nil || s.indexer == nil || s.profiles == nil {
 		return
 	}
-	allow, err := s.profiles.GetScoutVisibility(userID)
+	allow, err := s.profiles.IsScoutVisible(userID)
 	if err != nil {
 		log.Printf("[WARN] scout visibility lookup failed user_id=%d: %v", userID, err)
 		return

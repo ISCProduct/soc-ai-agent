@@ -35,6 +35,10 @@ func EchoCompanyAuth(companySecret string, users *repositories.CompanyUserReposi
 			if user == nil || !user.PasswordSet() {
 				return echo.NewHTTPError(401, "Unauthorized")
 			}
+			// 無効化されたアカウントは、JWTの有効期限が切れる前でもここで弾く（#1196）。
+			if user.Disabled() {
+				return echo.NewHTTPError(403, "このアカウントは無効化されています")
+			}
 			ctx := context.WithValue(c.Request().Context(), middleware.CompanyUserIDContextKey, companyUserID)
 			ctx = context.WithValue(ctx, middleware.CompanyIDContextKey, user.CompanyID)
 			c.SetRequest(c.Request().WithContext(ctx))
@@ -54,6 +58,9 @@ func SetupCompanyAuthRoutes(
 	auth := api.Group("/company-auth")
 	auth.POST("/login", authController.Login, echoLoginRateLimit())
 	auth.POST("/accept-invite", authController.AcceptInvite, echoLoginRateLimit())
+	// パスワードリセット（#1196）。総当たりとメール爆撃を防ぐためレート制限をかける。
+	auth.POST("/forgot-password", authController.ForgotPassword, echoPasswordResetRateLimit())
+	auth.POST("/reset-password", authController.ResetPassword, echoLoginRateLimit())
 	auth.POST("/refresh", authController.Refresh)
 	auth.POST("/logout", authController.Logout)
 

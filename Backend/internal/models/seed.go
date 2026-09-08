@@ -8,6 +8,10 @@ func SeedData(db *gorm.DB) error {
 	if err := seedIndustries(db); err != nil {
 		return err
 	}
+	// 業界プロファイルは industries の投入後に入れる（#1027）。
+	if err := seedIndustryWeightProfiles(db); err != nil {
+		return err
+	}
 
 	// 職種データ
 	if err := seedJobCategories(db); err != nil {
@@ -184,35 +188,35 @@ func seedAIQuestionTemplates(db *gorm.DB) error {
 			IsActive:    true,
 		},
 		{
-			Category:    "コミュニケーション",
+			Category:    "コミュニケーション力",
 			Prompt:      "チームでの作業において、あなたはどのようにコミュニケーションを取りますか？具体的なエピソードがあれば教えてください。",
 			BaseWeight:  7,
 			ContextKeys: `["チーム", "コミュニケーション", "協力"]`,
 			IsActive:    true,
 		},
 		{
-			Category:    "チームワーク",
+			Category:    "チームワーク志向",
 			Prompt:      "チームプロジェクトでの経験について教えてください。あなたはどのような役割を担当しましたか？",
 			BaseWeight:  7,
 			ContextKeys: `["チーム", "プロジェクト", "役割"]`,
 			IsActive:    true,
 		},
 		{
-			Category:    "リーダーシップ",
+			Category:    "リーダーシップ志向",
 			Prompt:      "グループやチームを率いた経験はありますか？その時どのようなアプローチを取りましたか？",
 			BaseWeight:  8,
 			ContextKeys: `["リーダー", "リード", "指導"]`,
 			IsActive:    true,
 		},
 		{
-			Category:    "分析思考",
+			Category:    "技術志向",
 			Prompt:      "複雑な問題に直面したとき、あなたはどのように分析し解決しますか？具体例を教えてください。",
 			BaseWeight:  8,
 			ContextKeys: `["分析", "問題解決", "論理"]`,
 			IsActive:    true,
 		},
 		{
-			Category:    "創造性",
+			Category:    "創造性志向",
 			Prompt:      "今までで最も創造的だと思うアイデアや解決策は何ですか？それはどのような場面で生まれましたか？",
 			BaseWeight:  7,
 			ContextKeys: `["創造", "アイデア", "革新"]`,
@@ -292,21 +296,21 @@ func seedDetailedQuestions(db *gorm.DB) error {
 		// コミュニケーション能力
 		{
 			Question:       "グループディスカッションやミーティングで、自分の意見をどのように伝えていますか？",
-			WeightCategory: "コミュニケーション能力",
+			WeightCategory: "コミュニケーション力",
 			WeightValue:    8,
 			Description:    "意見表明のスキルを評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "相手に複雑なことを説明する必要があった経験はありますか？どのように工夫しましたか？",
-			WeightCategory: "コミュニケーション能力",
+			WeightCategory: "コミュニケーション力",
 			WeightValue:    9,
 			Description:    "説明力と伝達スキルを評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "意見が対立したとき、どのように相手の意見を聞き、理解しようとしますか？",
-			WeightCategory: "コミュニケーション能力",
+			WeightCategory: "コミュニケーション力",
 			WeightValue:    8,
 			Description:    "傾聴力と対話能力を評価",
 			IsActive:       true,
@@ -315,21 +319,21 @@ func seedDetailedQuestions(db *gorm.DB) error {
 		// リーダーシップ
 		{
 			Question:       "グループやチームで、自分から率先して動いたり、メンバーをまとめたりした経験はありますか？",
-			WeightCategory: "リーダーシップ",
+			WeightCategory: "リーダーシップ志向",
 			WeightValue:    9,
 			Description:    "主体性とリーダー経験を評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "チームの目標達成のために、どのような工夫や働きかけをしたことがありますか？",
-			WeightCategory: "リーダーシップ",
+			WeightCategory: "リーダーシップ志向",
 			WeightValue:    8,
 			Description:    "目標達成への貢献度を評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "メンバーのモチベーションが下がっているとき、どのように対応しますか？",
-			WeightCategory: "リーダーシップ",
+			WeightCategory: "リーダーシップ志向",
 			WeightValue:    8,
 			Description:    "メンバーサポート能力を評価",
 			IsActive:       true,
@@ -338,21 +342,21 @@ func seedDetailedQuestions(db *gorm.DB) error {
 		// チームワーク
 		{
 			Question:       "チームプロジェクトで、あなたはどのような役割を担当することが多いですか？その理由は？",
-			WeightCategory: "チームワーク",
+			WeightCategory: "チームワーク志向",
 			WeightValue:    7,
 			Description:    "チーム内での役割認識を評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "チームメンバーと協力して成果を出した経験について教えてください。",
-			WeightCategory: "チームワーク",
+			WeightCategory: "チームワーク志向",
 			WeightValue:    8,
 			Description:    "協働経験と成果を評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "チーム内で苦手なメンバーがいた場合、どのように接しますか？",
-			WeightCategory: "チームワーク",
+			WeightCategory: "チームワーク志向",
 			WeightValue:    7,
 			Description:    "協調性と人間関係構築力を評価",
 			IsActive:       true,
@@ -361,21 +365,21 @@ func seedDetailedQuestions(db *gorm.DB) error {
 		// 問題解決力
 		{
 			Question:       "複雑な課題に直面したとき、どのように問題を整理し、解決策を考えますか？",
-			WeightCategory: "問題解決力",
+			WeightCategory: "技術志向",
 			WeightValue:    9,
 			Description:    "論理的思考と問題分析力を評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "予期せぬトラブルが発生したとき、どのように対処しましたか？具体例を教えてください。",
-			WeightCategory: "問題解決力",
+			WeightCategory: "技術志向",
 			WeightValue:    8,
 			Description:    "トラブル対応力を評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "問題の原因を特定するために、どのような手順や方法を使いますか？",
-			WeightCategory: "問題解決力",
+			WeightCategory: "技術志向",
 			WeightValue:    8,
 			Description:    "分析手法と論理性を評価",
 			IsActive:       true,
@@ -384,21 +388,21 @@ func seedDetailedQuestions(db *gorm.DB) error {
 		// 創造性・発想力
 		{
 			Question:       "今までで最も創造的だと思うアイデアや提案は何ですか？どのように思いつきましたか？",
-			WeightCategory: "創造性・発想力",
+			WeightCategory: "創造性志向",
 			WeightValue:    8,
 			Description:    "アイデア創出力を評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "既存のやり方ではうまくいかないとき、どのような新しいアプローチを試みますか？",
-			WeightCategory: "創造性・発想力",
+			WeightCategory: "創造性志向",
 			WeightValue:    8,
 			Description:    "柔軟な発想と挑戦姿勢を評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "何か新しいことを始めたり、独自の工夫をしたりした経験はありますか？",
-			WeightCategory: "創造性・発想力",
+			WeightCategory: "創造性志向",
 			WeightValue:    7,
 			Description:    "革新性と独創性を評価",
 			IsActive:       true,
@@ -407,21 +411,21 @@ func seedDetailedQuestions(db *gorm.DB) error {
 		// 計画性・実行力
 		{
 			Question:       "大きな目標を達成するために、どのように計画を立て、実行しますか？",
-			WeightCategory: "計画性・実行力",
+			WeightCategory: "細部志向",
 			WeightValue:    8,
 			Description:    "計画立案と実行力を評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "複数のタスクを同時に進める必要があるとき、どのように優先順位をつけますか？",
-			WeightCategory: "計画性・実行力",
+			WeightCategory: "細部志向",
 			WeightValue:    8,
 			Description:    "タスク管理能力を評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "計画通りに進まなかったとき、どのように対応しますか？",
-			WeightCategory: "計画性・実行力",
+			WeightCategory: "細部志向",
 			WeightValue:    7,
 			Description:    "柔軟な対応力を評価",
 			IsActive:       true,
@@ -430,21 +434,21 @@ func seedDetailedQuestions(db *gorm.DB) error {
 		// 学習意欲・成長志向
 		{
 			Question:       "最近、自分から進んで学んだことは何ですか？なぜそれを学ぼうと思いましたか？",
-			WeightCategory: "学習意欲・成長志向",
+			WeightCategory: "成長志向",
 			WeightValue:    9,
 			Description:    "自主的学習姿勢を評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "フィードバックや批判を受けたとき、どのように受け止め、活かしますか？",
-			WeightCategory: "学習意欲・成長志向",
+			WeightCategory: "成長志向",
 			WeightValue:    8,
 			Description:    "成長マインドセットを評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "失敗から学んだことや、それをどう次に活かしたかについて教えてください。",
-			WeightCategory: "学習意欲・成長志向",
+			WeightCategory: "成長志向",
 			WeightValue:    8,
 			Description:    "失敗からの学習能力を評価",
 			IsActive:       true,
@@ -453,21 +457,21 @@ func seedDetailedQuestions(db *gorm.DB) error {
 		// ストレス耐性・粘り強さ
 		{
 			Question:       "プレッシャーのかかる状況で、どのように自分を保ちますか？",
-			WeightCategory: "ストレス耐性・粘り強さ",
+			WeightCategory: "チャレンジ志向",
 			WeightValue:    8,
 			Description:    "ストレス対処法を評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "困難な状況でも諦めずに取り組んだ経験はありますか？何が原動力でしたか？",
-			WeightCategory: "ストレス耐性・粘り強さ",
+			WeightCategory: "チャレンジ志向",
 			WeightValue:    9,
 			Description:    "粘り強さと動機づけを評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "うまくいかないことが続いたとき、どのように気持ちを切り替えますか？",
-			WeightCategory: "ストレス耐性・粘り強さ",
+			WeightCategory: "チャレンジ志向",
 			WeightValue:    7,
 			Description:    "レジリエンスを評価",
 			IsActive:       true,
@@ -476,21 +480,21 @@ func seedDetailedQuestions(db *gorm.DB) error {
 		// ビジネス思考・目標志向
 		{
 			Question:       "仕事やプロジェクトにおいて、どのような成果を出すことを重視しますか？",
-			WeightCategory: "ビジネス思考・目標志向",
+			WeightCategory: "成長志向",
 			WeightValue:    8,
 			Description:    "成果志向を評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "顧客や利用者の視点で考えたり、行動したりした経験はありますか？",
-			WeightCategory: "ビジネス思考・目標志向",
+			WeightCategory: "成長志向",
 			WeightValue:    8,
 			Description:    "顧客志向を評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "将来、どのような価値を社会や組織に提供したいと考えていますか？",
-			WeightCategory: "ビジネス思考・目標志向",
+			WeightCategory: "成長志向",
 			WeightValue:    7,
 			Description:    "キャリアビジョンと価値観を評価",
 			IsActive:       true,
@@ -559,4 +563,61 @@ func seedAnalysisPhases(db *gorm.DB) error {
 	}
 
 	return db.Create(&phases).Error
+}
+
+// seedIndustryWeightProfiles 業界ごとの適性プロファイルを投入する（#1027）。
+//
+// マイグレーション(000021)ではなくここで入れる理由:
+// migrations.Up は SeedData より先に走るため、新規構築時は industries が
+// まだ空で、マイグレーション内の INSERT...SELECT が 0 行になる。
+// エラーも出ないまま永久に空のテーブルが残り、全業界が中立50へ
+// フォールバックして「どの生徒でも同じTOP3」が出てしまう。
+//
+// 値は業務知見に基づく本格的なものではなく、業界イメージからの仮置き。
+// 出典・更新方法・見直し条件は docs/wiki/scoring.md
+// 「2-2. 業界プロファイル」を参照（#1027 レビュー指摘）。
+//
+// 既に行がある業界は上書きしない。運用中に管理者が調整した値を
+// シードが壊さないため。値を配り直すにはマイグレーションで UPDATE すること。
+// 未設定の業界は行を作らず、アプリ側で中立50として扱う（PRD 非機能要件）。
+func seedIndustryWeightProfiles(db *gorm.DB) error {
+	// code -> 10軸。industries.code で引くのでシードの採番に依存しない。
+	weights := map[string]IndustryWeightProfile{
+		"IT":       {TechnicalOrientation: 85, TeamworkOrientation: 65, LeadershipOrientation: 55, CreativityOrientation: 70, StabilityOrientation: 40, GrowthOrientation: 80, WorkLifeBalance: 60, ChallengeSeeking: 75, DetailOrientation: 60, CommunicationSkill: 60},
+		"IT-SW":    {TechnicalOrientation: 90, TeamworkOrientation: 70, LeadershipOrientation: 55, CreativityOrientation: 70, StabilityOrientation: 35, GrowthOrientation: 85, WorkLifeBalance: 60, ChallengeSeeking: 75, DetailOrientation: 70, CommunicationSkill: 55},
+		"IT-WEB":   {TechnicalOrientation: 80, TeamworkOrientation: 65, LeadershipOrientation: 55, CreativityOrientation: 85, StabilityOrientation: 35, GrowthOrientation: 85, WorkLifeBalance: 65, ChallengeSeeking: 80, DetailOrientation: 55, CommunicationSkill: 65},
+		"MFG":      {TechnicalOrientation: 70, TeamworkOrientation: 75, LeadershipOrientation: 55, CreativityOrientation: 50, StabilityOrientation: 70, GrowthOrientation: 55, WorkLifeBalance: 60, ChallengeSeeking: 45, DetailOrientation: 85, CommunicationSkill: 55},
+		"MFG-AUTO": {TechnicalOrientation: 75, TeamworkOrientation: 80, LeadershipOrientation: 55, CreativityOrientation: 50, StabilityOrientation: 70, GrowthOrientation: 55, WorkLifeBalance: 55, ChallengeSeeking: 45, DetailOrientation: 90, CommunicationSkill: 55},
+		"MFG-ELEC": {TechnicalOrientation: 80, TeamworkOrientation: 70, LeadershipOrientation: 50, CreativityOrientation: 55, StabilityOrientation: 65, GrowthOrientation: 60, WorkLifeBalance: 55, ChallengeSeeking: 50, DetailOrientation: 85, CommunicationSkill: 50},
+		"FIN":      {TechnicalOrientation: 55, TeamworkOrientation: 65, LeadershipOrientation: 60, CreativityOrientation: 40, StabilityOrientation: 85, GrowthOrientation: 60, WorkLifeBalance: 55, ChallengeSeeking: 40, DetailOrientation: 90, CommunicationSkill: 70},
+		"FIN-BANK": {TechnicalOrientation: 50, TeamworkOrientation: 70, LeadershipOrientation: 60, CreativityOrientation: 35, StabilityOrientation: 90, GrowthOrientation: 55, WorkLifeBalance: 55, ChallengeSeeking: 35, DetailOrientation: 90, CommunicationSkill: 75},
+		"FIN-INS":  {TechnicalOrientation: 50, TeamworkOrientation: 65, LeadershipOrientation: 60, CreativityOrientation: 40, StabilityOrientation: 85, GrowthOrientation: 60, WorkLifeBalance: 55, ChallengeSeeking: 40, DetailOrientation: 85, CommunicationSkill: 80},
+		"CONS":     {TechnicalOrientation: 65, TeamworkOrientation: 70, LeadershipOrientation: 80, CreativityOrientation: 70, StabilityOrientation: 35, GrowthOrientation: 85, WorkLifeBalance: 40, ChallengeSeeking: 85, DetailOrientation: 70, CommunicationSkill: 90},
+		"EDU":      {TechnicalOrientation: 45, TeamworkOrientation: 75, LeadershipOrientation: 65, CreativityOrientation: 65, StabilityOrientation: 70, GrowthOrientation: 65, WorkLifeBalance: 65, ChallengeSeeking: 50, DetailOrientation: 65, CommunicationSkill: 90},
+		"MED":      {TechnicalOrientation: 55, TeamworkOrientation: 85, LeadershipOrientation: 55, CreativityOrientation: 40, StabilityOrientation: 80, GrowthOrientation: 60, WorkLifeBalance: 50, ChallengeSeeking: 45, DetailOrientation: 90, CommunicationSkill: 85},
+	}
+
+	var industries []Industry
+	if err := db.Select("id, code").Find(&industries).Error; err != nil {
+		return err
+	}
+	for _, ind := range industries {
+		w, ok := weights[ind.Code]
+		if !ok {
+			continue // 未定義の業界は中立50で扱う
+		}
+		w.IndustryID = ind.ID
+		// 既に行があれば触らない（運用で調整した値を上書きしない）。
+		var count int64
+		if err := db.Model(&IndustryWeightProfile{}).Where("industry_id = ?", ind.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			continue
+		}
+		if err := db.Create(&w).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
