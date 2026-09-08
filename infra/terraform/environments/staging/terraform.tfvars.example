@@ -27,3 +27,12 @@ frontend_image = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:s
 # 起動中の OGP 付き HTML は nginx edge（service-starting.html）で返す。
 # EC2 停止中は ALB 生 503 のまま。後から有効化する場合のみ true。
 # enable_error_fallback = false
+
+# Discord から本番を起動/停止する (/prod)。
+# discord_public_key      = "<Discord Developer Portal の PUBLIC KEY>"
+# discord_allowed_role_id = "<コマンド実行を許可するロールID>"
+#
+# 即時反映用の GitHub トークン(actions:write のみ)。
+# 未設定でも /prod は動作するが、反映は次の毎時実行(最大1時間後)になる。
+# github_dispatch_token = "<GitHub Fine-grained PAT: Actions=Read and write>"
+# github_dispatch_repo  = "ISCProduct/soc-ai-agent"

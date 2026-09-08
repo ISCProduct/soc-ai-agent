@@ -100,6 +100,11 @@ jobs:
       - name: Backlog クライアントの自己チェック
         run: python3 .github/scripts/backlog_client.py
 
+      # 本番の起動/停止判定。間違えると展示会当日に本番が落ちたまま、
+      # または止めたはずの本番が課金され続ける。
+      - name: 本番 uptime 判定のテスト
+        run: ./automation/test/prod-uptime-decision-test.sh
+
       - name: ワークフロー埋め込み Python の構文チェック
         run: |
           python3 - <<'PYEOF'
@@ -111,11 +116,11 @@ jobs:
           for p in sorted(pathlib.Path(".github/workflows").glob("*.yml")):
               src = p.read_text(encoding="utf-8")
               blocks = BLOCK.findall(src)
-              # 埋め込み Python があるのに抽出できていないなら、
-              # 検査したつもりで素通りしているので落とす
               # 実際の起動行だけ数える（このスクリプト自身の文字列リテラルは除く）
               invocations = sum(1 for line in src.splitlines()
                                 if line.strip().startswith("python3 - <<"))
+              # 埋め込み Python があるのに抽出できていないなら、
+              # 検査したつもりで素通りしているので落とす
               if invocations != len(blocks):
                   ng += 1
                   print(f"{p}: 埋め込み Python を抽出できませんでした"
