@@ -118,9 +118,26 @@ func TestGetCategoryOrder_ReturnsCanonicalCategories(t *testing.T) {
 
 	// 職種未決定
 	check("undecided", (&ChatService{}).getCategoryOrder(0))
-	// 各職種コードの分岐（DBに触らない純関数側で検証する）
-	for _, code := range []string{"ENG01", "SALES01", "MKT01", "HR01", "FIN01", "CONS01", "OTHER"} {
-		check(code, categoryOrderForJobCode(code))
+
+	// 職種ごとの優先順位（先頭に何を聞くか）は仕様なので固定する。
+	// 網羅性チェックだけだと順序を入れ替えても検出できない。
+	for _, tt := range []struct {
+		code      string
+		wantFirst string
+	}{
+		{code: "ENG01", wantFirst: "技術志向"},
+		{code: "SALES01", wantFirst: "コミュニケーション力"},
+		{code: "MKT01", wantFirst: "創造性志向"},
+		{code: "HR01", wantFirst: "コミュニケーション力"},
+		{code: "FIN01", wantFirst: "細部志向"},
+		{code: "CONS01", wantFirst: "技術志向"},
+		{code: "OTHER", wantFirst: "技術志向"},
+	} {
+		got := categoryOrderForJobCode(tt.code)
+		check(tt.code, got)
+		if got[0] != tt.wantFirst {
+			t.Errorf("%s: 先頭カテゴリ = %q, want %q", tt.code, got[0], tt.wantFirst)
+		}
 	}
 }
 

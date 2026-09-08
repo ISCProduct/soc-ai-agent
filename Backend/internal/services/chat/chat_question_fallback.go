@@ -12,7 +12,7 @@ func (s *ChatService) fallbackQuestionForCategory(category string, jobCategoryID
 		if targetLevel == "中途" {
 			return "業務で関係者と調整した経験はありますか？どんな場面で、どのように進めましたか？"
 		}
-		return "グループワークであなたがよく担当する役割は何ですか？（例: アイデア出し、まとめ役、サポートなど）"
+		return "グループワークで、自分の考えをどのように伝えていますか？"
 	case "リーダーシップ志向":
 		if targetLevel == "中途" {
 			return "業務でチームや案件をリードした経験はありますか？どのように進めましたか？"
@@ -69,7 +69,7 @@ func (s *ChatService) fallbackQuestionsForCategory(category string, jobCategoryI
 		if targetLevel == "中途" {
 			return []string{
 				"業務で相手に説明するとき、意識していることは何ですか？",
-				"関係者とのやり取りで工夫したことはありますか？",
+				"相手に合わせて説明の仕方を変えることはありますか？",
 			}
 		}
 		return []string{

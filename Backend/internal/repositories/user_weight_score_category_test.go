@@ -41,7 +41,11 @@ func TestAddScore_RejectsUnknownCategory(t *testing.T) {
 	repo, mock := newWeightScoreRepo(t)
 
 	err := repo.AddScore(1, "session-1", "ぜんぜん違うカテゴリ", 5)
-	require.Error(t, err)
+	require.Error(t, err, "正典外のカテゴリが素通りしている")
+	// sqlmock は未登録クエリでも必ずエラーを返すため、
+	// エラーの中身まで見ないとバリデーションの有無を検出できない。
+	require.Contains(t, err.Error(), "未知の重みカテゴリ")
+	// DBに一切触れないこと。
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

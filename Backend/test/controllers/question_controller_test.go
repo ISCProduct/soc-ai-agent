@@ -74,7 +74,7 @@ func TestQuestionController_CreateQuestion_Success(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{
 		"question":        "テスト質問",
-		"weight_category": "technical",
+		"weight_category": "技術志向",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/questions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -89,7 +89,7 @@ func TestQuestionController_CreateQuestion_ServiceError(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{
 		"question":        "テスト質問",
-		"weight_category": "technical",
+		"weight_category": "技術志向",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/questions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -119,4 +119,48 @@ func TestQuestionController_GetQuestionsByCategory_ServiceError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	assertStatus(t, newQuestionController(svc).GetQuestionsByCategory, newCtx(req, rec), http.StatusInternalServerError)
 	svc.AssertExpectations(t)
+}
+
+// TestQuestionController_CreateQuestion_RejectsUnknownCategory は、
+// 正典外のカテゴリが question_weights へ入らないことを検証する（#929）。
+//
+// user_weight_scores 側はリポジトリで塞いだが、このAPIは認証ユーザーからの
+// 任意文字列をそのまま保存する別経路だった。
+func TestQuestionController_CreateQuestion_RejectsUnknownCategory(t *testing.T) {
+	svc := &mocks.QuestionServiceMock{}
+
+	body, _ := json.Marshal(map[string]string{
+		"question":        "テスト質問",
+		"weight_category": "ぜんぜん違うカテゴリ",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/questions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewQuestionController(svc).CreateQuestion, newCtx(req, rec), http.StatusBadRequest)
+	svc.AssertNotCalled(t, "CreateQuestion", mock.Anything)
+}
+
+// 表記揺れは弾かずに正典へ寄せて保存する。
+func TestQuestionController_CreateQuestion_NormalizesAlias(t *testing.T) {
+	svc := &mocks.QuestionServiceMock{}
+	var saved *models.QuestionWeight
+	svc.On("CreateQuestion", mock.Anything).Run(func(args mock.Arguments) {
+		saved = args.Get(0).(*models.QuestionWeight)
+	}).Return(nil)
+
+	body, _ := json.Marshal(map[string]string{
+		"question":        "テスト質問",
+		"weight_category": "チームワーク", // 正典は「チームワーク志向」
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/questions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	assertStatus(t, controllers.NewQuestionController(svc).CreateQuestion, newCtx(req, rec), http.StatusCreated)
+
+	if saved == nil {
+		t.Fatal("CreateQuestion が呼ばれていない")
+	}
+	if saved.WeightCategory != "チームワーク志向" {
+		t.Errorf("WeightCategory = %q, want 「チームワーク志向」", saved.WeightCategory)
+	}
 }
