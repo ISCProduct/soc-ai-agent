@@ -10,7 +10,7 @@ const (
 
 // CompanyUser は企業担当者アカウント（#1091）。
 // スキーマは migrations/000017_company_users.up.sql と
-// migrations/000019_company_user_recovery.up.sql で管理。
+// migrations/000020_company_user_recovery.up.sql で管理。
 //
 // 招待トークンとパスワードリセットトークンは平文で持たず、SHA-256 の hex を保存する（#1196）。
 type CompanyUser struct {

@@ -117,9 +117,9 @@ go run ./cmd/migrate force 1   # version 2 を取り消した状態に補修し�
 | 3 | 退会（`withdrawn_at` / `withdrawn_users`） |
 | 4 | マルチテナント（`organizations` / memberships / 主要テーブルの `organization_id`）→ [multitenancy.md](./multitenancy.md) |
 | 5 | 主要テーブル `organization_id` への FK 制約 |
-| 19 | 企業ユーザーの復旧・剥奪（`disabled_at` / トークンのハッシュ化 / タグFKの RESTRICT 化）→ 下の注意を必ず読むこと |
+| 20 | 企業ユーザーの復旧・剥奪（`disabled_at` / トークンのハッシュ化 / タグFKの RESTRICT 化）→ 下の注意を必ず読むこと |
 
-### version 19 適用時の注意（#1196）
+### version 20 適用時の注意（#1196）
 
 **未受諾の招待リンクが全て失効します。** 平文の `invite_token` 列を削除するため、
 適用時点で受諾されていない招待メールのリンクは動かなくなります。
@@ -135,7 +135,7 @@ SELECT COUNT(*) FROM company_users
 デプロイの24時間前から新規招待を止めれば実質ゼロにできます。該当者がいる場合は、
 適用後に管理画面から再招待してください（本バージョンから受諾前アカウントの再招待が可能です）。
 
-**ロールバック順序に制約があります。** version 19 適用後にアプリだけ前のリビジョンへ戻すと
+**ロールバック順序に制約があります。** version 20 適用後にアプリだけ前のリビジョンへ戻すと
 500 になります。旧コードの `CompanyUser` は `invite_token` 列を参照するためです。
 アプリを戻す場合は `go run ./cmd/migrate down` を必ず同時に実行してください。
 なお `down` は列を復元しますが**中身は NULL** なので、いずれにせよ未受諾招待は復活しません。
