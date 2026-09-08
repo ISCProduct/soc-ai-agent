@@ -36,9 +36,8 @@ jobs:
     permissions:
       issues: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
+      # スクリプトはこのファイル内にインラインで持ち、リポジトリのファイルは一切読まない。
+      # checkout すると contents: read が必要になるだけで得るものが無いため置かない。
       - name: Backlog から消えた課題の GitHub Issue を削除
         env:
           BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
@@ -116,6 +115,16 @@ jobs:
           page = 1
           while True:
               items = gh("GET", f"/repos/{GH_REPO}/issues?state=all&per_page=100&page={page}")
+              # gh() は HTTP エラーでも None を返す。これを空ページと同一視すると、
+              # 途中で 403(レート制限)等が起きても「最後のページまで読んだ」ことになり、
+              # 未取得のIssueを Backlog 側にも無いものとして扱ってしまう。
+              if items is None:
+                  print(
+                      f"GitHub Issue 一覧の取得に失敗しました(page={page})。"
+                      "不完全な一覧で削除判定を行わないため中断します。",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
               if not items:
                   break
               for it in items:

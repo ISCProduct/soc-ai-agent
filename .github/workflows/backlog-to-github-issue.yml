@@ -94,6 +94,15 @@ jobs:
               page = 1
               while True:
                   items = gh_request("GET", f"/repos/{GH_REPO}/issues?state=all&per_page=100&page={page}")
+                  # gh_request は HTTP エラーでも None を返す。空ページと同一視すると
+                  # 対応表が不完全なまま同期を続け、既にIssueがある課題に重複Issueを作る。
+                  if items is None:
+                      print(
+                          f"GitHub Issue 一覧の取得に失敗しました(page={page})。"
+                          "不完全な対応表で同期すると重複Issueを作るため中断します。",
+                          file=sys.stderr,
+                      )
+                      sys.exit(1)
                   if not items:
                       break
                   for it in items:
@@ -143,9 +152,17 @@ jobs:
               if len(page) < 100:
                   break
               offset += 100
-              if offset >= 2000:  # 暴走防止
-                  print("Backlog 課題の取得が2000件に達したため打ち切ります。", flush=True)
-                  break
+              if offset >= 2000:
+                  # updatedSince は日付単位まで切り捨てられ、sort=updated&order=desc で取得する。
+                  # 2000件で打ち切ると同じ日付で再実行しても上位2000件を取り直すだけで、
+                  # 古い課題には永久に到達しない。基準日が翌日に進むと取りこぼしが確定する。
+                  # 黙って成功扱いにせず、失敗させて気づけるようにする。
+                  print(
+                      "Backlog 課題が2000件を超えました。この実行では取りこぼしが発生します。"
+                      "MINUTES_BACK を短くして実行間隔を詰めてください。",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
 
           print(f"{len(issues)} 件の Backlog 課題を取得しました（updatedSince={since}, minutes_back={MINUTES}）。", flush=True)
 
