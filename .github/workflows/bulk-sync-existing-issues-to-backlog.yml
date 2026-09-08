@@ -56,7 +56,10 @@ jobs:
           from time import sleep
 
           sys.path.insert(0, ".github/scripts")
-          from backlog_client import load_backlog_env, resolve_bl_base, bl_request as _bl_request
+          from backlog_client import (
+              load_backlog_env, resolve_bl_base, set_issue_status,
+              bl_request as _bl_request,
+          )
 
           API_KEY, SPACE_ID, PROJ_KEY, DOMAIN = load_backlog_env()
           GH_TOKEN  = os.environ['GH_TOKEN']
@@ -190,7 +193,7 @@ jobs:
 
                   # クローズ済みの Issue は Backlog 側でも完了に設定
                   if gh_state == 'closed':
-                      bl_request('PATCH', f"/issues/{bl_key}", {'statusId': 4})
+                      set_issue_status(BL_BASE, API_KEY, bl_key, 4)
 
                   gh_request('PATCH', f"/repos/{GH_REPO}/issues/{gh_number}", gh_data)
                   print(f"  GitHub Issue #{gh_number} を '{new_title}' に更新しました。")

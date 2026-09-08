@@ -549,3 +549,25 @@ func (s *EmailService) SendCompanyUserInvite(email, companyName, inviteToken str
 </body></html>`, companyName, setupURL)
 	return s.sendHTML([]string{email}, "【AI就活エージェント】企業ポータルへのご招待", body)
 }
+
+// SendCompanyUserPasswordReset は企業ポータルのパスワード再設定メールを送る（#1196）。
+// 企業ユーザーには再設定手段が無く、パスワードを忘れると復旧不能だった。
+func (s *EmailService) SendCompanyUserPasswordReset(email, resetToken string) error {
+	appURL := os.Getenv("FRONTEND_URL")
+	if appURL == "" {
+		appURL = "http://localhost:3000"
+	}
+	resetURL := appURL + "/company-portal/reset-password?token=" + resetToken
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="ja"><head><meta charset="UTF-8"><title>パスワードの再設定</title></head>
+<body style="font-family:sans-serif;background:#f5f5f5;padding:20px;">
+<div style="max-width:560px;margin:0 auto;background:#fff;border-radius:8px;padding:32px;">
+<h2 style="color:#1976D2;">パスワードの再設定</h2>
+<p>企業ポータルのパスワード再設定が要求されました。</p>
+<p>以下のリンクから新しいパスワードを設定してください。</p>
+<a href="%s" style="display:inline-block;background:#1976D2;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:16px 0;">パスワードを再設定する</a>
+<p style="color:#888;font-size:12px;">このリンクは1時間有効です。心当たりがない場合はこのメールを破棄してください。</p>
+</div>
+</body></html>`, resetURL)
+	return s.sendHTML([]string{email}, "【AI就活エージェント】企業ポータル パスワードの再設定", body)
+}

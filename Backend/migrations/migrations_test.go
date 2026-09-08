@@ -1,6 +1,9 @@
 package migrations
 
 import (
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -78,6 +81,87 @@ func TestMigrationPairs(t *testing.T) {
 	for base := range downs {
 		if !ups[base] {
 			t.Errorf("%s に対応する up マイグレーションが存在しない", base)
+		}
+	}
+}
+
+// TestMigrationVersionsAreContiguous はマイグレーション番号に穴が無いことを検証する（#929）。
+//
+// golang-migrate の Up() は現在バージョンから Next() で前進するだけなので、
+// 適用済みバージョンより小さい番号のマイグレーションが後から追加されても
+// 一度も実行されず ErrNoChange で正常終了する。エラーもログも出ない。
+//
+// 実際に、別ブランチが 000019 を使っている状態で 000020 を先にマージすると
+// 000019 が本番へ永久に適用されない、という事故が起きかけた。
+// 番号が飛んだ時点でCIを落として気づけるようにする。
+func TestMigrationVersionsAreContiguous(t *testing.T) {
+	entries, err := migrationFiles.ReadDir(".")
+	if err != nil {
+		t.Fatalf("マイグレーションディレクトリを読めない: %v", err)
+	}
+
+	// version -> その番号を名乗るマイグレーション名の集合。
+	// 同じ番号を別の名前が使っていたら重複。
+	names := map[int]map[string]bool{}
+	versions := map[int]string{}
+	re := regexp.MustCompile(`^(\d+)_(.*)\.(up|down)\.sql$`)
+	for _, e := range entries {
+		m := re.FindStringSubmatch(e.Name())
+		if m == nil {
+			continue
+		}
+		v, err := strconv.Atoi(m[1])
+		if err != nil {
+			t.Fatalf("番号を解釈できない: %s", e.Name())
+		}
+		if names[v] == nil {
+			names[v] = map[string]bool{}
+		}
+		names[v][m[2]] = true
+		versions[v] = e.Name()
+	}
+
+	// 同一バージョンに別名のマイグレーションが同居していないこと。
+	//
+	// 別ブランチが同じ番号を使ったまま両方マージされると、golang-migrate は
+	// 同じ version を2つ見ることになり、片方が適用されないまま version が進む。
+	// 欠番チェックだけでは重複は検出できないため、別に見る（#1201 レビュー指摘）。
+	for v, set := range names {
+		if len(set) > 1 {
+			dup := make([]string, 0, len(set))
+			for n := range set {
+				dup = append(dup, n)
+			}
+			sort.Strings(dup)
+			t.Errorf("マイグレーション %06d が重複している: %v。"+
+				"別ブランチが同じ番号を使っている。どちらかを採番し直すこと", v, dup)
+		}
+	}
+	if len(versions) == 0 {
+		t.Fatal("マイグレーションが1つも見つからない")
+	}
+
+	max := 0
+	for v := range versions {
+		if v > max {
+			max = v
+		}
+	}
+	// 1 から最大値まで、欠番が無いこと。
+	for v := 1; v <= max; v++ {
+		if _, ok := versions[v]; !ok {
+			t.Errorf("マイグレーション %06d が欠番。golang-migrate は適用済みより小さい番号を"+
+				"二度と実行しないため、後から埋めても本番へ適用されない", v)
+		}
+	}
+
+	// up と down が対になっていること。
+	for v, name := range versions {
+		base := strings.TrimSuffix(strings.TrimSuffix(name, ".up.sql"), ".down.sql")
+		for _, suffix := range []string{".up.sql", ".down.sql"} {
+			if _, err := migrationFiles.ReadFile(base + suffix); err != nil {
+				t.Errorf("%06d: %s が無い", v, base+suffix)
+			}
 		}
 	}
 }

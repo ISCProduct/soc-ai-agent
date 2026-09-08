@@ -256,6 +256,22 @@ export default function PageContent() {
           <Card elevation={0} sx={cardSx}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
+                生徒の傾向分析
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                担当する生徒のタイプと向いている業界を一覧比較します（参考情報）。
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Button variant="contained" component={Link} href="/admin/student-insights">
+                傾向分析へ
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card elevation={0} sx={cardSx}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
                 スコア精度検証
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>

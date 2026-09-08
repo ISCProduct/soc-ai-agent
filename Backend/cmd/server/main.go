@@ -37,6 +37,7 @@ import (
 	"Backend/internal/services/shared"
 	"Backend/internal/services/skillscore"
 	"Backend/internal/services/storage"
+	"Backend/internal/services/teacher"
 	"Backend/migrations"
 	"context"
 	"log"
@@ -227,6 +228,8 @@ func main() {
 	graduateRepo := repositories.NewGraduateEmploymentRepository(db)
 	companyRelationRepo := repositories.NewCompanyRelationRepository(db)
 	companyQueryRepo := repositories.NewCompanyQueryRepository(db)
+	// 学生・無認証向けの企業参照は審査前のゲスト投稿を隠す（#1203）
+	companyPublicRepo := repositories.NewCompanyPublicRepository(db)
 	matchRepo := repositories.NewUserCompanyMatchRepository(db)
 	profileRecalcRepo := repositories.NewProfileRecalculationRepository(db)
 	// 埋め込み・マッチング
@@ -347,7 +350,7 @@ func main() {
 	interviewService.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
-	interviewService.SetCompanyRepo(companyRepo)
+	interviewService.SetCompanyRepo(companyPublicRepo)
 	interviewService.SetCompanyOwnerChecker(func(userID, companyID uint) (bool, error) {
 		return shared.UserOwnsCompany(db, userID, companyID)
 	})
@@ -361,12 +364,12 @@ func main() {
 	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := controllers.NewCompanyRelationController(companyQueryRepo, aiClient)
-	companyValidator := company.NewCompanyValidationService(companyRepo, aiClient)
+	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
 	companyValidator.SetSearchBudget(companySearchBudget)
 	companyValidator.SetSearchFlight(companySearchFlight)
 	relationController.SetCompanyValidator(companyValidator)
 	resumeService.SetCompanyValidator(companyValidator)
-	resumeService.SetCompanyRepo(companyRepo)
+	resumeService.SetCompanyRepo(companyPublicRepo)
 	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
 	adminCompanyController.SetRelationsFetcher(relationsFetcher)
@@ -513,7 +516,10 @@ func main() {
 	routes.SetupAuthRoutes(api, authController, oauthController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupChatRoutes(api, chatController, questionController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCompanyRoutes(api, relationController)
-	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, adminVectorController, appController, userRepo, schoolService, cfg.AdminSecret)
+	industryWeightProfileRepo := repositories.NewIndustryWeightProfileRepository(db)
+	teacherInsightService := teacher.NewStudentInsightService(userRepo, userWeightScoreRepo, industryRepo, industryWeightProfileRepo)
+	teacherInsightController := controllers.NewTeacherStudentInsightController(teacherInsightService)
+	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, userRepo, schoolService, cfg.AdminSecret)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService)
@@ -530,6 +536,7 @@ func main() {
 	adminEntry.POST("/company-entry-submissions/:id/resend-email", companyEntryController.ResendEmail)
 	adminEntry.POST("/companies/:id/company-users", adminCompanyUserController.Invite)
 	adminEntry.GET("/companies/:id/company-users", adminCompanyUserController.List)
+	adminEntry.PATCH("/companies/:id/company-users/:userID", adminCompanyUserController.SetDisabled)
 	// CI(GitHub Actions)からのマシン間呼び出しのため、ログインユーザー前提のEchoAdminAuthではなく
 	// 共有シークレットのみで認証する(#861)
 	api.POST("/admin/whats-new/ingest", releaseNoteController.Ingest, routes.EchoStaticSecretAuth(cfg.AdminSecret))

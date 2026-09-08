@@ -86,6 +86,53 @@ jobs:
   #
   # 注意: 本アクションはPRの差分に対して「新規に持ち込まれた」脆弱性を検出する。
   # 既存の脆弱性の検知は Dependabot alerts (有効済み) が担当する。
+  test-workflow-scripts:
+    name: Workflow Scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Backlog 同期スクリプトの自己チェック。
+      # ワークフロー内の Python は CI で動くまで構文エラーに気づけないため、
+      # 埋め込みコードのコンパイルも合わせて確認する。
+      - name: Backlog クライアントの自己チェック
+        run: python3 .github/scripts/backlog_client.py
+
+      - name: ワークフロー埋め込み Python の構文チェック
+        run: |
+          python3 - <<'PYEOF'
+          import re, sys, textwrap, pathlib
+          # ヒアドキュメントは `<< 'PYEOF'` と `<<'PYEOF'` の両方が使われている
+          BLOCK = re.compile(r"python3 - <<\s*'PYEOF'\n(.*?)\n\s*PYEOF", re.S)
+          ng = 0
+          checked = 0
+          for p in sorted(pathlib.Path(".github/workflows").glob("*.yml")):
+              src = p.read_text(encoding="utf-8")
+              blocks = BLOCK.findall(src)
+              # 埋め込み Python があるのに抽出できていないなら、
+              # 検査したつもりで素通りしているので落とす
+              # 実際の起動行だけ数える（このスクリプト自身の文字列リテラルは除く）
+              invocations = sum(1 for line in src.splitlines()
+                                if line.strip().startswith("python3 - <<"))
+              if invocations != len(blocks):
+                  ng += 1
+                  print(f"{p}: 埋め込み Python を抽出できませんでした"
+                        f"（起動 {invocations} 件 / 抽出 {len(blocks)} 件）", file=sys.stderr)
+              for code in blocks:
+                  checked += 1
+                  try:
+                      compile(textwrap.dedent(code), str(p), "exec")
+                  except SyntaxError as e:
+                      ng += 1
+                      print(f"{p}: 埋め込み Python の構文エラー line {e.lineno}: {e.msg}", file=sys.stderr)
+              if blocks:
+                  print(f"{p.name}: OK ({len(blocks)} ブロック)")
+          print(f"検査したブロック数: {checked}")
+          sys.exit(1 if ng else 0)
+          PYEOF
+
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest

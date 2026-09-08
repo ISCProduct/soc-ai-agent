@@ -165,3 +165,57 @@ def load_backlog_env() -> tuple[str, str, str, str]:
     # 鍵の中身は出さず、設定漏れ検知用に長さだけ出す
     print(f"Backlog 設定: space={space_id}, project={proj_key}, apiKey_len={len(api_key)}", flush=True)
     return api_key, space_id, proj_key, domain
+
+
+def set_issue_status(base: str, api_key: str, issue_key: str, status_id: int) -> bool:
+    """課題のステータスを更新する。既に同じステータスなら何もしない。
+
+    Backlog は「変化のない更新」を 400 `No comment content.` (code 7) で拒否する。
+    GitHub より先に Backlog 側でステータスを変えていると必ずこれに当たり、
+    同期結果は正しいのにワークフローだけが赤くなる
+    （実際に SOCAIAGENT-256/257/258/262/263/267/303 の7件が同時に失敗した）。
+
+    エラーはここでは握り潰さない。APIキー失効などをサイレントに通すと
+    同期が止まったことに誰も気づけないため、変更不要のケースだけを除外する。
+
+    戻り値: 実際に更新したら True、変更不要なら False。
+    """
+    issue = bl_request(base, api_key, "GET", f"/issues/{issue_key}")
+    current = (issue or {}).get("status") or {}
+    if current.get("id") == status_id:
+        print(f"{issue_key}: 既に '{current.get('name')}' のため変更不要です。")
+        return False
+    bl_request(base, api_key, "PATCH", f"/issues/{issue_key}", {"statusId": status_id})
+    print(f"{issue_key}: '{current.get('name')}' → ステータス {status_id} に更新しました。")
+    return True
+
+
+if __name__ == "__main__":
+    # 自己チェック: python3 .github/scripts/backlog_client.py
+    import types
+
+    calls: list[tuple] = []
+
+    def _fake(base, api_key, method, path, data=None, **kw):
+        calls.append((method, path, data))
+        if method == "GET":
+            return {"status": {"id": _fake.current_id, "name": "現在"}}
+        return {}
+
+    _orig = bl_request
+    globals()["bl_request"] = _fake
+
+    _fake.current_id = 4
+    calls.clear()
+    assert set_issue_status("b", "k", "X-1", 4) is False, "同ステータスなら更新しない"
+    assert all(m == "GET" for m, _, _ in calls), f"PATCH を送ってはいけない: {calls}"
+
+    _fake.current_id = 1
+    calls.clear()
+    assert set_issue_status("b", "k", "X-1", 4) is True, "違うステータスなら更新する"
+    assert ("PATCH", "/issues/X-1", {"statusId": 4}) in calls, f"PATCH が無い: {calls}"
+
+    globals()["bl_request"] = _orig
+    assert normalize_space_id("https://myspace.backlog.jp") == "myspace"
+    assert build_url("https://x/api/v2", "/issues?a=b", "K").count("?") == 1
+    print("OK")

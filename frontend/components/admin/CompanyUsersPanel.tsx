@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useState } from 'react'
 import {
   Alert,
   Button,
+  Chip,
   MenuItem,
   Stack,
   Table,
@@ -15,6 +16,7 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin-fetch'
 
 type CompanyUserItem = {
   id: number
@@ -23,6 +25,16 @@ type CompanyUserItem = {
   role: string
   password_set: boolean
   invite_pending: boolean
+  /** 無効化済み。退職者のアクセスを止める手段 (#1196)。行削除はタグの参照があるため不可 */
+  disabled: boolean
+  disabled_at: string | null
+}
+
+/** 無効 > 招待中 > 有効 の順に判定する。無効化済みを「有効」と出さないため順序が重要 (#1196) */
+function statusChip(user: CompanyUserItem) {
+  if (user.disabled) return <Chip size="small" color="error" variant="filled" label="無効" />
+  if (!user.password_set) return <Chip size="small" color="warning" variant="outlined" label="招待中" />
+  return <Chip size="small" color="success" variant="outlined" label="有効" />
 }
 
 export function CompanyUsersPanel({ companyId }: { companyId: string }) {
@@ -33,6 +45,8 @@ export function CompanyUsersPanel({ companyId }: { companyId: string }) {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
+  // 二重送信防止。処理中の行だけボタンを無効化する
+  const [pendingId, setPendingId] = useState<number | null>(null)
 
   const loadUsers = useCallback(() => {
     fetch(`/api/admin/companies/${companyId}/company-users`, {
@@ -49,6 +63,33 @@ export function CompanyUsersPanel({ companyId }: { companyId: string }) {
   useEffect(() => {
     loadUsers()
   }, [loadUsers])
+
+  const handleToggleDisabled = async (user: CompanyUserItem) => {
+    const disabled = !user.disabled
+    if (disabled && !window.confirm(`${user.email} を無効化します。この担当者は企業ポータルにログインできなくなります。よろしいですか？`)) {
+      return
+    }
+    setError('')
+    setSuccess('')
+    setPendingId(user.id)
+    try {
+      await adminFetchJson(
+        `/api/admin/companies/${companyId}/company-users/${user.id}`,
+        {
+          method: 'PATCH',
+          headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ disabled }),
+        },
+        disabled ? '無効化に失敗しました' : '再有効化に失敗しました',
+      )
+      setSuccess(disabled ? '企業ユーザーを無効化しました' : '企業ユーザーを再有効化しました')
+      loadUsers()
+    } catch (e) {
+      setError(toAdminErrorMessage(e))
+    } finally {
+      setPendingId(null)
+    }
+  }
 
   const handleInvite = async (e: FormEvent) => {
     e.preventDefault()
@@ -100,6 +141,7 @@ export function CompanyUsersPanel({ companyId }: { companyId: string }) {
             <TableCell>メール</TableCell>
             <TableCell>ロール</TableCell>
             <TableCell>状態</TableCell>
+            <TableCell>操作</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -108,7 +150,18 @@ export function CompanyUsersPanel({ companyId }: { companyId: string }) {
               <TableCell>{u.name}</TableCell>
               <TableCell>{u.email}</TableCell>
               <TableCell>{u.role}</TableCell>
-              <TableCell>{u.password_set ? '有効' : '招待中'}</TableCell>
+              <TableCell>{statusChip(u)}</TableCell>
+              <TableCell>
+                <Button
+                  type="button"
+                  size="small"
+                  color={u.disabled ? 'primary' : 'error'}
+                  disabled={pendingId === u.id}
+                  onClick={() => handleToggleDisabled(u)}
+                >
+                  {u.disabled ? '再有効化' : '無効化'}
+                </Button>
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>

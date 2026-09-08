@@ -8,51 +8,51 @@ func (s *ChatService) fallbackQuestionForCategory(category string, jobCategoryID
 	switch category {
 	case "技術志向":
 		return s.techInterestQuestion(jobCategoryID, targetLevel)
-	case "コミュニケーション能力":
+	case "コミュニケーション力":
 		if targetLevel == "中途" {
 			return "業務で関係者と調整した経験はありますか？どんな場面で、どのように進めましたか？"
 		}
-		return "グループワークであなたがよく担当する役割は何ですか？（例: アイデア出し、まとめ役、サポートなど）"
-	case "リーダーシップ":
+		return "グループワークで、自分の考えをどのように伝えていますか？"
+	case "リーダーシップ志向":
 		if targetLevel == "中途" {
 			return "業務でチームや案件をリードした経験はありますか？どのように進めましたか？"
 		}
 		return "グループで何かをまとめた経験はありますか？どんな場面でしたか？"
-	case "チームワーク":
+	case "チームワーク志向":
 		if targetLevel == "中途" {
 			return "チームで協力して成果を出した経験はありますか？あなたの役割も教えてください。"
 		}
 		return "サークルや授業で、チームで取り組んだ経験はありますか？どんな役割でしたか？"
-	case "問題解決力":
+	case "安定志向":
 		if targetLevel == "中途" {
-			return "業務で課題が起きたとき、どのように解決しましたか？最近の例を教えてください。"
+			return "働き方について、変化の多い環境と落ち着いた環境のどちらが合うと感じますか？"
 		}
-		return "課題やレポートで困ったとき、どのように解決しましたか？最近の例を教えてください。"
-	case "創造性・発想力":
+		return "働く環境について、腰を据えて続けられることと新しい変化のどちらを大事にしたいですか？"
+	case "創造性志向":
 		if targetLevel == "中途" {
 			return "業務で改善や工夫を提案した経験はありますか？どんな内容でしたか？"
 		}
 		return "新しいアイデアを出した経験はありますか？どんな工夫をしましたか？"
-	case "計画性・実行力":
+	case "細部志向":
 		if targetLevel == "中途" {
 			return "業務で計画を立てて実行した経験を教えてください。どのように進めましたか？"
 		}
 		return "何かを計画して実行した経験を教えてください。どのように進めましたか？"
-	case "学習意欲・成長志向":
+	case "成長志向":
 		if targetLevel == "中途" {
 			return "業務に役立てるために学んだことはありますか？直近の例があれば教えてください。"
 		}
 		return "新しいことを学ぶとき、どうやって学習を進めますか？直近で学んだことはありますか？"
-	case "ストレス耐性・粘り強さ":
+	case "チャレンジ志向":
 		if targetLevel == "中途" {
 			return "業務で困難に直面したとき、どのように乗り越えましたか？具体例があれば教えてください。"
 		}
 		return "困難に直面したとき、どのように乗り越えましたか？具体例があれば教えてください。"
-	case "ビジネス思考・目標志向":
+	case "ワークライフバランス":
 		if targetLevel == "中途" {
-			return "業務で目標を立てて達成した経験はありますか？どんな目標でしたか？"
+			return "仕事とプライベートの時間配分について、どんな働き方が理想ですか？"
 		}
-		return "目標を立てて達成した経験はありますか？どんな目標でしたか？"
+		return "仕事とプライベートの過ごし方について、どんなバランスが理想ですか？"
 	default:
 		return ""
 	}
@@ -65,18 +65,18 @@ func (s *ChatService) fallbackQuestionsForCategory(category string, jobCategoryI
 			s.techInterestQuestion(jobCategoryID, targetLevel),
 			"最近触れた技術やツールはありますか？どんなことでも大丈夫です。",
 		}
-	case "コミュニケーション能力":
+	case "コミュニケーション力":
 		if targetLevel == "中途" {
 			return []string{
 				"業務で相手に説明するとき、意識していることは何ですか？",
-				"関係者とのやり取りで工夫したことはありますか？",
+				"相手に合わせて説明の仕方を変えることはありますか？",
 			}
 		}
 		return []string{
 			"人に説明するとき、意識していることは何ですか？",
 			"授業やサークルで発表した経験はありますか？",
 		}
-	case "リーダーシップ":
+	case "リーダーシップ志向":
 		if targetLevel == "中途" {
 			return []string{
 				"業務で主導したことはありますか？どんな場面でしたか？",
@@ -87,7 +87,7 @@ func (s *ChatService) fallbackQuestionsForCategory(category string, jobCategoryI
 			"自分から提案したりまとめ役をしたことはありますか？",
 			"人をまとめた経験があれば教えてください。",
 		}
-	case "チームワーク":
+	case "チームワーク志向":
 		if targetLevel == "中途" {
 			return []string{
 				"チームで協力して進めた仕事はありますか？",
@@ -98,18 +98,18 @@ func (s *ChatService) fallbackQuestionsForCategory(category string, jobCategoryI
 			"グループで協力した経験はありますか？",
 			"チームで取り組んだときの役割を教えてください。",
 		}
-	case "問題解決力":
+	case "安定志向":
 		if targetLevel == "中途" {
 			return []string{
-				"業務で困ったとき、どう解決しましたか？",
-				"トラブル対応で工夫したことはありますか？",
+				"変化の多い環境と、腰を据えて取り組める環境のどちらが合いますか？",
+				"長く続けられる働き方として、大事にしたいことは何ですか？",
 			}
 		}
 		return []string{
-			"困ったとき、どうやって解決しましたか？",
-			"課題で行き詰まったときの対処法を教えてください。",
+			"変化の多い環境と落ち着いた環境、どちらが自分に合うと思いますか？",
+			"長く働くうえで大事にしたいことは何ですか？",
 		}
-	case "創造性・発想力":
+	case "創造性志向":
 		if targetLevel == "中途" {
 			return []string{
 				"業務で改善案を出したことはありますか？",
@@ -120,7 +120,7 @@ func (s *ChatService) fallbackQuestionsForCategory(category string, jobCategoryI
 			"新しいアイデアを出した経験はありますか？",
 			"いつもと違う工夫をしたことはありますか？",
 		}
-	case "計画性・実行力":
+	case "細部志向":
 		if targetLevel == "中途" {
 			return []string{
 				"業務で計画を立てて進めた経験はありますか？",
@@ -131,7 +131,7 @@ func (s *ChatService) fallbackQuestionsForCategory(category string, jobCategoryI
 			"計画を立てて進めた経験はありますか？",
 			"期限を意識して進めたことはありますか？",
 		}
-	case "学習意欲・成長志向":
+	case "成長志向":
 		if targetLevel == "中途" {
 			return []string{
 				"最近学んだことはありますか？",
@@ -142,7 +142,7 @@ func (s *ChatService) fallbackQuestionsForCategory(category string, jobCategoryI
 			"最近学んだことはありますか？",
 			"新しく始めたことはありますか？",
 		}
-	case "ストレス耐性・粘り強さ":
+	case "チャレンジ志向":
 		if targetLevel == "中途" {
 			return []string{
 				"大変だった仕事をどう乗り越えましたか？",
@@ -153,16 +153,16 @@ func (s *ChatService) fallbackQuestionsForCategory(category string, jobCategoryI
 			"大変なとき、どうやって乗り越えましたか？",
 			"うまくいかない時の気持ちの切り替え方は？",
 		}
-	case "ビジネス思考・目標志向":
+	case "ワークライフバランス":
 		if targetLevel == "中途" {
 			return []string{
-				"目標を立てて取り組んだ経験はありますか？",
-				"成果を意識して進めた仕事はありますか？",
+				"仕事とプライベートの時間配分は、どのくらいが理想ですか？",
+				"働き方で譲れない条件はありますか？",
 			}
 		}
 		return []string{
-			"目標を立てて取り組んだ経験はありますか？",
-			"目標達成のために工夫したことはありますか？",
+			"仕事とプライベートのバランスについて、どんな働き方が理想ですか？",
+			"働くうえで大事にしたい時間の使い方はありますか？",
 		}
 	default:
 		return []string{s.fallbackQuestionForCategory(category, jobCategoryID, targetLevel)}
@@ -241,58 +241,73 @@ func (s *ChatService) techInterestQuestion(jobCategoryID uint, targetLevel strin
 }
 
 func (s *ChatService) getCategoryOrder(jobCategoryID uint) []string {
-	defaultOrder := []string{
-		"技術志向", "コミュニケーション能力", "リーダーシップ", "チームワーク",
-		"問題解決力", "創造性・発想力", "計画性・実行力", "学習意欲・成長志向",
-		"ストレス耐性・粘り強さ", "ビジネス思考・目標志向",
-	}
+	// 正典(domain/valueobject/match.go)の10種で並べる（#929）。
+	//
+	// 以前はここが正典とは別の10分類を返していたため、
+	// chat_question_predefined.go の絞り込み(q.Category != prioritizeCategory)が
+	// 技術志向以外で一致せず、事前定義質問(11件)が丸ごと使われないまま
+	// 毎回AI生成にフォールバックしていた。未評価カテゴリの判定も
+	// scoreMap(正典キー)と突き合わないため機能していなかった。
+	//
+	// 職種ごとの優先順位という元の意図は保ち、写像で重複した分と
+	// 抜けていた安定志向・ワークライフバランスを補って10種を網羅する。
 	undecidedOrder := []string{
-		"コミュニケーション能力", "学習意欲・成長志向", "問題解決力", "チームワーク",
-		"ビジネス思考・目標志向", "計画性・実行力", "創造性・発想力", "ストレス耐性・粘り強さ",
-		"リーダーシップ", "技術志向",
+		"コミュニケーション力", "成長志向", "技術志向", "チームワーク志向",
+		"細部志向", "創造性志向", "チャレンジ志向", "リーダーシップ志向",
+		"安定志向", "ワークライフバランス",
 	}
 
 	if jobCategoryID == 0 {
 		return undecidedOrder
 	}
+	return categoryOrderForJobCode(s.getJobCategoryCode(jobCategoryID))
+}
 
-	code := s.getJobCategoryCode(jobCategoryID)
+// categoryOrderForJobCode は職種コードごとの優先順位を返す純関数。
+// DBに触らないので、正典10種を網羅していることをテストで直接検証できる（#929）。
+func categoryOrderForJobCode(code string) []string {
+	defaultOrder := []string{
+		"技術志向", "コミュニケーション力", "リーダーシップ志向", "チームワーク志向",
+		"創造性志向", "細部志向", "成長志向", "チャレンジ志向",
+		"安定志向", "ワークライフバランス",
+	}
 	switch {
 	case strings.HasPrefix(code, "ENG"):
 		return []string{
-			"技術志向", "問題解決力", "学習意欲・成長志向", "創造性・発想力",
-			"計画性・実行力", "チームワーク", "コミュニケーション能力", "ストレス耐性・粘り強さ",
-			"ビジネス思考・目標志向", "リーダーシップ",
+			"技術志向", "成長志向", "創造性志向", "細部志向",
+			"チームワーク志向", "コミュニケーション力", "チャレンジ志向", "リーダーシップ志向",
+			"安定志向", "ワークライフバランス",
 		}
 	case strings.HasPrefix(code, "SALES"):
 		return []string{
-			"コミュニケーション能力", "ビジネス思考・目標志向", "チームワーク", "ストレス耐性・粘り強さ",
-			"計画性・実行力", "学習意欲・成長志向", "問題解決力", "リーダーシップ",
-			"創造性・発想力", "技術志向",
+			"コミュニケーション力", "成長志向", "チームワーク志向", "チャレンジ志向",
+			"細部志向", "技術志向", "リーダーシップ志向", "創造性志向",
+			"安定志向", "ワークライフバランス",
 		}
 	case strings.HasPrefix(code, "MKT"):
 		return []string{
-			"創造性・発想力", "問題解決力", "コミュニケーション能力", "ビジネス思考・目標志向",
-			"学習意欲・成長志向", "計画性・実行力", "チームワーク", "リーダーシップ",
-			"ストレス耐性・粘り強さ", "技術志向",
+			"創造性志向", "技術志向", "コミュニケーション力", "成長志向",
+			"細部志向", "チームワーク志向", "リーダーシップ志向", "チャレンジ志向",
+			"安定志向", "ワークライフバランス",
 		}
 	case strings.HasPrefix(code, "HR"):
 		return []string{
-			"コミュニケーション能力", "チームワーク", "リーダーシップ", "学習意欲・成長志向",
-			"計画性・実行力", "問題解決力", "ストレス耐性・粘り強さ", "ビジネス思考・目標志向",
-			"創造性・発想力", "技術志向",
+			"コミュニケーション力", "チームワーク志向", "リーダーシップ志向", "成長志向",
+			"細部志向", "技術志向", "チャレンジ志向", "創造性志向",
+			"安定志向", "ワークライフバランス",
 		}
 	case strings.HasPrefix(code, "FIN"):
+		// 金融は安定志向が職種適性として効くため上位に置く。
 		return []string{
-			"計画性・実行力", "問題解決力", "ビジネス思考・目標志向", "ストレス耐性・粘り強さ",
-			"学習意欲・成長志向", "コミュニケーション能力", "チームワーク", "リーダーシップ",
-			"創造性・発想力", "技術志向",
+			"細部志向", "安定志向", "技術志向", "成長志向",
+			"チャレンジ志向", "コミュニケーション力", "チームワーク志向", "リーダーシップ志向",
+			"創造性志向", "ワークライフバランス",
 		}
 	case strings.HasPrefix(code, "CONS"):
 		return []string{
-			"問題解決力", "コミュニケーション能力", "学習意欲・成長志向", "ビジネス思考・目標志向",
-			"チームワーク", "リーダーシップ", "計画性・実行力", "ストレス耐性・粘り強さ",
-			"創造性・発想力", "技術志向",
+			"技術志向", "コミュニケーション力", "成長志向", "チームワーク志向",
+			"リーダーシップ志向", "細部志向", "チャレンジ志向", "創造性志向",
+			"安定志向", "ワークライフバランス",
 		}
 	default:
 		return defaultOrder

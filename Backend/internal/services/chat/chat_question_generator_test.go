@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"Backend/domain/valueobject"
 	"Backend/internal/models"
 	"testing"
 )
@@ -83,17 +84,76 @@ func TestShouldValidateJobCategory(t *testing.T) {
 	}
 }
 
-func TestGetCategoryOrder_Undecided(t *testing.T) {
+// TestGetCategoryOrder_ReturnsCanonicalCategories は、質問の優先順位が
+// 正典カテゴリだけで構成され、10種すべてを重複なく網羅することを検証する（#929）。
+//
+// ここが正典と食い違うと、chat_question_predefined.go の絞り込みが一致せず
+// 事前定義質問が使われないまま毎回AI生成に落ち、未評価カテゴリの判定も
+// scoreMap(正典キー)と突き合わないため機能しなくなる。
+func TestGetCategoryOrder_ReturnsCanonicalCategories(t *testing.T) {
+	canonical := map[string]bool{}
+	for _, c := range valueobject.AllWeightCategories() {
+		canonical[string(c)] = true
+	}
+
+	check := func(label string, got []string) {
+		t.Helper()
+		if len(got) != 10 {
+			t.Fatalf("%s: len=%d want 10 (%v)", label, len(got), got)
+		}
+		seen := map[string]bool{}
+		for _, c := range got {
+			if !canonical[c] {
+				t.Errorf("%s: 正典外のカテゴリ %q が含まれる", label, c)
+			}
+			if seen[c] {
+				t.Errorf("%s: カテゴリ %q が重複している", label, c)
+			}
+			seen[c] = true
+		}
+		if len(seen) != 10 {
+			t.Errorf("%s: 10種を網羅していない (%d種)", label, len(seen))
+		}
+	}
+
+	// 職種未決定
+	check("undecided", (&ChatService{}).getCategoryOrder(0))
+
+	// 職種ごとの優先順位（先頭に何を聞くか）は仕様なので固定する。
+	// 網羅性チェックだけだと順序を入れ替えても検出できない。
+	for _, tt := range []struct {
+		code      string
+		wantFirst string
+	}{
+		{code: "ENG01", wantFirst: "技術志向"},
+		{code: "SALES01", wantFirst: "コミュニケーション力"},
+		{code: "MKT01", wantFirst: "創造性志向"},
+		{code: "HR01", wantFirst: "コミュニケーション力"},
+		{code: "FIN01", wantFirst: "細部志向"},
+		{code: "CONS01", wantFirst: "技術志向"},
+		{code: "OTHER", wantFirst: "技術志向"},
+	} {
+		got := categoryOrderForJobCode(tt.code)
+		check(tt.code, got)
+		if got[0] != tt.wantFirst {
+			t.Errorf("%s: 先頭カテゴリ = %q, want %q", tt.code, got[0], tt.wantFirst)
+		}
+	}
+}
+
+// 全ての正典カテゴリにフォールバック質問が用意されていること。
+// 用意が無いとカテゴリ指定が無視され、汎用質問に落ちる。
+func TestFallbackQuestions_CoverAllCanonicalCategories(t *testing.T) {
 	s := &ChatService{}
-	got := s.getCategoryOrder(0)
-	if len(got) != 10 {
-		t.Fatalf("len=%d want 10", len(got))
-	}
-	if got[0] != "コミュニケーション能力" {
-		t.Fatalf("first=%q want コミュニケーション能力", got[0])
-	}
-	if got[len(got)-1] != "技術志向" {
-		t.Fatalf("last=%q want 技術志向", got[len(got)-1])
+	for _, c := range valueobject.AllWeightCategories() {
+		for _, level := range []string{"新卒", "中途"} {
+			if got := s.fallbackQuestionForCategory(string(c), 0, level); got == "" {
+				t.Errorf("%s(%s): 単数フォールバックが空", c, level)
+			}
+			if got := s.fallbackQuestionsForCategory(string(c), 0, level); len(got) == 0 {
+				t.Errorf("%s(%s): 複数フォールバックが空", c, level)
+			}
+		}
 	}
 }
 
@@ -113,11 +173,11 @@ func TestSelectFallbackQuestion_SkipsAsked(t *testing.T) {
 
 func TestSelectFallbackQuestion_CategoryOptions(t *testing.T) {
 	s := &ChatService{}
-	got := s.selectFallbackQuestion("創造性・発想力", 0, "新卒", map[string]bool{})
+	got := s.selectFallbackQuestion("創造性志向", 0, "新卒", map[string]bool{})
 	if got == "" {
 		t.Fatal("expected creativity fallback")
 	}
-	options := s.fallbackQuestionsForCategory("創造性・発想力", 0, "新卒")
+	options := s.fallbackQuestionsForCategory("創造性志向", 0, "新卒")
 	found := false
 	for _, q := range options {
 		if q == got {
