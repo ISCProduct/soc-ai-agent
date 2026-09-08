@@ -34,8 +34,14 @@ var dateOnlyPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 // UptimeService は本番の「指定日終日起動」日付リストをSSM Parameter Storeで管理する。
 // #881台のインフラ方針(docs/architecture/infra-decision-oci-stg-aws-prod.md)の
 // 「指定日リスト」をSSM Parameterに持つ実装。
+// ssmAPI はUptimeServiceが使うSSM操作。テストで差し替えるために切っている。
+type ssmAPI interface {
+	GetParameter(ctx context.Context, in *ssm.GetParameterInput, opts ...func(*ssm.Options)) (*ssm.GetParameterOutput, error)
+	PutParameter(ctx context.Context, in *ssm.PutParameterInput, opts ...func(*ssm.Options)) (*ssm.PutParameterOutput, error)
+}
+
 type UptimeService struct {
-	client                *ssm.Client
+	client                ssmAPI
 	parameterName         string
 	overrideParameterName string
 	// ponytail: read-modify-writeの排他はプロセス内mutexのみ。

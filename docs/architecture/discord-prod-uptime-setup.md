@@ -54,9 +54,6 @@ ECSを起動しても**最大1時間で元に戻される**。「Discordで起�
 なぜstaging backendか: 本番(prod)は既定停止のため常時起動しているサーバーが必要。stagingは
 常時稼働方針のため、ここにDiscord Interactions Endpointを追加する。
 
-なぜstaging backendか: 本番(prod)は既定停止のため常時起動しているサーバーが必要。stagingは
-常時稼働方針のため、ここにDiscord Interactions Endpointを追加する。
-
 ## 0. 反映の順序（重要）
 
 `prod-uptime-scheduler.yml` は **cron / workflow_dispatch ともデフォルトブランチ(main)の
@@ -66,9 +63,11 @@ ECSを起動しても**最大1時間で元に戻される**。「Discordで起�
 
 したがって次の順で進めること。
 
-1. スケジューラの変更を **main まで反映**する（develop → release → main）
-2. staging に backend を反映する（`terraform apply` または CI デプロイ）
-3. `register-commands.sh` を実行して `/prod` を登録する
+1. **CIのIAMユーザーに override パラメータの読み取りを許可する**（手順6。これが先。
+   足りないと毎時のジョブが失敗し続ける）
+2. スケジューラの変更を **main まで反映**する（develop → release → main）
+3. staging に backend を反映する（`terraform apply` または CI デプロイ）
+4. `register-commands.sh` を実行して `/prod` を登録する
 
 `/prod` を登録するのは最後。登録しなければ誰も実行できないので、これが安全弁になる。
 
@@ -130,6 +129,43 @@ DISCORD_BOT_TOKEN=<Botトークン> DISCORD_APPLICATION_ID=<Application ID> \
 
 ## 6. SSM Parameter Store 読み書き権限
 
+### ⚠️ GitHub Actions 側のIAMに override のARNを足す（必須）
+
+CIが使うIAMユーザーのインラインポリシー `AllowProdUptimeSsmRead` は
+`prod-uptime-dates` **だけ**にリソース限定されており、そのままでは
+`prod-uptime-override` が `AccessDeniedException` になる（2026-09-08 実測）。
+
+この状態でも日付リストどおりの起動は続くが（縮退動作）、`/prod` は効かず、
+毎時のジョブは失敗し続ける。**main へ反映する前に**次を実行すること。
+
+```bash
+aws iam put-user-policy --user-name <CIのIAMユーザー> \
+  --policy-name AllowProdUptimeSsmRead \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Sid": "ProdUptimeSsmRead",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": [
+        "arn:aws:ssm:ap-northeast-1:<アカウントID>:parameter/soc-app/prod-uptime-dates",
+        "arn:aws:ssm:ap-northeast-1:<アカウントID>:parameter/soc-app/prod-uptime-override"
+      ]
+    }]
+  }'
+```
+
+確認:
+
+```bash
+aws ssm get-parameter --name /soc-app/prod-uptime-override
+# ParameterNotFound なら権限はOK（パラメータは初回 /prod 実行時に作られる）
+# AccessDeniedException ならポリシーが効いていない
+```
+
+### staging backend 側
+
+
 staging EC2のIAMロールには `infra/terraform/environments/staging/main.tf` の
 `ProdUptimeSsmAccess` ステートメントで `/soc-app/prod-uptime-dates` と
 `/soc-app/prod-uptime-override` への `ssm:GetParameter` / `ssm:PutParameter` が
@@ -162,6 +198,12 @@ GitHub Actions側（`prod-uptime-scheduler.yml`）は既存の `AWS_ACCESS_KEY_I
    `desired_count` が更新されることを確認
 
 ## 既知の制約
+
+- **`GITHUB_DISPATCH_TOKEN` は本番デプロイも起動できてしまう。** `deployment.yml` にも
+  `workflow_dispatch` があり、fine-grained PAT を「このワークフローだけ」に絞る手段が無い。
+  トークンは staging EC2 の `.env` と Launch Template の user_data に**平文**で載るため、
+  staging が侵害されると本番デプロイを起動されうる。許容できない場合はトークンを設定せず、
+  反映を毎時実行に任せること（`/prod` は設定なしでも動作する）
 
 - **`/prod state:on` のまま放置すると本番が課金され続ける。** 用が済んだら `auto` に
   戻すこと。`/prod-uptime-list` に「常時起動に固定されています」と表示されるので、

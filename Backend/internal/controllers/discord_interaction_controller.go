@@ -158,18 +158,33 @@ func (c *DiscordInteractionController) handleProdCommand(ctx echo.Context, inter
 		})
 	}
 
+	// 全ユーザーに影響する操作なので、誰がいつ実行したかを残す。
+	// 「本番が落ちている、誰が止めたのか」を後から追えるようにする。
+	log.Printf("[Discord] /prod state=%s by %s", state, interaction.ActorLabel())
+
 	// SSM書き込みとワークフロー起動でDiscordの3秒応答制限を超えるため、
 	// 先にdeferred応答を返して実処理は非同期で行う。
 	applicationID, token := interaction.ApplicationID, interaction.Token
 	go c.applyOverrideAndFollowUp(applicationID, token, state)
 
+	// 日付追加(/prod-uptime)と違い本番の稼働そのものを変えるため、
+	// ephemeralにせずチャンネルに残す。
 	return ctx.JSON(http.StatusOK, discord.InteractionResponse{
 		Type: discord.ResponseTypeDeferredChannelMessageWithSource,
-		Data: &discord.InteractionResponseData{Flags: discord.EphemeralFlag},
 	})
 }
 
+// recoverFollowUp は非同期フォローアップ内のpanicを受け止める。
+// echoのRecoverミドルウェアは起動済みgoroutineには効かず、panicすると
+// staging backendのプロセスごと落ちてDiscordの受け口が全滅する。
+func recoverFollowUp(name string) {
+	if r := recover(); r != nil {
+		log.Printf("[Discord] %s panic: %v", name, r)
+	}
+}
+
 func (c *DiscordInteractionController) applyOverrideAndFollowUp(applicationID, token, state string) {
+	defer recoverFollowUp("prod override")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
@@ -242,6 +257,7 @@ func (c *DiscordInteractionController) handleListCommand(interaction *discord.In
 }
 
 func (c *DiscordInteractionController) listDatesAndFollowUp(applicationID, token string) {
+	defer recoverFollowUp("prod-uptime list")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -254,11 +270,17 @@ func (c *DiscordInteractionController) listDatesAndFollowUp(applicationID, token
 	} else {
 		// 手動オーバーライド中は日付リストが効かないため、一覧だけ見て
 		// 「今日は載っていないから止まっているはず」と誤解しないよう併記する。
+		// 取得できなかった場合も黙って省略しない。表示が無いことを
+		// 「auto に戻っている」と読まれると、on 固定のまま課金が続く。
 		override, overrideErr := c.uptimeService.GetOverride(ctx)
-		if overrideErr != nil {
+		switch {
+		case overrideErr != nil:
 			log.Printf("[Discord] prod override get error: %v", overrideErr)
-		} else if override != discord.OverrideAuto {
+			content += "\n⚠️ 現在の設定を取得できませんでした(固定中かどうか不明です)。"
+		case override != discord.OverrideAuto:
 			content += "\n⚠️ 現在 /prod で「" + overrideLabel(override) + "」に固定されています(日付リストは無視されます)。"
+		default:
+			content += "\n現在の設定: 日付リストに従う(auto)"
 		}
 	}
 
@@ -311,6 +333,7 @@ func (c *DiscordInteractionController) handleModalSubmit(ctx echo.Context, inter
 }
 
 func (c *DiscordInteractionController) addDateAndFollowUp(applicationID, token, date string) {
+	defer recoverFollowUp("prod-uptime add")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

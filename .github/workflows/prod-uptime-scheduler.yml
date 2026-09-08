@@ -21,6 +21,13 @@ on:
 
 permissions: {}
 
+# 同時実行を許すと、起動側(RDSのavailable待ちで最大10分ループする)と停止側が
+# すれ違い、SSMは off なのに本番が起動したまま次の毎時実行まで課金され続ける。
+# cancel-in-progress で「最後の指示が勝つ」ようにする。
+concurrency:
+  group: prod-uptime-scheduler
+  cancel-in-progress: true
+
 jobs:
   sync-prod-uptime:
     runs-on: ubuntu-latest
@@ -57,8 +64,14 @@ jobs:
             exit 1
           fi
 
-          # 手動オーバーライド。未作成(初回)のみ auto 扱いにし、それ以外のAWSエラーは
-          # 日付リスト取得と同様に握りつぶさず失敗させる。
+          # 手動オーバーライド。未作成(初回)は auto 扱い。
+          #
+          # 読めない場合にここで exit すると、日付リストどおりの起動まで巻き添えで止まり、
+          # 指定日に本番が上がらなくなる。IAMに override のARNを足し忘れると必ずこれに当たる
+          # (実際、CIのIAMユーザーは prod-uptime-dates だけにリソース限定されていた)。
+          # そのため auto へ縮退して日付リストの反映は続け、ジョブは最後に失敗させる。
+          # オートスケーリング同期の失敗と同じ扱い。
+          OVERRIDE_READ_FAILED=""
           if OVERRIDE=$(aws ssm get-parameter --name "/${PROJECT_NAME}/prod-uptime-override" \
             --query 'Parameter.Value' --output text 2>/tmp/ssm_get_override_err); then
             :
@@ -66,13 +79,21 @@ jobs:
             OVERRIDE="auto"
           else
             cat /tmp/ssm_get_override_err >&2
-            exit 1
+            echo "::error::手動オーバーライドを読めませんでした。日付リストのみで判定します(/prod は効きません)。IAMに ${PROJECT_NAME}/prod-uptime-override への ssm:GetParameter を追加してください"
+            OVERRIDE="auto"
+            OVERRIDE_READ_FAILED=1
           fi
+
+          # Discord側(Go)は大文字と前後空白を無視して受理するため、手でSSMを
+          # 書き換えたときに表示と実挙動が食い違わないよう、こちらでも正規化する。
+          OVERRIDE=$(echo "$OVERRIDE" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
 
           case "$OVERRIDE" in
             on)
               DESIRED=1
               echo "override=on -> desired_count=1 (日付リストは無視)"
+              # 戻し忘れると請求で気づくことになるので、実行ログに毎回残す
+              echo "::warning::本番は /prod で「常時起動」に固定されています。不要なら /prod state:auto に戻してください"
               ;;
             off)
               DESIRED=0
@@ -185,5 +206,10 @@ jobs:
           # 失敗していればジョブを失敗させる(放置すると稼働日に0へ縮退して気づけない)。
           if [ -n "$AUTOSCALING_FAILED" ]; then
             echo "オートスケーリング下限(min_capacity)の同期に失敗しました" >&2
+            exit 1
+          fi
+
+          if [ -n "$OVERRIDE_READ_FAILED" ]; then
+            echo "手動オーバーライドを読めませんでした(/prod が無効のまま動いています)" >&2
             exit 1
           fi

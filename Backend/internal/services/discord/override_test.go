@@ -2,10 +2,15 @@ package discord
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 )
 
 func TestParseOverride(t *testing.T) {
@@ -150,4 +155,92 @@ func newTestDispatcher(baseURL, token, repo, workflow, ref string) *WorkflowDisp
 		baseURL:  baseURL,
 		client:   &http.Client{Timeout: 10 * time.Second},
 	}
+}
+
+// fakeSSM はSSMの応答を再現する。
+type fakeSSM struct {
+	value    string
+	getErr   error
+	putValue string
+	putCalls int
+}
+
+func (f *fakeSSM) GetParameter(_ context.Context, _ *ssm.GetParameterInput, _ ...func(*ssm.Options)) (*ssm.GetParameterOutput, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	return &ssm.GetParameterOutput{Parameter: &ssmtypes.Parameter{Value: aws.String(f.value)}}, nil
+}
+
+func (f *fakeSSM) PutParameter(_ context.Context, in *ssm.PutParameterInput, _ ...func(*ssm.Options)) (*ssm.PutParameterOutput, error) {
+	f.putCalls++
+	f.putValue = aws.ToString(in.Value)
+	return &ssm.PutParameterOutput{}, nil
+}
+
+func newTestUptimeService(f *fakeSSM) *UptimeService {
+	return &UptimeService{client: f, parameterName: "/p/dates", overrideParameterName: "/p/override"}
+}
+
+func TestUptimeService_GetOverride(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		err   error
+		want  string
+	}{
+		{"on", "on", nil, OverrideOn},
+		{"off", "off", nil, OverrideOff},
+		{"auto", "auto", nil, OverrideAuto},
+		{"大文字は正規化する", "ON", nil, OverrideOn},
+		{"前後空白は無視する", " off ", nil, OverrideOff},
+		// SSMは手でも書ける。未知の値を on/off と解釈すると、
+		// 打ち間違い一つで本番が起動しっぱなし/落ちたままになる。
+		{"未知の値は auto に倒す", "yes", nil, OverrideAuto},
+		{"空文字は auto", "", nil, OverrideAuto},
+		{"パラメータ未作成は auto", "", &ssmtypes.ParameterNotFound{}, OverrideAuto},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newTestUptimeService(&fakeSSM{value: tt.value, getErr: tt.err})
+			got, err := s.GetOverride(context.Background())
+			if err != nil {
+				t.Fatalf("GetOverride() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("GetOverride() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	t.Run("ParameterNotFound以外のエラーは握り潰さない", func(t *testing.T) {
+		s := newTestUptimeService(&fakeSSM{getErr: errors.New("AccessDeniedException")})
+		if _, err := s.GetOverride(context.Background()); err == nil {
+			t.Error("GetOverride() error = nil, want error")
+		}
+	})
+}
+
+func TestUptimeService_SetOverride(t *testing.T) {
+	t.Run("正規化した値を書き込む", func(t *testing.T) {
+		f := &fakeSSM{}
+		if err := newTestUptimeService(f).SetOverride(context.Background(), " ON "); err != nil {
+			t.Fatalf("SetOverride() error = %v", err)
+		}
+		if f.putValue != OverrideOn {
+			t.Errorf("書き込まれた値 = %q, want %q", f.putValue, OverrideOn)
+		}
+	})
+
+	// 検証を外すと、SSMに on/off/auto 以外が入りうる。
+	// ワークフローはそれを auto として扱うので、Discordの表示と実挙動がずれる。
+	t.Run("不正な値は書き込まない", func(t *testing.T) {
+		f := &fakeSSM{}
+		if err := newTestUptimeService(f).SetOverride(context.Background(), "stop"); err == nil {
+			t.Error("SetOverride() error = nil, want error")
+		}
+		if f.putCalls != 0 {
+			t.Errorf("PutParameter が %d 回呼ばれた。不正な値では書き込まないこと", f.putCalls)
+		}
+	})
 }

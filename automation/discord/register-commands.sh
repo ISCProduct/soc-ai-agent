@@ -35,6 +35,8 @@ curl -sf -X PUT \
       "name": "prod",
       "description": "本番環境を起動/停止します",
       "type": 1,
+      "dm_permission": false,
+      "default_member_permissions": "0",
       "options": [
         {
           "name": "state",

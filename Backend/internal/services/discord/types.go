@@ -46,6 +46,24 @@ type Interaction struct {
 
 type Member struct {
 	Roles []string `json:"roles"`
+	User  *User    `json:"user"`
+}
+
+// User は誰が本番を止めたかを記録するために使う。
+type User struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+}
+
+// ActorLabel は監査ログ用の実行者表記。取得できなければ "unknown"。
+func (i *Interaction) ActorLabel() string {
+	if i == nil || i.Member == nil || i.Member.User == nil {
+		return "unknown"
+	}
+	if i.Member.User.Username != "" {
+		return i.Member.User.Username + "(" + i.Member.User.ID + ")"
+	}
+	return i.Member.User.ID
 }
 
 // InteractionData はスラッシュコマンド名、またはモーダル送信時の custom_id・入力値を含む。
