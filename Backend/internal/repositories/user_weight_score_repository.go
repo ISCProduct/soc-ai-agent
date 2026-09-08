@@ -3,6 +3,7 @@ package repositories
 import (
 	"Backend/domain/entity"
 	"Backend/domain/mapper"
+	"Backend/domain/valueobject"
 	"Backend/internal/models"
 
 	"gorm.io/gorm"
@@ -20,6 +21,16 @@ func NewUserWeightScoreRepository(db *gorm.DB) *UserWeightScoreRepository {
 // 呼び出し前に対象レコードが存在しないことを確認すること。
 // スコアは 0〜100 に丸める。
 func (r *UserWeightScoreRepository) SetScore(userID uint, sessionID, category string, absoluteScore int) error {
+	// 正典外のカテゴリ名を書かせない（#929）。
+	// マッチングは正典キーで scoreMap を引くため、揺れた名前で保存されると
+	// その行は永久に引かれず、代わりに中立50が使われて静かにスコアが希釈される。
+	// 全ての書き込みがこのリポジトリを通るので、ここ1箇所で再発を止める。
+	normalized, err := valueobject.ParseWeightCategory(category)
+	if err != nil {
+		return err
+	}
+	category = string(normalized)
+
 	if absoluteScore < 0 {
 		absoluteScore = 0
 	}
@@ -42,10 +53,15 @@ func (r *UserWeightScoreRepository) SetScore(userID uint, sessionID, category st
 // レコードが存在しない場合はエラーを返す。
 // 加算結果は SQL 側で 0〜100 に丸め、競合時も範囲外にならないようにする。
 func (r *UserWeightScoreRepository) AddScore(userID uint, sessionID, category string, delta int) error {
-	var score models.UserWeightScore
-	err := r.db.Where("user_id = ? AND session_id = ? AND weight_category = ?",
-		userID, sessionID, category).First(&score).Error
+	normalized, err := valueobject.ParseWeightCategory(category)
 	if err != nil {
+		return err
+	}
+	category = string(normalized)
+
+	var score models.UserWeightScore
+	if err := r.db.Where("user_id = ? AND session_id = ? AND weight_category = ?",
+		userID, sessionID, category).First(&score).Error; err != nil {
 		return err
 	}
 	return r.db.Model(&score).Update(
