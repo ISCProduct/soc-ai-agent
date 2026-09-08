@@ -34,10 +34,22 @@ func (c *RealtimeController) Token(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
-	if req.UserID == 0 || req.InterviewID == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "user_id and interview_id are required")
+	if req.InterviewID == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "interview_id is required")
 	}
-	secret, err := c.interviewService.CreateRealtimeToken(ctx.Request().Context(), req.UserID, req.InterviewID)
+	// 誰として振る舞うかはトークンだけで決める。
+	// ボディの user_id を信頼すると、CreateRealtimeToken 内の isAllowed が
+	// actorID == ownerID で通るため、被害者のIDとセッションIDを両方指定するだけで
+	// 他人の面接セッションの ephemeral key を発行できてしまう(IDOR)。
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
+	}
+	// 旧クライアントは user_id を送る。食い違いはクライアント側の不具合なので明示的に弾く。
+	if req.UserID != 0 && req.UserID != userID {
+		return echo.NewHTTPError(http.StatusForbidden, "forbidden")
+	}
+	secret, err := c.interviewService.CreateRealtimeToken(ctx.Request().Context(), userID, req.InterviewID)
 	if err != nil {
 		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())

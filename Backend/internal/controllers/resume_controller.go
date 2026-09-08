@@ -21,6 +21,22 @@ func NewResumeController(resumeService interfaces.ResumeService) *ResumeControll
 	return &ResumeController{resumeService: resumeService}
 }
 
+// Status は認証中のユーザー自身の履歴書対応要否を返す(#1030)。
+// 他人のIDは受け付けない(クエリを取らず、トークンのIDだけを使う)。
+func (c *ResumeController) Status(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
+	}
+	status, err := c.resumeService.GetResumeStatus(userID)
+	if err != nil {
+		// 全ユーザーがホーム画面表示のたびに叩くため、DB劣化時は500が大量に出る。
+		// 原因追跡の起点を残す(他ハンドラと同じ echoInternalError を使う)。
+		return echoInternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, status)
+}
+
 func (c *ResumeController) Upload(ctx echo.Context) error {
 	if err := ctx.Request().ParseMultipartForm(32 << 20); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid form data")

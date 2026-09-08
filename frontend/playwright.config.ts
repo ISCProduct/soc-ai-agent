@@ -8,10 +8,16 @@ export default defineConfig({
     'chat.spec.ts',
     'chat-critical-flow.spec.ts',
     'resume.spec.ts',
+    'resume-reminder.spec.ts',
     'schedule.spec.ts',
     'admin.spec.ts',
+<<<<<<< ours
     'company-password-reset.spec.ts',
     'admin-company-users.spec.ts',
+    'public-pages.spec.ts',
+=======
+    'public-pages.spec.ts',
+>>>>>>> theirs
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

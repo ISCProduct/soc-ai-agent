@@ -272,6 +272,7 @@ func TestRealtimeController_Token_MissingFields(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"user_id": 0, "interview_id": 0})
 	req := httptest.NewRequest(http.MethodPost, "/api/realtime/token", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 1)
 	rec := httptest.NewRecorder()
 	assertStatus(t, newRealtimeController(nil, nil).Token, newCtx(req, rec), http.StatusBadRequest)
 }
@@ -280,6 +281,7 @@ func TestRealtimeController_Token_Forbidden(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"user_id": 1, "interview_id": 2})
 	req := httptest.NewRequest(http.MethodPost, "/api/realtime/token", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 1)
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
@@ -291,6 +293,7 @@ func TestRealtimeController_Token_Success(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"user_id": 1, "interview_id": 2})
 	req := httptest.NewRequest(http.MethodPost, "/api/realtime/token", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 1)
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
@@ -307,11 +310,57 @@ func TestRealtimeController_Token_TooManyRequests(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"user_id": 1, "interview_id": 2})
 	req := httptest.NewRequest(http.MethodPost, "/api/realtime/token", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 1)
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
 	svc.On("CreateRealtimeToken", tmock.Anything, uint(1), uint(2)).Return("", errors.New("realtime capacity exceeded: max 10 concurrent sessions"))
 	assertStatus(t, newRealtimeController(svc, nil).Token, newCtx(req, rec), http.StatusTooManyRequests)
+}
+
+// TestRealtimeController_Token_IgnoresBodyUserID は、他人のIDを本文で指定しても
+// 認証済みユーザーとしてしか ephemeral key を発行できないことを検証する。
+//
+// CreateRealtimeToken 内の isAllowed は actorID == ownerID で通るため、
+// 本文の user_id を信頼すると、被害者のIDとセッションIDを両方指定するだけで
+// 他人の面接セッションのキーを発行できてしまう(IDOR)。
+func TestRealtimeController_Token_IgnoresBodyUserID(t *testing.T) {
+	// 攻撃者(7)が被害者(1)になりすまそうとする。
+	body, _ := json.Marshal(map[string]any{"user_id": 1, "interview_id": 2})
+	req := httptest.NewRequest(http.MethodPost, "/api/realtime/token", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 7)
+	rec := httptest.NewRecorder()
+
+	svc := &mocks.InterviewServiceMock{}
+	assertStatus(t, newRealtimeController(svc, nil).Token, newCtx(req, rec), http.StatusForbidden)
+	// 被害者IDでサービスが呼ばれていないこと。
+	svc.AssertNotCalled(t, "CreateRealtimeToken", tmock.Anything, uint(1), uint(2))
+}
+
+// user_id 未指定でも認証済みIDで発行できる（本文の user_id は不要になった）。
+func TestRealtimeController_Token_UsesAuthenticatedIDWithoutBodyUserID(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{"interview_id": 2})
+	req := httptest.NewRequest(http.MethodPost, "/api/realtime/token", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 7)
+	rec := httptest.NewRecorder()
+
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("CreateRealtimeToken", tmock.Anything, uint(7), uint(2)).Return("secret", nil)
+	assertStatus(t, newRealtimeController(svc, nil).Token, newCtx(req, rec), http.StatusOK)
+	svc.AssertCalled(t, "CreateRealtimeToken", tmock.Anything, uint(7), uint(2))
+}
+
+func TestRealtimeController_Token_Unauthorized(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{"interview_id": 2})
+	req := httptest.NewRequest(http.MethodPost, "/api/realtime/token", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	svc := &mocks.InterviewServiceMock{}
+	assertStatus(t, newRealtimeController(svc, nil).Token, newCtx(req, rec), http.StatusUnauthorized)
+	svc.AssertNotCalled(t, "CreateRealtimeToken")
 }
 
 // ---- SessionInfo ----
