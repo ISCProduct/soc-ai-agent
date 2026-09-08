@@ -110,3 +110,51 @@ func (r *UserWeightScoreRepository) FindLatestByUser(userID uint) ([]entity.User
 	}
 	return r.FindByUserAndSession(userID, latest.SessionID)
 }
+
+// FindLatestScoresByUsers は複数ユーザーの「最新セッションのスコア」を1クエリで返す（#1027）。
+//
+// 教員向け一覧は担当生徒ぶん繰り返し引くため、FindLatestByUser
+// (1ユーザーあたり2クエリ)をループすると即 N+1 になる。
+// ウィンドウ関数で「ユーザーごとに最新の1行」を決め、その session_id の
+// 行だけを拾う。戻り値は user_id -> (正典カテゴリ名 -> スコア)。
+//
+// 「最新」は updated_at 降順、同値は id 降順で決める。
+// updated_at を使うのは既存の FindLatestByUser と揃えるため。
+func (r *UserWeightScoreRepository) FindLatestScoresByUsers(userIDs []uint) (map[uint]map[string]float64, error) {
+	result := map[uint]map[string]float64{}
+	if len(userIDs) == 0 {
+		return result, nil
+	}
+
+	type row struct {
+		UserID         uint
+		WeightCategory string
+		Score          int
+	}
+	var rows []row
+
+	// latest: ユーザーごとに最新1行を選び、その session_id を確定させる。
+	// scores: 同じ (user_id, session_id) の全カテゴリを取る。
+	const q = `
+WITH latest AS (
+  SELECT user_id, session_id,
+         ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY updated_at DESC, id DESC) AS rn
+  FROM user_weight_scores
+  WHERE user_id IN (?)
+)
+SELECT s.user_id, s.weight_category, s.score
+FROM user_weight_scores s
+JOIN latest l ON l.user_id = s.user_id AND l.session_id = s.session_id AND l.rn = 1
+WHERE s.user_id IN (?)`
+
+	if err := r.db.Raw(q, userIDs, userIDs).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, x := range rows {
+		if result[x.UserID] == nil {
+			result[x.UserID] = map[string]float64{}
+		}
+		result[x.UserID][x.WeightCategory] = float64(x.Score)
+	}
+	return result, nil
+}

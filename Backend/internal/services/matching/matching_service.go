@@ -246,14 +246,14 @@ func scoredMatch(userScores map[string]float64, category string, companyWeight f
 	if !ok {
 		userScore = 50.0
 	}
-	matchScore := calculateCategoryMatch(userScore, companyWeight)
+	matchScore := CalculateCategoryMatch(userScore, companyWeight)
 	return matchScore, evaluatedCount + 1, totalScore + matchScore
 }
 
-// calculateCategoryMatch カテゴリごとのマッチ度を計算
+// CalculateCategoryMatch カテゴリごとのマッチ度を計算
 // 差分を直接線形に扱う代わりに、意味的な緩やかな変化を持つシグモイド関数でスケーリングする。
 // ユーザースコアと企業重視度の差が小さいほど高スコア（0-100）。
-func calculateCategoryMatch(userScore, companyWeight float64) float64 {
+func CalculateCategoryMatch(userScore, companyWeight float64) float64 {
 	diff := math.Abs(userScore - companyWeight) // 0..100
 	// similarity: 1.0 (完全一致) -> 0.0 (完全不一致)
 	sim := 1.0 - diff/100.0
