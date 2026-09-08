@@ -208,6 +208,41 @@ func TestReleaseNoteService_IngestMergedPRs_SkipsDeveloperOnlySourceWithoutLLM(t
 	}
 }
 
+func TestReleaseNoteService_IngestMergedPRs_ReleaseUmbrellaGoesToLLMDespiteFargateBody(t *testing.T) {
+	db, mock := newReleaseNoteTestDB(t)
+	server, client := newSummaryStubServerWithAudience(t, "面接の深掘り質問が分かりやすくなりました。", "student")
+	defer server.Close()
+	svc := services.NewReleaseNoteService(db, client)
+
+	expectReleaseNotePurgeScan(mock)
+	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `release_notes` WHERE pr_number = \\?").
+		WithArgs(uint(1181)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO `release_notes`").
+		WithArgs(uint(1181), "テストタイトル", "面接の深掘り質問が分かりやすくなりました。", "student", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	saved, err := svc.IngestMergedPRs(context.Background(), []services.ReleaseNoteSource{
+		{
+			PRNumber: 1181,
+			Title:    "Release to production: 面接深掘り継続力",
+			Body:     "マージすると本番（ECS on Fargate）へ自動デプロイされます。\n- 面接の継続力・きっかけの深掘り",
+			MergedAt: time.Now(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if saved != 1 {
+		t.Fatalf("expected 1 saved, got %d", saved)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
 func TestReleaseNoteService_IngestMergedPRs_SkipsChorePrefixWithoutLLM(t *testing.T) {
 	db, mock := newReleaseNoteTestDB(t)
 	server, client := newSummaryStubServerWithAudience(t, "依存関係を更新しました。", "all")

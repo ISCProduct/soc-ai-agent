@@ -63,6 +63,11 @@ func isDeveloperOnlyReleaseNote(title, body string) bool {
 			return true
 		}
 	}
+	// Release 傘PRの本文には「ECS on Fargate」等の定型デプロイ文言が必ず入る。
+	// 本文ニードルだとユーザー向け機能ごと落とすため、LLMの空summaryに任せる。
+	if strings.HasPrefix(lowerTitle, "release") {
+		return false
+	}
 	text := strings.ToLower(title + "\n" + body)
 	for _, needle := range developerOnlyReleaseNoteNeedles {
 		if strings.Contains(text, needle) {
