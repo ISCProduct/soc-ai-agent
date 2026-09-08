@@ -17,16 +17,33 @@ import (
 	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 )
 
-const defaultParameterName = "/soc-app/prod-uptime-dates"
+const (
+	defaultParameterName         = "/soc-app/prod-uptime-dates"
+	defaultOverrideParameterName = "/soc-app/prod-uptime-override"
+)
+
+// 手動オーバーライドの値。日付リストより優先して本番の起動状態を決める。
+const (
+	OverrideOn   = "on"   // 日付に関係なく起動し続ける
+	OverrideOff  = "off"  // 日付に関係なく停止する
+	OverrideAuto = "auto" // オーバーライドせず、日付リストに従う（既定）
+)
 
 var dateOnlyPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 // UptimeService は本番の「指定日終日起動」日付リストをSSM Parameter Storeで管理する。
 // #881台のインフラ方針(docs/architecture/infra-decision-oci-stg-aws-prod.md)の
 // 「指定日リスト」をSSM Parameterに持つ実装。
+// ssmAPI はUptimeServiceが使うSSM操作。テストで差し替えるために切っている。
+type ssmAPI interface {
+	GetParameter(ctx context.Context, in *ssm.GetParameterInput, opts ...func(*ssm.Options)) (*ssm.GetParameterOutput, error)
+	PutParameter(ctx context.Context, in *ssm.PutParameterInput, opts ...func(*ssm.Options)) (*ssm.PutParameterOutput, error)
+}
+
 type UptimeService struct {
-	client        *ssm.Client
-	parameterName string
+	client                ssmAPI
+	parameterName         string
+	overrideParameterName string
 	// ponytail: read-modify-writeの排他はプロセス内mutexのみ。
 	// staging EC2は単一インスタンス運用(#829)のため実害はないが、複数インスタンス化する場合は
 	// SSM単体にCAS機構が無いため、DynamoDB等を使った分散ロックへの置き換えが必要。
@@ -47,7 +64,66 @@ func NewUptimeServiceFromEnv(ctx context.Context) (*UptimeService, error) {
 	if name == "" {
 		name = defaultParameterName
 	}
-	return &UptimeService{client: ssm.NewFromConfig(cfg), parameterName: name}, nil
+	overrideName := os.Getenv("PROD_UPTIME_OVERRIDE_SSM_PARAMETER")
+	if overrideName == "" {
+		overrideName = defaultOverrideParameterName
+	}
+	return &UptimeService{
+		client:                ssm.NewFromConfig(cfg),
+		parameterName:         name,
+		overrideParameterName: overrideName,
+	}, nil
+}
+
+// ParseOverride は on / off / auto のみ受理する（大文字小文字と前後空白は無視）。
+func ParseOverride(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case OverrideOn:
+		return OverrideOn, nil
+	case OverrideOff:
+		return OverrideOff, nil
+	case OverrideAuto, "":
+		return OverrideAuto, nil
+	default:
+		return "", fmt.Errorf("状態は on / off / auto のいずれかを指定してください")
+	}
+}
+
+// GetOverride は現在の手動オーバーライドを返す。未設定なら auto。
+func (s *UptimeService) GetOverride(ctx context.Context) (string, error) {
+	out, err := s.client.GetParameter(ctx, &ssm.GetParameterInput{Name: aws.String(s.overrideParameterName)})
+	if err != nil {
+		var notFound *ssmtypes.ParameterNotFound
+		if errors.As(err, &notFound) {
+			return OverrideAuto, nil
+		}
+		return "", fmt.Errorf("SSM parameter取得に失敗しました: %w", err)
+	}
+	// 手で書き換えられて未知の値になっていても、勝手に on/off と解釈せず auto に倒す。
+	// 誤って本番を起動しっぱなしにする/落とすより、日付リストどおりに動く方が安全。
+	value, err := ParseOverride(aws.ToString(out.Parameter.Value))
+	if err != nil {
+		return OverrideAuto, nil
+	}
+	return value, nil
+}
+
+// SetOverride は手動オーバーライドを設定する。値は ParseOverride 済みであること。
+func (s *UptimeService) SetOverride(ctx context.Context, value string) error {
+	normalized, err := ParseOverride(value)
+	if err != nil {
+		return err
+	}
+	_, err = s.client.PutParameter(ctx, &ssm.PutParameterInput{
+		Name:      aws.String(s.overrideParameterName),
+		Value:     aws.String(normalized),
+		Type:      ssmtypes.ParameterTypeString,
+		Overwrite: aws.Bool(true),
+	})
+	if err != nil {
+		return fmt.Errorf("SSM parameter更新に失敗しました: %w", err)
+	}
+	return nil
 }
 
 // ParseDate は "YYYY-MM-DD" 形式のみ受理する（JSTの暦日として扱う）。

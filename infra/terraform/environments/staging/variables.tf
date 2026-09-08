@@ -185,8 +185,21 @@ variable "discord_public_key" {
 
 variable "discord_allowed_role_id" {
   type        = string
-  description = "本番の指定日終日起動コマンド(/prod-uptime)を実行できるDiscordロールID"
+  description = "本番の起動/停止コマンド(/prod, /prod-uptime)を実行できるDiscordロールID"
   default     = ""
+}
+
+variable "github_dispatch_token" {
+  type        = string
+  sensitive   = true
+  description = "Discordの /prod から prod-uptime-scheduler.yml を即時起動するためのGitHubトークン(actions:write)。未設定でも機能は動くが、反映は次の毎時実行まで待つことになる"
+  default     = ""
+}
+
+variable "github_dispatch_repo" {
+  type        = string
+  description = "workflow_dispatch の対象リポジトリ(owner/repo)"
+  default     = "ISCProduct/soc-ai-agent"
 }
 
 variable "google_client_id" {
