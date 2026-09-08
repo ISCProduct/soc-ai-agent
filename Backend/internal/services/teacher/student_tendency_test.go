@@ -154,9 +154,32 @@ func TestBuildTendency(t *testing.T) {
 		}
 	})
 
-	t.Run("スコアありはタイプと業界が入る", func(t *testing.T) {
+	// 実データに「全カテゴリ score=0」の生徒が存在する。
+	// そのまま通すと確信ありげなタイプ名が教員に出る（PRD が避けたい断定）。
+	t.Run("全カテゴリ0点はデータ不足として返る", func(t *testing.T) {
+		got := BuildTendency(1, "山田太郎", "a@example.com",
+			map[string]float64{"技術志向": 0, "チームワーク志向": 0, "リーダーシップ志向": 0}, industries, profiles)
+		if got.DataAvailable {
+			t.Error("全カテゴリ0点なのに DataAvailable = true")
+		}
+		if got.TypeLabel != "分析データ不足" {
+			t.Errorf("TypeLabel = %q", got.TypeLabel)
+		}
+	})
+
+	// 計測カテゴリが少なすぎると、残りを中立50で埋めた業界TOP3が
+	// 表示のほとんどを占めてノイズになる。
+	t.Run("計測カテゴリが少なすぎるとデータ不足", func(t *testing.T) {
 		got := BuildTendency(1, "山田太郎", "a@example.com",
 			map[string]float64{"技術志向": 90, "成長志向": 70}, industries, profiles)
+		if got.DataAvailable {
+			t.Error("2カテゴリしか無いのに DataAvailable = true")
+		}
+	})
+
+	t.Run("スコアありはタイプと業界が入る", func(t *testing.T) {
+		got := BuildTendency(1, "山田太郎", "a@example.com",
+			map[string]float64{"技術志向": 90, "成長志向": 70, "チームワーク志向": 60}, industries, profiles)
 		if !got.DataAvailable {
 			t.Fatal("DataAvailable = false")
 		}
@@ -167,4 +190,47 @@ func TestBuildTendency(t *testing.T) {
 			t.Error("業界が空")
 		}
 	})
+}
+
+// S5: 同点時のタイブレークを実効的に検証する。
+// 入力を ID の降順にしておかないと、sort.SliceStable が入力順を保つため
+// タイブレークを消しても気づけない。
+func TestRankIndustries_TieBreakByIndustryID(t *testing.T) {
+	// 入力はわざと ID 降順。プロファイル未設定なので全業界が同点になる。
+	industries := []repositories.IndustryOption{
+		{ID: 3, Name: "C"}, {ID: 1, Name: "A"}, {ID: 2, Name: "B"},
+	}
+	got := RankIndustries(map[string]float64{"技術志向": 80}, industries,
+		map[uint]*models.IndustryWeightProfile{}, 3)
+
+	want := []uint{1, 2, 3}
+	for i, w := range want {
+		if got[i].IndustryID != w {
+			t.Fatalf("同点時がID昇順で安定していない: %+v", got)
+		}
+	}
+}
+
+// S6: 未評価カテゴリを中立50で埋めていることを検証する。
+//
+// これは「企業マッチングと同じ結果になること」というPRD非機能要件の要。
+// 0 で埋めると企業側 scoredMatch と食い違い、業界適性だけがずれる。
+func TestRankIndustries_MissingCategoryUsesNeutral(t *testing.T) {
+	industries := []repositories.IndustryOption{{ID: 1, Name: "X"}}
+	// 全軸50の業界に対し、生徒のスコアが1つも無い場合。
+	// 中立50で埋めていれば全カテゴリが完全一致してスコアは最大に近づく。
+	neutral := RankIndustries(map[string]float64{}, industries,
+		map[uint]*models.IndustryWeightProfile{}, 1)
+	// 明示的に全カテゴリ50を与えた場合と一致するはず。
+	explicit := map[string]float64{}
+	for _, c := range valueobject.AllWeightCategories() {
+		explicit[string(c)] = 50
+	}
+	withAll := RankIndustries(explicit, industries,
+		map[uint]*models.IndustryWeightProfile{}, 1)
+
+	if neutral[0].Score != withAll[0].Score {
+		t.Errorf("未評価カテゴリが中立50として扱われていない: %.4f != %.4f",
+			neutral[0].Score, withAll[0].Score)
+	}
 }

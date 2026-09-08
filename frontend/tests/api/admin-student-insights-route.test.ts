@@ -66,3 +66,61 @@ describe('GET /api/admin/teacher/students/tendency-analysis', () => {
     expect(await response.json()).toEqual({ error: '担当校の指定が必要です' })
   })
 })
+
+// #1027 レビュー指摘 S8: 既存 /api/admin/users と同じ堅牢性へ揃える。
+describe('GET /api/admin/teacher/students/tendency-analysis の堅牢性', () => {
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  it('許可していないクエリは転送しない', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    const request = new NextRequest(
+      'http://localhost:3000/api/admin/teacher/students/tendency-analysis?limit=10&evil=1&school_id=7',
+      { headers: { 'X-Admin-Email': 'a@example.com', 'X-Admin-Token': 't' } },
+    )
+    await GET(request)
+
+    const url = String(fetchMock.mock.calls[0][0])
+    expect(url).toContain('limit=10')
+    expect(url).toContain('school_id=7')
+    expect(url).not.toContain('evil')
+  })
+
+  it('バックエンドが空ボディを返しても500にならない', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(new Response('', { status: 502 }))
+    const request = new NextRequest(
+      'http://localhost:3000/api/admin/teacher/students/tendency-analysis',
+      { headers: { 'X-Admin-Email': 'a@example.com', 'X-Admin-Token': 't' } },
+    )
+    const res = await GET(request)
+    // バックエンドのステータスをそのまま返す（Nextの500に化けさせない）。
+    expect(res.status).toBe(502)
+  })
+
+  it('JSONでないボディでもクラッシュしない', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('<html>Bad Gateway</html>', { status: 502 }),
+    )
+    const request = new NextRequest(
+      'http://localhost:3000/api/admin/teacher/students/tendency-analysis',
+      { headers: { 'X-Admin-Email': 'a@example.com', 'X-Admin-Token': 't' } },
+    )
+    const res = await GET(request)
+    expect(res.status).toBe(502)
+    await expect(res.json()).resolves.toHaveProperty('error')
+  })
+
+  it('バックエンド接続失敗は502を返す', async () => {
+    jest.spyOn(global, 'fetch').mockRejectedValue(new Error('ECONNREFUSED'))
+    jest.spyOn(console, 'error').mockImplementation(() => {})
+    const request = new NextRequest(
+      'http://localhost:3000/api/admin/teacher/students/tendency-analysis',
+      { headers: { 'X-Admin-Email': 'a@example.com', 'X-Admin-Token': 't' } },
+    )
+    const res = await GET(request)
+    expect(res.status).toBe(502)
+  })
+})

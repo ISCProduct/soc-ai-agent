@@ -175,7 +175,7 @@ func TestListTendencies_PropagatesErrors(t *testing.T) {
 func TestListTendencies_MixedDataAvailability(t *testing.T) {
 	lister := &stubLister{students: students(2), total: 2}
 	scores := &stubScores{scores: map[uint]map[string]float64{
-		1: {"技術志向": 90},
+		1: {"技術志向": 90, "成長志向": 70, "チームワーク志向": 60},
 		// 生徒2 はスコアなし
 	}}
 	inds := &stubIndustries{items: []repositories.IndustryOption{{ID: 1, Name: "情報通信業"}}}
@@ -193,5 +193,57 @@ func TestListTendencies_MixedDataAvailability(t *testing.T) {
 	}
 	if got.Students[1].TypeLabel != "分析データ不足" {
 		t.Errorf("TypeLabel = %q", got.Students[1].TypeLabel)
+	}
+}
+
+// S7: 業界TOP3が親子1ファミリで埋まらないよう、大分類のみを対象にする。
+func TestListTendencies_UsesTopLevelIndustriesOnly(t *testing.T) {
+	lister := &stubLister{students: students(1), total: 1}
+	scores := &stubScores{scores: map[uint]map[string]float64{
+		1: {"技術志向": 90, "成長志向": 70, "チームワーク志向": 60},
+	}}
+	// 親(level 0) 2件 + 子(level 1) 3件。
+	inds := &stubIndustries{items: []repositories.IndustryOption{
+		{ID: 1, Name: "情報通信業", Level: 0},
+		{ID: 2, Name: "ソフトウェア開発", Level: 1},
+		{ID: 3, Name: "Webサービス", Level: 1},
+		{ID: 4, Name: "金融・保険業", Level: 0},
+		{ID: 5, Name: "銀行", Level: 1},
+	}}
+	svc := NewStudentInsightService(lister, scores, inds, &stubProfiles{})
+
+	got, err := svc.ListTendencies(25, 0, "", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	suited := got.Students[0].SuitedIndustries
+	if len(suited) != 2 {
+		t.Fatalf("大分類2件のはず: %+v", suited)
+	}
+	for _, s := range suited {
+		if s.IndustryID != 1 && s.IndustryID != 4 {
+			t.Errorf("子業界 %d(%s) が混ざっている。TOP3が1ファミリで埋まる",
+				s.IndustryID, s.IndustryName)
+		}
+	}
+}
+
+// level が一つも 0 でない構成では絞らない（表示が空になるより良い）。
+func TestListTendencies_FallsBackWhenNoTopLevel(t *testing.T) {
+	lister := &stubLister{students: students(1), total: 1}
+	scores := &stubScores{scores: map[uint]map[string]float64{
+		1: {"技術志向": 90, "成長志向": 70, "チームワーク志向": 60},
+	}}
+	inds := &stubIndustries{items: []repositories.IndustryOption{
+		{ID: 1, Name: "子A", Level: 1}, {ID: 2, Name: "子B", Level: 1},
+	}}
+	svc := NewStudentInsightService(lister, scores, inds, &stubProfiles{})
+
+	got, err := svc.ListTendencies(25, 0, "", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got.Students[0].SuitedIndustries) != 2 {
+		t.Errorf("大分類が無いときは絞らないはず: %+v", got.Students[0].SuitedIndustries)
 	}
 }

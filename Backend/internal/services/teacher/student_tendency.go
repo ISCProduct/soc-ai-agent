@@ -160,6 +160,30 @@ func RankIndustries(
 	return ranked
 }
 
+// minMeasuredCategories は分析結果を出すのに必要な計測カテゴリ数。
+//
+// 10カテゴリ中1つしか計測されていない生徒に断定的なタイプ名を出すと、
+// 残り9カテゴリを中立50で埋めた業界TOP3と合わせて表示のほとんどがノイズになる。
+// PRD が避けたい「断定」そのものなので、下回るときはデータ不足として扱う。
+const minMeasuredCategories = 3
+
+// hasMeaningfulScores は分析に足る実測があるかを判定する（#1027）。
+//
+// スコアが1件も無い場合に加え、全カテゴリが0点の場合もデータ不足とする。
+// 実データには「7カテゴリすべて score=0」の生徒が存在し、
+// そのままだと確信ありげなタイプ名が教員に表示される。
+func hasMeaningfulScores(scores map[string]float64) bool {
+	if len(scores) < minMeasuredCategories {
+		return false
+	}
+	for _, v := range scores {
+		if v > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // BuildTendency は1人ぶんの分析結果を組み立てる。
 // スコアが1件も無い生徒は DataAvailable=false にして、
 // タイプも業界も出さない（誤った断定を避ける）。
@@ -171,7 +195,7 @@ func BuildTendency(
 	profiles map[uint]*models.IndustryWeightProfile,
 ) StudentTendency {
 	t := StudentTendency{UserID: userID, Name: name, Email: email}
-	if len(scores) == 0 {
+	if !hasMeaningfulScores(scores) {
 		t.TypeLabel = "分析データ不足"
 		return t
 	}

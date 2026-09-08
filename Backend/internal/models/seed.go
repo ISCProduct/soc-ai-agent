@@ -8,6 +8,10 @@ func SeedData(db *gorm.DB) error {
 	if err := seedIndustries(db); err != nil {
 		return err
 	}
+	// 業界プロファイルは industries の投入後に入れる（#1027）。
+	if err := seedIndustryWeightProfiles(db); err != nil {
+		return err
+	}
 
 	// 職種データ
 	if err := seedJobCategories(db); err != nil {
@@ -559,4 +563,56 @@ func seedAnalysisPhases(db *gorm.DB) error {
 	}
 
 	return db.Create(&phases).Error
+}
+
+// seedIndustryWeightProfiles 業界ごとの適性プロファイルを投入する（#1027）。
+//
+// マイグレーション(000021)ではなくここで入れる理由:
+// migrations.Up は SeedData より先に走るため、新規構築時は industries が
+// まだ空で、マイグレーション内の INSERT...SELECT が 0 行になる。
+// エラーも出ないまま永久に空のテーブルが残り、全業界が中立50へ
+// フォールバックして「どの生徒でも同じTOP3」が出てしまう。
+//
+// 値は業務知見に基づく本格的なものではなく暫定。
+// 未設定の業界は行を作らず、アプリ側で中立50として扱う（PRD 非機能要件）。
+func seedIndustryWeightProfiles(db *gorm.DB) error {
+	// code -> 10軸。industries.code で引くのでシードの採番に依存しない。
+	weights := map[string]IndustryWeightProfile{
+		"IT":       {TechnicalOrientation: 85, TeamworkOrientation: 65, LeadershipOrientation: 55, CreativityOrientation: 70, StabilityOrientation: 40, GrowthOrientation: 80, WorkLifeBalance: 60, ChallengeSeeking: 75, DetailOrientation: 60, CommunicationSkill: 60},
+		"IT-SW":    {TechnicalOrientation: 90, TeamworkOrientation: 70, LeadershipOrientation: 55, CreativityOrientation: 70, StabilityOrientation: 35, GrowthOrientation: 85, WorkLifeBalance: 60, ChallengeSeeking: 75, DetailOrientation: 70, CommunicationSkill: 55},
+		"IT-WEB":   {TechnicalOrientation: 80, TeamworkOrientation: 65, LeadershipOrientation: 55, CreativityOrientation: 85, StabilityOrientation: 35, GrowthOrientation: 85, WorkLifeBalance: 65, ChallengeSeeking: 80, DetailOrientation: 55, CommunicationSkill: 65},
+		"MFG":      {TechnicalOrientation: 70, TeamworkOrientation: 75, LeadershipOrientation: 55, CreativityOrientation: 50, StabilityOrientation: 70, GrowthOrientation: 55, WorkLifeBalance: 60, ChallengeSeeking: 45, DetailOrientation: 85, CommunicationSkill: 55},
+		"MFG-AUTO": {TechnicalOrientation: 75, TeamworkOrientation: 80, LeadershipOrientation: 55, CreativityOrientation: 50, StabilityOrientation: 70, GrowthOrientation: 55, WorkLifeBalance: 55, ChallengeSeeking: 45, DetailOrientation: 90, CommunicationSkill: 55},
+		"MFG-ELEC": {TechnicalOrientation: 80, TeamworkOrientation: 70, LeadershipOrientation: 50, CreativityOrientation: 55, StabilityOrientation: 65, GrowthOrientation: 60, WorkLifeBalance: 55, ChallengeSeeking: 50, DetailOrientation: 85, CommunicationSkill: 50},
+		"FIN":      {TechnicalOrientation: 55, TeamworkOrientation: 65, LeadershipOrientation: 60, CreativityOrientation: 40, StabilityOrientation: 85, GrowthOrientation: 60, WorkLifeBalance: 55, ChallengeSeeking: 40, DetailOrientation: 90, CommunicationSkill: 70},
+		"FIN-BANK": {TechnicalOrientation: 50, TeamworkOrientation: 70, LeadershipOrientation: 60, CreativityOrientation: 35, StabilityOrientation: 90, GrowthOrientation: 55, WorkLifeBalance: 55, ChallengeSeeking: 35, DetailOrientation: 90, CommunicationSkill: 75},
+		"FIN-INS":  {TechnicalOrientation: 50, TeamworkOrientation: 65, LeadershipOrientation: 60, CreativityOrientation: 40, StabilityOrientation: 85, GrowthOrientation: 60, WorkLifeBalance: 55, ChallengeSeeking: 40, DetailOrientation: 85, CommunicationSkill: 80},
+		"CONS":     {TechnicalOrientation: 65, TeamworkOrientation: 70, LeadershipOrientation: 80, CreativityOrientation: 70, StabilityOrientation: 35, GrowthOrientation: 85, WorkLifeBalance: 40, ChallengeSeeking: 85, DetailOrientation: 70, CommunicationSkill: 90},
+		"EDU":      {TechnicalOrientation: 45, TeamworkOrientation: 75, LeadershipOrientation: 65, CreativityOrientation: 65, StabilityOrientation: 70, GrowthOrientation: 65, WorkLifeBalance: 65, ChallengeSeeking: 50, DetailOrientation: 65, CommunicationSkill: 90},
+		"MED":      {TechnicalOrientation: 55, TeamworkOrientation: 85, LeadershipOrientation: 55, CreativityOrientation: 40, StabilityOrientation: 80, GrowthOrientation: 60, WorkLifeBalance: 50, ChallengeSeeking: 45, DetailOrientation: 90, CommunicationSkill: 85},
+	}
+
+	var industries []Industry
+	if err := db.Select("id, code").Find(&industries).Error; err != nil {
+		return err
+	}
+	for _, ind := range industries {
+		w, ok := weights[ind.Code]
+		if !ok {
+			continue // 未定義の業界は中立50で扱う
+		}
+		w.IndustryID = ind.ID
+		// 既に行があれば触らない（運用で調整した値を上書きしない）。
+		var count int64
+		if err := db.Model(&IndustryWeightProfile{}).Where("industry_id = ?", ind.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			continue
+		}
+		if err := db.Create(&w).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }

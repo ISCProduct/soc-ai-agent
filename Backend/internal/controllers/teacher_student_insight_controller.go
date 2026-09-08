@@ -46,7 +46,16 @@ func (c *TeacherStudentInsightController) TendencyAnalysis(ctx echo.Context) err
 		offset = o
 	}
 	query := strings.TrimSpace(ctx.QueryParam("q"))
-	schoolID, _ := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
+
+	// 担当校の絞り込みが解決されていなければ拒否する（fail-close）。
+	// ok=false はミドルウェア(EchoAdminSchoolScope)を通っていないことを意味し、
+	// そのまま nil を渡すと「絞り込みなし = 全校の生徒の氏名・メール・分析結果」を
+	// 返してしまう。ルート定義から schoolScope が外れた場合に
+	// 静かに全開放されるのを防ぐ。
+	schoolID, ok := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
+	if !ok {
+		return echo.NewHTTPError(http.StatusForbidden, "school scope is not resolved")
+	}
 
 	result, err := c.svc.ListTendencies(limit, offset, query, schoolID)
 	if err != nil {

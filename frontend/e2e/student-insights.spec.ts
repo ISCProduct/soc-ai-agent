@@ -16,9 +16,9 @@ const STUDENT_WITH_DATA: TendencyStudent = {
   user_id: 1,
   name: '山田太郎',
   email: 'yamada@example.com',
-  type_label: '共感支援タイプ',
+  type_label: '対話タイプ',
   top_categories: [
-    { category: '対人志向', score: 90 },
+    { category: 'コミュニケーション力', score: 90 },
     { category: '成長志向', score: 72 },
   ],
   suited_industries: [
@@ -73,8 +73,8 @@ test.describe('生徒の傾向分析', () => {
     const row = page.getByRole('row').filter({ hasText: '山田太郎' })
     await expect(row).toBeVisible({ timeout: 8000 })
     await expect(row.getByText('yamada@example.com')).toBeVisible()
-    await expect(row.getByText('共感支援タイプ')).toBeVisible()
-    await expect(row.getByText('対人志向 90')).toBeVisible()
+    await expect(row.getByText('対話タイプ')).toBeVisible()
+    await expect(row.getByText('コミュニケーション力 90')).toBeVisible()
     await expect(row.getByText('ソフトウェア開発 81.2')).toBeVisible()
     await expect(row.getByText('情報通信業 76.4')).toBeVisible()
 
@@ -98,7 +98,7 @@ test.describe('生徒の傾向分析', () => {
     await expect(page.getByText('金融業 55.5')).toHaveCount(0)
 
     // スコアがある生徒側は従来通り表示される
-    await expect(page.getByRole('row').filter({ hasText: '山田太郎' }).getByText('共感支援タイプ')).toBeVisible()
+    await expect(page.getByRole('row').filter({ hasText: '山田太郎' }).getByText('対話タイプ')).toBeVisible()
   })
 
   test('検索するとクエリパラメータ q 付きで API が呼ばれる', async ({ page }) => {

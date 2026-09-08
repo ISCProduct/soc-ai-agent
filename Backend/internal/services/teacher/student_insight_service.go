@@ -84,10 +84,11 @@ func (s *StudentInsightService) ListTendencies(limit, offset int, query string, 
 		return nil, err
 	}
 
-	industries, err := s.industries.ListActive()
+	allIndustries, err := s.industries.ListActive()
 	if err != nil {
 		return nil, err
 	}
+	industries := topLevelIndustries(allIndustries)
 	rawProfiles, err := s.profiles.ListAll()
 	if err != nil {
 		return nil, err
@@ -103,4 +104,26 @@ func (s *StudentInsightService) ListTendencies(limit, offset int, query string, 
 		))
 	}
 	return result, nil
+}
+
+// topLevelIndustries は大分類(level 0)だけに絞る（#1027）。
+//
+// ListActive は親(level 0)と子(level 1)を両方返すため、そのまま順位付けすると
+// TOP3 が「情報通信業 / ソフトウェア開発 / Webサービス」のように
+// 1ファミリで埋まり、進路指導の情報量がほとんど無くなる。
+//
+// なお industries.parent_id はシードが設定しておらず全件 NULL のため、
+// 親子関係は level でしか判別できない（別途 #929 系の是正対象）。
+func topLevelIndustries(all []repositories.IndustryOption) []repositories.IndustryOption {
+	top := make([]repositories.IndustryOption, 0, len(all))
+	for _, i := range all {
+		if i.Level == 0 {
+			top = append(top, i)
+		}
+	}
+	// level が一つも 0 でない構成なら、絞らずに全件を使う（表示が空になるより良い）。
+	if len(top) == 0 {
+		return all
+	}
+	return top
 }
