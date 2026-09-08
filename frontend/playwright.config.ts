@@ -11,13 +11,9 @@ export default defineConfig({
     'resume-reminder.spec.ts',
     'schedule.spec.ts',
     'admin.spec.ts',
-<<<<<<< ours
+    'public-pages.spec.ts',
     'company-password-reset.spec.ts',
     'admin-company-users.spec.ts',
-    'public-pages.spec.ts',
-=======
-    'public-pages.spec.ts',
->>>>>>> theirs
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
