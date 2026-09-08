@@ -37,13 +37,20 @@ type UserDeletionActor struct {
 
 // UserDeletionService は退会（論理）と猶予後の物理パージを担当する。
 type UserDeletionService struct {
-	db     *gorm.DB
-	object ObjectDeleter
-	audit  auditRecorder
+	db               *gorm.DB
+	object           ObjectDeleter
+	audit            auditRecorder
+	scoutIndexSyncer ScoutIndexSyncer
 }
 
 func NewUserDeletionService(db *gorm.DB, object ObjectDeleter, audit auditRecorder) *UserDeletionService {
 	return &UserDeletionService{db: db, object: object, audit: audit}
+}
+
+// SetScoutIndexSyncer は退会時にスカウト検索インデックスを同期する処理を注入する（#1094）。
+// 未設定なら同期しない（RAG未設定環境でも退会は成功する）。
+func (s *UserDeletionService) SetScoutIndexSyncer(syncer ScoutIndexSyncer) {
+	s.scoutIndexSyncer = syncer
 }
 
 var (
@@ -144,6 +151,13 @@ func (s *UserDeletionService) DeleteUser(userID uint, actor UserDeletionActor) e
 			"s3_object_count":           keyCount,
 			"retention_days":            WithdrawalRetentionDays,
 		})
+	}
+
+	// 退会後もスカウト検索のベクトルが残り続けないよう削除する（#1094）。
+	// 退会済みは IsScoutVisible が false を返すため、Sync が削除を行う。
+	// RAG障害で退会自体を失敗させたくないので、Sync 側でエラーはログに留める。
+	if s.scoutIndexSyncer != nil {
+		s.scoutIndexSyncer.Sync(context.Background(), userID)
 	}
 	return nil
 }

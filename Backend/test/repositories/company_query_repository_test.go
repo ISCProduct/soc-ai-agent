@@ -30,6 +30,10 @@ func newCompanyQueryRepoTestDB(t *testing.T) (*repositories.CompanyQueryReposito
 	return repositories.NewCompanyQueryRepository(db), mock
 }
 
+// publicCompanyGuards は無認証の企業APIに必ず乗る絞り込み。
+// 審査前のゲスト投稿を除く条件が抜けると、無認証で誰でも読めてしまう（#1203）。
+const publicCompanyGuards = "is_active = .*NOT EXISTS.*company_entry_submissions"
+
 func TestGetCompaniesFiltered_Order(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -48,10 +52,10 @@ func TestGetCompaniesFiltered_Order(t *testing.T) {
 			wantTotal:  2,
 			wantCount:  2,
 			setupMock: func(mock sqlmock.Sqlmock) {
-				mock.ExpectQuery("SELECT count\\(\\*\\) FROM `companies` WHERE is_active = \\?").
+				mock.ExpectQuery("SELECT count.*" + publicCompanyGuards).
 					WithArgs(true).
 					WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
-				mock.ExpectQuery("SELECT \\* FROM `companies` WHERE is_active = \\? AND `companies`.`deleted_at` IS NULL ORDER BY updated_at DESC, id ASC LIMIT \\?").
+				mock.ExpectQuery(publicCompanyGuards+".*ORDER BY updated_at DESC, id ASC LIMIT").
 					WithArgs(true, 10).
 					WillReturnRows(sqlmock.NewRows([]string{"id", "name", "is_active"}).
 						AddRow(2, "B社", true).
@@ -66,10 +70,10 @@ func TestGetCompaniesFiltered_Order(t *testing.T) {
 			wantTotal:  1,
 			wantCount:  1,
 			setupMock: func(mock sqlmock.Sqlmock) {
-				mock.ExpectQuery("SELECT count\\(\\*\\) FROM `companies` WHERE is_active = \\? AND name LIKE \\?").
+				mock.ExpectQuery("SELECT count.*"+publicCompanyGuards+".*name LIKE").
 					WithArgs(true, "%テック%").
 					WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-				mock.ExpectQuery("SELECT \\* FROM `companies` WHERE is_active = \\? AND name LIKE \\? AND `companies`.`deleted_at` IS NULL ORDER BY name ASC LIMIT \\?").
+				mock.ExpectQuery(publicCompanyGuards+".*name LIKE.*ORDER BY name ASC LIMIT").
 					WithArgs(true, "%テック%", 10).
 					WillReturnRows(sqlmock.NewRows([]string{"id", "name", "is_active"}).
 						AddRow(1, "テック株式会社", true))
