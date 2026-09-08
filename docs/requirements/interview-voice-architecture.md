@@ -163,7 +163,7 @@ AI面接の音声基盤について、**Realtime API 実装を有効化するか
 | --- | --- | --- |
 | 案の選択 | A / B のいずれか | プロダクト判断 |
 | B 採用時のモデル | `gpt-realtime-mini` か `gpt-realtime`（約3倍） | 実際に聞いて判断 |
-| STT モデル | `gpt-4o-transcribe` を `gpt-4o-mini-transcribe` に下げるか（費用は半減、精度は低下） | 精度検証が必要 |
+| STT モデル | `gpt-4o-transcribe` を `gpt-4o-mini-transcribe` に下げるか | **精度検証が済むまで下げない**。文字起こしはレポート採点の入力(F-2)であり、費用差は1面接あたり約 $0.03 と小さい |
 | 既存 Realtime 実装の扱い | A 採用時、削除するか凍結して残すか | 本書は削除を推奨 |
 
 ## 10. 参照
