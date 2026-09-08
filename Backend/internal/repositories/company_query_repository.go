@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"fmt"
+	"strings"
 
 	"Backend/internal/models"
 
@@ -17,8 +18,10 @@ func NewCompanyQueryRepository(db *gorm.DB) *CompanyQueryRepository {
 	return &CompanyQueryRepository{db: db}
 }
 
-// unreviewedGuestEntrySubQuery は「ゲストが投稿し、まだ管理者に公開されていない企業」を
-// 選ぶサブクエリ条件（#1203）。
+// guestEntryVisibilityGuard は「ゲストが投稿し、まだ公開されていない企業」を
+// 指す行を除く SQL 条件を組み立てる（#1203）。
+// cols には企業IDを持つ列を並べる（relations なら4つの端点、market_info なら1つ）。
+// いずれかの列が非公開のゲスト投稿企業を指していれば、その行ごと返さない。
 //
 // /company-entry は無認証で投稿でき（honeypot とレート制限のみ）、
 // 作られる企業は data_status='draft' で始まる。審査前にそのまま公開APIへ出ると、
@@ -33,39 +36,23 @@ func NewCompanyQueryRepository(db *gorm.DB) *CompanyQueryRepository {
 //
 // ゲスト投稿は company_entry_submissions に必ず行が作られる
 // （company_entry_service.go）ので、これを唯一の識別子とする。
-// 管理者が公開した時点で data_status='published' になり、以後は表示される。
-const unreviewedGuestEntryCondition = `EXISTS (
+// 管理者が公開すると data_status='published' になり、以後は表示される。
+// 注意: company_entry_submissions の行が消えるとガードは fail-open する
+// （投稿履歴が無い＝ゲスト投稿ではない、と判定される）。現状この行を削除する
+// コードは無いが、データ整理や削除要求で消すときは data_status も合わせること。
+// 逆に公開後に却下されると is_active=false になる（data_status は published のまま）ため、
+// そちらも非表示に含める。これが無いと相関図にノードだけ出て詳細が404になる。
+//
+// 走査対象は companies(全社) ではなく company_entry_submissions(ゲスト投稿のみ) 側で、
+// 端点4本を1つの NOT EXISTS にまとめてある。NULL 端点は IN が一致しないため自然に通る
+// （資本関係と取引関係で使う列が異なる）。
+func guestEntryVisibilityGuard(cols ...string) string {
+	return fmt.Sprintf(`NOT EXISTS (
 	SELECT 1 FROM company_entry_submissions s
-	WHERE s.company_id = %s AND %s <> 'published'
-)`
-
-// excludeUnreviewedGuestEntries は無認証APIから審査前のゲスト投稿企業を除く。
-// companiesAlias は companies テーブル（または結合先）の別名。
-func excludeUnreviewedGuestEntries(db *gorm.DB, companiesAlias string) *gorm.DB {
-	idCol := companiesAlias + ".id"
-	statusCol := companiesAlias + ".data_status"
-	return db.Where("NOT " + fmt.Sprintf(unreviewedGuestEntryCondition, idCol, statusCol))
-}
-
-// visibleCompanyIDsSubQuery は公開してよい企業IDのサブクエリ。
-// relations / market_info のように companies を直接 FROM に持たない
-// クエリで、関連先の企業を絞るのに使う。
-func visibleCompanyIDsSubQuery(db *gorm.DB) *gorm.DB {
-	return db.Model(&models.Company{}).
-		Select("id").
-		Where("NOT " + fmt.Sprintf(unreviewedGuestEntryCondition, "companies.id", "companies.data_status"))
-}
-
-// relationEndpointsVisible は関係の端点(parent/child/from/to)がすべて
-// 公開してよい企業であることを要求する条件を返す（#1203）。
-// NULL の端点は条件を通す（資本関係と取引関係で使う列が異なるため）。
-func relationEndpointsVisible(db *gorm.DB) *gorm.DB {
-	visible := visibleCompanyIDsSubQuery(db)
-	cond := db.Session(&gorm.Session{NewDB: true})
-	for _, col := range []string{"parent_id", "child_id", "from_id", "to_id"} {
-		cond = cond.Where(col+" IS NULL OR "+col+" IN (?)", visible)
-	}
-	return cond
+	JOIN companies c ON c.id = s.company_id
+	WHERE (c.data_status <> 'published' OR c.is_active = false)
+	  AND s.company_id IN (%s)
+)`, strings.Join(cols, ", "))
 }
 
 // GetByCompanyID 指定企業IDに関連する企業関係を取得
@@ -82,7 +69,7 @@ func (r *CompanyQueryRepository) GetByCompanyID(companyID uint) ([]models.Compan
 		// 端点のいずれかが審査前のゲスト投稿なら、その関係ごと返さない（#1203）。
 		// Preload("Parent"/"Child"/"From"/"To") が models.Company を丸ごと返すため、
 		// ここを塞がないと企業一覧を絞っても隣から読めてしまう。
-		Where(relationEndpointsVisible(r.db)).
+		Where(guestEntryVisibilityGuard("parent_id", "child_id", "from_id", "to_id")).
 		Find(&relations).Error
 	return relations, err
 }
@@ -96,7 +83,7 @@ func (r *CompanyQueryRepository) GetAll() ([]models.CompanyRelation, error) {
 		Preload("From").
 		Preload("To").
 		Where("is_active = ?", true).
-		Where(relationEndpointsVisible(r.db)).
+		Where(guestEntryVisibilityGuard("parent_id", "child_id", "from_id", "to_id")).
 		Find(&relations).Error
 	return relations, err
 }
@@ -107,7 +94,7 @@ func (r *CompanyQueryRepository) GetMarketInfoByCompanyID(companyID uint) (*mode
 	err := r.db.
 		Preload("Company").
 		Where("company_id = ?", companyID).
-		Where("company_id IN (?)", visibleCompanyIDsSubQuery(r.db)).
+		Where(guestEntryVisibilityGuard("company_id")).
 		First(&marketInfo).Error
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
@@ -123,7 +110,7 @@ func (r *CompanyQueryRepository) GetAllMarketInfo() ([]models.CompanyMarketInfo,
 	var marketInfos []models.CompanyMarketInfo
 	err := r.db.
 		Preload("Company").
-		Where("company_id IN (?)", visibleCompanyIDsSubQuery(r.db)).
+		Where(guestEntryVisibilityGuard("company_id")).
 		Find(&marketInfos).Error
 	return marketInfos, err
 }
@@ -133,6 +120,9 @@ func (r *CompanyQueryRepository) GetJobPositionsByCompany(companyID uint) ([]mod
 	var positions []models.CompanyJobPosition
 	err := r.db.
 		Where("company_id = ? AND is_active = ? AND data_status = ?", companyID, true, "published").
+		// 求人側の data_status だけでなく企業側も見る（#1203）。
+		// 現状ゲスト投稿の求人は draft で作られるが、その前提が変わると素通りする。
+		Where(guestEntryVisibilityGuard("company_id")).
 		Preload("JobCategory").
 		Order("created_at desc").
 		Find(&positions).Error
@@ -143,9 +133,10 @@ func (r *CompanyQueryRepository) GetJobPositionsByCompany(companyID uint) ([]mod
 // 審査前のゲスト投稿は返さない（#1203）。
 func (r *CompanyQueryRepository) GetCompanyByID(id uint) (*models.Company, error) {
 	var company models.Company
-	err := excludeUnreviewedGuestEntries(
-		r.db.Where("id = ? AND is_active = ?", id, true), "companies",
-	).First(&company).Error
+	err := r.db.
+		Where("id = ? AND is_active = ?", id, true).
+		Where(guestEntryVisibilityGuard("companies.id")).
+		First(&company).Error
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +167,7 @@ func (r *CompanyQueryRepository) GetCompaniesFiltered(limit, offset int, industr
 // applyCompanyFilters は無認証の企業検索に共通の絞り込みを適用する。
 // 審査前のゲスト投稿を除く理由は unreviewedGuestEntryCondition のコメント参照（#1203）。
 func applyCompanyFilters(db *gorm.DB, industry, name, tech string) *gorm.DB {
-	db = excludeUnreviewedGuestEntries(db.Where("is_active = ?", true), "companies")
+	db = db.Where("is_active = ?", true).Where(guestEntryVisibilityGuard("companies.id"))
 	if industry != "" {
 		db = db.Where("industry = ?", industry)
 	}

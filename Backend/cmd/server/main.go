@@ -227,6 +227,8 @@ func main() {
 	graduateRepo := repositories.NewGraduateEmploymentRepository(db)
 	companyRelationRepo := repositories.NewCompanyRelationRepository(db)
 	companyQueryRepo := repositories.NewCompanyQueryRepository(db)
+	// 学生・無認証向けの企業参照は審査前のゲスト投稿を隠す（#1203）
+	companyPublicRepo := repositories.NewCompanyPublicRepository(db)
 	matchRepo := repositories.NewUserCompanyMatchRepository(db)
 	profileRecalcRepo := repositories.NewProfileRecalculationRepository(db)
 	// 埋め込み・マッチング
@@ -347,7 +349,7 @@ func main() {
 	interviewService.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
-	interviewService.SetCompanyRepo(companyRepo)
+	interviewService.SetCompanyRepo(companyPublicRepo)
 	interviewService.SetCompanyOwnerChecker(func(userID, companyID uint) (bool, error) {
 		return shared.UserOwnsCompany(db, userID, companyID)
 	})
@@ -361,12 +363,12 @@ func main() {
 	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := controllers.NewCompanyRelationController(companyQueryRepo, aiClient)
-	companyValidator := company.NewCompanyValidationService(companyRepo, aiClient)
+	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
 	companyValidator.SetSearchBudget(companySearchBudget)
 	companyValidator.SetSearchFlight(companySearchFlight)
 	relationController.SetCompanyValidator(companyValidator)
 	resumeService.SetCompanyValidator(companyValidator)
-	resumeService.SetCompanyRepo(companyRepo)
+	resumeService.SetCompanyRepo(companyPublicRepo)
 	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
 	adminCompanyController.SetRelationsFetcher(relationsFetcher)
