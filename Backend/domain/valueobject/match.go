@@ -101,6 +101,14 @@ var weightCategoryAliases = map[string]WeightCategory{
 
 	// チャットの質問体系(chat_question_fallback.go)が持っていた別分類。
 	// 質問文の切り口としての名前であり、評価軸としては正典へ寄せる。
+	//
+	// ここから下は「表記揺れの吸収」ではなく「意味的な統合」である点に注意。
+	// 正典10軸に対応する軸が無いものを最も近い軸へ寄せているため、
+	// スコアの意味が元の質問の意図とは変わる。
+	//
+	// 特に ビジネス思考・目標志向 -> 成長志向 は消去法で、対応が弱い。
+	// 正典に事業志向の軸が無いためどこへ寄せても不正解になる。
+	// 詳細と切り離す条件は docs/wiki/scoring.md「カテゴリの正典と別名」を参照。
 	"創造性・発想力":     CategoryCreativity,
 	"学習意欲・成長志向":   CategoryGrowth,
 	"問題解決力":       CategoryTechnical,
