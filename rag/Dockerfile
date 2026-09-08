@@ -29,13 +29,13 @@ if not has_responses:
 print("OpenAI SDK OK:", openai.__version__)
 PY
 
-COPY main.py /app/main.py
-COPY models.py /app/models.py
-COPY vector_store.py /app/vector_store.py
-COPY training_api.py /app/training_api.py
-COPY export_training_data.py /app/export_training_data.py
-COPY routers/ /app/routers/
-COPY services/ /app/services/
+# ソース一式をまとめて入れる。除外は .dockerignore 側で行う。
+# ファイルを個別に列挙すると、モジュール追加時の追記漏れで本番が起動不能になる。
+COPY . /app/
+
+# 起動時と同じ import を通してビルドを落とす。COPY漏れ・依存漏れを本番のクラッシュ
+# ループではなくビルド失敗として検出する(#1094 で student_profile_store.py が漏れた)。
+RUN python -c "import main"
 
 EXPOSE 9000
 

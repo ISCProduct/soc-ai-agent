@@ -1,0 +1,12 @@
+# ランタイムに不要なものだけを除外する。
+# 除外リストではなく COPY 側を列挙する方式だと、モジュール追加のたびに追記漏れで
+# 本番が ModuleNotFoundError になる(実際に student_profile_store.py / training/ で発生)。
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+tests/
+*.md
+Dockerfile
+Dockerfile.finetune
+requirements-finetune.txt

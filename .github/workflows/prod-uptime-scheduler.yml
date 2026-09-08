@@ -88,7 +88,10 @@ jobs:
           fi
 
           AUTOSCALING_FAILED=""
-          for SERVICE in backend frontend; do
+          # chroma -> rag-review の順に起動する(rag-reviewはCloud Map経由でchromaに接続する)。
+          # RAG(履歴書レビュー/ES添削)はbackendの同期依存であり、ここから漏れると
+          # 稼働日でもRAG機能だけ落ちる(実際に発生していた)。
+          for SERVICE in chroma rag-review backend frontend; do
             # オートスケーリングの下限を desired と同じ値に合わせる。
             # desired_count だけ更新しても min_capacity=0 のままだと CPU ターゲット追跡が
             # 0 まで縮退させ、タスク0ではCPUメトリクスが出ないため自力復帰できない。
@@ -98,9 +101,12 @@ jobs:
             if MAX=$(aws application-autoscaling describe-scalable-targets \
               --service-namespace ecs --resource-ids "$RESOURCE_ID" \
               --scalable-dimension ecs:service:DesiredCount \
-              --query 'ScalableTargets[0].MaxCapacity' --output text 2>/dev/null) \
-              && [ -n "$MAX" ] && [ "$MAX" != "None" ]; then
-              if aws application-autoscaling register-scalable-target \
+              --query 'ScalableTargets[0].MaxCapacity' --output text 2>/tmp/as_describe_err); then
+              if [ -z "$MAX" ] || [ "$MAX" == "None" ]; then
+                # スケーラブルターゲット未登録。chroma/rag-reviewはオートスケーリング対象外
+                # (Terraform側でも登録していない)ため、desired_countの更新だけで足りる。
+                echo "$SERVICE: スケーラブルターゲット未登録、desired_count のみ更新する"
+              elif aws application-autoscaling register-scalable-target \
                 --service-namespace ecs --resource-id "$RESOURCE_ID" \
                 --scalable-dimension ecs:service:DesiredCount \
                 --min-capacity "$DESIRED" --max-capacity "$MAX" > /dev/null; then
@@ -110,6 +116,9 @@ jobs:
                 AUTOSCALING_FAILED=1
               fi
             else
+              # API呼び出し自体の失敗(権限/スロットリング等)のみを失敗扱いにする。
+              # 「未登録」は上のブランチで正常系として扱う。
+              cat /tmp/as_describe_err >&2
               echo "$SERVICE: describe-scalable-targets に失敗(IAM権限を確認: application-autoscaling:DescribeScalableTargets)" >&2
               AUTOSCALING_FAILED=1
             fi

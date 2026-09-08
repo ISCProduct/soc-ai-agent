@@ -43,8 +43,10 @@ variable "frontend_desired_count" {
 }
 
 variable "rag_review_desired_count" {
+  # RAG(履歴書レビュー/ES添削)はbackendの同期依存であり、0だと稼働日でも機能が落ちる。
+  # 実際の増減は prod-uptime-scheduler.yml が担う(モジュール側で desired_count は ignore_changes)。
   type    = number
-  default = 0
+  default = 1
 }
 
 variable "backend_cpu" {
