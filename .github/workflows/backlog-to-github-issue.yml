@@ -45,7 +45,7 @@ jobs:
           MINUTES_BACK: ${{ inputs.minutes_back || '20' }}
         run: |
           python3 - << 'PYEOF'
-          import os, sys, json, urllib.parse, urllib.request, urllib.error
+          import os, re, sys, json, urllib.parse, urllib.request, urllib.error
           from datetime import datetime, timezone, timedelta
 
           sys.path.insert(0, ".github/scripts")
@@ -75,34 +75,94 @@ jobs:
                   print(f"GitHub API エラー {e.code}: {e.read().decode()}", file=sys.stderr)
                   return None
 
+          # 認証が切れていると全ての GitHub API が 401 になり、gh_request が None を返すため
+          # 「対応Issue未検出」として全件スキップされ、成功ログだけが残ってしまう。
+          # 先に疎通を確認して、失敗なら明示的に落とす。
+          if gh_request("GET", f"/repos/{GH_REPO}") is None:
+              print(
+                  "GitHub の認証に失敗しました。secrets.GH_TOKEN の有効期限と権限を確認してください。",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          # 課題1件ごとに Search API を呼ぶと、Search の制限(30回/分)にすぐ達して
+          # 403 になり、大半が「対応Issue未検出」として取りこぼされる。
+          # Issue 一覧を1回だけ取得して bl_key -> Issue の対応表を作る。
+          # 一覧は core API(5000回/時)なので、300件でも4リクエスト程度で済む。
+          def build_issue_index():
+              index = {}
+              page = 1
+              while True:
+                  items = gh_request("GET", f"/repos/{GH_REPO}/issues?state=all&per_page=100&page={page}")
+                  # gh_request は HTTP エラーでも None を返す。空ページと同一視すると
+                  # 対応表が不完全なまま同期を続け、既にIssueがある課題に重複Issueを作る。
+                  if items is None:
+                      print(
+                          f"GitHub Issue 一覧の取得に失敗しました(page={page})。"
+                          "不完全な対応表で同期すると重複Issueを作るため中断します。",
+                          file=sys.stderr,
+                      )
+                      sys.exit(1)
+                  if not items:
+                      break
+                  for it in items:
+                      if "pull_request" in it:
+                          continue
+                      m = re.match(rf'^\[({re.escape(PROJ_KEY)}-\d+)\]\s', it.get("title") or "")
+                      if m:
+                          index.setdefault(m.group(1), it)
+                  if len(items) < 100:
+                      break
+                  page += 1
+              return index
+
+          ISSUE_INDEX = build_issue_index()
+          print(f"GitHub Issue の対応表を作成しました: {len(ISSUE_INDEX)} 件")
+
           def gh_search_issue(bl_key):
-              q = urllib.parse.quote(f"[{bl_key}] repo:{GH_REPO} in:title is:issue")
-              result = gh_request("GET", f"/search/issues?q={q}&per_page=5")
-              if not result:
-                  return None
-              for item in result.get("items", []):
-                  if item["title"].startswith(f"[{bl_key}]"):
-                      return item
-              return None
+              return ISSUE_INDEX.get(bl_key)
 
           project = bl_request(BL_BASE, API_KEY, "GET", f"/projects/{PROJ_KEY}")
           project_id = project["id"]
 
           # Backlog API の updatedSince は yyyy-MM-dd のみ受け付ける（ISO datetime は 400）
           since = (datetime.now(timezone.utc) - timedelta(minutes=MINUTES)).strftime("%Y-%m-%d")
-          issues = bl_request(
-              BL_BASE,
-              API_KEY,
-              "GET",
-              "/issues",
-              {
-                  "projectId[]": project_id,
-                  "updatedSince": since,
-                  "count": 100,
-                  "sort": "updated",
-                  "order": "desc",
-              },
-          )
+          # Backlog の /issues は1回あたり最大100件しか返さない。窓を広げても
+          # 「更新が新しい100件」で打ち切られ、古い課題が取りこぼされるため offset で辿る。
+          issues = []
+          offset = 0
+          while True:
+              page = bl_request(
+                  BL_BASE,
+                  API_KEY,
+                  "GET",
+                  "/issues",
+                  {
+                      "projectId[]": project_id,
+                      "updatedSince": since,
+                      "count": 100,
+                      "offset": offset,
+                      "sort": "updated",
+                      "order": "desc",
+                  },
+              )
+              if not page:
+                  break
+              issues.extend(page)
+              if len(page) < 100:
+                  break
+              offset += 100
+              if offset >= 2000:
+                  # updatedSince は日付単位まで切り捨てられ、sort=updated&order=desc で取得する。
+                  # 2000件で打ち切ると同じ日付で再実行しても上位2000件を取り直すだけで、
+                  # 古い課題には永久に到達しない。基準日が翌日に進むと取りこぼしが確定する。
+                  # 黙って成功扱いにせず、失敗させて気づけるようにする。
+                  print(
+                      "Backlog 課題が2000件を超えました。この実行では取りこぼしが発生します。"
+                      "MINUTES_BACK を短くして実行間隔を詰めてください。",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
 
           print(f"{len(issues)} 件の Backlog 課題を取得しました（updatedSince={since}, minutes_back={MINUTES}）。", flush=True)
 
