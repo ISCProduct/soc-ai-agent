@@ -43,7 +43,10 @@ jobs:
           import os, sys, json, re, urllib.request, urllib.error
 
           sys.path.insert(0, ".github/scripts")
-          from backlog_client import load_backlog_env, resolve_bl_base, bl_request as _bl_request
+          from backlog_client import (
+              load_backlog_env, resolve_bl_base, set_issue_status,
+              bl_request as _bl_request,
+          )
 
           API_KEY, SPACE_ID, PROJ_KEY, DOMAIN = load_backlog_env()
           GH_NUMBER = os.environ['GH_NUMBER']
@@ -143,8 +146,9 @@ jobs:
               if not bl_key:
                   print("Backlog 課題キーが見つかりません。スキップします。")
                   sys.exit(0)
-              bl_request('PATCH', f"/issues/{bl_key}", {'statusId': 4})
-              print(f"Backlog 課題をクローズしました: {bl_key}")
+              # 既に完了なら何もしない。Backlog 側で先に完了にしてから GitHub を
+              # 閉じた場合、変更なしの更新になり Backlog が 400 で拒否する。
+              set_issue_status(BL_BASE, API_KEY, bl_key, 4)
 
           # ---- reopened: Backlog 課題を未対応（ステータス 1）に戻す ----
           elif ACTION == 'reopened':
@@ -152,6 +156,5 @@ jobs:
               if not bl_key:
                   print("Backlog 課題キーが見つかりません。スキップします。")
                   sys.exit(0)
-              bl_request('PATCH', f"/issues/{bl_key}", {'statusId': 1})
-              print(f"Backlog 課題を再オープンしました: {bl_key}")
+              set_issue_status(BL_BASE, API_KEY, bl_key, 1)
           PYEOF
