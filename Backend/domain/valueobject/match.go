@@ -1,6 +1,9 @@
 package valueobject
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // WeightCategory 適性診断の重みカテゴリを表す値オブジェクト
 type WeightCategory string
@@ -69,4 +72,69 @@ func (m MatchScore) IsHighMatch() bool {
 // String カテゴリとマッチ度の文字列表現
 func (m MatchScore) String() string {
 	return fmt.Sprintf("%s: %.1f%%", m.Category, m.MatchDegree)
+}
+
+// カテゴリ名の表記揺れを正典へ写像する（#929）。
+//
+// 正典は上の10種類だが、シードデータ・質問体系・面接スコアの写像が
+// それぞれ独自の表記を持っており、user_weight_scores に正典外の値が
+// 書き込まれていた。マッチング側は scoreMap を正典キーで引くため、
+// 不一致の行は引かれず、代わりに中立50が使われる
+// （matching_service.go の scoredMatch）。エラーもログも出ないまま
+// ユーザーの実スコアが捨てられる。
+//
+// 表記を1箇所に集約し、保存経路で必ず通すことで再発を止める。
+var weightCategoryAliases = map[string]WeightCategory{
+	// 「志向」サフィックスの欠落
+	"チームワーク":    CategoryTeamwork,
+	"リーダーシップ":   CategoryLeadership,
+	"創造性":       CategoryCreativity,
+	"チャレンジ":     CategoryChallenge,
+	"技術":        CategoryTechnical,
+	"安定":        CategoryStability,
+	"成長":        CategoryGrowth,
+	"細部":        CategoryDetail,
+	"コミュニケーション": CategoryCommunication,
+
+	// 「力」「能力」の揺れ
+	"コミュニケーション能力": CategoryCommunication,
+
+	// チャットの質問体系(chat_question_fallback.go)が持っていた別分類。
+	// 質問文の切り口としての名前であり、評価軸としては正典へ寄せる。
+	"創造性・発想力":     CategoryCreativity,
+	"学習意欲・成長志向":   CategoryGrowth,
+	"問題解決力":       CategoryTechnical,
+	"分析思考":        CategoryTechnical,
+	"計画性・実行力":     CategoryDetail,
+	"ストレス耐性・粘り強さ": CategoryChallenge,
+	"ビジネス思考・目標志向": CategoryGrowth,
+}
+
+// NormalizeWeightCategory は表記揺れを正典へ寄せる。
+// 正典にも別名表にも無い場合は ok=false を返す。呼び出し側で弾くこと。
+func NormalizeWeightCategory(raw string) (WeightCategory, bool) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", false
+	}
+	c := WeightCategory(s)
+	for _, known := range AllWeightCategories() {
+		if c == known {
+			return known, true
+		}
+	}
+	if mapped, ok := weightCategoryAliases[s]; ok {
+		return mapped, true
+	}
+	return "", false
+}
+
+// ParseWeightCategory は NormalizeWeightCategory のエラー版。
+// 保存経路の入口で使い、正典外の値がDBへ入るのを防ぐ。
+func ParseWeightCategory(raw string) (WeightCategory, error) {
+	c, ok := NormalizeWeightCategory(raw)
+	if !ok {
+		return "", fmt.Errorf("未知の重みカテゴリです: %q", raw)
+	}
+	return c, nil
 }

@@ -10,7 +10,7 @@ type CollectiveInsightLog struct {
 	CompanyID       uint   `gorm:"not null;index" json:"company_id"`
 	ActionType      string `gorm:"type:varchar(50);not null" json:"action_type"` // viewed / applied / passed / rejected
 	// スコアプロファイルのスナップショット（集合知計算用）
-	ScoreSnapshot string    `gorm:"type:text" json:"score_snapshot"` // JSON: {"技術志向":80,"チームワーク":60,...}
+	ScoreSnapshot string    `gorm:"type:text" json:"score_snapshot"` // JSON: {"技術志向":80,"チームワーク志向":60,...}
 	CreatedAt     time.Time `json:"created_at"`
 }
 
