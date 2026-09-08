@@ -21,6 +21,7 @@ import (
 // 「指定日リスト」運用を実現する入力口）。
 type DiscordInteractionController struct {
 	uptimeService *discord.UptimeService
+	dispatcher    *discord.WorkflowDispatcher
 	publicKey     string
 	allowedRoleID string
 }
@@ -28,6 +29,7 @@ type DiscordInteractionController struct {
 func NewDiscordInteractionController(uptimeService *discord.UptimeService) *DiscordInteractionController {
 	return &DiscordInteractionController{
 		uptimeService: uptimeService,
+		dispatcher:    discord.NewWorkflowDispatcherFromEnv(),
 		publicKey:     os.Getenv("DISCORD_PUBLIC_KEY"),
 		allowedRoleID: os.Getenv("DISCORD_ALLOWED_ROLE_ID"),
 	}
@@ -87,6 +89,10 @@ func (c *DiscordInteractionController) handleCommand(ctx echo.Context, interacti
 		return c.handleListCommand(interaction, ctx)
 	}
 
+	if interaction.Data.Name == discord.CommandNameProd {
+		return c.handleProdCommand(ctx, interaction)
+	}
+
 	if interaction.Data.Name != discord.CommandNameProdUptime {
 		return ctx.JSON(http.StatusOK, discord.InteractionResponse{
 			Type: discord.ResponseTypeChannelMessageWithSource,
@@ -124,6 +130,97 @@ func (c *DiscordInteractionController) handleCommand(ctx echo.Context, interacti
 	})
 }
 
+// handleProdCommand は本番の起動状態を手動で切り替える（/prod state:on|off|auto）。
+//
+// ECSを直接叩かずSSMのオーバーライドを書くのは、prod-uptime-scheduler.yml が毎時
+// 日付リストと照合して desired_count を上書きするため。直接起動しても最大1時間で
+// 元に戻され、「Discordで起動したのに落ちている」状態になる。
+func (c *DiscordInteractionController) handleProdCommand(ctx echo.Context, interaction *discord.Interaction) error {
+	if !c.hasAllowedRole(interaction) {
+		return ctx.JSON(http.StatusOK, discord.InteractionResponse{
+			Type: discord.ResponseTypeChannelMessageWithSource,
+			Data: &discord.InteractionResponseData{Content: "このコマンドを実行する権限がありません。", Flags: discord.EphemeralFlag},
+		})
+	}
+
+	state, err := discord.ParseOverride(discord.FindOptionString(interaction.Data.Options, discord.OptionNameState))
+	if err != nil {
+		return ctx.JSON(http.StatusOK, discord.InteractionResponse{
+			Type: discord.ResponseTypeChannelMessageWithSource,
+			Data: &discord.InteractionResponseData{Content: err.Error(), Flags: discord.EphemeralFlag},
+		})
+	}
+
+	if c.uptimeService == nil {
+		return ctx.JSON(http.StatusOK, discord.InteractionResponse{
+			Type: discord.ResponseTypeChannelMessageWithSource,
+			Data: &discord.InteractionResponseData{Content: "現在この機能は利用できません(未設定)。", Flags: discord.EphemeralFlag},
+		})
+	}
+
+	// SSM書き込みとワークフロー起動でDiscordの3秒応答制限を超えるため、
+	// 先にdeferred応答を返して実処理は非同期で行う。
+	applicationID, token := interaction.ApplicationID, interaction.Token
+	go c.applyOverrideAndFollowUp(applicationID, token, state)
+
+	return ctx.JSON(http.StatusOK, discord.InteractionResponse{
+		Type: discord.ResponseTypeDeferredChannelMessageWithSource,
+		Data: &discord.InteractionResponseData{Flags: discord.EphemeralFlag},
+	})
+}
+
+func (c *DiscordInteractionController) applyOverrideAndFollowUp(applicationID, token, state string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	content := overrideAppliedMessage(state)
+	if err := c.uptimeService.SetOverride(ctx, state); err != nil {
+		log.Printf("[Discord] prod override set error: %v", err)
+		content = userFacingErrorMessage(err)
+	} else {
+		// オーバーライドは書けたので、即時反映に失敗しても機能自体は成立する
+		// (次の毎時実行で反映される)。その旨をユーザーへ返す。
+		dispatched, err := c.dispatcher.Dispatch(ctx)
+		switch {
+		case err != nil:
+			log.Printf("[Discord] prod override dispatch error: %v", err)
+			content += "\n⚠️ 即時反映の起動に失敗しました。次の毎時実行(最大1時間後)で反映されます。"
+		case dispatched:
+			content += "\n反映を開始しました。完了まで数分かかります(本番DBの起動待ちを含む)。"
+		default:
+			content += "\n次の毎時実行(最大1時間後)で反映されます。"
+		}
+	}
+
+	if err := discord.EditOriginalResponse(applicationID, token, content); err != nil {
+		log.Printf("[Discord] prod override followup error: %v", err)
+	}
+}
+
+// overrideLabel は状態の表示名。
+func overrideLabel(state string) string {
+	switch state {
+	case discord.OverrideOn:
+		return "常時起動"
+	case discord.OverrideOff:
+		return "常時停止"
+	default:
+		return "日付リストに従う"
+	}
+}
+
+// overrideAppliedMessage は設定した状態をそのまま読める文言にする。
+func overrideAppliedMessage(state string) string {
+	switch state {
+	case discord.OverrideOn:
+		return "✅ 本番を「常時起動」に設定しました。日付リストに関係なく起動し続けます。"
+	case discord.OverrideOff:
+		return "🛑 本番を「常時停止」に設定しました。日付リストに関係なく停止します。"
+	default:
+		return "🔄 本番を「日付リストに従う」に戻しました。"
+	}
+}
+
 // handleListCommand は登録済み日付一覧を返す(閲覧専用、ロール制限なし)。
 // SSM読み取りがDiscordの3秒応答制限を超える可能性があるため、handleModalSubmitと
 // 同様にdeferred応答(type=5)を返し、実処理は非同期でフォローアップメッセージとして送る。
@@ -154,6 +251,15 @@ func (c *DiscordInteractionController) listDatesAndFollowUp(applicationID, token
 	if err != nil {
 		log.Printf("[Discord] prod-uptime list error: %v", err)
 		content = "日付一覧の取得に失敗しました。時間を置いて再度お試しください。"
+	} else {
+		// 手動オーバーライド中は日付リストが効かないため、一覧だけ見て
+		// 「今日は載っていないから止まっているはず」と誤解しないよう併記する。
+		override, overrideErr := c.uptimeService.GetOverride(ctx)
+		if overrideErr != nil {
+			log.Printf("[Discord] prod override get error: %v", overrideErr)
+		} else if override != discord.OverrideAuto {
+			content += "\n⚠️ 現在 /prod で「" + overrideLabel(override) + "」に固定されています(日付リストは無視されます)。"
+		}
 	}
 
 	if err := discord.EditOriginalResponse(applicationID, token, content); err != nil {

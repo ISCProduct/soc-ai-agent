@@ -50,9 +50,18 @@ type Member struct {
 
 // InteractionData はスラッシュコマンド名、またはモーダル送信時の custom_id・入力値を含む。
 type InteractionData struct {
-	Name       string      `json:"name,omitempty"`
-	CustomID   string      `json:"custom_id,omitempty"`
-	Components []Component `json:"components,omitempty"`
+	Name       string          `json:"name,omitempty"`
+	CustomID   string          `json:"custom_id,omitempty"`
+	Components []Component     `json:"components,omitempty"`
+	Options    []CommandOption `json:"options,omitempty"`
+}
+
+// CommandOption はスラッシュコマンドの引数（/prod state:on の "state"）。
+// Value を any で受けるのは、文字列以外の型の引数を持つコマンドが将来増えても
+// ペイロード全体のデコードが失敗しないようにするため。
+type CommandOption struct {
+	Name  string `json:"name"`
+	Value any    `json:"value"`
 }
 
 type Component struct {
@@ -87,9 +96,26 @@ const EphemeralFlag = 1 << 6
 const (
 	CommandNameProdUptime     = "prod-uptime"
 	CommandNameProdUptimeList = "prod-uptime-list"
+	CommandNameProd           = "prod"
+	OptionNameState           = "state"
 	ModalCustomIDProdUptime   = "prod_uptime_modal"
 	TextInputCustomIDDate     = "prod_uptime_date"
 )
+
+// FindOptionString はスラッシュコマンドの文字列引数を取り出す。
+// 見つからない、または文字列でない場合は空文字を返す。
+func FindOptionString(options []CommandOption, name string) string {
+	for _, o := range options {
+		if o.Name != name {
+			continue
+		}
+		if v, ok := o.Value.(string); ok {
+			return v
+		}
+		return ""
+	}
+	return ""
+}
 
 // FindComponentValue はモーダル送信データのネストしたComponentsから指定custom_idの入力値を探す。
 func FindComponentValue(components []Component, customID string) string {

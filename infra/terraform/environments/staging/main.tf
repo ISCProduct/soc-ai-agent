@@ -202,15 +202,19 @@ resource "aws_iam_role_policy" "app" {
         Resource = [module.s3.bucket_arn, "${module.s3.bucket_arn}/*"]
       },
       {
-        # Discord連携(/api/discord/interactions)から本番の「指定日終日起動」日付リストを
-        # 読み書きするための権限。対象パラメータは本番プロジェクト名(soc-app)固定。
+        # Discord連携(/api/discord/interactions)から本番の「指定日終日起動」日付リストと、
+        # /prod による手動オーバーライドを読み書きするための権限。
+        # 対象パラメータは本番プロジェクト名(soc-app)固定。
         Sid    = "ProdUptimeSsmAccess"
         Effect = "Allow"
         Action = [
           "ssm:GetParameter",
           "ssm:PutParameter",
         ]
-        Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/soc-app/prod-uptime-dates"
+        Resource = [
+          "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/soc-app/prod-uptime-dates",
+          "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/soc-app/prod-uptime-override",
+        ]
       },
     ]
   })
@@ -295,6 +299,8 @@ resource "aws_launch_template" "app" {
     admin_secret             = var.admin_secret_plain
     discord_public_key       = var.discord_public_key
     discord_allowed_role_id  = var.discord_allowed_role_id
+    github_dispatch_token    = var.github_dispatch_token
+    github_dispatch_repo     = var.github_dispatch_repo
     oauth_state_secret       = random_password.oauth_state_secret.result
     token_encryption_key     = random_id.token_encryption_key.hex
     edge_nginx_conf          = file("${path.module}/../../../nginx/staging-edge.conf")

@@ -5,6 +5,11 @@ name: Prod uptime scheduler
 # 日付リストはDiscordの /prod-uptime コマンド(Backend: /api/discord/interactions)で
 # SSM Parameter Store (/soc-app/prod-uptime-dates, カンマ区切り) に追加される。
 #
+# Discordの /prod コマンドは手動オーバーライド (/soc-app/prod-uptime-override) を
+# on / off / auto で書き込み、このワークフローを workflow_dispatch で即時起動する。
+# オーバーライドは日付リストより優先する。これが無いと、手動起動しても次の毎時実行が
+# 日付リストどおりに戻してしまい「起動したのに落ちている」状態になる。
+#
 # ponytail: デプロイ中(deployment.yml)との競合を防ぐロックは未実装。
 # 反映作業と本ジョブの実行が重なった場合、一時的にdesired_countが競合する可能性がある。
 # 実運用で問題になれば、SSM Parameterへのメンテナンスロックフラグ追加を検討する。
@@ -52,13 +57,42 @@ jobs:
             exit 1
           fi
 
-          DESIRED=0
-          if echo ",$DATES," | grep -q ",$TODAY_JST,"; then
-            DESIRED=1
-            echo "today ($TODAY_JST) is an uptime date -> desired_count=1"
+          # 手動オーバーライド。未作成(初回)のみ auto 扱いにし、それ以外のAWSエラーは
+          # 日付リスト取得と同様に握りつぶさず失敗させる。
+          if OVERRIDE=$(aws ssm get-parameter --name "/${PROJECT_NAME}/prod-uptime-override" \
+            --query 'Parameter.Value' --output text 2>/tmp/ssm_get_override_err); then
+            :
+          elif grep -q "ParameterNotFound" /tmp/ssm_get_override_err; then
+            OVERRIDE="auto"
           else
-            echo "today ($TODAY_JST) is not an uptime date -> desired_count=0"
+            cat /tmp/ssm_get_override_err >&2
+            exit 1
           fi
+
+          case "$OVERRIDE" in
+            on)
+              DESIRED=1
+              echo "override=on -> desired_count=1 (日付リストは無視)"
+              ;;
+            off)
+              DESIRED=0
+              echo "override=off -> desired_count=0 (日付リストは無視)"
+              ;;
+            *)
+              # auto、または想定外の値。想定外の値で本番を起動しっぱなしにする/落とすより
+              # 日付リストどおりに動く方が安全なので、auto と同じ扱いにする。
+              if [ "$OVERRIDE" != "auto" ]; then
+                echo "override='$OVERRIDE' は未知の値のため auto として扱う" >&2
+              fi
+              DESIRED=0
+              if echo ",$DATES," | grep -q ",$TODAY_JST,"; then
+                DESIRED=1
+                echo "today ($TODAY_JST) is an uptime date -> desired_count=1"
+              else
+                echo "today ($TODAY_JST) is not an uptime date -> desired_count=0"
+              fi
+              ;;
+          esac
 
           DB_ID="${PROJECT_NAME}-mysql"
 
