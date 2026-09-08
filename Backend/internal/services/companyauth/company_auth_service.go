@@ -39,6 +39,10 @@ var (
 	ErrCompanyNotFound     = errors.New("company not found")
 	ErrCompanyNotVerified  = errors.New("company is not verified")
 	ErrInvalidRefreshToken = errors.New("invalid refresh token")
+	ErrAccountDisabled     = errors.New("account is disabled")
+	ErrResetTokenInvalid   = errors.New("invalid password reset token")
+	ErrResetTokenExpired   = errors.New("password reset token expired")
+	ErrUserNotFound        = errors.New("company user not found")
 )
 
 type InviteRequest struct {
@@ -56,6 +60,15 @@ type AcceptInviteRequest struct {
 	Token    string `json:"token"`
 	Password string `json:"password"`
 	Name     string `json:"name"`
+}
+
+type ForgotPasswordRequest struct {
+	Email string `json:"email"`
+}
+
+type ResetPasswordRequest struct {
+	Token    string `json:"token"`
+	Password string `json:"password"`
 }
 
 type AuthResponse struct {
@@ -126,26 +139,40 @@ func (s *CompanyUserService) Invite(companyID uint, req InviteRequest) (*models.
 	if err != nil {
 		return nil, err
 	}
-	if existing != nil {
+	// パスワード設定済み＝既に使われているアカウント。重複作成は許さない。
+	// 復旧が必要な場合はパスワードリセットを使う（#1196 以前はここで詰んでいた）。
+	if existing != nil && existing.PasswordSet() {
+		return nil, ErrEmailExists
+	}
+	// 招待メールを紛失した等で受諾前のまま残っているアカウントは、
+	// トークンを発行し直して再招待できるようにする。
+	if existing != nil && existing.CompanyID != companyID {
 		return nil, ErrEmailExists
 	}
 
-	tokenBytes := make([]byte, 24)
-	if _, err := rand.Read(tokenBytes); err != nil {
+	inviteToken, err := generateToken()
+	if err != nil {
 		return nil, fmt.Errorf("failed to generate invite token: %w", err)
 	}
-	inviteToken := base64.URLEncoding.EncodeToString(tokenBytes)
+	tokenHash := hashToken(inviteToken)
 	expires := s.now().Add(config.PendingRegistrationTokenTTL)
 
-	user := &models.CompanyUser{
-		CompanyID:       companyID,
-		Email:           emailAddr,
-		Name:            name,
-		Role:            role,
-		InviteToken:     &inviteToken,
-		InviteExpiresAt: &expires,
+	user := existing
+	if user == nil {
+		user = &models.CompanyUser{CompanyID: companyID, Email: emailAddr}
 	}
-	if err := s.users.Create(user); err != nil {
+	user.Name = name
+	user.Role = role
+	user.InviteTokenHash = &tokenHash
+	user.InviteExpiresAt = &expires
+	// 再招待は無効化されたアカウントの復帰も兼ねる。
+	user.DisabledAt = nil
+
+	if user.ID == 0 {
+		if err := s.users.Create(user); err != nil {
+			return nil, err
+		}
+	} else if err := s.users.Update(user); err != nil {
 		return nil, err
 	}
 
@@ -168,12 +195,15 @@ func (s *CompanyUserService) AcceptInvite(req AcceptInviteRequest) (*AuthRespons
 		return nil, errors.New("password must be at least 8 characters")
 	}
 
-	user, err := s.users.FindByInviteToken(token)
+	user, err := s.users.FindByInviteTokenHash(hashToken(token))
 	if err != nil {
 		return nil, err
 	}
 	if user == nil {
 		return nil, ErrInviteNotFound
+	}
+	if user.Disabled() {
+		return nil, ErrAccountDisabled
 	}
 	if user.InviteExpiresAt != nil && s.now().After(*user.InviteExpiresAt) {
 		return nil, ErrInviteExpired
@@ -187,7 +217,7 @@ func (s *CompanyUserService) AcceptInvite(req AcceptInviteRequest) (*AuthRespons
 		return nil, err
 	}
 	user.Password = string(hashed)
-	user.InviteToken = nil
+	user.InviteTokenHash = nil
 	user.InviteExpiresAt = nil
 	if name != "" {
 		user.Name = name
@@ -211,8 +241,13 @@ func (s *CompanyUserService) Login(req LoginRequest) (*AuthResponse, error) {
 	if user == nil || !user.PasswordSet() {
 		return nil, ErrInvalidCredentials
 	}
+	// パスワード照合より先に無効化を返すと、無効なアカウントの存在が分かってしまう。
+	// 資格情報が正しい場合にだけ「無効化されている」と伝える。
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
 		return nil, ErrInvalidCredentials
+	}
+	if user.Disabled() {
+		return nil, ErrAccountDisabled
 	}
 	return s.buildAuthResponse(user, true)
 }
@@ -346,4 +381,19 @@ func (s *CompanyUserService) issueRefreshToken(companyUserID uint) (string, erro
 func hashRefreshToken(plain string) string {
 	sum := sha256.Sum256([]byte(plain))
 	return hex.EncodeToString(sum[:])
+}
+
+// hashToken は招待・パスワードリセットのトークンをDBに保存する形へ変換する。
+// 平文はメールでしか流通させない（#1196）。
+func hashToken(plain string) string {
+	sum := sha256.Sum256([]byte(plain))
+	return hex.EncodeToString(sum[:])
+}
+
+func generateToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
 }

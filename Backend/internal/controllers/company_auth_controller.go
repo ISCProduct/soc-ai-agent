@@ -43,6 +43,39 @@ func (c *CompanyAuthController) AcceptInvite(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, resp)
 }
 
+// ForgotPassword はパスワード再設定メールの送信を要求する。
+// POST /api/company-auth/forgot-password
+//
+// アカウントの存在有無を漏らさないため、結果に関わらず常に 200 を返す。
+func (c *CompanyAuthController) ForgotPassword(ctx echo.Context) error {
+	var req companyauth.ForgotPasswordRequest
+	if err := ctx.Bind(&req); err != nil {
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+	}
+	if err := c.svc.RequestPasswordReset(req); err != nil {
+		// DB障害などの内部エラーもここで飲み込むと調査できないのでログには残す。
+		// ただしレスポンスは成功と区別できない形にする。
+		logError(err)
+	}
+	return ctx.JSON(http.StatusOK, map[string]string{
+		"message": "パスワード再設定用のメールを送信しました",
+	})
+}
+
+// ResetPassword はトークンを検証してパスワードを再設定し、そのままログインさせる。
+// POST /api/company-auth/reset-password
+func (c *CompanyAuthController) ResetPassword(ctx echo.Context) error {
+	var req companyauth.ResetPasswordRequest
+	if err := ctx.Bind(&req); err != nil {
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+	}
+	resp, err := c.svc.ResetPassword(req)
+	if err != nil {
+		return mapCompanyAuthError(err)
+	}
+	return ctx.JSON(http.StatusOK, resp)
+}
+
 type companyRefreshRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
@@ -107,6 +140,14 @@ func mapCompanyAuthError(err error) error {
 		return newAPIError(http.StatusNotFound, ErrCodeNotFound, "company not found")
 	case errors.Is(err, companyauth.ErrCompanyNotVerified):
 		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "company is not verified")
+	case errors.Is(err, companyauth.ErrAccountDisabled):
+		return newAPIError(http.StatusForbidden, ErrCodeForbidden, "このアカウントは無効化されています")
+	case errors.Is(err, companyauth.ErrResetTokenInvalid):
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "invalid password reset token")
+	case errors.Is(err, companyauth.ErrResetTokenExpired):
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "password reset token expired")
+	case errors.Is(err, companyauth.ErrUserNotFound):
+		return newAPIError(http.StatusNotFound, ErrCodeNotFound, "company user not found")
 	default:
 		msg := err.Error()
 		if msg == "forbidden" {

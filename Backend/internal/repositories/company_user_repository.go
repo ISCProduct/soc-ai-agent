@@ -47,9 +47,24 @@ func (r *CompanyUserRepository) FindByEmail(email string) (*models.CompanyUser, 
 	return &m, nil
 }
 
-func (r *CompanyUserRepository) FindByInviteToken(token string) (*models.CompanyUser, error) {
+// FindByInviteTokenHash は招待トークンの SHA-256 hex で検索する。
+// 平文トークンはDBに保存しない（#1196）。
+func (r *CompanyUserRepository) FindByInviteTokenHash(hash string) (*models.CompanyUser, error) {
 	var m models.CompanyUser
-	err := r.db.Where("invite_token = ?", token).First(&m).Error
+	err := r.db.Where("invite_token_hash = ?", hash).First(&m).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// FindByPasswordResetTokenHash はパスワードリセットトークンの SHA-256 hex で検索する。
+func (r *CompanyUserRepository) FindByPasswordResetTokenHash(hash string) (*models.CompanyUser, error) {
+	var m models.CompanyUser
+	err := r.db.Where("password_reset_token_hash = ?", hash).First(&m).Error
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}

@@ -97,7 +97,7 @@ describe('POST /api/company-auth/reset-password', () => {
     jest.restoreAllMocks()
   })
 
-  it('認証ヘッダー無しでバックエンドへ転送し、成功時にセッションCookieを設定する', async () => {
+  it('認証ヘッダー無しでバックエンドへ素通しする', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(JSON.stringify(authResponse), {
         status: 200,
@@ -125,13 +125,12 @@ describe('POST /api/company-auth/reset-password', () => {
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual(authResponse)
 
-    expect(response.cookies.get('company_user_id')?.value).toBe('1')
-    expect(response.cookies.get('company_user_token')?.value).toBe('jwt-token')
-    expect(response.cookies.get('company_refresh_token')?.value).toBe('refresh-token')
-    expect(response.cookies.get('company_user_token')?.httpOnly).toBe(true)
+    // Cookie はこのルートでは張らない。accept-invite と同じく素通しにして、
+    // クライアントの persistCompanyAuth -> POST /api/company-auth/session に一本化する。
+    expect(response.headers.getSetCookie()).toEqual([])
   })
 
-  it('トークン無効(400)ではCookieを設定せず同じステータスで返す', async () => {
+  it('トークン無効(400)は同じステータスでそのまま返す', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ error: 'invalid or expired token' }), {
         status: 400,
@@ -147,7 +146,7 @@ describe('POST /api/company-auth/reset-password', () => {
     )
 
     expect(response.status).toBe(400)
-    expect(response.cookies.get('company_user_token')).toBeUndefined()
+    expect(response.headers.getSetCookie()).toEqual([])
     await expect(response.json()).resolves.toEqual({ error: 'invalid or expired token' })
   })
 })
