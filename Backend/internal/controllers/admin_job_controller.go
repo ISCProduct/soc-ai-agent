@@ -88,9 +88,14 @@ func (c *AdminJobController) CreateJobPosition(ctx echo.Context) error {
 	// 求人の公開状態は所属企業に合わせる。
 	// DBデフォルトの draft のままだと、公開済み企業に管理者が求人を足しても
 	// 学生側のクエリ(data_status='published')に乗らず、別途 publish 操作が要る（#1074）。
-	if company, err := c.companyRepo.FindByID(payload.CompanyID); err == nil && company != nil {
-		payload.DataStatus = company.DataStatus
+	//
+	// エラーを握り潰すと継承がスキップされて draft で作られ、
+	// 「公開済み企業に足したのに学生に出ない」が無言で再発する。
+	company, err := c.companyRepo.FindByID(payload.CompanyID)
+	if err != nil || company == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "company not found")
 	}
+	payload.DataStatus = company.DataStatus
 	if err := c.companyRepo.CreateJobPosition(&payload); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create job position")
 	}
@@ -118,20 +123,12 @@ func (c *AdminJobController) JobPositionAction(ctx echo.Context) error {
 	actor := ctx.Request().Header.Get("X-Admin-Email")
 	switch action {
 	case "publish":
-		// 企業が未公開のままだと、求人を published にしても学生側の
-		// クエリは企業側の data_status で弾くため、どこにも出ない求人ができる。
-		// 「承認したのに出ない」を作らないよう、ここで止める（#1074）。
-		// 企業を公開すれば draft の求人はまとめて published になる
-		// （admin_company_controller.go の publish 処理）ので、
-		// 求人だけを先に公開する正当な用途は無い。
-		company, err := c.companyRepo.FindByID(position.CompanyID)
-		if err != nil || company == nil {
-			return echo.NewHTTPError(http.StatusNotFound, "company not found")
-		}
-		if company.DataStatus != "published" {
-			return echo.NewHTTPError(http.StatusConflict,
-				"企業が未公開のため求人を公開できません。先に企業を公開してください（企業の公開時に求人もまとめて公開されます）")
-		}
+		// 企業が未公開のまま求人を publish しても学生側クエリで弾かれるが、
+		// ここでは止めない。63031830 で「FE が警告したうえで通す」という
+		// 製品判断が既に入っており（job-positions/page-content.tsx の確認ダイアログ）、
+		// サーバ側だけ 409 にすると「続行しますか？」に OK しても必ず失敗する
+		// 死んだ UI になるため。企業を公開すれば draft の求人はまとめて
+		// published になるので、実害も無い。
 		position.DataStatus = "published"
 		position.IsActive = true
 	case "reject":

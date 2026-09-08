@@ -79,15 +79,10 @@ func (r *CompanyQueryRepository) GetJobPositionsByCompany(companyID uint) ([]mod
 	return positions, err
 }
 
-// GetCompanyByID 指定IDの公開済み企業を取得。
-//
-// このリポジトリは無認証の /api/companies/* 専用（routes/company_routes.go）。
-// data_status を見ないと、company-entry からゲストが投稿した審査前(draft)の企業が
-// 誰にでも見えてしまう。管理者向けの一覧は CompanyRepository.ListActiveFiltered が
-// 別に status を受け取るので、ここは published 固定でよい（#1074）。
+// GetCompanyByID 指定IDの企業を取得
 func (r *CompanyQueryRepository) GetCompanyByID(id uint) (*models.Company, error) {
 	var company models.Company
-	err := r.db.Where("id = ? AND is_active = ? AND data_status = ?", id, true, "published").First(&company).Error
+	err := r.db.Where("id = ? AND is_active = ?", id, true).First(&company).Error
 	if err != nil {
 		return nil, err
 	}
@@ -115,10 +110,8 @@ func (r *CompanyQueryRepository) GetCompaniesFiltered(limit, offset int, industr
 	return companies, total, err
 }
 
-// applyCompanyFilters は無認証の企業検索に共通の絞り込みを適用する。
-// published 固定にする理由は GetCompanyByID のコメント参照（#1074）。
 func applyCompanyFilters(db *gorm.DB, industry, name, tech string) *gorm.DB {
-	db = db.Where("is_active = ? AND data_status = ?", true, "published")
+	db = db.Where("is_active = ?", true)
 	if industry != "" {
 		db = db.Where("industry = ?", industry)
 	}

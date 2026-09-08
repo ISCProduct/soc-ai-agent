@@ -21,7 +21,8 @@ test.describe('公開ページは未ログインで到達できる', () => {
       await page.goto(path)
 
       // リダイレクト先ではなく、要求したパスに留まっていること。
-      await expect(page).toHaveURL(new RegExp(`${path}$`))
+      // 正規表現ではなく述語で比較する（パスにメタ文字が入っても誤判定しない）。
+      await expect(page).toHaveURL((url) => url.pathname === path)
       await expect(page.getByText(mustSee).first()).toBeVisible({ timeout: 10000 })
     })
   }

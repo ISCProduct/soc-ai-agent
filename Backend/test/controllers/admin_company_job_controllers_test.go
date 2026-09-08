@@ -344,8 +344,6 @@ func TestAdminJobController_JobPositionAction_Publish_Success(t *testing.T) {
 	audit := &mocks.AuditLogServiceMock{}
 	position := &models.CompanyJobPosition{Title: "Engineer", CompanyID: 7}
 	companyRepo.On("FindJobPositionByID", uint(1)).Return(position, nil)
-	// 企業が公開済みなら求人を公開できる。
-	companyRepo.On("FindByID", uint(7)).Return(&models.Company{ID: 7, DataStatus: "published"}, nil)
 	companyRepo.On("UpdateJobPosition", mock.Anything).Return(nil)
 	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 
@@ -358,30 +356,13 @@ func TestAdminJobController_JobPositionAction_Publish_Success(t *testing.T) {
 	companyRepo.AssertExpectations(t)
 }
 
-// TestAdminJobController_JobPositionAction_Publish_RejectsDraftCompany は、
-// 企業が未公開のまま求人だけ公開する操作を止めることを検証する。
+// publish は企業の公開状態を見ない。
 //
-// 学生側のクエリは企業と求人の両方が published であることを要求するため、
-// 企業が draft のまま求人を published にすると、どこにも出ない求人ができる。
-// 「承認したのに学生に出ない」という #1074 の主訴そのもの。
-func TestAdminJobController_JobPositionAction_Publish_RejectsDraftCompany(t *testing.T) {
-	companyRepo := &mocks.CompanyRepositoryMock{}
-	position := &models.CompanyJobPosition{Title: "Engineer", CompanyID: 7}
-	companyRepo.On("FindJobPositionByID", uint(1)).Return(position, nil)
-	companyRepo.On("FindByID", uint(7)).Return(&models.Company{ID: 7, DataStatus: "draft"}, nil)
-
-	req := httptest.NewRequest(http.MethodPatch, "/api/admin/job-positions/1/publish", nil)
-	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
-	ctx.SetParamNames("id", "action")
-	ctx.SetParamValues("1", "publish")
-	assertStatus(t, newAdminJobController(companyRepo, nil, nil, nil).JobPositionAction, ctx, http.StatusConflict)
-	// 更新は一切行わないこと。
-	companyRepo.AssertNotCalled(t, "UpdateJobPosition", mock.Anything)
-}
-
-// reject は企業の公開状態に関わらず通す（公開前に不採用にする運用があるため）。
-func TestAdminJobController_JobPositionAction_RejectAllowedForDraftCompany(t *testing.T) {
+// 企業が未公開のまま求人を published にしても学生側クエリで弾かれるが、
+// 63031850 で「FE が確認ダイアログで警告したうえで通す」製品判断が入っている。
+// サーバ側だけ 409 にすると「続行しますか？」に OK しても必ず失敗する
+// 死んだ UI になるため、ここでは止めない（#1074 レビュー指摘）。
+func TestAdminJobController_JobPositionAction_PublishDoesNotCheckCompany(t *testing.T) {
 	companyRepo := &mocks.CompanyRepositoryMock{}
 	audit := &mocks.AuditLogServiceMock{}
 	position := &models.CompanyJobPosition{Title: "Engineer", CompanyID: 7}
@@ -389,13 +370,12 @@ func TestAdminJobController_JobPositionAction_RejectAllowedForDraftCompany(t *te
 	companyRepo.On("UpdateJobPosition", mock.Anything).Return(nil)
 	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/admin/job-positions/1/reject", nil)
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/job-positions/1/publish", nil)
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id", "action")
-	ctx.SetParamValues("1", "reject")
+	ctx.SetParamValues("1", "publish")
 	assertStatus(t, newAdminJobController(companyRepo, nil, nil, audit).JobPositionAction, ctx, http.StatusOK)
-	// reject では企業を引く必要が無いこと。
 	companyRepo.AssertNotCalled(t, "FindByID", mock.Anything)
 }
 
@@ -471,6 +451,37 @@ func TestAdminJobController_CreateJobPosition_InheritsCompanyStatus(t *testing.T
 			if created.DataStatus != tt.wantStatus {
 				t.Errorf("DataStatus = %q, want %q", created.DataStatus, tt.wantStatus)
 			}
+		})
+	}
+}
+
+// CreateJobPosition は企業を引けなければ作成しない。
+//
+// エラーを握り潰して継承をスキップすると DB デフォルトの draft で作られ、
+// 「公開済み企業に足したのに学生に出ない」が無言で再発する（#1074 レビュー指摘 S5）。
+// 存在しない company_id の求人が宙に浮くのも防ぐ。
+func TestAdminJobController_CreateJobPosition_RejectsUnknownCompany(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		company *models.Company
+		err     error
+	}{
+		{name: "企業が存在しない", company: nil, err: errors.New("record not found")},
+		{name: "DB障害", company: nil, err: errors.New("connection refused")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			companyRepo := &mocks.CompanyRepositoryMock{}
+			companyRepo.On("FindByID", uint(7)).Return(tt.company, tt.err)
+
+			body, _ := json.Marshal(map[string]any{
+				"company_id": 7, "title": "Engineer", "job_category_id": 3,
+			})
+			req := httptest.NewRequest(http.MethodPost, "/api/admin/job-positions", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			assertStatus(t, newAdminJobController(companyRepo, nil, nil, nil).CreateJobPosition, newCtx(req, rec), http.StatusBadRequest)
+			// 作成に進まないこと。
+			companyRepo.AssertNotCalled(t, "CreateJobPosition", mock.Anything)
 		})
 	}
 }
