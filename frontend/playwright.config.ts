@@ -14,6 +14,7 @@ export default defineConfig({
     'public-pages.spec.ts',
     'company-password-reset.spec.ts',
     'admin-company-users.spec.ts',
+    'student-insights.spec.ts',
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
