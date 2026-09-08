@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import {
   Alert,
   Box,
@@ -89,6 +90,12 @@ export function CompanyPortalLoginContent() {
             >
               ログイン
             </Button>
+          </Box>
+
+          <Box sx={{ textAlign: 'center', mt: 2 }}>
+            <Link href="/company-portal/forgot-password" style={{ fontSize: '0.875rem' }}>
+              パスワードをお忘れですか？
+            </Link>
           </Box>
 
           <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center' }}>

@@ -532,6 +532,7 @@ func main() {
 	adminEntry.POST("/company-entry-submissions/:id/resend-email", companyEntryController.ResendEmail)
 	adminEntry.POST("/companies/:id/company-users", adminCompanyUserController.Invite)
 	adminEntry.GET("/companies/:id/company-users", adminCompanyUserController.List)
+	adminEntry.PATCH("/companies/:id/company-users/:userID", adminCompanyUserController.SetDisabled)
 	// CI(GitHub Actions)からのマシン間呼び出しのため、ログインユーザー前提のEchoAdminAuthではなく
 	// 共有シークレットのみで認証する(#861)
 	api.POST("/admin/whats-new/ingest", releaseNoteController.Ingest, routes.EchoStaticSecretAuth(cfg.AdminSecret))

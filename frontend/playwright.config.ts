@@ -12,6 +12,8 @@ export default defineConfig({
     'schedule.spec.ts',
     'admin.spec.ts',
     'public-pages.spec.ts',
+    'company-password-reset.spec.ts',
+    'admin-company-users.spec.ts',
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
