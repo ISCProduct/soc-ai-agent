@@ -250,3 +250,56 @@ func TestSetDisabled_RejectsOtherCompany(t *testing.T) {
 		t.Fatalf("expected ErrUserNotFound, got %v", err)
 	}
 }
+
+// --- RefreshSession --------------------------------------------------------
+
+// TestRefreshSession_DisabledAccountRejected は無効化の迂回を防げていることを検証する。
+//
+// SetDisabled は既存のリフレッシュトークンを失効させるが、rotationGracePeriod(60秒)の
+// 間は失効済みトークンでもローテーションが通る。ここで無効化を見ていないと、
+// 無効化直後にリフレッシュした利用者へ新しいJWTと未失効のリフレッシュトークンが渡り、
+// 以降ずっとアクセスを維持できてしまう。
+func TestRefreshSession_DisabledAccountRejected(t *testing.T) {
+	db, mock := newCompanyAuthTestDB(t)
+	svc := newTestService(t, db)
+	svc.now = fixedNow
+	future := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	// 猶予期間内に失効したトークン（無効化と同時に revoke された直後を再現）。
+	revoked := fixedNow().Add(-10 * time.Second)
+	disabled := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery("SELECT \\* FROM `company_user_refresh_tokens`").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "company_user_id", "token_hash", "expires_at", "revoked_at"}).
+			AddRow(5, 1, hashRefreshToken("plain"), future, revoked))
+	mock.ExpectQuery("SELECT \\* FROM `company_users`").
+		WithArgs(uint(1), 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "company_id", "email", "password", "disabled_at"}).
+			AddRow(1, 10, "hr@example.com", "hashed", disabled))
+
+	if _, err := svc.RefreshSession("plain"); !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("無効化されたアカウントがリフレッシュできてしまう: err=%v", err)
+	}
+}
+
+// 招待未受諾（パスワード未設定）でもリフレッシュを通さない。
+func TestRefreshSession_PasswordNotSetRejected(t *testing.T) {
+	db, mock := newCompanyAuthTestDB(t)
+	svc := newTestService(t, db)
+	svc.now = fixedNow
+	future := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery("SELECT \\* FROM `company_user_refresh_tokens`").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "company_user_id", "token_hash", "expires_at", "revoked_at"}).
+			AddRow(5, 1, hashRefreshToken("plain"), future, nil))
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `company_user_refresh_tokens`").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	mock.ExpectQuery("SELECT \\* FROM `company_users`").
+		WithArgs(uint(1), 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "company_id", "email", "password"}).
+			AddRow(1, 10, "hr@example.com", ""))
+
+	if _, err := svc.RefreshSession("plain"); !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("expected ErrInvalidRefreshToken, got %v", err)
+	}
+}

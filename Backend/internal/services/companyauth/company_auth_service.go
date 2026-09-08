@@ -334,7 +334,15 @@ func (s *CompanyUserService) RefreshSession(plain string) (*AuthResponse, error)
 	if err != nil {
 		return nil, err
 	}
-	if user == nil {
+	if user == nil || !user.PasswordSet() {
+		return nil, ErrInvalidRefreshToken
+	}
+	// 無効化されたアカウントには新しいトークンを発行しない（#1196）。
+	// SetDisabled は既存のリフレッシュトークンを失効させるが、
+	// rotationGracePeriod(60秒)の間は失効済みトークンでもここまで到達する。
+	// ここで止めないと、無効化直後にリフレッシュした利用者へ
+	// 新しいJWTと未失効のリフレッシュトークンが渡り、無効化を恒久的に迂回できる。
+	if user.Disabled() {
 		return nil, ErrInvalidRefreshToken
 	}
 	return s.buildAuthResponse(user, true)
