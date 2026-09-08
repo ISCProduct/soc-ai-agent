@@ -646,6 +646,55 @@ jobs:
             --max-time 60 \
             || echo "stagingへの取り込みに失敗しました(停止中の可能性)。スキップします。"
 
+  # PRイベント時の一時的な失敗や、プロモーションPRの課題キー解決漏れがあっても、
+  # 本番Deploy成功後にBacklogの状態を「完了」へ補正する。
+  # pr-to-backlog.yml の既存ロジック（中間PRを辿る再帰解決）を再利用し、
+  # 各workflow_dispatchの完了まで待つことで、Deployジョブ成功だけを先に返さない。
+  sync-backlog-after-deploy:
+    needs: deploy-production
+    if: github.ref_name == 'main' && needs.deploy-production.result == 'success'
+    name: Sync Backlog statuses after production deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: write
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - name: Reconcile recently deployed PRs with Backlog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t prs < <(
+            gh pr list \
+              --repo "${{ github.repository }}" \
+              --state merged \
+              --base main \
+              --limit 20 \
+              --json number \
+              --jq '.[].number'
+          )
+
+          if [ "${#prs[@]}" -eq 0 ]; then
+            echo "mainへマージ済みのPRがありません。"
+            exit 0
+          fi
+
+          for pr in "${prs[@]}"; do
+            echo "Backlog同期を再実行します: PR #$pr"
+            run_url="$(gh workflow run pr-to-backlog.yml \
+              --repo "${{ github.repository }}" \
+              --ref main \
+              -f pr_number="$pr")"
+            run_id="${run_url##*/}"
+            gh run watch "$run_id" \
+              --repo "${{ github.repository }}" \
+              --exit-status
+          done
+
   # developへのマージPRもstagingでは即時確認できるようにする（本番には反映しない）。
   # pr_numberでべき等のため、後日releaseブランチ経由でmainへ入った際に
   # sync-whats-new(main)が別途取り込んでも問題ない。ただしmain側のマージPR番号は
