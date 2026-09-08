@@ -81,6 +81,7 @@
 | POST | `/api/resume/{id}/review` | レビュー実行（スコア更新も実施） |
 | GET | `/api/resume/{id}/review/stream` | レビューSSEストリーミング |
 | GET | `/api/resume/{id}/annotated` | 注釈済みPDF取得 |
+| GET | `/api/resume/status` | 自分の履歴書の対応要否（リマインダー用、#1030） |
 
 ---
 

@@ -7016,3 +7016,8 @@ __pycache__/
 *.pyc
 .tools/
 frontend/test-results/.last-run.json
+
+# next dev が自動生成するエージェント指示ファイル。
+# 生成物であり、各PRの差分に毎回混入するため追跡しない（#1074 レビュー指摘）。
+frontend/AGENTS.md
+frontend/CLAUDE.md
