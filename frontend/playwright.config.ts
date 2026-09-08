@@ -11,12 +11,8 @@ export default defineConfig({
     'resume-reminder.spec.ts',
     'schedule.spec.ts',
     'admin.spec.ts',
-<<<<<<< ours
+    'public-pages.spec.ts',
     'student-insights.spec.ts',
-    'public-pages.spec.ts',
-=======
-    'public-pages.spec.ts',
->>>>>>> theirs
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
