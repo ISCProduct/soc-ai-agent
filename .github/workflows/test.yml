@@ -116,11 +116,11 @@ jobs:
           for p in sorted(pathlib.Path(".github/workflows").glob("*.yml")):
               src = p.read_text(encoding="utf-8")
               blocks = BLOCK.findall(src)
-              # 埋め込み Python があるのに抽出できていないなら、
-              # 検査したつもりで素通りしているので落とす
               # 実際の起動行だけ数える（このスクリプト自身の文字列リテラルは除く）
               invocations = sum(1 for line in src.splitlines()
                                 if line.strip().startswith("python3 - <<"))
+              # 埋め込み Python があるのに抽出できていないなら、
+              # 検査したつもりで素通りしているので落とす
               if invocations != len(blocks):
                   ng += 1
                   print(f"{p}: 埋め込み Python を抽出できませんでした"
