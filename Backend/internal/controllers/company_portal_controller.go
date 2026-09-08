@@ -37,6 +37,41 @@ func (c *AdminCompanyUserController) Invite(ctx echo.Context) error {
 	})
 }
 
+type setCompanyUserDisabledRequest struct {
+	Disabled bool `json:"disabled"`
+}
+
+// SetDisabled は企業ユーザーの有効/無効を切り替える（#1196）。
+// PATCH /api/admin/companies/:id/company-users/:userID
+//
+// 行を削除しないのは company_student_tags.created_by が参照しているため。
+// 削除するとその担当者が付けた自社タグまで失われる。
+func (c *AdminCompanyUserController) SetDisabled(ctx echo.Context) error {
+	companyID, err := echoUintParam(ctx, "id")
+	if err != nil {
+		return err
+	}
+	companyUserID, err := echoUintParam(ctx, "userID")
+	if err != nil {
+		return err
+	}
+	var req setCompanyUserDisabledRequest
+	if err := ctx.Bind(&req); err != nil {
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+	}
+	user, err := c.svc.SetDisabled(companyID, companyUserID, req.Disabled)
+	if err != nil {
+		return mapCompanyAuthError(err)
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"id":          user.ID,
+		"company_id":  user.CompanyID,
+		"email":       user.Email,
+		"disabled":    user.Disabled(),
+		"disabled_at": user.DisabledAt,
+	})
+}
+
 func (c *AdminCompanyUserController) List(ctx echo.Context) error {
 	companyID, err := echoUintParam(ctx, "id")
 	if err != nil {
@@ -56,6 +91,8 @@ func (c *AdminCompanyUserController) List(ctx echo.Context) error {
 			"role":           u.Role,
 			"password_set":   u.PasswordSet(),
 			"invite_pending": !u.PasswordSet(),
+			"disabled":       u.Disabled(),
+			"disabled_at":    u.DisabledAt,
 		})
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{"items": items})

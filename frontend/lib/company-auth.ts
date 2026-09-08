@@ -67,6 +67,23 @@ function persistCompanyAuth(data: CompanyAuthResponse) {
   }).catch(() => {})
 }
 
+// Backendと同じパスワード要件（8文字以上） (#1196)
+export const COMPANY_PASSWORD_MIN_LENGTH = 8
+
+/**
+ * 新パスワードと確認用入力を検証し、問題があればエラーメッセージを返す（無ければ null）。
+ * 表示ロジックを持たない純関数なので単体テストしやすい (#1196)
+ */
+export function validateNewPassword(password: string, confirmPassword: string): string | null {
+  if (password.length < COMPANY_PASSWORD_MIN_LENGTH) {
+    return `パスワードは${COMPANY_PASSWORD_MIN_LENGTH}文字以上で入力してください。`
+  }
+  if (password !== confirmPassword) {
+    return 'パスワードが一致しません。'
+  }
+  return null
+}
+
 export const companyAuthService = {
   getStoredUser(): CompanyUser | null {
     const raw = getSessionStorage()?.getItem(COMPANY_AUTH_USER_KEY)
@@ -146,6 +163,38 @@ export const companyAuthService = {
     })
     if (!res.ok) {
       throw new Error('招待の受諾に失敗しました')
+    }
+    const data = (await res.json()) as CompanyAuthResponse
+    persistCompanyAuth(data)
+    return data
+  },
+
+  // パスワード再設定メールを要求する。アカウントの存在有無を漏らさないため
+  // Backendは常に200を返す。レート制限(429)などの失敗時のみ例外を投げる (#1196)
+  async requestPasswordReset(email: string): Promise<void> {
+    const res = await fetch('/api/company-auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    })
+    if (!res.ok) {
+      throw new Error(
+        res.status === 429
+          ? '送信回数の上限に達しました。しばらく時間をおいて再度お試しください。'
+          : 'メールの送信に失敗しました。時間をおいて再度お試しください。'
+      )
+    }
+  },
+
+  // パスワードを再設定する。成功するとAcceptInviteと同じ認証情報が返るためログイン状態にする (#1196)
+  async resetPassword(token: string, password: string): Promise<CompanyAuthResponse> {
+    const res = await fetch('/api/company-auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, password }),
+    })
+    if (!res.ok) {
+      throw new Error('パスワードの再設定に失敗しました')
     }
     const data = (await res.json()) as CompanyAuthResponse
     persistCompanyAuth(data)
