@@ -2,13 +2,15 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Box, IconButton, AppBar, Toolbar, Typography, Alert } from '@mui/material'
+import { Box, IconButton, AppBar, Toolbar, Typography, Alert, Link as MuiLink } from '@mui/material'
+import NextLink from 'next/link'
 import { Menu as MenuIcon } from '@mui/icons-material'
 import { AnalysisSidebar } from '@/components/analysis-sidebar'
 import { MuiChat } from '@/components/mui-chat'
 import { PageLoading } from '@/components/common/PageLoading'
 import { authService, User } from '@/lib/auth'
 import { WhatsNewEntry, fetchWhatsNewEntries, hasUnreadWhatsNew, markWhatsNewAsSeen } from '@/lib/whats-new-data'
+import { fetchResumeStatus, resumeReminderMessage } from '@/lib/resume-reminder'
 import styles from './page.module.css'
 
 export default function PageContent() {
@@ -18,6 +20,7 @@ export default function PageContent() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [whatsNewEntries, setWhatsNewEntries] = useState<WhatsNewEntry[]>([])
   const [showWhatsNewBanner, setShowWhatsNewBanner] = useState(false)
+  const [resumeReminder, setResumeReminder] = useState<string | null>(null)
 
   useEffect(() => {
     const storedUser = authService.getStoredUser()
@@ -34,6 +37,11 @@ export default function PageContent() {
       })
       .catch(() => {
         // 更新情報の取得失敗はチャット画面の利用を妨げない
+      })
+    fetchResumeStatus()
+      .then((status) => setResumeReminder(resumeReminderMessage(status)))
+      .catch(() => {
+        // 履歴書状態の取得失敗はホーム画面を壊さない（バナーを出さない）
       })
   }, [router])
 
@@ -98,6 +106,20 @@ export default function PageContent() {
             }
           >
             新着情報: {whatsNewEntries[0].title}
+          </Alert>
+        )}
+        {resumeReminder && (
+          // MUI の Alert は action を渡すと onClose の閉じるボタンを描画しないため
+          // (Alert.js: `action == null && onClose`)、導線は本文中に置いて閉じるボタンを残す。
+          <Alert severity="warning" onClose={() => setResumeReminder(null)} sx={{ borderRadius: 0 }}>
+            {resumeReminder}{' '}
+            <MuiLink
+              component={NextLink}
+              href="/resume"
+              sx={{ fontSize: '0.8rem', fontWeight: 600, color: 'inherit' }}
+            >
+              履歴書を確認する
+            </MuiLink>
           </Alert>
         )}
         <div className={styles.chatWrapper}>

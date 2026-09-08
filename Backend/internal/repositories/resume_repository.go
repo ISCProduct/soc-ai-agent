@@ -1,6 +1,8 @@
 package repositories
 
 import (
+	"errors"
+
 	"Backend/internal/models"
 
 	"gorm.io/gorm"
@@ -73,6 +75,38 @@ func (r *ResumeRepository) FindDocumentsByUserID(userID uint) ([]models.ResumeDo
 		return nil, err
 	}
 	return docs, nil
+}
+
+// FindLatestDocumentWithReview はユーザーの最新 ResumeDocument と、それに紐づく最新 ResumeReview を返す。
+// 「最新」は作成日時の降順とし、同一時刻の場合は ID の降順で決める(#1030)。
+//
+// 戻り値の組み合わせは3通り。
+//   - (nil, nil, nil): 履歴書を一度もアップロードしていない
+//   - (doc, nil, nil): アップロード済みだがレビューが未生成(処理中)
+//   - (doc, review, nil): レビュー済み
+func (r *ResumeRepository) FindLatestDocumentWithReview(userID uint) (*models.ResumeDocument, *models.ResumeReview, error) {
+	var doc models.ResumeDocument
+	err := r.db.Where("user_id = ?", userID).
+		Order("created_at DESC, id DESC").
+		First(&doc).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var review models.ResumeReview
+	err = r.db.Where("document_id = ?", doc.ID).
+		Order("created_at DESC, id DESC").
+		First(&review).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return &doc, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return &doc, &review, nil
 }
 
 func (r *ResumeRepository) FindReviewItems(reviewID uint) ([]models.ResumeReviewItem, error) {

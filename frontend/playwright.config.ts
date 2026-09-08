@@ -8,6 +8,7 @@ export default defineConfig({
     'chat.spec.ts',
     'chat-critical-flow.spec.ts',
     'resume.spec.ts',
+    'resume-reminder.spec.ts',
     'schedule.spec.ts',
     'admin.spec.ts',
     'public-pages.spec.ts',
