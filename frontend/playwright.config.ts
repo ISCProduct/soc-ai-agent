@@ -10,6 +10,7 @@ export default defineConfig({
     'resume.spec.ts',
     'schedule.spec.ts',
     'admin.spec.ts',
+    'company-password-reset.spec.ts',
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
