@@ -5,7 +5,7 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 export const dynamic = 'force-dynamic'
 
 // 転送を許可するクエリ。想定外のパラメータをバックエンドへ素通しさせない。
-const ALLOWED_PARAMS = ['limit', 'offset', 'q', 'school_id'] as const
+const ALLOWED_PARAMS = ['limit', 'offset', 'q', 'school_id', 'low_match_only'] as const
 
 // 生徒の傾向分析一覧(Issue #1027)のBFFプロキシ。
 //

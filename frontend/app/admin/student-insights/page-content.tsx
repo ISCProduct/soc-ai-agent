@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Alert,
+  Checkbox,
   Chip,
+  FormControlLabel,
   CircularProgress,
   InputAdornment,
   Paper,
@@ -28,9 +30,11 @@ import {
   displayCategories,
   displayIndustries,
   displayTypeLabel,
+  lowMatchApplications,
   NO_DATA_LABEL,
   type StudentTendency,
 } from '@/lib/student-insights'
+import { LOW_MATCH_THRESHOLD } from '@/lib/low-match'
 
 export default function PageContent() {
   const [adminEmail, setAdminEmail] = useState('')
@@ -39,6 +43,7 @@ export default function PageContent() {
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
   const [query, setQuery] = useState('')
+  const [lowMatchOnly, setLowMatchOnly] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
@@ -79,6 +84,7 @@ export default function PageContent() {
         offset: String(page * rowsPerPage),
         ...(query ? { q: query } : {}),
         ...(schoolId !== undefined ? { school_id: String(schoolId) } : {}),
+        ...(lowMatchOnly ? { low_match_only: 'true' } : {}),
       })
       const res = await fetch(`/api/admin/teacher/students/tendency-analysis?${params}`, {
         headers: authService.getAdminFetchHeaders(),
@@ -96,7 +102,7 @@ export default function PageContent() {
     } finally {
       if (!isCancelled?.()) setLoading(false)
     }
-  }, [adminEmail, schoolRequired, schoolId, page, rowsPerPage, query])
+  }, [adminEmail, schoolRequired, schoolId, page, rowsPerPage, query, lowMatchOnly])
 
   // 検索入力のたびに投げると古いレスポンスが新しい結果を上書きするため、デバウンス+キャンセルする
   useEffect(() => {
@@ -139,6 +145,17 @@ export default function PageContent() {
           }}
         />
         <SchoolFilterSelect value={schoolId} onChange={(id) => { setSchoolId(id); setPage(0) }} />
+        <FormControlLabel
+          control={
+            <Checkbox
+              size="small"
+              checked={lowMatchOnly}
+              onChange={(e) => { setLowMatchOnly(e.target.checked); setPage(0) }}
+            />
+          }
+          label={`マッチ度${LOW_MATCH_THRESHOLD}未満の応募がある生徒のみ`}
+          slotProps={{ typography: { variant: 'body2', noWrap: true } }}
+        />
       </Stack>
 
       <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
@@ -150,18 +167,19 @@ export default function PageContent() {
               <TableCell>タイプ</TableCell>
               <TableCell>上位カテゴリ</TableCell>
               <TableCell>向いている業界 TOP3</TableCell>
+              <TableCell>要フォローの応募</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
                   <CircularProgress size={24} />
                 </TableCell>
               </TableRow>
             ) : students.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                <TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                   生徒が見つかりません
                 </TableCell>
               </TableRow>
@@ -170,6 +188,7 @@ export default function PageContent() {
               const industries = displayIndustries(s)
               const typeLabel = displayTypeLabel(s)
               const noData = typeLabel === NO_DATA_LABEL
+              const lowMatches = lowMatchApplications(s)
               return (
                 <TableRow key={s.user_id} hover>
                   <TableCell>
@@ -208,6 +227,23 @@ export default function PageContent() {
                             label={i.industry_name}
                             score={i.score}
                             color="secondary.main"
+                          />
+                        ))}
+                      </Stack>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {lowMatches.length === 0 ? (
+                      <Typography variant="body2" color="text.disabled">—</Typography>
+                    ) : (
+                      <Stack spacing={0.5} sx={{ minWidth: 180 }}>
+                        {lowMatches.map((a, i) => (
+                          <Chip
+                            key={`${a.company_name}-${i}`}
+                            label={`${a.company_name}（${Math.round(a.match_score)}）`}
+                            size="small"
+                            color="warning"
+                            variant="outlined"
                           />
                         ))}
                       </Stack>
