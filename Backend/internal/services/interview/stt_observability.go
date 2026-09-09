@@ -1,6 +1,7 @@
 package interview
 
 import (
+	"Backend/internal/openai"
 	"log/slog"
 	"os"
 	"strings"
@@ -32,16 +33,15 @@ type STTObservation struct {
 // openai.Transcribe と同じ解決順にする。ここがずれると
 // 「ログ上はminiなのに実際は高精度モデル」という状態になり、
 // 費用と品質の突き合わせができなくなる。
+// 既定値は openai パッケージから直接引く。
+// 以前はここに同じ文字列を書き写し「一致させること」とコメントで縛っていたが、
+// 実際には片方だけ変わって食い違っていた。規約ではなく型で守る。
 func STTModelName() string {
 	if m := os.Getenv("OPENAI_WHISPER_MODEL"); m != "" {
 		return m
 	}
-	return defaultWhisperModel
+	return openai.DefaultTranscribeModel
 }
-
-// defaultWhisperModel は openai パッケージの既定値と一致させること。
-// 定数を共有しないのは、openai パッケージへの依存方向を増やさないため。
-const defaultWhisperModel = "gpt-4o-mini-transcribe"
 
 // EstimateAudioSeconds は音声バイト数からおおよその秒数を出す。
 //

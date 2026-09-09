@@ -16,9 +16,12 @@ AI面接の音声経路には Turn（STT→LLM→TTS）と Realtime の2実装�
    +-- POST /api/interviews/:id/turn        ──┤  実際に使われている
    |                                          │
    |   interview_turn.go                      │
-   |     :48  Transcribe   gpt-4o-transcribe  │
-   |     :102 ChatInterview gpt-4o-mini       │
-   |     :111 TTS          tts-1              │
+   |     TranscribeWithHints                  │
+   |                gpt-4o-mini-transcribe    │
+   |       └ 問題発話のみ gpt-4o-transcribe   │
+   |                     へ再送(#795 Task 5)  │
+   |     ChatInterview    gpt-4o-mini         │
+   |     TTS              tts-1               │
    |                                        ──┘
    |
    +-- (未使用) createRealtimeToken  ─────────┐
@@ -200,7 +203,7 @@ interview_usage_logs
 | `REALTIME_CACHED_AUDIO_INPUT_COST_PER_1M_USD` | 20.0 | 0.40 | `gpt-realtime` |
 | `LLM_INPUT_COST_PER_1M_USD` | （新規） | 0.15 | `gpt-4o-mini` |
 | `LLM_OUTPUT_COST_PER_1M_USD` | （新規） | 0.60 | `gpt-4o-mini` |
-| `STT_COST_PER_MIN_USD` | （新規） | 0.006 | **推定値**。下記参照 |
+| `STT_COST_PER_MIN_USD` | （新規） | 0.003 | **推定値**。Turnの既定モデル `gpt-4o-mini-transcribe` 用 |
 | `TTS_COST_PER_1M_CHARS_USD` | （新規） | 15.0 | `tts-1` |
 
 **モデルと単価の対応を必ず検証する。** 単価は `gpt-realtime` 基準だが、
@@ -210,8 +213,9 @@ interview_usage_logs
 変わるため同様。**起動時にモデル名と単価の組を突き合わせ、
 未知の組み合わせなら警告を出す**（記録した `model` 列で後から再計算もできる）。
 
-**`STT_COST_PER_MIN_USD` は実費ではなく推定値である。** `gpt-4o-transcribe` の
-課金は入力音声トークンと出力トークンに基づき、$0.006/分は目安にすぎない。
+**`STT_COST_PER_MIN_USD` は実費ではなく推定値である。** `gpt-4o-mini-transcribe` の
+課金は入力音声トークンと出力トークンに基づき、$0.003/分は目安にすぎない
+（`gpt-4o-transcribe` へ戻した場合は $0.006/分）。
 現在の `Client.Transcribe` はレスポンスから `text` しか返さず usage を捨てているため、
 実額は取れない。`/admin/costs` では**推定として明示し、実費と混ぜない**。
 実額が必要になったら `Transcribe` の戻り値に usage を足してトークン単位で集計する。
@@ -259,6 +263,13 @@ interview_usage_logs
 
 - `gpt-realtime-mini` の日本語発話品質。実際に聞いて判断する必要がある
 - WebRTC 接続の確立時間。N-1 の 1.0 秒に含めるかは実装後に判断する
-- `gpt-4o-mini-transcribe` の文字起こし精度。レポート採点の入力になるため、
-  精度検証が済むまで STT モデルは `gpt-4o-transcribe` のまま据え置く
-- `gpt-4o-mini-transcribe` へ下げた場合の文字起こし精度。レポート採点の入力になるため、精度低下がスコアに影響しないかの確認が要る
+- `gpt-4o-mini-transcribe` の日本語文字起こし精度。**合成音声での検証は実施済み**
+  （`docs/research/interview-audio-eval/RESULTS_stt_hints.md`）。
+  一般指標（CER・固有名詞正解率）では高精度モデルと差が出なかったが、
+  **mini は「御社」を8回中8回「本社」と誤認する**。面接では意味が変わるため、
+  この語を検知して高精度モデルへ再送するフォールバックを入れた
+  （`stt_fallback.go`）。
+- **実発話での精度と、フォールバックの再送率が未測定。** 再送率50%が損益分岐点で、
+  超えると mini + 再送は高精度モデル単独より高くつく
+  （`RESULTS_fallback.md`）。ステージングで `fell_back` を集計して判断する。
+  問題があれば `OPENAI_WHISPER_MODEL=gpt-4o-transcribe` へ戻す

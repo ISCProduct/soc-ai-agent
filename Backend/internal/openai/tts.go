@@ -20,10 +20,7 @@ func (cli *Client) Transcribe(ctx context.Context, audio []byte, filename string
 		return "", errors.New("openai api key is not set")
 	}
 
-	model := os.Getenv("OPENAI_WHISPER_MODEL")
-	if model == "" {
-		model = "gpt-4o-transcribe"
-	}
+	model := resolveTranscribeModel()
 
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
