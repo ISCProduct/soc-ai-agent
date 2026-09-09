@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"strings"
+	"time"
 )
 
 // interviewFallbackReplyText はChat失敗時に返す面接官としての言い換え応答。
@@ -45,7 +46,16 @@ func (s *InterviewService) Turn(
 	// STT: Whisper でユーザー音声をテキスト化。
 	// 破損音声・無音・タイムアウト等でTranscribe自体が失敗しても、ターンを
 	// 中断させず「聞き取れなかった」扱いで継続する（既存の空文字フォールバックに合流、#910）。
+	//
+	// モデルごとの品質・費用を後から突き合わせられるよう、
+	// 音声サイズ・応答時間・成否を記録する（音声R&D Task 1）。
+	// 発話本文・認識本文は記録しない。
+	const sttMimeType = "audio/webm"
+	sttStart := time.Now()
 	userText, err := s.openaiClient.Transcribe(ctx, audioData, "audio.webm")
+	LogSTTObservation(ObserveTranscribe(
+		sessionID, turnCount, len(audioData), sttMimeType, sttStart, userText, err,
+	))
 	if err != nil {
 		log.Printf("[Interview] transcribe error: %v", err)
 		userText = ""
