@@ -666,6 +666,98 @@ jobs:
             --max-time 60 \
             || echo "stagingへの取り込みに失敗しました(停止中の可能性)。スキップします。"
 
+  # 本番へ反映された issue を閉じる。
+  #
+  # feature/* -> develop -> release -> main のフローでは GitHub の
+  # `Closes #123` が発火しない。close キーワードは**デフォルトブランチへ
+  # マージされたPR**の本文でのみ効くが、feature PR の base は develop であり、
+  # プロモーションPRの本文には issue 番号が書かれないため。
+  # 結果、本番反映済みの issue が開いたまま溜まる（2026-09-10 時点で16件）。
+  #
+  # squash マージのコミット題名に残る元PR番号 `(#1234)` を辿り、
+  # そのPR本文の close キーワードから issue を解決して閉じる。
+  close-deployed-issues:
+    needs: deploy-production
+    if: github.ref_name == 'main' && needs.deploy-production.result == 'success'
+    name: Close issues deployed to production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # 閉じられなくてもデプロイは成功として扱う。
+    # issue の開閉は運用の都合であり、本番の稼働とは独立している。
+    continue-on-error: true
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # 直前のリリース範囲を見るため履歴が要る
+          fetch-depth: 0
+
+      - name: 本番へ反映されたPRから issue を解決して閉じる
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PYEOF'
+          import json, os, subprocess, sys
+
+          sys.path.insert(0, ".github/scripts")
+          from resolve_deployed_issues import extract_pr_numbers, extract_issue_numbers
+
+          REPO = os.environ["GH_REPO"]
+
+          def gh(args):
+              r = subprocess.run(["gh", *args, "--repo", REPO],
+                                 capture_output=True, text=True)
+              return r.stdout if r.returncode == 0 else ""
+
+          # 直近のリリースマージ（HEAD）に含まれるコミット題名を集める。
+          # 1つ前のmainのコミットとの差分を取る。
+          subjects = subprocess.run(
+              ["git", "log", "--format=%s", "HEAD~1..HEAD", "--no-merges"],
+              capture_output=True, text=True).stdout.splitlines()
+          if not subjects:
+              # マージコミット自体しか無い場合は、マージした側の履歴を辿る
+              subjects = subprocess.run(
+                  ["git", "log", "--format=%s", "HEAD^1..HEAD^2"],
+                  capture_output=True, text=True).stdout.splitlines()
+
+          prs = extract_pr_numbers(subjects)
+          print(f"コミット {len(subjects)} 件から 元PR {len(prs)} 件を検出")
+
+          issues = {}
+          for pr in prs:
+              body = gh(["pr", "view", str(pr), "--json", "body", "-q", ".body"])
+              for i in extract_issue_numbers(body):
+                  issues.setdefault(i, []).append(pr)
+
+          if not issues:
+              print("閉じる対象の issue はありません。")
+              sys.exit(0)
+
+          closed, skipped, failed = 0, 0, 0
+          for issue in sorted(issues):
+              state = gh(["issue", "view", str(issue), "--json", "state", "-q", ".state"]).strip()
+              if state != "OPEN":
+                  print(f"  #{issue}: 既に {state or '取得不可'} のためスキップ")
+                  skipped += 1
+                  continue
+              pr_list = ", ".join(f"#{p}" for p in issues[issue])
+              r = subprocess.run(
+                  ["gh", "issue", "close", str(issue), "--repo", REPO,
+                   "--comment", f"本番へ反映されたため自動でクローズしました（{pr_list}）。"],
+                  capture_output=True, text=True)
+              if r.returncode == 0:
+                  print(f"  #{issue}: クローズしました（{pr_list}）")
+                  closed += 1
+              else:
+                  print(f"  #{issue}: クローズに失敗 {r.stderr.strip()[:120]}", file=sys.stderr)
+                  failed += 1
+
+          print(f"クローズ {closed} 件 / スキップ {skipped} 件 / 失敗 {failed} 件")
+          PYEOF
+
   # PRイベント時の一時的な失敗や、プロモーションPRの課題キー解決漏れがあっても、
   # 本番Deploy成功後にBacklogの状態を「完了」へ補正する。
   # pr-to-backlog.yml の既存ロジック（中間PRを辿る再帰解決）を再利用し、
