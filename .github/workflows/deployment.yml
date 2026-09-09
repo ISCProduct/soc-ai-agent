@@ -88,6 +88,17 @@ jobs:
               --min-size 1 --desired-capacity 1
           fi
 
+      # デプロイ中はASGのヘルスチェックによる置換を止める(#828)。
+      # デプロイは稼働中インスタンス上で down → prune → pull → up を行い、
+      # アプリが数分間停止する。インスタンスは既に InService なので
+      # health_check_grace_period は効かず、ALB は30秒で unhealthy と判定する。
+      # 止めないとデプロイ中にインスタンスが置換され、デプロイ自体が壊れる。
+      - name: Suspend ASG health check replacement
+        run: |
+          aws autoscaling suspend-processes \
+            --auto-scaling-group-name "${PROJECT_NAME}-app" \
+            --scaling-processes ReplaceUnhealthy
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -281,6 +292,15 @@ jobs:
           aws ec2 revoke-security-group-ingress \
             --group-id ${{ steps.instance.outputs.sg_id }} \
             --protocol tcp --port 22 --cidr "${{ env.runner_ip }}/32" || true
+
+      # 失敗しても必ず戻す。停止したままだと、以後アプリが落ちても
+      # ASGが置換しなくなり ELB ヘルスチェックにした意味が無くなる。
+      - name: Resume ASG health check replacement
+        if: always()
+        run: |
+          aws autoscaling resume-processes \
+            --auto-scaling-group-name "${PROJECT_NAME}-app" \
+            --scaling-processes ReplaceUnhealthy || true
 
   deploy-staging-smoke:
     needs: deploy-staging
