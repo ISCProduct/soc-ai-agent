@@ -193,7 +193,54 @@ services:
     networks:
       - soc-ai-network
 
+  # ローカル音声スタックの検証用(#1209)。既定では起動しない。
+  #   docker compose --profile local-voice up -d
+  #
+  # macOS の Docker は Apple Silicon の GPU(Metal) にアクセスできないため、
+  # ここでの実測は CPU のみ。GPU が無い本番(ECS Fargate)に近い条件になる。
+  local-voice-stt:
+    build:
+      context: ./docker/local-voice
+      dockerfile: Dockerfile
+    container_name: soc-ai-local-voice-stt
+    profiles:
+      - local-voice
+    volumes:
+      - local_voice_models:/work/models
+      - ./docker/local-voice/work:/work/voice
+    networks:
+      - soc-ai-network
+
+  # ローカルLLM。qwen2.5:3b(2.2GB)を想定。8B級はDocker VMのメモリに載らない。
+  local-voice-llm:
+    image: ollama/ollama:latest
+    container_name: soc-ai-local-voice-llm
+    profiles:
+      - local-voice
+    ports:
+      - "${OLLAMA_PORT:-11435}:11434"
+    volumes:
+      - local_voice_ollama:/root/.ollama
+    networks:
+      - soc-ai-network
+
+  # 日本語TTS。macOSの say はコンテナに持ち込めないため、
+  # コンテナ構成では VOICEVOX を使う。
+  local-voice-tts:
+    image: voicevox/voicevox_engine:cpu-latest
+    container_name: soc-ai-local-voice-tts
+    profiles:
+      - local-voice
+    ports:
+      - "${VOICEVOX_PORT:-50021}:50021"
+    networks:
+      - soc-ai-network
+
 volumes:
+  local_voice_models:
+    driver: local
+  local_voice_ollama:
+    driver: local
   mysql_data:
     driver: local
   rag_data:
