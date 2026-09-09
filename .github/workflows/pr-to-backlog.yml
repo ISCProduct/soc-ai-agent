@@ -74,7 +74,10 @@ jobs:
           import os, sys, json, re, urllib.request
 
           sys.path.insert(0, ".github/scripts")
-          from backlog_client import load_backlog_env, resolve_bl_base, bl_request as _bl_request
+          from backlog_client import (
+              load_backlog_env, resolve_bl_base, advance_issue_status,
+              bl_request as _bl_request,
+          )
 
           API_KEY, SPACE_ID, PROJ_KEY, DOMAIN = load_backlog_env()
           PR_NUMBER = os.environ.get('PR_NUMBER', '')
@@ -195,36 +198,60 @@ jobs:
                   return 4, name
               return False, name
 
+          def update_merge_status(bl_key, status_id, status_name, *, pr_url_section=None):
+              """マージ時のステータス更新。既に先へ進んでいる課題は後退させない。
+
+              マージ同期は resolve_bl_keys_from_commits でコミット範囲から
+              過去の課題キーまで拾う。順序を見ずにマージ先ブランチのステータスを
+              当てると、develop へマージするたびに本番反映済み(完了)の課題まで
+              「ステージング環境反映」へ引き戻される
+              （SOCAIAGENT-289 が2回、SOCAIAGENT-311 が1回巻き戻された）。
+
+              戻り値: "updated" / "skipped" / "failed"
+              """
+              result = advance_issue_status(BL_BASE, API_KEY, bl_key, status_id, status_name,
+                                            request=bl_request)
+              if result == "updated" and pr_url_section:
+                  append_pr_url(bl_key, pr_url_section)
+              return result
+
+          def append_pr_url(bl_key, pr_url_section):
+              """説明欄への PR URL 追記。失敗してもステータス更新は守る。"""
+              try:
+                  issue = bl_request('GET', f"/issues/{bl_key}")
+                  if not issue:
+                      return
+                  current_desc = issue.get('description') or ''
+                  pr_pattern = r'\n*## GitHub PR\n[^\n]*'
+                  if re.search(pr_pattern, current_desc):
+                      new_desc = re.sub(pr_pattern, pr_url_section, current_desc)
+                  else:
+                      new_desc = current_desc.rstrip() + pr_url_section
+                  # 変化が無いなら PATCH しない(無変更更新は Backlog に拒否されうる)
+                  if new_desc.strip() and new_desc != current_desc:
+                      if bl_request('PATCH', f"/issues/{bl_key}", {'description': new_desc}) is None:
+                          print(f"警告: {bl_key} の説明欄への PR URL 追記に失敗しました"
+                                "(ステータス更新は成功しています)", file=sys.stderr)
+              except Exception as e:
+                  print(f"警告: {bl_key} の説明欄更新で例外: {e}"
+                        "(ステータス更新は成功しています)", file=sys.stderr)
+
           def update_backlog_status(bl_key, status_id, *, pr_url_section=None):
-              """ステータスを更新する。PR URL の追記は任意で、失敗してもステータス更新は守る。
+              """ステータスを無条件で更新する（PRオープン時の「処理中」、
+              非マージクローズ時の「未対応」）。どちらもそのPRの課題1件に対する
+              明示的な操作なので、後退も意図どおりとして許す。
+
+              PR URL の追記は任意で、失敗してもステータス更新は守る。
 
               以前は statusId と description を1回の PATCH でまとめて送っていたため、
               description 側が Backlog に拒否されるとステータス更新まで巻き添えで失われた
               (実際に SOCAIAGENT-286 が `No comment content.` (code 7) で更新されなかった)。
               ステータス更新を先に確定させ、説明欄の追記は後続の任意処理として分離する。
               """
-              result = bl_request('PATCH', f"/issues/{bl_key}", {'statusId': status_id})
-              if result is None:
+              if bl_request('PATCH', f"/issues/{bl_key}", {'statusId': status_id}) is None:
                   return False
-
               if pr_url_section:
-                  try:
-                      issue = bl_request('GET', f"/issues/{bl_key}")
-                      if issue:
-                          current_desc = issue.get('description') or ''
-                          pr_pattern = r'\n*## GitHub PR\n[^\n]*'
-                          if re.search(pr_pattern, current_desc):
-                              new_desc = re.sub(pr_pattern, pr_url_section, current_desc)
-                          else:
-                              new_desc = current_desc.rstrip() + pr_url_section
-                          # 変化が無いなら PATCH しない(無変更更新は Backlog に拒否されうる)
-                          if new_desc.strip() and new_desc != current_desc:
-                              if bl_request('PATCH', f"/issues/{bl_key}", {'description': new_desc}) is None:
-                                  print(f"警告: {bl_key} の説明欄への PR URL 追記に失敗しました"
-                                        "(ステータス更新は成功しています)", file=sys.stderr)
-                  except Exception as e:
-                      print(f"警告: {bl_key} の説明欄更新で例外: {e}"
-                            "(ステータス更新は成功しています)", file=sys.stderr)
+                  append_pr_url(bl_key, pr_url_section)
               return True
 
           if not PR_NUMBER:
@@ -286,7 +313,8 @@ jobs:
           print(f"検出した Backlog 課題キー: {', '.join(sorted(keys))}")
           pr_section = f'\n\n## GitHub PR\n{PR_URL}'
           for key in sorted(keys):
-              ok = update_backlog_status(key, status_id, pr_url_section=pr_section if key == own_key else None)
-              if ok:
+              result = update_merge_status(key, status_id, status_name,
+                                           pr_url_section=pr_section if key == own_key else None)
+              if result == "updated":
                   print(f"Backlog 課題を更新しました: {key} (ステータス: {status_name})")
           PYEOF

@@ -167,6 +167,68 @@ def load_backlog_env() -> tuple[str, str, str, str]:
     return api_key, space_id, proj_key, domain
 
 
+# マージ同期が課題を「前へ進めるだけ」にするための順序。
+#
+# マージ同期はPRのコミット範囲から過去の課題キーまで拾うため、順序を見ずに
+# マージ先ブランチのステータスを当てると、develop へマージするたびに
+# 本番反映済み(完了)の課題まで「ステージング環境反映」へ引き戻される。
+# 実際に SOCAIAGENT-289 が2回、SOCAIAGENT-311 が1回巻き戻された。
+#
+# 「保留」は流れの外だが、マージが起きた＝作業が再開したとみなして
+# 未対応と同じ位置に置き、前進を許す。
+MERGE_STATUS_ORDER = (
+    "未対応",
+    "保留",
+    "処理中",
+    "PR確認待ち",
+    "処理済み",
+    "ステージング環境反映",
+    "リリース待ち",
+    "完了",
+)
+
+
+def is_status_advance(current_name: str, target_name: str) -> bool:
+    """target が current より後（前進）なら True。
+
+    どちらかが順序表に無い（プロジェクト固有のステータスが増えた等）場合は
+    判断できないので True を返し、従来どおり更新する。
+    順序を知らないという理由で同期が止まる方が困るため。
+    """
+    order = {name: i for i, name in enumerate(MERGE_STATUS_ORDER)}
+    current = order.get((current_name or "").strip())
+    target = order.get((target_name or "").strip())
+    if current is None or target is None:
+        return True
+    return target > current
+
+
+def advance_issue_status(
+    base: str,
+    api_key: str,
+    issue_key: str,
+    status_id: int,
+    status_name: str,
+    request=None,
+) -> str:
+    """マージ同期用のステータス更新。後退させない。
+
+    戻り値: "updated" / "skipped"（前進でない）/ "failed"。
+    request はテスト用の差し替え口（省略時は bl_request）。
+    """
+    call = request or (lambda method, path, data=None: bl_request(base, api_key, method, path, data, fatal=False))
+
+    issue = call("GET", f"/issues/{issue_key}")
+    current_name = ((issue or {}).get("status") or {}).get("name", "")
+    if current_name and not is_status_advance(current_name, status_name):
+        print(f"{issue_key}: 既に '{current_name}' のため '{status_name}' へは戻さない")
+        return "skipped"
+
+    if call("PATCH", f"/issues/{issue_key}", {"statusId": status_id}) is None:
+        return "failed"
+    return "updated"
+
+
 def set_issue_status(base: str, api_key: str, issue_key: str, status_id: int) -> bool:
     """課題のステータスを更新する。既に同じステータスなら何もしない。
 
@@ -214,6 +276,62 @@ if __name__ == "__main__":
     calls.clear()
     assert set_issue_status("b", "k", "X-1", 4) is True, "違うステータスなら更新する"
     assert ("PATCH", "/issues/X-1", {"statusId": 4}) in calls, f"PATCH が無い: {calls}"
+
+    # --- 前進のみガード ---
+    # 実際に起きた巻き戻しをそのままケースにする
+    assert not is_status_advance("完了", "ステージング環境反映"), "SOCAIAGENT-289/311 の巻き戻し"
+    assert not is_status_advance("リリース待ち", "ステージング環境反映")
+    assert not is_status_advance("完了", "リリース待ち")
+    assert not is_status_advance("完了", "完了"), "同じステータスは前進ではない"
+    # 正常な前進は通す
+    assert is_status_advance("処理中", "ステージング環境反映")
+    assert is_status_advance("ステージング環境反映", "リリース待ち")
+    assert is_status_advance("リリース待ち", "完了")
+    assert is_status_advance("未対応", "完了")
+    assert is_status_advance("保留", "ステージング環境反映"), "保留はマージで再開したとみなす"
+    # 判断できないときは従来どおり更新する（順序を知らないだけで同期を止めない）
+    assert is_status_advance("知らないステータス", "完了")
+    assert is_status_advance("完了", "知らないステータス")
+    assert is_status_advance("", "完了")
+
+    # advance_issue_status: 後退は PATCH を送らない
+    sent: list[tuple] = []
+
+    def _req(current):
+        def call(method, path, data=None):
+            sent.append((method, path, data))
+            if method == "GET":
+                return {"status": {"name": current}}
+            return {}
+        return call
+
+    sent.clear()
+    assert advance_issue_status("b", "k", "X-1", 4, "ステージング環境反映", request=_req("完了")) == "skipped"
+    assert all(m == "GET" for m, _, _ in sent), f"後退時に PATCH を送っている: {sent}"
+
+    sent.clear()
+    assert advance_issue_status("b", "k", "X-1", 4, "完了", request=_req("リリース待ち")) == "updated"
+    assert ("PATCH", "/issues/X-1", {"statusId": 4}) in sent, f"前進時に PATCH が無い: {sent}"
+
+    # 現在ステータスを取得できないときは従来どおり更新する。
+    # 取得失敗を理由に同期が止まる方が困る。
+    sent.clear()
+
+    def _req_get_failed(method, path, data=None):
+        sent.append((method, path, data))
+        return None if method == "GET" else {}
+
+    assert advance_issue_status("b", "k", "X-1", 4, "完了", request=_req_get_failed) == "updated"
+    assert ("PATCH", "/issues/X-1", {"statusId": 4}) in sent, f"取得失敗時に PATCH が無い: {sent}"
+
+    # PATCH が失敗したら failed を返す（成功したことにしない）
+    sent.clear()
+
+    def _req_patch_failed(method, path, data=None):
+        sent.append((method, path, data))
+        return {"status": {"name": "リリース待ち"}} if method == "GET" else None
+
+    assert advance_issue_status("b", "k", "X-1", 4, "完了", request=_req_patch_failed) == "failed"
 
     globals()["bl_request"] = _orig
     assert normalize_space_id("https://myspace.backlog.jp") == "myspace"
