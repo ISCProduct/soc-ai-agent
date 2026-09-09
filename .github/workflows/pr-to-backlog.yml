@@ -76,6 +76,7 @@ jobs:
           sys.path.insert(0, ".github/scripts")
           from backlog_client import (
               load_backlog_env, resolve_bl_base, advance_issue_status,
+              set_issue_status_unless_same,
               bl_request as _bl_request,
           )
 
@@ -237,19 +238,27 @@ jobs:
                         "(ステータス更新は成功しています)", file=sys.stderr)
 
           def update_backlog_status(bl_key, status_id, *, pr_url_section=None):
-              """ステータスを無条件で更新する（PRオープン時の「処理中」、
-              非マージクローズ時の「未対応」）。どちらもそのPRの課題1件に対する
-              明示的な操作なので、後退も意図どおりとして許す。
+              """PRオープン時の「処理中」、非マージクローズ時の「未対応」への更新。
+
+              どちらもそのPRの課題1件に対する明示的な操作なので、後退も意図どおりとして許す
+              （コミット範囲から拾った過去の課題を守る update_merge_status とは意図が違う）。
+
+              ただし**既に同じステータスなら PATCH しない**。Backlog は無変更の PATCH を
+              400 `No comment content.` (code 7) で拒否するため、無条件に投げていた頃は
+              PR を更新するたびに失敗扱いになり、PR URL の追記まで巻き添えでスキップされた
+              （SOCAIAGENT-153 で実際に発生）。
 
               PR URL の追記は任意で、失敗してもステータス更新は守る。
-
-              以前は statusId と description を1回の PATCH でまとめて送っていたため、
-              description 側が Backlog に拒否されるとステータス更新まで巻き添えで失われた
-              (実際に SOCAIAGENT-286 が `No comment content.` (code 7) で更新されなかった)。
-              ステータス更新を先に確定させ、説明欄の追記は後続の任意処理として分離する。
+              statusId と description を1回の PATCH でまとめて送ると、description 側が
+              拒否されたときにステータス更新まで失われるため分離している
+              （SOCAIAGENT-286 が同じ code 7 で更新されなかった）。
               """
-              if bl_request('PATCH', f"/issues/{bl_key}", {'statusId': status_id}) is None:
+              result = set_issue_status_unless_same(BL_BASE, API_KEY, bl_key, status_id,
+                                                    request=bl_request)
+              if result == "failed":
                   return False
+              # skipped でも PR URL の追記は行う。ステータスが既に正しいことと、
+              # 説明欄に PR URL が載っていることは別の話。
               if pr_url_section:
                   append_pr_url(bl_key, pr_url_section)
               return True
