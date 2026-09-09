@@ -26,11 +26,7 @@ import (
 // ただし mini は実行ごとのばらつきが大きく、補助語があっても
 // 高精度モデルの安定性には届かない。
 func (cli *Client) TranscribeWithHints(ctx context.Context, audio []byte, filename, hints string) (string, error) {
-	model := os.Getenv("OPENAI_WHISPER_MODEL")
-	if model == "" {
-		model = defaultTranscribeModel
-	}
-	return cli.TranscribeWithModel(ctx, audio, filename, hints, model)
+	return cli.TranscribeWithModel(ctx, audio, filename, hints, resolveTranscribeModel())
 }
 
 // TranscribeWithModel はモデルを明示して文字起こしする（音声R&D Task 5）。
@@ -93,6 +89,18 @@ func (cli *Client) TranscribeWithModel(ctx context.Context, audio []byte, filena
 	return out.Text, nil
 }
 
-// defaultTranscribeModel は Transcribe と同じ既定値にすること。
+// DefaultTranscribeModel は STT の既定モデル。
 // ずれると補助語ありと無しで別モデルが使われ、比較が成立しない。
-const defaultTranscribeModel = "gpt-4o-mini-transcribe"
+const DefaultTranscribeModel = "gpt-4o-mini-transcribe"
+
+// resolveTranscribeModel は環境変数を見て使用するSTTモデルを決める。
+//
+// Transcribe と TranscribeWithHints が別々に既定値を持っていた頃は、
+// 片方だけ変えても誰も気づかず、ログに出るモデル名と実際に叩くモデルが
+// 食い違いうる状態だった。解決はここ1箇所に集約する。
+func resolveTranscribeModel() string {
+	if m := os.Getenv("OPENAI_WHISPER_MODEL"); m != "" {
+		return m
+	}
+	return DefaultTranscribeModel
+}

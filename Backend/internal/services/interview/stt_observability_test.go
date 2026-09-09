@@ -69,10 +69,15 @@ func TestObserveTranscribe_RecordsFailure(t *testing.T) {
 
 // ログ上のモデル名が実際に使われるモデルとずれると、
 // 費用と品質の突き合わせができなくなる。
+//
+// あえてリテラルで固定する。openai パッケージの定数と比較すると
+// 「同じ変数を両側から見るだけ」になり、既定値が変わっても落ちない。
+// 実際にその名前がリクエストへ乗ることは
+// openai.TestTranscribeWithHints_OmitsEmptyPrompt が固定している。
 func TestSTTModelName(t *testing.T) {
 	t.Setenv("OPENAI_WHISPER_MODEL", "")
-	if got := STTModelName(); got != defaultWhisperModel {
-		t.Errorf("既定 = %q, want %q", got, defaultWhisperModel)
+	if got := STTModelName(); got != "gpt-4o-mini-transcribe" {
+		t.Errorf("既定 = %q, want gpt-4o-mini-transcribe", got)
 	}
 	t.Setenv("OPENAI_WHISPER_MODEL", "gpt-4o-transcribe")
 	if got := STTModelName(); got != "gpt-4o-transcribe" {
