@@ -112,6 +112,11 @@ jobs:
       - name: 本番 uptime 判定のテスト
         run: ./automation/test/prod-uptime-decision-test.sh
 
+      # 本番反映済み issue の解決ロジック。
+      # 誤検出すると無関係な issue を閉じ、取りこぼすと開いたまま溜まる。
+      - name: デプロイ済み issue 解決の自己チェック
+        run: python3 .github/scripts/resolve_deployed_issues.py
+
       # リポジトリのファイルを読むワークフローに checkout があること。
       # schedule で動くワークフローは誰も結果を見ないため、壊れても気づけない。
       - name: ワークフローの checkout 漏れ検査
