@@ -69,3 +69,17 @@ func (s *StudentIndexSyncer) delete(ctx context.Context, userID uint) {
 		log.Printf("[WARN] student vector delete failed user_id=%d: %v", userID, err)
 	}
 }
+
+// EnsureDeleted はベクトルを削除し、結果を呼び出し元へ返す（#1204）。
+//
+// Sync はRAG障害で退会処理を巻き添えにしないためエラーを飲むが、
+// そのぶん「削除できなかった」ことが誰にも伝わらない。
+// 退会済みユーザーの取りこぼしを日次で回収する経路では成否が要るので分けている。
+//
+// 削除は冪等なので、既に消えているユーザーに対して繰り返し呼んでよい。
+func (s *StudentIndexSyncer) EnsureDeleted(ctx context.Context, userID uint) error {
+	if s == nil || s.indexer == nil {
+		return nil
+	}
+	return s.indexer.Delete(ctx, userID)
+}

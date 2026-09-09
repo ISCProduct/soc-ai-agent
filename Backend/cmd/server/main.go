@@ -551,6 +551,16 @@ func main() {
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()
 		run := func() {
+			// 退会時のベクトル削除はRAG障害でも退会を失敗させないためエラーを飲む。
+			// 取りこぼしをここで消し直す(#1204)。パージより先に実行して、
+			// 30日待たずに個人データを消す。
+			if attempted, failed, err := userDeletionService.ReconcileScoutIndex(context.Background()); err != nil {
+				slog.Error("scout index reconcile failed", "error", err)
+			} else if failed > 0 {
+				// 残り続けると気づけないので、0件になるまで毎回出す
+				slog.Warn("scout index reconcile incomplete", "attempted", attempted, "failed", failed)
+			}
+
 			n, err := userDeletionService.PurgeExpiredWithdrawals(time.Now().UTC())
 			if err != nil {
 				slog.Error("purge expired withdrawals failed", "error", err)
