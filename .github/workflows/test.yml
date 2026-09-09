@@ -117,6 +117,11 @@ jobs:
       - name: デプロイ済み issue 解決の自己チェック
         run: python3 .github/scripts/resolve_deployed_issues.py
 
+      # Dependabot のPRで必ず失敗するワークフローが無いこと。
+      # Dependabot 起因の実行には通常の secrets が渡らない（GitHubの仕様）。
+      - name: Dependabot 互換性の検査
+        run: ./automation/test/dependabot-workflow-test.sh
+
       # リポジトリのファイルを読むワークフローに checkout があること。
       # schedule で動くワークフローは誰も結果を見ないため、壊れても気づけない。
       - name: ワークフローの checkout 漏れ検査

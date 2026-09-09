@@ -51,6 +51,13 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    # Dependabot のPRには Backlog 課題キーが無く、
+    # かつ Dependabot 起因の実行には通常の secrets が渡らないため
+    # 「BACKLOG_API_KEY が未設定または空です」で必ず失敗する（GitHubの仕様）。
+    # 同期する課題がそもそも無いのでスキップする。
+    # workflow_dispatch（手動リカバリ）は actor が人間なので影響しない。
+    if: github.actor != 'dependabot[bot]'
+
     permissions:
       contents: read
       issues: read
