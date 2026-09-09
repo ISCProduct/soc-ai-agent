@@ -19,6 +19,12 @@ on:
 jobs:
   notify:
     runs-on: ubuntu-latest
+    # Dependabot のPRには Backlog 課題キーが無く、
+    # かつ Dependabot 起因の実行には通常の secrets が渡らないため
+    # 「Input required and not supplied: project_key」で必ず失敗する（GitHubの仕様）。
+    # 通知する対象がそもそも無いのでスキップする。
+    if: github.actor != 'dependabot[bot]'
+
     steps:
       - name: Backlog ホスト名を解決
         id: resolve
