@@ -7025,9 +7025,18 @@ frontend/CLAUDE.md
 # Playwright の実行結果（生成物）。追跡すると毎回差分が出る
 frontend/test-results/
 
-# 音声認識の調査用データ（音声ファイルを含む）。
-# CLAUDE_HANDOFF.md 自身が「調査用ディレクトリはスコープ外」としている
-docs/research/interview-audio-eval/
+# 調査・検証用のディレクトリ。音声などの大きなファイルや
+# 生データ、他セッション向けの作業指示が入るため追跡しない。
+# 設計の正本（docs/wiki, docs/design, docs/requirements, docs/architecture）は
+# 追跡対象なので、ここに置かないこと。
+#
+# ただし RESULTS_*.md は例外として追跡する。
+# 設計書・要件定義書がこれらを判断の根拠として参照しており
+# （例: interview-voice-architecture.md → RESULTS_fallback.md）、
+# 追跡から外すとリンク先が存在しなくなる。
+docs/research/**
+!docs/research/**/
+!docs/research/**/RESULTS_*.md
 
 # 各セッションの作業メモ
 /tasks/
