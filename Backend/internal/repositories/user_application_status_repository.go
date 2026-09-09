@@ -163,3 +163,50 @@ func (r *UserApplicationStatusRepository) GetGlobalCorrelation() ([]map[string]a
 	}
 	return result, nil
 }
+
+// LowMatchApplication は「マッチ度が低いのに応募中」の1件（#1028）。
+type LowMatchApplication struct {
+	UserID      uint    `json:"-"`
+	CompanyName string  `json:"company_name"`
+	MatchScore  float64 `json:"match_score"`
+	Status      string  `json:"status"`
+}
+
+// 進行中とみなさない応募ステータス。
+// 終了済みの応募まで拾うと「今フォローすべき生徒」が埋もれる。
+var terminalApplicationStatuses = []string{"withdrawn", "rejected", "not_applied"}
+
+// FindLowMatchApplicationsByUsers は複数生徒の「低マッチのまま進行中の応募」を1クエリで返す（#1028）。
+//
+// 教員向け一覧は担当生徒ぶん繰り返し引くため、生徒ごとに問い合わせると
+// 即 N+1 になる（FindLatestScoresByUsers と同じ理由）。
+//
+// threshold 未満のみを対象とし、境界値ちょうどは含めない
+// （学生側の needsLowMatchConfirm と揃える。片方だけ <= にすると
+// 「学生には確認が出ないのに教員一覧には出る」という食い違いが起きる）。
+func (r *UserApplicationStatusRepository) FindLowMatchApplicationsByUsers(
+	userIDs []uint, threshold float64,
+) (map[uint][]LowMatchApplication, error) {
+	result := map[uint][]LowMatchApplication{}
+	if len(userIDs) == 0 {
+		return result, nil
+	}
+
+	var rows []LowMatchApplication
+	err := r.db.Table("user_application_statuses AS a").
+		Select("a.user_id AS user_id, c.name AS company_name, m.match_score AS match_score, a.status AS status").
+		Joins("JOIN user_company_matches m ON m.id = a.match_id").
+		Joins("JOIN companies c ON c.id = a.company_id").
+		Where("a.user_id IN ?", userIDs).
+		Where("a.status NOT IN ?", terminalApplicationStatuses).
+		Where("m.match_score < ?", threshold).
+		Order("m.match_score ASC, a.id ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.UserID] = append(result[row.UserID], row)
+	}
+	return result, nil
+}

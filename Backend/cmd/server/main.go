@@ -518,6 +518,8 @@ func main() {
 	routes.SetupCompanyRoutes(api, relationController)
 	industryWeightProfileRepo := repositories.NewIndustryWeightProfileRepository(db)
 	teacherInsightService := teacher.NewStudentInsightService(userRepo, userWeightScoreRepo, industryRepo, industryWeightProfileRepo)
+	// 低マッチのまま進行中の応募を教員一覧に出す（#1028）
+	teacherInsightService.SetLowMatchReader(appStatusRepo)
 	teacherInsightController := controllers.NewTeacherStudentInsightController(teacherInsightService)
 	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, userRepo, schoolService, cfg.AdminSecret)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
