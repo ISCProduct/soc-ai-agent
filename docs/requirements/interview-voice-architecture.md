@@ -174,7 +174,7 @@ AI面接の音声基盤について、**Realtime API 実装を有効化するか
 | --- | --- | --- |
 | 案の選択 | A / B のいずれか | プロダクト判断 |
 | B 採用時のモデル | `gpt-realtime-mini` か `gpt-realtime`（約3倍） | 実際に聞いて判断 |
-| STT モデル | `gpt-4o-mini-transcribe` を既定値として採用 | 単価は半額。**合成音声で検証済み**（`docs/research/interview-audio-eval/RESULTS_stt_hints.md`）で、CER・固有名詞正解率に差は出なかった。ただし **mini は「御社」を8/8で「本社」と誤認する**ため、この語を検知して高精度モデルへ再送するフォールバックを併用する。実発話の精度と再送率は未測定で、問題が出たら `OPENAI_WHISPER_MODEL=gpt-4o-transcribe` に戻す。**ただし本番・ステージングのタスク定義にこの環境変数が無く、戻す経路が未整備**（詳細は Design Doc） |
+| STT モデル | `gpt-4o-mini-transcribe` を既定値として採用 | 単価は半額。**合成音声で検証済み**（`docs/research/interview-audio-eval/RESULTS_stt_hints.md`）で、CER・固有名詞正解率に差は出なかった。ただし **mini は「御社」を8/8で「本社」と誤認する**ため、この語を検知して高精度モデルへ再送するフォールバックを併用する。実発話の精度と再送率は未測定で、問題が出たら `OPENAI_WHISPER_MODEL=gpt-4o-transcribe` に戻す。戻すときは `terraform.tfvars` の `openai_whisper_model` を変更して apply する |
 | 既存 Realtime 実装の扱い | A 採用時、削除するか凍結して残すか | 本書は削除を推奨 |
 
 ## 10. 参照

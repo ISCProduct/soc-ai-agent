@@ -297,6 +297,7 @@ resource "aws_launch_template" "app" {
     frontend_domain          = local.frontend_domain
     user_secret              = random_password.user_secret.result
     admin_secret             = var.admin_secret_plain
+    openai_whisper_model     = var.openai_whisper_model
     discord_public_key       = var.discord_public_key
     discord_allowed_role_id  = var.discord_allowed_role_id
     github_dispatch_token    = var.github_dispatch_token
