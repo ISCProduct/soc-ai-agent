@@ -136,15 +136,38 @@ DISCORD_BOT_TOKEN=<Botトークン> DISCORD_APPLICATION_ID=<Application ID> \
 
 失敗した場合は Discord が返した理由（401 / 403 / 404 など）がそのまま表示される。
 
+### 現在の設定（2026-09-10 実測）
+
+```
+Application ID: 1538848654440407060
+install_params: {"scopes": ["applications.commands"], "permissions": "0"}
+登録済み: /prod-uptime  /prod-uptime-list  /prod
+```
+
+Interactions Endpoint URL は設定済みで、Backend が PING に応答できている
+（＝署名検証まで動作している）。
+
 ### コマンドが Discord に出てこないとき
 
 登録が成功しても表示されないことがある。上から順に確認する。
 
-1. **Bot に `applications.commands` スコープが無い**
-   OAuth2 > URL Generator で scopes に `bot` と `applications.commands` の
-   **両方**を選んで招待URLを作り直す。`bot` だけだと登録は成功するのに
-   サーバーにコマンドが出ない。
-2. **Interactions Endpoint URL が未設定**
+1. **`/prod` は既定では誰にも表示されない**（最も多い原因）
+   `/prod` は `default_member_permissions: "0"` で登録される。これは
+   「既定では誰も実行できない」という意味で、**事故防止のための意図した設定**。
+   Discordの **サーバー設定 > 連携サービス > 該当アプリ > `/prod`** から
+   実行を許可するロール／メンバーを追加するまで、誰のコマンド一覧にも出ない。
+
+   `/prod-uptime` と `/prod-uptime-list` には権限制限が無いので、
+   **この2つが出て `/prod` だけ出ないなら、原因はこれ。**
+
+2. **`applications.commands` スコープが無い**
+   OAuth2 > URL Generator の scopes に `applications.commands` が必要。
+   これが無いと登録は成功してもサーバーにコマンドが出ない。
+
+   なお **`bot` スコープは不要**。本構成は Interactions Endpoint（HTTP POST）
+   方式なので、Botがサーバーのメンバーになる必要はない。
+   `GET /users/@me/guilds` が0件でも異常ではない（2026-09-10 実測）。
+3. **Interactions Endpoint URL が未設定**
    General Information > Interactions Endpoint URL に
    `https://api-stg.shukatsu-ai.jp/api/discord/interactions` を設定して保存する。
    保存時にDiscordがPINGを送るので、応答できないと保存自体が失敗する。
@@ -155,11 +178,7 @@ DISCORD_BOT_TOKEN=<Botトークン> DISCORD_APPLICATION_ID=<Application ID> \
      https://api-stg.shukatsu-ai.jp/api/discord/interactions \
      -H 'Content-Type: application/json' -d '{"type":1}'
    ```
-3. **`/prod` の権限が誰にも付いていない**
-   `/prod` は `default_member_permissions: "0"` で登録される。
-   サーバー管理者が サーバー設定 > 連携サービス > 該当アプリ から
-   実行できるロールを明示的に許可するまで、一般メンバーには表示されない。
-   これは事故防止のための既定であり、意図した挙動。
+
 
 ## 6. SSM Parameter Store 読み書き権限
 
