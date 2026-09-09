@@ -75,12 +75,17 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		return err
 	}
 	if len(utterances) == 0 {
-		// utterances が0件の場合は空レポートを保存して正常終了
+		// utterances が0件の場合は空レポートを保存して正常終了。
+		//
+		// スコアは書かない。以前は全項目0点を書いていたが、
+		// 「発話が無い」ことと「全項目が最低評価」は違う。
+		// 0点は画面に最低評価として表示され、学生を誤解させる
+		// （docs/wiki/scoring.md §2-3 と同じ理由）。
 		empty := &models.InterviewReport{
 			SessionID:         sessionID,
 			SummaryText:       "発話データがありませんでした。",
-			ScoresJSON:        `{"logic":0,"specificity":0,"ownership":0,"communication":0,"enthusiasm":0}`,
-			EvidenceJSON:      `{}`,
+			ScoresJSON:        "",
+			EvidenceJSON:      "",
 			StrengthsJSON:     `[]`,
 			ImprovementsJSON:  `[]`,
 			TeacherReportJSON: `{}`,
@@ -126,26 +131,41 @@ Interview transcript:
 	model := shared.GetEnv("INTERVIEW_REPORT_MODEL", "")
 	// スキーマ違反は弾いて1度だけ作り直す（#795）。
 	var payload reportPayload
+	var haveBody bool
 	var lastErr error
 	for attempt := range reportGenerationAttempts {
 		raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 2000, model)
 		if err != nil {
 			return err
 		}
-		payload, lastErr = parseReportPayload(raw)
-		if lastErr == nil {
+		candidate, parseErr := parseReportJSON(raw)
+		if parseErr != nil {
+			lastErr = parseErr
+			log.Printf("[Interview] report json broken (session %d, attempt %d/%d): %v",
+				sessionID, attempt+1, reportGenerationAttempts, lastErr)
+			continue
+		}
+		// 本文は読めた。以降は最低限これを保存できる
+		payload, haveBody = candidate, true
+		if lastErr = ValidateRubricScores(candidate.Scores); lastErr == nil {
 			break
 		}
-		log.Printf("[Interview] report schema violation (session %d, attempt %d/%d): %v",
+		log.Printf("[Interview] report scores invalid (session %d, attempt %d/%d): %v",
 			sessionID, attempt+1, reportGenerationAttempts, lastErr)
 	}
+	payload, err = finalizeReportPayload(payload, haveBody, lastErr)
+	if err != nil {
+		return err
+	}
 	if lastErr != nil {
-		// 粗いスコアを書くより書かない方が安全。レポートは保存しない
-		return lastErr
+		log.Printf("[Interview] report saved without scores (session %d): %v", sessionID, lastErr)
 	}
 
-	scoresJSON, _ := json.Marshal(payload.Scores)
-	evidenceJSON, _ := json.Marshal(payload.Evidence)
+	// スコアを捨てた場合は空文字にする。json.Marshal(nil map) は "null" を返すが、
+	// それだと UpdateScoresFromInterviewReport の ScoresJSON == "" 早期リターンに
+	// 乗らず、スコア反映へ進んでしまう。
+	scoresJSON := marshalOrEmpty(payload.Scores)
+	evidenceJSON := marshalOrEmpty(payload.Evidence)
 	strengthsJSON, _ := json.Marshal(payload.Strengths)
 	improvementsJSON, _ := json.Marshal(payload.Improvements)
 	teacherJSON := []byte("{}")
@@ -164,8 +184,8 @@ Interview transcript:
 	report := &models.InterviewReport{
 		SessionID:         sessionID,
 		SummaryText:       payload.Summary,
-		ScoresJSON:        string(scoresJSON),
-		EvidenceJSON:      string(evidenceJSON),
+		ScoresJSON:        scoresJSON,
+		EvidenceJSON:      evidenceJSON,
 		StrengthsJSON:     string(strengthsJSON),
 		ImprovementsJSON:  string(improvementsJSON),
 		TeacherReportJSON: string(teacherJSON),
@@ -279,18 +299,75 @@ type reportPayload struct {
 	Teacher      *teacherReport    `json:"teacher"`
 }
 
-// parseReportPayload は LLM 出力を読み、ルーブリックに従うかを検証する（#795）。
+// parseReportJSON は LLM 出力を reportPayload として読む。
+// スコアの妥当性はここでは見ない（ValidateRubricScores が別に見る）。
 //
-// JSON として読めても、スコアが値域外だったり項目が欠けていれば弾く。
-// 誤ったスコアは user_weight_scores 経由でマッチングと教員向け傾向分析の
-// 両方に静かに混ざり、後から区別できない（docs/wiki/scoring.md §2-3）。
-func parseReportPayload(raw string) (reportPayload, error) {
+// 分けているのは、**JSONすら読めない**のと**本文は読めるがスコアだけ不正**とで
+// 取るべき対応が違うため。前者は何も残せないが、後者は講評を学生へ届けられる。
+func parseReportJSON(raw string) (reportPayload, error) {
 	var payload reportPayload
 	if err := json.Unmarshal([]byte(ExtractJSONObject(raw)), &payload); err != nil {
 		return reportPayload{}, fmt.Errorf("invalid report json: %w", err)
+	}
+	return payload, nil
+}
+
+// parseReportPayload は LLM 出力を読み、ルーブリックに従うかまで検証する（#795）。
+//
+// 誤ったスコアは user_weight_scores 経由でマッチングと教員向け傾向分析の
+// 両方に静かに混ざり、後から区別できない（docs/wiki/scoring.md §2-3）。
+func parseReportPayload(raw string) (reportPayload, error) {
+	payload, err := parseReportJSON(raw)
+	if err != nil {
+		return reportPayload{}, err
 	}
 	if err := ValidateRubricScores(payload.Scores); err != nil {
 		return reportPayload{}, fmt.Errorf("invalid report scores: %w", err)
 	}
 	return payload, nil
+}
+
+// finalizeReportPayload は保存すべきレポートを決める（#795）。
+//
+// haveBody は JSON として読めたか。読めていなければ残せるものが無いので
+// エラーを返す。読めていてスコアだけ不正なら、スコアを捨てて講評は残す。
+func finalizeReportPayload(p reportPayload, haveBody bool, scoreErr error) (reportPayload, error) {
+	if !haveBody {
+		if scoreErr == nil {
+			return reportPayload{}, fmt.Errorf("レポートを生成できなかった")
+		}
+		return reportPayload{}, scoreErr
+	}
+	if scoreErr != nil {
+		return dropInvalidScores(p), nil
+	}
+	return p, nil
+}
+
+// dropInvalidScores はスコアだけを捨てて本文を残す。
+//
+// スコアが不正でも summary / strengths / improvements は学生に有用なので、
+// レポートごと捨てない。空にすることで
+// UpdateScoresFromInterviewReport がスコア反映をスキップし
+// （ScoresJSON == "" で早期リターン）、画面もスコア欄を出さない。
+func dropInvalidScores(p reportPayload) reportPayload {
+	p.Scores = nil
+	p.Evidence = nil
+	return p
+}
+
+// marshalOrEmpty は中身が無ければ空文字を返す。
+//
+// "null" や "{}" を保存すると、スコア反映の早期リターン（ScoresJSON == ""）に
+// 乗らず、画面側も空オブジェクトを truthy と見て平均が NaN になる。
+// 「無い」ことは空文字で表す。
+func marshalOrEmpty[T ~map[string]int | ~map[string]string](m T) string {
+	if len(m) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
