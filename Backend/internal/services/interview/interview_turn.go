@@ -64,9 +64,13 @@ func (s *InterviewService) Turn(
 	if reason := NeedsSTTFallback(userText, err != nil, obs.AudioSeconds); reason != FallbackNone && !FallbackIsRedundant() {
 		// 費用は「再送したか」で決まるので、採用可否ではなくここで記録する
 		obs.FellBack = true
+		// 再送は「取れれば良い」もの。既定の60秒を待つと、そのターンの応答が
+		// STTだけで最悪120秒かかる。面接の体感を優先して短く打ち切る。
+		retryCtx, cancelRetry := context.WithTimeout(ctx, sttFallbackTimeout)
 		retried, retryErr := s.openaiClient.TranscribeWithModel(
-			ctx, audioData, "audio.webm", sttHints, FallbackModel,
+			retryCtx, audioData, "audio.webm", sttHints, FallbackModel,
 		)
+		cancelRetry()
 		// 再送に失敗しても面接は止めない。元の結果のまま続ける
 		applied := ShouldUseFallbackResult(retried, retryErr)
 		if applied {

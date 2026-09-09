@@ -3,6 +3,7 @@ package interview
 import (
 	"regexp"
 	"strings"
+	"time"
 )
 
 // FallbackReason はなぜ高精度モデルへ再送したか。
@@ -93,6 +94,12 @@ func ShouldUseFallbackResult(retried string, retryErr error) bool {
 // 既定モデルが既に高精度なら再送しても意味が無いので、
 // 呼び出し側は SameAsPrimary で判断する。
 const FallbackModel = "gpt-4o-transcribe"
+
+// sttFallbackTimeout は再送の打ち切り時間。
+//
+// 通常のSTTは60秒待つが、再送は元の結果があるうえでの上積みなので、
+// 待つほど面接の体感が悪くなる。打ち切っても元の結果で会話は続く。
+const sttFallbackTimeout = 20 * time.Second
 
 // FallbackIsRedundant は既定モデルが既に再送先と同じかを返す。
 // 同じなら再送しても結果は変わらず、費用だけが倍になる。

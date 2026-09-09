@@ -1,6 +1,7 @@
 package interview
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -137,4 +138,103 @@ func TestRubricKeys_MatchesValidation(t *testing.T) {
 	if err := ValidateRubricScores(scores); err != nil {
 		t.Errorf("プロンプトが求める項目を検証が弾いた: %v", err)
 	}
+}
+
+// スコアだけが不正なとき、講評は学生へ届けつつスコアは捨てる。
+// レポートごと捨てると、面接したのに何も表示されない。
+func TestDropInvalidScores_KeepsBody(t *testing.T) {
+	raw := `{
+  "summary": "落ち着いて回答できていました。",
+  "scores": {"logic": 99, "specificity": 2, "ownership": 4, "communication": 3, "enthusiasm": 4},
+  "evidence": {"logic": "結論から述べていた"},
+  "strengths": ["結論から話せる"],
+  "improvements": ["数値を添える"],
+  "teacher": {"overall_comment": "指導しやすい"}
+}`
+	// JSON としては読める
+	payload, err := parseReportJSON(raw)
+	if err != nil {
+		t.Fatalf("本文が読めない: %v", err)
+	}
+	// スコアは不正
+	if err := ValidateRubricScores(payload.Scores); err == nil {
+		t.Fatal("値域外のスコアを通した")
+	}
+
+	got := dropInvalidScores(payload)
+	if got.Summary == "" || len(got.Strengths) == 0 || len(got.Improvements) == 0 {
+		t.Error("講評まで捨てている")
+	}
+	if got.Teacher == nil {
+		t.Error("教員向けの内容まで捨てている")
+	}
+	if len(got.Scores) != 0 || len(got.Evidence) != 0 {
+		t.Errorf("不正なスコアが残っている: scores=%v evidence=%v", got.Scores, got.Evidence)
+	}
+}
+
+// 空のスコアは "null" や "{}" ではなく空文字で保存する。
+//
+// "null"/"{}" だと UpdateScoresFromInterviewReport の
+// ScoresJSON == "" 早期リターンに乗らずスコア反映へ進み、
+// 画面側も空オブジェクトを truthy と見て平均が NaN になる。
+func TestMarshalOrEmpty(t *testing.T) {
+	if got := marshalOrEmpty(map[string]int(nil)); got != "" {
+		t.Errorf("nil map = %q, want 空文字", got)
+	}
+	if got := marshalOrEmpty(map[string]int{}); got != "" {
+		t.Errorf("空 map = %q, want 空文字", got)
+	}
+	if got := marshalOrEmpty(map[string]string(nil)); got != "" {
+		t.Errorf("nil map(string) = %q, want 空文字", got)
+	}
+	if got := marshalOrEmpty(map[string]int{"logic": 3}); got != `{"logic":3}` {
+		t.Errorf("中身があるとき = %q", got)
+	}
+}
+
+// 保存すべき内容の決定。JSONが読めたかとスコアの妥当性で3通りに分かれる。
+func TestFinalizeReportPayload(t *testing.T) {
+	body := reportPayload{
+		Summary:      "落ち着いて回答できていました。",
+		Scores:       map[string]int{"logic": 99},
+		Evidence:     map[string]string{"logic": "根拠"},
+		Strengths:    []string{"結論から話せる"},
+		Improvements: []string{"数値を添える"},
+	}
+
+	t.Run("JSONが読めなければ保存しない", func(t *testing.T) {
+		if _, err := finalizeReportPayload(reportPayload{}, false, errors.New("broken")); err == nil {
+			t.Error("読めていないのに保存しようとした")
+		}
+	})
+
+	t.Run("読めなかったのに理由が無くてもエラーにする", func(t *testing.T) {
+		if _, err := finalizeReportPayload(reportPayload{}, false, nil); err == nil {
+			t.Error("理由が無いと成功扱いになっている")
+		}
+	})
+
+	t.Run("スコアが妥当ならそのまま", func(t *testing.T) {
+		got, err := finalizeReportPayload(body, true, nil)
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if len(got.Scores) == 0 {
+			t.Error("妥当なスコアまで捨てている")
+		}
+	})
+
+	t.Run("スコアだけ不正なら講評を残してスコアを捨てる", func(t *testing.T) {
+		got, err := finalizeReportPayload(body, true, errors.New("範囲外"))
+		if err != nil {
+			t.Fatalf("レポートごと捨てている: %v", err)
+		}
+		if got.Summary == "" || len(got.Strengths) == 0 {
+			t.Error("講評まで捨てている")
+		}
+		if len(got.Scores) != 0 || len(got.Evidence) != 0 {
+			t.Errorf("不正なスコアが残っている: %v / %v", got.Scores, got.Evidence)
+		}
+	})
 }
