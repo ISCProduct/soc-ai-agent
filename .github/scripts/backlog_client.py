@@ -203,6 +203,40 @@ def is_status_advance(current_name: str, target_name: str) -> bool:
     return target > current
 
 
+def set_issue_status_unless_same(
+    base: str,
+    api_key: str,
+    issue_key: str,
+    status_id: int,
+    request=None,
+) -> str:
+    """PRオープン/更新時のステータス更新。同じステータスなら PATCH しない。
+
+    Backlog は無変更の PATCH を 400 `No comment content.` (code 7) で拒否する。
+    毎回無条件に PATCH していたため、既に「処理中」の課題を持つ PR を更新するたびに
+    400 が出て失敗扱いになり、**PR URL の追記まで巻き添えでスキップ**されていた
+    (SOCAIAGENT-153 で実際に発生)。
+
+    後退（例: ステージング反映 → 処理中）は許す。
+    そのPRの課題1件に対する明示的な操作であり、advance_issue_status とは
+    意図が違う（あちらはコミット範囲から拾った過去の課題を守るためのもの）。
+
+    戻り値: "updated" / "skipped"（既に同じ）/ "failed"。
+    request はテスト用の差し替え口（省略時は bl_request）。
+    """
+    call = request or (lambda method, path, data=None: bl_request(base, api_key, method, path, data, fatal=False))
+
+    issue = call("GET", f"/issues/{issue_key}")
+    current_id = ((issue or {}).get("status") or {}).get("id")
+    if current_id == status_id:
+        print(f"{issue_key}: 既に同じステータスのため更新しない")
+        return "skipped"
+
+    if call("PATCH", f"/issues/{issue_key}", {"statusId": status_id}) is None:
+        return "failed"
+    return "updated"
+
+
 def advance_issue_status(
     base: str,
     api_key: str,
@@ -332,6 +366,41 @@ if __name__ == "__main__":
         return {"status": {"name": "リリース待ち"}} if method == "GET" else None
 
     assert advance_issue_status("b", "k", "X-1", 4, "完了", request=_req_patch_failed) == "failed"
+
+    # set_issue_status_unless_same: 同じステータスなら PATCH を送らない。
+    # 無変更 PATCH は Backlog が 400 code 7 で拒否し、PR URL 追記まで巻き添えになる。
+    def _req_id(current_id):
+        def call(method, path, data=None):
+            sent.append((method, path, data))
+            if method == "GET":
+                return {"status": {"id": current_id, "name": "処理中"}}
+            return {}
+        return call
+
+    sent.clear()
+    assert set_issue_status_unless_same("b", "k", "X-1", 2, request=_req_id(2)) == "skipped"
+    assert all(m == "GET" for m, _, _ in sent), f"同ステータスで PATCH を送っている: {sent}"
+
+    sent.clear()
+    assert set_issue_status_unless_same("b", "k", "X-1", 2, request=_req_id(1)) == "updated"
+    assert ("PATCH", "/issues/X-1", {"statusId": 2}) in sent, f"PATCH が無い: {sent}"
+
+    # 後退は許す（PRを開き直したときに「処理中」へ戻すのは意図どおり）
+    sent.clear()
+    assert set_issue_status_unless_same("b", "k", "X-1", 2, request=_req_id(4)) == "updated"
+
+    # 取得できないときは更新する（取得失敗で同期が止まる方が困る）
+    sent.clear()
+    assert set_issue_status_unless_same("b", "k", "X-1", 2, request=_req_get_failed) == "updated"
+
+    # PATCH 失敗は failed（成功したことにしない）
+    sent.clear()
+
+    def _req_id_patch_failed(method, path, data=None):
+        sent.append((method, path, data))
+        return {"status": {"id": 1, "name": "未対応"}} if method == "GET" else None
+
+    assert set_issue_status_unless_same("b", "k", "X-1", 2, request=_req_id_patch_failed) == "failed"
 
     globals()["bl_request"] = _orig
     assert normalize_space_id("https://myspace.backlog.jp") == "myspace"
