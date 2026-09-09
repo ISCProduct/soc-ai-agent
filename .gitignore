@@ -7021,3 +7021,13 @@ frontend/test-results/.last-run.json
 # 生成物であり、各PRの差分に毎回混入するため追跡しない（#1074 レビュー指摘）。
 frontend/AGENTS.md
 frontend/CLAUDE.md
+
+# Playwright の実行結果（生成物）。追跡すると毎回差分が出る
+frontend/test-results/
+
+# 音声認識の調査用データ（音声ファイルを含む）。
+# CLAUDE_HANDOFF.md 自身が「調査用ディレクトリはスコープ外」としている
+docs/research/interview-audio-eval/
+
+# 各セッションの作業メモ
+/tasks/
