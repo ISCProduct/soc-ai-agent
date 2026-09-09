@@ -52,6 +52,10 @@ OPENAI_MODEL=${openai_model}
 OPENAI_WEB_SEARCH_MODEL=gpt-4o-mini
 OPENAI_COMPANY_SEARCH_MODEL=gpt-4o-mini
 OPENAI_HINTS_MODEL=gpt-4o-mini
+# AI面接のSTT。miniは「御社」を「本社」と誤認しやすく、問題発話だけ
+# gpt-4o-transcribe へ自動で再送する(stt_fallback.go)。
+# 精度に問題が出たら gpt-4o-transcribe にすると再送なしで高精度モデルだけを使う。
+OPENAI_WHISPER_MODEL=${openai_whisper_model}
 RESEND_API_KEY=${resend_api_key}
 EMAIL_PROVIDER=resend
 EMAIL_FROM=noreply@shukatsu-ai.jp

@@ -510,6 +510,10 @@ module "backend" {
     OPENAI_WEB_SEARCH_MODEL     = "gpt-4o-mini"
     OPENAI_COMPANY_SEARCH_MODEL = "gpt-4o-mini"
     OPENAI_HINTS_MODEL          = "gpt-4o-mini"
+    # AI面接のSTT。miniは「御社」を「本社」と誤認しやすく、問題発話だけ
+    # gpt-4o-transcribe へ自動で再送する(stt_fallback.go)。
+    # 精度に問題が出たら var.openai_whisper_model を gpt-4o-transcribe にする。
+    OPENAI_WHISPER_MODEL = var.openai_whisper_model
     # 未設定だとOAuthコールバックURLがlocalhost:8080にフォールバックし、
     # 本番でOAuthログインが機能しなくなる(実際に発生した障害)。
     BASE_URL = "https://${local.backend_domain}"
