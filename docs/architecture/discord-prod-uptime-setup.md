@@ -127,6 +127,40 @@ DISCORD_BOT_TOKEN=<Botトークン> DISCORD_APPLICATION_ID=<Application ID> \
   ./automation/discord/register-commands.sh
 ```
 
+登録済みの確認だけしたいとき:
+
+```bash
+DISCORD_BOT_TOKEN=<Botトークン> DISCORD_APPLICATION_ID=<Application ID> \
+  ./automation/discord/register-commands.sh --list
+```
+
+失敗した場合は Discord が返した理由（401 / 403 / 404 など）がそのまま表示される。
+
+### コマンドが Discord に出てこないとき
+
+登録が成功しても表示されないことがある。上から順に確認する。
+
+1. **Bot に `applications.commands` スコープが無い**
+   OAuth2 > URL Generator で scopes に `bot` と `applications.commands` の
+   **両方**を選んで招待URLを作り直す。`bot` だけだと登録は成功するのに
+   サーバーにコマンドが出ない。
+2. **Interactions Endpoint URL が未設定**
+   General Information > Interactions Endpoint URL に
+   `https://api-stg.shukatsu-ai.jp/api/discord/interactions` を設定して保存する。
+   保存時にDiscordがPINGを送るので、応答できないと保存自体が失敗する。
+   到達確認は次で行える（**401 が正常**。署名が無いリクエストを拒否している）。
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+     https://api-stg.shukatsu-ai.jp/api/discord/interactions \
+     -H 'Content-Type: application/json' -d '{"type":1}'
+   ```
+3. **`/prod` の権限が誰にも付いていない**
+   `/prod` は `default_member_permissions: "0"` で登録される。
+   サーバー管理者が サーバー設定 > 連携サービス > 該当アプリ から
+   実行できるロールを明示的に許可するまで、一般メンバーには表示されない。
+   これは事故防止のための既定であり、意図した挙動。
+
 ## 6. SSM Parameter Store 読み書き権限
 
 ### ⚠️ GitHub Actions 側のIAMに override のARNを足す（必須）
