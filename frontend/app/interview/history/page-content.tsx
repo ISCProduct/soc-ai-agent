@@ -24,7 +24,7 @@ import InterviewSummary from '../components/InterviewSummary'
 import { parseJsonSafe } from '@/lib/interview-utils'
 import { PRIMARY } from '../constants'
 
-const InterviewTrendChart = dynamic(() => import('./InterviewTrendChart'), {
+const InterviewTrendChart = dynamic(() => import('@/components/InterviewTrendChart'), {
   ssr: false,
   loading: () => (
     <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>

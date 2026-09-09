@@ -11,13 +11,19 @@ import {
   YAxis,
 } from 'recharts'
 import type { InterviewTrendPoint } from '@/lib/interview'
-import { PRIMARY } from '../constants'
+import { COMFORTABLE_PRIMARY as PRIMARY } from '@/lib/student-theme'
 
 type InterviewTrendChartProps = {
   points: InterviewTrendPoint[]
 }
 
-/** recharts 依存を履歴ページ本体から切り離すためのチャート表示。 */
+// 面接スコアの推移。学生の履歴ページと、教員の生徒詳細(#1225)で共用する。
+// recharts 依存を呼び出し側の本体から切り離す目的もあるので、
+// 利用側では dynamic import すること。
+//
+// Y軸は 0〜5。スコアは interview_report.go のプロンプトで
+// 「各スコアは0〜5の整数」と定義されている。
+// 以前は 0〜10 になっており、満点でもグラフの中央にしか描かれていなかった。
 export default function InterviewTrendChart({ points }: InterviewTrendChartProps) {
   const data = points.map((p, i) => ({
     ...p,
@@ -30,7 +36,7 @@ export default function InterviewTrendChart({ points }: InterviewTrendChartProps
       <LineChart data={data}>
         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
         <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#64748b' }} />
-        <YAxis domain={[0, 10]} tick={{ fontSize: 12, fill: '#64748b' }} width={28} />
+        <YAxis domain={[0, 5]} ticks={[0, 1, 2, 3, 4, 5]} tick={{ fontSize: 12, fill: '#64748b' }} width={28} />
         <Tooltip formatter={(v: number) => v?.toFixed(1)} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
         <Line type="monotone" dataKey="logic" name="論理性" stroke={PRIMARY} dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls />

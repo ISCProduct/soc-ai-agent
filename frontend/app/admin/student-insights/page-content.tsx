@@ -22,12 +22,12 @@ import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
+import { ScoreBar } from '@/components/admin/ScoreBar'
 import { getAdminSchoolAccess } from '@/lib/admin-school-access'
 import {
   displayCategories,
   displayIndustries,
   displayTypeLabel,
-  formatScore,
   NO_DATA_LABEL,
   type StudentTendency,
 } from '@/lib/student-insights'
@@ -190,14 +190,9 @@ export default function PageContent() {
                     {categories.length === 0 ? (
                       <Typography variant="body2" color="text.disabled">—</Typography>
                     ) : (
-                      <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                      <Stack spacing={0.75} sx={{ minWidth: 170 }}>
                         {categories.map((c) => (
-                          <Chip
-                            key={c.category}
-                            label={`${c.category} ${formatScore(c.score)}`}
-                            size="small"
-                            variant="outlined"
-                          />
+                          <ScoreBar key={c.category} label={c.category} score={c.score} />
                         ))}
                       </Stack>
                     )}
@@ -206,14 +201,13 @@ export default function PageContent() {
                     {industries.length === 0 ? (
                       <Typography variant="body2" color="text.disabled">—</Typography>
                     ) : (
-                      <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                      <Stack spacing={0.75} sx={{ minWidth: 170 }}>
                         {industries.map((i) => (
-                          <Chip
+                          <ScoreBar
                             key={i.industry_id}
-                            label={`${i.industry_name} ${formatScore(i.score)}`}
-                            size="small"
-                            variant="outlined"
-                            color="secondary"
+                            label={i.industry_name}
+                            score={i.score}
+                            color="secondary.main"
                           />
                         ))}
                       </Stack>
