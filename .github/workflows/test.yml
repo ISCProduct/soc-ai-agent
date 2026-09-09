@@ -112,6 +112,15 @@ jobs:
       - name: 本番 uptime 判定のテスト
         run: ./automation/test/prod-uptime-decision-test.sh
 
+      # リポジトリのファイルを読むワークフローに checkout があること。
+      # schedule で動くワークフローは誰も結果を見ないため、壊れても気づけない。
+      - name: ワークフローの checkout 漏れ検査
+        run: ./automation/test/workflow-checkout-test.sh
+
+      # ステージングの起動/停止判定。間違えると開発中に環境が理由不明で落ちる。
+      - name: ステージング uptime 判定のテスト
+        run: ./automation/test/staging-uptime-decision-test.sh
+
       # Discordコマンド登録の失敗理由が表示されること。
       # 以前は curl -sf で握り潰しており、登録できない原因が追えなかった。
       - name: Discord コマンド登録スクリプトのテスト

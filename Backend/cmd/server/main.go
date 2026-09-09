@@ -442,6 +442,12 @@ func main() {
 		discordUptimeService = nil
 	}
 	discordInteractionController := controllers.NewDiscordInteractionController(discordUptimeService)
+	// ステージングの起動/停止（#1249）。本番と同じ認証情報で別のSSMパラメータを扱う。
+	if stagingUptime, stagingErr := discord.NewStagingUptimeServiceFromEnv(context.Background()); stagingErr != nil {
+		log.Printf("[Discord] staging uptime service disabled: %v", stagingErr)
+	} else {
+		discordInteractionController.SetStagingService(stagingUptime)
+	}
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := controllers.NewESRewriteController(aiClient)
 	scheduleRepo := repositories.NewScheduleRepository(db)

@@ -34,10 +34,16 @@ jobs:
   prune:
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       issues: write
     steps:
-      # スクリプトはこのファイル内にインラインで持ち、リポジトリのファイルは一切読まない。
-      # checkout すると contents: read が必要になるだけで得るものが無いため置かない。
+      # .github/scripts/backlog_client.py を import するので checkout が要る。
+      # 以前は「リポジトリのファイルは一切読まない」というコメントのまま
+      # checkout を置いていなかったため、毎時の実行が
+      # ModuleNotFoundError: No module named 'backlog_client' で失敗し続けていた
+      # （2026-09-08 以降、直近5回すべて失敗）。
+      - uses: actions/checkout@v7
+
       - name: Backlog から消えた課題の GitHub Issue を削除
         env:
           BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}

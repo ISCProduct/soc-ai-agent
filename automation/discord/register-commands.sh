@@ -1,5 +1,5 @@
 #!/bin/bash
-# Discordスラッシュコマンド /prod, /prod-uptime, /prod-uptime-list をアプリケーションに登録する。
+# Discordスラッシュコマンド /prod, /staging, /prod-uptime, /prod-uptime-list を登録する。
 # 一度実行すれば以後は再実行不要（コマンド内容を変更したときのみ再実行）。
 #
 # 必要な環境変数:
@@ -82,6 +82,25 @@ COMMANDS='[
     "type": 1
   },
   {
+    "name": "staging",
+    "description": "ステージング環境を起動/停止します",
+    "type": 1,
+    "dm_permission": false,
+    "default_member_permissions": "0",
+    "options": [
+      {
+        "name": "state",
+        "description": "on=起動 / off=停止",
+        "type": 3,
+        "required": true,
+        "choices": [
+          { "name": "on (起動する)", "value": "on" },
+          { "name": "off (停止する)", "value": "off" }
+        ]
+      }
+    ]
+  },
+  {
     "name": "prod",
     "description": "本番環境を起動/停止します",
     "type": 1,
@@ -111,18 +130,22 @@ cat <<'NOTE'
 
 反映まで数分かかる場合があります。Discordに出てこない場合は次を確認してください。
 
-1. Bot がサーバーに参加しているか
-   OAuth2 > URL Generator で scopes に「bot」と「applications.commands」の
-   両方を選んで招待URLを作り直す。applications.commands が無いと
-   登録は成功してもサーバーにコマンドが出ない。
+1. /prod だけ出ない場合（最も多い）
+   /prod は default_member_permissions="0" で登録される。これは
+   「既定では誰も実行できない」という意味で、事故防止のための設定。
+   Discordの サーバー設定 > 連携サービス > 該当アプリ > /prod から
+   実行を許可するロール/メンバーを追加するまで、誰の一覧にも出ない。
+   /prod-uptime と /prod-uptime-list には制限が無いので、
+   その2つが出て /prod だけ出ないならこれが原因。
 
-2. Interactions Endpoint URL が設定されているか
+2. どのコマンドも出ない場合
+   OAuth2 > URL Generator の scopes に applications.commands が必要。
+   これが無いと登録は成功してもサーバーに出ない。
+   なお bot スコープは不要（Interactions Endpoint 方式のため、
+   Botがサーバーのメンバーになる必要はない）。
+
+3. Interactions Endpoint URL が設定されているか
    General Information > Interactions Endpoint URL に
    https://api-stg.shukatsu-ai.jp/api/discord/interactions を設定して保存する。
    保存時にDiscordがPINGを送り、応答できないと保存自体が失敗する。
-
-3. コマンドがサーバーに見えているか
-   Discordのサーバー設定 > 連携サービス > 該当アプリ から
-   コマンドの権限を確認する。/prod は default_member_permissions="0" なので、
-   サーバー管理者が明示的にロールを許可するまで一般メンバーには表示されない。
 NOTE
