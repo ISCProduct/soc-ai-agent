@@ -270,7 +270,15 @@ aws iam put-user-policy --user-name <CIのIAMユーザー> \
 - `/soc-app/staging-uptime` への `ssm:GetParameter`
 - ASG への `autoscaling:UpdateAutoScalingGroup` / `DescribeAutoScalingGroups`
 
-> **未適用（2026-09-10 時点）。** `/staging` を使う前に実行すること。
+> **本番アカウント(508897596159)では 2026-09-10 に適用済み。**
+> IAMユーザー `NetworkSeminar2026-1` に `AllowProdUptimeSsmRead`（staging-uptime を追加）と
+> `AllowStagingAsgControl` を設定し、実地で確認済み。
+> 別アカウント・別IAMユーザーで動かす場合のみ必要。
+>
+> 確認した内容:
+> - `/soc-app/staging-uptime` の `ssm:GetParameter` が通る（ParameterNotFound = 未作成だが権限あり）
+> - `describe-auto-scaling-groups` で `soc-stg-app` が読める
+> - `update-auto-scaling-group` が通る（現在値と同じ値で無害に確認）
 
 ```bash
 # 1) SSM 読み取り（上の AllowProdUptimeSsmRead に staging-uptime を足す）
@@ -318,6 +326,9 @@ aws iam put-user-policy --user-name <CIのIAMユーザー> \
 `DescribeAutoScalingGroups` はリソース単位の絞り込みに対応していないため
 `Resource: "*"` になる（AWSの仕様）。更新側はタグ条件で
 `soc-stg-app` に限定しており、**本番のASGは触れない。**
+
+なお本番は ECS Fargate で ASG を使わないため、このアカウントに存在する
+Auto Scaling Group は `soc-stg-app` のみ（2026-09-10 実測）。
 
 ### 適用できたかの確認
 
