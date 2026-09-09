@@ -317,15 +317,28 @@ resource "aws_launch_template" "app" {
 }
 
 # 平常時は最小構成(desired=min=1)、負荷試験時にCPU使用率でオートスケールする。
-# ponytail: health_check_type=EC2。アプリのヘルスチェック応答が安定してから
-#           ELBに切り替える(不安定なままだと正常インスタンスまで入れ替わり続ける)。
+#
+# health_check_type = ELB (#828)。
+# EC2 のままだと、インスタンスが生きていればアプリのコンテナが落ちていても
+# 置換されず、復帰しない障害で手動介入が要る。
+#
+# ただしデプロイ中はヘルスチェックによる置換を止めること。
+# staging のデプロイは稼働中インスタンス上で
+#   docker compose down → system prune -af → pull → up -d
+# を行い、アプリが数分間停止する。インスタンスは既に InService なので
+# health_check_grace_period は効かず、ALB は 30秒(interval 10s × unhealthy 3回)で
+# unhealthy と判定する。そのままだと毎回のデプロイでインスタンスが置換され、
+# デプロイ自体が壊れる。
+# deployment.yml が ReplaceUnhealthy をデプロイ中だけ停止している。
 resource "aws_autoscaling_group" "app" {
   name                = "${var.project_name}-app"
   vpc_zone_identifier = module.network.public_subnet_ids
   min_size            = var.asg_min_size
   max_size            = var.asg_max_size
   desired_capacity    = var.asg_desired_capacity
-  health_check_type   = "EC2"
+  health_check_type   = "ELB"
+  # 起動直後はコンテナのpull/起動に時間がかかる。短いと起動途中で置換され続ける。
+  health_check_grace_period = 600
 
   launch_template {
     id      = aws_launch_template.app.id
