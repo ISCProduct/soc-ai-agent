@@ -50,9 +50,13 @@ func (s *InterviewService) Turn(
 	// モデルごとの品質・費用を後から突き合わせられるよう、
 	// 音声サイズ・応答時間・成否を記録する（音声R&D Task 1）。
 	// 発話本文・認識本文は記録しない。
+	// 面接コンテキストの語を補助語として渡す（音声R&D Task 4）。
+	// 実測では固有名詞が改善し、無関係な語での幻覚は起きなかった。
+	// 特に「御社」は mini が補助語なしだと8回中0回しか正しく取れない。
 	const sttMimeType = "audio/webm"
+	sttHints := BuildSTTHints(companyName, companyReading, position, companyInfo)
 	sttStart := time.Now()
-	userText, err := s.openaiClient.Transcribe(ctx, audioData, "audio.webm")
+	userText, err := s.openaiClient.TranscribeWithHints(ctx, audioData, "audio.webm", sttHints)
 	LogSTTObservation(ObserveTranscribe(
 		sessionID, turnCount, len(audioData), sttMimeType, sttStart, userText, err,
 	))
