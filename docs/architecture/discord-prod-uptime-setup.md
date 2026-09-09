@@ -242,6 +242,76 @@ aws iam put-user-policy --user-name <CIのIAMユーザー> \
   }'
 ```
 
+### ⚠️ ステージング用のIAM権限（`/staging` を使う場合は必須）
+
+`/staging` を動かすには、CIのIAMユーザーに次の2つが要る。
+**どちらか欠けると `staging-uptime-scheduler.yml` が
+`AccessDeniedException` で失敗し続ける**（本番側で実際に起きたのと同じパターン）。
+
+- `/soc-app/staging-uptime` への `ssm:GetParameter`
+- ASG への `autoscaling:UpdateAutoScalingGroup` / `DescribeAutoScalingGroups`
+
+> **未適用（2026-09-10 時点）。** `/staging` を使う前に実行すること。
+
+```bash
+# 1) SSM 読み取り（上の AllowProdUptimeSsmRead に staging-uptime を足す）
+aws iam put-user-policy --user-name <CIのIAMユーザー> \
+  --policy-name AllowProdUptimeSsmRead \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Sid": "ProdUptimeSsmRead",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": [
+        "arn:aws:ssm:ap-northeast-1:<アカウントID>:parameter/soc-app/prod-uptime-dates",
+        "arn:aws:ssm:ap-northeast-1:<アカウントID>:parameter/soc-app/prod-uptime-override",
+        "arn:aws:ssm:ap-northeast-1:<アカウントID>:parameter/soc-app/staging-uptime"
+      ]
+    }]
+  }'
+
+# 2) ASG の起動/停止
+aws iam put-user-policy --user-name <CIのIAMユーザー> \
+  --policy-name AllowStagingAsgControl \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "StagingAsgUpdate",
+        "Effect": "Allow",
+        "Action": "autoscaling:UpdateAutoScalingGroup",
+        "Resource": "*",
+        "Condition": {
+          "StringEquals": {"autoscaling:ResourceTag/Name": "soc-stg-app"}
+        }
+      },
+      {
+        "Sid": "StagingAsgDescribe",
+        "Effect": "Allow",
+        "Action": "autoscaling:DescribeAutoScalingGroups",
+        "Resource": "*"
+      }
+    ]
+  }'
+```
+
+`DescribeAutoScalingGroups` はリソース単位の絞り込みに対応していないため
+`Resource: "*"` になる（AWSの仕様）。更新側はタグ条件で
+`soc-stg-app` に限定しており、**本番のASGは触れない。**
+
+### 適用できたかの確認
+
+```bash
+# SSM が読めるか（値が返れば成功。ParameterNotFound は未作成なだけで権限はある）
+aws ssm get-parameter --name /soc-app/staging-uptime --query 'Parameter.Value' --output text
+
+# ASG が見えるか
+aws autoscaling describe-auto-scaling-groups \
+  --auto-scaling-group-names soc-stg-app \
+  --query 'AutoScalingGroups[0].{Min:MinSize,Desired:DesiredCapacity}' --output table
+```
+
 確認:
 
 ```bash
