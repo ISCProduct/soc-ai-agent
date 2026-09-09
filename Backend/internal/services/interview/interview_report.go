@@ -92,12 +92,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 	userPrompt := fmt.Sprintf(`以下の面接ログを読み、下記の評価基準に従ってJSONのみで出力してください。
 出力言語: %s
 
-## 評価基準（各スコアは0〜5の整数）
-- logic（論理性）: 回答が筋道立っているか、主張に一貫性があるか
-- specificity（具体性）: 具体的なエピソードや数値が含まれているか
-- ownership（主体性）: 「私が〜した」という自分起点の表現があるか
-- communication（コミュニケーション力）: 簡潔・明確に伝えられているか、聞き返しが少ないか
-- enthusiasm（積極性・熱意）: 志望動機や意欲が伝わっているか。取り組みのきっかけや継続の姿勢も評価材料に含めてよい
+%s
 
 ## 出力フォーマット（このキーと型を厳守してください）
 {
@@ -126,33 +121,29 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 ※ teacher以下は教員専用の詳細情報として出力してください。
 
 Interview transcript:
-%s`, lang, transcript)
+%s`, lang, BuildRubricPromptSection(), transcript)
 
 	model := shared.GetEnv("INTERVIEW_REPORT_MODEL", "")
-	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 2000, model)
-	if err != nil {
-		return err
-	}
-	type teacherReport struct {
-		OverallComment      string            `json:"overall_comment"`
-		DetailedEvidence    map[string]string `json:"detailed_evidence"`
-		CoachingPoints      []string          `json:"coaching_points"`
-		StrengthsForTeacher []string          `json:"strengths_for_teacher"`
-		NextSteps           []string          `json:"next_steps"`
-	}
-	type reportPayload struct {
-		Summary      string            `json:"summary"`
-		Scores       map[string]int    `json:"scores"`
-		Evidence     map[string]string `json:"evidence"`
-		Strengths    []string          `json:"strengths"`
-		Improvements []string          `json:"improvements"`
-		Teacher      *teacherReport    `json:"teacher"`
-	}
+	// スキーマ違反は弾いて1度だけ作り直す（#795）。
 	var payload reportPayload
-	cleaned := ExtractJSONObject(raw)
-	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
-		return fmt.Errorf("invalid report json: %w", err)
+	var lastErr error
+	for attempt := range reportGenerationAttempts {
+		raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 2000, model)
+		if err != nil {
+			return err
+		}
+		payload, lastErr = parseReportPayload(raw)
+		if lastErr == nil {
+			break
+		}
+		log.Printf("[Interview] report schema violation (session %d, attempt %d/%d): %v",
+			sessionID, attempt+1, reportGenerationAttempts, lastErr)
 	}
+	if lastErr != nil {
+		// 粗いスコアを書くより書かない方が安全。レポートは保存しない
+		return lastErr
+	}
+
 	scoresJSON, _ := json.Marshal(payload.Scores)
 	evidenceJSON, _ := json.Marshal(payload.Evidence)
 	strengthsJSON, _ := json.Marshal(payload.Strengths)
@@ -267,4 +258,39 @@ func buildReportSystemPrompt(lang string) string {
 		return prompt
 	}
 	return fmt.Sprintf("You are a job interview assessment assistant. Read the interview transcript and return evaluation as JSON. Use language code \"%s\" for the summary and evidence fields.", lang)
+}
+
+// teacherReport は教員向けレポート部分。
+type teacherReport struct {
+	OverallComment      string            `json:"overall_comment"`
+	DetailedEvidence    map[string]string `json:"detailed_evidence"`
+	CoachingPoints      []string          `json:"coaching_points"`
+	StrengthsForTeacher []string          `json:"strengths_for_teacher"`
+	NextSteps           []string          `json:"next_steps"`
+}
+
+// reportPayload は LLM に出力させるレポート JSON。
+type reportPayload struct {
+	Summary      string            `json:"summary"`
+	Scores       map[string]int    `json:"scores"`
+	Evidence     map[string]string `json:"evidence"`
+	Strengths    []string          `json:"strengths"`
+	Improvements []string          `json:"improvements"`
+	Teacher      *teacherReport    `json:"teacher"`
+}
+
+// parseReportPayload は LLM 出力を読み、ルーブリックに従うかを検証する（#795）。
+//
+// JSON として読めても、スコアが値域外だったり項目が欠けていれば弾く。
+// 誤ったスコアは user_weight_scores 経由でマッチングと教員向け傾向分析の
+// 両方に静かに混ざり、後から区別できない（docs/wiki/scoring.md §2-3）。
+func parseReportPayload(raw string) (reportPayload, error) {
+	var payload reportPayload
+	if err := json.Unmarshal([]byte(ExtractJSONObject(raw)), &payload); err != nil {
+		return reportPayload{}, fmt.Errorf("invalid report json: %w", err)
+	}
+	if err := ValidateRubricScores(payload.Scores); err != nil {
+		return reportPayload{}, fmt.Errorf("invalid report scores: %w", err)
+	}
+	return payload, nil
 }
