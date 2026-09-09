@@ -10,7 +10,28 @@ import (
 	"gorm.io/gorm"
 )
 
+// ErrInterviewBudgetExceeded は月次の面接上限に達したことを表す。
+// 既定では上限に達しても止めない（監視のみ）。costs.InterviewBudgetService を参照。
+var ErrInterviewBudgetExceeded = errors.New("interview monthly budget exceeded")
+
+// interviewBudgetGuard は月次上限の判定面。未設定なら常に許可する。
+type interviewBudgetGuard interface {
+	AllowStart() error
+}
+
+// SetBudgetGuard は月次上限の判定を注入する（任意）。
+func (s *InterviewService) SetBudgetGuard(g interviewBudgetGuard) {
+	s.budgetGuard = g
+}
+
 func (s *InterviewService) CreateSession(userID uint, language string, interviewerGender string) (*InterviewSessionResponse, error) {
+	// 面接1回ごとに STT / LLM / TTS を叩くため、セッション数がそのまま費用に効く。
+	// 既定は監視のみで、止めるのは INTERVIEW_BUDGET_ENFORCE を明示したときだけ。
+	if s.budgetGuard != nil {
+		if err := s.budgetGuard.AllowStart(); err != nil {
+			return nil, ErrInterviewBudgetExceeded
+		}
+	}
 	user, err := s.userRepo.GetUserByID(userID)
 	if err != nil || user == nil {
 		return nil, errors.New("user not found")
