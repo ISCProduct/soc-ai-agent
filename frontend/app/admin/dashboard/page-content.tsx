@@ -34,6 +34,16 @@ import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
 import { canUseFeature, fetchEntitlements, type Entitlements } from '@/lib/entitlements'
+import dynamic from 'next/dynamic'
+import type { InterviewTrendPoint } from '@/lib/interview'
+
+// 学生の履歴ページと同じ推移グラフ。教員が数値表だけを見て
+// 「伸びているのか停滞しているのか」を読み取れない状態を解消する(#1225)。
+// recharts をダッシュボード本体のバンドルへ入れないため dynamic import する。
+const InterviewTrendChart = dynamic(() => import('@/components/InterviewTrendChart'), {
+  ssr: false,
+  loading: () => <Box textAlign="center" py={4}><CircularProgress size={20} /></Box>,
+})
 
 type UserSummary = {
   user_id: number
@@ -51,6 +61,22 @@ type SessionEntry = {
   ended_at: string | null
   avg_score: number | null | undefined
   scores: Record<string, number> | null
+}
+
+// セッション履歴を推移グラフの入力へ変換する。
+// detailSessions は新しい順で来るので、グラフ用に古い順へ直す。
+function toTrendPoints(sessions: SessionEntry[]): InterviewTrendPoint[] {
+  return [...sessions]
+    .reverse()
+    .map(s => ({
+      session_id: s.session_id,
+      created_at: s.ended_at ?? '',
+      logic: s.scores?.logic ?? null,
+      specificity: s.scores?.specificity ?? null,
+      ownership: s.scores?.ownership ?? null,
+      communication: s.scores?.communication ?? null,
+      enthusiasm: s.scores?.enthusiasm ?? null,
+    }))
 }
 
 const SCORE_LABELS: Record<string, string> = {
@@ -330,6 +356,12 @@ export default function PageContent() {
           ) : detailSessions.length === 0 ? (
             <Typography color="text.secondary" py={2}>セッションがありません</Typography>
           ) : (
+            <>
+              {detailSessions.length >= 2 && (
+                <Box sx={{ height: 260, mb: 2 }}>
+                  <InterviewTrendChart points={toTrendPoints(detailSessions)} />
+                </Box>
+              )}
             <Table size="small">
               <TableHead>
                 <TableRow sx={{ bgcolor: '#f5f5f5' }}>
@@ -358,6 +390,7 @@ export default function PageContent() {
                 ))}
               </TableBody>
             </Table>
+            </>
           )}
         </DialogContent>
       </Dialog>

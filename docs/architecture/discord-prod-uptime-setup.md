@@ -11,6 +11,8 @@ Discordのスラッシュコマンドから本番環境(AWS ECS Fargate + RDS)�
 | `/prod state:auto` | 日付リストに従う状態へ戻す(既定) | 同上 |
 | `/prod-uptime` | 終日起動する日付を追加(モーダル入力) | 同上 |
 | `/prod-uptime-list` | 起動予定日と現在の設定を表示 | 制限なし(誰でも閲覧可) |
+| `/staging state:on` | ステージングを**起動** | `DISCORD_ALLOWED_ROLE_ID` のロール保有者のみ |
+| `/staging state:off` | ステージングを**停止** | 同上 |
 
 ## 仕組み
 
@@ -93,6 +95,53 @@ https://api-stg.shukatsu-ai.jp/api/discord/interactions
 保存時にDiscordがPING検証リクエストを送るため、事前に3〜6の設定を完了させ、staging backendが
 起動している状態で保存すること。検証に失敗する場合は `DISCORD_PUBLIC_KEY` の設定漏れを疑う。
 
+## 2-2. ステージングの起動/停止（#1249）
+
+`/staging` は本番と別の仕組みで動く。**日付リストを持たない。**
+ステージングは展示会運用ではなく開発用なので、「今起動しているか」だけを
+明示的に切り替える。`auto` を作っていないのは、日付リストが無い以上
+`auto` と `on` が同義になり、どちらを押したのか分からなくなるため。
+
+```
+Discordで /staging state:off
+  → Backend が SSM /soc-app/staging-uptime に off を書く
+  → staging-uptime-scheduler.yml が ASG を min=0 desired=0 にする
+```
+
+| | 本番 (`/prod`) | ステージング (`/staging`) |
+| --- | --- | --- |
+| 対象 | ECS Fargate + RDS | EC2 Auto Scaling Group |
+| SSM | `/soc-app/prod-uptime-override` | `/soc-app/staging-uptime` |
+| 状態 | on / off / auto | on / off |
+| 日付リスト | あり | なし |
+| ワークフロー | `prod-uptime-scheduler.yml`（毎時5分 UTC） | `staging-uptime-scheduler.yml`（毎時10分 UTC） |
+
+### ASG は min_size も一緒に下げる
+
+ASG は `desired < min` を受け付けない。`desired` だけ 0 にしようとすると
+`ValidationError` になるため、ワークフローは `min_size` も同時に変更する。
+
+これに伴い Terraform 側の `ignore_changes` に `min_size` を追加した。
+除外しないと、次の `terraform apply` で `min=1` に戻り、
+**停止したはずのステージングが黙って起動する。**
+
+### 判断できないときは止めない
+
+SSM の値が未作成・未知の値・空文字のとき、ワークフローは **on** として扱う。
+
+`off` に倒すと、パラメータを作る前や手書きミスでステージングが理由不明に落ちる。
+一方、権限エラーやスロットリングは握りつぶさず**ジョブを失敗させる**。
+「読めなかったから止めた」は原因が追えない事故になる。
+
+### 停止中のデプロイに注意
+
+ステージングを `off` にしたまま `develop` へ push すると、
+デプロイ先のインスタンスが無いため**デプロイが失敗する**。
+停止運用をする場合は、デプロイ前に `/staging state:on` で起動すること。
+
+（自動で起動し直す仕組みは入れていない。デプロイのたびに勝手に起動すると、
+コスト削減のために止めた意味が無くなるため。）
+
 ## 3. 実行権限ロールの確認
 
 コマンドを実行してよいDiscordロールのIDを控える（Discordのサーバー設定 > ロール > 対象ロールを
@@ -127,6 +176,59 @@ DISCORD_BOT_TOKEN=<Botトークン> DISCORD_APPLICATION_ID=<Application ID> \
   ./automation/discord/register-commands.sh
 ```
 
+登録済みの確認だけしたいとき:
+
+```bash
+DISCORD_BOT_TOKEN=<Botトークン> DISCORD_APPLICATION_ID=<Application ID> \
+  ./automation/discord/register-commands.sh --list
+```
+
+失敗した場合は Discord が返した理由（401 / 403 / 404 など）がそのまま表示される。
+
+### 現在の設定（2026-09-10 実測）
+
+```
+Application ID: 1538848654440407060
+install_params: {"scopes": ["applications.commands"], "permissions": "0"}
+登録済み: /prod-uptime  /prod-uptime-list  /prod
+```
+
+Interactions Endpoint URL は設定済みで、Backend が PING に応答できている
+（＝署名検証まで動作している）。
+
+### コマンドが Discord に出てこないとき
+
+登録が成功しても表示されないことがある。上から順に確認する。
+
+1. **`/prod` は既定では誰にも表示されない**（最も多い原因）
+   `/prod` は `default_member_permissions: "0"` で登録される。これは
+   「既定では誰も実行できない」という意味で、**事故防止のための意図した設定**。
+   Discordの **サーバー設定 > 連携サービス > 該当アプリ > `/prod`** から
+   実行を許可するロール／メンバーを追加するまで、誰のコマンド一覧にも出ない。
+
+   `/prod-uptime` と `/prod-uptime-list` には権限制限が無いので、
+   **この2つが出て `/prod` だけ出ないなら、原因はこれ。**
+
+2. **`applications.commands` スコープが無い**
+   OAuth2 > URL Generator の scopes に `applications.commands` が必要。
+   これが無いと登録は成功してもサーバーにコマンドが出ない。
+
+   なお **`bot` スコープは不要**。本構成は Interactions Endpoint（HTTP POST）
+   方式なので、Botがサーバーのメンバーになる必要はない。
+   `GET /users/@me/guilds` が0件でも異常ではない（2026-09-10 実測）。
+3. **Interactions Endpoint URL が未設定**
+   General Information > Interactions Endpoint URL に
+   `https://api-stg.shukatsu-ai.jp/api/discord/interactions` を設定して保存する。
+   保存時にDiscordがPINGを送るので、応答できないと保存自体が失敗する。
+   到達確認は次で行える（**401 が正常**。署名が無いリクエストを拒否している）。
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+     https://api-stg.shukatsu-ai.jp/api/discord/interactions \
+     -H 'Content-Type: application/json' -d '{"type":1}'
+   ```
+
+
 ## 6. SSM Parameter Store 読み書き権限
 
 ### ⚠️ GitHub Actions 側のIAMに override のARNを足す（必須）
@@ -157,6 +259,87 @@ aws iam put-user-policy --user-name <CIのIAMユーザー> \
       ]
     }]
   }'
+```
+
+### ⚠️ ステージング用のIAM権限（`/staging` を使う場合は必須）
+
+`/staging` を動かすには、CIのIAMユーザーに次の2つが要る。
+**どちらか欠けると `staging-uptime-scheduler.yml` が
+`AccessDeniedException` で失敗し続ける**（本番側で実際に起きたのと同じパターン）。
+
+- `/soc-app/staging-uptime` への `ssm:GetParameter`
+- ASG への `autoscaling:UpdateAutoScalingGroup` / `DescribeAutoScalingGroups`
+
+> **本番アカウント(508897596159)では 2026-09-10 に適用済み。**
+> IAMユーザー `NetworkSeminar2026-1` に `AllowProdUptimeSsmRead`（staging-uptime を追加）と
+> `AllowStagingAsgControl` を設定し、実地で確認済み。
+> 別アカウント・別IAMユーザーで動かす場合のみ必要。
+>
+> 確認した内容:
+> - `/soc-app/staging-uptime` の `ssm:GetParameter` が通る（ParameterNotFound = 未作成だが権限あり）
+> - `describe-auto-scaling-groups` で `soc-stg-app` が読める
+> - `update-auto-scaling-group` が通る（現在値と同じ値で無害に確認）
+
+```bash
+# 1) SSM 読み取り（上の AllowProdUptimeSsmRead に staging-uptime を足す）
+aws iam put-user-policy --user-name <CIのIAMユーザー> \
+  --policy-name AllowProdUptimeSsmRead \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Sid": "ProdUptimeSsmRead",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": [
+        "arn:aws:ssm:ap-northeast-1:<アカウントID>:parameter/soc-app/prod-uptime-dates",
+        "arn:aws:ssm:ap-northeast-1:<アカウントID>:parameter/soc-app/prod-uptime-override",
+        "arn:aws:ssm:ap-northeast-1:<アカウントID>:parameter/soc-app/staging-uptime"
+      ]
+    }]
+  }'
+
+# 2) ASG の起動/停止
+aws iam put-user-policy --user-name <CIのIAMユーザー> \
+  --policy-name AllowStagingAsgControl \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "StagingAsgUpdate",
+        "Effect": "Allow",
+        "Action": "autoscaling:UpdateAutoScalingGroup",
+        "Resource": "*",
+        "Condition": {
+          "StringEquals": {"autoscaling:ResourceTag/Name": "soc-stg-app"}
+        }
+      },
+      {
+        "Sid": "StagingAsgDescribe",
+        "Effect": "Allow",
+        "Action": "autoscaling:DescribeAutoScalingGroups",
+        "Resource": "*"
+      }
+    ]
+  }'
+```
+
+`DescribeAutoScalingGroups` はリソース単位の絞り込みに対応していないため
+`Resource: "*"` になる（AWSの仕様）。更新側はタグ条件で
+`soc-stg-app` に限定しており、**本番のASGは触れない。**
+
+なお本番は ECS Fargate で ASG を使わないため、このアカウントに存在する
+Auto Scaling Group は `soc-stg-app` のみ（2026-09-10 実測）。
+
+### 適用できたかの確認
+
+```bash
+# SSM が読めるか（値が返れば成功。ParameterNotFound は未作成なだけで権限はある）
+aws ssm get-parameter --name /soc-app/staging-uptime --query 'Parameter.Value' --output text
+
+# ASG が見えるか
+aws autoscaling describe-auto-scaling-groups \
+  --auto-scaling-group-names soc-stg-app \
+  --query 'AutoScalingGroups[0].{Min:MinSize,Desired:DesiredCapacity}' --output table
 ```
 
 確認:

@@ -82,11 +82,15 @@ func TestBuildQuestionCoverage(t *testing.T) {
 	}
 }
 
+// STAR が揃っている回答は、従来どおりハッシュで3バリエーションを選ぶ（#1093）。
+// STAR が欠けている回答は欠落要素を狙うため、ここでは揃った回答を使う（#794）。
 func TestBuildFollowUpQuestionTextVariants(t *testing.T) {
 	original := "学生時代に力を入れたことは？"
-	answerForMotivation := "a"  // followUpVariantIndex % 3 == 1
-	answerForContinuity := "aa" // followUpVariantIndex % 3 == 2
-	answerForRole := "aaa"      // followUpVariantIndex % 3 == 0
+	// いずれも S/T/A/R を全て含み、末尾の文字数だけでハッシュを変えている
+	const complete = "大学のゼミで集計が遅いという課題があり、自動化を実装して作業時間を5時間短縮しました。"
+	answerForMotivation := starCompleteAnswerWithVariant(t, complete, 1)
+	answerForContinuity := starCompleteAnswerWithVariant(t, complete, 2)
+	answerForRole := starCompleteAnswerWithVariant(t, complete, 0)
 
 	gotMotivation := BuildFollowUpQuestionText(original, answerForMotivation)
 	if !strings.Contains(gotMotivation, "きっかけ") {
@@ -101,6 +105,37 @@ func TestBuildFollowUpQuestionTextVariants(t *testing.T) {
 	gotRole := BuildFollowUpQuestionText(original, answerForRole)
 	if !strings.Contains(gotRole, "役割") {
 		t.Fatalf("role variant missing 役割: %s", gotRole)
+	}
+}
+
+// starCompleteAnswerWithVariant は STAR を保ったまま指定のバリエーションになる回答を作る。
+// 末尾に句点を足してハッシュだけをずらす。
+func starCompleteAnswerWithVariant(t *testing.T, base string, want int) string {
+	t.Helper()
+	answer := base
+	for range 10 {
+		if followUpVariantIndex(answer) == want {
+			if len(AnalyzeSTAR(answer).Missing()) != 0 {
+				t.Fatalf("テスト用の回答が STAR を満たしていない: %s", answer)
+			}
+			return answer
+		}
+		answer += "。"
+	}
+	t.Fatalf("variant %d になる回答を作れなかった", want)
+	return ""
+}
+
+// STAR が欠けている回答は、バリエーションではなく欠落要素を狙う（#794）。
+func TestBuildFollowUpQuestionText_PrefersMissingSTAR(t *testing.T) {
+	// 成果(R)だけが無い回答
+	answer := "大学のチーム開発で進捗の遅れという課題があり、タスク管理の仕組みを提案して導入しました。"
+	got := BuildFollowUpQuestionText("学生時代に力を入れたことは？", answer)
+	if !strings.Contains(got, "結果") {
+		t.Errorf("成果を促していない: %s", got)
+	}
+	if strings.Contains(got, "きっかけ") || strings.Contains(got, "継続") {
+		t.Errorf("欠落要素と無関係なバリエーションが選ばれた: %s", got)
 	}
 }
 

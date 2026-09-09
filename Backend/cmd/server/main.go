@@ -332,6 +332,9 @@ func main() {
 		nil,
 	)
 	interviewService := interview.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)
+	// 面接1回ごとに STT / LLM / TTS を叩くため、セッション数がそのまま費用に効く。
+	// 既定は監視のみで、止めるのは INTERVIEW_BUDGET_ENFORCE を明示したときだけ。
+	interviewService.SetBudgetGuard(costs.NewInterviewBudgetService(interviewSessionRepo, costs.NotifyInterviewBudgetToDiscord))
 	if jobEnqueuer != nil {
 		interviewService.SetJobEnqueuer(jobEnqueuer)
 	}
@@ -439,6 +442,12 @@ func main() {
 		discordUptimeService = nil
 	}
 	discordInteractionController := controllers.NewDiscordInteractionController(discordUptimeService)
+	// ステージングの起動/停止（#1249）。本番と同じ認証情報で別のSSMパラメータを扱う。
+	if stagingUptime, stagingErr := discord.NewStagingUptimeServiceFromEnv(context.Background()); stagingErr != nil {
+		log.Printf("[Discord] staging uptime service disabled: %v", stagingErr)
+	} else {
+		discordInteractionController.SetStagingService(stagingUptime)
+	}
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := controllers.NewESRewriteController(aiClient)
 	scheduleRepo := repositories.NewScheduleRepository(db)
@@ -518,6 +527,8 @@ func main() {
 	routes.SetupCompanyRoutes(api, relationController)
 	industryWeightProfileRepo := repositories.NewIndustryWeightProfileRepository(db)
 	teacherInsightService := teacher.NewStudentInsightService(userRepo, userWeightScoreRepo, industryRepo, industryWeightProfileRepo)
+	// 低マッチのまま進行中の応募を教員一覧に出す（#1028）
+	teacherInsightService.SetLowMatchReader(appStatusRepo)
 	teacherInsightController := controllers.NewTeacherStudentInsightController(teacherInsightService)
 	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, userRepo, schoolService, cfg.AdminSecret)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
@@ -551,6 +562,16 @@ func main() {
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()
 		run := func() {
+			// 退会時のベクトル削除はRAG障害でも退会を失敗させないためエラーを飲む。
+			// 取りこぼしをここで消し直す(#1204)。パージより先に実行して、
+			// 30日待たずに個人データを消す。
+			if attempted, failed, err := userDeletionService.ReconcileScoutIndex(context.Background()); err != nil {
+				slog.Error("scout index reconcile failed", "error", err)
+			} else if failed > 0 {
+				// 残り続けると気づけないので、0件になるまで毎回出す
+				slog.Warn("scout index reconcile incomplete", "attempted", attempted, "failed", failed)
+			}
+
 			n, err := userDeletionService.PurgeExpiredWithdrawals(time.Now().UTC())
 			if err != nil {
 				slog.Error("purge expired withdrawals failed", "error", err)

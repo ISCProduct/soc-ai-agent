@@ -67,6 +67,17 @@ func (r *InterviewSessionRepository) CountByUser(userID uint) (int64, error) {
 	return count, err
 }
 
+// CountSince は指定時刻以降に開始された面接の総数を返す（費用監視用）。
+//
+// 面接1回ごとに STT / LLM / TTS を叩くため、セッション数がそのまま費用に効く。
+func (r *InterviewSessionRepository) CountSince(since time.Time) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.InterviewSession{}).
+		Where("created_at >= ?", since).
+		Count(&count).Error
+	return count, err
+}
+
 func (r *InterviewSessionRepository) CountAll(schoolID *uint, companyID *uint) (int64, error) {
 	var count int64
 	query := applyInterviewSessionFilters(r.db.Model(&models.InterviewSession{}), schoolID, companyID)

@@ -214,6 +214,8 @@ resource "aws_iam_role_policy" "app" {
         Resource = [
           "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/soc-app/prod-uptime-dates",
           "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/soc-app/prod-uptime-override",
+          # /staging state:on|off の書き込み先（#1249）
+          "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/soc-app/staging-uptime",
         ]
       },
     ]
@@ -297,6 +299,7 @@ resource "aws_launch_template" "app" {
     frontend_domain          = local.frontend_domain
     user_secret              = random_password.user_secret.result
     admin_secret             = var.admin_secret_plain
+    openai_whisper_model     = var.openai_whisper_model
     discord_public_key       = var.discord_public_key
     discord_allowed_role_id  = var.discord_allowed_role_id
     github_dispatch_token    = var.github_dispatch_token
@@ -317,15 +320,28 @@ resource "aws_launch_template" "app" {
 }
 
 # 平常時は最小構成(desired=min=1)、負荷試験時にCPU使用率でオートスケールする。
-# ponytail: health_check_type=EC2。アプリのヘルスチェック応答が安定してから
-#           ELBに切り替える(不安定なままだと正常インスタンスまで入れ替わり続ける)。
+#
+# health_check_type = ELB (#828)。
+# EC2 のままだと、インスタンスが生きていればアプリのコンテナが落ちていても
+# 置換されず、復帰しない障害で手動介入が要る。
+#
+# ただしデプロイ中はヘルスチェックによる置換を止めること。
+# staging のデプロイは稼働中インスタンス上で
+#   docker compose down → system prune -af → pull → up -d
+# を行い、アプリが数分間停止する。インスタンスは既に InService なので
+# health_check_grace_period は効かず、ALB は 30秒(interval 10s × unhealthy 3回)で
+# unhealthy と判定する。そのままだと毎回のデプロイでインスタンスが置換され、
+# デプロイ自体が壊れる。
+# deployment.yml が ReplaceUnhealthy をデプロイ中だけ停止している。
 resource "aws_autoscaling_group" "app" {
   name                = "${var.project_name}-app"
   vpc_zone_identifier = module.network.public_subnet_ids
   min_size            = var.asg_min_size
   max_size            = var.asg_max_size
   desired_capacity    = var.asg_desired_capacity
-  health_check_type   = "EC2"
+  health_check_type   = "ELB"
+  # 起動直後はコンテナのpull/起動に時間がかかる。短いと起動途中で置換され続ける。
+  health_check_grace_period = 600
 
   launch_template {
     id      = aws_launch_template.app.id
@@ -342,9 +358,14 @@ resource "aws_autoscaling_group" "app" {
   }
 
   # デプロイ後1時間で自動停止/次回デプロイ時に自動起動する運用のため、
-  # CIが変更するdesired_capacityをterraform applyで巻き戻さない
+  # CIが変更するdesired_capacityをterraform applyで巻き戻さない。
+  #
+  # min_size も除外する。ASGは desired < min を受け付けないため、
+  # /staging state:off は min も 0 にする（staging-uptime-scheduler.yml）。
+  # min を除外しないと、次の terraform apply で min=1 に戻り、
+  # 停止したはずのステージングが黙って起動する（#1249）。
   lifecycle {
-    ignore_changes = [desired_capacity]
+    ignore_changes = [desired_capacity, min_size]
   }
 
   tag {

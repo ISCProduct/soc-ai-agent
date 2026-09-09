@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"strings"
+	"time"
 )
 
 // interviewFallbackReplyText はChat失敗時に返す面接官としての言い換え応答。
@@ -45,7 +46,43 @@ func (s *InterviewService) Turn(
 	// STT: Whisper でユーザー音声をテキスト化。
 	// 破損音声・無音・タイムアウト等でTranscribe自体が失敗しても、ターンを
 	// 中断させず「聞き取れなかった」扱いで継続する（既存の空文字フォールバックに合流、#910）。
-	userText, err := s.openaiClient.Transcribe(ctx, audioData, "audio.webm")
+	//
+	// モデルごとの品質・費用を後から突き合わせられるよう、
+	// 音声サイズ・応答時間・成否を記録する（音声R&D Task 1）。
+	// 発話本文・認識本文は記録しない。
+	// 面接コンテキストの語を補助語として渡す（音声R&D Task 4）。
+	// 実測では固有名詞が改善し、無関係な語での幻覚は起きなかった。
+	// 特に「御社」は mini が補助語なしだと8回中0回しか正しく取れない。
+	const sttMimeType = "audio/webm"
+	sttHints := BuildSTTHints(companyName, companyReading, position, companyInfo)
+	sttStart := time.Now()
+	userText, err := s.openaiClient.TranscribeWithHints(ctx, audioData, "audio.webm", sttHints)
+	obs := ObserveTranscribe(sessionID, turnCount, len(audioData), sttMimeType, sttStart, userText, err)
+
+	// 問題が疑われる結果だけ高精度モデルへ再送する（音声R&D Task 5）。
+	// 通常の発話は再送しない。再送率がそのまま追加費用になる。
+	if reason := NeedsSTTFallback(userText, err != nil, obs.AudioSeconds); reason != FallbackNone && !FallbackIsRedundant() {
+		// 費用は「再送したか」で決まるので、採用可否ではなくここで記録する
+		obs.FellBack = true
+		// 再送は「取れれば良い」もの。既定の60秒を待つと、そのターンの応答が
+		// STTだけで最悪120秒かかる。面接の体感を優先して短く打ち切る。
+		retryCtx, cancelRetry := context.WithTimeout(ctx, sttFallbackTimeout)
+		retried, retryErr := s.openaiClient.TranscribeWithModel(
+			retryCtx, audioData, "audio.webm", sttHints, FallbackModel,
+		)
+		cancelRetry()
+		// 再送に失敗しても面接は止めない。元の結果のまま続ける
+		applied := ShouldUseFallbackResult(retried, retryErr)
+		if applied {
+			userText, err = retried, nil
+			obs.ResultChars = len([]rune(strings.TrimSpace(retried)))
+			obs.Succeeded = true
+		}
+		log.Printf("[Interview] stt fallback session=%d turn=%d reason=%s applied=%t",
+			sessionID, turnCount, reason, applied)
+	}
+	LogSTTObservation(obs)
+
 	if err != nil {
 		log.Printf("[Interview] transcribe error: %v", err)
 		userText = ""

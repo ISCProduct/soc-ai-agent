@@ -1,0 +1,94 @@
+name: ステージング環境の起動/停止
+
+# SSM /soc-app/staging-uptime の値に従って staging の ASG を起動/停止する。
+#
+# 本番(prod-uptime-scheduler.yml)と違い日付リストは持たない。
+# ステージングは展示会運用ではなく開発用なので、「今起動しているか」だけを
+# 明示的に切り替える。値が無い・読めない場合は起動側へ倒す（後述）。
+
+on:
+  schedule:
+    - cron: "10 * * * *" # 毎時10分(UTC)。本番(5分)とずらして権限エラーを見分けやすくする
+  workflow_dispatch:
+
+permissions: {}
+
+# 起動と停止がすれ違うと、SSMは off なのにインスタンスが上がったままになる。
+# cancel-in-progress で「最後の指示が勝つ」ようにする。
+concurrency:
+  group: staging-uptime-scheduler
+  cancel-in-progress: true
+
+jobs:
+  sync-staging-uptime:
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
+      PROJECT_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}
+      STAGING_ASG_NAME: ${{ vars.STAGING_ASG_NAME || 'soc-stg-app' }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Determine desired state and apply
+        run: |
+          set -e
+
+          PARAM="/${PROJECT_NAME}/staging-uptime"
+
+          # パラメータ未作成(初回)は on 扱い。この機能を入れた時点では
+          # ステージングは動いているので、「無い＝止める」にすると
+          # 導入した瞬間に環境が落ちる。
+          #
+          # 一方、権限エラーやスロットリングは握りつぶさず失敗させる。
+          # 「読めなかったから止めた」は原因が追えない事故になる。
+          if STATE=$(aws ssm get-parameter --name "$PARAM" \
+            --query 'Parameter.Value' --output text 2>/tmp/ssm_err); then
+            :
+          elif grep -q "ParameterNotFound" /tmp/ssm_err; then
+            echo "$PARAM が未作成のため on として扱います"
+            STATE="on"
+          else
+            echo "::error::SSM パラメータの取得に失敗しました（IAM権限 ssm:GetParameter を確認）"
+            cat /tmp/ssm_err >&2
+            exit 1
+          fi
+
+          STATE=$(echo "$STATE" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+
+          # 手で書き換えられて未知の値になっていても、勝手に停止しない。
+          case "$STATE" in
+            on|off) ;;
+            *)
+              echo "::warning::未知の値 '$STATE' のため on として扱います"
+              STATE="on"
+              ;;
+          esac
+
+          if [ "$STATE" = "off" ]; then
+            MIN=0; DESIRED=0
+          else
+            MIN=1; DESIRED=1
+          fi
+          echo "state=$STATE -> min_size=$MIN desired_capacity=$DESIRED"
+
+          # ASG は desired < min を受け付けない。min も一緒に動かす必要がある。
+          # min だけ残して desired を 0 にしようとすると ValidationError になる。
+          aws autoscaling update-auto-scaling-group \
+            --auto-scaling-group-name "$STAGING_ASG_NAME" \
+            --min-size "$MIN" \
+            --desired-capacity "$DESIRED"
+
+          echo "$STAGING_ASG_NAME を min=$MIN desired=$DESIRED に設定しました"
+
+      - name: Show resulting capacity
+        run: |
+          aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "$STAGING_ASG_NAME" \
+            --query 'AutoScalingGroups[0].{Min:MinSize,Desired:DesiredCapacity,Instances:length(Instances)}' \
+            --output table
