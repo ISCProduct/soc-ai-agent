@@ -214,6 +214,49 @@ func (s *UserDeletionService) PurgeExpiredWithdrawals(now time.Time) (int, error
 	return purged, nil
 }
 
+// scoutIndexDeleter は退会済みユーザーのベクトルを確実に消すための最小インターフェース。
+// ScoutIndexSyncer.Sync は成否を返さないため、リコンサイルではこちらを使う（#1204）。
+type scoutIndexDeleter interface {
+	EnsureDeleted(ctx context.Context, userID uint) error
+}
+
+// ReconcileScoutIndex は退会済み（未パージ）ユーザーのスカウト用ベクトルを消し直す（#1204）。
+//
+// 退会時の削除は RAG 障害で退会自体を失敗させないためエラーを握りつぶしており、
+// ChromaDB が止まっている間に退会したユーザーのベクトルは残ったままになる。
+// 検索結果は DB 側で再フィルタされるため情報漏洩は起きないが、
+// 個人データが消えない状態が誰にも気づかれずに続く。
+//
+// 物理パージ(30日)を待つと窓が広すぎるので、パージと同じ日次ジョブで消し直す。
+// 削除は冪等なので、既に消えているユーザーに対して繰り返し呼んでも副作用はない。
+//
+// 戻り値: (試行件数, 失敗件数, エラー)。エラーは対象の取得に失敗した場合のみ。
+func (s *UserDeletionService) ReconcileScoutIndex(ctx context.Context) (int, int, error) {
+	if s.db == nil {
+		return 0, 0, errors.New("database not configured")
+	}
+	deleter, ok := s.scoutIndexSyncer.(scoutIndexDeleter)
+	if !ok || deleter == nil {
+		// 同期先が未設定の構成（テストやRAG無効時）では何もしない
+		return 0, 0, nil
+	}
+
+	var pending []models.WithdrawnUser
+	if err := s.db.Where("purged_at IS NULL").Find(&pending).Error; err != nil {
+		return 0, 0, err
+	}
+
+	failed := 0
+	for _, w := range pending {
+		if err := deleter.EnsureDeleted(ctx, w.UserID); err != nil {
+			// 個々の失敗で全体を止めない。次回の実行で再試行される。
+			log.Printf("[UserDeletion] scout index reconcile failed user_id=%d: %v", w.UserID, err)
+			failed++
+		}
+	}
+	return len(pending), failed, nil
+}
+
 func (s *UserDeletionService) purgeOne(w models.WithdrawnUser) error {
 	var keys []string
 	_ = json.Unmarshal([]byte(w.S3ObjectKeys), &keys)
