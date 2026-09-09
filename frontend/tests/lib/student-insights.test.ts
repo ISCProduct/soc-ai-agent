@@ -1,5 +1,6 @@
 import {
   displayCategories,
+  lowMatchApplications,
   displayIndustries,
   displayTypeLabel,
   formatScore,
@@ -96,5 +97,24 @@ describe('student-insights の表示ロジック', () => {
       expect(formatScore(81.2)).toBe('81.2')
       expect(formatScore(76.44)).toBe('76.4')
     })
+  })
+})
+
+// バックエンドは該当なしのとき項目ごと省略する(omitempty)ので、
+// null と undefined の両方を空として扱えないと画面が落ちる。
+describe('lowMatchApplications', () => {
+  it.each([
+    ['項目なし', undefined],
+    ['null', null],
+    ['空配列', []],
+  ])('%s は空配列を返す', (_name, value) => {
+    const s = { ...withData, low_match_applications: value } as StudentTendency
+    expect(lowMatchApplications(s)).toEqual([])
+  })
+
+  it('応募があればそのまま返す', () => {
+    const apps = [{ company_name: '株式会社テスト', match_score: 21.4, status: 'applied' }]
+    const s = { ...withData, low_match_applications: apps } as StudentTendency
+    expect(lowMatchApplications(s)).toEqual(apps)
   })
 })

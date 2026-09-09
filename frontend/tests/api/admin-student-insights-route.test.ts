@@ -6,6 +6,26 @@ describe('GET /api/admin/teacher/students/tendency-analysis', () => {
     jest.restoreAllMocks()
   })
 
+  // allowlist から漏れるとフィルタは黙って無効になり、
+  // 「全員が低マッチ」に見える（#1028）。
+  it('low_match_only を転送する', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ students: [], total: 0, limit: 25, offset: 0 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    const request = new NextRequest(
+      'http://localhost:3000/api/admin/teacher/students/tendency-analysis?low_match_only=true',
+      { headers: { 'X-Admin-Email': 'admin@example.com', 'X-Admin-Token': 'admin-token' } },
+    )
+    await GET(request)
+
+    const forwarded = new URL(String(fetchMock.mock.calls[0][0])).searchParams
+    expect(forwarded.get('low_match_only')).toBe('true')
+  })
+
   it('管理者認証ヘッダとクエリパラメータをそのままバックエンドへ転送する', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ students: [], total: 0, limit: 25, offset: 0 }), {
