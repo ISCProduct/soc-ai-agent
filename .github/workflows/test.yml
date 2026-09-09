@@ -112,6 +112,11 @@ jobs:
       - name: 本番 uptime 判定のテスト
         run: ./automation/test/prod-uptime-decision-test.sh
 
+      # Discordコマンド登録の失敗理由が表示されること。
+      # 以前は curl -sf で握り潰しており、登録できない原因が追えなかった。
+      - name: Discord コマンド登録スクリプトのテスト
+        run: ./automation/test/discord-register-commands-test.sh
+
       - name: ワークフロー埋め込み Python の構文チェック
         run: |
           python3 - <<'PYEOF'
