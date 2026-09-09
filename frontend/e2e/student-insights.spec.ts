@@ -74,9 +74,11 @@ test.describe('生徒の傾向分析', () => {
     await expect(row).toBeVisible({ timeout: 8000 })
     await expect(row.getByText('yamada@example.com')).toBeVisible()
     await expect(row.getByText('対話タイプ')).toBeVisible()
-    await expect(row.getByText('コミュニケーション力 90')).toBeVisible()
-    await expect(row.getByText('ソフトウェア開発 81.2')).toBeVisible()
-    await expect(row.getByText('情報通信業 76.4')).toBeVisible()
+    // スコアはバー表示(#1225)なので、ラベルと数値は別要素。
+    // 読み上げ用の aria-label で「どのラベルが何点か」を確認する
+    await expect(row.getByRole('img', { name: 'コミュニケーション力 90点' })).toBeVisible()
+    await expect(row.getByRole('img', { name: 'ソフトウェア開発 81.2点' })).toBeVisible()
+    await expect(row.getByRole('img', { name: '情報通信業 76.4点' })).toBeVisible()
 
     // 参考情報である旨の注記(教育現場での誤用防止)
     await expect(page.getByText('あくまで参考情報')).toBeVisible()
@@ -94,8 +96,8 @@ test.describe('生徒の傾向分析', () => {
 
     // タイプ名も上位カテゴリも業界も出してはいけない
     await expect(page.getByText('技術探究タイプ')).toHaveCount(0)
-    await expect(page.getByText('技術志向 88')).toHaveCount(0)
-    await expect(page.getByText('金融業 55.5')).toHaveCount(0)
+    await expect(page.getByRole('img', { name: '技術志向 88点' })).toHaveCount(0)
+    await expect(page.getByRole('img', { name: '金融業 55.5点' })).toHaveCount(0)
 
     // スコアがある生徒側は従来通り表示される
     await expect(page.getByRole('row').filter({ hasText: '山田太郎' }).getByText('対話タイプ')).toBeVisible()

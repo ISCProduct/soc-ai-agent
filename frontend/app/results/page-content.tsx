@@ -12,6 +12,7 @@ import {
 } from './components/ResultsStatusViews'
 import ResultsListView from './components/ResultsListView'
 import AnalysisScoreCard from './components/AnalysisScoreCard'
+import { LowMatchConfirmDialog } from '@/components/LowMatchConfirmDialog'
 
 /** ReactFlow 依存の詳細ビューは一覧表示では不要のため遅延ロード */
 const CompanyDetailView = dynamic(() => import('./components/CompanyDetailView'), {
@@ -60,6 +61,9 @@ function ResultsContent() {
     handleReset,
     handleToggleFavorite,
     handleApply,
+    lowMatchTarget,
+    cancelLowMatchApply,
+    confirmLowMatchApply,
     handleCloseDetail,
     handleCloseSnackbar,
     navigate,
@@ -125,6 +129,7 @@ function ResultsContent() {
   }
 
   return (
+    <>
     <ResultsListView
       companies={companies}
       isProvisional={isProvisional}
@@ -148,6 +153,17 @@ function ResultsContent() {
       onApply={handleApply}
       onNavigate={navigate}
     />
+    {/* マッチ度が低い企業への応募前の確認(#1028)。応募はブロックしない */}
+    {lowMatchTarget && (
+      <LowMatchConfirmDialog
+        open
+        companyName={lowMatchTarget.name}
+        matchScore={lowMatchTarget.matchScore}
+        onCancel={cancelLowMatchApply}
+        onConfirm={confirmLowMatchApply}
+      />
+    )}
+    </>
   )
 }
 

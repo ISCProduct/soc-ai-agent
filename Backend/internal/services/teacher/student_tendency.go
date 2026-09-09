@@ -31,6 +31,8 @@ type StudentTendency struct {
 	TypeLabel        string           `json:"type_label"`
 	TopCategories    []TopCategory    `json:"top_categories"`
 	SuitedIndustries []SuitedIndustry `json:"suited_industries"`
+	// 低マッチのまま進行中の応募（#1028）。無ければ空。
+	LowMatchApplications []repositories.LowMatchApplication `json:"low_match_applications,omitempty"`
 	// DataAvailable が false のときタイプも業界も参考にならない。
 	// UI 側で「分析データ不足」と出す（PRD 境界値）。
 	DataAvailable bool `json:"data_available"`

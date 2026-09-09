@@ -73,8 +73,10 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
   const improvements = parseJsonSafe(report.improvements_json) as string[] | null
 
   // Calculate overall score (average of all categories)
-  const overallScore = scores
-    ? Math.round((Object.values(scores).reduce((s, v) => s + v, 0) / Object.values(scores).length) * 10) / 10
+  // 空オブジェクトは truthy なので、件数を見ないと 0/0 で NaN が「NaN / 5」と表示される
+  const scoreValues = scores ? Object.values(scores) : []
+  const overallScore = scoreValues.length > 0
+    ? Math.round((scoreValues.reduce((s, v) => s + v, 0) / scoreValues.length) * 10) / 10
     : null
 
   return (
@@ -97,11 +99,11 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
       </Paper>
 
       {/* Scores */}
-      {scores && (
+      {scoreValues.length > 0 && (
         <Paper sx={{ bgcolor: paperBg, border: paperBorder, p: 3, borderRadius: 2 }}>
           <Typography sx={{ color: textPrimary, fontWeight: 700, mb: 2 }}>カテゴリ別スコア</Typography>
           <Stack spacing={1.5}>
-            {Object.entries(scores).map(([key, value]) => (
+            {Object.entries(scores ?? {}).map(([key, value]) => (
               <Box key={key}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
                   <Typography variant="body2" sx={{ color: textSecondary }}>

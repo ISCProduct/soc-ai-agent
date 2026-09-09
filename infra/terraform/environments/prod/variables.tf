@@ -198,3 +198,12 @@ variable "enable_error_fallback" {
   # 実際に「IAM権限不足の回避」でfalseへ倒したまま放置され、applyできない状態が続いた。
   default = true
 }
+
+# AI面接の音声認識モデル。既定はコード側と同じ mini。
+# 精度に問題が出たときに gpt-4o-transcribe へ戻せるよう、
+# 値を明示して切り替え口を用意しておく（既定と同値なので挙動は変わらない）。
+variable "openai_whisper_model" {
+  description = "AI面接のSTTモデル。品質に問題が出たら gpt-4o-transcribe に変更する"
+  type        = string
+  default     = "gpt-4o-mini-transcribe"
+}

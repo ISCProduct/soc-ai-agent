@@ -110,3 +110,41 @@ func nilIfEmptyUints(v []uint) []uint {
 	}
 	return v
 }
+
+// EnsureDeleted は Sync と違い、削除の成否を呼び出し元へ返す（#1204）。
+// 退会済みユーザーの取りこぼしを日次で回収する経路が、
+// 成功したかどうかを判断できる必要がある。
+func TestEnsureDeleted(t *testing.T) {
+	t.Run("削除を実行して成功を返す", func(t *testing.T) {
+		idx := &stubIndexer{}
+		s := NewStudentIndexSyncer(&stubScoutProfiles{}, idx)
+
+		require.NoError(t, s.EnsureDeleted(context.Background(), 42))
+		assert.Equal(t, []uint{42}, idx.deleted, "削除が実行されていない")
+	})
+
+	t.Run("失敗を握り潰さない", func(t *testing.T) {
+		idx := &stubIndexer{deleteErr: errors.New("chroma unavailable")}
+		s := NewStudentIndexSyncer(&stubScoutProfiles{}, idx)
+
+		err := s.EnsureDeleted(context.Background(), 42)
+		assert.Error(t, err, "Sync と違い、成否を返さないと再試行の要否が判断できない")
+		assert.Equal(t, []uint{42}, idx.deleted)
+	})
+
+	t.Run("公開可否を見ずに必ず削除する", func(t *testing.T) {
+		// 退会済みでも IsScoutVisible の取得が失敗しうる。
+		// そこで止まると Sync と同じ穴になるので、EnsureDeleted は参照しない。
+		idx := &stubIndexer{}
+		s := NewStudentIndexSyncer(&stubScoutProfiles{allow: true, allowErr: errors.New("db down")}, idx)
+
+		require.NoError(t, s.EnsureDeleted(context.Background(), 7))
+		assert.Equal(t, []uint{7}, idx.deleted)
+	})
+
+	t.Run("未設定でも落ちない", func(t *testing.T) {
+		var s *StudentIndexSyncer
+		require.NoError(t, s.EnsureDeleted(context.Background(), 1))
+		require.NoError(t, NewStudentIndexSyncer(&stubScoutProfiles{}, nil).EnsureDeleted(context.Background(), 1))
+	})
+}

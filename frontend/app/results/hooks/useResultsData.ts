@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { sendAnalysisReport } from '@/lib/api'
 import { fetchWithTimeout } from '@/lib/fetch-timeout'
 import { authService } from '@/lib/auth'
+import { needsLowMatchConfirm } from '@/lib/low-match'
 import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
 import {
   GUEST_APPLICATIONS_DISABLED_REASON,
@@ -53,6 +54,8 @@ export function useResultsData() {
   const [emailSending, setEmailSending] = useState(false)
   const [favoritingId, setFavoritingId] = useState<number | null>(null)
   const [applyingId, setApplyingId] = useState<number | null>(null)
+  // 低マッチ確認ダイアログの対象。null なら非表示（#1028）
+  const [lowMatchTarget, setLowMatchTarget] = useState<Company | null>(null)
   const [snackbar, setSnackbar] = useState<SnackbarState>({
     open: false,
     message: '',
@@ -271,6 +274,8 @@ export function useResultsData() {
     }
   }
 
+  // マッチ度が低い企業は一度確認する(#1028)。ブロックはしない。
+  // 応募処理そのものは runApply のまま変えず、前段に確認だけを挟む。
   const handleApply = async (e: MouseEvent, company: Company) => {
     e.stopPropagation()
     const user = authService.getStoredUser()
@@ -279,6 +284,15 @@ export function useResultsData() {
       return
     }
     if (!company.matchId || company.isApplied || applyingId !== null) return
+    if (needsLowMatchConfirm(company.matchScore)) {
+      setLowMatchTarget(company)
+      return
+    }
+    await runApply(company)
+  }
+
+  const runApply = async (company: Company) => {
+    if (!company.matchId) return
     setApplyingId(company.matchId)
     try {
       const res = await fetch('/api/applications', {
@@ -364,6 +378,15 @@ export function useResultsData() {
     handleReset,
     handleToggleFavorite,
     handleApply,
+    lowMatchTarget,
+    // ダイアログを閉じるだけ。応募APIは呼ばない
+    cancelLowMatchApply: () => setLowMatchTarget(null),
+    // 学生が「このまま応募する」を選んだとき。確認済みなので runApply へ直行する
+    confirmLowMatchApply: async () => {
+      const target = lowMatchTarget
+      setLowMatchTarget(null)
+      if (target) await runApply(target)
+    },
     handleCloseDetail,
     handleCloseSnackbar,
     navigate,

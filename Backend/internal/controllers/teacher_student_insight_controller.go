@@ -57,7 +57,18 @@ func (c *TeacherStudentInsightController) TendencyAnalysis(ctx echo.Context) err
 		return echo.NewHTTPError(http.StatusForbidden, "school scope is not resolved")
 	}
 
-	result, err := c.svc.ListTendencies(limit, offset, query, schoolID)
+	// low_match_only=true で「低マッチのまま進行中の応募がある生徒」に絞る（#1028）。
+	// 既定は false。不正値は false 扱いにして絞り込みが効かない方向へ倒す
+	// （誤って生徒を隠さない）。
+	lowMatchOnly, _ := strconv.ParseBool(ctx.QueryParam("low_match_only"))
+
+	var result *teacher.TendencyResult
+	var err error
+	if lowMatchOnly {
+		result, err = c.svc.ListTendenciesLowMatchOnly(limit, offset, query, schoolID)
+	} else {
+		result, err = c.svc.ListTendencies(limit, offset, query, schoolID)
+	}
 	if err != nil {
 		return echoInternalError(err)
 	}

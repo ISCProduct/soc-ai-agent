@@ -68,9 +68,16 @@ jobs:
       - name: Build check
         run: go build ./...
 
+      # バージョンを固定する。@latest は govulncheck 側の Go 要求が上がった瞬間に
+      # 全PRのCIが落ちる。実際 v1.8.0 が go>=1.26 を要求するようになり、
+      # go 1.25 + GOTOOLCHAIN=local の本CIでインストール自体が失敗した(2026-09-09)。
+      #
+      #   golang.org/x/vuln@v1.8.0 requires go >= 1.26.0 (running go 1.25.13)
+      #
+      # v1.7.0 が go 1.25 系に対応する最新。Go を上げるときは合わせて見直すこと。
       - name: Security scan (govulncheck)
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck ./...
 
   # 旧 audit-frontend (npm audit) の置き換え (#1132)。
@@ -104,6 +111,11 @@ jobs:
       # または止めたはずの本番が課金され続ける。
       - name: 本番 uptime 判定のテスト
         run: ./automation/test/prod-uptime-decision-test.sh
+
+      # Discordコマンド登録の失敗理由が表示されること。
+      # 以前は curl -sf で握り潰しており、登録できない原因が追えなかった。
+      - name: Discord コマンド登録スクリプトのテスト
+        run: ./automation/test/discord-register-commands-test.sh
 
       - name: ワークフロー埋め込み Python の構文チェック
         run: |

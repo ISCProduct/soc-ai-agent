@@ -126,8 +126,17 @@ func isAbstractOnlyAnswer(answer string) bool {
 }
 
 // BuildFollowUpQuestionText は深掘り追質問のテンプレート文を返す。
-// 回答内容のハッシュでバリエーションを選び、きっかけ・継続力の観点も一定確率で含める（#1093）。
+//
+// まず STAR（状況・課題・行動・成果）のうち欠けている要素を狙う（#794）。
+// ハッシュによるバリエーション選択は回答内容と無関係なので、
+// 「成果が語られていない回答に、きっかけを聞き返す」ことが起きていた。
+//
+// STAR が揃っている回答には、従来どおりハッシュでバリエーションを選び、
+// きっかけ・継続力の観点も一定確率で含める（#1093）。
 func BuildFollowUpQuestionText(originalQuestion, userAnswer string) string {
+	if q, _ := STARFollowUpQuestion(userAnswer); q != "" {
+		return q
+	}
 	snippet := strings.TrimSpace(userAnswer)
 	if utf8.RuneCountInString(snippet) > 40 {
 		snippet = string([]rune(snippet)[:40]) + "…"

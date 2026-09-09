@@ -25,13 +25,13 @@ type InterviewService struct {
 	userRepo             repository.UserRepository
 	emailService         *email.EmailService
 	openaiClient         *openai.Client
+	budgetGuard          interviewBudgetGuard
 	realtimeUsageService *costs.RealtimeUsageService
 	crossFeature         *flywheel.CrossFeatureIntegrationService
 	companyQuestionRepo  repository.InterviewCompanyQuestionRepository
 	questionStateRepo    repository.InterviewQuestionStateRepository
 	skillScoreRepo       SkillScoreReader
 	companyRepo          shared.CompanyBriefReader
-	userWeightScoreRepo  repository.UserWeightScoreRepository
 	jobCh                chan uint
 	workerOnce           sync.Once
 	jobs                 shared.JobEnqueuer
@@ -82,11 +82,6 @@ func (s *InterviewService) SetSkillScoreRepo(r SkillScoreReader) {
 // SetCompanyRepo 企業共有キャッシュ参照用リポジトリを注入する（オプション）
 func (s *InterviewService) SetCompanyRepo(r shared.CompanyBriefReader) {
 	s.companyRepo = r
-}
-
-// SetUserWeightScoreRepo ユーザー重みスコアリポジトリを注入する（オプション）
-func (s *InterviewService) SetUserWeightScoreRepo(r repository.UserWeightScoreRepository) {
-	s.userWeightScoreRepo = r
 }
 
 // SetCrossFeatureService 機能間連携サービスを注入する（オプション）

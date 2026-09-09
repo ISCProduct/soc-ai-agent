@@ -28,9 +28,10 @@ AI面接の音声基盤について、**Realtime API 実装を有効化するか
 
 | レイヤ | 実装 | モデル |
 | --- | --- | --- |
-| 音声認識 | `openai/tts.go:25` `Transcribe` | `gpt-4o-transcribe` |
-| 質問生成 | `openai/client_chat.go:51` `ChatInterview` | `gpt-4o-mini` |
-| 音声合成 | `openai/tts.go:83` `TTS` | `tts-1` |
+| 音声認識 | `openai/transcribe_hints.go` `TranscribeWithHints` | `gpt-4o-mini-transcribe` |
+| 音声認識(再送) | `openai/transcribe_hints.go` `TranscribeWithModel` | `gpt-4o-transcribe`（問題発話のみ） |
+| 質問生成 | `openai/client_chat.go` `ChatInterview` | `gpt-4o-mini` |
+| 音声合成 | `openai/tts.go` `TTS` | `tts-1` |
 
 呼び出し元は `frontend/app/interview/hooks/useInterviewSession.ts:266, 553`。
 
@@ -87,10 +88,33 @@ AI面接の音声基盤について、**Realtime API 実装を有効化するか
 | 応答遅延 | 2〜4秒（STT→LLM→TTS の直列） | 0.3〜0.8秒 | 選択次第 |
 | 発話の自然さ | `tts-1` 相当。抑揚が乏しい | 会話音声として自然 | 選択次第 |
 | 割り込み対応 | 不可 | 可（`interrupt_response`） | 選択次第 |
-| 1面接あたり | 約 $0.05 | 約 $0.18（`gpt-realtime-mini`） | — |
-| 100人×毎日 | 約 $150/月 | 約 $540/月 | — |
+| 1面接あたり | 約 $0.06〜0.12 | 約 $0.18（`gpt-realtime-mini`） | — |
+| 100人×毎日 | 約 $180〜360/月 | 約 $540/月 | — |
 | 変更量 | 削除のみ | Backend API 移行＋Frontend 新規実装 | B に加えて分岐 |
 | 保守負荷 | 最小 | 中 | 大 |
+
+**費用の注記。** 「1面接あたり」の内訳（STT / LLM / TTS の比率）は本書に書かれていない。
+確実に測れているのは STT 部分だけで、面接15分・学生発話7.5分として
+`gpt-4o-mini-transcribe` が $0.023、`gpt-4o-transcribe` が $0.045
+（`docs/research/interview-audio-eval/RESULTS_fallback.md`）。
+**フォールバックの再送率が50%を超えると、mini + 再送は高精度モデル単独より高くなる。**
+
+「100人×毎日」は上限想定である。この数字は学校向けの月額予算を大きく超える。
+
+月次の面接回数を数えて閾値で通知する仕組みを入れた（`InterviewBudgetService`）。
+
+| 環境変数 | 既定 | 意味 |
+| --- | --- | --- |
+| `INTERVIEW_MONTHLY_LIMIT` | 1000 | 月次の面接回数の上限 |
+| `INTERVIEW_ALERT_THRESHOLD` | 上限の8割 | この回数で1回だけ通知する |
+| `INTERVIEW_BUDGET_ENFORCE` | `false` | `true` にすると上限で面接開始を止める |
+
+**既定では止めない。** 実際の利用量が見えないまま遮断すると、面接練習をしたい学生を
+理由も分からず弾いてしまう。まず1〜2か月ぶんの実測を見てから
+`INTERVIEW_BUDGET_ENFORCE=true` にすること。
+
+既定の1000回は「面接1回あたり約 $0.035、月 $50 の予算のうち $35 を面接に割く」
+という仮定から引いた値で、**費用の内訳が未実測なので実測後に見直す。**
 
 ### 6.2 各案の評価
 
@@ -163,7 +187,7 @@ AI面接の音声基盤について、**Realtime API 実装を有効化するか
 | --- | --- | --- |
 | 案の選択 | A / B のいずれか | プロダクト判断 |
 | B 採用時のモデル | `gpt-realtime-mini` か `gpt-realtime`（約3倍） | 実際に聞いて判断 |
-| STT モデル | `gpt-4o-transcribe` を `gpt-4o-mini-transcribe` に下げるか | **精度検証が済むまで下げない**。文字起こしはレポート採点の入力(F-2)であり、費用差は1面接あたり約 $0.03 と小さい |
+| STT モデル | `gpt-4o-mini-transcribe` を既定値として採用 | 単価は半額。**合成音声で検証済み**（`docs/research/interview-audio-eval/RESULTS_stt_hints.md`）で、CER・固有名詞正解率に差は出なかった。ただし **mini は「御社」を8/8で「本社」と誤認する**ため、この語を検知して高精度モデルへ再送するフォールバックを併用する。実発話の精度と再送率は未測定で、問題が出たら `OPENAI_WHISPER_MODEL=gpt-4o-transcribe` に戻す。戻すときは `terraform.tfvars` の `openai_whisper_model` を変更して apply する |
 | 既存 Realtime 実装の扱い | A 採用時、削除するか凍結して残すか | 本書は削除を推奨 |
 
 ## 10. 参照
