@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"errors"
 	"log/slog"
+	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -93,8 +96,8 @@ func TestEstimateAudioSeconds(t *testing.T) {
 	}{
 		{"0バイト", 0, 0},
 		{"負数", -1, 0},
-		{"4KBで約1秒", 4000, 1},
-		{"40KBで約10秒", 40000, 10},
+		{"16KBで1秒", 16000, 1},
+		{"160KBで10秒", 160000, 10},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -110,5 +113,38 @@ func TestObserveTranscribe_RecordsLatency(t *testing.T) {
 	obs := ObserveTranscribe(1, 1, 1000, "audio/webm", time.Now().Add(-1500*time.Millisecond), "はい", nil)
 	if obs.LatencyMS < 1400 || obs.LatencyMS > 1700 {
 		t.Errorf("LatencyMS = %d, want 約1500", obs.LatencyMS)
+	}
+}
+
+// 推定バイトレートがフロントの録音設定とずれると、
+// 「音声長のわりに文字数が少ない」フォールバックが誤爆して費用が上がる。
+// 実際に合成音声(約3,800バイト/秒)を根拠に4,000としていた時期があり、
+// ブラウザの実データ(16,000バイト/秒)と4倍ずれていた。
+func TestEstimateAudioSeconds_MatchesRecorderBitrate(t *testing.T) {
+	const hookPath = "../../../../frontend/app/interview/hooks/useInterviewSession.ts"
+	src, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Skipf("フロントのソースを読めないためスキップ: %v", err)
+	}
+
+	// audioBitsPerSecond: 128000 のような記述を拾う
+	re := regexp.MustCompile(`audioBitsPerSecond:\s*([0-9_]+)`)
+	m := re.FindStringSubmatch(string(src))
+	if m == nil {
+		t.Fatalf("%s に audioBitsPerSecond が見つからない。録音設定の変更を検出できない", hookPath)
+	}
+	bits, err := strconv.Atoi(strings.ReplaceAll(m[1], "_", ""))
+	if err != nil {
+		t.Fatalf("audioBitsPerSecond を数値にできない: %q", m[1])
+	}
+
+	if bits != RecorderAudioBitsPerSecond {
+		t.Errorf("フロントの録音設定 %d bps に対し、推定は %d bps を前提にしている。"+
+			"EstimateAudioSeconds を合わせること", bits, RecorderAudioBitsPerSecond)
+	}
+
+	// 1秒ぶんのバイト数を入れて1秒に戻ること
+	if got := EstimateAudioSeconds(bits / 8); got != 1 {
+		t.Errorf("1秒ぶんの音声が %v 秒と推定された", got)
 	}
 }

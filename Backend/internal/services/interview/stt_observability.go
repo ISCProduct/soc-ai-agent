@@ -49,11 +49,22 @@ func STTModelName() string {
 // ここでの用途は「音声長に対して認識文字数が極端に少ないか」の判定と
 // 費用の概算なので、桁が合っていれば足りる。
 //
-// bytesPerSecond はブラウザの MediaRecorder が出す実測値から決めた概算。
-// docs/research/interview-audio-eval/audio/*.webm は 8〜10秒で 30〜46KB
-// だったため、約4KB/秒とする。
+// bytesPerSecond はフロントの録音設定から決まる。
+// useInterviewSession.ts が audioBitsPerSecond: 128000 で録るため 16,000 バイト/秒。
+//
+// 以前は調査用の合成音声（docs/research/interview-audio-eval/audio/*.webm、
+// 約3,800バイト/秒）を根拠に 4,000 としていたが、これは別のエンコード設定で
+// 作ったファイルであって、ブラウザが実際に送るデータではない。
+// 4倍過大に見積もっていたため、10秒の発話を40秒とみなし、
+// 「音声長のわりに文字数が少ない」フォールバックが短い回答で軒並み誤爆していた
+// （＝再送が増え、費用が上がる）。
+//
+// フロントの設定を変えるときはここも変えること。
+// TestEstimateAudioSeconds_MatchesRecorderBitrate がずれを検出する。
+const RecorderAudioBitsPerSecond = 128000
+
 func EstimateAudioSeconds(audioBytes int) float64 {
-	const bytesPerSecond = 4000.0
+	const bytesPerSecond = RecorderAudioBitsPerSecond / 8.0
 	if audioBytes <= 0 {
 		return 0
 	}
