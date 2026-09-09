@@ -272,4 +272,10 @@ interview_usage_logs
 - **実発話での精度と、フォールバックの再送率が未測定。** 再送率50%が損益分岐点で、
   超えると mini + 再送は高精度モデル単独より高くつく
   （`RESULTS_fallback.md`）。ステージングで `fell_back` を集計して判断する。
-  問題があれば `OPENAI_WHISPER_MODEL=gpt-4o-transcribe` へ戻す
+  問題があれば `OPENAI_WHISPER_MODEL=gpt-4o-transcribe` へ戻す。
+- **戻す経路が本番・ステージングに存在しない。** `OPENAI_WHISPER_MODEL` は
+  Terraform のタスク定義（`infra/terraform/environments/*/main.tf` の
+  `environment`）に無く、`OPENAI_WEB_SEARCH_MODEL` 等の他モデル名だけが
+  明示されている。現状で戻すにはコード変更とデプロイが要る。
+  **環境変数の追加は次回のデプロイに合わせて行う**（タスク定義の変更は
+  新リビジョン＝サービス更新を伴い、単独で当てると二重タスク稼働になる）
