@@ -22,14 +22,12 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Auto approve minor/patch updates
-        if: |
-          steps.metadata.outputs.update-type == 'version-update:semver-minor' ||
-          steps.metadata.outputs.update-type == 'version-update:semver-patch'
-        run: gh pr review "$PR_URL" --approve --body "dependabotによるminor/patch更新のため自動承認します。"
-        env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 自動承認は行わない。
+      # このリポジトリでは「Allow GitHub Actions to create and approve pull requests」が
+      # 無効なため、gh pr review --approve は必ず
+      # 「GitHub Actions is not permitted to approve pull requests」で失敗する。
+      # 失敗しても auto-merge の有効化自体は下のステップで行えるので、
+      # 承認は人が行う運用にして、通らないAPIを叩き続けるのをやめる。
 
       - name: Enable auto-merge for minor/patch updates
         if: |
