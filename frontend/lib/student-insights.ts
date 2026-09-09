@@ -12,6 +12,13 @@ export interface SuitedIndustry {
   score: number
 }
 
+// 低マッチのまま進行中の応募1件(Issue #1028)。
+export interface LowMatchApplication {
+  company_name: string
+  match_score: number
+  status: string
+}
+
 export interface StudentTendency {
   user_id: number
   name: string
@@ -19,6 +26,7 @@ export interface StudentTendency {
   type_label: string
   top_categories: CategoryScore[] | null
   suited_industries: SuitedIndustry[] | null
+  low_match_applications?: LowMatchApplication[] | null
   data_available: boolean
 }
 
@@ -55,4 +63,10 @@ export function displayIndustries(student: StudentTendency): SuitedIndustry[] {
 // スコアは整数ならそのまま、小数があれば小数第1位まで表示する
 export function formatScore(score: number): string {
   return Number.isInteger(score) ? String(score) : score.toFixed(1)
+}
+
+// 低マッチのまま進行中の応募。無ければ空配列。
+// バックエンドは該当なしのとき項目ごと省略する(omitempty)ので、null も空として扱う。
+export function lowMatchApplications(student: StudentTendency): LowMatchApplication[] {
+  return student.low_match_applications ?? []
 }

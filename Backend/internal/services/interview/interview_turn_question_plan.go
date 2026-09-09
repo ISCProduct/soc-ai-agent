@@ -123,8 +123,21 @@ func (s *InterviewService) generateFollowUpQuestion(ctx context.Context, origina
 		return "", errors.New("openai client not configured")
 	}
 	systemPrompt := "あなたは就活面接官です。応募者の直前回答を踏まえ、具体性を引き出す追質問を1文だけ日本語で作成してください。必要に応じて、取り組みのきっかけや継続の方法にも触れてください。余計な説明は不要です。"
-	userPrompt := fmt.Sprintf("元の質問: %s\n応募者回答: %s", originalQuestion, userAnswer)
+	userPrompt := buildFollowUpUserPrompt(originalQuestion, userAnswer)
 	ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	return s.openaiClient.ResponsesWithMaxTokens(ctxTimeout, systemPrompt, userPrompt, 0.2, 120)
+}
+
+// buildFollowUpUserPrompt は追質問生成のユーザープロンプトを組み立てる。
+//
+// STAR で欠けている要素を明示して、追質問の狙いを固定する（#794）。
+// 指定しないと、成果が語られていない回答にも「きっかけ」を聞き返すことがある。
+func buildFollowUpUserPrompt(originalQuestion, userAnswer string) string {
+	prompt := fmt.Sprintf("元の質問: %s\n応募者回答: %s", originalQuestion, userAnswer)
+	if _, missing := STARFollowUpQuestion(userAnswer); missing != "" {
+		label := STARLabel(missing)
+		prompt += fmt.Sprintf("\n\nこの回答には「%s」が含まれていません。「%s」を引き出す質問にしてください。", label, label)
+	}
+	return prompt
 }
