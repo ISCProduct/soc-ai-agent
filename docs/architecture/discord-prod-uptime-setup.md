@@ -11,6 +11,8 @@ Discordのスラッシュコマンドから本番環境(AWS ECS Fargate + RDS)�
 | `/prod state:auto` | 日付リストに従う状態へ戻す(既定) | 同上 |
 | `/prod-uptime` | 終日起動する日付を追加(モーダル入力) | 同上 |
 | `/prod-uptime-list` | 起動予定日と現在の設定を表示 | 制限なし(誰でも閲覧可) |
+| `/staging state:on` | ステージングを**起動** | `DISCORD_ALLOWED_ROLE_ID` のロール保有者のみ |
+| `/staging state:off` | ステージングを**停止** | 同上 |
 
 ## 仕組み
 
@@ -92,6 +94,53 @@ https://api-stg.shukatsu-ai.jp/api/discord/interactions
 
 保存時にDiscordがPING検証リクエストを送るため、事前に3〜6の設定を完了させ、staging backendが
 起動している状態で保存すること。検証に失敗する場合は `DISCORD_PUBLIC_KEY` の設定漏れを疑う。
+
+## 2-2. ステージングの起動/停止（#1249）
+
+`/staging` は本番と別の仕組みで動く。**日付リストを持たない。**
+ステージングは展示会運用ではなく開発用なので、「今起動しているか」だけを
+明示的に切り替える。`auto` を作っていないのは、日付リストが無い以上
+`auto` と `on` が同義になり、どちらを押したのか分からなくなるため。
+
+```
+Discordで /staging state:off
+  → Backend が SSM /soc-app/staging-uptime に off を書く
+  → staging-uptime-scheduler.yml が ASG を min=0 desired=0 にする
+```
+
+| | 本番 (`/prod`) | ステージング (`/staging`) |
+| --- | --- | --- |
+| 対象 | ECS Fargate + RDS | EC2 Auto Scaling Group |
+| SSM | `/soc-app/prod-uptime-override` | `/soc-app/staging-uptime` |
+| 状態 | on / off / auto | on / off |
+| 日付リスト | あり | なし |
+| ワークフロー | `prod-uptime-scheduler.yml`（毎時5分 UTC） | `staging-uptime-scheduler.yml`（毎時10分 UTC） |
+
+### ASG は min_size も一緒に下げる
+
+ASG は `desired < min` を受け付けない。`desired` だけ 0 にしようとすると
+`ValidationError` になるため、ワークフローは `min_size` も同時に変更する。
+
+これに伴い Terraform 側の `ignore_changes` に `min_size` を追加した。
+除外しないと、次の `terraform apply` で `min=1` に戻り、
+**停止したはずのステージングが黙って起動する。**
+
+### 判断できないときは止めない
+
+SSM の値が未作成・未知の値・空文字のとき、ワークフローは **on** として扱う。
+
+`off` に倒すと、パラメータを作る前や手書きミスでステージングが理由不明に落ちる。
+一方、権限エラーやスロットリングは握りつぶさず**ジョブを失敗させる**。
+「読めなかったから止めた」は原因が追えない事故になる。
+
+### 停止中のデプロイに注意
+
+ステージングを `off` にしたまま `develop` へ push すると、
+デプロイ先のインスタンスが無いため**デプロイが失敗する**。
+停止運用をする場合は、デプロイ前に `/staging state:on` で起動すること。
+
+（自動で起動し直す仕組みは入れていない。デプロイのたびに勝手に起動すると、
+コスト削減のために止めた意味が無くなるため。）
 
 ## 3. 実行権限ロールの確認
 

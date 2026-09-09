@@ -1,5 +1,5 @@
 #!/bin/bash
-# Discordスラッシュコマンド /prod, /prod-uptime, /prod-uptime-list をアプリケーションに登録する。
+# Discordスラッシュコマンド /prod, /staging, /prod-uptime, /prod-uptime-list を登録する。
 # 一度実行すれば以後は再実行不要（コマンド内容を変更したときのみ再実行）。
 #
 # 必要な環境変数:
@@ -80,6 +80,25 @@ COMMANDS='[
     "name": "prod-uptime-list",
     "description": "本番の起動予定日と現在の設定を表示します(誰でも閲覧可)",
     "type": 1
+  },
+  {
+    "name": "staging",
+    "description": "ステージング環境を起動/停止します",
+    "type": 1,
+    "dm_permission": false,
+    "default_member_permissions": "0",
+    "options": [
+      {
+        "name": "state",
+        "description": "on=起動 / off=停止",
+        "type": 3,
+        "required": true,
+        "choices": [
+          { "name": "on (起動する)", "value": "on" },
+          { "name": "off (停止する)", "value": "off" }
+        ]
+      }
+    ]
   },
   {
     "name": "prod",

@@ -115,6 +115,7 @@ const (
 	CommandNameProdUptime     = "prod-uptime"
 	CommandNameProdUptimeList = "prod-uptime-list"
 	CommandNameProd           = "prod"
+	CommandNameStaging        = "staging"
 	OptionNameState           = "state"
 	ModalCustomIDProdUptime   = "prod_uptime_modal"
 	TextInputCustomIDDate     = "prod_uptime_date"

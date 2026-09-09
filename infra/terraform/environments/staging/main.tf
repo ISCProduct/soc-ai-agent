@@ -214,6 +214,8 @@ resource "aws_iam_role_policy" "app" {
         Resource = [
           "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/soc-app/prod-uptime-dates",
           "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/soc-app/prod-uptime-override",
+          # /staging state:on|off の書き込み先（#1249）
+          "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/soc-app/staging-uptime",
         ]
       },
     ]
@@ -356,9 +358,14 @@ resource "aws_autoscaling_group" "app" {
   }
 
   # デプロイ後1時間で自動停止/次回デプロイ時に自動起動する運用のため、
-  # CIが変更するdesired_capacityをterraform applyで巻き戻さない
+  # CIが変更するdesired_capacityをterraform applyで巻き戻さない。
+  #
+  # min_size も除外する。ASGは desired < min を受け付けないため、
+  # /staging state:off は min も 0 にする（staging-uptime-scheduler.yml）。
+  # min を除外しないと、次の terraform apply で min=1 に戻り、
+  # 停止したはずのステージングが黙って起動する（#1249）。
   lifecycle {
-    ignore_changes = [desired_capacity]
+    ignore_changes = [desired_capacity, min_size]
   }
 
   tag {
