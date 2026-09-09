@@ -67,12 +67,14 @@ func (a STARAnalysis) Has(e STARElement) bool {
 
 // Missing は欠けている要素を、深掘りする優先順で返す。
 //
-// R（成果）を最優先にするのは、成果が語られない回答が最も評価しづらく、
-// かつ学生が最も落としやすい要素だから。次に A（自分の行動）。
+// A（行動）を先に聞くのは、会話の順序がそうだから。
+// 何をしたかが語られていない相手に「その取り組みの結果は？」と聞くと、
+// 存在しない取り組みの成果を尋ねることになる。
+// A が語られていれば、次に落としやすい R（成果）を聞く。
 // S と T は文脈情報で、無くても回答の価値は残る。
 func (a STARAnalysis) Missing() []STARElement {
 	var missing []STARElement
-	for _, e := range []STARElement{STARResult, STARAction, STARSituation, STARTask} {
+	for _, e := range []STARElement{STARAction, STARResult, STARSituation, STARTask} {
 		if !a.Has(e) {
 			missing = append(missing, e)
 		}
@@ -111,9 +113,23 @@ var starFollowUpQuestions = map[STARElement]string{
 }
 
 // STARFollowUpQuestion は欠けている要素を狙う深掘り質問を返す。
-// STAR が揃っている場合は空文字を返す（呼び出し側が従来のテンプレートへ委ねる）。
+//
+// 次の2つの場合は空文字を返し、呼び出し側の従来テンプレートへ委ねる。
+//
+//   - STAR が揃っている（深掘りする要素が無い）
+//   - **何ひとつ語られていない**（「はい。」「頑張りました。」など）
+//
+// 後者が重要で、STAR 分析は「エピソードは語られているが要素が欠けている」
+// ときに効く道具である。何も語られていない相手に欠落を1つ選んで聞くと、
+// 「はい。」に対して「その取り組みの結果、どうなりましたか」のような、
+// 存在しない取り組みを前提にした質問になる。
+// その場合は要素を絞らず、エピソードそのものを促す方がよい。
 func STARFollowUpQuestion(answer string) (string, STARElement) {
-	missing := AnalyzeSTAR(answer).Missing()
+	a := AnalyzeSTAR(answer)
+	if len(a.Evidence) == 0 {
+		return "", ""
+	}
+	missing := a.Missing()
 	if len(missing) == 0 {
 		return "", ""
 	}

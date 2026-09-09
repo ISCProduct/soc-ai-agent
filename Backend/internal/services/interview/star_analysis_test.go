@@ -121,19 +121,47 @@ func TestAnalyzeSTAR_EmptyAnswer(t *testing.T) {
 	if len(a.Missing()) != 4 {
 		t.Errorf("欠落要素 = %v, want 4件", a.Missing())
 	}
-	q, element := STARFollowUpQuestion("")
-	if q == "" || element != STARResult {
-		t.Errorf("空回答で質問が返らない: %q (%s)", q, element)
+}
+
+// 何ひとつ語られていない回答に、欠落を1つ選んだ質問を返さないこと。
+//
+// 「はい。」に対して「その取り組みの結果、どうなりましたか」と聞くと、
+// 存在しない取り組みの成果を尋ねることになり、会話が成立しない。
+// 要素を絞らずエピソードそのものを促す従来テンプレートへ委ねる。
+func TestSTARFollowUpQuestion_NothingToldNeedsNoElement(t *testing.T) {
+	for _, answer := range []string{
+		"",
+		"   ",
+		"はい。",
+		"そうですね。",
+		"えーと、頑張りました。",
+		"御社のビジョンに共感し、貢献したいと考えています。",
+	} {
+		t.Run(answer, func(t *testing.T) {
+			q, element := STARFollowUpQuestion(answer)
+			if q != "" || element != "" {
+				t.Errorf("何も語られていないのに %s を狙った: %q", STARLabel(element), q)
+			}
+		})
 	}
 }
 
-// 深掘りは成果(R)を最優先にする。
-// 複数欠けているときに状況や課題から聞くと、成果まで辿り着かずに時間切れになる。
-func TestSTARMissing_PrioritizesResult(t *testing.T) {
-	a := AnalyzeSTAR("がんばりました。")
+// 深掘りは A（行動）→ R（成果）の順で聞く。
+//
+// 何をしたかが語られていない相手に成果を聞くと、
+// 存在しない取り組みの成果を尋ねることになる。
+func TestSTARMissing_AsksActionBeforeResult(t *testing.T) {
+	// 場面だけあり、行動も成果も無い
+	a := AnalyzeSTAR("大学のゼミでのことです。")
 	missing := a.Missing()
-	if len(missing) == 0 || missing[0] != STARResult {
-		t.Errorf("優先順 = %v, want R が先頭", missing)
+	if len(missing) == 0 || missing[0] != STARAction {
+		t.Errorf("優先順 = %v, want A が先頭", missing)
+	}
+
+	// 行動はあるが成果が無い → 成果を聞く
+	b := AnalyzeSTAR("大学のゼミで集計を自動化する仕組みを実装しました。")
+	if m := b.Missing(); len(m) == 0 || m[0] != STARResult {
+		t.Errorf("行動がある場合の優先順 = %v, want R が先頭", m)
 	}
 }
 
