@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -58,8 +59,19 @@ func (d *WorkflowDispatcher) Enabled() bool {
 
 // Dispatch はワークフローを起動する。設定が無ければ (false, nil) を返す（エラーではない）。
 func (d *WorkflowDispatcher) Dispatch(ctx context.Context) (bool, error) {
-	if !d.Enabled() {
+	return d.DispatchWorkflow(ctx, d.workflow)
+}
+
+// DispatchWorkflow はワークフローを指定して起動する（#1249）。
+//
+// 本番とステージングで別のワークフローを叩くため、ファイル名を引数に取る。
+// 空文字なら既定（PROD_UPTIME_WORKFLOW_FILE）を使う。
+func (d *WorkflowDispatcher) DispatchWorkflow(ctx context.Context, workflow string) (bool, error) {
+	if d == nil || !d.Enabled() {
 		return false, nil
+	}
+	if strings.TrimSpace(workflow) == "" {
+		workflow = d.workflow
 	}
 
 	body, err := json.Marshal(map[string]string{"ref": d.ref})
@@ -71,7 +83,7 @@ func (d *WorkflowDispatcher) Dispatch(ctx context.Context) (bool, error) {
 	if base == "" {
 		base = defaultGitHubAPIBaseURL
 	}
-	url := fmt.Sprintf("%s/repos/%s/actions/workflows/%s/dispatches", base, d.repo, d.workflow)
+	url := fmt.Sprintf("%s/repos/%s/actions/workflows/%s/dispatches", base, d.repo, workflow)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return false, fmt.Errorf("リクエストの作成に失敗しました: %w", err)

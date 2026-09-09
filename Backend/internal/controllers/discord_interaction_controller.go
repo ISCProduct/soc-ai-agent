@@ -20,10 +20,23 @@ import (
 // 登録できるようにする（docs/architecture/infra-decision-oci-stg-aws-prod.md の
 // 「指定日リスト」運用を実現する入力口）。
 type DiscordInteractionController struct {
-	uptimeService *discord.UptimeService
-	dispatcher    *discord.WorkflowDispatcher
-	publicKey     string
-	allowedRoleID string
+	uptimeService  *discord.UptimeService
+	stagingService stagingUptimeSetter
+	dispatcher     *discord.WorkflowDispatcher
+	publicKey      string
+	allowedRoleID  string
+}
+
+// stagingUptimeSetter はステージングの起動状態の書き込み面（#1249）。
+// テストで差し替えるために切っている。
+type stagingUptimeSetter interface {
+	SetState(ctx context.Context, value string) error
+}
+
+// SetStagingService はステージング制御を注入する（任意）。
+// 未設定なら /staging は「利用できません」と返す。
+func (c *DiscordInteractionController) SetStagingService(s stagingUptimeSetter) {
+	c.stagingService = s
 }
 
 func NewDiscordInteractionController(uptimeService *discord.UptimeService) *DiscordInteractionController {
@@ -91,6 +104,10 @@ func (c *DiscordInteractionController) handleCommand(ctx echo.Context, interacti
 
 	if interaction.Data.Name == discord.CommandNameProd {
 		return c.handleProdCommand(ctx, interaction)
+	}
+
+	if interaction.Data.Name == discord.CommandNameStaging {
+		return c.handleStagingCommand(ctx, interaction)
 	}
 
 	if interaction.Data.Name != discord.CommandNameProdUptime {
@@ -390,4 +407,78 @@ func joinDates(dates []string) string {
 		out += ", " + d
 	}
 	return out
+}
+
+// handleStagingCommand は /staging state:on|off を処理する（#1249）。
+//
+// 本番(/prod)と違い日付リストが無いので、指定はそのまま起動状態になる。
+func (c *DiscordInteractionController) handleStagingCommand(ctx echo.Context, interaction *discord.Interaction) error {
+	if !c.hasAllowedRole(interaction) {
+		return ctx.JSON(http.StatusOK, discord.InteractionResponse{
+			Type: discord.ResponseTypeChannelMessageWithSource,
+			Data: &discord.InteractionResponseData{Content: "このコマンドを実行する権限がありません。", Flags: discord.EphemeralFlag},
+		})
+	}
+
+	state, err := discord.ParseStagingState(discord.FindOptionString(interaction.Data.Options, discord.OptionNameState))
+	if err != nil {
+		return ctx.JSON(http.StatusOK, discord.InteractionResponse{
+			Type: discord.ResponseTypeChannelMessageWithSource,
+			Data: &discord.InteractionResponseData{Content: err.Error(), Flags: discord.EphemeralFlag},
+		})
+	}
+
+	if c.stagingService == nil {
+		return ctx.JSON(http.StatusOK, discord.InteractionResponse{
+			Type: discord.ResponseTypeChannelMessageWithSource,
+			Data: &discord.InteractionResponseData{Content: "現在この機能は利用できません(未設定)。", Flags: discord.EphemeralFlag},
+		})
+	}
+
+	// 開発チーム全体に影響するので、誰がいつ止めたかを残す
+	log.Printf("[Discord] /staging state=%s by %s", state, interaction.ActorLabel())
+
+	applicationID, token := interaction.ApplicationID, interaction.Token
+	go c.applyStagingStateAndFollowUp(applicationID, token, state)
+
+	return ctx.JSON(http.StatusOK, discord.InteractionResponse{
+		Type: discord.ResponseTypeDeferredChannelMessageWithSource,
+	})
+}
+
+func (c *DiscordInteractionController) applyStagingStateAndFollowUp(applicationID, token, state string) {
+	defer recoverFollowUp("staging state")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	content := stagingStateAppliedMessage(state)
+	if err := c.stagingService.SetState(ctx, state); err != nil {
+		log.Printf("[Discord] staging state set error: %v", err)
+		content = userFacingErrorMessage(err)
+	} else {
+		dispatched, dispatchErr := c.dispatcher.DispatchWorkflow(ctx, stagingUptimeWorkflowFile)
+		switch {
+		case dispatchErr != nil:
+			log.Printf("[Discord] staging state dispatch error: %v", dispatchErr)
+			content += "\n⚠️ 即時反映の起動に失敗しました。次の毎時実行(最大1時間後)で反映されます。"
+		case dispatched:
+			content += "\n反映を開始しました。起動は完了まで数分かかります。"
+		default:
+			content += "\n次の毎時実行(最大1時間後)で反映されます。"
+		}
+	}
+
+	if err := discord.EditOriginalResponse(applicationID, token, content); err != nil {
+		log.Printf("[Discord] staging state followup error: %v", err)
+	}
+}
+
+// stagingUptimeWorkflowFile はステージングの起動/停止を行うワークフロー。
+const stagingUptimeWorkflowFile = "staging-uptime-scheduler.yml"
+
+func stagingStateAppliedMessage(state string) string {
+	if state == discord.StagingStateOn {
+		return "ステージング環境を **起動** に設定しました。"
+	}
+	return "ステージング環境を **停止** に設定しました。"
 }
