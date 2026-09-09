@@ -180,3 +180,39 @@ func TestListSessionsForOwner_FiltersCompanyID(t *testing.T) {
 		t.Fatalf("company_id filter = %v want 10", repo.lastCompanyID)
 	}
 }
+
+// 月次上限のガードが未設定なら面接は開始できる。
+// ガードは任意の仕組みで、注入しない環境まで止めてはいけない。
+func TestCreateSession_NoBudgetGuard(t *testing.T) {
+	svc := &InterviewService{}
+	if svc.budgetGuard != nil {
+		t.Error("既定でガードが入っている")
+	}
+}
+
+type stubBudgetGuard struct {
+	err    error
+	called int
+}
+
+func (g *stubBudgetGuard) AllowStart() error {
+	g.called++
+	return g.err
+}
+
+// ガードが拒否したら面接を作らない。
+// ユーザー取得より前に判定して、無駄なクエリを避ける。
+func TestCreateSession_BudgetGuardBlocks(t *testing.T) {
+	guard := &stubBudgetGuard{err: errors.New("over limit")}
+	svc := &InterviewService{}
+	svc.SetBudgetGuard(guard)
+
+	// userRepo は未設定。ガードで弾かれれば、そこへ到達せず panic しない
+	_, err := svc.CreateSession(1, "ja", "female")
+	if !errors.Is(err, ErrInterviewBudgetExceeded) {
+		t.Errorf("err = %v, want ErrInterviewBudgetExceeded", err)
+	}
+	if guard.called != 1 {
+		t.Errorf("ガードの呼び出し = %d, want 1", guard.called)
+	}
+}

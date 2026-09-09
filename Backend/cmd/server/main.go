@@ -332,6 +332,9 @@ func main() {
 		nil,
 	)
 	interviewService := interview.NewInterviewService(interviewSessionRepo, interviewUtteranceRepo, interviewReportRepo, userRepo, emailService, aiClient, realtimeUsageService)
+	// 面接1回ごとに STT / LLM / TTS を叩くため、セッション数がそのまま費用に効く。
+	// 既定は監視のみで、止めるのは INTERVIEW_BUDGET_ENFORCE を明示したときだけ。
+	interviewService.SetBudgetGuard(costs.NewInterviewBudgetService(interviewSessionRepo, costs.NotifyInterviewBudgetToDiscord))
 	if jobEnqueuer != nil {
 		interviewService.SetJobEnqueuer(jobEnqueuer)
 	}

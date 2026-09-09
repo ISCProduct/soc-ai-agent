@@ -25,6 +25,7 @@ type InterviewService struct {
 	userRepo             repository.UserRepository
 	emailService         *email.EmailService
 	openaiClient         *openai.Client
+	budgetGuard          interviewBudgetGuard
 	realtimeUsageService *costs.RealtimeUsageService
 	crossFeature         *flywheel.CrossFeatureIntegrationService
 	companyQuestionRepo  repository.InterviewCompanyQuestionRepository
