@@ -26,13 +26,20 @@ import (
 // ただし mini は実行ごとのばらつきが大きく、補助語があっても
 // 高精度モデルの安定性には届かない。
 func (cli *Client) TranscribeWithHints(ctx context.Context, audio []byte, filename, hints string) (string, error) {
-	if cli.apiKey == "" {
-		return "", errors.New("openai api key is not set")
-	}
-
 	model := os.Getenv("OPENAI_WHISPER_MODEL")
 	if model == "" {
 		model = defaultTranscribeModel
+	}
+	return cli.TranscribeWithModel(ctx, audio, filename, hints, model)
+}
+
+// TranscribeWithModel はモデルを明示して文字起こしする（音声R&D Task 5）。
+//
+// 選択的フォールバックで、既定モデルとは別の高精度モデルへ
+// 同じ音声を再送するために使う。
+func (cli *Client) TranscribeWithModel(ctx context.Context, audio []byte, filename, hints, model string) (string, error) {
+	if cli.apiKey == "" {
+		return "", errors.New("openai api key is not set")
 	}
 
 	var buf bytes.Buffer

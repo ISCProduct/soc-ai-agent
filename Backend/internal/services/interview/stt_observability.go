@@ -22,7 +22,9 @@ type STTObservation struct {
 	LatencyMS    int64
 	Succeeded    bool
 	ResultChars  int
-	FellBack     bool
+	// FellBack は高精度モデルへ再送したか。採用したかではなく実行したか。
+	// 再送率＝追加費用なので、採用しなかった再送も課金されている。
+	FellBack bool
 }
 
 // STTModelName は実際に使われる音声認識モデル名を返す。

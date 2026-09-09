@@ -57,9 +57,28 @@ func (s *InterviewService) Turn(
 	sttHints := BuildSTTHints(companyName, companyReading, position, companyInfo)
 	sttStart := time.Now()
 	userText, err := s.openaiClient.TranscribeWithHints(ctx, audioData, "audio.webm", sttHints)
-	LogSTTObservation(ObserveTranscribe(
-		sessionID, turnCount, len(audioData), sttMimeType, sttStart, userText, err,
-	))
+	obs := ObserveTranscribe(sessionID, turnCount, len(audioData), sttMimeType, sttStart, userText, err)
+
+	// 問題が疑われる結果だけ高精度モデルへ再送する（音声R&D Task 5）。
+	// 通常の発話は再送しない。再送率がそのまま追加費用になる。
+	if reason := NeedsSTTFallback(userText, err != nil, obs.AudioSeconds); reason != FallbackNone && !FallbackIsRedundant() {
+		// 費用は「再送したか」で決まるので、採用可否ではなくここで記録する
+		obs.FellBack = true
+		retried, retryErr := s.openaiClient.TranscribeWithModel(
+			ctx, audioData, "audio.webm", sttHints, FallbackModel,
+		)
+		// 再送に失敗しても面接は止めない。元の結果のまま続ける
+		applied := ShouldUseFallbackResult(retried, retryErr)
+		if applied {
+			userText, err = retried, nil
+			obs.ResultChars = len([]rune(strings.TrimSpace(retried)))
+			obs.Succeeded = true
+		}
+		log.Printf("[Interview] stt fallback session=%d turn=%d reason=%s applied=%t",
+			sessionID, turnCount, reason, applied)
+	}
+	LogSTTObservation(obs)
+
 	if err != nil {
 		log.Printf("[Interview] transcribe error: %v", err)
 		userText = ""
