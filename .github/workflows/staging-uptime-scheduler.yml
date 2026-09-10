@@ -76,6 +76,13 @@ jobs:
 
           # ASG は desired < min を受け付けない。min も一緒に動かす必要がある。
           # min だけ残して desired を 0 にしようとすると ValidationError になる。
+          if [ "$STATE" = "off" ]; then
+            MIN=0; DESIRED=0
+          else
+            MIN=1; DESIRED=1
+          fi
+          echo "state=$STATE -> min_size=$MIN desired_capacity=$DESIRED"
+
           apply_asg() {
             aws autoscaling update-auto-scaling-group \
               --auto-scaling-group-name "$STAGING_ASG_NAME" \
@@ -109,7 +116,7 @@ jobs:
           # ままになり、/staging state:on を打っても staging は復旧しない。
           if [ "$STATE" = "off" ]; then
             # アプリを止めてからDBを止める。
-            apply_asg 0 0
+            apply_asg "$MIN" "$DESIRED"
             DB_STATUS=$(aws rds describe-db-instances --db-instance-identifier "$STAGING_DB_ID" \
               --query 'DBInstances[0].DBInstanceStatus' --output text)
             if [ "$DB_STATUS" = "available" ]; then
@@ -122,7 +129,7 @@ jobs:
             # DBが起きてからアプリを上げる。逆にすると backend がDB接続に失敗し続け、
             # ELBヘルスチェックが通らないままASGにインスタンスを置換され続ける。
             wait_rds_available
-            apply_asg 1 1
+            apply_asg "$MIN" "$DESIRED"
           fi
 
       - name: Show resulting capacity
