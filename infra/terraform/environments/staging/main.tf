@@ -167,6 +167,16 @@ resource "aws_iam_role" "app" {
 
 data "aws_caller_identity" "current" {}
 
+# コンテナログの転送先（#1264 で staging が落ちた際、EC2に入れずログが取れず原因特定が止まったため）。
+# awslogs-create-group で自動作成させると保持期間が無期限になり課金が積み上がるので、
+# ここで作って retention を明示する。
+resource "aws_cloudwatch_log_group" "app" {
+  name              = "/ec2/${var.project_name}/app"
+  retention_in_days = 14
+
+  tags = local.tags
+}
+
 resource "aws_iam_role_policy" "app" {
   name = "${var.project_name}-app-policy"
   role = aws_iam_role.app.id
@@ -217,6 +227,19 @@ resource "aws_iam_role_policy" "app" {
           # /staging state:on|off の書き込み先（#1249）
           "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/soc-app/staging-uptime",
         ]
+      },
+      {
+        # コンテナログを CloudWatch Logs へ転送する(awslogsログドライバ)。
+        # 権限が無いとログ転送だけでなくコンテナ起動自体が失敗するため、
+        # ロググループを作る aws_cloudwatch_log_group.app より後に評価されるよう
+        # ARNを直接参照している。
+        Sid    = "ContainerLogsToCloudWatch"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        Resource = ["${aws_cloudwatch_log_group.app.arn}:*"]
       },
     ]
   })
@@ -279,6 +302,7 @@ resource "aws_launch_template" "app" {
 
   user_data = base64encode(templatefile("${path.module}/app_user_data.sh.tftpl", {
     aws_region               = var.region
+    log_group_name           = aws_cloudwatch_log_group.app.name
     backend_image            = local.backend_image
     frontend_image           = local.frontend_image
     rag_image                = local.rag_image
