@@ -504,7 +504,7 @@ func main() {
 
 	// グローバルミドルウェア
 	e.Use(echo.WrapMiddleware(middleware.RequestIDMiddleware))
-	e.Use(echo.WrapMiddleware(middleware.RequestLoggerMiddleware))
+	e.Use(middleware.EchoRequestLogger)
 	e.Use(echo.WrapMiddleware(securityHeadersMiddleware))
 	e.Use(echo.WrapMiddleware(buildCORSMiddleware()))
 	e.Use(routes.EchoTenantResolver(organizationService))
