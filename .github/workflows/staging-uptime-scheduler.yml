@@ -93,8 +93,11 @@ jobs:
 
           # deployment.yml と同じく、stopped を検知したら start を呼び直す(自己修復)。
           # 停止直後の "stopping" 中は start が弾かれるため、一度で成功しないことがある。
+          #
+          # 待ち時間は20分。stopping(数分) -> stopped -> start -> available(5〜10分) を
+          # 通るため、10分では足りない。
           wait_rds_available() {
-            for _ in $(seq 1 40); do
+            for _ in $(seq 1 80); do
               DB_STATUS=$(aws rds describe-db-instances --db-instance-identifier "$STAGING_DB_ID" \
                 --query 'DBInstances[0].DBInstanceStatus' --output text)
               if [ "$DB_STATUS" = "available" ]; then
