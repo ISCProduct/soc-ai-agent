@@ -5,10 +5,20 @@
 # 時間内に応答しませんでした」になっていた。本番の起動/停止を指示する口が、
 # 止まる環境に乗っていてはいけない。
 #
+# 公開は既存の staging ALB のリスナールール経由。ALB は EC2 とは独立して常時
+# 稼働しているので、staging が停止していてもこの受け口は生きている。
+#
+# 当初は Lambda Function URL を使ったが、設定が正当でも 403
+# (AccessDeniedException) から抜けられなかった。AuthType=NONE、リソースポリシーは
+# FunctionURLAllowPublicAccess (Principal:*) が付いており、DNS/TLS も正常、
+# 関数本体は aws lambda invoke で 401 を正しく返すことまで確認済み。URLを作り直しても
+# 変わらず、CloudTrailにも拒否記録が無く、アカウント側の制限が疑われるが特定できない。
+# ALB なら確実に動き、URL も変わらないためこちらを採る。
+#
 # コストについて:
-#   - Lambda は月100万リクエスト + 40万GB-秒の永久無料枠がある。
-#     想定利用（Discordコマンド 月数百回）では完全に無料枠内。
-#   - Function URL を使うので API Gateway は不要（追加料金なし）。
+#   - ALB は既存のものを使うため追加費用なし。URLも変わらない。
+#   - Lambda は月100万リクエスト + 40万GB-秒の永久無料枠があり、想定利用
+#     （Discordコマンド 月数百回）では完全に無料枠内。
 #   - SSM も GitHub API もパブリックエンドポイントなので VPC には入れない。
 #     VPC に入れると NAT Gateway が必要になり月$40級の固定費が発生する。
 #
@@ -121,14 +131,60 @@ resource "aws_lambda_function" "discord" {
   tags = local.tags
 }
 
-# 認証なしで公開する。Discord からの正当性は Ed25519 署名検証で確かめており、
-# AWS の認証を挟むと Discord 側が署名を付けられず疎通できない。
-resource "aws_lambda_function_url" "discord" {
-  function_name      = aws_lambda_function.discord.function_name
-  authorization_type = "NONE"
+# ALB から Lambda を呼ぶための一式。
+# ヘルスチェックは付けない（target_type=lambda では任意で、有効にすると
+# 定期的に空リクエストが飛んで無駄に実行回数を消費する）。
+resource "aws_lb_target_group" "discord" {
+  name        = "${var.project_name}-discord-tg"
+  target_type = "lambda"
+
+  tags = local.tags
+}
+
+resource "aws_lambda_permission" "alb" {
+  statement_id  = "AllowExecutionFromALB"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.discord.arn
+  principal     = "elasticloadbalancing.amazonaws.com"
+  source_arn    = aws_lb_target_group.discord.arn
+}
+
+resource "aws_lb_target_group_attachment" "discord" {
+  target_group_arn = aws_lb_target_group.discord.arn
+  target_id        = aws_lambda_function.discord.arn
+
+  # 権限が無い状態で登録するとELBが登録時の疎通確認に失敗する。
+  depends_on = [aws_lambda_permission.alb]
+}
+
+# backend へのルール(priority=100)より先に評価させる。
+# ALB モジュールは prod と共用しているため、モジュール側は変更せず
+# staging 側からリスナーへルールだけを足している。
+resource "aws_lb_listener_rule" "discord" {
+  listener_arn = module.alb.https_listener_arn
+  priority     = 90
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.discord.arn
+  }
+
+  condition {
+    host_header {
+      values = [local.backend_domain]
+    }
+  }
+
+  condition {
+    path_pattern {
+      values = ["/api/discord/interactions"]
+    }
+  }
+
+  tags = local.tags
 }
 
 output "discord_interactions_endpoint" {
   description = "Discord Developer Portal の INTERACTIONS ENDPOINT URL に設定する値"
-  value       = aws_lambda_function_url.discord.function_url
+  value       = "https://${local.backend_domain}/api/discord/interactions"
 }
