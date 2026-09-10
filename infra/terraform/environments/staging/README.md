@@ -125,3 +125,18 @@ aws ecs update-service --cluster soc-stg --service frontend --force-new-deployme
 ```
 
 （cluster / service 名は `terraform output` を優先）
+
+## ログを見る
+
+コンテナのログは CloudWatch Logs `/ec2/soc-stg/app` に転送される（保持14日）。
+EC2 に入らずに読めるので、インスタンスが落ちている・SSHできない場合はこちらを使う。
+
+```bash
+# 直近のログをサービス指定で追う（ストリーム名はコンテナ名）
+aws logs tail /ec2/soc-stg/app --follow --log-stream-name-prefix soc-stg-app-backend
+
+# 期間を絞って検索
+aws logs tail /ec2/soc-stg/app --since 1h --filter-pattern '[Discord]'
+```
+
+EC2 上では従来どおり `docker logs` も使える（Docker の dual logging によりローカルにも残る）。
