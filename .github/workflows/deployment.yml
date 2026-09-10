@@ -185,14 +185,15 @@ jobs:
       - name: Resolve staging instance IP
         id: instance
         run: |
-          IP=$(aws ec2 describe-instances \
+          read -r ID IP <<<"$(aws ec2 describe-instances \
             --filters "Name=tag:Name,Values=${PROJECT_NAME}-app" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+            --query 'Reservations[0].Instances[0].[InstanceId,PublicIpAddress]' --output text)"
           if [ -z "$IP" ] || [ "$IP" == "None" ]; then
             echo "staging instance not found (ASG未起動、またはタグ不一致)" >&2
             exit 1
           fi
           echo "ip=$IP" >> "$GITHUB_OUTPUT"
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
 
           SG_ID=$(aws ec2 describe-security-groups \
             --filters "Name=group-name,Values=${PROJECT_NAME}-ecs-sg" \
@@ -292,6 +293,20 @@ jobs:
           aws ec2 revoke-security-group-ingress \
             --group-id ${{ steps.instance.outputs.sg_id }} \
             --protocol tcp --port 22 --cidr "${{ env.runner_ip }}/32" || true
+
+      # デプロイ中の docker compose down で ALB は30秒でこのインスタンスを
+      # unhealthy と判定する。Suspend が止めるのは「置換」だけで判定自体は残るため、
+      # healthy に戻る前に Resume するとその場でインスタンスが置換される。
+      # 直後のスモークが起動途中の新インスタンスを叩いて必ず落ちるので、
+      # 先に in-service を待つ。
+      - name: Wait for ALB targets healthy
+        run: |
+          for name in be fe; do
+            TG=$(aws elbv2 describe-target-groups --names "${PROJECT_NAME}-$name-tg" \
+              --query 'TargetGroups[0].TargetGroupArn' --output text)
+            aws elbv2 wait target-in-service --target-group-arn "$TG" \
+              --targets "Id=${{ steps.instance.outputs.id }}"
+          done
 
       # 失敗しても必ず戻す。停止したままだと、以後アプリが落ちても
       # ASGが置換しなくなり ELB ヘルスチェックにした意味が無くなる。
