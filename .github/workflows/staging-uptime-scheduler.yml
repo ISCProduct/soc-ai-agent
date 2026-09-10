@@ -25,7 +25,6 @@ jobs:
     environment: staging
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
-      PROJECT_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}
       STAGING_ASG_NAME: ${{ vars.STAGING_ASG_NAME || 'soc-stg-app' }}
     steps:
       - name: Configure AWS credentials
@@ -39,7 +38,11 @@ jobs:
         run: |
           set -e
 
-          PARAM="/${PROJECT_NAME}/staging-uptime"
+          # Backend(services/discord/staging_uptime.go)が書き込むパラメータ名に合わせて固定する。
+          # ここを vars.PROJECT_NAME 由来にすると environment:staging の値(soc-stg)が入り、
+          # Backendが書く /soc-app/staging-uptime とも IAM 許可範囲とも一致せず AccessDenied で
+          # 毎時失敗する。失敗するとASG更新まで到達せず、停止したステージングが二度と上がらない。
+          PARAM="/soc-app/staging-uptime"
 
           # パラメータ未作成(初回)は on 扱い。この機能を入れた時点では
           # ステージングは動いているので、「無い＝止める」にすると
