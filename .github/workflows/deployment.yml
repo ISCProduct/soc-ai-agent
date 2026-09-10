@@ -270,10 +270,18 @@ jobs:
               docker compose pull
               docker compose up -d
               df -h /
+              # up -d の直後はまだ running になっていないことがある。特に新規インスタンスの
+              # 初回起動(イメージpull+ネットワーク/ボリューム作成から)は遅く、即座に判定すると
+              # 起動しているのに "is not running" で落ちる。最大60秒待つ。
               for s in frontend backend edge; do
+                for _ in $(seq 1 20); do
+                  docker compose ps --status running --services | grep -qx "$s" && break
+                  sleep 3
+                done
                 docker compose ps --status running --services | grep -qx "$s" || {
                   echo "service $s is not running" >&2
                   docker compose ps -a
+                  docker compose logs --tail 50 "$s" || true
                   exit 1
                 }
               done
