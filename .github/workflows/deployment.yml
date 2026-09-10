@@ -330,6 +330,59 @@ jobs:
       environment: staging
     secrets: inherit
 
+  # Discord Interactions Endpoint の受け口(Lambda)。
+  #
+  # deploy-staging には依存させない。この受け口を staging から Lambda へ移したのは
+  # 「staging が止まっていても /prod を受けられるようにする」ためで、staging の
+  # デプロイ結果に更新が引きずられては意味が無い。
+  #
+  # 関数の箱と環境変数は terraform 側(infra/terraform/environments/staging/
+  # discord_lambda.tf)が持ち、ここではコードだけ差し替える。
+  deploy-discord-lambda:
+    if: github.ref_name == 'develop'
+    name: Deploy Discord Lambda
+    runs-on: ubuntu-latest
+    environment: staging
+    concurrency:
+      group: deploy-discord-lambda
+      cancel-in-progress: true
+
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
+      FUNCTION_NAME: ${{ vars.PROJECT_NAME || 'soc-stg' }}-discord
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ./Backend/go.mod
+          cache-dependency-path: ./Backend/go.sum
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build and deploy
+        working-directory: ./Backend
+        run: |
+          set -e
+          # provided.al2023 のカスタムランタイムは bootstrap という名前の実行ファイルを探す。
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o bootstrap ./cmd/discord-lambda
+          zip -j discord-lambda.zip bootstrap
+
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --zip-file fileb://discord-lambda.zip \
+            --query 'LastUpdateStatus' --output text
+
+          # 更新の反映を待たずに次のリクエストが来ると、古いコードで応答することがある。
+          aws lambda wait function-updated --function-name "$FUNCTION_NAME"
+          echo "$FUNCTION_NAME を更新しました"
+
   # デプロイから1時間、新たなデプロイが無ければstagingを自動停止する（コスト削減）。
   # 1時間以内に次のdeploy-staging(→本ジョブ)が走ると、同じconcurrency groupで
   # 前回分がキャンセルされ、実質タイマーがリセットされる。

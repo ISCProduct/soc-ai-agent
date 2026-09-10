@@ -26,6 +26,7 @@ jobs:
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
       STAGING_ASG_NAME: ${{ vars.STAGING_ASG_NAME || 'soc-stg-app' }}
+      STAGING_DB_ID: ${{ vars.STAGING_DB_ID || 'soc-stg-mysql' }}
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
@@ -73,6 +74,8 @@ jobs:
               ;;
           esac
 
+          # ASG は desired < min を受け付けない。min も一緒に動かす必要がある。
+          # min だけ残して desired を 0 にしようとすると ValidationError になる。
           if [ "$STATE" = "off" ]; then
             MIN=0; DESIRED=0
           else
@@ -80,18 +83,61 @@ jobs:
           fi
           echo "state=$STATE -> min_size=$MIN desired_capacity=$DESIRED"
 
-          # ASG は desired < min を受け付けない。min も一緒に動かす必要がある。
-          # min だけ残して desired を 0 にしようとすると ValidationError になる。
-          aws autoscaling update-auto-scaling-group \
-            --auto-scaling-group-name "$STAGING_ASG_NAME" \
-            --min-size "$MIN" \
-            --desired-capacity "$DESIRED"
+          apply_asg() {
+            aws autoscaling update-auto-scaling-group \
+              --auto-scaling-group-name "$STAGING_ASG_NAME" \
+              --min-size "$1" \
+              --desired-capacity "$2"
+            echo "$STAGING_ASG_NAME を min=$1 desired=$2 に設定しました"
+          }
 
-          echo "$STAGING_ASG_NAME を min=$MIN desired=$DESIRED に設定しました"
+          # deployment.yml と同じく、stopped を検知したら start を呼び直す(自己修復)。
+          # 停止直後の "stopping" 中は start が弾かれるため、一度で成功しないことがある。
+          wait_rds_available() {
+            for _ in $(seq 1 40); do
+              DB_STATUS=$(aws rds describe-db-instances --db-instance-identifier "$STAGING_DB_ID" \
+                --query 'DBInstances[0].DBInstanceStatus' --output text)
+              if [ "$DB_STATUS" = "available" ]; then
+                echo "$STAGING_DB_ID は available"
+                return 0
+              fi
+              if [ "$DB_STATUS" = "stopped" ]; then
+                aws rds start-db-instance --db-instance-identifier "$STAGING_DB_ID" >/dev/null || true
+              fi
+              echo "RDS status: $DB_STATUS (waiting...)"
+              sleep 15
+            done
+            echo "::error::$STAGING_DB_ID が available になりませんでした (status=$DB_STATUS)"
+            return 1
+          }
+
+          # RDSもASGと一緒に動かす。deployment.yml の staging-auto-stop は
+          # ASG と RDS の両方を止めるのに、ここで ASG しか上げないと DB が停止した
+          # ままになり、/staging state:on を打っても staging は復旧しない。
+          if [ "$STATE" = "off" ]; then
+            # アプリを止めてからDBを止める。
+            apply_asg "$MIN" "$DESIRED"
+            DB_STATUS=$(aws rds describe-db-instances --db-instance-identifier "$STAGING_DB_ID" \
+              --query 'DBInstances[0].DBInstanceStatus' --output text)
+            if [ "$DB_STATUS" = "available" ]; then
+              aws rds stop-db-instance --db-instance-identifier "$STAGING_DB_ID" >/dev/null
+              echo "$STAGING_DB_ID を停止しました"
+            else
+              echo "$STAGING_DB_ID は $DB_STATUS のため停止操作をスキップします"
+            fi
+          else
+            # DBが起きてからアプリを上げる。逆にすると backend がDB接続に失敗し続け、
+            # ELBヘルスチェックが通らないままASGにインスタンスを置換され続ける。
+            wait_rds_available
+            apply_asg "$MIN" "$DESIRED"
+          fi
 
       - name: Show resulting capacity
         run: |
           aws autoscaling describe-auto-scaling-groups \
             --auto-scaling-group-names "$STAGING_ASG_NAME" \
             --query 'AutoScalingGroups[0].{Min:MinSize,Desired:DesiredCapacity,Instances:length(Instances)}' \
+            --output table
+          aws rds describe-db-instances --db-instance-identifier "$STAGING_DB_ID" \
+            --query 'DBInstances[0].{DB:DBInstanceIdentifier,Status:DBInstanceStatus}' \
             --output table

@@ -148,4 +148,6 @@ cat <<'NOTE'
    General Information > Interactions Endpoint URL に
    https://api-stg.shukatsu-ai.jp/api/discord/interactions を設定して保存する。
    保存時にDiscordがPINGを送り、応答できないと保存自体が失敗する。
+   （受け口の実体は staging backend から Lambda へ移設済み。ALB のリスナールールで
+     このパスだけ Lambda へ流しているため URL は変わらず、staging が停止していても動く）
 NOTE
