@@ -145,7 +145,9 @@ cat <<'NOTE'
    Botがサーバーのメンバーになる必要はない）。
 
 3. Interactions Endpoint URL が設定されているか
-   General Information > Interactions Endpoint URL に
-   https://api-stg.shukatsu-ai.jp/api/discord/interactions を設定して保存する。
+   General Information > Interactions Endpoint URL に Lambda Function URL を設定する。
+   値は次で取得する:
+     terraform -chdir=infra/terraform/environments/staging output -raw discord_interactions_endpoint
    保存時にDiscordがPINGを送り、応答できないと保存自体が失敗する。
+   （受け口は staging backend から Lambda へ移設済み。staging が停止していても動く）
 NOTE

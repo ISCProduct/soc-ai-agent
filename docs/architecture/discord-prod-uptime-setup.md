@@ -26,7 +26,7 @@ Discordのスラッシュコマンドから本番環境(AWS ECS Fargate + RDS)�
 ```
 Discordで /prod state:on
         ↓ (Discord Interactions Webhook, HTTPS POST)
-staging backend: POST /api/discord/interactions
+Lambda (soc-stg-discord, Function URL): POST /
   - Ed25519署名検証(DISCORD_PUBLIC_KEY)
   - 実行者のロールIDを確認(DISCORD_ALLOWED_ROLE_ID)
   - SSM /soc-app/prod-uptime-override に on を書く
@@ -53,8 +53,20 @@ ECSを起動しても**最大1時間で元に戻される**。「Discordで起�
 `/prod` は動作し、SSMのオーバーライドは書き込まれる。ただし**反映は次の毎時実行
 (最大1時間後)**になる。Discordの応答にもその旨が表示される。
 
-なぜstaging backendか: 本番(prod)は既定停止のため常時起動しているサーバーが必要。stagingは
-常時稼働方針のため、ここにDiscord Interactions Endpointを追加する。
+### なぜ Lambda か
+
+本番(prod)は既定停止のため、受け口には常時動いているものが必要になる。当初は staging の
+backend に置いていたが、staging は `deployment.yml` の `staging-auto-stop` によって
+**デプロイから1時間で自動停止する**。停止中は受け口ごと落ちるため /prod が
+「アプリケーションは時間内に応答しませんでした」になり、しかも復旧手段である
+`/staging state:on` も同じ受け口なので Discord からは何もできなくなっていた。
+
+本番の起動/停止を指示する口が、止まる環境に乗っていてはいけない。そのため
+Lambda Function URL へ移した。
+
+コスト面でも Lambda が最小になる。月100万リクエスト + 40万GB-秒の永久無料枠があり、
+想定利用（月数百回）では完全に無料枠内。Function URL を使うので API Gateway も要らない。
+SSM と GitHub API しか呼ばないので VPC に入れる必要がなく、NAT Gateway も発生しない。
 
 ## 0. 反映の順序（重要）
 
@@ -89,11 +101,16 @@ ECSを起動しても**最大1時間で元に戻される**。「Discordで起�
 **General Information** タブの `INTERACTIONS ENDPOINT URL` に以下を設定:
 
 ```
-https://api-stg.shukatsu-ai.jp/api/discord/interactions
+terraform output -raw discord_interactions_endpoint
+# 例: https://xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lambda-url.ap-northeast-1.on.aws/
 ```
 
-保存時にDiscordがPING検証リクエストを送るため、事前に3〜6の設定を完了させ、staging backendが
-起動している状態で保存すること。検証に失敗する場合は `DISCORD_PUBLIC_KEY` の設定漏れを疑う。
+Lambda Function URL のため、値は `infra/terraform/environments/staging` の
+`terraform output discord_interactions_endpoint` で取得する。
+
+保存時にDiscordがPING検証リクエストを送る。Lambda は常時稼働なので事前に環境を起動して
+おく必要はないが、`terraform apply` と CI による関数コードの反映(deploy-discord-lambda)が
+済んでいること。検証に失敗する場合は `DISCORD_PUBLIC_KEY` の設定漏れを疑う。
 
 ## 2-2. ステージングの起動/停止（#1249）
 
@@ -218,13 +235,13 @@ Interactions Endpoint URL は設定済みで、Backend が PING に応答でき�
    `GET /users/@me/guilds` が0件でも異常ではない（2026-09-10 実測）。
 3. **Interactions Endpoint URL が未設定**
    General Information > Interactions Endpoint URL に
-   `https://api-stg.shukatsu-ai.jp/api/discord/interactions` を設定して保存する。
+   `terraform output -raw discord_interactions_endpoint` の値を設定して保存する。
    保存時にDiscordがPINGを送るので、応答できないと保存自体が失敗する。
    到達確認は次で行える（**401 が正常**。署名が無いリクエストを拒否している）。
 
    ```bash
    curl -s -o /dev/null -w '%{http_code}\n' -X POST \
-     https://api-stg.shukatsu-ai.jp/api/discord/interactions \
+     "$(terraform -chdir=infra/terraform/environments/staging output -raw discord_interactions_endpoint)" \
      -H 'Content-Type: application/json' -d '{"type":1}'
    ```
 
@@ -350,13 +367,23 @@ aws ssm get-parameter --name /soc-app/prod-uptime-override
 # AccessDeniedException ならポリシーが効いていない
 ```
 
-### staging backend 側
+### Lambda 側
 
+`infra/terraform/environments/staging/discord_lambda.tf` の `UptimeParameters`
+ステートメントで `/soc-app/prod-uptime-dates`、`/soc-app/prod-uptime-override`、
+`/soc-app/staging-uptime` への `ssm:GetParameter` / `ssm:PutParameter` を付与している
+（tfvars変更後は `terraform apply` が必要）。
 
-staging EC2のIAMロールには `infra/terraform/environments/staging/main.tf` の
-`ProdUptimeSsmAccess` ステートメントで `/soc-app/prod-uptime-dates` と
-`/soc-app/prod-uptime-override` への `ssm:GetParameter` / `ssm:PutParameter` が
-付与済み（staging tfvars変更後は `terraform apply` が必要）。
+関数の箱と環境変数は terraform が持ち、コードは CI の `deploy-discord-lambda` ジョブが
+`aws lambda update-function-code` で入れる。terraform 実行環境に Go のクロスコンパイルを
+持ち込まないため、terraform 側はプレースホルダの zip を置くだけにしてある
+（`lifecycle.ignore_changes` で CI が入れたバイナリを巻き戻さない）。
+
+ログは CloudWatch Logs `/aws/lambda/soc-stg-discord`（保持14日）に出る。
+
+```bash
+aws logs tail /aws/lambda/soc-stg-discord --since 10m --filter-pattern '[Discord]'
+```
 
 GitHub Actions側（`prod-uptime-scheduler.yml`）は既存の `AWS_ACCESS_KEY_ID` /
 `AWS_SECRET_ACCESS_KEY` シークレットを使用する。このIAMユーザーに
