@@ -86,10 +86,16 @@ chmod 600 /opt/app/.env
 
 cat > /opt/app/docker-compose.yml <<EOF
 x-logging: &default-logging
-  driver: json-file
+  driver: awslogs
   options:
-    max-size: "10m"
-    max-file: "3"
+    awslogs-region: "${aws_region}"
+    awslogs-group: "${log_group_name}"
+    # ストリーム名をコンテナ名にする。既定は FullID で、どのサービスのログか読めない。
+    tag: "{{.Name}}"
+    # awslogs でも docker logs が読めるようローカルキャッシュを残す(Dockerのdual logging)。
+    # 上限を切らないとディスクが埋まる。
+    cache-max-size: "10m"
+    cache-max-file: "3"
 
 services:
   backend:
