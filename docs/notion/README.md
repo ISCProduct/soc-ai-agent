@@ -4,8 +4,9 @@
 
 ## 構成図の方針
 
-- **正本**: `docs/architecture/*.drawio.xml`（draw.io / AWS 公式アイコン）
+- **ローカル正本**: `docs/architecture/*.drawio.xml`（draw.io / AWS 公式アイコン）
 - **PNG**: `docs/architecture/notion-diagrams/*.png`（Notion 埋め込み用）
+- `docs/architecture/` は **git 追跡しない**（`.gitignore`）。クローン後はローカルで保持するか Notion から取得する
 - HTML 埋め込みは Notion サンドボックスで外部アイコンがブロックされるため **使わない**
 
 diagrams.net で XML を開くと AWS アイコン付きで編集・閲覧できます。
