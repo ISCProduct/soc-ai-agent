@@ -1,0 +1,194 @@
+name: Backlog 課題削除 → GitHub Issue 削除
+
+# Backlog で削除された課題に対応する GitHub Issue を削除します。
+#
+# Backlog には削除通知が無く、削除された課題は API から 404 になるだけなので、
+# GitHub 側の Issue に埋め込まれた backlog-key を1件ずつ問い合わせて存在を確認します。
+#
+# 安全策（Issue の削除は取り消せないため）:
+#   - 認証確認に失敗したら何もせず終了する
+#   - 404 のみを「削除された」と判定する。5xx・ネットワークエラー・その他は対象外
+#   - 削除対象が MAX_DELETIONS を超えたら中断する
+#     （大量の 404 は Backlog 側の障害やプロジェクトキー誤りの可能性が高い）
+#
+# 必要な GitHub Secrets:
+#   BACKLOG_SPACE_ID / BACKLOG_API_KEY / BACKLOG_PROJECT_KEY / BACKLOG_DOMAIN(任意)
+#   GH_TOKEN : Issue 削除は GraphQL deleteIssue が必要で、リポジトリ管理者権限を持つ PAT が要る。
+#              既定の GITHUB_TOKEN では削除できない。
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '削除せず対象を表示するだけにする'
+        required: false
+        default: 'true'
+      max_deletions:
+        description: '1回の実行で削除する上限。超えたら中断する'
+        required: false
+        default: '5'
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      # .github/scripts/backlog_client.py を import するので checkout が要る。
+      # 以前は「リポジトリのファイルは一切読まない」というコメントのまま
+      # checkout を置いていなかったため、毎時の実行が
+      # ModuleNotFoundError: No module named 'backlog_client' で失敗し続けていた
+      # （2026-09-08 以降、直近5回すべて失敗）。
+      - uses: actions/checkout@v7
+
+      - name: Backlog から消えた課題の GitHub Issue を削除
+        env:
+          BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
+          BACKLOG_SPACE_ID: ${{ secrets.BACKLOG_SPACE_ID }}
+          BACKLOG_PROJECT_KEY: ${{ secrets.BACKLOG_PROJECT_KEY }}
+          BACKLOG_DOMAIN: ${{ secrets.BACKLOG_DOMAIN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
+          GH_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          MAX_DELETIONS: ${{ inputs.max_deletions || '5' }}
+        run: |
+          python3 - << 'PYEOF'
+          import os, re, sys, json, urllib.parse, urllib.request, urllib.error
+
+          sys.path.insert(0, ".github/scripts")
+          from backlog_client import load_backlog_env, resolve_bl_base, build_url
+
+          API_KEY, SPACE_ID, PROJ_KEY, DOMAIN = load_backlog_env()
+          GH_TOKEN = os.environ["GH_TOKEN"]
+          GH_REPO = os.environ["GH_REPO"]
+          DRY_RUN = os.environ.get("DRY_RUN", "false").lower() == "true"
+          MAX_DELETIONS = int(os.environ.get("MAX_DELETIONS") or "5")
+
+          GH_BASE = "https://api.github.com"
+          BL_BASE, _ = resolve_bl_base(SPACE_ID, API_KEY, DOMAIN)
+
+          def gh(method, path, data=None):
+              url = f"{GH_BASE}{path}"
+              body = json.dumps(data).encode() if data else None
+              req = urllib.request.Request(url, data=body, method=method)
+              req.add_header("Authorization", f"Bearer {GH_TOKEN}")
+              req.add_header("Accept", "application/vnd.github+json")
+              req.add_header("X-GitHub-Api-Version", "2022-11-28")
+              if body:
+                  req.add_header("Content-Type", "application/json")
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      raw = r.read()
+                      return json.loads(raw) if raw else None
+              except urllib.error.HTTPError as e:
+                  print(f"GitHub API エラー {e.code}: {e.read().decode()[:200]}", file=sys.stderr)
+                  return None
+
+          def bl_status(path):
+              """Backlog へ GET し HTTP ステータスコードだけを返す。到達不能は None。"""
+              url = build_url(BL_BASE, path, API_KEY)
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(url, method="GET")) as r:
+                      return r.status
+              except urllib.error.HTTPError as e:
+                  return e.code
+              except Exception as e:
+                  print(f"  Backlog へ到達できません: {e}", file=sys.stderr)
+                  return None
+
+          # ---- 1. 認証確認。ここが通らない状態で 404 を削除判定に使うと事故になる ----
+          if bl_status("/users/myself") != 200:
+              print("Backlog の認証に失敗しました。削除判定を行わず終了します。", file=sys.stderr)
+              sys.exit(1)
+
+          # GitHub 側も先に確認する。ここが 401 のまま進むと Issue が1件も取れず、
+          # 「削除対象なし」と読める成功ログだけが残って不具合が見えなくなる。
+          if gh("GET", f"/repos/{GH_REPO}") is None:
+              print(
+                  "GitHub の認証に失敗しました。secrets.GH_TOKEN の有効期限と権限を確認してください。",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          # ---- 2. backlog-key を持つ GitHub Issue を集める ----
+          key_pat = re.compile(rf'<!--\s*backlog-key:({re.escape(PROJ_KEY)}-\d+)\s*-->')
+          title_pat = re.compile(rf'^\[({re.escape(PROJ_KEY)}-\d+)\]\s')
+
+          tracked = []  # (issue_number, node_id, bl_key, title)
+          page = 1
+          while True:
+              items = gh("GET", f"/repos/{GH_REPO}/issues?state=all&per_page=100&page={page}")
+              # gh() は HTTP エラーでも None を返す。これを空ページと同一視すると、
+              # 途中で 403(レート制限)等が起きても「最後のページまで読んだ」ことになり、
+              # 未取得のIssueを Backlog 側にも無いものとして扱ってしまう。
+              if items is None:
+                  print(
+                      f"GitHub Issue 一覧の取得に失敗しました(page={page})。"
+                      "不完全な一覧で削除判定を行わないため中断します。",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+              if not items:
+                  break
+              for it in items:
+                  if "pull_request" in it:
+                      continue
+                  m = key_pat.search(it.get("body") or "") or title_pat.match(it.get("title") or "")
+                  if m:
+                      tracked.append((it["number"], it["node_id"], m.group(1), it["title"]))
+              if len(items) < 100:
+                  break
+              page += 1
+
+          print(f"backlog-key を持つ Issue: {len(tracked)} 件")
+          if not tracked:
+              sys.exit(0)
+
+          # ---- 3. Backlog 側の存在確認。404 のみを削除済みとみなす ----
+          missing, unreachable = [], 0
+          for num, node_id, bl_key, title in tracked:
+              code = bl_status(f"/issues/{bl_key}")
+              if code == 404:
+                  missing.append((num, node_id, bl_key, title))
+              elif code != 200:
+                  unreachable += 1
+                  print(f"  判定不能（HTTP {code}）: {bl_key} #{num}")
+
+          print(f"Backlog から消えている: {len(missing)} 件 / 判定不能: {unreachable} 件")
+          if not missing:
+              sys.exit(0)
+
+          # ---- 4. 一度に大量に消えるのは障害の可能性が高いので中断する ----
+          if len(missing) > MAX_DELETIONS:
+              print(
+                  f"削除対象が上限 {MAX_DELETIONS} 件を超えました（{len(missing)} 件）。"
+                  "Backlog 側の障害やプロジェクトキー誤りの可能性があるため中断します。",
+                  file=sys.stderr,
+              )
+              for num, _, bl_key, title in missing:
+                  print(f"  - #{num} [{bl_key}] {title}", file=sys.stderr)
+              sys.exit(1)
+
+          # ---- 5. 削除 ----
+          for num, node_id, bl_key, title in missing:
+              if DRY_RUN:
+                  print(f"  [dry-run] 削除対象: #{num} [{bl_key}] {title}")
+                  continue
+              res = gh("POST", "/graphql", {
+                  "query": "mutation($id:ID!){ deleteIssue(input:{issueId:$id}){ clientMutationId } }",
+                  "variables": {"id": node_id},
+              })
+              if res and not res.get("errors"):
+                  print(f"  削除しました: #{num} [{bl_key}] {title}")
+              else:
+                  errs = (res or {}).get("errors")
+                  print(
+                      f"  削除に失敗: #{num} [{bl_key}] {errs}\n"
+                      "  Issue の削除にはリポジトリ管理者権限を持つ PAT (GH_TOKEN) が必要です。",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+          PYEOF

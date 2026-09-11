@@ -1,0 +1,101 @@
+name: Deploy Smoke Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: '対象環境'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+  workflow_call:
+    inputs:
+      environment:
+        description: '対象環境'
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-smoke-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Playwright Smoke (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    # Playwrightのブラウザインストールが稀にハングし、デフォルトの6時間上限まで
+    # 実行され続けることがあったため設定(test.ymlのe2e-frontendと同様の対策)
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: ./frontend
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve target URLs
+        id: urls
+        run: |
+          ENV="${{ inputs.environment }}"
+          if [ "$ENV" = "production" ]; then
+            echo "base=${{ vars.PROD_BASE_URL || 'https://shukatsu-ai.jp' }}" >> "$GITHUB_OUTPUT"
+            echo "api=${{ vars.PROD_API_BASE_URL || 'https://api.shukatsu-ai.jp' }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "base=${{ vars.STAGING_BASE_URL || 'https://stg.shukatsu-ai.jp' }}" >> "$GITHUB_OUTPUT"
+            echo "api=${{ vars.STAGING_API_BASE_URL || 'https://api-stg.shukatsu-ai.jp' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: ./frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: ./frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        # --with-deps は内部でapt-get updateを実行するが、ubuntuパッケージミラーへの
+        # 接続がハングしタイムアウトに達するまで進まなくなる事象が頻発したため外した
+        # (test.ymlのe2e-frontendと同様)。
+        run: npx playwright install chromium
+
+      - name: Run smoke tests
+        id: playwright
+        run: npx playwright test --config=playwright.smoke.config.ts
+        env:
+          CI: true
+          PLAYWRIGHT_BASE_URL: ${{ steps.urls.outputs.base }}
+          PLAYWRIGHT_API_BASE_URL: ${{ steps.urls.outputs.api }}
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ inputs.environment }}
+          path: frontend/playwright-report/
+          retention-days: 7
+
+      - name: Notify Discord
+        if: always()
+        working-directory: .
+        env:
+          DISCORD_DEPLOY_WEBHOOK_URL: ${{ secrets.DISCORD_DEPLOY_WEBHOOK_URL }}
+        run: |
+          STATUS=failure
+          if [ "${{ steps.playwright.outcome }}" = "success" ]; then
+            STATUS=success
+          fi
+          chmod +x automation/deploy-smoke/notify-discord.sh
+          automation/deploy-smoke/notify-discord.sh \
+            "$STATUS" \
+            "${{ inputs.environment }}" \
+            "${{ steps.urls.outputs.base }}" \
+            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "${{ github.actor }}"

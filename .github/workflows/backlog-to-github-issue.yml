@@ -1,0 +1,224 @@
+name: Backlog 課題 → GitHub Issue
+
+# 15分ごとに Backlog の更新課題をポーリングし、
+# 対応する GitHub Issue を自動作成・更新・クローズします。
+# GitHub Issue タイトル形式: [PROJ-N] 課題タイトル
+#
+# ループ防止: 説明に "GitHub Issue:" を含む課題（GitHub起源）はスキップします。
+#
+# 必要な GitHub Secrets:
+#   BACKLOG_SPACE_ID    : スペースID（例: myspace ← myspace.backlog.jp の場合）
+#   BACKLOG_API_KEY     : Backlog APIキー（個人設定で発行。前後空白なし）
+#   BACKLOG_PROJECT_KEY : プロジェクトキー（例: PROJ）
+#   BACKLOG_DOMAIN      : ドメイン（任意。省略時は backlog.jp → backlog.com の順に自動判定）
+#   GH_TOKEN            : GitHub PAT（issues 読み書き権限）
+#                         ※省略時は github.token を使用
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      minutes_back:
+        description: '何分前からの更新を取得するか（デフォルト: 20）'
+        required: false
+        default: '20'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Backlog 課題を GitHub Issue へ同期
+        env:
+          BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
+          BACKLOG_SPACE_ID: ${{ secrets.BACKLOG_SPACE_ID }}
+          BACKLOG_PROJECT_KEY: ${{ secrets.BACKLOG_PROJECT_KEY }}
+          BACKLOG_DOMAIN: ${{ secrets.BACKLOG_DOMAIN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
+          GH_REPO: ${{ github.repository }}
+          MINUTES_BACK: ${{ inputs.minutes_back || '20' }}
+        run: |
+          python3 - << 'PYEOF'
+          import os, re, sys, json, urllib.parse, urllib.request, urllib.error
+          from datetime import datetime, timezone, timedelta
+
+          sys.path.insert(0, ".github/scripts")
+          from backlog_client import load_backlog_env, resolve_bl_base, bl_request
+
+          API_KEY, SPACE_ID, PROJ_KEY, DOMAIN = load_backlog_env()
+          GH_TOKEN = os.environ["GH_TOKEN"]
+          GH_REPO = os.environ["GH_REPO"]
+          MINUTES = int(os.environ.get("MINUTES_BACK", "20"))
+
+          GH_BASE = "https://api.github.com"
+          BL_BASE, BL_DOMAIN = resolve_bl_base(SPACE_ID, API_KEY, DOMAIN)
+
+          def gh_request(method, path, data=None):
+              url = f"{GH_BASE}{path}"
+              body = json.dumps(data).encode() if data else None
+              req = urllib.request.Request(url, data=body, method=method)
+              req.add_header("Authorization", f"Bearer {GH_TOKEN}")
+              req.add_header("Accept", "application/vnd.github+json")
+              req.add_header("X-GitHub-Api-Version", "2022-11-28")
+              if body:
+                  req.add_header("Content-Type", "application/json")
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  print(f"GitHub API エラー {e.code}: {e.read().decode()}", file=sys.stderr)
+                  return None
+
+          # 認証が切れていると全ての GitHub API が 401 になり、gh_request が None を返すため
+          # 「対応Issue未検出」として全件スキップされ、成功ログだけが残ってしまう。
+          # 先に疎通を確認して、失敗なら明示的に落とす。
+          if gh_request("GET", f"/repos/{GH_REPO}") is None:
+              print(
+                  "GitHub の認証に失敗しました。secrets.GH_TOKEN の有効期限と権限を確認してください。",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          # 課題1件ごとに Search API を呼ぶと、Search の制限(30回/分)にすぐ達して
+          # 403 になり、大半が「対応Issue未検出」として取りこぼされる。
+          # Issue 一覧を1回だけ取得して bl_key -> Issue の対応表を作る。
+          # 一覧は core API(5000回/時)なので、300件でも4リクエスト程度で済む。
+          def build_issue_index():
+              index = {}
+              page = 1
+              while True:
+                  items = gh_request("GET", f"/repos/{GH_REPO}/issues?state=all&per_page=100&page={page}")
+                  # gh_request は HTTP エラーでも None を返す。空ページと同一視すると
+                  # 対応表が不完全なまま同期を続け、既にIssueがある課題に重複Issueを作る。
+                  if items is None:
+                      print(
+                          f"GitHub Issue 一覧の取得に失敗しました(page={page})。"
+                          "不完全な対応表で同期すると重複Issueを作るため中断します。",
+                          file=sys.stderr,
+                      )
+                      sys.exit(1)
+                  if not items:
+                      break
+                  for it in items:
+                      if "pull_request" in it:
+                          continue
+                      m = re.match(rf'^\[({re.escape(PROJ_KEY)}-\d+)\]\s', it.get("title") or "")
+                      if m:
+                          index.setdefault(m.group(1), it)
+                  if len(items) < 100:
+                      break
+                  page += 1
+              return index
+
+          ISSUE_INDEX = build_issue_index()
+          print(f"GitHub Issue の対応表を作成しました: {len(ISSUE_INDEX)} 件")
+
+          def gh_search_issue(bl_key):
+              return ISSUE_INDEX.get(bl_key)
+
+          project = bl_request(BL_BASE, API_KEY, "GET", f"/projects/{PROJ_KEY}")
+          project_id = project["id"]
+
+          # Backlog API の updatedSince は yyyy-MM-dd のみ受け付ける（ISO datetime は 400）
+          since = (datetime.now(timezone.utc) - timedelta(minutes=MINUTES)).strftime("%Y-%m-%d")
+          # Backlog の /issues は1回あたり最大100件しか返さない。窓を広げても
+          # 「更新が新しい100件」で打ち切られ、古い課題が取りこぼされるため offset で辿る。
+          issues = []
+          offset = 0
+          while True:
+              page = bl_request(
+                  BL_BASE,
+                  API_KEY,
+                  "GET",
+                  "/issues",
+                  {
+                      "projectId[]": project_id,
+                      "updatedSince": since,
+                      "count": 100,
+                      "offset": offset,
+                      "sort": "updated",
+                      "order": "desc",
+                  },
+              )
+              if not page:
+                  break
+              issues.extend(page)
+              if len(page) < 100:
+                  break
+              offset += 100
+              if offset >= 2000:
+                  # updatedSince は日付単位まで切り捨てられ、sort=updated&order=desc で取得する。
+                  # 2000件で打ち切ると同じ日付で再実行しても上位2000件を取り直すだけで、
+                  # 古い課題には永久に到達しない。基準日が翌日に進むと取りこぼしが確定する。
+                  # 黙って成功扱いにせず、失敗させて気づけるようにする。
+                  print(
+                      "Backlog 課題が2000件を超えました。この実行では取りこぼしが発生します。"
+                      "MINUTES_BACK を短くして実行間隔を詰めてください。",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+
+          print(f"{len(issues)} 件の Backlog 課題を取得しました（updatedSince={since}, minutes_back={MINUTES}）。", flush=True)
+
+          CLOSED_STATUS_IDS = {3, 4}  # 処理済み / 完了
+
+          for issue in issues:
+              bl_key = issue["issueKey"]
+              bl_summary = issue["summary"]
+              bl_desc = issue.get("description") or ""
+              bl_url = f"https://{SPACE_ID}.{BL_DOMAIN}/view/{bl_key}"
+              bl_status_id = issue["status"]["id"]
+
+              if "GitHub Issue:" in bl_desc:
+                  # GitHub起源の課題はタイトル/本文を書き換えるとループするためスキップするが、
+                  # Backlog側で直接ステータス変更された場合に状態(open/closed)だけは反映する。
+                  existing_gh = gh_search_issue(bl_key)
+                  if existing_gh is None:
+                      print(f"  スキップ（GitHub 起源、対応Issue未検出）: {bl_key}", flush=True)
+                      continue
+                  gh_num = existing_gh["number"]
+                  new_state = "closed" if bl_status_id in CLOSED_STATUS_IDS else "open"
+                  if existing_gh["state"] != new_state:
+                      gh_request("PATCH", f"/repos/{GH_REPO}/issues/{gh_num}", {"state": new_state})
+                      print(f"  GitHub Issue の状態を同期しました（GitHub 起源）: #{gh_num} ← {bl_key} (state: {new_state})", flush=True)
+                  else:
+                      print(f"  スキップ（GitHub 起源、状態変更なし）: {bl_key}", flush=True)
+                  continue
+
+              gh_title = f"[{bl_key}] {bl_summary}"
+              gh_body = (
+                  f"<!-- backlog-synced -->\n"
+                  f"<!-- backlog-key:{bl_key} -->\n\n"
+                  f"**Backlog 課題:** [{bl_key}]({bl_url})\n\n"
+                  f"---\n\n{bl_desc}"
+              )
+
+              existing_gh = gh_search_issue(bl_key)
+
+              if existing_gh is None:
+                  result = gh_request("POST", f"/repos/{GH_REPO}/issues", {
+                      "title": gh_title,
+                      "body": gh_body,
+                  })
+                  if result:
+                      print(f"  GitHub Issue を作成しました: #{result['number']} ← {bl_key}", flush=True)
+                      if bl_status_id in CLOSED_STATUS_IDS:
+                          gh_request("PATCH", f"/repos/{GH_REPO}/issues/{result['number']}", {"state": "closed"})
+              else:
+                  gh_num = existing_gh["number"]
+                  gh_curr_state = existing_gh["state"]
+                  new_state = "closed" if bl_status_id in CLOSED_STATUS_IDS else "open"
+                  update_data = {"title": gh_title, "body": gh_body}
+                  if gh_curr_state != new_state:
+                      update_data["state"] = new_state
+                  gh_request("PATCH", f"/repos/{GH_REPO}/issues/{gh_num}", update_data)
+                  print(f"  GitHub Issue を更新しました: #{gh_num} ← {bl_key} (state: {new_state})", flush=True)
+
+          print("同期完了。", flush=True)
+          PYEOF

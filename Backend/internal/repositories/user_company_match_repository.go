@@ -42,6 +42,61 @@ func (r *UserCompanyMatchRepository) CreateOrUpdate(match *entity.UserCompanyMat
 	return r.db.Save(m).Error
 }
 
+// CreateOrUpdateBatch は同一 user/session のマッチを一括 upsert する。
+// 既存レコードは1クエリで読み、新規は CreateInBatches、更新は Save（お気に入り等フラグ保持）。
+func (r *UserCompanyMatchRepository) CreateOrUpdateBatch(matches []*entity.UserCompanyMatch) (int, error) {
+	if len(matches) == 0 {
+		return 0, nil
+	}
+	userID := matches[0].UserID
+	sessionID := matches[0].SessionID
+
+	var existing []models.UserCompanyMatch
+	if err := r.db.Where("user_id = ? AND session_id = ?", userID, sessionID).Find(&existing).Error; err != nil {
+		return 0, err
+	}
+	byCompany := make(map[uint]models.UserCompanyMatch, len(existing))
+	for _, e := range existing {
+		byCompany[e.CompanyID] = e
+	}
+
+	now := time.Now()
+	toCreate := make([]*models.UserCompanyMatch, 0)
+	toUpdate := make([]*models.UserCompanyMatch, 0)
+	for _, match := range matches {
+		if match == nil || match.UserID != userID || match.SessionID != sessionID {
+			continue
+		}
+		m := mapper.UserCompanyMatchFromEntity(match)
+		if ex, ok := byCompany[match.CompanyID]; ok {
+			m.ID = ex.ID
+			m.CreatedAt = ex.CreatedAt
+			m.UpdatedAt = now
+			m.IsViewed = ex.IsViewed
+			m.IsFavorited = ex.IsFavorited
+			m.IsApplied = ex.IsApplied
+			toUpdate = append(toUpdate, m)
+		} else {
+			toCreate = append(toCreate, m)
+		}
+	}
+
+	saved := 0
+	if len(toCreate) > 0 {
+		if err := r.db.CreateInBatches(toCreate, 100).Error; err != nil {
+			return saved, err
+		}
+		saved += len(toCreate)
+	}
+	for _, m := range toUpdate {
+		if err := r.db.Save(m).Error; err != nil {
+			continue
+		}
+		saved++
+	}
+	return saved, nil
+}
+
 // FindTopMatchesByUserAndSession マッチング度の高い順に企業を取得
 func (r *UserCompanyMatchRepository) FindTopMatchesByUserAndSession(
 	userID uint, sessionID string, limit int,

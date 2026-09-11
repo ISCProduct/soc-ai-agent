@@ -1,0 +1,42 @@
+name: CodeRabbit レビュー依頼
+
+# develop / release 向け PR オープン時に CodeRabbit へレビューを依頼する。
+# .coderabbit.yml の auto_review と併用。既に依頼済みの PR では重複コメントしない。
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+    branches:
+      - develop
+      - release
+
+jobs:
+  request-review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: CodeRabbit にレビューを依頼
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- coderabbit-auto-request -->';
+            const issue_number = context.payload.pull_request.number;
+            const { owner, repo } = context.repo;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number,
+            });
+            if (comments.some((c) => c.body?.includes(marker))) {
+              console.log('CodeRabbit review already requested');
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body: `${marker}\n@coderabbitai review`,
+            });

@@ -19,13 +19,19 @@ export async function GET(request: NextRequest) {
     })
 
     if (!response.ok) {
-      return NextResponse.json({ results: [] }, { status: response.status })
+      return NextResponse.json(
+        { results: [], message: '企業検索に失敗しました。しばらくしてから再度お試しください' },
+        { status: response.status },
+      )
     }
 
     const data = await response.json()
     return NextResponse.json(data)
   } catch (error) {
     console.error('[API] Web search error:', error)
-    return NextResponse.json({ results: [] }, { status: 500 })
+    return NextResponse.json(
+      { results: [], message: 'バックエンドに接続できません。BACKEND_URL を確認してください' },
+      { status: 502 },
+    )
   }
 }

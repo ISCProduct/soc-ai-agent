@@ -60,27 +60,10 @@ JSONのみで返してください。`
 		techInfo = "\n使用技術スタック（参考）: " + req.TechStack
 	}
 
-	// 企業名が指定されていれば Web Search を使って最新の企業情報を取得し、プロンプトに注入する（失敗しても処理を継続）
+	// 企業名が指定されていればプロンプトに含め、リライトモデル自身の知識で企業の採用観点を反映させる
 	companyInfo := ""
 	if strings.TrimSpace(req.CompanyName) != "" {
-		parts := []string{}
-		// Query 1: 採用情報・企業理念・求める人物像
-		if info, err := c.openaiClient.WebSearchQuery(context.Background(), "企業名: "+req.CompanyName+" 採用情報 求める人物像 企業理念"); err == nil && strings.TrimSpace(info) != "" {
-			if len(info) > 2000 {
-				info = info[:2000]
-			}
-			parts = append(parts, info)
-		}
-		// Query 2: エンジニア向けの選考ポイント・技術スタックに関する情報
-		if info2, err2 := c.openaiClient.WebSearchQuery(context.Background(), "企業名: "+req.CompanyName+" エンジニア 選考 重視する点 技術スタック"); err2 == nil && strings.TrimSpace(info2) != "" {
-			if len(info2) > 2000 {
-				info2 = info2[:2000]
-			}
-			parts = append(parts, info2)
-		}
-		if len(parts) > 0 {
-			companyInfo = "\n\n【企業が重視するポイント】\n" + strings.Join(parts, "\n\n")
-		}
+		companyInfo = "\n【志望企業】" + req.CompanyName + "（この企業の採用で重視されると考えられる観点を、確実に知っている範囲で反映すること）"
 	}
 
 	userPrompt := `以下のES文章を、STAR法（Situation/Task/Action/Result）に沿ったエンジニア採用向けの表現にリライトしてください。

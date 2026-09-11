@@ -3,8 +3,12 @@ package controllers
 import (
 	"Backend/domain/entity"
 	"Backend/domain/repository"
-	"Backend/internal/services"
+	"Backend/internal/models"
+	"Backend/internal/services/chat"
+	"Backend/internal/services/email"
 	ifaces "Backend/internal/services/interfaces"
+	"Backend/internal/services/matching"
+	"Backend/internal/services/shared"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -128,6 +132,22 @@ func (c *ChatController) scheduleBackgroundMatching(userID uint, sessionID strin
 	c.matchingTimers.Store(sessionID, timer)
 }
 
+// checkSessionOwnership は session_id が既存セッションの場合、最初のメッセージの UserID と
+// userID が一致するか検証する。メッセージが1件も無い新規セッションは誰でも開始できるため許可する。
+func (c *ChatController) checkSessionOwnership(sessionID string, userID uint) ([]models.ChatMessage, error) {
+	history, err := c.chatService.GetChatHistory(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(history) == 0 {
+		return history, nil
+	}
+	if history[0].UserID == 0 || history[0].UserID != userID {
+		return nil, shared.ErrForbidden
+	}
+	return history, nil
+}
+
 // Chat チャット処理
 func (c *ChatController) Chat(ctx echo.Context) error {
 	userID, ok := echoUserID(ctx)
@@ -135,7 +155,7 @@ func (c *ChatController) Chat(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
-	var req services.ChatRequest
+	var req chat.ChatRequest
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
@@ -145,6 +165,14 @@ func (c *ChatController) Chat(ctx echo.Context) error {
 
 	if req.SessionID == "" || req.Message == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "Missing required fields")
+	}
+
+	// 既存セッションへの書き込みの場合、他ユーザーのセッションでないことを検証する（#946 IDOR対策）
+	if _, err := c.checkSessionOwnership(req.SessionID, userID); err != nil {
+		if err == shared.ErrForbidden {
+			return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
+		}
+		return echoInternalError(err)
 	}
 
 	resp, err := c.chatService.ProcessChat(ctx.Request().Context(), req)
@@ -170,14 +198,12 @@ func (c *ChatController) GetHistory(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
 	}
 
-	history, err := c.chatService.GetChatHistory(sessionID)
+	history, err := c.checkSessionOwnership(sessionID, userID)
 	if err != nil {
+		if err == shared.ErrForbidden {
+			return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
+		}
 		return echoInternalError(err)
-	}
-
-	// セッション所有者チェック：最初のメッセージの UserID と照合
-	if len(history) > 0 && history[0].UserID != 0 && history[0].UserID != userID {
-		return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
 	}
 
 	return ctx.JSON(http.StatusOK, history)
@@ -253,9 +279,9 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		}
 
 		type RecommendationResponse struct {
-			Recommendations     []any                 `json:"recommendations"`
+			Recommendations     []any                         `json:"recommendations"`
 			Reason              string                        `json:"reason,omitempty"`
-			Diagnostics         *services.MatchingDiagnostics `json:"diagnostics,omitempty"`
+			Diagnostics         *matching.MatchingDiagnostics `json:"diagnostics,omitempty"`
 			EvaluatedCategories int                           `json:"evaluated_categories"`
 			IsProvisional       bool                          `json:"is_provisional"`
 		}
@@ -323,8 +349,8 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		}
 
 		employeeCount := "未定"
-		if match.Company.EmployeeCount > 0 {
-			employeeCount = strconv.Itoa(match.Company.EmployeeCount) + "名"
+		if label := models.FormatEmployeeCount(match.Company.EmployeeCount, match.Company.EmployeeCountBasis); label != "" {
+			employeeCount = label
 		}
 
 		techStack := []string{}
@@ -338,7 +364,7 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 			MatchID:      match.ID,
 			CategoryName: match.Company.Name,
 			Score:        int(match.MatchScore),
-			Reason:       services.BuildMatchReason(match, userScores),
+			Reason:       matching.BuildMatchReason(match, userScores),
 			Industry:     match.Company.Industry,
 			Location:     match.Company.Location,
 			Employees:    employeeCount,
@@ -384,8 +410,11 @@ func (c *ChatController) ToggleFavorite(ctx echo.Context) error {
 	}
 
 	if err := c.matchingService.ToggleFavorite(req.MatchID, userID); err != nil {
-		if err == services.ErrForbidden {
+		if err == shared.ErrForbidden {
 			return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
+		}
+		if err == shared.ErrNotFound {
+			return echo.NewHTTPError(http.StatusNotFound, "match not found")
 		}
 		return echoInternalError(err)
 	}
@@ -415,27 +444,6 @@ func (c *ChatController) GetAnalysisSummary(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, summary)
-}
-
-// generateReasonForCategory カテゴリごとのマッチング理由を生成（フォールバック用）
-func generateReasonForCategory(category string, _ int) string {
-	reasons := map[string]string{
-		"技術志向":        "最新技術への探求心と技術的な深掘りが評価されています。技術主導型の企業で活躍できるでしょう。",
-		"コミュニケーション能力": "優れた対話力と説明力が認められています。チーム協業が重視される企業に適しています。",
-		"リーダーシップ":     "主導性と意思決定力が強みです。マネジメント志向のキャリアパスが開かれています。",
-		"チームワーク":      "協働と協調性に優れています。大規模チームでの開発に向いています。",
-		"問題解決力":       "論理思考と分析力が際立っています。課題解決型のプロジェクトで力を発揮できます。",
-		"創造性・発想力":     "独創性と革新的思考が光ります。スタートアップや新規事業で活躍できる素質があります。",
-		"計画性・実行力":     "目標設定とタスク管理能力が高く評価されています。プロジェクト型企業に最適です。",
-		"学習意欲・成長志向":   "継続学習と成長意識が強みです。教育体制が充実した企業で大きく成長できるでしょう。",
-		"ストレス耐性・粘り強さ": "困難への対処力とプレッシャー対応力が優れています。高負荷環境でも安定したパフォーマンスを発揮できます。",
-		"ビジネス思考・目標志向": "ビジネス価値の理解と成果志向が強みです。事業会社での活躍が期待されます。",
-	}
-
-	if reason, ok := reasons[category]; ok {
-		return reason
-	}
-	return "あなたの特性が評価されています。この分野で活躍できる企業とマッチングしました。"
 }
 
 // generateMatchReason 企業マッチングの理由を生成
@@ -548,16 +556,16 @@ func (c *ChatController) SendReport(ctx echo.Context) error {
 	matches, _ := c.matchingService.GetTopMatches(ctx.Request().Context(), userID, req.SessionID, 5)
 	userScores, _ := c.chatService.GetUserScores(userID, req.SessionID)
 
-	var companies []services.EmailReportCompany
+	var companies []email.EmailReportCompany
 	for i, match := range matches {
 		if match.Company == nil || match.Company.ID == 0 {
 			continue
 		}
-		companies = append(companies, services.EmailReportCompany{
+		companies = append(companies, email.EmailReportCompany{
 			Rank:   i + 1,
 			Name:   match.Company.Name,
 			Score:  int(match.MatchScore),
-			Reason: services.BuildMatchReason(match, userScores),
+			Reason: matching.BuildMatchReason(match, userScores),
 		})
 	}
 

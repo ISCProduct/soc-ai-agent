@@ -27,3 +27,24 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   }
   return NextResponse.json(data, { status: response.status })
 }
+
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  const response = await fetch(`${BACKEND_URL}/api/admin/users/${id}`, {
+    method: 'DELETE',
+    headers: {
+      'X-Admin-Email': request.headers.get('x-admin-email') || '',
+      'X-Admin-Token': request.headers.get('x-admin-token') || '',
+    },
+  })
+  const raw = await response.text()
+  let data: Record<string, unknown> = {}
+  if (raw) {
+    try {
+      data = JSON.parse(raw) as Record<string, unknown>
+    } catch {
+      data = response.ok ? { message: raw } : { error: raw }
+    }
+  }
+  return NextResponse.json(data, { status: response.status })
+}

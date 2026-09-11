@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { CheckCircle2, Loader2, ArrowRight } from "lucide-react"
+import { CheckCircle2, Loader2, ArrowRight, AlertCircle } from "lucide-react"
+import { authService } from "@/lib/auth"
 
 type AnalysisLoadingProps = {
   onCompleteAction: () => void
@@ -21,12 +22,37 @@ export function AnalysisLoading({ onCompleteAction }: AnalysisLoadingProps) {
   const [currentStep, setCurrentStep] = useState(0)
   const [completedSteps, setCompletedSteps] = useState<number[]>([])
   const [isFullyComplete, setIsFullyComplete] = useState(false)
+  // ponytail: バックエンドの実処理成否を軽量GETで確認するだけの簡易チェック。結果データそのものはCompanyResults側で再取得する。
+  const [apiState, setApiState] = useState<"pending" | "success" | "error">("pending")
+
+  const checkAnalysisReady = useCallback(async () => {
+    setApiState("pending")
+    try {
+      const sessionId = typeof window !== "undefined" ? localStorage.getItem("chat_session_id") : null
+      if (!sessionId) {
+        setApiState("error")
+        return
+      }
+      const res = await fetch(`/api/chat/recommendations?session_id=${sessionId}&limit=1`, {
+        headers: authService.getUserFetchHeaders(),
+      })
+      setApiState(res.ok ? "success" : "error")
+    } catch {
+      setApiState("error")
+    }
+  }, [])
+
+  useEffect(() => {
+    checkAnalysisReady()
+  }, [checkAnalysisReady])
 
   useEffect(() => {
     if (currentStep >= analysisSteps.length) {
-      setTimeout(() => {
-        setIsFullyComplete(true)
-      }, 500)
+      if (apiState === "success") {
+        setTimeout(() => {
+          setIsFullyComplete(true)
+        }, 500)
+      }
       return
     }
 
@@ -37,7 +63,7 @@ export function AnalysisLoading({ onCompleteAction }: AnalysisLoadingProps) {
     }, step.duration)
 
     return () => clearTimeout(timer)
-  }, [currentStep])
+  }, [currentStep, apiState])
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted/20 p-4">
@@ -123,6 +149,20 @@ export function AnalysisLoading({ onCompleteAction }: AnalysisLoadingProps) {
           </div>
         </div>
 
+        {currentStep >= analysisSteps.length && apiState === "error" && (
+          <div className="pt-4 border-t">
+            <div className="text-center space-y-4">
+              <div className="flex items-center justify-center gap-2 text-destructive">
+                <AlertCircle className="w-6 h-6" />
+                <p className="text-lg font-semibold">分析結果の取得に失敗しました</p>
+              </div>
+              <Button size="lg" variant="outline" onClick={checkAnalysisReady} className="w-full">
+                再試行する
+              </Button>
+            </div>
+          </div>
+        )}
+
         {isFullyComplete && (
           <div className="pt-4 border-t">
             <div className="text-center space-y-4">
@@ -130,8 +170,8 @@ export function AnalysisLoading({ onCompleteAction }: AnalysisLoadingProps) {
                 <CheckCircle2 className="w-6 h-6" />
                 <p className="text-lg font-semibold">分析が完了しました！</p>
               </div>
-              <Button 
-                size="lg" 
+              <Button
+                size="lg"
                 onClick={onCompleteAction}
                 className="w-full"
               >

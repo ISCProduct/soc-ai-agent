@@ -17,15 +17,31 @@ func NewUserRepository(db *gorm.DB) *UserRepository {
 	return &UserRepository{db: db}
 }
 
-// CreateUser 新規ユーザー作成
+// CreateUser 新規ユーザー作成（デフォルト組織へ所属）
 func (r *UserRepository) CreateUser(user *entity.User) error {
 	m := mapper.UserFromEntity(user)
-	if err := r.db.Create(m).Error; err != nil {
-		return err
+	if m.OrganizationID == 0 {
+		m.OrganizationID = models.DefaultOrganizationID
 	}
-	// 生成された ID などを entity に反映
-	*user = *mapper.UserToEntity(m)
-	return nil
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(m).Error; err != nil {
+			return err
+		}
+		role := models.OrgRoleMember
+		if m.IsAdmin {
+			role = models.OrgRoleOwner
+		}
+		membership := models.OrganizationMembership{
+			OrganizationID: m.OrganizationID,
+			UserID:         m.ID,
+			Role:           role,
+		}
+		if err := tx.Create(&membership).Error; err != nil {
+			return err
+		}
+		*user = *mapper.UserToEntity(m)
+		return nil
+	})
 }
 
 // GetUserByEmail メールアドレスでユーザー取得
@@ -68,14 +84,18 @@ func (r *UserRepository) ListUsers() ([]entity.User, error) {
 }
 
 // ListUsersPaged ページング付きユーザー一覧を取得
-func (r *UserRepository) ListUsersPaged(limit, offset int, query string) ([]entity.User, int64, error) {
+// schoolID が非nilの場合は個別校で絞り込む。
+func (r *UserRepository) ListUsersPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
 	var ms []models.User
 	var total int64
 
-	q := r.db.Model(&models.User{})
+	q := r.db.Model(&models.User{}).Where("withdrawn_at IS NULL")
 	if query != "" {
 		like := "%" + query + "%"
 		q = q.Where("name LIKE ? OR email LIKE ? OR school_name LIKE ?", like, like, like)
+	}
+	if schoolID != nil {
+		q = q.Where("school_id = ?", *schoolID)
 	}
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -137,4 +157,39 @@ func (r *UserRepository) GetUserByOAuth(provider, oauthID string) (*entity.User,
 		return nil, err
 	}
 	return mapper.UserToEntity(&m), nil
+}
+
+// ListStudentsPaged は生徒のみをページング付きで返す（#1027）。
+//
+// ListUsersPaged は role / is_guest / is_admin で絞っていないため、
+// 管理者やゲストも混ざる。教員向けの生徒一覧ではそれらを除く。
+// schoolID が非nilなら担当校で絞る（EchoAdminSchoolScope の結果を渡す）。
+func (r *UserRepository) ListStudentsPaged(limit, offset int, query string, schoolID *uint) ([]entity.User, int64, error) {
+	var ms []models.User
+	var total int64
+
+	q := r.db.Model(&models.User{}).
+		Where("withdrawn_at IS NULL").
+		Where("role = ?", "student").
+		Where("is_guest = ?", false).
+		Where("is_admin = ?", false)
+	if query != "" {
+		like := "%" + query + "%"
+		q = q.Where("name LIKE ? OR email LIKE ? OR school_name LIKE ?", like, like, like)
+	}
+	if schoolID != nil {
+		q = q.Where("school_id = ?", *schoolID)
+	}
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	// id を第2キーにして、同一時刻でもページ境界がずれないようにする。
+	if err := q.Order("created_at desc, id desc").Limit(limit).Offset(offset).Find(&ms).Error; err != nil {
+		return nil, 0, err
+	}
+	result := make([]entity.User, len(ms))
+	for i, m := range ms {
+		result[i] = *mapper.UserToEntity(&m)
+	}
+	return result, total, nil
 }

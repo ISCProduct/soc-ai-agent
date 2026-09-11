@@ -14,7 +14,8 @@ import (
 
 	"Backend/internal/controllers"
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/flywheel"
+	"Backend/internal/services/shared"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
@@ -207,7 +208,7 @@ func TestGitHubController_SummarizeRepo_Success(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	gh := &mocks.GitHubServiceMock{}
-	gh.On("SummarizeRepo", tmock.Anything, uint(1), "owner/repo", false).
+	gh.On("SummarizeRepo", tmock.Anything, uint(1), "owner/repo", false, "").
 		Return(&models.GitHubRepoSummary{FullName: "owner/repo"}, nil)
 	assertStatus(t, newGitHubController(gh, nil).SummarizeRepo, newCtx(req, rec), http.StatusOK)
 	gh.AssertExpectations(t)
@@ -216,7 +217,7 @@ func TestGitHubController_SummarizeRepo_Success(t *testing.T) {
 // ========== OAuthController ==========
 
 func newOAuthController(svc *mocks.OAuthServiceMock) *controllers.OAuthController {
-	return controllers.NewOAuthController(svc)
+	return controllers.NewOAuthController(svc, nil)
 }
 
 // ---- GoogleLogin ----
@@ -227,11 +228,8 @@ func TestOAuthController_GoogleLogin_Success(t *testing.T) {
 
 	svc := &mocks.OAuthServiceMock{}
 	svc.On("GetGoogleAuthURL", tmock.AnythingOfType("string")).Return("https://accounts.google.com/auth?state=xxx")
-	assertStatus(t, newOAuthController(svc).GoogleLogin, newCtx(req, rec), http.StatusOK)
-
-	var body map[string]string
-	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-	assert.Contains(t, body["auth_url"], "accounts.google.com")
+	assertStatus(t, newOAuthController(svc).GoogleLogin, newCtx(req, rec), http.StatusTemporaryRedirect)
+	assert.Contains(t, rec.Header().Get("Location"), "accounts.google.com")
 }
 
 // ---- GitHubLogin ----
@@ -242,11 +240,8 @@ func TestOAuthController_GitHubLogin_Success(t *testing.T) {
 
 	svc := &mocks.OAuthServiceMock{}
 	svc.On("GetGitHubAuthURL", tmock.AnythingOfType("string")).Return("https://github.com/login/oauth/authorize?state=xxx")
-	assertStatus(t, newOAuthController(svc).GitHubLogin, newCtx(req, rec), http.StatusOK)
-
-	var body map[string]string
-	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-	assert.Contains(t, body["auth_url"], "github.com")
+	assertStatus(t, newOAuthController(svc).GitHubLogin, newCtx(req, rec), http.StatusTemporaryRedirect)
+	assert.Contains(t, rec.Header().Get("Location"), "github.com")
 }
 
 // ---- GoogleCallback ----
@@ -277,6 +272,7 @@ func TestRealtimeController_Token_MissingFields(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"user_id": 0, "interview_id": 0})
 	req := httptest.NewRequest(http.MethodPost, "/api/realtime/token", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 1)
 	rec := httptest.NewRecorder()
 	assertStatus(t, newRealtimeController(nil, nil).Token, newCtx(req, rec), http.StatusBadRequest)
 }
@@ -285,10 +281,11 @@ func TestRealtimeController_Token_Forbidden(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"user_id": 1, "interview_id": 2})
 	req := httptest.NewRequest(http.MethodPost, "/api/realtime/token", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 1)
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("CreateRealtimeToken", tmock.Anything, uint(1), uint(2)).Return("", errors.New("forbidden"))
+	svc.On("CreateRealtimeToken", tmock.Anything, uint(1), uint(2)).Return("", shared.ErrForbidden)
 	assertStatus(t, newRealtimeController(svc, nil).Token, newCtx(req, rec), http.StatusForbidden)
 }
 
@@ -296,6 +293,7 @@ func TestRealtimeController_Token_Success(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"user_id": 1, "interview_id": 2})
 	req := httptest.NewRequest(http.MethodPost, "/api/realtime/token", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 1)
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
@@ -312,11 +310,57 @@ func TestRealtimeController_Token_TooManyRequests(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"user_id": 1, "interview_id": 2})
 	req := httptest.NewRequest(http.MethodPost, "/api/realtime/token", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 1)
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
 	svc.On("CreateRealtimeToken", tmock.Anything, uint(1), uint(2)).Return("", errors.New("realtime capacity exceeded: max 10 concurrent sessions"))
 	assertStatus(t, newRealtimeController(svc, nil).Token, newCtx(req, rec), http.StatusTooManyRequests)
+}
+
+// TestRealtimeController_Token_IgnoresBodyUserID は、他人のIDを本文で指定しても
+// 認証済みユーザーとしてしか ephemeral key を発行できないことを検証する。
+//
+// CreateRealtimeToken 内の isAllowed は actorID == ownerID で通るため、
+// 本文の user_id を信頼すると、被害者のIDとセッションIDを両方指定するだけで
+// 他人の面接セッションのキーを発行できてしまう(IDOR)。
+func TestRealtimeController_Token_IgnoresBodyUserID(t *testing.T) {
+	// 攻撃者(7)が被害者(1)になりすまそうとする。
+	body, _ := json.Marshal(map[string]any{"user_id": 1, "interview_id": 2})
+	req := httptest.NewRequest(http.MethodPost, "/api/realtime/token", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 7)
+	rec := httptest.NewRecorder()
+
+	svc := &mocks.InterviewServiceMock{}
+	assertStatus(t, newRealtimeController(svc, nil).Token, newCtx(req, rec), http.StatusForbidden)
+	// 被害者IDでサービスが呼ばれていないこと。
+	svc.AssertNotCalled(t, "CreateRealtimeToken", tmock.Anything, uint(1), uint(2))
+}
+
+// user_id 未指定でも認証済みIDで発行できる（本文の user_id は不要になった）。
+func TestRealtimeController_Token_UsesAuthenticatedIDWithoutBodyUserID(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{"interview_id": 2})
+	req := httptest.NewRequest(http.MethodPost, "/api/realtime/token", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUserID(req, 7)
+	rec := httptest.NewRecorder()
+
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("CreateRealtimeToken", tmock.Anything, uint(7), uint(2)).Return("secret", nil)
+	assertStatus(t, newRealtimeController(svc, nil).Token, newCtx(req, rec), http.StatusOK)
+	svc.AssertCalled(t, "CreateRealtimeToken", tmock.Anything, uint(7), uint(2))
+}
+
+func TestRealtimeController_Token_Unauthorized(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{"interview_id": 2})
+	req := httptest.NewRequest(http.MethodPost, "/api/realtime/token", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	svc := &mocks.InterviewServiceMock{}
+	assertStatus(t, newRealtimeController(svc, nil).Token, newCtx(req, rec), http.StatusUnauthorized)
+	svc.AssertNotCalled(t, "CreateRealtimeToken")
 }
 
 // ---- SessionInfo ----
@@ -357,26 +401,24 @@ func newIntegratedProfileController(
 	return controllers.NewIntegratedProfileController(cf, sc, rd)
 }
 
-func TestIntegratedProfileController_GetProfile_MissingUserID(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/user/profile", nil)
+// user_idは認証済みユーザーID(EchoUserAuth経由のリクエストコンテキスト)から取得する。
+// 以前はクエリのuser_idを未検証で信頼しており、認証なしで任意ユーザーの
+// プロファイルを取得できた。
+
+func TestIntegratedProfileController_GetProfile_Unauthenticated(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/user/profile?user_id=1&session_id=sess-1", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newIntegratedProfileController(nil, nil, nil).GetProfile, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, newIntegratedProfileController(nil, nil, nil).GetProfile, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestIntegratedProfileController_GetProfile_MissingSessionID(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/user/profile?user_id=1", nil)
-	rec := httptest.NewRecorder()
-	assertStatus(t, newIntegratedProfileController(nil, nil, nil).GetProfile, newCtx(req, rec), http.StatusBadRequest)
-}
-
-func TestIntegratedProfileController_GetProfile_InvalidUserID(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/user/profile?user_id=abc&session_id=sess-1", nil)
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/user/profile", nil), 1)
 	rec := httptest.NewRecorder()
 	assertStatus(t, newIntegratedProfileController(nil, nil, nil).GetProfile, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestIntegratedProfileController_GetProfile_Success(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/user/profile?user_id=1&session_id=sess-abc", nil)
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/user/profile?session_id=sess-abc", nil), 1)
 	rec := httptest.NewRecorder()
 
 	cf := &mocks.CrossFeatureServiceMock{}
@@ -385,7 +427,7 @@ func TestIntegratedProfileController_GetProfile_Success(t *testing.T) {
 
 	sc.On("CountByUser", uint(1)).Return(int64(3), nil)
 	rd.On("FindDocumentsByUserID", uint(1)).Return([]models.ResumeDocument{{Status: "reviewed"}}, nil)
-	cf.On("BuildIntegratedProfile", uint(1), "sess-abc", 3, true).Return(&services.UserIntegratedProfile{UserID: 1}, nil)
+	cf.On("BuildIntegratedProfile", uint(1), "sess-abc", 3, true).Return(&flywheel.UserIntegratedProfile{UserID: 1}, nil)
 
 	assertStatus(t, newIntegratedProfileController(cf, sc, rd).GetProfile, newCtx(req, rec), http.StatusOK)
 
@@ -396,8 +438,25 @@ func TestIntegratedProfileController_GetProfile_Success(t *testing.T) {
 	rd.AssertExpectations(t)
 }
 
+// クエリのuser_idは無視され、認証済みユーザーIDが使われること。
+func TestIntegratedProfileController_GetProfile_IgnoresQueryUserID(t *testing.T) {
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/user/profile?user_id=999&session_id=sess-abc", nil), 1)
+	rec := httptest.NewRecorder()
+
+	cf := &mocks.CrossFeatureServiceMock{}
+	sc := &mocks.InterviewSessionCounterMock{}
+	rd := &mocks.ResumeDocumentFinderMock{}
+
+	sc.On("CountByUser", uint(1)).Return(int64(0), nil)
+	rd.On("FindDocumentsByUserID", uint(1)).Return([]models.ResumeDocument{}, nil)
+	cf.On("BuildIntegratedProfile", uint(1), "sess-abc", 0, false).Return(&flywheel.UserIntegratedProfile{UserID: 1}, nil)
+
+	assertStatus(t, newIntegratedProfileController(cf, sc, rd).GetProfile, newCtx(req, rec), http.StatusOK)
+	cf.AssertExpectations(t)
+}
+
 func TestIntegratedProfileController_GetProfile_ServiceError(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/user/profile?user_id=1&session_id=sess-abc", nil)
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/user/profile?session_id=sess-abc", nil), 1)
 	rec := httptest.NewRecorder()
 
 	cf := &mocks.CrossFeatureServiceMock{}

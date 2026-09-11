@@ -12,4 +12,6 @@ type ResumeRepository interface {
 	CreateReview(review *models.ResumeReview) error
 	ReplaceReviewItems(reviewID uint, items []models.ResumeReviewItem) error
 	FindReviewItems(reviewID uint) ([]models.ResumeReviewItem, error)
+	// FindLatestDocumentWithReview は最新ドキュメントと、それに紐づく最新レビューを返す(#1030)。
+	FindLatestDocumentWithReview(userID uint) (*models.ResumeDocument, *models.ResumeReview, error)
 }

@@ -6,7 +6,7 @@ import "time"
 type QuestionWeight struct {
 	ID             uint      `gorm:"primaryKey" json:"ID"`
 	Question       string    `gorm:"type:varchar(500);not null;uniqueIndex:idx_question_hash" json:"question"`
-	WeightCategory string    `gorm:"size:100;not null;index" json:"weight_category"` // 例: "技術志向", "コミュニケーション", "リーダーシップ"
+	WeightCategory string    `gorm:"size:100;not null;index" json:"weight_category"` // 例: "技術志向", "コミュニケーション力", "リーダーシップ志向"（正典: domain/valueobject/match.go）
 	WeightValue    int       `gorm:"not null" json:"weight_value"`                   // 重み係数値
 	IndustryID     uint      `gorm:"index" json:"industry_id,omitempty"`             // 関連する業界ID(オプション)
 	JobCategoryID  uint      `gorm:"index" json:"job_category_id,omitempty"`         // 関連する職種ID(オプション)

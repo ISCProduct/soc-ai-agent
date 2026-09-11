@@ -1,14 +1,24 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/middleware"
+	"Backend/internal/services/auth"
 	"Backend/internal/services/interfaces"
+	"Backend/internal/services/refreshtoken"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
+
+// tenantOrgID はリクエストcontextからテナント解決済み組織ID(0の場合はテナント制約なし)を取り出す。
+func tenantOrgID(ctx echo.Context) uint {
+	id, _ := middleware.TenantOrganizationIDFromContext(ctx.Request().Context())
+	return id
+}
 
 // isProduction は APP_ENV=production のときのみ true を返す。
 func isProduction() bool { return os.Getenv("APP_ENV") == "production" }
@@ -23,26 +33,25 @@ func NewAuthController(authService interfaces.AuthService) *AuthController {
 
 // Register 新規ユーザー登録
 func (c *AuthController) Register(ctx echo.Context) error {
-	var req services.RegisterRequest
+	var req auth.RegisterRequest
 	if err := ctx.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
 	}
 
-	resp, err := c.authService.Register(req)
+	resp, err := c.authService.Register(req, tenantOrgID(ctx))
 	if err != nil {
 		if err.Error() == "email already exists" {
 			if isProduction() {
-				// ユーザー列挙対策: 本番では汎用メッセージを返す
 				log.Printf("[Register] email already exists: %s", req.Email)
-				return echo.NewHTTPError(http.StatusConflict, "Registration failed")
+				return newAPIError(http.StatusConflict, ErrCodeDuplicateEmail, "Registration failed")
 			}
-			return echo.NewHTTPError(http.StatusConflict, err.Error())
+			return newAPIError(http.StatusConflict, ErrCodeDuplicateEmail, err.Error())
 		}
 		if isProduction() {
 			log.Printf("[Register] error: %v", err)
-			return echo.NewHTTPError(http.StatusBadRequest, "Registration failed")
+			return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Registration failed")
 		}
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, err.Error())
 	}
 
 	return ctx.JSON(http.StatusCreated, resp)
@@ -50,21 +59,24 @@ func (c *AuthController) Register(ctx echo.Context) error {
 
 // Login ログイン
 func (c *AuthController) Login(ctx echo.Context) error {
-	var req services.LoginRequest
+	var req auth.LoginRequest
 	if err := ctx.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
 	}
 
-	resp, err := c.authService.Login(req)
+	resp, err := c.authService.Login(req, tenantOrgID(ctx))
 	if err != nil {
 		msg := err.Error()
 		if msg == "invalid email or password" || msg == "guest users cannot login" {
-			return echo.NewHTTPError(http.StatusUnauthorized, msg)
+			return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, msg)
 		}
 		if msg == "email_not_verified" || msg == "re_verification_required" {
-			return ctx.JSON(http.StatusForbidden, map[string]string{"error": msg})
+			return newAPIError(http.StatusForbidden, ErrCodeForbidden, msg)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, msg)
+		if msg == "tenant mismatch" {
+			return newAPIError(http.StatusForbidden, ErrCodeForbidden, msg)
+		}
+		return echoInternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, resp)
@@ -72,7 +84,7 @@ func (c *AuthController) Login(ctx echo.Context) error {
 
 // CreateGuest ゲストユーザー作成
 func (c *AuthController) CreateGuest(ctx echo.Context) error {
-	resp, err := c.authService.CreateGuestUser()
+	resp, err := c.authService.CreateGuestUser(tenantOrgID(ctx))
 	if err != nil {
 		return echoInternalError(err)
 	}
@@ -84,13 +96,13 @@ func (c *AuthController) CreateGuest(ctx echo.Context) error {
 func (c *AuthController) GetUser(ctx echo.Context) error {
 	userID, ok := echoUserID(ctx)
 	if !ok {
-		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
 	}
 
 	resp, err := c.authService.GetUser(userID)
 	if err != nil {
 		if err.Error() == "user not found" {
-			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+			return newAPIError(http.StatusNotFound, ErrCodeNotFound, err.Error())
 		}
 		return echoInternalError(err)
 	}
@@ -104,59 +116,69 @@ func (c *AuthController) RequestRegistration(ctx echo.Context) error {
 		Email string `json:"email"`
 	}
 	if err := ctx.Bind(&body); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
 	}
 
 	if err := c.authService.RequestRegistration(body.Email); err != nil {
 		if isProduction() {
-			// ユーザー列挙対策: 本番では成功と同じレスポンスを返す
 			log.Printf("[RequestRegistration] error for %s: %v", body.Email, err)
 			return ctx.JSON(http.StatusOK, map[string]string{"message": "confirmation email sent"})
 		}
 		if err.Error() == "email already exists" {
-			return echo.NewHTTPError(http.StatusConflict, err.Error())
+			return newAPIError(http.StatusConflict, ErrCodeDuplicateEmail, err.Error())
 		}
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, err.Error())
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{"message": "confirmation email sent"})
 }
 
-// VerifyRegistration 仮登録トークンを検証してメールアドレスを返す
+// VerifyRegistration 仮登録トークンを検証してメールアドレスを返す。
+// トークンは query または JSON body `{ "token": "..." }` を受け付ける（#1079）。
 func (c *AuthController) VerifyRegistration(ctx echo.Context) error {
-	token := ctx.QueryParam("token")
+	token := registrationTokenFromRequest(ctx)
 	if token == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "token is required")
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "token is required")
 	}
 
 	email, err := c.authService.ValidateRegistrationToken(token)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, err.Error())
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{"email": email, "token": token})
+}
+
+func registrationTokenFromRequest(ctx echo.Context) string {
+	if t := strings.TrimSpace(ctx.QueryParam("token")); t != "" {
+		return t
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	_ = ctx.Bind(&body)
+	return strings.TrimSpace(body.Token)
 }
 
 // UpdateProfile ユーザープロフィール更新
 func (c *AuthController) UpdateProfile(ctx echo.Context) error {
 	userID, ok := echoUserID(ctx)
 	if !ok {
-		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
 	}
 
-	var req services.UpdateProfileRequest
+	var req auth.UpdateProfileRequest
 	if err := ctx.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
 	}
-	// リクエストボディの user_id を無視し、JWTから取得した値で上書き
 	req.UserID = userID
 
 	resp, err := c.authService.UpdateProfile(req)
 	if err != nil {
 		if err.Error() == "user not found" {
-			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+			return newAPIError(http.StatusNotFound, ErrCodeNotFound, err.Error())
 		}
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, err.Error())
 	}
 
 	return ctx.JSON(http.StatusOK, resp)
@@ -168,7 +190,7 @@ func (c *AuthController) RequestPasswordReset(ctx echo.Context) error {
 		Email string `json:"email"`
 	}
 	if err := ctx.Bind(&body); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
 	}
 
 	// エラーがあっても常に200を返す（情報漏洩防止）
@@ -184,11 +206,11 @@ func (c *AuthController) ResetPassword(ctx echo.Context) error {
 		Password string `json:"password"`
 	}
 	if err := ctx.Bind(&body); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
 	}
 
 	if err := c.authService.ResetPassword(body.Token, body.Password); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, err.Error())
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{"message": "パスワードをリセットしました"})
@@ -205,22 +227,64 @@ func (c *AuthController) VerifyEmail(ctx echo.Context) error {
 		token = req.Token
 	}
 	if err := c.authService.VerifyEmail(token); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, err.Error())
 	}
 	return ctx.JSON(http.StatusOK, map[string]string{"message": "メールアドレスを確認しました。ログインしてください。"})
 }
 
-// DeleteAccount アカウントと全データを削除（個人情報保護法第28条対応）
+// DeleteAccount アカウントを退会処理する（論理削除。保持期間後に物理削除）
 // DELETE /api/auth/account
 func (c *AuthController) DeleteAccount(ctx echo.Context) error {
 	userID, ok := echoUserID(ctx)
 	if !ok {
-		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
 	}
 
 	if err := c.authService.DeleteAccount(userID); err != nil {
 		return echoInternalError(err)
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]string{"message": "アカウントを削除しました"})
+	return ctx.JSON(http.StatusOK, map[string]string{"message": "アカウントを退会処理しました"})
+}
+
+// refreshRequest はリフレッシュ/ログアウトのリクエストボディ (#616)
+type refreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+// Refresh リフレッシュトークンをローテーションして新しいトークンペアを返す
+// POST /api/auth/refresh
+func (c *AuthController) Refresh(ctx echo.Context) error {
+	var req refreshRequest
+	if err := ctx.Bind(&req); err != nil {
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+	}
+	if req.RefreshToken == "" {
+		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "refresh_token is required")
+	}
+
+	resp, err := c.authService.RefreshSession(req.RefreshToken)
+	if err != nil {
+		if errors.Is(err, refreshtoken.ErrInvalidRefreshToken) {
+			return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "invalid refresh token")
+		}
+		return echoInternalError(err)
+	}
+
+	return ctx.JSON(http.StatusOK, resp)
+}
+
+// Logout リフレッシュトークンを失効させる
+// POST /api/auth/logout
+func (c *AuthController) Logout(ctx echo.Context) error {
+	var req refreshRequest
+	if err := ctx.Bind(&req); err != nil {
+		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+	}
+
+	if err := c.authService.LogoutSession(req.RefreshToken); err != nil {
+		return echoInternalError(err)
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]string{"message": "ログアウトしました"})
 }

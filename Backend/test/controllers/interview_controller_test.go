@@ -14,10 +14,14 @@ import (
 
 	"Backend/internal/controllers"
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/interview"
+	"Backend/internal/services/shared"
+	"Backend/internal/services/storage"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"gorm.io/gorm"
 )
 
 func newInterviewController(svc *mocks.InterviewServiceMock) *controllers.InterviewController {
@@ -48,7 +52,7 @@ func TestInterviewController_Create_Success(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("CreateSession", uint(1), "ja", "female").Return(&services.InterviewSessionResponse{ID: 10}, nil)
+	svc.On("CreateSession", uint(1), "ja", "female").Return(&interview.InterviewSessionResponse{ID: 10}, nil)
 	assertStatus(t, newInterviewController(svc).Create, newCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -79,7 +83,7 @@ func TestInterviewController_List_Success(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("ListSessions", uint(1), false, 10, 0).Return([]services.InterviewSessionResponse{{ID: 1}}, int64(1), nil)
+	svc.On("ListSessions", uint(1), false, 10, 0).Return([]interview.InterviewSessionResponse{{ID: 1}}, int64(1), nil)
 	assertStatus(t, newInterviewController(svc).List, newCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -91,7 +95,7 @@ func TestInterviewController_List_LimitCapped(t *testing.T) {
 
 	svc := &mocks.InterviewServiceMock{}
 	// limit は100に切り捨てられる
-	svc.On("ListSessions", uint(1), false, 100, 0).Return([]services.InterviewSessionResponse{}, int64(0), nil)
+	svc.On("ListSessions", uint(1), false, 100, 0).Return([]interview.InterviewSessionResponse{}, int64(0), nil)
 	assertStatus(t, newInterviewController(svc).List, newCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -102,8 +106,51 @@ func TestInterviewController_List_Forbidden(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("ListSessions", uint(1), false, 20, 0).Return([]services.InterviewSessionResponse{}, int64(0), errors.New("forbidden"))
+	svc.On("ListSessions", uint(1), false, 20, 0).Return([]interview.InterviewSessionResponse{}, int64(0), shared.ErrForbidden)
 	assertStatus(t, newInterviewController(svc).List, newCtx(req, rec), http.StatusForbidden)
+}
+
+func TestInterviewController_HRList_Unauthorized(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/hr/interviews?company_id=10", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newInterviewController(nil).HRList, newCtx(req, rec), http.StatusUnauthorized)
+}
+
+func TestInterviewController_HRList_MissingCompanyID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/hr/interviews", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newInterviewController(nil).HRList, newCtx(req, rec), http.StatusBadRequest)
+}
+
+func TestInterviewController_HRList_Forbidden(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/hr/interviews?company_id=99", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("ListSessionsForOwner", uint(1), uint(99), 20, 0).Return([]interview.InterviewSessionResponse{}, int64(0), shared.ErrForbidden)
+	assertStatus(t, newInterviewController(svc).HRList, newCtx(req, rec), http.StatusForbidden)
+	svc.AssertExpectations(t)
+}
+
+func TestInterviewController_HRList_Success(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/hr/interviews?company_id=10", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("ListSessionsForOwner", uint(1), uint(10), 20, 0).Return([]interview.InterviewSessionResponse{{ID: 3}}, int64(1), nil)
+	assertStatus(t, newInterviewController(svc).HRList, newCtx(req, rec), http.StatusOK)
+	svc.AssertExpectations(t)
+}
+
+func TestInterviewController_HRList_InternalError(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/hr/interviews?company_id=10", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("ListSessionsForOwner", uint(1), uint(10), 20, 0).Return([]interview.InterviewSessionResponse{}, int64(0), errors.New("db down"))
+	assertStatus(t, newInterviewController(svc).HRList, newCtx(req, rec), http.StatusInternalServerError)
+	svc.AssertExpectations(t)
 }
 
 // ---- Get ----
@@ -136,7 +183,7 @@ func TestInterviewController_Get_Success(t *testing.T) {
 	c.SetParamValues("5")
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("GetSessionDetailWithRole", uint(1), uint(5), "student").Return(&services.InterviewDetailResponse{}, nil)
+	svc.On("GetSessionDetailWithRole", uint(1), uint(5), "student").Return(&interview.InterviewDetailResponse{}, nil)
 	assertStatus(t, newInterviewController(svc).Get, c, http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -150,7 +197,7 @@ func TestInterviewController_Get_Forbidden(t *testing.T) {
 	c.SetParamValues("5")
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("GetSessionDetailWithRole", uint(1), uint(5), "student").Return(nil, errors.New("forbidden"))
+	svc.On("GetSessionDetailWithRole", uint(1), uint(5), "student").Return(nil, shared.ErrForbidden)
 	assertStatus(t, newInterviewController(svc).Get, c, http.StatusForbidden)
 }
 
@@ -174,7 +221,7 @@ func TestInterviewController_Start_Success(t *testing.T) {
 	c.SetParamValues("3")
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("StartSession", uint(1), uint(3)).Return(&services.InterviewSessionResponse{ID: 3}, nil)
+	svc.On("StartSession", uint(1), uint(3)).Return(&interview.InterviewSessionResponse{ID: 3}, nil)
 	assertStatus(t, newInterviewController(svc).Start, c, http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -188,7 +235,7 @@ func TestInterviewController_Start_Forbidden(t *testing.T) {
 	c.SetParamValues("3")
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("StartSession", uint(1), uint(3)).Return(nil, errors.New("forbidden"))
+	svc.On("StartSession", uint(1), uint(3)).Return(nil, shared.ErrForbidden)
 	assertStatus(t, newInterviewController(svc).Start, c, http.StatusForbidden)
 }
 
@@ -212,7 +259,7 @@ func TestInterviewController_Finish_Success(t *testing.T) {
 	c.SetParamValues("3")
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("FinishSession", uint(1), uint(3)).Return(&services.InterviewSessionResponse{ID: 3}, nil)
+	svc.On("FinishSession", uint(1), uint(3)).Return(&interview.InterviewSessionResponse{ID: 3}, nil)
 	assertStatus(t, newInterviewController(svc).Finish, c, http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -226,7 +273,7 @@ func TestInterviewController_Finish_Forbidden(t *testing.T) {
 	c.SetParamValues("3")
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("FinishSession", uint(1), uint(3)).Return(nil, errors.New("forbidden"))
+	svc.On("FinishSession", uint(1), uint(3)).Return(nil, shared.ErrForbidden)
 	assertStatus(t, newInterviewController(svc).Finish, c, http.StatusForbidden)
 }
 
@@ -244,7 +291,7 @@ func TestInterviewController_GetTrend_Success(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("GetTrend", uint(1), 5).Return([]services.InterviewTrendPoint{{SessionID: 1}}, nil)
+	svc.On("GetTrend", uint(1), 5).Return([]interview.InterviewTrendPoint{{SessionID: 1}}, nil)
 	assertStatus(t, newInterviewController(svc).GetTrend, newCtx(req, rec), http.StatusOK)
 
 	var body map[string]any
@@ -300,7 +347,7 @@ func TestInterviewController_GetReport_Forbidden(t *testing.T) {
 	c.SetParamValues("2")
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("GetReport", uint(1), uint(2)).Return(nil, errors.New("forbidden"))
+	svc.On("GetReport", uint(1), uint(2)).Return(nil, shared.ErrForbidden)
 	assertStatus(t, newInterviewController(svc).GetReport, c, http.StatusForbidden)
 }
 
@@ -355,6 +402,20 @@ func TestInterviewController_SendReport_GuestForbidden(t *testing.T) {
 	assertStatus(t, newInterviewController(svc).SendReport, c, http.StatusForbidden)
 }
 
+// #939: 他ユーザーのセッションを指定した場合はサービス層が返す forbidden エラーを403にマッピングする。
+func TestInterviewController_SendReport_Forbidden(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/interviews/2/send-report", nil)
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("2")
+
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("SendReportEmail", uint(1), uint(2)).Return(shared.ErrForbidden)
+	assertStatus(t, newInterviewController(svc).SendReport, c, http.StatusForbidden)
+}
+
 // ---- AddUtterance ----
 
 func TestInterviewController_AddUtterance_Unauthorized(t *testing.T) {
@@ -393,7 +454,7 @@ func TestInterviewController_AddUtterance_Forbidden(t *testing.T) {
 	c.SetParamValues("3")
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("SaveUtterance", uint(1), uint(3), "user", "hello").Return(errors.New("forbidden"))
+	svc.On("SaveUtterance", uint(1), uint(3), "user", "hello").Return(shared.ErrForbidden)
 	assertStatus(t, newInterviewController(svc).AddUtterance, c, http.StatusForbidden)
 }
 
@@ -418,7 +479,7 @@ func TestInterviewController_GetPhraseSuggestions_Success(t *testing.T) {
 
 	svc := &mocks.InterviewServiceMock{}
 	svc.On("GetPhraseSuggestions", req.Context(), uint(1), uint(2)).
-		Return([]services.PhraseSuggestion{{Original: "頑張ります", Suggestions: []string{"尽力します"}}}, nil)
+		Return([]interview.PhraseSuggestion{{Original: "頑張ります", Suggestions: []string{"尽力します"}}}, nil)
 	assertStatus(t, newInterviewController(svc).GetPhraseSuggestions, c, http.StatusOK)
 	svc.AssertExpectations(t)
 }
@@ -433,7 +494,7 @@ func TestInterviewController_GetPhraseSuggestions_Forbidden(t *testing.T) {
 
 	svc := &mocks.InterviewServiceMock{}
 	svc.On("GetPhraseSuggestions", req.Context(), uint(1), uint(2)).
-		Return([]services.PhraseSuggestion{}, errors.New("forbidden"))
+		Return([]interview.PhraseSuggestion{}, shared.ErrForbidden)
 	assertStatus(t, newInterviewController(svc).GetPhraseSuggestions, c, http.StatusForbidden)
 }
 
@@ -464,4 +525,68 @@ func TestInterviewController_UploadVideo_ServiceUnavailable(t *testing.T) {
 	// videoRepo/s3Service がnilのとき ServiceUnavailable を返す
 	ctrl := controllers.NewInterviewController(nil, nil, nil)
 	assertStatus(t, ctrl.UploadVideo, c, http.StatusServiceUnavailable)
+}
+
+// TestInterviewController_UploadVideo_Forbidden は #941 の回帰テスト。
+// 他人の面接セッションIDを指定した場合、ファイル解析やS3アップロードに進む前に
+// 403を返し、動画レコードも作成されないことを検証する。
+func TestInterviewController_UploadVideo_Forbidden(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/interviews/9/upload-video", bytes.NewBufferString(""))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=xxx")
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("9")
+
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("EnsureSessionOwnership", uint(1), uint(9)).Return(shared.ErrForbidden)
+	videoRepo := &mocks.InterviewVideoRepositoryMock{}
+	// S3UploadServiceは未設定でもゼロ値で構築できる（メソッド呼び出しに到達しないことを検証するため）
+	ctrl := controllers.NewInterviewController(svc, videoRepo, &storage.S3UploadService{})
+
+	assertStatus(t, ctrl.UploadVideo, c, http.StatusForbidden)
+	svc.AssertExpectations(t)
+	// 所有権チェックで弾かれるため、動画レコード作成は一切行われない
+	videoRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+}
+
+// TestInterviewController_UploadVideo_SessionNotFound は未存在セッションを安全な404で返す。
+func TestInterviewController_UploadVideo_SessionNotFound(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/interviews/9/upload-video", bytes.NewBufferString(""))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=xxx")
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("9")
+
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("EnsureSessionOwnership", uint(1), uint(9)).Return(gorm.ErrRecordNotFound)
+	videoRepo := &mocks.InterviewVideoRepositoryMock{}
+	ctrl := controllers.NewInterviewController(svc, videoRepo, &storage.S3UploadService{})
+
+	assertStatus(t, ctrl.UploadVideo, c, http.StatusNotFound)
+	svc.AssertExpectations(t)
+	videoRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+}
+
+// TestInterviewController_UploadVideo_OwnershipCheckError は想定外の所有権確認エラーを500にする。
+func TestInterviewController_UploadVideo_OwnershipCheckError(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/interviews/9/upload-video", bytes.NewBufferString(""))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=xxx")
+	req = withUserID(req, 1)
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("9")
+
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("EnsureSessionOwnership", uint(1), uint(9)).Return(errors.New("db unavailable"))
+	videoRepo := &mocks.InterviewVideoRepositoryMock{}
+	ctrl := controllers.NewInterviewController(svc, videoRepo, &storage.S3UploadService{})
+
+	assertStatus(t, ctrl.UploadVideo, c, http.StatusInternalServerError)
+	svc.AssertExpectations(t)
+	videoRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
 }

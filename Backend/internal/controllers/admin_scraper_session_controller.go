@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/admin"
 	"Backend/internal/services/interfaces"
 	"net/http"
 	"time"
@@ -37,7 +37,7 @@ func (c *AdminScraperSessionController) Upsert(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
 
-	payload := services.ScraperSessionPayload{
+	payload := admin.ScraperSessionPayload{
 		SiteKey: req.SiteKey,
 		Cookies: req.Cookies,
 	}

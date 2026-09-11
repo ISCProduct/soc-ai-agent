@@ -1,7 +1,7 @@
 package mocks
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/auth"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -10,44 +10,44 @@ type AuthServiceMock struct {
 	mock.Mock
 }
 
-func (m *AuthServiceMock) Register(req services.RegisterRequest) (*services.AuthResponse, error) {
-	args := m.Called(req)
+func (m *AuthServiceMock) Register(req auth.RegisterRequest, tenantOrgID uint) (*auth.AuthResponse, error) {
+	args := m.Called(req, tenantOrgID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*services.AuthResponse), args.Error(1)
+	return args.Get(0).(*auth.AuthResponse), args.Error(1)
 }
 
-func (m *AuthServiceMock) Login(req services.LoginRequest) (*services.AuthResponse, error) {
-	args := m.Called(req)
+func (m *AuthServiceMock) Login(req auth.LoginRequest, tenantOrgID uint) (*auth.AuthResponse, error) {
+	args := m.Called(req, tenantOrgID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*services.AuthResponse), args.Error(1)
+	return args.Get(0).(*auth.AuthResponse), args.Error(1)
 }
 
-func (m *AuthServiceMock) CreateGuestUser() (*services.AuthResponse, error) {
-	args := m.Called()
+func (m *AuthServiceMock) CreateGuestUser(tenantOrgID uint) (*auth.AuthResponse, error) {
+	args := m.Called(tenantOrgID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*services.AuthResponse), args.Error(1)
+	return args.Get(0).(*auth.AuthResponse), args.Error(1)
 }
 
-func (m *AuthServiceMock) GetUser(userID uint) (*services.AuthResponse, error) {
+func (m *AuthServiceMock) GetUser(userID uint) (*auth.AuthResponse, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*services.AuthResponse), args.Error(1)
+	return args.Get(0).(*auth.AuthResponse), args.Error(1)
 }
 
-func (m *AuthServiceMock) UpdateProfile(req services.UpdateProfileRequest) (*services.AuthResponse, error) {
+func (m *AuthServiceMock) UpdateProfile(req auth.UpdateProfileRequest) (*auth.AuthResponse, error) {
 	args := m.Called(req)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*services.AuthResponse), args.Error(1)
+	return args.Get(0).(*auth.AuthResponse), args.Error(1)
 }
 
 func (m *AuthServiceMock) RequestRegistration(email string) error {
@@ -73,4 +73,16 @@ func (m *AuthServiceMock) VerifyEmail(token string) error {
 
 func (m *AuthServiceMock) DeleteAccount(userID uint) error {
 	return m.Called(userID).Error(0)
+}
+
+func (m *AuthServiceMock) RefreshSession(refreshToken string) (*auth.AuthResponse, error) {
+	args := m.Called(refreshToken)
+	if resp, ok := args.Get(0).(*auth.AuthResponse); ok {
+		return resp, args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *AuthServiceMock) LogoutSession(refreshToken string) error {
+	return m.Called(refreshToken).Error(0)
 }

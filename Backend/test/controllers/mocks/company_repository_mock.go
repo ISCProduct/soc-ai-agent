@@ -2,6 +2,7 @@ package mocks
 
 import (
 	"Backend/internal/models"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -32,6 +33,22 @@ func (m *CompanyRepositoryMock) CountActive() (int64, error) {
 	return args.Get(0).(int64), args.Error(1)
 }
 
+func (m *CompanyRepositoryMock) ListActiveFiltered(limit, offset int, name, status, industry, readiness, orderBy string, schoolID *uint) ([]models.Company, int64, error) {
+	args := m.Called(limit, offset, name, status, industry, readiness, orderBy, schoolID)
+	if v := args.Get(0); v != nil {
+		return v.([]models.Company), args.Get(1).(int64), args.Error(2)
+	}
+	return nil, args.Get(1).(int64), args.Error(2)
+}
+
+func (m *CompanyRepositoryMock) ListActiveIndustries() ([]string, error) {
+	args := m.Called()
+	if v := args.Get(0); v != nil {
+		return v.([]string), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
 func (m *CompanyRepositoryMock) FindAllPublished(limit, offset int) ([]models.Company, error) {
 	args := m.Called(limit, offset)
 	if v := args.Get(0); v != nil {
@@ -49,6 +66,14 @@ func (m *CompanyRepositoryMock) FindByID(id uint) (*models.Company, error) {
 	args := m.Called(id)
 	if v := args.Get(0); v != nil {
 		return v.(*models.Company), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *CompanyRepositoryMock) FindByIDs(ids []uint) ([]models.Company, error) {
+	args := m.Called(ids)
+	if v := args.Get(0); v != nil {
+		return v.([]models.Company), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
@@ -73,6 +98,14 @@ func (m *CompanyRepositoryMock) GetWeightProfile(companyID uint, jobPositionID *
 	args := m.Called(companyID, jobPositionID)
 	if v := args.Get(0); v != nil {
 		return v.(*models.CompanyWeightProfile), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *CompanyRepositoryMock) GetWeightProfilesByCompanyIDs(companyIDs []uint) (map[uint]*models.CompanyWeightProfile, error) {
+	args := m.Called(companyIDs)
+	if v := args.Get(0); v != nil {
+		return v.(map[uint]*models.CompanyWeightProfile), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
@@ -121,8 +154,8 @@ func (m *CompanyRepositoryMock) FindJobPositionsByCompany(companyID uint) ([]mod
 	return nil, args.Error(1)
 }
 
-func (m *CompanyRepositoryMock) ListJobPositions(companyID *uint, limit int) ([]models.CompanyJobPosition, error) {
-	args := m.Called(companyID, limit)
+func (m *CompanyRepositoryMock) ListJobPositions(companyID, schoolID *uint, limit int) ([]models.CompanyJobPosition, error) {
+	args := m.Called(companyID, schoolID, limit)
 	if v := args.Get(0); v != nil {
 		return v.([]models.CompanyJobPosition), args.Error(1)
 	}
@@ -137,4 +170,28 @@ func (m *CompanyRepositoryMock) CreateOrUpdateWeightProfile(profile *models.Comp
 func (m *CompanyRepositoryMock) CountWeightProfiles() (int64, error) {
 	args := m.Called()
 	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *CompanyRepositoryMock) ListPublishedL1WarmCandidates(limit int, infoTTL time.Duration) ([]models.CompanyL1WarmRow, error) {
+	args := m.Called(limit, infoTTL)
+	if v := args.Get(0); v != nil {
+		return v.([]models.CompanyL1WarmRow), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *CompanyRepositoryMock) CountL1Coverage(infoTTL time.Duration) (*models.L1CoverageStats, error) {
+	args := m.Called(infoTTL)
+	if v := args.Get(0); v != nil {
+		return v.(*models.L1CoverageStats), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *CompanyRepositoryMock) ListActiveMissingFetchCandidates(limit int, primaryOnly bool) ([]models.Company, error) {
+	args := m.Called(limit, primaryOnly)
+	if v := args.Get(0); v != nil {
+		return v.([]models.Company), args.Error(1)
+	}
+	return nil, args.Error(1)
 }

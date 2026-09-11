@@ -5,6 +5,7 @@ import styles from "./job-agent-chat.module.css"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Progress } from "@/components/ui/progress"
 import { Send, Bot, User } from "lucide-react"
@@ -96,6 +97,9 @@ export function JobAgentChat() {
   const [userScores, setUserScores] = useState<UserScore[]>([])
   const [progress, setProgress] = useState({ questions: 0, total: 15, categories: 0, totalCategories: 10 })
   const [showCustomInput, setShowCustomInput] = useState(false) // カスタム入力モード
+  const [historyLoadError, setHistoryLoadError] = useState<string | null>(null)
+  const [historyRetrying, setHistoryRetrying] = useState(false)
+  const [confirmAction, setConfirmAction] = useState<'reset' | 'end' | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // メッセージが更新されたらキャッシュに保存
@@ -120,92 +124,115 @@ export function JobAgentChat() {
     }
   }, [sessionId])
 
+  const applyHistoryOrStartSession = async (history: Awaited<ReturnType<typeof getChatHistory>>) => {
+    setHistoryLoadError(null)
+    if (history.length > 0) {
+      const loadedMessages: Message[] = history.map((msg) => ({
+        id: msg.id.toString(),
+        role: msg.role === "assistant" ? "agent" : "user",
+        content: msg.content,
+      }))
+      setMessages(loadedMessages)
+
+      try {
+        const scoresData = await getUserScores(sessionId)
+        if (scoresData && scoresData.length > 0) {
+          const scores: UserScore[] = scoresData.map((s: ChatScore) => ({
+            category: s.weight_category || s.category,
+            score: s.score || 0,
+            reason: s.reason || '',
+          }))
+          setUserScores(scores)
+          setProgress({
+            questions: history.length,
+            total: 15,
+            categories: scores.length,
+            totalCategories: 10,
+          })
+        }
+      } catch (error) {
+        console.error("Failed to load scores:", error)
+      }
+
+      const lastMessage = history[history.length - 1]
+      if (lastMessage.role === "assistant" &&
+          (lastMessage.content.includes("分析が完了しました") ||
+           lastMessage.content.includes("診断が完了しました"))) {
+        setIsComplete(true)
+      }
+      return
+    }
+
+    // 履歴 0 件（新規セッション）: 従来どおり最初の質問を生成
+    setIsTyping(true)
+    try {
+      const response = await sendChatMessage({
+        user_id: userId,
+        session_id: sessionId,
+        message: "START_SESSION",
+        industry_id: industryId,
+        job_category_id: jobCategoryId,
+      })
+      setMessages([{
+        id: "1",
+        role: "agent",
+        content: response.response,
+      }])
+    } finally {
+      setIsTyping(false)
+    }
+  }
+
   const initializeChat = async () => {
     if (!sessionId) {
       console.log('[Frontend] Session ID not ready yet')
       return
     }
-    
+
     try {
       console.log('[Frontend] Initializing chat with sessionId:', sessionId)
-      
-      // バックエンドからチャット履歴を取得
-      const history = await getChatHistory(sessionId)
-      console.log('[Frontend] Chat history loaded:', history.length, 'messages')
-      
-      if (history.length > 0) {
-        // 既存の履歴がある場合は復元
-        const loadedMessages: Message[] = history.map((msg) => ({
-          id: msg.id.toString(),
-          role: msg.role === "assistant" ? "agent" : "user",
-          content: msg.content,
-        }))
-        setMessages(loadedMessages)
-        console.log('[Frontend] Messages restored from backend')
-        
-        // バックエンドからスコアと進捗を取得
-        try {
-          const scoresData = await getUserScores(sessionId)
-          console.log('[Frontend] Scores loaded:', scoresData)
-          if (scoresData && scoresData.length > 0) {
-            const scores: UserScore[] = scoresData.map((s: ChatScore) => ({
-              category: s.weight_category || s.category,
-              score: s.score || 0,
-              reason: s.reason || ''
-            }))
-            setUserScores(scores)
-            
-            // 進捗状況を計算（スコアの数から）
-            setProgress({
-              questions: history.length,
-              total: 15,
-              categories: scores.length,
-              totalCategories: 10,
-            })
-          }
-        } catch (error) {
-          console.error("Failed to load scores:", error)
-        }
-        
-        // 完了状態をチェック（診断完了の特別なメッセージを確認）
-        const lastMessage = history[history.length - 1]
-        if (lastMessage.role === "assistant" && 
-            (lastMessage.content.includes("分析が完了しました") || 
-             lastMessage.content.includes("診断が完了しました"))) {
-          setIsComplete(true)
-        }
-      } else {
-        console.log('[Frontend] No history found, starting new session')
-        // 新規セッション：AIに最初の質問を生成させる
-        setIsTyping(true)
-        const response = await sendChatMessage({
-          user_id: userId,
-          session_id: sessionId,
-          message: "START_SESSION",
-          industry_id: industryId,
-          job_category_id: jobCategoryId,
-        })
-        
-        setMessages([
-          {
-            id: "1",
-            role: "agent",
-            content: response.response,
-          },
-        ])
-        setIsTyping(false)
+      let history
+      try {
+        history = await getChatHistory(sessionId)
+      } catch (error) {
+        console.error("Failed to load chat history:", error)
+        // #569: 履歴取得失敗時は挨拶ではなくエラー UI
+        setHistoryLoadError('履歴の読み込みに失敗しました。通信状況を確認して、もう一度お試しください。')
+        setMessages([])
+        return
       }
+      console.log('[Frontend] Chat history loaded:', history.length, 'messages')
+      await applyHistoryOrStartSession(history)
     } catch (error) {
-      console.error("Failed to initialize chat:", error)
-      // エラー時はデフォルトメッセージ
-      setMessages([
-        {
-          id: "1",
-          role: "agent",
-          content: "こんにちは！IT業界専門のキャリアエージェントです。あなたに最適な企業を見つけるため、いくつか質問させてください。まず、どのような職種に興味がありますか？",
-        },
-      ])
+      console.error("Failed to start new chat session:", error)
+      setHistoryLoadError('チャットの開始に失敗しました。もう一度お試しください。')
+      setMessages([])
     } finally {
+      setIsInitializing(false)
+    }
+  }
+
+  const handleRetryHistoryLoad = async () => {
+    if (!sessionId || historyRetrying) return
+    setHistoryRetrying(true)
+    setIsInitializing(true)
+    try {
+      let history
+      try {
+        history = await getChatHistory(sessionId)
+      } catch (error) {
+        console.error("Failed to load history (retry):", error)
+        setHistoryLoadError('履歴の読み込みに失敗しました。通信状況を確認して、もう一度お試しください。')
+        setMessages([])
+        return
+      }
+      await applyHistoryOrStartSession(history)
+    } catch (error) {
+      console.error("Failed to start new chat session (retry):", error)
+      setHistoryLoadError('チャットの開始に失敗しました。もう一度お試しください。')
+      setMessages([])
+    } finally {
+      setHistoryRetrying(false)
       setIsInitializing(false)
     }
   }
@@ -304,32 +331,40 @@ export function JobAgentChat() {
     }
   }
 
-  const handleReset = () => {
+  const performReset = () => {
     // 古いキャッシュをクリア
     if (typeof window !== 'undefined') {
       localStorage.removeItem(`chat_cache_${sessionId}`)
     }
-    
+
     // 新しいセッションID生成
     const newSessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
     if (typeof window !== 'undefined') {
       localStorage.setItem('chat_session_id', newSessionId)
     }
-    
+
     // ページをリロード（バックエンドには古いセッションが残る）
     window.location.reload()
   }
 
-  const handleEndChat = () => {
+  const performEndChat = () => {
     // セッションとキャッシュを完全にクリア
     if (typeof window !== 'undefined') {
       localStorage.removeItem(`chat_cache_${sessionId}`)
       localStorage.removeItem('chat_session_id')
     }
-    
+
     // ページをリロードして新しいセッションを開始
     window.location.reload()
   }
+
+  const handleReset = () => setConfirmAction('reset')
+  const handleEndChat = () => setConfirmAction('end')
+
+  const confirmDialogText =
+    confirmAction === 'reset'
+      ? { title: '最初からやり直しますか？', body: 'これまでの回答・チャット履歴はすべて削除されます。この操作は取り消せません。' }
+      : { title: 'チャットを終了しますか？', body: 'これまでの回答・チャット履歴はすべて削除されます。この操作は取り消せません。' }
 
   const handleAnalysisComplete = () => {
     setIsAnalyzing(false)
@@ -340,8 +375,35 @@ export function JobAgentChat() {
     return <AnalysisLoading onCompleteAction={handleAnalysisComplete} />
   }
 
+  const confirmDialog = (
+    <Dialog open={confirmAction !== null} onOpenChange={(open) => !open && setConfirmAction(null)}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{confirmDialogText.title}</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground mb-6">{confirmDialogText.body}</p>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setConfirmAction(null)}>
+            キャンセル
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={() => (confirmAction === 'reset' ? performReset() : performEndChat())}
+          >
+            {confirmAction === 'reset' ? 'やり直す' : '終了する'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+
   if (isComplete) {
-    return <CompanyResults userData={{ scores: userScores }} onResetAction={handleReset} />
+    return (
+      <>
+        <CompanyResults userData={{ scores: userScores }} onResetAction={handleReset} />
+        {confirmDialog}
+      </>
+    )
   }
 
   // 最後のメッセージに選択肢があるかチェック
@@ -351,6 +413,7 @@ export function JobAgentChat() {
     : false
 
   return (
+    <>
       <div className={`flex justify-center bg-background overflow-hidden ${styles.chatWrapper}`}>
         <Card className={`flex flex-col w-full max-w-4xl ${styles.chatCard}`}>
           <div className={`border-b bg-muted/50 ${styles.header}`}>
@@ -404,12 +467,32 @@ export function JobAgentChat() {
             </div>
           </div>
 
-          <div className={`flex-1 overflow-y-auto space-y-4 ${styles.messagesArea}`}>
+          <div
+            className={`flex-1 overflow-y-auto space-y-4 ${styles.messagesArea}`}
+            role="log"
+            aria-live="polite"
+            aria-relevant="additions"
+          >
             {isInitializing ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center space-y-2">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
                   <p className="text-sm text-muted-foreground">チャットを準備中...</p>
+                </div>
+              </div>
+            ) : historyLoadError ? (
+              <div className="flex items-center justify-center h-full px-4">
+                <div className="text-center space-y-4 max-w-md">
+                  <p className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-4 py-3">
+                    {historyLoadError}
+                  </p>
+                  <Button
+                    variant="default"
+                    onClick={handleRetryHistoryLoad}
+                    disabled={historyRetrying}
+                  >
+                    {historyRetrying ? '再読み込み中...' : '再試行'}
+                  </Button>
                 </div>
               </div>
             ) : (
@@ -467,7 +550,7 @@ export function JobAgentChat() {
                   )
                 })}
                 {isTyping && (
-                    <div className="flex gap-3">
+                    <div className="flex gap-3" role="status" aria-label="エージェントが入力中です">
                       <Avatar className="w-10 h-10 bg-primary flex-shrink-0">
                         <AvatarFallback>
                           <Bot className="w-5 h-5 text-primary-foreground" />
@@ -488,7 +571,7 @@ export function JobAgentChat() {
           </div>
 
           <div className="border-t p-4">
-            {hasChoicesInLastMessage && !showCustomInput ? (
+            {historyLoadError ? null : hasChoicesInLastMessage && !showCustomInput ? (
               // 選択肢がある場合は「その他を入力」ボタンのみ表示
               <div className="flex justify-center">
                 <Button
@@ -517,7 +600,7 @@ export function JobAgentChat() {
                     disabled={isLoadingFromBackend || isInitializing}
                     autoFocus={showCustomInput} // カスタム入力モード時は自動フォーカス
                 />
-                <Button type="submit" size="icon" disabled={isLoadingFromBackend || !inputValue.trim() || isInitializing}>
+                <Button type="submit" size="icon" disabled={isLoadingFromBackend || !inputValue.trim() || isInitializing} aria-label="メッセージを送信">
                   <Send className="w-4 h-4" />
                 </Button>
                 {/* カスタム入力モード時はキャンセルボタンを表示 */}
@@ -538,5 +621,7 @@ export function JobAgentChat() {
           </div>
         </Card>
       </div>
+      {confirmDialog}
+    </>
   )
 }

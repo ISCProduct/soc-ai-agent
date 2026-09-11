@@ -1,155 +1,251 @@
 package models
 
 import (
+	"errors"
+	"fmt"
+
 	"gorm.io/gorm"
 )
 
-// SeedCompanyRelations 企業関係のシードデータ（改良版）
-func SeedCompanyRelations(db *gorm.DB) error {
-	// 既存の企業数を確認
-	var count int64
-	db.Model(&Company{}).Count(&count)
+const factRelationDescSuffix = "（出所: 公開情報）"
 
-	if count < 3 {
-		// 企業データが不足している場合はスキップ
+type factCapitalRelationSpec struct {
+	parentCorpNum string
+	parentName    string
+	childCorpNum  string
+	childName     string
+	relationType  string
+	ratio         float64
+	note          string
+}
+
+type factBusinessRelationSpec struct {
+	fromCorpNum  string
+	fromName     string
+	toCorpNum    string
+	toName       string
+	relationType string
+	note         string
+}
+
+// 公開されているグループ体制・子会社一覧等に基づく資本関係（法人番号で特定）。
+var factCapitalRelations = []factCapitalRelationSpec{
+	{
+		parentCorpNum: "7010401026738", parentName: "トヨタ自動車株式会社",
+		childCorpNum: "7180301018923", childName: "トヨタテクニカルディベロップメント株式会社",
+		relationType: "capital_subsidiary", ratio: 100,
+		note: "トヨタ自動車の完全子会社",
+	},
+	{
+		parentCorpNum: "7010401026738", parentName: "トヨタ自動車株式会社",
+		childCorpNum: "9180301002173", childName: "ベルエアーシステムズ株式会社",
+		relationType: "capital_subsidiary", ratio: 100,
+		note: "トヨタ自動車グループの連結子会社",
+	},
+	{
+		parentCorpNum: "7010401026738", parentName: "トヨタ自動車株式会社",
+		childCorpNum: "5180301037157", childName: "株式会社ビーネックスソリューションズ",
+		relationType: "capital_affiliate", ratio: 50,
+		note: "トヨタ自動車グループ（ITサービス）",
+	},
+	{
+		parentCorpNum: "4180301012460", parentName: "株式会社豊田自動織機",
+		childCorpNum: "5180301014305", childName: "株式会社豊田自動織機ＩＴソリューションズ",
+		relationType: "capital_subsidiary", ratio: 100,
+		note: "豊田自動織機の子会社",
+	},
+	{
+		parentCorpNum: "4010401019905", parentName: "NEC株式会社",
+		childCorpNum: "7010601022674", childName: "ＮＥＣソリューションイノベータ株式会社",
+		relationType: "capital_subsidiary", ratio: 100,
+		note: "NECの連結子会社",
+	},
+	{
+		parentCorpNum: "8010105001109", parentName: "株式会社三菱ＵＦＪフィナンシャル・グループ",
+		childCorpNum: "6010001008770", childName: "三菱ＵＦＪ信託銀行株式会社",
+		relationType: "capital_subsidiary", ratio: 100,
+		note: "MUFGグループの連結子会社",
+	},
+	{
+		parentCorpNum: "8010105001109", parentName: "株式会社三菱ＵＦＪフィナンシャル・グループ",
+		childCorpNum: "8010001000016", childName: "三菱ＵＦＪニコス株式会社",
+		relationType: "capital_subsidiary", ratio: 100,
+		note: "MUFGグループの連結子会社",
+	},
+	{
+		parentCorpNum: "9010401013693", parentName: "ヤマトホールディングス株式会社",
+		childCorpNum: "9010601029263", childName: "ヤマトシステム開発株式会社",
+		relationType: "capital_subsidiary", ratio: 100,
+		note: "ヤマトホールディングスグループの子会社",
+	},
+	{
+		parentCorpNum: "4010401010393", parentName: "株式会社内田洋行",
+		childCorpNum: "3010401099784", childName: "株式会社内田洋行ＩＴソリューションズ",
+		relationType: "capital_subsidiary", ratio: 100,
+		note: "内田洋行の子会社",
+	},
+	{
+		parentCorpNum: "3010401028474", parentName: "パーソルホールディングス株式会社",
+		childCorpNum: "3180001032055", childName: "パーソルクロステクノロジー株式会社",
+		relationType: "capital_subsidiary", ratio: 100,
+		note: "パーソルホールディングスグループの子会社",
+	},
+	{
+		parentCorpNum: "9060001000184", parentName: "味の素株式会社",
+		childCorpNum: "2500001014640", childName: "サンヨー食品株式会社",
+		relationType: "capital_subsidiary", ratio: 100,
+		note: "味の素グループ（2010年に買収）",
+	},
+}
+
+var factBusinessRelations = []factBusinessRelationSpec{
+	{
+		fromCorpNum: "6010001008770", fromName: "三菱ＵＦＪ信託銀行株式会社",
+		toCorpNum: "8010001000016", toName: "三菱ＵＦＪニコス株式会社",
+		relationType: "business_partner",
+		note:         "MUFGグループ内の金融サービス連携",
+	},
+}
+
+// seedCompanyRelations は公開情報に基づく実在企業の関係を投入する（冪等）。
+func seedCompanyRelations(db *gorm.DB) error {
+	if err := db.Where("description LIKE ?", "%開発用シード%").Delete(&CompanyRelation{}).Error; err != nil {
+		return err
+	}
+
+	var factCount int64
+	if err := db.Model(&CompanyRelation{}).
+		Where("description LIKE ?", "%"+factRelationDescSuffix).
+		Count(&factCount).Error; err != nil {
+		return err
+	}
+	if factCount > 0 {
 		return nil
 	}
 
-	// 既存の関係数を確認
-	var relCount int64
-	db.Model(&CompanyRelation{}).Where("(parent_id <= 20 OR child_id <= 20 OR from_id <= 20 OR to_id <= 20)").Count(&relCount)
-
-	if relCount > 100 {
-		// 既に基本企業の関係が存在する場合はスキップ
-		return nil
-	}
-
-	relations := []CompanyRelation{
-		// ============ 資本関係図 ============
-		// テックホールディングス(1)を親会社とするグループ構造
-
-		// 完全子会社（100%出資）
-		{ParentID: ptr(uint(1)), ChildID: ptr(uint(2)), RelationType: "capital_subsidiary", Ratio: ptr(100.0), Description: "完全子会社 - ITソリューション事業の中核"},
-
-		// 関連会社（持分法適用）
-		{ParentID: ptr(uint(1)), ChildID: ptr(uint(3)), RelationType: "capital_affiliate", Ratio: ptr(30.0), Description: "関連会社 - コンサルティング事業の戦略的パートナー"},
-
-		// ============ ビジネス関係図（基本3社） ============
-		// システム開発・技術サービス
-		{FromID: ptr(uint(2)), ToID: ptr(uint(1)), RelationType: "business_service_provider", Description: "【技術サービス】基幹システム開発・運用保守を提供"},
-		{FromID: ptr(uint(2)), ToID: ptr(uint(3)), RelationType: "business_partner", Description: "【技術協力】クラウド移行プロジェクトの共同実施"},
-
-		// コンサルティングサービス
-		{FromID: ptr(uint(3)), ToID: ptr(uint(1)), RelationType: "business_service_provider", Description: "【経営支援】DX推進・事業戦略コンサルティングを提供"},
-		{FromID: ptr(uint(3)), ToID: ptr(uint(2)), RelationType: "business_partner", Description: "【業務提携】ITコンサルティング案件の協業"},
-
-		// グループ内取引
-		{FromID: ptr(uint(1)), ToID: ptr(uint(2)), RelationType: "business_internal", Description: "【グループ内】経営管理・人事労務サービスの提供"},
-		{FromID: ptr(uint(1)), ToID: ptr(uint(3)), RelationType: "business_investment", Description: "【投資】新規事業開発への資金・リソース提供"},
-	}
-
-	// 追加企業（ID 4-20）用のビジネス関係を動的生成
-	businessTypes := []struct {
-		Type string
-		Desc string
-	}{
-		{"business_service_provider", "【技術サービス】システム開発・運用保守を提供"},
-		{"business_service_provider", "【コンサルティング】IT戦略・経営支援を提供"},
-		{"business_partner", "【業務提携】共同開発プロジェクトの実施"},
-		{"business_partner", "【技術協力】技術ノウハウの相互提供"},
-		{"business_supplier", "【製品供給】ソフトウェア・ハードウェアの供給"},
-		{"business_outsource", "【業務委託】開発・運用業務の委託"},
-	}
-
-	// ID 4-20の企業が互いにビジネス関係を持つように生成
-	for i := uint(4); i <= 20; i++ {
-		// 各企業が5-10件のビジネス関係を持つ
-		numRelations := 5 + (i % 6)
-		for j := uint(0); j < numRelations; j++ {
-			targetID := ((i + j + 1) % 17) + 4 // 4-20の範囲でループ
-			if targetID == i {
-				targetID = (targetID % 17) + 4
-			}
-
-			typeIdx := (i + j) % uint(len(businessTypes))
-			bizType := businessTypes[typeIdx]
-
-			relations = append(relations, CompanyRelation{
-				FromID:       ptr(i),
-				ToID:         ptr(targetID),
-				RelationType: bizType.Type,
-				Description:  bizType.Desc,
-				IsActive:     true,
-			})
+	for _, spec := range factCapitalRelations {
+		if err := upsertFactCapitalRelation(db, spec); err != nil {
+			return fmt.Errorf("capital relation %s→%s: %w", spec.parentCorpNum, spec.childCorpNum, err)
 		}
 	}
-
-	for _, relation := range relations {
-		if err := db.FirstOrCreate(&relation, CompanyRelation{
-			ParentID:     relation.ParentID,
-			ChildID:      relation.ChildID,
-			FromID:       relation.FromID,
-			ToID:         relation.ToID,
-			RelationType: relation.RelationType,
-		}).Error; err != nil {
-			return err
+	for _, spec := range factBusinessRelations {
+		if err := upsertFactBusinessRelation(db, spec); err != nil {
+			return fmt.Errorf("business relation %s→%s: %w", spec.fromCorpNum, spec.toCorpNum, err)
 		}
 	}
 
 	return nil
 }
 
-// SeedCompanyMarketInfo 企業の市場情報シードデータ（詳細版）
-func SeedCompanyMarketInfo(db *gorm.DB) error {
-	// 既存の企業数を確認
-	var count int64
-	db.Model(&Company{}).Count(&count)
-
-	if count < 3 {
-		// 企業データが不足している場合はスキップ
-		return nil
+func upsertFactCapitalRelation(db *gorm.DB, spec factCapitalRelationSpec) error {
+	parentID, err := ensureCompanyByCorporateNumber(db, spec.parentCorpNum, spec.parentName)
+	if err != nil {
+		return err
+	}
+	childID, err := ensureCompanyByCorporateNumber(db, spec.childCorpNum, spec.childName)
+	if err != nil {
+		return err
 	}
 
-	marketInfos := []CompanyMarketInfo{
-		// テックホールディングス - 東証プライム上場
-		{
-			CompanyID:   1,
-			MarketType:  "prime",
-			IsListed:    true,
-			StockCode:   "9001",
-			MarketCap:   ptr(float64(500000)), // 時価総額: 5000億円
-			ListingDate: ptr("2015-04-01"),
-		},
-		// ITソリューションズ - 非上場（親会社の完全子会社）
-		{
-			CompanyID:   2,
-			MarketType:  "unlisted",
-			IsListed:    false,
-			StockCode:   "",
-			MarketCap:   nil,
-			ListingDate: nil,
-		},
-		// ビジネスコンサルティング - 東証グロース上場
-		{
-			CompanyID:   3,
-			MarketType:  "growth",
-			IsListed:    true,
-			StockCode:   "9003",
-			MarketCap:   ptr(float64(15000)), // 時価総額: 150億円
-			ListingDate: ptr("2020-12-15"),
-		},
+	relationType := spec.relationType
+	if !IsCapitalRelationType(relationType) {
+		relationType = "capital_affiliate"
 	}
 
-	for _, info := range marketInfos {
-		if err := db.FirstOrCreate(&info, CompanyMarketInfo{CompanyID: info.CompanyID}).Error; err != nil {
-			return err
-		}
+	description := spec.note + factRelationDescSuffix
+	ratio := spec.ratio
+
+	var existing CompanyRelation
+	err = db.Where("parent_id = ? AND child_id = ? AND relation_type = ?", parentID, childID, relationType).
+		First(&existing).Error
+	if err == nil {
+		existing.Description = description
+		existing.Ratio = &ratio
+		existing.IsActive = true
+		return db.Save(&existing).Error
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
 	}
 
-	return nil
+	return db.Create(&CompanyRelation{
+		ParentID:     &parentID,
+		ChildID:      &childID,
+		RelationType: relationType,
+		Ratio:        &ratio,
+		Description:  description,
+		IsActive:     true,
+	}).Error
 }
 
-// ポインタヘルパー関数
-func ptr[T any](v T) *T {
-	return &v
+func upsertFactBusinessRelation(db *gorm.DB, spec factBusinessRelationSpec) error {
+	fromID, err := ensureCompanyByCorporateNumber(db, spec.fromCorpNum, spec.fromName)
+	if err != nil {
+		return err
+	}
+	toID, err := ensureCompanyByCorporateNumber(db, spec.toCorpNum, spec.toName)
+	if err != nil {
+		return err
+	}
+
+	description := spec.note + factRelationDescSuffix
+	relationType := spec.relationType
+	if relationType == "" {
+		relationType = "business_partner"
+	}
+
+	var existing CompanyRelation
+	err = db.Where("from_id = ? AND to_id = ? AND relation_type = ?", fromID, toID, relationType).
+		First(&existing).Error
+	if err == nil {
+		existing.Description = description
+		existing.IsActive = true
+		return db.Save(&existing).Error
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	return db.Create(&CompanyRelation{
+		FromID:       &fromID,
+		ToID:         &toID,
+		RelationType: relationType,
+		Description:  description,
+		IsActive:     true,
+	}).Error
+}
+
+func ensureCompanyByCorporateNumber(db *gorm.DB, corpNum, name string) (uint, error) {
+	var company Company
+	err := db.Where("corporate_number = ?", corpNum).First(&company).Error
+	if err == nil {
+		return company.ID, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, err
+	}
+
+	// 法人番号が未設定の既存行（L1カタログ等）を名称で補完
+	if err := db.Where("corporate_number = '' AND name = ?", name).First(&company).Error; err == nil {
+		company.CorporateNumber = corpNum
+		if saveErr := db.Save(&company).Error; saveErr != nil {
+			return 0, saveErr
+		}
+		return company.ID, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, err
+	}
+
+	company = Company{
+		Name:            name,
+		CorporateNumber: corpNum,
+		IsActive:        true,
+		DataStatus:      "published",
+		SourceType:      "public_registry",
+		IsProvisional:   false,
+	}
+	if err := db.Create(&company).Error; err != nil {
+		return 0, err
+	}
+	return company.ID, nil
 }

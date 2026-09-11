@@ -22,7 +22,7 @@ resource "oci_core_instance" "app" {
 
   metadata = {
     ssh_authorized_keys = var.ssh_authorized_keys
-    user_data           = base64encode(templatefile("${path.module}/cloud-init.sh", {
+    user_data = base64encode(templatefile("${path.module}/cloud-init.sh", {
       project_name = var.project_name
     }))
   }

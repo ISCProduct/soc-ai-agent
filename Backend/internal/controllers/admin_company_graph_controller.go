@@ -2,11 +2,15 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/companyfetch"
 	"Backend/internal/config"
 	"Backend/internal/models"
+	"Backend/internal/openai"
 	"Backend/internal/scraper"
+	"Backend/internal/services/company"
 	ifaces "Backend/internal/services/interfaces"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,14 +28,23 @@ import (
 
 // AdminCompanyGraphController exposes the multi-source scraping pipeline via HTTP.
 type AdminCompanyGraphController struct {
-	pipeline     *scraper.Pipeline
-	companyRepo  repository.CompanyRepository
-	relationRepo repository.CompanyRelationRepository
-	audit        ifaces.AuditLogService
+	pipeline         *scraper.Pipeline
+	companyRepo      repository.CompanyRepository
+	relationRepo     repository.CompanyRelationRepository
+	audit            ifaces.AuditLogService
+	openaiClient     *openai.Client
+	relationsFetcher *company.CompanyRelationsFetcher
 }
 
-func NewAdminCompanyGraphController(pipeline *scraper.Pipeline, companyRepo repository.CompanyRepository, relationRepo repository.CompanyRelationRepository, audit ifaces.AuditLogService) *AdminCompanyGraphController {
-	return &AdminCompanyGraphController{pipeline: pipeline, companyRepo: companyRepo, relationRepo: relationRepo, audit: audit}
+func NewAdminCompanyGraphController(pipeline *scraper.Pipeline, companyRepo repository.CompanyRepository, relationRepo repository.CompanyRelationRepository, audit ifaces.AuditLogService, openaiClient *openai.Client) *AdminCompanyGraphController {
+	return &AdminCompanyGraphController{pipeline: pipeline, companyRepo: companyRepo, relationRepo: relationRepo, audit: audit, openaiClient: openaiClient}
+}
+
+// SetRelationsFetcher は Phase 2/3 の関係取得サービスを注入する（予算ガード・singleflight・TTL 付き）。
+func (c *AdminCompanyGraphController) SetRelationsFetcher(fetcher *company.CompanyRelationsFetcher) {
+	if c != nil {
+		c.relationsFetcher = fetcher
+	}
 }
 
 // TargetYear handles GET /api/admin/company-graph/target-year
@@ -246,8 +259,15 @@ func (c *AdminCompanyGraphController) syncRelationsFromNodes(nodes map[string]*s
 						continue
 					}
 				}
-				desc := fmt.Sprintf("scraping:%s", node.OfficialName)
-				if err := c.relationRepo.UpsertBusinessRelation(fromCompany.ID, toCompany.ID, entry.relationType, desc); err != nil {
+				desc := companyfetch.SanitizeRelationDescription("")
+				var upsertErr error
+				if models.IsCapitalRelationType(entry.relationType) {
+					// 資本関係は parent/child で保存（資本図表示用）
+					upsertErr = c.relationRepo.UpsertCapitalRelation(fromCompany.ID, toCompany.ID, entry.relationType, nil, desc)
+				} else {
+					upsertErr = c.relationRepo.UpsertBusinessRelation(fromCompany.ID, toCompany.ID, entry.relationType, desc)
+				}
+				if upsertErr != nil {
 					continue
 				}
 				synced++
@@ -328,4 +348,190 @@ func (c *AdminCompanyGraphController) upsertNodes(nodes map[string]*scraper.Comp
 		saved++
 	}
 	return saved, skipped
+}
+
+// llmExtractedRelations はOpenAI Web Searchで抽出した企業関係データ。
+type llmExtractedRelations struct {
+	Subsidiaries     []string `json:"subsidiaries"`
+	Affiliates       []string `json:"affiliates"`
+	BusinessPartners []string `json:"business_partners"`
+}
+
+// EnrichRelations handles POST /api/admin/company-graph/enrich-relations
+// OpenAI Web Searchを使って指定企業の関連会社・取引先を取得し、DBに保存する。
+// Phase 3: RelationsFetcher があれば予算ガード・singleflight・TTL 付き経路を優先する。
+func (c *AdminCompanyGraphController) EnrichRelations(ctx echo.Context) error {
+	var req struct {
+		CompanyID uint   `json:"company_id"`
+		URL       string `json:"url"`
+		Force     bool   `json:"force"`
+	}
+	if err := ctx.Bind(&req); err != nil || req.CompanyID == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "company_id is required")
+	}
+	forceRefresh := req.Force || ctx.QueryParam("force") == "true"
+
+	if c.relationsFetcher != nil {
+		result, err := c.relationsFetcher.FetchAndSave(ctx.Request().Context(), req.CompanyID, forceRefresh)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		adminEmail := ctx.Request().Header.Get("X-Admin-Email")
+		if adminEmail != "" && c.audit != nil {
+			c.audit.Record(adminEmail, "company_graph_enrich_relations", "company", req.CompanyID, map[string]any{
+				"saved":           result.SavedCount,
+				"source":          result.Source,
+				"from_cache":      result.FromCache,
+				"budget_exceeded": result.BudgetExceeded,
+				"force":           forceRefresh,
+			})
+		}
+		return ctx.JSON(http.StatusOK, map[string]any{
+			"ok":              true,
+			"company_id":      req.CompanyID,
+			"saved":           result.SavedCount,
+			"relations":       result.Relations,
+			"market_info":     result.MarketInfo,
+			"source":          result.Source,
+			"model_used":      result.ModelUsed,
+			"confidence":      result.Confidence,
+			"from_cache":      result.FromCache,
+			"budget_exceeded": result.BudgetExceeded,
+			"skip_reason":     result.SkipReason,
+		})
+	}
+
+	company, err := c.companyRepo.FindByID(req.CompanyID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "company not found")
+	}
+
+	extracted, err := c.fetchRelationsWithLLM(ctx.Request().Context(), company.Name, req.URL)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	now := time.Now()
+	saved := 0
+
+	type relEntry struct {
+		names        []string
+		relationType string
+	}
+	entries := []relEntry{
+		{extracted.Subsidiaries, "capital_subsidiary"},
+		{extracted.Affiliates, "capital_affiliate"},
+		{extracted.BusinessPartners, "business_partner"},
+	}
+
+	for _, entry := range entries {
+		for _, name := range entry.names {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			toCompany, findErr := c.companyRepo.FindByName(name)
+			if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
+				continue
+			}
+			if toCompany == nil {
+				toCompany = &models.Company{
+					Name:            name,
+					SourceType:      "llm_web_search",
+					SourceFetchedAt: &now,
+					IsProvisional:   true,
+					DataStatus:      "draft",
+				}
+				if createErr := c.companyRepo.Create(toCompany); createErr != nil {
+					continue
+				}
+			}
+			desc := companyfetch.SanitizeRelationDescription("")
+			var upsertErr error
+			if models.IsCapitalRelationType(entry.relationType) {
+				var ratio *float64
+				if entry.relationType == "capital_subsidiary" {
+					r := 100.0
+					ratio = &r
+				}
+				upsertErr = c.relationRepo.UpsertCapitalRelation(company.ID, toCompany.ID, entry.relationType, ratio, desc)
+			} else {
+				upsertErr = c.relationRepo.UpsertBusinessRelation(company.ID, toCompany.ID, entry.relationType, desc)
+			}
+			if upsertErr != nil {
+				continue
+			}
+			saved++
+		}
+	}
+
+	adminEmail := ctx.Request().Header.Get("X-Admin-Email")
+	if adminEmail != "" && c.audit != nil {
+		c.audit.Record(adminEmail, "company_graph_enrich_relations", "company", company.ID, map[string]any{
+			"company": company.Name,
+			"saved":   saved,
+		})
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"ok":        true,
+		"company":   company.Name,
+		"saved":     saved,
+		"extracted": extracted,
+	})
+}
+
+// RelationGraph handles GET /api/admin/companies/:id/relation-graph
+// 起点企業から資本関係を親会社→子会社→孫会社等の多段階で辿ったグラフと、
+// 起点企業直接分の取引関係を返す（相関図表示用）。
+func (c *AdminCompanyGraphController) RelationGraph(ctx echo.Context) error {
+	companyID, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	if c.companyRepo == nil || c.relationRepo == nil {
+		return echoInternalError(errors.New("relation repository is not configured"))
+	}
+
+	graphService := company.NewCompanyRelationGraphService(c.companyRepo, c.relationRepo)
+	graph, err := graphService.BuildGraph(uint(companyID))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "company not found")
+	}
+
+	return ctx.JSON(http.StatusOK, graph)
+}
+
+// fetchRelationsWithLLM はAIモデルの知識から企業の関連会社・取引先を抽出する。
+func (c *AdminCompanyGraphController) fetchRelationsWithLLM(ctx context.Context, companyName, url string) (*llmExtractedRelations, error) {
+	if c.openaiClient == nil {
+		return nil, errors.New("openai client not configured")
+	}
+
+	systemPrompt := `あなたは日本企業の資本関係・取引関係に詳しいアシスタントです。確実に知っている実在の企業名のみを回答し、不明な場合は空配列にしてください。推測で企業名を作らないでください。`
+	userPrompt := fmt.Sprintf(
+		`「%s」の企業関係情報について知っているものを答えてください。子会社・グループ会社・資本提携先・主要取引先を、実在する企業名のみで以下のJSON形式のみで返してください。余分な説明は不要です。
+{"subsidiaries":["子会社・グループ会社名"],"affiliates":["資本提携・関連会社名"],"business_partners":["主要取引先名"]}`,
+		companyName,
+	)
+
+	ctxTimeout, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	text, err := c.openaiClient.ChatCompletionJSON(ctxTimeout, systemPrompt, userPrompt, 0.2, 800, companyfetch.ExtractModel())
+	if err != nil {
+		return nil, fmt.Errorf("企業関係情報の取得失敗: %w", err)
+	}
+
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start == -1 || end == -1 || end <= start {
+		return &llmExtractedRelations{}, nil
+	}
+
+	var result llmExtractedRelations
+	if err := json.Unmarshal([]byte(text[start:end+1]), &result); err != nil {
+		return &llmExtractedRelations{}, nil
+	}
+	return &result, nil
 }

@@ -2,26 +2,40 @@ name: Test
 
 on:
   push:
-    branches-ignore:
+    branches:
+      - develop
+      - release
       - main
   pull_request:
     branches:
+      - develop
+      - release
       - main
+
+# 本ワークフローはチェックアウトとテスト実行のみで、リポジトリへの書き込みを行わない。
+# 既定の GITHUB_TOKEN 権限を継承せず、最小権限を明示する。
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test-backend:
     name: Go Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     defaults:
       run:
         working-directory: ./Backend
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: ./Backend/go.mod
           check-latest: true
@@ -30,30 +44,162 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      # test/ 配下(69ファイル/672テスト)がCI対象外だったため、
+      # Responses API移行でモックが腐っていたことに長期間気づけなかった (#1132)
+      #
+      # -timeout はハング検出が目的であり性能予算ではない。bcrypt(cost=12)を使う
+      # ログイン系テストは -race 下で重く、60s ではランナーの状態次第で
+      # 偽の失敗になりうるため 300s へ引き上げる。
       - name: Run tests
-        run: go test ./internal/... -v -race -timeout 60s
+        run: go test ./internal/... ./migrations/... ./test/... -v -race -timeout 300s
+
+      - name: Format check
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt が適用されていないファイルがあります:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
 
       - name: Build check
         run: go build ./...
 
+      # バージョンを固定する。@latest は govulncheck 側の Go 要求が上がった瞬間に
+      # 全PRのCIが落ちる。実際 v1.8.0 が go>=1.26 を要求するようになり、
+      # go 1.25 + GOTOOLCHAIN=local の本CIでインストール自体が失敗した(2026-09-09)。
+      #
+      #   golang.org/x/vuln@v1.8.0 requires go >= 1.26.0 (running go 1.25.13)
+      #
+      # v1.7.0 が go 1.25 系に対応する最新。Go を上げるときは合わせて見直すこと。
       - name: Security scan (govulncheck)
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck ./...
 
-  audit-frontend:
-    name: Frontend Security Audit
+  # 旧 audit-frontend (npm audit) の置き換え (#1132)。
+  #
+  # npm audit は registry.npmjs.org の audit API に依存しており、同APIが停止すると
+  # CI が丸ごと落ちる。実際に 2026-09-04 に無応答(45秒でHTTP 000)→503 となり、
+  # 通常のレジストリは正常なのに監査だけが7分待たされた末に失敗した。
+  # pnpm では同エンドポイントの廃止も報告されており、恒久的に不安定とみなす。
+  #
+  # GitHub Advisory DB を参照する dependency-review-action へ移行する。
+  # 外部レジストリのAPIに依存せず、frontend(npm)だけでなく Backend(Go)・rag(pip) の
+  # 依存も一度にカバーできる。publicリポジトリのため GitHub Advanced Security は不要。
+  #
+  # 注意: 本アクションはPRの差分に対して「新規に持ち込まれた」脆弱性を検出する。
+  # 既存の脆弱性の検知は Dependabot alerts (有効済み) が担当する。
+  test-workflow-scripts:
+    name: Workflow Scripts
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Backlog 同期スクリプトの自己チェック。
+      # ワークフロー内の Python は CI で動くまで構文エラーに気づけないため、
+      # 埋め込みコードのコンパイルも合わせて確認する。
+      - name: Backlog クライアントの自己チェック
+        run: python3 .github/scripts/backlog_client.py
+
+      # 本番の起動/停止判定。間違えると展示会当日に本番が落ちたまま、
+      # または止めたはずの本番が課金され続ける。
+      - name: 本番 uptime 判定のテスト
+        run: ./automation/test/prod-uptime-decision-test.sh
+
+      # 本番反映済み issue の解決ロジック。
+      # 誤検出すると無関係な issue を閉じ、取りこぼすと開いたまま溜まる。
+      - name: デプロイ済み issue 解決の自己チェック
+        run: python3 .github/scripts/resolve_deployed_issues.py
+
+      # Dependabot のPRで必ず失敗するワークフローが無いこと。
+      # Dependabot 起因の実行には通常の secrets が渡らない（GitHubの仕様）。
+      - name: Dependabot 互換性の検査
+        run: ./automation/test/dependabot-workflow-test.sh
+
+      # リポジトリのファイルを読むワークフローに checkout があること。
+      # schedule で動くワークフローは誰も結果を見ないため、壊れても気づけない。
+      - name: ワークフローの checkout 漏れ検査
+        run: ./automation/test/workflow-checkout-test.sh
+
+      # ステージングの起動/停止判定。間違えると開発中に環境が理由不明で落ちる。
+      - name: ステージング uptime 判定のテスト
+        run: ./automation/test/staging-uptime-decision-test.sh
+
+      # Discordコマンド登録の失敗理由が表示されること。
+      # 以前は curl -sf で握り潰しており、登録できない原因が追えなかった。
+      - name: Discord コマンド登録スクリプトのテスト
+        run: ./automation/test/discord-register-commands-test.sh
+
+      - name: ワークフロー埋め込み Python の構文チェック
+        run: |
+          python3 - <<'PYEOF'
+          import re, sys, textwrap, pathlib
+          # ヒアドキュメントは `<< 'PYEOF'` と `<<'PYEOF'` の両方が使われている
+          BLOCK = re.compile(r"python3 - <<\s*'PYEOF'\n(.*?)\n\s*PYEOF", re.S)
+          ng = 0
+          checked = 0
+          for p in sorted(pathlib.Path(".github/workflows").glob("*.yml")):
+              src = p.read_text(encoding="utf-8")
+              blocks = BLOCK.findall(src)
+              # 実際の起動行だけ数える（このスクリプト自身の文字列リテラルは除く）
+              invocations = sum(1 for line in src.splitlines()
+                                if line.strip().startswith("python3 - <<"))
+              # 埋め込み Python があるのに抽出できていないなら、
+              # 検査したつもりで素通りしているので落とす
+              if invocations != len(blocks):
+                  ng += 1
+                  print(f"{p}: 埋め込み Python を抽出できませんでした"
+                        f"（起動 {invocations} 件 / 抽出 {len(blocks)} 件）", file=sys.stderr)
+              for code in blocks:
+                  checked += 1
+                  try:
+                      compile(textwrap.dedent(code), str(p), "exec")
+                  except SyntaxError as e:
+                      ng += 1
+                      print(f"{p}: 埋め込み Python の構文エラー line {e.lineno}: {e.msg}", file=sys.stderr)
+              if blocks:
+                  print(f"{p.name}: OK ({len(blocks)} ブロック)")
+          print(f"検査したブロック数: {checked}")
+          sys.exit(1 if ng else 0)
+          PYEOF
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # base/head の比較を行うアクションのため pull_request でのみ動作する
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # 本アクションは浮動タグ(v5等)を公開していないため、完全バージョンで指定する
+      - name: Dependency Review (high severity)
+        uses: actions/dependency-review-action@v5.0.0
+        with:
+          fail-on-severity: high
+
+  test-frontend-unit:
+    name: Frontend Unit Tests
+    runs-on: ubuntu-latest
+    # audit-frontend と同じ理由で 5分では不足する
+    timeout-minutes: 10
 
     defaults:
       run:
         working-directory: ./frontend
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version-file: ./frontend/.nvmrc
           cache: npm
@@ -62,5 +208,52 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: npm audit (high severity)
-        run: npm audit --audit-level=high
+      - name: Run unit tests
+        run: npm test -- --no-coverage
+
+  e2e-frontend:
+    name: Frontend E2E Tests (Playwright)
+    runs-on: ubuntu-latest
+    # Playwrightのブラウザインストール(apt-get/ネットワーク)が稀にハングし、
+    # デフォルトの6時間上限まで実行され続けてランナー枠を圧迫することがあったため設定
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: ./frontend
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: ./frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: ./frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        # --with-deps は内部でapt-get updateを実行するが、ubuntuパッケージミラーへの
+        # 接続がハングし15分タイムアウトに達するまで進まなくなる事象が頻発したため外した。
+        # ubuntu-latestランナーには元々Chromiumヘッドレス実行に必要な共有ライブラリが
+        # ほぼ揃っており、欠けていれば後続のE2Eテスト実行時に明確なエラーとして検知できる。
+        run: npx playwright install chromium
+
+      - name: Run E2E tests
+        run: npx playwright test
+        env:
+          CI: true
+          NEXT_PUBLIC_BACKEND_URL: http://localhost:3000
+          BACKEND_URL: http://localhost:3000
+          E2E_MOCK_AUTH: 'true'
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7

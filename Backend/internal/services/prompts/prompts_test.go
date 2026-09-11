@@ -198,3 +198,132 @@ func TestBuildAnswerValidationUserPrompt(t *testing.T) {
 		t.Error("判定フォーマットが含まれていない")
 	}
 }
+
+// ──────────────────────────────────────────────
+// builder.go のテスト
+// ──────────────────────────────────────────────
+
+func TestInferJobType(t *testing.T) {
+	tests := []struct {
+		input string
+		want  JobType
+	}{
+		{"エンジニア", JobTypeEngineer},
+		{"Webエンジニア", JobTypeEngineer},
+		{"開発職", JobTypeEngineer},
+		{"SE", JobTypeEngineer},
+		{"ITコンサル", JobTypeEngineer},
+		{"営業", JobTypeSales},
+		{"インサイドセールス", JobTypeSales},
+		{"マーケティング", JobTypeMarketing},
+		{"広告プランナー", JobTypeMarketing},
+		{"デザイナー", JobTypeDesign},
+		{"UIデザイン", JobTypeDesign},
+		{"総合職", JobTypeGeneral},
+		{"人事", JobTypeGeneral},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := InferJobType(tt.input)
+			if got != tt.want {
+				t.Errorf("InferJobType(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetJobTypeConfig(t *testing.T) {
+	cfg := GetJobTypeConfig("エンジニア")
+	if cfg.Type != JobTypeEngineer {
+		t.Errorf("GetJobTypeConfig(エンジニア) type = %q, want エンジニア", cfg.Type)
+	}
+	if cfg.ToneGuideline == "" {
+		t.Error("ToneGuideline が空")
+	}
+	if cfg.TechFocusNote == "" {
+		t.Error("TechFocusNote が空")
+	}
+}
+
+func TestBuildJobTypeToneGuidance(t *testing.T) {
+	tests := []struct {
+		jobName  string
+		contains string
+	}{
+		{"エンジニア", "エンジニア"},
+		{"営業", "営業"},
+		{"マーケティング", "マーケ"},
+		{"不明な職種", "一般"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.jobName, func(t *testing.T) {
+			result := BuildJobTypeToneGuidance(tt.jobName)
+			if !strings.Contains(result, tt.contains) {
+				t.Errorf("BuildJobTypeToneGuidance(%q) に %q が含まれていない: %s", tt.jobName, tt.contains, result)
+			}
+		})
+	}
+}
+
+func TestBuildSimplifyQuestionPromptWithJobType(t *testing.T) {
+	q := "あなたのリーダーシップ経験について教えてください"
+
+	t.Run("エンジニア向けは100文字まで許容", func(t *testing.T) {
+		result := BuildSimplifyQuestionPromptWithJobType(q, "エンジニア")
+		if !strings.Contains(result, "100文字") {
+			t.Error("エンジニア向け文字数制約（100文字）が含まれていない")
+		}
+		if !strings.Contains(result, q) {
+			t.Error("元の質問が含まれていない")
+		}
+	})
+
+	t.Run("営業向けは80文字まで", func(t *testing.T) {
+		result := BuildSimplifyQuestionPromptWithJobType(q, "営業")
+		if !strings.Contains(result, "80文字") {
+			t.Error("営業向け文字数制約（80文字）が含まれていない")
+		}
+	})
+}
+
+func TestPromptVersion(t *testing.T) {
+	if PromptVersion == "" {
+		t.Error("PromptVersion が空文字")
+	}
+}
+
+func TestGetMatchingReasonPromptVersion(t *testing.T) {
+	v := GetMatchingReasonPromptVersion()
+	if !strings.HasPrefix(v, "matching_reason_") {
+		t.Errorf("GetMatchingReasonPromptVersion() = %q, プレフィックス matching_reason_ がない", v)
+	}
+}
+
+func TestBuildAnswerQualitySystemPromptWithContext(t *testing.T) {
+	t.Run("属性なし→基本プロンプトと同一", func(t *testing.T) {
+		result := BuildAnswerQualitySystemPromptWithContext("", "")
+		if result != AnswerQualitySystemPrompt {
+			t.Error("属性なしの場合、基本プロンプトと一致すべき")
+		}
+	})
+
+	t.Run("学年あり→背景セクション追加", func(t *testing.T) {
+		result := BuildAnswerQualitySystemPromptWithContext("新卒", "")
+		if !strings.Contains(result, "新卒") {
+			t.Error("学年情報が含まれていない")
+		}
+		if !strings.Contains(result, "背景") {
+			t.Error("背景セクションが含まれていない")
+		}
+	})
+
+	t.Run("学年・職種両方あり", func(t *testing.T) {
+		result := BuildAnswerQualitySystemPromptWithContext("中途", "エンジニア")
+		if !strings.Contains(result, "中途") {
+			t.Error("学年情報が含まれていない")
+		}
+		if !strings.Contains(result, "エンジニア") {
+			t.Error("志望職種が含まれていない")
+		}
+	})
+}

@@ -22,7 +22,8 @@ import (
 
 	"Backend/internal/controllers"
 	"Backend/internal/repositories"
-	"Backend/internal/services"
+	"Backend/internal/services/auth"
+	"Backend/internal/services/email"
 )
 
 func newIntegrationDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
@@ -49,8 +50,8 @@ func newAuthController(t *testing.T, db *gorm.DB) *controllers.AuthController {
 	t.Helper()
 	userRepo := repositories.NewUserRepository(db)
 	pendingRepo := repositories.NewPendingRegistrationRepository(db)
-	emailService := services.NewEmailService() // SMTP未設定時はログ出力のみ
-	authService := services.NewAuthService(userRepo, pendingRepo, emailService)
+	emailService := email.NewEmailService() // SMTP未設定時はログ出力のみ
+	authService := auth.NewAuthService(userRepo, pendingRepo, emailService)
 	return controllers.NewAuthController(authService)
 }
 
@@ -189,9 +190,10 @@ func TestCreateGuest_Integration(t *testing.T) {
 	db, mock := newIntegrationDB(t)
 	authController := newAuthController(t, db)
 
-	// CreateUser: INSERT INTO users
+	// CreateUser: INSERT INTO users + organization_memberships
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO `users`").WillReturnResult(sqlmock.NewResult(42, 1))
+	mock.ExpectExec("INSERT INTO `organization_memberships`").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/guest", nil)

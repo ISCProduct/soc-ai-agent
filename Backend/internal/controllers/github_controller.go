@@ -1,11 +1,12 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/github"
 	ifaces "Backend/internal/services/interfaces"
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -86,9 +87,16 @@ func (c *GitHubController) SyncAndWait(ctx echo.Context) error {
 	}
 
 	if err := c.githubService.SyncUserData(context.Background(), userID, true); err != nil {
-		var scopeErr *services.InsufficientScopesError
+		var scopeErr *github.InsufficientScopesError
 		if errors.As(err, &scopeErr) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
+		var reauthErr *github.GitHubReauthRequiredError
+		if errors.As(err, &reauthErr) {
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
+		if strings.Contains(err.Error(), "github profile not found") {
+			return echo.NewHTTPError(http.StatusNotFound, "GitHubプロフィールが見つかりません。GitHubアカウントを連携してください。")
 		}
 		return echoInternalError(err)
 	}
@@ -142,12 +150,13 @@ func (c *GitHubController) SummarizeRepo(ctx echo.Context) error {
 	var body struct {
 		FullName     string `json:"full_name"`
 		ForceRefresh bool   `json:"force_refresh"`
+		TargetRole   string `json:"target_role"`
 	}
 	if err := ctx.Bind(&body); err != nil || body.FullName == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "full_name is required")
 	}
 
-	summary, err := c.githubService.SummarizeRepo(ctx.Request().Context(), userID, body.FullName, body.ForceRefresh)
+	summary, err := c.githubService.SummarizeRepo(ctx.Request().Context(), userID, body.FullName, body.ForceRefresh, body.TargetRole)
 	if err != nil {
 		return echoInternalError(err)
 	}

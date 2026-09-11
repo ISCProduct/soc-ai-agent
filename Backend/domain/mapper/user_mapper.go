@@ -12,13 +12,16 @@ func UserToEntity(m *models.User) *entity.User {
 	}
 	return &entity.User{
 		ID:                       m.ID,
+		OrganizationID:           m.OrganizationID,
 		Email:                    m.Email,
 		Password:                 m.Password,
 		Name:                     m.Name,
 		IsGuest:                  m.IsGuest,
 		IsAdmin:                  m.IsAdmin,
+		Role:                     m.Role,
 		TargetLevel:              m.TargetLevel,
 		SchoolName:               m.SchoolName,
+		SchoolID:                 m.SchoolID,
 		OAuthProvider:            m.OAuthProvider,
 		OAuthID:                  m.OAuthID,
 		AvatarURL:                m.AvatarURL,
@@ -29,6 +32,9 @@ func UserToEntity(m *models.User) *entity.User {
 		LastLoginAt:              m.LastLoginAt,
 		PasswordResetToken:       m.PasswordResetToken,
 		PasswordResetExpiresAt:   m.PasswordResetExpiresAt,
+		AllowCollectiveInsight:   m.AllowCollectiveInsight,
+		AllowScoutVisibility:     m.AllowScoutVisibility,
+		WithdrawnAt:              m.WithdrawnAt,
 		CreatedAt:                m.CreatedAt,
 		UpdatedAt:                m.UpdatedAt,
 	}
@@ -41,13 +47,16 @@ func UserFromEntity(e *entity.User) *models.User {
 	}
 	return &models.User{
 		ID:                       e.ID,
+		OrganizationID:           e.OrganizationID,
 		Email:                    e.Email,
 		Password:                 e.Password,
 		Name:                     e.Name,
 		IsGuest:                  e.IsGuest,
 		IsAdmin:                  e.IsAdmin,
+		Role:                     e.Role,
 		TargetLevel:              e.TargetLevel,
 		SchoolName:               e.SchoolName,
+		SchoolID:                 e.SchoolID,
 		OAuthProvider:            e.OAuthProvider,
 		OAuthID:                  e.OAuthID,
 		AvatarURL:                e.AvatarURL,
@@ -58,6 +67,9 @@ func UserFromEntity(e *entity.User) *models.User {
 		LastLoginAt:              e.LastLoginAt,
 		PasswordResetToken:       e.PasswordResetToken,
 		PasswordResetExpiresAt:   e.PasswordResetExpiresAt,
+		AllowCollectiveInsight:   e.AllowCollectiveInsight,
+		AllowScoutVisibility:     e.AllowScoutVisibility,
+		WithdrawnAt:              e.WithdrawnAt,
 		CreatedAt:                e.CreatedAt,
 		UpdatedAt:                e.UpdatedAt,
 	}
@@ -69,10 +81,12 @@ func PendingRegistrationToEntity(m *models.PendingRegistration) *entity.PendingR
 		return nil
 	}
 	return &entity.PendingRegistration{
-		Token:     m.Token,
-		Email:     m.Email,
-		ExpiresAt: m.ExpiresAt,
-		CreatedAt: m.CreatedAt,
+		Token:        m.Token,
+		Email:        m.Email,
+		CompanyID:    m.CompanyID,
+		SubmissionID: m.SubmissionID,
+		ExpiresAt:    m.ExpiresAt,
+		CreatedAt:    m.CreatedAt,
 	}
 }
 
@@ -82,9 +96,11 @@ func PendingRegistrationFromEntity(e *entity.PendingRegistration) *models.Pendin
 		return nil
 	}
 	return &models.PendingRegistration{
-		Token:     e.Token,
-		Email:     e.Email,
-		ExpiresAt: e.ExpiresAt,
-		CreatedAt: e.CreatedAt,
+		Token:        e.Token,
+		Email:        e.Email,
+		CompanyID:    e.CompanyID,
+		SubmissionID: e.SubmissionID,
+		ExpiresAt:    e.ExpiresAt,
+		CreatedAt:    e.CreatedAt,
 	}
 }

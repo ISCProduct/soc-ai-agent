@@ -2,7 +2,7 @@ package mocks
 
 import (
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/admin"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -20,7 +20,7 @@ func (m *ScraperSessionServiceMock) List() ([]models.ScraperSession, error) {
 	return nil, args.Error(1)
 }
 
-func (m *ScraperSessionServiceMock) Upsert(payload services.ScraperSessionPayload) (*models.ScraperSession, error) {
+func (m *ScraperSessionServiceMock) Upsert(payload admin.ScraperSessionPayload) (*models.ScraperSession, error) {
 	args := m.Called(payload)
 	if v := args.Get(0); v != nil {
 		return v.(*models.ScraperSession), args.Error(1)

@@ -3,12 +3,16 @@
 .env.local
 .env.production
 .env.*.local
+.backlog.env
 
 # Terraform（シークレットを含む可能性があるため管理外）
 *.tfvars
 *.tfvars.json
+backend.hcl
 .terraform/
 .terraform.lock.hcl
+*.plan
+stg.plan
 *.tfstate
 *.tfstate.backup
 *.tfplan
@@ -17,6 +21,8 @@
 database/
 *.sql
 *.sqlite
+# マイグレーションファイルはバージョン管理対象 (#614)
+!Backend/migrations/*.sql
 
 # Logs
 *.log
@@ -7003,3 +7009,38 @@ mysql/logs/
 /rag/.venv/lib/python3.12/site-packages/six.py
 /rag/.venv/lib/python3.12/site-packages/typing_extensions.py
 /rag/.venv/pyvenv.cfg
+
+# Ignore rag virtualenv
+rag/.venv/
+__pycache__/
+*.pyc
+.tools/
+frontend/test-results/.last-run.json
+
+# next dev が自動生成するエージェント指示ファイル。
+# 生成物であり、各PRの差分に毎回混入するため追跡しない（#1074 レビュー指摘）。
+frontend/AGENTS.md
+frontend/CLAUDE.md
+
+# Playwright の実行結果（生成物）。追跡すると毎回差分が出る
+frontend/test-results/
+
+# 調査・検証用のディレクトリ。音声などの大きなファイルや
+# 生データ、他セッション向けの作業指示が入るため追跡しない。
+# 設計の正本のうち docs/wiki / docs/design / docs/requirements は追跡対象。
+# docs/architecture は draw.io / PNG / 環境依存メモが多く、ローカル更新で差分が
+# 毎回出るため追跡しない（Notion やローカル正本として扱う）。
+#
+# ただし RESULTS_*.md は例外として追跡する。
+# 設計書・要件定義書がこれらを判断の根拠として参照しており
+# （例: interview-voice-architecture.md → RESULTS_fallback.md）、
+# 追跡から外すとリンク先が存在しなくなる。
+docs/research/**
+!docs/research/**/
+!docs/research/**/RESULTS_*.md
+
+# アーキテクチャ図・インフラ構成メモ（draw.io / PNG / 環境依存ドキュメント）
+docs/architecture/
+
+# 各セッションの作業メモ
+/tasks/

@@ -1,16 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { buildProxyJsonResponse, buildProxyNetworkErrorResponse } from '@/lib/api-proxy'
+import { buildProxyJsonResponse, buildProxyNetworkErrorResponse, extractUserAuthHeaders } from '@/lib/api-proxy'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
 export const dynamic = 'force-dynamic'
-
-function userHeaders(request: NextRequest): Record<string, string> {
-  return {
-    'X-User-ID': request.headers.get('X-User-ID') || '',
-    'X-User-Token': request.headers.get('X-User-Token') || '',
-  }
-}
 
 export async function GET(request: NextRequest) {
   try {
@@ -20,7 +13,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'document_id is required' }, { status: 400 })
     }
 
-    const upstreamHeaders = userHeaders(request)
+    const upstreamHeaders = extractUserAuthHeaders(request)
     const range = request.headers.get('range')
     if (range) {
       upstreamHeaders.Range = range

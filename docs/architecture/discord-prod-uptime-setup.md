@@ -1,0 +1,438 @@
+# Discord連携: 本番の起動/停止セットアップ手順
+
+最終更新: 2026-09-08
+
+Discordのスラッシュコマンドから本番環境(AWS ECS Fargate + RDS)を操作する機能のセットアップ手順。
+
+| コマンド | できること | 権限 |
+|---|---|---|
+| `/prod state:on` | **今すぐ起動**し、以後も起動し続ける | `DISCORD_ALLOWED_ROLE_ID` のロール保有者のみ |
+| `/prod state:off` | **今すぐ停止**し、以後も停止し続ける | 同上 |
+| `/prod state:auto` | 日付リストに従う状態へ戻す(既定) | 同上 |
+| `/prod-uptime` | 終日起動する日付を追加(モーダル入力) | 同上 |
+| `/prod-uptime-list` | 起動予定日と現在の設定を表示 | 制限なし(誰でも閲覧可) |
+| `/staging state:on` | ステージングを**起動** | `DISCORD_ALLOWED_ROLE_ID` のロール保有者のみ |
+| `/staging state:off` | ステージングを**停止** | 同上 |
+
+## 仕組み
+
+状態は SSM Parameter Store の2つのパラメータで決まる。
+
+| パラメータ | 値 | 意味 |
+|---|---|---|
+| `/soc-app/prod-uptime-override` | `on` / `off` / `auto` | 手動オーバーライド。**日付リストより優先** |
+| `/soc-app/prod-uptime-dates` | `2026-09-01,2026-09-02` | 終日起動する日付(JST、カンマ区切り) |
+
+```
+Discordで /prod state:on
+        ↓ (Discord Interactions Webhook, HTTPS POST)
+Lambda (soc-stg-discord, Function URL): POST /
+  - Ed25519署名検証(DISCORD_PUBLIC_KEY)
+  - 実行者のロールIDを確認(DISCORD_ALLOWED_ROLE_ID)
+  - SSM /soc-app/prod-uptime-override に on を書く
+  - GitHub Actions を workflow_dispatch で即時起動(GITHUB_DISPATCH_TOKEN)
+        ↓
+GitHub Actions: prod-uptime-scheduler.yml (毎時cron + 即時起動)
+  1. override を読む。on なら起動、off なら停止(日付リストは見ない)
+  2. auto なら日付リストと「今日(JST)」を照合
+  3. 起動: RDS起動 → available待ち → chroma → rag-review → backend → frontend
+     停止: ECSを0にしてから RDS停止
+```
+
+### なぜ ECS を直接叩かないのか
+
+`prod-uptime-scheduler.yml` が毎時 desired_count を上書きするため、Discordから直接
+ECSを起動しても**最大1時間で元に戻される**。「Discordで起動したのに落ちている」状態に
+なるので、オーバーライドをSSMに書いてスケジューラに従わせる。
+
+反映処理そのものをGoに書き直さないのも同じ理由で、RDSの起動待ちやサービスの起動順を
+二重管理すると片方だけ直して本番が中途半端に起動する事故につながる。
+
+### GITHUB_DISPATCH_TOKEN が無い場合
+
+`/prod` は動作し、SSMのオーバーライドは書き込まれる。ただし**反映は次の毎時実行
+(最大1時間後)**になる。Discordの応答にもその旨が表示される。
+
+### なぜ Lambda か
+
+本番(prod)は既定停止のため、受け口には常時動いているものが必要になる。当初は staging の
+backend に置いていたが、staging は `deployment.yml` の `staging-auto-stop` によって
+**デプロイから1時間で自動停止する**。停止中は受け口ごと落ちるため /prod が
+「アプリケーションは時間内に応答しませんでした」になり、しかも復旧手段である
+`/staging state:on` も同じ受け口なので Discord からは何もできなくなっていた。
+
+本番の起動/停止を指示する口が、止まる環境に乗っていてはいけない。そのため
+Lambda Function URL へ移した。
+
+コスト面でも Lambda が最小になる。月100万リクエスト + 40万GB-秒の永久無料枠があり、
+想定利用（月数百回）では完全に無料枠内。Function URL を使うので API Gateway も要らない。
+SSM と GitHub API しか呼ばないので VPC に入れる必要がなく、NAT Gateway も発生しない。
+
+## 0. 反映の順序（重要）
+
+`prod-uptime-scheduler.yml` は **cron / workflow_dispatch ともデフォルトブランチ(main)の
+定義で動く**。オーバーライドを読む変更が main に入る前に `/prod` を使えるようにすると、
+コマンドは成功したように見えて SSM に書かれるだけで**本番の状態は何も変わらない**。
+「off にしたのに本番が起動したまま課金される」状態になる。
+
+したがって次の順で進めること。
+
+1. **CIのIAMユーザーに override パラメータの読み取りを許可する**（手順6。これが先。
+   足りないと毎時のジョブが失敗し続ける。本番アカウントでは適用済み）
+2. スケジューラの変更を **main まで反映**する（develop → release → main）
+3. staging に backend を反映する（`terraform apply` または CI デプロイ）
+4. `register-commands.sh` を実行して `/prod` を登録する
+
+`/prod` を登録するのは最後。登録しなければ誰も実行できないので、これが安全弁になる。
+
+## 1. Discord Application / Bot の作成
+
+1. [Discord Developer Portal](https://discord.com/developers/applications) で **New Application** を作成
+2. **General Information** タブで以下を控える:
+   - `APPLICATION ID`
+   - `PUBLIC KEY`（terraform変数 `discord_public_key` に設定する）
+3. **Bot** タブで **Add Bot** → Token を発行し控える（`register-commands.sh` 実行時のみ使用。恒久保存は不要）
+4. **Installation** タブ（または OAuth2 URL Generator）で以下を選択し、生成されたURLでBotをサーバーに招待:
+   - Scopes: `applications.commands`
+   - （ボタン/コマンド実行のみなら `bot` スコープや追加権限は不要）
+
+## 2. Interactions Endpoint URL の設定
+
+**General Information** タブの `INTERACTIONS ENDPOINT URL` に以下を設定:
+
+```
+terraform output -raw discord_interactions_endpoint
+# 例: https://xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.lambda-url.ap-northeast-1.on.aws/
+```
+
+Lambda Function URL のため、値は `infra/terraform/environments/staging` の
+`terraform output discord_interactions_endpoint` で取得する。
+
+保存時にDiscordがPING検証リクエストを送る。Lambda は常時稼働なので事前に環境を起動して
+おく必要はないが、`terraform apply` と CI による関数コードの反映(deploy-discord-lambda)が
+済んでいること。検証に失敗する場合は `DISCORD_PUBLIC_KEY` の設定漏れを疑う。
+
+## 2-2. ステージングの起動/停止（#1249）
+
+`/staging` は本番と別の仕組みで動く。**日付リストを持たない。**
+ステージングは展示会運用ではなく開発用なので、「今起動しているか」だけを
+明示的に切り替える。`auto` を作っていないのは、日付リストが無い以上
+`auto` と `on` が同義になり、どちらを押したのか分からなくなるため。
+
+```
+Discordで /staging state:off
+  → Backend が SSM /soc-app/staging-uptime に off を書く
+  → staging-uptime-scheduler.yml が ASG を min=0 desired=0 にする
+```
+
+| | 本番 (`/prod`) | ステージング (`/staging`) |
+| --- | --- | --- |
+| 対象 | ECS Fargate + RDS | EC2 Auto Scaling Group |
+| SSM | `/soc-app/prod-uptime-override` | `/soc-app/staging-uptime` |
+| 状態 | on / off / auto | on / off |
+| 日付リスト | あり | なし |
+| ワークフロー | `prod-uptime-scheduler.yml`（毎時5分 UTC） | `staging-uptime-scheduler.yml`（毎時10分 UTC） |
+
+### ASG は min_size も一緒に下げる
+
+ASG は `desired < min` を受け付けない。`desired` だけ 0 にしようとすると
+`ValidationError` になるため、ワークフローは `min_size` も同時に変更する。
+
+これに伴い Terraform 側の `ignore_changes` に `min_size` を追加した。
+除外しないと、次の `terraform apply` で `min=1` に戻り、
+**停止したはずのステージングが黙って起動する。**
+
+### 判断できないときは止めない
+
+SSM の値が未作成・未知の値・空文字のとき、ワークフローは **on** として扱う。
+
+`off` に倒すと、パラメータを作る前や手書きミスでステージングが理由不明に落ちる。
+一方、権限エラーやスロットリングは握りつぶさず**ジョブを失敗させる**。
+「読めなかったから止めた」は原因が追えない事故になる。
+
+### 停止中のデプロイに注意
+
+ステージングを `off` にしたまま `develop` へ push すると、
+デプロイ先のインスタンスが無いため**デプロイが失敗する**。
+停止運用をする場合は、デプロイ前に `/staging state:on` で起動すること。
+
+（自動で起動し直す仕組みは入れていない。デプロイのたびに勝手に起動すると、
+コスト削減のために止めた意味が無くなるため。）
+
+## 3. 実行権限ロールの確認
+
+コマンドを実行してよいDiscordロールのIDを控える（Discordのサーバー設定 > ロール > 対象ロールを
+右クリック > IDをコピー。開発者モードの有効化が必要）。
+
+## 4. terraform.tfvars への設定（staging）
+
+`infra/terraform/environments/staging/terraform.tfvars` に追記:
+
+```hcl
+discord_public_key      = "<Discord Developer PortalのPUBLIC KEY>"
+discord_allowed_role_id = "<実行を許可するロールID>"
+
+# 任意: /prod の即時反映用。未設定なら次の毎時実行まで待つ
+github_dispatch_token = "<GitHub Fine-grained PAT>"
+github_dispatch_repo  = "ISCProduct/soc-ai-agent"
+```
+
+`github_dispatch_token` は **Fine-grained PAT** を推奨する。必要な権限は対象リポジトリの
+`Actions: Read and write` のみ。これだけあれば `workflow_dispatch` を呼べる。
+リポジトリのコード読み書き権限は不要なので付けないこと。
+
+`terraform apply` で staging EC2 の `.env` に反映される（`docker compose up -d app` 相当の
+再起動で反映、または次回CIデプロイで自動反映）。
+
+## 5. スラッシュコマンドの登録
+
+一度だけ実行（コマンド内容を変更した場合のみ再実行）:
+
+```bash
+DISCORD_BOT_TOKEN=<Botトークン> DISCORD_APPLICATION_ID=<Application ID> \
+  ./automation/discord/register-commands.sh
+```
+
+登録済みの確認だけしたいとき:
+
+```bash
+DISCORD_BOT_TOKEN=<Botトークン> DISCORD_APPLICATION_ID=<Application ID> \
+  ./automation/discord/register-commands.sh --list
+```
+
+失敗した場合は Discord が返した理由（401 / 403 / 404 など）がそのまま表示される。
+
+### 現在の設定（2026-09-10 実測）
+
+```
+Application ID: 1538848654440407060
+install_params: {"scopes": ["applications.commands"], "permissions": "0"}
+登録済み: /prod-uptime  /prod-uptime-list  /prod
+```
+
+Interactions Endpoint URL は設定済みで、Backend が PING に応答できている
+（＝署名検証まで動作している）。
+
+### コマンドが Discord に出てこないとき
+
+登録が成功しても表示されないことがある。上から順に確認する。
+
+1. **`/prod` は既定では誰にも表示されない**（最も多い原因）
+   `/prod` は `default_member_permissions: "0"` で登録される。これは
+   「既定では誰も実行できない」という意味で、**事故防止のための意図した設定**。
+   Discordの **サーバー設定 > 連携サービス > 該当アプリ > `/prod`** から
+   実行を許可するロール／メンバーを追加するまで、誰のコマンド一覧にも出ない。
+
+   `/prod-uptime` と `/prod-uptime-list` には権限制限が無いので、
+   **この2つが出て `/prod` だけ出ないなら、原因はこれ。**
+
+2. **`applications.commands` スコープが無い**
+   OAuth2 > URL Generator の scopes に `applications.commands` が必要。
+   これが無いと登録は成功してもサーバーにコマンドが出ない。
+
+   なお **`bot` スコープは不要**。本構成は Interactions Endpoint（HTTP POST）
+   方式なので、Botがサーバーのメンバーになる必要はない。
+   `GET /users/@me/guilds` が0件でも異常ではない（2026-09-10 実測）。
+3. **Interactions Endpoint URL が未設定**
+   General Information > Interactions Endpoint URL に
+   `terraform output -raw discord_interactions_endpoint` の値を設定して保存する。
+   保存時にDiscordがPINGを送るので、応答できないと保存自体が失敗する。
+   到達確認は次で行える（**401 が正常**。署名が無いリクエストを拒否している）。
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+     "$(terraform -chdir=infra/terraform/environments/staging output -raw discord_interactions_endpoint)" \
+     -H 'Content-Type: application/json' -d '{"type":1}'
+   ```
+
+
+## 6. SSM Parameter Store 読み書き権限
+
+### ⚠️ GitHub Actions 側のIAMに override のARNを足す（必須）
+
+CIが使うIAMユーザーのインラインポリシー `AllowProdUptimeSsmRead` は
+`prod-uptime-dates` **だけ**にリソース限定されており、そのままでは
+`prod-uptime-override` が `AccessDeniedException` になる（2026-09-08 実測）。
+
+この状態でも日付リストどおりの起動は続くが（縮退動作）、`/prod` は効かず、
+毎時のジョブは失敗し続ける。**main へ反映する前に**次を実行すること。
+
+> **本番アカウント(508897596159)では 2026-09-09 に適用済み。**
+> 動作確認まで完了しているので、既存環境では再実行不要。
+> 別アカウント・別IAMユーザーで動かす場合のみ必要。
+
+```bash
+aws iam put-user-policy --user-name <CIのIAMユーザー> \
+  --policy-name AllowProdUptimeSsmRead \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Sid": "ProdUptimeSsmRead",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": [
+        "arn:aws:ssm:ap-northeast-1:<アカウントID>:parameter/soc-app/prod-uptime-dates",
+        "arn:aws:ssm:ap-northeast-1:<アカウントID>:parameter/soc-app/prod-uptime-override"
+      ]
+    }]
+  }'
+```
+
+### ⚠️ ステージング用のIAM権限（`/staging` を使う場合は必須）
+
+`/staging` を動かすには、CIのIAMユーザーに次の2つが要る。
+**どちらか欠けると `staging-uptime-scheduler.yml` が
+`AccessDeniedException` で失敗し続ける**（本番側で実際に起きたのと同じパターン）。
+
+- `/soc-app/staging-uptime` への `ssm:GetParameter`
+- ASG への `autoscaling:UpdateAutoScalingGroup` / `DescribeAutoScalingGroups`
+
+> **本番アカウント(508897596159)では 2026-09-10 に適用済み。**
+> IAMユーザー `NetworkSeminar2026-1` に `AllowProdUptimeSsmRead`（staging-uptime を追加）と
+> `AllowStagingAsgControl` を設定し、実地で確認済み。
+> 別アカウント・別IAMユーザーで動かす場合のみ必要。
+>
+> 確認した内容:
+> - `/soc-app/staging-uptime` の `ssm:GetParameter` が通る（ParameterNotFound = 未作成だが権限あり）
+> - `describe-auto-scaling-groups` で `soc-stg-app` が読める
+> - `update-auto-scaling-group` が通る（現在値と同じ値で無害に確認）
+
+```bash
+# 1) SSM 読み取り（上の AllowProdUptimeSsmRead に staging-uptime を足す）
+aws iam put-user-policy --user-name <CIのIAMユーザー> \
+  --policy-name AllowProdUptimeSsmRead \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Sid": "ProdUptimeSsmRead",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": [
+        "arn:aws:ssm:ap-northeast-1:<アカウントID>:parameter/soc-app/prod-uptime-dates",
+        "arn:aws:ssm:ap-northeast-1:<アカウントID>:parameter/soc-app/prod-uptime-override",
+        "arn:aws:ssm:ap-northeast-1:<アカウントID>:parameter/soc-app/staging-uptime"
+      ]
+    }]
+  }'
+
+# 2) ASG の起動/停止
+aws iam put-user-policy --user-name <CIのIAMユーザー> \
+  --policy-name AllowStagingAsgControl \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "StagingAsgUpdate",
+        "Effect": "Allow",
+        "Action": "autoscaling:UpdateAutoScalingGroup",
+        "Resource": "*",
+        "Condition": {
+          "StringEquals": {"autoscaling:ResourceTag/Name": "soc-stg-app"}
+        }
+      },
+      {
+        "Sid": "StagingAsgDescribe",
+        "Effect": "Allow",
+        "Action": "autoscaling:DescribeAutoScalingGroups",
+        "Resource": "*"
+      }
+    ]
+  }'
+```
+
+`DescribeAutoScalingGroups` はリソース単位の絞り込みに対応していないため
+`Resource: "*"` になる（AWSの仕様）。更新側はタグ条件で
+`soc-stg-app` に限定しており、**本番のASGは触れない。**
+
+なお本番は ECS Fargate で ASG を使わないため、このアカウントに存在する
+Auto Scaling Group は `soc-stg-app` のみ（2026-09-10 実測）。
+
+### 適用できたかの確認
+
+```bash
+# SSM が読めるか（値が返れば成功。ParameterNotFound は未作成なだけで権限はある）
+aws ssm get-parameter --name /soc-app/staging-uptime --query 'Parameter.Value' --output text
+
+# ASG が見えるか
+aws autoscaling describe-auto-scaling-groups \
+  --auto-scaling-group-names soc-stg-app \
+  --query 'AutoScalingGroups[0].{Min:MinSize,Desired:DesiredCapacity}' --output table
+```
+
+確認:
+
+```bash
+aws ssm get-parameter --name /soc-app/prod-uptime-override
+# ParameterNotFound なら権限はOK（パラメータは初回 /prod 実行時に作られる）
+# AccessDeniedException ならポリシーが効いていない
+```
+
+### Lambda 側
+
+`infra/terraform/environments/staging/discord_lambda.tf` の `UptimeParameters`
+ステートメントで `/soc-app/prod-uptime-dates`、`/soc-app/prod-uptime-override`、
+`/soc-app/staging-uptime` への `ssm:GetParameter` / `ssm:PutParameter` を付与している
+（tfvars変更後は `terraform apply` が必要）。
+
+関数の箱と環境変数は terraform が持ち、コードは CI の `deploy-discord-lambda` ジョブが
+`aws lambda update-function-code` で入れる。terraform 実行環境に Go のクロスコンパイルを
+持ち込まないため、terraform 側はプレースホルダの zip を置くだけにしてある
+（`lifecycle.ignore_changes` で CI が入れたバイナリを巻き戻さない）。
+
+ログは CloudWatch Logs `/aws/lambda/soc-stg-discord`（保持14日）に出る。
+
+```bash
+aws logs tail /aws/lambda/soc-stg-discord --since 10m --filter-pattern '[Discord]'
+```
+
+GitHub Actions側（`prod-uptime-scheduler.yml`）は既存の `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY` シークレットを使用する。このIAMユーザーに
+`ssm:GetParameter`、`ecs:DescribeServices` / `ecs:UpdateService`、
+`rds:DescribeDBInstances` / `rds:StartDBInstance` / `rds:StopDBInstance`、
+`application-autoscaling:DescribeScalableTargets` / `RegisterScalableTarget`
+の権限が必要。
+
+## 動作確認
+
+### /prod（起動・停止）
+
+1. Discordで `/prod state:off` を実行 → 「🛑 常時停止に設定しました」を確認
+2. `aws ssm get-parameter --name /soc-app/prod-uptime-override` が `off` になっていることを確認
+3. GitHub Actions の `Prod uptime scheduler` が起動し、ECSの desired_count が 0、
+   RDSが停止することを確認
+4. `/prod state:on` で逆方向を確認（RDSの起動待ちがあるため数分かかる）
+5. 展示会などが終わったら `/prod state:auto` で日付リスト運用へ戻す
+
+### /prod-uptime（日付登録）
+
+1. Discordで `/prod-uptime` を実行 → モーダルが表示されることを確認
+2. 日付（例: 明日の日付）を入力して送信 → 「✅ 追加しました」のメッセージを確認
+3. `aws ssm get-parameter --name /soc-app/prod-uptime-dates` で登録内容を確認
+4. `prod-uptime-scheduler.yml` を `workflow_dispatch` で手動実行し、ログでECSサービスの
+   `desired_count` が更新されることを確認
+
+## 既知の制約
+
+- **`GITHUB_DISPATCH_TOKEN` は本番デプロイも起動できてしまう。** `deployment.yml` にも
+  `workflow_dispatch` があり、fine-grained PAT を「このワークフローだけ」に絞る手段が無い。
+  トークンは staging EC2 の `.env` と Launch Template の user_data に**平文**で載るため、
+  staging が侵害されると本番デプロイを起動されうる。許容できない場合はトークンを設定せず、
+  反映を毎時実行に任せること（`/prod` は設定なしでも動作する）
+
+- **`/prod state:on` のまま放置すると本番が課金され続ける。** 用が済んだら `auto` に
+  戻すこと。`/prod-uptime-list` に「常時起動に固定されています」と表示されるので、
+  定期的に確認する
+- 起動には**数分かかる**（RDSの起動待ちを含む）。Discordの応答は「反映を開始しました」
+  までで、完了通知は無い。実際の状態は GitHub Actions のログで確認する
+- `/prod state:off` は確認ダイアログ無しで即座に本番を止める。ロール制限が唯一の防御
+- デプロイ作業中との競合を防ぐメンテナンスロックは未実装（`prod-uptime-scheduler.yml` 内に
+  `ponytail:` コメントで明記）。実運用で問題が出た場合は追加検討する
+- 日付はJSTの暦日（00:00〜23:59:59）単位。時刻指定はできない
+- 過去日は登録できない
+
+## テスト
+
+起動/停止の判定は `automation/test/prod-uptime-decision-test.sh` が
+`prod-uptime-scheduler.yml` から判定部分を抜き出して実行する（CIの `Workflow Scripts`
+ジョブで実行）。判定を間違えると展示会当日に本番が落ちたまま、または止めたはずの本番が
+課金され続けるため、ワークフローを直したらこのテストも確認すること。

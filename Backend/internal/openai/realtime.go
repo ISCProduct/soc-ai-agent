@@ -12,13 +12,13 @@ import (
 
 // RealtimeSessionRequest POST /v1/realtime/sessions のリクエストボディ
 type RealtimeSessionRequest struct {
-	Model                    string                 `json:"model"`
-	Modalities               []string               `json:"modalities,omitempty"`
-	Voice                    string                 `json:"voice,omitempty"`
-	Instructions             string                 `json:"instructions,omitempty"`
-	InputAudioTranscription  map[string]any `json:"input_audio_transcription,omitempty"`
-	TurnDetection            map[string]any `json:"turn_detection,omitempty"`
-	MaxResponseOutputTokens  any            `json:"max_response_output_tokens,omitempty"`
+	Model                   string         `json:"model"`
+	Modalities              []string       `json:"modalities,omitempty"`
+	Voice                   string         `json:"voice,omitempty"`
+	Instructions            string         `json:"instructions,omitempty"`
+	InputAudioTranscription map[string]any `json:"input_audio_transcription,omitempty"`
+	TurnDetection           map[string]any `json:"turn_detection,omitempty"`
+	MaxResponseOutputTokens any            `json:"max_response_output_tokens,omitempty"`
 }
 
 // RealtimeSessionResponse POST /v1/realtime/sessions のレスポンス

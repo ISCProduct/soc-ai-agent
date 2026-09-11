@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
+import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { Box } from '@mui/material'
 import { loadAvatar, type AvatarGender } from '@/lib/avatar-loader'
 import { LipsyncManager } from '@/lib/lipsync-manager'
@@ -238,7 +239,21 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
         const gltf  = await loadAvatar(gender)
         if (disposed) return
 
-        const model = gltf.scene
+        // キャッシュされた gltf.scene を直接使うとクリーンアップ時の dispose が
+        // キャッシュ上のテクスチャを破棄し、次回マウント時に blob URL エラーが発生する。
+        // SkeletonUtils.clone でスケルトンを含むディープクローンを作り、
+        // マテリアルも個別にクローンして各インスタンスが独立した状態を持つようにする。
+        const model = cloneSkeleton(gltf.scene) as THREE.Group
+        model.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const mesh = child as THREE.Mesh
+            if (Array.isArray(mesh.material)) {
+              mesh.material = mesh.material.map((m) => m.clone())
+            } else {
+              mesh.material = (mesh.material as THREE.Material).clone()
+            }
+          }
+        })
 
         // ── Auto-normalize model size and position ────────────────────────
         // RPM / standard glTF: front faces +Z (no rotation needed)

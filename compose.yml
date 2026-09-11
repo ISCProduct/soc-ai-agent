@@ -5,15 +5,23 @@ services:
       context: ./Backend
       dockerfile: Dockerfile
     container_name: soc-ai-agent-backend
+    restart: unless-stopped
     ports:
       - "${HOST_PORT:-8080}:8080"
     volumes:
       # 開発環境: ソースコードをマウント
       - ./Backend:/app
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+    # compose up 時に migrate → air の順で起動（スキーマ未適用で API が落ちないようにする）
+    entrypoint: ["/bin/sh", "/app/scripts/docker-entrypoint.dev.sh"]
+    command: ["air", "-c", ".air.toml"]
     env_file:
       - ${ENV_FILE:-./Backend/.env}
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - soc-ai-network
@@ -26,13 +34,40 @@ services:
       - NODE_ENV=${NODE_ENV:-development}
       - ANNOTATION_FONT_PATH=${ANNOTATION_FONT_PATH:-/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc}
       - RAG_REVIEW_URL=${RAG_REVIEW_URL:-http://rag-review:9000}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+
+  # 明示的な migrate ワンショット（app 起動前にも実行可能: docker compose run --rm migrate）
+  migrate:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: soc-ai-migrate
+    volumes:
+      - ./Backend:/app
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+    working_dir: /app
+    command: ["go", "run", "./cmd/migrate", "up"]
+    env_file:
+      - ${ENV_FILE:-./Backend/.env}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - soc-ai-network
+    restart: "no"
+    profiles:
+      - tools
+
 
   # MySQL Database
   db:
     image: mysql:8.0
     container_name: soc-ai-db
+    restart: unless-stopped
     ports:
-      - "${DB_HOST_BIND:-127.0.0.1}:3306:3306"
+      # 他プロジェクトの MySQL とぶつかる場合は DB_HOST_PORT を変更（例: 3307）
+      - "${DB_HOST_BIND:-127.0.0.1}:${DB_HOST_PORT:-3306}:3306"
     env_file:
       - ${ENV_FILE:-./Backend/.env}
     volumes:
@@ -57,13 +92,31 @@ services:
         max-size: "${LOG_MAX_SIZE:-10m}"
         max-file: "${LOG_MAX_FILE:-3}"
 
+  # レート制限(#617)・asynqキューのバックエンド。未起動でもBackendはインメモリにフォールバックする
+  redis:
+    image: redis:7-alpine
+    container_name: soc-ai-redis
+    restart: unless-stopped
+    networks:
+      - soc-ai-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILE:-3}"
+
   # Frontend
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: soc-ai-agent-frontend
-    restart: 'always'
+    restart: unless-stopped
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -88,8 +141,7 @@ services:
       context: ./tools/company-graph
       dockerfile: Dockerfile
     container_name: soc-ai-company-graph
-    profiles:
-      - company-graph
+    restart: unless-stopped
     ports:
       - "${COMPANY_GRAPH_PORT:-9100}:9100"
     environment:
@@ -98,14 +150,13 @@ services:
     networks:
       - soc-ai-network
 
-  # Resume review RAG (DuckDuckGo + CrewAI)
+  # Resume review RAG
   rag-review:
     build:
       context: ./rag
       dockerfile: Dockerfile
     container_name: soc-ai-rag-review
-    profiles:
-      - rag
+    restart: unless-stopped
     ports:
       - "${RAG_REVIEW_PORT:-9000}:9000"
     env_file:
@@ -113,10 +164,32 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
-      - OPENAI_HINTS_MODEL=${OPENAI_HINTS_MODEL:-gpt-4o-search-preview}
+      - OPENAI_HINTS_MODEL=${OPENAI_HINTS_MODEL:-gpt-4o-mini}
       - OPENAI_HINTS_PARSE_MODEL=${OPENAI_HINTS_PARSE_MODEL:-gpt-4o}
+      - CHROMA_HOST=${CHROMA_HOST:-chroma}
+      - CHROMA_PORT=${CHROMA_PORT:-8000}
+      # Phase 1B: Read 経路は既定で Search しない（admin 温存時のみ true）
+      - RAG_ALLOW_WEB_SEARCH_FALLBACK=${RAG_ALLOW_WEB_SEARCH_FALLBACK:-false}
+      - RAG_USE_DEEP_RESEARCH=${RAG_USE_DEEP_RESEARCH:-false}
     volumes:
       - rag_data:/data
+    depends_on:
+      - chroma
+    networks:
+      - soc-ai-network
+
+  # Vector DB for RAG embeddings (#573 / #557)
+  chroma:
+    image: chromadb/chroma:0.6.3
+    container_name: soc-ai-chroma
+    restart: unless-stopped
+    ports:
+      - "${CHROMA_HOST_PORT:-8000}:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
     networks:
       - soc-ai-network
 
@@ -124,6 +197,12 @@ volumes:
   mysql_data:
     driver: local
   rag_data:
+    driver: local
+  chroma_data:
+    driver: local
+  go_mod_cache:
+    driver: local
+  go_build_cache:
     driver: local
 
 networks:

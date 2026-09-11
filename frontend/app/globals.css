@@ -1,12 +1,21 @@
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP&display=swap');
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
 
-body {
-  margin: 0;
-  padding: 0;
-  font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+/*
+ * @layer base に入れる理由: admin/costs 等の一部画面で Tailwind (styles/globals.css) を
+ * 併用しており、レイヤー化されていないCSSはTailwindのユーティリティクラス(@layer utilities)より
+ * 常に優先されてしまう(CSSのカスケードレイヤー仕様)。layer化してもMUIページ側は
+ * CssBaseline が同等のリセットを提供済みのため影響しない。
+ */
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+  }
 }

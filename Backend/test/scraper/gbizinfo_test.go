@@ -164,8 +164,8 @@ func TestGBizClient_SearchByKeyword_FiltersMissingCorporateNumber(t *testing.T) 
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(gbizResponse([]map[string]any{
 			{"corporate_number": "1111111111111", "name": "正常な企業"},
-			{"corporate_number": "", "name": "番号なし企業"},          // フィルタ対象
-			{"name": "番号フィールドなし企業"},                         // フィルタ対象
+			{"corporate_number": "", "name": "番号なし企業"}, // フィルタ対象
+			{"name": "番号フィールドなし企業"},                    // フィルタ対象
 		})))
 	})
 

@@ -1,0 +1,38 @@
+region           = "ap-northeast-1"
+project_name     = "soc-stg"
+vpc_cidr         = "10.10.0.0/16"
+instance_type    = "t4g.small"
+db_instance_class = "db.t4g.micro"
+db_name          = "app_db"
+
+domain_name = "shukatsu-ai.jp"
+# 既定: stg.shukatsu-ai.jp（FE） / api-stg.shukatsu-ai.jp（BE）
+# staging_subdomain     = "stg"
+# staging_api_subdomain = "api-stg"
+
+# 既存 ECR のイメージ（タグは staging 用を推奨）
+backend_image  = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-backend:staging"
+frontend_image = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:staging"
+
+# staging 用 OpenAI キーの Secrets Manager ARN（未設定でも apply は可能だが BE の AI 機能は動かない）
+# openai_secret_arn = "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:stg/openai/api-key-xxxxxx"
+
+# 可能なら社内/VPN CIDR に制限する
+# allowed_http_cidrs = ["x.x.x.x/32"]
+
+# enable_ssh = true
+# allowed_ssh_cidrs = ["x.x.x.x/32"]
+
+# CloudFront+S3 フェイルオーバーは当面使わない（#827）。
+# 起動中の OGP 付き HTML は nginx edge（service-starting.html）で返す。
+# EC2 停止中は ALB 生 503 のまま。後から有効化する場合のみ true。
+# enable_error_fallback = false
+
+# Discord から本番を起動/停止する (/prod)。
+# discord_public_key      = "<Discord Developer Portal の PUBLIC KEY>"
+# discord_allowed_role_id = "<コマンド実行を許可するロールID>"
+#
+# 即時反映用の GitHub トークン(actions:write のみ)。
+# 未設定でも /prod は動作するが、反映は次の毎時実行(最大1時間後)になる。
+# github_dispatch_token = "<GitHub Fine-grained PAT: Actions=Read and write>"
+# github_dispatch_repo  = "ISCProduct/soc-ai-agent"

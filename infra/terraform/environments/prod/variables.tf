@@ -2,33 +2,208 @@ variable "region" {
   type    = string
   default = "ap-northeast-1"
 }
+
 variable "project_name" {
   type    = string
   default = "soc-app"
 }
+
 variable "vpc_cidr" {
   type    = string
-  default = "10.0.0.0/16"
-}
-variable "allowed_ssh_cidr" {
-  type    = list(string)
-  default = ["0.0.0.0/0"]
-}
-variable "instance_type" {
-  type    = string
-  default = "t4g.small"
-}
-variable "key_name" {
-  type    = string
-  default = null
-}
-variable "domain_name" {
-  type        = string
-  default     = "it-industryanalysis.jp"
-  description = "購入済みのドメイン名 (例: example.com)"
+  default = "10.20.0.0/16"
 }
 
-variable "secret_arns" {
+variable "azs" {
+  type    = list(string)
+  default = ["ap-northeast-1a", "ap-northeast-1c"]
+}
+
+variable "public_subnet_cidrs" {
+  type    = list(string)
+  default = ["10.20.1.0/24", "10.20.2.0/24"]
+}
+
+variable "allowed_http_cidrs" {
   type        = list(string)
-  description = "EC2 から読み取りを許可する Secrets Manager ARN のリスト。terraform.tfvars で指定すること（git 管理外）"
+  description = "ALBの80/443へアクセスを許可するCIDR。可能なら制限すること"
+  default     = ["0.0.0.0/0"]
+}
+
+# 本番は既定停止（指定起動）方針: docs/architecture/infra-decision-oci-stg-aws-prod.md 参照。
+# Fargateはタスク稼働時間分のみ課金されるため、既定 desired_count=0（完全停止）。
+# 起動する際は tfvars か -var で 1 以上に上げて apply する。
+variable "backend_desired_count" {
+  type    = number
+  default = 0
+}
+
+variable "frontend_desired_count" {
+  type    = number
+  default = 0
+}
+
+variable "rag_review_desired_count" {
+  # RAG(履歴書レビュー/ES添削)はbackendの同期依存であり、0だと稼働日でも機能が落ちる。
+  # 実際の増減は prod-uptime-scheduler.yml が担う(モジュール側で desired_count は ignore_changes)。
+  type    = number
+  default = 1
+}
+
+variable "backend_cpu" {
+  type        = number
+  description = "Fargateの有効な組み合わせに従うこと（例: 256/512/1024）"
+  default     = 256
+}
+
+variable "backend_memory" {
+  type    = number
+  default = 512
+}
+
+variable "frontend_cpu" {
+  type    = number
+  default = 256
+}
+
+variable "frontend_memory" {
+  type    = number
+  default = 512
+}
+
+variable "rag_review_cpu" {
+  type    = number
+  default = 256
+}
+
+variable "rag_review_memory" {
+  type    = number
+  default = 512
+}
+
+variable "db_instance_class" {
+  type    = string
+  default = "db.t4g.micro"
+}
+
+variable "db_name" {
+  type    = string
+  default = "app_db"
+}
+
+variable "rds_deletion_protection" {
+  type    = bool
+  default = true
+}
+
+variable "rds_skip_final_snapshot" {
+  type    = bool
+  default = false
+}
+
+variable "rds_backup_retention_period" {
+  type    = number
+  default = 7
+}
+
+variable "backend_image" {
+  type        = string
+  description = "ECR image URI for backend (tag included)"
+}
+
+variable "frontend_image" {
+  type        = string
+  description = "ECR image URI for frontend (tag included)"
+}
+
+variable "rag_review_image" {
+  type        = string
+  description = "ECR image URI for rag-review (tag included)"
+}
+
+variable "openai_secret_arn" {
+  type        = string
+  description = "既存のSecrets Manager ARNを使う場合(openai_api_key未指定時のフォールバック)"
+  default     = ""
+}
+
+variable "openai_api_key" {
+  type        = string
+  description = "OpenAI APIキー(平文)。指定するとTerraform管理のSecrets Manager経由でOPENAI_API_KEYとして注入される"
+  sensitive   = true
+  default     = ""
+}
+
+variable "google_client_id" {
+  type        = string
+  description = "Google OAuthクライアントID。コールバックURL https://api.<domain_name>/api/auth/google/callback をGoogle Cloud Console側で許可しておくこと"
+  default     = ""
+}
+
+variable "google_client_secret" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "github_client_id" {
+  type        = string
+  description = "GitHub OAuth AppのクライアントID。コールバックURL https://api.<domain_name>/api/auth/github/callback をGitHub側で許可しておくこと"
+  default     = ""
+}
+
+variable "github_client_secret" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "resend_api_key" {
+  type        = string
+  description = "Resend(メール送信)のAPIキー(#756)"
+  sensitive   = true
+  default     = ""
+}
+
+variable "admin_secret" {
+  type        = string
+  description = "管理者認証シークレット。CI(sync-whats-newジョブ等)から既知の値で呼び出すため、stagingのadmin_secret_plainと同じ値を設定すること"
+  sensitive   = true
+  default     = ""
+}
+
+variable "additional_secret_arns" {
+  type        = list(string)
+  description = "Extra secret ARNs the backend execution role may read"
+  default     = []
+}
+
+variable "frontend_api_base_url" {
+  type        = string
+  description = "NEXT_PUBLIC_API_BASE_URL。未指定なら https://api.<domain_name> を使用"
+  default     = ""
+}
+
+variable "domain_name" {
+  type        = string
+  description = "購入済みドメイン（同名の Route53 ホストゾーンが既に存在すること）"
+  default     = "shukatsu-ai.jp"
+}
+
+variable "enable_error_fallback" {
+  type        = bool
+  description = "frontendを常時CloudFront経由にし、ALBが500/502/503/504を返す場合(本番停止中を含む)にS3のOGP付き静的ページへフェイルオーバーするか"
+  # 本番(shukatsu-ai.jp / *.shukatsu-ai.jp)は既にCloudFront経由で配信済みのため既定はtrue。
+  # falseにするとcloudfront_app_proxyモジュールがcount=0になり、planが本番の
+  # CloudFrontディストリビューション・ACM証明書・S3エラーページを破壊対象に含める。
+  # 実際に「IAM権限不足の回避」でfalseへ倒したまま放置され、applyできない状態が続いた。
+  default = true
+}
+
+# AI面接の音声認識モデル。既定はコード側と同じ mini。
+# 精度に問題が出たときに gpt-4o-transcribe へ戻せるよう、
+# 値を明示して切り替え口を用意しておく（既定と同値なので挙動は変わらない）。
+variable "openai_whisper_model" {
+  description = "AI面接のSTTモデル。品質に問題が出たら gpt-4o-transcribe に変更する"
+  type        = string
+  default     = "gpt-4o-mini-transcribe"
 }

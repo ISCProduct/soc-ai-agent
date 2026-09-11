@@ -1,28 +1,35 @@
-import { NextRequest, NextResponse } from 'next/server'
-
-const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
+import { NextRequest } from 'next/server'
+import {
+  proxyAdminBackend,
+  jsonFromProxyResult,
+  proxyErrorResponse,
+  adminProxyHeaders,
+} from '@/lib/admin-backend-proxy'
 
 export const dynamic = 'force-dynamic'
+
+function parseCompanyId(id: string): number | null {
+  const n = Number(id)
+  return Number.isInteger(n) && n > 0 ? n : null
+}
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}`, {
-    headers: { 'X-Admin-Email': request.headers.get('x-admin-email') || '',
-      'X-Admin-Token': request.headers.get('x-admin-token') || '' },
-  })
-  const raw = await response.text()
-  let data: any = {}
-  if (raw) {
-    try {
-      data = JSON.parse(raw)
-    } catch {
-      data = response.ok ? { message: raw } : { error: raw }
-    }
+  if (!parseCompanyId(id)) {
+    return Response.json({ error: 'invalid company id' }, { status: 400 })
   }
-  return NextResponse.json(data, { status: response.status })
+  try {
+    const result = await proxyAdminBackend('GET', `/api/admin/companies/${id}`, {
+      headers: adminProxyHeaders(request.headers),
+      timeoutMs: 15_000,
+    })
+    return jsonFromProxyResult(result)
+  } catch (err) {
+    return proxyErrorResponse(err)
+  }
 }
 
 export async function PUT(
@@ -30,21 +37,18 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const body = await request.text()
-  const response = await fetch(`${BACKEND_URL}/api/admin/companies/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-Admin-Email': request.headers.get('x-admin-email') || '',
-      'X-Admin-Token': request.headers.get('x-admin-token') || '' },
-    body,
-  })
-  const raw = await response.text()
-  let data: any = {}
-  if (raw) {
-    try {
-      data = JSON.parse(raw)
-    } catch {
-      data = response.ok ? { message: raw } : { error: raw }
-    }
+  if (!parseCompanyId(id)) {
+    return Response.json({ error: 'invalid company id' }, { status: 400 })
   }
-  return NextResponse.json(data, { status: response.status })
+  const body = await request.text()
+  try {
+    const result = await proxyAdminBackend('PUT', `/api/admin/companies/${id}`, {
+      headers: adminProxyHeaders(request.headers),
+      body,
+      timeoutMs: 30_000,
+    })
+    return jsonFromProxyResult(result)
+  } catch (err) {
+    return proxyErrorResponse(err)
+  }
 }

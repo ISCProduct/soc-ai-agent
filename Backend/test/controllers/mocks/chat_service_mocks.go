@@ -3,7 +3,10 @@ package mocks
 import (
 	"Backend/domain/entity"
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/analysis"
+	"Backend/internal/services/chat"
+	"Backend/internal/services/email"
+	"Backend/internal/services/matching"
 	"context"
 
 	"github.com/stretchr/testify/mock"
@@ -14,10 +17,10 @@ type ChatServiceMock struct {
 	mock.Mock
 }
 
-func (m *ChatServiceMock) ProcessChat(ctx context.Context, req services.ChatRequest) (*services.ChatResponse, error) {
+func (m *ChatServiceMock) ProcessChat(ctx context.Context, req chat.ChatRequest) (*chat.ChatResponse, error) {
 	args := m.Called(ctx, req)
 	if v := args.Get(0); v != nil {
-		return v.(*services.ChatResponse), args.Error(1)
+		return v.(*chat.ChatResponse), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
@@ -69,10 +72,10 @@ func (m *MatchingServiceMock) ToggleFavorite(matchID uint, userID uint) error {
 	return args.Error(0)
 }
 
-func (m *MatchingServiceMock) GetDiagnostics(userID uint, sessionID string) (*services.MatchingDiagnostics, error) {
+func (m *MatchingServiceMock) GetDiagnostics(userID uint, sessionID string) (*matching.MatchingDiagnostics, error) {
 	args := m.Called(userID, sessionID)
 	if v := args.Get(0); v != nil {
-		return v.(*services.MatchingDiagnostics), args.Error(1)
+		return v.(*matching.MatchingDiagnostics), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
@@ -82,10 +85,10 @@ type AnalysisScoringServiceMock struct {
 	mock.Mock
 }
 
-func (m *AnalysisScoringServiceMock) BuildAnalysisSummary(ctx context.Context, userID uint, sessionID string) (*services.AnalysisSummary, error) {
+func (m *AnalysisScoringServiceMock) BuildAnalysisSummary(ctx context.Context, userID uint, sessionID string) (*analysis.AnalysisSummary, error) {
 	args := m.Called(ctx, userID, sessionID)
 	if v := args.Get(0); v != nil {
-		return v.(*services.AnalysisSummary), args.Error(1)
+		return v.(*analysis.AnalysisSummary), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
@@ -95,7 +98,7 @@ type EmailServiceMock struct {
 	mock.Mock
 }
 
-func (m *EmailServiceMock) SendAnalysisReport(user *entity.User, summary *services.AnalysisSummary, companies []services.EmailReportCompany, sessionID string) error {
+func (m *EmailServiceMock) SendAnalysisReport(user *entity.User, summary *analysis.AnalysisSummary, companies []email.EmailReportCompany, sessionID string) error {
 	args := m.Called(user, summary, companies, sessionID)
 	return args.Error(0)
 }

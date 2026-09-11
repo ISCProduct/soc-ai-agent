@@ -8,7 +8,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-const jwtTTL = 30 * 24 * time.Hour
+// jwtTTL はアクセストークンの有効期間。
+// 短TTL化しリフレッシュトークン（#616）で更新する。失効はリフレッシュトークン側で管理。
+const jwtTTL = 1 * time.Hour
 
 type userClaims struct {
 	Email string `json:"email"`

@@ -1,5 +1,6 @@
 'use client'
 import React, {useState, useEffect} from 'react'
+import Link from 'next/link'
 import styles from './analysis-sidebar.module.css'
 import
 {
@@ -18,6 +19,7 @@ import
     IconButton,
     useTheme,
     useMediaQuery,
+    Tooltip,
 }
     from '@mui/material'
 import {
@@ -37,11 +39,35 @@ import {
     RecordVoiceOver,
     EditNote,
     CalendarMonth,
+    Business,
+    Assignment,
+    NewReleases,
+    Assessment,
 } from '@mui/icons-material'
 import {authService, User} from '@/lib/auth'
 import {useRouter} from 'next/navigation'
+import { getResultsPathOrChat } from '@/lib/results-navigation'
+import {
+  getApplicationsNavTarget,
+  getTodayActionLabel,
+  shouldShowResultsCta,
+} from '@/lib/sidebar-navigation'
+import { SIDEBAR_ADMIN_NAV, SIDEBAR_NAV_ITEMS } from '@/lib/sidebar-nav'
+import { computeProgressTotals } from './mui-chat/utils'
 
 const DRAWER_WIDTH = 280
+
+const NAV_ICONS: Record<(typeof SIDEBAR_NAV_ITEMS)[number]['href'], React.ReactNode> = {
+    '/Correlation-diagram': <BorderAll color="primary"/>,
+    '/chat-history': <History color="primary"/>,
+    '/resume': <Description color="primary"/>,
+    '/interview': <RecordVoiceOver color="primary"/>,
+    '/interview/history': <Assessment color="primary"/>,
+    '/es-rewrite': <EditNote color="primary"/>,
+    '/schedule': <CalendarMonth color="primary"/>,
+    '/applications': <Assignment color="primary"/>,
+    '/profile': <ManageAccounts color="primary"/>,
+}
 
 interface AnalysisStep {
     id: string
@@ -70,12 +96,12 @@ interface AnalysisSidebarProps {
 }
 
 export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClose}: AnalysisSidebarProps) {
+    const router = useRouter()
     const [messageCount, setMessageCount] = useState(0)
     const [questionCount, setQuestionCount] = useState(0)
     const [totalQuestions, setTotalQuestions] = useState(15)
     const [phases, setPhases] = useState<PhaseProgress[] | null>(null)
     const [isAdmin, setIsAdmin] = useState(!!user.is_admin)
-    const router = useRouter()
     const theme = useTheme()
     const isMobile = useMediaQuery(theme.breakpoints.down('md'))
 
@@ -117,11 +143,12 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
     const getPhasePercent = (phaseName: string, fallback: number) => {
         const phase = phaseProgressFor(phaseName)
         if (!phase) return fallback
+        // まだ質問が始まっていないフェーズは「待機中」として fallback を返さない
+        if (phase.questions_asked === 0) return 0
         const required = phase.max_questions > 0 ? phase.max_questions : phase.min_questions
         if (required > 0) {
             return Math.min(100, Math.max(0, Math.floor((phase.valid_answers / required) * 100)))
         }
-        if (phase.questions_asked <= 0) return 0
         return Math.min(100, Math.floor((phase.valid_answers / phase.questions_asked) * 100))
     }
     const getPhaseStatus = (phaseName: string, defaultLabel: string) => {
@@ -165,6 +192,8 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
         overall: phases ? Math.floor((phasePercents.job + phasePercents.interest + phasePercents.aptitude + phasePercents.future) / 4) : fallbackOverall,
         ...phasePercents,
     }
+    // ヘッダー（ChatHeader）と同じ算出ロジックを使い、「X/Y 完了」の表示が一致するようにする
+    const progressTotals = computeProgressTotals({ phases, questionCount, totalQuestions })
 
     const analysisSteps: AnalysisStep[] = [
         {
@@ -219,6 +248,11 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                         <Typography variant="subtitle2" noWrap sx={{fontWeight: 600}}>
                             {user.name}
                         </Typography>
+                        {user.school_name && (
+                            <Typography variant="caption" noWrap color="text.secondary" sx={{display: 'block'}}>
+                                {user.school_name}
+                            </Typography>
+                        )}
                         {user.is_guest && (
                             <Chip label="ゲスト" size="small" sx={{height: 18, fontSize: '0.7rem'}}/>
                         )}
@@ -239,17 +273,36 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
 
                 {/* 今日やること（推奨フロー） */}
                 {progress.overall < 100 && (
-                    <Box sx={{ mb: 2, p: 1.5, bgcolor: '#fff8f5', borderRadius: 1, border: '1px solid #ffcc99' }}>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: '#ec5b13', display: 'block', mb: 0.5 }}>
+                    <Box sx={{ mb: 2, p: 1.5, bgcolor: 'action.hover', borderRadius: 1, border: '2px solid', borderColor: 'primary.main' }}>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: 'primary.main', display: 'block', mb: 0.5 }}>
                             今日やること
                         </Typography>
-                        <Typography variant="body2" sx={{ fontSize: '0.8rem', color: '#555' }}>
-                            {progress.overall === 0
-                                ? '① 自己分析チャットを始めましょう'
-                                : progress.overall < 80
-                                    ? '① チャットを続けて分析を完成させましょう'
-                                    : '② マッチング結果を確認しましょう'}
+                        <Typography variant="body2" sx={{ fontSize: '0.8rem', color: 'text.secondary', mb: shouldShowResultsCta(progress.overall) ? 1 : 0 }}>
+                            {getTodayActionLabel(progress.overall)}
                         </Typography>
+                        {shouldShowResultsCta(progress.overall) && (
+                            <ListItemButton
+                                onClick={() => {
+                                    router.push(getResultsPathOrChat())
+                                    onMobileClose?.()
+                                }}
+                                sx={{
+                                    borderRadius: 1,
+                                    bgcolor: 'primary.main',
+                                    color: 'primary.contrastText',
+                                    py: 0.75,
+                                    '&:hover': { bgcolor: 'primary.dark' },
+                                }}
+                            >
+                                <ListItemIcon sx={{ minWidth: 32, color: 'inherit' }}>
+                                    <Business fontSize="small" />
+                                </ListItemIcon>
+                                <ListItemText
+                                    primary="マッチング結果を見る"
+                                    primaryTypographyProps={{ fontSize: '0.8rem', fontWeight: 600 }}
+                                />
+                            </ListItemButton>
+                        )}
                     </Box>
                 )}
 
@@ -257,7 +310,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                     AI分析進捗
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{mb: 2}}>
-                    質問: {questionCount}/{expectedTotalQuestions} 完了 (想定{expectedTotalQuestions}問・{progress.overall}%)
+                    質問: {progressTotals.valid}/{progressTotals.required} 完了 (想定{progressTotals.required}問・{progressTotals.percent}%)
                 </Typography>
 
                 <List sx={{p: 0}}>
@@ -275,16 +328,17 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                             >
                                 <ListItemIcon sx={{minWidth: 36}}>
                                     {step.completed ? (
-                                        <CheckCircle color="success"/>
+                                        <CheckCircle color="success" aria-label="完了" />
                                     ) : (
-                                        <RadioButtonUnchecked color="action"/>
+                                        <RadioButtonUnchecked color="action" aria-label="未完了" />
                                     )}
                                 </ListItemIcon>
                                 <ListItemText
                                     primary={step.label}
+                                    secondary={step.completed ? '完了' : '未完了'}
                                     primaryTypographyProps={{
-                                        fontSize: '0.875rem',
-                                        fontWeight: step.completed ? 500 : 400,
+                                        fontSize: '0.95rem',
+                                        fontWeight: step.completed ? 700 : 500,
                                     }}
                                 />
                             </ListItem>
@@ -293,7 +347,15 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                                     <LinearProgress
                                         variant="determinate"
                                         value={step.progress}
-                                        sx={{height: 6, borderRadius: 3}}
+                                        aria-label={`${step.label} ${step.progress}%`}
+                                        sx={{
+                                          height: 10,
+                                          borderRadius: 1,
+                                          bgcolor: 'action.selected',
+                                          '& .MuiLinearProgress-bar': {
+                                            backgroundImage: 'repeating-linear-gradient(90deg, transparent, transparent 4px, rgba(255,255,255,0.35) 4px, rgba(255,255,255,0.35) 8px)',
+                                          },
+                                        }}
                                     />
                                     <Typography
                                         variant="caption"
@@ -327,6 +389,57 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
 
 
                 <Divider sx={{my: 2}}/>
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => {
+                            router.push(getResultsPathOrChat())
+                            onMobileClose?.()
+                        }}
+                        sx={{ borderRadius: 1 }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <Business color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="マッチング結果"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <Tooltip
+                        title={user.is_guest ? '選考管理はログイン後に利用できます' : ''}
+                        disableHoverListener={!user.is_guest}
+                    >
+                        <ListItemButton
+                            onClick={() => {
+                                router.push(getApplicationsNavTarget(user.is_guest))
+                                onMobileClose?.()
+                            }}
+                            sx={{ borderRadius: 1 }}
+                        >
+                            <ListItemIcon sx={{minWidth: 36}}>
+                                <Assignment color="primary"/>
+                            </ListItemIcon>
+                            <ListItemText
+                                primary="選考管理"
+                                secondary={user.is_guest ? 'ログインが必要です' : undefined}
+                                primaryTypographyProps={{
+                                    fontSize: '0.875rem',
+                                    fontWeight: 500,
+                                }}
+                                secondaryTypographyProps={{
+                                    fontSize: '0.7rem',
+                                }}
+                            />
+                        </ListItemButton>
+                    </Tooltip>
+                </ListItem>
+
                 <ListItem disablePadding>
                     <ListItemButton
                         onClick={() => router.push('/Correlation-diagram')}
@@ -411,6 +524,26 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
 
                 <ListItem disablePadding>
                     <ListItemButton
+                        onClick={() => router.push('/interview/history')}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <Assessment color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="面接履歴"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding>
+                    <ListItemButton
                         onClick={() => router.push('/es-rewrite')}
                         sx={{
                             borderRadius: 1,
@@ -451,7 +584,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
 
                 <ListItem disablePadding>
                     <ListItemButton
-                        onClick={() => router.push('/onboarding')}
+                        onClick={() => router.push('/profile')}
                         sx={{
                             borderRadius: 1,
                         }}
@@ -469,10 +602,36 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                     </ListItemButton>
                 </ListItem>
 
+                <ListItem disablePadding>
+                    <ListItemButton
+                        onClick={() => {
+                            router.push('/whats-new')
+                            onMobileClose?.()
+                        }}
+                        sx={{
+                            borderRadius: 1,
+                        }}
+                    >
+                        <ListItemIcon sx={{minWidth: 36}}>
+                            <NewReleases color="primary"/>
+                        </ListItemIcon>
+                        <ListItemText
+                            primary="更新情報"
+                            primaryTypographyProps={{
+                                fontSize: '0.875rem',
+                                fontWeight: 500,
+                            }}
+                        />
+                    </ListItemButton>
+                </ListItem>
+
                 {isAdmin && (
                     <ListItem disablePadding>
                         <ListItemButton
-                            onClick={() => router.push('/admin')}
+                            component={Link}
+                            href={SIDEBAR_ADMIN_NAV.href}
+                            prefetch
+                            onClick={onMobileClose}
                             sx={{
                                 borderRadius: 1,
                             }}
@@ -481,7 +640,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                                 <AdminPanelSettings color="primary"/>
                             </ListItemIcon>
                             <ListItemText
-                                primary="管理者機能"
+                                primary={SIDEBAR_ADMIN_NAV.label}
                                 primaryTypographyProps={{
                                     fontSize: '0.875rem',
                                     fontWeight: 600,

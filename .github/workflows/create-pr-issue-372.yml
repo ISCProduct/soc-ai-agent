@@ -13,12 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check branch exists
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Create Pull Request if branch exists
-        uses: actions/github-script@v6
+        uses: actions/github-script@v9
         with:
           script: |
             const branch = core.getInput('branch') || context.payload.inputs.branch || 'feature/issue-372-accuracy'

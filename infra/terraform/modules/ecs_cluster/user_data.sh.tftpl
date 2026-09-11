@@ -1,0 +1,19 @@
+#!/bin/bash
+set -euxo pipefail
+
+cat >> /etc/ecs/ecs.config <<EOF
+ECS_CLUSTER=${cluster_name}
+ECS_ENABLE_TASK_IAM_ROLE=true
+ECS_ENABLE_CONTAINER_METADATA=true
+EOF
+
+# EIP を固定するため、インスタンス起動時に再関連付けする
+if [ -n "${eip_allocation_id}" ]; then
+  TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+  INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
+  aws ec2 associate-address \
+    --region "${region}" \
+    --instance-id "$${INSTANCE_ID}" \
+    --allocation-id "${eip_allocation_id}" \
+    --allow-reassociation
+fi

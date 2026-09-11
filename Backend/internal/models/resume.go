@@ -4,6 +4,7 @@ import "time"
 
 type ResumeDocument struct {
 	ID               uint      `gorm:"primaryKey" json:"id"`
+	OrganizationID   uint      `gorm:"not null;index;column:organization_id" json:"organization_id"`
 	UserID           uint      `gorm:"not null;index" json:"user_id"`
 	SessionID        string    `gorm:"size:100;index" json:"session_id"`
 	SourceType       string    `gorm:"size:50;not null" json:"source_type"` // pdf, docx, google_docs

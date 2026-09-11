@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Box,
   Card,
@@ -17,19 +17,34 @@ import GitHubIcon from '@mui/icons-material/GitHub'
 import GoogleIcon from '@mui/icons-material/Google'
 import Link from 'next/link'
 import { authService, AuthResponse } from '@/lib/auth'
+import { BACKEND_URL } from '@/lib/backend-url'
+import { GUEST_LIMITATIONS } from '@/lib/guest-limits'
+import { StudentThemeToggle } from '@/components/student-theme-toggle'
+import { extractTenantSlug } from '@/lib/tenant'
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 interface LoginPageProps {
   onAuthSuccess: (authResponse: AuthResponse) => void
+  /** 0: ログイン, 1: 新規登録 */
+  initialTab?: number
 }
 
-export function LoginPage({ onAuthSuccess }: LoginPageProps) {
-  const [tabValue, setTabValue] = useState(0)
+export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
+  const [tabValue, setTabValue] = useState(initialTab)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [emailTouched, setEmailTouched] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   // 新規登録: メール送信完了状態
   const [registrationEmailSent, setRegistrationEmailSent] = useState(false)
+
+  const emailInvalid = emailTouched && email !== '' && !EMAIL_PATTERN.test(email)
+
+  useEffect(() => {
+    setTabValue(initialTab)
+  }, [initialTab])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -81,18 +96,12 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
     }
   }
 
-  const handleOAuthLogin = async (provider: 'google' | 'github') => {
-    setError('')
-    try {
-      const response = provider === 'google' 
-        ? await authService.getGoogleAuthUrl()
-        : await authService.getGithubAuthUrl()
-      
-      localStorage.setItem('oauth_state', response.state)
-      window.location.href = response.auth_url
-    } catch (err: any) {
-      setError(err.message)
-    }
+  const handleOAuthLogin = (provider: 'google' | 'github') => {
+    // バックエンドのOAuthエンドポイントへ直接遷移する
+    // fetch経由ではなく直接ナビゲートすることでクッキーが同一オリジンで正しく設定される
+    const slug = extractTenantSlug(window.location.hostname)
+    const tenantParam = slug ? `?tenant=${encodeURIComponent(slug)}` : ''
+    window.location.href = `${BACKEND_URL}/api/auth/${provider}${tenantParam}`
   }
 
   return (
@@ -103,11 +112,11 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
         justifyContent: 'center',
         minHeight: '100vh',
         bgcolor: 'background.default',
-        p: 2,
+        p: { xs: 2, sm: 3 },
       }}
     >
-      <Card sx={{ maxWidth: 450, width: '100%' }}>
-        <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
+      <Card sx={{ maxWidth: 520, width: '100%' }}>
+        <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
           <Typography variant="h4" align="center" gutterBottom fontWeight="bold">
             IT業界キャリアエージェント
           </Typography>
@@ -134,6 +143,9 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onBlur={() => setEmailTouched(true)}
+                error={emailInvalid}
+                helperText={emailInvalid ? 'メールアドレスの形式が正しくありません' : ' '}
                 required
                 sx={{ mb: 2 }}
               />
@@ -147,7 +159,7 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
                 sx={{ mb: 1 }}
               />
               <Box sx={{ textAlign: 'right', mt: -1, mb: 2 }}>
-                <Link href="/forgot-password" style={{ fontSize: '0.875rem', color: '#1976D2' }}>
+                <Link href="/forgot-password" style={{ fontSize: '0.875rem' }}>
                   パスワードをお忘れですか？
                 </Link>
               </Box>
@@ -156,7 +168,7 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
                 fullWidth
                 variant="contained"
                 size="large"
-                disabled={loading}
+                disabled={loading || emailInvalid}
               >
                 ログイン
               </Button>
@@ -177,6 +189,9 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onBlur={() => setEmailTouched(true)}
+                error={emailInvalid}
+                helperText={emailInvalid ? 'メールアドレスの形式が正しくありません' : ' '}
                 required
                 sx={{ mb: 3 }}
               />
@@ -185,7 +200,7 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
                 fullWidth
                 variant="contained"
                 size="large"
-                disabled={loading}
+                disabled={loading || emailInvalid}
               >
                 確認メールを送る
               </Button>
@@ -221,7 +236,14 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
             >
               ゲストとして続ける
             </Button>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', px: 0.5 }}>
+              ゲストでは以下が利用できません: {GUEST_LIMITATIONS.join(' / ')}。
+              あとからアカウント登録すると解放されます。
+            </Typography>
           </Box>
+
+          <Divider sx={{ my: 3 }} />
+          <StudentThemeToggle />
         </CardContent>
       </Card>
     </Box>

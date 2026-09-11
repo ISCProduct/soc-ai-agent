@@ -1,6 +1,7 @@
-/* チャット全体コンテナ */
+/* チャット全体コンテナ — 親の flex 高さを埋め、モバイルでも入力欄を確保 */
 .chatContainer {
-    height: calc(100vh - 48px); /* モバイルヘッダー(48px)分を引く */
+    height: 100%;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     background-color: #fff;
@@ -8,12 +9,14 @@
 
 /* ヘッダー */
 .chatHeader {
-    padding: 12px 12px; /* 1.5 * 8px */
+    padding: 10px 12px;
     border-bottom: 1px solid #e0e0e0;
     background-color: #fff;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-shrink: 0;
+    gap: 8px;
 }
 
 /* デスクトップタイトル: モバイルでは非表示 */
@@ -30,41 +33,38 @@
 
 /* 終了ボタン */
 .endButton {
-    min-width: 80px !important;
+    min-width: 64px !important;
     font-size: 0.75rem !important;
 }
 
 /* メッセージエリア */
 .messagesArea {
-    padding: 16px; /* 2 * 8px */
+    padding: 12px 12px 16px;
 }
 
 /* メッセージバブル */
 .messageBubble {
-    padding: 12px !important; /* 1.5 * 8px */
-    max-width: 90% !important;
+    padding: 10px 12px !important;
+    max-width: 88% !important;
+    border-radius: 12px !important;
 }
 
 /* 選択肢ボタン */
 .choiceButton {
     font-size: 0.75rem !important;
-    padding-top: 6px !important;    /* 0.75 * 8px */
+    padding-top: 6px !important;
     padding-bottom: 6px !important;
 }
 
 /* デスクトップ(md: 900px以上) */
 @media (min-width: 900px) {
-    .chatContainer {
-        height: 100vh;
-    }
-
     .chatHeader {
-        padding: 16px; /* 2 * 8px */
+        padding: 16px;
     }
 
     .chatTitle {
         display: block;
-        font-size: 1.5rem;
+        font-size: 1.35rem;
     }
 
     .chatProgress {
@@ -72,16 +72,16 @@
     }
 
     .endButton {
-        min-width: 120px !important;
+        min-width: 96px !important;
         font-size: 0.875rem !important;
     }
 
     .messagesArea {
-        padding: 24px; /* 3 * 8px */
+        padding: 24px;
     }
 
     .messageBubble {
-        padding: 16px !important; /* 2 * 8px */
+        padding: 14px 16px !important;
         max-width: 70% !important;
     }
 

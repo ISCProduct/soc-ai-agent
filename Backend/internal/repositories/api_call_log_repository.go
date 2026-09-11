@@ -20,24 +20,24 @@ func (r *APICallLogRepository) Create(log *models.APICallLog) error {
 }
 
 type DailyCostRow struct {
-	Date             string
-	TotalCostUSD     float64
-	TotalTokens      int64
-	CallCount        int64
+	Date         string
+	TotalCostUSD float64
+	TotalTokens  int64
+	CallCount    int64
 }
 
 type MonthlyCostRow struct {
-	Month            string
-	TotalCostUSD     float64
-	TotalTokens      int64
-	CallCount        int64
+	Month        string
+	TotalCostUSD float64
+	TotalTokens  int64
+	CallCount    int64
 }
 
 type ModelCostRow struct {
-	Model            string
-	TotalCostUSD     float64
-	TotalTokens      int64
-	CallCount        int64
+	Model        string
+	TotalCostUSD float64
+	TotalTokens  int64
+	CallCount    int64
 }
 
 // DailyCosts は過去 nDays 日間の日次集計を返す
@@ -95,4 +95,14 @@ func (r *APICallLogRepository) TotalCostSince(since time.Time) (float64, error) 
 		Select("COALESCE(SUM(cost_usd), 0)").
 		Scan(&total).Error
 	return total, err
+}
+
+// CountSearchCallsSince は指定日時以降の Web Search 系モデル呼び出し回数を返す。
+// company Search 予算（#587）のカウントに使う。model に "search" を含む行を対象とする。
+func (r *APICallLogRepository) CountSearchCallsSince(since time.Time) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.APICallLog{}).
+		Where("called_at >= ? AND LOWER(model) LIKE ?", since, "%search%").
+		Count(&count).Error
+	return count, err
 }

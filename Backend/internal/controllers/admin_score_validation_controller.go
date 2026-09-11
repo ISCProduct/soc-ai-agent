@@ -1,7 +1,9 @@
 package controllers
 
 import (
+	"Backend/internal/services/admin"
 	"Backend/internal/services/interfaces"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -52,7 +54,10 @@ func (c *AdminScoreValidationController) GetCalibration(ctx echo.Context) error 
 func (c *AdminScoreValidationController) RunCalibration(ctx echo.Context) error {
 	result, err := c.svc.RunCalibration()
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		if errors.Is(err, admin.ErrInsufficientSamples) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		return echoInternalError(err)
 	}
 	return ctx.JSON(http.StatusCreated, result)
 }
@@ -73,12 +78,13 @@ func (c *AdminScoreValidationController) GetCalibrationHistory(ctx echo.Context)
 }
 
 // ListVariants GET /api/admin/score-validation/variants
+// 全実験・全バリアントの詳細一覧を返す（管理画面のテーブル表示用）。
 func (c *AdminScoreValidationController) ListVariants(ctx echo.Context) error {
-	experiments, err := c.svc.ListExperiments()
+	variants, err := c.svc.ListAllVariants()
 	if err != nil {
 		return echoInternalError(err)
 	}
-	return ctx.JSON(http.StatusOK, map[string]any{"experiments": experiments})
+	return ctx.JSON(http.StatusOK, map[string]any{"experiments": variants})
 }
 
 // CreateVariant POST /api/admin/score-validation/variants

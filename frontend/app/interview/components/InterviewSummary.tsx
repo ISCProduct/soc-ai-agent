@@ -12,13 +12,13 @@ import {
   Stack,
   Tooltip,
   Typography,
+  Alert,
 } from '@mui/material'
 import CheckIcon from '@mui/icons-material/Check'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { InterviewReport, PhraseSuggestion, interviewApi } from '@/lib/interview'
 import { parseJsonSafe } from '@/lib/interview-utils'
-
-const PRIMARY = '#ec5b13'
+import { PRIMARY } from '../constants'
 
 const SCORE_LABELS: Record<string, string> = {
   logic: '論理性',
@@ -45,14 +45,19 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
 
   const [suggestions, setSuggestions] = useState<PhraseSuggestion[] | null>(null)
   const [suggestionsLoading, setSuggestionsLoading] = useState(false)
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null)
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
 
   useEffect(() => {
     if (!userId || !report.session_id) return
     setSuggestionsLoading(true)
+    setSuggestionsError(null)
     interviewApi.getPhraseSuggestions(report.session_id, userId)
       .then(setSuggestions)
-      .catch(() => setSuggestions([]))
+      .catch(() => {
+        setSuggestions(null)
+        setSuggestionsError('言い換え提案の取得に失敗しました')
+      })
       .finally(() => setSuggestionsLoading(false))
   }, [report.session_id, userId])
 
@@ -68,8 +73,10 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
   const improvements = parseJsonSafe(report.improvements_json) as string[] | null
 
   // Calculate overall score (average of all categories)
-  const overallScore = scores
-    ? Math.round((Object.values(scores).reduce((s, v) => s + v, 0) / Object.values(scores).length) * 10) / 10
+  // 空オブジェクトは truthy なので、件数を見ないと 0/0 で NaN が「NaN / 5」と表示される
+  const scoreValues = scores ? Object.values(scores) : []
+  const overallScore = scoreValues.length > 0
+    ? Math.round((scoreValues.reduce((s, v) => s + v, 0) / scoreValues.length) * 10) / 10
     : null
 
   return (
@@ -92,11 +99,11 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
       </Paper>
 
       {/* Scores */}
-      {scores && (
+      {scoreValues.length > 0 && (
         <Paper sx={{ bgcolor: paperBg, border: paperBorder, p: 3, borderRadius: 2 }}>
           <Typography sx={{ color: textPrimary, fontWeight: 700, mb: 2 }}>カテゴリ別スコア</Typography>
           <Stack spacing={1.5}>
-            {Object.entries(scores).map(([key, value]) => (
+            {Object.entries(scores ?? {}).map(([key, value]) => (
               <Box key={key}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
                   <Typography variant="body2" sx={{ color: textSecondary }}>
@@ -168,6 +175,8 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
               <CircularProgress size={18} sx={{ color: PRIMARY }} />
               <Typography variant="body2" sx={{ color: textMuted }}>分析中...</Typography>
             </Box>
+          ) : suggestionsError ? (
+            <Alert severity="error">{suggestionsError}</Alert>
           ) : suggestions && suggestions.length > 0 ? (
             <Stack spacing={2}>
               {suggestions.map((item, i) => (

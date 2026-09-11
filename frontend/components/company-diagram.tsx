@@ -10,7 +10,6 @@ import ReactFlow, {
     useNodesState,
     useEdgesState,
     MarkerType,
-    EdgeTypes,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Box, Typography, Chip } from '@mui/material';
@@ -24,35 +23,11 @@ import {
     type Company,
     type MarketType,
 } from '@/lib/company-data';
+import { formatRelationLabel } from '@/lib/relation-labels';
+import { layoutBusinessGraph, layoutCapitalGraphFromEdges } from '@/lib/relation-graph';
+import { edgeTypes } from '@/components/diagram/RelationEdge';
 
 type DiagramType = 'capital' | 'business';
-
-const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, label }: any) => {
-    const edgePath = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
-
-    return (
-        <>
-            <path
-                id={id}
-                style={style}
-                className="react-flow__edge-path"
-                d={edgePath}
-                markerEnd={markerEnd}
-            />
-            {label && (
-                <text>
-                    <textPath href={`#${id}`} startOffset="50%" textAnchor="middle" style={{ fontSize: '12px', fill: '#555' }}>
-                        {label}
-                    </textPath>
-                </text>
-            )}
-        </>
-    );
-};
-
-const edgeTypes: EdgeTypes = {
-    custom: CustomEdge,
-};
 
 interface CompanyDiagramProps {
     companyId: number;
@@ -63,19 +38,28 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
     const [relations, setRelations] = useState<CapitalRelation[]>([]);
     const [marketInfo, setMarketInfo] = useState<CompanyMarketInfo[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
 
     useEffect(() => {
         async function loadData() {
             setLoading(true);
-            const [relationsData, marketData] = await Promise.all([
-                fetchCompanyRelations(),
-                fetchCompanyMarketInfo()
-            ]);
-            setRelations(relationsData);
-            setMarketInfo(marketData);
-            setLoading(false);
+            setLoadError(null);
+            try {
+                const [relationsData, marketData] = await Promise.all([
+                    fetchCompanyRelations(),
+                    fetchCompanyMarketInfo()
+                ]);
+                setRelations(relationsData);
+                setMarketInfo(marketData);
+            } catch (error) {
+                setLoadError(error instanceof Error ? error.message : 'データの取得に失敗しました');
+                setRelations([]);
+                setMarketInfo([]);
+            } finally {
+                setLoading(false);
+            }
         }
-        loadData();
+        void loadData();
     }, []);
 
     const getMarketType = useCallback((compId: number): MarketType => {
@@ -114,41 +98,22 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
             }
         });
 
-        const nodes: Node[] = [];
-        const processedIds = new Set<number>();
+        // #1022: 親→子の向きで固定配置していた独自ロジックを廃止し、business タブと同様に
+        // 起点企業からのBFS距離(layoutCapitalGraphFromEdges)で配置する。起点が子会社でも
+        // 親会社が常に上に固定されず、起点企業が常に最上位に来る。
+        const involvedCompanies = Array.from(relatedIds);
+        const capitalRelations = relations.filter(rel => rel.relation_type.startsWith('capital'));
+        const positions = layoutCapitalGraphFromEdges(focusCompanyId, involvedCompanies, capitalRelations);
 
-        const addNodeWithChildren = (compId: number, level: number, xOffset: number): number => {
-            if (processedIds.has(compId)) return xOffset;
-            processedIds.add(compId);
-
-            const children = relations.filter(rel =>
-                rel.relation_type.startsWith('capital') &&
-                rel.parent_id === compId &&
-                relatedIds.has(rel.child_id!)
-            );
-
-            let currentX = xOffset;
-            const childPositions: number[] = [];
-
-            children.forEach((rel) => {
-                if (rel.child_id) {
-                    const childX = addNodeWithChildren(rel.child_id, level + 1, currentX);
-                    childPositions.push((currentX + childX) / 2);
-                    currentX = childX + 250;
-                }
-            });
-
-            const nodeX = childPositions.length > 0
-                ? (childPositions[0] + childPositions[childPositions.length - 1]) / 2
-                : currentX;
-
+        return involvedCompanies.map((compId) => {
             const isFocusCompany = compId === focusCompanyId;
             const marketType = getMarketType(compId);
+            const pos = positions.get(compId) ?? { x: 0, y: 0 };
 
-            nodes.push({
+            return {
                 id: String(compId),
                 type: 'default',
-                position: { x: nodeX, y: level * 150 },
+                position: { x: pos.x, y: pos.y },
                 data: {
                     label: (
                         <Box sx={{ textAlign: 'center', p: 1 }}>
@@ -179,27 +144,8 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
                     minWidth: '200px',
                     boxShadow: isFocusCompany ? '0 4px 12px rgba(255, 193, 7, 0.3)' : undefined,
                 },
-            });
-
-            return currentX;
-        };
-
-        // トップレベルの親会社を見つける
-        const parentCompanies = Array.from(relatedIds).filter(id => {
-            return !relations.some(rel =>
-                rel.relation_type.startsWith('capital') &&
-                rel.child_id === id &&
-                relatedIds.has(rel.parent_id!)
-            );
+            };
         });
-
-        let currentXOffset = 0;
-        parentCompanies.forEach(parentId => {
-            currentXOffset = addNodeWithChildren(parentId, 0, currentXOffset);
-            currentXOffset += 300;
-        });
-
-        return nodes;
     }, [relations, getMarketType, getCompanyName]);
 
     const createCapitalEdges = useCallback((focusCompanyId: number): Edge[] => {
@@ -249,7 +195,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
         const relatedIds = new Set([focusCompanyId]);
 
         relations.forEach(rel => {
-            if (rel.relation_type === 'business') {
+            if (rel.relation_type.startsWith('business')) {
                 if (rel.from_id === focusCompanyId) relatedIds.add(rel.to_id!);
                 if (rel.to_id === focusCompanyId) relatedIds.add(rel.from_id!);
             }
@@ -262,21 +208,19 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
             }
         });
 
+        // #970: 登録順の円形配置ではなく、起点企業からの関係性(BFS距離)に基づいて配置する
         const involvedCompanies = Array.from(relatedIds);
-        const angle = (2 * Math.PI) / involvedCompanies.length;
-        const radius = 250;
+        const positions = layoutBusinessGraph(focusCompanyId, involvedCompanies, relations);
 
-        return involvedCompanies.map((compId, idx) => {
+        return involvedCompanies.map((compId) => {
             const isFocusCompany = compId === focusCompanyId;
             const marketType = getMarketType(compId);
+            const pos = positions.get(compId) ?? { x: 0, y: 0 };
 
             return {
                 id: String(compId),
                 type: 'default',
-                position: {
-                    x: 400 + radius * Math.cos(idx * angle),
-                    y: 300 + radius * Math.sin(idx * angle),
-                },
+                position: { x: pos.x, y: pos.y },
                 data: {
                     label: (
                         <Box sx={{ textAlign: 'center', p: 1 }}>
@@ -316,7 +260,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
         const relatedIds = new Set([focusCompanyId]);
 
         relations.forEach(rel => {
-            if (rel.relation_type === 'business') {
+            if (rel.relation_type.startsWith('business')) {
                 if (rel.from_id === focusCompanyId) relatedIds.add(rel.to_id!);
                 if (rel.to_id === focusCompanyId) relatedIds.add(rel.from_id!);
             }
@@ -324,7 +268,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
 
         // ビジネス関係のエッジ
         relations.forEach((rel, idx) => {
-            if (rel.relation_type === 'business' && rel.from_id && rel.to_id) {
+            if (rel.relation_type.startsWith('business') && rel.from_id && rel.to_id) {
                 if (rel.from_id === focusCompanyId || rel.to_id === focusCompanyId ||
                     (relatedIds.has(rel.from_id) && relatedIds.has(rel.to_id))) {
                     edges.push({
@@ -332,7 +276,7 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
                         source: String(rel.from_id),
                         target: String(rel.to_id),
                         type: 'custom',
-                        label: rel.description,
+                        label: formatRelationLabel(rel.description, rel.relation_type),
                         animated: true,
                         style: {
                             stroke: '#2196F3',
@@ -400,6 +344,14 @@ export default function CompanyDiagram({ companyId, diagramType }: CompanyDiagra
         return (
             <Box sx={{ width: '100%', height: '500px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Typography>読み込み中...</Typography>
+            </Box>
+        );
+    }
+
+    if (loadError) {
+        return (
+            <Box sx={{ width: '100%', height: '500px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Typography color="error">{loadError}</Typography>
             </Box>
         );
     }

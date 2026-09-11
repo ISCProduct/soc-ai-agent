@@ -26,6 +26,18 @@ docker compose restart app
 docker compose logs -f app
 ```
 
+### メール送信（Resend / #758）
+
+本番・staging は独自ドメインを使う。`soc-ai-agent.com` ではなく検証済みの `shukatsu-ai.jp`。
+
+```env
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=re_xxxxxxxxx
+EMAIL_FROM=noreply@shukatsu-ai.jp
+```
+
+Resend ダッシュボードで `shukatsu-ai.jp` が Verified であること。API キーは Secrets のみ（リポジトリに置かない）。試験送信は登録確認メールで確認する。
+
 ### ヘルスチェック確認
 
 ```sh
@@ -35,10 +47,45 @@ curl http://localhost:8080/healthz
 
 ### マイグレーション
 
-GORMの `AutoMigrate` はサーバー起動時に自動実行されます。手動実行する場合:
+バージョン管理型マイグレーション（`Backend/migrations/`、`cmd/migrate`）を使用（GORMの `AutoMigrate` は禁止）。CI/CD（`.github/workflows/deployment.yml`）で以下の通り自動適用される（#618）。
+
+- **staging**: `docker compose up -d` 後、backendコンテナ内で `docker compose exec -T backend /bin/migrate up` を実行。失敗するとデプロイジョブが失敗する。
+- **production**: 新イメージのタスク定義を登録し、backendサービスと同じネットワーク設定でワンオフECSタスクとして `/bin/migrate up` を実行。マイグレーションが失敗した場合はサービスの更新（新イメージへの切り替え）自体を行わない。
+
+手動実行する場合:
 
 ```sh
-cd Backend && go run ./cmd/migrate
+cd Backend && go run ./cmd/migrate            # up
+cd Backend && go run ./cmd/migrate down       # 直近1件をロールバック
+cd Backend && go run ./cmd/migrate version    # 現在のバージョン確認
+```
+
+### デプロイのロールバック（#618）
+
+**backend/frontend（ECS Fargate, 本番）:**
+
+直前の安定リビジョンに戻す。マイグレーションが絡む変更は、先に対応する `down` マイグレーションを実行してからサービスを戻す。
+
+```sh
+# 1. 直前のタスク定義リビジョンを確認
+aws ecs list-task-definitions --family-prefix soc-app-backend --sort DESC --max-items 5
+
+# 2. スキーマ変更を伴う場合、先にロールバック（本番DBに対して慎重に実行）
+cd Backend && go run ./cmd/migrate down
+
+# 3. サービスを直前のリビジョンへ戻す
+aws ecs update-service --cluster soc-app --service backend \
+  --task-definition soc-app-backend:<直前のリビジョン番号>
+aws ecs update-service --cluster soc-app --service frontend \
+  --task-definition soc-app-frontend:<直前のリビジョン番号>
+```
+
+**staging（EC2 + Docker Compose）:**
+
+```sh
+# IMAGE_TAG=staging は都度上書きされるため、直前に安定していたコミットへ再デプロイする
+# のが確実（GitHub Actions を workflow_dispatch で該当コミットに対して再実行）
+gh workflow run deployment.yml --ref <直前の安定コミットSHA>
 ```
 
 ---
@@ -88,8 +135,12 @@ GET /api/admin/costs/monthly   # 月別コスト
 ```
 
 **アラート設定:**
-- `REALTIME_MONTHLY_ALERT_THRESHOLD_USD=200` を超えるとメール/Slackアラート
-- `REALTIME_ALERT_EMAILS` / `REALTIME_ALERT_SLACK_WEBHOOK_URL` で通知先設定
+- OpenAI API 全体（`api_call_logs`）: `OPENAI_COST_ALERT_THRESHOLD_USD=40`（UTC 月次）を超過すると Slack/Discord
+  - `OPENAI_COST_ALERT_SLACK_WEBHOOK_URL` / `OPENAI_COST_ALERT_DISCORD_WEBHOOK_URL`
+  - Slack 未設定時は `REALTIME_ALERT_SLACK_WEBHOOK_URL` へフォールバック
+  - 同一月は1回のみ通知
+- Realtime: `REALTIME_MONTHLY_ALERT_THRESHOLD_USD=200` を超えるとメール/Slack
+  - `REALTIME_ALERT_EMAILS` / `REALTIME_ALERT_SLACK_WEBHOOK_URL`
 
 ### 面接セッション監視
 
@@ -139,11 +190,19 @@ curl -X POST http://localhost:8080/api/interviews/{sessionID}/send-report \
 
 **対処:**
 ```sh
-# RAGサービス状態確認
-curl http://localhost:9000/health
+# RAG + Chroma を確実に起動（ビルド込み）
+make rag-up
 
-# RAGサービス再起動
-docker compose --profile rag restart rag-review
+# 状態確認（vector_store.ok 必須）
+curl -s http://localhost:9000/health
+curl -s http://localhost:8000/api/v2/heartbeat
+curl -s http://localhost:9000/vector/status
+
+# 旧イメージ疑い → 強制 rebuild
+make rag-rebuild
+
+# ログ
+docker compose --profile rag logs --tail 80 chroma rag-review
 ```
 
 ### スコアキャリブレーション「サンプル不足」エラー
@@ -163,13 +222,67 @@ docker compose --profile rag restart rag-review
 
 ## 5. データベース管理
 
-### バックアップ
+### デモ企業データのクリーンアップ（Issue #558）
+
+旧 Seed で投入された `example.com` 系のデモ企業は、起動時の `SeedData` 内で `CleanupDemoCompanies` が冪等実行され自動削除されます。既存環境で手動実行する場合:
+
+```sh
+cd Backend && go run ./cmd/migrate
+```
+
+`cmd/migrate` はスキーマ更新後に `SeedData` を呼び出すため、デモ企業・関連子テーブルも合わせてクリーンアップされます。サーバー起動時（`go run ./cmd/server`）でも同様に実行されます。
+
+**確認クエリ:**
+
+```sql
+SELECT id, name, website_url FROM companies
+WHERE website_url LIKE '%.example.com%'
+   OR website_url = 'https://example.com'
+   OR name IN (
+     '株式会社テックイノベーション',
+     'エンタープライズシステムズ株式会社',
+     'クリエイティブラボ株式会社'
+   );
+-- 0 件であること
+```
+
+### バックアップ・DR体制（#620）
+
+本番/staging は RDS（MySQL）を使用。2026-08時点の実設定（`infra/terraform/modules/rds/`、Terraform管理）:
+
+| 項目 | 設定 |
+|---|---|
+| 保存データ暗号化 | `storage_encrypted = true`（デフォルトAWS管理キー） |
+| 自動バックアップ | 有効、保持期間 7日（`BackupRetentionPeriod`） |
+| 削除保護 | `deletion_protection = true` |
+| PITR（ポイントインタイムリカバリ） | RDS自動バックアップの範囲内（過去7日以内の任意時点） |
+
+S3（履歴書・面接動画）は `infra/terraform/modules/s3/` でサーバーサイド暗号化（SSE）を設定済み。
+
+**復旧手順（PITR、RDS）:**
+
+```sh
+# 1. 復旧先の一時DBインスタンスを作成（元インスタンスは変更しない）
+aws rds restore-db-instance-to-point-in-time \
+  --source-db-instance-identifier soc-app-mysql \
+  --target-db-instance-identifier soc-app-mysql-restore-test \
+  --restore-time <YYYY-MM-DDThh:mm:ssZ>
+
+# 2. 復旧確認後、アプリのDB接続先を切り替える（DNS/接続文字列の更新が必要）
+# 3. 検証済みであれば旧インスタンスを削除、または保持して後日削除
+```
+
+**ChromaDB（ベクトルストア）復旧:** 永続ボリューム喪失時は `rag/` の再インデックス処理（企業ドキュメントの再embed）で再構築する。手順は [`chroma-migration.md`](chroma-migration.md) を参照。
+
+> 復旧リハーサル（実際の `restore-db-instance-to-point-in-time` 実行・結果記録）は本番環境への影響を伴うため未実施。実施する場合は本番から隔離された一時インスタンスに対して行い、結果をこのセクションに追記すること。
+
+**ローカル/開発環境の簡易バックアップ:**
 
 ```sh
 docker compose exec db mysqldump -u root -p app_db > backup_$(date +%Y%m%d).sql
 ```
 
-### リストア
+**ローカル/開発環境のリストア:**
 
 ```sh
 docker compose exec -T db mysql -u root -p app_db < backup_YYYYMMDD.sql

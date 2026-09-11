@@ -2,15 +2,31 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
+  // 新規作成したテストのみ実行（既存デバッグ用スペックを除外）
+  testMatch: [
+    'auth.spec.ts',
+    'chat.spec.ts',
+    'chat-critical-flow.spec.ts',
+    'resume.spec.ts',
+    'resume-reminder.spec.ts',
+    'schedule.spec.ts',
+    'admin.spec.ts',
+    'public-pages.spec.ts',
+    'company-password-reset.spec.ts',
+    'admin-company-users.spec.ts',
+    'student-insights.spec.ts',
+  ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  retries: process.env.CI ? 1 : 0,
   workers: 1,
-  reporter: 'list',
+  reporter: process.env.CI ? 'github' : 'list',
   use: {
     baseURL: 'http://localhost:3000',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
+    actionTimeout: 10000,
+    navigationTimeout: 15000,
   },
 
   projects: [
@@ -19,4 +35,19 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
+
+  webServer: {
+    command: process.env.CI
+      ? 'npm run build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && node .next/standalone/server.js'
+      : 'npm run dev',
+    url: 'http://localhost:3000',
+    reuseExistingServer: !process.env.CI,
+    timeout: 180000,
+    env: {
+      PORT: '3000',
+      NEXT_PUBLIC_BACKEND_URL: 'http://localhost:3000',
+      BACKEND_URL: 'http://localhost:3000',
+      E2E_MOCK_AUTH: 'true',
+    },
+  },
 });

@@ -20,6 +20,8 @@ import (
 	"Backend/internal/controllers"
 	"Backend/internal/models"
 	"Backend/internal/services"
+	"Backend/internal/services/admin"
+	"Backend/internal/services/flywheel"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/mock"
@@ -155,7 +157,7 @@ func TestAdminScraperSessionController_SessionDetail_Success(t *testing.T) {
 
 func TestAdminScoreValidationController_GetCorrelation_Success(t *testing.T) {
 	svc := &mocks.ScoreValidationServiceMock{}
-	svc.On("GetCorrelationReport").Return(&services.CorrelationReport{}, nil)
+	svc.On("GetCorrelationReport").Return(&admin.CorrelationReport{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/score-validation/correlation", nil)
 	rec := httptest.NewRecorder()
@@ -185,7 +187,7 @@ func TestAdminScoreValidationController_GetCalibration_Success(t *testing.T) {
 
 func TestAdminScoreValidationController_RunCalibration_Success(t *testing.T) {
 	svc := &mocks.ScoreValidationServiceMock{}
-	svc.On("RunCalibration").Return(&services.CalibrationResult{}, nil)
+	svc.On("RunCalibration").Return(&admin.CalibrationResult{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/score-validation/calibration/run", nil)
 	rec := httptest.NewRecorder()
@@ -195,7 +197,10 @@ func TestAdminScoreValidationController_RunCalibration_Success(t *testing.T) {
 
 func TestAdminScoreValidationController_ListVariants_Success(t *testing.T) {
 	svc := &mocks.ScoreValidationServiceMock{}
-	svc.On("ListExperiments").Return([]string{"exp-a", "exp-b"}, nil)
+	svc.On("ListAllVariants").Return([]models.QuestionVariant{
+		{ExperimentName: "exp-a", VariantName: "control"},
+		{ExperimentName: "exp-b", VariantName: "treatment"},
+	}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/score-validation/variants", nil)
 	rec := httptest.NewRecorder()
@@ -238,7 +243,7 @@ func TestAdminProfileRecalculationController_RecalculateOne_InvalidCompanyID(t *
 
 func TestAdminProfileRecalculationController_RecalculateAll_Success(t *testing.T) {
 	svc := &mocks.ProfileRecalculationServiceMock{}
-	svc.On("RecalculateAll", 0).Return([]*services.RecalculationResult{}, nil)
+	svc.On("RecalculateAll", 0).Return([]*flywheel.RecalculationResult{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/profile-recalculation", nil)
 	rec := httptest.NewRecorder()
@@ -248,7 +253,7 @@ func TestAdminProfileRecalculationController_RecalculateAll_Success(t *testing.T
 
 func TestAdminProfileRecalculationController_RecalculateOne_Success(t *testing.T) {
 	svc := &mocks.ProfileRecalculationServiceMock{}
-	svc.On("RecalculateCompany", uint(1), 0).Return(&services.RecalculationResult{CompanyID: 1}, nil)
+	svc.On("RecalculateCompany", uint(1), 0).Return(&flywheel.RecalculationResult{CompanyID: 1}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/profile-recalculation/1", nil)
 	rec := httptest.NewRecorder()
@@ -289,7 +294,7 @@ func TestAdminProfileRecalculationController_GetHistory_Success(t *testing.T) {
 
 func TestAdminUserController_List_ServiceError(t *testing.T) {
 	repo := &mocks.UserRepositoryMock{}
-	repo.On("ListUsersPaged", 25, 0, "").Return(nil, int64(0), errors.New("db error"))
+	repo.On("ListUsersPaged", 25, 0, "", mock.Anything).Return(nil, int64(0), errors.New("db error"))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
 	rec := httptest.NewRecorder()
@@ -300,7 +305,7 @@ func TestAdminUserController_List_ServiceError(t *testing.T) {
 func TestAdminUserController_List_Success(t *testing.T) {
 	repo := &mocks.UserRepositoryMock{}
 	users := []entity.User{{Email: "user@example.com"}}
-	repo.On("ListUsersPaged", 25, 0, "").Return(users, int64(1), nil)
+	repo.On("ListUsersPaged", 25, 0, "", mock.Anything).Return(users, int64(1), nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
 	rec := httptest.NewRecorder()
@@ -349,13 +354,15 @@ func TestAdminUserController_Update_InvalidTargetLevel(t *testing.T) {
 
 	targetLevel := "invalid"
 	body, _ := json.Marshal(map[string]*string{"target_level": &targetLevel})
-	req := httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body))
+	req := withAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body)), 42)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, controllers.NewAdminUserController(repo, nil).Update, ctx, http.StatusBadRequest)
+	ctrl := controllers.NewAdminUserController(repo, nil)
+	ctrl.SetSchoolService(newUnrestrictedSchoolService(42))
+	assertStatus(t, ctrl.Update, ctx, http.StatusBadRequest)
 	repo.AssertExpectations(t)
 }
 
@@ -369,13 +376,39 @@ func TestAdminUserController_Update_Success(t *testing.T) {
 
 	isAdmin := true
 	body, _ := json.Marshal(map[string]*bool{"is_admin": &isAdmin})
-	req := httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body))
+	req := withAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body)), 42)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, controllers.NewAdminUserController(repo, audit).Update, ctx, http.StatusOK)
+	ctrl := controllers.NewAdminUserController(repo, audit)
+	ctrl.SetSchoolService(newUnrestrictedSchoolService(42))
+	assertStatus(t, ctrl.Update, ctx, http.StatusOK)
 	repo.AssertExpectations(t)
 	audit.AssertExpectations(t)
+}
+
+// #980: school scope制限のあるadminは、担当校外のユーザーを更新できない(403)。
+func TestAdminUserController_Update_SchoolAccessDenied(t *testing.T) {
+	repo := &mocks.UserRepositoryMock{}
+	otherSchoolID := uint(99)
+	user := &entity.User{Email: "user@example.com", SchoolID: &otherSchoolID}
+	repo.On("GetUserByID", uint(1)).Return(user, nil)
+
+	schoolRepo := &mocks.SchoolRepositoryMock{}
+	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
+
+	isAdmin := true
+	body, _ := json.Marshal(map[string]*bool{"is_admin": &isAdmin})
+	req := withAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body)), 42)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	ctx := newCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("1")
+	ctrl := controllers.NewAdminUserController(repo, nil)
+	ctrl.SetSchoolService(services.NewSchoolService(schoolRepo))
+	assertStatus(t, ctrl.Update, ctx, http.StatusForbidden)
+	repo.AssertExpectations(t)
 }

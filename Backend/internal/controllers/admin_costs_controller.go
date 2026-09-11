@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/costs"
 	"Backend/internal/services/interfaces"
 	"net/http"
 	"time"
@@ -12,13 +12,18 @@ import (
 type AdminCostsController struct {
 	costService          interfaces.APICostService
 	realtimeUsageService interfaces.RealtimeUsageService
+	searchBudgetService  interfaces.CompanySearchBudgetService
 }
 
-func NewAdminCostsController(costService interfaces.APICostService, realtimeUsageService interfaces.RealtimeUsageService) *AdminCostsController {
-	return &AdminCostsController{
+func NewAdminCostsController(costService interfaces.APICostService, realtimeUsageService interfaces.RealtimeUsageService, searchBudget ...interfaces.CompanySearchBudgetService) *AdminCostsController {
+	ctrl := &AdminCostsController{
 		costService:          costService,
 		realtimeUsageService: realtimeUsageService,
 	}
+	if len(searchBudget) > 0 {
+		ctrl.searchBudgetService = searchBudget[0]
+	}
+	return ctrl
 }
 
 // Summary handles GET /api/admin/costs/summary
@@ -29,7 +34,7 @@ func (c *AdminCostsController) Summary(ctx echo.Context) error {
 	}
 	realtimeMonthTotal := 0.0
 	activeConnections := int64(0)
-	realtimeUsers := []services.RealtimeUserSummary{}
+	realtimeUsers := []costs.RealtimeUserSummary{}
 	if c.realtimeUsageService != nil {
 		realtimeMonthTotal, err = c.realtimeUsageService.CurrentMonthTotalCost()
 		if err != nil {
@@ -51,7 +56,7 @@ func (c *AdminCostsController) Summary(ctx echo.Context) error {
 		return echoInternalError(err)
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"current_month_cost_usd": monthTotal,
 		"model_breakdown":        modelBreakdown,
 		"realtime": map[string]any{
@@ -59,7 +64,14 @@ func (c *AdminCostsController) Summary(ctx echo.Context) error {
 			"active_connections":     activeConnections,
 			"user_breakdown":         realtimeUsers,
 		},
-	})
+	}
+	if c.searchBudgetService != nil {
+		if status, serr := c.searchBudgetService.Status(); serr == nil {
+			payload["company_search"] = status
+		}
+	}
+
+	return ctx.JSON(http.StatusOK, payload)
 }
 
 // Daily handles GET /api/admin/costs/daily?days=30
@@ -72,7 +84,7 @@ func (c *AdminCostsController) Daily(ctx echo.Context) error {
 	if err != nil {
 		return echoInternalError(err)
 	}
-	realtimeRows := []services.RealtimeDailySummary{}
+	realtimeRows := []costs.RealtimeDailySummary{}
 	if c.realtimeUsageService != nil {
 		realtimeRows, err = c.realtimeUsageService.GetDailyUsage(days)
 		if err != nil {
@@ -95,7 +107,7 @@ func (c *AdminCostsController) Monthly(ctx echo.Context) error {
 	if err != nil {
 		return echoInternalError(err)
 	}
-	realtimeRows := []services.RealtimeMonthlySummary{}
+	realtimeRows := []costs.RealtimeMonthlySummary{}
 	if c.realtimeUsageService != nil {
 		realtimeRows, err = c.realtimeUsageService.GetMonthlyUsage(months)
 		if err != nil {

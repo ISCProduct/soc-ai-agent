@@ -7,6 +7,9 @@ import (
 	"testing"
 
 	"Backend/internal/middleware"
+	"Backend/internal/models"
+	"Backend/internal/services"
+	"Backend/test/controllers/mocks"
 
 	"github.com/labstack/echo/v4"
 )
@@ -17,6 +20,19 @@ var testEcho = echo.New()
 func withUserID(r *http.Request, userID uint) *http.Request {
 	ctx := context.WithValue(r.Context(), middleware.UserIDContextKey, userID)
 	return r.WithContext(ctx)
+}
+
+func withAdminUserID(r *http.Request, adminUserID uint) *http.Request {
+	ctx := context.WithValue(r.Context(), middleware.AdminUserIDContextKey, adminUserID)
+	return r.WithContext(ctx)
+}
+
+// newUnrestrictedSchoolService は担当校未割当(=無制限admin、CanAdminAccessSchoolが常にtrue)の
+// SchoolServiceを返すテスト用ヘルパー(#980/#981/#982/#984)
+func newUnrestrictedSchoolService(adminUserID uint) *services.SchoolService {
+	repo := &mocks.SchoolRepositoryMock{}
+	repo.On("ListSchoolsForAdmin", adminUserID).Return([]models.School{}, nil)
+	return services.NewSchoolService(repo)
 }
 
 // newCtx はリクエストとレコーダーからecho.Contextを生成する

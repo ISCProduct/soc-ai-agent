@@ -8,8 +8,6 @@ import (
 
 	"Backend/internal/models"
 	"Backend/test/controllers/mocks"
-
-	"github.com/stretchr/testify/mock"
 )
 
 func TestAdminCompanyController_Names_ServiceError(t *testing.T) {

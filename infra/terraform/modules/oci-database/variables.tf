@@ -24,7 +24,7 @@ variable "db_admin_password" {
 }
 
 variable "shape_name" {
-  type    = string
-  default = "MySQL.Free"
+  type        = string
+  default     = "MySQL.Free"
   description = "Always Free対応: MySQL.Free"
 }

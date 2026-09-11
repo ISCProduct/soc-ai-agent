@@ -3,7 +3,6 @@ package controllers
 import (
 	ifaces "Backend/internal/services/interfaces"
 	"net/http"
-	"strconv"
 
 	"github.com/labstack/echo/v4"
 )
@@ -27,17 +26,15 @@ func NewIntegratedProfileController(
 	}
 }
 
-// GetProfile GET /api/user/profile?user_id=xxx&session_id=xxx
+// GetProfile GET /api/user/profile?session_id=xxx
+// user_idは認証済みユーザーID(JWT検証済み、EchoUserAuth経由)を使う。
+// 以前はクエリのuser_idを未検証で信頼しており、認証なしで任意ユーザーの
+// プロファイル(面接回数・職務経歴書レビュー状況等)を取得できた。
 func (c *IntegratedProfileController) GetProfile(ctx echo.Context) error {
-	userIDStr := ctx.QueryParam("user_id")
-	if userIDStr == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "user_id is required")
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	userIDParsed, err := strconv.ParseUint(userIDStr, 10, 32)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid user_id")
-	}
-	userID := uint(userIDParsed)
 
 	sessionID := ctx.QueryParam("session_id")
 	if sessionID == "" {

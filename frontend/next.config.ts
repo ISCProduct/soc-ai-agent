@@ -2,6 +2,10 @@ import type { NextConfig } from 'next'
 
 const isDev = process.env.NODE_ENV === 'development'
 
+// クライアントから直接叩くバックエンドのオリジン(headers()はリクエスト時に実行されるため
+// ビルド時焼き込み不要、コンテナのランタイム環境変数をそのまま読める)
+const backendOrigin = process.env.NEXT_PUBLIC_BACKEND_URL || process.env.BACKEND_URL || ''
+
 const securityHeaders = [
   {
     key: 'Content-Security-Policy',
@@ -9,14 +13,17 @@ const securityHeaders = [
       "default-src 'self'",
       // 開発モードでは webpack が eval() を使うため 'unsafe-eval' が必要
       isDev
-        ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
-        : "script-src 'self' 'unsafe-inline'",
-      "style-src 'self' 'unsafe-inline'",
+        ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://va.vercel-scripts.com"
+        : "script-src 'self' 'unsafe-inline' https://va.vercel-scripts.com",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' https://fonts.gstatic.com",
       "img-src 'self' data: https:",
+      // blob: URL の音声/動画再生を許可（AI面接の TTS は blob: 経由で再生。connect-src の blob: では不足）
+      "media-src 'self' blob:",
       // 開発モードでは webpack HMR の WebSocket 接続を許可
       isDev
-        ? "connect-src 'self' http://localhost:* https://api.openai.com ws://localhost:* wss://localhost:*"
-        : "connect-src 'self' https://api.openai.com",
+        ? "connect-src 'self' blob: http://localhost:* https://api.openai.com ws://localhost:* wss://localhost:*"
+        : `connect-src 'self' blob: https://api.openai.com${backendOrigin ? ` ${backendOrigin}` : ''}`,
       "frame-ancestors 'none'",
     ].join('; '),
   },
@@ -26,9 +33,17 @@ const securityHeaders = [
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
 ]
 
+// 面接ページはカメラ・マイクへのアクセスが必要なため Permissions-Policy を上書き
+const interviewPermissionsHeader = {
+  key: 'Permissions-Policy',
+  value: 'camera=(self), microphone=(self), geolocation=()',
+}
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: 'standalone',
+  // zod v4 は ESM-first ("type":"module") のため Webpack が解決できない場合がある
+  transpilePackages: ['zod'],
   // MUI emotion CSS-in-JS のSSR対応
   compiler: {
     emotion: true,
@@ -38,6 +53,14 @@ const nextConfig: NextConfig = {
       {
         source: '/(.*)',
         headers: securityHeaders,
+      },
+      {
+        // 面接ページのみカメラ・マイクを許可（他ページは securityHeaders で引き続き禁止）
+        source: '/interview(.*)',
+        headers: [
+          ...securityHeaders.filter((h) => h.key !== 'Permissions-Policy'),
+          interviewPermissionsHeader,
+        ],
       },
     ]
   },

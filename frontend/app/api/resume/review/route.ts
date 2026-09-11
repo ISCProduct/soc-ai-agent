@@ -1,16 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { buildProxyJsonResponse, buildProxyNetworkErrorResponse } from '@/lib/api-proxy'
+import { buildProxyJsonResponse, buildProxyNetworkErrorResponse, extractUserAuthHeaders } from '@/lib/api-proxy'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
 export const dynamic = 'force-dynamic'
-
-function userHeaders(request: NextRequest): Record<string, string> {
-  return {
-    'X-User-ID': request.headers.get('X-User-ID') || '',
-    'X-User-Token': request.headers.get('X-User-Token') || '',
-  }
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,7 +14,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.text()
-    const headers: Record<string, string> = userHeaders(request)
+    const headers: Record<string, string> = extractUserAuthHeaders(request)
     if (body) {
       headers['Content-Type'] = 'application/json'
     }

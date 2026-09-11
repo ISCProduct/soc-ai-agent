@@ -4,18 +4,20 @@ from typing import List, Dict, Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from export_training_data import apply_mask_to_session, to_openai_chat, to_openai_prompt, iter_examples_from_session
+from export_training_data import apply_mask_to_session, to_openai_prompt, to_outcome_example
 
 
 def register(app: FastAPI) -> None:
     """Register training-related endpoints on the given FastAPI app."""
 
     @app.post("/training/export")
-    async def export_training(request: Request, format: str = "openai_prompt", mask_pii: bool = True):
+    async def export_training(request: Request, mask_pii: bool = True):
         """Accepts a JSON array of sessions and streams JSONL suitable for fine-tuning.
 
+        教師ラベルは選考結果(application_status)のみを使用する。チャットのAI発話・
+        面接/ESの自動採点などAI生成物は蒸留を避けるため一切使用しない。
+
         Query parameters:
-        - format: openai_prompt (prompt/completion) or openai_chat (messages array)
         - mask_pii: whether to apply PII masking (default true)
         """
         try:
@@ -31,15 +33,11 @@ def register(app: FastAPI) -> None:
                 if mask_pii:
                     apply_mask_to_session(session)
 
-                if format == "openai_chat":
-                    obj = to_openai_chat(session)
-                    if not obj.get("messages"):
-                        continue
-                    yield json.dumps(obj, ensure_ascii=False) + "\n"
-                else:
-                    for ex in iter_examples_from_session(session):
-                        obj = to_openai_prompt(ex)
-                        yield json.dumps(obj, ensure_ascii=False) + "\n"
+                ex = to_outcome_example(session)
+                if ex is None:
+                    continue
+                obj = to_openai_prompt(ex)
+                yield json.dumps(obj, ensure_ascii=False) + "\n"
 
         return StreamingResponse(gen(), media_type="application/jsonl")
 
@@ -68,7 +66,7 @@ def register(app: FastAPI) -> None:
             raise HTTPException(status_code=400, detail="invalid output filename")
 
         # import here to avoid circular imports at module load
-        from export_training_data import apply_mask_to_session, iter_examples_from_session, to_openai_prompt
+        from export_training_data import apply_mask_to_session, to_openai_prompt, to_outcome_example
         from training.export_jsonl import to_training_record
         import os
 
@@ -79,15 +77,15 @@ def register(app: FastAPI) -> None:
                 for session in data:
                     if mask_pii:
                         apply_mask_to_session(session)
-                    for ex in iter_examples_from_session(session):
-                        # ex は例 (prompt/completion 等) を示す辞書
-                        rec = to_openai_prompt(ex)
-                        # sanitize via training utilities
-                        rec = to_training_record(rec)
-                        fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-                        written += 1
-                        if limit and written >= limit:
-                            break
+                    ex = to_outcome_example(session)
+                    if ex is None:
+                        continue
+                    # ex は選考結果ラベルのみを持つ example (prompt/completion)
+                    rec = to_openai_prompt(ex)
+                    # sanitize via training utilities
+                    rec = to_training_record(rec)
+                    fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                    written += 1
                     if limit and written >= limit:
                         break
         except Exception as exc:

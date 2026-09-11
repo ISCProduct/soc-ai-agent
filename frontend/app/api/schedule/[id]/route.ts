@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { extractUserAuthHeaders } from '@/lib/api-proxy'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
@@ -7,11 +8,12 @@ export const dynamic = 'force-dynamic'
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const { searchParams } = new URL(request.url)
-    const userId = searchParams.get('user_id')
-    if (!userId) return NextResponse.json({ error: 'user_id is required' }, { status: 400 })
+    const authHeaders = extractUserAuthHeaders(request)
+    if (!authHeaders['X-User-Token']) {
+      return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
+    }
 
-    const res = await fetch(`${BACKEND_URL}/api/schedule/${id}?user_id=${userId}`)
+    const res = await fetch(`${BACKEND_URL}/api/schedule/${id}`, { headers: authHeaders })
     if (!res.ok) {
       const errorText = await res.text()
       return NextResponse.json({ error: errorText.trim() }, { status: res.status })
@@ -30,14 +32,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const { searchParams } = new URL(request.url)
-    const userId = searchParams.get('user_id')
-    if (!userId) return NextResponse.json({ error: 'user_id is required' }, { status: 400 })
+    const authHeaders = extractUserAuthHeaders(request)
+    if (!authHeaders['X-User-Token']) {
+      return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
+    }
 
     const body = await request.text()
-    const res = await fetch(`${BACKEND_URL}/api/schedule/${id}?user_id=${userId}`, {
+    const res = await fetch(`${BACKEND_URL}/api/schedule/${id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body,
     })
     if (!res.ok) {
@@ -58,12 +61,14 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const { searchParams } = new URL(request.url)
-    const userId = searchParams.get('user_id')
-    if (!userId) return NextResponse.json({ error: 'user_id is required' }, { status: 400 })
+    const authHeaders = extractUserAuthHeaders(request)
+    if (!authHeaders['X-User-Token']) {
+      return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
+    }
 
-    const res = await fetch(`${BACKEND_URL}/api/schedule/${id}?user_id=${userId}`, {
+    const res = await fetch(`${BACKEND_URL}/api/schedule/${id}`, {
       method: 'DELETE',
+      headers: authHeaders,
     })
     if (res.status === 204) return new NextResponse(null, { status: 204 })
     if (!res.ok) {

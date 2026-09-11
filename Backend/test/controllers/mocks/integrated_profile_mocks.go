@@ -2,7 +2,7 @@ package mocks
 
 import (
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/flywheel"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -11,12 +11,12 @@ type CrossFeatureServiceMock struct {
 	mock.Mock
 }
 
-func (m *CrossFeatureServiceMock) BuildIntegratedProfile(userID uint, chatSessionID string, interviewCount int, resumeReviewDone bool) (*services.UserIntegratedProfile, error) {
+func (m *CrossFeatureServiceMock) BuildIntegratedProfile(userID uint, chatSessionID string, interviewCount int, resumeReviewDone bool) (*flywheel.UserIntegratedProfile, error) {
 	args := m.Called(userID, chatSessionID, interviewCount, resumeReviewDone)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*services.UserIntegratedProfile), args.Error(1)
+	return args.Get(0).(*flywheel.UserIntegratedProfile), args.Error(1)
 }
 
 type InterviewSessionCounterMock struct {

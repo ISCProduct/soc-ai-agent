@@ -1,0 +1,19 @@
+import { NextRequest, NextResponse } from 'next/server'
+
+const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
+
+export const dynamic = 'force-dynamic'
+
+export async function GET(request: NextRequest) {
+  const company = request.nextUrl.searchParams.get('company') || ''
+  const qs = company ? `?company=${encodeURIComponent(company)}` : ''
+  const res = await fetch(`${BACKEND_URL}/api/admin/vector/status${qs}`, {
+    headers: {
+      'X-Admin-Email': request.headers.get('x-admin-email') || '',
+      'X-Admin-Token': request.headers.get('x-admin-token') || '',
+    },
+    cache: 'no-store',
+  })
+  const data = await res.json()
+  return NextResponse.json(data, { status: res.status })
+}

@@ -1,0 +1,21 @@
+name,industry,segment,website_url,publish
+# Core（例: メガベンチャー / 大手IT / 主要SIer）— 実運用では 200〜300 社に拡張
+株式会社リクルート,情報通信業,core,,true
+株式会社サイバーエージェント,情報通信業,core,,true
+楽天グループ株式会社,情報通信業,core,,true
+LINEヤフー株式会社,情報通信業,core,,true
+株式会社メルカリ,情報通信業,core,,true
+富士通株式会社,情報通信業,core,,true
+日本電気株式会社,情報通信業,core,,true
+株式会社NTTデータ,情報通信業,core,,true
+株式会社野村総合研究所,情報通信業,core,,true
+株式会社日立製作所,情報通信業,core,,true
+# 中小SI / 受託・SES寄り（例）— Year1 は 1,000〜2,000 社規模へ拡張
+株式会社アイエスエフネット,情報サービス・SI,sme_si,,true
+株式会社システムズ,情報サービス・SI,sme_si,,true
+株式会社テクノプロ,情報サービス・SI,sme_si,,true
+パーソルクロステクノロジー株式会社,情報サービス・SI,sme_si,,true
+株式会社エスワイシステム,情報サービス・SI,sme_si,,true
+株式会社フォーラムエンジニアリング,情報サービス・SI,sme_si,,true
+株式会社ユニリタ,情報サービス・SI,sme_si,,true
+株式会社インテック,情報サービス・SI,sme_si,,true

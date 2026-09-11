@@ -4,6 +4,19 @@ This compose overlay adds MCP servers for:
 - pdf-reader-mcp (resume PDF text extraction)
 - brave-search (company research via Brave Search API)
 
+## Notion MCP（ドキュメント同期）
+
+Cursor から Notion にページを作成するには、公式 Notion MCP を接続します。
+
+1. プロジェクトに `.cursor/mcp.json` を配置済み（`https://mcp.notion.com/mcp`）
+2. **Cursor を再起動**
+3. **Settings → MCP** で `notion` が表示されたら **Connect / Needs login** から OAuth 完了
+4. 接続後、チャットで「Notion にドキュメントを作成して」と依頼
+
+作成対象（`docs/notion/`）:
+- `617-redis-rate-limit-jobs.md`
+- `infra-decision-aws-staging-prod.md`
+
 ## Prerequisites
 - Docker + Docker Compose
 - Brave Search API key

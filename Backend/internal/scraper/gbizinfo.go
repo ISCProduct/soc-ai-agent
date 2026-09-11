@@ -14,11 +14,11 @@ import (
 
 // GBizRecord is one entry from the gBizINFO API.
 type GBizRecord struct {
-	CorporateNumber  string `json:"corporate_number"`
-	Name             string `json:"name"`
-	PostalCode       string `json:"postal_code"`
-	Location         string `json:"location"`
-	BusinessSummary  struct {
+	CorporateNumber string `json:"corporate_number"`
+	Name            string `json:"name"`
+	PostalCode      string `json:"postal_code"`
+	Location        string `json:"location"`
+	BusinessSummary struct {
 		MajorClassificationName string `json:"major_classification_name"`
 	} `json:"business_summary"`
 	CompanyURL string `json:"company_url"`

@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24-bullseye AS builder
+FROM golang:1.25-bookworm AS builder
 
 WORKDIR /app
 
@@ -31,13 +31,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=1 go build -ldflags="-s -w" -o /bin/migrate ./cmd/migrate
 
-# Build seed script (optional)
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 go build -ldflags="-s -w" -o /bin/seed-large ./cmd/seed-large
-
 # Runtime stage
-FROM golang:1.24-bullseye
+FROM golang:1.25-bookworm
 
 WORKDIR /app
 
@@ -59,29 +54,42 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     chromium \
     chromium-driver \
+    swig \
+    build-essential \
+    python3-dev \
  && rm -rf /var/lib/apt/lists/*
 
-#
-# NOTE: Hot-reload (air) is omitted to avoid Go toolchain version constraints.
-#
+# Install Air for local Docker Compose hot reload.
+ARG AIR_VERSION=v1.62.0
+RUN go install github.com/air-verse/air@${AIR_VERSION}
 
-# Optional: copy full source for debugging/hot reload
+
+# OCR 依存はソース全体のコピーより前に入れる。
+# ここを後ろに置くと、Go を1行直しただけでも直前の COPY 層が無効化され、
+# PaddleOCR の再インストールと PyMuPDF のソースビルドが毎デプロイで再実行される。
+# scripts/ だけを先にコピーすることで、requirements.txt が変わらない限り層が再利用される。
+#
+# bookworm の pip は PEP 668 で externally-managed のため --break-system-packages が必要。
+# PyMuPDF 1.20.2 は cp311 の wheel を提供しておらず、上で入れた swig / build-essential /
+# python3-dev を使ってソースからビルドされる（paddleocr 2.7.0.3 が PyMuPDF<1.21.0 を要求するため
+# wheel のある新しい PyMuPDF へは上げられない）。#1142 参照。
+COPY scripts/ /app/scripts/
+RUN if [ -d /app/scripts/wheels ] && [ "$(ls -A /app/scripts/wheels)" ]; then \
+      python3 -m pip install --break-system-packages --no-index --find-links=/app/scripts/wheels -r /app/scripts/requirements.txt ; \
+    else \
+      python3 -m pip install --break-system-packages --prefer-binary --default-timeout=600 --retries=8 -r /app/scripts/requirements.txt ; \
+    fi
+
+# 実行時に config/match_reason_templates.json 等を相対パスで読むため、ソース一式が必要。
 COPY --from=builder /app /app
 
 # Copy built binaries
 COPY --from=builder /bin/server /bin/server
 COPY --from=builder /bin/migrate /bin/migrate
-COPY --from=builder /bin/seed-large /bin/seed-large
 
 # Make them executable
-RUN chmod +x /bin/server /bin/migrate /bin/seed-large
+RUN chmod +x /bin/server /bin/migrate
 
-# Install OCR dependencies (use local wheels if provided)
-RUN if [ -d /app/scripts/wheels ] && [ "$(ls -A /app/scripts/wheels)" ]; then \
-      python3 -m pip install --no-index --find-links=/app/scripts/wheels -r /app/scripts/requirements.txt ; \
-    else \
-      python3 -m pip install --prefer-binary --default-timeout=300 --retries=5 -r /app/scripts/requirements.txt ; \
-    fi
 
 EXPOSE 8080
 

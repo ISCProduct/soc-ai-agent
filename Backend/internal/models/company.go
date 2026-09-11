@@ -1,28 +1,41 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 // Company 企業情報
 type Company struct {
-	ID               uint       `gorm:"primaryKey" json:"id"`
-	Name             string     `gorm:"type:varchar(255);not null" json:"name"`
-	NameReading      string     `gorm:"type:varchar(255)" json:"name_reading"` // 企業名の読み仮名（ふりがな）
-	Description      string     `gorm:"type:text" json:"description"`
-	Industry         string     `gorm:"type:varchar(100)" json:"industry"`
-	EmployeeCount    int        `gorm:"default:0" json:"employee_count"`
-	FoundedYear      int        `json:"founded_year"`
-	Location         string     `gorm:"type:varchar(255)" json:"location"`
-	WebsiteURL       string     `gorm:"type:varchar(500)" json:"website_url"`
-	LogoURL          string     `gorm:"type:varchar(500)" json:"logo_url"`
-	CorporateNumber  string     `gorm:"type:varchar(13);index" json:"corporate_number"`
-	SourceType       string     `gorm:"type:varchar(50)" json:"source_type"` // official, job_site, manual
-	SourceURL        string     `gorm:"type:varchar(500)" json:"source_url"`
-	SourceFetchedAt  *time.Time `json:"source_fetched_at,omitempty"`
-	IsProvisional    bool       `gorm:"default:true" json:"is_provisional"`
-	DataStatus       string     `gorm:"type:varchar(20);default:'draft'" json:"data_status"` // draft, published
-	GBizLastSyncedAt *time.Time `json:"gbiz_last_synced_at,omitempty"`
-	GBizSyncStatus   string     `gorm:"type:varchar(20)" json:"gbiz_sync_status"` // success, failed
-	GBizSyncMessage  string     `gorm:"type:text" json:"gbiz_sync_message"`
+	ID                 uint       `gorm:"primaryKey" json:"id"`
+	Name               string     `gorm:"type:varchar(255);not null" json:"name"`
+	NameReading        string     `gorm:"type:varchar(255)" json:"name_reading"` // 企業名の読み仮名（ふりがな）
+	Description        string     `gorm:"type:text" json:"description"`
+	Industry           string     `gorm:"type:varchar(100);index:idx_companies_active_status_industry,priority:3" json:"industry"`
+	EmployeeCount      int        `gorm:"default:0" json:"employee_count"`
+	EmployeeCountBasis string     `gorm:"type:varchar(16);not null;default:''" json:"employee_count_basis,omitempty"` // consolidated|standalone
+	FoundedYear        int        `json:"founded_year"`
+	Location           string     `gorm:"type:varchar(255)" json:"location"`
+	WebsiteURL         string     `gorm:"type:varchar(500)" json:"website_url"`
+	LogoURL            string     `gorm:"type:varchar(500)" json:"logo_url"`
+	CorporateNumber    string     `gorm:"type:varchar(13);index" json:"corporate_number"`
+	SourceType         string     `gorm:"type:varchar(50)" json:"source_type"` // official, job_site, manual, scrape, web_search
+	SourceURL          string     `gorm:"type:varchar(500)" json:"source_url"`
+	SourceFetchedAt    *time.Time `json:"source_fetched_at,omitempty"`
+	IsProvisional      bool       `gorm:"default:true" json:"is_provisional"`
+	DataStatus         string     `gorm:"type:varchar(20);default:'draft';index:idx_companies_active_status_industry,priority:2;index:idx_companies_active_status_id,priority:2" json:"data_status"` // draft, published
+	GBizLastSyncedAt   *time.Time `json:"gbiz_last_synced_at,omitempty"`
+	GBizSyncStatus     string     `gorm:"type:varchar(20)" json:"gbiz_sync_status"` // success, failed
+	GBizSyncMessage    string     `gorm:"type:text" json:"gbiz_sync_message"`
+
+	// #557 フィールド別鮮度・provenance
+	InfoFetchedAt       *time.Time `json:"info_fetched_at,omitempty"`
+	JobsFetchedAt       *time.Time `json:"jobs_fetched_at,omitempty"`
+	TechFetchedAt       *time.Time `json:"tech_fetched_at,omitempty"`
+	RelationsFetchedAt  *time.Time `json:"relations_fetched_at,omitempty"`
+	LastModelUsed       string     `gorm:"type:varchar(64)" json:"last_model_used,omitempty"`
+	LastFetchConfidence string     `gorm:"type:varchar(16)" json:"last_fetch_confidence,omitempty"` // high|medium|low
 
 	// 企業の特徴・文化
 	Culture        string `gorm:"type:text" json:"culture"`            // 企業文化の説明
@@ -41,45 +54,46 @@ type Company struct {
 	FemaleRatio  float64 `json:"female_ratio"`                   // 女性比率（%）
 
 	// 評価・ステータス
-	IsActive   bool `gorm:"default:true" json:"is_active"`
+	IsActive   bool `gorm:"default:true;index:idx_companies_active_status_industry,priority:1;index:idx_companies_active_status_id,priority:1" json:"is_active"`
 	IsVerified bool `gorm:"default:false" json:"is_verified"` // 認証済み企業フラグ
 
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
-	DeletedAt *time.Time `gorm:"index"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 }
 
 // CompanyJobPosition 企業の募集職種
 type CompanyJobPosition struct {
-	ID        uint    `gorm:"primaryKey"`
-	CompanyID uint    `gorm:"not null;index"`
-	Company   Company `gorm:"foreignKey:CompanyID"`
+	ID        uint    `gorm:"primaryKey" json:"id"`
+	CompanyID uint    `gorm:"not null;index" json:"company_id"`
+	Company   Company `gorm:"foreignKey:CompanyID" json:"company"`
 
-	Title         string      `gorm:"type:varchar(255);not null"`
-	Description   string      `gorm:"type:text"`
-	JobCategoryID uint        `gorm:"index"`
-	JobCategory   JobCategory `gorm:"foreignKey:JobCategoryID"`
+	Title         string      `gorm:"type:varchar(255);not null" json:"title"`
+	JobURL        string      `gorm:"type:varchar(500)" json:"job_url"`
+	Description   string      `gorm:"type:text" json:"description"`
+	JobCategoryID uint        `gorm:"index" json:"job_category_id"`
+	JobCategory   JobCategory `gorm:"foreignKey:JobCategoryID" json:"job_category"`
 
 	// 給与情報
-	MinSalary int // 最低年収（万円）
-	MaxSalary int // 最高年収（万円）
+	MinSalary int `json:"min_salary"` // 最低年収（万円）
+	MaxSalary int `json:"max_salary"` // 最高年収（万円）
 
 	// 勤務条件
-	EmploymentType string `gorm:"type:varchar(50)"` // 正社員、契約社員など
-	WorkLocation   string `gorm:"type:varchar(255)"`
-	RemoteOption   bool   `gorm:"default:false"`
+	EmploymentType string `gorm:"type:varchar(50)" json:"employment_type"` // 正社員、契約社員など
+	WorkLocation   string `gorm:"type:varchar(255)" json:"work_location"`
+	RemoteOption   bool   `gorm:"default:false" json:"remote_option"`
 
 	// 必須スキル・歓迎スキル
-	RequiredSkills  string `gorm:"type:text"` // JSON形式
-	PreferredSkills string `gorm:"type:text"` // JSON形式
+	RequiredSkills  string `gorm:"type:text" json:"required_skills"`  // JSON形式
+	PreferredSkills string `gorm:"type:text" json:"preferred_skills"` // JSON形式
 
 	// 募集ステータス
-	IsActive   bool   `gorm:"default:true"`
-	DataStatus string `gorm:"type:varchar(20);default:'draft'" json:"data_status"` // draft, published, rejected
+	IsActive   bool   `gorm:"default:true;index:idx_company_job_positions_active_status,priority:1" json:"is_active"`
+	DataStatus string `gorm:"type:varchar(20);default:'draft';index:idx_company_job_positions_active_status,priority:2" json:"data_status"` // draft, published, rejected
 
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt *time.Time `gorm:"index"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 }
 
 // CompanyWeightProfile 企業の適性プロファイル（10カテゴリの重視度）
@@ -104,6 +118,20 @@ type CompanyWeightProfile struct {
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// CompanyL1WarmRow は L1 温存バッチ用の候補行。
+type CompanyL1WarmRow struct {
+	Company
+	HasWeightProfile bool `json:"has_weight_profile" gorm:"column:has_weight_profile"`
+}
+
+// L1CoverageStats は公開マッチングカタログの L1 充足統計。
+type L1CoverageStats struct {
+	PublishedTotal int64 `json:"published_total"`
+	InfoFresh      int64 `json:"info_fresh"`
+	HasProfile     int64 `json:"has_profile"`
+	NeedsWarm      int64 `json:"needs_warm"`
 }
 
 // UserCompanyMatch ユーザーと企業のマッチング結果
@@ -151,14 +179,20 @@ type UserApplicationStatus struct {
 	Company   Company `gorm:"foreignKey:CompanyID"`
 	MatchID   uint    `gorm:"not null;index"` // UserCompanyMatch との紐付け
 
-	// 選考ステータス
-	// applied: 応募済み / document_passed: 書類通過 / interview: 面接中 /
-	// offered: 内定 / accepted: 内定承諾 / declined: 辞退 / rejected: 不合格
+	// 選考ステータス（ValidStatuses: docs/requirements/application-status-transition.md）
+	// not_applied / applied / document_screening / document_passed /
+	// interview_scheduled / interview_in_progress / offered / accepted /
+	// withdrawn / rejected
 	Status string `gorm:"type:varchar(50);not null;default:'applied'"`
 	Notes  string `gorm:"type:text"` // メモ・備考
 
 	AppliedAt       *time.Time // 応募日
 	StatusUpdatedAt *time.Time // ステータス最終更新日
+
+	// ActiveDedupKey はDB生成列（#1017）。終了状態(withdrawn/rejected/accepted)ではNULLになり、
+	// それ以外は "user_id-company_id" になる。UNIQUE制約により進行中の重複応募をDBレベルで防ぐ。
+	// 読み取り専用（アプリ側から書き込まない）。
+	ActiveDedupKey *string `gorm:"column:active_dedup_key;->"`
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -208,7 +242,7 @@ type CompanyReview struct {
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
-	DeletedAt *time.Time `gorm:"index"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 }
 
 // CompanyBenefit 企業の福利厚生

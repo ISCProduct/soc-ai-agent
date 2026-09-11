@@ -1,23 +1,11 @@
-'use client'
-
-import { LoginPage } from '@/components/login-page'
-import { authService, AuthResponse } from '@/lib/auth'
-import { useRouter } from 'next/navigation'
-import { useEffect } from 'react'
+import { Suspense } from 'react'
+import { LoginContent } from '@/components/login-content'
+import { PageLoading } from '@/components/common/PageLoading'
 
 export default function Login() {
-  const router = useRouter()
-
-  useEffect(() => {
-    const storedUser = authService.getStoredUser()
-    if (storedUser) {
-      router.replace('/')
-    }
-  }, [router])
-
-  const handleAuthSuccess = (authResponse: AuthResponse) => {
-    router.push('/')
-  }
-
-  return <LoginPage onAuthSuccess={handleAuthSuccess} />
+  return (
+    <Suspense fallback={<PageLoading message="ログイン画面を準備しています..." />}>
+      <LoginContent />
+    </Suspense>
+  )
 }

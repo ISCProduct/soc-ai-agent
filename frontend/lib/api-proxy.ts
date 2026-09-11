@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { parseProxyResponse, type ProxyResponseData } from '@/lib/proxy-response'
+import { parseProxyResponse, type ParsedProxyResponse, type ProxyResponseData } from '@/lib/proxy-response'
+import { looksLikeHtml, userFacingApiMessage } from '@/lib/user-facing-error'
 
 export interface ProxyErrorBody {
   error: string
@@ -15,16 +16,17 @@ function getString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined
 }
 
-function getErrorText(data: ProxyResponseData): string {
-  return getString(data.error) ?? getString(data.message) ?? 'Upstream API error'
+function isProxyErrorObject(data: ParsedProxyResponse): data is ProxyResponseData {
+  return !!data && typeof data === 'object' && !Array.isArray(data)
 }
 
-function getDetailText(data: ProxyResponseData, raw: string): string | undefined {
-  const detail =
-    getString(data.detail) ??
-    getString(data.details) ??
-    getString(data.message) ??
-    getString(raw)
+function getDetailText(data: ParsedProxyResponse, raw: string): string | undefined {
+  const detail = isProxyErrorObject(data)
+    ? getString(data.detail) ??
+      getString(data.details) ??
+      getString(data.message) ??
+      getString(raw)
+    : getString(raw)
   return detail
 }
 
@@ -32,8 +34,10 @@ export function extractUserAuthHeaders(request: NextRequest): Record<string, str
   const headers: Record<string, string> = {}
   const xUserId = request.headers.get('X-User-ID')
   const xUserToken = request.headers.get('X-User-Token')
+  const xTenantSlug = request.headers.get('X-Tenant-Slug')
   if (xUserId) headers['X-User-ID'] = xUserId
   if (xUserToken) headers['X-User-Token'] = xUserToken
+  if (xTenantSlug) headers['X-Tenant-Slug'] = xTenantSlug
   return headers
 }
 
@@ -45,12 +49,13 @@ export async function buildProxyJsonResponse(response: Response): Promise<NextRe
     return NextResponse.json(data, { status: response.status })
   }
 
-  const error = getErrorText(data)
-  const detail = getDetailText(data, raw)
+  const rawForUser = looksLikeHtml(raw) ? '' : raw
+  const error = userFacingApiMessage(response.status, raw)
+  const detail = looksLikeHtml(raw) ? undefined : getDetailText(data, rawForUser)
   const body: ProxyErrorBody = {
     error,
     status: response.status,
-    ...(detail && detail !== error ? { detail } : {}),
+    ...(detail && detail !== error && !looksLikeHtml(detail) ? { detail } : {}),
   }
   return NextResponse.json(body, { status: response.status })
 }

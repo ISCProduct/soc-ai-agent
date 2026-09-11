@@ -1,0 +1,59 @@
+name: Close fixed issues on main
+
+# mainブランチはfeature/* -> develop -> release -> main と複数回マージを経由するため、
+# GitHub標準の "Fixes #N" 自動クローズ(defaultブランチへの直接マージのみ発火)が
+# 効かないことがある。mainにpushされた分のコミットメッセージを直接スキャンして、
+# Fixes/Closes/Resolves #N が含まれていれば該当issueを明示的にクローズする。
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  close-fixed-issues:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Close issues referenced by newly merged commits
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.event.after }}"
+
+          # 新規ブランチ作成直後などbeforeが全0の場合は今回のコミット1件のみを対象にする
+          if [[ "$BEFORE" =~ ^0+$ ]]; then
+            RANGE="$AFTER"
+          else
+            RANGE="$BEFORE..$AFTER"
+          fi
+
+          ISSUE_NUMBERS=$(git log --format=%B "$RANGE" \
+            | grep -ioE '(close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]+#[0-9]+' \
+            | grep -oE '[0-9]+' \
+            | sort -u)
+
+          if [ -z "$ISSUE_NUMBERS" ]; then
+            echo "クローズ対象の参照(Fixes/Closes/Resolves #N)なし"
+            exit 0
+          fi
+
+          for num in $ISSUE_NUMBERS; do
+            STATE=$(gh issue view "$num" --json state --jq .state 2>/dev/null || echo "NOT_FOUND")
+            if [ "$STATE" == "OPEN" ]; then
+              gh issue close "$num" --comment "mainへのマージにより自動クローズしました($GITHUB_SHA)。"
+              echo "closed #$num"
+            else
+              echo "#$num は対象外(state=$STATE)"
+            fi
+          done

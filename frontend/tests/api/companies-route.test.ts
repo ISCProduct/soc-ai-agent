@@ -36,6 +36,6 @@ describe('GET /api/companies', () => {
     const data = await response.json()
 
     expect(response.status).toBe(502)
-    expect(data).toEqual({ error: 'Failed to fetch companies from backend' })
+    expect(data).toMatchObject({ error: expect.any(String), status: 502 })
   })
 })

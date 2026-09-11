@@ -1,8 +1,8 @@
 package controllers
 
 import (
-	"Backend/internal/services"
 	"Backend/internal/services/interfaces"
+	"Backend/internal/services/shared"
 	"errors"
 	"log"
 	"mime/multipart"
@@ -19,6 +19,22 @@ type ResumeController struct {
 
 func NewResumeController(resumeService interfaces.ResumeService) *ResumeController {
 	return &ResumeController{resumeService: resumeService}
+}
+
+// Status は認証中のユーザー自身の履歴書対応要否を返す(#1030)。
+// 他人のIDは受け付けない(クエリを取らず、トークンのIDだけを使う)。
+func (c *ResumeController) Status(ctx echo.Context) error {
+	userID, ok := echoUserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
+	}
+	status, err := c.resumeService.GetResumeStatus(userID)
+	if err != nil {
+		// 全ユーザーがホーム画面表示のたびに叩くため、DB劣化時は500が大量に出る。
+		// 原因追跡の起点を残す(他ハンドラと同じ echoInternalError を使う)。
+		return echoInternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, status)
 }
 
 func (c *ResumeController) Upload(ctx echo.Context) error {
@@ -55,6 +71,10 @@ func (c *ResumeController) Upload(ctx echo.Context) error {
 
 	result, err := c.resumeService.Upload(uint(userID), sessionID, sourceType, sourceURL, fileHeader)
 	if err != nil {
+		var ve *shared.ValidationError
+		if errors.As(err, &ve) {
+			return echo.NewHTTPError(http.StatusUnprocessableEntity, ve.Message)
+		}
 		return echoInternalError(err)
 	}
 
@@ -75,7 +95,7 @@ func (c *ResumeController) Review(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "user_id is required")
 	}
 	if err := c.resumeService.EnsureDocumentOwner(uint(docID), userID); err != nil {
-		if errors.Is(err, services.ErrForbidden) {
+		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
 		return echoInternalError(err)
@@ -99,10 +119,10 @@ func (c *ResumeController) Review(ctx echo.Context) error {
 	review, items, err := c.resumeService.ReviewDocument(uint(docID), userID, payload.CompanyName, payload.JobTitle, payload.CandidateType)
 	if err != nil {
 		log.Printf("resume_review: failed document_id=%d err=%v", docID, err)
-		if errors.Is(err, services.ErrForbidden) {
+		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
-		var ve *services.ValidationError
+		var ve *shared.ValidationError
 		if errors.As(err, &ve) {
 			return echo.NewHTTPError(http.StatusUnprocessableEntity, ve.Message)
 		}
@@ -130,7 +150,7 @@ func (c *ResumeController) ReviewStream(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "user_id is required")
 	}
 	if err := c.resumeService.EnsureDocumentOwner(uint(docID), userID); err != nil {
-		if errors.Is(err, services.ErrForbidden) {
+		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
 		return echoInternalError(err)
@@ -176,7 +196,7 @@ func (c *ResumeController) Annotated(ctx echo.Context) error {
 
 	file, err := c.resumeService.OpenAnnotatedFile(uint(docID), userID)
 	if err != nil {
-		if errors.Is(err, services.ErrForbidden) {
+		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())

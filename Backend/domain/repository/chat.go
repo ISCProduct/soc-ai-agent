@@ -51,6 +51,8 @@ type ConversationContextRepository interface {
 	GetOrCreate(userID uint, sessionID string) (*models.ConversationContext, error)
 	SetJobCategoryID(userID uint, sessionID string, jobCategoryID uint) error
 	GetJobCategoryID(sessionID string) (uint, error)
+	// SetSessionSummary はセッション単位で LLM による診断サマリを保存します。
+	SetSessionSummary(userID uint, sessionID string, summary string) error
 }
 
 // SessionValidationRepository はセッション検証情報の永続化インターフェース。

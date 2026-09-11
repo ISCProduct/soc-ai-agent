@@ -1,6 +1,9 @@
 import { BACKEND_URL } from './backend-url'
+import { authService } from './auth'
+import { fetchWithTimeout, LIST_FETCH_TIMEOUT_MS } from './fetch-timeout'
+import { extractApiErrorMessage } from './interview-utils'
 
-const DEFAULT_INTERVIEW_MAX_MINUTES = 10
+const DEFAULT_INTERVIEW_MAX_MINUTES = 30
 const DEFAULT_INTERVIEW_QUESTION_DURATION_SECONDS = 180
 
 export type InterviewSession = {
@@ -86,99 +89,108 @@ export type PhraseSuggestion = {
   suggestions: string[]
 }
 
+async function interviewFetch(input: string, init?: RequestInit, timeoutMs?: number): Promise<Response> {
+  await authService.ensureFreshUserToken()
+  const headers = new Headers(init?.headers)
+  const authHeaders = authService.getUserFetchHeaders()
+  Object.entries(authHeaders).forEach(([k, v]) => headers.set(k, v))
+  const next = { ...init, headers }
+  return timeoutMs ? fetchWithTimeout(input, next, timeoutMs) : fetch(input, next)
+}
+
 export const interviewApi = {
   async createSession(userId: number, language = 'ja', interviewerGender?: string): Promise<InterviewSession> {
-    const res = await fetch(`${BACKEND_URL}/api/interviews`, {
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId, language, interviewer_gender: interviewerGender }),
     })
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
   async startSession(sessionId: number, userId: number): Promise<InterviewSession> {
-    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/start`, {
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId }),
     })
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
   async finishSession(sessionId: number, userId: number): Promise<InterviewSession> {
-    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/finish`, {
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/finish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId }),
     })
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
   async saveUtterance(sessionId: number, userId: number, role: 'user' | 'ai', text: string): Promise<void> {
-    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/utterances`, {
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/utterances`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId, role, text }),
     })
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
   },
 
   async getDetail(sessionId: number, userId: number, role?: string): Promise<InterviewDetail> {
     const roleParam = role ? `&role=${role}` : ''
-    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}?user_id=${userId}${roleParam}`)
-    if (!res.ok) throw new Error(await res.text())
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}?user_id=${userId}${roleParam}`, undefined, LIST_FETCH_TIMEOUT_MS)
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
   async getReport(sessionId: number, userId: number): Promise<InterviewReport | null> {
-    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/report?user_id=${userId}`)
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/report?user_id=${userId}`)
     if (res.status === 404) return null
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
   async listSessions(userId: number, page = 1, limit = 20): Promise<{ sessions: InterviewSession[]; total: number }> {
-    const res = await fetch(`${BACKEND_URL}/api/interviews?user_id=${userId}&page=${page}&limit=${limit}`)
-    if (!res.ok) throw new Error(await res.text())
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews?user_id=${userId}&page=${page}&limit=${limit}`, undefined, LIST_FETCH_TIMEOUT_MS)
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
   async createRealtimeToken(userId: number, interviewId: number): Promise<string> {
-    const res = await fetch(`${BACKEND_URL}/api/realtime/token`, {
+    const res = await interviewFetch(`${BACKEND_URL}/api/realtime/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId, interview_id: interviewId }),
     })
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     const data = await res.json()
     return data.client_secret
   },
 
   async getPhraseSuggestions(sessionId: number, userId: number): Promise<PhraseSuggestion[]> {
-    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/phrase-suggestions?user_id=${userId}`)
-    if (!res.ok) throw new Error(await res.text())
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/phrase-suggestions?user_id=${userId}`, undefined, LIST_FETCH_TIMEOUT_MS)
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     const data = await res.json()
     return data.suggestions as PhraseSuggestion[]
   },
 
   async getTrend(userId: number, limit = 0): Promise<InterviewTrendPoint[]> {
     const params = limit > 0 ? `?user_id=${userId}&limit=${limit}` : `?user_id=${userId}`
-    const res = await fetch(`${BACKEND_URL}/api/interviews/trend${params}`)
-    if (!res.ok) throw new Error(await res.text())
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/trend${params}`, undefined, LIST_FETCH_TIMEOUT_MS)
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     const data = await res.json()
     return data.points as InterviewTrendPoint[]
   },
 
   async sendReportEmail(sessionId: number, userId: number): Promise<{ message: string }> {
-    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/send-report`, {
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/send-report`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId }),
     })
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
@@ -189,12 +201,22 @@ export const interviewApi = {
     onProgress?: (percent: number) => void,
   ): Promise<{ video_id: number; status: string }> {
     return new Promise((resolve, reject) => {
+      void (async () => {
+        try {
+          await authService.ensureFreshUserToken()
+        } catch (e) {
+          reject(e instanceof Error ? e : new Error(String(e)))
+          return
+        }
+
       const form = new FormData()
       form.append('user_id', String(userId))
       form.append('video', blob, `interview_${sessionId}.webm`)
 
       const xhr = new XMLHttpRequest()
       xhr.open('POST', `${BACKEND_URL}/api/interviews/${sessionId}/upload-video`)
+      const userHeaders = authService.getUserFetchHeaders()
+      Object.entries(userHeaders).forEach(([k, v]) => xhr.setRequestHeader(k, v))
 
       if (onProgress) {
         xhr.upload.onprogress = (e) => {
@@ -215,6 +237,7 @@ export const interviewApi = {
       xhr.ontimeout = () => reject(new Error('アップロードがタイムアウトしました'))
       xhr.timeout = 30 * 60 * 1000 // 30分
       xhr.send(form)
+      })()
     })
   },
 }

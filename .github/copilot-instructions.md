@@ -24,5 +24,6 @@
 - Docker: `docker compose up -d`（必要に応じて `--profile rag`）
 
 ## レビュー観点
+- **必須:** 変更領域の lint（FE: `npm run lint` / BE: `go vet` 等）が通っていることを確認する。未確認・失敗はマージブロッカー。
 - 仕様との整合性、型安全性、エラーハンドリング、既存テストへの影響を重視する。
 - 関連ドキュメント（README / docs/wiki）を必要に応じて更新する。

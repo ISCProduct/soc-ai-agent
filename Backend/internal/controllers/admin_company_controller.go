@@ -2,58 +2,137 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/companyfetch"
 	"Backend/internal/models"
 	"Backend/internal/openai"
-	"Backend/internal/services"
+	"Backend/internal/services/company"
+	"Backend/internal/services/gbizinfo"
 	ifaces "Backend/internal/services/interfaces"
-	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"gorm.io/gorm"
 )
 
 type AdminCompanyController struct {
-	repo         repository.CompanyRepository
-	audit        ifaces.AuditLogService
-	gbiz         *services.GBizInfoService
-	openaiClient *openai.Client
+	repo             repository.CompanyRepository
+	audit            ifaces.AuditLogService
+	gbiz             *gbizinfo.GBizInfoService
+	openaiClient     *openai.Client
+	infoFetcher      *company.CompanyInfoFetcher
+	relationsFetcher *company.CompanyRelationsFetcher
+	jobFetcher       *company.JobFetchService
+	techFetcher      *company.TechStackFetcher
+	catalogWarm      *company.CatalogWarmService
+	missingBatch     *company.CompanyMissingBatchService
 }
 
-func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.AuditLogService, gbiz *services.GBizInfoService, openaiClient ...*openai.Client) *AdminCompanyController {
+func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.AuditLogService, gbiz *gbizinfo.GBizInfoService, openaiClient ...*openai.Client) *AdminCompanyController {
 	ctrl := &AdminCompanyController{repo: repo, audit: audit, gbiz: gbiz}
 	if len(openaiClient) > 0 {
 		ctrl.openaiClient = openaiClient[0]
+		ctrl.infoFetcher = company.NewCompanyInfoFetcher(repo, openaiClient[0], gbiz)
+		ctrl.jobFetcher = company.NewJobFetchService(repo, openaiClient[0])
+		ctrl.techFetcher = company.NewTechStackFetcher(repo, openaiClient[0])
+		ctrl.catalogWarm = company.NewCatalogWarmService(repo, ctrl.infoFetcher, ctrl.jobFetcher)
+		ctrl.missingBatch = company.NewCompanyMissingBatchService(
+			repo, ctrl.infoFetcher, ctrl.jobFetcher, ctrl.techFetcher, nil,
+		)
 	}
 	return ctrl
 }
 
+// SetRelationsFetcher は企業関係・市場情報取得サービスを注入する（#633 Phase 2）。
+func (c *AdminCompanyController) SetRelationsFetcher(fetcher *company.CompanyRelationsFetcher) {
+	if c != nil {
+		c.relationsFetcher = fetcher
+		if c.missingBatch != nil || c.infoFetcher != nil {
+			c.missingBatch = company.NewCompanyMissingBatchService(
+				c.repo, c.infoFetcher, c.jobFetcher, c.techFetcher, fetcher,
+			)
+		}
+	}
+}
+
+// SetCompanySearchGuards は FirstTouch Search の予算・singleflight を注入する（#587）。
+func (c *AdminCompanyController) SetCompanySearchGuards(budget companyfetch.SearchBudget, flight *company.CompanySearchFlight) {
+	if c == nil {
+		return
+	}
+	if c.infoFetcher != nil {
+		c.infoFetcher.SetSearchBudget(budget)
+		c.infoFetcher.SetSearchFlight(flight)
+	}
+	if c.jobFetcher != nil {
+		c.jobFetcher.SetSearchBudget(budget)
+		c.jobFetcher.SetSearchFlight(flight)
+	}
+	if c.techFetcher != nil {
+		c.techFetcher.SetSearchBudget(budget)
+		c.techFetcher.SetSearchFlight(flight)
+	}
+	if c.relationsFetcher != nil {
+		c.relationsFetcher.SetSearchBudget(budget)
+		c.relationsFetcher.SetSearchFlight(flight)
+	}
+}
+
 // List GET /api/admin/companies
 func (c *AdminCompanyController) List(ctx echo.Context) error {
+	const maxListLimit = 200
 	limit := 50
 	offset := 0
 	if v, err := strconv.Atoi(ctx.QueryParam("limit")); err == nil && v > 0 {
-		limit = v
+		limit = min(v, maxListLimit)
 	}
 	if v, err := strconv.Atoi(ctx.QueryParam("offset")); err == nil && v >= 0 {
 		offset = v
 	}
-	companies, err := c.repo.FindAllActive(limit, offset)
+	name := strings.TrimSpace(ctx.QueryParam("name"))
+	status := strings.TrimSpace(ctx.QueryParam("status"))
+	industry := strings.TrimSpace(ctx.QueryParam("industry"))
+	readiness := strings.TrimSpace(ctx.QueryParam("readiness"))
+	orderBy := strings.TrimSpace(ctx.QueryParam("order"))
+	// 企業カタログは共有のため school_id は「承認済みだけ見る」任意の絞り込み(閲覧制限ではない)。
+	var schoolID *uint
+	if raw := ctx.QueryParam("school_id"); raw != "" {
+		if id, err := strconv.ParseUint(raw, 10, 64); err == nil {
+			v := uint(id)
+			schoolID = &v
+		}
+	}
+	companies, total, err := c.repo.ListActiveFiltered(limit, offset, name, status, industry, readiness, orderBy, schoolID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch companies")
 	}
-	total, _ := c.repo.CountActive()
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"companies": companies,
 		"total":     total,
 		"limit":     limit,
 		"offset":    offset,
+		"name":      name,
+		"status":    status,
+		"industry":  industry,
+		"readiness": readiness,
+		"order":     orderBy,
 	})
+}
+
+// Industries GET /api/admin/companies/industries
+// アクティブ企業に付いている業界名の一覧を返す（絞り込み用）。
+func (c *AdminCompanyController) Industries(ctx echo.Context) error {
+	industries, err := c.repo.ListActiveIndustries()
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch industries")
+	}
+	if industries == nil {
+		industries = []string{}
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{"industries": industries})
 }
 
 // Create POST /api/admin/companies
@@ -66,6 +145,11 @@ func (c *AdminCompanyController) Create(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
 	}
 	applyCompanyDefaults(&payload)
+	// AI プレビュー経由で作成した場合は取得メタを残し、公開後も再取得判断できるようにする
+	if strings.TrimSpace(payload.LastModelUsed) != "" && payload.InfoFetchedAt == nil {
+		now := time.Now()
+		payload.InfoFetchedAt = &now
+	}
 	if err := c.repo.Create(&payload); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create company")
 	}
@@ -123,14 +207,39 @@ func (c *AdminCompanyController) Publish(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
 	}
-	company, err := c.repo.FindByID(uint(id))
+	companyID := uint(id)
+	company, err := c.repo.FindByID(companyID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "company not found")
+	}
+	profile, err := c.repo.GetWeightProfile(companyID, nil)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return echo.NewHTTPError(http.StatusBadRequest, "weight profile is required before publish")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load weight profile")
+	}
+	if profile == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "weight profile is required before publish")
 	}
 	company.DataStatus = "published"
 	company.IsProvisional = false
 	if err := c.repo.Update(company); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to publish company")
+	}
+	cid := companyID
+	jobs, err := c.repo.ListJobPositions(&cid, nil, 1000)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list job positions")
+	}
+	for i := range jobs {
+		if jobs[i].DataStatus != "draft" {
+			continue
+		}
+		jobs[i].DataStatus = "published"
+		if err := c.repo.UpdateJobPosition(&jobs[i]); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to publish job positions")
+		}
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
 	c.audit.Record(actor, "company.publish", "company", company.ID, map[string]any{
@@ -196,95 +305,6 @@ func (c *AdminCompanyController) SyncGBiz(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, result)
 }
 
-// FetchTechStack POST /api/admin/companies/:id/tech-stack-search
-// OpenAI WebSearchで企業の技術スタックを取得してDBを更新する
-func (c *AdminCompanyController) FetchTechStack(ctx echo.Context) error {
-	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
-	}
-	if c.openaiClient == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "openai client not configured")
-	}
-	company, err := c.repo.FindByID(uint(id))
-	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "company not found")
-	}
-
-	prompt := fmt.Sprintf(
-		`「%s」という日本のIT企業の技術スタックを調査してください。以下のJSON形式のみで回答してください（余分な説明は不要）。
-{
-  "tech_stack": ["言語・フレームワーク名（例: Go, React, TypeScript）"],
-  "infra_stack": ["インフラ名（例: AWS, GCP, Azure, オンプレ）"],
-  "cicd_tools": ["CI/CDツール名（例: GitHub Actions, Jenkins, CircleCI）"],
-  "development_style": "開発手法（例: スクラム, ウォーターフォール, カンバン）"
-}`,
-		company.Name,
-	)
-
-	reqCtx, cancel := context.WithTimeout(ctx.Request().Context(), 30*time.Second)
-	defer cancel()
-
-	text, err := c.openaiClient.WebSearchQuery(reqCtx, prompt)
-	if err != nil {
-		return echoInternalError(err)
-	}
-
-	// JSON部分を抽出
-	start := strings.Index(text, "{")
-	end := strings.LastIndex(text, "}")
-	if start == -1 || end == -1 || end <= start {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to parse web search response")
-	}
-
-	type techStackResult struct {
-		TechStack        []string `json:"tech_stack"`
-		InfraStack       []string `json:"infra_stack"`
-		CicdTools        []string `json:"cicd_tools"`
-		DevelopmentStyle string   `json:"development_style"`
-	}
-	var result techStackResult
-	if err := json.Unmarshal([]byte(text[start:end+1]), &result); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to parse tech stack json")
-	}
-
-	// JSON配列をシリアライズしてDBに保存
-	if len(result.TechStack) > 0 {
-		if b, err := json.Marshal(result.TechStack); err == nil {
-			company.TechStack = string(b)
-		}
-	}
-	if len(result.InfraStack) > 0 {
-		if b, err := json.Marshal(result.InfraStack); err == nil {
-			company.InfraStack = string(b)
-		}
-	}
-	if len(result.CicdTools) > 0 {
-		if b, err := json.Marshal(result.CicdTools); err == nil {
-			company.CicdTools = string(b)
-		}
-	}
-	if result.DevelopmentStyle != "" {
-		company.DevelopmentStyle = result.DevelopmentStyle
-	}
-
-	if err := c.repo.Update(company); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update company")
-	}
-
-	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.tech_stack_search", "company", company.ID, map[string]any{
-		"name": company.Name,
-	})
-
-	return ctx.JSON(http.StatusOK, map[string]any{
-		"tech_stack":        result.TechStack,
-		"infra_stack":       result.InfraStack,
-		"cicd_tools":        result.CicdTools,
-		"development_style": result.DevelopmentStyle,
-	})
-}
-
 func applyCompanyDefaults(company *models.Company) {
 	if strings.TrimSpace(company.SourceType) == "" {
 		company.SourceType = "manual"
@@ -319,6 +339,9 @@ func mergeCompany(existing *models.Company, payload *models.Company) error {
 	}
 	if payload.EmployeeCount > 0 {
 		existing.EmployeeCount = payload.EmployeeCount
+	}
+	if basis := models.NormalizeEmployeeCountBasis(payload.EmployeeCountBasis); basis != "" {
+		existing.EmployeeCountBasis = basis
 	}
 	if payload.FoundedYear > 0 {
 		existing.FoundedYear = payload.FoundedYear

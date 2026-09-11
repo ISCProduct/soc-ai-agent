@@ -2,7 +2,7 @@ package mocks
 
 import (
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/flywheel"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -12,18 +12,18 @@ type ProfileRecalculationServiceMock struct {
 	mock.Mock
 }
 
-func (m *ProfileRecalculationServiceMock) RecalculateAll(minSamples int) ([]*services.RecalculationResult, error) {
+func (m *ProfileRecalculationServiceMock) RecalculateAll(minSamples int) ([]*flywheel.RecalculationResult, error) {
 	args := m.Called(minSamples)
 	if v := args.Get(0); v != nil {
-		return v.([]*services.RecalculationResult), args.Error(1)
+		return v.([]*flywheel.RecalculationResult), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
 
-func (m *ProfileRecalculationServiceMock) RecalculateCompany(companyID uint, minSamples int) (*services.RecalculationResult, error) {
+func (m *ProfileRecalculationServiceMock) RecalculateCompany(companyID uint, minSamples int) (*flywheel.RecalculationResult, error) {
 	args := m.Called(companyID, minSamples)
 	if v := args.Get(0); v != nil {
-		return v.(*services.RecalculationResult), args.Error(1)
+		return v.(*flywheel.RecalculationResult), args.Error(1)
 	}
 	return nil, args.Error(1)
 }

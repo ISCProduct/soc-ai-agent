@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { extractUserAuthHeaders } from '@/lib/api-proxy'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url)
-  const userId = searchParams.get('user_id')
-  if (!userId) return NextResponse.json({ error: 'user_id is required' }, { status: 400 })
+  const authHeaders = extractUserAuthHeaders(request)
+  if (!authHeaders['X-User-Token']) {
+    return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
+  }
 
-  const res = await fetch(`${BACKEND_URL}/api/schedule/export/ics?user_id=${userId}`)
+  const res = await fetch(`${BACKEND_URL}/api/schedule/export/ics`, { headers: authHeaders })
   if (!res.ok) {
     return NextResponse.json({ error: 'Export failed' }, { status: res.status })
   }

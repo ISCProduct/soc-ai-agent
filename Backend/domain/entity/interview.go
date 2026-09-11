@@ -37,8 +37,8 @@ func (s *InterviewSession) Duration() *time.Duration {
 
 // InterviewReport 面接レポートエンティティ
 type InterviewReport struct {
-	SessionID   uint
-	SummaryText string
-	ScoresJSON  string
+	SessionID    uint
+	SummaryText  string
+	ScoresJSON   string
 	EvidenceJSON string
 }

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/services/interfaces"
 	"net/http"
@@ -54,7 +55,15 @@ func (c *AdminJobController) JobPositions(ctx echo.Context) error {
 			limit = v
 		}
 	}
-	positions, err := c.companyRepo.ListJobPositions(companyID, limit)
+	// 求人カタログは共有のため school_id は「承認済み企業の求人だけ見る」任意の絞り込み(閲覧制限ではない)。
+	var jobSchoolID *uint
+	if raw := strings.TrimSpace(ctx.QueryParam("school_id")); raw != "" {
+		if id, err := strconv.ParseUint(raw, 10, 64); err == nil {
+			v := uint(id)
+			jobSchoolID = &v
+		}
+	}
+	positions, err := c.companyRepo.ListJobPositions(companyID, jobSchoolID, limit)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch job positions")
 	}
@@ -76,6 +85,17 @@ func (c *AdminJobController) CreateJobPosition(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "job_category_id is required")
 	}
 	payload.IsActive = true
+	// 求人の公開状態は所属企業に合わせる。
+	// DBデフォルトの draft のままだと、公開済み企業に管理者が求人を足しても
+	// 学生側のクエリ(data_status='published')に乗らず、別途 publish 操作が要る（#1074）。
+	//
+	// エラーを握り潰すと継承がスキップされて draft で作られ、
+	// 「公開済み企業に足したのに学生に出ない」が無言で再発する。
+	company, err := c.companyRepo.FindByID(payload.CompanyID)
+	if err != nil || company == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "company not found")
+	}
+	payload.DataStatus = company.DataStatus
 	if err := c.companyRepo.CreateJobPosition(&payload); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create job position")
 	}
@@ -103,6 +123,12 @@ func (c *AdminJobController) JobPositionAction(ctx echo.Context) error {
 	actor := ctx.Request().Header.Get("X-Admin-Email")
 	switch action {
 	case "publish":
+		// 企業が未公開のまま求人を publish しても学生側クエリで弾かれるが、
+		// ここでは止めない。63031830 で「FE が警告したうえで通す」という
+		// 製品判断が既に入っており（job-positions/page-content.tsx の確認ダイアログ）、
+		// サーバ側だけ 409 にすると「続行しますか？」に OK しても必ず失敗する
+		// 死んだ UI になるため。企業を公開すれば draft の求人はまとめて
+		// published になるので、実害も無い。
 		position.DataStatus = "published"
 		position.IsActive = true
 	case "reject":
@@ -112,7 +138,7 @@ func (c *AdminJobController) JobPositionAction(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "unknown action")
 	}
 	if err := c.companyRepo.UpdateJobPosition(position); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update")
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update job position")
 	}
 	c.audit.Record(actor, "job_position."+action, "company_job_position", position.ID, map[string]any{
 		"data_status": position.DataStatus,
@@ -135,7 +161,8 @@ func (c *AdminJobController) GraduateEmployments(ctx echo.Context) error {
 			limit = v
 		}
 	}
-	entries, err := c.graduateRepo.List(companyID, limit)
+	schoolID, _ := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
+	entries, err := c.graduateRepo.List(companyID, schoolID, limit)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch graduate employments")
 	}

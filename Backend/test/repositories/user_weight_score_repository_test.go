@@ -38,6 +38,9 @@ func newScoreRepoTestDB(t *testing.T) (*repositories.UserWeightScoreRepository, 
 func TestSetScore_CreatesNewRecord(t *testing.T) {
 	repo, mock := newScoreRepoTestDB(t)
 
+	mock.ExpectQuery("SELECT `organization_id` FROM `users` WHERE id = \\?").
+		WithArgs(uint(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"organization_id"}).AddRow(1))
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO `user_weight_scores`").
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -94,6 +97,9 @@ func TestAddScore_RecordNotFound(t *testing.T) {
 func TestSetScore_SemanticSeparation(t *testing.T) {
 	repo, mock := newScoreRepoTestDB(t)
 
+	mock.ExpectQuery("SELECT `organization_id` FROM `users` WHERE id = \\?").
+		WithArgs(uint(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"organization_id"}).AddRow(1))
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO `user_weight_scores`").
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -103,6 +109,28 @@ func TestSetScore_SemanticSeparation(t *testing.T) {
 		t.Errorf("SetScore returned error: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("SetScore が SELECT を発行した（予期しないクエリ）: %v", err)
+		t.Errorf("SetScore expectations: %v", err)
+	}
+}
+
+// TestAddScore_ClampsToZeroOneHundred は加算結果が 0〜100 に丸められることを検証する
+func TestAddScore_ClampsToZeroOneHundred(t *testing.T) {
+	repo, mock := newScoreRepoTestDB(t)
+
+	mock.ExpectQuery("SELECT \\* FROM `user_weight_scores` WHERE").
+		WithArgs(uint(1), "session-1", "技術志向", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "session_id", "weight_category", "score"}).
+			AddRow(10, 1, "session-1", "技術志向", 95))
+
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `user_weight_scores`").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	if err := repo.AddScore(1, "session-1", "技術志向", 20); err != nil {
+		t.Errorf("AddScore returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("expectations not met: %v", err)
 	}
 }

@@ -1,4 +1,5 @@
 import { authService } from '@/lib/auth'
+import { UserFacingApiError, userFacingApiMessage } from '@/lib/user-facing-error'
 
 const API_BASE = '/api'
 
@@ -43,6 +44,7 @@ export interface ChatResponse {
     answered_questions: number
     evaluated_categories?: number
     total_categories?: number
+    job_category_id?: number
     current_phase?: PhaseProgress
     all_phases?: PhaseProgress[]
     current_scores?: Array<{
@@ -92,9 +94,9 @@ export async function sendChatMessage(request: ChatRequest): Promise<ChatRespons
         })
 
         if (!response.ok) {
-            const errorText = await response.text().catch(() => response.statusText)
-            console.error('[API] Chat error:', response.status, errorText)
-            throw new Error(`Chat API error: ${errorText || response.statusText}`)
+            const errorText = await response.text().catch(() => '')
+            console.error('[API] Chat error:', response.status, errorText.slice(0, 200))
+            throw new UserFacingApiError(userFacingApiMessage(response.status, errorText), response.status)
         }
 
         return response.json()
@@ -105,22 +107,18 @@ export async function sendChatMessage(request: ChatRequest): Promise<ChatRespons
 }
 
 export async function getChatHistory(sessionId: string): Promise<ChatHistory[]> {
-    try {
-        const response = await fetch(`${API_BASE}/chat/history?session_id=${sessionId}`, {
-            headers: authService.getUserFetchHeaders(),
-        })
+    const response = await fetch(`${API_BASE}/chat/history?session_id=${sessionId}`, {
+        headers: authService.getUserFetchHeaders(),
+    })
 
-        if (!response.ok) {
-            console.warn(`History API error: ${response.status}`)
-            return []
-        }
-
-        const raw = await response.json()
-        return unwrapArray<ChatHistory>(raw)
-    } catch (error) {
-        console.warn('Failed to fetch chat history:', error)
-        return []
+    if (!response.ok) {
+        const errorText = await response.text().catch(() => '')
+        console.error('[API] History error:', response.status, errorText.slice(0, 200))
+        throw new UserFacingApiError(userFacingApiMessage(response.status, errorText), response.status)
     }
+
+    const raw = await response.json()
+    return unwrapArray<ChatHistory>(raw)
 }
 
 export async function getUserScores(sessionId: string): Promise<ChatScore[]> {

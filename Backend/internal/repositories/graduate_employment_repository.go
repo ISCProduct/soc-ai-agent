@@ -31,7 +31,8 @@ func (r *GraduateEmploymentRepository) Update(entry *models.GraduateEmployment) 
 	return r.db.Save(entry).Error
 }
 
-func (r *GraduateEmploymentRepository) List(companyID *uint, limit int) ([]models.GraduateEmployment, error) {
+// List は卒業生の就職情報一覧を返す。schoolID が非nilの場合は個別校で絞り込む。
+func (r *GraduateEmploymentRepository) List(companyID, schoolID *uint, limit int) ([]models.GraduateEmployment, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -39,6 +40,9 @@ func (r *GraduateEmploymentRepository) List(companyID *uint, limit int) ([]model
 	query := r.db.Preload("Company").Preload("JobPosition")
 	if companyID != nil {
 		query = query.Where("company_id = ?", *companyID)
+	}
+	if schoolID != nil {
+		query = query.Where("school_id = ?", *schoolID)
 	}
 	err := query.Order("created_at desc").Limit(limit).Find(&entries).Error
 	return entries, err

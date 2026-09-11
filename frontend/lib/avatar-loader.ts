@@ -94,7 +94,9 @@ function createGLTFLoader(): GLTFLoader {
   // Set up DRACO loader for compressed models
   const dracoLoader = new DRACOLoader()
   dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/')
-  dracoLoader.preload()
+  // preload() は外部CDNへの非同期フェッチを開始するため、ネットワーク不可環境では
+  // Failed to fetch エラーが Promise チェーンを通じてアバターロード全体を失敗させる。
+  // デコーダーはモデルの初回ロード時に自動的に取得されるため preload() は不要。
   loader.setDRACOLoader(dracoLoader)
 
   return loader

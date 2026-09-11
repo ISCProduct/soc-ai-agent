@@ -5,13 +5,16 @@ import "time"
 // User ドメインエンティティ（GORM依存なし）
 type User struct {
 	ID                       uint
+	OrganizationID           uint
 	Email                    string
 	Password                 string
 	Name                     string
 	IsGuest                  bool
 	IsAdmin                  bool
+	Role                     string // student / teacher
 	TargetLevel              string // 新卒 or 中途
 	SchoolName               string
+	SchoolID                 *uint
 	OAuthProvider            string
 	OAuthID                  string
 	AvatarURL                string
@@ -23,8 +26,16 @@ type User struct {
 	LastLoginAt              *time.Time
 	PasswordResetToken       string
 	PasswordResetExpiresAt   *time.Time
+	AllowCollectiveInsight   bool
+	AllowScoutVisibility     bool
+	WithdrawnAt              *time.Time
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
+}
+
+// IsWithdrawn は退会済みかどうか。
+func (u *User) IsWithdrawn() bool {
+	return u != nil && u.WithdrawnAt != nil
 }
 
 // IsNewGrad 新卒ユーザーかどうか

@@ -12,7 +12,7 @@ type GitHubService interface {
 	TriggerAsyncSync(userID uint, force bool)
 	SyncUserData(ctx context.Context, userID uint, force bool) error
 	ListRepoSummaries(userID uint) ([]models.GitHubRepoSummary, error)
-	SummarizeRepo(ctx context.Context, userID uint, fullName string, forceRefresh bool) (*models.GitHubRepoSummary, error)
+	SummarizeRepo(ctx context.Context, userID uint, fullName string, forceRefresh bool, targetRole string) (*models.GitHubRepoSummary, error)
 }
 
 type SkillScoreService interface {

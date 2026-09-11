@@ -1,29 +1,65 @@
-name: Deploy Frontend & Backend to ECS (disabled)
+name: Deploy
 
+# develop -> staging（IAMロール無しEC2 + Docker Compose、SSHでpull/up）
+# main    -> production（ECS on Fargate、展示会時起動。desired_countは変更しない）
 on:
+  push:
+    branches:
+      - develop
+      - main
   workflow_dispatch:
 
 jobs:
-  deploy:
+  deploy-staging:
+    if: github.ref_name == 'develop'
+    name: Deploy to staging
     runs-on: ubuntu-latest
+    environment: staging
+    # staging-auto-stopジョブ(最大1時間スリープ)は別concurrency groupなので、
+    # ここをジョブ単位にしないとワークフロー全体のrunが1時間ブロックされ、
+    # 次のデプロイが開始できなくなる
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
 
     env:
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-
-      # ECR
-      ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
-      ECR_REPOSITORY_FRONTEND: ${{ secrets.ECR_REPOSITORY_FRONTEND }}
-      ECR_REPOSITORY_BACKEND: ${{ secrets.ECR_REPOSITORY_BACKEND }}
-      IMAGE_TAG: ${{ github.sha }}
-
-      # ECS
-      ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
-      ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
-      ECS_TASK_FAMILY: ${{ secrets.ECS_TASK_FAMILY }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
+      ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+      # staging EC2上のdocker-compose.ymlはこのタグを固定で参照しているため、
+      # SHAタグではなく固定タグにする（pull => 中身が更新される）
+      IMAGE_TAG: staging
+      PROJECT_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
+        with:
+          # 変更検知(git diff)で前回pushからの差分を見るためフル履歴を取得する
+          fetch-depth: 0
+
+      # Dockerfile/依存関係に変更が無いサービスまでビルド・ECRへpushしてしまうと、
+      # ビルド時間とECRストレージの両方が無駄になる。前回push(github.event.before)
+      # からの変更パスを見て、サービスごとにビルドが必要かどうかを判定する。
+      # before が取れない場合(workflow_dispatch手動実行・force push直後等)は
+      # 安全側に倒して全サービスをビルドする。
+      - name: Detect changed services
+        id: changes
+        run: |
+          BEFORE="${{ github.event.before }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ -z "$BEFORE" ] || \
+             [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            echo "before commit unavailable; building all services"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            echo "rag=true" >> "$GITHUB_OUTPUT"
+          else
+            CHANGED=$(git diff --name-only "$BEFORE" HEAD)
+            echo "changed files:"
+            echo "$CHANGED"
+            echo "frontend=$(echo "$CHANGED" | grep -q '^frontend/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            echo "backend=$(echo "$CHANGED" | grep -q '^Backend/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            echo "rag=$(echo "$CHANGED" | grep -q '^rag/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
@@ -35,61 +71,852 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # =========================
-      # Buildx のセットアップ
-      # =========================
+      # デプロイ後1時間で自動停止する運用のため、止まっていたら起動をキックする
+      # (完了は待たない。この後のDockerビルド時間と起動時間を並行させるため)
+      - name: Start staging infra if stopped
+        run: |
+          RDS_STATUS=$(aws rds describe-db-instances --db-instance-identifier ${PROJECT_NAME}-mysql \
+            --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null || echo "unknown")
+          if [ "$RDS_STATUS" == "stopped" ]; then
+            aws rds start-db-instance --db-instance-identifier ${PROJECT_NAME}-mysql
+          fi
+
+          DESIRED=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "${PROJECT_NAME}-app" \
+            --query 'AutoScalingGroups[0].DesiredCapacity' --output text 2>/dev/null || echo "0")
+          if [ "$DESIRED" == "0" ]; then
+            aws autoscaling update-auto-scaling-group --auto-scaling-group-name "${PROJECT_NAME}-app" \
+              --min-size 1 --desired-capacity 1
+          fi
+
+      # デプロイ中はASGのヘルスチェックによる置換を止める(#828)。
+      # デプロイは稼働中インスタンス上で down → prune → pull → up を行い、
+      # アプリが数分間停止する。インスタンスは既に InService なので
+      # health_check_grace_period は効かず、ALB は30秒で unhealthy と判定する。
+      # 止めないとデプロイ中にインスタンスが置換され、デプロイ自体が壊れる。
+      #
+      # HealthCheck も一緒に止める。ReplaceUnhealthy だけを止めても ASG は
+      # ヘルス判定自体は続けており、一度 Unhealthy と記録したインスタンスは
+      # ALB が healthy に戻っても Healthy へは戻らない。結果 Resume した瞬間に
+      # 置換が走り、直後のスモークが起動途中の新インスタンスを叩いて落ちる。
+      - name: Suspend ASG health check replacement
+        run: |
+          aws autoscaling suspend-processes \
+            --auto-scaling-group-name "${PROJECT_NAME}-app" \
+            --scaling-processes HealthCheck ReplaceUnhealthy
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # =========================
-      # フロントエンドのビルドとプッシュ
-      # =========================
-      - name: Build frontend image
-        working-directory: ./frontend
+      # レイヤーキャッシュはECRへ保存するtype=registryを使う(type=ghaはリポジトリ全体で
+      # 10GB共有・LRU退避されるため、他イメージのビルドで頻繁に追い出されて無関係な変更でも
+      # apt-get等の重いレイヤーから毎回リビルドされてしまう)。3イメージを並列ビルドする。
+      # staging EC2はamd64（instance_type変更済み、旧t4g.small/ARM64からの移行に伴う）。
+      - name: Build and push images (frontend/backend/rag-review, parallel)
         run: |
-          docker buildx build --platform linux/amd64 \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG \
-            --push .
+          set -e
+          pids=()
 
-      # =========================
-      # バックエンドのビルドとプッシュ
-      # =========================
-      - name: Build backend image
+          if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then
+            (cd frontend && docker buildx build --platform linux/amd64 \
+              --build-arg NODE_ENV=production \
+              --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }} \
+              --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging \
+              --cache-to type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging,mode=max \
+              -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &
+            pids+=($!)
+          else
+            echo "frontend unchanged, skip build/push"
+          fi
+
+          if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then
+            (cd Backend && docker buildx build --platform linux/amd64 \
+              --cache-from type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-staging \
+              --cache-to type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-staging,mode=max \
+              -t $ECR_REGISTRY/soc-backend:$IMAGE_TAG --push .) &
+            pids+=($!)
+          else
+            echo "backend unchanged, skip build/push"
+          fi
+
+          if [ "${{ steps.changes.outputs.rag }}" = "true" ]; then
+            (cd rag && docker buildx build --platform linux/amd64 \
+              --cache-from type=registry,ref=$ECR_REGISTRY/soc-rag-review:buildcache-staging \
+              --cache-to type=registry,ref=$ECR_REGISTRY/soc-rag-review:buildcache-staging,mode=max \
+              -t $ECR_REGISTRY/soc-rag-review:$IMAGE_TAG --push .) &
+            pids+=($!)
+          else
+            echo "rag-review unchanged, skip build/push"
+          fi
+
+          fail=0
+          for pid in "${pids[@]}"; do
+            wait "$pid" || fail=1
+          done
+          exit $fail
+
+      # ビルド中に裏で進めた起動を待ち合わせる（RDSは停止からだと最大10分程度かかる）。
+      # 直前のauto-stopとレースして"stopping"の間は起動キックが素通りすることがあるため、
+      # ここでも stopped を検知したら都度start-db-instanceを呼び直す（自己修復）。
+      #
+      # 待ち時間は20分。auto-stop の直後にデプロイが始まると
+      #   stopping(数分) -> stopped -> start -> available(5〜10分)
+      # を通ることになり、10分では足りずタイムアウトした実績がある。
+      - name: Wait for staging infra ready
+        run: |
+          for i in $(seq 1 80); do
+            STATUS=$(aws rds describe-db-instances --db-instance-identifier ${PROJECT_NAME}-mysql \
+              --query 'DBInstances[0].DBInstanceStatus' --output text)
+            [ "$STATUS" == "available" ] && break
+            if [ "$STATUS" == "stopped" ]; then
+              aws rds start-db-instance --db-instance-identifier ${PROJECT_NAME}-mysql || true
+            fi
+            echo "RDS status: $STATUS (waiting...)"
+            sleep 15
+          done
+          if [ "$STATUS" != "available" ]; then
+            echo "RDS did not become available in time" >&2
+            exit 1
+          fi
+
+          for i in $(seq 1 20); do
+            STATE=$(aws ec2 describe-instances \
+              --filters "Name=tag:Name,Values=${PROJECT_NAME}-app" "Name=instance-state-name,Values=running" \
+              --query 'Reservations[0].Instances[0].State.Name' --output text)
+            [ "$STATE" == "running" ] && break
+            echo "EC2 state: $STATE (waiting...)"
+            sleep 15
+          done
+          if [ "$STATE" != "running" ]; then
+            echo "staging instance did not become running in time" >&2
+            exit 1
+          fi
+
+      - name: Resolve staging instance IP
+        id: instance
+        run: |
+          read -r ID IP <<<"$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=${PROJECT_NAME}-app" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].[InstanceId,PublicIpAddress]' --output text)"
+          if [ -z "$IP" ] || [ "$IP" == "None" ]; then
+            echo "staging instance not found (ASG未起動、またはタグ不一致)" >&2
+            exit 1
+          fi
+          echo "ip=$IP" >> "$GITHUB_OUTPUT"
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
+          SG_ID=$(aws ec2 describe-security-groups \
+            --filters "Name=group-name,Values=${PROJECT_NAME}-ecs-sg" \
+            --query 'SecurityGroups[0].GroupId' --output text)
+          echo "sg_id=$SG_ID" >> "$GITHUB_OUTPUT"
+
+      # GitHub Actionsランナーは固定IPを持たないため、SSHステップの前後だけ
+      # ランナー自身のIPをSGへ動的に許可する（常時0.0.0.0/0で開けない）
+      - name: Allow runner IP for SSH
+        run: |
+          RUNNER_IP=$(curl -s https://checkip.amazonaws.com)
+          echo "runner_ip=$RUNNER_IP" >> "$GITHUB_ENV"
+          aws ec2 authorize-security-group-ingress \
+            --group-id ${{ steps.instance.outputs.sg_id }} \
+            --protocol tcp --port 22 --cidr "${RUNNER_IP}/32"
+
+      # 新規起動直後はuser_data(docker/compose導入)完了前でSSHはできてもcomposeが
+      # 無いことがあるため、ポート疎通だけでなく/opt/appの準備も待つ
+      - name: Wait for instance SSH/docker-compose ready
+        run: |
+          for i in $(seq 1 20); do
+            timeout 5 bash -c "cat < /dev/null > /dev/tcp/${{ steps.instance.outputs.ip }}/22" 2>/dev/null && break
+            echo "waiting for SSH port..."
+            sleep 15
+          done
+
+      - name: Sync edge nginx (503 時の OGP 付き静的 HTML)
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ steps.instance.outputs.ip }}
+          username: ubuntu
+          key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          source: "infra/nginx/staging-edge.conf,infra/static/service-unavailable.html,infra/static/service-starting.html,infra/staging/ensure-edge-compose.sh"
+          target: /tmp/edge-sync
+          strip_components: 2
+
+      - name: Deploy via SSH (docker compose pull && up -d)
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ steps.instance.outputs.ip }}
+          username: ubuntu
+          key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            set -e
+            sudo bash -c '
+              for i in $(seq 1 20); do
+                [ -f /opt/app/docker-compose.yml ] && command -v docker >/dev/null && break
+                echo "waiting for user_data (docker/compose) to finish..."
+                sleep 15
+              done
+              aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
+              mkdir -p /opt/app/nginx/static
+              cp /tmp/edge-sync/staging-edge.conf /opt/app/nginx/staging-edge.conf
+              cp /tmp/edge-sync/service-unavailable.html /opt/app/nginx/static/service-unavailable.html
+              cp /tmp/edge-sync/service-starting.html /opt/app/nginx/static/service-starting.html
+              chmod +x /tmp/edge-sync/ensure-edge-compose.sh
+              /tmp/edge-sync/ensure-edge-compose.sh /opt/app/docker-compose.yml
+              cd /opt/app
+              # 既存インスタンスの .env は S3_BUCKET のみ。アプリは AWS_S3_BUCKET を読む。
+              if [ -f .env ] && grep -q '^S3_BUCKET=' .env && ! grep -q '^AWS_S3_BUCKET=' .env; then
+                echo "AWS_S3_BUCKET=$(grep '^S3_BUCKET=' .env | cut -d= -f2-)" >> .env
+              fi
+              df -h /
+              # 稼働中イメージは prune できない。先に down してから空ける。
+              # named volume(chroma_data)は --volumes を付けない限り残る。
+              docker compose down --remove-orphans || true
+              docker system prune -af
+              docker compose pull
+              docker compose up -d
+              df -h /
+              # up -d の直後はまだ running になっていないことがある。特に新規インスタンスの
+              # 初回起動(イメージpull+ネットワーク/ボリューム作成から)は遅く、即座に判定すると
+              # 起動しているのに "is not running" で落ちる。最大60秒待つ。
+              for s in frontend backend edge; do
+                for _ in $(seq 1 20); do
+                  docker compose ps --status running --services | grep -qx "$s" && break
+                  sleep 3
+                done
+                docker compose ps --status running --services | grep -qx "$s" || {
+                  echo "service $s is not running" >&2
+                  docker compose ps -a
+                  docker compose logs --tail 50 "$s" || true
+                  exit 1
+                }
+              done
+
+              # DBマイグレーション適用(#618)。backend起動直後はDB接続が間に合わない
+              # ことがあるためリトライする。
+              MIGRATE_OK=0
+              for i in $(seq 1 10); do
+                docker compose exec -T backend /bin/migrate up && { MIGRATE_OK=1; break; }
+                echo "migrate retry ($i)..."
+                sleep 5
+              done
+              if [ "$MIGRATE_OK" != "1" ]; then
+                echo "migration failed" >&2
+                exit 1
+              fi
+            '
+
+      - name: Revoke runner IP for SSH
+        if: always()
+        run: |
+          aws ec2 revoke-security-group-ingress \
+            --group-id ${{ steps.instance.outputs.sg_id }} \
+            --protocol tcp --port 22 --cidr "${{ env.runner_ip }}/32" || true
+
+      # デプロイ中の docker compose down で ALB は30秒でこのインスタンスを
+      # unhealthy と判定する。Suspend が止めるのは「置換」だけで判定自体は残るため、
+      # healthy に戻る前に Resume するとその場でインスタンスが置換される。
+      # 直後のスモークが起動途中の新インスタンスを叩いて必ず落ちるので、
+      # 先に in-service を待つ。
+      - name: Wait for ALB targets healthy
+        run: |
+          for name in be fe; do
+            TG=$(aws elbv2 describe-target-groups --names "${PROJECT_NAME}-$name-tg" \
+              --query 'TargetGroups[0].TargetGroupArn' --output text)
+            aws elbv2 wait target-in-service --target-group-arn "$TG" \
+              --targets "Id=${{ steps.instance.outputs.id }}"
+          done
+
+      # 失敗しても必ず戻す。停止したままだと、以後アプリが落ちても
+      # ASGが置換しなくなり ELB ヘルスチェックにした意味が無くなる。
+      - name: Resume ASG health check replacement
+        if: always()
+        run: |
+          aws autoscaling resume-processes \
+            --auto-scaling-group-name "${PROJECT_NAME}-app" \
+            --scaling-processes HealthCheck ReplaceUnhealthy || true
+
+  deploy-staging-smoke:
+    needs: deploy-staging
+    if: github.ref_name == 'develop' && success()
+    uses: ./.github/workflows/deploy-smoke.yml
+    with:
+      environment: staging
+    secrets: inherit
+
+  # Discord Interactions Endpoint の受け口(Lambda)。
+  #
+  # deploy-staging には依存させない。この受け口を staging から Lambda へ移したのは
+  # 「staging が止まっていても /prod を受けられるようにする」ためで、staging の
+  # デプロイ結果に更新が引きずられては意味が無い。
+  #
+  # 関数の箱と環境変数は terraform 側(infra/terraform/environments/staging/
+  # discord_lambda.tf)が持ち、ここではコードだけ差し替える。
+  deploy-discord-lambda:
+    if: github.ref_name == 'develop'
+    name: Deploy Discord Lambda
+    runs-on: ubuntu-latest
+    environment: staging
+    concurrency:
+      group: deploy-discord-lambda
+      cancel-in-progress: true
+
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
+      FUNCTION_NAME: ${{ vars.PROJECT_NAME || 'soc-stg' }}-discord
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ./Backend/go.mod
+          cache-dependency-path: ./Backend/go.sum
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build and deploy
         working-directory: ./Backend
         run: |
-          docker buildx build --platform linux/amd64 \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG \
-            --push .
+          set -e
+          # provided.al2023 のカスタムランタイムは bootstrap という名前の実行ファイルを探す。
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o bootstrap ./cmd/discord-lambda
+          zip -j discord-lambda.zip bootstrap
 
-      # =========================
-      # タスク定義の更新（フロント）
-      # =========================
-      - name: Render task definition (frontend)
-        id: render-frontend
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --zip-file fileb://discord-lambda.zip \
+            --query 'LastUpdateStatus' --output text
+
+          # 更新の反映を待たずに次のリクエストが来ると、古いコードで応答することがある。
+          aws lambda wait function-updated --function-name "$FUNCTION_NAME"
+          echo "$FUNCTION_NAME を更新しました"
+
+  # デプロイから1時間、新たなデプロイが無ければstagingを自動停止する（コスト削減）。
+  # 1時間以内に次のdeploy-staging(→本ジョブ)が走ると、同じconcurrency groupで
+  # 前回分がキャンセルされ、実質タイマーがリセットされる。
+  staging-auto-stop:
+    needs: deploy-staging
+    if: github.ref_name == 'develop'
+    name: Auto-stop staging after 1h
+    runs-on: ubuntu-latest
+    environment: staging
+    concurrency:
+      group: staging-auto-stop
+      cancel-in-progress: true
+
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
+      PROJECT_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
         with:
-          task-definition: .aws/task-definition-template.json
-          container-name: soc-frontend
-          image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ env.IMAGE_TAG }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      # =========================
-      # タスク定義の更新（バックエンド）
-      # =========================
-      - name: Render task definition (backend)
+      - name: Wait 1 hour (cancelled if a new deploy arrives)
+        run: sleep 3600
+
+      - name: Stop staging infra (EC2 + RDS)
+        run: |
+          aws autoscaling update-auto-scaling-group --auto-scaling-group-name "${PROJECT_NAME}-app" \
+            --min-size 0 --desired-capacity 0
+          aws rds stop-db-instance --db-instance-identifier ${PROJECT_NAME}-mysql || true
+
+  deploy-production:
+    if: github.ref_name == 'main'
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
+      ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+      IMAGE_TAG: ${{ github.sha }}
+      # ECSクラスタ名・タスク定義family接頭辞はともにTerraformのproject_name（既定soc-app）由来
+      PROJECT_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # 変更検知(git diff)で前回pushからの差分を見るためフル履歴を取得する
+          fetch-depth: 0
+
+      # Dockerfile/依存関係に変更が無いサービスまでビルド・ECRへpushしてしまうと、
+      # ビルド時間とECRストレージの両方が無駄になる。前回push(github.event.before)
+      # からの変更パスを見て、サービスごとにビルド・デプロイが必要かどうかを判定する。
+      # before が取れない場合(workflow_dispatch手動実行・force push直後等)は
+      # 安全側に倒して全サービスをビルド・デプロイする。
+      - name: Detect changed services
+        id: changes
+        run: |
+          BEFORE="${{ github.event.before }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ -z "$BEFORE" ] || \
+             [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            echo "before commit unavailable; building all services"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            echo "rag=true" >> "$GITHUB_OUTPUT"
+          else
+            CHANGED=$(git diff --name-only "$BEFORE" HEAD)
+            echo "changed files:"
+            echo "$CHANGED"
+            echo "frontend=$(echo "$CHANGED" | grep -q '^frontend/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            echo "backend=$(echo "$CHANGED" | grep -q '^Backend/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            echo "rag=$(echo "$CHANGED" | grep -q '^rag/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # レイヤーキャッシュはECRへ保存するtype=registryを使う(type=ghaはリポジトリ全体で
+      # 10GB共有・LRU退避されるため、他イメージのビルドで頻繁に追い出されて無関係な変更でも
+      # apt-get等の重いレイヤーから毎回リビルドされてしまう)。3イメージを並列ビルドする
+      - name: Build and push images (frontend/backend/rag-review, parallel)
+        run: |
+          set -e
+          pids=()
+
+          if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then
+            (cd frontend && docker buildx build --platform linux/amd64 \
+              --build-arg NODE_ENV=production \
+              --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }} \
+              --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production \
+              --cache-to type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production,mode=max \
+              -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &
+            pids+=($!)
+          else
+            echo "frontend unchanged, skip build/push"
+          fi
+
+          if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then
+            (cd Backend && docker buildx build --platform linux/amd64 \
+              --cache-from type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-production \
+              --cache-to type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-production,mode=max \
+              -t $ECR_REGISTRY/soc-backend:$IMAGE_TAG --push .) &
+            pids+=($!)
+          else
+            echo "backend unchanged, skip build/push"
+          fi
+
+          if [ "${{ steps.changes.outputs.rag }}" = "true" ]; then
+            (cd rag && docker buildx build --platform linux/amd64 \
+              --cache-from type=registry,ref=$ECR_REGISTRY/soc-rag-review:buildcache-production \
+              --cache-to type=registry,ref=$ECR_REGISTRY/soc-rag-review:buildcache-production,mode=max \
+              -t $ECR_REGISTRY/soc-rag-review:$IMAGE_TAG --push .) &
+            pids+=($!)
+          else
+            echo "rag-review unchanged, skip build/push"
+          fi
+
+          fail=0
+          for pid in "${pids[@]}"; do
+            wait "$pid" || fail=1
+          done
+          exit $fail
+
+      # ECS Fargateのタスク定義はTerraformが管理する。CIはTerraform applyを
+      # 行わず、現在のタスク定義のimageだけ差し替えて新リビジョンを登録する
+      # （実行/タスクロールのIAM操作が不要なため、デプロイ用の最小権限で完結する）。
+      - name: Fetch current backend task definition
+        if: steps.changes.outputs.backend == 'true'
+        run: |
+          aws ecs describe-task-definition --task-definition "${PROJECT_NAME}-backend" \
+            --query 'taskDefinition' \
+            | jq 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' \
+            > backend-task-def.json
+
+      - name: Render backend task definition
+        if: steps.changes.outputs.backend == 'true'
         id: render-backend
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: ${{ steps.render-frontend.outputs.task-definition }}
+          task-definition: backend-task-def.json
           container-name: soc-backend
-          image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_BACKEND }}:${{ env.IMAGE_TAG }}
+          image: ${{ env.ECR_REGISTRY }}/soc-backend:${{ env.IMAGE_TAG }}
 
-      # =========================
-      # ECS デプロイ
-      # =========================
-      - name: Deploy to Amazon ECS
+      # DBマイグレーション適用(#618)。新イメージのタスク定義を先に登録し、
+      # backendサービスと同じネットワーク設定でワンオフタスクとしてmigrateを
+      # 実行する。失敗したらここでジョブを止め、サービスは更新しない。
+      - name: Register backend task definition (for migration)
+        if: steps.changes.outputs.backend == 'true'
+        id: register-backend
+        run: |
+          TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://${{ steps.render-backend.outputs.task-definition }} \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "task_def_arn=$TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
+
+      - name: Run DB migration (production)
+        if: steps.changes.outputs.backend == 'true'
+        run: |
+          NETWORK_CONFIG=$(aws ecs describe-services --cluster "${PROJECT_NAME}" --services backend \
+            --query 'services[0].networkConfiguration' --output json)
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "${PROJECT_NAME}" \
+            --task-definition "${{ steps.register-backend.outputs.task_def_arn }}" \
+            --launch-type FARGATE \
+            --network-configuration "$NETWORK_CONFIG" \
+            --overrides '{"containerOverrides":[{"name":"soc-backend","command":["/bin/migrate","up"]}]}' \
+            --query 'tasks[0].taskArn' --output text)
+          echo "Migration task: $TASK_ARN"
+          aws ecs wait tasks-stopped --cluster "${PROJECT_NAME}" --tasks "$TASK_ARN"
+          EXIT_CODE=$(aws ecs describe-tasks --cluster "${PROJECT_NAME}" --tasks "$TASK_ARN" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration failed (exit code: $EXIT_CODE)" >&2
+            aws ecs describe-tasks --cluster "${PROJECT_NAME}" --tasks "$TASK_ARN" \
+              --query 'tasks[0].containers[0].reason' --output text >&2
+            exit 1
+          fi
+          echo "✓ Migration applied successfully"
+
+      - name: Deploy backend service
+        if: steps.changes.outputs.backend == 'true'
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-backend.outputs.task-definition }}
-          service: ${{ env.ECS_SERVICE }}
-          cluster: ${{ env.ECS_CLUSTER }}
-          wait-for-service-stability: true
+          service: backend
+          cluster: ${{ env.PROJECT_NAME }}
+          # 3サービスを同時に走らせ、安定待ちは後段でまとめて行う（直列だと合計待ちが積み上がる）
+          wait-for-service-stability: false
+
+      - name: Fetch current frontend task definition
+        if: steps.changes.outputs.frontend == 'true'
+        run: |
+          aws ecs describe-task-definition --task-definition "${PROJECT_NAME}-frontend" \
+            --query 'taskDefinition' \
+            | jq 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' \
+            > frontend-task-def.json
+
+      - name: Render frontend task definition
+        if: steps.changes.outputs.frontend == 'true'
+        id: render-frontend
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: frontend-task-def.json
+          container-name: soc-frontend
+          image: ${{ env.ECR_REGISTRY }}/soc-frontend:${{ env.IMAGE_TAG }}
+
+      - name: Deploy frontend service
+        if: steps.changes.outputs.frontend == 'true'
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-frontend.outputs.task-definition }}
+          service: frontend
+          cluster: ${{ env.PROJECT_NAME }}
+          # 3サービスを同時に走らせ、安定待ちは後段でまとめて行う（直列だと合計待ちが積み上がる）
+          wait-for-service-stability: false
+
+      # rag-reviewはchroma(ベクトルDB)とのサイドカー構成で、DBを持たないため
+      # マイグレーション相当のステップは無い。差し替えるのはrag-reviewコンテナの
+      # イメージのみで、chromaコンテナはタスク定義上そのまま維持される。
+      - name: Fetch current rag-review task definition
+        if: steps.changes.outputs.rag == 'true'
+        run: |
+          aws ecs describe-task-definition --task-definition "${PROJECT_NAME}-rag-review" \
+            --query 'taskDefinition' \
+            | jq 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' \
+            > rag-review-task-def.json
+
+      - name: Render rag-review task definition
+        if: steps.changes.outputs.rag == 'true'
+        id: render-rag-review
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: rag-review-task-def.json
+          container-name: rag-review
+          image: ${{ env.ECR_REGISTRY }}/soc-rag-review:${{ env.IMAGE_TAG }}
+
+      - name: Deploy rag-review service
+        if: steps.changes.outputs.rag == 'true'
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-rag-review.outputs.task-definition }}
+          service: rag-review
+          cluster: ${{ env.PROJECT_NAME }}
+          # 3サービスを同時に走らせ、安定待ちは後段でまとめて行う（直列だと合計待ちが積み上がる）
+          wait-for-service-stability: false
+
+      # backend/frontend/rag-review全てのECSデプロイが安定するまで待った後(=本番反映が実際に完了した後)に通知する。
+      # DISCORD_RELEASE_WEBHOOK_URL未設定でもデプロイ自体は失敗させない(automation/deploy-smoke/notify-discord.shと同じ方針)。
+      # 直列に待つと 588s + 302s + 88s と積み上がるため、3サービスの安定待ちを並列化する。
+      # 二重稼働は発生しない（デプロイ方式は従来どおり minimumHealthyPercent=0 のまま）。
+      - name: Wait for services to stabilize (parallel)
+        run: |
+          set -e
+          services=""
+          if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then services="$services backend"; fi
+          if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then services="$services frontend"; fi
+          if [ "${{ steps.changes.outputs.rag }}" = "true" ]; then services="$services rag-review"; fi
+          if [ -z "$services" ]; then
+            echo "no service deployed; nothing to wait for"
+            exit 0
+          fi
+
+          pids=()
+          for s in $services; do
+            (
+              started=$(date +%s)
+              aws ecs wait services-stable --cluster "$PROJECT_NAME" --services "$s"
+              echo "$s stable in $(( $(date +%s) - started ))s"
+            ) &
+            pids+=($!)
+          done
+
+          fail=0
+          for pid in "${pids[@]}"; do
+            wait "$pid" || fail=1
+          done
+          if [ "$fail" != "0" ]; then
+            echo "one or more services did not reach a stable state" >&2
+          fi
+          exit $fail
+
+      # merge commit 件名（Merge pull request #N）ではなく、マージPRのタイトル
+      # （Release to production: ...）と本文の機能一覧を通知に使う。
+      - name: Notify Discord release
+        env:
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ -z "${DISCORD_RELEASE_WEBHOOK_URL:-}" ]; then
+            echo "DISCORD_RELEASE_WEBHOOK_URL is not set; skip Discord notify"
+            exit 0
+          fi
+          CONTENT="$(python3 automation/discord/build_release_notify.py \
+            --commit-subject "$(git log -1 --format=%s)" \
+            --commit-url "${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --actor "${{ github.actor }}" \
+            --repo "${{ github.repository }}")"
+          PAYLOAD="$(python3 -c "import json,sys; print(json.dumps({'content': sys.argv[1]}))" "$CONTENT")"
+          curl -sS -X POST -H 'Content-Type: application/json' -d "$PAYLOAD" "$DISCORD_RELEASE_WEBHOOK_URL"
+
+  # 更新情報(#861): mainへの直近マージPRをAI要約してDBへ取り込む。
+  # 本番(Fargate)は展示会時のみ起動(desired_countは変更しない)のため、
+  # デプロイ直後に到達できない場合がある。pr_numberでべき等なので、
+  # 失敗しても後続の実行(展示会起動時など)で取りこぼしなく再取り込みされる。
+  # stagingにも同じmain由来の内容を反映し、本番が停止中でもstagingで確認できるようにする。
+  sync-whats-new:
+    needs: deploy-production
+    if: github.ref_name == 'main' && always() && needs.deploy-production.result == 'success'
+    name: Sync whats-new from merged PRs
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Fetch recently merged PRs and ingest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          PROD_API_BASE: https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }}
+          STAGING_API_BASE: https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }}
+        run: |
+          sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base main --limit 20 \
+            --json number,title,body,mergedAt \
+            --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
+
+          curl -sf -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Secret: $ADMIN_SECRET" \
+            -d "{\"sources\": $sources}" \
+            --max-time 60 \
+            || echo "本番への取り込みに失敗しました(停止中の可能性)。スキップします。"
+
+          curl -sf -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Secret: $ADMIN_SECRET" \
+            -d "{\"sources\": $sources}" \
+            --max-time 60 \
+            || echo "stagingへの取り込みに失敗しました(停止中の可能性)。スキップします。"
+
+  # 本番へ反映された issue を閉じる。
+  #
+  # feature/* -> develop -> release -> main のフローでは GitHub の
+  # `Closes #123` が発火しない。close キーワードは**デフォルトブランチへ
+  # マージされたPR**の本文でのみ効くが、feature PR の base は develop であり、
+  # プロモーションPRの本文には issue 番号が書かれないため。
+  # 結果、本番反映済みの issue が開いたまま溜まる（2026-09-10 時点で16件）。
+  #
+  # squash マージのコミット題名に残る元PR番号 `(#1234)` を辿り、
+  # そのPR本文の close キーワードから issue を解決して閉じる。
+  close-deployed-issues:
+    needs: deploy-production
+    if: github.ref_name == 'main' && needs.deploy-production.result == 'success'
+    name: Close issues deployed to production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # 閉じられなくてもデプロイは成功として扱う。
+    # issue の開閉は運用の都合であり、本番の稼働とは独立している。
+    continue-on-error: true
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # 直前のリリース範囲を見るため履歴が要る
+          fetch-depth: 0
+
+      - name: 本番へ反映されたPRから issue を解決して閉じる
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PYEOF'
+          import json, os, subprocess, sys
+
+          sys.path.insert(0, ".github/scripts")
+          from resolve_deployed_issues import extract_pr_numbers, extract_issue_numbers
+
+          REPO = os.environ["GH_REPO"]
+
+          def gh(args):
+              r = subprocess.run(["gh", *args, "--repo", REPO],
+                                 capture_output=True, text=True)
+              return r.stdout if r.returncode == 0 else ""
+
+          # 直近のリリースマージ（HEAD）に含まれるコミット題名を集める。
+          # 1つ前のmainのコミットとの差分を取る。
+          subjects = subprocess.run(
+              ["git", "log", "--format=%s", "HEAD~1..HEAD", "--no-merges"],
+              capture_output=True, text=True).stdout.splitlines()
+          if not subjects:
+              # マージコミット自体しか無い場合は、マージした側の履歴を辿る
+              subjects = subprocess.run(
+                  ["git", "log", "--format=%s", "HEAD^1..HEAD^2"],
+                  capture_output=True, text=True).stdout.splitlines()
+
+          prs = extract_pr_numbers(subjects)
+          print(f"コミット {len(subjects)} 件から 元PR {len(prs)} 件を検出")
+
+          issues = {}
+          for pr in prs:
+              body = gh(["pr", "view", str(pr), "--json", "body", "-q", ".body"])
+              for i in extract_issue_numbers(body):
+                  issues.setdefault(i, []).append(pr)
+
+          if not issues:
+              print("閉じる対象の issue はありません。")
+              sys.exit(0)
+
+          closed, skipped, failed = 0, 0, 0
+          for issue in sorted(issues):
+              state = gh(["issue", "view", str(issue), "--json", "state", "-q", ".state"]).strip()
+              if state != "OPEN":
+                  print(f"  #{issue}: 既に {state or '取得不可'} のためスキップ")
+                  skipped += 1
+                  continue
+              pr_list = ", ".join(f"#{p}" for p in issues[issue])
+              r = subprocess.run(
+                  ["gh", "issue", "close", str(issue), "--repo", REPO,
+                   "--comment", f"本番へ反映されたため自動でクローズしました（{pr_list}）。"],
+                  capture_output=True, text=True)
+              if r.returncode == 0:
+                  print(f"  #{issue}: クローズしました（{pr_list}）")
+                  closed += 1
+              else:
+                  print(f"  #{issue}: クローズに失敗 {r.stderr.strip()[:120]}", file=sys.stderr)
+                  failed += 1
+
+          print(f"クローズ {closed} 件 / スキップ {skipped} 件 / 失敗 {failed} 件")
+          PYEOF
+
+  # PRイベント時の一時的な失敗や、プロモーションPRの課題キー解決漏れがあっても、
+  # 本番Deploy成功後にBacklogの状態を「完了」へ補正する。
+  # pr-to-backlog.yml の既存ロジック（中間PRを辿る再帰解決）を再利用し、
+  # 各workflow_dispatchの完了まで待つことで、Deployジョブ成功だけを先に返さない。
+  sync-backlog-after-deploy:
+    needs: deploy-production
+    if: github.ref_name == 'main' && needs.deploy-production.result == 'success'
+    name: Sync Backlog statuses after production deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: write
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - name: Reconcile recently deployed PRs with Backlog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t prs < <(
+            gh pr list \
+              --repo "${{ github.repository }}" \
+              --state merged \
+              --base main \
+              --limit 20 \
+              --json number \
+              --jq '.[].number'
+          )
+
+          if [ "${#prs[@]}" -eq 0 ]; then
+            echo "mainへマージ済みのPRがありません。"
+            exit 0
+          fi
+
+          for pr in "${prs[@]}"; do
+            echo "Backlog同期を再実行します: PR #$pr"
+            run_url="$(gh workflow run pr-to-backlog.yml \
+              --repo "${{ github.repository }}" \
+              --ref main \
+              -f pr_number="$pr")"
+            run_id="${run_url##*/}"
+            gh run watch "$run_id" \
+              --repo "${{ github.repository }}" \
+              --exit-status
+          done
+
+  # developへのマージPRもstagingでは即時確認できるようにする（本番には反映しない）。
+  # pr_numberでべき等のため、後日releaseブランチ経由でmainへ入った際に
+  # sync-whats-new(main)が別途取り込んでも問題ない。ただしmain側のマージPR番号は
+  # develop側の個別PR番号とは別物になるため、同一変更が粒度違いで2件表示される
+  # ことがある（許容: 実害は軽微、必要になれば重複排除を後日検討）。
+  sync-whats-new-develop:
+    needs: deploy-staging
+    if: github.ref_name == 'develop' && always() && needs.deploy-staging.result == 'success'
+    name: Sync whats-new from merged PRs (develop → staging)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Fetch recently merged PRs (base develop) and ingest into staging
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          STAGING_API_BASE: https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }}
+        run: |
+          sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base develop --limit 20 \
+            --json number,title,body,mergedAt \
+            --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
+
+          curl -sf -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Secret: $ADMIN_SECRET" \
+            -d "{\"sources\": $sources}" \
+            --max-time 60 \
+            || echo "stagingへの取り込みに失敗しました(停止中の可能性)。スキップします。"

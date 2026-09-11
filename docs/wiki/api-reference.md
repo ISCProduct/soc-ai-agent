@@ -17,11 +17,21 @@
 | メソッド | パス | 概要 |
 |---------|------|------|
 | POST | `/api/auth/register` | メール登録 |
-| POST | `/api/auth/login` | ログイン |
+| POST | `/api/auth/login` | ログイン（`user_token` + `refresh_token` を返す） |
+| POST | `/api/auth/refresh` | トークンリフレッシュ（ローテーション #616） |
+| POST | `/api/auth/logout` | リフレッシュトークン失効 |
 | POST | `/api/auth/verify-email` | メール認証 |
 | POST | `/api/auth/forgot-password` | パスワードリセット要求 |
 | GET | `/api/auth/google` | Google OAuth開始 |
 | GET | `/api/auth/github` | GitHub OAuth開始 |
+
+### トークン仕様（#616）
+
+- **アクセストークン**（`user_token`）: JWT・有効期間 **1時間**。`X-User-Token` ヘッダーで送信
+- **リフレッシュトークン**（`refresh_token`）: 不透明トークン・有効期間 **30日**・DB管理（SHA-256ハッシュ保存）
+  - `/api/auth/refresh` のたびにローテーションされる（並行リクエスト対策で旧トークンは60秒の猶予あり）
+  - ログアウト・パスワードリセット・アカウント削除で失効する
+- フロントエンドは httpOnly Cookie（`user_token` / `refresh_token`）で保持し、`middleware.ts` が期限2分前に自動リフレッシュする
 
 ---
 
@@ -71,6 +81,31 @@
 | POST | `/api/resume/{id}/review` | レビュー実行（スコア更新も実施） |
 | GET | `/api/resume/{id}/review/stream` | レビューSSEストリーミング |
 | GET | `/api/resume/{id}/annotated` | 注釈済みPDF取得 |
+| GET | `/api/resume/status` | 自分の履歴書の対応要否（リマインダー用、#1030） |
+
+---
+
+## 企業ポータル（#1091 / #1196）
+
+企業担当者用。学生用(`X-User-Token`)・管理者用(`X-Admin-Token`)とは
+別シークレット・別ヘッダで、認可境界が独立している。
+
+| メソッド | パス | 認証 | 概要 |
+|---------|------|------|------|
+| POST | `/api/company-auth/login` | なし（レート制限あり） | ログイン |
+| POST | `/api/company-auth/accept-invite` | なし（レート制限あり） | 招待受諾＋パスワード設定 |
+| POST | `/api/company-auth/forgot-password` | なし（レート制限あり） | リセットメール要求。**存在有無に関わらず常に200** |
+| POST | `/api/company-auth/reset-password` | なし（レート制限あり） | リセット実行＋ログイン |
+| POST | `/api/company-auth/refresh` | リフレッシュトークン | トークンローテーション |
+| POST | `/api/company-auth/logout` | リフレッシュトークン | ログアウト |
+| GET | `/api/company-auth/me` | `X-Company-User-Token` | 自分の情報 |
+| GET | `/api/company-portal/*` | `X-Company-User-Token` | 学生検索・タグ・分析（company_id はJWT由来） |
+| POST | `/api/admin/companies/{id}/company-users` | admin | 企業ユーザー招待 |
+| GET | `/api/admin/companies/{id}/company-users` | admin | 企業ユーザー一覧 |
+| PATCH | `/api/admin/companies/{id}/company-users/{userID}` | admin | 有効/無効の切替（#1196） |
+
+企業ユーザーの**アクセス剥奪は行削除ではなく無効化**で行う。
+削除はタグの外部キー制約（`RESTRICT`）で失敗する。
 
 ---
 

@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"Backend/internal/services"
+	"Backend/internal/services/company"
 	"Backend/internal/services/interfaces"
 	"net/http"
 	"strconv"
@@ -31,7 +31,7 @@ func (c *AdminCrawlController) ListSources(ctx echo.Context) error {
 
 // CreateSource POST /api/admin/crawl-sources
 func (c *AdminCrawlController) CreateSource(ctx echo.Context) error {
-	var payload services.CrawlSourcePayload
+	var payload company.CrawlSourcePayload
 	if err := ctx.Bind(&payload); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
 	}
@@ -52,7 +52,7 @@ func (c *AdminCrawlController) UpdateSource(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid source id")
 	}
-	var payload services.CrawlSourcePayload
+	var payload company.CrawlSourcePayload
 	if err := ctx.Bind(&payload); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
 	}
