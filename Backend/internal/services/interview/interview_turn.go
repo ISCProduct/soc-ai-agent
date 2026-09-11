@@ -43,6 +43,22 @@ func (s *InterviewService) Turn(
 		return nil, shared.ErrSessionFinished
 	}
 
+	type companyContextResult struct {
+		id      uint
+		reading string
+		info    string
+	}
+	companyContextCh := make(chan companyContextResult, 1)
+	go func() {
+		resolvedID := s.resolveCompanyID(companyID, companyName)
+		resolvedReading := companyReading
+		if companyName != "" && resolvedReading == "" {
+			resolvedReading = s.resolveCompanyReading(ctx, resolvedID, companyName)
+		}
+		resolvedInfo := s.resolveCompanyInfo(resolvedID, companyName, companyInfo)
+		companyContextCh <- companyContextResult{id: resolvedID, reading: resolvedReading, info: resolvedInfo}
+	}()
+
 	// STT: Whisper でユーザー音声をテキスト化。
 	// 破損音声・無音・タイムアウト等でTranscribe自体が失敗しても、ターンを
 	// 中断させず「聞き取れなかった」扱いで継続する（既存の空文字フォールバックに合流、#910）。
@@ -92,15 +108,16 @@ func (s *InterviewService) Turn(
 	}
 
 	// WEB検索・手入力で company_id=0 でも、企業名が DB 登録と一致すれば解決する (#567)
-	companyID = s.resolveCompanyID(companyID, companyName)
+	companyContext := <-companyContextCh
+	companyID = companyContext.id
 
 	// 読み仮名: 共有DB優先。無い場合のみモデル知識（Searchではない）
 	if companyName != "" && companyReading == "" {
-		companyReading = s.resolveCompanyReading(ctx, companyID, companyName)
+		companyReading = companyContext.reading
 	}
 
 	// 企業情報: 共有キャッシュ優先（general/sier 問わず）。無ければクライアント文面をフォールバック
-	companyInfo = s.resolveCompanyInfo(companyID, companyName, companyInfo)
+	companyInfo = companyContext.info
 
 	// 企業別カスタム質問とGitHubスキルスコアを取得
 	customQuestions := s.fetchCustomQuestions(companyID, position)
@@ -155,6 +172,8 @@ func (s *InterviewService) Turn(
 		UserText:               userText,
 		AIText:                 aiText,
 		Audio:                  audio,
+		CompanyReading:         companyReading,
+		CompanyInfo:            companyInfo,
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
 	}
@@ -254,6 +273,8 @@ func (s *InterviewService) StartTurn(
 	result := &TurnResult{
 		AIText:                 aiText,
 		Audio:                  audio,
+		CompanyReading:         companyReading,
+		CompanyInfo:            companyInfo,
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
 	}

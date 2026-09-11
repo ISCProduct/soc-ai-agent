@@ -4,6 +4,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/services/company"
 	"context"
+	"fmt"
 	"strings"
 )
 
@@ -12,7 +13,22 @@ import (
 func (s *InterviewService) resolveCompanyInfo(companyID uint, companyName, clientInfo string) string {
 	brief := ""
 	if companyID > 0 || strings.TrimSpace(companyName) != "" {
-		brief = s.lookupCompanyProfile(companyID, companyName)
+		cacheKey := fmt.Sprintf("%d:%s", companyID, strings.TrimSpace(companyName))
+		if cached, ok := s.companyProfileCache.Load(cacheKey); ok {
+			brief, _ = cached.(string)
+		} else {
+			value, _, _ := s.companyProfileFlight.Do(cacheKey, func() (any, error) {
+				if cached, ok := s.companyProfileCache.Load(cacheKey); ok {
+					return cached, nil
+				}
+				lookup := s.lookupCompanyProfile(companyID, companyName)
+				if strings.TrimSpace(lookup) != "" {
+					s.companyProfileCache.Store(cacheKey, lookup)
+				}
+				return lookup, nil
+			})
+			brief, _ = value.(string)
+		}
 	}
 	if brief != "" {
 		return brief
@@ -72,5 +88,21 @@ func (s *InterviewService) resolveCompanyReading(ctx context.Context, companyID 
 			return reading
 		}
 	}
-	return s.lookupCompanyReading(ctx, companyName)
+	cacheKey := strings.TrimSpace(companyName)
+	if cached, ok := s.companyReadingCache.Load(cacheKey); ok {
+		reading, _ := cached.(string)
+		return reading
+	}
+	value, _, _ := s.companyReadingFlight.Do(cacheKey, func() (any, error) {
+		if cached, ok := s.companyReadingCache.Load(cacheKey); ok {
+			return cached, nil
+		}
+		reading := s.lookupCompanyReading(ctx, companyName)
+		if strings.TrimSpace(reading) != "" {
+			s.companyReadingCache.Store(cacheKey, reading)
+		}
+		return reading, nil
+	})
+	reading, _ := value.(string)
+	return reading
 }

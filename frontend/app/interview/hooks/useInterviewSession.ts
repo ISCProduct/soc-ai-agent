@@ -78,6 +78,7 @@ export function useInterviewSession({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const historyRef = useRef<{ role: string; content: string }[]>([])
+  const companyContextRef = useRef({ reading: '', info: '' })
   const aiAudioRef = useRef<HTMLAudioElement | null>(null)
   const aiAudioCtxRef = useRef<AudioContext | null>(null)
   const aiLevelRafRef = useRef<number | null>(null)
@@ -282,6 +283,12 @@ export function useInterviewSession({
     })
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     const { meta, audio } = await parseMultipartResponse(res)
+    if (typeof meta.company_reading === 'string' && meta.company_reading) {
+      companyContextRef.current.reading = meta.company_reading
+    }
+    if (typeof meta.company_info === 'string' && meta.company_info) {
+      companyContextRef.current.info = meta.company_info
+    }
     const aiText: string = meta.ai_text || ''
     setIsDeepeningQuestion(Boolean(meta.is_deepening))
     setQuestionCategory(typeof meta.question_category === 'string' ? meta.question_category : null)
@@ -543,9 +550,9 @@ export function useInterviewSession({
     formData.append('question_elapsed_seconds', String(questionElapsedSeconds))
     formData.append('question_duration_seconds', String(Math.max(60, interviewLimits.questionDurationSeconds || 180)))
     formData.append('company_name', interviewCompany?.name || '')
-    formData.append('company_reading', interviewCompany?.name_reading || '')
+    formData.append('company_reading', companyContextRef.current.reading || interviewCompany?.name_reading || '')
     formData.append('position', selectedPosition?.title || '')
-    formData.append('company_info', buildCompanyInfo(interviewCompany))
+    formData.append('company_info', companyContextRef.current.info || buildCompanyInfo(interviewCompany))
     formData.append('company_type', selectedPosition?.category || 'general')
     formData.append('company_id', String(interviewCompany?.id || 0))
     try {
@@ -557,6 +564,12 @@ export function useInterviewSession({
       })
       if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
       const { meta, audio } = await parseMultipartResponse(res)
+      if (typeof meta.company_reading === 'string' && meta.company_reading) {
+        companyContextRef.current.reading = meta.company_reading
+      }
+      if (typeof meta.company_info === 'string' && meta.company_info) {
+        companyContextRef.current.info = meta.company_info
+      }
       const userText: string = meta.user_text || ''
       const aiText: string = meta.ai_text || ''
       setIsDeepeningQuestion(Boolean(meta.is_deepening))
