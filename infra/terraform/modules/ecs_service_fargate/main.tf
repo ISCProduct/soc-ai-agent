@@ -193,6 +193,20 @@ resource "aws_ecs_task_definition" "this" {
   }
 
   tags = var.tags
+
+  lifecycle {
+    # container_definitions: デプロイ(deployment.yml)が amazon-ecs-render-task-definition で
+    # image を差し替えた新リビジョンを登録するため、applyの度に差分が出て
+    # "must be replaced" になる。サービス側は task_definition を ignore しているので
+    # 実害(稼働リビジョンの巻き戻り)は無いが、plan が毎回ノイズになり、
+    # 本当に危険な差分を見落とす原因になる。
+    #
+    # 注意: container_definitions には image だけでなく environment / secrets /
+    # logConfiguration / healthCheck も含まれる。これらを terraform から変更したい場合は
+    # 一時的にこの ignore を外して apply すること(JSON文字列なので部分的なignoreはできない)。
+    # cpu / memory はトップレベル属性なので ignore されず、従来どおり反映される。
+    ignore_changes = [container_definitions]
+  }
 }
 
 resource "aws_ecs_service" "this" {

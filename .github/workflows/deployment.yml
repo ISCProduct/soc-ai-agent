@@ -157,9 +157,13 @@ jobs:
       # ビルド中に裏で進めた起動を待ち合わせる（RDSは停止からだと最大10分程度かかる）。
       # 直前のauto-stopとレースして"stopping"の間は起動キックが素通りすることがあるため、
       # ここでも stopped を検知したら都度start-db-instanceを呼び直す（自己修復）。
+      #
+      # 待ち時間は20分。auto-stop の直後にデプロイが始まると
+      #   stopping(数分) -> stopped -> start -> available(5〜10分)
+      # を通ることになり、10分では足りずタイムアウトした実績がある。
       - name: Wait for staging infra ready
         run: |
-          for i in $(seq 1 40); do
+          for i in $(seq 1 80); do
             STATUS=$(aws rds describe-db-instances --db-instance-identifier ${PROJECT_NAME}-mysql \
               --query 'DBInstances[0].DBInstanceStatus' --output text)
             [ "$STATUS" == "available" ] && break
@@ -270,10 +274,18 @@ jobs:
               docker compose pull
               docker compose up -d
               df -h /
+              # up -d の直後はまだ running になっていないことがある。特に新規インスタンスの
+              # 初回起動(イメージpull+ネットワーク/ボリューム作成から)は遅く、即座に判定すると
+              # 起動しているのに "is not running" で落ちる。最大60秒待つ。
               for s in frontend backend edge; do
+                for _ in $(seq 1 20); do
+                  docker compose ps --status running --services | grep -qx "$s" && break
+                  sleep 3
+                done
                 docker compose ps --status running --services | grep -qx "$s" || {
                   echo "service $s is not running" >&2
                   docker compose ps -a
+                  docker compose logs --tail 50 "$s" || true
                   exit 1
                 }
               done

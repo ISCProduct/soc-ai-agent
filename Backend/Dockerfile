@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.25-bookworm AS builder
 
 WORKDIR /app
 
@@ -32,7 +32,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=1 go build -ldflags="-s -w" -o /bin/migrate ./cmd/migrate
 
 # Runtime stage
-FROM golang:1.24-bookworm
+FROM golang:1.25-bookworm
 
 WORKDIR /app
 

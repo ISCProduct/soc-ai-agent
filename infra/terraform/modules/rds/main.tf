@@ -19,6 +19,8 @@ resource "aws_db_instance" "this" {
   engine_version = var.engine_version
   instance_class = var.instance_class
 
+  allow_major_version_upgrade = var.allow_major_version_upgrade
+
   allocated_storage     = var.allocated_storage
   max_allocated_storage = var.allocated_storage * 2
   storage_type          = "gp3"
