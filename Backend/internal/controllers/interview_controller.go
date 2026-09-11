@@ -282,8 +282,10 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 
 	metaPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
 	json.NewEncoder(metaPart).Encode(map[string]string{
-		"user_text": result.UserText,
-		"ai_text":   result.AIText,
+		"user_text":       result.UserText,
+		"ai_text":         result.AIText,
+		"company_reading": result.CompanyReading,
+		"company_info":    result.CompanyInfo,
 	})
 
 	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})
@@ -339,7 +341,11 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 	ctx.Response().Header().Set("Content-Type", "multipart/mixed; boundary="+mw.Boundary())
 
 	metaPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
-	json.NewEncoder(metaPart).Encode(map[string]string{"ai_text": result.AIText})
+	json.NewEncoder(metaPart).Encode(map[string]string{
+		"ai_text":         result.AIText,
+		"company_reading": result.CompanyReading,
+		"company_info":    result.CompanyInfo,
+	})
 
 	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})
 	audioPart.Write(result.Audio)

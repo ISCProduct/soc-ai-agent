@@ -450,6 +450,13 @@ function InterviewContent() {
     if (!res.ok) throw new Error(await res.text())
     const { meta, audio } = await parseMultipartResponse(res)
     const aiText: string = meta.ai_text || ''
+    if (meta.company_reading || meta.company_info) {
+      setInterviewCompany(prev => prev ? {
+        ...prev,
+        name_reading: meta.company_reading || prev.name_reading,
+        description: meta.company_info || prev.description,
+      } : prev)
+    }
     if (aiText) {
       historyRef.current.push({ role: 'assistant', content: aiText })
       setUtterances(p => [...p, { role: 'ai', text: aiText }])
@@ -645,6 +652,13 @@ function InterviewContent() {
       })
       if (!res.ok) throw new Error(await res.text())
       const { meta, audio } = await parseMultipartResponse(res)
+      if (meta.company_reading || meta.company_info) {
+        setInterviewCompany(prev => prev ? {
+          ...prev,
+          name_reading: meta.company_reading || prev.name_reading,
+          description: meta.company_info || prev.description,
+        } : prev)
+      }
       const userText: string = meta.user_text || ''
       const aiText: string = meta.ai_text || ''
       if (userText) {

@@ -29,6 +29,8 @@ type InterviewService struct {
 	crossFeature         *CrossFeatureIntegrationService
 	jobCh                chan uint
 	workerOnce           sync.Once
+	companyReadingCache  sync.Map
+	companyProfileCache  sync.Map
 }
 
 func NewInterviewService(
@@ -491,9 +493,11 @@ func (s *InterviewService) estimateCost(start, end *time.Time) float64 {
 
 // TurnResult は1ターンの結果（AIテキスト + TTS音声バイト列）
 type TurnResult struct {
-	UserText string
-	AIText   string
-	Audio    []byte
+	UserText      string
+	AIText        string
+	Audio         []byte
+	CompanyReading string
+	CompanyInfo    string
 }
 
 // Turn はユーザー音声を受け取り、STT→Chat→TTSを実行してTurnResultを返します
@@ -523,23 +527,38 @@ func (s *InterviewService) Turn(
 		return nil, errors.New("forbidden")
 	}
 
-	// STT: Whisper でユーザー音声をテキスト化
-	userText, err := s.openaiClient.Transcribe(ctx, audioData, "audio.webm")
-	if err != nil {
-		return nil, fmt.Errorf("transcribe error: %w", err)
+	var (
+		userText     string
+		transcribeErr error
+		wg           sync.WaitGroup
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		userText, transcribeErr = s.openaiClient.Transcribe(ctx, audioData, "audio.webm")
+	}()
+
+	// STT と企業情報検索は互いに依存しないため並列実行する。
+	if companyName != "" && companyReading == "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			companyReading = s.cachedCompanyReading(ctx, companyName)
+		}()
+	}
+	if companyType == "general" && companyName != "" && companyInfo == "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			companyInfo = s.cachedCompanyProfile(ctx, companyName)
+		}()
+	}
+	wg.Wait()
+	if transcribeErr != nil {
+		return nil, fmt.Errorf("transcribe error: %w", transcribeErr)
 	}
 	if strings.TrimSpace(userText) == "" {
 		userText = "（聞き取れませんでした）"
-	}
-
-	// 読み仮名が未指定の場合はWeb検索で自動取得
-	if companyName != "" && companyReading == "" {
-		companyReading = s.lookupCompanyReading(ctx, companyName)
-	}
-
-	// 自社開発企業の場合は公式サイト情報を取得
-	if companyType == "general" && companyName != "" && companyInfo == "" {
-		companyInfo = s.lookupCompanyProfile(ctx, companyName)
 	}
 
 	// 履歴にユーザー発言を追加
@@ -576,7 +595,7 @@ func (s *InterviewService) Turn(
 		return nil, fmt.Errorf("tts error: %w", err)
 	}
 
-	return &TurnResult{UserText: userText, AIText: aiText, Audio: audio}, nil
+	return &TurnResult{UserText: userText, AIText: aiText, Audio: audio, CompanyReading: companyReading, CompanyInfo: companyInfo}, nil
 }
 
 // StartTurn は面接開始の最初のAI発話を生成します
@@ -604,12 +623,12 @@ func (s *InterviewService) StartTurn(
 
 	// 読み仮名が未指定の場合はWeb検索で自動取得
 	if companyName != "" && companyReading == "" {
-		companyReading = s.lookupCompanyReading(ctx, companyName)
+		companyReading = s.cachedCompanyReading(ctx, companyName)
 	}
 
 	// 自社開発企業の場合は公式サイト情報を取得
 	if companyType == "general" && companyName != "" && companyInfo == "" {
-		companyInfo = s.lookupCompanyProfile(ctx, companyName)
+		companyInfo = s.cachedCompanyProfile(ctx, companyName)
 	}
 
 	systemPromptStart := buildInterviewSystemPrompt(
@@ -643,7 +662,29 @@ func (s *InterviewService) StartTurn(
 		return nil, fmt.Errorf("tts error: %w", err)
 	}
 
-	return &TurnResult{AIText: aiText, Audio: audio}, nil
+	return &TurnResult{AIText: aiText, Audio: audio, CompanyReading: companyReading, CompanyInfo: companyInfo}, nil
+}
+
+func (s *InterviewService) cachedCompanyReading(ctx context.Context, companyName string) string {
+	if value, ok := s.companyReadingCache.Load(companyName); ok {
+		return value.(string)
+	}
+	reading := s.lookupCompanyReading(ctx, companyName)
+	if reading != "" {
+		s.companyReadingCache.Store(companyName, reading)
+	}
+	return reading
+}
+
+func (s *InterviewService) cachedCompanyProfile(ctx context.Context, companyName string) string {
+	if value, ok := s.companyProfileCache.Load(companyName); ok {
+		return value.(string)
+	}
+	profile := s.lookupCompanyProfile(ctx, companyName)
+	if profile != "" {
+		s.companyProfileCache.Store(companyName, profile)
+	}
+	return profile
 }
 
 // lookupCompanyReading はWeb検索を使って企業名の日本語読み（ふりがな）を取得します。
