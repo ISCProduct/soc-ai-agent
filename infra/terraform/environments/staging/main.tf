@@ -90,7 +90,18 @@ module "rds" {
   security_group_ids = [module.network.rds_security_group_id]
   instance_class     = var.db_instance_class
   db_name            = var.db_name
-  tags               = local.tags
+
+  # MySQL 8.0 は 2026-07-31 に RDS の標準サポートが終了し、08-01 から
+  # 延長サポート($0.10/vCPU時)が課金されている。8.4 は LTS で標準サポート対象(#1277)。
+  #
+  # モジュールの default は "8.0" のままにしてある。ここを変えると prod も
+  # 同時に上がってしまうため、検証が済むまでは環境側で明示的に指定する。
+  engine_version = "8.4"
+
+  # 8.0 -> 8.4 はメジャーバージョンアップグレード。これが false だと apply が失敗する。
+  allow_major_version_upgrade = true
+
+  tags = local.tags
 }
 
 module "secrets" {

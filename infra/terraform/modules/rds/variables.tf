@@ -21,6 +21,13 @@ variable "engine_version" {
   default = "8.0"
 }
 
+# メジャーバージョンアップグレード時のみ true にする。
+# 既定 false なので、うっかり engine_version を跨いで変更しても apply が失敗して止まる。
+variable "allow_major_version_upgrade" {
+  type    = bool
+  default = false
+}
+
 variable "allocated_storage" {
   type    = number
   default = 20

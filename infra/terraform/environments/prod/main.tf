@@ -224,7 +224,19 @@ module "rds" {
   deletion_protection     = var.rds_deletion_protection
   skip_final_snapshot     = var.rds_skip_final_snapshot
   backup_retention_period = var.rds_backup_retention_period
-  tags                    = local.tags
+
+  # MySQL 8.0 は 2026-07-31 に RDS の標準サポートが終了し、08-01 から
+  # 延長サポート($0.10/vCPU時)が課金されている。8.4 は LTS で標準サポート対象(#1277)。
+  # staging で先に検証済み(8.0.46 -> 8.4.9、マイグレーション/スモークとも通過)。
+  #
+  # モジュールの default は "8.0" のまま。環境ごとに明示指定して、
+  # 片方だけ上げられるようにしている。
+  engine_version = "8.4"
+
+  # 8.0 -> 8.4 はメジャーバージョンアップグレード。これが false だと apply が失敗する。
+  allow_major_version_upgrade = true
+
+  tags = local.tags
 }
 
 module "secrets" {
