@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" agent="cursor" version="24.0.0" type="device">
+  <diagram id="infra-overview" name="インフラ全体像">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="インフラ全体像（Staging 常時 + Production 指定起動）" style="text;html=1;fontSize=18;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="700" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="同一 AWS アカウント / コンピュート用途で分離" style="text;html=1;fontSize=12;fontColor=#666666;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="50" width="500" height="24" as="geometry" />
+        </mxCell>
+
+        <!-- Staging card -->
+        <mxCell id="stgBox" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#248814;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="40" y="100" width="620" height="320" as="geometry" />
+        </mxCell>
+        <mxCell id="stgTitle" value="🟢 Staging（常時起動）" style="text;html=1;fontSize=14;fontStyle=1;align=left;fontColor=#248814;" vertex="1" parent="1">
+          <mxGeometry x="60" y="110" width="280" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="stgDomain" value="stg.shukatsu-ai.jp / api-stg.shukatsu-ai.jp" style="text;html=1;fontSize=11;fontColor=#545b64;align=left;" vertex="1" parent="1">
+          <mxGeometry x="60" y="138" width="360" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="stgEcs" value="Amazon ECS&lt;br&gt;on EC2" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ecs;" vertex="1" parent="1">
+          <mxGeometry x="80" y="180" width="56" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="stgEc2" value="Amazon EC2&lt;br&gt;Container Instance" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2;" vertex="1" parent="1">
+          <mxGeometry x="200" y="180" width="56" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="stgAlb" value="Elastic Load&lt;br&gt;Balancing (ALB)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.application_load_balancer;" vertex="1" parent="1">
+          <mxGeometry x="320" y="180" width="56" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="stgRds" value="Amazon RDS&lt;br&gt;MySQL" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#3B48CC;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.rds;" vertex="1" parent="1">
+          <mxGeometry x="440" y="180" width="56" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="stgS3" value="Amazon S3" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#7AA116;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;" vertex="1" parent="1">
+          <mxGeometry x="560" y="180" width="56" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="stgNote" value="Terraform: environments/staging&#xa;desired ≥ 1 / NAT なし&#xa;コスト目安: ¥8,000〜15,000/月 + ALB" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="80" y="300" width="540" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Production card -->
+        <mxCell id="prodBox" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#D13212;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="700" y="100" width="620" height="320" as="geometry" />
+        </mxCell>
+        <mxCell id="prodTitle" value="🔴 Production（既定停止）" style="text;html=1;fontSize=14;fontStyle=1;align=left;fontColor=#D13212;" vertex="1" parent="1">
+          <mxGeometry x="720" y="110" width="300" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="prodDomain" value="shukatsu-ai.jp / api.shukatsu-ai.jp" style="text;html=1;fontSize=11;fontColor=#545b64;align=left;" vertex="1" parent="1">
+          <mxGeometry x="720" y="138" width="360" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="prodEcs" value="Amazon ECS&lt;br&gt;Fargate" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ecs;" vertex="1" parent="1">
+          <mxGeometry x="740" y="180" width="56" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="prodFargate" value="AWS Fargate&lt;br&gt;desired=0 既定" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.fargate;" vertex="1" parent="1">
+          <mxGeometry x="860" y="180" width="56" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="prodAlb" value="Elastic Load&lt;br&gt;Balancing (ALB)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.application_load_balancer;" vertex="1" parent="1">
+          <mxGeometry x="980" y="180" width="56" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="prodRds" value="Amazon RDS&lt;br&gt;MySQL" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#3B48CC;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.rds;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="180" width="56" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="prodS3" value="Amazon S3" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#7AA116;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="180" width="56" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="prodNote" value="Terraform: environments/prod&#xa;起動: (A) 本番反映時明示 / (B) 指定日終日&#xa;ALB は常時課金（Fargate は稼働分）" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;fillColor=#ffffff;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="740" y="300" width="540" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Shared -->
+        <mxCell id="sharedTitle" value="共通 / CI・CD" style="text;html=1;fontSize=13;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="460" width="200" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="gha" value="GitHub Actions&lt;br&gt;build &amp; push" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="510" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ecr" value="Amazon ECR" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ecr;" vertex="1" parent="1">
+          <mxGeometry x="230" y="505" width="56" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="r53" value="Amazon Route 53" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.route_53;" vertex="1" parent="1">
+          <mxGeometry x="360" y="505" width="56" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="sm" value="AWS Secrets&lt;br&gt;Manager" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#DD344C;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.secrets_manager;" vertex="1" parent="1">
+          <mxGeometry x="490" y="505" width="56" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="cw" value="Amazon&lt;br&gt;CloudWatch" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#E7157B;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudwatch;" vertex="1" parent="1">
+          <mxGeometry x="620" y="505" width="56" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="acm" value="AWS Certificate&lt;br&gt;Manager" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#DD344C;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.certificate_manager;" vertex="1" parent="1">
+          <mxGeometry x="750" y="505" width="56" height="56" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="gha" target="ecr">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
