@@ -31,8 +31,8 @@ type RealtimeSessionResponse struct {
 }
 
 func (cli *Client) CreateRealtimeClientSecret(ctx context.Context, session RealtimeSessionRequest) (*RealtimeSessionResponse, error) {
-	if cli.apiKey == "" {
-		return nil, errors.New("openai api key is not set")
+	if err := cli.ensureAudio(); err != nil {
+		return nil, err
 	}
 	body, err := json.Marshal(session)
 	if err != nil {
@@ -42,7 +42,7 @@ func (cli *Client) CreateRealtimeClientSecret(ctx context.Context, session Realt
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+cli.apiKey)
+	req.Header.Set("Authorization", "Bearer "+cli.audioKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}

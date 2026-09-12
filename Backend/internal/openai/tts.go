@@ -16,8 +16,8 @@ import (
 
 // Transcribe は音声データを Whisper でテキストに変換します
 func (cli *Client) Transcribe(ctx context.Context, audio []byte, filename string) (string, error) {
-	if cli.apiKey == "" {
-		return "", errors.New("openai api key is not set")
+	if err := cli.ensureAudio(); err != nil {
+		return "", err
 	}
 
 	model := resolveTranscribeModel()
@@ -38,11 +38,11 @@ func (cli *Client) Transcribe(ctx context.Context, audio []byte, filename string
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.BaseURL()+"/audio/transcriptions", &buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.AudioBaseURL()+"/audio/transcriptions", &buf)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+cli.apiKey)
+	req.Header.Set("Authorization", "Bearer "+cli.audioKey)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	client := &http.Client{Timeout: 60 * time.Second}
@@ -71,8 +71,8 @@ func (cli *Client) Transcribe(ctx context.Context, audio []byte, filename string
 
 // TTS は OpenAI TTS API でテキストを音声に変換し、mp3 バイト列を返します
 func (cli *Client) TTS(ctx context.Context, text, voice string) ([]byte, error) {
-	if cli.apiKey == "" {
-		return nil, errors.New("openai api key is not set")
+	if err := cli.ensureAudio(); err != nil {
+		return nil, err
 	}
 
 	model := os.Getenv("OPENAI_TTS_MODEL")
@@ -96,11 +96,11 @@ func (cli *Client) TTS(ctx context.Context, text, voice string) ([]byte, error) 
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.BaseURL()+"/audio/speech", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.AudioBaseURL()+"/audio/speech", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+cli.apiKey)
+	req.Header.Set("Authorization", "Bearer "+cli.audioKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 60 * time.Second}
@@ -120,6 +120,10 @@ func (cli *Client) TTS(ctx context.Context, text, voice string) ([]byte, error) 
 
 // ChatInterview は面接官として会話し、次のメッセージを返します
 func (cli *Client) ChatInterview(ctx context.Context, systemPrompt string, history []map[string]string) (string, error) {
+	// 面接の応答生成はテキスト系（音声ではない）
+	if err := cli.ensureText(); err != nil {
+		return "", err
+	}
 	type message struct {
 		Role    string `json:"role"`
 		Content string `json:"content"`
@@ -156,7 +160,7 @@ func (cli *Client) ChatInterview(ctx context.Context, systemPrompt string, histo
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+cli.apiKey)
+	req.Header.Set("Authorization", "Bearer "+cli.textKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 60 * time.Second}

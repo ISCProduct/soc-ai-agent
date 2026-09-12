@@ -39,8 +39,8 @@ func resolveWebSearchModel(override string) string {
 }
 
 func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxTokens int, modelOverride ...string) (string, error) {
-	if cli == nil || cli.c == nil {
-		return "", errors.New("openai client is nil")
+	if err := cli.ensureText(); err != nil {
+		return "", err
 	}
 
 	model := cli.DefaultModel
@@ -157,8 +157,8 @@ func isRetryableAPIErr(err error) bool {
 // WebSearchJSON は Responses API の web_search で 1 クエリだけ実行する。
 // Chat Completions の search-preview / gpt-5-search-api は使わない（高トークン・高額）。
 func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxTokens int, modelOverride ...string) (string, error) {
-	if cli == nil || cli.c == nil {
-		return "", errors.New("openai client is nil")
+	if err := cli.ensureText(); err != nil {
+		return "", err
 	}
 	if maxTokens < 600 {
 		maxTokens = 600

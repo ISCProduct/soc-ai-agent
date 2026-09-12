@@ -82,7 +82,7 @@ func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (s
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+cli.apiKey)
+	req.Header.Set("Authorization", "Bearer "+cli.textKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 120 * time.Second}
@@ -245,8 +245,8 @@ func (cli *Client) callResponsesAPIWithTempFallback(ctx context.Context, input a
 }
 
 func (cli *Client) Responses(ctx context.Context, input string, modelOverride ...string) (string, error) {
-	if cli == nil || cli.c == nil {
-		return "", errors.New("openai client is nil")
+	if err := cli.ensureText(); err != nil {
+		return "", err
 	}
 
 	model := cli.DefaultModel
@@ -309,8 +309,8 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 	return "", lastErr
 }
 func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, userPrompt string, temperature float32, modelOverride ...string) (string, error) {
-	if cli == nil || cli.c == nil {
-		return "", errors.New("openai client is nil")
+	if err := cli.ensureText(); err != nil {
+		return "", err
 	}
 
 	model := cli.DefaultModel
@@ -382,8 +382,8 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 
 // ChatCompletionJSON uses the go-openai SDK to request a JSON response.
 func (cli *Client) ResponsesWithMaxTokens(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxOutputTokens int, modelOverride ...string) (string, error) {
-	if cli == nil || cli.c == nil {
-		return "", errors.New("openai client is nil")
+	if err := cli.ensureText(); err != nil {
+		return "", err
 	}
 
 	model := cli.DefaultModel
