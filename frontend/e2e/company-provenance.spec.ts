@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { setupAuth } from './fixtures/auth'
 
 /**
  * 企業情報の出どころ表示（#1125 フェーズ1）。
@@ -43,6 +44,12 @@ async function stubCompany(page: Page, overrides: Record<string, unknown>) {
 }
 
 test.describe('企業情報の出どころ表示', () => {
+  // /company/[id] は requireSessionUser() で保護されており、
+  // 未ログインだと /login へリダイレクトしてバッジまで到達しない
+  test.beforeEach(async ({ page }) => {
+    await setupAuth(page)
+  })
+
   test('AI推定の情報にはバッジと確信度、根拠リンクが出る', async ({ page }) => {
     await stubCompany(page, {
       source_type: 'web_search',
