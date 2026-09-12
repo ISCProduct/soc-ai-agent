@@ -17,7 +17,7 @@ func NewUserCompanyMatchRepository(db *gorm.DB) *UserCompanyMatchRepository {
 	return &UserCompanyMatchRepository{db: db}
 }
 
-// upsertAssignments は衝突時に上書きする列。
+// upsertAssignments は衝突時に上書きする列（ON DUPLICATE KEY UPDATE の右辺）。
 // is_viewed / is_favorited / is_applied はユーザー操作の結果なので含めない（再計算で消さない）。
 var upsertAssignments = clause.AssignmentColumns([]string{
 	"job_position_id",
@@ -35,11 +35,6 @@ var upsertAssignments = clause.AssignmentColumns([]string{
 	"match_reason",
 	"updated_at",
 })
-
-// matchConflictColumns は一意キー uniq_user_session_company（migration 000022）に対応する。
-var matchConflictColumns = []clause.Column{
-	{Name: "user_id"}, {Name: "session_id"}, {Name: "company_id"},
-}
 
 // CreateOrUpdate マッチング結果を作成または更新
 func (r *UserCompanyMatchRepository) CreateOrUpdate(match *entity.UserCompanyMatch) error {
@@ -73,10 +68,11 @@ func (r *UserCompanyMatchRepository) CreateOrUpdateBatch(matches []*entity.UserC
 		return 0, nil
 	}
 
-	err := r.db.Clauses(clause.OnConflict{
-		Columns:   matchConflictColumns,
-		DoUpdates: upsertAssignments,
-	}).CreateInBatches(rows, 100).Error
+	// MySQL ドライバは OnConflict.Columns を無視して ON DUPLICATE KEY UPDATE を書くだけなので
+	// 衝突検出は一意キー uniq_user_session_company（migration 000023）に依存する。
+	// 将来この表に別の一意キーを足すと、そちらでも衝突して同じ列が更新される点に注意。
+	err := r.db.Clauses(clause.OnConflict{DoUpdates: upsertAssignments}).
+		CreateInBatches(rows, 100).Error
 	if err != nil {
 		return 0, err
 	}

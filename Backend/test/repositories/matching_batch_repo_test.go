@@ -107,11 +107,58 @@ func TestCreateOrUpdateBatch_SingleUpsert(t *testing.T) {
 	if strings.Contains(sql, "UPDATE `user_company_matches` SET") {
 		t.Errorf("件数分の UPDATE が残っている: %s", sql)
 	}
-	// ユーザー操作の結果は再計算で消さない
-	for _, col := range []string{"is_viewed", "is_favorited", "is_applied"} {
-		if strings.Contains(sql[strings.Index(sql, "ON DUPLICATE KEY UPDATE"):], col) {
-			t.Errorf("%s が衝突時の更新対象に含まれている: %s", col, sql)
+
+	idx := strings.Index(sql, "ON DUPLICATE KEY UPDATE")
+	if idx < 0 {
+		t.Fatalf("upsert になっていない: %s", sql)
+	}
+	assignments := sql[idx:]
+
+	// スコア・理由・更新時刻は再計算で上書きされる（このIssueの目的）
+	for _, col := range []string{"match_score", "match_reason", "updated_at"} {
+		if !strings.Contains(assignments, col) {
+			t.Errorf("%s が衝突時の更新対象に含まれていない: %s", col, assignments)
 		}
+	}
+	// ユーザー操作の結果と作成時刻は再計算で消さない
+	for _, col := range []string{"is_viewed", "is_favorited", "is_applied", "created_at"} {
+		if strings.Contains(assignments, col) {
+			t.Errorf("%s が衝突時の更新対象に含まれている: %s", col, assignments)
+		}
+	}
+}
+
+// TestCreateOrUpdateBatch_SplitsIntoBatches は100件超でもクエリが件数分にならないことを検証する。
+// CreateInBatches の100件刻みで分割されるため、250件なら3クエリに収まる。
+func TestCreateOrUpdateBatch_SplitsIntoBatches(t *testing.T) {
+	repo, mock, captured := newMatchRepoMock(t)
+
+	mock.ExpectBegin()
+	for range 3 {
+		mock.ExpectExec("INSERT INTO `user_company_matches` .* ON DUPLICATE KEY UPDATE").
+			WillReturnResult(sqlmock.NewResult(1, 100))
+	}
+	mock.ExpectCommit()
+
+	matches := make([]*entity.UserCompanyMatch, 0, 250)
+	for i := range 250 {
+		matches = append(matches, &entity.UserCompanyMatch{
+			UserID: 1, SessionID: "s1", CompanyID: uint(i + 1), MatchScore: float64(i),
+		})
+	}
+
+	saved, err := repo.CreateOrUpdateBatch(matches)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if saved != 250 {
+		t.Fatalf("saved=%d want 250", saved)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	if len(*captured) != 3 {
+		t.Fatalf("発行クエリ数=%d want 3（250件が100件刻みで分割される）", len(*captured))
 	}
 }
 
