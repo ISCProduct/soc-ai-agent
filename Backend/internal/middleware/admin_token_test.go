@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +13,8 @@ const testAdminSecret = "test-admin-secret"
 
 // TestParseAdminToken は署名・有効期限・形式の検証をテーブル駆動で確認する（#1155）。
 func TestParseAdminToken(t *testing.T) {
+	// 実行環境に ADMIN_TOKEN_TTL_HOURS が設定されていると TTL 境界のケースが落ちるため固定する
+	t.Setenv("ADMIN_TOKEN_TTL_HOURS", "")
 	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
 	const userID = uint(7)
 	const email = "admin@example.com"
@@ -37,14 +41,29 @@ func TestParseAdminToken(t *testing.T) {
 		},
 		{
 			// 旧形式を持っているのは正規の管理者なので、再ログインを案内できるよう期限切れ扱いにする
-			name:   "期限を持たない旧形式は期限切れとして拒否",
-			token:  adminTokenSignature(userID, email, testAdminSecret, now.Unix()),
+			name:   "期限を持たない旧形式は期限切れとして拒否（署名が一致する場合）",
+			token:  legacyAdminSignature(userID, email, testAdminSecret),
 			userID: userID, email: email, secret: testAdminSecret, at: now, wantErr: ErrAdminTokenExpired,
 		},
 		{
 			name:  "旧形式ですらない文字列は無効",
 			token: "garbage", userID: userID, email: email, secret: testAdminSecret,
 			at: now, wantErr: ErrAdminTokenInvalid,
+		},
+		{
+			// 署名を見ずに形式だけで expired を返すと、hex 64文字を投げるだけで
+			// 「そのメールアドレスが管理者か」をレスポンスの差から判別できてしまう
+			name:  "旧形式の長さでも署名が違えば無効（列挙オラクルを作らない）",
+			token: strings.Repeat("ab", 32), userID: userID, email: email, secret: testAdminSecret,
+			at: now, wantErr: ErrAdminTokenInvalid,
+		},
+		{
+			name: "発行時刻に先行ゼロを付けた別表記は無効",
+			token: func() string {
+				raw, sig, _ := splitForTest(valid)
+				return "0" + raw + "." + sig
+			}(),
+			userID: userID, email: email, secret: testAdminSecret, at: now, wantErr: ErrAdminTokenInvalid,
 		},
 		{
 			name: "署名が改ざんされていると拒否", token: valid[:len(valid)-1] + "0",
@@ -96,7 +115,7 @@ func TestParseAdminToken(t *testing.T) {
 			if tt.wantErr == nil && err != nil {
 				t.Fatalf("err=%v, 有効であるべき", err)
 			}
-			if tt.wantErr != nil && err != tt.wantErr {
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err=%v want %v", err, tt.wantErr)
 			}
 		})

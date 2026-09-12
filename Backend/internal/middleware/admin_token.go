@@ -79,13 +79,23 @@ func parseAdminTokenAt(token string, userID uint, email, secret string, now time
 		// 期限を持たない旧形式（HMAC-SHA256 の hex 64文字のみ）は受け付けない。
 		// ただし旧形式を持っているのは正規の管理者なので、無効ではなく期限切れとして扱い
 		// 「再ログインしてください」と案内できるようにする(#1155)。
-		if isLegacyAdminToken(token) {
+		//
+		// 案内を出すのは署名が一致した場合だけ。署名を見ずに形式だけで expired を返すと、
+		// 適当な hex 64文字を投げるだけで「そのメールアドレスが管理者か」を
+		// レスポンスの差から判別できる（列挙オラクル）。
+		if isLegacyAdminToken(token) &&
+			hmac.Equal([]byte(token), []byte(legacyAdminSignature(userID, email, secret))) {
 			return time.Time{}, ErrAdminTokenExpired
 		}
 		return time.Time{}, ErrAdminTokenInvalid
 	}
 	issuedAtUnix, err := strconv.ParseInt(rawIssuedAt, 10, 64)
 	if err != nil {
+		return time.Time{}, ErrAdminTokenInvalid
+	}
+	// 符号や先行ゼロ（"+123" / "0123"）で同じ署名に対する別表記を作れないようにする。
+	// 将来トークン文字列をキーにした失効・リプレイ検知を入れるときに効く。
+	if strconv.FormatInt(issuedAtUnix, 10) != rawIssuedAt {
 		return time.Time{}, ErrAdminTokenInvalid
 	}
 	expected := adminTokenSignature(userID, email, secret, issuedAtUnix)
@@ -104,18 +114,26 @@ func parseAdminTokenAt(token string, userID uint, email, secret string, now time
 	return issuedAt, nil
 }
 
+// legacyAdminSignature は #1155 以前の payload（発行時刻なし）の HMAC を返す。
+// 旧トークンを持つ正規の管理者にだけ再ログイン案内を出すために使う。
+func legacyAdminSignature(userID uint, email, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	fmt.Fprintf(mac, "%d:%s", userID, email)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// LegacyAdminTokenForTest は #1155 以前の形式のトークンを返す（移行挙動のテスト用）。
+// 本番コードからは使わない。
+func LegacyAdminTokenForTest(userID uint, email, secret string) string {
+	return legacyAdminSignature(userID, email, secret)
+}
+
 // isLegacyAdminToken は #1155 以前の形式（発行時刻を持たない HMAC-SHA256 の hex）かを判定する。
 func isLegacyAdminToken(token string) bool {
 	if len(token) != sha256.Size*2 {
 		return false
 	}
 	_, err := hex.DecodeString(token)
-	return err == nil
-}
-
-// VerifyAdminToken はトークンの署名と有効期限を検証する。
-func VerifyAdminToken(token string, userID uint, email, secret string) bool {
-	_, err := ParseAdminToken(token, userID, email, secret)
 	return err == nil
 }
 
