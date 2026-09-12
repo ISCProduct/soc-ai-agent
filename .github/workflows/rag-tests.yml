@@ -25,7 +25,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # CLAUDE.md の正規手順どおり constraints.txt は -c で渡す（#1159）。
+          # rag/Dockerfile と同じ正規手順。constraints.txt は -c で渡す（#1159）。
           # 旧: `pip install -r rag/constraints.txt || true` は constraints を
           # requirements として入れるため、litellm 等の推移的要求が pydantic /
           # tiktoken の ==ピンを超えて解決しても `|| true` で失敗が隠れ、

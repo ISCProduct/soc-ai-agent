@@ -248,7 +248,7 @@ GET /training/export
 |---------|------|
 | `rag/main.py` | FastAPI メインアプリケーション |
 | `rag/training_api.py` | ファインチューニングデータ出力 API |
-| `rag/constraints.txt` | 固定バージョン依存関係（**本番環境ではこちらを使用**） |
+| `rag/constraints.txt` | バージョン制約ファイル（`-c` で渡す。単体で `-r` に渡さない） |
 | `rag/requirements.txt` | 参考用（バージョン指定なし） |
 | `rag/export_training_data.py` | ログからトレーニングデータを生成 |
 
@@ -265,7 +265,7 @@ docker compose logs -f rag-review
 
 # Python 環境での直接起動（デバッグ時）
 cd rag
-pip install -r constraints.txt
+pip install -r requirements.txt -c constraints.txt
 LOG_LEVEL=DEBUG python3 main.py
 ```
 

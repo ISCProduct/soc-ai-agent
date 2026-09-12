@@ -227,6 +227,8 @@ def _skip_if_marker_not_applicable(req: Requirement) -> None:
         pytest.skip(f"{req.name} は現環境ではマーカー不成立: {req.marker}")
 
 
+# pip は既定で prerelease をインストールしないため、検証も prereleases=False で揃える。
+# packaging の SpecifierSet.contains() の既定はバージョンにより変わるため明示する（packaging は推移的依存）。
 def _installed_version(req: Requirement) -> str:
     try:
         return importlib.metadata.version(req.name)
@@ -235,6 +237,7 @@ def _installed_version(req: Requirement) -> str:
             f"{req.name}: requirements.txt に宣言されているがインストールされていない。"
             "`pip install -r requirements.txt -c constraints.txt` で環境を作り直すこと"
         )
+        raise AssertionError("unreachable")  # pytest.fail は必ず送出する
 
 
 class TestDeclaredPackagesMatchInstalled:
@@ -246,7 +249,7 @@ class TestDeclaredPackagesMatchInstalled:
     依存を追加しても自動的に検証対象になる。
     """
 
-    def test_requirements_txt_is_parsable(self):
+    def test_declaration_files_are_parsable(self):
         """requirements.txt / constraints.txt の全行が Requirement として解釈できる。"""
         assert not _DECLARED_ERRORS, f"requirements.txt にパースできない行がある: {_DECLARED_ERRORS}"
         assert not _CONSTRAINTS_ERRORS, f"constraints.txt にパースできない行がある: {_CONSTRAINTS_ERRORS}"
@@ -256,46 +259,47 @@ class TestDeclaredPackagesMatchInstalled:
         assert _DECLARED, "requirements.txt の宣言が1件も読めていない"
 
     @pytest.mark.parametrize("req", _DECLARED, ids=[r.name for r in _DECLARED])
-    def test_requirements_declaration_has_version_spec(self, req: Requirement):
-        """宣言にバージョン指定がある。
+    def test_requirements_declaration_is_bounded(self, req: Requirement):
+        """直接依存は上下から縛られている（`==` 系1件、または下限と上限の両方）。
 
-        指定が空だと SpecifierSet.contains() が常に True になり、全件検証が
-        「何も検証していない」状態で緑になる（langchain 1.x 固定 #894 や
-        chromadb <0.7.0 固定 #489 の意図が黙って失われる）。
+        削除した旧テスト（chromadb / langchain 系のインストール済み検証）が
+        `assert lower/upper is not None` で守っていたのは「上限・下限が宣言されていること」。
+        非空 specifier の確認だけでは、`langchain-core>=1.0`（上限なし）のように
+        片側を落としても素通りするため、langchain 1.x 固定(#894)や
+        chromadb <0.7.0 固定(#489)の意図が黙って失われる。
         """
-        assert str(req.specifier), f"{req.name}: requirements.txt にバージョン指定が無い"
+        if req.url:
+            # 直接参照（`pkg @ git+https://...`）は specifier ではなく URL でピン留めする形式
+            return
+        ops = {spec.operator for spec in req.specifier}
+        bounded = ops & {"==", "===", "~="} or ({">=", ">"} & ops and {"<", "<="} & ops)
+        assert bounded, (
+            f"{req.name}: 宣言 {req.specifier or '(指定なし)'} が上限・下限の両方を縛っていない"
+        )
 
     @pytest.mark.parametrize("req", _DECLARED, ids=[r.name for r in _DECLARED])
     def test_installed_satisfies_requirements(self, req: Requirement):
         """インストール済み版が requirements.txt の宣言を満たしている。"""
         _skip_if_marker_not_applicable(req)
         installed = _installed_version(req)
-        assert req.specifier.contains(installed), (
+        assert req.specifier.contains(installed, prereleases=False), (
             f"{req.name}: インストール済み {installed} が宣言 {req.specifier} を満たしていない。"
             "`pip install -r requirements.txt -c constraints.txt` で環境を作り直すこと (#1159)"
-        )
-
-    @pytest.mark.parametrize("req", _DECLARED, ids=[r.name for r in _DECLARED])
-    def test_installed_satisfies_constraints(self, req: Requirement):
-        """constraints.txt にも宣言がある場合、インストール済み版がそちらも満たしている。"""
-        _skip_if_marker_not_applicable(req)
-        con = _CONSTRAINED.get(canonicalize_name(req.name))
-        if con is None:
-            pytest.skip(f"{req.name} は constraints.txt に宣言が無い")
-        installed = importlib.metadata.version(req.name)
-        assert con.specifier.contains(installed), (
-            f"{req.name}: インストール済み {installed} が constraints.txt の "
-            f"{con.specifier} を満たしていない (#1159)"
         )
 
     @pytest.mark.parametrize(
         "req", _CONSTRAINTS_DECLARED, ids=[r.name for r in _CONSTRAINTS_DECLARED]
     )
-    def test_installed_satisfies_constraints_only_declarations(self, req: Requirement):
-        """constraints.txt にしか無い宣言（numpy / litellm / httpx 等）も検証する。
+    def test_installed_satisfies_constraints(self, req: Requirement):
+        """constraints.txt の全宣言について、インストール済み版が制約を満たしている。
 
-        これらは推移的依存の範囲を縛るための制約なので、宣言が守られていなければ
-        #1067 と同種の乖離になる。未インストール（その推移的依存が入らない構成）は skip。
+        requirements.txt にある直接依存も、constraints.txt にしか無い宣言
+        （numpy / litellm / httpx）も同じ扱いで検証する。後者は推移的依存の範囲を
+        縛るための制約なので、守られていなければ #1067 と同種の乖離になる。
+        未インストール（その推移的依存が入らない構成）は skip。
+
+        constraints 側には上下限の両方を要求しない（`numpy<3.0` のように
+        上限だけを縛る設計の宣言があるため）。
         """
         _skip_if_marker_not_applicable(req)
         assert str(req.specifier), f"{req.name}: constraints.txt にバージョン指定が無い"
@@ -303,7 +307,7 @@ class TestDeclaredPackagesMatchInstalled:
             installed = importlib.metadata.version(req.name)
         except importlib.metadata.PackageNotFoundError:
             pytest.skip(f"{req.name} は未インストール（推移的依存が入っていない）")
-        assert req.specifier.contains(installed), (
+        assert req.specifier.contains(installed, prereleases=False), (
             f"{req.name}: インストール済み {installed} が constraints.txt の "
             f"{req.specifier} を満たしていない (#1159)"
         )

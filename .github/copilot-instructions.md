@@ -20,7 +20,7 @@
 ## 主要コマンド
 - Backend: `cd Backend && go run ./cmd/server`
 - Frontend: `cd frontend && npm run dev`
-- RAG: `cd rag && pip install -r constraints.txt && python3 main.py`
+- RAG: `cd rag && pip install -r requirements.txt -c constraints.txt && python3 main.py`
 - Docker: `docker compose up -d`（必要に応じて `--profile rag`）
 
 ## レビュー観点

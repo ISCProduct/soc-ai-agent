@@ -186,14 +186,14 @@ RAG サービスは重いため、必要な場合のみ起動してください�
 ```sh
 cd rag
 
-# 依存インストール（constraints.txt で固定バージョンを使用）
-pip install -r constraints.txt
+# 依存インストール（requirements.txt の宣言を constraints.txt で縛る）
+pip install -r requirements.txt -c constraints.txt
 
 # サービス起動（http://localhost:9000）
 python3 main.py
 ```
 
-> **重要**: RAG の依存パッケージは `constraints.txt` で固定されています。`requirements.txt` ではなく `constraints.txt` を使用してください。バージョンの違いで動作しなくなる場合があります。
+> **重要**: 必ず `-c constraints.txt` を付けてください。`pip install -r constraints.txt`（constraints を requirements として渡す形）だと、`requirements.txt` にしか宣言が無いパッケージ（uvicorn 等）が推移的依存として最新版で入り、宣言と実インストールが乖離します（#1159）。乖離は `rag/tests/test_dependency_constraints.py` が検知して落ちます。
 
 ---
 
@@ -244,7 +244,7 @@ npx playwright test
 |------|------|------|
 | `DB接続エラー` | MySQL が未起動 / `.env` の設定ミス | `docker compose up -d db` を実行、または `.env` を確認 |
 | `OPENAI_API_KEY が未設定` | AI 機能を使う場合に必要 | `.env` に `OPENAI_API_KEY` を設定 |
-| `rag-review 起動失敗` | 依存パッケージのバージョン不一致 | `pip install -r constraints.txt` で固定バージョンを使用 |
+| `rag-review 起動失敗` | 依存パッケージのバージョン不一致 | `pip install -r requirements.txt -c constraints.txt` で作り直す |
 | `CORS エラー（開発時）` | `ALLOWED_ORIGINS` 未設定 | `.env` に `ALLOWED_ORIGINS=http://localhost:3000` を追加 |
 | `フロントビルド失敗` | Node.js バージョンが古い | Node.js 18 以上を使用（`nvm use 18` 等） |
 | `TOKEN_ENCRYPTION_KEY 警告` | GitHub 連携に必要 | 64 桁の hex キーを生成して設定（`python3 -c "import secrets; print(secrets.token_hex(32))"`) |
