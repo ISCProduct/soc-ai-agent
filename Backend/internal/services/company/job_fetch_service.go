@@ -3,6 +3,7 @@ package company
 import (
 	"Backend/domain/repository"
 	"Backend/internal/companyfetch"
+	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/ragclient"
@@ -126,7 +127,7 @@ func (s *JobFetchService) FetchAndSaveJobs(ctx context.Context, companyID uint, 
 	// RAGのChromaDBに求人情報を保存してレビュー精度を向上させる
 	if len(saved) > 0 {
 		ragContent := buildJobsRAGContent(company.Name, allJobs)
-		go s.pushContextToRAG(company.Name, "jobs", ragContent)
+		go s.pushContextToRAG(middleware.GetRequestID(ctx), company.Name, "jobs", ragContent)
 	}
 
 	return saved, nil
@@ -180,13 +181,14 @@ func (s *JobFetchService) FetchAndSavePersona(ctx context.Context, companyID uin
 
 	// RAGのChromaDBに人物像データを保存して履歴書・ESレビューの精度を向上させる
 	ragContent := buildPersonaRAGContent(company.Name, companyInfo, profile)
-	go s.pushContextToRAG(company.Name, "persona", ragContent)
+	go s.pushContextToRAG(middleware.GetRequestID(ctx), company.Name, "persona", ragContent)
 
 	return profile, nil
 }
 
 // pushContextToRAG は取得した企業情報をRAGサービスのChromaDBに非同期でpushする。
-func (s *JobFetchService) pushContextToRAG(companyName, contextType, content string) {
+// requestID は呼び出し元リクエストのIDをRAGのログまで引き継ぐために受け取る(#1188)。
+func (s *JobFetchService) pushContextToRAG(requestID, companyName, contextType, content string) {
 	ragURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
 	if ragURL == "" {
 		return
@@ -200,15 +202,16 @@ func (s *JobFetchService) pushContextToRAG(companyName, contextType, content str
 		return
 	}
 	url := strings.TrimRight(ragURL, "/") + "/company/context"
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
+	// 呼び出し元リクエストはすでに完了している可能性があるため、
+	// キャンセルは引き継がずリクエストIDのみ引き継ぐ。
+	ctx, cancel := context.WithTimeout(middleware.WithRequestID(context.Background(), requestID), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 	ragclient.SetAuthHeader(req)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	req = req.WithContext(ctx)
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {

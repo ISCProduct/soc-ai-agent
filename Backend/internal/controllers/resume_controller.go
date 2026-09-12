@@ -116,7 +116,7 @@ func (c *ResumeController) Review(ctx echo.Context) error {
 		payload.CandidateType,
 	)
 
-	review, items, err := c.resumeService.ReviewDocument(uint(docID), userID, payload.CompanyName, payload.JobTitle, payload.CandidateType)
+	review, items, err := c.resumeService.ReviewDocument(ctx.Request().Context(), uint(docID), userID, payload.CompanyName, payload.JobTitle, payload.CandidateType)
 	if err != nil {
 		log.Printf("resume_review: failed document_id=%d err=%v", docID, err)
 		if errors.Is(err, shared.ErrForbidden) {

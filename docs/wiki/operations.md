@@ -5,6 +5,7 @@
 1. [デプロイ手順](#1-デプロイ手順)
 2. [定期バッチ作業](#2-定期バッチ作業)
 3. [監視項目](#3-監視項目)
+   - [リクエストIDでサービス横断追跡](#31-リクエストidでサービス横断追跡-1188)
 4. [障害対応](#4-障害対応)
 5. [データベース管理](#5-データベース管理)
 6. [管理画面操作](#6-管理画面操作)
@@ -160,6 +161,34 @@ docker compose logs app | grep "\[CrossFeature\]"
 # 面接レポート生成の状況
 docker compose logs app | grep "\[Interview\]"
 ```
+
+---
+
+## 3.1 リクエストIDでサービス横断追跡 (#1188)
+
+1リクエストに1つのIDを振り、FE -> BE -> RAG のログを同じIDで突き合わせる。
+追加のトレーシング基盤（OpenTelemetry / Jaeger）は導入していない。構造化ログの
+突き合わせで足りるため、コスト削減方針と両立させている。
+
+| 区間 | ヘッダー | 採番/検証 |
+| --- | --- | --- |
+| ブラウザ -> Next.js | `X-Request-ID` | `frontend/middleware.ts` が採番。クライアント指定値は `^[A-Za-z0-9_-]{1,64}$` のみ採用し、それ以外は採番し直す |
+| Next.js -> Backend | `X-Request-ID` | Route Handler が `extractUserAuthHeaders` / `adminProxyHeaders` で転送 |
+| Backend 内 | - | `middleware.RequestIDMiddleware` がコンテキストへ格納。レスポンスにも同ヘッダーを返す |
+| Backend -> RAG | `X-Trace-ID` + `X-Request-ID` | `ragclient.SetAuthHeader` がコンテキストから付与 |
+| RAG 内 | - | `_trace_id_middleware` が `trace_id` として構造化ログへ出力し、両ヘッダーで返す |
+
+ユーザーから不具合報告を受けたときは、ブラウザのレスポンスヘッダー `X-Request-ID`
+を聞き取り、各サービスのログを横断 grep する。
+
+```sh
+RID=<X-Request-ID の値>
+docker compose logs app        | grep "$RID"
+docker compose logs rag-review | grep "$RID"
+```
+
+バックグラウンド処理（求人情報のRAGへのpush等）はリクエストのキャンセルは
+引き継がず、IDのみ引き継ぐ。呼び出し元リクエストが完了済みでも追跡できる。
 
 ---
 
