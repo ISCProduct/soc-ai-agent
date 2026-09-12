@@ -64,7 +64,7 @@ func (cli *Client) TranscribeWithModel(ctx context.Context, audio []byte, filena
 	req.Header.Set("Authorization", "Bearer "+cli.audioKey)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 
-	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
+	resp, err := cli.httpClientFor("audio", 60*time.Second).Do(req)
 	if err != nil {
 		return "", err
 	}
