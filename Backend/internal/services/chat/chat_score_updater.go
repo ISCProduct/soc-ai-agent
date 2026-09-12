@@ -17,7 +17,7 @@ import (
 // 戻り値の bool は「有効な品質回答かどうか」を示す（進捗カウントに使用）。
 func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, sessionID, message string, jobCategoryID uint) (bool, error) {
 	// 会話履歴から直近の質問を取得
-	history, err := s.chatMessageRepo.FindRecentBySessionID(sessionID, 5)
+	history, err := s.chatMessageRepo.FindRecentBySessionIDForUser(sessionID, userID, 5)
 	if err != nil {
 		log.Printf("Warning: failed to get history for analysis: %v\n", err)
 		history = []models.ChatMessage{}

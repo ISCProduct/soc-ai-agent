@@ -115,11 +115,11 @@ func (s *AnalysisScoringService) calculateAptitudeScore(userID uint, sessionID s
 	return clamp01(sum / count), axisScores
 }
 
-func (s *AnalysisScoringService) calculateFutureScore(sessionID string) (float64, []string) {
+func (s *AnalysisScoringService) calculateFutureScore(userID uint, sessionID string) (float64, []string) {
 	if s.chatMessageRepo == nil || s.futureAnalyzer == nil {
 		return 0, nil
 	}
-	messages, err := s.chatMessageRepo.FindBySessionID(sessionID)
+	messages, err := s.chatMessageRepo.FindBySessionIDForUser(sessionID, userID)
 	if err != nil {
 		return 0, nil
 	}

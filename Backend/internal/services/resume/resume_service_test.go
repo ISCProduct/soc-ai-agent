@@ -21,6 +21,8 @@ import (
 
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
+
+	"gorm.io/gorm"
 )
 
 func makeUploadedFileHeader(t *testing.T, filename string, content []byte, contentType string) *multipart.FileHeader {
@@ -84,6 +86,15 @@ func (r *resumeRepoStub) UpdateDocument(doc *models.ResumeDocument) error {
 func (r *resumeRepoStub) FindDocumentByID(id uint) (*models.ResumeDocument, error) {
 	if r.doc == nil || r.doc.ID != id {
 		return nil, errors.New("not found")
+	}
+	return r.doc, nil
+}
+
+// FindDocumentByIDForUser は user_id でスコープした取得（#1156）。
+// 所有者が違えば gorm.ErrRecordNotFound を返す（実装と同じ挙動）。
+func (r *resumeRepoStub) FindDocumentByIDForUser(id, userID uint) (*models.ResumeDocument, error) {
+	if r.doc == nil || r.doc.ID != id || r.doc.UserID != userID {
+		return nil, gorm.ErrRecordNotFound
 	}
 	return r.doc, nil
 }

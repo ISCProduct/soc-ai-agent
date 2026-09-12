@@ -171,7 +171,7 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 	}
 	interestScore := s.calculateInterestScore(userID, sessionID)
 	aptitudeScore, axes := s.calculateAptitudeScore(userID, sessionID)
-	futureScore, signals := s.calculateFutureScore(sessionID)
+	futureScore, signals := s.calculateFutureScore(userID, sessionID)
 
 	finalScore := (jobScore * 0.4) + (interestScore * 0.25) + (aptitudeScore * 0.2) + (futureScore * 0.15)
 
@@ -204,7 +204,7 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 	// LLMによる簡易サマリ（利用可能な場合）
 	if s.aiClient != nil && s.chatMessageRepo != nil && s.conversationContextRepo != nil {
 		// 直近のユーザーメッセージを収集
-		msgs, err := s.chatMessageRepo.FindRecentBySessionID(sessionID, 30)
+		msgs, err := s.chatMessageRepo.FindRecentBySessionIDForUser(sessionID, userID, 30)
 		if err == nil {
 			// プロンプト構築：スコア要約 + 最近メッセージ
 			contextBytes, _ := json.Marshal(map[string]any{

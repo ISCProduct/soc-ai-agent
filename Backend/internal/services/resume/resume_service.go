@@ -9,6 +9,7 @@ import (
 	"Backend/internal/services/shared"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -16,6 +17,8 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+
+	"gorm.io/gorm"
 )
 
 // allowedMIMETypes はアップロード可能なファイルタイプ
@@ -168,12 +171,11 @@ type ResumeUploadResult struct {
 }
 
 func (s *ResumeService) EnsureDocumentOwner(documentID uint, requestingUserID uint) error {
-	doc, err := s.repo.FindDocumentByID(documentID)
-	if err != nil {
+	if _, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return shared.ErrForbidden
+		}
 		return err
-	}
-	if doc.UserID != requestingUserID {
-		return shared.ErrForbidden
 	}
 	return nil
 }
