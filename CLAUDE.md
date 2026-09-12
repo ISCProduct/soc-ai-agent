@@ -7,7 +7,7 @@ SOC AI Agent: 採用支援SaaS (Go + Next.js + Python RAG)
 ### Frontend (Next.js)
 - `cd frontend && npm run dev` (3000) / `npm run build` / `npm run lint`
 ### RAG (Python)
-- `cd rag && pip install -r constraints.txt && python3 main.py` (9000)
+- `cd rag && pip install -r requirements.txt -c constraints.txt && python3 main.py` (9000)
 ### Docker
 - `docker compose up -d`（db/app/frontend/rag-review/chroma/company-graphを含む全サービスを起動。`docker compose stop` / `down` で全停止・削除可）
 - RAGのみ起動/リビルド: `make rag-up` または `docker compose up -d --build chroma rag-review`

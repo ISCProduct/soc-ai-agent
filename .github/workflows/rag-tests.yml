@@ -23,11 +23,16 @@ jobs:
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
-      - name: Install dependencies if present
+      - name: Install dependencies
         run: |
-          if [ -f rag/requirements.txt ]; then pip install -r rag/requirements.txt; fi
-          if [ -f rag/constraints.txt ]; then pip install -r rag/constraints.txt || true; fi
-          pip install pytest coverage pytest-cov
+          # rag/Dockerfile と同じ正規手順。constraints.txt は -c で渡す（#1159）。
+          # 旧: `pip install -r rag/constraints.txt || true` は constraints を
+          # requirements として入れるため、litellm 等の推移的要求が pydantic /
+          # tiktoken の ==ピンを超えて解決しても `|| true` で失敗が隠れ、
+          # 宣言と実インストールが乖離した状態でテストが走りえた。
+          # テスト用ツールも既存のピンを崩さないよう -c で縛る。
+          pip install -r rag/requirements.txt -c rag/constraints.txt
+          pip install coverage pytest-cov -c rag/requirements.txt -c rag/constraints.txt
 
       - name: Run tests with coverage
         working-directory: rag
