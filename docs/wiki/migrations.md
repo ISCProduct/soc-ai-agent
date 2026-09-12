@@ -145,6 +145,15 @@ upsert により上書きされます。`session_id IS NULL` の行は空文字�
 `SessionID string` のため常に空文字を書く。NULL のままだと MySQL の UNIQUE が複数 NULL を
 許すため一意キーが穴になる）。
 
+version 23 の `ADD UNIQUE KEY` は `LOCK=NONE` のため、ローリングデプロイ中に旧コード
+（一意制約を前提としない read-then-write）が重複行を作ると `Error 1062` で失敗し、
+`dirty=1` が残ります。**version 22 の4文はいずれも冪等**なので、その場合は
+`go run ./cmd/migrate force 22` → `go run ./cmd/migrate up` で再実行すれば収束します。
+
+`session_id` 列は nullable のままです（NOT NULL 化はテーブル再構築を伴うため分離）。
+将来モデルを `*string` に変えたりデータインポートを追加すると一意キーが再び穴になるため、
+別マイグレーションで `MODIFY session_id varchar(255) NOT NULL DEFAULT ''` を行うのが望ましい。
+
 **ロールバック順序に制約があります。** 一意キー（version 23）が無い状態で新しいアプリを
 動かすと、`ON DUPLICATE KEY UPDATE` が衝突を検出できず再計算ごとに重複行が増え続けます。
 アプリを戻す場合は `go run ./cmd/migrate down` を先に、ではなく**アプリを先に**旧リビジョンへ

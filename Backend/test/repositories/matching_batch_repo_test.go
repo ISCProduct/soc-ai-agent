@@ -120,6 +120,12 @@ func TestCreateOrUpdateBatch_SingleUpsert(t *testing.T) {
 			t.Errorf("%s が衝突時の更新対象に含まれていない: %s", col, assignments)
 		}
 	}
+	// 10カテゴリのスコア列や job_position_id が upsertAssignments から抜け落ちても
+	// 上のアサートだけでは気づけないため、更新対象列の本数も固定する
+	// (job_position_id + match_score + 10カテゴリ + match_reason + updated_at = 14)
+	if n := strings.Count(assignments, "=VALUES("); n != 14 {
+		t.Errorf("衝突時の更新対象列=%d want 14: %s", n, assignments)
+	}
 	// ユーザー操作の結果と作成時刻は再計算で消さない
 	for _, col := range []string{"is_viewed", "is_favorited", "is_applied", "created_at"} {
 		if strings.Contains(assignments, col) {
@@ -179,6 +185,9 @@ func TestCreateOrUpdateBatch_PropagatesError(t *testing.T) {
 	}
 	if saved != 0 {
 		t.Fatalf("saved=%d want 0", saved)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 
