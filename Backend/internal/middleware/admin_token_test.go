@@ -218,7 +218,14 @@ func TestValidateAdminTokenForUser_ExpiredIsDistinguishable(t *testing.T) {
 	}
 
 	// 署名が違う場合は期限切れではなく invalid（期限の情報を与えない）
-	tampered := token[:len(token)-1] + "0"
+	// 末尾を固定文字にすると、元々その文字だったときに改竄にならず 1/16 で落ちる。
+	// 必ず別の文字になるよう最後の1文字をずらす。
+	last := token[len(token)-1]
+	replacement := "0"
+	if last == '0' {
+		replacement = "1"
+	}
+	tampered := token[:len(token)-1] + replacement
 	if err := ValidateAdminTokenForUser(tampered, user, testAdminSecret); err != ErrAdminTokenInvalid {
 		t.Fatalf("err = %v, want ErrAdminTokenInvalid", err)
 	}
