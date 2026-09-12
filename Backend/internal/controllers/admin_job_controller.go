@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
+	"Backend/internal/services"
 	"Backend/internal/services/interfaces"
 	"net/http"
 	"strconv"
@@ -18,6 +19,13 @@ type AdminJobController struct {
 	jobCategory  repository.JobCategoryRepository
 	graduateRepo repository.GraduateEmploymentRepository
 	audit        interfaces.AuditLogService
+	schools      *services.SchoolService
+}
+
+// SetSchoolAccess は担当校スコープ検証に使うサービスを注入する(#1157)。
+// 未設定のまま単体取得/更新を呼ぶと fail-closed で拒否する。
+func (c *AdminJobController) SetSchoolAccess(schools *services.SchoolService) {
+	c.schools = schools
 }
 
 func NewAdminJobController(companyRepo repository.CompanyRepository, jobCategory repository.JobCategoryRepository, graduateRepo repository.GraduateEmploymentRepository, audit interfaces.AuditLogService) *AdminJobController {
@@ -226,6 +234,10 @@ func (c *AdminJobController) GetGraduateEmployment(ctx echo.Context) error {
 	if err != nil || entry == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "not found")
 	}
+	// 一覧(GraduateEmployments)は担当校で絞り込まれるが、単体取得は素通りだった(#1157)
+	if err := ensureAdminSchoolAccess(ctx, c.schools, entry.SchoolID); err != nil {
+		return err
+	}
 	return ctx.JSON(http.StatusOK, entry)
 }
 
@@ -238,6 +250,10 @@ func (c *AdminJobController) UpdateGraduateEmployment(ctx echo.Context) error {
 	entry, err := c.graduateRepo.FindByID(uint(id))
 	if err != nil || entry == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "not found")
+	}
+	// 他校の卒業生就職情報を書き換えられないようにする(#1157)
+	if err := ensureAdminSchoolAccess(ctx, c.schools, entry.SchoolID); err != nil {
+		return err
 	}
 	type updateRequest struct {
 		CompanyID      uint   `json:"company_id"`

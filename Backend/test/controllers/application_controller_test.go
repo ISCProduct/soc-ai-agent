@@ -41,6 +41,8 @@ func newApplicationController(svc *mocks.ApplicationServiceMock) *controllers.Ap
 	return controllers.NewApplicationController(svc)
 }
 
+func uintPtr(v uint) *uint { return &v }
+
 // ---- Apply ----
 
 func TestApplicationController_Apply_Unauthorized(t *testing.T) {
@@ -234,20 +236,59 @@ func TestApplicationController_AdminUpdateStatus_Success(t *testing.T) {
 	app := &entity.UserApplicationStatus{Status: "document_screening"}
 	// 管理者ルートは isAdmin=true 固定、userID は所有権チェック対象外のため 0 を渡す
 	svc.On("UpdateStatus", uint(1), uint(0), "document_screening", mock.Anything, true).Return(app, nil)
+	svc.On("OwnerSchoolID", uint(1)).Return(uintPtr(5), nil)
 
 	body, _ := json.Marshal(map[string]any{"status": "document_screening", "notes": "書類選考開始"})
-	req := httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body))
+	req := withAdminUserID(httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body)), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := newCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
-	assertStatus(t, newApplicationController(svc).AdminUpdateStatus, c, http.StatusOK)
+	ctrl := newApplicationController(svc)
+	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
+	assertStatus(t, ctrl.AdminUpdateStatus, c, http.StatusOK)
 
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.Equal(t, "document_screening", resp["status"])
 	svc.AssertExpectations(t)
+}
+
+// TestApplicationController_AdminUpdateStatus_OtherSchoolDenied は担当校を持つ管理者(先生)が
+// 他校の生徒の選考ステータスを書き換えられないことを検証する(#1157)。
+func TestApplicationController_AdminUpdateStatus_OtherSchoolDenied(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	svc.On("OwnerSchoolID", uint(1)).Return(uintPtr(9), nil)
+
+	body, _ := json.Marshal(map[string]any{"status": "document_screening"})
+	req := withAdminUserID(httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body)), 1)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("1")
+	ctrl := newApplicationController(svc)
+	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
+	assertStatus(t, ctrl.AdminUpdateStatus, c, http.StatusForbidden)
+	svc.AssertNotCalled(t, "UpdateStatus", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+}
+
+// TestApplicationController_AdminUpdateStatus_SchoolAccessNotConfigured は
+// SchoolService 未注入(DI漏れ)のとき fail-closed になることを検証する(#1157)。
+func TestApplicationController_AdminUpdateStatus_SchoolAccessNotConfigured(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	svc.On("OwnerSchoolID", uint(1)).Return(uintPtr(5), nil)
+
+	body, _ := json.Marshal(map[string]any{"status": "document_screening"})
+	req := withAdminUserID(httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body)), 1)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := newCtx(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("1")
+	assertStatus(t, newApplicationController(svc).AdminUpdateStatus, c, http.StatusInternalServerError)
+	svc.AssertNotCalled(t, "UpdateStatus", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestApplicationController_AdminUpdateStatus_MissingStatus(t *testing.T) {
@@ -264,16 +305,19 @@ func TestApplicationController_AdminUpdateStatus_ClosedConflict_HasCode(t *testi
 	svc := &mocks.ApplicationServiceMock{}
 	svc.On("UpdateStatus", uint(1), uint(0), "document_screening", mock.Anything, true).
 		Return(nil, errors.New("application_already_closed: ステータス accepted は終了状態のため更新できません"))
+	svc.On("OwnerSchoolID", uint(1)).Return(uintPtr(5), nil)
 
 	body, _ := json.Marshal(map[string]any{"status": "document_screening"})
-	req := httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body))
+	req := withAdminUserID(httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body)), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := newCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
 
-	err := newApplicationController(svc).AdminUpdateStatus(c)
+	ctrl := newApplicationController(svc)
+	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
+	err := ctrl.AdminUpdateStatus(c)
 	var he *echo.HTTPError
 	require.ErrorAs(t, err, &he)
 	assert.Equal(t, http.StatusConflict, he.Code)
@@ -285,16 +329,19 @@ func TestApplicationController_AdminUpdateStatus_InvalidTransition_HasCode(t *te
 	svc := &mocks.ApplicationServiceMock{}
 	svc.On("UpdateStatus", uint(1), uint(0), "accepted", mock.Anything, true).
 		Return(nil, errors.New("invalid_status_transition: applied から accepted への遷移は許可されていません"))
+	svc.On("OwnerSchoolID", uint(1)).Return(uintPtr(5), nil)
 
 	body, _ := json.Marshal(map[string]any{"status": "accepted"})
-	req := httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body))
+	req := withAdminUserID(httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body)), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := newCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
 
-	err := newApplicationController(svc).AdminUpdateStatus(c)
+	ctrl := newApplicationController(svc)
+	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
+	err := ctrl.AdminUpdateStatus(c)
 	var he *echo.HTTPError
 	require.ErrorAs(t, err, &he)
 	assert.Equal(t, http.StatusConflict, he.Code)
@@ -429,9 +476,9 @@ func TestApplicationController_AdminList_Success(t *testing.T) {
 	apps := []*entity.UserApplicationStatus{
 		{UserID: 1, CompanyID: 2, Status: "document_screening"},
 	}
-	svc.On("ListForAdmin", uint(1), uint(2), "document_screening").Return(apps, nil)
+	svc.On("ListForAdmin", uint(1), uint(2), "document_screening", (*uint)(nil)).Return(apps, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/applications?user_id=1&company_id=2&status=document_screening", nil)
+	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/applications?user_id=1&company_id=2&status=document_screening", nil), nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, newApplicationController(svc).AdminList, newCtx(req, rec), http.StatusOK)
 
@@ -443,9 +490,9 @@ func TestApplicationController_AdminList_Success(t *testing.T) {
 
 func TestApplicationController_AdminList_NoFilters(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
-	svc.On("ListForAdmin", uint(0), uint(0), "").Return([]*entity.UserApplicationStatus{}, nil)
+	svc.On("ListForAdmin", uint(0), uint(0), "", (*uint)(nil)).Return([]*entity.UserApplicationStatus{}, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/applications", nil)
+	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/applications", nil), nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, newApplicationController(svc).AdminList, newCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
@@ -455,6 +502,28 @@ func TestApplicationController_AdminList_InvalidUserID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/applications?user_id=abc", nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, controllers.NewApplicationController(nil).AdminList, newCtx(req, rec), http.StatusBadRequest)
+}
+
+// TestApplicationController_AdminList_ScopedToSchool は担当校フィルタがクエリまで届くことを検証する(#1157)。
+// 先生が他校の生徒の user_id を指定しても、学校で絞り込まれたクエリになるため他校のデータは返らない。
+func TestApplicationController_AdminList_ScopedToSchool(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	svc.On("ListForAdmin", uint(42), uint(0), "", uintPtr(5)).Return([]*entity.UserApplicationStatus{}, nil)
+
+	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/applications?user_id=42", nil), uintPtr(5))
+	rec := httptest.NewRecorder()
+	assertStatus(t, newApplicationController(svc).AdminList, newCtx(req, rec), http.StatusOK)
+	svc.AssertExpectations(t)
+}
+
+// TestApplicationController_AdminList_RequiresSchoolScope は
+// EchoAdminSchoolScope 未適用のルートから呼ばれた場合に fail-closed になることを検証する(#1157)。
+func TestApplicationController_AdminList_RequiresSchoolScope(t *testing.T) {
+	svc := &mocks.ApplicationServiceMock{}
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/applications", nil)
+	rec := httptest.NewRecorder()
+	assertStatus(t, newApplicationController(svc).AdminList, newCtx(req, rec), http.StatusInternalServerError)
+	svc.AssertNotCalled(t, "ListForAdmin")
 }
 
 // ---- List ----

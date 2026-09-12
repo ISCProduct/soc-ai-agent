@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"Backend/domain/entity"
+	"Backend/internal/middleware"
+	"Backend/internal/services"
 	"Backend/internal/services/interfaces"
 	"Backend/internal/services/shared"
 	"errors"
@@ -15,10 +17,17 @@ import (
 // ApplicationController 応募・選考ステータス管理コントローラー
 type ApplicationController struct {
 	appService interfaces.ApplicationService
+	schools    *services.SchoolService
 }
 
 func NewApplicationController(appService interfaces.ApplicationService) *ApplicationController {
 	return &ApplicationController{appService: appService}
+}
+
+// SetSchoolAccess は管理者の担当校スコープ検証に使うサービスを注入する(#1157)。
+// 未設定のまま管理者向けエンドポイントを呼ぶと fail-closed で拒否する。
+func (c *ApplicationController) SetSchoolAccess(schools *services.SchoolService) {
+	c.schools = schools
 }
 
 // applicationErrorStatus はサービス層エラーメッセージの先頭コード（application_service.go参照。
@@ -144,6 +153,15 @@ func (c *ApplicationController) AdminUpdateStatus(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "status は必須です")
 	}
 
+	// 担当校を持つ管理者(先生)が他校の生徒の選考ステータスを書き換えられないようにする(#1157)
+	ownerSchoolID, err := c.appService.OwnerSchoolID(id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "応募データが見つかりません")
+	}
+	if err := ensureAdminSchoolAccess(ctx, c.schools, ownerSchoolID); err != nil {
+		return err
+	}
+
 	app, err := c.appService.UpdateStatus(id, 0, req.Status, req.Notes, true)
 	if err != nil {
 		return mapApplicationError(err)
@@ -220,7 +238,14 @@ func (c *ApplicationController) AdminList(ctx echo.Context) error {
 	}
 	status := ctx.QueryParam("status")
 
-	apps, err := c.appService.ListForAdmin(userID, companyID, status)
+	// 担当校スコープ(#1157)。EchoAdminSchoolScope が未適用のルートから呼ばれた場合は
+	// 絞り込み対象が決まらないため fail-closed で拒否する。
+	schoolID, ok := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
+	if !ok {
+		return echo.NewHTTPError(http.StatusInternalServerError, "school scope is not configured")
+	}
+
+	apps, err := c.appService.ListForAdmin(userID, companyID, status, schoolID)
 	if err != nil {
 		return echoInternalError(err)
 	}
