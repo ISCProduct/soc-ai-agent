@@ -48,7 +48,7 @@ func TestAdminSchoolController_AddMember_OtherSchoolDenied(t *testing.T) {
 
 	ctrl := controllers.NewAdminSchoolController(services.NewSchoolService(repo))
 	assertStatus(t, ctrl.AddMember, ctx, http.StatusForbidden)
-	repo.AssertNotCalled(t, "AddMember")
+	repo.AssertNotCalled(t, "AddMember", mock.Anything)
 }
 
 // TestAdminSchoolController_AddMember_OwnSchoolAllowed は担当校への追加は通ることを検証する。
@@ -56,6 +56,9 @@ func TestAdminSchoolController_AddMember_OwnSchoolAllowed(t *testing.T) {
 	repo := &mocks.SchoolRepositoryMock{}
 	repo.On("ListSchoolsForAdmin", uint(1)).
 		Return([]models.School{{ID: 5, Name: "担当校"}}, nil)
+	// 対象も担当校を持つ管理者（無制限管理者の降格ではない）
+	repo.On("ListSchoolsForAdmin", uint(2)).
+		Return([]models.School{{ID: 6, Name: "別の担当校"}}, nil)
 	repo.On("FindByID", uint(5)).Return(&models.School{ID: 5, Name: "担当校"}, nil)
 	repo.On("AddMember", mock.MatchedBy(func(m *models.AdminSchoolMembership) bool {
 		return m.UserID == 2 && m.SchoolID == 5
@@ -78,8 +81,8 @@ func TestAdminSchoolController_AddMember_OwnSchoolAllowed(t *testing.T) {
 // 最後の担当校を外すと権限剥奪のつもりが全校アクセスへの昇格になる。
 func TestAdminSchoolController_RemoveMember_LastSchoolDenied(t *testing.T) {
 	repo := &mocks.SchoolRepositoryMock{}
-	// 呼び出し元(無制限管理者)と対象(A校のみ担当)の2回解決される
-	repo.On("ListSchoolsForAdmin", uint(1)).Return([]models.School{}, nil)
+	// 呼び出し元も対象もA校のみ担当（制限admin同士）
+	repo.On("ListSchoolsForAdmin", uint(1)).Return([]models.School{{ID: 5, Name: "担当校"}}, nil)
 	repo.On("ListSchoolsForAdmin", uint(7)).Return([]models.School{{ID: 5, Name: "担当校"}}, nil)
 
 	req := withAdminUserID(httptest.NewRequest(http.MethodDelete, "/api/admin/schools/5/members/7", nil), 1)
@@ -87,14 +90,54 @@ func TestAdminSchoolController_RemoveMember_LastSchoolDenied(t *testing.T) {
 
 	ctrl := controllers.NewAdminSchoolController(services.NewSchoolService(repo))
 	assertStatus(t, ctrl.RemoveMember, ctx, http.StatusForbidden)
-	repo.AssertNotCalled(t, "RemoveMember")
+	repo.AssertNotCalled(t, "RemoveMember", mock.Anything, mock.Anything)
+}
+
+// TestAdminSchoolController_RemoveMember_UnrestrictedCanRemoveLastSchool は、
+// 無制限管理者は最後の担当校を解除できることを検証する（#1157）。
+//
+// ResolveAdminAccess は is_admin を見ないため、ここを止めると
+// 「先に is_admin を解除する」という回避手順が存在せず、退職した先生の担当を
+// API から外せなくなる（締めすぎ）。昇格が成立するのは制限adminが実行する場合だけ。
+func TestAdminSchoolController_RemoveMember_UnrestrictedCanRemoveLastSchool(t *testing.T) {
+	repo := &mocks.SchoolRepositoryMock{}
+	repo.On("ListSchoolsForAdmin", uint(1)).Return([]models.School{}, nil) // 呼び出し元=無制限
+	repo.On("RemoveMember", uint(7), uint(5)).Return(nil)
+
+	req := withAdminUserID(httptest.NewRequest(http.MethodDelete, "/api/admin/schools/5/members/7", nil), 1)
+	ctx, _ := newSchoolMemberCtx(req, "5", "7")
+
+	ctrl := controllers.NewAdminSchoolController(services.NewSchoolService(repo))
+	assertStatus(t, ctrl.RemoveMember, ctx, http.StatusOK)
+	repo.AssertExpectations(t)
+}
+
+// TestAdminSchoolController_AddMember_CannotDemotePlatformAdmin は、制限adminが
+// 無制限管理者を自校へ追加して降格させられないことを検証する（#1157）。
+//
+// 降格後は担当校1件になり、最後の担当校は制限adminからは解除できないため、
+// 無制限管理者を恒久的に自校へ閉じ込められてしまう。
+func TestAdminSchoolController_AddMember_CannotDemotePlatformAdmin(t *testing.T) {
+	repo := &mocks.SchoolRepositoryMock{}
+	repo.On("ListSchoolsForAdmin", uint(1)).Return([]models.School{{ID: 5, Name: "担当校"}}, nil)
+	repo.On("ListSchoolsForAdmin", uint(99)).Return([]models.School{}, nil) // 対象=無制限管理者
+
+	body, _ := json.Marshal(map[string]any{"user_id": 99})
+	req := withAdminUserID(httptest.NewRequest(http.MethodPost, "/api/admin/schools/5/members", bytes.NewReader(body)), 1)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := newSchoolMemberCtx(req, "5", "")
+
+	ctrl := controllers.NewAdminSchoolController(services.NewSchoolService(repo))
+	assertStatus(t, ctrl.AddMember, ctx, http.StatusForbidden)
+	repo.AssertNotCalled(t, "AddMember", mock.Anything)
 }
 
 // TestAdminSchoolController_RemoveMember_KeepsOtherSchools は、担当校が複数ある管理者からの
 // 1校の解除は通ることを検証する（0件にならないため昇格しない）。
 func TestAdminSchoolController_RemoveMember_KeepsOtherSchools(t *testing.T) {
 	repo := &mocks.SchoolRepositoryMock{}
-	repo.On("ListSchoolsForAdmin", uint(1)).Return([]models.School{}, nil)
+	// 呼び出し元も制限admin（無制限管理者なら別テストのとおり常に解除できる）
+	repo.On("ListSchoolsForAdmin", uint(1)).Return([]models.School{{ID: 5, Name: "A校"}}, nil)
 	repo.On("ListSchoolsForAdmin", uint(7)).
 		Return([]models.School{{ID: 5, Name: "A校"}, {ID: 6, Name: "B校"}}, nil)
 	repo.On("RemoveMember", uint(7), uint(5)).Return(nil)
@@ -133,5 +176,5 @@ func TestAdminUserController_Update_RestrictedCannotGrantAdmin(t *testing.T) {
 	ctrl := controllers.NewAdminUserController(userRepo, nil)
 	ctrl.SetSchoolService(services.NewSchoolService(schoolRepo))
 	assertStatus(t, ctrl.Update, ctx, http.StatusForbidden)
-	userRepo.AssertNotCalled(t, "UpdateUser")
+	userRepo.AssertNotCalled(t, "UpdateUser", mock.Anything)
 }

@@ -523,7 +523,7 @@ func TestApplicationController_AdminList_RequiresSchoolScope(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/applications", nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, newApplicationController(svc).AdminList, newCtx(req, rec), http.StatusForbidden)
-	svc.AssertNotCalled(t, "ListForAdmin")
+	svc.AssertNotCalled(t, "ListForAdmin", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
 // ---- List ----
