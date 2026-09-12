@@ -97,7 +97,6 @@ const AI_TOKENS = new Set([
   'scraping',
   'job_site',
   'llm_extract',
-  'db',
 ])
 
 /**

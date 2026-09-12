@@ -21,6 +21,9 @@ export function ProvenanceBadge({ provenance, target }: ProvenanceBadgeProps) {
   if (!label) return null
 
   const tooltip = target ? `${target}: ${label.detail}` : label.detail
+  const visibleLabel = label.confidenceLabel
+    ? `${label.label}（${label.confidenceLabel.replace('確信度: ', '')}）`
+    : label.label
 
   return (
     <Stack direction="row" spacing={0.75} alignItems="center" component="span">
@@ -30,14 +33,16 @@ export function ProvenanceBadge({ provenance, target }: ProvenanceBadgeProps) {
           variant={label.kind === 'ai' ? 'outlined' : 'filled'}
           color={label.tone === 'default' ? undefined : label.tone}
           icon={<InfoOutlinedIcon />}
-          label={
-            label.confidenceLabel
-              ? `${label.label}（${label.confidenceLabel.replace('確信度: ', '')}）`
-              : label.label
-          }
-          // Playwright / 支援技術から参照できるようにする
+          label={visibleLabel}
+          // MUI の Chip は onClick が無いとフォーカス不能な div になるため、
+          // ツールチップの免責文にキーボードとスクリーンリーダーから到達できない。
+          // tabIndex と role を明示して読み上げ・フォーカス対象にする。
+          tabIndex={0}
+          role="note"
+          // Playwright / 支援技術から参照できるようにする。
+          // 可視ラベルを先頭に含める（WCAG 2.5.3 Label in Name）
           data-testid={`provenance-${label.kind}`}
-          aria-label={tooltip}
+          aria-label={`${visibleLabel}。${tooltip}`}
         />
       </Tooltip>
       {label.evidenceUrl && (

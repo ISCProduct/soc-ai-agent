@@ -23,7 +23,7 @@ describe('classifyProvenance', () => {
   })
 
   it('公式サイト由来は公式情報', () => {
-    const got = classifyProvenance({ source_type: 'official', source_fetched_at: null } as never)
+    const got = classifyProvenance({ source_type: 'official', fetched_at: null })
     expect(got?.kind).toBe('official')
   })
 
