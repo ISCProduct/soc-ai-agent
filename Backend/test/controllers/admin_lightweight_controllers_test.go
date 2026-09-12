@@ -296,7 +296,7 @@ func TestAdminUserController_List_ServiceError(t *testing.T) {
 	repo := &mocks.UserRepositoryMock{}
 	repo.On("ListUsersPaged", 25, 0, "", mock.Anything).Return(nil, int64(0), errors.New("db error"))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
+	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/users", nil), nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, controllers.NewAdminUserController(repo, nil).List, newCtx(req, rec), http.StatusInternalServerError)
 	repo.AssertExpectations(t)
@@ -307,7 +307,7 @@ func TestAdminUserController_List_Success(t *testing.T) {
 	users := []entity.User{{Email: "user@example.com"}}
 	repo.On("ListUsersPaged", 25, 0, "", mock.Anything).Return(users, int64(1), nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
+	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/users", nil), nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, controllers.NewAdminUserController(repo, nil).List, newCtx(req, rec), http.StatusOK)
 	repo.AssertExpectations(t)

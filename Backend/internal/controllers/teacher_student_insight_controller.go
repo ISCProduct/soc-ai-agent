@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"Backend/internal/middleware"
 	"Backend/internal/services/teacher"
 
 	"github.com/labstack/echo/v4"
@@ -48,13 +47,12 @@ func (c *TeacherStudentInsightController) TendencyAnalysis(ctx echo.Context) err
 	query := strings.TrimSpace(ctx.QueryParam("q"))
 
 	// 担当校の絞り込みが解決されていなければ拒否する（fail-close）。
-	// ok=false はミドルウェア(EchoAdminSchoolScope)を通っていないことを意味し、
-	// そのまま nil を渡すと「絞り込みなし = 全校の生徒の氏名・メール・分析結果」を
-	// 返してしまう。ルート定義から schoolScope が外れた場合に
-	// 静かに全開放されるのを防ぐ。
-	schoolID, ok := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
-	if !ok {
-		return echo.NewHTTPError(http.StatusForbidden, "school scope is not resolved")
+	// ミドルウェア(EchoAdminSchoolScope)を通っていない場合にそのまま nil を渡すと
+	// 「絞り込みなし = 全校の生徒の氏名・メール・分析結果」を返してしまう。
+	// ルート定義から schoolScope が外れた場合に静かに全開放されるのを防ぐ(#1157で共通化)。
+	schoolID, scopeErr := echoAdminSchoolFilter(ctx)
+	if scopeErr != nil {
+		return scopeErr
 	}
 
 	// low_match_only=true で「低マッチのまま進行中の応募がある生徒」に絞る（#1028）。

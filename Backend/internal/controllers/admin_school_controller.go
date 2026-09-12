@@ -94,6 +94,11 @@ func (c *AdminSchoolController) AddMember(ctx echo.Context) error {
 	if req.UserID == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "user_id is required")
 	}
+	// 担当校を持つ管理者が任意の学校へ自分を追加できると、他校の生徒データを
+	// 「正規の担当」として閲覧できてしまう(#1157)
+	if err := c.ensureSchoolAccess(ctx, id); err != nil {
+		return err
+	}
 	if err := c.schools.AddMember(req.UserID, id); err != nil {
 		return mapSchoolError(err)
 	}
@@ -109,6 +114,26 @@ func (c *AdminSchoolController) RemoveMember(ctx echo.Context) error {
 	userID, err := echoUintParam(ctx, "user_id")
 	if err != nil {
 		return err
+	}
+	if err := c.ensureSchoolAccess(ctx, id); err != nil {
+		return err
+	}
+	// 自分の担当を外すと担当校0件になり、ResolveAdminAccess の仕様
+	// （0件=無制限のプラットフォーム管理者）により全校アクセスへ昇格してしまう(#1157)。
+	// 担当を持つ管理者自身の削除は、無制限管理者に依頼させる。
+	adminUserID, ok := middleware.AdminUserIDFromContext(ctx.Request().Context())
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	if adminUserID == userID {
+		restricted, _, err := c.schools.ResolveAdminAccess(adminUserID)
+		if err != nil {
+			return echoInternalError(err)
+		}
+		if restricted {
+			return echo.NewHTTPError(http.StatusForbidden,
+				"自分の担当校は解除できません（権限昇格を防ぐため、無制限管理者に依頼してください）")
+		}
 	}
 	if err := c.schools.RemoveMember(userID, id); err != nil {
 		return mapSchoolError(err)

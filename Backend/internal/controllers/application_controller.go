@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"Backend/domain/entity"
-	"Backend/internal/middleware"
 	"Backend/internal/services"
 	"Backend/internal/services/interfaces"
 	"Backend/internal/services/shared"
@@ -12,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	"gorm.io/gorm"
 )
 
 // ApplicationController 応募・選考ステータス管理コントローラー
@@ -155,8 +155,11 @@ func (c *ApplicationController) AdminUpdateStatus(ctx echo.Context) error {
 
 	// 担当校を持つ管理者(先生)が他校の生徒の選考ステータスを書き換えられないようにする(#1157)
 	ownerSchoolID, err := c.appService.OwnerSchoolID(id)
-	if err != nil {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return echo.NewHTTPError(http.StatusNotFound, "応募データが見つかりません")
+	} else if err != nil {
+		// DB障害を404で隠すとログも残らず追跡できない
+		return echoInternalError(err)
 	}
 	if err := ensureAdminSchoolAccess(ctx, c.schools, ownerSchoolID); err != nil {
 		return err
@@ -238,11 +241,10 @@ func (c *ApplicationController) AdminList(ctx echo.Context) error {
 	}
 	status := ctx.QueryParam("status")
 
-	// 担当校スコープ(#1157)。EchoAdminSchoolScope が未適用のルートから呼ばれた場合は
-	// 絞り込み対象が決まらないため fail-closed で拒否する。
-	schoolID, ok := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
-	if !ok {
-		return echo.NewHTTPError(http.StatusInternalServerError, "school scope is not configured")
+	// 担当校スコープ(#1157)。EchoAdminSchoolScope 未適用のルートからは fail-closed で拒否する。
+	schoolID, err := echoAdminSchoolFilter(ctx)
+	if err != nil {
+		return err
 	}
 
 	apps, err := c.appService.ListForAdmin(userID, companyID, status, schoolID)

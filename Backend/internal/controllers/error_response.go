@@ -97,6 +97,20 @@ func ensureAdminSchoolAccess(ctx echo.Context, schools *services.SchoolService, 
 	return nil
 }
 
+// echoAdminSchoolFilter は EchoAdminSchoolScope が設定した絞り込み対象(nilは絞り込みなし)を返す。
+//
+// ミドルウェア未適用のルートから呼ばれた場合は fail-closed で 500 を返す(#1157)。
+// `schoolID, _ :=` で第2戻り値を捨てると、ルートから schoolScope が外れたときに
+// 「絞り込みなし」と区別できず、全校のデータが返る fail-open になる。
+func echoAdminSchoolFilter(ctx echo.Context) (*uint, error) {
+	filter, ok := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
+	if !ok {
+		// 既存の teacher insight 経路と同じ 403 に揃える（#1027 の前例）
+		return nil, echo.NewHTTPError(http.StatusForbidden, "school scope is not resolved")
+	}
+	return filter, nil
+}
+
 // echoRequiredUintQuery は必須の正の整数クエリパラメータを返す。欠落・不正は 400。
 func echoRequiredUintQuery(c echo.Context, key string) (uint, error) {
 	raw := c.QueryParam(key)

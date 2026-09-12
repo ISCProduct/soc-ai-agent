@@ -7,6 +7,7 @@ import {
   InputLabel,
   MenuItem,
   Select,
+  Stack,
   TableBody,
   TableCell,
   TableHead,
@@ -22,6 +23,8 @@ import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { APPLICATION_STATUSES, STATUS_LABELS, adminNextStatuses } from '@/lib/application-status'
+import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
+import { getAdminSchoolAccess } from '@/lib/admin-school-access'
 
 type AdminApplication = {
   id: number
@@ -37,6 +40,10 @@ export default function PageContent() {
   const [statusFilter, setStatusFilter] = useState('')
   const [error, setError] = useState('')
   const [pending, setPending] = useState<Record<number, { status: string; notes: string }>>({})
+  // 担当校を持つ管理者(先生)は school_id が必須（未指定は 400）。
+  // 解決前に一覧を取ると必ず失敗するため、scopeReady で初回ロードを待たせる(#1157)
+  const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
+  const [scopeReady, setScopeReady] = useState(false)
 
   useEffect(() => {
     const user = authService.getStoredUser()
@@ -45,10 +52,29 @@ export default function PageContent() {
     }
   }, [])
 
-  const load = async (status = statusFilter) => {
+  useEffect(() => {
+    let cancelled = false
+    getAdminSchoolAccess()
+      .then((access) => {
+        if (cancelled) return
+        if (access.restricted && access.schools.length > 0) {
+          setSchoolId(access.schools[0].id)
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setScopeReady(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const load = async (status = statusFilter, school = schoolId) => {
     setError('')
     const params = new URLSearchParams()
     if (status) params.set('status', status)
+    if (school !== undefined) params.set('school_id', String(school))
     const qs = params.toString()
     const res = await fetch(`/api/admin/applications${qs ? `?${qs}` : ''}`, {
       headers: authService.getAdminFetchHeaders(),
@@ -62,9 +88,10 @@ export default function PageContent() {
   }
 
   useEffect(() => {
+    if (!scopeReady) return
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter])
+  }, [statusFilter, schoolId, scopeReady])
 
   const save = async (app: AdminApplication) => {
     const next = pending[app.id] ?? { status: app.status, notes: app.notes || '' }
@@ -103,21 +130,25 @@ export default function PageContent() {
       <ErrorAlert error={error} />
       <AdminPanel title="応募一覧">
         <AdminPanelBody>
-          <FormControl size="small" sx={{ mb: 2, minWidth: 200 }}>
-            <InputLabel>ステータス</InputLabel>
-            <Select
-              value={statusFilter}
-              label="ステータス"
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <MenuItem value="">すべて</MenuItem>
-              {APPLICATION_STATUSES.map((s) => (
-                <MenuItem key={s} value={s}>
-                  {STATUS_LABELS[s] || s}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2, flexWrap: 'wrap' }}>
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <InputLabel>ステータス</InputLabel>
+              <Select
+                value={statusFilter}
+                label="ステータス"
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                <MenuItem value="">すべて</MenuItem>
+                {APPLICATION_STATUSES.map((s) => (
+                  <MenuItem key={s} value={s}>
+                    {STATUS_LABELS[s] || s}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {/* 担当校が1校の管理者には表示されず自動適用される(#798 の既存コンポーネント) */}
+            <SchoolFilterSelect value={schoolId} onChange={setSchoolId} />
+          </Stack>
           {applications.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
               応募はありません。

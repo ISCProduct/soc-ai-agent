@@ -169,7 +169,10 @@ func (c *AdminJobController) GraduateEmployments(ctx echo.Context) error {
 			limit = v
 		}
 	}
-	schoolID, _ := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
+	schoolID, err := echoAdminSchoolFilter(ctx)
+	if err != nil {
+		return err
+	}
 	entries, err := c.graduateRepo.List(companyID, schoolID, limit)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch graduate employments")
@@ -177,6 +180,38 @@ func (c *AdminJobController) GraduateEmployments(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"entries": entries,
 	})
+}
+
+// resolveGraduateSchoolID は作成する卒業生就職情報に紐づける学校IDを決める(#1157)。
+//
+//   - 担当校を持つ管理者(先生): 指定が無ければ担当校が1校ならそれを使い、複数なら school_id を要求する。
+//     指定があれば担当校に含まれることを検証する。
+//   - 無制限管理者(担当校0件): 指定をそのまま使う。未指定(nil)も許容する(学校に紐づかない全体データ)。
+func (c *AdminJobController) resolveGraduateSchoolID(ctx echo.Context, requested *uint) (*uint, error) {
+	if c.schools == nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "school access check is not configured")
+	}
+	adminUserID, ok := middleware.AdminUserIDFromContext(ctx.Request().Context())
+	if !ok {
+		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	restricted, allowed, err := c.schools.ResolveAdminAccess(adminUserID)
+	if err != nil {
+		return nil, echoInternalError(err)
+	}
+	if !restricted {
+		return requested, nil
+	}
+	if requested == nil {
+		if len(allowed) == 1 {
+			return &allowed[0], nil
+		}
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "school_id is required")
+	}
+	if err := ensureAdminSchoolAccess(ctx, c.schools, requested); err != nil {
+		return nil, err
+	}
+	return requested, nil
 }
 
 // CreateGraduateEmployment POST /api/admin/graduate-employments
@@ -187,6 +222,7 @@ func (c *AdminJobController) CreateGraduateEmployment(ctx echo.Context) error {
 		GraduateName   string `json:"graduate_name"`
 		GraduationYear int    `json:"graduation_year"`
 		SchoolName     string `json:"school_name"`
+		SchoolID       *uint  `json:"school_id"`
 		Department     string `json:"department"`
 		HiredAt        string `json:"hired_at"`
 		Note           string `json:"note"`
@@ -198,6 +234,13 @@ func (c *AdminJobController) CreateGraduateEmployment(ctx echo.Context) error {
 	if payload.CompanyID == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "company_id is required")
 	}
+	// school_id を入れないと、一覧(WHERE school_id = ?)も単体取得(ensureAdminSchoolAccess)も
+	// 担当校を持つ管理者から見えなくなる。作成者自身が見られない行が増えるのを防ぐ(#1157)
+	schoolID, err := c.resolveGraduateSchoolID(ctx, payload.SchoolID)
+	if err != nil {
+		return err
+	}
+
 	var hiredAt *time.Time
 	if strings.TrimSpace(payload.HiredAt) != "" {
 		if parsed, err := time.Parse("2006-01-02", payload.HiredAt); err == nil {
@@ -206,6 +249,7 @@ func (c *AdminJobController) CreateGraduateEmployment(ctx echo.Context) error {
 	}
 	entry := &models.GraduateEmployment{
 		CompanyID:      payload.CompanyID,
+		SchoolID:       schoolID,
 		JobPositionID:  payload.JobPositionID,
 		GraduateName:   strings.TrimSpace(payload.GraduateName),
 		GraduationYear: payload.GraduationYear,
