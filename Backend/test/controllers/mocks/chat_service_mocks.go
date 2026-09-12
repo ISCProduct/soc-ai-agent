@@ -33,6 +33,21 @@ func (m *ChatServiceMock) GetChatHistory(sessionID string) ([]models.ChatMessage
 	return nil, args.Error(1)
 }
 
+// GetChatHistoryForUser は user_id でスコープした履歴取得（#1156）。
+func (m *ChatServiceMock) GetChatHistoryForUser(sessionID string, userID uint) ([]models.ChatMessage, error) {
+	args := m.Called(sessionID, userID)
+	if v := args.Get(0); v != nil {
+		return v.([]models.ChatMessage), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+// SessionHasMessages は session_id にメッセージが存在するか（#1156）。
+func (m *ChatServiceMock) SessionHasMessages(sessionID string) (bool, error) {
+	args := m.Called(sessionID)
+	return args.Bool(0), args.Error(1)
+}
+
 func (m *ChatServiceMock) GetUserScores(userID uint, sessionID string) ([]entity.UserWeightScore, error) {
 	args := m.Called(userID, sessionID)
 	if v := args.Get(0); v != nil {

@@ -63,6 +63,21 @@ func (m *mockChatMessageRepo) FindRecentBySessionID(sessionID string, limit int)
 	}, nil
 }
 func (m *mockChatMessageRepo) GetUsedQuestionIDs(sessionID string) ([]uint, error) { return nil, nil }
+
+func (m *mockChatMessageRepo) FindBySessionIDForUser(sessionID string, userID uint) ([]models.ChatMessage, error) {
+	return m.FindBySessionID(sessionID)
+}
+
+func (m *mockChatMessageRepo) FindRecentBySessionIDForUser(
+	sessionID string, userID uint, limit int,
+) ([]models.ChatMessage, error) {
+	return m.FindRecentBySessionID(sessionID, limit)
+}
+
+func (m *mockChatMessageRepo) ExistsBySessionID(sessionID string) (bool, error) {
+	msgs, err := m.FindBySessionID(sessionID)
+	return len(msgs) > 0, err
+}
 func (m *mockChatMessageRepo) GetUserSessions(userID uint) ([]models.ChatSession, error) {
 	return nil, nil
 }

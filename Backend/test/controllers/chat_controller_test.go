@@ -51,7 +51,7 @@ func TestChatController_GetHistory_MissingSessionID(t *testing.T) {
 
 func TestChatController_GetHistory_ServiceError(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
-	chatSvc.On("GetChatHistory", "s1").Return(nil, errors.New("db error"))
+	chatSvc.On("GetChatHistoryForUser", "s1", uint(1)).Return(nil, errors.New("db error"))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/history?session_id=s1", nil)
 	req = withUserID(req, 1)
@@ -63,7 +63,7 @@ func TestChatController_GetHistory_ServiceError(t *testing.T) {
 func TestChatController_GetHistory_Success(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
 	history := []models.ChatMessage{{UserID: 1, SessionID: "s1", Role: "user"}}
-	chatSvc.On("GetChatHistory", "s1").Return(history, nil)
+	chatSvc.On("GetChatHistoryForUser", "s1", uint(1)).Return(history, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/history?session_id=s1", nil)
 	req = withUserID(req, 1)
@@ -74,9 +74,10 @@ func TestChatController_GetHistory_Success(t *testing.T) {
 
 func TestChatController_GetHistory_Forbidden(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
-	// userID=1でリクエストするが、履歴のUserID=2（別ユーザー）
-	history := []models.ChatMessage{{UserID: 2, SessionID: "s1", Role: "user"}}
-	chatSvc.On("GetChatHistory", "s1").Return(history, nil)
+	// userID=1 でリクエスト。クエリは user_id でスコープされているので0件が返り、
+	// セッション自体は存在する（= 他人のセッション）ので拒否される（#1156）
+	chatSvc.On("GetChatHistoryForUser", "s1", uint(1)).Return([]models.ChatMessage{}, nil)
+	chatSvc.On("SessionHasMessages", "s1").Return(true, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/history?session_id=s1", nil)
 	req = withUserID(req, 1)
@@ -89,8 +90,8 @@ func TestChatController_GetHistory_Forbidden(t *testing.T) {
 
 func TestChatController_Chat_Forbidden_ExistingSessionOwnedByAnotherUser(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
-	history := []models.ChatMessage{{UserID: 2, SessionID: "s1", Role: "user"}}
-	chatSvc.On("GetChatHistory", "s1").Return(history, nil)
+	chatSvc.On("GetChatHistoryForUser", "s1", uint(1)).Return([]models.ChatMessage{}, nil)
+	chatSvc.On("SessionHasMessages", "s1").Return(true, nil)
 
 	body := `{"session_id":"s1","message":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/chat", bytes.NewBufferString(body))
@@ -102,10 +103,12 @@ func TestChatController_Chat_Forbidden_ExistingSessionOwnedByAnotherUser(t *test
 	chatSvc.AssertNotCalled(t, "ProcessChat", mock.Anything, mock.Anything)
 }
 
+// user_id が未設定(0)のメッセージが存在するセッションも、スコープ付きクエリでは
+// 誰の履歴にも現れないため拒否される（#1156）。
 func TestChatController_Chat_Forbidden_ExistingSessionWithUnsetOwner(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
-	history := []models.ChatMessage{{UserID: 0, SessionID: "s0", Role: "user"}}
-	chatSvc.On("GetChatHistory", "s0").Return(history, nil)
+	chatSvc.On("GetChatHistoryForUser", "s0", uint(1)).Return([]models.ChatMessage{}, nil)
+	chatSvc.On("SessionHasMessages", "s0").Return(true, nil)
 
 	body := `{"session_id":"s0","message":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/chat", bytes.NewBufferString(body))
@@ -120,7 +123,8 @@ func TestChatController_Chat_Forbidden_ExistingSessionWithUnsetOwner(t *testing.
 func TestChatController_Chat_Success_NewSession(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
 	// session s2 はまだメッセージが存在しない新規セッション
-	chatSvc.On("GetChatHistory", "s2").Return([]models.ChatMessage{}, nil)
+	chatSvc.On("GetChatHistoryForUser", "s2", uint(1)).Return([]models.ChatMessage{}, nil)
+	chatSvc.On("SessionHasMessages", "s2").Return(false, nil)
 	chatSvc.On("ProcessChat", mock.Anything, mock.Anything).Return(&chat.ChatResponse{Response: "ok"}, nil)
 
 	body := `{"session_id":"s2","message":"hello"}`
@@ -134,9 +138,10 @@ func TestChatController_Chat_Success_NewSession(t *testing.T) {
 
 func TestChatController_Chat_Success_OwnExistingSession(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
-	// session s3 は既にuserID=1（リクエスト本人）のメッセージが存在する
+	// session s3 は既にuserID=1（リクエスト本人）のメッセージが存在する。
+	// スコープ付きクエリが1件返すので SessionHasMessages は呼ばれない
 	history := []models.ChatMessage{{UserID: 1, SessionID: "s3", Role: "user"}}
-	chatSvc.On("GetChatHistory", "s3").Return(history, nil)
+	chatSvc.On("GetChatHistoryForUser", "s3", uint(1)).Return(history, nil)
 	chatSvc.On("ProcessChat", mock.Anything, mock.Anything).Return(&chat.ChatResponse{Response: "ok"}, nil)
 
 	body := `{"session_id":"s3","message":"hello"}`

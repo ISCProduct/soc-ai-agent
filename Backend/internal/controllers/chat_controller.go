@@ -132,17 +132,27 @@ func (c *ChatController) scheduleBackgroundMatching(userID uint, sessionID strin
 	c.matchingTimers.Store(sessionID, timer)
 }
 
-// checkSessionOwnership は session_id が既存セッションの場合、最初のメッセージの UserID と
-// userID が一致するか検証する。メッセージが1件も無い新規セッションは誰でも開始できるため許可する。
+// checkSessionOwnership は session_id が既存セッションの場合、その所有者かを検証する。
+// メッセージが1件も無い新規セッションは誰でも開始できるため許可する。
+//
+// 判定は「user_id でスコープしたクエリが1件でも返すか」で行う（#1156）。
+// 以前は session_id だけで全件読んで先頭1件の UserID を比較していたため、
+// 「1セッションのメッセージは全て同一ユーザー」という不変条件に依存していた。
+// その不変条件は DB 制約でもクエリでも担保されていない。
 func (c *ChatController) checkSessionOwnership(sessionID string, userID uint) ([]models.ChatMessage, error) {
-	history, err := c.chatService.GetChatHistory(sessionID)
+	history, err := c.chatService.GetChatHistoryForUser(sessionID, userID)
 	if err != nil {
 		return nil, err
 	}
-	if len(history) == 0 {
+	if len(history) > 0 {
 		return history, nil
 	}
-	if history[0].UserID == 0 || history[0].UserID != userID {
+	// 自分のメッセージが0件。新規セッションなら許可、他人のセッションなら拒否する
+	exists, err := c.chatService.SessionHasMessages(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
 		return nil, shared.ErrForbidden
 	}
 	return history, nil

@@ -35,6 +35,18 @@ func (r *ResumeRepository) FindDocumentByID(id uint) (*models.ResumeDocument, er
 	return &doc, nil
 }
 
+// FindDocumentByIDForUser は所有者の職務経歴書だけを返す（#1156）。
+//
+// FindDocumentByID は主キーだけで引くため、他ユーザーの document_id を渡されたときに
+// 他人の文書が返る。防御を呼び出し側の比較に委ねず、クエリ自体をスコープする（多層防御）。
+func (r *ResumeRepository) FindDocumentByIDForUser(id, userID uint) (*models.ResumeDocument, error) {
+	var doc models.ResumeDocument
+	if err := r.db.Where("id = ? AND user_id = ?", id, userID).First(&doc).Error; err != nil {
+		return nil, err
+	}
+	return &doc, nil
+}
+
 func (r *ResumeRepository) ReplaceTextBlocks(documentID uint, blocks []models.ResumeTextBlock) error {
 	if err := r.db.Where("document_id = ?", documentID).Delete(&models.ResumeTextBlock{}).Error; err != nil {
 		return err

@@ -7,6 +7,9 @@ type ResumeRepository interface {
 	CreateDocument(doc *models.ResumeDocument) error
 	UpdateDocument(doc *models.ResumeDocument) error
 	FindDocumentByID(id uint) (*models.ResumeDocument, error)
+	// FindDocumentByIDForUser はクエリ自体を user_id でスコープする（#1156 多層防御）。
+	// 所有者しか触れない経路では主キーだけで引く版ではなくこちらを使う。
+	FindDocumentByIDForUser(id, userID uint) (*models.ResumeDocument, error)
 	ReplaceTextBlocks(documentID uint, blocks []models.ResumeTextBlock) error
 	FindTextBlocks(documentID uint) ([]models.ResumeTextBlock, error)
 	CreateReview(review *models.ResumeReview) error

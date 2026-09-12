@@ -6,8 +6,14 @@ import "Backend/internal/models"
 type ChatMessageRepository interface {
 	Create(msg *models.ChatMessage) error
 	FindBySessionID(sessionID string) ([]models.ChatMessage, error)
+	// FindBySessionIDForUser / FindRecentBySessionIDForUser は
+	// クエリ自体を user_id でスコープする（#1156 多層防御）。所有者しか読めない経路では
+	// session_id だけで引く版ではなくこちらを使う。
+	FindBySessionIDForUser(sessionID string, userID uint) ([]models.ChatMessage, error)
+	ExistsBySessionID(sessionID string) (bool, error)
 	FindByUserID(userID uint) ([]models.ChatMessage, error)
 	FindRecentBySessionID(sessionID string, limit int) ([]models.ChatMessage, error)
+	FindRecentBySessionIDForUser(sessionID string, userID uint, limit int) ([]models.ChatMessage, error)
 	GetUsedQuestionIDs(sessionID string) ([]uint, error)
 	GetUserSessions(userID uint) ([]models.ChatSession, error)
 }
