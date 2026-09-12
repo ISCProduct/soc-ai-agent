@@ -41,6 +41,7 @@ type InterviewCompany = {
   id: number
   name: string
   name_reading?: string
+  company_info?: string
   description?: string
   main_business?: string
   industry?: string
@@ -436,7 +437,7 @@ function InterviewContent() {
       setInterviewCompany(prev => prev ? {
         ...prev,
         name_reading: meta.company_reading || prev.name_reading,
-        description: meta.company_info || prev.description,
+        company_info: meta.company_info || prev.company_info,
       } : prev)
     }
     if (aiText) {
@@ -638,7 +639,7 @@ function InterviewContent() {
         setInterviewCompany(prev => prev ? {
           ...prev,
           name_reading: meta.company_reading || prev.name_reading,
-          description: meta.company_info || prev.description,
+          company_info: meta.company_info || prev.company_info,
         } : prev)
       }
       const userText: string = meta.user_text || ''
