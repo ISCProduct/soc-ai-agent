@@ -25,9 +25,12 @@ jobs:
 
       - name: Install dependencies if present
         run: |
+          # テスト用ツールを先に入れる。requirements.txt より後ろに置くと
+          # バージョン無指定の pytest が ==ピンを上書きし、宣言と実インストールが
+          # 乖離した状態でテストが走る（#1159 の全件検証が落ちる）
+          pip install coverage pytest-cov
           if [ -f rag/requirements.txt ]; then pip install -r rag/requirements.txt; fi
           if [ -f rag/constraints.txt ]; then pip install -r rag/constraints.txt || true; fi
-          pip install pytest coverage pytest-cov
 
       - name: Run tests with coverage
         working-directory: rag

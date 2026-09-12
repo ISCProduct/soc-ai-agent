@@ -1,8 +1,12 @@
 """
-依存バージョン整合性テスト (Issue #489)
+依存バージョン整合性テスト (Issue #489 / #1067 / #1159)
 
 requirements.txt と constraints.txt のバージョン制約が一致していること、
 インストール済みパッケージが制約範囲内にあることを検証する。
+
+インストール済み版の検証は requirements.txt の全宣言を対象にする（#1159）。
+パッケージ名を列挙する方式だと、列挙漏れのパッケージで #1067 と同じ乖離が
+起きても CI が素通りするため。
 
 実行方法:
     cd rag && pytest tests/test_dependency_constraints.py -v
@@ -13,6 +17,7 @@ import os
 import re
 
 import pytest
+from packaging.requirements import Requirement
 from packaging.version import Version
 
 _RAG_DIR = os.path.join(os.path.dirname(__file__), "..")
@@ -76,24 +81,6 @@ class TestChromadbVersionConstraint:
         assert req_upper == con_upper, (
             f"requirements.txt (<{req_upper}) と constraints.txt (<{con_upper}) の "
             "chromadb 上限が不一致。両ファイルを揃えること。"
-        )
-
-    def test_installed_chromadb_within_lower_bound(self):
-        """インストール済みの chromadb が下限 >=0.6.3 を満たしている。"""
-        version = importlib.metadata.version("chromadb")
-        lower = _extract_lower_bound(_REQUIREMENTS_TXT, "chromadb")
-        assert lower is not None
-        assert Version(version) >= Version(lower), (
-            f"インストール済み chromadb {version} が下限 {lower} 未満"
-        )
-
-    def test_installed_chromadb_within_upper_bound(self):
-        """インストール済みの chromadb が上限 <0.7.0 を満たしている。"""
-        version = importlib.metadata.version("chromadb")
-        upper = _extract_upper_bound(_CONSTRAINTS_TXT, "chromadb")
-        assert upper is not None
-        assert Version(version) < Version(upper), (
-            f"インストール済み chromadb {version} が上限 <{upper} を超えている"
         )
 
 
@@ -201,42 +188,64 @@ class TestLangchainInRequirements:
         assert _parse_version_spec(_CONSTRAINTS_TXT, "langchain-community") is None
 
 
-_LANGCHAIN_PACKAGES = (
-    "langchain",
-    "langchain-core",
-    "langchain-openai",
-    "langchain-text-splitters",
-)
+def _declared_requirements(filepath: str) -> list[Requirement]:
+    """宣言ファイルを1行ずつ Requirement として解釈する。
+
+    `==` / `>=` / `<` / 複合指定を一様に扱えるため、パッケージ名の列挙が不要になる。
+    """
+    reqs: list[Requirement] = []
+    with open(filepath, encoding="utf-8") as f:
+        for line in f:
+            stripped = line.split("#")[0].strip()
+            if not stripped or stripped.startswith("-"):
+                # 空行・コメント行と、pip オプション行（-r / --index-url 等）は対象外
+                continue
+            reqs.append(Requirement(stripped))
+    return reqs
 
 
-class TestLangchainInstalledVersionMatchesDeclaration:
-    """Issue #1067: langchain 系の「宣言」と「実インストール」の乖離を検知する。
+_DECLARED = _declared_requirements(_REQUIREMENTS_TXT)
+_CONSTRAINED = {r.name.lower(): r for r in _declared_requirements(_CONSTRAINTS_TXT)}
 
-    既存の TestLangchainInRequirements は requirements.txt と constraints.txt の
-    宣言同士しか突き合わせておらず、宣言が 1.x なのに実環境へ 0.3.x が入ったまま、
-    という状態を検知できなかった。chromadb で既に確立している
-    test_installed_chromadb_within_* と同じ検証を langchain 系へ横展開する。
+
+class TestDeclaredPackagesMatchInstalled:
+    """Issue #1159: requirements.txt の全宣言について、実インストール版が宣言を満たすことを検証する。
+
+    #1067 で入れた乖離検知は langchain 系4件と chromadb だけが対象で、
+    `==` ピン（fastapi/pydantic/pytest/tiktoken/uvicorn）は検証されていなかった。
+    ここでは宣言を列挙せず requirements.txt を読んで判定するため、
+    依存を追加しても自動的に検証対象になる。
     """
 
-    @pytest.mark.parametrize("package", _LANGCHAIN_PACKAGES)
-    def test_installed_langchain_within_lower_bound(self, package: str):
-        """インストール済みの langchain 系が requirements.txt の下限を満たしている。"""
-        installed = Version(importlib.metadata.version(package))
-        lower = _extract_lower_bound(_REQUIREMENTS_TXT, package)
-        assert lower is not None, f"requirements.txt に {package} の下限が設定されていない"
-        assert installed >= Version(lower), (
-            f"{package}: インストール済み {installed} が宣言下限 >={lower} を下回っている。"
-            "`pip install -r requirements.txt -c constraints.txt` で環境を作り直すこと (#1067)"
+    def test_requirements_txt_is_not_empty(self):
+        """宣言の読み取り自体が壊れていないことを確かめる（全件検証が空振りしないため）。"""
+        assert len(_DECLARED) >= 5, f"requirements.txt の宣言が読めていない: {_DECLARED}"
+
+    @pytest.mark.parametrize("req", _DECLARED, ids=[r.name for r in _DECLARED])
+    def test_installed_satisfies_requirements(self, req: Requirement):
+        """インストール済み版が requirements.txt の宣言を満たしている。"""
+        try:
+            installed = importlib.metadata.version(req.name)
+        except importlib.metadata.PackageNotFoundError:
+            pytest.fail(
+                f"{req.name}: requirements.txt に宣言されているがインストールされていない。"
+                "`pip install -r requirements.txt -c constraints.txt` で環境を作り直すこと"
+            )
+        assert req.specifier.contains(installed, prereleases=True), (
+            f"{req.name}: インストール済み {installed} が宣言 {req.specifier} を満たしていない。"
+            "`pip install -r requirements.txt -c constraints.txt` で環境を作り直すこと (#1159)"
         )
 
-    @pytest.mark.parametrize("package", _LANGCHAIN_PACKAGES)
-    def test_installed_langchain_within_upper_bound(self, package: str):
-        """インストール済みの langchain 系が constraints.txt の上限を満たしている。"""
-        installed = Version(importlib.metadata.version(package))
-        upper = _extract_upper_bound(_CONSTRAINTS_TXT, package)
-        assert upper is not None, f"constraints.txt に {package} の上限が設定されていない"
-        assert installed < Version(upper), (
-            f"{package}: インストール済み {installed} が宣言上限 <{upper} を超えている (#1067)"
+    @pytest.mark.parametrize("req", _DECLARED, ids=[r.name for r in _DECLARED])
+    def test_installed_satisfies_constraints(self, req: Requirement):
+        """constraints.txt にも宣言がある場合、インストール済み版がそちらも満たしている。"""
+        con = _CONSTRAINED.get(req.name.lower())
+        if con is None:
+            pytest.skip(f"{req.name} は constraints.txt に宣言が無い")
+        installed = importlib.metadata.version(req.name)
+        assert con.specifier.contains(installed, prereleases=True), (
+            f"{req.name}: インストール済み {installed} が constraints.txt の "
+            f"{con.specifier} を満たしていない (#1159)"
         )
 
 
