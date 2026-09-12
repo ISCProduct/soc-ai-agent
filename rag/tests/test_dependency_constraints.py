@@ -17,7 +17,8 @@ import os
 import re
 
 import pytest
-from packaging.requirements import Requirement
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 _RAG_DIR = os.path.join(os.path.dirname(__file__), "..")
@@ -188,24 +189,52 @@ class TestLangchainInRequirements:
         assert _parse_version_spec(_CONSTRAINTS_TXT, "langchain-community") is None
 
 
-def _declared_requirements(filepath: str) -> list[Requirement]:
+def _declared_requirements(filepath: str) -> tuple[list[Requirement], list[tuple[str, str]]]:
     """宣言ファイルを1行ずつ Requirement として解釈する。
 
     `==` / `>=` / `<` / 複合指定を一様に扱えるため、パッケージ名の列挙が不要になる。
+    パースできない行は例外にせず errors として返す。モジュールインポート時に例外を投げると
+    collection error になり、`--maxfail=1` の CI では依存整合と無関係なテストまで
+    止まってしまうため（原因も専用テストの失敗メッセージで示す）。
     """
     reqs: list[Requirement] = []
+    errors: list[tuple[str, str]] = []
     with open(filepath, encoding="utf-8") as f:
         for line in f:
-            stripped = line.split("#")[0].strip()
+            # 行頭または空白直後の # だけをコメントとして落とす。
+            # 直接参照URL (`pkg @ git+https://...#egg=pkg`) のフラグメントを壊さないため。
+            stripped = re.sub(r"(?:^|\s)#.*$", "", line).strip()
             if not stripped or stripped.startswith("-"):
                 # 空行・コメント行と、pip オプション行（-r / --index-url 等）は対象外
                 continue
-            reqs.append(Requirement(stripped))
-    return reqs
+            try:
+                reqs.append(Requirement(stripped))
+            except InvalidRequirement as exc:
+                errors.append((stripped, str(exc)))
+    return reqs, errors
 
 
-_DECLARED = _declared_requirements(_REQUIREMENTS_TXT)
-_CONSTRAINED = {r.name.lower(): r for r in _declared_requirements(_CONSTRAINTS_TXT)}
+_DECLARED, _DECLARED_ERRORS = _declared_requirements(_REQUIREMENTS_TXT)
+_CONSTRAINTS_DECLARED, _CONSTRAINTS_ERRORS = _declared_requirements(_CONSTRAINTS_TXT)
+# PEP 503 の正規化名で引く（requirements 側が langchain_core、constraints 側が
+# langchain-core のような表記ゆれでも照合が外れないようにする）
+_CONSTRAINED = {canonicalize_name(r.name): r for r in _CONSTRAINTS_DECLARED}
+
+
+def _skip_if_marker_not_applicable(req: Requirement) -> None:
+    """環境マーカーが成立しない宣言（例: python_version < "3.11"）は検証対象外。"""
+    if req.marker is not None and not req.marker.evaluate():
+        pytest.skip(f"{req.name} は現環境ではマーカー不成立: {req.marker}")
+
+
+def _installed_version(req: Requirement) -> str:
+    try:
+        return importlib.metadata.version(req.name)
+    except importlib.metadata.PackageNotFoundError:
+        pytest.fail(
+            f"{req.name}: requirements.txt に宣言されているがインストールされていない。"
+            "`pip install -r requirements.txt -c constraints.txt` で環境を作り直すこと"
+        )
 
 
 class TestDeclaredPackagesMatchInstalled:
@@ -217,21 +246,31 @@ class TestDeclaredPackagesMatchInstalled:
     依存を追加しても自動的に検証対象になる。
     """
 
+    def test_requirements_txt_is_parsable(self):
+        """requirements.txt / constraints.txt の全行が Requirement として解釈できる。"""
+        assert not _DECLARED_ERRORS, f"requirements.txt にパースできない行がある: {_DECLARED_ERRORS}"
+        assert not _CONSTRAINTS_ERRORS, f"constraints.txt にパースできない行がある: {_CONSTRAINTS_ERRORS}"
+
     def test_requirements_txt_is_not_empty(self):
         """宣言の読み取り自体が壊れていないことを確かめる（全件検証が空振りしないため）。"""
-        assert len(_DECLARED) >= 5, f"requirements.txt の宣言が読めていない: {_DECLARED}"
+        assert _DECLARED, "requirements.txt の宣言が1件も読めていない"
+
+    @pytest.mark.parametrize("req", _DECLARED, ids=[r.name for r in _DECLARED])
+    def test_requirements_declaration_has_version_spec(self, req: Requirement):
+        """宣言にバージョン指定がある。
+
+        指定が空だと SpecifierSet.contains() が常に True になり、全件検証が
+        「何も検証していない」状態で緑になる（langchain 1.x 固定 #894 や
+        chromadb <0.7.0 固定 #489 の意図が黙って失われる）。
+        """
+        assert str(req.specifier), f"{req.name}: requirements.txt にバージョン指定が無い"
 
     @pytest.mark.parametrize("req", _DECLARED, ids=[r.name for r in _DECLARED])
     def test_installed_satisfies_requirements(self, req: Requirement):
         """インストール済み版が requirements.txt の宣言を満たしている。"""
-        try:
-            installed = importlib.metadata.version(req.name)
-        except importlib.metadata.PackageNotFoundError:
-            pytest.fail(
-                f"{req.name}: requirements.txt に宣言されているがインストールされていない。"
-                "`pip install -r requirements.txt -c constraints.txt` で環境を作り直すこと"
-            )
-        assert req.specifier.contains(installed, prereleases=True), (
+        _skip_if_marker_not_applicable(req)
+        installed = _installed_version(req)
+        assert req.specifier.contains(installed), (
             f"{req.name}: インストール済み {installed} が宣言 {req.specifier} を満たしていない。"
             "`pip install -r requirements.txt -c constraints.txt` で環境を作り直すこと (#1159)"
         )
@@ -239,13 +278,34 @@ class TestDeclaredPackagesMatchInstalled:
     @pytest.mark.parametrize("req", _DECLARED, ids=[r.name for r in _DECLARED])
     def test_installed_satisfies_constraints(self, req: Requirement):
         """constraints.txt にも宣言がある場合、インストール済み版がそちらも満たしている。"""
-        con = _CONSTRAINED.get(req.name.lower())
+        _skip_if_marker_not_applicable(req)
+        con = _CONSTRAINED.get(canonicalize_name(req.name))
         if con is None:
             pytest.skip(f"{req.name} は constraints.txt に宣言が無い")
         installed = importlib.metadata.version(req.name)
-        assert con.specifier.contains(installed, prereleases=True), (
+        assert con.specifier.contains(installed), (
             f"{req.name}: インストール済み {installed} が constraints.txt の "
             f"{con.specifier} を満たしていない (#1159)"
+        )
+
+    @pytest.mark.parametrize(
+        "req", _CONSTRAINTS_DECLARED, ids=[r.name for r in _CONSTRAINTS_DECLARED]
+    )
+    def test_installed_satisfies_constraints_only_declarations(self, req: Requirement):
+        """constraints.txt にしか無い宣言（numpy / litellm / httpx 等）も検証する。
+
+        これらは推移的依存の範囲を縛るための制約なので、宣言が守られていなければ
+        #1067 と同種の乖離になる。未インストール（その推移的依存が入らない構成）は skip。
+        """
+        _skip_if_marker_not_applicable(req)
+        assert str(req.specifier), f"{req.name}: constraints.txt にバージョン指定が無い"
+        try:
+            installed = importlib.metadata.version(req.name)
+        except importlib.metadata.PackageNotFoundError:
+            pytest.skip(f"{req.name} は未インストール（推移的依存が入っていない）")
+        assert req.specifier.contains(installed), (
+            f"{req.name}: インストール済み {installed} が constraints.txt の "
+            f"{req.specifier} を満たしていない (#1159)"
         )
 
 
