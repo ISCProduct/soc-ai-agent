@@ -101,20 +101,29 @@ func providerFromEnv(key string) string {
 
 // resolveBaseURL は系統ごとの base URL を決める。
 // local プロバイダは推論先が分からないと成立しないため、base URL 未設定はエラーにする。
-func resolveBaseURL(provider, baseURLEnv, fallbackURL string) (string, error) {
-	if baseURL := firstNonEmpty(os.Getenv(baseURLEnv)); baseURL != "" {
+// resolveBaseURL は系統ごとの base URL を決める。
+// 第2戻り値は「その系統の base URL が env で明示指定されたか」。
+// 明示指定なら operator が意図してその宛先へ送っているとみなし、実キーを渡す（プロキシ用途）。
+func resolveBaseURL(provider, baseURLEnv, fallbackURL string) (baseURL string, explicit bool, err error) {
+	if v := firstNonEmpty(os.Getenv(baseURLEnv)); v != "" {
 		// openai プロバイダでも base URL の差し替えは許す（プロキシ・Azure 互換ゲートウェイ等）
-		return strings.TrimRight(baseURL, "/"), nil
+		if !strings.HasPrefix(v, "http://") && !strings.HasPrefix(v, "https://") {
+			// scheme 無しは相対URLとして扱われ、最初の AI 呼び出しで分かりにくく落ちる
+			return "", false, fmt.Errorf("%s は http:// または https:// で始まる必要があります: %q", baseURLEnv, v)
+		}
+		return strings.TrimRight(v, "/"), true, nil
 	}
 	if provider == providerLocal {
 		// 継承元がローカル推論先ならそれを使う（1台に全部載せる構成）。
 		// OpenAI 本家を継承しても local としては成立しないのでエラーにする。
 		if fallbackURL != "" && !isOpenAIEndpoint(fallbackURL) {
-			return strings.TrimRight(fallbackURL, "/"), nil
+			return strings.TrimRight(fallbackURL, "/"), false, nil
 		}
-		return "", fmt.Errorf("%s=%s には %s が必要です", providerEnvName(baseURLEnv), providerLocal, baseURLEnv)
+		return "", false, fmt.Errorf("%s=%s には %s が必要です", providerEnvName(baseURLEnv), providerLocal, baseURLEnv)
 	}
-	return fallbackURL, nil
+	// openai を名乗る系統は継承しない。継承すると
+	// 「テキストはローカル、埋め込みだけ OpenAI」という明示指定が黙って無視される。
+	return defaultOpenAIBaseURL, false, nil
 }
 
 // providerEnvName は base URL の env 名から対応する PROVIDER env 名を導く（エラーメッセージ用）。
@@ -136,18 +145,18 @@ func NewFromEnv(optionalModel string) (*Client, error) {
 	embeddingProvider := providerFromEnvOr("AI_EMBEDDING_PROVIDER", textProvider)
 	audioProvider := providerFromEnvOr("AI_AUDIO_PROVIDER", textProvider)
 
-	textBaseURL, err := resolveBaseURL(textProvider, "AI_TEXT_BASE_URL", defaultOpenAIBaseURL)
+	textBaseURL, textExplicit, err := resolveBaseURL(textProvider, "AI_TEXT_BASE_URL", defaultOpenAIBaseURL)
 	if err != nil {
 		return nil, err
 	}
 	// 埋め込み・音声の base URL 未設定時はテキストと同じ推論先を使う（1台に全部載せる構成が多いため）。
 	// provider も継承されるため、テキストを local にすれば埋め込み・音声も
 	// 同じローカル推論先・ダミーキーになる。別の推論先に分けたい場合だけ個別に指定する。
-	embeddingBaseURL, err := resolveBaseURL(embeddingProvider, "AI_EMBEDDING_BASE_URL", textBaseURL)
+	embeddingBaseURL, embeddingExplicit, err := resolveBaseURL(embeddingProvider, "AI_EMBEDDING_BASE_URL", textBaseURL)
 	if err != nil {
 		return nil, err
 	}
-	audioBaseURL, err := resolveBaseURL(audioProvider, "AI_AUDIO_BASE_URL", textBaseURL)
+	audioBaseURL, audioExplicit, err := resolveBaseURL(audioProvider, "AI_AUDIO_BASE_URL", textBaseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -161,8 +170,8 @@ func NewFromEnv(optionalModel string) (*Client, error) {
 		DefaultModel:       model,
 		EmbeddingModel:     embeddingModel,
 		apiKey:             key,
-		textKey:            keyFor(textBaseURL, key),
-		audioKey:           keyFor(audioBaseURL, key),
+		textKey:            keyFor(textProvider, textBaseURL, textExplicit, key),
+		audioKey:           keyFor(audioProvider, audioBaseURL, audioExplicit, key),
 		baseURL:            textBaseURL,
 		embeddingBaseURL:   embeddingBaseURL,
 		audioBaseURL:       audioBaseURL,
@@ -178,7 +187,7 @@ func NewFromEnv(optionalModel string) (*Client, error) {
 	if embeddingBaseURL == textBaseURL && embeddingProvider == textProvider {
 		cli.embedC = cli.c
 	} else {
-		cli.embedC = newSDKClient(keyFor(embeddingBaseURL, key), embeddingBaseURL)
+		cli.embedC = newSDKClient(keyFor(embeddingProvider, embeddingBaseURL, embeddingExplicit, key), embeddingBaseURL)
 	}
 
 	if !cli.textAvailable || !cli.embeddingAvailable || !cli.audioAvailable {
@@ -192,25 +201,34 @@ func NewFromEnv(optionalModel string) (*Client, error) {
 
 // keyFor は系統ごとに送る API キーを返す。
 //
-// 判定は provider ではなく**解決後の base URL** で行う。provider 基準だと
-// 「OPENAI_API_KEY を残したまま AI_TEXT_PROVIDER=local に切り替える」という
-// 最も自然な移行手順で、OpenAI の実キーがローカル推論先へ送信されてしまう。
-// OpenAI 本家宛のときだけ実キーを使い、それ以外へはダミーを送る。
-func keyFor(baseURL, key string) string {
-	if isOpenAIEndpoint(baseURL) {
+// 実キーを渡すのは「provider が openai」かつ「OpenAI 本家宛、または base URL が
+// env で明示指定されている（= プロキシ・互換ゲートウェイを operator が意図して指定した）」場合だけ。
+//
+//   - provider=local: 常にダミー。「OPENAI_API_KEY を残したまま provider を local に
+//     切り替える」という最も自然な移行手順で実キーが外部へ出るのを防ぐ
+//   - 継承した base URL: 明示指定ではないのでダミー（テキストのローカル推論先を
+//     埋め込み・音声が継承したケース）
+func keyFor(provider, baseURL string, explicit bool, key string) string {
+	if provider != providerOpenAI {
+		return localPlaceholderAPIKey
+	}
+	if isOpenAIEndpoint(baseURL) || explicit {
 		return key
 	}
 	return localPlaceholderAPIKey
 }
 
-// isOpenAIEndpoint は base URL が OpenAI 本家かを判定する。
+// isOpenAIEndpoint は base URL が OpenAI 本家（https）かを判定する。
+// scheme も見るのは、http:// の typo で実キーが平文送信されるのを防ぐため。
 func isOpenAIEndpoint(baseURL string) bool {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return false
 	}
-	host := strings.ToLower(u.Hostname())
-	return host == "api.openai.com"
+	if strings.ToLower(u.Scheme) != "https" {
+		return false
+	}
+	return strings.ToLower(u.Hostname()) == "api.openai.com"
 }
 
 // providerFromEnvOr は env 未設定時に fallbackProvider を返す providerFromEnv。

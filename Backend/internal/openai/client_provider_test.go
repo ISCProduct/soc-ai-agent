@@ -79,8 +79,9 @@ func TestNewFromEnv_ProviderMatrix(t *testing.T) {
 				"AI_EMBEDDING_PROVIDER": "openai",
 			},
 			wantTextProvider: providerLocal, wantTextBaseURL: "http://localhost:11434/v1",
-			wantModel:        "gpt-4o-mini",
-			wantEmbedBaseURL: "http://localhost:11434/v1", wantEmbedModel: "text-embedding-3-small",
+			wantModel: "gpt-4o-mini",
+			// openai を名乗る系統は base URL を継承しない（明示指定が黙って無視されるのを防ぐ）
+			wantEmbedBaseURL: defaultOpenAIBaseURL, wantEmbedModel: "text-embedding-3-small",
 			wantAudioBaseURL:  "http://localhost:11434/v1",
 			wantTextAvailable: true, wantAudioAvailable: true,
 		},
@@ -114,14 +115,20 @@ func TestNewFromEnv_ProviderMatrix(t *testing.T) {
 			wantTextAvailable: true, wantEmbedAvailable: true, wantAudioAvailable: true,
 		},
 		{
+			// テキストだけプロキシ経由にした場合、埋め込み・音声は本家を向く（継承しない）
 			name: "openaiプロバイダでもbase URLは差し替えられる（プロキシ・互換ゲートウェイ）",
 			env: map[string]string{
 				"OPENAI_API_KEY": "sk-test", "AI_TEXT_BASE_URL": "https://gw.example.test/v1/",
 			},
 			wantTextProvider: providerOpenAI, wantTextBaseURL: "https://gw.example.test/v1",
-			wantModel: "gpt-4o-mini", wantEmbedBaseURL: "https://gw.example.test/v1",
-			wantEmbedModel: "text-embedding-3-small", wantAudioBaseURL: "https://gw.example.test/v1",
+			wantModel: "gpt-4o-mini", wantEmbedBaseURL: defaultOpenAIBaseURL,
+			wantEmbedModel: "text-embedding-3-small", wantAudioBaseURL: defaultOpenAIBaseURL,
 			wantTextAvailable: true, wantEmbedAvailable: true, wantAudioAvailable: true,
+		},
+		{
+			name:    "base URL に scheme が無ければ起動時エラー",
+			env:     map[string]string{"OPENAI_API_KEY": "sk-test", "AI_TEXT_BASE_URL": "api.openai.com/v1"},
+			wantErr: true,
 		},
 		{
 			name: "系統ごとに別の推論先を指定できる",
@@ -582,5 +589,61 @@ func TestNilClientReturnsErrAIUnavailable(t *testing.T) {
 	}
 	if !cli.Degraded() {
 		t.Error("nil クライアントは Degraded() = true であるべき")
+	}
+}
+
+// TestKeyFor はキーの受け渡し規則をテーブル駆動で固定する（#1293）。
+//
+// 「実キーをどこへ送るか」は誤ると本番シークレットが外部へ出るため、
+// 判定規則そのものをテストで固定する。
+func TestKeyFor(t *testing.T) {
+	const realKey = "sk-real"
+	tests := []struct {
+		name     string
+		provider string
+		baseURL  string
+		explicit bool
+		want     string
+	}{
+		{
+			name: "openai + 本家: 実キー", provider: providerOpenAI,
+			baseURL: defaultOpenAIBaseURL, want: realKey,
+		},
+		{
+			name: "openai + 明示指定のプロキシ: 実キー（operator の意図）", provider: providerOpenAI,
+			baseURL: "https://gw.example.test/v1", explicit: true, want: realKey,
+		},
+		{
+			name: "openai + 継承した base URL: ダミー", provider: providerOpenAI,
+			baseURL: "http://ollama:11434/v1", explicit: false, want: localPlaceholderAPIKey,
+		},
+		{
+			name: "local: 常にダミー", provider: providerLocal,
+			baseURL: "http://ollama:11434/v1", explicit: true, want: localPlaceholderAPIKey,
+		},
+		{
+			name: "local + 本家を明示しても実キーは渡さない", provider: providerLocal,
+			baseURL: defaultOpenAIBaseURL, explicit: true, want: localPlaceholderAPIKey,
+		},
+		{
+			// http:// の typo で実キーが平文送信されるのを防ぐ
+			name: "本家ホストでも http は本家扱いしない", provider: providerOpenAI,
+			baseURL: "http://api.openai.com/v1", explicit: false, want: localPlaceholderAPIKey,
+		},
+		{
+			name: "似たホスト名は本家扱いしない", provider: providerOpenAI,
+			baseURL: "https://api.openai.com.evil.test/v1", explicit: false, want: localPlaceholderAPIKey,
+		},
+		{
+			name: "ポート付きの本家は本家扱い", provider: providerOpenAI,
+			baseURL: "https://api.openai.com:443/v1", want: realKey,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := keyFor(tt.provider, tt.baseURL, tt.explicit, realKey); got != tt.want {
+				t.Fatalf("keyFor() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
