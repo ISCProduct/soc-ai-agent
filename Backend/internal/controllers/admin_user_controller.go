@@ -80,7 +80,10 @@ func (c *AdminUserController) List(ctx echo.Context) error {
 		offset = o
 	}
 	query := strings.TrimSpace(ctx.QueryParam("q"))
-	schoolID, _ := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
+	schoolID, err := echoAdminSchoolFilter(ctx)
+	if err != nil {
+		return err
+	}
 
 	users, total, err := c.repo.ListUsersPaged(limit, offset, query, schoolID)
 	if err != nil {
@@ -108,6 +111,25 @@ func (c *AdminUserController) List(ctx echo.Context) error {
 	})
 }
 
+// denyIfRestricted は呼び出し元が担当校を持つ管理者(制限admin)なら 403 を返す(#1157)。
+func (c *AdminUserController) denyIfRestricted(ctx echo.Context, message string) error {
+	if c.schools == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "school access check is not configured")
+	}
+	adminUserID, ok := middleware.AdminUserIDFromContext(ctx.Request().Context())
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	restricted, _, err := c.schools.ResolveAdminAccess(adminUserID)
+	if err != nil {
+		return echoInternalError(err)
+	}
+	if restricted {
+		return echo.NewHTTPError(http.StatusForbidden, message)
+	}
+	return nil
+}
+
 // Update PUT /api/admin/users/:id
 func (c *AdminUserController) Update(ctx echo.Context) error {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
@@ -126,6 +148,13 @@ func (c *AdminUserController) Update(ctx echo.Context) error {
 		return err
 	}
 	if payload.IsAdmin != nil {
+		// 担当校を持つ管理者(先生)が自校の生徒に is_admin を付けると、その生徒は
+		// admin_school_memberships が0件のため ResolveAdminAccess の仕様
+		// (0件=無制限のプラットフォーム管理者)により全校アクセスを得てしまう(#1157)。
+		// 権限そのものの変更は無制限管理者に限る。
+		if err := c.denyIfRestricted(ctx, "管理者権限の変更は無制限管理者のみ可能です"); err != nil {
+			return err
+		}
 		user.IsAdmin = *payload.IsAdmin
 	}
 	if payload.Name != nil {
@@ -179,6 +208,13 @@ func (c *AdminUserController) Delete(ctx echo.Context) error {
 	}
 	if err := c.ensureSchoolAccess(ctx, user); err != nil {
 		return err
+	}
+	// 退会は is_admin を false にするため、管理者アカウントの退会は「権限の変更」と同じ影響を持つ。
+	// 制限adminが同僚の管理者や（users.school_id が偶然一致した）無制限管理者を降格させられないようにする(#1157)
+	if user.IsAdmin {
+		if err := c.denyIfRestricted(ctx, "管理者アカウントの退会は無制限管理者のみ可能です"); err != nil {
+			return err
+		}
 	}
 	if user.IsWithdrawn() {
 		return echo.NewHTTPError(http.StatusConflict, "account already withdrawn")

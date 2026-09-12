@@ -415,6 +415,7 @@ func main() {
 	adminInterviewController.SetOpenAIClient(aiClient)
 	adminInterviewController.SetUserAccessGuard(userDeletionService)
 	adminInterviewController.SetSchoolAccess(userRepo, interviewSessionRepo, schoolService)
+	adminJobController.SetSchoolAccess(schoolService)
 	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminDashboardController.SetSchoolService(schoolService)
 	adminDashboardController.SetOrganizationService(organizationService)
@@ -446,6 +447,7 @@ func main() {
 	esReviewController := controllers.NewESReviewController()
 	appService := application.NewApplicationService(appStatusRepo, matchRepo, db)
 	appController := controllers.NewApplicationController(appService)
+	appController.SetSchoolAccess(schoolService)
 	hrStudentAnalysisService := hr.NewStudentAnalysisService(
 		db,
 		userRepo,

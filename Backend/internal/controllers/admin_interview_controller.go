@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"Backend/domain/repository"
-	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services"
@@ -365,7 +364,10 @@ func (c *AdminInterviewController) ListSessions(ctx echo.Context) error {
 		limit = 100
 	}
 	offset := (page - 1) * limit
-	schoolID, _ := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
+	schoolID, err := echoAdminSchoolFilter(ctx)
+	if err != nil {
+		return err
+	}
 
 	var companyID *uint
 	if raw := ctx.QueryParam("company_id"); raw != "" {

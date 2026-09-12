@@ -38,8 +38,10 @@ func SetupAdminRoutes(
 
 	// 管理者認証必須エンドポイント
 	admin := api.Group("/admin", EchoAdminAuth(userRepo, adminSecret))
-	// 個別校での絞り込み対象(#798): ユーザー・卒業生就職情報・面接・ダッシュボード・企業・求人のみ。
+	// 個別校での絞り込み対象(#798): ユーザー・卒業生就職情報・面接・ダッシュボード・企業・求人・選考ステータス。
 	// 他のadmin機能(組織/監査ログ/コスト等)はschool_idを要求しない。
+	// パスパラメータで単一リソースを指定するエンドポイントは、ミドルウェアではなく
+	// コントローラ側で ensureAdminSchoolAccess により対象の学校を検証する(#980-#984 / #1157)。
 	schoolScope := EchoAdminSchoolScope(schoolService)
 
 	// 企業管理
@@ -184,6 +186,7 @@ func SetupAdminRoutes(
 
 	// 選考ステータス管理(#1016): user_id/company_id/statusで絞り込み可能な一覧、
 	// および進捗更新（isAdminは常にtrue固定。サービス層の遷移表が正）
-	admin.GET("/applications", appController.AdminList)
+	// 一覧は schoolScope で絞り込み、単体更新はコントローラ側で対象の所有者の学校を検証する(#1157)
+	admin.GET("/applications", appController.AdminList, schoolScope)
 	admin.PATCH("/applications/:id/status", appController.AdminUpdateStatus)
 }
