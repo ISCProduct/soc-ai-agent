@@ -4,8 +4,13 @@ package middleware_test
 // 実行: cd Backend && go test ./test/middleware/... -run TestAdminAuth -v
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -184,5 +189,70 @@ func TestAdminAuth_UserEmailNotFound(t *testing.T) {
 
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("存在しないメール: got %d, want 403", rr.Code)
+	}
+}
+
+// legacyAdminToken は #1155 以前の形式（発行時刻を持たない HMAC-SHA256）のトークンを作る。
+// 本番パッケージにテスト専用の公開関数を足さないため、ここで組み立てる。
+func legacyAdminToken(userID uint, email, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	fmt.Fprintf(mac, "%d:%s", userID, email)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// TestAdminAuth_ExpiredTokenMessage は期限切れと無効で 403 の本文が出し分けられることを
+// 検証する（#1155）。
+//
+// 期限切れだけ「再ログインしてください」と案内する。ただし案内を出すのは署名が
+// 一致した場合だけで、形式だけで判定すると「そのメールアドレスが管理者か」を
+// レスポンスの差から判別できる列挙オラクルになる。
+func TestAdminAuth_ExpiredTokenMessage(t *testing.T) {
+	const secret = "test-secret"
+	const email = "admin@example.com"
+
+	tests := []struct {
+		name        string
+		token       string
+		wantMessage string
+	}{
+		{
+			name:        "旧形式で署名が一致するなら再ログイン案内",
+			token:       legacyAdminToken(1, email, secret),
+			wantMessage: "有効期限",
+		},
+		{
+			name:        "旧形式の長さでも署名が違えば Forbidden のみ",
+			token:       strings.Repeat("ab", 32),
+			wantMessage: "Forbidden",
+		},
+		{
+			name:        "そもそも形式が違えば Forbidden のみ",
+			token:       "garbage",
+			wantMessage: "Forbidden",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, mock := newTestUserRepo(t)
+			mock.ExpectQuery("SELECT \\* FROM `users` WHERE email = \\? ORDER BY `users`.`id` LIMIT \\?").
+				WithArgs(email, 1).
+				WillReturnRows(sqlmock.NewRows(userRepoColumns).AddRow(1, email, "管理者", true, false))
+
+			h := middleware.AdminAuthFunc(repo, secret, okHandler)
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("X-Admin-Email", email)
+			req.Header.Set("X-Admin-Token", tt.token)
+			rr := httptest.NewRecorder()
+
+			h(rr, req)
+
+			if rr.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", rr.Code)
+			}
+			if !strings.Contains(rr.Body.String(), tt.wantMessage) {
+				t.Errorf("body = %q, want contains %q", rr.Body.String(), tt.wantMessage)
+			}
+		})
 	}
 }
