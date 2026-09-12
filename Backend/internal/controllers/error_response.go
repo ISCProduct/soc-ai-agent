@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"Backend/internal/logger"
 	"Backend/internal/middleware"
+	"Backend/internal/openai"
 	"Backend/internal/services"
 
 	"github.com/labstack/echo/v4"
@@ -61,6 +63,13 @@ const internalServerErrorMessage = "内部エラーが発生しました"
 // echoInternalError はエラーをログ出力しつつ echo.HTTPError を返す。
 func echoInternalError(err error) error {
 	logError(err)
+	// AI プロバイダ未設定・ローカル推論先の障害は設定/運用の問題で、リトライすれば
+	// 回復しうる。500 + 「内部エラー」だと API 利用者が原因を切り分けられないため
+	// 503 + 明示メッセージにする(#1293)。echoInternalError を通る全経路に一様に効かせる。
+	if errors.Is(err, openai.ErrAIUnavailable) {
+		return newAPIError(http.StatusServiceUnavailable, ErrCodeServiceUnavail,
+			"現在AI機能を利用できません。しばらくしてから再度お試しください。")
+	}
 	return newAPIError(http.StatusInternalServerError, ErrCodeInternalError, internalServerErrorMessage)
 }
 
