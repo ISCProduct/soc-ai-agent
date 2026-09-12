@@ -249,7 +249,7 @@ GET /training/export
 | `rag/main.py` | FastAPI メインアプリケーション |
 | `rag/training_api.py` | ファインチューニングデータ出力 API |
 | `rag/constraints.txt` | バージョン制約ファイル（`-c` で渡す。単体で `-r` に渡さない） |
-| `rag/requirements.txt` | 参考用（バージョン指定なし） |
+| `rag/requirements.txt` | 直接依存の宣言（主インストール元。全件に上下限つき。`test_requirements_declaration_is_bounded` が強制する） |
 | `rag/export_training_data.py` | ログからトレーニングデータを生成 |
 
 ---

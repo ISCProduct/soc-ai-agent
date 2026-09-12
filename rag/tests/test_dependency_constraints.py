@@ -18,7 +18,6 @@ import re
 
 import pytest
 from packaging.requirements import InvalidRequirement, Requirement
-from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 _RAG_DIR = os.path.join(os.path.dirname(__file__), "..")
@@ -216,9 +215,6 @@ def _declared_requirements(filepath: str) -> tuple[list[Requirement], list[tuple
 
 _DECLARED, _DECLARED_ERRORS = _declared_requirements(_REQUIREMENTS_TXT)
 _CONSTRAINTS_DECLARED, _CONSTRAINTS_ERRORS = _declared_requirements(_CONSTRAINTS_TXT)
-# PEP 503 の正規化名で引く（requirements 側が langchain_core、constraints 側が
-# langchain-core のような表記ゆれでも照合が外れないようにする）
-_CONSTRAINED = {canonicalize_name(r.name): r for r in _CONSTRAINTS_DECLARED}
 
 
 def _skip_if_marker_not_applicable(req: Requirement) -> None:
@@ -227,8 +223,6 @@ def _skip_if_marker_not_applicable(req: Requirement) -> None:
         pytest.skip(f"{req.name} は現環境ではマーカー不成立: {req.marker}")
 
 
-# pip は既定で prerelease をインストールしないため、検証も prereleases=False で揃える。
-# packaging の SpecifierSet.contains() の既定はバージョンにより変わるため明示する（packaging は推移的依存）。
 def _installed_version(req: Requirement) -> str:
     try:
         return importlib.metadata.version(req.name)
@@ -242,6 +236,10 @@ def _installed_version(req: Requirement) -> str:
 
 class TestDeclaredPackagesMatchInstalled:
     """Issue #1159: requirements.txt の全宣言について、実インストール版が宣言を満たすことを検証する。
+
+    判定は `prereleases=False` で行う。pip は既定で prerelease をインストールしないため
+    それに揃える（packaging の `SpecifierSet.contains()` の既定はバージョンにより変わり、
+    packaging は推移的依存なのでテストの厳格さが揺れてしまう）。
 
     #1067 で入れた乖離検知は langchain 系4件と chromadb だけが対象で、
     `==` ピン（fastapi/pydantic/pytest/tiktoken/uvicorn）は検証されていなかった。
