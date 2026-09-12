@@ -138,7 +138,11 @@ func EchoAdminAuth(userRepo *repositories.UserRepository, adminSecret string) ec
 				return echo.NewHTTPError(http.StatusServiceUnavailable, "Service Unavailable: admin authentication not configured")
 			}
 			token := c.Request().Header.Get("X-Admin-Token")
-			if token == "" || !middleware.VerifyAdminToken(token, user.ID, user.Email, adminSecret) {
+			// 署名・有効期限・管理者1名単位の失効(admin_token_not_before)を検証する(#1155)
+			switch err := middleware.ValidateAdminTokenForUser(token, user, adminSecret); {
+			case errors.Is(err, middleware.ErrAdminTokenExpired):
+				return echo.NewHTTPError(http.StatusForbidden, "管理者トークンの有効期限が切れました。再ログインしてください。")
+			case err != nil:
 				return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
 			}
 			ctx := context.WithValue(c.Request().Context(), middleware.AdminUserIDContextKey, user.ID)

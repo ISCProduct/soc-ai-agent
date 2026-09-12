@@ -4,13 +4,15 @@ import "time"
 
 // User ドメインエンティティ（GORM依存なし）
 type User struct {
-	ID                       uint
-	OrganizationID           uint
-	Email                    string
-	Password                 string
-	Name                     string
-	IsGuest                  bool
-	IsAdmin                  bool
+	ID             uint
+	OrganizationID uint
+	Email          string
+	Password       string
+	Name           string
+	IsGuest        bool
+	IsAdmin        bool
+	// AdminTokenNotBefore はこれより前に発行された管理者トークンを失効させる(#1155)
+	AdminTokenNotBefore      *time.Time
 	Role                     string // student / teacher
 	TargetLevel              string // 新卒 or 中途
 	SchoolName               string
