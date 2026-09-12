@@ -209,6 +209,13 @@ func (c *AdminUserController) Delete(ctx echo.Context) error {
 	if err := c.ensureSchoolAccess(ctx, user); err != nil {
 		return err
 	}
+	// 退会は is_admin を false にするため、管理者アカウントの退会は「権限の変更」と同じ影響を持つ。
+	// 制限adminが同僚の管理者や（users.school_id が偶然一致した）無制限管理者を降格させられないようにする(#1157)
+	if user.IsAdmin {
+		if err := c.denyIfRestricted(ctx, "管理者アカウントの退会は無制限管理者のみ可能です"); err != nil {
+			return err
+		}
+	}
 	if user.IsWithdrawn() {
 		return echo.NewHTTPError(http.StatusConflict, "account already withdrawn")
 	}

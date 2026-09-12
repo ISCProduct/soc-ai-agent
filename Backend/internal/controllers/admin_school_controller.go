@@ -108,17 +108,23 @@ func (c *AdminSchoolController) AddMember(ctx echo.Context) error {
 		return echoInternalError(err)
 	}
 	if callerRestricted {
-		// 無制限管理者を自校の担当に追加すると、その管理者は担当校1件の制限adminへ降格する。
-		// 降格後は最後の担当校を外せないため（上記 RemoveMember のガード）、
-		// 制限adminが無制限管理者を恒久的に自校へ閉じ込められてしまう。
+		// 担当校を持たないユーザー（無制限管理者・新任の先生・一般ユーザー）の追加は
+		// 無制限管理者に限る。無制限管理者を自校の担当に追加すると担当校1件の制限adminへ
+		// 降格し、最後の担当校は制限adminからは外せないため（下記 RemoveMember のガード）、
+		// 無制限管理者を恒久的に自校へ閉じ込められてしまう(#1157)。
 		targetRestricted, _, err := c.schools.ResolveAdminAccess(req.UserID)
 		if err != nil {
 			return echoInternalError(err)
 		}
 		if !targetRestricted {
 			return echo.NewHTTPError(http.StatusForbidden,
-				"無制限管理者を担当校へ追加できません（無制限管理者に依頼してください）")
+				"担当校をまだ持たないユーザーの追加は無制限管理者のみ可能です")
 		}
+	} else if req.UserID == adminUserID {
+		// 無制限管理者が自分を担当に追加すると制限adminへ降格し、
+		// 最後の担当校は自分では外せない（他に無制限管理者が居なければ手SQL以外で戻せない）
+		return echo.NewHTTPError(http.StatusForbidden,
+			"自分自身を担当校へ追加できません（無制限管理者の権限を失い、自力で戻せなくなります）")
 	}
 	if err := c.schools.AddMember(req.UserID, id); err != nil {
 		return mapSchoolError(err)

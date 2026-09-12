@@ -74,6 +74,49 @@ func TestAdminSchoolController_AddMember_OwnSchoolAllowed(t *testing.T) {
 	repo.AssertExpectations(t)
 }
 
+// TestAdminSchoolController_AddMember_UnrestrictedBootstrap は、無制限管理者が
+// 担当校を持たないユーザーへ初回の担当を割り当てられることを検証する（#1157）。
+//
+// ここが塞がると担当校の初回割当（唯一のブートストラップ経路）が不可能になる。
+// targetRestricted のチェックが `if callerRestricted` の外へ出る回帰を検出する。
+func TestAdminSchoolController_AddMember_UnrestrictedBootstrap(t *testing.T) {
+	repo := &mocks.SchoolRepositoryMock{}
+	repo.On("ListSchoolsForAdmin", uint(1)).Return([]models.School{}, nil) // 呼び出し元=無制限
+	repo.On("FindByID", uint(5)).Return(&models.School{ID: 5, Name: "A校"}, nil)
+	repo.On("AddMember", mock.MatchedBy(func(m *models.AdminSchoolMembership) bool {
+		return m.UserID == 50 && m.SchoolID == 5
+	})).Return(nil)
+
+	body, _ := json.Marshal(map[string]any{"user_id": 50})
+	req := withAdminUserID(httptest.NewRequest(http.MethodPost, "/api/admin/schools/5/members", bytes.NewReader(body)), 1)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := newSchoolMemberCtx(req, "5", "")
+
+	ctrl := controllers.NewAdminSchoolController(services.NewSchoolService(repo))
+	assertStatus(t, ctrl.AddMember, ctx, http.StatusCreated)
+	repo.AssertExpectations(t)
+}
+
+// TestAdminSchoolController_AddMember_UnrestrictedCannotAddSelf は、無制限管理者が
+// 自分を担当校へ追加して自分自身を降格させられないことを検証する（#1157）。
+//
+// 降格すると最後の担当校を自分では外せず、他に無制限管理者が居なければ
+// 手SQL以外に復旧手段が無くなる。
+func TestAdminSchoolController_AddMember_UnrestrictedCannotAddSelf(t *testing.T) {
+	repo := &mocks.SchoolRepositoryMock{}
+	repo.On("ListSchoolsForAdmin", uint(1)).Return([]models.School{}, nil)
+	repo.On("FindByID", uint(5)).Return(&models.School{ID: 5, Name: "A校"}, nil)
+
+	body, _ := json.Marshal(map[string]any{"user_id": 1})
+	req := withAdminUserID(httptest.NewRequest(http.MethodPost, "/api/admin/schools/5/members", bytes.NewReader(body)), 1)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := newSchoolMemberCtx(req, "5", "")
+
+	ctrl := controllers.NewAdminSchoolController(services.NewSchoolService(repo))
+	assertStatus(t, ctrl.AddMember, ctx, http.StatusForbidden)
+	repo.AssertNotCalled(t, "AddMember", mock.Anything)
+}
+
 // TestAdminSchoolController_RemoveMember_LastSchoolDenied は、対象の担当校が0件になる削除を
 // 拒否することを検証する（#1157）。
 //
