@@ -65,7 +65,17 @@ function provenanceString(data: Record<string, unknown>, key: string): string | 
 }
 
 // セクション別の取得時刻を組み合わせた出どころ入力を作る（#1125 フェーズ1）
-function buildProvenance(data: Record<string, unknown>, fetchedAtKey: string): CompanyProvenanceInput {
+//
+// sectionAIFetched は「このセクションがAI取得パイプラインで埋まったか」。
+// companies.source_type は行に1つしか無く、技術スタック取得・関連企業取得が
+// 走るたびに上書きされるため、それだけではセクションごとの出どころを区別できない。
+// tech_fetched_at / relations_fetched_at はAI取得側だけが打刻するので、
+// その有無で「この節はAIが埋めた」と判定する。
+function buildProvenance(
+  data: Record<string, unknown>,
+  fetchedAtKey: string,
+  sectionAIFetched = false,
+): CompanyProvenanceInput {
   return {
     source_type: provenanceString(data, 'source_type'),
     source_url: provenanceString(data, 'source_url'),
@@ -73,6 +83,7 @@ function buildProvenance(data: Record<string, unknown>, fetchedAtKey: string): C
     last_model_used: provenanceString(data, 'last_model_used'),
     gbiz_last_synced_at: provenanceString(data, 'gbiz_last_synced_at'),
     fetched_at: provenanceString(data, fetchedAtKey) ?? provenanceString(data, 'source_fetched_at'),
+    section_ai_fetched: sectionAIFetched,
   }
 }
 
@@ -121,8 +132,13 @@ export function mapCompanyApiToViewModel(raw: unknown): CompanyDetailViewModel |
     partnerships: Array.isArray(data.partnerships) ? data.partnerships.map(String) : undefined,
     provenance: {
       basic: buildProvenance(data, 'info_fetched_at'),
-      tech: buildProvenance(data, 'tech_fetched_at'),
-      relations: buildProvenance(data, 'relations_fetched_at'),
+      // tech_fetched_at / relations_fetched_at の打刻は AI 取得側だけが行う
+      tech: buildProvenance(data, 'tech_fetched_at', provenanceString(data, 'tech_fetched_at') !== undefined),
+      relations: buildProvenance(
+        data,
+        'relations_fetched_at',
+        provenanceString(data, 'relations_fetched_at') !== undefined,
+      ),
     },
   }
 }

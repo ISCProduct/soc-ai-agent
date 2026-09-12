@@ -19,6 +19,17 @@ export interface CompanyProvenanceInput {
   gbiz_last_synced_at?: string | null
   /** セクション別の取得時刻。無ければ source_fetched_at で代替する */
   fetched_at?: string | null
+  /**
+   * このセクションがAI取得パイプラインで埋められたか。
+   *
+   * companies テーブルの source_type は行に1つしか無く、技術スタック取得
+   * (tech_stack_fetcher) や関連企業取得 (company_relations_fetcher) が
+   * 実行されるたびに上書きされる。そのため source_type だけでは
+   * 「基本情報は公的DB、技術スタックはAI推定」の混在を区別できない。
+   * tech_fetched_at / relations_fetched_at はAI取得側だけが打刻するので、
+   * その有無をセクション単位の判定材料として使う。
+   */
+  section_ai_fetched?: boolean
 }
 
 export interface ProvenanceLabel {
@@ -57,41 +68,98 @@ function joinDetail(parts: Array<string | undefined>): string {
   return parts.filter((p) => p && p.length > 0).join(' / ')
 }
 
+// source_type の表記ゆれと複合値を正規化する。
+//
+// 実データには "gbizinfo+web_search" のような複合値があり（本番相当DBで34社）、
+// 単純な等値比較ではどの分岐にも当たらずバッジが出ないまま
+// AI推定の情報が無警告で表示されていた。
+function sourceTokens(sourceType: string): string[] {
+  return sourceType
+    .toLowerCase()
+    .split(/[+,/\s]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0)
+}
+
+/** 公的DB・企業公式サイト由来を示すトークン */
+const OFFICIAL_TOKENS = new Set(['official', 'gbizinfo', 'gbiz', 'public_registry'])
+/** 運営の手入力 */
+const MANUAL_TOKENS = new Set(['manual'])
 /**
- * 出どころを分類する。表示するものが無い場合は null を返す（バッジを出さない）。
+ * AI・クローラー由来を示すトークン。
+ * Backend の companyfetch 定数（scrape / web_search / llm_extract）に加え、
+ * 求人サイトやグラフ生成側の表記ゆれも含める。
+ */
+const AI_TOKENS = new Set([
+  'web_search',
+  'llm_web_search',
+  'scrape',
+  'scraping',
+  'job_site',
+  'llm_extract',
+  'db',
+])
+
+/**
+ * 出どころを分類する。
  *
  * 判定順:
- *   1. gBizinfo と同期済み → 公的DB由来（公式情報）
- *   2. source_type が official / manual → 公式サイト / 手入力
- *   3. source_type が web_search、または確信度がある → AI 推定
- *   4. それ以外 → 表示しない
+ *   1. セクションがAI取得パイプラインで埋まっている → AI 推定
+ *      （行の source_type が公的DBでも、そのセクションはAIが埋めている）
+ *   2. AI 由来のトークンが1つでも含まれる → AI 推定
+ *      混在（gbizinfo+web_search）は安全側に倒す。一部でもAIなら公式と名乗らせない
+ *   3. すべて公的DB・公式サイト由来 → 公式情報
+ *   4. 手入力 → 運営入力
+ *   5. 判定できない → 出典不明
+ *
+ * null は返さない。バッジを出さないと「出どころが確かな情報」と同じ見た目になり、
+ * この機能の目的（AI推定を公的情報と誤認させない）が達成できないため。
  */
 export function classifyProvenance(input: CompanyProvenanceInput | null | undefined): ProvenanceLabel | null {
   if (!input) return null
 
   const confidence = normalizeConfidence(input.last_fetch_confidence)
   const fetchedAt = formatDate(input.fetched_at)
-  const sourceType = (input.source_type || '').trim()
+  const tokens = sourceTokens(input.source_type || '')
 
-  if (input.gbiz_last_synced_at) {
+  const hasAI = input.section_ai_fetched === true || tokens.some((t) => AI_TOKENS.has(t))
+  const hasOfficial = tokens.some((t) => OFFICIAL_TOKENS.has(t)) || Boolean(input.gbiz_last_synced_at)
+  const hasManual = tokens.some((t) => MANUAL_TOKENS.has(t))
+
+  if (hasAI) {
+    return {
+      kind: 'ai',
+      label: 'AI推定',
+      confidenceLabel: confidence ? CONFIDENCE_LABELS[confidence] : undefined,
+      tone: confidence === 'low' ? 'warning' : 'default',
+      evidenceUrl: input.source_url || undefined,
+      detail: joinDetail([
+        hasOfficial
+          ? '公的DBの情報にAIがWeb上から補完した内容が混ざっています。正確性は保証されません'
+          : 'AIがWeb上の情報から推定した内容です。正確性は保証されません',
+        confidence && CONFIDENCE_LABELS[confidence],
+        fetchedAt && `取得: ${fetchedAt}`,
+        input.last_model_used ? `モデル: ${input.last_model_used}` : undefined,
+      ]),
+    }
+  }
+
+  if (hasOfficial) {
+    const syncedAt = formatDate(input.gbiz_last_synced_at)
     return {
       kind: 'official',
       label: '公式情報',
       tone: 'success',
-      detail: joinDetail(['出典: gBizinfo（経済産業省の法人情報DB）', `同期: ${formatDate(input.gbiz_last_synced_at)}`]),
+      detail: joinDetail([
+        tokens.includes('official') && !tokens.some((t) => t.startsWith('gbiz'))
+          ? '出典: 企業の公式サイト'
+          : '出典: gBizinfo（経済産業省の法人情報DB）',
+        syncedAt ? `同期: ${syncedAt}` : fetchedAt && `取得: ${fetchedAt}`,
+      ]),
     }
   }
 
-  if (sourceType === 'official') {
-    return {
-      kind: 'official',
-      label: '公式情報',
-      tone: 'success',
-      detail: joinDetail(['出典: 企業の公式サイト', fetchedAt && `取得: ${fetchedAt}`]),
-    }
-  }
-
-  if (sourceType === 'manual') {
+  if (hasManual) {
     return {
       kind: 'manual',
       label: '運営入力',
@@ -100,21 +168,27 @@ export function classifyProvenance(input: CompanyProvenanceInput | null | undefi
     }
   }
 
-  if (sourceType === 'web_search' || sourceType === 'scrape' || sourceType === 'job_site' || confidence) {
+  // 確信度だけがあるケース（source_type 未設定）もAI取得の痕跡なのでAI扱い
+  if (confidence) {
     return {
       kind: 'ai',
       label: 'AI推定',
-      confidenceLabel: confidence ? CONFIDENCE_LABELS[confidence] : undefined,
+      confidenceLabel: CONFIDENCE_LABELS[confidence],
       tone: confidence === 'low' ? 'warning' : 'default',
       evidenceUrl: input.source_url || undefined,
       detail: joinDetail([
         'AIがWeb上の情報から推定した内容です。正確性は保証されません',
-        confidence && CONFIDENCE_LABELS[confidence],
+        CONFIDENCE_LABELS[confidence],
         fetchedAt && `取得: ${fetchedAt}`,
         input.last_model_used ? `モデル: ${input.last_model_used}` : undefined,
       ]),
     }
   }
 
-  return null
+  return {
+    kind: 'unknown',
+    label: '出典不明',
+    tone: 'warning',
+    detail: joinDetail(['出どころを確認できていない情報です', fetchedAt && `取得: ${fetchedAt}`]),
+  }
 }

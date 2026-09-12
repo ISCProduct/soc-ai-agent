@@ -86,27 +86,41 @@ test.describe('企業情報の出どころ表示', () => {
     await expect(badge).toContainText('低い')
   })
 
-  test('gBizinfo と同期済みの情報は公式情報として表示される', async ({ page }) => {
+  test('gBizinfo 由来だけの情報は公式情報として表示される', async ({ page }) => {
     await stubCompany(page, {
-      source_type: 'web_search',
-      last_fetch_confidence: 'low',
-      gbiz_last_synced_at: '2026-09-01T00:00:00Z',
+      source_type: 'gbizinfo',
       corporate_number: '7010401026738',
     })
 
     await page.goto('/company/42')
 
     await expect(page.getByTestId('provenance-official').first()).toContainText('公式情報')
-    // 公的DB由来なので AI 推定バッジは出ない
+    // AI 由来が混ざっていないので AI 推定バッジは出ない
     await expect(page.getByTestId('provenance-ai')).toHaveCount(0)
   })
 
-  test('出どころが無い企業にはバッジを出さない', async ({ page }) => {
+  // 本番相当DBに実在する "gbizinfo+web_search"（34社）。等値比較ではどの分岐にも
+  // 当たらず、AI補完済みの情報が無警告で表示されていた
+  test('公的DBとAIが混在する企業はAI推定として警告する', async ({ page }) => {
+    await stubCompany(page, {
+      source_type: 'gbizinfo+web_search',
+      corporate_number: '7010401026738',
+    })
+
+    await page.goto('/company/42')
+
+    await expect(page.getByTestId('provenance-ai').first()).toContainText('AI推定')
+    await expect(page.getByTestId('provenance-official')).toHaveCount(0)
+  })
+
+  // 無言だと「出どころが確かな情報」と同じ見た目になる。この機能の目的が達成できない
+  test('出どころが無い企業は「出典不明」として表示する', async ({ page }) => {
     await stubCompany(page, { source_type: '', last_fetch_confidence: '' })
 
     await page.goto('/company/42')
 
     await expect(page.getByRole('heading', { name: 'テスト株式会社' })).toBeVisible()
+    await expect(page.getByTestId('provenance-unknown').first()).toContainText('出典不明')
     await expect(page.getByTestId('provenance-ai')).toHaveCount(0)
     await expect(page.getByTestId('provenance-official')).toHaveCount(0)
   })
