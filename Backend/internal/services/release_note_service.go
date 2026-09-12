@@ -54,6 +54,18 @@ var developerOnlyReleaseNoteNeedles = []string{
 	"インフラ構成",
 	"デプロイパイプライン",
 	"ci/cd",
+	// 運用操作。Discordからの環境起動/停止や稼働日設定は開発・運用担当者のものであり、
+	// 学生や教員には関係がない(#1289)。
+	"discord",
+	"staging",
+	"ステージング",
+	"デプロイ",
+	"cloudwatch",
+	"lambda",
+	"rds",
+	"ecs",
+	"稼働日",
+	"起動/停止",
 }
 
 func isDeveloperOnlyReleaseNote(title, body string) bool {
@@ -63,14 +75,19 @@ func isDeveloperOnlyReleaseNote(title, body string) bool {
 			return true
 		}
 	}
-	// Release 傘PRの本文には「ECS on Fargate」等の定型デプロイ文言が必ず入る。
-	// 本文ニードルだとユーザー向け機能ごと落とすため、LLMの空summaryに任せる。
+	// Release 傘PRの本文には「ECS on Fargate」等の定型デプロイ文言が必ず入るため、
+	// 本文ニードルで judge するとユーザー向け機能ごと落ちる。
+	// 一方タイトルには「本番反映（Discordから本番環境を起動/停止する）」のように主題が
+	// 書かれるので、タイトルだけはニードル判定する。本文はLLMの空summaryに任せる(#1289)。
 	if strings.HasPrefix(lowerTitle, "release") {
-		return false
+		return containsDeveloperOnlyNeedle(lowerTitle)
 	}
-	text := strings.ToLower(title + "\n" + body)
+	return containsDeveloperOnlyNeedle(strings.ToLower(title + "\n" + body))
+}
+
+func containsDeveloperOnlyNeedle(lowerText string) bool {
 	for _, needle := range developerOnlyReleaseNoteNeedles {
-		if strings.Contains(text, needle) {
+		if strings.Contains(lowerText, needle) {
 			return true
 		}
 	}
