@@ -13,11 +13,10 @@ import (
 // ChatService チャットサービスのインターフェース
 type ChatService interface {
 	ProcessChat(ctx context.Context, req chat.ChatRequest) (*chat.ChatResponse, error)
-	GetChatHistory(sessionID string) ([]models.ChatMessage, error)
-	// GetChatHistoryForUser / SessionHasMessages はクエリを user_id でスコープした
+	// GetChatHistoryForUser / SessionHasOtherUserMessages はクエリを user_id でスコープした
 	// 所有者判定に使う（#1156）
 	GetChatHistoryForUser(sessionID string, userID uint) ([]models.ChatMessage, error)
-	SessionHasMessages(sessionID string) (bool, error)
+	SessionHasOtherUserMessages(sessionID string, userID uint) (bool, error)
 	GetUserScores(userID uint, sessionID string) ([]entity.UserWeightScore, error)
 	GetUserChatSessions(userID uint) ([]models.ChatSession, error)
 }

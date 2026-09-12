@@ -10,21 +10,16 @@ import (
 	"time"
 )
 
-// GetChatHistory チャット履歴を取得
-func (s *ChatService) GetChatHistory(sessionID string) ([]models.ChatMessage, error) {
-	return s.chatMessageRepo.FindBySessionID(sessionID)
-}
-
 // GetChatHistoryForUser は指定ユーザーのメッセージだけを返す（#1156）。
 // 所有者以外には1件も返らないため、呼び出し側の所有者比較に依存しない。
 func (s *ChatService) GetChatHistoryForUser(sessionID string, userID uint) ([]models.ChatMessage, error) {
 	return s.chatMessageRepo.FindBySessionIDForUser(sessionID, userID)
 }
 
-// SessionHasMessages は session_id にメッセージが存在するかを返す（#1156）。
-// 「まだ誰も使っていない新規セッション」と「他人のセッション」を区別するために使う。
-func (s *ChatService) SessionHasMessages(sessionID string) (bool, error) {
-	return s.chatMessageRepo.ExistsBySessionID(sessionID)
+// SessionHasOtherUserMessages は session_id に自分以外のメッセージがあるかを返す（#1156）。
+// あれば所有者判定を拒否する（混在セッションはフェイルクローズ）。
+func (s *ChatService) SessionHasOtherUserMessages(sessionID string, userID uint) (bool, error) {
+	return s.chatMessageRepo.ExistsBySessionIDForOtherUser(sessionID, userID)
 }
 
 // GetUserScores ユーザーのスコアを取得

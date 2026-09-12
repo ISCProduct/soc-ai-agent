@@ -22,19 +22,10 @@ func (r *ChatMessageRepository) Create(msg *models.ChatMessage) error {
 	return r.db.Create(msg).Error
 }
 
-// FindBySessionID セッションIDでメッセージ履歴を取得
-func (r *ChatMessageRepository) FindBySessionID(sessionID string) ([]models.ChatMessage, error) {
-	var messages []models.ChatMessage
-	err := r.db.Where("session_id = ?", sessionID).
-		Order("created_at ASC").
-		Find(&messages).Error
-	return messages, err
-}
-
 // FindBySessionIDForUser は指定ユーザーのメッセージだけを返す（#1156）。
 //
-// FindBySessionID は session_id だけで引くため、他ユーザーのセッションIDを
-// 渡されたときに他人のメッセージが返る。防御を呼び出し側の比較に委ねず、
+// session_id だけで引くと、他ユーザーのセッションIDを渡されたときに
+// 他人のメッセージが返る。防御を呼び出し側の比較に委ねず、
 // クエリ自体をスコープする（多層防御）。
 func (r *ChatMessageRepository) FindBySessionIDForUser(sessionID string, userID uint) ([]models.ChatMessage, error) {
 	var messages []models.ChatMessage
@@ -44,15 +35,17 @@ func (r *ChatMessageRepository) FindBySessionIDForUser(sessionID string, userID 
 	return messages, err
 }
 
-// ExistsBySessionID は session_id のメッセージが1件でも存在するかを返す（#1156）。
+// ExistsBySessionIDForOtherUser は session_id に「自分以外」のメッセージが
+// あるかを返す（#1156）。このリポジトリで意図的に user_id でスコープしない唯一のメソッド。
 //
-// FindBySessionIDForUser が0件のとき「新規セッション」と「他人のセッション」を
-// 区別するために使う。前者は開始を許可し、後者は拒否する。
-func (r *ChatMessageRepository) ExistsBySessionID(sessionID string) (bool, error) {
+// session_id はクライアント採番のため衝突・推測があり得る。他人のメッセージが
+// 混在したセッションは双方に対して拒否する（フェイルクローズ）。
+// 「自分のメッセージが1件でもあれば許可」にすると、混在セッションで両者が通り、
+// 下流の要約・埋め込み・分析に相手の自由記述が混ざる。
+func (r *ChatMessageRepository) ExistsBySessionIDForOtherUser(sessionID string, userID uint) (bool, error) {
 	var count int64
 	err := r.db.Model(&models.ChatMessage{}).
-		Where("session_id = ?", sessionID).
-		Limit(1).
+		Where("session_id = ? AND user_id <> ?", sessionID, userID).
 		Count(&count).Error
 	return count > 0, err
 }
@@ -63,22 +56,6 @@ func (r *ChatMessageRepository) FindByUserID(userID uint) ([]models.ChatMessage,
 	err := r.db.Where("user_id = ?", userID).
 		Order("created_at ASC").
 		Find(&messages).Error
-	return messages, err
-}
-
-// FindRecentBySessionID セッションIDで最新N件を取得
-func (r *ChatMessageRepository) FindRecentBySessionID(sessionID string, limit int) ([]models.ChatMessage, error) {
-	var messages []models.ChatMessage
-	err := r.db.Where("session_id = ?", sessionID).
-		Order("created_at DESC").
-		Limit(limit).
-		Find(&messages).Error
-
-	// 時系列順に並び替え
-	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
-		messages[i], messages[j] = messages[j], messages[i]
-	}
-
 	return messages, err
 }
 
@@ -99,16 +76,6 @@ func (r *ChatMessageRepository) FindRecentBySessionIDForUser(
 	}
 
 	return messages, err
-}
-
-// GetUsedQuestionIDs セッションで既に使用した質問IDを取得。
-// 本番の呼び出し元は現在無い（#1156 の調査で確認）。使うときは user_id でスコープすること。
-func (r *ChatMessageRepository) GetUsedQuestionIDs(sessionID string) ([]uint, error) {
-	var questionIDs []uint
-	err := r.db.Model(&models.ChatMessage{}).
-		Where("session_id = ? AND role = ? AND question_weight_id > 0", sessionID, "assistant").
-		Pluck("question_weight_id", &questionIDs).Error
-	return questionIDs, err
 }
 
 // GetUserSessions ユーザーのチャットセッション一覧を取得
