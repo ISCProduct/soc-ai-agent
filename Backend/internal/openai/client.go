@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -35,9 +36,21 @@ const (
 // （詳細は起動ログの slog.Warn を見る）。
 var ErrAIUnavailable = errors.New("ai provider unavailable")
 
+// Usage は1回のAIコールの使用量。
+//
+// Provider / ViaFallback を含めるのは、api_call_logs を「OpenAI への課金額」として
+// 使えるようにするため（#1293）。これが無いと無料のローカル推論が課金額に混ざり、
+// フォールバックの USD 上限が通常の OpenAI 利用と同じ財布になる。
+type Usage struct {
+	Model            string
+	PromptTokens     int
+	CompletionTokens int
+	Provider         string // "openai" / "local"
+	ViaFallback      bool   // ローカル障害時のフォールバックで処理されたか
+}
+
 // UsageHook はAPIコール成功時に呼ばれるコールバック。
-// model: 使用モデル名, promptTokens: 入力トークン数, completionTokens: 出力トークン数
-type UsageHook func(model string, promptTokens, completionTokens int)
+type UsageHook func(Usage)
 
 // Client は go-openai SDK をラップします。
 //
@@ -71,10 +84,29 @@ type Client struct {
 
 	// fallbacks は系統名 -> フォールバック用トランスポート。
 	// ローカル推論先を使う系統にだけ設定される（#1293）。
-	fallbacks     map[string]*fallbackTransport
-	fallbackGuard FallbackGuard
+	fallbacks map[string]*fallbackTransport
 
 	OnUsage UsageHook // オプション: コール成功時にトークン使用量を通知
+}
+
+// reportUsage は使用量を OnUsage に通知する。
+// provider と「フォールバック経由か」をここで一括して埋める。
+func (cli *Client) reportUsage(ctx context.Context, provider, model string, promptTokens, completionTokens int) {
+	if cli == nil || cli.OnUsage == nil {
+		return
+	}
+	viaFallback := fallbackUsed(ctx)
+	if viaFallback {
+		// フォールバックで処理されたなら課金先は OpenAI
+		provider = providerOpenAI
+	}
+	cli.OnUsage(Usage{
+		Model:            model,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		Provider:         provider,
+		ViaFallback:      viaFallback,
+	})
 }
 
 var (
@@ -231,10 +263,25 @@ func keyFor(provider, baseURL string, explicit bool, key string) string {
 	if provider != providerOpenAI {
 		return localPlaceholderAPIKey
 	}
-	if isOpenAIEndpoint(baseURL) || explicit {
+	if isOpenAIEndpoint(baseURL) {
+		return key
+	}
+	// 明示指定のゲートウェイでも、平文 http:// には実キーを送らない。
+	// AI_TEXT_PROVIDER=openai のまま base URL をローカル(http://localhost:11434/v1)に
+	// 向けた設定ミスで実キーが出るのを防ぐ（#1293 レビュー）。
+	if explicit && isHTTPSEndpoint(baseURL) {
 		return key
 	}
 	return localPlaceholderAPIKey
+}
+
+// isHTTPSEndpoint は base URL が https かを判定する。
+func isHTTPSEndpoint(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	return strings.ToLower(u.Scheme) == "https" && u.Host != ""
 }
 
 // isOpenAIEndpoint は base URL が OpenAI 本家（https）かを判定する。

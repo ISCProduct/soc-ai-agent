@@ -34,11 +34,12 @@ func TestResponses_CachedTokensLogging(t *testing.T) {
 
 	client := openai.NewWithBaseURL(server.URL, "gpt-4o-mini")
 	called := false
-	client.OnUsage = func(model string, promptTokens, completionTokens int) {
+	client.OnUsage = func(u openai.Usage) {
 		called = true
-		assert.Equal(t, "gpt-4o-mini", model)
-		assert.Equal(t, 100, promptTokens)
-		assert.Equal(t, 10, completionTokens)
+		assert.Equal(t, "gpt-4o-mini", u.Model)
+		assert.Equal(t, 100, u.PromptTokens)
+		assert.Equal(t, 10, u.CompletionTokens)
+		assert.False(t, u.ViaFallback, "フォールバックしていないので false")
 	}
 
 	ctx := context.Background()
@@ -71,11 +72,12 @@ func TestChatCompletion_CachedTokensLogging(t *testing.T) {
 
 	client := openai.NewWithBaseURL(server.URL, "gpt-4o-mini")
 	called := false
-	client.OnUsage = func(model string, promptTokens, completionTokens int) {
+	client.OnUsage = func(u openai.Usage) {
 		called = true
-		assert.Equal(t, "gpt-4o-mini", model)
-		assert.Equal(t, 100, promptTokens)
-		assert.Equal(t, 10, completionTokens)
+		assert.Equal(t, "gpt-4o-mini", u.Model)
+		assert.Equal(t, 100, u.PromptTokens)
+		assert.Equal(t, 10, u.CompletionTokens)
+		assert.False(t, u.ViaFallback, "フォールバックしていないので false")
 	}
 
 	ctx := context.Background()

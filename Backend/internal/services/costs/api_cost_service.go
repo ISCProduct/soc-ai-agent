@@ -2,6 +2,7 @@ package costs
 
 import (
 	"Backend/internal/models"
+	openaiPkg "Backend/internal/openai"
 	"Backend/internal/repositories"
 	"Backend/internal/services/shared"
 	"fmt"
@@ -28,8 +29,15 @@ var modelPricing = map[string][2]float64{
 	"text-embedding-3-large": {0.13, 0.13},
 }
 
-// calculateCost は入力/出力トークン数とモデル名からUSDコストを計算する
-func calculateCost(model string, promptTokens, completionTokens int) float64 {
+// calculateCost は入力/出力トークン数とモデル名からUSDコストを計算する。
+//
+// provider が openai 以外のときは 0 を返す。ローカル推論は無料であり、
+// かつローカルのモデル名（gpt-oss-20b 等）は単価表に無いため
+// 未知モデルの既定（gpt-4o 単価）が架空のコストとして記録されてしまう（#1293）。
+func calculateCost(provider, model string, promptTokens, completionTokens int) float64 {
+	if provider != "" && !strings.EqualFold(provider, "openai") {
+		return 0
+	}
 	lower := strings.ToLower(strings.TrimSpace(model))
 
 	// prefix match for versioned model names (e.g. gpt-4o-2024-08-06)
@@ -76,16 +84,22 @@ func NewAPICostService(repo *repositories.APICallLogRepository) *APICostService 
 	return &APICostService{repo: repo, alertThresholdUSD: threshold}
 }
 
-// LogCall は非同期でAPIコールログをDBに記録する
-func (s *APICostService) LogCall(model string, promptTokens, completionTokens int) {
+// LogUsage は非同期でAPIコールログをDBに記録する。
+//
+// provider / via_fallback を残すのは、この表を「OpenAI への課金額」として
+// 使えるようにするため（#1293）。フォールバックの USD 上限は via_fallback だけを
+// 集計するので、通常の OpenAI 利用（企業検索など）が保険の予算を食わない。
+func (s *APICostService) LogUsage(u openaiPkg.Usage) {
 	go func() {
-		cost := calculateCost(model, promptTokens, completionTokens)
+		cost := calculateCost(u.Provider, u.Model, u.PromptTokens, u.CompletionTokens)
 		entry := &models.APICallLog{
-			Model:            model,
-			PromptTokens:     promptTokens,
-			CompletionTokens: completionTokens,
-			TotalTokens:      promptTokens + completionTokens,
+			Model:            u.Model,
+			PromptTokens:     u.PromptTokens,
+			CompletionTokens: u.CompletionTokens,
+			TotalTokens:      u.PromptTokens + u.CompletionTokens,
 			CostUSD:          cost,
+			Provider:         u.Provider,
+			ViaFallback:      u.ViaFallback,
 			CalledAt:         time.Now().UTC(),
 		}
 		if err := s.repo.Create(entry); err != nil {

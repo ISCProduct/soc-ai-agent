@@ -2,12 +2,15 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // stubGuard はテスト用の FallbackGuard。
@@ -34,6 +37,11 @@ func localAndFallbackServers(t *testing.T, localStatus int) (localURL, fallbackU
 
 	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&lh, 1)
+		// ローカル側に実キーが届いていないことを全テストで検証する。
+		// 「1回目はダミーキー」が最も重要な不変条件（#1293）。
+		if got := r.Header.Get("Authorization"); strings.Contains(got, "sk-") {
+			t.Errorf("ローカル推論先に実キーらしい値が送られた: %q", got)
+		}
 		w.WriteHeader(localStatus)
 		_, _ = w.Write([]byte(`{"error":{"message":"local failure"}}`))
 	}))
@@ -313,6 +321,253 @@ func TestShouldFallback(t *testing.T) {
 			}
 			if got := shouldFallback(resp, tt.err); got != tt.want {
 				t.Fatalf("shouldFallback() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestFallback_NoGuardIsDenied はガード未注入なら再試行しないことを検証する（#1293 レビュー）。
+//
+// NewFromEnv は cmd/server 以外の main（crawl/cli/api）からも呼ばれ、
+// そこでは SetFallbackGuard が呼ばれていない。許可側に倒すと、
+// バッチ実行中にローカルが落ちた瞬間から上限なしで従量課金が進む。
+func TestFallback_NoGuardIsDenied(t *testing.T) {
+	localURL, fbURL, localHits, fbHits, _ := localAndFallbackServers(t, http.StatusInternalServerError)
+
+	tr := &fallbackTransport{
+		primaryBaseURL:  localURL,
+		fallbackBaseURL: fbURL,
+		fallbackKey:     "sk-real",
+		system:          "text",
+		// guard は意図的に nil
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, localURL+"/chat/completions", strings.NewReader(`{"model":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := tr.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("ローカルのレスポンスがそのまま返るべき: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500（ローカルのエラーをそのまま返す）", resp.StatusCode)
+	}
+	if got := atomic.LoadInt32(localHits); got != 1 {
+		t.Errorf("ローカルへの試行 = %d, want 1", got)
+	}
+	if got := atomic.LoadInt32(fbHits); got != 0 {
+		t.Errorf("ガード未注入なのに OpenAI を呼んだ（%d 回）", got)
+	}
+}
+
+// TestRewriteToFallback_URL は /v1 接頭辞の差し替えを固定する（#1293 レビュー）。
+//
+// e2e テストは httptest のパス無し URL を使うため、この分岐が全く固定されていなかった。
+func TestRewriteToFallback_URL(t *testing.T) {
+	tests := []struct {
+		name     string
+		primary  string
+		reqPath  string
+		rawQuery string
+		want     string
+	}{
+		{name: "ローカルに/v1なし", primary: "http://localhost:11434", reqPath: "/chat/completions", want: "https://api.openai.com/v1/chat/completions"},
+		{name: "ローカルに/v1あり", primary: "http://localhost:11434/v1", reqPath: "/v1/chat/completions", want: "https://api.openai.com/v1/chat/completions"},
+		{name: "ローカルに/v1と末尾スラッシュ", primary: "http://localhost:11434/v1/", reqPath: "/v1/chat/completions", want: "https://api.openai.com/v1/chat/completions"},
+		{name: "クエリを保持", primary: "http://localhost:11434/v1", reqPath: "/v1/audio/transcriptions", rawQuery: "x=1&y=2", want: "https://api.openai.com/v1/audio/transcriptions?x=1&y=2"},
+		{name: "ネストした接頭辞", primary: "http://localhost:8000/openai/v1", reqPath: "/openai/v1/embeddings", want: "https://api.openai.com/v1/embeddings"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := &fallbackTransport{
+				primaryBaseURL:  tt.primary,
+				fallbackBaseURL: defaultOpenAIBaseURL,
+				fallbackKey:     "sk-real",
+			}
+			req := httptest.NewRequest(http.MethodPost, "http://ignored"+tt.reqPath, nil)
+			req.URL.RawQuery = tt.rawQuery
+
+			out, err := tr.rewriteToFallback(req, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := out.URL.String(); got != tt.want {
+				t.Errorf("URL = %q, want %q", got, tt.want)
+			}
+			if out.Host != "api.openai.com" {
+				t.Errorf("Host = %q, want api.openai.com", out.Host)
+			}
+			if got := out.Header.Get("Authorization"); got != "Bearer sk-real" {
+				t.Errorf("Authorization = %q", got)
+			}
+		})
+	}
+}
+
+// TestRewriteToFallback_Model はローカルのモデル名を OpenAI のモデル名へ差し替えることを検証する。
+//
+// .env.example が推奨する gpt-oss-20b 等は api.openai.com に存在しないため、
+// 差し替えないとフォールバックが model_not_found で必ず失敗する（#1293 レビュー）。
+func TestRewriteToFallback_Model(t *testing.T) {
+	tests := []struct {
+		name          string
+		fallbackModel string
+		contentType   string
+		body          string
+		wantModel     string
+		wantUnchanged bool
+	}{
+		{name: "JSONのmodelを差し替える", fallbackModel: "gpt-4o-mini", contentType: "application/json", body: `{"model":"gpt-oss-20b","messages":[]}`, wantModel: "gpt-4o-mini"},
+		{name: "未設定なら触らない", fallbackModel: "", contentType: "application/json", body: `{"model":"gpt-oss-20b"}`, wantUnchanged: true},
+		{name: "multipartは触らない", fallbackModel: "whisper-1", contentType: "multipart/form-data; boundary=x", body: "--x\r\n", wantUnchanged: true},
+		{name: "modelキーが無ければ触らない", fallbackModel: "gpt-4o-mini", contentType: "application/json", body: `{"input":"x"}`, wantUnchanged: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := &fallbackTransport{
+				primaryBaseURL:  "http://localhost:11434/v1",
+				fallbackBaseURL: defaultOpenAIBaseURL,
+				fallbackKey:     "sk-real",
+				fallbackModel:   tt.fallbackModel,
+			}
+			req := httptest.NewRequest(http.MethodPost, "http://localhost:11434/v1/chat/completions", nil)
+			req.Header.Set("Content-Type", tt.contentType)
+
+			out, err := tr.rewriteToFallback(req, []byte(tt.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			sent, err := io.ReadAll(out.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantUnchanged {
+				if string(sent) != tt.body {
+					t.Errorf("ボディが書き換えられた: %s", sent)
+				}
+				return
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(sent, &payload); err != nil {
+				t.Fatalf("送信ボディがJSONでない: %s", sent)
+			}
+			if payload["model"] != tt.wantModel {
+				t.Errorf("model = %v, want %q", payload["model"], tt.wantModel)
+			}
+			if out.ContentLength != int64(len(sent)) {
+				t.Errorf("ContentLength = %d, want %d（書き換え後の長さ）", out.ContentLength, len(sent))
+			}
+		})
+	}
+}
+
+// TestLocalAttemptContext は1回目に持ち時間を使い切らせないことを検証する（#1293 レビュー）。
+//
+// ローカル推論の実際の障害は「遅い・返らない」が主。1回目が期限を使い切ると
+// フォールバックは0バイトも送れずに終わる（ログだけ出て実際は届かない）。
+func TestLocalAttemptContext(t *testing.T) {
+	tr := &fallbackTransport{}
+
+	t.Run("呼び出し側に期限があれば一部だけ渡す", func(t *testing.T) {
+		parent, cancelParent := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancelParent()
+		ctx, cancel := tr.localAttemptContext(parent)
+		defer cancel()
+
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("1回目に期限が設定されていない")
+		}
+		remaining := time.Until(deadline)
+		if remaining >= 10*time.Second {
+			t.Errorf("1回目が持ち時間を使い切っている: %v", remaining)
+		}
+		if remaining <= 0 {
+			t.Errorf("1回目の持ち時間が無い: %v", remaining)
+		}
+	})
+
+	t.Run("期限が無くenvも無ければ制限しない", func(t *testing.T) {
+		ctx, cancel := tr.localAttemptContext(context.Background())
+		defer cancel()
+		if _, ok := ctx.Deadline(); ok {
+			t.Error("正常な長時間生成を打ち切らないため、期限を付けてはいけない")
+		}
+	})
+
+	t.Run("期限が無くenvがあればそれを使う", func(t *testing.T) {
+		limited := &fallbackTransport{localAttemptTimeout: 5 * time.Second}
+		ctx, cancel := limited.localAttemptContext(context.Background())
+		defer cancel()
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("AI_LOCAL_ATTEMPT_TIMEOUT_SECONDS 相当の期限が効いていない")
+		}
+	})
+}
+
+// TestFallback_NotOnCallerCancel は呼び出し側のキャンセルで再試行しないことを検証する。
+// 投げても無駄で、ガードの分間カウンタだけ消費する（#1293 レビュー）。
+func TestFallback_NotOnCallerCancel(t *testing.T) {
+	localURL, fbURL, _, fbHits, _ := localAndFallbackServers(t, http.StatusInternalServerError)
+	guard := &stubGuard{allow: true}
+	tr := &fallbackTransport{
+		primaryBaseURL:  localURL,
+		fallbackBaseURL: fbURL,
+		fallbackKey:     "sk-real",
+		guard:           guard,
+		system:          "text",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // 呼び出し側がすでに終了している
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, localURL+"/chat/completions", strings.NewReader(`{"model":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _ = tr.RoundTrip(req)
+	if got := atomic.LoadInt32(fbHits); got != 0 {
+		t.Errorf("呼び出し側キャンセル後に OpenAI を呼んだ（%d 回）", got)
+	}
+}
+
+// TestValidatedFallbackBaseURL は実キーを送る宛先の検証を固定する（#1293 レビュー）。
+func TestValidatedFallbackBaseURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    string
+		wantErr bool
+	}{
+		{name: "未設定はOpenAI本家", raw: "", want: defaultOpenAIBaseURL},
+		{name: "httpsは許可", raw: "https://gw.example.com/v1", want: "https://gw.example.com/v1"},
+		{name: "末尾スラッシュを剥がす", raw: "https://gw.example.com/v1/", want: "https://gw.example.com/v1"},
+		{name: "平文httpの外部ホストは拒否", raw: "http://10.0.0.5/v1", wantErr: true},
+		{name: "ループバックのhttpは許可", raw: "http://127.0.0.1:4000/v1", want: "http://127.0.0.1:4000/v1"},
+		{name: "localhostのhttpは許可", raw: "http://localhost:4000/v1", want: "http://localhost:4000/v1"},
+		{name: "scheme無しは拒否", raw: "gw.example.com:9999", wantErr: true},
+		{name: "host空は拒否", raw: "https://", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := validatedFallbackBaseURL(tt.raw)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("エラーを期待したが %q が通った", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("= %q, want %q", got, tt.want)
 			}
 		})
 	}

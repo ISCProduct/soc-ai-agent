@@ -1,7 +1,10 @@
 package costs
 
 import (
+	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -11,24 +14,17 @@ type fakeCostRepo struct {
 	// since ごとの返り値。日次(その日の0時)と月次(1日の0時)で引き分ける。
 	daily, monthly float64
 	err            error
-	calls          int
+	calls          atomic.Int32
 }
 
-func (r *fakeCostRepo) TotalCostSince(since time.Time) (float64, error) {
-	r.calls++
+func (r *fakeCostRepo) TotalFallbackCostSince(ctx context.Context, since time.Time) (float64, error) {
+	r.calls.Add(1)
 	if r.err != nil {
 		return 0, r.err
 	}
-	if since.Day() == 1 && since.Hour() == 0 {
-		// 月初は日次と月次が同じ範囲になるため、テストでは月次を優先して返す
+	// 月次の問い合わせは1日の0時。それ以外はその日の0時（日次）。
+	if since.Day() == 1 {
 		return r.monthly, nil
-	}
-	if since.Day() == since.Day() && since.Hour() == 0 && since.Month() != 0 {
-		// 日次の問い合わせ（その日の0時）と月次（1日の0時）を区別する
-		if since.Day() == 1 {
-			return r.monthly, nil
-		}
-		return r.daily, nil
 	}
 	return r.daily, nil
 }
@@ -151,8 +147,8 @@ func TestAllowFallback_CachesTotals(t *testing.T) {
 			t.Fatal("上限内なのに拒否された")
 		}
 	}
-	if repo.calls != 2 {
-		t.Fatalf("集計クエリ数=%d want 2（日次・月次を1回ずつ）", repo.calls)
+	if got := repo.calls.Load(); got != 2 {
+		t.Fatalf("集計クエリ数=%d want 2（日次・月次を1回ずつ）", got)
 	}
 
 	// TTL 経過後は再取得する
@@ -160,8 +156,8 @@ func TestAllowFallback_CachesTotals(t *testing.T) {
 	if allow, _ := g.AllowFallback(); !allow {
 		t.Fatal("上限内なのに拒否された")
 	}
-	if repo.calls != 4 {
-		t.Fatalf("TTL経過後の集計クエリ数=%d want 4", repo.calls)
+	if got := repo.calls.Load(); got != 4 {
+		t.Fatalf("TTL経過後の集計クエリ数=%d want 4", got)
 	}
 }
 
@@ -170,5 +166,98 @@ func TestAllowFallback_NilGuard(t *testing.T) {
 	var g *OpenAIFallbackGuard
 	if allow, _ := g.AllowFallback(); allow {
 		t.Fatal("nil ガードが許可を返した")
+	}
+}
+
+// TestAllowFallback_MinuteLimitDefault は分間上限の既定値が無制限でないことを固定する。
+//
+// USD 上限は最大 costCacheTTL 分だけ古い値で判定するため、その窓の間に効く
+// ブレーキはこのレート制限だけ（#1293 レビュー）。
+func TestAllowFallback_MinuteLimitDefault(t *testing.T) {
+	for _, k := range []string{
+		"OPENAI_FALLBACK_ENABLED", "OPENAI_DAILY_HARD_LIMIT_USD",
+		"OPENAI_MONTHLY_HARD_LIMIT_USD", "OPENAI_FALLBACK_MAX_REQUESTS_PER_MINUTE",
+	} {
+		t.Setenv(k, "")
+	}
+	if defaultMaxRequestsPerMinute <= 0 {
+		t.Fatalf("既定の分間上限が無制限になっている: %d", defaultMaxRequestsPerMinute)
+	}
+
+	at := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	g := newGuardAt(&fakeCostRepo{daily: 0, monthly: 0}, at)
+
+	for i := range defaultMaxRequestsPerMinute {
+		if allow, reason := g.AllowFallback(); !allow {
+			t.Fatalf("%d 回目で拒否された: %s", i+1, reason)
+		}
+	}
+	if allow, reason := g.AllowFallback(); allow {
+		t.Error("既定の分間上限を超えても許可された")
+	} else if reason != "分間リクエスト上限に到達" {
+		t.Errorf("reason = %q", reason)
+	}
+}
+
+// TestAllowFallback_ConcurrentIsRaceFree は並行呼び出しでカウンタが壊れないことを確認する。
+// 障害時は複数ハンドラから同時に呼ばれる（-race で実行する）。
+func TestAllowFallback_ConcurrentIsRaceFree(t *testing.T) {
+	for _, k := range []string{
+		"OPENAI_FALLBACK_ENABLED", "OPENAI_DAILY_HARD_LIMIT_USD",
+		"OPENAI_MONTHLY_HARD_LIMIT_USD", "OPENAI_FALLBACK_MAX_REQUESTS_PER_MINUTE",
+	} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("OPENAI_FALLBACK_MAX_REQUESTS_PER_MINUTE", "1000")
+
+	at := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	g := newGuardAt(&fakeCostRepo{daily: 0, monthly: 0}, at)
+
+	var wg sync.WaitGroup
+	for range 50 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			g.AllowFallback()
+		}()
+	}
+	wg.Wait()
+
+	g.mu.Lock()
+	count := g.minuteCount
+	g.mu.Unlock()
+	if count != 50 {
+		t.Errorf("minuteCount = %d, want 50", count)
+	}
+}
+
+// TestCalculateCost_NonOpenAIProviderIsFree はローカル推論を課金額に混ぜないことを検証する。
+//
+// 未知モデル名は gpt-4o 単価にフォールバックするため、これが無いと
+// 無料のローカル推論が架空コストとして日次/月次予算を食い潰す（#1293 レビュー）。
+func TestCalculateCost_NonOpenAIProviderIsFree(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		model    string
+		wantZero bool
+	}{
+		{name: "localは常に0", provider: "local", model: "my-local-model", wantZero: true},
+		{name: "localでOpenAI名でも0", provider: "local", model: "gpt-4o", wantZero: true},
+		{name: "openaiは課金", provider: "openai", model: "gpt-4o"},
+		{name: "provider不明(既存行)はOpenAI扱い", provider: "", model: "gpt-4o"},
+		{name: "大文字小文字を区別しない", provider: "LOCAL", model: "gpt-4o", wantZero: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := calculateCost(tt.provider, tt.model, 1_000_000, 1_000_000)
+			if tt.wantZero && got != 0 {
+				t.Errorf("cost = %v, want 0", got)
+			}
+			if !tt.wantZero && got <= 0 {
+				t.Errorf("cost = %v, want > 0", got)
+			}
+		})
 	}
 }

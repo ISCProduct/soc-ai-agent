@@ -69,6 +69,7 @@ func (e *ResponsesAPIError) Retryable() bool {
 }
 
 func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (string, error) {
+	ctx = withFallbackFlag(ctx)
 	// ensureText と二重管理にすると local プロバイダで Responses 系が全滅するため、
 	// ここも同じガードに寄せる（#1293 レビュー指摘）
 	if err := cli.ensureText(); err != nil {
@@ -137,8 +138,8 @@ func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (s
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return "", err
 	}
-	if cli.OnUsage != nil && (parsed.Usage.InputTokens > 0 || parsed.Usage.OutputTokens > 0) {
-		cli.OnUsage(payload.Model, parsed.Usage.InputTokens, parsed.Usage.OutputTokens)
+	if parsed.Usage.InputTokens > 0 || parsed.Usage.OutputTokens > 0 {
+		cli.reportUsage(ctx, cli.textProvider, payload.Model, parsed.Usage.InputTokens, parsed.Usage.OutputTokens)
 		if parsed.Usage.PromptTokensDetails != nil {
 			cached := parsed.Usage.PromptTokensDetails.CachedTokens
 			var hit float64
