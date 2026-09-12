@@ -207,6 +207,8 @@ func TestValidateAdminTokenForUser(t *testing.T) {
 // 呼び出し側（EchoAdminAuth）が「再ログインしてください」と案内できるようにするため、
 // 署名が正しいトークンの期限切れだけは無効と区別する。
 func TestValidateAdminTokenForUser_ExpiredIsDistinguishable(t *testing.T) {
+	// 実行環境で TTL を伸ばしていると期限切れにならないため固定する
+	t.Setenv("ADMIN_TOKEN_TTL_HOURS", "")
 	user := &entity.User{ID: 7, Email: "admin@example.com", IsAdmin: true}
 	old := time.Now().Add(-defaultAdminTokenTTL - time.Hour)
 	token := generateAdminTokenAt(user.ID, user.Email, testAdminSecret, old)

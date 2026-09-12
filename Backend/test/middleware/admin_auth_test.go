@@ -4,6 +4,10 @@ package middleware_test
 // 実行: cd Backend && go test ./test/middleware/... -run TestAdminAuth -v
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -188,6 +192,14 @@ func TestAdminAuth_UserEmailNotFound(t *testing.T) {
 	}
 }
 
+// legacyAdminToken は #1155 以前の形式（発行時刻を持たない HMAC-SHA256）のトークンを作る。
+// 本番パッケージにテスト専用の公開関数を足さないため、ここで組み立てる。
+func legacyAdminToken(userID uint, email, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	fmt.Fprintf(mac, "%d:%s", userID, email)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
 // TestAdminAuth_ExpiredTokenMessage は期限切れと無効で 403 の本文が出し分けられることを
 // 検証する（#1155）。
 //
@@ -205,7 +217,7 @@ func TestAdminAuth_ExpiredTokenMessage(t *testing.T) {
 	}{
 		{
 			name:        "旧形式で署名が一致するなら再ログイン案内",
-			token:       middleware.LegacyAdminTokenForTest(1, email, secret),
+			token:       legacyAdminToken(1, email, secret),
 			wantMessage: "有効期限",
 		},
 		{

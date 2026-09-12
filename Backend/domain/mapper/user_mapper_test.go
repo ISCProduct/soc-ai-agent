@@ -1,4 +1,4 @@
-package middleware
+package mapper_test
 
 import (
 	"testing"

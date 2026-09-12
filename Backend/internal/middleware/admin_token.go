@@ -122,12 +122,6 @@ func legacyAdminSignature(userID uint, email, secret string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// LegacyAdminTokenForTest は #1155 以前の形式のトークンを返す（移行挙動のテスト用）。
-// 本番コードからは使わない。
-func LegacyAdminTokenForTest(userID uint, email, secret string) string {
-	return legacyAdminSignature(userID, email, secret)
-}
-
 // isLegacyAdminToken は #1155 以前の形式（発行時刻を持たない HMAC-SHA256 の hex）かを判定する。
 func isLegacyAdminToken(token string) bool {
 	if len(token) != sha256.Size*2 {
