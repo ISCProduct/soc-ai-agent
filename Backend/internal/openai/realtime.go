@@ -31,7 +31,8 @@ type RealtimeSessionResponse struct {
 }
 
 func (cli *Client) CreateRealtimeClientSecret(ctx context.Context, session RealtimeSessionRequest) (*RealtimeSessionResponse, error) {
-	if err := cli.ensureAudio(); err != nil {
+	// Realtime は OpenAI 固有 API。ローカル音声構成では縮退する（#1293）
+	if err := cli.ensureRealtime(); err != nil {
 		return nil, err
 	}
 	body, err := json.Marshal(session)
@@ -42,7 +43,7 @@ func (cli *Client) CreateRealtimeClientSecret(ctx context.Context, session Realt
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+cli.audioKey)
+	req.Header.Set("Authorization", "Bearer "+cli.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}

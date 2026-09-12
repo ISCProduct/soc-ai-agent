@@ -59,19 +59,30 @@ func TestNewFromEnv_ProviderMatrix(t *testing.T) {
 			wantTextAvailable: true, wantEmbedAvailable: true, wantAudioAvailable: true,
 		},
 		{
-			name: "テキストのみlocal: キー無しでもテキストは使える",
+			name: "テキストのみlocal指定: provider と base URL が3系統に継承される（1台構成）",
 			env: map[string]string{
 				"AI_TEXT_PROVIDER": "local",
 				"AI_TEXT_BASE_URL": "http://localhost:11434/v1",
 				"AI_TEXT_MODEL":    "gpt-oss-20b",
 			},
 			wantTextProvider: providerLocal, wantTextBaseURL: "http://localhost:11434/v1",
-			wantModel: "gpt-oss-20b",
-			// 埋め込み・音声の base URL 未指定はテキストを継承するが、プロバイダは openai のままなので
-			// キー無しでは縮退する
+			wantModel:        "gpt-oss-20b",
 			wantEmbedBaseURL: "http://localhost:11434/v1", wantEmbedModel: "text-embedding-3-small",
 			wantAudioBaseURL:  "http://localhost:11434/v1",
-			wantTextAvailable: true,
+			wantTextAvailable: true, wantEmbedAvailable: true, wantAudioAvailable: true,
+		},
+		{
+			name: "テキストlocal + 埋め込みは明示的にopenai: キー無しなら埋め込みだけ縮退",
+			env: map[string]string{
+				"AI_TEXT_PROVIDER":      "local",
+				"AI_TEXT_BASE_URL":      "http://localhost:11434/v1",
+				"AI_EMBEDDING_PROVIDER": "openai",
+			},
+			wantTextProvider: providerLocal, wantTextBaseURL: "http://localhost:11434/v1",
+			wantModel:        "gpt-4o-mini",
+			wantEmbedBaseURL: "http://localhost:11434/v1", wantEmbedModel: "text-embedding-3-small",
+			wantAudioBaseURL:  "http://localhost:11434/v1",
+			wantTextAvailable: true, wantAudioAvailable: true,
 		},
 		{
 			name:    "localなのにbase URLが無い: 設定として成立しないのでエラー",
@@ -79,7 +90,8 @@ func TestNewFromEnv_ProviderMatrix(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "埋め込みだけlocalでbase URLが無い場合もエラー",
+			// テキストが OpenAI 本家のままなので継承元が無く、local として成立しない
+			name:    "埋め込みだけlocalでbase URLが無い場合はエラー",
 			env:     map[string]string{"AI_EMBEDDING_PROVIDER": "local", "OPENAI_API_KEY": "sk-test"},
 			wantErr: true,
 		},
@@ -91,7 +103,7 @@ func TestNewFromEnv_ProviderMatrix(t *testing.T) {
 			wantTextProvider: providerLocal, wantTextBaseURL: "http://localhost:8000/v1",
 			wantModel: "gpt-4o-mini", wantEmbedBaseURL: "http://localhost:8000/v1",
 			wantEmbedModel: "text-embedding-3-small", wantAudioBaseURL: "http://localhost:8000/v1",
-			wantTextAvailable: true,
+			wantTextAvailable: true, wantEmbedAvailable: true, wantAudioAvailable: true,
 		},
 		{
 			name:             "未知のプロバイダ名はopenaiへフォールバック（起動を止めない）",
@@ -373,6 +385,11 @@ func TestSystemsRouteToTheirOwnServers(t *testing.T) {
 	textSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		textPaths = append(textPaths, r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/responses" {
+			// Responses API は chat/completions と応答形式が違う
+			_, _ = w.Write([]byte(`{"output_text":"ok"}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{}"}}]}`))
 	}))
 	defer textSrv.Close()
@@ -406,6 +423,69 @@ func TestSystemsRouteToTheirOwnServers(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := cli.ChatCompletionJSON(ctx, "sys", "user", 0, 16); err != nil {
+		t.Fatalf("text(chat): %v", err)
+	}
+	// Responses API も同じテキスト推論先へ行くこと。
+	// ここを検証していなかったため、doResponses に残っていた旧 apiKey ガードで
+	// local プロバイダのテキスト系が全滅していたのを見落としていた
+	if _, err := cli.Responses(ctx, "input"); err != nil {
+		t.Fatalf("text(responses): %v", err)
+	}
+	if _, err := cli.Embedding(ctx, "text"); err != nil {
+		t.Fatalf("embedding: %v", err)
+	}
+	if _, err := cli.Transcribe(ctx, []byte("audio"), "a.webm"); err != nil {
+		t.Fatalf("audio(stt): %v", err)
+	}
+	if _, err := cli.TTS(ctx, "こんにちは", "alloy"); err != nil {
+		t.Fatalf("audio(tts): %v", err)
+	}
+
+	if len(textPaths) != 2 || textPaths[0] != "/chat/completions" || textPaths[1] != "/responses" {
+		t.Errorf("text へのリクエスト = %v", textPaths)
+	}
+	if len(embedPaths) != 1 || embedPaths[0] != "/embeddings" {
+		t.Errorf("embedding へのリクエスト = %v", embedPaths)
+	}
+	if len(audioPaths) != 2 || audioPaths[0] != "/audio/transcriptions" || audioPaths[1] != "/audio/speech" {
+		t.Errorf("audio へのリクエスト = %v", audioPaths)
+	}
+}
+
+// TestLocalEndpointsNeverReceiveRealKey は OPENAI_API_KEY を残したまま local へ
+// 切り替えたときに、実キーがローカル推論先へ送信されないことを検証する（#1293）。
+//
+// 「キーはタスク定義に残したまま provider だけ local にする」のが最も自然な移行手順で、
+// provider 基準でキーを選ぶ実装だと実キーが外部へ漏れる。
+func TestLocalEndpointsNeverReceiveRealKey(t *testing.T) {
+	const realKey = "sk-REAL-SECRET"
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/embeddings":
+			_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1]}],"usage":{"prompt_tokens":1}}`))
+		case "/audio/transcriptions":
+			_, _ = w.Write([]byte(`{"text":"ok"}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{}"}}]}`))
+		}
+	}))
+	defer srv.Close()
+
+	clearAIEnv(t)
+	t.Setenv("OPENAI_API_KEY", realKey)
+	t.Setenv("AI_TEXT_PROVIDER", "local")
+	t.Setenv("AI_TEXT_BASE_URL", srv.URL)
+	// 埋め込み・音声は未指定（テキストの provider と base URL を継承する）
+
+	cli, err := NewFromEnv("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := cli.ChatCompletionJSON(ctx, "sys", "user", 0, 16); err != nil {
 		t.Fatalf("text: %v", err)
 	}
 	if _, err := cli.Embedding(ctx, "text"); err != nil {
@@ -415,14 +495,46 @@ func TestSystemsRouteToTheirOwnServers(t *testing.T) {
 		t.Fatalf("audio: %v", err)
 	}
 
-	if len(textPaths) != 1 || textPaths[0] != "/chat/completions" {
-		t.Errorf("text へのリクエスト = %v", textPaths)
+	if len(seen) != 3 {
+		t.Fatalf("リクエスト数=%d want 3", len(seen))
 	}
-	if len(embedPaths) != 1 || embedPaths[0] != "/embeddings" {
-		t.Errorf("embedding へのリクエスト = %v", embedPaths)
+	for _, auth := range seen {
+		if strings.Contains(auth, realKey) {
+			t.Fatalf("実キーがローカル推論先へ送信された: %q", auth)
+		}
+		if auth != "Bearer "+localPlaceholderAPIKey {
+			t.Errorf("Authorization = %q, want %q", auth, "Bearer "+localPlaceholderAPIKey)
+		}
 	}
-	if len(audioPaths) != 1 || audioPaths[0] != "/audio/transcriptions" {
-		t.Errorf("audio へのリクエスト = %v", audioPaths)
+}
+
+// TestRealtimeDegradesWithLocalAudio は音声をローカル化した構成で Realtime が
+// 縮退することを検証する（#1293）。
+//
+// Realtime は OpenAI 固有 API で互換サーバーには存在しない。URL が固定のまま
+// ダミーキーを本家へ送ると 401 になるだけなので、呼ぶ前に縮退させる。
+func TestRealtimeDegradesWithLocalAudio(t *testing.T) {
+	clearAIEnv(t)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("AI_AUDIO_PROVIDER", "local")
+	t.Setenv("AI_AUDIO_BASE_URL", "http://whisper:9000/v1")
+
+	cli, err := NewFromEnv("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cli.CreateRealtimeClientSecret(context.Background(), RealtimeSessionRequest{}); !errors.Is(err, ErrAIUnavailable) {
+		t.Fatalf("err = %v, want ErrAIUnavailable", err)
+	}
+	// 音声が OpenAI のままならガードは通る（実際のリクエストは送らない）
+	clearAIEnv(t)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	cli2, err := NewFromEnv("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cli2.ensureRealtime(); err != nil {
+		t.Fatalf("OpenAI 構成で縮退した: %v", err)
 	}
 }
 
@@ -438,6 +550,8 @@ func TestPartialAvailability(t *testing.T) {
 	clearAIEnv(t)
 	t.Setenv("AI_TEXT_PROVIDER", "local")
 	t.Setenv("AI_TEXT_BASE_URL", srv.URL)
+	// 埋め込みだけ明示的に OpenAI に残す（キーが無いので縮退する）
+	t.Setenv("AI_EMBEDDING_PROVIDER", "openai")
 
 	cli, err := NewFromEnv("")
 	if err != nil {

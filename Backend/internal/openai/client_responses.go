@@ -69,8 +69,10 @@ func (e *ResponsesAPIError) Retryable() bool {
 }
 
 func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (string, error) {
-	if cli.apiKey == "" {
-		return "", errors.New("openai api key is not set")
+	// ensureText と二重管理にすると local プロバイダで Responses 系が全滅するため、
+	// ここも同じガードに寄せる（#1293 レビュー指摘）
+	if err := cli.ensureText(); err != nil {
+		return "", err
 	}
 
 	body, err := json.Marshal(payload)
@@ -78,7 +80,7 @@ func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (s
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.baseURL+"/responses", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.BaseURL()+"/responses", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
