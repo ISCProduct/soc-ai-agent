@@ -572,3 +572,171 @@ func TestValidatedFallbackBaseURL(t *testing.T) {
 		})
 	}
 }
+
+// TestFallback_LocalResponseBodyIsFullyReadable は正常なローカル応答が
+// 途中で切れないことを検証する（#1293 レビュー F-1）。
+//
+// 1回目の ctx は resp.Body の寿命を握っている。RoundTrip 直後にキャンセルすると
+// バッファ済みの分（既定4KB）までしか読めず、正常な応答が切れる。
+// 実アプリの応答は 18KB 程度、TTS の音声はさらに大きいので必ず踏む。
+func TestFallback_LocalResponseBodyIsFullyReadable(t *testing.T) {
+	const size = 512 * 1024
+	payload := strings.Repeat("x", size)
+
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(payload))
+	}))
+	t.Cleanup(local.Close)
+
+	tr := &fallbackTransport{
+		primaryBaseURL:  local.URL,
+		fallbackBaseURL: defaultOpenAIBaseURL,
+		fallbackKey:     "sk-real",
+		guard:           &stubGuard{allow: true},
+		system:          "text",
+	}
+
+	// 呼び出し側に期限を持たせる（localAttemptContext が独自 ctx を張る条件）
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, local.URL+"/chat/completions", strings.NewReader(`{"model":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := tr.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	got, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		t.Fatalf("ボディを最後まで読めない（1回目のctxが早くキャンセルされている）: %v (読めたのは %d バイト)", readErr, len(got))
+	}
+	if len(got) != size {
+		t.Errorf("読めたバイト数 = %d, want %d", len(got), size)
+	}
+}
+
+// TestFallback_SuppressedResponseBodyIsReadable は上限到達で縮退したときに
+// 返すローカルのエラーレスポンスも最後まで読めることを検証する（#1293 レビュー F-2）。
+//
+// ここが切れると、呼び出し元は「上限到達で縮退した」ではなく
+// context canceled を見ることになり、運用の切り分けができない。
+func TestFallback_SuppressedResponseBodyIsReadable(t *testing.T) {
+	const size = 64 * 1024
+	payload := strings.Repeat("e", size)
+
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(payload))
+	}))
+	t.Cleanup(local.Close)
+
+	tr := &fallbackTransport{
+		primaryBaseURL:  local.URL,
+		fallbackBaseURL: defaultOpenAIBaseURL,
+		fallbackKey:     "sk-real",
+		guard:           &stubGuard{allow: false, reason: "日次コスト上限に到達"},
+		system:          "text",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, local.URL+"/chat/completions", strings.NewReader(`{"model":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := tr.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	got, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		t.Fatalf("縮退時のローカルエラーを最後まで読めない: %v (読めたのは %d バイト)", readErr, len(got))
+	}
+	if len(got) != size {
+		t.Errorf("読めたバイト数 = %d, want %d", len(got), size)
+	}
+}
+
+// TestSetupFallbacks_DefaultFallbackModel は OpenAI 本家へ逃げるときに
+// モデル名の既定値が入ることを検証する（#1293 レビュー F-6）。
+//
+// 既定が無いと .env.example の推奨構成（gpt-oss-20b 等）のままフォールバックしても
+// model_not_found で必ず失敗し、機構はあるが既定で無効、という状態になる。
+func TestSetupFallbacks_DefaultFallbackModel(t *testing.T) {
+	tests := []struct {
+		name           string
+		fallbackURL    string
+		envModel       string
+		wantTextModel  string
+		wantEmbedModel string
+	}{
+		{name: "本家宛は既定値が入る", wantTextModel: "gpt-4o-mini", wantEmbedModel: "text-embedding-3-small"},
+		{name: "envが優先される", envModel: "gpt-4.1-mini", wantTextModel: "gpt-4.1-mini", wantEmbedModel: "text-embedding-3-small"},
+		{
+			// 互換ゲートウェイはモデル名を勝手に決められない
+			name:        "ゲートウェイ宛は空のまま",
+			fallbackURL: "https://gw.example.com/v1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAIEnv(t)
+			t.Setenv("OPENAI_API_KEY", "sk-real")
+			t.Setenv("AI_TEXT_PROVIDER", "local")
+			t.Setenv("AI_TEXT_BASE_URL", "http://localhost:11434/v1")
+			t.Setenv("AI_FALLBACK_BASE_URL", tt.fallbackURL)
+			t.Setenv("AI_FALLBACK_MODEL", tt.envModel)
+
+			cli, err := NewFromEnv("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cli.fallbacks["text"]; got == nil {
+				t.Fatal("text 系統にフォールバックが設定されていない")
+			} else if got.fallbackModel != tt.wantTextModel {
+				t.Errorf("text fallbackModel = %q, want %q", got.fallbackModel, tt.wantTextModel)
+			}
+			if got := cli.fallbacks["embedding"]; got != nil && got.fallbackModel != tt.wantEmbedModel {
+				t.Errorf("embedding fallbackModel = %q, want %q", got.fallbackModel, tt.wantEmbedModel)
+			}
+		})
+	}
+}
+
+// TestAllowsRealKey は実キーを送ってよい宛先の判定を固定する（#1293 レビュー F-5）。
+// keyFor と validatedFallbackBaseURL がこの1つの判定を共有する。
+func TestAllowsRealKey(t *testing.T) {
+	tests := []struct {
+		baseURL string
+		want    bool
+	}{
+		{baseURL: "https://api.openai.com/v1", want: true},
+		{baseURL: "https://gw.example.com/v1", want: true},
+		{baseURL: "http://localhost:11434/v1", want: true},
+		{baseURL: "http://127.0.0.1:4000/v1", want: true},
+		{baseURL: "http://[::1]:4000/v1", want: true},
+		{baseURL: "http://10.0.0.5/v1", want: false},
+		{baseURL: "http://litellm:4000/v1", want: false},
+		{baseURL: "ftp://example.com", want: false},
+		{baseURL: "gw.example.com:9999", want: false},
+		{baseURL: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.baseURL, func(t *testing.T) {
+			if got := allowsRealKey(tt.baseURL); got != tt.want {
+				t.Errorf("allowsRealKey(%q) = %v, want %v", tt.baseURL, got, tt.want)
+			}
+		})
+	}
+}

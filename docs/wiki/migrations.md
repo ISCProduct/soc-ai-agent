@@ -136,6 +136,14 @@ go run ./cmd/migrate force 1   # version 2 を取り消した状態に補修し�
 `provider` で課金対象を切り分け、`via_fallback` でフォールバック専用予算を分離します。
 `ALGORITHM=INPLACE, LOCK=NONE` なので書き込みは止まりません。
 
+**適用順序に制約があります。アプリより先に version 25 を適用してください。**
+アプリを先に出すと `models.APICallLog` に `provider` / `via_fallback` が
+含まれるため INSERT が `Unknown column` で全失敗します。`LogUsage` は
+エラーをログに出すだけなので気づきにくく、同時に `TotalFallbackCostSince` も
+失敗して**フォールバックのUSD上限が fail-open で無効化**されます
+（残るブレーキは `OPENAI_FALLBACK_MAX_REQUESTS_PER_MINUTE` だけ）。
+コンテナ起動時の自動マイグレーションは無く、`go run ./cmd/migrate up` が必要です。
+
 **既存行は `provider=''` / `via_fallback=0` になります。** `provider` が空の行は
 OpenAI 扱い（従来の集計と同じ）です。フォールバック予算の集計は `via_fallback=1` の
 行だけなので、適用直後は 0 から始まります。

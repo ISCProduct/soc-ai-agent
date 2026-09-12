@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -266,22 +267,41 @@ func keyFor(provider, baseURL string, explicit bool, key string) string {
 	if isOpenAIEndpoint(baseURL) {
 		return key
 	}
-	// 明示指定のゲートウェイでも、平文 http:// には実キーを送らない。
-	// AI_TEXT_PROVIDER=openai のまま base URL をローカル(http://localhost:11434/v1)に
-	// 向けた設定ミスで実キーが出るのを防ぐ（#1293 レビュー）。
-	if explicit && isHTTPSEndpoint(baseURL) {
+	// 明示指定のゲートウェイでも、平文で外部ホストへ実キーを送るのは許さない。
+	// AI_TEXT_PROVIDER=openai のまま base URL をローカル推論先に向けた設定ミスで
+	// 実キーが出るのを防ぐ（#1293 レビュー）。
+	if explicit && allowsRealKey(baseURL) {
 		return key
 	}
 	return localPlaceholderAPIKey
 }
 
-// isHTTPSEndpoint は base URL が https かを判定する。
-func isHTTPSEndpoint(baseURL string) bool {
+// allowsRealKey は「その URL に実 API キーを送ってよいか」を判定する。
+//
+// https なら宛先を問わず可。平文 http はループバック宛だけ許す
+// （ローカルの互換ゲートウェイ経由は実運用であり、鍵がネットワークに出ない）。
+// フォールバック先 URL の検証（validatedFallbackBaseURL）も同じ判定を使う。
+// 同じ「平文だが安全か」を2箇所で別々に判断すると必ず食い違うため。
+func allowsRealKey(baseURL string) bool {
 	u, err := url.Parse(baseURL)
-	if err != nil {
+	if err != nil || u.Host == "" {
 		return false
 	}
-	return strings.ToLower(u.Scheme) == "https" && u.Host != ""
+	if strings.EqualFold(u.Scheme, "https") {
+		return true
+	}
+	return strings.EqualFold(u.Scheme, "http") && isLoopbackHost(u.Hostname())
+}
+
+func isLoopbackHost(host string) bool {
+	switch strings.ToLower(host) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // isOpenAIEndpoint は base URL が OpenAI 本家（https）かを判定する。

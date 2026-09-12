@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -97,17 +96,35 @@ func (t *fallbackTransport) RoundTrip(req *http.Request) (*http.Response, error)
 
 	localCtx, cancelLocal := t.localAttemptContext(req.Context())
 	resp, err := t.transport().RoundTrip(withBody(req.WithContext(localCtx), body))
-	if !shouldFallback(resp, err) {
-		cancelLocal()
+
+	// ローカルのレスポンスを呼び出し元へ返す場合、localCtx はまだ生かしておく必要がある。
+	// resp.Body の読み出しは http.Transport の readLoop 経由で、その ctx が
+	// キャンセルされるとバッファ済みの分（既定4KB）までしか読めなくなる。
+	// Body を閉じるタイミングまでキャンセルを遅らせる。
+	returnLocal := func() (*http.Response, error) {
+		if resp == nil || resp.Body == nil {
+			cancelLocal()
+			return resp, err
+		}
+		resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: cancelLocal}
 		return resp, err
 	}
-	// 1回目の予算を打ち切る。2回目は呼び出し側の ctx をそのまま使う
-	cancelLocal()
+
+	if !shouldFallback(resp, err) {
+		return returnLocal()
+	}
 
 	// 呼び出し側（ユーザー切断・上位のタイムアウト）が終了している場合は再試行しない。
 	// 投げても無駄で、ガードの分間カウンタだけ消費する。
 	if reqErr := req.Context().Err(); reqErr != nil {
-		return resp, err
+		return returnLocal()
+	}
+
+	// ローカルを自前の期限で打ち切ったのか、ローカル自身が失敗したのかを
+	// 運用で切り分けられるようにする。
+	localTimedOut := localCtx.Err() != nil
+	if localTimedOut {
+		slog.Warn("local ai attempt exceeded its budget", "system", t.system, "path", req.URL.Path)
 	}
 
 	// ガード未注入は「上限判定できない」= 拒否（fail-closed）。
@@ -120,18 +137,22 @@ func (t *fallbackTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	if !allowed {
 		// 縮退運転。ローカルのエラーをそのまま返し、OpenAI は呼ばない
 		slog.Warn("openai fallback suppressed", "system", t.system, "reason", reason)
-		return resp, err
+		return returnLocal()
 	}
 
 	fbReq, buildErr := t.rewriteToFallback(req, body)
 	if buildErr != nil {
 		slog.Warn("openai fallback request build failed", "system", t.system, "error", buildErr)
-		return resp, err
+		return returnLocal()
 	}
+
+	// ここから先はローカルのレスポンスを捨てるので、予算も解放してよい
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
-	slog.Warn("falling back to openai", "system", t.system, "path", req.URL.Path)
+	cancelLocal()
+
+	slog.Warn("falling back to openai", "system", t.system, "path", req.URL.Path, "local_timeout", localTimedOut)
 	markFallbackUsed(req.Context())
 	fbResp, fbErr := t.transport().RoundTrip(fbReq)
 	if fbErr != nil {
@@ -144,6 +165,22 @@ func (t *fallbackTransport) RoundTrip(req *http.Request) (*http.Response, error)
 		return nil, fbErr
 	}
 	return fbResp, nil
+}
+
+// cancelOnCloseBody は Body を閉じるまで ctx のキャンセルを遅らせるラッパー。
+//
+// RoundTrip が返った時点でレスポンスヘッダーは届いているが、ボディはまだ
+// ネットワークから読み出している途中。ここで ctx をキャンセルすると
+// バッファ済みの分しか読めず、正常な応答が途中で切れる。
+type cancelOnCloseBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *cancelOnCloseBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.cancel()
+	return err
 }
 
 // localAttemptContext は1回目（ローカル）用の ctx を返す。
@@ -324,10 +361,18 @@ func (cli *Client) setupFallbacks(realKey string) {
 		return
 	}
 
-	// ローカルのモデル名は OpenAI に存在しないため、フォールバック時に差し替える名前。
+	// ローカルのモデル名（gpt-oss-20b 等）は OpenAI に存在しないため、
+	// フォールバック時に差し替える名前。
+	//
+	// フォールバック先が OpenAI 本家のときだけ既定値を入れる。既定が無いと
+	// .env.example の推奨構成のままフォールバックしても model_not_found で
+	// 必ず失敗する = 機構はあるが既定で無効、になってしまう。
+	// 互換ゲートウェイ経由（AI_FALLBACK_BASE_URL 指定）はモデル名を
+	// 勝手に決められないので空のままにする。
+	toOpenAI := fallbackBaseURL == defaultOpenAIBaseURL
 	fallbackModels := map[string]string{
-		"text":      strings.TrimSpace(os.Getenv("AI_FALLBACK_MODEL")),
-		"embedding": strings.TrimSpace(os.Getenv("AI_FALLBACK_EMBEDDING_MODEL")),
+		"text":      firstNonEmptyOr(os.Getenv("AI_FALLBACK_MODEL"), defaultIf(toOpenAI, "gpt-4o-mini")),
+		"embedding": firstNonEmptyOr(os.Getenv("AI_FALLBACK_EMBEDDING_MODEL"), defaultIf(toOpenAI, "text-embedding-3-small")),
 	}
 
 	// 呼び出し側に期限が無い経路（音声）で fail-fast させたいときの1回目の上限。
@@ -375,6 +420,21 @@ func (cli *Client) setupFallbacks(realKey string) {
 	}
 }
 
+// firstNonEmptyOr は env 値が空なら既定値を返す。
+func firstNonEmptyOr(value, def string) string {
+	if v := strings.TrimSpace(value); v != "" {
+		return v
+	}
+	return def
+}
+
+func defaultIf(cond bool, value string) string {
+	if cond {
+		return value
+	}
+	return ""
+}
+
 // validatedFallbackBaseURL はフォールバック先 URL を検証する。
 //
 // 実キーを送る宛先なので http:// は拒否する（isOpenAIEndpoint が scheme を見るのと同じ理由）。
@@ -392,23 +452,12 @@ func validatedFallbackBaseURL(raw string) (string, error) {
 	if u.Host == "" {
 		return "", errors.New("host が空: " + trimmed)
 	}
-	// 平文 http を許すのはループバック宛だけ。ローカルの互換ゲートウェイ
-	// （LiteLLM 等）を経由させる構成は実運用であり、かつ鍵がネットワークに出ない。
-	if strings.ToLower(u.Scheme) != "https" && !isLoopbackHost(u.Hostname()) {
+	// 判定は keyFor と共有する（allowsRealKey）。同じ「平文だが安全か」を
+	// 2箇所で別々に判断すると必ず食い違う。
+	if !allowsRealKey(trimmed) {
 		return "", errors.New("scheme must be https (実APIキーを送るため平文は許可しない): " + trimmed)
 	}
 	return trimmed, nil
-}
-
-func isLoopbackHost(host string) bool {
-	switch strings.ToLower(host) {
-	case "localhost", "127.0.0.1", "::1", "[::1]":
-		return true
-	}
-	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
-		return ip.IsLoopback()
-	}
-	return false
 }
 
 // fallbackEnabledFromEnv は OPENAI_FALLBACK_ENABLED を読む（既定 true）。
