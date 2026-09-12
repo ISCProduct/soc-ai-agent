@@ -115,14 +115,15 @@ func TestNewFromEnv_ProviderMatrix(t *testing.T) {
 			wantTextAvailable: true, wantEmbedAvailable: true, wantAudioAvailable: true,
 		},
 		{
-			// テキストだけプロキシ経由にした場合、埋め込み・音声は本家を向く（継承しない）
+			// ゲートウェイ経由は3系統すべてに継承される（provider が同じため）。
+			// 継承しないと、埋め込みと STT/TTS だけ本家へ直行してしまう
 			name: "openaiプロバイダでもbase URLは差し替えられる（プロキシ・互換ゲートウェイ）",
 			env: map[string]string{
 				"OPENAI_API_KEY": "sk-test", "AI_TEXT_BASE_URL": "https://gw.example.test/v1/",
 			},
 			wantTextProvider: providerOpenAI, wantTextBaseURL: "https://gw.example.test/v1",
-			wantModel: "gpt-4o-mini", wantEmbedBaseURL: defaultOpenAIBaseURL,
-			wantEmbedModel: "text-embedding-3-small", wantAudioBaseURL: defaultOpenAIBaseURL,
+			wantModel: "gpt-4o-mini", wantEmbedBaseURL: "https://gw.example.test/v1",
+			wantEmbedModel: "text-embedding-3-small", wantAudioBaseURL: "https://gw.example.test/v1",
 			wantTextAvailable: true, wantEmbedAvailable: true, wantAudioAvailable: true,
 		},
 		{
@@ -645,5 +646,56 @@ func TestKeyFor(t *testing.T) {
 				t.Fatalf("keyFor() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestGatewayInheritedByAllSystems はゲートウェイ経由の設定が3系統すべてに効き、
+// 実キーが渡ることを検証する（#1293）。
+//
+// 継承しないと埋め込みと STT/TTS だけ OpenAI 本家へ直行するため、
+// egress を制限した環境では失敗し、制限が無い環境では意図しない直接送信になる。
+func TestGatewayInheritedByAllSystems(t *testing.T) {
+	clearAIEnv(t)
+	t.Setenv("OPENAI_API_KEY", "sk-real")
+	t.Setenv("AI_TEXT_BASE_URL", "https://gw.corp.example/v1")
+
+	cli, err := NewFromEnv("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, got := range []string{cli.BaseURL(), cli.EmbeddingBaseURL(), cli.AudioBaseURL()} {
+		if got != "https://gw.corp.example/v1" {
+			t.Errorf("base URL = %q, want ゲートウェイ", got)
+		}
+	}
+	// 明示指定した宛先なので実キーを渡す（そうしないと 401 で機能しない）
+	if cli.textKey != "sk-real" || cli.audioKey != "sk-real" {
+		t.Errorf("textKey=%q audioKey=%q, want sk-real", cli.textKey, cli.audioKey)
+	}
+}
+
+// TestExplicitOpenAIEmbeddingGoesToOfficial はテキストをローカル化しても
+// 埋め込みを明示的に OpenAI に残せることを検証する（#1293）。
+func TestExplicitOpenAIEmbeddingGoesToOfficial(t *testing.T) {
+	clearAIEnv(t)
+	t.Setenv("OPENAI_API_KEY", "sk-real")
+	t.Setenv("AI_TEXT_PROVIDER", "local")
+	t.Setenv("AI_TEXT_BASE_URL", "http://ollama:11434/v1")
+	t.Setenv("AI_EMBEDDING_PROVIDER", "openai")
+
+	cli, err := NewFromEnv("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cli.EmbeddingBaseURL() != defaultOpenAIBaseURL {
+		t.Errorf("EmbeddingBaseURL() = %q, want %q（明示した provider が尊重されるべき）",
+			cli.EmbeddingBaseURL(), defaultOpenAIBaseURL)
+	}
+	// テキストはローカルなのでダミーキー、埋め込みは本家なので実キー
+	if cli.textKey != localPlaceholderAPIKey {
+		t.Errorf("textKey = %q, want %q", cli.textKey, localPlaceholderAPIKey)
+	}
+	if cli.embedC == cli.c {
+		t.Error("推論先が違うのに SDK クライアントを共有している")
 	}
 }

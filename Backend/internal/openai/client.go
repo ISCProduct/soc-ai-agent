@@ -104,25 +104,29 @@ func providerFromEnv(key string) string {
 // resolveBaseURL は系統ごとの base URL を決める。
 // 第2戻り値は「その系統の base URL が env で明示指定されたか」。
 // 明示指定なら operator が意図してその宛先へ送っているとみなし、実キーを渡す（プロキシ用途）。
-func resolveBaseURL(provider, baseURLEnv, fallbackURL string) (baseURL string, explicit bool, err error) {
+func resolveBaseURL(
+	provider, baseURLEnv, fallbackProvider, fallbackURL string, fallbackExplicit bool,
+) (baseURL string, explicit bool, err error) {
 	if v := firstNonEmpty(os.Getenv(baseURLEnv)); v != "" {
 		// openai プロバイダでも base URL の差し替えは許す（プロキシ・Azure 互換ゲートウェイ等）
-		if !strings.HasPrefix(v, "http://") && !strings.HasPrefix(v, "https://") {
+		lower := strings.ToLower(v)
+		if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
 			// scheme 無しは相対URLとして扱われ、最初の AI 呼び出しで分かりにくく落ちる
 			return "", false, fmt.Errorf("%s は http:// または https:// で始まる必要があります: %q", baseURLEnv, v)
 		}
 		return strings.TrimRight(v, "/"), true, nil
 	}
+
+	// 継承元と provider が同じなら base URL も継承する。
+	// provider が違う場合に継承すると「テキストはローカル、埋め込みだけ OpenAI」という
+	// 明示指定が黙って無視されるため、そのときは継承しない。
+	if provider == fallbackProvider && fallbackURL != "" {
+		return strings.TrimRight(fallbackURL, "/"), fallbackExplicit, nil
+	}
 	if provider == providerLocal {
-		// 継承元がローカル推論先ならそれを使う（1台に全部載せる構成）。
-		// OpenAI 本家を継承しても local としては成立しないのでエラーにする。
-		if fallbackURL != "" && !isOpenAIEndpoint(fallbackURL) {
-			return strings.TrimRight(fallbackURL, "/"), false, nil
-		}
+		// local は推論先が分からないと成立しない
 		return "", false, fmt.Errorf("%s=%s には %s が必要です", providerEnvName(baseURLEnv), providerLocal, baseURLEnv)
 	}
-	// openai を名乗る系統は継承しない。継承すると
-	// 「テキストはローカル、埋め込みだけ OpenAI」という明示指定が黙って無視される。
 	return defaultOpenAIBaseURL, false, nil
 }
 
@@ -145,18 +149,23 @@ func NewFromEnv(optionalModel string) (*Client, error) {
 	embeddingProvider := providerFromEnvOr("AI_EMBEDDING_PROVIDER", textProvider)
 	audioProvider := providerFromEnvOr("AI_AUDIO_PROVIDER", textProvider)
 
-	textBaseURL, textExplicit, err := resolveBaseURL(textProvider, "AI_TEXT_BASE_URL", defaultOpenAIBaseURL)
+	// テキストは継承元が無い（fallbackProvider を空にして継承を発生させない）。
+	// local なら base URL が必須、openai なら本家が既定になる。
+	textBaseURL, textExplicit, err := resolveBaseURL(
+		textProvider, "AI_TEXT_BASE_URL", "", defaultOpenAIBaseURL, false)
 	if err != nil {
 		return nil, err
 	}
 	// 埋め込み・音声の base URL 未設定時はテキストと同じ推論先を使う（1台に全部載せる構成が多いため）。
 	// provider も継承されるため、テキストを local にすれば埋め込み・音声も
 	// 同じローカル推論先・ダミーキーになる。別の推論先に分けたい場合だけ個別に指定する。
-	embeddingBaseURL, embeddingExplicit, err := resolveBaseURL(embeddingProvider, "AI_EMBEDDING_BASE_URL", textBaseURL)
+	embeddingBaseURL, embeddingExplicit, err := resolveBaseURL(
+		embeddingProvider, "AI_EMBEDDING_BASE_URL", textProvider, textBaseURL, textExplicit)
 	if err != nil {
 		return nil, err
 	}
-	audioBaseURL, audioExplicit, err := resolveBaseURL(audioProvider, "AI_AUDIO_BASE_URL", textBaseURL)
+	audioBaseURL, audioExplicit, err := resolveBaseURL(
+		audioProvider, "AI_AUDIO_BASE_URL", textProvider, textBaseURL, textExplicit)
 	if err != nil {
 		return nil, err
 	}
