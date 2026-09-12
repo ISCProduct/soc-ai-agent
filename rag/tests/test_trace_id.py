@@ -25,6 +25,10 @@ def client():
         (None, None),
         ("req 123", None),
         ("req\n123", None),
+        # Python の $ は末尾の改行の直前にもマッチするので、末尾改行は取りこぼしやすい
+        ("abc\n", None),
+        ("abc\r\n", None),
+        ("a" * 64 + "\n", None),
         ("../../etc/passwd", None),
         ("<script>", None),
     ],
@@ -34,9 +38,13 @@ def test_safe_trace_id(value, expected):
 
 
 def test_trace_id_pattern_is_anchored():
-    """前方一致だけで通ると不正な後続文字を見逃すため、両端アンカーを固定する。"""
-    assert main._TRACE_ID_PATTERN.pattern.startswith("^")
-    assert main._TRACE_ID_PATTERN.pattern.endswith("$")
+    """アンカーは \\A / \\Z を使う。
+
+    Python の ^...$ は末尾の改行の直前にもマッチするため、"abc\\n" が通ってしまう。
+    その値はログとレスポンスヘッダーへ流れるので、アンカーの種類自体を固定する。
+    """
+    assert main._TRACE_ID_PATTERN.pattern.startswith("\\A")
+    assert main._TRACE_ID_PATTERN.pattern.endswith("\\Z")
 
 
 class TestTraceIDMiddleware:

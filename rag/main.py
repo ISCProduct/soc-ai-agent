@@ -137,7 +137,9 @@ async def _internal_auth_middleware(request: Request, call_next: Callable) -> An
     return await call_next(request)
 
 
-_TRACE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+# \A ... \Z を使う。Python の $ は末尾の改行の直前にもマッチするため、
+# ^...$ だと "abc\n" が通ってしまい、改行入りの値がログとレスポンスヘッダーへ流れる。
+_TRACE_ID_PATTERN = re.compile(r"\A[A-Za-z0-9_-]{1,64}\Z")
 
 
 def _safe_trace_id(value: str | None) -> str | None:
