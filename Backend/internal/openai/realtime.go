@@ -31,8 +31,9 @@ type RealtimeSessionResponse struct {
 }
 
 func (cli *Client) CreateRealtimeClientSecret(ctx context.Context, session RealtimeSessionRequest) (*RealtimeSessionResponse, error) {
-	if cli.apiKey == "" {
-		return nil, errors.New("openai api key is not set")
+	// Realtime は OpenAI 固有 API。ローカル音声構成では縮退する（#1293）
+	if err := cli.ensureRealtime(); err != nil {
+		return nil, err
 	}
 	body, err := json.Marshal(session)
 	if err != nil {

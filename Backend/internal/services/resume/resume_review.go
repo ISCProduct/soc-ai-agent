@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"Backend/internal/models"
+	"Backend/internal/openai"
 	"Backend/internal/ragclient"
 )
 
@@ -323,9 +324,13 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	if err != nil {
 		log.Printf("resume_review_stream: build score failed: %v", err)
 		var ve *shared.ValidationError
-		if errors.As(err, &ve) {
+		switch {
+		case errors.As(err, &ve):
 			sendEvent(map[string]any{"type": "error", "message": ve.Message})
-		} else {
+		case errors.Is(err, openai.ErrAIUnavailable):
+			// 内部設定が学生に見えないよう固定文言にする(#1293)
+			sendEvent(map[string]any{"type": "error", "message": "現在AI機能を利用できません。しばらくしてから再度お試しください。"})
+		default:
 			sendEvent(map[string]any{"type": "error", "message": err.Error()})
 		}
 		return err

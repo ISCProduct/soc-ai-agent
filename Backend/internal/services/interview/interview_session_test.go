@@ -142,17 +142,21 @@ func TestStartTurn_RejectsFinishedSession(t *testing.T) {
 func TestTurn_AllowsInProgressSession_UpToFinishedCheck(t *testing.T) {
 	t.Parallel()
 
-	// finished でなければガードを通過すること自体は確認できる
-	// (この先の openaiClient 呼び出しは nil pointer で落ちるため、ガード通過だけを検証する)
+	// finished でなければガードを通過することを検証する。
+	//
+	// 以前は openaiClient が nil のときガード通過後に panic していたため、panic の有無で
+	// 判定していた。#1293 で AI 未設定は panic ではなく ErrAIUnavailable による縮退に
+	// なったため、ガードを通過して面接の縮退応答が返ることで判定する。
 	repo := newSessionRepoStub(&models.InterviewSession{ID: 1, UserID: 10, Status: "in_progress"})
 	svc := newTestInterviewService(repo)
 
-	defer func() {
-		r := recover()
-		assert.NotNil(t, r, "openaiClientがnilのためガード通過後にpanicする想定")
-	}()
-	_, _ = svc.Turn(context.Background(), 10, 1, []byte("audio"), nil,
+	result, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), nil,
 		"企業名", "", "position", "info", "general", 0, 0, 60, 0, 0, 0, 0)
+
+	// AI が使えないときは面接を落とさず、聞き取れなかった旨の応答で続行する（既存の縮退挙動）
+	assert.NoError(t, err)
+	assert.NotNil(t, result, "finishedガードを通過していない")
+	assert.Contains(t, result.UserText, "聞き取れませんでした")
 }
 
 func TestListSessionsForOwner_ForbiddenWhenCheckerMissing(t *testing.T) {

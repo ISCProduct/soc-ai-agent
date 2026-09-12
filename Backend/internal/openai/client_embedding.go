@@ -3,21 +3,21 @@ package openai
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 
 	openai "github.com/sashabaranov/go-openai"
 )
 
 func (cli *Client) Embedding(ctx context.Context, input string, modelOverride ...string) ([]float32, error) {
-	if cli == nil || cli.c == nil {
-		return nil, errors.New("openai client is nil")
+	if err := cli.ensureEmbedding(); err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(input) == "" {
 		return nil, errors.New("embedding input is empty")
 	}
 
-	model := os.Getenv("OPENAI_EMBEDDING_MODEL")
+	// 埋め込みモデルは AI_EMBEDDING_MODEL / OPENAI_EMBEDDING_MODEL の解決結果を使う(#1293)
+	model := cli.EmbeddingModel
 	if len(modelOverride) > 0 && strings.TrimSpace(modelOverride[0]) != "" {
 		model = modelOverride[0]
 	}
@@ -25,7 +25,7 @@ func (cli *Client) Embedding(ctx context.Context, input string, modelOverride ..
 		model = "text-embedding-3-small"
 	}
 
-	resp, err := cli.c.CreateEmbeddings(ctx, openai.EmbeddingRequest{
+	resp, err := cli.embedC.CreateEmbeddings(ctx, openai.EmbeddingRequest{
 		Model: openai.EmbeddingModel(model),
 		Input: []string{input},
 	})

@@ -195,11 +195,22 @@ func main() {
 	}
 	slog.Info("Database seeding completed")
 
-	// OpenAI クライアント初期化
+	// AI クライアント初期化（#1293）
+	//
+	// OPENAI_API_KEY が無くても起動する。AI を使う呼び出しだけが ErrAIUnavailable で
+	// 縮退し、企業検索・企業一覧・マッチング・選考管理・求人・キャッシュ済み説明は
+	// 従来どおり動作する。エラーになるのは設定自体が成立しない場合
+	// （AI_TEXT_PROVIDER=local なのに AI_TEXT_BASE_URL が無い等）だけ。
 	aiClient, err := openai.NewFromEnv("")
 	if err != nil {
-		log.Fatalf("Failed to initialize OpenAI client: %v", err)
+		log.Fatalf("Failed to initialize AI client: %v", err)
 	}
+	textProvider, embeddingProvider, audioProvider := aiClient.Providers()
+	slog.Info("AI providers resolved",
+		"text", textProvider, "text_base_url", aiClient.BaseURL(), "text_model", aiClient.DefaultModel,
+		"embedding", embeddingProvider, "embedding_base_url", aiClient.EmbeddingBaseURL(),
+		"audio", audioProvider, "audio_base_url", aiClient.AudioBaseURL(),
+		"degraded", aiClient.Degraded())
 
 	// OAuth設定読み込み
 	oauthConfig := config.LoadOAuthConfig()

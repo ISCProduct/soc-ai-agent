@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -34,8 +33,8 @@ func (cli *Client) TranscribeWithHints(ctx context.Context, audio []byte, filena
 // 選択的フォールバックで、既定モデルとは別の高精度モデルへ
 // 同じ音声を再送するために使う。
 func (cli *Client) TranscribeWithModel(ctx context.Context, audio []byte, filename, hints, model string) (string, error) {
-	if cli.apiKey == "" {
-		return "", errors.New("openai api key is not set")
+	if err := cli.ensureAudio(); err != nil {
+		return "", err
 	}
 
 	var buf bytes.Buffer
@@ -58,11 +57,11 @@ func (cli *Client) TranscribeWithModel(ctx context.Context, audio []byte, filena
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.BaseURL()+"/audio/transcriptions", &buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.AudioBaseURL()+"/audio/transcriptions", &buf)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+cli.apiKey)
+	req.Header.Set("Authorization", "Bearer "+cli.audioKey)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
