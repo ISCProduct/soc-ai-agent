@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -51,8 +52,9 @@ type Client struct {
 	EmbeddingModel string
 
 	apiKey string
-	// textKey / audioKey は系統ごとに送る API キー。local はダミー値になる。
+	// textKey / embeddingKey / audioKey は系統ごとに送る API キー。local はダミー値になる。
 	textKey          string
+	embeddingKey     string
 	audioKey         string
 	baseURL          string
 	embeddingBaseURL string
@@ -66,6 +68,11 @@ type Client struct {
 	textAvailable      bool
 	embeddingAvailable bool
 	audioAvailable     bool
+
+	// fallbacks は系統名 -> フォールバック用トランスポート。
+	// ローカル推論先を使う系統にだけ設定される（#1293）。
+	fallbacks     map[string]*fallbackTransport
+	fallbackGuard FallbackGuard
 
 	OnUsage UsageHook // オプション: コール成功時にトークン使用量を通知
 }
@@ -180,6 +187,7 @@ func NewFromEnv(optionalModel string) (*Client, error) {
 		EmbeddingModel:     embeddingModel,
 		apiKey:             key,
 		textKey:            keyFor(textProvider, textBaseURL, textExplicit, key),
+		embeddingKey:       keyFor(embeddingProvider, embeddingBaseURL, embeddingExplicit, key),
 		audioKey:           keyFor(audioProvider, audioBaseURL, audioExplicit, key),
 		baseURL:            textBaseURL,
 		embeddingBaseURL:   embeddingBaseURL,
@@ -196,8 +204,10 @@ func NewFromEnv(optionalModel string) (*Client, error) {
 	if embeddingBaseURL == textBaseURL && embeddingProvider == textProvider {
 		cli.embedC = cli.c
 	} else {
-		cli.embedC = newSDKClient(keyFor(embeddingProvider, embeddingBaseURL, embeddingExplicit, key), embeddingBaseURL)
+		cli.embedC = newSDKClient(cli.embeddingKey, embeddingBaseURL)
 	}
+
+	cli.setupFallbacks(key)
 
 	if !cli.textAvailable || !cli.embeddingAvailable || !cli.audioAvailable {
 		slog.Warn("AI provider is degraded: OPENAI_API_KEY が未設定のため一部のAI機能が利用できません",
@@ -254,6 +264,14 @@ func newSDKClient(key, baseURL string) *openai.Client {
 	return openai.NewClientWithConfig(config)
 }
 
+// newSDKClientWithTransport は独自トランスポート（フォールバック用）を通す SDK クライアントを返す。
+func newSDKClientWithTransport(key, baseURL string, transport http.RoundTripper) *openai.Client {
+	config := openai.DefaultConfig(key)
+	config.BaseURL = baseURL
+	config.HTTPClient = &http.Client{Transport: transport}
+	return openai.NewClientWithConfig(config)
+}
+
 // NewWithBaseURL はテスト用コンストラクタ。baseURL を差し替えてモックサーバーを利用できる。
 func NewWithBaseURL(baseURL, model string) *Client {
 	cli := &Client{
@@ -261,6 +279,7 @@ func NewWithBaseURL(baseURL, model string) *Client {
 		EmbeddingModel:     "text-embedding-3-small",
 		apiKey:             "test-key",
 		textKey:            "test-key",
+		embeddingKey:       "test-key",
 		audioKey:           "test-key",
 		baseURL:            baseURL,
 		embeddingBaseURL:   baseURL,

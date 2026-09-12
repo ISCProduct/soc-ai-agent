@@ -45,7 +45,7 @@ func (cli *Client) Transcribe(ctx context.Context, audio []byte, filename string
 	req.Header.Set("Authorization", "Bearer "+cli.audioKey)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := cli.httpClientFor("audio", 60*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -103,7 +103,7 @@ func (cli *Client) TTS(ctx context.Context, text, voice string) ([]byte, error) 
 	req.Header.Set("Authorization", "Bearer "+cli.audioKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := cli.httpClientFor("audio", 60*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -163,7 +163,7 @@ func (cli *Client) ChatInterview(ctx context.Context, systemPrompt string, histo
 	req.Header.Set("Authorization", "Bearer "+cli.textKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := cli.httpClientFor("text", 60*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err

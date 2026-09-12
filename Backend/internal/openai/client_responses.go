@@ -87,7 +87,7 @@ func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (s
 	req.Header.Set("Authorization", "Bearer "+cli.textKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := cli.httpClientFor("text", 120*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
