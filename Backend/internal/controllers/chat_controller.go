@@ -143,15 +143,25 @@ func (c *ChatController) scheduleBackgroundMatching(userID uint, sessionID strin
 // セッションで双方が通ってしまう。session_id はクライアント採番（Math.random ベース）
 // なので衝突・先回り書き込みがあり得る。よって他人の存在を常に確認し、
 // 1件でもあれば双方に対して拒否する（フェイルクローズ）。
-func (c *ChatController) checkSessionOwnership(sessionID string, userID uint) ([]models.ChatMessage, error) {
+func (c *ChatController) ensureSessionNotOwnedByOthers(sessionID string, userID uint) error {
 	hasOther, err := c.chatService.SessionHasOtherUserMessages(sessionID, userID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if hasOther {
-		return nil, shared.ErrForbidden
+		return shared.ErrForbidden
 	}
 	// 他人がいない = 新規セッション or 自分のセッション。どちらも許可
+	return nil
+}
+
+// checkSessionOwnership は所有者を検証したうえで自分の履歴を返す。
+// 履歴が要らない呼び出し側は ensureSessionNotOwnedByOthers を使う
+// （content TEXT を含む全件 SELECT を発行しないため）。
+func (c *ChatController) checkSessionOwnership(sessionID string, userID uint) ([]models.ChatMessage, error) {
+	if err := c.ensureSessionNotOwnedByOthers(sessionID, userID); err != nil {
+		return nil, err
+	}
 	return c.chatService.GetChatHistoryForUser(sessionID, userID)
 }
 
@@ -174,8 +184,9 @@ func (c *ChatController) Chat(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Missing required fields")
 	}
 
-	// 既存セッションへの書き込みの場合、他ユーザーのセッションでないことを検証する（#946 IDOR対策）
-	if _, err := c.checkSessionOwnership(req.SessionID, userID); err != nil {
+	// 既存セッションへの書き込みの場合、他ユーザーのセッションでないことを検証する（#946 IDOR対策）。
+	// 履歴自体は ProcessChat が LIMIT 付きで読み直すので、ここでは所有者判定だけ行う。
+	if err := c.ensureSessionNotOwnedByOthers(req.SessionID, userID); err != nil {
 		if err == shared.ErrForbidden {
 			return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
 		}

@@ -120,9 +120,9 @@ func TestChatController_Chat_Forbidden_ExistingSessionWithUnsetOwner(t *testing.
 
 func TestChatController_Chat_Success_NewSession(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
-	// session s2 はまだメッセージが存在しない新規セッション
+	// session s2 はまだメッセージが存在しない新規セッション。
+	// Chat は履歴を使わないので所有者判定だけを行う（GetChatHistoryForUser は呼ばない）
 	chatSvc.On("SessionHasOtherUserMessages", "s2", uint(1)).Return(false, nil)
-	chatSvc.On("GetChatHistoryForUser", "s2", uint(1)).Return([]models.ChatMessage{}, nil)
 	chatSvc.On("ProcessChat", mock.Anything, mock.Anything).Return(&chat.ChatResponse{Response: "ok"}, nil)
 
 	body := `{"session_id":"s2","message":"hello"}`
@@ -137,9 +137,7 @@ func TestChatController_Chat_Success_NewSession(t *testing.T) {
 func TestChatController_Chat_Success_OwnExistingSession(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
 	// session s3 は既にuserID=1（リクエスト本人）のメッセージのみが存在する
-	history := []models.ChatMessage{{UserID: 1, SessionID: "s3", Role: "user"}}
 	chatSvc.On("SessionHasOtherUserMessages", "s3", uint(1)).Return(false, nil)
-	chatSvc.On("GetChatHistoryForUser", "s3", uint(1)).Return(history, nil)
 	chatSvc.On("ProcessChat", mock.Anything, mock.Anything).Return(&chat.ChatResponse{Response: "ok"}, nil)
 
 	body := `{"session_id":"s3","message":"hello"}`
@@ -149,6 +147,8 @@ func TestChatController_Chat_Success_OwnExistingSession(t *testing.T) {
 	rec := httptest.NewRecorder()
 	assertStatus(t, newChatController(chatSvc, nil, nil, nil, nil).Chat, newCtx(req, rec), http.StatusOK)
 	chatSvc.AssertExpectations(t)
+	// 履歴は ProcessChat が LIMIT 付きで読み直すので、ここで全件 SELECT を出さない
+	chatSvc.AssertNotCalled(t, "GetChatHistoryForUser", mock.Anything, mock.Anything)
 }
 
 // 自分のメッセージがあっても、同じ session_id に他人のメッセージが混在していれば
