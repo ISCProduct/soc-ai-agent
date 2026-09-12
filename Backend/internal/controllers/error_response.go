@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -105,7 +106,11 @@ func ensureAdminSchoolAccess(ctx echo.Context, schools *services.SchoolService, 
 func echoAdminSchoolFilter(ctx echo.Context) (*uint, error) {
 	filter, ok := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
 	if !ok {
-		// 既存の teacher insight 経路と同じ 403 に揃える（#1027 の前例）
+		// 既存の teacher insight 経路と同じ 403 に揃える（#1027 の前例）。
+		// ただし 403 だけでは「正当な権限拒否」と区別できず、ルート定義から
+		// schoolScope が外れた設定ミスに気づけないのでログを残す(#1157)。
+		logError(fmt.Errorf("school scope middleware is missing: %s %s",
+			ctx.Request().Method, ctx.Request().URL.Path))
 		return nil, echo.NewHTTPError(http.StatusForbidden, "school scope is not resolved")
 	}
 	return filter, nil

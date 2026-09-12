@@ -118,22 +118,18 @@ func (c *AdminSchoolController) RemoveMember(ctx echo.Context) error {
 	if err := c.ensureSchoolAccess(ctx, id); err != nil {
 		return err
 	}
-	// 自分の担当を外すと担当校0件になり、ResolveAdminAccess の仕様
-	// （0件=無制限のプラットフォーム管理者）により全校アクセスへ昇格してしまう(#1157)。
-	// 担当を持つ管理者自身の削除は、無制限管理者に依頼させる。
-	adminUserID, ok := middleware.AdminUserIDFromContext(ctx.Request().Context())
-	if !ok {
-		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	// 担当校が0件になる削除を禁止する(#1157)。
+	// ResolveAdminAccess は担当校0件を「無制限のプラットフォーム管理者」として扱うため、
+	// 最後の担当校を外すと権限剥奪のつもりが全校アクセスへの昇格になる。
+	// 自分自身だけでなく、同じ学校の別管理者を0件化する経路も同じ結果になるため一律で拒否する。
+	targetRestricted, targetSchools, err := c.schools.ResolveAdminAccess(userID)
+	if err != nil {
+		return echoInternalError(err)
 	}
-	if adminUserID == userID {
-		restricted, _, err := c.schools.ResolveAdminAccess(adminUserID)
-		if err != nil {
-			return echoInternalError(err)
-		}
-		if restricted {
-			return echo.NewHTTPError(http.StatusForbidden,
-				"自分の担当校は解除できません（権限昇格を防ぐため、無制限管理者に依頼してください）")
-		}
+	if targetRestricted && len(targetSchools) == 1 && targetSchools[0] == id {
+		return echo.NewHTTPError(http.StatusForbidden,
+			"最後の担当校は解除できません（担当校0件は無制限管理者として扱われます）。"+
+				"権限を外す場合は先に管理者権限(is_admin)を解除してください")
 	}
 	if err := c.schools.RemoveMember(userID, id); err != nil {
 		return mapSchoolError(err)

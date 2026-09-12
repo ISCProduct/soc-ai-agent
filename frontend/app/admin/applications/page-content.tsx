@@ -24,7 +24,6 @@ import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { APPLICATION_STATUSES, STATUS_LABELS, adminNextStatuses } from '@/lib/application-status'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
-import { getAdminSchoolAccess } from '@/lib/admin-school-access'
 
 type AdminApplication = {
   id: number
@@ -52,23 +51,12 @@ export default function PageContent() {
     }
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
-    getAdminSchoolAccess()
-      .then((access) => {
-        if (cancelled) return
-        if (access.restricted && access.schools.length > 0) {
-          setSchoolId(access.schools[0].id)
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setScopeReady(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  // 学校アクセスの解決は SchoolFilterSelect に任せ、完了通知を受けて初回ロードする。
+  // ページ側でも fetch すると /api/admin/me/school-access を二重に叩くことになる。
+  const handleScopeResolved = (failure?: string) => {
+    if (failure) setError(failure)
+    setScopeReady(true)
+  }
 
   const load = async (status = statusFilter, school = schoolId) => {
     setError('')
@@ -147,7 +135,7 @@ export default function PageContent() {
               </Select>
             </FormControl>
             {/* 担当校が1校の管理者には表示されず自動適用される(#798 の既存コンポーネント) */}
-            <SchoolFilterSelect value={schoolId} onChange={setSchoolId} />
+            <SchoolFilterSelect value={schoolId} onChange={setSchoolId} onResolved={handleScopeResolved} />
           </Stack>
           {applications.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
