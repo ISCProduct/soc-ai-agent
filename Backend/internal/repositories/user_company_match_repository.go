@@ -4,9 +4,9 @@ import (
 	"Backend/domain/entity"
 	"Backend/domain/mapper"
 	"Backend/internal/models"
-	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type UserCompanyMatchRepository struct {
@@ -17,33 +17,36 @@ func NewUserCompanyMatchRepository(db *gorm.DB) *UserCompanyMatchRepository {
 	return &UserCompanyMatchRepository{db: db}
 }
 
+// upsertAssignments は衝突時に上書きする列（ON DUPLICATE KEY UPDATE の右辺）。
+// is_viewed / is_favorited / is_applied はユーザー操作の結果なので含めない（再計算で消さない）。
+var upsertAssignments = clause.AssignmentColumns([]string{
+	"job_position_id",
+	"match_score",
+	"technical_match",
+	"teamwork_match",
+	"leadership_match",
+	"creativity_match",
+	"stability_match",
+	"growth_match",
+	"work_life_match",
+	"challenge_match",
+	"detail_match",
+	"communication_match",
+	"match_reason",
+	"updated_at",
+})
+
 // CreateOrUpdate マッチング結果を作成または更新
 func (r *UserCompanyMatchRepository) CreateOrUpdate(match *entity.UserCompanyMatch) error {
-	var existing models.UserCompanyMatch
-	err := r.db.Where("user_id = ? AND session_id = ? AND company_id = ?",
-		match.UserID, match.SessionID, match.CompanyID).First(&existing).Error
-
-	m := mapper.UserCompanyMatchFromEntity(match)
-
-	if err == gorm.ErrRecordNotFound {
-		// 新規作成
-		return r.db.Create(m).Error
-	} else if err != nil {
-		return err
-	}
-
-	// 更新（ID以外のフィールドを更新）
-	m.ID = existing.ID
-	m.CreatedAt = existing.CreatedAt
-	m.UpdatedAt = time.Now()
-	m.IsViewed = existing.IsViewed
-	m.IsFavorited = existing.IsFavorited
-	m.IsApplied = existing.IsApplied
-	return r.db.Save(m).Error
+	_, err := r.CreateOrUpdateBatch([]*entity.UserCompanyMatch{match})
+	return err
 }
 
 // CreateOrUpdateBatch は同一 user/session のマッチを一括 upsert する。
-// 既存レコードは1クエリで読み、新規は CreateInBatches、更新は Save（お気に入り等フラグ保持）。
+//
+// 一意キー uniq_user_session_company で衝突を検出し、1回の INSERT ... ON DUPLICATE KEY UPDATE
+// で作成と更新をまとめる（#1166）。既存の閲覧/お気に入り/応募フラグは upsertAssignments に
+// 含めないことで保持される。保存に失敗した場合はエラーを呼び出し元へ返す。
 func (r *UserCompanyMatchRepository) CreateOrUpdateBatch(matches []*entity.UserCompanyMatch) (int, error) {
 	if len(matches) == 0 {
 		return 0, nil
@@ -51,50 +54,29 @@ func (r *UserCompanyMatchRepository) CreateOrUpdateBatch(matches []*entity.UserC
 	userID := matches[0].UserID
 	sessionID := matches[0].SessionID
 
-	var existing []models.UserCompanyMatch
-	if err := r.db.Where("user_id = ? AND session_id = ?", userID, sessionID).Find(&existing).Error; err != nil {
-		return 0, err
-	}
-	byCompany := make(map[uint]models.UserCompanyMatch, len(existing))
-	for _, e := range existing {
-		byCompany[e.CompanyID] = e
-	}
-
-	now := time.Now()
-	toCreate := make([]*models.UserCompanyMatch, 0)
-	toUpdate := make([]*models.UserCompanyMatch, 0)
+	rows := make([]*models.UserCompanyMatch, 0, len(matches))
 	for _, match := range matches {
 		if match == nil || match.UserID != userID || match.SessionID != sessionID {
 			continue
 		}
 		m := mapper.UserCompanyMatchFromEntity(match)
-		if ex, ok := byCompany[match.CompanyID]; ok {
-			m.ID = ex.ID
-			m.CreatedAt = ex.CreatedAt
-			m.UpdatedAt = now
-			m.IsViewed = ex.IsViewed
-			m.IsFavorited = ex.IsFavorited
-			m.IsApplied = ex.IsApplied
-			toUpdate = append(toUpdate, m)
-		} else {
-			toCreate = append(toCreate, m)
-		}
+		// 既存行のIDは分からないので主キーは空にし、衝突検出は一意キーに任せる
+		m.ID = 0
+		rows = append(rows, m)
+	}
+	if len(rows) == 0 {
+		return 0, nil
 	}
 
-	saved := 0
-	if len(toCreate) > 0 {
-		if err := r.db.CreateInBatches(toCreate, 100).Error; err != nil {
-			return saved, err
-		}
-		saved += len(toCreate)
+	// MySQL ドライバは OnConflict.Columns を無視して ON DUPLICATE KEY UPDATE を書くだけなので
+	// 衝突検出は一意キー uniq_user_session_company（migration 000023）に依存する。
+	// 将来この表に別の一意キーを足すと、そちらでも衝突して同じ列が更新される点に注意。
+	err := r.db.Clauses(clause.OnConflict{DoUpdates: upsertAssignments}).
+		CreateInBatches(rows, 100).Error
+	if err != nil {
+		return 0, err
 	}
-	for _, m := range toUpdate {
-		if err := r.db.Save(m).Error; err != nil {
-			continue
-		}
-		saved++
-	}
-	return saved, nil
+	return len(rows), nil
 }
 
 // FindTopMatchesByUserAndSession マッチング度の高い順に企業を取得

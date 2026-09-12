@@ -118,6 +118,46 @@ go run ./cmd/migrate force 1   # version 2 を取り消した状態に補修し�
 | 4 | マルチテナント（`organizations` / memberships / 主要テーブルの `organization_id`）→ [multitenancy.md](./multitenancy.md) |
 | 5 | 主要テーブル `organization_id` への FK 制約 |
 | 20 | 企業ユーザーの復旧・剥奪（`disabled_at` / トークンのハッシュ化 / タグFKの RESTRICT 化）→ 下の注意を必ず読むこと |
+| 22 | マッチング結果の重複行の集約（`user_company_matches`）→ 下の注意を必ず読むこと |
+| 23 | `user_company_matches` に一意キー `uniq_user_session_company` |
+
+### version 22 / 23 適用時の注意（#1166）
+
+**重複していたマッチング結果の行が削除されます。** version 23 で
+`(user_id, session_id, company_id)` に一意キーを張るため、その前に version 22 で
+重複行を1行（`MIN(id)`）へ集約します。
+
+適用前に件数を確認してください。0件なら version 22 はどのUPDATE/DELETEも0行に作用します。
+
+```sql
+SELECT COUNT(*) FROM (
+  SELECT 1 FROM user_company_matches
+   GROUP BY user_id, session_id, company_id HAVING COUNT(*) > 1) x;
+```
+
+集約時に失われないよう、以下は残す行へ寄せています。
+
+- `is_viewed` / `is_favorited` / `is_applied`（ユーザー操作の結果）は重複行の `MAX` を採用
+- `user_application_statuses.match_id`（FKが無く、参照側は INNER JOIN）は残す行へ付け替え
+
+`match_score` / `match_reason` は残した行の値がそのまま残りますが、次回のマッチング再計算で
+upsert により上書きされます。`session_id IS NULL` の行は空文字へ寄せます（Go 側は
+`SessionID string` のため常に空文字を書く。NULL のままだと MySQL の UNIQUE が複数 NULL を
+許すため一意キーが穴になる）。
+
+version 23 の `ADD UNIQUE KEY` は `LOCK=NONE` のため、ローリングデプロイ中に旧コード
+（一意制約を前提としない read-then-write）が重複行を作ると `Error 1062` で失敗し、
+`dirty=1` が残ります。**version 22 の4文はいずれも冪等**なので、その場合は
+`go run ./cmd/migrate force 22` → `go run ./cmd/migrate up` で再実行すれば収束します。
+
+`session_id` 列は nullable のままです（NOT NULL 化はテーブル再構築を伴うため分離）。
+将来モデルを `*string` に変えたりデータインポートを追加すると一意キーが再び穴になるため、
+別マイグレーションで `MODIFY session_id varchar(255) NOT NULL DEFAULT ''` を行うのが望ましい。
+
+**ロールバック順序に制約があります。** 一意キー（version 23）が無い状態で新しいアプリを
+動かすと、`ON DUPLICATE KEY UPDATE` が衝突を検出できず再計算ごとに重複行が増え続けます。
+アプリを戻す場合は `go run ./cmd/migrate down` を先に、ではなく**アプリを先に**旧リビジョンへ
+戻してから down を実行してください。集約した行と付け替えた `match_id` は down では復元されません。
 
 ### version 20 適用時の注意（#1196）
 
