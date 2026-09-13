@@ -1,9 +1,12 @@
 package openai
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -34,9 +37,21 @@ const (
 // （詳細は起動ログの slog.Warn を見る）。
 var ErrAIUnavailable = errors.New("ai provider unavailable")
 
+// Usage は1回のAIコールの使用量。
+//
+// Provider / ViaFallback を含めるのは、api_call_logs を「OpenAI への課金額」として
+// 使えるようにするため（#1293）。これが無いと無料のローカル推論が課金額に混ざり、
+// フォールバックの USD 上限が通常の OpenAI 利用と同じ財布になる。
+type Usage struct {
+	Model            string
+	PromptTokens     int
+	CompletionTokens int
+	Provider         string // "openai" / "local"
+	ViaFallback      bool   // ローカル障害時のフォールバックで処理されたか
+}
+
 // UsageHook はAPIコール成功時に呼ばれるコールバック。
-// model: 使用モデル名, promptTokens: 入力トークン数, completionTokens: 出力トークン数
-type UsageHook func(model string, promptTokens, completionTokens int)
+type UsageHook func(Usage)
 
 // Client は go-openai SDK をラップします。
 //
@@ -51,8 +66,9 @@ type Client struct {
 	EmbeddingModel string
 
 	apiKey string
-	// textKey / audioKey は系統ごとに送る API キー。local はダミー値になる。
+	// textKey / embeddingKey / audioKey は系統ごとに送る API キー。local はダミー値になる。
 	textKey          string
+	embeddingKey     string
 	audioKey         string
 	baseURL          string
 	embeddingBaseURL string
@@ -67,7 +83,31 @@ type Client struct {
 	embeddingAvailable bool
 	audioAvailable     bool
 
+	// fallbacks は系統名 -> フォールバック用トランスポート。
+	// ローカル推論先を使う系統にだけ設定される（#1293）。
+	fallbacks map[string]*fallbackTransport
+
 	OnUsage UsageHook // オプション: コール成功時にトークン使用量を通知
+}
+
+// reportUsage は使用量を OnUsage に通知する。
+// provider と「フォールバック経由か」をここで一括して埋める。
+func (cli *Client) reportUsage(ctx context.Context, provider, model string, promptTokens, completionTokens int) {
+	if cli == nil || cli.OnUsage == nil {
+		return
+	}
+	viaFallback := fallbackUsed(ctx)
+	if viaFallback {
+		// フォールバックで処理されたなら課金先は OpenAI
+		provider = providerOpenAI
+	}
+	cli.OnUsage(Usage{
+		Model:            model,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		Provider:         provider,
+		ViaFallback:      viaFallback,
+	})
 }
 
 var (
@@ -180,6 +220,7 @@ func NewFromEnv(optionalModel string) (*Client, error) {
 		EmbeddingModel:     embeddingModel,
 		apiKey:             key,
 		textKey:            keyFor(textProvider, textBaseURL, textExplicit, key),
+		embeddingKey:       keyFor(embeddingProvider, embeddingBaseURL, embeddingExplicit, key),
 		audioKey:           keyFor(audioProvider, audioBaseURL, audioExplicit, key),
 		baseURL:            textBaseURL,
 		embeddingBaseURL:   embeddingBaseURL,
@@ -196,8 +237,10 @@ func NewFromEnv(optionalModel string) (*Client, error) {
 	if embeddingBaseURL == textBaseURL && embeddingProvider == textProvider {
 		cli.embedC = cli.c
 	} else {
-		cli.embedC = newSDKClient(keyFor(embeddingProvider, embeddingBaseURL, embeddingExplicit, key), embeddingBaseURL)
+		cli.embedC = newSDKClient(cli.embeddingKey, embeddingBaseURL)
 	}
+
+	cli.setupFallbacks(key)
 
 	if !cli.textAvailable || !cli.embeddingAvailable || !cli.audioAvailable {
 		slog.Warn("AI provider is degraded: OPENAI_API_KEY が未設定のため一部のAI機能が利用できません",
@@ -221,10 +264,44 @@ func keyFor(provider, baseURL string, explicit bool, key string) string {
 	if provider != providerOpenAI {
 		return localPlaceholderAPIKey
 	}
-	if isOpenAIEndpoint(baseURL) || explicit {
+	if isOpenAIEndpoint(baseURL) {
+		return key
+	}
+	// 明示指定のゲートウェイでも、平文で外部ホストへ実キーを送るのは許さない。
+	// AI_TEXT_PROVIDER=openai のまま base URL をローカル推論先に向けた設定ミスで
+	// 実キーが出るのを防ぐ（#1293 レビュー）。
+	if explicit && allowsRealKey(baseURL) {
 		return key
 	}
 	return localPlaceholderAPIKey
+}
+
+// allowsRealKey は「その URL に実 API キーを送ってよいか」を判定する。
+//
+// https なら宛先を問わず可。平文 http はループバック宛だけ許す
+// （ローカルの互換ゲートウェイ経由は実運用であり、鍵がネットワークに出ない）。
+// フォールバック先 URL の検証（validatedFallbackBaseURL）も同じ判定を使う。
+// 同じ「平文だが安全か」を2箇所で別々に判断すると必ず食い違うため。
+func allowsRealKey(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	if strings.EqualFold(u.Scheme, "https") {
+		return true
+	}
+	return strings.EqualFold(u.Scheme, "http") && isLoopbackHost(u.Hostname())
+}
+
+func isLoopbackHost(host string) bool {
+	switch strings.ToLower(host) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // isOpenAIEndpoint は base URL が OpenAI 本家（https）かを判定する。
@@ -254,6 +331,14 @@ func newSDKClient(key, baseURL string) *openai.Client {
 	return openai.NewClientWithConfig(config)
 }
 
+// newSDKClientWithTransport は独自トランスポート（フォールバック用）を通す SDK クライアントを返す。
+func newSDKClientWithTransport(key, baseURL string, transport http.RoundTripper) *openai.Client {
+	config := openai.DefaultConfig(key)
+	config.BaseURL = baseURL
+	config.HTTPClient = &http.Client{Transport: transport}
+	return openai.NewClientWithConfig(config)
+}
+
 // NewWithBaseURL はテスト用コンストラクタ。baseURL を差し替えてモックサーバーを利用できる。
 func NewWithBaseURL(baseURL, model string) *Client {
 	cli := &Client{
@@ -261,6 +346,7 @@ func NewWithBaseURL(baseURL, model string) *Client {
 		EmbeddingModel:     "text-embedding-3-small",
 		apiKey:             "test-key",
 		textKey:            "test-key",
+		embeddingKey:       "test-key",
 		audioKey:           "test-key",
 		baseURL:            baseURL,
 		embeddingBaseURL:   baseURL,

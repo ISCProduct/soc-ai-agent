@@ -18,16 +18,19 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/ragclient"
+
+	"gorm.io/gorm"
 )
 
 // ctx はリクエストIDを RAG まで伝播させるために受け取る(#1188)
 func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, requestingUserID uint, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
-	doc, err := s.repo.FindDocumentByID(documentID)
+	// クエリを user_id でスコープする。所有者以外には見つからない（#1156）
+	doc, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, shared.ErrForbidden
+		}
 		return nil, nil, err
-	}
-	if doc.UserID != requestingUserID {
-		return nil, nil, shared.ErrForbidden
 	}
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
 		return nil, nil, &shared.ValidationError{Message: "応募企業名または応募職種を入力してください"}
@@ -241,14 +244,14 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		flushSSE(w)
 	}
 
-	doc, err := s.repo.FindDocumentByID(documentID)
+	doc, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			sendEvent(map[string]any{"type": "error", "message": "forbidden"})
+			return shared.ErrForbidden
+		}
 		sendEvent(map[string]any{"type": "error", "message": err.Error()})
 		return err
-	}
-	if doc.UserID != requestingUserID {
-		sendEvent(map[string]any{"type": "error", "message": "forbidden"})
-		return shared.ErrForbidden
 	}
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
 		msg := "応募企業名または応募職種を入力してください"

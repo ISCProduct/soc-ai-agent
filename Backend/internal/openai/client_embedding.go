@@ -25,6 +25,7 @@ func (cli *Client) Embedding(ctx context.Context, input string, modelOverride ..
 		model = "text-embedding-3-small"
 	}
 
+	ctx = withFallbackFlag(ctx)
 	resp, err := cli.embedC.CreateEmbeddings(ctx, openai.EmbeddingRequest{
 		Model: openai.EmbeddingModel(model),
 		Input: []string{input},
@@ -35,8 +36,8 @@ func (cli *Client) Embedding(ctx context.Context, input string, modelOverride ..
 	if len(resp.Data) == 0 {
 		return nil, errors.New("empty embedding response")
 	}
-	if cli.OnUsage != nil && resp.Usage.PromptTokens > 0 {
-		cli.OnUsage(model, resp.Usage.PromptTokens, 0)
+	if resp.Usage.PromptTokens > 0 {
+		cli.reportUsage(ctx, cli.embeddingProvider, model, resp.Usage.PromptTokens, 0)
 	}
 	return resp.Data[0].Embedding, nil
 }

@@ -14,15 +14,17 @@ import (
 
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
+
+	"gorm.io/gorm"
 )
 
 func (s *ResumeService) OpenAnnotatedFile(documentID uint, requestingUserID uint) (*AnnotatedFile, error) {
-	doc, err := s.repo.FindDocumentByID(documentID)
+	doc, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, shared.ErrForbidden
+		}
 		return nil, err
-	}
-	if doc.UserID != requestingUserID {
-		return nil, shared.ErrForbidden
 	}
 	if strings.TrimSpace(doc.AnnotatedPath) == "" {
 		return nil, errors.New("annotated file not ready")

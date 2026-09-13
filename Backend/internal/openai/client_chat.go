@@ -53,7 +53,7 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 
 	var lastErr error
 	for attempt := 1; attempt <= 5; attempt++ {
-		ctxReq, cancel := context.WithTimeout(ctx, 60*time.Second)
+		ctxReq, cancel := context.WithTimeout(withFallbackFlag(ctx), 60*time.Second)
 		req := openai.ChatCompletionRequest{
 			Model: model,
 			Messages: []openai.ChatCompletionMessage{
@@ -92,9 +92,7 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 		if err == nil && len(resp.Choices) > 0 {
 			content := strings.TrimSpace(resp.Choices[0].Message.Content)
 			if content != "" {
-				if cli.OnUsage != nil {
-					cli.OnUsage(req.Model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
-				}
+				cli.reportUsage(ctxReq, cli.textProvider, req.Model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 				// キャッシュヒットのログを出力（存在すれば）
 				if resp.Usage.PromptTokensDetails != nil {
 					cached := resp.Usage.PromptTokensDetails.CachedTokens

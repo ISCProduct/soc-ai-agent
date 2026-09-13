@@ -5,10 +5,15 @@ import "Backend/internal/models"
 // ChatMessageRepository はチャットメッセージの永続化インターフェース。
 type ChatMessageRepository interface {
 	Create(msg *models.ChatMessage) error
-	FindBySessionID(sessionID string) ([]models.ChatMessage, error)
+	// チャットメッセージの読み出しは必ず user_id でスコープする（#1156 多層防御）。
+	// session_id だけで引く版は呼び出し元ゼロになったため削除した。
+	// 復活させると「呼び出し側で所有者を比較する」前提に逆戻りする。
+	FindBySessionIDForUser(sessionID string, userID uint) ([]models.ChatMessage, error)
+	FindRecentBySessionIDForUser(sessionID string, userID uint, limit int) ([]models.ChatMessage, error)
+	// ExistsBySessionIDForOtherUser は「他人がすでに使っているセッションID」を弾くための
+	// 唯一の例外。意図的に user_id != ? で引く。
+	ExistsBySessionIDForOtherUser(sessionID string, userID uint) (bool, error)
 	FindByUserID(userID uint) ([]models.ChatMessage, error)
-	FindRecentBySessionID(sessionID string, limit int) ([]models.ChatMessage, error)
-	GetUsedQuestionIDs(sessionID string) ([]uint, error)
 	GetUserSessions(userID uint) ([]models.ChatSession, error)
 }
 
