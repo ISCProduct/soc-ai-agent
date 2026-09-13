@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -738,5 +739,126 @@ func TestAllowsRealKey(t *testing.T) {
 				t.Errorf("allowsRealKey(%q) = %v, want %v", tt.baseURL, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestFallback_OpenAIResponseBodyIsFullyReadable はフォールバック成功時の
+// OpenAI 側レスポンスも最後まで読めることを検証する（#1293 レビュー F-1 の周辺）。
+//
+// フォールバック経路では2回目の前に localCtx を解放するが、2回目は
+// 呼び出し側の ctx を使うので影響を受けないこと。
+func TestFallback_OpenAIResponseBodyIsFullyReadable(t *testing.T) {
+	const size = 256 * 1024
+	payload := strings.Repeat("y", size)
+
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(payload))
+	}))
+	t.Cleanup(func() {
+		local.Close()
+		fallback.Close()
+	})
+
+	tr := &fallbackTransport{
+		primaryBaseURL:  local.URL,
+		fallbackBaseURL: fallback.URL,
+		fallbackKey:     "sk-real",
+		guard:           &stubGuard{allow: true},
+		system:          "text",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, local.URL+"/chat/completions", strings.NewReader(`{"model":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := tr.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	got, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		t.Fatalf("OpenAI 側のボディを最後まで読めない: %v (読めたのは %d バイト)", readErr, len(got))
+	}
+	if len(got) != size {
+		t.Errorf("読めたバイト数 = %d, want %d", len(got), size)
+	}
+}
+
+// TestFallback_BinaryResponseIsFullyReadable は音声（TTS）相当のバイナリ応答が
+// 切れないことを検証する（#1293 レビュー F-1）。
+// 音声は生HTTP経路で httpClientFor を通り、必ず4KBを超える。
+func TestFallback_BinaryResponseIsFullyReadable(t *testing.T) {
+	const size = 300 * 1024
+	payload := make([]byte, size)
+	for i := range payload {
+		payload[i] = byte(i % 256)
+	}
+
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write(payload)
+	}))
+	t.Cleanup(local.Close)
+
+	tr := &fallbackTransport{
+		primaryBaseURL:  local.URL,
+		fallbackBaseURL: defaultOpenAIBaseURL,
+		fallbackKey:     "sk-real",
+		guard:           &stubGuard{allow: true},
+		system:          "audio",
+	}
+	// 音声経路と同じく http.Client.Timeout だけで制御する（ctx に期限が無い）
+	client := &http.Client{Timeout: 30 * time.Second, Transport: tr}
+
+	resp, err := client.Post(local.URL+"/audio/speech", "application/json", strings.NewReader(`{"model":"tts-1"}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	got, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		t.Fatalf("音声バイナリを最後まで読めない: %v (読めたのは %d バイト)", readErr, len(got))
+	}
+	if !bytes.Equal(got, payload) {
+		t.Errorf("音声バイナリが一致しない: 読めたのは %d バイト, want %d", len(got), size)
+	}
+}
+
+// TestFallback_DoubleCloseIsSafe は Body を2回閉じてもパニックしないことを確認する。
+// cancelOnCloseBody は Close ごとに cancel を呼ぶが CancelFunc は冪等。
+func TestFallback_DoubleCloseIsSafe(t *testing.T) {
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(local.Close)
+
+	tr := &fallbackTransport{
+		primaryBaseURL:  local.URL,
+		fallbackBaseURL: defaultOpenAIBaseURL,
+		fallbackKey:     "sk-real",
+		guard:           &stubGuard{allow: true},
+		system:          "text",
+	}
+	req := httptest.NewRequest(http.MethodPost, local.URL+"/chat/completions", strings.NewReader(`{"model":"x"}`))
+	req.RequestURI = ""
+
+	resp, err := tr.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("1回目の Close でエラー: %v", err)
+	}
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("2回目の Close でエラー: %v", err)
 	}
 }
