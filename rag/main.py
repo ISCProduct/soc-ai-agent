@@ -10,6 +10,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from typing import Any, Callable
@@ -136,9 +137,29 @@ async def _internal_auth_middleware(request: Request, call_next: Callable) -> An
     return await call_next(request)
 
 
+# \A ... \Z を使う。Python の $ は末尾の改行の直前にもマッチするため、
+# ^...$ だと "abc\n" が通ってしまい、改行入りの値がログとレスポンスヘッダーへ流れる。
+_TRACE_ID_PATTERN = re.compile(r"\A[A-Za-z0-9_-]{1,64}\Z")
+
+
+def _safe_trace_id(value: str | None) -> str | None:
+    """外部から渡されたトレースIDを検証する。
+
+    この値はログとレスポンスヘッダーに出るため、英数字とハイフン・アンダースコアのみ許可し、
+    長さも制限する。不正な値は None を返して呼び出し側で自前生成させる。
+    """
+    if value and _TRACE_ID_PATTERN.match(value):
+        return value
+    return None
+
+
 @app.middleware("http")
 async def _trace_id_middleware(request: Request, call_next: Callable) -> Any:
-    trace_id = request.headers.get("X-Trace-ID") or str(uuid.uuid4())
+    # Backend は X-Request-ID で自身のリクエストIDを送る(#1188)。
+    # X-Trace-ID を正としつつ、無い場合は X-Request-ID を採用してログを突き合わせられるようにする。
+    trace_id = _safe_trace_id(request.headers.get("X-Trace-ID")) or _safe_trace_id(
+        request.headers.get("X-Request-ID")
+    ) or str(uuid.uuid4())
     token = _trace_id_var.set(trace_id)
     start = time.time()
     try:
@@ -158,6 +179,7 @@ async def _trace_id_middleware(request: Request, call_next: Callable) -> Any:
         }
         print(json.dumps(payload, ensure_ascii=False), flush=True)
         response.headers["X-Trace-ID"] = trace_id
+        response.headers["X-Request-ID"] = trace_id
         return response
     finally:
         _trace_id_var.reset(token)

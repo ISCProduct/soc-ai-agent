@@ -26,7 +26,7 @@ func (m *ResumeServiceMock) EnsureDocumentOwner(documentID uint, requestingUserI
 	return m.Called(documentID, requestingUserID).Error(0)
 }
 
-func (m *ResumeServiceMock) ReviewDocument(documentID uint, requestingUserID uint, companyName, jobTitle, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+func (m *ResumeServiceMock) ReviewDocument(ctx context.Context, documentID uint, requestingUserID uint, companyName, jobTitle, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
 	args := m.Called(documentID, requestingUserID, companyName, jobTitle, candidateType)
 	var review *models.ResumeReview
 	var items []models.ResumeReviewItem

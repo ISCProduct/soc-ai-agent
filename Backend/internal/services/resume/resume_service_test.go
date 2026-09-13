@@ -253,7 +253,7 @@ func TestResumeService_ReviewDocumentRejectsOtherUser(t *testing.T) {
 		},
 	}, "", nil)
 
-	_, _, err := service.ReviewDocument(10, 2, "ACME", "Engineer", "new_grad")
+	_, _, err := service.ReviewDocument(context.Background(), 10, 2, "ACME", "Engineer", "new_grad")
 	if !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("他ユーザーのレビュー実行は forbidden であるべき: got %v", err)
 	}
