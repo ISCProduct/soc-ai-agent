@@ -120,6 +120,48 @@ go run ./cmd/migrate force 1   # version 2 を取り消した状態に補修し�
 | 20 | 企業ユーザーの復旧・剥奪（`disabled_at` / トークンのハッシュ化 / タグFKの RESTRICT 化）→ 下の注意を必ず読むこと |
 | 22 | マッチング結果の重複行の集約（`user_company_matches`）→ 下の注意を必ず読むこと |
 | 23 | `user_company_matches` に一意キー `uniq_user_session_company` |
+| 25 | `api_call_logs` に `provider` / `via_fallback`（AIコストの推論先別集計）→ 下の注意を読むこと |
+
+### version 25 適用時の注意（#1293）
+
+`api_call_logs` は推論先に関係なく記録されるため、そのままでは「OpenAI への課金額」
+として使えませんでした。実測で2つの壊れ方が確認されています。
+
+1. ローカル推論（無料）の行が混ざる。しかも `calculateCost` は未知のモデル名を
+   gpt-4o 単価にフォールバックするため、無料の推論が架空コストとして記録される。
+2. 企業検索などの通常の OpenAI 利用と同じ財布になる。実データでは 2026-08 の合計が
+   $57.99 で、フォールバックの既定月次上限 $20 を恒久的に超過していた
+   （= ローカル障害時にフォールバックが一度も発動しない）。
+
+`provider` で課金対象を切り分け、`via_fallback` でフォールバック専用予算を分離します。
+`ALGORITHM=INPLACE, LOCK=NONE` なので書き込みは止まりません。
+
+**適用順序に制約があります。アプリより先に version 25 を適用してください。**
+アプリを先に出すと `models.APICallLog` に `provider` / `via_fallback` が
+含まれるため INSERT が `Unknown column` で全失敗します。`LogUsage` は
+エラーをログに出すだけなので気づきにくく、同時に `TotalFallbackCostSince` も
+失敗して**フォールバックのUSD上限が fail-open で無効化**されます
+（残るブレーキは `OPENAI_FALLBACK_MAX_REQUESTS_PER_MINUTE` だけ）。
+コンテナ起動時の自動マイグレーションは無く、`go run ./cmd/migrate up` が必要です。
+
+**既存行は `provider=''` / `via_fallback=0` になります。** `provider` が空の行は
+OpenAI 扱い（従来の集計と同じ）です。フォールバック予算の集計は `via_fallback=1` の
+行だけなので、適用直後は 0 から始まります。
+
+適用前の確認:
+
+```sql
+-- ローカル推論の行が混ざっているか（混ざっていれば架空コストが計上されている）
+SELECT model, COUNT(*) c, SUM(cost_usd) usd FROM api_call_logs
+ WHERE called_at >= DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-01')
+ GROUP BY model ORDER BY usd DESC;
+```
+
+**down の注意。** 戻すと `via_fallback` が消えるため、フォールバックの USD 上限が
+「全コール合計」で判定されます。通常の OpenAI 利用だけで上限に達し、ローカル障害時に
+フォールバックが発動しなくなります。戻す場合は
+`OPENAI_DAILY_HARD_LIMIT_USD` / `OPENAI_MONTHLY_HARD_LIMIT_USD` を実績に合わせて
+引き上げるか、`OPENAI_FALLBACK_ENABLED=false` で明示的に無効化してください。
 
 ### version 22 / 23 適用時の注意（#1166）
 

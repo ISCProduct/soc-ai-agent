@@ -287,9 +287,12 @@ func main() {
 	companySearchBudget := costs.NewCompanySearchBudgetService(apiCallLogRepo, emailService)
 	companySearchFlight := company.NewCompanySearchFlight()
 	// OpenAI APIコール時にトークン使用量をロギング
-	aiClient.OnUsage = func(model string, promptTokens, completionTokens int) {
-		apiCostService.LogCall(model, promptTokens, completionTokens)
+	aiClient.OnUsage = func(u openai.Usage) {
+		apiCostService.LogUsage(u)
 	}
+	// ローカル推論先の障害時に OpenAI へ無条件でフォールバックすると、障害が続く間
+	// 全トラフィックが従量課金へ移る。日次/月次のUSD上限と分間レートで打ち切る(#1293)
+	aiClient.SetFallbackGuard(costs.NewOpenAIFallbackGuard(apiCallLogRepo))
 	schoolRepo := repositories.NewSchoolRepository(db)
 	schoolService := services.NewSchoolService(schoolRepo)
 	authService := auth.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
