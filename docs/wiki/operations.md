@@ -190,6 +190,22 @@ docker compose logs rag-review | grep "$RID"
 バックグラウンド処理（求人情報のRAGへのpush等）はリクエストのキャンセルは
 引き継がず、IDのみ引き継ぐ。呼び出し元リクエストが完了済みでも追跡できる。
 
+### 現時点のカバレッジと制限
+
+Next.js の Route Handler が Backend へ転送するのは、共通ヘルパー
+（`extractUserAuthHeaders` / `adminProxyHeaders`）を使っている Handler だけ。
+ヘッダーを自前で組んでいる Handler が **64本** 残っており、そこを通った
+リクエストは Backend が別のIDを採番する。
+
+つまりブラウザに返った `X-Request-ID` で grep しても、この64本経由の
+リクエストは Backend のログに出てこない。その場合は時刻とパスで絞り込み、
+Backend が採番したIDを拾ってから RAG のログを追う。
+
+新しい Route Handler は共通ヘルパーを使うこと。
+`frontend/tests/app/request-id-propagation.test.ts` が自前ヘッダーの
+Handler 数を監視していて、増やすとテストが落ちる。
+残りの64本の移行は #1188 のフォローアップとして別PRで行う。
+
 ---
 
 ## 4. 障害対応
