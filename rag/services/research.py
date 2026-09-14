@@ -194,11 +194,15 @@ def rank_results_by_domain_trust(raw_texts: List[str], company_name: str) -> Lis
 #
 # OpenAI の web_search ツールは検索結果が固定トークンとして課金されるため、
 # 1コールあたりの入力トークンが本文の長さに関係なく大きくなる。
-# 本番相当DBの実測では gpt-5-search-api が1コール平均 30,392 入力トークンで、
-# AIコスト全体の約9割を占めていた。
+# 実測（api_call_logs）では検索系モデルが1コール平均 30,392 入力トークンで、
+# 通常の推論(約4,000)の7.5倍だった。
+# なお api_call_logs は Backend のコールしか記録していないため、
+# RAG のコストは現状計測できていない（#1294）。
 #
 # 効くのは「1コールの重さ（context size）」と「コール回数（クエリ数）」の2つ。
-# どちらも env で変えられるようにして、品質劣化が出たらデプロイ無しで戻せるようにする。
+# どちらも env で変えられるようにする。ただし本番は ECS のタスク定義に
+# 環境変数が焼き込まれているため、変更には terraform の編集と apply が必要
+# （「env を戻すだけ」では戻らない）。docs/wiki/rag-service.md を参照。
 
 _VALID_CONTEXT_SIZES = ("low", "medium", "high")
 

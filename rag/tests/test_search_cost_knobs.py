@@ -60,20 +60,6 @@ class TestDefaultModels:
     gpt-4o は入力単価が 16.7 倍。要約・パース用途では mini で足りる。
     """
 
-    @pytest.mark.parametrize(
-        ("env_key", "module_path"),
-        [
-            ("OPENAI_CHAT_MODEL", "services.research"),
-            ("OPENAI_CHAT_MODEL", "services.hints"),
-            ("OPENAI_HINTS_PARSE_MODEL", "services.hints"),
-        ],
-    )
-    def test_既定はminiでenvで上書きできる(self, monkeypatch, env_key, module_path):
-        monkeypatch.delenv(env_key, raising=False)
-        assert os.getenv(env_key, "gpt-4o-mini") == "gpt-4o-mini"
-        monkeypatch.setenv(env_key, "gpt-4o")
-        assert os.getenv(env_key, "gpt-4o-mini") == "gpt-4o"
-
     def test_ソース上の既定値にgpt_4oが残っていない(self):
         """既定値の書き換え漏れを検出する。"""
         import pathlib
