@@ -235,7 +235,12 @@ func (f *CompanyInfoFetcher) ProvisionByName(ctx context.Context, companyName st
 
 		result, err := f.Acquire(ctx, name, "")
 		if err != nil {
-			f.markProvisionFailed(key)
+			// 自前のタイムアウトやユーザー離脱は「その企業が取得できない」証拠ではない。
+			// ここで記録すると、実在する企業が1時間ブロックされ、しかも DB に無いので
+			// 企業検索からも選べず行き止まりになる。
+			if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+				f.markProvisionFailed(key)
+			}
 			return nil, err
 		}
 		if result == nil || !companyInfoIsSubstantive(result) {

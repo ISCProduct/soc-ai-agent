@@ -107,6 +107,33 @@ func TestProvisionByName_NegativeCache(t *testing.T) {
 	assert.Equal(t, afterFirst, calls, "2回目は取得を試みてはいけない（ネガティブキャッシュ）")
 }
 
+// 自前のタイムアウトやユーザー離脱は「取得できない企業」の証拠ではないので記録しない（#1124）。
+// 記録すると、実在する企業が1時間ブロックされ、しかも DB に無いので
+// 企業検索からも選べず行き止まりになる。
+func TestProvisionByName_DoesNotCacheCancellation(t *testing.T) {
+	var calls int
+	srv := makeCountingServer(t, validCompanyInfoJSON(), &calls)
+	defer srv.Close()
+
+	repo := &mocks.CompanyRepositoryMock{}
+	repo.On("FindByName", mock.Anything).Return(nil, errors.New("not found"))
+	repo.On("Create", mock.AnythingOfType("*models.Company")).Return(nil)
+
+	client := openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")
+	fetcher := company.NewCompanyInfoFetcher(repo, client)
+
+	// 既にキャンセルされた ctx = ユーザー離脱・上位のタイムアウト相当
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := fetcher.ProvisionByName(canceled, "実在株式会社ABC")
+	require.Error(t, err)
+
+	// 2回目は通常の ctx。ネガティブキャッシュに入っていなければ取得・登録される
+	got, err := fetcher.ProvisionByName(context.Background(), "実在株式会社ABC")
+	require.NoError(t, err, "キャンセルを記録して再試行を塞いではいけない")
+	assert.Equal(t, "実在株式会社ABC", got.Name)
+}
+
 // 表記ゆれも同じ失敗として扱う（normalizeCompanyKey で正規化される）
 func TestProvisionByName_NegativeCacheNormalizesName(t *testing.T) {
 	var calls int
