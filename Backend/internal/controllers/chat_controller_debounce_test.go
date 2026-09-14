@@ -14,7 +14,7 @@ func TestScheduleBackgroundMatching_CancelsOldTimer(t *testing.T) {
 	c := &ChatController{}
 
 	// 1回目のスケジュール
-	c.scheduleBackgroundMatching(1, "session-1")
+	c.scheduleBackgroundMatching(1, "session-1", false)
 	first, ok := c.matchingTimers.Load("session-1")
 	if !ok {
 		t.Fatal("1回目のタイマーが登録されていない")
@@ -22,7 +22,7 @@ func TestScheduleBackgroundMatching_CancelsOldTimer(t *testing.T) {
 	firstTimer := first.(*time.Timer)
 
 	// 2回目のスケジュール（1回目はキャンセルされるべき）
-	c.scheduleBackgroundMatching(1, "session-1")
+	c.scheduleBackgroundMatching(1, "session-1", false)
 	second, ok := c.matchingTimers.Load("session-1")
 	if !ok {
 		t.Fatal("2回目のタイマーが登録されていない")
@@ -44,8 +44,8 @@ func TestScheduleBackgroundMatching_CancelsOldTimer(t *testing.T) {
 func TestScheduleBackgroundMatching_DifferentSessionsAreIndependent(t *testing.T) {
 	c := &ChatController{}
 
-	c.scheduleBackgroundMatching(1, "session-a")
-	c.scheduleBackgroundMatching(2, "session-b")
+	c.scheduleBackgroundMatching(1, "session-a", false)
+	c.scheduleBackgroundMatching(2, "session-b", false)
 
 	timerA, okA := c.matchingTimers.Load("session-a")
 	timerB, okB := c.matchingTimers.Load("session-b")
@@ -78,7 +78,7 @@ func TestScheduleBackgroundMatching_MultipleCallsReplaceTimer(t *testing.T) {
 
 	const n = 5
 	for i := range n {
-		c.scheduleBackgroundMatching(uint(i+1), "session-debounce")
+		c.scheduleBackgroundMatching(uint(i+1), "session-debounce", false)
 	}
 
 	// 1エントリのみ存在するはず
@@ -98,4 +98,21 @@ func TestScheduleBackgroundMatching_MultipleCallsReplaceTimer(t *testing.T) {
 		t2.(*time.Timer).Stop()
 		c.matchingTimers.Delete("session-debounce")
 	}
+}
+
+func TestScheduleBackgroundMatching_PreservesQualityFlagAcrossDebounce(t *testing.T) {
+	c := &ChatController{}
+
+	c.scheduleBackgroundMatching(1, "session-q", true)
+	c.scheduleBackgroundMatching(1, "session-q", false)
+
+	if _, ok := c.matchingQualityPending.Load("session-q"); !ok {
+		t.Fatal("診断完了フラグが後続メッセージで消えてはいけない")
+	}
+
+	if tmr, ok := c.matchingTimers.Load("session-q"); ok {
+		tmr.(*time.Timer).Stop()
+		c.matchingTimers.Delete("session-q")
+	}
+	c.matchingQualityPending.Delete("session-q")
 }

@@ -33,11 +33,19 @@ func (r *DiagnosisQualityRepository) FindByUserAndSession(userID uint, sessionID
 	return &report, nil
 }
 
-func (r *DiagnosisQualityRepository) ListRecent(limit int) ([]models.DiagnosisQualityReport, error) {
+// ListRecent は直近のレポートを返す。schoolID が非nilならその学校の生徒に限定する。
+func (r *DiagnosisQualityRepository) ListRecent(limit int, schoolID *uint) ([]models.DiagnosisQualityReport, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
+	q := r.db.Model(&models.DiagnosisQualityReport{}).
+		Joins("JOIN users ON users.id = diagnosis_quality_reports.user_id").
+		Order("diagnosis_quality_reports.updated_at DESC").
+		Limit(limit)
+	if schoolID != nil {
+		q = q.Where("users.school_id = ?", *schoolID)
+	}
 	var rows []models.DiagnosisQualityReport
-	err := r.db.Order("updated_at DESC").Limit(limit).Find(&rows).Error
+	err := q.Find(&rows).Error
 	return rows, err
 }

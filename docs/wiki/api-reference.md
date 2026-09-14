@@ -221,10 +221,11 @@ rejected         → 不合格
 
 | メソッド | パス | 概要 |
 |---------|------|------|
-| GET | `/api/admin/diagnosis-quality` | 直近レポート一覧（`?limit=`） |
+| GET | `/api/admin/diagnosis-quality` | 直近レポート一覧（`?limit=`、学校スコープ付き） |
 | GET | `/api/admin/diagnosis-quality?user_id=&session_id=` | セッション単位のレポート |
 
-マッチング完了後に asynq `diagnosis:quality` が非同期実行し、信頼度とフラグのみ保存する（スコアは自動補正しない）。
+マッチング成功かつ**診断完了時のみ** asynq `diagnosis:quality` が非同期実行し、信頼度とフラグのみ保存する（スコアは自動補正しない）。
+品質ジョブが保証するのは「根拠の薄さの過大評価をしない」ことであり、本人適性の真偽判定ではない。
 
 ### 集合知バッチ（#205）
 

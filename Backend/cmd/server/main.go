@@ -510,7 +510,7 @@ func main() {
 	scoreValidationRepo := repositories.NewScoreValidationRepository(db)
 	scoreValidationService := admin.NewScoreValidationService(scoreValidationRepo)
 	scoreValidationController := controllers.NewAdminScoreValidationController(scoreValidationService)
-	diagnosisQualityController := controllers.NewAdminDiagnosisQualityController(diagnosisQualityRepo)
+	diagnosisQualityController := controllers.NewAdminDiagnosisQualityController(diagnosisQualityRepo, userRepo, schoolService)
 	collectiveInsightRepo := repositories.NewCollectiveInsightRepository(db)
 	collectiveInsightService := flywheel.NewCollectiveInsightService(collectiveInsightRepo, userWeightScoreRepo)
 	collectiveInsightController := controllers.NewCollectiveInsightController(collectiveInsightService)

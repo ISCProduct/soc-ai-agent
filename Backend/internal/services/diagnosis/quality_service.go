@@ -63,36 +63,40 @@ func (s *QualityService) RunDiagnosisQuality(ctx context.Context, userID uint, s
 	}
 
 	flags := heuristicFlags(scores, matches)
-	confidence := heuristicConfidence(scores, matches, flags)
+	confidence := heuristicConfidence(scores, flags)
 	summary := heuristicSummary(flags, confidence)
 
+	if s.aiClient != nil && len(messages) > 0 {
+		if llm, llmErr := s.evaluateWithLLM(ctx, scores, messages, matches); llmErr != nil {
+			log.Printf("[diagnosis.quality] LLM evaluate failed user=%d session=%s err=%v", userID, sessionID, llmErr)
+		} else if llm != nil {
+			flags = mergeFlags(flags, llm.Flags)
+			// LLM が楽観的でも、構造的な根拠不足を高 confidence にできないようにする
+			if llm.Confidence > 0 {
+				confidence = minInt(confidence, clampInt(llm.Confidence, 0, 100))
+			}
+			if strings.TrimSpace(llm.Summary) != "" {
+				summary = strings.TrimSpace(llm.Summary)
+			}
+		}
+	}
+
+	// raw は最終状態を監査できるよう、マージ後に組み立てる
 	raw := map[string]any{
-		"source":      "heuristic",
 		"score_count": len(scores),
 		"match_top_n": len(matches),
 		"message_n":   len(messages),
 		"flags":       flags,
 		"confidence":  confidence,
 	}
-
-	if s.aiClient != nil && len(messages) > 0 {
-		if llm, llmErr := s.evaluateWithLLM(ctx, scores, messages, matches); llmErr != nil {
-			log.Printf("[diagnosis.quality] LLM evaluate failed user=%d session=%s err=%v", userID, sessionID, llmErr)
-			raw["llm_error"] = llmErr.Error()
-		} else if llm != nil {
-			flags = mergeFlags(flags, llm.Flags)
-			if llm.Confidence > 0 {
-				confidence = clampInt(llm.Confidence, 0, 100)
-			}
-			if strings.TrimSpace(llm.Summary) != "" {
-				summary = strings.TrimSpace(llm.Summary)
-			}
-			raw["source"] = "heuristic+llm"
-			raw["llm"] = llm
-		}
+	if len(flags) == 0 {
+		raw["flags"] = []string{}
 	}
 
 	flagsJSON, _ := json.Marshal(flags)
+	if flags == nil {
+		flagsJSON = []byte("[]")
+	}
 	rawJSON, _ := json.Marshal(raw)
 	report := &models.DiagnosisQualityReport{
 		UserID:     userID,
@@ -109,23 +113,31 @@ func (s *QualityService) RunDiagnosisQuality(ctx context.Context, userID uint, s
 	return nil
 }
 
+func measuredAxisCount(scores []entity.UserWeightScore) int {
+	// マッチングと同じく「行がある＝計測済み」（値0も含む）
+	return len(scores)
+}
+
 func heuristicFlags(scores []entity.UserWeightScore, matches []*entity.UserCompanyMatch) []string {
 	var flags []string
-	measured := 0
-	for _, s := range scores {
-		if s.Score != 0 {
-			measured++
-		}
-	}
+	measured := measuredAxisCount(scores)
 	if measured == 0 {
 		flags = append(flags, "no_measured_axes")
 	} else if measured < 4 {
 		flags = append(flags, "few_measured_axes")
 	}
 
-	if len(matches) >= 2 {
+	switch {
+	case len(matches) == 0:
+		flags = append(flags, "no_matches")
+	case len(matches) == 1:
+		flags = append(flags, "single_match_only")
+		if matches[0].MatchedAxisCount < 4 {
+			flags = append(flags, "thin_match_evidence")
+		}
+	default:
 		maxS := matches[0].MatchScore
-		minS := matches[0].MatchScore
+		minS := matches[len(matches)-1].MatchScore
 		for _, m := range matches {
 			if m.MatchScore > maxS {
 				maxS = m.MatchScore
@@ -137,23 +149,16 @@ func heuristicFlags(scores []entity.UserWeightScore, matches []*entity.UserCompa
 		if maxS >= 90 && (maxS-minS) < 8 {
 			flags = append(flags, "saturated_matches")
 		}
-		if matches[0].MatchedAxisCount > 0 && matches[0].MatchedAxisCount < 4 {
+		if matches[0].MatchedAxisCount < 4 {
 			flags = append(flags, "thin_match_evidence")
 		}
-	} else if len(matches) == 0 {
-		flags = append(flags, "no_matches")
 	}
 	return flags
 }
 
-func heuristicConfidence(scores []entity.UserWeightScore, matches []*entity.UserCompanyMatch, flags []string) int {
-	measured := 0
-	for _, s := range scores {
-		if s.Score != 0 {
-			measured++
-		}
-	}
-	base := measured * 10 // 0-100 for 10 axes
+func heuristicConfidence(scores []entity.UserWeightScore, flags []string) int {
+	measured := measuredAxisCount(scores)
+	base := measured * 10
 	if base > 100 {
 		base = 100
 	}
@@ -191,6 +196,13 @@ func clampInt(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (s *QualityService) evaluateWithLLM(

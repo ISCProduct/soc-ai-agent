@@ -245,7 +245,21 @@ export function useMuiChat() {
       // クイック選択など明示 override
       messageText = overrideMessage.trim()
     } else if (selectedChoiceValue && !otherChoiceActive) {
-      messageText = buildChoiceOutgoingMessage(selectedChoiceValue, input)
+      const typed = input.trim()
+      // 選択後に別選択肢のラベルを打った場合は、後から打った内容を優先する
+      if (typed) {
+        const resolved = resolveChatOutgoingMessage(typed, currentChoices, false)
+        if (
+          resolved !== selectedChoiceValue &&
+          currentChoices.some((c) => c.value === resolved)
+        ) {
+          messageText = resolved
+        } else {
+          messageText = buildChoiceOutgoingMessage(selectedChoiceValue, typed)
+        }
+      } else {
+        messageText = buildChoiceOutgoingMessage(selectedChoiceValue, '')
+      }
     } else {
       messageText = resolveChatOutgoingMessage(input.trim(), currentChoices, otherChoiceActive)
     }

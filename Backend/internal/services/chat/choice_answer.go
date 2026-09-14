@@ -113,9 +113,14 @@ func ResolveChoiceAnswer(question, answer string) ChoiceResolution {
 
 	if letter, reason, ok := SplitChoiceAndReason(answer); ok {
 		for _, opt := range options {
-			if strings.EqualFold(opt.Value, letter) {
-				return ChoiceResolution{Letter: opt.Value, IsChoice: true, Text: opt.Value, Reason: reason}
+			if !strings.EqualFold(opt.Value, letter) {
+				continue
 			}
+			if isOtherChoiceText(opt.Text) {
+				// 「その他」は記号採点に落とさず自由記述として扱う
+				return ChoiceResolution{IsFreeText: true, Text: reason}
+			}
+			return ChoiceResolution{Letter: opt.Value, IsChoice: true, Text: opt.Value, Reason: reason}
 		}
 		return ChoiceResolution{Letter: letter, IsChoice: true, Text: letter, Reason: reason}
 	}

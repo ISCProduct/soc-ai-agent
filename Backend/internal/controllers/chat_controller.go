@@ -32,6 +32,9 @@ type ChatController struct {
 	emailService    ifaces.EmailService
 	jobs            shared.JobEnqueuer
 	matchingTimers  sync.Map // key: sessionID, value: *time.Timer（デバウンス用）
+	// matchingQualityPending は診断完了後に品質ジョブを1回だけ走らせるフラグ。
+	// デバウンス中に後続メッセージが来ても完了フラグを落とさない。
+	matchingQualityPending sync.Map // key: sessionID, value: true
 }
 
 const minEvaluatedCategoriesForFinal = 4
@@ -99,7 +102,7 @@ func (c *ChatController) notifyMatchingFailure(userID uint, sessionID string, er
 	}
 }
 
-func (c *ChatController) runBackgroundMatching(userID uint, sessionID string) {
+func (c *ChatController) runBackgroundMatching(userID uint, sessionID string, runDiagnosisQuality bool) {
 	ctx := context.Background()
 	var lastErr error
 
@@ -107,7 +110,9 @@ func (c *ChatController) runBackgroundMatching(userID uint, sessionID string) {
 		err := c.matchingService.CalculateMatching(ctx, userID, sessionID)
 		if err == nil {
 			log.Printf("[Chat] Background matching calculation completed: user=%d session=%s attempt=%d", userID, sessionID, attempt)
-			c.enqueueDiagnosisQuality(userID, sessionID)
+			if runDiagnosisQuality {
+				c.enqueueDiagnosisQuality(userID, sessionID)
+			}
 			return
 		}
 		lastErr = err
@@ -137,14 +142,19 @@ func (c *ChatController) enqueueDiagnosisQuality(userID uint, sessionID string) 
 
 // scheduleBackgroundMatching はセッション単位でデバウンスしてマッチング計算をスケジュールする。
 // 同一セッションへの連続メッセージが来ても、最後のメッセージから matchingDebounceDelay 後に1回だけ実行する。
-func (c *ChatController) scheduleBackgroundMatching(userID uint, sessionID string) {
+// diagnosisComplete が true の場合、マッチ成功後に診断妥当性ジョブを1回 enqueue する。
+func (c *ChatController) scheduleBackgroundMatching(userID uint, sessionID string, diagnosisComplete bool) {
+	if diagnosisComplete {
+		c.matchingQualityPending.Store(sessionID, true)
+	}
 	// 既存タイマーがあればキャンセル
 	if prev, ok := c.matchingTimers.Load(sessionID); ok {
 		prev.(*time.Timer).Stop()
 	}
 	timer := time.AfterFunc(matchingDebounceDelay, func() {
 		c.matchingTimers.Delete(sessionID)
-		c.runBackgroundMatching(userID, sessionID)
+		_, runQuality := c.matchingQualityPending.LoadAndDelete(sessionID)
+		c.runBackgroundMatching(userID, sessionID, runQuality)
 	})
 	c.matchingTimers.Store(sessionID, timer)
 }
@@ -216,7 +226,8 @@ func (c *ChatController) Chat(ctx echo.Context) error {
 	}
 
 	// マッチング計算をデバウンスして非同期実行（同一セッションへの連続リクエストを1回にまとめる）
-	c.scheduleBackgroundMatching(req.UserID, req.SessionID)
+	// 診断妥当性ジョブは完了時のみ（毎メッセージ起動すると LLM コストが約15倍になる）
+	c.scheduleBackgroundMatching(req.UserID, req.SessionID, resp.IsComplete)
 
 	return ctx.JSON(http.StatusOK, resp)
 }

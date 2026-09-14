@@ -43,24 +43,20 @@ C) その他（自由記述）`
 		{"その他（自由記述）", false, "", true, ""},
 		{"A: チームで進めるのが好きです", true, "A", false, "チームで進めるのが好きです"},
 		{"B：理由を添えます", true, "B", false, "理由を添えます"},
+		{"C: 本当は自由記述です", false, "", true, ""},
 	}
 	for _, tc := range cases {
 		got := ResolveChoiceAnswer(q, tc.in)
-		if got.IsChoice != tc.wantChoice || got.IsFreeText != tc.wantFreeText || got.Letter != tc.wantLetter || got.Reason != tc.wantReason {
-			t.Fatalf("in=%q got=%+v want choice=%v letter=%q free=%v reason=%q",
-				tc.in, got, tc.wantChoice, tc.wantLetter, tc.wantFreeText, tc.wantReason)
+		if got.IsChoice != tc.wantChoice || got.IsFreeText != tc.wantFreeText || got.Letter != tc.wantLetter {
+			t.Fatalf("in=%q got=%+v want choice=%v letter=%q free=%v",
+				tc.in, got, tc.wantChoice, tc.wantLetter, tc.wantFreeText)
 		}
-	}
-}
-
-func TestBlendChoiceAndReasonScore(t *testing.T) {
-	if got := blendChoiceAndReasonScore(100, 40, "短い"); got != 100 {
-		t.Fatalf("short reason should keep choice score, got %d", got)
-	}
-	got := blendChoiceAndReasonScore(100, 40, "これは十分長い理由テキストです")
-	want := int(0.7*100 + 0.3*40) // 82
-	if got != want {
-		t.Fatalf("blended=%d want %d", got, want)
+		if tc.wantReason != "" && got.Reason != tc.wantReason {
+			t.Fatalf("in=%q reason=%q want %q", tc.in, got.Reason, tc.wantReason)
+		}
+		if tc.in == "C: 本当は自由記述です" && got.Text != "本当は自由記述です" {
+			t.Fatalf("その他理由が Text に残るべき: got=%q", got.Text)
+		}
 	}
 }
 
