@@ -247,6 +247,11 @@ func (f *CompanyInfoFetcher) ProvisionByName(ctx context.Context, companyName st
 			// いずれも「その企業が存在しない」証拠ではなく、こちら側やプロバイダの都合。
 			// 記録すると実在する企業が1時間ブロックされ、しかも DB に無いので
 			// 企業検索からも選べず行き止まりになる。
+			//
+			// 代償として、検索が走った後で失敗するケース（JSONデコード失敗など）は
+			// 再送のたびに課金される。予算超過は ErrSearchBudgetExceeded が
+			// 検索の手前で返るので課金されず、ここでは問題にならない。
+			// 行き止まりを作るより、その分を払うほうがましと判断している。
 			return nil, err
 		}
 		if result == nil || !companyInfoIsSubstantive(result) {
