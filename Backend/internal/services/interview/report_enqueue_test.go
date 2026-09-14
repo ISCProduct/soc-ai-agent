@@ -27,6 +27,8 @@ func (s *stubJobEnqueuer) EnqueueInterviewReport(sessionID uint) error {
 	return s.err
 }
 
+func (s *stubJobEnqueuer) EnqueueDiagnosisQuality(uint, string) error { return nil }
+
 func newEnqueueTestService() *InterviewService {
 	return NewInterviewService(nil, nil, nil, nil, nil, nil, nil)
 }

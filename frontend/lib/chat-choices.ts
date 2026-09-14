@@ -52,3 +52,15 @@ export function resolveChatOutgoingMessage(
 
   return trimmed
 }
+
+/**
+ * 選択中の記号と任意理由テキストから送信メッセージを組み立てる。
+ * 理由あり: "A: 理由" / 理由なし: "A"
+ */
+export function buildChoiceOutgoingMessage(selectedValue: string, reason: string): string {
+  const letter = selectedValue.trim()
+  const trimmedReason = reason.trim()
+  if (!letter) return trimmedReason
+  if (!trimmedReason) return letter
+  return `${letter}: ${trimmedReason}`
+}

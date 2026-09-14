@@ -60,13 +60,18 @@ export function MuiChat() {
           analysisComplete={chat.analysisComplete}
           showChoiceButtons={chat.showChoiceButtons}
           choiceOptions={chat.choiceOptions}
+          selectedChoiceValue={chat.selectedChoiceValue}
           input={chat.input}
           inputPlaceholder={chat.inputPlaceholder}
           isLoading={chat.isLoading}
           historyLoadError={chat.historyLoadError}
+          canSend={chat.canSend}
           inputRef={chat.inputRef}
           onInputChange={chat.setInput}
-          onSend={chat.handleSend}
+          onSelectChoice={chat.handleSelectChoice}
+          onSend={() => {
+            void chat.handleSend()
+          }}
           onOtherChoice={chat.handleOtherChoice}
           onShowCompletionModal={() => chat.setShowCompletionModal(true)}
         />
