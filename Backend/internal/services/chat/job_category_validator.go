@@ -34,7 +34,19 @@ type JobValidationResult struct {
 
 // ValidateJobCategory ユーザーの職種回答を判定
 func (v *JobCategoryValidator) ValidateJobCategory(ctx context.Context, userAnswer string) (*JobValidationResult, error) {
-	normalizedAnswer, err := v.normalizeNumericAnswer(userAnswer)
+	return v.ValidateJobCategoryWithQuestion(ctx, userAnswer, "")
+}
+
+// ValidateJobCategoryWithQuestion は直前に提示した質問文を添えて判定する。
+//
+// 番号だけの回答は、その質問に並んでいた選択肢に対して解釈する必要がある。
+// 大分類のマスタ順で解釈すると、小分類の選択肢に答えた番号を取り違える
+// （「開発系エンジニア」→ 小分類 1.ソフトウェア / 2.Web / 3.データ と聞かれて
+// 「2」と答えた学生が、大分類の2番目である「営業」として登録されていた）。
+func (v *JobCategoryValidator) ValidateJobCategoryWithQuestion(
+	ctx context.Context, userAnswer, presentedQuestion string,
+) (*JobValidationResult, error) {
+	normalizedAnswer, err := v.normalizeNumericAnswer(userAnswer, presentedQuestion)
 	if err != nil {
 		return nil, fmt.Errorf("failed to normalize numeric answer: %w", err)
 	}
@@ -178,14 +190,31 @@ JSONのみを返してください。説明は不要です。`, userAnswer, stri
 	}, nil
 }
 
-func (v *JobCategoryValidator) normalizeNumericAnswer(userAnswer string) (string, error) {
-	trimmed := strings.TrimSpace(userAnswer)
+// normalizeNumericAnswer は番号だけの回答を職種名へ置き換える。
+//
+// 解釈の基準は「利用者が直前に見た選択肢」。presentedQuestion から選択肢を
+// 拾えたら、必ずそれに対して番号を当てる。大分類のマスタ順は使わない。
+//
+// 拾えなかった場合（質問文が渡らない、選択肢形式でない）は、大分類の一覧に
+// 当てる従来の挙動へ落とす。初回の職種選択は GenerateJobSelectionQuestion が
+// 大分類をその順で並べるため、この経路でも整合する。
+func (v *JobCategoryValidator) normalizeNumericAnswer(userAnswer, presentedQuestion string) (string, error) {
+	trimmed := strings.TrimSpace(normalizeOptionText(userAnswer))
 	if trimmed == "" {
 		return userAnswer, nil
 	}
 
 	choice, err := strconv.Atoi(trimmed)
 	if err != nil || choice <= 0 {
+		return userAnswer, nil
+	}
+
+	if options := ExtractPresentedOptions(presentedQuestion); len(options) > 0 {
+		if name := OptionForChoice(options, choice); name != "" {
+			return name, nil
+		}
+		// 提示された範囲外の番号。マスタ順に当てると別の職種になるため、
+		// 原文のまま返して AI 判定に委ねる（判定できなければ聞き直しになる）。
 		return userAnswer, nil
 	}
 
@@ -204,8 +233,8 @@ func (v *JobCategoryValidator) normalizeNumericAnswer(userAnswer string) (string
 }
 
 // NormalizeNumericAnswer is an exported wrapper for normalizeNumericAnswer for use in external tests.
-func (v *JobCategoryValidator) NormalizeNumericAnswer(userAnswer string) (string, error) {
-	return v.normalizeNumericAnswer(userAnswer)
+func (v *JobCategoryValidator) NormalizeNumericAnswer(userAnswer, presentedQuestion string) (string, error) {
+	return v.normalizeNumericAnswer(userAnswer, presentedQuestion)
 }
 
 // GenerateJobSelectionQuestion 職種選択の質問を生成
