@@ -3,6 +3,10 @@ updates:
   # RAG サービスの Python 依存を週次で自動更新
   - package-ecosystem: pip
     directory: /rag
+    # 既定は「リポジトリのデフォルトブランチ」= main。main への push は
+    # 本番(ECS on Fargate)への自動デプロイを引くため、依存更新が develop・release の
+    # ゲートを通らずに本番へ出てしまう。ブランチフローに合わせて develop 宛にする。
+    target-branch: develop
     schedule:
       interval: weekly
       day: monday
@@ -20,6 +24,8 @@ updates:
   # GitHub Actions のバージョンを週次で自動更新
   - package-ecosystem: github-actions
     directory: /
+    # pip と同じ理由で develop 宛にする（既定の main だと本番へ直行する）
+    target-branch: develop
     schedule:
       interval: weekly
       day: monday
@@ -29,3 +35,9 @@ updates:
     labels:
       - dependencies
       - github-actions
+    # メジャーバージョンアップは手動で判断するため対象外（pip と揃える）。
+    # 自動マージの対象が minor/patch だけでも、major PR が自動で開くと
+    # 「緑だから」で通してしまいやすい。
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
