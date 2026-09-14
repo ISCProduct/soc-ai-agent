@@ -114,7 +114,7 @@ func TestAuthServiceGetUserIssuesAdminToken(t *testing.T) {
 	if resp.Token == "" {
 		t.Fatal("admin token should be issued on GetUser")
 	}
-	if !middleware.VerifyAdminToken(resp.Token, user.ID, user.Email, os.Getenv("ADMIN_SECRET")) {
+	if _, err := middleware.ParseAdminToken(resp.Token, user.ID, user.Email, os.Getenv("ADMIN_SECRET")); err != nil {
 		t.Fatal("admin token should verify")
 	}
 }

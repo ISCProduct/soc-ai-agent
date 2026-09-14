@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"context"
 	"time"
 
 	"gorm.io/gorm"
@@ -85,6 +86,20 @@ func (r *APICallLogRepository) ModelBreakdown(since time.Time) ([]ModelCostRow, 
 		GROUP BY model
 		ORDER BY total_cost_usd DESC`, since).Scan(&rows).Error
 	return rows, err
+}
+
+// TotalFallbackCostSince は指定日時以降の「OpenAIフォールバック分だけ」の合計コストを返す（#1293）。
+//
+// フォールバックの USD 上限はこの値で判定する。全コール合計で判定すると、
+// 企業検索など通常の OpenAI 利用だけで上限に達し、ローカル障害時に
+// フォールバックが一度も発動しなくなる（実データで月 $57 に対し既定上限 $20）。
+func (r *APICallLogRepository) TotalFallbackCostSince(ctx context.Context, since time.Time) (float64, error) {
+	var total float64
+	err := r.db.WithContext(ctx).Model(&models.APICallLog{}).
+		Where("via_fallback = ? AND called_at >= ?", true, since).
+		Select("COALESCE(SUM(cost_usd), 0)").
+		Scan(&total).Error
+	return total, err
 }
 
 // TotalCostSince は指定日時以降の合計コストを返す

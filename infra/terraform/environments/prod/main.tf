@@ -522,6 +522,10 @@ module "backend" {
     OPENAI_WEB_SEARCH_MODEL     = "gpt-4o-mini"
     OPENAI_COMPANY_SEARCH_MODEL = "gpt-4o-mini"
     OPENAI_HINTS_MODEL          = "gpt-4o-mini"
+    # 企業検索の web_search のコスト調整ノブ (#1124)。
+    # 検索結果が固定トークンとして課金されるため、1コールの重さがそのままコストに効く。
+    # 品質が落ちたら "high" に戻す（apply とサービス更新が必要）。
+    OPENAI_WEB_SEARCH_CONTEXT_SIZE = "medium"
     # AI面接のSTT。miniは「御社」を「本社」と誤認しやすく、問題発話だけ
     # gpt-4o-transcribe へ自動で再送する(stt_fallback.go)。
     # 精度に問題が出たら var.openai_whisper_model を gpt-4o-transcribe にする。
@@ -617,7 +621,10 @@ module "rag_review" {
   environment = {
     OPENAI_EMBEDDING_MODEL   = "text-embedding-3-small"
     OPENAI_HINTS_MODEL       = "gpt-4o-mini"
-    OPENAI_HINTS_PARSE_MODEL = "gpt-4o"
+    OPENAI_HINTS_PARSE_MODEL = "gpt-4o-mini"
+    # Web検索のコスト調整ノブ (#1124)。品質が落ちたら戻す（apply が必要）
+    OPENAI_WEB_SEARCH_CONTEXT_SIZE = "medium"
+    OPENAI_WEB_SEARCH_MAX_QUERIES  = "4"
     # chromaは独立サービス。Cloud Map経由で名前解決する
     CHROMA_HOST = "chroma.${aws_service_discovery_private_dns_namespace.internal.name}"
     CHROMA_PORT = "8000"

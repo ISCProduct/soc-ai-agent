@@ -242,7 +242,8 @@ func TestAdminJobController_GraduateEmployments_List_Success(t *testing.T) {
 	entries := []models.GraduateEmployment{{GraduateName: "Test User"}}
 	gradRepo.On("List", (*uint)(nil), (*uint)(nil), 50).Return(entries, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments", nil)
+	// schoolScope 適用ルートなので、絞り込み対象(ここでは絞り込みなし)を context に載せる
+	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments", nil), nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, newAdminJobController(nil, nil, gradRepo, nil).GraduateEmployments, newCtx(req, rec), http.StatusOK)
 	gradRepo.AssertExpectations(t)
@@ -275,13 +276,65 @@ func TestAdminJobController_GetGraduateEmployment_Success(t *testing.T) {
 	entry := &models.GraduateEmployment{GraduateName: "Test User"}
 	gradRepo.On("FindByID", uint(1)).Return(entry, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments/1", nil)
+	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments/1", nil), 1)
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newAdminJobController(nil, nil, gradRepo, nil).GetGraduateEmployment, ctx, http.StatusOK)
+	ctrl := newAdminJobController(nil, nil, gradRepo, nil)
+	ctrl.SetSchoolAccess(newUnrestrictedSchoolService(1))
+	assertStatus(t, ctrl.GetGraduateEmployment, ctx, http.StatusOK)
 	gradRepo.AssertExpectations(t)
+}
+
+// TestAdminJobController_GetGraduateEmployment_OtherSchoolDenied は
+// 担当校を持つ管理者(先生)が他校の卒業生就職情報を単体取得できないことを検証する(#1157)。
+// 一覧(GraduateEmployments)は schoolScope で絞られていたが、単体取得は素通りだった。
+func TestAdminJobController_GetGraduateEmployment_OtherSchoolDenied(t *testing.T) {
+	gradRepo := &mocks.GraduateEmploymentRepositoryMock{}
+	otherSchool := uint(9)
+	entry := &models.GraduateEmployment{GraduateName: "他校の卒業生", SchoolID: &otherSchool}
+	gradRepo.On("FindByID", uint(1)).Return(entry, nil)
+
+	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments/1", nil), 1)
+	rec := httptest.NewRecorder()
+	ctx := newCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("1")
+	ctrl := newAdminJobController(nil, nil, gradRepo, nil)
+	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
+	assertStatus(t, ctrl.GetGraduateEmployment, ctx, http.StatusForbidden)
+}
+
+// TestAdminJobController_GetGraduateEmployment_OwnSchoolAllowed は担当校のものは取得できることを検証する。
+func TestAdminJobController_GetGraduateEmployment_OwnSchoolAllowed(t *testing.T) {
+	gradRepo := &mocks.GraduateEmploymentRepositoryMock{}
+	ownSchool := uint(5)
+	entry := &models.GraduateEmployment{GraduateName: "自校の卒業生", SchoolID: &ownSchool}
+	gradRepo.On("FindByID", uint(1)).Return(entry, nil)
+
+	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments/1", nil), 1)
+	rec := httptest.NewRecorder()
+	ctx := newCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("1")
+	ctrl := newAdminJobController(nil, nil, gradRepo, nil)
+	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
+	assertStatus(t, ctrl.GetGraduateEmployment, ctx, http.StatusOK)
+}
+
+// TestAdminJobController_GetGraduateEmployment_SchoolAccessNotConfigured は
+// SchoolService 未注入(DI漏れ)のとき fail-closed になることを検証する。
+func TestAdminJobController_GetGraduateEmployment_SchoolAccessNotConfigured(t *testing.T) {
+	gradRepo := &mocks.GraduateEmploymentRepositoryMock{}
+	gradRepo.On("FindByID", uint(1)).Return(&models.GraduateEmployment{}, nil)
+
+	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments/1", nil), 1)
+	rec := httptest.NewRecorder()
+	ctx := newCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("1")
+	assertStatus(t, newAdminJobController(nil, nil, gradRepo, nil).GetGraduateEmployment, ctx, http.StatusInternalServerError)
 }
 
 func TestAdminJobController_UpdateGraduateEmployment_Success(t *testing.T) {
@@ -293,14 +346,36 @@ func TestAdminJobController_UpdateGraduateEmployment_Success(t *testing.T) {
 	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 
 	body, _ := json.Marshal(map[string]interface{}{"company_id": 1, "graduate_name": "Updated User"})
-	req := httptest.NewRequest(http.MethodPut, "/api/admin/graduate-employments/1", bytes.NewReader(body))
+	req := withAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/graduate-employments/1", bytes.NewReader(body)), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newAdminJobController(nil, nil, gradRepo, audit).UpdateGraduateEmployment, ctx, http.StatusOK)
+	ctrl := newAdminJobController(nil, nil, gradRepo, audit)
+	ctrl.SetSchoolAccess(newUnrestrictedSchoolService(1))
+	assertStatus(t, ctrl.UpdateGraduateEmployment, ctx, http.StatusOK)
 	gradRepo.AssertExpectations(t)
+}
+
+// TestAdminJobController_UpdateGraduateEmployment_OtherSchoolDenied は
+// 他校の卒業生就職情報を書き換えられないことを検証する(#1157)。
+func TestAdminJobController_UpdateGraduateEmployment_OtherSchoolDenied(t *testing.T) {
+	gradRepo := &mocks.GraduateEmploymentRepositoryMock{}
+	otherSchool := uint(9)
+	gradRepo.On("FindByID", uint(1)).Return(&models.GraduateEmployment{SchoolID: &otherSchool}, nil)
+
+	body, _ := json.Marshal(map[string]interface{}{"company_id": 1, "graduate_name": "改変"})
+	req := withAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/graduate-employments/1", bytes.NewReader(body)), 1)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	ctx := newCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("1")
+	ctrl := newAdminJobController(nil, nil, gradRepo, nil)
+	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
+	assertStatus(t, ctrl.UpdateGraduateEmployment, ctx, http.StatusForbidden)
+	gradRepo.AssertNotCalled(t, "Update", mock.Anything)
 }
 
 func TestAdminJobController_JobPositionAction_InvalidID(t *testing.T) {
@@ -401,11 +476,51 @@ func TestAdminJobController_GraduateEmployments_Create_Success(t *testing.T) {
 	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 
 	body, _ := json.Marshal(map[string]interface{}{"company_id": 1, "graduate_name": "Test User"})
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewReader(body))
+	req := withAdminUserID(httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewReader(body)), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminJobController(nil, nil, gradRepo, audit).CreateGraduateEmployment, newCtx(req, rec), http.StatusOK)
+	ctrl := newAdminJobController(nil, nil, gradRepo, audit)
+	ctrl.SetSchoolAccess(newUnrestrictedSchoolService(1))
+	assertStatus(t, ctrl.CreateGraduateEmployment, newCtx(req, rec), http.StatusOK)
 	gradRepo.AssertExpectations(t)
+}
+
+// TestAdminJobController_CreateGraduateEmployment_StampsOwnSchool は、担当校を持つ管理者(先生)が
+// 作成した卒業生就職情報に自校の school_id が入ることを検証する（#1157）。
+//
+// school_id が NULL のままだと、一覧(WHERE school_id = ?)にも単体取得にも現れず、
+// 作成者自身が二度と参照できない行になる。
+func TestAdminJobController_CreateGraduateEmployment_StampsOwnSchool(t *testing.T) {
+	gradRepo := &mocks.GraduateEmploymentRepositoryMock{}
+	audit := &mocks.AuditLogServiceMock{}
+	gradRepo.On("Create", mock.MatchedBy(func(e *models.GraduateEmployment) bool {
+		return e.SchoolID != nil && *e.SchoolID == 5
+	})).Return(nil)
+	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
+
+	body, _ := json.Marshal(map[string]interface{}{"company_id": 1, "graduate_name": "自校の卒業生"})
+	req := withAdminUserID(httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewReader(body)), 1)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	ctrl := newAdminJobController(nil, nil, gradRepo, audit)
+	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
+	assertStatus(t, ctrl.CreateGraduateEmployment, newCtx(req, rec), http.StatusOK)
+	gradRepo.AssertExpectations(t)
+}
+
+// TestAdminJobController_CreateGraduateEmployment_RejectsOtherSchool は、担当外の school_id を
+// 指定した作成が 403 になることを検証する（#1157）。
+func TestAdminJobController_CreateGraduateEmployment_RejectsOtherSchool(t *testing.T) {
+	gradRepo := &mocks.GraduateEmploymentRepositoryMock{}
+
+	body, _ := json.Marshal(map[string]interface{}{"company_id": 1, "graduate_name": "他校", "school_id": 9})
+	req := withAdminUserID(httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewReader(body)), 1)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	ctrl := newAdminJobController(nil, nil, gradRepo, nil)
+	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
+	assertStatus(t, ctrl.CreateGraduateEmployment, newCtx(req, rec), http.StatusForbidden)
+	gradRepo.AssertNotCalled(t, "Create", mock.Anything)
 }
 
 // TestAdminJobController_CreateJobPosition_InheritsCompanyStatus は、

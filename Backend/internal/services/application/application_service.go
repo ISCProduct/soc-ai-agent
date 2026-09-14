@@ -238,8 +238,14 @@ func (s *ApplicationService) GetApplicationsByUser(userID uint) ([]*entity.UserA
 
 // ListForAdmin 管理者向けに条件を指定して応募一覧を取得する（§10.5）。
 // userID/companyID が 0、status が空文字の場合はその条件を絞り込まない。
-func (s *ApplicationService) ListForAdmin(userID, companyID uint, status string) ([]*entity.UserApplicationStatus, error) {
-	return s.appRepo.FindAll(userID, companyID, status)
+// schoolID は担当校を持つ管理者(先生)向けの絞り込み。nil は絞り込みなし(プラットフォーム管理者)。
+func (s *ApplicationService) ListForAdmin(userID, companyID uint, status string, schoolID *uint) ([]*entity.UserApplicationStatus, error) {
+	return s.appRepo.FindAll(userID, companyID, status, schoolID)
+}
+
+// OwnerSchoolID は応募データを所有するユーザーの学校ID(未所属ならnil)を返す(#1157)。
+func (s *ApplicationService) OwnerSchoolID(applicationID uint) (*uint, error) {
+	return s.appRepo.FindOwnerSchoolID(applicationID)
 }
 
 // ListForOwner は企業オーナー向け応募一覧。company_id 必須、所有権がなければ 403。
@@ -248,7 +254,7 @@ func (s *ApplicationService) ListForOwner(userID, companyID uint, status string)
 	if err := s.requireCompanyOwner(userID, companyID); err != nil {
 		return nil, err
 	}
-	return s.appRepo.FindAll(0, companyID, status)
+	return s.appRepo.FindAll(0, companyID, status, nil)
 }
 
 // UpdateStatusAsOwner は企業オーナーによる選考ステータス更新。

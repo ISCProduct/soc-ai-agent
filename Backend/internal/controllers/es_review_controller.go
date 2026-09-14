@@ -54,7 +54,8 @@ func (c *ESReviewController) Review(ctx echo.Context) error {
 	url := strings.TrimRight(ragURL, "/") + "/es/review"
 	log.Printf("es_review: rag request question_type=%q company=%q", req.QuestionType, req.CompanyName)
 
-	ragReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	// リクエストIDを RAG まで伝播させるため ctx 付きで作る(#1188)
+	ragReq, err := http.NewRequestWithContext(ctx.Request().Context(), http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to create RAG request")
 	}

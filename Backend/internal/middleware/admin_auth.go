@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"Backend/internal/repositories"
+	"errors"
 	"net/http"
 )
 
@@ -43,7 +44,12 @@ func verifyAdminRequest(w http.ResponseWriter, r *http.Request, userRepo *reposi
 		return false
 	}
 	token := r.Header.Get("X-Admin-Token")
-	if token == "" || !VerifyAdminToken(token, user.ID, user.Email, adminSecret) {
+	// 署名・有効期限・管理者1名単位の失効を検証する(#1155)
+	switch err := ValidateAdminTokenForUser(token, user, adminSecret); {
+	case errors.Is(err, ErrAdminTokenExpired):
+		http.Error(w, "管理者トークンの有効期限が切れました。再ログインしてください。", http.StatusForbidden)
+		return false
+	case err != nil:
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return false
 	}

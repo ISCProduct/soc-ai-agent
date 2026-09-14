@@ -9,13 +9,19 @@ import (
 	"Backend/internal/services/shared"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net"
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
+
+	"gorm.io/gorm"
 )
 
 // allowedMIMETypes はアップロード可能なファイルタイプ
@@ -113,6 +119,67 @@ type ResumeService struct {
 	crossFeature *flywheel.CrossFeatureIntegrationService
 	validator    *company.CompanyValidationService
 	companyRepo  shared.CompanyBriefReader
+	persona      PersonaEnsurer
+	provisioner  CompanyProvisioner
+
+	// personaFailures は求める人材像の生成に失敗した企業の記録。
+	// 記録しないとレビューのたびに再試行する（1レビューで最大2回）。
+	personaMu       sync.RWMutex
+	personaFailures map[uint]time.Time
+}
+
+// CompanyProvisioner は DB に無い企業を取得して登録する。
+//
+// 実装は CompanyInfoFetcher.ProvisionByName。gBizinfo（無料）を優先し、
+// 足りなければ AI 検索へ落ちる。取得結果は companies に保存されるため、
+// 以後その企業は履歴書レビュー・企業検索・マッチング・面接ヒントのすべてから
+// 追加コストなしで参照できる。
+type CompanyProvisioner interface {
+	ProvisionByName(ctx context.Context, companyName string) (*models.Company, error)
+}
+
+// SetCompanyProvisioner は未登録企業の取得・登録器を注入する（オプション）。
+func (s *ResumeService) SetCompanyProvisioner(p CompanyProvisioner) {
+	s.provisioner = p
+}
+
+// PersonaEnsurer は企業の「求める人材像」(CompanyWeightProfile) を用意する。
+//
+// 実装は JobFetchService.FetchAndSavePersona で、DB に保存済みの企業情報だけを
+// 材料に安いモデルで1回生成し、結果を company_weight_profiles に保存する
+// （Web検索はしない）。2回目以降は AI を呼ばずに DB から返る。
+type PersonaEnsurer interface {
+	FetchAndSavePersona(ctx context.Context, companyID uint, forceRefresh bool) (*models.CompanyWeightProfile, error)
+}
+
+// personaFailureTTL は求める人材像の生成に失敗した企業を再試行しない期間。
+const personaFailureTTL = 10 * time.Minute
+
+func (s *ResumeService) markPersonaFailed(companyID uint) {
+	s.personaMu.Lock()
+	defer s.personaMu.Unlock()
+	if s.personaFailures == nil {
+		s.personaFailures = map[uint]time.Time{}
+	}
+	now := time.Now()
+	for id, at := range s.personaFailures {
+		if now.Sub(at) > personaFailureTTL {
+			delete(s.personaFailures, id)
+		}
+	}
+	s.personaFailures[companyID] = now
+}
+
+func (s *ResumeService) recentlyFailedPersona(companyID uint) bool {
+	s.personaMu.RLock()
+	defer s.personaMu.RUnlock()
+	at, ok := s.personaFailures[companyID]
+	return ok && time.Since(at) <= personaFailureTTL
+}
+
+// SetPersonaEnsurer は求める人材像の生成器を注入する（オプション）。
+func (s *ResumeService) SetPersonaEnsurer(p PersonaEnsurer) {
+	s.persona = p
 }
 
 // SetCrossFeatureService 機能間連携サービスを注入する（オプション）
@@ -146,6 +213,27 @@ func (s *ResumeService) lookupCompanyBriefFromCache(companyName string) string {
 	if p, err := s.companyRepo.GetWeightProfile(comp.ID, nil); err == nil {
 		profile = p
 	}
+	// 未生成なら1回だけ作る（#1124）。
+	//
+	// brief の「重視傾向」が企業の求める人材像そのもので、これが無いと
+	// レビューは業種・事業内容だけを見た一般論になる。実測では 842社中
+	// 90社(10.7%)しか持っていなかった。
+	//
+	// 生成は DB の企業情報だけを材料にした安いモデルの1コールで、結果は
+	// DB に保存され全学生のレビューで使い回される。失敗してもレビューは
+	// 続行する（重視傾向が無い状態に戻るだけ）。
+	if profile == nil && s.persona != nil && !s.recentlyFailedPersona(comp.ID) {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		if p, err := s.persona.FetchAndSavePersona(ctx, comp.ID, false); err == nil {
+			profile = p
+		} else {
+			// 失敗を覚えておく。この関数は1レビューで最大2回呼ばれるうえ、
+			// 記録しないとレビューのたびに再試行し続ける
+			s.markPersonaFailed(comp.ID)
+			log.Printf("[Resume] persona ensure failed company_id=%d: %v", comp.ID, err)
+		}
+	}
 	return company.BuildCompanyBrief(comp, profile)
 }
 
@@ -168,18 +256,27 @@ type ResumeUploadResult struct {
 }
 
 func (s *ResumeService) EnsureDocumentOwner(documentID uint, requestingUserID uint) error {
-	doc, err := s.repo.FindDocumentByID(documentID)
-	if err != nil {
+	if _, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return shared.ErrForbidden
+		}
 		return err
-	}
-	if doc.UserID != requestingUserID {
-		return shared.ErrForbidden
 	}
 	return nil
 }
 
 // ensureRealCompany は企業名が指定されている場合に実在確認を行い、正規化名を返す。
 // 企業名が空の場合（職種のみレビュー）はそのまま通す。
+// provisionTimeout は未登録企業の取得に与える時間（#1124）。
+//
+// この処理はレスポンスの最初の1バイトを書く前に走る。CloudFront の
+// origin_read_timeout と staging の nginx proxy_read_timeout がどちらも 60秒なので、
+// それを超えるとエッジが接続を切り、コード側が返すエラーメッセージは
+// ユーザーに届かない（静的エラーページに差し替わる）。
+// エッジの上限より短くして、必ず自前のメッセージを返せるようにする。
+const provisionTimeout = 40 * time.Second
+
+// ctx は呼び出し元リクエストのもの。ユーザーが離脱したら取得も止める。
 func (s *ResumeService) ensureRealCompany(ctx context.Context, companyName string) (string, error) {
 	name := strings.TrimSpace(companyName)
 	if name == "" {
@@ -188,17 +285,35 @@ func (s *ResumeService) ensureRealCompany(ctx context.Context, companyName strin
 	if s.validator == nil {
 		return "", &shared.ValidationError{Message: "企業の実在確認機能が利用できません。しばらくしてから再度お試しください"}
 	}
-	result, err := s.validator.Validate(ctx, name)
+	// まず DB だけで確定させる（#1124）。
+	//
+	// 従来は DB に無いと Web検索で実在確認だけを行い、**結果を捨てていた**。
+	// 1コールあたり約3万入力トークン払って真偽値しか得られず、企業情報が無いので
+	// レビューは一般論になり、次に同じ企業名が来ればまた払っていた。
+	result, err := s.validator.ValidateFromDB(name)
 	if err != nil {
 		return "", err
 	}
-	if !result.Exists {
-		return "", &shared.ValidationError{Message: "実在が確認できない企業名です。企業を検索して候補から選択してください"}
+	if result != nil && result.Exists {
+		if strings.TrimSpace(result.CanonicalName) != "" {
+			return result.CanonicalName, nil
+		}
+		return name, nil
 	}
-	if strings.TrimSpace(result.CanonicalName) != "" {
-		return result.CanonicalName, nil
+
+	// DB に無ければ取得して登録する。取得結果は companies に保存されるので、
+	// 以後この企業は企業検索・マッチング・面接ヒントからも参照できる。
+	if s.provisioner == nil {
+		return "", &shared.ValidationError{Message: "登録されていない企業名です。企業を検索して候補から選択してください"}
 	}
-	return name, nil
+	provisionCtx, cancel := context.WithTimeout(ctx, provisionTimeout)
+	defer cancel()
+	company, err := s.provisioner.ProvisionByName(provisionCtx, name)
+	if err != nil {
+		log.Printf("[Resume] company provision failed name=%q: %v", name, err)
+		return "", &shared.ValidationError{Message: "企業情報を取得できませんでした。企業名を確認するか、企業を検索して候補から選択してください"}
+	}
+	return company.Name, nil
 }
 
 type AnnotatedFile struct {

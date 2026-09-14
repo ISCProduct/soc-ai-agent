@@ -284,7 +284,7 @@ export function useResultsData() {
       return
     }
     if (!company.matchId || company.isApplied || applyingId !== null) return
-    if (needsLowMatchConfirm(company.matchScore)) {
+    if (needsLowMatchConfirm(company.matchScore, company.matchedAxisCount)) {
       setLowMatchTarget(company)
       return
     }

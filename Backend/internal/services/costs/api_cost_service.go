@@ -2,6 +2,7 @@ package costs
 
 import (
 	"Backend/internal/models"
+	openaiPkg "Backend/internal/openai"
 	"Backend/internal/repositories"
 	"Backend/internal/services/shared"
 	"fmt"
@@ -26,25 +27,47 @@ var modelPricing = map[string][2]float64{
 	"o3":                     {10.00, 40.00},
 	"text-embedding-3-small": {0.02, 0.02},
 	"text-embedding-3-large": {0.13, 0.13},
+	// Web検索系。検索結果が固定トークンとして課金されるため入力トークンが
+	// 桁違いに大きい（実測で1コール平均3万トークン）。
+	// gpt-4o-mini-search-preview は最長一致が無いと gpt-4o 単価に当たり得るので
+	// 明示が必要。残り2つは既定と同値だが、単価の根拠を残すために書いておく。
+	"gpt-4o-search-preview":      {2.50, 10.00},
+	"gpt-4o-mini-search-preview": {0.15, 0.60},
+	"gpt-5-search-api":           {2.50, 10.00},
 }
 
-// calculateCost は入力/出力トークン数とモデル名からUSDコストを計算する
-func calculateCost(model string, promptTokens, completionTokens int) float64 {
+// calculateCost は入力/出力トークン数とモデル名からUSDコストを計算する。
+//
+// provider が openai 以外のときは 0 を返す。ローカル推論は無料であり、
+// かつローカルのモデル名（gpt-oss-20b 等）は単価表に無いため
+// 未知モデルの既定（gpt-4o 単価）が架空のコストとして記録されてしまう（#1293）。
+func calculateCost(provider, model string, promptTokens, completionTokens int) float64 {
+	if provider != "" && !strings.EqualFold(provider, "openai") {
+		return 0
+	}
 	lower := strings.ToLower(strings.TrimSpace(model))
 
-	// prefix match for versioned model names (e.g. gpt-4o-2024-08-06)
-	var pricing [2]float64
-	var found bool
-	for k, v := range modelPricing {
-		if lower == k || strings.HasPrefix(lower, k+"-") || strings.HasPrefix(lower, k+":") {
-			pricing = v
-			found = true
-			break
+	// バージョン付きモデル名（gpt-4o-2024-08-06 等）に対応するため前方一致を使うが、
+	// 必ず**最長一致**を取る。
+	//
+	// 以前は map を range して最初に一致したもので break していた。Go の map の
+	// 反復順序はランダムなので、"gpt-4o-mini" が "gpt-4o" の前方一致に当たると
+	// 16.7倍高い gpt-4o 単価で記録されていた。しかも実行ごとに結果が変わる。
+	// 実測（本番相当DB, 2026-08-13以降）では gpt-4o-mini の 892万入力トークンが
+	// $26.32 として記録されており、正しい mini 単価なら $1.79 だった。
+	// コスト削減の判断材料が15倍近く狂っていたことになる。
+	pricing := [2]float64{2.50, 10.00} // 未知モデルは gpt-4o 単価に倒す（過小評価しない）
+	best := ""
+	for k := range modelPricing {
+		if lower != k && !strings.HasPrefix(lower, k+"-") && !strings.HasPrefix(lower, k+":") {
+			continue
+		}
+		if len(k) > len(best) {
+			best = k
 		}
 	}
-	if !found {
-		// Default to gpt-4o pricing
-		pricing = [2]float64{2.50, 10.00}
+	if best != "" {
+		pricing = modelPricing[best]
 	}
 
 	inputCost := float64(promptTokens) * pricing[0] / 1_000_000
@@ -76,16 +99,22 @@ func NewAPICostService(repo *repositories.APICallLogRepository) *APICostService 
 	return &APICostService{repo: repo, alertThresholdUSD: threshold}
 }
 
-// LogCall は非同期でAPIコールログをDBに記録する
-func (s *APICostService) LogCall(model string, promptTokens, completionTokens int) {
+// LogUsage は非同期でAPIコールログをDBに記録する。
+//
+// provider / via_fallback を残すのは、この表を「OpenAI への課金額」として
+// 使えるようにするため（#1293）。フォールバックの USD 上限は via_fallback だけを
+// 集計するので、通常の OpenAI 利用（企業検索など）が保険の予算を食わない。
+func (s *APICostService) LogUsage(u openaiPkg.Usage) {
 	go func() {
-		cost := calculateCost(model, promptTokens, completionTokens)
+		cost := calculateCost(u.Provider, u.Model, u.PromptTokens, u.CompletionTokens)
 		entry := &models.APICallLog{
-			Model:            model,
-			PromptTokens:     promptTokens,
-			CompletionTokens: completionTokens,
-			TotalTokens:      promptTokens + completionTokens,
+			Model:            u.Model,
+			PromptTokens:     u.PromptTokens,
+			CompletionTokens: u.CompletionTokens,
+			TotalTokens:      u.PromptTokens + u.CompletionTokens,
 			CostUSD:          cost,
+			Provider:         u.Provider,
+			ViaFallback:      u.ViaFallback,
 			CalledAt:         time.Now().UTC(),
 		}
 		if err := s.repo.Create(entry); err != nil {

@@ -35,6 +35,15 @@ func newUnrestrictedSchoolService(adminUserID uint) *services.SchoolService {
 	return services.NewSchoolService(repo)
 }
 
+// newRestrictedSchoolService は担当校を持つadmin(=先生)のSchoolServiceを返す。
+// allowedSchoolID 以外の学校のリソースに対して CanAdminAccessSchool が false を返す(#1157)
+func newRestrictedSchoolService(adminUserID, allowedSchoolID uint) *services.SchoolService {
+	repo := &mocks.SchoolRepositoryMock{}
+	repo.On("ListSchoolsForAdmin", adminUserID).
+		Return([]models.School{{ID: allowedSchoolID, Name: "担当校"}}, nil)
+	return services.NewSchoolService(repo)
+}
+
 // newCtx はリクエストとレコーダーからecho.Contextを生成する
 func newCtx(req *http.Request, rec *httptest.ResponseRecorder) echo.Context {
 	return testEcho.NewContext(req, rec)

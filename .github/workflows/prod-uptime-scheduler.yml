@@ -47,6 +47,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Determine desired state and apply
+        id: apply
         run: |
           set -e
 
@@ -116,6 +117,7 @@ jobs:
           esac
 
           DB_ID="${PROJECT_NAME}-mysql"
+          echo "desired=$DESIRED" >> "$GITHUB_OUTPUT"
 
           if [ "$DESIRED" == "1" ]; then
             # RDSを先に起動し、利用可能になってからECSを起動する
@@ -212,4 +214,47 @@ jobs:
           if [ -n "$OVERRIDE_READ_FAILED" ]; then
             echo "手動オーバーライドを読めませんでした(/prod が無効のまま動いています)" >&2
             exit 1
+          fi
+
+      # 本番が停止している間に main へデプロイすると、deployment.yml の
+      # 「Sync whats-new from merged PRs」は curl に失敗して取り込みをスキップする
+      # (|| echo で握りつぶされ、ジョブは success になるので気づけない)。
+      # 結果、更新情報の追加・削除が本番へ反映されないまま残る。実際に、運用作業が
+      # ユーザー向け更新情報に出たまま消えない状態になった(#1290)。
+      #
+      # 本番を起動したこのタイミングで取り込み直す。ingest は pr_number で冪等、
+      # かつ毎回 purge が走るので、何度呼んでも害はない。
+      - name: Sync whats-new (本番起動時の取りこぼしを回収)
+        if: steps.apply.outputs.desired == '1'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          PROD_API_BASE: https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }}
+        run: |
+          # backend のタスク起動とヘルスチェック通過を待つ。
+          # ここで待たずに叩くと必ず失敗し、取りこぼしを回収できない。
+          for _ in $(seq 1 40); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 10 "$PROD_API_BASE/health" || echo "000")
+            [ "$CODE" = "200" ] && break
+            echo "backend health: $CODE (waiting...)"
+            sleep 15
+          done
+          if [ "$CODE" != "200" ]; then
+            echo "::warning::本番backendが応答しないため更新情報の取り込みを見送ります(次回起動時に回収されます)"
+            exit 0
+          fi
+
+          sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base main --limit 20 \
+            --json number,title,body,mergedAt \
+            --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
+
+          if curl -sf -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Secret: $ADMIN_SECRET" \
+            -d "{\"sources\": $sources}" \
+            --max-time 60 > /dev/null; then
+            echo "更新情報を取り込みました"
+          else
+            echo "::warning::更新情報の取り込みに失敗しました(次回起動時に回収されます)"
           fi

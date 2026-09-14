@@ -15,7 +15,7 @@ func (s *ChatService) buildAndSaveSessionSummary(ctx context.Context, userID uin
 	}
 
 	// 直近のユーザーメッセージを収集
-	msgs, err := s.chatMessageRepo.FindRecentBySessionID(sessionID, 30)
+	msgs, err := s.chatMessageRepo.FindRecentBySessionIDForUser(sessionID, userID, 30)
 	if err != nil {
 		return nil, err
 	}

@@ -42,7 +42,7 @@ func newLowMatchRepo(t *testing.T) (*repositories.UserApplicationStatusRepositor
 
 func TestFindLowMatchApplicationsByUsers_SQL(t *testing.T) {
 	repo, got := newLowMatchRepo(t)
-	_, err := repo.FindLowMatchApplicationsByUsers([]uint{1, 2}, 40)
+	_, err := repo.FindLowMatchApplicationsByUsers([]uint{1, 2}, 40, 4)
 	require.NoError(t, err)
 	require.Len(t, *got, 1)
 	sql := (*got)[0]
@@ -71,9 +71,24 @@ func TestFindLowMatchApplicationsByUsers_SQL(t *testing.T) {
 }
 
 // 生徒が0人ならクエリを投げない。
+// 算出軸が少ない行は「低マッチ」ではなく「計測不足」なので除外する（#1124）。
+// ここが抜けると、軸が2本しか埋まっていない学生の応募が
+// 教員の「軌道修正の対象」に大量に並ぶ。
+func TestFindLowMatchApplicationsByUsers_ExcludesThinEvidence(t *testing.T) {
+	repo, captured := newLowMatchRepo(t)
+
+	if _, err := repo.FindLowMatchApplicationsByUsers([]uint{1}, 40, 4); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sql := (*captured)[0]
+	if !strings.Contains(sql, "matched_axis_count") {
+		t.Errorf("算出軸数の絞り込みが無い: %s", sql)
+	}
+}
+
 func TestFindLowMatchApplicationsByUsers_EmptyInput(t *testing.T) {
 	repo, got := newLowMatchRepo(t)
-	res, err := repo.FindLowMatchApplicationsByUsers(nil, 40)
+	res, err := repo.FindLowMatchApplicationsByUsers(nil, 40, 4)
 	require.NoError(t, err)
 	require.Empty(t, res)
 	require.Empty(t, *got, "生徒0人でクエリを投げている")

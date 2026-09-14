@@ -157,6 +157,11 @@ func (s *AuthService) ResetPassword(token, newPassword string) error {
 	user.Password = string(hashedPassword)
 	user.PasswordResetToken = ""
 	user.PasswordResetExpiresAt = nil
+	// 管理者トークンも失効させる(#1155)。リフレッシュトークンだけ失効させても、
+	// 管理者トークンは TTL 切れまで使えてしまい「漏洩に気づいてパスワードを変えた」が効かない。
+	// Go から書き、Go から読む（loc=Local と MySQL の session TZ の差に依存しない）
+	now := time.Now()
+	user.AdminTokenNotBefore = &now
 
 	if err := s.userRepo.UpdateUser(user); err != nil {
 		return err

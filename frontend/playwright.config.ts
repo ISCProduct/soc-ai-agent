@@ -15,6 +15,8 @@ export default defineConfig({
     'company-password-reset.spec.ts',
     'admin-company-users.spec.ts',
     'student-insights.spec.ts',
+    'company-provenance.spec.ts',
+    'request-id.spec.ts',
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

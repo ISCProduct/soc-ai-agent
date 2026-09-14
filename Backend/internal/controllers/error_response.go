@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -9,6 +11,7 @@ import (
 
 	"Backend/internal/logger"
 	"Backend/internal/middleware"
+	"Backend/internal/openai"
 	"Backend/internal/services"
 
 	"github.com/labstack/echo/v4"
@@ -60,6 +63,13 @@ const internalServerErrorMessage = "内部エラーが発生しました"
 // echoInternalError はエラーをログ出力しつつ echo.HTTPError を返す。
 func echoInternalError(err error) error {
 	logError(err)
+	// AI プロバイダ未設定・ローカル推論先の障害は設定/運用の問題で、リトライすれば
+	// 回復しうる。500 + 「内部エラー」だと API 利用者が原因を切り分けられないため
+	// 503 + 明示メッセージにする(#1293)。echoInternalError を通る全経路に一様に効かせる。
+	if errors.Is(err, openai.ErrAIUnavailable) {
+		return newAPIError(http.StatusServiceUnavailable, ErrCodeServiceUnavail,
+			"現在AI機能を利用できません。しばらくしてから再度お試しください。")
+	}
 	return newAPIError(http.StatusInternalServerError, ErrCodeInternalError, internalServerErrorMessage)
 }
 
@@ -95,6 +105,24 @@ func ensureAdminSchoolAccess(ctx echo.Context, schools *services.SchoolService, 
 		return echo.NewHTTPError(http.StatusForbidden, "school access denied")
 	}
 	return nil
+}
+
+// echoAdminSchoolFilter は EchoAdminSchoolScope が設定した絞り込み対象(nilは絞り込みなし)を返す。
+//
+// ミドルウェア未適用のルートから呼ばれた場合は fail-closed で 500 を返す(#1157)。
+// `schoolID, _ :=` で第2戻り値を捨てると、ルートから schoolScope が外れたときに
+// 「絞り込みなし」と区別できず、全校のデータが返る fail-open になる。
+func echoAdminSchoolFilter(ctx echo.Context) (*uint, error) {
+	filter, ok := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
+	if !ok {
+		// 既存の teacher insight 経路と同じ 403 に揃える（#1027 の前例）。
+		// ただし 403 だけでは「正当な権限拒否」と区別できず、ルート定義から
+		// schoolScope が外れた設定ミスに気づけないのでログを残す(#1157)。
+		logError(fmt.Errorf("school scope middleware is missing: %s %s",
+			ctx.Request().Method, ctx.Request().URL.Path))
+		return nil, echo.NewHTTPError(http.StatusForbidden, "school scope is not resolved")
+	}
+	return filter, nil
 }
 
 // echoRequiredUintQuery は必須の正の整数クエリパラメータを返す。欠落・不正は 400。
