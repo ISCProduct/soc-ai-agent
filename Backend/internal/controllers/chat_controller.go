@@ -344,6 +344,10 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		CategoryScores CategoryScores `json:"category_scores"`
 		IsFavorited    bool           `json:"is_favorited"`
 		IsApplied      bool           `json:"is_applied"`
+		// MatchedAxisCount は Score の算出に使えた軸の数（0-10、#1124）。
+		// 少ないほど根拠が薄い。低マッチ警告の抑制に使う。
+		// レスポンス直下の evaluated_categories（ユーザースコアの非ゼロ件数）とは別物。
+		MatchedAxisCount int `json:"matched_axis_count"`
 	}
 
 	type RecommendationResponse struct {
@@ -378,17 +382,18 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		}
 
 		items = append(items, CompanyRecommendation{
-			ID:           int(match.Company.ID),
-			MatchID:      match.ID,
-			CategoryName: match.Company.Name,
-			Score:        int(match.MatchScore),
-			Reason:       matching.BuildMatchReason(match, userScores),
-			Industry:     match.Company.Industry,
-			Location:     match.Company.Location,
-			Employees:    employeeCount,
-			TechStack:    techStack,
-			IsFavorited:  match.IsFavorited,
-			IsApplied:    match.IsApplied,
+			ID:               int(match.Company.ID),
+			MatchID:          match.ID,
+			CategoryName:     match.Company.Name,
+			Score:            int(match.MatchScore),
+			Reason:           matching.BuildMatchReason(match, userScores),
+			Industry:         match.Company.Industry,
+			Location:         match.Company.Location,
+			Employees:        employeeCount,
+			TechStack:        techStack,
+			IsFavorited:      match.IsFavorited,
+			IsApplied:        match.IsApplied,
+			MatchedAxisCount: match.MatchedAxisCount,
 			CategoryScores: CategoryScores{
 				Technical:     match.TechnicalMatch,
 				Teamwork:      match.TeamworkMatch,

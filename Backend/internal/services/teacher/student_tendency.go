@@ -135,7 +135,12 @@ func RankIndustries(
 		total := 0.0
 		for _, c := range categories {
 			category := string(c)
-			// 未評価カテゴリは中立50。企業マッチング側(scoredMatch)と同じ扱い。
+			// 未評価カテゴリは中立50で埋める。
+			//
+			// 企業マッチング側(scoredMatch)は #1124 で「未計測は平均から除外」に
+			// 変えたが、こちらは業界数(12)が少なく相対順位が目的なので据え置き。
+			// ただし CalculateCategoryMatch は共有しているため、線形化の影響は
+			// こちらにも及ぶ（スコアの絶対値が下がり、順位も入れ替わる）。
 			userScore, ok := scores[category]
 			if !ok {
 				userScore = 50

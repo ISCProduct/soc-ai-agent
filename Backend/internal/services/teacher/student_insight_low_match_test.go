@@ -17,12 +17,14 @@ type stubLowMatch struct {
 	calls        int
 	gotIDs       []uint
 	gotThreshold float64
+	gotMinAxes   int
 }
 
-func (s *stubLowMatch) FindLowMatchApplicationsByUsers(userIDs []uint, threshold float64) (map[uint][]repositories.LowMatchApplication, error) {
+func (s *stubLowMatch) FindLowMatchApplicationsByUsers(userIDs []uint, threshold float64, minMatchedAxes int) (map[uint][]repositories.LowMatchApplication, error) {
 	s.calls++
 	s.gotIDs = userIDs
 	s.gotThreshold = threshold
+	s.gotMinAxes = minMatchedAxes
 	return s.byUser, s.err
 }
 
@@ -158,5 +160,20 @@ func TestLowMatchThreshold_MatchesFrontend(t *testing.T) {
 	}
 	if LowMatchThreshold != want {
 		t.Errorf("閾値が食い違っている: backend=%v frontend=%v", LowMatchThreshold, want)
+	}
+
+	// 軸数の下限も同じ理由で揃える必要がある（#1124）。
+	// 片方だけ変えると「学生には確認が出ないのに教員一覧には出る」が再発する。
+	ma := regexp.MustCompile(`MIN_MATCHED_AXES_FOR_LOW_MATCH = (\d+)`).FindSubmatch(src)
+	if ma == nil {
+		t.Fatal("フロント側の MIN_MATCHED_AXES_FOR_LOW_MATCH を見つけられない")
+	}
+	wantAxes, err := strconv.Atoi(string(ma[1]))
+	if err != nil {
+		t.Fatalf("パースできない: %v", err)
+	}
+	if MinMatchedAxesForLowMatch != wantAxes {
+		t.Errorf("軸数の下限が食い違っている: backend=%v frontend=%v",
+			MinMatchedAxesForLowMatch, wantAxes)
 	}
 }

@@ -91,10 +91,20 @@ type UserCompanyMatch struct {
 	ChallengeMatch     float64
 	DetailMatch        float64
 	CommunicationMatch float64
-	MatchReason        string
-	IsViewed           bool
-	IsFavorited        bool
-	IsApplied          bool
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	// MatchedAxisCount は MatchScore の算出に使えた軸の数（0-10）。
+	// 未計測の軸は平均に含めないため、この値が小さいほど根拠が薄い（#1124）。
+	//
+	// スコア行が存在すれば値が0でも「計測済み」と数える。面接経路の 0 は
+	// 「5点中0点」を正規化した正当なスコア（cross_feature_integration_service.go）なので、
+	// 測れていないわけではない。
+	//
+	// なお chat_controller.go の countEvaluatedCategories は score != 0 で数えるため、
+	// 同じ「何軸で測れたか」でも値が食い違う。あちらは 0 を未計測とみなす簡略化。
+	MatchedAxisCount int
+	MatchReason      string
+	IsViewed         bool
+	IsFavorited      bool
+	IsApplied        bool
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }

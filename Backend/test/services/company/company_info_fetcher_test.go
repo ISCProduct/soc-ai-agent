@@ -52,6 +52,19 @@ func makeChatCompletionsServer(t *testing.T, responseText string) *httptest.Serv
 	}))
 }
 
+// makeCountingServer は makeChatCompletionsServer と同じ応答を返しつつ、
+// 呼び出し回数を数える（ネガティブキャッシュの検証用）。
+func makeCountingServer(t *testing.T, responseText string, calls *int) *httptest.Server {
+	t.Helper()
+	inner := makeChatCompletionsServer(t, responseText)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*calls++
+		inner.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(inner.Close)
+	return srv
+}
+
 func TestCompanyInfoFetcher_FetchAndSave_TTLCache(t *testing.T) {
 	now := time.Now()
 	repo := &mocks.CompanyRepositoryMock{}

@@ -24,6 +24,8 @@ export interface Company {
   employees: string
   description: string
   matchScore: number
+  /** matchScore の算出に使えた軸の数（0-10、#1124）。少ないほど根拠が薄い */
+  matchedAxisCount?: number
   tags: string[]
   techStack: string[]
   categoryScores?: CategoryScores

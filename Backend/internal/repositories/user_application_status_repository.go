@@ -208,7 +208,7 @@ var terminalApplicationStatuses = []string{"withdrawn", "rejected", "not_applied
 // （学生側の needsLowMatchConfirm と揃える。片方だけ <= にすると
 // 「学生には確認が出ないのに教員一覧には出る」という食い違いが起きる）。
 func (r *UserApplicationStatusRepository) FindLowMatchApplicationsByUsers(
-	userIDs []uint, threshold float64,
+	userIDs []uint, threshold float64, minMatchedAxes int,
 ) (map[uint][]LowMatchApplication, error) {
 	result := map[uint][]LowMatchApplication{}
 	if len(userIDs) == 0 {
@@ -223,6 +223,9 @@ func (r *UserApplicationStatusRepository) FindLowMatchApplicationsByUsers(
 		Where("a.user_id IN ?", userIDs).
 		Where("a.status NOT IN ?", terminalApplicationStatuses).
 		Where("m.match_score < ?", threshold).
+		// 算出軸が少ない行は「低マッチ」ではなく「計測不足」（#1124）。
+		// 再計算前の行は matched_axis_count = 0 なので、ここで一緒に除外される。
+		Where("m.matched_axis_count >= ?", minMatchedAxes).
 		Order("m.match_score ASC, a.id ASC").
 		Scan(&rows).Error
 	if err != nil {
