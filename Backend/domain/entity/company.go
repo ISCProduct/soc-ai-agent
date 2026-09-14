@@ -91,7 +91,10 @@ type UserCompanyMatch struct {
 	ChallengeMatch     float64
 	DetailMatch        float64
 	CommunicationMatch float64
-	MatchReason        string
+	// EvaluatedCategories は MatchScore の算出に使えた軸の数（0-10）。
+	// 未計測の軸は平均に含めないため、この値が小さいほど根拠が薄い（#1124）。
+	EvaluatedCategories int
+	MatchReason         string
 	IsViewed           bool
 	IsFavorited        bool
 	IsApplied          bool

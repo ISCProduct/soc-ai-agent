@@ -214,7 +214,9 @@ func (s *MatchingService) calculateMatchScore(
 	match.DetailMatch, evaluatedCount, totalScore = scoredMatch(userScores, "細部志向", float64(companyProfile.DetailOrientation), evaluatedCount, totalScore)
 	match.CommunicationMatch, evaluatedCount, totalScore = scoredMatch(userScores, "コミュニケーション力", float64(companyProfile.CommunicationSkill), evaluatedCount, totalScore)
 
-	// 総合マッチ度を計算（全カテゴリの平均）
+	// 総合マッチ度は「計測できた軸だけ」の平均（#1124）。
+	// 何件で算出したかを持たせ、表示側が根拠の薄さを示せるようにする。
+	match.EvaluatedCategories = evaluatedCount
 	if evaluatedCount > 0 {
 		match.MatchScore = totalScore / float64(evaluatedCount)
 	} else {
@@ -240,28 +242,44 @@ func defaultCompanyWeightProfile(companyID uint) *models.CompanyWeightProfile {
 	}
 }
 
+// scoredMatch はカテゴリ1つ分のマッチ度を返す。
+//
+// 未計測カテゴリは平均に含めない（#1124）。以前は中立値(50)で埋めたうえで
+// 評価対象に数えていたため、企業の重視度が 45〜70 に寄っている実データでは
+// 差が小さくなり、スコアを1つも持たないユーザーでも全企業と97%前後で
+// 一致してしまっていた。計測できていない軸は「一致」ではなく「不明」。
 func scoredMatch(userScores map[string]float64, category string, companyWeight float64, evaluatedCount int, totalScore float64) (float64, int, float64) {
-	// 未評価カテゴリは中立値(50)として扱い、評価対象に含める
 	userScore, ok := userScores[category]
 	if !ok {
-		userScore = 50.0
+		// 未計測。0 を返すが平均には数えない（EvaluatedCategories で件数が分かる）
+		return 0, evaluatedCount, totalScore
 	}
 	matchScore := CalculateCategoryMatch(userScore, companyWeight)
 	return matchScore, evaluatedCount + 1, totalScore + matchScore
 }
 
-// CalculateCategoryMatch カテゴリごとのマッチ度を計算
-// 差分を直接線形に扱う代わりに、意味的な緩やかな変化を持つシグモイド関数でスケーリングする。
-// ユーザースコアと企業重視度の差が小さいほど高スコア（0-100）。
+// CalculateCategoryMatch カテゴリごとのマッチ度を計算する（0-100）。
+//
+// ユーザースコアと企業重視度の差をそのまま減点する。
+//
+//	差   0 -> 100
+//	差  10 -> 90
+//	差  20 -> 80
+//	差  30 -> 70
+//	差  50 -> 50
+//	差 100 -> 0
+//
+// 以前はロジスティック関数（k=12）でスケーリングしていたが、実際に現れる差の範囲
+// （企業の重視度 45〜92、ユーザースコア 0〜80）がすべて曲線の平坦部に入り、
+// 差20で97.3、差30で91.7と、ほとんど差が出なかった。
+// 本番相当DBでは全90社が91〜99%（平均97%）に固まり、
+// 「どの企業とも高相性」としか読めない状態だった（#1124）。
+//
+// 線形にしたのは、スコアの意味が読み手に伝わるようにするため。
+// 「差がそのまま減点」なら結果から逆算でき、係数の調整も要らない。
 func CalculateCategoryMatch(userScore, companyWeight float64) float64 {
 	diff := math.Abs(userScore - companyWeight) // 0..100
-	// similarity: 1.0 (完全一致) -> 0.0 (完全不一致)
-	sim := 1.0 - diff/100.0
-	// ロジスティック関数でスケーリング。中心を 0.5、スロープを適度に設定して差の小さい領域で緩やかに変化するようにする。
-	k := 12.0
-	x := k * (sim - 0.5)
-	s := 1.0 / (1.0 + math.Exp(-x))
-	return math.Max(0.0, math.Min(100.0, 100.0*s))
+	return math.Max(0.0, math.Min(100.0, 100.0-diff))
 }
 
 // GetTopMatches マッチング度の高い企業を取得
