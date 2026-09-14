@@ -165,6 +165,11 @@ go run ./cmd/migrate force 1   # version 2 を取り消した状態に補修し�
 最大で 89位 → 25位 の移動がありました。既存ユーザーには
 「おすすめ企業が入れ替わった」ように見えます。
 
+### version 27（diagnosis_quality_reports）
+
+診断完了後の妥当性フラグ保存用テーブル。`user_weight_scores` / `user_company_matches` は
+更新しない。マッチング成功後に asynq `diagnosis:quality` が upsert する。
+
 ### version 25 適用時の注意（#1293）
 
 `api_call_logs` は推論先に関係なく記録されるため、そのままでは「OpenAI への課金額」

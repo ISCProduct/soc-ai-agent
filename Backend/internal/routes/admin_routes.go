@@ -23,6 +23,7 @@ func SetupAdminRoutes(
 	adminCostsController *controllers.AdminCostsController,
 	profileRecalcController *controllers.AdminProfileRecalculationController,
 	scoreValidationController *controllers.AdminScoreValidationController,
+	diagnosisQualityController *controllers.AdminDiagnosisQualityController,
 	collectiveInsightController *controllers.CollectiveInsightController,
 	scraperSessionController *controllers.AdminScraperSessionController,
 	adminVectorController *controllers.AdminVectorController,
@@ -169,6 +170,7 @@ func SetupAdminRoutes(
 	admin.GET("/score-validation/variants", scoreValidationController.ListVariants)
 	admin.POST("/score-validation/variants", scoreValidationController.CreateVariant)
 	admin.GET("/score-validation/variants/results", scoreValidationController.GetVariantResults)
+	admin.GET("/diagnosis-quality", diagnosisQualityController.List)
 
 	// 集合知管理
 	admin.POST("/collective-insights/rebuild-summaries", collectiveInsightController.RebuildSummaries)
