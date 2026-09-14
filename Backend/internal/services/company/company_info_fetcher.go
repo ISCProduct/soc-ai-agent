@@ -194,6 +194,90 @@ func (f *CompanyInfoFetcher) ConfirmAndSave(companyID uint, result *CompanyInfoR
 	return companyInfoFromModel(company), nil
 }
 
+// ProvisionByName は DB に無い企業を取得して登録する（#1124）。
+//
+// 従来、履歴書レビューで未登録の企業名が来ると Web検索で実在確認だけを行い、
+// **結果を捨てていた**。1コールあたり約3万入力トークン払って真偽値しか得られず、
+// 企業情報が無いのでレビューは一般論になり、次に同じ企業名が来ればまた払っていた。
+//
+// ここでは同じ取得結果を companies に登録する。以後その企業は
+// 履歴書レビュー・企業検索・マッチング・面接ヒントのすべてから
+// 追加コストなしで参照できる（既存企業と同じ扱いになる）。
+//
+// 取得は gBizinfo（無料）を優先し、足りなければ AI 検索へ落ちる。
+// 検索予算（SearchBudget）は Acquire の内部で効く。
+// 十分な情報が得られなければ登録せずエラーを返す（推測で企業を作らない）。
+func (f *CompanyInfoFetcher) ProvisionByName(ctx context.Context, companyName string) (*models.Company, error) {
+	name := strings.TrimSpace(companyName)
+	if name == "" {
+		return nil, fmt.Errorf("company name is empty")
+	}
+
+	// 同名の同時リクエストで二重登録しないよう singleflight を通す
+	run := func() (any, error) {
+		// 直前に別リクエストが登録している可能性があるので再確認する
+		if existing, err := f.repo.FindByName(name); err == nil && existing != nil {
+			return existing, nil
+		}
+
+		result, err := f.Acquire(ctx, name, "")
+		if err != nil {
+			return nil, err
+		}
+		if result == nil || !companyInfoIsSubstantive(result) {
+			return nil, fmt.Errorf("企業情報を取得できませんでした: %s", name)
+		}
+
+		now := time.Now()
+		company := &models.Company{
+			Name:            name,
+			SourceType:      result.Source,
+			SourceURL:       result.SourceURL,
+			SourceFetchedAt: &now,
+			InfoFetchedAt:   &now,
+			// 取得直後は暫定。人手または後続の取得で確定させる
+			IsProvisional:       true,
+			DataStatus:          "draft",
+			IsActive:            true,
+			LastModelUsed:       result.ModelUsed,
+			LastFetchConfidence: result.Confidence,
+		}
+		applyCompanyInfoResult(company, result)
+		if strings.TrimSpace(company.Name) == "" {
+			company.Name = name
+		}
+		if err := f.repo.Create(company); err != nil {
+			return nil, fmt.Errorf("failed to create company: %w", err)
+		}
+		return company, nil
+	}
+
+	var v any
+	var err error
+	if f.flight != nil {
+		v, err = f.flight.Do("provision", normalizeCompanyKey(name), run)
+	} else {
+		v, err = run()
+	}
+	if err != nil {
+		return nil, err
+	}
+	company, _ := v.(*models.Company)
+	if company == nil {
+		return nil, fmt.Errorf("company provision returned nil: %s", name)
+	}
+	return company, nil
+}
+
+// companyInfoIsSubstantive は登録に足る中身があるかを判定する。
+// 名前しか分からない結果で企業レコードを作ると、検索・マッチングに空の企業が増える。
+func companyInfoIsSubstantive(result *CompanyInfoResult) bool {
+	return strings.TrimSpace(result.Description) != "" ||
+		strings.TrimSpace(result.MainBusiness) != "" ||
+		strings.TrimSpace(result.WebsiteURL) != "" ||
+		strings.TrimSpace(result.Industry) != ""
+}
+
 // Acquire は企業名から基本情報をプレビュー取得する（DB 非更新）。
 func (f *CompanyInfoFetcher) Acquire(ctx context.Context, companyName, websiteURL string) (*CompanyInfoResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)

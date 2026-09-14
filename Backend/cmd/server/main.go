@@ -389,6 +389,9 @@ func main() {
 	// 企業briefの「重視傾向」が未生成なら1回だけ作る（#1124）。
 	// DB の企業情報だけを材料にした安いモデルの1コールで、結果は全学生で使い回される。
 	resumeService.SetPersonaEnsurer(jobFetcher)
+	// DB に無い企業は取得して登録する。取得結果は companies に保存され、
+	// 企業検索・マッチング・面接ヒントからも参照できるようになる（#1124）。
+	resumeService.SetCompanyProvisioner(infoFetcher)
 	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
 	adminCompanyController.SetRelationsFetcher(relationsFetcher)

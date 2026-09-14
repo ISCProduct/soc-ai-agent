@@ -119,6 +119,22 @@ type ResumeService struct {
 	validator    *company.CompanyValidationService
 	companyRepo  shared.CompanyBriefReader
 	persona      PersonaEnsurer
+	provisioner  CompanyProvisioner
+}
+
+// CompanyProvisioner は DB に無い企業を取得して登録する。
+//
+// 実装は CompanyInfoFetcher.ProvisionByName。gBizinfo（無料）を優先し、
+// 足りなければ AI 検索へ落ちる。取得結果は companies に保存されるため、
+// 以後その企業は履歴書レビュー・企業検索・マッチング・面接ヒントのすべてから
+// 追加コストなしで参照できる。
+type CompanyProvisioner interface {
+	ProvisionByName(ctx context.Context, companyName string) (*models.Company, error)
+}
+
+// SetCompanyProvisioner は未登録企業の取得・登録器を注入する（オプション）。
+func (s *ResumeService) SetCompanyProvisioner(p CompanyProvisioner) {
+	s.provisioner = p
 }
 
 // PersonaEnsurer は企業の「求める人材像」(CompanyWeightProfile) を用意する。
@@ -225,23 +241,35 @@ func (s *ResumeService) ensureRealCompany(companyName string) (string, error) {
 	if s.validator == nil {
 		return "", &shared.ValidationError{Message: "企業の実在確認機能が利用できません。しばらくしてから再度お試しください"}
 	}
-	// 履歴書レビューでは Web検索での実在確認を行わない（#1124）。
+	// まず DB だけで確定させる（#1124）。
 	//
-	// Web検索は1コールあたり約3万入力トークンかかるが、返るのは真偽値だけで
-	// 結果を DB に保存しないため、その後の企業brief取得（完全一致の FindByName）にも
-	// 当たらない。つまり一番高い経路が「外部情報なし」の一般論レビューを返していた。
-	// DB に無い企業は、企業検索画面から選んでもらう。
+	// 従来は DB に無いと Web検索で実在確認だけを行い、**結果を捨てていた**。
+	// 1コールあたり約3万入力トークン払って真偽値しか得られず、企業情報が無いので
+	// レビューは一般論になり、次に同じ企業名が来ればまた払っていた。
 	result, err := s.validator.ValidateFromDB(name)
 	if err != nil {
 		return "", err
 	}
-	if result == nil || !result.Exists {
+	if result != nil && result.Exists {
+		if strings.TrimSpace(result.CanonicalName) != "" {
+			return result.CanonicalName, nil
+		}
+		return name, nil
+	}
+
+	// DB に無ければ取得して登録する。取得結果は companies に保存されるので、
+	// 以後この企業は企業検索・マッチング・面接ヒントからも参照できる。
+	if s.provisioner == nil {
 		return "", &shared.ValidationError{Message: "登録されていない企業名です。企業を検索して候補から選択してください"}
 	}
-	if strings.TrimSpace(result.CanonicalName) != "" {
-		return result.CanonicalName, nil
+	provisionCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	company, err := s.provisioner.ProvisionByName(provisionCtx, name)
+	if err != nil {
+		log.Printf("[Resume] company provision failed name=%q: %v", name, err)
+		return "", &shared.ValidationError{Message: "企業情報を取得できませんでした。企業名を確認するか、企業を検索して候補から選択してください"}
 	}
-	return name, nil
+	return company.Name, nil
 }
 
 type AnnotatedFile struct {
