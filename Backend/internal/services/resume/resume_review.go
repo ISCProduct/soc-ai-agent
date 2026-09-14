@@ -35,7 +35,7 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
 		return nil, nil, &shared.ValidationError{Message: "応募企業名または応募職種を入力してください"}
 	}
-	canonicalName, err := s.ensureRealCompany(context.Background(), companyName)
+	canonicalName, err := s.ensureRealCompany(companyName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -258,7 +258,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		sendEvent(map[string]any{"type": "error", "message": msg})
 		return errors.New(msg)
 	}
-	canonicalName, err := s.ensureRealCompany(ctx, companyName)
+	canonicalName, err := s.ensureRealCompany(companyName)
 	if err != nil {
 		msg := err.Error()
 		var ve *shared.ValidationError
@@ -459,7 +459,13 @@ func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, c
 	prompt := fmt.Sprintf(`以下は履歴書/エントリーシートのOCRテキストです。
 この内容をレビューし、改善すべき点を最大8件までJSONで返してください。
 必ず本文中に存在する短い引用(quote)を入れてください。quoteは後で位置合わせに使います。
-「記載されていません」「未記入」などの欠落指摘は禁止です。本文の内容に基づいた具体的な改善点のみを書いてください。
+
+「記載されていません」「未記入」だけで終わる指摘は禁止です。
+ただし「企業情報(参考)」に重視傾向が示されている場合、その軸について応募書類の
+裏付けが弱い・触れられていないことは指摘してかまいません。その場合も必ず
+本文の実在するブロックを quote に選び、「その軸を裏付けるには、この記述に
+何を足せばよいか」を suggestion に具体的に書いてください
+（例: 重視傾向がリーダーシップなら、既存の活動記述に役割・人数・期間・成果を足す案を出す）。
 page_hintは本文の行頭にある [P#B#] の P# を使ってください。
 block_indexは本文の行頭にある [P#B#] の B# を使ってください。
 各itemsは必ず本文の1ブロックに対応させ、総合的なまとめや全体評価だけの項目は禁止です。
@@ -474,6 +480,9 @@ suggestionは「どう直すか」が分かるように書いてください（�
 学歴/職歴は明らかな矛盾・不足がある場合のみ指摘し、それ以外は指摘から除外してください。
 企業に合わせた観点（求める人物像・事業領域・評価軸）に照らし、応募書類の内容がどう評価されるかを具体的に指摘してください。
 一般論ではなく、この応募企業に合わせた改善提案を優先してください。
+「企業情報(参考)」に重視傾向がある場合は、その軸を優先的に扱ってください。
+企業情報が空、または重視傾向が無い場合は、一般的な観点でレビューしてください
+（存在しない企業の特徴を推測して書かないこと）。
 
 出力は次のJSONのみ:
 {"score":0-100,"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}

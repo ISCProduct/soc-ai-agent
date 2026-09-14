@@ -87,6 +87,34 @@ func (s *CompanyValidationService) SetSearchFlight(flight *CompanySearchFlight) 
 // Validate は企業名の実在を確認する。
 // 優先順: メモリキャッシュ → DB 完全一致/部分一致 → OpenAI WebSearch（1クエリ・短文）。
 func (s *CompanyValidationService) Validate(ctx context.Context, query string) (*CompanyValidationResult, error) {
+	result, err := s.ValidateFromDB(query)
+	if err != nil {
+		return nil, err
+	}
+	if result != nil {
+		return result, nil
+	}
+
+	q := strings.TrimSpace(query)
+	searched, err := s.validateWithWebSearch(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	s.putCache(normalizeCompanyKey(q), *searched)
+	return searched, nil
+}
+
+// ValidateFromDB はメモリキャッシュと DB だけで実在を確認する（Web検索しない）。
+//
+// 判定できなかった場合は (nil, nil) を返す。呼び出し側は Web検索に進むか、
+// 「企業を検索して選択してください」と案内するかを選べる。
+//
+// 履歴書レビューのようにコストを払いたくない経路から使う（#1124）。
+// Web検索での実在確認は1コールあたり約3万入力トークンかかる一方、
+// 得られるのは真偽値だけで結果を DB に保存もしないため、
+// その後の企業brief取得（完全一致の FindByName）にも当たらず、
+// 「一番高い経路が一番中身の薄いレビューを返す」状態になっていた。
+func (s *CompanyValidationService) ValidateFromDB(query string) (*CompanyValidationResult, error) {
 	q := strings.TrimSpace(query)
 	if q == "" {
 		return nil, &shared.ValidationError{Message: "企業名を入力してください"}
@@ -150,12 +178,8 @@ func (s *CompanyValidationService) Validate(ctx context.Context, query string) (
 		}
 	}
 
-	result, err := s.validateWithWebSearch(ctx, q)
-	if err != nil {
-		return nil, err
-	}
-	s.putCache(key, *result)
-	return result, nil
+	// DB では判定できなかった
+	return nil, nil
 }
 
 // SearchCandidates は DB 候補を返し、必要なら WebSearch で実在候補を補完する。

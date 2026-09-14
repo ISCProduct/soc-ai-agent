@@ -386,6 +386,9 @@ func main() {
 	relationController.SetCompanyValidator(companyValidator)
 	resumeService.SetCompanyValidator(companyValidator)
 	resumeService.SetCompanyRepo(companyPublicRepo)
+	// 企業briefの「重視傾向」が未生成なら1回だけ作る（#1124）。
+	// DB の企業情報だけを材料にした安いモデルの1コールで、結果は全学生で使い回される。
+	resumeService.SetPersonaEnsurer(jobFetcher)
 	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
 	adminCompanyController.SetRelationsFetcher(relationsFetcher)

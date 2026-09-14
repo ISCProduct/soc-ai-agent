@@ -12,11 +12,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net"
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -116,6 +118,21 @@ type ResumeService struct {
 	crossFeature *flywheel.CrossFeatureIntegrationService
 	validator    *company.CompanyValidationService
 	companyRepo  shared.CompanyBriefReader
+	persona      PersonaEnsurer
+}
+
+// PersonaEnsurer は企業の「求める人材像」(CompanyWeightProfile) を用意する。
+//
+// 実装は JobFetchService.FetchAndSavePersona で、DB に保存済みの企業情報だけを
+// 材料に安いモデルで1回生成し、結果を company_weight_profiles に保存する
+// （Web検索はしない）。2回目以降は AI を呼ばずに DB から返る。
+type PersonaEnsurer interface {
+	FetchAndSavePersona(ctx context.Context, companyID uint, forceRefresh bool) (*models.CompanyWeightProfile, error)
+}
+
+// SetPersonaEnsurer は求める人材像の生成器を注入する（オプション）。
+func (s *ResumeService) SetPersonaEnsurer(p PersonaEnsurer) {
+	s.persona = p
 }
 
 // SetCrossFeatureService 機能間連携サービスを注入する（オプション）
@@ -148,6 +165,24 @@ func (s *ResumeService) lookupCompanyBriefFromCache(companyName string) string {
 	var profile *models.CompanyWeightProfile
 	if p, err := s.companyRepo.GetWeightProfile(comp.ID, nil); err == nil {
 		profile = p
+	}
+	// 未生成なら1回だけ作る（#1124）。
+	//
+	// brief の「重視傾向」が企業の求める人材像そのもので、これが無いと
+	// レビューは業種・事業内容だけを見た一般論になる。実測では 842社中
+	// 90社(10.7%)しか持っていなかった。
+	//
+	// 生成は DB の企業情報だけを材料にした安いモデルの1コールで、結果は
+	// DB に保存され全学生のレビューで使い回される。失敗してもレビューは
+	// 続行する（重視傾向が無い状態に戻るだけ）。
+	if profile == nil && s.persona != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		if p, err := s.persona.FetchAndSavePersona(ctx, comp.ID, false); err == nil {
+			profile = p
+		} else {
+			log.Printf("[Resume] persona ensure failed company_id=%d: %v", comp.ID, err)
+		}
 	}
 	return company.BuildCompanyBrief(comp, profile)
 }
@@ -182,7 +217,7 @@ func (s *ResumeService) EnsureDocumentOwner(documentID uint, requestingUserID ui
 
 // ensureRealCompany は企業名が指定されている場合に実在確認を行い、正規化名を返す。
 // 企業名が空の場合（職種のみレビュー）はそのまま通す。
-func (s *ResumeService) ensureRealCompany(ctx context.Context, companyName string) (string, error) {
+func (s *ResumeService) ensureRealCompany(companyName string) (string, error) {
 	name := strings.TrimSpace(companyName)
 	if name == "" {
 		return "", nil
@@ -190,12 +225,18 @@ func (s *ResumeService) ensureRealCompany(ctx context.Context, companyName strin
 	if s.validator == nil {
 		return "", &shared.ValidationError{Message: "企業の実在確認機能が利用できません。しばらくしてから再度お試しください"}
 	}
-	result, err := s.validator.Validate(ctx, name)
+	// 履歴書レビューでは Web検索での実在確認を行わない（#1124）。
+	//
+	// Web検索は1コールあたり約3万入力トークンかかるが、返るのは真偽値だけで
+	// 結果を DB に保存しないため、その後の企業brief取得（完全一致の FindByName）にも
+	// 当たらない。つまり一番高い経路が「外部情報なし」の一般論レビューを返していた。
+	// DB に無い企業は、企業検索画面から選んでもらう。
+	result, err := s.validator.ValidateFromDB(name)
 	if err != nil {
 		return "", err
 	}
-	if !result.Exists {
-		return "", &shared.ValidationError{Message: "実在が確認できない企業名です。企業を検索して候補から選択してください"}
+	if result == nil || !result.Exists {
+		return "", &shared.ValidationError{Message: "登録されていない企業名です。企業を検索して候補から選択してください"}
 	}
 	if strings.TrimSpace(result.CanonicalName) != "" {
 		return result.CanonicalName, nil
