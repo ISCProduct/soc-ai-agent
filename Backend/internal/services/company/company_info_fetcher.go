@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -46,6 +47,11 @@ type CompanyInfoFetcher struct {
 	llm    *companyfetch.LLM
 	gbiz   *gbizinfo.GBizInfoService
 	flight *CompanySearchFlight
+
+	// provisionFailures は ProvisionByName が失敗した企業名の記録（#1124）。
+	// 打ち間違えを繰り返し投げられたときに毎回 Web検索を払わないためのネガティブキャッシュ。
+	provisionMu       sync.RWMutex
+	provisionFailures map[string]time.Time
 }
 
 func NewCompanyInfoFetcher(repo repository.CompanyRepository, client *openai.Client, gbiz ...*gbizinfo.GBizInfoService) *CompanyInfoFetcher {
@@ -213,6 +219,13 @@ func (f *CompanyInfoFetcher) ProvisionByName(ctx context.Context, companyName st
 		return nil, fmt.Errorf("company name is empty")
 	}
 
+	key := normalizeCompanyKey(name)
+	// 直近で取得に失敗した名前は再試行しない（#1124）。
+	// 打ち間違えを繰り返し投げられたときに毎回 Web検索を払わないため。
+	if f.recentlyFailedProvision(key) {
+		return nil, fmt.Errorf("企業情報を取得できませんでした（直近の試行が失敗）: %s", name)
+	}
+
 	// 同名の同時リクエストで二重登録しないよう singleflight を通す
 	run := func() (any, error) {
 		// 直前に別リクエストが登録している可能性があるので再確認する
@@ -222,9 +235,11 @@ func (f *CompanyInfoFetcher) ProvisionByName(ctx context.Context, companyName st
 
 		result, err := f.Acquire(ctx, name, "")
 		if err != nil {
+			f.markProvisionFailed(key)
 			return nil, err
 		}
 		if result == nil || !companyInfoIsSubstantive(result) {
+			f.markProvisionFailed(key)
 			return nil, fmt.Errorf("企業情報を取得できませんでした: %s", name)
 		}
 
@@ -255,7 +270,7 @@ func (f *CompanyInfoFetcher) ProvisionByName(ctx context.Context, companyName st
 	var v any
 	var err error
 	if f.flight != nil {
-		v, err = f.flight.Do("provision", normalizeCompanyKey(name), run)
+		v, err = f.flight.Do("provision", key, run)
 	} else {
 		v, err = run()
 	}
@@ -270,12 +285,45 @@ func (f *CompanyInfoFetcher) ProvisionByName(ctx context.Context, companyName st
 }
 
 // companyInfoIsSubstantive は登録に足る中身があるかを判定する。
-// 名前しか分からない結果で企業レコードを作ると、検索・マッチングに空の企業が増える。
+//
+// 事業内容（Description か MainBusiness）を必須にする。業種や公式URLだけでは
+// 「打ち間違えた名前 ＋ 情報通信業」のレコードが学生の企業検索に載ってしまう。
+// 企業briefの中核も事業内容なので、これが無い企業を登録しても
+// レビューは一般論になり、登録する意味がない。
 func companyInfoIsSubstantive(result *CompanyInfoResult) bool {
 	return strings.TrimSpace(result.Description) != "" ||
-		strings.TrimSpace(result.MainBusiness) != "" ||
-		strings.TrimSpace(result.WebsiteURL) != "" ||
-		strings.TrimSpace(result.Industry) != ""
+		strings.TrimSpace(result.MainBusiness) != ""
+}
+
+// provisionFailureTTL は取得に失敗した企業名を再試行しない期間（#1124）。
+//
+// これが無いと、打ち間違えた企業名を投げるたびに gBizinfo + Web検索（最大3回）が
+// フルで走る。singleflight は同時実行しかまとめないので、間隔を空けた再送は素通りする。
+const provisionFailureTTL = time.Hour
+
+// markProvisionFailed / recentlyFailedProvision は失敗した企業名を一定時間おぼえる。
+func (f *CompanyInfoFetcher) markProvisionFailed(key string) {
+	f.provisionMu.Lock()
+	defer f.provisionMu.Unlock()
+	if f.provisionFailures == nil {
+		f.provisionFailures = map[string]time.Time{}
+	}
+	// 有効期限切れをここで掃除する。件数が増え続けないようにするだけなので
+	// ponytail: 専用の purge ループは置かない
+	now := time.Now()
+	for k, at := range f.provisionFailures {
+		if now.Sub(at) > provisionFailureTTL {
+			delete(f.provisionFailures, k)
+		}
+	}
+	f.provisionFailures[key] = now
+}
+
+func (f *CompanyInfoFetcher) recentlyFailedProvision(key string) bool {
+	f.provisionMu.RLock()
+	defer f.provisionMu.RUnlock()
+	at, ok := f.provisionFailures[key]
+	return ok && time.Since(at) <= provisionFailureTTL
 }
 
 // Acquire は企業名から基本情報をプレビュー取得する（DB 非更新）。

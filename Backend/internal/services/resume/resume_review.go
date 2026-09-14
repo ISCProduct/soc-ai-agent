@@ -35,7 +35,7 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
 		return nil, nil, &shared.ValidationError{Message: "応募企業名または応募職種を入力してください"}
 	}
-	canonicalName, err := s.ensureRealCompany(companyName)
+	canonicalName, err := s.ensureRealCompany(ctx, companyName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -258,7 +258,11 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		sendEvent(map[string]any{"type": "error", "message": msg})
 		return errors.New(msg)
 	}
-	canonicalName, err := s.ensureRealCompany(companyName)
+	// 未登録企業の取得は最大 provisionTimeout かかる。その間レスポンスが
+	// 無言だとエッジ(60秒)に切られるため、先に1イベント流して時計を進めておく。
+	sendEvent(map[string]any{"type": "progress", "message": "企業情報を確認しています"})
+
+	canonicalName, err := s.ensureRealCompany(ctx, companyName)
 	if err != nil {
 		msg := err.Error()
 		var ve *shared.ValidationError
@@ -449,10 +453,19 @@ func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, c
 		return nil, nil, fmt.Errorf("AIクライアントが初期化されていません")
 	}
 	text := buildResumeText(blocks, 30000)
-	if strings.TrimSpace(companyName) != "" && strings.TrimSpace(companyInfo) == "" {
-		// 共有キャッシュのみ。未登録時は空（Search / 都度 LLM 企業調査はしない）
+	// 企業briefは RAGレポートの有無に関わらず必ず併記する（#1124）。
+	//
+	// 「重視傾向」を出力するのは brief だけで、RAGレポートには含まれない。
+	// 以前は RAGレポートが空のときしか brief を使っていなかったため、
+	// プロンプト側の「重視傾向があれば不足を指摘してよい」という条件が
+	// 通常経路では一度も成立していなかった。
+	if strings.TrimSpace(companyName) != "" {
 		if brief := s.lookupCompanyBriefFromCache(companyName); brief != "" {
-			companyInfo = brief
+			if strings.TrimSpace(companyInfo) == "" {
+				companyInfo = brief
+			} else {
+				companyInfo = brief + "\n\n" + companyInfo
+			}
 		}
 	}
 
@@ -460,12 +473,15 @@ func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, c
 この内容をレビューし、改善すべき点を最大8件までJSONで返してください。
 必ず本文中に存在する短い引用(quote)を入れてください。quoteは後で位置合わせに使います。
 
-「記載されていません」「未記入」だけで終わる指摘は禁止です。
-ただし「企業情報(参考)」に重視傾向が示されている場合、その軸について応募書類の
-裏付けが弱い・触れられていないことは指摘してかまいません。その場合も必ず
-本文の実在するブロックを quote に選び、「その軸を裏付けるには、この記述に
-何を足せばよいか」を suggestion に具体的に書いてください
+原則として、本文の内容に基づいた具体的な改善点のみを書いてください。
+「記載されていません」「未記入」といった欠落の指摘は、次の条件を**すべて**満たす場合にだけ
+許可します。それ以外の欠落指摘は禁止です。
+  (1) 「企業情報(参考)」に「重視傾向:」の行があり、
+  (2) 指摘する内容がその重視傾向に挙がっている軸に対応していて、
+  (3) quote に本文の実在するブロックを選び、
+  (4) suggestion に「その軸を裏付けるには、この記述に何を足せばよいか」を具体的に書く
 （例: 重視傾向がリーダーシップなら、既存の活動記述に役割・人数・期間・成果を足す案を出す）。
+「重視傾向:」の行が無い場合は、欠落の指摘を一切しないでください。
 page_hintは本文の行頭にある [P#B#] の P# を使ってください。
 block_indexは本文の行頭にある [P#B#] の B# を使ってください。
 各itemsは必ず本文の1ブロックに対応させ、総合的なまとめや全体評価だけの項目は禁止です。

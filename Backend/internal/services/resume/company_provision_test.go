@@ -90,7 +90,7 @@ func TestEnsureRealCompany(t *testing.T) {
 				&lookupStub{exact: map[string]*models.Company{"株式会社登録済み": registered}}, nil))
 			svc.SetCompanyProvisioner(tt.provisioner)
 
-			got, err := svc.ensureRealCompany(tt.input)
+			got, err := svc.ensureRealCompany(context.Background(), tt.input)
 
 			if tt.wantErr {
 				var ve *shared.ValidationError
@@ -115,7 +115,7 @@ func TestEnsureRealCompany_WithoutProvisioner(t *testing.T) {
 	svc := &ResumeService{}
 	svc.SetCompanyValidator(company.NewCompanyValidationService(&lookupStub{exact: map[string]*models.Company{}}, nil))
 
-	_, err := svc.ensureRealCompany("株式会社未登録")
+	_, err := svc.ensureRealCompany(context.Background(), "株式会社未登録")
 	var ve *shared.ValidationError
 	if !errors.As(err, &ve) {
 		t.Fatalf("want ValidationError, got %v", err)

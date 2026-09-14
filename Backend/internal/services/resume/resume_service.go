@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -120,6 +121,11 @@ type ResumeService struct {
 	companyRepo  shared.CompanyBriefReader
 	persona      PersonaEnsurer
 	provisioner  CompanyProvisioner
+
+	// personaFailures は求める人材像の生成に失敗した企業の記録。
+	// 記録しないとレビューのたびに再試行する（1レビューで最大2回）。
+	personaMu       sync.RWMutex
+	personaFailures map[uint]time.Time
 }
 
 // CompanyProvisioner は DB に無い企業を取得して登録する。
@@ -144,6 +150,31 @@ func (s *ResumeService) SetCompanyProvisioner(p CompanyProvisioner) {
 // （Web検索はしない）。2回目以降は AI を呼ばずに DB から返る。
 type PersonaEnsurer interface {
 	FetchAndSavePersona(ctx context.Context, companyID uint, forceRefresh bool) (*models.CompanyWeightProfile, error)
+}
+
+// personaFailureTTL は求める人材像の生成に失敗した企業を再試行しない期間。
+const personaFailureTTL = 10 * time.Minute
+
+func (s *ResumeService) markPersonaFailed(companyID uint) {
+	s.personaMu.Lock()
+	defer s.personaMu.Unlock()
+	if s.personaFailures == nil {
+		s.personaFailures = map[uint]time.Time{}
+	}
+	now := time.Now()
+	for id, at := range s.personaFailures {
+		if now.Sub(at) > personaFailureTTL {
+			delete(s.personaFailures, id)
+		}
+	}
+	s.personaFailures[companyID] = now
+}
+
+func (s *ResumeService) recentlyFailedPersona(companyID uint) bool {
+	s.personaMu.RLock()
+	defer s.personaMu.RUnlock()
+	at, ok := s.personaFailures[companyID]
+	return ok && time.Since(at) <= personaFailureTTL
 }
 
 // SetPersonaEnsurer は求める人材像の生成器を注入する（オプション）。
@@ -191,12 +222,15 @@ func (s *ResumeService) lookupCompanyBriefFromCache(companyName string) string {
 	// 生成は DB の企業情報だけを材料にした安いモデルの1コールで、結果は
 	// DB に保存され全学生のレビューで使い回される。失敗してもレビューは
 	// 続行する（重視傾向が無い状態に戻るだけ）。
-	if profile == nil && s.persona != nil {
+	if profile == nil && s.persona != nil && !s.recentlyFailedPersona(comp.ID) {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
 		if p, err := s.persona.FetchAndSavePersona(ctx, comp.ID, false); err == nil {
 			profile = p
 		} else {
+			// 失敗を覚えておく。この関数は1レビューで最大2回呼ばれるうえ、
+			// 記録しないとレビューのたびに再試行し続ける
+			s.markPersonaFailed(comp.ID)
 			log.Printf("[Resume] persona ensure failed company_id=%d: %v", comp.ID, err)
 		}
 	}
@@ -233,7 +267,17 @@ func (s *ResumeService) EnsureDocumentOwner(documentID uint, requestingUserID ui
 
 // ensureRealCompany は企業名が指定されている場合に実在確認を行い、正規化名を返す。
 // 企業名が空の場合（職種のみレビュー）はそのまま通す。
-func (s *ResumeService) ensureRealCompany(companyName string) (string, error) {
+// provisionTimeout は未登録企業の取得に与える時間（#1124）。
+//
+// この処理はレスポンスの最初の1バイトを書く前に走る。CloudFront の
+// origin_read_timeout と staging の nginx proxy_read_timeout がどちらも 60秒なので、
+// それを超えるとエッジが接続を切り、コード側が返すエラーメッセージは
+// ユーザーに届かない（静的エラーページに差し替わる）。
+// エッジの上限より短くして、必ず自前のメッセージを返せるようにする。
+const provisionTimeout = 40 * time.Second
+
+// ctx は呼び出し元リクエストのもの。ユーザーが離脱したら取得も止める。
+func (s *ResumeService) ensureRealCompany(ctx context.Context, companyName string) (string, error) {
 	name := strings.TrimSpace(companyName)
 	if name == "" {
 		return "", nil
@@ -262,7 +306,7 @@ func (s *ResumeService) ensureRealCompany(companyName string) (string, error) {
 	if s.provisioner == nil {
 		return "", &shared.ValidationError{Message: "登録されていない企業名です。企業を検索して候補から選択してください"}
 	}
-	provisionCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	provisionCtx, cancel := context.WithTimeout(ctx, provisionTimeout)
 	defer cancel()
 	company, err := s.provisioner.ProvisionByName(provisionCtx, name)
 	if err != nil {
