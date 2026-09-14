@@ -3,12 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { InterviewStatus } from '../types'
 import { shouldStartInterviewMediaPreview } from './mediaPreviewGate'
+import {
+  MEDIA_CONSTRAINTS,
+  classifyMediaErrorKind,
+  isStreamUsable,
+  mediaErrorMessage,
+} from '../lib/mediaStream'
 
-/** getUserMedia 共通制約（ロビープレビュー / ensureStream で共有） */
-export const MEDIA_CONSTRAINTS: MediaStreamConstraints = {
-  audio: { sampleRate: 48000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
-  video: true,
-}
+// 制約は lib/mediaStream.ts に集約した。既存の import 先を壊さないため再輸出する。
+export { MEDIA_CONSTRAINTS }
 
 type UseInterviewMediaArgs = {
   loading: boolean
@@ -25,6 +28,11 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
   const [lobbyPermissionError, setLobbyPermissionError] = useState<string | null>(null)
 
   const streamRef = useRef<MediaStream | null>(null)
+  // getUserMedia の同時実行を1本にまとめる。
+  // ロビープレビューの effect と handleStart の ensureStream() は
+  // status の変化を挟んでほぼ同時に走るため、まとめないと
+  // 取り残したストリームがデバイスを掴み続ける。
+  const acquiringRef = useRef<Promise<MediaStream> | null>(null)
   const lobbyVideoRef = useRef<HTMLVideoElement | null>(null)
   const sessionVideoRef = useRef<HTMLVideoElement | null>(null)
   // video 要素がマウントした瞬間にストリームをアタッチするための callback ref。
@@ -37,6 +45,42 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
     }
   }, [])
 
+  /**
+   * ストリームを1本だけ確保する。
+   *
+   * 同時に呼ばれても getUserMedia は1回しか走らず、全員が同じ
+   * ストリームを受け取る。これが無いと、先に代入されたストリームが
+   * stop() されないまま取り残され、デバイスを掴み続ける。
+   */
+  const acquireStream = useCallback(async (): Promise<MediaStream> => {
+    if (isStreamUsable(streamRef.current)) return streamRef.current as MediaStream
+    if (acquiringRef.current) return acquiringRef.current
+
+    const pending = (async () => {
+      const stream = await navigator.mediaDevices.getUserMedia(MEDIA_CONSTRAINTS)
+      // 待っている間に別経路が使えるストリームを確保していたら、
+      // 今取得したほうを捨てる。掴みっぱなしを作らない。
+      const existing = streamRef.current
+      if (existing && existing !== stream && isStreamUsable(existing)) {
+        stream.getTracks().forEach((t) => t.stop())
+        return existing
+      }
+      // 死んだストリームが残っていれば明示的に解放してから置き換える。
+      if (existing && existing !== stream) {
+        existing.getTracks().forEach((t) => t.stop())
+      }
+      streamRef.current = stream
+      return stream
+    })()
+
+    acquiringRef.current = pending
+    try {
+      return await pending
+    } finally {
+      if (acquiringRef.current === pending) acquiringRef.current = null
+    }
+  }, [])
+
   const videoRecorderRef = useRef<MediaRecorder | null>(null)
   const videoChunksRef = useRef<Blob[]>([])
 
@@ -46,17 +90,12 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
     let cancelled = false
     const startPreview = async () => {
       try {
-        let stream = streamRef.current
-        const needsNew =
-          !stream || stream.getTracks().length === 0 || stream.getTracks().every((t) => t.readyState === 'ended')
-        if (needsNew) {
-          stream = await navigator.mediaDevices.getUserMedia(MEDIA_CONSTRAINTS)
-          if (cancelled) {
-            stream.getTracks().forEach((t) => t.stop())
-            return
-          }
-          streamRef.current = stream
-        }
+        // 取得は acquireStream に一本化する。ここで直接 getUserMedia すると
+        // handleStart の ensureStream() と二重に走り、片方が取り残される。
+        const stream = await acquireStream()
+        // cancelled でもストリームは止めない。streamRef が所有しており、
+        // 面接中も使い続ける。ここで止めると handleStart 側が死んだストリームを掴む。
+        if (cancelled) return
         if (lobbyVideoRef.current && stream) {
           lobbyVideoRef.current.srcObject = stream
           lobbyVideoRef.current.play().catch(() => undefined)
@@ -64,28 +103,7 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
         setLobbyPermissionError(null)
       } catch (err: unknown) {
         if (cancelled) return
-        const name = err instanceof DOMException ? err.name : err instanceof Error ? err.name : ''
-        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-          const blocked: string[] = []
-          await navigator.mediaDevices
-            .getUserMedia({ video: true })
-            .then((s) => s.getTracks().forEach((t) => t.stop()))
-            .catch(() => {
-              blocked.push('カメラ')
-            })
-          await navigator.mediaDevices
-            .getUserMedia({ audio: true })
-            .then((s) => s.getTracks().forEach((t) => t.stop()))
-            .catch(() => {
-              blocked.push('マイク')
-            })
-          const target = blocked.length > 0 ? blocked.join('と') : 'マイクとカメラ'
-          setLobbyPermissionError(`${target}へのアクセスが拒否されました。`)
-        } else if (name === 'NotFoundError') {
-          setLobbyPermissionError('マイクまたはカメラが見つかりません。デバイスを確認してください。')
-        } else {
-          setLobbyPermissionError('カメラの起動に失敗しました。')
-        }
+        setLobbyPermissionError(await classifyMediaError(err))
       }
     }
     void startPreview()
@@ -104,28 +122,26 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
   }, [status])
 
   const classifyMediaError = async (err: unknown): Promise<string> => {
-    const name = err instanceof DOMException ? err.name : err instanceof Error ? err.name : ''
-    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-      const blocked: string[] = []
-      await navigator.mediaDevices
-        .getUserMedia({ video: true })
-        .then((s) => s.getTracks().forEach((t) => t.stop()))
-        .catch(() => {
-          blocked.push('カメラ')
-        })
-      await navigator.mediaDevices
-        .getUserMedia({ audio: true })
-        .then((s) => s.getTracks().forEach((t) => t.stop()))
-        .catch(() => {
-          blocked.push('マイク')
-        })
-      const target = blocked.length > 0 ? blocked.join('と') : 'マイクとカメラ'
-      return `${target}へのアクセスが拒否されました。`
+    const kind = classifyMediaErrorKind(err)
+    if (kind !== 'denied') return mediaErrorMessage(kind)
+
+    // 権限拒否と分かっている場合だけ、どちらが拒否されたのかを個別に確かめる。
+    // デバイス使用中など他の失敗でここへ来ると、この問い合わせも失敗して
+    // 「許可したのに権限エラー」と誤表示する原因になる。
+    const blocked: string[] = []
+    for (const [label, constraints] of [
+      ['カメラ', { video: true }],
+      ['マイク', { audio: true }],
+    ] as const) {
+      try {
+        const probe = await navigator.mediaDevices.getUserMedia(constraints)
+        probe.getTracks().forEach((t) => t.stop())
+      } catch (probeErr) {
+        // 拒否されたものだけを挙げる。使用中や未検出は権限の問題ではない。
+        if (classifyMediaErrorKind(probeErr) === 'denied') blocked.push(label)
+      }
     }
-    if (name === 'NotFoundError') {
-      return 'マイクまたはカメラが見つかりません。デバイスを確認してください。'
-    }
-    return 'カメラの起動に失敗しました。'
+    return mediaErrorMessage('denied', blocked.length > 0 ? blocked.join('と') : undefined)
   }
 
   /** ページリロードせず getUserMedia を再実行する（会社選択状態を維持）。 */
@@ -135,9 +151,10 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
       streamRef.current.getTracks().forEach((t) => t.stop())
       streamRef.current = null
     }
+    // 進行中の取得があれば、その結果を掴まないよう捨てる
+    acquiringRef.current = null
     try {
-      const stream = await navigator.mediaDevices.getUserMedia(MEDIA_CONSTRAINTS)
-      streamRef.current = stream
+      const stream = await acquireStream()
       // エラー UI 解除後に video がマウントされるのを待つ
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
@@ -152,22 +169,34 @@ export function useInterviewMedia({ loading, status }: UseInterviewMediaArgs) {
   }
 
   const ensureStream = async (): Promise<MediaStream> => {
-    let stream = streamRef.current
-    if (!stream || stream.getTracks().every((t) => t.readyState === 'ended')) {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia(MEDIA_CONSTRAINTS)
-      } catch (err: unknown) {
-        const name = err instanceof DOMException ? err.name : err instanceof Error ? err.name : ''
-        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') throw new Error('NotAllowedError')
-        if (name === 'NotFoundError') throw new Error('NotFoundError')
-        throw err
-      }
-      streamRef.current = stream
+    try {
+      return await acquireStream()
+    } catch (err: unknown) {
+      // 呼び出し側 (parseMediaError) が種別で分岐できるよう名前を残す。
+      // 使用中 (busy) を権限拒否に丸めない。
+      const kind = classifyMediaErrorKind(err)
+      if (kind === 'denied') throw new Error('NotAllowedError')
+      if (kind === 'notfound') throw new Error('NotFoundError')
+      if (kind === 'busy') throw new Error('NotReadableError')
+      throw err
     }
-    return stream
   }
 
   const stopStream = () => {
+    // 進行中の取得結果が後から streamRef に入るのを防ぐ。
+    // これが無いと、停止したつもりのストリームが残って次回の取得を妨げる。
+    const pending = acquiringRef.current
+    acquiringRef.current = null
+    if (pending) {
+      void pending
+        .then((s) => {
+          s.getTracks().forEach((t) => t.stop())
+          // 遅れて代入された参照も外す。残すと次回「使えないストリーム」を
+          // 掴んだ状態から始まる。
+          if (streamRef.current === s) streamRef.current = null
+        })
+        .catch(() => {})
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop())
       streamRef.current = null
