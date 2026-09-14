@@ -210,8 +210,14 @@ func (f *CompanyInfoFetcher) ConfirmAndSave(companyID uint, result *CompanyInfoR
 // 履歴書レビュー・企業検索・マッチング・面接ヒントのすべてから
 // 追加コストなしで参照できる（既存企業と同じ扱いになる）。
 //
-// 取得は gBizinfo（無料）を優先し、足りなければ AI 検索へ落ちる。
-// 検索予算（SearchBudget）は Acquire の内部で効く。
+// 取得は gBizinfo（無料）を先に試すが、**AI 検索は事実上必ず走る**。
+// gBizinfo は法人登記由来のため文化・働き方・主要事業を返さず、
+// enrichGapsWithAI の needsAI がそれらの空欄で必ず真になるため。
+// 「gBiz で済めば無料」ではなく「gBiz は AI の入力を良くするだけ」と考えること。
+//
+// 検索予算（SearchBudget）は SearchLiteJSON の入口で効く
+// （main.go で SetSearchBudget 済み。未注入なら何も止まらない）。
+//
 // 十分な情報が得られなければ登録せずエラーを返す（推測で企業を作らない）。
 func (f *CompanyInfoFetcher) ProvisionByName(ctx context.Context, companyName string) (*models.Company, error) {
 	name := strings.TrimSpace(companyName)
@@ -235,15 +241,17 @@ func (f *CompanyInfoFetcher) ProvisionByName(ctx context.Context, companyName st
 
 		result, err := f.Acquire(ctx, name, "")
 		if err != nil {
-			// 自前のタイムアウトやユーザー離脱は「その企業が取得できない」証拠ではない。
-			// ここで記録すると、実在する企業が1時間ブロックされ、しかも DB に無いので
+			// 取得エラーは記録しない。
+			//
+			// タイムアウト・ユーザー離脱・OpenAI の 5xx・空応答・JSONデコード失敗は
+			// いずれも「その企業が存在しない」証拠ではなく、こちら側やプロバイダの都合。
+			// 記録すると実在する企業が1時間ブロックされ、しかも DB に無いので
 			// 企業検索からも選べず行き止まりになる。
-			if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
-				f.markProvisionFailed(key)
-			}
 			return nil, err
 		}
 		if result == nil || !companyInfoIsSubstantive(result) {
+			// 取得は成功したのに中身が無い = 打ち間違いなど「実在しない企業名」の signal。
+			// ネガティブキャッシュはこの場合だけ効かせる。
 			f.markProvisionFailed(key)
 			return nil, fmt.Errorf("企業情報を取得できませんでした: %s", name)
 		}
