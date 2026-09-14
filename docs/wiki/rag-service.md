@@ -283,3 +283,35 @@ python3 -m pytest tests/ -v
 - [システム概要](./overview.md) — 全体アーキテクチャ
 - [API リファレンス](./api-reference.md) — バックエンド API 一覧
 - [Getting Started](./getting-started.md) — 環境構築手順
+
+
+## Web検索のコスト（#1124）
+
+OpenAI の `web_search` ツールは、検索結果が固定トークンとして課金される。
+本文の長さに関係なく1コールの入力トークンが大きくなるため、
+**コストは「1コールの重さ × コール回数」でほぼ決まる**。
+
+本番相当DB（2026-08-13以降, 2,981コール）の実測:
+
+| model | コール数 | 入力トークン | 1コール平均 | 全体比 |
+| --- | ---: | ---: | ---: | ---: |
+| gpt-5-search-api | 323 | 9,816,772 | 30,392 | 約9割 |
+| gpt-4o-mini | 2,206 | 8,926,489 | 4,046 | 約1割 |
+
+検索1コールが通常の推論7.5倍の入力トークンを使っている。
+
+### 調整ノブ
+
+| env | 既定 | 範囲 | 効果 |
+| --- | --- | --- | --- |
+| `OPENAI_WEB_SEARCH_CONTEXT_SIZE` | `medium` | low / medium / high | 1コールの重さ。以前は `high` 固定だった |
+| `OPENAI_WEB_SEARCH_MAX_QUERIES` | `4` | 1〜10 | 1企業あたりのコール回数。以前は 5 固定 |
+| `OPENAI_CHAT_MODEL` | `gpt-4o-mini` | - | 要約・クエリ生成。以前は `gpt-4o` 既定（入力単価16.7倍） |
+| `OPENAI_HINTS_PARSE_MODEL` | `gpt-4o-mini` | - | JSON構造化抽出。以前は `gpt-4o` 既定 |
+
+不正な値は既定に倒す（設定ミスでリクエストを止めない）。
+品質劣化が出た場合は env を戻すだけでよく、デプロイは不要。
+
+反映後は `api_call_logs` の model 別内訳で削減幅を確認すること。
+なお 2026-09-14 より前の記録はコストが過大なので、比較は同日以降で行う
+（`docs/wiki/search-provider-cost.md` 参照）。
