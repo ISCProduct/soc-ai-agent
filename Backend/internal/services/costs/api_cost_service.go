@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -28,26 +27,13 @@ var modelPricing = map[string][2]float64{
 	"o3":                     {10.00, 40.00},
 	"text-embedding-3-small": {0.02, 0.02},
 	"text-embedding-3-large": {0.13, 0.13},
-	// Web検索系。単価が本体モデルと異なるうえ、検索結果が固定トークンとして
-	// 課金されるため入力トークンが桁違いに大きい（実測で1コール平均3万トークン）。
-	// 未登録だと既定の gpt-4o 単価に落ちるので明示する。
+	// Web検索系。検索結果が固定トークンとして課金されるため入力トークンが
+	// 桁違いに大きい（実測で1コール平均3万トークン）。
+	// gpt-4o-mini-search-preview は最長一致が無いと gpt-4o 単価に当たり得るので
+	// 明示が必要。残り2つは既定と同値だが、単価の根拠を残すために書いておく。
 	"gpt-4o-search-preview":      {2.50, 10.00},
 	"gpt-4o-mini-search-preview": {0.15, 0.60},
 	"gpt-5-search-api":           {2.50, 10.00},
-}
-
-// pricingKeysByLengthDesc は modelPricing のキーを長い順に並べたもの。
-// 最長一致を決定的に行うために init で1回だけ作る。
-var pricingKeysByLengthDesc []string
-
-func init() {
-	pricingKeysByLengthDesc = make([]string, 0, len(modelPricing))
-	for k := range modelPricing {
-		pricingKeysByLengthDesc = append(pricingKeysByLengthDesc, k)
-	}
-	sort.Slice(pricingKeysByLengthDesc, func(i, j int) bool {
-		return len(pricingKeysByLengthDesc[i]) > len(pricingKeysByLengthDesc[j])
-	})
 }
 
 // calculateCost は入力/出力トークン数とモデル名からUSDコストを計算する。
@@ -71,11 +57,17 @@ func calculateCost(provider, model string, promptTokens, completionTokens int) f
 	// $26.32 として記録されており、正しい mini 単価なら $1.79 だった。
 	// コスト削減の判断材料が15倍近く狂っていたことになる。
 	pricing := [2]float64{2.50, 10.00} // 未知モデルは gpt-4o 単価に倒す（過小評価しない）
-	for _, k := range pricingKeysByLengthDesc {
-		if lower == k || strings.HasPrefix(lower, k+"-") || strings.HasPrefix(lower, k+":") {
-			pricing = modelPricing[k]
-			break
+	best := ""
+	for k := range modelPricing {
+		if lower != k && !strings.HasPrefix(lower, k+"-") && !strings.HasPrefix(lower, k+":") {
+			continue
 		}
+		if len(k) > len(best) {
+			best = k
+		}
+	}
+	if best != "" {
+		pricing = modelPricing[best]
 	}
 
 	inputCost := float64(promptTokens) * pricing[0] / 1_000_000
