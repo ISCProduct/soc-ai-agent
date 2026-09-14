@@ -144,14 +144,14 @@ func TestProvisionByName_EmptyName(t *testing.T) {
 	}
 }
 
-// emptySearchProvider は検索は成功するが中身の無い結果を返す。
-// 打ち間違いなど「実在しない企業名」を投げたときの挙動を再現する。
-type emptySearchProvider struct{ calls int }
+// countingSearchProvider は検索の呼び出し回数を数えるだけのスタブ。
+// 中身は後段の Parse スタブが決めるため、ここでは固定文字列でよい。
+type countingSearchProvider struct{ calls int }
 
-func (p *emptySearchProvider) Name() string { return "stub" }
-func (p *emptySearchProvider) Search(context.Context, string, int) (string, string, error) {
+func (p *countingSearchProvider) Name() string { return "stub" }
+func (p *countingSearchProvider) Search(context.Context, string, int) (string, string, error) {
 	p.calls++
-	return "該当する企業の情報は見つかりませんでした。", "stub-search", nil
+	return "検索結果のプレースホルダ", "stub-search", nil
 }
 
 // emptyParseServer は Parse 段で「全項目が空」の企業情報を返すサーバ。
@@ -185,7 +185,7 @@ func TestProvisionByName_CachesEmptyResult(t *testing.T) {
 	srv := emptyParseServer(t)
 
 	f := NewCompanyInfoFetcher(repo, openai.NewWithBaseURL(srv.URL, "gpt-4o-mini"))
-	search := &emptySearchProvider{}
+	search := &countingSearchProvider{}
 	f.llm.Search = search
 
 	if _, err := f.ProvisionByName(context.Background(), "存在しない企業名"); err == nil {
@@ -226,7 +226,7 @@ func TestProvisionByName_SubstantiveResultIsNotCached(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	f := NewCompanyInfoFetcher(repo, openai.NewWithBaseURL(srv.URL, "gpt-4o-mini"))
-	f.llm.Search = &emptySearchProvider{}
+	f.llm.Search = &countingSearchProvider{}
 
 	if _, err := f.ProvisionByName(context.Background(), "株式会社テスト"); err != nil {
 		t.Fatalf("error = %v", err)
