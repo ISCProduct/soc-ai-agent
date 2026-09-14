@@ -95,9 +95,9 @@ type UserCompanyMatch struct {
 	// 未計測の軸は平均に含めないため、この値が小さいほど根拠が薄い（#1124）。
 	EvaluatedCategories int
 	MatchReason         string
-	IsViewed           bool
-	IsFavorited        bool
-	IsApplied          bool
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	IsViewed            bool
+	IsFavorited         bool
+	IsApplied           bool
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
