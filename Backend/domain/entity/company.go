@@ -94,8 +94,12 @@ type UserCompanyMatch struct {
 	// MatchedAxisCount は MatchScore の算出に使えた軸の数（0-10）。
 	// 未計測の軸は平均に含めないため、この値が小さいほど根拠が薄い（#1124）。
 	//
-	// 既知の制約: スコア行が存在すれば値が0でも「計測済み」と数える。
-	// 面接経路は全軸0の行を書くため、実際には測れていないのに10と出る。
+	// スコア行が存在すれば値が0でも「計測済み」と数える。面接経路の 0 は
+	// 「5点中0点」を正規化した正当なスコア（cross_feature_integration_service.go）なので、
+	// 測れていないわけではない。
+	//
+	// なお chat_controller.go の countEvaluatedCategories は score != 0 で数えるため、
+	// 同じ「何軸で測れたか」でも値が食い違う。あちらは 0 を未計測とみなす簡略化。
 	MatchedAxisCount int
 	MatchReason      string
 	IsViewed         bool

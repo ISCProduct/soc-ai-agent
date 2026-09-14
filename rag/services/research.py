@@ -190,6 +190,47 @@ def rank_results_by_domain_trust(raw_texts: List[str], company_name: str) -> Lis
     return [t for _, t in scored]
 
 
+# --- コスト調整ノブ（#1124） -------------------------------------------------
+#
+# OpenAI の web_search ツールは検索結果が固定トークンとして課金されるため、
+# 1コールあたりの入力トークンが本文の長さに関係なく大きくなる。
+# 実測（api_call_logs）では検索系モデルが1コール平均 30,392 入力トークンで、
+# 通常の推論(約4,000)の7.5倍だった。
+# なお api_call_logs は Backend のコールしか記録していないため、
+# RAG のコストは現状計測できていない（#1294）。
+#
+# 効くのは「1コールの重さ（context size）」と「コール回数（クエリ数）」の2つ。
+# どちらも env で変えられるようにする。ただし本番は ECS のタスク定義に
+# 環境変数が焼き込まれているため、変更には terraform の編集と apply が必要
+# （「env を戻すだけ」では戻らない）。docs/wiki/rag-service.md を参照。
+
+_VALID_CONTEXT_SIZES = ("low", "medium", "high")
+
+
+def web_search_context_size() -> str:
+    """web_search の search_context_size を返す（既定 medium）。
+
+    以前は "high" 固定だった。high は最も高コストな設定で、企業概要の要約という
+    用途に対して過剰。不正な値は既定に倒す（起動を止めない）。
+    """
+    value = os.getenv("OPENAI_WEB_SEARCH_CONTEXT_SIZE", "medium").strip().lower()
+    return value if value in _VALID_CONTEXT_SIZES else "medium"
+
+
+def max_search_queries() -> int:
+    """1企業あたりの検索クエリ数の上限を返す（既定 4）。
+
+    以前は 5 固定。web_search は1クエリ=1コール=固定トークン課金なので、
+    ここがそのままコールあたり単価×回数に効く。
+    """
+    raw = os.getenv("OPENAI_WEB_SEARCH_MAX_QUERIES", "").strip()
+    if raw.isdigit():
+        n = int(raw)
+        if 1 <= n <= 10:
+            return n
+    return 4
+
+
 def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
     """LLMを使って企業・職種に応じた3〜5つの検索クエリを生成する。
 
@@ -214,7 +255,9 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
             if entry:
                 ts = entry.get("ts", 0)
                 if time.time() - ts < cache_ttl:
-                    return entry.get("queries", [])
+                    # 上限を読み出し側にも掛ける。保存側だけだと、上限を下げても
+                    # キャッシュ済みの古い件数が TTL 切れまで返り続けてノブが効かない
+                    return entry.get("queries", [])[: max_search_queries()]
     except Exception as exc:
         logger.warning("query cache read failed error=%s", exc)
 
@@ -246,7 +289,7 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
         try:
             client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
             prompt = (
-                "以下の企業と職種について、採用情報を調査するための検索クエリを3〜5個生成してください。\n\n"
+                "以下の企業と職種について、採用情報を調査するための検索クエリを3〜4個生成してください。\n\n"
                 "企業名: {company}\n"
                 "職種: {role}\n\n"
                 "以下の3軸をカバーする検索クエリを生成してください。\n"
@@ -257,7 +300,7 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
                 "出力はJSONのみ: {{\"queries\": [\"クエリ1\", \"クエリ2\", ...]}}"
             ).format(company=safe_company, role=role_text)
             resp = client.chat.completions.create(
-                model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o"),
+                model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 max_tokens=300,
@@ -269,15 +312,17 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
                 queries = [q.strip() for q in queries if q and isinstance(q, str)]
                 if queries:
                     logger.info("generated %d search queries company=%s", len(queries), safe_company)
-                    save_to_cache(cache_key, queries[:5])
-                    return queries[:5]
+                    limit = max_search_queries()
+                    save_to_cache(cache_key, queries[:limit])
+                    return queries[:limit]
         except Exception as exc:
             logger.warning("query generation failed company=%s error=%s", safe_company, exc)
 
     # フォールバック: テンプレートを使用
     tqs = template_queries(company_name, role_text)
-    save_to_cache(cache_key, tqs[:5])
-    return tqs[:5]
+    limit = max_search_queries()
+    save_to_cache(cache_key, tqs[:limit])
+    return tqs[:limit]
 
 
 def _web_search_openai(query: str) -> str:
@@ -296,7 +341,7 @@ def _web_search_openai(query: str) -> str:
         response = client.responses.create(
             model=model,
             input=query,
-            tools=[{"type": "web_search", "search_context_size": "high"}],
+            tools=[{"type": "web_search", "search_context_size": web_search_context_size()}],
             tool_choice="required",
             max_output_tokens=1000,
         )
@@ -341,7 +386,7 @@ def _summarize_for_hiring(company_name: str, job_title: str, raw_texts: List[str
              )
     try:
         resp = client.chat.completions.create(
-            model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o"),
+            model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
             messages=[
                 {"role": "system", "content": "あなたは企業リサーチの専門アナリストです。"},
                 {"role": "user", "content": prompt},
