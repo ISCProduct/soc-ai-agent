@@ -3,7 +3,7 @@ name: Dependabot Auto Merge
 on:
   pull_request:
     branches:
-      - main
+      - develop
 
 permissions:
   contents: write
@@ -29,6 +29,8 @@ jobs:
       # 失敗しても auto-merge の有効化自体は下のステップで行えるので、
       # 承認は人が行う運用にして、通らないAPIを叩き続けるのをやめる。
 
+      # 対象は develop 宛のみ。main 宛で自動マージすると、依存更新が
+      # develop・release のゲートを通らずに本番(ECS on Fargate)へ自動デプロイされる。
       - name: Enable auto-merge for minor/patch updates
         if: |
           steps.metadata.outputs.update-type == 'version-update:semver-minor' ||
