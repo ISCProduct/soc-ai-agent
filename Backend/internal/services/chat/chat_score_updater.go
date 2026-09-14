@@ -76,9 +76,27 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 	return true, nil
 }
 
+// 選択肢スコアと任意理由テキストのブレンド係数（既存 EMA 0.7/0.3 と揃える）。
+const (
+	choiceScoreWeight       = 0.7
+	choiceReasonScoreWeight = 0.3
+	minReasonRunesForBlend  = 8
+)
+
+// blendChoiceAndReasonScore は選択肢ベース点と理由テキスト点を混ぜる。
+// 理由が短すぎる場合は選択肢点のみ（ノイズ防止）。
+func blendChoiceAndReasonScore(choiceScore, reasonScore int, reason string) int {
+	if len([]rune(strings.TrimSpace(reason))) < minReasonRunesForBlend {
+		return choiceScore
+	}
+	blended := float64(choiceScore)*choiceScoreWeight + float64(reasonScore)*choiceReasonScoreWeight
+	return int(math.Round(blended))
+}
+
 // processChoiceAnswer 選択肢回答を処理してスコアを更新する。
+// reason は任意。十分な長さがあればテキスト採点と 0.7/0.3 でブレンドする。
 // 戻り値の bool は「有効な品質回答かどうか」を示す（進捗カウントに使用）。
-func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sessionID, answer string, history []models.ChatMessage, jobCategoryID uint) (bool, error) {
+func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sessionID, answer, reason string, history []models.ChatMessage, jobCategoryID uint) (bool, error) {
 	// 最後のAIの質問を取得
 	var lastQuestion string
 	var targetCategory string
@@ -119,7 +137,7 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 		targetCategory = s.inferCategoryFromQuestion(lastQuestion)
 	}
 
-	log.Printf("[Choice Answer] Processing choice '%s' for category: %s\n", answer, targetCategory)
+	log.Printf("[Choice Answer] Processing choice '%s' reason=%q for category: %s\n", answer, reason, targetCategory)
 
 	result := s.answerEvaluator.EvaluateHumanScoring(lastQuestion, answer, true, jobCategoryID != 0, nil)
 	if result.Action != PrecheckScore {
@@ -127,7 +145,16 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 		return false, nil
 	}
 
-	if err := s.updateCategoryScore(userID, sessionID, targetCategory, result.Score); err != nil {
+	finalScore := result.Score
+	if len([]rune(strings.TrimSpace(reason))) >= minReasonRunesForBlend {
+		textResult := s.answerEvaluator.EvaluateHumanScoringWithContext(ctx, lastQuestion, reason, false, jobCategoryID != 0, nil)
+		if textResult.Action == PrecheckScore && textResult.Score > 0 {
+			finalScore = blendChoiceAndReasonScore(result.Score, textResult.Score, reason)
+			log.Printf("[Choice Answer] Blended score choice=%d text=%d -> %d\n", result.Score, textResult.Score, finalScore)
+		}
+	}
+
+	if err := s.updateCategoryScore(userID, sessionID, targetCategory, finalScore); err != nil {
 		return false, err
 	}
 	// 選択肢回答は選択した内容に関わらず有効（スコア0でも意思表示）

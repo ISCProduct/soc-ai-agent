@@ -41,6 +41,18 @@ async function mockChatPost(
  * - Enter単独は送信せず Ctrl/Meta+Enter で送信
  * - job_category_id が後続リクエストに載る
  */
+/**
+ * チャットの入力欄。placeholder は状態で変わる（#1318 で選択肢まわりが増えた）。
+ *   - 通常: メッセージを入力...
+ *   - 選択肢表示中（未選択）: 選択肢を選ぶか、同じ内容を入力してください
+ *   - 選択肢を選んだ後: 任意: そう思う理由を一言（空でも送信可）
+ *   - その他を選択: その他の内容を入力...
+ * 個別のテストが文言に依存しないよう、ここに集約する。
+ */
+function chatInput(page: Page) {
+  return page.getByPlaceholder(/メッセージを入力|選択肢を選ぶか|そう思う理由|その他の内容/)
+}
+
 test.describe('チャット主要機能（職種・選択肢・送信）', () => {
   test.beforeEach(async ({ page }) => {
     await setupChatCriticalAuth(page)
@@ -78,7 +90,11 @@ test.describe('チャット主要機能（職種・選択肢・送信）', () =>
     })
     await expect(page.getByRole('button', { name: /A\.\s*要件が曖昧/ })).toBeVisible()
 
+    // 選択肢のクリックは「選択」まで。理由を書いてから送れるよう、ここでは送信しない
     await page.getByRole('button', { name: /A\.\s*要件が曖昧/ }).click()
+    expect(posted).toHaveLength(0)
+
+    await page.getByRole('button', { name: 'メッセージを送信' }).click()
 
     await expect
       .poll(() => posted.length, { timeout: 10000 })
@@ -86,6 +102,58 @@ test.describe('チャット主要機能（職種・選択肢・送信）', () =>
     expect(posted[0]?.message).toBe('A')
     await expect(page.getByText('職種を特定できません')).toHaveCount(0)
     await expect(page.getByText('要件の曖昧さが一番の課題')).toBeVisible()
+  })
+
+  // 選択肢を選んだあとに理由を書くと "A: 理由" で送られる（#1318 の主目的）。
+  // buildChoiceOutgoingMessage の単体テストはあるが、画面の配線を守るものが無かった。
+  test('選択肢を選んで理由を入力すると「記号: 理由」で送信される', async ({ page }) => {
+    await mockChatHistory(page, [historyItem(1, 'assistant', INTERVIEW_MCQ)])
+
+    const posted: Array<{ message?: string }> = []
+    await mockChatPost(page, (body) => {
+      posted.push(body)
+      return {
+        body: {
+          response: '理由まで書けていますね。次の質問です。',
+          is_complete: false,
+          total_questions: 15,
+          answered_questions: 1,
+          job_category_id: 0,
+        },
+      }
+    })
+
+    await page.goto('/')
+    await expect(page.getByRole('button', { name: /A\.\s*要件が曖昧/ })).toBeVisible({
+      timeout: 15000,
+    })
+
+    await page.getByRole('button', { name: /A\.\s*要件が曖昧/ }).click()
+    await chatInput(page).fill('仕様が固まる前に実装を始めたため')
+
+    await page.getByRole('button', { name: 'メッセージを送信' }).click()
+
+    await expect.poll(() => posted.length, { timeout: 10000 }).toBe(1)
+    expect(posted[0]?.message).toBe('A: 仕様が固まる前に実装を始めたため')
+  })
+
+  // 何も選ばず本文も空なら送信できない（誤送信の防止）
+  test('未選択かつ本文が空なら送信ボタンは押せない', async ({ page }) => {
+    await mockChatHistory(page, [historyItem(1, 'assistant', INTERVIEW_MCQ)])
+
+    const posted: Array<{ message?: string }> = []
+    await mockChatPost(page, (body) => {
+      posted.push(body)
+      return { body: { response: 'ok', is_complete: false, total_questions: 15, answered_questions: 1 } }
+    })
+
+    await page.goto('/')
+    await expect(page.getByRole('button', { name: /A\.\s*要件が曖昧/ })).toBeVisible({
+      timeout: 15000,
+    })
+
+    await expect(page.getByRole('button', { name: 'メッセージを送信' })).toBeDisabled()
+    expect(posted).toHaveLength(0)
   })
 
   test('無効回答警告のあとでも直前質問の選択肢ボタンが残る', async ({ page }) => {
@@ -122,7 +190,7 @@ test.describe('チャット主要機能（職種・選択肢・送信）', () =>
     })
 
     await page.goto('/')
-    const input = page.getByPlaceholder(/メッセージを入力|選択肢と同じ内容/)
+    const input = chatInput(page)
     await expect(input).toBeVisible({
       timeout: 15000,
     })
@@ -176,7 +244,7 @@ test.describe('チャット主要機能（職種・選択肢・送信）', () =>
       timeout: 15000,
     })
 
-    const input = page.getByPlaceholder(/メッセージを入力|選択肢と同じ内容/)
+    const input = chatInput(page)
     await input.fill('Webエンジニア')
     await input.press('Control+Enter')
     await expect(page.getByText('次の質問です', { exact: false })).toBeVisible({

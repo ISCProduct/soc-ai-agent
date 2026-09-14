@@ -35,13 +35,13 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	trimmedAnswer := strings.TrimSpace(req.Message)
 	lastAssistantQuestion := findLastAssistantQuestion(history)
 	resolved := ResolveChoiceAnswer(lastAssistantQuestion, trimmedAnswer)
-	log.Printf("[ProcessChat] Checking answer: raw=%q resolved_choice=%v letter=%q free_text=%v\n",
-		trimmedAnswer, resolved.IsChoice, resolved.Letter, resolved.IsFreeText)
+	log.Printf("[ProcessChat] Checking answer: raw=%q resolved_choice=%v letter=%q reason=%q free_text=%v\n",
+		trimmedAnswer, resolved.IsChoice, resolved.Letter, resolved.Reason, resolved.IsFreeText)
 	isQualityAnswer := false
 	if resolved.IsChoice && s.isChoiceAnswer(resolved.Letter) {
 		log.Printf("[ProcessChat] Processing as choice answer\n")
 		var err error
-		isQualityAnswer, err = s.processChoiceAnswer(ctx, req.UserID, req.SessionID, resolved.Letter, history, jobCategoryID)
+		isQualityAnswer, err = s.processChoiceAnswer(ctx, req.UserID, req.SessionID, resolved.Letter, resolved.Reason, history, jobCategoryID)
 		if err != nil {
 			log.Printf("Warning: failed to process choice answer: %v\n", err)
 		}

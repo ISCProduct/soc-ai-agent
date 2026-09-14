@@ -8,4 +8,5 @@ type JobEnqueuer interface {
 	EnqueueEmailRegistration(email, token string) error
 	EnqueueEmailPasswordReset(email, token, appURL string) error
 	EnqueueInterviewReport(sessionID uint) error
+	EnqueueDiagnosisQuality(userID uint, sessionID string) error
 }

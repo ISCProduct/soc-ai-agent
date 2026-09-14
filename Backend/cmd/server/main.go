@@ -21,6 +21,7 @@ import (
 	"Backend/internal/services/company"
 	"Backend/internal/services/companyauth"
 	"Backend/internal/services/costs"
+	"Backend/internal/services/diagnosis"
 	"Backend/internal/services/email"
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/gbizinfo"
@@ -352,9 +353,19 @@ func main() {
 		interviewService.SetJobEnqueuer(jobEnqueuer)
 	}
 	interviewService.StartWorker()
+
+	diagnosisQualityRepo := repositories.NewDiagnosisQualityRepository(db)
+	diagnosisQualityService := diagnosis.NewQualityService(
+		diagnosisQualityRepo,
+		userWeightScoreRepo,
+		chatMessageRepo,
+		matchRepo,
+		aiClient,
+	)
+
 	if rdb != nil {
 		queueServer = queue.NewServer(rdb)
-		queueServer.RegisterHandlers(emailService, interviewService)
+		queueServer.RegisterHandlers(emailService, interviewService, diagnosisQualityService)
 		if err := queueServer.Start(); err != nil {
 			log.Printf("[queue] failed to start worker: %v", err)
 		}
@@ -378,6 +389,9 @@ func main() {
 	authController := controllers.NewAuthController(authService)
 	oauthController := controllers.NewOAuthController(oauthService, organizationService)
 	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
+	if jobEnqueuer != nil {
+		chatController.SetJobEnqueuer(jobEnqueuer)
+	}
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := controllers.NewCompanyRelationController(companyQueryRepo, aiClient)
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
@@ -496,6 +510,7 @@ func main() {
 	scoreValidationRepo := repositories.NewScoreValidationRepository(db)
 	scoreValidationService := admin.NewScoreValidationService(scoreValidationRepo)
 	scoreValidationController := controllers.NewAdminScoreValidationController(scoreValidationService)
+	diagnosisQualityController := controllers.NewAdminDiagnosisQualityController(diagnosisQualityRepo)
 	collectiveInsightRepo := repositories.NewCollectiveInsightRepository(db)
 	collectiveInsightService := flywheel.NewCollectiveInsightService(collectiveInsightRepo, userWeightScoreRepo)
 	collectiveInsightController := controllers.NewCollectiveInsightController(collectiveInsightService)
@@ -537,7 +552,7 @@ func main() {
 	// 低マッチのまま進行中の応募を教員一覧に出す（#1028）
 	teacherInsightService.SetLowMatchReader(appStatusRepo)
 	teacherInsightController := controllers.NewTeacherStudentInsightController(teacherInsightService)
-	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, userRepo, schoolService, cfg.AdminSecret)
+	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, userRepo, schoolService, cfg.AdminSecret)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService)

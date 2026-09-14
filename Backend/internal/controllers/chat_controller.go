@@ -30,6 +30,7 @@ type ChatController struct {
 	analysisService ifaces.AnalysisScoringService
 	userRepo        repository.UserRepository
 	emailService    ifaces.EmailService
+	jobs            shared.JobEnqueuer
 	matchingTimers  sync.Map // key: sessionID, value: *time.Timer（デバウンス用）
 }
 
@@ -45,6 +46,11 @@ func NewChatController(chatService ifaces.ChatService, matchingService ifaces.Ma
 		userRepo:        userRepo,
 		emailService:    emailService,
 	}
+}
+
+// SetJobEnqueuer は診断妥当性ジョブ等の投入先を設定する。
+func (c *ChatController) SetJobEnqueuer(j shared.JobEnqueuer) {
+	c.jobs = j
 }
 
 func countEvaluatedCategories(scores []entity.UserWeightScore) int {
@@ -101,6 +107,7 @@ func (c *ChatController) runBackgroundMatching(userID uint, sessionID string) {
 		err := c.matchingService.CalculateMatching(ctx, userID, sessionID)
 		if err == nil {
 			log.Printf("[Chat] Background matching calculation completed: user=%d session=%s attempt=%d", userID, sessionID, attempt)
+			c.enqueueDiagnosisQuality(userID, sessionID)
 			return
 		}
 		lastErr = err
@@ -116,6 +123,16 @@ func (c *ChatController) runBackgroundMatching(userID uint, sessionID string) {
 
 	log.Printf("[Chat] ALERT: background matching permanently failed: user=%d session=%s attempts=%d err=%v", userID, sessionID, matchingRetryMaxAttempts, lastErr)
 	c.notifyMatchingFailure(userID, sessionID, lastErr)
+}
+
+func (c *ChatController) enqueueDiagnosisQuality(userID uint, sessionID string) {
+	if c.jobs == nil {
+		log.Printf("[Chat] diagnosis quality skipped (no queue): user=%d session=%s", userID, sessionID)
+		return
+	}
+	if err := c.jobs.EnqueueDiagnosisQuality(userID, sessionID); err != nil {
+		log.Printf("[Chat] diagnosis quality enqueue failed: user=%d session=%s err=%v", userID, sessionID, err)
+	}
 }
 
 // scheduleBackgroundMatching はセッション単位でデバウンスしてマッチング計算をスケジュールする。
