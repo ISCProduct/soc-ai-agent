@@ -2,13 +2,16 @@
 
 import { useEffect, type MutableRefObject, type RefObject } from 'react'
 import type { InterviewStatus } from '../types'
+import { initialVadState, stepVad, type VadState } from '../lib/vadDecision'
 
-/** 発話検知の音量閾値 (RMS) */
-export const VAD_THRESHOLD = 0.015
-/** この無音時間が続いたら自動送信（長めに設定して途切れ防止） */
-export const SILENCE_MS = 2500
-/** 録音開始後この時間は自動停止しない（息継ぎなどで誤停止しない） */
-export const MIN_RECORDING_MS = 1000
+// しきい値・時間定数は lib/vadDecision.ts に集約した。
+// 判定を純粋関数にして、実音声なしで境界を検証できるようにしている。
+export {
+  SILENCE_MS,
+  MIN_RECORDING_MS,
+  CONFIRM_MS,
+  WARMUP_FRAMES,
+} from '../lib/vadDecision'
 
 type UseHandsFreeVadArgs = {
   enabled: boolean
@@ -19,11 +22,16 @@ type UseHandsFreeVadArgs = {
   aiSpeakingRef: MutableRefObject<boolean>
   startRecording: () => void
   stopRecording: () => void
+  /** 発話が確定しなかった録音を送らずに捨てる。 */
+  discardRecording: () => void
 }
 
 /**
  * ハンズフリー VAD: 音声検知で自動録音開始・停止。
  * stream / recording フラグの refs は呼び出し側が所有する。
+ *
+ * 判定そのものは lib/vadDecision.ts の純粋関数が行う。
+ * ここは AudioContext から RMS を取り出して結果を実行するだけに留める。
  */
 export function useHandsFreeVad({
   enabled,
@@ -34,6 +42,7 @@ export function useHandsFreeVad({
   aiSpeakingRef,
   startRecording,
   stopRecording,
+  discardRecording,
 }: UseHandsFreeVadArgs) {
   useEffect(() => {
     if (!enabled || status !== 'connected' || !streamRef.current) return
@@ -43,35 +52,32 @@ export function useHandsFreeVad({
     analyser.fftSize = 512
     source.connect(analyser)
     const buf = new Float32Array(analyser.fftSize)
-    let silenceStart: number | null = null
-    let recordingStartTime: number | null = null
+    let vad: VadState = initialVadState()
     let rafId: number
+
     const tick = () => {
       rafId = requestAnimationFrame(tick)
       analyser.getFloatTimeDomainData(buf)
       const rms = Math.sqrt(buf.reduce((s, v) => s + v * v, 0) / buf.length)
-      const speaking = rms > VAD_THRESHOLD
-      if (speaking) {
-        silenceStart = null
-        if (!isRecordingRef.current && !turnPendingRef.current && !aiSpeakingRef.current) {
-          recordingStartTime = Date.now()
+
+      // 送信中・AI発話中は新しい録音を始めない。
+      const canStart = !isRecordingRef.current && !turnPendingRef.current && !aiSpeakingRef.current
+      const { state, action } = stepVad(vad, { rms, now: Date.now(), canStart })
+      vad = state
+
+      switch (action) {
+        case 'start':
           startRecording()
-        }
-      } else if (isRecordingRef.current) {
-        // 録音開始直後の短い無音（息継ぎ等）では止めない
-        const elapsed = recordingStartTime ? Date.now() - recordingStartTime : Infinity
-        if (elapsed < MIN_RECORDING_MS) return
-        if (silenceStart === null) {
-          silenceStart = Date.now()
-        } else if (Date.now() - silenceStart > SILENCE_MS) {
-          silenceStart = null
-          recordingStartTime = null
+          break
+        case 'stop':
           stopRecording()
-        }
-      } else {
-        silenceStart = null
+          break
+        case 'discard':
+          discardRecording()
+          break
       }
     }
+
     rafId = requestAnimationFrame(tick)
     return () => {
       cancelAnimationFrame(rafId)
