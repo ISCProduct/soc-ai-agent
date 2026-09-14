@@ -8,6 +8,7 @@ import { extractApiErrorMessage, parseMediaError, parseMultipartResponse } from 
 import { WeightScore } from '@/components/ScoreUpdateBanner'
 import type { InterviewMedia } from './useInterviewMedia'
 import { useHandsFreeVad } from './useHandsFreeVad'
+import { pickRecorderFormat, extFromMimeType, type RecorderFormat } from '../lib/recorderFormat'
 import { buildCompanyInfo, getNextAvatarGender } from '../utils'
 import {
   evaluateReportPollTick,
@@ -76,6 +77,11 @@ export function useInterviewSession({
   const [finishFailed, setFinishFailed] = useState(false)
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const recorderFormatRef = useRef<RecorderFormat>({ mimeType: '', ext: 'webm' })
+  // 発話が確定しなかった録音を送らずに捨てるためのフラグ。
+  // MediaRecorder.stop() は非同期で onstop を呼ぶため、
+  // 停止要求の時点でどちらの意図か記録しておく必要がある。
+  const discardTurnRef = useRef(false)
   const audioChunksRef = useRef<Blob[]>([])
   const historyRef = useRef<{ role: string; content: string }[]>([])
   const aiAudioRef = useRef<HTMLAudioElement | null>(null)
@@ -103,6 +109,7 @@ export function useInterviewSession({
   // VAD effect は hooks 順序のため先に登録し、実装は ref 経由で呼ぶ
   const startRecordingRef = useRef<() => void>(() => {})
   const stopRecordingRef = useRef<() => void>(() => {})
+  const discardRecordingRef = useRef<() => void>(() => {})
 
   // ref と state を常に同期（VAD の stale closure 対策）
   const setIsRecording = (v: boolean) => { isRecordingRef.current = v; _setIsRecording(v) }
@@ -118,6 +125,7 @@ export function useInterviewSession({
     aiSpeakingRef,
     startRecording: () => startRecordingRef.current(),
     stopRecording: () => stopRecordingRef.current(),
+    discardRecording: () => discardRecordingRef.current(),
   })
 
   useEffect(() => { userRef.current = user }, [user])
@@ -510,9 +518,26 @@ export function useInterviewSession({
     if (audioTracks.length === 0) return
     const micStream = new MediaStream(audioTracks)
     audioChunksRef.current = []
-    const mr = new MediaRecorder(micStream, { mimeType: 'audio/webm', audioBitsPerSecond: 128000 })
+    discardTurnRef.current = false
+    // mimeType はブラウザが実際に出せる形式から選ぶ。'audio/webm' 固定だと
+    // Safari では NotSupportedError で例外になり、録音が始まらなかった。
+    const format = pickRecorderFormat()
+    recorderFormatRef.current = format
+    const mr = new MediaRecorder(
+      micStream,
+      format.mimeType
+        ? { mimeType: format.mimeType, audioBitsPerSecond: 128000 }
+        : { audioBitsPerSecond: 128000 },
+    )
     mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
-    mr.onstop = () => { void sendTurn() }
+    mr.onstop = () => {
+      if (discardTurnRef.current) {
+        discardTurnRef.current = false
+        audioChunksRef.current = []
+        return
+      }
+      void sendTurn()
+    }
     mediaRecorderRef.current = mr
     mr.start()
     setIsRecording(true)
@@ -527,13 +552,33 @@ export function useInterviewSession({
   }
   stopRecordingRef.current = stopRecording
 
+  /**
+   * 発話が確定しなかった録音を破棄する（送信しない）。
+   *
+   * VAD は頭切れを避けるため低いしきい値で録音を始める。
+   * 物音で始まった録音まで送ると、無音や雑音だけの音声で
+   * STT を呼ぶことになり、費用と誤認識が増える。
+   */
+  const discardRecording = () => {
+    if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') return
+    discardTurnRef.current = true
+    mediaRecorderRef.current.stop()
+    setIsRecording(false)
+  }
+  discardRecordingRef.current = discardRecording
+
   const sendTurn = async () => {
     if (!user || !session) { setTurnPending(false); return }
     const chunks = audioChunksRef.current
     if (chunks.length === 0) { setTurnPending(false); return }
-    const audioBlob = new Blob(chunks, { type: 'audio/webm' })
+    // 実際に録れた形式で送る。Blob の type と拡張子が実体とずれると、
+    // 受け側の形式判定とファイル名が食い違う。
+    const format = recorderFormatRef.current
+    const blobType = chunks[0]?.type || format.mimeType || 'audio/webm'
+    const ext = extFromMimeType(blobType) || format.ext
+    const audioBlob = new Blob(chunks, { type: blobType })
     const formData = new FormData()
-    formData.append('audio', audioBlob, 'audio.webm')
+    formData.append('audio', audioBlob, `audio.${ext}`)
     formData.append('user_id', String(user.user_id))
     formData.append('history', JSON.stringify(historyRef.current))
     formData.append('turn_count', String(Math.floor(historyRef.current.length / 2) + 1))
