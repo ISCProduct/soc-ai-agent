@@ -13,8 +13,8 @@ import (
 // 理由なしは中立寄り、理由が選択と逆ならさらに中立へ戻す。
 
 const (
-	choiceOnlyDampening   = 0.55 // 理由なし: 50 からの距離を 55% に縮める
-	contradictionDamping  = 0.25 // 矛盾時: 50 からの距離を 25% に縮める
+	choiceOnlyDampening    = 0.55 // 理由なし: 50 からの距離を 55% に縮める
+	contradictionDamping   = 0.25 // 矛盾時: 50 からの距離を 25% に縮める
 	minReasonRunesEvidence = 8
 )
 
@@ -71,12 +71,12 @@ func dampenTowardNeutral(score int, factor float64) int {
 
 // 会話履歴上のユーザー発言の根拠分類（品質ジョブ用）。
 const (
-	EvidenceEmpty              = "empty"
-	EvidenceChoiceOnly         = "choice_only"
-	EvidenceChoiceWithReason   = "choice_with_reason"
+	EvidenceEmpty               = "empty"
+	EvidenceChoiceOnly          = "choice_only"
+	EvidenceChoiceWithReason    = "choice_with_reason"
 	EvidenceChoiceContradiction = "choice_contradiction"
-	EvidenceThinFreeText       = "thin_free_text"
-	EvidenceFreeText           = "free_text"
+	EvidenceThinFreeText        = "thin_free_text"
+	EvidenceFreeText            = "free_text"
 )
 
 // ClassifyOutgoingAnswerEvidence は保存済みユーザー発言の根拠の厚さを分類する。

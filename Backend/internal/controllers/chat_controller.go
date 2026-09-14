@@ -356,15 +356,15 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		}
 
 		type RecommendationResponse struct {
-			Recommendations      []any                         `json:"recommendations"`
-			Reason               string                        `json:"reason,omitempty"`
-			Diagnostics          *matching.MatchingDiagnostics `json:"diagnostics,omitempty"`
-			EvaluatedCategories  int                           `json:"evaluated_categories"`
-			IsProvisional        bool                          `json:"is_provisional"`
-			DiagnosisConfidence  int                           `json:"diagnosis_confidence,omitempty"`
-			DiagnosisFlags       []string                      `json:"diagnosis_flags,omitempty"`
-			DiagnosisSummary     string                        `json:"diagnosis_summary,omitempty"`
-			MinMatchedAxisCount  int                           `json:"min_matched_axis_count,omitempty"`
+			Recommendations     []any                         `json:"recommendations"`
+			Reason              string                        `json:"reason,omitempty"`
+			Diagnostics         *matching.MatchingDiagnostics `json:"diagnostics,omitempty"`
+			EvaluatedCategories int                           `json:"evaluated_categories"`
+			IsProvisional       bool                          `json:"is_provisional"`
+			DiagnosisConfidence int                           `json:"diagnosis_confidence,omitempty"`
+			DiagnosisFlags      []string                      `json:"diagnosis_flags,omitempty"`
+			DiagnosisSummary    string                        `json:"diagnosis_summary,omitempty"`
+			MinMatchedAxisCount int                           `json:"min_matched_axis_count,omitempty"`
 		}
 
 		evaluatedCategories := countEvaluatedCategories(userScores)
