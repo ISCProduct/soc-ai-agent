@@ -1,7 +1,7 @@
 -- マッチ度の算出に使えた軸の数を持たせる（#1124 / SOCAIAGENT-291）
 --
 -- 総合マッチ度はこれまで「未計測の軸を中立値(50)で埋めたうえで10軸の平均」だった。
--- 企業の重視度が 45〜92（平均59前後）に寄っている実データでは、中立値との差が
+-- 企業の重視度が 35〜92（平均59前後）に寄っている実データでは、中立値との差が
 -- 小さくなるため、スコアを1つも持たないユーザーでも全企業と97%前後で一致する。
 -- 本番相当DBでは全90社が 91〜99%（平均97%）に固まっていた。
 --
@@ -12,6 +12,6 @@
 -- 既存行は 0（不明）。次回のマッチング再計算で正しい値が入る。
 
 ALTER TABLE `user_company_matches`
-  ADD COLUMN `evaluated_categories` tinyint NOT NULL DEFAULT 0
+  ADD COLUMN `matched_axis_count` tinyint NOT NULL DEFAULT 0
   COMMENT '#1124 MatchScore の算出に使えた軸の数(0-10)。小さいほど根拠が薄い',
   ALGORITHM=INPLACE, LOCK=NONE;

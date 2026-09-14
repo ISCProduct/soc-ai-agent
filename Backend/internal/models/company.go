@@ -159,9 +159,12 @@ type UserCompanyMatch struct {
 	DetailMatch        float64 // 細部志向マッチ度
 	CommunicationMatch float64 // コミュニケーション力マッチ度
 
-	// EvaluatedCategories は MatchScore の算出に使えた軸の数（0-10）。
+	// MatchedAxisCount は MatchScore の算出に使えた軸の数（0-10）。
 	// 未計測の軸は平均に含めないため、この値が小さいほど根拠が薄い（#1124）。
-	EvaluatedCategories int `gorm:"not null;default:0"`
+	//
+	// 名前を evaluated_categories にしないのは、チャットの進捗表示が返す
+	// 同名のJSONフィールド（ユーザースコアの非ゼロ件数）と意味が違うため。
+	MatchedAxisCount int `gorm:"not null;default:0" json:"matched_axis_count"`
 
 	// マッチング理由・推薦文
 	MatchReason string `gorm:"type:text"` // AIが生成したマッチング理由

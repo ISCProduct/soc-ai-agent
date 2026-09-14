@@ -29,7 +29,7 @@ type IndustryProfileReader interface {
 
 // LowMatchApplicationReader は低マッチ応募の一括読み出し面（#1028）。
 type LowMatchApplicationReader interface {
-	FindLowMatchApplicationsByUsers(userIDs []uint, threshold float64) (map[uint][]repositories.LowMatchApplication, error)
+	FindLowMatchApplicationsByUsers(userIDs []uint, threshold float64, minMatchedAxes int) (map[uint][]repositories.LowMatchApplication, error)
 }
 
 type StudentInsightService struct {
@@ -45,6 +45,14 @@ type StudentInsightService struct {
 // 学生側の frontend/lib/low-match.ts の LOW_MATCH_THRESHOLD と揃える。
 // 片方だけ変えると「学生には確認が出ないのに教員一覧には出る」ことになる。
 const LowMatchThreshold = 40.0
+
+// MinMatchedAxesForLowMatch はマッチ度を信用するのに最低限必要な軸の数（#1124）。
+// 学生側の frontend/lib/low-match.ts の MIN_MATCHED_AXES_FOR_LOW_MATCH と揃える。
+//
+// マッチ度は「計測できた軸だけ」の平均なので、軸が少ない学生は実力ではなく
+// 計測不足で低い値になる。それを「軌道修正の対象」に出すと、
+// 教員には「不適切な応募を繰り返している生徒」に見えてしまう。
+const MinMatchedAxesForLowMatch = 4
 
 func NewStudentInsightService(
 	users StudentLister,
@@ -133,7 +141,7 @@ func (s *StudentInsightService) listTendencies(limit, offset int, query string, 
 	// フィルタを掛け直す手間より有用なため。
 	lowMatchByUser := map[uint][]repositories.LowMatchApplication{}
 	if s.lowMatch != nil {
-		lowMatchByUser, err = s.lowMatch.FindLowMatchApplicationsByUsers(userIDs, LowMatchThreshold)
+		lowMatchByUser, err = s.lowMatch.FindLowMatchApplicationsByUsers(userIDs, LowMatchThreshold, MinMatchedAxesForLowMatch)
 		if err != nil {
 			return nil, err
 		}

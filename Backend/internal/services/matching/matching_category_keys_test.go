@@ -10,12 +10,12 @@ import (
 // TestCalculateMatchScore_UsesCanonicalKeys は、マッチング計算が引くキーが
 // 正典10種と一致することを検証する（#929）。
 //
-// ここが正典とずれると scoredMatch の `!ok` 分岐で中立50に置き換わり、
-// エラーもログも出ないままユーザーの実スコアが捨てられる。
+// ここが正典とずれると scoredMatch の `!ok` 分岐で未計測として除外され、
+// エラーもログも出ないままユーザーの実スコアが捨てられる（#1124 以前は中立50で埋めていた）。
 // 「静かに壊れる」ため、テストで固定しておく必要がある。
 func TestCalculateMatchScore_UsesCanonicalKeys(t *testing.T) {
 	// 正典キーだけを持つスコアマップ。全カテゴリ100、企業側も100にすると
-	// 全カテゴリがヒットした場合のみ総合スコアが最大になる。
+	// 全カテゴリがヒットしたときに算出軸数が10になる。
 	userScores := map[string]float64{}
 	for _, c := range valueobject.AllWeightCategories() {
 		userScores[string(c)] = 100
@@ -49,15 +49,15 @@ func TestCalculateMatchScore_UsesCanonicalKeys(t *testing.T) {
 		got := svc.calculateMatchScore(partial, profile)
 		// 未計測カテゴリは平均から除外されるため MatchScore は変わらない（#1124）。
 		// キーが引けているかは「算出に使えた軸の数」が減るかで判定する。
-		if got.EvaluatedCategories >= full.EvaluatedCategories {
+		if got.MatchedAxisCount >= full.MatchedAxisCount {
 			t.Errorf("カテゴリ %q を外しても算出軸数が減らない (%d >= %d)。"+
 				"calculateMatchScore がこのキーを引いていない可能性がある",
-				c, got.EvaluatedCategories, full.EvaluatedCategories)
+				c, got.MatchedAxisCount, full.MatchedAxisCount)
 		}
 	}
 }
 
-// 未評価カテゴリが中立50として扱われることを固定する。
+// 未計測カテゴリが平均から除外されることを固定する。
 // この挙動があるため、キーがずれても「エラーにならず静かに希釈される」。
 func TestScoredMatch_MissingCategoryIsExcluded(t *testing.T) {
 	// 未計測カテゴリは平均に含めない（#1124）。

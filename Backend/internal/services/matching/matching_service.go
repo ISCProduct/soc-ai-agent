@@ -216,7 +216,7 @@ func (s *MatchingService) calculateMatchScore(
 
 	// 総合マッチ度は「計測できた軸だけ」の平均（#1124）。
 	// 何件で算出したかを持たせ、表示側が根拠の薄さを示せるようにする。
-	match.EvaluatedCategories = evaluatedCount
+	match.MatchedAxisCount = evaluatedCount
 	if evaluatedCount > 0 {
 		match.MatchScore = totalScore / float64(evaluatedCount)
 	} else {
@@ -226,6 +226,11 @@ func (s *MatchingService) calculateMatchScore(
 	return match
 }
 
+// defaultCompanyWeightProfile はプロファイル未設定企業の代替（全軸50）。
+//
+// 注意: 線形化(#1124)により、スコアが50付近のユーザーはこの企業と全軸100点になる。
+// 現状は公開企業すべてにプロファイルがあるため到達しないが、
+// 新規企業を入れたときに「なぜか100%の企業」が出たらここを疑うこと。
 func defaultCompanyWeightProfile(companyID uint) *models.CompanyWeightProfile {
 	return &models.CompanyWeightProfile{
 		CompanyID:             companyID,
@@ -251,7 +256,7 @@ func defaultCompanyWeightProfile(companyID uint) *models.CompanyWeightProfile {
 func scoredMatch(userScores map[string]float64, category string, companyWeight float64, evaluatedCount int, totalScore float64) (float64, int, float64) {
 	userScore, ok := userScores[category]
 	if !ok {
-		// 未計測。0 を返すが平均には数えない（EvaluatedCategories で件数が分かる）
+		// 未計測。0 を返すが平均には数えない（MatchedAxisCount で件数が分かる）
 		return 0, evaluatedCount, totalScore
 	}
 	matchScore := CalculateCategoryMatch(userScore, companyWeight)
@@ -270,7 +275,7 @@ func scoredMatch(userScores map[string]float64, category string, companyWeight f
 //	差 100 -> 0
 //
 // 以前はロジスティック関数（k=12）でスケーリングしていたが、実際に現れる差の範囲
-// （企業の重視度 45〜92、ユーザースコア 0〜80）がすべて曲線の平坦部に入り、
+// （企業の重視度 35〜92、ユーザースコア 0〜80）がすべて曲線の平坦部に入り、
 // 差20で97.3、差30で91.7と、ほとんど差が出なかった。
 // 本番相当DBでは全90社が91〜99%（平均97%）に固まり、
 // 「どの企業とも高相性」としか読めない状態だった（#1124）。

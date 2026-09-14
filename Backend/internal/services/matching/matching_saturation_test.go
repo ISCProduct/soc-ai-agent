@@ -70,8 +70,8 @@ func TestCalculateMatchScore_ExcludesUnmeasured(t *testing.T) {
 
 	t.Run("スコアが1つも無ければ算出できない", func(t *testing.T) {
 		got := svc.calculateMatchScore(map[string]float64{}, profile)
-		if got.EvaluatedCategories != 0 {
-			t.Errorf("EvaluatedCategories = %d, want 0", got.EvaluatedCategories)
+		if got.MatchedAxisCount != 0 {
+			t.Errorf("MatchedAxisCount = %d, want 0", got.MatchedAxisCount)
 		}
 		// 以前はここが 97 前後になっていた
 		if got.MatchScore != 0 {
@@ -82,8 +82,8 @@ func TestCalculateMatchScore_ExcludesUnmeasured(t *testing.T) {
 	t.Run("計測済みの軸だけで平均する", func(t *testing.T) {
 		// 技術志向だけ計測済み。差20 -> 80点
 		got := svc.calculateMatchScore(map[string]float64{"技術志向": 80}, profile)
-		if got.EvaluatedCategories != 1 {
-			t.Errorf("EvaluatedCategories = %d, want 1", got.EvaluatedCategories)
+		if got.MatchedAxisCount != 1 {
+			t.Errorf("MatchedAxisCount = %d, want 1", got.MatchedAxisCount)
 		}
 		if math.Abs(got.MatchScore-80) > 0.001 {
 			t.Errorf("MatchScore = %.2f, want 80（未計測9軸に引っ張られない）", got.MatchScore)
@@ -100,8 +100,8 @@ func TestCalculateMatchScore_ExcludesUnmeasured(t *testing.T) {
 		// 技術志向: 差20 -> 80 / コミュニケーション力: 差0 -> 100
 		got := svc.calculateMatchScore(
 			map[string]float64{"技術志向": 80, "コミュニケーション力": 60}, profile)
-		if got.EvaluatedCategories != 2 {
-			t.Errorf("EvaluatedCategories = %d, want 2", got.EvaluatedCategories)
+		if got.MatchedAxisCount != 2 {
+			t.Errorf("MatchedAxisCount = %d, want 2", got.MatchedAxisCount)
 		}
 		if math.Abs(got.MatchScore-90) > 0.001 {
 			t.Errorf("MatchScore = %.2f, want 90", got.MatchScore)

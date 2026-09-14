@@ -31,11 +31,11 @@ func loadMatchReasonTemplates() matchReasonTemplates {
 	templatesOnce.Do(func() {
 		templates = matchReasonTemplates{
 			Default: matchReasonTemplate{
-				Intro:   "総合マッチ度{{match_score}}%。{{company_name}}（{{industry}}）は、あなたの志向と企業が重視する人物像が高い水準で一致しています。",
-				Fit:     "特に{{top_matches}}の一致度が高く、この企業の仕事の進め方や価値観と噛み合っています。",
+				Intro:   "総合マッチ度{{match_score}}%。{{company_name}}（{{industry}}）は、あなたの志向と企業が重視する人物像が{{match_level}}。",
+				Fit:     "その中では{{top_matches}}が相対的に高く、この企業の仕事の進め方や価値観と近い部分です。",
 				User:    "これまでの回答からは、{{user_strengths}}が強みとして読み取れます。強みが発揮できる場面が多く、成長の機会が得られる見込みがあります。",
 				Company: "{{company_context}}",
-				Closing: "上記の理由から、{{company_name}}は「無理なく力を発揮しつつ、次の成長につなげられる」候補として特におすすめです。",
+				Closing: "{{closing}}",
 			},
 		}
 
@@ -80,6 +80,8 @@ func BuildMatchReason(match *entity.UserCompanyMatch, userScores []entity.UserWe
 
 	replacer := strings.NewReplacer(
 		"{{match_score}}", fmt.Sprintf("%.0f", match.MatchScore),
+		"{{match_level}}", matchLevelPhrase(match.MatchScore),
+		"{{closing}}", closingPhrase(match.MatchScore, match.Company.Name),
 		"{{company_name}}", match.Company.Name,
 		"{{industry}}", fallbackText(match.Company.Industry, "IT業界"),
 		"{{top_matches}}", topMatches,
@@ -98,6 +100,39 @@ func BuildMatchReason(match *entity.UserCompanyMatch, userScores []entity.UserWe
 	return strings.Join(filterNonEmpty(sections), "\n\n")
 }
 
+// matchLevelPhrase はマッチ度に応じた言い回しを返す（#1124）。
+//
+// 以前は「高い水準で一致しています」で固定だった。飽和していた頃は
+// スコアが91%未満に落ちなかったため破綻しなかったが、線形化でスコアが
+// 下がるようになり「総合マッチ度22%。…高い水準で一致しています」が出る。
+func matchLevelPhrase(score float64) string {
+	switch {
+	case score >= 80:
+		return "高い水準で一致しています"
+	case score >= 60:
+		return "おおむね一致しています"
+	case score >= 40:
+		return "部分的に一致しています"
+	default:
+		return "あまり一致していません"
+	}
+}
+
+// closingPhrase はマッチ度に応じた締めを返す。
+// 低スコアで「特におすすめです」と書くと推薦の信頼を損なう。
+func closingPhrase(score float64, companyName string) string {
+	switch {
+	case score >= 80:
+		return fmt.Sprintf("上記の理由から、%sは「無理なく力を発揮しつつ、次の成長につなげられる」候補として特におすすめです。", companyName)
+	case score >= 60:
+		return fmt.Sprintf("%sは、強みを活かせる場面がある候補です。気になる点は選考の中で確認してみてください。", companyName)
+	case score >= 40:
+		return fmt.Sprintf("%sは志向の重なりが部分的です。どこが合い、どこが合わないかを見たうえで検討してください。", companyName)
+	default:
+		return fmt.Sprintf("%sは現時点の回答からは志向の重なりが小さい候補です。関心がある場合は、何に惹かれるのかを整理してから進めることをおすすめします。", companyName)
+	}
+}
+
 func topMatchSummaries(match *entity.UserCompanyMatch) string {
 	scores := []scoreItem{
 		{label: "技術志向", score: match.TechnicalMatch},
@@ -112,13 +147,22 @@ func topMatchSummaries(match *entity.UserCompanyMatch) string {
 		{label: "コミュニケーション力", score: match.CommunicationMatch},
 	}
 
-	sort.Slice(scores, func(i, j int) bool {
-		return scores[i].score > scores[j].score
+	// 未計測の軸はスコア0で保存されている（#1124）。
+	// 除外しないと「リーダーシップ(0%)の一致度が高く」という文面になる。
+	measured := make([]scoreItem, 0, len(scores))
+	for _, s := range scores {
+		if s.score > 0 {
+			measured = append(measured, s)
+		}
+	}
+
+	sort.Slice(measured, func(i, j int) bool {
+		return measured[i].score > measured[j].score
 	})
 
 	parts := []string{}
-	for i := 0; i < len(scores) && i < 3; i++ {
-		parts = append(parts, fmt.Sprintf("%s(%.0f%%)", scores[i].label, scores[i].score))
+	for i := 0; i < len(measured) && i < 3; i++ {
+		parts = append(parts, fmt.Sprintf("%s(%.0f%%)", measured[i].label, measured[i].score))
 	}
 	if len(parts) == 0 {
 		return "複数の評価軸"

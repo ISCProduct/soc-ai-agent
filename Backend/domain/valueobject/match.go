@@ -79,9 +79,9 @@ func (m MatchScore) String() string {
 // 正典は上の10種類だが、シードデータ・質問体系・面接スコアの写像が
 // それぞれ独自の表記を持っており、user_weight_scores に正典外の値が
 // 書き込まれていた。マッチング側は scoreMap を正典キーで引くため、
-// 不一致の行は引かれず、代わりに中立50が使われる
-// （matching_service.go の scoredMatch）。エラーもログも出ないまま
-// ユーザーの実スコアが捨てられる。
+// 不一致の行は引かれず、その軸は未計測として平均から除外される
+// （matching_service.go の scoredMatch。#1124 以前は中立50で埋めていた）。
+// エラーもログも出ないままユーザーの実スコアが捨てられる。
 //
 // 表記を1箇所に集約し、保存経路で必ず通すことで再発を止める。
 var weightCategoryAliases = map[string]WeightCategory{

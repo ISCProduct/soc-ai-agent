@@ -91,13 +91,16 @@ type UserCompanyMatch struct {
 	ChallengeMatch     float64
 	DetailMatch        float64
 	CommunicationMatch float64
-	// EvaluatedCategories は MatchScore の算出に使えた軸の数（0-10）。
+	// MatchedAxisCount は MatchScore の算出に使えた軸の数（0-10）。
 	// 未計測の軸は平均に含めないため、この値が小さいほど根拠が薄い（#1124）。
-	EvaluatedCategories int
-	MatchReason         string
-	IsViewed            bool
-	IsFavorited         bool
-	IsApplied           bool
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	//
+	// 既知の制約: スコア行が存在すれば値が0でも「計測済み」と数える。
+	// 面接経路は全軸0の行を書くため、実際には測れていないのに10と出る。
+	MatchedAxisCount int
+	MatchReason      string
+	IsViewed         bool
+	IsFavorited      bool
+	IsApplied        bool
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }

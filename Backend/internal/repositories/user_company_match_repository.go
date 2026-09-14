@@ -32,7 +32,7 @@ var upsertAssignments = clause.AssignmentColumns([]string{
 	"challenge_match",
 	"detail_match",
 	"communication_match",
-	"evaluated_categories",
+	"matched_axis_count",
 	"match_reason",
 	"updated_at",
 })
