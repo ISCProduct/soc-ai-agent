@@ -105,7 +105,11 @@ func TestListTendencies_LowMatchIsBatched(t *testing.T) {
 	}
 }
 
-// 閾値がサービス定数として渡ること。
+// 閾値と軸数の下限がサービス定数のままリポジトリへ渡ること。
+//
+// 引数が2つとも数値なので、取り違えても型では気付けない。
+// 軸数の下限が落ちると、再計算前の matched_axis_count = 0 の行まで
+// 「低マッチ」として教員一覧に出る（#1124）。
 func TestListTendencies_PassesThreshold(t *testing.T) {
 	low := &stubLowMatch{}
 	if _, err := lowMatchService(low, threeStudents...).ListTendencies(25, 0, "", nil); err != nil {
@@ -113,6 +117,28 @@ func TestListTendencies_PassesThreshold(t *testing.T) {
 	}
 	if low.gotThreshold != LowMatchThreshold {
 		t.Errorf("threshold = %v, want %v", low.gotThreshold, LowMatchThreshold)
+	}
+	if low.gotMinAxes != MinMatchedAxesForLowMatch {
+		t.Errorf("minMatchedAxes = %v, want %v", low.gotMinAxes, MinMatchedAxesForLowMatch)
+	}
+	// 0 を渡すと「計測不足の行を除外する」というガードが無効化される。
+	if low.gotMinAxes <= 0 {
+		t.Errorf("minMatchedAxes = %v: 0 以下では計測不足の行を除外できない", low.gotMinAxes)
+	}
+}
+
+// 絞り込みあり経路でも同じ定数が渡ること。
+// ListTendencies 側だけ直して LowMatchOnly 側を忘れる取りこぼしを防ぐ。
+func TestListTendenciesLowMatchOnly_PassesThreshold(t *testing.T) {
+	low := &stubLowMatch{}
+	if _, err := lowMatchService(low, threeStudents...).ListTendenciesLowMatchOnly(25, 0, "", nil); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if low.gotThreshold != LowMatchThreshold {
+		t.Errorf("threshold = %v, want %v", low.gotThreshold, LowMatchThreshold)
+	}
+	if low.gotMinAxes != MinMatchedAxesForLowMatch {
+		t.Errorf("minMatchedAxes = %v, want %v", low.gotMinAxes, MinMatchedAxesForLowMatch)
 	}
 }
 

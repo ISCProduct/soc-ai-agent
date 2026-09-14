@@ -77,16 +77,47 @@ type ChoiceResolution struct {
 	Letter     string // 選択肢記号（IsChoice=true のとき）
 	IsChoice   bool   // processChoiceAnswer 経路
 	IsFreeText bool   // 文章採点経路（その他・非選択肢質問含む）
-	Text       string // 採点・保存に使う本文
+	Text       string // 採点・保存に使う本文（自由記述時）
+	Reason     string // 選択肢に付随する任意の理由テキスト
+}
+
+// choiceWithReasonRe は FE が送る "A: 理由" / "1：理由" 形式。
+var choiceWithReasonRe = regexp.MustCompile(`(?s)^([A-Ea-e1-5])\s*[:：]\s*(.+)$`)
+
+// SplitChoiceAndReason は "A: 理由" 形式を letter と理由に分ける。
+// コロン形式でなければ letter="", reason=原文。
+func SplitChoiceAndReason(answer string) (letter, reason string, ok bool) {
+	answer = strings.TrimSpace(answer)
+	m := choiceWithReasonRe.FindStringSubmatch(answer)
+	if m == nil {
+		return "", answer, false
+	}
+	letter = strings.ToUpper(m[1])
+	if letter >= "1" && letter <= "5" {
+		// 数字はそのまま
+		letter = m[1]
+	}
+	reason = strings.TrimSpace(m[2])
+	return letter, reason, true
 }
 
 // ResolveChoiceAnswer は選択肢質問に対する自由入力を記号へ寄せる。
 // マッチしない自由記述・「その他」は IsFreeText=true（scoreChoice default 60 を避ける）。
+// "A: 理由" 形式は IsChoice=true かつ Reason に理由を載せる。
 func ResolveChoiceAnswer(question, answer string) ChoiceResolution {
 	answer = strings.TrimSpace(answer)
 	options := ParseChoiceOptions(question)
 	if len(options) == 0 {
 		return ChoiceResolution{IsFreeText: true, Text: answer}
+	}
+
+	if letter, reason, ok := SplitChoiceAndReason(answer); ok {
+		for _, opt := range options {
+			if strings.EqualFold(opt.Value, letter) {
+				return ChoiceResolution{Letter: opt.Value, IsChoice: true, Text: opt.Value, Reason: reason}
+			}
+		}
+		return ChoiceResolution{Letter: letter, IsChoice: true, Text: letter, Reason: reason}
 	}
 
 	upper := strings.ToUpper(answer)

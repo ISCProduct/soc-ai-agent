@@ -217,6 +217,15 @@ rejected         → 不合格
 | POST | `/api/admin/score-validation/variants` | バリアント作成 |
 | GET | `/api/admin/score-validation/variants/results?experiment=xxx` | バリアント結果 |
 
+### 診断妥当性レポート
+
+| メソッド | パス | 概要 |
+|---------|------|------|
+| GET | `/api/admin/diagnosis-quality` | 直近レポート一覧（`?limit=`） |
+| GET | `/api/admin/diagnosis-quality?user_id=&session_id=` | セッション単位のレポート |
+
+マッチング完了後に asynq `diagnosis:quality` が非同期実行し、信頼度とフラグのみ保存する（スコアは自動補正しない）。
+
 ### 集合知バッチ（#205）
 
 | メソッド | パス | 概要 |

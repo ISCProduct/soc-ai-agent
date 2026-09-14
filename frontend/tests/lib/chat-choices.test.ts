@@ -1,4 +1,8 @@
-import { resolveChatOutgoingMessage, type ChatChoiceOption } from '@/lib/chat-choices'
+import {
+  buildChoiceOutgoingMessage,
+  resolveChatOutgoingMessage,
+  type ChatChoiceOption,
+} from '@/lib/chat-choices'
 
 const choices: ChatChoiceOption[] = [
   { value: '1', label: '1', text: '新しい技術やツールに触れる' },
@@ -29,5 +33,17 @@ describe('resolveChatOutgoingMessage', () => {
 
   it('選択肢が無いときは原文のまま', () => {
     expect(resolveChatOutgoingMessage('こんにちは', [], false)).toBe('こんにちは')
+  })
+})
+
+describe('buildChoiceOutgoingMessage', () => {
+  it('理由なしは記号のみ', () => {
+    expect(buildChoiceOutgoingMessage('A', '')).toBe('A')
+    expect(buildChoiceOutgoingMessage('1', '  ')).toBe('1')
+  })
+
+  it('理由ありは A: 理由 形式', () => {
+    expect(buildChoiceOutgoingMessage('A', 'チームで進めたい')).toBe('A: チームで進めたい')
+    expect(buildChoiceOutgoingMessage('2', '設計が好き')).toBe('2: 設計が好き')
   })
 })

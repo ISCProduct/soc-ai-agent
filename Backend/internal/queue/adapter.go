@@ -31,5 +31,9 @@ func (a *EnqueuerAdapter) EnqueueInterviewReport(sessionID uint) error {
 	return a.Client.EnqueueInterviewReport(sessionID)
 }
 
+func (a *EnqueuerAdapter) EnqueueDiagnosisQuality(userID uint, sessionID string) error {
+	return a.Client.EnqueueDiagnosisQuality(userID, sessionID)
+}
+
 // コンパイル時チェック
 var _ shared.JobEnqueuer = (*EnqueuerAdapter)(nil)

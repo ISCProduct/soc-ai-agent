@@ -16,6 +16,7 @@ const (
 	TaskEmailRegistration   = "email:registration"
 	TaskEmailPasswordReset  = "email:password_reset"
 	TaskInterviewReport     = "interview:report"
+	TaskDiagnosisQuality    = "diagnosis:quality"
 
 	QueueDefault  = "default"
 	QueueCritical = "critical"
@@ -75,6 +76,12 @@ type InterviewReportPayload struct {
 	SessionID uint `json:"session_id"`
 }
 
+// DiagnosisQualityPayload は診断妥当性評価ジョブのペイロード。
+type DiagnosisQualityPayload struct {
+	UserID    uint   `json:"user_id"`
+	SessionID string `json:"session_id"`
+}
+
 func (c *Client) enqueue(taskType, queueName string, payload any, maxRetry int, timeout time.Duration) error {
 	if c == nil || c.client == nil {
 		return fmt.Errorf("queue client is not configured")
@@ -116,6 +123,10 @@ func (c *Client) EnqueueEmailPasswordReset(p EmailPasswordResetPayload) error {
 
 func (c *Client) EnqueueInterviewReport(sessionID uint) error {
 	return c.enqueue(TaskInterviewReport, QueueDefault, InterviewReportPayload{SessionID: sessionID}, 3, 10*time.Minute)
+}
+
+func (c *Client) EnqueueDiagnosisQuality(userID uint, sessionID string) error {
+	return c.enqueue(TaskDiagnosisQuality, QueueDefault, DiagnosisQualityPayload{UserID: userID, SessionID: sessionID}, 3, 5*time.Minute)
 }
 
 // RedisOptFromClient は go-redis Client から asynq の RedisConnOpt を作る。

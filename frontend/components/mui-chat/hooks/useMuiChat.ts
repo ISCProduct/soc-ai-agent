@@ -6,7 +6,7 @@ import { sendChatMessage, getChatHistory, type ChatRequest, type ChatResponse } 
 import { UserFacingApiError, gatewayErrorPath } from '@/lib/user-facing-error'
 import { authService } from '@/lib/auth'
 import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
-import { resolveChatOutgoingMessage } from '@/lib/chat-choices'
+import { buildChoiceOutgoingMessage, resolveChatOutgoingMessage } from '@/lib/chat-choices'
 import {
   extractChoices,
   makeMessageId,
@@ -41,6 +41,7 @@ export function useMuiChat() {
   const [showEndChatModal, setShowEndChatModal] = useState(false)
   const [showTerminationModal, setShowTerminationModal] = useState(false)
   const [otherChoiceActive, setOtherChoiceActive] = useState(false)
+  const [selectedChoiceValue, setSelectedChoiceValue] = useState<string | null>(null)
   const [phaseProgresses, setPhaseProgresses] = useState<PhaseProgress[] | null>(null)
   const [historyLoadError, setHistoryLoadError] = useState<string | null>(null)
   const [historyRetrying, setHistoryRetrying] = useState(false)
@@ -228,22 +229,28 @@ export function useMuiChat() {
   }, [])
 
   const handleSend = async (overrideMessage?: string) => {
-    const rawText = (overrideMessage ?? input).trim()
-    if (!rawText || isLoading || !sessionId || !userId || historyLoadError) return
-
-    // ボタン送信はそのまま。自由入力は直近の選択肢ラベルを記号へ正規化する
-    const lastAssistant = findLastAssistantQuestionMessage(messages)
-    const currentChoices = lastAssistant ? extractChoices(lastAssistant.content) : []
-    const messageText =
-      overrideMessage !== undefined
-        ? rawText
-        : resolveChatOutgoingMessage(rawText, currentChoices, otherChoiceActive)
+    if (isLoading || !sessionId || !userId || historyLoadError) return
 
     // 分析完了後はメッセージ送信を無効化
     if (analysisComplete) {
       console.log('[MUI Chat] Analysis already complete, ignoring message')
       return
     }
+
+    const lastAssistant = findLastAssistantQuestionMessage(messages)
+    const currentChoices = lastAssistant ? extractChoices(lastAssistant.content) : []
+
+    let messageText: string
+    if (overrideMessage !== undefined) {
+      // クイック選択など明示 override
+      messageText = overrideMessage.trim()
+    } else if (selectedChoiceValue && !otherChoiceActive) {
+      messageText = buildChoiceOutgoingMessage(selectedChoiceValue, input)
+    } else {
+      messageText = resolveChatOutgoingMessage(input.trim(), currentChoices, otherChoiceActive)
+    }
+
+    if (!messageText) return
 
     const userMessage: Message = {
       id: makeMessageId(),
@@ -255,6 +262,7 @@ export function useMuiChat() {
     setMessages((prev) => [...prev, userMessage])
     setInput('')
     setOtherChoiceActive(false)
+    setSelectedChoiceValue(null)
     setIsLoading(true)
 
     try {
@@ -512,18 +520,38 @@ export function useMuiChat() {
   const inputPlaceholder = otherChoiceActive
     ? 'その他の内容を入力...'
     : showChoiceButtons
-      ? '選択肢と同じ内容を入力しても送信できます'
+      ? selectedChoiceValue
+        ? '任意: そう思う理由を一言（空でも送信可）'
+        : '選択肢を選ぶか、同じ内容を入力してください'
       : 'メッセージを入力...'
+
+  const canSend = otherChoiceActive
+    ? input.trim().length > 0
+    : selectedChoiceValue !== null || input.trim().length > 0
 
   useEffect(() => {
     if (!showChoiceButtons) {
       setOtherChoiceActive(false)
+      setSelectedChoiceValue(null)
     }
   }, [showChoiceButtons])
 
+  // 新しい質問が来たら選択をクリア
+  useEffect(() => {
+    setSelectedChoiceValue(null)
+    setOtherChoiceActive(false)
+  }, [lastAssistantMessage?.id])
+
   const handleOtherChoice = () => {
     setOtherChoiceActive(true)
+    setSelectedChoiceValue(null)
     setInput('')
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  const handleSelectChoice = (value: string) => {
+    setOtherChoiceActive(false)
+    setSelectedChoiceValue(value)
     setTimeout(() => inputRef.current?.focus(), 0)
   }
 
@@ -542,6 +570,7 @@ export function useMuiChat() {
     showEndChatModal,
     showTerminationModal,
     otherChoiceActive,
+    selectedChoiceValue,
     historyLoadError,
     historyRetrying,
     messagesEndRef,
@@ -551,6 +580,7 @@ export function useMuiChat() {
     choiceOptions,
     showChoiceButtons,
     inputPlaceholder,
+    canSend,
     handleSend,
     handleReset,
     handleEndChat,
@@ -560,5 +590,6 @@ export function useMuiChat() {
     handleContinueChat,
     handleRetryHistoryLoad,
     handleOtherChoice,
+    handleSelectChoice,
   }
 }

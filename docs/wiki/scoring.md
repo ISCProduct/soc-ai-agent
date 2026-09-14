@@ -253,20 +253,22 @@ type CompanyWeightProfile struct {
 ### 総合マッチスコアの計算
 
 ```
-総合マッチスコア = 全カテゴリのマッチ度の平均
+総合マッチスコア = 計測できたカテゴリのマッチ度の平均
 ```
 
-未評価カテゴリは中立値（50）として計算に含めます。
+未計測カテゴリは平均に**含めない**（#1124）。件数は `matched_axis_count` に保存する。
+以前は中立値50で埋めていたが、企業重視度が50前後に寄ると未診断でも97%前後に飽和するため廃止した。
 
 ### 実装（`matching_service.go`）
 
 ```go
 // scoredMatch 1カテゴリのマッチ度を計算
 func scoredMatch(userScores map[string]float64, category string, companyWeight float64, ...) (...) {
-    // 未評価カテゴリは中立値(50)として扱い、評価対象に含める
-    userScore := userScores[category]  // 未評価の場合は 0 → 中立値補完
-    diff := math.Abs(userScore - companyWeight)
-    matchDegree := 100.0 - diff
+    userScore, ok := userScores[category]
+    if !ok {
+        return 0, evaluatedCount, totalScore // 未計測は平均から除外
+    }
+    matchDegree := 100.0 - math.Abs(userScore - companyWeight) // 線形
     // ...
 }
 ```
