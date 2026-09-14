@@ -131,7 +131,10 @@ func (c *AdminDashboardController) ListUsers(ctx echo.Context) error {
 	offset := (echoIntQuery(ctx, "page", 1) - 1) * limit
 	query := ctx.QueryParam("query")
 	sort := ctx.QueryParam("sort") // avg_score_asc | avg_score_desc | session_count_desc | registered_desc
-	schoolID, _ := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
+	schoolID, err := echoAdminSchoolFilter(ctx)
+	if err != nil {
+		return err
+	}
 
 	users, total, err := c.userRepo.ListUsersPaged(limit, offset, query, schoolID)
 	if err != nil {
@@ -292,7 +295,10 @@ func (c *AdminDashboardController) ExportCSV(ctx echo.Context) error {
 	if !entitlement.Can(c.currentAdminPlan(ctx), entitlement.FeatureExport) {
 		return echo.NewHTTPError(http.StatusForbidden, "plan_feature_required")
 	}
-	schoolID, _ := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
+	schoolID, err := echoAdminSchoolFilter(ctx)
+	if err != nil {
+		return err
+	}
 	users, _, err := c.userRepo.ListUsersPaged(10000, 0, "", schoolID)
 	if err != nil {
 		return echoInternalError(err)

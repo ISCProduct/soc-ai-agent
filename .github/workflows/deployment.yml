@@ -737,19 +737,23 @@ jobs:
             --json number,title,body,mergedAt \
             --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
 
+          # 本番が停止していると必ず失敗する(既定停止の運用)。ここで失敗させるとデプロイが
+          # 落ちてしまうため続行はするが、黙って握りつぶすと「反映されていない」ことに
+          # 気づけない。実際にそれで、運用作業がユーザー向け更新情報に出たまま残った(#1290)。
+          # 取りこぼしは prod-uptime-scheduler.yml が本番起動時に回収する。
           curl -sf -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $ADMIN_SECRET" \
             -d "{\"sources\": $sources}" \
             --max-time 60 \
-            || echo "本番への取り込みに失敗しました(停止中の可能性)。スキップします。"
+            || echo "::warning::本番への更新情報の取り込みに失敗しました(停止中の可能性)。本番起動時に回収されます。"
 
           curl -sf -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $ADMIN_SECRET" \
             -d "{\"sources\": $sources}" \
             --max-time 60 \
-            || echo "stagingへの取り込みに失敗しました(停止中の可能性)。スキップします。"
+            || echo "::warning::stagingへの更新情報の取り込みに失敗しました(停止中の可能性)。"
 
   # 本番へ反映された issue を閉じる。
   #

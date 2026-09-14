@@ -9,6 +9,16 @@ import { extractTenantSlug, isAdminHost } from '@/lib/tenant'
 // アクセストークンの残り有効期間がこの秒数を下回ったらリフレッシュする (#616)
 const REFRESH_MARGIN_SECONDS = 120
 
+// リクエストID (#1188)。FE -> BE -> RAG のログを1つのIDで突き合わせるため、
+// 入口であるここで採番し、Route Handler 経由でBackendへ渡す。
+const REQUEST_ID_HEADER = 'X-Request-ID'
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
+
+// クライアント指定値はログに出るため形式を検証し、不正なら採番し直す
+function resolveRequestId(incoming: string | null): string {
+  return incoming && REQUEST_ID_PATTERN.test(incoming) ? incoming : crypto.randomUUID()
+}
+
 interface RefreshedSession {
   userId: string
   userToken: string
@@ -117,6 +127,9 @@ export async function middleware(request: NextRequest) {
   const tenantSlug = extractTenantSlug(request.headers.get('host') ?? '')
   if (tenantSlug) requestHeaders.set('X-Tenant-Slug', tenantSlug)
 
+  const requestId = resolveRequestId(request.headers.get(REQUEST_ID_HEADER))
+  requestHeaders.set(REQUEST_ID_HEADER, requestId)
+
   if (userId && userToken) {
     let effectiveUserId = userId
     let effectiveToken = userToken
@@ -160,6 +173,9 @@ export async function middleware(request: NextRequest) {
   } else {
     response = NextResponse.next({ request: { headers: requestHeaders } })
   }
+
+  // 問い合わせ時にユーザーがIDを提示できるよう、ブラウザ側にも返す(#1188)
+  response.headers.set(REQUEST_ID_HEADER, requestId)
 
   // ローテーションされた新しいトークンペアをCookieへ反映
   if (refreshed) {

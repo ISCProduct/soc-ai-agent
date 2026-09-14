@@ -32,6 +32,21 @@ func TestIsDeveloperOnlyReleaseNote(t *testing.T) {
 		// Release 傘PRは本文に Fargate/Terraform 定型文があっても LLM に任せる
 		{name: "Release傘PRのFargate定型文は除外しない", title: "Release to production: 面接UX修正", body: "マージすると本番（ECS on Fargate）へ自動デプロイされます。", want: false},
 		{name: "Release傘PRのterraform言及は除外しない", title: "Release: 2026-09-07 レート制限回避ほか", body: "infra/terraform の修正を含む", want: false},
+
+		// #1289: Release 傘PRでも「タイトルが運用作業そのもの」なら除外する。
+		// 本番の更新情報に Discord からの環境起動/停止などが表示されていた。
+		// 実際に本番へ出た PR タイトルをそのまま使う。
+		{name: "実例: Discordから本番環境を起動/停止するは除外", title: "Release: 2026-09-09 本番反映（Discordから本番環境を起動/停止する）", body: "", want: true},
+		{name: "実例: Lambda移設とstaging運用は除外", title: "release: Discord受け口のLambda移設と観測性・staging運用の修正を本番ブランチへ反映する", body: "", want: true},
+		{name: "実例: staging復旧まわりは除外", title: "release: staging復旧まわりの修正4件を本番ブランチへ反映する", body: "", want: true},
+		{name: "実例: 基盤バージョンアップとデプロイ基盤は除外", title: "release: 基盤バージョンアップ(#1277)とデプロイ基盤の修正を本番へ反映する", body: "", want: true},
+		{name: "実例: 本番RAGインフラのコード化は除外", title: "Release: 2026-08-31 本番RAGインフラ(rag-review/chroma)のコード化", body: "", want: false},
+
+		// ユーザー向けリリースまで落とさないこと（フィルタの過剰適用を防ぐ回帰）
+		{name: "実例: 音声認識改善・教員向け機能は残す", title: "Release: 2026-09-10 本番反映（AI面接の音声認識改善・教員向け機能・公開API漏洩修正）", body: "", want: false},
+		{name: "実例: 教員向け分析・企業パスワードリセットは残す", title: "Release: 2026-09-08 本番反映（教員向け生徒傾向分析・企業パスワードリセット・未審査企業の露出修正）", body: "", want: false},
+		{name: "実例: スカウト機能は残す", title: "Release to production: 2026-09-05 スカウト機能、OpenAIリトライ不具合修正、CI検証範囲の拡大", body: "", want: false},
+		{name: "実例: 面接深掘り継続力は残す", title: "Release to production: 2026-09-05 面接深掘り継続力・OAuth文字化け修正・FT蒸留排除・Backlog同期", body: "", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

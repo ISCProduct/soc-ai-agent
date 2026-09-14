@@ -51,7 +51,7 @@ func (s *ChatService) ensureUserEmbedding(ctx context.Context, userID uint, sess
 		return err
 	}
 
-	history, err := s.chatMessageRepo.FindBySessionID(sessionID)
+	history, err := s.chatMessageRepo.FindBySessionIDForUser(sessionID, userID)
 	if err != nil {
 		return fmt.Errorf("load chat history: %w", err)
 	}

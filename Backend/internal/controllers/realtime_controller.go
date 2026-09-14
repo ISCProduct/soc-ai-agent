@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/openai"
 	ifaces "Backend/internal/services/interfaces"
 	"Backend/internal/services/shared"
 	"errors"
@@ -56,6 +57,11 @@ func (c *RealtimeController) Token(ctx echo.Context) error {
 		}
 		if strings.Contains(err.Error(), "realtime capacity exceeded") {
 			return echo.NewHTTPError(http.StatusTooManyRequests, err.Error())
+		}
+		// AI プロバイダ未設定・ローカル構成では 503 + 固定文言にする。
+		// err.Error() をそのまま返すと OpenAI のエラー本文や内部設定が学生に見える(#1293)
+		if errors.Is(err, openai.ErrAIUnavailable) {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "現在AI機能を利用できません。しばらくしてから再度お試しください。")
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}

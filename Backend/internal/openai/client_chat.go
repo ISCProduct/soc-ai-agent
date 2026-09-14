@@ -39,8 +39,8 @@ func resolveWebSearchModel(override string) string {
 }
 
 func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxTokens int, modelOverride ...string) (string, error) {
-	if cli == nil || cli.c == nil {
-		return "", errors.New("openai client is nil")
+	if err := cli.ensureText(); err != nil {
+		return "", err
 	}
 
 	model := cli.DefaultModel
@@ -53,7 +53,7 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 
 	var lastErr error
 	for attempt := 1; attempt <= 5; attempt++ {
-		ctxReq, cancel := context.WithTimeout(ctx, 60*time.Second)
+		ctxReq, cancel := context.WithTimeout(withFallbackFlag(ctx), 60*time.Second)
 		req := openai.ChatCompletionRequest{
 			Model: model,
 			Messages: []openai.ChatCompletionMessage{
@@ -92,9 +92,7 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 		if err == nil && len(resp.Choices) > 0 {
 			content := strings.TrimSpace(resp.Choices[0].Message.Content)
 			if content != "" {
-				if cli.OnUsage != nil {
-					cli.OnUsage(req.Model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
-				}
+				cli.reportUsage(ctxReq, cli.textProvider, req.Model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 				// キャッシュヒットのログを出力（存在すれば）
 				if resp.Usage.PromptTokensDetails != nil {
 					cached := resp.Usage.PromptTokensDetails.CachedTokens
@@ -157,8 +155,8 @@ func isRetryableAPIErr(err error) bool {
 // WebSearchJSON は Responses API の web_search で 1 クエリだけ実行する。
 // Chat Completions の search-preview / gpt-5-search-api は使わない（高トークン・高額）。
 func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxTokens int, modelOverride ...string) (string, error) {
-	if cli == nil || cli.c == nil {
-		return "", errors.New("openai client is nil")
+	if err := cli.ensureText(); err != nil {
+		return "", err
 	}
 	if maxTokens < 600 {
 		maxTokens = 600

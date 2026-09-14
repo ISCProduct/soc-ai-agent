@@ -25,12 +25,19 @@ func (m *ChatServiceMock) ProcessChat(ctx context.Context, req chat.ChatRequest)
 	return nil, args.Error(1)
 }
 
-func (m *ChatServiceMock) GetChatHistory(sessionID string) ([]models.ChatMessage, error) {
-	args := m.Called(sessionID)
+// GetChatHistoryForUser は user_id でスコープした履歴取得（#1156）。
+func (m *ChatServiceMock) GetChatHistoryForUser(sessionID string, userID uint) ([]models.ChatMessage, error) {
+	args := m.Called(sessionID, userID)
 	if v := args.Get(0); v != nil {
 		return v.([]models.ChatMessage), args.Error(1)
 	}
 	return nil, args.Error(1)
+}
+
+// SessionHasOtherUserMessages は session_id に自分以外のメッセージがあるか（#1156）。
+func (m *ChatServiceMock) SessionHasOtherUserMessages(sessionID string, userID uint) (bool, error) {
+	args := m.Called(sessionID, userID)
+	return args.Bool(0), args.Error(1)
 }
 
 func (m *ChatServiceMock) GetUserScores(userID uint, sessionID string) ([]entity.UserWeightScore, error) {

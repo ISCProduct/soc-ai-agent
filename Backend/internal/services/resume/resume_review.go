@@ -16,16 +16,21 @@ import (
 	"time"
 
 	"Backend/internal/models"
+	"Backend/internal/openai"
 	"Backend/internal/ragclient"
+
+	"gorm.io/gorm"
 )
 
-func (s *ResumeService) ReviewDocument(documentID uint, requestingUserID uint, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
-	doc, err := s.repo.FindDocumentByID(documentID)
+// ctx はリクエストIDを RAG まで伝播させるために受け取る(#1188)
+func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, requestingUserID uint, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+	// クエリを user_id でスコープする。所有者以外には見つからない（#1156）
+	doc, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, shared.ErrForbidden
+		}
 		return nil, nil, err
-	}
-	if doc.UserID != requestingUserID {
-		return nil, nil, shared.ErrForbidden
 	}
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
 		return nil, nil, &shared.ValidationError{Message: "応募企業名または応募職種を入力してください"}
@@ -73,7 +78,7 @@ func (s *ResumeService) ReviewDocument(documentID uint, requestingUserID uint, c
 		return nil, nil, err
 	}
 
-	review, items, err := s.buildResumeReviewWithAI(blocks, companyName, jobTitle, candidateType)
+	review, items, err := s.buildResumeReviewWithAI(ctx, blocks, companyName, jobTitle, candidateType)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -136,7 +141,8 @@ type ragReviewResponse struct {
 	Report string `json:"report"`
 }
 
-func (s *ResumeService) fetchRAGReport(resumeText, companyName, jobTitle string) (string, error) {
+// ctx はリクエストIDを RAG へ伝播させるために受け取る(#1188)
+func (s *ResumeService) fetchRAGReport(ctx context.Context, resumeText, companyName, jobTitle string) (string, error) {
 	baseURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
 	if baseURL == "" {
 		return "", errors.New("RAG_REVIEW_URL is not set")
@@ -156,7 +162,7 @@ func (s *ResumeService) fetchRAGReport(resumeText, companyName, jobTitle string)
 	}
 
 	url := strings.TrimRight(baseURL, "/") + "/resume/review"
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -238,14 +244,14 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		flushSSE(w)
 	}
 
-	doc, err := s.repo.FindDocumentByID(documentID)
+	doc, err := s.repo.FindDocumentByIDForUser(documentID, requestingUserID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			sendEvent(map[string]any{"type": "error", "message": "forbidden"})
+			return shared.ErrForbidden
+		}
 		sendEvent(map[string]any{"type": "error", "message": err.Error()})
 		return err
-	}
-	if doc.UserID != requestingUserID {
-		sendEvent(map[string]any{"type": "error", "message": "forbidden"})
-		return shared.ErrForbidden
 	}
 	if strings.TrimSpace(companyName) == "" && strings.TrimSpace(jobTitle) == "" {
 		msg := "応募企業名または応募職種を入力してください"
@@ -323,9 +329,13 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	if err != nil {
 		log.Printf("resume_review_stream: build score failed: %v", err)
 		var ve *shared.ValidationError
-		if errors.As(err, &ve) {
+		switch {
+		case errors.As(err, &ve):
 			sendEvent(map[string]any{"type": "error", "message": ve.Message})
-		} else {
+		case errors.Is(err, openai.ErrAIUnavailable):
+			// 内部設定が学生に見えないよう固定文言にする(#1293)
+			sendEvent(map[string]any{"type": "error", "message": "現在AI機能を利用できません。しばらくしてから再度お試しください。"})
+		default:
 			sendEvent(map[string]any{"type": "error", "message": err.Error()})
 		}
 		return err
@@ -412,7 +422,7 @@ func relaySSEChunks(body io.Reader, w http.ResponseWriter) (string, error) {
 	return accum.String(), scanner.Err()
 }
 
-func (s *ResumeService) buildResumeReviewWithAI(blocks []models.ResumeTextBlock, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+func (s *ResumeService) buildResumeReviewWithAI(ctx context.Context, blocks []models.ResumeTextBlock, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
 	text := buildResumeText(blocks, 30000)
 	if strings.TrimSpace(text) == "" {
 		return nil, nil, &shared.ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
@@ -423,7 +433,7 @@ func (s *ResumeService) buildResumeReviewWithAI(blocks []models.ResumeTextBlock,
 
 	var companyInfo string
 	if strings.TrimSpace(companyName) != "" {
-		if ragReport, err := s.fetchRAGReport(text, companyName, jobTitle); err == nil {
+		if ragReport, err := s.fetchRAGReport(ctx, text, companyName, jobTitle); err == nil {
 			companyInfo = ragReport
 		} else {
 			log.Printf("resume_review: rag report failed: %v", err)

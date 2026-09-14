@@ -21,6 +21,7 @@ import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
+import { getAdminSchoolAccess } from '@/lib/admin-school-access'
 
 type AdminUser = {
   id: number
@@ -45,11 +46,25 @@ export default function PageContent() {
   const [rowsPerPage, setRowsPerPage] = useState(25)
   const [loading, setLoading] = useState(false)
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
+  // 担当校を持つ管理者(先生)かどうか。true のとき管理者権限の変更ボタンを出さない(#1157)
+  const [restrictedAdmin, setRestrictedAdmin] = useState(false)
 
   useEffect(() => {
     const user = authService.getStoredUser()
     if (!user?.is_admin) {
       window.location.href = '/'
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    getAdminSchoolAccess()
+      .then((access) => {
+        if (!cancelled) setRestrictedAdmin(access.restricted)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
     }
   }, [])
 
@@ -203,14 +218,18 @@ export default function PageContent() {
                         <TableCell>{user.updated_at}</TableCell>
                         <TableCell align="right">
                           <Stack direction="row" spacing={1} justifyContent="flex-end">
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              disabled={loading}
-                              onClick={() => handleToggleAdmin(user)}
-                            >
-                              {user.is_admin ? '管理者権限を外す' : '管理者にする'}
-                            </Button>
+                            {/* 担当校を持つ管理者(先生)は is_admin を変更できない(#1157)。
+                                押せば必ず403になるボタンを出さない */}
+                            {!restrictedAdmin && (
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                disabled={loading}
+                                onClick={() => handleToggleAdmin(user)}
+                              >
+                                {user.is_admin ? '管理者権限を外す' : '管理者にする'}
+                              </Button>
+                            )}
                             <Button
                               size="small"
                               variant="outlined"

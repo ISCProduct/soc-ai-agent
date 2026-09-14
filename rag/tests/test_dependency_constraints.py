@@ -1,8 +1,12 @@
 """
-依存バージョン整合性テスト (Issue #489)
+依存バージョン整合性テスト (Issue #489 / #1067 / #1159)
 
 requirements.txt と constraints.txt のバージョン制約が一致していること、
 インストール済みパッケージが制約範囲内にあることを検証する。
+
+インストール済み版の検証は requirements.txt の全宣言を対象にする（#1159）。
+パッケージ名を列挙する方式だと、列挙漏れのパッケージで #1067 と同じ乖離が
+起きても CI が素通りするため。
 
 実行方法:
     cd rag && pytest tests/test_dependency_constraints.py -v
@@ -13,6 +17,7 @@ import os
 import re
 
 import pytest
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import Version
 
 _RAG_DIR = os.path.join(os.path.dirname(__file__), "..")
@@ -76,24 +81,6 @@ class TestChromadbVersionConstraint:
         assert req_upper == con_upper, (
             f"requirements.txt (<{req_upper}) と constraints.txt (<{con_upper}) の "
             "chromadb 上限が不一致。両ファイルを揃えること。"
-        )
-
-    def test_installed_chromadb_within_lower_bound(self):
-        """インストール済みの chromadb が下限 >=0.6.3 を満たしている。"""
-        version = importlib.metadata.version("chromadb")
-        lower = _extract_lower_bound(_REQUIREMENTS_TXT, "chromadb")
-        assert lower is not None
-        assert Version(version) >= Version(lower), (
-            f"インストール済み chromadb {version} が下限 {lower} 未満"
-        )
-
-    def test_installed_chromadb_within_upper_bound(self):
-        """インストール済みの chromadb が上限 <0.7.0 を満たしている。"""
-        version = importlib.metadata.version("chromadb")
-        upper = _extract_upper_bound(_CONSTRAINTS_TXT, "chromadb")
-        assert upper is not None
-        assert Version(version) < Version(upper), (
-            f"インストール済み chromadb {version} が上限 <{upper} を超えている"
         )
 
 
@@ -201,42 +188,126 @@ class TestLangchainInRequirements:
         assert _parse_version_spec(_CONSTRAINTS_TXT, "langchain-community") is None
 
 
-_LANGCHAIN_PACKAGES = (
-    "langchain",
-    "langchain-core",
-    "langchain-openai",
-    "langchain-text-splitters",
-)
+def _declared_requirements(filepath: str) -> tuple[list[Requirement], list[tuple[str, str]]]:
+    """宣言ファイルを1行ずつ Requirement として解釈する。
+
+    `==` / `>=` / `<` / 複合指定を一様に扱えるため、パッケージ名の列挙が不要になる。
+    パースできない行は例外にせず errors として返す。モジュールインポート時に例外を投げると
+    collection error になり、`--maxfail=1` の CI では依存整合と無関係なテストまで
+    止まってしまうため（原因も専用テストの失敗メッセージで示す）。
+    """
+    reqs: list[Requirement] = []
+    errors: list[tuple[str, str]] = []
+    with open(filepath, encoding="utf-8") as f:
+        for line in f:
+            # 行頭または空白直後の # だけをコメントとして落とす。
+            # 直接参照URL (`pkg @ git+https://...#egg=pkg`) のフラグメントを壊さないため。
+            stripped = re.sub(r"(?:^|\s)#.*$", "", line).strip()
+            if not stripped or stripped.startswith("-"):
+                # 空行・コメント行と、pip オプション行（-r / --index-url 等）は対象外
+                continue
+            try:
+                reqs.append(Requirement(stripped))
+            except InvalidRequirement as exc:
+                errors.append((stripped, str(exc)))
+    return reqs, errors
 
 
-class TestLangchainInstalledVersionMatchesDeclaration:
-    """Issue #1067: langchain 系の「宣言」と「実インストール」の乖離を検知する。
+_DECLARED, _DECLARED_ERRORS = _declared_requirements(_REQUIREMENTS_TXT)
+_CONSTRAINTS_DECLARED, _CONSTRAINTS_ERRORS = _declared_requirements(_CONSTRAINTS_TXT)
 
-    既存の TestLangchainInRequirements は requirements.txt と constraints.txt の
-    宣言同士しか突き合わせておらず、宣言が 1.x なのに実環境へ 0.3.x が入ったまま、
-    という状態を検知できなかった。chromadb で既に確立している
-    test_installed_chromadb_within_* と同じ検証を langchain 系へ横展開する。
+
+def _skip_if_marker_not_applicable(req: Requirement) -> None:
+    """環境マーカーが成立しない宣言（例: python_version < "3.11"）は検証対象外。"""
+    if req.marker is not None and not req.marker.evaluate():
+        pytest.skip(f"{req.name} は現環境ではマーカー不成立: {req.marker}")
+
+
+def _installed_version(req: Requirement) -> str:
+    try:
+        return importlib.metadata.version(req.name)
+    except importlib.metadata.PackageNotFoundError:
+        pytest.fail(
+            f"{req.name}: requirements.txt に宣言されているがインストールされていない。"
+            "`pip install -r requirements.txt -c constraints.txt` で環境を作り直すこと"
+        )
+        raise AssertionError("unreachable")  # pytest.fail は必ず送出する
+
+
+class TestDeclaredPackagesMatchInstalled:
+    """Issue #1159: requirements.txt の全宣言について、実インストール版が宣言を満たすことを検証する。
+
+    判定は `prereleases=False` で行う。pip は既定で prerelease をインストールしないため
+    それに揃える（packaging の `SpecifierSet.contains()` の既定はバージョンにより変わり、
+    packaging は推移的依存なのでテストの厳格さが揺れてしまう）。
+
+    #1067 で入れた乖離検知は langchain 系4件と chromadb だけが対象で、
+    `==` ピン（fastapi/pydantic/pytest/tiktoken/uvicorn）は検証されていなかった。
+    ここでは宣言を列挙せず requirements.txt を読んで判定するため、
+    依存を追加しても自動的に検証対象になる。
     """
 
-    @pytest.mark.parametrize("package", _LANGCHAIN_PACKAGES)
-    def test_installed_langchain_within_lower_bound(self, package: str):
-        """インストール済みの langchain 系が requirements.txt の下限を満たしている。"""
-        installed = Version(importlib.metadata.version(package))
-        lower = _extract_lower_bound(_REQUIREMENTS_TXT, package)
-        assert lower is not None, f"requirements.txt に {package} の下限が設定されていない"
-        assert installed >= Version(lower), (
-            f"{package}: インストール済み {installed} が宣言下限 >={lower} を下回っている。"
-            "`pip install -r requirements.txt -c constraints.txt` で環境を作り直すこと (#1067)"
+    def test_declaration_files_are_parsable(self):
+        """requirements.txt / constraints.txt の全行が Requirement として解釈できる。"""
+        assert not _DECLARED_ERRORS, f"requirements.txt にパースできない行がある: {_DECLARED_ERRORS}"
+        assert not _CONSTRAINTS_ERRORS, f"constraints.txt にパースできない行がある: {_CONSTRAINTS_ERRORS}"
+
+    def test_requirements_txt_is_not_empty(self):
+        """宣言の読み取り自体が壊れていないことを確かめる（全件検証が空振りしないため）。"""
+        assert _DECLARED, "requirements.txt の宣言が1件も読めていない"
+
+    @pytest.mark.parametrize("req", _DECLARED, ids=[r.name for r in _DECLARED])
+    def test_requirements_declaration_is_bounded(self, req: Requirement):
+        """直接依存は上下から縛られている（`==` 系1件、または下限と上限の両方）。
+
+        削除した旧テスト（chromadb / langchain 系のインストール済み検証）が
+        `assert lower/upper is not None` で守っていたのは「上限・下限が宣言されていること」。
+        非空 specifier の確認だけでは、`langchain-core>=1.0`（上限なし）のように
+        片側を落としても素通りするため、langchain 1.x 固定(#894)や
+        chromadb <0.7.0 固定(#489)の意図が黙って失われる。
+        """
+        if req.url:
+            # 直接参照（`pkg @ git+https://...`）は specifier ではなく URL でピン留めする形式
+            return
+        ops = {spec.operator for spec in req.specifier}
+        bounded = ops & {"==", "===", "~="} or ({">=", ">"} & ops and {"<", "<="} & ops)
+        assert bounded, (
+            f"{req.name}: 宣言 {req.specifier or '(指定なし)'} が上限・下限の両方を縛っていない"
         )
 
-    @pytest.mark.parametrize("package", _LANGCHAIN_PACKAGES)
-    def test_installed_langchain_within_upper_bound(self, package: str):
-        """インストール済みの langchain 系が constraints.txt の上限を満たしている。"""
-        installed = Version(importlib.metadata.version(package))
-        upper = _extract_upper_bound(_CONSTRAINTS_TXT, package)
-        assert upper is not None, f"constraints.txt に {package} の上限が設定されていない"
-        assert installed < Version(upper), (
-            f"{package}: インストール済み {installed} が宣言上限 <{upper} を超えている (#1067)"
+    @pytest.mark.parametrize("req", _DECLARED, ids=[r.name for r in _DECLARED])
+    def test_installed_satisfies_requirements(self, req: Requirement):
+        """インストール済み版が requirements.txt の宣言を満たしている。"""
+        _skip_if_marker_not_applicable(req)
+        installed = _installed_version(req)
+        assert req.specifier.contains(installed, prereleases=False), (
+            f"{req.name}: インストール済み {installed} が宣言 {req.specifier} を満たしていない。"
+            "`pip install -r requirements.txt -c constraints.txt` で環境を作り直すこと (#1159)"
+        )
+
+    @pytest.mark.parametrize(
+        "req", _CONSTRAINTS_DECLARED, ids=[r.name for r in _CONSTRAINTS_DECLARED]
+    )
+    def test_installed_satisfies_constraints(self, req: Requirement):
+        """constraints.txt の全宣言について、インストール済み版が制約を満たしている。
+
+        requirements.txt にある直接依存も、constraints.txt にしか無い宣言
+        （numpy / litellm / httpx）も同じ扱いで検証する。後者は推移的依存の範囲を
+        縛るための制約なので、守られていなければ #1067 と同種の乖離になる。
+        未インストール（その推移的依存が入らない構成）は skip。
+
+        constraints 側には上下限の両方を要求しない（`numpy<3.0` のように
+        上限だけを縛る設計の宣言があるため）。
+        """
+        _skip_if_marker_not_applicable(req)
+        assert str(req.specifier), f"{req.name}: constraints.txt にバージョン指定が無い"
+        try:
+            installed = importlib.metadata.version(req.name)
+        except importlib.metadata.PackageNotFoundError:
+            pytest.skip(f"{req.name} は未インストール（推移的依存が入っていない）")
+        assert req.specifier.contains(installed, prereleases=False), (
+            f"{req.name}: インストール済み {installed} が constraints.txt の "
+            f"{req.specifier} を満たしていない (#1159)"
         )
 
 

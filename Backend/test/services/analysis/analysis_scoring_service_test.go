@@ -50,19 +50,25 @@ func newOpenAITestServerForAnalysis(t *testing.T, responseBody string) (*httptes
 type mockChatMessageRepo struct{}
 
 func (m *mockChatMessageRepo) Create(msg *models.ChatMessage) error { return nil }
-func (m *mockChatMessageRepo) FindBySessionID(sessionID string) ([]models.ChatMessage, error) {
-	return nil, nil
-}
 func (m *mockChatMessageRepo) FindByUserID(userID uint) ([]models.ChatMessage, error) {
 	return nil, nil
 }
-func (m *mockChatMessageRepo) FindRecentBySessionID(sessionID string, limit int) ([]models.ChatMessage, error) {
+func (m *mockChatMessageRepo) FindBySessionIDForUser(sessionID string, userID uint) ([]models.ChatMessage, error) {
+	return nil, nil
+}
+
+func (m *mockChatMessageRepo) FindRecentBySessionIDForUser(
+	sessionID string, userID uint, limit int,
+) ([]models.ChatMessage, error) {
 	return []models.ChatMessage{
 		{Role: "user", Content: "私はバックエンド開発が好きで、チームでの協調を重視します。"},
 		{Role: "user", Content: "新しい技術に挑戦したいです。"},
 	}, nil
 }
-func (m *mockChatMessageRepo) GetUsedQuestionIDs(sessionID string) ([]uint, error) { return nil, nil }
+
+func (m *mockChatMessageRepo) ExistsBySessionIDForOtherUser(sessionID string, userID uint) (bool, error) {
+	return false, nil
+}
 func (m *mockChatMessageRepo) GetUserSessions(userID uint) ([]models.ChatSession, error) {
 	return nil, nil
 }

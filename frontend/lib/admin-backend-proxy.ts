@@ -145,9 +145,12 @@ export function proxyErrorResponse(err: unknown): NextResponse {
 }
 
 export function adminProxyHeaders(requestHeaders: Headers): Record<string, string> {
+  const requestId = requestHeaders.get('x-request-id')
   return {
     'Content-Type': 'application/json',
     'X-Admin-Email': requestHeaders.get('x-admin-email') || '',
     'X-Admin-Token': requestHeaders.get('x-admin-token') || '',
+    // middleware.ts が採番したリクエストIDをBackend/RAGまで引き継ぐ(#1188)
+    ...(requestId ? { 'X-Request-ID': requestId } : {}),
   }
 }

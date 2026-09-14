@@ -135,7 +135,7 @@ func TestAdminDashboardController_UserSessions_ReportRepoError(t *testing.T) {
 // ---- ListUsers ----
 
 func TestAdminDashboardController_ListUsers_UserRepoError(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users", nil)
+	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users", nil), nil)
 	rec := httptest.NewRecorder()
 
 	userRepo := &mocks.UserRepositoryMock{}
@@ -145,7 +145,7 @@ func TestAdminDashboardController_ListUsers_UserRepoError(t *testing.T) {
 }
 
 func TestAdminDashboardController_ListUsers_Success(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users?limit=10&page=1", nil)
+	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users?limit=10&page=1", nil), nil)
 	rec := httptest.NewRecorder()
 
 	users := []entity.User{{ID: 1, Name: "テストユーザー", Email: "test@example.com"}}
@@ -169,7 +169,7 @@ func TestAdminDashboardController_ListUsers_Success(t *testing.T) {
 }
 
 func TestAdminDashboardController_ListUsers_SessionStatError(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users", nil)
+	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users", nil), nil)
 	rec := httptest.NewRecorder()
 
 	users := []entity.User{{ID: 1, Name: "ユーザー"}}
@@ -191,7 +191,7 @@ func TestAdminDashboardController_ExportCSV_AdminIDMissing_FailsClosed(t *testin
 	ctrl := newAdminDashboardController(nil, nil, nil)
 	ctrl.SetOrganizationService(organization.NewOrganizationService(repo))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil)
+	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, ctrl.ExportCSV, newCtx(req, rec), http.StatusForbidden)
 }
@@ -202,7 +202,7 @@ func TestAdminDashboardController_ExportCSV_OrgLookupError_FailsClosed(t *testin
 	ctrl := newAdminDashboardController(nil, nil, nil)
 	ctrl.SetOrganizationService(organization.NewOrganizationService(repo))
 
-	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), 42)
+	req := withSchoolFilter(withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), 42), nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, ctrl.ExportCSV, newCtx(req, rec), http.StatusForbidden)
 }
@@ -216,7 +216,7 @@ func TestAdminDashboardController_ExportCSV_OrgUnassigned_UsesGlobalDefault(t *t
 	ctrl := newAdminDashboardController(userRepo, nil, nil)
 	ctrl.SetOrganizationService(organization.NewOrganizationService(orgRepo))
 
-	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), 42)
+	req := withSchoolFilter(withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), 42), nil)
 	rec := httptest.NewRecorder()
 	// orgID==0(プラットフォーム管理者)はCurrentPlan()(既定PlanPro)にフォールバックするため
 	// export自体は許可される(fail-closedで403にはならない)。以降はuserRepoのエラーで500。
@@ -226,7 +226,7 @@ func TestAdminDashboardController_ExportCSV_OrgUnassigned_UsesGlobalDefault(t *t
 // ---- ExportCSV ----
 
 func TestAdminDashboardController_ExportCSV_UserRepoError(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil)
+	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), nil)
 	rec := httptest.NewRecorder()
 
 	userRepo := &mocks.UserRepositoryMock{}
@@ -235,7 +235,7 @@ func TestAdminDashboardController_ExportCSV_UserRepoError(t *testing.T) {
 }
 
 func TestAdminDashboardController_ExportCSV_Success(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil)
+	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), nil)
 	rec := httptest.NewRecorder()
 
 	users := []entity.User{

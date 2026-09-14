@@ -118,6 +118,88 @@ go run ./cmd/migrate force 1   # version 2 を取り消した状態に補修し�
 | 4 | マルチテナント（`organizations` / memberships / 主要テーブルの `organization_id`）→ [multitenancy.md](./multitenancy.md) |
 | 5 | 主要テーブル `organization_id` への FK 制約 |
 | 20 | 企業ユーザーの復旧・剥奪（`disabled_at` / トークンのハッシュ化 / タグFKの RESTRICT 化）→ 下の注意を必ず読むこと |
+| 22 | マッチング結果の重複行の集約（`user_company_matches`）→ 下の注意を必ず読むこと |
+| 23 | `user_company_matches` に一意キー `uniq_user_session_company` |
+| 25 | `api_call_logs` に `provider` / `via_fallback`（AIコストの推論先別集計）→ 下の注意を読むこと |
+
+### version 25 適用時の注意（#1293）
+
+`api_call_logs` は推論先に関係なく記録されるため、そのままでは「OpenAI への課金額」
+として使えませんでした。実測で2つの壊れ方が確認されています。
+
+1. ローカル推論（無料）の行が混ざる。しかも `calculateCost` は未知のモデル名を
+   gpt-4o 単価にフォールバックするため、無料の推論が架空コストとして記録される。
+2. 企業検索などの通常の OpenAI 利用と同じ財布になる。実データでは 2026-08 の合計が
+   $57.99 で、フォールバックの既定月次上限 $20 を恒久的に超過していた
+   （= ローカル障害時にフォールバックが一度も発動しない）。
+
+`provider` で課金対象を切り分け、`via_fallback` でフォールバック専用予算を分離します。
+`ALGORITHM=INPLACE, LOCK=NONE` なので書き込みは止まりません。
+
+**適用順序に制約があります。アプリより先に version 25 を適用してください。**
+アプリを先に出すと `models.APICallLog` に `provider` / `via_fallback` が
+含まれるため INSERT が `Unknown column` で全失敗します。`LogUsage` は
+エラーをログに出すだけなので気づきにくく、同時に `TotalFallbackCostSince` も
+失敗して**フォールバックのUSD上限が fail-open で無効化**されます
+（残るブレーキは `OPENAI_FALLBACK_MAX_REQUESTS_PER_MINUTE` だけ）。
+コンテナ起動時の自動マイグレーションは無く、`go run ./cmd/migrate up` が必要です。
+
+**既存行は `provider=''` / `via_fallback=0` になります。** `provider` が空の行は
+OpenAI 扱い（従来の集計と同じ）です。フォールバック予算の集計は `via_fallback=1` の
+行だけなので、適用直後は 0 から始まります。
+
+適用前の確認:
+
+```sql
+-- ローカル推論の行が混ざっているか（混ざっていれば架空コストが計上されている）
+SELECT model, COUNT(*) c, SUM(cost_usd) usd FROM api_call_logs
+ WHERE called_at >= DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-01')
+ GROUP BY model ORDER BY usd DESC;
+```
+
+**down の注意。** 戻すと `via_fallback` が消えるため、フォールバックの USD 上限が
+「全コール合計」で判定されます。通常の OpenAI 利用だけで上限に達し、ローカル障害時に
+フォールバックが発動しなくなります。戻す場合は
+`OPENAI_DAILY_HARD_LIMIT_USD` / `OPENAI_MONTHLY_HARD_LIMIT_USD` を実績に合わせて
+引き上げるか、`OPENAI_FALLBACK_ENABLED=false` で明示的に無効化してください。
+
+### version 22 / 23 適用時の注意（#1166）
+
+**重複していたマッチング結果の行が削除されます。** version 23 で
+`(user_id, session_id, company_id)` に一意キーを張るため、その前に version 22 で
+重複行を1行（`MIN(id)`）へ集約します。
+
+適用前に件数を確認してください。0件なら version 22 はどのUPDATE/DELETEも0行に作用します。
+
+```sql
+SELECT COUNT(*) FROM (
+  SELECT 1 FROM user_company_matches
+   GROUP BY user_id, session_id, company_id HAVING COUNT(*) > 1) x;
+```
+
+集約時に失われないよう、以下は残す行へ寄せています。
+
+- `is_viewed` / `is_favorited` / `is_applied`（ユーザー操作の結果）は重複行の `MAX` を採用
+- `user_application_statuses.match_id`（FKが無く、参照側は INNER JOIN）は残す行へ付け替え
+
+`match_score` / `match_reason` は残した行の値がそのまま残りますが、次回のマッチング再計算で
+upsert により上書きされます。`session_id IS NULL` の行は空文字へ寄せます（Go 側は
+`SessionID string` のため常に空文字を書く。NULL のままだと MySQL の UNIQUE が複数 NULL を
+許すため一意キーが穴になる）。
+
+version 23 の `ADD UNIQUE KEY` は `LOCK=NONE` のため、ローリングデプロイ中に旧コード
+（一意制約を前提としない read-then-write）が重複行を作ると `Error 1062` で失敗し、
+`dirty=1` が残ります。**version 22 の4文はいずれも冪等**なので、その場合は
+`go run ./cmd/migrate force 22` → `go run ./cmd/migrate up` で再実行すれば収束します。
+
+`session_id` 列は nullable のままです（NOT NULL 化はテーブル再構築を伴うため分離）。
+将来モデルを `*string` に変えたりデータインポートを追加すると一意キーが再び穴になるため、
+別マイグレーションで `MODIFY session_id varchar(255) NOT NULL DEFAULT ''` を行うのが望ましい。
+
+**ロールバック順序に制約があります。** 一意キー（version 23）が無い状態で新しいアプリを
+動かすと、`ON DUPLICATE KEY UPDATE` が衝突を検出できず再計算ごとに重複行が増え続けます。
+アプリを戻す場合は `go run ./cmd/migrate down` を先に、ではなく**アプリを先に**旧リビジョンへ
+戻してから down を実行してください。集約した行と付け替えた `match_id` は down では復元されません。
 
 ### version 20 適用時の注意（#1196）
 

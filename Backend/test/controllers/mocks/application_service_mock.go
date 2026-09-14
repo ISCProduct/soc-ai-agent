@@ -42,8 +42,8 @@ func (m *ApplicationServiceMock) Accept(applicationID, userID uint, isAdmin bool
 	return args.Get(0).(*entity.UserApplicationStatus), args.Error(1)
 }
 
-func (m *ApplicationServiceMock) ListForAdmin(userID, companyID uint, status string) ([]*entity.UserApplicationStatus, error) {
-	args := m.Called(userID, companyID, status)
+func (m *ApplicationServiceMock) ListForAdmin(userID, companyID uint, status string, schoolID *uint) ([]*entity.UserApplicationStatus, error) {
+	args := m.Called(userID, companyID, status, schoolID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -80,4 +80,13 @@ func (m *ApplicationServiceMock) GetCorrelation(userID, companyID uint) ([]map[s
 		return nil, args.Error(1)
 	}
 	return args.Get(0).([]map[string]any), args.Error(1)
+}
+
+// OwnerSchoolID は応募の所有ユーザーの学校IDを返す(#1157)
+func (m *ApplicationServiceMock) OwnerSchoolID(applicationID uint) (*uint, error) {
+	args := m.Called(applicationID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*uint), args.Error(1)
 }
