@@ -1,4 +1,4 @@
-import { needsLowMatchConfirm, LOW_MATCH_THRESHOLD } from '@/lib/low-match'
+import { needsLowMatchConfirm, LOW_MATCH_THRESHOLD, MIN_MATCHED_AXES_FOR_LOW_MATCH } from '@/lib/low-match'
 
 // マッチ度が低い企業への応募時に確認を出すかの判定（#1028）。
 // 出しすぎると邪魔になり、出さなすぎると気づけない。境界を固定する。
@@ -39,5 +39,31 @@ describe('needsLowMatchConfirm の入力検証', () => {
     ['-Infinity', -Infinity],
   ])('%s は確認しない', (_l, v) => {
     expect(needsLowMatchConfirm(v)).toBe(false)
+  })
+})
+
+// マッチ度は「計測できた軸だけ」の平均なので、軸が少ない学生は実力ではなく
+// 計測不足で低い値になる（#1124）。そこに確認ダイアログを出すと
+// 「スコアが取れていないこと」を「スコアが低いこと」として扱ってしまう。
+describe('算出軸が少ない場合', () => {
+  it.each([
+    ['軸が0本', 0],
+    ['軸が1本', 1],
+    ['軸が3本（下限未満）', 3],
+  ])('%s なら低スコアでも確認を出さない', (_label, axes) => {
+    expect(needsLowMatchConfirm(10, axes as number)).toBe(false)
+  })
+
+  it('下限ちょうどなら従来どおり判定する', () => {
+    expect(needsLowMatchConfirm(10, MIN_MATCHED_AXES_FOR_LOW_MATCH)).toBe(true)
+    expect(needsLowMatchConfirm(90, MIN_MATCHED_AXES_FOR_LOW_MATCH)).toBe(false)
+  })
+
+  it.each([
+    ['未指定', undefined],
+    ['null', null],
+  ])('軸数が %s なら従来どおりスコアだけで判定する', (_label, axes) => {
+    // 古いレスポンスとの互換。ここで false に倒すと警告が全く出なくなる
+    expect(needsLowMatchConfirm(10, axes as undefined)).toBe(true)
   })
 })
