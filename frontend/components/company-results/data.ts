@@ -336,8 +336,8 @@ export const generateITCompanies = (userData: UserData): Company[] => {
         score += teamScore * 1.2
       }
 
-      // 5. 問題解決力
-      const problemScore = scoreMap["問題解決力"] || 0
+      // 5. 技術志向（旧: 問題解決力）
+      const problemScore = scoreMap["技術志向"] || scoreMap["問題解決力"] || 0
       if (problemScore > 5 && company.industry.includes("コンサル")) {
         score += problemScore * 1.5
       }
@@ -345,8 +345,8 @@ export const generateITCompanies = (userData: UserData): Company[] => {
         score += 10
       }
 
-      // 6. 創造性・発想力
-      const creativityScore = scoreMap["創造性・発想力"] || 0
+      // 6. 創造性志向（旧: 創造性・発想力）
+      const creativityScore = scoreMap["創造性志向"] || scoreMap["創造性・発想力"] || 0
       if (creativityScore > 5 && company.size === "ベンチャー") {
         score += creativityScore * 1.5
       }
@@ -354,14 +354,14 @@ export const generateITCompanies = (userData: UserData): Company[] => {
         score += 12
       }
 
-      // 7. 計画性・実行力
-      const planningScore = scoreMap["計画性・実行力"] || 0
+      // 7. 細部志向（旧: 計画性・実行力）
+      const planningScore = scoreMap["細部志向"] || scoreMap["計画性・実行力"] || 0
       if (planningScore > 5 && company.industry.includes("SIer")) {
         score += planningScore * 1.3
       }
 
-      // 8. 学習意欲・成長志向
-      const growthScore = scoreMap["学習意欲・成長志向"] || 0
+      // 8. 成長志向（旧: 学習意欲・成長志向）
+      const growthScore = scoreMap["成長志向"] || scoreMap["学習意欲・成長志向"] || 0
       if (growthScore > 5 && company.tags.includes("教育制度充実")) {
         score += growthScore * 1.4
       }
@@ -369,8 +369,8 @@ export const generateITCompanies = (userData: UserData): Company[] => {
         score += 10
       }
 
-      // 9. ストレス耐性・粘り強さ
-      const stressScore = scoreMap["ストレス耐性・粘り強さ"] || 0
+      // 9. チャレンジ志向（旧: ストレス耐性・粘り強さ / ビジネス思考）
+      const stressScore = scoreMap["チャレンジ志向"] || scoreMap["ストレス耐性・粘り強さ"] || 0
       if (stressScore > 5 && company.projectTypes.includes("大規模プロジェクト")) {
         score += stressScore * 1.2
       }
@@ -378,8 +378,8 @@ export const generateITCompanies = (userData: UserData): Company[] => {
         score += 10
       }
 
-      // 10. ビジネス思考・目標志向
-      const businessScore = scoreMap["ビジネス思考・目標志向"] || 0
+      // 10. 成果・目標（チャレンジ志向へ統合。旧ビジネス思考キーも見る）
+      const businessScore = scoreMap["チャレンジ志向"] || scoreMap["ビジネス思考・目標志向"] || 0
       if (businessScore > 5 && company.projectTypes.includes("自社サービス")) {
         score += businessScore * 1.4
       }

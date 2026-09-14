@@ -2,6 +2,7 @@ package interview
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/repositories"
 	"Backend/internal/services/email"
 	"Backend/internal/services/shared"
 	"context"
@@ -194,12 +195,17 @@ Interview transcript:
 		return err
 	}
 
-	// 面接スコアを UserWeightScore に反映（crossFeature が設定済みの場合のみ）
+	// 面接スコアをチャット診断セッションへ反映し、可能なら再マッチングする。
 	if s.crossFeature != nil {
-		chatSessionID := fmt.Sprintf("interview-%d", session.UserID)
-		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, chatSessionID, report); err != nil {
-			// スコア反映失敗はレポート生成を失敗扱いにしない
+		targetSession := s.crossFeature.ResolveDiagnosisSessionID(session.UserID)
+		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, targetSession, report); err != nil {
 			log.Printf("[CrossFeature] interview score update failed for session %d: %v\n", sessionID, err)
+		} else if s.matchingRunner != nil && !repositories.IsInterviewSnapshotSession(targetSession) {
+			go func(userID uint, sessionID string) {
+				if err := s.matchingRunner.CalculateMatching(context.Background(), userID, sessionID); err != nil {
+					log.Printf("[CrossFeature] rematch after interview failed user=%d session=%s: %v\n", userID, sessionID, err)
+				}
+			}(session.UserID, targetSession)
 		}
 	}
 	return nil

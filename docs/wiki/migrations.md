@@ -122,6 +122,8 @@ go run ./cmd/migrate force 1   # version 2 を取り消した状態に補修し�
 | 23 | `user_company_matches` に一意キー `uniq_user_session_company` |
 | 25 | `api_call_logs` に `provider` / `via_fallback`（AIコストの推論先別集計）→ 下の注意を読むこと |
 | 26 | `user_company_matches` に `matched_axis_count`（マッチ度の算出軸数）→ 下の注意を読むこと |
+| 27 | `diagnosis_quality_reports`（診断妥当性フラグ） |
+| 28 | ビジネス思考系質問のカテゴリ再配置（成長志向からの切り離し） |
 
 ### version 26 適用時の注意（#1124）
 
@@ -169,6 +171,12 @@ go run ./cmd/migrate force 1   # version 2 を取り消した状態に補修し�
 
 診断完了後の妥当性フラグ保存用テーブル。`user_weight_scores` / `user_company_matches` は
 更新しない。マッチング成功後に asynq `diagnosis:quality` が upsert する。
+
+### version 28（ビジネス思考系カテゴリの再配置）
+
+`question_weights` / `ai_question_templates` のうち、成果・顧客・社会価値の質問を
+成長志向からチャレンジ志向 / コミュニケーション力 / リーダーシップ志向へ移す。
+ユーザー側 Growth の構造的膨張を止めるための前方修正。
 
 ### version 25 適用時の注意（#1293）
 

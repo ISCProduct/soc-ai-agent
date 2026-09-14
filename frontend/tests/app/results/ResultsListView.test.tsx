@@ -70,8 +70,17 @@ describe('ResultsListView', () => {
   })
 
   it('暫定評価チップを表示する', () => {
-    renderList({ isProvisional: true })
+    renderList({ isProvisional: true, diagnosisSummary: '選択のみの回答が多いです' })
     expect(screen.getByText('暫定評価')).toBeInTheDocument()
+    expect(screen.getByText(/選択のみの回答が多いです/)).toBeInTheDocument()
+    expect(screen.getByText(/仮マッチしています/)).toBeInTheDocument()
+  })
+
+  it('適合度に根拠軸数を表示する', () => {
+    renderList({
+      companies: [{ ...sampleCompany, matchedAxisCount: 6 }],
+    })
+    expect(screen.getByText(/根拠軸 6/)).toBeInTheDocument()
   })
 
   it('分析データ取得失敗時に警告と再読み込みボタンを表示する', () => {

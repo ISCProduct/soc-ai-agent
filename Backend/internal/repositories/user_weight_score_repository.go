@@ -114,17 +114,30 @@ func (r *UserWeightScoreRepository) CountByUserAndSession(userID uint, sessionID
 	return count, err
 }
 
-// FindLatestByUser ユーザーの最新セッションのスコアを取得する
+// FindLatestByUser ユーザーの最新セッションのスコアを取得する。
+// 面接スナップショット(interview-*)よりチャット診断セッションを優先する。
 func (r *UserWeightScoreRepository) FindLatestByUser(userID uint) ([]entity.UserWeightScore, error) {
-	// 最新の session_id を特定
 	var latest models.UserWeightScore
 	err := r.db.Where("user_id = ?", userID).
-		Order("updated_at DESC").
+		Order("CASE WHEN session_id LIKE 'interview-%' THEN 1 ELSE 0 END ASC, updated_at DESC, id DESC").
 		First(&latest).Error
 	if err != nil {
 		return nil, err
 	}
 	return r.FindByUserAndSession(userID, latest.SessionID)
+}
+
+// FindLatestDiagnosisSessionID はマッチング対象に使うチャット診断セッションを返す。
+// 面接スナップショットは除外。無い場合は gorm.ErrRecordNotFound。
+func (r *UserWeightScoreRepository) FindLatestDiagnosisSessionID(userID uint) (string, error) {
+	var latest models.UserWeightScore
+	err := r.db.Where("user_id = ? AND session_id NOT LIKE ?", userID, "interview-%").
+		Order("updated_at DESC, id DESC").
+		First(&latest).Error
+	if err != nil {
+		return "", err
+	}
+	return latest.SessionID, nil
 }
 
 // FindLatestScoresByUsers は複数ユーザーの「最新セッションのスコア」を1クエリで返す（#1027）。
@@ -134,8 +147,7 @@ func (r *UserWeightScoreRepository) FindLatestByUser(userID uint) ([]entity.User
 // ウィンドウ関数で「ユーザーごとに最新の1行」を決め、その session_id の
 // 行だけを拾う。戻り値は user_id -> (正典カテゴリ名 -> スコア)。
 //
-// 「最新」は updated_at 降順、同値は id 降順で決める。
-// updated_at を使うのは既存の FindLatestByUser と揃えるため。
+// 「最新」はチャット診断を優先し、同優先内では updated_at / id 降順。
 func (r *UserWeightScoreRepository) FindLatestScoresByUsers(userIDs []uint) (map[uint]map[string]float64, error) {
 	result := map[uint]map[string]float64{}
 	if len(userIDs) == 0 {
@@ -149,12 +161,16 @@ func (r *UserWeightScoreRepository) FindLatestScoresByUsers(userIDs []uint) (map
 	}
 	var rows []row
 
-	// latest: ユーザーごとに最新1行を選び、その session_id を確定させる。
-	// scores: 同じ (user_id, session_id) の全カテゴリを取る。
 	const q = `
 WITH latest AS (
   SELECT user_id, session_id,
-         ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY updated_at DESC, id DESC) AS rn
+         ROW_NUMBER() OVER (
+           PARTITION BY user_id
+           ORDER BY
+             CASE WHEN session_id LIKE 'interview-%' THEN 1 ELSE 0 END ASC,
+             updated_at DESC,
+             id DESC
+         ) AS rn
   FROM user_weight_scores
   WHERE user_id IN (?)
 )

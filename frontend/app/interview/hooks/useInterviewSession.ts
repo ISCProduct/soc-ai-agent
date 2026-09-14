@@ -349,6 +349,16 @@ export function useInterviewSession({
     }
   }
 
+  const resolveScoreSessionId = (userId: number) => {
+    if (typeof window !== 'undefined') {
+      const chatSession = window.localStorage.getItem('chat_session_id')
+      if (chatSession && chatSession.trim() !== '') {
+        return chatSession
+      }
+    }
+    return `interview-${userId}`
+  }
+
   const handleStop = async (forced = false) => {
     const videoBlob = await media.stopAndCollectVideoBlob()
 
@@ -358,7 +368,7 @@ export function useInterviewSession({
     const currentUser = userRef.current
     let didFinishFail = false
     if (currentUser && currentSession) {
-      const scoreSessionId = `interview-${currentUser.user_id}`
+      const scoreSessionId = resolveScoreSessionId(currentUser.user_id)
       try {
         const res = await fetch(`/api/user/weight-scores?user_id=${currentUser.user_id}&session_id=${encodeURIComponent(scoreSessionId)}`)
         const data = await res.json()
@@ -425,7 +435,7 @@ export function useInterviewSession({
   }
 
   const loadScoresAfter = async (userId: number) => {
-    const scoreSessionId = `interview-${userId}`
+    const scoreSessionId = resolveScoreSessionId(userId)
     try {
       const res = await fetch(`/api/user/weight-scores?user_id=${userId}&session_id=${encodeURIComponent(scoreSessionId)}`)
       const data = await res.json()
