@@ -152,6 +152,23 @@ func isRetryableAPIErr(err error) bool {
 	return false
 }
 
+// webSearchContextSize は web_search の search_context_size を返す（既定 medium）。
+//
+// web_search は検索結果が固定トークンとして課金されるため、本文の長さに関係なく
+// 1コールの入力トークンが大きくなる。high は最も高コストな設定で、企業情報の
+// 抽出という用途に対しては過剰（#1124）。
+//
+// 品質が落ちた場合に env で戻せるようにしておく。不正な値は既定に倒す
+// （設定ミスで検索を止めない）。
+func webSearchContextSize() string {
+	switch v := strings.ToLower(strings.TrimSpace(os.Getenv("OPENAI_WEB_SEARCH_CONTEXT_SIZE"))); v {
+	case "low", "medium", "high":
+		return v
+	default:
+		return "medium"
+	}
+}
+
 // WebSearchJSON は Responses API の web_search で 1 クエリだけ実行する。
 // Chat Completions の search-preview / gpt-5-search-api は使わない（高トークン・高額）。
 func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxTokens int, modelOverride ...string) (string, error) {
@@ -181,7 +198,7 @@ func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxToke
 			MaxOutputTokens: maxTokens,
 			Tools: []map[string]any{{
 				"type":                "web_search",
-				"search_context_size": "high",
+				"search_context_size": webSearchContextSize(),
 			}},
 			ToolChoice: "required",
 		})

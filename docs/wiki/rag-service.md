@@ -291,27 +291,43 @@ OpenAI の `web_search` ツールは、検索結果が固定トークンとし�
 本文の長さに関係なく1コールの入力トークンが大きくなるため、
 **コストは「1コールの重さ × コール回数」でほぼ決まる**。
 
-本番相当DB（2026-08-13以降, 2,981コール）の実測:
-
-| model | コール数 | 入力トークン | 1コール平均 | 全体比 |
-| --- | ---: | ---: | ---: | ---: |
-| gpt-5-search-api | 323 | 9,816,772 | 30,392 | 約9割 |
-| gpt-4o-mini | 2,206 | 8,926,489 | 4,046 | 約1割 |
-
-検索1コールが通常の推論7.5倍の入力トークンを使っている。
-
 ### 調整ノブ
 
-| env | 既定 | 範囲 | 効果 |
+| env | 既定 | 範囲 | 効く場所 |
 | --- | --- | --- | --- |
-| `OPENAI_WEB_SEARCH_CONTEXT_SIZE` | `medium` | low / medium / high | 1コールの重さ。以前は `high` 固定だった |
-| `OPENAI_WEB_SEARCH_MAX_QUERIES` | `4` | 1〜10 | 1企業あたりのコール回数。以前は 5 固定 |
-| `OPENAI_CHAT_MODEL` | `gpt-4o-mini` | - | 要約・クエリ生成。以前は `gpt-4o` 既定（入力単価16.7倍） |
-| `OPENAI_HINTS_PARSE_MODEL` | `gpt-4o-mini` | - | JSON構造化抽出。以前は `gpt-4o` 既定 |
+| `OPENAI_WEB_SEARCH_CONTEXT_SIZE` | `medium` | low / medium / high | Backend の企業検索（`WebSearchJSON`）と RAG の企業リサーチ。以前はどちらも `high` 固定 |
+| `OPENAI_WEB_SEARCH_MAX_QUERIES` | `4` | 1〜10 | RAG の企業リサーチのクエリ数。以前は 5 固定。hints 経路は固定クエリなので対象外 |
+| `OPENAI_CHAT_MODEL` | `gpt-4o-mini` | - | RAG の要約・クエリ生成。以前は `gpt-4o` 既定（入力単価16.7倍） |
+| `OPENAI_HINTS_PARSE_MODEL` | `gpt-4o-mini` | - | RAG のJSON構造化抽出。以前は `gpt-4o` |
 
 不正な値は既定に倒す（設定ミスでリクエストを止めない）。
-品質劣化が出た場合は env を戻すだけでよく、デプロイは不要。
 
-反映後は `api_call_logs` の model 別内訳で削減幅を確認すること。
-なお 2026-09-14 より前の記録はコストが過大なので、比較は同日以降で行う
-（`docs/wiki/search-provider-cost.md` 参照）。
+**本番で env を変えるにはデプロイが必要。** ECS のタスク定義に環境変数が
+焼き込まれているため、`infra/terraform/environments/prod/main.tf` を編集して
+apply し、サービスを更新する必要がある。「env を戻すだけ」では戻らない。
+
+### 計測できる範囲（重要）
+
+`api_call_logs` に記録しているのは **Backend (Go) のコールだけ**。
+RAG (Python) はトークン使用量をどこにも記録していないため、
+**RAG のコストは現状まったく計測できない**。
+
+したがって上の表のうち RAG 側に効くノブ（クエリ数・RAGのモデル）は、
+変更しても `api_call_logs` では削減幅を確認できない。確認したい場合は
+OpenAI のダッシュボード側で見るか、RAG の使用量記録を実装する必要がある（#1294）。
+
+Backend 側（`OPENAI_WEB_SEARCH_CONTEXT_SIZE` が効く企業検索）は
+`api_call_logs` の model 別内訳で確認できる。比較は 2026-09-14 以降で行うこと
+（それ以前は単価解決のバグでコストが過大。`docs/wiki/search-provider-cost.md` 参照）。
+
+### 実績メモ
+
+`api_call_logs`（2026-08-13〜09-12, 2,981コール）で `gpt-5-search-api` が
+323コール・1コール平均 30,392 入力トークンを記録しているが、これは
+**2026-08-22 09:06〜09:31 の25分間に集中した一過性のもの**で、以降ゼロ。
+原因だった Chat Completions の search-api 経路は
+`client_chat.go` の `resolveWebSearchModel` で既に `gpt-4o-mini` に強制されている。
+
+直近14日の実績は `gpt-4o-mini` 16コール / `gpt-5.2` 12コールで合計約 $0.12。
+**現時点で削るべき定常コストはほぼ無い。** 上のノブは、企業検索の利用が
+本格化したときに効くようにしてある予防的な設定。

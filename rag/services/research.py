@@ -251,7 +251,9 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
             if entry:
                 ts = entry.get("ts", 0)
                 if time.time() - ts < cache_ttl:
-                    return entry.get("queries", [])
+                    # 上限を読み出し側にも掛ける。保存側だけだと、上限を下げても
+                    # キャッシュ済みの古い件数が TTL 切れまで返り続けてノブが効かない
+                    return entry.get("queries", [])[: max_search_queries()]
     except Exception as exc:
         logger.warning("query cache read failed error=%s", exc)
 
@@ -283,7 +285,7 @@ def _generate_search_queries(company_name: str, job_title: str) -> List[str]:
         try:
             client = m.OpenAI(api_key=api_key, timeout=m.OPENAI_TIMEOUT_SEC)
             prompt = (
-                "以下の企業と職種について、採用情報を調査するための検索クエリを3〜5個生成してください。\n\n"
+                "以下の企業と職種について、採用情報を調査するための検索クエリを3〜4個生成してください。\n\n"
                 "企業名: {company}\n"
                 "職種: {role}\n\n"
                 "以下の3軸をカバーする検索クエリを生成してください。\n"

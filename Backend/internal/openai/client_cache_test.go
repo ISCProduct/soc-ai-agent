@@ -111,5 +111,7 @@ func TestWebSearchJSON_UsesResponsesWebSearchTool(t *testing.T) {
 	assert.NotEmpty(t, tools)
 	tool, _ := tools[0].(map[string]any)
 	assert.Equal(t, "web_search", tool["type"])
-	assert.Equal(t, "high", tool["search_context_size"])
+	// 既定は medium。以前は "high" 固定だった（#1124）。
+	// 値そのものの境界は TestWebSearchContextSize が担保する
+	assert.Equal(t, "medium", tool["search_context_size"])
 }

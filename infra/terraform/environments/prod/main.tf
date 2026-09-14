@@ -617,7 +617,7 @@ module "rag_review" {
   environment = {
     OPENAI_EMBEDDING_MODEL   = "text-embedding-3-small"
     OPENAI_HINTS_MODEL       = "gpt-4o-mini"
-    OPENAI_HINTS_PARSE_MODEL = "gpt-4o"
+    OPENAI_HINTS_PARSE_MODEL = "gpt-4o-mini"
     # chromaは独立サービス。Cloud Map経由で名前解決する
     CHROMA_HOST = "chroma.${aws_service_discovery_private_dns_namespace.internal.name}"
     CHROMA_PORT = "8000"
