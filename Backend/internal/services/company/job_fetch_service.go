@@ -349,7 +349,8 @@ func (s *JobFetchService) upsertJobPosition(companyID uint, job scraper.JobPosti
 // analyzePersonaProfile は企業情報と求人情報テキストから10カテゴリのスコアを導出する。
 func (s *JobFetchService) analyzePersonaProfile(ctx context.Context, companyName, companyInfo, positionText string) (*models.CompanyWeightProfile, error) {
 	systemPrompt := `あなたは採用コンサルタントです。企業情報から「企業が重視する人物像」を10カテゴリのスコア（0〜100）で評価し、指定のJSON形式のみで回答してください。`
-	userPrompt := fmt.Sprintf(`「%s」が求める人物像を以下の10カテゴリでスコア化してください（0〜100、50が中立）。
+	userPrompt := fmt.Sprintf(`「%s」が求める人物像を以下の10カテゴリでスコア化してください（0〜100）。
+50付近に寄せないでください。企業の特徴が強い軸は70以上、弱い軸は30以下をそれぞれ2つ以上必ず含めてください。
 JSON形式のみで回答してください（説明文は不要）。
 
 {
@@ -398,7 +399,7 @@ JSON形式のみで回答してください（説明文は不要）。
 		return nil, fmt.Errorf("人物像JSONのunmarshal失敗: %w", err)
 	}
 
-	return &models.CompanyWeightProfile{
+	profile := &models.CompanyWeightProfile{
 		TechnicalOrientation:  clampScore(raw.TechnicalOrientation),
 		TeamworkOrientation:   clampScore(raw.TeamworkOrientation),
 		LeadershipOrientation: clampScore(raw.LeadershipOrientation),
@@ -409,7 +410,9 @@ JSON形式のみで回答してください（説明文は不要）。
 		ChallengeSeeking:      clampScore(raw.ChallengeSeeking),
 		DetailOrientation:     clampScore(raw.DetailOrientation),
 		CommunicationSkill:    clampScore(raw.CommunicationSkill),
-	}, nil
+	}
+	EnsureProfileContrast(profile)
+	return profile, nil
 }
 
 func clampScore(v int) int {

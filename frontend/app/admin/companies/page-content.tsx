@@ -37,6 +37,7 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import { authService } from '@/lib/auth'
+import { getAdminSchoolAccess } from '@/lib/admin-school-access'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel } from '@/components/admin/AdminPanel'
@@ -184,11 +185,17 @@ function groupCompaniesByIndustry(companies: Company[]): { key: string; label: s
 }
 
 export default function PageContent() {
+  const [isPlatform, setIsPlatform] = useState(false)
+
   useEffect(() => {
     const user = authService.getStoredUser()
     if (!user?.is_admin) {
       window.location.href = '/'
+      return
     }
+    void getAdminSchoolAccess()
+      .then((access) => setIsPlatform(!access.restricted))
+      .catch(() => setIsPlatform(false))
   }, [])
 
   const [companies, setCompanies] = useState<Company[]>([])
@@ -308,9 +315,9 @@ export default function PageContent() {
   }, [companies])
 
   useEffect(() => {
-    void fetchCoverage()
+    if (isPlatform) void fetchCoverage()
     void fetchIndustries()
-  }, [fetchCoverage, fetchIndustries])
+  }, [isPlatform, fetchCoverage, fetchIndustries])
 
   useEffect(() => {
     if (schoolId === undefined) {
@@ -798,15 +805,17 @@ export default function PageContent() {
         }
         backHref={busy ? undefined : '/admin'}
         actions={
-          <Button
-            variant="contained"
-            component={Link}
-            href="/admin/companies/new"
-            disableElevation
-            disabled={busy}
-          >
-            企業を追加
-          </Button>
+          isPlatform ? (
+            <Button
+              variant="contained"
+              component={Link}
+              href="/admin/companies/new"
+              disableElevation
+              disabled={busy}
+            >
+              企業を追加
+            </Button>
+          ) : undefined
         }
       />
 
@@ -832,10 +841,14 @@ export default function PageContent() {
         </Typography>
         <Stack spacing={0.5}>
           <Typography variant="body2" color="text.secondary">
-            1. 企業名で探し、情報が足りなければ「情報を取得」します
+            {isPlatform
+              ? '1. 企業名で探し、情報が足りなければ「情報を取得」します'
+              : '1. 企業名で探し、「会社概要」「技術情報」「関連企業」で内容を確認します'}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            2. 「会社概要」「技術情報」「関連企業」で内容を確認・修正します
+            {isPlatform
+              ? '2. 「会社概要」「技術情報」「関連企業」で内容を確認・修正します'
+              : '2. 必要なら内容を修正し、担当校向けの掲載承認を設定します'}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             3. 情報がそろった企業を選んで「学生に公開」します（足りない企業は選べません）
@@ -843,6 +856,7 @@ export default function PageContent() {
         </Stack>
       </Box>
 
+      {isPlatform && (
       <Box
         sx={{
           mb: 2,
@@ -901,6 +915,7 @@ export default function PageContent() {
           </Stack>
         </Stack>
       </Box>
+      )}
 
       <AdminPanel title="企業一覧">
         <Box
@@ -1116,11 +1131,11 @@ export default function PageContent() {
                 <Button variant="outlined" size="small" onClick={resetFilters}>
                   絞り込みを解除
                 </Button>
-              ) : (
+              ) : isPlatform ? (
                 <Button component={Link} href="/admin/companies/new" variant="outlined" size="small">
                   最初の企業を追加
                 </Button>
-              )}
+              ) : null}
             </Box>
           )}
 
@@ -1328,6 +1343,7 @@ export default function PageContent() {
                           sx={{ flexShrink: 0, pl: { xs: 5, md: 0 } }}
                         >
                           {!ready ? (
+                            isPlatform ? (
                             <Button
                               variant="contained"
                               size="small"
@@ -1339,6 +1355,7 @@ export default function PageContent() {
                             >
                               {fetching ? '取得中…' : '情報を取得'}
                             </Button>
+                            ) : null
                           ) : isDraft ? (
                             <Button
                               variant="contained"
@@ -1384,24 +1401,28 @@ export default function PageContent() {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
-        <MenuItem
-          disabled={busy}
-          onClick={() => menuAnchor && handleFetchPrimary(menuAnchor.company.id, false)}
-        >
-          <ListItemIcon>
-            <RefreshIcon fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>情報を取得</ListItemText>
-        </MenuItem>
-        <MenuItem
-          disabled={busy}
-          onClick={() => menuAnchor && handleFetchPrimary(menuAnchor.company.id, true)}
-        >
-          <ListItemIcon>
-            <RefreshIcon fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>最新の情報に更新</ListItemText>
-        </MenuItem>
+        {isPlatform && (
+          <MenuItem
+            disabled={busy}
+            onClick={() => menuAnchor && handleFetchPrimary(menuAnchor.company.id, false)}
+          >
+            <ListItemIcon>
+              <RefreshIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>情報を取得</ListItemText>
+          </MenuItem>
+        )}
+        {isPlatform && (
+          <MenuItem
+            disabled={busy}
+            onClick={() => menuAnchor && handleFetchPrimary(menuAnchor.company.id, true)}
+          >
+            <ListItemIcon>
+              <RefreshIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>最新の情報に更新</ListItemText>
+          </MenuItem>
+        )}
         {menuAnchor?.company.data_status !== 'published' ? (
           [
             <MenuItem
@@ -1448,6 +1469,7 @@ export default function PageContent() {
         </AccordionSummary>
         <AccordionDetails sx={{ pt: 0 }}>
           <Stack spacing={2}>
+            {isPlatform && (
             <Box>
               <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
                 マッチング用データの更新
@@ -1494,6 +1516,7 @@ export default function PageContent() {
                 </Button>
               </Stack>
             </Box>
+            )}
 
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Button component={Link} href="/admin/job-positions" size="small" variant="outlined">

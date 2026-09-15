@@ -102,3 +102,41 @@ func TestEchoAdminSchoolScope_RestrictedAllowedSchool(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }
+
+func TestEchoRequirePlatformAdmin_UnrestrictedOK(t *testing.T) {
+	schools := services.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{}})
+	e := echo.New()
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ctx := context.WithValue(c.Request().Context(), middleware.AdminUserIDContextKey, uint(1))
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	})
+	e.GET("/x", func(c echo.Context) error { return c.String(http.StatusOK, "ok") }, routes.EchoRequirePlatformAdmin(schools))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestEchoRequirePlatformAdmin_RestrictedForbidden(t *testing.T) {
+	schools := services.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{
+		2: {{ID: 5}},
+	}})
+	e := echo.New()
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ctx := context.WithValue(c.Request().Context(), middleware.AdminUserIDContextKey, uint(2))
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	})
+	e.GET("/x", func(c echo.Context) error { return c.String(http.StatusOK, "ok") }, routes.EchoRequirePlatformAdmin(schools))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}

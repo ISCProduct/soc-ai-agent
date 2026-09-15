@@ -38,6 +38,10 @@ import {
 export interface ResultsListViewProps {
   companies: Company[]
   isProvisional: boolean
+  diagnosisSummary?: string | null
+  evaluatedCategories?: number | null
+  minMatchedAxisCount?: number | null
+  diagnosisConfidence?: number | null
   analysisScores: AnalysisScores | null
   scoreComment: string
   analysisError: string | null
@@ -65,6 +69,10 @@ export interface ResultsListViewProps {
 export default function ResultsListView({
   companies,
   isProvisional,
+  diagnosisSummary = null,
+  evaluatedCategories = null,
+  minMatchedAxisCount = null,
+  diagnosisConfidence = null,
   analysisScores,
   scoreComment,
   analysisError,
@@ -139,10 +147,29 @@ export default function ResultsListView({
             🎉 AI分析完了！適合企業を{companies.length}社に絞り込みました
           </Typography>
           {isProvisional && (
-            <Chip label="暫定評価" color="warning" variant="outlined" sx={{ mb: 1 }} />
+            <Box sx={{ mb: 1.5 }}>
+              <Chip label="暫定評価" color="warning" variant="outlined" sx={{ mb: 1 }} />
+              <Alert severity="warning" sx={{ textAlign: 'left', maxWidth: 720, mx: 'auto' }}>
+                {diagnosisSummary ||
+                  '回答の根拠がまだ薄いため、適合度は参考値です。選択肢に理由を添えると精度が上がります。'}
+                {(evaluatedCategories != null || minMatchedAxisCount != null || diagnosisConfidence != null) && (
+                  <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                    {[
+                      evaluatedCategories != null ? `評価カテゴリ ${evaluatedCategories}` : null,
+                      minMatchedAxisCount != null ? `最小根拠軸 ${minMatchedAxisCount}` : null,
+                      diagnosisConfidence != null ? `診断信頼度 ${diagnosisConfidence}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' / ')}
+                  </Typography>
+                )}
+              </Alert>
+            </Box>
           )}
           <Typography variant="body1" color="text.secondary">
-            AIによる詳細分析に基づいて、最適なIT企業をマッチングしました
+            {isProvisional
+              ? '現時点の回答から仮マッチしています。会話を続けると根拠が厚くなります'
+              : 'AIによる詳細分析に基づいて、最適なIT企業をマッチングしました'}
           </Typography>
         </Box>
       </Box>
@@ -277,6 +304,9 @@ export default function ResultsListView({
                       </Box>
                       <Typography variant="caption" color="text.secondary">
                         適合度
+                        {typeof company.matchedAxisCount === 'number'
+                          ? `（根拠軸 ${company.matchedAxisCount}）`
+                          : ''}
                       </Typography>
                     </Box>
                   </Box>

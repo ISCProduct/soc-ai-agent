@@ -7,6 +7,7 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { useRequirePlatformAdmin } from '@/lib/use-require-platform-admin'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
@@ -24,6 +25,7 @@ type AuditLog = {
 }
 
 export default function PageContent() {
+  const platformReady = useRequirePlatformAdmin()
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
@@ -34,6 +36,8 @@ export default function PageContent() {
       window.location.href = '/'
     }
   }, [])
+
+  if (!platformReady) return null
 
   const loadLogs = async () => {
     setError('')

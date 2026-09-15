@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -41,8 +42,27 @@ var interviewScoreMapping = []struct {
 	{"enthusiasm", []string{"成長志向", "チームワーク志向"}},
 }
 
+// ResolveDiagnosisSessionID は面接スコアを流し込むチャット診断セッションを決める。
+// チャット診断が無い場合のみ interview-{userID} スナップショットへフォールバックする。
+func (s *CrossFeatureIntegrationService) ResolveDiagnosisSessionID(userID uint) string {
+	if s.weightScoreRepo == nil {
+		return PickDiagnosisSessionID(userID, "", errors.New("no repo"))
+	}
+	id, err := s.weightScoreRepo.FindLatestDiagnosisSessionID(userID)
+	return PickDiagnosisSessionID(userID, id, err)
+}
+
+// PickDiagnosisSessionID は診断セッション選定の純関数（テスト用にも公開）。
+func PickDiagnosisSessionID(userID uint, latestChatSession string, err error) string {
+	fallback := fmt.Sprintf("interview-%d", userID)
+	if err != nil || strings.TrimSpace(latestChatSession) == "" || repositories.IsInterviewSnapshotSession(latestChatSession) {
+		return fallback
+	}
+	return latestChatSession
+}
+
 // UpdateScoresFromInterviewReport 面接レポートを元に UserWeightScore を更新する
-// セッションIDは面接セッションID（文字列変換して利用）
+// chatSessionID は診断・マッチング対象のセッション（ResolveDiagnosisSessionID の結果を渡す）。
 func (s *CrossFeatureIntegrationService) UpdateScoresFromInterviewReport(
 	userID uint,
 	chatSessionID string,
@@ -50,6 +70,9 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromInterviewReport(
 ) error {
 	if report == nil || report.ScoresJSON == "" {
 		return nil
+	}
+	if strings.TrimSpace(chatSessionID) == "" {
+		chatSessionID = s.ResolveDiagnosisSessionID(userID)
 	}
 
 	var interviewScores map[string]int
