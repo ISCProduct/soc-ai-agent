@@ -82,22 +82,8 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 	if err != nil {
 		return nil, nil, err
 	}
-	review.DocumentID = doc.ID
-	if err := s.repo.CreateReview(review); err != nil {
+	if err := s.persistReview(doc, review, items); err != nil {
 		return nil, nil, err
-	}
-	for i := range items {
-		items[i].ReviewID = review.ID
-	}
-	if err := s.repo.ReplaceReviewItems(review.ID, items); err != nil {
-		return nil, nil, err
-	}
-
-	// スコア更新（クロス機能連携）
-	if s.crossFeature != nil {
-		if err := s.crossFeature.UpdateScoresFromResumeReview(doc.UserID, doc.SessionID, review, items); err != nil {
-			log.Printf("[Resume] crossFeature score update failed: %v\n", err)
-		}
 	}
 
 	annotatedPath, annotatedStored, err := s.annotatePDF(pdfPath, doc, review, items)
@@ -105,8 +91,8 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 		return review, items, err
 	}
 	_ = annotatedPath
+	// status は persistReview が済ませている（保存できたときだけ reviewed）。
 	doc.AnnotatedPath = annotatedStored
-	doc.Status = "reviewed"
 	if err := s.repo.UpdateDocument(doc); err != nil {
 		return review, items, err
 	}
@@ -235,6 +221,40 @@ func (s *ResumeService) fetchRAGReportStream(ctx context.Context, resumeText, co
 	return resp.Body, nil
 }
 
+// persistReview はレビュー本文・指摘事項を保存し、スコアをフライホイールへ渡す。
+//
+// 通常経路とストリーム経路で同じ処理が要る。以前はストリーム経路だけがこれを
+// 呼んでおらず、画面には出るが何も保存されない状態だった（#1332）。
+// 学生はレビューを二度と見られず、latest_score が nil のままなので
+// 「要対応」から永久に外れず、履歴書スコアがマッチングにも反映されなかった。
+//
+// 呼び出し側で共有することで、片方だけ保存を忘れる形に戻らないようにする。
+func (s *ResumeService) persistReview(doc *models.ResumeDocument, review *models.ResumeReview, items []models.ResumeReviewItem) error {
+	review.DocumentID = doc.ID
+	if err := s.repo.CreateReview(review); err != nil {
+		return fmt.Errorf("レビューの保存に失敗しました: %w", err)
+	}
+	for i := range items {
+		items[i].ReviewID = review.ID
+	}
+	if err := s.repo.ReplaceReviewItems(review.ID, items); err != nil {
+		return fmt.Errorf("指摘事項の保存に失敗しました: %w", err)
+	}
+
+	// 状態遷移を保存と同じ場所に置く。別々にすると、保存を忘れたまま
+	// reviewed にする形（#1332 そのもの）へ戻れてしまう。
+	// reviewed は「レビューが引ける」ことを意味しなければならない。
+	doc.Status = "reviewed"
+
+	// スコア連携は失敗してもレビュー自体は成立しているので止めない。
+	if s.crossFeature != nil {
+		if err := s.crossFeature.UpdateScoresFromResumeReview(doc.UserID, doc.SessionID, review, items); err != nil {
+			log.Printf("[Resume] crossFeature score update failed document_id=%d: %v", doc.ID, err)
+		}
+	}
+	return nil
+}
+
 // ReviewDocumentStream はドキュメントを前処理した後、SSEでRAGレポートをストリーミングし、
 // 最後にスコア・指摘事項を complete イベントとして送信する。
 func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uint, requestingUserID uint, companyName, jobTitle, candidateType string, w http.ResponseWriter) error {
@@ -345,6 +365,20 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		return err
 	}
 
+	// レビューを保存する。画面に出して終わりにすると、学生は二度と見られず、
+	// スコアもフライホイールに載らない（#1332）。
+	//
+	// 保存に失敗しても complete は送る。ここまでの内容は既に画面へ流れており、
+	// エラーにして消すほうが損失が大きい。代わりに status を進めないので、
+	// 「レビュー未実施」として再実行を促せる。
+	if err := s.persistReview(doc, review, items); err != nil {
+		log.Printf("resume_review_stream: persist failed document_id=%d err=%v", documentID, err)
+		sendEvent(map[string]any{
+			"type":    "save_error",
+			"message": "レビュー結果の保存に失敗しました。この画面を閉じると結果が失われます。お手数ですが再度実行してください。",
+		})
+	}
+
 	// 注釈 PDF を生成して保存
 	annotatedAvailable := false
 	_, annotatedStored, err := s.annotatePDF(pdfPath, doc, review, items)
@@ -356,9 +390,14 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		})
 	} else {
 		doc.AnnotatedPath = annotatedStored
-		doc.Status = "reviewed"
-		_ = s.repo.UpdateDocument(doc)
 		annotatedAvailable = true
+	}
+
+	// status は persistReview が保存に成功したときだけ進めている。
+	// 注釈PDFの成否では変えない。注釈は付加機能であり、失敗しても
+	// 「レビュー済み」であることは変わらない。
+	if err := s.repo.UpdateDocument(doc); err != nil {
+		log.Printf("resume_review_stream: update document failed document_id=%d err=%v", documentID, err)
 	}
 
 	sendEvent(map[string]any{
