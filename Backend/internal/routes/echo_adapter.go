@@ -199,3 +199,24 @@ func EchoAdminSchoolScope(schools *services.SchoolService) echo.MiddlewareFunc {
 		}
 	}
 }
+
+// EchoRequirePlatformAdmin は担当校を持つ管理者(教員・学園側)を拒否し、
+// 担当校0件のシステム管理者だけを通す。EchoAdminAuth の後段に置くこと。
+func EchoRequirePlatformAdmin(schools *services.SchoolService) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			adminUserID, ok := middleware.AdminUserIDFromContext(c.Request().Context())
+			if !ok {
+				return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+			}
+			restricted, _, err := schools.ResolveAdminAccess(adminUserID)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
+			}
+			if restricted {
+				return echo.NewHTTPError(http.StatusForbidden, "platform admin only")
+			}
+			return next(c)
+		}
+	}
+}

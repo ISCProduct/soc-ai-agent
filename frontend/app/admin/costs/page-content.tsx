@@ -13,6 +13,7 @@ import {
 } from 'recharts'
 import { ArrowLeft, Info } from 'lucide-react'
 import { authService } from '@/lib/auth'
+import { useRequirePlatformAdmin } from '@/lib/use-require-platform-admin'
 import { cn } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -184,6 +185,7 @@ function CostBarChart({
 }
 
 export default function PageContent() {
+  const platformReady = useRequirePlatformAdmin()
   const [adminEmail, setAdminEmail] = useState('')
   const [summary, setSummary] = useState<Summary | null>(null)
   const [daily, setDaily] = useState<DailyRow[]>([])
@@ -201,6 +203,8 @@ export default function PageContent() {
     }
     setAdminEmail(user.email)
   }, [])
+
+  if (!platformReady) return null
 
   const fetchAll = useCallback(async () => {
     if (!adminEmail) return
