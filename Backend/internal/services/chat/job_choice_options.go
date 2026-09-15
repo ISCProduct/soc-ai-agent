@@ -8,8 +8,10 @@ import (
 
 // 「1. ソフトウェアエンジニア（Webサービス開発）」のような番号付き選択肢を拾う。
 //
-// 全角の数字・ピリオド・括弧も来るため、正規化してから処理する。
-var presentedOptionPattern = regexp.MustCompile(`^\s*(\d{1,2})\s*[.．:：)）]\s*(.+?)\s*$`)
+// 改行区切りとは限らない。LLM が生成する質問文は
+// 「近いのはどれですか？ 1. A 2. B 3. C」のように1行で並べることもあるため、
+// 行単位ではなく本文全体から番号マーカーを探す。
+var optionMarkerPattern = regexp.MustCompile(`(\d{1,2})\s*[.．:：)）]\s*`)
 
 // 選択肢名の後ろに付く補足。「Webエンジニア（Webサービス・フロント/バックエンド開発）」の
 // 括弧部分は職種名ではないので、判定に渡す前に落とす。
@@ -26,33 +28,45 @@ var optionSuffixPattern = regexp.MustCompile(`[（(].*$`)
 // 番号が何番目の選択肢を指すかは、そのとき提示された一覧にしか書かれていない。
 // 一覧を固定のマスタ順で解釈すると、小分類に答えた番号を大分類として読む。
 func ExtractPresentedOptions(questionText string) []string {
-	if strings.TrimSpace(questionText) == "" {
+	text := normalizeOptionText(questionText)
+	if strings.TrimSpace(text) == "" {
 		return nil
 	}
 
-	options := make([]string, 0, 8)
+	marks := optionMarkerPattern.FindAllStringSubmatchIndex(text, -1)
+
+	// 1 から始まる連番だけを選択肢とみなす。本文中にたまたま現れた
+	// 「3. の観点について」のような数字を拾わないため。
+	kept := make([][]int, 0, len(marks))
 	expected := 1
-	for _, line := range strings.Split(normalizeOptionText(questionText), "\n") {
-		m := presentedOptionPattern.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		n, err := strconv.Atoi(m[1])
+	for _, m := range marks {
+		n, err := strconv.Atoi(text[m[2]:m[3]])
 		if err != nil || n != expected {
-			// 番号が飛んだら選択肢リストではない（本文中の「2. 」等）。
-			// 1から連番で並んでいるものだけを選択肢とみなす。
 			continue
 		}
-		name := strings.TrimSpace(optionSuffixPattern.ReplaceAllString(m[2], ""))
-		if name == "" {
-			continue
-		}
-		options = append(options, name)
+		kept = append(kept, m)
 		expected++
 	}
-	if len(options) < 2 {
-		// 1件だけ拾えた場合は選択肢ではなく箇条書きの可能性が高い。
+	if len(kept) < 2 {
 		return nil
+	}
+
+	options := make([]string, 0, len(kept))
+	for i, m := range kept {
+		// 名前は「マーカーの直後」から「次のマーカー」か「行末」の手前まで。
+		// 1行に並んでいても、改行区切りでも、同じ規則で切り出せる。
+		end := len(text)
+		if i+1 < len(kept) {
+			end = kept[i+1][0]
+		}
+		if nl := strings.IndexByte(text[m[1]:end], '\n'); nl >= 0 {
+			end = m[1] + nl
+		}
+		name := strings.TrimSpace(optionSuffixPattern.ReplaceAllString(text[m[1]:end], ""))
+		if name == "" {
+			return nil
+		}
+		options = append(options, name)
 	}
 	return options
 }

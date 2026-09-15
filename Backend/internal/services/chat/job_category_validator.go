@@ -192,12 +192,12 @@ JSONのみを返してください。説明は不要です。`, userAnswer, stri
 
 // normalizeNumericAnswer は番号だけの回答を職種名へ置き換える。
 //
-// 解釈の基準は「利用者が直前に見た選択肢」。presentedQuestion から選択肢を
-// 拾えたら、必ずそれに対して番号を当てる。大分類のマスタ順は使わない。
+// 解釈の基準は「利用者が直前に見た選択肢」。presentedQuestion があれば、
+// 番号は必ずその選択肢に対して当てる。大分類のマスタ順は使わない。
 //
-// 拾えなかった場合（質問文が渡らない、選択肢形式でない）は、大分類の一覧に
-// 当てる従来の挙動へ落とす。初回の職種選択は GenerateJobSelectionQuestion が
-// 大分類をその順で並べるため、この経路でも整合する。
+// 大分類の一覧に当てるのは質問文が無いときだけ。初回の職種選択は
+// GenerateJobSelectionQuestion が大分類をその順で並べるので、
+// 質問文があるならそちらを解析すれば同じ結果になる。
 func (v *JobCategoryValidator) normalizeNumericAnswer(userAnswer, presentedQuestion string) (string, error) {
 	trimmed := strings.TrimSpace(normalizeOptionText(userAnswer))
 	if trimmed == "" {
@@ -209,15 +209,23 @@ func (v *JobCategoryValidator) normalizeNumericAnswer(userAnswer, presentedQuest
 		return userAnswer, nil
 	}
 
-	if options := ExtractPresentedOptions(presentedQuestion); len(options) > 0 {
-		if name := OptionForChoice(options, choice); name != "" {
-			return name, nil
+	if strings.TrimSpace(presentedQuestion) != "" {
+		// 質問を提示している以上、番号はその選択肢に対する回答。
+		// 拾えたらそれを使い、拾えなくても大分類マスタには当てない。
+		//
+		// ここでマスタに落とすと、選択肢の書式が変わった（LLM の出力は
+		// 一定ではない）だけで元の不具合に戻る。判定できないときは
+		// 原文のまま AI へ渡し、必要なら聞き直させるほうが安全。
+		if options := ExtractPresentedOptions(presentedQuestion); len(options) > 0 {
+			if name := OptionForChoice(options, choice); name != "" {
+				return name, nil
+			}
 		}
-		// 提示された範囲外の番号。マスタ順に当てると別の職種になるため、
-		// 原文のまま返して AI 判定に委ねる（判定できなければ聞き直しになる）。
 		return userAnswer, nil
 	}
 
+	// 質問文が無い場合だけ大分類の一覧に当てる。履歴が空の初回など、
+	// 画面側が独自に一覧を出しているケースを想定している。
 	topCategories, err := v.jobCategoryRepo.GetTopCategories()
 	if err != nil {
 		return "", err

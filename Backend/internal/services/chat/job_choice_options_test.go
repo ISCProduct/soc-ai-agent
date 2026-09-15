@@ -91,6 +91,58 @@ func TestNormalizeNumericAnswer_FullWidthDigit(t *testing.T) {
 	}
 }
 
+// LLM の出力は改行区切りとは限らない。1行に並べられても解釈できること。
+// ここが抜けると、書式が変わっただけで元の不具合に戻る。
+func TestExtractPresentedOptions_Inline(t *testing.T) {
+	got := ExtractPresentedOptions("近いのはどれですか？ 1. ソフトウェアエンジニア 2. Webエンジニア 3. データエンジニア")
+	want := []string{"ソフトウェアエンジニア", "Webエンジニア", "データエンジニア"}
+	if len(got) != len(want) {
+		t.Fatalf("件数 = %d (%v), want %d", len(got), got, len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// 質問を提示しているのに選択肢を拾えなかった場合、大分類マスタへは当てない。
+// 当てると書式が変わっただけで「2 → 営業」に戻る。
+func TestNormalizeNumericAnswer_UnparsableQuestionDoesNotFallBackToMaster(t *testing.T) {
+	repo := &jobCategoryRepoMock{topCategories: []models.JobCategory{
+		{Name: "エンジニア"}, {Name: "営業"}, {Name: "マーケティング"},
+	}}
+	v := &JobCategoryValidator{jobCategoryRepo: repo}
+
+	// 番号付きの選択肢が無い質問文
+	got, err := v.normalizeNumericAnswer("2", "どんな仕事に興味がありますか？自由にお答えください。")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == "営業" {
+		t.Fatal("大分類マスタに当てている（書式変更で元の不具合に戻る経路）")
+	}
+	if got != "2" {
+		t.Errorf("原文のまま AI 判定へ渡すこと: got %s", got)
+	}
+}
+
+// 質問文が無いときだけ大分類に当てる（履歴が空の初回など）。
+func TestNormalizeNumericAnswer_NoQuestionUsesMaster(t *testing.T) {
+	repo := &jobCategoryRepoMock{topCategories: []models.JobCategory{
+		{Name: "エンジニア"}, {Name: "営業"},
+	}}
+	v := &JobCategoryValidator{jobCategoryRepo: repo}
+
+	got, err := v.normalizeNumericAnswer("2", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "営業" {
+		t.Errorf("want 営業, got %s", got)
+	}
+}
+
 func TestExtractPresentedOptions(t *testing.T) {
 	tests := []struct {
 		name string
@@ -131,8 +183,33 @@ func TestExtractPresentedOptions(t *testing.T) {
 			want: nil,
 		},
 		{
+			// マーカーは複数あるが、連番として成立するのは1件だけ。
+			// これを選択肢として採用すると、本文中の数字に番号を当ててしまう。
+			name: "連番が1件しか成立しない場合も選択肢とみなさない",
+			text: "1. 概要をまとめました。5. 詳細は別紙です。",
+			want: nil,
+		},
+		{
+			// 連番が途中で飛ぶ場合、飛んだ先は選択肢ではない。
+			name: "番号が飛んだら以降は拾わない",
+			text: "どれですか？\n1. エンジニア\n2. 営業\n7. その他",
+			want: []string{"エンジニア", "営業"},
+		},
+		{
 			name: "空文字",
 			text: "",
+			want: nil,
+		},
+		{
+			// 番号だけで名前が無い。選択肢として使えないので採用しない。
+			name: "名前の無い番号は選択肢とみなさない",
+			text: "どれですか？\n1.\n2.\n",
+			want: nil,
+		},
+		{
+			// 一部だけ名前が欠けている場合も、番号と名前の対応が崩れるため採用しない。
+			name: "一部の名前が欠けていたら採用しない",
+			text: "どれですか？\n1. エンジニア\n2.\n3. 営業\n",
 			want: nil,
 		},
 	}
