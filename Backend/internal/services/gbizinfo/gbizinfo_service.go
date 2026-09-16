@@ -5,12 +5,14 @@ import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/config"
 	"Backend/internal/models"
+	"Backend/internal/services/houjinbangou"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -28,6 +30,7 @@ type GBizInfoService struct {
 	companyRepo   repository.CompanyRepository
 	relationRepo  repository.CompanyRelationRepository
 	detailFetcher CompanyDetailFetcher
+	numberFinder  *houjinbangou.Client
 }
 
 // CompanyDetailFetcher は関連企業として新規作成した会社の詳細情報(業種・住所・URL等)を
@@ -43,6 +46,45 @@ func (s *GBizInfoService) SetDetailFetcher(f CompanyDetailFetcher) {
 	if s != nil {
 		s.detailFetcher = f
 	}
+}
+
+// SetCorporateNumberFinder は国税庁 法人番号システムのクライアントを注入する。
+// gBizINFO は法人番号が無いと何も引けないため、未設定の企業をここで補う。
+// 未注入でも動作は変わらない(法人番号が無い企業は従来どおり同期失敗になる)。
+func (s *GBizInfoService) SetCorporateNumberFinder(c *houjinbangou.Client) {
+	if s != nil {
+		s.numberFinder = c
+	}
+}
+
+// ensureCorporateNumber は法人番号が未設定の企業について、国税庁APIで商号から特定して保存する。
+// 特定できなければ空文字を返す(呼び出し側が従来どおり同期失敗として扱う)。
+//
+// 会社名が同じ別法人は実在するため、一意に決まらない場合は何も書かない。
+// 誤った法人番号を入れると、以降の同期でまるごと別会社の情報に上書きされる。
+func (s *GBizInfoService) ensureCorporateNumber(ctx context.Context, company *models.Company) string {
+	if s.numberFinder == nil || !s.numberFinder.Enabled() {
+		return ""
+	}
+
+	corp, err := s.numberFinder.ResolveCorporateNumber(ctx, company.Name, company.Location)
+	if err != nil {
+		slog.Warn("法人番号の特定に失敗しました", "company_id", company.ID, "error", err)
+		return ""
+	}
+	if corp == nil {
+		slog.Info("法人番号を一意に特定できませんでした", "company_id", company.ID, "name", company.Name)
+		return ""
+	}
+
+	company.CorporateNumber = corp.CorporateNumber
+	if err := s.companyRepo.Update(company); err != nil {
+		slog.Warn("法人番号の保存に失敗しました", "company_id", company.ID, "error", err)
+		return ""
+	}
+	slog.Info("法人番号を特定しました",
+		"company_id", company.ID, "name", company.Name, "corporate_number", corp.CorporateNumber)
+	return corp.CorporateNumber
 }
 
 type GBizSearchResult struct {
@@ -108,6 +150,10 @@ func (s *GBizInfoService) SyncCompany(ctx context.Context, companyID uint) (*GBi
 		return nil, err
 	}
 	corporateNumber := strings.TrimSpace(company.CorporateNumber)
+	if corporateNumber == "" {
+		// 商号から国税庁APIで引けることがある。引けたらそのまま同期を続行する。
+		corporateNumber = s.ensureCorporateNumber(ctx, company)
+	}
 	if corporateNumber == "" {
 		return s.syncFailed(company, "corporate_number is required")
 	}

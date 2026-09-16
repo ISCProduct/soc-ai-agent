@@ -26,6 +26,7 @@ import (
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/gbizinfo"
 	"Backend/internal/services/github"
+	"Backend/internal/services/houjinbangou"
 	"Backend/internal/services/hr"
 	"Backend/internal/services/interview"
 	"Backend/internal/services/matching"
@@ -323,6 +324,9 @@ func main() {
 	// 関連企業として新規作成された会社(gbizinfo経由/AI検索経由の両方)にも
 	// infoFetcherで詳細情報を充填する(空データの企業が量産される問題への対応)。
 	gbizInfoService.SetDetailFetcher(infoFetcher)
+	// gBizINFO は法人番号が無いと何も引けない。商号しか分かっていない企業のために、
+	// 国税庁 法人番号システムで法人番号を特定できるようにする(未設定なら無効)。
+	gbizInfoService.SetCorporateNumberFinder(houjinbangou.NewClientFromEnv())
 	relationsFetcher := company.NewCompanyRelationsFetcher(companyRepo, companyRelationRepo, aiClient, gbizInfoService)
 	relationsFetcher.SetSearchBudget(companySearchBudget)
 	relationsFetcher.SetSearchFlight(companySearchFlight)
