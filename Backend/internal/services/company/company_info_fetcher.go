@@ -440,12 +440,30 @@ func gbizResultUseful(r *CompanyInfoResult) bool {
 
 // enrichGapsWithAI は gBiz で埋まった結果の空欄だけ、安価 AI Search で補完する。
 func (f *CompanyInfoFetcher) enrichGapsWithAI(ctx context.Context, companyName, websiteURL string, base *CompanyInfoResult) (*CompanyInfoResult, error) {
-	needsAI := base.Description == "" || base.MainBusiness == "" || base.Industry == "" ||
-		base.Culture == "" || base.WorkStyle == "" || base.WebsiteURL == ""
-	if !needsAI {
+	if !companyInfoHasGaps(base) {
 		return base, nil
 	}
-	ai, err := f.acquireViaAISearch(ctx, companyName, firstNonEmpty(websiteURL, base.WebsiteURL))
+	siteURL := firstNonEmpty(websiteURL, base.WebsiteURL)
+
+	// web_search は検索結果が固定8,000トークン/callで課金される(#1124)。
+	// 公式サイトのURLが分かっているなら、まずそこを読んで穴を埋める。
+	// 埋まりきればSearchは呼ばない。
+	if site, siteErr := f.acquireFromWebsite(ctx, companyName, siteURL); siteErr == nil {
+		mergeCompanyInfoGaps(base, site)
+		if !companyInfoHasGaps(base) {
+			base.Source = companyfetch.SourceGBiz + "+" + companyfetch.SourceScrape
+			base.Confidence = companyfetch.ConfidenceMedium
+			if site.ModelUsed != "" {
+				base.ModelUsed = "gbizinfo+" + site.ModelUsed
+			}
+			return base, nil
+		}
+	} else {
+		// JS描画のサイトなど、本文が取れないことは珍しくない。Searchへ戻すだけ。
+		log.Printf("website extract skipped company=%s: %v", companyName, siteErr)
+	}
+
+	ai, err := f.acquireViaAISearch(ctx, companyName, siteURL)
 	if err != nil {
 		// Search モデル廃止などで AI が落ちても、gBiz の法人データは返す。
 		// ここで error にするとバッチが「失敗 N」になり、保存済み gBiz も無かったことになる。
@@ -463,6 +481,38 @@ func (f *CompanyInfoFetcher) enrichGapsWithAI(ctx context.Context, companyName, 
 	base.Source = companyfetch.SourceGBiz + "+" + companyfetch.SourceWebSearch
 	base.Confidence = companyfetch.ConfidenceMedium
 	return base, nil
+}
+
+// companyInfoHasGaps は AI で補う必要のある空欄が残っているかを返す。
+func companyInfoHasGaps(r *CompanyInfoResult) bool {
+	return r.Description == "" || r.MainBusiness == "" || r.Industry == "" ||
+		r.Culture == "" || r.WorkStyle == "" || r.WebsiteURL == ""
+}
+
+// acquireFromWebsite は公式サイトの本文から情報を組み立てる（web_search を使わない）。
+//
+// 本文が取れなければエラーを返す。呼び出し側は web_search へ戻すこと。
+func (f *CompanyInfoFetcher) acquireFromWebsite(ctx context.Context, companyName, websiteURL string) (*CompanyInfoResult, error) {
+	if strings.TrimSpace(websiteURL) == "" {
+		return nil, fmt.Errorf("公式サイトURLが無いためスキップします")
+	}
+
+	text, err := collectWebsiteText(ctx, websiteURL)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := f.acquireCheapExtract(ctx, companyName, websiteURL, text)
+	if err != nil {
+		return nil, err
+	}
+	// 読んだページが根拠なので、検索結果ではなくスクレイプとして記録する。
+	result.Source = companyfetch.SourceScrape
+	result.SourceURL = strings.TrimSpace(websiteURL)
+	if result.WebsiteURL == "" {
+		result.WebsiteURL = strings.TrimSpace(websiteURL)
+	}
+	return result, nil
 }
 
 // acquireViaAISearch は安価な mini-search → Parse で事実のみ取得する（deep search なし）。
