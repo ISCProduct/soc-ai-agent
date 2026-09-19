@@ -188,6 +188,44 @@ func TestResolveCorporateNumber(t *testing.T) {
 			wantNumber: "",
 		},
 		{
+			// 実例。「freee株式会社」は法人格を落とすと台東区の
+			// 「株式会社Ｆｒｅｅｅ」に完全一致する(本物は品川区)。
+			// 候補が1件でも所在地が食い違えば採用しない。
+			name:       "候補が1件でも所在地が食い違えば採用しない",
+			query:      "Ｆｒｅｅｅ株式会社",
+			location:   "東京都品川区大崎",
+			body:       wrap(corpAt("5010401130076", "株式会社Ｆｒｅｅｅ", "東京都", "台東区")),
+			wantNumber: "",
+		},
+		{
+			name:       "所在地が一致すれば採用する",
+			query:      "Ｆｒｅｅｅ株式会社",
+			location:   "東京都台東区台東４丁目",
+			body:       wrap(corpAt("5010401130076", "株式会社Ｆｒｅｅｅ", "東京都", "台東区")),
+			wantNumber: "5010401130076",
+		},
+		{
+			name:       "所在地ヒントが都道府県だけなら市区町村は問わない",
+			query:      "テスト商事",
+			location:   "東京都",
+			body:       wrap(corpAt("1111111111111", "テスト商事株式会社", "東京都", "台東区")),
+			wantNumber: "1111111111111",
+		},
+		{
+			name:       "所在地ヒントが無ければ従来どおり採用する",
+			query:      "テスト商事",
+			location:   "",
+			body:       wrap(corpAt("1111111111111", "テスト商事株式会社", "東京都", "台東区")),
+			wantNumber: "1111111111111",
+		},
+		{
+			name:       "都道府県が違えば採用しない",
+			query:      "テスト商事",
+			location:   "大阪府大阪市",
+			body:       wrap(corpAt("1111111111111", "テスト商事株式会社", "東京都", "台東区")),
+			wantNumber: "",
+		},
+		{
 			name:       "該当ゼロ",
 			query:      "存在しない会社",
 			body:       `<?xml version="1.0"?><corporations><count>0</count></corporations>`,
