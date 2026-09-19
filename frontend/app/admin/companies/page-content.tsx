@@ -1356,7 +1356,7 @@ export default function PageContent() {
                               {fetching ? '取得中…' : '情報を取得'}
                             </Button>
                             ) : null
-                          ) : isDraft ? (
+                          ) : isDraft && isPlatform ? (
                             <Button
                               variant="contained"
                               size="small"
@@ -1423,7 +1423,7 @@ export default function PageContent() {
             <ListItemText>最新の情報に更新</ListItemText>
           </MenuItem>
         )}
-        {menuAnchor?.company.data_status !== 'published' ? (
+        {!isPlatform ? null : menuAnchor?.company.data_status !== 'published' ? (
           [
             <MenuItem
               key="publish"

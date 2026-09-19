@@ -79,8 +79,10 @@ func SetupAdminRoutes(
 	admin.GET("/companies/names", adminCompanyController.Names)
 	admin.GET("/companies/:id", adminCompanyController.Get)
 	admin.PUT("/companies/:id", adminCompanyController.Update)
-	admin.PATCH("/companies/:id/publish", adminCompanyController.Publish)
-	admin.PATCH("/companies/:id/reject", adminCompanyController.Reject)
+	// 掲載公開・非公開は全テナント共通の DataStatus / IsActive を書き換えるのでシステム管理者専用。
+	// 担当校ごとの掲載可否は /schools/:id/company-approvals で扱う。
+	admin.PATCH("/companies/:id/publish", adminCompanyController.Publish, platform)
+	admin.PATCH("/companies/:id/reject", adminCompanyController.Reject, platform)
 	admin.GET("/companies/:id/relation-graph", adminCompanyGraphController.RelationGraph)
 	admin.GET("/companies/:id/interview-questions", adminInterviewController.ListCompanyQuestions)
 	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion)
