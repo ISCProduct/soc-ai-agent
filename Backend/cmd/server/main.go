@@ -418,6 +418,9 @@ func main() {
 	resumeService.SetCompanyProvisioner(infoFetcher)
 	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
+	// コンストラクタが自前生成した infoFetcher には SetSharedSearch が掛からない。
+	// 共有済みのものに差し替えないと、fetch-missing-batch で検索が統合されない(#1124)。
+	adminCompanyController.SetInfoFetcher(infoFetcher)
 	adminCompanyController.SetRelationsFetcher(relationsFetcher)
 	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
 	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
