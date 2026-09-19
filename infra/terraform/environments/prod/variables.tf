@@ -166,9 +166,15 @@ variable "resend_api_key" {
 
 variable "admin_secret" {
   type        = string
-  description = "管理者認証シークレット。CI(sync-whats-newジョブ等)から既知の値で呼び出すため、stagingのadmin_secret_plainと同じ値を設定すること"
+  description = "管理者認証シークレット。未指定なら本番専用の値を自動生成する(#1158)。stagingと同じ値を入れないこと"
   sensitive   = true
   default     = ""
+}
+
+variable "secret_values_managed_outside" {
+  type        = bool
+  description = "外部サービス由来のキー(OpenAI/Resend/OAuth)の値をSecrets Manager側で直接管理している場合はtrue。tfvarsに平文を置かずにplan/applyできるようにする(#1158)"
+  default     = false
 }
 
 variable "additional_secret_arns" {
