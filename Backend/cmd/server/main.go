@@ -39,6 +39,7 @@ import (
 	"Backend/internal/services/skillscore"
 	"Backend/internal/services/storage"
 	"Backend/internal/services/teacher"
+	"Backend/internal/services/training"
 	"Backend/migrations"
 	"context"
 	"log"
@@ -574,6 +575,10 @@ func main() {
 	adminEntry.POST("/companies/:id/company-users", adminCompanyUserController.Invite)
 	adminEntry.GET("/companies/:id/company-users", adminCompanyUserController.List)
 	adminEntry.PATCH("/companies/:id/company-users/:userID", adminCompanyUserController.SetDisabled)
+	// 学習データのエクスポート(#268)。候補者の発話と選考結果を含むため管理者のみ。
+	adminTrainingController := controllers.NewAdminTrainingController(training.NewService(db))
+	adminEntry.GET("/training/stats", adminTrainingController.Stats)
+	adminEntry.GET("/training/export", adminTrainingController.Export)
 	// CI(GitHub Actions)からのマシン間呼び出しのため、ログインユーザー前提のEchoAdminAuthではなく
 	// 共有シークレットのみで認証する(#861)
 	api.POST("/admin/whats-new/ingest", releaseNoteController.Ingest, routes.EchoStaticSecretAuth(cfg.AdminSecret))
