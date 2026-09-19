@@ -51,6 +51,7 @@ function ResumeContent() {
     scoresBefore,
     scoresAfter,
     annotateError,
+    saveError,
     handleDownload,
   } = useResumePage()
 
@@ -105,6 +106,7 @@ function ResumeContent() {
         scoresBefore={scoresBefore}
         scoresAfter={scoresAfter}
         annotateError={annotateError}
+        saveError={saveError}
         onDownload={handleDownload}
       />
     </Box>

@@ -37,6 +37,8 @@ export function useResumePage() {
   const [uploadError, setUploadError] = useState('')
   const [reviewError, setReviewError] = useState('')
   const [annotateError, setAnnotateError] = useState('')
+  // 保存に失敗しても画面にはレビューが出る。黙っていると学生は保存済みだと思って閉じる(#1332)
+  const [saveError, setSaveError] = useState('')
   const [review, setReview] = useState<ReviewResult | null>(null)
   const [ragReport, setRagReport] = useState('')
   const [scoresBefore, setScoresBefore] = useState<WeightScore[] | null>(null)
@@ -180,6 +182,7 @@ export function useResumePage() {
     setScoresBefore(null)
     setScoresAfter(null)
     setAnnotateError('')
+    setSaveError('')
     setReviewError('')
     setReviewLoading(false)
     setLoading(true)
@@ -238,6 +241,7 @@ export function useResumePage() {
 
     setReviewError('')
     setAnnotateError('')
+    setSaveError('')
     setReview(null)
     setRagReport('')
     setScoresAfter(null)
@@ -336,6 +340,8 @@ export function useResumePage() {
                 /* ignore */
               }
             }
+          } else if (data.type === 'save_error') {
+            setSaveError(String(data.message ?? ''))
           } else if (data.type === 'annotate_error') {
             setAnnotateError(String(data.message ?? ''))
           } else if (data.type === 'error') {
@@ -416,6 +422,7 @@ export function useResumePage() {
     scoresBefore,
     scoresAfter,
     annotateError,
+    saveError,
     handleDownload,
   }
 }

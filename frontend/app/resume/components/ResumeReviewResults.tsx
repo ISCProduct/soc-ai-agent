@@ -21,6 +21,7 @@ type ResumeReviewResultsProps = {
   scoresBefore: WeightScore[] | null
   scoresAfter: WeightScore[] | null
   annotateError: string
+  saveError: string
   onDownload: () => void
 }
 
@@ -29,6 +30,7 @@ export function ResumeReviewResults({
   scoresBefore,
   scoresAfter,
   annotateError,
+  saveError,
   onDownload,
 }: ResumeReviewResultsProps) {
   if (!review) return null
@@ -46,6 +48,9 @@ export function ResumeReviewResults({
       )}
 
       <Paper sx={{ p: 3, mt: 4 }} elevation={2}>
+        {saveError && (
+          <Alert severity="error" sx={{ mb: 2 }}>{saveError}</Alert>
+        )}
         <Typography variant="h5" fontWeight="bold" gutterBottom>
           指摘事項
         </Typography>

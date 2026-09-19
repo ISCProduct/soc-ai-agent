@@ -3,6 +3,7 @@
  */
 import { act, renderHook } from '@testing-library/react'
 import { useResumePage } from '@/app/resume/hooks/useResumePage'
+import { TextDecoder as NodeTextDecoder, TextEncoder as NodeTextEncoder } from 'util'
 
 jest.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
@@ -164,5 +165,94 @@ describe('useResumePage handleUpload バリデーション (#1055)', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(result.current.documentId).toBe(8)
+  })
+})
+
+// #1332: 保存に失敗してもレビューは画面に出る。save_error を握りつぶすと
+// 学生は「保存済み」と思って閉じ、結果が失われる（不具合の症状がそのまま再現する）
+describe('useResumePage SSE save_error (#1332)', () => {
+  const originalFetch = global.fetch
+
+  // jsdom には TextEncoder/TextDecoder が無い。フック側が TextDecoder を使うので補う
+  beforeAll(() => {
+    const g = globalThis as unknown as { TextEncoder?: unknown; TextDecoder?: unknown }
+    g.TextEncoder = g.TextEncoder ?? NodeTextEncoder
+    g.TextDecoder = g.TextDecoder ?? NodeTextDecoder
+  })
+
+  afterEach(() => {
+    global.fetch = originalFetch
+  })
+
+  const streamResponse = (events: object[]) => {
+    const body = events.map((e) => `data: ${JSON.stringify(e)}\n`).join('')
+    const chunk = new NodeTextEncoder().encode(body)
+    let sent = false
+    return {
+      ok: true,
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (sent) return { done: true, value: undefined }
+            sent = true
+            return { done: false, value: chunk }
+          },
+          cancel: async () => undefined,
+        }),
+      },
+    } as unknown as Response
+  }
+
+  const review = { score: 80, summary: 'ok' }
+
+  it('save_error を受け取ったら画面に出すための state に残す', async () => {
+    global.fetch = jest.fn().mockImplementation(async (url: string) => {
+      if (String(url).includes('/api/resume/review/stream')) {
+        return streamResponse([
+          { type: 'save_error', message: '保存に失敗しました' },
+          { type: 'complete', review, items: [], annotated_available: false },
+        ])
+      }
+      return { ok: true, json: async () => ({ document: { id: 3 } }) } as unknown as Response
+    })
+
+    const { result } = renderHook(() => useResumePage())
+    act(() => {
+      result.current.setSourceUrl('https://example.com/resume.pdf')
+      result.current.setJobTitle('バックエンドエンジニア')
+    })
+    await act(async () => {
+      await result.current.handleUpload()
+    })
+    await act(async () => {
+      await result.current.handleReview()
+    })
+
+    expect(result.current.saveError).toBe('保存に失敗しました')
+    expect(result.current.review).not.toBeNull()
+  })
+
+  it('保存が成功した通常のレビューでは save_error は空のまま', async () => {
+    global.fetch = jest.fn().mockImplementation(async (url: string) => {
+      if (String(url).includes('/api/resume/review/stream')) {
+        return streamResponse([{ type: 'complete', review, items: [], annotated_available: false }])
+      }
+      return { ok: true, json: async () => ({ document: { id: 4 } }) } as unknown as Response
+    })
+
+    const { result } = renderHook(() => useResumePage())
+    act(() => {
+      result.current.setSourceUrl('https://example.com/resume.pdf')
+      result.current.setJobTitle('バックエンドエンジニア')
+    })
+    await act(async () => {
+      await result.current.handleUpload()
+    })
+    await act(async () => {
+      await result.current.handleReview()
+    })
+
+    expect(result.current.saveError).toBe('')
+    expect(result.current.review).not.toBeNull()
   })
 })

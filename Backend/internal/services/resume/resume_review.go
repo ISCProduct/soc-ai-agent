@@ -86,18 +86,24 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 		return nil, nil, err
 	}
 
-	annotatedPath, annotatedStored, err := s.annotatePDF(pdfPath, doc, review, items)
-	if err != nil {
-		return review, items, err
+	// 注釈PDFは付加機能。失敗してもレビューは成立しているので、
+	// ストリーム経路と同じくログだけ残して status の保存まで進む。
+	// ここで return すると reviewed が DB に載らず、教員一覧と統合プロファイルに
+	// 「レビュー済み」が出ないまま（経路によって status が食い違う）。
+	annotatedPath, annotatedStored, annotateErr := s.annotatePDF(pdfPath, doc, review, items)
+	if annotateErr != nil {
+		log.Printf("resume_review: annotatePDF failed document_id=%d err=%v", doc.ID, annotateErr)
+	} else {
+		_ = annotatedPath
+		doc.AnnotatedPath = annotatedStored
 	}
-	_ = annotatedPath
-	// status は persistReview が済ませている（保存できたときだけ reviewed）。
-	doc.AnnotatedPath = annotatedStored
+
+	// persistReview がメモリ上で立てた status をここで永続化する。
 	if err := s.repo.UpdateDocument(doc); err != nil {
 		return review, items, err
 	}
 
-	return review, items, nil
+	return review, items, annotateErr
 }
 
 type aiReviewResponse struct {
