@@ -345,7 +345,9 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 		QuestionElapsedSeconds  int    `json:"question_elapsed_seconds"`
 		QuestionDurationSeconds int    `json:"question_duration_seconds"`
 	}
-	ctx.Bind(&req)
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
 
 	result, err := c.interviewService.StartTurn(
 		ctx.Request().Context(),

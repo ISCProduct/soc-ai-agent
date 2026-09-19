@@ -71,7 +71,11 @@ func (c *AdminCompanyGraphController) Crawl(ctx echo.Context) error {
 	req.Pages = 2
 	req.Threshold = config.CompanyGraphThreshold()
 
-	ctx.Bind(&req)
+	// 既定値を入れたあとに Bind するため、不正なボディを無視すると
+	// 「指定したつもりの条件と違う対象をクロールする」ことになる。
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
 
 	// company-graph コンテナ経由でクロール（未設定の場合は埋め込みパイプラインを使用）
 	var nodes map[string]*scraper.CompanyNode

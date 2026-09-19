@@ -223,7 +223,11 @@ func (c *AuthController) VerifyEmail(ctx echo.Context) error {
 		var req struct {
 			Token string `json:"token"`
 		}
-		ctx.Bind(&req)
+		// クエリにトークンが無いときだけボディを読む。
+		// その状況で壊れたボディが来たのなら、黙って空トークン扱いにせず不正リクエストとして返す。
+		if err := ctx.Bind(&req); err != nil {
+			return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+		}
 		token = req.Token
 	}
 	if err := c.authService.VerifyEmail(token); err != nil {

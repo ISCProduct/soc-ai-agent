@@ -140,6 +140,10 @@ jobs:
       - name: 運用アラート通知スクリプトのテスト
         run: ./automation/test/ops-notify-discord-test.sh
 
+      # Bind のエラー握りつぶし。#1064 は修正が入らないままクローズされた。
+      - name: Bind エラー握りつぶしの検査
+        run: ./automation/test/bind-error-check.sh
+
       - name: ワークフロー埋め込み Python の構文チェック
         run: |
           python3 - <<'PYEOF'
