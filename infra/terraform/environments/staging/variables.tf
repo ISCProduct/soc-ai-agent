@@ -157,6 +157,19 @@ variable "openai_api_key_plain" {
   default     = ""
 }
 
+variable "gbizinfo_api_key" {
+  type        = string
+  description = "gBizINFO Web-APIのアクセストークン(平文、Secrets Manager未使用のためuser_dataに直接埋め込む)。未設定時はgBizINFO連携が無効になり、企業情報の取得がweb_searchに寄る"
+  sensitive   = true
+  default     = ""
+}
+
+variable "gbizinfo_base_url" {
+  type        = string
+  description = "gBizINFOのベースURL。提供されているのはv1で、コード側が /v1/hojin/... を付ける"
+  default     = "https://info.gbiz.go.jp/hojin"
+}
+
 variable "houjin_bangou_app_id" {
   type        = string
   description = "国税庁 法人番号システムWeb-APIのアプリケーションID(平文、Secrets Manager未使用のためuser_dataに直接埋め込む)。未設定時は法人番号の自動特定だけが無効になる"
