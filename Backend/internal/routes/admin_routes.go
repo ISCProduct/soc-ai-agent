@@ -152,6 +152,7 @@ func SetupAdminRoutes(
 
 	// コスト管理
 	admin.GET("/costs/summary", adminCostsController.Summary)
+	admin.GET("/costs/breakdown", adminCostsController.Breakdown)
 	admin.GET("/costs/daily", adminCostsController.Daily)
 	admin.GET("/costs/monthly", adminCostsController.Monthly)
 
