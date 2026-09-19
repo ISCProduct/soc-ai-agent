@@ -11,6 +11,8 @@ langchain-openai>=1.6.2,<2.0
 langchain-text-splitters>=1.0,<2.0
 # openai SDK 2.x 系（litellm との両立）
 openai>=1.109.1,<3.0
+# /metrics 公開（#1186）
+prometheus-fastapi-instrumentator==8.1.0
 pydantic==2.13.5
 pytest==9.1.1
 tiktoken==0.13.0
