@@ -39,6 +39,27 @@ func resolveWebSearchModel(override string) string {
 }
 
 func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxTokens int, modelOverride ...string) (string, error) {
+	return cli.chatCompletionJSON(ctx, systemPrompt, userPrompt, temperature, maxTokens, nil, modelOverride...)
+}
+
+// ChatCompletionWithSchema は JSON Schema を強制して応答を得る（Structured Outputs）。
+//
+// ChatCompletionJSON が使う JSON mode は「有効なJSONであること」しか保証しない。
+// キーの欠落・型違い・想定外の列挙値はそのまま通るため、受け取り側での検証が
+// 必須になっていた。strict:true のスキーマを渡すと、モデル側が形式を保証する。
+//
+// スキーマ非対応のモデル・エンドポイントでは JSON mode へ落ちる。
+func (cli *Client) ChatCompletionWithSchema(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxTokens int, schema *ResponseSchema, modelOverride ...string) (string, error) {
+	return cli.chatCompletionJSON(ctx, systemPrompt, userPrompt, temperature, maxTokens, schema, modelOverride...)
+}
+
+// ResponseSchema は Structured Outputs に渡すスキーマ。
+type ResponseSchema struct {
+	Name   string
+	Schema json.RawMessage
+}
+
+func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxTokens int, schema *ResponseSchema, modelOverride ...string) (string, error) {
 	if err := cli.ensureText(); err != nil {
 		return "", err
 	}
@@ -69,12 +90,18 @@ func (cli *Client) ChatCompletionJSON(ctx context.Context, systemPrompt, userPro
 			Temperature:         temperature,
 			MaxTokens:           0,
 			MaxCompletionTokens: maxTokens,
-			ResponseFormat: &openai.ChatCompletionResponseFormat{
-				Type: openai.ChatCompletionResponseFormatTypeJSONObject,
-			},
+			ResponseFormat:      responseFormatFor(schema),
 		}
 
 		resp, err := cli.c.CreateChatCompletion(ctxReq, req)
+		// スキーマ非対応のモデル・エンドポイントでは JSON mode まで落とす。
+		// 形式の保証は失うが、取得できなくなるよりはよい。
+		if err != nil && schema != nil && isUnsupportedResponseFormatErr(err) {
+			req.ResponseFormat = &openai.ChatCompletionResponseFormat{
+				Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+			}
+			resp, err = cli.c.CreateChatCompletion(ctxReq, req)
+		}
 		if err != nil && isUnsupportedResponseFormatErr(err) {
 			req.ResponseFormat = nil
 			resp, err = cli.c.CreateChatCompletion(ctxReq, req)
@@ -234,3 +261,20 @@ func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxToke
 }
 
 // ResponsesWithMaxTokens は Responses API を使い、maxOutputTokens を指定してテキストを取得します。
+
+// responseFormatFor はスキーマの有無に応じた response_format を返す。
+func responseFormatFor(schema *ResponseSchema) *openai.ChatCompletionResponseFormat {
+	if schema == nil || len(schema.Schema) == 0 {
+		return &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+		}
+	}
+	return &openai.ChatCompletionResponseFormat{
+		Type: openai.ChatCompletionResponseFormatTypeJSONSchema,
+		JSONSchema: &openai.ChatCompletionResponseFormatJSONSchema{
+			Name:   schema.Name,
+			Schema: schema.Schema,
+			Strict: true,
+		},
+	}
+}

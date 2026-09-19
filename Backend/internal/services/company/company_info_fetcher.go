@@ -554,7 +554,7 @@ func (f *CompanyInfoFetcher) acquireViaAISearch(ctx context.Context, companyName
 		"企業名「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。検索結果に無い項目は空文字または0。推測禁止。\n%s",
 		companyName, companyInfoJSONSchema,
 	)
-	raw, modelsUsed, err := f.llm.SearchLiteThenParse(ctx, searchPrompt, systemPrompt, parseUser, 600)
+	raw, modelsUsed, err := f.llm.SearchLiteThenParseWithSchema(ctx, searchPrompt, systemPrompt, parseUser, 600, companyInfoResponseSchema())
 	if err != nil {
 		return nil, fmt.Errorf("企業情報のAI取得失敗: %w", err)
 	}
@@ -632,7 +632,7 @@ func (f *CompanyInfoFetcher) acquireCheapExtract(ctx context.Context, companyNam
 		return f.acquireViaAISearch(ctx, companyName, websiteURL)
 	}
 
-	raw, model, err := f.llm.ExtractJSON(ctx, systemPrompt, userPrompt, 600)
+	raw, model, err := f.llm.ExtractJSONWithSchema(ctx, systemPrompt, userPrompt, 600, companyInfoResponseSchema())
 	if err != nil {
 		return nil, fmt.Errorf("企業情報の取得失敗: %w", err)
 	}
@@ -659,6 +659,9 @@ func parseCompanyInfoResult(text string) (*CompanyInfoResult, error) {
 	if result.EmployeeCount > 0 && result.EmployeeCountBasis == "" {
 		result.EmployeeCountBasis = models.EmployeeCountBasisConsolidated
 	}
+	// スキーマで縛れない内容(業種の表記ゆれ、年や人数の妥当性)をここで潰す。
+	// スキーマ非対応モデルへフォールバックした場合もここを通る。
+	sanitizeCompanyInfo(&result)
 	return &result, nil
 }
 
