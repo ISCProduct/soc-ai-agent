@@ -147,6 +147,12 @@ func (s *MatchingService) applyAIReasonsToTopMatches(
 	log.Printf("[CalculateMatching] Generating AI reasons for top %d of %d matches\n", len(top), len(pending))
 
 	for _, match := range top {
+		// 打ち切り済みなら残りのLLM呼び出しは全て失敗するだけなので、ここで抜ける（#1167）。
+		// 最も時間を使うのがこのループなので、キャンセルが実際に効くのもここ。
+		if ctx.Err() != nil {
+			log.Printf("[CalculateMatching] AI reason generation aborted: %v\n", ctx.Err())
+			return
+		}
 		reason, err := s.GenerateMatchReason(ctx, match, userScores)
 		if err != nil {
 			log.Printf("[CalculateMatching] Warning: Failed to generate AI reason for company %d: %v\n", match.CompanyID, err)
