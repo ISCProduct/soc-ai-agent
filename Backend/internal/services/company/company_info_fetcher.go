@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -449,22 +450,30 @@ func (f *CompanyInfoFetcher) enrichGapsWithAI(ctx context.Context, companyName, 
 	}
 	siteURL := firstNonEmpty(websiteURL, base.WebsiteURL)
 
-	// web_search は検索結果が固定8,000トークン/callで課金される(#1124)。
-	// 公式サイトのURLが分かっているなら、まずそこを読んで穴を埋める。
-	// 埋まりきればSearchは呼ばない。
-	if site, siteErr := f.acquireFromWebsite(ctx, companyName, siteURL); siteErr == nil {
-		mergeCompanyInfoGaps(base, site)
-		if !companyInfoHasGaps(base) {
-			base.Source = companyfetch.SourceGBiz + "+" + companyfetch.SourceScrape
-			base.Confidence = companyfetch.ConfidenceMedium
-			if site.ModelUsed != "" {
-				base.ModelUsed = "gbizinfo+" + site.ModelUsed
+	// 公式サイトの本文から穴を埋める経路。既定では無効。
+	//
+	// 相手サイトの利用規約が自動取得を禁じている場合があり、規約は企業ごとに
+	// 異なるため機械的に判断できない。robots.txt も未対応。これらを詰めるまでは
+	// 動かさない。COMPANY_WEBSITE_EXTRACT=1 で明示的に有効化したときだけ走る。
+	//
+	// #1338 の時点では gBizINFO が 404 で必ず失敗していたため、この経路には
+	// そもそも到達していなかった。#1341 で gBizINFO を直した結果、意図せず
+	// 動き出す状態になっていた。
+	if websiteExtractEnabled() {
+		if site, siteErr := f.acquireFromWebsite(ctx, companyName, siteURL); siteErr == nil {
+			mergeCompanyInfoGaps(base, site)
+			if !companyInfoHasGaps(base) {
+				base.Source = companyfetch.SourceGBiz + "+" + companyfetch.SourceScrape
+				base.Confidence = companyfetch.ConfidenceMedium
+				if site.ModelUsed != "" {
+					base.ModelUsed = "gbizinfo+" + site.ModelUsed
+				}
+				return base, nil
 			}
-			return base, nil
+		} else {
+			// JS描画のサイトなど、本文が取れないことは珍しくない。Searchへ戻すだけ。
+			log.Printf("website extract skipped company=%s: %v", companyName, siteErr)
 		}
-	} else {
-		// JS描画のサイトなど、本文が取れないことは珍しくない。Searchへ戻すだけ。
-		log.Printf("website extract skipped company=%s: %v", companyName, siteErr)
 	}
 
 	ai, err := f.acquireViaAISearch(ctx, companyName, siteURL)
@@ -485,6 +494,13 @@ func (f *CompanyInfoFetcher) enrichGapsWithAI(ctx context.Context, companyName, 
 	base.Source = companyfetch.SourceGBiz + "+" + companyfetch.SourceWebSearch
 	base.Confidence = companyfetch.ConfidenceMedium
 	return base, nil
+}
+
+// websiteExtractEnabled は公式サイトからの本文取得を行うかを返す。
+//
+// 既定は無効。利用規約・robots.txt の扱いを詰めるまで自動では動かさない。
+func websiteExtractEnabled() bool {
+	return os.Getenv("COMPANY_WEBSITE_EXTRACT") == "1"
 }
 
 // companyInfoHasGaps は AI で補う必要のある空欄が残っているかを返す。
