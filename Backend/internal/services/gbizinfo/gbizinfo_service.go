@@ -246,7 +246,7 @@ func (s *GBizInfoService) syncFailed(company *models.Company, message string) (*
 
 func (s *GBizInfoService) fetchProfile(ctx context.Context, corporateNumber string) (*models.GBizCompanyProfile, error) {
 	var resp gbizProfileResponse
-	if err := s.get(ctx, "/v2/hojin/"+corporateNumber, &resp); err != nil {
+	if err := s.get(ctx, "/v1/hojin/"+corporateNumber, &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.HojinInfos) == 0 {
@@ -270,7 +270,7 @@ func (s *GBizInfoService) fetchProfile(ctx context.Context, corporateNumber stri
 
 func (s *GBizInfoService) fetchProcurements(ctx context.Context, corporateNumber string, companyID uint) ([]models.GBizProcurement, error) {
 	var resp gbizProcurementResponse
-	if err := s.get(ctx, "/v2/hojin/"+corporateNumber+"/procurement", &resp); err != nil {
+	if err := s.get(ctx, "/v1/hojin/"+corporateNumber+"/procurement", &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.HojinInfos) == 0 {
@@ -294,7 +294,7 @@ func (s *GBizInfoService) fetchProcurements(ctx context.Context, corporateNumber
 
 func (s *GBizInfoService) fetchSubsidies(ctx context.Context, corporateNumber string, companyID uint) ([]models.GBizSubsidy, error) {
 	var resp gbizSubsidyResponse
-	if err := s.get(ctx, "/v2/hojin/"+corporateNumber+"/subsidy", &resp); err != nil {
+	if err := s.get(ctx, "/v1/hojin/"+corporateNumber+"/subsidy", &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.HojinInfos) == 0 {
@@ -320,7 +320,7 @@ func (s *GBizInfoService) fetchSubsidies(ctx context.Context, corporateNumber st
 
 func (s *GBizInfoService) fetchFinances(ctx context.Context, corporateNumber string, companyID uint) ([]models.GBizFinance, error) {
 	var resp gbizFinanceResponse
-	if err := s.get(ctx, "/v2/hojin/"+corporateNumber+"/finance", &resp); err != nil {
+	if err := s.get(ctx, "/v1/hojin/"+corporateNumber+"/finance", &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.HojinInfos) == 0 {
@@ -346,7 +346,7 @@ func (s *GBizInfoService) fetchFinances(ctx context.Context, corporateNumber str
 
 func (s *GBizInfoService) fetchWorkplace(ctx context.Context, corporateNumber string, companyID uint) (*models.GBizWorkplace, error) {
 	var resp gbizWorkplaceResponse
-	if err := s.get(ctx, "/v2/hojin/"+corporateNumber+"/workplace", &resp); err != nil {
+	if err := s.get(ctx, "/v1/hojin/"+corporateNumber+"/workplace", &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.HojinInfos) == 0 {
