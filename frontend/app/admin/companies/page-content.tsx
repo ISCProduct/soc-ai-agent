@@ -852,7 +852,9 @@ export default function PageContent() {
               : '2. 必要なら内容を修正し、担当校向けの掲載承認を設定します'}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            3. 情報がそろった企業を選んで「学生に公開」します（足りない企業は選べません）
+            {isPlatform
+              ? '3. 情報がそろった企業を選んで「学生に公開」します（足りない企業は選べません）'
+              : '3. 学生への公開はシステム管理者が行います'}
           </Typography>
         </Stack>
       </Box>

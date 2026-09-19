@@ -92,7 +92,9 @@ func SetupAdminRoutes(
 	admin.GET("/job-categories", adminJobController.JobCategories)
 	admin.GET("/job-positions", adminJobController.JobPositions)
 	admin.POST("/job-positions", adminJobController.CreateJobPosition)
-	admin.Any("/job-positions/:id/:action", adminJobController.JobPositionAction)
+	// 求人の公開・却下も企業と同じく全テナント共通の DataStatus / IsActive を書き換える。
+	// 未公開企業の求人を公開できてしまうため、企業側と揃えてシステム管理者専用にする。
+	admin.Any("/job-positions/:id/:action", adminJobController.JobPositionAction, platform)
 
 	// ── システム管理者専用（テナント横断・インフラ）────────────────────
 	admin.POST("/users/purge-expired", adminUserController.PurgeExpired, platform)

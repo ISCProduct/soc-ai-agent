@@ -186,6 +186,10 @@ func (c *AdminCompanyController) Get(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, company)
 }
 
+// maxCompanyUpdateBody は企業更新で受け付けるリクエストボディの上限。
+// 企業1件ぶんのテキストなので 1MiB あれば足りる。
+const maxCompanyUpdateBody = 1 << 20
+
 // Update PUT /api/admin/companies/:id
 func (c *AdminCompanyController) Update(ctx echo.Context) error {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
@@ -193,7 +197,8 @@ func (c *AdminCompanyController) Update(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
 	}
 	// 送られてこなかった項目を「false / 空」で上書きしないため、キーの有無も見る。
-	body, err := io.ReadAll(ctx.Request().Body)
+	// ctx.Bind と違い全量をメモリに載せるので上限を付ける。
+	body, err := io.ReadAll(http.MaxBytesReader(ctx.Response(), ctx.Request().Body, maxCompanyUpdateBody))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
 	}
@@ -214,9 +219,19 @@ func (c *AdminCompanyController) Update(ctx echo.Context) error {
 
 	// data_status / is_provisional は学校をまたいで共有される。PATCH /publish と同じ権限で守らないと
 	// 「編集」からの公開で platform 限定を素通りできてしまう。
-	if changesPublication(company, &payload, provisionalSent) {
+	publicationChanged := changesPublication(company, &payload, provisionalSent)
+	if publicationChanged {
 		if err := c.requirePlatformAdmin(ctx); err != nil {
 			return err
+		}
+		// 公開に進めるなら Publish と同じ前提を満たすこと。重み付けプロファイルが無い企業を
+		// 公開すると、マッチングが既定値(全軸50)で計算されて「なぜか高得点の企業」になる。
+		// なお Publish が行う draft 求人の一括公開はここでは行わない
+		// （求人が published にならないだけで、過剰公開の方向には倒れない）。
+		if payload.DataStatus == "published" && company.DataStatus != "published" {
+			if err := c.requireWeightProfile(uint(id)); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -230,9 +245,13 @@ func (c *AdminCompanyController) Update(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update company")
 	}
 	actor := ctx.Request().Header.Get("X-Admin-Email")
-	c.audit.Record(actor, "company.update", "company", company.ID, map[string]any{
-		"name": company.Name,
-	})
+	meta := map[string]any{"name": company.Name}
+	if publicationChanged {
+		// 「誰がいつ公開したか」を company.update の中に埋もれさせない
+		meta["data_status"] = company.DataStatus
+		meta["is_provisional"] = company.IsProvisional
+	}
+	c.audit.Record(actor, "company.update", "company", company.ID, meta)
 	return ctx.JSON(http.StatusOK, company)
 }
 
@@ -244,6 +263,21 @@ func changesPublication(existing, payload *models.Company, provisionalSent bool)
 		return true
 	}
 	return provisionalSent && payload.IsProvisional != existing.IsProvisional
+}
+
+// requireWeightProfile は公開前に重み付けプロファイルがあることを確かめる（Publish と同じ前提）。
+func (c *AdminCompanyController) requireWeightProfile(companyID uint) error {
+	profile, err := c.repo.GetWeightProfile(companyID, nil)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return echo.NewHTTPError(http.StatusBadRequest, "weight profile is required before publish")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load weight profile")
+	}
+	if profile == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "weight profile is required before publish")
+	}
+	return nil
 }
 
 // requirePlatformAdmin は担当校つき管理者を 403 で弾く（ルートの platform ミドルウェアと同じ判定）。

@@ -131,12 +131,16 @@ func (c *AdminJobController) JobPositionAction(ctx echo.Context) error {
 	actor := ctx.Request().Header.Get("X-Admin-Email")
 	switch action {
 	case "publish":
-		// 企業が未公開のまま求人を publish しても学生側クエリで弾かれるが、
-		// ここでは止めない。63031830 で「FE が警告したうえで通す」という
-		// 製品判断が既に入っており（job-positions/page-content.tsx の確認ダイアログ）、
-		// サーバ側だけ 409 にすると「続行しますか？」に OK しても必ず失敗する
-		// 死んだ UI になるため。企業を公開すれば draft の求人はまとめて
-		// published になるので、実害も無い。
+		// 企業が未公開のまま求人を publish しても、ここでは止めない。
+		// 63031830 で「FE が警告したうえで通す」という製品判断が既に入っており
+		// （job-positions/page-content.tsx の確認ダイアログ）、サーバ側だけ 409 に
+		// すると「続行しますか？」に OK しても必ず失敗する死んだ UI になるため。
+		//
+		// ただし「学生側クエリで弾かれるので実害なし」は誤り。
+		// GetJobPositionsByCompany のガード(guestEntryVisibilityGuard)は
+		// company_entry_submissions に行があるゲスト投稿企業にしか効かず、
+		// 通常経路で作られた draft 企業の求人はそのまま学生に出る。
+		// この操作をシステム管理者に限定しているのはそのため。
 		position.DataStatus = "published"
 		position.IsActive = true
 	case "reject":
