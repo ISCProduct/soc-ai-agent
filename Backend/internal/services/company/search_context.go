@@ -25,7 +25,14 @@ package company
 // 採用ページや技術ブログは会社概要やIR資料とは別の場所にあり、1回の検索では
 // そこまで辿りきれない。tech だけは従来どおり個別に検索する。
 //
-// 結果として web_search は 1社あたり 3回 → 2回 になる。
+// 取引内容の補完パス(enrichTransactionDescriptions)も統合しない。あれが走るのは
+// 1回目で description が埋まらなかったときだけで、その1回目が読んだのが
+// 共有テキストそのものなので、同じものを読み直しても埋まらない。
+//
+// 結果として web_search は 1社あたり次のようになる。
+//
+//	統合前  info 1 + relations 1 + 補完 0〜1 + tech 1 = 3〜4回
+//	統合後  共有 1(info+relations) + 補完 0〜1 + tech 1 = 2〜3回
 
 import (
 	"context"
@@ -91,7 +98,8 @@ func (c *SearchContext) Forget(companyKey string) {
 	c.mu.Unlock()
 }
 
-// sharedSearchPrompt は1回の検索で3系統分を尋ねるプロンプトを組み立てる。
+// sharedSearchPrompt は1回の検索で info と relations の2系統分を尋ねる
+// プロンプトを組み立てる。tech と補完パスは対象外（上のコメント参照）。
 //
 // 個別のプロンプトを単純に連結するのではなく、検索対象のページが異なることを
 // 明示して、どれかに偏らないようにする。
@@ -116,8 +124,8 @@ func sharedSearchPrompt(companyName, websiteURL string) string {
 // searchThenParse は共有の検索結果を使って解析だけを行う。
 // 共有が無い場合は従来どおり検索と解析をまとめて行う。
 //
-// 3系統(info / relations / tech)がこれを通ることで、web_search は
-// 企業ごとに1回で済む。解析は用途ごとのスキーマで別々に行う。
+// 解析は用途ごとのスキーマで別々に行う。Parse は通常のチャット課金なので、
+// 回数が増えても Search の固定課金に比べれば桁が違う。
 func searchThenParse(
 	ctx context.Context,
 	shared *SearchContext,

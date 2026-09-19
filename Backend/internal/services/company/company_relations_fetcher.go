@@ -415,7 +415,13 @@ description は具体的な取引内容（推定可）。弱い場合は空文�
 		"企業「%s」と関連企業（%s）について次のJSONを返してください。description は具体的な取引内容（推定可）。弱いフォールバックなら空文字（『主要取引先』と書かない）。\n%s",
 		companyName, partnerList, parseSchema,
 	)
-	raw, modelsUsed, err := searchThenParse(ctx, f.shared, f.llm, companyName, sharedSearchPrompt(companyName, websiteURL), searchPrompt, systemPrompt, parseUser, 1000)
+	// ここは共有検索を使わない。この補完パスが走るのは、1回目の取得で
+	// description が空だった相手が残っているときだけで、その「1回目」が
+	// 読んだのが共有テキストそのものだからだ。同じテキストを読み直しても
+	// description は埋まらず、補完が丸ごと無意味になる。
+	// 技術スタックを統合から外したのと同じ理由(#1124)。
+	// 相手を名指しした検索をここで別に撃つ。
+	raw, modelsUsed, err := f.llm.SearchLiteThenParse(ctx, searchPrompt, systemPrompt, parseUser, 1000)
 	if err != nil {
 		return nil, err
 	}

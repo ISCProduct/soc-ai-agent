@@ -9,6 +9,7 @@ package company
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -180,5 +181,35 @@ func TestSharedSearchPrompt_URLが無くても壊れない(t *testing.T) {
 	}
 	if !strings.Contains(got, "株式会社テスト") {
 		t.Error("企業名が含まれていない")
+	}
+}
+
+// 補完パス(enrichTransactionDescriptions)が共有検索を使っていないことを固定する。
+//
+// あれが走るのは1回目で description が空だった相手が残っているときだけ。
+// その1回目が読んだのが共有テキストそのものなので、共有を使い回すと同じ
+// テキストを読み直すだけになり、補完が丸ごと無意味になる。
+// コスト削減のつもりで品質だけ落ちるので、ここで固定しておく。
+func TestEnrichTransactionDescriptions_共有検索を使わない(t *testing.T) {
+	src, err := os.ReadFile("company_relations_fetcher.go")
+	if err != nil {
+		t.Fatalf("読めない: %v", err)
+	}
+	text := string(src)
+
+	idx := strings.Index(text, "func (f *CompanyRelationsFetcher) enrichTransactionDescriptions")
+	if idx < 0 {
+		t.Fatal("補完パスの関数が見つからない。名前が変わったならテストも直すこと")
+	}
+	body := text[idx:]
+	if end := strings.Index(body[1:], "\nfunc "); end >= 0 {
+		body = body[:end+1]
+	}
+
+	if strings.Contains(body, "searchThenParse") {
+		t.Error("補完パスが共有検索を使っている。1回目と同じテキストを読むだけで description は埋まらない")
+	}
+	if !strings.Contains(body, "SearchLiteThenParse") {
+		t.Error("補完パスが個別に検索していない")
 	}
 }
