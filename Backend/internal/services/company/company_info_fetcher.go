@@ -377,15 +377,19 @@ func (f *CompanyInfoFetcher) acquireFromGBizCompany(ctx context.Context, company
 		if err != nil || len(hits) == 0 {
 			return nil, fmt.Errorf("gbizinfo: corporate number not found for %s", company.Name)
 		}
-		company.CorporateNumber = hits[0].CorporateNumber
-		if company.WebsiteURL == "" && hits[0].CompanyURL != "" {
-			company.WebsiteURL = hits[0].CompanyURL
+		hit := pickGBizHit(hits, company.Name, company.Location)
+		if hit == nil {
+			return nil, fmt.Errorf("gbizinfo: 商号が一致する法人を特定できませんでした: %s", company.Name)
 		}
-		if company.Location == "" && hits[0].Location != "" {
-			company.Location = hits[0].Location
+		company.CorporateNumber = hit.CorporateNumber
+		if company.WebsiteURL == "" && hit.CompanyURL != "" {
+			company.WebsiteURL = hit.CompanyURL
 		}
-		if company.EmployeeCount == 0 && hits[0].EmployeeNumber > 0 {
-			company.EmployeeCount = hits[0].EmployeeNumber
+		if company.Location == "" && hit.Location != "" {
+			company.Location = hit.Location
+		}
+		if company.EmployeeCount == 0 && hit.EmployeeNumber > 0 {
+			company.EmployeeCount = hit.EmployeeNumber
 			company.EmployeeCountBasis = models.EmployeeCountBasisStandalone
 		}
 		_ = f.repo.Update(company)

@@ -212,3 +212,42 @@ func stripLegalForms(name string) string {
 	}
 	return strings.TrimSpace(s)
 }
+
+// NormalizeCompanyName は商号を比較用に正規化する。
+// 法人格・幅・空白・記号の違いを吸収する。
+//
+// 国税庁以外の情報源(gBizINFOの名称検索など)でも同じ基準で突き合わせたいので公開する。
+// 情報源ごとに正規化を書くと基準がずれ、片方だけ別会社を掴む状態になる。
+func NormalizeCompanyName(name string) string {
+	return normalizeName(name)
+}
+
+// LocationMatches は所在地の文字列同士が矛盾しないかを返す。
+// candidate が空、または hint が空なら判断材料が無いので true。
+//
+// 突き合わせの基準を国税庁側と揃えるために公開する。
+func LocationMatches(candidateLocation, locationHint string) bool {
+	cand := strings.TrimSpace(candidateLocation)
+	hint := strings.TrimSpace(locationHint)
+	if cand == "" || hint == "" {
+		return true
+	}
+	// 都道府県名で照合する。候補側は「東京都港区…」のような連結文字列で来る。
+	for _, pref := range prefectures {
+		if strings.HasPrefix(cand, pref) {
+			return strings.Contains(hint, pref)
+		}
+	}
+	return true
+}
+
+// prefectures は所在地文字列の先頭から都道府県を切り出すための一覧。
+var prefectures = []string{
+	"北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県",
+	"茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県",
+	"新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県", "岐阜県",
+	"静岡県", "愛知県", "三重県", "滋賀県", "京都府", "大阪府", "兵庫県",
+	"奈良県", "和歌山県", "鳥取県", "島根県", "岡山県", "広島県", "山口県",
+	"徳島県", "香川県", "愛媛県", "高知県", "福岡県", "佐賀県", "長崎県",
+	"熊本県", "大分県", "宮崎県", "鹿児島県", "沖縄県",
+}
