@@ -24,8 +24,9 @@ func TestSearchContext_同じ企業なら検索は1回(t *testing.T) {
 		return "検索結果テキスト", "gpt-4o-mini", nil
 	}
 
-	// info / relations / tech の3系統が順に引く想定
-	for range 3 {
+	// info / relations の2系統が順に引く想定。
+	// tech は統合すると技術スタックが取れなくなるため対象外(実測で確認)。
+	for range 2 {
 		text, model, err := sc.Fetch("株式会社テスト", fetch)
 		if err != nil {
 			t.Fatalf("エラーが返った: %v", err)
@@ -152,7 +153,6 @@ func TestSharedSearchPrompt(t *testing.T) {
 		"https://example.co.jp/",
 		"企業概要", "従業員数", "勤務スタイル", // info
 		"子会社", "出資比率", "上場区分", // relations
-		"開発言語", "生産設備", // tech（IT / 製造業の両方）
 		"根拠URL",
 	} {
 		if !strings.Contains(got, want) {
@@ -160,11 +160,14 @@ func TestSharedSearchPrompt(t *testing.T) {
 		}
 	}
 
-	// 業種で分岐する tech を1回の検索でまかなうため、両方を尋ねたうえで
-	// 該当しない側は埋めさせない。
-	if !strings.Contains(got, "無理に埋めない") {
-		t.Error("該当しない項目を埋めさせない指示が必要")
+	// tech は統合しない。統合すると検索が会社概要・IR資料に寄り、
+	// 採用ページや技術ブログまで辿らず技術スタックが取れなくなる(実測)。
+	for _, ng := range []string{"開発言語", "生産設備", "技術ブログ"} {
+		if strings.Contains(got, ng) {
+			t.Errorf("技術は統合対象外にしたはず: %q が含まれている", ng)
+		}
 	}
+
 	if !strings.Contains(got, "推測せず") {
 		t.Error("推測を禁じる指示が必要")
 	}

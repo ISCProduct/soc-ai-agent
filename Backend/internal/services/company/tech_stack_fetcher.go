@@ -33,14 +33,6 @@ type TechStackFetcher struct {
 	repo   repository.CompanyRepository
 	llm    *companyfetch.LLM
 	flight *CompanySearchFlight
-	shared *SearchContext
-}
-
-// SetSharedSearch は企業ごとに1回だけ行う検索の結果を共有する入れ物を注入する(#1124)。
-func (f *TechStackFetcher) SetSharedSearch(sc *SearchContext) {
-	if f != nil {
-		f.shared = sc
-	}
 }
 
 func NewTechStackFetcher(repo repository.CompanyRepository, client *openai.Client) *TechStackFetcher {
@@ -220,7 +212,7 @@ func (f *TechStackFetcher) Acquire(ctx context.Context, companyName, websiteURL,
 		"企業「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。検索結果に無い項目は空配列/空文字。推測禁止。\n%s",
 		companyName, schema,
 	)
-	raw, modelsUsed, err := searchThenParse(ctx, f.shared, f.llm, companyName, sharedSearchPrompt(companyName, websiteURL), searchPrompt, systemPrompt, parseUser, 400)
+	raw, modelsUsed, err := f.llm.SearchLiteThenParse(ctx, searchPrompt, systemPrompt, parseUser, 400)
 	if err != nil {
 		return nil, fmt.Errorf("%sの取得失敗: %w", domainLabel, err)
 	}

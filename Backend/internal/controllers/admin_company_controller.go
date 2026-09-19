@@ -74,11 +74,6 @@ func (c *AdminCompanyController) SetCompanySearchGuards(budget companyfetch.Sear
 	if c.techFetcher != nil {
 		c.techFetcher.SetSearchBudget(budget)
 		c.techFetcher.SetSearchFlight(flight)
-		// 管理画面から生成した techFetcher にも検索結果の共有を渡す。
-		// ここが漏れると tech だけ別に web_search を発行してしまう(#1124)。
-		if c.infoFetcher != nil {
-			c.techFetcher.SetSharedSearch(c.infoFetcher.SharedSearch())
-		}
 	}
 	if c.relationsFetcher != nil {
 		c.relationsFetcher.SetSearchBudget(budget)

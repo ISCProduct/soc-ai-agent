@@ -794,12 +794,3 @@ func buildCompanyFactsText(company *models.Company) string {
 	}
 	return b.String()
 }
-
-// SharedSearch は注入済みの検索結果共有を返す。
-// 管理画面など、別所で生成した fetcher へ同じ入れ物を渡すために使う。
-func (f *CompanyInfoFetcher) SharedSearch() *SearchContext {
-	if f == nil {
-		return nil
-	}
-	return f.shared
-}
