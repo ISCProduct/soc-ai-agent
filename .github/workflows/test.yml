@@ -136,6 +136,10 @@ jobs:
       - name: Discord コマンド登録スクリプトのテスト
         run: ./automation/test/discord-register-commands-test.sh
 
+      # 起動ジョブの失敗通知。沈黙すると障害時にしか露見しない。
+      - name: 運用アラート通知スクリプトのテスト
+        run: ./automation/test/ops-notify-discord-test.sh
+
       - name: ワークフロー埋め込み Python の構文チェック
         run: |
           python3 - <<'PYEOF'
