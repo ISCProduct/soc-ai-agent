@@ -199,3 +199,21 @@ func EchoAdminSchoolScope(schools *services.SchoolService) echo.MiddlewareFunc {
 		}
 	}
 }
+
+// echoGuestAIRateLimit は未認証で叩けるAI呼び出し（ES添削・企業WEB検索）の
+// コスト濫用を止めるレート制限ミドルウェア（#1154）。
+// 認証を付けられない仕様のため、IP単位＋全体上限の二段で課金の総量を抑える。
+//
+// ponytail: 制限器はタスク内メモリ（prodのREDIS_URLもlocalhostサイドカーで同スコープ）。
+// backend を複数タスクへ増やす場合は共有Redisの KeyRateLimiter へ差し替えること。
+func echoGuestAIRateLimit() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ip := middleware.GetClientIP(c.Request())
+			if !middleware.GuestAIRateLimiter.Allow(ip) || !middleware.GuestAIGlobalRateLimiter.Allow("global") {
+				return echo.NewHTTPError(http.StatusTooManyRequests, "Too Many Requests: リクエスト上限に達しました。しばらく待ってから再試行してください。")
+			}
+			return next(c)
+		}
+	}
+}
