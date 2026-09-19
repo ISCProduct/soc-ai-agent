@@ -447,7 +447,11 @@ func (f *CompanyInfoFetcher) enrichGapsWithAI(ctx context.Context, companyName, 
 
 	// web_search は検索結果が固定8,000トークン/callで課金される(#1124)。
 	// 公式サイトのURLが分かっているなら、まずそこを読んで穴を埋める。
-	// 埋まりきればSearchは呼ばない。
+	//
+	// ただし実測では「勤務スタイル」が公式サイトからほぼ取れず、下の穴判定に
+	// 含まれているため、多くの場合そのまま Search へ進む。Search を省けるのは
+	// サイト側で全項目が埋まったときだけで、削減効果は限定的。
+	// 情報量を減らさないことを優先して、判定は絞っていない。
 	if site, siteErr := f.acquireFromWebsite(ctx, companyName, siteURL); siteErr == nil {
 		mergeCompanyInfoGaps(base, site)
 		if !companyInfoHasGaps(base) {
