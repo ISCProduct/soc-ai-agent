@@ -204,8 +204,6 @@ export default function PageContent() {
     setAdminEmail(user.email)
   }, [])
 
-  if (!platformReady) return null
-
   const fetchAll = useCallback(async () => {
     if (!adminEmail) return
     setLoading(true)
@@ -238,7 +236,13 @@ export default function PageContent() {
     }
   }, [adminEmail, dailyDays])
 
-  useEffect(() => { fetchAll() }, [fetchAll])
+  useEffect(() => {
+    if (!platformReady) return
+    fetchAll()
+  }, [platformReady, fetchAll])
+
+  // フック呼び出し順を変えないため、ガードは全フックの後に置く
+  if (!platformReady) return null
 
   const totalDailyCost = daily.reduce((s, r) => s + r.total_cost_usd, 0)
   const maxDailyModel = summary?.model_breakdown?.[0]?.total_cost_usd ?? 0.0001

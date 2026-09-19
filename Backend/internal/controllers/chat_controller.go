@@ -434,15 +434,20 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 	}
 	evaluatedCategories := countEvaluatedCategories(userScores)
 	diagConf, diagFlags, diagSummary := c.loadDiagnosisQuality(userID, sessionID)
-	minAxes := minMatchedAxisCount(matches)
-	isProvisional := isRecommendationProvisional(evaluatedCategories, diagConf, diagFlags, minAxes)
 
-	var items []CompanyRecommendation
+	// 企業を解決できない match は表示されないので、根拠軸数の集計からも外す。
+	displayed := make([]*entity.UserCompanyMatch, 0, len(matches))
 	for _, match := range matches {
 		if match.Company == nil || match.Company.ID == 0 {
 			continue
 		}
+		displayed = append(displayed, match)
+	}
+	minAxes := minMatchedAxisCount(displayed)
+	isProvisional := isRecommendationProvisional(evaluatedCategories, diagConf, diagFlags, minAxes)
 
+	var items []CompanyRecommendation
+	for _, match := range displayed {
 		employeeCount := "未定"
 		if label := models.FormatEmployeeCount(match.Company.EmployeeCount, match.Company.EmployeeCountBasis); label != "" {
 			employeeCount = label

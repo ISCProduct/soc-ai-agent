@@ -197,7 +197,12 @@ Interview transcript:
 
 	// 面接スコアをチャット診断セッションへ反映し、可能なら再マッチングする。
 	if s.crossFeature != nil {
-		targetSession := s.crossFeature.ResolveDiagnosisSessionID(session.UserID)
+		targetSession, err := s.crossFeature.ResolveDiagnosisSessionID(session.UserID)
+		if err != nil {
+			// 診断セッションを特定できないまま書くと別セッションを汚すので、反映も再マッチングも行わない。
+			log.Printf("[CrossFeature] diagnosis session resolve failed for session %d: %v\n", sessionID, err)
+			return nil
+		}
 		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, targetSession, report); err != nil {
 			log.Printf("[CrossFeature] interview score update failed for session %d: %v\n", sessionID, err)
 		} else if s.matchingRunner != nil && !repositories.IsInterviewSnapshotSession(targetSession) {

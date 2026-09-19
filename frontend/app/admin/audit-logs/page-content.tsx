@@ -37,8 +37,6 @@ export default function PageContent() {
     }
   }, [])
 
-  if (!platformReady) return null
-
   const loadLogs = async () => {
     setError('')
     const response = await fetch('/api/admin/audit-logs', {
@@ -53,8 +51,9 @@ export default function PageContent() {
   }
 
   useEffect(() => {
+    if (!platformReady) return
     loadLogs()
-  }, [])
+  }, [platformReady])
 
   const filtered = useMemo(() => {
     if (!query) return logs
@@ -63,6 +62,9 @@ export default function PageContent() {
       `${log.action} ${log.actor_email || ''} ${log.target_type}`.toLowerCase().includes(q),
     )
   }, [logs, query])
+
+  // フック呼び出し順を変えないため、ガードは全フックの後に置く
+  if (!platformReady) return null
 
   const renderMetadata = (raw?: string) => {
     if (!raw) return '-'
