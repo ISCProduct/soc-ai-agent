@@ -6,6 +6,8 @@ package middleware
 import (
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -135,6 +137,23 @@ func ConfigureRateLimiters(login, passwordReset KeyRateLimiter) {
 	if passwordReset != nil {
 		PasswordResetRateLimiter = passwordReset
 	}
+}
+
+// GuestAIRateLimiter は未認証で叩けるAI呼び出し（ES添削・企業WEB検索）のIP単位制限（#1154）。
+// 展示会会場のNAT配下では複数人が同一IPになるため、窓は広めに取る。
+var GuestAIRateLimiter KeyRateLimiter = NewRateLimiter(10*time.Minute, envPositiveInt("GUEST_AI_RATE_LIMIT_PER_IP", 60))
+
+// GuestAIGlobalRateLimiter は同エンドポイント群の全体上限（#1154）。
+// IPを変えれば per-IP 制限は回避できるため、課金の総量をここで止める。
+var GuestAIGlobalRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("GUEST_AI_RATE_LIMIT_GLOBAL", 1000))
+
+// envPositiveInt は環境変数を正の整数として読む。未設定・不正値は既定値。
+// 展示会中に上限へ当たった場合、再ビルドせずタスク定義の環境変数だけで緩められるようにするための調整つまみ。
+func envPositiveInt(key string, def int) int {
+	if v, err := strconv.Atoi(os.Getenv(key)); err == nil && v > 0 {
+		return v
+	}
+	return def
 }
 
 // CompanyEntryRateLimiter は企業情報ゲスト投稿のレート制限器（#754）
