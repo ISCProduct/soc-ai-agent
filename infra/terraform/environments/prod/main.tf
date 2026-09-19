@@ -136,6 +136,13 @@ resource "aws_secretsmanager_secret_version" "oauth" {
     github_client_id     = var.github_client_id
     github_client_secret = var.github_client_secret
   })
+
+  lifecycle {
+    # 値の管理をTerraformから外す(#1158)。初回作成後はSecrets Manager側の値が正。
+    # これが無いと、ローカルのtfvarsに本番の平文を置き続けない限りplanが差分を出し、
+    # 空文字で上書きしてしまう。外部サービス由来のキーはAWS CLI/コンソールで更新する。
+    ignore_changes = [secret_string]
+  }
 }
 
 # Resend(メール送信)APIキー(#756: EMAIL_PROVIDER未設定でもRESEND_API_KEYがあれば自動選択される)
@@ -149,6 +156,11 @@ resource "aws_secretsmanager_secret_version" "email" {
   secret_string = jsonencode({
     resend_api_key = var.resend_api_key
   })
+
+  lifecycle {
+    # 値の管理をTerraformから外す(#1158)。
+    ignore_changes = [secret_string]
+  }
 }
 
 # 管理者認証シークレット(sync-whats-newジョブ等、CIからのサービス間呼び出しに使用)
@@ -157,15 +169,31 @@ resource "aws_secretsmanager_secret" "admin" {
   tags = local.tags
 }
 
+# admin_secret は staging と同じ固定値を入れる運用だったが、staging の漏洩が
+# そのまま本番の管理者権限になる(#1158)。未指定なら本番専用の値を自動生成する。
+# CI(sync-whats-new)は Secrets Manager から読む形に変えてあるため、既知の値である必要はない。
+resource "random_password" "admin_secret" {
+  length  = 48
+  special = false
+}
+
 resource "aws_secretsmanager_secret_version" "admin" {
   secret_id = aws_secretsmanager_secret.admin.id
   secret_string = jsonencode({
-    admin_secret         = var.admin_secret
+    admin_secret         = var.admin_secret != "" ? var.admin_secret : random_password.admin_secret.result
     user_secret          = random_password.user_secret.result
     company_user_secret  = random_password.company_user_secret.result
     oauth_state_secret   = random_password.oauth_state_secret.result
     token_encryption_key = random_id.token_encryption_key.hex
   })
+
+  lifecycle {
+    # 値の管理をTerraformから外す(#1158)。
+    # user_secret 等の random_password は再生成されても全セッションが無効になるだけで
+    # 済むが、それを意図せず引き起こさないためにも固定する。ローテーションは
+    # AWS CLI で値を書き換える(docs/wiki/prod-secrets-rotation.md)。
+    ignore_changes = [secret_string]
+  }
 }
 
 # OpenAI APIキー(DB/OAuth同様、Secrets Managerで管理しECSタスク実行ロール経由で注入)
@@ -181,13 +209,19 @@ resource "aws_secretsmanager_secret_version" "openai" {
   })
 
   lifecycle {
+    # 値の管理をTerraformから外す(#1158)。
+    ignore_changes = [secret_string]
+
     # openai_api_key/openai_secret_arnの両方が空のままapplyされると、OPENAI_API_KEYが
     # 空文字で本番backendが起動時にクラッシュする(過去に実際発生した障害)。
     # variable validationでのvar間参照はTerraform 1.9+が必要(このリポジトリの
     # required_version >= 1.5.0と非互換)なため、resourceのpreconditionで検証する。
+    #
+    # 値をSecrets Manager側で管理している環境(secret_values_managed_outside=true)では
+    # tfvarsが空なのが正しい状態なので、この検査は初期構築時のみに効かせる。
     precondition {
-      condition     = var.openai_api_key != "" || var.openai_secret_arn != ""
-      error_message = "openai_api_key と openai_secret_arn のいずれかを設定してください(両方空だと本番backendが起動できません)。"
+      condition     = var.secret_values_managed_outside || var.openai_api_key != "" || var.openai_secret_arn != ""
+      error_message = "openai_api_key と openai_secret_arn のいずれかを設定してください(両方空だと本番backendが起動できません)。値をSecrets Manager側で管理している場合は secret_values_managed_outside = true を設定してください。"
     }
   }
 }

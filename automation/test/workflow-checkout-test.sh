@@ -26,7 +26,7 @@ for f in "$WF_DIR"/*.yml "$WF_DIR"/*.yaml; do
   # リポジトリのファイルに依存する記述
   needs_repo=""
   grep -q "sys.path.insert(0, \".github/scripts\")" "$f" && needs_repo="${needs_repo}backlog_client "
-  grep -qE "\./automation/(test|discord)/" "$f" && needs_repo="${needs_repo}automation/ "
+  grep -qE "\./automation/(test|discord|ops)/" "$f" && needs_repo="${needs_repo}automation/ "
   grep -qE "^\s*run:.*\./(scripts|automation)/" "$f" && needs_repo="${needs_repo}script "
 
   [ -z "$needs_repo" ] && continue
@@ -46,7 +46,7 @@ done
 # 依存の種類ごとに最低件数を固定して、条件の欠落を検出する。
 # 対象を減らすときはこの数も一緒に下げること。
 MIN_BACKLOG_CLIENT=5
-MIN_AUTOMATION=1
+MIN_AUTOMATION=3
 if [ "$bl" -lt "$MIN_BACKLOG_CLIENT" ]; then
   echo "NG: backlog_client を読むワークフローが $bl 件しか見つかりません（期待 $MIN_BACKLOG_CLIENT 件以上）。抽出条件が壊れています。" >&2
   exit 1

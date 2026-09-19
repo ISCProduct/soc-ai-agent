@@ -51,6 +51,15 @@ func (c *Client) ResolveCorporateNumber(ctx context.Context, name, locationHint 
 		return nil, err
 	}
 
+	// 採用は必ずここを通す。所在地の突き合わせを1箇所にまとめないと、
+	// 経路が増えたときに検証の無い採用が残る(実際に残していた)。
+	adopt := func(corp Corporation) (*Corporation, error) {
+		if !locationMatchesHint(corp, locationHint) {
+			return nil, nil
+		}
+		return &corp, nil
+	}
+
 	want := normalizeName(name)
 	if want == "" {
 		return nil, nil
@@ -76,7 +85,7 @@ func (c *Client) ResolveCorporateNumber(ctx context.Context, name, locationHint 
 			}
 		}
 		if len(exact) == 1 {
-			return &exact[0], nil
+			return adopt(exact[0])
 		}
 		if len(exact) > 1 {
 			alive = exact
@@ -93,7 +102,10 @@ func (c *Client) ResolveCorporateNumber(ctx context.Context, name, locationHint 
 	}
 
 	if len(matched) == 1 {
-		return &matched[0], nil
+		// 候補が1件でも所在地は突き合わせる。法人格を落として比べる以上、
+		// 別会社が一意に見えることがある。実例として「freee株式会社」は
+		// 台東区の「株式会社Ｆｒｅｅｅ」に完全一致してしまう(本物は品川区)。
+		return adopt(matched[0])
 	}
 	if len(matched) == 0 {
 		return nil, nil
@@ -102,9 +114,39 @@ func (c *Client) ResolveCorporateNumber(ctx context.Context, name, locationHint 
 	// 同名が複数。所在地の都道府県が分かるなら、それで絞れることがある。
 	narrowed := narrowByLocation(matched, locationHint)
 	if len(narrowed) == 1 {
-		return &narrowed[0], nil
+		return adopt(narrowed[0])
 	}
 	return nil, nil
+}
+
+// locationMatchesHint は法人の所在地が与えられたヒントと矛盾しないかを返す。
+//
+// ヒントが空なら突き合わせる材料が無いので true を返す(従来どおり採用する)。
+// ヒントが市区町村まで含んでいるときだけ、市区町村の一致も求める。
+// 都道府県だけのヒントで市区町村の一致を求めると、正しい法人まで落としてしまう。
+func locationMatchesHint(corp Corporation, locationHint string) bool {
+	hint := strings.TrimSpace(locationHint)
+	if hint == "" {
+		return true
+	}
+
+	if pref := strings.TrimSpace(corp.PrefectureName); pref != "" && !strings.Contains(hint, pref) {
+		return false
+	}
+	if city := strings.TrimSpace(corp.CityName); city != "" && hintHasCityLevel(hint) && !strings.Contains(hint, city) {
+		return false
+	}
+	return true
+}
+
+// hintHasCityLevel はヒントが市区町村まで書かれているかを判定する。
+func hintHasCityLevel(hint string) bool {
+	for _, suffix := range []string{"市", "区", "町", "村", "郡"} {
+		if strings.Contains(hint, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // narrowByLocation は所在地の文字列に都道府県名が含まれる法人だけを残す。
@@ -169,4 +211,43 @@ func stripLegalForms(name string) string {
 		s = strings.ReplaceAll(s, form, "")
 	}
 	return strings.TrimSpace(s)
+}
+
+// NormalizeCompanyName は商号を比較用に正規化する。
+// 法人格・幅・空白・記号の違いを吸収する。
+//
+// 国税庁以外の情報源(gBizINFOの名称検索など)でも同じ基準で突き合わせたいので公開する。
+// 情報源ごとに正規化を書くと基準がずれ、片方だけ別会社を掴む状態になる。
+func NormalizeCompanyName(name string) string {
+	return normalizeName(name)
+}
+
+// LocationMatches は所在地の文字列同士が矛盾しないかを返す。
+// candidate が空、または hint が空なら判断材料が無いので true。
+//
+// 突き合わせの基準を国税庁側と揃えるために公開する。
+func LocationMatches(candidateLocation, locationHint string) bool {
+	cand := strings.TrimSpace(candidateLocation)
+	hint := strings.TrimSpace(locationHint)
+	if cand == "" || hint == "" {
+		return true
+	}
+	// 都道府県名で照合する。候補側は「東京都港区…」のような連結文字列で来る。
+	for _, pref := range prefectures {
+		if strings.HasPrefix(cand, pref) {
+			return strings.Contains(hint, pref)
+		}
+	}
+	return true
+}
+
+// prefectures は所在地文字列の先頭から都道府県を切り出すための一覧。
+var prefectures = []string{
+	"北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県",
+	"茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県",
+	"新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県", "岐阜県",
+	"静岡県", "愛知県", "三重県", "滋賀県", "京都府", "大阪府", "兵庫県",
+	"奈良県", "和歌山県", "鳥取県", "島根県", "岡山県", "広島県", "山口県",
+	"徳島県", "香川県", "愛媛県", "高知県", "福岡県", "佐賀県", "長崎県",
+	"熊本県", "大分県", "宮崎県", "鹿児島県", "沖縄県",
 }

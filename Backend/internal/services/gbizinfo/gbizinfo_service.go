@@ -100,7 +100,7 @@ func (s *GBizInfoService) SearchByName(ctx context.Context, name string) ([]GBiz
 		return nil, errors.New("gbizinfo service is not configured")
 	}
 	var resp gbizProfileResponse
-	path := "/v2/hojin?name=" + url.QueryEscape(name) + "&limit=10"
+	path := "/v1/hojin?name=" + url.QueryEscape(name) + "&limit=10"
 	if err := s.get(ctx, path, &resp); err != nil {
 		return nil, err
 	}
@@ -246,7 +246,7 @@ func (s *GBizInfoService) syncFailed(company *models.Company, message string) (*
 
 func (s *GBizInfoService) fetchProfile(ctx context.Context, corporateNumber string) (*models.GBizCompanyProfile, error) {
 	var resp gbizProfileResponse
-	if err := s.get(ctx, "/v2/hojin/"+corporateNumber, &resp); err != nil {
+	if err := s.get(ctx, "/v1/hojin/"+corporateNumber, &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.HojinInfos) == 0 {
@@ -264,13 +264,14 @@ func (s *GBizInfoService) fetchProfile(ctx context.Context, corporateNumber stri
 		EmployeeNumber:  info.EmployeeNumber,
 		DateEstablished: info.DateOfEstablishment,
 		CompanyURL:      info.CompanyURL,
+		BusinessSummary: info.BusinessSummary,
 		UpdateDate:      info.UpdateDate,
 	}, nil
 }
 
 func (s *GBizInfoService) fetchProcurements(ctx context.Context, corporateNumber string, companyID uint) ([]models.GBizProcurement, error) {
 	var resp gbizProcurementResponse
-	if err := s.get(ctx, "/v2/hojin/"+corporateNumber+"/procurement", &resp); err != nil {
+	if err := s.get(ctx, "/v1/hojin/"+corporateNumber+"/procurement", &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.HojinInfos) == 0 {
@@ -294,7 +295,7 @@ func (s *GBizInfoService) fetchProcurements(ctx context.Context, corporateNumber
 
 func (s *GBizInfoService) fetchSubsidies(ctx context.Context, corporateNumber string, companyID uint) ([]models.GBizSubsidy, error) {
 	var resp gbizSubsidyResponse
-	if err := s.get(ctx, "/v2/hojin/"+corporateNumber+"/subsidy", &resp); err != nil {
+	if err := s.get(ctx, "/v1/hojin/"+corporateNumber+"/subsidy", &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.HojinInfos) == 0 {
@@ -320,7 +321,7 @@ func (s *GBizInfoService) fetchSubsidies(ctx context.Context, corporateNumber st
 
 func (s *GBizInfoService) fetchFinances(ctx context.Context, corporateNumber string, companyID uint) ([]models.GBizFinance, error) {
 	var resp gbizFinanceResponse
-	if err := s.get(ctx, "/v2/hojin/"+corporateNumber+"/finance", &resp); err != nil {
+	if err := s.get(ctx, "/v1/hojin/"+corporateNumber+"/finance", &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.HojinInfos) == 0 {
@@ -346,7 +347,7 @@ func (s *GBizInfoService) fetchFinances(ctx context.Context, corporateNumber str
 
 func (s *GBizInfoService) fetchWorkplace(ctx context.Context, corporateNumber string, companyID uint) (*models.GBizWorkplace, error) {
 	var resp gbizWorkplaceResponse
-	if err := s.get(ctx, "/v2/hojin/"+corporateNumber+"/workplace", &resp); err != nil {
+	if err := s.get(ctx, "/v1/hojin/"+corporateNumber+"/workplace", &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.HojinInfos) == 0 {
@@ -387,6 +388,22 @@ func (s *GBizInfoService) get(ctx context.Context, path string, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+// flattenBusinessSummary は複数行の事業概要を1行にまとめる。
+// gBizINFO は「メディア事業\nインターネット広告事業\nゲーム事業」のように
+// 改行区切りで返すことがある。
+func flattenBusinessSummary(summary string) string {
+	fields := strings.FieldsFunc(summary, func(r rune) bool {
+		return r == '\n' || r == '\r'
+	})
+	parts := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if t := strings.TrimSpace(f); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	return strings.Join(parts, "、")
+}
+
 func applyGBizProfile(company *models.Company, profile *models.GBizCompanyProfile) {
 	if strings.TrimSpace(company.Name) == "" && profile.Name != "" {
 		company.Name = profile.Name
@@ -410,6 +427,11 @@ func applyGBizProfile(company *models.Company, profile *models.GBizCompanyProfil
 	}
 	if strings.TrimSpace(company.CorporateNumber) == "" && profile.CorporateNumber != "" {
 		company.CorporateNumber = profile.CorporateNumber
+	}
+	// 事業概要は企業の主要事業そのもの。ここが埋まると web_search を呼ばずに
+	// 済む企業が増える(#1124)。複数行で返ることがあるので1行に均す。
+	if strings.TrimSpace(company.MainBusiness) == "" && strings.TrimSpace(profile.BusinessSummary) != "" {
+		company.MainBusiness = flattenBusinessSummary(profile.BusinessSummary)
 	}
 	if company.SourceFetchedAt == nil {
 		now := time.Now()
@@ -595,6 +617,7 @@ type gbizProfileResponse struct {
 		EmployeeNumber      int    `json:"employee_number"`
 		DateOfEstablishment string `json:"date_of_establishment"`
 		CompanyURL          string `json:"company_url"`
+		BusinessSummary     string `json:"business_summary"`
 		UpdateDate          string `json:"update_date"`
 	} `json:"hojin-infos"`
 }
