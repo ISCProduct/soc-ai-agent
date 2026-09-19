@@ -46,6 +46,11 @@ export function parseMediaError(error: unknown): string {
     return 'マイクとカメラへのアクセスが拒否されました。ブラウザのアドレスバー横から権限を許可してください。'
   if (msg.includes('NotFoundError'))
     return 'マイクまたはカメラが見つかりません。デバイスが正しく接続されているか確認してください。'
+  // 権限はあるが、他のタブ・アプリがデバイスを掴んでいる場合。
+  // 権限拒否と同じ文言にすると「許可したのに権限エラー」に見え、
+  // 利用者が設定画面を探し回ることになる。
+  if (msg.includes('NotReadableError') || msg.includes('TrackStartError'))
+    return 'カメラまたはマイクを他のアプリ・タブが使用中です。使用中のタブやアプリを閉じてから、もう一度お試しください。'
   // OpenAI 側の 401（chat/tts/whisper error 401 など）のみ API キー案内にする。
   // セッション JWT の Unauthorized を誤って API キー不足と表示しない。
   if (

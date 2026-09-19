@@ -99,8 +99,18 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 		match.CompanyID = company.ID
 		match.Company = mapper.CompanyToEntity(company)
 
-		// ここでは LLM を呼ばず、テンプレ+DB のみで理由を埋める（外部I/Oなし）
-		match.MatchReason = BuildMatchReason(match, userScores)
+		// テンプレ理由はここでは作らない。
+		//
+		// 以前は全公開企業ぶん BuildMatchReason を回して match_reason に保存していた。
+		// だが表示されるのは match_score 降順の上位10件だけで、読み出し側
+		// (chat_controller の推薦一覧・メールレポート) はどちらも BuildMatchReason を
+		// 呼び直す。保存済みが空ならその場で同じ文面が作られるため結果は変わらない。
+		//
+		// 実測: BuildMatchReason は 16.7KB/回。本番想定の4,000社では1回の診断で
+		// 67MB を確保し、うち表示されるのは10件ぶんだけだった（CalculateMatching
+		// 全体の確保メモリの96%）。あわせて TEXT 列を4,000行ぶん書いていた。
+		//
+		// AI 生成の理由は高価なので上位N件だけ保存する（applyAIReasonsToTopMatches）。
 		pending = append(pending, match)
 	}
 
@@ -123,8 +133,9 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 // 全公開企業ぶん生成すると、本番想定 2,500〜4,000 社では大半が捨てられる LLM 呼び出しになり、
 // #588 が既定オフにした理由（コストとレイテンシ）がそのまま戻る。
 //
-// 呼び出し前に全件が BuildMatchReason で埋まっているため、AI 生成に失敗しても
-// テンプレ理由が残る。既定オフのときは何もしない。
+// AI 生成に失敗した場合 match_reason は空のままになる。読み出し側が
+// BuildMatchReason でテンプレ理由を作るため、利用者から見える結果は変わらない。
+// 既定オフのときは何もしない（その場合 match_reason は全件空になる）。
 func (s *MatchingService) applyAIReasonsToTopMatches(
 	ctx context.Context, pending []*entity.UserCompanyMatch, userScores []entity.UserWeightScore,
 ) {
@@ -136,6 +147,12 @@ func (s *MatchingService) applyAIReasonsToTopMatches(
 	log.Printf("[CalculateMatching] Generating AI reasons for top %d of %d matches\n", len(top), len(pending))
 
 	for _, match := range top {
+		// 打ち切り済みなら残りのLLM呼び出しは全て失敗するだけなので、ここで抜ける（#1167）。
+		// 最も時間を使うのがこのループなので、キャンセルが実際に効くのもここ。
+		if ctx.Err() != nil {
+			log.Printf("[CalculateMatching] AI reason generation aborted: %v\n", ctx.Err())
+			return
+		}
 		reason, err := s.GenerateMatchReason(ctx, match, userScores)
 		if err != nil {
 			log.Printf("[CalculateMatching] Warning: Failed to generate AI reason for company %d: %v\n", match.CompanyID, err)

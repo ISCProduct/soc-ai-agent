@@ -59,6 +59,27 @@ func (c *AdminCompanyController) SetSchoolRestrictionChecker(f func(adminUserID 
 	}
 }
 
+// SetInfoFetcher は基本情報取得サービスを差し替える。
+//
+// コンストラクタは openaiClient を受け取ると infoFetcher を自前生成する。
+// その生成物には main.go 側で行う SetSharedSearch が掛かっていないため、
+// 管理画面と fetch-missing-batch は検索結果の共有(#1124)が効かないまま
+// 系統ごとに web_search を発行していた。件数が出るのはこのバッチ経路なので、
+// 共有済みのインスタンスをここで渡し直す。
+//
+// infoFetcher を差し替えたら、それを抱えている catalogWarm と missingBatch も
+// 作り直す必要がある。片方だけ直すと古い fetcher が残る。
+func (c *AdminCompanyController) SetInfoFetcher(fetcher *company.CompanyInfoFetcher) {
+	if c == nil || fetcher == nil {
+		return
+	}
+	c.infoFetcher = fetcher
+	c.catalogWarm = company.NewCatalogWarmService(c.repo, fetcher, c.jobFetcher)
+	c.missingBatch = company.NewCompanyMissingBatchService(
+		c.repo, fetcher, c.jobFetcher, c.techFetcher, c.relationsFetcher,
+	)
+}
+
 // SetRelationsFetcher は企業関係・市場情報取得サービスを注入する（#633 Phase 2）。
 func (c *AdminCompanyController) SetRelationsFetcher(fetcher *company.CompanyRelationsFetcher) {
 	if c != nil {

@@ -93,8 +93,13 @@ func TestCalculateMatching_AIReasonOnlyForTopN(t *testing.T) {
 			aiCount++
 			continue
 		}
-		if strings.TrimSpace(m.MatchReason) == "" {
-			t.Fatalf("company %d の理由が空。AI対象外はテンプレ理由が入るべき", m.CompanyID)
+		// AI 対象外はテンプレ理由を保存しない。
+		// 表示されるのは上位N件だけで、読み出し側が BuildMatchReason を呼び直すため
+		// 利用者から見える結果は変わらない（test/controllers の
+		// TestGetRecommendations_ReasonIsBuiltWhenNotStored で担保）。
+		// 本番想定4,000社では、この保存が1回の診断あたり67MBを占めていた。
+		if strings.TrimSpace(m.MatchReason) != "" {
+			t.Fatalf("company %d にAI以外の理由が保存されている: %q", m.CompanyID, m.MatchReason)
 		}
 	}
 	if aiCount != topN {
@@ -129,9 +134,11 @@ func TestCalculateMatching_NoAICallsWhenFlagOff(t *testing.T) {
 	if got := calls.Load(); got != 0 {
 		t.Fatalf("既定オフなのに LLM を %d 回呼んでいる", got)
 	}
+	// 既定オフのときは match_reason を一切保存しない。
+	// 保存しても読まれるのは上位10件だけで、その10件は読み出し側が作り直す。
 	for _, m := range matchRepo.captured {
-		if strings.TrimSpace(m.MatchReason) == "" {
-			t.Fatalf("company %d の理由が空。テンプレ理由が入るべき", m.CompanyID)
+		if strings.TrimSpace(m.MatchReason) != "" {
+			t.Fatalf("company %d に理由が保存されている: %q", m.CompanyID, m.MatchReason)
 		}
 	}
 }

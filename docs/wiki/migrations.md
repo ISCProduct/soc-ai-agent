@@ -167,6 +167,18 @@ go run ./cmd/migrate force 1   # version 2 を取り消した状態に補修し�
 最大で 89位 → 25位 の移動がありました。既存ユーザーには
 「おすすめ企業が入れ替わった」ように見えます。
 
+### version 28（user_company_matches のスコア順インデックス）
+
+おすすめ企業の取得 (`FindTopMatchesByUserAndSession`) から filesort を外すための
+`idx_ucm_user_session_score (user_id, session_id, match_score DESC)` を追加する。
+
+既存の `idx_user_session` / `uniq_user_session_company` は `(user_id, session_id)` までしか
+並びを持たないため、絞り込んだ後の全行をソートしていた。1セッションの行数は公開企業数と
+同じ（本番想定 2,500〜4,000 行）。`ALGORITHM=INPLACE, LOCK=NONE` なので停止は不要。
+
+冗長になる `idx_user_session` は消していない。GORM のモデルタグ
+(`internal/models/company.go`) が宣言しており、そちらと併せて直す必要があるため。
+
 ### version 27（diagnosis_quality_reports）
 
 診断完了後の妥当性フラグ保存用テーブル。`user_weight_scores` / `user_company_matches` は

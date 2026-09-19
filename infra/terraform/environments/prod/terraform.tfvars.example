@@ -11,11 +11,26 @@ domain_name = "shukatsu-ai.jp"
 backend_image  = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-backend:latest"
 frontend_image = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:latest"
 
-# 本番用 OpenAI キーの Secrets Manager ARN
-# openai_secret_arn = "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:prod/openai/api-key-xxxxxx"
+# --- シークレット ---
+# 本番の実シークレットはここに書かない(#1158)。値は Secrets Manager を正とし、
+# Terraform は入れ物だけを管理する。更新手順は docs/wiki/prod-secrets-rotation.md。
+#
+# 既存環境(値が Secrets Manager にある)では次を有効にする。
+# これが無いと openai_api_key が空であることを precondition が弾く。
+# secret_values_managed_outside = true
 
-# Resend(メール送信)APIキー(#756)
-# resend_api_key = "re_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+# 新規環境の初期構築時のみ、値を入れて一度だけ apply する。
+# apply 後はこのファイルから値を消し、上の secret_values_managed_outside = true を設定する。
+# openai_api_key       = "sk-xxxx"
+# resend_api_key       = "re_xxxx"
+# google_client_secret = "xxxx"
+# github_client_secret = "xxxx"
+#
+# admin_secret は指定しない(未指定なら本番専用の値が自動生成される)。
+# staging と同じ値を入れないこと。
+
+# 別管理の OpenAI キーを参照する場合の ARN
+# openai_secret_arn = "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:prod/openai/api-key-xxxxxx"
 
 # 可能なら社内/VPN CIDR に制限する
 # allowed_http_cidrs = ["x.x.x.x/32"]

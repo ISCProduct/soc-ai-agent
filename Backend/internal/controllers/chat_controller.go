@@ -35,11 +35,23 @@ type ChatController struct {
 	jobs            shared.JobEnqueuer
 	qualityRepo     *repositories.DiagnosisQualityRepository
 	matchingTimers  sync.Map // key: sessionID, value: *time.Timer（デバウンス用）
+	matchingRunning sync.Map // key: sessionID, value: struct{}（実行中の多重起動防止, #1167）
 }
 
 const minEvaluatedCategoriesForFinal = 4
 const matchingRetryMaxAttempts = 3
 const matchingDebounceDelay = 3 * time.Second
+
+// matchingRunTimeout はバックグラウンドのマッチング計算1回分(リトライ込み)の上限（#1167）。
+// #1061 で最悪所要が20分規模まで縮んだため、その1.5倍を打ち切り点にする。
+// これを超えるのは入力規模か外部APIの異常であり、待ち続けるより goroutine と
+// DB接続を解放した方がよい。本番は Fargate タスク1本のため滞留がそのまま他の
+// リクエストのコネクション枯渇になる。
+//
+// ponytail: 打ち切りが実際に効くのは LLM 呼び出し(ctx を渡している)とリトライ待ちの間。
+// リポジトリ層は ctx を受け取らないため、実行中のDBクエリ1本ぶんは超過しうる。
+// そこまで詰めるならリポジトリの signature に ctx を通す必要がある。
+const matchingRunTimeout = 30 * time.Minute
 
 func NewChatController(chatService ifaces.ChatService, matchingService ifaces.MatchingService, analysisService ifaces.AnalysisScoringService, userRepo repository.UserRepository, emailService ifaces.EmailService) *ChatController {
 	return &ChatController{
@@ -142,9 +154,25 @@ func (c *ChatController) notifyMatchingFailure(userID uint, sessionID string, er
 }
 
 func (c *ChatController) runBackgroundMatching(userID uint, sessionID string) {
-	ctx := context.Background()
+	// 同一セッションの計算が走っている間は捨てる（#1167）。
+	// デバウンスは「まだ発火していないタイマー」しか止められないため、計算が数分かかると
+	// 前の計算中に次が始まり、同じ user_company_matches 行への UPDATE が競合する。
+	//
+	// ponytail: 捨てた分の最新メッセージは、次のメッセージでの再スケジュールまで反映されない。
+	// 反映漏れが問題になるなら、実行中フラグに「保留」を持たせて完了後に1回だけ再実行する
+	// (coalescing) へ広げる。
+	if _, running := c.matchingRunning.LoadOrStore(sessionID, struct{}{}); running {
+		log.Printf("[Chat] Background matching already running, skipped: user=%d session=%s", userID, sessionID)
+		return
+	}
+	defer c.matchingRunning.Delete(sessionID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), matchingRunTimeout)
+	defer cancel()
+
 	var lastErr error
 
+retryLoop:
 	for attempt := 1; attempt <= matchingRetryMaxAttempts; attempt++ {
 		err := c.matchingService.CalculateMatching(ctx, userID, sessionID)
 		if err == nil {
@@ -154,13 +182,26 @@ func (c *ChatController) runBackgroundMatching(userID uint, sessionID string) {
 		}
 		lastErr = err
 
+		// 打ち切り後のリトライは同じ ctx で必ず失敗するため、ここで止める。
+		if ctx.Err() != nil {
+			log.Printf("[Chat] Background matching aborted: user=%d session=%s attempt=%d err=%v reason=%v", userID, sessionID, attempt, err, ctx.Err())
+			break
+		}
+
 		if attempt == matchingRetryMaxAttempts {
 			break
 		}
 
 		wait := time.Duration(1<<(attempt-1)) * time.Second
 		log.Printf("[Chat] Background matching calculation failed: user=%d session=%s attempt=%d/%d err=%v retry_in=%s", userID, sessionID, attempt, matchingRetryMaxAttempts, err, wait)
-		time.Sleep(wait)
+		// time.Sleep だと打ち切りを待てない。バックオフ中もキャンセルに応じる。
+		select {
+		case <-ctx.Done():
+			// 打ち切りも「結果が出ていない」ことに変わりはないので、下のアラート経路へ合流する。
+			log.Printf("[Chat] Background matching aborted during backoff: user=%d session=%s reason=%v", userID, sessionID, ctx.Err())
+			break retryLoop
+		case <-time.After(wait):
+		}
 	}
 
 	log.Printf("[Chat] ALERT: background matching permanently failed: user=%d session=%s attempts=%d err=%v", userID, sessionID, matchingRetryMaxAttempts, lastErr)

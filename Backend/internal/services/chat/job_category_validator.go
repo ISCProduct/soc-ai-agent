@@ -34,7 +34,19 @@ type JobValidationResult struct {
 
 // ValidateJobCategory ユーザーの職種回答を判定
 func (v *JobCategoryValidator) ValidateJobCategory(ctx context.Context, userAnswer string) (*JobValidationResult, error) {
-	normalizedAnswer, err := v.normalizeNumericAnswer(userAnswer)
+	return v.ValidateJobCategoryWithQuestion(ctx, userAnswer, "")
+}
+
+// ValidateJobCategoryWithQuestion は直前に提示した質問文を添えて判定する。
+//
+// 番号だけの回答は、その質問に並んでいた選択肢に対して解釈する必要がある。
+// 大分類のマスタ順で解釈すると、小分類の選択肢に答えた番号を取り違える
+// （「開発系エンジニア」→ 小分類 1.ソフトウェア / 2.Web / 3.データ と聞かれて
+// 「2」と答えた学生が、大分類の2番目である「営業」として登録されていた）。
+func (v *JobCategoryValidator) ValidateJobCategoryWithQuestion(
+	ctx context.Context, userAnswer, presentedQuestion string,
+) (*JobValidationResult, error) {
+	normalizedAnswer, err := v.normalizeNumericAnswer(userAnswer, presentedQuestion)
 	if err != nil {
 		return nil, fmt.Errorf("failed to normalize numeric answer: %w", err)
 	}
@@ -178,8 +190,16 @@ JSONのみを返してください。説明は不要です。`, userAnswer, stri
 	}, nil
 }
 
-func (v *JobCategoryValidator) normalizeNumericAnswer(userAnswer string) (string, error) {
-	trimmed := strings.TrimSpace(userAnswer)
+// normalizeNumericAnswer は番号だけの回答を職種名へ置き換える。
+//
+// 解釈の基準は「利用者が直前に見た選択肢」。presentedQuestion があれば、
+// 番号は必ずその選択肢に対して当てる。大分類のマスタ順は使わない。
+//
+// 大分類の一覧に当てるのは質問文が無いときだけ。初回の職種選択は
+// GenerateJobSelectionQuestion が大分類をその順で並べるので、
+// 質問文があるならそちらを解析すれば同じ結果になる。
+func (v *JobCategoryValidator) normalizeNumericAnswer(userAnswer, presentedQuestion string) (string, error) {
+	trimmed := strings.TrimSpace(normalizeOptionText(userAnswer))
 	if trimmed == "" {
 		return userAnswer, nil
 	}
@@ -189,6 +209,23 @@ func (v *JobCategoryValidator) normalizeNumericAnswer(userAnswer string) (string
 		return userAnswer, nil
 	}
 
+	if strings.TrimSpace(presentedQuestion) != "" {
+		// 質問を提示している以上、番号はその選択肢に対する回答。
+		// 拾えたらそれを使い、拾えなくても大分類マスタには当てない。
+		//
+		// ここでマスタに落とすと、選択肢の書式が変わった（LLM の出力は
+		// 一定ではない）だけで元の不具合に戻る。判定できないときは
+		// 原文のまま AI へ渡し、必要なら聞き直させるほうが安全。
+		if options := ExtractPresentedOptions(presentedQuestion); len(options) > 0 {
+			if name := OptionForChoice(options, choice); name != "" {
+				return name, nil
+			}
+		}
+		return userAnswer, nil
+	}
+
+	// 質問文が無い場合だけ大分類の一覧に当てる。履歴が空の初回など、
+	// 画面側が独自に一覧を出しているケースを想定している。
 	topCategories, err := v.jobCategoryRepo.GetTopCategories()
 	if err != nil {
 		return "", err
@@ -204,8 +241,8 @@ func (v *JobCategoryValidator) normalizeNumericAnswer(userAnswer string) (string
 }
 
 // NormalizeNumericAnswer is an exported wrapper for normalizeNumericAnswer for use in external tests.
-func (v *JobCategoryValidator) NormalizeNumericAnswer(userAnswer string) (string, error) {
-	return v.normalizeNumericAnswer(userAnswer)
+func (v *JobCategoryValidator) NormalizeNumericAnswer(userAnswer, presentedQuestion string) (string, error) {
+	return v.normalizeNumericAnswer(userAnswer, presentedQuestion)
 }
 
 // GenerateJobSelectionQuestion 職種選択の質問を生成
