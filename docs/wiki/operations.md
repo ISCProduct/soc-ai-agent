@@ -6,6 +6,7 @@
 2. [定期バッチ作業](#2-定期バッチ作業)
 3. [監視項目](#3-監視項目)
    - [リクエストIDでサービス横断追跡](#31-リクエストidでサービス横断追跡-1188)
+   - [メトリクスを見る](#32-メトリクスを見る-1186)
 4. [障害対応](#4-障害対応)
 5. [データベース管理](#5-データベース管理)
 6. [管理画面操作](#6-管理画面操作)
@@ -205,6 +206,84 @@ Backend が採番したIDを拾ってから RAG のログを追う。
 `frontend/tests/app/request-id-propagation.test.ts` が自前ヘッダーの
 Handler 数を監視していて、増やすとテストが落ちる。
 残りの64本の移行は #1188 のフォローアップとして別PRで行う。
+
+---
+
+## 3.2 メトリクスを見る (#1186)
+
+Backend と RAG は Prometheus 形式のメトリクスを `/metrics` で出す。
+**Prometheus / Grafana は常設していない。** 本番は稼働日のみ起動する運用なので、
+監視スタックを常時動かすと稼働していない日も課金が続く。見たいときだけ手元で起動して
+スクレイプする。
+
+### 何が取れるか
+
+| 指標 | 内容 |
+|---|---|
+| `backend_requests_total` | メソッド・パス・ステータス別のリクエスト数（RED の Rate / Errors） |
+| `backend_request_duration_seconds` | レイテンシのヒストグラム（RED の Duration） |
+| `http_request_duration_seconds`（RAG） | RAG 側の同等指標 |
+| `go_*` / `process_*` | GC・メモリ・FD 数（USE の Utilization / Saturation） |
+
+ALB のヘルスチェック（`/health`, `/healthz`）は計装から除外している。30秒ごとに来るため、
+含めるとリクエスト数の大半を占めて実際のトラフィックが読めなくなる。
+
+**ルートに一致しないリクエスト（404）も除外している。** この場合 Echo の `c.Path()` が空になり、
+ライブラリは `url` ラベルへ生のパスを入れる。ALB はインターネット直結でスキャンを日常的に
+受けるため、そのまま計装するとラベルの種類が無限に増え、プロセスとスクレイパのメモリを
+食いつぶす。404 の総数を見たい場合は ALB 側の `HTTPCode_Target_4XX_Count` を使う。
+
+一致したルートは `url="/api/users/:id"` のようにパターンで記録されるため、パスパラメータで
+ラベルが増えることはない。
+
+### 有効化
+
+Backend は `METRICS_TOKEN` が設定されているときだけ `/metrics` を公開する（計装自体も行わない）。
+backend の ALB はインターネットに直結しているため、既定では開けない。
+
+```bash
+# 値は Secrets Manager の soc-app/admin などに置き、タスク定義から注入する
+METRICS_TOKEN=<ランダムな長い文字列>
+```
+
+RAG 側は追加設定不要。`/metrics` は既存の内部認証ミドルウェアの対象なので、
+`X-Internal-Token`（`RAG_INTERNAL_TOKEN`）が必要になる。
+
+### 取得する
+
+```bash
+# Backend
+curl -H "Authorization: Bearer $METRICS_TOKEN" https://api.shukatsu-ai.jp/metrics
+
+# RAG（VPC 内部からのみ。ALB 経由では公開していない）
+curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://<rag-host>:9000/metrics
+```
+
+### 手元の Prometheus でスクレイプする
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: soc-backend
+    scheme: https
+    static_configs:
+      - targets: ["api.shukatsu-ai.jp"]
+    authorization:
+      type: Bearer
+      credentials: "<METRICS_TOKEN>"
+```
+
+```bash
+docker run --rm -p 9090:9090 \
+  -v "$PWD/prometheus.yml:/etc/prometheus/prometheus.yml" \
+  prom/prometheus
+```
+
+稼働日が増えて常時監視が必要になったら、ここを常設の Prometheus + Grafana に置き換える。
+その判断はコストとの兼ね合いで決める。
+
+常時計測している指標と信頼性目標は [SLO とアラート](./slo.md) を参照（計測ソースは ALB の
+CloudWatch メトリクス）。
 
 ---
 

@@ -49,6 +49,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 )
 
@@ -552,6 +553,20 @@ func main() {
 	e.Use(echo.WrapMiddleware(securityHeadersMiddleware))
 	e.Use(echo.WrapMiddleware(buildCORSMiddleware()))
 	e.Use(routes.EchoTenantResolver(organizationService))
+
+	// メトリクス（#1186）。METRICS_TOKEN が未設定なら計装も公開もしない。
+	// 本番の backend ALB はインターネット直結なので、既定で開けたままにはしない。
+	// 取得方法は docs/wiki/operations.md「メトリクスを見る」を参照。
+	if metricsToken := strings.TrimSpace(os.Getenv("METRICS_TOKEN")); metricsToken != "" {
+		e.Use(echoprometheus.NewMiddlewareWithConfig(echoprometheus.MiddlewareConfig{
+			Subsystem: "backend",
+			// 除外理由は routes.MetricsSkipper のコメントを参照（ヘルスチェックと
+			// ルート未一致リクエストのラベル爆発を避ける）。
+			Skipper: routes.MetricsSkipper,
+		}))
+		e.GET("/metrics", echoprometheus.NewHandler(), routes.EchoMetricsAuth(metricsToken))
+		log.Println("[metrics] /metrics を有効化しました（Bearer 認証）")
+	}
 
 	// ヘルスチェックエンドポイント
 	// /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス

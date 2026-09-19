@@ -24,9 +24,12 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 	}
 
 	lastQuestion := ""
+	// 出題時に保存した軸。推測より確実なので、あればこれを使う(#1333)。
+	storedCategory := ""
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Role == "assistant" {
 			lastQuestion = history[i].Content
+			storedCategory = history[i].WeightCategory
 			break
 		}
 	}
@@ -41,7 +44,14 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 		return true, nil
 	}
 
-	targetCategory := s.inferCategoryFromQuestion(lastQuestion)
+	// 出題時に狙った軸を最優先する。質問文からの推測は、キーワードに
+	// 当たらない質問が既定の技術志向に落ちるため、狙った軸が未評価のまま
+	// 残って次のターンでも同じ軸が選ばれる。15問で6軸しか埋まらない原因(#1333)。
+	// 保存が無い過去のメッセージのみ、従来どおり推測にフォールバックする。
+	targetCategory := storedCategory
+	if targetCategory == "" {
+		targetCategory = s.inferCategoryFromQuestion(lastQuestion)
+	}
 	scoreAnswer := message
 	isChoice := false
 	if !isTextBasedQuestion(lastQuestion) {
@@ -87,6 +97,8 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Role == "assistant" {
 			lastQuestion = history[i].Content
+			// 出題時に保存した軸があればそれを正とする(#1333)。
+			targetCategory = history[i].WeightCategory
 			break
 		}
 	}
@@ -106,13 +118,16 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 		return false, fmt.Errorf("failed to get AI questions: %w", err)
 	}
 
-	for i := len(aiQuestions) - 1; i >= 0; i-- {
-		if strings.Contains(lastQuestion, aiQuestions[i].QuestionText) ||
-			strings.Contains(aiQuestions[i].QuestionText, strings.Split(lastQuestion, "\n")[0]) {
-			if aiQuestions[i].Template != nil {
-				targetCategory = aiQuestions[i].Template.Category
+	// 保存済みの軸があるならそれが最も確実なので、テンプレート由来の上書きはしない。
+	if targetCategory == "" {
+		for i := len(aiQuestions) - 1; i >= 0; i-- {
+			if strings.Contains(lastQuestion, aiQuestions[i].QuestionText) ||
+				strings.Contains(aiQuestions[i].QuestionText, strings.Split(lastQuestion, "\n")[0]) {
+				if aiQuestions[i].Template != nil {
+					targetCategory = aiQuestions[i].Template.Category
+				}
+				break
 			}
-			break
 		}
 	}
 

@@ -64,7 +64,24 @@ func (s *ChatService) handleSessionStart(ctx context.Context, req ChatRequest) (
 }
 
 // generateStrategicQuestion AIが戦略的に次の質問を生成
-func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, scoreMap map[string]int, allCategories []string, askedTexts map[string]bool, industryID, jobCategoryID uint, targetLevel string, currentPhase *entity.UserAnalysisProgress) (string, uint, error) {
+// phaseCategories はフェーズごとに出題を許す評価軸。
+//
+// 全フェーズの和集合が正典10種(domain/valueobject/match.go)を覆っていないと、
+// 覆われていない軸はどのフェーズでも出題されず永久に未評価のまま残る。
+// マッチングは企業側の10軸と突き合わせるので、そのぶん情報が捨てられる(#1333)。
+// phase_categories_test.go がこの網羅を強制する。
+var phaseCategories = map[string][]string{
+	"job_analysis":      {"技術志向", "創造性志向", "成長志向", "安定志向"},
+	"interest_analysis": {"技術志向", "創造性志向", "成長志向", "チャレンジ志向"},
+	"aptitude_analysis": {"コミュニケーション力", "チームワーク志向", "リーダーシップ志向", "細部志向"},
+	"future_analysis":   {"安定志向", "成長志向", "ワークライフバランス", "チャレンジ志向"},
+}
+
+func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, scoreMap map[string]int, allCategories []string, askedTexts map[string]bool, industryID, jobCategoryID uint, targetLevel string, currentPhase *entity.UserAnalysisProgress) (string, uint, string, error) {
+	// 狙った軸は呼び出し元に返す。ここはフェーズで絞った allowedCategories から
+	// 選ぶので、呼び出し元が allCategories から決めた軸とは一致しないことがある。
+	// 採点側が質問文から軸を推測し直すと、キーワードに当たらない質問が既定の
+	// 技術志向に落ちて狙った軸が未評価のまま残る(#1333)。
 	// 会話履歴を構築
 	historyText := ""
 	for _, msg := range history {
@@ -82,13 +99,6 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 			askedQuestionsText += fmt.Sprintf("%d. %s\n", questionCount, text)
 		}
 		askedQuestionsText += fmt.Sprintf("\n**上記%d個の質問と類似・重複する質問は絶対に生成しないでください**\n", questionCount)
-	}
-
-	phaseCategories := map[string][]string{
-		"job_analysis":      {"技術志向", "創造性志向", "成長志向", "安定志向"},
-		"interest_analysis": {"技術志向", "創造性志向", "成長志向", "チャレンジ志向"},
-		"aptitude_analysis": {"コミュニケーション力", "チームワーク志向", "リーダーシップ志向", "細部志向"},
-		"future_analysis":   {"安定志向", "成長志向", "ワークライフバランス", "チャレンジ志向"},
 	}
 
 	allowedCategories := allCategories
@@ -247,7 +257,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 
 	questionText, err := s.aiCallWithRetries(ctx, prompt)
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 
 	// 質問文をクリーンアップ
@@ -344,7 +354,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 
 		questionText, err = s.aiCallWithRetries(ctx, retryPrompt)
 		if err != nil {
-			return "", 0, err
+			return "", 0, "", err
 		}
 		questionText = strings.TrimSpace(questionText)
 		questionText = strings.Trim(questionText, `"「」`)
@@ -359,7 +369,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	questionText = strings.TrimSpace(questionText)
 	if questionText == "" {
 		log.Printf("Warning: AI generated empty question even after fallback, not saving. user=%d session=%s\n", userID, sessionID)
-		return "", 0, fmt.Errorf("ai returned empty question")
+		return "", 0, "", fmt.Errorf("ai returned empty question")
 	}
 
 	aiGenQuestion := &models.AIGeneratedQuestion{
@@ -373,8 +383,8 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 	}
 
 	if err := s.aiGeneratedQuestionRepo.Create(aiGenQuestion); err != nil {
-		return "", 0, fmt.Errorf("failed to save AI generated question: %w", err)
+		return "", 0, "", fmt.Errorf("failed to save AI generated question: %w", err)
 	}
 
-	return questionText, aiGenQuestion.ID, nil
+	return questionText, aiGenQuestion.ID, targetCategory, nil
 }
