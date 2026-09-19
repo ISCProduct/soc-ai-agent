@@ -6,6 +6,7 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -35,6 +36,41 @@ var modelPricing = map[string][2]float64{
 	"gpt-4o-search-preview":      {2.50, 10.00},
 	"gpt-4o-mini-search-preview": {0.15, 0.60},
 	"gpt-5-search-api":           {2.50, 10.00},
+}
+
+// modelPricingOverrideEnv は単価表を再ビルドなしに差し替える env（#1294 DesignDoc §3.4）。
+//
+//	AI_MODEL_PRICING_JSON={"gpt-4o":[2.5,10.0],"gpt-5.2":[1.25,5.0]}
+//
+// 価格改定は不定期に起きるのに、テーブルは定数なのでデプロイを待つことになる。
+// 実測値が狂うと「ローカル化でいくら減ったか」の判断材料そのものが狂うため、
+// 運用側で先に直せるようにする。
+const modelPricingOverrideEnv = "AI_MODEL_PRICING_JSON"
+
+func init() {
+	applyModelPricingOverride(os.Getenv(modelPricingOverrideEnv))
+}
+
+// applyModelPricingOverride は JSON の単価をテーブルへ上書きする。
+// 不正な値は無視してログに残す。計測の設定ミスでサーバーを起動不能にしない。
+func applyModelPricingOverride(raw string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return
+	}
+	var override map[string][]float64
+	if err := json.Unmarshal([]byte(raw), &override); err != nil {
+		log.Printf("[APICost] %s を解釈できませんでした（既定の単価表を使います）: %v", modelPricingOverrideEnv, err)
+		return
+	}
+	for model, rates := range override {
+		key := strings.ToLower(strings.TrimSpace(model))
+		if key == "" || len(rates) != 2 || rates[0] < 0 || rates[1] < 0 {
+			log.Printf("[APICost] %s の %q を無視しました（[入力単価, 出力単価] の非負の2要素が必要）", modelPricingOverrideEnv, model)
+			continue
+		}
+		modelPricing[key] = [2]float64{rates[0], rates[1]}
+	}
 }
 
 // calculateCost は入力/出力トークン数とモデル名からUSDコストを計算する。
