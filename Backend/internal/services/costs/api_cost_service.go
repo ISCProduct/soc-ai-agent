@@ -6,6 +6,7 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -344,6 +345,37 @@ func (s *APICostService) GetModelBreakdown(since time.Time) ([]ModelCostSummary,
 			TotalCostUSD: r.TotalCostUSD,
 			TotalTokens:  r.TotalTokens,
 			CallCount:    r.CallCount,
+		}
+	}
+	return result, nil
+}
+
+// UsageBreakdownSummary は軸ごとの利用量集計（#1294）。
+type UsageBreakdownSummary struct {
+	Key           string  `json:"key"`
+	TotalCostUSD  float64 `json:"total_cost_usd"`
+	TotalTokens   int64   `json:"total_tokens"`
+	CallCount     int64   `json:"call_count"`
+	AvgLatencyMs  float64 `json:"avg_latency_ms"`
+	CacheHitCount int64   `json:"cache_hit_count"`
+}
+
+// GetUsageBreakdown は指定軸（機能/プロバイダ/モデル/組織）で利用量を集計する（#1294）。
+// 未知の軸はエラーにする。呼び出し元のクエリパラメータをそのまま SQL へ渡さないため。
+func (s *APICostService) GetUsageBreakdown(ctx context.Context, since time.Time, dim repositories.BreakdownDimension) ([]UsageBreakdownSummary, error) {
+	rows, err := s.repo.UsageBreakdown(ctx, since, dim)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]UsageBreakdownSummary, len(rows))
+	for i, r := range rows {
+		result[i] = UsageBreakdownSummary{
+			Key:           r.Key,
+			TotalCostUSD:  r.TotalCostUSD,
+			TotalTokens:   r.TotalTokens,
+			CallCount:     r.CallCount,
+			AvgLatencyMs:  r.AvgLatencyMs,
+			CacheHitCount: r.CacheHitCount,
 		}
 	}
 	return result, nil

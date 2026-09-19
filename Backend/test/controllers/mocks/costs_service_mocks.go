@@ -1,7 +1,9 @@
 package mocks
 
 import (
+	"Backend/internal/repositories"
 	"Backend/internal/services/costs"
+	"context"
 	"time"
 
 	"github.com/stretchr/testify/mock"
@@ -37,6 +39,15 @@ func (m *APICostServiceMock) GetMonthlyCosts(nMonths int) ([]costs.MonthlyCostSu
 	args := m.Called(nMonths)
 	if v := args.Get(0); v != nil {
 		return v.([]costs.MonthlyCostSummary), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+// GetUsageBreakdown は機能別・組織別などの内訳集計のモック（#1294）。
+func (m *APICostServiceMock) GetUsageBreakdown(ctx context.Context, since time.Time, dim repositories.BreakdownDimension) ([]costs.UsageBreakdownSummary, error) {
+	args := m.Called(ctx, since, dim)
+	if v := args.Get(0); v != nil {
+		return v.([]costs.UsageBreakdownSummary), args.Error(1)
 	}
 	return nil, args.Error(1)
 }
