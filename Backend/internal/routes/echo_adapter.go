@@ -6,6 +6,7 @@ import (
 	"Backend/internal/services"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/organization"
+	"Backend/internal/usagectx"
 	"context"
 	"crypto/subtle"
 	"errors"
@@ -77,6 +78,11 @@ func EchoUserAuth(userSecret string, access auth.UserAccessGuard, orgs ...Organi
 					ctx = context.WithValue(ctx, middleware.OrganizationIDContextKey, tenantOrgID)
 				}
 			}
+			// AI利用量の配賦先をここで一度だけ載せる（#1294）。
+			// 各サービスが個別にユーザー/組織を引き回さなくても、この経路の
+			// AI 呼び出しはすべて機能別・組織別に配賦できる。
+			orgID, _ := middleware.OrganizationIDFromContext(ctx)
+			ctx = usagectx.WithActor(ctx, userID, orgID)
 			c.SetRequest(c.Request().WithContext(ctx))
 			return next(c)
 		}

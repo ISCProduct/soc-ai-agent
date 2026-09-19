@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"log"
@@ -225,7 +226,8 @@ func (s *AnalysisScoringService) BuildAnalysisSummary(ctx context.Context, userI
 日本語で簡潔に記述してください。`
 			userPrompt := "解析メタ情報: " + string(contextBytes) + "\n\n直近のユーザーメッセージ:\n" + userContext
 
-			raw, err := s.aiClient.ChatCompletionJSON(context.Background(), systemPrompt, userPrompt, 0.2, 400)
+			aiCtx := usagectx.WithFeature(context.Background(), usagectx.FeatureAnalysisScoring)
+			raw, err := s.aiClient.ChatCompletionJSON(aiCtx, systemPrompt, userPrompt, 0.2, 400)
 			if err == nil && strings.TrimSpace(raw) != "" {
 				// パースを試みる
 				var parsed LLMStructuredSummary

@@ -5,6 +5,7 @@ import (
 	openaiPkg "Backend/internal/openai"
 	"Backend/internal/repositories"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"fmt"
 	"log"
 	"os"
@@ -116,6 +117,14 @@ func (s *APICostService) LogUsage(u openaiPkg.Usage) {
 			Provider:         u.Provider,
 			ViaFallback:      u.ViaFallback,
 			CalledAt:         time.Now().UTC(),
+			// 配賦軸（#1294）。Feature が空の経路は unknown として残し、
+			// 「まだ計測できていない経路」を件数で追えるようにする。
+			Feature:        featureOrUnknown(u.Feature),
+			UserID:         u.UserID,
+			OrganizationID: u.OrganizationID,
+			AudioSeconds:   u.AudioSeconds,
+			LatencyMs:      u.LatencyMs,
+			CacheHit:       u.CacheHit,
 		}
 		if err := s.repo.Create(entry); err != nil {
 			log.Printf("[APICost] failed to log: %v", err)
@@ -327,4 +336,13 @@ func (s *APICostService) SetAlertHooksForTest(
 	s.modelBreakdownFn = func(time.Time) ([]ModelCostSummary, error) {
 		return nil, nil
 	}
+}
+
+// featureOrUnknown は空の機能名を 'unknown' に寄せる（#1294）。
+// DB 側の既定値と一致させ、集計時に空文字と unknown が分かれないようにする。
+func featureOrUnknown(feature string) string {
+	if feature == "" {
+		return usagectx.FeatureUnknown
+	}
+	return feature
 }

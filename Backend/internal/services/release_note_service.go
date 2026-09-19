@@ -3,6 +3,7 @@ package services
 import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
@@ -197,6 +198,7 @@ func (s *ReleaseNoteService) summarize(ctx context.Context, src ReleaseNoteSourc
 		"以下のPR内容を次のJSON形式で要約してください。\n%s\n\n---\nPRタイトル: %s\nPR本文:\n%s",
 		releaseNoteSummarySchema, src.Title, src.Body,
 	)
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureReleaseNote)
 	raw, err := s.llm.ChatCompletionJSON(ctx, releaseNoteSummarySystemPrompt, userPrompt, 0.3, 300)
 	if err != nil {
 		return nil, err

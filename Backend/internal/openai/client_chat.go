@@ -93,6 +93,8 @@ func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPro
 			ResponseFormat:      responseFormatFor(schema),
 		}
 
+		// レイテンシはリトライ込みで測る。利用者から見た待ち時間はそれなので（#1294）。
+		start := time.Now()
 		resp, err := cli.c.CreateChatCompletion(ctxReq, req)
 		// スキーマ非対応のモデル・エンドポイントでは JSON mode まで落とす。
 		// 形式の保証は失うが、取得できなくなるよりはよい。
@@ -119,7 +121,14 @@ func (cli *Client) chatCompletionJSON(ctx context.Context, systemPrompt, userPro
 		if err == nil && len(resp.Choices) > 0 {
 			content := strings.TrimSpace(resp.Choices[0].Message.Content)
 			if content != "" {
-				cli.reportUsage(ctxReq, cli.textProvider, req.Model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+				cli.reportUsage(ctxReq, usageReport{
+					provider:         cli.textProvider,
+					model:            req.Model,
+					promptTokens:     resp.Usage.PromptTokens,
+					completionTokens: resp.Usage.CompletionTokens,
+					latency:          time.Since(start),
+					cacheHit:         resp.Usage.PromptTokensDetails != nil && resp.Usage.PromptTokensDetails.CachedTokens > 0,
+				})
 				// キャッシュヒットのログを出力（存在すれば）
 				if resp.Usage.PromptTokensDetails != nil {
 					cached := resp.Usage.PromptTokensDetails.CachedTokens
