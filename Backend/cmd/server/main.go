@@ -322,6 +322,10 @@ func main() {
 	infoFetcher := company.NewCompanyInfoFetcher(companyRepo, aiClient, gbizInfoService)
 	infoFetcher.SetSearchBudget(companySearchBudget)
 	infoFetcher.SetSearchFlight(companySearchFlight)
+	// web_search は検索結果が固定8,000トークン/callで課金される。info/relations/tech が
+	// 別々に検索すると1社あたり3回分かかるため、検索結果を共有して1回に寄せる(#1124)。
+	companySharedSearch := company.NewSearchContext()
+	infoFetcher.SetSharedSearch(companySharedSearch)
 	// 関連企業として新規作成された会社(gbizinfo経由/AI検索経由の両方)にも
 	// infoFetcherで詳細情報を充填する(空データの企業が量産される問題への対応)。
 	gbizInfoService.SetDetailFetcher(infoFetcher)
@@ -331,6 +335,7 @@ func main() {
 	relationsFetcher := company.NewCompanyRelationsFetcher(companyRepo, companyRelationRepo, aiClient, gbizInfoService)
 	relationsFetcher.SetSearchBudget(companySearchBudget)
 	relationsFetcher.SetSearchFlight(companySearchFlight)
+	relationsFetcher.SetSharedSearch(companySharedSearch)
 	relationsFetcher.SetInfoFetcher(infoFetcher)
 	jobFetcher := company.NewJobFetchService(companyRepo, aiClient)
 	jobFetcher.SetSearchBudget(companySearchBudget)
@@ -413,6 +418,9 @@ func main() {
 	resumeService.SetCompanyProvisioner(infoFetcher)
 	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
+	// コンストラクタが自前生成した infoFetcher には SetSharedSearch が掛からない。
+	// 共有済みのものに差し替えないと、fetch-missing-batch で検索が統合されない(#1124)。
+	adminCompanyController.SetInfoFetcher(infoFetcher)
 	adminCompanyController.SetRelationsFetcher(relationsFetcher)
 	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
 	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)

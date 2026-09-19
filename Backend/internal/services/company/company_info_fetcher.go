@@ -48,6 +48,7 @@ type CompanyInfoFetcher struct {
 	llm    *companyfetch.LLM
 	gbiz   *gbizinfo.GBizInfoService
 	flight *CompanySearchFlight
+	shared *SearchContext
 
 	// provisionFailures は ProvisionByName が失敗した企業名の記録（#1124）。
 	// 打ち間違えを繰り返し投げられたときに毎回 Web検索を払わないためのネガティブキャッシュ。
@@ -64,6 +65,14 @@ func NewCompanyInfoFetcher(repo repository.CompanyRepository, client *openai.Cli
 }
 
 // SetSearchBudget は月次 Search 予算ガードを注入する。
+// SetSharedSearch は企業ごとに1回だけ行う検索の結果を共有する入れ物を注入する。
+// 未注入なら従来どおり系統ごとに検索する(#1124)。
+func (f *CompanyInfoFetcher) SetSharedSearch(sc *SearchContext) {
+	if f != nil {
+		f.shared = sc
+	}
+}
+
 func (f *CompanyInfoFetcher) SetSearchBudget(budget companyfetch.SearchBudget) {
 	if f == nil {
 		return
@@ -554,9 +563,30 @@ func (f *CompanyInfoFetcher) acquireViaAISearch(ctx context.Context, companyName
 		"企業名「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。検索結果に無い項目は空文字または0。推測禁止。\n%s",
 		companyName, companyInfoJSONSchema,
 	)
-	raw, modelsUsed, err := f.llm.SearchLiteThenParseWithSchema(ctx, searchPrompt, systemPrompt, parseUser, 600, companyInfoResponseSchema())
-	if err != nil {
-		return nil, fmt.Errorf("企業情報のAI取得失敗: %w", err)
+	// 検索は企業ごとに1回に寄せる。relations / tech も同じ結果を使うため、
+	// web_search の固定課金(8,000トークン/call)が1社1回で済む(#1124)。
+	// 共有が未注入なら従来どおり検索+解析をまとめて行う。
+	var raw, modelsUsed string
+	var err error
+	if f.shared != nil {
+		searchText, searchModel, searchErr := f.shared.Fetch(companyName, func() (string, string, error) {
+			return f.llm.SearchLiteJSON(ctx, sharedSearchPrompt(companyName, websiteURL), 1500)
+		})
+		if searchErr != nil {
+			return nil, fmt.Errorf("企業情報のAI取得失敗: %w", searchErr)
+		}
+		parsed, parseModel, parseErr := f.llm.ParseJSONWithSchema(ctx, systemPrompt,
+			parseUser+"\n\n---\n検索結果:\n"+companyfetch.TrimText(searchText, 2000), 600,
+			companyInfoResponseSchema())
+		if parseErr != nil {
+			return nil, fmt.Errorf("企業情報のAI取得失敗: %w", parseErr)
+		}
+		raw, modelsUsed = parsed, searchModel+"+"+parseModel
+	} else {
+		raw, modelsUsed, err = f.llm.SearchLiteThenParseWithSchema(ctx, searchPrompt, systemPrompt, parseUser, 600, companyInfoResponseSchema())
+		if err != nil {
+			return nil, fmt.Errorf("企業情報のAI取得失敗: %w", err)
+		}
 	}
 	result, err := parseCompanyInfoResult(raw)
 	if err != nil {
