@@ -427,9 +427,12 @@ func main() {
 	adminAuditController := controllers.NewAdminAuditController(auditLogService)
 	// gBizINFO 公式 API を使った企業データ収集パイプライン
 	// Mynavi・Rikunabi・CareerTasu スクレイパーは利用規約違反リスクのため削除 (#178)
-	gbizToken := os.Getenv("GBIZINFO_API_TOKEN")
+	// 環境変数名の解決は config.LoadConfig に一本化する。
+	// ここで os.Getenv("GBIZINFO_API_TOKEN") を直接読んでいたため、
+	// GBIZINFO_API_KEY しか設定していない本番・staging では空文字が渡り、
+	// 企業グラフの gBizINFO 取得だけが 401 になっていた。
 	companyGraphPipeline := &scraper.Pipeline{
-		GBiz:      scraper.NewGBizClient("", gbizToken),
+		GBiz:      scraper.NewGBizClient("", cfg.GBizInfoToken),
 		Threshold: config.CompanyGraphThreshold(),
 	}
 	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService, aiClient)
