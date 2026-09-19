@@ -667,7 +667,8 @@ export default function PageContent() {
     )
   }
 
-  const selectableOnPage = companies.filter(canSelectForPublish)
+  // 公開操作はシステム管理者専用なので、一括公開の選択UIも担当校管理者には出さない
+  const selectableOnPage = isPlatform ? companies.filter(canSelectForPublish) : []
   const selectedSelectableCount = selectableOnPage.filter((c) => selectedIds.includes(c.id)).length
   const allSelectableSelected =
     selectableOnPage.length > 0 && selectedSelectableCount === selectableOnPage.length
@@ -1196,13 +1197,15 @@ export default function PageContent() {
                         justifyContent="space-between"
                       >
                         <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ minWidth: 0, flex: 1 }}>
-                          <Checkbox
-                            checked={selected}
-                            onChange={() => toggleSelect(company.id)}
-                            disabled={busy || !canSelectForPublish(company)}
-                            inputProps={{ 'aria-label': `${company.name}を選択` }}
-                            sx={{ mt: -0.5 }}
-                          />
+                          {isPlatform && (
+                            <Checkbox
+                              checked={selected}
+                              onChange={() => toggleSelect(company.id)}
+                              disabled={busy || !canSelectForPublish(company)}
+                              inputProps={{ 'aria-label': `${company.name}を選択` }}
+                              sx={{ mt: -0.5 }}
+                            />
+                          )}
                           <Box sx={{ minWidth: 0, flex: 1 }}>
                             <Stack
                               direction="row"
@@ -1369,14 +1372,17 @@ export default function PageContent() {
                             </Button>
                           ) : null}
 
-                          <IconButton
-                            size="small"
-                            aria-label={`${company.name}のその他の操作`}
-                            disabled={busy && !fetching}
-                            onClick={(e) => setMenuAnchor({ el: e.currentTarget, company })}
-                          >
-                            <MoreVertIcon fontSize="small" />
-                          </IconButton>
+                          {/* メニューの中身はすべてシステム管理者専用。空のメニューを開かせない */}
+                          {isPlatform && (
+                            <IconButton
+                              size="small"
+                              aria-label={`${company.name}のその他の操作`}
+                              disabled={busy && !fetching}
+                              onClick={(e) => setMenuAnchor({ el: e.currentTarget, company })}
+                            >
+                              <MoreVertIcon fontSize="small" />
+                            </IconButton>
+                          )}
                         </Stack>
                       </Stack>
                     </Box>

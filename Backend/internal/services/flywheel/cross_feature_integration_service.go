@@ -47,7 +47,7 @@ var interviewScoreMapping = []struct {
 // 検索そのものが失敗した場合はエラーを返す（一時障害をスナップショットへ書き込まないため）。
 func (s *CrossFeatureIntegrationService) ResolveDiagnosisSessionID(userID uint) (string, error) {
 	if s.weightScoreRepo == nil {
-		return PickDiagnosisSessionID(userID, "", gorm.ErrRecordNotFound)
+		return "", errors.New("weightScoreRepo が未注入")
 	}
 	id, err := s.weightScoreRepo.FindLatestDiagnosisSessionID(userID)
 	return PickDiagnosisSessionID(userID, id, err)
@@ -114,6 +114,8 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromInterviewReport(
 		}
 	}
 	// 1件も書けていないのに成功を返すと、呼び出し元が面接前スコアで再マッチングしてしまう。
+	// 部分成功（applied > 0）は許容する。移動平均なので一部でも反映された方が面接前より近く、
+	// ここでエラーにすると書けた分まで再マッチングされずに宙に浮く。
 	if applied == 0 && failed > 0 {
 		return fmt.Errorf("面接スコアの反映が全件失敗しました (%d件)", failed)
 	}

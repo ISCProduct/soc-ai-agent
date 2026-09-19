@@ -199,9 +199,10 @@ Interview transcript:
 	if s.crossFeature != nil {
 		targetSession, err := s.crossFeature.ResolveDiagnosisSessionID(session.UserID)
 		if err != nil {
-			// 診断セッションを特定できないまま書くと別セッションを汚すので、反映も再マッチングも行わない。
-			log.Printf("[CrossFeature] diagnosis session resolve failed for session %d: %v\n", sessionID, err)
-			return nil
+			// 診断セッションを特定できないまま書くと別セッションを汚す。
+			// ここで握りつぶすと面接スコアがどこにも反映されないまま消えるので、
+			// エラーを返してキュー(asynq)のリトライに載せる。レポート本体は Upsert 済みで冪等。
+			return fmt.Errorf("診断セッションの解決に失敗 (session=%d): %w", sessionID, err)
 		}
 		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, targetSession, report); err != nil {
 			log.Printf("[CrossFeature] interview score update failed for session %d: %v\n", sessionID, err)

@@ -410,6 +410,10 @@ func main() {
 	resumeService.SetCompanyProvisioner(infoFetcher)
 	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
+	adminCompanyController.SetSchoolRestrictionChecker(func(adminUserID uint) (bool, error) {
+		restricted, _, err := schoolService.ResolveAdminAccess(adminUserID)
+		return restricted, err
+	})
 	adminCompanyController.SetRelationsFetcher(relationsFetcher)
 	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
 	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)

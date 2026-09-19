@@ -3,12 +3,15 @@ package controllers
 import (
 	"Backend/domain/repository"
 	"Backend/internal/companyfetch"
+	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/company"
 	"Backend/internal/services/gbizinfo"
 	ifaces "Backend/internal/services/interfaces"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -29,6 +32,8 @@ type AdminCompanyController struct {
 	techFetcher      *company.TechStackFetcher
 	catalogWarm      *company.CatalogWarmService
 	missingBatch     *company.CompanyMissingBatchService
+	// schoolRestricted は「担当校つき管理者か」を返す。公開状態の変更可否の判定に使う。
+	schoolRestricted func(adminUserID uint) (bool, error)
 }
 
 func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.AuditLogService, gbiz *gbizinfo.GBizInfoService, openaiClient ...*openai.Client) *AdminCompanyController {
@@ -44,6 +49,14 @@ func NewAdminCompanyController(repo repository.CompanyRepository, audit ifaces.A
 		)
 	}
 	return ctrl
+}
+
+// SetSchoolRestrictionChecker は担当校つき管理者かどうかの判定を注入する。
+// 未注入だと公開状態の変更を止められないので、必ず main で渡すこと。
+func (c *AdminCompanyController) SetSchoolRestrictionChecker(f func(adminUserID uint) (bool, error)) {
+	if c != nil {
+		c.schoolRestricted = f
+	}
 }
 
 // SetRelationsFetcher は企業関係・市場情報取得サービスを注入する（#633 Phase 2）。
@@ -179,17 +192,39 @@ func (c *AdminCompanyController) Update(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
 	}
-	var payload models.Company
-	if err := ctx.Bind(&payload); err != nil {
+	// 送られてこなかった項目を「false / 空」で上書きしないため、キーの有無も見る。
+	body, err := io.ReadAll(ctx.Request().Body)
+	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
 	}
+	var payload models.Company
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
+	}
+	var sentFields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &sentFields); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
+	}
+	_, provisionalSent := sentFields["is_provisional"]
+
 	company, err := c.repo.FindByID(uint(id))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "company not found")
 	}
 
+	// data_status / is_provisional は学校をまたいで共有される。PATCH /publish と同じ権限で守らないと
+	// 「編集」からの公開で platform 限定を素通りできてしまう。
+	if changesPublication(company, &payload, provisionalSent) {
+		if err := c.requirePlatformAdmin(ctx); err != nil {
+			return err
+		}
+	}
+
 	if err := mergeCompany(company, &payload); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if provisionalSent {
+		company.IsProvisional = payload.IsProvisional
 	}
 	if err := c.repo.Update(company); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update company")
@@ -199,6 +234,35 @@ func (c *AdminCompanyController) Update(ctx echo.Context) error {
 		"name": company.Name,
 	})
 	return ctx.JSON(http.StatusOK, company)
+}
+
+// changesPublication は編集内容が掲載状態（公開／暫定フラグ）を動かすかを見る。
+// provisionalSent はリクエストボディに is_provisional が含まれていたか。
+// bool のゼロ値と「未送信」は区別できないので、送られた場合だけ比較する。
+func changesPublication(existing, payload *models.Company, provisionalSent bool) bool {
+	if payload.DataStatus != "" && payload.DataStatus != existing.DataStatus {
+		return true
+	}
+	return provisionalSent && payload.IsProvisional != existing.IsProvisional
+}
+
+// requirePlatformAdmin は担当校つき管理者を 403 で弾く（ルートの platform ミドルウェアと同じ判定）。
+func (c *AdminCompanyController) requirePlatformAdmin(ctx echo.Context) error {
+	if c.schoolRestricted == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "school access checker is not configured")
+	}
+	adminUserID, ok := middleware.AdminUserIDFromContext(ctx.Request().Context())
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	restricted, err := c.schoolRestricted(adminUserID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
+	}
+	if restricted {
+		return echo.NewHTTPError(http.StatusForbidden, "platform admin only")
+	}
+	return nil
 }
 
 // Publish PATCH /api/admin/companies/:id/publish
@@ -394,6 +458,6 @@ func mergeCompany(existing *models.Company, payload *models.Company) error {
 		}
 		existing.DataStatus = payload.DataStatus
 	}
-	existing.IsProvisional = payload.IsProvisional
+	// IsProvisional は呼び出し側が「送られてきた場合だけ」反映する。
 	return nil
 }

@@ -155,3 +155,55 @@ func TestHeuristicConfidence_ChatFlagsPenalizeHarder(t *testing.T) {
 		t.Fatalf("chat flags should cut confidence hard: base=%d weak=%d", base, weak)
 	}
 }
+
+// TestHeuristicFlags_ThinMatchUsesMinimum は thin_match_evidence の判定が
+// 先頭ではなく上位マッチ全体の最小 MatchedAxisCount を見ることを検証する。
+// 先頭だけ見ていると「1位は根拠十分、2位以降は根拠が薄い」結果を
+// 信頼できる診断として扱い、confidence のペナルティも落ちる。
+func TestHeuristicFlags_ThinMatchUsesMinimum(t *testing.T) {
+	scores := []entity.UserWeightScore{
+		{WeightCategory: "技術志向", Score: 60},
+		{WeightCategory: "成長志向", Score: 40},
+		{WeightCategory: "チームワーク志向", Score: 55},
+		{WeightCategory: "細部志向", Score: 45},
+		{WeightCategory: "チャレンジ志向", Score: 50},
+		{WeightCategory: "コミュニケーション力", Score: 52},
+	}
+
+	tests := []struct {
+		name     string
+		matches  []*entity.UserCompanyMatch
+		wantFlag bool
+	}{
+		{
+			name: "全マッチの根拠軸が十分ならフラグなし",
+			matches: []*entity.UserCompanyMatch{
+				{CompanyID: 1, MatchScore: 80, MatchedAxisCount: 6},
+				{CompanyID: 2, MatchScore: 60, MatchedAxisCount: 5},
+			},
+			wantFlag: false,
+		},
+		{
+			name: "先頭は十分でも後続が薄ければフラグを立てる",
+			matches: []*entity.UserCompanyMatch{
+				{CompanyID: 1, MatchScore: 80, MatchedAxisCount: 6},
+				{CompanyID: 2, MatchScore: 60, MatchedAxisCount: 2},
+			},
+			wantFlag: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := false
+			for _, f := range heuristicFlags(scores, tt.matches) {
+				if f == "thin_match_evidence" {
+					got = true
+				}
+			}
+			if got != tt.wantFlag {
+				t.Fatalf("thin_match_evidence = %v, want %v", got, tt.wantFlag)
+			}
+		})
+	}
+}

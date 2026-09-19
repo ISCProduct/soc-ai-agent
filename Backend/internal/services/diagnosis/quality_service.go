@@ -152,7 +152,7 @@ func heuristicFlags(scores []entity.UserWeightScore, matches []*entity.UserCompa
 		if maxS >= 90 && (maxS-minS) < 8 {
 			flags = append(flags, "saturated_matches")
 		}
-		// 上位マッチの「最小」根拠軸数で見る（docs/wiki/scoring.md）。先頭だけだと後続の薄い根拠を見落とす。
+		// 上位マッチの「最小」根拠軸数で見る。先頭だけだと後続の薄い根拠を見落とす。
 		minAxes := matches[0].MatchedAxisCount
 		for _, m := range matches[1:] {
 			if m.MatchedAxisCount < minAxes {

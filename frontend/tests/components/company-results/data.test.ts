@@ -89,4 +89,21 @@ describe('generateITCompanies', () => {
     expect(sier).toBeDefined()
     expect(sier!.matchScore).toBeGreaterThan(50)
   })
+
+  // 旧カテゴリへのフォールバックは「新カテゴリが無いとき」だけ。0点は有効なスコアなので拾ってはいけない
+  it('新カテゴリが0点なら旧カテゴリのスコアを拾わない', () => {
+    const zeroOnly = generateITCompanies({
+      scores: [{ category: '創造性志向', score: 0, reason: 'test' }],
+    })
+    const withLegacy = generateITCompanies({
+      scores: [
+        { category: '創造性志向', score: 0, reason: 'test' },
+        { category: '創造性・発想力', score: 10, reason: 'test' },
+      ],
+    })
+
+    expect(withLegacy.map(c => [c.name, c.matchScore])).toEqual(
+      zeroOnly.map(c => [c.name, c.matchScore]),
+    )
+  })
 })
