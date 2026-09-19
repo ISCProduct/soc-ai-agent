@@ -144,6 +144,10 @@ jobs:
       - name: Bind エラー握りつぶしの検査
         run: ./automation/test/bind-error-check.sh
 
+      # 検査スクリプト自体が壊れると「検査したつもり」で素通りする。
+      - name: Bind 検査スクリプトのテスト
+        run: ./automation/test/bind-error-check-test.sh
+
       - name: ワークフロー埋め込み Python の構文チェック
         run: |
           python3 - <<'PYEOF'
