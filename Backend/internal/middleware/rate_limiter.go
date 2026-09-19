@@ -140,11 +140,14 @@ func ConfigureRateLimiters(login, passwordReset KeyRateLimiter) {
 }
 
 // GuestAIRateLimiter は未認証で叩けるAI呼び出し（ES添削・企業WEB検索）のIP単位制限（#1154）。
-// 展示会会場のNAT配下では複数人が同一IPになるため、窓は広めに取る。
-var GuestAIRateLimiter KeyRateLimiter = NewRateLimiter(10*time.Minute, envPositiveInt("GUEST_AI_RATE_LIMIT_PER_IP", 60))
+// 単一送信元からの連打を止めるためのもので、利用者ごとの公平な配分ではない。
+// 正規利用の大半は Next.js の BFF 経由（BACKEND_URL=https://api.shukatsu-ai.jp）で届くため
+// ALB から見た送信元は frontend タスクの出口IP1つに収束する。展示会会場のNATでも同様。
+// したがってIP単位は緩く取り、課金の総量は下の全体上限で止める。
+var GuestAIRateLimiter KeyRateLimiter = NewRateLimiter(10*time.Minute, envPositiveInt("GUEST_AI_RATE_LIMIT_PER_IP", 300))
 
 // GuestAIGlobalRateLimiter は同エンドポイント群の全体上限（#1154）。
-// IPを変えれば per-IP 制限は回避できるため、課金の総量をここで止める。
+// IPを変えれば per-IP 制限は回避できるため、実質的なコスト上限はこちらが担う。
 var GuestAIGlobalRateLimiter KeyRateLimiter = NewRateLimiter(time.Hour, envPositiveInt("GUEST_AI_RATE_LIMIT_GLOBAL", 1000))
 
 // envPositiveInt は環境変数を正の整数として読む。未設定・不正値は既定値。
