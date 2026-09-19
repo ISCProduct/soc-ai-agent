@@ -3,6 +3,7 @@ package chat
 import (
 	"Backend/internal/models"
 	"Backend/internal/services/prompts"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -179,6 +180,7 @@ func (s *ChatService) validateAnswerRelevance(ctx context.Context, question, ans
 	userPrompt := prompts.BuildAnswerValidationUserPrompt(question, answer)
 
 	// temperature=0で安定した判定を行う
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureChatAnswerCheck)
 	response, err := s.aiClient.ResponsesWithTemperature(ctx, systemPrompt, userPrompt, 0.0)
 	if err != nil {
 		return false, fmt.Errorf("AI validation error: %w", err)

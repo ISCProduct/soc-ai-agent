@@ -10,6 +10,9 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
+
+	"Backend/internal/usagectx"
 
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -48,6 +51,27 @@ type Usage struct {
 	CompletionTokens int
 	Provider         string // "openai" / "local"
 	ViaFallback      bool   // ローカル障害時のフォールバックで処理されたか
+
+	// 配賦軸（#1294）。機能別・組織別にコストを割るために記録する。
+	// Feature は context から取るため、呼び出し元が usagectx.WithFeature を
+	// 通していない経路は "unknown" になる（その件数が計測漏れの指標）。
+	Feature        string
+	UserID         *uint // 実行主体。バッチ経路は nil
+	OrganizationID *uint // 配賦先の学校/企業。解決できなければ nil
+	AudioSeconds   float64
+	LatencyMs      int
+	CacheHit       bool
+}
+
+// usageReport は reportUsage への入力。引数が増えたため構造体にする（DesignDoc §4）。
+type usageReport struct {
+	provider         string
+	model            string
+	promptTokens     int
+	completionTokens int
+	latency          time.Duration
+	audioSeconds     float64
+	cacheHit         bool
 }
 
 // UsageHook はAPIコール成功時に呼ばれるコールバック。
@@ -92,21 +116,29 @@ type Client struct {
 
 // reportUsage は使用量を OnUsage に通知する。
 // provider と「フォールバック経由か」をここで一括して埋める。
-func (cli *Client) reportUsage(ctx context.Context, provider, model string, promptTokens, completionTokens int) {
+func (cli *Client) reportUsage(ctx context.Context, r usageReport) {
 	if cli == nil || cli.OnUsage == nil {
 		return
 	}
 	viaFallback := fallbackUsed(ctx)
+	provider := r.provider
 	if viaFallback {
 		// フォールバックで処理されたなら課金先は OpenAI
 		provider = providerOpenAI
 	}
+	userID, orgID := usagectx.Actor(ctx)
 	cli.OnUsage(Usage{
-		Model:            model,
-		PromptTokens:     promptTokens,
-		CompletionTokens: completionTokens,
+		Model:            r.model,
+		PromptTokens:     r.promptTokens,
+		CompletionTokens: r.completionTokens,
 		Provider:         provider,
 		ViaFallback:      viaFallback,
+		Feature:          usagectx.Feature(ctx),
+		UserID:           userID,
+		OrganizationID:   orgID,
+		AudioSeconds:     r.audioSeconds,
+		LatencyMs:        int(r.latency.Milliseconds()),
+		CacheHit:         r.cacheHit,
 	})
 }
 

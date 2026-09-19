@@ -6,6 +6,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/repositories"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -225,6 +226,7 @@ JSONのみで返答:
 		strings.Join(chatLines, "\n"),
 	)
 
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureDiagnosisQuality)
 	raw, err := s.aiClient.ChatCompletionJSON(ctx, system, user, 0.2, 400)
 	if err != nil {
 		return nil, err

@@ -2,6 +2,7 @@ package companyfetch
 
 import (
 	"Backend/internal/openai"
+	"Backend/internal/usagectx"
 	"context"
 	"fmt"
 	"strings"
@@ -32,6 +33,7 @@ func (l *LLM) ExtractJSON(ctx context.Context, systemPrompt, userPrompt string, 
 		maxTokens = 600
 	}
 	model = ExtractModel()
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureCompanyParse)
 	text, err = l.Client.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.2, maxTokens, model)
 	return text, model, err
 }
@@ -139,6 +141,7 @@ func (l *LLM) ParseJSON(ctx context.Context, systemPrompt, userPrompt string, ma
 		maxTokens = 600
 	}
 	model = ParseModel()
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureCompanyParse)
 	text, err = l.Client.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.2, maxTokens, model)
 	return text, model, err
 }

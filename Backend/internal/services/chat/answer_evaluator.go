@@ -4,6 +4,7 @@ import (
 	"Backend/internal/models"
 	internalOpenAI "Backend/internal/openai"
 	"Backend/internal/services/prompts"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -43,6 +44,7 @@ func (e *AnswerEvaluator) llmEvaluate(ctx context.Context, question, answer stri
 		return nil
 	}
 	userPrompt := prompts.BuildAnswerQualityUserPrompt(question, answer)
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureChatAnswerEval)
 	raw, err := e.llmClient.ChatCompletionJSON(ctx, prompts.AnswerQualitySystemPrompt, userPrompt, 0.2, 256)
 	if err != nil {
 		log.Printf("[AnswerEvaluator] LLM評価エラー: %v", err)
