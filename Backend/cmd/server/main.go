@@ -577,7 +577,10 @@ func main() {
 	adminEntry.PATCH("/companies/:id/company-users/:userID", adminCompanyUserController.SetDisabled)
 	// 学習データのエクスポート(#268)。候補者の発話と選考結果を含むため管理者のみ。
 	adminTrainingController := controllers.NewAdminTrainingController(training.NewService(db))
-	adminEntry.GET("/training/stats", adminTrainingController.Stats)
+	// stats は件数しか返さない(個人情報を含まない)。運用から機械的に叩けるよう、
+	// whats-new/ingest と同じサービス間認証にする。管理者になりすます形を避ける。
+	api.GET("/admin/training/stats", adminTrainingController.Stats, routes.EchoStaticSecretAuth(cfg.AdminSecret))
+	// export は候補者の発話と選考結果を返すので、管理者本人の認証を要求する。
 	adminEntry.GET("/training/export", adminTrainingController.Export)
 	// CI(GitHub Actions)からのマシン間呼び出しのため、ログインユーザー前提のEchoAdminAuthではなく
 	// 共有シークレットのみで認証する(#861)
