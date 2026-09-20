@@ -127,6 +127,11 @@ jobs:
       - name: ワークフローの checkout 漏れ検査
         run: ./automation/test/workflow-checkout-test.sh
 
+      # 反映後スモークがデプロイと同じ concurrency group にいること。
+      # ずれるとスモーク中に次のデプロイが環境を落とし、変更と無関係に全滅する。
+      - name: スモークの concurrency group 検査
+        run: ./automation/test/deploy-smoke-concurrency-test.sh
+
       # ステージングの起動/停止判定。間違えると開発中に環境が理由不明で落ちる。
       - name: ステージング uptime 判定のテスト
         run: ./automation/test/staging-uptime-decision-test.sh
