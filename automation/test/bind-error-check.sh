@@ -9,38 +9,72 @@
 # 実際にはコードに修正が入っていなかった。レビューと issue のクローズだけでは
 # 再発を止められないため、検査で固定する。
 #
-# 意図的に無視する場合は `_ = ctx.Bind(&x)` と書くこと（意図が読めるため許可する）。
+# 許容する形:
+#   if err := ctx.Bind(&x); err != nil { ... }
+#   err := ctx.Bind(&x)
+#   if err != nil { ... }              ← 次の非空行で見ていれば可
+#   _ = ctx.Bind(&x)                   ← 意図的に無視（意図が読めるため）
+#
+# 検出できない形: Bind を複数行に分けて書いた場合（行単位の検査の限界）。
+# 現状そう書かれた箇所は無い。
 #
 # 使い方: ./automation/test/bind-error-check.sh [検査対象ディレクトリ]
-# 対象を指定した場合は件数の下限チェックを行わない（自己テスト用）。
+# 対象を指定した場合は件数の下限を1件に緩める（自己テスト用）。
 
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TARGET="${1:-$ROOT/Backend}"
 
-# `.Bind(` を全部拾う。ポインタ変数をそのまま渡す `ctx.Bind(req)` も対象に含める
-# （`&` 固定だと素通りする）。行コメントは除外する。経緯を日本語コメントに残す
-# リポジトリなので、コメント内の `ctx.Bind(&x)` で CI が赤くなると邪魔でしかない。
-hits=$(grep -rn "\.Bind(" "$TARGET" --include="*.go" | grep -vE "^[^:]+:[0-9]+:[[:space:]]*//" || true)
-total=$(printf '%s\n' "$hits" | grep -c . || true)
+# echo の Context に対する Bind だけを見る。`.Bind(` 全部を対象にすると
+# DIコンテナや sql ドライバの Bind まで巻き込む。
+BIND_RE='(ctx|c)\\.Bind\\('
 
 # 抽出条件が壊れると「検査したつもり」で素通りする。件数の下限を固定して検出する。
-MIN_CHECKED=50
-if [ "$#" -eq 0 ] && [ "$total" -lt "$MIN_CHECKED" ]; then
+if [ "$#" -eq 0 ]; then
+  MIN_CHECKED=50
+else
+  MIN_CHECKED=1
+fi
+
+total=0
+bad=""
+while IFS= read -r f; do
+  out=$(awk -v file="$f" -v re="$BIND_RE" '
+    { l[NR] = $0 }
+    END {
+      for (i = 1; i <= NR; i++) {
+        s = l[i]
+        if (s ~ /^[[:space:]]*\/\//) continue          # 行コメント
+        if (s !~ re) continue
+        printf "HIT\n"
+        if (s ~ /if err :?=/) continue                 # 同じ行で検査している
+        if (s ~ /_ =/) continue                        # 意図的に無視
+        if (s ~ /err :?=/) {                           # 代入だけ。次の非空行で見ているか
+          j = i + 1
+          while (j <= NR && l[j] ~ /^[[:space:]]*$/) j++
+          if (j <= NR && l[j] ~ /if err != nil/) continue
+        }
+        printf "BAD\t%s:%d:%s\n", file, i, s
+      }
+    }
+  ' "$f")
+  hits=$(printf '%s\n' "$out" | grep -c '^HIT$' || true)
+  total=$((total + hits))
+  bad_lines=$(printf '%s\n' "$out" | sed -n 's/^BAD\t//p')
+  if [ -n "$bad_lines" ]; then
+    bad="${bad}${bad_lines}
+"
+  fi
+done < <(find "$TARGET" -name '*.go' -type f)
+
+if [ "$total" -lt "$MIN_CHECKED" ]; then
   echo "NG: Bind の呼び出しが $total 件しか見つかりません（期待 $MIN_CHECKED 件以上）。抽出条件が壊れています。"
   exit 1
 fi
 
-# 同じ行でエラーを検査している（if err := ... ; err != nil）か、
-# 意図的に捨てている（_ = ）なら OK。
-#
-# `err = ctx.Bind(&x)` のように代入するだけの形は許可しない。代入しても
-# その後で検査しなければ #1064 と同じバグで、代入の有無では区別できないため。
-bad=$(printf '%s\n' "$hits" | grep -vE "if err :?=|_ = " || true)
-
-if [ -n "$bad" ]; then
+if [ -n "$(printf '%s' "$bad" | tr -d '[:space:]')" ]; then
   echo "FAIL: Bind のエラーを捨てている箇所があります。if err := ctx.Bind(&x); err != nil で 400 を返すか、意図的なら _ = を付けてください。"
-  printf '%s\n' "$bad" | sed "s|$ROOT/||"
+  printf '%s' "$bad" | sed "s|$ROOT/||"
   exit 1
 fi
 
