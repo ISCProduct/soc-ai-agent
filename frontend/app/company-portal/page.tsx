@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Alert,
-  Box,
   Button,
   Card,
   CardActionArea,
@@ -174,7 +173,10 @@ export default function CompanyPortalDashboardPage() {
         </Card>
       )}
 
-      <Box>
+      <Stack direction="row" spacing={1}>
+        <Button variant="outlined" onClick={() => router.push('/company-portal/settings')}>
+          設定
+        </Button>
         <Button
           variant="outlined"
           onClick={() => {
@@ -184,7 +186,7 @@ export default function CompanyPortalDashboardPage() {
         >
           ログアウト
         </Button>
-      </Box>
+      </Stack>
     </PageContainer>
   )
 }

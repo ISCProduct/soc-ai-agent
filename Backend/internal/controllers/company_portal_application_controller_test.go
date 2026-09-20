@@ -117,6 +117,9 @@ func portalRequest(t *testing.T, method, path string, body string, companyID uin
 	ctx := r.Context()
 	ctx = withValue(ctx, middleware.CompanyIDContextKey, companyID)
 	ctx = withValue(ctx, middleware.CompanyUserRoleContextKey, role)
+	// 企業ユーザーIDは自己無効化の判定に使う。既定を 1 にしておき、
+	// 別のIDが必要なテストは portalRequestAs を使う。
+	ctx = withValue(ctx, middleware.CompanyUserIDContextKey, uint(1))
 	r = r.WithContext(ctx)
 
 	rec := httptest.NewRecorder()
@@ -345,4 +348,14 @@ func TestCompanyPortalApplication_List_同意した学生の氏名だけ出す(t
 	if len(students.askedUserIDs) != 2 {
 		t.Errorf("氏名の問い合わせが行われていない: %v", students.askedUserIDs)
 	}
+}
+
+// portalRequestAs は企業ユーザーIDを指定できる版。
+// 自分自身かどうかで挙動が変わる操作のテストに使う。
+func portalRequestAs(t *testing.T, method, path, body string, companyID, companyUserID uint, role string) (echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	c, rec := portalRequest(t, method, path, body, companyID, role)
+	ctx := withValue(c.Request().Context(), middleware.CompanyUserIDContextKey, companyUserID)
+	c.SetRequest(c.Request().WithContext(ctx))
+	return c, rec
 }
