@@ -1,4 +1,4 @@
-package controllers
+package company
 
 // 企業ポータルの求人管理（#1321）。
 //

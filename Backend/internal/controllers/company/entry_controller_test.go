@@ -1,7 +1,7 @@
-package controllers_test
+package company_test
 
 import (
-	"Backend/internal/controllers"
+	companycontrollers "Backend/internal/controllers/company"
 	"Backend/internal/services/company"
 	"bytes"
 	"encoding/json"
@@ -14,7 +14,7 @@ import (
 
 func TestCompanyEntryController_Submit_ValidationErrors(t *testing.T) {
 	svc := &company.CompanyEntryService{}
-	ctrl := controllers.NewCompanyEntryController(svc)
+	ctrl := companycontrollers.NewCompanyEntryController(svc)
 	e := echo.New()
 
 	tests := []struct {

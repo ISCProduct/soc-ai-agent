@@ -1,4 +1,4 @@
-package controllers
+package company
 
 // 企業ポータルのダッシュボードと応募者管理（#1320）。
 //
@@ -105,7 +105,7 @@ func (c *CompanyPortalApplicationController) Dashboard(ctx echo.Context) error {
 //
 // entity をそのまま返すとJSONタグが無くGoのフィールド名で出るため、
 // 他のAPIと同じ snake_case になるよう明示的に組み立てる
-// （管理者向けの jsonAdminApplicationList と同じ方針）。
+// （管理者向けの controllers.jsonAdminApplicationList と同じ方針）。
 //
 // StudentName はスカウト公開に同意した学生のみ入る。同意が無ければ空文字。
 // 「自社に応募した学生を同意の有無に関わらず見せるか」は #1319 で未決定のため、

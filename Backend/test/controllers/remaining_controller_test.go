@@ -15,6 +15,7 @@ import (
 	"Backend/internal/controllers"
 	admincontrollers "Backend/internal/controllers/admin"
 	chatcontrollers "Backend/internal/controllers/chat"
+	companycontrollers "Backend/internal/controllers/company"
 	escontrollers "Backend/internal/controllers/es"
 	"Backend/internal/models"
 	"Backend/internal/services/school"
@@ -218,7 +219,7 @@ func TestScheduleController_ExportICS_Unauthenticated(t *testing.T) {
 // ---- CompanyEntryController ----
 
 func TestCompanyEntryController_Submit_MissingName(t *testing.T) {
-	c := controllers.NewCompanyEntryController(nil)
+	c := companycontrollers.NewCompanyEntryController(nil)
 	body, _ := json.Marshal(map[string]any{"name": ""})
 	req := httptest.NewRequest(http.MethodPost, "/api/company-entry", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -233,7 +234,7 @@ func TestCompanyEntryController_Submit_MissingName(t *testing.T) {
 // ---- CompanyRelationController ----
 
 func TestCompanyRelationController_GetCompanyByID_InvalidID(t *testing.T) {
-	c := controllers.NewCompanyRelationController(nil, nil)
+	c := companycontrollers.NewCompanyRelationController(nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/abc", nil)
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
@@ -243,7 +244,7 @@ func TestCompanyRelationController_GetCompanyByID_InvalidID(t *testing.T) {
 }
 
 func TestCompanyRelationController_GetCompanyJobPositions_InvalidID(t *testing.T) {
-	c := controllers.NewCompanyRelationController(nil, nil)
+	c := companycontrollers.NewCompanyRelationController(nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/abc/job-positions", nil)
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
@@ -253,7 +254,7 @@ func TestCompanyRelationController_GetCompanyJobPositions_InvalidID(t *testing.T
 }
 
 func TestCompanyRelationController_WebSearchCompanies_MissingQuery(t *testing.T) {
-	c := controllers.NewCompanyRelationController(nil, nil)
+	c := companycontrollers.NewCompanyRelationController(nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/search", nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, c.WebSearchCompanies, newCtx(req, rec), http.StatusBadRequest)

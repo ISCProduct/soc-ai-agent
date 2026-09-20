@@ -1,4 +1,4 @@
-package controllers
+package company
 
 // 企業ポータルのダッシュボードと応募者管理のテスト（#1320）。
 // 実行: cd Backend && go test ./internal/controllers/ -run CompanyPortalApplication -v
