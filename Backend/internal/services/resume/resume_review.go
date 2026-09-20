@@ -86,23 +86,11 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 		return nil, nil, err
 	}
 
-	// 注釈PDFの成否で status を変えないのはストリーム経路と同じ。
-	// ここで return すると reviewed が DB に載らず、レビューは保存済みなのに
-	// 教員一覧と統合プロファイルに「レビュー済み」が出ない（経路で挙動が食い違う）。
-	annotatedPath, annotatedStored, annotateErr := s.annotatePDF(pdfPath, doc, review, items)
-	if annotateErr != nil {
-		log.Printf("resume_review: annotatePDF failed document_id=%d err=%v", doc.ID, annotateErr)
-	} else {
-		_ = annotatedPath
-		doc.AnnotatedPath = annotatedStored
-	}
-
-	doc.Status = "reviewed"
-	if err := s.repo.UpdateDocument(doc); err != nil {
+	if _, err := s.finalizeDocument(doc, pdfPath, review, items); err != nil {
 		return review, items, err
 	}
 
-	return review, items, annotateErr
+	return review, items, nil
 }
 
 type aiReviewResponse struct {
@@ -228,6 +216,38 @@ func (s *ResumeService) fetchRAGReportStream(ctx context.Context, resumeText, co
 
 // ReviewDocumentStream はドキュメントを前処理した後、SSEでRAGレポートをストリーミングし、
 // 最後にスコア・指摘事項を complete イベントとして送信する。
+// finalizeDocument は注釈PDFを作り、status を reviewed にして保存する。
+// 戻り値は「注釈PDFが使えるか」と、status 保存の失敗。
+//
+// 注釈は付加機能なので、失敗してもレビュー済みであることは変わらない。
+// ここで早期 return して status を保存しそこねると、レビューは保存済みなのに
+// 教員一覧と統合プロファイル(doc.Status == "reviewed" を見ている)に
+// 出てこない。通常経路とストリーム経路で2度これを踏んだので処理を1つにする。
+//
+// 注釈に失敗したら AnnotatedPath は空にする。再レビュー時に前回の注釈PDFが
+// 残っていると、新しいレビュー本文と古い指摘入りPDFが組で配られる。
+func (s *ResumeService) finalizeDocument(
+	doc *models.ResumeDocument,
+	pdfPath string,
+	review *models.ResumeReview,
+	items []models.ResumeReviewItem,
+) (annotatedAvailable bool, err error) {
+	if _, annotatedStored, annotateErr := s.annotatePDF(pdfPath, doc, review, items); annotateErr != nil {
+		log.Printf("resume_review: annotatePDF failed document_id=%d err=%v", doc.ID, annotateErr)
+		doc.AnnotatedPath = ""
+	} else {
+		doc.AnnotatedPath = annotatedStored
+		annotatedAvailable = true
+	}
+
+	doc.Status = "reviewed"
+	if err := s.repo.UpdateDocument(doc); err != nil {
+		log.Printf("resume_review: UpdateDocument failed document_id=%d err=%v", doc.ID, err)
+		return annotatedAvailable, err
+	}
+	return annotatedAvailable, nil
+}
+
 // persistReview はレビュー本体・指摘項目・スコア連携をまとめて保存する。
 //
 // 通常経路(ReviewDocument)とストリーム経路(ReviewDocumentStream)の両方から呼ぶ。
@@ -375,27 +395,15 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 		return err
 	}
 
-	// 注釈 PDF を生成して保存
-	annotatedAvailable := false
-	_, annotatedStored, err := s.annotatePDF(pdfPath, doc, review, items)
-	if err != nil {
-		log.Printf("resume_review_stream: annotatePDF failed document_id=%d err=%v", documentID, err)
+	annotatedAvailable, err := s.finalizeDocument(doc, pdfPath, review, items)
+	if !annotatedAvailable {
 		sendEvent(map[string]any{
 			"type":    "annotate_error",
 			"message": "注釈PDFの生成に失敗しました。レビュー結果は表示されますが、PDFダウンロードはご利用いただけません。",
 		})
-	} else {
-		doc.AnnotatedPath = annotatedStored
-		annotatedAvailable = true
 	}
-
-	// 注釈PDFの生成に失敗してもレビュー自体は保存できているので reviewed にする。
-	// 以前は annotatePDF が成功したときだけ reviewed にしていたため、
-	// レビュー済みなのに status が進まない場合があった。
-	doc.Status = "reviewed"
-	if err := s.repo.UpdateDocument(doc); err != nil {
+	if err != nil {
 		// ここを握り潰すと「レビューはあるのに要対応のまま」になる。
-		log.Printf("resume_review_stream: UpdateDocument failed document_id=%d err=%v", documentID, err)
 		sendEvent(map[string]any{"type": "error", "message": "レビュー結果の保存に失敗しました。もう一度お試しください。"})
 		return err
 	}
