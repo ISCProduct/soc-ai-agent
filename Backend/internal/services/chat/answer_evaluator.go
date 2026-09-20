@@ -3,6 +3,7 @@ package chat
 import (
 	"Backend/internal/models"
 	internalOpenAI "Backend/internal/openai"
+	"Backend/internal/safego"
 	"Backend/internal/services/prompts"
 	"Backend/internal/usagectx"
 	"context"
@@ -113,20 +114,20 @@ func (e *AnswerEvaluator) EvaluateHybrid(ctx context.Context, question *models.P
 	)
 
 	wg.Add(2)
-	go func() {
+	safego.Go(func() {
 		defer wg.Done()
 		r, err := e.Evaluate(question, answer)
 		mu.Lock()
 		ruleResult, ruleErr = r, err
 		mu.Unlock()
-	}()
-	go func() {
+	})
+	safego.Go(func() {
 		defer wg.Done()
 		r := e.llmEvaluate(ctx, questionText, answer)
 		mu.Lock()
 		llmResult = r
 		mu.Unlock()
-	}()
+	})
 	wg.Wait()
 
 	if ruleErr != nil {

@@ -5,6 +5,7 @@ import (
 	"Backend/internal/services/auth"
 
 	"github.com/labstack/echo/v4"
+	echomw "github.com/labstack/echo/v4/middleware"
 )
 
 // SetupInterviewRoutes 面接関連のルーティング設定
@@ -20,7 +21,9 @@ func SetupInterviewRoutes(api *echo.Group, interviewController *interviewcontrol
 	interviews.POST("/:id/utterances", interviewController.AddUtterance)
 	interviews.GET("/:id/report", interviewController.GetReport)
 	interviews.POST("/:id/send-report", interviewController.SendReport)
-	interviews.POST("/:id/upload-video", interviewController.UploadVideo)
+	// 動画だけはグローバルの 32M 制限から除外してあるので、ここで上限を置く
+	// （maxVideoSize=500MB + multipart のオーバーヘッド分）。
+	interviews.POST("/:id/upload-video", interviewController.UploadVideo, echomw.BodyLimit("512M"))
 	interviews.GET("/:id/phrase-suggestions", interviewController.GetPhraseSuggestions)
 	interviews.POST("/:id/turn", interviewController.Turn)
 	interviews.POST("/:id/start-turn", interviewController.StartTurn)

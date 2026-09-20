@@ -122,7 +122,15 @@ func fetchPageHTML(ctx context.Context, pageURL string) (string, error) {
 	}
 	done := make(chan result, 1)
 
+	// ここは結果を返す goroutine なので safego.Go は使わない。
+	// panic を黙って握り潰すと done へ何も流れず、ctx に期限が無い呼び出し経路で
+	// 受け側が永久に待つ。エラーとして送り返す。
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- result{err: fmt.Errorf("ページ取得中に panic しました: %v", r)}
+			}
+		}()
 		body, charset, err := fetchBytes(pageURL)
 		if err != nil {
 			done <- result{err: err}
