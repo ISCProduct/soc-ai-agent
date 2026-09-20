@@ -56,6 +56,7 @@ func SetupCompanyAuthRoutes(
 	portalController *controllers.CompanyPortalController,
 	studentController *controllers.CompanyStudentController,
 	applicationController *controllers.CompanyPortalApplicationController,
+	jobController *controllers.CompanyPortalJobController,
 	companySecret string,
 	users *repositories.CompanyUserRepository,
 ) {
@@ -91,5 +92,14 @@ func SetupCompanyAuthRoutes(
 		portal.GET("/applications", applicationController.List)
 		// 選考ステータスの変更は破壊的操作なので owner のみ（コントローラ側で判定）。
 		portal.PATCH("/applications/:id/status", applicationController.UpdateStatus)
+	}
+
+	// 求人管理 (#1321)。一覧は全員、作成・編集・公開は owner のみ
+	// （コントローラ側で判定）。削除は提供しない（応募が紐づくため非公開化で対応）。
+	if jobController != nil {
+		portal.GET("/jobs", jobController.List)
+		portal.POST("/jobs", jobController.Create)
+		portal.PATCH("/jobs/:id", jobController.Update)
+		portal.POST("/jobs/:id/publish", jobController.Publish)
 	}
 }

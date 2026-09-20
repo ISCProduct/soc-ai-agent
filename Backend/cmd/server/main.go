@@ -20,6 +20,7 @@ import (
 	"Backend/internal/services/chat"
 	"Backend/internal/services/company"
 	"Backend/internal/services/companyauth"
+	"Backend/internal/services/companyportal"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/diagnosis"
 	"Backend/internal/services/email"
@@ -596,7 +597,11 @@ func main() {
 	companyPortalApplicationController := controllers.NewCompanyPortalApplicationController(
 		appService, companyRepo, studentSearchRepo,
 	)
-	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, cfg.CompanyUserSecret, companyUserRepo)
+	// 企業ポータルの求人管理 (#1321)。既存の CompanyRepository を使い、新しいテーブルは作らない。
+	companyPortalJobController := controllers.NewCompanyPortalJobController(
+		companyportal.NewJobService(companyRepo),
+	)
+	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, cfg.CompanyUserSecret, companyUserRepo)
 	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())
