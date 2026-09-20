@@ -113,7 +113,9 @@ func SetupAdminRoutes(
 
 	admin.GET("/audit-logs", adminAuditController.List, platform)
 
+	// コスト管理
 	admin.GET("/costs/summary", adminCostsController.Summary, platform)
+	admin.GET("/costs/breakdown", adminCostsController.Breakdown, platform)
 	admin.GET("/costs/daily", adminCostsController.Daily, platform)
 	admin.GET("/costs/monthly", adminCostsController.Monthly, platform)
 

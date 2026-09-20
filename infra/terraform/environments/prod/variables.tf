@@ -213,3 +213,9 @@ variable "openai_whisper_model" {
   type        = string
   default     = "gpt-4o-mini-transcribe"
 }
+
+variable "gbizinfo_base_url" {
+  type        = string
+  description = "gBizINFO Web-APIのベースURL(#1360)。シークレットではないため環境変数として注入する"
+  default     = "https://info.gbiz.go.jp/hojin"
+}

@@ -8,6 +8,7 @@ import (
 	"Backend/internal/openai"
 	"Backend/internal/ragclient"
 	"Backend/internal/scraper"
+	"Backend/internal/usagectx"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -372,6 +373,7 @@ JSON形式のみで回答してください（説明文は不要）。
 求人情報:
 %s`, companyName, companyInfo, positionText)
 
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureCompanyJobFetch)
 	jsonStr, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.3, 500)
 	if err != nil {
 		return nil, fmt.Errorf("人物像分析失敗: %w", err)

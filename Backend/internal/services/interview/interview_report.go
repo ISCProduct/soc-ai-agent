@@ -5,6 +5,7 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/services/email"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
@@ -135,6 +136,7 @@ Interview transcript:
 	var haveBody bool
 	var lastErr error
 	for attempt := range reportGenerationAttempts {
+		ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport)
 		raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 2000, model)
 		if err != nil {
 			return err

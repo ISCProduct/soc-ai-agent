@@ -4,6 +4,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
@@ -68,6 +69,7 @@ func (s *InterviewService) GetPhraseSuggestions(ctx context.Context, userID uint
 %s`, transcript)
 
 	model := shared.GetEnv("INTERVIEW_REPORT_MODEL", "")
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewRealtime)
 	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.5, 1000, model)
 	if err != nil {
 		return nil, err

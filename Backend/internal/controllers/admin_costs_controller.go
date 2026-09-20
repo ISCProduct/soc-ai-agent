@@ -1,9 +1,11 @@
 package controllers
 
 import (
+	"Backend/internal/repositories"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/interfaces"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -72,6 +74,40 @@ func (c *AdminCostsController) Summary(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, payload)
+}
+
+// Breakdown handles GET /api/admin/costs/breakdown?by=feature&days=30
+//
+// 機能別・プロバイダ別・モデル別・組織別の内訳を返す（#1294）。
+// ローカル推論はコスト0で記録されるため、件数とレイテンシで「0円化できている量」を見る。
+func (c *AdminCostsController) Breakdown(ctx echo.Context) error {
+	dim := repositories.BreakdownDimension(strings.TrimSpace(ctx.QueryParam("by")))
+	if dim == "" {
+		dim = repositories.BreakdownByFeature
+	}
+	// クエリパラメータをそのまま SQL の列名にしないための検査。
+	if !repositories.IsValidBreakdownDimension(dim) {
+		return echo.NewHTTPError(http.StatusBadRequest, "by must be one of: feature, provider, model, organization")
+	}
+
+	days := echoIntQuery(ctx, "days", 30)
+	if days > 90 {
+		days = 90
+	}
+	if days < 1 {
+		days = 1
+	}
+
+	since := time.Now().UTC().AddDate(0, 0, -days)
+	rows, err := c.costService.GetUsageBreakdown(ctx.Request().Context(), since, dim)
+	if err != nil {
+		return echoInternalError(err)
+	}
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"by":        string(dim),
+		"days":      days,
+		"breakdown": rows,
+	})
 }
 
 // Daily handles GET /api/admin/costs/daily?days=30

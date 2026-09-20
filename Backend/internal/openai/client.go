@@ -10,6 +10,9 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
+
+	"Backend/internal/usagectx"
 
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -48,6 +51,61 @@ type Usage struct {
 	CompletionTokens int
 	Provider         string // "openai" / "local"
 	ViaFallback      bool   // ローカル障害時のフォールバックで処理されたか
+
+	// 配賦軸（#1294）。機能別・組織別にコストを割るために記録する。
+	// Feature は context から取るため、呼び出し元が usagectx.WithFeature を
+	// 通していない経路は "unknown" になる（その件数が計測漏れの指標）。
+	Feature        string
+	UserID         *uint // 実行主体。バッチ経路は nil
+	OrganizationID *uint // 配賦先の学校/企業。解決できなければ nil
+	AudioSeconds   float64
+	Characters     int // TTS の入力文字数(rune)。トークン課金でない経路の課金単位
+	LatencyMs      int
+	CacheHit       bool
+}
+
+// AudioUsage は音声経路（STT / TTS）1回ぶんの使用量（#1294）。
+//
+// これらのレスポンスにはトークン使用量が入らないため、呼び出し側が持っている
+// 単位（音声の秒数・入力文字数）で記録する。秒数の見積もりはフロントの録音設定に
+// 依存するので、算出はクライアントではなく呼び出し側（interview サービス）が行う。
+type AudioUsage struct {
+	Model        string
+	AudioSeconds float64
+	Characters   int
+	Latency      time.Duration
+}
+
+// ReportAudioUsage は STT / TTS の使用量を記録する（#1294）。
+//
+// トークンが返らない経路のため reportUsage とは別入口にする。機能名と実行主体は
+// 他の経路と同じく context から取るので、呼び出し側は usagectx.WithFeature を通すこと。
+func (cli *Client) ReportAudioUsage(ctx context.Context, u AudioUsage) {
+	if cli == nil || cli.OnUsage == nil {
+		return
+	}
+	userID, orgID := usagectx.Actor(ctx)
+	cli.OnUsage(Usage{
+		Model:          u.Model,
+		Provider:       cli.audioProvider,
+		Feature:        usagectx.Feature(ctx),
+		UserID:         userID,
+		OrganizationID: orgID,
+		AudioSeconds:   u.AudioSeconds,
+		Characters:     u.Characters,
+		LatencyMs:      int(u.Latency.Milliseconds()),
+	})
+}
+
+// usageReport は reportUsage への入力。引数が増えたため構造体にする（DesignDoc §4）。
+type usageReport struct {
+	provider         string
+	model            string
+	promptTokens     int
+	completionTokens int
+	latency          time.Duration
+	audioSeconds     float64
+	cacheHit         bool
 }
 
 // UsageHook はAPIコール成功時に呼ばれるコールバック。
@@ -92,21 +150,29 @@ type Client struct {
 
 // reportUsage は使用量を OnUsage に通知する。
 // provider と「フォールバック経由か」をここで一括して埋める。
-func (cli *Client) reportUsage(ctx context.Context, provider, model string, promptTokens, completionTokens int) {
+func (cli *Client) reportUsage(ctx context.Context, r usageReport) {
 	if cli == nil || cli.OnUsage == nil {
 		return
 	}
 	viaFallback := fallbackUsed(ctx)
+	provider := r.provider
 	if viaFallback {
 		// フォールバックで処理されたなら課金先は OpenAI
 		provider = providerOpenAI
 	}
+	userID, orgID := usagectx.Actor(ctx)
 	cli.OnUsage(Usage{
-		Model:            model,
-		PromptTokens:     promptTokens,
-		CompletionTokens: completionTokens,
+		Model:            r.model,
+		PromptTokens:     r.promptTokens,
+		CompletionTokens: r.completionTokens,
 		Provider:         provider,
 		ViaFallback:      viaFallback,
+		Feature:          usagectx.Feature(ctx),
+		UserID:           userID,
+		OrganizationID:   orgID,
+		AudioSeconds:     r.audioSeconds,
+		LatencyMs:        int(r.latency.Milliseconds()),
+		CacheHit:         r.cacheHit,
 	})
 }
 

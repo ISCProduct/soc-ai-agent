@@ -69,6 +69,13 @@ func (cli *Client) Transcribe(ctx context.Context, audio []byte, filename string
 	return strings.TrimSpace(result.Text), nil
 }
 
+// DefaultTTSModel は TTS の既定モデル。
+//
+// 利用量の記録側（interview/turn_usage.go）と同じ値を見る必要がある。
+// DefaultTranscribeModel と同じ理由で、文字列を書き写さず定数を共有する。
+// 書き写すと片方だけ変わり、ログ上のモデル名と実際が食い違う。
+const DefaultTTSModel = "tts-1"
+
 // TTS は OpenAI TTS API でテキストを音声に変換し、mp3 バイト列を返します
 func (cli *Client) TTS(ctx context.Context, text, voice string) ([]byte, error) {
 	if err := cli.ensureAudio(); err != nil {
@@ -77,7 +84,7 @@ func (cli *Client) TTS(ctx context.Context, text, voice string) ([]byte, error) 
 
 	model := os.Getenv("OPENAI_TTS_MODEL")
 	if model == "" {
-		model = "tts-1"
+		model = DefaultTTSModel
 	}
 	if voice == "" {
 		voice = os.Getenv("OPENAI_TTS_VOICE")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -26,6 +27,7 @@ func (cli *Client) Embedding(ctx context.Context, input string, modelOverride ..
 	}
 
 	ctx = withFallbackFlag(ctx)
+	start := time.Now()
 	resp, err := cli.embedC.CreateEmbeddings(ctx, openai.EmbeddingRequest{
 		Model: openai.EmbeddingModel(model),
 		Input: []string{input},
@@ -37,7 +39,12 @@ func (cli *Client) Embedding(ctx context.Context, input string, modelOverride ..
 		return nil, errors.New("empty embedding response")
 	}
 	if resp.Usage.PromptTokens > 0 {
-		cli.reportUsage(ctx, cli.embeddingProvider, model, resp.Usage.PromptTokens, 0)
+		cli.reportUsage(ctx, usageReport{
+			provider:     cli.embeddingProvider,
+			model:        model,
+			promptTokens: resp.Usage.PromptTokens,
+			latency:      time.Since(start),
+		})
 	}
 	return resp.Data[0].Embedding, nil
 }
