@@ -52,7 +52,7 @@ func newAuthController(t *testing.T, db *gorm.DB) *controllers.AuthController {
 	pendingRepo := repositories.NewPendingRegistrationRepository(db)
 	emailService := email.NewEmailService() // SMTP未設定時はログ出力のみ
 	authService := auth.NewAuthService(userRepo, pendingRepo, emailService)
-	return controllers.NewAuthController(authService)
+	return controllers.NewAuthController(authService, "test-user-secret")
 }
 
 // TestLogin_Integration は POST /api/auth/login の完全な統合フローを検証する

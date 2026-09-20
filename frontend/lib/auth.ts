@@ -182,6 +182,17 @@ export const authService = {
     }
   },
 
+  /**
+   * 本登録する。
+   *
+   * ゲストとして診断まで進んでいる場合は、その結果を引き継ぐ。
+   * 引き継がないと user_id が変わり、診断結果・マッチ結果・チャット履歴が
+   * 取り残される。教員向けの一覧は本登録済みの生徒しか見ないため、
+   * 取り残された結果は誰にも届かない（#1374）。
+   *
+   * 引き継ぎ対象は X-User-Token から特定される。promote_guest は
+   * 「引き継ぐ意思」の表明で、誰を昇格するかはサーバが決める。
+   */
   async register(
     email: string,
     password: string,
@@ -191,9 +202,16 @@ export const authService = {
     certificationsInProgress: string,
     registrationToken?: string,
   ): Promise<AuthResponse> {
+    const promoteGuest = this.isGuestSession()
     const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getTenantHeaders() },
+      headers: {
+        'Content-Type': 'application/json',
+        ...getTenantHeaders(),
+        // ゲストのときだけ送る。通常の登録でトークンを送ると、
+        // 別アカウントを作りたい場合に引き継ぎ判定へ入ってしまう。
+        ...(promoteGuest ? { 'X-User-Token': this.getStoredUserToken() || '' } : {}),
+      },
       body: JSON.stringify({
         email,
         password,
@@ -202,6 +220,7 @@ export const authService = {
         certifications_acquired: certificationsAcquired,
         certifications_in_progress: certificationsInProgress,
         registration_token: registrationToken,
+        promote_guest: promoteGuest,
       }),
     })
     if (!res.ok) {
@@ -335,6 +354,18 @@ export const authService = {
         }),
       }).catch(() => {})
     }
+  },
+
+  /**
+   * 現在の利用者がゲストかどうか。
+   *
+   * 本登録時に診断結果を引き継ぐかの判定に使う（#1374）。
+   * 保存されたユーザーとトークンの両方が揃っているときだけ true にする。
+   * どちらかが欠けていると、サーバ側で対象を特定できず登録が失敗する。
+   */
+  isGuestSession(): boolean {
+    const user = this.getStoredUser()
+    return Boolean(user?.is_guest) && Boolean(this.getStoredUserToken())
   },
 
   getStoredUser(): User | null {
