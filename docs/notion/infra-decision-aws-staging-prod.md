@@ -16,7 +16,7 @@
 
 - staging = OCI → **staging = AWS（常時起動）**
 - 本番 = ECS on EC2 → **本番 = ECS on Fargate**（断続運用向け）
-- OCI（`environments/oci`）は現行 staging としては使わない
+- OCI（`environments/oci`）は現行 staging としては使わない（2026-09-20 に削除済み）
 
 ---
 
@@ -83,7 +83,7 @@
 |------|----------|
 | `infra/terraform/environments/staging` | staging 正（ECS on EC2 + ALB） |
 | `infra/terraform/environments/prod` | 本番（ECS on Fargate、既定停止） |
-| `infra/terraform/environments/oci` | 非正（アーカイブ候補） |
+| `infra/terraform/environments/oci` | 削除済み（2026-09-20 に terraform destroy 実施・コードも削除） |
 
 ---
 
