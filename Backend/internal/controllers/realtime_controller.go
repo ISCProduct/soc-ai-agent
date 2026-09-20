@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/openai"
 	ifaces "Backend/internal/services/interfaces"
 	"Backend/internal/services/shared"
@@ -42,7 +43,7 @@ func (c *RealtimeController) Token(ctx echo.Context) error {
 	// ボディの user_id を信頼すると、CreateRealtimeToken 内の isAllowed が
 	// actorID == ownerID で通るため、被害者のIDとセッションIDを両方指定するだけで
 	// 他人の面接セッションの ephemeral key を発行できてしまう(IDOR)。
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
 	}

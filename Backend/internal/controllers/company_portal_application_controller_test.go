@@ -30,7 +30,7 @@ func withValue(ctx context.Context, key, val any) context.Context {
 	return context.WithValue(ctx, key, val)
 }
 
-// assertAPIStatus は newAPIError が返す echo.HTTPError の status を検証する。
+// assertAPIStatus は httpapi.NewAPIError が返す echo.HTTPError の status を検証する。
 func assertAPIStatus(t *testing.T, err error, want int) {
 	t.Helper()
 	if err == nil {

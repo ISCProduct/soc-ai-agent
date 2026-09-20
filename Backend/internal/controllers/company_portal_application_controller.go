@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"Backend/domain/entity"
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/services/shared"
 
@@ -75,21 +76,21 @@ type DashboardResponse struct {
 func (c *CompanyPortalApplicationController) Dashboard(ctx echo.Context) error {
 	companyID, ok := echoCompanyID(ctx)
 	if !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
 
 	pending, err := c.apps.CountPendingForCompanyPortal(companyID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	jobs, err := c.jobs.CountPublishedJobPositions(companyID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	since := time.Now().AddDate(0, 0, -newCandidateWindowDays)
 	candidates, err := c.students.CountNewStudents(companyID, since)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, DashboardResponse{
@@ -147,14 +148,14 @@ type applicationListResponse struct {
 func (c *CompanyPortalApplicationController) List(ctx echo.Context) error {
 	companyID, ok := echoCompanyID(ctx)
 	if !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
 
-	limit := echoIntQuery(ctx, "limit", 30)
+	limit := httpapi.IntQuery(ctx, "limit", 30)
 	if limit <= 0 || limit > 100 {
 		limit = 30
 	}
-	offset := max(echoIntQuery(ctx, "offset", 0), 0)
+	offset := max(httpapi.IntQuery(ctx, "offset", 0), 0)
 
 	status := strings.TrimSpace(ctx.QueryParam("status"))
 	apps, total, err := c.apps.ListForCompanyPortal(companyID, status, limit, offset)
@@ -171,7 +172,7 @@ func (c *CompanyPortalApplicationController) List(ctx echo.Context) error {
 	}
 	names, err := c.students.VisibleStudentNames(companyID, userIDs)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	items := make([]applicationItem, len(apps))
@@ -198,23 +199,23 @@ type updateApplicationStatusBody struct {
 func (c *CompanyPortalApplicationController) UpdateStatus(ctx echo.Context) error {
 	companyID, ok := echoCompanyID(ctx)
 	if !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
 	if !middleware.CompanyUserIsOwner(ctx.Request().Context()) {
-		return newAPIError(http.StatusForbidden, ErrCodeForbidden, "選考ステータスの更新は管理者のみ行えます")
+		return httpapi.NewAPIError(http.StatusForbidden, httpapi.ErrCodeForbidden, "選考ステータスの更新は管理者のみ行えます")
 	}
 
-	id, apiErr := echoUintParam(ctx, "id")
+	id, apiErr := httpapi.UintParam(ctx, "id")
 	if apiErr != nil {
 		return apiErr
 	}
 
 	var body updateApplicationStatusBody
 	if err := ctx.Bind(&body); err != nil {
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
 	}
 	if strings.TrimSpace(body.Status) == "" {
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "status は必須です")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "status は必須です")
 	}
 
 	app, err := c.apps.UpdateStatusForCompanyPortal(id, companyID, body.Status, body.Notes)
@@ -231,20 +232,20 @@ func (c *CompanyPortalApplicationController) UpdateStatus(ctx echo.Context) erro
 // 区別すると、存在するIDかどうかを総当たりで調べられる。
 func mapPortalApplicationError(err error) error {
 	if errors.Is(err, shared.ErrForbidden) {
-		return newAPIError(http.StatusForbidden, ErrCodeForbidden, "この応募を操作する権限がありません")
+		return httpapi.NewAPIError(http.StatusForbidden, httpapi.ErrCodeForbidden, "この応募を操作する権限がありません")
 	}
 
 	msg := err.Error()
 	switch {
 	case strings.HasPrefix(msg, "invalid_status_transition:"):
-		return newAPIError(http.StatusConflict, ErrCodeInvalidStatus, msg)
+		return httpapi.NewAPIError(http.StatusConflict, httpapi.ErrCodeInvalidStatus, msg)
 	case strings.HasPrefix(msg, "application_already_closed:"):
-		return newAPIError(http.StatusConflict, ErrCodeInvalidStatus, msg)
+		return httpapi.NewAPIError(http.StatusConflict, httpapi.ErrCodeInvalidStatus, msg)
 	case strings.HasPrefix(msg, "invalid_status:"):
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, msg)
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, msg)
 	case strings.HasPrefix(msg, "application_not_found:"):
 		// 企業スコープ外と区別しない。
-		return newAPIError(http.StatusForbidden, ErrCodeForbidden, "この応募を操作する権限がありません")
+		return httpapi.NewAPIError(http.StatusForbidden, httpapi.ErrCodeForbidden, "この応募を操作する権限がありません")
 	}
-	return echoInternalError(err)
+	return httpapi.InternalError(err)
 }

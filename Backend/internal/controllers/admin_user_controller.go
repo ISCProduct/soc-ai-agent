@@ -3,6 +3,7 @@ package controllers
 import (
 	"Backend/domain/entity"
 	"Backend/domain/repository"
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/interfaces"
@@ -43,7 +44,7 @@ func (c *AdminUserController) SetSchoolService(schools *school.SchoolService) {
 // ensureSchoolAccess は、対象ユーザーが呼び出し元admin(担当校制限がある場合)の担当校に
 // 属するかを検証する共通ヘルパーへの薄いラッパー。
 func (c *AdminUserController) ensureSchoolAccess(ctx echo.Context, target *entity.User) error {
-	return ensureAdminSchoolAccess(ctx, c.schools, target.SchoolID)
+	return httpapi.EnsureAdminSchoolAccess(ctx, c.schools, target.SchoolID)
 }
 
 type adminUserResponse struct {
@@ -80,7 +81,7 @@ func (c *AdminUserController) List(ctx echo.Context) error {
 		offset = o
 	}
 	query := strings.TrimSpace(ctx.QueryParam("q"))
-	schoolID, err := echoAdminSchoolFilter(ctx)
+	schoolID, err := httpapi.AdminSchoolFilter(ctx)
 	if err != nil {
 		return err
 	}
@@ -122,7 +123,7 @@ func (c *AdminUserController) denyIfRestricted(ctx echo.Context, message string)
 	}
 	restricted, _, err := c.schools.ResolveAdminAccess(adminUserID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	if restricted {
 		return echo.NewHTTPError(http.StatusForbidden, message)

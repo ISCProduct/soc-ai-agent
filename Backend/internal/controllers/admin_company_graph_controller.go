@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/companyfetch"
 	"Backend/internal/config"
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/scraper"
@@ -92,7 +93,7 @@ func (c *AdminCompanyGraphController) Crawl(ctx echo.Context) error {
 		nodes, logs, targetYear = n, l, y
 	} else {
 		if c.pipeline == nil {
-			return echoInternalError(errors.New("pipeline not configured"))
+			return httpapi.InternalError(errors.New("pipeline not configured"))
 		}
 		p := *c.pipeline
 		if req.Threshold > 0 {
@@ -495,7 +496,7 @@ func (c *AdminCompanyGraphController) RelationGraph(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
 	}
 	if c.companyRepo == nil || c.relationRepo == nil {
-		return echoInternalError(errors.New("relation repository is not configured"))
+		return httpapi.InternalError(errors.New("relation repository is not configured"))
 	}
 
 	graphService := company.NewCompanyRelationGraphService(c.companyRepo, c.relationRepo)

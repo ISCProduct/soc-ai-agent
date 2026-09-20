@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/controllers/httpapi"
 	companyauth "Backend/internal/services/companyauth"
 	"net/http"
 
@@ -16,13 +17,13 @@ func NewAdminCompanyUserController(svc *companyauth.CompanyUserService) *AdminCo
 }
 
 func (c *AdminCompanyUserController) Invite(ctx echo.Context) error {
-	companyID, err := echoUintParam(ctx, "id")
+	companyID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
 	var req companyauth.InviteRequest
 	if err := ctx.Bind(&req); err != nil {
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
 	}
 	user, err := c.svc.Invite(companyID, req)
 	if err != nil {
@@ -47,17 +48,17 @@ type setCompanyUserDisabledRequest struct {
 // 行を削除しないのは company_student_tags.created_by が参照しているため。
 // 削除するとその担当者が付けた自社タグまで失われる。
 func (c *AdminCompanyUserController) SetDisabled(ctx echo.Context) error {
-	companyID, err := echoUintParam(ctx, "id")
+	companyID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
-	companyUserID, err := echoUintParam(ctx, "userID")
+	companyUserID, err := httpapi.UintParam(ctx, "userID")
 	if err != nil {
 		return err
 	}
 	var req setCompanyUserDisabledRequest
 	if err := ctx.Bind(&req); err != nil {
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
 	}
 	user, err := c.svc.SetDisabled(companyID, companyUserID, req.Disabled)
 	if err != nil {
@@ -73,13 +74,13 @@ func (c *AdminCompanyUserController) SetDisabled(ctx echo.Context) error {
 }
 
 func (c *AdminCompanyUserController) List(ctx echo.Context) error {
-	companyID, err := echoUintParam(ctx, "id")
+	companyID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
 	users, err := c.svc.ListByCompany(companyID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	items := make([]map[string]any, 0, len(users))
 	for _, u := range users {
@@ -108,19 +109,19 @@ func NewCompanyPortalController(svc *companyauth.CompanyUserService) *CompanyPor
 
 // GetCompany は自社 company_id のみ閲覧可能（他社は 403）。
 func (c *CompanyPortalController) GetCompany(ctx echo.Context) error {
-	companyUserID, ok := echoCompanyUserID(ctx)
+	companyUserID, ok := httpapi.CompanyUserID(ctx)
 	if !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
-	companyID, err := echoUintParam(ctx, "id")
+	companyID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
 	if err := c.svc.EnsureCompanyAccess(companyUserID, companyID); err != nil {
 		if err.Error() == "forbidden" {
-			return newAPIError(http.StatusForbidden, ErrCodeForbidden, "Forbidden")
+			return httpapi.NewAPIError(http.StatusForbidden, httpapi.ErrCodeForbidden, "Forbidden")
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"company_id": companyID,

@@ -3,6 +3,7 @@ package controllers
 import (
 	"Backend/domain/repository"
 	"Backend/internal/companyfetch"
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
@@ -399,7 +400,7 @@ func (c *AdminCompanyController) SearchGBiz(ctx echo.Context) error {
 	}
 	results, err := c.gbiz.SearchByName(ctx.Request().Context(), name)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{"results": results})
 }

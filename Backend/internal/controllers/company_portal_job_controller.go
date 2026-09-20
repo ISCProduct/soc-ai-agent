@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/services/companyportal"
@@ -113,7 +114,7 @@ func (b jobBody) toInput() companyportal.JobInput {
 func (c *CompanyPortalJobController) List(ctx echo.Context) error {
 	companyID, ok := echoCompanyID(ctx)
 	if !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
 	jobs, err := c.jobs.List(companyID)
 	if err != nil {
@@ -137,7 +138,7 @@ func (c *CompanyPortalJobController) Create(ctx echo.Context) error {
 	}
 	var body jobBody
 	if err := ctx.Bind(&body); err != nil {
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
 	}
 	job, err := c.jobs.Create(companyID, body.toInput())
 	if err != nil {
@@ -152,13 +153,13 @@ func (c *CompanyPortalJobController) Update(ctx echo.Context) error {
 	if apiErr != nil {
 		return apiErr
 	}
-	id, apiErr := echoUintParam(ctx, "id")
+	id, apiErr := httpapi.UintParam(ctx, "id")
 	if apiErr != nil {
 		return apiErr
 	}
 	var body jobBody
 	if err := ctx.Bind(&body); err != nil {
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
 	}
 	job, err := c.jobs.Update(id, companyID, body.toInput())
 	if err != nil {
@@ -181,13 +182,13 @@ func (c *CompanyPortalJobController) Publish(ctx echo.Context) error {
 	if apiErr != nil {
 		return apiErr
 	}
-	id, apiErr := echoUintParam(ctx, "id")
+	id, apiErr := httpapi.UintParam(ctx, "id")
 	if apiErr != nil {
 		return apiErr
 	}
 	var body publishBody
 	if err := ctx.Bind(&body); err != nil {
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
 	}
 	published := body.Published == nil || *body.Published
 
@@ -207,10 +208,10 @@ func (c *CompanyPortalJobController) Publish(ctx echo.Context) error {
 func (c *CompanyPortalJobController) requireOwner(ctx echo.Context) (uint, error) {
 	companyID, ok := echoCompanyID(ctx)
 	if !ok {
-		return 0, newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return 0, httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
 	if !middleware.CompanyUserIsOwner(ctx.Request().Context()) {
-		return 0, newAPIError(http.StatusForbidden, ErrCodeForbidden, "求人の管理は管理者のみ行えます")
+		return 0, httpapi.NewAPIError(http.StatusForbidden, httpapi.ErrCodeForbidden, "求人の管理は管理者のみ行えます")
 	}
 	return companyID, nil
 }
@@ -219,11 +220,11 @@ func mapPortalJobError(err error) error {
 	var ve *shared.ValidationError
 	switch {
 	case errors.Is(err, shared.ErrForbidden):
-		return newAPIError(http.StatusForbidden, ErrCodeForbidden, "この求人を操作する権限がありません")
+		return httpapi.NewAPIError(http.StatusForbidden, httpapi.ErrCodeForbidden, "この求人を操作する権限がありません")
 	case errors.Is(err, companyportal.ErrJobLimitReached):
-		return newAPIError(http.StatusConflict, ErrCodeInvalidStatus, err.Error())
+		return httpapi.NewAPIError(http.StatusConflict, httpapi.ErrCodeInvalidStatus, err.Error())
 	case errors.As(err, &ve):
-		return newAPIError(http.StatusUnprocessableEntity, ErrCodeValidationError, ve.Message)
+		return httpapi.NewAPIError(http.StatusUnprocessableEntity, httpapi.ErrCodeValidationError, ve.Message)
 	}
-	return echoInternalError(err)
+	return httpapi.InternalError(err)
 }

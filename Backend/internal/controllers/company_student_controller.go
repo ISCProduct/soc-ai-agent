@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/repositories"
 	hrsvc "Backend/internal/services/hr"
@@ -52,11 +53,11 @@ func NewCompanyStudentController(
 // 業界フィルタの選択肢。企業固有のデータは含まないため company_id によるスコープは不要。
 func (c *CompanyStudentController) Industries(ctx echo.Context) error {
 	if _, ok := echoCompanyID(ctx); !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
 	options, err := c.industries.ListActive()
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{"items": options})
 }
@@ -73,8 +74,8 @@ func (c *CompanyStudentController) filtersFrom(ctx echo.Context) repositories.St
 		Location:   ctx.QueryParam("location"),
 		Skill:      ctx.QueryParam("skill"),
 		Tag:        ctx.QueryParam("tag"),
-		Limit:      echoIntQuery(ctx, "limit", 30),
-		Offset:     echoIntQuery(ctx, "offset", 0),
+		Limit:      httpapi.IntQuery(ctx, "limit", 30),
+		Offset:     httpapi.IntQuery(ctx, "offset", 0),
 	}
 }
 
@@ -82,11 +83,11 @@ func (c *CompanyStudentController) filtersFrom(ctx echo.Context) repositories.St
 func (c *CompanyStudentController) List(ctx echo.Context) error {
 	companyID, ok := echoCompanyID(ctx)
 	if !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
 	result, err := c.search.Search(companyID, c.filtersFrom(ctx))
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, result)
 }
@@ -99,11 +100,11 @@ type semanticSearchBody struct {
 func (c *CompanyStudentController) SemanticSearch(ctx echo.Context) error {
 	companyID, ok := echoCompanyID(ctx)
 	if !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
 	var body semanticSearchBody
 	if err := ctx.Bind(&body); err != nil {
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
 	}
 	result, err := c.search.SemanticSearch(ctx.Request().Context(), companyID, body.Query, c.filtersFrom(ctx))
 	if err != nil {
@@ -117,9 +118,9 @@ func (c *CompanyStudentController) SemanticSearch(ctx echo.Context) error {
 func (c *CompanyStudentController) Detail(ctx echo.Context) error {
 	companyID, ok := echoCompanyID(ctx)
 	if !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
-	userID, err := echoUintParam(ctx, "userID")
+	userID, err := httpapi.UintParam(ctx, "userID")
 	if err != nil {
 		return err
 	}
@@ -129,7 +130,7 @@ func (c *CompanyStudentController) Detail(ctx echo.Context) error {
 	}
 	tags, err := c.search.ListTagsForUser(companyID, userID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"analysis": analysis,
@@ -145,26 +146,26 @@ type addTagBody struct {
 func (c *CompanyStudentController) AddTag(ctx echo.Context) error {
 	companyID, ok := echoCompanyID(ctx)
 	if !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
-	companyUserID, ok := echoCompanyUserID(ctx)
+	companyUserID, ok := httpapi.CompanyUserID(ctx)
 	if !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
-	userID, err := echoUintParam(ctx, "userID")
+	userID, err := httpapi.UintParam(ctx, "userID")
 	if err != nil {
 		return err
 	}
 	var body addTagBody
 	if err := ctx.Bind(&body); err != nil {
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
 	}
 	if err := c.search.AddTag(companyID, companyUserID, userID, body.TagName); err != nil {
 		return mapStudentSearchError(err)
 	}
 	tags, err := c.search.ListTagsForUser(companyID, userID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusCreated, map[string]any{"tags": tags})
 }
@@ -173,14 +174,14 @@ func (c *CompanyStudentController) AddTag(ctx echo.Context) error {
 func (c *CompanyStudentController) RemoveTag(ctx echo.Context) error {
 	companyID, ok := echoCompanyID(ctx)
 	if !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
-	tagID, err := echoUintParam(ctx, "tagID")
+	tagID, err := httpapi.UintParam(ctx, "tagID")
 	if err != nil {
 		return err
 	}
 	if err := c.search.RemoveTag(companyID, tagID); err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.NoContent(http.StatusNoContent)
 }
@@ -189,11 +190,11 @@ func (c *CompanyStudentController) RemoveTag(ctx echo.Context) error {
 func (c *CompanyStudentController) ListTags(ctx echo.Context) error {
 	companyID, ok := echoCompanyID(ctx)
 	if !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
 	names, err := c.search.ListTagNames(companyID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{"items": names})
 }
@@ -201,12 +202,12 @@ func (c *CompanyStudentController) ListTags(ctx echo.Context) error {
 func mapStudentSearchError(err error) error {
 	switch {
 	case errors.Is(err, hrsvc.ErrStudentNotVisible):
-		return newAPIError(http.StatusNotFound, ErrCodeNotFound, "学生が見つかりません")
+		return httpapi.NewAPIError(http.StatusNotFound, httpapi.ErrCodeNotFound, "学生が見つかりません")
 	case errors.Is(err, hrsvc.ErrInvalidTagName), errors.Is(err, hrsvc.ErrEmptyQuery):
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "入力内容が不正です")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "入力内容が不正です")
 	case errors.Is(err, hrsvc.ErrSemanticSearchUnavailable):
-		return newAPIError(http.StatusServiceUnavailable, ErrCodeServiceUnavail, "セマンティック検索を利用できません")
+		return httpapi.NewAPIError(http.StatusServiceUnavailable, httpapi.ErrCodeServiceUnavail, "セマンティック検索を利用できません")
 	default:
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 }

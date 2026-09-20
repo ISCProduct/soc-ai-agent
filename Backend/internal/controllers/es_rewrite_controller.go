@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/openai"
 	"Backend/internal/usagectx"
 	"context"
@@ -95,7 +96,7 @@ JSONのみで返してください。`
 	aiCtx := usagectx.WithFeature(context.Background(), usagectx.FeatureESRewrite)
 	raw, err := c.openaiClient.ChatCompletionJSON(aiCtx, systemPrompt, userPrompt, 0.7, 1500)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	// マークダウンフェンスなどを除去してJSONオブジェクトを抽出

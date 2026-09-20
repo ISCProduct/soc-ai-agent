@@ -13,6 +13,7 @@ import (
 	"errors"
 	"net/http"
 
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	companyauth "Backend/internal/services/companyauth"
@@ -108,7 +109,7 @@ type profileBody struct {
 func (c *CompanyPortalProfileController) GetCompany(ctx echo.Context) error {
 	companyID, ok := echoCompanyID(ctx)
 	if !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
 	company, err := c.profiles.Get(companyID)
 	if err != nil {
@@ -125,7 +126,7 @@ func (c *CompanyPortalProfileController) UpdateCompany(ctx echo.Context) error {
 	}
 	var body profileBody
 	if err := ctx.Bind(&body); err != nil {
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
 	}
 	company, err := c.profiles.Update(companyID, companyportal.ProfileInput{
 		Description:    body.Description,
@@ -150,11 +151,11 @@ func (c *CompanyPortalProfileController) UpdateCompany(ctx echo.Context) error {
 func (c *CompanyPortalProfileController) ListMembers(ctx echo.Context) error {
 	companyID, ok := echoCompanyID(ctx)
 	if !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
 	users, err := c.members.ListByCompany(companyID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	items := make([]map[string]any, 0, len(users))
 	for _, u := range users {
@@ -179,7 +180,7 @@ func (c *CompanyPortalProfileController) InviteMember(ctx echo.Context) error {
 	}
 	var req companyauth.InviteRequest
 	if err := ctx.Bind(&req); err != nil {
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
 	}
 	user, err := c.members.Invite(companyID, req)
 	if err != nil {
@@ -206,7 +207,7 @@ func (c *CompanyPortalProfileController) SetMemberDisabled(ctx echo.Context) err
 	if apiErr != nil {
 		return apiErr
 	}
-	targetID, apiErr := echoUintParam(ctx, "userID")
+	targetID, apiErr := httpapi.UintParam(ctx, "userID")
 	if apiErr != nil {
 		return apiErr
 	}
@@ -214,12 +215,12 @@ func (c *CompanyPortalProfileController) SetMemberDisabled(ctx echo.Context) err
 	// 自分自身を無効化すると、その企業に owner がいなくなりうる。
 	// 復旧が運営対応になるので防ぐ。
 	if actorID, ok := middleware.CompanyUserIDFromContext(ctx.Request().Context()); ok && actorID == targetID {
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "自分自身を無効化することはできません")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "自分自身を無効化することはできません")
 	}
 
 	var body setMemberDisabledBody
 	if err := ctx.Bind(&body); err != nil {
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
 	}
 	user, err := c.members.SetDisabled(companyID, targetID, body.Disabled)
 	if err != nil {
@@ -236,10 +237,10 @@ func (c *CompanyPortalProfileController) SetMemberDisabled(ctx echo.Context) err
 func (c *CompanyPortalProfileController) requireOwner(ctx echo.Context) (uint, error) {
 	companyID, ok := echoCompanyID(ctx)
 	if !ok {
-		return 0, newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return 0, httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
 	if !middleware.CompanyUserIsOwner(ctx.Request().Context()) {
-		return 0, newAPIError(http.StatusForbidden, ErrCodeForbidden, "この操作は管理者のみ行えます")
+		return 0, httpapi.NewAPIError(http.StatusForbidden, httpapi.ErrCodeForbidden, "この操作は管理者のみ行えます")
 	}
 	return companyID, nil
 }
@@ -248,9 +249,9 @@ func mapPortalProfileError(err error) error {
 	var ve *shared.ValidationError
 	switch {
 	case errors.Is(err, shared.ErrForbidden):
-		return newAPIError(http.StatusForbidden, ErrCodeForbidden, "この企業を操作する権限がありません")
+		return httpapi.NewAPIError(http.StatusForbidden, httpapi.ErrCodeForbidden, "この企業を操作する権限がありません")
 	case errors.As(err, &ve):
-		return newAPIError(http.StatusUnprocessableEntity, ErrCodeValidationError, ve.Message)
+		return httpapi.NewAPIError(http.StatusUnprocessableEntity, httpapi.ErrCodeValidationError, ve.Message)
 	}
-	return echoInternalError(err)
+	return httpapi.InternalError(err)
 }

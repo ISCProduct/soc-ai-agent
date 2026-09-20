@@ -1,4 +1,4 @@
-package controllers
+package httpapi
 
 import (
 	"encoding/json"
@@ -28,12 +28,12 @@ func decodeErrResp(t *testing.T, rec *httptest.ResponseRecorder) middleware.Erro
 	return resp
 }
 
-// ── newAPIError ────────────────────────────────────────────────────────────────
+// ── NewAPIError ────────────────────────────────────────────────────────────────
 
 func TestNewAPIError_WithCode(t *testing.T) {
 	e := setupEcho()
 	e.GET("/", func(c echo.Context) error {
-		return newAPIError(http.StatusConflict, ErrCodeDuplicateEmail, "email already exists")
+		return NewAPIError(http.StatusConflict, ErrCodeDuplicateEmail, "email already exists")
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -55,7 +55,7 @@ func TestNewAPIError_WithCode(t *testing.T) {
 func TestNewAPIError_WithDetail(t *testing.T) {
 	e := setupEcho()
 	e.GET("/", func(c echo.Context) error {
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "invalid input", "nameフィールドは必須です")
+		return NewAPIError(http.StatusBadRequest, ErrCodeValidationError, "invalid input", "nameフィールドは必須です")
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -71,7 +71,7 @@ func TestNewAPIError_WithDetail(t *testing.T) {
 func TestNewAPIError_WithoutDetail(t *testing.T) {
 	e := setupEcho()
 	e.GET("/", func(c echo.Context) error {
-		return newAPIError(http.StatusNotFound, ErrCodeNotFound, "not found")
+		return NewAPIError(http.StatusNotFound, ErrCodeNotFound, "not found")
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -87,12 +87,12 @@ func TestNewAPIError_WithoutDetail(t *testing.T) {
 	}
 }
 
-// ── echoInternalError ─────────────────────────────────────────────────────────
+// ── InternalError ─────────────────────────────────────────────────────────
 
 func TestEchoInternalError(t *testing.T) {
 	e := setupEcho()
 	e.GET("/", func(c echo.Context) error {
-		return echoInternalError(errors.New("db connection failed"))
+		return InternalError(errors.New("db connection failed"))
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -106,17 +106,17 @@ func TestEchoInternalError(t *testing.T) {
 	if resp.Code != ErrCodeInternalError {
 		t.Errorf("code = %q, want %q", resp.Code, ErrCodeInternalError)
 	}
-	if resp.Error != internalServerErrorMessage {
-		t.Errorf("error = %q, want %q", resp.Error, internalServerErrorMessage)
+	if resp.Error != InternalServerErrorMessage {
+		t.Errorf("error = %q, want %q", resp.Error, InternalServerErrorMessage)
 	}
 }
 
-// ── echoUintParam ─────────────────────────────────────────────────────────────
+// ── UintParam ─────────────────────────────────────────────────────────────
 
 func TestEchoUintParam_Valid(t *testing.T) {
 	e := setupEcho()
 	e.GET("/items/:id", func(c echo.Context) error {
-		id, err := echoUintParam(c, "id")
+		id, err := UintParam(c, "id")
 		if err != nil {
 			return err
 		}
@@ -146,7 +146,7 @@ func TestEchoUintParam_Invalid(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			e := setupEcho()
 			e.GET("/items/:id", func(c echo.Context) error {
-				_, err := echoUintParam(c, "id")
+				_, err := UintParam(c, "id")
 				return err
 			})
 

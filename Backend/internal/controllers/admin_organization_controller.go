@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/services/organization"
 	"errors"
 	"net/http"
@@ -55,7 +56,7 @@ func (c *AdminOrganizationController) List(ctx echo.Context) error {
 	}
 	orgs, total, err := c.orgs.List(limit, offset)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"organizations": orgs,
@@ -86,7 +87,7 @@ func (c *AdminOrganizationController) Create(ctx echo.Context) error {
 
 // Get GET /api/admin/organizations/:id
 func (c *AdminOrganizationController) Get(ctx echo.Context) error {
-	id, err := echoUintParam(ctx, "id")
+	id, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
@@ -99,7 +100,7 @@ func (c *AdminOrganizationController) Get(ctx echo.Context) error {
 
 // Update PUT /api/admin/organizations/:id
 func (c *AdminOrganizationController) Update(ctx echo.Context) error {
-	id, err := echoUintParam(ctx, "id")
+	id, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
@@ -122,7 +123,7 @@ func (c *AdminOrganizationController) Update(ctx echo.Context) error {
 
 // ListMembers GET /api/admin/organizations/:id/members
 func (c *AdminOrganizationController) ListMembers(ctx echo.Context) error {
-	id, err := echoUintParam(ctx, "id")
+	id, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
@@ -135,7 +136,7 @@ func (c *AdminOrganizationController) ListMembers(ctx echo.Context) error {
 
 // AddMember POST /api/admin/organizations/:id/members
 func (c *AdminOrganizationController) AddMember(ctx echo.Context) error {
-	id, err := echoUintParam(ctx, "id")
+	id, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
@@ -159,11 +160,11 @@ func (c *AdminOrganizationController) AddMember(ctx echo.Context) error {
 
 // UpdateMember PUT /api/admin/organizations/:id/members/:user_id
 func (c *AdminOrganizationController) UpdateMember(ctx echo.Context) error {
-	orgID, err := echoUintParam(ctx, "id")
+	orgID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
-	userID, err := echoUintParam(ctx, "user_id")
+	userID, err := httpapi.UintParam(ctx, "user_id")
 	if err != nil {
 		return err
 	}
@@ -180,11 +181,11 @@ func (c *AdminOrganizationController) UpdateMember(ctx echo.Context) error {
 
 // RemoveMember DELETE /api/admin/organizations/:id/members/:user_id
 func (c *AdminOrganizationController) RemoveMember(ctx echo.Context) error {
-	orgID, err := echoUintParam(ctx, "id")
+	orgID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
-	userID, err := echoUintParam(ctx, "user_id")
+	userID, err := httpapi.UintParam(ctx, "user_id")
 	if err != nil {
 		return err
 	}
@@ -211,6 +212,6 @@ func mapOrgError(err error) error {
 	case errors.Is(err, organization.ErrCrossOrganization), errors.Is(err, organization.ErrOrganizationDisabled):
 		return echo.NewHTTPError(http.StatusForbidden, err.Error())
 	default:
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 }

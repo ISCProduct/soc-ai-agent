@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/services/interfaces"
 	"net/http"
 	"strconv"
@@ -29,7 +30,7 @@ func (c *AdminProfileRecalculationController) RecalculateAll(ctx echo.Context) e
 
 	results, err := c.service.RecalculateAll(req.MinSamples)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	updated := 0
@@ -66,7 +67,7 @@ func (c *AdminProfileRecalculationController) RecalculateOne(ctx echo.Context) e
 
 	result, err := c.service.RecalculateCompany(companyID, req.MinSamples)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, result)
@@ -99,7 +100,7 @@ func (c *AdminProfileRecalculationController) GetHistory(ctx echo.Context) error
 
 	histories, err := c.service.GetHistory(companyID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	type HistoryResponse struct {

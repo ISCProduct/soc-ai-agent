@@ -6,6 +6,7 @@ package controllers
 import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/companyfields"
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
 	"Backend/internal/services/company"
 	"context"
@@ -35,7 +36,7 @@ func (c *AdminCompanyController) WebSearchCompanyInfo(ctx echo.Context) error {
 
 	result, err := c.infoFetcher.Acquire(ctx.Request().Context(), req.Name, req.WebsiteURL)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	actor := ctx.Request().Header.Get("X-Admin-Email")
@@ -62,7 +63,7 @@ func (c *AdminCompanyController) FetchTechStack(ctx echo.Context) error {
 	forceRefresh := ctx.QueryParam("force") == "true"
 	result, err := c.techFetcher.FetchAndSave(ctx.Request().Context(), uint(id), forceRefresh)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	actor := ctx.Request().Header.Get("X-Admin-Email")
@@ -89,7 +90,7 @@ func (c *AdminCompanyController) FetchCompanyInfo(ctx echo.Context) error {
 	forceRefresh := ctx.QueryParam("force") == "true"
 	result, err := c.infoFetcher.FetchAndSave(ctx.Request().Context(), uint(id), forceRefresh)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	actor := ctx.Request().Header.Get("X-Admin-Email")
@@ -119,7 +120,7 @@ func (c *AdminCompanyController) ConfirmCompanyInfo(ctx echo.Context) error {
 
 	result, err := c.infoFetcher.ConfirmAndSave(uint(id), &req)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	actor := ctx.Request().Header.Get("X-Admin-Email")
@@ -151,7 +152,7 @@ func (c *AdminCompanyController) WebSearchCompanyRelations(ctx echo.Context) err
 
 	result, err := c.relationsFetcher.Acquire(ctx.Request().Context(), req.Name, req.WebsiteURL)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	actor := ctx.Request().Header.Get("X-Admin-Email")
@@ -179,7 +180,7 @@ func (c *AdminCompanyController) FetchCompanyRelations(ctx echo.Context) error {
 	if ctx.QueryParam("cache_only") == "true" {
 		result, err := c.relationsFetcher.LoadSaved(uint(id))
 		if err != nil {
-			return echoInternalError(err)
+			return httpapi.InternalError(err)
 		}
 		return ctx.JSON(http.StatusOK, result)
 	}
@@ -187,7 +188,7 @@ func (c *AdminCompanyController) FetchCompanyRelations(ctx echo.Context) error {
 	forceRefresh := ctx.QueryParam("force") == "true"
 	result, err := c.relationsFetcher.FetchAndSave(ctx.Request().Context(), uint(id), forceRefresh)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	actor := ctx.Request().Header.Get("X-Admin-Email")
@@ -218,7 +219,7 @@ func (c *AdminCompanyController) ConfirmCompanyRelations(ctx echo.Context) error
 
 	result, err := c.relationsFetcher.ConfirmAndSave(ctx.Request().Context(), uint(id), &req)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	actor := ctx.Request().Header.Get("X-Admin-Email")

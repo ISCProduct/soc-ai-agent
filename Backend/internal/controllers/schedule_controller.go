@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/services/interfaces"
 	"errors"
 	"net/http"
@@ -34,7 +35,7 @@ func (c *ScheduleController) List(ctx echo.Context) error {
 	}
 	events, err := c.service.List(userID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, events)
 }
@@ -69,7 +70,7 @@ func (c *ScheduleController) Get(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
-	eventID, err := echoUintParam(ctx, "id")
+	eventID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid event id")
 	}
@@ -89,7 +90,7 @@ func (c *ScheduleController) Update(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
-	eventID, err := echoUintParam(ctx, "id")
+	eventID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid event id")
 	}
@@ -120,7 +121,7 @@ func (c *ScheduleController) Delete(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
-	eventID, err := echoUintParam(ctx, "id")
+	eventID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid event id")
 	}
@@ -141,7 +142,7 @@ func (c *ScheduleController) ExportICS(ctx echo.Context) error {
 	}
 	ics, err := c.service.ExportICS(userID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	ctx.Response().Header().Set("Content-Type", "text/calendar; charset=utf-8")
 	ctx.Response().Header().Set("Content-Disposition", "attachment; filename=\"schedule.ics\"")
@@ -152,7 +153,7 @@ func (c *ScheduleController) ExportICS(ctx echo.Context) error {
 // クライアント指定のuser_idクエリパラメータは信用しない(#983: 以前はここが未検証で
 // 任意ユーザーの予定にアクセスできた)。
 func echoScheduleUserID(ctx echo.Context) (uint, error) {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return 0, echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}

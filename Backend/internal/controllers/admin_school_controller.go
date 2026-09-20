@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/services/school"
 	"errors"
@@ -45,7 +46,7 @@ func (c *AdminSchoolController) List(ctx echo.Context) error {
 	}
 	schools, total, err := c.schools.List(limit, offset)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"schools": schools,
@@ -70,7 +71,7 @@ func (c *AdminSchoolController) Create(ctx echo.Context) error {
 
 // Get GET /api/admin/schools/:id
 func (c *AdminSchoolController) Get(ctx echo.Context) error {
-	id, err := echoUintParam(ctx, "id")
+	id, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
@@ -83,7 +84,7 @@ func (c *AdminSchoolController) Get(ctx echo.Context) error {
 
 // AddMember POST /api/admin/schools/:id/members
 func (c *AdminSchoolController) AddMember(ctx echo.Context) error {
-	id, err := echoUintParam(ctx, "id")
+	id, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
@@ -105,7 +106,7 @@ func (c *AdminSchoolController) AddMember(ctx echo.Context) error {
 	}
 	callerRestricted, _, err := c.schools.ResolveAdminAccess(adminUserID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	if callerRestricted {
 		// 担当校を持たないユーザー（無制限管理者・新任の先生・一般ユーザー）の追加は
@@ -114,7 +115,7 @@ func (c *AdminSchoolController) AddMember(ctx echo.Context) error {
 		// 無制限管理者を恒久的に自校へ閉じ込められてしまう(#1157)。
 		targetRestricted, _, err := c.schools.ResolveAdminAccess(req.UserID)
 		if err != nil {
-			return echoInternalError(err)
+			return httpapi.InternalError(err)
 		}
 		if !targetRestricted {
 			return echo.NewHTTPError(http.StatusForbidden,
@@ -134,11 +135,11 @@ func (c *AdminSchoolController) AddMember(ctx echo.Context) error {
 
 // RemoveMember DELETE /api/admin/schools/:id/members/:user_id
 func (c *AdminSchoolController) RemoveMember(ctx echo.Context) error {
-	id, err := echoUintParam(ctx, "id")
+	id, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
-	userID, err := echoUintParam(ctx, "user_id")
+	userID, err := httpapi.UintParam(ctx, "user_id")
 	if err != nil {
 		return err
 	}
@@ -159,12 +160,12 @@ func (c *AdminSchoolController) RemoveMember(ctx echo.Context) error {
 	// 昇格が成立するのは制限adminが実行する場合だけなので、そこだけを拒否する。
 	callerRestricted, _, err := c.schools.ResolveAdminAccess(adminUserID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	if callerRestricted {
 		targetRestricted, targetSchools, err := c.schools.ResolveAdminAccess(userID)
 		if err != nil {
-			return echoInternalError(err)
+			return httpapi.InternalError(err)
 		}
 		if targetRestricted && len(targetSchools) == 1 && targetSchools[0] == id {
 			return echo.NewHTTPError(http.StatusForbidden,
@@ -179,20 +180,20 @@ func (c *AdminSchoolController) RemoveMember(ctx echo.Context) error {
 
 // ListCompanyApprovals GET /api/admin/schools/:id/company-approvals
 func (c *AdminSchoolController) ListCompanyApprovals(ctx echo.Context) error {
-	id, err := echoUintParam(ctx, "id")
+	id, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
 	ids, err := c.schools.ListApprovedCompanyIDs(id)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{"company_ids": ids})
 }
 
 // AddCompanyApproval POST /api/admin/schools/:id/company-approvals
 func (c *AdminSchoolController) AddCompanyApproval(ctx echo.Context) error {
-	id, err := echoUintParam(ctx, "id")
+	id, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
@@ -214,14 +215,14 @@ func (c *AdminSchoolController) AddCompanyApproval(ctx echo.Context) error {
 
 // RemoveCompanyApproval DELETE /api/admin/schools/:id/company-approvals/:company_id
 func (c *AdminSchoolController) RemoveCompanyApproval(ctx echo.Context) error {
-	id, err := echoUintParam(ctx, "id")
+	id, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
 	if forbidden := c.ensureSchoolAccess(ctx, id); forbidden != nil {
 		return forbidden
 	}
-	companyID, err := echoUintParam(ctx, "company_id")
+	companyID, err := httpapi.UintParam(ctx, "company_id")
 	if err != nil {
 		return err
 	}
@@ -239,7 +240,7 @@ func (c *AdminSchoolController) ensureSchoolAccess(ctx echo.Context, schoolID ui
 	}
 	restricted, allowedSchoolIDs, err := c.schools.ResolveAdminAccess(adminUserID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	if !restricted {
 		return nil
@@ -261,7 +262,7 @@ func (c *AdminSchoolController) MySchoolAccess(ctx echo.Context) error {
 	}
 	restricted, schools, err := c.schools.ListAccessibleSchools(adminUserID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"restricted": restricted,
@@ -278,6 +279,6 @@ func mapSchoolError(err error) error {
 	case errors.Is(err, school.ErrSchoolNameRequired), errors.Is(err, school.ErrSchoolOrgRequired):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	default:
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 }

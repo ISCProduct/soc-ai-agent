@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 
@@ -35,12 +36,12 @@ func NewUserPreferenceController(
 // Industries GET /api/user/industries
 // 学生が希望業界を選ぶための選択肢（企業側の /company-portal/industries と同一マスタ）。
 func (c *UserPreferenceController) Industries(ctx echo.Context) error {
-	if _, ok := echoUserID(ctx); !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+	if _, ok := httpapi.UserID(ctx); !ok {
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
 	options, err := c.industries.ListActive()
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{"items": options})
 }
@@ -61,13 +62,13 @@ type userPreferenceResponse struct {
 
 // Get GET /api/user/preferences
 func (c *UserPreferenceController) Get(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
 	pref, err := c.repo.FindByUserID(userID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	if pref == nil {
 		// 未設定でも 200 で空の希望条件を返し、フロントの分岐を減らす。
@@ -75,7 +76,7 @@ func (c *UserPreferenceController) Get(ctx echo.Context) error {
 	}
 	allow, err := c.repo.GetScoutVisibility(userID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, userPreferenceResponse{UserPreference: pref, AllowScoutVisibility: allow})
 }
@@ -84,17 +85,17 @@ const maxPreferenceLocationLength = 100
 
 // Put PUT /api/user/preferences
 func (c *UserPreferenceController) Put(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
-		return newAPIError(http.StatusUnauthorized, ErrCodeUnauthorized, "Unauthorized")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "Unauthorized")
 	}
 	var body userPreferenceBody
 	if err := ctx.Bind(&body); err != nil {
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "Invalid request body")
 	}
 	location := strings.TrimSpace(body.DesiredLocation)
 	if len([]rune(location)) > maxPreferenceLocationLength {
-		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "希望勤務地が長すぎます")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "希望勤務地が長すぎます")
 	}
 	pref := &models.UserPreference{
 		UserID:            userID,
@@ -103,17 +104,17 @@ func (c *UserPreferenceController) Put(ctx echo.Context) error {
 		Note:              strings.TrimSpace(body.Note),
 	}
 	if err := c.repo.Upsert(pref); err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	if body.AllowScoutVisibility != nil {
 		if err := c.repo.SetScoutVisibility(userID, *body.AllowScoutVisibility); err != nil {
-			return echoInternalError(err)
+			return httpapi.InternalError(err)
 		}
 	}
 	allow, err := c.repo.GetScoutVisibility(userID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	// 希望条件はベクトル化対象なので、保存のたびに検索インデックスを同期する。
 	if c.syncer != nil {

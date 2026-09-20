@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/services/github"
 	ifaces "Backend/internal/services/interfaces"
 	"context"
@@ -27,7 +28,7 @@ func NewGitHubController(githubService ifaces.GitHubService, skillScoreService i
 // GetProfile GitHubプロフィール・リポジトリ・言語統計を取得する
 // GET /api/github/profile
 func (c *GitHubController) GetProfile(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -60,7 +61,7 @@ func (c *GitHubController) GetProfile(ctx echo.Context) error {
 // Sync GitHubデータの非同期同期をトリガーする
 // POST /api/github/sync
 func (c *GitHubController) Sync(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -81,7 +82,7 @@ func (c *GitHubController) Sync(ctx echo.Context) error {
 // SyncAndWait GitHubデータを同期してから結果を返す（同期的）
 // POST /api/github/sync/wait
 func (c *GitHubController) SyncAndWait(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -98,7 +99,7 @@ func (c *GitHubController) SyncAndWait(ctx echo.Context) error {
 		if strings.Contains(err.Error(), "github profile not found") {
 			return echo.NewHTTPError(http.StatusNotFound, "GitHubプロフィールが見つかりません。GitHubアカウントを連携してください。")
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{
@@ -109,7 +110,7 @@ func (c *GitHubController) SyncAndWait(ctx echo.Context) error {
 // GetSkills ユーザーのカテゴリ別スキルスコアを取得する
 // GET /api/github/skills
 func (c *GitHubController) GetSkills(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -125,7 +126,7 @@ func (c *GitHubController) GetSkills(ctx echo.Context) error {
 // ListRepoSummaries ユーザーのリポジトリAI要約一覧を取得する
 // GET /api/github/repo/summaries
 func (c *GitHubController) ListRepoSummaries(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -142,7 +143,7 @@ func (c *GitHubController) ListRepoSummaries(ctx echo.Context) error {
 // POST /api/github/repo/summarize
 // Body: { "full_name": "owner/repo", "force_refresh": false }
 func (c *GitHubController) SummarizeRepo(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -158,7 +159,7 @@ func (c *GitHubController) SummarizeRepo(ctx echo.Context) error {
 
 	summary, err := c.githubService.SummarizeRepo(ctx.Request().Context(), userID, body.FullName, body.ForceRefresh, body.TargetRole)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, summary)

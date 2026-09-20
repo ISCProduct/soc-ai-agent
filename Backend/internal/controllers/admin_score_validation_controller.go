@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/services/admin"
 	"Backend/internal/services/interfaces"
 	"errors"
@@ -24,7 +25,7 @@ func NewAdminScoreValidationController(svc interfaces.ScoreValidationService) *A
 func (c *AdminScoreValidationController) GetCorrelation(ctx echo.Context) error {
 	report, err := c.svc.GetCorrelationReport()
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, report)
 }
@@ -34,7 +35,7 @@ func (c *AdminScoreValidationController) GetCorrelation(ctx echo.Context) error 
 func (c *AdminScoreValidationController) GetPhaseMetrics(ctx echo.Context) error {
 	report, err := c.svc.GetPhasePrecisionReport()
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, report)
 }
@@ -44,7 +45,7 @@ func (c *AdminScoreValidationController) GetPhaseMetrics(ctx echo.Context) error
 func (c *AdminScoreValidationController) GetCalibration(ctx echo.Context) error {
 	weights, err := c.svc.GetCurrentCalibration()
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{"weights": weights})
 }
@@ -57,7 +58,7 @@ func (c *AdminScoreValidationController) RunCalibration(ctx echo.Context) error 
 		if errors.Is(err, admin.ErrInsufficientSamples) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusCreated, result)
 }
@@ -72,7 +73,7 @@ func (c *AdminScoreValidationController) GetCalibrationHistory(ctx echo.Context)
 	}
 	history, err := c.svc.GetCalibrationHistory(limit)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{"history": history})
 }
@@ -82,7 +83,7 @@ func (c *AdminScoreValidationController) GetCalibrationHistory(ctx echo.Context)
 func (c *AdminScoreValidationController) ListVariants(ctx echo.Context) error {
 	variants, err := c.svc.ListAllVariants()
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{"experiments": variants})
 }
@@ -107,7 +108,7 @@ func (c *AdminScoreValidationController) CreateVariant(ctx echo.Context) error {
 
 	variant, err := c.svc.CreateVariant(req.ExperimentName, req.VariantName, req.Description, req.TrafficRatio)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusCreated, variant)
 }
@@ -120,7 +121,7 @@ func (c *AdminScoreValidationController) GetVariantResults(ctx echo.Context) err
 	}
 	results, err := c.svc.GetVariantResults(experimentName)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{"experiment": experimentName, "results": results})
 }

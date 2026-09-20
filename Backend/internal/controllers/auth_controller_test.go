@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/interfaces"
@@ -130,8 +131,8 @@ func TestRegister_DuplicateEmail_ReturnsDuplicateEmailCode(t *testing.T) {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusConflict)
 	}
 	resp := decodeAuthErrResp(t, rec)
-	if resp.Code != ErrCodeDuplicateEmail {
-		t.Errorf("code = %q, want %q", resp.Code, ErrCodeDuplicateEmail)
+	if resp.Code != httpapi.ErrCodeDuplicateEmail {
+		t.Errorf("code = %q, want %q", resp.Code, httpapi.ErrCodeDuplicateEmail)
 	}
 }
 
@@ -144,8 +145,8 @@ func TestRegister_InvalidBody_ReturnsValidationError(t *testing.T) {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 	resp := decodeAuthErrResp(t, rec)
-	if resp.Code != ErrCodeValidationError {
-		t.Errorf("code = %q, want %q", resp.Code, ErrCodeValidationError)
+	if resp.Code != httpapi.ErrCodeValidationError {
+		t.Errorf("code = %q, want %q", resp.Code, httpapi.ErrCodeValidationError)
 	}
 }
 
@@ -162,8 +163,8 @@ func TestRegister_OtherError_ReturnsValidationError(t *testing.T) {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 	resp := decodeAuthErrResp(t, rec)
-	if resp.Code != ErrCodeValidationError {
-		t.Errorf("code = %q, want %q", resp.Code, ErrCodeValidationError)
+	if resp.Code != httpapi.ErrCodeValidationError {
+		t.Errorf("code = %q, want %q", resp.Code, httpapi.ErrCodeValidationError)
 	}
 }
 
@@ -196,8 +197,8 @@ func TestLogin_InvalidCredentials_ReturnsUnauthorized(t *testing.T) {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 	resp := decodeAuthErrResp(t, rec)
-	if resp.Code != ErrCodeUnauthorized {
-		t.Errorf("code = %q, want %q", resp.Code, ErrCodeUnauthorized)
+	if resp.Code != httpapi.ErrCodeUnauthorized {
+		t.Errorf("code = %q, want %q", resp.Code, httpapi.ErrCodeUnauthorized)
 	}
 }
 
@@ -216,8 +217,8 @@ func TestLogin_EmailNotVerified_ReturnsForbidden(t *testing.T) {
 				t.Errorf("msg=%q: status = %d, want %d", msg, rec.Code, http.StatusForbidden)
 			}
 			resp := decodeAuthErrResp(t, rec)
-			if resp.Code != ErrCodeForbidden {
-				t.Errorf("msg=%q: code = %q, want %q", msg, resp.Code, ErrCodeForbidden)
+			if resp.Code != httpapi.ErrCodeForbidden {
+				t.Errorf("msg=%q: code = %q, want %q", msg, resp.Code, httpapi.ErrCodeForbidden)
 			}
 		})
 	}
@@ -248,8 +249,8 @@ func TestGetUser_Unauthorized_WhenNoUserIDInContext(t *testing.T) {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 	resp := decodeAuthErrResp(t, rec)
-	if resp.Code != ErrCodeUnauthorized {
-		t.Errorf("code = %q, want %q", resp.Code, ErrCodeUnauthorized)
+	if resp.Code != httpapi.ErrCodeUnauthorized {
+		t.Errorf("code = %q, want %q", resp.Code, httpapi.ErrCodeUnauthorized)
 	}
 }
 
@@ -268,8 +269,8 @@ func TestRequestRegistration_DuplicateEmail(t *testing.T) {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusConflict)
 	}
 	resp := decodeAuthErrResp(t, rec)
-	if resp.Code != ErrCodeDuplicateEmail {
-		t.Errorf("code = %q, want %q", resp.Code, ErrCodeDuplicateEmail)
+	if resp.Code != httpapi.ErrCodeDuplicateEmail {
+		t.Errorf("code = %q, want %q", resp.Code, httpapi.ErrCodeDuplicateEmail)
 	}
 }
 
@@ -282,8 +283,8 @@ func TestRequestRegistration_InvalidBody(t *testing.T) {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 	resp := decodeAuthErrResp(t, rec)
-	if resp.Code != ErrCodeValidationError {
-		t.Errorf("code = %q, want %q", resp.Code, ErrCodeValidationError)
+	if resp.Code != httpapi.ErrCodeValidationError {
+		t.Errorf("code = %q, want %q", resp.Code, httpapi.ErrCodeValidationError)
 	}
 }
 
@@ -298,8 +299,8 @@ func TestVerifyRegistration_MissingToken(t *testing.T) {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 	resp := decodeAuthErrResp(t, rec)
-	if resp.Code != ErrCodeValidationError {
-		t.Errorf("code = %q, want %q", resp.Code, ErrCodeValidationError)
+	if resp.Code != httpapi.ErrCodeValidationError {
+		t.Errorf("code = %q, want %q", resp.Code, httpapi.ErrCodeValidationError)
 	}
 }
 
@@ -342,8 +343,8 @@ func TestResetPassword_InvalidToken_ReturnsValidationError(t *testing.T) {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 	resp := decodeAuthErrResp(t, rec)
-	if resp.Code != ErrCodeValidationError {
-		t.Errorf("code = %q, want %q", resp.Code, ErrCodeValidationError)
+	if resp.Code != httpapi.ErrCodeValidationError {
+		t.Errorf("code = %q, want %q", resp.Code, httpapi.ErrCodeValidationError)
 	}
 }
 
@@ -358,7 +359,7 @@ func TestDeleteAccount_Unauthorized_WhenNoUserID(t *testing.T) {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 	resp := decodeAuthErrResp(t, rec)
-	if resp.Code != ErrCodeUnauthorized {
-		t.Errorf("code = %q, want %q", resp.Code, ErrCodeUnauthorized)
+	if resp.Code != httpapi.ErrCodeUnauthorized {
+		t.Errorf("code = %q, want %q", resp.Code, httpapi.ErrCodeUnauthorized)
 	}
 }
