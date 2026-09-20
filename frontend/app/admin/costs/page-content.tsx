@@ -13,6 +13,7 @@ import {
 } from 'recharts'
 import { ArrowLeft, Info } from 'lucide-react'
 import { authService } from '@/lib/auth'
+import { useRequirePlatformAdmin } from '@/lib/use-require-platform-admin'
 import { cn } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -203,6 +204,7 @@ function CostBarChart({
 }
 
 export default function PageContent() {
+  const platformReady = useRequirePlatformAdmin()
   const [adminEmail, setAdminEmail] = useState('')
   const [summary, setSummary] = useState<Summary | null>(null)
   const [daily, setDaily] = useState<DailyRow[]>([])
@@ -262,7 +264,13 @@ export default function PageContent() {
     }
   }, [adminEmail, dailyDays, breakdownAxis])
 
-  useEffect(() => { fetchAll() }, [fetchAll])
+  useEffect(() => {
+    if (!platformReady) return
+    fetchAll()
+  }, [platformReady, fetchAll])
+
+  // フック呼び出し順を変えないため、ガードは全フックの後に置く
+  if (!platformReady) return null
 
   const totalDailyCost = daily.reduce((s, r) => s + r.total_cost_usd, 0)
   const maxDailyModel = summary?.model_breakdown?.[0]?.total_cost_usd ?? 0.0001

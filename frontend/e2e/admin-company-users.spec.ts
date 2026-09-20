@@ -65,6 +65,16 @@ async function mockCompanyPage(page: Page, users: MockCompanyUser[]) {
     })
   })
 
+  // 会社概要画面は掲載状態（ステータス・暫定データ）の出し分けに権限を引く。
+  // 未モックだとこの fetch が終わらず networkidle に到達しない
+  await page.route('**/api/admin/me/school-access*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ restricted: false, schools: [] }),
+    })
+  })
+
   await page.route('**/api/admin/companies/10', async (route) => {
     await route.fulfill({
       status: 200,

@@ -1,3 +1,14 @@
+# ============================================================
+# ローカル開発用 Compose（既定ファイル）
+#
+# `docker compose` は compose.yml を優先して読み込むため、ローカル開発では
+# ファイル指定なしの `docker compose up -d` でこのファイルが使われる。
+# ソースを build して起動し、DB は named volume mysql_data を使う。
+#
+# 同ディレクトリの docker-compose.yml は staging EC2 用（ECR イメージを pull）。
+# ローカルで誤って指定しないこと。
+# 手順: docs/wiki/getting-started.md
+# ============================================================
 services:
   # Backend API Server
   app:

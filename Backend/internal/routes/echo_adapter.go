@@ -207,6 +207,27 @@ func EchoAdminSchoolScope(schools *services.SchoolService) echo.MiddlewareFunc {
 	}
 }
 
+// EchoRequirePlatformAdmin は担当校を持つ管理者(教員・学園側)を拒否し、
+// 担当校0件のシステム管理者だけを通す。EchoAdminAuth の後段に置くこと。
+func EchoRequirePlatformAdmin(schools *services.SchoolService) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			adminUserID, ok := middleware.AdminUserIDFromContext(c.Request().Context())
+			if !ok {
+				return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+			}
+			restricted, _, err := schools.ResolveAdminAccess(adminUserID)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
+			}
+			if restricted {
+				return echo.NewHTTPError(http.StatusForbidden, "platform admin only")
+			}
+			return next(c)
+		}
+	}
+}
+
 // echoGuestAIRateLimit は未認証で叩けるAI呼び出し（ES添削・企業WEB検索）の
 // コスト濫用を止めるレート制限ミドルウェア（#1154）。
 // 認証を付けられない仕様のため、IP単位＋全体上限の二段で課金の総量を抑える。

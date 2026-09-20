@@ -21,6 +21,7 @@ import (
 	"Backend/internal/services/chat"
 	"Backend/internal/services/company"
 	"Backend/internal/services/companyauth"
+	"Backend/internal/services/companyportal"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/diagnosis"
 	"Backend/internal/services/email"
@@ -391,6 +392,7 @@ func main() {
 	// クロス機能連携サービス（チャットスコア↔面接/職務経歴書レビュー）
 	crossFeatureService := flywheel.NewCrossFeatureIntegrationService(userWeightScoreRepo)
 	interviewService.SetCrossFeatureService(crossFeatureService)
+	interviewService.SetMatchingRunner(matchingService)
 	interviewService.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
@@ -403,12 +405,13 @@ func main() {
 	// コントローラー層の初期化
 	organizationRepo := repositories.NewOrganizationRepository(db)
 	organizationService := organization.NewOrganizationService(organizationRepo)
-	authController := controllers.NewAuthController(authService)
+	authController := controllers.NewAuthController(authService, cfg.UserSecret)
 	oauthController := controllers.NewOAuthController(oauthService, organizationService)
 	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	if jobEnqueuer != nil {
 		chatController.SetJobEnqueuer(jobEnqueuer)
 	}
+	chatController.SetDiagnosisQualityRepo(diagnosisQualityRepo)
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := controllers.NewCompanyRelationController(companyQueryRepo, aiClient)
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
@@ -425,6 +428,10 @@ func main() {
 	resumeService.SetCompanyProvisioner(infoFetcher)
 	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
+	adminCompanyController.SetSchoolRestrictionChecker(func(adminUserID uint) (bool, error) {
+		restricted, _, err := schoolService.ResolveAdminAccess(adminUserID)
+		return restricted, err
+	})
 	// コンストラクタが自前生成した infoFetcher には SetSharedSearch が掛からない。
 	// 共有済みのものに差し替えないと、fetch-missing-batch で検索が統合されない(#1124)。
 	adminCompanyController.SetInfoFetcher(infoFetcher)
@@ -608,7 +615,21 @@ func main() {
 	routes.SetupScheduleRoutes(api, scheduleController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupApplicationRoutes(api, appController, hrStudentAnalysisController, cfg.UserSecret, userDeletionService, organizationService)
-	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, cfg.CompanyUserSecret, companyUserRepo)
+	// 企業ポータルのダッシュボードと応募者管理 (#1320)。
+	// 応募・求人・学生の集計はそれぞれ既存のリポジトリを使い、新しいテーブルは作らない。
+	companyPortalApplicationController := controllers.NewCompanyPortalApplicationController(
+		appService, companyRepo, studentSearchRepo,
+	)
+	// 企業ポータルの求人管理 (#1321)。既存の CompanyRepository を使い、新しいテーブルは作らない。
+	companyPortalJobController := controllers.NewCompanyPortalJobController(
+		companyportal.NewJobService(companyRepo),
+	)
+	// 自社プロフィール編集と担当者管理 (#1322)。
+	// 担当者管理は既存の CompanyUserService をそのまま使う。
+	companyPortalProfileController := controllers.NewCompanyPortalProfileController(
+		companyportal.NewProfileService(companyRepo), companyUserService,
+	)
+	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, cfg.CompanyUserSecret, companyUserRepo)
 	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())
