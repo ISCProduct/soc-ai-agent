@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -16,7 +17,19 @@ import (
 
 var ErrReleaseNoteLLMClientNil = errors.New("openai client is nil")
 
-const releaseNoteSummarySystemPrompt = `あなたはtoC向けSaaSのリリースノート編集者です。開発者向けのPRタイトル・本文から、エンドユーザー向けにやさしい日本語で1〜2文の更新内容を要約し、対象読者(audience)を分類してください。技術用語（API名・関数名・内部実装の詳細）は避け、ユーザーにとって何が変わったか・何が嬉しいかを書いてください。
+const releaseNoteSummarySystemPrompt = `あなたはtoC向けSaaSのリリースノート編集者です。開発者向けのPRタイトル・本文から、エンドユーザー向けにやさしい日本語で1〜2文の更新内容を要約し、対象読者(audience)を分類してください。
+
+読み手はパソコンやITに詳しくない学生・教員です。専門用語を知らない人が読んで意味が分かる文章にしてください。
+
+書き方のルール:
+- 「〜できるようになりました」「〜が見やすくなりました」のように、利用者から見て何が変わったかを書く
+- カタカナの専門用語・英字の略語は使わない
+  悪い例: API / バッチ / キャッシュ / セッション / ログ / デプロイ / パフォーマンス / UI / マッチングアルゴリズム
+  言い換え例: 「読み込みが速くなりました」「入力した内容が保存されるようになりました」「おすすめの企業がより合うようになりました」
+- 社内の仕組みや画面の裏側の話は書かない。利用者が画面で見て分かることだけを書く
+- 「対応しました」「改善しました」だけで終わらせず、利用者にとって何が良くなるかを書く
+
+タイトルも同じ基準で、専門用語を使わずに書いてください。
 
 audience は以下のいずれかにしてください:
 - "student": 就活中の学生ユーザーが画面や機能として体験できる新機能・UI改善・不具合修正・パフォーマンス向上
@@ -71,19 +84,74 @@ var developerOnlyReleaseNoteNeedles = []string{
 
 func isDeveloperOnlyReleaseNote(title, body string) bool {
 	lowerTitle := strings.ToLower(strings.TrimSpace(title))
-	for _, prefix := range []string{"ci:", "chore:", "ops:"} {
-		if strings.HasPrefix(lowerTitle, prefix) {
-			return true
-		}
-	}
-	// Release 傘PRの本文には「ECS on Fargate」等の定型デプロイ文言が必ず入るため、
-	// 本文ニードルで judge するとユーザー向け機能ごと落ちる。
-	// 一方タイトルには「本番反映（Discordから本番環境を起動/停止する）」のように主題が
-	// 書かれるので、タイトルだけはニードル判定する。本文はLLMの空summaryに任せる(#1289)。
+
+	// release 傘PRは中身を要約させない。
+	//
+	// main へ直接マージされるのは傘PRだけで、その本文は運用担当者向けに書かれる。
+	// 「起動ジョブの失敗通知が初めて有効になる」「スキーマ変更あり」といった記述が
+	// そのまま要約され、学生向けの更新情報として表示された。
+	//
+	// 以前はタイトルだけニードル判定していたが、傘PRのタイトルは
+	// 「本番反映 — SRE整備（通知・レート制限・可観測性）とAI利用量計測ほか34件」の
+	// ように中身の要約になっており、運用語が入らないことがある。実際にすり抜けた。
+	//
+	// 更新情報は中身の個別PRから作る（.github/scripts/collect_whats_new_sources.py）。
+	// 傘PRが渡ってきた場合はここで落とす。
 	if strings.HasPrefix(lowerTitle, "release") {
-		return containsDeveloperOnlyNeedle(lowerTitle)
+		return true
+	}
+
+	// 開発・運用の接頭辞。個別PRのタイトルには主題が書かれるため判定できる。
+	//
+	// docs: は入れない。「docs: ユーザー向けヘルプを更新」のように
+	// 利用者に関係する変更が入ることがあるため、本文の判定に委ねる。
+	//
+	// スコープ付き（refactor(backend): など）も拾う。Conventional Commits では
+	// 接頭辞のあとに括弧でスコープが入るため、そこを外してから比較する。
+	// "fix(ops): 起動判定を直す" のようにスコープ側が運用のこともある。
+	// 型だけ見ると fix として通ってしまうため、スコープも判定する。
+	typ, scope := commitType(lowerTitle)
+	if isDeveloperOnlyCommitType(typ) || isDeveloperOnlyScope(scope) {
+		return true
 	}
 	return containsDeveloperOnlyNeedle(strings.ToLower(title + "\n" + body))
+}
+
+// commitType は Conventional Commits の型とスコープを返す。
+// "refactor(backend): x" なら ("refactor", "backend")、型が無ければ空文字。
+func commitType(lowerTitle string) (typ, scope string) {
+	colon := strings.Index(lowerTitle, ":")
+	if colon <= 0 {
+		return "", ""
+	}
+	head := lowerTitle[:colon]
+	if paren := strings.Index(head, "("); paren > 0 {
+		if close := strings.Index(head[paren:], ")"); close > 0 {
+			scope = strings.TrimSpace(head[paren+1 : paren+close])
+		}
+		head = head[:paren]
+	}
+	return strings.TrimSpace(head), scope
+}
+
+// isDeveloperOnlyCommitType は利用者に関係しない変更の型かを返す。
+func isDeveloperOnlyCommitType(t string) bool {
+	switch t {
+	case "ci", "chore", "ops", "build", "refactor", "test", "style", "perf":
+		// perf は内部の速度改善が多く、利用者が体感できるものは
+		// LLM が summary を書ける feat/fix として出されることが多い。
+		return true
+	}
+	return false
+}
+
+// isDeveloperOnlyScope は利用者に関係しない領域のスコープかを返す。
+func isDeveloperOnlyScope(scope string) bool {
+	switch scope {
+	case "ops", "ci", "infra", "deps", "deploy", "sre", "build":
+		return true
+	}
+	return false
 }
 
 func containsDeveloperOnlyNeedle(lowerText string) bool {
@@ -105,12 +173,24 @@ func (s *ReleaseNoteService) purgeStoredDeveloperOnlyNotes(ctx context.Context) 
 		return fmt.Errorf("list release notes for purge: %w", err)
 	}
 	for _, note := range notes {
-		if !isDeveloperOnlyReleaseNote(note.Title, note.Summary) {
+		reason := ""
+		switch {
+		case isDeveloperOnlyReleaseNote(note.Title, note.Summary):
+			reason = "開発者向け"
+		default:
+			// 判定を厳しくする前に保存された、専門用語まじりの更新情報も消す。
+			// 基準を変えたときに古いものが残ると、いつまでも表示され続ける。
+			if needle, found := containsJargon(note.Title, note.Summary); found {
+				reason = "専門用語 " + needle
+			}
+		}
+		if reason == "" {
 			continue
 		}
 		if err := s.db.WithContext(ctx).Delete(&note).Error; err != nil {
-			return fmt.Errorf("purge developer-only release note pr=%d: %w", note.PRNumber, err)
+			return fmt.Errorf("purge release note pr=%d: %w", note.PRNumber, err)
 		}
+		log.Printf("[ReleaseNote] PR #%d を削除しました(%s): %s", note.PRNumber, reason, note.Title)
 	}
 	return nil
 }
@@ -170,6 +250,15 @@ func (s *ReleaseNoteService) IngestMergedPRs(ctx context.Context, sources []Rele
 			return saved, fmt.Errorf("summarize PR #%d: %w", src.PRNumber, err)
 		}
 		if strings.TrimSpace(result.Summary) == "" {
+			continue
+		}
+
+		// 専門用語が残っていたら出さない。指示しても従わないことがあるため、
+		// 出力側でも検査する。専門用語まじりの文章を出すくらいなら、
+		// その回の更新情報を出さないほうがよい(#1290)。
+		if needle, found := containsJargon(result.Title, result.Summary); found {
+			log.Printf("[ReleaseNote] PR #%d: 専門用語 %q が残っているため出力しない: %s",
+				src.PRNumber, needle, result.Title)
 			continue
 		}
 
