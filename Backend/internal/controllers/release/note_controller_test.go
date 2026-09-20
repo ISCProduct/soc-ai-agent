@@ -1,4 +1,4 @@
-package controllers_test
+package release_test
 
 import (
 	"bytes"
@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"Backend/internal/controllers"
+	releasecontrollers "Backend/internal/controllers/release"
 	"Backend/internal/middleware"
 	"Backend/internal/repositories"
 	"Backend/internal/services/release"
@@ -51,7 +51,7 @@ func TestReleaseNoteController_List_ReturnsNotesNewestFirst(t *testing.T) {
 	db, mock := newReleaseNoteControllerTestDB(t)
 	svc := release.NewReleaseNoteService(db, nil)
 	userRepo := repositories.NewUserRepository(db)
-	ctrl := controllers.NewReleaseNoteController(svc, userRepo)
+	ctrl := releasecontrollers.NewReleaseNoteController(svc, userRepo)
 	e := echo.New()
 
 	mock.ExpectQuery("SELECT \\* FROM `users` WHERE `users`.`id` = \\? ORDER BY `users`.`id` LIMIT \\?").
@@ -88,7 +88,7 @@ func TestReleaseNoteController_List_UsesAdminAudienceForAdminUser(t *testing.T) 
 	db, mock := newReleaseNoteControllerTestDB(t)
 	svc := release.NewReleaseNoteService(db, nil)
 	userRepo := repositories.NewUserRepository(db)
-	ctrl := controllers.NewReleaseNoteController(svc, userRepo)
+	ctrl := releasecontrollers.NewReleaseNoteController(svc, userRepo)
 	e := echo.New()
 
 	mock.ExpectQuery("SELECT \\* FROM `users` WHERE `users`.`id` = \\? ORDER BY `users`.`id` LIMIT \\?").
@@ -119,7 +119,7 @@ func TestReleaseNoteController_List_Unauthenticated(t *testing.T) {
 	db, _ := newReleaseNoteControllerTestDB(t)
 	svc := release.NewReleaseNoteService(db, nil)
 	userRepo := repositories.NewUserRepository(db)
-	ctrl := controllers.NewReleaseNoteController(svc, userRepo)
+	ctrl := releasecontrollers.NewReleaseNoteController(svc, userRepo)
 	e := echo.New()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/whats-new", nil)
@@ -137,7 +137,7 @@ func TestReleaseNoteController_Ingest_InvalidPayload(t *testing.T) {
 	db, _ := newReleaseNoteControllerTestDB(t)
 	svc := release.NewReleaseNoteService(db, nil)
 	userRepo := repositories.NewUserRepository(db)
-	ctrl := controllers.NewReleaseNoteController(svc, userRepo)
+	ctrl := releasecontrollers.NewReleaseNoteController(svc, userRepo)
 	e := echo.New()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/whats-new/ingest", bytes.NewReader([]byte("not-json")))
@@ -159,7 +159,7 @@ func TestReleaseNoteController_Ingest_NilLLMClientReturnsInternalError(t *testin
 	db, _ := newReleaseNoteControllerTestDB(t)
 	svc := release.NewReleaseNoteService(db, nil)
 	userRepo := repositories.NewUserRepository(db)
-	ctrl := controllers.NewReleaseNoteController(svc, userRepo)
+	ctrl := releasecontrollers.NewReleaseNoteController(svc, userRepo)
 	e := echo.New()
 
 	payload := map[string]any{

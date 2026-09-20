@@ -1,4 +1,4 @@
-package controllers
+package github
 
 import (
 	"Backend/internal/controllers/httpapi"

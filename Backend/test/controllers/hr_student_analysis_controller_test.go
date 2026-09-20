@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	applicationcontrollers "Backend/internal/controllers/application"
 	"Backend/internal/services/flywheel"
 	hrsvc "Backend/internal/services/hr"
 	"Backend/internal/services/shared"
@@ -23,8 +23,8 @@ func (s *hrStudentAnalysisServiceStub) GetAnalysis(ownerUserID, companyID, targe
 	return s.resp, s.err
 }
 
-func newHRStudentAnalysisController(svc *hrStudentAnalysisServiceStub) *controllers.HRStudentAnalysisController {
-	return controllers.NewHRStudentAnalysisController(svc)
+func newHRStudentAnalysisController(svc *hrStudentAnalysisServiceStub) *applicationcontrollers.HRStudentAnalysisController {
+	return applicationcontrollers.NewHRStudentAnalysisController(svc)
 }
 
 func hrAnalysisCtx(req *http.Request, rec *httptest.ResponseRecorder, userID string) echo.Context {

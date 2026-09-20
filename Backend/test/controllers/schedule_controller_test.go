@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"Backend/internal/controllers"
+	schedulecontrollers "Backend/internal/controllers/schedule"
 	"Backend/internal/models"
 	"Backend/test/controllers/mocks"
 
@@ -25,8 +25,8 @@ import (
 	"gorm.io/gorm"
 )
 
-func newScheduleController(svc *mocks.ScheduleServiceMock) *controllers.ScheduleController {
-	return controllers.NewScheduleController(svc)
+func newScheduleController(svc *mocks.ScheduleServiceMock) *schedulecontrollers.ScheduleController {
+	return schedulecontrollers.NewScheduleController(svc)
 }
 
 // ---- List ----
@@ -58,7 +58,7 @@ func TestScheduleController_Create_InvalidBody(t *testing.T) {
 	req := withUserID(httptest.NewRequest(http.MethodPost, "/api/schedule", bytes.NewBufferString("not-json")), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewScheduleController(nil).Create, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, schedulecontrollers.NewScheduleController(nil).Create, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestScheduleController_Create_InvalidScheduledAt(t *testing.T) {
@@ -69,7 +69,7 @@ func TestScheduleController_Create_InvalidScheduledAt(t *testing.T) {
 	req := withUserID(httptest.NewRequest(http.MethodPost, "/api/schedule", bytes.NewReader(body)), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewScheduleController(nil).Create, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, schedulecontrollers.NewScheduleController(nil).Create, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestScheduleController_Create_ServiceError(t *testing.T) {
@@ -119,7 +119,7 @@ func TestScheduleController_Get_InvalidID(t *testing.T) {
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, controllers.NewScheduleController(nil).Get, ctx, http.StatusBadRequest)
+	assertStatus(t, schedulecontrollers.NewScheduleController(nil).Get, ctx, http.StatusBadRequest)
 }
 
 func TestScheduleController_Get_Forbidden(t *testing.T) {
@@ -170,7 +170,7 @@ func TestScheduleController_Update_InvalidID(t *testing.T) {
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, controllers.NewScheduleController(nil).Update, ctx, http.StatusBadRequest)
+	assertStatus(t, schedulecontrollers.NewScheduleController(nil).Update, ctx, http.StatusBadRequest)
 }
 
 func TestScheduleController_Update_InvalidBody(t *testing.T) {
@@ -180,7 +180,7 @@ func TestScheduleController_Update_InvalidBody(t *testing.T) {
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, controllers.NewScheduleController(nil).Update, ctx, http.StatusBadRequest)
+	assertStatus(t, schedulecontrollers.NewScheduleController(nil).Update, ctx, http.StatusBadRequest)
 }
 
 func TestScheduleController_Update_InvalidScheduledAt(t *testing.T) {
@@ -193,7 +193,7 @@ func TestScheduleController_Update_InvalidScheduledAt(t *testing.T) {
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, controllers.NewScheduleController(nil).Update, ctx, http.StatusBadRequest)
+	assertStatus(t, schedulecontrollers.NewScheduleController(nil).Update, ctx, http.StatusBadRequest)
 }
 
 func TestScheduleController_Update_Forbidden(t *testing.T) {

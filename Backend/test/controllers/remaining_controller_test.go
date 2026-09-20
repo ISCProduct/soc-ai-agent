@@ -12,11 +12,11 @@ import (
 	"testing"
 
 	"Backend/domain/entity"
-	"Backend/internal/controllers"
 	admincontrollers "Backend/internal/controllers/admin"
 	chatcontrollers "Backend/internal/controllers/chat"
 	companycontrollers "Backend/internal/controllers/company"
 	escontrollers "Backend/internal/controllers/es"
+	schedulecontrollers "Backend/internal/controllers/schedule"
 	"Backend/internal/models"
 	"Backend/internal/services/school"
 	"Backend/test/controllers/mocks"
@@ -166,21 +166,21 @@ func TestQuestionController_GetQuestionsByCategory_MissingCategory(t *testing.T)
 // 未認証(コンテキストにユーザーIDが無い)場合は401を返す。
 
 func TestScheduleController_List_Unauthenticated(t *testing.T) {
-	c := controllers.NewScheduleController(nil)
+	c := schedulecontrollers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/schedules", nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, c.List, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestScheduleController_Create_Unauthenticated(t *testing.T) {
-	c := controllers.NewScheduleController(nil)
+	c := schedulecontrollers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/schedules", nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, c.Create, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestScheduleController_Get_Unauthenticated(t *testing.T) {
-	c := controllers.NewScheduleController(nil)
+	c := schedulecontrollers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/schedules/1", nil)
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
@@ -190,7 +190,7 @@ func TestScheduleController_Get_Unauthenticated(t *testing.T) {
 }
 
 func TestScheduleController_Update_Unauthenticated(t *testing.T) {
-	c := controllers.NewScheduleController(nil)
+	c := schedulecontrollers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodPut, "/api/schedules/1", nil)
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
@@ -200,7 +200,7 @@ func TestScheduleController_Update_Unauthenticated(t *testing.T) {
 }
 
 func TestScheduleController_Delete_Unauthenticated(t *testing.T) {
-	c := controllers.NewScheduleController(nil)
+	c := schedulecontrollers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodDelete, "/api/schedules/1", nil)
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
@@ -210,7 +210,7 @@ func TestScheduleController_Delete_Unauthenticated(t *testing.T) {
 }
 
 func TestScheduleController_ExportICS_Unauthenticated(t *testing.T) {
-	c := controllers.NewScheduleController(nil)
+	c := schedulecontrollers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/schedules/export.ics", nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, c.ExportICS, newCtx(req, rec), http.StatusUnauthorized)

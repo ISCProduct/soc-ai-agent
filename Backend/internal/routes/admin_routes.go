@@ -1,8 +1,9 @@
 package routes
 
 import (
-	"Backend/internal/controllers"
 	admincontrollers "Backend/internal/controllers/admin"
+	applicationcontrollers "Backend/internal/controllers/application"
+	insightcontrollers "Backend/internal/controllers/insight"
 	"Backend/internal/repositories"
 	"Backend/internal/services/school"
 
@@ -25,11 +26,11 @@ func SetupAdminRoutes(
 	profileRecalcController *admincontrollers.AdminProfileRecalculationController,
 	scoreValidationController *admincontrollers.AdminScoreValidationController,
 	diagnosisQualityController *admincontrollers.AdminDiagnosisQualityController,
-	collectiveInsightController *controllers.CollectiveInsightController,
+	collectiveInsightController *insightcontrollers.CollectiveInsightController,
 	scraperSessionController *admincontrollers.AdminScraperSessionController,
 	adminVectorController *admincontrollers.AdminVectorController,
-	appController *controllers.ApplicationController,
-	teacherInsightController *controllers.TeacherStudentInsightController,
+	appController *applicationcontrollers.ApplicationController,
+	teacherInsightController *insightcontrollers.TeacherStudentInsightController,
 	userRepo *repositories.UserRepository,
 	schoolService *school.SchoolService,
 	adminSecret string,

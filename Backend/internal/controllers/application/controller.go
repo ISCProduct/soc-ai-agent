@@ -1,4 +1,4 @@
-package controllers
+package application
 
 import (
 	"Backend/domain/entity"
