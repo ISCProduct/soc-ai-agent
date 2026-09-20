@@ -308,16 +308,25 @@ EventBridge Scheduler へ移すまで（#1388）は、以下を手順として�
 
    Discord で `/prod state:on`
 
-   これでオーバーライドが `on` になり、日付リストに関係なく起動する。起動ジョブが即時実行される。
+   これでオーバーライドが `on` になり、日付リストに関係なく起動する。
+
+   **Discord の返信が「反映を開始しました」であることを確認する。**
+   即時実行は `GITHUB_DISPATCH_TOKEN` / `GITHUB_DISPATCH_REPO` が揃っているときだけで、
+   未設定・API 失敗時は「⚠️ 即時反映の起動に失敗しました。次の毎時実行(最大1時間後)で
+   反映されます。」が返る。この手順は「最大1時間待ち」を避けるためのものなので、
+   そこで気づけないと意味が無い。
 
 2. **起動を確認する**（RDS の起動待ちがあるため10分ほど見る）
 
    ```bash
    curl -s -o /dev/null -w '%{http_code}\n' https://api.shukatsu-ai.jp/health   # 200 を期待
    curl -s -o /dev/null -w '%{http_code}\n' https://shukatsu-ai.jp               # 200 を期待
-   aws ecs describe-services --cluster soc-app --services backend frontend \
+   aws ecs describe-services --cluster soc-app --services chroma rag-review backend frontend \
      --query 'services[].{n:serviceName,d:desiredCount,r:runningCount}' --output text
    ```
+
+   **4サービス全部を見ること。** 起動ジョブは `chroma rag-review backend frontend` を
+   回しており、ここから漏れると稼働日でも RAG 機能だけ落ちる（実際に起きている）。
 
 3. **主要フローを1回ずつ手で通す**（チャット / 面接 / 履歴書レビュー）
 
@@ -328,13 +337,23 @@ EventBridge Scheduler へ移すまで（#1388）は、以下を手順として�
 ### 当日
 
 4. 朝いちばんで `/health` を確認する（上のコマンド）
+
+   **`/health` は生存確認だけ**で、DB 接続も外部 API も見ていない
+   （`cmd/server/main.go` のハンドラは無条件に 200 を返す）。
+   RDS が落ちている・タスク定義が古い状態でも 200 になるので、
+   これだけで「動いている」と判断しないこと。前日ステップ3を1本だけでも通すのが確実。
 5. 異常があれば Discord の運用アラートチャンネルを確認する（#1355 の通知先）
 
 ### 終了後
 
 6. **本番を停止する**
 
-   Discord で `/prod state:auto`（日付リストに従う）または `/prod state:off`（明示的に停止）
+   Discord で `/prod state:off`（明示的に停止）
+
+   **当日中に止めたいなら `auto` ではなく `off`。** 当日を日付リストに登録して
+   いる場合、`auto` に戻しても JST 0時までは起動が続き、そこから先の停止も
+   毎時 cron 頼みになる（この節が問題にしている遅延が停止側にそのまま効く）。
+   `off` は即時実行されるので確実に落ちる。翌日以降も稼働日が続くなら `auto` でよい。
 
    **`on` のまま放置すると課金が続く。** 起動ジョブは `on` のとき毎回
    「常時起動に固定されています」と警告を出すので、実行ログにも残る。
@@ -344,6 +363,13 @@ EventBridge Scheduler へ移すまで（#1388）は、以下を手順として�
 - **本番へのデプロイ**: デプロイはワンオフ ECS タスクで `migrate up` を実行するため、
   RDS が停止していると必ず失敗する。デプロイ前に RDS を起動しておくこと
   （ECS タスクまで起動する必要はない。RDS だけでよい）
+
+  ```bash
+  aws rds start-db-instance --db-instance-identifier soc-app-mysql
+  ```
+
+  `/prod state:on` でも起きるが、そちらは ECS も上げるので停止中のデプロイのためだけなら
+  余計に課金される。
 
 ---
 
