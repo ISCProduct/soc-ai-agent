@@ -9,6 +9,7 @@ import (
 	"Backend/internal/openai"
 	"Backend/internal/services/prompts"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"context"
 	"errors"
 	"fmt"
@@ -365,6 +366,7 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 	}
 
 	userPrompt := buildMatchingReasonUserPrompt(match, userScores)
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureMatchingReason)
 	reason, err := s.aiClient.ResponsesWithTemperature(
 		ctx,
 		prompts.MatchingReasonSystemPrompt,

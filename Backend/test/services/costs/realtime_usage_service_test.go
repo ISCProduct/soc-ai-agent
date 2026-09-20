@@ -31,16 +31,16 @@ func TestRealtimeTokenRatesCalcCost(t *testing.T) {
 				InputAudioTokens:  1_000_000,
 				OutputAudioTokens: 1_000_000,
 			},
-			// デフォルト単価: input $100, output $200 → 合計 $300
-			wantCost: 300.0,
+			// デフォルト単価: input $32, output $64 → 合計 $96（#1294 で現行価格へ更新）
+			wantCost: 96.0,
 		},
 		{
 			name: "キャッシュ済み音声入力",
 			usage: costs.TokenUsage{
 				InputCachedAudioTokens: 1_000_000,
 			},
-			// デフォルト単価: $20
-			wantCost: 20.0,
+			// デフォルト単価: $0.40（#1294 で現行価格へ更新）
+			wantCost: 0.40,
 		},
 		{
 			name: "混合トークン",
@@ -52,10 +52,10 @@ func TestRealtimeTokenRatesCalcCost(t *testing.T) {
 				InputCachedAudioTokens: 200_000,
 			},
 			// text: 0.5*5 + 0.5*15 = 10
-			// audio: 0.1*100 + 0.1*200 = 30
-			// cached: 0.2*20 = 4
-			// 合計: 44
-			wantCost: 44.0,
+			// audio: 0.1*32 + 0.1*64 = 9.6
+			// cached: 0.2*0.40 = 0.08
+			// 合計: 19.68
+			wantCost: 19.68,
 		},
 		{
 			name:     "トークン0はコスト0",

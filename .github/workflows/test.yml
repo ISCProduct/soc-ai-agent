@@ -148,6 +148,10 @@ jobs:
       - name: Bind 検査スクリプトのテスト
         run: ./automation/test/bind-error-check-test.sh
 
+      # AI呼び出しの機能名。付け忘れると feature='unknown' で記録され、機能別に割れない。
+      - name: AI利用量の機能名付与の検査
+        run: ./automation/test/ai-usage-feature-check.sh
+
       - name: ワークフロー埋め込み Python の構文チェック
         run: |
           python3 - <<'PYEOF'

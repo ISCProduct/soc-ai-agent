@@ -89,6 +89,7 @@ func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (s
 	req.Header.Set("Content-Type", "application/json")
 
 	client := cli.httpClientFor("text", 120*time.Second)
+	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -139,7 +140,14 @@ func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (s
 		return "", err
 	}
 	if parsed.Usage.InputTokens > 0 || parsed.Usage.OutputTokens > 0 {
-		cli.reportUsage(ctx, cli.textProvider, payload.Model, parsed.Usage.InputTokens, parsed.Usage.OutputTokens)
+		cli.reportUsage(ctx, usageReport{
+			provider:         cli.textProvider,
+			model:            payload.Model,
+			promptTokens:     parsed.Usage.InputTokens,
+			completionTokens: parsed.Usage.OutputTokens,
+			latency:          time.Since(start),
+			cacheHit:         parsed.Usage.PromptTokensDetails != nil && parsed.Usage.PromptTokensDetails.CachedTokens > 0,
+		})
 		if parsed.Usage.PromptTokensDetails != nil {
 			cached := parsed.Usage.PromptTokensDetails.CachedTokens
 			var hit float64

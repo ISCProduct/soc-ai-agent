@@ -725,14 +725,39 @@ jobs:
     name: Sync whats-new from merged PRs
     runs-on: ubuntu-latest
     continue-on-error: true
+    # 本番の admin_secret を Secrets Manager から読むため、production の認証情報を使う(#1158)。
+    # リポジトリ既定の認証情報はECSクラスタ作成前の古い値で、本番リソースを引けない。
+    environment: production
     steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
+
       - name: Fetch recently merged PRs and ingest
         env:
           GH_TOKEN: ${{ github.token }}
+          PROJECT_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}
+          # staging 側は引き続きリポジトリシークレットを使う。
+          # 本番と staging で別値にするのが #1158 の目的。
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
           PROD_API_BASE: https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }}
           STAGING_API_BASE: https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }}
         run: |
+          # 本番の admin_secret は Secrets Manager を正とする(#1158)。
+          # 読めない場合だけリポジトリシークレットへフォールバックする(移行期間の両対応)。
+          PROD_ADMIN_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id "${PROJECT_NAME:-soc-app}/admin" --query SecretString --output text 2>/dev/null \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('admin_secret',''))" 2>/dev/null || true)
+          if [ -n "$PROD_ADMIN_SECRET" ]; then
+            echo "::add-mask::$PROD_ADMIN_SECRET"
+          else
+            echo "::warning::Secrets Manager から admin_secret を読めませんでした。リポジトリシークレットで続行します(IAMに secretsmanager:GetSecretValue を確認してください)"
+            PROD_ADMIN_SECRET="$ADMIN_SECRET"
+          fi
+
           sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base main --limit 20 \
             --json number,title,body,mergedAt \
             --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
@@ -743,7 +768,7 @@ jobs:
           # 取りこぼしは prod-uptime-scheduler.yml が本番起動時に回収する。
           curl -sf -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
-            -H "X-Admin-Secret: $ADMIN_SECRET" \
+            -H "X-Admin-Secret: $PROD_ADMIN_SECRET" \
             -d "{\"sources\": $sources}" \
             --max-time 60 \
             || echo "::warning::本番への更新情報の取り込みに失敗しました(停止中の可能性)。本番起動時に回収されます。"

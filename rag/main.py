@@ -112,8 +112,14 @@ app = FastAPI()
 
 # Training export endpoints (registered from training_api.py)
 import training_api  # noqa: E402
+from prometheus_fastapi_instrumentator import Instrumentator  # noqa: E402
 
 training_api.register(app)
+
+# メトリクス（#1186）。/metrics は内部認証ミドルウェアの対象なので、
+# X-Internal-Token が無いリクエストは 401 になる（免除パスに入れないこと）。
+# Prometheus を常設せず、必要なときだけスクレイプする運用。
+Instrumentator().instrument(app).expose(app, include_in_schema=False)
 
 
 @app.middleware("http")
