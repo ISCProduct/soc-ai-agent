@@ -41,6 +41,9 @@ func EchoCompanyAuth(companySecret string, users *repositories.CompanyUserReposi
 			}
 			ctx := context.WithValue(c.Request().Context(), middleware.CompanyUserIDContextKey, companyUserID)
 			ctx = context.WithValue(ctx, middleware.CompanyIDContextKey, user.CompanyID)
+			// 破壊的操作を owner に限るため、役割もここで載せる（#1319）。
+			// ハンドラごとに引き直すと、引き忘れた経路だけ権限判定が抜ける。
+			ctx = context.WithValue(ctx, middleware.CompanyUserRoleContextKey, user.Role)
 			c.SetRequest(c.Request().WithContext(ctx))
 			return next(c)
 		}
@@ -52,6 +55,7 @@ func SetupCompanyAuthRoutes(
 	authController *controllers.CompanyAuthController,
 	portalController *controllers.CompanyPortalController,
 	studentController *controllers.CompanyStudentController,
+	applicationController *controllers.CompanyPortalApplicationController,
 	companySecret string,
 	users *repositories.CompanyUserRepository,
 ) {
@@ -79,4 +83,13 @@ func SetupCompanyAuthRoutes(
 	portal.DELETE("/students/:userID/tags/:tagID", studentController.RemoveTag)
 	portal.GET("/tags", studentController.ListTags)
 	portal.GET("/industries", studentController.Industries)
+
+	// ダッシュボードと応募者管理 (#1320)。
+	// company_id はJWT由来。他社の応募IDを指定された場合は 403 を返す。
+	if applicationController != nil {
+		portal.GET("/dashboard", applicationController.Dashboard)
+		portal.GET("/applications", applicationController.List)
+		// 選考ステータスの変更は破壊的操作なので owner のみ（コントローラ側で判定）。
+		portal.PATCH("/applications/:id/status", applicationController.UpdateStatus)
+	}
 }
