@@ -8,6 +8,7 @@
    - [リクエストIDでサービス横断追跡](#31-リクエストidでサービス横断追跡-1188)
    - [メトリクスを見る](#32-メトリクスを見る-1186)
    - [稼働日の前日チェックリスト](#33-稼働日の前日チェックリスト-1388)
+   - [エラートラッキング（Sentry）](#34-エラートラッキングsentry-619--1185)
 4. [障害対応](#4-障害対応)
 5. [データベース管理](#5-データベース管理)
 6. [管理画面操作](#6-管理画面操作)
@@ -370,6 +371,59 @@ EventBridge Scheduler へ移すまで（#1388）は、以下を手順として�
 
   `/prod state:on` でも起きるが、そちらは ECS も上げるので停止中のデプロイのためだけなら
   余計に課金される。
+
+## 3.4 エラートラッキング（Sentry）（#619 / #1185）
+
+本番の未処理エラーを Backend / Frontend / RAG から Sentry へ送る。
+**DSN 未設定時はすべて no-op**（ローカル開発では依存しない）。
+
+### 環境変数
+
+| 変数 | 対象 | 説明 |
+|---|---|---|
+| `SENTRY_DSN` | Backend / RAG / FE(server) | プロジェクトの DSN |
+| `NEXT_PUBLIC_SENTRY_DSN` | Frontend(browser) | ブラウザ用 DSN（公開してよい値）。**ビルド時に渡す必要がある**（下記） |
+| `SENTRY_RELEASE` | 共通（任意） | リリース識別子（git SHA など）。リリース単位の追跡に使う |
+
+`NEXT_PUBLIC_*` は実行時ではなく**ビルド時にバンドルへ埋め込まれる**。ブラウザ側を動かすには
+GitHub のリポジトリシークレット `SENTRY_DSN_FRONTEND` を設定すること（deployment.yml が
+`--build-arg` で Docker ビルドへ渡す）。未設定のままだと SDK は積まれるが初期化されず、
+バンドルだけ増えて1件も送信されない。
+
+DSN の形式にも注意。2023年以降に作られた組織の DSN は `https://oNNN.ingest.us.sentry.io/...`
+のようにリージョンが入る。CSP（`frontend/next.config.ts`）は `https://*.sentry.io` を
+許可しているのでどちらの形式でも通るが、ここを狭めるとブラウザからの送信が全部ブロックされる。
+| `APP_ENV` | 共通 | `development` / `staging` / `production`（Sentry environment） |
+
+DSN は Secrets Manager 等に置き、リポジトリには置かない。
+
+### 送信しないもの
+
+`beforeSend` で次を落とす（履歴書・チャット本文などの個人情報対策）:
+
+- リクエストボディ / Cookie / QueryString
+- `Authorization` / `X-Admin-Token` / `X-User-Token` / `X-Company-User-Token` / `X-Internal-Token`
+
+相関は既存の `X-Request-ID`（`request_id` タグ）で行う（3.1 節）。
+
+### 通知
+
+Sentry プロジェクトの Alert Rule で Discord / Slack へ転送する。
+コストアラート（#604）や CloudWatch（`slo.md`）と通知先を揃える。
+
+### 動作確認
+
+1. staging に DSN を設定してデプロイ
+2. 意図的に 500 を起こす（または Sentry の test event）
+3. Sentry Issues にイベントが届き、`request_id` タグでログと突合できること
+
+### 受け入れ条件との対応（#619）
+
+| 受け入れ条件 | 状態 |
+|---|---|
+| 本番の未処理エラーが通知される | Sentry（本節）。DSN 設定と Alert Rule が必要 |
+| 基本メトリクスがダッシュボードで確認できる | `/metrics`（3.2 節 / #1186）+ ALB CloudWatch |
+| SLOとアラートルールが文書化されている | [slo.md](./slo.md)（#1187） |
 
 ---
 

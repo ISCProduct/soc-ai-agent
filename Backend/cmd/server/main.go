@@ -7,6 +7,7 @@ import (
 	"Backend/internal/logger"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
+	"Backend/internal/observability"
 	"Backend/internal/openai"
 	"Backend/internal/queue"
 	"Backend/internal/repositories"
@@ -50,8 +51,10 @@ import (
 	"strings"
 	"time"
 
+	sentryecho "github.com/getsentry/sentry-go/echo"
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
+	echomw "github.com/labstack/echo/v4/middleware"
 )
 
 // wildcardPattern は "https://*.shukatsu-ai.jp" のようなオリジンパターンの前後を保持する。
@@ -172,6 +175,9 @@ func checkAnnotationFont() {
 func main() {
 	// 構造化ログの初期化（LOG_LEVEL / LOG_FORMAT 環境変数で制御）
 	logger.Setup()
+
+	flushSentry, sentryOn := observability.InitSentry()
+	defer flushSentry()
 
 	// PDF アノテーションフォントの存在チェック（起動時警告）
 	checkAnnotationFont()
@@ -550,6 +556,17 @@ func main() {
 
 	// グローバルミドルウェア
 	e.Use(echo.WrapMiddleware(middleware.RequestIDMiddleware))
+	// Recover は Sentry の有無に関わらず入れる。DSN 未設定のときだけ panic で
+	// 接続が切れる（観測基盤の有無でアプリの外部挙動が変わる）のを避ける。
+	//
+	// 並び順は「Recover が外、sentryecho が内」。Echo は先に Use したものが外側なので、
+	// 逆にすると Recover が先に panic を拾ってしまい、sentryecho の
+	// recoverWithSentry（スタックトレース付きで送る唯一の経路）が発火しない。
+	e.Use(echomw.Recover())
+	if sentryOn {
+		// Repanic=true で Sentry へ送ったあと再 panic させ、外側の Recover が 500 にする（#1185）
+		e.Use(sentryecho.New(sentryecho.Options{Repanic: true}))
+	}
 	e.Use(middleware.EchoRequestLogger)
 	e.Use(echo.WrapMiddleware(securityHeadersMiddleware))
 	e.Use(echo.WrapMiddleware(buildCORSMiddleware()))

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/getsentry/sentry-go"
+	sentryecho "github.com/getsentry/sentry-go/echo"
 	"github.com/labstack/echo/v4"
 )
 
@@ -84,7 +86,28 @@ func CustomHTTPErrorHandler(err error, c echo.Context) {
 		}
 	}
 
+	// 5xx のみ Sentry へ送る（4xx はクライアント起因でノイズになる）
+	if status >= http.StatusInternalServerError {
+		captureServerError(c, err)
+	}
+
 	_ = c.JSON(status, resp)
+}
+
+func captureServerError(c echo.Context, err error) {
+	hub := sentryecho.GetHubFromContext(c)
+	if hub == nil {
+		hub = sentry.CurrentHub()
+	}
+	if hub == nil {
+		return
+	}
+	hub.WithScope(func(scope *sentry.Scope) {
+		if rid := GetRequestID(c.Request().Context()); rid != "" {
+			scope.SetTag("request_id", rid)
+		}
+		hub.CaptureException(err)
+	})
 }
 
 // DefaultCodeByStatus is an exported wrapper for defaultCodeByStatus for use in external tests.

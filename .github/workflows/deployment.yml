@@ -120,6 +120,9 @@ jobs:
             (cd frontend && docker buildx build --platform linux/amd64 \
               --build-arg NODE_ENV=production \
               --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }} \
+              --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND }} \
+              --build-arg NEXT_PUBLIC_APP_ENV=staging \
+              --build-arg NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }} \
               --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging \
               --cache-to type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging,mode=max \
               -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &
@@ -501,6 +504,9 @@ jobs:
             (cd frontend && docker buildx build --platform linux/amd64 \
               --build-arg NODE_ENV=production \
               --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }} \
+              --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND }} \
+              --build-arg NEXT_PUBLIC_APP_ENV=production \
+              --build-arg NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }} \
               --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production \
               --cache-to type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production,mode=max \
               -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &
