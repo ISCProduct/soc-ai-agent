@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/internal/openai"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -90,7 +91,9 @@ JSONのみで返してください。`
   }
 }`
 
-	raw, err := c.openaiClient.ChatCompletionJSON(context.Background(), systemPrompt, userPrompt, 0.7, 1500)
+	// 未ログイン利用が仕様の経路なので主体は載らない。機能名だけ付けて費用を機能別に割る（#1294）。
+	aiCtx := usagectx.WithFeature(context.Background(), usagectx.FeatureESRewrite)
+	raw, err := c.openaiClient.ChatCompletionJSON(aiCtx, systemPrompt, userPrompt, 0.7, 1500)
 	if err != nil {
 		return echoInternalError(err)
 	}

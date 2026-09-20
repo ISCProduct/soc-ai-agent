@@ -106,7 +106,9 @@ func (c *ResumeController) Review(ctx echo.Context) error {
 		CandidateType string `json:"candidate_type"`
 		JobTitle      string `json:"job_title"`
 	}
-	ctx.Bind(&payload)
+	if err := ctx.Bind(&payload); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
 
 	log.Printf(
 		"resume_review: start document_id=%d company=%q job_title=%q candidate_type=%q",
@@ -161,7 +163,9 @@ func (c *ResumeController) ReviewStream(ctx echo.Context) error {
 		CandidateType string `json:"candidate_type"`
 		JobTitle      string `json:"job_title"`
 	}
-	ctx.Bind(&payload)
+	if err := ctx.Bind(&payload); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
 
 	log.Printf(
 		"resume_review_stream: start document_id=%d company=%q job_title=%q",

@@ -22,7 +22,10 @@ func (c *AdminProfileRecalculationController) RecalculateAll(ctx echo.Context) e
 	var req struct {
 		MinSamples int `json:"min_samples"`
 	}
-	ctx.Bind(&req)
+	// min_samples がゼロ値に落ちると、意図した閾値と違う条件で全件再計算が走る。
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
 
 	results, err := c.service.RecalculateAll(req.MinSamples)
 	if err != nil {
@@ -57,7 +60,9 @@ func (c *AdminProfileRecalculationController) RecalculateOne(ctx echo.Context) e
 	var req struct {
 		MinSamples int `json:"min_samples"`
 	}
-	ctx.Bind(&req)
+	if err := ctx.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
 
 	result, err := c.service.RecalculateCompany(companyID, req.MinSamples)
 	if err != nil {

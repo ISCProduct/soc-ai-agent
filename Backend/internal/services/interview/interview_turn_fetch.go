@@ -3,6 +3,7 @@ package interview
 import (
 	"Backend/internal/companyfetch"
 	"Backend/internal/models"
+	"Backend/internal/usagectx"
 	"context"
 	"fmt"
 	"log"
@@ -43,6 +44,7 @@ func (s *InterviewService) lookupCompanyReading(ctx context.Context, companyName
 	query := fmt.Sprintf("「%s」の正しい日本語読み（ふりがな）をカタカナで1行だけ答えてください。", companyName)
 	ctxTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	ctxTimeout = usagectx.WithFeature(ctxTimeout, usagectx.FeatureInterviewTurn)
 	result, err := s.openaiClient.ResponsesWithTemperature(ctxTimeout, systemPrompt, query, 0.0, companyfetch.ExtractModel())
 	if err != nil {
 		return ""

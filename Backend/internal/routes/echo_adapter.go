@@ -6,11 +6,13 @@ import (
 	"Backend/internal/services"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/organization"
+	"Backend/internal/usagectx"
 	"context"
 	"crypto/subtle"
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -76,6 +78,11 @@ func EchoUserAuth(userSecret string, access auth.UserAccessGuard, orgs ...Organi
 					ctx = context.WithValue(ctx, middleware.OrganizationIDContextKey, tenantOrgID)
 				}
 			}
+			// AI利用量の配賦先をここで一度だけ載せる（#1294）。
+			// 各サービスが個別にユーザー/組織を引き回さなくても、この経路の
+			// AI 呼び出しはすべて機能別・組織別に配賦できる。
+			orgID, _ := middleware.OrganizationIDFromContext(ctx)
+			ctx = usagectx.WithActor(ctx, userID, orgID)
 			c.SetRequest(c.Request().WithContext(ctx))
 			return next(c)
 		}
@@ -198,4 +205,58 @@ func EchoAdminSchoolScope(schools *services.SchoolService) echo.MiddlewareFunc {
 			return next(c)
 		}
 	}
+}
+
+// echoGuestAIRateLimit は未認証で叩けるAI呼び出し（ES添削・企業WEB検索）の
+// コスト濫用を止めるレート制限ミドルウェア（#1154）。
+// 認証を付けられない仕様のため、IP単位＋全体上限の二段で課金の総量を抑える。
+//
+// ponytail: 制限器はタスク内メモリ（prodのREDIS_URLもlocalhostサイドカーで同スコープ）。
+// backend を複数タスクへ増やす場合は共有Redisの KeyRateLimiter へ差し替えること。
+func echoGuestAIRateLimit() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ip := middleware.GetClientIP(c.Request())
+			if !middleware.GuestAIRateLimiter.Allow(ip) || !middleware.GuestAIGlobalRateLimiter.Allow("global") {
+				return echo.NewHTTPError(http.StatusTooManyRequests, "Too Many Requests: リクエスト上限に達しました。しばらく待ってから再試行してください。")
+			}
+			return next(c)
+		}
+	}
+}
+
+// EchoMetricsAuth は /metrics を Bearer トークンで保護するミドルウェア（#1186）。
+//
+// backend の ALB はインターネットに直結しているため、無防備に開けるとエンドポイント一覧・
+// リクエスト数・レイテンシ分布が誰でも読める。Prometheus の scrape_config は
+// authorization.credentials で Bearer を送れるので、標準的な形で合わせる。
+func EchoMetricsAuth(token string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			// "Bearer " 無しの素のトークンは受け付けない。TrimPrefix だと素通りしてしまう。
+			provided, ok := strings.CutPrefix(c.Request().Header.Get("Authorization"), "Bearer ")
+			// 比較時間から推測されないよう定数時間比較を使う（他の認証経路と同じ方針）。
+			if !ok || subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
+				return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+			}
+			return next(c)
+		}
+	}
+}
+
+// MetricsSkipper は /metrics の計装対象から外すリクエストを判定する（#1186）。
+//
+// ALB のヘルスチェックは30秒ごとに来るため、含めるとリクエスト数の大半を占めて
+// 実際のトラフィックが読めなくなる。
+//
+// ルートに一致しないリクエスト(404)も外す。この場合 c.Path() が空になり、
+// echoprometheus は url ラベルへ生のパスを入れる。ALB はインターネット直結で
+// スキャンを日常的に受けるため、放置するとラベルの種類が無限に増え、プロセスと
+// スクレイパのメモリを食いつぶす。404 の総数は ALB 側のメトリクスで見る。
+func MetricsSkipper(c echo.Context) bool {
+	switch c.Path() {
+	case "", "/health", "/healthz", "/metrics":
+		return true
+	}
+	return false
 }

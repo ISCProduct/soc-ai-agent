@@ -19,7 +19,11 @@ on:
     - cron: "5 * * * *" # 毎時5分(UTC)
   workflow_dispatch:
 
-permissions: {}
+# checkout(通知スクリプトの取得)と、whats-new 取り込みの gh pr list に必要な分だけ与える。
+# 以前は {} だったため、GITHUB_TOKEN で読む経路は権限不足になりうる状態だった。
+permissions:
+  contents: read
+  pull-requests: read
 
 # 同時実行を許すと、起動側(RDSのavailable待ちで最大10分ループする)と停止側が
 # すれ違い、SSMは off なのに本番が起動したまま次の毎時実行まで課金され続ける。
@@ -39,6 +43,10 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
       PROJECT_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}
     steps:
+      # 失敗通知に automation/ops/notify-discord.sh を使うため必須。
+      # checkout 漏れは automation/test/workflow-checkout-test.sh が静的に検出する。
+      - uses: actions/checkout@v4
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -225,6 +233,7 @@ jobs:
       # 本番を起動したこのタイミングで取り込み直す。ingest は pr_number で冪等、
       # かつ毎回 purge が走るので、何度呼んでも害はない。
       - name: Sync whats-new (本番起動時の取りこぼしを回収)
+        id: whatsnew
         if: steps.apply.outputs.desired == '1'
         continue-on-error: true
         env:
@@ -241,8 +250,22 @@ jobs:
             sleep 15
           done
           if [ "$CODE" != "200" ]; then
+            echo "healthy=0" >> "$GITHUB_OUTPUT"
             echo "::warning::本番backendが応答しないため更新情報の取り込みを見送ります(次回起動時に回収されます)"
             exit 0
+          fi
+          echo "healthy=1" >> "$GITHUB_OUTPUT"
+
+          # 本番の admin_secret は Secrets Manager を正とする(#1158)。
+          # 読めない場合だけリポジトリシークレットへフォールバックする(移行期間の両対応)。
+          PROD_ADMIN_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id "${PROJECT_NAME:-soc-app}/admin" --query SecretString --output text 2>/dev/null \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('admin_secret',''))" 2>/dev/null || true)
+          if [ -n "$PROD_ADMIN_SECRET" ]; then
+            echo "::add-mask::$PROD_ADMIN_SECRET"
+          else
+            echo "::warning::Secrets Manager から admin_secret を読めませんでした。リポジトリシークレットで続行します(IAMに secretsmanager:GetSecretValue を確認してください)"
+            PROD_ADMIN_SECRET="$ADMIN_SECRET"
           fi
 
           sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base main --limit 20 \
@@ -251,10 +274,37 @@ jobs:
 
           if curl -sf -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
-            -H "X-Admin-Secret: $ADMIN_SECRET" \
+            -H "X-Admin-Secret: $PROD_ADMIN_SECRET" \
             -d "{\"sources\": $sources}" \
             --max-time 60 > /dev/null; then
             echo "更新情報を取り込みました"
           else
             echo "::warning::更新情報の取り込みに失敗しました(次回起動時に回収されます)"
           fi
+
+      # 「起動したのに backend が上がってこない」は最も重要な事象なのに、
+      # 上のステップは continue-on-error + warning で成功扱いになっていた(#1354)。
+      # ジョブの失敗へ昇格させ、下の通知に乗せる。
+      - name: 起動日にbackendが応答しない場合は失敗させる
+        if: steps.apply.outputs.desired == '1' && steps.whatsnew.outputs.healthy != '1'
+        run: |
+          echo "本番を起動しましたが backend の /health が 200 を返しませんでした" > "$RUNNER_TEMP/alert-reason.txt"
+          echo "::error::本番を起動しましたが backend の /health が 200 を返しませんでした"
+          exit 1
+
+      # schedule で動くジョブは誰も結果を見ない。失敗を人へ届ける唯一の経路。
+      # concurrency の cancel-in-progress によるキャンセルは failure() に含まれない(通知されない)。
+      - name: 失敗をDiscordへ通知
+        if: failure()
+        env:
+          DISCORD_OPS_WEBHOOK_URL: ${{ secrets.DISCORD_OPS_WEBHOOK_URL }}
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+        run: |
+          REASON=""
+          if [ -f "$RUNNER_TEMP/alert-reason.txt" ]; then
+            REASON=$(cat "$RUNNER_TEMP/alert-reason.txt")
+          fi
+          ./automation/ops/notify-discord.sh "@here ❌ **本番の起動/停止ジョブが失敗しました**
+          ${REASON}
+          稼働日であれば本番が起動していない可能性があります。/prod state:on で手動起動できます。
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

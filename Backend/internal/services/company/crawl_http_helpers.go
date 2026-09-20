@@ -86,12 +86,21 @@ func fetchText(url string) (string, error) {
 	return string(body), nil
 }
 
+// Goの正規表現(RE2)は後方参照を持たないため、`<(script|style)...</\1>` は
+// コンパイル時に panic する。script と style を交替で個別に書く。
+// あわせてコンパイルを1回で済ませる(呼ばれるたびに3本コンパイルしていた)。
+var (
+	scriptStyleBlockRe = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>|<style[^>]*>.*?</style>`)
+	htmlTagRe          = regexp.MustCompile(`(?is)<[^>]+>`)
+	whitespaceRunRe    = regexp.MustCompile(`\s+`)
+)
+
 func normalizeHTMLText(rawHTML string) string {
-	clean := regexp.MustCompile(`(?is)<(script|style)[^>]*>.*?</\1>`).ReplaceAllString(rawHTML, " ")
-	clean = regexp.MustCompile(`(?is)<[^>]+>`).ReplaceAllString(clean, " ")
+	clean := scriptStyleBlockRe.ReplaceAllString(rawHTML, " ")
+	clean = htmlTagRe.ReplaceAllString(clean, " ")
 	clean = html.UnescapeString(clean)
 	clean = strings.ReplaceAll(clean, "\u00a0", " ")
-	clean = regexp.MustCompile(`\s+`).ReplaceAllString(clean, " ")
+	clean = whitespaceRunRe.ReplaceAllString(clean, " ")
 	return strings.TrimSpace(clean)
 }
 
