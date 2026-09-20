@@ -6,6 +6,7 @@ import (
 	"Backend/internal/openai"
 	"Backend/internal/services/company"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
@@ -274,6 +275,7 @@ func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Con
 	ctxTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	ctxTimeout = usagectx.WithFeature(ctxTimeout, usagectx.FeatureCompanySearch)
 	text, err := ctrl.openaiClient.ChatCompletionJSON(ctxTimeout, systemPrompt, userPrompt, 0.2, 500, companyfetch.ExtractModel())
 	if err != nil {
 		return []map[string]string{}

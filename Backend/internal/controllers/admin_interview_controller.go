@@ -8,6 +8,7 @@ import (
 	"Backend/internal/services/auth"
 	"Backend/internal/services/interview"
 	"Backend/internal/services/storage"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
@@ -296,6 +297,7 @@ JSON配列形式のみで回答（説明文不要）:
 		positionSummary,
 	)
 
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport)
 	jsonStr, err := c.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.7, 2000)
 	if err != nil {
 		return nil, err

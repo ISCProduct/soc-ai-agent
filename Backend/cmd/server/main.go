@@ -26,6 +26,7 @@ import (
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/gbizinfo"
 	"Backend/internal/services/github"
+	"Backend/internal/services/houjinbangou"
 	"Backend/internal/services/hr"
 	"Backend/internal/services/interview"
 	"Backend/internal/services/matching"
@@ -38,6 +39,7 @@ import (
 	"Backend/internal/services/skillscore"
 	"Backend/internal/services/storage"
 	"Backend/internal/services/teacher"
+	"Backend/internal/services/training"
 	"Backend/migrations"
 	"context"
 	"log"
@@ -47,6 +49,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 )
 
@@ -320,12 +323,20 @@ func main() {
 	infoFetcher := company.NewCompanyInfoFetcher(companyRepo, aiClient, gbizInfoService)
 	infoFetcher.SetSearchBudget(companySearchBudget)
 	infoFetcher.SetSearchFlight(companySearchFlight)
+	// web_search は検索結果が固定8,000トークン/callで課金される。info/relations/tech が
+	// 別々に検索すると1社あたり3回分かかるため、検索結果を共有して1回に寄せる(#1124)。
+	companySharedSearch := company.NewSearchContext()
+	infoFetcher.SetSharedSearch(companySharedSearch)
 	// 関連企業として新規作成された会社(gbizinfo経由/AI検索経由の両方)にも
 	// infoFetcherで詳細情報を充填する(空データの企業が量産される問題への対応)。
 	gbizInfoService.SetDetailFetcher(infoFetcher)
+	// gBizINFO は法人番号が無いと何も引けない。商号しか分かっていない企業のために、
+	// 国税庁 法人番号システムで法人番号を特定できるようにする(未設定なら無効)。
+	gbizInfoService.SetCorporateNumberFinder(houjinbangou.NewClientFromEnv())
 	relationsFetcher := company.NewCompanyRelationsFetcher(companyRepo, companyRelationRepo, aiClient, gbizInfoService)
 	relationsFetcher.SetSearchBudget(companySearchBudget)
 	relationsFetcher.SetSearchFlight(companySearchFlight)
+	relationsFetcher.SetSharedSearch(companySharedSearch)
 	relationsFetcher.SetInfoFetcher(infoFetcher)
 	jobFetcher := company.NewJobFetchService(companyRepo, aiClient)
 	jobFetcher.SetSearchBudget(companySearchBudget)
@@ -408,15 +419,21 @@ func main() {
 	resumeService.SetCompanyProvisioner(infoFetcher)
 	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
+	// コンストラクタが自前生成した infoFetcher には SetSharedSearch が掛からない。
+	// 共有済みのものに差し替えないと、fetch-missing-batch で検索が統合されない(#1124)。
+	adminCompanyController.SetInfoFetcher(infoFetcher)
 	adminCompanyController.SetRelationsFetcher(relationsFetcher)
 	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
 	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
 	adminAuditController := controllers.NewAdminAuditController(auditLogService)
 	// gBizINFO 公式 API を使った企業データ収集パイプライン
 	// Mynavi・Rikunabi・CareerTasu スクレイパーは利用規約違反リスクのため削除 (#178)
-	gbizToken := os.Getenv("GBIZINFO_API_TOKEN")
+	// 環境変数名の解決は config.LoadConfig に一本化する。
+	// ここで os.Getenv("GBIZINFO_API_TOKEN") を直接読んでいたため、
+	// GBIZINFO_API_KEY しか設定していない本番・staging では空文字が渡り、
+	// 企業グラフの gBizINFO 取得だけが 401 になっていた。
 	companyGraphPipeline := &scraper.Pipeline{
-		GBiz:      scraper.NewGBizClient("", gbizToken),
+		GBiz:      scraper.NewGBizClient("", cfg.GBizInfoToken),
 		Threshold: config.CompanyGraphThreshold(),
 	}
 	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService, aiClient)
@@ -531,6 +548,20 @@ func main() {
 	e.Use(echo.WrapMiddleware(buildCORSMiddleware()))
 	e.Use(routes.EchoTenantResolver(organizationService))
 
+	// メトリクス（#1186）。METRICS_TOKEN が未設定なら計装も公開もしない。
+	// 本番の backend ALB はインターネット直結なので、既定で開けたままにはしない。
+	// 取得方法は docs/wiki/operations.md「メトリクスを見る」を参照。
+	if metricsToken := strings.TrimSpace(os.Getenv("METRICS_TOKEN")); metricsToken != "" {
+		e.Use(echoprometheus.NewMiddlewareWithConfig(echoprometheus.MiddlewareConfig{
+			Subsystem: "backend",
+			// 除外理由は routes.MetricsSkipper のコメントを参照（ヘルスチェックと
+			// ルート未一致リクエストのラベル爆発を避ける）。
+			Skipper: routes.MetricsSkipper,
+		}))
+		e.GET("/metrics", echoprometheus.NewHandler(), routes.EchoMetricsAuth(metricsToken))
+		log.Println("[metrics] /metrics を有効化しました（Bearer 認証）")
+	}
+
 	// ヘルスチェックエンドポイント
 	// /healthz は ECS ターゲットグループ・ALB・Kubernetes の標準パス
 	// /health は後方互換のため維持
@@ -570,6 +601,13 @@ func main() {
 	adminEntry.POST("/companies/:id/company-users", adminCompanyUserController.Invite)
 	adminEntry.GET("/companies/:id/company-users", adminCompanyUserController.List)
 	adminEntry.PATCH("/companies/:id/company-users/:userID", adminCompanyUserController.SetDisabled)
+	// 学習データのエクスポート(#268)。候補者の発話と選考結果を含むため管理者のみ。
+	adminTrainingController := controllers.NewAdminTrainingController(training.NewService(db))
+	// stats は件数しか返さない(個人情報を含まない)。運用から機械的に叩けるよう、
+	// whats-new/ingest と同じサービス間認証にする。管理者になりすます形を避ける。
+	api.GET("/admin/training/stats", adminTrainingController.Stats, routes.EchoStaticSecretAuth(cfg.AdminSecret))
+	// export は候補者の発話と選考結果を返すので、管理者本人の認証を要求する。
+	adminEntry.GET("/training/export", adminTrainingController.Export)
 	// CI(GitHub Actions)からのマシン間呼び出しのため、ログインユーザー前提のEchoAdminAuthではなく
 	// 共有シークレットのみで認証する(#861)
 	api.POST("/admin/whats-new/ingest", releaseNoteController.Ingest, routes.EchoStaticSecretAuth(cfg.AdminSecret))

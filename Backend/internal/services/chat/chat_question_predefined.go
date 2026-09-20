@@ -20,29 +20,43 @@ func (s *ChatService) tryGetPredefinedQuestion(userID uint, sessionID string, pr
 		return nil, err
 	}
 
-	// 職種に合う質問のみ残す（汎用質問はAIに任せる）
-	jobSpecificQuestions := make([]*models.PredefinedQuestion, 0, len(allQuestions))
+	// 職種固有の質問を優先しつつ、汎用質問(job_category_id IS NULL)も使う。
+	//
+	// 以前はここで汎用質問を捨てていた（「汎用はAIに任せる」という方針）。
+	// しかし事前定義質問11問のうち職種に紐づくのは技術志向の2問だけで、
+	// 残り9問（安定志向・ワークライフバランスを含む）が丸ごと使われず、
+	// 採点ルール付きの質問があるのに毎回AI生成へ落ちていた(#1333)。
+	//
+	// 汎用でも「その軸を測る」目的は果たせる。職種固有があればそちらを選ぶ、
+	// という優先順位だけ残して捨てるのはやめる。
+	betterThan := func(a, b *models.PredefinedQuestion) bool {
+		if b == nil {
+			return true
+		}
+		aSpecific := a.JobCategoryID != nil && *a.JobCategoryID == jobCategoryID
+		bSpecific := b.JobCategoryID != nil && *b.JobCategoryID == jobCategoryID
+		if aSpecific != bSpecific {
+			return aSpecific // 職種固有が勝つ
+		}
+		if a.Priority != b.Priority {
+			return a.Priority > b.Priority
+		}
+		return a.ID < b.ID
+	}
+
+	var selected *models.PredefinedQuestion
 	for _, q := range allQuestions {
-		if q.JobCategoryID == nil || *q.JobCategoryID != jobCategoryID {
+		// 他職種向けの質問は対象外。汎用(nil)は残す。
+		if q.JobCategoryID != nil && *q.JobCategoryID != jobCategoryID {
 			continue
 		}
-		jobSpecificQuestions = append(jobSpecificQuestions, q)
-	}
-
-	if len(jobSpecificQuestions) == 0 {
-		return nil, nil
-	}
-
-	// 優先カテゴリで質問を検索（該当がなければAIに任せる）
-	var selected *models.PredefinedQuestion
-	for _, q := range jobSpecificQuestions {
 		if _, asked := askedTexts[q.QuestionText]; asked {
 			continue
 		}
 		if prioritizeCategory != "" && q.Category != prioritizeCategory {
 			continue
 		}
-		if selected == nil || q.Priority > selected.Priority || (q.Priority == selected.Priority && q.ID < selected.ID) {
+		if betterThan(q, selected) {
 			selected = q
 		}
 	}

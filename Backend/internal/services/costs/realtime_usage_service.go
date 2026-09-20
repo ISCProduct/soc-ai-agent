@@ -40,11 +40,14 @@ type realtimeTokenRates struct {
 
 func loadTokenRates() realtimeTokenRates {
 	return realtimeTokenRates{
-		textInput:        shared.GetFloatEnv("REALTIME_TEXT_INPUT_COST_PER_1M_USD", 5.0),
-		textOutput:       shared.GetFloatEnv("REALTIME_TEXT_OUTPUT_COST_PER_1M_USD", 15.0),
-		audioInput:       shared.GetFloatEnv("REALTIME_AUDIO_INPUT_COST_PER_1M_USD", 100.0),
-		audioOutput:      shared.GetFloatEnv("REALTIME_AUDIO_OUTPUT_COST_PER_1M_USD", 200.0),
-		cachedAudioInput: shared.GetFloatEnv("REALTIME_CACHED_AUDIO_INPUT_COST_PER_1M_USD", 20.0),
+		textInput:  shared.GetFloatEnv("REALTIME_TEXT_INPUT_COST_PER_1M_USD", 5.0),
+		textOutput: shared.GetFloatEnv("REALTIME_TEXT_OUTPUT_COST_PER_1M_USD", 15.0),
+		// 音声の既定単価は旧価格のまま残っていた（#1193 の未完了タスク / #1294 DesignDoc §3.4）。
+		// 旧値のままだと Realtime のコストを実際の3倍以上に見積もることになり、
+		// 「ローカル化でいくら減ったか」の判断材料が狂う。
+		audioInput:       shared.GetFloatEnv("REALTIME_AUDIO_INPUT_COST_PER_1M_USD", 32.0),
+		audioOutput:      shared.GetFloatEnv("REALTIME_AUDIO_OUTPUT_COST_PER_1M_USD", 64.0),
+		cachedAudioInput: shared.GetFloatEnv("REALTIME_CACHED_AUDIO_INPUT_COST_PER_1M_USD", 0.40),
 	}
 }
 

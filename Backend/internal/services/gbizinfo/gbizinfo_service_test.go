@@ -19,7 +19,7 @@ func TestGBizInfoServiceFetchProcurementsKeepsJointSignatures(t *testing.T) {
 		baseURL: "https://gbiz.example",
 		token:   "test-token",
 		client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-			if r.URL.Path != "/v2/hojin/1234567890123/procurement" {
+			if r.URL.Path != "/v1/hojin/1234567890123/procurement" {
 				t.Fatalf("unexpected path: %s", r.URL.Path)
 			}
 			if got := r.Header.Get("X-hojinInfo-api-token"); got != "test-token" {
@@ -63,7 +63,7 @@ func TestGBizInfoServiceFetchSubsidiesKeepsJointSignatures(t *testing.T) {
 		baseURL: "https://gbiz.example",
 		token:   "test-token",
 		client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-			if r.URL.Path != "/v2/hojin/1234567890123/subsidy" {
+			if r.URL.Path != "/v1/hojin/1234567890123/subsidy" {
 				t.Fatalf("unexpected path: %s", r.URL.Path)
 			}
 			body := `{

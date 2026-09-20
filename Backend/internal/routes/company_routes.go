@@ -12,9 +12,10 @@ func SetupCompanyRoutes(api *echo.Group, relationController *controllers.Company
 	companies.GET("", relationController.GetCompanies)
 	companies.GET("/relations", relationController.GetAllCompanyRelations)
 	companies.GET("/market-info", relationController.GetAllMarketInfo)
-	companies.GET("/web-search", relationController.WebSearchCompanies)
+	// OpenAI WebSearch を呼ぶ未認証経路。コスト濫用をレート制限で止める（#1154）
+	companies.GET("/web-search", relationController.WebSearchCompanies, echoGuestAIRateLimit())
 	companies.GET("/brief", relationController.GetCompanyBrief)
-	companies.POST("/validate", relationController.ValidateCompany)
+	companies.POST("/validate", relationController.ValidateCompany, echoGuestAIRateLimit())
 	// 固定パスを :id より先に登録してEchoが優先解決する（順序は不問だがドキュメント目的で明示）
 	companies.GET("/:id", relationController.GetCompanyByID)
 	companies.GET("/:id/job-positions", relationController.GetCompanyJobPositions)

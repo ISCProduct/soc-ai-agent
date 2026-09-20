@@ -11,7 +11,9 @@ on:
     - cron: "10 * * * *" # 毎時10分(UTC)。本番(5分)とずらして権限エラーを見分けやすくする
   workflow_dispatch:
 
-permissions: {}
+# checkout(通知スクリプトの取得)に必要な分だけ与える。
+permissions:
+  contents: read
 
 # 起動と停止がすれ違うと、SSMは off なのにインスタンスが上がったままになる。
 # cancel-in-progress で「最後の指示が勝つ」ようにする。
@@ -28,6 +30,9 @@ jobs:
       STAGING_ASG_NAME: ${{ vars.STAGING_ASG_NAME || 'soc-stg-app' }}
       STAGING_DB_ID: ${{ vars.STAGING_DB_ID || 'soc-stg-mysql' }}
     steps:
+      # 失敗通知に automation/ops/notify-discord.sh を使うため必須。
+      - uses: actions/checkout@v4
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -144,3 +149,15 @@ jobs:
           aws rds describe-db-instances --db-instance-identifier "$STAGING_DB_ID" \
             --query 'DBInstances[0].{DB:DBInstanceIdentifier,Status:DBInstanceStatus}' \
             --output table
+
+      # 毎時の schedule 実行は誰も結果を見ない。SSM の権限エラーで毎時失敗し続け、
+      # 停止したステージングが上がらないまま放置される事故を防ぐ(#1354)。
+      - name: 失敗をDiscordへ通知
+        if: failure()
+        env:
+          DISCORD_OPS_WEBHOOK_URL: ${{ secrets.DISCORD_OPS_WEBHOOK_URL }}
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+        run: |
+          ./automation/ops/notify-discord.sh "⚠️ **ステージングの起動/停止ジョブが失敗しました**
+          /staging state:on を打っても復旧しない状態になっている可能性があります。
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

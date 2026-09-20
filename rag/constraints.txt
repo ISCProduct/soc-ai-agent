@@ -47,3 +47,10 @@ tiktoken>=0.13.0,<0.14
 # openai SDK との互換性が確認された 0.28.x 系列に固定。
 # 0.29.x 以降は再検証が必要なため上限を設定。
 httpx>=0.28.1,<0.29
+
+# --- メトリクス（#1186） ---
+# /metrics の公開に使用。8.x を fastapi 0.141.1 と組み合わせて動作確認済み。
+# 9.x は未検証のため上限を設定する。
+prometheus-fastapi-instrumentator>=8.1.0,<9.0
+# 上記の推移的依存。Prometheus テキスト形式の互換を保つため 0.x 系に固定。
+prometheus-client>=0.21,<1.0
