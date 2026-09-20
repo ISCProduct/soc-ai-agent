@@ -1,4 +1,4 @@
-package controllers
+package resume
 
 import (
 	"Backend/internal/controllers/httpapi"

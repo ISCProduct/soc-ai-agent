@@ -1,4 +1,4 @@
-package controllers
+package insight
 
 import (
 	"Backend/internal/controllers/httpapi"

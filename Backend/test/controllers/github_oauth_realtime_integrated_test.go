@@ -12,9 +12,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
 	authcontrollers "Backend/internal/controllers/auth"
+	githubcontrollers "Backend/internal/controllers/github"
 	interviewcontrollers "Backend/internal/controllers/interview"
+	usercontrollers "Backend/internal/controllers/user"
 	"Backend/internal/models"
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/shared"
@@ -26,8 +27,8 @@ import (
 
 // ========== GitHubController ==========
 
-func newGitHubController(gh *mocks.GitHubServiceMock, ss *mocks.SkillScoreServiceMock) *controllers.GitHubController {
-	return controllers.NewGitHubController(gh, ss)
+func newGitHubController(gh *mocks.GitHubServiceMock, ss *mocks.SkillScoreServiceMock) *githubcontrollers.GitHubController {
+	return githubcontrollers.NewGitHubController(gh, ss)
 }
 
 // ---- GetProfile ----
@@ -399,8 +400,8 @@ func newIntegratedProfileController(
 	cf *mocks.CrossFeatureServiceMock,
 	sc *mocks.InterviewSessionCounterMock,
 	rd *mocks.ResumeDocumentFinderMock,
-) *controllers.IntegratedProfileController {
-	return controllers.NewIntegratedProfileController(cf, sc, rd)
+) *usercontrollers.IntegratedProfileController {
+	return usercontrollers.NewIntegratedProfileController(cf, sc, rd)
 }
 
 // user_idは認証済みユーザーID(EchoUserAuth経由のリクエストコンテキスト)から取得する。

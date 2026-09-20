@@ -1,4 +1,4 @@
-package controllers
+package release
 
 import (
 	"Backend/internal/controllers/httpapi"

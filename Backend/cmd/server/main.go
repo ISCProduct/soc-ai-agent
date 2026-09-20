@@ -2,13 +2,19 @@ package main
 
 import (
 	"Backend/internal/config"
-	"Backend/internal/controllers"
 	admincontrollers "Backend/internal/controllers/admin"
+	applicationcontrollers "Backend/internal/controllers/application"
 	authcontrollers "Backend/internal/controllers/auth"
 	chatcontrollers "Backend/internal/controllers/chat"
 	companycontrollers "Backend/internal/controllers/company"
 	escontrollers "Backend/internal/controllers/es"
+	githubcontrollers "Backend/internal/controllers/github"
+	insightcontrollers "Backend/internal/controllers/insight"
 	interviewcontrollers "Backend/internal/controllers/interview"
+	releasecontrollers "Backend/internal/controllers/release"
+	resumecontrollers "Backend/internal/controllers/resume"
+	schedulecontrollers "Backend/internal/controllers/schedule"
+	usercontrollers "Backend/internal/controllers/user"
 	"Backend/internal/infrastructure/redisx"
 	"Backend/internal/logger"
 	"Backend/internal/middleware"
@@ -458,7 +464,7 @@ func main() {
 	}
 	adminCompanyGraphController := admincontrollers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService, aiClient)
 	adminCompanyGraphController.SetRelationsFetcher(relationsFetcher)
-	resumeController := controllers.NewResumeController(resumeService)
+	resumeController := resumecontrollers.NewResumeController(resumeService)
 
 	// S3 upload service for interview videos (optional — skipped if env vars are not set)
 	s3UploadService, s3Err := storage.NewS3UploadService()
@@ -504,8 +510,8 @@ func main() {
 	companyPortalController := companycontrollers.NewCompanyPortalController(companyUserService)
 	adminCompanyUserController := companycontrollers.NewAdminCompanyUserController(companyUserService)
 	releaseNoteService := release.NewReleaseNoteService(db, aiClient)
-	releaseNoteController := controllers.NewReleaseNoteController(releaseNoteService, userRepo)
-	githubController := controllers.NewGitHubController(githubService, skillScoreService)
+	releaseNoteController := releasecontrollers.NewReleaseNoteController(releaseNoteService, userRepo)
+	githubController := githubcontrollers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := escontrollers.NewESRewriteController(aiClient)
 	scheduleRepo := repositories.NewScheduleRepository(db)
 	scheduleService := schedule.NewScheduleService(scheduleRepo)
@@ -513,11 +519,11 @@ func main() {
 	googleTokenRepo := repositories.NewUserGoogleTokenRepository(db)
 	calendarSyncService := schedule.NewCalendarSyncService(googleTokenRepo, scheduleRepo, oauthConfig)
 	scheduleService.SetCalendarSyncService(calendarSyncService)
-	googleCalendarController := controllers.NewGoogleCalendarController(calendarSyncService)
-	scheduleController := controllers.NewScheduleController(scheduleService)
+	googleCalendarController := schedulecontrollers.NewGoogleCalendarController(calendarSyncService)
+	scheduleController := schedulecontrollers.NewScheduleController(scheduleService)
 	esReviewController := escontrollers.NewESReviewController()
 	appService := application.NewApplicationService(appStatusRepo, matchRepo, db)
-	appController := controllers.NewApplicationController(appService)
+	appController := applicationcontrollers.NewApplicationController(appService)
 	appController.SetSchoolAccess(schoolService)
 	hrStudentAnalysisService := hr.NewStudentAnalysisService(
 		db,
@@ -529,7 +535,7 @@ func main() {
 		interviewReportRepo,
 		resumeRepo,
 	)
-	hrStudentAnalysisController := controllers.NewHRStudentAnalysisController(hrStudentAnalysisService)
+	hrStudentAnalysisController := applicationcontrollers.NewHRStudentAnalysisController(hrStudentAnalysisService)
 	// 企業ポータルの学生検索・タグ管理 (#1094)
 	studentSearchRepo := repositories.NewStudentSearchRepository(db)
 	companyStudentTagRepo := repositories.NewCompanyStudentTagRepository(db)
@@ -541,16 +547,16 @@ func main() {
 	// 希望条件の保存とプロフィール更新の両方から同じ同期処理を呼ぶ (#1094)
 	scoutIndexSyncer := hr.NewStudentIndexSyncer(userPreferenceRepo, studentSemanticClient)
 	authService.SetScoutIndexSyncer(scoutIndexSyncer)
-	userPreferenceController := controllers.NewUserPreferenceController(userPreferenceRepo, scoutIndexSyncer, industryRepo)
-	integratedProfileController := controllers.NewIntegratedProfileController(crossFeatureService, interviewSessionRepo, resumeRepo)
-	entitlementController := controllers.NewEntitlementController(organizationService)
+	userPreferenceController := usercontrollers.NewUserPreferenceController(userPreferenceRepo, scoutIndexSyncer, industryRepo)
+	integratedProfileController := usercontrollers.NewIntegratedProfileController(crossFeatureService, interviewSessionRepo, resumeRepo)
+	entitlementController := usercontrollers.NewEntitlementController(organizationService)
 	scoreValidationRepo := repositories.NewScoreValidationRepository(db)
 	scoreValidationService := admin.NewScoreValidationService(scoreValidationRepo)
 	scoreValidationController := admincontrollers.NewAdminScoreValidationController(scoreValidationService)
 	diagnosisQualityController := admincontrollers.NewAdminDiagnosisQualityController(diagnosisQualityRepo)
 	collectiveInsightRepo := repositories.NewCollectiveInsightRepository(db)
 	collectiveInsightService := flywheel.NewCollectiveInsightService(collectiveInsightRepo, userWeightScoreRepo)
-	collectiveInsightController := controllers.NewCollectiveInsightController(collectiveInsightService)
+	collectiveInsightController := insightcontrollers.NewCollectiveInsightController(collectiveInsightService)
 	scraperSessionService := admin.NewScraperSessionService(scraperSessionRepo)
 	scraperSessionController := admincontrollers.NewAdminScraperSessionController(scraperSessionService)
 
@@ -613,7 +619,7 @@ func main() {
 	teacherInsightService := teacher.NewStudentInsightService(userRepo, userWeightScoreRepo, industryRepo, industryWeightProfileRepo)
 	// 低マッチのまま進行中の応募を教員一覧に出す（#1028）
 	teacherInsightService.SetLowMatchReader(appStatusRepo)
-	teacherInsightController := controllers.NewTeacherStudentInsightController(teacherInsightService)
+	teacherInsightController := insightcontrollers.NewTeacherStudentInsightController(teacherInsightService)
 	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, userRepo, schoolService, cfg.AdminSecret)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService)

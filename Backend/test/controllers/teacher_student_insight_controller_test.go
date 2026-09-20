@@ -16,7 +16,7 @@ import (
 	"testing"
 
 	"Backend/domain/entity"
-	"Backend/internal/controllers"
+	insightcontrollers "Backend/internal/controllers/insight"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
@@ -52,8 +52,8 @@ type noopProfiles struct{}
 
 func (noopProfiles) ListAll() ([]models.IndustryWeightProfile, error) { return nil, nil }
 
-func newInsightController(lister teacher.StudentLister) *controllers.TeacherStudentInsightController {
-	return controllers.NewTeacherStudentInsightController(
+func newInsightController(lister teacher.StudentLister) *insightcontrollers.TeacherStudentInsightController {
+	return insightcontrollers.NewTeacherStudentInsightController(
 		teacher.NewStudentInsightService(lister, noopScores{}, noopIndustries{}, noopProfiles{}),
 	)
 }

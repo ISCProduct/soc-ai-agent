@@ -1,4 +1,4 @@
-package controllers
+package insight
 
 import (
 	"net/http"
