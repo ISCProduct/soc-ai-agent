@@ -4,9 +4,9 @@ import (
 	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/middleware"
-	"Backend/internal/services"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/interfaces"
+	"Backend/internal/services/school"
 	"errors"
 	"net/http"
 	"strconv"
@@ -23,7 +23,7 @@ type AdminUserController struct {
 	repo     repository.UserRepository
 	audit    interfaces.AuditLogService
 	deletion *auth.UserDeletionService
-	schools  *services.SchoolService
+	schools  *school.SchoolService
 }
 
 func NewAdminUserController(repo repository.UserRepository, audit interfaces.AuditLogService) *AdminUserController {
@@ -36,7 +36,7 @@ func (c *AdminUserController) SetDeletionService(deletion *auth.UserDeletionServ
 }
 
 // SetSchoolService は担当校スコープの検証に使うサービスを設定する(#980/#981)
-func (c *AdminUserController) SetSchoolService(schools *services.SchoolService) {
+func (c *AdminUserController) SetSchoolService(schools *school.SchoolService) {
 	c.schools = schools
 }
 

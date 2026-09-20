@@ -7,12 +7,12 @@ import (
 	"Backend/internal/logger"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
+	"Backend/internal/observability"
 	"Backend/internal/openai"
 	"Backend/internal/queue"
 	"Backend/internal/repositories"
 	"Backend/internal/routes"
 	"Backend/internal/scraper"
-	"Backend/internal/services"
 	"Backend/internal/services/admin"
 	"Backend/internal/services/analysis"
 	"Backend/internal/services/application"
@@ -20,6 +20,7 @@ import (
 	"Backend/internal/services/chat"
 	"Backend/internal/services/company"
 	"Backend/internal/services/companyauth"
+	"Backend/internal/services/companyportal"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/diagnosis"
 	"Backend/internal/services/email"
@@ -33,8 +34,10 @@ import (
 	"Backend/internal/services/oauth"
 	"Backend/internal/services/organization"
 	"Backend/internal/services/refreshtoken"
+	"Backend/internal/services/release"
 	"Backend/internal/services/resume"
 	"Backend/internal/services/schedule"
+	"Backend/internal/services/school"
 	"Backend/internal/services/shared"
 	"Backend/internal/services/skillscore"
 	"Backend/internal/services/storage"
@@ -49,8 +52,10 @@ import (
 	"strings"
 	"time"
 
+	sentryecho "github.com/getsentry/sentry-go/echo"
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
+	echomw "github.com/labstack/echo/v4/middleware"
 )
 
 // wildcardPattern は "https://*.shukatsu-ai.jp" のようなオリジンパターンの前後を保持する。
@@ -171,6 +176,9 @@ func checkAnnotationFont() {
 func main() {
 	// 構造化ログの初期化（LOG_LEVEL / LOG_FORMAT 環境変数で制御）
 	logger.Setup()
+
+	flushSentry, sentryOn := observability.InitSentry()
+	defer flushSentry()
 
 	// PDF アノテーションフォントの存在チェック（起動時警告）
 	checkAnnotationFont()
@@ -298,7 +306,7 @@ func main() {
 	// 全トラフィックが従量課金へ移る。日次/月次のUSD上限と分間レートで打ち切る(#1293)
 	aiClient.SetFallbackGuard(costs.NewOpenAIFallbackGuard(apiCallLogRepo))
 	schoolRepo := repositories.NewSchoolRepository(db)
-	schoolService := services.NewSchoolService(schoolRepo)
+	schoolService := school.NewSchoolService(schoolRepo)
 	authService := auth.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	authService.SetDB(db)
 	authService.SetSchoolRepo(schoolRepo)
@@ -385,6 +393,7 @@ func main() {
 	// クロス機能連携サービス（チャットスコア↔面接/職務経歴書レビュー）
 	crossFeatureService := flywheel.NewCrossFeatureIntegrationService(userWeightScoreRepo)
 	interviewService.SetCrossFeatureService(crossFeatureService)
+	interviewService.SetMatchingRunner(matchingService)
 	interviewService.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
@@ -397,12 +406,13 @@ func main() {
 	// コントローラー層の初期化
 	organizationRepo := repositories.NewOrganizationRepository(db)
 	organizationService := organization.NewOrganizationService(organizationRepo)
-	authController := controllers.NewAuthController(authService)
+	authController := controllers.NewAuthController(authService, cfg.UserSecret)
 	oauthController := controllers.NewOAuthController(oauthService, organizationService)
 	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	if jobEnqueuer != nil {
 		chatController.SetJobEnqueuer(jobEnqueuer)
 	}
+	chatController.SetDiagnosisQualityRepo(diagnosisQualityRepo)
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := controllers.NewCompanyRelationController(companyQueryRepo, aiClient)
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
@@ -419,6 +429,10 @@ func main() {
 	resumeService.SetCompanyProvisioner(infoFetcher)
 	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
+	adminCompanyController.SetSchoolRestrictionChecker(func(adminUserID uint) (bool, error) {
+		restricted, _, err := schoolService.ResolveAdminAccess(adminUserID)
+		return restricted, err
+	})
 	// コンストラクタが自前生成した infoFetcher には SetSharedSearch が掛からない。
 	// 共有済みのものに差し替えないと、fetch-missing-batch で検索が統合されない(#1124)。
 	adminCompanyController.SetInfoFetcher(infoFetcher)
@@ -474,7 +488,7 @@ func main() {
 	adminVectorController := controllers.NewAdminVectorController(admin.NewAdminVectorService())
 	profileRecalcService := flywheel.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
 	profileRecalcController := controllers.NewAdminProfileRecalculationController(profileRecalcService)
-	companyEntryService := services.NewCompanyEntryService(db, userRepo, pendingRegistrationRepo, emailService)
+	companyEntryService := company.NewCompanyEntryService(db, userRepo, pendingRegistrationRepo, emailService)
 	authService.SetCompanyOwnershipClaimer(companyEntryService)
 	companyEntryController := controllers.NewCompanyEntryController(companyEntryService)
 	companyUserRepo := repositories.NewCompanyUserRepository(db)
@@ -483,7 +497,7 @@ func main() {
 	companyAuthController := controllers.NewCompanyAuthController(companyUserService)
 	companyPortalController := controllers.NewCompanyPortalController(companyUserService)
 	adminCompanyUserController := controllers.NewAdminCompanyUserController(companyUserService)
-	releaseNoteService := services.NewReleaseNoteService(db, aiClient)
+	releaseNoteService := release.NewReleaseNoteService(db, aiClient)
 	releaseNoteController := controllers.NewReleaseNoteController(releaseNoteService, userRepo)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := controllers.NewESRewriteController(aiClient)
@@ -543,6 +557,17 @@ func main() {
 
 	// グローバルミドルウェア
 	e.Use(echo.WrapMiddleware(middleware.RequestIDMiddleware))
+	// Recover は Sentry の有無に関わらず入れる。DSN 未設定のときだけ panic で
+	// 接続が切れる（観測基盤の有無でアプリの外部挙動が変わる）のを避ける。
+	//
+	// 並び順は「Recover が外、sentryecho が内」。Echo は先に Use したものが外側なので、
+	// 逆にすると Recover が先に panic を拾ってしまい、sentryecho の
+	// recoverWithSentry（スタックトレース付きで送る唯一の経路）が発火しない。
+	e.Use(echomw.Recover())
+	if sentryOn {
+		// Repanic=true で Sentry へ送ったあと再 panic させ、外側の Recover が 500 にする（#1185）
+		e.Use(sentryecho.New(sentryecho.Options{Repanic: true}))
+	}
 	e.Use(middleware.EchoRequestLogger)
 	e.Use(echo.WrapMiddleware(securityHeadersMiddleware))
 	e.Use(echo.WrapMiddleware(buildCORSMiddleware()))
@@ -591,7 +616,21 @@ func main() {
 	routes.SetupScheduleRoutes(api, scheduleController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupApplicationRoutes(api, appController, hrStudentAnalysisController, cfg.UserSecret, userDeletionService, organizationService)
-	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, cfg.CompanyUserSecret, companyUserRepo)
+	// 企業ポータルのダッシュボードと応募者管理 (#1320)。
+	// 応募・求人・学生の集計はそれぞれ既存のリポジトリを使い、新しいテーブルは作らない。
+	companyPortalApplicationController := controllers.NewCompanyPortalApplicationController(
+		appService, companyRepo, studentSearchRepo,
+	)
+	// 企業ポータルの求人管理 (#1321)。既存の CompanyRepository を使い、新しいテーブルは作らない。
+	companyPortalJobController := controllers.NewCompanyPortalJobController(
+		companyportal.NewJobService(companyRepo),
+	)
+	// 自社プロフィール編集と担当者管理 (#1322)。
+	// 担当者管理は既存の CompanyUserService をそのまま使う。
+	companyPortalProfileController := controllers.NewCompanyPortalProfileController(
+		companyportal.NewProfileService(companyRepo), companyUserService,
+	)
+	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, cfg.CompanyUserSecret, companyUserRepo)
 	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())

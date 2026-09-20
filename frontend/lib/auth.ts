@@ -182,6 +182,17 @@ export const authService = {
     }
   },
 
+  /**
+   * 本登録する。
+   *
+   * ゲストとして診断まで進んでいる場合は、その結果を引き継ぐ。
+   * 引き継がないと user_id が変わり、診断結果・マッチ結果・チャット履歴が
+   * 取り残される。教員向けの一覧は本登録済みの生徒しか見ないため、
+   * 取り残された結果は誰にも届かない（#1374）。
+   *
+   * 引き継ぎ対象は X-User-Token から特定される。promote_guest は
+   * 「引き継ぐ意思」の表明で、誰を昇格するかはサーバが決める。
+   */
   async register(
     email: string,
     password: string,
@@ -191,9 +202,32 @@ export const authService = {
     certificationsInProgress: string,
     registrationToken?: string,
   ): Promise<AuthResponse> {
+    let promoteGuest = this.isGuestSession()
+    if (promoteGuest) {
+      // localStorage の user_token は1時間で切れる。本登録は必ずメール往復を挟むので、
+      // 「夜に診断 → 翌朝メールから登録」で普通に期限切れになる。
+      // 期限切れのまま送るとサーバが 401 を返し、再読み込みしても localStorage は
+      // 直らないので登録自体ができなくなる。30日のリフレッシュトークンで入れ直す。
+      try {
+        await this.ensureFreshUserToken()
+      } catch {
+        // リフレッシュも切れている（30日超・Cookie削除など）。この場合はサーバ側でも
+        // ゲスト行を特定できず、何を渡しても引き継げない。登録自体を止める理由は
+        // 無いので、引き継ぎを諦めて通常登録として続ける。
+        // 「ゲストは特定できるが昇格できない」場合（本登録済み・管理者等）は
+        // サーバが 409 を返す。そちらを黙って新規作成に倒してはいけない。
+        promoteGuest = false
+      }
+    }
     const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getTenantHeaders() },
+      headers: {
+        'Content-Type': 'application/json',
+        ...getTenantHeaders(),
+        // ゲストのときだけ送る。通常の登録でトークンを送ると、
+        // 別アカウントを作りたい場合に引き継ぎ判定へ入ってしまう。
+        ...(promoteGuest ? { 'X-User-Token': this.getStoredUserToken() || '' } : {}),
+      },
       body: JSON.stringify({
         email,
         password,
@@ -202,6 +236,7 @@ export const authService = {
         certifications_acquired: certificationsAcquired,
         certifications_in_progress: certificationsInProgress,
         registration_token: registrationToken,
+        promote_guest: promoteGuest,
       }),
     })
     if (!res.ok) {
@@ -335,6 +370,18 @@ export const authService = {
         }),
       }).catch(() => {})
     }
+  },
+
+  /**
+   * 現在の利用者がゲストかどうか。
+   *
+   * 本登録時に診断結果を引き継ぐかの判定に使う（#1374）。
+   * 保存されたユーザーとトークンの両方が揃っているときだけ true にする。
+   * どちらかが欠けていると、サーバ側で対象を特定できず登録が失敗する。
+   */
+  isGuestSession(): boolean {
+    const user = this.getStoredUser()
+    return Boolean(user?.is_guest) && Boolean(this.getStoredUserToken())
   },
 
   getStoredUser(): User | null {

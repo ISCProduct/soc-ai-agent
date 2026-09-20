@@ -70,10 +70,25 @@ func guard(cols ...string) string {
 		AND s.company_id IN (` + strings.Join(cols, ", ") + `) )`)
 }
 
+// publishedCompanyGuard は「企業が掲載承認済みで有効」を要求する条件。
+//
+// guard() はゲスト投稿企業（company_entry_submissions に行がある企業）にしか
+// 効かない。通常経路で作られた draft 企業は素通りするため、未認証の
+// GET /api/companies/:id/job-positions から掲載承認前の求人が読めていた。
+// 企業一覧・マッチングが使う FindAllPublished と同じ条件に揃えてある。
+func publishedCompanyGuard(col string) string {
+	return normalizeSQL(`EXISTS ( SELECT 1 FROM companies c
+		WHERE c.id = ` + col + `
+		AND c.is_active = true
+		AND c.data_status = 'published'
+		AND c.deleted_at IS NULL )`)
+}
+
 func TestPublicCompanyEndpoints_ExcludeUnreviewedGuestEntries(t *testing.T) {
 	relationGuard := guard("parent_id", "child_id", "from_id", "to_id")
 	companyGuard := guard("companies.id")
 	marketGuard := guard("company_id")
+	publishedCompanyGuard := publishedCompanyGuard("company_job_positions.company_id")
 
 	tests := []struct {
 		name string
@@ -98,7 +113,9 @@ func TestPublicCompanyEndpoints_ExcludeUnreviewedGuestEntries(t *testing.T) {
 		{name: "全市場情報", want: []string{marketGuard}, call: func(db *gorm.DB) {
 			_, _ = repositories.NewCompanyQueryRepository(db).GetAllMarketInfo()
 		}},
-		{name: "企業の求人一覧", want: []string{marketGuard}, call: func(db *gorm.DB) {
+		// 求人一覧だけはガードを強めてある。ゲスト投稿かどうかに関わらず、
+		// 企業が掲載承認されるまで求人を出さない（publishedCompanyGuard 参照）。
+		{name: "企業の求人一覧", want: []string{publishedCompanyGuard}, call: func(db *gorm.DB) {
 			_, _ = repositories.NewCompanyQueryRepository(db).GetJobPositionsByCompany(1)
 		}},
 		// #1203 レビュー指摘: 以下3つは CompanyRepository を直接使っており素通りしていた。

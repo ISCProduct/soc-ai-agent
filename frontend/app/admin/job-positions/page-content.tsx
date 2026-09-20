@@ -17,6 +17,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import { authService } from '@/lib/auth'
+import { getAdminSchoolAccess } from '@/lib/admin-school-access'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
@@ -70,10 +71,12 @@ const parsedSkills = (json?: string): string[] => {
 
 function JobPositionCard({
   position,
+  isPlatform,
   onPublish,
   onReject,
 }: {
   position: JobPosition
+  isPlatform: boolean
   onPublish: (id: number) => void
   onReject: (id: number) => void
 }) {
@@ -115,7 +118,7 @@ function JobPositionCard({
           )}
         </Box>
         <Stack direction="row" alignItems="center" spacing={1} flexShrink={0}>
-          {(position.data_status || 'draft') !== 'published' && (
+          {isPlatform && (position.data_status || 'draft') !== 'published' && (
             <>
               <Button
                 variant="contained"
@@ -243,6 +246,8 @@ export default function PageContent() {
     }
   }, [])
 
+  // 承認・却下は掲載状態を全テナントに対して変える操作なのでシステム管理者だけ
+  const [isPlatform, setIsPlatform] = useState(false)
   const [jobPositions, setJobPositions] = useState<JobPosition[]>([])
   const [error, setError] = useState('')
   const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'published' | 'rejected'>('all')
@@ -257,6 +262,12 @@ export default function PageContent() {
 
   useEffect(() => {
     fetchJobPositions()
+  }, [])
+
+  useEffect(() => {
+    getAdminSchoolAccess()
+      .then((access) => setIsPlatform(!access.restricted))
+      .catch(() => setIsPlatform(false))
   }, [])
 
   const handlePublish = async (id: number) => {
@@ -345,6 +356,7 @@ export default function PageContent() {
                 <JobPositionCard
                   key={position.id}
                   position={position}
+                  isPlatform={isPlatform}
                   onPublish={handlePublish}
                   onReject={handleReject}
                 />

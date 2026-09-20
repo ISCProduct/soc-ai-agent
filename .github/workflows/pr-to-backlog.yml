@@ -24,7 +24,15 @@ name: PR → Backlog 同期
 #   1. PR タイトルの [PROJ-N] プレフィックス
 #   2. PR 本文の <!-- backlog-key:PROJ-N --> マーカー
 #   3. PR 本文の「Backlog: PROJ-N」記述
-#   4. PR 本文の Closes/Fixes/Resolves #N が指す GitHub Issue から解決
+#   4. PR タイトル・本文の Closes/Fixes/Resolves/Refs/Related/See #N が指す GitHub Issue
+#   5. ブランチ名に埋め込まれた番号（fix/1374-... / feature/619-... / feature/issue-521）
+#
+#   4・5 の参照先が Issue ではなく別のPRだった場合は、そのPRの参照先をもう一段たどる
+#   （「#1357 のレビュー指摘」のような追いPRは、元PR経由でしか元Issueに届かない）。
+#
+#   5 を見るのは、本文への記述が書き忘れられるため。ブランチ名の番号は普段から
+#   入れているので、追加の手間なく拾える経路として持っている。実際に 2026-09-20 の
+#   マージ8件中6件が「キーが見つかりません」でスキップされていた。
 #
 # 手動リカバリ（workflow_dispatch）:
 #   何らかの理由でマージ時の自動更新が漏れた（例: キー解決の連鎖が当時のロジックの
@@ -129,25 +137,6 @@ jobs:
                   return m.group(1)
               return None
 
-          def resolve_bl_key_from_gh_issue(body):
-              """PR 本文の Closes/Fixes/Resolves #N から GitHub Issue を取得し Backlog キーを解決する"""
-              if not GH_TOKEN or not GH_REPO:
-                  return None
-              nums = re.findall(
-                  r'(?:closes?|fixes?|resolves?)\s+#(\d+)',
-                  body or '', re.IGNORECASE
-              )
-              for num in nums:
-                  try:
-                      issue = gh_api(f"/issues/{num}")
-                  except Exception:
-                      continue
-                  bl_key = extract_bl_key(issue.get('title', ''), issue.get('body') or '')
-                  if bl_key:
-                      print(f"GitHub Issue #{num} から Backlog キーを解決: {bl_key}")
-                      return bl_key
-              return None
-
           def gh_get_issue_or_pr(number):
               """PR番号もGitHub上ではIssue番号として扱えるため issues API で取得する。
               戻り値に 'pull_request' キーが含まれていれば、それはPR(issueではない)。"""
@@ -155,6 +144,70 @@ jobs:
                   return gh_api(f"/issues/{number}")
               except Exception:
                   return None
+
+          # Closes/Fixes/Resolves に加えて Refs/Related/See も拾う。
+          # このリポジトリでは「Refs #1158」「Refs #1332」という書き方が実際に使われており、
+          # キーワードを絞っていたせいで同期が漏れていた。
+          ISSUE_REF_RE = re.compile(
+              r'(?:closes?|fixes?|resolves?|refs?|related(?:\s+to)?|see)\s*[:：]?\s*#(\d+)',
+              re.IGNORECASE,
+          )
+
+          # ブランチ名に埋め込まれた番号。fix/1374-guest-promotion / feature/619-observability /
+          # feature/issue-521 のいずれも拾う。
+          #
+          # 本文への記述は書き忘れるが、ブランチ名の番号は普段から入れているので
+          # 追加の手間なく拾える経路として持っておく。2桁以上に限るのは
+          # chore/repo-cleanup-phase1 のような「番号ではない数字」を避けるため。
+          BRANCH_NUM_RE = re.compile(r'(?:^|/)(?:issue[-_]?)?(\d{2,6})(?:[-_/]|$)')
+
+          def candidate_issue_numbers(title, body, head_ref):
+              """Backlog キーの解決元になりうる GitHub の番号を、確度の高い順に返す"""
+              nums = []
+              for num in ISSUE_REF_RE.findall(f"{title or ''}\n{body or ''}"):
+                  if num not in nums:
+                      nums.append(num)
+              m = BRANCH_NUM_RE.search(head_ref or '')
+              if m and m.group(1) not in nums:
+                  nums.append(m.group(1))
+              return nums
+
+          def resolve_bl_key_from_gh_issue(body, title='', head_ref='', depth=2, _seen=None):
+              """PR の参照先(Issue / 別PR / ブランチ名の番号)から Backlog キーを解決する。
+
+              参照先が Issue でなく PR だった場合はその PR の参照先をもう一段たどる。
+              「#1357 のレビュー指摘」のような追いPRは、元PR経由でしか元の Issue に
+              たどり着けないため。"""
+              if not GH_TOKEN or not GH_REPO or depth <= 0:
+                  return None
+              if _seen is None:
+                  _seen = set()
+              for num in candidate_issue_numbers(title, body, head_ref):
+                  if num in _seen:
+                      continue
+                  _seen.add(num)
+                  target = gh_get_issue_or_pr(num)
+                  if not target:
+                      continue
+                  bl_key = extract_bl_key(target.get('title', ''), target.get('body') or '')
+                  if bl_key:
+                      kind = 'PR' if target.get('pull_request') else 'Issue'
+                      print(f"GitHub {kind} #{num} から Backlog キーを解決: {bl_key}")
+                      return bl_key
+                  if target.get('pull_request'):
+                      # 追いPR → 元PR → 元Issue の連鎖をたどる
+                      sub_ref = ''
+                      try:
+                          sub_ref = (gh_api(f"/pulls/{num}").get('head') or {}).get('ref', '')
+                      except Exception:
+                          pass
+                      bl_key = resolve_bl_key_from_gh_issue(
+                          target.get('body') or '', target.get('title', ''), sub_ref,
+                          depth - 1, _seen,
+                      )
+                      if bl_key:
+                          return bl_key
+              return None
 
           def resolve_bl_keys_from_commits(pr_number, depth=3, _seen_numbers=None):
               """プロモーションPRのコミットが参照する番号からBacklogキーを解決する。
@@ -281,9 +334,11 @@ jobs:
           PR_MERGED   = bool(pr.get('merged'))
           PR_BASE_REF = (pr.get('base') or {}).get('ref', '')
 
+          PR_HEAD_REF = (pr.get('head') or {}).get('ref', '')
+
           own_key = extract_bl_key(PR_TITLE, PR_BODY)
           if not own_key:
-              own_key = resolve_bl_key_from_gh_issue(PR_BODY)
+              own_key = resolve_bl_key_from_gh_issue(PR_BODY, PR_TITLE, PR_HEAD_REF)
 
           # ---- PR オープン/更新時: 処理中 ----
           if ACTION != 'closed':

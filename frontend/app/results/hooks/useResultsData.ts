@@ -40,6 +40,10 @@ export function useResultsData() {
   const [error, setError] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
   const [isProvisional, setIsProvisional] = useState(false)
+  const [diagnosisSummary, setDiagnosisSummary] = useState<string | null>(null)
+  const [evaluatedCategories, setEvaluatedCategories] = useState<number | null>(null)
+  const [minMatchedAxisCount, setMinMatchedAxisCount] = useState<number | null>(null)
+  const [diagnosisConfidence, setDiagnosisConfidence] = useState<number | null>(null)
   const [jobSuitabilityComment, setJobSuitabilityComment] = useState('')
   const [suggestedRoles, setSuggestedRoles] = useState<SuggestedRole[]>([])
   const [scoreComment, setScoreComment] = useState('')
@@ -157,6 +161,26 @@ export function useResultsData() {
         if (ignore) return
 
         setIsProvisional(Boolean(data?.is_provisional))
+        setDiagnosisSummary(
+          typeof data?.diagnosis_summary === 'string' && data.diagnosis_summary.trim()
+            ? data.diagnosis_summary.trim()
+            : null,
+        )
+        setEvaluatedCategories(
+          Number.isFinite(Number(data?.evaluated_categories))
+            ? Number(data.evaluated_categories)
+            : null,
+        )
+        setMinMatchedAxisCount(
+          Number.isFinite(Number(data?.min_matched_axis_count))
+            ? Number(data.min_matched_axis_count)
+            : null,
+        )
+        setDiagnosisConfidence(
+          Number.isFinite(Number(data?.diagnosis_confidence))
+            ? Number(data.diagnosis_confidence)
+            : null,
+        )
 
         if (!data || !data.recommendations || !Array.isArray(data.recommendations) || data.recommendations.length === 0) {
           const reason = data?.reason || 'matching_results_empty'
@@ -354,6 +378,10 @@ export function useResultsData() {
     loading,
     error,
     isProvisional,
+    diagnosisSummary,
+    evaluatedCategories,
+    minMatchedAxisCount,
+    diagnosisConfidence,
     jobSuitabilityComment,
     suggestedRoles,
     scoreComment,

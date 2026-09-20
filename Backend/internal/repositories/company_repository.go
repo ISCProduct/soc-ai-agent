@@ -462,3 +462,19 @@ func (r *CompanyRepository) ListActiveMissingFetchCandidates(limit int, primaryO
 		Find(&companies).Error
 	return companies, err
 }
+
+// CountPublishedJobPositions は企業の公開中の求人数を返す（#1320）。
+//
+// 公開判定は FindJobPositionsByCompany と同じ条件にする。
+// ここだけ条件がずれると「ダッシュボードには出るのに学生側に見えない」
+// という食い違いになる。
+func (r *CompanyRepository) CountPublishedJobPositions(companyID uint) (int64, error) {
+	if companyID == 0 {
+		return 0, gorm.ErrInvalidValue
+	}
+	var n int64
+	err := r.db.Model(&models.CompanyJobPosition{}).
+		Where("company_id = ? AND is_active = ? AND data_status = ?", companyID, true, "published").
+		Count(&n).Error
+	return n, err
+}

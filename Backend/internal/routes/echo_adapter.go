@@ -3,9 +3,9 @@ package routes
 import (
 	"Backend/internal/middleware"
 	"Backend/internal/repositories"
-	"Backend/internal/services"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/organization"
+	"Backend/internal/services/school"
 	"Backend/internal/usagectx"
 	"context"
 	"crypto/subtle"
@@ -162,7 +162,7 @@ func EchoAdminAuth(userRepo *repositories.UserRepository, adminSecret string) ec
 // EchoAdminSchoolScope は管理者(先生)の担当校にもとづき、クエリパラメータ school_id を検証し
 // AdminSchoolFilterContextKey へ絞り込み対象(nilは絞り込みなし)を格納するEcho nativeミドルウェア。
 // EchoAdminAuth より後段に配置すること(AdminUserIDContextKeyに依存する)。
-func EchoAdminSchoolScope(schools *services.SchoolService) echo.MiddlewareFunc {
+func EchoAdminSchoolScope(schools *school.SchoolService) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			adminUserID, ok := middleware.AdminUserIDFromContext(c.Request().Context())
@@ -202,6 +202,27 @@ func EchoAdminSchoolScope(schools *services.SchoolService) echo.MiddlewareFunc {
 
 			ctx := context.WithValue(c.Request().Context(), middleware.AdminSchoolFilterContextKey, schoolID)
 			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	}
+}
+
+// EchoRequirePlatformAdmin は担当校を持つ管理者(教員・学園側)を拒否し、
+// 担当校0件のシステム管理者だけを通す。EchoAdminAuth の後段に置くこと。
+func EchoRequirePlatformAdmin(schools *school.SchoolService) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			adminUserID, ok := middleware.AdminUserIDFromContext(c.Request().Context())
+			if !ok {
+				return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+			}
+			restricted, _, err := schools.ResolveAdminAccess(adminUserID)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
+			}
+			if restricted {
+				return echo.NewHTTPError(http.StatusForbidden, "platform admin only")
+			}
 			return next(c)
 		}
 	}

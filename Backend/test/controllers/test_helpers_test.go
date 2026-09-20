@@ -8,7 +8,7 @@ import (
 
 	"Backend/internal/middleware"
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/school"
 	"Backend/test/controllers/mocks"
 
 	"github.com/labstack/echo/v4"
@@ -29,19 +29,19 @@ func withAdminUserID(r *http.Request, adminUserID uint) *http.Request {
 
 // newUnrestrictedSchoolService は担当校未割当(=無制限admin、CanAdminAccessSchoolが常にtrue)の
 // SchoolServiceを返すテスト用ヘルパー(#980/#981/#982/#984)
-func newUnrestrictedSchoolService(adminUserID uint) *services.SchoolService {
+func newUnrestrictedSchoolService(adminUserID uint) *school.SchoolService {
 	repo := &mocks.SchoolRepositoryMock{}
 	repo.On("ListSchoolsForAdmin", adminUserID).Return([]models.School{}, nil)
-	return services.NewSchoolService(repo)
+	return school.NewSchoolService(repo)
 }
 
 // newRestrictedSchoolService は担当校を持つadmin(=先生)のSchoolServiceを返す。
 // allowedSchoolID 以外の学校のリソースに対して CanAdminAccessSchool が false を返す(#1157)
-func newRestrictedSchoolService(adminUserID, allowedSchoolID uint) *services.SchoolService {
+func newRestrictedSchoolService(adminUserID, allowedSchoolID uint) *school.SchoolService {
 	repo := &mocks.SchoolRepositoryMock{}
 	repo.On("ListSchoolsForAdmin", adminUserID).
 		Return([]models.School{{ID: allowedSchoolID, Name: "担当校"}}, nil)
-	return services.NewSchoolService(repo)
+	return school.NewSchoolService(repo)
 }
 
 // newCtx はリクエストとレコーダーからecho.Contextを生成する

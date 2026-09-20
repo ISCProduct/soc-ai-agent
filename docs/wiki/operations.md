@@ -7,6 +7,8 @@
 3. [監視項目](#3-監視項目)
    - [リクエストIDでサービス横断追跡](#31-リクエストidでサービス横断追跡-1188)
    - [メトリクスを見る](#32-メトリクスを見る-1186)
+   - [稼働日の前日チェックリスト](#33-稼働日の前日チェックリスト-1388)
+   - [エラートラッキング（Sentry）](#34-エラートラッキングsentry-619--1185)
 4. [障害対応](#4-障害対応)
 5. [データベース管理](#5-データベース管理)
 6. [管理画面操作](#6-管理画面操作)
@@ -284,6 +286,144 @@ docker run --rm -p 9090:9090 \
 
 常時計測している指標と信頼性目標は [SLO とアラート](./slo.md) を参照（計測ソースは ALB の
 CloudWatch メトリクス）。
+
+---
+
+## 3.3 稼働日の前日チェックリスト (#1388)
+
+本番は稼働日のみ起動する。**起動を毎時の GitHub cron に任せきりにしないこと。**
+
+### なぜ前日に起動するのか
+
+`prod-uptime-scheduler.yml` は `cron: "5 * * * *"` と書いてあるが、GitHub ホストの scheduled workflow は
+ベストエフォートで、実測の発火間隔は **平均約4時間・最大5.5時間**だった（直近18間隔で1時間以内は0回、#1388）。
+
+JST 0時に稼働日へ入っても、次の発火は数時間後になる。**当日の朝に本番が上がっていない可能性がある。**
+#1355 の失敗通知は「ジョブが動いて失敗した」ときに鳴るもので、**発火しなければ鳴らない**。
+
+EventBridge Scheduler へ移すまで（#1388）は、以下を手順として実施する。
+
+### 前日（夕方〜夜）
+
+1. **本番を起動する**
+
+   Discord で `/prod state:on`
+
+   これでオーバーライドが `on` になり、日付リストに関係なく起動する。
+
+   **Discord の返信が「反映を開始しました」であることを確認する。**
+   即時実行は `GITHUB_DISPATCH_TOKEN` / `GITHUB_DISPATCH_REPO` が揃っているときだけで、
+   未設定・API 失敗時は「⚠️ 即時反映の起動に失敗しました。次の毎時実行(最大1時間後)で
+   反映されます。」が返る。この手順は「最大1時間待ち」を避けるためのものなので、
+   そこで気づけないと意味が無い。
+
+2. **起動を確認する**（RDS の起動待ちがあるため10分ほど見る）
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' https://api.shukatsu-ai.jp/health   # 200 を期待
+   curl -s -o /dev/null -w '%{http_code}\n' https://shukatsu-ai.jp               # 200 を期待
+   aws ecs describe-services --cluster soc-app --services chroma rag-review backend frontend \
+     --query 'services[].{n:serviceName,d:desiredCount,r:runningCount}' --output text
+   ```
+
+   **4サービス全部を見ること。** 起動ジョブは `chroma rag-review backend frontend` を
+   回しており、ここから漏れると稼働日でも RAG 機能だけ落ちる（実際に起きている）。
+
+3. **主要フローを1回ずつ手で通す**（チャット / 面接 / 履歴書レビュー）
+
+   起動しただけでは、シークレットの参照ミスや外部APIキーの失効は分からない。
+   実際に rev 70/71 は**存在しないシークレットARN**を参照しており、起動すら
+   できない状態のまま停止中だったため誰も気づかなかった（#1371）。
+
+### 当日
+
+4. 朝いちばんで `/health` を確認する（上のコマンド）
+
+   **`/health` は生存確認だけ**で、DB 接続も外部 API も見ていない
+   （`cmd/server/main.go` のハンドラは無条件に 200 を返す）。
+   RDS が落ちている・タスク定義が古い状態でも 200 になるので、
+   これだけで「動いている」と判断しないこと。前日ステップ3を1本だけでも通すのが確実。
+5. 異常があれば Discord の運用アラートチャンネルを確認する（#1355 の通知先）
+
+### 終了後
+
+6. **本番を停止する**
+
+   Discord で `/prod state:off`（明示的に停止）
+
+   **当日中に止めたいなら `auto` ではなく `off`。** 当日を日付リストに登録して
+   いる場合、`auto` に戻しても JST 0時までは起動が続き、そこから先の停止も
+   毎時 cron 頼みになる（この節が問題にしている遅延が停止側にそのまま効く）。
+   `off` は即時実行されるので確実に落ちる。翌日以降も稼働日が続くなら `auto` でよい。
+
+   **`on` のまま放置すると課金が続く。** 起動ジョブは `on` のとき毎回
+   「常時起動に固定されています」と警告を出すので、実行ログにも残る。
+
+### 停止中にやってはいけないこと
+
+- **本番へのデプロイ**: デプロイはワンオフ ECS タスクで `migrate up` を実行するため、
+  RDS が停止していると必ず失敗する。デプロイ前に RDS を起動しておくこと
+  （ECS タスクまで起動する必要はない。RDS だけでよい）
+
+  ```bash
+  aws rds start-db-instance --db-instance-identifier soc-app-mysql
+  ```
+
+  `/prod state:on` でも起きるが、そちらは ECS も上げるので停止中のデプロイのためだけなら
+  余計に課金される。
+
+## 3.4 エラートラッキング（Sentry）（#619 / #1185）
+
+本番の未処理エラーを Backend / Frontend / RAG から Sentry へ送る。
+**DSN 未設定時はすべて no-op**（ローカル開発では依存しない）。
+
+### 環境変数
+
+| 変数 | 対象 | 説明 |
+|---|---|---|
+| `SENTRY_DSN` | Backend / RAG / FE(server) | プロジェクトの DSN |
+| `NEXT_PUBLIC_SENTRY_DSN` | Frontend(browser) | ブラウザ用 DSN（公開してよい値）。**ビルド時に渡す必要がある**（下記） |
+| `SENTRY_RELEASE` | 共通（任意） | リリース識別子（git SHA など）。リリース単位の追跡に使う |
+
+`NEXT_PUBLIC_*` は実行時ではなく**ビルド時にバンドルへ埋め込まれる**。ブラウザ側を動かすには
+GitHub のリポジトリシークレット `SENTRY_DSN_FRONTEND` を設定すること（deployment.yml が
+`--build-arg` で Docker ビルドへ渡す）。未設定のままだと SDK は積まれるが初期化されず、
+バンドルだけ増えて1件も送信されない。
+
+DSN の形式にも注意。2023年以降に作られた組織の DSN は `https://oNNN.ingest.us.sentry.io/...`
+のようにリージョンが入る。CSP（`frontend/next.config.ts`）は `https://*.sentry.io` を
+許可しているのでどちらの形式でも通るが、ここを狭めるとブラウザからの送信が全部ブロックされる。
+| `APP_ENV` | 共通 | `development` / `staging` / `production`（Sentry environment） |
+
+DSN は Secrets Manager 等に置き、リポジトリには置かない。
+
+### 送信しないもの
+
+`beforeSend` で次を落とす（履歴書・チャット本文などの個人情報対策）:
+
+- リクエストボディ / Cookie / QueryString
+- `Authorization` / `X-Admin-Token` / `X-User-Token` / `X-Company-User-Token` / `X-Internal-Token`
+
+相関は既存の `X-Request-ID`（`request_id` タグ）で行う（3.1 節）。
+
+### 通知
+
+Sentry プロジェクトの Alert Rule で Discord / Slack へ転送する。
+コストアラート（#604）や CloudWatch（`slo.md`）と通知先を揃える。
+
+### 動作確認
+
+1. staging に DSN を設定してデプロイ
+2. 意図的に 500 を起こす（または Sentry の test event）
+3. Sentry Issues にイベントが届き、`request_id` タグでログと突合できること
+
+### 受け入れ条件との対応（#619）
+
+| 受け入れ条件 | 状態 |
+|---|---|
+| 本番の未処理エラーが通知される | Sentry（本節）。DSN 設定と Alert Rule が必要 |
+| 基本メトリクスがダッシュボードで確認できる | `/metrics`（3.2 節 / #1186）+ ALB CloudWatch |
+| SLOとアラートルールが文書化されている | [slo.md](./slo.md)（#1187） |
 
 ---
 

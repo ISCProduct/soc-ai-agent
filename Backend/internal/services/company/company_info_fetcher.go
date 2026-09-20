@@ -222,7 +222,8 @@ func (f *CompanyInfoFetcher) ConfirmAndSave(companyID uint, result *CompanyInfoR
 //
 // 取得は gBizinfo（無料）を先に試すが、**AI 検索は事実上必ず走る**。
 // gBizinfo は法人登記由来のため文化・働き方・主要事業を返さず、
-// enrichGapsWithAI の needsAI がそれらの空欄で必ず真になるため。
+// enrichGapsWithAI の穴判定(companyInfoHasGaps)がそれらの空欄で必ず真になるため。
+// なお gBiz と AI Search の間で公式サイト本文の取得も走る(enrichGapsWithAI 参照)。
 // 「gBiz で済めば無料」ではなく「gBiz は AI の入力を良くするだけ」と考えること。
 //
 // 検索予算（SearchBudget）は SearchLiteJSON の入口で効く
@@ -468,6 +469,13 @@ func (f *CompanyInfoFetcher) enrichGapsWithAI(ctx context.Context, companyName, 
 	// #1338 の時点では gBizINFO が 404 で必ず失敗していたため、この経路には
 	// そもそも到達していなかった。#1341 で gBizINFO を直した結果、意図せず
 	// 動き出す状態になっていた。
+	//
+	// 有効化してもコスト削減にはならない。実測では「勤務スタイル」が公式サイトから
+	// ほぼ取れず、下の穴判定に含まれているため、多くの場合そのまま Search へ進む。
+	// Search を省けるのは gBiz とサイトを合わせて companyInfoHasGaps の6項目が
+	// 埋まったときだけで、それ以外は公式サイトの HTTP 取得(最大3ページ + politeDelay)と
+	// 安価モデルの抽出コールを払ったうえで Search も呼ぶ純増になる。
+	// #1124 でコストを触るときはここを見ること。
 	if websiteExtractEnabled() {
 		if site, siteErr := f.acquireFromWebsite(ctx, companyName, siteURL); siteErr == nil {
 			mergeCompanyInfoGaps(base, site)

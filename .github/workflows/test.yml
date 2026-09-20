@@ -127,6 +127,11 @@ jobs:
       - name: ワークフローの checkout 漏れ検査
         run: ./automation/test/workflow-checkout-test.sh
 
+      # 反映後スモークがデプロイと同じ concurrency group にいること。
+      # ずれるとスモーク中に次のデプロイが環境を落とし、変更と無関係に全滅する。
+      - name: スモークの concurrency group 検査
+        run: ./automation/test/deploy-smoke-concurrency-test.sh
+
       # ステージングの起動/停止判定。間違えると開発中に環境が理由不明で落ちる。
       - name: ステージング uptime 判定のテスト
         run: ./automation/test/staging-uptime-decision-test.sh
@@ -143,6 +148,15 @@ jobs:
       # Bind のエラー握りつぶし。#1064 は修正が入らないままクローズされた。
       - name: Bind エラー握りつぶしの検査
         run: ./automation/test/bind-error-check.sh
+
+      # 検査スクリプト自体が壊れると「検査したつもり」で素通りする。
+      - name: Bind 検査スクリプトのテスト
+        run: ./automation/test/bind-error-check-test.sh
+
+      # Backlog 同期は「キーが見つかりません」で success のまま何もしない。
+      # 黙って取りこぼすので、キー解決元の抽出だけは固定する。
+      - name: Backlog キー検出のテスト
+        run: ./automation/test/backlog-key-detection-test.sh
 
       # AI呼び出しの機能名。付け忘れると feature='unknown' で記録され、機能別に割れない。
       - name: AI利用量の機能名付与の検査

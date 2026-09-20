@@ -184,3 +184,35 @@ func Testレビュー生成経路は必ず保存を通る(t *testing.T) {
 		t.Errorf("レビューを生成して保存していない経路がある: 生成 %d 箇所 / 保存 %d 箇所", generators, persists)
 	}
 }
+
+// TestFinalizeDocument_注釈PDFに失敗してもstatusを保存する は、
+// 「注釈は付加機能」という前提をコードに固定する。
+//
+// 以前は annotatePDF が失敗すると status を保存する前に return しており、
+// レビューは保存済みなのに教員一覧と統合プロファイルに「レビュー済み」が
+// 出なかった。ストリーム経路(#1370)と通常経路(#1379)で2度踏んでいる。
+func TestFinalizeDocument_注釈PDFに失敗してもstatusを保存する(t *testing.T) {
+	repo := &fakeResumeRepo{}
+	s := &ResumeService{repo: repo}
+	doc := &models.ResumeDocument{Status: "normalized", AnnotatedPath: "old/annotated.pdf"}
+	items := []models.ResumeReviewItem{{Message: "指摘"}}
+
+	// 存在しないディレクトリを渡すと annotatePDF は書き込みで失敗する
+	annotated, err := s.finalizeDocument(doc, "/nonexistent/dir/resume.pdf", &models.ResumeReview{ID: 42}, items)
+
+	if err != nil {
+		t.Fatalf("注釈の失敗を status 保存の失敗にしてはいけない: %v", err)
+	}
+	if annotated {
+		t.Fatal("注釈PDFは作れていないので false を返すこと")
+	}
+	if repo.updateDocCalls != 1 {
+		t.Fatalf("UpdateDocument の呼び出し回数 = %d, want 1", repo.updateDocCalls)
+	}
+	if repo.updatedDoc.Status != "reviewed" {
+		t.Fatalf("status = %q, want reviewed", repo.updatedDoc.Status)
+	}
+	if repo.updatedDoc.AnnotatedPath != "" {
+		t.Fatalf("注釈に失敗したら前回のPDFを指したままにしない: %q", repo.updatedDoc.AnnotatedPath)
+	}
+}

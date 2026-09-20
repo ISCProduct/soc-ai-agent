@@ -234,7 +234,7 @@ Validation の `confidence` は **メモリキャッシュ（30分）のみ**で
 | `OPENAI_HINTS_MODEL` | RAG hints の Search | `rag/main.py` は **`OPENAI_WEB_SEARCH_MODEL`** を参照。HINTS_MODEL は未使用 |
 | `OPENAI_HINTS_PARSE_MODEL` | hints JSON 化 | RAG で使用（既定 `gpt-4o`） |
 | `OPENAI_WEB_SEARCH_MODEL` | Go `WebSearchJSON` + RAG Search | `.env.example` に **未記載** |
-| Brave Search MCP | `mcp/README.md` | **`compose.mcp.yml` がリポジトリに存在しない**。アプリコードからの呼び出しもなし |
+| Brave Search MCP | `docs/mcp-resume-review.md` | **`compose.mcp.yml` がリポジトリに存在しない**。アプリコードからの呼び出しもなし |
 
 ### 2.5 参考になる既存パターン
 
@@ -625,5 +625,5 @@ PoC（実装前の確認項目）: 大手〜スタートアップ 10 社で (a) 
 - `Backend/internal/models/company.go`
 - `rag/main.py`（hints / web_search）
 - `tools/company-graph/internal/scraper/`
-- `mcp/README.md`
+- `docs/mcp-resume-review.md`
 - `docs/design/vector-db.md`

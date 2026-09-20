@@ -54,6 +54,7 @@ from services.logging_setup import (
     _trace_id_var,
     setup_logging,
 )
+from services.sentry_setup import init_sentry
 from services.research import (  # noqa: F401
     _domain_trust_score,
     _extract_domains_from_text,
@@ -107,6 +108,9 @@ from vector_store import (  # noqa: E402, F401
 )
 
 logger = setup_logging()
+
+# エラートラッキング（#1185）。DSN 未設定時は no-op。
+init_sentry()
 
 app = FastAPI()
 

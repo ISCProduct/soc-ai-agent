@@ -4,9 +4,9 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
 	"Backend/internal/openai"
-	"Backend/internal/services"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/interview"
+	"Backend/internal/services/school"
 	"Backend/internal/services/storage"
 	"Backend/internal/usagectx"
 	"context"
@@ -32,7 +32,7 @@ type AdminInterviewController struct {
 	access              auth.UserAccessGuard
 	userRepo            repository.UserRepository
 	sessionRepo         repository.InterviewSessionRepository
-	schools             *services.SchoolService
+	schools             *school.SchoolService
 }
 
 func NewAdminInterviewController(
@@ -58,7 +58,7 @@ func (c *AdminInterviewController) SetCompanyRepo(r repository.CompanyRepository
 }
 
 // SetSchoolAccess は担当校スコープの検証に使うリポジトリ/サービスを設定する(#982)
-func (c *AdminInterviewController) SetSchoolAccess(userRepo repository.UserRepository, sessionRepo repository.InterviewSessionRepository, schools *services.SchoolService) {
+func (c *AdminInterviewController) SetSchoolAccess(userRepo repository.UserRepository, sessionRepo repository.InterviewSessionRepository, schools *school.SchoolService) {
 	c.userRepo = userRepo
 	c.sessionRepo = sessionRepo
 	c.schools = schools
