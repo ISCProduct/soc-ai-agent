@@ -14,7 +14,7 @@ import (
 	"Backend/domain/entity"
 	"Backend/internal/controllers"
 	"Backend/internal/models"
-	"Backend/internal/services"
+	"Backend/internal/services/school"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/mock"
@@ -71,7 +71,7 @@ func TestAdminInterviewController_ListVideos_SchoolAccessDenied(t *testing.T) {
 	userRepo.On("GetUserByID", uint(3)).Return(&entity.User{Email: "u3@example.com", SchoolID: &otherSchoolID}, nil)
 	schoolRepo := &mocks.SchoolRepositoryMock{}
 	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
-	c.SetSchoolAccess(userRepo, sessionRepo, services.NewSchoolService(schoolRepo))
+	c.SetSchoolAccess(userRepo, sessionRepo, school.NewSchoolService(schoolRepo))
 
 	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/interview/sessions/5/videos", nil), 42)
 	rec := httptest.NewRecorder()
@@ -94,7 +94,7 @@ func TestAdminInterviewController_ListVideos_SchoolAccessAllowed(t *testing.T) {
 	userRepo.On("GetUserByID", uint(3)).Return(&entity.User{Email: "u3@example.com", SchoolID: &ownSchoolID}, nil)
 	schoolRepo := &mocks.SchoolRepositoryMock{}
 	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
-	c.SetSchoolAccess(userRepo, sessionRepo, services.NewSchoolService(schoolRepo))
+	c.SetSchoolAccess(userRepo, sessionRepo, school.NewSchoolService(schoolRepo))
 	videoRepo.On("FindBySessionID", mock.Anything, uint(5)).Return([]models.InterviewVideo{}, nil)
 
 	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/interview/sessions/5/videos", nil), 42)
@@ -118,7 +118,7 @@ func TestAdminInterviewController_VideoURL_SchoolAccessDenied(t *testing.T) {
 	userRepo.On("GetUserByID", uint(3)).Return(&entity.User{Email: "u3@example.com", SchoolID: &otherSchoolID}, nil)
 	schoolRepo := &mocks.SchoolRepositoryMock{}
 	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
-	c.SetSchoolAccess(userRepo, nil, services.NewSchoolService(schoolRepo))
+	c.SetSchoolAccess(userRepo, nil, school.NewSchoolService(schoolRepo))
 
 	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/interview/videos/7/url", nil), 42)
 	rec := httptest.NewRecorder()

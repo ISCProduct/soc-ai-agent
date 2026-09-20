@@ -2,7 +2,7 @@ package controllers_test
 
 import (
 	"Backend/internal/controllers"
-	"Backend/internal/services"
+	"Backend/internal/services/company"
 	"bytes"
 	"encoding/json"
 	"net/http"
@@ -13,7 +13,7 @@ import (
 )
 
 func TestCompanyEntryController_Submit_ValidationErrors(t *testing.T) {
-	svc := &services.CompanyEntryService{}
+	svc := &company.CompanyEntryService{}
 	ctrl := controllers.NewCompanyEntryController(svc)
 	e := echo.New()
 

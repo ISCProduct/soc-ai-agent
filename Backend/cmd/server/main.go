@@ -13,7 +13,6 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/routes"
 	"Backend/internal/scraper"
-	"Backend/internal/services"
 	"Backend/internal/services/admin"
 	"Backend/internal/services/analysis"
 	"Backend/internal/services/application"
@@ -35,8 +34,10 @@ import (
 	"Backend/internal/services/oauth"
 	"Backend/internal/services/organization"
 	"Backend/internal/services/refreshtoken"
+	"Backend/internal/services/release"
 	"Backend/internal/services/resume"
 	"Backend/internal/services/schedule"
+	"Backend/internal/services/school"
 	"Backend/internal/services/shared"
 	"Backend/internal/services/skillscore"
 	"Backend/internal/services/storage"
@@ -305,7 +306,7 @@ func main() {
 	// 全トラフィックが従量課金へ移る。日次/月次のUSD上限と分間レートで打ち切る(#1293)
 	aiClient.SetFallbackGuard(costs.NewOpenAIFallbackGuard(apiCallLogRepo))
 	schoolRepo := repositories.NewSchoolRepository(db)
-	schoolService := services.NewSchoolService(schoolRepo)
+	schoolService := school.NewSchoolService(schoolRepo)
 	authService := auth.NewAuthService(userRepo, pendingRegistrationRepo, emailService)
 	authService.SetDB(db)
 	authService.SetSchoolRepo(schoolRepo)
@@ -487,7 +488,7 @@ func main() {
 	adminVectorController := controllers.NewAdminVectorController(admin.NewAdminVectorService())
 	profileRecalcService := flywheel.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
 	profileRecalcController := controllers.NewAdminProfileRecalculationController(profileRecalcService)
-	companyEntryService := services.NewCompanyEntryService(db, userRepo, pendingRegistrationRepo, emailService)
+	companyEntryService := company.NewCompanyEntryService(db, userRepo, pendingRegistrationRepo, emailService)
 	authService.SetCompanyOwnershipClaimer(companyEntryService)
 	companyEntryController := controllers.NewCompanyEntryController(companyEntryService)
 	companyUserRepo := repositories.NewCompanyUserRepository(db)
@@ -496,7 +497,7 @@ func main() {
 	companyAuthController := controllers.NewCompanyAuthController(companyUserService)
 	companyPortalController := controllers.NewCompanyPortalController(companyUserService)
 	adminCompanyUserController := controllers.NewAdminCompanyUserController(companyUserService)
-	releaseNoteService := services.NewReleaseNoteService(db, aiClient)
+	releaseNoteService := release.NewReleaseNoteService(db, aiClient)
 	releaseNoteController := controllers.NewReleaseNoteController(releaseNoteService, userRepo)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
 	esRewriteController := controllers.NewESRewriteController(aiClient)

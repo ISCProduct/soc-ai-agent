@@ -2,7 +2,7 @@ package controllers
 
 import (
 	"Backend/internal/repositories"
-	"Backend/internal/services"
+	"Backend/internal/services/release"
 	"net/http"
 	"time"
 
@@ -10,11 +10,11 @@ import (
 )
 
 type ReleaseNoteController struct {
-	service  *services.ReleaseNoteService
+	service  *release.ReleaseNoteService
 	userRepo *repositories.UserRepository
 }
 
-func NewReleaseNoteController(service *services.ReleaseNoteService, userRepo *repositories.UserRepository) *ReleaseNoteController {
+func NewReleaseNoteController(service *release.ReleaseNoteService, userRepo *repositories.UserRepository) *ReleaseNoteController {
 	return &ReleaseNoteController{service: service, userRepo: userRepo}
 }
 
@@ -65,9 +65,9 @@ func (c *ReleaseNoteController) Ingest(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
 	}
 
-	sources := make([]services.ReleaseNoteSource, 0, len(req.Sources))
+	sources := make([]release.ReleaseNoteSource, 0, len(req.Sources))
 	for _, s := range req.Sources {
-		sources = append(sources, services.ReleaseNoteSource{
+		sources = append(sources, release.ReleaseNoteSource{
 			PRNumber: s.PRNumber,
 			Title:    s.Title,
 			Body:     s.Body,

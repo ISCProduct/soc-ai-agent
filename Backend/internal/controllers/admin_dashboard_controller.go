@@ -5,9 +5,9 @@ import (
 	"Backend/internal/entitlement"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
-	"Backend/internal/services"
 	ifaces "Backend/internal/services/interfaces"
 	"Backend/internal/services/organization"
+	"Backend/internal/services/school"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,7 +23,7 @@ type AdminDashboardController struct {
 	userRepo    repository.UserRepository
 	sessionRepo ifaces.DashboardSessionRepo
 	reportRepo  ifaces.DashboardReportRepo
-	schools     *services.SchoolService
+	schools     *school.SchoolService
 	orgs        *organization.OrganizationService
 }
 
@@ -40,7 +40,7 @@ func NewAdminDashboardController(
 }
 
 // SetSchoolService は担当校スコープの検証に使うサービスを設定する(#984)
-func (c *AdminDashboardController) SetSchoolService(schools *services.SchoolService) {
+func (c *AdminDashboardController) SetSchoolService(schools *school.SchoolService) {
 	c.schools = schools
 }
 

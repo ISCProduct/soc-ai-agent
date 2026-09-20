@@ -4,8 +4,8 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
-	"Backend/internal/services"
 	"Backend/internal/services/interfaces"
+	"Backend/internal/services/school"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,12 +19,12 @@ type AdminJobController struct {
 	jobCategory  repository.JobCategoryRepository
 	graduateRepo repository.GraduateEmploymentRepository
 	audit        interfaces.AuditLogService
-	schools      *services.SchoolService
+	schools      *school.SchoolService
 }
 
 // SetSchoolAccess は担当校スコープ検証に使うサービスを注入する(#1157)。
 // 未設定のまま単体取得/更新を呼ぶと fail-closed で拒否する。
-func (c *AdminJobController) SetSchoolAccess(schools *services.SchoolService) {
+func (c *AdminJobController) SetSchoolAccess(schools *school.SchoolService) {
 	c.schools = schools
 }
 
