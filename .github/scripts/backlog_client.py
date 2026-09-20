@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -165,6 +166,42 @@ def load_backlog_env() -> tuple[str, str, str, str]:
     # 鍵の中身は出さず、設定漏れ検知用に長さだけ出す
     print(f"Backlog 設定: space={space_id}, project={proj_key}, apiKey_len={len(api_key)}", flush=True)
     return api_key, space_id, proj_key, domain
+
+
+# Backlog の優先度ID。プロジェクト共通の固定値（2=高 / 3=中 / 4=低）。
+BACKLOG_PRIORITY_IDS = {"高": 2, "中": 3, "低": 4}
+
+# 優先度が読み取れないときの既定。従来の固定値と同じ「中」。
+DEFAULT_PRIORITY_ID = 3
+
+# Issue Form (.github/ISSUE_TEMPLATE/bug_report.yml) の
+# 「### 優先度」セクション直下の1行を拾う。
+_PRIORITY_SECTION = re.compile(r"^###\s*優先度\s*$\n+(.+)$", re.MULTILINE)
+
+
+def parse_priority_id(body: str) -> int:
+    """GitHub Issue 本文の優先度セレクトから Backlog の priorityId を返す。
+
+    Issue Form の dropdown は本文へ
+
+        ### 優先度
+
+        高 — サービス停止・情報漏えい・データ破損・金銭被害
+
+    の形で展開される。選択肢は説明つきなので、先頭の 高/中/低 だけを見る。
+    セクションが無い（フォームを使わず起票された、Backlog起源など）場合は
+    既定の「中」を返す。優先度が読めないという理由で同期を止めない。
+    """
+    m = _PRIORITY_SECTION.search(body or "")
+    if not m:
+        return DEFAULT_PRIORITY_ID
+    value = m.group(1).strip()
+    if value in ("_No response_", ""):
+        return DEFAULT_PRIORITY_ID
+    for name, pid in BACKLOG_PRIORITY_IDS.items():
+        if value.startswith(name):
+            return pid
+    return DEFAULT_PRIORITY_ID
 
 
 # マージ同期が課題を「前へ進めるだけ」にするための順序。
@@ -401,6 +438,22 @@ if __name__ == "__main__":
         return {"status": {"id": 1, "name": "未対応"}} if method == "GET" else None
 
     assert set_issue_status_unless_same("b", "k", "X-1", 2, request=_req_id_patch_failed) == "failed"
+
+    # --- 優先度セレクト → priorityId ---
+    form = "### 優先度\n\n高 — サービス停止・情報漏えい・データ破損・金銭被害\n\n### 事象\n\nx"
+    assert parse_priority_id(form) == 2, "セレクトの「高」が Backlog の高(2)になる"
+    assert parse_priority_id("### 優先度\n\n中 — 一部機能が使えない") == 3
+    assert parse_priority_id("### 優先度\n\n低 — 軽微") == 4
+    # マーカーが先頭に付いた本文（github-issue-to-backlog が書き戻す形）でも読める
+    assert parse_priority_id("<!-- backlog-key:X-1 -->\n\n### 優先度\n\n高") == 2
+    # フォーム未使用・未回答・未知の値は既定の「中」。同期を止めない。
+    assert parse_priority_id("ただの本文") == DEFAULT_PRIORITY_ID
+    assert parse_priority_id("") == DEFAULT_PRIORITY_ID
+    assert parse_priority_id(None) == DEFAULT_PRIORITY_ID
+    assert parse_priority_id("### 優先度\n\n_No response_") == DEFAULT_PRIORITY_ID
+    assert parse_priority_id("### 優先度\n\n激高") == DEFAULT_PRIORITY_ID
+    # 見出しが優先度で「始まる」だけの別セクションは拾わない
+    assert parse_priority_id("### 優先度の根拠\n\n高") == DEFAULT_PRIORITY_ID
 
     globals()["bl_request"] = _orig
     assert normalize_space_id("https://myspace.backlog.jp") == "myspace"

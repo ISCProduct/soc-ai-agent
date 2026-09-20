@@ -784,6 +784,12 @@ jobs:
           # 「停止中で届かない」と「鍵が違って拒否された」は対処が別物。
           # 後者を warning で流すと、admin_secret のローテーション後に更新情報が
           # 反映されないまま誰も気づかない(#1290 と同じ症状)。
+          #
+          # 503 は拾わない。CloudFront が ALB の 500/502/503/504 をすべて 503 へ
+          # 差し替えるため(modules/cloudfront_app_proxy)、503 はほぼ「オリジンが
+          # 応答しない」を意味する。バックエンドの「ADMIN_SECRET 未設定」も 503 だが、
+          # ローリング更新中やタスク停止中に必ず踏むので、ここで落とすと
+          # 正常なデプロイが赤くなる(実際に本番デプロイで踏んだ)。
           prod_code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $PROD_ADMIN_SECRET" \
@@ -792,8 +798,8 @@ jobs:
           prod_rejected=0
           case "$prod_code" in
             2*) ;;
-            401|403|503)
-              echo "::error::本番への更新情報の取り込みが $prod_code で拒否されました。admin_secret が本番の値と一致していないか、本番側で未設定です(ローテーション後の CI 設定を確認してください)"
+            401|403)
+              echo "::error::本番への更新情報の取り込みが $prod_code で拒否されました。admin_secret が本番の値と一致していません(ローテーション後の CI 設定を確認してください)"
               prod_rejected=1
               ;;
             *)

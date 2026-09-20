@@ -12,7 +12,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	authcontrollers "Backend/internal/controllers/auth"
+	githubcontrollers "Backend/internal/controllers/github"
+	interviewcontrollers "Backend/internal/controllers/interview"
+	usercontrollers "Backend/internal/controllers/user"
 	"Backend/internal/models"
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/shared"
@@ -24,8 +27,8 @@ import (
 
 // ========== GitHubController ==========
 
-func newGitHubController(gh *mocks.GitHubServiceMock, ss *mocks.SkillScoreServiceMock) *controllers.GitHubController {
-	return controllers.NewGitHubController(gh, ss)
+func newGitHubController(gh *mocks.GitHubServiceMock, ss *mocks.SkillScoreServiceMock) *githubcontrollers.GitHubController {
+	return githubcontrollers.NewGitHubController(gh, ss)
 }
 
 // ---- GetProfile ----
@@ -216,8 +219,8 @@ func TestGitHubController_SummarizeRepo_Success(t *testing.T) {
 
 // ========== OAuthController ==========
 
-func newOAuthController(svc *mocks.OAuthServiceMock) *controllers.OAuthController {
-	return controllers.NewOAuthController(svc, nil)
+func newOAuthController(svc *mocks.OAuthServiceMock) *authcontrollers.OAuthController {
+	return authcontrollers.NewOAuthController(svc, nil)
 }
 
 // ---- GoogleLogin ----
@@ -262,8 +265,8 @@ func TestOAuthController_GitHubCallback_MissingCode(t *testing.T) {
 
 // ========== RealtimeController ==========
 
-func newRealtimeController(interviewSvc *mocks.InterviewServiceMock, realtimeSvc *mocks.RealtimeUsageServiceMock) *controllers.RealtimeController {
-	return controllers.NewRealtimeController(interviewSvc, realtimeSvc)
+func newRealtimeController(interviewSvc *mocks.InterviewServiceMock, realtimeSvc *mocks.RealtimeUsageServiceMock) *interviewcontrollers.RealtimeController {
+	return interviewcontrollers.NewRealtimeController(interviewSvc, realtimeSvc)
 }
 
 // ---- Token ----
@@ -383,7 +386,7 @@ func TestRealtimeController_SessionInfo_NilService(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/realtime/session-info", nil)
 	rec := httptest.NewRecorder()
 	// nil インターフェースを直接渡すとデフォルト10分が返る
-	ctrl := controllers.NewRealtimeController(nil, nil)
+	ctrl := interviewcontrollers.NewRealtimeController(nil, nil)
 	assertStatus(t, ctrl.SessionInfo, newCtx(req, rec), http.StatusOK)
 
 	var resp map[string]int
@@ -397,8 +400,8 @@ func newIntegratedProfileController(
 	cf *mocks.CrossFeatureServiceMock,
 	sc *mocks.InterviewSessionCounterMock,
 	rd *mocks.ResumeDocumentFinderMock,
-) *controllers.IntegratedProfileController {
-	return controllers.NewIntegratedProfileController(cf, sc, rd)
+) *usercontrollers.IntegratedProfileController {
+	return usercontrollers.NewIntegratedProfileController(cf, sc, rd)
 }
 
 // user_idは認証済みユーザーID(EchoUserAuth経由のリクエストコンテキスト)から取得する。

@@ -2,6 +2,7 @@ package github
 
 import (
 	"Backend/internal/crypto"
+	"Backend/internal/safego"
 	"context"
 	"errors"
 	"fmt"
@@ -15,13 +16,13 @@ import (
 // TriggerAsyncSync 非同期でGitHubデータ同期を開始する（ノンブロッキング）
 // force=true でキャッシュを無視して強制同期する
 func (s *GitHubService) TriggerAsyncSync(userID uint, force bool) {
-	go func() {
+	safego.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		if err := s.SyncUserData(ctx, userID, force); err != nil {
 			log.Printf("[GitHubService] async sync failed for user %d: %v", userID, err)
 		}
-	}()
+	})
 }
 
 // SyncUserData GitHubからリポジトリ・言語比率・コントリビューション数を取得してDBに保存する

@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"Backend/internal/safego"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -95,7 +96,7 @@ func PutErrorJSON(kind string, payload any) string {
 		return ""
 	}
 	putter := s3ErrorPutter
-	go func() {
+	safego.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if _, _, err := putter.UploadFile(ctx, key, "application/json", doc); err != nil {
@@ -103,6 +104,6 @@ func PutErrorJSON(kind string, payload any) string {
 			return
 		}
 		slog.Info("s3 error log uploaded", "key", key)
-	}()
+	})
 	return key
 }

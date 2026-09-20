@@ -3,6 +3,7 @@ package auth
 import (
 	"Backend/domain/entity"
 	"Backend/internal/config"
+	"Backend/internal/safego"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -202,18 +203,18 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 	if s.jobs != nil {
 		if err := s.jobs.EnqueueEmailVerification(user.ID, user.Email, user.Name, user.EmailVerificationToken, appURL); err != nil {
 			log.Printf("[AuthService] enqueue verification email failed, fallback goroutine: %v", err)
-			go func() {
+			safego.Go(func() {
 				if err := s.emailService.SendVerificationEmail(user, user.EmailVerificationToken, appURL); err != nil {
 					log.Printf("[AuthService] failed to send verification email to %s: %v", user.Email, err)
 				}
-			}()
+			})
 		}
 	} else {
-		go func() {
+		safego.Go(func() {
 			if err := s.emailService.SendVerificationEmail(user, user.EmailVerificationToken, appURL); err != nil {
 				log.Printf("[AuthService] failed to send verification email to %s: %v", user.Email, err)
 			}
-		}()
+		})
 	}
 
 	return buildRegisterResponse(user)

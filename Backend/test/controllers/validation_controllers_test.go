@@ -12,7 +12,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	companycontrollers "Backend/internal/controllers/company"
+	escontrollers "Backend/internal/controllers/es"
 )
 
 // ---- ESReviewController ----
@@ -21,7 +22,7 @@ func TestESReviewController_Review_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/es/review", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewESReviewController().Review, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, escontrollers.NewESReviewController().Review, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestESReviewController_Review_MissingRAGURL(t *testing.T) {
@@ -33,7 +34,7 @@ func TestESReviewController_Review_MissingRAGURL(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/es/review", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewESReviewController().Review, newCtx(req, rec), http.StatusServiceUnavailable)
+	assertStatus(t, escontrollers.NewESReviewController().Review, newCtx(req, rec), http.StatusServiceUnavailable)
 }
 
 // ---- ESRewriteController ----
@@ -43,7 +44,7 @@ func TestESRewriteController_Rewrite_MissingOriginalText(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/es/rewrite", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewESRewriteController(nil).Rewrite, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, escontrollers.NewESRewriteController(nil).Rewrite, newCtx(req, rec), http.StatusBadRequest)
 }
 
 // ---- CompanyRelationController ----
@@ -54,7 +55,7 @@ func TestCompanyRelationController_GetCompanyRelations_InvalidID(t *testing.T) {
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, controllers.NewCompanyRelationController(nil, nil).GetCompanyRelations, ctx, http.StatusBadRequest)
+	assertStatus(t, companycontrollers.NewCompanyRelationController(nil, nil).GetCompanyRelations, ctx, http.StatusBadRequest)
 }
 
 func TestCompanyRelationController_GetCompanyMarketInfo_InvalidID(t *testing.T) {
@@ -63,5 +64,5 @@ func TestCompanyRelationController_GetCompanyMarketInfo_InvalidID(t *testing.T) 
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, controllers.NewCompanyRelationController(nil, nil).GetCompanyMarketInfo, ctx, http.StatusBadRequest)
+	assertStatus(t, companycontrollers.NewCompanyRelationController(nil, nil).GetCompanyMarketInfo, ctx, http.StatusBadRequest)
 }

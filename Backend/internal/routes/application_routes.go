@@ -1,7 +1,7 @@
 package routes
 
 import (
-	"Backend/internal/controllers"
+	applicationcontrollers "Backend/internal/controllers/application"
 	"Backend/internal/services/auth"
 
 	"github.com/labstack/echo/v4"
@@ -10,8 +10,8 @@ import (
 // SetupApplicationRoutes 応募・選考ステータス管理のルーティング設定
 func SetupApplicationRoutes(
 	api *echo.Group,
-	appController *controllers.ApplicationController,
-	hrStudentAnalysisController *controllers.HRStudentAnalysisController,
+	appController *applicationcontrollers.ApplicationController,
+	hrStudentAnalysisController *applicationcontrollers.HRStudentAnalysisController,
 	userSecret string,
 	access auth.UserAccessGuard,
 	orgs OrganizationIDResolver,

@@ -2,7 +2,19 @@ package main
 
 import (
 	"Backend/internal/config"
-	"Backend/internal/controllers"
+	admincontrollers "Backend/internal/controllers/admin"
+	applicationcontrollers "Backend/internal/controllers/application"
+	authcontrollers "Backend/internal/controllers/auth"
+	chatcontrollers "Backend/internal/controllers/chat"
+	companycontrollers "Backend/internal/controllers/company"
+	escontrollers "Backend/internal/controllers/es"
+	githubcontrollers "Backend/internal/controllers/github"
+	insightcontrollers "Backend/internal/controllers/insight"
+	interviewcontrollers "Backend/internal/controllers/interview"
+	releasecontrollers "Backend/internal/controllers/release"
+	resumecontrollers "Backend/internal/controllers/resume"
+	schedulecontrollers "Backend/internal/controllers/schedule"
+	usercontrollers "Backend/internal/controllers/user"
 	"Backend/internal/infrastructure/redisx"
 	"Backend/internal/logger"
 	"Backend/internal/middleware"
@@ -406,15 +418,15 @@ func main() {
 	// コントローラー層の初期化
 	organizationRepo := repositories.NewOrganizationRepository(db)
 	organizationService := organization.NewOrganizationService(organizationRepo)
-	authController := controllers.NewAuthController(authService, cfg.UserSecret)
-	oauthController := controllers.NewOAuthController(oauthService, organizationService)
-	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
+	authController := authcontrollers.NewAuthController(authService, cfg.UserSecret)
+	oauthController := authcontrollers.NewOAuthController(oauthService, organizationService)
+	chatController := chatcontrollers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	if jobEnqueuer != nil {
 		chatController.SetJobEnqueuer(jobEnqueuer)
 	}
 	chatController.SetDiagnosisQualityRepo(diagnosisQualityRepo)
-	questionController := controllers.NewQuestionController(questionService)
-	relationController := controllers.NewCompanyRelationController(companyQueryRepo, aiClient)
+	questionController := chatcontrollers.NewQuestionController(questionService)
+	relationController := companycontrollers.NewCompanyRelationController(companyQueryRepo, aiClient)
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
 	companyValidator.SetSearchBudget(companySearchBudget)
 	companyValidator.SetSearchFlight(companySearchFlight)
@@ -427,7 +439,7 @@ func main() {
 	// DB に無い企業は取得して登録する。取得結果は companies に保存され、
 	// 企業検索・マッチング・面接ヒントからも参照できるようになる（#1124）。
 	resumeService.SetCompanyProvisioner(infoFetcher)
-	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
+	adminCompanyController := admincontrollers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
 	adminCompanyController.SetSchoolRestrictionChecker(func(adminUserID uint) (bool, error) {
 		restricted, _, err := schoolService.ResolveAdminAccess(adminUserID)
@@ -437,9 +449,9 @@ func main() {
 	// 共有済みのものに差し替えないと、fetch-missing-batch で検索が統合されない(#1124)。
 	adminCompanyController.SetInfoFetcher(infoFetcher)
 	adminCompanyController.SetRelationsFetcher(relationsFetcher)
-	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
-	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
-	adminAuditController := controllers.NewAdminAuditController(auditLogService)
+	adminCrawlController := admincontrollers.NewAdminCrawlController(crawlService, auditLogService)
+	adminJobController := admincontrollers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
+	adminAuditController := admincontrollers.NewAdminAuditController(auditLogService)
 	// gBizINFO 公式 API を使った企業データ収集パイプライン
 	// Mynavi・Rikunabi・CareerTasu スクレイパーは利用規約違反リスクのため削除 (#178)
 	// 環境変数名の解決は config.LoadConfig に一本化する。
@@ -450,9 +462,9 @@ func main() {
 		GBiz:      scraper.NewGBizClient("", cfg.GBizInfoToken),
 		Threshold: config.CompanyGraphThreshold(),
 	}
-	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService, aiClient)
+	adminCompanyGraphController := admincontrollers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService, aiClient)
 	adminCompanyGraphController.SetRelationsFetcher(relationsFetcher)
-	resumeController := controllers.NewResumeController(resumeService)
+	resumeController := resumecontrollers.NewResumeController(resumeService)
 
 	// S3 upload service for interview videos (optional — skipped if env vars are not set)
 	s3UploadService, s3Err := storage.NewS3UploadService()
@@ -467,51 +479,51 @@ func main() {
 		logger.EnableS3ErrorArchive(s3UploadService)
 	}
 	userDeletionService := auth.NewUserDeletionService(db, objectDeleter, auditLogService)
-	adminOrganizationController := controllers.NewAdminOrganizationController(organizationService)
-	adminSchoolController := controllers.NewAdminSchoolController(schoolService)
-	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
+	adminOrganizationController := admincontrollers.NewAdminOrganizationController(organizationService)
+	adminSchoolController := admincontrollers.NewAdminSchoolController(schoolService)
+	adminUserController := admincontrollers.NewAdminUserController(userRepo, auditLogService)
 	adminUserController.SetDeletionService(userDeletionService)
 	adminUserController.SetSchoolService(schoolService)
-	interviewController := controllers.NewInterviewController(interviewService, videoRepo, s3UploadService)
-	realtimeController := controllers.NewRealtimeController(interviewService, realtimeUsageService)
-	adminInterviewController := controllers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
+	interviewController := interviewcontrollers.NewInterviewController(interviewService, videoRepo, s3UploadService)
+	realtimeController := interviewcontrollers.NewRealtimeController(interviewService, realtimeUsageService)
+	adminInterviewController := admincontrollers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
 	adminInterviewController.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	adminInterviewController.SetCompanyRepo(companyRepo)
 	adminInterviewController.SetOpenAIClient(aiClient)
 	adminInterviewController.SetUserAccessGuard(userDeletionService)
 	adminInterviewController.SetSchoolAccess(userRepo, interviewSessionRepo, schoolService)
 	adminJobController.SetSchoolAccess(schoolService)
-	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
+	adminDashboardController := admincontrollers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminDashboardController.SetSchoolService(schoolService)
 	adminDashboardController.SetOrganizationService(organizationService)
-	adminCostsController := controllers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
-	adminVectorController := controllers.NewAdminVectorController(admin.NewAdminVectorService())
+	adminCostsController := admincontrollers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
+	adminVectorController := admincontrollers.NewAdminVectorController(admin.NewAdminVectorService())
 	profileRecalcService := flywheel.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
-	profileRecalcController := controllers.NewAdminProfileRecalculationController(profileRecalcService)
+	profileRecalcController := admincontrollers.NewAdminProfileRecalculationController(profileRecalcService)
 	companyEntryService := company.NewCompanyEntryService(db, userRepo, pendingRegistrationRepo, emailService)
 	authService.SetCompanyOwnershipClaimer(companyEntryService)
-	companyEntryController := controllers.NewCompanyEntryController(companyEntryService)
+	companyEntryController := companycontrollers.NewCompanyEntryController(companyEntryService)
 	companyUserRepo := repositories.NewCompanyUserRepository(db)
 	companyUserRefreshRepo := repositories.NewCompanyUserRefreshTokenRepository(db)
 	companyUserService := companyauth.NewCompanyUserService(db, companyUserRepo, companyUserRefreshRepo, emailService, cfg.CompanyUserSecret)
-	companyAuthController := controllers.NewCompanyAuthController(companyUserService)
-	companyPortalController := controllers.NewCompanyPortalController(companyUserService)
-	adminCompanyUserController := controllers.NewAdminCompanyUserController(companyUserService)
+	companyAuthController := companycontrollers.NewCompanyAuthController(companyUserService)
+	companyPortalController := companycontrollers.NewCompanyPortalController(companyUserService)
+	adminCompanyUserController := companycontrollers.NewAdminCompanyUserController(companyUserService)
 	releaseNoteService := release.NewReleaseNoteService(db, aiClient)
-	releaseNoteController := controllers.NewReleaseNoteController(releaseNoteService, userRepo)
-	githubController := controllers.NewGitHubController(githubService, skillScoreService)
-	esRewriteController := controllers.NewESRewriteController(aiClient)
+	releaseNoteController := releasecontrollers.NewReleaseNoteController(releaseNoteService, userRepo)
+	githubController := githubcontrollers.NewGitHubController(githubService, skillScoreService)
+	esRewriteController := escontrollers.NewESRewriteController(aiClient)
 	scheduleRepo := repositories.NewScheduleRepository(db)
 	scheduleService := schedule.NewScheduleService(scheduleRepo)
 	// Googleカレンダー連携
 	googleTokenRepo := repositories.NewUserGoogleTokenRepository(db)
 	calendarSyncService := schedule.NewCalendarSyncService(googleTokenRepo, scheduleRepo, oauthConfig)
 	scheduleService.SetCalendarSyncService(calendarSyncService)
-	googleCalendarController := controllers.NewGoogleCalendarController(calendarSyncService)
-	scheduleController := controllers.NewScheduleController(scheduleService)
-	esReviewController := controllers.NewESReviewController()
+	googleCalendarController := schedulecontrollers.NewGoogleCalendarController(calendarSyncService)
+	scheduleController := schedulecontrollers.NewScheduleController(scheduleService)
+	esReviewController := escontrollers.NewESReviewController()
 	appService := application.NewApplicationService(appStatusRepo, matchRepo, db)
-	appController := controllers.NewApplicationController(appService)
+	appController := applicationcontrollers.NewApplicationController(appService)
 	appController.SetSchoolAccess(schoolService)
 	hrStudentAnalysisService := hr.NewStudentAnalysisService(
 		db,
@@ -523,30 +535,30 @@ func main() {
 		interviewReportRepo,
 		resumeRepo,
 	)
-	hrStudentAnalysisController := controllers.NewHRStudentAnalysisController(hrStudentAnalysisService)
+	hrStudentAnalysisController := applicationcontrollers.NewHRStudentAnalysisController(hrStudentAnalysisService)
 	// 企業ポータルの学生検索・タグ管理 (#1094)
 	studentSearchRepo := repositories.NewStudentSearchRepository(db)
 	companyStudentTagRepo := repositories.NewCompanyStudentTagRepository(db)
 	studentSemanticClient := hr.NewStudentSemanticClient()
 	studentSearchService := hr.NewStudentSearchService(studentSearchRepo, companyStudentTagRepo, studentSemanticClient)
 	industryRepo := repositories.NewIndustryRepository(db)
-	companyStudentController := controllers.NewCompanyStudentController(studentSearchService, hrStudentAnalysisService, industryRepo)
+	companyStudentController := companycontrollers.NewCompanyStudentController(studentSearchService, hrStudentAnalysisService, industryRepo)
 	userPreferenceRepo := repositories.NewUserPreferenceRepository(db)
 	// 希望条件の保存とプロフィール更新の両方から同じ同期処理を呼ぶ (#1094)
 	scoutIndexSyncer := hr.NewStudentIndexSyncer(userPreferenceRepo, studentSemanticClient)
 	authService.SetScoutIndexSyncer(scoutIndexSyncer)
-	userPreferenceController := controllers.NewUserPreferenceController(userPreferenceRepo, scoutIndexSyncer, industryRepo)
-	integratedProfileController := controllers.NewIntegratedProfileController(crossFeatureService, interviewSessionRepo, resumeRepo)
-	entitlementController := controllers.NewEntitlementController(organizationService)
+	userPreferenceController := usercontrollers.NewUserPreferenceController(userPreferenceRepo, scoutIndexSyncer, industryRepo)
+	integratedProfileController := usercontrollers.NewIntegratedProfileController(crossFeatureService, interviewSessionRepo, resumeRepo)
+	entitlementController := usercontrollers.NewEntitlementController(organizationService)
 	scoreValidationRepo := repositories.NewScoreValidationRepository(db)
 	scoreValidationService := admin.NewScoreValidationService(scoreValidationRepo)
-	scoreValidationController := controllers.NewAdminScoreValidationController(scoreValidationService)
-	diagnosisQualityController := controllers.NewAdminDiagnosisQualityController(diagnosisQualityRepo)
+	scoreValidationController := admincontrollers.NewAdminScoreValidationController(scoreValidationService)
+	diagnosisQualityController := admincontrollers.NewAdminDiagnosisQualityController(diagnosisQualityRepo)
 	collectiveInsightRepo := repositories.NewCollectiveInsightRepository(db)
 	collectiveInsightService := flywheel.NewCollectiveInsightService(collectiveInsightRepo, userWeightScoreRepo)
-	collectiveInsightController := controllers.NewCollectiveInsightController(collectiveInsightService)
+	collectiveInsightController := insightcontrollers.NewCollectiveInsightController(collectiveInsightService)
 	scraperSessionService := admin.NewScraperSessionService(scraperSessionRepo)
-	scraperSessionController := controllers.NewAdminScraperSessionController(scraperSessionService)
+	scraperSessionController := admincontrollers.NewAdminScraperSessionController(scraperSessionService)
 
 	// Echo初期化
 	e := echo.New()
@@ -568,6 +580,14 @@ func main() {
 		// Repanic=true で Sentry へ送ったあと再 panic させ、外側の Recover が 500 にする（#1185）
 		e.Use(sentryecho.New(sentryecho.Options{Repanic: true}))
 	}
+	// ボディサイズの上限。これが無いと ParseMultipartForm が超過分を一時ファイルへ
+	// 無制限に書き出すため、各ハンドラのサイズ検査へ到達する前にディスクを埋められる。
+	// 面接動画だけは maxVideoSize(500MB) を通す必要があるので、routes.BodyLimitSkipper
+	// で除外し、ルート側に個別の上限を置く。
+	e.Use(echomw.BodyLimitWithConfig(echomw.BodyLimitConfig{
+		Skipper: routes.BodyLimitSkipper,
+		Limit:   "32M",
+	}))
 	e.Use(middleware.EchoRequestLogger)
 	e.Use(echo.WrapMiddleware(securityHeadersMiddleware))
 	e.Use(echo.WrapMiddleware(buildCORSMiddleware()))
@@ -607,7 +627,7 @@ func main() {
 	teacherInsightService := teacher.NewStudentInsightService(userRepo, userWeightScoreRepo, industryRepo, industryWeightProfileRepo)
 	// 低マッチのまま進行中の応募を教員一覧に出す（#1028）
 	teacherInsightService.SetLowMatchReader(appStatusRepo)
-	teacherInsightController := controllers.NewTeacherStudentInsightController(teacherInsightService)
+	teacherInsightController := insightcontrollers.NewTeacherStudentInsightController(teacherInsightService)
 	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, userRepo, schoolService, cfg.AdminSecret)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService)
@@ -618,16 +638,16 @@ func main() {
 	routes.SetupApplicationRoutes(api, appController, hrStudentAnalysisController, cfg.UserSecret, userDeletionService, organizationService)
 	// 企業ポータルのダッシュボードと応募者管理 (#1320)。
 	// 応募・求人・学生の集計はそれぞれ既存のリポジトリを使い、新しいテーブルは作らない。
-	companyPortalApplicationController := controllers.NewCompanyPortalApplicationController(
+	companyPortalApplicationController := companycontrollers.NewCompanyPortalApplicationController(
 		appService, companyRepo, studentSearchRepo,
 	)
 	// 企業ポータルの求人管理 (#1321)。既存の CompanyRepository を使い、新しいテーブルは作らない。
-	companyPortalJobController := controllers.NewCompanyPortalJobController(
+	companyPortalJobController := companycontrollers.NewCompanyPortalJobController(
 		companyportal.NewJobService(companyRepo),
 	)
 	// 自社プロフィール編集と担当者管理 (#1322)。
 	// 担当者管理は既存の CompanyUserService をそのまま使う。
-	companyPortalProfileController := controllers.NewCompanyPortalProfileController(
+	companyPortalProfileController := companycontrollers.NewCompanyPortalProfileController(
 		companyportal.NewProfileService(companyRepo), companyUserService,
 	)
 	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, cfg.CompanyUserSecret, companyUserRepo)
@@ -641,7 +661,7 @@ func main() {
 	adminEntry.GET("/companies/:id/company-users", adminCompanyUserController.List)
 	adminEntry.PATCH("/companies/:id/company-users/:userID", adminCompanyUserController.SetDisabled)
 	// 学習データのエクスポート(#268)。候補者の発話と選考結果を含むため管理者のみ。
-	adminTrainingController := controllers.NewAdminTrainingController(training.NewService(db))
+	adminTrainingController := admincontrollers.NewAdminTrainingController(training.NewService(db))
 	// stats は件数しか返さない(個人情報を含まない)。運用から機械的に叩けるよう、
 	// whats-new/ingest と同じサービス間認証にする。管理者になりすます形を避ける。
 	api.GET("/admin/training/stats", adminTrainingController.Stats, routes.EchoStaticSecretAuth(cfg.AdminSecret))

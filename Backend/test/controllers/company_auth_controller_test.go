@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	companycontrollers "Backend/internal/controllers/company"
 	companyauth "Backend/internal/services/companyauth"
 
 	"github.com/labstack/echo/v4"
@@ -20,7 +20,7 @@ func TestCompanyAuthController_Login_InvalidBody(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	err := controllers.NewCompanyAuthController(&companyauth.CompanyUserService{}).Login(c)
+	err := companycontrollers.NewCompanyAuthController(&companyauth.CompanyUserService{}).Login(c)
 	assert.Error(t, err)
 }
 
@@ -30,6 +30,6 @@ func TestCompanyAuthController_Me_Unauthorized(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	err := controllers.NewCompanyAuthController(&companyauth.CompanyUserService{}).Me(c)
+	err := companycontrollers.NewCompanyAuthController(&companyauth.CompanyUserService{}).Me(c)
 	assert.Error(t, err)
 }
