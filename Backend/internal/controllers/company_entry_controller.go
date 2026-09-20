@@ -2,7 +2,7 @@ package controllers
 
 import (
 	"Backend/internal/middleware"
-	"Backend/internal/services"
+	"Backend/internal/services/company"
 	"errors"
 	"net/http"
 	"strconv"
@@ -12,10 +12,10 @@ import (
 )
 
 type CompanyEntryController struct {
-	service *services.CompanyEntryService
+	service *company.CompanyEntryService
 }
 
-func NewCompanyEntryController(service *services.CompanyEntryService) *CompanyEntryController {
+func NewCompanyEntryController(service *company.CompanyEntryService) *CompanyEntryController {
 	return &CompanyEntryController{service: service}
 }
 
@@ -90,7 +90,7 @@ func (c *CompanyEntryController) Submit(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
 	}
 
-	in := services.CompanyEntryInput{
+	in := company.CompanyEntryInput{
 		Name:             req.Name,
 		Description:      req.Description,
 		Industry:         req.Industry,
@@ -115,7 +115,7 @@ func (c *CompanyEntryController) Submit(ctx echo.Context) error {
 		SourceIP:         middleware.GetClientIP(ctx.Request()),
 	}
 	for _, jp := range req.JobPositions {
-		in.JobPositions = append(in.JobPositions, services.CompanyEntryJobInput{
+		in.JobPositions = append(in.JobPositions, company.CompanyEntryJobInput{
 			Title:           jp.Title,
 			Description:     jp.Description,
 			JobCategoryID:   jp.JobCategoryID,
@@ -129,7 +129,7 @@ func (c *CompanyEntryController) Submit(ctx echo.Context) error {
 		})
 	}
 	if req.WeightProfile != nil {
-		in.WeightProfile = &services.CompanyEntryWeightInput{
+		in.WeightProfile = &company.CompanyEntryWeightInput{
 			TechnicalOrientation:  req.WeightProfile.TechnicalOrientation,
 			TeamworkOrientation:   req.WeightProfile.TeamworkOrientation,
 			LeadershipOrientation: req.WeightProfile.LeadershipOrientation,
@@ -143,7 +143,7 @@ func (c *CompanyEntryController) Submit(ctx echo.Context) error {
 		}
 	}
 	for _, g := range req.Graduates {
-		in.Graduates = append(in.Graduates, services.CompanyEntryGraduateInput{
+		in.Graduates = append(in.Graduates, company.CompanyEntryGraduateInput{
 			GraduateName:   g.GraduateName,
 			GraduationYear: g.GraduationYear,
 			SchoolName:     g.SchoolName,
@@ -182,7 +182,7 @@ func (c *CompanyEntryController) ResendEmail(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
 	}
 	if err := c.service.ResendEmail(uint(id)); err != nil {
-		if errors.Is(err, services.ErrCompanyEntrySubmissionNotFound) {
+		if errors.Is(err, company.ErrCompanyEntrySubmissionNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "submission not found")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())

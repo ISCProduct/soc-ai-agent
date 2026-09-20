@@ -1,4 +1,4 @@
-package services
+package release
 
 import (
 	"Backend/internal/models"

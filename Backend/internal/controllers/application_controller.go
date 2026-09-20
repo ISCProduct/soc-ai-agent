@@ -2,8 +2,8 @@ package controllers
 
 import (
 	"Backend/domain/entity"
-	"Backend/internal/services"
 	"Backend/internal/services/interfaces"
+	"Backend/internal/services/school"
 	"Backend/internal/services/shared"
 	"errors"
 	"net/http"
@@ -17,7 +17,7 @@ import (
 // ApplicationController 応募・選考ステータス管理コントローラー
 type ApplicationController struct {
 	appService interfaces.ApplicationService
-	schools    *services.SchoolService
+	schools    *school.SchoolService
 }
 
 func NewApplicationController(appService interfaces.ApplicationService) *ApplicationController {
@@ -26,7 +26,7 @@ func NewApplicationController(appService interfaces.ApplicationService) *Applica
 
 // SetSchoolAccess は管理者の担当校スコープ検証に使うサービスを注入する(#1157)。
 // 未設定のまま管理者向けエンドポイントを呼ぶと fail-closed で拒否する。
-func (c *ApplicationController) SetSchoolAccess(schools *services.SchoolService) {
+func (c *ApplicationController) SetSchoolAccess(schools *school.SchoolService) {
 	c.schools = schools
 }
 

@@ -1,11 +1,11 @@
-package services_test
+package school_test
 
 import (
 	"errors"
 	"testing"
 
 	"Backend/internal/repositories"
-	"Backend/internal/services"
+	"Backend/internal/services/school"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"gorm.io/driver/mysql"
@@ -32,7 +32,7 @@ func newSchoolTestDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 
 func TestSchoolService_ResolveAdminAccess_Unrestricted(t *testing.T) {
 	db, mock := newSchoolTestDB(t)
-	svc := services.NewSchoolService(repositories.NewSchoolRepository(db))
+	svc := school.NewSchoolService(repositories.NewSchoolRepository(db))
 
 	mock.ExpectQuery("SELECT .* FROM `schools` JOIN admin_school_memberships").
 		WithArgs(uint(1)).
@@ -55,7 +55,7 @@ func TestSchoolService_ResolveAdminAccess_Unrestricted(t *testing.T) {
 
 func TestSchoolService_ResolveAdminAccess_Restricted(t *testing.T) {
 	db, mock := newSchoolTestDB(t)
-	svc := services.NewSchoolService(repositories.NewSchoolRepository(db))
+	svc := school.NewSchoolService(repositories.NewSchoolRepository(db))
 
 	mock.ExpectQuery("SELECT .* FROM `schools` JOIN admin_school_memberships").
 		WithArgs(uint(2)).
@@ -76,12 +76,12 @@ func TestSchoolService_ResolveAdminAccess_Restricted(t *testing.T) {
 
 func TestSchoolService_Create_Validation(t *testing.T) {
 	db, _ := newSchoolTestDB(t)
-	svc := services.NewSchoolService(repositories.NewSchoolRepository(db))
+	svc := school.NewSchoolService(repositories.NewSchoolRepository(db))
 
-	if _, err := svc.Create(services.CreateSchoolInput{OrganizationID: 1, Name: ""}); !errors.Is(err, services.ErrSchoolNameRequired) {
+	if _, err := svc.Create(school.CreateSchoolInput{OrganizationID: 1, Name: ""}); !errors.Is(err, school.ErrSchoolNameRequired) {
 		t.Fatalf("got %v want ErrSchoolNameRequired", err)
 	}
-	if _, err := svc.Create(services.CreateSchoolInput{OrganizationID: 0, Name: "情報科学専門学校"}); !errors.Is(err, services.ErrSchoolOrgRequired) {
+	if _, err := svc.Create(school.CreateSchoolInput{OrganizationID: 0, Name: "情報科学専門学校"}); !errors.Is(err, school.ErrSchoolOrgRequired) {
 		t.Fatalf("got %v want ErrSchoolOrgRequired", err)
 	}
 }

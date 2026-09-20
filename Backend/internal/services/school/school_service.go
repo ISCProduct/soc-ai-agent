@@ -1,4 +1,4 @@
-package services
+package school
 
 import (
 	"Backend/domain/repository"

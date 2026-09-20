@@ -2,7 +2,7 @@ package controllers
 
 import (
 	"Backend/internal/middleware"
-	"Backend/internal/services"
+	"Backend/internal/services/school"
 	"errors"
 	"net/http"
 	"strconv"
@@ -13,10 +13,10 @@ import (
 // AdminSchoolController はプラットフォーム管理者向けの個別校CRUD、担当管理者割当、
 // 企業掲載承認リストを扱う。
 type AdminSchoolController struct {
-	schools *services.SchoolService
+	schools *school.SchoolService
 }
 
-func NewAdminSchoolController(schools *services.SchoolService) *AdminSchoolController {
+func NewAdminSchoolController(schools *school.SchoolService) *AdminSchoolController {
 	return &AdminSchoolController{schools: schools}
 }
 
@@ -61,11 +61,11 @@ func (c *AdminSchoolController) Create(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
-	school, err := c.schools.Create(services.CreateSchoolInput{OrganizationID: req.OrganizationID, Name: req.Name})
+	created, err := c.schools.Create(school.CreateSchoolInput{OrganizationID: req.OrganizationID, Name: req.Name})
 	if err != nil {
 		return mapSchoolError(err)
 	}
-	return ctx.JSON(http.StatusCreated, school)
+	return ctx.JSON(http.StatusCreated, created)
 }
 
 // Get GET /api/admin/schools/:id
@@ -74,11 +74,11 @@ func (c *AdminSchoolController) Get(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
-	school, err := c.schools.Get(id)
+	found, err := c.schools.Get(id)
 	if err != nil {
 		return mapSchoolError(err)
 	}
-	return ctx.JSON(http.StatusOK, school)
+	return ctx.JSON(http.StatusOK, found)
 }
 
 // AddMember POST /api/admin/schools/:id/members
@@ -271,11 +271,11 @@ func (c *AdminSchoolController) MySchoolAccess(ctx echo.Context) error {
 
 func mapSchoolError(err error) error {
 	switch {
-	case errors.Is(err, services.ErrSchoolNotFound):
+	case errors.Is(err, school.ErrSchoolNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
-	case errors.Is(err, services.ErrSchoolAlreadyAssigned), errors.Is(err, services.ErrCompanyAlreadyApproved):
+	case errors.Is(err, school.ErrSchoolAlreadyAssigned), errors.Is(err, school.ErrCompanyAlreadyApproved):
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
-	case errors.Is(err, services.ErrSchoolNameRequired), errors.Is(err, services.ErrSchoolOrgRequired):
+	case errors.Is(err, school.ErrSchoolNameRequired), errors.Is(err, school.ErrSchoolOrgRequired):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	default:
 		return echoInternalError(err)

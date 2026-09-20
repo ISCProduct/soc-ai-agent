@@ -1,4 +1,4 @@
-package services_test
+package release_test
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"Backend/internal/openai"
-	"Backend/internal/services"
+	"Backend/internal/services/release"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"gorm.io/driver/mysql"
@@ -77,14 +77,14 @@ func TestReleaseNoteService_IngestMergedPRs_SkipsExisting(t *testing.T) {
 	db, mock := newReleaseNoteTestDB(t)
 	server, client := newSummaryStubServer(t, "")
 	defer server.Close()
-	svc := services.NewReleaseNoteService(db, client)
+	svc := release.NewReleaseNoteService(db, client)
 
 	expectReleaseNotePurgeScan(mock)
 	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `release_notes` WHERE pr_number = \\?").
 		WithArgs(uint(100)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 
-	saved, err := svc.IngestMergedPRs(context.Background(), []services.ReleaseNoteSource{
+	saved, err := svc.IngestMergedPRs(context.Background(), []release.ReleaseNoteSource{
 		{PRNumber: 100, Title: "既存PR", Body: "本文", MergedAt: time.Now()},
 	})
 	if err != nil {
@@ -102,14 +102,14 @@ func TestReleaseNoteService_IngestMergedPRs_SkipsEmptySummary(t *testing.T) {
 	db, mock := newReleaseNoteTestDB(t)
 	server, client := newSummaryStubServer(t, "")
 	defer server.Close()
-	svc := services.NewReleaseNoteService(db, client)
+	svc := release.NewReleaseNoteService(db, client)
 
 	expectReleaseNotePurgeScan(mock)
 	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `release_notes` WHERE pr_number = \\?").
 		WithArgs(uint(200)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 
-	saved, err := svc.IngestMergedPRs(context.Background(), []services.ReleaseNoteSource{
+	saved, err := svc.IngestMergedPRs(context.Background(), []release.ReleaseNoteSource{
 		{PRNumber: 200, Title: "内部リファクタリング", Body: "ユーザーに影響なし", MergedAt: time.Now()},
 	})
 	if err != nil {
@@ -124,7 +124,7 @@ func TestReleaseNoteService_IngestMergedPRs_SavesNewEntry(t *testing.T) {
 	db, mock := newReleaseNoteTestDB(t)
 	server, client := newSummaryStubServerWithAudience(t, "新機能を追加しました。", "teacher")
 	defer server.Close()
-	svc := services.NewReleaseNoteService(db, client)
+	svc := release.NewReleaseNoteService(db, client)
 
 	expectReleaseNotePurgeScan(mock)
 	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `release_notes` WHERE pr_number = \\?").
@@ -136,7 +136,7 @@ func TestReleaseNoteService_IngestMergedPRs_SavesNewEntry(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	saved, err := svc.IngestMergedPRs(context.Background(), []services.ReleaseNoteSource{
+	saved, err := svc.IngestMergedPRs(context.Background(), []release.ReleaseNoteSource{
 		{PRNumber: 300, Title: "新機能", Body: "ユーザー向けの本文", MergedAt: time.Now()},
 	})
 	if err != nil {
@@ -155,7 +155,7 @@ func TestReleaseNoteService_IngestMergedPRs_FallsBackToAllAudienceWhenUnknown(t 
 	db, mock := newReleaseNoteTestDB(t)
 	server, client := newSummaryStubServerWithAudience(t, "新機能を追加しました。", "unknown-value")
 	defer server.Close()
-	svc := services.NewReleaseNoteService(db, client)
+	svc := release.NewReleaseNoteService(db, client)
 
 	expectReleaseNotePurgeScan(mock)
 	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `release_notes` WHERE pr_number = \\?").
@@ -167,7 +167,7 @@ func TestReleaseNoteService_IngestMergedPRs_FallsBackToAllAudienceWhenUnknown(t 
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	saved, err := svc.IngestMergedPRs(context.Background(), []services.ReleaseNoteSource{
+	saved, err := svc.IngestMergedPRs(context.Background(), []release.ReleaseNoteSource{
 		{PRNumber: 301, Title: "新機能", Body: "本文", MergedAt: time.Now()},
 	})
 	if err != nil {
@@ -185,7 +185,7 @@ func TestReleaseNoteService_IngestMergedPRs_SkipsDeveloperOnlySourceWithoutLLM(t
 	db, mock := newReleaseNoteTestDB(t)
 	server, client := newSummaryStubServerWithAudience(t, "CIを改善しました。", "all")
 	defer server.Close()
-	svc := services.NewReleaseNoteService(db, client)
+	svc := release.NewReleaseNoteService(db, client)
 
 	expectReleaseNotePurgeScan(mock)
 	mock.ExpectBegin()
@@ -194,7 +194,7 @@ func TestReleaseNoteService_IngestMergedPRs_SkipsDeveloperOnlySourceWithoutLLM(t
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectCommit()
 
-	saved, err := svc.IngestMergedPRs(context.Background(), []services.ReleaseNoteSource{
+	saved, err := svc.IngestMergedPRs(context.Background(), []release.ReleaseNoteSource{
 		{PRNumber: 400, Title: "ci: Dockerビルドキャッシュを変更", Body: "GitHub Actions の高速化", MergedAt: time.Now()},
 	})
 	if err != nil {
@@ -212,7 +212,7 @@ func TestReleaseNoteService_IngestMergedPRs_ReleaseUmbrellaGoesToLLMDespiteFarga
 	db, mock := newReleaseNoteTestDB(t)
 	server, client := newSummaryStubServerWithAudience(t, "面接の深掘り質問が分かりやすくなりました。", "student")
 	defer server.Close()
-	svc := services.NewReleaseNoteService(db, client)
+	svc := release.NewReleaseNoteService(db, client)
 
 	expectReleaseNotePurgeScan(mock)
 	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `release_notes` WHERE pr_number = \\?").
@@ -224,7 +224,7 @@ func TestReleaseNoteService_IngestMergedPRs_ReleaseUmbrellaGoesToLLMDespiteFarga
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	saved, err := svc.IngestMergedPRs(context.Background(), []services.ReleaseNoteSource{
+	saved, err := svc.IngestMergedPRs(context.Background(), []release.ReleaseNoteSource{
 		{
 			PRNumber: 1181,
 			Title:    "Release to production: 面接深掘り継続力",
@@ -247,7 +247,7 @@ func TestReleaseNoteService_IngestMergedPRs_SkipsChorePrefixWithoutLLM(t *testin
 	db, mock := newReleaseNoteTestDB(t)
 	server, client := newSummaryStubServerWithAudience(t, "依存関係を更新しました。", "all")
 	defer server.Close()
-	svc := services.NewReleaseNoteService(db, client)
+	svc := release.NewReleaseNoteService(db, client)
 
 	expectReleaseNotePurgeScan(mock)
 	mock.ExpectBegin()
@@ -256,7 +256,7 @@ func TestReleaseNoteService_IngestMergedPRs_SkipsChorePrefixWithoutLLM(t *testin
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectCommit()
 
-	saved, err := svc.IngestMergedPRs(context.Background(), []services.ReleaseNoteSource{
+	saved, err := svc.IngestMergedPRs(context.Background(), []release.ReleaseNoteSource{
 		{PRNumber: 402, Title: "chore: 依存関係を更新", Body: "go.mod の bump", MergedAt: time.Now()},
 	})
 	if err != nil {
@@ -274,7 +274,7 @@ func TestReleaseNoteService_IngestMergedPRs_SavesUserFacingAndSkipsInternalInSam
 	db, mock := newReleaseNoteTestDB(t)
 	server, client := newSummaryStubServerWithAudience(t, "面談画面を改善しました。", "student")
 	defer server.Close()
-	svc := services.NewReleaseNoteService(db, client)
+	svc := release.NewReleaseNoteService(db, client)
 
 	expectReleaseNotePurgeScan(mock)
 	mock.ExpectBegin()
@@ -291,7 +291,7 @@ func TestReleaseNoteService_IngestMergedPRs_SavesUserFacingAndSkipsInternalInSam
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	saved, err := svc.IngestMergedPRs(context.Background(), []services.ReleaseNoteSource{
+	saved, err := svc.IngestMergedPRs(context.Background(), []release.ReleaseNoteSource{
 		{PRNumber: 500, Title: "fix: CodeRabbit指摘への対応", Body: "", MergedAt: time.Now()},
 		{PRNumber: 501, Title: "feat: 面談画面の改善", Body: "学生が入力しやすくする", MergedAt: time.Now()},
 	})
@@ -310,7 +310,7 @@ func TestReleaseNoteService_IngestMergedPRs_PurgesStoredDeveloperOnlyNotes(t *te
 	db, mock := newReleaseNoteTestDB(t)
 	server, client := newSummaryStubServer(t, "")
 	defer server.Close()
-	svc := services.NewReleaseNoteService(db, client)
+	svc := release.NewReleaseNoteService(db, client)
 
 	now := time.Now()
 	mock.ExpectQuery("SELECT \\* FROM `release_notes`").
@@ -338,7 +338,7 @@ func TestReleaseNoteService_IngestMergedPRs_KeepsStoredUserFacingNotes(t *testin
 	db, mock := newReleaseNoteTestDB(t)
 	server, client := newSummaryStubServer(t, "")
 	defer server.Close()
-	svc := services.NewReleaseNoteService(db, client)
+	svc := release.NewReleaseNoteService(db, client)
 
 	now := time.Now()
 	mock.ExpectQuery("SELECT \\* FROM `release_notes`").
@@ -359,18 +359,18 @@ func TestReleaseNoteService_IngestMergedPRs_KeepsStoredUserFacingNotes(t *testin
 
 func TestReleaseNoteService_IngestMergedPRs_NilClientErrors(t *testing.T) {
 	db, mock := newReleaseNoteTestDB(t)
-	svc := services.NewReleaseNoteService(db, nil)
+	svc := release.NewReleaseNoteService(db, nil)
 
 	expectReleaseNotePurgeScan(mock)
-	_, err := svc.IngestMergedPRs(context.Background(), []services.ReleaseNoteSource{{PRNumber: 1}})
-	if err != services.ErrReleaseNoteLLMClientNil {
+	_, err := svc.IngestMergedPRs(context.Background(), []release.ReleaseNoteSource{{PRNumber: 1}})
+	if err != release.ErrReleaseNoteLLMClientNil {
 		t.Fatalf("expected ErrReleaseNoteLLMClientNil, got %v", err)
 	}
 }
 
 func TestReleaseNoteService_List_OrdersByMergedAtDesc(t *testing.T) {
 	db, mock := newReleaseNoteTestDB(t)
-	svc := services.NewReleaseNoteService(db, nil)
+	svc := release.NewReleaseNoteService(db, nil)
 
 	rows := sqlmock.NewRows([]string{"id", "pr_number", "title", "summary", "audience", "merged_at", "created_at"}).
 		AddRow(2, 200, "新しい方", "説明2", "all", time.Now(), time.Now()).
@@ -391,7 +391,7 @@ func TestReleaseNoteService_List_OrdersByMergedAtDesc(t *testing.T) {
 // #966: システム管理者(isAdmin=true)は all/admin のaudienceのみ表示されること。
 func TestReleaseNoteService_List_AdminSeesAllAndAdminAudience(t *testing.T) {
 	db, mock := newReleaseNoteTestDB(t)
-	svc := services.NewReleaseNoteService(db, nil)
+	svc := release.NewReleaseNoteService(db, nil)
 
 	rows := sqlmock.NewRows([]string{"id", "pr_number", "title", "summary", "audience", "merged_at", "created_at"}).
 		AddRow(1, 100, "管理者向け機能", "説明", "admin", time.Now(), time.Now())
@@ -414,7 +414,7 @@ func TestReleaseNoteService_List_AdminSeesAllAndAdminAudience(t *testing.T) {
 // #966: 教員(role=teacher)は all/teacher のaudienceのみ表示されること。
 func TestReleaseNoteService_List_TeacherSeesAllAndTeacherAudience(t *testing.T) {
 	db, mock := newReleaseNoteTestDB(t)
-	svc := services.NewReleaseNoteService(db, nil)
+	svc := release.NewReleaseNoteService(db, nil)
 
 	rows := sqlmock.NewRows([]string{"id", "pr_number", "title", "summary", "audience", "merged_at", "created_at"}).
 		AddRow(1, 100, "教員向け機能", "説明", "teacher", time.Now(), time.Now())

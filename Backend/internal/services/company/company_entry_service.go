@@ -1,4 +1,4 @@
-package services
+package company
 
 import (
 	"Backend/domain/entity"

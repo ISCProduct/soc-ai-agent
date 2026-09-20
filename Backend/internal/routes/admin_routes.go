@@ -3,7 +3,7 @@ package routes
 import (
 	"Backend/internal/controllers"
 	"Backend/internal/repositories"
-	"Backend/internal/services"
+	"Backend/internal/services/school"
 
 	"github.com/labstack/echo/v4"
 )
@@ -30,7 +30,7 @@ func SetupAdminRoutes(
 	appController *controllers.ApplicationController,
 	teacherInsightController *controllers.TeacherStudentInsightController,
 	userRepo *repositories.UserRepository,
-	schoolService *services.SchoolService,
+	schoolService *school.SchoolService,
 	adminSecret string,
 ) {
 	companyGraph := api.Group("/admin/company-graph")

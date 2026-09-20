@@ -19,9 +19,9 @@ import (
 	"Backend/domain/entity"
 	"Backend/internal/controllers"
 	"Backend/internal/models"
-	"Backend/internal/services"
 	"Backend/internal/services/admin"
 	"Backend/internal/services/flywheel"
+	"Backend/internal/services/school"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/mock"
@@ -408,7 +408,7 @@ func TestAdminUserController_Update_SchoolAccessDenied(t *testing.T) {
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
 	ctrl := controllers.NewAdminUserController(repo, nil)
-	ctrl.SetSchoolService(services.NewSchoolService(schoolRepo))
+	ctrl.SetSchoolService(school.NewSchoolService(schoolRepo))
 	assertStatus(t, ctrl.Update, ctx, http.StatusForbidden)
 	repo.AssertExpectations(t)
 }
