@@ -343,6 +343,7 @@ resource "aws_launch_template" "app" {
     github_dispatch_token    = var.github_dispatch_token
     github_dispatch_repo     = var.github_dispatch_repo
     oauth_state_secret       = random_password.oauth_state_secret.result
+    sentry_dsn               = var.sentry_dsn
     token_encryption_key     = random_id.token_encryption_key.hex
     edge_nginx_conf          = file("${path.module}/../../../nginx/staging-edge.conf")
     service_unavailable_html = file("${path.module}/../../../static/service-unavailable.html")

@@ -272,3 +272,10 @@ variable "staging_api_subdomain" {
   description = "staging バックエンドAPI用サブドメインラベル"
   default     = "api-stg"
 }
+
+variable "sentry_dsn" {
+  type        = string
+  description = "サーバー側(Backend/RAG)のSentry DSN(#1185)。未設定ならSentryは初期化されない。ブラウザ側はビルド時に焼き込むためCIのシークレット(SENTRY_DSN_FRONTEND_STAGING)で渡す"
+  sensitive   = true
+  default     = ""
+}
