@@ -1,4 +1,4 @@
-package controllers
+package company
 
 // 企業ポータル求人管理のロール境界テスト（#1321）。
 // 実行: cd Backend && go test ./internal/controllers/ -run CompanyPortalJob -v

@@ -1,4 +1,4 @@
-package controllers
+package company
 
 // 企業ポータルの自社プロフィール編集と担当者管理（#1322）。
 //

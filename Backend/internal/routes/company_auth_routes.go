@@ -1,7 +1,7 @@
 package routes
 
 import (
-	"Backend/internal/controllers"
+	companycontrollers "Backend/internal/controllers/company"
 	"Backend/internal/middleware"
 	"Backend/internal/repositories"
 
@@ -52,12 +52,12 @@ func EchoCompanyAuth(companySecret string, users *repositories.CompanyUserReposi
 
 func SetupCompanyAuthRoutes(
 	api *echo.Group,
-	authController *controllers.CompanyAuthController,
-	portalController *controllers.CompanyPortalController,
-	studentController *controllers.CompanyStudentController,
-	applicationController *controllers.CompanyPortalApplicationController,
-	jobController *controllers.CompanyPortalJobController,
-	profileController *controllers.CompanyPortalProfileController,
+	authController *companycontrollers.CompanyAuthController,
+	portalController *companycontrollers.CompanyPortalController,
+	studentController *companycontrollers.CompanyStudentController,
+	applicationController *companycontrollers.CompanyPortalApplicationController,
+	jobController *companycontrollers.CompanyPortalJobController,
+	profileController *companycontrollers.CompanyPortalProfileController,
 	companySecret string,
 	users *repositories.CompanyUserRepository,
 ) {

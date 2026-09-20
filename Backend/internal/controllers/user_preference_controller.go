@@ -19,6 +19,12 @@ type scoutIndexSyncer interface {
 
 // UserPreferenceController は学生本人の希望条件の取得・更新（#1094）。
 // 企業向け学生検索のフィルタ軸（希望業界・希望勤務地）を学生が入力する。
+// industryLister は業種マスタの取得のみを使う。Go の慣習に従い利用側で宣言する
+// （company/student_controller.go にも同名の宣言があるが、そちらは企業側の利用分）。
+type industryLister interface {
+	ListActive() ([]repositories.IndustryOption, error)
+}
+
 type UserPreferenceController struct {
 	repo       *repositories.UserPreferenceRepository
 	syncer     scoutIndexSyncer

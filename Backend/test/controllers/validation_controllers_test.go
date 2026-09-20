@@ -12,7 +12,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	companycontrollers "Backend/internal/controllers/company"
 	escontrollers "Backend/internal/controllers/es"
 )
 
@@ -55,7 +55,7 @@ func TestCompanyRelationController_GetCompanyRelations_InvalidID(t *testing.T) {
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, controllers.NewCompanyRelationController(nil, nil).GetCompanyRelations, ctx, http.StatusBadRequest)
+	assertStatus(t, companycontrollers.NewCompanyRelationController(nil, nil).GetCompanyRelations, ctx, http.StatusBadRequest)
 }
 
 func TestCompanyRelationController_GetCompanyMarketInfo_InvalidID(t *testing.T) {
@@ -64,5 +64,5 @@ func TestCompanyRelationController_GetCompanyMarketInfo_InvalidID(t *testing.T) 
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, controllers.NewCompanyRelationController(nil, nil).GetCompanyMarketInfo, ctx, http.StatusBadRequest)
+	assertStatus(t, companycontrollers.NewCompanyRelationController(nil, nil).GetCompanyMarketInfo, ctx, http.StatusBadRequest)
 }

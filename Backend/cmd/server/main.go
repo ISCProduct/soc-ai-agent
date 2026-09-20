@@ -6,6 +6,7 @@ import (
 	admincontrollers "Backend/internal/controllers/admin"
 	authcontrollers "Backend/internal/controllers/auth"
 	chatcontrollers "Backend/internal/controllers/chat"
+	companycontrollers "Backend/internal/controllers/company"
 	escontrollers "Backend/internal/controllers/es"
 	interviewcontrollers "Backend/internal/controllers/interview"
 	"Backend/internal/infrastructure/redisx"
@@ -419,7 +420,7 @@ func main() {
 	}
 	chatController.SetDiagnosisQualityRepo(diagnosisQualityRepo)
 	questionController := chatcontrollers.NewQuestionController(questionService)
-	relationController := controllers.NewCompanyRelationController(companyQueryRepo, aiClient)
+	relationController := companycontrollers.NewCompanyRelationController(companyQueryRepo, aiClient)
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
 	companyValidator.SetSearchBudget(companySearchBudget)
 	companyValidator.SetSearchFlight(companySearchFlight)
@@ -495,13 +496,13 @@ func main() {
 	profileRecalcController := admincontrollers.NewAdminProfileRecalculationController(profileRecalcService)
 	companyEntryService := company.NewCompanyEntryService(db, userRepo, pendingRegistrationRepo, emailService)
 	authService.SetCompanyOwnershipClaimer(companyEntryService)
-	companyEntryController := controllers.NewCompanyEntryController(companyEntryService)
+	companyEntryController := companycontrollers.NewCompanyEntryController(companyEntryService)
 	companyUserRepo := repositories.NewCompanyUserRepository(db)
 	companyUserRefreshRepo := repositories.NewCompanyUserRefreshTokenRepository(db)
 	companyUserService := companyauth.NewCompanyUserService(db, companyUserRepo, companyUserRefreshRepo, emailService, cfg.CompanyUserSecret)
-	companyAuthController := controllers.NewCompanyAuthController(companyUserService)
-	companyPortalController := controllers.NewCompanyPortalController(companyUserService)
-	adminCompanyUserController := controllers.NewAdminCompanyUserController(companyUserService)
+	companyAuthController := companycontrollers.NewCompanyAuthController(companyUserService)
+	companyPortalController := companycontrollers.NewCompanyPortalController(companyUserService)
+	adminCompanyUserController := companycontrollers.NewAdminCompanyUserController(companyUserService)
 	releaseNoteService := release.NewReleaseNoteService(db, aiClient)
 	releaseNoteController := controllers.NewReleaseNoteController(releaseNoteService, userRepo)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
@@ -535,7 +536,7 @@ func main() {
 	studentSemanticClient := hr.NewStudentSemanticClient()
 	studentSearchService := hr.NewStudentSearchService(studentSearchRepo, companyStudentTagRepo, studentSemanticClient)
 	industryRepo := repositories.NewIndustryRepository(db)
-	companyStudentController := controllers.NewCompanyStudentController(studentSearchService, hrStudentAnalysisService, industryRepo)
+	companyStudentController := companycontrollers.NewCompanyStudentController(studentSearchService, hrStudentAnalysisService, industryRepo)
 	userPreferenceRepo := repositories.NewUserPreferenceRepository(db)
 	// 希望条件の保存とプロフィール更新の両方から同じ同期処理を呼ぶ (#1094)
 	scoutIndexSyncer := hr.NewStudentIndexSyncer(userPreferenceRepo, studentSemanticClient)
@@ -623,16 +624,16 @@ func main() {
 	routes.SetupApplicationRoutes(api, appController, hrStudentAnalysisController, cfg.UserSecret, userDeletionService, organizationService)
 	// 企業ポータルのダッシュボードと応募者管理 (#1320)。
 	// 応募・求人・学生の集計はそれぞれ既存のリポジトリを使い、新しいテーブルは作らない。
-	companyPortalApplicationController := controllers.NewCompanyPortalApplicationController(
+	companyPortalApplicationController := companycontrollers.NewCompanyPortalApplicationController(
 		appService, companyRepo, studentSearchRepo,
 	)
 	// 企業ポータルの求人管理 (#1321)。既存の CompanyRepository を使い、新しいテーブルは作らない。
-	companyPortalJobController := controllers.NewCompanyPortalJobController(
+	companyPortalJobController := companycontrollers.NewCompanyPortalJobController(
 		companyportal.NewJobService(companyRepo),
 	)
 	// 自社プロフィール編集と担当者管理 (#1322)。
 	// 担当者管理は既存の CompanyUserService をそのまま使う。
-	companyPortalProfileController := controllers.NewCompanyPortalProfileController(
+	companyPortalProfileController := companycontrollers.NewCompanyPortalProfileController(
 		companyportal.NewProfileService(companyRepo), companyUserService,
 	)
 	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, cfg.CompanyUserSecret, companyUserRepo)

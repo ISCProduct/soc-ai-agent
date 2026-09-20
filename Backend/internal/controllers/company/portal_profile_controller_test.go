@@ -1,4 +1,4 @@
-package controllers
+package company
 
 // 企業ポータルのプロフィール編集・担当者管理のテスト（#1322）。
 // 実行: cd Backend && go test ./internal/controllers/ -run CompanyPortalProfile -v
