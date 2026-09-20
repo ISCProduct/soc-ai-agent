@@ -46,6 +46,20 @@ func NewCompanyQueryRepository(db *gorm.DB) *CompanyQueryRepository {
 // 走査対象は companies(全社) ではなく company_entry_submissions(ゲスト投稿のみ) 側で、
 // 端点4本を1つの NOT EXISTS にまとめてある。NULL 端点は IN が一致しないため自然に通る
 // （資本関係と取引関係で使う列が異なる）。
+// publishedCompanyExists は「その企業が公開済みで有効」を要求する。
+//
+// guestEntryVisibilityGuard（ゲスト投稿だけを弾く NOT EXISTS）より強く、
+// 掲載承認前の企業を一律に除外する。学生向けの導線はすべてこの条件に揃える。
+func publishedCompanyExists(col string) string {
+	return fmt.Sprintf(`EXISTS (
+	SELECT 1 FROM companies c
+	WHERE c.id = %s
+	  AND c.is_active = true
+	  AND c.data_status = 'published'
+	  AND c.deleted_at IS NULL
+)`, col)
+}
+
 func guestEntryVisibilityGuard(cols ...string) string {
 	return fmt.Sprintf(`NOT EXISTS (
 	SELECT 1 FROM company_entry_submissions s
@@ -120,9 +134,15 @@ func (r *CompanyQueryRepository) GetJobPositionsByCompany(companyID uint) ([]mod
 	var positions []models.CompanyJobPosition
 	err := r.db.
 		Where("company_id = ? AND is_active = ? AND data_status = ?", companyID, true, "published").
-		// 求人側の data_status だけでなく企業側も見る（#1203）。
-		// 現状ゲスト投稿の求人は draft で作られるが、その前提が変わると素通りする。
-		Where(guestEntryVisibilityGuard("company_id")).
+		// 求人側の data_status だけでなく企業側も見る。
+		//
+		// 以前は guestEntryVisibilityGuard で企業側を見ていたが、あれは
+		// company_entry_submissions に行があるゲスト投稿企業にしか効かない。
+		// 通常経路で作られた draft 企業（＝まだ掲載承認していない企業）の求人は
+		// この未認証エンドポイントからそのまま読めていた。
+		//
+		// 企業一覧・マッチングが使う FindAllPublished と同じ条件に揃える。
+		Where(publishedCompanyExists("company_job_positions.company_id")).
 		Preload("JobCategory").
 		Order("created_at desc").
 		Find(&positions).Error
