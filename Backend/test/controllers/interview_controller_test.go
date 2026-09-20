@@ -12,7 +12,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	interviewcontrollers "Backend/internal/controllers/interview"
 	"Backend/internal/models"
 	"Backend/internal/services/interview"
 	"Backend/internal/services/shared"
@@ -24,8 +24,8 @@ import (
 	"gorm.io/gorm"
 )
 
-func newInterviewController(svc *mocks.InterviewServiceMock) *controllers.InterviewController {
-	return controllers.NewInterviewController(svc, nil, nil)
+func newInterviewController(svc *mocks.InterviewServiceMock) *interviewcontrollers.InterviewController {
+	return interviewcontrollers.NewInterviewController(svc, nil, nil)
 }
 
 // ---- Create ----
@@ -507,7 +507,7 @@ func TestInterviewController_UploadVideo_Unauthorized(t *testing.T) {
 	c.SetParamNames("id")
 	c.SetParamValues("1")
 	// videoRepo/s3Service がnilのとき ServiceUnavailable
-	ctrl := controllers.NewInterviewController(nil, nil, nil)
+	ctrl := interviewcontrollers.NewInterviewController(nil, nil, nil)
 	// まずInvalidID確認（ParseMultipartFormより前）
 	c2 := newCtx(req, rec)
 	c2.SetParamNames("id")
@@ -523,7 +523,7 @@ func TestInterviewController_UploadVideo_ServiceUnavailable(t *testing.T) {
 	c.SetParamNames("id")
 	c.SetParamValues("1")
 	// videoRepo/s3Service がnilのとき ServiceUnavailable を返す
-	ctrl := controllers.NewInterviewController(nil, nil, nil)
+	ctrl := interviewcontrollers.NewInterviewController(nil, nil, nil)
 	assertStatus(t, ctrl.UploadVideo, c, http.StatusServiceUnavailable)
 }
 
@@ -543,7 +543,7 @@ func TestInterviewController_UploadVideo_Forbidden(t *testing.T) {
 	svc.On("EnsureSessionOwnership", uint(1), uint(9)).Return(shared.ErrForbidden)
 	videoRepo := &mocks.InterviewVideoRepositoryMock{}
 	// S3UploadServiceは未設定でもゼロ値で構築できる（メソッド呼び出しに到達しないことを検証するため）
-	ctrl := controllers.NewInterviewController(svc, videoRepo, &storage.S3UploadService{})
+	ctrl := interviewcontrollers.NewInterviewController(svc, videoRepo, &storage.S3UploadService{})
 
 	assertStatus(t, ctrl.UploadVideo, c, http.StatusForbidden)
 	svc.AssertExpectations(t)
@@ -564,7 +564,7 @@ func TestInterviewController_UploadVideo_SessionNotFound(t *testing.T) {
 	svc := &mocks.InterviewServiceMock{}
 	svc.On("EnsureSessionOwnership", uint(1), uint(9)).Return(gorm.ErrRecordNotFound)
 	videoRepo := &mocks.InterviewVideoRepositoryMock{}
-	ctrl := controllers.NewInterviewController(svc, videoRepo, &storage.S3UploadService{})
+	ctrl := interviewcontrollers.NewInterviewController(svc, videoRepo, &storage.S3UploadService{})
 
 	assertStatus(t, ctrl.UploadVideo, c, http.StatusNotFound)
 	svc.AssertExpectations(t)
@@ -584,7 +584,7 @@ func TestInterviewController_UploadVideo_OwnershipCheckError(t *testing.T) {
 	svc := &mocks.InterviewServiceMock{}
 	svc.On("EnsureSessionOwnership", uint(1), uint(9)).Return(errors.New("db unavailable"))
 	videoRepo := &mocks.InterviewVideoRepositoryMock{}
-	ctrl := controllers.NewInterviewController(svc, videoRepo, &storage.S3UploadService{})
+	ctrl := interviewcontrollers.NewInterviewController(svc, videoRepo, &storage.S3UploadService{})
 
 	assertStatus(t, ctrl.UploadVideo, c, http.StatusInternalServerError)
 	svc.AssertExpectations(t)

@@ -14,6 +14,8 @@ import (
 	"Backend/domain/entity"
 	"Backend/internal/controllers"
 	admincontrollers "Backend/internal/controllers/admin"
+	chatcontrollers "Backend/internal/controllers/chat"
+	escontrollers "Backend/internal/controllers/es"
 	"Backend/internal/models"
 	"Backend/internal/services/school"
 	"Backend/test/controllers/mocks"
@@ -134,7 +136,7 @@ func TestAdminInterviewController_VideoURL_SchoolAccessDenied(t *testing.T) {
 // ---- QuestionController ----
 
 func TestQuestionController_GenerateQuestions_MissingCategory(t *testing.T) {
-	c := controllers.NewQuestionController(nil)
+	c := chatcontrollers.NewQuestionController(nil)
 	body, _ := json.Marshal(map[string]any{"count": 5})
 	req := httptest.NewRequest(http.MethodPost, "/api/questions/generate", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -143,7 +145,7 @@ func TestQuestionController_GenerateQuestions_MissingCategory(t *testing.T) {
 }
 
 func TestQuestionController_CreateQuestion_MissingFields(t *testing.T) {
-	c := controllers.NewQuestionController(nil)
+	c := chatcontrollers.NewQuestionController(nil)
 	body, _ := json.Marshal(map[string]any{"question": ""})
 	req := httptest.NewRequest(http.MethodPost, "/api/questions", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -152,7 +154,7 @@ func TestQuestionController_CreateQuestion_MissingFields(t *testing.T) {
 }
 
 func TestQuestionController_GetQuestionsByCategory_MissingCategory(t *testing.T) {
-	c := controllers.NewQuestionController(nil)
+	c := chatcontrollers.NewQuestionController(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/questions", nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, c.GetQuestionsByCategory, newCtx(req, rec), http.StatusBadRequest)
@@ -260,7 +262,7 @@ func TestCompanyRelationController_WebSearchCompanies_MissingQuery(t *testing.T)
 // ---- ESReviewController ----
 
 func TestESReviewController_Review_MissingESText(t *testing.T) {
-	c := controllers.NewESReviewController()
+	c := escontrollers.NewESReviewController()
 	body, _ := json.Marshal(map[string]any{"es_text": ""})
 	req := httptest.NewRequest(http.MethodPost, "/api/es/review", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -271,7 +273,7 @@ func TestESReviewController_Review_MissingESText(t *testing.T) {
 // ---- ESRewriteController ----
 
 func TestESRewriteController_Rewrite_InvalidBody(t *testing.T) {
-	c := controllers.NewESRewriteController(nil)
+	c := escontrollers.NewESRewriteController(nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/es/rewrite", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

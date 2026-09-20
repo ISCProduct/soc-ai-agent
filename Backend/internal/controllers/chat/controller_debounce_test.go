@@ -1,4 +1,4 @@
-package controllers
+package chat
 
 // デバウンスマッチングのテスト（Issue #308）
 // 実行: cd Backend && go test ./internal/controllers/... -run TestScheduleBackgroundMatching -v

@@ -4,6 +4,10 @@ import (
 	"Backend/internal/config"
 	"Backend/internal/controllers"
 	admincontrollers "Backend/internal/controllers/admin"
+	authcontrollers "Backend/internal/controllers/auth"
+	chatcontrollers "Backend/internal/controllers/chat"
+	escontrollers "Backend/internal/controllers/es"
+	interviewcontrollers "Backend/internal/controllers/interview"
 	"Backend/internal/infrastructure/redisx"
 	"Backend/internal/logger"
 	"Backend/internal/middleware"
@@ -407,14 +411,14 @@ func main() {
 	// コントローラー層の初期化
 	organizationRepo := repositories.NewOrganizationRepository(db)
 	organizationService := organization.NewOrganizationService(organizationRepo)
-	authController := controllers.NewAuthController(authService, cfg.UserSecret)
-	oauthController := controllers.NewOAuthController(oauthService, organizationService)
-	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
+	authController := authcontrollers.NewAuthController(authService, cfg.UserSecret)
+	oauthController := authcontrollers.NewOAuthController(oauthService, organizationService)
+	chatController := chatcontrollers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	if jobEnqueuer != nil {
 		chatController.SetJobEnqueuer(jobEnqueuer)
 	}
 	chatController.SetDiagnosisQualityRepo(diagnosisQualityRepo)
-	questionController := controllers.NewQuestionController(questionService)
+	questionController := chatcontrollers.NewQuestionController(questionService)
 	relationController := controllers.NewCompanyRelationController(companyQueryRepo, aiClient)
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
 	companyValidator.SetSearchBudget(companySearchBudget)
@@ -473,8 +477,8 @@ func main() {
 	adminUserController := admincontrollers.NewAdminUserController(userRepo, auditLogService)
 	adminUserController.SetDeletionService(userDeletionService)
 	adminUserController.SetSchoolService(schoolService)
-	interviewController := controllers.NewInterviewController(interviewService, videoRepo, s3UploadService)
-	realtimeController := controllers.NewRealtimeController(interviewService, realtimeUsageService)
+	interviewController := interviewcontrollers.NewInterviewController(interviewService, videoRepo, s3UploadService)
+	realtimeController := interviewcontrollers.NewRealtimeController(interviewService, realtimeUsageService)
 	adminInterviewController := admincontrollers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
 	adminInterviewController.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	adminInterviewController.SetCompanyRepo(companyRepo)
@@ -501,7 +505,7 @@ func main() {
 	releaseNoteService := release.NewReleaseNoteService(db, aiClient)
 	releaseNoteController := controllers.NewReleaseNoteController(releaseNoteService, userRepo)
 	githubController := controllers.NewGitHubController(githubService, skillScoreService)
-	esRewriteController := controllers.NewESRewriteController(aiClient)
+	esRewriteController := escontrollers.NewESRewriteController(aiClient)
 	scheduleRepo := repositories.NewScheduleRepository(db)
 	scheduleService := schedule.NewScheduleService(scheduleRepo)
 	// Googleカレンダー連携
@@ -510,7 +514,7 @@ func main() {
 	scheduleService.SetCalendarSyncService(calendarSyncService)
 	googleCalendarController := controllers.NewGoogleCalendarController(calendarSyncService)
 	scheduleController := controllers.NewScheduleController(scheduleService)
-	esReviewController := controllers.NewESReviewController()
+	esReviewController := escontrollers.NewESReviewController()
 	appService := application.NewApplicationService(appStatusRepo, matchRepo, db)
 	appController := controllers.NewApplicationController(appService)
 	appController.SetSchoolAccess(schoolService)
