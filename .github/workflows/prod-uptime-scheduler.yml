@@ -282,14 +282,16 @@ jobs:
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $PROD_ADMIN_SECRET" \
             -d "{\"sources\": $sources}" \
-            --max-time 60 || echo 000)
+            --max-time 60 || true)
           case "$code" in
             2*)
               echo "更新情報を取り込みました"
               ;;
-            401|403)
-              echo "::error::更新情報の取り込みが $code で拒否されました。admin_secret が本番の値と一致していません"
-              exit 1
+            401|403|503)
+              # このステップは continue-on-error なので、ここで exit しても
+              # ジョブは落ちない。下の「失敗させる」ステップへ出力で伝える。
+              echo "rejected=$code" >> "$GITHUB_OUTPUT"
+              echo "::error::更新情報の取り込みが $code で拒否されました(admin_secret が本番の値と一致していない、または未設定)"
               ;;
             *)
               echo "::warning::更新情報の取り込みに失敗しました(HTTP $code / 次回起動時に回収されます)"
@@ -304,6 +306,16 @@ jobs:
         run: |
           echo "本番を起動しましたが backend の /health が 200 を返しませんでした" > "$RUNNER_TEMP/alert-reason.txt"
           echo "::error::本番を起動しましたが backend の /health が 200 を返しませんでした"
+          exit 1
+
+      # 鍵の不一致は「停止中で届かない」と違い、放っておいても直らない。
+      # ここが最後の回収経路なので、警告で流すと更新情報が出ないまま気づけない。
+      - name: 更新情報の取り込みが拒否されたら失敗させる
+        if: steps.whatsnew.outputs.rejected != ''
+        run: |
+          reason="本番への更新情報の取り込みが HTTP ${{ steps.whatsnew.outputs.rejected }} で拒否されました(admin_secret の不一致または未設定)"
+          echo "$reason" > "$RUNNER_TEMP/alert-reason.txt"
+          echo "::error::$reason"
           exit 1
 
       # schedule で動くジョブは誰も結果を見ない。失敗を人へ届ける唯一の経路。

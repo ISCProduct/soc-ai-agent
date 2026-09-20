@@ -694,11 +694,18 @@ module "rag_review" {
   enable_execute_command         = true
   region                         = var.region
   s3_bucket_arn                  = module.s3.bucket_arn
-  secret_arns                    = [aws_secretsmanager_secret.openai.arn, aws_secretsmanager_secret.rag_internal.arn]
+  # openai_secret_arn を使う経路では実行ロールにその ARN の取得許可が要る。
+  # backend 側(local.backend_secret_arns)には入っているが、ここには無かった。
+  secret_arns = compact(concat(
+    [aws_secretsmanager_secret.openai.arn, aws_secretsmanager_secret.rag_internal.arn],
+    var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
+  ))
   secrets = [
     {
-      name      = "OPENAI_API_KEY"
-      valueFrom = var.openai_api_key != "" ? "${aws_secretsmanager_secret.openai.arn}:openai_api_key::" : var.openai_secret_arn
+      name = "OPENAI_API_KEY"
+      # backend 側(local.backend_secrets)と同じ向き。tfvars を空にする運用(#1158)で
+      # 参照先が空文字にならないよう、既定は Terraform 管理のシークレットを指す。
+      valueFrom = var.openai_api_key == "" && var.openai_secret_arn != "" ? var.openai_secret_arn : "${aws_secretsmanager_secret.openai.arn}:openai_api_key::"
     },
     {
       name      = "RAG_INTERNAL_TOKEN"

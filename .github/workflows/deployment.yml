@@ -782,12 +782,12 @@ jobs:
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $PROD_ADMIN_SECRET" \
             -d "{\"sources\": $sources}" \
-            --max-time 60 || echo 000)
+            --max-time 60 || true)
           prod_rejected=0
           case "$prod_code" in
             2*) ;;
-            401|403)
-              echo "::error::本番への更新情報の取り込みが $prod_code で拒否されました。admin_secret が本番の値と一致していません(ローテーション後の CI 設定を確認してください)"
+            401|403|503)
+              echo "::error::本番への更新情報の取り込みが $prod_code で拒否されました。admin_secret が本番の値と一致していないか、本番側で未設定です(ローテーション後の CI 設定を確認してください)"
               prod_rejected=1
               ;;
             *)

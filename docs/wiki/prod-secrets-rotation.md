@@ -60,6 +60,7 @@ aws secretsmanager put-secret-value --secret-id soc-app/admin \
 
 # 4. 後始末（重要）
 shred -u /tmp/admin.json 2>/dev/null || rm -P /tmp/admin.json
+unset NEW_SECRET
 ```
 
 **反映にはタスクの再起動が必要。** ECS は起動時にしか Secrets Manager を読まない。
@@ -81,8 +82,14 @@ shred -u /tmp/admin.json 2>/dev/null || rm -P /tmp/admin.json
 CI は本番向けには Secrets Manager から読み、読めないときだけこのシークレットへ
 フォールバックする。本番値が残っていると、権限不調に気づかないまま動いてしまう。
 
-取り込みが 401/403 になった場合、CI はジョブを失敗させる（警告では流さない）。
-「停止中で届かない」と区別するための設計なので、失敗したら鍵の不一致を疑うこと。
+取り込みが 401/403/503 になった場合、CI は警告では流さずエラーにする。
+- `prod-uptime-scheduler`（本番起動時の回収）はジョブを失敗させ、Discord へ通知する
+- `deployment` の `sync-whats-new` はジョブを失敗表示にする（ジョブ自体が
+  `continue-on-error` なのでデプロイは止まらない。通知は飛ばないので、
+  デプロイ後にジョブの結果を見ること）
+
+「停止中で届かない」と区別するための設計なので、これらが出たら鍵の不一致か
+本番側の未設定を疑うこと。
 
 ## ローカルに平文が残っていないことの確認
 
@@ -93,6 +100,23 @@ grep -nE "openai_api_key|resend_api_key|client_secret|admin_secret" \
 
 値が入っていれば削除し、`secret_values_managed_outside = true` を設定する。
 この変数を入れないと、`openai_api_key` が空の状態で precondition に止められる。
+
+## tfvars を空にする前に値が入っていることを確認する
+
+Terraform は値を管理しないので、**Secrets Manager 側が空のままでも plan は通る**。
+`secret_values_managed_outside = true` にする前に、実値が入っていることを確かめること。
+初回 apply を空の tfvars で通した環境では `{"openai_api_key": ""}` が固定されており、
+気づかないまま「起動はするが AI 機能が全部無効」になる。
+
+```bash
+for id in soc-app/openai soc-app/email soc-app/oauth soc-app/admin; do
+  echo "--- $id"
+  aws secretsmanager get-secret-value --secret-id "$id" --query SecretString --output text \
+    | python3 -c "import json,sys; print({k: ('設定済み' if v else '空') for k, v in json.load(sys.stdin).items()})"
+done
+```
+
+空のキーがあれば、上のローテーション手順で値を入れてから進める。
 
 ## 新規環境を作る場合
 
