@@ -9,6 +9,9 @@ locals {
 
   backend_secret_arns = compact(concat(
     [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn, aws_secretsmanager_secret.email.arn, aws_secretsmanager_secret.admin.arn, aws_secretsmanager_secret.openai.arn, aws_secretsmanager_secret.rag_internal.arn],
+    # 法人番号API / gBizINFO(#1360)。AWS 側には既にあったがコードに無く、
+    # apply すると実行ロールからこの2つの取得許可が外れ、次のタスク起動が失敗する状態だった。
+    [aws_secretsmanager_secret.houjin_bangou.arn, aws_secretsmanager_secret.gbizinfo.arn],
     var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
     var.additional_secret_arns
   ))
@@ -94,6 +97,20 @@ locals {
       {
         name      = "RAG_INTERNAL_TOKEN"
         valueFrom = "${aws_secretsmanager_secret.rag_internal.arn}:rag_internal_token::"
+      }
+    ],
+    [
+      # 手で登録されたタスク定義(rev 70/71)は HOUJIN 側の ARN が壊れており
+      # (/houjin-bangou-xxxx:h が欠落)、存在しないシークレットを指していた。
+      # ECS は起動時に全シークレットを解決するため、次の起動で失敗する(#1371)。
+      # 参照をコードで組み立てて、手作業のタイプミスが入らないようにする。
+      {
+        name      = "HOUJIN_BANGOU_APP_ID"
+        valueFrom = "${aws_secretsmanager_secret.houjin_bangou.arn}:houjin_bangou_app_id::"
+      },
+      {
+        name      = "GBIZINFO_API_KEY"
+        valueFrom = "${aws_secretsmanager_secret.gbizinfo.arn}:gbizinfo_api_key::"
       }
     ]
   )
@@ -194,6 +211,37 @@ resource "aws_secretsmanager_secret_version" "admin" {
     # AWS CLI で値を書き換える(docs/wiki/prod-secrets-rotation.md)。
     ignore_changes = [secret_string]
   }
+}
+
+# 法人番号API / gBizINFO のシークレット(#1360)。
+#
+# AWS 側には手作業で作成されており、タスク定義もこれを注入していたが、
+# Terraform には定義が無かった。そのまま apply すると実行ロールの許可から
+# この2つが外れ、次にタスクを起動したとき(=稼働日の朝)に失敗する状態だった。
+#
+# 値は Terraform で管理しない(#1158 と同じ方針)。ここでは入れ物だけを持つ。
+# secret_version を作ると、既存の値を空文字で上書きしてしまう。
+import {
+  to = aws_secretsmanager_secret.houjin_bangou
+  id = "arn:aws:secretsmanager:ap-northeast-1:508897596159:secret:soc-app/houjin-bangou-5RpFkr"
+}
+
+resource "aws_secretsmanager_secret" "houjin_bangou" {
+  name = "${var.project_name}/houjin-bangou"
+  # AWS 側に入っている説明をそのまま持つ。書かないと import で消える。
+  description = "国税庁 法人番号システムWeb-API のアプリケーションID"
+  tags        = local.tags
+}
+
+import {
+  to = aws_secretsmanager_secret.gbizinfo
+  id = "arn:aws:secretsmanager:ap-northeast-1:508897596159:secret:soc-app/gbizinfo-KojOzj"
+}
+
+resource "aws_secretsmanager_secret" "gbizinfo" {
+  name        = "${var.project_name}/gbizinfo"
+  description = "gBizINFO Web-API のアクセストークン"
+  tags        = local.tags
 }
 
 # OpenAI APIキー(DB/OAuth同様、Secrets Managerで管理しECSタスク実行ロール経由で注入)
@@ -564,6 +612,8 @@ module "backend" {
     # gpt-4o-transcribe へ自動で再送する(stt_fallback.go)。
     # 精度に問題が出たら var.openai_whisper_model を gpt-4o-transcribe にする。
     OPENAI_WHISPER_MODEL = var.openai_whisper_model
+    # gBizINFO の参照先(#1360)。実体のタスク定義に入っていたがコードに無かった。
+    GBIZINFO_BASE_URL = var.gbizinfo_base_url
     # 未設定だとOAuthコールバックURLがlocalhost:8080にフォールバックし、
     # 本番でOAuthログインが機能しなくなる(実際に発生した障害)。
     BASE_URL = "https://${local.backend_domain}"
