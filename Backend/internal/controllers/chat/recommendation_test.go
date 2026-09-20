@@ -1,4 +1,4 @@
-package controllers
+package chat
 
 // chat_controller.go のレコメンド暫定判定のテスト。
 // 以前は admin_company_publication_test.go に同居していたが、テスト対象は

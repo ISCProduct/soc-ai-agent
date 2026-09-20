@@ -1,4 +1,4 @@
-package controllers
+package interview
 
 import (
 	"Backend/domain/repository"

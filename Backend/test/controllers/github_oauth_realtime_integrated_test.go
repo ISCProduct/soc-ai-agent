@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"Backend/internal/controllers"
+	authcontrollers "Backend/internal/controllers/auth"
+	interviewcontrollers "Backend/internal/controllers/interview"
 	"Backend/internal/models"
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/shared"
@@ -216,8 +218,8 @@ func TestGitHubController_SummarizeRepo_Success(t *testing.T) {
 
 // ========== OAuthController ==========
 
-func newOAuthController(svc *mocks.OAuthServiceMock) *controllers.OAuthController {
-	return controllers.NewOAuthController(svc, nil)
+func newOAuthController(svc *mocks.OAuthServiceMock) *authcontrollers.OAuthController {
+	return authcontrollers.NewOAuthController(svc, nil)
 }
 
 // ---- GoogleLogin ----
@@ -262,8 +264,8 @@ func TestOAuthController_GitHubCallback_MissingCode(t *testing.T) {
 
 // ========== RealtimeController ==========
 
-func newRealtimeController(interviewSvc *mocks.InterviewServiceMock, realtimeSvc *mocks.RealtimeUsageServiceMock) *controllers.RealtimeController {
-	return controllers.NewRealtimeController(interviewSvc, realtimeSvc)
+func newRealtimeController(interviewSvc *mocks.InterviewServiceMock, realtimeSvc *mocks.RealtimeUsageServiceMock) *interviewcontrollers.RealtimeController {
+	return interviewcontrollers.NewRealtimeController(interviewSvc, realtimeSvc)
 }
 
 // ---- Token ----
@@ -383,7 +385,7 @@ func TestRealtimeController_SessionInfo_NilService(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/realtime/session-info", nil)
 	rec := httptest.NewRecorder()
 	// nil インターフェースを直接渡すとデフォルト10分が返る
-	ctrl := controllers.NewRealtimeController(nil, nil)
+	ctrl := interviewcontrollers.NewRealtimeController(nil, nil)
 	assertStatus(t, ctrl.SessionInfo, newCtx(req, rec), http.StatusOK)
 
 	var resp map[string]int

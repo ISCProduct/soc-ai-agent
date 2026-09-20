@@ -1,4 +1,4 @@
-package controllers
+package chat
 
 // バックグラウンドマッチングの打ち切りと多重実行防止のテスト（Issue #1167）
 // 実行: cd Backend && go test ./internal/controllers/... -run TestRunBackgroundMatching -v
