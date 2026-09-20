@@ -12,7 +12,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	insightcontrollers "Backend/internal/controllers/insight"
 	"Backend/internal/services/flywheel"
 	"Backend/test/controllers/mocks"
 
@@ -20,8 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newCollectiveInsightController(svc *mocks.CollectiveInsightServiceMock) *controllers.CollectiveInsightController {
-	return controllers.NewCollectiveInsightController(svc)
+func newCollectiveInsightController(svc *mocks.CollectiveInsightServiceMock) *insightcontrollers.CollectiveInsightController {
+	return insightcontrollers.NewCollectiveInsightController(svc)
 }
 
 // ---- GetRecommendations ----
@@ -29,14 +29,14 @@ func newCollectiveInsightController(svc *mocks.CollectiveInsightServiceMock) *co
 func TestCollectiveInsightController_GetRecommendations_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/collective-insights/recommendations", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewCollectiveInsightController(nil).GetRecommendations, newCtx(req, rec), http.StatusUnauthorized)
+	assertStatus(t, insightcontrollers.NewCollectiveInsightController(nil).GetRecommendations, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestCollectiveInsightController_GetRecommendations_MissingSessionID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/collective-insights/recommendations", nil)
 	req = withUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewCollectiveInsightController(nil).GetRecommendations, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, insightcontrollers.NewCollectiveInsightController(nil).GetRecommendations, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestCollectiveInsightController_GetRecommendations_ServiceError(t *testing.T) {
@@ -98,7 +98,7 @@ func TestCollectiveInsightController_UpdateConsent_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/collective-insights/consent", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewCollectiveInsightController(nil).UpdateConsent, newCtx(req, rec), http.StatusUnauthorized)
+	assertStatus(t, insightcontrollers.NewCollectiveInsightController(nil).UpdateConsent, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestCollectiveInsightController_UpdateConsent_InvalidBody(t *testing.T) {
@@ -106,7 +106,7 @@ func TestCollectiveInsightController_UpdateConsent_InvalidBody(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = withUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewCollectiveInsightController(nil).UpdateConsent, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, insightcontrollers.NewCollectiveInsightController(nil).UpdateConsent, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestCollectiveInsightController_UpdateConsent_Success(t *testing.T) {
@@ -131,7 +131,7 @@ func TestCollectiveInsightController_UpdateConsent_Success(t *testing.T) {
 func TestCollectiveInsightController_RecordAction_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/collective-insights/actions", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewCollectiveInsightController(nil).RecordAction, newCtx(req, rec), http.StatusUnauthorized)
+	assertStatus(t, insightcontrollers.NewCollectiveInsightController(nil).RecordAction, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestCollectiveInsightController_RecordAction_InvalidBody(t *testing.T) {
@@ -139,7 +139,7 @@ func TestCollectiveInsightController_RecordAction_InvalidBody(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = withUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewCollectiveInsightController(nil).RecordAction, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, insightcontrollers.NewCollectiveInsightController(nil).RecordAction, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestCollectiveInsightController_RecordAction_MissingFields(t *testing.T) {
@@ -157,7 +157,7 @@ func TestCollectiveInsightController_RecordAction_MissingFields(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			req = withUserID(req, 1)
 			rec := httptest.NewRecorder()
-			assertStatus(t, controllers.NewCollectiveInsightController(nil).RecordAction, newCtx(req, rec), http.StatusBadRequest)
+			assertStatus(t, insightcontrollers.NewCollectiveInsightController(nil).RecordAction, newCtx(req, rec), http.StatusBadRequest)
 		})
 	}
 }
@@ -170,7 +170,7 @@ func TestCollectiveInsightController_RecordAction_InvalidActionType(t *testing.T
 			req.Header.Set("Content-Type", "application/json")
 			req = withUserID(req, 1)
 			rec := httptest.NewRecorder()
-			assertStatus(t, controllers.NewCollectiveInsightController(nil).RecordAction, newCtx(req, rec), http.StatusBadRequest)
+			assertStatus(t, insightcontrollers.NewCollectiveInsightController(nil).RecordAction, newCtx(req, rec), http.StatusBadRequest)
 		})
 	}
 }

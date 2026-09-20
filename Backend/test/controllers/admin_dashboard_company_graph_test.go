@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"Backend/domain/entity"
-	"Backend/internal/controllers"
+	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"Backend/internal/services/organization"
@@ -30,8 +30,8 @@ func newAdminDashboardController(
 	userRepo *mocks.UserRepositoryMock,
 	sessRepo *mocks.DashboardSessionRepoMock,
 	repRepo *mocks.DashboardReportRepoMock,
-) *controllers.AdminDashboardController {
-	return controllers.NewAdminDashboardController(userRepo, sessRepo, repRepo)
+) *admincontrollers.AdminDashboardController {
+	return admincontrollers.NewAdminDashboardController(userRepo, sessRepo, repRepo)
 }
 
 // ---- UserSessions ----
@@ -42,7 +42,7 @@ func TestAdminDashboardController_UserSessions_InvalidID(t *testing.T) {
 	c := newCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("abc")
-	assertStatus(t, controllers.NewAdminDashboardController(nil, nil, nil).UserSessions, c, http.StatusBadRequest)
+	assertStatus(t, admincontrollers.NewAdminDashboardController(nil, nil, nil).UserSessions, c, http.StatusBadRequest)
 }
 
 func TestAdminDashboardController_UserSessions_SessionRepoError(t *testing.T) {
@@ -258,8 +258,8 @@ func TestAdminDashboardController_ExportCSV_Success(t *testing.T) {
 
 // ========== AdminCompanyGraphController ==========
 
-func newAdminCompanyGraphController() *controllers.AdminCompanyGraphController {
-	return controllers.NewAdminCompanyGraphController(nil, nil, nil, nil, nil)
+func newAdminCompanyGraphController() *admincontrollers.AdminCompanyGraphController {
+	return admincontrollers.NewAdminCompanyGraphController(nil, nil, nil, nil, nil)
 }
 
 // ---- TargetYear ----
