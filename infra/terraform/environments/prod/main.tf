@@ -41,8 +41,11 @@ locals {
     ],
     [
       {
-        name      = "OPENAI_API_KEY"
-        valueFrom = var.openai_api_key != "" ? "${aws_secretsmanager_secret.openai.arn}:openai_api_key::" : var.openai_secret_arn
+        name = "OPENAI_API_KEY"
+        # 既定は Terraform 管理のシークレットを指す。tfvars を空にする運用(#1158)でも
+        # 参照先が空文字にならないようにするため、フォールバックの向きをこうしている。
+        # 外部で作った別のシークレットを使いたいときだけ openai_secret_arn を指定する。
+        valueFrom = var.openai_api_key == "" && var.openai_secret_arn != "" ? var.openai_secret_arn : "${aws_secretsmanager_secret.openai.arn}:openai_api_key::"
       }
     ],
     [

@@ -258,29 +258,43 @@ jobs:
 
           # 本番の admin_secret は Secrets Manager を正とする(#1158)。
           # 読めない場合だけリポジトリシークレットへフォールバックする(移行期間の両対応)。
+          # 失敗理由(AccessDenied / ResourceNotFound / ExpiredToken)を残す。値は stdout 側。
+          sm_err=$(mktemp)
           PROD_ADMIN_SECRET=$(aws secretsmanager get-secret-value \
-            --secret-id "${PROJECT_NAME:-soc-app}/admin" --query SecretString --output text 2>/dev/null \
-            | python3 -c "import json,sys; print(json.load(sys.stdin).get('admin_secret',''))" 2>/dev/null || true)
+            --secret-id "${PROJECT_NAME:-soc-app}/admin" --query SecretString --output text 2>"$sm_err" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('admin_secret',''))" 2>>"$sm_err" || true)
           if [ -n "$PROD_ADMIN_SECRET" ]; then
             echo "::add-mask::$PROD_ADMIN_SECRET"
           else
             echo "::warning::Secrets Manager から admin_secret を読めませんでした。リポジトリシークレットで続行します(IAMに secretsmanager:GetSecretValue を確認してください)"
+            sed 's/^/  aws: /' "$sm_err"
             PROD_ADMIN_SECRET="$ADMIN_SECRET"
           fi
+          rm -f "$sm_err"
 
           sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base main --limit 20 \
             --json number,title,body,mergedAt \
             --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
 
-          if curl -sf -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
+          # 起動確認済みの状態で 401/403 なら「停止中」ではなく鍵の不一致。
+          # ここは最後の回収経路なので、warning で流すと誰も気づけない。
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $PROD_ADMIN_SECRET" \
             -d "{\"sources\": $sources}" \
-            --max-time 60 > /dev/null; then
-            echo "更新情報を取り込みました"
-          else
-            echo "::warning::更新情報の取り込みに失敗しました(次回起動時に回収されます)"
-          fi
+            --max-time 60 || echo 000)
+          case "$code" in
+            2*)
+              echo "更新情報を取り込みました"
+              ;;
+            401|403)
+              echo "::error::更新情報の取り込みが $code で拒否されました。admin_secret が本番の値と一致していません"
+              exit 1
+              ;;
+            *)
+              echo "::warning::更新情報の取り込みに失敗しました(HTTP $code / 次回起動時に回収されます)"
+              ;;
+          esac
 
       # 「起動したのに backend が上がってこない」は最も重要な事象なのに、
       # 上のステップは continue-on-error + warning で成功扱いになっていた(#1354)。

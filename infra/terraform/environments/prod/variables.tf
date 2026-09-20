@@ -173,7 +173,7 @@ variable "admin_secret" {
 
 variable "secret_values_managed_outside" {
   type        = bool
-  description = "外部サービス由来のキー(OpenAI/Resend/OAuth)の値をSecrets Manager側で直接管理している場合はtrue。tfvarsに平文を置かずにplan/applyできるようにする(#1158)"
+  description = "外部サービス由来のキー(OpenAI/Resend/OAuth)の値をSecrets Manager側で直接管理している場合はtrue。tfvarsに平文を置かずにplan/applyできるようにする(#1158)。このフラグが効くのは初期構築時のprecondition検査だけで、値の更新はfalseでもTerraformからは行えない(ignore_changesは常時有効で、tfvarsの値が入るのは初回作成時のみ)"
   default     = false
 }
 

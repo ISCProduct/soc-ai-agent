@@ -729,7 +729,11 @@ jobs:
     # リポジトリ既定の認証情報はECSクラスタ作成前の古い値で、本番リソースを引けない。
     environment: production
     steps:
+      # 認証に失敗しても後続は続ける。ここで止めると、リポジトリシークレットへの
+      # フォールバックが効かないだけでなく、これまで確実に動いていた staging への
+      # 取り込みまで丸ごとスキップされる(ジョブは continue-on-error で緑のまま)。
       - name: Configure AWS credentials
+        continue-on-error: true
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -748,15 +752,20 @@ jobs:
         run: |
           # 本番の admin_secret は Secrets Manager を正とする(#1158)。
           # 読めない場合だけリポジトリシークレットへフォールバックする(移行期間の両対応)。
+          # 失敗理由(AccessDenied / ResourceNotFound / ExpiredToken)が分からないと
+          # 警告を見ても何を直せばよいか判断できない。stderr は残す(値は stdout 側)。
+          sm_err=$(mktemp)
           PROD_ADMIN_SECRET=$(aws secretsmanager get-secret-value \
-            --secret-id "${PROJECT_NAME:-soc-app}/admin" --query SecretString --output text 2>/dev/null \
-            | python3 -c "import json,sys; print(json.load(sys.stdin).get('admin_secret',''))" 2>/dev/null || true)
+            --secret-id "${PROJECT_NAME:-soc-app}/admin" --query SecretString --output text 2>"$sm_err" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('admin_secret',''))" 2>>"$sm_err" || true)
           if [ -n "$PROD_ADMIN_SECRET" ]; then
             echo "::add-mask::$PROD_ADMIN_SECRET"
           else
             echo "::warning::Secrets Manager から admin_secret を読めませんでした。リポジトリシークレットで続行します(IAMに secretsmanager:GetSecretValue を確認してください)"
+            sed 's/^/  aws: /' "$sm_err"
             PROD_ADMIN_SECRET="$ADMIN_SECRET"
           fi
+          rm -f "$sm_err"
 
           sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base main --limit 20 \
             --json number,title,body,mergedAt \
@@ -766,12 +775,25 @@ jobs:
           # 落ちてしまうため続行はするが、黙って握りつぶすと「反映されていない」ことに
           # 気づけない。実際にそれで、運用作業がユーザー向け更新情報に出たまま残った(#1290)。
           # 取りこぼしは prod-uptime-scheduler.yml が本番起動時に回収する。
-          curl -sf -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
+          # 「停止中で届かない」と「鍵が違って拒否された」は対処が別物。
+          # 後者を warning で流すと、admin_secret のローテーション後に更新情報が
+          # 反映されないまま誰も気づかない(#1290 と同じ症状)。
+          prod_code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $PROD_ADMIN_SECRET" \
             -d "{\"sources\": $sources}" \
-            --max-time 60 \
-            || echo "::warning::本番への更新情報の取り込みに失敗しました(停止中の可能性)。本番起動時に回収されます。"
+            --max-time 60 || echo 000)
+          prod_rejected=0
+          case "$prod_code" in
+            2*) ;;
+            401|403)
+              echo "::error::本番への更新情報の取り込みが $prod_code で拒否されました。admin_secret が本番の値と一致していません(ローテーション後の CI 設定を確認してください)"
+              prod_rejected=1
+              ;;
+            *)
+              echo "::warning::本番への更新情報の取り込みに失敗しました(HTTP $prod_code / 停止中の可能性)。本番起動時に回収されます。"
+              ;;
+          esac
 
           curl -sf -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
@@ -779,6 +801,9 @@ jobs:
             -d "{\"sources\": $sources}" \
             --max-time 60 \
             || echo "::warning::stagingへの更新情報の取り込みに失敗しました(停止中の可能性)。"
+
+          # staging まで流し終えてから落とす。先に exit すると staging の取り込みも飛ぶ。
+          [ "$prod_rejected" = "0" ]
 
   # 本番へ反映された issue を閉じる。
   #
