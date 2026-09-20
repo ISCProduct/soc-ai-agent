@@ -113,7 +113,11 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 	if req.TargetLevel != "新卒" && req.TargetLevel != "中途" {
 		return nil, errors.New("target_level must be '新卒' or '中途'")
 	}
-	if strings.TrimSpace(req.SchoolName) == "" {
+	// 既定値の補完は新規作成用。昇格では「学校名が送られてこなかった」ことを
+	// 保てないと、ゲストが自分で設定した学校名を既定値で潰してしまう。
+	// フロントの register() は school_name を送らないので、この上書きは常に起きる。
+	requestedSchoolName := strings.TrimSpace(req.SchoolName)
+	if requestedSchoolName == "" {
 		req.SchoolName = config.SchoolName()
 	}
 
@@ -145,7 +149,8 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 			// 画面上は成功に見えるため、呼び出し側に判断させる。
 			return nil, err
 		}
-		applyRegistrationToGuest(guest, req, string(hashedPassword), s.resolveSchoolID(req.SchoolName))
+		// 既定値で補完した名前ではなく、実際に送られてきた名前だけを反映する。
+		applyRegistrationToGuest(guest, req, requestedSchoolName, string(hashedPassword), s.resolveSchoolID(requestedSchoolName))
 		user = guest
 		promoting = true
 	} else {
@@ -188,6 +193,12 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 
 	// 認証メール送信（失敗しても登録は成功扱い）
 	appURL := config.AppURL()
+	// 未注入で goroutine に入ると nil 参照でプロセスごと落ちる。
+	// メールが出ないだけなら登録は成立しているので、ログに残して続ける。
+	if s.emailService == nil {
+		log.Printf("[AuthService] email service is not configured; skipped verification email for %s", guestPromotionLogLabel(user.ID))
+		return buildRegisterResponse(user)
+	}
 	if s.jobs != nil {
 		if err := s.jobs.EnqueueEmailVerification(user.ID, user.Email, user.Name, user.EmailVerificationToken, appURL); err != nil {
 			log.Printf("[AuthService] enqueue verification email failed, fallback goroutine: %v", err)
@@ -205,6 +216,11 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGue
 		}()
 	}
 
+	return buildRegisterResponse(user)
+}
+
+// buildRegisterResponse は登録・昇格どちらでも同じ内容を返す。
+func buildRegisterResponse(user *entity.User) (*AuthResponse, error) {
 	return &AuthResponse{
 		UserID:                   user.ID,
 		Email:                    user.Email,

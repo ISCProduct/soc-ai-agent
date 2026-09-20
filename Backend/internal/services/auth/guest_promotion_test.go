@@ -58,7 +58,7 @@ func TestApplyRegistrationToGuest_KeepsIdentity(t *testing.T) {
 		Email:      "student@example.com",
 		Name:       "山田太郎",
 		SchoolName: "新しい専門学校",
-	}, "hashed", &newSchoolID)
+	}, "新しい専門学校", "hashed", &newSchoolID)
 
 	// 変わってはいけないもの
 	if guest.ID != 42 {
@@ -97,12 +97,52 @@ func TestApplyRegistrationToGuest_KeepsSchoolWhenBlank(t *testing.T) {
 
 	applyRegistrationToGuest(guest, RegisterRequest{
 		Email: "s@example.com", Name: "名前", SchoolName: "  ",
-	}, "hashed", nil)
+	}, "  ", "hashed", nil)
 
 	if guest.SchoolName != "既存の学校" {
 		t.Errorf("学校名が消えている: %q", guest.SchoolName)
 	}
 	if guest.SchoolID == nil || *guest.SchoolID != 77 {
 		t.Errorf("school_id が消えている: %v（教員から生徒が見えなくなる）", guest.SchoolID)
+	}
+}
+
+// Register 経由の昇格で、ゲストが設定済みの学校名を既定値で潰さないこと。
+//
+// applyRegistrationToGuest の「空なら上書きしない」ガードだけでは守れない。
+// Register は学校名が空のとき DEFAULT_SCHOOL_NAME を埋めてから渡すため、
+// フロントが school_name を送らない現状では常に既定値で上書きされる。
+// 学園デフォルトを設定したテナントでは、個別校の生徒が担当校の教員一覧から
+// 消える（#1374 が守ると宣言した相手そのもの）。
+func TestRegister_昇格では学校名を既定値で上書きしない(t *testing.T) {
+	t.Setenv("DEFAULT_SCHOOL_NAME", "学園デフォルト")
+
+	schoolID := uint(77)
+	guest := &entity.User{
+		ID:         42,
+		IsGuest:    true,
+		SchoolName: "A専門学校",
+		SchoolID:   &schoolID,
+	}
+	repo := &userRepoAuthStub{user: guest}
+	service := NewAuthService(repo, &pendingRepoAuthStub{}, nil)
+
+	// フロントの register() と同じく school_name を送らない
+	if _, err := service.Register(RegisterRequest{
+		Email:    "student@example.com",
+		Password: "password123",
+		Name:     "山田太郎",
+	}, 0, guest.ID); err != nil {
+		t.Fatalf("昇格に失敗: %v", err)
+	}
+
+	if guest.SchoolName != "A専門学校" {
+		t.Errorf("学校名が既定値で上書きされている: %q（担当校の教員から生徒が消える）", guest.SchoolName)
+	}
+	if guest.SchoolID == nil || *guest.SchoolID != 77 {
+		t.Errorf("school_id が変わっている: %v", guest.SchoolID)
+	}
+	if guest.IsGuest {
+		t.Error("昇格できていない")
 	}
 }

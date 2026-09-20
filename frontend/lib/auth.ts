@@ -202,7 +202,23 @@ export const authService = {
     certificationsInProgress: string,
     registrationToken?: string,
   ): Promise<AuthResponse> {
-    const promoteGuest = this.isGuestSession()
+    let promoteGuest = this.isGuestSession()
+    if (promoteGuest) {
+      // localStorage の user_token は1時間で切れる。本登録は必ずメール往復を挟むので、
+      // 「夜に診断 → 翌朝メールから登録」で普通に期限切れになる。
+      // 期限切れのまま送るとサーバが 401 を返し、再読み込みしても localStorage は
+      // 直らないので登録自体ができなくなる。30日のリフレッシュトークンで入れ直す。
+      try {
+        await this.ensureFreshUserToken()
+      } catch {
+        // リフレッシュも切れている（30日超・Cookie削除など）。この場合はサーバ側でも
+        // ゲスト行を特定できず、何を渡しても引き継げない。登録自体を止める理由は
+        // 無いので、引き継ぎを諦めて通常登録として続ける。
+        // 「ゲストは特定できるが昇格できない」場合（本登録済み・管理者等）は
+        // サーバが 409 を返す。そちらを黙って新規作成に倒してはいけない。
+        promoteGuest = false
+      }
+    }
     const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
       method: 'POST',
       headers: {

@@ -46,7 +46,9 @@ func PromotableGuest(u *entity.User) error {
 //
 // user_id・organization_id・作成日時は変えない。診断結果やチャット履歴が
 // これらに紐づいているため、変えると引き継ぎの意味が無くなる。
-func applyRegistrationToGuest(u *entity.User, req RegisterRequest, hashedPassword string, schoolID *uint) {
+// schoolName は「リクエストで実際に指定された学校名」。既定値で補完したものを
+// 渡してはいけない（ゲストが設定済みの学校名を既定値で潰す）。
+func applyRegistrationToGuest(u *entity.User, req RegisterRequest, schoolName, hashedPassword string, schoolID *uint) {
 	u.Email = req.Email
 	u.Password = hashedPassword
 	u.Name = req.Name
@@ -57,8 +59,8 @@ func applyRegistrationToGuest(u *entity.User, req RegisterRequest, hashedPasswor
 
 	// 学校名は入力があるときだけ上書きする。ゲストには既定の学校名が
 	// 入っており、入力が空のときにそれを消すと学校の紐付けを失う。
-	if strings.TrimSpace(req.SchoolName) != "" {
-		u.SchoolName = req.SchoolName
+	if strings.TrimSpace(schoolName) != "" {
+		u.SchoolName = schoolName
 	}
 	// school_id は解決できたときだけ更新する。解決できない名前で
 	// 既存の紐付けを消すと、担当校の教員から生徒が見えなくなる。
