@@ -29,6 +29,8 @@ type APICallLog struct {
 	OrganizationID *uint `json:"organization_id,omitempty"`
 	// STT/TTS はトークンではなく音声の長さが課金単位になる。
 	AudioSeconds float64 `gorm:"type:decimal(10,2);not null;default:0" json:"audio_seconds"`
+	// TTS は文字数が課金単位。トークンでもなく秒でもないため独立させる。
+	Characters int `gorm:"not null;default:0" json:"characters"`
 	// ローカル化が体験に与える影響を見るため。
 	LatencyMs int `gorm:"not null;default:0" json:"latency_ms"`
 	// キャッシュで外部呼び出しを回避した件数を数えるため。
