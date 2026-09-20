@@ -53,17 +53,6 @@ C) その他（自由記述）`
 	}
 }
 
-func TestBlendChoiceAndReasonScore(t *testing.T) {
-	if got := blendChoiceAndReasonScore(100, 40, "短い"); got != 100 {
-		t.Fatalf("short reason should keep choice score, got %d", got)
-	}
-	got := blendChoiceAndReasonScore(100, 40, "これは十分長い理由テキストです")
-	want := int(0.7*100 + 0.3*40) // 82
-	if got != want {
-		t.Fatalf("blended=%d want %d", got, want)
-	}
-}
-
 func TestSplitChoiceAndReason(t *testing.T) {
 	letter, reason, ok := SplitChoiceAndReason("A: hello")
 	if !ok || letter != "A" || reason != "hello" {

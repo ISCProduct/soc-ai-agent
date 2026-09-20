@@ -12,7 +12,7 @@ import (
 	"Backend/internal/controllers"
 	"Backend/internal/middleware"
 	"Backend/internal/repositories"
-	"Backend/internal/services"
+	"Backend/internal/services/release"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/echo/v4"
@@ -49,7 +49,7 @@ func newAuthenticatedReleaseNoteRequest(userID uint) (*http.Request, *httptest.R
 
 func TestReleaseNoteController_List_ReturnsNotesNewestFirst(t *testing.T) {
 	db, mock := newReleaseNoteControllerTestDB(t)
-	svc := services.NewReleaseNoteService(db, nil)
+	svc := release.NewReleaseNoteService(db, nil)
 	userRepo := repositories.NewUserRepository(db)
 	ctrl := controllers.NewReleaseNoteController(svc, userRepo)
 	e := echo.New()
@@ -86,7 +86,7 @@ func TestReleaseNoteController_List_ReturnsNotesNewestFirst(t *testing.T) {
 // #966: システム管理者(is_admin=true)にはstudent/teacherの絞り込みではなくadmin向けの絞り込みが渡ること。
 func TestReleaseNoteController_List_UsesAdminAudienceForAdminUser(t *testing.T) {
 	db, mock := newReleaseNoteControllerTestDB(t)
-	svc := services.NewReleaseNoteService(db, nil)
+	svc := release.NewReleaseNoteService(db, nil)
 	userRepo := repositories.NewUserRepository(db)
 	ctrl := controllers.NewReleaseNoteController(svc, userRepo)
 	e := echo.New()
@@ -117,7 +117,7 @@ func TestReleaseNoteController_List_UsesAdminAudienceForAdminUser(t *testing.T) 
 // #966: 未認証（userIDがコンテキストにない）場合は401を返すこと。
 func TestReleaseNoteController_List_Unauthenticated(t *testing.T) {
 	db, _ := newReleaseNoteControllerTestDB(t)
-	svc := services.NewReleaseNoteService(db, nil)
+	svc := release.NewReleaseNoteService(db, nil)
 	userRepo := repositories.NewUserRepository(db)
 	ctrl := controllers.NewReleaseNoteController(svc, userRepo)
 	e := echo.New()
@@ -135,7 +135,7 @@ func TestReleaseNoteController_List_Unauthenticated(t *testing.T) {
 
 func TestReleaseNoteController_Ingest_InvalidPayload(t *testing.T) {
 	db, _ := newReleaseNoteControllerTestDB(t)
-	svc := services.NewReleaseNoteService(db, nil)
+	svc := release.NewReleaseNoteService(db, nil)
 	userRepo := repositories.NewUserRepository(db)
 	ctrl := controllers.NewReleaseNoteController(svc, userRepo)
 	e := echo.New()
@@ -157,7 +157,7 @@ func TestReleaseNoteController_Ingest_InvalidPayload(t *testing.T) {
 
 func TestReleaseNoteController_Ingest_NilLLMClientReturnsInternalError(t *testing.T) {
 	db, _ := newReleaseNoteControllerTestDB(t)
-	svc := services.NewReleaseNoteService(db, nil)
+	svc := release.NewReleaseNoteService(db, nil)
 	userRepo := repositories.NewUserRepository(db)
 	ctrl := controllers.NewReleaseNoteController(svc, userRepo)
 	e := echo.New()

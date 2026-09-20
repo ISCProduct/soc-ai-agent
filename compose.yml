@@ -1,3 +1,14 @@
+# ============================================================
+# ローカル開発用 Compose（既定ファイル）
+#
+# `docker compose` は compose.yml を優先して読み込むため、ローカル開発では
+# ファイル指定なしの `docker compose up -d` でこのファイルが使われる。
+# ソースを build して起動し、DB は named volume mysql_data を使う。
+#
+# 同ディレクトリの docker-compose.yml は staging EC2 用（ECR イメージを pull）。
+# ローカルで誤って指定しないこと。
+# 手順: docs/wiki/getting-started.md
+# ============================================================
 services:
   # Backend API Server
   app:
@@ -129,6 +140,9 @@ services:
       - BACKEND_URL=${BACKEND_URL:-http://app:8080}
       - COMPANY_GRAPH_URL=${COMPANY_GRAPH_URL:-http://company-graph:9100}
       - WATCHPACK_POLLING=${WATCHPACK_POLLING:-true}
+      - NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN:-}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_RELEASE=${SENTRY_RELEASE:-}
     depends_on:
       app:
         condition: service_started
@@ -171,6 +185,9 @@ services:
       # Phase 1B: Read 経路は既定で Search しない（admin 温存時のみ true）
       - RAG_ALLOW_WEB_SEARCH_FALLBACK=${RAG_ALLOW_WEB_SEARCH_FALLBACK:-false}
       - RAG_USE_DEEP_RESEARCH=${RAG_USE_DEEP_RESEARCH:-false}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_RELEASE=${SENTRY_RELEASE:-}
+      - APP_ENV=${APP_ENV:-development}
     volumes:
       - rag_data:/data
     depends_on:

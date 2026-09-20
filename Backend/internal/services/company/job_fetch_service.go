@@ -349,8 +349,27 @@ func (s *JobFetchService) upsertJobPosition(companyID uint, job scraper.JobPosti
 
 // analyzePersonaProfile は企業情報と求人情報テキストから10カテゴリのスコアを導出する。
 func (s *JobFetchService) analyzePersonaProfile(ctx context.Context, companyName, companyInfo, positionText string) (*models.CompanyWeightProfile, error) {
-	systemPrompt := `あなたは採用コンサルタントです。企業情報から「企業が重視する人物像」を10カテゴリのスコア（0〜100）で評価し、指定のJSON形式のみで回答してください。`
-	userPrompt := fmt.Sprintf(`「%s」が求める人物像を以下の10カテゴリでスコア化してください（0〜100、50が中立）。
+	// 各軸を独立した絶対評価で尋ねると、どの企業でも「重視する」と答えるため
+	// 全社が上限に張り付き、識別に使えないプロファイルになる(#1331)。
+	// 「平均的な日本企業と比べた相対評価」であることと、
+	// 全軸を高くできないことを明示する。
+	systemPrompt := `あなたは採用コンサルタントです。企業が求める人物像を10カテゴリのスコアで評価し、指定のJSON形式のみで回答してください。
+
+スコアは「平均的な日本企業と比べてどれだけ重視するか」の相対評価です。
+- 50 = 平均的な日本企業と同程度
+- 80以上 = その企業を特徴づけるほど強く重視する
+- 20以下 = 平均的な企業より明らかに重視しない
+
+どの企業もチームワークや誠実さは重視します。そういう「どこでも重視するもの」は
+50前後にしてください。高くしてよいのは、同業他社と比べてもその企業を
+際立たせている項目だけです。
+
+必ず守ること:
+- 80以上を付けてよいのは最大3項目まで
+- 少なくとも2項目は40以下にする
+- 10項目すべてを似た値にしない（最大値と最小値の差を40以上にする）`
+	userPrompt := fmt.Sprintf(`「%s」が求める人物像を以下の10カテゴリでスコア化してください（0〜100）。
+平均的な日本企業を50とした相対評価です。この企業を他社と見分けられる形にしてください。
 JSON形式のみで回答してください（説明文は不要）。
 
 {
@@ -400,7 +419,7 @@ JSON形式のみで回答してください（説明文は不要）。
 		return nil, fmt.Errorf("人物像JSONのunmarshal失敗: %w", err)
 	}
 
-	return &models.CompanyWeightProfile{
+	profile := &models.CompanyWeightProfile{
 		TechnicalOrientation:  clampScore(raw.TechnicalOrientation),
 		TeamworkOrientation:   clampScore(raw.TeamworkOrientation),
 		LeadershipOrientation: clampScore(raw.LeadershipOrientation),
@@ -411,7 +430,27 @@ JSON形式のみで回答してください（説明文は不要）。
 		ChallengeSeeking:      clampScore(raw.ChallengeSeeking),
 		DetailOrientation:     clampScore(raw.DetailOrientation),
 		CommunicationSkill:    clampScore(raw.CommunicationSkill),
-	}, nil
+	}
+
+	// プロンプトで分散を要求しても従わないことがあるため、幅が狭ければ
+	// 順序を保ったまま引き伸ばす。識別力の無いプロファイルは、その軸が
+	// 全企業に同じ定数を足すだけになり並び順に寄与しない(#1331)。
+	if normalizeProfileSpread(profile) {
+		log.Printf("[Persona] %s: プロファイルの幅が狭いため正規化した", companyName)
+	}
+	if profileIsDegenerate(profile) {
+		// 引き伸ばしても差が出ない（全軸ほぼ同値）。
+		//
+		// ここでエラーにしてはいけない。プロファイルが無い企業は
+		// matching_service.go の defaultCompanyWeightProfile（全軸50）に
+		// フォールバックするため、保存を拒むと「最も平坦なプロファイル」に
+		// 落ちる。平均的な学生に対してマッチ度がほぼ100になり、かえって
+		// 上位に来てしまう。
+		//
+		// 保存はしたうえで記録に残し、再生成の判断材料にする。
+		log.Printf("[Persona] %s: 識別力の無いプロファイル（全軸ほぼ同値）。企業情報が薄い可能性がある", companyName)
+	}
+	return profile, nil
 }
 
 func clampScore(v int) int {

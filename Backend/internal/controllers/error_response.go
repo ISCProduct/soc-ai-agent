@@ -12,7 +12,7 @@ import (
 	"Backend/internal/logger"
 	"Backend/internal/middleware"
 	"Backend/internal/openai"
-	"Backend/internal/services"
+	"Backend/internal/services/school"
 
 	"github.com/labstack/echo/v4"
 )
@@ -89,7 +89,7 @@ func echoCompanyUserID(c echo.Context) (uint, bool) {
 // 呼び出し元admin(担当校制限がある場合)がアクセスしてよいかを検証する共通ヘルパー
 // (#980/#981/#982/#984で同一ロジックが3コントローラーに重複していたのを統合)。
 // schoolsが未設定(呼び出し元でのDI漏れ)の場合はfail-closedで拒否する。
-func ensureAdminSchoolAccess(ctx echo.Context, schools *services.SchoolService, targetSchoolID *uint) error {
+func ensureAdminSchoolAccess(ctx echo.Context, schools *school.SchoolService, targetSchoolID *uint) error {
 	if schools == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "school access check is not configured")
 	}

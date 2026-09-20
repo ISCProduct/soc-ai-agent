@@ -16,8 +16,8 @@ import (
 	"Backend/internal/controllers"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
-	"Backend/internal/services"
 	"Backend/internal/services/organization"
+	"Backend/internal/services/school"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
@@ -109,7 +109,7 @@ func TestAdminDashboardController_UserSessions_SchoolAccessDenied(t *testing.T) 
 	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
 
 	ctrl := newAdminDashboardController(userRepo, nil, nil)
-	ctrl.SetSchoolService(services.NewSchoolService(schoolRepo))
+	ctrl.SetSchoolService(school.NewSchoolService(schoolRepo))
 	assertStatus(t, ctrl.UserSessions, c, http.StatusForbidden)
 	userRepo.AssertExpectations(t)
 }

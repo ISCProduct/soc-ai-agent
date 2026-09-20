@@ -13,6 +13,11 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   workers: 1,
+  // デプロイ直後はコンテナが再起動したてで Next.js がコールド。ログイン画面の
+  // タブは MUI のクライアント描画で SSR の HTML に含まれないため、既定の 5 秒
+  // では初回描画に間に合わず落ちることがあった（warm なら 1.3 秒で通る）。
+  // actionTimeout / navigationTimeout と同じ水準に引き上げる。
+  expect: { timeout: 15000 },
   reporter: process.env.CI ? 'github' : 'list',
   use: {
     baseURL,

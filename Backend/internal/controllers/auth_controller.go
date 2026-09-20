@@ -25,10 +25,35 @@ func isProduction() bool { return os.Getenv("APP_ENV") == "production" }
 
 type AuthController struct {
 	authService interfaces.AuthService
+	userSecret  string
 }
 
-func NewAuthController(authService interfaces.AuthService) *AuthController {
-	return &AuthController{authService: authService}
+func NewAuthController(authService interfaces.AuthService, userSecret string) *AuthController {
+	return &AuthController{authService: authService, userSecret: userSecret}
+}
+
+// guestUserIDForPromotion は昇格対象のゲストを X-User-Token から特定する。
+//
+// 対象をボディで受け取らないのは、他人のゲストアカウントを奪えるようにしないため。
+// 引き継ぎを希望しているのにトークンが無効なら 0 ではなくエラーにする。
+// ここで黙って新規登録にすると、学生は診断をやり直すことになるのに
+// 画面上は成功に見える（#1374）。
+func (c *AuthController) guestUserIDForPromotion(ctx echo.Context, req auth.RegisterRequest) (uint, error) {
+	if !req.PromoteGuest {
+		return 0, nil
+	}
+	if c.userSecret == "" {
+		return 0, newAPIError(http.StatusServiceUnavailable, ErrCodeValidationError, "guest promotion is not configured")
+	}
+	token := ctx.Request().Header.Get("X-User-Token")
+	if token == "" {
+		return 0, newAPIError(http.StatusUnauthorized, ErrCodeValidationError, "ゲストの情報を引き継ぐにはログイン状態が必要です。ページを再読み込みしてからお試しください。")
+	}
+	userID, _, err := middleware.ParseJWT(token, c.userSecret)
+	if err != nil || userID == 0 {
+		return 0, newAPIError(http.StatusUnauthorized, ErrCodeValidationError, "ゲストの有効期限が切れています。ページを再読み込みしてからお試しください。")
+	}
+	return userID, nil
 }
 
 // Register 新規ユーザー登録
@@ -38,8 +63,16 @@ func (c *AuthController) Register(ctx echo.Context) error {
 		return newAPIError(http.StatusBadRequest, ErrCodeValidationError, "Invalid request body")
 	}
 
-	resp, err := c.authService.Register(req, tenantOrgID(ctx))
+	promoteGuestUserID, err := c.guestUserIDForPromotion(ctx, req)
 	if err != nil {
+		return err
+	}
+
+	resp, err := c.authService.Register(req, tenantOrgID(ctx), promoteGuestUserID)
+	if err != nil {
+		if errors.Is(err, auth.ErrGuestNotPromotable) {
+			return newAPIError(http.StatusConflict, ErrCodeValidationError, "このアカウントはゲストではないため引き継げません。ログインしてご利用ください。")
+		}
 		if err.Error() == "email already exists" {
 			if isProduction() {
 				log.Printf("[Register] email already exists: %s", req.Email)

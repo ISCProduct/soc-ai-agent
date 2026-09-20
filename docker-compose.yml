@@ -1,3 +1,17 @@
+# ============================================================
+# staging (ECS on EC2) の EC2 ホスト用 Compose
+#
+# ローカル開発では使わない。ECR のイメージを pull して起動し、RDS 等の
+# マネージドリソースに接続するため、ローカルで実行すると staging の
+# リソースへ接続しにいく。ローカル開発は compose.yml を使うこと。
+#
+# デプロイ時に EC2 の /opt/app/docker-compose.yml へ配置される。
+# そのパスを前提に以下が参照しているため、ファイル名は変更しないこと:
+#   - infra/terraform/environments/staging/app_user_data.sh.tftpl
+#   - infra/staging/ensure-edge-compose.sh
+#   - .github/workflows/deployment.yml
+# 手順: docs/wiki/operations.md
+# ============================================================
 services:
   backend:
     image: 970835573274.dkr.ecr.ap-northeast-1.amazonaws.com/soc-backend:latest

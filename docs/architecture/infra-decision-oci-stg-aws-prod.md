@@ -14,7 +14,7 @@
 - ~~staging = OCI~~ → **staging = AWS（常時起動）**
 - ~~本番の平日昼間定期 cron~~ → **本番反映時の明示起動 + 指定日は終日稼働**（変更なし）
 - ~~本番 = ECS on EC2~~ → **本番 = ECS on Fargate**（展示会・説明会時のみ起動する断続運用のため、稼働時間分のみ課金されるFargateを採用。EC2/ASGだと停止管理やインスタンス保守が残る）
-- OCI（`environments/oci`）は **現行 staging としては使わない**（アーカイブ / 将来の実験用）
+- ~~OCI（`environments/oci`）は **現行 staging としては使わない**（アーカイブ / 将来の実験用）~~ → **削除済み**（2026-09-20、リソース destroy 済み。コードも削除）
 
 staging と本番は同じクラウド（AWS）だが、コンピュートは用途で分ける: staging=常時稼働向けのECS on EC2、production=断続稼働向けのECS on Fargate。両者ともALBでドメイン/HTTPSを提供する点は共通。
 
@@ -119,7 +119,7 @@ staging と本番は同じクラウド（AWS）だが、コンピュートは用
 | `infra/terraform/modules/ecs_cluster` / `ecs_service` | staging専用（EC2/ASG） |
 | `infra/terraform/modules/ecs_service_fargate` | prod専用（Fargate） |
 | `infra/terraform/environments/prod` | **本番 root（ECS on Fargate 化済み）**。既定 `*_desired_count=0`（停止） |
-| `infra/terraform/environments/oci` | **非正**（使わない。整理時に archive） |
+| `infra/terraform/environments/oci` | **削除済み**（2026-09-20。リソース destroy 済み） |
 
 ## ドメイン紐付け
 
@@ -143,4 +143,4 @@ staging と本番は同じクラウド（AWS）だが、コンピュートは用
 1. **AWS staging を常時で apply**（bootstrap → staging）。OCI は触らない
 2. staging にアプリ（ECR イメージ）を載せて常時検証できる状態にする
 3. **本番**: `environments/prod`（ECS 化・ドメイン紐付け済み）を実際にレビュー→ apply。明示起動 + 指定日終日の自動制御は別タスクとして残っている（現状は `ecs_desired_capacity` の手動 apply で起動/停止）
-4. infra 整理: OCI を `archive/` へ（任意・後続）
+4. ~~infra 整理: OCI を `archive/` へ（任意・後続）~~ → 実施済み（archive ではなく削除）

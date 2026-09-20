@@ -23,15 +23,11 @@ func newWeightScoreBatchRepo(t *testing.T) (*UserWeightScoreRepository, sqlmock.
 
 // TestFindLatestScoresByUsers_UsesLatestSession は「最新セッション」の定義を固定する（#1027）。
 //
-// updated_at の降順が昇順に変わると「最古セッション」を拾う。
-// 教員向け一覧が古い分析結果を表示し続けても誰も気づけないため、
-// 生成されるSQLに順序を含めて固定しておく。
+// チャット診断を面接スナップショットより優先し、同優先内では updated_at / id 降順。
 func TestFindLatestScoresByUsers_UsesLatestSession(t *testing.T) {
 	repo, mock := newWeightScoreBatchRepo(t)
 
-	// ウィンドウ関数の ORDER BY が降順であること、
-	// 同値時のタイブレークに id を使っていることをSQLで強制する。
-	mock.ExpectQuery("ROW_NUMBER\\(\\) OVER \\(PARTITION BY user_id ORDER BY updated_at DESC, id DESC\\)").
+	mock.ExpectQuery("ROW_NUMBER\\(\\) OVER \\(\\s*PARTITION BY user_id\\s*ORDER BY\\s*CASE WHEN session_id LIKE 'interview-%' THEN 1 ELSE 0 END ASC,\\s*updated_at DESC,\\s*id DESC\\s*\\)").
 		WillReturnRows(sqlmock.NewRows([]string{"user_id", "weight_category", "score"}).
 			AddRow(1, "技術志向", 90).
 			AddRow(1, "成長志向", 70).

@@ -10,10 +10,12 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { useRequirePlatformAdmin } from '@/lib/use-require-platform-admin'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 
 export default function PageContent() {
+  const platformReady = useRequirePlatformAdmin()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -24,6 +26,8 @@ export default function PageContent() {
       window.location.href = '/'
     }
   }, [])
+
+  if (!platformReady) return null
 
   const handleRebuild = async () => {
     setLoading(true)

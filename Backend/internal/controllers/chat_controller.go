@@ -4,7 +4,9 @@ import (
 	"Backend/domain/entity"
 	"Backend/domain/repository"
 	"Backend/internal/models"
+	"Backend/internal/repositories"
 	"Backend/internal/services/chat"
+	"Backend/internal/services/diagnosis"
 	"Backend/internal/services/email"
 	ifaces "Backend/internal/services/interfaces"
 	"Backend/internal/services/matching"
@@ -31,6 +33,7 @@ type ChatController struct {
 	userRepo        repository.UserRepository
 	emailService    ifaces.EmailService
 	jobs            shared.JobEnqueuer
+	qualityRepo     *repositories.DiagnosisQualityRepository
 	matchingTimers  sync.Map // key: sessionID, value: *time.Timer（デバウンス用）
 	matchingRunning sync.Map // key: sessionID, value: struct{}（実行中の多重起動防止, #1167）
 }
@@ -65,6 +68,11 @@ func (c *ChatController) SetJobEnqueuer(j shared.JobEnqueuer) {
 	c.jobs = j
 }
 
+// SetDiagnosisQualityRepo は recommendations に診断信頼度を載せるための参照先。
+func (c *ChatController) SetDiagnosisQualityRepo(r *repositories.DiagnosisQualityRepository) {
+	c.qualityRepo = r
+}
+
 func countEvaluatedCategories(scores []entity.UserWeightScore) int {
 	count := 0
 	for _, score := range scores {
@@ -73,6 +81,40 @@ func countEvaluatedCategories(scores []entity.UserWeightScore) int {
 		}
 	}
 	return count
+}
+
+func (c *ChatController) loadDiagnosisQuality(userID uint, sessionID string) (confidence int, flags []string, summary string) {
+	if c.qualityRepo == nil {
+		return 0, nil, ""
+	}
+	report, err := c.qualityRepo.FindByUserAndSession(userID, sessionID)
+	if err != nil || report == nil {
+		return 0, nil, ""
+	}
+	return report.Confidence, diagnosis.ParseFlagsJSON(report.FlagsJSON), report.Summary
+}
+
+func minMatchedAxisCount(matches []*entity.UserCompanyMatch) int {
+	if len(matches) == 0 {
+		return 0
+	}
+	minAxes := matches[0].MatchedAxisCount
+	for _, m := range matches[1:] {
+		if m.MatchedAxisCount < minAxes {
+			minAxes = m.MatchedAxisCount
+		}
+	}
+	return minAxes
+}
+
+func isRecommendationProvisional(evaluatedCategories, diagnosisConfidence int, diagnosisFlags []string, minAxes int) bool {
+	if evaluatedCategories < minEvaluatedCategoriesForFinal {
+		return true
+	}
+	if minAxes > 0 && minAxes < minEvaluatedCategoriesForFinal {
+		return true
+	}
+	return diagnosis.ForcesProvisional(diagnosisConfidence, diagnosisFlags)
 }
 
 func parseEmailListFromEnv(key string) []string {
@@ -360,16 +402,24 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 			Diagnostics         *matching.MatchingDiagnostics `json:"diagnostics,omitempty"`
 			EvaluatedCategories int                           `json:"evaluated_categories"`
 			IsProvisional       bool                          `json:"is_provisional"`
+			DiagnosisConfidence int                           `json:"diagnosis_confidence,omitempty"`
+			DiagnosisFlags      []string                      `json:"diagnosis_flags,omitempty"`
+			DiagnosisSummary    string                        `json:"diagnosis_summary,omitempty"`
+			MinMatchedAxisCount int                           `json:"min_matched_axis_count,omitempty"`
 		}
 
 		evaluatedCategories := countEvaluatedCategories(userScores)
-		isProvisional := evaluatedCategories < minEvaluatedCategoriesForFinal
+		diagConf, diagFlags, diagSummary := c.loadDiagnosisQuality(userID, sessionID)
+		isProvisional := isRecommendationProvisional(evaluatedCategories, diagConf, diagFlags, 0)
 		response := RecommendationResponse{
 			Recommendations:     []any{},
 			Reason:              reason,
 			Diagnostics:         diagnostics,
 			EvaluatedCategories: evaluatedCategories,
 			IsProvisional:       isProvisional,
+			DiagnosisConfidence: diagConf,
+			DiagnosisFlags:      diagFlags,
+			DiagnosisSummary:    diagSummary,
 		}
 
 		return ctx.JSON(http.StatusOK, response)
@@ -412,6 +462,10 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		Recommendations     []CompanyRecommendation `json:"recommendations"`
 		EvaluatedCategories int                     `json:"evaluated_categories"`
 		IsProvisional       bool                    `json:"is_provisional"`
+		DiagnosisConfidence int                     `json:"diagnosis_confidence,omitempty"`
+		DiagnosisFlags      []string                `json:"diagnosis_flags,omitempty"`
+		DiagnosisSummary    string                  `json:"diagnosis_summary,omitempty"`
+		MinMatchedAxisCount int                     `json:"min_matched_axis_count,omitempty"`
 	}
 
 	userScores, err := c.chatService.GetUserScores(userID, sessionID)
@@ -420,14 +474,21 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		userScores = []entity.UserWeightScore{}
 	}
 	evaluatedCategories := countEvaluatedCategories(userScores)
-	isProvisional := evaluatedCategories < minEvaluatedCategoriesForFinal
+	diagConf, diagFlags, diagSummary := c.loadDiagnosisQuality(userID, sessionID)
 
-	var items []CompanyRecommendation
+	// 企業を解決できない match は表示されないので、根拠軸数の集計からも外す。
+	displayed := make([]*entity.UserCompanyMatch, 0, len(matches))
 	for _, match := range matches {
 		if match.Company == nil || match.Company.ID == 0 {
 			continue
 		}
+		displayed = append(displayed, match)
+	}
+	minAxes := minMatchedAxisCount(displayed)
+	isProvisional := isRecommendationProvisional(evaluatedCategories, diagConf, diagFlags, minAxes)
 
+	var items []CompanyRecommendation
+	for _, match := range displayed {
 		employeeCount := "未定"
 		if label := models.FormatEmployeeCount(match.Company.EmployeeCount, match.Company.EmployeeCountBasis); label != "" {
 			employeeCount = label
@@ -471,6 +532,10 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		Recommendations:     items,
 		EvaluatedCategories: evaluatedCategories,
 		IsProvisional:       isProvisional,
+		DiagnosisConfidence: diagConf,
+		DiagnosisFlags:      diagFlags,
+		DiagnosisSummary:    diagSummary,
+		MinMatchedAxisCount: minAxes,
 	}
 
 	return ctx.JSON(http.StatusOK, response)

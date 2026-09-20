@@ -15,16 +15,18 @@ frontend_image = "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/soc-frontend:l
 # 本番の実シークレットはここに書かない(#1158)。値は Secrets Manager を正とし、
 # Terraform は入れ物だけを管理する。更新手順は docs/wiki/prod-secrets-rotation.md。
 #
-# 既存環境(値が Secrets Manager にある)では次を有効にする。
-# これが無いと openai_api_key が空であることを precondition が弾く。
-# secret_values_managed_outside = true
-
-# 新規環境の初期構築時のみ、値を入れて一度だけ apply する。
-# apply 後はこのファイルから値を消し、上の secret_values_managed_outside = true を設定する。
+# 【新規環境の初期構築】先に値を入れて一度だけ apply する。
+# ここを飛ばして下の secret_values_managed_outside = true だけを付けると、
+# 空文字が Secrets Manager に書き込まれ、起動はするが OpenAI 依存の機能が
+# 全部 401 で死ぬ(precondition も素通りする)。
 # openai_api_key       = "sk-xxxx"
 # resend_api_key       = "re_xxxx"
 # google_client_secret = "xxxx"
 # github_client_secret = "xxxx"
+
+# 【apply 後 / 既存環境】値をこのファイルから消し、次を有効にする。
+# これが無いと openai_api_key が空であることを precondition が弾く。
+# secret_values_managed_outside = true
 #
 # admin_secret は指定しない(未指定なら本番専用の値が自動生成される)。
 # staging と同じ値を入れないこと。

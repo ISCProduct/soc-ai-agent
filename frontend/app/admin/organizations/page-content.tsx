@@ -10,6 +10,7 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { useRequirePlatformAdmin } from '@/lib/use-require-platform-admin'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
@@ -38,6 +39,7 @@ function formatDate(value?: string): string {
 }
 
 export default function PageContent() {
+  const platformReady = useRequirePlatformAdmin()
   useEffect(() => {
     const user = authService.getStoredUser()
     if (!user?.is_admin) {
@@ -49,6 +51,7 @@ export default function PageContent() {
   const [error, setError] = useState('')
 
   useEffect(() => {
+    if (!platformReady) return
     fetch('/api/admin/organizations?limit=100', {
       headers: authService.getAdminFetchHeaders(),
     })
@@ -61,7 +64,9 @@ export default function PageContent() {
         setOrganizations(data?.organizations || [])
       })
       .catch(() => setError('学園一覧の取得に失敗しました'))
-  }, [])
+  }, [platformReady])
+
+  if (!platformReady) return null
 
   return (
     <PageContainer maxWidth={ADMIN_PAGE_WIDTH.standard}>

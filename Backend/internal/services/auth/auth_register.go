@@ -73,7 +73,15 @@ func (s *AuthService) ValidateRegistrationToken(token string) (string, error) {
 
 // Register 新規ユーザー登録
 // tenantOrgID はHostサブドメインから解決された組織ID（0の場合はデフォルト組織へ所属）。
-func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint) (*AuthResponse, error) {
+// Register は本登録を行う。
+//
+// promoteGuestUserID が 0 でなければ、そのゲスト行を昇格させる（新規作成しない）。
+// ゲストのまま診断まで進める仕様のため、作り直すと user_id が変わり、
+// 診断結果・マッチ結果・チャット履歴が取り残される（#1374）。
+//
+// 呼び出し側は promoteGuestUserID を必ず認証済みトークンから渡すこと。
+// リクエストボディの値を信用すると、他人のゲストアカウントを奪える。
+func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint, promoteGuestUserID uint) (*AuthResponse, error) {
 	// バリデーション
 	if req.Email == "" || req.Password == "" {
 		return nil, errors.New("email and password are required")
@@ -105,7 +113,11 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint) (*AuthResp
 	if req.TargetLevel != "新卒" && req.TargetLevel != "中途" {
 		return nil, errors.New("target_level must be '新卒' or '中途'")
 	}
-	if strings.TrimSpace(req.SchoolName) == "" {
+	// 既定値の補完は新規作成用。昇格では「学校名が送られてこなかった」ことを
+	// 保てないと、ゲストが自分で設定した学校名を既定値で潰してしまう。
+	// フロントの register() は school_name を送らないので、この上書きは常に起きる。
+	requestedSchoolName := strings.TrimSpace(req.SchoolName)
+	if requestedSchoolName == "" {
 		req.SchoolName = config.SchoolName()
 	}
 
@@ -124,19 +136,37 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint) (*AuthResp
 		return nil, fmt.Errorf("failed to hash password: %w", err)
 	}
 
-	// ユーザー作成
-	user := &entity.User{
-		Email:                    req.Email,
-		Password:                 string(hashedPassword),
-		Name:                     req.Name,
-		IsGuest:                  false,
-		TargetLevel:              req.TargetLevel,
-		SchoolName:               req.SchoolName,
-		SchoolID:                 s.resolveSchoolID(req.SchoolName),
-		IsAdmin:                  false,
-		CertificationsAcquired:   req.CertificationsAcquired,
-		CertificationsInProgress: req.CertificationsInProgress,
-		OrganizationID:           tenantOrgID,
+	// ゲストからの昇格か、新規作成かを決める。
+	var user *entity.User
+	promoting := false
+	if promoteGuestUserID != 0 {
+		guest, err := s.userRepo.GetUserByID(promoteGuestUserID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load guest user: %w", err)
+		}
+		if err := PromotableGuest(guest); err != nil {
+			// 黙って新規作成しない。診断をやり直すことになるのに
+			// 画面上は成功に見えるため、呼び出し側に判断させる。
+			return nil, err
+		}
+		// 既定値で補完した名前ではなく、実際に送られてきた名前だけを反映する。
+		applyRegistrationToGuest(guest, req, requestedSchoolName, string(hashedPassword), s.resolveSchoolID(requestedSchoolName))
+		user = guest
+		promoting = true
+	} else {
+		user = &entity.User{
+			Email:                    req.Email,
+			Password:                 string(hashedPassword),
+			Name:                     req.Name,
+			IsGuest:                  false,
+			TargetLevel:              req.TargetLevel,
+			SchoolName:               req.SchoolName,
+			SchoolID:                 s.resolveSchoolID(req.SchoolName),
+			IsAdmin:                  false,
+			CertificationsAcquired:   req.CertificationsAcquired,
+			CertificationsInProgress: req.CertificationsInProgress,
+			OrganizationID:           tenantOrgID,
+		}
 	}
 
 	// メール認証トークン生成（有効期限 24 時間）（#330）
@@ -148,7 +178,12 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint) (*AuthResp
 	emailVerExpires := time.Now().Add(24 * time.Hour)
 	user.EmailVerificationExpires = &emailVerExpires
 
-	if err := s.userRepo.CreateUser(user); err != nil {
+	if promoting {
+		if err := s.userRepo.UpdateUser(user); err != nil {
+			return nil, fmt.Errorf("failed to promote guest user: %w", err)
+		}
+		log.Printf("[AuthService] guest promoted to registered account %s", guestPromotionLogLabel(user.ID))
+	} else if err := s.userRepo.CreateUser(user); err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
 
@@ -158,6 +193,12 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint) (*AuthResp
 
 	// 認証メール送信（失敗しても登録は成功扱い）
 	appURL := config.AppURL()
+	// 未注入で goroutine に入ると nil 参照でプロセスごと落ちる。
+	// メールが出ないだけなら登録は成立しているので、ログに残して続ける。
+	if s.emailService == nil {
+		log.Printf("[AuthService] email service is not configured; skipped verification email for %s", guestPromotionLogLabel(user.ID))
+		return buildRegisterResponse(user)
+	}
 	if s.jobs != nil {
 		if err := s.jobs.EnqueueEmailVerification(user.ID, user.Email, user.Name, user.EmailVerificationToken, appURL); err != nil {
 			log.Printf("[AuthService] enqueue verification email failed, fallback goroutine: %v", err)
@@ -175,6 +216,11 @@ func (s *AuthService) Register(req RegisterRequest, tenantOrgID uint) (*AuthResp
 		}()
 	}
 
+	return buildRegisterResponse(user)
+}
+
+// buildRegisterResponse は登録・昇格どちらでも同じ内容を返す。
+func buildRegisterResponse(user *entity.User) (*AuthResponse, error) {
 	return &AuthResponse{
 		UserID:                   user.ID,
 		Email:                    user.Email,

@@ -6,6 +6,7 @@ import { GlobalNavMenu } from '@/components/global-nav-menu'
 import { Analytics } from '@vercel/analytics/react'
 // Vercelでホスティングされるまで実データは収集されない(AWS ECSデプロイのため現状は未計測)
 import { SpeedInsights } from '@vercel/speed-insights/next'
+import { SentryClientInit } from '@/components/sentry-client-init'
 
 const TITLE = 'IT企業エージェント | 就活AI'
 const DESCRIPTION = '適性診断から企業マッチングまで。IT就活を支援するAIエージェントです。'
@@ -39,6 +40,7 @@ export default function RootLayout({
         <meta charSet="UTF-8" />
       </head>
       <body style={{ margin: 0, padding: 0 }}>
+        <SentryClientInit />
         <MuiProvider>
           {children}
           <GlobalNavMenu />

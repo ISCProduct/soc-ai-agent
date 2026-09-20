@@ -86,25 +86,8 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 	return true, nil
 }
 
-// 選択肢スコアと任意理由テキストのブレンド係数（既存 EMA 0.7/0.3 と揃える）。
-const (
-	choiceScoreWeight       = 0.7
-	choiceReasonScoreWeight = 0.3
-	minReasonRunesForBlend  = 8
-)
-
-// blendChoiceAndReasonScore は選択肢ベース点と理由テキスト点を混ぜる。
-// 理由が短すぎる場合は選択肢点のみ（ノイズ防止）。
-func blendChoiceAndReasonScore(choiceScore, reasonScore int, reason string) int {
-	if len([]rune(strings.TrimSpace(reason))) < minReasonRunesForBlend {
-		return choiceScore
-	}
-	blended := float64(choiceScore)*choiceScoreWeight + float64(reasonScore)*choiceReasonScoreWeight
-	return int(math.Round(blended))
-}
-
 // processChoiceAnswer 選択肢回答を処理してスコアを更新する。
-// reason は任意。十分な長さがあればテキスト採点と 0.7/0.3 でブレンドする。
+// reason の有無・矛盾で軸スコアを中立寄りに減衰する（文章品質スコアとは混ぜない）。
 // 戻り値の bool は「有効な品質回答かどうか」を示す（進捗カウントに使用）。
 func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sessionID, answer, reason string, history []models.ChatMessage, jobCategoryID uint) (bool, error) {
 	// 最後のAIの質問を取得
@@ -160,39 +143,15 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 		return false, nil
 	}
 
-	finalScore := result.Score
-	if len([]rune(strings.TrimSpace(reason))) >= minReasonRunesForBlend {
-		textResult := s.answerEvaluator.EvaluateHumanScoringWithContext(ctx, lastQuestion, reason, false, jobCategoryID != 0, nil)
-		if textResult.Action == PrecheckScore && textResult.Score > 0 {
-			finalScore = blendChoiceAndReasonScore(result.Score, textResult.Score, reason)
-			log.Printf("[Choice Answer] Blended score choice=%d text=%d -> %d\n", result.Score, textResult.Score, finalScore)
-		}
-	}
+	finalScore, evidenceFlags := AdjustChoiceAxisScore(result.Score, reason)
+	log.Printf("[Choice Answer] axis score choice=%d -> adjusted=%d flags=%v reason_len=%d\n",
+		result.Score, finalScore, evidenceFlags, len([]rune(strings.TrimSpace(reason))))
 
 	if err := s.updateCategoryScore(userID, sessionID, targetCategory, finalScore); err != nil {
 		return false, err
 	}
 	// 選択肢回答は選択した内容に関わらず有効（スコア0でも意思表示）
 	return true, nil
-}
-
-// convertChoiceToScore 選択肢をスコアに変換
-func (s *ChatService) convertChoiceToScore(choice string) int {
-	choice = strings.ToUpper(strings.TrimSpace(choice))
-	switch choice {
-	case "A", "1":
-		return 100 // 非常に高い/強く同意
-	case "B", "2":
-		return 75 // やや高い/やや同意
-	case "C", "3":
-		return 50 // 中立/どちらでもない
-	case "D", "4":
-		return 25 // やや低い/やや不同意
-	case "E", "5":
-		return 0 // 低い/不同意
-	default:
-		return 50 // デフォルト
-	}
 }
 
 // inferCategoryFromQuestion 質問文からカテゴリを推測
