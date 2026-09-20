@@ -3,6 +3,7 @@ package main
 import (
 	"Backend/internal/config"
 	"Backend/internal/controllers"
+	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/infrastructure/redisx"
 	"Backend/internal/logger"
 	"Backend/internal/middleware"
@@ -427,7 +428,7 @@ func main() {
 	// DB に無い企業は取得して登録する。取得結果は companies に保存され、
 	// 企業検索・マッチング・面接ヒントからも参照できるようになる（#1124）。
 	resumeService.SetCompanyProvisioner(infoFetcher)
-	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
+	adminCompanyController := admincontrollers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
 	adminCompanyController.SetSchoolRestrictionChecker(func(adminUserID uint) (bool, error) {
 		restricted, _, err := schoolService.ResolveAdminAccess(adminUserID)
@@ -437,9 +438,9 @@ func main() {
 	// 共有済みのものに差し替えないと、fetch-missing-batch で検索が統合されない(#1124)。
 	adminCompanyController.SetInfoFetcher(infoFetcher)
 	adminCompanyController.SetRelationsFetcher(relationsFetcher)
-	adminCrawlController := controllers.NewAdminCrawlController(crawlService, auditLogService)
-	adminJobController := controllers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
-	adminAuditController := controllers.NewAdminAuditController(auditLogService)
+	adminCrawlController := admincontrollers.NewAdminCrawlController(crawlService, auditLogService)
+	adminJobController := admincontrollers.NewAdminJobController(companyRepo, jobCategoryRepo, graduateRepo, auditLogService)
+	adminAuditController := admincontrollers.NewAdminAuditController(auditLogService)
 	// gBizINFO 公式 API を使った企業データ収集パイプライン
 	// Mynavi・Rikunabi・CareerTasu スクレイパーは利用規約違反リスクのため削除 (#178)
 	// 環境変数名の解決は config.LoadConfig に一本化する。
@@ -450,7 +451,7 @@ func main() {
 		GBiz:      scraper.NewGBizClient("", cfg.GBizInfoToken),
 		Threshold: config.CompanyGraphThreshold(),
 	}
-	adminCompanyGraphController := controllers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService, aiClient)
+	adminCompanyGraphController := admincontrollers.NewAdminCompanyGraphController(companyGraphPipeline, companyRepo, companyRelationRepo, auditLogService, aiClient)
 	adminCompanyGraphController.SetRelationsFetcher(relationsFetcher)
 	resumeController := controllers.NewResumeController(resumeService)
 
@@ -467,27 +468,27 @@ func main() {
 		logger.EnableS3ErrorArchive(s3UploadService)
 	}
 	userDeletionService := auth.NewUserDeletionService(db, objectDeleter, auditLogService)
-	adminOrganizationController := controllers.NewAdminOrganizationController(organizationService)
-	adminSchoolController := controllers.NewAdminSchoolController(schoolService)
-	adminUserController := controllers.NewAdminUserController(userRepo, auditLogService)
+	adminOrganizationController := admincontrollers.NewAdminOrganizationController(organizationService)
+	adminSchoolController := admincontrollers.NewAdminSchoolController(schoolService)
+	adminUserController := admincontrollers.NewAdminUserController(userRepo, auditLogService)
 	adminUserController.SetDeletionService(userDeletionService)
 	adminUserController.SetSchoolService(schoolService)
 	interviewController := controllers.NewInterviewController(interviewService, videoRepo, s3UploadService)
 	realtimeController := controllers.NewRealtimeController(interviewService, realtimeUsageService)
-	adminInterviewController := controllers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
+	adminInterviewController := admincontrollers.NewAdminInterviewController(interviewService, videoRepo, s3UploadService)
 	adminInterviewController.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	adminInterviewController.SetCompanyRepo(companyRepo)
 	adminInterviewController.SetOpenAIClient(aiClient)
 	adminInterviewController.SetUserAccessGuard(userDeletionService)
 	adminInterviewController.SetSchoolAccess(userRepo, interviewSessionRepo, schoolService)
 	adminJobController.SetSchoolAccess(schoolService)
-	adminDashboardController := controllers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
+	adminDashboardController := admincontrollers.NewAdminDashboardController(userRepo, interviewSessionRepo, interviewReportRepo)
 	adminDashboardController.SetSchoolService(schoolService)
 	adminDashboardController.SetOrganizationService(organizationService)
-	adminCostsController := controllers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
-	adminVectorController := controllers.NewAdminVectorController(admin.NewAdminVectorService())
+	adminCostsController := admincontrollers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
+	adminVectorController := admincontrollers.NewAdminVectorController(admin.NewAdminVectorService())
 	profileRecalcService := flywheel.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
-	profileRecalcController := controllers.NewAdminProfileRecalculationController(profileRecalcService)
+	profileRecalcController := admincontrollers.NewAdminProfileRecalculationController(profileRecalcService)
 	companyEntryService := company.NewCompanyEntryService(db, userRepo, pendingRegistrationRepo, emailService)
 	authService.SetCompanyOwnershipClaimer(companyEntryService)
 	companyEntryController := controllers.NewCompanyEntryController(companyEntryService)
@@ -540,13 +541,13 @@ func main() {
 	entitlementController := controllers.NewEntitlementController(organizationService)
 	scoreValidationRepo := repositories.NewScoreValidationRepository(db)
 	scoreValidationService := admin.NewScoreValidationService(scoreValidationRepo)
-	scoreValidationController := controllers.NewAdminScoreValidationController(scoreValidationService)
-	diagnosisQualityController := controllers.NewAdminDiagnosisQualityController(diagnosisQualityRepo)
+	scoreValidationController := admincontrollers.NewAdminScoreValidationController(scoreValidationService)
+	diagnosisQualityController := admincontrollers.NewAdminDiagnosisQualityController(diagnosisQualityRepo)
 	collectiveInsightRepo := repositories.NewCollectiveInsightRepository(db)
 	collectiveInsightService := flywheel.NewCollectiveInsightService(collectiveInsightRepo, userWeightScoreRepo)
 	collectiveInsightController := controllers.NewCollectiveInsightController(collectiveInsightService)
 	scraperSessionService := admin.NewScraperSessionService(scraperSessionRepo)
-	scraperSessionController := controllers.NewAdminScraperSessionController(scraperSessionService)
+	scraperSessionController := admincontrollers.NewAdminScraperSessionController(scraperSessionService)
 
 	// Echo初期化
 	e := echo.New()
@@ -641,7 +642,7 @@ func main() {
 	adminEntry.GET("/companies/:id/company-users", adminCompanyUserController.List)
 	adminEntry.PATCH("/companies/:id/company-users/:userID", adminCompanyUserController.SetDisabled)
 	// 学習データのエクスポート(#268)。候補者の発話と選考結果を含むため管理者のみ。
-	adminTrainingController := controllers.NewAdminTrainingController(training.NewService(db))
+	adminTrainingController := admincontrollers.NewAdminTrainingController(training.NewService(db))
 	// stats は件数しか返さない(個人情報を含まない)。運用から機械的に叩けるよう、
 	// whats-new/ingest と同じサービス間認証にする。管理者になりすます形を避ける。
 	api.GET("/admin/training/stats", adminTrainingController.Stats, routes.EchoStaticSecretAuth(cfg.AdminSecret))

@@ -1,7 +1,7 @@
 // admin_company_fetch_controller.go — AI を使った企業情報・関係・求人・ペルソナの
 // 取得・確定保存エンドポイント群（AdminCompanyController のメソッド）。
 
-package controllers
+package admin
 
 import (
 	"Backend/internal/companyfetch"

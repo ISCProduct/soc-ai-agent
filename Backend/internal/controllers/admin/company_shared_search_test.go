@@ -1,4 +1,4 @@
-package controllers
+package admin
 
 // 管理画面・バッチ経路に「検索結果の共有」が届いているかのテスト。
 // 実行: cd Backend && go test ./internal/controllers/ -run TestSetInfoFetcher -v

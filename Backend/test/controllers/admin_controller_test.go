@@ -11,13 +11,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	admincontrollers "Backend/internal/controllers/admin"
 )
 
 // ---- AdminAuditController ----
 
 func TestAdminAuditController_New(t *testing.T) {
-	c := controllers.NewAdminAuditController(nil)
+	c := admincontrollers.NewAdminAuditController(nil)
 	if c == nil {
 		t.Fatal("NewAdminAuditController returned nil")
 	}
@@ -26,7 +26,7 @@ func TestAdminAuditController_New(t *testing.T) {
 // ---- AdminCostsController ----
 
 func TestAdminCostsController_New(t *testing.T) {
-	c := controllers.NewAdminCostsController(nil, nil)
+	c := admincontrollers.NewAdminCostsController(nil, nil)
 	if c == nil {
 		t.Fatal("NewAdminCostsController returned nil")
 	}
@@ -35,7 +35,7 @@ func TestAdminCostsController_New(t *testing.T) {
 // ---- AdminScoreValidationController ----
 
 func TestAdminScoreValidationController_CreateVariant_InvalidBody(t *testing.T) {
-	c := controllers.NewAdminScoreValidationController(nil)
+	c := admincontrollers.NewAdminScoreValidationController(nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/score-validation/variants", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -43,7 +43,7 @@ func TestAdminScoreValidationController_CreateVariant_InvalidBody(t *testing.T) 
 }
 
 func TestAdminScoreValidationController_CreateVariant_MissingFields(t *testing.T) {
-	c := controllers.NewAdminScoreValidationController(nil)
+	c := admincontrollers.NewAdminScoreValidationController(nil)
 	body, _ := json.Marshal(map[string]any{"experiment_name": "", "variant_name": ""})
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/score-validation/variants", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -54,7 +54,7 @@ func TestAdminScoreValidationController_CreateVariant_MissingFields(t *testing.T
 // ---- AdminProfileRecalculationController ----
 
 func TestAdminProfileRecalculationController_RecalculateOne_NonNumericID(t *testing.T) {
-	c := controllers.NewAdminProfileRecalculationController(nil)
+	c := admincontrollers.NewAdminProfileRecalculationController(nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/profile-recalculation/abc", nil)
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
@@ -66,7 +66,7 @@ func TestAdminProfileRecalculationController_RecalculateOne_NonNumericID(t *test
 // ---- AdminScraperSessionController ----
 
 func TestAdminScraperSessionController_Delete_MissingKey(t *testing.T) {
-	c := controllers.NewAdminScraperSessionController(nil)
+	c := admincontrollers.NewAdminScraperSessionController(nil)
 	req := httptest.NewRequest(http.MethodDelete, "/api/admin/scraper-sessions/", nil)
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
@@ -76,7 +76,7 @@ func TestAdminScraperSessionController_Delete_MissingKey(t *testing.T) {
 }
 
 func TestAdminScraperSessionController_Upsert_InvalidBody(t *testing.T) {
-	c := controllers.NewAdminScraperSessionController(nil)
+	c := admincontrollers.NewAdminScraperSessionController(nil)
 	req := httptest.NewRequest(http.MethodPut, "/api/admin/scraper-sessions", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -86,7 +86,7 @@ func TestAdminScraperSessionController_Upsert_InvalidBody(t *testing.T) {
 // ---- AdminUserController ----
 
 func TestAdminUserController_Update_InvalidID(t *testing.T) {
-	c := controllers.NewAdminUserController(nil, nil)
+	c := admincontrollers.NewAdminUserController(nil, nil)
 	req := httptest.NewRequest(http.MethodPut, "/api/admin/users/abc", nil)
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
@@ -98,7 +98,7 @@ func TestAdminUserController_Update_InvalidID(t *testing.T) {
 // ---- AdminJobController ----
 
 func TestAdminJobController_New(t *testing.T) {
-	c := controllers.NewAdminJobController(nil, nil, nil, nil)
+	c := admincontrollers.NewAdminJobController(nil, nil, nil, nil)
 	if c == nil {
 		t.Fatal("NewAdminJobController returned nil")
 	}

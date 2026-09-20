@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/models"
 )
 
@@ -42,8 +42,8 @@ func (r *interviewCompanyQuestionRepoStub) Delete(uint) error {
 	return nil
 }
 
-func newAdminInterviewQuestionController(repo *interviewCompanyQuestionRepoStub) *controllers.AdminInterviewController {
-	c := controllers.NewAdminInterviewController(nil, nil, nil)
+func newAdminInterviewQuestionController(repo *interviewCompanyQuestionRepoStub) *admincontrollers.AdminInterviewController {
+	c := admincontrollers.NewAdminInterviewController(nil, nil, nil)
 	c.SetCompanyQuestionRepo(repo)
 	return c
 }
