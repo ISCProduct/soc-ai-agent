@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -41,8 +42,36 @@ var interviewScoreMapping = []struct {
 	{"enthusiasm", []string{"成長志向", "チームワーク志向"}},
 }
 
+// ResolveDiagnosisSessionID は面接スコアを流し込むチャット診断セッションを決める。
+// チャット診断が無い場合のみ interview-{userID} スナップショットへフォールバックする。
+// 検索そのものが失敗した場合はエラーを返す（一時障害をスナップショットへ書き込まないため）。
+func (s *CrossFeatureIntegrationService) ResolveDiagnosisSessionID(userID uint) (string, error) {
+	if s.weightScoreRepo == nil {
+		return "", errors.New("weightScoreRepo が未注入")
+	}
+	id, err := s.weightScoreRepo.FindLatestDiagnosisSessionID(userID)
+	return PickDiagnosisSessionID(userID, id, err)
+}
+
+// PickDiagnosisSessionID は診断セッション選定の純関数（テスト用にも公開）。
+// 「診断が無い」(gorm.ErrRecordNotFound) だけをフォールバック条件にし、
+// 接続断などの一時エラーは呼び出し元へ返す。
+func PickDiagnosisSessionID(userID uint, latestChatSession string, err error) (string, error) {
+	fallback := fmt.Sprintf("interview-%d", userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fallback, nil
+		}
+		return "", err
+	}
+	if strings.TrimSpace(latestChatSession) == "" || repositories.IsInterviewSnapshotSession(latestChatSession) {
+		return fallback, nil
+	}
+	return latestChatSession, nil
+}
+
 // UpdateScoresFromInterviewReport 面接レポートを元に UserWeightScore を更新する
-// セッションIDは面接セッションID（文字列変換して利用）
+// chatSessionID は診断・マッチング対象のセッション（ResolveDiagnosisSessionID の結果を渡す）。
 func (s *CrossFeatureIntegrationService) UpdateScoresFromInterviewReport(
 	userID uint,
 	chatSessionID string,
@@ -51,12 +80,20 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromInterviewReport(
 	if report == nil || report.ScoresJSON == "" {
 		return nil
 	}
+	if strings.TrimSpace(chatSessionID) == "" {
+		resolved, err := s.ResolveDiagnosisSessionID(userID)
+		if err != nil {
+			return fmt.Errorf("診断セッションの解決に失敗: %w", err)
+		}
+		chatSessionID = resolved
+	}
 
 	var interviewScores map[string]int
 	if err := json.Unmarshal([]byte(report.ScoresJSON), &interviewScores); err != nil {
 		return fmt.Errorf("面接スコアのパースエラー: %w", err)
 	}
 
+	applied, failed := 0, 0
 	for _, mapping := range interviewScoreMapping {
 		raw, ok := interviewScores[mapping.interviewKey]
 		if !ok {
@@ -68,10 +105,19 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromInterviewReport(
 		// 複数カテゴリに均等按分して移動平均で更新
 		for _, category := range mapping.categories {
 			if err := s.applyMovingAverage(userID, chatSessionID, category, normalized); err != nil {
-				// 更新失敗は警告ログのみ（処理継続）
+				// 一部失敗は警告ログのみ（処理継続）
 				log.Printf("[CrossFeature] interview→score update failed (cat=%s): %v\n", category, err)
+				failed++
+				continue
 			}
+			applied++
 		}
+	}
+	// 1件も書けていないのに成功を返すと、呼び出し元が面接前スコアで再マッチングしてしまう。
+	// 部分成功（applied > 0）は許容する。移動平均なので一部でも反映された方が面接前より近く、
+	// ここでエラーにすると書けた分まで再マッチングされずに宙に浮く。
+	if applied == 0 && failed > 0 {
+		return fmt.Errorf("面接スコアの反映が全件失敗しました (%d件)", failed)
 	}
 	return nil
 }

@@ -86,6 +86,10 @@ func (s *InterviewService) Turn(
 			sessionID, turnCount, reason, applied)
 	}
 	LogSTTObservation(obs)
+	// 利用量として記録する（#1294）。STT のレスポンスにはトークンが入らないため、
+	// 既に計測している音声秒数とレイテンシをそのまま渡す。
+	// 再送が発生した場合は2回課金されるので、その分も記録する。
+	recordSTTUsage(ctx, s.openaiClient, obs)
 
 	if err != nil {
 		log.Printf("[Interview] transcribe error: %v", err)
@@ -149,7 +153,11 @@ func (s *InterviewService) Turn(
 	// TTS: AI返答を音声化（企業名は読み仮名に置換して誤読を防ぐ。表示用のaiTextはそのまま保持）。
 	// TTS失敗時もターンは中断させず、音声なし（テキストのみ）で返す（#910）。
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
-	audio, err := s.openaiClient.TTS(ctx, applyCompanyReadingForTTS(aiText, companyName, companyReading), voice)
+	ttsText := applyCompanyReadingForTTS(aiText, companyName, companyReading)
+	ttsStart := time.Now()
+	audio, err := s.openaiClient.TTS(ctx, ttsText, voice)
+	// 失敗しても課金されている可能性があるため、成否に関わらず記録する（#1294）。
+	recordTTSUsage(ctx, s.openaiClient, ttsText, time.Since(ttsStart))
 	if err != nil {
 		log.Printf("[Interview] tts error: %v", err)
 		audio = nil
@@ -249,7 +257,11 @@ func (s *InterviewService) StartTurn(
 	// TTS: 企業名は読み仮名に置換して誤読を防ぐ（表示用のaiTextはそのまま保持）。
 	// TTS失敗時もターンは中断させず、音声なし（テキストのみ）で返す（#910）。
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
-	audio, err := s.openaiClient.TTS(ctx, applyCompanyReadingForTTS(aiText, companyName, companyReading), voice)
+	ttsText := applyCompanyReadingForTTS(aiText, companyName, companyReading)
+	ttsStart := time.Now()
+	audio, err := s.openaiClient.TTS(ctx, ttsText, voice)
+	// 失敗しても課金されている可能性があるため、成否に関わらず記録する（#1294）。
+	recordTTSUsage(ctx, s.openaiClient, ttsText, time.Since(ttsStart))
 	if err != nil {
 		log.Printf("[Interview] tts error: %v", err)
 		audio = nil

@@ -107,3 +107,31 @@ func TestRealtimeAudioRateDefaults(t *testing.T) {
 		})
 	}
 }
+
+// TestCalculateAudioCost は音声経路（秒・文字）の単価計算を検証する（#1294）。
+// トークン課金ではないため、単価表とは別の計算になる。
+func TestCalculateAudioCost(t *testing.T) {
+	tests := []struct {
+		name       string
+		provider   string
+		seconds    float64
+		characters int
+		want       float64
+	}{
+		{"STT 60秒 = 1分ぶん", "openai", 60, 0, 0.006},
+		{"STT 30秒 = 半分", "openai", 30, 0, 0.003},
+		{"TTS 100万文字", "openai", 0, 1_000_000, 15.0},
+		{"STTとTTSの合算", "openai", 60, 1_000_000, 15.006},
+		{"ローカル推論は0", "local", 60, 1_000_000, 0},
+		{"使用量0なら0", "openai", 0, 0, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := calculateAudioCost(tt.provider, tt.seconds, tt.characters)
+			if math.Abs(got-tt.want) > 1e-9 {
+				t.Errorf("calculateAudioCost()=%.6f, 期待=%.6f", got, tt.want)
+			}
+		})
+	}
+}

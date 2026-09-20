@@ -56,7 +56,8 @@ UserCompanyMatch（総合マッチ度 0-100）
 ### スコアの範囲
 
 - 各カテゴリ: **0〜100**
-- 未評価のカテゴリは中立値 **50** として扱われます
+- チャット進捗の「評価済み」判定は **score ≠ 0** の件数
+- マッチングでは未計測カテゴリを中立50で埋めず、平均から除外する（#1124）
 
 ### データ構造（`UserWeightScore`）
 
@@ -77,9 +78,9 @@ type UserWeightScore struct {
 ## 2-1. カテゴリの正典と別名（#929）
 
 カテゴリ名の正典は `Backend/domain/valueobject/match.go` の10種類。
-マッチングは `scoreMap` をこのキーで引き、**見つからないカテゴリは中立50に置き換えて
-評価件数にも数える**（`matching_service.go` の `scoredMatch`）。つまり名前が揺れると
-エラーもログも出ないまま、ユーザーの実スコアが捨てられて薄まる。
+マッチングは `scoreMap` をこのキーで引き、**見つからないカテゴリは平均から除外する**
+（`matching_service.go` の `scoredMatch`、#1124）。名前が揺れるとユーザーの実スコアが
+捨てられて軸数が減るため、保存経路では正典化が必須。
 
 保存経路（`UserWeightScoreRepository.SetScore/AddScore`、`POST /api/questions/*`）は
 `valueobject.ParseWeightCategory` を必ず通し、正典外を弾く。
@@ -107,17 +108,20 @@ type UserWeightScore struct {
 | 計画性・実行力 | 細部志向 | 妥当 |
 | ストレス耐性・粘り強さ | チャレンジ志向 | 妥当 |
 | 学習意欲・成長志向 | 成長志向 | 妥当 |
-| **ビジネス思考・目標志向** | **成長志向** | **弱い（消去法）** |
+| **ビジネス思考・目標志向** | **チャレンジ志向** | 成果・目標達成に寄せる（成長＝学習意欲と分離） |
 
-### ビジネス思考・目標志向は暫定対応
+### ビジネス思考・目標志向の寄せ先
 
-正典10軸に事業志向・目標達成の軸が無いため、どこへ寄せても不正解になる。
-現状は消去法で成長志向へ統合しているが、以下の副作用がある。
+正典10軸に事業志向の専用軸は無い。成長志向へ寄せると学習意欲質問と同軸になり
+ユーザーの Growth だけが膨らむため、**チャレンジ志向**へ統合する（migration 028）。
 
-- 「顧客や利用者の視点で」「どのような成果を出すことを重視するか」といった質問への回答が、
-  学習意欲の質問と同じ軸に集計される
-- ユーザー側の成長志向だけが構造的に膨らみ、企業側 `CompanyWeightProfile.GrowthOrientation`
-  （企業が「成長志向」として入力した値）との差分が系統的にずれる
+seed 質問の振り分け:
+
+| 質問の意図 | 正典カテゴリ |
+|---|---|
+| 成果を重視するか | チャレンジ志向 |
+| 顧客・利用者視点 | コミュニケーション力 |
+| 社会・組織への価値提供 | リーダーシップ志向 |
 
 同じ理由で `技術志向` も 問題解決力 + 分析思考 の受け皿になっている。
 
@@ -126,7 +130,7 @@ type UserWeightScore struct {
 次のいずれかに当たったら、統合をやめて正典に軸を追加することを検討する。
 
 1. 事業志向・目標達成を企業側が明示的に重視したいという要求が出たとき
-2. `score_validation` でユーザー側の成長志向・技術志向が企業側と系統的にずれていると確認できたとき
+2. `score_validation` でチャレンジ志向・技術志向が企業側と系統的にずれていると確認できたとき
 3. 統合先の軸のスコア分布が、統合前と比べて明らかに歪んでいるとき
 
 **分離する場合の影響範囲**（1マイグレーションでは済まない）:
@@ -279,6 +283,29 @@ func scoredMatch(userScores map[string]float64, category string, companyWeight f
 マッチ度 >= 80 → 高マッチ（IsHighMatch = true）
 ```
 
+### 選択肢回答の根拠品質
+
+選択肢記号の**生の位置**は `A=100 … E=20`。ただしそのまま書くと理由なしの極端値が量産されるため、書き込み時に調整する（`choice_evidence.go`）。
+
+| 状況 | 扱い |
+|------|------|
+| 理由なし（または極短） | 中立50へ減衰（距離×0.55）。フラグ `choice_only_evidence` |
+| 支持する理由あり | 生の位置を採用 |
+| 理由が選択と矛盾 | 強く減衰（距離×0.25）。フラグ `choice_reason_contradiction` |
+
+文章の「品質スコア」と軸位置はスケールが違うため**混ぜない**（混ぜると理由を書いた人ほど中央に寄る）。
+
+### 診断妥当性と暫定表示
+
+診断完了後の品質ジョブはスコアを**自動補正せず**、`diagnosis_quality_reports` に confidence / flags を保存する。
+`GET /api/chat/recommendations` は次のいずれかで `is_provisional=true` とする。
+
+- 評価カテゴリ数が 4 未満
+- 上位マッチの最小 `matched_axis_count` が 4 未満
+- 診断信頼度が 55 未満、または薄い根拠フラグ（`thin_chat_evidence` / `mostly_choice_only` 等）
+
+レスポンスに `diagnosis_confidence` / `diagnosis_flags` / `diagnosis_summary` / `min_matched_axis_count` を載せる。
+
 ---
 
 ## 5. マッチング結果（UserCompanyMatch）
@@ -329,9 +356,15 @@ type UserCompanyMatch struct {
 ### 6.3 面接・職務経歴書スコア → UserWeightScore 更新（#204）
 
 ```
-面接完了 → 面接スコア → UserWeightScore 更新 → 再マッチング
-職務経歴書レビュー → レビュースコア → UserWeightScore 更新 → 再マッチング
+面接完了
+  → 最新のチャット診断 session_id を解決（無ければ interview-{userId}）
+  → 面接スコアを移動平均で UserWeightScore に反映
+  → チャット session なら CalculateMatching で再マッチング
+職務経歴書レビュー → レビュースコア → UserWeightScore 更新
+（職務経歴書側の自動再マッチは未接続）
 ```
+
+チャット診断と面接スナップショットを混ぜない。`FindLatestByUser` もチャット session を優先する。
 
 ---
 

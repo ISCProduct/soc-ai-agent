@@ -37,6 +37,10 @@ function ResultsContent() {
     loading,
     error,
     isProvisional,
+    diagnosisSummary,
+    evaluatedCategories,
+    minMatchedAxisCount,
+    diagnosisConfidence,
     jobSuitabilityComment,
     suggestedRoles,
     scoreComment,
@@ -133,6 +137,10 @@ function ResultsContent() {
     <ResultsListView
       companies={companies}
       isProvisional={isProvisional}
+      diagnosisSummary={diagnosisSummary}
+      evaluatedCategories={evaluatedCategories}
+      minMatchedAxisCount={minMatchedAxisCount}
+      diagnosisConfidence={diagnosisConfidence}
       analysisScores={analysisScores}
       scoreComment={scoreComment}
       analysisError={analysisError}

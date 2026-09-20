@@ -6,6 +6,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/repositories"
+	"Backend/internal/services/chat"
 	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
@@ -63,37 +64,43 @@ func (s *QualityService) RunDiagnosisQuality(ctx context.Context, userID uint, s
 		matches = nil
 	}
 
-	flags := heuristicFlags(scores, matches)
-	confidence := heuristicConfidence(scores, matches, flags)
+	chatFlags, chatStats := chatEvidenceFlags(messages)
+	flags := mergeFlags(heuristicFlags(scores, matches), chatFlags)
+	confidence := heuristicConfidence(scores, flags)
 	summary := heuristicSummary(flags, confidence)
-
-	raw := map[string]any{
-		"source":      "heuristic",
-		"score_count": len(scores),
-		"match_top_n": len(matches),
-		"message_n":   len(messages),
-		"flags":       flags,
-		"confidence":  confidence,
-	}
 
 	if s.aiClient != nil && len(messages) > 0 {
 		if llm, llmErr := s.evaluateWithLLM(ctx, scores, messages, matches); llmErr != nil {
 			log.Printf("[diagnosis.quality] LLM evaluate failed user=%d session=%s err=%v", userID, sessionID, llmErr)
-			raw["llm_error"] = llmErr.Error()
 		} else if llm != nil {
 			flags = mergeFlags(flags, llm.Flags)
+			// LLM が楽観的でも、構造的な根拠不足を高 confidence にできないようにする
 			if llm.Confidence > 0 {
-				confidence = clampInt(llm.Confidence, 0, 100)
+				confidence = minInt(confidence, clampInt(llm.Confidence, 0, 100))
 			}
 			if strings.TrimSpace(llm.Summary) != "" {
 				summary = strings.TrimSpace(llm.Summary)
 			}
-			raw["source"] = "heuristic+llm"
-			raw["llm"] = llm
 		}
 	}
 
+	// raw は最終状態を監査できるよう、マージ後に組み立てる
+	raw := map[string]any{
+		"score_count": len(scores),
+		"match_top_n": len(matches),
+		"message_n":   len(messages),
+		"chat_stats":  chatStats,
+		"flags":       flags,
+		"confidence":  confidence,
+	}
+	if len(flags) == 0 {
+		raw["flags"] = []string{}
+	}
+
 	flagsJSON, _ := json.Marshal(flags)
+	if flags == nil {
+		flagsJSON = []byte("[]")
+	}
 	rawJSON, _ := json.Marshal(raw)
 	report := &models.DiagnosisQualityReport{
 		UserID:     userID,
@@ -110,23 +117,31 @@ func (s *QualityService) RunDiagnosisQuality(ctx context.Context, userID uint, s
 	return nil
 }
 
+func measuredAxisCount(scores []entity.UserWeightScore) int {
+	// マッチングと同じく「行がある＝計測済み」（値0も含む）
+	return len(scores)
+}
+
 func heuristicFlags(scores []entity.UserWeightScore, matches []*entity.UserCompanyMatch) []string {
 	var flags []string
-	measured := 0
-	for _, s := range scores {
-		if s.Score != 0 {
-			measured++
-		}
-	}
+	measured := measuredAxisCount(scores)
 	if measured == 0 {
 		flags = append(flags, "no_measured_axes")
 	} else if measured < 4 {
 		flags = append(flags, "few_measured_axes")
 	}
 
-	if len(matches) >= 2 {
+	switch {
+	case len(matches) == 0:
+		flags = append(flags, "no_matches")
+	case len(matches) == 1:
+		flags = append(flags, "single_match_only")
+		if matches[0].MatchedAxisCount < 4 {
+			flags = append(flags, "thin_match_evidence")
+		}
+	default:
 		maxS := matches[0].MatchScore
-		minS := matches[0].MatchScore
+		minS := matches[len(matches)-1].MatchScore
 		for _, m := range matches {
 			if m.MatchScore > maxS {
 				maxS = m.MatchScore
@@ -138,27 +153,85 @@ func heuristicFlags(scores []entity.UserWeightScore, matches []*entity.UserCompa
 		if maxS >= 90 && (maxS-minS) < 8 {
 			flags = append(flags, "saturated_matches")
 		}
-		if matches[0].MatchedAxisCount > 0 && matches[0].MatchedAxisCount < 4 {
+		// 上位マッチの「最小」根拠軸数で見る（docs/wiki/scoring.md）。
+		// 先頭だけだと後続の薄い根拠を見落とす。
+		minAxes := matches[0].MatchedAxisCount
+		for _, m := range matches[1:] {
+			if m.MatchedAxisCount < minAxes {
+				minAxes = m.MatchedAxisCount
+			}
+		}
+		if minAxes < 4 {
 			flags = append(flags, "thin_match_evidence")
 		}
-	} else if len(matches) == 0 {
-		flags = append(flags, "no_matches")
 	}
 	return flags
 }
 
-func heuristicConfidence(scores []entity.UserWeightScore, matches []*entity.UserCompanyMatch, flags []string) int {
-	measured := 0
-	for _, s := range scores {
-		if s.Score != 0 {
-			measured++
+func chatEvidenceFlags(messages []models.ChatMessage) (flags []string, stats map[string]int) {
+	stats = map[string]int{
+		"user_messages": 0,
+		"choice_only":   0,
+		"with_reason":   0,
+		"contradiction": 0,
+		"free_text":     0,
+		"thin_free":     0,
+	}
+	for _, msg := range messages {
+		if msg.Role != "user" {
+			continue
+		}
+		stats["user_messages"]++
+		switch chat.ClassifyOutgoingAnswerEvidence(msg.Content) {
+		case chat.EvidenceChoiceOnly:
+			stats["choice_only"]++
+		case chat.EvidenceChoiceWithReason:
+			stats["with_reason"]++
+		case chat.EvidenceChoiceContradiction:
+			stats["contradiction"]++
+		case chat.EvidenceFreeText:
+			stats["free_text"]++
+		case chat.EvidenceThinFreeText:
+			stats["thin_free"]++
 		}
 	}
-	base := measured * 10 // 0-100 for 10 axes
+
+	if stats["user_messages"] == 0 {
+		return []string{"no_chat_evidence"}, stats
+	}
+
+	substantial := stats["with_reason"] + stats["free_text"]
+	weak := stats["choice_only"] + stats["thin_free"] + stats["contradiction"]
+
+	if substantial == 0 {
+		flags = append(flags, "thin_chat_evidence")
+	}
+	if weak > 0 && weak*2 >= stats["user_messages"] {
+		flags = append(flags, "mostly_choice_only")
+	}
+	if stats["contradiction"] > 0 {
+		flags = append(flags, "choice_reason_contradiction")
+	}
+	return flags, stats
+}
+
+func heuristicConfidence(scores []entity.UserWeightScore, flags []string) int {
+	measured := measuredAxisCount(scores)
+	base := measured * 10
 	if base > 100 {
 		base = 100
 	}
-	penalty := 12 * len(flags)
+	penalty := 0
+	for _, f := range flags {
+		switch f {
+		case "no_chat_evidence", "thin_chat_evidence", "mostly_choice_only", "choice_reason_contradiction":
+			penalty += 18
+		case "thin_match_evidence", "few_measured_axes", "no_measured_axes":
+			penalty += 14
+		default:
+			penalty += 10
+		}
+	}
 	return clampInt(base-penalty, 5, 95)
 }
 
@@ -194,6 +267,13 @@ func clampInt(v, lo, hi int) int {
 	return v
 }
 
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func (s *QualityService) evaluateWithLLM(
 	ctx context.Context,
 	scores []entity.UserWeightScore,
@@ -218,8 +298,9 @@ func (s *QualityService) evaluateWithLLM(
 	}
 
 	system := `あなたは適性診断の品質監査者です。ユーザースコアを変更せず、会話・スコア・マッチの整合だけを評価してください。
+選択肢だけの回答が多い・理由が薄い・スコアと会話の方向が食い違う場合は confidence を下げ、対応する flags を付けてください。
 JSONのみで返答:
-{"confidence":0-100の整数,"flags":["thin_evidence"|"score_transcript_mismatch"|"few_measured_axes"|"saturated_matches"等],"summary":"日本語で2文以内"}`
+{"confidence":0-100の整数,"flags":["thin_chat_evidence"|"mostly_choice_only"|"score_transcript_mismatch"|"few_measured_axes"|"saturated_matches"等],"summary":"日本語で2文以内"}`
 	user := fmt.Sprintf("スコア:\n%s\n\n上位マッチ:\n%s\n\n会話抜粋:\n%s",
 		strings.Join(scoreLines, "\n"),
 		strings.Join(matchLines, "\n"),
