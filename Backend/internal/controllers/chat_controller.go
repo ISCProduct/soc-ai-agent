@@ -3,6 +3,7 @@ package controllers
 import (
 	"Backend/domain/entity"
 	"Backend/domain/repository"
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"Backend/internal/services/chat"
@@ -267,7 +268,7 @@ func (c *ChatController) checkSessionOwnership(sessionID string, userID uint) ([
 
 // Chat チャット処理
 func (c *ChatController) Chat(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -290,12 +291,12 @@ func (c *ChatController) Chat(ctx echo.Context) error {
 		if err == shared.ErrForbidden {
 			return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	resp, err := c.chatService.ProcessChat(ctx.Request().Context(), req)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	// マッチング計算をデバウンスして非同期実行（同一セッションへの連続リクエストを1回にまとめる）
@@ -306,7 +307,7 @@ func (c *ChatController) Chat(ctx echo.Context) error {
 
 // GetHistory チャット履歴取得
 func (c *ChatController) GetHistory(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -321,7 +322,7 @@ func (c *ChatController) GetHistory(ctx echo.Context) error {
 		if err == shared.ErrForbidden {
 			return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, history)
@@ -329,7 +330,7 @@ func (c *ChatController) GetHistory(ctx echo.Context) error {
 
 // GetScores ユーザースコア取得
 func (c *ChatController) GetScores(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -341,7 +342,7 @@ func (c *ChatController) GetScores(ctx echo.Context) error {
 
 	scores, err := c.chatService.GetUserScores(userID, sessionID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, scores)
@@ -349,7 +350,7 @@ func (c *ChatController) GetScores(ctx echo.Context) error {
 
 // GetRecommendations トップ適性企業を取得
 func (c *ChatController) GetRecommendations(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -543,7 +544,7 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 
 // ToggleFavorite お気に入りをトグル (POST /api/chat/favorite)
 func (c *ChatController) ToggleFavorite(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -562,7 +563,7 @@ func (c *ChatController) ToggleFavorite(ctx echo.Context) error {
 		if err == shared.ErrNotFound {
 			return echo.NewHTTPError(http.StatusNotFound, "match not found")
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]bool{"ok": true})
@@ -570,7 +571,7 @@ func (c *ChatController) ToggleFavorite(ctx echo.Context) error {
 
 // GetAnalysisSummary 4分析スコアと進捗を取得
 func (c *ChatController) GetAnalysisSummary(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -586,7 +587,7 @@ func (c *ChatController) GetAnalysisSummary(ctx echo.Context) error {
 
 	summary, err := c.analysisService.BuildAnalysisSummary(ctx.Request().Context(), userID, sessionID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, summary)
@@ -666,7 +667,7 @@ func splitTechStack(techStack string) []string {
 
 // SendReport チャット分析結果をメールで送信
 func (c *ChatController) SendReport(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -695,7 +696,7 @@ func (c *ChatController) SendReport(ctx echo.Context) error {
 	// 分析サマリー取得
 	summary, err := c.analysisService.BuildAnalysisSummary(ctx.Request().Context(), userID, req.SessionID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	// おすすめ企業取得（最大5件）
@@ -728,14 +729,14 @@ func (c *ChatController) SendReport(ctx echo.Context) error {
 
 // GetSessions ユーザーのチャットセッション一覧を取得
 func (c *ChatController) GetSessions(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
 	sessions, err := c.chatService.GetUserChatSessions(userID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, sessions)

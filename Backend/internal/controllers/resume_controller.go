@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/services/interfaces"
 	"Backend/internal/services/shared"
 	"errors"
@@ -24,15 +25,15 @@ func NewResumeController(resumeService interfaces.ResumeService) *ResumeControll
 // Status は認証中のユーザー自身の履歴書対応要否を返す(#1030)。
 // 他人のIDは受け付けない(クエリを取らず、トークンのIDだけを使う)。
 func (c *ResumeController) Status(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
 	}
 	status, err := c.resumeService.GetResumeStatus(userID)
 	if err != nil {
 		// 全ユーザーがホーム画面表示のたびに叩くため、DB劣化時は500が大量に出る。
-		// 原因追跡の起点を残す(他ハンドラと同じ echoInternalError を使う)。
-		return echoInternalError(err)
+		// 原因追跡の起点を残す(他ハンドラと同じ httpapi.InternalError を使う)。
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, status)
 }
@@ -54,7 +55,7 @@ func (c *ResumeController) Upload(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid user_id")
 	}
-	authenticatedID, ok := echoUserID(ctx)
+	authenticatedID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "user_id is required")
 	}
@@ -75,7 +76,7 @@ func (c *ResumeController) Upload(ctx echo.Context) error {
 		if errors.As(err, &ve) {
 			return echo.NewHTTPError(http.StatusUnprocessableEntity, ve.Message)
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, result)
@@ -90,7 +91,7 @@ func (c *ResumeController) Review(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid document_id")
 	}
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "user_id is required")
 	}
@@ -98,7 +99,7 @@ func (c *ResumeController) Review(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	var payload struct {
@@ -128,7 +129,7 @@ func (c *ResumeController) Review(ctx echo.Context) error {
 		if errors.As(err, &ve) {
 			return echo.NewHTTPError(http.StatusUnprocessableEntity, ve.Message)
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	log.Printf("resume_review: completed document_id=%d score=%d items=%d", docID, review.Score, len(items))
 
@@ -147,7 +148,7 @@ func (c *ResumeController) ReviewStream(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid document_id")
 	}
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "user_id is required")
 	}
@@ -155,7 +156,7 @@ func (c *ResumeController) ReviewStream(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, "forbidden")
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	var payload struct {
@@ -193,7 +194,7 @@ func (c *ResumeController) Annotated(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid document_id")
 	}
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "user_id is required")
 	}

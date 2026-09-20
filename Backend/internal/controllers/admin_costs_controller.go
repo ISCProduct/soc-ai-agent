@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/repositories"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/interfaces"
@@ -32,7 +33,7 @@ func NewAdminCostsController(costService interfaces.APICostService, realtimeUsag
 func (c *AdminCostsController) Summary(ctx echo.Context) error {
 	monthTotal, err := c.costService.GetCurrentMonthTotal()
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	realtimeMonthTotal := 0.0
 	activeConnections := int64(0)
@@ -40,22 +41,22 @@ func (c *AdminCostsController) Summary(ctx echo.Context) error {
 	if c.realtimeUsageService != nil {
 		realtimeMonthTotal, err = c.realtimeUsageService.CurrentMonthTotalCost()
 		if err != nil {
-			return echoInternalError(err)
+			return httpapi.InternalError(err)
 		}
 		activeConnections, err = c.realtimeUsageService.CurrentActiveCount()
 		if err != nil {
-			return echoInternalError(err)
+			return httpapi.InternalError(err)
 		}
 		realtimeUsers, err = c.realtimeUsageService.GetUserBreakdown(30, 20)
 		if err != nil {
-			return echoInternalError(err)
+			return httpapi.InternalError(err)
 		}
 	}
 
 	since30d := time.Now().UTC().AddDate(0, 0, -30)
 	modelBreakdown, err := c.costService.GetModelBreakdown(since30d)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	payload := map[string]any{
@@ -90,7 +91,7 @@ func (c *AdminCostsController) Breakdown(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "by must be one of: feature, provider, model, organization")
 	}
 
-	days := echoIntQuery(ctx, "days", 30)
+	days := httpapi.IntQuery(ctx, "days", 30)
 	if days > 90 {
 		days = 90
 	}
@@ -101,7 +102,7 @@ func (c *AdminCostsController) Breakdown(ctx echo.Context) error {
 	since := time.Now().UTC().AddDate(0, 0, -days)
 	rows, err := c.costService.GetUsageBreakdown(ctx.Request().Context(), since, dim)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"by":        string(dim),
@@ -112,19 +113,19 @@ func (c *AdminCostsController) Breakdown(ctx echo.Context) error {
 
 // Daily handles GET /api/admin/costs/daily?days=30
 func (c *AdminCostsController) Daily(ctx echo.Context) error {
-	days := echoIntQuery(ctx, "days", 30)
+	days := httpapi.IntQuery(ctx, "days", 30)
 	if days > 90 {
 		days = 90
 	}
 	rows, err := c.costService.GetDailyCosts(days)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	realtimeRows := []costs.RealtimeDailySummary{}
 	if c.realtimeUsageService != nil {
 		realtimeRows, err = c.realtimeUsageService.GetDailyUsage(days)
 		if err != nil {
-			return echoInternalError(err)
+			return httpapi.InternalError(err)
 		}
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
@@ -135,19 +136,19 @@ func (c *AdminCostsController) Daily(ctx echo.Context) error {
 
 // Monthly handles GET /api/admin/costs/monthly?months=12
 func (c *AdminCostsController) Monthly(ctx echo.Context) error {
-	months := echoIntQuery(ctx, "months", 12)
+	months := httpapi.IntQuery(ctx, "months", 12)
 	if months > 24 {
 		months = 24
 	}
 	rows, err := c.costService.GetMonthlyCosts(months)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	realtimeRows := []costs.RealtimeMonthlySummary{}
 	if c.realtimeUsageService != nil {
 		realtimeRows, err = c.realtimeUsageService.GetMonthlyUsage(months)
 		if err != nil {
-			return echoInternalError(err)
+			return httpapi.InternalError(err)
 		}
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{

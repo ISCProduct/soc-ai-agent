@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/interfaces"
 	"net/http"
@@ -22,7 +23,7 @@ func NewCollectiveInsightController(svc interfaces.CollectiveInsightService) *Co
 // GetRecommendations GET /api/collective-insights/recommendations?session_id=xxx
 // 類似スコアプロファイルのユーザーが通過した企業をレコメンドする
 func (c *CollectiveInsightController) GetRecommendations(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -44,7 +45,7 @@ func (c *CollectiveInsightController) GetRecommendations(ctx echo.Context) error
 
 	items, err := c.svc.GetCollectiveRecommendations(userID, sessionID, excludeIDs)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	if items == nil {
 		items = []flywheel.CollectiveRecommendItem{}
@@ -68,7 +69,7 @@ func (c *CollectiveInsightController) GetTopPassRateCompanies(ctx echo.Context) 
 
 	companies, err := c.svc.GetTopPassRateCompanies(limit)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]any{
@@ -79,7 +80,7 @@ func (c *CollectiveInsightController) GetTopPassRateCompanies(ctx echo.Context) 
 // UpdateConsent PUT /api/collective-insights/consent
 // ユーザーの集合知参加同意を更新する
 func (c *CollectiveInsightController) UpdateConsent(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -92,7 +93,7 @@ func (c *CollectiveInsightController) UpdateConsent(ctx echo.Context) error {
 	}
 
 	if err := c.svc.UpdateConsent(userID, req.Allow); err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]any{
@@ -104,7 +105,7 @@ func (c *CollectiveInsightController) UpdateConsent(ctx echo.Context) error {
 // RecordAction POST /api/collective-insights/actions
 // ユーザー行動を匿名ログとして記録する
 func (c *CollectiveInsightController) RecordAction(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -127,7 +128,7 @@ func (c *CollectiveInsightController) RecordAction(ctx echo.Context) error {
 	}
 
 	if err := c.svc.RecordAction(userID, req.SessionID, req.CompanyID, req.ActionType); err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusCreated, map[string]any{"status": "recorded"})
@@ -137,7 +138,7 @@ func (c *CollectiveInsightController) RecordAction(ctx echo.Context) error {
 // 全企業の行動サマリーをバッチ再集計する（管理画面用）
 func (c *CollectiveInsightController) RebuildSummaries(ctx echo.Context) error {
 	if err := c.svc.RebuildSummaries(); err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{"status": "rebuilt"})
 }

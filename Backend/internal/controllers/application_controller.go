@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/entity"
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/services/interfaces"
 	"Backend/internal/services/school"
 	"Backend/internal/services/shared"
@@ -47,7 +48,7 @@ func mapApplicationError(err error) error {
 	msg := err.Error()
 	for code, status := range applicationErrorStatus {
 		if strings.HasPrefix(msg, code+":") {
-			return newAPIError(status, code, msg)
+			return httpapi.NewAPIError(status, code, msg)
 		}
 	}
 	return echo.NewHTTPError(http.StatusBadRequest, msg)
@@ -55,7 +56,7 @@ func mapApplicationError(err error) error {
 
 // Apply POST /api/applications - 企業への応募登録
 func (c *ApplicationController) Apply(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
 	}
@@ -98,7 +99,7 @@ func (c *ApplicationController) Apply(ctx echo.Context) error {
 
 // UpdateStatus PUT /api/applications/{id} - 選考ステータス更新
 func (c *ApplicationController) UpdateStatus(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
 	}
@@ -137,7 +138,7 @@ func (c *ApplicationController) UpdateStatus(ctx echo.Context) error {
 // AdminUpdateStatus PATCH /api/admin/applications/{id}/status - 管理者による選考ステータス更新。
 // isAdmin は常に true 固定（クライアント入力からは取らない。#1016）。
 func (c *ApplicationController) AdminUpdateStatus(ctx echo.Context) error {
-	id, err := echoUintParam(ctx, "id")
+	id, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
@@ -159,9 +160,9 @@ func (c *ApplicationController) AdminUpdateStatus(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "応募データが見つかりません")
 	} else if err != nil {
 		// DB障害を404で隠すとログも残らず追跡できない
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
-	if err := ensureAdminSchoolAccess(ctx, c.schools, ownerSchoolID); err != nil {
+	if err := httpapi.EnsureAdminSchoolAccess(ctx, c.schools, ownerSchoolID); err != nil {
 		return err
 	}
 
@@ -179,11 +180,11 @@ func (c *ApplicationController) AdminUpdateStatus(ctx echo.Context) error {
 
 // Withdraw POST /api/applications/{id}/withdraw - ユーザーによる選考辞退（§10.3）
 func (c *ApplicationController) Withdraw(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
 	}
-	id, err := echoUintParam(ctx, "id")
+	id, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
@@ -201,11 +202,11 @@ func (c *ApplicationController) Withdraw(ctx echo.Context) error {
 
 // Accept POST /api/applications/{id}/accept - ユーザーによる内定承諾（§10.4）
 func (c *ApplicationController) Accept(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
 	}
-	id, err := echoUintParam(ctx, "id")
+	id, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
@@ -242,25 +243,25 @@ func (c *ApplicationController) AdminList(ctx echo.Context) error {
 	status := ctx.QueryParam("status")
 
 	// 担当校スコープ(#1157)。EchoAdminSchoolScope 未適用のルートからは fail-closed で拒否する。
-	schoolID, err := echoAdminSchoolFilter(ctx)
+	schoolID, err := httpapi.AdminSchoolFilter(ctx)
 	if err != nil {
 		return err
 	}
 
 	apps, err := c.appService.ListForAdmin(userID, companyID, status, schoolID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return jsonAdminApplicationList(ctx, apps)
 }
 
 // HRList GET /api/hr/applications?company_id= - 企業オーナー向け応募一覧（#1083）
 func (c *ApplicationController) HRList(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
 	}
-	companyID, err := echoRequiredUintQuery(ctx, "company_id")
+	companyID, err := httpapi.RequiredUintQuery(ctx, "company_id")
 	if err != nil {
 		return err
 	}
@@ -270,18 +271,18 @@ func (c *ApplicationController) HRList(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, "企業の所有権がありません")
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return jsonAdminApplicationList(ctx, apps)
 }
 
 // HRUpdateStatus PATCH /api/hr/applications/:id/status - 企業オーナーによる選考ステータス更新（#1083）
 func (c *ApplicationController) HRUpdateStatus(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
 	}
-	id, err := echoUintParam(ctx, "id")
+	id, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return err
 	}
@@ -345,7 +346,7 @@ func jsonAdminApplicationList(ctx echo.Context, apps []*entity.UserApplicationSt
 
 // List GET /api/applications - 認証ユーザーの応募一覧取得
 func (c *ApplicationController) List(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
 	}
@@ -396,7 +397,7 @@ func (c *ApplicationController) List(ctx echo.Context) error {
 
 // GetCorrelation GET /api/applications/correlation?company_id=X - 相関分析データ取得
 func (c *ApplicationController) GetCorrelation(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
 	}

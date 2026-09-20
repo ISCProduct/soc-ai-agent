@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/services/interfaces"
@@ -173,7 +174,7 @@ func (c *AdminJobController) GraduateEmployments(ctx echo.Context) error {
 			limit = v
 		}
 	}
-	schoolID, err := echoAdminSchoolFilter(ctx)
+	schoolID, err := httpapi.AdminSchoolFilter(ctx)
 	if err != nil {
 		return err
 	}
@@ -201,7 +202,7 @@ func (c *AdminJobController) resolveGraduateSchoolID(ctx echo.Context, requested
 	}
 	restricted, allowed, err := c.schools.ResolveAdminAccess(adminUserID)
 	if err != nil {
-		return nil, echoInternalError(err)
+		return nil, httpapi.InternalError(err)
 	}
 	if !restricted {
 		return requested, nil
@@ -212,7 +213,7 @@ func (c *AdminJobController) resolveGraduateSchoolID(ctx echo.Context, requested
 		}
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "school_id is required")
 	}
-	if err := ensureAdminSchoolAccess(ctx, c.schools, requested); err != nil {
+	if err := httpapi.EnsureAdminSchoolAccess(ctx, c.schools, requested); err != nil {
 		return nil, err
 	}
 	return requested, nil
@@ -238,7 +239,7 @@ func (c *AdminJobController) CreateGraduateEmployment(ctx echo.Context) error {
 	if payload.CompanyID == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "company_id is required")
 	}
-	// school_id を入れないと、一覧(WHERE school_id = ?)も単体取得(ensureAdminSchoolAccess)も
+	// school_id を入れないと、一覧(WHERE school_id = ?)も単体取得(httpapi.EnsureAdminSchoolAccess)も
 	// 担当校を持つ管理者から見えなくなる。作成者自身が見られない行が増えるのを防ぐ(#1157)
 	schoolID, err := c.resolveGraduateSchoolID(ctx, payload.SchoolID)
 	if err != nil {
@@ -283,7 +284,7 @@ func (c *AdminJobController) GetGraduateEmployment(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "not found")
 	}
 	// 一覧(GraduateEmployments)は担当校で絞り込まれるが、単体取得は素通りだった(#1157)
-	if err := ensureAdminSchoolAccess(ctx, c.schools, entry.SchoolID); err != nil {
+	if err := httpapi.EnsureAdminSchoolAccess(ctx, c.schools, entry.SchoolID); err != nil {
 		return err
 	}
 	return ctx.JSON(http.StatusOK, entry)
@@ -300,7 +301,7 @@ func (c *AdminJobController) UpdateGraduateEmployment(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "not found")
 	}
 	// 他校の卒業生就職情報を書き換えられないようにする(#1157)
-	if err := ensureAdminSchoolAccess(ctx, c.schools, entry.SchoolID); err != nil {
+	if err := httpapi.EnsureAdminSchoolAccess(ctx, c.schools, entry.SchoolID); err != nil {
 		return err
 	}
 	type updateRequest struct {

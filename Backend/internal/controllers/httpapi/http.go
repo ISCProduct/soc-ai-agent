@@ -1,4 +1,4 @@
-package controllers
+package httpapi
 
 import (
 	"errors"
@@ -34,9 +34,9 @@ const (
 
 // ── ヘルパー関数 ──────────────────────────────────────────────────────────────
 
-// newAPIError はエラーコード付きの echo エラーを生成する。
+// NewAPIError はエラーコード付きの echo エラーを生成する。
 // detail は省略可能（省略時はレスポンスに含まれない）。
-func newAPIError(status int, code, message string, detail ...string) error {
+func NewAPIError(status int, code, message string, detail ...string) error {
 	d := ""
 	if len(detail) > 0 {
 		d = detail[0]
@@ -48,48 +48,48 @@ func newAPIError(status int, code, message string, detail ...string) error {
 	})
 }
 
-// echoUintParam はパスパラメータを uint として取得する。
-func echoUintParam(c echo.Context, key string) (uint, error) {
+// UintParam はパスパラメータを uint として取得する。
+func UintParam(c echo.Context, key string) (uint, error) {
 	s := c.Param(key)
 	id, err := strconv.ParseUint(s, 10, 64)
 	if err != nil || id == 0 {
-		return 0, newAPIError(http.StatusBadRequest, ErrCodeValidationError, "invalid "+key)
+		return 0, NewAPIError(http.StatusBadRequest, ErrCodeValidationError, "invalid "+key)
 	}
 	return uint(id), nil
 }
 
-const internalServerErrorMessage = "内部エラーが発生しました"
+const InternalServerErrorMessage = "内部エラーが発生しました"
 
-// echoInternalError はエラーをログ出力しつつ echo.HTTPError を返す。
-func echoInternalError(err error) error {
-	logError(err)
+// InternalError はエラーをログ出力しつつ echo.HTTPError を返す。
+func InternalError(err error) error {
+	LogError(err)
 	// AI プロバイダ未設定・ローカル推論先の障害は設定/運用の問題で、リトライすれば
 	// 回復しうる。500 + 「内部エラー」だと API 利用者が原因を切り分けられないため
-	// 503 + 明示メッセージにする(#1293)。echoInternalError を通る全経路に一様に効かせる。
+	// 503 + 明示メッセージにする(#1293)。InternalError を通る全経路に一様に効かせる。
 	if errors.Is(err, openai.ErrAIUnavailable) {
-		return newAPIError(http.StatusServiceUnavailable, ErrCodeServiceUnavail,
+		return NewAPIError(http.StatusServiceUnavailable, ErrCodeServiceUnavail,
 			"現在AI機能を利用できません。しばらくしてから再度お試しください。")
 	}
-	return newAPIError(http.StatusInternalServerError, ErrCodeInternalError, internalServerErrorMessage)
+	return NewAPIError(http.StatusInternalServerError, ErrCodeInternalError, InternalServerErrorMessage)
 }
 
-// echoUserID は echo.Context のリクエストコンテキストからユーザーIDを取得する。
-func echoUserID(c echo.Context) (uint, bool) {
+// UserID は echo.Context のリクエストコンテキストからユーザーIDを取得する。
+func UserID(c echo.Context) (uint, bool) {
 	userID, ok := c.Request().Context().Value(middleware.UserIDContextKey).(uint)
 	return userID, ok && userID != 0
 }
 
-// echoCompanyUserID は企業ポータル認証済みユーザーIDを取得する。
-func echoCompanyUserID(c echo.Context) (uint, bool) {
+// CompanyUserID は企業ポータル認証済みユーザーIDを取得する。
+func CompanyUserID(c echo.Context) (uint, bool) {
 	companyUserID, ok := middleware.CompanyUserIDFromContext(c.Request().Context())
 	return companyUserID, ok
 }
 
-// ensureAdminSchoolAccess は、対象リソースの学校ID(未割当ならnil)に対して、
+// EnsureAdminSchoolAccess は、対象リソースの学校ID(未割当ならnil)に対して、
 // 呼び出し元admin(担当校制限がある場合)がアクセスしてよいかを検証する共通ヘルパー
 // (#980/#981/#982/#984で同一ロジックが3コントローラーに重複していたのを統合)。
 // schoolsが未設定(呼び出し元でのDI漏れ)の場合はfail-closedで拒否する。
-func ensureAdminSchoolAccess(ctx echo.Context, schools *school.SchoolService, targetSchoolID *uint) error {
+func EnsureAdminSchoolAccess(ctx echo.Context, schools *school.SchoolService, targetSchoolID *uint) error {
 	if schools == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "school access check is not configured")
 	}
@@ -107,26 +107,26 @@ func ensureAdminSchoolAccess(ctx echo.Context, schools *school.SchoolService, ta
 	return nil
 }
 
-// echoAdminSchoolFilter は EchoAdminSchoolScope が設定した絞り込み対象(nilは絞り込みなし)を返す。
+// AdminSchoolFilter は EchoAdminSchoolScope が設定した絞り込み対象(nilは絞り込みなし)を返す。
 //
 // ミドルウェア未適用のルートから呼ばれた場合は fail-closed で 500 を返す(#1157)。
 // `schoolID, _ :=` で第2戻り値を捨てると、ルートから schoolScope が外れたときに
 // 「絞り込みなし」と区別できず、全校のデータが返る fail-open になる。
-func echoAdminSchoolFilter(ctx echo.Context) (*uint, error) {
+func AdminSchoolFilter(ctx echo.Context) (*uint, error) {
 	filter, ok := middleware.AdminSchoolFilterFromContext(ctx.Request().Context())
 	if !ok {
 		// 既存の teacher insight 経路と同じ 403 に揃える（#1027 の前例）。
 		// ただし 403 だけでは「正当な権限拒否」と区別できず、ルート定義から
 		// schoolScope が外れた設定ミスに気づけないのでログを残す(#1157)。
-		logError(fmt.Errorf("school scope middleware is missing: %s %s",
+		LogError(fmt.Errorf("school scope middleware is missing: %s %s",
 			ctx.Request().Method, ctx.Request().URL.Path))
 		return nil, echo.NewHTTPError(http.StatusForbidden, "school scope is not resolved")
 	}
 	return filter, nil
 }
 
-// echoRequiredUintQuery は必須の正の整数クエリパラメータを返す。欠落・不正は 400。
-func echoRequiredUintQuery(c echo.Context, key string) (uint, error) {
+// RequiredUintQuery は必須の正の整数クエリパラメータを返す。欠落・不正は 400。
+func RequiredUintQuery(c echo.Context, key string) (uint, error) {
 	raw := c.QueryParam(key)
 	if raw == "" {
 		return 0, echo.NewHTTPError(http.StatusBadRequest, key+" is required")
@@ -138,8 +138,8 @@ func echoRequiredUintQuery(c echo.Context, key string) (uint, error) {
 	return uint(id), nil
 }
 
-// echoIntQuery はクエリパラメータを整数として取得し、取得できない場合はデフォルト値を返す。
-func echoIntQuery(c echo.Context, key string, def int) int {
+// IntQuery はクエリパラメータを整数として取得し、取得できない場合はデフォルト値を返す。
+func IntQuery(c echo.Context, key string, def int) int {
 	v := c.QueryParam(key)
 	if v == "" {
 		return def
@@ -151,17 +151,7 @@ func echoIntQuery(c echo.Context, key string, def int) int {
 	return n
 }
 
-// Exported wrappers for testing from external packages.
-
-const InternalServerErrorMessage = internalServerErrorMessage
-
-func NewAPIError(status int, code, message string, detail ...string) error {
-	return newAPIError(status, code, message, detail...)
-}
-func EchoUintParam(c echo.Context, key string) (uint, error) { return echoUintParam(c, key) }
-func EchoInternalError(err error) error                      { return echoInternalError(err) }
-
-func logError(err error) {
+func LogError(err error) {
 	if err == nil {
 		return
 	}

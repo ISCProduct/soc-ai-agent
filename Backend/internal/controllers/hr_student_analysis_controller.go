@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/controllers/httpapi"
 	hrsvc "Backend/internal/services/hr"
 	"Backend/internal/services/shared"
 	"errors"
@@ -24,15 +25,15 @@ func NewHRStudentAnalysisController(svc studentAnalysisService) *HRStudentAnalys
 
 // GetAnalysis GET /api/hr/students/:userID/analysis?company_id=
 func (c *HRStudentAnalysisController) GetAnalysis(ctx echo.Context) error {
-	ownerUserID, ok := echoUserID(ctx)
+	ownerUserID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "認証が必要です")
 	}
-	companyID, err := echoRequiredUintQuery(ctx, "company_id")
+	companyID, err := httpapi.RequiredUintQuery(ctx, "company_id")
 	if err != nil {
 		return err
 	}
-	targetUserID, err := echoUintParam(ctx, "userID")
+	targetUserID, err := httpapi.UintParam(ctx, "userID")
 	if err != nil {
 		return err
 	}
@@ -45,7 +46,7 @@ func (c *HRStudentAnalysisController) GetAnalysis(ctx echo.Context) error {
 		if errors.Is(err, hrsvc.ErrStudentNotVisible) {
 			return echo.NewHTTPError(http.StatusNotFound, "学生が見つかりません")
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, analysis)
 }

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/auth"
@@ -74,7 +75,7 @@ func (c *AdminInterviewController) ensureSchoolAccessForUser(ctx echo.Context, o
 	if err != nil || owner == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "user not found")
 	}
-	return ensureAdminSchoolAccess(ctx, c.schools, owner.SchoolID)
+	return httpapi.EnsureAdminSchoolAccess(ctx, c.schools, owner.SchoolID)
 }
 
 // SetOpenAIClient OpenAIクライアントを注入する
@@ -92,13 +93,13 @@ func (c *AdminInterviewController) ListCompanyQuestions(ctx echo.Context) error 
 	if c.companyQuestionRepo == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "not configured")
 	}
-	companyID, err := echoUintParam(ctx, "id")
+	companyID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
 	}
 	qs, err := c.companyQuestionRepo.FindByCompanyID(companyID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{"questions": qs})
 }
@@ -108,7 +109,7 @@ func (c *AdminInterviewController) CreateCompanyQuestion(ctx echo.Context) error
 	if c.companyQuestionRepo == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "not configured")
 	}
-	companyID, err := echoUintParam(ctx, "id")
+	companyID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
 	}
@@ -137,7 +138,7 @@ func (c *AdminInterviewController) CreateCompanyQuestion(ctx echo.Context) error
 		IsRequired:   req.IsRequired,
 	}
 	if err := c.companyQuestionRepo.Create(q); err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusCreated, q)
 }
@@ -147,11 +148,11 @@ func (c *AdminInterviewController) UpdateCompanyQuestion(ctx echo.Context) error
 	if c.companyQuestionRepo == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "not configured")
 	}
-	companyID, err := echoUintParam(ctx, "id")
+	companyID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
 	}
-	qID, err := echoUintParam(ctx, "qid")
+	qID, err := httpapi.UintParam(ctx, "qid")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid question ID")
 	}
@@ -193,7 +194,7 @@ func (c *AdminInterviewController) UpdateCompanyQuestion(ctx echo.Context) error
 		q.IsRequired = *req.IsRequired
 	}
 	if err := c.companyQuestionRepo.Update(q); err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, q)
 }
@@ -203,11 +204,11 @@ func (c *AdminInterviewController) DeleteCompanyQuestion(ctx echo.Context) error
 	if c.companyQuestionRepo == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "not configured")
 	}
-	companyID, err := echoUintParam(ctx, "id")
+	companyID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
 	}
-	qID, err := echoUintParam(ctx, "qid")
+	qID, err := httpapi.UintParam(ctx, "qid")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid question ID")
 	}
@@ -216,7 +217,7 @@ func (c *AdminInterviewController) DeleteCompanyQuestion(ctx echo.Context) error
 		return echo.NewHTTPError(http.StatusNotFound, "Question not found")
 	}
 	if err := c.companyQuestionRepo.Delete(qID); err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.NoContent(http.StatusNoContent)
 }
@@ -227,7 +228,7 @@ func (c *AdminInterviewController) GenerateCompanyQuestions(ctx echo.Context) er
 	if c.companyRepo == nil || c.openaiClient == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "not configured")
 	}
-	companyID, err := echoUintParam(ctx, "id")
+	companyID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid company ID")
 	}
@@ -360,13 +361,13 @@ func buildPositionSummaryForInterview(positions []models.CompanyJobPosition) str
 // ListSessions handles GET /api/admin/interviews
 // Returns all interview sessions with pagination.
 func (c *AdminInterviewController) ListSessions(ctx echo.Context) error {
-	page := echoIntQuery(ctx, "page", 1)
-	limit := echoIntQuery(ctx, "limit", 20)
+	page := httpapi.IntQuery(ctx, "page", 1)
+	limit := httpapi.IntQuery(ctx, "limit", 20)
 	if limit > 100 {
 		limit = 100
 	}
 	offset := (page - 1) * limit
-	schoolID, err := echoAdminSchoolFilter(ctx)
+	schoolID, err := httpapi.AdminSchoolFilter(ctx)
 	if err != nil {
 		return err
 	}
@@ -383,7 +384,7 @@ func (c *AdminInterviewController) ListSessions(ctx echo.Context) error {
 
 	sessions, total, err := c.interviewService.ListAllSessionsAdmin(limit, offset, schoolID, companyID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]any{
@@ -448,7 +449,7 @@ func (c *AdminInterviewController) VideoURL(ctx echo.Context) error {
 			if errors.Is(err, auth.ErrAccountWithdrawn) {
 				return echo.NewHTTPError(http.StatusForbidden, "account has been withdrawn")
 			}
-			return echoInternalError(err)
+			return httpapi.InternalError(err)
 		}
 	}
 
@@ -463,7 +464,7 @@ func (c *AdminInterviewController) VideoURL(ctx echo.Context) error {
 	expires := 15 * time.Minute
 	presignedURL, err := c.s3Service.PresignGetURL(ctx.Request().Context(), video.DriveFileID, expires)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{

@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/services/teacher"
 
 	"github.com/labstack/echo/v4"
@@ -50,7 +51,7 @@ func (c *TeacherStudentInsightController) TendencyAnalysis(ctx echo.Context) err
 	// ミドルウェア(EchoAdminSchoolScope)を通っていない場合にそのまま nil を渡すと
 	// 「絞り込みなし = 全校の生徒の氏名・メール・分析結果」を返してしまう。
 	// ルート定義から schoolScope が外れた場合に静かに全開放されるのを防ぐ(#1157で共通化)。
-	schoolID, scopeErr := echoAdminSchoolFilter(ctx)
+	schoolID, scopeErr := httpapi.AdminSchoolFilter(ctx)
 	if scopeErr != nil {
 		return scopeErr
 	}
@@ -68,7 +69,7 @@ func (c *TeacherStudentInsightController) TendencyAnalysis(ctx echo.Context) err
 		result, err = c.svc.ListTendencies(limit, offset, query, schoolID)
 	}
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, result)
 }

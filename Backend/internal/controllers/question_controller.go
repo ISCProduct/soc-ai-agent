@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/valueobject"
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
 	"Backend/internal/services/chat"
 	"Backend/internal/services/interfaces"
@@ -36,7 +37,7 @@ func (c *QuestionController) GenerateQuestions(ctx echo.Context) error {
 
 	questions, err := c.questionService.GenerateAndSaveQuestions(ctx.Request().Context(), req)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]any{
@@ -67,7 +68,7 @@ func (c *QuestionController) CreateQuestion(ctx echo.Context) error {
 	qw.WeightCategory = string(normalized)
 
 	if err := c.questionService.CreateQuestion(&qw); err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusCreated, qw)
@@ -83,7 +84,7 @@ func (c *QuestionController) GetQuestionsByCategory(ctx echo.Context) error {
 
 	questions, err := c.questionService.GetQuestionsByCategory(category)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, questions)

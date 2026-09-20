@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/repositories"
 	"Backend/internal/services/release"
 	"net/http"
@@ -26,7 +27,7 @@ type releaseNoteResponse struct {
 
 // List GET /api/whats-new
 func (c *ReleaseNoteController) List(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -37,7 +38,7 @@ func (c *ReleaseNoteController) List(ctx echo.Context) error {
 
 	notes, err := c.service.List(ctx.Request().Context(), 20, user.Role, user.IsAdmin)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	res := make([]releaseNoteResponse, 0, len(notes))
 	for _, n := range notes {
@@ -77,7 +78,7 @@ func (c *ReleaseNoteController) Ingest(ctx echo.Context) error {
 
 	saved, err := c.service.IngestMergedPRs(ctx.Request().Context(), sources)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]int{"saved": saved})
 }

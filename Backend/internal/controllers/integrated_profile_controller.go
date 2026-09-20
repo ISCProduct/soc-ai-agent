@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"Backend/internal/controllers/httpapi"
 	ifaces "Backend/internal/services/interfaces"
 	"net/http"
 
@@ -31,7 +32,7 @@ func NewIntegratedProfileController(
 // 以前はクエリのuser_idを未検証で信頼しており、認証なしで任意ユーザーの
 // プロファイル(面接回数・職務経歴書レビュー状況等)を取得できた。
 func (c *IntegratedProfileController) GetProfile(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -60,7 +61,7 @@ func (c *IntegratedProfileController) GetProfile(ctx echo.Context) error {
 
 	profile, err := c.crossFeature.BuildIntegratedProfile(userID, sessionID, interviewCount, resumeReviewDone)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	return ctx.JSON(http.StatusOK, profile)

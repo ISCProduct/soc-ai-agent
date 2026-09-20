@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/entitlement"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
@@ -127,18 +128,18 @@ func avgScoresJSON(scoresJSON string) (map[string]float64, *float64) {
 
 // ListUsers handles GET /api/admin/dashboard/users
 func (c *AdminDashboardController) ListUsers(ctx echo.Context) error {
-	limit := echoIntQuery(ctx, "limit", 25)
-	offset := (echoIntQuery(ctx, "page", 1) - 1) * limit
+	limit := httpapi.IntQuery(ctx, "limit", 25)
+	offset := (httpapi.IntQuery(ctx, "page", 1) - 1) * limit
 	query := ctx.QueryParam("query")
 	sort := ctx.QueryParam("sort") // avg_score_asc | avg_score_desc | session_count_desc | registered_desc
-	schoolID, err := echoAdminSchoolFilter(ctx)
+	schoolID, err := httpapi.AdminSchoolFilter(ctx)
 	if err != nil {
 		return err
 	}
 
 	users, total, err := c.userRepo.ListUsersPaged(limit, offset, query, schoolID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	userIDs := make([]uint, len(users))
@@ -148,7 +149,7 @@ func (c *AdminDashboardController) ListUsers(ctx echo.Context) error {
 
 	statMap, err := c.sessionRepo.GetUserStatsBatch(userIDs)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	// Collect all finished session IDs to batch-fetch reports
@@ -167,7 +168,7 @@ func (c *AdminDashboardController) ListUsers(ctx echo.Context) error {
 
 	reports, err := c.reportRepo.FindBySessionIDs(allSessionIDs)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	// Compute per-user avg scores
@@ -253,18 +254,18 @@ func (c *AdminDashboardController) UserSessions(ctx echo.Context) error {
 	if err != nil || target == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "user not found")
 	}
-	if err := ensureAdminSchoolAccess(ctx, c.schools, target.SchoolID); err != nil {
+	if err := httpapi.EnsureAdminSchoolAccess(ctx, c.schools, target.SchoolID); err != nil {
 		return err
 	}
 
 	sessionIDs, err := c.sessionRepo.ListFinishedSessionIDsByUser(userID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	reports, err := c.reportRepo.FindBySessionIDs(sessionIDs)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	reportBySession := map[uint]*models.InterviewReport{}
 	for i := range reports {
@@ -273,7 +274,7 @@ func (c *AdminDashboardController) UserSessions(ctx echo.Context) error {
 
 	sessions, err := c.sessionRepo.ListFinishedByUser(userID, 0)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	entries := make([]SessionScoreEntry, 0, len(sessions))
@@ -295,13 +296,13 @@ func (c *AdminDashboardController) ExportCSV(ctx echo.Context) error {
 	if !entitlement.Can(c.currentAdminPlan(ctx), entitlement.FeatureExport) {
 		return echo.NewHTTPError(http.StatusForbidden, "plan_feature_required")
 	}
-	schoolID, err := echoAdminSchoolFilter(ctx)
+	schoolID, err := httpapi.AdminSchoolFilter(ctx)
 	if err != nil {
 		return err
 	}
 	users, _, err := c.userRepo.ListUsersPaged(10000, 0, "", schoolID)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	userIDs := make([]uint, len(users))
 	for i, u := range users {

@@ -1,4 +1,4 @@
-package controllers
+package httpapi
 
 import (
 	"errors"
@@ -32,7 +32,7 @@ func TestEchoInternalError_AIUnavailable(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := echoInternalError(tt.err)
+			err := InternalError(tt.err)
 			var he *echo.HTTPError
 			if !errors.As(err, &he) {
 				t.Fatalf("echo.HTTPError ではない: %T", err)

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/internal/config"
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/middleware"
 	"Backend/internal/services/schedule"
 	"fmt"
@@ -29,7 +30,7 @@ func NewGoogleCalendarController(calendarSync *schedule.CalendarSyncService) *Go
 // コールバック（Googleから直接Backendへ）まで届かず壊れるため、ユーザーIDと
 // タイムスタンプを署名付きstateパラメータ自体に埋め込む（Cookie不要）。
 func (c *GoogleCalendarController) ConnectStart(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
 	}
@@ -79,7 +80,7 @@ func (c *GoogleCalendarController) ConnectCallback(ctx echo.Context) error {
 // Status GET /api/google-calendar/status
 // Googleカレンダー連携状態を返す（ユーザー認証必須）。
 func (c *GoogleCalendarController) Status(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
 	}
@@ -90,12 +91,12 @@ func (c *GoogleCalendarController) Status(ctx echo.Context) error {
 // Disconnect DELETE /api/google-calendar/disconnect
 // Googleカレンダー連携を解除する（ユーザー認証必須）。
 func (c *GoogleCalendarController) Disconnect(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
 	}
 	if err := c.calendarSync.Disconnect(userID); err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]string{"status": "disconnected"})
 }

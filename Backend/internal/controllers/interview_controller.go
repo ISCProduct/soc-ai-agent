@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"Backend/domain/repository"
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
 	ifaces "Backend/internal/services/interfaces"
 	"Backend/internal/services/shared"
@@ -49,14 +50,14 @@ type interviewUtteranceRequest struct {
 // GetTrend GET /api/interviews/trend?limit=N
 // 完了済みセッションのスコア時系列を返す。
 func (c *InterviewController) GetTrend(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	limit := echoIntQuery(ctx, "limit", 20)
+	limit := httpapi.IntQuery(ctx, "limit", 20)
 	points, err := c.interviewService.GetTrend(userID, limit)
 	if err != nil {
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"points": points,
@@ -65,11 +66,11 @@ func (c *InterviewController) GetTrend(ctx echo.Context) error {
 
 // GetReport GET /api/interviews/:id/report
 func (c *InterviewController) GetReport(ctx echo.Context) error {
-	sessionID, err := echoUintParam(ctx, "id")
+	sessionID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
 	}
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -78,7 +79,7 @@ func (c *InterviewController) GetReport(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	if report == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "report not yet available")
@@ -88,11 +89,11 @@ func (c *InterviewController) GetReport(ctx echo.Context) error {
 
 // GetPhraseSuggestions GET /api/interviews/:id/phrase-suggestions
 func (c *InterviewController) GetPhraseSuggestions(ctx echo.Context) error {
-	sessionID, err := echoUintParam(ctx, "id")
+	sessionID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
 	}
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -101,7 +102,7 @@ func (c *InterviewController) GetPhraseSuggestions(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"suggestions": suggestions,
@@ -110,11 +111,11 @@ func (c *InterviewController) GetPhraseSuggestions(ctx echo.Context) error {
 
 // SendReport POST /api/interviews/:id/send-report
 func (c *InterviewController) SendReport(ctx echo.Context) error {
-	sessionID, err := echoUintParam(ctx, "id")
+	sessionID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
 	}
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -128,7 +129,7 @@ func (c *InterviewController) SendReport(ctx echo.Context) error {
 		if err.Error() == "guest users cannot receive email reports" {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]string{"message": "レポートをメールで送信しました"})
 }
@@ -138,7 +139,7 @@ const maxVideoSize = 500 << 20
 
 // UploadVideo POST /api/interviews/:id/upload-video
 func (c *InterviewController) UploadVideo(ctx echo.Context) error {
-	sessionID, err := echoUintParam(ctx, "id")
+	sessionID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
 	}
@@ -147,7 +148,7 @@ func (c *InterviewController) UploadVideo(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "video upload service not configured")
 	}
 
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -160,7 +161,7 @@ func (c *InterviewController) UploadVideo(ctx echo.Context) error {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "session not found")
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	// メモリには最大 10 MB を確保し、それ以上は一時ファイルに書き出す
@@ -225,7 +226,7 @@ func (c *InterviewController) UploadVideo(ctx echo.Context) error {
 
 // Turn POST /api/interviews/:id/turn
 func (c *InterviewController) Turn(ctx echo.Context) error {
-	sessionID, err := echoUintParam(ctx, "id")
+	sessionID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
 	}
@@ -235,7 +236,7 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Failed to parse form")
 	}
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -297,7 +298,7 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrSessionFinished) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	// multipart レスポンス: JSON メタ + audio
@@ -324,12 +325,12 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 
 // StartTurn POST /api/interviews/:id/start-turn
 func (c *InterviewController) StartTurn(ctx echo.Context) error {
-	sessionID, err := echoUintParam(ctx, "id")
+	sessionID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
 	}
 
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -371,7 +372,7 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrSessionFinished) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 
 	w := ctx.Response().Writer
@@ -396,7 +397,7 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 
 // Create POST /api/interviews
 func (c *InterviewController) Create(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -413,11 +414,11 @@ func (c *InterviewController) Create(ctx echo.Context) error {
 
 // Start POST /api/interviews/:id/start
 func (c *InterviewController) Start(ctx echo.Context) error {
-	sessionID, err := echoUintParam(ctx, "id")
+	sessionID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid interview id")
 	}
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -433,11 +434,11 @@ func (c *InterviewController) Start(ctx echo.Context) error {
 
 // Finish POST /api/interviews/:id/finish
 func (c *InterviewController) Finish(ctx echo.Context) error {
-	sessionID, err := echoUintParam(ctx, "id")
+	sessionID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid interview id")
 	}
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -453,12 +454,12 @@ func (c *InterviewController) Finish(ctx echo.Context) error {
 
 // List GET /api/interviews
 func (c *InterviewController) List(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	page := echoIntQuery(ctx, "page", 1)
-	limit := echoIntQuery(ctx, "limit", 20)
+	page := httpapi.IntQuery(ctx, "page", 1)
+	limit := httpapi.IntQuery(ctx, "limit", 20)
 	if limit > 100 {
 		limit = 100
 	}
@@ -482,16 +483,16 @@ func (c *InterviewController) List(ctx echo.Context) error {
 
 // HRList GET /api/hr/interviews?company_id= - 企業オーナー向け面接一覧（#1083）
 func (c *InterviewController) HRList(ctx echo.Context) error {
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	companyID, err := echoRequiredUintQuery(ctx, "company_id")
+	companyID, err := httpapi.RequiredUintQuery(ctx, "company_id")
 	if err != nil {
 		return err
 	}
-	page := echoIntQuery(ctx, "page", 1)
-	limit := echoIntQuery(ctx, "limit", 20)
+	page := httpapi.IntQuery(ctx, "page", 1)
+	limit := httpapi.IntQuery(ctx, "limit", 20)
 	if limit > 100 {
 		limit = 100
 	}
@@ -501,7 +502,7 @@ func (c *InterviewController) HRList(ctx echo.Context) error {
 		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
-		return echoInternalError(err)
+		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"sessions": sessions,
@@ -513,11 +514,11 @@ func (c *InterviewController) HRList(ctx echo.Context) error {
 
 // Get GET /api/interviews/:id
 func (c *InterviewController) Get(ctx echo.Context) error {
-	sessionID, err := echoUintParam(ctx, "id")
+	sessionID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid interview id")
 	}
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
@@ -537,11 +538,11 @@ func (c *InterviewController) Get(ctx echo.Context) error {
 
 // AddUtterance POST /api/interviews/:id/utterances
 func (c *InterviewController) AddUtterance(ctx echo.Context) error {
-	sessionID, err := echoUintParam(ctx, "id")
+	sessionID, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid interview id")
 	}
-	userID, ok := echoUserID(ctx)
+	userID, ok := httpapi.UserID(ctx)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
