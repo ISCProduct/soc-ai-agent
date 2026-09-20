@@ -45,6 +45,12 @@ func profileAxes(p *models.CompanyWeightProfile) []*int {
 	}
 }
 
+// NormalizeProfileSpread は normalizeProfileSpread の公開版。
+// 既存プロファイルを一括で直す cmd/amplify-profiles から使う。
+func NormalizeProfileSpread(p *models.CompanyWeightProfile) bool {
+	return normalizeProfileSpread(p)
+}
+
 // normalizeProfileSpread は10軸の幅が狭すぎる場合に、順序を保ったまま引き伸ばす。
 //
 // 全軸が同じ値のときは引き伸ばしようがないので何もしない。

@@ -13,11 +13,13 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { useRequirePlatformAdmin } from '@/lib/use-require-platform-admin'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { applyInfoPayload, WORK_STYLE_OPTIONS } from '@/lib/admin-company-form'
 
 export default function PageContent() {
+  const platformReady = useRequirePlatformAdmin()
   const router = useRouter()
 
   useEffect(() => {
@@ -127,6 +129,8 @@ export default function PageContent() {
       setCreating(false)
     }
   }
+
+  if (!platformReady) return null
 
   return (
     <AdminFormContainer title="企業の追加" maxWidth={700} backHref="/admin/companies" backLabel="一覧に戻る">

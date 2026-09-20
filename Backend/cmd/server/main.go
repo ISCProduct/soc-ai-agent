@@ -386,6 +386,7 @@ func main() {
 	// クロス機能連携サービス（チャットスコア↔面接/職務経歴書レビュー）
 	crossFeatureService := flywheel.NewCrossFeatureIntegrationService(userWeightScoreRepo)
 	interviewService.SetCrossFeatureService(crossFeatureService)
+	interviewService.SetMatchingRunner(matchingService)
 	interviewService.SetCompanyQuestionRepo(interviewCompanyQuestionRepo)
 	interviewService.SetQuestionStateRepo(interviewQuestionStateRepo)
 	interviewService.SetSkillScoreRepo(skillScoreRepo)
@@ -404,6 +405,7 @@ func main() {
 	if jobEnqueuer != nil {
 		chatController.SetJobEnqueuer(jobEnqueuer)
 	}
+	chatController.SetDiagnosisQualityRepo(diagnosisQualityRepo)
 	questionController := controllers.NewQuestionController(questionService)
 	relationController := controllers.NewCompanyRelationController(companyQueryRepo, aiClient)
 	companyValidator := company.NewCompanyValidationService(companyPublicRepo, aiClient)
@@ -420,6 +422,10 @@ func main() {
 	resumeService.SetCompanyProvisioner(infoFetcher)
 	adminCompanyController := controllers.NewAdminCompanyController(companyRepo, auditLogService, gbizInfoService, aiClient)
 	adminCompanyController.SetCompanySearchGuards(companySearchBudget, companySearchFlight)
+	adminCompanyController.SetSchoolRestrictionChecker(func(adminUserID uint) (bool, error) {
+		restricted, _, err := schoolService.ResolveAdminAccess(adminUserID)
+		return restricted, err
+	})
 	// コンストラクタが自前生成した infoFetcher には SetSharedSearch が掛からない。
 	// 共有済みのものに差し替えないと、fetch-missing-batch で検索が統合されない(#1124)。
 	adminCompanyController.SetInfoFetcher(infoFetcher)

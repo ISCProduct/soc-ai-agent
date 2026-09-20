@@ -21,6 +21,7 @@ func TestNormalizeWeightCategory(t *testing.T) {
 		{name: "質問体系の別名(分析思考)", raw: "分析思考", want: CategoryTechnical, ok: true},
 		{name: "質問体系の別名(計画性・実行力)", raw: "計画性・実行力", want: CategoryDetail, ok: true},
 		{name: "質問体系の別名(ストレス耐性)", raw: "ストレス耐性・粘り強さ", want: CategoryChallenge, ok: true},
+		{name: "ビジネス思考はチャレンジへ（成長に寄せない）", raw: "ビジネス思考・目標志向", want: CategoryChallenge, ok: true},
 		{name: "前後の空白を無視する", raw: "  成長志向 ", want: CategoryGrowth, ok: true},
 		{name: "空文字は弾く", raw: "", ok: false},
 		{name: "未知の値は弾く", raw: "ぜんぜん違うカテゴリ", ok: false},
