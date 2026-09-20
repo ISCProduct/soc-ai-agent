@@ -32,7 +32,7 @@ func main() {
 	updated := 0
 	for i := range profiles {
 		p := &profiles[i]
-		if !company.EnsureProfileContrast(p) {
+		if !company.NormalizeProfileSpread(p) {
 			continue
 		}
 		if err := db.Model(p).Select(

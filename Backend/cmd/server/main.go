@@ -20,6 +20,7 @@ import (
 	"Backend/internal/services/chat"
 	"Backend/internal/services/company"
 	"Backend/internal/services/companyauth"
+	"Backend/internal/services/companyportal"
 	"Backend/internal/services/costs"
 	"Backend/internal/services/diagnosis"
 	"Backend/internal/services/email"
@@ -597,7 +598,16 @@ func main() {
 	routes.SetupScheduleRoutes(api, scheduleController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGoogleCalendarRoutes(api, googleCalendarController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupApplicationRoutes(api, appController, hrStudentAnalysisController, cfg.UserSecret, userDeletionService, organizationService)
-	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, cfg.CompanyUserSecret, companyUserRepo)
+	// 企業ポータルのダッシュボードと応募者管理 (#1320)。
+	// 応募・求人・学生の集計はそれぞれ既存のリポジトリを使い、新しいテーブルは作らない。
+	companyPortalApplicationController := controllers.NewCompanyPortalApplicationController(
+		appService, companyRepo, studentSearchRepo,
+	)
+	// 企業ポータルの求人管理 (#1321)。既存の CompanyRepository を使い、新しいテーブルは作らない。
+	companyPortalJobController := controllers.NewCompanyPortalJobController(
+		companyportal.NewJobService(companyRepo),
+	)
+	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, cfg.CompanyUserSecret, companyUserRepo)
 	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())

@@ -236,3 +236,68 @@ func (r *UserApplicationStatusRepository) FindLowMatchApplicationsByUsers(
 	}
 	return result, nil
 }
+
+// --- 企業ポータル向け（#1320） ---
+
+// FindByCompanyPaged は企業ポータルの応募者一覧。
+//
+// company_id は呼び出し側がJWTから解決した値のみを渡す。
+// クエリパラメータ由来の値を渡してはいけない（他社の応募が見える）。
+// 0 を渡すと全社分になってしまうため、ここで明示的に弾く。
+//
+// 学生名の表示に User を使うので Preload する。
+func (r *UserApplicationStatusRepository) FindByCompanyPaged(
+	companyID uint, status string, limit, offset int,
+) ([]*entity.UserApplicationStatus, int64, error) {
+	if companyID == 0 {
+		return nil, 0, gorm.ErrInvalidValue
+	}
+
+	q := r.db.Model(&models.UserApplicationStatus{}).Where("company_id = ?", companyID)
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var ms []*models.UserApplicationStatus
+	rows := q.Session(&gorm.Session{}).Preload("User").Preload("Company").
+		Order("user_application_statuses.created_at DESC")
+	if limit > 0 {
+		rows = rows.Limit(limit)
+	}
+	if offset > 0 {
+		rows = rows.Offset(offset)
+	}
+	if err := rows.Find(&ms).Error; err != nil {
+		return nil, 0, err
+	}
+
+	result := make([]*entity.UserApplicationStatus, len(ms))
+	for i, m := range ms {
+		result[i] = mapper.UserApplicationStatusToEntity(m)
+	}
+	return result, total, nil
+}
+
+// CountByCompanyAndStatuses は企業の応募をステータスで数える。
+// statuses が空なら全件。ダッシュボードの「未対応」件数に使う。
+func (r *UserApplicationStatusRepository) CountByCompanyAndStatuses(
+	companyID uint, statuses []string,
+) (int64, error) {
+	if companyID == 0 {
+		return 0, gorm.ErrInvalidValue
+	}
+	q := r.db.Model(&models.UserApplicationStatus{}).Where("company_id = ?", companyID)
+	if len(statuses) > 0 {
+		q = q.Where("status IN ?", statuses)
+	}
+	var n int64
+	if err := q.Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return n, nil
+}
