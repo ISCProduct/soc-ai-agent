@@ -62,5 +62,25 @@ func scrubEvent(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 		}
 		event.Request.QueryString = ""
 	}
+
+	// 例外メッセージは素通りする。err.Error() に外部レスポンス本文や AI 出力を
+	// そのまま埋めている箇所が実在する（resume_review.go の "rag review failed: %s" など）。
+	// 長い本文ほど個人情報を含みやすいので、頭だけ残して切る。
+	for i := range event.Exception {
+		event.Exception[i].Value = truncateForSentry(event.Exception[i].Value)
+	}
+	event.Message = truncateForSentry(event.Message)
 	return event
+}
+
+// maxSentryMessageRunes は例外メッセージとして送る上限。
+// 原因の特定には先頭で足り、それ以上は本文の持ち出しになりやすい。
+const maxSentryMessageRunes = 300
+
+func truncateForSentry(msg string) string {
+	runes := []rune(msg)
+	if len(runes) <= maxSentryMessageRunes {
+		return msg
+	}
+	return string(runes[:maxSentryMessageRunes]) + "…(truncated)"
 }

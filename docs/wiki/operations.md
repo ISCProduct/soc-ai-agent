@@ -298,8 +298,17 @@ CloudWatch メトリクス）。
 | 変数 | 対象 | 説明 |
 |---|---|---|
 | `SENTRY_DSN` | Backend / RAG / FE(server) | プロジェクトの DSN |
-| `NEXT_PUBLIC_SENTRY_DSN` | Frontend(browser) | ブラウザ用 DSN（公開してよい値） |
+| `NEXT_PUBLIC_SENTRY_DSN` | Frontend(browser) | ブラウザ用 DSN（公開してよい値）。**ビルド時に渡す必要がある**（下記） |
 | `SENTRY_RELEASE` | 共通（任意） | リリース識別子（git SHA など）。リリース単位の追跡に使う |
+
+`NEXT_PUBLIC_*` は実行時ではなく**ビルド時にバンドルへ埋め込まれる**。ブラウザ側を動かすには
+GitHub のリポジトリシークレット `SENTRY_DSN_FRONTEND` を設定すること（deployment.yml が
+`--build-arg` で Docker ビルドへ渡す）。未設定のままだと SDK は積まれるが初期化されず、
+バンドルだけ増えて1件も送信されない。
+
+DSN の形式にも注意。2023年以降に作られた組織の DSN は `https://oNNN.ingest.us.sentry.io/...`
+のようにリージョンが入る。CSP（`frontend/next.config.ts`）は `https://*.sentry.io` を
+許可しているのでどちらの形式でも通るが、ここを狭めるとブラウザからの送信が全部ブロックされる。
 | `APP_ENV` | 共通 | `development` / `staging` / `production`（Sentry environment） |
 
 DSN は Secrets Manager 等に置き、リポジトリには置かない。

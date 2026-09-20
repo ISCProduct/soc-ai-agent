@@ -549,10 +549,16 @@ func main() {
 
 	// グローバルミドルウェア
 	e.Use(echo.WrapMiddleware(middleware.RequestIDMiddleware))
+	// Recover は Sentry の有無に関わらず入れる。DSN 未設定のときだけ panic で
+	// 接続が切れる（観測基盤の有無でアプリの外部挙動が変わる）のを避ける。
+	//
+	// 並び順は「Recover が外、sentryecho が内」。Echo は先に Use したものが外側なので、
+	// 逆にすると Recover が先に panic を拾ってしまい、sentryecho の
+	// recoverWithSentry（スタックトレース付きで送る唯一の経路）が発火しない。
+	e.Use(echomw.Recover())
 	if sentryOn {
-		// Repanic=true のあと Recover で握りつぶし、Sentry には panic を送る（#1185）
+		// Repanic=true で Sentry へ送ったあと再 panic させ、外側の Recover が 500 にする（#1185）
 		e.Use(sentryecho.New(sentryecho.Options{Repanic: true}))
-		e.Use(echomw.Recover())
 	}
 	e.Use(middleware.EchoRequestLogger)
 	e.Use(echo.WrapMiddleware(securityHeadersMiddleware))

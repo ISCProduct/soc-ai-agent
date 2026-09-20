@@ -1,7 +1,9 @@
 package observability
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/getsentry/sentry-go"
 )
@@ -60,5 +62,35 @@ func TestScrubEvent_RemovesSecrets(t *testing.T) {
 func TestScrubEvent_NilSafe(t *testing.T) {
 	if scrubEvent(nil, nil) != nil {
 		t.Fatal("nil event は nil を返すべき")
+	}
+}
+
+// 例外メッセージには外部レスポンス本文や AI 出力がそのまま入る経路がある
+// （resume_review.go の "rag review failed: %s" など）。Request のスクラブだけでは
+// 個人情報の混入を防げない。
+func TestScrubEvent_例外メッセージを切り詰める(t *testing.T) {
+	long := strings.Repeat("あ", maxSentryMessageRunes+50)
+	event := &sentry.Event{
+		Message:   long,
+		Exception: []sentry.Exception{{Value: "rag review failed: " + long}},
+	}
+
+	out := scrubEvent(event, nil)
+
+	if utf8.RuneCountInString(out.Exception[0].Value) > maxSentryMessageRunes+len("…(truncated)") {
+		t.Errorf("例外メッセージが切り詰められていない: %d文字", utf8.RuneCountInString(out.Exception[0].Value))
+	}
+	if !strings.HasSuffix(out.Exception[0].Value, "…(truncated)") {
+		t.Error("切り詰めたことが分かる印が無い")
+	}
+	if utf8.RuneCountInString(out.Message) > maxSentryMessageRunes+len("…(truncated)") {
+		t.Error("Message が切り詰められていない")
+	}
+}
+
+func TestScrubEvent_短いメッセージはそのまま(t *testing.T) {
+	event := &sentry.Event{Exception: []sentry.Exception{{Value: "db connection failed"}}}
+	if got := scrubEvent(event, nil).Exception[0].Value; got != "db connection failed" {
+		t.Errorf("短いメッセージまで加工している: %q", got)
 	}
 }
