@@ -1,0 +1,32 @@
+name: バグ報告
+description: 不具合・脆弱性を報告する（Backlog課題が自動作成されます）
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 優先度
+      description: Backlog課題の優先度にそのまま入ります。対応順番はこれで決まります。
+      options:
+        - 高 — サービス停止・情報漏えい・データ破損・金銭被害
+        - 中 — 一部機能が使えない / 回避策はある
+        - 低 — 軽微・改善・リファクタ
+      default: 1
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: 事象
+      description: 何が起きるか。再現手順があれば併記。
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影響
+      description: 誰に・どこまで影響するか。
+  - type: textarea
+    id: fix
+    attributes:
+      label: 対応案

@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"Backend/internal/safego"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -72,12 +73,12 @@ func (s *Server) Start() error {
 	if s == nil || s.server == nil {
 		return nil
 	}
-	go func() {
+	safego.Go(func() {
 		log.Printf("[queue] asynq worker starting")
 		if err := s.server.Run(s.mux); err != nil {
 			log.Printf("[queue] asynq worker stopped: %v", err)
 		}
-	}()
+	})
 	return nil
 }
 

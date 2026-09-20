@@ -1,13 +1,13 @@
 package routes
 
 import (
-	"Backend/internal/controllers"
+	schedulecontrollers "Backend/internal/controllers/schedule"
 	"Backend/internal/services/auth"
 
 	"github.com/labstack/echo/v4"
 )
 
-func SetupGoogleCalendarRoutes(api *echo.Group, calendarController *controllers.GoogleCalendarController, userSecret string, access auth.UserAccessGuard, orgs OrganizationIDResolver) {
+func SetupGoogleCalendarRoutes(api *echo.Group, calendarController *schedulecontrollers.GoogleCalendarController, userSecret string, access auth.UserAccessGuard, orgs OrganizationIDResolver) {
 	// 認証不要（OAuth コールバック）
 	api.GET("/google-calendar/callback", calendarController.ConnectCallback)
 

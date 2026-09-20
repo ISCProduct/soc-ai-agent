@@ -11,7 +11,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	resumecontrollers "Backend/internal/controllers/resume"
 	"Backend/internal/services/resume"
 	"Backend/test/controllers/mocks"
 
@@ -23,7 +23,7 @@ func TestResumeStatus_Unauthorized(t *testing.T) {
 	svc := &mocks.ResumeServiceMock{}
 	req := httptest.NewRequest(http.MethodGet, "/api/resume/status", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewResumeController(svc).Status, newCtx(req, rec), http.StatusUnauthorized)
+	assertStatus(t, resumecontrollers.NewResumeController(svc).Status, newCtx(req, rec), http.StatusUnauthorized)
 	svc.AssertNotCalled(t, "GetResumeStatus")
 }
 
@@ -37,7 +37,7 @@ func TestResumeStatus_UsesAuthenticatedUserID(t *testing.T) {
 
 	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/resume/status?user_id=999", nil), 7)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewResumeController(svc).Status, newCtx(req, rec), http.StatusOK)
+	assertStatus(t, resumecontrollers.NewResumeController(svc).Status, newCtx(req, rec), http.StatusOK)
 
 	// クエリの999ではなく、認証済みの7で呼ばれていること。
 	svc.AssertCalled(t, "GetResumeStatus", uint(7))
@@ -60,7 +60,7 @@ func TestResumeStatus_ReviewNotRunIsNeedsAttention(t *testing.T) {
 
 	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/resume/status", nil), 4)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewResumeController(svc).Status, newCtx(req, rec), http.StatusOK)
+	assertStatus(t, resumecontrollers.NewResumeController(svc).Status, newCtx(req, rec), http.StatusOK)
 
 	assert.JSONEq(t, `{"has_document":true,"latest_score":null,"needs_attention":true}`, rec.Body.String())
 }
@@ -73,7 +73,7 @@ func TestResumeStatus_NoDocumentSerializesNullScore(t *testing.T) {
 
 	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/resume/status", nil), 3)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewResumeController(svc).Status, newCtx(req, rec), http.StatusOK)
+	assertStatus(t, resumecontrollers.NewResumeController(svc).Status, newCtx(req, rec), http.StatusOK)
 
 	assert.JSONEq(t, `{"has_document":false,"latest_score":null,"needs_attention":true}`, rec.Body.String())
 }
@@ -84,5 +84,5 @@ func TestResumeStatus_ServiceError(t *testing.T) {
 
 	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/resume/status", nil), 7)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewResumeController(svc).Status, newCtx(req, rec), http.StatusInternalServerError)
+	assertStatus(t, resumecontrollers.NewResumeController(svc).Status, newCtx(req, rec), http.StatusInternalServerError)
 }

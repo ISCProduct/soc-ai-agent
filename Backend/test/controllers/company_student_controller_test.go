@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	companycontrollers "Backend/internal/controllers/company"
 	"Backend/internal/middleware"
 	"Backend/internal/repositories"
 	hrsvc "Backend/internal/services/hr"
@@ -89,8 +89,8 @@ func (s *companyIndustryStub) ListActive() ([]repositories.IndustryOption, error
 	return s.items, s.err
 }
 
-func newCompanyStudentController(search *companyStudentSearchStub, analysis *companyStudentAnalysisStub) *controllers.CompanyStudentController {
-	return controllers.NewCompanyStudentController(search, analysis, &companyIndustryStub{
+func newCompanyStudentController(search *companyStudentSearchStub, analysis *companyStudentAnalysisStub) *companycontrollers.CompanyStudentController {
+	return companycontrollers.NewCompanyStudentController(search, analysis, &companyIndustryStub{
 		items: []repositories.IndustryOption{{ID: 1, Name: "IT・通信"}},
 	})
 }

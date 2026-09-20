@@ -12,7 +12,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	chatcontrollers "Backend/internal/controllers/chat"
 	"Backend/internal/models"
 	"Backend/internal/services/chat"
 	"Backend/test/controllers/mocks"
@@ -20,8 +20,8 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-func newQuestionController(svc *mocks.QuestionServiceMock) *controllers.QuestionController {
-	return controllers.NewQuestionController(svc)
+func newQuestionController(svc *mocks.QuestionServiceMock) *chatcontrollers.QuestionController {
+	return chatcontrollers.NewQuestionController(svc)
 }
 
 // ---- GenerateQuestions ----
@@ -30,7 +30,7 @@ func TestQuestionController_GenerateQuestions_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/questions/generate", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewQuestionController(nil).GenerateQuestions, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, chatcontrollers.NewQuestionController(nil).GenerateQuestions, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestQuestionController_GenerateQuestions_DefaultCount(t *testing.T) {
@@ -65,7 +65,7 @@ func TestQuestionController_CreateQuestion_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/questions", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewQuestionController(nil).CreateQuestion, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, chatcontrollers.NewQuestionController(nil).CreateQuestion, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestQuestionController_CreateQuestion_Success(t *testing.T) {
@@ -136,7 +136,7 @@ func TestQuestionController_CreateQuestion_RejectsUnknownCategory(t *testing.T) 
 	req := httptest.NewRequest(http.MethodPost, "/api/questions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewQuestionController(svc).CreateQuestion, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, chatcontrollers.NewQuestionController(svc).CreateQuestion, newCtx(req, rec), http.StatusBadRequest)
 	svc.AssertNotCalled(t, "CreateQuestion", mock.Anything)
 }
 
@@ -155,7 +155,7 @@ func TestQuestionController_CreateQuestion_NormalizesAlias(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/questions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewQuestionController(svc).CreateQuestion, newCtx(req, rec), http.StatusCreated)
+	assertStatus(t, chatcontrollers.NewQuestionController(svc).CreateQuestion, newCtx(req, rec), http.StatusCreated)
 
 	if saved == nil {
 		t.Fatal("CreateQuestion が呼ばれていない")

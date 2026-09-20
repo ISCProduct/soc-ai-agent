@@ -10,13 +10,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	companycontrollers "Backend/internal/controllers/company"
 	"Backend/internal/models"
 	"Backend/test/controllers/mocks"
 )
 
-func newCompanyRelationController(repo *mocks.CompanyRelationQueryRepositoryMock) *controllers.CompanyRelationController {
-	return controllers.NewCompanyRelationController(repo, nil)
+func newCompanyRelationController(repo *mocks.CompanyRelationQueryRepositoryMock) *companycontrollers.CompanyRelationController {
+	return companycontrollers.NewCompanyRelationController(repo, nil)
 }
 
 // ---- GetCompanyRelations ----
