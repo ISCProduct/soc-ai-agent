@@ -3,6 +3,7 @@ package interview
 import (
 	"Backend/internal/models"
 	"Backend/internal/repositories"
+	"Backend/internal/safego"
 	"Backend/internal/services/email"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
@@ -209,11 +210,12 @@ Interview transcript:
 		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, targetSession, report); err != nil {
 			log.Printf("[CrossFeature] interview score update failed for session %d: %v\n", sessionID, err)
 		} else if s.matchingRunner != nil && !repositories.IsInterviewSnapshotSession(targetSession) {
-			go func(userID uint, sessionID string) {
+			userID, sessionID := session.UserID, targetSession
+			safego.Go(func() {
 				if err := s.matchingRunner.CalculateMatching(context.Background(), userID, sessionID); err != nil {
 					log.Printf("[CrossFeature] rematch after interview failed user=%d session=%s: %v\n", userID, sessionID, err)
 				}
-			}(session.UserID, targetSession)
+			})
 		}
 	}
 	return nil

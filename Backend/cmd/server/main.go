@@ -573,6 +573,14 @@ func main() {
 		// Repanic=true で Sentry へ送ったあと再 panic させ、外側の Recover が 500 にする（#1185）
 		e.Use(sentryecho.New(sentryecho.Options{Repanic: true}))
 	}
+	// ボディサイズの上限。これが無いと ParseMultipartForm が超過分を一時ファイルへ
+	// 無制限に書き出すため、各ハンドラのサイズ検査へ到達する前にディスクを埋められる。
+	// 面接動画だけは maxVideoSize(500MB) を通す必要があるので、routes.BodyLimitSkipper
+	// で除外し、ルート側に個別の上限を置く。
+	e.Use(echomw.BodyLimitWithConfig(echomw.BodyLimitConfig{
+		Skipper: routes.BodyLimitSkipper,
+		Limit:   "32M",
+	}))
 	e.Use(middleware.EchoRequestLogger)
 	e.Use(echo.WrapMiddleware(securityHeadersMiddleware))
 	e.Use(echo.WrapMiddleware(buildCORSMiddleware()))

@@ -4,6 +4,7 @@ import (
 	"Backend/domain/repository"
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/models"
+	"Backend/internal/safego"
 	ifaces "Backend/internal/services/interfaces"
 	"Backend/internal/services/shared"
 	"Backend/internal/services/storage"
@@ -205,7 +206,8 @@ func (c *InterviewController) UploadVideo(ctx echo.Context) error {
 	}
 
 	// S3 へのアップロードを非同期で実行（io.Reader をそのまま渡してメモリを節約）
-	go func(vid *models.InterviewVideo, f io.ReadCloser, key string) {
+	vid, f, key := videoRecord, file, s3Key
+	safego.Go(func() {
 		defer f.Close()
 		ctx := context.Background()
 		fileID, s3URL, uploadErr := c.s3Service.UploadReader(ctx, key, vid.MimeType, f)
@@ -215,7 +217,7 @@ func (c *InterviewController) UploadVideo(ctx echo.Context) error {
 			return
 		}
 		c.videoRepo.UpdateStatus(ctx, vid.ID, "done", "", fileID, s3URL, &uploadedAt)
-	}(videoRecord, file, s3Key)
+	})
 
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"video_id": videoRecord.ID,

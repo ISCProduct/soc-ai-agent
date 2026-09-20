@@ -4,6 +4,7 @@ import (
 	"Backend/internal/models"
 	openaiPkg "Backend/internal/openai"
 	"Backend/internal/repositories"
+	"Backend/internal/safego"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
@@ -174,7 +175,7 @@ func NewAPICostService(repo *repositories.APICallLogRepository) *APICostService 
 // 使えるようにするため（#1293）。フォールバックの USD 上限は via_fallback だけを
 // 集計するので、通常の OpenAI 利用（企業検索など）が保険の予算を食わない。
 func (s *APICostService) LogUsage(u openaiPkg.Usage) {
-	go func() {
+	safego.Go(func() {
 		// 音声経路（STT/TTS）はトークンが返らない。秒数・文字数から計算する。
 		cost := calculateCost(u.Provider, u.Model, u.PromptTokens, u.CompletionTokens)
 		if u.AudioSeconds > 0 || u.Characters > 0 {
@@ -204,7 +205,7 @@ func (s *APICostService) LogUsage(u openaiPkg.Usage) {
 			return
 		}
 		s.checkAndNotifyThreshold()
-	}()
+	})
 }
 
 // checkAndNotifyThreshold は当月（UTC）累計が閾値を超えたら Slack/Discord に通知する。

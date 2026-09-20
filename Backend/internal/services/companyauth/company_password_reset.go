@@ -1,6 +1,7 @@
 package companyauth
 
 import (
+	"Backend/internal/safego"
 	"errors"
 	"fmt"
 	"log"
@@ -58,11 +59,11 @@ func (s *CompanyUserService) RequestPasswordReset(req ForgotPasswordRequest) err
 		//
 		// 送信失敗はログのみ。エラーを返すと送信可否から存在が漏れる。
 		addr, userID := user.Email, user.ID
-		go func() {
+		safego.Go(func() {
 			if err := s.email.SendCompanyUserPasswordReset(addr, token); err != nil {
 				log.Printf("[CompanyUserService] password reset email failed company_user_id=%d error=%v", userID, err)
 			}
-		}()
+		})
 	}
 	return nil
 }
