@@ -1,7 +1,7 @@
 // admin_company_catalog_controller.go — L1 カタログ (Seed / Coverage / Warm) と
 // バッチ不足取得エンドポイント（AdminCompanyController のメソッド）。
 
-package controllers
+package admin
 
 import (
 	"Backend/internal/services/company"

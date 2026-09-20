@@ -12,7 +12,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/models"
 	"Backend/test/controllers/mocks"
 
@@ -22,8 +22,8 @@ import (
 
 // ===== AdminCompanyController =====
 
-func newAdminCompanyController(repo *mocks.CompanyRepositoryMock, audit *mocks.AuditLogServiceMock) *controllers.AdminCompanyController {
-	return controllers.NewAdminCompanyController(repo, audit, nil)
+func newAdminCompanyController(repo *mocks.CompanyRepositoryMock, audit *mocks.AuditLogServiceMock) *admincontrollers.AdminCompanyController {
+	return admincontrollers.NewAdminCompanyController(repo, audit, nil)
 }
 
 func TestAdminCompanyController_List_ServiceError(t *testing.T) {
@@ -49,7 +49,7 @@ func TestAdminCompanyController_Create_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/companies", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewAdminCompanyController(nil, nil, nil).Create, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, admincontrollers.NewAdminCompanyController(nil, nil, nil).Create, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAdminCompanyController_Create_MissingName(t *testing.T) {
@@ -57,7 +57,7 @@ func TestAdminCompanyController_Create_MissingName(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/companies", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewAdminCompanyController(nil, nil, nil).Create, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, admincontrollers.NewAdminCompanyController(nil, nil, nil).Create, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAdminCompanyController_Create_Success(t *testing.T) {
@@ -80,7 +80,7 @@ func TestAdminCompanyController_Get_InvalidID(t *testing.T) {
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, controllers.NewAdminCompanyController(nil, nil, nil).Get, ctx, http.StatusBadRequest)
+	assertStatus(t, admincontrollers.NewAdminCompanyController(nil, nil, nil).Get, ctx, http.StatusBadRequest)
 }
 
 func TestAdminCompanyController_Get_NotFound(t *testing.T) {
@@ -201,8 +201,8 @@ func TestAdminCompanyController_Reject_Success(t *testing.T) {
 
 // ===== AdminJobController =====
 
-func newAdminJobController(companyRepo *mocks.CompanyRepositoryMock, jobCatRepo *mocks.JobCategoryRepositoryMock, gradRepo *mocks.GraduateEmploymentRepositoryMock, audit *mocks.AuditLogServiceMock) *controllers.AdminJobController {
-	return controllers.NewAdminJobController(companyRepo, jobCatRepo, gradRepo, audit)
+func newAdminJobController(companyRepo *mocks.CompanyRepositoryMock, jobCatRepo *mocks.JobCategoryRepositoryMock, gradRepo *mocks.GraduateEmploymentRepositoryMock, audit *mocks.AuditLogServiceMock) *admincontrollers.AdminJobController {
+	return admincontrollers.NewAdminJobController(companyRepo, jobCatRepo, gradRepo, audit)
 }
 
 func TestAdminJobController_JobCategories_ServiceError(t *testing.T) {
@@ -255,7 +255,7 @@ func TestAdminJobController_GetGraduateEmployment_InvalidID(t *testing.T) {
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, controllers.NewAdminJobController(nil, nil, nil, nil).GetGraduateEmployment, ctx, http.StatusBadRequest)
+	assertStatus(t, admincontrollers.NewAdminJobController(nil, nil, nil, nil).GetGraduateEmployment, ctx, http.StatusBadRequest)
 }
 
 func TestAdminJobController_GetGraduateEmployment_NotFound(t *testing.T) {
@@ -384,7 +384,7 @@ func TestAdminJobController_JobPositionAction_InvalidID(t *testing.T) {
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id", "action")
 	ctx.SetParamValues("abc", "publish")
-	assertStatus(t, controllers.NewAdminJobController(nil, nil, nil, nil).JobPositionAction, ctx, http.StatusBadRequest)
+	assertStatus(t, admincontrollers.NewAdminJobController(nil, nil, nil, nil).JobPositionAction, ctx, http.StatusBadRequest)
 }
 
 func TestAdminJobController_JobPositionAction_NotFound(t *testing.T) {
@@ -458,7 +458,7 @@ func TestAdminJobController_GraduateEmployments_Create_InvalidBody(t *testing.T)
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewAdminJobController(nil, nil, nil, nil).CreateGraduateEmployment, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, admincontrollers.NewAdminJobController(nil, nil, nil, nil).CreateGraduateEmployment, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAdminJobController_GraduateEmployments_Create_MissingCompanyID(t *testing.T) {
@@ -466,7 +466,7 @@ func TestAdminJobController_GraduateEmployments_Create_MissingCompanyID(t *testi
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewAdminJobController(nil, nil, nil, nil).CreateGraduateEmployment, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, admincontrollers.NewAdminJobController(nil, nil, nil, nil).CreateGraduateEmployment, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAdminJobController_GraduateEmployments_Create_Success(t *testing.T) {

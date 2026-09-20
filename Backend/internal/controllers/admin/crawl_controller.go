@@ -1,4 +1,4 @@
-package controllers
+package admin
 
 import (
 	"Backend/internal/services/company"

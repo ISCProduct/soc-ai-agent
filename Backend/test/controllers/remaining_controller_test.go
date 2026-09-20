@@ -13,6 +13,7 @@ import (
 
 	"Backend/domain/entity"
 	"Backend/internal/controllers"
+	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/models"
 	"Backend/internal/services/school"
 	"Backend/test/controllers/mocks"
@@ -24,7 +25,7 @@ import (
 
 func TestAdminCrawlController_ListSources_CallsService(t *testing.T) {
 	// nilサービスでパニックになる前に返すケースはないため、コンストラクタの動作のみ確認
-	c := controllers.NewAdminCrawlController(nil, nil)
+	c := admincontrollers.NewAdminCrawlController(nil, nil)
 	if c == nil {
 		t.Fatal("NewAdminCrawlController returned nil")
 	}
@@ -33,7 +34,7 @@ func TestAdminCrawlController_ListSources_CallsService(t *testing.T) {
 func TestAdminCrawlController_Runs_InvalidSourceID(t *testing.T) {
 	// source_idが数値でない場合は無視されてサービス呼び出しになるため、
 	// nilサービスで呼ぶとpanicするケースはここでは扱わない
-	c := controllers.NewAdminCrawlController(nil, nil)
+	c := admincontrollers.NewAdminCrawlController(nil, nil)
 	if c == nil {
 		t.Fatal("NewAdminCrawlController returned nil")
 	}
@@ -42,7 +43,7 @@ func TestAdminCrawlController_Runs_InvalidSourceID(t *testing.T) {
 // ---- AdminInterviewController ----
 
 func TestAdminInterviewController_ListVideos_InvalidID(t *testing.T) {
-	c := controllers.NewAdminInterviewController(nil, nil, nil)
+	c := admincontrollers.NewAdminInterviewController(nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/interview/sessions/abc/videos", nil)
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
@@ -52,7 +53,7 @@ func TestAdminInterviewController_ListVideos_InvalidID(t *testing.T) {
 }
 
 func TestAdminInterviewController_VideoURL_InvalidID(t *testing.T) {
-	c := controllers.NewAdminInterviewController(nil, nil, nil)
+	c := admincontrollers.NewAdminInterviewController(nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/interview/videos/xyz/url", nil)
 	rec := httptest.NewRecorder()
 	ctx := newCtx(req, rec)
@@ -63,7 +64,7 @@ func TestAdminInterviewController_VideoURL_InvalidID(t *testing.T) {
 
 // #982: school scope制限のあるadminは、担当校外のユーザーのセッション動画一覧を取得できない(403)。
 func TestAdminInterviewController_ListVideos_SchoolAccessDenied(t *testing.T) {
-	c := controllers.NewAdminInterviewController(nil, nil, nil)
+	c := admincontrollers.NewAdminInterviewController(nil, nil, nil)
 	otherSchoolID := uint(99)
 	sessionRepo := &mocks.InterviewSessionRepositoryMock{}
 	sessionRepo.On("FindByID", uint(5)).Return(&models.InterviewSession{ID: 5, UserID: 3}, nil)
@@ -86,7 +87,7 @@ func TestAdminInterviewController_ListVideos_SchoolAccessDenied(t *testing.T) {
 // #982: 担当校が一致すればセッション動画一覧を取得できる。
 func TestAdminInterviewController_ListVideos_SchoolAccessAllowed(t *testing.T) {
 	videoRepo := &mocks.InterviewVideoRepositoryMock{}
-	c := controllers.NewAdminInterviewController(nil, videoRepo, nil)
+	c := admincontrollers.NewAdminInterviewController(nil, videoRepo, nil)
 	ownSchoolID := uint(1)
 	sessionRepo := &mocks.InterviewSessionRepositoryMock{}
 	sessionRepo.On("FindByID", uint(5)).Return(&models.InterviewSession{ID: 5, UserID: 3}, nil)
@@ -111,7 +112,7 @@ func TestAdminInterviewController_ListVideos_SchoolAccessAllowed(t *testing.T) {
 // #982: school scope制限のあるadminは、担当校外のユーザーの動画URLを取得できない(403)。
 func TestAdminInterviewController_VideoURL_SchoolAccessDenied(t *testing.T) {
 	videoRepo := &mocks.InterviewVideoRepositoryMock{}
-	c := controllers.NewAdminInterviewController(nil, videoRepo, nil)
+	c := admincontrollers.NewAdminInterviewController(nil, videoRepo, nil)
 	otherSchoolID := uint(99)
 	videoRepo.On("FindByID", mock.Anything, uint(7)).Return(&models.InterviewVideo{ID: 7, UserID: 3, Status: "done", DriveFileID: "f1"}, nil)
 	userRepo := &mocks.UserRepositoryMock{}

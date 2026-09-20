@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"Backend/domain/entity"
-	"Backend/internal/controllers"
+	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/models"
 	"Backend/internal/services/school"
 	"Backend/test/controllers/mocks"
@@ -46,7 +46,7 @@ func TestAdminSchoolController_AddMember_OtherSchoolDenied(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	ctx, _ := newSchoolMemberCtx(req, "9", "")
 
-	ctrl := controllers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
 	assertStatus(t, ctrl.AddMember, ctx, http.StatusForbidden)
 	repo.AssertNotCalled(t, "AddMember", mock.Anything)
 }
@@ -69,7 +69,7 @@ func TestAdminSchoolController_AddMember_OwnSchoolAllowed(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	ctx, _ := newSchoolMemberCtx(req, "5", "")
 
-	ctrl := controllers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
 	assertStatus(t, ctrl.AddMember, ctx, http.StatusCreated)
 	repo.AssertExpectations(t)
 }
@@ -92,7 +92,7 @@ func TestAdminSchoolController_AddMember_UnrestrictedBootstrap(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	ctx, _ := newSchoolMemberCtx(req, "5", "")
 
-	ctrl := controllers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
 	assertStatus(t, ctrl.AddMember, ctx, http.StatusCreated)
 	repo.AssertExpectations(t)
 }
@@ -112,7 +112,7 @@ func TestAdminSchoolController_AddMember_UnrestrictedCannotAddSelf(t *testing.T)
 	req.Header.Set("Content-Type", "application/json")
 	ctx, _ := newSchoolMemberCtx(req, "5", "")
 
-	ctrl := controllers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
 	assertStatus(t, ctrl.AddMember, ctx, http.StatusForbidden)
 	repo.AssertNotCalled(t, "AddMember", mock.Anything)
 }
@@ -131,7 +131,7 @@ func TestAdminSchoolController_RemoveMember_LastSchoolDenied(t *testing.T) {
 	req := withAdminUserID(httptest.NewRequest(http.MethodDelete, "/api/admin/schools/5/members/7", nil), 1)
 	ctx, _ := newSchoolMemberCtx(req, "5", "7")
 
-	ctrl := controllers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
 	assertStatus(t, ctrl.RemoveMember, ctx, http.StatusForbidden)
 	repo.AssertNotCalled(t, "RemoveMember", mock.Anything, mock.Anything)
 }
@@ -150,7 +150,7 @@ func TestAdminSchoolController_RemoveMember_UnrestrictedCanRemoveLastSchool(t *t
 	req := withAdminUserID(httptest.NewRequest(http.MethodDelete, "/api/admin/schools/5/members/7", nil), 1)
 	ctx, _ := newSchoolMemberCtx(req, "5", "7")
 
-	ctrl := controllers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
 	assertStatus(t, ctrl.RemoveMember, ctx, http.StatusOK)
 	repo.AssertExpectations(t)
 }
@@ -170,7 +170,7 @@ func TestAdminSchoolController_AddMember_CannotDemotePlatformAdmin(t *testing.T)
 	req.Header.Set("Content-Type", "application/json")
 	ctx, _ := newSchoolMemberCtx(req, "5", "")
 
-	ctrl := controllers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
 	assertStatus(t, ctrl.AddMember, ctx, http.StatusForbidden)
 	repo.AssertNotCalled(t, "AddMember", mock.Anything)
 }
@@ -188,7 +188,7 @@ func TestAdminSchoolController_RemoveMember_KeepsOtherSchools(t *testing.T) {
 	req := withAdminUserID(httptest.NewRequest(http.MethodDelete, "/api/admin/schools/5/members/7", nil), 1)
 	ctx, _ := newSchoolMemberCtx(req, "5", "7")
 
-	ctrl := controllers.NewAdminSchoolController(school.NewSchoolService(repo))
+	ctrl := admincontrollers.NewAdminSchoolController(school.NewSchoolService(repo))
 	assertStatus(t, ctrl.RemoveMember, ctx, http.StatusOK)
 	repo.AssertExpectations(t)
 }
@@ -216,7 +216,7 @@ func TestAdminUserController_Update_RestrictedCannotGrantAdmin(t *testing.T) {
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("20")
 
-	ctrl := controllers.NewAdminUserController(userRepo, nil)
+	ctrl := admincontrollers.NewAdminUserController(userRepo, nil)
 	ctrl.SetSchoolService(school.NewSchoolService(schoolRepo))
 	assertStatus(t, ctrl.Update, ctx, http.StatusForbidden)
 	userRepo.AssertNotCalled(t, "UpdateUser", mock.Anything)

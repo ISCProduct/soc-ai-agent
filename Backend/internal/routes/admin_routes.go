@@ -2,6 +2,7 @@ package routes
 
 import (
 	"Backend/internal/controllers"
+	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/repositories"
 	"Backend/internal/services/school"
 
@@ -10,23 +11,23 @@ import (
 
 func SetupAdminRoutes(
 	api *echo.Group,
-	adminCompanyController *controllers.AdminCompanyController,
-	adminCrawlController *controllers.AdminCrawlController,
-	adminJobController *controllers.AdminJobController,
-	adminUserController *controllers.AdminUserController,
-	adminOrganizationController *controllers.AdminOrganizationController,
-	adminSchoolController *controllers.AdminSchoolController,
-	adminAuditController *controllers.AdminAuditController,
-	adminCompanyGraphController *controllers.AdminCompanyGraphController,
-	adminInterviewController *controllers.AdminInterviewController,
-	adminDashboardController *controllers.AdminDashboardController,
-	adminCostsController *controllers.AdminCostsController,
-	profileRecalcController *controllers.AdminProfileRecalculationController,
-	scoreValidationController *controllers.AdminScoreValidationController,
-	diagnosisQualityController *controllers.AdminDiagnosisQualityController,
+	adminCompanyController *admincontrollers.AdminCompanyController,
+	adminCrawlController *admincontrollers.AdminCrawlController,
+	adminJobController *admincontrollers.AdminJobController,
+	adminUserController *admincontrollers.AdminUserController,
+	adminOrganizationController *admincontrollers.AdminOrganizationController,
+	adminSchoolController *admincontrollers.AdminSchoolController,
+	adminAuditController *admincontrollers.AdminAuditController,
+	adminCompanyGraphController *admincontrollers.AdminCompanyGraphController,
+	adminInterviewController *admincontrollers.AdminInterviewController,
+	adminDashboardController *admincontrollers.AdminDashboardController,
+	adminCostsController *admincontrollers.AdminCostsController,
+	profileRecalcController *admincontrollers.AdminProfileRecalculationController,
+	scoreValidationController *admincontrollers.AdminScoreValidationController,
+	diagnosisQualityController *admincontrollers.AdminDiagnosisQualityController,
 	collectiveInsightController *controllers.CollectiveInsightController,
-	scraperSessionController *controllers.AdminScraperSessionController,
-	adminVectorController *controllers.AdminVectorController,
+	scraperSessionController *admincontrollers.AdminScraperSessionController,
+	adminVectorController *admincontrollers.AdminVectorController,
 	appController *controllers.ApplicationController,
 	teacherInsightController *controllers.TeacherStudentInsightController,
 	userRepo *repositories.UserRepository,
