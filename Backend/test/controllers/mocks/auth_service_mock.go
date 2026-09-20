@@ -10,8 +10,8 @@ type AuthServiceMock struct {
 	mock.Mock
 }
 
-func (m *AuthServiceMock) Register(req auth.RegisterRequest, tenantOrgID uint) (*auth.AuthResponse, error) {
-	args := m.Called(req, tenantOrgID)
+func (m *AuthServiceMock) Register(req auth.RegisterRequest, tenantOrgID uint, promoteGuestUserID uint) (*auth.AuthResponse, error) {
+	args := m.Called(req, tenantOrgID, promoteGuestUserID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

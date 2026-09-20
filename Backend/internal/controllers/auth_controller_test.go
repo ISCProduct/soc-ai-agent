@@ -17,8 +17,14 @@ import (
 
 // ── モック ────────────────────────────────────────────────────────────────────
 
+// authTestUserSecret はゲスト昇格のトークン検証に使うテスト用シークレット。
+const authTestUserSecret = "test-user-secret"
+
 type mockAuthService struct {
 	interfaces.AuthService
+	// promotedGuestUserID は Register に渡された昇格対象。
+	// ボディではなくトークンから特定されていることの確認に使う。
+	promotedGuestUserID   uint
 	registerFn            func(req auth.RegisterRequest, tenantOrgID uint) (*auth.AuthResponse, error)
 	loginFn               func(req auth.LoginRequest, tenantOrgID uint) (*auth.AuthResponse, error)
 	getUserFn             func(userID uint) (*auth.AuthResponse, error)
@@ -31,7 +37,8 @@ type mockAuthService struct {
 	deleteAccountFn       func(userID uint) error
 }
 
-func (m *mockAuthService) Register(req auth.RegisterRequest, tenantOrgID uint) (*auth.AuthResponse, error) {
+func (m *mockAuthService) Register(req auth.RegisterRequest, tenantOrgID uint, promoteGuestUserID uint) (*auth.AuthResponse, error) {
+	m.promotedGuestUserID = promoteGuestUserID
 	return m.registerFn(req, tenantOrgID)
 }
 func (m *mockAuthService) Login(req auth.LoginRequest, tenantOrgID uint) (*auth.AuthResponse, error) {
@@ -70,7 +77,7 @@ func (m *mockAuthService) RequestPasswordReset(_ string) error { return nil }
 func newAuthTestServer(svc interfaces.AuthService) (*echo.Echo, *AuthController) {
 	e := echo.New()
 	e.HTTPErrorHandler = middleware.CustomHTTPErrorHandler
-	ctrl := NewAuthController(svc)
+	ctrl := NewAuthController(svc, authTestUserSecret)
 	return e, ctrl
 }
 

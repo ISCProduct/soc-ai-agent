@@ -135,6 +135,12 @@ type RegisterRequest struct {
 	CertificationsAcquired   string `json:"certifications_acquired"`
 	CertificationsInProgress string `json:"certifications_in_progress"`
 	RegistrationToken        string `json:"registration_token"`
+	// PromoteGuest はゲストの診断結果を引き継いで本登録するかどうか。
+	//
+	// 対象のゲストは X-User-Token から特定する。この値は「引き継ぐ意思」の
+	// 表明にすぎず、誰を昇格するかの決定には使わない。ボディで対象を
+	// 指定できると、他人のゲストアカウントを奪える。
+	PromoteGuest bool `json:"promote_guest"`
 }
 
 // LoginRequest ログインリクエスト

@@ -399,7 +399,7 @@ func main() {
 	// コントローラー層の初期化
 	organizationRepo := repositories.NewOrganizationRepository(db)
 	organizationService := organization.NewOrganizationService(organizationRepo)
-	authController := controllers.NewAuthController(authService)
+	authController := controllers.NewAuthController(authService, cfg.UserSecret)
 	oauthController := controllers.NewOAuthController(oauthService, organizationService)
 	chatController := controllers.NewChatController(chatService, matchingService, analysisService, userRepo, emailService)
 	if jobEnqueuer != nil {

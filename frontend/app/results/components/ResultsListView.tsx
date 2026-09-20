@@ -140,6 +140,7 @@ export default function ResultsListView({
             }
           >
             ゲスト利用中です。メール送信や選考管理はアカウント登録後に利用できます。
+            今の診断結果はそのまま引き継がれます。
           </Alert>
         )}
         <Box sx={{ textAlign: 'center' }}>
