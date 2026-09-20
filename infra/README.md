@@ -22,9 +22,10 @@ infra/
       prod/              # 本番（AWS ECS on Fargate + ALB・既定停止）
     modules/
       network, rds, s3, secrets, alb, ecs_cluster, ecs_service, ecs_service_fargate   # AWS
-      *_legacy                           # レガシー
+      cloudfront_app_proxy, ecr, error_fallback                                        # AWS
+      *_legacy                           # レガシー（参照なし）
   ecs/                   # 旧 task-def JSON（参照用）
-  nginx/
+  nginx/                 # staging edge の nginx 設定（staging-edge.conf）
   scripts/
 ```
 

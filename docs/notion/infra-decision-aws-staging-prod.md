@@ -103,4 +103,4 @@
 1. AWS staging を常時で apply（bootstrap → staging）
 2. staging にアプリを載せて常時検証
 3. 本番 prod のレビュー→ apply。自動起動制御は別タスク
-4. OCI を archive へ（任意）
+4. ~~OCI を archive へ（任意）~~ → 実施済み（2026-09-20、リソース destroy とコード削除）
