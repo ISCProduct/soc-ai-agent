@@ -208,35 +208,43 @@ func TestReleaseNoteService_IngestMergedPRs_SkipsDeveloperOnlySourceWithoutLLM(t
 	}
 }
 
-func TestReleaseNoteService_IngestMergedPRs_ReleaseUmbrellaGoesToLLMDespiteFargateBody(t *testing.T) {
+// release 傘PRは LLM を呼ばずに除外する（#1290）。
+//
+// main へ直接マージされるのは傘PRだけで、その本文は運用担当者向けに書かれる。
+// 要約させると「起動ジョブの失敗通知が初めて有効になる」のような運用作業が
+// 学生向けの更新情報として出てしまう。実際に出た。
+//
+// 更新情報は中身の個別PRから作る（.github/scripts/collect_whats_new_sources.py）。
+func TestReleaseNoteService_IngestMergedPRs_傘PRはLLMを呼ばずに除外する(t *testing.T) {
 	db, mock := newReleaseNoteTestDB(t)
-	server, client := newSummaryStubServerWithAudience(t, "面接の深掘り質問が分かりやすくなりました。", "student")
+
+	// LLM が呼ばれたら失敗させる。呼ばれた時点で設計が崩れている。
+	server, client := newSummaryStubServerWithAudience(t, "呼ばれてはいけない", "student")
 	defer server.Close()
 	svc := release.NewReleaseNoteService(db, client)
 
 	expectReleaseNotePurgeScan(mock)
-	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `release_notes` WHERE pr_number = \\?").
-		WithArgs(uint(1181)).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	// 除外時は保存済みの同PRを消す。存在チェックのSELECTは走らない。
 	mock.ExpectBegin()
-	mock.ExpectExec("INSERT INTO `release_notes`").
-		WithArgs(uint(1181), "テストタイトル", "面接の深掘り質問が分かりやすくなりました。", "student", sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("DELETE FROM `release_notes`").
+		WithArgs(uint(1381)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectCommit()
 
 	saved, err := svc.IngestMergedPRs(context.Background(), []release.ReleaseNoteSource{
 		{
-			PRNumber: 1181,
-			Title:    "Release to production: 面接深掘り継続力",
-			Body:     "マージすると本番（ECS on Fargate）へ自動デプロイされます。\n- 面接の継続力・きっかけの深掘り",
+			PRNumber: 1381,
+			// 運用語を含まないタイトル。以前のニードル判定はここをすり抜けた。
+			Title:    "release: 本番反映 — SRE整備（通知・レート制限・可観測性）とAI利用量計測ほか34件",
+			Body:     "### 1. 起動ジョブの失敗通知が「初めて有効になる」（#1355）",
 			MergedAt: time.Now(),
 		},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if saved != 1 {
-		t.Fatalf("expected 1 saved, got %d", saved)
+	if saved != 0 {
+		t.Fatalf("傘PRが保存された: %d件", saved)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet expectations: %v", err)
