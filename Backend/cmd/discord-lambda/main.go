@@ -57,39 +57,100 @@ func main() {
 		os.Getenv("DISCORD_ALLOWED_ROLE_ID"),
 	)
 
-	lambda.Start(newLambdaHandler(handler))
+	lambda.Start(newLambdaHandler(handler, discord.NewWorkflowDispatcherFromEnv()))
 }
 
-func newLambdaHandler(h *discord.Handler) func(context.Context, events.ALBTargetGroupRequest) (events.ALBTargetGroupResponse, error) {
-	return func(ctx context.Context, req events.ALBTargetGroupRequest) (events.ALBTargetGroupResponse, error) {
-		body, err := decodeBody(req)
-		if err != nil {
-			log.Printf("[Discord] body decode error: %v", err)
+// schedulerEvent は EventBridge Scheduler から渡す固定ペイロード（#1388）。
+//
+// GitHub ホストの scheduled workflow はベストエフォートで、実測では
+// 毎時のはずの prod-uptime-scheduler が平均4時間・最大5.5時間空いていた。
+// 稼働日の朝に本番が起動していない事故につながるため、発火は AWS 側の
+// スケジューラに任せ、ここから workflow_dispatch で既存ワークフローを叩く。
+//
+// 起動手順（RDS待ち、chroma→rag-review→backend→frontend の順序、
+// オートスケーリング下限の同期）はワークフローが持っている。Go 側に書き直すと
+// 二重管理になり、片方だけ直して本番が中途半端に起動する事故になる。
+type schedulerEvent struct {
+	Source   string `json:"source"`
+	Workflow string `json:"workflow"`
+}
+
+// schedulerSource は EventBridge からの呼び出しであることを示す値。
+// Discord の Interaction ペイロードと取り違えないよう、固定文字列で判定する。
+const schedulerSource = "prod-uptime-scheduler"
+
+// newLambdaHandler は ALB からの Discord Interaction と、
+// EventBridge Scheduler からの起動要求の両方を受ける。
+//
+// 入口を分けずに1つの Lambda で受けるのは、本番を起動する口を増やさないため。
+// ALB 経由の受け口は staging が停止していても生きている（既存の構成）。
+func newLambdaHandler(h *discord.Handler, dispatcher *discord.WorkflowDispatcher) func(context.Context, json.RawMessage) (any, error) {
+	return func(ctx context.Context, raw json.RawMessage) (any, error) {
+		// EventBridge Scheduler からの呼び出しかを先に判定する。
+		// ALB のリクエストには source フィールドが無いので取り違えない。
+		var ev schedulerEvent
+		if err := json.Unmarshal(raw, &ev); err == nil && ev.Source == schedulerSource {
+			return handleScheduled(ctx, dispatcher, ev)
+		}
+
+		var req events.ALBTargetGroupRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			log.Printf("[Discord] event decode error: %v", err)
 			return textResponse(http.StatusBadRequest), nil
 		}
-
-		// ALB はヘッダ名を小文字にして渡す。
-		status, resp := h.Handle(ctx, body,
-			req.Headers["x-signature-ed25519"],
-			req.Headers["x-signature-timestamp"],
-		)
-		if resp == nil {
-			return textResponse(status), nil
-		}
-
-		payload, err := json.Marshal(resp)
-		if err != nil {
-			log.Printf("[Discord] response marshal error: %v", err)
-			return textResponse(http.StatusInternalServerError), nil
-		}
-
-		return events.ALBTargetGroupResponse{
-			StatusCode:        status,
-			StatusDescription: statusDescription(status),
-			Headers:           map[string]string{"Content-Type": "application/json"},
-			Body:              string(payload),
-		}, nil
+		return handleALB(ctx, h, req)
 	}
+}
+
+// handleScheduled はワークフローを起動する。
+//
+// 失敗しても Lambda をエラー終了させる。EventBridge のリトライに任せられるうえ、
+// 成功扱いにすると「起動しなかったのに誰も気づかない」状態に戻る。
+func handleScheduled(ctx context.Context, dispatcher *discord.WorkflowDispatcher, ev schedulerEvent) (any, error) {
+	dispatched, err := dispatcher.DispatchWorkflow(ctx, ev.Workflow)
+	if err != nil {
+		log.Printf("[Scheduler] workflow dispatch failed: %v", err)
+		return nil, err
+	}
+	if !dispatched {
+		// トークン未設定。設定漏れに気づけるようエラーにする。
+		log.Printf("[Scheduler] workflow dispatch skipped: dispatcher not configured")
+		return nil, errDispatcherNotConfigured
+	}
+	log.Printf("[Scheduler] workflow dispatched: %s", ev.Workflow)
+	return map[string]string{"status": "dispatched", "workflow": ev.Workflow}, nil
+}
+
+var errDispatcherNotConfigured = errors.New("workflow dispatcher is not configured")
+
+func handleALB(ctx context.Context, h *discord.Handler, req events.ALBTargetGroupRequest) (events.ALBTargetGroupResponse, error) {
+	body, err := decodeBody(req)
+	if err != nil {
+		log.Printf("[Discord] body decode error: %v", err)
+		return textResponse(http.StatusBadRequest), nil
+	}
+
+	// ALB はヘッダ名を小文字にして渡す。
+	status, resp := h.Handle(ctx, body,
+		req.Headers["x-signature-ed25519"],
+		req.Headers["x-signature-timestamp"],
+	)
+	if resp == nil {
+		return textResponse(status), nil
+	}
+
+	payload, err := json.Marshal(resp)
+	if err != nil {
+		log.Printf("[Discord] response marshal error: %v", err)
+		return textResponse(http.StatusInternalServerError), nil
+	}
+
+	return events.ALBTargetGroupResponse{
+		StatusCode:        status,
+		StatusDescription: statusDescription(status),
+		Headers:           map[string]string{"Content-Type": "application/json"},
+		Body:              string(payload),
+	}, nil
 }
 
 // errBodyTooLarge は署名検証前に打ち切った場合のエラー。
