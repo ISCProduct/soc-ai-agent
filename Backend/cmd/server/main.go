@@ -601,7 +601,12 @@ func main() {
 	companyPortalJobController := controllers.NewCompanyPortalJobController(
 		companyportal.NewJobService(companyRepo),
 	)
-	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, cfg.CompanyUserSecret, companyUserRepo)
+	// 自社プロフィール編集と担当者管理 (#1322)。
+	// 担当者管理は既存の CompanyUserService をそのまま使う。
+	companyPortalProfileController := controllers.NewCompanyPortalProfileController(
+		companyportal.NewProfileService(companyRepo), companyUserService,
+	)
+	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, cfg.CompanyUserSecret, companyUserRepo)
 	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())

@@ -57,6 +57,7 @@ func SetupCompanyAuthRoutes(
 	studentController *controllers.CompanyStudentController,
 	applicationController *controllers.CompanyPortalApplicationController,
 	jobController *controllers.CompanyPortalJobController,
+	profileController *controllers.CompanyPortalProfileController,
 	companySecret string,
 	users *repositories.CompanyUserRepository,
 ) {
@@ -101,5 +102,16 @@ func SetupCompanyAuthRoutes(
 		portal.POST("/jobs", jobController.Create)
 		portal.PATCH("/jobs/:id", jobController.Update)
 		portal.POST("/jobs/:id/publish", jobController.Publish)
+	}
+
+	// 自社プロフィール編集と担当者管理 (#1322)。
+	// 管理者向けは :id で企業を指定するが、ここでは自社しか触れないため
+	// パラメータを持たせない。更新系は owner のみ（コントローラ側で判定）。
+	if profileController != nil {
+		portal.GET("/company", profileController.GetCompany)
+		portal.PATCH("/company", profileController.UpdateCompany)
+		portal.GET("/members", profileController.ListMembers)
+		portal.POST("/members", profileController.InviteMember)
+		portal.PATCH("/members/:userID", profileController.SetMemberDisabled)
 	}
 }
