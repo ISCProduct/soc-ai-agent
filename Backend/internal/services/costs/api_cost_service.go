@@ -39,6 +39,37 @@ var modelPricing = map[string][2]float64{
 	"gpt-5-search-api":           {2.50, 10.00},
 }
 
+// 音声経路の単価（#1294 DesignDoc §3.4）。
+//
+// STT は分単位、TTS は文字単位で課金され、トークン単価の表では表せない。
+//
+// 既定値は 2026-05 時点で確認した公開価格に基づく。価格改定が入っている可能性があるため、
+// 実請求額との突き合わせで必ず確認すること（#1193 では旧価格が3年ぶん残っていた）。
+// 生の使用量（audio_seconds / characters）を保存しているので、単価が違っていても
+// 後から再計算できる。
+func sttCostPerMinuteUSD() float64 {
+	return shared.GetFloatEnv("STT_COST_PER_MINUTE_USD", 0.006)
+}
+
+func ttsCostPer1MCharsUSD() float64 {
+	return shared.GetFloatEnv("TTS_COST_PER_1M_CHARS_USD", 15.0)
+}
+
+// calculateAudioCost は音声経路のコストを返す。ローカル推論は 0。
+func calculateAudioCost(provider string, audioSeconds float64, characters int) float64 {
+	if provider != "" && !strings.EqualFold(provider, "openai") {
+		return 0
+	}
+	cost := 0.0
+	if audioSeconds > 0 {
+		cost += audioSeconds / 60.0 * sttCostPerMinuteUSD()
+	}
+	if characters > 0 {
+		cost += float64(characters) / 1_000_000.0 * ttsCostPer1MCharsUSD()
+	}
+	return cost
+}
+
 // modelPricingOverrideEnv は単価表を再ビルドなしに差し替える env（#1294 DesignDoc §3.4）。
 //
 //	AI_MODEL_PRICING_JSON={"gpt-4o":[2.5,10.0],"gpt-5.2":[1.25,5.0]}
@@ -144,7 +175,11 @@ func NewAPICostService(repo *repositories.APICallLogRepository) *APICostService 
 // 集計するので、通常の OpenAI 利用（企業検索など）が保険の予算を食わない。
 func (s *APICostService) LogUsage(u openaiPkg.Usage) {
 	go func() {
+		// 音声経路（STT/TTS）はトークンが返らない。秒数・文字数から計算する。
 		cost := calculateCost(u.Provider, u.Model, u.PromptTokens, u.CompletionTokens)
+		if u.AudioSeconds > 0 || u.Characters > 0 {
+			cost = calculateAudioCost(u.Provider, u.AudioSeconds, u.Characters)
+		}
 		entry := &models.APICallLog{
 			Model:            u.Model,
 			PromptTokens:     u.PromptTokens,
@@ -160,6 +195,7 @@ func (s *APICostService) LogUsage(u openaiPkg.Usage) {
 			UserID:         u.UserID,
 			OrganizationID: u.OrganizationID,
 			AudioSeconds:   u.AudioSeconds,
+			Characters:     u.Characters,
 			LatencyMs:      u.LatencyMs,
 			CacheHit:       u.CacheHit,
 		}
