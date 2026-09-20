@@ -23,6 +23,8 @@ require (
 	github.com/alicebob/miniredis/v2 v2.34.0
 	github.com/aws/aws-lambda-go v1.54.0
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.73.6
+	github.com/getsentry/sentry-go v0.35.1
+	github.com/getsentry/sentry-go/echo v0.35.1
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.19.1

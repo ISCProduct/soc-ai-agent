@@ -22,8 +22,8 @@ const securityHeaders = [
       "media-src 'self' blob:",
       // 開発モードでは webpack HMR の WebSocket 接続を許可
       isDev
-        ? "connect-src 'self' blob: http://localhost:* https://api.openai.com ws://localhost:* wss://localhost:*"
-        : `connect-src 'self' blob: https://api.openai.com${backendOrigin ? ` ${backendOrigin}` : ''}`,
+        ? "connect-src 'self' blob: http://localhost:* https://api.openai.com https://*.ingest.sentry.io ws://localhost:* wss://localhost:*"
+        : `connect-src 'self' blob: https://api.openai.com https://*.ingest.sentry.io${backendOrigin ? ` ${backendOrigin}` : ''}`,
       "frame-ancestors 'none'",
     ].join('; '),
   },

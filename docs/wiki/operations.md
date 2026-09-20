@@ -7,6 +7,7 @@
 3. [監視項目](#3-監視項目)
    - [リクエストIDでサービス横断追跡](#31-リクエストidでサービス横断追跡-1188)
    - [メトリクスを見る](#32-メトリクスを見る-1186)
+   - [エラートラッキング（Sentry）](#33-エラートラッキングsentry-619--1185)
 4. [障害対応](#4-障害対応)
 5. [データベース管理](#5-データベース管理)
 6. [管理画面操作](#6-管理画面操作)
@@ -284,6 +285,52 @@ docker run --rm -p 9090:9090 \
 
 常時計測している指標と信頼性目標は [SLO とアラート](./slo.md) を参照（計測ソースは ALB の
 CloudWatch メトリクス）。
+
+---
+
+## 3.3 エラートラッキング（Sentry）（#619 / #1185）
+
+本番の未処理エラーを Backend / Frontend / RAG から Sentry へ送る。
+**DSN 未設定時はすべて no-op**（ローカル開発では依存しない）。
+
+### 環境変数
+
+| 変数 | 対象 | 説明 |
+|---|---|---|
+| `SENTRY_DSN` | Backend / RAG / FE(server) | プロジェクトの DSN |
+| `NEXT_PUBLIC_SENTRY_DSN` | Frontend(browser) | ブラウザ用 DSN（公開してよい値） |
+| `SENTRY_RELEASE` | 共通（任意） | リリース識別子（git SHA など）。リリース単位の追跡に使う |
+| `APP_ENV` | 共通 | `development` / `staging` / `production`（Sentry environment） |
+
+DSN は Secrets Manager 等に置き、リポジトリには置かない。
+
+### 送信しないもの
+
+`beforeSend` で次を落とす（履歴書・チャット本文などの個人情報対策）:
+
+- リクエストボディ / Cookie / QueryString
+- `Authorization` / `X-Admin-Token` / `X-User-Token` / `X-Company-User-Token` / `X-Internal-Token`
+
+相関は既存の `X-Request-ID`（`request_id` タグ）で行う（3.1 節）。
+
+### 通知
+
+Sentry プロジェクトの Alert Rule で Discord / Slack へ転送する。
+コストアラート（#604）や CloudWatch（`slo.md`）と通知先を揃える。
+
+### 動作確認
+
+1. staging に DSN を設定してデプロイ
+2. 意図的に 500 を起こす（または Sentry の test event）
+3. Sentry Issues にイベントが届き、`request_id` タグでログと突合できること
+
+### 受け入れ条件との対応（#619）
+
+| 受け入れ条件 | 状態 |
+|---|---|
+| 本番の未処理エラーが通知される | Sentry（本節）。DSN 設定と Alert Rule が必要 |
+| 基本メトリクスがダッシュボードで確認できる | `/metrics`（3.2 節 / #1186）+ ALB CloudWatch |
+| SLOとアラートルールが文書化されている | [slo.md](./slo.md)（#1187） |
 
 ---
 

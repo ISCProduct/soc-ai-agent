@@ -54,3 +54,7 @@ httpx>=0.28.1,<0.29
 prometheus-fastapi-instrumentator>=8.1.0,<9.0
 # 上記の推移的依存。Prometheus テキスト形式の互換を保つため 0.x 系に固定。
 prometheus-client>=0.21,<1.0
+
+# --- エラートラッキング（#1185） ---
+# FastAPI / Starlette 統合付き。3.x は未検証のため上限を設定する。
+sentry-sdk>=2.19.0,<3.0

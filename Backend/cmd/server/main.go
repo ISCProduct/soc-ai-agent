@@ -7,6 +7,7 @@ import (
 	"Backend/internal/logger"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
+	"Backend/internal/observability"
 	"Backend/internal/openai"
 	"Backend/internal/queue"
 	"Backend/internal/repositories"
@@ -49,8 +50,10 @@ import (
 	"strings"
 	"time"
 
+	sentryecho "github.com/getsentry/sentry-go/echo"
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
+	echomw "github.com/labstack/echo/v4/middleware"
 )
 
 // wildcardPattern は "https://*.shukatsu-ai.jp" のようなオリジンパターンの前後を保持する。
@@ -171,6 +174,9 @@ func checkAnnotationFont() {
 func main() {
 	// 構造化ログの初期化（LOG_LEVEL / LOG_FORMAT 環境変数で制御）
 	logger.Setup()
+
+	flushSentry, sentryOn := observability.InitSentry()
+	defer flushSentry()
 
 	// PDF アノテーションフォントの存在チェック（起動時警告）
 	checkAnnotationFont()
@@ -543,6 +549,11 @@ func main() {
 
 	// グローバルミドルウェア
 	e.Use(echo.WrapMiddleware(middleware.RequestIDMiddleware))
+	if sentryOn {
+		// Repanic=true のあと Recover で握りつぶし、Sentry には panic を送る（#1185）
+		e.Use(sentryecho.New(sentryecho.Options{Repanic: true}))
+		e.Use(echomw.Recover())
+	}
 	e.Use(middleware.EchoRequestLogger)
 	e.Use(echo.WrapMiddleware(securityHeadersMiddleware))
 	e.Use(echo.WrapMiddleware(buildCORSMiddleware()))
