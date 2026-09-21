@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"Backend/internal/controllers"
+	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/services/costs"
 	ifaces "Backend/internal/services/interfaces"
 	"Backend/test/controllers/mocks"
@@ -19,8 +19,8 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-func newAdminCostsController(cost ifaces.APICostService, realtime ifaces.RealtimeUsageService) *controllers.AdminCostsController {
-	return controllers.NewAdminCostsController(cost, realtime)
+func newAdminCostsController(cost ifaces.APICostService, realtime ifaces.RealtimeUsageService) *admincontrollers.AdminCostsController {
+	return admincontrollers.NewAdminCostsController(cost, realtime)
 }
 
 // ===== Summary =====
@@ -82,7 +82,7 @@ func TestAdminCostsController_Summary_IncludesCompanySearch(t *testing.T) {
 		Month: "2026-07", Count: 12, Limit: 2000, Remaining: 1988, Enforce: true, Exceeded: false,
 	}, nil)
 
-	ctrl := controllers.NewAdminCostsController(cost, nil, budget)
+	ctrl := admincontrollers.NewAdminCostsController(cost, nil, budget)
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/summary", nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, ctrl.Summary, newCtx(req, rec), http.StatusOK)

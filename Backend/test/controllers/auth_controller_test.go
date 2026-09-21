@@ -12,7 +12,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	authcontrollers "Backend/internal/controllers/auth"
 	"Backend/internal/services/auth"
 	"Backend/test/controllers/mocks"
 
@@ -20,8 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newAuthController(svc *mocks.AuthServiceMock) *controllers.AuthController {
-	return controllers.NewAuthController(svc, "test-user-secret")
+func newAuthController(svc *mocks.AuthServiceMock) *authcontrollers.AuthController {
+	return authcontrollers.NewAuthController(svc, "test-user-secret")
 }
 
 // ---- Register ----
@@ -30,7 +30,7 @@ func TestAuthController_Register_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewAuthController(nil, "test-user-secret").Register, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").Register, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAuthController_Register_EmailExists(t *testing.T) {
@@ -66,7 +66,7 @@ func TestAuthController_Login_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewAuthController(nil, "test-user-secret").Login, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").Login, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAuthController_Login_InvalidCredentials(t *testing.T) {
@@ -126,7 +126,7 @@ func TestAuthController_CreateGuest_Success(t *testing.T) {
 func TestAuthController_GetUser_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/user", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewAuthController(nil, "test-user-secret").GetUser, newCtx(req, rec), http.StatusUnauthorized)
+	assertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").GetUser, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestAuthController_GetUser_NotFound(t *testing.T) {
@@ -186,7 +186,7 @@ func TestAuthController_RequestRegistration_Success(t *testing.T) {
 func TestAuthController_VerifyRegistration_MissingToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-registration", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewAuthController(nil, "test-user-secret").VerifyRegistration, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").VerifyRegistration, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAuthController_VerifyRegistration_InvalidToken(t *testing.T) {
@@ -218,7 +218,7 @@ func TestAuthController_VerifyRegistration_Success(t *testing.T) {
 func TestAuthController_UpdateProfile_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/auth/profile", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewAuthController(nil, "test-user-secret").UpdateProfile, newCtx(req, rec), http.StatusUnauthorized)
+	assertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").UpdateProfile, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestAuthController_UpdateProfile_Success(t *testing.T) {
@@ -303,7 +303,7 @@ func TestAuthController_VerifyEmail_Success(t *testing.T) {
 func TestAuthController_DeleteAccount_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/auth/account", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewAuthController(nil, "test-user-secret").DeleteAccount, newCtx(req, rec), http.StatusUnauthorized)
+	assertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").DeleteAccount, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestAuthController_DeleteAccount_Success(t *testing.T) {

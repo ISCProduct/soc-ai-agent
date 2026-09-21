@@ -773,9 +773,11 @@ jobs:
           fi
           rm -f "$sm_err"
 
-          sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base main --limit 20 \
-            --json number,title,body,mergedAt \
-            --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
+          # main へ直接マージされるのは release 傘PRだけで、その本文は
+          # 「起動ジョブの失敗通知が初めて有効になる」のような運用担当者向けの記述になる。
+          # 傘PRをそのまま要約させると、中身に混ざった運用作業がユーザー向け更新情報として
+          # 出てしまう（実際に出た）。傘PRは要約対象にせず、中身の個別PRを送る。
+          sources=$(python3 .github/scripts/collect_whats_new_sources.py)
 
           # 本番が停止していると必ず失敗する(既定停止の運用)。ここで失敗させるとデプロイが
           # 落ちてしまうため続行はするが、黙って握りつぶすと「反映されていない」ことに
@@ -784,6 +786,12 @@ jobs:
           # 「停止中で届かない」と「鍵が違って拒否された」は対処が別物。
           # 後者を warning で流すと、admin_secret のローテーション後に更新情報が
           # 反映されないまま誰も気づかない(#1290 と同じ症状)。
+          #
+          # 503 は拾わない。CloudFront が ALB の 500/502/503/504 をすべて 503 へ
+          # 差し替えるため(modules/cloudfront_app_proxy)、503 はほぼ「オリジンが
+          # 応答しない」を意味する。バックエンドの「ADMIN_SECRET 未設定」も 503 だが、
+          # ローリング更新中やタスク停止中に必ず踏むので、ここで落とすと
+          # 正常なデプロイが赤くなる(実際に本番デプロイで踏んだ)。
           prod_code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $PROD_ADMIN_SECRET" \
@@ -792,8 +800,8 @@ jobs:
           prod_rejected=0
           case "$prod_code" in
             2*) ;;
-            401|403|503)
-              echo "::error::本番への更新情報の取り込みが $prod_code で拒否されました。admin_secret が本番の値と一致していないか、本番側で未設定です(ローテーション後の CI 設定を確認してください)"
+            401|403)
+              echo "::error::本番への更新情報の取り込みが $prod_code で拒否されました。admin_secret が本番の値と一致していません(ローテーション後の CI 設定を確認してください)"
               prod_rejected=1
               ;;
             *)

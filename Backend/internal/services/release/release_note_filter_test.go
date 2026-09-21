@@ -29,24 +29,37 @@ func TestIsDeveloperOnlyReleaseNote(t *testing.T) {
 		{name: "デプロイパイプラインは除外", title: "改善", body: "デプロイパイプラインの安定化", want: true},
 		{name: "CI/CDは除外", title: "速度改善", body: "CI/CD の並列化", want: true},
 		{name: "保存済みのやさしい要約でもTerraformなら除外", title: "構成を更新しました", body: "Terraform構成を直しました。", want: true},
-		// Release 傘PRは本文に Fargate/Terraform 定型文があっても LLM に任せる
-		{name: "Release傘PRのFargate定型文は除外しない", title: "Release to production: 面接UX修正", body: "マージすると本番（ECS on Fargate）へ自動デプロイされます。", want: false},
-		{name: "Release傘PRのterraform言及は除外しない", title: "Release: 2026-09-07 レート制限回避ほか", body: "infra/terraform の修正を含む", want: false},
+		// release 傘PRは一律で除外する（#1290 の再発防止）。
+		//
+		// main へ直接マージされるのは傘PRだけで、その本文は運用担当者向けに書かれる。
+		// 以前はタイトルのニードル判定に頼っていたが、傘PRのタイトルは中身の要約に
+		// なっており運用語が入らないことがある。実際に
+		// 「SRE整備（通知・レート制限・可観測性）とAI利用量計測ほか34件」が通過し、
+		// 本文の「起動ジョブの失敗通知が初めて有効になる」が学生向けに表示された。
+		//
+		// 更新情報は中身の個別PRから作る（collect_whats_new_sources.py）。
+		{name: "傘PR: 運用語を含まないタイトルでも除外", title: "release: 本番反映 — SRE整備（通知・レート制限・可観測性）とAI利用量計測ほか34件", body: "", want: true},
+		{name: "傘PR: ユーザー向けの内容でも除外", title: "Release: 2026-09-10 本番反映（AI面接の音声認識改善・教員向け機能・公開API漏洩修正）", body: "", want: true},
+		{name: "傘PR: 大文字小文字を問わず除外", title: "Release to production: 面接UX修正", body: "", want: true},
+		{name: "傘PR: 企業ポータルほか21件も除外", title: "release: 本番反映 — 企業ポータル・ゲスト診断の引き継ぎ・掲載承認前求人の露出修正ほか21件", body: "", want: true},
 
-		// #1289: Release 傘PRでも「タイトルが運用作業そのもの」なら除外する。
-		// 本番の更新情報に Discord からの環境起動/停止などが表示されていた。
-		// 実際に本番へ出た PR タイトルをそのまま使う。
-		{name: "実例: Discordから本番環境を起動/停止するは除外", title: "Release: 2026-09-09 本番反映（Discordから本番環境を起動/停止する）", body: "", want: true},
-		{name: "実例: Lambda移設とstaging運用は除外", title: "release: Discord受け口のLambda移設と観測性・staging運用の修正を本番ブランチへ反映する", body: "", want: true},
-		{name: "実例: staging復旧まわりは除外", title: "release: staging復旧まわりの修正4件を本番ブランチへ反映する", body: "", want: true},
-		{name: "実例: 基盤バージョンアップとデプロイ基盤は除外", title: "release: 基盤バージョンアップ(#1277)とデプロイ基盤の修正を本番へ反映する", body: "", want: true},
-		{name: "実例: 本番RAGインフラのコード化は除外", title: "Release: 2026-08-31 本番RAGインフラ(rag-review/chroma)のコード化", body: "", want: false},
-
-		// ユーザー向けリリースまで落とさないこと（フィルタの過剰適用を防ぐ回帰）
-		{name: "実例: 音声認識改善・教員向け機能は残す", title: "Release: 2026-09-10 本番反映（AI面接の音声認識改善・教員向け機能・公開API漏洩修正）", body: "", want: false},
-		{name: "実例: 教員向け分析・企業パスワードリセットは残す", title: "Release: 2026-09-08 本番反映（教員向け生徒傾向分析・企業パスワードリセット・未審査企業の露出修正）", body: "", want: false},
-		{name: "実例: スカウト機能は残す", title: "Release to production: 2026-09-05 スカウト機能、OpenAIリトライ不具合修正、CI検証範囲の拡大", body: "", want: false},
-		{name: "実例: 面接深掘り継続力は残す", title: "Release to production: 2026-09-05 面接深掘り継続力・OAuth文字化け修正・FT蒸留排除・Backlog同期", body: "", want: false},
+		// 個別PRは主題がタイトルに出るので判定できる。ユーザー向けは残す。
+		{name: "個別PR: 機能追加は残す", title: "feat(interview): 面接の深掘り質問を改善する", body: "", want: false},
+		{name: "個別PR: 不具合修正は残す", title: "fix(resume): 履歴書レビューの結果が保存されない問題を直す", body: "", want: false},
+		{name: "個別PR: 運用は除外", title: "ops: 起動/停止ジョブの失敗をDiscordへ通知する", body: "", want: true},
+		// スコープ側が運用のこともある。型(fix)だけ見ると通ってしまう。
+		{name: "個別PR: fix(ops)は除外", title: "fix(ops): 本番の起動判定をAWS側のスケジューラで発火させる", body: "", want: true},
+		{name: "個別PR: chore(deps)は除外", title: "chore(deps): bump golang.org/x/net", body: "", want: true},
+		{name: "個別PR: fix(infra)は除外", title: "fix(infra): 設定を直す", body: "", want: true},
+		// 機能スコープの fix は残す。
+		{name: "個別PR: fix(diagnosis)は残す", title: "fix(diagnosis): 出題した軸を採点まで運ぶ", body: "", want: false},
+		{name: "個別PR: fix(resume)は残す", title: "fix(resume): レビュー結果を保存する", body: "", want: false},
+		{name: "個別PR: リファクタは除外", title: "refactor(backend): services 直下の取り残しをサブパッケージへ移す", body: "", want: true},
+		{name: "個別PR: ビルドは除外", title: "build(deps): bump golang.org/x/net", body: "", want: true},
+		{name: "個別PR: テストは除外", title: "test: 権限境界の検査を足す", body: "", want: true},
+		{name: "個別PR: 性能改善は除外", title: "perf(matching): 計算を速くする", body: "", want: true},
+		// docs: は一律除外しない。利用者向けヘルプの更新が混ざるため本文で判定する。
+		{name: "個別PR: 開発者向けドキュメントは本文で除外", title: "docs: migrations の手順を追記する", body: "デプロイ手順を追記", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

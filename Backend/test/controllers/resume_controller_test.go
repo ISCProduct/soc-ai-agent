@@ -12,7 +12,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	resumecontrollers "Backend/internal/controllers/resume"
 	"Backend/internal/models"
 	"Backend/internal/services/resume"
 	"Backend/internal/services/shared"
@@ -21,8 +21,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func newResumeController(svc *mocks.ResumeServiceMock) *controllers.ResumeController {
-	return controllers.NewResumeController(svc)
+func newResumeController(svc *mocks.ResumeServiceMock) *resumecontrollers.ResumeController {
+	return resumecontrollers.NewResumeController(svc)
 }
 
 // ---- Upload ----
@@ -31,7 +31,7 @@ func TestResumeController_Upload_InvalidForm(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/resumes/upload", bytes.NewBufferString("not-multipart"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewResumeController(nil).Upload, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, resumecontrollers.NewResumeController(nil).Upload, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestResumeController_Upload_MissingUserID(t *testing.T) {
@@ -41,7 +41,7 @@ func TestResumeController_Upload_MissingUserID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/resumes/upload", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewResumeController(nil).Upload, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, resumecontrollers.NewResumeController(nil).Upload, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestResumeController_Upload_Unauthorized(t *testing.T) {
@@ -52,7 +52,7 @@ func TestResumeController_Upload_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/resumes/upload", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewResumeController(nil).Upload, newCtx(req, rec), http.StatusUnauthorized)
+	assertStatus(t, resumecontrollers.NewResumeController(nil).Upload, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestResumeController_Upload_Forbidden(t *testing.T) {
@@ -64,7 +64,7 @@ func TestResumeController_Upload_Forbidden(t *testing.T) {
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req = withUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewResumeController(nil).Upload, newCtx(req, rec), http.StatusForbidden)
+	assertStatus(t, resumecontrollers.NewResumeController(nil).Upload, newCtx(req, rec), http.StatusForbidden)
 }
 
 func TestResumeController_Upload_Success(t *testing.T) {
@@ -92,13 +92,13 @@ func TestResumeController_Upload_Success(t *testing.T) {
 func TestResumeController_Review_MissingDocumentID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/resumes/review", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewResumeController(nil).Review, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, resumecontrollers.NewResumeController(nil).Review, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestResumeController_Review_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/resumes/review?document_id=1", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewResumeController(nil).Review, newCtx(req, rec), http.StatusUnauthorized)
+	assertStatus(t, resumecontrollers.NewResumeController(nil).Review, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestResumeController_Review_Forbidden(t *testing.T) {
@@ -131,13 +131,13 @@ func TestResumeController_Review_Success(t *testing.T) {
 func TestResumeController_Annotated_MissingDocumentID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/resumes/annotated", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewResumeController(nil).Annotated, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, resumecontrollers.NewResumeController(nil).Annotated, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestResumeController_Annotated_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/resumes/annotated?document_id=1", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewResumeController(nil).Annotated, newCtx(req, rec), http.StatusUnauthorized)
+	assertStatus(t, resumecontrollers.NewResumeController(nil).Annotated, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestResumeController_Annotated_Forbidden(t *testing.T) {
@@ -167,13 +167,13 @@ func TestResumeController_Annotated_NotFound(t *testing.T) {
 func TestResumeController_ReviewStream_MissingDocumentID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/resumes/review/stream", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewResumeController(nil).ReviewStream, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, resumecontrollers.NewResumeController(nil).ReviewStream, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestResumeController_ReviewStream_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/resumes/review/stream?document_id=1", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewResumeController(nil).ReviewStream, newCtx(req, rec), http.StatusUnauthorized)
+	assertStatus(t, resumecontrollers.NewResumeController(nil).ReviewStream, newCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestResumeController_ReviewStream_Forbidden(t *testing.T) {

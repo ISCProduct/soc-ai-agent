@@ -216,6 +216,38 @@ func ssrfSafeDialContext(ctx context.Context, network, addr string) (net.Conn, e
 	return nil, lastErr
 }
 
+// maxDownloadBytes は source_url からの取り込み上限。
+// 取り込み先は履歴書1通なので、これを超える応答は読み切らずに捨てる。
+const maxDownloadBytes = 32 << 20
+
+// downloadFilename は取得先が名乗るファイル名を、保存先ディレクトリの外へ
+// 出られない形に正規化する。
+//
+// Content-Disposition は「相手のサーバーが決める値」であり、利用者は
+// source_url に自前のサーバーを指定できる。filepath.Join は ".." を解決して
+// しまうため、filename="../../etc/cron.d/x" をそのまま渡すと保存先の外へ
+// 任意の内容を書き込めた。filepath.Base でパス要素を落としてから使う。
+func downloadFilename(disposition, urlPath string) string {
+	name := ""
+	if disposition != "" {
+		if parts := strings.Split(disposition, "filename="); len(parts) > 1 {
+			name = strings.Trim(parts[1], "\"")
+		}
+	}
+	if name == "" {
+		name = urlPath
+	}
+	// パス区切りを含む値はここで1要素に落ちる。Windows 由来の "\\" も潰す。
+	name = filepath.Base(strings.ReplaceAll(name, "\\", "/"))
+	if name == "" || name == "." || name == ".." || name == "/" {
+		name = "document"
+	}
+	if filepath.Ext(name) == "" {
+		name += ".pdf"
+	}
+	return name
+}
+
 func downloadSourceFile(ctx context.Context, url, storagePath string) (string, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -234,26 +266,10 @@ func downloadSourceFile(ctx context.Context, url, storagePath string) (string, s
 		return "", "", fmt.Errorf("download failed: %s", resp.Status)
 	}
 
-	filename := "downloaded"
-	if disp := resp.Header.Get("Content-Disposition"); disp != "" {
-		if parts := strings.Split(disp, "filename="); len(parts) > 1 {
-			filename = strings.Trim(parts[1], "\"")
-		}
-	}
-	if filename == "downloaded" {
-		filename = filepath.Base(req.URL.Path)
-	}
-	if filename == "" || filename == "." || filename == "/" {
-		filename = "document"
-	}
-	ext := filepath.Ext(filename)
-	if ext == "" {
-		ext = ".pdf"
-		filename += ext
-	}
+	filename := downloadFilename(resp.Header.Get("Content-Disposition"), req.URL.Path)
 
 	dest := filepath.Join(storagePath, filename)
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDownloadBytes))
 	if err != nil {
 		return "", "", err
 	}

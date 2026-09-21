@@ -281,3 +281,11 @@ func MetricsSkipper(c echo.Context) bool {
 	}
 	return false
 }
+
+// BodyLimitSkipper はグローバルのボディサイズ上限から外すリクエストを判定する。
+//
+// 面接動画だけは maxVideoSize(500MB) を通す必要があり、ルート側で個別の上限を置いている。
+// このスキッパーは e.Use（ルーティング前）で使うため c.Path() はまだ空で、生パスで見る。
+func BodyLimitSkipper(c echo.Context) bool {
+	return strings.HasSuffix(c.Request().URL.Path, "/upload-video")
+}

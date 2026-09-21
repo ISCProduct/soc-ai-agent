@@ -12,15 +12,15 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/models"
 	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/mock"
 )
 
-func newAdminCrawlController(crawlSvc *mocks.CrawlServiceMock, audit *mocks.AuditLogServiceMock) *controllers.AdminCrawlController {
-	return controllers.NewAdminCrawlController(crawlSvc, audit)
+func newAdminCrawlController(crawlSvc *mocks.CrawlServiceMock, audit *mocks.AuditLogServiceMock) *admincontrollers.AdminCrawlController {
+	return admincontrollers.NewAdminCrawlController(crawlSvc, audit)
 }
 
 // ===== ListSources =====
@@ -52,7 +52,7 @@ func TestAdminCrawlController_Sources_Create_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/crawl-sources", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, controllers.NewAdminCrawlController(nil, nil).CreateSource, newCtx(req, rec), http.StatusBadRequest)
+	assertStatus(t, admincontrollers.NewAdminCrawlController(nil, nil).CreateSource, newCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAdminCrawlController_Sources_Create_ServiceError(t *testing.T) {
@@ -90,7 +90,7 @@ func TestAdminCrawlController_SourceDetail_InvalidID(t *testing.T) {
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, controllers.NewAdminCrawlController(nil, nil).UpdateSource, ctx, http.StatusBadRequest)
+	assertStatus(t, admincontrollers.NewAdminCrawlController(nil, nil).UpdateSource, ctx, http.StatusBadRequest)
 }
 
 func TestAdminCrawlController_SourceDetail_Update_InvalidBody(t *testing.T) {
@@ -100,7 +100,7 @@ func TestAdminCrawlController_SourceDetail_Update_InvalidBody(t *testing.T) {
 	ctx := newCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, controllers.NewAdminCrawlController(nil, nil).UpdateSource, ctx, http.StatusBadRequest)
+	assertStatus(t, admincontrollers.NewAdminCrawlController(nil, nil).UpdateSource, ctx, http.StatusBadRequest)
 }
 
 func TestAdminCrawlController_SourceDetail_Update_Success(t *testing.T) {

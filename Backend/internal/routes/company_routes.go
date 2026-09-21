@@ -1,13 +1,13 @@
 package routes
 
 import (
-	"Backend/internal/controllers"
+	companycontrollers "Backend/internal/controllers/company"
 
 	"github.com/labstack/echo/v4"
 )
 
 // SetupCompanyRoutes 企業関連のルーティング設定
-func SetupCompanyRoutes(api *echo.Group, relationController *controllers.CompanyRelationController) {
+func SetupCompanyRoutes(api *echo.Group, relationController *companycontrollers.CompanyRelationController) {
 	companies := api.Group("/companies")
 	companies.GET("", relationController.GetCompanies)
 	companies.GET("/relations", relationController.GetAllCompanyRelations)

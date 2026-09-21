@@ -10,7 +10,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	companycontrollers "Backend/internal/controllers/company"
 	"Backend/internal/repositories"
 	companyauth "Backend/internal/services/companyauth"
 
@@ -23,7 +23,7 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-func newCompanyAuthControllerWithMock(t *testing.T) (*controllers.CompanyAuthController, sqlmock.Sqlmock) {
+func newCompanyAuthControllerWithMock(t *testing.T) (*companycontrollers.CompanyAuthController, sqlmock.Sqlmock) {
 	t.Helper()
 	sqlDB, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -40,7 +40,7 @@ func newCompanyAuthControllerWithMock(t *testing.T) (*controllers.CompanyAuthCon
 		nil,
 		"test-company-secret",
 	)
-	return controllers.NewCompanyAuthController(svc), mock
+	return companycontrollers.NewCompanyAuthController(svc), mock
 }
 
 func postJSON(t *testing.T, path, body string) (echo.Context, *httptest.ResponseRecorder) {

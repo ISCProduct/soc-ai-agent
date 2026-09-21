@@ -15,7 +15,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/test/controllers/mocks"
@@ -80,7 +80,7 @@ func TestAdminCompanyController_Update_PublicationGuard(t *testing.T) {
 			audit := &mocks.AuditLogServiceMock{}
 			audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 
-			ctrl := controllers.NewAdminCompanyController(repo, audit, nil)
+			ctrl := admincontrollers.NewAdminCompanyController(repo, audit, nil)
 			ctrl.SetSchoolRestrictionChecker(func(uint) (bool, error) { return tt.restricted, nil })
 
 			raw, _ := json.Marshal(tt.body)

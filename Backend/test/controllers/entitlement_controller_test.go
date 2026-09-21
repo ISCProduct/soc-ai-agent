@@ -14,7 +14,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Backend/internal/controllers"
+	usercontrollers "Backend/internal/controllers/user"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/services/organization"
@@ -29,7 +29,7 @@ func withOrganizationID(r *http.Request, orgID uint) *http.Request {
 }
 
 func TestEntitlementController_GetEntitlements_NoOrgContext_FailsClosed(t *testing.T) {
-	c := controllers.NewEntitlementController(nil)
+	c := usercontrollers.NewEntitlementController(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/entitlements", nil)
 	rec := httptest.NewRecorder()
 	assertStatus(t, c.GetEntitlements, newCtx(req, rec), http.StatusOK)
@@ -42,7 +42,7 @@ func TestEntitlementController_GetEntitlements_NoOrgContext_FailsClosed(t *testi
 func TestEntitlementController_GetEntitlements_OrgLookupError_FailsClosed(t *testing.T) {
 	repo := &mocks.OrganizationRepositoryMock{}
 	repo.On("FindByID", uint(1)).Return(nil, errors.New("db error"))
-	c := controllers.NewEntitlementController(organization.NewOrganizationService(repo))
+	c := usercontrollers.NewEntitlementController(organization.NewOrganizationService(repo))
 
 	req := withOrganizationID(httptest.NewRequest(http.MethodGet, "/api/entitlements", nil), 1)
 	rec := httptest.NewRecorder()
@@ -58,7 +58,7 @@ func TestEntitlementController_GetEntitlements_OrgLookupError_FailsClosed(t *tes
 func TestEntitlementController_GetEntitlements_OrgResolved_UsesOrgPlan(t *testing.T) {
 	repo := &mocks.OrganizationRepositoryMock{}
 	repo.On("FindByID", uint(1)).Return(&models.Organization{ID: 1, Plan: "pro"}, nil)
-	c := controllers.NewEntitlementController(organization.NewOrganizationService(repo))
+	c := usercontrollers.NewEntitlementController(organization.NewOrganizationService(repo))
 
 	req := withOrganizationID(httptest.NewRequest(http.MethodGet, "/api/entitlements", nil), 1)
 	rec := httptest.NewRecorder()
