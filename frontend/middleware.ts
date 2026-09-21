@@ -3,7 +3,7 @@ import {
   SERVER_BACKEND_URL,
   setSessionCookies,
   setCompanySessionCookies,
-} from '@/lib/session-cookies'
+} from '@/lib/auth/session-cookies'
 import { extractTenantSlug, isAdminHost } from '@/lib/tenant'
 
 // アクセストークンの残り有効期間がこの秒数を下回ったらリフレッシュする (#616)

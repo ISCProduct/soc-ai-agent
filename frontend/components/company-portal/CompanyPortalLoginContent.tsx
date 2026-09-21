@@ -13,7 +13,7 @@ import {
   Typography,
 } from '@mui/material'
 import { StudentThemeToggle } from '@/components/student-theme-toggle'
-import { companyAuthService } from '@/lib/company-auth'
+import { companyAuthService } from '@/lib/company/auth'
 
 export function CompanyPortalLoginContent() {
   const router = useRouter()

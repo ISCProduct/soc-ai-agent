@@ -5,7 +5,7 @@ import * as THREE from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { Box } from '@mui/material'
 import { loadAvatar, type AvatarGender } from '@/lib/avatar-loader'
-import { LipsyncManager } from '@/lib/lipsync-manager'
+import { LipsyncManager } from '@/lib/interview/lipsync-manager'
 
 interface ThreeAvatarProps {
   gender: AvatarGender

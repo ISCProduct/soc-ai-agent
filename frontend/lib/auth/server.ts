@@ -1,6 +1,6 @@
 import { cookies, headers } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { SERVER_BACKEND_URL } from '@/lib/session-cookies'
+import { SERVER_BACKEND_URL } from '@/lib/auth/session-cookies'
 import { extractTenantSlug } from '@/lib/tenant'
 import type { User } from '@/lib/auth'
 

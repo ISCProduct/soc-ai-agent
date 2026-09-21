@@ -37,13 +37,13 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import { authService } from '@/lib/auth'
-import { getAdminSchoolAccess } from '@/lib/admin-school-access'
+import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { companyAspectHref, type CompanyAspect } from '@/components/admin/CompanyAspectTabs'
-import { fetchCompanyPrimary, formatFetchPrimarySummary, formatFetchPrimaryEmptyAspects, hasActionableSoftEmpty } from '@/lib/admin-company-fetch'
+import { fetchCompanyPrimary, formatFetchPrimarySummary, formatFetchPrimaryEmptyAspects, hasActionableSoftEmpty } from '@/lib/admin/company-fetch'
 import {
   applyBatchWave,
   batchItemFailuresFromResponse,
@@ -56,8 +56,8 @@ import {
   shouldContinueBatch,
   type BatchItemFailure,
   type BatchProgress,
-} from '@/lib/admin-company-batch-progress'
-import { resolveIndustryFieldProfile } from '@/lib/admin-company-field-profile'
+} from '@/lib/admin/company-batch-progress'
+import { resolveIndustryFieldProfile } from '@/lib/admin/company-field-profile'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
 
 const PAGE_SIZE = 50

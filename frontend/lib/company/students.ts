@@ -1,4 +1,4 @@
-import { companyAuthService } from '@/lib/company-auth'
+import { companyAuthService } from '@/lib/company/auth'
 
 export interface StudentTag {
   id: number

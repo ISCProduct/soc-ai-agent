@@ -8,8 +8,8 @@
  *
  * 状態管理は既存流儀のまま各コンポーネントの useState + <ErrorAlert /> に任せる。
  */
-import { fetchWithTimeout, FetchTimeoutError } from './fetch-timeout'
-import { UserFacingApiError, looksLikeHtml, userFacingApiMessage } from './user-facing-error'
+import { fetchWithTimeout, FetchTimeoutError } from '../fetch-timeout'
+import { UserFacingApiError, looksLikeHtml, userFacingApiMessage } from '../user-facing-error'
 
 /** 原因を特定できない例外に出す既定文言。英語の生メッセージを画面に出さないため */
 const UNKNOWN_ERROR_MESSAGE = '通信エラーが発生しました。しばらくしてから再試行してください。'

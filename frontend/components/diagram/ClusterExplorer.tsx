@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { Box, Typography, TextField, Chip } from '@mui/material'
-import { marketColors, marketLabels, type CapitalRelation, type MarketType } from '@/lib/company-data'
+import { marketColors, marketLabels, type CapitalRelation, type MarketType } from '@/lib/company/data'
 import { computeRelationClusters, type RelationCluster } from '@/lib/relation-graph'
 
 type DiagramType = 'capital' | 'business'

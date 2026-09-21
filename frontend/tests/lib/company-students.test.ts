@@ -1,8 +1,8 @@
 /** @jest-environment jsdom */
 
-import { companyStudentService } from '@/lib/company-students'
+import { companyStudentService } from '@/lib/company/students'
 
-jest.mock('@/lib/company-auth', () => ({
+jest.mock('@/lib/company/auth', () => ({
   companyAuthService: {
     ensureFreshToken: jest.fn().mockResolvedValue(undefined),
     getAuthHeaders: () => ({ 'X-Company-User-Token': 'jwt-token' }),

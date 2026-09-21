@@ -16,7 +16,7 @@ import {
   fetchCompanyMarketInfo,
   type CapitalRelation,
   type CompanyMarketInfo,
-} from '@/lib/company-data'
+} from '@/lib/company/data'
 import type {
   AnalysisScores,
   Company,

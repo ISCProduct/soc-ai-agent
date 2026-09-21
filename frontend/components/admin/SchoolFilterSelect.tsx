@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { MenuItem, TextField } from '@mui/material'
-import { getAdminSchoolAccess, type AdminSchool } from '@/lib/admin-school-access'
+import { getAdminSchoolAccess, type AdminSchool } from '@/lib/admin/school-access'
 
 interface SchoolFilterSelectProps {
   value: number | undefined

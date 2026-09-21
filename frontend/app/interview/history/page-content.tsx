@@ -21,7 +21,7 @@ import dynamic from 'next/dynamic'
 import { authService, User } from '@/lib/auth'
 import { interviewApi, InterviewDetail, InterviewSession, InterviewTrendPoint, TeacherReport } from '@/lib/interview'
 import InterviewSummary from '../components/InterviewSummary'
-import { parseJsonSafe } from '@/lib/interview-utils'
+import { parseJsonSafe } from '@/lib/interview/utils'
 import { PRIMARY } from '../constants'
 
 const InterviewTrendChart = dynamic(() => import('@/components/InterviewTrendChart'), {

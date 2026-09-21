@@ -1,7 +1,7 @@
 /**
  * 企業詳細ページ用のユーティリティ。
  */
-import type { CompanyProvenanceInput } from '@/lib/company-provenance'
+import type { CompanyProvenanceInput } from '@/lib/company/provenance'
 
 export function parseJsonArray(s?: string): string[] {
   if (!s) return []
@@ -13,7 +13,7 @@ export function parseJsonArray(s?: string): string[] {
   }
 }
 
-import { formatEmployeeCount } from '@/lib/company-data'
+import { formatEmployeeCount } from '@/lib/company/data'
 
 /** API / プロキシ応答から企業オブジェクトを取り出す */
 export function unwrapCompanyRecord(raw: unknown): Record<string, unknown> | null {
