@@ -310,7 +310,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                     AI分析進捗
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{mb: 2}}>
-                    質問: {progressTotals.valid}/{progressTotals.required} 完了 (想定{progressTotals.required}問・{progressTotals.percent}%)
+                    質問 {progressTotals.valid}/{progressTotals.required}（{progressTotals.percent}%）
                 </Typography>
 
                 <List sx={{p: 0}}>
@@ -335,7 +335,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                                 </ListItemIcon>
                                 <ListItemText
                                     primary={step.label}
-                                    secondary={step.completed ? '完了' : '未完了'}
                                     primaryTypographyProps={{
                                         fontSize: '0.95rem',
                                         fontWeight: step.completed ? 700 : 500,
