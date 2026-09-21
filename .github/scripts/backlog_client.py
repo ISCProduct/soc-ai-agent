@@ -168,6 +168,26 @@ def load_backlog_env() -> tuple[str, str, str, str]:
     return api_key, space_id, proj_key, domain
 
 
+# GitHub -> Backlog 同期で、Backlog 起源の Issue に対して何を同期してよいか。
+#
+# Backlog 起源(本文に <!-- backlog-synced -->)の Issue はタイトル・本文を
+# 書き戻すとループするため同期しない。ただし開閉だけは返す必要がある。
+# 返さないと、Backlog 起源の課題は GitHub を閉じても Backlog が未対応のまま残る
+# (実際に SOCAIAGENT-146/147/148 が本番反映後も未対応のままだった)。
+#
+# 逆方向(backlog-to-github-issue.yml)も、GitHub 起源の課題について
+# 「タイトル・本文は書き換えず、状態だけ反映する」という同じ扱いをしている。
+# set_issue_status は同じステータスなら PATCH しないので、往復しても止まる。
+_STATE_ACTIONS = ("closed", "reopened")
+
+
+def should_skip_backlog_sync(body: str, action: str) -> bool:
+    """Backlog 起源の Issue で、この action の同期を丸ごと飛ばすべきか。"""
+    if "<!-- backlog-synced -->" not in (body or ""):
+        return False
+    return action not in _STATE_ACTIONS
+
+
 # Backlog の優先度ID。プロジェクト共通の固定値（2=高 / 3=中 / 4=低）。
 BACKLOG_PRIORITY_IDS = {"高": 2, "中": 3, "低": 4}
 
@@ -454,6 +474,19 @@ if __name__ == "__main__":
     assert parse_priority_id("### 優先度\n\n激高") == DEFAULT_PRIORITY_ID
     # 見出しが優先度で「始まる」だけの別セクションは拾わない
     assert parse_priority_id("### 優先度の根拠\n\n高") == DEFAULT_PRIORITY_ID
+
+    # --- Backlog 起源 Issue の同期範囲 ---
+    synced = "<!-- backlog-synced -->\n<!-- backlog-key:X-1 -->\n本文"
+    # 開閉は Backlog へ返す。返さないと GitHub を閉じても Backlog が未対応のまま残る。
+    assert should_skip_backlog_sync(synced, "closed") is False
+    assert should_skip_backlog_sync(synced, "reopened") is False
+    # タイトル・本文の書き戻しはループするので飛ばす
+    assert should_skip_backlog_sync(synced, "opened") is True
+    assert should_skip_backlog_sync(synced, "edited") is True
+    # GitHub 起源はどの action も通常どおり同期する
+    assert should_skip_backlog_sync("ふつうの本文", "edited") is False
+    assert should_skip_backlog_sync("", "opened") is False
+    assert should_skip_backlog_sync(None, "closed") is False
 
     globals()["bl_request"] = _orig
     assert normalize_space_id("https://myspace.backlog.jp") == "myspace"
