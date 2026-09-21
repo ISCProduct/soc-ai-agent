@@ -1,7 +1,7 @@
 package middleware_test
 
 // レート制限ミドルウェアのテスト（Issue #325）
-// 実行: cd Backend && go test ./test/middleware/... -run TestRateLimit -v
+// 実行: cd Backend && go test ./internal/middleware/... -run TestRateLimit -v
 
 import (
 	"net/http"

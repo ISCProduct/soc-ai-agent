@@ -1,7 +1,7 @@
 package middleware_test
 
 // 管理者認証ミドルウェアのセキュリティテスト
-// 実行: cd Backend && go test ./test/middleware/... -run TestAdminAuth -v
+// 実行: cd Backend && go test ./internal/middleware/... -run TestAdminAuth -v
 
 import (
 	"crypto/hmac"

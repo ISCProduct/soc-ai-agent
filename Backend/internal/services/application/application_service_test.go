@@ -2,7 +2,7 @@ package application_test
 
 // ApplicationServiceの状態遷移エンジンテスト
 //
-// 実行: cd Backend && go test ./test/services/... -run Application -v
+// 実行: cd Backend && go test ./internal/services/... -run Application -v
 
 import (
 	"testing"

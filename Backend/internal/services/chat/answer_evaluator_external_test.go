@@ -10,7 +10,7 @@ package chat_test
 //   - RMSE が 20 点以下であること（全 20 サンプル平均）
 //   - カテゴリ推論が正しい分類を返すこと
 //
-// 実行: cd Backend && go test ./test/services/... -run Evaluator -v
+// 実行: cd Backend && go test ./internal/services/... -run Evaluator -v
 
 import (
 	"fmt"

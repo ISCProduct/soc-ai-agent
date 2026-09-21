@@ -5,7 +5,7 @@ package chat_test
 // EvaluateWithLLMFallback / EvaluateHybrid の振る舞いを、
 // モックHTTPサーバー経由で検証する。
 //
-// 実行: cd Backend && go test ./test/services/... -run LLM -v
+// 実行: cd Backend && go test ./internal/services/... -run LLM -v
 
 import (
 	"context"

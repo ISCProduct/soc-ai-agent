@@ -1,7 +1,7 @@
 package middleware_test
 
 // OAuth state 検証のテスト（Issue #324）
-// 実行: cd Backend && go test ./test/middleware/... -run TestOAuthState -v
+// 実行: cd Backend && go test ./internal/middleware/... -run TestOAuthState -v
 
 import (
 	"crypto/hmac"

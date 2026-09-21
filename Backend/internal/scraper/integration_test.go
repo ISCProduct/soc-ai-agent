@@ -3,7 +3,7 @@ package scraper_test
 // 統合テスト: 実際の gBizINFO API を使用して動作確認を行う。
 //
 // 実行方法:
-//   GBIZINFO_API_TOKEN=<your-token> go test ./test/scraper/... -run Integration -v
+//   GBIZINFO_API_TOKEN=<your-token> go test ./internal/scraper/... -run Integration -v
 //
 // トークン未設定の場合は全テストが自動的にスキップされる。
 // gBizINFO APIトークンの取得: https://info.gbiz.go.jp/

@@ -1,7 +1,7 @@
 package matching_test
 
 // マッチングサービス内部ロジックのユニットテスト
-// 実行: cd Backend && go test ./test/services/... -run TestFormatTopUserScores -v
+// 実行: cd Backend && go test ./internal/services/... -run TestFormatTopUserScores -v
 
 import (
 	"strings"
