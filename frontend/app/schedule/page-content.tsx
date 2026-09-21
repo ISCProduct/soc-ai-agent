@@ -271,7 +271,11 @@ export default function PageContent() {
           <Divider />
 
           {/* Weekday headers */}
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', bgcolor: '#f9f9f9' }}>
+          {/* 曜日行とカレンダー行は同じ列定義にする。
+              1fr は最小コンテンツ幅を下回れないため、長い企業名が入った週だけ
+              列幅が変わり、曜日と日付の対応がずれていた
+              （320pxでは右端の25・26日が画面外へ消えた）。 */}
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', bgcolor: '#f9f9f9' }}>
             {WEEKDAYS.map((d, i) => (
               <Box key={d} sx={{
                 p: { xs: 0.5, sm: 1 }, textAlign: 'center',
@@ -288,7 +292,7 @@ export default function PageContent() {
           {/* Calendar grid */}
           <Box>
             {weeks.map((week, wi) => (
-              <Box key={wi} sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: wi < weeks.length - 1 ? '1px solid #eee' : 'none' }}>
+              <Box key={wi} sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', borderBottom: wi < weeks.length - 1 ? '1px solid #eee' : 'none' }}>
                 {week.map((day, di) => {
                   const isToday = day &&
                     day.getFullYear() === today.getFullYear() &&
@@ -301,6 +305,10 @@ export default function PageContent() {
                       onClick={() => day && openCreateDialog(day)}
                       sx={{
                         minHeight: { xs: 52, sm: 80 },
+                        // 列が中身に押し広げられないようにする。
+                        // これが無いと minmax(0,1fr) でもセル自身が最小幅を主張する。
+                        minWidth: 0,
+                        overflow: 'hidden',
                         p: 0.5,
                         borderRight: di < 6 ? '1px solid #eee' : 'none',
                         bgcolor: day ? '#fff' : '#f9f9f9',
