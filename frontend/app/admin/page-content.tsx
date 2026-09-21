@@ -13,7 +13,7 @@ import {
 } from '@mui/material'
 import Grid from '@mui/material/Grid'
 import { authService } from '@/lib/auth'
-import { getAdminSchoolAccess } from '@/lib/admin-school-access'
+import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 

@@ -7,7 +7,7 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
-import { useRequirePlatformAdmin } from '@/lib/use-require-platform-admin'
+import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'

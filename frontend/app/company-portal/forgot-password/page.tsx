@@ -12,7 +12,7 @@ import {
   Typography,
 } from '@mui/material'
 import Link from 'next/link'
-import { companyAuthService } from '@/lib/company-auth'
+import { companyAuthService } from '@/lib/company/auth'
 
 export default function CompanyPortalForgotPasswordPage() {
   const [email, setEmail] = useState('')

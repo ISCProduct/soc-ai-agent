@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { getAdminSchoolAccess } from '@/lib/admin-school-access'
+import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 
 /**
  * システム管理者専用ページ用。担当校つき管理者は /admin へ戻す。

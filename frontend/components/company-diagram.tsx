@@ -22,7 +22,7 @@ import {
     type CompanyMarketInfo,
     type Company,
     type MarketType,
-} from '@/lib/company-data';
+} from '@/lib/company/data';
 import { formatRelationLabel } from '@/lib/relation-labels';
 import { layoutBusinessGraph, layoutCapitalGraphFromEdges } from '@/lib/relation-graph';
 import { edgeTypes } from '@/components/diagram/RelationEdge';

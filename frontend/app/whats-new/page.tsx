@@ -2,7 +2,7 @@ import { Container } from '@mui/material'
 import { BackButton } from '@/components/common/back-button'
 import { MarkWhatsNewSeen } from '@/components/common/mark-whats-new-seen'
 import { fetchWhatsNewEntriesServer, type WhatsNewEntry } from '@/lib/whats-new-data'
-import { getServerUserAuthHeaders, requireSessionUser } from '@/lib/server-auth'
+import { getServerUserAuthHeaders, requireSessionUser } from '@/lib/auth/server'
 import { WhatsNewView } from './whats-new-view'
 
 export default async function WhatsNewPage() {

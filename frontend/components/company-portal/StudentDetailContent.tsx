@@ -16,8 +16,8 @@ import {
   Typography,
 } from '@mui/material'
 import { PageContainer } from '@/components/admin/PageContainer'
-import { companyAuthService } from '@/lib/company-auth'
-import { companyStudentService, StudentDetail, StudentTag } from '@/lib/company-students'
+import { companyAuthService } from '@/lib/company/auth'
+import { companyStudentService, StudentDetail, StudentTag } from '@/lib/company/students'
 
 /** 面接レポートのJSON文字列配列を安全にパースする（不正なJSONは無視する） */
 function parseJsonList(raw: string): string[] {

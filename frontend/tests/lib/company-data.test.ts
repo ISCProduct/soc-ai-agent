@@ -5,7 +5,7 @@ import {
   fetchCompanySummary,
   formatEmployeeCount,
   CompanyDataFetchError,
-} from '@/lib/company-data'
+} from '@/lib/company/data'
 
 describe('formatEmployeeCount', () => {
   it('labels consolidated and standalone counts', () => {

@@ -48,7 +48,7 @@ describe('リクエストID伝播のカバレッジ', () => {
 
   it('共通ヘルパーが X-Request-ID を転送している', () => {
     const apiProxy = readFileSync(join(__dirname, '..', '..', 'lib', 'api-proxy.ts'), 'utf8')
-    const adminProxy = readFileSync(join(__dirname, '..', '..', 'lib', 'admin-backend-proxy.ts'), 'utf8')
+    const adminProxy = readFileSync(join(__dirname, '..', '..', 'lib', 'admin', 'backend-proxy.ts'), 'utf8')
     expect(apiProxy).toContain('X-Request-ID')
     expect(adminProxy).toContain('X-Request-ID')
   })

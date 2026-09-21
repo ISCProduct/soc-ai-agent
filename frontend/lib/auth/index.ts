@@ -1,5 +1,5 @@
-import { BACKEND_URL } from './backend-url'
-import { extractTenantSlug } from './tenant'
+import { BACKEND_URL } from '../backend-url'
+import { extractTenantSlug } from '../tenant'
 import { clearChatSessionOnEnd } from '@/components/mui-chat/utils'
 
 // middleware.tsを経由しない直接Backend fetch用に、現在のHostから学園slugヘッダーを組み立てる

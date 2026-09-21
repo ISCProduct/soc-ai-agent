@@ -4,7 +4,7 @@ import {
   jsonFromProxyResult,
   proxyErrorResponse,
   adminProxyHeaders,
-} from '@/lib/admin-backend-proxy'
+} from '@/lib/admin/backend-proxy'
 
 export const dynamic = 'force-dynamic'
 

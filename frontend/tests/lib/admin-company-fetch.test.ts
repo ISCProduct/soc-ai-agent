@@ -4,7 +4,7 @@ import {
   hasActionableSoftEmpty,
   isActionableEmptyStep,
   type FetchPrimaryResponse,
-} from '@/lib/admin-company-fetch'
+} from '@/lib/admin/company-fetch'
 
 describe('admin-company-fetch', () => {
   const base: FetchPrimaryResponse = {

@@ -2,7 +2,7 @@ import {
   infoFieldEnabled,
   resolveIndustryFieldProfile,
   techFieldSpec,
-} from '@/lib/admin-company-field-profile'
+} from '@/lib/admin/company-field-profile'
 
 describe('admin-company-field-profile', () => {
   describe('resolveIndustryFieldProfile', () => {

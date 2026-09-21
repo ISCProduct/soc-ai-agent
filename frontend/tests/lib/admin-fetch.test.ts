@@ -1,4 +1,4 @@
-import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin-fetch'
+import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin/fetch'
 import { FetchTimeoutError } from '@/lib/fetch-timeout'
 import { GATEWAY_USER_MESSAGE, UserFacingApiError } from '@/lib/user-facing-error'
 

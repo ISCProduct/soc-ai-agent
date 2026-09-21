@@ -1,4 +1,4 @@
-import { companyAuthService } from '@/lib/company-auth'
+import { companyAuthService } from '@/lib/company/auth'
 
 // 企業ポータルの自社プロフィール編集と担当者管理（#1322）。
 //

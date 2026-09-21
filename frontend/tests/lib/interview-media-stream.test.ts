@@ -3,7 +3,7 @@ import {
   classifyMediaErrorKind,
   mediaErrorMessage,
 } from '@/app/interview/lib/mediaStream'
-import { parseMediaError } from '@/lib/interview-utils'
+import { parseMediaError } from '@/lib/interview/utils'
 
 function track(readyState: 'live' | 'ended') {
   return { readyState } as MediaStreamTrack

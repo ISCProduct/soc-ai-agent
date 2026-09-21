@@ -3,7 +3,7 @@
  * Backend 専用 API POST /api/admin/companies/:id/fetch-primary を呼ぶ。
  */
 
-import { resolveIndustryFieldProfile } from '@/lib/admin-company-field-profile'
+import { resolveIndustryFieldProfile } from '@/lib/admin/company-field-profile'
 
 export type FetchPrimaryStep = {
   status?: string

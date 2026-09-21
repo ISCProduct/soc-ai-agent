@@ -1,4 +1,4 @@
-import { companyAuthService } from '@/lib/company-auth'
+import { companyAuthService } from '@/lib/company/auth'
 
 // 企業ポータルの求人管理（#1321）。
 //

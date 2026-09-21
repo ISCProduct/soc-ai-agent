@@ -1,7 +1,7 @@
-import { BACKEND_URL } from './backend-url'
-import { authService } from './auth'
-import { fetchWithTimeout, LIST_FETCH_TIMEOUT_MS } from './fetch-timeout'
-import { extractApiErrorMessage } from './interview-utils'
+import { BACKEND_URL } from '../backend-url'
+import { authService } from '../auth/index'
+import { fetchWithTimeout, LIST_FETCH_TIMEOUT_MS } from '../fetch-timeout'
+import { extractApiErrorMessage } from '../interview/utils'
 
 const DEFAULT_INTERVIEW_MAX_MINUTES = 30
 const DEFAULT_INTERVIEW_QUESTION_DURATION_SECONDS = 180

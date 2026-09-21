@@ -15,7 +15,7 @@ import {
 } from '@mui/material'
 import { ArrowBack, LocationOn, People, TrendingUp as TrendingUpIcon } from '@mui/icons-material'
 import dynamic from 'next/dynamic'
-import type { CapitalRelation, CompanyMarketInfo } from '@/lib/company-data'
+import type { CapitalRelation, CompanyMarketInfo } from '@/lib/company/data'
 import type { Company } from '../types'
 
 const CompanyRelationDiagram = dynamic(() => import('./CompanyRelationDiagram'), {
