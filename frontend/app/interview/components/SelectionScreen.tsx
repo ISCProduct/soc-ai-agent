@@ -148,10 +148,10 @@ export default function SelectionScreen({
       <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: { xs: 2, sm: 3, lg: 10 }, py: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0, flex: 1 }}>
           <Box sx={{ color: PRIMARY, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-            <PsychologyIcon sx={{ fontSize: { xs: 26, sm: 32 } }} />
+            <PsychologyIcon sx={{ fontSize: 32 }} />
           </Box>
-          {/* 13文字あるので、狭い端末では縮めないと右の戻る/アバターを画面外へ押し出す。 */}
-          <Typography noWrap sx={{ fontWeight: 700, fontSize: { xs: 14, sm: 20 }, color: '#0f172a' }}>IT業界キャリアエージェント</Typography>
+          {/* 13文字あるので、縮み代(minWidth:0)を与えないと右の戻る/アバターを画面外へ押し出す。 */}
+          <Typography noWrap sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: '#0f172a' }}>IT業界キャリアエージェント</Typography>
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
           <IconButton sx={{ bgcolor: '#f1f5f9', color: '#475569' }} size="small" onClick={onBack}>
