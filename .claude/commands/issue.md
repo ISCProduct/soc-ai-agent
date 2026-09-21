@@ -55,7 +55,11 @@ gh issue create --title "{{title}}" --body-file {{tmpfile}} --label "{{label}}"
 {{spec_url}}
 ```
 
-10. **書き戻し** … 3ページとも `Issue番号` / `GitHub` / `Name`（`#N ` 先頭）を更新。`ステータス` がある DB は `レビュー中`（または `実装中`）
+10. **書き戻し** … 3ページとも `Issue番号` / `GitHub` / `Name`（`#N ` 先頭）/ `Backlogキー` を更新。`ステータス` がある DB（PRD / DesignDoc）は `承認済み`
+
+    - **`Backlogキー`**: Issue作成直後はまだ空。`github-issue-to-backlog.yml` が Backlog 課題を作り、GitHub Issue のタイトルを `[SOCAIAGENT-N] ...` に書き換えるまで数十秒かかる。`gh issue view {{number}} --json title -q .title` を数回試してプレフィックスが付いたら、その `SOCAIAGENT-N` を書き込む。付かないまま終わったら空のままにせず、理由をユーザーへ伝える（空欄のまま放置すると Backlog と突き合わせられない）。
+    - **`ステータス` は `承認済み`**。`レビュー中` にしない。起票まで進んだ時点で内容は合意済みであり、`レビュー中` のまま誰も動かさないため、実際に全件が止まっていた。
+    - 実装が main へマージされたら `完了` に更新する（`/pr` のマージ後、または後追いで）。
 
 **禁止・注意:**
 - Notion 作成を飛ばして Issue に全文を載せない
