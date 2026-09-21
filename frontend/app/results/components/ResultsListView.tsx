@@ -398,7 +398,7 @@ export default function ResultsListView({
                       size="small"
                       onClick={(e) => {
                         e.stopPropagation()
-                        onNavigate(`/Correlation-diagram?company_id=${company.id}`)
+                        onNavigate(`/correlation-diagram?company_id=${company.id}`)
                       }}
                     >
                       関連企業を見る

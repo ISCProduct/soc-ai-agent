@@ -58,7 +58,7 @@ import { computeProgressTotals } from './mui-chat/utils'
 const DRAWER_WIDTH = 280
 
 const NAV_ICONS: Record<(typeof SIDEBAR_NAV_ITEMS)[number]['href'], React.ReactNode> = {
-    '/Correlation-diagram': <BorderAll color="primary"/>,
+    '/correlation-diagram': <BorderAll color="primary"/>,
     '/chat-history': <History color="primary"/>,
     '/resume': <Description color="primary"/>,
     '/interview': <RecordVoiceOver color="primary"/>,
@@ -442,7 +442,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
 
                 <ListItem disablePadding>
                     <ListItemButton
-                        onClick={() => router.push('/Correlation-diagram')}
+                        onClick={() => router.push('/correlation-diagram')}
                         sx={{
                             borderRadius: 1,
                         }}

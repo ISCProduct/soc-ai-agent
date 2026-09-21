@@ -26,7 +26,7 @@ import ManageAccountsIcon from '@mui/icons-material/ManageAccounts'
 import { SIDEBAR_NAV_ITEMS, shouldShowStudentBottomNav } from '@/lib/sidebar-nav'
 
 const NAV_ICONS: Record<(typeof SIDEBAR_NAV_ITEMS)[number]['href'], React.ReactNode> = {
-  '/Correlation-diagram': <BorderAllIcon color="primary" />,
+  '/correlation-diagram': <BorderAllIcon color="primary" />,
   '/chat-history': <HistoryIcon color="primary" />,
   '/resume': <DescriptionIcon color="primary" />,
   '/interview': <RecordVoiceOverIcon color="primary" />,
