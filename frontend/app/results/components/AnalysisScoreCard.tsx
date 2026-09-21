@@ -3,7 +3,7 @@
 import { Alert, Box, Button, Typography } from '@mui/material'
 import { Refresh } from '@mui/icons-material'
 import type { AnalysisScores } from '../types'
-import { SHORTLIST } from '../shortlistTokens'
+import { UI } from '@/lib/design/tokens'
 
 export interface AnalysisScoreCardProps {
   analysisScores: AnalysisScores | null
@@ -44,7 +44,7 @@ export default function AnalysisScoreCard({
       */}
       {(scoreComment || analysisScores) && (
         <Box sx={{ mb: 4 }}>
-          <Typography sx={{ fontSize: 17, fontWeight: 700, color: SHORTLIST.ink, mb: 1.5 }}>
+          <Typography sx={{ fontSize: 17, fontWeight: 700, color: UI.ink, mb: 1.5 }}>
             どこまで聞けているか
           </Typography>
           {analysisScores && (
@@ -56,16 +56,16 @@ export default function AnalysisScoreCard({
                 { label: '将来', value: analysisScores.future },
               ].map(({ label, value }) => (
                 <Box key={label} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                  <Typography sx={{ fontSize: 14, color: SHORTLIST.inkSoft, minWidth: 40 }}>{label}</Typography>
-                  <Box sx={{ flex: 1, height: 8, backgroundColor: SHORTLIST.ruleSoft, position: 'relative' }}>
+                  <Typography sx={{ fontSize: 14, color: UI.inkSoft, minWidth: 40 }}>{label}</Typography>
+                  <Box sx={{ flex: 1, height: 8, backgroundColor: UI.ruleSoft, position: 'relative' }}>
                     <Box sx={{
                       position: 'absolute', inset: 0, right: 'auto',
                       width: `${Math.max(0, Math.min(100, value))}%`,
-                      backgroundColor: value < 50 ? SHORTLIST.flag : SHORTLIST.mark,
+                      backgroundColor: value < 50 ? UI.flag : UI.mark,
                     }} />
                   </Box>
                   <Typography sx={{
-                    fontSize: 13, color: SHORTLIST.inkSoft, minWidth: 34, textAlign: 'right',
+                    fontSize: 13, color: UI.inkSoft, minWidth: 34, textAlign: 'right',
                     fontVariantNumeric: 'tabular-nums',
                   }}>
                     {value}
@@ -75,7 +75,7 @@ export default function AnalysisScoreCard({
             </Box>
           )}
           {scoreComment && (
-            <Typography sx={{ fontSize: 14.5, lineHeight: 1.9, color: SHORTLIST.inkSoft, maxWidth: '64ch' }}>
+            <Typography sx={{ fontSize: 14.5, lineHeight: 1.9, color: UI.inkSoft, maxWidth: '64ch' }}>
               {scoreComment}
             </Typography>
           )}

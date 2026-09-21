@@ -34,7 +34,7 @@ import {
   getGuestApplicationsButtonProps,
   getGuestEmailButtonProps,
 } from '@/lib/guest-limits'
-import { SHORTLIST, leadSentences, scaleBand } from '../shortlistTokens'
+import { UI, leadSentences, scaleBand } from '@/lib/design/tokens'
 
 export interface ResultsListViewProps {
   companies: Company[]
@@ -110,14 +110,14 @@ export default function ResultsListView({
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      backgroundColor: SHORTLIST.paper,
+      backgroundColor: UI.paper,
       pb: { xs: 7, md: 0 },
     }}>
       {/* ヘッダー部分 */}
       <Box sx={{
         p: { xs: 2, sm: 3 },
-        borderBottom: `1px solid ${SHORTLIST.rule}`,
-        backgroundColor: SHORTLIST.paper,
+        borderBottom: `1px solid ${UI.rule}`,
+        backgroundColor: UI.paper,
         flexShrink: 0,
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 2 }}>
@@ -165,13 +165,13 @@ export default function ResultsListView({
               fontSize: { xs: 22, sm: 28 },
               fontWeight: 700,
               letterSpacing: '0.01em',
-              color: SHORTLIST.ink,
+              color: UI.ink,
               mb: 0.5,
             }}
           >
             あなたに近い{companies.length}社
           </Typography>
-          <Typography sx={{ fontSize: 15, color: SHORTLIST.inkSoft, maxWidth: '62ch', lineHeight: 1.85, mb: 1.5 }}>
+          <Typography sx={{ fontSize: 15, color: UI.inkSoft, maxWidth: '62ch', lineHeight: 1.85, mb: 1.5 }}>
             {isProvisional
               ? 'ここまでの回答で並べています。会話を続けると根拠が増え、順番も変わります。'
               : '回答の傾向と、企業が重視する人物像を突き合わせた順に並べています。'}
@@ -182,7 +182,7 @@ export default function ResultsListView({
             ここで一度「差は小さい」と言うほうが正直で、読む手間も少ない。
           */}
           {companies.length > 1 && band.max - band.min <= 15 && (
-            <Typography sx={{ fontSize: 14, color: SHORTLIST.inkSoft, mb: 1.5 }}>
+            <Typography sx={{ fontSize: 14, color: UI.inkSoft, mb: 1.5 }}>
               適合度は{band.min}〜{band.max}に収まっています。順位の差はわずかなので、
               上から順に決める必要はありません。
             </Typography>
@@ -200,9 +200,9 @@ export default function ResultsListView({
                   textAlign: 'left',
                   maxWidth: '68ch',
                   backgroundColor: 'transparent',
-                  border: `1px solid ${SHORTLIST.flag}`,
+                  border: `1px solid ${UI.flag}`,
                   borderRadius: 0.5,
-                  color: SHORTLIST.ink,
+                  color: UI.ink,
                   py: 1.25,
                 }}
               >
@@ -230,7 +230,7 @@ export default function ResultsListView({
         flexGrow: 1,
         overflowY: 'auto',
         p: { xs: 2, sm: 4 },
-        backgroundColor: SHORTLIST.paper,
+        backgroundColor: UI.paper,
       }}>
         <Box sx={{ maxWidth: 1200, mx: 'auto' }}>
           <AnalysisScoreCard
@@ -246,11 +246,11 @@ export default function ResultsListView({
           */}
           {(jobSuitabilityComment || suggestedRoles.length > 0) && (
             <Box sx={{ mb: 4 }}>
-              <Typography sx={{ fontSize: 17, fontWeight: 700, color: SHORTLIST.ink, mb: 1 }}>
+              <Typography sx={{ fontSize: 17, fontWeight: 700, color: UI.ink, mb: 1 }}>
                 向いていそうな職種
               </Typography>
               {jobSuitabilityComment && (
-                <Typography sx={{ fontSize: 14.5, lineHeight: 1.9, color: SHORTLIST.inkSoft, maxWidth: '64ch', mb: 1.5 }}>
+                <Typography sx={{ fontSize: 14.5, lineHeight: 1.9, color: UI.inkSoft, maxWidth: '64ch', mb: 1.5 }}>
                   {jobSuitabilityComment}
                 </Typography>
               )}
@@ -261,15 +261,15 @@ export default function ResultsListView({
                     key={i}
                     sx={{
                       py: 1.25,
-                      borderTop: i === 0 ? `1px solid ${SHORTLIST.ruleSoft}` : 'none',
-                      borderBottom: `1px solid ${SHORTLIST.ruleSoft}`,
+                      borderTop: i === 0 ? `1px solid ${UI.ruleSoft}` : 'none',
+                      borderBottom: `1px solid ${UI.ruleSoft}`,
                     }}
                   >
-                    <Typography sx={{ fontSize: 15, fontWeight: 700, color: SHORTLIST.ink }}>
+                    <Typography sx={{ fontSize: 15, fontWeight: 700, color: UI.ink }}>
                       {role.title}
                     </Typography>
                     {role.reason && (
-                      <Typography sx={{ fontSize: 14, lineHeight: 1.85, color: SHORTLIST.inkSoft, mt: 0.25 }}>
+                      <Typography sx={{ fontSize: 14, lineHeight: 1.85, color: UI.inkSoft, mt: 0.25 }}>
                         {role.reason}
                       </Typography>
                     )}
@@ -290,14 +290,14 @@ export default function ResultsListView({
                 component="li"
                 key={`${company.id}-${index}`}
                 sx={{
-                  borderTop: index === 0 ? `1px solid ${SHORTLIST.rule}` : 'none',
-                  borderBottom: `1px solid ${SHORTLIST.rule}`,
+                  borderTop: index === 0 ? `1px solid ${UI.rule}` : 'none',
+                  borderBottom: `1px solid ${UI.rule}`,
                   cursor: 'pointer',
                   px: { xs: 2, sm: 3 },
                   py: { xs: 2.5, sm: 3 },
                   transition: 'background-color 120ms',
                   '&:hover': { backgroundColor: 'rgba(255,255,255,0.55)' },
-                  '&:focus-visible': { outline: `3px solid ${SHORTLIST.mark}`, outlineOffset: -3 },
+                  '&:focus-visible': { outline: `3px solid ${UI.mark}`, outlineOffset: -3 },
                 }}
                 onClick={() => onSelectCompany(company)}
               >
@@ -309,7 +309,7 @@ export default function ResultsListView({
                         sx={{
                           fontSize: { xs: 20, sm: 26 },
                           fontWeight: 700,
-                          color: SHORTLIST.rule,
+                          color: UI.rule,
                           fontVariantNumeric: 'tabular-nums',
                           lineHeight: 1,
                           minWidth: { xs: 24, sm: 34 },
@@ -318,10 +318,10 @@ export default function ResultsListView({
                         {index + 1}
                       </Typography>
                       <Box sx={{ minWidth: 0 }}>
-                        <Typography sx={{ fontSize: { xs: 17, sm: 20 }, fontWeight: 700, color: SHORTLIST.ink, lineHeight: 1.4 }}>
+                        <Typography sx={{ fontSize: { xs: 17, sm: 20 }, fontWeight: 700, color: UI.ink, lineHeight: 1.4 }}>
                           {company.name}
                         </Typography>
-                        <Typography sx={{ fontSize: 13, color: SHORTLIST.inkSoft, mt: 0.25 }}>
+                        <Typography sx={{ fontSize: 13, color: UI.inkSoft, mt: 0.25 }}>
                           {[company.industry, company.location, company.employees].filter(Boolean).join('　')}
                         </Typography>
                       </Box>
@@ -332,13 +332,13 @@ export default function ResultsListView({
                           size="small"
                           onClick={(e) => onToggleFavorite(e, company)}
                           disabled={favoritingId === company.matchId}
-                          sx={{ color: company.isFavorited ? SHORTLIST.flag : SHORTLIST.rule }}
+                          sx={{ color: company.isFavorited ? UI.flag : UI.rule }}
                         >
                           {company.isFavorited ? <Favorite fontSize="small" /> : <FavoriteBorder fontSize="small" />}
                         </IconButton>
                       </Tooltip>
                       <Typography sx={{
-                        fontSize: { xs: 22, sm: 26 }, fontWeight: 700, color: SHORTLIST.ink,
+                        fontSize: { xs: 22, sm: 26 }, fontWeight: 700, color: UI.ink,
                         fontVariantNumeric: 'tabular-nums', lineHeight: 1,
                       }}>
                         {company.matchScore}
@@ -352,12 +352,12 @@ export default function ResultsListView({
                   */}
                   {typeof company.matchedAxisCount === 'number' &&
                     company.matchedAxisCount < maxAxisCount && (
-                      <Typography sx={{ fontSize: 13, color: SHORTLIST.flag, mt: 0.5 }}>
+                      <Typography sx={{ fontSize: 13, color: UI.flag, mt: 0.5 }}>
                         根拠 {company.matchedAxisCount}軸（他の候補より少なめ）
                       </Typography>
                     )}
 
-                  <Typography sx={{ fontSize: 15, lineHeight: 1.9, color: SHORTLIST.ink, maxWidth: '68ch', mb: 2 }}>
+                  <Typography sx={{ fontSize: 15, lineHeight: 1.9, color: UI.ink, maxWidth: '68ch', mb: 2 }}>
                     {leadSentences(company.description)}
                   </Typography>
 
@@ -373,8 +373,8 @@ export default function ResultsListView({
                           key={i}
                           sx={{
                             fontSize: 12.5,
-                            color: SHORTLIST.inkSoft,
-                            border: `1px solid ${SHORTLIST.ruleSoft}`,
+                            color: UI.inkSoft,
+                            border: `1px solid ${UI.ruleSoft}`,
                             borderRadius: 0.5,
                             px: 0.9,
                             py: 0.2,
@@ -400,7 +400,7 @@ export default function ResultsListView({
                     1行で書くほうが速く読める。
                   */}
                   {company.categoryScores && (
-                    <Typography sx={{ fontSize: 13.5, color: SHORTLIST.inkSoft, mb: 2 }}>
+                    <Typography sx={{ fontSize: 13.5, color: UI.inkSoft, mb: 2 }}>
                       噛み合った軸：
                       {getTopCategoryScores(company.categoryScores, 3)
                         .map(({ label, score }) => `${label} ${Math.round(score)}`)
@@ -428,7 +428,7 @@ export default function ResultsListView({
                     <Button
                       variant="text"
                       size="small"
-                      sx={{ color: SHORTLIST.inkSoft, fontWeight: 500 }}
+                      sx={{ color: UI.inkSoft, fontWeight: 500 }}
                       onClick={(e) => {
                         e.stopPropagation()
                         onNavigate(`/correlation-diagram?company_id=${company.id}`)
@@ -439,7 +439,7 @@ export default function ResultsListView({
                     <Button
                       variant="text"
                       size="small"
-                      sx={{ color: SHORTLIST.inkSoft, fontWeight: 500 }}
+                      sx={{ color: UI.inkSoft, fontWeight: 500 }}
                       onClick={(e) => {
                         e.stopPropagation()
                         onNavigate(`/es-rewrite?${buildEsRewriteQuery(company)}`)
