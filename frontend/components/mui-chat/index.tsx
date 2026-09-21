@@ -1,7 +1,7 @@
 'use client'
 
 import { Box } from '@mui/material'
-import styles from './mui-chat.module.css'
+import styles from './MuiChat.module.css'
 import { PageLoading } from '@/components/common/PageLoading'
 import { useMuiChat } from './hooks/useMuiChat'
 import { ChatHeader } from './components/ChatHeader'

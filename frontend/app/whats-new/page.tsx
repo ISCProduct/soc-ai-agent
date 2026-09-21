@@ -1,6 +1,6 @@
 import { Container } from '@mui/material'
-import { BackButton } from '@/components/common/back-button'
-import { MarkWhatsNewSeen } from '@/components/common/mark-whats-new-seen'
+import { BackButton } from '@/components/common/BackButton'
+import { MarkWhatsNewSeen } from '@/components/common/MarkWhatsNewSeen'
 import { fetchWhatsNewEntriesServer, type WhatsNewEntry } from '@/lib/whats-new-data'
 import { getServerUserAuthHeaders, requireSessionUser } from '@/lib/auth/server'
 import { WhatsNewView } from './whats-new-view'

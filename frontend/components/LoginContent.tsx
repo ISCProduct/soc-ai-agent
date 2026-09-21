@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { LoginPage } from '@/components/login-page'
+import { LoginPage } from '@/components/LoginPage'
 import { authService, AuthResponse } from '@/lib/auth'
 import { isLoginRegisterTab } from '@/lib/guest-limits'
 
