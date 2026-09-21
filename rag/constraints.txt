@@ -57,4 +57,4 @@ prometheus-client>=0.21,<1.0
 
 # --- エラートラッキング（#1185） ---
 # FastAPI / Starlette 統合付き。3.x は未検証のため上限を設定する。
-sentry-sdk>=2.19.0,<3.0
+sentry-sdk>=2.69.2,<3.0

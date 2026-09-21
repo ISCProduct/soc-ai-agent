@@ -17,7 +17,7 @@ prometheus-fastapi-instrumentator==8.1.0
 # extras は付けない。CI が本ファイルを -c constraints としても使うため、
 # pip が "Constraints cannot have extras" で落ちる（rag-tests.yml）。
 # FastAPI 統合は fastapi が既に入っているので sentry_sdk 本体で足りる。
-sentry-sdk>=2.19.0,<3.0
+sentry-sdk>=2.69.2,<3.0
 pydantic==2.13.5
 pytest==9.1.1
 tiktoken==0.13.0
