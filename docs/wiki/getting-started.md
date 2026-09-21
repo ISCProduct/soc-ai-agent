@@ -97,8 +97,9 @@ NEXT_PUBLIC_INTERVIEW_COST_PER_MIN_USD=0.18
 docker compose up -d --build
 
 # RAG + 独立 Chroma（履歴書レビュー / 面接 hints で必須）
+# どちらも既定サービスなので上の up -d で一緒に起動する。
+# 作り直したいときだけ:
 make rag-up
-# または: docker compose --profile rag up -d --build chroma rag-review
 ```
 
 | サービス | URL |
@@ -135,7 +136,7 @@ make rag-rebuild
 ```sh
 docker compose logs -f app       # バックエンド
 docker compose logs -f frontend  # フロントエンド
-docker compose --profile rag logs -f chroma rag-review
+docker compose logs -f chroma rag-review
 ```
 
 > **注意**: プロジェクトルートには `docker-compose.yml`（ハイフンあり）と `compose.yml` の2つが存在します。
@@ -216,10 +217,13 @@ go run ./cmd/migrate
 
 ```sh
 cd Backend
-go test ./internal/...      # 内部パッケージテスト
-go test ./test/...          # 統合テスト・コントローラーテスト
-go test ./...               # 全テスト
+go test ./internal/... ./migrations/...   # 本体のテスト（対象パッケージの隣に配置）
+go test ./test/...                        # 複数パッケージ横断のテストのみ（4ファイル）
+go test ./...                             # 全テスト
 ```
+
+> テストは対象パッケージの隣に置きます（例: `internal/controllers/admin/*_test.go`）。
+> `Backend/test/` に残しているのは、対象が1パッケージに定まらないものだけです。
 
 ### フロントエンド
 
