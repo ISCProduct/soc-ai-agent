@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { MenuItem, TextField } from '@mui/material'
-import { getAdminSchoolAccess, type AdminSchool } from '@/lib/admin-school-access'
+import { getAdminSchoolAccess, type AdminSchool } from '@/lib/admin/school-access'
 
 interface SchoolFilterSelectProps {
   value: number | undefined
@@ -60,7 +60,9 @@ export function SchoolFilterSelect({ value, onChange, onResolved }: SchoolFilter
       value={value ?? ''}
       onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
       size="small"
-      sx={{ minWidth: 200 }}
+      // 固定幅 200px は狭幅で画面外へ押し出す原因になる。
+      // 狭幅では幅いっぱい、md以上でだけ固定幅にする(#UI監査 R4)。
+      sx={{ minWidth: { xs: 0, md: 200 }, width: { xs: '100%', md: 'auto' } }}
     >
       {!restricted && <MenuItem value="">全学校</MenuItem>}
       {schools.map((school) => (

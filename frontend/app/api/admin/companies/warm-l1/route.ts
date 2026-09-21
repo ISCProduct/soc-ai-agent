@@ -4,7 +4,7 @@ import {
   jsonFromProxyResult,
   proxyAdminBackend,
   proxyErrorResponse,
-} from '@/lib/admin-backend-proxy'
+} from '@/lib/admin/backend-proxy'
 
 /** fetch-missing-batch と同じ。100社でも HeadersTimeout=5分で切れないようにする */
 const BATCH_TIMEOUT_MS = 900_000

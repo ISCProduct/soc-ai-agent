@@ -30,7 +30,7 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { authService } from '@/lib/auth'
-import { useRequirePlatformAdmin } from '@/lib/use-require-platform-admin'
+import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 
 type VectorStats = {
   total_collections: number

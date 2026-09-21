@@ -17,14 +17,14 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import { authService } from '@/lib/auth'
-import { getAdminSchoolAccess } from '@/lib/admin-school-access'
+import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminListCard } from '@/components/admin/AdminListCard'
 import { StatusBadge } from '@/components/admin/StatusBadge'
-import { isCompanyUnpublished } from '@/lib/company-draft'
+import { isCompanyUnpublished } from '@/lib/company/draft'
 
 type JobPosition = {
   id: number

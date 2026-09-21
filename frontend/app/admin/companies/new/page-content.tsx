@@ -13,10 +13,10 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
-import { useRequirePlatformAdmin } from '@/lib/use-require-platform-admin'
+import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
-import { applyInfoPayload, WORK_STYLE_OPTIONS } from '@/lib/admin-company-form'
+import { applyInfoPayload, WORK_STYLE_OPTIONS } from '@/lib/admin/company-form'
 
 export default function PageContent() {
   const platformReady = useRequirePlatformAdmin()

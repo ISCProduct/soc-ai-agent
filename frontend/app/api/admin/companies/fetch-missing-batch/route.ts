@@ -4,8 +4,8 @@ import {
   jsonFromProxyResult,
   proxyAdminBackend,
   proxyErrorResponse,
-} from '@/lib/admin-backend-proxy'
-import { formatMissingBatchLogLine } from '@/lib/admin-company-batch-progress'
+} from '@/lib/admin/backend-proxy'
+import { formatMissingBatchLogLine } from '@/lib/admin/company-batch-progress'
 
 /** Backend がレスポンスを返すまで最大15分待つ（global fetch / undici 既定の HeadersTimeout=5分を回避） */
 const BATCH_TIMEOUT_MS = 900_000

@@ -234,13 +234,22 @@ export default function PageContent() {
       )}
 
       {/* Filters */}
-      <Stack direction="row" spacing={2} mb={2}>
+      {/* 狭幅では縦積みにする。
+          横並びのまま minWidth:220 の並び替えと学校フィルターを置くと、
+          390px で document.scrollWidth が 468px になり画面全体が横スクロールした。
+          検索欄も極端に縮んで入力内容が読めなくなる。 */}
+      <Stack
+        direction={{ xs: 'column', md: 'row' }}
+        spacing={2}
+        mb={2}
+        sx={{ alignItems: { xs: 'stretch', md: 'center' } }}
+      >
         <TextField
           placeholder="名前・メール・学校名で検索"
           value={query}
           onChange={e => { setQuery(e.target.value); setPage(0) }}
           size="small"
-          sx={{ flex: 1 }}
+          sx={{ flex: { md: 1 }, minWidth: 0 }}
           InputProps={{
             startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>
           }}
@@ -251,7 +260,8 @@ export default function PageContent() {
           value={sort}
           onChange={e => { setSort(e.target.value); setPage(0) }}
           size="small"
-          sx={{ minWidth: 220 }}
+          // 狭幅では幅いっぱい。md以上だけ固定幅にする。
+          sx={{ minWidth: { xs: 0, md: 220 }, width: { xs: '100%', md: 'auto' } }}
         >
           {SORT_OPTIONS.map(opt => (
             <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>

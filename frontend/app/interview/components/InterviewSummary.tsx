@@ -17,7 +17,7 @@ import {
 import CheckIcon from '@mui/icons-material/Check'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { InterviewReport, PhraseSuggestion, interviewApi } from '@/lib/interview'
-import { parseJsonSafe } from '@/lib/interview-utils'
+import { parseJsonSafe } from '@/lib/interview/utils'
 import { PRIMARY } from '../constants'
 
 const SCORE_LABELS: Record<string, string> = {

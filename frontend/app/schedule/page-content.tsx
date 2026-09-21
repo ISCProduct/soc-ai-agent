@@ -271,7 +271,11 @@ export default function PageContent() {
           <Divider />
 
           {/* Weekday headers */}
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', bgcolor: '#f9f9f9' }}>
+          {/* 曜日行とカレンダー行は同じ列定義にする。
+              1fr は最小コンテンツ幅を下回れないため、長い企業名が入った週だけ
+              列幅が変わり、曜日と日付の対応がずれていた
+              （320pxでは右端の25・26日が画面外へ消えた）。 */}
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', bgcolor: '#f9f9f9' }}>
             {WEEKDAYS.map((d, i) => (
               <Box key={d} sx={{
                 p: { xs: 0.5, sm: 1 }, textAlign: 'center',
@@ -288,7 +292,7 @@ export default function PageContent() {
           {/* Calendar grid */}
           <Box>
             {weeks.map((week, wi) => (
-              <Box key={wi} sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: wi < weeks.length - 1 ? '1px solid #eee' : 'none' }}>
+              <Box key={wi} sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', borderBottom: wi < weeks.length - 1 ? '1px solid #eee' : 'none' }}>
                 {week.map((day, di) => {
                   const isToday = day &&
                     day.getFullYear() === today.getFullYear() &&
@@ -301,6 +305,10 @@ export default function PageContent() {
                       onClick={() => day && openCreateDialog(day)}
                       sx={{
                         minHeight: { xs: 52, sm: 80 },
+                        // 列が中身に押し広げられないようにする。
+                        // これが無いと minmax(0,1fr) でもセル自身が最小幅を主張する。
+                        minWidth: 0,
+                        overflow: 'hidden',
                         p: 0.5,
                         borderRight: di < 6 ? '1px solid #eee' : 'none',
                         bgcolor: day ? '#fff' : '#f9f9f9',
@@ -368,22 +376,32 @@ export default function PageContent() {
           .map(ev => (
             <Paper key={ev.id} elevation={1} sx={{ p: 2, mb: 1.5, borderRadius: 2, borderLeft: `4px solid ${stageColor(ev.stage)}` }}>
               <Stack direction="row" alignItems="flex-start" spacing={2}>
-                <Box flex={1}>
-                  <Stack direction="row" alignItems="center" spacing={1} mb={0.5}>
-                    <Typography fontWeight={600}>{ev.company_name}</Typography>
-                    <Chip label={ev.stage} size="small" sx={{ bgcolor: stageColor(ev.stage), color: '#fff', height: 20, fontSize: '0.7rem' }} />
-                    {ev.title && <Typography variant="body2" color="text.secondary">{ev.title}</Typography>}
+                {/*
+                  390px では企業名・段階・面接名を1行に詰めると面接名が数文字ずつに
+                  割れて読めなくなる（UI監査 R5）。1行目は企業名と段階だけにし、
+                  日時・面接名・メモはそれぞれ独立した行に落とす。
+                  minWidth:0 がないと長い企業名が右の編集/削除ボタンを押し出す。
+                */}
+                <Box flex={1} minWidth={0}>
+                  <Stack direction="row" alignItems="center" spacing={1} mb={0.5} flexWrap="wrap" useFlexGap>
+                    <Typography fontWeight={600} sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>{ev.company_name}</Typography>
+                    <Chip label={ev.stage} size="small" sx={{ bgcolor: stageColor(ev.stage), color: '#fff', height: 20, fontSize: '0.7rem', flexShrink: 0 }} />
                   </Stack>
                   <Typography variant="body2" color="text.secondary">
                     {new Date(ev.scheduled_at).toLocaleString('ja-JP', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </Typography>
+                  {ev.title && (
+                    <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>
+                      {ev.title}
+                    </Typography>
+                  )}
                   {ev.notes && (
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>
                       {ev.notes}
                     </Typography>
                   )}
                 </Box>
-                <Stack direction="row">
+                <Stack direction="row" sx={{ flexShrink: 0 }}>
                   <IconButton size="small" onClick={() => openEditDialog(ev)}>
                     <EditIcon fontSize="small" />
                   </IconButton>

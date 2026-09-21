@@ -17,6 +17,7 @@ import {
   Typography,
 } from '@mui/material'
 import type { CompanyCandidate } from '../types'
+import { companySourceLabel } from '../utils'
 
 type ResumeReviewFormProps = {
   companyQuery: string
@@ -71,7 +72,7 @@ export function ResumeReviewForm({
       <Stack spacing={2}>
         <Typography variant="h6">レビュー実行</Typography>
         <Typography variant="body2" color="text.secondary">
-          企業を指定する場合は、DB検索またはWEB実在確認で候補を選択してください（自由入力のみではレビューできません）。
+          企業を指定する場合は、「掲載企業から探す」または「Webから探す」で候補を選んでください（入力しただけではレビューできません）。
           企業なしで職種のみの一般レビューも可能です。
         </Typography>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'flex-start' }}>
@@ -94,7 +95,7 @@ export function ResumeReviewForm({
             disabled={companySearchLoading || !companyQuery.trim()}
             sx={{ whiteSpace: 'nowrap', minWidth: 100 }}
           >
-            DB検索
+            掲載企業から探す
           </Button>
           <Button
             variant="contained"
@@ -102,7 +103,7 @@ export function ResumeReviewForm({
             disabled={companySearchLoading || !companyQuery.trim()}
             sx={{ whiteSpace: 'nowrap', minWidth: 140 }}
           >
-            WEBで実在確認
+            Webから探す
           </Button>
         </Stack>
         {companySearchLoading && <LinearProgress />}
@@ -117,7 +118,7 @@ export function ResumeReviewForm({
             }
           >
             確定: {selectedCompanyMeta.name}
-            {selectedCompanyMeta.source ? `（${selectedCompanyMeta.source}）` : ''}
+            {selectedCompanyMeta.source ? `（${companySourceLabel(selectedCompanyMeta.source)}）` : ''}
             {selectedCompanyMeta.evidence_urls?.[0] ? ` / ${selectedCompanyMeta.evidence_urls[0]}` : ''}
           </Alert>
         )}
@@ -138,7 +139,7 @@ export function ResumeReviewForm({
                         {c.description}
                       </Typography>
                     )}
-                    <Chip size="small" label={c.source} sx={{ mt: 0.5 }} />
+                    <Chip size="small" label={companySourceLabel(c.source)} sx={{ mt: 0.5 }} />
                   </CardContent>
                 </CardActionArea>
               </Card>

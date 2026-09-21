@@ -10,7 +10,7 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
-import { useRequirePlatformAdmin } from '@/lib/use-require-platform-admin'
+import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 

@@ -14,8 +14,8 @@ import {
 } from '@mui/material'
 import { PageContainer } from '@/components/admin/PageContainer'
 import { PageLoading } from '@/components/common/PageLoading'
-import { companyAuthService } from '@/lib/company-auth'
-import { companyApplicationService, type CompanyDashboard } from '@/lib/company-applications'
+import { companyAuthService } from '@/lib/company/auth'
+import { companyApplicationService, type CompanyDashboard } from '@/lib/company/applications'
 
 // 集計カード。0件でも「何もない」と分かることが重要なので、
 // 件数は常に出し、次の行動への導線を添える（#1320）。

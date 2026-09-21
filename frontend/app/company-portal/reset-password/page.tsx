@@ -13,7 +13,7 @@ import {
   Typography,
 } from '@mui/material'
 import Link from 'next/link'
-import { companyAuthService, validateNewPassword } from '@/lib/company-auth'
+import { companyAuthService, validateNewPassword } from '@/lib/company/auth'
 
 function ResetPasswordContent() {
   const router = useRouter()

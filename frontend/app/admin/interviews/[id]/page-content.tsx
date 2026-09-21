@@ -21,7 +21,7 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
-import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin-fetch'
+import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin/fetch'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 

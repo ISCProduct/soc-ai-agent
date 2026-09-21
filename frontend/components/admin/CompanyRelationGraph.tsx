@@ -11,7 +11,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css'
 import { Alert, Box, Chip, CircularProgress, Stack, Typography } from '@mui/material'
 import { authService } from '@/lib/auth'
-import { marketColors, marketLabels, type MarketType } from '@/lib/company-data'
+import { marketColors, marketLabels, type MarketType } from '@/lib/company/data'
 import { layoutCapitalGraph, type CompanyRelationGraph as RelationGraphData } from '@/lib/relation-graph'
 import { sanitizeRelationDescription, displayRelationDescription, isRelationDescriptionFallback } from '@/lib/relation-labels'
 

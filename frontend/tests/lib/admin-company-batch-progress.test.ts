@@ -11,7 +11,7 @@ import {
   formatMissingBatchLogLine,
   shouldContinueBatch,
   type BatchWave,
-} from '@/lib/admin-company-batch-progress'
+} from '@/lib/admin/company-batch-progress'
 
 const wave = (over: Partial<BatchWave> = {}): BatchWave => ({
   processed: 6,

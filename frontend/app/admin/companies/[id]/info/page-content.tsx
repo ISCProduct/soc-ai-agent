@@ -13,12 +13,12 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
-import { getAdminSchoolAccess } from '@/lib/admin-school-access'
-import { infoFieldEnabled, resolveIndustryFieldProfile } from '@/lib/admin-company-field-profile'
+import { getAdminSchoolAccess } from '@/lib/admin/school-access'
+import { infoFieldEnabled, resolveIndustryFieldProfile } from '@/lib/admin/company-field-profile'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { CompanyAspectTabs } from '@/components/admin/CompanyAspectTabs'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
-import { applyInfoPayload, WORK_STYLE_OPTIONS } from '@/lib/admin-company-form'
+import { applyInfoPayload, WORK_STYLE_OPTIONS } from '@/lib/admin/company-form'
 import { CompanyUsersPanel } from '@/components/admin/CompanyUsersPanel'
 
 export default function PageContent() {

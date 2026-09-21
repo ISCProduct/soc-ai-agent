@@ -14,14 +14,14 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
-import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin-fetch'
+import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin/fetch'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
-import { getAdminSchoolAccess } from '@/lib/admin-school-access'
+import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 
 type AdminUser = {
   id: number

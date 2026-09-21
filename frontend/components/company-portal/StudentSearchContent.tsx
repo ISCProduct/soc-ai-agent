@@ -17,12 +17,12 @@ import {
   Typography,
 } from '@mui/material'
 import { PageContainer } from '@/components/admin/PageContainer'
-import { companyAuthService } from '@/lib/company-auth'
+import { companyAuthService } from '@/lib/company/auth'
 import {
   companyStudentService,
   StudentFilters,
   StudentListItem,
-} from '@/lib/company-students'
+} from '@/lib/company/students'
 
 type IndustryOption = { id: number; name: string; level: number }
 

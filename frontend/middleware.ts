@@ -3,7 +3,7 @@ import {
   SERVER_BACKEND_URL,
   setSessionCookies,
   setCompanySessionCookies,
-} from '@/lib/session-cookies'
+} from '@/lib/auth/session-cookies'
 import { extractTenantSlug, isAdminHost } from '@/lib/tenant'
 
 // アクセストークンの残り有効期間がこの秒数を下回ったらリフレッシュする (#616)
@@ -18,6 +18,16 @@ const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
 function resolveRequestId(incoming: string | null): string {
   return incoming && REQUEST_ID_PATTERN.test(incoming) ? incoming : crypto.randomUUID()
 }
+
+// 企業相関図の旧URL。app/ 配下で唯一の大文字始まりセグメントだったため
+// /correlation-diagram へ揃えた。既存のリンクやブックマークを切らさないよう
+// ここで恒久リダイレクトする。
+//
+// next.config の redirects() を使わないのは、source の照合が大文字小文字を
+// 区別せず、新URL自身もマッチして無限リダイレクトになるため(実測で確認)。
+// ここでは pathname を厳密比較する。
+const LEGACY_CORRELATION_DIAGRAM_PATH = '/Correlation-diagram'
+const CORRELATION_DIAGRAM_PATH = '/correlation-diagram'
 
 interface RefreshedSession {
   userId: string
@@ -98,6 +108,13 @@ function isUnderAdminPath(pathname: string): boolean {
 export async function middleware(request: NextRequest) {
   const host = request.headers.get('host') ?? ''
   const pathname = request.nextUrl.pathname
+
+  // 認証まわりの処理に入る前に返す（リダイレクトだけのためにトークン更新を走らせない）
+  if (pathname === LEGACY_CORRELATION_DIAGRAM_PATH) {
+    const redirectUrl = request.nextUrl.clone()
+    redirectUrl.pathname = CORRELATION_DIAGRAM_PATH
+    return NextResponse.redirect(redirectUrl, 308)
+  }
   // admin.shukatsu-ai.jp は /admin 配下へ内部的にrewriteする(URLバーの表示は変えない)。
   // /api配下はNext.jsのAPI Route Handlerであり/admin/api/...という実体は存在しないため対象外。
   const needsAdminRewrite =

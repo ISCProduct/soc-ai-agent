@@ -116,11 +116,14 @@ jobs:
           set -e
           pids=()
 
+          # NEXT_PUBLIC_* はビルド時にバンドルへ焼き込まれる。DSN を staging と本番で
+          # 同じシークレットから渡すと、staging を有効化した瞬間に次の本番デプロイでも
+          # 有効になってしまい、環境ごとに段階導入できない。シークレットを分ける。
           if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then
             (cd frontend && docker buildx build --platform linux/amd64 \
               --build-arg NODE_ENV=production \
               --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }} \
-              --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND }} \
+              --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND_STAGING }} \
               --build-arg NEXT_PUBLIC_APP_ENV=staging \
               --build-arg NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }} \
               --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging \
@@ -504,7 +507,7 @@ jobs:
             (cd frontend && docker buildx build --platform linux/amd64 \
               --build-arg NODE_ENV=production \
               --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }} \
-              --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND }} \
+              --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND_PROD }} \
               --build-arg NEXT_PUBLIC_APP_ENV=production \
               --build-arg NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }} \
               --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production \
@@ -735,6 +738,12 @@ jobs:
     # リポジトリ既定の認証情報はECSクラスタ作成前の古い値で、本番リソースを引けない。
     environment: production
     steps:
+      # collect_whats_new_sources.py と、それが読む resolve_deployed_issues.py を使う。
+      # squash マージのコミット題名から元PR番号を辿るため、履歴も要る。
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
       # 認証に失敗しても後続は続ける。ここで止めると、リポジトリシークレットへの
       # フォールバックが効かないだけでなく、これまで確実に動いていた staging への
       # 取り込みまで丸ごとスキップされる(ジョブは continue-on-error で緑のまま)。
@@ -856,7 +865,7 @@ jobs:
           import json, os, subprocess, sys
 
           sys.path.insert(0, ".github/scripts")
-          from resolve_deployed_issues import extract_pr_numbers, extract_issue_numbers
+          from resolve_deployed_issues import extract_pr_numbers, resolve_issues
 
           REPO = os.environ["GH_REPO"]
 
@@ -879,11 +888,17 @@ jobs:
           prs = extract_pr_numbers(subjects)
           print(f"コミット {len(subjects)} 件から 元PR {len(prs)} 件を検出")
 
-          issues = {}
-          for pr in prs:
-              body = gh(["pr", "view", str(pr), "--json", "body", "-q", ".body"])
-              for i in extract_issue_numbers(body):
-                  issues.setdefault(i, []).append(pr)
+          def body_of(pr):
+              return gh(["pr", "view", str(pr), "--json", "body", "-q", ".body"])
+
+          def commits_of(pr):
+              return gh(["pr", "view", str(pr), "--json", "commits",
+                         "-q", "[.commits[].messageHeadline]|.[]"]).splitlines()
+
+          # 本文に close キーワードが無いPRは1段掘る。release→main が squash
+          # マージだと範囲にはリリースPR1件しか現れず、各 feature PR の
+          # Closes #N まで届かないため(詳細は resolve_issues のコメント)。
+          issues = resolve_issues(prs, body_of, commits_of)
 
           if not issues:
               print("閉じる対象の issue はありません。")

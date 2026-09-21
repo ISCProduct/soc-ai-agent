@@ -1,7 +1,7 @@
 /**
  * マッチング結果ページ向けの純粋ヘルパー（React state 非依存）。
  */
-import type { CapitalRelation } from '@/lib/company-data'
+import type { CapitalRelation } from '@/lib/company/data'
 import type {
   AnalysisScores,
   CategoryScores,

@@ -5,11 +5,14 @@
 
 **開発メンバー**
 
-- **バックエンド**: 大橋 和幸
-- **フロントエンド**: 原 拓哉
-- **AI・LLM**: 田中優希
-- **インフラ**: 亀川英地
-- **インフラ**: 江坂広樹
+| メンバー | 担当 |
+|---------|------|
+| 大橋 和幸 | 全体統括 |
+| 原 拓哉 | フロントエンド |
+| 田中 優希 | AI・LLM |
+| 亀川 英地 | インフラ / バックエンド |
+| 江坂 広樹 | インフラ / バックエンド |
+
 ---
 
 ## 目次
@@ -34,22 +37,46 @@
 ## アーキテクチャ概要
 
 ```
-                      ┌─────────────────────────────┐
-                      │        Next.js Frontend        │
-                      │  (App Router / MUI v7 / 3D)   │
-                      └───────────────┬───────────────┘
-                                      │ HTTP / WebRTC
-                      ┌───────────────▼───────────────┐
-                      │       Go Backend (net/http)     │
-                      │  DDD: entity / repo / svc / ctl │
-                      └──┬──────────┬──────────┬───────┘
-                         │          │          │
-              ┌──────────▼──┐  ┌────▼────┐  ┌─▼──────────────┐
-              │  MySQL 8.0   │  │ AWS S3  │  │ FastAPI RAG     │
-              │  (GORM)      │  │ (動画・  │  │ (Python/CrewAI) │
-              └─────────────┘  │  PDF)   │  └────────────────┘
-                               └─────────┘
+                   ┌──────────────────────────────────┐
+                   │         Next.js Frontend         │
+                   │   App Router / MUI v7 / Three.js │
+                   │   middleware.ts:                 │
+                   │     認証Cookie→ヘッダー注入      │
+                   │     テナント解決                 │
+                   └────────────────┬─────────────────┘
+                                    │ HTTP / WebRTC(OpenAI Realtime)
+                   ┌────────────────▼─────────────────┐
+                   │        Go Backend (Echo v4)      │
+                   │   controllers → services →       │
+                   │   repositories （domain = ポート）│
+                   └──┬────────┬────────┬─────────┬───┘
+                      │        │        │         │
+            ┌─────────▼──┐ ┌───▼────┐ ┌─▼──────┐ ┌▼──────────────┐
+            │ MySQL 8.0  │ │ Redis  │ │ AWS S3 │ │ FastAPI RAG   │
+            │ GORM +     │ │ ジョブ │ │ 動画・ │ │ LangChain     │
+            │ migrations │ │ キュー │ │ PDF    │ └───────┬───────┘
+            └────────────┘ └────────┘ └────────┘         │
+                                                 ┌───────▼───────┐
+                                                 │   ChromaDB    │
+                                                 │  ベクトルDB   │
+                                                 └───────────────┘
 ```
+
+### レイヤー構成（Backend）
+
+`domain/` がリポジトリのインターフェース（ポート）と値オブジェクトを持ち、
+`internal/repositories/` がその実装（アダプタ）にあたります。
+
+```
+routes/                      ルーティング・ミドルウェア適用
+  └─ controllers/<domain>/   HTTPハンドラ（ドメイン別13パッケージ）
+       └─ services/<domain>/ ビジネスロジック（ドメイン別30パッケージ）
+            └─ repositories/ DBアクセス（domain/repository のI/Fを実装）
+                 └─ models/  GORMモデル
+```
+
+スキーマ変更は `Backend/migrations/` の up/down SQL で管理します
+（**GORM AutoMigrate は使用禁止**）。
 
 ---
 
@@ -94,7 +121,7 @@
 | AI チャット分析 | 4フェーズ・10カテゴリのスコアリングによる企業マッチング |
 | 音声面接練習 | OpenAI Realtime API + 3D アバター（Three.js / wawa-lipsync） |
 | 面接動画管理 | AWS S3 アップロード・管理者 Presigned URL 閲覧 |
-| 職務経歴書レビュー | RAG（DuckDuckGo + OpenAI Embeddings）によるフィードバック生成 |
+| 職務経歴書レビュー | RAG（ChromaDB + OpenAI Embeddings）によるフィードバック生成 |
 | 選考管理 | 応募→書類通過→面接→内定の選考ステータス管理 |
 | 集合知レコメンド | 類似スコアユーザーの通過企業を匿名集計してレコメンド |
 | スコア精度検証 | 通過率相関・A/Bテスト・自動キャリブレーション |
@@ -105,45 +132,74 @@
 | 管理者ダッシュボード | ユーザー・企業・コスト・監査ログのCRUD |
 | OAuth 認証 | Google / GitHub OAuth2 + メール・パスワード |
 | メールレポート | 分析・面接レポートのメール配信 |
+| 企業ポータル | 企業ユーザーによる学生検索・応募管理・自社プロフィール編集 |
+| ES レビュー / リライト | エントリーシートの添削と書き換え提案 |
+| 教員向け分析 | 担当校スコープでの生徒傾向分析（学校単位のアクセス制御） |
+| マルチテナント | 学園サブドメインによるテナント解決 |
 
 ---
 
 ## 技術スタック
 
-- **Backend**: Go 1.25 / GORM (MySQL) / AWS SDK v2 / `go-openai`
-- **Frontend**: Next.js 16 / React 19 / TypeScript / MUI v7 / Radix UI / React Flow / Three.js
-- **RAG**: Python / FastAPI / CrewAI / OpenAI Embeddings
-- **CI / 実行環境**: Docker / Docker Compose / GitHub Actions / Playwright E2E
+| 層 | 主な技術 |
+|----|---------|
+| Backend | Go 1.25 / Echo v4 / GORM (MySQL 8.0) / Redis / AWS SDK v2 / go-openai / Sentry |
+| Frontend | Next.js 16 / React 19 / TypeScript / MUI v7 / Radix UI / React Flow / Three.js / Sentry |
+| RAG | Python 3.10 / FastAPI / LangChain / ChromaDB / OpenAI Embeddings / Sentry |
+| インフラ | AWS ECS（staging: on EC2 / 本番: on Fargate）+ ALB / RDS / S3 / Terraform |
+| CI・テスト | GitHub Actions / Docker Compose / Jest / Playwright E2E / pytest |
 
----
+> **補足**: CrewAI は依存衝突のため requirements.txt から除外済みです（Issue #273）。
+> RAG の検索は LangChain + OpenAI web search 経由で行います。
 
 ## ディレクトリ構成
 
 ```
 /
 ├── Backend/
-│   ├── cmd/server/          # サーバーエントリポイント
-│   ├── domain/              # エンティティ・リポジトリI/F・マッパー
-│   ├── internal/
-│   │   ├── controllers/     # HTTPハンドラ
-│   │   ├── services/        # ビジネスロジック
-│   │   ├── repositories/    # DBアクセス
-│   │   ├── models/          # GORMモデル・AutoMigrate
-│   │   ├── routes/          # ルーティング
-│   │   └── middleware/      # 認証ミドルウェア
-│   └── test/                # 統合テスト
+│   ├── cmd/server/              # エントリポイント（手動DI）
+│   ├── domain/                  # エンティティ・リポジトリI/F・VO・マッパー
+│   ├── migrations/              # up/down SQL（AutoMigrate禁止）
+│   └── internal/
+│       ├── controllers/         # HTTPハンドラ（ドメイン別13パッケージ）
+│       │   ├── admin/ auth/ chat/ company/ es/ github/ insight/
+│       │   ├── interview/ application/ release/ resume/ schedule/ user/
+│       │   ├── httpapi/         # 共通HTTPヘルパー（エラー応答・パラメータ取得）
+│       │   ├── mocks/ testsupport/  # テスト用ダブル・共有ヘルパー
+│       ├── services/            # ビジネスロジック（ドメイン別30パッケージ + shared/interfaces/prompts）
+│       ├── repositories/        # DBアクセス（domain/repository の実装）
+│       ├── models/              # GORMモデル
+│       ├── routes/              # ルーティング・ミドルウェア適用
+│       ├── middleware/          # 認証・スコープ制御
+│       ├── observability/       # Sentry・メトリクス
+│       └── queue/               # Redis ジョブキュー
 ├── frontend/
-│   ├── app/                 # Next.js App Router ページ
-│   ├── components/          # 共通コンポーネント
-│   └── e2e/                 # Playwright E2E テスト
-├── rag/                     # 職務経歴書RAGサービス (Python/FastAPI)
-├── docs/wiki/               # 運用ドキュメント・Wiki
-├── infra/                   # ECS インフラ設定
-├── mysql/                   # MySQL ローカル設定
-└── compose.yml              # Docker Compose 定義
+│   ├── app/                     # App Router ページ・Route Handler
+│   ├── components/              # コンポーネント（PascalCase / ui は shadcn 規約）
+│   ├── lib/                     # admin/ auth/ company/ interview/ + 共通ユーティリティ
+│   ├── middleware.ts            # 認証Cookie→ヘッダー注入・テナント解決・旧URL転送
+│   ├── tests/                   # Jest ユニットテスト
+│   └── e2e/                     # Playwright E2E・デプロイ後スモーク
+├── rag/
+│   ├── main.py                  # FastAPI エントリポイント
+│   ├── routers/ services/       # エンドポイント・処理本体
+│   ├── training/                # LoRA学習・学習データ出力
+│   └── tests/                   # pytest
+├── docs/
+│   ├── wiki/                    # 運用ドキュメント（正本）
+│   ├── design/ requirements/    # 設計・要件
+│   └── finetune/                # ファインチューニング関連
+├── infra/terraform/             # staging / prod / modules
+├── automation/                  # Discord通知・ワークフロー検査スクリプト
+├── scripts/                     # 開発補助スクリプト
+├── tools/company-graph/         # 企業スクレイピング（別Goモジュール）
+├── compose.yml                  # ローカル開発用
+└── docker-compose.yml           # staging EC2 用（ローカルでは使わない）
 ```
 
----
+> **テストの置き場所**: Go のテストは対象パッケージの隣に置きます
+> （`internal/controllers/admin/*_test.go` など）。`Backend/test/` に残っているのは
+> 複数パッケージを横断する4ファイルのみです。
 
 ## 環境変数
 
@@ -216,7 +272,7 @@ RAG_REVIEW_URL=http://rag-review:9000
 ### フロントエンド（`.env.local`）
 
 ```env
-NEXT_PUBLIC_BACKEND_URL=http://localhost:80
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8080
 NEXT_PUBLIC_INTERVIEW_MAX_MINUTES=10
 NEXT_PUBLIC_INTERVIEW_MAX_COST_USD=1.8
 NEXT_PUBLIC_INTERVIEW_COST_PER_MIN_USD=0.18
@@ -256,18 +312,17 @@ make core-up
 
 **注意:** プロジェクト直下には `docker-compose.yml` も存在しますが、こちらは **本番環境（AWS ECR/RDS接続）用** です。ローカル開発で誤って使用すると本番DBに接続しようとするため、必ずデフォルトの `compose.yml`（ファイル名指定なしの `docker compose` コマンドで読み込まれます）を使用してください。
 
-### RAG + Chroma（profile=rag・推奨）
+### RAG + Chroma
 
-履歴書レビュー / 面接 hints / 企業コンテキストには **独立 Chroma** と **rag-review** が必要です。  
-`compose.yml` では `profiles: [rag]` のため、コア起動だけでは立ち上がりません。
+履歴書レビュー / 面接 hints / 企業コンテキストには **Chroma** と **rag-review** が必要です。
+どちらも `compose.yml` の既定サービスなので、`docker compose up -d` で一緒に起動します。
+RAG だけ作り直したいときは次を使います。
 
 ```sh
-# one-shot（ビルド込み + スモーク）
+# ビルド込み + スモークまで一気に
 make rag-up
 # または
 ./scripts/dev-rag-up.sh
-# または
-docker compose --profile rag up -d --build chroma rag-review
 ```
 
 | サービス | 役割 | ポート |
@@ -290,8 +345,6 @@ curl -s http://localhost:9000/vector/status
 
 ```sh
 make rag-rebuild
-# または
-docker compose --profile rag up -d --build --force-recreate chroma rag-review
 ```
 
 Backend からは compose 内で `RAG_REVIEW_URL=http://rag-review:9000`（`Backend/.env.example` 参照）。ホストから叩く場合は `http://localhost:9000`。
@@ -307,14 +360,22 @@ Backend からは compose 内で `RAG_REVIEW_URL=http://rag-review:9000`（`Back
 
 ### サービス一覧
 
+```sh
+docker compose up -d --build     # 既定サービスをまとめて起動
+docker compose stop              # 停止
+docker compose down              # 停止 + 削除（named volume は残る）
+```
+
 | サービス | 役割 | ポート | 備考 |
 |---------|------|--------|------|
 | `app` | Go バックエンド API | 8080 | |
-| `db` | MySQL 8.0 | 3306 | |
+| `db` | MySQL 8.0 | 3306 | `DB_HOST_PORT` で変更可（既定は 127.0.0.1 のみ公開） |
+| `redis` | ジョブキュー・レート制限 | 6379 | |
 | `frontend` | Next.js | 3000 | |
-| `chroma` | ベクトル DB | 8000 | **profile `rag`** |
-| `rag-review` | 職務経歴書 / hints RAG | 9000 | **profile `rag`**（Chroma 依存） |
-| `company-graph` | 企業スクレイピング | 9100 | profile `company-graph` |
+| `chroma` | ベクトル DB | 8000 | 永続 volume `chroma_data` |
+| `rag-review` | 職務経歴書 / hints RAG | 9000 | Chroma 依存 |
+| `company-graph` | 企業スクレイピング | 9100 | |
+| `migrate` | DBマイグレーション適用 | - | **profile `tools`**。`docker compose --profile tools run --rm migrate` |
 
 ---
 
@@ -456,14 +517,19 @@ cpr "123"
 | メソッド | パス | 概要 |
 |---------|------|------|
 | POST | `/api/resume/upload` | アップロード |
-| GET | `/api/resume/review` | RAGレビュー取得 |
+| POST | `/api/resume/review` | RAGレビュー実行 |
+| POST | `/api/resume/review/stream` | レビューのストリーミング取得 |
+| GET | `/api/resume/status` | レビュー状態取得 |
+| GET | `/api/resume/annotated` | 注釈付きPDF取得 |
 
 ### 選考管理（#201）
 | メソッド | パス | 概要 |
 |---------|------|------|
 | POST | `/api/applications` | 応募登録 |
 | GET | `/api/applications` | 選考一覧取得 |
-| PUT | `/api/applications/{id}` | ステータス更新 |
+| PUT | `/api/applications/{id}` | 応募内容更新 |
+| POST | `/api/applications/{id}/withdraw` | 辞退 |
+| POST | `/api/applications/{id}/accept` | 内定承諾 |
 
 ### 統合プロファイル（#204）
 | メソッド | パス | 概要 |
@@ -491,16 +557,46 @@ cpr "123"
 | GET | `/api/admin/costs/summary` | APIコストサマリー |
 | GET | `/api/admin/audit-logs` | 監査ログ |
 
+### 企業ポータル（企業ユーザー向け）
+| メソッド | パス | 概要 |
+|---------|------|------|
+| POST | `/api/company-auth/login` | 企業ユーザーログイン |
+| POST | `/api/company-auth/accept-invite` | 招待受諾 |
+| GET | `/api/company-auth/students` | 学生検索 |
+| POST | `/api/company-auth/students/semantic-search` | 学生のセマンティック検索 |
+| GET | `/api/company-portal/applications` | 自社への応募一覧 |
+| PATCH | `/api/company-portal/applications/{id}/status` | 選考ステータス更新 |
+
+### ES（エントリーシート）
+| メソッド | パス | 概要 |
+|---------|------|------|
+| POST | `/api/es/review` | ESレビュー |
+| POST | `/api/es/rewrite` | ESリライト |
+
+### スケジュール・カレンダー
+| メソッド | パス | 概要 |
+|---------|------|------|
+| GET | `/api/schedule` | 選考スケジュール取得 |
+| GET | `/api/google-calendar/...` | Googleカレンダー連携 |
+
+> エンドポイントは全部で約200本あります。網羅した一覧は
+> [`docs/wiki/api-reference.md`](./docs/wiki/api-reference.md) を参照してください。
+
 ---
 
-## /品質管理
+## 品質管理
 
-- **Go**: `go vet` / `go test ./...` を CI で実行
-- **Frontend**: `npm run lint`（ESLint）
-- **E2E**: Playwright（`frontend/e2e/`）
-- **PR ルール**: Lint + Go Unit Tests を通過させてからマージ
+| 対象 | コマンド | CI |
+|------|---------|----|
+| Go | `cd Backend && go vet ./... && go test ./internal/... ./migrations/...` | Go Unit Tests |
+| Frontend | `cd frontend && npm run lint && npx jest` | Frontend Unit Tests |
+| E2E | `cd frontend && npx playwright test` | Frontend E2E Tests |
+| RAG | `cd rag && python -m pytest tests` | test（`rag/**` の変更時のみ） |
+| ワークフロー | `./automation/test/*.sh` | Workflow Scripts |
 
----
+- **ブランチフロー**: `feature/* → develop → release → main`（各段でPRレビュー必須）
+- **デプロイ**: develop push → staging へ自動デプロイ、main push → 本番へ自動デプロイ。`release` は中間ゲート（自動デプロイなし）
+- **反映後スモーク**: staging デプロイ後に Playwright スモークが走ります（`frontend/e2e/smoke/`）
 
 ## よくあるトラブル
 
@@ -512,7 +608,7 @@ cpr "123"
 | GitHub同期エラー | `TOKEN_ENCRYPTION_KEY` が設定されているか確認。未設定だとトークン暗号化がスキップされ警告ログが出力される |
 | CORS エラー（開発時） | `ALLOWED_ORIGINS=http://localhost:3000` を `.env` に設定（未設定時は全オリジン拒否） |
 | S3アップロード失敗 | `AWS_S3_BUCKET` と IAM権限（`s3:PutObject` / `s3:GetObject`）を確認 |
-| フロントビルド失敗 | Node.js 18以上を使用 |
+| フロントビルド失敗 | Node.js 22 を使用（`frontend/.nvmrc`） |
 | rag-review起動失敗 | `cd rag && pip install -r requirements.txt -c constraints.txt` で作り直す |
 
 ---

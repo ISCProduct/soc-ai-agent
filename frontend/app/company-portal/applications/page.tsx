@@ -22,14 +22,14 @@ import {
 } from '@mui/material'
 import { PageContainer } from '@/components/admin/PageContainer'
 import { PageLoading } from '@/components/common/PageLoading'
-import { companyAuthService } from '@/lib/company-auth'
+import { companyAuthService } from '@/lib/company/auth'
 import {
   ALLOWED_TRANSITIONS,
   APPLICATION_STATUS_LABELS,
   companyApplicationService,
   statusLabel,
   type ApplicationListItem,
-} from '@/lib/company-applications'
+} from '@/lib/company/applications'
 
 const PAGE_SIZE = 30
 

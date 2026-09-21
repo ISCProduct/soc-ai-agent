@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from 'react'
 import { Box, Typography } from '@mui/material'
-import { marketColors, type MarketType } from '@/lib/company-data'
+import { marketColors, type MarketType } from '@/lib/company/data'
 
 type DiagramCompanyNodeLabelProps = {
   name: string

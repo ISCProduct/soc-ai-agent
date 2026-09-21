@@ -18,7 +18,7 @@ import { authService } from '@/lib/auth'
 import {
   resolveIndustryFieldProfile,
   type TechFieldKey,
-} from '@/lib/admin-company-field-profile'
+} from '@/lib/admin/company-field-profile'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel } from '@/components/admin/AdminPanel'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'

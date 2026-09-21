@@ -1,3 +1,10 @@
+// Package controllers_test は、複数のコントローラーパッケージにまたがる
+// テストだけを置く。
+//
+// 単一のコントローラーを対象とするテストは、それぞれの
+// internal/controllers/<pkg>/ へ移した。ここに残っているのは 1 ファイルで
+// admin / chat / company / es / schedule のように複数パッケージを
+// 横断して検証しているもので、どれか 1 つのパッケージには属せない。
 package controllers_test
 
 // 残りのコントローラーのHTTPハンドラーテスト
@@ -16,10 +23,11 @@ import (
 	chatcontrollers "Backend/internal/controllers/chat"
 	companycontrollers "Backend/internal/controllers/company"
 	escontrollers "Backend/internal/controllers/es"
+	"Backend/internal/controllers/mocks"
 	schedulecontrollers "Backend/internal/controllers/schedule"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
 	"Backend/internal/services/school"
-	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -49,20 +57,20 @@ func TestAdminInterviewController_ListVideos_InvalidID(t *testing.T) {
 	c := admincontrollers.NewAdminInterviewController(nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/interview/sessions/abc/videos", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, c.ListVideos, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, c.ListVideos, ctx, http.StatusBadRequest)
 }
 
 func TestAdminInterviewController_VideoURL_InvalidID(t *testing.T) {
 	c := admincontrollers.NewAdminInterviewController(nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/interview/videos/xyz/url", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("video_id")
 	ctx.SetParamValues("xyz")
-	assertStatus(t, c.VideoURL, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, c.VideoURL, ctx, http.StatusBadRequest)
 }
 
 // #982: school scope制限のあるadminは、担当校外のユーザーのセッション動画一覧を取得できない(403)。
@@ -77,12 +85,12 @@ func TestAdminInterviewController_ListVideos_SchoolAccessDenied(t *testing.T) {
 	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
 	c.SetSchoolAccess(userRepo, sessionRepo, school.NewSchoolService(schoolRepo))
 
-	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/interview/sessions/5/videos", nil), 42)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/interview/sessions/5/videos", nil), 42)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("5")
-	assertStatus(t, c.ListVideos, ctx, http.StatusForbidden)
+	testsupport.AssertStatus(t, c.ListVideos, ctx, http.StatusForbidden)
 	sessionRepo.AssertExpectations(t)
 	userRepo.AssertExpectations(t)
 }
@@ -101,12 +109,12 @@ func TestAdminInterviewController_ListVideos_SchoolAccessAllowed(t *testing.T) {
 	c.SetSchoolAccess(userRepo, sessionRepo, school.NewSchoolService(schoolRepo))
 	videoRepo.On("FindBySessionID", mock.Anything, uint(5)).Return([]models.InterviewVideo{}, nil)
 
-	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/interview/sessions/5/videos", nil), 42)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/interview/sessions/5/videos", nil), 42)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("5")
-	assertStatus(t, c.ListVideos, ctx, http.StatusOK)
+	testsupport.AssertStatus(t, c.ListVideos, ctx, http.StatusOK)
 	sessionRepo.AssertExpectations(t)
 	userRepo.AssertExpectations(t)
 	videoRepo.AssertExpectations(t)
@@ -124,12 +132,12 @@ func TestAdminInterviewController_VideoURL_SchoolAccessDenied(t *testing.T) {
 	schoolRepo.On("ListSchoolsForAdmin", uint(42)).Return([]models.School{{ID: 1}}, nil)
 	c.SetSchoolAccess(userRepo, nil, school.NewSchoolService(schoolRepo))
 
-	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/interview/videos/7/url", nil), 42)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/interview/videos/7/url", nil), 42)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("video_id")
 	ctx.SetParamValues("7")
-	assertStatus(t, c.VideoURL, ctx, http.StatusForbidden)
+	testsupport.AssertStatus(t, c.VideoURL, ctx, http.StatusForbidden)
 	videoRepo.AssertExpectations(t)
 	userRepo.AssertExpectations(t)
 }
@@ -142,7 +150,7 @@ func TestQuestionController_GenerateQuestions_MissingCategory(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/questions/generate", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.GenerateQuestions, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, c.GenerateQuestions, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestQuestionController_CreateQuestion_MissingFields(t *testing.T) {
@@ -151,14 +159,14 @@ func TestQuestionController_CreateQuestion_MissingFields(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/questions", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.CreateQuestion, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, c.CreateQuestion, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestQuestionController_GetQuestionsByCategory_MissingCategory(t *testing.T) {
 	c := chatcontrollers.NewQuestionController(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/questions", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.GetQuestionsByCategory, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, c.GetQuestionsByCategory, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 // ---- ScheduleController ----
@@ -169,51 +177,51 @@ func TestScheduleController_List_Unauthenticated(t *testing.T) {
 	c := schedulecontrollers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/schedules", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.List, newCtx(req, rec), http.StatusUnauthorized)
+	testsupport.AssertStatus(t, c.List, testsupport.NewCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestScheduleController_Create_Unauthenticated(t *testing.T) {
 	c := schedulecontrollers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/schedules", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.Create, newCtx(req, rec), http.StatusUnauthorized)
+	testsupport.AssertStatus(t, c.Create, testsupport.NewCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestScheduleController_Get_Unauthenticated(t *testing.T) {
 	c := schedulecontrollers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/schedules/1", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, c.Get, ctx, http.StatusUnauthorized)
+	testsupport.AssertStatus(t, c.Get, ctx, http.StatusUnauthorized)
 }
 
 func TestScheduleController_Update_Unauthenticated(t *testing.T) {
 	c := schedulecontrollers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodPut, "/api/schedules/1", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, c.Update, ctx, http.StatusUnauthorized)
+	testsupport.AssertStatus(t, c.Update, ctx, http.StatusUnauthorized)
 }
 
 func TestScheduleController_Delete_Unauthenticated(t *testing.T) {
 	c := schedulecontrollers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodDelete, "/api/schedules/1", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, c.Delete, ctx, http.StatusUnauthorized)
+	testsupport.AssertStatus(t, c.Delete, ctx, http.StatusUnauthorized)
 }
 
 func TestScheduleController_ExportICS_Unauthenticated(t *testing.T) {
 	c := schedulecontrollers.NewScheduleController(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/schedules/export.ics", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.ExportICS, newCtx(req, rec), http.StatusUnauthorized)
+	testsupport.AssertStatus(t, c.ExportICS, testsupport.NewCtx(req, rec), http.StatusUnauthorized)
 }
 
 // ---- CompanyEntryController ----
@@ -237,27 +245,27 @@ func TestCompanyRelationController_GetCompanyByID_InvalidID(t *testing.T) {
 	c := companycontrollers.NewCompanyRelationController(nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/abc", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, c.GetCompanyByID, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, c.GetCompanyByID, ctx, http.StatusBadRequest)
 }
 
 func TestCompanyRelationController_GetCompanyJobPositions_InvalidID(t *testing.T) {
 	c := companycontrollers.NewCompanyRelationController(nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/abc/job-positions", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, c.GetCompanyJobPositions, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, c.GetCompanyJobPositions, ctx, http.StatusBadRequest)
 }
 
 func TestCompanyRelationController_WebSearchCompanies_MissingQuery(t *testing.T) {
 	c := companycontrollers.NewCompanyRelationController(nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/search", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.WebSearchCompanies, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, c.WebSearchCompanies, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 // ---- ESReviewController ----
@@ -268,7 +276,7 @@ func TestESReviewController_Review_MissingESText(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/es/review", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.Review, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, c.Review, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 // ---- ESRewriteController ----
@@ -278,5 +286,5 @@ func TestESRewriteController_Rewrite_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/es/rewrite", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.Rewrite, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, c.Rewrite, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }

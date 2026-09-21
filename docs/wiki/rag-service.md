@@ -229,7 +229,7 @@ use_deep_research=false の場合:
 ```sh
 # トレーニングデータのエクスポート
 cd rag
-python3 export_training_data.py
+python3 training/export_training_data.py
 ```
 
 ```sh
@@ -238,7 +238,7 @@ GET /training/export
 ```
 
 エクスポートされたデータは `training/` ディレクトリ以下に保存されます。
-詳細は [`rag/FINETUNE_README.md`](../../rag/FINETUNE_README.md) を参照してください。
+詳細は [`docs/finetune/README.md`](../finetune/README.md) を参照してください。
 
 ---
 
@@ -248,17 +248,18 @@ GET /training/export
 |---------|------|
 | `rag/main.py` | FastAPI メインアプリケーション |
 | `rag/training_api.py` | ファインチューニングデータ出力 API |
+| `rag/training/` | LoRA 学習・データ出力スクリプト |
 | `rag/constraints.txt` | バージョン制約ファイル（`-c` で渡す。単体で `-r` に渡さない） |
 | `rag/requirements.txt` | 直接依存の宣言（主インストール元。全件に上下限つき。`test_requirements_declaration_is_bounded` が強制する） |
-| `rag/export_training_data.py` | ログからトレーニングデータを生成 |
+| `rag/training/export_training_data.py` | ログからトレーニングデータを生成 |
 
 ---
 
 ## ローカル開発・デバッグ
 
 ```sh
-# RAG サービスのみ起動
-docker compose --profile rag up -d rag-review
+# RAG サービスのみ起動（既定サービスなので profile 指定は不要）
+docker compose up -d rag-review
 
 # ログ確認
 docker compose logs -f rag-review

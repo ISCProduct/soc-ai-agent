@@ -2,7 +2,7 @@
 
 import { Chip, Link as MuiLink, Stack, Tooltip, Typography } from '@mui/material'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
-import { classifyProvenance, type CompanyProvenanceInput } from '@/lib/company-provenance'
+import { classifyProvenance, type CompanyProvenanceInput } from '@/lib/company/provenance'
 
 interface ProvenanceBadgeProps {
   provenance: CompanyProvenanceInput | null | undefined

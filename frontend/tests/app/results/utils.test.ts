@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import type { CapitalRelation } from '@/lib/company-data'
+import type { CapitalRelation } from '@/lib/company/data'
 import type { CategoryScores } from '@/app/results/types'
 import {
   buildEmptyRecommendationsMessage,

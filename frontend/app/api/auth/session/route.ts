@@ -3,7 +3,7 @@ import {
   SERVER_BACKEND_URL,
   clearSessionCookies,
   setSessionCookies,
-} from '@/lib/session-cookies'
+} from '@/lib/auth/session-cookies'
 
 // middleware が Cookie をリフレッシュしたあと、有効な user_token をクライアントへ返す。
 // 面接など Backend 直叩き API は sessionStorage の JWT を使うため、Cookie と同期する (#616)。
