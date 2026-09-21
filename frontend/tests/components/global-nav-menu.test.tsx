@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { fireEvent, render, screen } from '@testing-library/react'
-import { GlobalNavMenu } from '@/components/global-nav-menu'
+import { GlobalNavMenu } from '@/components/GlobalNavMenu'
 
 let mockPathname = '/interview'
 

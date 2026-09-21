@@ -12,7 +12,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import { StudentThemeToggle } from '@/components/student-theme-toggle'
+import { StudentThemeToggle } from '@/components/StudentThemeToggle'
 import { companyAuthService } from '@/lib/company/auth'
 
 export function CompanyPortalLoginContent() {

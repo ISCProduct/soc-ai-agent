@@ -9,7 +9,7 @@ import dynamic from 'next/dynamic';
 import { PageLoading } from '@/components/common/PageLoading';
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer';
 
-const CorrelationDiagram = dynamic(() => import('@/components/Correlation-diagram'), {
+const CorrelationDiagram = dynamic(() => import('@/components/CorrelationDiagram'), {
     ssr: false,
     loading: () => <PageLoading message="企業相関図を準備しています..." />,
 });

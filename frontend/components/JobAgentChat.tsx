@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import styles from "./job-agent-chat.module.css"
+import styles from "./JobAgentChat.module.css"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,7 +10,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Progress } from "@/components/ui/progress"
 import { Send, Bot, User } from "lucide-react"
 import { CompanyResults } from "@/components/company-results"
-import { AnalysisLoading } from "@/components/analysis-loading"
+import { AnalysisLoading } from "@/components/AnalysisLoading"
 import { sendChatMessage, getChatHistory, getUserScores, type ChatResponse, type ChatScore } from "@/lib/api"
 
 type Message = {

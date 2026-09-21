@@ -13,7 +13,7 @@ import {
   Typography,
 } from '@mui/material'
 import { ErrorOutline, Person, SmartToy, WarningAmber } from '@mui/icons-material'
-import styles from '../mui-chat.module.css'
+import styles from '../MuiChat.module.css'
 import { TypingIndicator } from './TypingIndicator'
 import {
   CHAT_BRAND,

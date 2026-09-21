@@ -1,7 +1,7 @@
 'use client'
 
 import { Box, Button, LinearProgress, Typography } from '@mui/material'
-import styles from '../mui-chat.module.css'
+import styles from '../MuiChat.module.css'
 import { CHAT_BRAND } from '../utils'
 import type { ProgressTotals } from '../types'
 

@@ -1,7 +1,7 @@
 'use client'
 import React, {useState, useEffect} from 'react'
 import Link from 'next/link'
-import styles from './analysis-sidebar.module.css'
+import styles from './AnalysisSidebar.module.css'
 import
 {
     Box,
