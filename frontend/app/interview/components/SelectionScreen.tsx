@@ -223,7 +223,7 @@ export default function SelectionScreen({
                       '&:hover': { bgcolor: companySourceTab === 'web' ? `${PRIMARY}e0` : '#e2e8f0' },
                     }}
                   >
-                    🔍 Webから探す
+                    Webから探す
                   </Button>
                 </Box>
 
