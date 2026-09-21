@@ -1,0 +1,7 @@
+/* 求人の参照元URLリンク */
+.sourceLink {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+}

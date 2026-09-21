@@ -39,7 +39,7 @@ export default function RootLayout({
       <head>
         <meta charSet="UTF-8" />
       </head>
-      <body style={{ margin: 0, padding: 0 }}>
+      <body>
         <SentryClientInit />
         <MuiProvider>
           {children}

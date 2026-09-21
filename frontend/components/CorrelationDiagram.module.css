@@ -1,0 +1,5 @@
+/* ReactFlow のキャンバスを親要素いっぱいに広げる */
+.canvas {
+  width: 100%;
+  height: 100%;
+}
