@@ -2,7 +2,7 @@
 
 カタカナ/ひらがな表記の氏名(敬称隣接)を見逃していた問題の回帰防止。
 """
-from export_training_data import mask_pii, to_outcome_example, OUTCOME_LABELS
+from training.export_training_data import mask_pii, to_outcome_example, OUTCOME_LABELS
 
 
 def test_mask_pii_masks_kanji_name_with_honorific():

@@ -15,5 +15,5 @@ COPY . /app
 WORKDIR /app/rag
 
 # デフォルトはヘルプ表示
-ENTRYPOINT ["python3", "-u", "train/lora_train.py"]
+ENTRYPOINT ["python3", "-u", "training/lora_train.py"]
 CMD ["--help"]
