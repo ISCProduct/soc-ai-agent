@@ -1,7 +1,7 @@
 package middleware_test
 
 // リクエストIDミドルウェアのテスト（Issue #403）
-// 実行: cd Backend && go test ./test/middleware/... -run TestRequestID -v
+// 実行: cd Backend && go test ./internal/middleware/... -run TestRequestID -v
 
 import (
 	"net/http"

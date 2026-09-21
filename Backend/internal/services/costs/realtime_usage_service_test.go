@@ -1,6 +1,6 @@
 package costs_test
 
-// 実行: cd Backend && go test ./test/services/... -run TestRealtime -v
+// 実行: cd Backend && go test ./internal/services/... -run TestRealtime -v
 
 import (
 	"math"

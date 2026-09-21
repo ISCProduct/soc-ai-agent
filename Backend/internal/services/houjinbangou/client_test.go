@@ -1,7 +1,7 @@
 package houjinbangou_test
 
 // 国税庁 法人番号システムWeb-API クライアントのテスト。
-// 実行: cd Backend && go test ./test/services/houjinbangou/... -v
+// 実行: cd Backend && go test ./internal/services/houjinbangou/... -v
 
 import (
 	"context"

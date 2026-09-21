@@ -1,7 +1,7 @@
 package github_test
 
 // GitHub GraphQL インジェクション対策のテスト（Issue #311）
-// 実行: cd Backend && go test ./test/services/... -run TestGitHub -v
+// 実行: cd Backend && go test ./internal/services/... -run TestGitHub -v
 
 import (
 	"encoding/json"

@@ -1,7 +1,7 @@
 package training_test
 
 // 学習データのエクスポートのテスト。
-// 実行: cd Backend && go test ./test/services/training/... -v
+// 実行: cd Backend && go test ./internal/services/training/... -v
 //
 // 実DBを使わず、発行されるSQLと結果の組み立てを検証する。
 // 見たいのは「AI発話が混ざらないこと」と「結論が出た応募だけを対象にすること」。

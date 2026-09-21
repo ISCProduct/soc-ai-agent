@@ -1,7 +1,7 @@
 package middleware_test
 
 // リクエストロガーミドルウェアのテスト（Issue #403）
-// 実行: cd Backend && go test ./test/middleware/... -run TestRequestLogger -v
+// 実行: cd Backend && go test ./internal/middleware/... -run TestRequestLogger -v
 
 import (
 	"bytes"

@@ -2,7 +2,7 @@ package schedule_test
 
 // スケジュールサービスのユニットテスト (Issue #188)
 //
-// 実行: cd Backend && go test ./test/services/... -run Schedule -v
+// 実行: cd Backend && go test ./internal/services/... -run Schedule -v
 
 import (
 	"Backend/internal/models"

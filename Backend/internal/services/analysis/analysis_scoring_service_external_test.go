@@ -1,7 +1,7 @@
 package analysis_test
 
 // 分析スコアリングサービスのユニットテスト
-// 実行: cd Backend && go test ./test/services/... -run TestRuleBased -v
+// 実行: cd Backend && go test ./internal/services/... -run TestRuleBased -v
 
 import (
 	"context"

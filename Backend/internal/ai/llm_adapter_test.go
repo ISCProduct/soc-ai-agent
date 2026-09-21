@@ -1,4 +1,4 @@
-package services_test
+package ai_test
 
 // LLM アダプターレイヤーのコンパイル時インターフェース適合テスト (Issue #177)
 //

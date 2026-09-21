@@ -1,7 +1,7 @@
 package repositories_test
 
 // UserWeightScoreRepository SetScore/AddScore のテスト（Issue #315）
-// 実行: cd Backend && go test ./test/repositories/... -run TestUserWeightScore -v
+// 実行: cd Backend && go test ./internal/repositories/... -run TestUserWeightScore -v
 
 import (
 	"testing"
