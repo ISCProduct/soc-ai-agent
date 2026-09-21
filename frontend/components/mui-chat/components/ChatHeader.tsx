@@ -31,7 +31,7 @@ export function ChatHeader({
           IT業界キャリアエージェント
         </Typography>
         <Typography variant="body2" color="text.secondary" className={styles.chatProgress}>
-          AI適性診断 — {valid}/{required} 問完了（想定{required}問・{percent}%）
+          AI適性診断 — {valid}/{required} 問（{percent}%）
         </Typography>
         <LinearProgress
           variant="determinate"

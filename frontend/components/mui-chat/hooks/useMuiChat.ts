@@ -11,7 +11,6 @@ import {
   extractChoices,
   makeMessageId,
   INITIAL_GREETING,
-  RESET_GREETING,
   clearChatSessionOnEnd,
   readStoredJobCategoryId,
   writeStoredJobCategoryId,
@@ -456,7 +455,7 @@ export function useMuiChat() {
     const initialMessage: Message = {
       id: '0',
       role: 'assistant',
-      content: RESET_GREETING,
+      content: INITIAL_GREETING,
       timestamp: new Date(),
     }
     setMessages([initialMessage])

@@ -102,3 +102,12 @@ export function isAnnotatedPdfResponse(
   }
   return false
 }
+
+/**
+ * 企業候補の取得元を学生向けの日本語に直す。
+ * そのまま出すと `db` / `web_search` という内部の値が画面に出てしまう。
+ */
+export function companySourceLabel(source?: string): string {
+  if (!source) return ''
+  return source === 'db' ? '掲載企業' : 'Web'
+}
