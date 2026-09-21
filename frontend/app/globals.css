@@ -19,3 +19,8 @@
     font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
   }
 }
+
+/* ログイン系フォームの補助リンク */
+.auth-link {
+  font-size: 0.875rem;
+}

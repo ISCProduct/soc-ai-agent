@@ -25,6 +25,7 @@ import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminListCard } from '@/components/admin/AdminListCard'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { isCompanyUnpublished } from '@/lib/company/draft'
+import styles from './page-content.module.css'
 
 type JobPosition = {
   id: number
@@ -168,7 +169,7 @@ function JobPositionCard({
                       href={position.company.source_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      style={{ display: 'flex', alignItems: 'center', gap: 2, fontSize: 13 }}
+                      className={styles.sourceLink}
                     >
                       {position.company.source_url.length > 60
                         ? position.company.source_url.slice(0, 60) + '…'

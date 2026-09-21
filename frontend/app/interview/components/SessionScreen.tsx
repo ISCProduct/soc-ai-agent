@@ -21,6 +21,7 @@ import dynamic from 'next/dynamic'
 import { PRIMARY } from '../constants'
 import { formatSeconds } from '@/lib/interview/utils'
 import type { Utterance } from '../types'
+import styles from './interview.module.css'
 
 const ThreeAvatar = dynamic(() => import('./ThreeAvatar'), {
   ssr: false,
@@ -277,12 +278,7 @@ export default function SessionScreen({
                 ref={sessionVideoCallbackRef}
                 muted
                 playsInline
-                style={{
-                  position: 'absolute', inset: 0,
-                  width: '100%', height: '100%',
-                  objectFit: 'cover', transform: 'scaleX(-1)',
-                  display: cameraEnabled ? 'block' : 'none',
-                }}
+                className={`${styles.cameraVideo} ${styles.cameraVideoFill} ${cameraEnabled ? '' : styles.cameraVideoHidden}`}
               />
               {!cameraEnabled && (
                 <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -389,7 +385,7 @@ export default function SessionScreen({
             <Box sx={{ display: 'flex', gap: 1 }}>
               {/* 録音 / 話す ボタン */}
               <Tooltip title={aiSpeaking ? 'AI発話中...' : turnPending ? 'AIが考えています...' : isRecording ? 'クリックして送信' : 'クリックして話す'}>
-                <span style={{ flex: 1 }}>
+                <span className={styles.recordButtonWrap}>
                   <Button
                     fullWidth
                     onClick={isRecording ? onStopRecording : onStartRecording}

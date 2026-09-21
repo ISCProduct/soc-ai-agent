@@ -1,0 +1,30 @@
+/* 面接画面(ロビー/セッション)のスタイル */
+.cameraVideo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* 自分の映像は鏡像で表示する */
+  transform: scaleX(-1);
+}
+
+/* セッション画面ではアスペクト比を保つ親要素に重ねる */
+.cameraVideoFill {
+  position: absolute;
+  inset: 0;
+}
+
+.cameraVideoHidden {
+  display: none;
+}
+
+.avatarSvg {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* Tooltip 用の span を Button と同じ幅に広げる */
+.recordButtonWrap {
+  flex: 1;
+}

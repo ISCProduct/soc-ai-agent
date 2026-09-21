@@ -92,7 +92,7 @@ export default function CompanyPortalForgotPasswordPage() {
           )}
 
           <Box sx={{ textAlign: 'center', mt: 2 }}>
-            <Link href="/company-portal/sign-in" style={{ fontSize: '0.875rem' }}>
+            <Link href="/company-portal/sign-in" className="auth-link">
               ログインページへ戻る
             </Link>
           </Box>
