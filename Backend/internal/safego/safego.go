@@ -4,6 +4,7 @@ package safego
 import (
 	"log/slog"
 	"runtime/debug"
+	"time"
 
 	"github.com/getsentry/sentry-go"
 )
@@ -20,15 +21,40 @@ import (
 // エラーを送り返すこと）。
 func Go(fn func()) {
 	go func() {
-		defer func() {
-			r := recover()
-			if r == nil {
-				return
-			}
-			slog.Error("goroutine が panic しました", "panic", r, "stack", string(debug.Stack()))
-			// Sentry 未初期化なら CurrentHub にクライアントが無く、何もしない。
-			sentry.CurrentHub().Recover(r)
-		}()
+		defer recoverAndLog()
 		fn()
 	}()
+}
+
+// Every は fn を interval ごとに実行する。runNow が true なら最初の tick を待たず1回実行する。
+//
+// Go で包むだけだと、panic した時点で goroutine が終わり周期実行そのものが止まる。
+// プロセスは生きているので監視には引っかからず、クロールや退会ユーザーの物理削除が
+// 次のデプロイまで動かないまま気づけない。そのため各回を個別に recover し、
+// 1回落ちても次の回は走るようにする。
+func Every(interval time.Duration, runNow bool, fn func()) {
+	Go(func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		run := func() {
+			defer recoverAndLog()
+			fn()
+		}
+		if runNow {
+			run()
+		}
+		for range ticker.C {
+			run()
+		}
+	})
+}
+
+func recoverAndLog() {
+	r := recover()
+	if r == nil {
+		return
+	}
+	slog.Error("goroutine が panic しました", "panic", r, "stack", string(debug.Stack()))
+	// Sentry 未初期化なら CurrentHub にクライアントが無く、何もしない。
+	sentry.CurrentHub().Recover(r)
 }
