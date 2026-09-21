@@ -1,4 +1,4 @@
-package controllers_test
+package application_test
 
 import (
 	"errors"
@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	applicationcontrollers "Backend/internal/controllers/application"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/services/flywheel"
 	hrsvc "Backend/internal/services/hr"
 	"Backend/internal/services/shared"
@@ -28,7 +29,7 @@ func newHRStudentAnalysisController(svc *hrStudentAnalysisServiceStub) *applicat
 }
 
 func hrAnalysisCtx(req *http.Request, rec *httptest.ResponseRecorder, userID string) echo.Context {
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("userID")
 	c.SetParamValues(userID)
 	return c
@@ -37,35 +38,35 @@ func hrAnalysisCtx(req *http.Request, rec *httptest.ResponseRecorder, userID str
 func TestHRStudentAnalysisController_GetAnalysis_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/hr/students/5/analysis?company_id=10", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newHRStudentAnalysisController(nil).GetAnalysis, newCtx(req, rec), http.StatusUnauthorized)
+	testsupport.AssertStatus(t, newHRStudentAnalysisController(nil).GetAnalysis, testsupport.NewCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestHRStudentAnalysisController_GetAnalysis_MissingCompanyID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/hr/students/5/analysis", nil)
-	req = withUserID(req, 2)
+	req = testsupport.WithUserID(req, 2)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newHRStudentAnalysisController(nil).GetAnalysis, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, newHRStudentAnalysisController(nil).GetAnalysis, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestHRStudentAnalysisController_GetAnalysis_Forbidden(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/hr/students/5/analysis?company_id=99", nil)
-	req = withUserID(req, 2)
+	req = testsupport.WithUserID(req, 2)
 	rec := httptest.NewRecorder()
 	svc := &hrStudentAnalysisServiceStub{err: shared.ErrForbidden}
-	assertStatus(t, newHRStudentAnalysisController(svc).GetAnalysis, hrAnalysisCtx(req, rec, "5"), http.StatusForbidden)
+	testsupport.AssertStatus(t, newHRStudentAnalysisController(svc).GetAnalysis, hrAnalysisCtx(req, rec, "5"), http.StatusForbidden)
 }
 
 func TestHRStudentAnalysisController_GetAnalysis_NotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/hr/students/5/analysis?company_id=10", nil)
-	req = withUserID(req, 2)
+	req = testsupport.WithUserID(req, 2)
 	rec := httptest.NewRecorder()
 	svc := &hrStudentAnalysisServiceStub{err: hrsvc.ErrStudentNotVisible}
-	assertStatus(t, newHRStudentAnalysisController(svc).GetAnalysis, hrAnalysisCtx(req, rec, "5"), http.StatusNotFound)
+	testsupport.AssertStatus(t, newHRStudentAnalysisController(svc).GetAnalysis, hrAnalysisCtx(req, rec, "5"), http.StatusNotFound)
 }
 
 func TestHRStudentAnalysisController_GetAnalysis_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/hr/students/5/analysis?company_id=10", nil)
-	req = withUserID(req, 2)
+	req = testsupport.WithUserID(req, 2)
 	rec := httptest.NewRecorder()
 	svc := &hrStudentAnalysisServiceStub{
 		resp: &hrsvc.StudentAnalysisResponse{
@@ -74,13 +75,13 @@ func TestHRStudentAnalysisController_GetAnalysis_Success(t *testing.T) {
 			InterviewReports:  []hrsvc.InterviewReportView{},
 		},
 	}
-	assertStatus(t, newHRStudentAnalysisController(svc).GetAnalysis, hrAnalysisCtx(req, rec, "5"), http.StatusOK)
+	testsupport.AssertStatus(t, newHRStudentAnalysisController(svc).GetAnalysis, hrAnalysisCtx(req, rec, "5"), http.StatusOK)
 }
 
 func TestHRStudentAnalysisController_GetAnalysis_InternalError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/hr/students/5/analysis?company_id=10", nil)
-	req = withUserID(req, 2)
+	req = testsupport.WithUserID(req, 2)
 	rec := httptest.NewRecorder()
 	svc := &hrStudentAnalysisServiceStub{err: errors.New("boom")}
-	assertStatus(t, newHRStudentAnalysisController(svc).GetAnalysis, hrAnalysisCtx(req, rec, "5"), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newHRStudentAnalysisController(svc).GetAnalysis, hrAnalysisCtx(req, rec, "5"), http.StatusInternalServerError)
 }

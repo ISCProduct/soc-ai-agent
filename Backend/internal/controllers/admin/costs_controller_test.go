@@ -1,8 +1,8 @@
-package controllers_test
+package admin_test
 
 // AdminCostsControllerのHTTPハンドラーテスト (Issue #430)
 //
-// 実行: cd Backend && go test ./test/controllers/... -run "AdminCosts" -v
+// 実行: cd Backend && go test ./internal/controllers/admin/... -run "AdminCosts" -v
 
 import (
 	"errors"
@@ -12,9 +12,10 @@ import (
 	"testing"
 
 	admincontrollers "Backend/internal/controllers/admin"
+	"Backend/internal/controllers/mocks"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/services/costs"
 	ifaces "Backend/internal/services/interfaces"
-	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -31,7 +32,7 @@ func TestAdminCostsController_Summary_CostServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/summary", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCostsController(cost, nil).Summary, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newAdminCostsController(cost, nil).Summary, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	cost.AssertExpectations(t)
 }
 
@@ -42,7 +43,7 @@ func TestAdminCostsController_Summary_ModelBreakdownError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/summary", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCostsController(cost, nil).Summary, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newAdminCostsController(cost, nil).Summary, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	cost.AssertExpectations(t)
 }
 
@@ -53,7 +54,7 @@ func TestAdminCostsController_Summary_Success_NoRealtime(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/summary", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCostsController(cost, nil).Summary, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCostsController(cost, nil).Summary, testsupport.NewCtx(req, rec), http.StatusOK)
 	cost.AssertExpectations(t)
 }
 
@@ -68,7 +69,7 @@ func TestAdminCostsController_Summary_Success_WithRealtime(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/summary", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCostsController(cost, realtime).Summary, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCostsController(cost, realtime).Summary, testsupport.NewCtx(req, rec), http.StatusOK)
 	cost.AssertExpectations(t)
 	realtime.AssertExpectations(t)
 }
@@ -85,7 +86,7 @@ func TestAdminCostsController_Summary_IncludesCompanySearch(t *testing.T) {
 	ctrl := admincontrollers.NewAdminCostsController(cost, nil, budget)
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/summary", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, ctrl.Summary, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, ctrl.Summary, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	body := rec.Body.String()
 	if !strings.Contains(body, `"company_search"`) {
@@ -106,7 +107,7 @@ func TestAdminCostsController_Daily_ServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/daily", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCostsController(cost, nil).Daily, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newAdminCostsController(cost, nil).Daily, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	cost.AssertExpectations(t)
 }
 
@@ -116,7 +117,7 @@ func TestAdminCostsController_Daily_Success_NoRealtime(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/daily", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCostsController(cost, nil).Daily, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCostsController(cost, nil).Daily, testsupport.NewCtx(req, rec), http.StatusOK)
 	cost.AssertExpectations(t)
 }
 
@@ -128,7 +129,7 @@ func TestAdminCostsController_Daily_Success_WithRealtime(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/daily", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCostsController(cost, realtime).Daily, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCostsController(cost, realtime).Daily, testsupport.NewCtx(req, rec), http.StatusOK)
 }
 
 // ===== Monthly =====
@@ -139,7 +140,7 @@ func TestAdminCostsController_Monthly_ServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/monthly", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCostsController(cost, nil).Monthly, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newAdminCostsController(cost, nil).Monthly, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	cost.AssertExpectations(t)
 }
 
@@ -149,7 +150,7 @@ func TestAdminCostsController_Monthly_Success_NoRealtime(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/monthly", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCostsController(cost, nil).Monthly, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCostsController(cost, nil).Monthly, testsupport.NewCtx(req, rec), http.StatusOK)
 	cost.AssertExpectations(t)
 }
 
@@ -161,6 +162,6 @@ func TestAdminCostsController_Monthly_Success_WithRealtime(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/costs/monthly", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCostsController(cost, realtime).Monthly, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCostsController(cost, realtime).Monthly, testsupport.NewCtx(req, rec), http.StatusOK)
 
 }

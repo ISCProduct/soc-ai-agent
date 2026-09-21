@@ -1,8 +1,8 @@
-package controllers_test
+package admin_test
 
 // AdminCompany・AdminJobコントローラーのHTTPハンドラーテスト (Issue #430)
 //
-// 実行: cd Backend && go test ./test/controllers/... -run "AdminCompany|AdminJob" -v
+// 実行: cd Backend && go test ./internal/controllers/admin/... -run "AdminCompany|AdminJob" -v
 
 import (
 	"bytes"
@@ -13,8 +13,9 @@ import (
 	"testing"
 
 	admincontrollers "Backend/internal/controllers/admin"
+	"Backend/internal/controllers/mocks"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
-	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/mock"
 	"gorm.io/gorm"
@@ -32,7 +33,7 @@ func TestAdminCompanyController_List_ServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/companies", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCompanyController(repo, nil).List, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newAdminCompanyController(repo, nil).List, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 }
 
 func TestAdminCompanyController_List_Success(t *testing.T) {
@@ -41,7 +42,7 @@ func TestAdminCompanyController_List_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/companies", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCompanyController(repo, nil).List, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCompanyController(repo, nil).List, testsupport.NewCtx(req, rec), http.StatusOK)
 	repo.AssertExpectations(t)
 }
 
@@ -49,7 +50,7 @@ func TestAdminCompanyController_Create_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/companies", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminCompanyController(nil, nil, nil).Create, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminCompanyController(nil, nil, nil).Create, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAdminCompanyController_Create_MissingName(t *testing.T) {
@@ -57,7 +58,7 @@ func TestAdminCompanyController_Create_MissingName(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/companies", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminCompanyController(nil, nil, nil).Create, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminCompanyController(nil, nil, nil).Create, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAdminCompanyController_Create_Success(t *testing.T) {
@@ -70,17 +71,17 @@ func TestAdminCompanyController_Create_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/companies", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCompanyController(repo, audit).Create, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCompanyController(repo, audit).Create, testsupport.NewCtx(req, rec), http.StatusOK)
 	repo.AssertExpectations(t)
 }
 
 func TestAdminCompanyController_Get_InvalidID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/companies/abc", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, admincontrollers.NewAdminCompanyController(nil, nil, nil).Get, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminCompanyController(nil, nil, nil).Get, ctx, http.StatusBadRequest)
 }
 
 func TestAdminCompanyController_Get_NotFound(t *testing.T) {
@@ -89,10 +90,10 @@ func TestAdminCompanyController_Get_NotFound(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/companies/1", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newAdminCompanyController(repo, nil).Get, ctx, http.StatusNotFound)
+	testsupport.AssertStatus(t, newAdminCompanyController(repo, nil).Get, ctx, http.StatusNotFound)
 	repo.AssertExpectations(t)
 }
 
@@ -103,10 +104,10 @@ func TestAdminCompanyController_Get_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/companies/1", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newAdminCompanyController(repo, nil).Get, ctx, http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCompanyController(repo, nil).Get, ctx, http.StatusOK)
 	repo.AssertExpectations(t)
 }
 
@@ -122,10 +123,10 @@ func TestAdminCompanyController_Update_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/admin/companies/1", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newAdminCompanyController(repo, audit).Update, ctx, http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCompanyController(repo, audit).Update, ctx, http.StatusOK)
 	repo.AssertExpectations(t)
 }
 
@@ -147,10 +148,10 @@ func TestAdminCompanyController_Publish_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/admin/companies/1/publish", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newAdminCompanyController(repo, audit).Publish, ctx, http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCompanyController(repo, audit).Publish, ctx, http.StatusOK)
 	repo.AssertExpectations(t)
 }
 
@@ -162,10 +163,10 @@ func TestAdminCompanyController_Publish_RequiresWeightProfile(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/admin/companies/1/publish", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newAdminCompanyController(repo, nil).Publish, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, newAdminCompanyController(repo, nil).Publish, ctx, http.StatusBadRequest)
 	repo.AssertExpectations(t)
 }
 
@@ -175,10 +176,10 @@ func TestAdminCompanyController_Publish_NotFound(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/admin/companies/1/publish", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newAdminCompanyController(repo, nil).Publish, ctx, http.StatusNotFound)
+	testsupport.AssertStatus(t, newAdminCompanyController(repo, nil).Publish, ctx, http.StatusNotFound)
 	repo.AssertExpectations(t)
 }
 
@@ -192,10 +193,10 @@ func TestAdminCompanyController_Reject_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/admin/companies/1/reject", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newAdminCompanyController(repo, audit).Reject, ctx, http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCompanyController(repo, audit).Reject, ctx, http.StatusOK)
 	repo.AssertExpectations(t)
 }
 
@@ -211,7 +212,7 @@ func TestAdminJobController_JobCategories_ServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/job-categories", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminJobController(nil, jobCatRepo, nil, nil).JobCategories, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newAdminJobController(nil, jobCatRepo, nil, nil).JobCategories, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	jobCatRepo.AssertExpectations(t)
 }
 
@@ -222,7 +223,7 @@ func TestAdminJobController_JobCategories_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/job-categories", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminJobController(nil, jobCatRepo, nil, nil).JobCategories, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminJobController(nil, jobCatRepo, nil, nil).JobCategories, testsupport.NewCtx(req, rec), http.StatusOK)
 	jobCatRepo.AssertExpectations(t)
 }
 
@@ -233,7 +234,7 @@ func TestAdminJobController_JobPositions_List_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/job-positions", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminJobController(companyRepo, nil, nil, nil).JobPositions, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminJobController(companyRepo, nil, nil, nil).JobPositions, testsupport.NewCtx(req, rec), http.StatusOK)
 	companyRepo.AssertExpectations(t)
 }
 
@@ -243,19 +244,19 @@ func TestAdminJobController_GraduateEmployments_List_Success(t *testing.T) {
 	gradRepo.On("List", (*uint)(nil), (*uint)(nil), 50).Return(entries, nil)
 
 	// schoolScope 適用ルートなので、絞り込み対象(ここでは絞り込みなし)を context に載せる
-	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments", nil), nil)
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments", nil), nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminJobController(nil, nil, gradRepo, nil).GraduateEmployments, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminJobController(nil, nil, gradRepo, nil).GraduateEmployments, testsupport.NewCtx(req, rec), http.StatusOK)
 	gradRepo.AssertExpectations(t)
 }
 
 func TestAdminJobController_GetGraduateEmployment_InvalidID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments/abc", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, admincontrollers.NewAdminJobController(nil, nil, nil, nil).GetGraduateEmployment, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminJobController(nil, nil, nil, nil).GetGraduateEmployment, ctx, http.StatusBadRequest)
 }
 
 func TestAdminJobController_GetGraduateEmployment_NotFound(t *testing.T) {
@@ -264,10 +265,10 @@ func TestAdminJobController_GetGraduateEmployment_NotFound(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments/1", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newAdminJobController(nil, nil, gradRepo, nil).GetGraduateEmployment, ctx, http.StatusNotFound)
+	testsupport.AssertStatus(t, newAdminJobController(nil, nil, gradRepo, nil).GetGraduateEmployment, ctx, http.StatusNotFound)
 	gradRepo.AssertExpectations(t)
 }
 
@@ -276,14 +277,14 @@ func TestAdminJobController_GetGraduateEmployment_Success(t *testing.T) {
 	entry := &models.GraduateEmployment{GraduateName: "Test User"}
 	gradRepo.On("FindByID", uint(1)).Return(entry, nil)
 
-	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments/1", nil), 1)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments/1", nil), 1)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
 	ctrl := newAdminJobController(nil, nil, gradRepo, nil)
-	ctrl.SetSchoolAccess(newUnrestrictedSchoolService(1))
-	assertStatus(t, ctrl.GetGraduateEmployment, ctx, http.StatusOK)
+	ctrl.SetSchoolAccess(testsupport.NewUnrestrictedSchoolService(1))
+	testsupport.AssertStatus(t, ctrl.GetGraduateEmployment, ctx, http.StatusOK)
 	gradRepo.AssertExpectations(t)
 }
 
@@ -296,14 +297,14 @@ func TestAdminJobController_GetGraduateEmployment_OtherSchoolDenied(t *testing.T
 	entry := &models.GraduateEmployment{GraduateName: "他校の卒業生", SchoolID: &otherSchool}
 	gradRepo.On("FindByID", uint(1)).Return(entry, nil)
 
-	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments/1", nil), 1)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments/1", nil), 1)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
 	ctrl := newAdminJobController(nil, nil, gradRepo, nil)
-	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
-	assertStatus(t, ctrl.GetGraduateEmployment, ctx, http.StatusForbidden)
+	ctrl.SetSchoolAccess(testsupport.NewRestrictedSchoolService(1, 5))
+	testsupport.AssertStatus(t, ctrl.GetGraduateEmployment, ctx, http.StatusForbidden)
 }
 
 // TestAdminJobController_GetGraduateEmployment_OwnSchoolAllowed は担当校のものは取得できることを検証する。
@@ -313,14 +314,14 @@ func TestAdminJobController_GetGraduateEmployment_OwnSchoolAllowed(t *testing.T)
 	entry := &models.GraduateEmployment{GraduateName: "自校の卒業生", SchoolID: &ownSchool}
 	gradRepo.On("FindByID", uint(1)).Return(entry, nil)
 
-	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments/1", nil), 1)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments/1", nil), 1)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
 	ctrl := newAdminJobController(nil, nil, gradRepo, nil)
-	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
-	assertStatus(t, ctrl.GetGraduateEmployment, ctx, http.StatusOK)
+	ctrl.SetSchoolAccess(testsupport.NewRestrictedSchoolService(1, 5))
+	testsupport.AssertStatus(t, ctrl.GetGraduateEmployment, ctx, http.StatusOK)
 }
 
 // TestAdminJobController_GetGraduateEmployment_SchoolAccessNotConfigured は
@@ -329,12 +330,12 @@ func TestAdminJobController_GetGraduateEmployment_SchoolAccessNotConfigured(t *t
 	gradRepo := &mocks.GraduateEmploymentRepositoryMock{}
 	gradRepo.On("FindByID", uint(1)).Return(&models.GraduateEmployment{}, nil)
 
-	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments/1", nil), 1)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/graduate-employments/1", nil), 1)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newAdminJobController(nil, nil, gradRepo, nil).GetGraduateEmployment, ctx, http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newAdminJobController(nil, nil, gradRepo, nil).GetGraduateEmployment, ctx, http.StatusInternalServerError)
 }
 
 func TestAdminJobController_UpdateGraduateEmployment_Success(t *testing.T) {
@@ -346,15 +347,15 @@ func TestAdminJobController_UpdateGraduateEmployment_Success(t *testing.T) {
 	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 
 	body, _ := json.Marshal(map[string]interface{}{"company_id": 1, "graduate_name": "Updated User"})
-	req := withAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/graduate-employments/1", bytes.NewReader(body)), 1)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/graduate-employments/1", bytes.NewReader(body)), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
 	ctrl := newAdminJobController(nil, nil, gradRepo, audit)
-	ctrl.SetSchoolAccess(newUnrestrictedSchoolService(1))
-	assertStatus(t, ctrl.UpdateGraduateEmployment, ctx, http.StatusOK)
+	ctrl.SetSchoolAccess(testsupport.NewUnrestrictedSchoolService(1))
+	testsupport.AssertStatus(t, ctrl.UpdateGraduateEmployment, ctx, http.StatusOK)
 	gradRepo.AssertExpectations(t)
 }
 
@@ -366,25 +367,25 @@ func TestAdminJobController_UpdateGraduateEmployment_OtherSchoolDenied(t *testin
 	gradRepo.On("FindByID", uint(1)).Return(&models.GraduateEmployment{SchoolID: &otherSchool}, nil)
 
 	body, _ := json.Marshal(map[string]interface{}{"company_id": 1, "graduate_name": "改変"})
-	req := withAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/graduate-employments/1", bytes.NewReader(body)), 1)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/graduate-employments/1", bytes.NewReader(body)), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
 	ctrl := newAdminJobController(nil, nil, gradRepo, nil)
-	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
-	assertStatus(t, ctrl.UpdateGraduateEmployment, ctx, http.StatusForbidden)
+	ctrl.SetSchoolAccess(testsupport.NewRestrictedSchoolService(1, 5))
+	testsupport.AssertStatus(t, ctrl.UpdateGraduateEmployment, ctx, http.StatusForbidden)
 	gradRepo.AssertNotCalled(t, "Update", mock.Anything)
 }
 
 func TestAdminJobController_JobPositionAction_InvalidID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPatch, "/api/admin/job-positions/abc/publish", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id", "action")
 	ctx.SetParamValues("abc", "publish")
-	assertStatus(t, admincontrollers.NewAdminJobController(nil, nil, nil, nil).JobPositionAction, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminJobController(nil, nil, nil, nil).JobPositionAction, ctx, http.StatusBadRequest)
 }
 
 func TestAdminJobController_JobPositionAction_NotFound(t *testing.T) {
@@ -393,10 +394,10 @@ func TestAdminJobController_JobPositionAction_NotFound(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/admin/job-positions/1/publish", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id", "action")
 	ctx.SetParamValues("1", "publish")
-	assertStatus(t, newAdminJobController(companyRepo, nil, nil, nil).JobPositionAction, ctx, http.StatusNotFound)
+	testsupport.AssertStatus(t, newAdminJobController(companyRepo, nil, nil, nil).JobPositionAction, ctx, http.StatusNotFound)
 	companyRepo.AssertExpectations(t)
 }
 
@@ -407,10 +408,10 @@ func TestAdminJobController_JobPositionAction_UnknownAction(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/admin/job-positions/1/unknown", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id", "action")
 	ctx.SetParamValues("1", "unknown")
-	assertStatus(t, newAdminJobController(companyRepo, nil, nil, nil).JobPositionAction, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, newAdminJobController(companyRepo, nil, nil, nil).JobPositionAction, ctx, http.StatusBadRequest)
 	companyRepo.AssertExpectations(t)
 }
 
@@ -424,10 +425,10 @@ func TestAdminJobController_JobPositionAction_Publish_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/admin/job-positions/1/publish", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id", "action")
 	ctx.SetParamValues("1", "publish")
-	assertStatus(t, newAdminJobController(companyRepo, nil, nil, audit).JobPositionAction, ctx, http.StatusOK)
+	testsupport.AssertStatus(t, newAdminJobController(companyRepo, nil, nil, audit).JobPositionAction, ctx, http.StatusOK)
 	companyRepo.AssertExpectations(t)
 }
 
@@ -447,10 +448,10 @@ func TestAdminJobController_JobPositionAction_PublishDoesNotCheckCompany(t *test
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/admin/job-positions/1/publish", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id", "action")
 	ctx.SetParamValues("1", "publish")
-	assertStatus(t, newAdminJobController(companyRepo, nil, nil, audit).JobPositionAction, ctx, http.StatusOK)
+	testsupport.AssertStatus(t, newAdminJobController(companyRepo, nil, nil, audit).JobPositionAction, ctx, http.StatusOK)
 	companyRepo.AssertNotCalled(t, "FindByID", mock.Anything)
 }
 
@@ -458,7 +459,7 @@ func TestAdminJobController_GraduateEmployments_Create_InvalidBody(t *testing.T)
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminJobController(nil, nil, nil, nil).CreateGraduateEmployment, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminJobController(nil, nil, nil, nil).CreateGraduateEmployment, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAdminJobController_GraduateEmployments_Create_MissingCompanyID(t *testing.T) {
@@ -466,7 +467,7 @@ func TestAdminJobController_GraduateEmployments_Create_MissingCompanyID(t *testi
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminJobController(nil, nil, nil, nil).CreateGraduateEmployment, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminJobController(nil, nil, nil, nil).CreateGraduateEmployment, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAdminJobController_GraduateEmployments_Create_Success(t *testing.T) {
@@ -476,12 +477,12 @@ func TestAdminJobController_GraduateEmployments_Create_Success(t *testing.T) {
 	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 
 	body, _ := json.Marshal(map[string]interface{}{"company_id": 1, "graduate_name": "Test User"})
-	req := withAdminUserID(httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewReader(body)), 1)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewReader(body)), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	ctrl := newAdminJobController(nil, nil, gradRepo, audit)
-	ctrl.SetSchoolAccess(newUnrestrictedSchoolService(1))
-	assertStatus(t, ctrl.CreateGraduateEmployment, newCtx(req, rec), http.StatusOK)
+	ctrl.SetSchoolAccess(testsupport.NewUnrestrictedSchoolService(1))
+	testsupport.AssertStatus(t, ctrl.CreateGraduateEmployment, testsupport.NewCtx(req, rec), http.StatusOK)
 	gradRepo.AssertExpectations(t)
 }
 
@@ -499,12 +500,12 @@ func TestAdminJobController_CreateGraduateEmployment_StampsOwnSchool(t *testing.
 	audit.On("Record", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 
 	body, _ := json.Marshal(map[string]interface{}{"company_id": 1, "graduate_name": "自校の卒業生"})
-	req := withAdminUserID(httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewReader(body)), 1)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewReader(body)), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	ctrl := newAdminJobController(nil, nil, gradRepo, audit)
-	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
-	assertStatus(t, ctrl.CreateGraduateEmployment, newCtx(req, rec), http.StatusOK)
+	ctrl.SetSchoolAccess(testsupport.NewRestrictedSchoolService(1, 5))
+	testsupport.AssertStatus(t, ctrl.CreateGraduateEmployment, testsupport.NewCtx(req, rec), http.StatusOK)
 	gradRepo.AssertExpectations(t)
 }
 
@@ -514,12 +515,12 @@ func TestAdminJobController_CreateGraduateEmployment_RejectsOtherSchool(t *testi
 	gradRepo := &mocks.GraduateEmploymentRepositoryMock{}
 
 	body, _ := json.Marshal(map[string]interface{}{"company_id": 1, "graduate_name": "他校", "school_id": 9})
-	req := withAdminUserID(httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewReader(body)), 1)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodPost, "/api/admin/graduate-employments", bytes.NewReader(body)), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	ctrl := newAdminJobController(nil, nil, gradRepo, nil)
-	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
-	assertStatus(t, ctrl.CreateGraduateEmployment, newCtx(req, rec), http.StatusForbidden)
+	ctrl.SetSchoolAccess(testsupport.NewRestrictedSchoolService(1, 5))
+	testsupport.AssertStatus(t, ctrl.CreateGraduateEmployment, testsupport.NewCtx(req, rec), http.StatusForbidden)
 	gradRepo.AssertNotCalled(t, "Create", mock.Anything)
 }
 
@@ -558,7 +559,7 @@ func TestAdminJobController_CreateJobPosition_InheritsCompanyStatus(t *testing.T
 			req := httptest.NewRequest(http.MethodPost, "/api/admin/job-positions", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
-			assertStatus(t, newAdminJobController(companyRepo, nil, nil, audit).CreateJobPosition, newCtx(req, rec), http.StatusOK)
+			testsupport.AssertStatus(t, newAdminJobController(companyRepo, nil, nil, audit).CreateJobPosition, testsupport.NewCtx(req, rec), http.StatusOK)
 
 			if created == nil {
 				t.Fatal("CreateJobPosition が呼ばれていない")
@@ -594,7 +595,7 @@ func TestAdminJobController_CreateJobPosition_RejectsUnknownCompany(t *testing.T
 			req := httptest.NewRequest(http.MethodPost, "/api/admin/job-positions", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
-			assertStatus(t, newAdminJobController(companyRepo, nil, nil, nil).CreateJobPosition, newCtx(req, rec), http.StatusBadRequest)
+			testsupport.AssertStatus(t, newAdminJobController(companyRepo, nil, nil, nil).CreateJobPosition, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 			// 作成に進まないこと。
 			companyRepo.AssertNotCalled(t, "CreateJobPosition", mock.Anything)
 		})

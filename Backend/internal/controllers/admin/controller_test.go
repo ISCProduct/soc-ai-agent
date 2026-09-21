@@ -1,8 +1,8 @@
-package controllers_test
+package admin_test
 
 // Admin系コントローラーのHTTPハンドラーテスト
 //
-// 実行: cd Backend && go test ./test/controllers/... -run Admin -v
+// 実行: cd Backend && go test ./internal/controllers/admin/... -run Admin -v
 
 import (
 	"bytes"
@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	admincontrollers "Backend/internal/controllers/admin"
+	"Backend/internal/controllers/testsupport"
 )
 
 // ---- AdminAuditController ----
@@ -39,7 +40,7 @@ func TestAdminScoreValidationController_CreateVariant_InvalidBody(t *testing.T) 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/score-validation/variants", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.CreateVariant, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, c.CreateVariant, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAdminScoreValidationController_CreateVariant_MissingFields(t *testing.T) {
@@ -48,7 +49,7 @@ func TestAdminScoreValidationController_CreateVariant_MissingFields(t *testing.T
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/score-validation/variants", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.CreateVariant, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, c.CreateVariant, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 // ---- AdminProfileRecalculationController ----
@@ -57,10 +58,10 @@ func TestAdminProfileRecalculationController_RecalculateOne_NonNumericID(t *test
 	c := admincontrollers.NewAdminProfileRecalculationController(nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/profile-recalculation/abc", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("company_id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, c.RecalculateOne, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, c.RecalculateOne, ctx, http.StatusBadRequest)
 }
 
 // ---- AdminScraperSessionController ----
@@ -69,10 +70,10 @@ func TestAdminScraperSessionController_Delete_MissingKey(t *testing.T) {
 	c := admincontrollers.NewAdminScraperSessionController(nil)
 	req := httptest.NewRequest(http.MethodDelete, "/api/admin/scraper-sessions/", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("site_key")
 	ctx.SetParamValues("")
-	assertStatus(t, c.Delete, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, c.Delete, ctx, http.StatusBadRequest)
 }
 
 func TestAdminScraperSessionController_Upsert_InvalidBody(t *testing.T) {
@@ -80,7 +81,7 @@ func TestAdminScraperSessionController_Upsert_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/admin/scraper-sessions", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.Upsert, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, c.Upsert, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 // ---- AdminUserController ----
@@ -89,10 +90,10 @@ func TestAdminUserController_Update_InvalidID(t *testing.T) {
 	c := admincontrollers.NewAdminUserController(nil, nil)
 	req := httptest.NewRequest(http.MethodPut, "/api/admin/users/abc", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, c.Update, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, c.Update, ctx, http.StatusBadRequest)
 }
 
 // ---- AdminJobController ----

@@ -1,8 +1,8 @@
-package controllers_test
+package admin_test
 
 // AdminCrawlControllerのHTTPハンドラーテスト (Issue #431)
 //
-// 実行: cd Backend && go test ./test/controllers/... -run "AdminCrawl" -v
+// 実行: cd Backend && go test ./internal/controllers/admin/... -run "AdminCrawl" -v
 
 import (
 	"bytes"
@@ -13,8 +13,9 @@ import (
 	"testing"
 
 	admincontrollers "Backend/internal/controllers/admin"
+	"Backend/internal/controllers/mocks"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
-	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -31,7 +32,7 @@ func TestAdminCrawlController_Sources_List_ServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/crawl-sources", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCrawlController(svc, nil).ListSources, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newAdminCrawlController(svc, nil).ListSources, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	svc.AssertExpectations(t)
 }
 
@@ -42,7 +43,7 @@ func TestAdminCrawlController_Sources_List_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/crawl-sources", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCrawlController(svc, nil).ListSources, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCrawlController(svc, nil).ListSources, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -52,7 +53,7 @@ func TestAdminCrawlController_Sources_Create_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/crawl-sources", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminCrawlController(nil, nil).CreateSource, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminCrawlController(nil, nil).CreateSource, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAdminCrawlController_Sources_Create_ServiceError(t *testing.T) {
@@ -63,7 +64,7 @@ func TestAdminCrawlController_Sources_Create_ServiceError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/crawl-sources", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCrawlController(svc, nil).CreateSource, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, newAdminCrawlController(svc, nil).CreateSource, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 	svc.AssertExpectations(t)
 }
 
@@ -78,7 +79,7 @@ func TestAdminCrawlController_Sources_Create_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/crawl-sources", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCrawlController(svc, audit).CreateSource, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCrawlController(svc, audit).CreateSource, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -87,20 +88,20 @@ func TestAdminCrawlController_Sources_Create_Success(t *testing.T) {
 func TestAdminCrawlController_SourceDetail_InvalidID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/admin/crawl-sources/abc", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, admincontrollers.NewAdminCrawlController(nil, nil).UpdateSource, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminCrawlController(nil, nil).UpdateSource, ctx, http.StatusBadRequest)
 }
 
 func TestAdminCrawlController_SourceDetail_Update_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/admin/crawl-sources/1", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, admincontrollers.NewAdminCrawlController(nil, nil).UpdateSource, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminCrawlController(nil, nil).UpdateSource, ctx, http.StatusBadRequest)
 }
 
 func TestAdminCrawlController_SourceDetail_Update_Success(t *testing.T) {
@@ -114,10 +115,10 @@ func TestAdminCrawlController_SourceDetail_Update_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/admin/crawl-sources/1", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newAdminCrawlController(svc, audit).UpdateSource, ctx, http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCrawlController(svc, audit).UpdateSource, ctx, http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -129,7 +130,7 @@ func TestAdminCrawlController_Runs_ServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/crawl-runs", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCrawlController(svc, nil).Runs, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newAdminCrawlController(svc, nil).Runs, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	svc.AssertExpectations(t)
 }
 
@@ -140,7 +141,7 @@ func TestAdminCrawlController_Runs_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/crawl-runs", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCrawlController(svc, nil).Runs, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCrawlController(svc, nil).Runs, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -152,10 +153,10 @@ func TestAdminCrawlController_RunSource_ServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/crawl-sources/1/run", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newAdminCrawlController(svc, nil).RunSource, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, newAdminCrawlController(svc, nil).RunSource, ctx, http.StatusBadRequest)
 	svc.AssertExpectations(t)
 }
 
@@ -168,9 +169,9 @@ func TestAdminCrawlController_RunSource_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/crawl-sources/1/run", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newAdminCrawlController(svc, audit).RunSource, ctx, http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCrawlController(svc, audit).RunSource, ctx, http.StatusOK)
 	svc.AssertExpectations(t)
 }

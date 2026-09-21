@@ -1,8 +1,8 @@
-package controllers_test
+package company_test
 
 // #1196 企業ポータルのパスワードリセットのHTTP層テスト
 //
-// 実行: cd Backend && go test ./test/controllers/... -run CompanyPasswordReset -v
+// 実行: cd Backend && go test ./internal/controllers/company/... -run CompanyPasswordReset -v
 
 import (
 	"bytes"

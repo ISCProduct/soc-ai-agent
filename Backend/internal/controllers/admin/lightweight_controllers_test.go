@@ -1,4 +1,4 @@
-package controllers_test
+package admin_test
 
 // Admin系軽量コントローラーのHTTPハンドラーテスト (Issue #429)
 //
@@ -6,7 +6,7 @@ package controllers_test
 //       AdminScoreValidationController, AdminProfileRecalculationController,
 //       AdminUserController
 //
-// 実行: cd Backend && go test ./test/controllers/... -run "AdminAudit|AdminScraper|AdminScore|AdminProfile|AdminUser" -v
+// 実行: cd Backend && go test ./internal/controllers/admin/... -run "AdminAudit|AdminScraper|AdminScore|AdminProfile|AdminUser" -v
 
 import (
 	"bytes"
@@ -18,11 +18,12 @@ import (
 
 	"Backend/domain/entity"
 	admincontrollers "Backend/internal/controllers/admin"
+	"Backend/internal/controllers/mocks"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
 	"Backend/internal/services/admin"
 	"Backend/internal/services/flywheel"
 	"Backend/internal/services/school"
-	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -35,7 +36,7 @@ func TestAdminAuditController_List_ServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/audit-logs", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminAuditController(svc).List, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminAuditController(svc).List, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	svc.AssertExpectations(t)
 }
 
@@ -46,7 +47,7 @@ func TestAdminAuditController_List_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/audit-logs", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminAuditController(svc).List, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminAuditController(svc).List, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -56,7 +57,7 @@ func TestAdminAuditController_List_CustomLimit(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/audit-logs?limit=10", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminAuditController(svc).List, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminAuditController(svc).List, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -68,7 +69,7 @@ func TestAdminScraperSessionController_Sessions_List_ServiceError(t *testing.T) 
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/scraper-sessions", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminScraperSessionController(svc).List, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminScraperSessionController(svc).List, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	svc.AssertExpectations(t)
 }
 
@@ -78,7 +79,7 @@ func TestAdminScraperSessionController_Sessions_List_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/scraper-sessions", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminScraperSessionController(svc).List, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminScraperSessionController(svc).List, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -86,7 +87,7 @@ func TestAdminScraperSessionController_Sessions_Upsert_InvalidBody(t *testing.T)
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/scraper-sessions", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminScraperSessionController(nil).Upsert, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminScraperSessionController(nil).Upsert, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAdminScraperSessionController_Sessions_Upsert_InvalidExpiresAt(t *testing.T) {
@@ -99,7 +100,7 @@ func TestAdminScraperSessionController_Sessions_Upsert_InvalidExpiresAt(t *testi
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/scraper-sessions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminScraperSessionController(nil).Upsert, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminScraperSessionController(nil).Upsert, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAdminScraperSessionController_Sessions_Upsert_Success(t *testing.T) {
@@ -114,17 +115,17 @@ func TestAdminScraperSessionController_Sessions_Upsert_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/scraper-sessions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminScraperSessionController(svc).Upsert, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminScraperSessionController(svc).Upsert, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
 func TestAdminScraperSessionController_SessionDetail_MissingSiteKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/admin/scraper-sessions/", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("site_key")
 	ctx.SetParamValues("")
-	assertStatus(t, admincontrollers.NewAdminScraperSessionController(nil).Delete, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminScraperSessionController(nil).Delete, ctx, http.StatusBadRequest)
 }
 
 func TestAdminScraperSessionController_SessionDetail_ServiceError(t *testing.T) {
@@ -133,10 +134,10 @@ func TestAdminScraperSessionController_SessionDetail_ServiceError(t *testing.T) 
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/admin/scraper-sessions/mynavi", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("site_key")
 	ctx.SetParamValues("mynavi")
-	assertStatus(t, admincontrollers.NewAdminScraperSessionController(svc).Delete, ctx, http.StatusInternalServerError)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminScraperSessionController(svc).Delete, ctx, http.StatusInternalServerError)
 	svc.AssertExpectations(t)
 }
 
@@ -146,10 +147,10 @@ func TestAdminScraperSessionController_SessionDetail_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/admin/scraper-sessions/mynavi", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("site_key")
 	ctx.SetParamValues("mynavi")
-	assertStatus(t, admincontrollers.NewAdminScraperSessionController(svc).Delete, ctx, http.StatusNoContent)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminScraperSessionController(svc).Delete, ctx, http.StatusNoContent)
 	svc.AssertExpectations(t)
 }
 
@@ -161,7 +162,7 @@ func TestAdminScoreValidationController_GetCorrelation_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/score-validation/correlation", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminScoreValidationController(svc).GetCorrelation, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminScoreValidationController(svc).GetCorrelation, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -171,7 +172,7 @@ func TestAdminScoreValidationController_GetCorrelation_Error(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/score-validation/correlation", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminScoreValidationController(svc).GetCorrelation, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminScoreValidationController(svc).GetCorrelation, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	svc.AssertExpectations(t)
 }
 
@@ -181,7 +182,7 @@ func TestAdminScoreValidationController_GetCalibration_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/score-validation/calibration", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminScoreValidationController(svc).GetCalibration, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminScoreValidationController(svc).GetCalibration, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -191,7 +192,7 @@ func TestAdminScoreValidationController_RunCalibration_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/score-validation/calibration/run", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminScoreValidationController(svc).RunCalibration, newCtx(req, rec), http.StatusCreated)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminScoreValidationController(svc).RunCalibration, testsupport.NewCtx(req, rec), http.StatusCreated)
 	svc.AssertExpectations(t)
 }
 
@@ -204,7 +205,7 @@ func TestAdminScoreValidationController_ListVariants_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/score-validation/variants", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminScoreValidationController(svc).ListVariants, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminScoreValidationController(svc).ListVariants, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -220,14 +221,14 @@ func TestAdminScoreValidationController_CreateVariant_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/score-validation/variants", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminScoreValidationController(svc).CreateVariant, newCtx(req, rec), http.StatusCreated)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminScoreValidationController(svc).CreateVariant, testsupport.NewCtx(req, rec), http.StatusCreated)
 	svc.AssertExpectations(t)
 }
 
 func TestAdminScoreValidationController_GetVariantResults_MissingExperiment(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/score-validation/variants/results", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminScoreValidationController(nil).GetVariantResults, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminScoreValidationController(nil).GetVariantResults, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 // ===== AdminProfileRecalculationController =====
@@ -235,10 +236,10 @@ func TestAdminScoreValidationController_GetVariantResults_MissingExperiment(t *t
 func TestAdminProfileRecalculationController_RecalculateOne_InvalidCompanyID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/profile-recalculation/abc", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("company_id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, admincontrollers.NewAdminProfileRecalculationController(nil).RecalculateOne, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminProfileRecalculationController(nil).RecalculateOne, ctx, http.StatusBadRequest)
 }
 
 func TestAdminProfileRecalculationController_RecalculateAll_Success(t *testing.T) {
@@ -247,7 +248,7 @@ func TestAdminProfileRecalculationController_RecalculateAll_Success(t *testing.T
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/profile-recalculation", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminProfileRecalculationController(svc).RecalculateAll, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminProfileRecalculationController(svc).RecalculateAll, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -257,10 +258,10 @@ func TestAdminProfileRecalculationController_RecalculateOne_Success(t *testing.T
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/profile-recalculation/1", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("company_id")
 	ctx.SetParamValues("1")
-	assertStatus(t, admincontrollers.NewAdminProfileRecalculationController(svc).RecalculateOne, ctx, http.StatusOK)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminProfileRecalculationController(svc).RecalculateOne, ctx, http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -270,10 +271,10 @@ func TestAdminProfileRecalculationController_Rollback_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/profile-recalculation/1/rollback", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("company_id")
 	ctx.SetParamValues("1")
-	assertStatus(t, admincontrollers.NewAdminProfileRecalculationController(svc).Rollback, ctx, http.StatusOK)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminProfileRecalculationController(svc).Rollback, ctx, http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -283,10 +284,10 @@ func TestAdminProfileRecalculationController_GetHistory_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/profile-recalculation/1/history", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("company_id")
 	ctx.SetParamValues("1")
-	assertStatus(t, admincontrollers.NewAdminProfileRecalculationController(svc).GetHistory, ctx, http.StatusOK)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminProfileRecalculationController(svc).GetHistory, ctx, http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -296,9 +297,9 @@ func TestAdminUserController_List_ServiceError(t *testing.T) {
 	repo := &mocks.UserRepositoryMock{}
 	repo.On("ListUsersPaged", 25, 0, "", mock.Anything).Return(nil, int64(0), errors.New("db error"))
 
-	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/users", nil), nil)
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/users", nil), nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminUserController(repo, nil).List, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminUserController(repo, nil).List, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	repo.AssertExpectations(t)
 }
 
@@ -307,29 +308,29 @@ func TestAdminUserController_List_Success(t *testing.T) {
 	users := []entity.User{{Email: "user@example.com"}}
 	repo.On("ListUsersPaged", 25, 0, "", mock.Anything).Return(users, int64(1), nil)
 
-	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/users", nil), nil)
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/users", nil), nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, admincontrollers.NewAdminUserController(repo, nil).List, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminUserController(repo, nil).List, testsupport.NewCtx(req, rec), http.StatusOK)
 	repo.AssertExpectations(t)
 }
 
 func TestAdminUserController_Update_InvalidUserID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/admin/users/abc", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("abc")
-	assertStatus(t, admincontrollers.NewAdminUserController(nil, nil).Update, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminUserController(nil, nil).Update, ctx, http.StatusBadRequest)
 }
 
 func TestAdminUserController_Update_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, admincontrollers.NewAdminUserController(nil, nil).Update, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminUserController(nil, nil).Update, ctx, http.StatusBadRequest)
 }
 
 func TestAdminUserController_Update_UserNotFound(t *testing.T) {
@@ -340,10 +341,10 @@ func TestAdminUserController_Update_UserNotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, admincontrollers.NewAdminUserController(repo, nil).Update, ctx, http.StatusNotFound)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminUserController(repo, nil).Update, ctx, http.StatusNotFound)
 	repo.AssertExpectations(t)
 }
 
@@ -354,15 +355,15 @@ func TestAdminUserController_Update_InvalidTargetLevel(t *testing.T) {
 
 	targetLevel := "invalid"
 	body, _ := json.Marshal(map[string]*string{"target_level": &targetLevel})
-	req := withAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body)), 42)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body)), 42)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
 	ctrl := admincontrollers.NewAdminUserController(repo, nil)
-	ctrl.SetSchoolService(newUnrestrictedSchoolService(42))
-	assertStatus(t, ctrl.Update, ctx, http.StatusBadRequest)
+	ctrl.SetSchoolService(testsupport.NewUnrestrictedSchoolService(42))
+	testsupport.AssertStatus(t, ctrl.Update, ctx, http.StatusBadRequest)
 	repo.AssertExpectations(t)
 }
 
@@ -376,15 +377,15 @@ func TestAdminUserController_Update_Success(t *testing.T) {
 
 	isAdmin := true
 	body, _ := json.Marshal(map[string]*bool{"is_admin": &isAdmin})
-	req := withAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body)), 42)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body)), 42)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
 	ctrl := admincontrollers.NewAdminUserController(repo, audit)
-	ctrl.SetSchoolService(newUnrestrictedSchoolService(42))
-	assertStatus(t, ctrl.Update, ctx, http.StatusOK)
+	ctrl.SetSchoolService(testsupport.NewUnrestrictedSchoolService(42))
+	testsupport.AssertStatus(t, ctrl.Update, ctx, http.StatusOK)
 	repo.AssertExpectations(t)
 	audit.AssertExpectations(t)
 }
@@ -401,14 +402,14 @@ func TestAdminUserController_Update_SchoolAccessDenied(t *testing.T) {
 
 	isAdmin := true
 	body, _ := json.Marshal(map[string]*bool{"is_admin": &isAdmin})
-	req := withAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body)), 42)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodPut, "/api/admin/users/1", bytes.NewReader(body)), 42)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
 	ctrl := admincontrollers.NewAdminUserController(repo, nil)
 	ctrl.SetSchoolService(school.NewSchoolService(schoolRepo))
-	assertStatus(t, ctrl.Update, ctx, http.StatusForbidden)
+	testsupport.AssertStatus(t, ctrl.Update, ctx, http.StatusForbidden)
 	repo.AssertExpectations(t)
 }

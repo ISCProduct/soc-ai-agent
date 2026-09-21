@@ -1,4 +1,4 @@
-package controllers_test
+package chat_test
 
 import (
 	"encoding/json"
@@ -8,8 +8,9 @@ import (
 	"testing"
 
 	"Backend/domain/entity"
+	"Backend/internal/controllers/mocks"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/services/matching"
-	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -51,11 +52,11 @@ func TestGetRecommendations_ReasonIsBuiltWhenNotStored(t *testing.T) {
 	matchSvc.On("GetTopMatches", mock.Anything, userID, sessionID, 10).Return(matches, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations?session_id="+sessionID, nil)
-	req = withUserID(req, userID)
+	req = testsupport.WithUserID(req, userID)
 	rec := httptest.NewRecorder()
 
 	ctl := newChatController(chatSvc, matchSvc, nil, nil, nil)
-	if err := ctl.GetRecommendations(newCtx(req, rec)); err != nil {
+	if err := ctl.GetRecommendations(testsupport.NewCtx(req, rec)); err != nil {
 		t.Fatalf("GetRecommendations: %v", err)
 	}
 	if rec.Code != http.StatusOK {
@@ -120,11 +121,11 @@ func TestGetRecommendations_StoredAIReasonWins(t *testing.T) {
 	matchSvc.On("GetTopMatches", mock.Anything, userID, sessionID, 10).Return(matches, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations?session_id="+sessionID, nil)
-	req = withUserID(req, userID)
+	req = testsupport.WithUserID(req, userID)
 	rec := httptest.NewRecorder()
 
 	ctl := newChatController(chatSvc, matchSvc, nil, nil, nil)
-	if err := ctl.GetRecommendations(newCtx(req, rec)); err != nil {
+	if err := ctl.GetRecommendations(testsupport.NewCtx(req, rec)); err != nil {
 		t.Fatalf("GetRecommendations: %v", err)
 	}
 

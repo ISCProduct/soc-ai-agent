@@ -1,8 +1,8 @@
-package controllers_test
+package auth_test
 
 // AuthControllerのHTTPハンドラーテスト
 //
-// 実行: cd Backend && go test ./test/controllers/... -run Auth -v
+// 実行: cd Backend && go test ./internal/controllers/auth/... -run Auth -v
 
 import (
 	"bytes"
@@ -13,8 +13,9 @@ import (
 	"testing"
 
 	authcontrollers "Backend/internal/controllers/auth"
+	"Backend/internal/controllers/mocks"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/services/auth"
-	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,7 +31,7 @@ func TestAuthController_Register_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").Register, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").Register, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAuthController_Register_EmailExists(t *testing.T) {
@@ -42,7 +43,7 @@ func TestAuthController_Register_EmailExists(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).Register, newCtx(req, rec), http.StatusConflict)
+	testsupport.AssertStatus(t, newAuthController(svc).Register, testsupport.NewCtx(req, rec), http.StatusConflict)
 	svc.AssertExpectations(t)
 }
 
@@ -56,7 +57,7 @@ func TestAuthController_Register_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).Register, newCtx(req, rec), http.StatusCreated)
+	testsupport.AssertStatus(t, newAuthController(svc).Register, testsupport.NewCtx(req, rec), http.StatusCreated)
 	svc.AssertExpectations(t)
 }
 
@@ -66,7 +67,7 @@ func TestAuthController_Login_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").Login, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").Login, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAuthController_Login_InvalidCredentials(t *testing.T) {
@@ -78,7 +79,7 @@ func TestAuthController_Login_InvalidCredentials(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).Login, newCtx(req, rec), http.StatusUnauthorized)
+	testsupport.AssertStatus(t, newAuthController(svc).Login, testsupport.NewCtx(req, rec), http.StatusUnauthorized)
 	svc.AssertExpectations(t)
 }
 
@@ -91,7 +92,7 @@ func TestAuthController_Login_EmailNotVerified(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).Login, newCtx(req, rec), http.StatusForbidden)
+	testsupport.AssertStatus(t, newAuthController(svc).Login, testsupport.NewCtx(req, rec), http.StatusForbidden)
 	svc.AssertExpectations(t)
 }
 
@@ -105,7 +106,7 @@ func TestAuthController_Login_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).Login, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAuthController(svc).Login, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -117,7 +118,7 @@ func TestAuthController_CreateGuest_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/guest", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).CreateGuest, newCtx(req, rec), http.StatusCreated)
+	testsupport.AssertStatus(t, newAuthController(svc).CreateGuest, testsupport.NewCtx(req, rec), http.StatusCreated)
 	svc.AssertExpectations(t)
 }
 
@@ -126,7 +127,7 @@ func TestAuthController_CreateGuest_Success(t *testing.T) {
 func TestAuthController_GetUser_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/user", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").GetUser, newCtx(req, rec), http.StatusUnauthorized)
+	testsupport.AssertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").GetUser, testsupport.NewCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestAuthController_GetUser_NotFound(t *testing.T) {
@@ -134,9 +135,9 @@ func TestAuthController_GetUser_NotFound(t *testing.T) {
 	svc.On("GetUser", uint(1)).Return(nil, errors.New("user not found"))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/user", nil)
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).GetUser, newCtx(req, rec), http.StatusNotFound)
+	testsupport.AssertStatus(t, newAuthController(svc).GetUser, testsupport.NewCtx(req, rec), http.StatusNotFound)
 	svc.AssertExpectations(t)
 }
 
@@ -145,9 +146,9 @@ func TestAuthController_GetUser_Success(t *testing.T) {
 	svc.On("GetUser", uint(1)).Return(&auth.AuthResponse{Token: "tok"}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/user", nil)
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).GetUser, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAuthController(svc).GetUser, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -161,7 +162,7 @@ func TestAuthController_RequestRegistration_Conflict(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/request-registration", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).RequestRegistration, newCtx(req, rec), http.StatusConflict)
+	testsupport.AssertStatus(t, newAuthController(svc).RequestRegistration, testsupport.NewCtx(req, rec), http.StatusConflict)
 	svc.AssertExpectations(t)
 }
 
@@ -173,7 +174,7 @@ func TestAuthController_RequestRegistration_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/request-registration", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).RequestRegistration, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAuthController(svc).RequestRegistration, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	var resp map[string]string
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
@@ -186,7 +187,7 @@ func TestAuthController_RequestRegistration_Success(t *testing.T) {
 func TestAuthController_VerifyRegistration_MissingToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-registration", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").VerifyRegistration, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").VerifyRegistration, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestAuthController_VerifyRegistration_InvalidToken(t *testing.T) {
@@ -195,7 +196,7 @@ func TestAuthController_VerifyRegistration_InvalidToken(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-registration?token=bad-token", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).VerifyRegistration, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, newAuthController(svc).VerifyRegistration, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 	svc.AssertExpectations(t)
 }
 
@@ -205,7 +206,7 @@ func TestAuthController_VerifyRegistration_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-registration?token=valid-token", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).VerifyRegistration, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAuthController(svc).VerifyRegistration, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	var resp map[string]string
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
@@ -218,7 +219,7 @@ func TestAuthController_VerifyRegistration_Success(t *testing.T) {
 func TestAuthController_UpdateProfile_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/auth/profile", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").UpdateProfile, newCtx(req, rec), http.StatusUnauthorized)
+	testsupport.AssertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").UpdateProfile, testsupport.NewCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestAuthController_UpdateProfile_Success(t *testing.T) {
@@ -229,9 +230,9 @@ func TestAuthController_UpdateProfile_Success(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"name": "更新太郎"})
 	req := httptest.NewRequest(http.MethodPut, "/api/auth/profile", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).UpdateProfile, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAuthController(svc).UpdateProfile, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -246,7 +247,7 @@ func TestAuthController_RequestPasswordReset_AlwaysOK(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	// エラーがあっても常に200（情報漏洩防止）
-	assertStatus(t, newAuthController(svc).RequestPasswordReset, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAuthController(svc).RequestPasswordReset, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -260,7 +261,7 @@ func TestAuthController_ResetPassword_InvalidToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).ResetPassword, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, newAuthController(svc).ResetPassword, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 	svc.AssertExpectations(t)
 }
 
@@ -272,7 +273,7 @@ func TestAuthController_ResetPassword_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/reset-password", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).ResetPassword, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAuthController(svc).ResetPassword, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -284,7 +285,7 @@ func TestAuthController_VerifyEmail_InvalidToken(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-email?token=bad", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).VerifyEmail, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, newAuthController(svc).VerifyEmail, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 	svc.AssertExpectations(t)
 }
 
@@ -294,7 +295,7 @@ func TestAuthController_VerifyEmail_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/verify-email?token=valid", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).VerifyEmail, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAuthController(svc).VerifyEmail, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -303,7 +304,7 @@ func TestAuthController_VerifyEmail_Success(t *testing.T) {
 func TestAuthController_DeleteAccount_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/auth/account", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").DeleteAccount, newCtx(req, rec), http.StatusUnauthorized)
+	testsupport.AssertStatus(t, authcontrollers.NewAuthController(nil, "test-user-secret").DeleteAccount, testsupport.NewCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestAuthController_DeleteAccount_Success(t *testing.T) {
@@ -311,8 +312,8 @@ func TestAuthController_DeleteAccount_Success(t *testing.T) {
 	svc.On("DeleteAccount", uint(1)).Return(nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/auth/account", nil)
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAuthController(svc).DeleteAccount, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAuthController(svc).DeleteAccount, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }

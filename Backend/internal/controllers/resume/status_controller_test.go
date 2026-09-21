@@ -1,8 +1,8 @@
-package controllers_test
+package resume_test
 
 // #1030 GET /api/resume/status のHTTPハンドラーテスト
 //
-// 実行: cd Backend && go test ./test/controllers/... -run ResumeStatus -v
+// 実行: cd Backend && go test ./internal/controllers/resume/... -run ResumeStatus -v
 
 import (
 	"encoding/json"
@@ -11,9 +11,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"Backend/internal/controllers/mocks"
 	resumecontrollers "Backend/internal/controllers/resume"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/services/resume"
-	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -23,7 +24,7 @@ func TestResumeStatus_Unauthorized(t *testing.T) {
 	svc := &mocks.ResumeServiceMock{}
 	req := httptest.NewRequest(http.MethodGet, "/api/resume/status", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, resumecontrollers.NewResumeController(svc).Status, newCtx(req, rec), http.StatusUnauthorized)
+	testsupport.AssertStatus(t, resumecontrollers.NewResumeController(svc).Status, testsupport.NewCtx(req, rec), http.StatusUnauthorized)
 	svc.AssertNotCalled(t, "GetResumeStatus")
 }
 
@@ -35,9 +36,9 @@ func TestResumeStatus_UsesAuthenticatedUserID(t *testing.T) {
 	svc.On("GetResumeStatus", uint(7)).
 		Return(&resume.ResumeStatus{HasDocument: true, LatestScore: &score, NeedsAttention: true}, nil)
 
-	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/resume/status?user_id=999", nil), 7)
+	req := testsupport.WithUserID(httptest.NewRequest(http.MethodGet, "/api/resume/status?user_id=999", nil), 7)
 	rec := httptest.NewRecorder()
-	assertStatus(t, resumecontrollers.NewResumeController(svc).Status, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, resumecontrollers.NewResumeController(svc).Status, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	// クエリの999ではなく、認証済みの7で呼ばれていること。
 	svc.AssertCalled(t, "GetResumeStatus", uint(7))
@@ -58,9 +59,9 @@ func TestResumeStatus_ReviewNotRunIsNeedsAttention(t *testing.T) {
 	svc.On("GetResumeStatus", uint(4)).
 		Return(&resume.ResumeStatus{HasDocument: true, LatestScore: nil, NeedsAttention: true}, nil)
 
-	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/resume/status", nil), 4)
+	req := testsupport.WithUserID(httptest.NewRequest(http.MethodGet, "/api/resume/status", nil), 4)
 	rec := httptest.NewRecorder()
-	assertStatus(t, resumecontrollers.NewResumeController(svc).Status, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, resumecontrollers.NewResumeController(svc).Status, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	assert.JSONEq(t, `{"has_document":true,"latest_score":null,"needs_attention":true}`, rec.Body.String())
 }
@@ -71,9 +72,9 @@ func TestResumeStatus_NoDocumentSerializesNullScore(t *testing.T) {
 	svc.On("GetResumeStatus", uint(3)).
 		Return(&resume.ResumeStatus{HasDocument: false, LatestScore: nil, NeedsAttention: true}, nil)
 
-	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/resume/status", nil), 3)
+	req := testsupport.WithUserID(httptest.NewRequest(http.MethodGet, "/api/resume/status", nil), 3)
 	rec := httptest.NewRecorder()
-	assertStatus(t, resumecontrollers.NewResumeController(svc).Status, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, resumecontrollers.NewResumeController(svc).Status, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	assert.JSONEq(t, `{"has_document":false,"latest_score":null,"needs_attention":true}`, rec.Body.String())
 }
@@ -82,7 +83,7 @@ func TestResumeStatus_ServiceError(t *testing.T) {
 	svc := &mocks.ResumeServiceMock{}
 	svc.On("GetResumeStatus", uint(7)).Return(nil, errors.New("db down"))
 
-	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/resume/status", nil), 7)
+	req := testsupport.WithUserID(httptest.NewRequest(http.MethodGet, "/api/resume/status", nil), 7)
 	rec := httptest.NewRecorder()
-	assertStatus(t, resumecontrollers.NewResumeController(svc).Status, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, resumecontrollers.NewResumeController(svc).Status, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 }
