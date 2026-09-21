@@ -376,22 +376,32 @@ export default function PageContent() {
           .map(ev => (
             <Paper key={ev.id} elevation={1} sx={{ p: 2, mb: 1.5, borderRadius: 2, borderLeft: `4px solid ${stageColor(ev.stage)}` }}>
               <Stack direction="row" alignItems="flex-start" spacing={2}>
-                <Box flex={1}>
-                  <Stack direction="row" alignItems="center" spacing={1} mb={0.5}>
-                    <Typography fontWeight={600}>{ev.company_name}</Typography>
-                    <Chip label={ev.stage} size="small" sx={{ bgcolor: stageColor(ev.stage), color: '#fff', height: 20, fontSize: '0.7rem' }} />
-                    {ev.title && <Typography variant="body2" color="text.secondary">{ev.title}</Typography>}
+                {/*
+                  390px では企業名・段階・面接名を1行に詰めると面接名が数文字ずつに
+                  割れて読めなくなる（UI監査 R5）。1行目は企業名と段階だけにし、
+                  日時・面接名・メモはそれぞれ独立した行に落とす。
+                  minWidth:0 がないと長い企業名が右の編集/削除ボタンを押し出す。
+                */}
+                <Box flex={1} minWidth={0}>
+                  <Stack direction="row" alignItems="center" spacing={1} mb={0.5} flexWrap="wrap" useFlexGap>
+                    <Typography fontWeight={600} sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>{ev.company_name}</Typography>
+                    <Chip label={ev.stage} size="small" sx={{ bgcolor: stageColor(ev.stage), color: '#fff', height: 20, fontSize: '0.7rem', flexShrink: 0 }} />
                   </Stack>
                   <Typography variant="body2" color="text.secondary">
                     {new Date(ev.scheduled_at).toLocaleString('ja-JP', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </Typography>
+                  {ev.title && (
+                    <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>
+                      {ev.title}
+                    </Typography>
+                  )}
                   {ev.notes && (
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>
                       {ev.notes}
                     </Typography>
                   )}
                 </Box>
-                <Stack direction="row">
+                <Stack direction="row" sx={{ flexShrink: 0 }}>
                   <IconButton size="small" onClick={() => openEditDialog(ev)}>
                     <EditIcon fontSize="small" />
                   </IconButton>
