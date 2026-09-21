@@ -11,7 +11,7 @@ import {
   Typography,
 } from '@mui/material'
 import { Send } from '@mui/icons-material'
-import styles from '../../mui-chat.module.css'
+import styles from '../mui-chat.module.css'
 import type { ChoiceOption } from '../types'
 import { CHAT_BRAND, CHAT_BRAND_HOVER, shouldSendChatOnKeyDown } from '../utils'
 

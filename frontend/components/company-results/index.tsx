@@ -1,10 +1,10 @@
 'use client'
 
-import { useCompanyResults } from './company-results/hooks/useCompanyResults'
-import { CompanyResultsLoading } from './company-results/components/CompanyResultsLoading'
-import { CompanyResultsContent } from './company-results/components/CompanyResultsContent'
-import { ErrorAlert } from './common/ErrorAlert'
-import type { CompanyResultsProps } from './company-results/types'
+import { useCompanyResults } from './hooks/useCompanyResults'
+import { CompanyResultsLoading } from './components/CompanyResultsLoading'
+import { CompanyResultsContent } from './components/CompanyResultsContent'
+import { ErrorAlert } from '../common/ErrorAlert'
+import type { CompanyResultsProps } from './types'
 
 /**
  * 適性診断結果に基づく企業マッチング一覧。
