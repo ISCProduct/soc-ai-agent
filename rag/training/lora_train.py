@@ -6,7 +6,7 @@ LoRA学習スクリプト（雛形）
 - 実際の学習は transformers/peft/accelerate 等の依存関係が必要です。依存がない場合は案内メッセージを出して終了します。
 
 使い方例:
-python rag/train/lora_train.py --input data/train.jsonl --output-dir /models/lora --dry-run
+python rag/training/lora_train.py --input data/train.jsonl --output-dir /models/lora --dry-run
 
 注意: デフォルトは dry-run で安全に動作します。実行環境に合わせて --dry-run を外して下さい。
 """

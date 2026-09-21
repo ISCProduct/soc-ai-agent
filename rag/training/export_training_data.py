@@ -107,7 +107,7 @@ def apply_mask_to_session(session: Dict[str, Any]) -> None:
 # 教師ラベルとして許可する選考結果(UserApplicationStatus)のみ。
 # チャットのAI発話・面接/ESの自動採点・マッチング理由文などAI生成物は、
 # 他モデルの出力を教師信号にすること(蒸留)に該当するため学習ラベルに使用してはならない。
-# 詳細: docs/finetune_design.md
+# 詳細: docs/finetune/design.md
 OUTCOME_LABELS: Dict[str, str] = {
     "rejected": "不通過",
     "offered": "内定",

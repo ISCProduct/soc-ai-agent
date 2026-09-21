@@ -4,7 +4,7 @@ from typing import List, Dict, Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from export_training_data import apply_mask_to_session, to_openai_prompt, to_outcome_example
+from training.export_training_data import apply_mask_to_session, to_openai_prompt, to_outcome_example
 
 
 def register(app: FastAPI) -> None:
@@ -66,7 +66,7 @@ def register(app: FastAPI) -> None:
             raise HTTPException(status_code=400, detail="invalid output filename")
 
         # import here to avoid circular imports at module load
-        from export_training_data import apply_mask_to_session, to_openai_prompt, to_outcome_example
+        from training.export_training_data import apply_mask_to_session, to_openai_prompt, to_outcome_example
         from training.export_jsonl import to_training_record
         import os
 
