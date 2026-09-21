@@ -1,8 +1,8 @@
-package controllers_test
+package admin_test
 
 // AdminDashboardController・AdminCompanyGraphControllerのHTTPハンドラーテスト
 //
-// 実行: cd Backend && go test ./test/controllers/... -run "AdminDashboard|AdminCompanyGraph" -v
+// 実行: cd Backend && go test ./internal/controllers/admin/... -run "AdminDashboard|AdminCompanyGraph" -v
 
 import (
 	"encoding/json"
@@ -14,11 +14,12 @@ import (
 
 	"Backend/domain/entity"
 	admincontrollers "Backend/internal/controllers/admin"
+	"Backend/internal/controllers/mocks"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"Backend/internal/services/organization"
 	"Backend/internal/services/school"
-	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -39,16 +40,16 @@ func newAdminDashboardController(
 func TestAdminDashboardController_UserSessions_InvalidID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/abc/sessions", nil)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("abc")
-	assertStatus(t, admincontrollers.NewAdminDashboardController(nil, nil, nil).UserSessions, c, http.StatusBadRequest)
+	testsupport.AssertStatus(t, admincontrollers.NewAdminDashboardController(nil, nil, nil).UserSessions, c, http.StatusBadRequest)
 }
 
 func TestAdminDashboardController_UserSessions_SessionRepoError(t *testing.T) {
-	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/1/sessions", nil), 42)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/1/sessions", nil), 42)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
 
@@ -57,15 +58,15 @@ func TestAdminDashboardController_UserSessions_SessionRepoError(t *testing.T) {
 	sessRepo := &mocks.DashboardSessionRepoMock{}
 	sessRepo.On("ListFinishedSessionIDsByUser", uint(1)).Return([]uint{}, errors.New("db error"))
 	ctrl := newAdminDashboardController(userRepo, sessRepo, nil)
-	ctrl.SetSchoolService(newUnrestrictedSchoolService(42))
-	assertStatus(t, ctrl.UserSessions, c, http.StatusInternalServerError)
+	ctrl.SetSchoolService(testsupport.NewUnrestrictedSchoolService(42))
+	testsupport.AssertStatus(t, ctrl.UserSessions, c, http.StatusInternalServerError)
 	sessRepo.AssertExpectations(t)
 }
 
 func TestAdminDashboardController_UserSessions_Success(t *testing.T) {
-	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/2/sessions", nil), 42)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/2/sessions", nil), 42)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("2")
 
@@ -84,8 +85,8 @@ func TestAdminDashboardController_UserSessions_Success(t *testing.T) {
 	}, nil)
 
 	ctrl := newAdminDashboardController(userRepo, sessRepo, repRepo)
-	ctrl.SetSchoolService(newUnrestrictedSchoolService(42))
-	assertStatus(t, ctrl.UserSessions, c, http.StatusOK)
+	ctrl.SetSchoolService(testsupport.NewUnrestrictedSchoolService(42))
+	testsupport.AssertStatus(t, ctrl.UserSessions, c, http.StatusOK)
 
 	var body map[string]any
 	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
@@ -96,9 +97,9 @@ func TestAdminDashboardController_UserSessions_Success(t *testing.T) {
 
 // #984: school scope制限のあるadminは、担当校外のユーザーのセッションを閲覧できない(403)。
 func TestAdminDashboardController_UserSessions_SchoolAccessDenied(t *testing.T) {
-	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/3/sessions", nil), 42)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/3/sessions", nil), 42)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("3")
 
@@ -110,14 +111,14 @@ func TestAdminDashboardController_UserSessions_SchoolAccessDenied(t *testing.T) 
 
 	ctrl := newAdminDashboardController(userRepo, nil, nil)
 	ctrl.SetSchoolService(school.NewSchoolService(schoolRepo))
-	assertStatus(t, ctrl.UserSessions, c, http.StatusForbidden)
+	testsupport.AssertStatus(t, ctrl.UserSessions, c, http.StatusForbidden)
 	userRepo.AssertExpectations(t)
 }
 
 func TestAdminDashboardController_UserSessions_ReportRepoError(t *testing.T) {
-	req := withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/3/sessions", nil), 42)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users/3/sessions", nil), 42)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("3")
 
@@ -128,24 +129,24 @@ func TestAdminDashboardController_UserSessions_ReportRepoError(t *testing.T) {
 	sessRepo.On("ListFinishedSessionIDsByUser", uint(3)).Return([]uint{20}, nil)
 	repRepo.On("FindBySessionIDs", []uint{20}).Return([]models.InterviewReport{}, errors.New("db error"))
 	ctrl := newAdminDashboardController(userRepo, sessRepo, repRepo)
-	ctrl.SetSchoolService(newUnrestrictedSchoolService(42))
-	assertStatus(t, ctrl.UserSessions, c, http.StatusInternalServerError)
+	ctrl.SetSchoolService(testsupport.NewUnrestrictedSchoolService(42))
+	testsupport.AssertStatus(t, ctrl.UserSessions, c, http.StatusInternalServerError)
 }
 
 // ---- ListUsers ----
 
 func TestAdminDashboardController_ListUsers_UserRepoError(t *testing.T) {
-	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users", nil), nil)
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users", nil), nil)
 	rec := httptest.NewRecorder()
 
 	userRepo := &mocks.UserRepositoryMock{}
 	userRepo.On("ListUsersPaged", 25, 0, "", mock.Anything).Return([]entity.User{}, int64(0), errors.New("db error"))
-	assertStatus(t, newAdminDashboardController(userRepo, nil, nil).ListUsers, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newAdminDashboardController(userRepo, nil, nil).ListUsers, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	userRepo.AssertExpectations(t)
 }
 
 func TestAdminDashboardController_ListUsers_Success(t *testing.T) {
-	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users?limit=10&page=1", nil), nil)
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users?limit=10&page=1", nil), nil)
 	rec := httptest.NewRecorder()
 
 	users := []entity.User{{ID: 1, Name: "テストユーザー", Email: "test@example.com"}}
@@ -160,7 +161,7 @@ func TestAdminDashboardController_ListUsers_Success(t *testing.T) {
 	sessRepo.On("ListFinishedSessionIDsByUser", uint(1)).Return([]uint{}, nil)
 	repRepo.On("FindBySessionIDs", []uint(nil)).Return([]models.InterviewReport{}, nil)
 
-	assertStatus(t, newAdminDashboardController(userRepo, sessRepo, repRepo).ListUsers, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminDashboardController(userRepo, sessRepo, repRepo).ListUsers, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	var body map[string]any
 	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
@@ -169,7 +170,7 @@ func TestAdminDashboardController_ListUsers_Success(t *testing.T) {
 }
 
 func TestAdminDashboardController_ListUsers_SessionStatError(t *testing.T) {
-	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users", nil), nil)
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users", nil), nil)
 	rec := httptest.NewRecorder()
 
 	users := []entity.User{{ID: 1, Name: "ユーザー"}}
@@ -178,7 +179,7 @@ func TestAdminDashboardController_ListUsers_SessionStatError(t *testing.T) {
 
 	userRepo.On("ListUsersPaged", 25, 0, "", mock.Anything).Return(users, int64(1), nil)
 	sessRepo.On("GetUserStatsBatch", []uint{1}).Return(nil, errors.New("db error"))
-	assertStatus(t, newAdminDashboardController(userRepo, sessRepo, nil).ListUsers, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newAdminDashboardController(userRepo, sessRepo, nil).ListUsers, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 }
 
 // ---- ExportCSV / currentAdminPlan fail-closed (#985 CodeRabbit指摘) ----
@@ -191,9 +192,9 @@ func TestAdminDashboardController_ExportCSV_AdminIDMissing_FailsClosed(t *testin
 	ctrl := newAdminDashboardController(nil, nil, nil)
 	ctrl.SetOrganizationService(organization.NewOrganizationService(repo))
 
-	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), nil)
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, ctrl.ExportCSV, newCtx(req, rec), http.StatusForbidden)
+	testsupport.AssertStatus(t, ctrl.ExportCSV, testsupport.NewCtx(req, rec), http.StatusForbidden)
 }
 
 func TestAdminDashboardController_ExportCSV_OrgLookupError_FailsClosed(t *testing.T) {
@@ -202,9 +203,9 @@ func TestAdminDashboardController_ExportCSV_OrgLookupError_FailsClosed(t *testin
 	ctrl := newAdminDashboardController(nil, nil, nil)
 	ctrl.SetOrganizationService(organization.NewOrganizationService(repo))
 
-	req := withSchoolFilter(withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), 42), nil)
+	req := testsupport.WithSchoolFilter(testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), 42), nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, ctrl.ExportCSV, newCtx(req, rec), http.StatusForbidden)
+	testsupport.AssertStatus(t, ctrl.ExportCSV, testsupport.NewCtx(req, rec), http.StatusForbidden)
 }
 
 func TestAdminDashboardController_ExportCSV_OrgUnassigned_UsesGlobalDefault(t *testing.T) {
@@ -216,26 +217,26 @@ func TestAdminDashboardController_ExportCSV_OrgUnassigned_UsesGlobalDefault(t *t
 	ctrl := newAdminDashboardController(userRepo, nil, nil)
 	ctrl.SetOrganizationService(organization.NewOrganizationService(orgRepo))
 
-	req := withSchoolFilter(withAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), 42), nil)
+	req := testsupport.WithSchoolFilter(testsupport.WithAdminUserID(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), 42), nil)
 	rec := httptest.NewRecorder()
 	// orgID==0(プラットフォーム管理者)はCurrentPlan()(既定PlanPro)にフォールバックするため
 	// export自体は許可される(fail-closedで403にはならない)。以降はuserRepoのエラーで500。
-	assertStatus(t, ctrl.ExportCSV, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, ctrl.ExportCSV, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 }
 
 // ---- ExportCSV ----
 
 func TestAdminDashboardController_ExportCSV_UserRepoError(t *testing.T) {
-	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), nil)
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), nil)
 	rec := httptest.NewRecorder()
 
 	userRepo := &mocks.UserRepositoryMock{}
 	userRepo.On("ListUsersPaged", 10000, 0, "", mock.Anything).Return([]entity.User{}, int64(0), errors.New("db error"))
-	assertStatus(t, newAdminDashboardController(userRepo, nil, nil).ExportCSV, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newAdminDashboardController(userRepo, nil, nil).ExportCSV, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 }
 
 func TestAdminDashboardController_ExportCSV_Success(t *testing.T) {
-	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), nil)
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/export/csv", nil), nil)
 	rec := httptest.NewRecorder()
 
 	users := []entity.User{
@@ -250,7 +251,7 @@ func TestAdminDashboardController_ExportCSV_Success(t *testing.T) {
 	sessRepo.On("ListFinishedSessionIDsByUser", uint(1)).Return([]uint{}, nil)
 	repRepo.On("FindBySessionIDs", []uint(nil)).Return([]models.InterviewReport{}, nil)
 
-	assertStatus(t, newAdminDashboardController(userRepo, sessRepo, repRepo).ExportCSV, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminDashboardController(userRepo, sessRepo, repRepo).ExportCSV, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	assert.Equal(t, "text/csv; charset=utf-8", rec.Header().Get("Content-Type"))
 	assert.Contains(t, rec.Body.String(), "田中 太郎")
@@ -267,7 +268,7 @@ func newAdminCompanyGraphController() *admincontrollers.AdminCompanyGraphControl
 func TestAdminCompanyGraphController_TargetYear_NoParam(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/company-graph/target-year", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCompanyGraphController().TargetYear, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCompanyGraphController().TargetYear, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	var body map[string]int
 	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
@@ -277,7 +278,7 @@ func TestAdminCompanyGraphController_TargetYear_NoParam(t *testing.T) {
 func TestAdminCompanyGraphController_TargetYear_WithYear(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/company-graph/target-year?year=2023", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCompanyGraphController().TargetYear, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCompanyGraphController().TargetYear, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	var body map[string]int
 	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
@@ -290,7 +291,7 @@ func TestAdminCompanyGraphController_Crawl_NilPipeline(t *testing.T) {
 	// COMPANY_GRAPH_URL が未設定かつ pipeline が nil → 500
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/company-graph/crawl", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCompanyGraphController().Crawl, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newAdminCompanyGraphController().Crawl, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 }
 
 func TestAdminCompanyGraphController_Crawl_ExternalServiceError(t *testing.T) {
@@ -306,7 +307,7 @@ func TestAdminCompanyGraphController_Crawl_ExternalServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/company-graph/crawl", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCompanyGraphController().Crawl, newCtx(req, rec), http.StatusBadGateway)
+	testsupport.AssertStatus(t, newAdminCompanyGraphController().Crawl, testsupport.NewCtx(req, rec), http.StatusBadGateway)
 }
 
 func TestAdminCompanyGraphController_Crawl_ExternalServiceSuccess(t *testing.T) {
@@ -323,7 +324,7 @@ func TestAdminCompanyGraphController_Crawl_ExternalServiceSuccess(t *testing.T) 
 	rec := httptest.NewRecorder()
 
 	// companyRepo/relationRepo が nil → upsertNodes/syncRelationsFromNodes は 0 を返す
-	assertStatus(t, newAdminCompanyGraphController().Crawl, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCompanyGraphController().Crawl, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	var body map[string]any
 	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))

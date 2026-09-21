@@ -1,4 +1,4 @@
-package controllers_test
+package admin_test
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	admincontrollers "Backend/internal/controllers/admin"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
 )
 
@@ -53,11 +54,11 @@ func TestAdminInterviewController_CreateCompanyQuestion_RejectsWhitespace(t *tes
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/companies/1/interview-questions", bytes.NewBufferString(`{"category":"   ","question_text":" question "}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
 
-	assertStatus(t, newAdminInterviewQuestionController(repo).CreateCompanyQuestion, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, newAdminInterviewQuestionController(repo).CreateCompanyQuestion, ctx, http.StatusBadRequest)
 }
 
 func TestAdminInterviewController_UpdateCompanyQuestion_RejectsDifferentCompany(t *testing.T) {
@@ -65,11 +66,11 @@ func TestAdminInterviewController_UpdateCompanyQuestion_RejectsDifferentCompany(
 	req := httptest.NewRequest(http.MethodPut, "/api/admin/companies/1/interview-questions/10", bytes.NewBufferString(`{"question_text":"updated"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id", "qid")
 	ctx.SetParamValues("1", "10")
 
-	assertStatus(t, newAdminInterviewQuestionController(repo).UpdateCompanyQuestion, ctx, http.StatusNotFound)
+	testsupport.AssertStatus(t, newAdminInterviewQuestionController(repo).UpdateCompanyQuestion, ctx, http.StatusNotFound)
 	if repo.updateCall {
 		t.Fatal("question from another company was updated")
 	}
@@ -80,11 +81,11 @@ func TestAdminInterviewController_UpdateCompanyQuestion_RejectsEmptyQuestion(t *
 	req := httptest.NewRequest(http.MethodPut, "/api/admin/companies/1/interview-questions/10", bytes.NewBufferString(`{"question_text":"   "}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id", "qid")
 	ctx.SetParamValues("1", "10")
 
-	assertStatus(t, newAdminInterviewQuestionController(repo).UpdateCompanyQuestion, ctx, http.StatusBadRequest)
+	testsupport.AssertStatus(t, newAdminInterviewQuestionController(repo).UpdateCompanyQuestion, ctx, http.StatusBadRequest)
 	if repo.updateCall {
 		t.Fatal("empty question was updated")
 	}
@@ -94,11 +95,11 @@ func TestAdminInterviewController_DeleteCompanyQuestion_RejectsDifferentCompany(
 	repo := &interviewCompanyQuestionRepoStub{question: &models.InterviewCompanyQuestion{ID: 10, CompanyID: 2}}
 	req := httptest.NewRequest(http.MethodDelete, "/api/admin/companies/1/interview-questions/10", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id", "qid")
 	ctx.SetParamValues("1", "10")
 
-	assertStatus(t, newAdminInterviewQuestionController(repo).DeleteCompanyQuestion, ctx, http.StatusNotFound)
+	testsupport.AssertStatus(t, newAdminInterviewQuestionController(repo).DeleteCompanyQuestion, ctx, http.StatusNotFound)
 	if repo.deleteCall {
 		t.Fatal("question from another company was deleted")
 	}

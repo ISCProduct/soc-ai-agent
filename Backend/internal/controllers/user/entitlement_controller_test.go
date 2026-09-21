@@ -1,4 +1,4 @@
-package controllers_test
+package user_test
 
 // EntitlementController.GetEntitlementsのHTTPハンドラーテスト(#985 CodeRabbit指摘)。
 //
@@ -14,11 +14,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"Backend/internal/controllers/mocks"
+	"Backend/internal/controllers/testsupport"
 	usercontrollers "Backend/internal/controllers/user"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/services/organization"
-	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -32,7 +33,7 @@ func TestEntitlementController_GetEntitlements_NoOrgContext_FailsClosed(t *testi
 	c := usercontrollers.NewEntitlementController(nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/entitlements", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.GetEntitlements, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, c.GetEntitlements, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	var body map[string]any
 	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
@@ -46,7 +47,7 @@ func TestEntitlementController_GetEntitlements_OrgLookupError_FailsClosed(t *tes
 
 	req := withOrganizationID(httptest.NewRequest(http.MethodGet, "/api/entitlements", nil), 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.GetEntitlements, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, c.GetEntitlements, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	var body map[string]any
 	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
@@ -62,7 +63,7 @@ func TestEntitlementController_GetEntitlements_OrgResolved_UsesOrgPlan(t *testin
 
 	req := withOrganizationID(httptest.NewRequest(http.MethodGet, "/api/entitlements", nil), 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, c.GetEntitlements, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, c.GetEntitlements, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	var body map[string]any
 	assert.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))

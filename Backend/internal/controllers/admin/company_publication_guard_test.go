@@ -1,4 +1,4 @@
-package controllers_test
+package admin_test
 
 // 編集APIからの掲載状態変更が、システム管理者以外に通らないことを固定する。
 //
@@ -16,9 +16,10 @@ import (
 	"testing"
 
 	admincontrollers "Backend/internal/controllers/admin"
+	"Backend/internal/controllers/mocks"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/middleware"
 	"Backend/internal/models"
-	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/mock"
 	"gorm.io/gorm"
@@ -88,11 +89,11 @@ func TestAdminCompanyController_Update_PublicationGuard(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			req = req.WithContext(context.WithValue(req.Context(), middleware.AdminUserIDContextKey, uint(7)))
 			rec := httptest.NewRecorder()
-			c := newCtx(req, rec)
+			c := testsupport.NewCtx(req, rec)
 			c.SetParamNames("id")
 			c.SetParamValues("1")
 
-			assertStatus(t, ctrl.Update, c, tt.want)
+			testsupport.AssertStatus(t, ctrl.Update, c, tt.want)
 		})
 	}
 }

@@ -1,8 +1,8 @@
-package controllers_test
+package chat_test
 
 // QuestionControllerのHTTPハンドラーテスト (Issue #422)
 //
-// 実行: cd Backend && go test ./test/controllers/... -run Question -v
+// 実行: cd Backend && go test ./internal/controllers/chat/... -run Question -v
 
 import (
 	"bytes"
@@ -13,9 +13,10 @@ import (
 	"testing"
 
 	chatcontrollers "Backend/internal/controllers/chat"
+	"Backend/internal/controllers/mocks"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
 	"Backend/internal/services/chat"
-	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -30,7 +31,7 @@ func TestQuestionController_GenerateQuestions_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/questions/generate", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, chatcontrollers.NewQuestionController(nil).GenerateQuestions, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, chatcontrollers.NewQuestionController(nil).GenerateQuestions, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestQuestionController_GenerateQuestions_DefaultCount(t *testing.T) {
@@ -43,7 +44,7 @@ func TestQuestionController_GenerateQuestions_DefaultCount(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/questions/generate", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newQuestionController(svc).GenerateQuestions, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newQuestionController(svc).GenerateQuestions, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -55,7 +56,7 @@ func TestQuestionController_GenerateQuestions_ServiceError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/questions/generate", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newQuestionController(svc).GenerateQuestions, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newQuestionController(svc).GenerateQuestions, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	svc.AssertExpectations(t)
 }
 
@@ -65,7 +66,7 @@ func TestQuestionController_CreateQuestion_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/questions", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, chatcontrollers.NewQuestionController(nil).CreateQuestion, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, chatcontrollers.NewQuestionController(nil).CreateQuestion, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestQuestionController_CreateQuestion_Success(t *testing.T) {
@@ -79,7 +80,7 @@ func TestQuestionController_CreateQuestion_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/questions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newQuestionController(svc).CreateQuestion, newCtx(req, rec), http.StatusCreated)
+	testsupport.AssertStatus(t, newQuestionController(svc).CreateQuestion, testsupport.NewCtx(req, rec), http.StatusCreated)
 	svc.AssertExpectations(t)
 }
 
@@ -94,7 +95,7 @@ func TestQuestionController_CreateQuestion_ServiceError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/questions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, newQuestionController(svc).CreateQuestion, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newQuestionController(svc).CreateQuestion, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	svc.AssertExpectations(t)
 }
 
@@ -107,7 +108,7 @@ func TestQuestionController_GetQuestionsByCategory_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/questions?category=technical", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newQuestionController(svc).GetQuestionsByCategory, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newQuestionController(svc).GetQuestionsByCategory, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -117,7 +118,7 @@ func TestQuestionController_GetQuestionsByCategory_ServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/questions?category=technical", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newQuestionController(svc).GetQuestionsByCategory, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newQuestionController(svc).GetQuestionsByCategory, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	svc.AssertExpectations(t)
 }
 
@@ -136,7 +137,7 @@ func TestQuestionController_CreateQuestion_RejectsUnknownCategory(t *testing.T) 
 	req := httptest.NewRequest(http.MethodPost, "/api/questions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, chatcontrollers.NewQuestionController(svc).CreateQuestion, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, chatcontrollers.NewQuestionController(svc).CreateQuestion, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 	svc.AssertNotCalled(t, "CreateQuestion", mock.Anything)
 }
 
@@ -155,7 +156,7 @@ func TestQuestionController_CreateQuestion_NormalizesAlias(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/questions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, chatcontrollers.NewQuestionController(svc).CreateQuestion, newCtx(req, rec), http.StatusCreated)
+	testsupport.AssertStatus(t, chatcontrollers.NewQuestionController(svc).CreateQuestion, testsupport.NewCtx(req, rec), http.StatusCreated)
 
 	if saved == nil {
 		t.Fatal("CreateQuestion が呼ばれていない")

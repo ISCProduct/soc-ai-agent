@@ -1,4 +1,4 @@
-package controllers_test
+package company_test
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	companycontrollers "Backend/internal/controllers/company"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/middleware"
 	"Backend/internal/repositories"
 	hrsvc "Backend/internal/services/hr"
@@ -96,7 +97,7 @@ func newCompanyStudentController(search *companyStudentSearchStub, analysis *com
 }
 
 func companyStudentCtx(req *http.Request, rec *httptest.ResponseRecorder, names, values []string) echo.Context {
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames(names...)
 	c.SetParamValues(values...)
 	return c
@@ -124,7 +125,7 @@ func TestCompanyStudentController_RequiresCompanyAuth(t *testing.T) {
 			req := httptest.NewRequest(tt.method, "/api/company-portal/students", nil)
 			rec := httptest.NewRecorder()
 			// 企業コンテキストを設定しない = 未認証
-			assertStatus(t, tt.handler, companyStudentCtx(req, rec, []string{"userID", "tagID"}, []string{"5", "1"}), http.StatusUnauthorized)
+			testsupport.AssertStatus(t, tt.handler, companyStudentCtx(req, rec, []string{"userID", "tagID"}, []string{"5", "1"}), http.StatusUnauthorized)
 		})
 	}
 }
@@ -138,7 +139,7 @@ func TestCompanyStudentController_List_UsesJWTCompanyIDAndFilters(t *testing.T) 
 	req = withCompanyContext(req, 42, 7)
 	rec := httptest.NewRecorder()
 
-	assertStatus(t, newCompanyStudentController(search, nil).List, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newCompanyStudentController(search, nil).List, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	// company_id クエリを付けても JWT の company_id が使われる（他社越境の防止）。
 	assert.Equal(t, uint(7), search.lastCompany)
@@ -176,7 +177,7 @@ func TestCompanyStudentController_SemanticSearch(t *testing.T) {
 			req = withCompanyContext(req, 42, 7)
 			rec := httptest.NewRecorder()
 
-			assertStatus(t, newCompanyStudentController(search, nil).SemanticSearch, newCtx(req, rec), tt.wantStatus)
+			testsupport.AssertStatus(t, newCompanyStudentController(search, nil).SemanticSearch, testsupport.NewCtx(req, rec), tt.wantStatus)
 		})
 	}
 }
@@ -203,7 +204,7 @@ func TestCompanyStudentController_Detail(t *testing.T) {
 			req = withCompanyContext(req, 42, 7)
 			rec := httptest.NewRecorder()
 
-			assertStatus(t, newCompanyStudentController(search, analysis).Detail,
+			testsupport.AssertStatus(t, newCompanyStudentController(search, analysis).Detail,
 				companyStudentCtx(req, rec, []string{"userID"}, []string{"5"}), tt.wantStatus)
 		})
 	}
@@ -216,7 +217,7 @@ func TestCompanyStudentController_Detail_ReturnsOwnCompanyTags(t *testing.T) {
 	req = withCompanyContext(req, 42, 7)
 	rec := httptest.NewRecorder()
 
-	assertStatus(t, newCompanyStudentController(search, analysis).Detail,
+	testsupport.AssertStatus(t, newCompanyStudentController(search, analysis).Detail,
 		companyStudentCtx(req, rec, []string{"userID"}, []string{"5"}), http.StatusOK)
 
 	var body struct {
@@ -251,7 +252,7 @@ func TestCompanyStudentController_AddTag(t *testing.T) {
 			req = withCompanyContext(req, 42, 7)
 			rec := httptest.NewRecorder()
 
-			assertStatus(t, newCompanyStudentController(search, nil).AddTag,
+			testsupport.AssertStatus(t, newCompanyStudentController(search, nil).AddTag,
 				companyStudentCtx(req, rec, []string{"userID"}, []string{"5"}), tt.wantStatus)
 		})
 	}
@@ -265,7 +266,7 @@ func TestCompanyStudentController_AddTag_RecordsCreator(t *testing.T) {
 	req = withCompanyContext(req, 42, 7)
 	rec := httptest.NewRecorder()
 
-	assertStatus(t, newCompanyStudentController(search, nil).AddTag,
+	testsupport.AssertStatus(t, newCompanyStudentController(search, nil).AddTag,
 		companyStudentCtx(req, rec, []string{"userID"}, []string{"5"}), http.StatusCreated)
 
 	assert.Equal(t, uint(7), search.lastCompany)
@@ -278,7 +279,7 @@ func TestCompanyStudentController_RemoveTag_ScopedToOwnCompany(t *testing.T) {
 	req = withCompanyContext(req, 42, 7)
 	rec := httptest.NewRecorder()
 
-	assertStatus(t, newCompanyStudentController(search, nil).RemoveTag,
+	testsupport.AssertStatus(t, newCompanyStudentController(search, nil).RemoveTag,
 		companyStudentCtx(req, rec, []string{"userID", "tagID"}, []string{"5", "9"}), http.StatusNoContent)
 
 	assert.Equal(t, uint(7), search.lastCompany)
@@ -289,8 +290,8 @@ func TestCompanyStudentController_Industries(t *testing.T) {
 	req = withCompanyContext(req, 42, 7)
 	rec := httptest.NewRecorder()
 
-	assertStatus(t, newCompanyStudentController(&companyStudentSearchStub{}, nil).Industries,
-		newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newCompanyStudentController(&companyStudentSearchStub{}, nil).Industries,
+		testsupport.NewCtx(req, rec), http.StatusOK)
 	assert.Contains(t, rec.Body.String(), "IT・通信")
 }
 
@@ -300,7 +301,7 @@ func TestCompanyStudentController_ListTags(t *testing.T) {
 	req = withCompanyContext(req, 42, 7)
 	rec := httptest.NewRecorder()
 
-	assertStatus(t, newCompanyStudentController(search, nil).ListTags, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newCompanyStudentController(search, nil).ListTags, testsupport.NewCtx(req, rec), http.StatusOK)
 	assert.Equal(t, uint(7), search.lastCompany)
 	assert.Contains(t, rec.Body.String(), "即戦力")
 }

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
+	"Backend/internal/controllers/mocks"
 	"Backend/internal/models"
 	"Backend/internal/services/company"
-	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"

@@ -1,8 +1,8 @@
-package controllers_test
+package company_test
 
 // CompanyRelationControllerのHTTPハンドラーテスト (Issue #432)
 //
-// 実行: cd Backend && go test ./test/controllers/... -run CompanyRelation -v
+// 実行: cd Backend && go test ./internal/controllers/company/... -run CompanyRelation -v
 
 import (
 	"errors"
@@ -11,8 +11,9 @@ import (
 	"testing"
 
 	companycontrollers "Backend/internal/controllers/company"
+	"Backend/internal/controllers/mocks"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
-	"Backend/test/controllers/mocks"
 )
 
 func newCompanyRelationController(repo *mocks.CompanyRelationQueryRepositoryMock) *companycontrollers.CompanyRelationController {
@@ -28,10 +29,10 @@ func TestCompanyRelationController_GetCompanyRelations_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/1/relations", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newCompanyRelationController(repo).GetCompanyRelations, ctx, http.StatusOK)
+	testsupport.AssertStatus(t, newCompanyRelationController(repo).GetCompanyRelations, ctx, http.StatusOK)
 	repo.AssertExpectations(t)
 }
 
@@ -41,10 +42,10 @@ func TestCompanyRelationController_GetCompanyRelations_ServiceError(t *testing.T
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/1/relations", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newCompanyRelationController(repo).GetCompanyRelations, ctx, http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newCompanyRelationController(repo).GetCompanyRelations, ctx, http.StatusInternalServerError)
 	repo.AssertExpectations(t)
 }
 
@@ -57,10 +58,10 @@ func TestCompanyRelationController_GetCompanyMarketInfo_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/1/market-info", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newCompanyRelationController(repo).GetCompanyMarketInfo, ctx, http.StatusOK)
+	testsupport.AssertStatus(t, newCompanyRelationController(repo).GetCompanyMarketInfo, ctx, http.StatusOK)
 	repo.AssertExpectations(t)
 }
 
@@ -70,10 +71,10 @@ func TestCompanyRelationController_GetCompanyMarketInfo_NotFound(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/1/market-info", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newCompanyRelationController(repo).GetCompanyMarketInfo, ctx, http.StatusNotFound)
+	testsupport.AssertStatus(t, newCompanyRelationController(repo).GetCompanyMarketInfo, ctx, http.StatusNotFound)
 	repo.AssertExpectations(t)
 }
 
@@ -83,10 +84,10 @@ func TestCompanyRelationController_GetCompanyMarketInfo_ServiceError(t *testing.
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/1/market-info", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newCompanyRelationController(repo).GetCompanyMarketInfo, ctx, http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newCompanyRelationController(repo).GetCompanyMarketInfo, ctx, http.StatusInternalServerError)
 	repo.AssertExpectations(t)
 }
 
@@ -98,7 +99,7 @@ func TestCompanyRelationController_GetAllCompanyRelations_Success(t *testing.T) 
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/relations/all", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newCompanyRelationController(repo).GetAllCompanyRelations, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newCompanyRelationController(repo).GetAllCompanyRelations, testsupport.NewCtx(req, rec), http.StatusOK)
 	repo.AssertExpectations(t)
 }
 
@@ -108,7 +109,7 @@ func TestCompanyRelationController_GetAllCompanyRelations_ServiceError(t *testin
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/relations/all", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newCompanyRelationController(repo).GetAllCompanyRelations, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newCompanyRelationController(repo).GetAllCompanyRelations, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	repo.AssertExpectations(t)
 }
 
@@ -120,7 +121,7 @@ func TestCompanyRelationController_GetAllMarketInfo_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/market-info/all", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newCompanyRelationController(repo).GetAllMarketInfo, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newCompanyRelationController(repo).GetAllMarketInfo, testsupport.NewCtx(req, rec), http.StatusOK)
 	repo.AssertExpectations(t)
 }
 
@@ -132,10 +133,10 @@ func TestCompanyRelationController_GetCompanyByID_NotFound(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/1", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newCompanyRelationController(repo).GetCompanyByID, ctx, http.StatusNotFound)
+	testsupport.AssertStatus(t, newCompanyRelationController(repo).GetCompanyByID, ctx, http.StatusNotFound)
 	repo.AssertExpectations(t)
 }
 
@@ -146,10 +147,10 @@ func TestCompanyRelationController_GetCompanyByID_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/1", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newCompanyRelationController(repo).GetCompanyByID, ctx, http.StatusOK)
+	testsupport.AssertStatus(t, newCompanyRelationController(repo).GetCompanyByID, ctx, http.StatusOK)
 	repo.AssertExpectations(t)
 }
 
@@ -162,10 +163,10 @@ func TestCompanyRelationController_GetCompanyJobPositions_Success(t *testing.T) 
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companies/1/job-positions", nil)
 	rec := httptest.NewRecorder()
-	ctx := newCtx(req, rec)
+	ctx := testsupport.NewCtx(req, rec)
 	ctx.SetParamNames("id")
 	ctx.SetParamValues("1")
-	assertStatus(t, newCompanyRelationController(repo).GetCompanyJobPositions, ctx, http.StatusOK)
+	testsupport.AssertStatus(t, newCompanyRelationController(repo).GetCompanyJobPositions, ctx, http.StatusOK)
 	repo.AssertExpectations(t)
 }
 
@@ -178,7 +179,7 @@ func TestCompanyRelationController_GetCompanies_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companies", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newCompanyRelationController(repo).GetCompanies, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newCompanyRelationController(repo).GetCompanies, testsupport.NewCtx(req, rec), http.StatusOK)
 	repo.AssertExpectations(t)
 }
 
@@ -188,6 +189,6 @@ func TestCompanyRelationController_GetCompanies_ServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companies", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newCompanyRelationController(repo).GetCompanies, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newCompanyRelationController(repo).GetCompanies, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	repo.AssertExpectations(t)
 }

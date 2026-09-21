@@ -1,4 +1,4 @@
-package controllers_test
+package insight_test
 
 // #1027 教員向け生徒傾向分析の認可テスト。
 //
@@ -6,10 +6,9 @@ package controllers_test
 // 担当校の絞り込みが外れると「教員が全校の生徒を閲覧できる」重大インシデントになる。
 // 絞り込みがサービス層まで正しく届くことをここで固定する。
 //
-// 実行: cd Backend && go test ./test/controllers/... -run TeacherStudentInsight -v
+// 実行: cd Backend && go test ./internal/controllers/insight/... -run TeacherStudentInsight -v
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +16,7 @@ import (
 
 	"Backend/domain/entity"
 	insightcontrollers "Backend/internal/controllers/insight"
-	"Backend/internal/middleware"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
 	"Backend/internal/services/teacher"
@@ -58,10 +57,7 @@ func newInsightController(lister teacher.StudentLister) *insightcontrollers.Teac
 	)
 }
 
-// withSchoolFilter は EchoAdminSchoolScope が入れる値を再現する。
-func withSchoolFilter(r *http.Request, schoolID *uint) *http.Request {
-	return r.WithContext(context.WithValue(r.Context(), middleware.AdminSchoolFilterContextKey, schoolID))
-}
+// testsupport.WithSchoolFilter は EchoAdminSchoolScope が入れる値を再現する。
 
 // TestTeacherStudentInsight_PassesSchoolScopeToService は、
 // 担当校の絞り込みがサービス層まで届くことを検証する。
@@ -72,9 +68,9 @@ func TestTeacherStudentInsight_PassesSchoolScopeToService(t *testing.T) {
 	schoolID := uint(7)
 	spy := &schoolScopeSpy{}
 
-	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/teacher/students/tendency-analysis", nil), &schoolID)
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/teacher/students/tendency-analysis", nil), &schoolID)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newInsightController(spy).TendencyAnalysis, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newInsightController(spy).TendencyAnalysis, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	require.True(t, spy.called, "サービスが呼ばれていない")
 	require.NotNil(t, spy.gotSchoolID, "担当校が渡っていない。全校の生徒が返る状態")
@@ -85,9 +81,9 @@ func TestTeacherStudentInsight_PassesSchoolScopeToService(t *testing.T) {
 func TestTeacherStudentInsight_UnrestrictedAdminGetsNilScope(t *testing.T) {
 	spy := &schoolScopeSpy{}
 
-	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/teacher/students/tendency-analysis", nil), nil)
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/teacher/students/tendency-analysis", nil), nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newInsightController(spy).TendencyAnalysis, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newInsightController(spy).TendencyAnalysis, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	require.True(t, spy.called)
 	assert.Nil(t, spy.gotSchoolID)
@@ -104,7 +100,7 @@ func TestTeacherStudentInsight_FailsClosedWithoutScope(t *testing.T) {
 	// AdminSchoolFilterContextKey を入れずに呼ぶ = ミドルウェア未経由。
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/teacher/students/tendency-analysis", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newInsightController(spy).TendencyAnalysis, newCtx(req, rec), http.StatusForbidden)
+	testsupport.AssertStatus(t, newInsightController(spy).TendencyAnalysis, testsupport.NewCtx(req, rec), http.StatusForbidden)
 
 	assert.False(t, spy.called, "スコープ未解決なのに生徒一覧を引いている")
 }
@@ -125,9 +121,9 @@ func TestTeacherStudentInsight_ClampsPaging(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var gotLimit, gotOffset int
 			lister := &pagingSpy{onCall: func(l, o int) { gotLimit, gotOffset = l, o }}
-			req := withSchoolFilter(httptest.NewRequest(http.MethodGet, tt.url, nil), nil)
+			req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, tt.url, nil), nil)
 			rec := httptest.NewRecorder()
-			assertStatus(t, newInsightController(lister).TendencyAnalysis, newCtx(req, rec), http.StatusOK)
+			testsupport.AssertStatus(t, newInsightController(lister).TendencyAnalysis, testsupport.NewCtx(req, rec), http.StatusOK)
 			assert.Equal(t, tt.wantLimit, gotLimit)
 			assert.Equal(t, tt.wantOff, gotOffset)
 		})
@@ -144,9 +140,9 @@ func (s *pagingSpy) ListStudentsPaged(limit, offset int, _ string, _ *uint) ([]e
 // レスポンス形が壊れていないこと（フロントの型と一致する）。
 func TestTeacherStudentInsight_ResponseShape(t *testing.T) {
 	spy := &schoolScopeSpy{}
-	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/x", nil), nil)
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/x", nil), nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newInsightController(spy).TendencyAnalysis, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newInsightController(spy).TendencyAnalysis, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	var got teacher.TendencyResult
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))

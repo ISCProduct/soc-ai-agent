@@ -1,8 +1,8 @@
-package controllers_test
+package application_test
 
 // ApplicationControllerのHTTPハンドラーテスト
 //
-// 実行: cd Backend && go test ./test/controllers/... -run Application -v
+// 実行: cd Backend && go test ./internal/controllers/application/... -run Application -v
 
 import (
 	"bytes"
@@ -15,9 +15,10 @@ import (
 
 	"Backend/domain/entity"
 	applicationcontrollers "Backend/internal/controllers/application"
+	"Backend/internal/controllers/mocks"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/middleware"
 	"Backend/internal/services/shared"
-	"Backend/test/controllers/mocks"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
@@ -49,15 +50,15 @@ func TestApplicationController_Apply_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/applications", bytes.NewBufferString(`{"company_id":1,"match_id":1}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	assertStatus(t, applicationcontrollers.NewApplicationController(nil).Apply, newCtx(req, rec), http.StatusUnauthorized)
+	testsupport.AssertStatus(t, applicationcontrollers.NewApplicationController(nil).Apply, testsupport.NewCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestApplicationController_Apply_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/applications", bytes.NewBufferString("invalid json"))
 	req.Header.Set("Content-Type", "application/json")
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, applicationcontrollers.NewApplicationController(nil).Apply, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, applicationcontrollers.NewApplicationController(nil).Apply, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestApplicationController_Apply_MissingFields(t *testing.T) {
@@ -73,9 +74,9 @@ func TestApplicationController_Apply_MissingFields(t *testing.T) {
 			body, _ := json.Marshal(tc.body)
 			req := httptest.NewRequest(http.MethodPost, "/api/applications", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
-			req = withUserID(req, 1)
+			req = testsupport.WithUserID(req, 1)
 			rec := httptest.NewRecorder()
-			assertStatus(t, applicationcontrollers.NewApplicationController(nil).Apply, newCtx(req, rec), http.StatusBadRequest)
+			testsupport.AssertStatus(t, applicationcontrollers.NewApplicationController(nil).Apply, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 		})
 	}
 }
@@ -87,9 +88,9 @@ func TestApplicationController_Apply_ServiceError(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"user_id": 999, "company_id": 2, "match_id": 3})
 	req := httptest.NewRequest(http.MethodPost, "/api/applications", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newApplicationController(svc).Apply, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, newApplicationController(svc).Apply, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 	svc.AssertExpectations(t)
 }
 
@@ -103,9 +104,9 @@ func TestApplicationController_Apply_Success(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"user_id": 999, "company_id": 2, "match_id": 3})
 	req := httptest.NewRequest(http.MethodPost, "/api/applications", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newApplicationController(svc).Apply, newCtx(req, rec), http.StatusCreated)
+	testsupport.AssertStatus(t, newApplicationController(svc).Apply, testsupport.NewCtx(req, rec), http.StatusCreated)
 
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
@@ -120,10 +121,10 @@ func TestApplicationController_UpdateStatus_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/applications/1", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
-	assertStatus(t, applicationcontrollers.NewApplicationController(nil).UpdateStatus, c, http.StatusUnauthorized)
+	testsupport.AssertStatus(t, applicationcontrollers.NewApplicationController(nil).UpdateStatus, c, http.StatusUnauthorized)
 }
 
 func TestApplicationController_UpdateStatus_InvalidID(t *testing.T) {
@@ -134,12 +135,12 @@ func TestApplicationController_UpdateStatus_InvalidID(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPut, "/api/applications/"+tc.id, nil)
-			req = withUserID(req, 1)
+			req = testsupport.WithUserID(req, 1)
 			rec := httptest.NewRecorder()
-			c := newCtx(req, rec)
+			c := testsupport.NewCtx(req, rec)
 			c.SetParamNames("id")
 			c.SetParamValues(tc.id)
-			assertStatus(t, applicationcontrollers.NewApplicationController(nil).UpdateStatus, c, http.StatusBadRequest)
+			testsupport.AssertStatus(t, applicationcontrollers.NewApplicationController(nil).UpdateStatus, c, http.StatusBadRequest)
 		})
 	}
 }
@@ -148,12 +149,12 @@ func TestApplicationController_UpdateStatus_MissingFields(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"status": ""})
 	req := httptest.NewRequest(http.MethodPut, "/api/applications/1", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
-	assertStatus(t, applicationcontrollers.NewApplicationController(nil).UpdateStatus, c, http.StatusBadRequest)
+	testsupport.AssertStatus(t, applicationcontrollers.NewApplicationController(nil).UpdateStatus, c, http.StatusBadRequest)
 }
 
 func TestApplicationController_UpdateStatus_Success(t *testing.T) {
@@ -164,12 +165,12 @@ func TestApplicationController_UpdateStatus_Success(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"user_id": 999, "status": "interview_in_progress", "notes": "通過"})
 	req := httptest.NewRequest(http.MethodPut, "/api/applications/1", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
-	assertStatus(t, newApplicationController(svc).UpdateStatus, c, http.StatusOK)
+	testsupport.AssertStatus(t, newApplicationController(svc).UpdateStatus, c, http.StatusOK)
 
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
@@ -185,12 +186,12 @@ func TestApplicationController_UpdateStatus_InvalidTransitionConflict(t *testing
 	body, _ := json.Marshal(map[string]any{"status": "accepted"})
 	req := httptest.NewRequest(http.MethodPut, "/api/applications/1", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
-	assertStatus(t, newApplicationController(svc).UpdateStatus, c, http.StatusConflict)
+	testsupport.AssertStatus(t, newApplicationController(svc).UpdateStatus, c, http.StatusConflict)
 	svc.AssertExpectations(t)
 }
 
@@ -202,12 +203,12 @@ func TestApplicationController_UpdateStatus_ClosedConflict(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"status": "applied"})
 	req := httptest.NewRequest(http.MethodPut, "/api/applications/1", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
-	assertStatus(t, newApplicationController(svc).UpdateStatus, c, http.StatusConflict)
+	testsupport.AssertStatus(t, newApplicationController(svc).UpdateStatus, c, http.StatusConflict)
 	svc.AssertExpectations(t)
 }
 
@@ -220,12 +221,12 @@ func TestApplicationController_UpdateStatus_IgnoresClientIsAdmin(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"user_id": 1, "status": "document_screening", "notes": "書類選考開始", "is_admin": true})
 	req := httptest.NewRequest(http.MethodPut, "/api/applications/1", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
-	assertStatus(t, newApplicationController(svc).UpdateStatus, c, http.StatusOK)
+	testsupport.AssertStatus(t, newApplicationController(svc).UpdateStatus, c, http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -239,15 +240,15 @@ func TestApplicationController_AdminUpdateStatus_Success(t *testing.T) {
 	svc.On("OwnerSchoolID", uint(1)).Return(uintPtr(5), nil)
 
 	body, _ := json.Marshal(map[string]any{"status": "document_screening", "notes": "書類選考開始"})
-	req := withAdminUserID(httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body)), 1)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body)), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
 	ctrl := newApplicationController(svc)
-	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
-	assertStatus(t, ctrl.AdminUpdateStatus, c, http.StatusOK)
+	ctrl.SetSchoolAccess(testsupport.NewRestrictedSchoolService(1, 5))
+	testsupport.AssertStatus(t, ctrl.AdminUpdateStatus, c, http.StatusOK)
 
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
@@ -262,15 +263,15 @@ func TestApplicationController_AdminUpdateStatus_OtherSchoolDenied(t *testing.T)
 	svc.On("OwnerSchoolID", uint(1)).Return(uintPtr(9), nil)
 
 	body, _ := json.Marshal(map[string]any{"status": "document_screening"})
-	req := withAdminUserID(httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body)), 1)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body)), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
 	ctrl := newApplicationController(svc)
-	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
-	assertStatus(t, ctrl.AdminUpdateStatus, c, http.StatusForbidden)
+	ctrl.SetSchoolAccess(testsupport.NewRestrictedSchoolService(1, 5))
+	testsupport.AssertStatus(t, ctrl.AdminUpdateStatus, c, http.StatusForbidden)
 	svc.AssertNotCalled(t, "UpdateStatus", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
@@ -281,13 +282,13 @@ func TestApplicationController_AdminUpdateStatus_SchoolAccessNotConfigured(t *te
 	svc.On("OwnerSchoolID", uint(1)).Return(uintPtr(5), nil)
 
 	body, _ := json.Marshal(map[string]any{"status": "document_screening"})
-	req := withAdminUserID(httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body)), 1)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body)), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
-	assertStatus(t, newApplicationController(svc).AdminUpdateStatus, c, http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newApplicationController(svc).AdminUpdateStatus, c, http.StatusInternalServerError)
 	svc.AssertNotCalled(t, "UpdateStatus", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
@@ -295,10 +296,10 @@ func TestApplicationController_AdminUpdateStatus_MissingStatus(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBufferString(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
-	assertStatus(t, applicationcontrollers.NewApplicationController(nil).AdminUpdateStatus, c, http.StatusBadRequest)
+	testsupport.AssertStatus(t, applicationcontrollers.NewApplicationController(nil).AdminUpdateStatus, c, http.StatusBadRequest)
 }
 
 func TestApplicationController_AdminUpdateStatus_ClosedConflict_HasCode(t *testing.T) {
@@ -308,15 +309,15 @@ func TestApplicationController_AdminUpdateStatus_ClosedConflict_HasCode(t *testi
 	svc.On("OwnerSchoolID", uint(1)).Return(uintPtr(5), nil)
 
 	body, _ := json.Marshal(map[string]any{"status": "document_screening"})
-	req := withAdminUserID(httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body)), 1)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body)), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
 
 	ctrl := newApplicationController(svc)
-	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
+	ctrl.SetSchoolAccess(testsupport.NewRestrictedSchoolService(1, 5))
 	err := ctrl.AdminUpdateStatus(c)
 	var he *echo.HTTPError
 	require.ErrorAs(t, err, &he)
@@ -332,15 +333,15 @@ func TestApplicationController_AdminUpdateStatus_InvalidTransition_HasCode(t *te
 	svc.On("OwnerSchoolID", uint(1)).Return(uintPtr(5), nil)
 
 	body, _ := json.Marshal(map[string]any{"status": "accepted"})
-	req := withAdminUserID(httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body)), 1)
+	req := testsupport.WithAdminUserID(httptest.NewRequest(http.MethodPatch, "/api/admin/applications/1/status", bytes.NewBuffer(body)), 1)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
 
 	ctrl := newApplicationController(svc)
-	ctrl.SetSchoolAccess(newRestrictedSchoolService(1, 5))
+	ctrl.SetSchoolAccess(testsupport.NewRestrictedSchoolService(1, 5))
 	err := ctrl.AdminUpdateStatus(c)
 	var he *echo.HTTPError
 	require.ErrorAs(t, err, &he)
@@ -354,10 +355,10 @@ func TestApplicationController_AdminUpdateStatus_InvalidTransition_HasCode(t *te
 func TestApplicationController_Withdraw_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/applications/1/withdraw", nil)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
-	assertStatus(t, applicationcontrollers.NewApplicationController(nil).Withdraw, c, http.StatusUnauthorized)
+	testsupport.AssertStatus(t, applicationcontrollers.NewApplicationController(nil).Withdraw, c, http.StatusUnauthorized)
 }
 
 func TestApplicationController_Withdraw_Success(t *testing.T) {
@@ -366,12 +367,12 @@ func TestApplicationController_Withdraw_Success(t *testing.T) {
 	svc.On("Withdraw", uint(1), uint(1), false).Return(app, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/applications/1/withdraw", nil)
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
-	assertStatus(t, newApplicationController(svc).Withdraw, c, http.StatusOK)
+	testsupport.AssertStatus(t, newApplicationController(svc).Withdraw, c, http.StatusOK)
 
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
@@ -385,9 +386,9 @@ func TestApplicationController_Withdraw_ClosedConflict_HasCode(t *testing.T) {
 		Return(nil, errors.New("application_already_closed: ステータス accepted は終了状態のため更新できません"))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/applications/1/withdraw", nil)
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
 
@@ -404,10 +405,10 @@ func TestApplicationController_Withdraw_ClosedConflict_HasCode(t *testing.T) {
 func TestApplicationController_Accept_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/applications/1/accept", nil)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
-	assertStatus(t, applicationcontrollers.NewApplicationController(nil).Accept, c, http.StatusUnauthorized)
+	testsupport.AssertStatus(t, applicationcontrollers.NewApplicationController(nil).Accept, c, http.StatusUnauthorized)
 }
 
 func TestApplicationController_Accept_Success(t *testing.T) {
@@ -416,12 +417,12 @@ func TestApplicationController_Accept_Success(t *testing.T) {
 	svc.On("Accept", uint(1), uint(1), false).Return(app, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/applications/1/accept", nil)
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
-	assertStatus(t, newApplicationController(svc).Accept, c, http.StatusOK)
+	testsupport.AssertStatus(t, newApplicationController(svc).Accept, c, http.StatusOK)
 
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
@@ -435,9 +436,9 @@ func TestApplicationController_Accept_NotOffered_HasCode(t *testing.T) {
 		Return(nil, errors.New("application_not_offered: 内定状態でないため承諾できません（現在: applied）"))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/applications/1/accept", nil)
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
 
@@ -455,9 +456,9 @@ func TestApplicationController_Withdraw_Forbidden_HasCode(t *testing.T) {
 		Return(nil, errors.New("forbidden: 権限がありません"))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/applications/1/withdraw", nil)
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("1")
 
@@ -478,9 +479,9 @@ func TestApplicationController_AdminList_Success(t *testing.T) {
 	}
 	svc.On("ListForAdmin", uint(1), uint(2), "document_screening", (*uint)(nil)).Return(apps, nil)
 
-	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/applications?user_id=1&company_id=2&status=document_screening", nil), nil)
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/applications?user_id=1&company_id=2&status=document_screening", nil), nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newApplicationController(svc).AdminList, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newApplicationController(svc).AdminList, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
@@ -492,16 +493,16 @@ func TestApplicationController_AdminList_NoFilters(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
 	svc.On("ListForAdmin", uint(0), uint(0), "", (*uint)(nil)).Return([]*entity.UserApplicationStatus{}, nil)
 
-	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/applications", nil), nil)
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/applications", nil), nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newApplicationController(svc).AdminList, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newApplicationController(svc).AdminList, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
 func TestApplicationController_AdminList_InvalidUserID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/applications?user_id=abc", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, applicationcontrollers.NewApplicationController(nil).AdminList, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, applicationcontrollers.NewApplicationController(nil).AdminList, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 // TestApplicationController_AdminList_ScopedToSchool は担当校フィルタがクエリまで届くことを検証する(#1157)。
@@ -510,9 +511,9 @@ func TestApplicationController_AdminList_ScopedToSchool(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
 	svc.On("ListForAdmin", uint(42), uint(0), "", uintPtr(5)).Return([]*entity.UserApplicationStatus{}, nil)
 
-	req := withSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/applications?user_id=42", nil), uintPtr(5))
+	req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/applications?user_id=42", nil), uintPtr(5))
 	rec := httptest.NewRecorder()
-	assertStatus(t, newApplicationController(svc).AdminList, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newApplicationController(svc).AdminList, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -522,7 +523,7 @@ func TestApplicationController_AdminList_RequiresSchoolScope(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/applications", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newApplicationController(svc).AdminList, newCtx(req, rec), http.StatusForbidden)
+	testsupport.AssertStatus(t, newApplicationController(svc).AdminList, testsupport.NewCtx(req, rec), http.StatusForbidden)
 	svc.AssertNotCalled(t, "ListForAdmin", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
@@ -531,7 +532,7 @@ func TestApplicationController_AdminList_RequiresSchoolScope(t *testing.T) {
 func TestApplicationController_List_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/applications", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, applicationcontrollers.NewApplicationController(nil).List, newCtx(req, rec), http.StatusUnauthorized)
+	testsupport.AssertStatus(t, applicationcontrollers.NewApplicationController(nil).List, testsupport.NewCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestApplicationController_List_ServiceError(t *testing.T) {
@@ -539,9 +540,9 @@ func TestApplicationController_List_ServiceError(t *testing.T) {
 	svc.On("GetApplicationsByUser", uint(1)).Return(nil, errors.New("DB error"))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/applications", nil)
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newApplicationController(svc).List, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newApplicationController(svc).List, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	svc.AssertExpectations(t)
 }
 
@@ -554,9 +555,9 @@ func TestApplicationController_List_Success(t *testing.T) {
 	svc.On("GetApplicationsByUser", uint(1)).Return(apps, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/applications?user_id=999", nil)
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newApplicationController(svc).List, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newApplicationController(svc).List, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
@@ -569,7 +570,7 @@ func TestApplicationController_List_Success(t *testing.T) {
 func TestApplicationController_GetCorrelation_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/applications/correlation", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, applicationcontrollers.NewApplicationController(nil).GetCorrelation, newCtx(req, rec), http.StatusUnauthorized)
+	testsupport.AssertStatus(t, applicationcontrollers.NewApplicationController(nil).GetCorrelation, testsupport.NewCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestApplicationController_GetCorrelation_Success(t *testing.T) {
@@ -578,9 +579,9 @@ func TestApplicationController_GetCorrelation_Success(t *testing.T) {
 	svc.On("GetCorrelation", uint(1), uint(0)).Return(data, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/applications/correlation", nil)
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newApplicationController(svc).GetCorrelation, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newApplicationController(svc).GetCorrelation, testsupport.NewCtx(req, rec), http.StatusOK)
 
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
@@ -593,9 +594,9 @@ func TestApplicationController_GetCorrelation_Forbidden(t *testing.T) {
 	svc.On("GetCorrelation", uint(1), uint(99)).Return(nil, shared.ErrForbidden)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/applications/correlation?company_id=99", nil)
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newApplicationController(svc).GetCorrelation, newCtx(req, rec), http.StatusForbidden)
+	testsupport.AssertStatus(t, newApplicationController(svc).GetCorrelation, testsupport.NewCtx(req, rec), http.StatusForbidden)
 	svc.AssertExpectations(t)
 }
 
@@ -605,9 +606,9 @@ func TestApplicationController_GetCorrelation_OwnerCompany(t *testing.T) {
 	svc.On("GetCorrelation", uint(1), uint(10)).Return(data, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/applications/correlation?company_id=10", nil)
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newApplicationController(svc).GetCorrelation, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newApplicationController(svc).GetCorrelation, testsupport.NewCtx(req, rec), http.StatusOK)
 	svc.AssertExpectations(t)
 }
 
@@ -616,23 +617,23 @@ func TestApplicationController_GetCorrelation_OwnerCompany(t *testing.T) {
 func TestApplicationController_HRList_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/hr/applications?company_id=10", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, applicationcontrollers.NewApplicationController(nil).HRList, newCtx(req, rec), http.StatusUnauthorized)
+	testsupport.AssertStatus(t, applicationcontrollers.NewApplicationController(nil).HRList, testsupport.NewCtx(req, rec), http.StatusUnauthorized)
 }
 
 func TestApplicationController_HRList_MissingCompanyID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/hr/applications", nil)
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, applicationcontrollers.NewApplicationController(nil).HRList, newCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, applicationcontrollers.NewApplicationController(nil).HRList, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestApplicationController_HRList_Forbidden(t *testing.T) {
 	svc := &mocks.ApplicationServiceMock{}
 	svc.On("ListForOwner", uint(1), uint(99), "").Return(nil, shared.ErrForbidden)
 	req := httptest.NewRequest(http.MethodGet, "/api/hr/applications?company_id=99", nil)
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newApplicationController(svc).HRList, newCtx(req, rec), http.StatusForbidden)
+	testsupport.AssertStatus(t, newApplicationController(svc).HRList, testsupport.NewCtx(req, rec), http.StatusForbidden)
 	svc.AssertExpectations(t)
 }
 
@@ -642,20 +643,20 @@ func TestApplicationController_HRUpdateStatus_Forbidden(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"status": "document_screening"})
 	req := httptest.NewRequest(http.MethodPatch, "/api/hr/applications/5/status", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
-	req = withUserID(req, 1)
+	req = testsupport.WithUserID(req, 1)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("5")
-	assertStatus(t, newApplicationController(svc).HRUpdateStatus, c, http.StatusForbidden)
+	testsupport.AssertStatus(t, newApplicationController(svc).HRUpdateStatus, c, http.StatusForbidden)
 	svc.AssertExpectations(t)
 }
 
 func TestApplicationController_HRUpdateStatus_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPatch, "/api/hr/applications/5/status", nil)
 	rec := httptest.NewRecorder()
-	c := newCtx(req, rec)
+	c := testsupport.NewCtx(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("5")
-	assertStatus(t, applicationcontrollers.NewApplicationController(nil).HRUpdateStatus, c, http.StatusUnauthorized)
+	testsupport.AssertStatus(t, applicationcontrollers.NewApplicationController(nil).HRUpdateStatus, c, http.StatusUnauthorized)
 }

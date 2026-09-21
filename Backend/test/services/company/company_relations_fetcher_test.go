@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"Backend/internal/companyfetch"
+	"Backend/internal/controllers/mocks"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/company"
-	"Backend/test/controllers/mocks"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"

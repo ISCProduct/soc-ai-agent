@@ -1,4 +1,4 @@
-package controllers_test
+package admin_test
 
 import (
 	"errors"
@@ -6,8 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"Backend/internal/controllers/mocks"
+	"Backend/internal/controllers/testsupport"
 	"Backend/internal/models"
-	"Backend/test/controllers/mocks"
 )
 
 func TestAdminCompanyController_Names_ServiceError(t *testing.T) {
@@ -16,7 +17,7 @@ func TestAdminCompanyController_Names_ServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/companies/names", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCompanyController(repo, nil).Names, newCtx(req, rec), http.StatusInternalServerError)
+	testsupport.AssertStatus(t, newAdminCompanyController(repo, nil).Names, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 	repo.AssertExpectations(t)
 }
 
@@ -27,6 +28,6 @@ func TestAdminCompanyController_Names_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/companies/names?q=Test", nil)
 	rec := httptest.NewRecorder()
-	assertStatus(t, newAdminCompanyController(repo, nil).Names, newCtx(req, rec), http.StatusOK)
+	testsupport.AssertStatus(t, newAdminCompanyController(repo, nil).Names, testsupport.NewCtx(req, rec), http.StatusOK)
 	repo.AssertExpectations(t)
 }
