@@ -188,7 +188,7 @@ function ESRewriteContent() {
               '&:hover': { bgcolor: mode === 'review' ? `${PRIMARY}e0` : '#e2e8f0' },
             }}
           >
-            ES添削（RAGフィードバック）
+            ES添削
           </Button>
           <Button
             startIcon={<AutoFixHighIcon />}

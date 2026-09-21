@@ -206,7 +206,7 @@ export default function SelectionScreen({
                       '&:hover': { bgcolor: companySourceTab === 'db' ? `${PRIMARY}e0` : '#e2e8f0' },
                     }}
                   >
-                    🏢 企業管理から選択
+                    🏢 登録済みの企業から選ぶ
                   </Button>
                   <Button
                     size="small"
@@ -218,7 +218,7 @@ export default function SelectionScreen({
                       '&:hover': { bgcolor: companySourceTab === 'web' ? `${PRIMARY}e0` : '#e2e8f0' },
                     }}
                   >
-                    🔍 WEB検索
+                    🔍 Webから探す
                   </Button>
                 </Box>
 
@@ -241,7 +241,7 @@ export default function SelectionScreen({
                         }
                       }
                     }}
-                    placeholder={companySourceTab === 'web' ? '企業名を入力してWEB検索' : '企業名を入力、または下のリストから選択'}
+                    placeholder={companySourceTab === 'web' ? '企業名を入力して検索' : '企業名を入力、または下のリストから選択'}
                     sx={{
                       width: '100%', pl: '40px', pr: 2, py: 1.5,
                       bgcolor: '#f8fafc', border: '1px solid #e2e8f0',
@@ -324,12 +324,12 @@ export default function SelectionScreen({
                 {companySourceTab === 'web' && (
                   <>
                     <Typography sx={{ fontSize: 12, color: '#94a3b8', mb: 1 }}>
-                      {companySearch.trim() ? 'WEB検索結果' : 'キーワードを入力してください'}
+                      {companySearch.trim() ? '検索結果' : 'キーワードを入力してください'}
                     </Typography>
                     {webSearchLoading ? (
                       <LinearProgress sx={{ borderRadius: 1 }} />
                     ) : (
-                      <Stack spacing={1} role="listbox" aria-label="WEB検索結果">
+                      <Stack spacing={1} role="listbox" aria-label="検索結果">
                         {webSearchResults.map((result, i) => {
                           const isSelected = interviewCompany?.name === result.name
                           const selectResult = () => {
@@ -521,7 +521,7 @@ export default function SelectionScreen({
                   {hintsLoading ? (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <CircularProgress size={14} sx={{ color: '#d97706' }} />
-                      <Typography sx={{ fontSize: 12, color: '#92400e' }}>共有キャッシュから読み込み中...</Typography>
+                      <Typography sx={{ fontSize: 12, color: '#92400e' }}>企業情報を読み込み中...</Typography>
                     </Box>
                   ) : companyHints && (companyHints.style_tags.length > 0 || companyHints.top_questions.length > 0 || companyHints.company_brief) ? (
                     <Stack spacing={1.5}>
@@ -559,7 +559,7 @@ export default function SelectionScreen({
                     </Stack>
                   ) : (
                     <Typography sx={{ fontSize: 12, color: '#92400e' }}>
-                      共有キャッシュに企業情報があるとスナップショットを表示します（都度Web検索はしません）。
+                      企業情報が登録されていると、面接の傾向をここに表示します。
                     </Typography>
                   )}
                 </Paper>

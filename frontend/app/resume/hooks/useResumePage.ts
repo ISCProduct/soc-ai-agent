@@ -129,13 +129,13 @@ export function useResumePage() {
         const res = await fetch(`/api/companies?name=${encodeURIComponent(q)}&limit=5`, { cache: 'no-store' })
         if (!res.ok) {
           const errText = await res.text()
-          throw new Error(parseApiErrorMessage(errText, 'DB検索に失敗しました'))
+          throw new Error(parseApiErrorMessage(errText, '企業の検索に失敗しました'))
         }
         const data = await res.json()
         const list = mapDbCompanyResults(data)
         setCompanyCandidates(list)
         if (list.length === 0) {
-          setCompanySearchError('DBに該当企業がありません。「WEBで実在確認」を試してください')
+          setCompanySearchError('掲載企業の中に見つかりませんでした。「Webから探す」をお試しください')
         }
         return
       }
@@ -144,7 +144,7 @@ export function useResumePage() {
       const res = await fetch(`/api/companies/web-search?q=${encodeURIComponent(q)}`, { cache: 'no-store' })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        throw new Error(parseApiErrorMessage(JSON.stringify(data), 'WEB検索に失敗しました'))
+        throw new Error(parseApiErrorMessage(JSON.stringify(data), 'Web検索に失敗しました'))
       }
       const list = mapWebSearchResults(data)
       setCompanyCandidates(list)
@@ -228,7 +228,7 @@ export function useResumePage() {
       return
     }
     if (companyName.trim() && !companyValidated) {
-      setReviewError('企業を検索して候補から選択するか、「WEBで実在確認」を実行してください')
+      setReviewError('企業を検索して候補から選ぶか、「Webから探す」を実行してください')
       return
     }
 
