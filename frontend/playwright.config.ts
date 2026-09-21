@@ -17,6 +17,7 @@ export default defineConfig({
     'student-insights.spec.ts',
     'company-provenance.spec.ts',
     'request-id.spec.ts',
+    'responsive-layout.spec.ts',
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

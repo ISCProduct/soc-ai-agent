@@ -27,7 +27,7 @@ import {
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import AddIcon from '@mui/icons-material/Add'
 import { authService } from '@/lib/auth'
-import { useRequirePlatformAdmin } from '@/lib/use-require-platform-admin'
+import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 import { correlationLabel, correlationColor, formatPercent, formatRate } from '@/lib/score-validation-utils'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'

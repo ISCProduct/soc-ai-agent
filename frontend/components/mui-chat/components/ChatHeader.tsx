@@ -1,7 +1,7 @@
 'use client'
 
 import { Box, Button, LinearProgress, Typography } from '@mui/material'
-import styles from '../../mui-chat.module.css'
+import styles from '../MuiChat.module.css'
 import { CHAT_BRAND } from '../utils'
 import type { ProgressTotals } from '../types'
 
@@ -31,7 +31,7 @@ export function ChatHeader({
           IT業界キャリアエージェント
         </Typography>
         <Typography variant="body2" color="text.secondary" className={styles.chatProgress}>
-          AI適性診断 — {valid}/{required} 問完了（想定{required}問・{percent}%）
+          AI適性診断 — {valid}/{required} 問（{percent}%）
         </Typography>
         <LinearProgress
           variant="determinate"

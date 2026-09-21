@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { ServiceErrorView } from '@/components/service-error-view'
+import { ServiceErrorView } from '@/components/ServiceErrorView'
 
 const TITLE = '接続できません | 就活AI'
 const DESCRIPTION = 'サーバーに接続できませんでした。しばらくしてから再試行してください。'

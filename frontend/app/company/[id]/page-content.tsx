@@ -37,7 +37,7 @@ import {
 import { fetchWithTimeout } from '@/lib/fetch-timeout'
 import { ProvenanceBadge } from '@/components/company/ProvenanceBadge'
 
-const CompanyDiagram = dynamic(() => import('@/components/company-diagram'), {
+const CompanyDiagram = dynamic(() => import('@/components/CompanyDiagram'), {
   ssr: false,
   loading: () => (
     <Box sx={{ py: 4, textAlign: 'center', color: 'text.secondary' }}>

@@ -1,14 +1,5 @@
-/* モバイル用ヘッダー: md(900px)未満のみ表示 */
-.mobileHeader {
-    display: flex;
-}
-
-/* デスクトップでは非表示 */
-@media (min-width: 900px) {
-    .mobileHeader {
-        display: none;
-    }
-}
+/* モバイル用ヘッダーの表示条件は app/page-content.tsx の sx に移した。
+   MUI の AppBar が当てる display:flex に CSS Modules が負けていたため。 */
 
 .mainContent {
     flex-grow: 1;

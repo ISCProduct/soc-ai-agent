@@ -24,13 +24,13 @@ import {
 } from '@mui/material'
 import { PageContainer } from '@/components/admin/PageContainer'
 import { PageLoading } from '@/components/common/PageLoading'
-import { companyAuthService } from '@/lib/company-auth'
+import { companyAuthService } from '@/lib/company/auth'
 import {
   companyProfileService,
   type CompanyMember,
   type CompanyProfile,
   type ProfileUpdate,
-} from '@/lib/company-profile'
+} from '@/lib/company/profile'
 
 export default function CompanyPortalSettingsPage() {
   const router = useRouter()

@@ -188,7 +188,7 @@ function ESRewriteContent() {
               '&:hover': { bgcolor: mode === 'review' ? `${PRIMARY}e0` : '#e2e8f0' },
             }}
           >
-            ES添削（RAGフィードバック）
+            ES添削
           </Button>
           <Button
             startIcon={<AutoFixHighIcon />}
@@ -464,7 +464,11 @@ function ESRewriteContent() {
 
               {/* STAR breakdown */}
               <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
-                <Typography sx={{ fontWeight: 700, fontSize: 16, mb: 2 }}>STAR法 分解</Typography>
+                <Typography sx={{ fontWeight: 700, fontSize: 16, mb: 0.5 }}>STAR法 分解</Typography>
+                {/* 学生には初見の用語なので、見出しの下で一度だけ説明する。 */}
+                <Typography sx={{ fontSize: 13, color: '#64748b', mb: 2 }}>
+                  「どんな状況で、何が課題で、何をして、どうなったか」の4つが書けているかを見ます。
+                </Typography>
                 <Stack spacing={2}>
                   {STAR_LABELS.map(({ key, label, color, emoji }, idx) => (
                     <Box key={key}>

@@ -19,7 +19,7 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import ClosedCaptionIcon from '@mui/icons-material/ClosedCaption'
 import dynamic from 'next/dynamic'
 import { PRIMARY } from '../constants'
-import { formatSeconds } from '@/lib/interview-utils'
+import { formatSeconds } from '@/lib/interview/utils'
 import type { Utterance } from '../types'
 
 const ThreeAvatar = dynamic(() => import('./ThreeAvatar'), {

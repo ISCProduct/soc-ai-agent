@@ -24,8 +24,8 @@ import {
 } from '@mui/material'
 import { PageContainer } from '@/components/admin/PageContainer'
 import { PageLoading } from '@/components/common/PageLoading'
-import { companyAuthService } from '@/lib/company-auth'
-import { companyJobService, isPublished, type CompanyJob, type JobInput } from '@/lib/company-jobs'
+import { companyAuthService } from '@/lib/company/auth'
+import { companyJobService, isPublished, type CompanyJob, type JobInput } from '@/lib/company/jobs'
 
 const EMPTY_FORM: JobInput = {
   title: '',

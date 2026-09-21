@@ -12,7 +12,7 @@ jest.mock('@/lib/auth', () => ({
 }))
 
 // 学校絞り込みUI(SchoolFilterSelect)は独自に fetch するため、本テストの対象外として固定する
-jest.mock('@/lib/admin-school-access', () => ({
+jest.mock('@/lib/admin/school-access', () => ({
   getAdminSchoolAccess: async () => ({ restricted: false, schools: [] }),
 }))
 

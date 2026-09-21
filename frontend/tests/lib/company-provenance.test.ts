@@ -1,4 +1,4 @@
-import { classifyProvenance } from '@/lib/company-provenance'
+import { classifyProvenance } from '@/lib/company/provenance'
 
 // 企業情報の出どころ表示（#1125 フェーズ1）。
 // AI 推定を公的情報と同じ見た目で出さないことが目的なので、分類の境界を固定する。

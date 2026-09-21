@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { adminProxyHeaders } from '@/lib/admin-backend-proxy'
+import { adminProxyHeaders } from '@/lib/admin/backend-proxy'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 

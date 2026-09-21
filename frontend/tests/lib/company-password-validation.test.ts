@@ -1,4 +1,4 @@
-import { validateNewPassword } from '@/lib/company-auth'
+import { validateNewPassword } from '@/lib/company/auth'
 
 describe('validateNewPassword', () => {
   const cases: { name: string; password: string; confirm: string; expected: string | null }[] = [

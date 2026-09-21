@@ -1,4 +1,4 @@
-import { extractApiErrorMessage, parseMediaError } from '@/lib/interview-utils'
+import { extractApiErrorMessage, parseMediaError } from '@/lib/interview/utils'
 
 describe('parseMediaError', () => {
   it('maps session Unauthorized to re-login guidance', () => {

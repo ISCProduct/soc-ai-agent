@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { fireEvent, render, screen } from '@testing-library/react'
-import { GlobalNavMenu } from '@/components/global-nav-menu'
+import { GlobalNavMenu } from '@/components/GlobalNavMenu'
 
 let mockPathname = '/interview'
 
@@ -39,7 +39,7 @@ describe('GlobalNavMenu', () => {
     expect(await screen.findByRole('link', { name: /ESリライト・添削/ })).toHaveAttribute('href', '/es-rewrite')
     expect(screen.getByRole('link', { name: /選考スケジュール/ })).toHaveAttribute('href', '/schedule')
     expect(screen.getByRole('link', { name: /選考管理/ })).toHaveAttribute('href', '/applications')
-    expect(screen.getByRole('link', { name: /企業相関図/ })).toHaveAttribute('href', '/Correlation-diagram')
+    expect(screen.getByRole('link', { name: /企業相関図/ })).toHaveAttribute('href', '/correlation-diagram')
     expect(screen.getByRole('link', { name: /面接履歴/ })).toHaveAttribute('href', '/interview/history')
   })
 })

@@ -55,7 +55,7 @@ describe('SelectionScreen', () => {
   it('最小限の props でステップタイトルと企業名を表示する', () => {
     renderScreen()
 
-    expect(screen.getByText('InterviewAI')).toBeInTheDocument()
+    expect(screen.getByText('IT業界キャリアエージェント')).toBeInTheDocument()
     expect(screen.getByText('練習する企業・職種を選ぶ')).toBeInTheDocument()
     expect(screen.getByText('企業未選択')).toBeInTheDocument()
     expect(screen.getAllByText(POSITIONS[0].title).length).toBeGreaterThan(0)
