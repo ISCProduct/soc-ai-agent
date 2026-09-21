@@ -773,9 +773,11 @@ jobs:
           fi
           rm -f "$sm_err"
 
-          sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base main --limit 20 \
-            --json number,title,body,mergedAt \
-            --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
+          # main へ直接マージされるのは release 傘PRだけで、その本文は
+          # 「起動ジョブの失敗通知が初めて有効になる」のような運用担当者向けの記述になる。
+          # 傘PRをそのまま要約させると、中身に混ざった運用作業がユーザー向け更新情報として
+          # 出てしまう（実際に出た）。傘PRは要約対象にせず、中身の個別PRを送る。
+          sources=$(python3 .github/scripts/collect_whats_new_sources.py)
 
           # 本番が停止していると必ず失敗する(既定停止の運用)。ここで失敗させるとデプロイが
           # 落ちてしまうため続行はするが、黙って握りつぶすと「反映されていない」ことに
