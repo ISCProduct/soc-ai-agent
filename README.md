@@ -69,8 +69,8 @@
 
 ```
 routes/                      ルーティング・ミドルウェア適用
-  └─ controllers/<domain>/   HTTPハンドラ（14パッケージ）
-       └─ services/<domain>/ ビジネスロジック（33パッケージ）
+  └─ controllers/<domain>/   HTTPハンドラ（ドメイン別13パッケージ）
+       └─ services/<domain>/ ビジネスロジック（ドメイン別30パッケージ）
             └─ repositories/ DBアクセス（domain/repository のI/Fを実装）
                  └─ models/  GORMモデル
 ```
@@ -161,12 +161,12 @@ routes/                      ルーティング・ミドルウェア適用
 │   ├── domain/                  # エンティティ・リポジトリI/F・VO・マッパー
 │   ├── migrations/              # up/down SQL（AutoMigrate禁止）
 │   └── internal/
-│       ├── controllers/         # HTTPハンドラ（ドメイン別14パッケージ）
+│       ├── controllers/         # HTTPハンドラ（ドメイン別13パッケージ）
 │       │   ├── admin/ auth/ chat/ company/ es/ github/ insight/
 │       │   ├── interview/ application/ release/ resume/ schedule/ user/
 │       │   ├── httpapi/         # 共通HTTPヘルパー（エラー応答・パラメータ取得）
 │       │   ├── mocks/ testsupport/  # テスト用ダブル・共有ヘルパー
-│       ├── services/            # ビジネスロジック（ドメイン別33パッケージ）
+│       ├── services/            # ビジネスロジック（ドメイン別30パッケージ + shared/interfaces/prompts）
 │       ├── repositories/        # DBアクセス（domain/repository の実装）
 │       ├── models/              # GORMモデル
 │       ├── routes/              # ルーティング・ミドルウェア適用
