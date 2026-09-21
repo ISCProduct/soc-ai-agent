@@ -735,6 +735,12 @@ jobs:
     # リポジトリ既定の認証情報はECSクラスタ作成前の古い値で、本番リソースを引けない。
     environment: production
     steps:
+      # collect_whats_new_sources.py と、それが読む resolve_deployed_issues.py を使う。
+      # squash マージのコミット題名から元PR番号を辿るため、履歴も要る。
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
       # 認証に失敗しても後続は続ける。ここで止めると、リポジトリシークレットへの
       # フォールバックが効かないだけでなく、これまで確実に動いていた staging への
       # 取り込みまで丸ごとスキップされる(ジョブは continue-on-error で緑のまま)。
