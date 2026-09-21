@@ -68,9 +68,11 @@ test.describe('履歴書リマインダーカード', () => {
     await page.goto('/')
     // 「まだ描画されていないだけ」で0件になるのを避けるため、
     // 先に画面本体の描画完了を待ってから0件を主張する。
-    await expect(page.getByRole('button', { name: 'menu' }).or(page.locator('header'))).toBeVisible({
-      timeout: 15000,
-    })
+    //
+    // header は待たない。モバイル用ヘッダーは md 未満でだけ表示するようにしたため
+    // （UI監査 R3。PCでチャット内のタイトルと重複していた）、
+    // Playwright 既定の 1280px では現れない。
+    await expect(page.locator('main').first()).toBeVisible({ timeout: 15000 })
     await expect(reminderAlert(page)).toHaveCount(0)
   })
 })
