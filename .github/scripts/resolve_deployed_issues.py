@@ -57,6 +57,44 @@ def extract_issue_numbers(pr_body: str) -> list[int]:
     return out
 
 
+def resolve_issues(prs, body_of, commits_of):
+    """本番へ入ったPR番号の一覧から、閉じるべき issue -> 根拠PR を解決する。
+
+    body_of(pr) は PR 本文、commits_of(pr) は PR が含むコミット題名の一覧を返す。
+
+    本文に close キーワードが無いPRは1段だけ掘る。
+    release→main が squash マージされると、デプロイ範囲(HEAD~1..HEAD)に現れるのは
+    リリースPR1件だけになる。リリースPRの本文に issue 番号は書かれないため、
+    ここで止まると「閉じる対象の issue はありません」で毎回終わり、
+    本番反映済みの issue が開いたまま溜まる(実際に12件溜まった)。
+    リリースPRのコミット題名には各 feature PR の番号が (#1234) で残っているので、
+    そこから feature PR の本文へ辿る。
+
+    掘るのは1段だけ。リリースPRが過去のリリースPRを含むことがあり、
+    無制限に辿ると範囲が際限なく広がる。
+    """
+    issues: dict[int, list[int]] = {}
+
+    def record(issue: int, pr: int) -> None:
+        refs = issues.setdefault(issue, [])
+        if pr not in refs:
+            refs.append(pr)
+
+    for pr in prs:
+        found = extract_issue_numbers(body_of(pr))
+        if found:
+            for i in found:
+                record(i, pr)
+            continue
+        for sub in extract_pr_numbers(commits_of(pr)):
+            if sub == pr:
+                continue
+            for i in extract_issue_numbers(body_of(sub)):
+                record(i, sub)
+
+    return issues
+
+
 if __name__ == "__main__":
     # 自己チェック: python3 .github/scripts/resolve_deployed_issues.py
     assert extract_pr_numbers(["feat: 何か (#1234)"]) == [1234]
@@ -84,5 +122,36 @@ if __name__ == "__main__":
     assert extract_issue_numbers("Closes ISCProduct/other#11") == [], "他リポジトリは対象外"
     # 単語境界: "Discloses #12" を拾わない
     assert extract_issue_numbers("Discloses #12") == []
+
+    # --- resolve_issues: リリースPRを1段掘る ---
+    # 実際に起きた形: release→main が squash され、範囲にはリリースPR1件だけが残る。
+    bodies = {
+        1421: "## 中身\n\n| #1401 | リファクタ |\n",   # リリースPR。close キーワード無し
+        1401: "Closes #1300",
+        1413: "Closes #1404\nCloses #1405",
+        1414: "close キーワードの無いPR",
+    }
+    commits = {1421: ["refactor: 分離 (#1401)", "fix: 直す (#1413)", "fix(ci): (#1414)"]}
+    got = resolve_issues([1421], lambda n: bodies.get(n, ""), lambda n: commits.get(n, []))
+    assert got == {1300: [1401], 1404: [1413], 1405: [1413]}, f"リリースPRを掘れていない: {got}"
+
+    # 本文に close キーワードがあるPRは掘らない（feature PR が直接 main に入る場合）
+    got = resolve_issues([1413], lambda n: bodies.get(n, ""), lambda n: commits.get(n, []))
+    assert got == {1404: [1413], 1405: [1413]}, got
+
+    # 掘るのは1段だけ。孫は辿らない（過去のリリースPRで範囲が際限なく広がる）
+    nested_bodies = {90: "", 91: "", 92: "Closes #7"}
+    nested_commits = {90: ["release: 前回 (#91)"], 91: ["fix: 何か (#92)"]}
+    got = resolve_issues([90], lambda n: nested_bodies.get(n, ""), lambda n: nested_commits.get(n, []))
+    assert got == {}, f"2段目まで辿っている: {got}"
+
+    # 自分自身を含むコミット題名（squash後の題名）で無限に戻らない
+    got = resolve_issues([55], lambda n: "", lambda n: ["release: x (#55)"])
+    assert got == {}, got
+
+    # 同じ issue を複数PRが閉じる場合は根拠を重複なく並べる
+    dup_bodies = {10: "", 11: "Closes #1", 12: "Closes #1"}
+    got = resolve_issues([10], lambda n: dup_bodies.get(n, ""), lambda n: ["a (#11)", "b (#12)"])
+    assert got == {1: [11, 12]}, got
 
     print("OK")

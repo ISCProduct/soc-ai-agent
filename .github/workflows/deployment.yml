@@ -865,7 +865,7 @@ jobs:
           import json, os, subprocess, sys
 
           sys.path.insert(0, ".github/scripts")
-          from resolve_deployed_issues import extract_pr_numbers, extract_issue_numbers
+          from resolve_deployed_issues import extract_pr_numbers, resolve_issues
 
           REPO = os.environ["GH_REPO"]
 
@@ -888,11 +888,17 @@ jobs:
           prs = extract_pr_numbers(subjects)
           print(f"コミット {len(subjects)} 件から 元PR {len(prs)} 件を検出")
 
-          issues = {}
-          for pr in prs:
-              body = gh(["pr", "view", str(pr), "--json", "body", "-q", ".body"])
-              for i in extract_issue_numbers(body):
-                  issues.setdefault(i, []).append(pr)
+          def body_of(pr):
+              return gh(["pr", "view", str(pr), "--json", "body", "-q", ".body"])
+
+          def commits_of(pr):
+              return gh(["pr", "view", str(pr), "--json", "commits",
+                         "-q", "[.commits[].messageHeadline]|.[]"]).splitlines()
+
+          # 本文に close キーワードが無いPRは1段掘る。release→main が squash
+          # マージだと範囲にはリリースPR1件しか現れず、各 feature PR の
+          # Closes #N まで届かないため(詳細は resolve_issues のコメント)。
+          issues = resolve_issues(prs, body_of, commits_of)
 
           if not issues:
               print("閉じる対象の issue はありません。")
