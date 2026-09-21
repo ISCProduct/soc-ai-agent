@@ -49,6 +49,8 @@ function InterviewContent() {
   const [companySourceTab, setCompanySourceTab] = useState<'db' | 'web'>('db')
   const [webSearchResults, setWebSearchResults] = useState<{ name: string; description: string }[]>([])
   const [webSearchLoading, setWebSearchLoading] = useState(false)
+  const [webSearchError, setWebSearchError] = useState<string | null>(null)
+  const [webSearchRefreshKey, setWebSearchRefreshKey] = useState(0)
   const [positionCategory, setPositionCategory] = useState<'general' | 'sier'>('general')
   const [companyHints, setCompanyHints] = useState<{ style_tags: string[]; top_questions: string[]; company_brief?: string } | null>(null)
   const [hintsLoading, setHintsLoading] = useState(false)
@@ -125,6 +127,10 @@ function InterviewContent() {
     setCompaniesRefreshKey(k => k + 1)
   }, [])
 
+  const retryWebSearch = useCallback(() => {
+    setWebSearchRefreshKey(k => k + 1)
+  }, [])
+
   // Load company list for selection screen (initial fetch + debounced search)
   useEffect(() => {
     if (loading || companySourceTab !== 'db') return
@@ -174,23 +180,47 @@ function InterviewContent() {
   }, [interviewCompany?.name, selectedPosition.title]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // WEB検索
+  // 失敗とヒット0件を必ず区別する。以前はどちらも空配列にしていたため、
+  // APIが落ちていても「検索結果が見つかりません」と出て、学生には
+  // その企業が存在しないように見えていた(#1447)。
   useEffect(() => {
     if (loading || companySourceTab !== 'web') return
-    if (!companySearch.trim()) { setWebSearchResults([]); return }
+    if (!companySearch.trim()) { setWebSearchResults([]); setWebSearchError(null); return }
     let cancelled = false
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       setWebSearchLoading(true)
-      fetch(`/api/companies/web-search?q=${encodeURIComponent(companySearch.trim())}`, { cache: 'no-store' })
-        .then(r => r.ok ? r.json() : null)
-        .then(data => {
-          if (cancelled) return
-          setWebSearchResults(Array.isArray(data?.results) ? data.results : [])
-        })
-        .catch(() => { if (!cancelled) setWebSearchResults([]) })
-        .finally(() => { if (!cancelled) setWebSearchLoading(false) })
+      setWebSearchError(null)
+      try {
+        const r = await fetch(
+          `/api/companies/web-search?q=${encodeURIComponent(companySearch.trim())}`,
+          { cache: 'no-store' },
+        )
+        if (cancelled) return
+        if (!r.ok) {
+          // 学生向けの画面なのでステータスコードは出さない。
+          // 待てば直る 429 だけは次の行動が変わるので文言を分ける。
+          throw new Error(
+            r.status === 429
+              ? '検索の回数が多すぎます。少し時間を置いてからお試しください。'
+              : '検索できませんでした。しばらくしてからもう一度お試しください。',
+          )
+        }
+        const data = await r.json()
+        setWebSearchResults(Array.isArray(data?.results) ? data.results : [])
+      } catch (e) {
+        if (cancelled) return
+        setWebSearchError(
+          e instanceof Error && e.message
+            ? e.message
+            : '検索できませんでした。しばらくしてからもう一度お試しください。',
+        )
+        setWebSearchResults([])
+      } finally {
+        if (!cancelled) setWebSearchLoading(false)
+      }
     }, 500)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [loading, companySearch, companySourceTab]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loading, companySearch, companySourceTab, webSearchRefreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleBackToSelection = useCallback(() => {
     clearInterviewLobbyDraft()
@@ -241,6 +271,8 @@ function InterviewContent() {
         webSearchResults={webSearchResults}
         setWebSearchResults={setWebSearchResults}
         webSearchLoading={webSearchLoading}
+        webSearchError={webSearchError}
+        onRetryWebSearch={retryWebSearch}
         positionCategory={positionCategory}
         setPositionCategory={setPositionCategory}
         selectedPosition={selectedPosition}
