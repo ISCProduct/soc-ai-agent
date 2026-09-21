@@ -209,6 +209,15 @@ type CalibrationResult struct {
 }
 
 // RunCalibration 実績データからスコア重みを再計算して保存する
+// correlationApprox は重みから相関係数の簡易近似を返す。
+// weight=1.0 が平均的なカテゴリ、1.0超が正の相関、1.0未満が負の相関を示す。
+//
+// 下限のクランプは #313 の修正。math.Min だけだと weight が負のときに
+// -1 を下回る値を返していた。
+func correlationApprox(weight float64) float64 {
+	return math.Max(-1.0, math.Min(weight-1.0, 1.0))
+}
+
 func (s *ScoreValidationService) RunCalibration() (*CalibrationResult, error) {
 	stats, err := s.repo.GetCategoryPassStats()
 	if err != nil {
@@ -239,9 +248,7 @@ func (s *ScoreValidationService) RunCalibration() (*CalibrationResult, error) {
 		weight := stat.PassRate / avgPassRate
 		weight = math.Round(weight*100) / 100
 
-		// 相関係数の簡易近似（重み - 1.0 を [-1, 1] にクランプ）
-		// weight=1.0 が平均的なカテゴリ、1.0超が正の相関、1.0未満が負の相関を示す
-		correlation := math.Max(-1.0, math.Min(weight-1.0, 1.0))
+		correlation := correlationApprox(weight)
 
 		weights = append(weights, models.ScoreCalibrationWeight{
 			Category:    stat.Category,

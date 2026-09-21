@@ -1,17 +1,15 @@
 package admin
 
 // スコアバリデーション相関係数のテスト（Issue #313）
+//
+// 対象は score_validation_service.go の correlationApprox。以前はこのファイル内に
+// 同じ式を複製して検証していたため、本番側の式が変わってもテストは通り続けた。
 // 実行: cd Backend && go test ./internal/services/... -run TestCorrelation -v
 
 import (
 	"math"
 	"testing"
 )
-
-// correlationApprox は本番コードと同一の相関係数近似ロジック
-func correlationApprox(weight float64) float64 {
-	return math.Max(-1.0, math.Min(weight-1.0, 1.0))
-}
 
 // TestCorrelation_AlwaysInRange は計算結果が常に [-1, 1] に収まることを検証する（#313修正の担保）
 func TestCorrelation_AlwaysInRange(t *testing.T) {
