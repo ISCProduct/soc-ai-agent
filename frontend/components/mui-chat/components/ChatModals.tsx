@@ -49,14 +49,14 @@ export function ChatModals({
       >
         <DialogTitle sx={{ textAlign: 'center', pb: 1 }}>
           <Typography variant="h5" component="div" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
-            🎉 分析が完了しました！
+            聞き取りが終わりました
           </Typography>
         </DialogTitle>
         <DialogContent sx={{ pt: 2, pb: 2 }}>
           <Typography variant="body1" sx={{ textAlign: 'center', mb: 2 }}>
             {allPhasesCompleted
-              ? 'すべての分析が完了しました！あなたに最適な企業をマッチングしました。'
-              : 'あなたの適性を分析し、最適な企業をマッチングしました。'}
+              ? '回答をもとに、近い企業を並べました。'
+              : 'ここまでの回答をもとに、近い企業を並べました。会話を続けると根拠が増えます。'}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
             結果ページで詳細な企業情報を確認できます。

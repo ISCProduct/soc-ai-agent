@@ -77,7 +77,7 @@ export function ChatInputBar({
               '&:hover': { bgcolor: CHAT_BRAND_HOVER },
             }}
           >
-            🎉 分析完了！結果を見る
+            結果を見る
           </Button>
           <Typography variant="caption" display="block" sx={{ mt: 1 }} color="text.secondary">
             あなたに最適な企業をマッチングしました
