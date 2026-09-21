@@ -524,7 +524,7 @@ curl -s http://localhost:9000/vector/status
 make rag-rebuild
 
 # ログ
-docker compose --profile rag logs --tail 80 chroma rag-review
+docker compose logs --tail 80 chroma rag-review
 ```
 
 ### スコアキャリブレーション「サンプル不足」エラー

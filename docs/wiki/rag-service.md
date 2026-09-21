@@ -258,8 +258,8 @@ GET /training/export
 ## ローカル開発・デバッグ
 
 ```sh
-# RAG サービスのみ起動
-docker compose --profile rag up -d rag-review
+# RAG サービスのみ起動（既定サービスなので profile 指定は不要）
+docker compose up -d rag-review
 
 # ログ確認
 docker compose logs -f rag-review
