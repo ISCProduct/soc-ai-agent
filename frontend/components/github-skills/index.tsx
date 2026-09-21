@@ -1,10 +1,10 @@
 'use client'
 
-import { useGitHubSkills } from './github-skills/hooks/useGitHubSkills'
-import { GitHubSkillsLoading } from './github-skills/components/GitHubSkillsLoading'
-import { GitHubSkillsNotLinked } from './github-skills/components/GitHubSkillsNotLinked'
-import { GitHubSkillsView } from './github-skills/components/GitHubSkillsView'
-import type { GitHubSkillsProps } from './github-skills/types'
+import { useGitHubSkills } from './hooks/useGitHubSkills'
+import { GitHubSkillsLoading } from './components/GitHubSkillsLoading'
+import { GitHubSkillsNotLinked } from './components/GitHubSkillsNotLinked'
+import { GitHubSkillsView } from './components/GitHubSkillsView'
+import type { GitHubSkillsProps } from './types'
 
 /**
  * GitHub 連携ユーザーのスキル分析・リポジトリ要約 UI。

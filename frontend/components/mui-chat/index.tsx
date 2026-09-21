@@ -3,11 +3,11 @@
 import { Box } from '@mui/material'
 import styles from './mui-chat.module.css'
 import { PageLoading } from '@/components/common/PageLoading'
-import { useMuiChat } from './mui-chat/hooks/useMuiChat'
-import { ChatHeader } from './mui-chat/components/ChatHeader'
-import { ChatMessageList } from './mui-chat/components/ChatMessageList'
-import { ChatInputBar } from './mui-chat/components/ChatInputBar'
-import { ChatModals } from './mui-chat/components/ChatModals'
+import { useMuiChat } from './hooks/useMuiChat'
+import { ChatHeader } from './components/ChatHeader'
+import { ChatMessageList } from './components/ChatMessageList'
+import { ChatInputBar } from './components/ChatInputBar'
+import { ChatModals } from './components/ChatModals'
 
 /**
  * IT業界キャリアエージェントのチャット UI。
