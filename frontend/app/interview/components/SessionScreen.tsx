@@ -384,7 +384,12 @@ export default function SessionScreen({
             {/* 主要ボタン行 */}
             <Box sx={{ display: 'flex', gap: 1 }}>
               {/* 録音 / 話す ボタン */}
-              <Tooltip title={aiSpeaking ? 'AI発話中...' : turnPending ? 'AIが考えています...' : isRecording ? 'クリックして送信' : 'クリックして話す'}>
+              {/*
+                「AI発話中」「AIが考えています」をやめた。
+                面接練習は「面接官と話している」という前提が成り立ってこそ
+                練習になる。話し相手をAIと呼ぶとその前提が崩れる。
+              */}
+              <Tooltip title={aiSpeaking ? '面接官が話しています' : turnPending ? '面接官が考えています' : isRecording ? 'クリックして送信' : 'クリックして話す'}>
                 <span className={styles.recordButtonWrap}>
                   <Button
                     fullWidth
@@ -409,7 +414,7 @@ export default function SessionScreen({
                       '&:disabled': { bgcolor: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.3)', border: '1px solid rgba(255,255,255,0.1)' },
                     }}
                   >
-                    {isRecording ? 'レコーディング中...' : turnPending ? '処理中...' : aiSpeaking ? 'AI発話中' : '話す'}
+                    {isRecording ? '録音中' : turnPending ? '送信中' : aiSpeaking ? '面接官が発言中' : '話す'}
                   </Button>
                 </span>
               </Tooltip>
