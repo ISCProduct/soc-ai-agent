@@ -116,11 +116,14 @@ jobs:
           set -e
           pids=()
 
+          # NEXT_PUBLIC_* はビルド時にバンドルへ焼き込まれる。DSN を staging と本番で
+          # 同じシークレットから渡すと、staging を有効化した瞬間に次の本番デプロイでも
+          # 有効になってしまい、環境ごとに段階導入できない。シークレットを分ける。
           if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then
             (cd frontend && docker buildx build --platform linux/amd64 \
               --build-arg NODE_ENV=production \
               --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }} \
-              --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND }} \
+              --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND_STAGING }} \
               --build-arg NEXT_PUBLIC_APP_ENV=staging \
               --build-arg NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }} \
               --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging \
@@ -504,7 +507,7 @@ jobs:
             (cd frontend && docker buildx build --platform linux/amd64 \
               --build-arg NODE_ENV=production \
               --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }} \
-              --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND }} \
+              --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND_PROD }} \
               --build-arg NEXT_PUBLIC_APP_ENV=production \
               --build-arg NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }} \
               --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production \

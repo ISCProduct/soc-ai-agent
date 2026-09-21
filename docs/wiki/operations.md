@@ -8,6 +8,7 @@
    - [リクエストIDでサービス横断追跡](#31-リクエストidでサービス横断追跡-1188)
    - [メトリクスを見る](#32-メトリクスを見る-1186)
    - [稼働日の前日チェックリスト](#33-稼働日の前日チェックリスト-1388)
+   - [エラートラッキング(Sentry)の有効化](#34-エラートラッキングsentryの有効化-1185)
    - [エラートラッキング（Sentry）](#34-エラートラッキングsentry-619--1185)
 4. [障害対応](#4-障害対応)
 5. [データベース管理](#5-データベース管理)
@@ -424,6 +425,63 @@ Sentry プロジェクトの Alert Rule で Discord / Slack へ転送する。
 | 本番の未処理エラーが通知される | Sentry（本節）。DSN 設定と Alert Rule が必要 |
 | 基本メトリクスがダッシュボードで確認できる | `/metrics`（3.2 節 / #1186）+ ALB CloudWatch |
 | SLOとアラートルールが文書化されている | [slo.md](./slo.md)（#1187） |
+
+---
+
+## 3.4 エラートラッキング(Sentry)の有効化 (#1185)
+
+**DSN を設定しない限り Sentry は何も送信しない。** コードは Backend / Frontend / RAG の3つに入っているが、
+いずれも DSN 未設定なら初期化自体をスキップする（`frontend/lib/sentry.ts` の `sentrySharedOptions()` は
+null を返し、`Backend/internal/observability/sentry.go` も DSN 空なら初期化しない）。
+
+### 段階導入の順序
+
+1. **staging で有効化し、1週間ほど様子を見る**
+2. 実際に届いたイベントを開いて、**個人情報やトークンが混ざっていないことを自分の目で確認する**
+3. 問題なければ本番を有効化する
+
+**展示会など本番の稼働日の直前に有効化しない。** 新しい外部送信を当日直前に増やさない。
+
+### staging を有効化する
+
+| 対象 | 設定先 | 値 |
+|---|---|---|
+| ブラウザ側 | GitHub リポジトリシークレット `SENTRY_DSN_FRONTEND_STAGING` | Sentry の Frontend プロジェクトの DSN |
+| サーバー側(Backend/RAG) | Terraform 変数 `sentry_dsn`（staging の tfvars） | Sentry の Backend プロジェクトの DSN |
+
+ブラウザ側の DSN は `NEXT_PUBLIC_*` なので**ビルド時にバンドルへ焼き込まれる**。
+シークレットを登録したあと、frontend を再ビルドするデプロイが走って初めて有効になる。
+
+サーバー側は staging の `terraform apply` で `.env` に渡り、Backend と rag-review の両方が読む
+（同じ `.env` を `env_file` で共有しているため）。
+
+### 本番を有効化する（展示会後）
+
+| 対象 | 設定先 |
+|---|---|
+| ブラウザ側 | シークレット `SENTRY_DSN_FRONTEND_PROD` |
+| サーバー側 | 本番タスク定義の環境変数 `SENTRY_DSN` |
+
+**シークレットは staging と本番で分けてある。** 同じ名前を使うと、staging を有効化した瞬間に
+次の本番デプロイでも有効になり、段階導入ができない。
+
+本番のサーバー側だけ注意点がある。ECS のタスク定義は `container_definitions` を
+`ignore_changes` にしているため（`modules/ecs_service_fargate/main.tf`）、**Terraform に環境変数を
+足しただけでは反映されない**。反映するには一時的に ignore を外して apply する必要がある
+（モジュール側のコメントにも同じ注意書きがある）。
+
+### 送信前に落としているもの
+
+`frontend/lib/sentry.ts` で以下を除去している。追加するときはここも更新すること。
+
+- `Authorization` / `Cookie` / `X-*-Token` などの認証ヘッダー
+- **URL のクエリとフラグメント** — `/verify-email?token=` `/company-portal/setup?token=`
+  `/auth/callback?user=` にワンタイムトークンやユーザー情報が載るため
+- **Referer** — 遷移元のクエリ（＝トークン）が載る
+- リクエストボディ（履歴書・チャット本文の混入防止）
+- パンくずの URL、および console のパンくずは丸ごと破棄
+
+`sendDefaultPii: false` / `tracesSampleRate: 0`（トレースは送らない＝Sentry の枠を消費しない）。
 
 ---
 
