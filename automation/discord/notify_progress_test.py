@@ -8,11 +8,19 @@ from notify_progress import NotificationError, build_payload, send_notification,
 
 
 class NotificationTest(unittest.TestCase):
-    def test_reminder_explains_normal_channel_input_and_disables_mentions(self):
+    def test_reminder_mentions_everyone_outside_copyable_markdown(self):
         payload = build_payload()
         self.assertIn("このチャンネル", payload["content"])
         self.assertIn("進捗", payload["content"])
-        self.assertEqual(payload["allowed_mentions"], {"parse": []})
+        self.assertEqual(payload["allowed_mentions"], {"parse": ["everyone"]})
+        content = payload["content"]
+        self.assertTrue(content.startswith("@everyone\n"))
+        self.assertEqual(content.count("```"), 2)
+        template = content.split("```markdown\n", 1)[1].split("```", 1)[0]
+        self.assertNotIn("@everyone", template)
+        self.assertIn("## 今週の進捗\n- ", template)
+        self.assertIn("## 次にやること\n- ", template)
+        self.assertIn("## 困っていること・相談\n- ", template)
         self.assertLessEqual(len(payload["content"]), 2000)
 
     def test_rejects_invalid_urls_without_leaking_secret(self):
