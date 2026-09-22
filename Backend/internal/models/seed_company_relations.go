@@ -29,72 +29,61 @@ type factBusinessRelationSpec struct {
 }
 
 // 公開されているグループ体制・子会社一覧等に基づく資本関係（法人番号で特定）。
+//
+// 追加・変更時は必ず次の 2 点を満たすこと。description に「出所: 公開情報」が付くため、
+// 裏取りのないレコードを入れると誤情報が信頼ラベル付きで本番に出る。
+//  1. 法人番号を国税庁「法人番号システムWeb-API」で実在確認する
+//     (検査用数字だけなら TestSeedCompanyRelationsCorporateNumbers が自動検証する)
+//  2. 資本関係そのものを有価証券報告書・グループ会社一覧などの一次情報で確認する
+//     (取引先であることと資本関係があることは別物)
 var factCapitalRelations = []factCapitalRelationSpec{
 	{
-		parentCorpNum: "7010401026738", parentName: "トヨタ自動車株式会社",
+		parentCorpNum: "1180301018771", parentName: "トヨタ自動車株式会社",
 		childCorpNum: "7180301018923", childName: "トヨタテクニカルディベロップメント株式会社",
 		relationType: "capital_subsidiary", ratio: 100,
 		note: "トヨタ自動車の完全子会社",
 	},
 	{
-		parentCorpNum: "7010401026738", parentName: "トヨタ自動車株式会社",
-		childCorpNum: "9180301002173", childName: "ベルエアーシステムズ株式会社",
-		relationType: "capital_subsidiary", ratio: 100,
-		note: "トヨタ自動車グループの連結子会社",
-	},
-	{
-		parentCorpNum: "7010401026738", parentName: "トヨタ自動車株式会社",
-		childCorpNum: "5180301037157", childName: "株式会社ビーネックスソリューションズ",
-		relationType: "capital_affiliate", ratio: 50,
-		note: "トヨタ自動車グループ（ITサービス）",
-	},
-	{
-		parentCorpNum: "4180301012460", parentName: "株式会社豊田自動織機",
+		parentCorpNum: "3180301014273", parentName: "株式会社豊田自動織機",
 		childCorpNum: "5180301014305", childName: "株式会社豊田自動織機ＩＴソリューションズ",
 		relationType: "capital_subsidiary", ratio: 100,
 		note: "豊田自動織機の子会社",
 	},
 	{
-		parentCorpNum: "4010401019905", parentName: "NEC株式会社",
+		parentCorpNum: "7010401022916", parentName: "日本電気株式会社",
 		childCorpNum: "7010601022674", childName: "ＮＥＣソリューションイノベータ株式会社",
 		relationType: "capital_subsidiary", ratio: 100,
 		note: "NECの連結子会社",
 	},
 	{
-		parentCorpNum: "8010105001109", parentName: "株式会社三菱ＵＦＪフィナンシャル・グループ",
+		parentCorpNum: "4010001073486", parentName: "株式会社三菱ＵＦＪフィナンシャル・グループ",
 		childCorpNum: "6010001008770", childName: "三菱ＵＦＪ信託銀行株式会社",
 		relationType: "capital_subsidiary", ratio: 100,
 		note: "MUFGグループの連結子会社",
 	},
 	{
-		parentCorpNum: "8010105001109", parentName: "株式会社三菱ＵＦＪフィナンシャル・グループ",
+		parentCorpNum: "4010001073486", parentName: "株式会社三菱ＵＦＪフィナンシャル・グループ",
 		childCorpNum: "8010001000016", childName: "三菱ＵＦＪニコス株式会社",
 		relationType: "capital_subsidiary", ratio: 100,
 		note: "MUFGグループの連結子会社",
 	},
 	{
-		parentCorpNum: "9010401013693", parentName: "ヤマトホールディングス株式会社",
+		parentCorpNum: "7010001034964", parentName: "ヤマトホールディングス株式会社",
 		childCorpNum: "9010601029263", childName: "ヤマトシステム開発株式会社",
 		relationType: "capital_subsidiary", ratio: 100,
 		note: "ヤマトホールディングスグループの子会社",
 	},
 	{
-		parentCorpNum: "4010401010393", parentName: "株式会社内田洋行",
+		parentCorpNum: "1010001034730", parentName: "株式会社内田洋行",
 		childCorpNum: "3010401099784", childName: "株式会社内田洋行ＩＴソリューションズ",
 		relationType: "capital_subsidiary", ratio: 100,
 		note: "内田洋行の子会社",
 	},
 	{
-		parentCorpNum: "3010401028474", parentName: "パーソルホールディングス株式会社",
+		parentCorpNum: "8011001058176", parentName: "パーソルホールディングス株式会社",
 		childCorpNum: "3180001032055", childName: "パーソルクロステクノロジー株式会社",
 		relationType: "capital_subsidiary", ratio: 100,
 		note: "パーソルホールディングスグループの子会社",
-	},
-	{
-		parentCorpNum: "9060001000184", parentName: "味の素株式会社",
-		childCorpNum: "2500001014640", childName: "サンヨー食品株式会社",
-		relationType: "capital_subsidiary", ratio: 100,
-		note: "味の素グループ（2010年に買収）",
 	},
 }
 
