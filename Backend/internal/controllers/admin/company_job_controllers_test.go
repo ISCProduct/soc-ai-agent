@@ -601,3 +601,37 @@ func TestAdminJobController_CreateJobPosition_RejectsUnknownCompany(t *testing.T
 		})
 	}
 }
+
+// TestAdminCompanyController_List_LimitCap は limit クエリの頭打ちを固定する(#1412)。
+//
+// 上限が無いと limit=1000000 のような値がそのままリポジトリへ渡り、DB と JSON 生成で
+// タスクが詰まる。他の管理系コントローラー(user/school/organization)と同じ 100 に揃える。
+func TestAdminCompanyController_List_LimitCap(t *testing.T) {
+	tests := []struct {
+		name      string
+		query     string
+		wantLimit int
+	}{
+		{name: "未指定は既定の50", query: "", wantLimit: 50},
+		{name: "上限内はそのまま", query: "?limit=30", wantLimit: 30},
+		{name: "上限ちょうど", query: "?limit=100", wantLimit: 100},
+		{name: "上限超過は100へ頭打ち", query: "?limit=101", wantLimit: 100},
+		{name: "極端な値も100へ頭打ち", query: "?limit=1000000", wantLimit: 100},
+		{name: "0は既定の50", query: "?limit=0", wantLimit: 50},
+		{name: "負値は既定の50", query: "?limit=-1", wantLimit: 50},
+		{name: "数値以外は既定の50", query: "?limit=abc", wantLimit: 50},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &mocks.CompanyRepositoryMock{}
+			repo.On("ListActiveFiltered", tt.wantLimit, 0, "", "", "", "", "", mock.Anything).
+				Return([]models.Company{}, int64(0), nil)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/admin/companies"+tt.query, nil)
+			rec := httptest.NewRecorder()
+			testsupport.AssertStatus(t, newAdminCompanyController(repo, nil).List, testsupport.NewCtx(req, rec), http.StatusOK)
+			repo.AssertExpectations(t)
+		})
+	}
+}

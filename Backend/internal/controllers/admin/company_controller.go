@@ -118,7 +118,9 @@ func (c *AdminCompanyController) SetCompanySearchGuards(budget companyfetch.Sear
 
 // List GET /api/admin/companies
 func (c *AdminCompanyController) List(ctx echo.Context) error {
-	const maxListLimit = 200
+	// 他の管理系コントローラー(user/school/organization)と同じ 100 で頭打ちにする。
+	// 上限が無いと limit=1000000 で DB と JSON 生成にタスクが詰まる(#1412)。
+	const maxListLimit = 100
 	limit := 50
 	offset := 0
 	if v, err := strconv.Atoi(ctx.QueryParam("limit")); err == nil && v > 0 {
