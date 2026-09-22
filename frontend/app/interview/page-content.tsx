@@ -145,6 +145,9 @@ function InterviewContent() {
         if (cancelled) return
         if (!r.ok) throw new Error('企業一覧の取得に失敗しました')
         const data = await r.json()
+        // r.json() の待ち中に検索語が変わることがある。setState 直前で
+        // 再確認して、古い一覧が最新を上書きするのを防ぐ(#1464)。
+        if (cancelled) return
         const list: InterviewCompany[] = Array.isArray(data?.companies) ? data.companies : []
         setAllCompanies(list)
       } catch (e) {
@@ -206,6 +209,11 @@ function InterviewContent() {
           )
         }
         const data = await r.json()
+        // JSON パース中に検索語が変わってクリーンアップが走ったら、
+        // この結果は古い。setState 直前で再確認して上書きを防ぐ(#1464)。
+        // fetch 後の1回だけでは足りない: r.json() も待ちであり、その間に
+        // 別の検索が cancelled を立てうる。
+        if (cancelled) return
         setWebSearchResults(Array.isArray(data?.results) ? data.results : [])
       } catch (e) {
         if (cancelled) return
