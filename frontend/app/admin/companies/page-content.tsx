@@ -30,6 +30,7 @@ import {
   ListItemIcon,
   ListItemText,
 } from '@mui/material'
+import { approvalChipState, canToggleApproval } from '@/lib/admin/company-approval'
 import SearchIcon from '@mui/icons-material/Search'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
@@ -221,8 +222,11 @@ export default function PageContent() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [bulkPublishing, setBulkPublishing] = useState(false)
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
-  const [approvedCompanyIds, setApprovedCompanyIds] = useState<Set<number>>(new Set())
+  // 学校の承認済み企業ID。null は「取得できていない」。空集合と区別する(#1452)。
+  // 以前は失敗時も空集合のままで、承認済みの企業まで一覧が全件「未承認」に見えていた。
+  const [approvedCompanyIds, setApprovedCompanyIds] = useState<Set<number> | null>(null)
   const [approvalBusyId, setApprovalBusyId] = useState<number | null>(null)
+  const [approvalError, setApprovalError] = useState('')
 
   const fetchCoverage = useCallback(async () => {
     const res = await fetch('/api/admin/companies/l1-coverage', {
@@ -321,38 +325,57 @@ export default function PageContent() {
 
   useEffect(() => {
     if (schoolId === undefined) {
-      setApprovedCompanyIds(new Set())
+      setApprovedCompanyIds(null)
+      setApprovalError('')
       return
     }
     let cancelled = false
-    fetch(`/api/admin/schools/${schoolId}/company-approvals`, {
-      headers: authService.getAdminFetchHeaders(),
-      cache: 'no-store',
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (!cancelled) setApprovedCompanyIds(new Set(data?.company_ids || []))
-      })
-      .catch(() => {})
+    const load = async () => {
+      setApprovalError('')
+      try {
+        const res = await fetch(`/api/admin/schools/${schoolId}/company-approvals`, {
+          headers: authService.getAdminFetchHeaders(),
+          cache: 'no-store',
+        })
+        // r.ok を見ないと、500 が HTML を返したときに .json() が例外になり
+        // 空集合のまま「全件未承認」に見える。
+        if (!res.ok) throw new Error(`status ${res.status}`)
+        const data = await res.json()
+        if (!cancelled) setApprovedCompanyIds(new Set<number>(data?.company_ids || []))
+      } catch {
+        if (cancelled) return
+        setApprovedCompanyIds(null)
+        setApprovalError('この学校の承認状態を取得できませんでした。承認の表示と操作は一時的に使えません。')
+      }
+    }
+    void load()
     return () => { cancelled = true }
   }, [schoolId])
 
   const toggleCompanyApproval = async (companyId: number, approved: boolean) => {
-    if (schoolId === undefined) return
+    // 承認状態が取れていないときは操作させない。サーバー側の実態と食い違うため。
+    if (!canToggleApproval(approvedCompanyIds, schoolId)) return
     setApprovalBusyId(companyId)
+    setApprovalError('')
     try {
       const res = await fetch(`/api/admin/schools/${schoolId}/company-approvals${approved ? `/${companyId}` : ''}`, {
         method: approved ? 'DELETE' : 'POST',
         headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
         body: approved ? undefined : JSON.stringify({ company_id: companyId }),
       })
-      if (!res.ok) return
+      if (!res.ok) {
+        // 無言で返すと、押しても反応しないチップを何度も押すことになる(#1452)。
+        setApprovalError(approved ? '承認の解除に失敗しました。' : '承認に失敗しました。')
+        return
+      }
       setApprovedCompanyIds((prev) => {
-        const next = new Set(prev)
+        const next = new Set(prev ?? [])
         if (approved) next.delete(companyId)
         else next.add(companyId)
         return next
       })
+    } catch {
+      setApprovalError('通信に失敗しました。時間をおいて再度お試しください。')
     } finally {
       setApprovalBusyId(null)
     }
@@ -821,6 +844,11 @@ export default function PageContent() {
       />
 
       <ErrorAlert error={error} />
+      {approvalError ? (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {approvalError}
+        </Alert>
+      ) : null}
       {fetchMessage && (
         <Alert severity={fetchSeverity} sx={{ mb: 2 }} onClose={() => setFetchMessage('')}>
           {fetchMessage}
@@ -1232,15 +1260,25 @@ export default function PageContent() {
                               </Typography>
                               <Chip label={status.label} color={status.color} size="small" />
                               {schoolId !== undefined ? (
-                                <Chip
-                                  label={approvedCompanyIds.has(company.id) ? '承認済み' : '未承認'}
-                                  color={approvedCompanyIds.has(company.id) ? 'success' : 'default'}
-                                  variant={approvedCompanyIds.has(company.id) ? 'filled' : 'outlined'}
-                                  size="small"
-                                  disabled={approvalBusyId === company.id}
-                                  onClick={() => toggleCompanyApproval(company.id, approvedCompanyIds.has(company.id))}
-                                  sx={{ cursor: 'pointer' }}
-                                />
+                                // 取得できていない状態を「未承認」と同じ見た目にしない(#1452)。
+                                approvalChipState(approvedCompanyIds, company.id) === 'unknown' ? (
+                                  <Chip label="承認状態 不明" color="warning" variant="outlined" size="small" />
+                                ) : (
+                                  (() => {
+                                    const approved = approvalChipState(approvedCompanyIds, company.id) === 'approved'
+                                    return (
+                                      <Chip
+                                        label={approved ? '承認済み' : '未承認'}
+                                        color={approved ? 'success' : 'default'}
+                                        variant={approved ? 'filled' : 'outlined'}
+                                        size="small"
+                                        disabled={approvalBusyId === company.id}
+                                        onClick={() => toggleCompanyApproval(company.id, approved)}
+                                        sx={{ cursor: 'pointer' }}
+                                      />
+                                    )
+                                  })()
+                                )
                               ) : null}
                               {!groupByIndustry && industryLabel ? (
                                 <Chip
