@@ -11,7 +11,9 @@ Bot登録やBot Tokenは不要で、Python 3の標準ライブラリとIncoming 
 提供されたWebhookは同ファイルに保存済み（Git管理外・パーミッション0600）。
 環境変数が優先される。URLはログやGitに記録しない。
 
-通知先はWebhookが紐づくチャンネル。`@everyone` 等のメンションは送らない。
+通知先はWebhookが紐づくチャンネル。通知文の冒頭に `@everyone` を付け、
+`allowed_mentions.parse` に `everyone` を設定してメンションを有効化する。
+個別ユーザー・ロールのメンション解析は有効にしない。
 
 ## 実行
 
@@ -28,8 +30,9 @@ python3 automation/discord/notify_progress.py
 python3 -m unittest discover -s automation/discord -p 'notify_progress_test.py' -v
 ```
 
-通知内容は「取り組んだこと・進捗」「次にやること」「困っていること・相談したいこと」の
-記入例。形式は任意で、フォームやコマンドによる進捗入力は不要。
+通知には「今週の進捗」「次にやること」「困っていること・相談」のMarkdownテンプレートを
+コードブロックで載せる。コピーして記入し、通常メッセージとして投稿できる。
+テンプレート内には `@everyone` を含めず、報告のたびに全員へ通知することを防ぐ。
 
 `wait=true` で投稿確認ができた場合のみ成功終了する。
 失敗時は終了コード1。タイムアウト等で送信済みの可能性があるため、自動再送しない。
