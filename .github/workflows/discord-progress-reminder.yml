@@ -36,7 +36,7 @@ jobs:
       - name: Preview message
         run: python3 automation/discord/notify_progress.py --dry-run
       - name: Send reminder
-        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+        if: github.actor != 'dependabot[bot]' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
         env:
           DISCORD_PROGRESS_WEBHOOK_URL: ${{ secrets.DISCORD_PROGRESS_WEBHOOK_URL }}
         run: python3 automation/discord/notify_progress.py
