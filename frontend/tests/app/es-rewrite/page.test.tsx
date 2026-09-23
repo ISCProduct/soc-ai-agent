@@ -37,7 +37,7 @@ describe('ESRewritePage エラー表示 (#1015)', () => {
     fireEvent.change(screen.getByPlaceholderText(/チームで開発した経験があります/), {
       target: { value: '元の文章です。' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'AIでリライトする' }))
+    fireEvent.click(screen.getByRole('button', { name: '書き直す' }))
 
     expect(
       await screen.findByText('ログインの有効期限が切れました。再度ログインしてください。'),
@@ -58,7 +58,7 @@ describe('ESRewritePage エラー表示 (#1015)', () => {
     fireEvent.change(screen.getByPlaceholderText(/チームで開発した経験があります/), {
       target: { value: '元の文章です。' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'AIでリライトする' }))
+    fireEvent.click(screen.getByRole('button', { name: '書き直す' }))
 
     await waitFor(() => {
       expect(screen.getByText('リライトに失敗しました。再試行してください。')).toBeInTheDocument()

@@ -1,6 +1,7 @@
 'use client'
 
 import type { EdgeProps, EdgeTypes } from 'reactflow'
+import styles from './RelationEdge.module.css'
 
 /**
  * 関連図用エッジ。ラベルは水平のピル型で重なりを抑える。
@@ -46,7 +47,7 @@ export function RelationEdge({
         markerEnd={markerEnd}
       />
       {text ? (
-        <g transform={`translate(${labelX}, ${labelY})`} style={{ pointerEvents: 'none' }}>
+        <g transform={`translate(${labelX}, ${labelY})`} className={styles.label}>
           <rect
             x={-pillWidth / 2}
             y={-11}
@@ -60,12 +61,7 @@ export function RelationEdge({
           <text
             textAnchor="middle"
             dominantBaseline="central"
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              fill: '#344054',
-              letterSpacing: '0.01em',
-            }}
+            className={styles.labelText}
           >
             {truncatedText}
           </text>

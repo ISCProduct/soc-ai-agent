@@ -35,9 +35,6 @@ func SetupAdminRoutes(
 	schoolService *school.SchoolService,
 	adminSecret string,
 ) {
-	companyGraph := api.Group("/admin/company-graph")
-	companyGraph.GET("/target-year", adminCompanyGraphController.TargetYear)
-
 	admin := api.Group("/admin", EchoAdminAuth(userRepo, adminSecret))
 	schoolScope := EchoAdminSchoolScope(schoolService)
 	// システム管理者専用。担当校を持つ教員・学園側管理者は 403。
@@ -153,6 +150,10 @@ func SetupAdminRoutes(
 	admin.POST("/crawl-sources/:id/run", adminCrawlController.RunSource, platform)
 	admin.GET("/crawl-runs", adminCrawlController.Runs, platform)
 
+	// /admin 配下に認証なしのグループを作らない(#1411)。年度計算だけを返す軽い
+	// エンドポイントだが、認証の外にあると「/admin に生やせば守られる」前提が崩れ、
+	// 次にこのグループへ足したハンドラが無認証で公開される。
+	admin.GET("/company-graph/target-year", adminCompanyGraphController.TargetYear)
 	admin.POST("/company-graph/crawl", adminCompanyGraphController.Crawl, platform)
 	admin.POST("/company-graph/enrich-relations", adminCompanyGraphController.EnrichRelations, platform)
 

@@ -22,8 +22,8 @@ services:
     volumes:
       # 開発環境: ソースコードをマウント
       - ./Backend:/app
-      - go_mod_cache:/go/pkg/mod
-      - go_build_cache:/root/.cache/go-build
+      - go_mod_cache_app:/home/app/go/pkg/mod
+      - go_build_cache_app:/home/app/.cache/go-build
     # compose up 時に migrate → air の順で起動（スキーマ未適用で API が落ちないようにする）
     entrypoint: ["/bin/sh", "/app/scripts/docker-entrypoint.dev.sh"]
     command: ["air", "-c", ".air.toml"]
@@ -55,8 +55,8 @@ services:
     container_name: soc-ai-migrate
     volumes:
       - ./Backend:/app
-      - go_mod_cache:/go/pkg/mod
-      - go_build_cache:/root/.cache/go-build
+      - go_mod_cache_app:/home/app/go/pkg/mod
+      - go_build_cache_app:/home/app/.cache/go-build
     working_dir: /app
     command: ["go", "run", "./cmd/migrate", "up"]
     env_file:
@@ -217,9 +217,9 @@ volumes:
     driver: local
   chroma_data:
     driver: local
-  go_mod_cache:
+  go_mod_cache_app:
     driver: local
-  go_build_cache:
+  go_build_cache_app:
     driver: local
 
 networks:

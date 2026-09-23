@@ -55,6 +55,8 @@ export interface SelectionScreenProps {
   companiesLoading: boolean
   companiesLoadError: string | null
   onRetryCompaniesLoad: () => void
+  webSearchError: string | null
+  onRetryWebSearch: () => void
   webSearchResults: { name: string; description: string }[]
   setWebSearchResults: Dispatch<SetStateAction<{ name: string; description: string }[]>>
   webSearchLoading: boolean
@@ -87,6 +89,8 @@ export default function SelectionScreen({
   companiesLoading,
   companiesLoadError,
   onRetryCompaniesLoad,
+  webSearchError,
+  onRetryWebSearch,
   webSearchResults,
   setWebSearchResults,
   webSearchLoading,
@@ -219,7 +223,7 @@ export default function SelectionScreen({
                       '&:hover': { bgcolor: companySourceTab === 'web' ? `${PRIMARY}e0` : '#e2e8f0' },
                     }}
                   >
-                    🔍 Webから探す
+                    Webから探す
                   </Button>
                 </Box>
 
@@ -376,9 +380,16 @@ export default function SelectionScreen({
                             </Box>
                           )
                         })}
-                        {webSearchResults.length === 0 && companySearch.trim() && !webSearchLoading && (
+                        {webSearchError ? (
+                          <Stack spacing={1} alignItems="flex-start">
+                            <Typography sx={{ color: '#dc2626', fontSize: 13 }}>{webSearchError}</Typography>
+                            <Button size="small" variant="outlined" onClick={onRetryWebSearch}>
+                              再試行
+                            </Button>
+                          </Stack>
+                        ) : webSearchResults.length === 0 && companySearch.trim() && !webSearchLoading ? (
                           <Typography sx={{ color: '#94a3b8', fontSize: 13 }}>検索結果が見つかりません</Typography>
-                        )}
+                        ) : null}
                       </Stack>
                     )}
                   </>

@@ -27,11 +27,16 @@ export function ChatHeader({
   return (
     <Box className={styles.chatHeader}>
       <Box sx={{ minWidth: 0, flex: 1, pr: 1 }}>
+        {/*
+          「AI適性診断 — 0/15問（0%）」をやめた。
+          学生が見たいのは「あと何問か」であって、何が診断しているかではない。
+          %は棒グラフが同じことを示しているので数字からは外す。
+        */}
         <Typography variant="h5" className={styles.chatTitle}>
           IT業界キャリアエージェント
         </Typography>
         <Typography variant="body2" color="text.secondary" className={styles.chatProgress}>
-          AI適性診断 — {valid}/{required} 問（{percent}%）
+          {valid}問に回答（全{required}問）
         </Typography>
         <LinearProgress
           variant="determinate"

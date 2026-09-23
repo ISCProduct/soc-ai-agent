@@ -159,7 +159,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
                 sx={{ mb: 1 }}
               />
               <Box sx={{ textAlign: 'right', mt: -1, mb: 2 }}>
-                <Link href="/forgot-password" style={{ fontSize: '0.875rem' }}>
+                <Link href="/forgot-password" className="auth-link">
                   パスワードをお忘れですか？
                 </Link>
               </Box>

@@ -34,6 +34,7 @@ import {
   getGuestApplicationsButtonProps,
   getGuestEmailButtonProps,
 } from '@/lib/guest-limits'
+import { UI, leadSentences, scaleBand } from '@/lib/design/tokens'
 
 export interface ResultsListViewProps {
   companies: Company[]
@@ -95,20 +96,28 @@ export default function ResultsListView({
 }: ResultsListViewProps) {
   const guestEmailProps = getGuestEmailButtonProps(isGuestUser)
   const guestApplicationsProps = getGuestApplicationsButtonProps(isGuestUser)
+  // 一覧全体の幅。各社の位置はこの中で示す
+  const band = scaleBand(companies.map((c) => c.matchScore))
+  // 一覧の中で最も多い根拠軸数。これを下回る行だけ印を出す
+  const maxAxisCount = Math.max(
+    0,
+    ...companies.map((c) => (typeof c.matchedAxisCount === 'number' ? c.matchedAxisCount : 0)),
+  )
+
   return (
     <Box sx={{
       height: '100vh',
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      backgroundColor: 'background.default',
+      backgroundColor: UI.paper,
       pb: { xs: 7, md: 0 },
     }}>
       {/* ヘッダー部分 */}
       <Box sx={{
         p: { xs: 2, sm: 3 },
-        borderBottom: '1px solid #e0e0e0',
-        backgroundColor: '#fff',
+        borderBottom: `1px solid ${UI.rule}`,
+        backgroundColor: UI.paper,
         flexShrink: 0,
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 2 }}>
@@ -143,14 +152,60 @@ export default function ResultsListView({
             今の診断結果はそのまま引き継がれます。
           </Alert>
         )}
-        <Box sx={{ textAlign: 'center' }}>
-          <Typography variant="h4" fontWeight="bold" gutterBottom sx={{ fontSize: { xs: '1.2rem', sm: '2.125rem' } }}>
-            🎉 AI分析完了！適合企業を{companies.length}社に絞り込みました
+        {/*
+          「AI分析完了！」をやめた理由。
+          学生が知りたいのは「どこを受けるか」であって、AIが動いたことではない。
+          製品が自分の手柄を先に言うと、結果そのものが軽く見える。
+          見出しは何のリストなのかだけを述べる。
+        */}
+        <Box>
+          <Typography
+            component="h1"
+            sx={{
+              fontSize: { xs: 22, sm: 28 },
+              fontWeight: 700,
+              letterSpacing: '0.01em',
+              color: UI.ink,
+              mb: 0.5,
+            }}
+          >
+            あなたに近い{companies.length}社
           </Typography>
+          <Typography sx={{ fontSize: 15, color: UI.inkSoft, maxWidth: '62ch', lineHeight: 1.85, mb: 1.5 }}>
+            {isProvisional
+              ? 'ここまでの回答で並べています。会話を続けると根拠が増え、順番も変わります。'
+              : '回答の傾向と、企業が重視する人物像を突き合わせた順に並べています。'}
+          </Typography>
+          {/*
+            適合度の幅を一度だけ述べる。実測では候補が狭い帯に密集しており、
+            78 と 71 の差は見た目ほど大きくない。各行に目盛りを並べるより、
+            ここで一度「差は小さい」と言うほうが正直で、読む手間も少ない。
+          */}
+          {companies.length > 1 && band.max - band.min <= 15 && (
+            <Typography sx={{ fontSize: 14, color: UI.inkSoft, mb: 1.5 }}>
+              適合度は{band.min}〜{band.max}に収まっています。順位の差はわずかなので、
+              上から順に決める必要はありません。
+            </Typography>
+          )}
+          {/*
+            「暫定評価」のチップを外した。同じことを下の注意書きが書いており、
+            孤立したピルは色がついているだけで情報を足していなかった。
+          */}
           {isProvisional && (
             <Box sx={{ mb: 1.5 }}>
-              <Chip label="暫定評価" color="warning" variant="outlined" sx={{ mb: 1 }} />
-              <Alert severity="warning" sx={{ textAlign: 'left', maxWidth: 720, mx: 'auto' }}>
+              <Alert
+                severity="warning"
+                icon={false}
+                sx={{
+                  textAlign: 'left',
+                  maxWidth: '68ch',
+                  backgroundColor: 'transparent',
+                  border: `1px solid ${UI.flag}`,
+                  borderRadius: 0.5,
+                  color: UI.ink,
+                  py: 1.25,
+                }}
+              >
                 {diagnosisSummary ||
                   '回答の根拠がまだ薄いため、適合度は参考値です。選択肢に理由を添えると精度が上がります。'}
                 {(evaluatedCategories != null || minMatchedAxisCount != null || diagnosisConfidence != null) && (
@@ -167,11 +222,6 @@ export default function ResultsListView({
               </Alert>
             </Box>
           )}
-          <Typography variant="body1" color="text.secondary">
-            {isProvisional
-              ? '現時点の回答から仮マッチしています。会話を続けると根拠が厚くなります'
-              : 'AIによる詳細分析に基づいて、最適なIT企業をマッチングしました'}
-          </Typography>
         </Box>
       </Box>
 
@@ -180,7 +230,7 @@ export default function ResultsListView({
         flexGrow: 1,
         overflowY: 'auto',
         p: { xs: 2, sm: 4 },
-        backgroundColor: 'background.default',
+        backgroundColor: UI.paper,
       }}>
         <Box sx={{ maxWidth: 1200, mx: 'auto' }}>
           <AnalysisScoreCard
@@ -190,166 +240,150 @@ export default function ResultsListView({
             onRetryAnalysis={onRetryAnalysis}
           />
 
-          {/* 職種適性コメントセクション */}
+          {/*
+            緑の枠とピルと「→」をやめた。職種名は見出しの重さで足り、
+            矢印は役割の説明を箇条書きに見せていただけだった。
+          */}
           {(jobSuitabilityComment || suggestedRoles.length > 0) && (
-            <Card elevation={2} sx={{ mb: 3, border: '2px solid', borderColor: 'success.light', backgroundColor: '#f0faf0' }}>
-              <CardContent>
-                <Typography variant="h6" fontWeight="bold" gutterBottom>
-                  🎯 あなたに向いている職種
+            <Box sx={{ mb: 4 }}>
+              <Typography sx={{ fontSize: 17, fontWeight: 700, color: UI.ink, mb: 1 }}>
+                向いていそうな職種
+              </Typography>
+              {jobSuitabilityComment && (
+                <Typography sx={{ fontSize: 14.5, lineHeight: 1.9, color: UI.inkSoft, maxWidth: '64ch', mb: 1.5 }}>
+                  {jobSuitabilityComment}
                 </Typography>
-                {jobSuitabilityComment && (
-                  <Typography variant="body1" sx={{ mb: 2 }}>
-                    {jobSuitabilityComment}
-                  </Typography>
-                )}
-                {suggestedRoles.length > 0 && (
-                  <Stack spacing={1.5}>
-                    {suggestedRoles.map((role, i) => (
-                      <Box key={i} sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
-                        <Chip label={role.title} color="success" variant="filled" sx={{ fontWeight: 'bold', flexShrink: 0 }} />
-                        <Typography variant="body2" color="text.secondary" sx={{ pt: 0.5 }}>
-                          → {role.reason}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Stack>
-                )}
-              </CardContent>
-            </Card>
+              )}
+              <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, maxWidth: '72ch' }}>
+                {suggestedRoles.map((role, i) => (
+                  <Box
+                    component="li"
+                    key={i}
+                    sx={{
+                      py: 1.25,
+                      borderTop: i === 0 ? `1px solid ${UI.ruleSoft}` : 'none',
+                      borderBottom: `1px solid ${UI.ruleSoft}`,
+                    }}
+                  >
+                    <Typography sx={{ fontSize: 15, fontWeight: 700, color: UI.ink }}>
+                      {role.title}
+                    </Typography>
+                    {role.reason && (
+                      <Typography sx={{ fontSize: 14, lineHeight: 1.85, color: UI.inkSoft, mt: 0.25 }}>
+                        {role.reason}
+                      </Typography>
+                    )}
+                  </Box>
+                ))}
+              </Box>
+            </Box>
           )}
 
-          {/* おすすめの次のステップ サマリー */}
-          {companies.length > 0 && (
-            <Card elevation={1} sx={{ mb: 2, border: '1px solid', borderColor: 'primary.light', bgcolor: '#f8f4ff' }}>
-              <CardContent sx={{ py: 2 }}>
-                <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-                  おすすめの次のステップ
-                </Typography>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  <Chip
-                    label={`面接練習: ${companies[0].name}から始める`}
-                    color="primary"
-                    size="small"
-                    onClick={() => onNavigate(`/interview?${buildInterviewQuery(companies[0])}`)}
-                  />
-                  <Chip label="企業詳細を確認する" variant="outlined" size="small" onClick={() => onSelectCompany(companies[0])} />
-                  {companies.some((c) => !c.isFavorited) && (
-                    <Chip
-                      label="気になる企業をお気に入り登録"
-                      variant="outlined"
-                      size="small"
-                      color="error"
-                      onClick={(e) => {
-                        const target = companies.find((c) => !c.isFavorited && c.matchId)
-                        if (target) onToggleFavorite(e, target)
-                      }}
-                    />
-                  )}
-                </Stack>
-              </CardContent>
-            </Card>
-          )}
-
-          <Stack spacing={4}>
+          {/*
+            カードをやめて罫線区切りの一覧にしている。
+            学生の用途は「見比べて絞る」ことなので、1社ずつ箱に入れると
+            隣と比べにくく、どれも同じ重みに見える。
+          */}
+          <Box component="ol" sx={{ listStyle: 'none', m: 0, p: 0 }}>
             {companies.map((company, index) => (
-              <Card
+              <Box
+                component="li"
                 key={`${company.id}-${index}`}
-                elevation={0}
                 sx={{
-                  border: '2px solid',
-                  borderColor: 'divider',
-                  borderRadius: 3,
+                  borderTop: index === 0 ? `1px solid ${UI.rule}` : 'none',
+                  borderBottom: `1px solid ${UI.rule}`,
                   cursor: 'pointer',
-                  p: { xs: 0.5, sm: 1 },
-                  '&:hover': {
-                    borderColor: 'primary.main',
-                    boxShadow: 3,
-                  },
-                  '&:focus-visible': {
-                    outline: '3px solid',
-                    outlineColor: 'primary.main',
-                  },
+                  px: { xs: 2, sm: 3 },
+                  py: { xs: 2.5, sm: 3 },
+                  transition: 'background-color 120ms',
+                  '&:hover': { backgroundColor: 'rgba(255,255,255,0.55)' },
+                  '&:focus-visible': { outline: `3px solid ${UI.mark}`, outlineOffset: -3 },
                 }}
                 onClick={() => onSelectCompany(company)}
               >
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <Avatar sx={{ bgcolor: 'primary.main', width: 56, height: 56, fontWeight: 'bold' }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 2 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: { xs: 1.5, sm: 2.5 }, minWidth: 0 }}>
+                      {/* 順位。実際に序列があるので番号は情報として機能する */}
+                      <Typography
+                        aria-hidden
+                        sx={{
+                          fontSize: { xs: 20, sm: 26 },
+                          fontWeight: 700,
+                          color: UI.rule,
+                          fontVariantNumeric: 'tabular-nums',
+                          lineHeight: 1,
+                          minWidth: { xs: 24, sm: 34 },
+                        }}
+                      >
                         {index + 1}
-                      </Avatar>
-                      <Box>
-                        <Typography variant="h6" fontWeight="bold">
+                      </Typography>
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography sx={{ fontSize: { xs: 17, sm: 20 }, fontWeight: 700, color: UI.ink, lineHeight: 1.4 }}>
                           {company.name}
                         </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          {company.industry}
+                        <Typography sx={{ fontSize: 13, color: UI.inkSoft, mt: 0.25 }}>
+                          {[company.industry, company.location, company.employees].filter(Boolean).join('　')}
                         </Typography>
                       </Box>
                     </Box>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <Tooltip title={company.isFavorited ? 'お気に入り解除' : 'お気に入り登録'}>
-                          <IconButton
-                            size="small"
-                            onClick={(e) => onToggleFavorite(e, company)}
-                            disabled={favoritingId === company.matchId}
-                            sx={{ color: company.isFavorited ? 'error.main' : 'action.disabled' }}
-                          >
-                            {company.isFavorited ? <Favorite fontSize="small" /> : <FavoriteBorder fontSize="small" />}
-                          </IconButton>
-                        </Tooltip>
-                        <Typography variant="h4" color="primary.main" fontWeight="bold">
-                          {company.matchScore}
-                        </Typography>
-                      </Box>
-                      <Typography variant="caption" color="text.secondary">
-                        適合度
-                        {typeof company.matchedAxisCount === 'number'
-                          ? `（根拠軸 ${company.matchedAxisCount}）`
-                          : ''}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+                      <Tooltip title={company.isFavorited ? 'お気に入りから外す' : 'お気に入りに入れる'}>
+                        <IconButton
+                          size="small"
+                          onClick={(e) => onToggleFavorite(e, company)}
+                          disabled={favoritingId === company.matchId}
+                          sx={{ color: company.isFavorited ? UI.flag : UI.rule }}
+                        >
+                          {company.isFavorited ? <Favorite fontSize="small" /> : <FavoriteBorder fontSize="small" />}
+                        </IconButton>
+                      </Tooltip>
+                      <Typography sx={{
+                        fontSize: { xs: 22, sm: 26 }, fontWeight: 700, color: UI.ink,
+                        fontVariantNumeric: 'tabular-nums', lineHeight: 1,
+                      }}>
+                        {company.matchScore}
                       </Typography>
                     </Box>
                   </Box>
+                  {/*
+                    根拠軸数は全行に出さない。ほとんどの行が同じ値になるため、
+                    毎行に書くと読み飛ばされ、本当に薄い行も埋もれる。
+                    一覧の中で相対的に薄い行だけ印を出す。
+                  */}
+                  {typeof company.matchedAxisCount === 'number' &&
+                    company.matchedAxisCount < maxAxisCount && (
+                      <Typography sx={{ fontSize: 13, color: UI.flag, mt: 0.5 }}>
+                        根拠 {company.matchedAxisCount}軸（他の候補より少なめ）
+                      </Typography>
+                    )}
 
-                  <Typography variant="body2" sx={{ mb: 2 }}>
-                    {company.description}
+                  <Typography sx={{ fontSize: 15, lineHeight: 1.9, color: UI.ink, maxWidth: '68ch', mb: 2 }}>
+                    {leadSentences(company.description)}
                   </Typography>
 
-                  <Stack direction="row" spacing={2} sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <LocationOn fontSize="small" color="action" />
-                      <Typography variant="body2" color="text.secondary">
-                        {company.location}
-                      </Typography>
-                    </Box>
-                    {company.employees && (
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <People fontSize="small" color="action" />
-                        <Typography variant="body2" color="text.secondary">
-                          {company.employees}
-                        </Typography>
-                      </Box>
-                    )}
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <TrendingUpIcon fontSize="small" color="action" />
-                      <Typography variant="body2" color="text.secondary">
-                        {company.industry}
-                      </Typography>
-                    </Box>
-                  </Stack>
 
+                  {/*
+                    「技術スタック:」のラベルを外した。Go や AWS が並んでいれば
+                    それが何かは見れば分かる。ラベルは行数を増やすだけだった。
+                  */}
                   {company.techStack && company.techStack.length > 0 && (
-                    <Box sx={{ mb: 2 }}>
-                      <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
-                        技術スタック:
-                      </Typography>
-                      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                        {company.techStack.map((tech, i) => (
-                          <Chip key={i} label={tech} size="small" color="primary" variant="outlined" />
-                        ))}
-                      </Stack>
-                    </Box>
+                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
+                      {company.techStack.map((tech, i) => (
+                        <Box
+                          key={i}
+                          sx={{
+                            fontSize: 12.5,
+                            color: UI.inkSoft,
+                            border: `1px solid ${UI.ruleSoft}`,
+                            borderRadius: 0.5,
+                            px: 0.9,
+                            py: 0.2,
+                          }}
+                        >
+                          {tech}
+                        </Box>
+                      ))}
+                    </Stack>
                   )}
 
                   {company.tags && company.tags.length > 0 && (
@@ -360,27 +394,25 @@ export default function ResultsListView({
                     </Stack>
                   )}
 
+                  {/*
+                    3本の棒グラフをやめた。値が 97/95/77 のように軒並み高い側へ寄るため、
+                    棒はどれも満杯に見えて差を伝えない。どの軸が噛み合ったかだけを
+                    1行で書くほうが速く読める。
+                  */}
                   {company.categoryScores && (
-                    <Box sx={{ mt: 2 }}>
-                      <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
-                        カテゴリ別スコア（上位3項目）:
-                      </Typography>
-                      <Stack spacing={0.5}>
-                        {getTopCategoryScores(company.categoryScores, 3).map(({ label, score }) => (
-                          <Box key={label} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Typography variant="caption" sx={{ minWidth: 100, color: 'text.secondary' }}>{label}</Typography>
-                            <Box sx={{ flex: 1, bgcolor: 'grey.200', borderRadius: 1, height: 6, overflow: 'hidden' }}>
-                              <Box sx={{ width: `${Math.round(score)}%`, bgcolor: 'primary.main', height: '100%', borderRadius: 1 }} />
-                            </Box>
-                            <Typography variant="caption" sx={{ minWidth: 30, textAlign: 'right', fontWeight: 'bold', color: 'primary.main' }}>
-                              {Math.round(score)}
-                            </Typography>
-                          </Box>
-                        ))}
-                      </Stack>
-                    </Box>
+                    <Typography sx={{ fontSize: 13.5, color: UI.inkSoft, mb: 2 }}>
+                      噛み合った軸：
+                      {getTopCategoryScores(company.categoryScores, 3)
+                        .map(({ label, score }) => `${label} ${Math.round(score)}`)
+                        .join('　')}
+                    </Typography>
                   )}
 
+                  {/*
+                    4つのボタンが同じ重さで並んでいた。学生がこの行で次に取る行動は
+                    ほぼ「応募する」か「面接を練習する」で、残り2つは寄り道。
+                    主・副・副次の3段にして、迷う時間を減らす。
+                  */}
                   <Stack direction="row" spacing={1} sx={{ mt: 2, alignItems: 'center', flexWrap: 'wrap', gap: 1 }} useFlexGap>
                     <Button
                       variant="contained"
@@ -394,8 +426,9 @@ export default function ResultsListView({
                       この企業の面接を練習する
                     </Button>
                     <Button
-                      variant="outlined"
+                      variant="text"
                       size="small"
+                      sx={{ color: UI.inkSoft, fontWeight: 500 }}
                       onClick={(e) => {
                         e.stopPropagation()
                         onNavigate(`/correlation-diagram?company_id=${company.id}`)
@@ -404,9 +437,9 @@ export default function ResultsListView({
                       関連企業を見る
                     </Button>
                     <Button
-                      variant="outlined"
+                      variant="text"
                       size="small"
-                      color="success"
+                      sx={{ color: UI.inkSoft, fontWeight: 500 }}
                       onClick={(e) => {
                         e.stopPropagation()
                         onNavigate(`/es-rewrite?${buildEsRewriteQuery(company)}`)
@@ -427,14 +460,10 @@ export default function ResultsListView({
                         </Button>
                       </span>
                     </Tooltip>
-                    <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold' }}>
-                      クリックして詳細を見る →
-                    </Typography>
                   </Stack>
-                </CardContent>
-              </Card>
+              </Box>
             ))}
-          </Stack>
+          </Box>
 
           <Box sx={{ textAlign: 'center', mt: 4, mb: 4 }}>
             <Stack direction="row" spacing={2} justifyContent="center" flexWrap="wrap" useFlexGap>
