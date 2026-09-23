@@ -62,6 +62,10 @@ type Usage struct {
 	Characters     int // TTS の入力文字数(rune)。トークン課金でない経路の課金単位
 	LatencyMs      int
 	CacheHit       bool
+	// WebSearchCalls は web_search ツールの呼び出し回数。
+	// ツール料はトークン単価の表では表せないため、生の回数を残して
+	// 単価が変わっても後から再計算できるようにする（音声の秒数・文字数と同じ方針）。
+	WebSearchCalls int
 }
 
 // AudioUsage は音声経路（STT / TTS）1回ぶんの使用量（#1294）。
@@ -106,6 +110,10 @@ type usageReport struct {
 	latency          time.Duration
 	audioSeconds     float64
 	cacheHit         bool
+	// webSearchCalls は web_search ツールを使った回数(通常 0 か 1)。
+	// このツールはトークンとは別に1コール単位で課金されるため、
+	// トークンだけでは実費を再現できない(#1124)。
+	webSearchCalls int
 }
 
 // UsageHook はAPIコール成功時に呼ばれるコールバック。
@@ -173,6 +181,7 @@ func (cli *Client) reportUsage(ctx context.Context, r usageReport) {
 		AudioSeconds:     r.audioSeconds,
 		LatencyMs:        int(r.latency.Milliseconds()),
 		CacheHit:         r.cacheHit,
+		WebSearchCalls:   r.webSearchCalls,
 	})
 }
 

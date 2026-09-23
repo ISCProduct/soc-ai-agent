@@ -30,6 +30,8 @@ type CaseResult struct {
 	Error           string   `json:"error,omitempty"`
 	Transcript      string   `json:"transcript"`
 	TranscriptChars int      `json:"transcript_chars"`
+	Condition       string   `json:"condition"`
+	Source          string   `json:"source"`
 }
 
 // ModelSummary はモデル単位の集計。
@@ -44,6 +46,10 @@ type ModelSummary struct {
 	MeanLatencyMS    int64        `json:"mean_latency_ms"`
 	TotalAudioSec    float64      `json:"total_audio_sec"`
 	EstCostPerMinUSD float64      `json:"est_cost_per_min_usd"`
+	// 録音条件別・由来別の内訳（#1484）。合成だけの結果を全体平均に
+	// 埋もれさせないため、条件と由来で分けても見られるようにする。
+	ByCondition []GroupSummary `json:"by_condition"`
+	BySource    []GroupSummary `json:"by_source"`
 }
 
 // Report は比較全体の結果。
@@ -82,7 +88,7 @@ func RunModel(model string, cases []Case, audios []Audio) *ModelSummary {
 	for _, a := range audios {
 		c := byID[a.ID]
 		text, latency, err := transcribe(model, a)
-		r := CaseResult{ID: a.ID, DurationSec: a.DurationSec, LatencyMS: latency}
+		r := CaseResult{ID: a.ID, DurationSec: a.DurationSec, LatencyMS: latency, Condition: c.ConditionOf(), Source: c.SourceOf()}
 		if err != nil {
 			r.Error = err.Error()
 			r.Failed = true
@@ -125,6 +131,8 @@ func RunModel(model string, cases []Case, audios []Audio) *ModelSummary {
 	if numTotal > 0 {
 		s.NumberAccuracy = float64(numHit) / float64(numTotal)
 	}
+	s.ByCondition = Breakdown(s.Cases, func(r CaseResult) string { return r.Condition })
+	s.BySource = Breakdown(s.Cases, func(r CaseResult) string { return r.Source })
 	return s
 }
 

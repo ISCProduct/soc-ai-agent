@@ -35,6 +35,12 @@ type APICallLog struct {
 	LatencyMs int `gorm:"not null;default:0" json:"latency_ms"`
 	// キャッシュで外部呼び出しを回避した件数を数えるため。
 	CacheHit bool `gorm:"not null;default:0" json:"cache_hit"`
+	// web_search ツールの呼び出し回数。トークンとは別に1コール単位で課金される。
+	// 単価ではなく生の回数を残すのは AudioSeconds / Characters と同じ理由で、
+	// 価格改定が入っても後から再計算できるようにするため。
+	// これが無いと、同じ gpt-4o-mini でも通常のチャットと web_search を
+	// 区別できず、検索コストの85%を占めるツール料が記録から抜ける。
+	WebSearchCalls int `gorm:"not null;default:0" json:"web_search_calls"`
 	// 複合インデックス (called_at, provider) と (organization_id, called_at) は
 	// migrations/000031 で定義する。AutoMigrate は使わない方針のためタグには書かない。
 }
