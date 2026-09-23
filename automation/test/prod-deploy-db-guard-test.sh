@@ -47,6 +47,38 @@ else
   fi
 fi
 
+# 停止日のデプロイでは、新しいタスク定義が起動するかを一時起動して確認し、必ず0へ戻す。
+# 戻し忘れると非稼働日にFargateが動き続ける。
+UP=$(line_of "Start production services for verification")
+WAIT=$(line_of "Wait for services to stabilize")
+DOWN=$(line_of "Scale production services back to zero")
+
+if [ -z "$UP" ] || [ -z "$DOWN" ]; then
+  echo "FAIL 本番サービスの一時起動 / 0へ戻す ステップが揃っていない"
+  fail=$((fail + 1))
+else
+  if [ -n "$WAIT" ] && { [ "$UP" -ge "$WAIT" ] || [ "$DOWN" -le "$WAIT" ]; }; then
+    echo "FAIL 一時起動 → 安定待ち → 0へ戻す の順になっていない（up=${UP} wait=${WAIT} down=${DOWN}）"
+    fail=$((fail + 1))
+  fi
+  if [ -n "$STOP" ] && [ "$DOWN" -ge "$STOP" ]; then
+    echo "FAIL サービスを0へ戻すのはRDS停止より前にすること（down=${DOWN} stopRds=${STOP}）"
+    fail=$((fail + 1))
+  fi
+  # always() が無いと、安定待ちで落ちたときにタスクが起動したまま課金が続く。
+  if ! sed -n "${DOWN},$((DOWN + 3))p" "$WF" | grep -q "always()"; then
+    echo "FAIL 0へ戻すステップに always() が無い（失敗時に起動したまま残る）"
+    fail=$((fail + 1))
+  fi
+  if ! sed -n "${DOWN},$((DOWN + 3))p" "$WF" | grep -q "was_down == 'true'"; then
+    echo "FAIL 0へ戻すステップが was_down を見ていない（稼働日の本番を0にしうる）"
+    fail=$((fail + 1))
+  fi
+  if [ "$fail" -eq 0 ]; then
+    echo "ok   一時起動→安定待ち→0へ戻す→RDS停止 の順で、失敗時も0へ戻る"
+  fi
+fi
+
 echo
 if [ "$fail" -gt 0 ]; then echo "FAIL ($fail 件)"; exit 1; fi
 echo "PASS"

@@ -582,6 +582,22 @@ jobs:
       # ECSサービスは起動しない。desired=0 のままでもタスク定義の差し替えは反映され、
       # 稼働日にスケジューラが立ち上げた時点で新しい定義が使われる。ここでECSまで上げると
       # 毎時5分のスケジューラが desired=0 に戻すため、起動と停止の往復になる。
+      # 本番が停止状態(全サービス desired=0)だったかを先に記録する。
+      # 停止日にデプロイした場合だけ、検証のために一時起動して、終わったら0へ戻す。
+      - name: Record production service state
+        id: prod-svc
+        run: |
+          DESIRED_TOTAL=$(aws ecs describe-services --cluster "${PROJECT_NAME}" \
+            --services backend frontend rag-review \
+            --query 'sum(services[].desiredCount)' --output text 2>/dev/null || echo "0")
+          if [ "$DESIRED_TOTAL" = "0" ]; then
+            echo "本番は停止状態。デプロイ後に一時起動して確認する"
+            echo "was_down=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "本番は稼働中(desired合計=$DESIRED_TOTAL)。起動状態には触らない"
+            echo "was_down=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Start production RDS if stopped (for migration)
         if: steps.changes.outputs.backend == 'true'
         id: prod-db
@@ -707,6 +723,23 @@ jobs:
       # DISCORD_RELEASE_WEBHOOK_URL未設定でもデプロイ自体は失敗させない(automation/deploy-smoke/notify-discord.shと同じ方針)。
       # 直列に待つと 588s + 302s + 88s と積み上がるため、3サービスの安定待ちを並列化する。
       # 二重稼働は発生しない（デプロイ方式は従来どおり minimumHealthyPercent=0 のまま）。
+      # 停止日のデプロイでは、新しいタスク定義が実際に起動するかをここで確認する。
+      # 確認できないまま稼働日を迎えると、展示会当日に起動しないイメージが出てくる。
+      # 後段で必ず0へ戻すため、立ち上がっているのはこのジョブの間だけ。
+      - name: Start production services for verification
+        if: steps.prod-svc.outputs.was_down == 'true'
+        run: |
+          set -e
+          services=""
+          if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then services="$services backend"; fi
+          if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then services="$services frontend"; fi
+          if [ "${{ steps.changes.outputs.rag }}" = "true" ]; then services="$services rag-review"; fi
+          for svc in $services; do
+            aws ecs update-service --cluster "$PROJECT_NAME" --service "$svc" \
+              --desired-count 1 > /dev/null
+            echo "$svc を desired=1 で起動"
+          done
+
       - name: Wait for services to stabilize (parallel)
         run: |
           set -e
@@ -740,6 +773,22 @@ jobs:
 
       # merge commit 件名（Merge pull request #N）ではなく、マージPRのタイトル
       # （Release to production: ...）と本文の機能一覧を通知に使う。
+      # 確認が済んだ（または失敗した）ら必ず0へ戻す。always() が無いと、
+      # 安定待ちで落ちたときにタスクが起動したまま課金され続ける。
+      # prod-uptime-scheduler と重なると先に0へ戻される場合があるが、結果は同じ。
+      - name: Scale production services back to zero
+        if: always() && steps.prod-svc.outputs.was_down == 'true'
+        run: |
+          services=""
+          if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then services="$services backend"; fi
+          if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then services="$services frontend"; fi
+          if [ "${{ steps.changes.outputs.rag }}" = "true" ]; then services="$services rag-review"; fi
+          for svc in $services; do
+            aws ecs update-service --cluster "$PROJECT_NAME" --service "$svc" \
+              --desired-count 0 > /dev/null || true
+            echo "$svc を desired=0 へ戻した"
+          done
+
       # デプロイが終わったら、このデプロイが起動したRDSは停止へ戻す。
       # 停止するのは「このデプロイが stopped から起動した」場合だけで、かつ本番が稼働状態でない
       # (全サービス desired=0)ときに限る。稼働日にデプロイした本番は落とさない。
