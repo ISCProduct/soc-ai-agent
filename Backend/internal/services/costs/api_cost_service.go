@@ -56,6 +56,22 @@ func ttsCostPer1MCharsUSD() float64 {
 	return shared.GetFloatEnv("TTS_COST_PER_1M_CHARS_USD", 15.0)
 }
 
+// webSearchCostPerCallUSD は web_search ツール1コールあたりの料金。
+//
+// このツールはトークンとは別に1コール単位で課金される。単価表はトークンしか
+// 持っていなかったため、検索コストの大半が記録から抜けていた。実測では
+// 2026-08 の web_search 772 コールぶん、$7.72 が api_call_logs に現れていない。
+//
+// 検索1回の内訳は「ツール料 $0.010 + 固定8,000入力トークン」で、ツール料が
+// 85% を占める。ここが抜けていると、モデルを安くしても下がらないコストが
+// 見えず、削減の判断材料にならない。
+//
+// 既定値は 2026-09 時点の公開価格（$10 / 1,000 コール）。価格改定に備えて
+// 生の回数を api_call_logs.web_search_calls に残してあるので、後から再計算できる。
+func webSearchCostPerCallUSD() float64 {
+	return shared.GetFloatEnv("WEB_SEARCH_COST_PER_CALL_USD", 0.010)
+}
+
 // calculateAudioCost は音声経路のコストを返す。ローカル推論は 0。
 func calculateAudioCost(provider string, audioSeconds float64, characters int) float64 {
 	if provider != "" && !strings.EqualFold(provider, "openai") {
@@ -169,6 +185,24 @@ func NewAPICostService(repo *repositories.APICallLogRepository) *APICostService 
 	return &APICostService{repo: repo, alertThresholdUSD: threshold}
 }
 
+// usageCostUSD は1コールぶんの課金額を返す。
+//
+// トークン・音声・ツール料の3つを1か所にまとめる。以前はトークンだけを見ており、
+// web_search のツール料が丸ごと抜けていた。
+func usageCostUSD(u openaiPkg.Usage) float64 {
+	// 音声経路（STT/TTS）はトークンが返らない。秒数・文字数から計算する。
+	cost := calculateCost(u.Provider, u.Model, u.PromptTokens, u.CompletionTokens)
+	if u.AudioSeconds > 0 || u.Characters > 0 {
+		cost = calculateAudioCost(u.Provider, u.AudioSeconds, u.Characters)
+	}
+	// web_search はトークンとは別に1コール単位で課金される。
+	// ローカル推論(provider != openai)には存在しないので加算しない。
+	if u.WebSearchCalls > 0 && (u.Provider == "" || strings.EqualFold(u.Provider, "openai")) {
+		cost += float64(u.WebSearchCalls) * webSearchCostPerCallUSD()
+	}
+	return cost
+}
+
 // LogUsage は非同期でAPIコールログをDBに記録する。
 //
 // provider / via_fallback を残すのは、この表を「OpenAI への課金額」として
@@ -176,11 +210,7 @@ func NewAPICostService(repo *repositories.APICallLogRepository) *APICostService 
 // 集計するので、通常の OpenAI 利用（企業検索など）が保険の予算を食わない。
 func (s *APICostService) LogUsage(u openaiPkg.Usage) {
 	safego.Go(func() {
-		// 音声経路（STT/TTS）はトークンが返らない。秒数・文字数から計算する。
-		cost := calculateCost(u.Provider, u.Model, u.PromptTokens, u.CompletionTokens)
-		if u.AudioSeconds > 0 || u.Characters > 0 {
-			cost = calculateAudioCost(u.Provider, u.AudioSeconds, u.Characters)
-		}
+		cost := usageCostUSD(u)
 		entry := &models.APICallLog{
 			Model:            u.Model,
 			PromptTokens:     u.PromptTokens,
@@ -197,6 +227,7 @@ func (s *APICostService) LogUsage(u openaiPkg.Usage) {
 			OrganizationID: u.OrganizationID,
 			AudioSeconds:   u.AudioSeconds,
 			Characters:     u.Characters,
+			WebSearchCalls: u.WebSearchCalls,
 			LatencyMs:      u.LatencyMs,
 			CacheHit:       u.CacheHit,
 		}
