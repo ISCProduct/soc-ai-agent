@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -115,7 +116,12 @@ func (h *Handler) setProdOverride(ctx context.Context, interaction *Interaction)
 		return ephemeral("このコマンドを実行する権限がありません。")
 	}
 
-	state, err := ParseOverride(FindOptionString(interaction.Data.Options, OptionNameState))
+	// state は選択肢固定(on/off/auto)なので、復帰日は until で受けて結合する。
+	raw := FindOptionString(interaction.Data.Options, OptionNameState)
+	if until := strings.TrimSpace(FindOptionString(interaction.Data.Options, OptionNameUntil)); until != "" {
+		raw = strings.TrimSpace(raw) + ":" + until
+	}
+	state, err := ParseOverride(raw)
 	if err != nil {
 		return ephemeral(err.Error())
 	}
@@ -207,7 +213,8 @@ func (h *Handler) listDates(ctx context.Context) *InteractionResponse {
 	case overrideErr != nil:
 		log.Printf("[Discord] prod override get error: %v", overrideErr)
 		content += "\n⚠️ 現在の設定を取得できませんでした(固定中かどうか不明です)。"
-	case override != OverrideAuto:
+	case ResolveOverride(override, todayJST()) != OverrideAuto:
+		// 復帰日を過ぎた値は実際には効いていないので、警告を出さず auto として扱う。
 		content += "\n⚠️ 現在 /prod で「" + overrideLabel(override) + "」に固定されています(日付リストは無視されます)。"
 	default:
 		content += "\n現在の設定: 日付リストに従う(auto)"
@@ -322,14 +329,21 @@ func dateInputModal() *InteractionResponse {
 
 // overrideLabel は状態の表示名。
 func overrideLabel(state string) string {
-	switch state {
+	base, expiry, hasExpiry := strings.Cut(state, ":")
+	label := ""
+	switch base {
 	case OverrideOn:
-		return "常時起動"
+		label = "常時起動"
 	case OverrideOff:
-		return "常時停止"
+		label = "常時停止"
 	default:
 		return "日付リストに従う"
 	}
+	if hasExpiry {
+		// 期限を併記しないと、状態表示を見ても戻し忘れかどうか判断できない。
+		label += "（" + expiry + " に auto へ復帰）"
+	}
+	return label
 }
 
 // overrideAppliedMessage は設定した状態をそのまま読める文言にする。
