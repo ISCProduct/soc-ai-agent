@@ -636,21 +636,6 @@ jobs:
           fi
           echo "✓ Migration applied successfully"
 
-      # 起動したのがこのデプロイ自身で、かつ本番が稼働状態でない(全サービス desired=0)ときだけ停止へ戻す。
-      # 稼働日にデプロイした場合は止めない。マイグレーションが失敗しても課金を残さないため always()。
-      - name: Stop production RDS if this deploy started it
-        if: always() && steps.changes.outputs.backend == 'true' && steps.prod-db.outputs.started_by_deploy == 'true'
-        run: |
-          DESIRED_TOTAL=$(aws ecs describe-services --cluster "${PROJECT_NAME}" \
-            --services backend frontend rag-review \
-            --query 'sum(services[].desiredCount)' --output text 2>/dev/null || echo "0")
-          if [ "$DESIRED_TOTAL" != "0" ]; then
-            echo "本番が稼働中(desired合計=$DESIRED_TOTAL)のためRDSは停止しない"
-            exit 0
-          fi
-          aws rds stop-db-instance --db-instance-identifier "${PROJECT_NAME}-mysql" > /dev/null || true
-          echo "✓ RDSを停止状態へ戻した"
-
       - name: Deploy backend service
         if: steps.changes.outputs.backend == 'true'
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
@@ -755,6 +740,23 @@ jobs:
 
       # merge commit 件名（Merge pull request #N）ではなく、マージPRのタイトル
       # （Release to production: ...）と本文の機能一覧を通知に使う。
+      # デプロイが終わったら、このデプロイが起動したRDSは停止へ戻す。
+      # 停止するのは「このデプロイが stopped から起動した」場合だけで、かつ本番が稼働状態でない
+      # (全サービス desired=0)ときに限る。稼働日にデプロイした本番は落とさない。
+      # 途中で失敗しても課金を残さないため always()。
+      - name: Stop production RDS if this deploy started it
+        if: always() && steps.changes.outputs.backend == 'true' && steps.prod-db.outputs.started_by_deploy == 'true'
+        run: |
+          DESIRED_TOTAL=$(aws ecs describe-services --cluster "${PROJECT_NAME}" \
+            --services backend frontend rag-review \
+            --query 'sum(services[].desiredCount)' --output text 2>/dev/null || echo "0")
+          if [ "$DESIRED_TOTAL" != "0" ]; then
+            echo "本番が稼働中(desired合計=$DESIRED_TOTAL)のためRDSは停止しない"
+            exit 0
+          fi
+          aws rds stop-db-instance --db-instance-identifier "${PROJECT_NAME}-mysql" > /dev/null || true
+          echo "✓ RDSを停止状態へ戻した"
+
       - name: Notify Discord release
         env:
           DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
