@@ -36,9 +36,29 @@ elif [ -n "$MIGRATE" ] && [ "$STOP" -le "$MIGRATE" ]; then
   fail=$((fail + 1))
 else
   echo "ok   起動したRDSを停止へ戻すステップがある（${STOP}）"
+  # 停止ステップ本体（次のステップ行まで）を切り出して検査する。
+  STOP_END=$(awk -v s="$STOP" 'NR > s && /^      - name: /{print NR; exit}' "$WF")
+  [ -n "$STOP_END" ] || STOP_END=$((STOP + 40))
+  STOP_BODY=$(sed -n "${STOP},${STOP_END}p" "$WF")
+
   # 稼働中の本番を止めないためのガード。条件が消えると展示会当日にDBを落とす。
-  if ! sed -n "${STOP},$((STOP + 12))p" "$WF" | grep -q "desiredCount"; then
+  if ! grep -q "desiredCount" <<< "$STOP_BODY"; then
     echo "FAIL 停止ステップに desiredCount の確認が無い（稼働中の本番を止めうる）"
+    fail=$((fail + 1))
+  fi
+  # 状態を取得できないまま停止すると、稼働中のDBを落としうる（取得失敗は停止しない）。
+  if ! grep -q "ECSサービスの状態を取得できないためRDSは停止しない" <<< "$STOP_BODY"; then
+    echo "FAIL describe-services の失敗時に停止を中止していない"
+    fail=$((fail + 1))
+  fi
+  # 実行中のマイグレーションからDB接続を切ると dirty なマイグレーションが残る。
+  if ! grep -q "lastStatus" <<< "$STOP_BODY"; then
+    echo "FAIL マイグレーションタスクの停止確認が無い（DDL実行中にDBを落としうる）"
+    fail=$((fail + 1))
+  fi
+  # 停止失敗を握りつぶすと、非稼働日にRDSが起動したまま残っても気づけない。
+  if grep -q "stop-db-instance .*|| true" <<< "$STOP_BODY"; then
+    echo "FAIL stop-db-instance の失敗を握りつぶしている"
     fail=$((fail + 1))
   fi
   if ! sed -n "${STOP},$((STOP + 3))p" "$WF" | grep -q "started_by_deploy == 'true'"; then
