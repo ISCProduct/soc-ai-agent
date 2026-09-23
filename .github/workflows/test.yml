@@ -119,6 +119,11 @@ jobs:
 
       # Dependabot のPRで必ず失敗するワークフローが無いこと。
       # Dependabot 起因の実行には通常の secrets が渡らない（GitHubの仕様）。
+      # 本番は通常日はRDSが停止している。ガードが外れると main へのマージが
+      # マイグレーションで必ず失敗する（#1488 で実際に発生）。
+      - name: 本番デプロイのRDSガード検査
+        run: ./automation/test/prod-deploy-db-guard-test.sh
+
       - name: Dependabot 互換性の検査
         run: ./automation/test/dependabot-workflow-test.sh
 

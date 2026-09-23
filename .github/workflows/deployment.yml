@@ -576,6 +576,42 @@ jobs:
             --query 'taskDefinition.taskDefinitionArn' --output text)
           echo "task_def_arn=$TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
 
+      # 本番は「指定日のみ終日起動」ポリシー(prod-uptime-scheduler)のため、通常日はRDSが停止している。
+      # 停止中はマイグレーションがDBへ到達できず必ず失敗する(実際に #1488 のデプロイが
+      # "no route to host" で落ちた)ので、この工程だけ一時的にRDSを起動する。
+      # ECSサービスは起動しない。desired=0 のままでもタスク定義の差し替えは反映され、
+      # 稼働日にスケジューラが立ち上げた時点で新しい定義が使われる。ここでECSまで上げると
+      # 毎時5分のスケジューラが desired=0 に戻すため、起動と停止の往復になる。
+      - name: Start production RDS if stopped (for migration)
+        if: steps.changes.outputs.backend == 'true'
+        id: prod-db
+        run: |
+          DB_ID="${PROJECT_NAME}-mysql"
+          started=false
+          # stopping(数分) -> stopped -> start -> starting -> available で最大10分程度かかる。
+          for i in $(seq 1 40); do
+            STATUS=$(aws rds describe-db-instances --db-instance-identifier "$DB_ID" \
+              --query 'DBInstances[0].DBInstanceStatus' --output text)
+            if [ "$STATUS" = "available" ]; then
+              echo "RDS available (started_by_deploy=$started)"
+              if [ "$started" = "false" ]; then echo "started_by_deploy=false" >> "$GITHUB_OUTPUT"; fi
+              exit 0
+            fi
+            # 起動をこのデプロイが行った場合だけ、後段で停止へ戻す。
+            # starting(= スケジューラ等が起動中)のときは started のままにして触らない。
+            # available を待てずにタイムアウトしても起動しっぱなしにしないよう、
+            # start を打った時点で出力しておく。
+            if [ "$STATUS" = "stopped" ] && [ "$started" = "false" ]; then
+              aws rds start-db-instance --db-instance-identifier "$DB_ID" > /dev/null || true
+              started=true
+              echo "started_by_deploy=true" >> "$GITHUB_OUTPUT"
+            fi
+            echo "RDS status: $STATUS (waiting...)"
+            sleep 30
+          done
+          echo "RDS did not become available in time" >&2
+          exit 1
+
       - name: Run DB migration (production)
         if: steps.changes.outputs.backend == 'true'
         run: |
@@ -599,6 +635,21 @@ jobs:
             exit 1
           fi
           echo "✓ Migration applied successfully"
+
+      # 起動したのがこのデプロイ自身で、かつ本番が稼働状態でない(全サービス desired=0)ときだけ停止へ戻す。
+      # 稼働日にデプロイした場合は止めない。マイグレーションが失敗しても課金を残さないため always()。
+      - name: Stop production RDS if this deploy started it
+        if: always() && steps.changes.outputs.backend == 'true' && steps.prod-db.outputs.started_by_deploy == 'true'
+        run: |
+          DESIRED_TOTAL=$(aws ecs describe-services --cluster "${PROJECT_NAME}" \
+            --services backend frontend rag-review \
+            --query 'sum(services[].desiredCount)' --output text 2>/dev/null || echo "0")
+          if [ "$DESIRED_TOTAL" != "0" ]; then
+            echo "本番が稼働中(desired合計=$DESIRED_TOTAL)のためRDSは停止しない"
+            exit 0
+          fi
+          aws rds stop-db-instance --db-instance-identifier "${PROJECT_NAME}-mysql" > /dev/null || true
+          echo "✓ RDSを停止状態へ戻した"
 
       - name: Deploy backend service
         if: steps.changes.outputs.backend == 'true'
