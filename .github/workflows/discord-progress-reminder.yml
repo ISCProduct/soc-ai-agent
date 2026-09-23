@@ -1,0 +1,49 @@
+name: Discord Progress Reminder
+
+on:
+  schedule:
+    # 毎週日曜日18:00 JST = 日曜日09:00 UTC
+    - cron: '0 9 * * 0'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '送信せずに通知文とテストを確認する'
+        type: boolean
+        default: true
+  pull_request:
+    branches:
+      - develop
+      - release
+      - main
+    paths:
+      - '.github/workflows/discord-progress-reminder.yml'
+      - 'automation/discord/notify_progress.py'
+      - 'automation/discord/notify_progress_test.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: discord-progress-reminder-${{ github.event_name }}-${{ github.ref }}
+  # 送信ジョブは途中キャンセルしない。PRのテスト実行だけはキャンセルしてよい。
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  reminder:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Test reminder
+        run: python3 -m unittest discover -s automation/discord -p 'notify_progress_test.py' -v
+      - name: Preview message
+        run: python3 automation/discord/notify_progress.py --dry-run
+      - name: Send reminder
+        # Dependabot の実行には secrets が渡らないため除外する
+        # （automation/test/dependabot-workflow-test.sh で規約化）
+        if: github.actor != 'dependabot[bot]' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
+        env:
+          DISCORD_PROGRESS_WEBHOOK_URL: ${{ secrets.DISCORD_PROGRESS_WEBHOOK_URL }}
+        run: python3 automation/discord/notify_progress.py

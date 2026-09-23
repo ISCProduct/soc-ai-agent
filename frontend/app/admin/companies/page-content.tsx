@@ -30,6 +30,7 @@ import {
   ListItemIcon,
   ListItemText,
 } from '@mui/material'
+import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin/fetch'
 import { approvalChipState, canToggleApproval } from '@/lib/admin/company-approval'
 import SearchIcon from '@mui/icons-material/Search'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -333,19 +334,20 @@ export default function PageContent() {
     const load = async () => {
       setApprovalError('')
       try {
-        const res = await fetch(`/api/admin/schools/${schoolId}/company-approvals`, {
-          headers: authService.getAdminFetchHeaders(),
-          cache: 'no-store',
-        })
-        // r.ok を見ないと、500 が HTML を返したときに .json() が例外になり
-        // 空集合のまま「全件未承認」に見える。
-        if (!res.ok) throw new Error(`status ${res.status}`)
-        const data = await res.json()
+        // adminFetchJson は非2xx・タイムアウト・ALB の HTML エラーページを
+        // すべて日本語メッセージ付きの例外へ正規化する(#1066)。素の fetch だと
+        // 500 が HTML を返したとき .json() が例外になり、空集合のまま
+        // 「全件未承認」に見えてしまう。
+        const data = await adminFetchJson<{ company_ids?: number[] }>(
+          `/api/admin/schools/${schoolId}/company-approvals`,
+          { headers: authService.getAdminFetchHeaders(), cache: 'no-store' },
+          '承認状態の取得に失敗しました',
+        )
         if (!cancelled) setApprovedCompanyIds(new Set<number>(data?.company_ids || []))
-      } catch {
+      } catch (e) {
         if (cancelled) return
         setApprovedCompanyIds(null)
-        setApprovalError('この学校の承認状態を取得できませんでした。承認の表示と操作は一時的に使えません。')
+        setApprovalError(toAdminErrorMessage(e))
       }
     }
     void load()
@@ -358,24 +360,25 @@ export default function PageContent() {
     setApprovalBusyId(companyId)
     setApprovalError('')
     try {
-      const res = await fetch(`/api/admin/schools/${schoolId}/company-approvals${approved ? `/${companyId}` : ''}`, {
-        method: approved ? 'DELETE' : 'POST',
-        headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
-        body: approved ? undefined : JSON.stringify({ company_id: companyId }),
-      })
-      if (!res.ok) {
-        // 無言で返すと、押しても反応しないチップを何度も押すことになる(#1452)。
-        setApprovalError(approved ? '承認の解除に失敗しました。' : '承認に失敗しました。')
-        return
-      }
+      await adminFetchJson(
+        `/api/admin/schools/${schoolId}/company-approvals${approved ? `/${companyId}` : ''}`,
+        {
+          method: approved ? 'DELETE' : 'POST',
+          headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
+          body: approved ? undefined : JSON.stringify({ company_id: companyId }),
+        },
+        approved ? '承認の解除に失敗しました' : '承認に失敗しました',
+      )
       setApprovedCompanyIds((prev) => {
         const next = new Set(prev ?? [])
         if (approved) next.delete(companyId)
         else next.add(companyId)
         return next
       })
-    } catch {
-      setApprovalError('通信に失敗しました。時間をおいて再度お試しください。')
+    } catch (e) {
+      // 無言で返すと、押しても反応しないチップを何度も押すことになる(#1452)。
+      // 成功していないので approvedCompanyIds は変えない。
+      setApprovalError(toAdminErrorMessage(e))
     } finally {
       setApprovalBusyId(null)
     }
