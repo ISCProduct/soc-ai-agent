@@ -31,6 +31,9 @@ const (
 
 var dateOnlyPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
+// dateLayout は日付リストと復帰日で共通の書式。JST の暦日で扱う。
+const dateLayout = "2006-01-02"
+
 // UptimeService は本番の「指定日終日起動」日付リストをSSM Parameter Storeで管理する。
 // #881台のインフラ方針(docs/architecture/infra-decision-oci-stg-aws-prod.md)の
 // 「指定日リスト」をSSM Parameterに持つ実装。
@@ -75,18 +78,64 @@ func NewUptimeServiceFromEnv(ctx context.Context) (*UptimeService, error) {
 	}, nil
 }
 
-// ParseOverride は on / off / auto のみ受理する（大文字小文字と前後空白は無視）。
+// ParseOverride は on / off / auto と、復帰日付き(on:YYYY-MM-DD / off:YYYY-MM-DD)を
+// 受理する（大文字小文字と前後空白は無視）。
+//
+// 復帰日は「この日(JST)になったら auto へ戻す」という意味。期限の無い off は
+// 戻し忘れると起動日が丸ごと潰れる。実際 2026-09-12 に設定された off が放置され、
+// 9/24 の起動日を潰しかけたうえ、本番デプロイのマイグレーションが3回失敗していた。
+//
+//	off:2026-09-24  -> 9/23 までは停止、9/24 になったら日付リストに従う
 func ParseOverride(raw string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case OverrideOn:
-		return OverrideOn, nil
-	case OverrideOff:
-		return OverrideOff, nil
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	state, expiry, hasExpiry := strings.Cut(normalized, ":")
+
+	switch state {
+	case OverrideOn, OverrideOff:
 	case OverrideAuto, "":
+		if hasExpiry {
+			// auto は既定状態なので、そこへ戻す日付を指定しても意味が無い。
+			// 受理すると「設定したのに何も変わらない」誤解を生む。
+			return "", fmt.Errorf("auto に復帰日は指定できません（on:YYYY-MM-DD / off:YYYY-MM-DD の形で指定してください）")
+		}
 		return OverrideAuto, nil
 	default:
 		return "", fmt.Errorf("状態は on / off / auto のいずれかを指定してください")
 	}
+
+	if !hasExpiry {
+		return state, nil
+	}
+	if !dateOnlyPattern.MatchString(expiry) {
+		return "", fmt.Errorf("復帰日は YYYY-MM-DD の形式で指定してください（例: %s:2026-09-24）", state)
+	}
+	if _, err := time.Parse(dateLayout, expiry); err != nil {
+		return "", fmt.Errorf("復帰日が実在しない日付です: %s", expiry)
+	}
+	return state + ":" + expiry, nil
+}
+
+// ResolveOverride は保存値と今日の日付(JST)から、実際に効かせる状態を返す。
+//
+// 復帰日に達していれば auto を返す。判定は prod-uptime-scheduler.yml 側にも
+// 同じものがある（あちらが desired_count を決める最終地点のため）。
+// YYYY-MM-DD の辞書順比較で日付順と一致するので、両方とも文字列比較で揃えている。
+func ResolveOverride(raw, todayJST string) string {
+	state, expiry, hasExpiry := strings.Cut(strings.ToLower(strings.TrimSpace(raw)), ":")
+	if state != OverrideOn && state != OverrideOff {
+		return OverrideAuto
+	}
+	if !hasExpiry {
+		return state
+	}
+	if !dateOnlyPattern.MatchString(expiry) {
+		// 壊れた値で本番を起動しっぱなしにする/落とすより、日付リストに従う方が安全。
+		return OverrideAuto
+	}
+	if todayJST >= expiry {
+		return OverrideAuto
+	}
+	return state
 }
 
 // GetOverride は現在の手動オーバーライドを返す。未設定なら auto。
@@ -132,7 +181,7 @@ func ParseDate(raw string) (string, error) {
 	if !dateOnlyPattern.MatchString(trimmed) {
 		return "", fmt.Errorf("日付はYYYY-MM-DD形式で入力してください（例: 2026-09-01）")
 	}
-	if _, err := time.Parse("2006-01-02", trimmed); err != nil {
+	if _, err := time.Parse(dateLayout, trimmed); err != nil {
 		return "", fmt.Errorf("存在しない日付です: %s", trimmed)
 	}
 	return trimmed, nil
@@ -140,7 +189,7 @@ func ParseDate(raw string) (string, error) {
 
 // AddDate は指定日をリストへ追加する（べき等）。過去日は追加を拒否する。
 func (s *UptimeService) AddDate(ctx context.Context, date string) ([]string, error) {
-	today := time.Now().In(jst()).Format("2006-01-02")
+	today := time.Now().In(jst()).Format(dateLayout)
 	if date < today {
 		return nil, fmt.Errorf("過去の日付は指定できません（今日: %s）", today)
 	}
@@ -200,6 +249,12 @@ func (s *UptimeService) listDates(ctx context.Context) ([]string, error) {
 		}
 	}
 	return dates, nil
+}
+
+// todayJST は JST の今日の日付を YYYY-MM-DD で返す。
+// 日付リストと復帰日の判定はどちらも JST の暦日で行う。
+func todayJST() string {
+	return time.Now().In(jst()).Format(dateLayout)
 }
 
 func jst() *time.Location {

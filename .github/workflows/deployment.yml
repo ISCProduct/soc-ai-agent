@@ -440,6 +440,10 @@ jobs:
     name: Deploy to production
     runs-on: ubuntu-latest
     environment: production
+    # checkout と Notify Discord release の gh pr 参照に必要な分だけ与える。
+    permissions:
+      contents: read
+      pull-requests: read
     concurrency:
       group: deploy-production
       cancel-in-progress: false
@@ -576,8 +580,72 @@ jobs:
             --query 'taskDefinition.taskDefinitionArn' --output text)
           echo "task_def_arn=$TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
 
+      # 本番は「指定日のみ終日起動」ポリシー(prod-uptime-scheduler)のため、通常日はRDSが停止している。
+      # 停止中はマイグレーションがDBへ到達できず必ず失敗する(実際に #1488 のデプロイが
+      # "no route to host" で落ちた)ので、この工程だけ一時的にRDSを起動する。
+      # ECSサービスは起動しない。desired=0 のままでもタスク定義の差し替えは反映され、
+      # 稼働日にスケジューラが立ち上げた時点で新しい定義が使われる。ここでECSまで上げると
+      # 毎時5分のスケジューラが desired=0 に戻すため、起動と停止の往復になる。
+      # ponytail: prod-uptime-scheduler との排他は未実装。毎時5分の実行と重なると
+      # マイグレーション中にRDSを停止されうる（その場合はデプロイが失敗するので再実行する）。
+      # 起動待ちループは stopped を見るたびに start を打ち直すため、起動段階では自己修復する。
+      # 実運用で再実行が続くようなら、SSM にメンテナンスフラグを置いて相互に見る形へ上げる。
+      # 本番が停止状態(全サービス desired=0)だったかを先に記録する。
+      # 停止日にデプロイした場合だけ、検証のために一時起動して、終わったら0へ戻す。
+      - name: Record production service state
+        id: prod-svc
+        run: |
+          DESIRED_TOTAL=$(aws ecs describe-services --cluster "${PROJECT_NAME}" \
+            --services chroma rag-review backend frontend \
+            --query 'sum(services[].desiredCount)' --output text 2>/dev/null || echo "0")
+          if [ "$DESIRED_TOTAL" = "0" ]; then
+            echo "本番は停止状態。デプロイ後に一時起動して確認する"
+            echo "was_down=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "本番は稼働中(desired合計=$DESIRED_TOTAL)。起動状態には触らない"
+            echo "was_down=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Start production RDS if stopped (for migration)
+        if: steps.changes.outputs.backend == 'true'
+        id: prod-db
+        run: |
+          DB_ID="${PROJECT_NAME}-mysql"
+          started=false
+          # stopping(数分) -> stopped -> start -> starting -> available で最大10分程度かかる。
+          for _ in $(seq 1 40); do
+            STATUS=$(aws rds describe-db-instances --db-instance-identifier "$DB_ID" \
+              --query 'DBInstances[0].DBInstanceStatus' --output text)
+            if [ "$STATUS" = "available" ]; then
+              echo "RDS available (started_by_deploy=$started)"
+              if [ "$started" = "false" ]; then echo "started_by_deploy=false" >> "$GITHUB_OUTPUT"; fi
+              exit 0
+            fi
+            # stopped を見るたびに start を打ち直す。prod-uptime-scheduler が
+            # 毎時5分に desired=0 を見て停止しうるため、1回きりだと再起動されず
+            # このループがタイムアウトする。start が成功したときだけ所有フラグを立て、
+            # スロットリング等で失敗した回は false のままにして次のループで再試行する。
+            if [ "$STATUS" = "stopped" ]; then
+              if aws rds start-db-instance --db-instance-identifier "$DB_ID" > /dev/null; then
+                if [ "$started" = "false" ]; then
+                  started=true
+                  # available を待てずタイムアウトしても起動しっぱなしにしないよう、
+                  # ここで出力しておく（後段の停止ステップが拾う）。
+                  echo "started_by_deploy=true" >> "$GITHUB_OUTPUT"
+                fi
+              else
+                echo "start-db-instance に失敗。次のループで再試行する" >&2
+              fi
+            fi
+            echo "RDS status: $STATUS (waiting...)"
+            sleep 30
+          done
+          echo "RDS did not become available in time" >&2
+          exit 1
+
       - name: Run DB migration (production)
         if: steps.changes.outputs.backend == 'true'
+        id: migrate
         run: |
           NETWORK_CONFIG=$(aws ecs describe-services --cluster "${PROJECT_NAME}" --services backend \
             --query 'services[0].networkConfiguration' --output json)
@@ -589,6 +657,8 @@ jobs:
             --overrides '{"containerOverrides":[{"name":"soc-backend","command":["/bin/migrate","up"]}]}' \
             --query 'tasks[0].taskArn' --output text)
           echo "Migration task: $TASK_ARN"
+          # 後段のRDS停止が「タスクが本当に止まったか」を確認できるようにARNを残す。
+          echo "task_arn=$TASK_ARN" >> "$GITHUB_OUTPUT"
           aws ecs wait tasks-stopped --cluster "${PROJECT_NAME}" --tasks "$TASK_ARN"
           EXIT_CODE=$(aws ecs describe-tasks --cluster "${PROJECT_NAME}" --tasks "$TASK_ARN" \
             --query 'tasks[0].containers[0].exitCode' --output text)
@@ -671,6 +741,16 @@ jobs:
       # DISCORD_RELEASE_WEBHOOK_URL未設定でもデプロイ自体は失敗させない(automation/deploy-smoke/notify-discord.shと同じ方針)。
       # 直列に待つと 588s + 302s + 88s と積み上がるため、3サービスの安定待ちを並列化する。
       # 二重稼働は発生しない（デプロイ方式は従来どおり minimumHealthyPercent=0 のまま）。
+      # 停止日のデプロイでは、新しいタスク定義が実際に起動するかをここで確認する。
+      # 確認できないまま稼働日を迎えると、展示会当日に起動しないイメージが出てくる。
+      # 後段で必ず0へ戻すため、立ち上がっているのはこのジョブの間だけ。
+      # 変更のあったサービスだけを起動しても確認にならない。rag-review は chroma が居ないと
+      # ヘルスチェックが503を返し、backend も RAG を同期で呼ぶ。本番と同じ組み合わせで起動する。
+      # desired と min_capacity を揃えるのも必須（揃えないとターゲット追跡が0へ縮退する）。
+      - name: Start production services for verification
+        if: steps.prod-svc.outputs.was_down == 'true'
+        run: ./automation/ops/prod-scale.sh 1
+
       - name: Wait for services to stabilize (parallel)
         run: |
           set -e
@@ -704,6 +784,49 @@ jobs:
 
       # merge commit 件名（Merge pull request #N）ではなく、マージPRのタイトル
       # （Release to production: ...）と本文の機能一覧を通知に使う。
+      # 確認が済んだ（または失敗した）ら必ず0へ戻す。always() が無いと、
+      # 安定待ちで落ちたときにタスクが起動したまま課金され続ける。
+      # prod-uptime-scheduler と重なると先に0へ戻される場合があるが、結果は同じ。
+      - name: Scale production services back to zero
+        if: always() && steps.prod-svc.outputs.was_down == 'true'
+        run: ./automation/ops/prod-scale.sh 0
+
+      # デプロイが終わったら、このデプロイが起動したRDSは停止へ戻す。
+      # 停止するのは「このデプロイが stopped から起動した」場合だけで、かつ本番が稼働状態でない
+      # (全サービス desired=0)ときに限る。稼働日にデプロイした本番は落とさない。
+      # 途中で失敗しても課金を残さないため always()。
+      - name: Stop production RDS if this deploy started it
+        if: always() && steps.changes.outputs.backend == 'true' && steps.prod-db.outputs.started_by_deploy == 'true'
+        run: |
+          set -uo pipefail
+          # マイグレーションのワンオフタスクがまだ動いている状態でDBを落とすと、
+          # 実行中のDDLが切れて dirty なマイグレーションが残る。
+          # wait が一時障害で失敗した場合に備え、STOPPED を確認できたときだけ進む。
+          TASK_ARN="${{ steps.migrate.outputs.task_arn }}"
+          if [ -n "$TASK_ARN" ]; then
+            TASK_STATUS=$(aws ecs describe-tasks --cluster "${PROJECT_NAME}" --tasks "$TASK_ARN" \
+              --query 'tasks[0].lastStatus' --output text 2>/dev/null || echo "UNKNOWN")
+            if [ "$TASK_STATUS" != "STOPPED" ]; then
+              echo "マイグレーションタスクが $TASK_STATUS のためRDSは停止しない。" >&2
+              echo "稼働日でなければ prod-uptime-scheduler が次の毎時実行で停止する。" >&2
+              exit 1
+            fi
+          fi
+          # 取得できないまま「停止中」とみなすと、稼働中の本番DBを落としうる。安全側に倒す。
+          if ! DESIRED_TOTAL=$(aws ecs describe-services --cluster "${PROJECT_NAME}" \
+            --services chroma rag-review backend frontend \
+            --query 'sum(services[].desiredCount)' --output text); then
+            echo "ECSサービスの状態を取得できないためRDSは停止しない" >&2
+            exit 1
+          fi
+          if [ "$DESIRED_TOTAL" != "0" ]; then
+            echo "本番が稼働中(desired合計=$DESIRED_TOTAL)のためRDSは停止しない"
+            exit 0
+          fi
+          # 停止できなかったことを運用者が検知できるよう、失敗はステップの失敗にする。
+          aws rds stop-db-instance --db-instance-identifier "${PROJECT_NAME}-mysql" > /dev/null
+          echo "✓ RDSを停止状態へ戻した"
+
       - name: Notify Discord release
         env:
           DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
