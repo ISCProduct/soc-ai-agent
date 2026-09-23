@@ -9,6 +9,8 @@ Discordのスラッシュコマンドから本番環境(AWS ECS Fargate + RDS)�
 | `/prod state:on` | **今すぐ起動**し、以後も起動し続ける | `DISCORD_ALLOWED_ROLE_ID` のロール保有者のみ |
 | `/prod state:off` | **今すぐ停止**し、以後も停止し続ける | 同上 |
 | `/prod state:auto` | 日付リストに従う状態へ戻す(既定) | 同上 |
+| `/prod state:off until:2026-09-24` | **復帰日つき**。9/23 までは停止し、9/24 になったら `auto` へ自動復帰 | 同上 |
+| `/prod state:on until:2026-09-24` | 同上の起動版。9/23 までは起動し続け、9/24 に `auto` へ戻る | 同上 |
 | `/prod-uptime` | 終日起動する日付を追加(モーダル入力) | 同上 |
 | `/prod-uptime-list` | 起動予定日と現在の設定を表示 | 制限なし(誰でも閲覧可) |
 | `/staging state:on` | ステージングを**起動** | `DISCORD_ALLOWED_ROLE_ID` のロール保有者のみ |
@@ -20,7 +22,7 @@ Discordのスラッシュコマンドから本番環境(AWS ECS Fargate + RDS)�
 
 | パラメータ | 値 | 意味 |
 |---|---|---|
-| `/soc-app/prod-uptime-override` | `on` / `off` / `auto` | 手動オーバーライド。**日付リストより優先** |
+| `/soc-app/prod-uptime-override` | `on` / `off` / `auto` / `on:YYYY-MM-DD` / `off:YYYY-MM-DD` | 手動オーバーライド。**日付リストより優先**。日付は「その日(JST)に `auto` へ戻す」復帰日 |
 | `/soc-app/prod-uptime-dates` | `2026-09-01,2026-09-02` | 終日起動する日付(JST、カンマ区切り) |
 
 ```
@@ -436,3 +438,48 @@ GitHub Actions側（`prod-uptime-scheduler.yml`）は既存の `AWS_ACCESS_KEY_I
 `prod-uptime-scheduler.yml` から判定部分を抜き出して実行する（CIの `Workflow Scripts`
 ジョブで実行）。判定を間違えると展示会当日に本番が落ちたまま、または止めたはずの本番が
 課金され続けるため、ワークフローを直したらこのテストも確認すること。
+
+## 復帰日つきオーバーライド
+
+`on` / `off` は指定した状態に固定し続ける。戻し忘れると、起動日が丸ごと潰れるか、
+逆に課金が続く。
+
+実際に 2026-09-12 に設定された `off` が 9/23 まで放置され、9/24 の起動日を
+潰しかけた。その間、本番デプロイのマイグレーションが 3 回失敗していた
+（`connection timed out` / `no route to host`）。本番が停止していると DB へ
+到達できないため、起動日以外の `main` への push は必ずここで落ちる。
+
+`off:2026-09-24` のように復帰日を付けると、**その日(JST)になった時点で
+`auto` へ戻る**。戻す操作を忘れても事故にならない。
+
+```
+/prod state:off until:2026-09-24
+  → 9/23 までは停止
+  → 9/24 になったら日付リストに従う（9/24 が起動日なら起動する）
+```
+
+`state` は Discord 側で選択肢(`on` / `off` / `auto`)固定のため日付を入力できない。
+復帰日は `until` オプションで受け、内部で `off:2026-09-24` の形に結合して
+SSM へ書く。`until` を省略すれば従来どおり戻すまで固定される。
+
+判定は次の 2 箇所にあり、どちらも同じ結果になる必要がある。
+
+| 場所 | 役割 |
+| --- | --- |
+| `discord.ResolveOverride`（Go） | `/prod-uptime-list` の状態表示 |
+| `prod-uptime-scheduler.yml` | `desired_count` を決める最終地点 |
+
+`YYYY-MM-DD` は辞書順が日付順と一致するため、両方とも文字列比較で揃えている。
+テストは `automation/test/prod-uptime-decision-test.sh`（シェル側）と
+`uptime_override_expiry_test.go`（Go側）にある。
+
+不正な日付（`off:2026/09/24` など）は `auto` に倒す。壊れた値で本番を
+起動しっぱなしにする／落とすより、日付リストどおりに動く方が安全なため。
+
+### 制約
+
+`auto` に復帰日は指定できない（`auto` が既定状態なので意味がない）。
+
+`until` オプションを追加したので、**`automation/discord/register-commands.sh` を
+再実行してコマンドを登録し直す必要がある**。登録し直すまで Discord 側に
+`until` が出ない。
