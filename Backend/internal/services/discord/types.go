@@ -117,8 +117,11 @@ const (
 	CommandNameProd           = "prod"
 	CommandNameStaging        = "staging"
 	OptionNameState           = "state"
-	ModalCustomIDProdUptime   = "prod_uptime_modal"
-	TextInputCustomIDDate     = "prod_uptime_date"
+	// OptionNameUntil は /prod の復帰日。state と結合して on:YYYY-MM-DD の形にする。
+	// state は選択肢(choices)固定で日付を入力できないため、別オプションで受ける。
+	OptionNameUntil         = "until"
+	ModalCustomIDProdUptime = "prod_uptime_modal"
+	TextInputCustomIDDate   = "prod_uptime_date"
 )
 
 // FindOptionString はスラッシュコマンドの文字列引数を取り出す。

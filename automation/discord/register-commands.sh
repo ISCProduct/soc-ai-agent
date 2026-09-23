@@ -117,6 +117,12 @@ COMMANDS='[
           { "name": "off (今すぐ停止して停止し続ける)", "value": "off" },
           { "name": "auto (日付リストに従う・既定)", "value": "auto" }
         ]
+      },
+      {
+        "name": "until",
+        "description": "復帰日 YYYY-MM-DD。この日(JST)に auto へ自動復帰します。省略すると戻すまで固定",
+        "type": 3,
+        "required": false
       }
     ]
   }

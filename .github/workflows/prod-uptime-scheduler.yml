@@ -97,12 +97,54 @@ jobs:
           # 書き換えたときに表示と実挙動が食い違わないよう、こちらでも正規化する。
           OVERRIDE=$(echo "$OVERRIDE" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
 
+          # 復帰日つきオーバーライド(on:YYYY-MM-DD / off:YYYY-MM-DD)を解決する。
+          # 「この日(JST)になったら auto へ戻す」という意味。
+          #
+          # 期限の無い off は戻し忘れると起動日が丸ごと潰れる。実際 2026-09-12 に
+          # 設定された off が 9/23 まで放置され、9/24 の起動日を潰しかけたうえ、
+          # 本番デプロイのマイグレーションが3回失敗していた。
+          #
+          # 判定は Go 側 (discord.ResolveOverride) と同じ。YYYY-MM-DD は辞書順が
+          # 日付順と一致するので、両方とも文字列比較で揃えている。
+          #
+          # case ではなく if で書くのは、automation/test/prod-uptime-decision-test.sh が
+          # 「TODAY_JST= から最初の esac まで」で判定ロジックを抽出しているため。
+          # ここに esac を増やすと抽出が途中で切れ、テストが本体を素通しする。
+          OVERRIDE_RAW="$OVERRIDE"
+          OVERRIDE_EXPIRY=""
+          if [ "${OVERRIDE%%:*}" == "on" ] || [ "${OVERRIDE%%:*}" == "off" ]; then
+            if [ "$OVERRIDE" != "${OVERRIDE%%:*}" ]; then
+              OVERRIDE_EXPIRY="${OVERRIDE#*:}"
+              # date は環境差(GNU/BSD)とテストのスタブがあるため使わず、python3 で実在日付を見る。
+              if ! echo "$OVERRIDE_EXPIRY" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' \
+                || ! python3 -c 'import sys,datetime; datetime.date.fromisoformat(sys.argv[1])' \
+                  "$OVERRIDE_EXPIRY" 2>/dev/null; then
+                # 形式だけ見ると 2026-09-31 や 9999-99-99 を通してしまう。
+                # 前者は9/30にも停止固定が続き、後者は事実上解除されない。
+                # Go 側 (discord.ResolveOverride) は time.Parse で実在日付のみ許すので合わせる。
+                echo "override='$OVERRIDE_RAW' の復帰日が不正なため auto として扱う" >&2
+                OVERRIDE="auto"
+              elif [[ ! "$TODAY_JST" < "$OVERRIDE_EXPIRY" ]]; then
+                echo "override='$OVERRIDE_RAW' は復帰日 $OVERRIDE_EXPIRY に達したため auto として扱う (今日=$TODAY_JST)"
+                OVERRIDE="auto"
+              else
+                echo "override='$OVERRIDE_RAW' は $OVERRIDE_EXPIRY まで有効 (今日=$TODAY_JST)"
+                OVERRIDE="${OVERRIDE%%:*}"
+              fi
+            fi
+          fi
+
           case "$OVERRIDE" in
             on)
               DESIRED=1
               echo "override=on -> desired_count=1 (日付リストは無視)"
-              # 戻し忘れると請求で気づくことになるので、実行ログに毎回残す
-              echo "::warning::本番は /prod で「常時起動」に固定されています。不要なら /prod state:auto に戻してください"
+              # 戻し忘れると請求で気づくことになるので、実行ログに毎回残す。
+              # 復帰日つきなら自動で戻るため warning にはしない。
+              if [ -n "$OVERRIDE_EXPIRY" ]; then
+                echo "本番は $OVERRIDE_EXPIRY まで常時起動に固定されています(その日に auto へ自動復帰)"
+              else
+                echo "::warning::本番は /prod で「常時起動」に固定されています。不要なら /prod state:auto に戻してください"
+              fi
               ;;
             off)
               DESIRED=0
