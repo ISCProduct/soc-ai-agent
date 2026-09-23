@@ -595,19 +595,40 @@ jobs:
       - name: Record production service state
         id: prod-svc
         run: |
-          DESIRED_TOTAL=$(aws ecs describe-services --cluster "${PROJECT_NAME}" \
+          set -uo pipefail
+          # 取得失敗を「停止中」に倒さない。`|| echo "0"` で 0 に化けると、稼働中の
+          # 本番を was_down=true と記録し、後段の always() クリーンアップが
+          # 全サービスを停止する。スロットリングや一時的な通信障害で起こりうる。
+          if ! DESIRED_TOTAL=$(aws ecs describe-services --cluster "${PROJECT_NAME}" \
             --services chroma rag-review backend frontend \
-            --query 'sum(services[].desiredCount)' --output text 2>/dev/null || echo "0")
+            --query 'sum(services[].desiredCount)' --output text); then
+            echo "::error::本番サービスの状態を取得できませんでした。起動状態が不明なままでは停止判断ができないため中断します" >&2
+            exit 1
+          fi
+          if [ -z "$DESIRED_TOTAL" ] || [ "$DESIRED_TOTAL" = "None" ]; then
+            echo "::error::本番サービスの desired_count を取得できませんでした(値='$DESIRED_TOTAL')" >&2
+            exit 1
+          fi
+
+          # デプロイ中に /prod で運用指示が変わったかを後で見るため、開始時点の値を控える。
+          # 読めなかった場合は空にしておき、復元時は「変わっていない」とは見なさない。
+          OVERRIDE_AT_START=$(aws ssm get-parameter --name "/${PROJECT_NAME}/prod-uptime-override" \
+            --query 'Parameter.Value' --output text 2>/dev/null || echo "__unreadable__")
+          echo "override_at_start=$OVERRIDE_AT_START" >> "$GITHUB_OUTPUT"
+
           if [ "$DESIRED_TOTAL" = "0" ]; then
-            echo "本番は停止状態。デプロイ後に一時起動して確認する"
+            echo "本番は停止状態。デプロイ後に一時起動して確認する (override=$OVERRIDE_AT_START)"
             echo "was_down=true" >> "$GITHUB_OUTPUT"
           else
             echo "本番は稼働中(desired合計=$DESIRED_TOTAL)。起動状態には触らない"
             echo "was_down=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # backend を変更していなくても、停止日の一時検証では backend を含む全サービスを
+      # 起動する(prod-scale.sh)。RDS が停止のままだと backend は DB 接続に失敗して
+      # 終了し、安定待ちは変更サービスだけを見るため「起動できないまま検証成功」になる。
       - name: Start production RDS if stopped (for migration)
-        if: steps.changes.outputs.backend == 'true'
+        if: steps.changes.outputs.backend == 'true' || steps.prod-svc.outputs.was_down == 'true'
         id: prod-db
         run: |
           DB_ID="${PROJECT_NAME}-mysql"
@@ -784,12 +805,48 @@ jobs:
 
       # merge commit 件名（Merge pull request #N）ではなく、マージPRのタイトル
       # （Release to production: ...）と本文の機能一覧を通知に使う。
-      # 確認が済んだ（または失敗した）ら必ず0へ戻す。always() が無いと、
+      # 確認が済んだ（または失敗した）ら0へ戻す。always() が無いと、
       # 安定待ちで落ちたときにタスクが起動したまま課金され続ける。
-      # prod-uptime-scheduler と重なると先に0へ戻される場合があるが、結果は同じ。
+      #
+      # ただし「開始時に停止していた」だけで機械的に落とすと、デプロイ中に
+      # /prod on やスケジューラが本番を起動した場合にそれを打ち消してしまう。
+      # deployment.yml と prod-uptime-scheduler.yml は concurrency group が別で
+      # 排他されないため、次の毎時実行まで本番が落ちたままになりうる。
+      # 復元前に運用指示を読み直し、起動すべき状態なら触らない。
       - name: Scale production services back to zero
         if: always() && steps.prod-svc.outputs.was_down == 'true'
-        run: ./automation/ops/prod-scale.sh 0
+        run: |
+          set -uo pipefail
+          TODAY_JST=$(TZ=Asia/Tokyo date +%F)
+
+          OVERRIDE_NOW=$(aws ssm get-parameter --name "/${PROJECT_NAME}/prod-uptime-override" \
+            --query 'Parameter.Value' --output text 2>/dev/null || echo "__unreadable__")
+          OVERRIDE_AT_START="${{ steps.prod-svc.outputs.override_at_start }}"
+          if [ "$OVERRIDE_NOW" != "$OVERRIDE_AT_START" ]; then
+            echo "デプロイ中に運用指示が変わった($OVERRIDE_AT_START -> $OVERRIDE_NOW)ため、起動状態には触らない"
+            exit 0
+          fi
+          if [ "$OVERRIDE_NOW" = "__unreadable__" ]; then
+            echo "運用指示(override)を読めないため、起動状態には触らない。停止は prod-uptime-scheduler に任せる" >&2
+            exit 0
+          fi
+          # /prod on は日付リストを無視して起動させる指示。日付リストに今日が無くても止めない。
+          # ここを見落とすと、手動で起動させた本番をデプロイが落とす。
+          if [ "${OVERRIDE_NOW%%:*}" = "on" ]; then
+            echo "override=$OVERRIDE_NOW（起動指示）のため、起動状態には触らない"
+            exit 0
+          fi
+
+          # 日付リストは JST の暦日で判定する。デプロイが日付をまたぐと、
+          # 開始時は停止日でも終了時には起動日になっていることがある。
+          DATES=$(aws ssm get-parameter --name "/${PROJECT_NAME}/prod-uptime-dates" \
+            --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+          if echo ",$DATES," | grep -q ",$TODAY_JST,"; then
+            echo "今日($TODAY_JST)は起動日になっているため、起動状態には触らない"
+            exit 0
+          fi
+
+          ./automation/ops/prod-scale.sh 0
 
       # デプロイが終わったら、このデプロイが起動したRDSは停止へ戻す。
       # 停止するのは「このデプロイが stopped から起動した」場合だけで、かつ本番が稼働状態でない
@@ -807,9 +864,15 @@ jobs:
             TASK_STATUS=$(aws ecs describe-tasks --cluster "${PROJECT_NAME}" --tasks "$TASK_ARN" \
               --query 'tasks[0].lastStatus' --output text 2>/dev/null || echo "UNKNOWN")
             if [ "$TASK_STATUS" != "STOPPED" ]; then
-              echo "マイグレーションタスクが $TASK_STATUS のためRDSは停止しない。" >&2
-              echo "稼働日でなければ prod-uptime-scheduler が次の毎時実行で停止する。" >&2
-              exit 1
+              # 放置するとワンオフタスクが残り続け、次のスケジューラがRDSだけ止めて
+              # 実行中のDDLから接続を切る。明示的に止めて終了を待つ。
+              echo "マイグレーションタスクが $TASK_STATUS のため停止させる" >&2
+              aws ecs stop-task --cluster "${PROJECT_NAME}" --task "$TASK_ARN" \
+                --reason "deploy cleanup" > /dev/null || true
+              if ! aws ecs wait tasks-stopped --cluster "${PROJECT_NAME}" --tasks "$TASK_ARN"; then
+                echo "マイグレーションタスクの停止を確認できないためRDSは停止しない" >&2
+                exit 1
+              fi
             fi
           fi
           # 取得できないまま「停止中」とみなすと、稼働中の本番DBを落としうる。安全側に倒す。
@@ -822,6 +885,20 @@ jobs:
           if [ "$DESIRED_TOTAL" != "0" ]; then
             echo "本番が稼働中(desired合計=$DESIRED_TOTAL)のためRDSは停止しない"
             exit 0
+          fi
+          # desired=0 にしてもタスクはすぐには消えない。ドレイン中のbackendが残ったまま
+          # DBを落とすと、処理中のリクエストが途中で切れる。running が捌けるまで待つ。
+          for _ in $(seq 1 20); do
+            RUNNING_TOTAL=$(aws ecs describe-services --cluster "${PROJECT_NAME}" \
+              --services chroma rag-review backend frontend \
+              --query 'sum(services[].runningCount)' --output text 2>/dev/null || echo "unknown")
+            [ "$RUNNING_TOTAL" = "0" ] && break
+            echo "runningCount=$RUNNING_TOTAL (waiting...)"
+            sleep 15
+          done
+          if [ "$RUNNING_TOTAL" != "0" ]; then
+            echo "タスクが残っている(running=$RUNNING_TOTAL)ためRDSは停止しない。スケジューラに任せる" >&2
+            exit 1
           fi
           # 停止できなかったことを運用者が検知できるよう、失敗はステップの失敗にする。
           aws rds stop-db-instance --db-instance-identifier "${PROJECT_NAME}-mysql" > /dev/null
