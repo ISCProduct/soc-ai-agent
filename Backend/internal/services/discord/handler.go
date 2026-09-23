@@ -348,14 +348,30 @@ func overrideLabel(state string) string {
 
 // overrideAppliedMessage は設定した状態をそのまま読める文言にする。
 func overrideAppliedMessage(state string) string {
-	switch state {
+	// state は復帰日つき(off:2026-09-24)になりうる。完全一致で分岐すると
+	// default に落ち、停止固定にしたのに「autoへ戻しました」と逆の内容を通知する。
+	base, expiry, hasExpiry := strings.Cut(state, ":")
+	suffix := "日付リストに関係なく"
+	if hasExpiry {
+		suffix = expiry + " までは日付リストに関係なく"
+	}
+	switch base {
 	case OverrideOn:
-		return "✅ 本番を「常時起動」に設定しました。日付リストに関係なく起動し続けます。"
+		return "✅ 本番を「常時起動」に設定しました。" + suffix + "起動し続けます。" + revertNote(hasExpiry, expiry)
 	case OverrideOff:
-		return "🛑 本番を「常時停止」に設定しました。日付リストに関係なく停止します。"
+		return "🛑 本番を「常時停止」に設定しました。" + suffix + "停止します。" + revertNote(hasExpiry, expiry)
 	default:
 		return "🔄 本番を「日付リストに従う」に戻しました。"
 	}
+}
+
+// revertNote は復帰日つきのときだけ、いつ auto へ戻るかを添える。
+// 戻し忘れを防ぐのが復帰日の目的なので、設定した本人に見えないと意味がない。
+func revertNote(hasExpiry bool, expiry string) string {
+	if !hasExpiry {
+		return ""
+	}
+	return "（" + expiry + " に「日付リストに従う」へ自動復帰します）"
 }
 
 func stagingStateAppliedMessage(state string) string {
