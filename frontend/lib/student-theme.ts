@@ -9,8 +9,11 @@ export const STUDENT_THEME_LABELS: Record<StudentThemeMode, string> = {
   'high-contrast': '高コントラスト（色弱・弱視向け）',
 }
 
+// BIZ UDPGothic は学校配布物・自治体文書で使われるユニバーサルデザイン書体。
+// 利用者（専門学校生）が日頃目にしている字面で、判別性も高い。
+// Noto Sans JP は読み込み失敗時のフォールバックとして残す。
 const FONT_FAMILY =
-  "'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+  "'BIZ UDPGothic', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
 
 /** パターン3 既定: Wong に近い色覚セーフ青 */
 export const COMFORTABLE_PRIMARY = '#0072B2'

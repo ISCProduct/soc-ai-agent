@@ -93,7 +93,7 @@ export function CompanyPortalLoginContent() {
           </Box>
 
           <Box sx={{ textAlign: 'center', mt: 2 }}>
-            <Link href="/company-portal/forgot-password" style={{ fontSize: '0.875rem' }}>
+            <Link href="/company-portal/forgot-password" className="auth-link">
               パスワードをお忘れですか？
             </Link>
           </Box>

@@ -1,8 +1,9 @@
 'use client'
 
-import { Alert, Box, Button, Card, CardContent, Typography } from '@mui/material'
+import { Alert, Box, Button, Typography } from '@mui/material'
 import { Refresh } from '@mui/icons-material'
 import type { AnalysisScores } from '../types'
+import { UI } from '@/lib/design/tokens'
 
 export interface AnalysisScoreCardProps {
   analysisScores: AnalysisScores | null
@@ -35,34 +36,50 @@ export default function AnalysisScoreCard({
         </Alert>
       )}
 
+      {/*
+        4つの大きな%をやめた。
+        100% / 100% / 55% / 20% と並んでも、学生が次に何をすればいいかは分からない。
+        どこまで聞けたかの進み具合なので、横一列の目盛りで「まだ将来の話が薄い」と
+        一目で分かる形にする。数字は補助に落とす。
+      */}
       {(scoreComment || analysisScores) && (
-        <Card elevation={2} sx={{ mb: 3, border: '2px solid', borderColor: 'primary.light', backgroundColor: '#f0f4ff' }}>
-          <CardContent>
-            <Typography variant="h6" fontWeight="bold" gutterBottom>
-              📊 4段階分析スコア
-            </Typography>
-            {analysisScores && (
-              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)' }, gap: 2, mb: 2 }}>
-                {[
-                  { label: '職種分析', value: analysisScores.job },
-                  { label: '興味分析', value: analysisScores.interest },
-                  { label: '適性分析', value: analysisScores.aptitude },
-                  { label: '将来分析', value: analysisScores.future },
-                ].map(({ label, value }) => (
-                  <Box key={label} sx={{ textAlign: 'center', bgcolor: '#fff', borderRadius: 2, p: 1.5, boxShadow: 1 }}>
-                    <Typography variant="caption" color="text.secondary">{label}</Typography>
-                    <Typography variant="h5" fontWeight="bold" color="primary.main">{value}%</Typography>
+        <Box sx={{ mb: 4 }}>
+          <Typography sx={{ fontSize: 17, fontWeight: 700, color: UI.ink, mb: 1.5 }}>
+            どこまで聞けているか
+          </Typography>
+          {analysisScores && (
+            <Box sx={{ display: 'grid', gap: 1, mb: 2, maxWidth: 560 }}>
+              {[
+                { label: '職種', value: analysisScores.job },
+                { label: '興味', value: analysisScores.interest },
+                { label: '適性', value: analysisScores.aptitude },
+                { label: '将来', value: analysisScores.future },
+              ].map(({ label, value }) => (
+                <Box key={label} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                  <Typography sx={{ fontSize: 14, color: UI.inkSoft, minWidth: 40 }}>{label}</Typography>
+                  <Box sx={{ flex: 1, height: 8, backgroundColor: UI.ruleSoft, position: 'relative' }}>
+                    <Box sx={{
+                      position: 'absolute', inset: 0, right: 'auto',
+                      width: `${Math.max(0, Math.min(100, value))}%`,
+                      backgroundColor: value < 50 ? UI.flag : UI.mark,
+                    }} />
                   </Box>
-                ))}
-              </Box>
-            )}
-            {scoreComment && (
-              <Typography variant="body2" color="text.secondary">
-                {scoreComment}
-              </Typography>
-            )}
-          </CardContent>
-        </Card>
+                  <Typography sx={{
+                    fontSize: 13, color: UI.inkSoft, minWidth: 34, textAlign: 'right',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}>
+                    {value}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+          )}
+          {scoreComment && (
+            <Typography sx={{ fontSize: 14.5, lineHeight: 1.9, color: UI.inkSoft, maxWidth: '64ch' }}>
+              {scoreComment}
+            </Typography>
+          )}
+        </Box>
       )}
     </>
   )

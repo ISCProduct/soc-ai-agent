@@ -2,13 +2,18 @@
 
 import { Box, CircularProgress, Typography } from '@mui/material'
 
-/** AI応答待ちのタイピングインジケーター */
+/**
+ * 返答待ちの表示。
+ *
+ * 「AIが考えています」をやめた。待たされている側に必要なのは
+ * 「反応がある」ことであって、何が考えているかではない。
+ */
 export function TypingIndicator() {
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
       <CircularProgress size={16} />
       <Typography variant="body2" color="text.secondary">
-        AIが考えています
+        考えています
       </Typography>
       <Box sx={{ display: 'flex', gap: 0.5 }}>
         {[0, 0.16, 0.32].map((delay, i) => (

@@ -6,15 +6,6 @@ import (
 	"time"
 )
 
-func (s *CrawlService) StartScheduler() {
-	s.EnsureL1WarmCrawlSource()
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-	for range ticker.C {
-		s.runDueSources()
-	}
-}
-
 func (s *CrawlService) RunDueSources() {
 	s.runDueSources()
 }

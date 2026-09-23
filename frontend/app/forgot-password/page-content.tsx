@@ -90,7 +90,7 @@ export default function PageContent() {
           )}
 
           <Box sx={{ textAlign: 'center', mt: 2 }}>
-            <Link href="/login" style={{ fontSize: '0.875rem' }}>
+            <Link href="/login" className="auth-link">
               ログインページへ戻る
             </Link>
           </Box>

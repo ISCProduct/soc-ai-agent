@@ -41,6 +41,7 @@ import CorrelationCompanyDetailPanel, {
 } from '@/components/CorrelationCompanyDetailPanel';
 import { edgeTypes } from '@/components/diagram/RelationEdge';
 import ClusterExplorer from '@/components/diagram/ClusterExplorer';
+import styles from './CorrelationDiagram.module.css';
 
 type DiagramType = 'capital' | 'business';
 
@@ -450,7 +451,7 @@ export default function CorrelationDiagram({ initialCompanyId = null }: Correlat
                             nodesDraggable={true}
                             nodesConnectable={false}
                             elementsSelectable={true}
-                            style={{ width: '100%', height: '100%' }}
+                            className={styles.canvas}
                         >
                             <Background color="#aaa" gap={16} />
                             <Controls

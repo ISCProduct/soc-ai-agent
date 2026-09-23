@@ -24,6 +24,7 @@ import (
 	"Backend/internal/queue"
 	"Backend/internal/repositories"
 	"Backend/internal/routes"
+	"Backend/internal/safego"
 	"Backend/internal/scraper"
 	"Backend/internal/services/admin"
 	"Backend/internal/services/analysis"
@@ -671,37 +672,36 @@ func main() {
 	// 共有シークレットのみで認証する(#861)
 	api.POST("/admin/whats-new/ingest", releaseNoteController.Ingest, routes.EchoStaticSecretAuth(cfg.AdminSecret))
 
-	go crawlService.StartScheduler()
+	// 以下の定期実行は safego 経由で起動する。素の go だと 1 回の panic で
+	// Backend プロセスが丸ごと落ち、全ユーザーが 502 になる(#1405, #1446)。
+	// Every は各回を個別に recover するので、1 回落ちても次の回は走る。
+
+	// L1 温存ジョブの作成はクロール本体と分けて起動する。
+	// 同じ goroutine に入れると、ここが落ちたときにクロールごと止まる。
+	safego.Go(crawlService.EnsureL1WarmCrawlSource)
+	safego.Every(1*time.Minute, false, crawlService.RunDueSources)
 
 	// 退会ユーザーの猶予期間経過後の物理削除（1日1回）
-	go func() {
-		ticker := time.NewTicker(24 * time.Hour)
-		defer ticker.Stop()
-		run := func() {
-			// 退会時のベクトル削除はRAG障害でも退会を失敗させないためエラーを飲む。
-			// 取りこぼしをここで消し直す(#1204)。パージより先に実行して、
-			// 30日待たずに個人データを消す。
-			if attempted, failed, err := userDeletionService.ReconcileScoutIndex(context.Background()); err != nil {
-				slog.Error("scout index reconcile failed", "error", err)
-			} else if failed > 0 {
-				// 残り続けると気づけないので、0件になるまで毎回出す
-				slog.Warn("scout index reconcile incomplete", "attempted", attempted, "failed", failed)
-			}
+	safego.Every(24*time.Hour, true, func() {
+		// 退会時のベクトル削除はRAG障害でも退会を失敗させないためエラーを飲む。
+		// 取りこぼしをここで消し直す(#1204)。パージより先に実行して、
+		// 30日待たずに個人データを消す。
+		if attempted, failed, err := userDeletionService.ReconcileScoutIndex(context.Background()); err != nil {
+			slog.Error("scout index reconcile failed", "error", err)
+		} else if failed > 0 {
+			// 残り続けると気づけないので、0件になるまで毎回出す
+			slog.Warn("scout index reconcile incomplete", "attempted", attempted, "failed", failed)
+		}
 
-			n, err := userDeletionService.PurgeExpiredWithdrawals(time.Now().UTC())
-			if err != nil {
-				slog.Error("purge expired withdrawals failed", "error", err)
-				return
-			}
-			if n > 0 {
-				slog.Info("purged expired withdrawals", "count", n)
-			}
+		n, err := userDeletionService.PurgeExpiredWithdrawals(time.Now().UTC())
+		if err != nil {
+			slog.Error("purge expired withdrawals failed", "error", err)
+			return
 		}
-		run()
-		for range ticker.C {
-			run()
+		if n > 0 {
+			slog.Info("purged expired withdrawals", "count", n)
 		}
-	}()
+	})
 
 	// サーバー起動
 	port := cfg.ServerPort

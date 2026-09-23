@@ -58,7 +58,7 @@ describe('ResultsListView', () => {
     expect(screen.getByText('サンプル株式会社')).toBeInTheDocument()
     expect(screen.getByText('92')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '応募する' })).toBeInTheDocument()
-    expect(screen.getByText(/適合企業を1社に絞り込みました/)).toBeInTheDocument()
+    expect(screen.getByText(/あなたに近い1社/)).toBeInTheDocument()
   })
 
   it('企業カードクリックで onSelectCompany を呼ぶ', () => {
@@ -69,18 +69,27 @@ describe('ResultsListView', () => {
     expect(onSelectCompany).toHaveBeenCalledWith(sampleCompany)
   })
 
-  it('暫定評価チップを表示する', () => {
+  // チップは廃止した。同じことを注意書きが書いており、
+  // 色のついたピルは情報を足していなかった。注意書き本文で確認する。
+  it('根拠が薄いときは注意書きを表示する', () => {
     renderList({ isProvisional: true, diagnosisSummary: '選択のみの回答が多いです' })
-    expect(screen.getByText('暫定評価')).toBeInTheDocument()
     expect(screen.getByText(/選択のみの回答が多いです/)).toBeInTheDocument()
-    expect(screen.getByText(/仮マッチしています/)).toBeInTheDocument()
+    expect(screen.getByText(/選択のみの回答が多いです/)).toBeInTheDocument()
+    expect(screen.getByText(/会話を続けると根拠が増え/)).toBeInTheDocument()
   })
 
-  it('適合度に根拠軸数を表示する', () => {
+  // 全行に根拠軸数を出すのはやめた。ほとんどの行が同じ値になり
+  // 読み飛ばされるため、相対的に薄い行だけ印を出す。
+  it('他より根拠が薄い行にだけ印を出す', () => {
     renderList({
-      companies: [{ ...sampleCompany, matchedAxisCount: 6 }],
+      companies: [
+        { ...sampleCompany, matchedAxisCount: 9 },
+        { ...sampleCompany, id: '2', name: '根拠が薄い株式会社', matchedAxisCount: 6 },
+      ],
     })
-    expect(screen.getByText(/根拠軸 6/)).toBeInTheDocument()
+    expect(screen.getByText(/根拠 6軸/)).toBeInTheDocument()
+    // 同じ値が並ぶだけの行には印を出さない
+    expect(screen.queryByText(/根拠 9軸/)).not.toBeInTheDocument()
   })
 
   it('分析データ取得失敗時に警告と再読み込みボタンを表示する', () => {

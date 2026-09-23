@@ -29,7 +29,7 @@ describe('InterviewSummary', () => {
     // 講評は届く
     expect(screen.getByText('落ち着いて回答できていました。')).toBeInTheDocument()
     // スコア欄は出さない
-    expect(screen.queryByText('カテゴリ別スコア')).not.toBeInTheDocument()
+    expect(screen.queryByText('評価の内訳')).not.toBeInTheDocument()
     // NaN を画面に出さない
     expect(document.body.textContent).not.toMatch(/NaN/)
   })
@@ -55,7 +55,7 @@ describe('InterviewSummary', () => {
 
     expect(screen.getByText('総合評価')).toBeInTheDocument()
     expect(screen.getByText('総合的に落ち着いて回答できています。')).toBeInTheDocument()
-    expect(screen.getByText('カテゴリ別スコア')).toBeInTheDocument()
+    expect(screen.getByText('評価の内訳')).toBeInTheDocument()
     expect(screen.getByText('論理性')).toBeInTheDocument()
     expect(screen.getByText('4.5 / 5')).toBeInTheDocument()
     expect(screen.getByText('「結論から先に説明できていました。」')).toBeInTheDocument()

@@ -1,4 +1,11 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP&display=swap');
+/*
+ * BIZ UDPGothic: 森沢のユニバーサルデザイン書体。日本の学校配布物・自治体文書で
+ * 広く使われており、この製品の利用者（専門学校生）が日頃目にしている書体そのもの。
+ * Noto Sans JP は日本語Webの初期値で、どのサイトでも同じ顔になる。
+ * 併せて弱視・ディスレクシア向けに字形の判別性が高く、既存の色覚配慮（Wong配色）と
+ * 方向性が一致する。
+ */
+@import url('https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=Noto+Sans+JP:wght@400;500;700&display=swap');
 
 /*
  * @layer base に入れる理由: admin/costs 等の一部画面で Tailwind (styles/globals.css) を
@@ -16,6 +23,11 @@
   body {
     margin: 0;
     padding: 0;
-    font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+    font-family: 'BIZ UDPGothic', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
   }
+}
+
+/* ログイン系フォームの補助リンク */
+.auth-link {
+  font-size: 0.875rem;
 }
