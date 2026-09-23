@@ -596,7 +596,7 @@ jobs:
         id: prod-svc
         run: |
           DESIRED_TOTAL=$(aws ecs describe-services --cluster "${PROJECT_NAME}" \
-            --services backend frontend rag-review \
+            --services chroma rag-review backend frontend \
             --query 'sum(services[].desiredCount)' --output text 2>/dev/null || echo "0")
           if [ "$DESIRED_TOTAL" = "0" ]; then
             echo "本番は停止状態。デプロイ後に一時起動して確認する"
@@ -744,19 +744,12 @@ jobs:
       # 停止日のデプロイでは、新しいタスク定義が実際に起動するかをここで確認する。
       # 確認できないまま稼働日を迎えると、展示会当日に起動しないイメージが出てくる。
       # 後段で必ず0へ戻すため、立ち上がっているのはこのジョブの間だけ。
+      # 変更のあったサービスだけを起動しても確認にならない。rag-review は chroma が居ないと
+      # ヘルスチェックが503を返し、backend も RAG を同期で呼ぶ。本番と同じ組み合わせで起動する。
+      # desired と min_capacity を揃えるのも必須（揃えないとターゲット追跡が0へ縮退する）。
       - name: Start production services for verification
         if: steps.prod-svc.outputs.was_down == 'true'
-        run: |
-          set -e
-          services=""
-          if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then services="$services backend"; fi
-          if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then services="$services frontend"; fi
-          if [ "${{ steps.changes.outputs.rag }}" = "true" ]; then services="$services rag-review"; fi
-          for svc in $services; do
-            aws ecs update-service --cluster "$PROJECT_NAME" --service "$svc" \
-              --desired-count 1 > /dev/null
-            echo "$svc を desired=1 で起動"
-          done
+        run: ./automation/ops/prod-scale.sh 1
 
       - name: Wait for services to stabilize (parallel)
         run: |
@@ -796,18 +789,7 @@ jobs:
       # prod-uptime-scheduler と重なると先に0へ戻される場合があるが、結果は同じ。
       - name: Scale production services back to zero
         if: always() && steps.prod-svc.outputs.was_down == 'true'
-        run: |
-          set -euo pipefail
-          services=""
-          if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then services="$services backend"; fi
-          if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then services="$services frontend"; fi
-          if [ "${{ steps.changes.outputs.rag }}" = "true" ]; then services="$services rag-review"; fi
-          for svc in $services; do
-            # 失敗を握りつぶすと、非稼働日にタスクが動き続けても気づけない。
-            aws ecs update-service --cluster "$PROJECT_NAME" --service "$svc" \
-              --desired-count 0 > /dev/null
-            echo "$svc を desired=0 へ戻した"
-          done
+        run: ./automation/ops/prod-scale.sh 0
 
       # デプロイが終わったら、このデプロイが起動したRDSは停止へ戻す。
       # 停止するのは「このデプロイが stopped から起動した」場合だけで、かつ本番が稼働状態でない
@@ -832,7 +814,7 @@ jobs:
           fi
           # 取得できないまま「停止中」とみなすと、稼働中の本番DBを落としうる。安全側に倒す。
           if ! DESIRED_TOTAL=$(aws ecs describe-services --cluster "${PROJECT_NAME}" \
-            --services backend frontend rag-review \
+            --services chroma rag-review backend frontend \
             --query 'sum(services[].desiredCount)' --output text); then
             echo "ECSサービスの状態を取得できないためRDSは停止しない" >&2
             exit 1

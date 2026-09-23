@@ -94,8 +94,34 @@ else
     echo "FAIL 0へ戻すステップが was_down を見ていない（稼働日の本番を0にしうる）"
     fail=$((fail + 1))
   fi
+  # 変更のあったサービスだけ起動すると、chroma 不在で rag-review が healthy にならない。
+  # min_capacity を揃えないとターゲット追跡が0へ縮退し、壊れたイメージでも安定待ちが通る。
+  SCALE="$ROOT/automation/ops/prod-scale.sh"
+  for step in "$UP" "$DOWN"; do
+    if ! sed -n "${step},$((step + 3))p" "$WF" | grep -q "automation/ops/prod-scale.sh"; then
+      echo "FAIL 一時起動/停止が automation/ops/prod-scale.sh を使っていない"
+      fail=$((fail + 1))
+      break
+    fi
+  done
+  if [ ! -x "$SCALE" ]; then
+    echo "FAIL automation/ops/prod-scale.sh が無い、または実行権限が無い"
+    fail=$((fail + 1))
+  else
+    if ! grep -q "register-scalable-target" "$SCALE"; then
+      echo "FAIL prod-scale.sh が min_capacity を揃えていない（ターゲット追跡が0へ縮退する）"
+      fail=$((fail + 1))
+    fi
+    CHROMA=$(grep -n "SERVICES=" "$SCALE" | head -1)
+    case "$CHROMA" in
+      *"chroma rag-review"*) : ;;
+      *) echo "FAIL prod-scale.sh の起動順に chroma -> rag-review が無い"; fail=$((fail + 1)) ;;
+    esac
+  fi
+
   if [ "$fail" -eq 0 ]; then
     echo "ok   一時起動→安定待ち→0へ戻す→RDS停止 の順で、失敗時も0へ戻る"
+    echo "ok   起動/停止は prod-scale.sh 経由（chroma込み・min_capacity同期）"
   fi
 fi
 
