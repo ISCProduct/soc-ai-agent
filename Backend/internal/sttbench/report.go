@@ -50,6 +50,34 @@ func PrintSummary(w io.Writer, model string, s *ModelSummary) {
 		}
 		fmt.Fprintf(w, "  取り逃した語: %s\n", strings.Join(parts, ", "))
 	}
+
+	// 由来別（合成 / 実発話）。合成だけの結果を本番品質の根拠にしないため、
+	// 実発話が混ざっているときは分けて見せる（#1484）。
+	printGroups(w, "由来別", s.BySource)
+	// 録音条件別。母数が小さい条件が全体平均に埋もれるのを防ぐ。
+	printGroups(w, "録音条件別", s.ByCondition)
+}
+
+// printGroups は内訳を1グループ1行で出す。母数なしの指標は "-" で示す。
+func printGroups(w io.Writer, title string, groups []GroupSummary) {
+	// 1グループしか無い（＝全部同じ由来/条件）なら、全体平均と同じなので出さない
+	if len(groups) <= 1 {
+		return
+	}
+	fmt.Fprintf(w, "  [%s]\n", title)
+	for _, g := range groups {
+		fmt.Fprintf(w, "    %-16s 件数%3d  CER %.3f  固有名詞 %s  数値 %s  失敗率 %.1f%%\n",
+			g.Key, g.Cases, g.MeanCER,
+			pctOrDash(g.KeywordAccuracy), pctOrDash(g.NumberAccuracy), g.FailureRate*100)
+	}
+}
+
+// pctOrDash は -1（母数なし）を "-" に、それ以外を百分率にする。
+func pctOrDash(v float64) string {
+	if v < 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.1f%%", v*100)
 }
 
 // PrintComparison はモデル間の差を並べる。
