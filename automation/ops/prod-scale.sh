@@ -47,10 +47,20 @@ for SERVICE in $SERVICES; do
     failed=1
   fi
 
-  if ! aws ecs update-service --cluster "$PROJECT_NAME" --service "$SERVICE" \
-    --desired-count "$DESIRED" > /dev/null; then
-    # 握りつぶすと、停止したつもりでタスクが動き続けても気づけない。
-    echo "$SERVICE: desired_count=$DESIRED への更新に失敗" >&2
+  # スロットリングや一時的なAPI障害で1回失敗しただけで諦めると、desired=1 のまま
+  # 残って課金が続く（後段のRDS停止も desired 合計が非ゼロで見送られる）。
+  updated=""
+  for attempt in 1 2 3; do
+    if aws ecs update-service --cluster "$PROJECT_NAME" --service "$SERVICE" \
+      --desired-count "$DESIRED" > /dev/null; then
+      updated=1
+      break
+    fi
+    echo "$SERVICE: desired_count=$DESIRED への更新に失敗（$attempt 回目）" >&2
+    sleep $((attempt * 5))
+  done
+  if [ -z "$updated" ]; then
+    echo "$SERVICE: desired_count=$DESIRED への更新に3回失敗した" >&2
     failed=1
     continue
   fi

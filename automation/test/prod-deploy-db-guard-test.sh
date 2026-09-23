@@ -86,19 +86,26 @@ else
     fail=$((fail + 1))
   fi
   # always() が無いと、安定待ちで落ちたときにタスクが起動したまま課金が続く。
-  if ! sed -n "${DOWN},$((DOWN + 3))p" "$WF" | grep -q "always()"; then
+  DOWN_END=$(awk -v s="$DOWN" 'NR > s && /^      - name:/ { print NR - 1; exit }' "$WF")
+  [ -z "$DOWN_END" ] && DOWN_END=$((DOWN + 40))
+  if ! sed -n "${DOWN},${DOWN_END}p" "$WF" | grep -q "always()"; then
     echo "FAIL 0へ戻すステップに always() が無い（失敗時に起動したまま残る）"
     fail=$((fail + 1))
   fi
-  if ! sed -n "${DOWN},$((DOWN + 3))p" "$WF" | grep -q "was_down == 'true'"; then
+  if ! sed -n "${DOWN},${DOWN_END}p" "$WF" | grep -q "was_down == 'true'"; then
     echo "FAIL 0へ戻すステップが was_down を見ていない（稼働日の本番を0にしうる）"
     fail=$((fail + 1))
   fi
   # 変更のあったサービスだけ起動すると、chroma 不在で rag-review が healthy にならない。
   # min_capacity を揃えないとターゲット追跡が0へ縮退し、壊れたイメージでも安定待ちが通る。
   SCALE="$ROOT/automation/ops/prod-scale.sh"
+  # ステップ本体は複数行になりうる（0へ戻す側は運用指示の読み直しガードを持つ）。
+  # 次のステップ宣言(- name:)までを本体として見る。3行固定だと、ガードを足した
+  # だけで落ちてしまい、本当に見たい「prod-scale.sh を経由しているか」を見失う。
   for step in "$UP" "$DOWN"; do
-    if ! sed -n "${step},$((step + 3))p" "$WF" | grep -q "automation/ops/prod-scale.sh"; then
+    step_end=$(awk -v s="$step" 'NR > s && /^      - name:/ { print NR - 1; exit }' "$WF")
+    [ -z "$step_end" ] && step_end=$((step + 40))
+    if ! sed -n "${step},${step_end}p" "$WF" | grep -q "automation/ops/prod-scale.sh"; then
       echo "FAIL 一時起動/停止が automation/ops/prod-scale.sh を使っていない"
       fail=$((fail + 1))
       break
@@ -119,8 +126,28 @@ else
     esac
   fi
 
+  # /prod on は日付リストを無視して起動させる指示。ここを見落とすと手動起動した本番を落とす。
+  DOWN_END=$(awk -v s="$DOWN" 'NR > s && /^      - name: /{print NR; exit}' "$WF")
+  [ -n "$DOWN_END" ] || DOWN_END=$((DOWN + 40))
+  DOWN_BODY=$(sed -n "${DOWN},${DOWN_END}p" "$WF")
+  if ! grep -q 'OVERRIDE_NOW%%:\*' <<< "$DOWN_BODY"; then
+    echo "FAIL 0へ戻すステップが override=on を見ていない（手動起動した本番を落としうる）"
+    fail=$((fail + 1))
+  fi
+  # ドレイン中のタスクが残ったままDBを落とすと、処理中のリクエストが切れる。
+  if ! grep -q "runningCount" <<< "$STOP_BODY"; then
+    echo "FAIL RDS停止前に runningCount の確認が無い（ドレイン中にDBを落としうる）"
+    fail=$((fail + 1))
+  fi
+  # ワンオフタスクを残すと、次のスケジューラがRDSだけ止めて実行中のDDLを切る。
+  if ! grep -q "stop-task" <<< "$STOP_BODY"; then
+    echo "FAIL マイグレーションタスクを停止させる処理が無い（残留してDDLが切られる）"
+    fail=$((fail + 1))
+  fi
+
   if [ "$fail" -eq 0 ]; then
     echo "ok   一時起動→安定待ち→0へ戻す→RDS停止 の順で、失敗時も0へ戻る"
+    echo "ok   override=on / runningCount / ワンオフタスク停止のガードがある"
     echo "ok   起動/停止は prod-scale.sh 経由（chroma込み・min_capacity同期）"
   fi
 fi

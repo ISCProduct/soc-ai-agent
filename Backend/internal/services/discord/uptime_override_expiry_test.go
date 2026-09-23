@@ -1,6 +1,10 @@
 package discord
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+)
 
 // TestParseOverride_Expiry は復帰日付きオーバーライドの受理と拒否を固定する。
 //
@@ -111,57 +115,120 @@ func TestOverrideLabel_ShowsExpiry(t *testing.T) {
 	}
 }
 
-// TestSetProdOverride_UntilOption は /prod の state と until が結合されることを固定する。
+// TestProdCommand_UntilOption は /prod の state と until が
+// **実ハンドラ経由で** SSM に保存されることを固定する。
 //
-// state は Discord 側で選択肢(on/off/auto)固定になっており日付を入力できない。
-// until を別オプションで受けて結合しないと、復帰日つきオーバーライドを
-// Discord から設定できず、機能が存在しないのと同じになる。
-func TestSetProdOverride_UntilOption(t *testing.T) {
+// 以前はここでハンドラを呼ばず、結合処理をテスト内に複製して ParseOverride だけを
+// 検証していた。そのため handler.go の until 取得・結合を削除しても全ケースが通り、
+// この機能の退行をまったく検出できなかった。AGENTS.md の
+// 「実ハンドラへ渡して、SSMに保存される値と応答を検証する」に従う。
+func TestProdCommand_UntilOption(t *testing.T) {
 	tests := []struct {
-		name    string
-		state   string
-		until   string
-		want    string
-		wantErr bool
+		name        string
+		state       string
+		until       string
+		wantStored  string
+		wantInReply string
+		wantNoWrite bool
 	}{
-		{name: "until 省略なら従来どおり", state: "off", until: "", want: "off"},
-		{name: "until 指定で結合される", state: "off", until: "2026-09-24", want: "off:2026-09-24"},
-		{name: "on にも付けられる", state: "on", until: "2026-10-01", want: "on:2026-10-01"},
-		{name: "until の前後空白は無視", state: "off", until: "  2026-09-24  ", want: "off:2026-09-24"},
-		{name: "auto に until は付けられない", state: "auto", until: "2026-09-24", wantErr: true},
-		{name: "不正な日付は弾く", state: "off", until: "9/24", wantErr: true},
+		{
+			name: "until 省略なら従来どおり", state: "off", until: "",
+			wantStored: "off", wantInReply: "常時停止",
+		},
+		{
+			name: "until 指定で復帰日つきが保存される", state: "off", until: "2026-09-24",
+			wantStored: "off:2026-09-24", wantInReply: "2026-09-24",
+		},
+		{
+			name: "on にも付けられる", state: "on", until: "2026-10-01",
+			wantStored: "on:2026-10-01", wantInReply: "2026-10-01",
+		},
+		{
+			name: "until の前後空白は無視", state: "off", until: "  2026-09-24  ",
+			wantStored: "off:2026-09-24", wantInReply: "2026-09-24",
+		},
+		{
+			name: "auto に until は付けられない", state: "auto", until: "2026-09-24",
+			wantNoWrite: true,
+		},
+		{
+			name: "不正な日付は書き込みへ進まない", state: "off", until: "9/24",
+			wantNoWrite: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// handler と同じ結合手順を通す
-			raw := tt.state
-			if u := trimSpaceForTest(tt.until); u != "" {
-				raw = trimSpaceForTest(raw) + ":" + u
+			ssm := &fakeSSM{value: "auto"}
+			h := NewHandler(newTestUptimeService(ssm), &stagingSetterStub{}, noopDispatcher(), "", "role-allowed")
+
+			options := []CommandOption{{Name: OptionNameState, Value: tt.state}}
+			if tt.until != "" {
+				options = append(options, CommandOption{Name: OptionNameUntil, Value: tt.until})
 			}
-			got, err := ParseOverride(raw)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("state=%q until=%q はエラーになるべき（got %q）", tt.state, tt.until, got)
+			resp := h.handleCommand(context.Background(), &Interaction{
+				Type:   InteractionTypeApplicationCommand,
+				Member: &Member{Roles: []string{"role-allowed"}},
+				Data:   &InteractionData{Name: CommandNameProd, Options: options},
+			})
+
+			if tt.wantNoWrite {
+				if ssm.putCalls > 0 {
+					t.Errorf("不正な指定なのにSSMへ書き込んでいる: %q", ssm.putValue)
 				}
 				return
 			}
-			if err != nil {
-				t.Fatalf("state=%q until=%q: %v", tt.state, tt.until, err)
+			if ssm.putCalls != 1 {
+				t.Fatalf("SSMへの書き込み回数 = %d, want 1", ssm.putCalls)
 			}
-			if got != tt.want {
-				t.Errorf("got %q, want %q", got, tt.want)
+			if ssm.putValue != tt.wantStored {
+				t.Errorf("保存値 = %q, want %q", ssm.putValue, tt.wantStored)
+			}
+			// 応答が実際の設定内容と食い違うと、停止固定にしたのに
+			// 「autoへ戻しました」と読めてしまう。
+			if got := contentOf(resp); !strings.Contains(got, tt.wantInReply) {
+				t.Errorf("応答に %q が含まれない: %q", tt.wantInReply, got)
 			}
 		})
 	}
 }
 
-func trimSpaceForTest(s string) string {
-	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t') {
-		s = s[1:]
+// TestOverrideAppliedMessage_Expiry は確認メッセージが復帰日つきでも
+// 実際の設定内容を伝えることを固定する。
+func TestOverrideAppliedMessage_Expiry(t *testing.T) {
+	tests := []struct {
+		state      string
+		wantHas    []string
+		wantNotHas []string
+	}{
+		{state: "off", wantHas: []string{"常時停止"}, wantNotHas: []string{"自動復帰"}},
+		{state: "on", wantHas: []string{"常時起動"}, wantNotHas: []string{"自動復帰"}},
+		{state: "auto", wantHas: []string{"日付リストに従う"}},
+		{
+			state:      "off:2026-09-24",
+			wantHas:    []string{"常時停止", "2026-09-24", "自動復帰"},
+			wantNotHas: []string{"戻しました"},
+		},
+		{
+			state:      "on:2026-10-01",
+			wantHas:    []string{"常時起動", "2026-10-01", "自動復帰"},
+			wantNotHas: []string{"戻しました"},
+		},
 	}
-	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\t') {
-		s = s[:len(s)-1]
+
+	for _, tt := range tests {
+		t.Run(tt.state, func(t *testing.T) {
+			got := overrideAppliedMessage(tt.state)
+			for _, w := range tt.wantHas {
+				if !strings.Contains(got, w) {
+					t.Errorf("%q が含まれない: %q", w, got)
+				}
+			}
+			for _, w := range tt.wantNotHas {
+				if strings.Contains(got, w) {
+					t.Errorf("%q が含まれてはいけない: %q", w, got)
+				}
+			}
+		})
 	}
-	return s
 }
