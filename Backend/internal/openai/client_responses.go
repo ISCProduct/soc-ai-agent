@@ -25,6 +25,21 @@ type responsesRequest struct {
 	ToolChoice      any              `json:"tool_choice,omitempty"`
 }
 
+// countWebSearchTools はリクエストに含まれる web_search ツールの数を返す。
+//
+// web_search は検索結果の固定トークンに加えて1コール単位のツール料が課金される。
+// モデル名からは判別できない（同じ gpt-4o-mini でも通常のチャットと混ざる）ため、
+// リクエスト内容から数える。
+func countWebSearchTools(tools []map[string]any) int {
+	n := 0
+	for _, t := range tools {
+		if v, ok := t["type"].(string); ok && strings.HasPrefix(v, "web_search") {
+			n++
+		}
+	}
+	return n
+}
+
 func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string, temperature *float32, maxOutputTokens int, includeTextFormat bool) (string, error) {
 	payload := responsesRequest{
 		Model:           model,
@@ -147,6 +162,7 @@ func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (s
 			completionTokens: parsed.Usage.OutputTokens,
 			latency:          time.Since(start),
 			cacheHit:         parsed.Usage.PromptTokensDetails != nil && parsed.Usage.PromptTokensDetails.CachedTokens > 0,
+			webSearchCalls:   countWebSearchTools(payload.Tools),
 		})
 		if parsed.Usage.PromptTokensDetails != nil {
 			cached := parsed.Usage.PromptTokensDetails.CachedTokens
