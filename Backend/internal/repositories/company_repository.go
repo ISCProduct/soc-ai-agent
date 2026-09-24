@@ -327,6 +327,25 @@ func (r *CompanyRepository) CountWeightProfiles() (int64, error) {
 	return count, err
 }
 
+// CountPublishedWithoutWeightProfile は公開中なのに会社単位プロファイル
+// （job_position_id IS NULL）を持たない企業数を返す（#1380）。
+//
+// 公開判定は CountPublished / FindAllPublished と同じ条件にする。
+// ここがずれると「マッチング対象から外れた企業数」が実態と合わなくなる。
+func (r *CompanyRepository) CountPublishedWithoutWeightProfile() (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Company{}).
+		Where("is_active = ? AND data_status = ?", true, "published").
+		Where("NOT EXISTS (?)",
+			r.db.Model(&models.CompanyWeightProfile{}).
+				Select("1").
+				Where("company_weight_profiles.company_id = companies.id").
+				Where("company_weight_profiles.job_position_id IS NULL"),
+		).
+		Count(&count).Error
+	return count, err
+}
+
 // ListPublishedL1WarmCandidates は L1 未充足の公開企業を返す。
 func (r *CompanyRepository) ListPublishedL1WarmCandidates(limit int, infoTTL time.Duration) ([]models.CompanyL1WarmRow, error) {
 	if limit <= 0 {

@@ -19,6 +19,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/services/analysis"
 	"Backend/internal/services/chat"
+	"Backend/internal/services/matching"
 	"Backend/internal/services/shared"
 
 	"github.com/stretchr/testify/mock"
@@ -503,6 +504,72 @@ func TestChatController_GetRecommendations_NoMatches_ReturnEmpty(t *testing.T) {
 	rec := httptest.NewRecorder()
 	testsupport.AssertStatus(t, newChatController(chatSvc, matchSvc, nil, nil, nil).GetRecommendations, testsupport.NewCtx(req, rec), http.StatusOK)
 	matchSvc.AssertExpectations(t)
+}
+
+// TestChatController_GetRecommendations_EmptyReason は空レスポンスの reason を固定する（#1380）。
+//
+// insufficient_company_data はフロント（frontend/app/results/utils.ts）で
+// 「企業情報を公開するまでお待ちください」と表示される。企業は公開済みで
+// プロファイルだけが無いケースにこれを返すと、公開作業では直らない問題に
+// 誤った復旧手順を案内することになる。
+func TestChatController_GetRecommendations_EmptyReason(t *testing.T) {
+	tests := []struct {
+		name string
+		diag *matching.MatchingDiagnostics
+		want string
+	}{
+		{
+			name: "ユーザースコアが無い",
+			diag: &matching.MatchingDiagnostics{UserScoreCount: 0, ActiveCompanyCount: 10},
+			want: "insufficient_user_scores",
+		},
+		{
+			name: "公開企業が0社",
+			diag: &matching.MatchingDiagnostics{UserScoreCount: 10, ActiveCompanyCount: 0},
+			want: "insufficient_company_data",
+		},
+		{
+			name: "公開企業はあるが全社プロファイル未設定",
+			diag: &matching.MatchingDiagnostics{
+				UserScoreCount: 10, ActiveCompanyCount: 10, CompaniesWithoutProfile: 10,
+			},
+			want: "insufficient_company_profiles",
+		},
+		{
+			name: "一部だけプロファイル欠損（原因は別）",
+			diag: &matching.MatchingDiagnostics{
+				UserScoreCount: 10, ActiveCompanyCount: 10, WeightProfileCount: 9, CompaniesWithoutProfile: 1,
+			},
+			want: "matching_results_empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matchSvc := &mocks.MatchingServiceMock{}
+			chatSvc := &mocks.ChatServiceMock{}
+			matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", 10).Return(nil, nil)
+			matchSvc.On("GetDiagnostics", uint(1), "s1").Return(tt.diag, nil)
+			chatSvc.On("GetUserScores", uint(1), "s1").Return([]entity.UserWeightScore{}, nil)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations?session_id=s1", nil)
+			req = testsupport.WithUserID(req, 1)
+			rec := httptest.NewRecorder()
+			testsupport.AssertStatus(t, newChatController(chatSvc, matchSvc, nil, nil, nil).GetRecommendations,
+				testsupport.NewCtx(req, rec), http.StatusOK)
+
+			var body struct {
+				Reason string `json:"reason"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("レスポンスをデコードできない: %v (%s)", err, rec.Body.String())
+			}
+			if body.Reason != tt.want {
+				t.Errorf("reason=%q want %q", body.Reason, tt.want)
+			}
+			matchSvc.AssertExpectations(t)
+		})
+	}
 }
 
 func TestChatController_GetRecommendations_WithMatches_Success(t *testing.T) {

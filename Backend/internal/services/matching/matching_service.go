@@ -86,12 +86,23 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 
 	// 3. 各企業とのマッチングを計算（プロファイルはメモリ上で参照）
 	pending := make([]*entity.UserCompanyMatch, 0, len(companies))
+	skippedNoProfile := 0
 	for i := range companies {
 		company := &companies[i]
 		profile, ok := profiles[company.ID]
 		if !ok || profile == nil {
-			log.Printf("[CalculateMatching] Warning: No profile for company %d; using default weights\n", company.ID)
-			profile = defaultCompanyWeightProfile(company.ID)
+			// プロファイルが無い企業はマッチング対象から外す（#1380）。
+			//
+			// 以前は全軸50のデフォルトで埋めていたが、全軸50は「取りうる中で
+			// 最も平坦なプロファイル」で、マッチ度が 100-|差| である以上、
+			// スコアが50付近の平均的な学生に対して各軸100点になる。
+			// 情報が無い企業ほど上位に来るという逆のインセンティブになり、
+			// 学生にも「なぜ1位なのか」を説明できない。
+			//
+			// 根拠が無いなら勧めない。件数は CountPublishedWithoutWeightProfile
+			// （GetDiagnostics の companies_without_profile）で集計できる。
+			skippedNoProfile++
+			continue
 		}
 
 		match := s.calculateMatchScore(scoreMap, profile)
@@ -113,6 +124,11 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 		//
 		// AI 生成の理由は高価なので上位N件だけ保存する（applyAIReasonsToTopMatches）。
 		pending = append(pending, match)
+	}
+
+	if skippedNoProfile > 0 {
+		log.Printf("[CalculateMatching] Skipped %d of %d published companies without weight profile\n",
+			skippedNoProfile, len(companies))
 	}
 
 	// 4. 表示されるのは match_score 降順の上位のみ（FindTopMatchesByUserAndSession）。
@@ -244,27 +260,6 @@ func (s *MatchingService) calculateMatchScore(
 	return match
 }
 
-// defaultCompanyWeightProfile はプロファイル未設定企業の代替（全軸50）。
-//
-// 注意: 線形化(#1124)により、スコアが50付近のユーザーはこの企業と全軸100点になる。
-// 現状は公開企業すべてにプロファイルがあるため到達しないが、
-// 新規企業を入れたときに「なぜか100%の企業」が出たらここを疑うこと。
-func defaultCompanyWeightProfile(companyID uint) *models.CompanyWeightProfile {
-	return &models.CompanyWeightProfile{
-		CompanyID:             companyID,
-		TechnicalOrientation:  50,
-		TeamworkOrientation:   50,
-		LeadershipOrientation: 50,
-		CreativityOrientation: 50,
-		StabilityOrientation:  50,
-		GrowthOrientation:     50,
-		WorkLifeBalance:       50,
-		ChallengeSeeking:      50,
-		DetailOrientation:     50,
-		CommunicationSkill:    50,
-	}
-}
-
 // scoredMatch はカテゴリ1つ分のマッチ度を返す。
 //
 // 未計測カテゴリは平均に含めない（#1124）。以前は中立値(50)で埋めたうえで
@@ -330,6 +325,9 @@ type MatchingDiagnostics struct {
 	UserScoreCount     int64 `json:"user_score_count"`
 	ActiveCompanyCount int64 `json:"active_company_count"`
 	WeightProfileCount int64 `json:"weight_profile_count"`
+	// CompaniesWithoutProfile は公開中なのに会社単位プロファイルを持たない企業数（#1380）。
+	// これらはマッチング対象から外れるため、推薦が出ない原因を運用者が数えられるようにする。
+	CompaniesWithoutProfile int64 `json:"companies_without_profile"`
 }
 
 func (s *MatchingService) GetDiagnostics(userID uint, sessionID string) (*MatchingDiagnostics, error) {
@@ -345,10 +343,15 @@ func (s *MatchingService) GetDiagnostics(userID uint, sessionID string) (*Matchi
 	if err != nil {
 		return nil, err
 	}
+	companiesWithoutProfile, err := s.companyRepo.CountPublishedWithoutWeightProfile()
+	if err != nil {
+		return nil, err
+	}
 	return &MatchingDiagnostics{
-		UserScoreCount:     userScoreCount,
-		ActiveCompanyCount: activeCompanyCount,
-		WeightProfileCount: weightProfileCount,
+		UserScoreCount:          userScoreCount,
+		ActiveCompanyCount:      activeCompanyCount,
+		WeightProfileCount:      weightProfileCount,
+		CompaniesWithoutProfile: companiesWithoutProfile,
 	}, nil
 }
 

@@ -172,6 +172,11 @@ func (m *CompanyRepositoryMock) CountWeightProfiles() (int64, error) {
 	return args.Get(0).(int64), args.Error(1)
 }
 
+func (m *CompanyRepositoryMock) CountPublishedWithoutWeightProfile() (int64, error) {
+	args := m.Called()
+	return args.Get(0).(int64), args.Error(1)
+}
+
 func (m *CompanyRepositoryMock) ListPublishedL1WarmCandidates(limit int, infoTTL time.Duration) ([]models.CompanyL1WarmRow, error) {
 	args := m.Called(limit, infoTTL)
 	if v := args.Get(0); v != nil {

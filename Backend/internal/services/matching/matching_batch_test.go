@@ -86,6 +86,15 @@ func (s *matchingCompanyRepo) CreateOrUpdateWeightProfile(*models.CompanyWeightP
 func (s *matchingCompanyRepo) CountWeightProfiles() (int64, error) {
 	return int64(len(s.profiles)), nil
 }
+func (s *matchingCompanyRepo) CountPublishedWithoutWeightProfile() (int64, error) {
+	var n int64
+	for i := range s.companies {
+		if s.profiles[s.companies[i].ID] == nil {
+			n++
+		}
+	}
+	return n, nil
+}
 func (s *matchingCompanyRepo) ListPublishedL1WarmCandidates(int, time.Duration) ([]models.CompanyL1WarmRow, error) {
 	return nil, nil
 }
@@ -118,12 +127,15 @@ func (s *matchingScoreRepo) CountByUserAndSession(uint, string) (int64, error) {
 type matchingMatchRepo struct {
 	batchCalls int
 	saved      int
+	// savedMatches は保存対象そのもの。どの企業が対象に残ったかを検証する（#1380）
+	savedMatches []*entity.UserCompanyMatch
 }
 
 func (s *matchingMatchRepo) CreateOrUpdate(*entity.UserCompanyMatch) error { return nil }
 func (s *matchingMatchRepo) CreateOrUpdateBatch(matches []*entity.UserCompanyMatch) (int, error) {
 	s.batchCalls++
 	s.saved = len(matches)
+	s.savedMatches = matches
 	return len(matches), nil
 }
 func (s *matchingMatchRepo) FindTopMatchesByUserAndSession(uint, string, int) ([]*entity.UserCompanyMatch, error) {
@@ -145,7 +157,7 @@ func TestCalculateMatching_UsesBatchProfileAndUpsert(t *testing.T) {
 		companies: []models.Company{
 			{ID: 1, Name: "A社", Industry: "IT"},
 			{ID: 2, Name: "B社", Industry: "製造"},
-			{ID: 3, Name: "C社", Industry: "IT"}, // プロファイルなし → デフォルト重み
+			{ID: 3, Name: "C社", Industry: "IT"}, // プロファイルなし → 対象外(#1380)
 		},
 		profiles: map[uint]*models.CompanyWeightProfile{
 			1: {CompanyID: 1, TechnicalOrientation: 80},
@@ -166,8 +178,8 @@ func TestCalculateMatching_UsesBatchProfileAndUpsert(t *testing.T) {
 	if matchRepo.batchCalls != 1 {
 		t.Fatalf("CreateOrUpdateBatch calls=%d want 1", matchRepo.batchCalls)
 	}
-	if matchRepo.saved != 3 {
-		t.Fatalf("saved matches=%d want 3 (missing profile uses default weights)", matchRepo.saved)
+	if matchRepo.saved != 2 {
+		t.Fatalf("saved matches=%d want 2 (プロファイル無しは対象外)", matchRepo.saved)
 	}
 }
 
