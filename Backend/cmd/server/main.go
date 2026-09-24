@@ -651,7 +651,11 @@ func main() {
 	companyPortalProfileController := companycontrollers.NewCompanyPortalProfileController(
 		companyportal.NewProfileService(companyRepo), companyUserService,
 	)
-	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, cfg.CompanyUserSecret, companyUserRepo)
+	// 学校への掲載申請 (#1506)。専用テーブル school_company_applications を使う。
+	companyPortalSchoolApplicationController := companycontrollers.NewCompanyPortalSchoolApplicationController(
+		companyportal.NewSchoolApplicationService(repositories.NewSchoolCompanyApplicationRepository(db)),
+	)
+	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, companyPortalSchoolApplicationController, cfg.CompanyUserSecret, companyUserRepo)
 	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())
