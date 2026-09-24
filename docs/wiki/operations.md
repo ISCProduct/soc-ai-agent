@@ -405,6 +405,12 @@ DSN は Secrets Manager 等に置き、リポジトリには置かない。
 
 - リクエストボディ / Cookie / QueryString
 - `Authorization` / `X-Admin-Token` / `X-User-Token` / `X-Company-User-Token` / `X-Internal-Token`
+- `X-Origin-Token`（CloudFront の経路証明。漏れると公開ALB直叩きで詐称XFFを署名させられる）/ `Referer`（遷移元のクエリにワンタイムトークンが載る）
+
+一覧は frontend `frontend/lib/sentry.ts` の `SENSITIVE_HEADERS` と Backend
+`Backend/internal/observability/sentry.go` の `sensitiveHeaders` の2箇所にある。
+片方だけ直す事故を防ぐため、両者の食い違いは Go のテスト
+（`TestSensitiveHeaders_フロントと同期`）で落ちる。
 
 相関は既存の `X-Request-ID`（`request_id` タグ）で行う（3.1 節）。
 
@@ -642,14 +648,30 @@ backend を叩くため、インスタンス毎に生成した値だと組み合
 SSM パラメータの中身は `random_password.bff_internal_token` と同じ値なので、
 どちらの経路でも必ず一致する。SSM を読めなかった場合はデプロイログに `WARN` を出し、
 `.env` は変更しない（user_data が書いた正しい値を消さないため）。
+`deployment.yml` は **running のインスタンス全台**へ SSH するので、ASG が複数台へ
+増えていても配り漏れは出ない。
 
-デプロイを待たずに確認するなら:
+デプロイを待たずに確認するなら。**トークンの値そのものは表示しない**
+（端末のスクロールバック・セッション録画・貼り付けたログに残り、拾った者は
+公開 backend ALB へ任意の `X-Client-IP` を送って送信元IPを詐称できる）。
+ハッシュの先頭12桁だけを突き合わせる:
 
 ```sh
-# terraform 側の正解
-aws ssm get-parameter --name /soc-stg/bff-internal-token --query Parameter.Value --output text
-# 各インスタンスの実値（全台で上と一致していること）
-ssh ubuntu@<staging-ip> "sudo grep '^BFF_INTERNAL_TOKEN=' /opt/app/.env"
+# terraform 側の正解（値は出さずハッシュだけ）
+EXPECTED=$(aws ssm get-parameter --name /soc-stg/bff-internal-token \
+  --query Parameter.Value --output text \
+  | tr -d '\n' | openssl dgst -sha256 | awk '{print substr($NF,1,12)}')
+echo "expected: $EXPECTED"
+
+# 全 running インスタンスの実値のハッシュ（すべて expected と一致していること）
+aws ec2 describe-instances \
+  --filters Name=tag:Name,Values=soc-stg-app Name=instance-state-name,Values=running \
+  --query 'Reservations[].Instances[].PublicIpAddress' --output text \
+  | tr '\t' '\n' | while read -r ip; do
+      printf '%s: ' "$ip"
+      ssh ubuntu@"$ip" "sudo sed -n 's/^BFF_INTERNAL_TOKEN=//p' /opt/app/.env \
+        | tr -d '\n' | sha256sum | cut -c1-12"
+    done
 ```
 
 ### 効いているか確認する
