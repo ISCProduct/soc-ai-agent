@@ -182,6 +182,41 @@ func TestAdminDashboardController_ListUsers_SessionStatError(t *testing.T) {
 	testsupport.AssertStatus(t, newAdminDashboardController(userRepo, sessRepo, nil).ListUsers, testsupport.NewCtx(req, rec), http.StatusInternalServerError)
 }
 
+// #1498: ListUsers の limit は httpapi.MaxListLimit(100)でクランプされる。
+// IntQuery に戻すと limit=1000000 が ListUsersPaged にそのまま渡り全件取得になるため、
+// 本番ハンドラ経由でリポジトリに渡る値を固定する。
+func TestAdminDashboardController_ListUsers_ClampsLimit(t *testing.T) {
+	tests := []struct {
+		name       string
+		query      string
+		wantLimit  int
+		wantOffset int
+	}{
+		{name: "未指定は既定値25", query: "", wantLimit: 25, wantOffset: 0},
+		{name: "上限以下はそのまま", query: "?limit=10", wantLimit: 10, wantOffset: 0},
+		{name: "上限超えは100にクランプ", query: "?limit=101", wantLimit: 100, wantOffset: 0},
+		{name: "極端な値も100にクランプ", query: "?limit=1000000", wantLimit: 100, wantOffset: 0},
+		{name: "offsetもクランプ後のlimitで計算する", query: "?limit=1000000&page=3", wantLimit: 100, wantOffset: 200},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/users"+tt.query, nil), nil)
+			rec := httptest.NewRecorder()
+
+			userRepo := &mocks.UserRepositoryMock{}
+			sessRepo := &mocks.DashboardSessionRepoMock{}
+			repRepo := &mocks.DashboardReportRepoMock{}
+			userRepo.On("ListUsersPaged", tt.wantLimit, tt.wantOffset, "", mock.Anything).Return([]entity.User{}, int64(0), nil)
+			sessRepo.On("GetUserStatsBatch", []uint{}).Return(map[uint]repositories.UserSessionStat{}, nil)
+			repRepo.On("FindBySessionIDs", []uint(nil)).Return([]models.InterviewReport{}, nil)
+
+			testsupport.AssertStatus(t, newAdminDashboardController(userRepo, sessRepo, repRepo).ListUsers, testsupport.NewCtx(req, rec), http.StatusOK)
+			userRepo.AssertExpectations(t)
+		})
+	}
+}
+
 // ---- ExportCSV / currentAdminPlan fail-closed (#985 CodeRabbit指摘) ----
 // 組織解決に失敗した場合、entitlement.CurrentPlan()(DEFAULT_PLAN未設定時はPlanPro)へ
 // フォールバックすると特権機能(CSVエクスポート)が一時障害で素通りしてしまうため、
