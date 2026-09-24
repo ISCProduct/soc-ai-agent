@@ -124,6 +124,12 @@ jobs:
       - name: 本番デプロイのRDSガード検査
         run: ./automation/test/prod-deploy-db-guard-test.sh
 
+      # 運用手順の `aws ecs update-service --task-definition <family>`（リビジョン省略）。
+      # 最新 ACTIVE = terraform が tfvars の image(:latest) で登録した定義が選ばれ、
+      # 本番は SHA タグしか push しないため稼働中イメージが巻き戻る/存在せず落ちる。
+      - name: ECS update-service のリビジョン指定検査
+        run: ./automation/test/ecs-update-service-revision-test.sh
+
       - name: Dependabot 互換性の検査
         run: ./automation/test/dependabot-workflow-test.sh
 

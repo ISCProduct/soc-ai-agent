@@ -545,25 +545,69 @@ prod の CloudFront は迂回できるので、段数に数える代わりに
 
 `environment` / `secrets` は ECS タスク定義の `container_definitions` の中にある。
 `terraform apply` で新リビジョンは登録されるが、`aws_ecs_service` は `task_definition` を
-`ignore_changes` しているため**稼働中のタスクは入れ替わらない**。反映するには apply 後に
+`ignore_changes` しているため**稼働中のタスクは入れ替わらない**
+（`infra/terraform/modules/ecs_service_fargate/main.tf` の `lifecycle`）。反映するには apply 後に
 デプロイを1回走らせる（`deployment.yml` は最新リビジョンを取得して image だけ差し替えるので、
 terraform が入れた環境変数はそのまま引き継がれる）。frontend/backend に差分が無い場合は
-手動で強制デプロイする。
+下記の手順で手動反映する。
 
 `BFF_INTERNAL_TOKEN` は frontend と backend の**両方**に入って初めて機能する。
 frontend だけ入れ替えると backend は旧リビジョンのまま期待トークンが空になり、
 `GetClientIP` が転送された `X-Client-IP` を全て捨てて frontend の出口IP1つへ
 再び集約される。必ず2サービスとも流す。
 
+> **`--task-definition soc-app-<svc>`（リビジョン省略）で update-service してはいけない。**
+> リビジョンを省略すると AWS CLI は**最新の ACTIVE リビジョン**＝ terraform が
+> `var.backend_image` / `var.frontend_image` から登録したものを選ぶ。本番デプロイ
+> (`.github/workflows/deployment.yml`) は `soc-backend:<SHA>` / `soc-frontend:<SHA>` しか
+> push せず `latest` を更新しないため、tfvars が `:latest`
+> (`infra/terraform/environments/prod/terraform.tfvars.example`) のままだと、
+> 稼働中のイメージを古いものへ巻き戻すか、存在しないタグでデプロイを失敗させる。
+
+安全な手順は deployment.yml と同じ「最新リビジョンを取って image だけ差し替えて登録」で、
+差し替える先を新しい SHA ではなく**稼働中サービスが今使っている image** にする。
+
 ```sh
-for svc in frontend backend; do
-  aws ecs update-service --cluster soc-app --service "$svc" \
-    --task-definition "soc-app-$svc" --force-new-deployment
+CLUSTER=soc-app
+
+for svc in backend frontend; do
+  container="soc-$svc"   # タスク定義上のコンテナ名(soc-backend / soc-frontend)
+
+  # 1) 稼働中サービスが今使っている image を控える（これを維持するのが目的）
+  running_td=$(aws ecs describe-services --cluster "$CLUSTER" --services "$svc" \
+    --query 'services[0].taskDefinition' --output text)
+  running_image=$(aws ecs describe-task-definition --task-definition "$running_td" \
+    --query "taskDefinition.containerDefinitions[?name=='$container'].image | [0]" --output text)
+  echo "$svc: 稼働中 $running_td / $running_image"
+  case "$running_image" in ""|None) echo "image を取得できない。中止" >&2; exit 1;; esac
+
+  # 2) terraform が登録した最新リビジョン(= 新しい environment/secrets 入り)を取り、
+  #    image だけ 1) の値へ戻して新リビジョンとして登録する
+  aws ecs describe-task-definition --task-definition "$CLUSTER-$svc" \
+    --query 'taskDefinition' \
+    | jq --arg c "$container" --arg img "$running_image" \
+        'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+         | .containerDefinitions |= map(if .name == $c then .image = $img else . end)' \
+    > "/tmp/$svc-td.json"
+
+  new_td=$(aws ecs register-task-definition --cli-input-json "file:///tmp/$svc-td.json" \
+    --query 'taskDefinition.taskDefinitionArn' --output text)
+
+  # 3) 反映前に、狙った環境変数が入っていて image が変わっていないことを確認する
+  aws ecs describe-task-definition --task-definition "$new_td" \
+    --query "taskDefinition.containerDefinitions[?name=='$container'].{image:image,env:environment[?name=='TRUSTED_PROXY_HOPS'||name=='CLOUDFRONT_ORIGIN_TOKEN'],secrets:secrets[?name=='BFF_INTERNAL_TOKEN']}"
+
+  # 4) リビジョンを明示して適用する（family だけ渡すと 1) の image が上書きされる）
+  aws ecs update-service --cluster "$CLUSTER" --service "$svc" --task-definition "$new_td"
 done
 
 # 両方が新リビジョンで安定するまで待つ
-aws ecs wait services-stable --cluster soc-app --services frontend backend
+aws ecs wait services-stable --cluster soc-app --services backend frontend
 ```
+
+`--force-new-deployment` は不要（`--task-definition` を変えた時点で新しいデプロイが走る）。
+本番が停止日（`desired_count=0`）なら update-service だけ打っておけばよく、
+`services-stable` は即座に返る。次にスケジューラが起動した時点で新リビジョンが使われる。
 
 ### staging の既存インスタンスへ反映する
 
