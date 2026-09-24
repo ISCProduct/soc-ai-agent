@@ -10,6 +10,7 @@
    - [稼働日の前日チェックリスト](#33-稼働日の前日チェックリスト-1388)
    - [エラートラッキング(Sentry)の有効化](#34-エラートラッキングsentryの有効化-1185)
    - [エラートラッキング（Sentry）](#34-エラートラッキングsentry-619--1185)
+   - [クライアントIPをBFFからBackendへ引き継ぐ](#35-クライアントipをbffからbackendへ引き継ぐ-1407)
 4. [障害対応](#4-障害対応)
 5. [データベース管理](#5-データベース管理)
 6. [管理画面操作](#6-管理画面操作)
@@ -482,6 +483,54 @@ null を返し、`Backend/internal/observability/sentry.go` も DSN 空なら初
 - パンくずの URL、および console のパンくずは丸ごと破棄
 
 `sendDefaultPii: false` / `tracesSampleRate: 0`（トレースは送らない＝Sentry の枠を消費しない）。
+
+---
+
+## 3.5 クライアントIPをBFFからBackendへ引き継ぐ (#1407)
+
+Next.js の Route Handler（BFF）が Backend を呼ぶと、Backend から見た送信元は
+frontend タスクの出口IP1つに収束する。転送しないと「IP単位」のレート制限
+（ログイン 20回/分、パスワードリセット 5回/時、企業情報のゲスト投稿 5回/時、
+ゲストAI）が**全利用者合計の上限**として効き、展示会など同時アクセスが増える場面で
+無関係な利用者が 429 で締め出される。
+
+### 信頼境界
+
+backend の ALB はインターネットに直結しているため、`X-Client-IP` は誰でも送れる。
+無条件に採用するとIP単位の制限を詐称で回避できるので、**BFF と共有するトークンが
+一致した場合に限り**採用する。
+
+| 区間 | ヘッダー | 採用条件 |
+| --- | --- | --- |
+| ブラウザ -> CloudFront/ALB/nginx -> Next.js | `X-Forwarded-For` | 各プロキシが末尾へ直前の送信元を追記する。クライアント指定値は先頭に残る |
+| Next.js -> Backend | `X-Client-IP` + `X-Internal-Token` | `lib/api-proxy.ts` の `clientIpHeaders` が、XFF の末尾から `TRUSTED_PROXY_HOPS` 番目の要素だけを載せる。クライアントが送ってきた `X-Client-IP` は読まない |
+| Backend | - | `middleware.GetClientIP` が `BFF_INTERNAL_TOKEN` と定数時間比較し、一致かつIPとして妥当なときだけ採用。それ以外は従来どおり ALB が付けた XFF 末尾へフォールバック |
+
+トークン未設定なら BFF は何も送らず、Backend も何も見ない（従来の挙動のまま）。
+シークレット未配布でサイトが落ちないようにするための無効化であって、素通しではない。
+
+### 環境変数
+
+| 変数 | 置き場所 | 値 |
+| --- | --- | --- |
+| `BFF_INTERNAL_TOKEN` | frontend タスクと backend タスクの両方 | 同じランダム文字列。prod は Secrets Manager `soc-app/bff-internal`、staging は EC2 の共有 `.env`（いずれも Terraform の `random_password` が生成） |
+| `TRUSTED_PROXY_HOPS` | frontend タスクのみ | frontend の手前にいる信頼できるプロキシの段数。ALB のみ=1（既定）、CloudFront+ALB=2、CloudFront+ALB+edge nginx=3 |
+
+`TRUSTED_PROXY_HOPS` は経路を1段でも増減させたら必ず合わせる。多く見積もると
+クライアントが先頭に詰めた詐称値を拾いうるため、迷ったら小さい値（＝より末尾側）にする。
+値が XFF の要素数を超えた場合は推測せず転送しない。
+
+### 効いているか確認する
+
+```sh
+# 別々の回線（テザリング等）から2回ログインに失敗させ、
+# 一方が 429 になっても他方が通ることを見る
+curl -i -X POST https://shukatsu-ai.jp/api/company-auth/login \
+  -H 'Content-Type: application/json' -d '{"email":"...","password":"..."}'
+```
+
+企業情報のゲスト投稿の監査ログ（`company_entry_submissions.source_ip`）も同じ経路でIPを取るため、
+転送が効いていれば投稿ごとに異なるIPが記録される。
 
 ---
 

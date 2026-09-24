@@ -4,6 +4,7 @@ package middleware
 // 既定はインメモリ。REDIS_URL 利用時は Redis スライディングウィンドウに切替可能。
 
 import (
+	"crypto/subtle"
 	"net"
 	"net/http"
 	"os"
@@ -89,13 +90,59 @@ func (rl *RateLimiter) cleanupLoop() {
 	}
 }
 
+// ClientIPHeader は BFF(Next.js Route Handler)が実クライアントIPを載せるヘッダー名 (#1407)。
+const ClientIPHeader = "X-Client-IP"
+
+// InternalTokenHeader は内部サービス間の共有シークレットを載せるヘッダー名。
+// Backend -> RAG で既に使っている名前に揃える(Sentry のヘッダー除去対象にも入っている)。
+const InternalTokenHeader = "X-Internal-Token"
+
+// BFFInternalTokenEnv は BFF からの呼び出しであることを示す共有シークレットの環境変数名。
+// frontend タスクと backend タスクへ同じ値を配る。
+const BFFInternalTokenEnv = "BFF_INTERNAL_TOKEN"
+
+// trustedForwardedClientIP は BFF が転送した実クライアントIPを返す。信用できない場合は空文字列。
+//
+// 信頼境界:
+// backend の ALB はインターネットに直結しているため、X-Client-IP は誰でも送れる。
+// 無条件に採用するとIP単位のレート制限を詐称で回避できるので、BFF と共有する
+// BFF_INTERNAL_TOKEN が一致したときに限り採用する。未設定・不一致・IPとして不正な値は
+// すべて無視し、呼び出し元は従来どおり ALB が付けた XFF 末尾へフォールバックする
+// (シークレット未配布でもサービスが止まらないようにするため、拒否ではなく無視)。
+func trustedForwardedClientIP(r *http.Request) string {
+	expected := strings.TrimSpace(os.Getenv(BFFInternalTokenEnv))
+	if expected == "" {
+		return ""
+	}
+	provided := strings.TrimSpace(r.Header.Get(InternalTokenHeader))
+	// 比較時間から推測されないよう定数時間比較（他の内部認証と同じ方針）
+	if subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
+		return ""
+	}
+	// BFF は1件しか載せない想定だが、経路が増えても XFF と同じ「末尾が実IP」の
+	// 規則で読めるようにしておく。
+	parts := strings.Split(r.Header.Get(ClientIPHeader), ",")
+	ip := stripPort(strings.TrimSpace(parts[len(parts)-1]))
+	if net.ParseIP(ip) == nil {
+		return ""
+	}
+	return ip
+}
+
 // GetClientIP は X-Forwarded-For / X-Real-IP を優先してクライアントIPを取得する。
 //
 // X-Forwarded-For はクライアントが自由に詐称でき、ALB は「既存の値の末尾」へ実IPを追記する。
 // したがって信頼できるのは最後の要素のみ。以前は複数要素のときにカンマ区切り文字列を
 // そのまま返しており、攻撃者が先頭を書き換えるだけで無限に異なるキーを作れたため、
 // IP単位のレート制限(ログイン試行を含む)を完全に回避できた。
+//
+// BFF 経由のリクエストは XFF 末尾が frontend タスクの出口IP1つに収束し、IP単位の制限が
+// 全利用者共通の上限として効いてしまう(#1407)。そのため信頼できる経路から届いた
+// X-Client-IP のみを最優先で採用する。
 func GetClientIP(r *http.Request) string {
+	if ip := trustedForwardedClientIP(r); ip != "" {
+		return ip
+	}
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.Split(xff, ",")
 		if last := strings.TrimSpace(parts[len(parts)-1]); last != "" {

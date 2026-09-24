@@ -275,6 +275,15 @@ resource "random_id" "token_encryption_key" {
   byte_length = 32
 }
 
+# frontend(BFF) -> backend の内部認証トークン(#1407)。
+# backend は このトークンが一致したときだけ BFF の X-Client-IP を実クライアントIPとして
+# 採用する。staging は1ホストの docker compose で .env を共有するため、
+# この1つの値が frontend/backend の両コンテナへ渡る。
+resource "random_password" "bff_internal_token" {
+  length  = 48
+  special = false
+}
+
 data "aws_ami" "app" {
   most_recent = true
   owners      = ["099720109477"] # Canonical
@@ -345,6 +354,8 @@ resource "aws_launch_template" "app" {
     oauth_state_secret       = random_password.oauth_state_secret.result
     sentry_dsn               = var.sentry_dsn
     token_encryption_key     = random_id.token_encryption_key.hex
+    bff_internal_token       = random_password.bff_internal_token.result
+    trusted_proxy_hops       = var.enable_error_fallback ? "3" : "2"
     edge_nginx_conf          = file("${path.module}/../../../nginx/staging-edge.conf")
     service_unavailable_html = file("${path.module}/../../../static/service-unavailable.html")
     service_starting_html    = file("${path.module}/../../../static/service-starting.html")
