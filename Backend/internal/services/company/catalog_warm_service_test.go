@@ -205,4 +205,24 @@ func TestCoverage_Rates(t *testing.T) {
 	if len(cov.Alerts) == 0 {
 		t.Fatal("expected alerts")
 	}
+	// #1380: プロファイルが無い企業はマッチング対象外。
+	// 一部欠損（ここでは 100社中50社）でも運用者が件数を直接読めること。
+	if cov.MissingProfile != 50 {
+		t.Fatalf("companies_without_profile=%d want 50", cov.MissingProfile)
+	}
+}
+
+// TestCoverage_MissingProfileNeverNegative は集計タイミングのズレで
+// HasProfile > PublishedTotal になっても負の件数を出さないことを固定する。
+func TestCoverage_MissingProfileNeverNegative(t *testing.T) {
+	repo := &warmRepoStub{
+		stats: &models.L1CoverageStats{PublishedTotal: 10, HasProfile: 12},
+	}
+	cov, err := NewCatalogWarmService(repo, nil, nil).Coverage(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cov.MissingProfile != 0 {
+		t.Fatalf("companies_without_profile=%d want 0", cov.MissingProfile)
+	}
 }

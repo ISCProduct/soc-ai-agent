@@ -228,3 +228,40 @@ func TestCreateOrUpdateBatch_Empty(t *testing.T) {
 		t.Fatalf("saved=%d err=%v want 0/nil", saved, err)
 	}
 }
+
+// TestFindTopMatchesByUserAndSession_ExcludesCompaniesWithoutProfile は
+// プロファイルを失った企業のマッチ行が推薦に出ないことを SQL レベルで固定する（#1380）。
+//
+// CalculateMatching はプロファイルが無い企業をスキップするだけで、既存の
+// user_company_matches は残る（CreateOrUpdateBatch は upsert なので削除しない）。
+// この条件が落ちると、デフォルト重み（全軸50）時代に作られた行や
+// プロファイル削除前に作られた行が、再計算後も推薦一覧・メールレポートに
+// 古いスコアのまま出続ける。
+func TestFindTopMatchesByUserAndSession_ExcludesCompaniesWithoutProfile(t *testing.T) {
+	repo, mock, captured := newMatchRepoMock(t)
+
+	mock.ExpectQuery("SELECT \\* FROM `user_company_matches`").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	if _, err := repo.FindTopMatchesByUserAndSession(1, "s1", 10); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(*captured) == 0 {
+		t.Fatal("SQLが記録されていない")
+	}
+	sql := (*captured)[0]
+	for _, want := range []string{
+		"EXISTS",                          // プロファイルを持つ企業に限定
+		"company_weight_profiles",         // 突き合わせ先
+		"job_position_id IS NULL",         // 会社単位プロファイルのみ（求人単位を拾わない）
+		"user_company_matches.company_id", // 相関先を取り違えると全件通過する
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("発行SQLに %q が無い:\n%s", want, sql)
+		}
+	}
+	// 行自体は消さない方針（is_favorited / is_applied を守る）
+	if strings.Contains(sql, "DELETE") {
+		t.Errorf("読み出し経路で行を削除している: %s", sql)
+	}
+}

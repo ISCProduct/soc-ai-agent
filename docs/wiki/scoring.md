@@ -274,9 +274,22 @@ type CompanyWeightProfile struct {
 学生にも「なぜこの企業が1位なのか」を説明できなかった。
 
 - 学生から見える影響: プロファイルが無い企業は推薦に出ない（`user_company_matches` に行を作らない）
-- 運用者から見える影響: `GET /api/chat/recommendations` の `diagnostics.companies_without_profile`
-  （`CountPublishedWithoutWeightProfile`）で対象外になった企業数を数えられる。
-  公開企業がすべてプロファイル未設定なら `reason = insufficient_company_data` を返す
+- **既存行も読み出し時に除外する**: `CalculateMatching` は行を作らないだけで、過去に作られた
+  `user_company_matches` は残る（`CreateOrUpdateBatch` は upsert で削除しない）。
+  そのため読み出し側でも外す — `FindTopMatchesByUserAndSession`（推薦一覧・メールレポート）と
+  `FindLowMatchApplicationsByUsers`（教員の低マッチ集計）に
+  `CompanyHasWeightProfileSQL` の EXISTS 条件を入れている。
+  **行は消さない**。`is_viewed` / `is_favorited` / `is_applied` はユーザー操作の結果で、
+  プロファイルを生成し直せば元のスコアごと復帰する。削除すると復帰できない
+- 運用者から見える影響:
+  - 一部欠損の常時監視は `GET /api/admin/companies/l1-coverage` の
+    `companies_without_profile`（= `published_total - has_profile`。追加クエリ無し）。
+    `profile_rate` / `profile_target=0.95` のアラートも同じ数字から出る
+  - 推薦が0件になったときは `GET /api/chat/recommendations` の
+    `diagnostics.companies_without_profile`（`CountPublishedWithoutWeightProfile`）
+  - 公開企業がすべてプロファイル未設定なら `reason = insufficient_company_profiles` を返す。
+    公開企業が0社の `insufficient_company_data` とは分ける
+    （前者は「プロファイル生成が必要」、後者は「企業公開が必要」で復旧手順が違う）
 - プロファイルは `FetchAndSavePersona`（AI）で生成する。失敗した企業は推薦に出ないまま残るため、
   上の件数が増え続けていないかを見る
 - 識別力が低いだけ（全軸ほぼ同値）のプロファイルは**除外しない**。保存はして記録に残す（#1331）
