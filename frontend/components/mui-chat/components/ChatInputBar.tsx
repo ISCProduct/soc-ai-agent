@@ -64,10 +64,7 @@ export function ChatInputBar({
           <Button
             variant="contained"
             size="large"
-            onClick={() => {
-              console.log('[MUI Chat] Rendering completion button (analysisComplete=true)')
-              onShowCompletionModal()
-            }}
+            onClick={onShowCompletionModal}
             sx={{
               py: 2,
               px: 4,

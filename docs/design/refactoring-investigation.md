@@ -131,7 +131,7 @@ FE ページは約 **44**。FE の `*.test.ts(x)` は約 **9** と少なく、**
 
 **Frontend pages:** `resume`, `profile`, `company/[id]`, `admin/score-validation`, `schedule`, `es-rewrite` など。
 
-**Frontend components:** `company-results`, `github-skills`, `job-agent-chat`, `Correlation-diagram`, `analysis-sidebar`。
+**Frontend components:** `company-results`, `github-skills`, `Correlation-diagram`, `analysis-sidebar`。
 
 ---
 
