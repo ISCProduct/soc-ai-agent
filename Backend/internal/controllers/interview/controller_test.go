@@ -301,6 +301,40 @@ func TestInterviewController_GetTrend_Success(t *testing.T) {
 	svc.AssertExpectations(t)
 }
 
+// TestInterviewController_GetTrend_LimitCap は limit クエリの頭打ちを固定する(#1478)。
+//
+// 上限が無いと limit=1000000 がそのままサービスへ渡り、完了済みセッション全件が
+// 読まれる。一覧系(List/HRList)と同じ 100 に揃える。
+func TestInterviewController_GetTrend_LimitCap(t *testing.T) {
+	tests := []struct {
+		name      string
+		query     string
+		wantLimit int
+	}{
+		{name: "未指定は既定の20", query: "", wantLimit: 20},
+		{name: "上限内はそのまま", query: "?limit=5", wantLimit: 5},
+		{name: "上限ちょうど", query: "?limit=100", wantLimit: 100},
+		{name: "上限超過は100へ頭打ち", query: "?limit=101", wantLimit: 100},
+		{name: "極端な値も100へ頭打ち", query: "?limit=1000000", wantLimit: 100},
+		{name: "0は既定の20", query: "?limit=0", wantLimit: 20},
+		{name: "負値は既定の20", query: "?limit=-1", wantLimit: 20},
+		{name: "数値以外は既定の20", query: "?limit=abc", wantLimit: 20},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/interviews/trend"+tt.query, nil)
+			req = testsupport.WithUserID(req, 1)
+			rec := httptest.NewRecorder()
+
+			svc := &mocks.InterviewServiceMock{}
+			svc.On("GetTrend", uint(1), tt.wantLimit).Return([]interview.InterviewTrendPoint{}, nil)
+			testsupport.AssertStatus(t, newInterviewController(svc).GetTrend, testsupport.NewCtx(req, rec), http.StatusOK)
+			svc.AssertExpectations(t)
+		})
+	}
+}
+
 // ---- GetReport ----
 
 func TestInterviewController_GetReport_Unauthorized(t *testing.T) {

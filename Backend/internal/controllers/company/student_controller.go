@@ -74,7 +74,7 @@ func (c *CompanyStudentController) filtersFrom(ctx echo.Context) repositories.St
 		Location:   ctx.QueryParam("location"),
 		Skill:      ctx.QueryParam("skill"),
 		Tag:        ctx.QueryParam("tag"),
-		Limit:      httpapi.IntQuery(ctx, "limit", 30),
+		Limit:      httpapi.LimitQuery(ctx, "limit", 30),
 		Offset:     httpapi.IntQuery(ctx, "offset", 0),
 	}
 }

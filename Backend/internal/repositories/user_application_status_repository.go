@@ -226,6 +226,10 @@ func (r *UserApplicationStatusRepository) FindLowMatchApplicationsByUsers(
 		// 算出軸が少ない行は「低マッチ」ではなく「計測不足」（#1124）。
 		// 再計算前の行は matched_axis_count = 0 なので、ここで一緒に除外される。
 		Where("m.matched_axis_count >= ?", minMatchedAxes).
+		// プロファイルを失った企業のマッチ行は古いスコアのまま残る（#1380）。
+		// 学生側の推薦から消えた企業が教員の「低マッチ」一覧にだけ残ると、
+		// 学生と教員で見えている数字が食い違う。
+		Where(CompanyHasWeightProfileSQL("m.company_id")).
 		Order("m.match_score ASC, a.id ASC").
 		Scan(&rows).Error
 	if err != nil {

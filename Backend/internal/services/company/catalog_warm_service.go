@@ -43,9 +43,13 @@ func NewCatalogWarmService(
 
 // L1Coverage は公開カタログの L1 充足率。
 type L1Coverage struct {
-	PublishedTotal int64    `json:"published_total"`
-	InfoFresh      int64    `json:"info_fresh"`
-	HasProfile     int64    `json:"has_profile"`
+	PublishedTotal int64 `json:"published_total"`
+	InfoFresh      int64 `json:"info_fresh"`
+	HasProfile     int64 `json:"has_profile"`
+	// MissingProfile は公開中なのに会社単位プロファイルを持たない企業数（#1380）。
+	// この企業はマッチング対象外なので、1社でも増えれば推薦から抜け落ちている。
+	// PublishedTotal / HasProfile と同じ1回の集計から導出するので追加クエリは無い。
+	MissingProfile int64    `json:"companies_without_profile"`
 	NeedsWarm      int64    `json:"needs_warm"`
 	InfoRate       float64  `json:"info_rate"`
 	ProfileRate    float64  `json:"profile_rate"`
@@ -105,6 +109,7 @@ func (s *CatalogWarmService) Coverage(ctx context.Context) (*L1Coverage, error) 
 		PublishedTotal: stats.PublishedTotal,
 		InfoFresh:      stats.InfoFresh,
 		HasProfile:     stats.HasProfile,
+		MissingProfile: max(stats.PublishedTotal-stats.HasProfile, 0),
 		NeedsWarm:      stats.NeedsWarm,
 		InfoTarget:     0.80,
 		ProfileTarget:  0.95,

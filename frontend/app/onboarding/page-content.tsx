@@ -117,7 +117,7 @@ export default function PageContent() {
         </Box>
         {/* ウェルカムメッセージ */}
         <Box sx={{ textAlign: 'center', mb: 5 }}>
-          <Typography variant="h4" sx={{ fontWeight: 700, mb: 1, fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>
+          <Typography variant="h4" component="h1" sx={{ fontWeight: 700, mb: 1, fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>
             ようこそ！まずはここから始めましょう
           </Typography>
           <Typography sx={{ color: 'text.secondary', fontSize: 16 }}>

@@ -68,6 +68,15 @@ func TestFindLowMatchApplicationsByUsers_SQL(t *testing.T) {
 		// 抜けると全生徒の応募を読み込む
 		require.Contains(t, sql, "user_id IN")
 	})
+
+	// #1380: プロファイルを失った企業のマッチ行は古いスコアのまま残る。
+	// ここが抜けると、学生の推薦からは消えた企業が教員の「低マッチ」一覧にだけ残り、
+	// 学生と教員で見えている数字が食い違う。
+	t.Run("プロファイルが無い企業のマッチを除く", func(t *testing.T) {
+		require.Contains(t, sql, "company_weight_profiles")
+		require.Contains(t, sql, "job_position_id IS NULL")
+		require.Contains(t, sql, "m.company_id")
+	})
 }
 
 // 生徒が0人ならクエリを投げない。

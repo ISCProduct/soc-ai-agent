@@ -59,7 +59,7 @@ func (c *InterviewController) GetTrend(ctx echo.Context) error {
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	limit := httpapi.IntQuery(ctx, "limit", 20)
+	limit := httpapi.LimitQuery(ctx, "limit", 20)
 	points, err := c.interviewService.GetTrend(userID, limit)
 	if err != nil {
 		return httpapi.InternalError(err)
@@ -493,10 +493,7 @@ func (c *InterviewController) List(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 	page := httpapi.IntQuery(ctx, "page", 1)
-	limit := httpapi.IntQuery(ctx, "limit", 20)
-	if limit > 100 {
-		limit = 100
-	}
+	limit := httpapi.LimitQuery(ctx, "limit", 20)
 	offset := (page - 1) * limit
 	allStr := ctx.QueryParam("all")
 	all := allStr == "1" || strings.ToLower(allStr) == "true"
@@ -526,10 +523,7 @@ func (c *InterviewController) HRList(ctx echo.Context) error {
 		return err
 	}
 	page := httpapi.IntQuery(ctx, "page", 1)
-	limit := httpapi.IntQuery(ctx, "limit", 20)
-	if limit > 100 {
-		limit = 100
-	}
+	limit := httpapi.LimitQuery(ctx, "limit", 20)
 	offset := (page - 1) * limit
 	sessions, total, err := c.interviewService.ListSessionsForOwner(userID, companyID, limit, offset)
 	if err != nil {
