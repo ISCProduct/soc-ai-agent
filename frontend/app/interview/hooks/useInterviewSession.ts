@@ -22,6 +22,10 @@ import type { Utterance, InterviewCompany, Position, InterviewStatus } from '../
 
 export type ReportStatus = 'idle' | 'pending' | 'ready' | 'error' | 'timeout'
 
+/** レポート生成の再投入API自体が失敗したときの文言(#1476) */
+export const REPORT_RETRY_FAILED_MESSAGE =
+  'レポート生成の再試行リクエストに失敗しました。通信状況を確認して、もう一度お試しください。'
+
 /**
  * ターン(/turn, /start-turn)のタイムアウト(#1476)。
  * STT→LLM→TTS を通すので一覧系より長く取るが、無期限にはしない。
@@ -65,6 +69,8 @@ export function useInterviewSession({
   const [session, setSession] = useState<InterviewSession | null>(null)
   const [report, setReport] = useState<InterviewReport | null>(null)
   const [reportStatus, setReportStatus] = useState<ReportStatus>('idle')
+  /** レポート生成の再投入API(regenerateReport)が失敗したときのメッセージ(#1476) */
+  const [reportRetryError, setReportRetryError] = useState('')
   const [emailSending, setEmailSending] = useState(false)
   const [emailSent, setEmailSent] = useState(false)
   // メール送信失敗をUIへ伝えるためのメッセージ（#1056）
@@ -170,12 +176,19 @@ export function useInterviewSession({
   const cleanupConnection = () => {
     audioGenerationRef.current++
     ;[timerRef, pollRef].forEach(r => { if (r.current) { clearInterval(r.current); r.current = null } })
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+    if (mediaRecorderRef.current) {
       // 録音中に終了した場合、stop() の onstop で新しいターンを送ると
       // 終了API(=レポート生成のキュー投入)より後に発話が積まれる(#1476)。
       // まだ確定していない録音なので送らずに捨てる（VADの空振りと同じ扱い）。
+      //
+      // state は見ない。MediaRecorder.stop() は state を即座に 'inactive' にする一方で
+      // onstop は後のタスクで発火するため、「送信ボタンを押した直後に終了した」場合の
+      // 未処理の録音が state では 'inactive' と区別できない。この録音を見逃すと、
+      // onstop がまだ trackTurn を呼んでいない＝待つべき Promise も無いまま
+      // finishSession の後に /turn が飛び、最後の回答がレポートから落ちる。
       discardTurnRef.current = true
-      mediaRecorderRef.current.stop(); mediaRecorderRef.current = null
+      if (mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop()
+      mediaRecorderRef.current = null
     }
     if (aiAudioRef.current) { aiAudioRef.current.pause(); aiAudioRef.current.src = '' }
     if (aiLevelRafRef.current !== null) { cancelAnimationFrame(aiLevelRafRef.current); aiLevelRafRef.current = null }
@@ -384,7 +397,7 @@ export function useInterviewSession({
     setErrorMessage(null)
     setUtterances([])
     setPartialUser(''); setPartialAi('')
-    setReport(null); setReportStatus('idle')
+    setReport(null); setReportStatus('idle'); setReportRetryError('')
     setRemainingSeconds(interviewLimits.maxMinutes * 60)
     setElapsedSeconds(0)
     setCurrentQuestionIndex(1)
@@ -611,13 +624,20 @@ export function useInterviewSession({
    * かつ finishSession は終了済みセッションを再キューしない）。
    * そこで再開の前に生成ジョブの再投入を依頼する。既にレポートがあればサーバー側で何もしない。
    */
-  const retryReportPolling = () => {
+  const retryReportPolling = async () => {
     const target = pollSessionRef.current
       ?? (session && user ? { sessionId: session.id, userId: user.user_id } : null)
     if (!target) return
-    // 再投入が失敗してもポーリングは続ける。結果はレポート画面のタイムアウト表示に出るので握り潰しではない。
-    void interviewApi.regenerateReport(target.sessionId, target.userId)
-      .catch(e => console.error('[report regenerate error]', e))
+    setReportRetryError('')
+    try {
+      await interviewApi.regenerateReport(target.sessionId, target.userId)
+    } catch (e) {
+      // 再投入が失敗した＝ジョブは入り直っていない。ここでポーリングへ戻すと、
+      // ユーザーは失敗を知らされないまま「生成中」をさらに3分見せられて再びタイムアウトする(#1476)。
+      console.error('[report regenerate error]', e)
+      setReportRetryError(REPORT_RETRY_FAILED_MESSAGE)
+      return
+    }
     startReportPolling(target.sessionId, target.userId)
   }
 
@@ -766,6 +786,7 @@ export function useInterviewSession({
     session,
     report,
     reportStatus,
+    reportRetryError,
     retryReportPolling,
     emailSending,
     emailSent,

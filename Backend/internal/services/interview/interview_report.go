@@ -77,12 +77,20 @@ func (s *InterviewService) StartWorker() {
 
 func (s *InterviewService) runWorker() {
 	for sessionID := range s.jobCh {
-		if err := s.generateReport(context.Background(), sessionID); err != nil {
-			log.Printf("[Interview] Report generation failed for session %d: %v\n", sessionID, err)
-			continue
-		}
-		log.Printf("[Interview] Report generation completed for session %d\n", sessionID)
+		s.runReportJob(sessionID)
 	}
+}
+
+// runReportJob は1件分のレポート生成を実行し、終わったら重複排除の登録を外す(#1476)。
+// 処理中も登録を保持するのは、生成が3分のUIタイムアウトを超えたときの再試行で
+// 同じセッションが二重に走らないようにするため。
+func (s *InterviewService) runReportJob(sessionID uint) {
+	defer s.clearReportJobInFlight(sessionID)
+	if err := s.generateReport(context.Background(), sessionID); err != nil {
+		log.Printf("[Interview] Report generation failed for session %d: %v\n", sessionID, err)
+		return
+	}
+	log.Printf("[Interview] Report generation completed for session %d\n", sessionID)
 }
 
 // buildTranscript formats utterances into a plain-text transcript for the LLM prompt.

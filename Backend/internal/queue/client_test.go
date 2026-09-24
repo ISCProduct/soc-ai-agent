@@ -175,6 +175,73 @@ func TestEnqueueInterviewReportDeduplicatesPerSession(t *testing.T) {
 	}
 }
 
+// TestEnqueueInterviewReportRecoversFinishedJob は #1476 の回帰テスト。
+//
+// レポート生成ジョブが再試行を使い切ってアーカイブされると、レポートは未生成のまま残る。
+// UI は3分で再試行ボタンを出すが、ここで重複排除に弾かれると実ジョブが投入されないまま
+// APIだけ成功を返し、ユーザーはもう一度ポーリングをタイムアウトさせられる。
+// 終わったジョブ（archived / completed）は再生成時に置き換えられなければならない。
+func TestEnqueueInterviewReportRecoversFinishedJob(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	client := queue.NewClient(rdb)
+	defer client.Close()
+
+	inspector := asynq.NewInspector(queue.RedisOptFromClient(rdb))
+	defer inspector.Close()
+
+	const sessionID = uint(42)
+	taskID := queue.InterviewReportTaskID(sessionID)
+
+	if err := client.EnqueueInterviewReport(sessionID); err != nil {
+		t.Fatalf("初回投入: %v", err)
+	}
+	// 再試行を使い切ってアーカイブされた状態を作る。
+	if err := inspector.ArchiveTask(queue.QueueDefault, taskID); err != nil {
+		t.Fatalf("アーカイブ: %v", err)
+	}
+	info, err := inspector.GetTaskInfo(queue.QueueDefault, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.State != asynq.TaskStateArchived {
+		t.Fatalf("前提が崩れている: state=%s want archived", info.State)
+	}
+
+	// レポート画面の「再試行」。唯一の回復手段なので必ず投入されなければならない。
+	if err := client.EnqueueInterviewReport(sessionID); err != nil {
+		t.Fatalf("再生成の投入: %v", err)
+	}
+
+	info, err = inspector.GetTaskInfo(queue.QueueDefault, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.State != asynq.TaskStatePending {
+		t.Fatalf("state=%s want pending（失敗済みジョブのロックで再生成が塞がれている）", info.State)
+	}
+
+	tasks, err := inspector.ListPendingTasks(queue.QueueDefault)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, tk := range tasks {
+		if tk.Type == queue.TaskInterviewReport {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("pending のレポートジョブ=%d件 want 1", count)
+	}
+}
+
 func TestNewClientNilRedis(t *testing.T) {
 	if queue.NewClient(nil) != nil {
 		t.Fatal("expected nil client")

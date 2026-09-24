@@ -2,8 +2,11 @@ package interview
 
 import (
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"Backend/internal/models"
 )
 
 // stubJobEnqueuer は shared.JobEnqueuer の最小スタブ。EnqueueInterviewReport 以外は使わない。
@@ -139,5 +142,86 @@ func TestEnqueueReportGeneration_DoesNotBlockWhenRedisFailsAndChannelFull(t *tes
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Redis障害 + バッファ満杯で enqueueReportGeneration がブロックした")
+	}
+}
+
+// blockingUtterRepo は generateReport を任意の時点まで止めておくための発話リポジトリ。
+// LLM 呼び出しまで進む前に失敗させるため、解放後は取得エラーを返す。
+type blockingUtterRepo struct {
+	started chan uint
+	release chan struct{}
+	calls   atomic.Int32
+}
+
+func (r *blockingUtterRepo) Create(*models.InterviewUtterance) error { return nil }
+
+func (r *blockingUtterRepo) FindBySessionID(sessionID uint) ([]models.InterviewUtterance, error) {
+	r.calls.Add(1)
+	r.started <- sessionID
+	<-r.release
+	return nil, errors.New("レポート生成失敗（テスト用）")
+}
+
+// TestFallbackWorker_DoesNotRunSameSessionTwice は #1476 の回帰テスト。
+//
+// Redis 未設定・障害時の channel フォールバックには asynq の重複排除が無い。
+// 生成が3分のUIタイムアウトを超えて走っている間に再試行ボタンを押されると、
+// レポートはまだ未保存なので RegenerateReport が通り、同じセッションが2回実行されてしまう。
+// LLM 費用の二重化・レポート上書き・スコアの二重反映が起きるため、
+// worker を実際に起動した本番経路（runWorker → generateReport）で重複しないことを固定する。
+//
+// 同時に、失敗したジョブの後は再生成できること（回復手段が塞がらないこと）も確認する。
+func TestFallbackWorker_DoesNotRunSameSessionTwice(t *testing.T) {
+	const ownerID, sessionID = uint(3), uint(7)
+
+	utterRepo := &blockingUtterRepo{started: make(chan uint), release: make(chan struct{})}
+	t.Cleanup(func() { close(utterRepo.release) })
+
+	svc := NewInterviewService(
+		newSessionRepoStub(&models.InterviewSession{ID: sessionID, UserID: ownerID, Status: "finished"}),
+		utterRepo,
+		&reportRepoStub{},
+		nonAdminUserRepoStub{},
+		nil, nil, nil,
+	)
+	svc.StartWorker()
+
+	if _, err := svc.RegenerateReport(ownerID, sessionID); err != nil {
+		t.Fatalf("再生成の投入に失敗: %v", err)
+	}
+	select {
+	case <-utterRepo.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker がレポート生成を開始していない")
+	}
+
+	// 生成中にもう一度再試行ボタンを押す。レポートはまだ未保存なので RegenerateReport は通る。
+	if _, err := svc.RegenerateReport(ownerID, sessionID); err != nil {
+		t.Fatalf("再生成の投入に失敗: %v", err)
+	}
+	if n := len(svc.jobCh); n != 0 {
+		t.Fatalf("処理中の同一セッションが %d 件追加投入された（二重実行になる）", n)
+	}
+
+	// 1件目を失敗で終わらせる。ここで2件目が控えていれば worker がそのまま続けて実行する。
+	utterRepo.release <- struct{}{}
+	select {
+	case <-utterRepo.started:
+		t.Fatal("処理中に積まれた重複ジョブが続けて実行された（LLM費用とスコア反映が二重になる）")
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	// 失敗したジョブの後は再生成できなければ回復手段が無くなる。
+	if _, err := svc.RegenerateReport(ownerID, sessionID); err != nil {
+		t.Fatalf("再生成の投入に失敗: %v", err)
+	}
+	select {
+	case <-utterRepo.started:
+		utterRepo.release <- struct{}{}
+	case <-time.After(2 * time.Second):
+		t.Fatal("失敗したジョブの再生成が実行されない（回復手段が塞がっている）")
+	}
+	if got := utterRepo.calls.Load(); got != 2 {
+		t.Fatalf("generateReport 実行回数=%d want 2", got)
 	}
 }

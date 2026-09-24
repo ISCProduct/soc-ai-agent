@@ -25,7 +25,7 @@ jest.mock('@/lib/auth', () => ({
   },
 }))
 
-import { useInterviewSession } from '@/app/interview/hooks/useInterviewSession'
+import { useInterviewSession, REPORT_RETRY_FAILED_MESSAGE } from '@/app/interview/hooks/useInterviewSession'
 import type { InterviewMedia } from '@/app/interview/hooks/useInterviewMedia'
 import type { InterviewCompany, Position } from '@/app/interview/types'
 import type { User } from '@/lib/auth'
@@ -66,6 +66,19 @@ const turnResponse = (meta: Record<string, string>): FakeResponse => {
   }
 }
 
+/**
+ * stop() の後に onstop が発火するまでの「隙間」を再現する MediaRecorder。
+ *
+ * 実物の stop() は state を即座に 'inactive' にする一方で、dataavailable / stop イベントは
+ * 別タスクで発火する。onstop を同期で呼ぶフェイクだとこの隙間が消え、
+ * 「送信ボタンを押した直後に面接が終了した」競合をテストで再現できない。
+ */
+const pendingRecorderStops: (() => void)[] = []
+/** 保留中の onstop を発火させる（＝ブラウザが後から stop イベントを配送した状態） */
+const deliverRecorderStops = () => {
+  pendingRecorderStops.splice(0).forEach(fire => fire())
+}
+
 class FakeMediaRecorder {
   static isTypeSupported = () => true
   state: 'inactive' | 'recording' = 'inactive'
@@ -76,8 +89,10 @@ class FakeMediaRecorder {
   }
   stop() {
     this.state = 'inactive'
-    this.ondataavailable?.({ data: new Blob(['voice'], { type: 'audio/webm' }) })
-    this.onstop?.()
+    pendingRecorderStops.push(() => {
+      this.ondataavailable?.({ data: new Blob(['voice'], { type: 'audio/webm' }) })
+      this.onstop?.()
+    })
   }
 }
 
@@ -114,6 +129,7 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
   beforeEach(() => {
     calls = []
     releaseTurn = null
+    pendingRecorderStops.length = 0
     Object.assign(globalThis, {
       MediaRecorder: FakeMediaRecorder,
       MediaStream: class {},
@@ -161,8 +177,9 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
 
     await act(async () => { await result.current.handleJoin() })
     act(() => { result.current.startRecording() })
-    // stop で onstop → sendTurn が走り、/turn の応答待ちになる
+    // stop → onstop → sendTurn が走り、/turn の応答待ちになる
     act(() => { result.current.stopRecording() })
+    act(() => { deliverRecorderStops() })
     await flush()
     expect(releaseTurn).not.toBeNull()
 
@@ -192,11 +209,77 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
     act(() => { result.current.startRecording() })
 
     await act(async () => { await result.current.handleStop() })
+    act(() => { deliverRecorderStops() })
     await flush()
 
     // 終了後に /turn を投げると、その発話は finishSession より後に保存される
     expect(calls.filter(u => u.endsWith('/turn'))).toHaveLength(0)
     expect(calls.some(u => u.includes('/finish'))).toBe(true)
+
+    unmount()
+  })
+
+  /**
+   * stop() 済み・onstop 未発火の録音は state が 'inactive' で、録音中との区別が付かない。
+   * ここを state で判定すると破棄フラグが立たず、sendTurn もまだ trackTurn を呼んでいないため
+   * 終了処理は解決済みの古い Promise を待つだけになる。結果、finishSession の後に /turn が飛び、
+   * 最後の回答がレポートから欠ける。
+   */
+  it('送信直後（onstop 発火前）に完了した場合も、その録音を新しいターンとして送らない', async () => {
+    const media = fakeMedia()
+    const { result, unmount } = renderSession(media)
+
+    await act(async () => { await result.current.handleJoin() })
+    act(() => { result.current.startRecording() })
+    // 送信ボタン。state は 'inactive' になるが onstop はまだ配送されていない
+    act(() => { result.current.stopRecording() })
+    expect(pendingRecorderStops).toHaveLength(1)
+
+    await act(async () => { await result.current.handleStop() })
+    // ここでブラウザが stop イベントを配送する
+    act(() => { deliverRecorderStops() })
+    await flush()
+
+    expect(calls.filter(u => u.endsWith('/turn'))).toHaveLength(0)
+    expect(calls.some(u => u.includes('/finish'))).toBe(true)
+
+    unmount()
+  })
+
+  /**
+   * 再生成APIが失敗した＝生成ジョブは入り直っていない。
+   * それでもポーリングへ戻すと、ユーザーは失敗を知らされないまま「生成中」をさらに3分見せられ、
+   * 再びタイムアウトする。失敗はその場でレポート画面に出す（#1476）。
+   */
+  it('レポート再生成のリクエストが失敗したら、ポーリングへ戻さずエラーを出す', async () => {
+    const media = fakeMedia()
+    const { result, unmount } = renderSession(media)
+
+    await act(async () => { await result.current.handleJoin() })
+    await act(async () => { await result.current.handleStop() })
+    await flush()
+    expect(result.current.reportRetryError).toBe('')
+
+    const detailUrl = (u: string) => u.includes('/api/interviews/1?')
+    const detailCallsBefore = calls.filter(detailUrl).length
+
+    // 再試行ボタン。オフライン・401・500 などで再投入自体が失敗するケース。
+    const okFetch = global.fetch
+    global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/report/regenerate')) {
+        calls.push(url)
+        return { ok: false, status: 500, headers: { get: () => 'application/json' }, text: async () => '{"error":"internal"}' }
+      }
+      return (okFetch as unknown as (i: RequestInfo | URL, n?: RequestInit) => Promise<unknown>)(input, init)
+    }) as unknown as typeof fetch
+
+    await act(async () => { await result.current.retryReportPolling() })
+
+    expect(calls.some(u => u.includes('/report/regenerate'))).toBe(true)
+    expect(result.current.reportRetryError).toBe(REPORT_RETRY_FAILED_MESSAGE)
+    // 再投入できていないのにポーリングを開始すると、また3分待たされる
+    expect(calls.filter(detailUrl)).toHaveLength(detailCallsBefore)
 
     unmount()
   })

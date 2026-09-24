@@ -359,7 +359,8 @@ function InterviewContent() {
         isGuest={!user || user.is_guest}
         onRegisterClick={() => router.push(GUEST_REGISTER_PATH)}
         onSendEmail={session.sendReportEmail}
-        onRetryReport={session.retryReportPolling}
+        onRetryReport={() => { void session.retryReportPolling() }}
+        reportRetryError={session.reportRetryError}
         finishFailed={session.finishFailed}
         onRetryFinish={session.retryFinish}
         utteranceSaveFailed={session.utteranceSaveFailed}

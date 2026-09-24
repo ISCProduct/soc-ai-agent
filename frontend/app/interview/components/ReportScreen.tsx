@@ -42,6 +42,8 @@ export interface ReportScreenProps {
   onSendEmail: () => void
   /** タイムアウト / エラー時の再ポーリング */
   onRetryReport?: () => void
+  /** 再生成API(regenerateReport)自体が失敗したときのメッセージ。握り潰さず即座に出す(#1476) */
+  reportRetryError?: string
   /** 面接終了API(finishSession)が失敗したか(#1015) */
   finishFailed?: boolean
   /** finishSession失敗時の再試行 */
@@ -76,6 +78,7 @@ export default function ReportScreen({
   emailError,
   onSendEmail,
   onRetryReport,
+  reportRetryError,
   finishFailed,
   onRetryFinish,
   utteranceSaveFailed,
@@ -193,6 +196,8 @@ export default function ReportScreen({
                 再試行
               </Button>
             )}
+            {/* 再試行そのものが失敗したなら、生成中に戻さずここで知らせる（#1476） */}
+            <ErrorAlert error={reportRetryError ?? ''} sx={{ mt: 2, mb: 0 }} />
           </Paper>
         )}
 

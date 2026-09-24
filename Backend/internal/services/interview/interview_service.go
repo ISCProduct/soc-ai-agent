@@ -34,7 +34,11 @@ type InterviewService struct {
 	skillScoreRepo       SkillScoreReader
 	companyRepo          shared.CompanyBriefReader
 	jobCh                chan uint
-	workerOnce           sync.Once
+	// inFlightJobs はフォールバック channel 経路の重複排除（Redis 経路の TaskID 相当、#1476）。
+	// 投入時に登録し、worker が処理し終えるまで保持する。
+	inFlightJobs map[uint]struct{}
+	inFlightMu   sync.Mutex
+	workerOnce   sync.Once
 	jobs                 shared.JobEnqueuer
 	ownsCompany          func(userID, companyID uint) (bool, error)
 }
@@ -62,6 +66,7 @@ func NewInterviewService(
 		openaiClient:         openaiClient,
 		realtimeUsageService: realtimeUsageService,
 		jobCh:                make(chan uint, jobChBufferSize),
+		inFlightJobs:         map[uint]struct{}{},
 	}
 }
 
@@ -135,17 +140,48 @@ func (s *InterviewService) enqueueReportGeneration(sessionID uint) {
 }
 
 // offerReportJob は jobCh へノンブロッキングに投入する。投入できなければ false を返す。
+//
+// 同じセッションのジョブが控えている／処理中なら投入しない(#1476)。
+// Redis 経路と違いこちらには asynq の重複排除が無く、生成が3分のUIタイムアウトを
+// 超えて走っている間に再試行ボタンを押されると、レポート未保存のまま再投入できてしまう。
+// 単一 worker でも2件目が続けて走るため、LLM 費用・レポート上書き・スコアの二重反映が起きる。
 func (s *InterviewService) offerReportJob(sessionID uint) bool {
+	if !s.markReportJobInFlight(sessionID) {
+		log.Printf("[Interview] report job already queued for session %d, skipped", sessionID)
+		// 既に控えている＝望む状態なので、投入できたものとして扱う。
+		return true
+	}
 	select {
 	case s.jobCh <- sessionID:
 		return true
 	default:
 		// バッファ満杯。ここで待つと呼び出し元(FinishSession)ごとハングするため捨てる。
 		// 手動で再生成できるよう sessionID をログに残す。
+		s.clearReportJobInFlight(sessionID)
 		log.Printf("[Interview] ERROR: report job queue full (cap=%d), dropped report generation for session %d",
 			jobChBufferSize, sessionID)
 		return false
 	}
+}
+
+// markReportJobInFlight はセッションを処理中として登録する。既に登録済みなら false。
+func (s *InterviewService) markReportJobInFlight(sessionID uint) bool {
+	s.inFlightMu.Lock()
+	defer s.inFlightMu.Unlock()
+	if s.inFlightJobs == nil {
+		s.inFlightJobs = map[uint]struct{}{}
+	}
+	if _, ok := s.inFlightJobs[sessionID]; ok {
+		return false
+	}
+	s.inFlightJobs[sessionID] = struct{}{}
+	return true
+}
+
+func (s *InterviewService) clearReportJobInFlight(sessionID uint) {
+	s.inFlightMu.Lock()
+	defer s.inFlightMu.Unlock()
+	delete(s.inFlightJobs, sessionID)
 }
 
 type InterviewSessionResponse struct {
