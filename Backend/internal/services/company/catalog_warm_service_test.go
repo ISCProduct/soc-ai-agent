@@ -62,6 +62,7 @@ func (s *warmRepoStub) ListJobPositions(*uint, *uint, int) ([]models.CompanyJobP
 }
 func (s *warmRepoStub) CreateOrUpdateWeightProfile(*models.CompanyWeightProfile) error { return nil }
 func (s *warmRepoStub) CountWeightProfiles() (int64, error)                            { return 0, nil }
+func (s *warmRepoStub) CountPublishedWithoutWeightProfile() (int64, error)             { return 0, nil }
 func (s *warmRepoStub) ListActiveMissingFetchCandidates(int, bool) ([]models.Company, error) {
 	return nil, nil
 }

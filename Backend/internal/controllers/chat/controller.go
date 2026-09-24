@@ -392,7 +392,10 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		if diagnostics != nil {
 			if diagnostics.UserScoreCount == 0 {
 				reason = "insufficient_user_scores"
-			} else if diagnostics.ActiveCompanyCount == 0 || diagnostics.WeightProfileCount == 0 {
+			} else if diagnostics.ActiveCompanyCount == 0 || diagnostics.WeightProfileCount == 0 ||
+				diagnostics.CompaniesWithoutProfile >= diagnostics.ActiveCompanyCount {
+				// 公開企業はあってもプロファイルが1社も無ければマッチングは0件になる（#1380）。
+				// 「結果が空」ではなく「企業データ不足」として運用者に見せる。
 				reason = "insufficient_company_data"
 			}
 		}
