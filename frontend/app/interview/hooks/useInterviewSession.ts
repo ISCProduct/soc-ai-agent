@@ -16,7 +16,7 @@ import {
   REPORT_POLL_TIMEOUT_MS,
 } from '../reportPolling'
 import { resolveFinishOutcomeMessage } from '../finishOutcome'
-import { saveUtteranceWithRetry, UTTERANCE_FLUSH_TIMEOUT_MS } from '../utteranceSave'
+import { saveUtteranceWithRetry, newClientUtteranceId, flushThenFinish } from '../utteranceSave'
 import type { Utterance, InterviewCompany, Position, InterviewStatus } from '../types'
 
 export type ReportStatus = 'idle' | 'pending' | 'ready' | 'error' | 'timeout'
@@ -285,10 +285,22 @@ export function useInterviewSession({
    * 面接自体は止めない（止めてもユーザーにできることが無い）。
    */
   const queueUtteranceSave = (sessionId: number, userId: number, role: 'user' | 'ai', text: string) => {
-    utteranceSaveChainRef.current = utteranceSaveChainRef.current.then(async () => {
-      const saved = await saveUtteranceWithRetry(() => interviewApi.saveUtterance(sessionId, userId, role, text))
-      if (!saved) setUtteranceSaveFailed(true)
-    })
+    // IDはチェーンに積む時点で1つだけ発行する。再試行の中で作り直すと、
+    // 結果不明の失敗（応答ロスト・タイムアウト）の再送が別の発話として保存される(#1476)。
+    const clientUtteranceId = newClientUtteranceId()
+    utteranceSaveChainRef.current = utteranceSaveChainRef.current
+      .then(async () => {
+        const saved = await saveUtteranceWithRetry(
+          () => interviewApi.saveUtterance(sessionId, userId, role, text, clientUtteranceId),
+        )
+        if (!saved) setUtteranceSaveFailed(true)
+      })
+      // チェーンが reject のまま残ると、面接終了時にこれを待つ処理ごと落ちて
+      // レポート生成が始まらなくなる。必ず解決する鎖にしておく(#1476)。
+      .catch(e => {
+        console.error('[utterance save chain error]', e)
+        setUtteranceSaveFailed(true)
+      })
   }
 
   const doStartTurn = async (sessionId: number, userId: number) => {
@@ -398,57 +410,64 @@ export function useInterviewSession({
     // タイマーのsetIntervalから呼ばれた場合でも最新値を読むため、stateではなくrefを使う(#926)
     const currentSession = sessionRef.current
     const currentUser = userRef.current
-    let didFinishFail = false
-    if (currentUser && currentSession) {
-      const scoreSessionId = resolveScoreSessionId(currentUser.user_id)
-      try {
-        const res = await fetch(`/api/user/weight-scores?user_id=${currentUser.user_id}&session_id=${encodeURIComponent(scoreSessionId)}`)
-        const data = await res.json()
-        setScoresBefore(data.weight_scores ?? null)
-      } catch {
-        // 取得失敗時は scoresBefore=null のまま。ScoreUpdateBanner側で「スコア比較なし」と表示する(#1015)
-        setScoresBefore(null)
-      }
-      // 未完了の発話保存を終了APIより先に片付ける(#1476)。
-      // finishSession はレポート生成をキューするため、ここで待たないと
-      // 最後の発話が保存される前にレポートが生成されうる。
-      await Promise.race([
-        utteranceSaveChainRef.current,
-        new Promise<void>(resolve => setTimeout(resolve, UTTERANCE_FLUSH_TIMEOUT_MS)),
-      ])
-      try {
-        await interviewApi.finishSession(currentSession.id, currentUser.user_id)
-      } catch {
-        // 終了APIの失敗を握りつぶさず、レポート画面にエラーと再試行手段を出す(#1015)
-        didFinishFail = true
-      }
+    if (!currentUser || !currentSession) {
+      setFinishFailed(false)
+      setStatus('finished')
+      setReportStatus('pending')
+      setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: false, forced }))
+      return
     }
-    setFinishFailed(didFinishFail)
+
+    const scoreSessionId = resolveScoreSessionId(currentUser.user_id)
+    try {
+      const res = await fetch(`/api/user/weight-scores?user_id=${currentUser.user_id}&session_id=${encodeURIComponent(scoreSessionId)}`)
+      const data = await res.json()
+      setScoresBefore(data.weight_scores ?? null)
+    } catch {
+      // 取得失敗時は scoresBefore=null のまま。ScoreUpdateBanner側で「スコア比較なし」と表示する(#1015)
+      setScoresBefore(null)
+    }
+
+    // 終了APIを待たずに画面を先へ進める。以降の待ちでユーザーを止めないための順序(#1476)。
+    setFinishFailed(false)
     setStatus('finished')
     setReportStatus('pending')
-    setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: didFinishFail, forced }))
-    if (currentSession && currentUser) {
-      startReportPolling(currentSession.id, currentUser.user_id)
+    setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: false, forced }))
 
-      // Upload video asynchronously
-      if (videoBlob) {
-        const MB = 1024 * 1024
-        const sizeMB = (videoBlob.size / MB).toFixed(1)
-        if (videoBlob.size > 200 * MB) {
-          setVideoSizeWarning(`動画サイズが ${sizeMB} MB と非常に大きいです。アップロードに時間がかかる場合があります。`)
-        }
-        setVideoUploadStatus('uploading')
-        setVideoUploadProgress(0)
-        interviewApi.uploadVideo(
-          currentSession.id,
-          currentUser.user_id,
-          videoBlob,
-          (percent) => setVideoUploadProgress(percent),
-        )
-          .then(() => { setVideoUploadStatus('done'); setVideoSizeWarning(null) })
-          .catch(() => setVideoUploadStatus('error'))
+    // 動画アップロードは発話保存と独立なので先に始める
+    if (videoBlob) {
+      const MB = 1024 * 1024
+      const sizeMB = (videoBlob.size / MB).toFixed(1)
+      if (videoBlob.size > 200 * MB) {
+        setVideoSizeWarning(`動画サイズが ${sizeMB} MB と非常に大きいです。アップロードに時間がかかる場合があります。`)
       }
+      setVideoUploadStatus('uploading')
+      setVideoUploadProgress(0)
+      interviewApi.uploadVideo(
+        currentSession.id,
+        currentUser.user_id,
+        videoBlob,
+        (percent) => setVideoUploadProgress(percent),
+      )
+        .then(() => { setVideoUploadStatus('done'); setVideoSizeWarning(null) })
+        .catch(() => setVideoUploadStatus('error'))
     }
+
+    // 積み残した発話保存を「全部」片付けてから終了APIを呼ぶ(#1476)。
+    // 画面は既に finished へ進めてあるので、ここで待ってもユーザーは止まらない。
+    try {
+      await flushThenFinish(
+        utteranceSaveChainRef.current,
+        () => interviewApi.finishSession(currentSession.id, currentUser.user_id),
+      )
+    } catch {
+      // 終了APIの失敗を握りつぶさず、レポート画面にエラーと再試行手段を出す(#1015)
+      setFinishFailed(true)
+      setErrorMessage(resolveFinishOutcomeMessage({ finishFailed: true, forced }))
+    }
+    // ポーリングは終了API（=レポート生成のキュー投入）の後に始める。
+    // 先に始めるとタイムアウトの3分が生成開始前から減り始める。
+    startReportPolling(currentSession.id, currentUser.user_id)
   }
 
   /** finishSession失敗時にレポート画面から再試行するための関数(#1015) */
@@ -542,14 +561,21 @@ export function useInterviewSession({
     pollRef.current = setInterval(() => { void tick() }, REPORT_POLL_INTERVAL_MS)
   }
 
+  /**
+   * レポート取得の再試行(#1015, #1476)。
+   *
+   * ポーリングを再開するだけでは、生成ジョブ自体が失われている場合に永久に復旧しない
+   * （asynqの再試行を使い切る／フォールバックworkerで1回失敗する／キューが溢れる、
+   * かつ finishSession は終了済みセッションを再キューしない）。
+   * そこで再開の前に生成ジョブの再投入を依頼する。既にレポートがあればサーバー側で何もしない。
+   */
   const retryReportPolling = () => {
     const target = pollSessionRef.current
-    if (!target) {
-      if (session && user) {
-        startReportPolling(session.id, user.user_id)
-      }
-      return
-    }
+      ?? (session && user ? { sessionId: session.id, userId: user.user_id } : null)
+    if (!target) return
+    // 再投入が失敗してもポーリングは続ける。結果はレポート画面のタイムアウト表示に出るので握り潰しではない。
+    void interviewApi.regenerateReport(target.sessionId, target.userId)
+      .catch(e => console.error('[report regenerate error]', e))
     startReportPolling(target.sessionId, target.userId)
   }
 

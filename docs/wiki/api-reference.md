@@ -66,7 +66,9 @@
 | POST | `/api/interviews/{id}/start` | 開始（チャットスコアをAIプロンプトに注入） |
 | POST | `/api/interviews/{id}/turn` | 1ターン実行（音声→テキスト→AI→音声） |
 | POST | `/api/interviews/{id}/finish` | 終了・レポート生成キュー |
+| POST | `/api/interviews/{id}/utterances` | 発話保存。`client_utterance_id` を付けると再送が冪等になる（#1476） |
 | GET | `/api/interviews/{id}/report` | レポート取得 |
+| POST | `/api/interviews/{id}/report/regenerate` | 未生成レポートの生成ジョブ再投入（#1476, `docs/wiki/redis-jobs.md`） |
 | POST | `/api/interviews/{id}/upload-video` | 動画S3アップロード |
 | POST | `/api/interviews/{id}/send-report` | レポートメール送信 |
 | POST | `/api/realtime/token` | WebRTCセッショントークン取得 |

@@ -14,6 +14,9 @@ import (
 // 既定では上限に達しても止めない（監視のみ）。costs.InterviewBudgetService を参照。
 var ErrInterviewBudgetExceeded = errors.New("interview monthly budget exceeded")
 
+// maxClientUtteranceIDLen は client_utterance_id の上限。DBの VARCHAR(64) と揃える。
+const maxClientUtteranceIDLen = 64
+
 // interviewBudgetGuard は月次上限の判定面。未設定なら常に許可する。
 type interviewBudgetGuard interface {
 	AllowStart() error
@@ -123,7 +126,13 @@ func (s *InterviewService) EnsureSessionOwnership(userID uint, sessionID uint) e
 	return nil
 }
 
-func (s *InterviewService) SaveUtterance(userID uint, sessionID uint, role string, text string) error {
+// SaveUtterance は発話を保存する。clientUtteranceID は発話ごとにクライアントが発行する一意ID(#1476)。
+//
+// 保存は結果不明のまま失敗しうる（応答のロスト、クライアント側タイムアウト）ため、
+// クライアントは同じ ID を付けたまま再送する。重複判定はサーバー側でしかできないので
+// (session_id, client_utterance_id) の一意制約に委ね、当たった再送は no-op にする。
+// 空文字は NULL として保存し、ID を送らない経路は従来どおり追記される。
+func (s *InterviewService) SaveUtterance(userID uint, sessionID uint, role string, text string, clientUtteranceID string) error {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
 		return err
@@ -143,6 +152,12 @@ func (s *InterviewService) SaveUtterance(userID uint, sessionID uint, role strin
 		SessionID: sessionID,
 		Role:      role,
 		Text:      text,
+	}
+	if id := strings.TrimSpace(clientUtteranceID); id != "" {
+		if len(id) > maxClientUtteranceIDLen {
+			return errors.New("client_utterance_id too long")
+		}
+		utter.ClientUtteranceID = &id
 	}
 	return s.utterRepo.Create(utter)
 }

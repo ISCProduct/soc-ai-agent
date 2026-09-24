@@ -3,6 +3,7 @@ package interview
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -219,4 +220,86 @@ func TestCreateSession_BudgetGuardBlocks(t *testing.T) {
 	if guard.called != 1 {
 		t.Errorf("ガードの呼び出し = %d, want 1", guard.called)
 	}
+}
+
+// TestSaveUtterance_ClientUtteranceID は #1476 のレビュー指摘「再試行する発話保存を冪等に」の回帰テスト。
+//
+// POST /utterances は追記APIなので、クライアントが再試行すると
+// 「サーバーはDBへ書けたが応答だけ失われた」ケースで同じ発話がもう一件入り、
+// 書き起こし・スコア・LoRA学習データへ重複して伝播する。
+// クライアントが発話ごとに発行するIDをそのまま行へ載せ、
+// (session_id, client_utterance_id) の一意制約でサーバー側が再送を弾けるようにする。
+func TestSaveUtterance_ClientUtteranceID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		clientID  string
+		wantStore *string
+		wantErr   bool
+		msg       string
+	}{
+		{
+			name:      "IDを付けて送れば行に載る",
+			clientID:  "9f1c2b3a-0000-4000-8000-000000000001",
+			wantStore: strPtr("9f1c2b3a-0000-4000-8000-000000000001"),
+			msg:       "IDが保存されないと一意制約が効かず再試行で二重保存される",
+		},
+		{
+			name:      "前後の空白は落として保存する",
+			clientID:  "  abc123  ",
+			wantStore: strPtr("abc123"),
+			msg:       "空白の有無で同じ発話が別IDになり二重保存される",
+		},
+		{
+			name:      "ID未指定はNULLのまま（ID非対応の経路は従来どおり追記）",
+			clientID:  "",
+			wantStore: nil,
+			msg:       "空文字を保存すると2件目以降が一意制約に当たって保存できなくなる",
+		},
+		{
+			name:     "64文字を超えるIDは受け付けない",
+			clientID: strings.Repeat("a", 65),
+			wantErr:  true,
+			msg:      "DBのVARCHAR(64)で黙って切り詰められ、別の発話と衝突しうる",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			sessionRepo := newSessionRepoStub(&models.InterviewSession{ID: 1, UserID: 10, Status: "in_progress"})
+			utterRepo := &saveUtterRepoStub{}
+			svc := NewInterviewService(sessionRepo, utterRepo, nil, nil, nil, nil, nil)
+
+			err := svc.SaveUtterance(10, 1, "user", "自己紹介をします", tt.clientID)
+
+			if tt.wantErr {
+				assert.Error(t, err, tt.msg)
+				assert.Empty(t, utterRepo.created, "エラーなのに保存されている")
+				return
+			}
+			assert.NoError(t, err)
+			if assert.Len(t, utterRepo.created, 1) {
+				assert.Equal(t, tt.wantStore, utterRepo.created[0].ClientUtteranceID, tt.msg)
+			}
+		})
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
+// saveUtterRepoStub は保存された行をそのまま記録するだけのスタブ。
+type saveUtterRepoStub struct {
+	created []models.InterviewUtterance
+}
+
+func (r *saveUtterRepoStub) Create(u *models.InterviewUtterance) error {
+	r.created = append(r.created, *u)
+	return nil
+}
+
+func (r *saveUtterRepoStub) FindBySessionID(uint) ([]models.InterviewUtterance, error) {
+	return nil, nil
 }

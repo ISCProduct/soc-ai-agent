@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
+
+	"gorm.io/gorm"
 )
 
 // ErrNoUtterances は発話が1件も保存されていないセッションのレポート生成エラー（#1476）。
@@ -27,6 +29,44 @@ import (
 // 再試行し切っても0件なら、レポートは未生成のままフロントのポーリングがタイムアウトし、
 // 「生成できなかった」ことがユーザーに見える状態で止まる。
 var ErrNoUtterances = errors.New("interview: no utterances for session")
+
+// ErrSessionNotFinished は未終了セッションに対してレポート再生成を要求されたことを表す(#1476)。
+var ErrSessionNotFinished = errors.New("interview: session is not finished")
+
+// RegenerateReport は未生成のレポートを作り直すためにジョブを再投入する(#1476)。
+//
+// レポート生成ジョブは失われうる。asynq の再試行を使い切った場合、Redis 無しの
+// フォールバック worker では1回で（発話0件なら ErrNoUtterances で確実に）、
+// jobCh が満杯なら投入すらされずに捨てられる。FinishSession は終了済みセッションを
+// 再キューしない（#1019 の冪等性）ため、これまでユーザーには回復手段が無く、
+// 遅れて発話が保存されてもレポートは永久に未生成のままだった。
+//
+// レポートが既にあるときは何もしない。ここで無条件に再投入すると、
+// 生成中のジョブと二重に走って LLM 費用が二重に掛かり、レポートが上書きされる。
+// 呼び出し側（フロントの再試行ボタン）はポーリングがタイムアウト/失敗した後にだけ叩く。
+//
+// 戻り値の queued は「新たにジョブを投入したか」。false は「既に生成済みなので不要」。
+func (s *InterviewService) RegenerateReport(userID uint, sessionID uint) (queued bool, err error) {
+	session, err := s.sessionRepo.FindByID(sessionID)
+	if err != nil {
+		return false, err
+	}
+	if !s.isAllowed(userID, session.UserID) {
+		return false, shared.ErrForbidden
+	}
+	if session.Status != "finished" {
+		return false, ErrSessionNotFinished
+	}
+	report, err := s.reportRepo.FindBySessionID(sessionID)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, err
+	}
+	if report != nil {
+		return false, nil
+	}
+	s.enqueueReportGeneration(sessionID)
+	return true, nil
+}
 
 func (s *InterviewService) StartWorker() {
 	// Redis キュー利用時は asynq worker が処理する。フォールバック用 channel worker は常に起動。

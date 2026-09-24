@@ -135,13 +135,32 @@ export const interviewApi = {
   /**
    * 発話を保存する。半開きの接続で固まると面接ターンごと止まるため、必ずタイムアウトを付ける。
    * 失敗は呼び出し側（saveUtteranceWithRetry）が再試行し、駄目ならUIに出す（#1476）。
+   *
+   * clientUtteranceId は発話ごとに1つだけ発行し、再試行でも同じ値を送ること。
+   * タイムアウトや応答のロストは「保存できたかどうか分からない」失敗なので、
+   * この ID をサーバー側の一意制約に当てて二重保存を防ぐ。
    */
-  async saveUtterance(sessionId: number, userId: number, role: 'user' | 'ai', text: string): Promise<void> {
+  async saveUtterance(sessionId: number, userId: number, role: 'user' | 'ai', text: string, clientUtteranceId: string): Promise<void> {
     const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/utterances`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, role, text }),
+      body: JSON.stringify({ user_id: userId, role, text, client_utterance_id: clientUtteranceId }),
     }, UTTERANCE_FETCH_TIMEOUT_MS)
+    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
+  },
+
+  /**
+   * 未生成のレポートの生成ジョブを再投入する(#1476)。
+   * 生成ジョブは再試行を使い切ると失われ、終了APIは終了済みセッションを再キューしないため、
+   * ポーリングがタイムアウト/失敗した後の回復手段はこれだけ。
+   * 失敗しても呼び出し側はポーリングを続けるので、ここでは投げっぱなしにしない（呼び出し側で握る）。
+   */
+  async regenerateReport(sessionId: number, userId: number): Promise<void> {
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/report/regenerate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId }),
+    })
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
   },
 
