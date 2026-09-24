@@ -22,9 +22,7 @@ export async function GET(request: NextRequest) {
     if (tech) {
       url += `&tech=${encodeURIComponent(tech)}`
     }
-    
-    console.log('[API] Fetching companies from:', url)
-    
+
     const response = await fetch(url, {
       method: 'GET',
       headers: {

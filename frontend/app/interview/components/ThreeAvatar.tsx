@@ -39,24 +39,18 @@ interface MouthTarget {
 
 /** Traverse the loaded GLTF scene and find the best mouth-open morph target. */
 function findMouthTarget(root: THREE.Object3D): MouthTarget | null {
-  // First pass: collect all morph target info and log it
-  const allKeys: { meshName: string; keys: string[] }[] = []
+  // First pass: モデルにモーフターゲットが1つでもあるか確認する
+  let hasMorphTargets = false
   root.traverse((child) => {
     if (child instanceof THREE.Mesh && child.morphTargetDictionary) {
-      const keys = Object.keys(child.morphTargetDictionary)
-      if (keys.length > 0) {
-        allKeys.push({ meshName: child.name || '(unnamed)', keys })
+      if (Object.keys(child.morphTargetDictionary).length > 0) {
+        hasMorphTargets = true
       }
     }
   })
 
-  if (allKeys.length > 0) {
-    console.log('[ThreeAvatar] All morph targets found in model:')
-    allKeys.forEach(({ meshName, keys }) =>
-      console.log(`  mesh "${meshName}":`, keys)
-    )
-  } else {
-    console.log('[ThreeAvatar] No morph targets found in model – lipsync will use head animation only')
+  // モーフターゲットが無い場合はリップシンクを頭の動きだけで表現する
+  if (!hasMorphTargets) {
     return null
   }
 
@@ -69,7 +63,6 @@ function findMouthTarget(root: THREE.Object3D): MouthTarget | null {
         const idx = child.morphTargetDictionary[pattern]
         if (idx !== undefined) {
           found = { mesh: child, index: idx, smoothed: 0 }
-          console.log(`[ThreeAvatar] Using mouth shape key: "${pattern}" (index ${idx}) on mesh "${child.name}"`)
         }
       }
     })
@@ -85,16 +78,12 @@ function findMouthTarget(root: THREE.Object3D): MouthTarget | null {
         const lower = key.toLowerCase()
         if (lower.includes('mouth') || lower.includes('jaw') || lower.includes('open') || key === 'あ') {
           partial = { mesh: child, index: idx, smoothed: 0 }
-          console.log(`[ThreeAvatar] Partial-match mouth shape key: "${key}" (index ${idx}) on mesh "${child.name}"`)
           break
         }
       }
     }
   })
 
-  if (!partial) {
-    console.log('[ThreeAvatar] No mouth shape key matched – lipsync drives head animation only')
-  }
   return partial
 }
 
@@ -235,7 +224,6 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
     const loadModel = async () => {
       try {
         setIsLoading(true)
-        console.log(`[ThreeAvatar] Loading ${gender} avatar…`)
 
         const gltf  = await loadAvatar(gender)
         if (disposed) return
@@ -281,7 +269,6 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
         model.position.y = -center.y * s + 0.3   // shift up so head/torso fill camera frame
         model.position.z = -center.z * s
 
-        console.log(`[ThreeAvatar] model size=${JSON.stringify(size.toArray().map(v=>+v.toFixed(3)))} scale=${s.toFixed(3)}`)
         // ─────────────────────────────────────────────────────────────────
 
         avatarGroup.add(model)
@@ -300,10 +287,9 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
           'jaw_master', 'lowerjaw', 'LowerJaw', 'lower_jaw',
           'mouth', 'Mouth',
         ]
-        // Collect ALL named nodes (Bone or Object3D) for logging + search
+        // Collect ALL named nodes (Bone or Object3D) for search
         const allNodes: THREE.Object3D[] = []
         model.traverse((child) => { if (child.name) allNodes.push(child) })
-        console.log('[ThreeAvatar] All nodes:', allNodes.map(n => `${n.type}:${n.name}`))
 
         let foundNode: THREE.Object3D | null = null
         // Exact match
@@ -320,9 +306,6 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
         if (foundNode) {
           jawBoneRef.current = foundNode as THREE.Bone
           jawRestRotRef.current = foundNode.rotation.clone()
-          console.log(`[ThreeAvatar] Jaw node found: "${foundNode.name}" (${foundNode.type})`)
-        } else {
-          console.log('[ThreeAvatar] No jaw node matched. Node list above — please report bone names.')
         }
 
         // Collect Oculus-viseme meshes as fallback
@@ -343,7 +326,6 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
 
         setIsLoading(false)
         animate()
-        console.log(`[ThreeAvatar] ${gender} avatar ready`)
       } catch (err) {
         console.error('[ThreeAvatar] Failed to load avatar:', err)
         if (!disposed) setUseFallback(true)
@@ -388,7 +370,6 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
       mouthTargetRef.current  = null
       jawBoneRef.current      = null
       jawRestRotRef.current   = null
-      console.log('[ThreeAvatar] Cleanup complete')
     }
   }, [gender, useFallback]) // eslint-disable-line react-hooks/exhaustive-deps
 
