@@ -680,3 +680,55 @@ GET /api/admin/audit-logs
 ```
 
 全管理操作（企業作成・更新・削除等）が記録されています。
+
+---
+
+## 本番の可観測性（#1497）
+
+2026-09 の本番調査で、**障害を検知・追跡する手段が無い**ことが分かった。
+
+| 仕組み | 当時の状態 |
+| --- | --- |
+| ALB アクセスログ | 無効。5xx の発生元を特定できない |
+| Sentry | **本番のみ未設定**（staging にはある） |
+| CloudWatch アラーム | prod / staging とも **0件** |
+
+14日間に ELB 5xx が **50,997件** 出ていたにもかかわらず誰も気付いておらず、
+同時期に本番デプロイのマイグレーションも3回連続で失敗していた。
+
+### 入れたもの
+
+**ALB アクセスログ** — `s3://soc-app-alb-logs`、保持30日。
+`enable_access_logs` で切り替える。staging は既定の `false` のまま（コスト）。
+
+**Sentry** — `SENTRY_DSN` / `SENTRY_ENVIRONMENT` を backend のタスク定義へ。
+`terraform.tfvars` の `sentry_dsn` に値を入れる。空なら `InitSentry` が no-op に
+なるので、未設定のままでも起動はする。
+
+**CloudWatch アラーム** — SNS トピック `soc-app-alarms` 経由。
+`alarm_email` にアドレスを設定し、届いたメールで **Confirm するまで有効にならない**。
+
+| アラーム | 条件 |
+| --- | --- |
+| `target-5xx` | アプリの5xxが5分で5件超 |
+| `target-latency` | p95応答が3秒超（2回連続） |
+| `rds-free-storage` | 空き2GiB未満 |
+| `rds-cpu` | CPU 80%超が10分 |
+
+### 設計上の要点: 計画停止中に鳴らさない
+
+本番は「指定日のみ終日起動」で、**稼働していない時間の方が長い**。
+停止中に鳴るアラームを置くと通知が無視される状態になり、結局いまと同じになる。
+
+- `treat_missing_data = "notBreaching"`（データが無い＝停止中は正常扱い）
+- **停止中でも出る `HTTPCode_ELB_5XX` は対象にしない**。これはターゲット全滅時に
+  ALB が返す503で、計画停止中は常時発生する
+- 稼働していないと発生しない指標だけを見る
+
+### 停止中の見え方
+
+frontend は CloudFront 経由で、ALB が 500/502/503/504 を返すと
+`s3://soc-app-errors-production/service-unavailable.html` へフェイルオーバーする
+（`enable_error_fallback`、既定 `true`）。学生には「接続できません」の案内が出る。
+
+API (`api.shukatsu-ai.jp`) は JSON を返す前提のため対象外で、素の503になる。
