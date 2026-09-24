@@ -14,6 +14,15 @@ RUN python3 -m pip install --upgrade pip setuptools wheel && \
 COPY . /app
 WORKDIR /app/rag
 
+# 非root実行用のユーザー(#1477)。pip install は root で済ませ、学習実行だけ落とす。
+# 学習は --output-dir 配下へモデルを書き出し、HuggingFace のキャッシュは
+# $HOME/.cache に落ちるので /app と /home/app の両方を app 所有にする。
+RUN groupadd --gid 10001 app \
+ && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/app --shell /bin/sh app \
+ && chown -R app:app /app /home/app
+
+USER app
+
 # デフォルトはヘルプ表示
 ENTRYPOINT ["python3", "-u", "training/lora_train.py"]
 CMD ["--help"]
