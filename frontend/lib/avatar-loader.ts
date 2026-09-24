@@ -59,9 +59,7 @@ async function loadAvatarInternal(gender: AvatarGender): Promise<GLTF> {
 
   // Try loading from local file first
   try {
-    console.log(`[AvatarLoader] Loading local avatar: ${localPath}`)
     const gltf = await loadWithTimeout(loader, localPath, 10000)
-    console.log(`[AvatarLoader] Successfully loaded local avatar`)
     if (!hasMorphTargets(gltf)) {
       console.warn('[AvatarLoader] Avatar does not have morph targets. Lipsync will not work.')
     }
@@ -73,9 +71,7 @@ async function loadAvatarInternal(gender: AvatarGender): Promise<GLTF> {
   // Fallback to Ready Player Me CDN
   const fallbackUrl = READY_PLAYER_ME_FALLBACK[gender]
   try {
-    console.log(`[AvatarLoader] Loading RPM fallback: ${fallbackUrl}`)
     const gltf = await loadWithTimeout(loader, fallbackUrl, 15000)
-    console.log(`[AvatarLoader] Successfully loaded RPM fallback avatar`)
     return gltf
   } catch {
     throw new Error(
@@ -148,17 +144,14 @@ function hasMorphTargets(gltf: GLTF): boolean {
  */
 export function clearAvatarCache(): void {
   avatarCache.clear()
-  console.log('[AvatarLoader] Avatar cache cleared')
 }
 
 /**
  * Preload avatars for both genders
  */
 export async function preloadAvatars(): Promise<void> {
-  console.log('[AvatarLoader] Preloading avatars...')
   await Promise.all([
     loadAvatar('male').catch(e => console.error('Failed to preload male avatar:', e)),
     loadAvatar('female').catch(e => console.error('Failed to preload female avatar:', e)),
   ])
-  console.log('[AvatarLoader] Avatar preloading complete')
 }
