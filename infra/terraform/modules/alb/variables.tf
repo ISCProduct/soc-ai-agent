@@ -79,3 +79,15 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "enable_access_logs" {
+  type        = bool
+  description = "ALBのアクセスログをS3へ出すか。有効化しないと5xxの発生元を特定できない"
+  default     = false
+}
+
+variable "access_logs_retention_days" {
+  type        = number
+  description = "アクセスログの保持日数"
+  default     = 30
+}

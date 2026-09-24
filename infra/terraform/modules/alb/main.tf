@@ -1,3 +1,84 @@
+# アクセスログ用バケット。有効化したときだけ作る。
+#
+# 2026-09 の調査で、14日間に ELB 5xx が 50,997 件発生していたのに
+# 発生元をまったく特定できなかった。アクセスログが無効で、Sentry も本番だけ
+# 未設定、CloudWatch アラームも0件という状態だったため、誰も気付いていなかった。
+# 障害の切り分け以前に「誰が来ているのか」が分からない。
+resource "aws_s3_bucket" "access_logs" {
+  count         = var.enable_access_logs ? 1 : 0
+  bucket        = "${var.project_name}-alb-logs"
+  force_destroy = false
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-alb-logs"
+  })
+}
+
+resource "aws_s3_bucket_public_access_block" "access_logs" {
+  count  = var.enable_access_logs ? 1 : 0
+  bucket = aws_s3_bucket.access_logs[0].id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "access_logs" {
+  count  = var.enable_access_logs ? 1 : 0
+  bucket = aws_s3_bucket.access_logs[0].id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      # ALB のアクセスログは SSE-KMS を受け付けない（SSE-S3 のみ）。
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+# 放置すると増え続けるだけなので保持期間を切る。
+# CloudWatch Logs の保持(14日)より長くしているのは、アクセスログは
+# 後追い調査で遡ることが多いため。
+resource "aws_s3_bucket_lifecycle_configuration" "access_logs" {
+  count  = var.enable_access_logs ? 1 : 0
+  bucket = aws_s3_bucket.access_logs[0].id
+
+  rule {
+    id     = "expire"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      days = var.access_logs_retention_days
+    }
+  }
+}
+
+# ALB がログを書き込むための権限。東京リージョンの ELB サービスアカウントを使う。
+data "aws_elb_service_account" "this" {
+  count = var.enable_access_logs ? 1 : 0
+}
+
+data "aws_iam_policy_document" "access_logs" {
+  count = var.enable_access_logs ? 1 : 0
+
+  statement {
+    principals {
+      type        = "AWS"
+      identifiers = [data.aws_elb_service_account.this[0].arn]
+    }
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.access_logs[0].arn}/*"]
+  }
+}
+
+resource "aws_s3_bucket_policy" "access_logs" {
+  count  = var.enable_access_logs ? 1 : 0
+  bucket = aws_s3_bucket.access_logs[0].id
+  policy = data.aws_iam_policy_document.access_logs[0].json
+}
+
 resource "aws_lb" "this" {
   name               = "${var.project_name}-alb"
   internal           = false
@@ -5,9 +86,19 @@ resource "aws_lb" "this" {
   subnets            = var.subnet_ids
   security_groups    = [var.security_group_id]
 
+  dynamic "access_logs" {
+    for_each = var.enable_access_logs ? [1] : []
+    content {
+      bucket  = aws_s3_bucket.access_logs[0].id
+      enabled = true
+    }
+  }
+
   tags = merge(var.tags, {
     Name = "${var.project_name}-alb"
   })
+
+  depends_on = [aws_s3_bucket_policy.access_logs]
 }
 
 resource "aws_lb_target_group" "frontend" {

@@ -14,6 +14,21 @@ RUN python3 -m pip install --upgrade pip setuptools wheel && \
 COPY . /app
 WORKDIR /app/rag
 
+# 非root実行用のユーザー(#1477)。pip install は root で済ませ、学習実行だけ落とす。
+# 学習は --output-dir 配下へモデルを書き出し、HuggingFace のキャッシュは
+# $HOME/.cache に落ちるので /app と /home/app の両方を app 所有にする。
+#
+# /models は lora_train.py の使用例が使う既定の書き出し先（--output-dir /models/lora）。
+# root 実行だった頃は os.makedirs が /models を作れたが、非root では作れないため
+# ここで作って所有権を渡す。ホストのボリュームを /models にマウントする場合は
+# そのボリュームも uid 10001 が書ける必要がある。
+RUN groupadd --gid 10001 app \
+ && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/app --shell /bin/sh app \
+ && mkdir -p /models \
+ && chown -R app:app /app /home/app /models
+
+USER app
+
 # デフォルトはヘルプ表示
 ENTRYPOINT ["python3", "-u", "training/lora_train.py"]
 CMD ["--help"]

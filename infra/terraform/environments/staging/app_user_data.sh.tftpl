@@ -83,6 +83,14 @@ APP_URL=https://${frontend_domain}
 ALLOWED_ORIGINS=https://${frontend_domain}
 NEXT_PUBLIC_BACKEND_URL=https://${backend_domain}
 BACKEND_URL=https://${backend_domain}
+# BFFが転送する X-Client-IP を backend が信用してよいかの共有トークン(#1407)。
+# frontend/backend が同じ .env を読むので、この1行で両方に同じ値が渡る。
+BFF_INTERNAL_TOKEN=${bff_internal_token}
+# X-Forwarded-For のどこが実クライアントIPかは frontend の手前の段数で決まる(#1407)。
+# staging は常に ALB -> edge nginx -> frontend の2段。
+# edge nginx へは ALB の SG からしか届かないため、この2段は迂回できない。
+# CloudFront(error_fallback)は S3 エラーページ専用の失敗時経路なので段数に数えない。
+TRUSTED_PROXY_HOPS=${trusted_proxy_hops}
 RAG_REVIEW_URL=http://rag-review:9000
 CHROMA_HOST=chroma
 CHROMA_PORT=8000

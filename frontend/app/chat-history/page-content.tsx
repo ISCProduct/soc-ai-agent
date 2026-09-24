@@ -106,7 +106,7 @@ export default function PageContent() {
         戻る
       </Button>
 
-      <Typography variant="h4" gutterBottom>
+      <Typography variant="h4" component="h1" gutterBottom>
         チャット履歴
       </Typography>
 

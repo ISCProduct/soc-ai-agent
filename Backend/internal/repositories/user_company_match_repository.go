@@ -80,12 +80,30 @@ func (r *UserCompanyMatchRepository) CreateOrUpdateBatch(matches []*entity.UserC
 	return len(rows), nil
 }
 
+// CompanyHasWeightProfileSQL は「会社単位プロファイルを持つ企業」に限定する SQL 条件を返す（#1380）。
+//
+// プロファイルが無い企業は CalculateMatching が計算対象から外す（matching_service.go）。
+// だが既に保存済みの user_company_matches は残るため、読み出し側でも外さないと
+// デプロイ前にデフォルト重み（全軸50）で作られた行や、プロファイル削除前に作られた行が
+// 推薦一覧・メールレポート・教員の低マッチ集計に古いスコアのまま出続ける。
+//
+// 行は消さない。is_viewed / is_favorited / is_applied はユーザー操作の結果で、
+// プロファイル生成をやり直せばそのまま復帰できる。削除すると復帰できない。
+//
+// companyIDColumn は呼び出し元がコード内リテラルで渡す列名（外部入力を渡さないこと）。
+func CompanyHasWeightProfileSQL(companyIDColumn string) string {
+	return "EXISTS (SELECT 1 FROM company_weight_profiles cwp" +
+		" WHERE cwp.company_id = " + companyIDColumn +
+		" AND cwp.job_position_id IS NULL)"
+}
+
 // FindTopMatchesByUserAndSession マッチング度の高い順に企業を取得
 func (r *UserCompanyMatchRepository) FindTopMatchesByUserAndSession(
 	userID uint, sessionID string, limit int,
 ) ([]*entity.UserCompanyMatch, error) {
 	var ms []*models.UserCompanyMatch
 	err := r.db.Where("user_id = ? AND session_id = ?", userID, sessionID).
+		Where(CompanyHasWeightProfileSQL("user_company_matches.company_id")).
 		Order("match_score DESC").
 		Limit(limit).
 		Preload("Company").

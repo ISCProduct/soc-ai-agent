@@ -58,6 +58,7 @@ func SetupCompanyAuthRoutes(
 	applicationController *companycontrollers.CompanyPortalApplicationController,
 	jobController *companycontrollers.CompanyPortalJobController,
 	profileController *companycontrollers.CompanyPortalProfileController,
+	schoolAppController *companycontrollers.CompanyPortalSchoolApplicationController,
 	companySecret string,
 	users *repositories.CompanyUserRepository,
 ) {
@@ -113,5 +114,13 @@ func SetupCompanyAuthRoutes(
 		portal.GET("/members", profileController.ListMembers)
 		portal.POST("/members", profileController.InviteMember)
 		portal.PATCH("/members/:userID", profileController.SetMemberDisabled)
+	}
+
+	// 学校への掲載申請 (#1506)。一覧は全員、申請・取消は owner のみ
+	// （コントローラ側で判定）。company_id はJWT由来。
+	if schoolAppController != nil {
+		portal.GET("/school-applications", schoolAppController.List)
+		portal.POST("/school-applications", schoolAppController.Create)
+		portal.DELETE("/school-applications/:id", schoolAppController.Delete)
 	}
 }

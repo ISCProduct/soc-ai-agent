@@ -8,7 +8,7 @@ locals {
   backend_domain  = "api.${var.domain_name}"
 
   backend_secret_arns = compact(concat(
-    [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn, aws_secretsmanager_secret.email.arn, aws_secretsmanager_secret.admin.arn, aws_secretsmanager_secret.openai.arn, aws_secretsmanager_secret.rag_internal.arn],
+    [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn, aws_secretsmanager_secret.email.arn, aws_secretsmanager_secret.admin.arn, aws_secretsmanager_secret.openai.arn, aws_secretsmanager_secret.rag_internal.arn, aws_secretsmanager_secret.bff_internal.arn],
     # 法人番号API / gBizINFO(#1360)。AWS 側には既にあったがコードに無く、
     # apply すると実行ロールからこの2つの取得許可が外れ、次のタスク起動が失敗する状態だった。
     [aws_secretsmanager_secret.houjin_bangou.arn, aws_secretsmanager_secret.gbizinfo.arn],
@@ -100,6 +100,12 @@ locals {
       {
         name      = "RAG_INTERNAL_TOKEN"
         valueFrom = "${aws_secretsmanager_secret.rag_internal.arn}:rag_internal_token::"
+      },
+      {
+        # frontend(BFF)が転送する X-Client-IP を信用してよいかの判定に使う(#1407)。
+        # 未設定でも起動はする（その場合はIP単位の制限が従来どおりBFFの出口IPで集計される）。
+        name      = "BFF_INTERNAL_TOKEN"
+        valueFrom = "${aws_secretsmanager_secret.bff_internal.arn}:bff_internal_token::"
       }
     ],
     [
@@ -553,6 +559,41 @@ resource "aws_secretsmanager_secret_version" "rag_internal" {
   })
 }
 
+# frontend(BFF) -> backend の内部認証トークン(#1407)。
+# backend の ALB はインターネット直結なので、X-Client-IP は誰でも送れる。
+# このトークンが一致したときだけ backend が X-Client-IP を実クライアントIPとして採用し、
+# IP単位のレート制限を利用者ごとに効かせる。不一致・未設定なら無視して従来の XFF 末尾を使う
+# （fail-closed で拒否はしない。シークレット未配布でサイトを落とさないため）。
+resource "random_password" "bff_internal_token" {
+  length  = 48
+  special = false
+}
+
+# CloudFront -> ALB の経路証明トークン(#1407)。
+# ALB は 0.0.0.0/0 に開いており、api.${var.domain_name} から得た同じALBのIPへ
+# frontend の Host/SNI で直接接続できる。この迂回経路で詐称 X-Forwarded-For を送られても
+# 段数だけ見ると「CloudFront+ALBの2段」と区別が付かないため、CloudFront が付与する
+# このトークンが一致したときだけ frontend が段数を信用する。
+# bff_internal_token とは別値にする（CloudFront 設定側に置く値なので、漏れても
+# backend の X-Client-IP 採用権限までは渡らないようにする）。
+resource "random_password" "cloudfront_origin_token" {
+  length  = 48
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "bff_internal" {
+  name = "${var.project_name}/bff-internal"
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "bff_internal" {
+  secret_id = aws_secretsmanager_secret.bff_internal.id
+  secret_string = jsonencode({
+    bff_internal_token      = random_password.bff_internal_token.result
+    cloudfront_origin_token = random_password.cloudfront_origin_token.result
+  })
+}
+
 # --- ドメイン紐付け（既存 Route53 ホストゾーンを使用） ---
 data "aws_route53_zone" "selected" {
   name = var.domain_name
@@ -573,6 +614,9 @@ module "alb" {
   target_type          = "ip"
   # 本番反映の切り替え待機を短縮する(デプロイ頻度が高いため #運用実績)
   deregistration_delay = 10
+  # 5xxの発生元を特定できるようにする。無効だった間、14日で50,997件のELB 5xxが
+  # 出ていたのに誰が来ているのか分からなかった。
+  enable_access_logs = true
   # 学園マルチテナント(<学園slug>.shukatsu-ai.jp)とadmin.shukatsu-ai.jp用のワイルドカードSAN
   additional_san_domains = ["*.${var.domain_name}"]
   tags                   = local.tags
@@ -626,6 +670,10 @@ module "backend" {
     # 同一タスク内のredisサイドカーへlocalhost経由で接続(awsvpcモードはコンテナ間で
     # ネットワーク名前空間を共有するため)
     REDIS_URL = "redis://localhost:6379/0"
+    # 本番だけ Sentry が未設定で、エラーがどこにも残っていなかった(stagingにはある)。
+    # 空文字なら InitSentry が no-op になるので、未設定のままでも起動はする。
+    SENTRY_DSN         = var.sentry_dsn
+    SENTRY_ENVIRONMENT = "production"
     # Cloud Map(Service Discovery)経由でrag-reviewタスクへ到達する
     RAG_REVIEW_URL = "http://rag-review.${aws_service_discovery_private_dns_namespace.internal.name}:9000"
   }
@@ -671,7 +719,29 @@ module "frontend" {
     # セッションリフレッシュ等)がprocess.envを実行時に読む経路のために設定する。
     BACKEND_URL             = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
     NEXT_PUBLIC_BACKEND_URL = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
+    # X-Forwarded-For のどこが実クライアントIPかは frontend の手前の段数で決まる(#1407)。
+    # enable_error_fallback が有効なときだけ CloudFront が1段増える。
+    TRUSTED_PROXY_HOPS = var.enable_error_fallback ? "2" : "1"
   }
+  # Route Handler から backend を呼ぶときに実クライアントIPを添えるための共有トークン(#1407)。
+  # backend 側と同じ値でないと X-Client-IP は無視される。
+  secret_arns = [aws_secretsmanager_secret.bff_internal.arn]
+  secrets = concat(
+    [
+      {
+        name      = "BFF_INTERNAL_TOKEN"
+        valueFrom = "${aws_secretsmanager_secret.bff_internal.arn}:bff_internal_token::"
+      }
+    ],
+    # CloudFront 経由であることの証明。これを設定した環境では、一致しない
+    # リクエスト(=ALB直叩き)の X-Forwarded-For を実IPとして採用しない(#1407)。
+    var.enable_error_fallback ? [
+      {
+        name      = "CLOUDFRONT_ORIGIN_TOKEN"
+        valueFrom = "${aws_secretsmanager_secret.bff_internal.arn}:cloudfront_origin_token::"
+      }
+    ] : []
+  )
   tags = local.tags
 }
 
@@ -896,6 +966,7 @@ module "cloudfront_app_proxy" {
   aliases                   = [local.frontend_domain, "*.${var.domain_name}"]
   route53_zone_id           = data.aws_route53_zone.selected.zone_id
   alb_dns_name              = module.alb.alb_dns_name
+  origin_token              = random_password.cloudfront_origin_token.result
   service_unavailable_html  = file("${path.module}/../../../static/service-unavailable.html")
   tags                      = local.tags
 }

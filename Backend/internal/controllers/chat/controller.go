@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -356,19 +355,11 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 	}
 
 	sessionID := ctx.QueryParam("session_id")
-	limitStr := ctx.QueryParam("limit")
-
 	if sessionID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
 	}
 
-	limit := 10 // デフォルト
-	if limitStr != "" {
-		l, err := strconv.Atoi(limitStr)
-		if err == nil && l > 0 {
-			limit = l
-		}
-	}
+	limit := httpapi.LimitQuery(ctx, "limit", 10)
 
 	// 既存のマッチング結果を取得（事前計算済みを想定）
 	log.Printf("[GetRecommendations] Fetching pre-calculated matches for user %d, session %s\n", userID, sessionID)
@@ -392,8 +383,14 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		if diagnostics != nil {
 			if diagnostics.UserScoreCount == 0 {
 				reason = "insufficient_user_scores"
-			} else if diagnostics.ActiveCompanyCount == 0 || diagnostics.WeightProfileCount == 0 {
+			} else if diagnostics.ActiveCompanyCount == 0 {
 				reason = "insufficient_company_data"
+			} else if diagnostics.CompaniesWithoutProfile >= diagnostics.ActiveCompanyCount {
+				// 公開企業はあってもプロファイルが1社も無ければマッチングは0件になる（#1380）。
+				// insufficient_company_data と混ぜると、フロントが
+				// 「企業情報を公開するまでお待ちください」と案内してしまう。
+				// 公開は済んでいて、必要なのはプロファイル生成なので別 reason にする。
+				reason = "insufficient_company_profiles"
 			}
 		}
 

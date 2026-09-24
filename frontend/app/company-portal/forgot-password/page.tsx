@@ -48,7 +48,7 @@ export default function CompanyPortalForgotPasswordPage() {
     >
       <Card sx={{ maxWidth: 450, width: '100%' }}>
         <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
-          <Typography variant="h5" align="center" gutterBottom fontWeight="bold">
+          <Typography variant="h5" component="h1" align="center" gutterBottom fontWeight="bold">
             パスワードをお忘れですか？
           </Typography>
           <Typography variant="body2" align="center" color="text.secondary" sx={{ mb: 3 }}>
@@ -76,6 +76,8 @@ export default function CompanyPortalForgotPasswordPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                autoComplete="email"
+                slotProps={{ htmlInput: { inputMode: 'email' } }}
                 sx={{ mb: 3 }}
               />
               <Button

@@ -377,3 +377,46 @@ func TestInterviewService_EnsureSessionOwnership(t *testing.T) {
 		assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 	})
 }
+
+// TestInterviewService_GetTrend_Limit はサービス側の limit 上限を固定する(#1478)。
+//
+// コントローラーが httpapi.MaxListLimit(100) で頭打ちにしても、ここで limit > 50 を
+// 既定値20へ戻していると `GET /api/interviews/trend?limit=100` は20件しか返らない。
+// 上限を100へ揃え、本番の GetTrend を通した返却件数で固定する。
+func TestInterviewService_GetTrend_Limit(t *testing.T) {
+	tests := []struct {
+		name      string
+		limit     int
+		wantLimit int
+	}{
+		{name: "0は既定の20", limit: 0, wantLimit: 20},
+		{name: "負値は既定の20", limit: -1, wantLimit: 20},
+		{name: "上限内はそのまま", limit: 51, wantLimit: 51},
+		{name: "上限ちょうどはそのまま", limit: 100, wantLimit: 100},
+		{name: "上限超過は既定の20", limit: 101, wantLimit: 20},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sRepo := new(mockSessionRepo)
+			rRepo := new(mockReportRepo)
+			// DBには上限より多くの完了済みセッションがある想定にし、
+			// リポジトリへ渡った limit の件数だけ返す。
+			sessions := make([]models.InterviewSession, 0, tt.wantLimit)
+			for i := range tt.wantLimit {
+				id := uint(i + 1)
+				sessions = append(sessions, models.InterviewSession{ID: id, UserID: 1})
+				rRepo.On("FindBySessionID", id).
+					Return(&models.InterviewReport{SessionID: id, ScoresJSON: `{"logic":80}`}, nil)
+			}
+			sRepo.On("ListFinishedByUser", uint(1), tt.wantLimit).Return(sessions, nil)
+
+			svc := interview.NewInterviewService(sRepo, nil, rRepo, nil, nil, nil, nil)
+			points, err := svc.GetTrend(1, tt.limit)
+
+			assert.NoError(t, err)
+			assert.Len(t, points, tt.wantLimit)
+			sRepo.AssertExpectations(t)
+		})
+	}
+}

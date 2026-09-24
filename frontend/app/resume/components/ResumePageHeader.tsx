@@ -15,15 +15,16 @@ export function ResumePageHeader({ prefilledCompany, prefilledIndustry }: Resume
   return (
     <>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+        {/* size="small" のままだと34x34でモバイルのタップ領域が足りない（#1481） */}
         <IconButton
           onClick={() => router.back()}
           size="small"
           aria-label="前のページに戻る"
-          sx={{ bgcolor: '#f1f5f9', color: '#475569' }}
+          sx={{ bgcolor: '#f1f5f9', color: '#475569', width: 44, height: 44 }}
         >
           <ArrowBackIcon />
         </IconButton>
-        <Typography variant="h4" fontWeight="bold" sx={{ fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>
+        <Typography variant="h4" component="h1" fontWeight="bold" sx={{ fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>
           履歴書・エントリシート レビュー
         </Typography>
       </Box>

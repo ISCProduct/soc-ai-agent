@@ -79,6 +79,7 @@ function SetupContent() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              autoComplete="new-password"
               sx={{ mb: 3 }}
             />
             <Button

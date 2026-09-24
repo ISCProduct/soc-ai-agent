@@ -10,6 +10,7 @@
    - [稼働日の前日チェックリスト](#33-稼働日の前日チェックリスト-1388)
    - [エラートラッキング(Sentry)の有効化](#34-エラートラッキングsentryの有効化-1185)
    - [エラートラッキング（Sentry）](#34-エラートラッキングsentry-619--1185)
+   - [クライアントIPをBFFからBackendへ引き継ぐ](#35-クライアントipをbffからbackendへ引き継ぐ-1407)
 4. [障害対応](#4-障害対応)
 5. [データベース管理](#5-データベース管理)
 6. [管理画面操作](#6-管理画面操作)
@@ -404,6 +405,12 @@ DSN は Secrets Manager 等に置き、リポジトリには置かない。
 
 - リクエストボディ / Cookie / QueryString
 - `Authorization` / `X-Admin-Token` / `X-User-Token` / `X-Company-User-Token` / `X-Internal-Token`
+- `X-Origin-Token`（CloudFront の経路証明。漏れると公開ALB直叩きで詐称XFFを署名させられる）/ `Referer`（遷移元のクエリにワンタイムトークンが載る）
+
+一覧は frontend `frontend/lib/sentry.ts` の `SENSITIVE_HEADERS` と Backend
+`Backend/internal/observability/sentry.go` の `sensitiveHeaders` の2箇所にある。
+片方だけ直す事故を防ぐため、両者の食い違いは Go のテスト
+（`TestSensitiveHeaders_フロントと同期`）で落ちる。
 
 相関は既存の `X-Request-ID`（`request_id` タグ）で行う（3.1 節）。
 
@@ -465,10 +472,17 @@ null を返し、`Backend/internal/observability/sentry.go` も DSN 空なら初
 **シークレットは staging と本番で分けてある。** 同じ名前を使うと、staging を有効化した瞬間に
 次の本番デプロイでも有効になり、段階導入ができない。
 
-本番のサーバー側だけ注意点がある。ECS のタスク定義は `container_definitions` を
-`ignore_changes` にしているため（`modules/ecs_service_fargate/main.tf`）、**Terraform に環境変数を
-足しただけでは反映されない**。反映するには一時的に ignore を外して apply する必要がある
-（モジュール側のコメントにも同じ注意書きがある）。
+本番のサーバー側だけ注意点がある。`SENTRY_DSN` は ECS タスク定義の `container_definitions` の中
+にあり、`terraform apply` で新しいリビジョンは登録されるが、`aws_ecs_service` が `task_definition`
+を `ignore_changes` しているため**稼働中のタスクは入れ替わらない**
+（`modules/ecs_service_fargate/main.tf`）。反映するには apply 後にデプロイを1回走らせる
+（`deployment.yml` は最新リビジョンを取得して image だけ差し替えるので、terraform が入れた
+環境変数はそのまま引き継がれる）。frontend/backend に差分が無い場合は
+[3.5 の「本番タスク定義へ反映する」](#本番タスク定義へ反映する)と同じ手順で手動反映する。
+
+> かつては `container_definitions` も `ignore_changes` に入っていて、**Terraform に環境変数を
+> 足しても永久に本番へ届かなかった**（#1407）。現在は外してあるので、一時的に ignore を外す
+> といった作業は不要。
 
 ### 送信前に落としているもの
 
@@ -482,6 +496,195 @@ null を返し、`Backend/internal/observability/sentry.go` も DSN 空なら初
 - パンくずの URL、および console のパンくずは丸ごと破棄
 
 `sendDefaultPii: false` / `tracesSampleRate: 0`（トレースは送らない＝Sentry の枠を消費しない）。
+
+---
+
+## 3.5 クライアントIPをBFFからBackendへ引き継ぐ (#1407)
+
+Next.js の Route Handler（BFF）が Backend を呼ぶと、Backend から見た送信元は
+frontend タスクの出口IP1つに収束する。転送しないと「IP単位」のレート制限
+（ログイン 20回/分、パスワードリセット 5回/時、企業情報のゲスト投稿 5回/時、
+ゲストAI）が**全利用者合計の上限**として効き、展示会など同時アクセスが増える場面で
+無関係な利用者が 429 で締め出される。
+
+### 信頼境界
+
+backend の ALB はインターネットに直結しているため、`X-Client-IP` は誰でも送れる。
+無条件に採用するとIP単位の制限を詐称で回避できるので、**BFF と共有するトークンが
+一致した場合に限り**採用する。
+
+| 区間 | ヘッダー | 採用条件 |
+| --- | --- | --- |
+| ブラウザ -> CloudFront/ALB/nginx -> Next.js | `X-Forwarded-For` | 各プロキシが末尾へ直前の送信元を追記する。クライアント指定値は先頭に残る |
+| CloudFront -> ALB -> Next.js | `X-Origin-Token` | CloudFront のカスタムオリジンヘッダー。ビューアーが同名ヘッダーを送っても CloudFront が上書きするので詐称できない |
+| Next.js -> Backend | `X-Client-IP` + `X-Internal-Token` | `lib/api-proxy.ts` の `clientIpHeaders` が、XFF の末尾から `TRUSTED_PROXY_HOPS` 番目の要素だけを載せる。クライアントが送ってきた `X-Client-IP` は読まない |
+| Backend | - | `middleware.GetClientIP` が `BFF_INTERNAL_TOKEN` と定数時間比較し、一致かつIPとして妥当なときだけ採用。それ以外は従来どおり ALB が付けた XFF 末尾へフォールバック |
+
+トークン未設定なら BFF は何も送らず、Backend も何も見ない（従来の挙動のまま）。
+シークレット未配布でサイトが落ちないようにするための無効化であって、素通しではない。
+
+#### CloudFront を迂回する経路を数えない
+
+本番の ALB は `0.0.0.0/0` に開いており、`api.shukatsu-ai.jp` から得た同じ ALB の IP へ
+frontend の Host/SNI で直接接続できる。この迂回経路で
+`X-Forwarded-For: <詐称IP>` を送ると、ALB が実IPを末尾へ足して**要素数2の XFF**が
+出来上がり、CloudFront 経由の正規リクエストと段数では区別が付かない。
+段数だけで信用すると、詐称した先頭を BFF が内部トークン付きで署名して Backend へ渡し、
+IP単位の制限を任意のIPごとに分散できてしまう。
+
+そのため `CLOUDFRONT_ORIGIN_TOKEN` を設定した環境では、CloudFront が付けた
+`X-Origin-Token` が一致したときだけ段数を信用する。一致しない（＝ALB 直叩き）場合は
+何も転送せず、Backend は BFF の出口IPへフォールバックする。
+
+### 環境変数
+
+| 変数 | 置き場所 | 値 |
+| --- | --- | --- |
+| `BFF_INTERNAL_TOKEN` | frontend タスクと backend タスクの両方 | 同じランダム文字列。prod は Secrets Manager `soc-app/bff-internal` の `bff_internal_token`、staging は EC2 の共有 `.env` + SSM `/soc-stg/bff-internal-token`（いずれも Terraform の `random_password` が生成。staging は全インスタンスで同一必須） |
+| `TRUSTED_PROXY_HOPS` | frontend タスクのみ | frontend の手前にいる**必ず通る**プロキシの段数。prod(CloudFront+ALB)=2、prod で `enable_error_fallback=false`(ALBのみ)=1、staging(ALB+edge nginx)=2、ローカル=未設定(1) |
+| `CLOUDFRONT_ORIGIN_TOKEN` | frontend タスクのみ | CloudFront が `X-Origin-Token` として付ける値。Secrets Manager `soc-app/bff-internal` の `cloudfront_origin_token`。CloudFront を迂回できる環境（prod）でのみ設定する |
+
+`TRUSTED_PROXY_HOPS` は経路を1段でも増減させたら必ず合わせる。多く見積もると
+クライアントが先頭に詰めた詐称値を拾いうるため、迷ったら小さい値（＝より末尾側）にする。
+値が XFF の要素数を超えた場合は推測せず転送しない。
+
+数えてよいのは**成功経路に必ず存在し、かつ迂回できない段**だけ。
+staging の CloudFront は Route53 SECONDARY の S3 エラーページ専用（失敗時のみ）なので
+段数に数えず、常に 2（ALB + edge nginx。nginx へは ALB の SG からしか届かない）。
+prod の CloudFront は迂回できるので、段数に数える代わりに
+`CLOUDFRONT_ORIGIN_TOKEN` で経路を認証する。
+
+### 本番タスク定義へ反映する
+
+`environment` / `secrets` は ECS タスク定義の `container_definitions` の中にある。
+`terraform apply` で新リビジョンは登録されるが、`aws_ecs_service` は `task_definition` を
+`ignore_changes` しているため**稼働中のタスクは入れ替わらない**
+（`infra/terraform/modules/ecs_service_fargate/main.tf` の `lifecycle`）。反映するには apply 後に
+デプロイを1回走らせる（`deployment.yml` は最新リビジョンを取得して image だけ差し替えるので、
+terraform が入れた環境変数はそのまま引き継がれる）。frontend/backend に差分が無い場合は
+下記の手順で手動反映する。
+
+`BFF_INTERNAL_TOKEN` は frontend と backend の**両方**に入って初めて機能する。
+frontend だけ入れ替えると backend は旧リビジョンのまま期待トークンが空になり、
+`GetClientIP` が転送された `X-Client-IP` を全て捨てて frontend の出口IP1つへ
+再び集約される。必ず2サービスとも流す。
+
+> **`--task-definition soc-app-<svc>`（リビジョン省略）で update-service してはいけない。**
+> リビジョンを省略すると AWS CLI は**最新の ACTIVE リビジョン**＝ terraform が
+> `var.backend_image` / `var.frontend_image` から登録したものを選ぶ。本番デプロイ
+> (`.github/workflows/deployment.yml`) は `soc-backend:<SHA>` / `soc-frontend:<SHA>` しか
+> push せず `latest` を更新しないため、tfvars が `:latest`
+> (`infra/terraform/environments/prod/terraform.tfvars.example`) のままだと、
+> 稼働中のイメージを古いものへ巻き戻すか、存在しないタグでデプロイを失敗させる。
+
+安全な手順は deployment.yml と同じ「最新リビジョンを取って image だけ差し替えて登録」で、
+差し替える先を新しい SHA ではなく**稼働中サービスが今使っている image** にする。
+
+```sh
+CLUSTER=soc-app
+
+for svc in backend frontend; do
+  container="soc-$svc"   # タスク定義上のコンテナ名(soc-backend / soc-frontend)
+
+  # 1) 稼働中サービスが今使っている image を控える（これを維持するのが目的）
+  running_td=$(aws ecs describe-services --cluster "$CLUSTER" --services "$svc" \
+    --query 'services[0].taskDefinition' --output text)
+  running_image=$(aws ecs describe-task-definition --task-definition "$running_td" \
+    --query "taskDefinition.containerDefinitions[?name=='$container'].image | [0]" --output text)
+  echo "$svc: 稼働中 $running_td / $running_image"
+  case "$running_image" in ""|None) echo "image を取得できない。中止" >&2; exit 1;; esac
+
+  # 2) terraform が登録した最新リビジョン(= 新しい environment/secrets 入り)を取り、
+  #    image だけ 1) の値へ戻して新リビジョンとして登録する
+  aws ecs describe-task-definition --task-definition "$CLUSTER-$svc" \
+    --query 'taskDefinition' \
+    | jq --arg c "$container" --arg img "$running_image" \
+        'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+         | .containerDefinitions |= map(if .name == $c then .image = $img else . end)' \
+    > "/tmp/$svc-td.json"
+
+  new_td=$(aws ecs register-task-definition --cli-input-json "file:///tmp/$svc-td.json" \
+    --query 'taskDefinition.taskDefinitionArn' --output text)
+
+  # 3) 反映前に、狙った環境変数が入っていて image が変わっていないことを確認する
+  aws ecs describe-task-definition --task-definition "$new_td" \
+    --query "taskDefinition.containerDefinitions[?name=='$container'].{image:image,env:environment[?name=='TRUSTED_PROXY_HOPS'||name=='CLOUDFRONT_ORIGIN_TOKEN'],secrets:secrets[?name=='BFF_INTERNAL_TOKEN']}"
+
+  # 4) リビジョンを明示して適用する（family だけ渡すと 1) の image が上書きされる）
+  aws ecs update-service --cluster "$CLUSTER" --service "$svc" --task-definition "$new_td"
+done
+
+# 両方が新リビジョンで安定するまで待つ
+aws ecs wait services-stable --cluster soc-app --services backend frontend
+```
+
+`--force-new-deployment` は不要（`--task-definition` を変えた時点で新しいデプロイが走る）。
+本番が停止日（`desired_count=0`）なら update-service だけ打っておけばよく、
+`services-stable` は即座に返る。次にスケジューラが起動した時点で新リビジョンが使われる。
+
+### staging の既存インスタンスへ反映する
+
+staging は EC2 上の docker compose で、`.env` を書くのは launch template の user_data
+だけ。ASG は `version = "$Latest"` を指定しており、新しい LT 版を作っても**この指定自体は
+変化しない**ため instance refresh は起きない。つまり apply しても稼働中のインスタンスは
+古い `.env` のままになる。
+
+そのため `deployment.yml` のデプロイ手順で `.env` を更新している。
+**デプロイを1回流せば反映される**。
+
+`BFF_INTERNAL_TOKEN` は **staging 全インスタンスで同じ値でなければならない**。
+frontend は `BACKEND_URL=https://<backend_domain>`、つまり ALB 配下の任意のインスタンスの
+backend を叩くため、インスタンス毎に生成した値だと組み合わせ次第で検証に失敗し、
+`X-Client-IP` が捨てられて全利用者が frontend の出口IP1つへ再集約される
+（負荷試験で ASG が最大3台まで増えると顕在化する）。
+
+配り方は1系統に揃えてある:
+
+| 対象 | 経路 |
+| --- | --- |
+| 新規インスタンス | launch template の user_data が `random_password.bff_internal_token` を直接書く |
+| 稼働中インスタンス | `deployment.yml` が SSM `/<project>/bff-internal-token` を読んで `.env` を上書き |
+
+SSM パラメータの中身は `random_password.bff_internal_token` と同じ値なので、
+どちらの経路でも必ず一致する。SSM を読めなかった場合はデプロイログに `WARN` を出し、
+`.env` は変更しない（user_data が書いた正しい値を消さないため）。
+`deployment.yml` は **running のインスタンス全台**へ SSH するので、ASG が複数台へ
+増えていても配り漏れは出ない。
+
+デプロイを待たずに確認するなら。**トークンの値そのものは表示しない**
+（端末のスクロールバック・セッション録画・貼り付けたログに残り、拾った者は
+公開 backend ALB へ任意の `X-Client-IP` を送って送信元IPを詐称できる）。
+ハッシュの先頭12桁だけを突き合わせる:
+
+```sh
+# terraform 側の正解（値は出さずハッシュだけ）
+EXPECTED=$(aws ssm get-parameter --name /soc-stg/bff-internal-token \
+  --query Parameter.Value --output text \
+  | tr -d '\n' | openssl dgst -sha256 | awk '{print substr($NF,1,12)}')
+echo "expected: $EXPECTED"
+
+# 全 running インスタンスの実値のハッシュ（すべて expected と一致していること）
+aws ec2 describe-instances \
+  --filters Name=tag:Name,Values=soc-stg-app Name=instance-state-name,Values=running \
+  --query 'Reservations[].Instances[].PublicIpAddress' --output text \
+  | tr '\t' '\n' | while read -r ip; do
+      printf '%s: ' "$ip"
+      ssh ubuntu@"$ip" "sudo sed -n 's/^BFF_INTERNAL_TOKEN=//p' /opt/app/.env \
+        | tr -d '\n' | sha256sum | cut -c1-12"
+    done
+```
+
+### 効いているか確認する
+
+```sh
+# 別々の回線（テザリング等）から2回ログインに失敗させ、
+# 一方が 429 になっても他方が通ることを見る
+curl -i -X POST https://shukatsu-ai.jp/api/company-auth/login \
+  -H 'Content-Type: application/json' -d '{"email":"...","password":"..."}'
+```
+
+企業情報のゲスト投稿の監査ログ（`company_entry_submissions.source_ip`）も同じ経路でIPを取るため、
+転送が効いていれば投稿ごとに異なるIPが記録される。
 
 ---
 
@@ -680,3 +883,55 @@ GET /api/admin/audit-logs
 ```
 
 全管理操作（企業作成・更新・削除等）が記録されています。
+
+---
+
+## 本番の可観測性（#1497）
+
+2026-09 の本番調査で、**障害を検知・追跡する手段が無い**ことが分かった。
+
+| 仕組み | 当時の状態 |
+| --- | --- |
+| ALB アクセスログ | 無効。5xx の発生元を特定できない |
+| Sentry | **本番のみ未設定**（staging にはある） |
+| CloudWatch アラーム | prod / staging とも **0件** |
+
+14日間に ELB 5xx が **50,997件** 出ていたにもかかわらず誰も気付いておらず、
+同時期に本番デプロイのマイグレーションも3回連続で失敗していた。
+
+### 入れたもの
+
+**ALB アクセスログ** — `s3://soc-app-alb-logs`、保持30日。
+`enable_access_logs` で切り替える。staging は既定の `false` のまま（コスト）。
+
+**Sentry** — `SENTRY_DSN` / `SENTRY_ENVIRONMENT` を backend のタスク定義へ。
+`terraform.tfvars` の `sentry_dsn` に値を入れる。空なら `InitSentry` が no-op に
+なるので、未設定のままでも起動はする。
+
+**CloudWatch アラーム** — SNS トピック `soc-app-alarms` 経由。
+`alarm_email` にアドレスを設定し、届いたメールで **Confirm するまで有効にならない**。
+
+| アラーム | 条件 |
+| --- | --- |
+| `target-5xx` | アプリの5xxが5分で5件超 |
+| `target-latency` | p95応答が3秒超（2回連続） |
+| `rds-free-storage` | 空き2GiB未満 |
+| `rds-cpu` | CPU 80%超が10分 |
+
+### 設計上の要点: 計画停止中に鳴らさない
+
+本番は「指定日のみ終日起動」で、**稼働していない時間の方が長い**。
+停止中に鳴るアラームを置くと通知が無視される状態になり、結局いまと同じになる。
+
+- `treat_missing_data = "notBreaching"`（データが無い＝停止中は正常扱い）
+- **停止中でも出る `HTTPCode_ELB_5XX` は対象にしない**。これはターゲット全滅時に
+  ALB が返す503で、計画停止中は常時発生する
+- 稼働していないと発生しない指標だけを見る
+
+### 停止中の見え方
+
+frontend は CloudFront 経由で、ALB が 500/502/503/504 を返すと
+`s3://soc-app-errors-production/service-unavailable.html` へフェイルオーバーする
+（`enable_error_fallback`、既定 `true`）。学生には「接続できません」の案内が出る。
+
+API (`api.shukatsu-ai.jp`) は JSON を返す前提のため対象外で、素の503になる。

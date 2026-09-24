@@ -61,12 +61,24 @@ func publishedCompanyExists(col string) string {
 }
 
 func guestEntryVisibilityGuard(cols ...string) string {
+	joined := strings.Join(cols, ", ")
+	// companies.is_guest_entry を主たる判定に使う(#1409)。
+	// 以前は company_entry_submissions の行の有無だけで判定しており、
+	// その行が消えると「ゲスト投稿ではない」と見なされて審査前の企業が
+	// 未認証の公開APIへ出た(fail-open)。表示可否の材料を監査用テーブルに
+	// 置いていたのが原因なので、企業行側へ移した。
+	//
+	// company_entry_submissions 側の条件も残す。マイグレーションの埋め漏れや、
+	// フラグを立てない経路が後から増えたときに、片方だけで素通りさせない。
 	return fmt.Sprintf(`NOT EXISTS (
-	SELECT 1 FROM company_entry_submissions s
-	JOIN companies c ON c.id = s.company_id
-	WHERE (c.data_status <> 'published' OR c.is_active = false)
-	  AND s.company_id IN (%s)
-)`, strings.Join(cols, ", "))
+	SELECT 1 FROM companies c
+	WHERE c.id IN (%s)
+	  AND (c.data_status <> 'published' OR c.is_active = false)
+	  AND (
+	    c.is_guest_entry = true
+	    OR EXISTS (SELECT 1 FROM company_entry_submissions s WHERE s.company_id = c.id)
+	  )
+)`, joined)
 }
 
 // GetByCompanyID 指定企業IDに関連する企業関係を取得

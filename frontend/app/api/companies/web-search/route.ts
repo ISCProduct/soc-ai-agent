@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { clientIpHeaders } from '@/lib/api-proxy'
 
 const API_BASE_URL = process.env.BACKEND_URL || 'http://app:8080'
 
@@ -14,7 +15,8 @@ export async function GET(request: NextRequest) {
     const url = `${API_BASE_URL}/api/companies/web-search?q=${encodeURIComponent(q)}`
     const response = await fetch(url, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
+      // ゲストAIのIP単位制限を利用者ごとに効かせる(#1407)
+      headers: { 'Content-Type': 'application/json', ...clientIpHeaders(request) },
       cache: 'no-store',
     })
 

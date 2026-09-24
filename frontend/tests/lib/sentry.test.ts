@@ -28,6 +28,23 @@ describe('scrubSentryEvent', () => {
     expect(out?.request?.headers?.['X-Admin-Token']).toBeUndefined()
     expect(out?.request?.headers?.['X-Request-ID']).toBe('keep')
   })
+
+  // 経路証明・BFF内部トークンは本番の全リクエストに載る(#1407)。
+  // Sentry へ流れると ALB 直叩きで CloudFront 経由と誤認させ、
+  // 詐称した X-Forwarded-For を BFF に署名させられる。
+  it.each(['X-Origin-Token', 'x-origin-token', 'X-Internal-Token'])(
+    '%s を落とす（経路証明トークンの漏洩）',
+    (header) => {
+      const event = {
+        request: { headers: { [header]: 'origin-secret', 'X-Request-ID': 'keep' } },
+      } as unknown as ErrorEvent
+
+      const out = scrubSentryEvent(event)
+      expect(out?.request?.headers?.[header]).toBeUndefined()
+      expect(JSON.stringify(out)).not.toContain('origin-secret')
+      expect(out?.request?.headers?.['X-Request-ID']).toBe('keep')
+    },
+  )
 })
 
 // httpContextIntegration が window.location.href をそのまま request.url に入れるため、

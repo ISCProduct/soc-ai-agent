@@ -227,10 +227,11 @@ export default function PageContent() {
       <Box sx={{ maxWidth: 900, mx: 'auto' }}>
         {/* Header */}
         <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, mb: 3 }}>
-          <IconButton onClick={() => router.back()} size="small">
+          {/* size="small" のままだと34x34でモバイルのタップ領域が足りない（#1481） */}
+          <IconButton onClick={() => router.back()} size="small" aria-label="前のページに戻る" sx={{ width: 44, height: 44 }}>
             <ArrowBackIcon />
           </IconButton>
-          <Typography variant="h5" fontWeight={700} sx={{ flex: 1, minWidth: 0, fontSize: { xs: '1.1rem', sm: '1.5rem' } }}>
+          <Typography variant="h5" component="h1" fontWeight={700} sx={{ flex: 1, minWidth: 0, fontSize: { xs: '1.1rem', sm: '1.5rem' } }}>
             選考スケジュール
           </Typography>
           <Button

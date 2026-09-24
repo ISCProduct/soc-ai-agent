@@ -92,7 +92,9 @@ export default function PageContent() {
             >
               <MenuIcon />
             </IconButton>
-            <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'text.primary' }}>
+            {/* モバイル専用の見出し（#1479）。PCでは AppBar ごと非表示になり、
+                代わりに ChatHeader 側のタイトルが h1 として見える。 */}
+            <Typography variant="subtitle1" component="h1" sx={{ fontWeight: 600, color: 'text.primary' }}>
               IT業界キャリアエージェント
             </Typography>
           </Toolbar>

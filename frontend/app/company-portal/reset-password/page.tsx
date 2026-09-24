@@ -59,7 +59,7 @@ function ResetPasswordContent() {
     >
       <Card sx={{ maxWidth: 450, width: '100%' }}>
         <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
-          <Typography variant="h5" align="center" gutterBottom fontWeight="bold">
+          <Typography variant="h5" component="h1" align="center" gutterBottom fontWeight="bold">
             新しいパスワードを設定
           </Typography>
           <Typography variant="body2" align="center" color="text.secondary" sx={{ mb: 3 }}>
@@ -77,6 +77,7 @@ function ResetPasswordContent() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              autoComplete="new-password"
               helperText="8文字以上で入力してください"
               sx={{ mb: 2 }}
             />
@@ -87,6 +88,7 @@ function ResetPasswordContent() {
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
+              autoComplete="new-password"
               sx={{ mb: 3 }}
             />
             <Button
