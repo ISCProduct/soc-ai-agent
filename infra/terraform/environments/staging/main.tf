@@ -398,6 +398,11 @@ resource "aws_autoscaling_group" "app" {
   # 起動直後はコンテナのpull/起動に時間がかかる。短いと起動途中で置換され続ける。
   health_check_grace_period = 600
 
+  # "$Latest" はこの指定自体が変化しないため、user_data を変えて新しい LT 版を作っても
+  # ASG のリソース差分にならず instance refresh は走らない（＝稼働中インスタンスの
+  # /opt/app/.env は古いまま）。ここを latest_version にすると apply の度に
+  # ローリング置換が走り、stagingが数分落ちる。
+  # そのため .env の追記は deployment.yml のデプロイ手順で行う（#1407）。
   launch_template {
     id      = aws_launch_template.app.id
     version = "$Latest"

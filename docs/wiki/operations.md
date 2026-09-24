@@ -550,9 +550,37 @@ prod の CloudFront は迂回できるので、段数に数える代わりに
 terraform が入れた環境変数はそのまま引き継がれる）。frontend/backend に差分が無い場合は
 手動で強制デプロイする。
 
+`BFF_INTERNAL_TOKEN` は frontend と backend の**両方**に入って初めて機能する。
+frontend だけ入れ替えると backend は旧リビジョンのまま期待トークンが空になり、
+`GetClientIP` が転送された `X-Client-IP` を全て捨てて frontend の出口IP1つへ
+再び集約される。必ず2サービスとも流す。
+
 ```sh
-aws ecs update-service --cluster soc-app --service frontend \
-  --task-definition soc-app-frontend --force-new-deployment
+for svc in frontend backend; do
+  aws ecs update-service --cluster soc-app --service "$svc" \
+    --task-definition "soc-app-$svc" --force-new-deployment
+done
+
+# 両方が新リビジョンで安定するまで待つ
+aws ecs wait services-stable --cluster soc-app --services frontend backend
+```
+
+### staging の既存インスタンスへ反映する
+
+staging は EC2 上の docker compose で、`.env` を書くのは launch template の user_data
+だけ。ASG は `version = "$Latest"` を指定しており、新しい LT 版を作っても**この指定自体は
+変化しない**ため instance refresh は起きない。つまり apply しても稼働中のインスタンスは
+古い `.env` のままになる。
+
+そのため `deployment.yml` のデプロイ手順で、`.env` に `BFF_INTERNAL_TOKEN` /
+`TRUSTED_PROXY_HOPS` が無ければ追記している（frontend/backend が同じ `.env` を読むので、
+トークンはインスタンス内で生成した値で足りる）。**デプロイを1回流せば反映される**。
+
+デプロイを待たずに確認・反映するなら:
+
+```sh
+ssh ubuntu@<staging-ip> "sudo grep -c '^BFF_INTERNAL_TOKEN=' /opt/app/.env"
+# 0 なら次のデプロイで追記される。即時に効かせるなら追記して docker compose up -d
 ```
 
 ### 効いているか確認する

@@ -272,6 +272,18 @@ jobs:
               if [ -f .env ] && grep -q '^S3_BUCKET=' .env && ! grep -q '^AWS_S3_BUCKET=' .env; then
                 echo "AWS_S3_BUCKET=$(grep '^S3_BUCKET=' .env | cut -d= -f2-)" >> .env
               fi
+              # 実クライアントIP転送の2変数(#1407)。user_data は新規インスタンスでしか
+              # 走らず、ASG は version=$Latest なので LT を更新しても既存インスタンスは
+              # 置換されない。無ければここで足さないと、稼働中のstagingは転送が無効のまま
+              # 全利用者が同じ出口IPでレート制限される。
+              # frontend/backend が同じ .env を読むので、トークンはこの場で生成した値でよい。
+              if [ -f .env ] && ! grep -q ^BFF_INTERNAL_TOKEN= .env; then
+                echo BFF_INTERNAL_TOKEN=$(openssl rand -hex 32) >> .env
+              fi
+              # staging は常に ALB -> edge nginx -> frontend の2段(terraform と同値)
+              if [ -f .env ] && ! grep -q ^TRUSTED_PROXY_HOPS= .env; then
+                echo TRUSTED_PROXY_HOPS=2 >> .env
+              fi
               df -h /
               # 稼働中イメージは prune できない。先に down してから空ける。
               # named volume(chroma_data)は --volumes を付けない限り残る。
