@@ -41,7 +41,7 @@ export function newClientUtteranceId(): string {
  */
 export async function flushThenFinish(
   pendingSaves: Promise<void>,
-  finish: () => Promise<void>,
+  finish: () => Promise<unknown>,
 ): Promise<void> {
   await pendingSaves
   await finish()
