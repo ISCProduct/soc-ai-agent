@@ -39,8 +39,8 @@ type InterviewService struct {
 	inFlightJobs map[uint]struct{}
 	inFlightMu   sync.Mutex
 	workerOnce   sync.Once
-	jobs                 shared.JobEnqueuer
-	ownsCompany          func(userID, companyID uint) (bool, error)
+	jobs         shared.JobEnqueuer
+	ownsCompany  func(userID, companyID uint) (bool, error)
 }
 
 // SkillScoreReader はGitHubスキルスコア取得の最小インターフェース。
