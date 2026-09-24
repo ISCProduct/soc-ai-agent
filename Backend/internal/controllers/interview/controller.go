@@ -115,6 +115,11 @@ func (c *InterviewController) RegenerateReport(ctx echo.Context) error {
 		if errors.Is(err, interviewsvc.ErrSessionNotFinished) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+		// キューへ入れられなかったのに202を返すと、フロントは存在しないジョブを
+		// 3分ポーリングして再びタイムアウトするだけになる(#1476)。
+		if errors.Is(err, interviewsvc.ErrReportQueueNotAvailable) {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "レポート生成を受け付けられませんでした。時間をおいて再試行してください。")
+		}
 		return httpapi.InternalError(err)
 	}
 	return ctx.JSON(http.StatusAccepted, map[string]bool{"queued": queued})

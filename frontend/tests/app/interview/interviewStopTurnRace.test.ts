@@ -121,14 +121,41 @@ function fakeMedia(): InterviewMedia {
 
 const flush = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
 
+/**
+ * ヘッダーは返すが本文（音声）が届かないまま固まる応答。
+ * 実際のブラウザは fetch に渡した signal を abort すると本文の読み込みも中断するので、
+ * その挙動だけを再現する。中断されなければ永久に解決しない。
+ */
+const hangingBodyResponse = (signal?: AbortSignal | null): FakeResponse => {
+  const never = <T,>(): Promise<T> => new Promise<T>((_, reject) => {
+    signal?.addEventListener('abort', () => reject(new Error('AbortError: The operation was aborted')))
+  })
+  return {
+    ok: true,
+    status: 200,
+    headers: { get: () => 'multipart/mixed; boundary=turnboundary' },
+    text: never,
+    json: never,
+    arrayBuffer: never,
+  }
+}
+
 describe('完了する と応答待ちターンの競合 (#1476)', () => {
   const originalFetch = global.fetch
   let calls: string[]
   let releaseTurn: ((res: FakeResponse) => void) | null
+  /** true の間は /start-turn の応答を保留する（参加直後の応答待ち状態を再現する） */
+  let holdStartTurn: boolean
+  let releaseStartTurn: ((res: FakeResponse) => void) | null
+  /** true の間は /turn がヘッダーだけ返して本文で固まる */
+  let hangTurnBody: boolean
 
   beforeEach(() => {
     calls = []
     releaseTurn = null
+    holdStartTurn = false
+    releaseStartTurn = null
+    hangTurnBody = false
     pendingRecorderStops.length = 0
     Object.assign(globalThis, {
       MediaRecorder: FakeMediaRecorder,
@@ -142,11 +169,15 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
     jest.spyOn(console, 'error').mockImplementation(() => {})
     jest.spyOn(console, 'warn').mockImplementation(() => {})
 
-    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+    global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       calls.push(url)
-      if (url.includes('/start-turn')) return turnResponse({ ai_text: '自己紹介をお願いします' })
+      if (url.includes('/start-turn')) {
+        if (!holdStartTurn) return turnResponse({ ai_text: '自己紹介をお願いします' })
+        return new Promise<FakeResponse>(resolve => { releaseStartTurn = resolve })
+      }
       if (url.includes('/turn')) {
+        if (hangTurnBody) return hangingBodyResponse(init?.signal)
         // 応答をテスト側で任意のタイミングまで保留する（=ターン処理中の状態）
         return new Promise<FakeResponse>(resolve => { releaseTurn = resolve })
       }
@@ -199,6 +230,102 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
     expect(finishIndex).toBeGreaterThan(Math.max(...saveIndexes))
 
     unmount()
+  })
+
+  /**
+   * handleJoin は /start-turn の完了前に状態を connected にするため、その応答待ち中でも
+   * 録音ボタンが押せて /turn を始められる。実行中のターンを1つしか覚えない実装だと、
+   * handleStop は後から始まった /turn しか待たず、遅れて返った /start-turn の質問が
+   * finishSession の後に保存される。質問を欠いた書き起こしでレポートが確定してしまう。
+   */
+  it('/start-turn の応答待ち中に始めたターンがあっても、両方の発話を finishSession より先に保存する', async () => {
+    holdStartTurn = true
+    const media = fakeMedia()
+    const { result, unmount } = renderSession(media)
+
+    await act(async () => {
+      void result.current.handleJoin()
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    expect(releaseStartTurn).not.toBeNull()
+
+    // /start-turn の応答待ち中に、ユーザーが録音して回答を送る
+    act(() => { result.current.startRecording() })
+    act(() => { result.current.stopRecording() })
+    act(() => { deliverRecorderStops() })
+    await flush()
+    expect(releaseTurn).not.toBeNull()
+
+    // 後から始めた /turn だけ先に返る
+    await act(async () => {
+      releaseTurn?.(turnResponse({ user_text: '最後の回答です', ai_text: 'ありがとうございました' }))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+
+    await act(async () => {
+      const stopping = result.current.handleStop()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      // /start-turn がまだ応答待ちなので、ここで終了APIを呼ぶと質問が書き起こしから欠ける
+      expect(calls.some(u => u.includes('/finish'))).toBe(false)
+
+      releaseStartTurn?.(turnResponse({ ai_text: '自己紹介をお願いします' }))
+      await stopping
+    })
+
+    const saveIndexes = calls.map((u, i) => ({ u, i })).filter(c => c.u.includes('/utterances')).map(c => c.i)
+    const finishIndex = calls.findIndex(u => u.includes('/finish'))
+    expect(saveIndexes).toHaveLength(3) // /turn の user/ai + 遅れて返った /start-turn の質問
+    expect(finishIndex).toBeGreaterThan(Math.max(...saveIndexes))
+
+    unmount()
+  })
+
+  /**
+   * ターンのタイムアウトはヘッダー受信までしか効かない実装だと、本文（音声）の受信中に
+   * 半開きになったターンは永久に解決しない。handleStop がそれを待つので finishSession も
+   * ポーリング開始も呼ばれず、画面は「生成中」のまま進まない。
+   */
+  it('ターンの本文受信が止まっても、タイムアウトで打ち切って finishSession へ進む', async () => {
+    const advance = (ms: number) => act(async () => { await jest.advanceTimersByTimeAsync(ms) })
+    try {
+      hangTurnBody = true
+      const media = fakeMedia()
+      const { result, unmount } = renderSession(media)
+
+      await act(async () => { await result.current.handleJoin() })
+      act(() => { result.current.startRecording() })
+      act(() => { result.current.stopRecording() })
+      // タイムアウトのタイマーはこの後の sendTurn で張られるので、ここから偽タイマーにする。
+      // Promise の解決に使うものまで偽にすると React の act が進まなくなるため、
+      // 偽にするのは setTimeout / setInterval だけに絞る。
+      jest.useFakeTimers({
+        doNotFake: ['nextTick', 'queueMicrotask', 'setImmediate', 'performance', 'Date', 'requestAnimationFrame', 'cancelAnimationFrame'],
+      })
+      act(() => { deliverRecorderStops() })
+      await advance(0)
+      // ヘッダーは返っているが本文（音声）が届かない状態
+      expect(calls.some(u => u.endsWith('/turn'))).toBe(true)
+
+      let stopped = false
+      let stopping: Promise<void> = Promise.resolve()
+      await act(async () => {
+        stopping = result.current.handleStop().then(() => { stopped = true })
+        await jest.advanceTimersByTimeAsync(0)
+      })
+      expect(stopped).toBe(false)
+      expect(calls.some(u => u.includes('/finish'))).toBe(false)
+
+      // ターンのタイムアウト（90秒）まで進める
+      await advance(90_000)
+      await act(async () => { await stopping })
+
+      expect(stopped).toBe(true)
+      expect(calls.some(u => u.includes('/finish'))).toBe(true)
+
+      unmount()
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it('録音中に完了した場合、その録音を新しいターンとして送らない', async () => {

@@ -33,6 +33,13 @@ var ErrNoUtterances = errors.New("interview: no utterances for session")
 // ErrSessionNotFinished は未終了セッションに対してレポート再生成を要求されたことを表す(#1476)。
 var ErrSessionNotFinished = errors.New("interview: session is not finished")
 
+// ErrReportQueueNotAvailable はレポート生成ジョブを投入できなかったことを表す(#1476)。
+//
+// Redis 未設定/障害時のフォールバック channel が満杯だとジョブは捨てられる。
+// ここを成功(202)で返すと、フロントは存在しないジョブを3分ポーリングして
+// 再びタイムアウトするだけになるため、投入失敗はそのままエラーとして返す。
+var ErrReportQueueNotAvailable = errors.New("interview: report job queue is not available")
+
 // RegenerateReport は未生成のレポートを作り直すためにジョブを再投入する(#1476)。
 //
 // レポート生成ジョブは失われうる。asynq の再試行を使い切った場合、Redis 無しの
@@ -46,6 +53,7 @@ var ErrSessionNotFinished = errors.New("interview: session is not finished")
 // 呼び出し側（フロントの再試行ボタン）はポーリングがタイムアウト/失敗した後にだけ叩く。
 //
 // 戻り値の queued は「新たにジョブを投入したか」。false は「既に生成済みなので不要」。
+// 投入そのものに失敗したときは ErrReportQueueNotAvailable を返す（成功として返さない）。
 func (s *InterviewService) RegenerateReport(userID uint, sessionID uint) (queued bool, err error) {
 	session, err := s.sessionRepo.FindByID(sessionID)
 	if err != nil {
@@ -64,7 +72,9 @@ func (s *InterviewService) RegenerateReport(userID uint, sessionID uint) (queued
 	if report != nil {
 		return false, nil
 	}
-	s.enqueueReportGeneration(sessionID)
+	if !s.enqueueReportGeneration(sessionID) {
+		return false, ErrReportQueueNotAvailable
+	}
 	return true, nil
 }
 

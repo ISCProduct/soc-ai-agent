@@ -127,16 +127,17 @@ func (s *InterviewService) GenerateReportForSession(ctx context.Context, session
 // 面接終了APIがそのままハングし、goroutine が解放されない。
 // 溢れた場合はレポート生成を諦めてエラーログに残す（本番は Redis 経路が primary で、
 // そちらは asynq がジョブを永続化するため、この channel はフォールバック専用）。
-func (s *InterviewService) enqueueReportGeneration(sessionID uint) {
+//
+// 戻り値は「ジョブが投入できたか」(#1476)。呼び出し元（再生成API）が成功応答を返すかの判断に使う。
+func (s *InterviewService) enqueueReportGeneration(sessionID uint) bool {
 	if s.jobs != nil {
 		if err := s.jobs.EnqueueInterviewReport(sessionID); err != nil {
 			log.Printf("[Interview] enqueue report failed, fallback channel: %v", err)
-			s.offerReportJob(sessionID)
-			return
+			return s.offerReportJob(sessionID)
 		}
-		return
+		return true
 	}
-	s.offerReportJob(sessionID)
+	return s.offerReportJob(sessionID)
 }
 
 // offerReportJob は jobCh へノンブロッキングに投入する。投入できなければ false を返す。

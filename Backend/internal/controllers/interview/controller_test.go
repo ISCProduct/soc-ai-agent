@@ -647,6 +647,8 @@ func TestInterviewController_RegenerateReport(t *testing.T) {
 		{name: "未認証は401", withUser: false, sessionID: "3", wantStatus: http.StatusUnauthorized},
 		{name: "他人のセッションは403", withUser: true, sessionID: "3", svcErr: shared.ErrForbidden, wantStatus: http.StatusForbidden, wantCall: true},
 		{name: "未終了セッションは400", withUser: true, sessionID: "3", svcErr: interview.ErrSessionNotFinished, wantStatus: http.StatusBadRequest, wantCall: true},
+		// キュー満杯でジョブを捨てたのに202を返すと、フロントは存在しないジョブを3分ポーリングする(#1476)
+		{name: "キューへ投入できなければ503", withUser: true, sessionID: "3", svcErr: interview.ErrReportQueueNotAvailable, wantStatus: http.StatusServiceUnavailable, wantCall: true},
 		{name: "IDが不正なら400", withUser: true, sessionID: "abc", wantStatus: http.StatusBadRequest},
 	}
 

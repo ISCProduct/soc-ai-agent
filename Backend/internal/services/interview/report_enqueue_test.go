@@ -145,6 +145,50 @@ func TestEnqueueReportGeneration_DoesNotBlockWhenRedisFailsAndChannelFull(t *tes
 	}
 }
 
+// TestRegenerateReport_QueueFullIsNotSuccess は #1476 のレビュー指摘の回帰テスト。
+//
+// フォールバックキューが満杯だとジョブは捨てられるが、これを 202 queued=true で返すと
+// 唯一の回復操作である再試行APIが成功に見え、フロントは存在しないジョブを3分ポーリングして
+// また同じタイムアウト画面に戻る。キュー単体の false ではなく、再生成API経路
+// （RegenerateReport）を通して「投入失敗はエラーになる」ことを固定する。
+func TestRegenerateReport_QueueFullIsNotSuccess(t *testing.T) {
+	// fillJobCh が 1..jobChBufferSize を使うため、重複排除に引っ掛からないIDを選ぶ。
+	const ownerID, sessionID = uint(3), uint(jobChBufferSize + 7)
+
+	tests := []struct {
+		name string
+		jobs *stubJobEnqueuer
+	}{
+		{name: "Redis未設定でキュー満杯", jobs: nil},
+		{name: "Redis障害中でキュー満杯", jobs: &stubJobEnqueuer{err: errors.New("redis down")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewInterviewService(
+				newSessionRepoStub(&models.InterviewSession{ID: sessionID, UserID: ownerID, Status: "finished"}),
+				&utterRepoStub{},
+				&reportRepoStub{},
+				nonAdminUserRepoStub{},
+				nil, nil, nil,
+			)
+			if tt.jobs != nil {
+				svc.SetJobEnqueuer(tt.jobs)
+			}
+			fillJobCh(t, svc)
+
+			queued, err := svc.RegenerateReport(ownerID, sessionID)
+
+			if !errors.Is(err, ErrReportQueueNotAvailable) {
+				t.Fatalf("err=%v want errors.Is(err, ErrReportQueueNotAvailable)（投入失敗が成功として返っている）", err)
+			}
+			if queued {
+				t.Fatal("ジョブを捨てたのに queued=true を返した（フロントが存在しないジョブを待ち続ける）")
+			}
+		})
+	}
+}
+
 // blockingUtterRepo は generateReport を任意の時点まで止めておくための発話リポジトリ。
 // LLM 呼び出しまで進む前に失敗させるため、解放後は取得エラーを返す。
 type blockingUtterRepo struct {

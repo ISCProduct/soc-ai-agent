@@ -17,7 +17,7 @@ import {
 } from '../reportPolling'
 import { resolveFinishOutcomeMessage } from '../finishOutcome'
 import { saveUtteranceWithRetry, newClientUtteranceId, flushThenFinish } from '../utteranceSave'
-import { fetchWithTimeout } from '@/lib/fetch-timeout'
+import { fetchAndReadWithTimeout } from '@/lib/fetch-timeout'
 import type { Utterance, InterviewCompany, Position, InterviewStatus } from '../types'
 
 export type ReportStatus = 'idle' | 'pending' | 'ready' | 'error' | 'timeout'
@@ -31,6 +31,8 @@ export const REPORT_RETRY_FAILED_MESSAGE =
  * STT→LLM→TTS を通すので一覧系より長く取るが、無期限にはしない。
  * 半開きのまま固まると、ターンが終わらないので面接が進まず、
  * 終了時に「応答待ちのターン」を待つ処理（handleStop）も戻らなくなる。
+ * ヘッダー受信後に本文（multipart の音声）で止まる場合も同じなので、
+ * fetchWithTimeout ではなく本文の読み込みまで見る fetchAndReadWithTimeout を使う。
  */
 const TURN_FETCH_TIMEOUT_MS = 90_000
 
@@ -343,16 +345,22 @@ export function useInterviewSession({
    * ターンの応答処理（発話を保存チェーンへ積み終えるまで）を「実行中のターン」として記録する(#1476)。
    * handleStop はこれを待ってから保存チェーンを読む。
    * 失敗しても終了処理を止めないよう、記録する側の Promise は必ず解決させる。
+   *
+   * 代入で上書きせず、実行中の全ターンを束ねる。handleJoin は /start-turn の完了前に
+   * 状態を connected にするので、その応答待ち中にユーザーが録音して /turn を始められる。
+   * 上書きすると handleStop は最後の1件しか待たず、遅れて返った /start-turn の質問が
+   * finishSession の後に保存され、質問を欠いた書き起こしでレポートが確定する。
    */
   const trackTurn = (receiving: Promise<Blob>): Promise<Blob> => {
-    inFlightTurnRef.current = receiving.then(() => {}, () => {})
+    const settled = receiving.then(() => {}, () => {})
+    inFlightTurnRef.current = Promise.all([inFlightTurnRef.current, settled]).then(() => {})
     return receiving
   }
 
   const doStartTurn = async (sessionId: number, userId: number) => {
     const receive = async (): Promise<Blob> => {
       await authService.ensureFreshUserToken()
-      const res = await fetchWithTimeout(`${BACKEND_URL}/api/interviews/${sessionId}/start-turn`, {
+      const { meta, audio } = await fetchAndReadWithTimeout(`${BACKEND_URL}/api/interviews/${sessionId}/start-turn`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
         body: JSON.stringify({
@@ -368,9 +376,10 @@ export function useInterviewSession({
           question_elapsed_seconds: 0,
           question_duration_seconds: Math.max(60, interviewLimits.questionDurationSeconds || 180),
         }),
-      }, TURN_FETCH_TIMEOUT_MS)
-      if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
-      const { meta, audio } = await parseMultipartResponse(res)
+      }, TURN_FETCH_TIMEOUT_MS, async res => {
+        if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
+        return parseMultipartResponse(res)
+      })
       const aiText: string = meta.ai_text || ''
       setIsDeepeningQuestion(Boolean(meta.is_deepening))
       setQuestionCategory(typeof meta.question_category === 'string' ? meta.question_category : null)
@@ -724,13 +733,14 @@ export function useInterviewSession({
     formData.append('company_id', String(interviewCompany?.id || 0))
     const receive = async (): Promise<Blob> => {
       await authService.ensureFreshUserToken()
-      const res = await fetchWithTimeout(`${BACKEND_URL}/api/interviews/${session.id}/turn`, {
+      const { meta, audio } = await fetchAndReadWithTimeout(`${BACKEND_URL}/api/interviews/${session.id}/turn`, {
         method: 'POST',
         headers: { ...authService.getUserFetchHeaders() },
         body: formData,
-      }, TURN_FETCH_TIMEOUT_MS)
-      if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
-      const { meta, audio } = await parseMultipartResponse(res)
+      }, TURN_FETCH_TIMEOUT_MS, async res => {
+        if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
+        return parseMultipartResponse(res)
+      })
       const userText: string = meta.user_text || ''
       const aiText: string = meta.ai_text || ''
       setIsDeepeningQuestion(Boolean(meta.is_deepening))
