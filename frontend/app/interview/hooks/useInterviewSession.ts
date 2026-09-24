@@ -17,9 +17,18 @@ import {
 } from '../reportPolling'
 import { resolveFinishOutcomeMessage } from '../finishOutcome'
 import { saveUtteranceWithRetry, newClientUtteranceId, flushThenFinish } from '../utteranceSave'
+import { fetchWithTimeout } from '@/lib/fetch-timeout'
 import type { Utterance, InterviewCompany, Position, InterviewStatus } from '../types'
 
 export type ReportStatus = 'idle' | 'pending' | 'ready' | 'error' | 'timeout'
+
+/**
+ * ターン(/turn, /start-turn)のタイムアウト(#1476)。
+ * STT→LLM→TTS を通すので一覧系より長く取るが、無期限にはしない。
+ * 半開きのまま固まると、ターンが終わらないので面接が進まず、
+ * 終了時に「応答待ちのターン」を待つ処理（handleStop）も戻らなくなる。
+ */
+const TURN_FETCH_TIMEOUT_MS = 90_000
 
 type UseInterviewSessionArgs = {
   user: User | null
@@ -86,6 +95,16 @@ export function useInterviewSession({
    * 1本のチェーンに積むことで、順序を保ったままターン処理をブロックしない。
    */
   const utteranceSaveChainRef = useRef<Promise<void>>(Promise.resolve())
+  /**
+   * 応答待ちのターン(#1476)。
+   * 「完了する」は turnPending 中でも押せるし、時間切れの強制終了も割り込む。
+   * 終了処理が保存チェーンを読んだ後に /turn の応答が届くと、その発話は
+   * finishSession の後に保存され、レポートが最後のやり取り抜きで作られる。
+   * そこで終了処理はまずこれを待ってからチェーンを読む。
+   * 解決するのは「応答を保存チェーンに積み終えた時点」までで、音声再生は含めない
+   * （終了時は cleanupConnection が再生を止めるため、再生まで待つと解決しない）。
+   */
+  const inFlightTurnRef = useRef<Promise<void>>(Promise.resolve())
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recorderFormatRef = useRef<RecorderFormat>({ mimeType: '', ext: 'webm' })
   // 発話が確定しなかった録音を送らずに捨てるためのフラグ。
@@ -152,6 +171,10 @@ export function useInterviewSession({
     audioGenerationRef.current++
     ;[timerRef, pollRef].forEach(r => { if (r.current) { clearInterval(r.current); r.current = null } })
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      // 録音中に終了した場合、stop() の onstop で新しいターンを送ると
+      // 終了API(=レポート生成のキュー投入)より後に発話が積まれる(#1476)。
+      // まだ確定していない録音なので送らずに捨てる（VADの空振りと同じ扱い）。
+      discardTurnRef.current = true
       mediaRecorderRef.current.stop(); mediaRecorderRef.current = null
     }
     if (aiAudioRef.current) { aiAudioRef.current.pause(); aiAudioRef.current.src = '' }
@@ -303,36 +326,49 @@ export function useInterviewSession({
       })
   }
 
+  /**
+   * ターンの応答処理（発話を保存チェーンへ積み終えるまで）を「実行中のターン」として記録する(#1476)。
+   * handleStop はこれを待ってから保存チェーンを読む。
+   * 失敗しても終了処理を止めないよう、記録する側の Promise は必ず解決させる。
+   */
+  const trackTurn = (receiving: Promise<Blob>): Promise<Blob> => {
+    inFlightTurnRef.current = receiving.then(() => {}, () => {})
+    return receiving
+  }
+
   const doStartTurn = async (sessionId: number, userId: number) => {
-    await authService.ensureFreshUserToken()
-    const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/start-turn`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
-      body: JSON.stringify({
-        user_id: userId,
-        company_name: interviewCompany?.name || '',
-        company_reading: interviewCompany?.name_reading || '',
-        position: selectedPosition?.title || '',
-        company_info: buildCompanyInfo(interviewCompany),
-        company_id: interviewCompany?.id || 0,
-        company_type: selectedPosition?.category || 'general',
-        question_index: 1,
-        total_questions: Math.max(1, selectedPosition?.questions || 1),
-        question_elapsed_seconds: 0,
-        question_duration_seconds: Math.max(60, interviewLimits.questionDurationSeconds || 180),
-      }),
-    })
-    if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
-    const { meta, audio } = await parseMultipartResponse(res)
-    const aiText: string = meta.ai_text || ''
-    setIsDeepeningQuestion(Boolean(meta.is_deepening))
-    setQuestionCategory(typeof meta.question_category === 'string' ? meta.question_category : null)
-    if (aiText) {
-      historyRef.current.push({ role: 'assistant', content: aiText })
-      setUtterances(p => [...p, { role: 'ai', text: aiText }])
-      queueUtteranceSave(sessionId, userId, 'ai', aiText)
+    const receive = async (): Promise<Blob> => {
+      await authService.ensureFreshUserToken()
+      const res = await fetchWithTimeout(`${BACKEND_URL}/api/interviews/${sessionId}/start-turn`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
+        body: JSON.stringify({
+          user_id: userId,
+          company_name: interviewCompany?.name || '',
+          company_reading: interviewCompany?.name_reading || '',
+          position: selectedPosition?.title || '',
+          company_info: buildCompanyInfo(interviewCompany),
+          company_id: interviewCompany?.id || 0,
+          company_type: selectedPosition?.category || 'general',
+          question_index: 1,
+          total_questions: Math.max(1, selectedPosition?.questions || 1),
+          question_elapsed_seconds: 0,
+          question_duration_seconds: Math.max(60, interviewLimits.questionDurationSeconds || 180),
+        }),
+      }, TURN_FETCH_TIMEOUT_MS)
+      if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
+      const { meta, audio } = await parseMultipartResponse(res)
+      const aiText: string = meta.ai_text || ''
+      setIsDeepeningQuestion(Boolean(meta.is_deepening))
+      setQuestionCategory(typeof meta.question_category === 'string' ? meta.question_category : null)
+      if (aiText) {
+        historyRef.current.push({ role: 'assistant', content: aiText })
+        setUtterances(p => [...p, { role: 'ai', text: aiText }])
+        queueUtteranceSave(sessionId, userId, 'ai', aiText)
+      }
+      return audio
     }
-    await playAudioBlob(audio)
+    await playAudioBlob(await trackTurn(receive()))
   }
 
   const handleJoinWithConsent = () => {
@@ -356,6 +392,8 @@ export function useInterviewSession({
     setSessionWarningShown(false)
     setUtteranceSaveFailed(false)
     utteranceSaveChainRef.current = Promise.resolve()
+    // 前回の面接でハングしたターンを次の終了処理が待ち続けないよう、参加時に捨てる
+    inFlightTurnRef.current = Promise.resolve()
     media.setMicEnabled(true); media.setCameraEnabled(true)
     historyRef.current = []
 
@@ -456,6 +494,10 @@ export function useInterviewSession({
     // 積み残した発話保存を「全部」片付けてから終了APIを呼ぶ(#1476)。
     // 画面は既に finished へ進めてあるので、ここで待ってもユーザーは止まらない。
     try {
+      // 応答待ちのターンが発話を積み終えるのを先に待つ。ここを飛ばすと、
+      // 「完了する」の後に届いた /turn の発話が finishSession の後に保存され、
+      // レポートが最後のやり取り抜きで生成される(#1476)。
+      await inFlightTurnRef.current
       await flushThenFinish(
         utteranceSaveChainRef.current,
         () => interviewApi.finishSession(currentSession.id, currentUser.user_id),
@@ -660,13 +702,13 @@ export function useInterviewSession({
     formData.append('company_info', buildCompanyInfo(interviewCompany))
     formData.append('company_type', selectedPosition?.category || 'general')
     formData.append('company_id', String(interviewCompany?.id || 0))
-    try {
+    const receive = async (): Promise<Blob> => {
       await authService.ensureFreshUserToken()
-      const res = await fetch(`${BACKEND_URL}/api/interviews/${session.id}/turn`, {
+      const res = await fetchWithTimeout(`${BACKEND_URL}/api/interviews/${session.id}/turn`, {
         method: 'POST',
         headers: { ...authService.getUserFetchHeaders() },
         body: formData,
-      })
+      }, TURN_FETCH_TIMEOUT_MS)
       if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
       const { meta, audio } = await parseMultipartResponse(res)
       const userText: string = meta.user_text || ''
@@ -683,7 +725,10 @@ export function useInterviewSession({
         setUtterances(p => [...p, { role: 'ai', text: aiText }])
         queueUtteranceSave(session.id, user.user_id, 'ai', aiText)
       }
-      await playAudioBlob(audio)
+      return audio
+    }
+    try {
+      await playAudioBlob(await trackTurn(receive()))
     } catch (e: unknown) {
       setErrorMessage(parseMediaError(e))
     } finally {

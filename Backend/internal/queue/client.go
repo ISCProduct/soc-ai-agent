@@ -2,6 +2,7 @@ package queue
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -82,7 +83,7 @@ type DiagnosisQualityPayload struct {
 	SessionID string `json:"session_id"`
 }
 
-func (c *Client) enqueue(taskType, queueName string, payload any, maxRetry int, timeout time.Duration) error {
+func (c *Client) enqueue(taskType, queueName string, payload any, maxRetry int, timeout time.Duration, extra ...asynq.Option) error {
 	if c == nil || c.client == nil {
 		return fmt.Errorf("queue client is not configured")
 	}
@@ -97,6 +98,7 @@ func (c *Client) enqueue(taskType, queueName string, payload any, maxRetry int, 
 		asynq.Timeout(timeout),
 		asynq.Retention(24 * time.Hour),
 	}
+	opts = append(opts, extra...)
 	info, err := c.client.Enqueue(task, opts...)
 	if err != nil {
 		return err
@@ -121,8 +123,30 @@ func (c *Client) EnqueueEmailPasswordReset(p EmailPasswordResetPayload) error {
 	return c.enqueue(TaskEmailPasswordReset, QueueCritical, p, 5, 2*time.Minute)
 }
 
+// interviewReportTimeout はレポート生成ジョブの実行時間上限。
+// 重複排除の TTL もこれに合わせる（この時間を超えて走るジョブは asynq 側で打ち切られる）。
+const interviewReportTimeout = 10 * time.Minute
+
+// EnqueueInterviewReport はレポート生成ジョブをセッション単位で重複排除して投入する(#1476)。
+//
+// 生成前のセッションへ FinishSession と RegenerateReport が重なると、同じセッションに
+// 複数のジョブが走る。各ジョブが LLM を呼んで Upsert するため、費用が二重に掛かり、
+// 後勝ちでレポートが上書きされ、スコアの移動平均も二重に効く。
+//
+// TaskID ではなく Unique を使う: TaskID は完了・アーカイブ済みタスクとも衝突するため、
+// Retention(24h) の間は再生成（回復手段そのもの）が投入できなくなる。
+// Unique のロックはジョブの成功か TTL 経過で解放されるので、失敗したジョブの
+// 作り直しは最長でも TTL 後に必ずできる。
 func (c *Client) EnqueueInterviewReport(sessionID uint) error {
-	return c.enqueue(TaskInterviewReport, QueueDefault, InterviewReportPayload{SessionID: sessionID}, 3, 10*time.Minute)
+	err := c.enqueue(TaskInterviewReport, QueueDefault, InterviewReportPayload{SessionID: sessionID},
+		3, interviewReportTimeout, asynq.Unique(interviewReportTimeout))
+	if errors.Is(err, asynq.ErrDuplicateTask) {
+		// 既に同じセッションのジョブが控えている＝望む状態なので成功扱いにする。
+		// ここでエラーを返すと呼び出し側がフォールバックの channel へ二重投入してしまう。
+		log.Printf("[queue] interview report already queued session=%d", sessionID)
+		return nil
+	}
+	return err
 }
 
 func (c *Client) EnqueueDiagnosisQuality(userID uint, sessionID string) error {

@@ -25,7 +25,7 @@ compose の `backend` サービスは `redis` に依存し、既定で `REDIS_UR
 | タスク | リトライ | 備考 |
 |--------|----------|------|
 | `email:*` | 5 | critical キュー |
-| `interview:report` | 3 | default キュー |
+| `interview:report` | 3 | default キュー / セッション単位で重複排除（`asynq.Unique` 10分） |
 
 失敗はログ `[queue] task failed`。asynq の archive（DLQ）に保持。
 
@@ -45,6 +45,12 @@ compose の `backend` サービスは `redis` に依存し、既定で `REDIS_UR
 - 既にレポートがあれば何もしない（`{"queued": false}`）。無条件に再投入すると LLM 費用が二重に掛かり、生成中のレポートを上書きする
 - 未終了セッションは 400、他人のセッションは 403
 - フロントはレポート画面の「再試行」ボタン（ポーリングのタイムアウト／失敗後）から叩く
+
+さらに、レポートが保存される前に `finish` と `regenerate` が重なっても二重にジョブが走らないよう、
+`interview:report` は `asynq.Unique`（TTL = ジョブのタイムアウトと同じ10分）でセッション単位に重複排除する。
+重複投入はエラーではなく成功扱い（＝既にジョブが控えている状態）で、channel へのフォールバックもしない。
+`asynq.TaskID` を使わないのは、完了・アーカイブ済みタスクとも衝突して `Retention`（24時間）の間
+再生成そのものを投入できなくなるため。Unique のロックはジョブの成功か TTL 経過で解放される。
 
 ## フォールバック
 
