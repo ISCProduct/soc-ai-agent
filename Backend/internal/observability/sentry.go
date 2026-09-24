@@ -43,6 +43,26 @@ func InitSentry() (flush func(), enabled bool) {
 	}, true
 }
 
+// sensitiveHeaders は Sentry へ送ってはいけないリクエストヘッダー（小文字）。
+// frontend の `frontend/lib/sentry.ts` の SENSITIVE_HEADERS と同じ集合にすること。
+// 片方だけ直して他方を忘れる事故が実際に起きたため、TestSensitiveHeaders_フロントと同期
+// が両者の突き合わせで落ちる。
+var sensitiveHeaders = map[string]bool{
+	"authorization":        true,
+	"cookie":               true,
+	"x-admin-token":        true,
+	"x-user-token":         true,
+	"x-company-user-token": true,
+	"x-internal-token":     true,
+	// CloudFront が本番の全オリジンリクエストへ付ける経路証明トークン(#1407)。
+	// distribution の aliases は `*.shukatsu-ai.jp` を含むため、api ドメインを
+	// CloudFront 経由で叩けば backend にもこのヘッダー付きで届く。漏れると
+	// 公開ALBへの frontend 直叩きで詐称 X-Forwarded-For を署名させられる。
+	"x-origin-token": true,
+	// 遷移元のクエリ（＝ワンタイムトークン）がそのまま載る。
+	"referer": true,
+}
+
 // scrubEvent は Sentry 送信前に認証ヘッダー・Cookie・リクエストボディを落とす。
 // 履歴書・チャット本文などの個人情報が混入しないようにする（#619）。
 func scrubEvent(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
@@ -52,13 +72,10 @@ func scrubEvent(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 	if event.Request != nil {
 		event.Request.Cookies = ""
 		event.Request.Data = ""
-		if event.Request.Headers != nil {
-			delete(event.Request.Headers, "Authorization")
-			delete(event.Request.Headers, "Cookie")
-			delete(event.Request.Headers, "X-Admin-Token")
-			delete(event.Request.Headers, "X-User-Token")
-			delete(event.Request.Headers, "X-Company-User-Token")
-			delete(event.Request.Headers, "X-Internal-Token")
+		for key := range event.Request.Headers {
+			if sensitiveHeaders[strings.ToLower(key)] {
+				delete(event.Request.Headers, key)
+			}
 		}
 		event.Request.QueryString = ""
 	}

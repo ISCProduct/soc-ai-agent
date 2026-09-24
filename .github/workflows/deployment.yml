@@ -197,18 +197,33 @@ jobs:
             exit 1
           fi
 
-      - name: Resolve staging instance IP
+      # 先頭1台だけに配ってはいけない。ASGは負荷試験で最大3台まで増え、frontend は
+      # ALB 配下の任意のインスタンスの backend を叩く。配り漏れた台に振られると
+      # BFF_INTERNAL_TOKEN が未設定/旧値のままで X-Client-IP が捨てられ、
+      # 全利用者が frontend の出口IP1つへ再集約される(#1407)。
+      # 全 running インスタンスを列挙し、以降のSSH/SCPへカンマ区切りで渡す。
+      - name: Resolve staging instance IPs
         id: instance
         run: |
-          read -r ID IP <<<"$(aws ec2 describe-instances \
+          IPS=""
+          IDS=""
+          while read -r ID IP; do
+            if [ -z "$IP" ] || [ "$IP" == "None" ]; then
+              echo "WARN: $ID にパブリックIPが無いのでスキップします" >&2
+              continue
+            fi
+            IPS="${IPS:+$IPS,}$IP"
+            IDS="${IDS:+$IDS }$ID"
+          done < <(aws ec2 describe-instances \
             --filters "Name=tag:Name,Values=${PROJECT_NAME}-app" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[0].Instances[0].[InstanceId,PublicIpAddress]' --output text)"
-          if [ -z "$IP" ] || [ "$IP" == "None" ]; then
+            --query 'Reservations[].Instances[].[InstanceId,PublicIpAddress]' --output text)
+          if [ -z "$IPS" ]; then
             echo "staging instance not found (ASG未起動、またはタグ不一致)" >&2
             exit 1
           fi
-          echo "ip=$IP" >> "$GITHUB_OUTPUT"
-          echo "id=$ID" >> "$GITHUB_OUTPUT"
+          echo "対象インスタンス: $IDS"
+          echo "ips=$IPS" >> "$GITHUB_OUTPUT"
+          echo "ids=$IDS" >> "$GITHUB_OUTPUT"
 
           SG_ID=$(aws ec2 describe-security-groups \
             --filters "Name=group-name,Values=${PROJECT_NAME}-ecs-sg" \
@@ -229,16 +244,18 @@ jobs:
       # 無いことがあるため、ポート疎通だけでなく/opt/appの準備も待つ
       - name: Wait for instance SSH/docker-compose ready
         run: |
-          for i in $(seq 1 20); do
-            timeout 5 bash -c "cat < /dev/null > /dev/tcp/${{ steps.instance.outputs.ip }}/22" 2>/dev/null && break
-            echo "waiting for SSH port..."
-            sleep 15
+          for ip in $(echo "${{ steps.instance.outputs.ips }}" | tr ',' ' '); do
+            for i in $(seq 1 20); do
+              timeout 5 bash -c "cat < /dev/null > /dev/tcp/$ip/22" 2>/dev/null && break
+              echo "waiting for SSH port ($ip)..."
+              sleep 15
+            done
           done
 
       - name: Sync edge nginx (503 時の OGP 付き静的 HTML)
         uses: appleboy/scp-action@v1
         with:
-          host: ${{ steps.instance.outputs.ip }}
+          host: ${{ steps.instance.outputs.ips }}
           username: ubuntu
           key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
           source: "infra/nginx/staging-edge.conf,infra/static/service-unavailable.html,infra/static/service-starting.html,infra/staging/ensure-edge-compose.sh"
@@ -248,10 +265,12 @@ jobs:
       - name: Deploy via SSH (docker compose pull && up -d)
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ steps.instance.outputs.ip }}
+          host: ${{ steps.instance.outputs.ips }}
           username: ubuntu
           key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
           script_stop: true
+          # 複数台のときは1台ずつ順番に流す(並列だと全台同時に compose down して全断する)
+          sync: true
           script: |
             set -e
             sudo bash -c '
@@ -271,6 +290,31 @@ jobs:
               # 既存インスタンスの .env は S3_BUCKET のみ。アプリは AWS_S3_BUCKET を読む。
               if [ -f .env ] && grep -q '^S3_BUCKET=' .env && ! grep -q '^AWS_S3_BUCKET=' .env; then
                 echo "AWS_S3_BUCKET=$(grep '^S3_BUCKET=' .env | cut -d= -f2-)" >> .env
+              fi
+              # 実クライアントIP転送の2変数(#1407)。user_data は新規インスタンスでしか
+              # 走らず、ASG は version=$Latest なので LT を更新しても既存インスタンスは
+              # 置換されない。無ければここで足さないと、稼働中のstagingは転送が無効のまま
+              # 全利用者が同じ出口IPでレート制限される。
+              #
+              # トークンはこの場で生成してはいけない。frontend は ALB 配下の任意の
+              # インスタンスの backend を叩くため、インスタンス毎に違う値になると
+              # 検証に失敗して X-Client-IP が捨てられる（負荷試験でASGが3台まで増えると顕在化）。
+              # terraform が作った SSM パラメータ(= user_data が新規インスタンスへ配るのと
+              # 同じ値)を読み、既存の値があっても上書きして全台を揃える。
+              BFF_TOKEN=$(aws ssm get-parameter --region ${{ env.AWS_REGION }} --name /${{ env.PROJECT_NAME }}/bff-internal-token --query Parameter.Value --output text 2>/dev/null || true)
+              if [ -n "$BFF_TOKEN" ] && [ "$BFF_TOKEN" != None ]; then
+                if [ -f .env ]; then
+                  sed -i /^BFF_INTERNAL_TOKEN=/d .env
+                  echo BFF_INTERNAL_TOKEN=$BFF_TOKEN >> .env
+                fi
+              else
+                # 新規インスタンスは user_data が同じ値を既に書いているので .env は触らない。
+                # 黙って進むと不一致に気付けないため、理由をログへ残す。
+                echo "WARN: SSM /${{ env.PROJECT_NAME }}/bff-internal-token を読めませんでした（terraform apply 未実施の可能性）。.env は変更しません" >&2
+              fi
+              # staging は常に ALB -> edge nginx -> frontend の2段(terraform と同値)
+              if [ -f .env ] && ! grep -q ^TRUSTED_PROXY_HOPS= .env; then
+                echo TRUSTED_PROXY_HOPS=2 >> .env
               fi
               df -h /
               # 稼働中イメージは prune できない。先に down してから空ける。
@@ -327,8 +371,12 @@ jobs:
           for name in be fe; do
             TG=$(aws elbv2 describe-target-groups --names "${PROJECT_NAME}-$name-tg" \
               --query 'TargetGroups[0].TargetGroupArn' --output text)
-            aws elbv2 wait target-in-service --target-group-arn "$TG" \
-              --targets "Id=${{ steps.instance.outputs.id }}"
+            TARGETS=""
+            for id in ${{ steps.instance.outputs.ids }}; do
+              TARGETS="$TARGETS Id=$id"
+            done
+            # shellcheck disable=SC2086
+            aws elbv2 wait target-in-service --target-group-arn "$TG" --targets $TARGETS
           done
 
       # 失敗しても必ず戻す。停止したままだと、以後アプリが落ちても

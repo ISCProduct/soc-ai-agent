@@ -7,6 +7,9 @@ const SENSITIVE_HEADERS = new Set([
   'x-user-token',
   'x-company-user-token',
   'x-internal-token',
+  // CloudFront が本番の全リクエストへ必ず付ける経路証明トークン(#1407)。
+  // 漏れると ALB 直叩きで CloudFront 経由と誤認させ、詐称XFFを署名させられる。
+  'x-origin-token',
   // httpContextIntegration が必ず載せる。遷移元のクエリ（＝トークン）が入る
   'referer',
 ])

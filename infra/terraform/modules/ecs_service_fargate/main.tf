@@ -194,19 +194,18 @@ resource "aws_ecs_task_definition" "this" {
 
   tags = var.tags
 
-  lifecycle {
-    # container_definitions: デプロイ(deployment.yml)が amazon-ecs-render-task-definition で
-    # image を差し替えた新リビジョンを登録するため、applyの度に差分が出て
-    # "must be replaced" になる。サービス側は task_definition を ignore しているので
-    # 実害(稼働リビジョンの巻き戻り)は無いが、plan が毎回ノイズになり、
-    # 本当に危険な差分を見落とす原因になる。
-    #
-    # 注意: container_definitions には image だけでなく environment / secrets /
-    # logConfiguration / healthCheck も含まれる。これらを terraform から変更したい場合は
-    # 一時的にこの ignore を外して apply すること(JSON文字列なので部分的なignoreはできない)。
-    # cpu / memory はトップレベル属性なので ignore されず、従来どおり反映される。
-    ignore_changes = [container_definitions]
-  }
+  # container_definitions は以前 ignore_changes に入れていた（デプロイが image を差し替えた
+  # 新リビジョンを登録するため apply の度に差分が出て plan がノイズになる、という理由）。
+  # しかし container_definitions は JSON 文字列なので image だけを部分的に ignore できず、
+  # environment / secrets も丸ごと反映されなくなっていた。
+  # 本番デプロイ(deployment.yml)は describe-task-definition で「最新リビジョン」を取得して
+  # image だけ差し替えるため、terraform が新リビジョンを登録できない限り新しい環境変数は
+  # 永久に本番へ届かない（#1407 の TRUSTED_PROXY_HOPS / BFF_INTERNAL_TOKEN が該当）。
+  #
+  # ignore を外すと apply の度に新リビジョンが登録されるが、aws_ecs_service 側が
+  # task_definition を ignore しているので稼働中のリビジョンは巻き戻らない。
+  # 次のデプロイが最新リビジョン(= terraform の設定入り)を拾って image だけ差し替えるため、
+  # 設定が正しく伝播する。plan のノイズより設定が届かない方が危険なので ignore は付けない。
 }
 
 resource "aws_ecs_service" "this" {
