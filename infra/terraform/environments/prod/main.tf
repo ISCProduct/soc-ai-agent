@@ -573,6 +573,9 @@ module "alb" {
   target_type          = "ip"
   # 本番反映の切り替え待機を短縮する(デプロイ頻度が高いため #運用実績)
   deregistration_delay = 10
+  # 5xxの発生元を特定できるようにする。無効だった間、14日で50,997件のELB 5xxが
+  # 出ていたのに誰が来ているのか分からなかった。
+  enable_access_logs = true
   # 学園マルチテナント(<学園slug>.shukatsu-ai.jp)とadmin.shukatsu-ai.jp用のワイルドカードSAN
   additional_san_domains = ["*.${var.domain_name}"]
   tags                   = local.tags
@@ -626,6 +629,10 @@ module "backend" {
     # 同一タスク内のredisサイドカーへlocalhost経由で接続(awsvpcモードはコンテナ間で
     # ネットワーク名前空間を共有するため)
     REDIS_URL = "redis://localhost:6379/0"
+    # 本番だけ Sentry が未設定で、エラーがどこにも残っていなかった(stagingにはある)。
+    # 空文字なら InitSentry が no-op になるので、未設定のままでも起動はする。
+    SENTRY_DSN         = var.sentry_dsn
+    SENTRY_ENVIRONMENT = "production"
     # Cloud Map(Service Discovery)経由でrag-reviewタスクへ到達する
     RAG_REVIEW_URL = "http://rag-review.${aws_service_discovery_private_dns_namespace.internal.name}:9000"
   }

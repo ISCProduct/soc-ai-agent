@@ -219,3 +219,16 @@ variable "gbizinfo_base_url" {
   description = "gBizINFO Web-APIのベースURL(#1360)。シークレットではないため環境変数として注入する"
   default     = "https://info.gbiz.go.jp/hojin"
 }
+
+variable "alarm_email" {
+  type        = string
+  description = "CloudWatchアラームの通知先メールアドレス。空ならアラームは状態を持つだけで誰にも届かない。購読はメール側でConfirmするまで有効にならない"
+  default     = ""
+}
+
+variable "sentry_dsn" {
+  type        = string
+  description = "サーバー側(Backend)のSentry DSN。本番だけ未設定でエラーが記録されていなかった。空ならSentryは初期化されない"
+  default     = ""
+  sensitive   = true
+}
