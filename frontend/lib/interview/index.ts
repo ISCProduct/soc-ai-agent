@@ -3,6 +3,9 @@ import { authService } from '../auth/index'
 import { fetchWithTimeout, LIST_FETCH_TIMEOUT_MS } from '../fetch-timeout'
 import { extractApiErrorMessage } from '../interview/utils'
 
+/** 発話保存のタイムアウト。再試行前提なので一覧系より短くする（#1476） */
+const UTTERANCE_FETCH_TIMEOUT_MS = 8_000
+
 const DEFAULT_INTERVIEW_MAX_MINUTES = 30
 const DEFAULT_INTERVIEW_QUESTION_DURATION_SECONDS = 180
 
@@ -129,12 +132,16 @@ export const interviewApi = {
     return res.json()
   },
 
+  /**
+   * 発話を保存する。半開きの接続で固まると面接ターンごと止まるため、必ずタイムアウトを付ける。
+   * 失敗は呼び出し側（saveUtteranceWithRetry）が再試行し、駄目ならUIに出す（#1476）。
+   */
   async saveUtterance(sessionId: number, userId: number, role: 'user' | 'ai', text: string): Promise<void> {
     const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/utterances`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId, role, text }),
-    })
+    }, UTTERANCE_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
   },
 

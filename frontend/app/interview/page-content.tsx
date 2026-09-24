@@ -362,6 +362,7 @@ function InterviewContent() {
         onRetryReport={session.retryReportPolling}
         finishFailed={session.finishFailed}
         onRetryFinish={session.retryFinish}
+        utteranceSaveFailed={session.utteranceSaveFailed}
         videoUploadStatus={session.videoUploadStatus}
         videoUploadProgress={session.videoUploadProgress}
         videoSizeWarning={session.videoSizeWarning}
@@ -400,6 +401,7 @@ function InterviewContent() {
       isRecording={session.isRecording}
       turnPending={session.turnPending}
       errorMessage={session.errorMessage}
+      utteranceSaveFailed={session.utteranceSaveFailed}
       sessionVideoCallbackRef={media.sessionVideoCallbackRef}
       transcriptEndRef={session.transcriptEndRef}
       aiAudioRef={session.aiAudioRef}

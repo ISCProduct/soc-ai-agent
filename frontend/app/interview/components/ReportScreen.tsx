@@ -18,6 +18,7 @@ import InterviewSummary from './InterviewSummary'
 import ScoreUpdateBanner, { WeightScore } from '@/components/ScoreUpdateBanner'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { PRIMARY, BG_DARK } from '../constants'
+import { UTTERANCE_SAVE_FAILED_MESSAGE } from '../utteranceSave'
 import type { ReportStatus } from '../hooks/useInterviewSession'
 import {
   GUEST_EMAIL_DISABLED_REASON,
@@ -45,6 +46,8 @@ export interface ReportScreenProps {
   finishFailed?: boolean
   /** finishSession失敗時の再試行 */
   onRetryFinish?: () => void
+  /** 発話保存が再試行しても失敗したか。レポートが欠ける理由として必ず出す（#1476） */
+  utteranceSaveFailed?: boolean
   /** ゲストユーザーはメール送信不可 */
   isGuest: boolean
   /** ゲスト向け登録導線への遷移 */
@@ -75,6 +78,7 @@ export default function ReportScreen({
   onRetryReport,
   finishFailed,
   onRetryFinish,
+  utteranceSaveFailed,
   isGuest,
   onRegisterClick,
   videoUploadStatus,
@@ -112,6 +116,13 @@ export default function ReportScreen({
                 再試行
               </Button>
             )}
+          </Paper>
+        )}
+
+        {/* 発話が保存できていないなら、レポートが欠ける・生成されない理由をここで明示する（#1476） */}
+        {utteranceSaveFailed && (
+          <Paper role="alert" sx={{ bgcolor: 'rgba(251,188,5,0.15)', border: '1px solid rgba(251,188,5,0.4)', p: 2, mb: 2, borderRadius: 2 }}>
+            <Typography variant="body2" sx={{ color: '#fdd663' }}>{UTTERANCE_SAVE_FAILED_MESSAGE}</Typography>
           </Paper>
         )}
 

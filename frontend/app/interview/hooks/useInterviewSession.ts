@@ -16,6 +16,7 @@ import {
   REPORT_POLL_TIMEOUT_MS,
 } from '../reportPolling'
 import { resolveFinishOutcomeMessage } from '../finishOutcome'
+import { saveUtteranceWithRetry, UTTERANCE_FLUSH_TIMEOUT_MS } from '../utteranceSave'
 import type { Utterance, InterviewCompany, Position, InterviewStatus } from '../types'
 
 export type ReportStatus = 'idle' | 'pending' | 'ready' | 'error' | 'timeout'
@@ -75,7 +76,16 @@ export function useInterviewSession({
   const [scoresAfter, setScoresAfter] = useState<WeightScore[] | null>(null)
   /** 面接終了API(finishSession)が失敗したかどうか。true の間はレポート画面に再試行UIを出す(#1015) */
   const [finishFailed, setFinishFailed] = useState(false)
+  /** 発話保存が再試行しても失敗したか。true の間は面接画面・レポート画面に警告を出す(#1476) */
+  const [utteranceSaveFailed, setUtteranceSaveFailed] = useState(false)
 
+  /**
+   * 発話保存を直列につなぐチェーン(#1476)。
+   * 再試行込みの保存をターン処理の中で待つと、失敗時に音声再生が数秒止まる。
+   * かといって投げっぱなしにすると user/ai の保存順が入れ替わり、レポートの書き起こしが崩れる。
+   * 1本のチェーンに積むことで、順序を保ったままターン処理をブロックしない。
+   */
+  const utteranceSaveChainRef = useRef<Promise<void>>(Promise.resolve())
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recorderFormatRef = useRef<RecorderFormat>({ mimeType: '', ext: 'webm' })
   // 発話が確定しなかった録音を送らずに捨てるためのフラグ。
@@ -269,6 +279,18 @@ export function useInterviewSession({
     })
   }
 
+  /**
+   * 発話保存をチェーンに積む(#1476)。
+   * 再試行しても保存できなければ utteranceSaveFailed を立て、UIに「記録できていない」ことを出す。
+   * 面接自体は止めない（止めてもユーザーにできることが無い）。
+   */
+  const queueUtteranceSave = (sessionId: number, userId: number, role: 'user' | 'ai', text: string) => {
+    utteranceSaveChainRef.current = utteranceSaveChainRef.current.then(async () => {
+      const saved = await saveUtteranceWithRetry(() => interviewApi.saveUtterance(sessionId, userId, role, text))
+      if (!saved) setUtteranceSaveFailed(true)
+    })
+  }
+
   const doStartTurn = async (sessionId: number, userId: number) => {
     await authService.ensureFreshUserToken()
     const res = await fetch(`${BACKEND_URL}/api/interviews/${sessionId}/start-turn`, {
@@ -296,7 +318,7 @@ export function useInterviewSession({
     if (aiText) {
       historyRef.current.push({ role: 'assistant', content: aiText })
       setUtterances(p => [...p, { role: 'ai', text: aiText }])
-      try { await interviewApi.saveUtterance(sessionId, userId, 'ai', aiText) } catch (e) { console.error('[utterance save error]', e) }
+      queueUtteranceSave(sessionId, userId, 'ai', aiText)
     }
     await playAudioBlob(audio)
   }
@@ -320,6 +342,8 @@ export function useInterviewSession({
     setCurrentQuestionIndex(1)
     setQuestionElapsedSeconds(0)
     setSessionWarningShown(false)
+    setUtteranceSaveFailed(false)
+    utteranceSaveChainRef.current = Promise.resolve()
     media.setMicEnabled(true); media.setCameraEnabled(true)
     historyRef.current = []
 
@@ -385,6 +409,13 @@ export function useInterviewSession({
         // 取得失敗時は scoresBefore=null のまま。ScoreUpdateBanner側で「スコア比較なし」と表示する(#1015)
         setScoresBefore(null)
       }
+      // 未完了の発話保存を終了APIより先に片付ける(#1476)。
+      // finishSession はレポート生成をキューするため、ここで待たないと
+      // 最後の発話が保存される前にレポートが生成されうる。
+      await Promise.race([
+        utteranceSaveChainRef.current,
+        new Promise<void>(resolve => setTimeout(resolve, UTTERANCE_FLUSH_TIMEOUT_MS)),
+      ])
       try {
         await interviewApi.finishSession(currentSession.id, currentUser.user_id)
       } catch {
@@ -619,12 +650,12 @@ export function useInterviewSession({
       if (userText) {
         historyRef.current.push({ role: 'user', content: userText })
         setUtterances(p => [...p, { role: 'user', text: userText }])
-        try { await interviewApi.saveUtterance(session.id, user.user_id, 'user', userText) } catch (e) { console.error('[utterance save error]', e) }
+        queueUtteranceSave(session.id, user.user_id, 'user', userText)
       }
       if (aiText) {
         historyRef.current.push({ role: 'assistant', content: aiText })
         setUtterances(p => [...p, { role: 'ai', text: aiText }])
-        try { await interviewApi.saveUtterance(session.id, user.user_id, 'ai', aiText) } catch (e) { console.error('[utterance save error]', e) }
+        queueUtteranceSave(session.id, user.user_id, 'ai', aiText)
       }
       await playAudioBlob(audio)
     } catch (e: unknown) {
@@ -687,6 +718,7 @@ export function useInterviewSession({
     scoresBefore,
     scoresAfter,
     finishFailed,
+    utteranceSaveFailed,
     retryFinish,
     aiAudioRef,
     transcriptEndRef,

@@ -15,6 +15,19 @@ import (
 	"strings"
 )
 
+// ErrNoUtterances は発話が1件も保存されていないセッションのレポート生成エラー（#1476）。
+//
+// 以前はこの場合に「発話データがありませんでした」という空レポートを保存して正常終了していた。
+// しかし発話0件は「面接に中身が無かった」とは限らない。発話保存(POST /utterances)は
+// ブラウザから別リクエストで行われるため、ネットワーク瞬断やトークン失効で丸ごと欠落しうる。
+// そこで空レポートを成功として確定させると、面接をやり切ったユーザーに中身のないレポートが
+// 届き、失敗の痕跡もどこにも残らない（スコアと LoRA 学習データの欠損もそのまま伝播する）。
+//
+// レポートは作らずエラーを返し、ジョブの再試行（asynq: MaxRetry=3）に委ねる。
+// 再試行し切っても0件なら、レポートは未生成のままフロントのポーリングがタイムアウトし、
+// 「生成できなかった」ことがユーザーに見える状態で止まる。
+var ErrNoUtterances = errors.New("interview: no utterances for session")
+
 func (s *InterviewService) StartWorker() {
 	// Redis キュー利用時は asynq worker が処理する。フォールバック用 channel worker は常に起動。
 	s.workerOnce.Do(func() {
@@ -78,22 +91,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		return err
 	}
 	if len(utterances) == 0 {
-		// utterances が0件の場合は空レポートを保存して正常終了。
-		//
-		// スコアは書かない。以前は全項目0点を書いていたが、
-		// 「発話が無い」ことと「全項目が最低評価」は違う。
-		// 0点は画面に最低評価として表示され、学生を誤解させる
-		// （docs/wiki/scoring.md §2-3 と同じ理由）。
-		empty := &models.InterviewReport{
-			SessionID:         sessionID,
-			SummaryText:       "発話データがありませんでした。",
-			ScoresJSON:        "",
-			EvidenceJSON:      "",
-			StrengthsJSON:     `[]`,
-			ImprovementsJSON:  `[]`,
-			TeacherReportJSON: `{}`,
-		}
-		return s.reportRepo.Upsert(empty)
+		return fmt.Errorf("%w (session=%d)", ErrNoUtterances, sessionID)
 	}
 	transcript := BuildTranscript(utterances)
 	systemPrompt := buildReportSystemPrompt(lang)

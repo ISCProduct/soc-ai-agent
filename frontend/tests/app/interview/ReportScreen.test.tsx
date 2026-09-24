@@ -3,6 +3,7 @@
  */
 import { render, screen } from '@testing-library/react'
 import ReportScreen from '@/app/interview/components/ReportScreen'
+import { UTTERANCE_SAVE_FAILED_MESSAGE } from '@/app/interview/utteranceSave'
 
 describe('ReportScreen', () => {
   const noop = () => {}
@@ -33,6 +34,20 @@ describe('ReportScreen', () => {
       />
     )
   }
+
+  // #1476: 発話保存が落ちたまま面接が終わると、レポートが欠ける/生成されない。
+  // その理由が画面に出ないとユーザーも運用側も原因に辿り着けない。
+  it('発話保存に失敗していたら、その旨を警告として表示する', () => {
+    renderScreen({ utteranceSaveFailed: true })
+
+    expect(screen.getByText(UTTERANCE_SAVE_FAILED_MESSAGE)).toBeInTheDocument()
+  })
+
+  it('発話保存に失敗していなければ警告を出さない', () => {
+    renderScreen()
+
+    expect(screen.queryByText(UTTERANCE_SAVE_FAILED_MESSAGE)).not.toBeInTheDocument()
+  })
 
   it('タイトル「面接レポート」を表示する', () => {
     renderScreen()

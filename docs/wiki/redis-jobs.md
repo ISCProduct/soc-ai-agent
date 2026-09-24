@@ -29,6 +29,10 @@ compose の `backend` サービスは `redis` に依存し、既定で `REDIS_UR
 
 失敗はログ `[queue] task failed`。asynq の archive（DLQ）に保持。
 
+`interview:report` は発話が0件のセッションで `ErrNoUtterances` を返し、リトライ対象になる（#1476）。
+発話保存がネットワーク瞬断などで欠落した場合に、空レポートを「正常終了」として確定させないため。
+リトライし切っても0件ならレポートは作らない（フロントのポーリングがタイムアウトし、生成失敗として見える）。
+
 ## フォールバック
 
 Redis 不通時:
