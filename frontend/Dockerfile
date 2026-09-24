@@ -2,10 +2,21 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
+# 非root実行(#1477)。node イメージ同梱の node ユーザー(uid 1000)をそのまま使う。
+# npm install / npm run build も node で回すので、後段の巨大な chown -R が要らない。
+#
+# .next と node_modules は compose 側で匿名ボリュームにされる。
+# Docker は「イメージ内に存在するパス」の所有権をボリュームへ引き継ぐため、
+# .next を空でも先に作っておかないと root 所有のボリュームができ、
+# next dev / next start がビルド成果物を書けずに起動直後で落ちる。
+RUN mkdir -p /app/.next && chown -R node:node /app
+
+USER node
+
+COPY --chown=node:node package*.json ./
 RUN npm install
 
-COPY . .
+COPY --chown=node:node . .
 
 # ARG/ENVでNODE_ENV=productionをnpm installより前にスコープさせると、devDependencies
 # (typescript等)がインストールされずwebpackのパスエイリアス解決が壊れる。そのため

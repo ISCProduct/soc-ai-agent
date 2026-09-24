@@ -37,6 +37,22 @@ COPY . /app/
 # ループではなくビルド失敗として検出する(#1094 で student_profile_store.py が漏れた)。
 RUN python -c "import main"
 
+# 非root実行用のユーザー(#1477)。依存の pip install は root で済ませ、実行時だけ落とす。
+# 9000 番で待ち受けるため特権ポートの問題は無い。
+RUN groupadd --gid 10001 app \
+ && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/app --shell /bin/sh app
+
+# 実行時に書き込む先の所有権を合わせる。
+#  - /app/chroma_db : CHROMA_HOST 未設定時の PersistentClient フォールバック先
+#                     (vector_store.py の DEFAULT_CHROMA_DATA_DIR)
+#  - /app/search_logs : 検索ログとクエリキャッシュ (services/settings.py)
+#  - /data : compose の rag_data ボリュームのマウント先。イメージ側に用意しておかないと
+#            Docker が root 所有で作り、非rootから書けなくなる。
+RUN mkdir -p /app/chroma_db /app/search_logs /data \
+ && chown -R app:app /app /data /home/app
+
+USER app
+
 EXPOSE 9000
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "9000"]

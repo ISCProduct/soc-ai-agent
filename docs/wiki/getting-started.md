@@ -253,6 +253,29 @@ npx playwright test
 | `フロントビルド失敗` | Node.js バージョンが古い | Node.js 18 以上を使用（`nvm use 18` 等） |
 | `TOKEN_ENCRYPTION_KEY 警告` | GitHub 連携に必要 | 64 桁の hex キーを生成して設定（`python3 -c "import secrets; print(secrets.token_hex(32))"`) |
 | `S3アップロード失敗` | IAM 権限不足 | `s3:PutObject` / `s3:GetObject` 権限を確認 |
+| `frontend が EACCES で起動しない`（Linux） | ホストの UID が 1000 以外で、bind mount した `./frontend` に `next dev` が `next-env.d.ts` を書けない | `.env` に `FRONTEND_USER=$(id -u):$(id -g)` を設定し、下記のボリューム作り直しも行う |
+| `rag-review が /data で PermissionError` | root 実行時代のデータが `rag_data` に残っている（`RAG_CHROMA_DATA_DIR=/data/...` を使う場合のみ） | `docker compose run --rm --user root rag-review chown -R 10001:10001 /data`（ファイルは消えない） |
+
+### コンテナ非root化（#1477）にともなう既存環境の移行
+
+全コンテナを非rootで動かすようにしたため、**root で動いていた頃に作られたボリュームが残っていると書き込みに失敗する**。
+
+- **frontend の `.next` / `node_modules`**: 匿名ボリュームをやめて名前付き（`frontend_next` / `frontend_node_modules`）にしたので、**次の `docker compose up` で自動的に新しいボリュームが作られ移行が済む**。旧ボリュームは残るだけなので、回収したければ `docker volume prune`。
+- **`FRONTEND_USER` を変えた場合**: 名前付きボリュームは `node`（uid 1000）所有で作られるため、作り直しが必要。どちらもビルドキャッシュなので消してよい。
+
+  ```sh
+  docker compose down
+  docker volume rm "$(basename "$PWD")_frontend_node_modules" "$(basename "$PWD")_frontend_next"
+  docker compose up -d --build
+  ```
+
+- **`rag_data`**: ChromaDB の実データが入りうるので**消さずに所有権だけ移す**。既定構成（`CHROMA_HOST=chroma`）では `/data` を使わないため、この作業が要るのは `RAG_CHROMA_DATA_DIR=/data/...` へ切り替えている環境だけ。
+
+  ```sh
+  docker compose run --rm --user root rag-review chown -R 10001:10001 /data
+  ```
+
+- **`mysql_data` / `chroma_data`**: 対象外。MySQL・Chroma の公式イメージは非root化していないので、これまでどおり動く。
 
 ---
 
