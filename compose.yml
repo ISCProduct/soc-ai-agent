@@ -128,10 +128,25 @@ services:
       dockerfile: Dockerfile
     container_name: soc-ai-agent-frontend
     restart: unless-stopped
+    # 開発時の実行ユーザー。既定はイメージ同梱の node (uid 1000)。
+    # Linux ホストで自分の UID が 1000 以外だと、bind mount した ./frontend に
+    # next dev が next-env.d.ts（.gitignore 対象なのでクリーン checkout には無い）を
+    # 書けず起動できない（#1477）。その場合は .env に
+    #   FRONTEND_USER=1001:1001   # $(id -u):$(id -g)
+    # を入れる。下の2ボリュームは node 所有で作られるので、併せて
+    #   docker compose down && docker volume rm <project>_frontend_node_modules <project>_frontend_next
+    # で作り直すこと（どちらもビルドキャッシュなので消して問題ない）。
+    user: "${FRONTEND_USER:-node}"
     volumes:
       - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
+      # 匿名ボリューム（`- /app/node_modules`）にすると、root で動いていた旧コンテナが
+      # 作ったボリュームが `up --build` の再作成でそのまま引き継がれ、非root化した
+      # 途端に next dev がキャッシュを書けず EACCES になる（#1477）。
+      # 名前付きにすると新しいボリュームがイメージの内容（node 所有）で初期化されるため、
+      # 既存環境も次の `up` で自動的に移行する。旧ボリュームは残るだけで消えないので、
+      # 気になれば `docker volume prune` で回収する。
+      - frontend_node_modules:/app/node_modules
+      - frontend_next:/app/.next
     ports:
       - "3000:3000"
     environment:
@@ -189,6 +204,12 @@ services:
       - SENTRY_RELEASE=${SENTRY_RELEASE:-}
       - APP_ENV=${APP_ENV:-development}
     volumes:
+      # 既定では使わない（CHROMA_HOST=chroma があるので PersistentClient を通らず、
+      # RAG_CHROMA_DATA_DIR の既定も /app/chroma_db）。
+      # RAG_CHROMA_DATA_DIR=/data/... へ切り替える場合（scripts/migrate_persistent_to_http.py）で、
+      # かつ root で動いていた頃のデータが既にこのボリュームにあるなら、非root化後は
+      # 書き込みが PermissionError になる。一度だけ所有権を移す（ファイルは消さない）:
+      #   docker compose run --rm --user root rag-review chown -R 10001:10001 /data
       - rag_data:/data
     depends_on:
       - chroma
@@ -212,6 +233,12 @@ services:
 
 volumes:
   mysql_data:
+    driver: local
+  # frontend のビルドキャッシュ。匿名にすると旧root所有のボリュームを引き継ぐため
+  # 名前付きにしている（#1477。compose.yml の frontend のコメント参照）
+  frontend_node_modules:
+    driver: local
+  frontend_next:
     driver: local
   rag_data:
     driver: local

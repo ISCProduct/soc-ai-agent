@@ -12,6 +12,18 @@ const PUBLIC_PAGES = [
   { path: '/privacy', mustSee: 'プライバシー' },
 ]
 
+// h1 を1つ持つべき公開ページ。スクリーンリーダーと検索エンジンは h1 で
+// 「このページは何か」を判断するため、見出しが h4/h5 のままだと構造が伝わらない（#1479）。
+const PAGES_WITH_H1 = [
+  ...PUBLIC_PAGES.map(({ path }) => path),
+  '/forgot-password',
+  '/reset-password',
+  '/register/confirm',
+  '/company-portal/sign-in',
+  '/company-portal/forgot-password',
+  '/company-portal/reset-password',
+]
+
 test.describe('公開ページは未ログインで到達できる', () => {
   for (const { path, mustSee } of PUBLIC_PAGES) {
     test(`${path} が /login へリダイレクトされない`, async ({ page }) => {
@@ -37,4 +49,18 @@ test.describe('公開ページは未ログインで到達できる', () => {
     await nameField.fill('テスト株式会社')
     await expect(nameField).toHaveValue('テスト株式会社')
   })
+})
+
+test.describe('主要な公開ページには h1 が1つある', () => {
+  for (const path of PAGES_WITH_H1) {
+    test(`${path} の h1 はちょうど1つ`, async ({ page }) => {
+      await page.context().clearCookies()
+      await page.goto(path)
+
+      // getByRole は display:none の要素を除くので、実際に読み上げられる見出しだけを数える。
+      const h1 = page.getByRole('heading', { level: 1 })
+      await expect(h1.first()).toBeVisible({ timeout: 10000 })
+      await expect(h1).toHaveCount(1)
+    })
+  }
 })

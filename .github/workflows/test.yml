@@ -173,6 +173,11 @@ jobs:
       - name: AI利用量の機能名付与の検査
         run: ./automation/test/ai-usage-feature-check.sh
 
+      # コンテナが root で動いていないこと。#1470 は Backend だけを直したため、
+      # 同じ穴が4イメージに残っていた（#1477）。
+      - name: Dockerfile の非root実行の検査
+        run: ./automation/test/dockerfile-nonroot-test.sh
+
       - name: ワークフロー埋め込み Python の構文チェック
         run: |
           python3 - <<'PYEOF'

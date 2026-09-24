@@ -201,7 +201,7 @@ PRD でも「初期データ投入作業自体はスコープ外」としてい�
 教員向けの傾向分析（#1027）の両方が読む。**誤ったスコアを書くと、
 どちらにも静かに混ざり、後から区別できない。**
 
-一方スコアが無い場合は、マッチングが中立50で扱い（`matching_service.go` の
+一方スコアが無い場合は、マッチングがその軸を平均から除外し（`matching_service.go` の
 `scoredMatch`）、傾向分析は「分析データ不足」と表示する（#1027）。
 **欠損は画面に出るが、誤りは出ない。**
 
@@ -222,6 +222,7 @@ PRD でも「初期データ投入作業自体はスコープ外」としてい�
 ## 3. 企業プロファイル（CompanyWeightProfile）
 
 各企業は 10 カテゴリそれぞれに「重視度（0〜100）」を持ちます。
+プロファイルが無い企業はマッチングの対象外（[#1380](#プロファイルを持たない企業1380)）。
 
 ```go
 type CompanyWeightProfile struct {
@@ -262,6 +263,36 @@ type CompanyWeightProfile struct {
 
 未計測カテゴリは平均に**含めない**（#1124）。件数は `matched_axis_count` に保存する。
 以前は中立値50で埋めていたが、企業重視度が50前後に寄ると未診断でも97%前後に飽和するため廃止した。
+
+### プロファイルを持たない企業（#1380）
+
+**`CompanyWeightProfile` が無い公開企業はマッチング対象から外す**（`CalculateMatching` が `continue` する）。
+
+以前は全軸50のデフォルトで埋めていたが、全軸50は取りうる中で最も平坦なプロファイルで、
+マッチ度が `100 - |差|` である以上、スコアが50付近の平均的な学生に対して各軸100点になる。
+**情報が無い企業ほど上位に出る**という逆のインセンティブになり、
+学生にも「なぜこの企業が1位なのか」を説明できなかった。
+
+- 学生から見える影響: プロファイルが無い企業は推薦に出ない（`user_company_matches` に行を作らない）
+- **既存行も読み出し時に除外する**: `CalculateMatching` は行を作らないだけで、過去に作られた
+  `user_company_matches` は残る（`CreateOrUpdateBatch` は upsert で削除しない）。
+  そのため読み出し側でも外す — `FindTopMatchesByUserAndSession`（推薦一覧・メールレポート）と
+  `FindLowMatchApplicationsByUsers`（教員の低マッチ集計）に
+  `CompanyHasWeightProfileSQL` の EXISTS 条件を入れている。
+  **行は消さない**。`is_viewed` / `is_favorited` / `is_applied` はユーザー操作の結果で、
+  プロファイルを生成し直せば元のスコアごと復帰する。削除すると復帰できない
+- 運用者から見える影響:
+  - 一部欠損の常時監視は `GET /api/admin/companies/l1-coverage` の
+    `companies_without_profile`（= `published_total - has_profile`。追加クエリ無し）。
+    `profile_rate` / `profile_target=0.95` のアラートも同じ数字から出る
+  - 推薦が0件になったときは `GET /api/chat/recommendations` の
+    `diagnostics.companies_without_profile`（`CountPublishedWithoutWeightProfile`）
+  - 公開企業がすべてプロファイル未設定なら `reason = insufficient_company_profiles` を返す。
+    公開企業が0社の `insufficient_company_data` とは分ける
+    （前者は「プロファイル生成が必要」、後者は「企業公開が必要」で復旧手順が違う）
+- プロファイルは `FetchAndSavePersona`（AI）で生成する。失敗した企業は推薦に出ないまま残るため、
+  上の件数が増え続けていないかを見る
+- 識別力が低いだけ（全軸ほぼ同値）のプロファイルは**除外しない**。保存はして記録に残す（#1331）
 
 ### 実装（`matching_service.go`）
 

@@ -5,11 +5,14 @@
 # マネージドリソースに接続するため、ローカルで実行すると staging の
 # リソースへ接続しにいく。ローカル開発は compose.yml を使うこと。
 #
-# デプロイ時に EC2 の /opt/app/docker-compose.yml へ配置される。
-# そのパスを前提に以下が参照しているため、ファイル名は変更しないこと:
-#   - infra/terraform/environments/staging/app_user_data.sh.tftpl
-#   - infra/staging/ensure-edge-compose.sh
-#   - .github/workflows/deployment.yml
+# 注意: このファイル自体は staging へ配布されない（#1477 のレビューで判明）。
+# EC2 上の /opt/app/docker-compose.yml を書くのは
+# infra/terraform/environments/staging/app_user_data.sh.tftpl で、
+# .github/workflows/deployment.yml はそれを `docker compose pull && up -d` するだけ
+# （scp するのは nginx 設定と ensure-edge-compose.sh のみ）。
+# 実際に staging で動くサービスは user_data 側の定義が正であり、
+# ここにしかない company-graph は staging / 本番のどちらでも起動していない。
+# 構成を変えるときは app_user_data.sh.tftpl と infra/staging/ensure-edge-compose.sh を直すこと。
 # 手順: docs/wiki/operations.md
 # ============================================================
 services:

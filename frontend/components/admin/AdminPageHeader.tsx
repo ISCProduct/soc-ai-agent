@@ -35,11 +35,19 @@ export function AdminPageHeader({
       <Box sx={{ minWidth: 0 }}>
         <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: description ? 0.5 : 0 }}>
           {backHref ? (
-            <IconButton component={Link} href={backHref} size="small" aria-label={backAriaLabel}>
+            // size="small" のままだと34x34でモバイルのタップ領域が足りない（#1481）
+            <IconButton
+              component={Link}
+              href={backHref}
+              size="small"
+              aria-label={backAriaLabel}
+              sx={{ width: 44, height: 44 }}
+            >
               <ArrowBackIcon />
             </IconButton>
           ) : null}
-          <Typography variant="h4" fontWeight={700} sx={{ letterSpacing: '-0.02em' }}>
+          {/* 管理画面のページ見出しは h1（#1479）。見た目は variant="h4" のまま */}
+          <Typography variant="h4" component="h1" fontWeight={700} sx={{ letterSpacing: '-0.02em' }}>
             {title}
           </Typography>
         </Stack>

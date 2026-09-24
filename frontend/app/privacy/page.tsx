@@ -6,7 +6,7 @@ export default function PrivacyPage() {
     <Container maxWidth="md" sx={{ py: 6 }}>
       <BackButton />
 
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
+      <Typography variant="h4" component="h1" fontWeight="bold" gutterBottom>
         プライバシーポリシー
       </Typography>
       <Typography variant="body2" color="text.secondary" gutterBottom>

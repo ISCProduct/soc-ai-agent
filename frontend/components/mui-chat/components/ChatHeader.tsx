@@ -32,7 +32,12 @@ export function ChatHeader({
           学生が見たいのは「あと何問か」であって、何が診断しているかではない。
           %は棒グラフが同じことを示しているので数字からは外す。
         */}
-        <Typography variant="h5" className={styles.chatTitle}>
+        {/*
+          チャット画面の見出し（#1479）。
+          このタイトルはモバイルでは display:none で、代わりに app/page-content.tsx の
+          モバイルヘッダー側が h1 を担う。両方が同時に見えることはない。
+        */}
+        <Typography variant="h5" component="h1" className={styles.chatTitle}>
           IT業界キャリアエージェント
         </Typography>
         <Typography variant="body2" color="text.secondary" className={styles.chatProgress}>
