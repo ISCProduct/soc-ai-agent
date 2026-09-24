@@ -18,6 +18,8 @@ func SetupAdminRoutes(
 	adminUserController *admincontrollers.AdminUserController,
 	adminOrganizationController *admincontrollers.AdminOrganizationController,
 	adminSchoolController *admincontrollers.AdminSchoolController,
+	adminSchoolAppController *admincontrollers.AdminSchoolApplicationController,
+	adminSchoolJobSuppressionController *admincontrollers.AdminSchoolJobSuppressionController,
 	adminAuditController *admincontrollers.AdminAuditController,
 	adminCompanyGraphController *admincontrollers.AdminCompanyGraphController,
 	adminInterviewController *admincontrollers.AdminInterviewController,
@@ -71,6 +73,16 @@ func SetupAdminRoutes(
 	admin.GET("/schools/:id/company-approvals", adminSchoolController.ListCompanyApprovals)
 	admin.POST("/schools/:id/company-approvals", adminSchoolController.AddCompanyApproval)
 	admin.DELETE("/schools/:id/company-approvals/:company_id", adminSchoolController.RemoveCompanyApproval)
+
+	// 掲載申請の審査キュー (#1507)。担当校のキャリア担当が承認・却下する。
+	admin.GET("/schools/:id/company-applications", adminSchoolAppController.List)
+	admin.POST("/schools/:id/company-applications/:appId/approve", adminSchoolAppController.Approve)
+	admin.POST("/schools/:id/company-applications/:appId/reject", adminSchoolAppController.Reject)
+
+	// 個別求人停止 (#1508)。企業承認は企業単位だが、問題のある求人だけを学校向けに止める。
+	admin.GET("/schools/:id/job-suppressions", adminSchoolJobSuppressionController.List)
+	admin.POST("/schools/:id/job-suppressions", adminSchoolJobSuppressionController.Create)
+	admin.DELETE("/schools/:id/job-suppressions/:jobId", adminSchoolJobSuppressionController.Delete)
 
 	// 企業・求人カタログの閲覧と基本編集（掲載承認のため全件閲覧は担当校管理者にも必要）
 	admin.GET("/companies", adminCompanyController.List)

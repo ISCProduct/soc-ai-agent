@@ -26,10 +26,11 @@ func TestSetupAdminRoutes_AllRoutesRequireAuth(t *testing.T) {
 	api := e.Group("/api")
 	routes.SetupAdminRoutes(
 		api,
-		// コントローラー19個 + userRepo + schoolService
+		// コントローラー21個 + userRepo + schoolService
 		nil, nil, nil, nil, nil, nil, nil,
 		nil, nil, nil, nil, nil, nil, nil,
 		nil, nil, nil, nil, nil, nil, nil,
+		nil, nil,
 		"test-admin-secret",
 	)
 
