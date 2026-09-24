@@ -281,6 +281,51 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
   })
 
   /**
+   * 「完了する」を /turn の応答待ち中に押した場合の音声再生(#1501)。
+   * playAudioBlob が自分の入り口で音声世代を読む実装だと、cleanupConnection が先に世代を
+   * 進めていても「更新後の世代」を読むため stale 判定を通過する。結果、既にレポート画面へ
+   * 遷移しているのに面接官の音声が鳴り出す。/start-turn の応答が遅れた場合も同じ。
+   */
+  it('完了した後に届いたターンの音声は、/turn も /start-turn も再生しない', async () => {
+    holdStartTurn = true
+    const media = fakeMedia()
+    const { result, unmount } = renderSession(media)
+
+    const play = HTMLMediaElement.prototype.play as jest.Mock
+
+    await act(async () => {
+      void result.current.handleJoin()
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    expect(releaseStartTurn).not.toBeNull()
+
+    // /start-turn の応答待ち中に、ユーザーが録音して回答を送る
+    act(() => { result.current.startRecording() })
+    act(() => { result.current.stopRecording() })
+    act(() => { deliverRecorderStops() })
+    await flush()
+    expect(releaseTurn).not.toBeNull()
+    // どちらも応答待ちなので、まだ再生は始まっていない
+    expect(play).not.toHaveBeenCalled()
+
+    // 応答待ちのまま「完了する」を押し、その後に両方の応答が届く
+    await act(async () => {
+      const stopping = result.current.handleStop()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      releaseTurn?.(turnResponse({ user_text: '最後の回答です', ai_text: 'ありがとうございました' }))
+      releaseStartTurn?.(turnResponse({ ai_text: '自己紹介をお願いします' }))
+      await stopping
+    })
+    await flush()
+
+    // 発話はレポートのために保存されるが、音声は鳴らさない
+    expect(calls.filter(u => u.includes('/utterances'))).toHaveLength(3)
+    expect(play).not.toHaveBeenCalled()
+
+    unmount()
+  })
+
+  /**
    * ターンのタイムアウトはヘッダー受信までしか効かない実装だと、本文（音声）の受信中に
    * 半開きになったターンは永久に解決しない。handleStop がそれを待つので finishSession も
    * ポーリング開始も呼ばれず、画面は「生成中」のまま進まない。

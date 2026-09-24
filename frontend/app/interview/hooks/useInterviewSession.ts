@@ -226,8 +226,16 @@ export function useInterviewSession({
     }, 1000)
   }
 
-  const playAudioBlob = async (blob: Blob): Promise<void> => {
-    const gen = audioGenerationRef.current
+  /**
+   * ターンの応答音声を再生する。
+   * gen は「リクエストを投げた時点」の音声世代で、呼び出し側から引き継ぐ(#1501)。
+   * ここで audioGenerationRef を読むと、応答待ちの間に「完了する」で
+   * cleanupConnection が世代を進めていても更新後の値を読むため stale 判定を通過し、
+   * レポート画面へ遷移した後に面接官の音声が鳴り出す。
+   */
+  const playAudioBlob = async (blob: Blob, gen: number): Promise<void> => {
+    // 終了済み（または次のターンに切り替わった後）なら、再生を始めない
+    if (gen !== audioGenerationRef.current) return
     const url = URL.createObjectURL(blob)
     const el = new Audio()
     aiAudioRef.current = el
@@ -258,8 +266,6 @@ export function useInterviewSession({
       el.removeAttribute('src')
       el.load()
     }
-
-    if (gen !== audioGenerationRef.current) { cleanup(); return }
 
     try {
       if (!aiAudioCtxRef.current || aiAudioCtxRef.current.state === 'closed') {
@@ -357,6 +363,17 @@ export function useInterviewSession({
     return receiving
   }
 
+  /**
+   * ターンの応答を待って音声を再生する(#1501)。
+   * 音声世代はリクエスト開始時点（＝この関数に入った時点。receive() は既に呼ばれているが、
+   * 間に cleanupConnection が割り込む隙は無い）で取り、playAudioBlob へ引き継ぐ。
+   * 応答待ちの間に面接が終了していれば再生しない。/turn と /start-turn の両方をここに通す。
+   */
+  const playTurnAudio = async (receiving: Promise<Blob>): Promise<void> => {
+    const gen = audioGenerationRef.current
+    await playAudioBlob(await trackTurn(receiving), gen)
+  }
+
   const doStartTurn = async (sessionId: number, userId: number) => {
     const receive = async (): Promise<Blob> => {
       await authService.ensureFreshUserToken()
@@ -390,7 +407,7 @@ export function useInterviewSession({
       }
       return audio
     }
-    await playAudioBlob(await trackTurn(receive()))
+    await playTurnAudio(receive())
   }
 
   const handleJoinWithConsent = () => {
@@ -758,7 +775,7 @@ export function useInterviewSession({
       return audio
     }
     try {
-      await playAudioBlob(await trackTurn(receive()))
+      await playTurnAudio(receive())
     } catch (e: unknown) {
       setErrorMessage(parseMediaError(e))
     } finally {
