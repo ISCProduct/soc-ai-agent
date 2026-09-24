@@ -172,8 +172,11 @@ func (s *CompanyEntryService) Submit(in CompanyEntryInput) (*CompanyEntryResult,
 		SourceType:       "manual",
 		DataStatus:       "draft",
 		IsProvisional:    true,
-		IsActive:         true,
-		SourceFetchedAt:  &now,
+		// 表示可否の判定に使う(#1409)。company_entry_submissions の行が消えても
+		// ガードが外れないよう、企業行そのものに残す。
+		IsGuestEntry:    true,
+		IsActive:        true,
+		SourceFetchedAt: &now,
 	}
 
 	submission := &models.CompanyEntrySubmission{
