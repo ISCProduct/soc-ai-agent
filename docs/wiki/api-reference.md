@@ -118,12 +118,34 @@
 | POST | `/api/company-auth/logout` | リフレッシュトークン | ログアウト |
 | GET | `/api/company-auth/me` | `X-Company-User-Token` | 自分の情報 |
 | GET | `/api/company-portal/*` | `X-Company-User-Token` | 学生検索・タグ・分析（company_id はJWT由来） |
+| GET/POST/DELETE | `/api/company-portal/school-applications` | `X-Company-User-Token` | 学校への掲載申請（#1506）。申請・取消は owner のみ。他社の申請取消は403 |
 | POST | `/api/admin/companies/{id}/company-users` | admin | 企業ユーザー招待 |
 | GET | `/api/admin/companies/{id}/company-users` | admin | 企業ユーザー一覧 |
 | PATCH | `/api/admin/companies/{id}/company-users/{userID}` | admin | 有効/無効の切替（#1196） |
 
 企業ユーザーの**アクセス剥奪は行削除ではなく無効化**で行う。
 削除はタグの外部キー制約（`RESTRICT`）で失敗する。
+
+---
+
+## 掲載申請フロー（#1505）
+
+企業が「この学校の学生に求人・情報を掲載したい」と申請し、学校のキャリア担当
+職員が承認する。承認されると `school_company_approvals` に行が入り、学生側の
+絞り込み（`ListActiveFiltered` / `ListJobPositions` の JOIN）がそのまま効く。
+
+| メソッド | パス | 認証 | 概要 |
+|---------|------|------|------|
+| GET | `/api/company-portal/school-applications` | `X-Company-User-Token` | 自社の申請一覧 |
+| POST | `/api/company-portal/school-applications` | company owner | 掲載申請（#1506）。承認待ちの重複は不可 |
+| DELETE | `/api/company-portal/school-applications/{id}` | company owner | 申請取消。他社の申請は403 |
+| GET | `/api/admin/schools/{id}/company-applications?status=pending` | admin（担当校） | 審査キュー（#1507） |
+| POST | `/api/admin/schools/{id}/company-applications/{appId}/approve` | admin（担当校） | 承認。承認リストへ追加＋status=approved |
+| POST | `/api/admin/schools/{id}/company-applications/{appId}/reject` | admin（担当校） | 却下。status=rejected |
+
+`company_id` は企業側JWT由来。管理者側は担当校スコープ（`CanAdminAccessSchool`,
+#1157）で他校の申請に触れさせない。承認は「承認リスト追加 → status更新」の順で
+行い、途中失敗時に「承認済み表示なのに学生に出ない」不整合を防ぐ。
 
 ---
 
