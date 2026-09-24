@@ -466,10 +466,17 @@ null を返し、`Backend/internal/observability/sentry.go` も DSN 空なら初
 **シークレットは staging と本番で分けてある。** 同じ名前を使うと、staging を有効化した瞬間に
 次の本番デプロイでも有効になり、段階導入ができない。
 
-本番のサーバー側だけ注意点がある。ECS のタスク定義は `container_definitions` を
-`ignore_changes` にしているため（`modules/ecs_service_fargate/main.tf`）、**Terraform に環境変数を
-足しただけでは反映されない**。反映するには一時的に ignore を外して apply する必要がある
-（モジュール側のコメントにも同じ注意書きがある）。
+本番のサーバー側だけ注意点がある。`SENTRY_DSN` は ECS タスク定義の `container_definitions` の中
+にあり、`terraform apply` で新しいリビジョンは登録されるが、`aws_ecs_service` が `task_definition`
+を `ignore_changes` しているため**稼働中のタスクは入れ替わらない**
+（`modules/ecs_service_fargate/main.tf`）。反映するには apply 後にデプロイを1回走らせる
+（`deployment.yml` は最新リビジョンを取得して image だけ差し替えるので、terraform が入れた
+環境変数はそのまま引き継がれる）。frontend/backend に差分が無い場合は
+[3.5 の「本番タスク定義へ反映する」](#本番タスク定義へ反映する)と同じ手順で手動反映する。
+
+> かつては `container_definitions` も `ignore_changes` に入っていて、**Terraform に環境変数を
+> 足しても永久に本番へ届かなかった**（#1407）。現在は外してあるので、一時的に ignore を外す
+> といった作業は不要。
 
 ### 送信前に落としているもの
 
