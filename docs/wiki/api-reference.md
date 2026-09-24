@@ -142,10 +142,17 @@
 | GET | `/api/admin/schools/{id}/company-applications?status=pending` | admin（担当校） | 審査キュー（#1507） |
 | POST | `/api/admin/schools/{id}/company-applications/{appId}/approve` | admin（担当校） | 承認。承認リストへ追加＋status=approved |
 | POST | `/api/admin/schools/{id}/company-applications/{appId}/reject` | admin（担当校） | 却下。status=rejected |
+| GET | `/api/admin/schools/{id}/job-suppressions` | admin（担当校） | 個別停止一覧（#1508） |
+| POST | `/api/admin/schools/{id}/job-suppressions` | admin（担当校） | 求人を学校向けに個別停止。重複は409 |
+| DELETE | `/api/admin/schools/{id}/job-suppressions/{jobId}` | admin（担当校） | 個別停止の解除（べき等） |
 
 `company_id` は企業側JWT由来。管理者側は担当校スコープ（`CanAdminAccessSchool`,
 #1157）で他校の申請に触れさせない。承認は「承認リスト追加 → status更新」の順で
 行い、途中失敗時に「承認済み表示なのに学生に出ない」不整合を防ぐ。
+
+承認された企業の求人は学生に自動掲載される（`ListJobPositions` の承認JOIN）。
+問題のある求人だけは `job-suppressions` で学校ごとに個別停止でき、停止された
+求人は同 JOIN の `LEFT JOIN ... IS NULL` で学生一覧から除外される（#1508）。
 
 ---
 

@@ -488,6 +488,11 @@ func main() {
 		schoolapproval.NewReviewService(repositories.NewSchoolCompanyApplicationRepository(db), schoolRepo),
 		schoolService,
 	)
+	// 個別求人停止 (#1508)。承認済み企業の求人でも学校ごとに止められる。
+	adminSchoolJobSuppressionController := admincontrollers.NewAdminSchoolJobSuppressionController(
+		schoolapproval.NewSuppressionService(repositories.NewSchoolJobSuppressionRepository(db)),
+		schoolService,
+	)
 	adminUserController := admincontrollers.NewAdminUserController(userRepo, auditLogService)
 	adminUserController.SetDeletionService(userDeletionService)
 	adminUserController.SetSchoolService(schoolService)
@@ -635,7 +640,7 @@ func main() {
 	// 低マッチのまま進行中の応募を教員一覧に出す（#1028）
 	teacherInsightService.SetLowMatchReader(appStatusRepo)
 	teacherInsightController := insightcontrollers.NewTeacherStudentInsightController(teacherInsightService)
-	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminSchoolAppController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, userRepo, schoolService, cfg.AdminSecret)
+	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminSchoolAppController, adminSchoolJobSuppressionController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, userRepo, schoolService, cfg.AdminSecret)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService)
