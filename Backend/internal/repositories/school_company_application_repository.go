@@ -68,3 +68,24 @@ func (r *SchoolCompanyApplicationRepository) FindByID(id uint) (*models.SchoolCo
 func (r *SchoolCompanyApplicationRepository) Delete(id uint) error {
 	return r.db.Delete(&models.SchoolCompanyApplication{}, id).Error
 }
+
+// ListBySchool は学校向けの申請一覧を新しい順で返す。
+// status が空文字なら全件、指定があればその状態だけ。
+func (r *SchoolCompanyApplicationRepository) ListBySchool(schoolID uint, status string) ([]models.SchoolCompanyApplication, error) {
+	q := r.db.Where("school_id = ?", schoolID)
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
+	var apps []models.SchoolCompanyApplication
+	if err := q.Order("created_at DESC, id DESC").Find(&apps).Error; err != nil {
+		return nil, err
+	}
+	return apps, nil
+}
+
+// UpdateStatus は申請の状態と審査者を更新する。承認・却下で使う。
+func (r *SchoolCompanyApplicationRepository) UpdateStatus(id uint, status string, reviewedBy uint) error {
+	return r.db.Model(&models.SchoolCompanyApplication{}).
+		Where("id = ?", id).
+		Updates(map[string]any{"status": status, "reviewed_by": reviewedBy}).Error
+}

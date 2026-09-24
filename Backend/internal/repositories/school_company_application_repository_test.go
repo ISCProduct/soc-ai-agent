@@ -66,3 +66,54 @@ func TestListByCompany_ScopedByCompany(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestListBySchool_FiltersByStatus は status 指定時に絞ることを検証する。
+func TestListBySchool_FiltersByStatus(t *testing.T) {
+	repo, mock := newSchoolAppRepo(t)
+	mock.ExpectQuery("SELECT \\* FROM `school_company_applications` WHERE school_id = \\? AND status = \\?").
+		WithArgs(uint(3), models.SchoolCompanyApplicationPending).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "school_id", "company_id", "status"}).AddRow(1, 3, 7, "pending"))
+
+	apps, err := repo.ListBySchool(3, models.SchoolCompanyApplicationPending)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(apps) != 1 {
+		t.Errorf("apps = %+v", apps)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestListBySchool_NoStatus は status 空文字なら全件（status 条件なし）を検証する。
+func TestListBySchool_NoStatus(t *testing.T) {
+	repo, mock := newSchoolAppRepo(t)
+	mock.ExpectQuery("SELECT \\* FROM `school_company_applications` WHERE school_id = \\? ORDER BY").
+		WithArgs(uint(3)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "school_id", "company_id", "status"}))
+
+	if _, err := repo.ListBySchool(3, ""); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestUpdateStatus は status と reviewed_by を更新することを検証する。
+func TestUpdateStatus(t *testing.T) {
+	repo, mock := newSchoolAppRepo(t)
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `school_company_applications` SET").
+		WithArgs(uint(99), models.SchoolCompanyApplicationApproved, sqlmock.AnyArg(), uint(10)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	if err := repo.UpdateStatus(10, models.SchoolCompanyApplicationApproved, 99); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
