@@ -170,6 +170,15 @@ resource "aws_cloudfront_distribution" "app" {
     domain_name = var.alb_dns_name
     origin_id   = "alb"
 
+    # frontend(BFF)が「このリクエストは本当にCloudFrontを通ったか」を判定するための
+    # 共有シークレット(#1407)。ALBは 0.0.0.0/0 に開いており CloudFront を迂回できるため、
+    # これが無いと迂回経路の詐称 X-Forwarded-For を実IPとして署名してしまう。
+    # ビューアーが同名ヘッダーを送ってもCloudFrontがこの値で上書きする。
+    custom_header {
+      name  = "X-Origin-Token"
+      value = var.origin_token
+    }
+
     custom_origin_config {
       http_port                = 80
       https_port               = 443
@@ -202,13 +211,13 @@ resource "aws_cloudfront_distribution" "app" {
 
   # 静的ページ自体はS3から直接取得(GET/HEADのみのため制約なし)
   ordered_cache_behavior {
-    path_pattern             = "/service-unavailable.html"
-    allowed_methods          = ["GET", "HEAD"]
-    cached_methods           = ["GET", "HEAD"]
-    target_origin_id         = "s3-errors"
-    viewer_protocol_policy   = "redirect-to-https"
-    compress                 = true
-    cache_policy_id          = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # AWS managed: CachingDisabled
+    path_pattern           = "/service-unavailable.html"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "s3-errors"
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+    cache_policy_id        = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # AWS managed: CachingDisabled
   }
 
   custom_error_response {

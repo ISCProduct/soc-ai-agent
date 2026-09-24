@@ -320,6 +320,11 @@ resource "aws_launch_template" "app" {
     }
   }
 
+  # trusted_proxy_hops は常に2（ALB + edge nginx）(#1407)。
+  # staging の CloudFront(error_fallback) は Route53 SECONDARY の S3 静的エラーページ専用で、
+  # 正常時は PRIMARY の ALB へ直接届くため成功経路には存在せず、段数に数えてはいけない。
+  # 3 にすると通常の2要素XFFでは転送が無効になり、さらにクライアントが先頭へIPを1個足すと
+  # その詐称値が3段目として内部トークン付きで署名され、IP単位の制限を回避できてしまう。
   user_data = base64encode(templatefile("${path.module}/app_user_data.sh.tftpl", {
     aws_region               = var.region
     log_group_name           = aws_cloudwatch_log_group.app.name
@@ -355,7 +360,7 @@ resource "aws_launch_template" "app" {
     sentry_dsn               = var.sentry_dsn
     token_encryption_key     = random_id.token_encryption_key.hex
     bff_internal_token       = random_password.bff_internal_token.result
-    trusted_proxy_hops       = var.enable_error_fallback ? "3" : "2"
+    trusted_proxy_hops       = "2"
     edge_nginx_conf          = file("${path.module}/../../../nginx/staging-edge.conf")
     service_unavailable_html = file("${path.module}/../../../static/service-unavailable.html")
     service_starting_html    = file("${path.module}/../../../static/service-starting.html")

@@ -569,6 +569,18 @@ resource "random_password" "bff_internal_token" {
   special = false
 }
 
+# CloudFront -> ALB の経路証明トークン(#1407)。
+# ALB は 0.0.0.0/0 に開いており、api.${var.domain_name} から得た同じALBのIPへ
+# frontend の Host/SNI で直接接続できる。この迂回経路で詐称 X-Forwarded-For を送られても
+# 段数だけ見ると「CloudFront+ALBの2段」と区別が付かないため、CloudFront が付与する
+# このトークンが一致したときだけ frontend が段数を信用する。
+# bff_internal_token とは別値にする（CloudFront 設定側に置く値なので、漏れても
+# backend の X-Client-IP 採用権限までは渡らないようにする）。
+resource "random_password" "cloudfront_origin_token" {
+  length  = 48
+  special = false
+}
+
 resource "aws_secretsmanager_secret" "bff_internal" {
   name = "${var.project_name}/bff-internal"
   tags = local.tags
@@ -577,7 +589,8 @@ resource "aws_secretsmanager_secret" "bff_internal" {
 resource "aws_secretsmanager_secret_version" "bff_internal" {
   secret_id = aws_secretsmanager_secret.bff_internal.id
   secret_string = jsonencode({
-    bff_internal_token = random_password.bff_internal_token.result
+    bff_internal_token      = random_password.bff_internal_token.result
+    cloudfront_origin_token = random_password.cloudfront_origin_token.result
   })
 }
 
@@ -706,12 +719,22 @@ module "frontend" {
   # Route Handler から backend を呼ぶときに実クライアントIPを添えるための共有トークン(#1407)。
   # backend 側と同じ値でないと X-Client-IP は無視される。
   secret_arns = [aws_secretsmanager_secret.bff_internal.arn]
-  secrets = [
-    {
-      name      = "BFF_INTERNAL_TOKEN"
-      valueFrom = "${aws_secretsmanager_secret.bff_internal.arn}:bff_internal_token::"
-    }
-  ]
+  secrets = concat(
+    [
+      {
+        name      = "BFF_INTERNAL_TOKEN"
+        valueFrom = "${aws_secretsmanager_secret.bff_internal.arn}:bff_internal_token::"
+      }
+    ],
+    # CloudFront 経由であることの証明。これを設定した環境では、一致しない
+    # リクエスト(=ALB直叩き)の X-Forwarded-For を実IPとして採用しない(#1407)。
+    var.enable_error_fallback ? [
+      {
+        name      = "CLOUDFRONT_ORIGIN_TOKEN"
+        valueFrom = "${aws_secretsmanager_secret.bff_internal.arn}:cloudfront_origin_token::"
+      }
+    ] : []
+  )
   tags = local.tags
 }
 
@@ -936,6 +959,7 @@ module "cloudfront_app_proxy" {
   aliases                   = [local.frontend_domain, "*.${var.domain_name}"]
   route53_zone_id           = data.aws_route53_zone.selected.zone_id
   alb_dns_name              = module.alb.alb_dns_name
+  origin_token              = random_password.cloudfront_origin_token.result
   service_unavailable_html  = file("${path.module}/../../../static/service-unavailable.html")
   tags                      = local.tags
 }

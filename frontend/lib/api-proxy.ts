@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { parseProxyResponse, type ParsedProxyResponse, type ProxyResponseData } from '@/lib/proxy-response'
 import { looksLikeHtml, userFacingApiMessage } from '@/lib/user-facing-error'
@@ -52,28 +53,57 @@ export function clientIpHeaders(request: NextRequest): Record<string, string> {
 
   const forwardedFor = request.headers.get('x-forwarded-for') ?? ''
   if (!forwardedFor.trim()) return {}
-  const hops = forwardedFor.split(',')
-  // 末尾から数えて trustedProxyHops() 番目が実クライアントIP。
+  const hops = trustedProxyHops(request)
+  if (hops < 1) return {}
+  const parts = forwardedFor.split(',')
+  // 末尾から数えて hops 番目が実クライアントIP。
   // 範囲外（想定より手前で止まっている＝経路が想定と違う）なら推測せず転送しない。
-  const clientIp = hops[hops.length - trustedProxyHops()]?.trim() ?? ''
+  const clientIp = parts[parts.length - hops]?.trim() ?? ''
   if (!clientIp) return {}
   return { 'X-Client-IP': clientIp, 'X-Internal-Token': token }
 }
 
+/** CloudFront がオリジンリクエストへ必ず付け直す、経路証明用のヘッダー名。 */
+const originTokenHeader = 'x-origin-token'
+
+function tokenMatches(provided: string, expected: string): boolean {
+  const a = Buffer.from(provided)
+  const b = Buffer.from(expected)
+  // timingSafeEqual は長さが違うと例外になるので、先に長さで弾く（長さ自体は秘密ではない）
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
 /**
- * frontend の手前にいる信頼できるプロキシの段数。
+ * frontend の手前にいる「必ず通る」プロキシの段数。信用できないときは 0（=転送しない）。
  *
  * ALB・CloudFront・nginx はいずれも XFF の末尾へ「直前の送信元」を追記するため、
  * 実クライアントIPの位置は段数で決まる。
  * - ALB のみ: 1（既定）
- * - CloudFront + ALB: 2
- * - CloudFront + ALB + edge nginx（staging）: 3
+ * - ALB + edge nginx（staging。nginx へは ALB の SG からしか届かない）: 2
+ * - CloudFront + ALB（本番）: 2
+ *
+ * ただし「段数が合っている」だけでは足りない。本番の ALB は 0.0.0.0/0 に開いており、
+ * CloudFront を通さず ALB へ直接 `X-Forwarded-For: <詐称IP>` を投げれば、ALB が実IPを
+ * 末尾へ足して要素数2の XFF がそのまま出来上がる。段数だけを見ると詐称した先頭を
+ * 実IPとして内部トークン付きで Backend へ署名してしまい、IP単位の制限を任意に分散できる。
+ * そこで CloudFront がオリジンへ付与する共有シークレット(`CLOUDFRONT_ORIGIN_TOKEN`)で
+ * 「本当に CloudFront を通ったか」を確かめてから段数を信用する。
+ * CloudFront のカスタムオリジンヘッダーはビューアーが同名ヘッダーを送っても必ず上書き
+ * されるため、ビューアー側から詐称できない。
+ *
+ * `CLOUDFRONT_ORIGIN_TOKEN` 未設定の環境（staging / ローカル）は、手前の段が
+ * SG で経路を強制されている前提なので段数をそのまま使う。
  *
  * 多く見積もると詐称値を拾いうるので、不正値は既定の1へ倒す。
  */
-function trustedProxyHops(): number {
-  const hops = Number(process.env.TRUSTED_PROXY_HOPS)
-  return Number.isInteger(hops) && hops >= 1 ? hops : 1
+function trustedProxyHops(request: NextRequest): number {
+  const configured = Number(process.env.TRUSTED_PROXY_HOPS)
+  const hops = Number.isInteger(configured) && configured >= 1 ? configured : 1
+
+  const expected = process.env.CLOUDFRONT_ORIGIN_TOKEN?.trim()
+  if (!expected) return hops
+  const provided = request.headers.get(originTokenHeader)?.trim() ?? ''
+  return tokenMatches(provided, expected) ? hops : 0
 }
 
 export function extractUserAuthHeaders(request: NextRequest): Record<string, string> {

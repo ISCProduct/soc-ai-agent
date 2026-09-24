@@ -17,19 +17,23 @@ function requestWith(headers: Record<string, string>): NextRequest {
 }
 
 describe('clientIpHeaders', () => {
-  const originalToken = process.env.BFF_INTERNAL_TOKEN
-  const originalHops = process.env.TRUSTED_PROXY_HOPS
+  const originalEnv = {
+    BFF_INTERNAL_TOKEN: process.env.BFF_INTERNAL_TOKEN,
+    TRUSTED_PROXY_HOPS: process.env.TRUSTED_PROXY_HOPS,
+    CLOUDFRONT_ORIGIN_TOKEN: process.env.CLOUDFRONT_ORIGIN_TOKEN,
+  }
+
+  function setEnv(name: keyof typeof originalEnv, value: string | undefined): void {
+    if (value === undefined) {
+      delete process.env[name]
+    } else {
+      process.env[name] = value
+    }
+  }
 
   afterEach(() => {
-    if (originalToken === undefined) {
-      delete process.env.BFF_INTERNAL_TOKEN
-    } else {
-      process.env.BFF_INTERNAL_TOKEN = originalToken
-    }
-    if (originalHops === undefined) {
-      delete process.env.TRUSTED_PROXY_HOPS
-    } else {
-      process.env.TRUSTED_PROXY_HOPS = originalHops
+    for (const [name, value] of Object.entries(originalEnv)) {
+      setEnv(name as keyof typeof originalEnv, value)
     }
   })
 
@@ -37,6 +41,7 @@ describe('clientIpHeaders', () => {
     name: string
     token: string | undefined
     hops?: string
+    originToken?: string
     headers: Record<string, string>
     expected: Record<string, string>
   }[] = [
@@ -90,10 +95,57 @@ describe('clientIpHeaders', () => {
       expected: { 'X-Client-IP': '198.51.100.7', 'X-Internal-Token': 'secret-token' },
     },
     {
-      name: 'CloudFront+ALB+nginx(3段)なら末尾から3番目を採る',
+      name: 'ALB+nginx(2段, staging)なら末尾から2番目を採る',
       token: 'secret-token',
-      hops: '3',
-      headers: { 'x-forwarded-for': '1.1.1.1, 198.51.100.7, 203.0.113.10, 10.0.0.9' },
+      hops: '2',
+      headers: { 'x-forwarded-for': '1.1.1.1, 198.51.100.7, 10.0.0.9' },
+      expected: { 'X-Client-IP': '198.51.100.7', 'X-Internal-Token': 'secret-token' },
+    },
+    // --- CloudFront を迂回する経路(ALB直叩き)で詐称XFFを署名しないこと ---
+    {
+      name: 'CLOUDFRONT_ORIGIN_TOKEN設定時、X-Origin-Tokenが無ければ段数を信用せず転送しない',
+      token: 'secret-token',
+      hops: '2',
+      originToken: 'cf-secret',
+      // ALB直叩き: 攻撃者の詐称値 + ALBが足した実IP の2要素になり、CloudFront経由と区別が付かない
+      headers: { 'x-forwarded-for': '198.51.100.1, 203.0.113.50' },
+      expected: {},
+    },
+    {
+      name: 'X-Origin-Tokenが不一致なら転送しない',
+      token: 'secret-token',
+      hops: '2',
+      originToken: 'cf-secret',
+      headers: {
+        'x-forwarded-for': '198.51.100.1, 203.0.113.50',
+        'x-origin-token': 'attacker-guess',
+      },
+      expected: {},
+    },
+    {
+      name: 'X-Origin-Tokenが長さ違いでも転送しない(timingSafeEqualが例外にならない)',
+      token: 'secret-token',
+      hops: '2',
+      originToken: 'cf-secret',
+      headers: { 'x-forwarded-for': '198.51.100.1, 203.0.113.50', 'x-origin-token': 'x' },
+      expected: {},
+    },
+    {
+      name: 'X-Origin-Tokenが一致すれば段数どおりに採る(CloudFront経由の正規経路)',
+      token: 'secret-token',
+      hops: '2',
+      originToken: 'cf-secret',
+      headers: {
+        'x-forwarded-for': '198.51.100.7, 203.0.113.50',
+        'x-origin-token': 'cf-secret',
+      },
+      expected: { 'X-Client-IP': '198.51.100.7', 'X-Internal-Token': 'secret-token' },
+    },
+    {
+      name: 'CLOUDFRONT_ORIGIN_TOKEN未設定なら X-Origin-Token を要求しない(staging/ローカル)',
+      token: 'secret-token',
+      hops: '2',
+      headers: { 'x-forwarded-for': '198.51.100.7, 10.0.0.9' },
       expected: { 'X-Client-IP': '198.51.100.7', 'X-Internal-Token': 'secret-token' },
     },
     {
@@ -119,17 +171,10 @@ describe('clientIpHeaders', () => {
     },
   ]
 
-  it.each(cases)('$name', ({ token, hops, headers, expected }) => {
-    if (token === undefined) {
-      delete process.env.BFF_INTERNAL_TOKEN
-    } else {
-      process.env.BFF_INTERNAL_TOKEN = token
-    }
-    if (hops === undefined) {
-      delete process.env.TRUSTED_PROXY_HOPS
-    } else {
-      process.env.TRUSTED_PROXY_HOPS = hops
-    }
+  it.each(cases)('$name', ({ token, hops, originToken, headers, expected }) => {
+    setEnv('BFF_INTERNAL_TOKEN', token)
+    setEnv('TRUSTED_PROXY_HOPS', hops)
+    setEnv('CLOUDFRONT_ORIGIN_TOKEN', originToken)
     expect(clientIpHeaders(requestWith(headers))).toEqual(expected)
   })
 

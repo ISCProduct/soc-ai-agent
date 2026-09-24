@@ -503,22 +503,57 @@ backend の ALB はインターネットに直結しているため、`X-Client-
 | 区間 | ヘッダー | 採用条件 |
 | --- | --- | --- |
 | ブラウザ -> CloudFront/ALB/nginx -> Next.js | `X-Forwarded-For` | 各プロキシが末尾へ直前の送信元を追記する。クライアント指定値は先頭に残る |
+| CloudFront -> ALB -> Next.js | `X-Origin-Token` | CloudFront のカスタムオリジンヘッダー。ビューアーが同名ヘッダーを送っても CloudFront が上書きするので詐称できない |
 | Next.js -> Backend | `X-Client-IP` + `X-Internal-Token` | `lib/api-proxy.ts` の `clientIpHeaders` が、XFF の末尾から `TRUSTED_PROXY_HOPS` 番目の要素だけを載せる。クライアントが送ってきた `X-Client-IP` は読まない |
 | Backend | - | `middleware.GetClientIP` が `BFF_INTERNAL_TOKEN` と定数時間比較し、一致かつIPとして妥当なときだけ採用。それ以外は従来どおり ALB が付けた XFF 末尾へフォールバック |
 
 トークン未設定なら BFF は何も送らず、Backend も何も見ない（従来の挙動のまま）。
 シークレット未配布でサイトが落ちないようにするための無効化であって、素通しではない。
 
+#### CloudFront を迂回する経路を数えない
+
+本番の ALB は `0.0.0.0/0` に開いており、`api.shukatsu-ai.jp` から得た同じ ALB の IP へ
+frontend の Host/SNI で直接接続できる。この迂回経路で
+`X-Forwarded-For: <詐称IP>` を送ると、ALB が実IPを末尾へ足して**要素数2の XFF**が
+出来上がり、CloudFront 経由の正規リクエストと段数では区別が付かない。
+段数だけで信用すると、詐称した先頭を BFF が内部トークン付きで署名して Backend へ渡し、
+IP単位の制限を任意のIPごとに分散できてしまう。
+
+そのため `CLOUDFRONT_ORIGIN_TOKEN` を設定した環境では、CloudFront が付けた
+`X-Origin-Token` が一致したときだけ段数を信用する。一致しない（＝ALB 直叩き）場合は
+何も転送せず、Backend は BFF の出口IPへフォールバックする。
+
 ### 環境変数
 
 | 変数 | 置き場所 | 値 |
 | --- | --- | --- |
-| `BFF_INTERNAL_TOKEN` | frontend タスクと backend タスクの両方 | 同じランダム文字列。prod は Secrets Manager `soc-app/bff-internal`、staging は EC2 の共有 `.env`（いずれも Terraform の `random_password` が生成） |
-| `TRUSTED_PROXY_HOPS` | frontend タスクのみ | frontend の手前にいる信頼できるプロキシの段数。ALB のみ=1（既定）、CloudFront+ALB=2、CloudFront+ALB+edge nginx=3 |
+| `BFF_INTERNAL_TOKEN` | frontend タスクと backend タスクの両方 | 同じランダム文字列。prod は Secrets Manager `soc-app/bff-internal` の `bff_internal_token`、staging は EC2 の共有 `.env`（いずれも Terraform の `random_password` が生成） |
+| `TRUSTED_PROXY_HOPS` | frontend タスクのみ | frontend の手前にいる**必ず通る**プロキシの段数。prod(CloudFront+ALB)=2、prod で `enable_error_fallback=false`(ALBのみ)=1、staging(ALB+edge nginx)=2、ローカル=未設定(1) |
+| `CLOUDFRONT_ORIGIN_TOKEN` | frontend タスクのみ | CloudFront が `X-Origin-Token` として付ける値。Secrets Manager `soc-app/bff-internal` の `cloudfront_origin_token`。CloudFront を迂回できる環境（prod）でのみ設定する |
 
 `TRUSTED_PROXY_HOPS` は経路を1段でも増減させたら必ず合わせる。多く見積もると
 クライアントが先頭に詰めた詐称値を拾いうるため、迷ったら小さい値（＝より末尾側）にする。
 値が XFF の要素数を超えた場合は推測せず転送しない。
+
+数えてよいのは**成功経路に必ず存在し、かつ迂回できない段**だけ。
+staging の CloudFront は Route53 SECONDARY の S3 エラーページ専用（失敗時のみ）なので
+段数に数えず、常に 2（ALB + edge nginx。nginx へは ALB の SG からしか届かない）。
+prod の CloudFront は迂回できるので、段数に数える代わりに
+`CLOUDFRONT_ORIGIN_TOKEN` で経路を認証する。
+
+### 本番タスク定義へ反映する
+
+`environment` / `secrets` は ECS タスク定義の `container_definitions` の中にある。
+`terraform apply` で新リビジョンは登録されるが、`aws_ecs_service` は `task_definition` を
+`ignore_changes` しているため**稼働中のタスクは入れ替わらない**。反映するには apply 後に
+デプロイを1回走らせる（`deployment.yml` は最新リビジョンを取得して image だけ差し替えるので、
+terraform が入れた環境変数はそのまま引き継がれる）。frontend/backend に差分が無い場合は
+手動で強制デプロイする。
+
+```sh
+aws ecs update-service --cluster soc-app --service frontend \
+  --task-definition soc-app-frontend --force-new-deployment
+```
 
 ### 効いているか確認する
 
