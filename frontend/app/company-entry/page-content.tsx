@@ -201,7 +201,9 @@ export default function PageContent() {
     return (
       <Box sx={{ p: 4, maxWidth: 700, mx: 'auto', textAlign: 'center' }}>
         <Alert severity="success" sx={{ mb: 3 }}>
-          <Typography variant="h6" gutterBottom>
+          {/* 送信後はこの早期returnに入りフォーム側の h1 が描画されないため、
+              完了見出しを h1 にしてページ見出しを残す（#1479） */}
+          <Typography variant="h6" component="h1" gutterBottom>
             送信が完了しました
           </Typography>
           <Typography sx={{ mb: 1 }}>
