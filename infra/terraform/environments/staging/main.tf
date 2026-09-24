@@ -240,6 +240,14 @@ resource "aws_iam_role_policy" "app" {
         ]
       },
       {
+        # デプロイ手順(deployment.yml)が稼働中インスタンスの /opt/app/.env を
+        # 全台同じ BFF_INTERNAL_TOKEN へ更新するために読む(#1407)。
+        Sid      = "BffInternalTokenSsmRead"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = [aws_ssm_parameter.bff_internal_token.arn]
+      },
+      {
         # コンテナログを CloudWatch Logs へ転送する(awslogsログドライバ)。
         # 権限が無いとログ転送だけでなくコンテナ起動自体が失敗するため、
         # ロググループを作る aws_cloudwatch_log_group.app より後に評価されるよう
@@ -282,6 +290,28 @@ resource "random_id" "token_encryption_key" {
 resource "random_password" "bff_internal_token" {
   length  = 48
   special = false
+}
+
+# 上のトークンは staging 全インスタンスで同一でなければならない(#1407)。
+# frontend は BACKEND_URL=https://<backend_domain> 経由、つまり ALB 配下の任意の
+# インスタンスの backend を叩く。負荷試験で ASG が最大3台まで増えると、
+# インスタンス毎にトークンを生成した場合は frontend と backend の組み合わせ次第で
+# 検証に失敗し、X-Client-IP が捨てられて全利用者が frontend の出口IP1つへ再集約される。
+#
+# user_data(新規インスタンス)は下の launch template から直接この値を受け取り、
+# 稼働中インスタンスは deployment.yml が SSM からこの値を読んで .env を更新する。
+# どちらも出どころが random_password.bff_internal_token 1つなので必ず一致する。
+# 型は String。この同じ値が下の launch template の user_data に平文で載っており
+# (db_password や oauth_state_secret など既存の秘密も同様)、
+# ec2:DescribeLaunchTemplateVersions で読めるため、SecureString を足しても
+# 実際の境界は IAM のまま変わらない。読み出しはこのパラメータ1本へ限定する。
+resource "aws_ssm_parameter" "bff_internal_token" {
+  name        = "/${var.project_name}/bff-internal-token"
+  description = "BFF(frontend) -> backend の X-Client-IP 検証用共有トークン(#1407)"
+  type        = "String"
+  value       = random_password.bff_internal_token.result
+
+  tags = local.tags
 }
 
 data "aws_ami" "app" {

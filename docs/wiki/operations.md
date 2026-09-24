@@ -623,15 +623,33 @@ staging は EC2 上の docker compose で、`.env` を書くのは launch templa
 変化しない**ため instance refresh は起きない。つまり apply しても稼働中のインスタンスは
 古い `.env` のままになる。
 
-そのため `deployment.yml` のデプロイ手順で、`.env` に `BFF_INTERNAL_TOKEN` /
-`TRUSTED_PROXY_HOPS` が無ければ追記している（frontend/backend が同じ `.env` を読むので、
-トークンはインスタンス内で生成した値で足りる）。**デプロイを1回流せば反映される**。
+そのため `deployment.yml` のデプロイ手順で `.env` を更新している。
+**デプロイを1回流せば反映される**。
 
-デプロイを待たずに確認・反映するなら:
+`BFF_INTERNAL_TOKEN` は **staging 全インスタンスで同じ値でなければならない**。
+frontend は `BACKEND_URL=https://<backend_domain>`、つまり ALB 配下の任意のインスタンスの
+backend を叩くため、インスタンス毎に生成した値だと組み合わせ次第で検証に失敗し、
+`X-Client-IP` が捨てられて全利用者が frontend の出口IP1つへ再集約される
+（負荷試験で ASG が最大3台まで増えると顕在化する）。
+
+配り方は1系統に揃えてある:
+
+| 対象 | 経路 |
+| --- | --- |
+| 新規インスタンス | launch template の user_data が `random_password.bff_internal_token` を直接書く |
+| 稼働中インスタンス | `deployment.yml` が SSM `/<project>/bff-internal-token` を読んで `.env` を上書き |
+
+SSM パラメータの中身は `random_password.bff_internal_token` と同じ値なので、
+どちらの経路でも必ず一致する。SSM を読めなかった場合はデプロイログに `WARN` を出し、
+`.env` は変更しない（user_data が書いた正しい値を消さないため）。
+
+デプロイを待たずに確認するなら:
 
 ```sh
-ssh ubuntu@<staging-ip> "sudo grep -c '^BFF_INTERNAL_TOKEN=' /opt/app/.env"
-# 0 なら次のデプロイで追記される。即時に効かせるなら追記して docker compose up -d
+# terraform 側の正解
+aws ssm get-parameter --name /soc-stg/bff-internal-token --query Parameter.Value --output text
+# 各インスタンスの実値（全台で上と一致していること）
+ssh ubuntu@<staging-ip> "sudo grep '^BFF_INTERNAL_TOKEN=' /opt/app/.env"
 ```
 
 ### 効いているか確認する

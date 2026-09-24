@@ -276,9 +276,22 @@ jobs:
               # 走らず、ASG は version=$Latest なので LT を更新しても既存インスタンスは
               # 置換されない。無ければここで足さないと、稼働中のstagingは転送が無効のまま
               # 全利用者が同じ出口IPでレート制限される。
-              # frontend/backend が同じ .env を読むので、トークンはこの場で生成した値でよい。
-              if [ -f .env ] && ! grep -q ^BFF_INTERNAL_TOKEN= .env; then
-                echo BFF_INTERNAL_TOKEN=$(openssl rand -hex 32) >> .env
+              #
+              # トークンはこの場で生成してはいけない。frontend は ALB 配下の任意の
+              # インスタンスの backend を叩くため、インスタンス毎に違う値になると
+              # 検証に失敗して X-Client-IP が捨てられる（負荷試験でASGが3台まで増えると顕在化）。
+              # terraform が作った SSM パラメータ(= user_data が新規インスタンスへ配るのと
+              # 同じ値)を読み、既存の値があっても上書きして全台を揃える。
+              BFF_TOKEN=$(aws ssm get-parameter --region ${{ env.AWS_REGION }} --name /${{ env.PROJECT_NAME }}/bff-internal-token --query Parameter.Value --output text 2>/dev/null || true)
+              if [ -n "$BFF_TOKEN" ] && [ "$BFF_TOKEN" != None ]; then
+                if [ -f .env ]; then
+                  sed -i /^BFF_INTERNAL_TOKEN=/d .env
+                  echo BFF_INTERNAL_TOKEN=$BFF_TOKEN >> .env
+                fi
+              else
+                # 新規インスタンスは user_data が同じ値を既に書いているので .env は触らない。
+                # 黙って進むと不一致に気付けないため、理由をログへ残す。
+                echo "WARN: SSM /${{ env.PROJECT_NAME }}/bff-internal-token を読めませんでした（terraform apply 未実施の可能性）。.env は変更しません" >&2
               fi
               # staging は常に ALB -> edge nginx -> frontend の2段(terraform と同値)
               if [ -f .env ] && ! grep -q ^TRUSTED_PROXY_HOPS= .env; then
