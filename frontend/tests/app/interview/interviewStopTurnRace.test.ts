@@ -18,12 +18,8 @@ import { act, renderHook } from '@testing-library/react'
 
 Object.assign(globalThis, { TextEncoder, TextDecoder })
 
-jest.mock('@/lib/auth', () => ({
-  authService: {
-    ensureFreshUserToken: jest.fn().mockResolvedValue(undefined),
-    getUserFetchHeaders: () => ({}),
-  },
-}))
+// authService は本物を使う。トークン更新(/api/auth/session)も面接ターンの一部なので、
+// ここをモックで即解決にすると、更新が半開きで固まるケースを再現できない（#1501）。
 
 import { useInterviewSession, REPORT_RETRY_FAILED_MESSAGE } from '@/app/interview/hooks/useInterviewSession'
 import type { InterviewMedia } from '@/app/interview/hooks/useInterviewMedia'
@@ -96,6 +92,16 @@ class FakeMediaRecorder {
   }
 }
 
+/** exp だけ持つ JWT 風のトークン。authService は署名を見ず exp だけ読む */
+const tokenExpiringIn = (seconds: number): string =>
+  `header.${btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + seconds }))}.sig`
+
+/** 保存済みトークンを差し替える。期限が近いと authService は /api/auth/session を叩く */
+const storeUserToken = (token: string) => {
+  window.sessionStorage.setItem('user_token', token)
+  window.localStorage.setItem('user_token', token)
+}
+
 const user: User = { user_id: 7, email: 'a@example.com' } as User
 const interviewCompany = { id: 1, name: 'テスト株式会社' } as InterviewCompany
 const selectedPosition = { title: '総合職', category: 'general', questions: 3 } as Position
@@ -126,10 +132,12 @@ const flush = () => act(async () => { await new Promise(resolve => setTimeout(re
  * 実際のブラウザは fetch に渡した signal を abort すると本文の読み込みも中断するので、
  * その挙動だけを再現する。中断されなければ永久に解決しない。
  */
+const neverResolves = <T,>(signal?: AbortSignal | null): Promise<T> => new Promise<T>((_, reject) => {
+  signal?.addEventListener('abort', () => reject(new Error('AbortError: The operation was aborted')))
+})
+
 const hangingBodyResponse = (signal?: AbortSignal | null): FakeResponse => {
-  const never = <T,>(): Promise<T> => new Promise<T>((_, reject) => {
-    signal?.addEventListener('abort', () => reject(new Error('AbortError: The operation was aborted')))
-  })
+  const never = <T,>(): Promise<T> => neverResolves<T>(signal)
   return {
     ok: true,
     status: 200,
@@ -149,6 +157,8 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
   let releaseStartTurn: ((res: FakeResponse) => void) | null
   /** true の間は /turn がヘッダーだけ返して本文で固まる */
   let hangTurnBody: boolean
+  /** true の間は /api/auth/session が応答せず固まる（middleware のトークン更新が半開き） */
+  let hangAuthSession: boolean
 
   beforeEach(() => {
     calls = []
@@ -156,6 +166,9 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
     holdStartTurn = false
     releaseStartTurn = null
     hangTurnBody = false
+    hangAuthSession = false
+    // 面接中は有効なトークンが入っている状態から始める
+    storeUserToken(tokenExpiringIn(3600))
     pendingRecorderStops.length = 0
     Object.assign(globalThis, {
       MediaRecorder: FakeMediaRecorder,
@@ -172,6 +185,10 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
     global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       calls.push(url)
+      if (url.includes('/api/auth/session')) {
+        if (hangAuthSession) return neverResolves<FakeResponse>(init?.signal)
+        return jsonResponse({ user_token: tokenExpiringIn(3600) })
+      }
       if (url.includes('/start-turn')) {
         if (!holdStartTurn) return turnResponse({ ai_text: '自己紹介をお願いします' })
         return new Promise<FakeResponse>(resolve => { releaseStartTurn = resolve })
@@ -189,6 +206,8 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
 
   afterEach(() => {
     global.fetch = originalFetch
+    window.sessionStorage.clear()
+    window.localStorage.clear()
     jest.restoreAllMocks()
   })
 
@@ -366,6 +385,61 @@ describe('完了する と応答待ちターンの競合 (#1476)', () => {
 
       expect(stopped).toBe(true)
       expect(calls.some(u => u.includes('/finish'))).toBe(true)
+
+      unmount()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  /**
+   * ターンは本体の通信を投げる前にトークン更新(/api/auth/session)を待つ（#1501）。
+   * この更新に上限が無いと、middleware 側の更新通信が半開きになったとき
+   * ターンのタイムアウト（90秒）はそもそも張られず、応答待ちのターンは永久に残る。
+   * 画面だけ「レポートを生成中」へ進み、finishSession もポーリングも始まらない。
+   */
+  it('トークン更新が返らないターンがあっても、上限を超えたら終了処理へ進む', async () => {
+    const advance = (ms: number) => act(async () => { await jest.advanceTimersByTimeAsync(ms) })
+    try {
+      const media = fakeMedia()
+      const { result, unmount } = renderSession(media)
+
+      await act(async () => { await result.current.handleJoin() })
+
+      // 最終ターンの直前に有効期限が近づいた状態。ここから更新が半開きで固まる
+      storeUserToken(tokenExpiringIn(10))
+      hangAuthSession = true
+
+      act(() => { result.current.startRecording() })
+      act(() => { result.current.stopRecording() })
+      jest.useFakeTimers({
+        doNotFake: ['nextTick', 'queueMicrotask', 'setImmediate', 'performance', 'Date', 'requestAnimationFrame', 'cancelAnimationFrame'],
+      })
+      act(() => { deliverRecorderStops() })
+      await advance(0)
+      // トークン更新で止まっているので、ターン本体はまだ投げられていない
+      expect(calls.some(u => u.includes('/api/auth/session'))).toBe(true)
+      expect(calls.some(u => u.endsWith('/turn'))).toBe(false)
+
+      let stopped = false
+      let stopping: Promise<void> = Promise.resolve()
+      await act(async () => {
+        stopping = result.current.handleStop().then(() => { stopped = true })
+        await jest.advanceTimersByTimeAsync(0)
+      })
+      expect(stopped).toBe(false)
+      expect(calls.some(u => u.includes('/finish'))).toBe(false)
+
+      // 掴んだままの更新は返らないが、以降の通信は復帰した状態
+      hangAuthSession = false
+      // トークン更新の上限（15秒）まで進める。ターンの90秒より手前で打ち切れること
+      await advance(15_000)
+      await act(async () => { await stopping })
+
+      expect(stopped).toBe(true)
+      expect(calls.some(u => u.includes('/finish'))).toBe(true)
+      // 失敗はユーザーに見せる（黙って「生成中」のままにしない）
+      expect(result.current.errorMessage).toContain('タイムアウト')
 
       unmount()
     } finally {

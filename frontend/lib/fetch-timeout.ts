@@ -2,6 +2,18 @@
 
 export const LIST_FETCH_TIMEOUT_MS = 15_000
 
+/**
+ * トークン更新(/api/auth/session)のタイムアウト(#1501)。
+ *
+ * Backend 直叩きの処理（面接のターンなど）は、本体のリクエストを投げる前に
+ * authService.ensureFreshUserToken() を待つ。ここが無期限だと、middleware 側の
+ * 更新通信が半開きになったときに本体のタイムアウト（面接ターンなら90秒）が
+ * そもそも張られず、呼び出し元は何秒待っても戻らない。
+ * 更新はCookieを見るだけの軽いGETなので一覧系と同じ15秒で足り、
+ * これで「トークン更新 + ターン本体」の合計も 15 + 90 = 105秒 で必ず戻る。
+ */
+export const AUTH_REFRESH_TIMEOUT_MS = 15_000
+
 export class FetchTimeoutError extends Error {
   constructor(message = '通信がタイムアウトしました。再試行してください。') {
     super(message)

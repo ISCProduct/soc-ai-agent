@@ -33,6 +33,10 @@ export const REPORT_RETRY_FAILED_MESSAGE =
  * 終了時に「応答待ちのターン」を待つ処理（handleStop）も戻らなくなる。
  * ヘッダー受信後に本文（multipart の音声）で止まる場合も同じなので、
  * fetchWithTimeout ではなく本文の読み込みまで見る fetchAndReadWithTimeout を使う。
+ *
+ * ターンはこの通信の前に authService.ensureFreshUserToken() を待つ。そちらにも
+ * AUTH_REFRESH_TIMEOUT_MS（15秒）が掛かっているので、ターン1回の上限は
+ * 15 + 90 = 105秒。どこで固まっても有限時間で戻る（#1501）。
  */
 const TURN_FETCH_TIMEOUT_MS = 90_000
 
