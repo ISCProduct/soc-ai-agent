@@ -3,6 +3,7 @@ package resume
 import (
 	"Backend/domain/repository"
 	"Backend/internal/models"
+	"Backend/internal/netsafe"
 	"Backend/internal/openai"
 	"Backend/internal/services/company"
 	"Backend/internal/services/flywheel"
@@ -62,13 +63,13 @@ func validateFileUpload(fileHeader *multipart.FileHeader) error {
 	return &shared.ValidationError{Message: "PDF または Word（.doc/.docx）のみアップロードできます"}
 }
 
-// lookupIP はホスト名からIPアドレスを解決する。テストでモック可能にするため変数にしている。
-var lookupIP = net.LookupIP
+// lookupIP / isInternalIP は netsafe の共通実装へ寄せた(#1408)。
+// 同じ判定が2箇所にあると、片方だけ直したときに気付けない。
+// テストからの差し替えは netsafe.LookupIP を使う。
+// テストから差し替えるため var のまま残す。既定は共通実装。
+var lookupIP = netsafe.LookupIP
 
-// isInternalIP はループバック/プライベート/リンクローカル/未指定アドレスのいずれかを判定する（SSRF対策）
-func isInternalIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
-}
+func isInternalIP(ip net.IP) bool { return netsafe.IsInternalIP(ip) }
 
 // validateURL はSSRF対策のためURLスキームとIPアドレス範囲を検証する。
 // ホスト名がIPリテラルでない場合は名前解決を行い、解決された全IPを検証する
