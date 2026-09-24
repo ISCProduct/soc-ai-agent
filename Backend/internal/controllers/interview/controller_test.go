@@ -463,7 +463,7 @@ func TestInterviewController_AddUtterance_Unauthorized(t *testing.T) {
 }
 
 func TestInterviewController_AddUtterance_Success(t *testing.T) {
-	body, _ := json.Marshal(map[string]string{"role": "user", "text": "自己紹介をします"})
+	body, _ := json.Marshal(map[string]string{"role": "user", "text": "自己紹介をします", "client_utterance_id": "utt-1"})
 	req := httptest.NewRequest(http.MethodPost, "/api/interviews/3/utterances", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req = testsupport.WithUserID(req, 1)
@@ -473,7 +473,8 @@ func TestInterviewController_AddUtterance_Success(t *testing.T) {
 	c.SetParamValues("3")
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("SaveUtterance", uint(1), uint(3), "user", "自己紹介をします").Return(nil)
+	// 冪等キーがサービスまで届くこと。ここが落ちると再試行で同じ発話が二重保存される(#1476)
+	svc.On("SaveUtterance", uint(1), uint(3), "user", "自己紹介をします", "utt-1").Return(nil)
 	testsupport.AssertStatus(t, newInterviewController(svc).AddUtterance, c, http.StatusNoContent)
 	svc.AssertExpectations(t)
 }
@@ -489,7 +490,7 @@ func TestInterviewController_AddUtterance_Forbidden(t *testing.T) {
 	c.SetParamValues("3")
 
 	svc := &mocks.InterviewServiceMock{}
-	svc.On("SaveUtterance", uint(1), uint(3), "user", "hello").Return(shared.ErrForbidden)
+	svc.On("SaveUtterance", uint(1), uint(3), "user", "hello", "").Return(shared.ErrForbidden)
 	testsupport.AssertStatus(t, newInterviewController(svc).AddUtterance, c, http.StatusForbidden)
 }
 
@@ -624,4 +625,50 @@ func TestInterviewController_UploadVideo_OwnershipCheckError(t *testing.T) {
 	testsupport.AssertStatus(t, ctrl.UploadVideo, c, http.StatusInternalServerError)
 	svc.AssertExpectations(t)
 	videoRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+}
+
+// ---- RegenerateReport ----
+
+// TestInterviewController_RegenerateReport は #1476 のレビュー指摘
+// 「未生成レポートを実際に再生成できる経路」のHTTP側の回帰テスト。
+// 生成ジョブが失われた後、フロントの再試行ボタンから通る経路はここだけ。
+func TestInterviewController_RegenerateReport(t *testing.T) {
+	tests := []struct {
+		name       string
+		withUser   bool
+		sessionID  string
+		queued     bool
+		svcErr     error
+		wantStatus int
+		wantCall   bool
+	}{
+		{name: "未生成なら202でキュー投入", withUser: true, sessionID: "3", queued: true, wantStatus: http.StatusAccepted, wantCall: true},
+		{name: "生成済みでも202（サーバー側で二重投入しない）", withUser: true, sessionID: "3", queued: false, wantStatus: http.StatusAccepted, wantCall: true},
+		{name: "未認証は401", withUser: false, sessionID: "3", wantStatus: http.StatusUnauthorized},
+		{name: "他人のセッションは403", withUser: true, sessionID: "3", svcErr: shared.ErrForbidden, wantStatus: http.StatusForbidden, wantCall: true},
+		{name: "未終了セッションは400", withUser: true, sessionID: "3", svcErr: interview.ErrSessionNotFinished, wantStatus: http.StatusBadRequest, wantCall: true},
+		// キュー満杯でジョブを捨てたのに202を返すと、フロントは存在しないジョブを3分ポーリングする(#1476)
+		{name: "キューへ投入できなければ503", withUser: true, sessionID: "3", svcErr: interview.ErrReportQueueNotAvailable, wantStatus: http.StatusServiceUnavailable, wantCall: true},
+		{name: "IDが不正なら400", withUser: true, sessionID: "abc", wantStatus: http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/interviews/3/report/regenerate", nil)
+			if tt.withUser {
+				req = testsupport.WithUserID(req, 1)
+			}
+			rec := httptest.NewRecorder()
+			c := testsupport.NewCtx(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues(tt.sessionID)
+
+			svc := &mocks.InterviewServiceMock{}
+			if tt.wantCall {
+				svc.On("RegenerateReport", uint(1), uint(3)).Return(tt.queued, tt.svcErr)
+			}
+			testsupport.AssertStatus(t, newInterviewController(svc).RegenerateReport, c, tt.wantStatus)
+			svc.AssertExpectations(t)
+		})
+	}
 }

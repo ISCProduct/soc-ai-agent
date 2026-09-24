@@ -1,4 +1,5 @@
 import { BACKEND_URL } from '../backend-url'
+import { AUTH_REFRESH_TIMEOUT_MS, fetchAndReadWithTimeout } from '../fetch-timeout'
 import { extractTenantSlug } from '../tenant'
 import { clearChatSessionOnEnd } from '@/components/mui-chat/utils'
 
@@ -417,6 +418,11 @@ export const authService = {
    * httpOnly Cookie（+ middleware 自動リフレッシュ）から有効な user_token を取得し、
    * sessionStorage / localStorage へ同期する。
    * Backend 直叩き（面接など）はストレージの JWT を使うため、参加前に呼ぶ。
+   *
+   * 呼び出し元は「本体のリクエストの前」にこれを待つので、ここが無期限だと
+   * 本体側のタイムアウトが張られる前に止まり、何秒待っても戻らなくなる（#1501）。
+   * 面接では終了処理が応答待ちのターンを待つため、そのまま
+   * finishSession もレポートのポーリングも永久に始まらない。必ず上限を掛ける。
    */
   async ensureFreshUserToken(): Promise<void> {
     const current = this.getStoredUserToken()
@@ -424,15 +430,19 @@ export const authService = {
       return
     }
 
-    const res = await fetch('/api/auth/session', {
-      method: 'GET',
-      cache: 'no-store',
-      credentials: 'same-origin',
-    })
-    if (!res.ok) {
-      throw new Error('Unauthorized: ログインの有効期限が切れました。再ログインしてください。')
-    }
-    const data: { user_token?: string } = await res.json()
+    // 本文(JSON)の受信中に半開きで固まる場合も打ち切りたいので、
+    // ヘッダーまでしか見ない fetchWithTimeout ではなく読み込みまで見る方を使う。
+    const data = await fetchAndReadWithTimeout(
+      '/api/auth/session',
+      { method: 'GET', cache: 'no-store', credentials: 'same-origin' },
+      AUTH_REFRESH_TIMEOUT_MS,
+      async (res): Promise<{ user_token?: string }> => {
+        if (!res.ok) {
+          throw new Error('Unauthorized: ログインの有効期限が切れました。再ログインしてください。')
+        }
+        return res.json()
+      },
+    )
     if (!data.user_token) {
       throw new Error('Unauthorized: ログインの有効期限が切れました。再ログインしてください。')
     }
