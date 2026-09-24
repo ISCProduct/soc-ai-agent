@@ -87,7 +87,7 @@ function RegisterConfirmForm() {
     >
       <Card sx={{ maxWidth: 450, width: '100%' }}>
         <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
-          <Typography variant="h5" align="center" gutterBottom fontWeight="bold">
+          <Typography variant="h5" component="h1" align="center" gutterBottom fontWeight="bold">
             会員登録の完了
           </Typography>
 
@@ -126,6 +126,7 @@ function RegisterConfirmForm() {
                   onChange={(e) => setPassword(e.target.value)}
                   onBlur={() => setPasswordTouched(true)}
                   required
+                  autoComplete="new-password"
                   error={passwordTooShort}
                   helperText={passwordTooShort ? 'パスワードは8文字以上で入力してください' : '8文字以上で入力してください'}
                   sx={{ mb: 2 }}
@@ -138,6 +139,7 @@ function RegisterConfirmForm() {
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   onBlur={() => setConfirmTouched(true)}
                   required
+                  autoComplete="new-password"
                   error={passwordMismatch}
                   helperText={passwordMismatch ? 'パスワードが一致しません' : ' '}
                   sx={{ mb: 3 }}
