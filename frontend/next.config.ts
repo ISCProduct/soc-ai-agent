@@ -47,6 +47,8 @@ const nextConfig: NextConfig = {
   // MUI emotion CSS-in-JS のSSR対応
   compiler: {
     emotion: true,
+    // 本番ビルドのみ console.log 等を除去（error/warn は残す）。開発時は従来どおり全て出力する
+    removeConsole: isDev ? false : { exclude: ['error', 'warn'] },
   },
   async headers() {
     return [
