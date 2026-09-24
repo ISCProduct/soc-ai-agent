@@ -165,6 +165,42 @@ func TestEchoUintParam_Invalid(t *testing.T) {
 	}
 }
 
+// ── LimitQuery ────────────────────────────────────────────────────────────
+
+// TestLimitQuery は一覧APIの limit が既定値と上限100の間に収まることを固定する(#1478)。
+//
+// 上限が無いと limit=1000000 がそのままサービス/DBへ渡り、1リクエストで
+// 全件が読まれてJSON化される。
+func TestLimitQuery(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		def   int
+		want  int
+	}{
+		{name: "未指定は既定値", query: "", def: 20, want: 20},
+		{name: "上限内はそのまま", query: "?limit=30", def: 20, want: 30},
+		{name: "上限ちょうど", query: "?limit=100", def: 20, want: 100},
+		{name: "上限超過は100へ頭打ち", query: "?limit=101", def: 20, want: MaxListLimit},
+		{name: "極端な値も100へ頭打ち", query: "?limit=1000000", def: 20, want: MaxListLimit},
+		{name: "0は既定値", query: "?limit=0", def: 10, want: 10},
+		{name: "負値は既定値", query: "?limit=-1", def: 10, want: 10},
+		{name: "数値以外は既定値", query: "?limit=abc", def: 10, want: 10},
+		{name: "既定値が上限を超えていても100へ頭打ち", query: "", def: 500, want: MaxListLimit},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/"+tt.query, nil)
+			rec := httptest.NewRecorder()
+			c := setupEcho().NewContext(req, rec)
+			if got := LimitQuery(c, "limit", tt.def); got != tt.want {
+				t.Fatalf("LimitQuery() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 // ── エラーコード定数 ──────────────────────────────────────────────────────────
 
 func TestErrorCodeConstants(t *testing.T) {

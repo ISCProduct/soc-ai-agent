@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -356,19 +355,11 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 	}
 
 	sessionID := ctx.QueryParam("session_id")
-	limitStr := ctx.QueryParam("limit")
-
 	if sessionID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
 	}
 
-	limit := 10 // デフォルト
-	if limitStr != "" {
-		l, err := strconv.Atoi(limitStr)
-		if err == nil && l > 0 {
-			limit = l
-		}
-	}
+	limit := httpapi.LimitQuery(ctx, "limit", 10)
 
 	// 既存のマッチング結果を取得（事前計算済みを想定）
 	log.Printf("[GetRecommendations] Fetching pre-calculated matches for user %d, session %s\n", userID, sessionID)

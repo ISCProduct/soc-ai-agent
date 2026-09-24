@@ -362,10 +362,7 @@ func buildPositionSummaryForInterview(positions []models.CompanyJobPosition) str
 // Returns all interview sessions with pagination.
 func (c *AdminInterviewController) ListSessions(ctx echo.Context) error {
 	page := httpapi.IntQuery(ctx, "page", 1)
-	limit := httpapi.IntQuery(ctx, "limit", 20)
-	if limit > 100 {
-		limit = 100
-	}
+	limit := httpapi.LimitQuery(ctx, "limit", 20)
 	offset := (page - 1) * limit
 	schoolID, err := httpapi.AdminSchoolFilter(ctx)
 	if err != nil {

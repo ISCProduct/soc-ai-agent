@@ -151,6 +151,20 @@ func IntQuery(c echo.Context, key string, def int) int {
 	return n
 }
 
+// MaxListLimit は一覧APIの1リクエストあたり取得件数の上限。
+// admin の user/school/organization/company 系が 100 で頭打ちにしているのに揃える(#1412)。
+const MaxListLimit = 100
+
+// LimitQuery は一覧APIの limit クエリを取得し、MaxListLimit で頭打ちにする。
+// 未指定・不正値・0以下は def を返す（def 自体も上限を超えない）。
+//
+// 上限が無いと limit=1000000 がそのままサービス/DBへ渡り、1リクエストで
+// 全件が読まれてJSON化される(#1478)。同じ定数が各コントローラーに散らばると
+// 追加したエンドポイントで付け忘れるため、ここに集約する。
+func LimitQuery(c echo.Context, key string, def int) int {
+	return min(IntQuery(c, key, def), MaxListLimit)
+}
+
 func LogError(err error) {
 	if err == nil {
 		return
