@@ -289,7 +289,11 @@ func (r *CompanyRepository) ListJobPositions(companyID, schoolID *uint, limit in
 		query = query.Where("company_id = ?", *companyID)
 	}
 	if schoolID != nil {
-		query = query.Joins("JOIN school_company_approvals ON school_company_approvals.company_id = company_job_positions.company_id AND school_company_approvals.school_id = ?", *schoolID)
+		query = query.
+			Joins("JOIN school_company_approvals ON school_company_approvals.company_id = company_job_positions.company_id AND school_company_approvals.school_id = ?", *schoolID).
+			// 学校ごとに個別停止された求人を除外する（#1508）。
+			Joins("LEFT JOIN school_job_suppressions ON school_job_suppressions.job_position_id = company_job_positions.id AND school_job_suppressions.school_id = ?", *schoolID).
+			Where("school_job_suppressions.id IS NULL")
 	}
 	err := query.Order("created_at desc").Limit(limit).Find(&positions).Error
 	return positions, err

@@ -51,6 +51,7 @@ import (
 	"Backend/internal/services/resume"
 	"Backend/internal/services/schedule"
 	"Backend/internal/services/school"
+	"Backend/internal/services/schoolapproval"
 	"Backend/internal/services/shared"
 	"Backend/internal/services/skillscore"
 	"Backend/internal/services/storage"
@@ -482,6 +483,16 @@ func main() {
 	userDeletionService := auth.NewUserDeletionService(db, objectDeleter, auditLogService)
 	adminOrganizationController := admincontrollers.NewAdminOrganizationController(organizationService)
 	adminSchoolController := admincontrollers.NewAdminSchoolController(schoolService)
+	// 掲載申請の審査キュー (#1507)。申請テーブルと承認リスト(school_company_approvals)を束ねる。
+	adminSchoolAppController := admincontrollers.NewAdminSchoolApplicationController(
+		schoolapproval.NewReviewService(repositories.NewSchoolCompanyApplicationRepository(db), schoolRepo),
+		schoolService,
+	)
+	// 個別求人停止 (#1508)。承認済み企業の求人でも学校ごとに止められる。
+	adminSchoolJobSuppressionController := admincontrollers.NewAdminSchoolJobSuppressionController(
+		schoolapproval.NewSuppressionService(repositories.NewSchoolJobSuppressionRepository(db)),
+		schoolService,
+	)
 	adminUserController := admincontrollers.NewAdminUserController(userRepo, auditLogService)
 	adminUserController.SetDeletionService(userDeletionService)
 	adminUserController.SetSchoolService(schoolService)
@@ -629,7 +640,7 @@ func main() {
 	// 低マッチのまま進行中の応募を教員一覧に出す（#1028）
 	teacherInsightService.SetLowMatchReader(appStatusRepo)
 	teacherInsightController := insightcontrollers.NewTeacherStudentInsightController(teacherInsightService)
-	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, userRepo, schoolService, cfg.AdminSecret)
+	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminSchoolAppController, adminSchoolJobSuppressionController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, userRepo, schoolService, cfg.AdminSecret)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService)
@@ -651,7 +662,11 @@ func main() {
 	companyPortalProfileController := companycontrollers.NewCompanyPortalProfileController(
 		companyportal.NewProfileService(companyRepo), companyUserService,
 	)
-	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, cfg.CompanyUserSecret, companyUserRepo)
+	// 学校への掲載申請 (#1506)。専用テーブル school_company_applications を使う。
+	companyPortalSchoolApplicationController := companycontrollers.NewCompanyPortalSchoolApplicationController(
+		companyportal.NewSchoolApplicationService(repositories.NewSchoolCompanyApplicationRepository(db)),
+	)
+	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, companyPortalSchoolApplicationController, cfg.CompanyUserSecret, companyUserRepo)
 	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())
