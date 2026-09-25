@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { extractUserAuthHeaders, buildProxyJsonResponse, buildProxyNetworkErrorResponse } from '@/lib/api-proxy'
-import { SERVER_BACKEND_URL } from '@/lib/session-cookies'
+import { SERVER_BACKEND_URL } from '@/lib/auth/session-cookies'
 
 // 企業招待・学生仮登録の確認（#1079）。トークンは body に載せ、URL ログに残さない。
 export async function POST(request: NextRequest) {

@@ -116,10 +116,16 @@ jobs:
           set -e
           pids=()
 
+          # NEXT_PUBLIC_* はビルド時にバンドルへ焼き込まれる。DSN を staging と本番で
+          # 同じシークレットから渡すと、staging を有効化した瞬間に次の本番デプロイでも
+          # 有効になってしまい、環境ごとに段階導入できない。シークレットを分ける。
           if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then
             (cd frontend && docker buildx build --platform linux/amd64 \
               --build-arg NODE_ENV=production \
               --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }} \
+              --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND_STAGING }} \
+              --build-arg NEXT_PUBLIC_APP_ENV=staging \
+              --build-arg NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }} \
               --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging \
               --cache-to type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-staging,mode=max \
               -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &
@@ -191,18 +197,33 @@ jobs:
             exit 1
           fi
 
-      - name: Resolve staging instance IP
+      # 先頭1台だけに配ってはいけない。ASGは負荷試験で最大3台まで増え、frontend は
+      # ALB 配下の任意のインスタンスの backend を叩く。配り漏れた台に振られると
+      # BFF_INTERNAL_TOKEN が未設定/旧値のままで X-Client-IP が捨てられ、
+      # 全利用者が frontend の出口IP1つへ再集約される(#1407)。
+      # 全 running インスタンスを列挙し、以降のSSH/SCPへカンマ区切りで渡す。
+      - name: Resolve staging instance IPs
         id: instance
         run: |
-          read -r ID IP <<<"$(aws ec2 describe-instances \
+          IPS=""
+          IDS=""
+          while read -r ID IP; do
+            if [ -z "$IP" ] || [ "$IP" == "None" ]; then
+              echo "WARN: $ID にパブリックIPが無いのでスキップします" >&2
+              continue
+            fi
+            IPS="${IPS:+$IPS,}$IP"
+            IDS="${IDS:+$IDS }$ID"
+          done < <(aws ec2 describe-instances \
             --filters "Name=tag:Name,Values=${PROJECT_NAME}-app" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[0].Instances[0].[InstanceId,PublicIpAddress]' --output text)"
-          if [ -z "$IP" ] || [ "$IP" == "None" ]; then
+            --query 'Reservations[].Instances[].[InstanceId,PublicIpAddress]' --output text)
+          if [ -z "$IPS" ]; then
             echo "staging instance not found (ASG未起動、またはタグ不一致)" >&2
             exit 1
           fi
-          echo "ip=$IP" >> "$GITHUB_OUTPUT"
-          echo "id=$ID" >> "$GITHUB_OUTPUT"
+          echo "対象インスタンス: $IDS"
+          echo "ips=$IPS" >> "$GITHUB_OUTPUT"
+          echo "ids=$IDS" >> "$GITHUB_OUTPUT"
 
           SG_ID=$(aws ec2 describe-security-groups \
             --filters "Name=group-name,Values=${PROJECT_NAME}-ecs-sg" \
@@ -223,16 +244,18 @@ jobs:
       # 無いことがあるため、ポート疎通だけでなく/opt/appの準備も待つ
       - name: Wait for instance SSH/docker-compose ready
         run: |
-          for i in $(seq 1 20); do
-            timeout 5 bash -c "cat < /dev/null > /dev/tcp/${{ steps.instance.outputs.ip }}/22" 2>/dev/null && break
-            echo "waiting for SSH port..."
-            sleep 15
+          for ip in $(echo "${{ steps.instance.outputs.ips }}" | tr ',' ' '); do
+            for i in $(seq 1 20); do
+              timeout 5 bash -c "cat < /dev/null > /dev/tcp/$ip/22" 2>/dev/null && break
+              echo "waiting for SSH port ($ip)..."
+              sleep 15
+            done
           done
 
       - name: Sync edge nginx (503 時の OGP 付き静的 HTML)
         uses: appleboy/scp-action@v1
         with:
-          host: ${{ steps.instance.outputs.ip }}
+          host: ${{ steps.instance.outputs.ips }}
           username: ubuntu
           key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
           source: "infra/nginx/staging-edge.conf,infra/static/service-unavailable.html,infra/static/service-starting.html,infra/staging/ensure-edge-compose.sh"
@@ -242,10 +265,12 @@ jobs:
       - name: Deploy via SSH (docker compose pull && up -d)
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ steps.instance.outputs.ip }}
+          host: ${{ steps.instance.outputs.ips }}
           username: ubuntu
           key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
           script_stop: true
+          # 複数台のときは1台ずつ順番に流す(並列だと全台同時に compose down して全断する)
+          sync: true
           script: |
             set -e
             sudo bash -c '
@@ -265,6 +290,31 @@ jobs:
               # 既存インスタンスの .env は S3_BUCKET のみ。アプリは AWS_S3_BUCKET を読む。
               if [ -f .env ] && grep -q '^S3_BUCKET=' .env && ! grep -q '^AWS_S3_BUCKET=' .env; then
                 echo "AWS_S3_BUCKET=$(grep '^S3_BUCKET=' .env | cut -d= -f2-)" >> .env
+              fi
+              # 実クライアントIP転送の2変数(#1407)。user_data は新規インスタンスでしか
+              # 走らず、ASG は version=$Latest なので LT を更新しても既存インスタンスは
+              # 置換されない。無ければここで足さないと、稼働中のstagingは転送が無効のまま
+              # 全利用者が同じ出口IPでレート制限される。
+              #
+              # トークンはこの場で生成してはいけない。frontend は ALB 配下の任意の
+              # インスタンスの backend を叩くため、インスタンス毎に違う値になると
+              # 検証に失敗して X-Client-IP が捨てられる（負荷試験でASGが3台まで増えると顕在化）。
+              # terraform が作った SSM パラメータ(= user_data が新規インスタンスへ配るのと
+              # 同じ値)を読み、既存の値があっても上書きして全台を揃える。
+              BFF_TOKEN=$(aws ssm get-parameter --region ${{ env.AWS_REGION }} --name /${{ env.PROJECT_NAME }}/bff-internal-token --query Parameter.Value --output text 2>/dev/null || true)
+              if [ -n "$BFF_TOKEN" ] && [ "$BFF_TOKEN" != None ]; then
+                if [ -f .env ]; then
+                  sed -i /^BFF_INTERNAL_TOKEN=/d .env
+                  echo BFF_INTERNAL_TOKEN=$BFF_TOKEN >> .env
+                fi
+              else
+                # 新規インスタンスは user_data が同じ値を既に書いているので .env は触らない。
+                # 黙って進むと不一致に気付けないため、理由をログへ残す。
+                echo "WARN: SSM /${{ env.PROJECT_NAME }}/bff-internal-token を読めませんでした（terraform apply 未実施の可能性）。.env は変更しません" >&2
+              fi
+              # staging は常に ALB -> edge nginx -> frontend の2段(terraform と同値)
+              if [ -f .env ] && ! grep -q ^TRUSTED_PROXY_HOPS= .env; then
+                echo TRUSTED_PROXY_HOPS=2 >> .env
               fi
               df -h /
               # 稼働中イメージは prune できない。先に down してから空ける。
@@ -321,8 +371,12 @@ jobs:
           for name in be fe; do
             TG=$(aws elbv2 describe-target-groups --names "${PROJECT_NAME}-$name-tg" \
               --query 'TargetGroups[0].TargetGroupArn' --output text)
-            aws elbv2 wait target-in-service --target-group-arn "$TG" \
-              --targets "Id=${{ steps.instance.outputs.id }}"
+            TARGETS=""
+            for id in ${{ steps.instance.outputs.ids }}; do
+              TARGETS="$TARGETS Id=$id"
+            done
+            # shellcheck disable=SC2086
+            aws elbv2 wait target-in-service --target-group-arn "$TG" --targets $TARGETS
           done
 
       # 失敗しても必ず戻す。停止したままだと、以後アプリが落ちても
@@ -364,9 +418,9 @@ jobs:
       FUNCTION_NAME: ${{ vars.PROJECT_NAME || 'soc-stg' }}-discord
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: ./Backend/go.mod
           cache-dependency-path: ./Backend/go.sum
@@ -434,6 +488,10 @@ jobs:
     name: Deploy to production
     runs-on: ubuntu-latest
     environment: production
+    # checkout と Notify Discord release の gh pr 参照に必要な分だけ与える。
+    permissions:
+      contents: read
+      pull-requests: read
     concurrency:
       group: deploy-production
       cancel-in-progress: false
@@ -501,6 +559,9 @@ jobs:
             (cd frontend && docker buildx build --platform linux/amd64 \
               --build-arg NODE_ENV=production \
               --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }} \
+              --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND_PROD }} \
+              --build-arg NEXT_PUBLIC_APP_ENV=production \
+              --build-arg NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }} \
               --cache-from type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production \
               --cache-to type=registry,ref=$ECR_REGISTRY/soc-frontend:buildcache-production,mode=max \
               -t $ECR_REGISTRY/soc-frontend:$IMAGE_TAG --push .) &
@@ -567,8 +628,93 @@ jobs:
             --query 'taskDefinition.taskDefinitionArn' --output text)
           echo "task_def_arn=$TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
 
+      # 本番は「指定日のみ終日起動」ポリシー(prod-uptime-scheduler)のため、通常日はRDSが停止している。
+      # 停止中はマイグレーションがDBへ到達できず必ず失敗する(実際に #1488 のデプロイが
+      # "no route to host" で落ちた)ので、この工程だけ一時的にRDSを起動する。
+      # ECSサービスは起動しない。desired=0 のままでもタスク定義の差し替えは反映され、
+      # 稼働日にスケジューラが立ち上げた時点で新しい定義が使われる。ここでECSまで上げると
+      # 毎時5分のスケジューラが desired=0 に戻すため、起動と停止の往復になる。
+      # ponytail: prod-uptime-scheduler との排他は未実装。毎時5分の実行と重なると
+      # マイグレーション中にRDSを停止されうる（その場合はデプロイが失敗するので再実行する）。
+      # 起動待ちループは stopped を見るたびに start を打ち直すため、起動段階では自己修復する。
+      # 実運用で再実行が続くようなら、SSM にメンテナンスフラグを置いて相互に見る形へ上げる。
+      # 本番が停止状態(全サービス desired=0)だったかを先に記録する。
+      # 停止日にデプロイした場合だけ、検証のために一時起動して、終わったら0へ戻す。
+      - name: Record production service state
+        id: prod-svc
+        run: |
+          set -uo pipefail
+          # 取得失敗を「停止中」に倒さない。`|| echo "0"` で 0 に化けると、稼働中の
+          # 本番を was_down=true と記録し、後段の always() クリーンアップが
+          # 全サービスを停止する。スロットリングや一時的な通信障害で起こりうる。
+          if ! DESIRED_TOTAL=$(aws ecs describe-services --cluster "${PROJECT_NAME}" \
+            --services chroma rag-review backend frontend \
+            --query 'sum(services[].desiredCount)' --output text); then
+            echo "::error::本番サービスの状態を取得できませんでした。起動状態が不明なままでは停止判断ができないため中断します" >&2
+            exit 1
+          fi
+          if [ -z "$DESIRED_TOTAL" ] || [ "$DESIRED_TOTAL" = "None" ]; then
+            echo "::error::本番サービスの desired_count を取得できませんでした(値='$DESIRED_TOTAL')" >&2
+            exit 1
+          fi
+
+          # デプロイ中に /prod で運用指示が変わったかを後で見るため、開始時点の値を控える。
+          # 読めなかった場合は空にしておき、復元時は「変わっていない」とは見なさない。
+          OVERRIDE_AT_START=$(aws ssm get-parameter --name "/${PROJECT_NAME}/prod-uptime-override" \
+            --query 'Parameter.Value' --output text 2>/dev/null || echo "__unreadable__")
+          echo "override_at_start=$OVERRIDE_AT_START" >> "$GITHUB_OUTPUT"
+
+          if [ "$DESIRED_TOTAL" = "0" ]; then
+            echo "本番は停止状態。デプロイ後に一時起動して確認する (override=$OVERRIDE_AT_START)"
+            echo "was_down=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "本番は稼働中(desired合計=$DESIRED_TOTAL)。起動状態には触らない"
+            echo "was_down=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # backend を変更していなくても、停止日の一時検証では backend を含む全サービスを
+      # 起動する(prod-scale.sh)。RDS が停止のままだと backend は DB 接続に失敗して
+      # 終了し、安定待ちは変更サービスだけを見るため「起動できないまま検証成功」になる。
+      - name: Start production RDS if stopped (for migration)
+        if: steps.changes.outputs.backend == 'true' || steps.prod-svc.outputs.was_down == 'true'
+        id: prod-db
+        run: |
+          DB_ID="${PROJECT_NAME}-mysql"
+          started=false
+          # stopping(数分) -> stopped -> start -> starting -> available で最大10分程度かかる。
+          for _ in $(seq 1 40); do
+            STATUS=$(aws rds describe-db-instances --db-instance-identifier "$DB_ID" \
+              --query 'DBInstances[0].DBInstanceStatus' --output text)
+            if [ "$STATUS" = "available" ]; then
+              echo "RDS available (started_by_deploy=$started)"
+              if [ "$started" = "false" ]; then echo "started_by_deploy=false" >> "$GITHUB_OUTPUT"; fi
+              exit 0
+            fi
+            # stopped を見るたびに start を打ち直す。prod-uptime-scheduler が
+            # 毎時5分に desired=0 を見て停止しうるため、1回きりだと再起動されず
+            # このループがタイムアウトする。start が成功したときだけ所有フラグを立て、
+            # スロットリング等で失敗した回は false のままにして次のループで再試行する。
+            if [ "$STATUS" = "stopped" ]; then
+              if aws rds start-db-instance --db-instance-identifier "$DB_ID" > /dev/null; then
+                if [ "$started" = "false" ]; then
+                  started=true
+                  # available を待てずタイムアウトしても起動しっぱなしにしないよう、
+                  # ここで出力しておく（後段の停止ステップが拾う）。
+                  echo "started_by_deploy=true" >> "$GITHUB_OUTPUT"
+                fi
+              else
+                echo "start-db-instance に失敗。次のループで再試行する" >&2
+              fi
+            fi
+            echo "RDS status: $STATUS (waiting...)"
+            sleep 30
+          done
+          echo "RDS did not become available in time" >&2
+          exit 1
+
       - name: Run DB migration (production)
         if: steps.changes.outputs.backend == 'true'
+        id: migrate
         run: |
           NETWORK_CONFIG=$(aws ecs describe-services --cluster "${PROJECT_NAME}" --services backend \
             --query 'services[0].networkConfiguration' --output json)
@@ -580,6 +726,8 @@ jobs:
             --overrides '{"containerOverrides":[{"name":"soc-backend","command":["/bin/migrate","up"]}]}' \
             --query 'tasks[0].taskArn' --output text)
           echo "Migration task: $TASK_ARN"
+          # 後段のRDS停止が「タスクが本当に止まったか」を確認できるようにARNを残す。
+          echo "task_arn=$TASK_ARN" >> "$GITHUB_OUTPUT"
           aws ecs wait tasks-stopped --cluster "${PROJECT_NAME}" --tasks "$TASK_ARN"
           EXIT_CODE=$(aws ecs describe-tasks --cluster "${PROJECT_NAME}" --tasks "$TASK_ARN" \
             --query 'tasks[0].containers[0].exitCode' --output text)
@@ -662,6 +810,16 @@ jobs:
       # DISCORD_RELEASE_WEBHOOK_URL未設定でもデプロイ自体は失敗させない(automation/deploy-smoke/notify-discord.shと同じ方針)。
       # 直列に待つと 588s + 302s + 88s と積み上がるため、3サービスの安定待ちを並列化する。
       # 二重稼働は発生しない（デプロイ方式は従来どおり minimumHealthyPercent=0 のまま）。
+      # 停止日のデプロイでは、新しいタスク定義が実際に起動するかをここで確認する。
+      # 確認できないまま稼働日を迎えると、展示会当日に起動しないイメージが出てくる。
+      # 後段で必ず0へ戻すため、立ち上がっているのはこのジョブの間だけ。
+      # 変更のあったサービスだけを起動しても確認にならない。rag-review は chroma が居ないと
+      # ヘルスチェックが503を返し、backend も RAG を同期で呼ぶ。本番と同じ組み合わせで起動する。
+      # desired と min_capacity を揃えるのも必須（揃えないとターゲット追跡が0へ縮退する）。
+      - name: Start production services for verification
+        if: steps.prod-svc.outputs.was_down == 'true'
+        run: ./automation/ops/prod-scale.sh 1
+
       - name: Wait for services to stabilize (parallel)
         run: |
           set -e
@@ -695,6 +853,105 @@ jobs:
 
       # merge commit 件名（Merge pull request #N）ではなく、マージPRのタイトル
       # （Release to production: ...）と本文の機能一覧を通知に使う。
+      # 確認が済んだ（または失敗した）ら0へ戻す。always() が無いと、
+      # 安定待ちで落ちたときにタスクが起動したまま課金され続ける。
+      #
+      # ただし「開始時に停止していた」だけで機械的に落とすと、デプロイ中に
+      # /prod on やスケジューラが本番を起動した場合にそれを打ち消してしまう。
+      # deployment.yml と prod-uptime-scheduler.yml は concurrency group が別で
+      # 排他されないため、次の毎時実行まで本番が落ちたままになりうる。
+      # 復元前に運用指示を読み直し、起動すべき状態なら触らない。
+      - name: Scale production services back to zero
+        if: always() && steps.prod-svc.outputs.was_down == 'true'
+        run: |
+          set -uo pipefail
+          TODAY_JST=$(TZ=Asia/Tokyo date +%F)
+
+          OVERRIDE_NOW=$(aws ssm get-parameter --name "/${PROJECT_NAME}/prod-uptime-override" \
+            --query 'Parameter.Value' --output text 2>/dev/null || echo "__unreadable__")
+          OVERRIDE_AT_START="${{ steps.prod-svc.outputs.override_at_start }}"
+          if [ "$OVERRIDE_NOW" != "$OVERRIDE_AT_START" ]; then
+            echo "デプロイ中に運用指示が変わった($OVERRIDE_AT_START -> $OVERRIDE_NOW)ため、起動状態には触らない"
+            exit 0
+          fi
+          if [ "$OVERRIDE_NOW" = "__unreadable__" ]; then
+            echo "運用指示(override)を読めないため、起動状態には触らない。停止は prod-uptime-scheduler に任せる" >&2
+            exit 0
+          fi
+          # /prod on は日付リストを無視して起動させる指示。日付リストに今日が無くても止めない。
+          # ここを見落とすと、手動で起動させた本番をデプロイが落とす。
+          if [ "${OVERRIDE_NOW%%:*}" = "on" ]; then
+            echo "override=$OVERRIDE_NOW（起動指示）のため、起動状態には触らない"
+            exit 0
+          fi
+
+          # 日付リストは JST の暦日で判定する。デプロイが日付をまたぐと、
+          # 開始時は停止日でも終了時には起動日になっていることがある。
+          DATES=$(aws ssm get-parameter --name "/${PROJECT_NAME}/prod-uptime-dates" \
+            --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+          if echo ",$DATES," | grep -q ",$TODAY_JST,"; then
+            echo "今日($TODAY_JST)は起動日になっているため、起動状態には触らない"
+            exit 0
+          fi
+
+          ./automation/ops/prod-scale.sh 0
+
+      # デプロイが終わったら、このデプロイが起動したRDSは停止へ戻す。
+      # 停止するのは「このデプロイが stopped から起動した」場合だけで、かつ本番が稼働状態でない
+      # (全サービス desired=0)ときに限る。稼働日にデプロイした本番は落とさない。
+      # 途中で失敗しても課金を残さないため always()。
+      - name: Stop production RDS if this deploy started it
+        if: always() && steps.changes.outputs.backend == 'true' && steps.prod-db.outputs.started_by_deploy == 'true'
+        run: |
+          set -uo pipefail
+          # マイグレーションのワンオフタスクがまだ動いている状態でDBを落とすと、
+          # 実行中のDDLが切れて dirty なマイグレーションが残る。
+          # wait が一時障害で失敗した場合に備え、STOPPED を確認できたときだけ進む。
+          TASK_ARN="${{ steps.migrate.outputs.task_arn }}"
+          if [ -n "$TASK_ARN" ]; then
+            TASK_STATUS=$(aws ecs describe-tasks --cluster "${PROJECT_NAME}" --tasks "$TASK_ARN" \
+              --query 'tasks[0].lastStatus' --output text 2>/dev/null || echo "UNKNOWN")
+            if [ "$TASK_STATUS" != "STOPPED" ]; then
+              # 放置するとワンオフタスクが残り続け、次のスケジューラがRDSだけ止めて
+              # 実行中のDDLから接続を切る。明示的に止めて終了を待つ。
+              echo "マイグレーションタスクが $TASK_STATUS のため停止させる" >&2
+              aws ecs stop-task --cluster "${PROJECT_NAME}" --task "$TASK_ARN" \
+                --reason "deploy cleanup" > /dev/null || true
+              if ! aws ecs wait tasks-stopped --cluster "${PROJECT_NAME}" --tasks "$TASK_ARN"; then
+                echo "マイグレーションタスクの停止を確認できないためRDSは停止しない" >&2
+                exit 1
+              fi
+            fi
+          fi
+          # 取得できないまま「停止中」とみなすと、稼働中の本番DBを落としうる。安全側に倒す。
+          if ! DESIRED_TOTAL=$(aws ecs describe-services --cluster "${PROJECT_NAME}" \
+            --services chroma rag-review backend frontend \
+            --query 'sum(services[].desiredCount)' --output text); then
+            echo "ECSサービスの状態を取得できないためRDSは停止しない" >&2
+            exit 1
+          fi
+          if [ "$DESIRED_TOTAL" != "0" ]; then
+            echo "本番が稼働中(desired合計=$DESIRED_TOTAL)のためRDSは停止しない"
+            exit 0
+          fi
+          # desired=0 にしてもタスクはすぐには消えない。ドレイン中のbackendが残ったまま
+          # DBを落とすと、処理中のリクエストが途中で切れる。running が捌けるまで待つ。
+          for _ in $(seq 1 20); do
+            RUNNING_TOTAL=$(aws ecs describe-services --cluster "${PROJECT_NAME}" \
+              --services chroma rag-review backend frontend \
+              --query 'sum(services[].runningCount)' --output text 2>/dev/null || echo "unknown")
+            [ "$RUNNING_TOTAL" = "0" ] && break
+            echo "runningCount=$RUNNING_TOTAL (waiting...)"
+            sleep 15
+          done
+          if [ "$RUNNING_TOTAL" != "0" ]; then
+            echo "タスクが残っている(running=$RUNNING_TOTAL)ためRDSは停止しない。スケジューラに任せる" >&2
+            exit 1
+          fi
+          # 停止できなかったことを運用者が検知できるよう、失敗はステップの失敗にする。
+          aws rds stop-db-instance --db-instance-identifier "${PROJECT_NAME}-mysql" > /dev/null
+          echo "✓ RDSを停止状態へ戻した"
+
       - name: Notify Discord release
         env:
           DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
@@ -725,31 +982,99 @@ jobs:
     name: Sync whats-new from merged PRs
     runs-on: ubuntu-latest
     continue-on-error: true
+    # 本番の admin_secret を Secrets Manager から読むため、production の認証情報を使う(#1158)。
+    # リポジトリ既定の認証情報はECSクラスタ作成前の古い値で、本番リソースを引けない。
+    environment: production
     steps:
+      # collect_whats_new_sources.py と、それが読む resolve_deployed_issues.py を使う。
+      # squash マージのコミット題名から元PR番号を辿るため、履歴も要る。
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # 認証に失敗しても後続は続ける。ここで止めると、リポジトリシークレットへの
+      # フォールバックが効かないだけでなく、これまで確実に動いていた staging への
+      # 取り込みまで丸ごとスキップされる(ジョブは continue-on-error で緑のまま)。
+      - name: Configure AWS credentials
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
+
       - name: Fetch recently merged PRs and ingest
         env:
           GH_TOKEN: ${{ github.token }}
+          PROJECT_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}
+          # staging 側は引き続きリポジトリシークレットを使う。
+          # 本番と staging で別値にするのが #1158 の目的。
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
           PROD_API_BASE: https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }}
           STAGING_API_BASE: https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }}
         run: |
-          sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base main --limit 20 \
-            --json number,title,body,mergedAt \
-            --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
+          # 本番の admin_secret は Secrets Manager を正とする(#1158)。
+          # 読めない場合だけリポジトリシークレットへフォールバックする(移行期間の両対応)。
+          # 失敗理由(AccessDenied / ResourceNotFound / ExpiredToken)が分からないと
+          # 警告を見ても何を直せばよいか判断できない。stderr は残す(値は stdout 側)。
+          sm_err=$(mktemp)
+          PROD_ADMIN_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id "${PROJECT_NAME:-soc-app}/admin" --query SecretString --output text 2>"$sm_err" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('admin_secret',''))" 2>>"$sm_err" || true)
+          if [ -n "$PROD_ADMIN_SECRET" ]; then
+            echo "::add-mask::$PROD_ADMIN_SECRET"
+          else
+            echo "::warning::Secrets Manager から admin_secret を読めませんでした。リポジトリシークレットで続行します(IAMに secretsmanager:GetSecretValue を確認してください)"
+            sed 's/^/  aws: /' "$sm_err"
+            PROD_ADMIN_SECRET="$ADMIN_SECRET"
+          fi
+          rm -f "$sm_err"
 
-          curl -sf -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
+          # main へ直接マージされるのは release 傘PRだけで、その本文は
+          # 「起動ジョブの失敗通知が初めて有効になる」のような運用担当者向けの記述になる。
+          # 傘PRをそのまま要約させると、中身に混ざった運用作業がユーザー向け更新情報として
+          # 出てしまう（実際に出た）。傘PRは要約対象にせず、中身の個別PRを送る。
+          sources=$(python3 .github/scripts/collect_whats_new_sources.py)
+
+          # 本番が停止していると必ず失敗する(既定停止の運用)。ここで失敗させるとデプロイが
+          # 落ちてしまうため続行はするが、黙って握りつぶすと「反映されていない」ことに
+          # 気づけない。実際にそれで、運用作業がユーザー向け更新情報に出たまま残った(#1290)。
+          # 取りこぼしは prod-uptime-scheduler.yml が本番起動時に回収する。
+          # 「停止中で届かない」と「鍵が違って拒否された」は対処が別物。
+          # 後者を warning で流すと、admin_secret のローテーション後に更新情報が
+          # 反映されないまま誰も気づかない(#1290 と同じ症状)。
+          #
+          # 503 は拾わない。CloudFront が ALB の 500/502/503/504 をすべて 503 へ
+          # 差し替えるため(modules/cloudfront_app_proxy)、503 はほぼ「オリジンが
+          # 応答しない」を意味する。バックエンドの「ADMIN_SECRET 未設定」も 503 だが、
+          # ローリング更新中やタスク停止中に必ず踏むので、ここで落とすと
+          # 正常なデプロイが赤くなる(実際に本番デプロイで踏んだ)。
+          prod_code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
-            -H "X-Admin-Secret: $ADMIN_SECRET" \
+            -H "X-Admin-Secret: $PROD_ADMIN_SECRET" \
             -d "{\"sources\": $sources}" \
-            --max-time 60 \
-            || echo "本番への取り込みに失敗しました(停止中の可能性)。スキップします。"
+            --max-time 60 || true)
+          prod_rejected=0
+          case "$prod_code" in
+            2*) ;;
+            401|403)
+              echo "::error::本番への更新情報の取り込みが $prod_code で拒否されました。admin_secret が本番の値と一致していません(ローテーション後の CI 設定を確認してください)"
+              prod_rejected=1
+              ;;
+            *)
+              echo "::warning::本番への更新情報の取り込みに失敗しました(HTTP $prod_code / 停止中の可能性)。本番起動時に回収されます。"
+              ;;
+          esac
 
           curl -sf -X POST "$STAGING_API_BASE/api/admin/whats-new/ingest" \
             -H "Content-Type: application/json" \
             -H "X-Admin-Secret: $ADMIN_SECRET" \
             -d "{\"sources\": $sources}" \
             --max-time 60 \
-            || echo "stagingへの取り込みに失敗しました(停止中の可能性)。スキップします。"
+            || echo "::warning::stagingへの更新情報の取り込みに失敗しました(停止中の可能性)。"
+
+          # staging まで流し終えてから落とす。先に exit すると staging の取り込みも飛ぶ。
+          [ "$prod_rejected" = "0" ]
 
   # 本番へ反映された issue を閉じる。
   #
@@ -788,7 +1113,7 @@ jobs:
           import json, os, subprocess, sys
 
           sys.path.insert(0, ".github/scripts")
-          from resolve_deployed_issues import extract_pr_numbers, extract_issue_numbers
+          from resolve_deployed_issues import extract_pr_numbers, resolve_issues
 
           REPO = os.environ["GH_REPO"]
 
@@ -811,11 +1136,17 @@ jobs:
           prs = extract_pr_numbers(subjects)
           print(f"コミット {len(subjects)} 件から 元PR {len(prs)} 件を検出")
 
-          issues = {}
-          for pr in prs:
-              body = gh(["pr", "view", str(pr), "--json", "body", "-q", ".body"])
-              for i in extract_issue_numbers(body):
-                  issues.setdefault(i, []).append(pr)
+          def body_of(pr):
+              return gh(["pr", "view", str(pr), "--json", "body", "-q", ".body"])
+
+          def commits_of(pr):
+              return gh(["pr", "view", str(pr), "--json", "commits",
+                         "-q", "[.commits[].messageHeadline]|.[]"]).splitlines()
+
+          # 本文に close キーワードが無いPRは1段掘る。release→main が squash
+          # マージだと範囲にはリリースPR1件しか現れず、各 feature PR の
+          # Closes #N まで届かないため(詳細は resolve_issues のコメント)。
+          issues = resolve_issues(prs, body_of, commits_of)
 
           if not issues:
               print("閉じる対象の issue はありません。")

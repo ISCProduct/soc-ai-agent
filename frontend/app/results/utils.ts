@@ -1,7 +1,7 @@
 /**
  * マッチング結果ページ向けの純粋ヘルパー（React state 非依存）。
  */
-import type { CapitalRelation } from '@/lib/company-data'
+import type { CapitalRelation } from '@/lib/company/data'
 import type {
   AnalysisScores,
   CategoryScores,
@@ -41,6 +41,7 @@ export function mapRecommendationToCompany(
     employees: rec.employees || '未定',
     description: rec.reason || '詳細情報は準備中です',
     matchScore: rec.score || 0,
+    matchedAxisCount: rec.matched_axis_count,
     tags: rec.tags || [],
     techStack: rec.tech_stack || [],
     categoryScores: normalizeCategoryScores(rec.category_scores),
@@ -77,6 +78,10 @@ export function buildEmptyRecommendationsMessage(
     message = '判定結果を出すための根拠が不足しています。チャットで質問に回答してください。'
   } else if (reason === 'insufficient_company_data') {
     message = '現在、公開済みの企業データがありません。管理者が企業情報を公開するまでお待ちください。'
+  } else if (reason === 'insufficient_company_profiles') {
+    // 企業は公開済み。足りないのは重視度プロファイルなので、公開を促す案内を出さない（#1380）
+    message =
+      '公開中の企業に重視度プロファイルが未設定のため、マッチングできませんでした。管理者がプロファイルを生成するまでお待ちください。'
   }
   if (diagnostics) {
     // 内部指標はエンドユーザー向け文言に混在させず、調査用にconsoleへ出力するのみに留める

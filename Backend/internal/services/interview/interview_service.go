@@ -30,11 +30,16 @@ type InterviewService struct {
 	budgetGuard          interviewBudgetGuard
 	realtimeUsageService *costs.RealtimeUsageService
 	crossFeature         *flywheel.CrossFeatureIntegrationService
+	matchingRunner       MatchingRunner
 	companyQuestionRepo  repository.InterviewCompanyQuestionRepository
 	questionStateRepo    repository.InterviewQuestionStateRepository
 	skillScoreRepo       SkillScoreReader
 	companyRepo          shared.CompanyBriefReader
 	jobCh                chan uint
+	// inFlightJobs はフォールバック channel 経路の重複排除（Redis 経路の TaskID 相当、#1476）。
+	// 投入時に登録し、worker が処理し終えるまで保持する。
+	inFlightJobs         map[uint]struct{}
+	inFlightMu           sync.Mutex
 	workerOnce           sync.Once
 	jobs                 shared.JobEnqueuer
 	ownsCompany          func(userID, companyID uint) (bool, error)
@@ -67,6 +72,7 @@ func NewInterviewService(
 		openaiClient:         openaiClient,
 		realtimeUsageService: realtimeUsageService,
 		jobCh:                make(chan uint, jobChBufferSize),
+		inFlightJobs:         map[uint]struct{}{},
 	}
 }
 
@@ -90,9 +96,19 @@ func (s *InterviewService) SetCompanyRepo(r shared.CompanyBriefReader) {
 	s.companyRepo = r
 }
 
+// MatchingRunner は面接スコア反映後の再マッチング面。
+type MatchingRunner interface {
+	CalculateMatching(ctx context.Context, userID uint, sessionID string) error
+}
+
 // SetCrossFeatureService 機能間連携サービスを注入する（オプション）
 func (s *InterviewService) SetCrossFeatureService(cf *flywheel.CrossFeatureIntegrationService) {
 	s.crossFeature = cf
+}
+
+// SetMatchingRunner は面接→スコア反映後の再マッチングを注入する（オプション）。
+func (s *InterviewService) SetMatchingRunner(m MatchingRunner) {
+	s.matchingRunner = m
 }
 
 // SetJobEnqueuer は面接レポート等の永続キュー投入先を設定する（#617）。
@@ -117,30 +133,62 @@ func (s *InterviewService) GenerateReportForSession(ctx context.Context, session
 // 面接終了APIがそのままハングし、goroutine が解放されない。
 // 溢れた場合はレポート生成を諦めてエラーログに残す（本番は Redis 経路が primary で、
 // そちらは asynq がジョブを永続化するため、この channel はフォールバック専用）。
-func (s *InterviewService) enqueueReportGeneration(sessionID uint) {
+//
+// 戻り値は「ジョブが投入できたか」(#1476)。呼び出し元（再生成API）が成功応答を返すかの判断に使う。
+func (s *InterviewService) enqueueReportGeneration(sessionID uint) bool {
 	if s.jobs != nil {
 		if err := s.jobs.EnqueueInterviewReport(sessionID); err != nil {
 			log.Printf("[Interview] enqueue report failed, fallback channel: %v", err)
-			s.offerReportJob(sessionID)
-			return
+			return s.offerReportJob(sessionID)
 		}
-		return
+		return true
 	}
-	s.offerReportJob(sessionID)
+	return s.offerReportJob(sessionID)
 }
 
 // offerReportJob は jobCh へノンブロッキングに投入する。投入できなければ false を返す。
+//
+// 同じセッションのジョブが控えている／処理中なら投入しない(#1476)。
+// Redis 経路と違いこちらには asynq の重複排除が無く、生成が3分のUIタイムアウトを
+// 超えて走っている間に再試行ボタンを押されると、レポート未保存のまま再投入できてしまう。
+// 単一 worker でも2件目が続けて走るため、LLM 費用・レポート上書き・スコアの二重反映が起きる。
 func (s *InterviewService) offerReportJob(sessionID uint) bool {
+	if !s.markReportJobInFlight(sessionID) {
+		log.Printf("[Interview] report job already queued for session %d, skipped", sessionID)
+		// 既に控えている＝望む状態なので、投入できたものとして扱う。
+		return true
+	}
 	select {
 	case s.jobCh <- sessionID:
 		return true
 	default:
 		// バッファ満杯。ここで待つと呼び出し元(FinishSession)ごとハングするため捨てる。
 		// 手動で再生成できるよう sessionID をログに残す。
+		s.clearReportJobInFlight(sessionID)
 		log.Printf("[Interview] ERROR: report job queue full (cap=%d), dropped report generation for session %d",
 			jobChBufferSize, sessionID)
 		return false
 	}
+}
+
+// markReportJobInFlight はセッションを処理中として登録する。既に登録済みなら false。
+func (s *InterviewService) markReportJobInFlight(sessionID uint) bool {
+	s.inFlightMu.Lock()
+	defer s.inFlightMu.Unlock()
+	if s.inFlightJobs == nil {
+		s.inFlightJobs = map[uint]struct{}{}
+	}
+	if _, ok := s.inFlightJobs[sessionID]; ok {
+		return false
+	}
+	s.inFlightJobs[sessionID] = struct{}{}
+	return true
+}
+
+func (s *InterviewService) clearReportJobInFlight(sessionID uint) {
+	s.inFlightMu.Lock()
+	defer s.inFlightMu.Unlock()
+	delete(s.inFlightJobs, sessionID)
 }
 
 type InterviewSessionResponse struct {

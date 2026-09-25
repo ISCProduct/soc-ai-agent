@@ -13,20 +13,30 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
-import { infoFieldEnabled, resolveIndustryFieldProfile } from '@/lib/admin-company-field-profile'
+import { getAdminSchoolAccess } from '@/lib/admin/school-access'
+import { infoFieldEnabled, resolveIndustryFieldProfile } from '@/lib/admin/company-field-profile'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { CompanyAspectTabs } from '@/components/admin/CompanyAspectTabs'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
-import { applyInfoPayload, WORK_STYLE_OPTIONS } from '@/lib/admin-company-form'
+import { applyInfoPayload, WORK_STYLE_OPTIONS } from '@/lib/admin/company-form'
 import { CompanyUsersPanel } from '@/components/admin/CompanyUsersPanel'
 
 export default function PageContent() {
   const params = useParams()
   const id = params.id as string
 
+  // 掲載状態（ステータス・暫定データ）はシステム管理者しか変えられない（API も 403 を返す）
+  const [isPlatform, setIsPlatform] = useState(false)
+
   useEffect(() => {
     const user = authService.getStoredUser()
     if (!user?.is_admin) window.location.href = '/'
+  }, [])
+
+  useEffect(() => {
+    getAdminSchoolAccess()
+      .then((access) => setIsPlatform(!access.restricted))
+      .catch(() => setIsPlatform(false))
   }, [])
 
   const [error, setError] = useState('')
@@ -239,8 +249,7 @@ export default function PageContent() {
         welfare_details: welfareDetails,
         source_type: sourceType,
         source_url: sourceUrl,
-        is_provisional: isProvisional,
-        data_status: dataStatus,
+        ...(isPlatform ? { is_provisional: isProvisional, data_status: dataStatus } : {}),
       }),
     })
     if (!res.ok) {
@@ -450,19 +459,23 @@ export default function PageContent() {
           <MenuItem value="llm_web_search">旧LLM知識（非推奨）</MenuItem>
         </TextField>
         <TextField label="出典URL" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} />
-        <TextField select label="ステータス" value={dataStatus} onChange={(e) => setDataStatus(e.target.value)}>
-          <MenuItem value="draft">下書き</MenuItem>
-          <MenuItem value="published">公開</MenuItem>
-        </TextField>
-        <TextField
-          select
-          label="暫定データ"
-          value={isProvisional ? 'yes' : 'no'}
-          onChange={(e) => setIsProvisional(e.target.value === 'yes')}
-        >
-          <MenuItem value="yes">暫定</MenuItem>
-          <MenuItem value="no">確定</MenuItem>
-        </TextField>
+        {isPlatform && (
+          <>
+            <TextField select label="ステータス" value={dataStatus} onChange={(e) => setDataStatus(e.target.value)}>
+              <MenuItem value="draft">下書き</MenuItem>
+              <MenuItem value="published">公開</MenuItem>
+            </TextField>
+            <TextField
+              select
+              label="暫定データ"
+              value={isProvisional ? 'yes' : 'no'}
+              onChange={(e) => setIsProvisional(e.target.value === 'yes')}
+            >
+              <MenuItem value="yes">暫定</MenuItem>
+              <MenuItem value="no">確定</MenuItem>
+            </TextField>
+          </>
+        )}
 
         <Button variant="outlined" onClick={handleSave} disabled={!name.trim()}>
           手入力のみ保存（メタデータ更新なし）

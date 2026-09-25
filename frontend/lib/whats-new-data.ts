@@ -1,5 +1,5 @@
 import { authService } from '@/lib/auth'
-import { SERVER_BACKEND_URL } from '@/lib/session-cookies'
+import { SERVER_BACKEND_URL } from '@/lib/auth/session-cookies'
 
 export interface WhatsNewEntry {
   title: string

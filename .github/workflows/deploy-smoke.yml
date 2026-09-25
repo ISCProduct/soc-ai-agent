@@ -18,8 +18,12 @@ on:
         required: true
         type: string
 
+# deployment.yml の deploy-staging / deploy-production ジョブと同じ group を使う。
+# 別 group にしていたため、スモークの実行中に次のデプロイが開始でき、その
+# docker compose down で対象環境が落ちてスモークが全滅していた（#1387 #1377 #1392 等）。
+# 同じ group に入れて、スモークが終わるまで次のデプロイを開始させない。
 concurrency:
-  group: deploy-smoke-${{ inputs.environment }}
+  group: deploy-${{ inputs.environment }}
   cancel-in-progress: false
 
 jobs:
@@ -87,6 +91,8 @@ jobs:
         working-directory: .
         env:
           DISCORD_DEPLOY_WEBHOOK_URL: ${{ secrets.DISCORD_DEPLOY_WEBHOOK_URL }}
+          DISCORD_OPS_WEBHOOK_URL: ${{ secrets.DISCORD_OPS_WEBHOOK_URL }}
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
         run: |
           STATUS=failure
           if [ "${{ steps.playwright.outcome }}" = "success" ]; then

@@ -12,7 +12,7 @@ import {
   type CapitalRelation,
   type CompanyMarketInfo,
   type MarketType,
-} from '@/lib/company-data'
+} from '@/lib/company/data'
 import { formatRelationLabel } from '@/lib/relation-labels'
 import { layoutBusinessGraph, layoutCapitalGraphFromEdges } from '@/lib/relation-graph'
 import { collectRelatedCompanyIds, resolveCompanyNameFromRelations } from '../utils'

@@ -59,9 +59,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# Install Air for local Docker Compose hot reload.
+# Air はローカルの Docker Compose ホットリロード用。
+# GOPATH ではなく /usr/local/bin へ置き、どのユーザーからも PATH で引けるようにする。
 ARG AIR_VERSION=v1.62.0
-RUN go install github.com/air-verse/air@${AIR_VERSION}
+RUN GOBIN=/usr/local/bin go install github.com/air-verse/air@${AIR_VERSION}
 
 
 # OCR 依存はソース全体のコピーより前に入れる。
@@ -80,8 +81,19 @@ RUN if [ -d /app/scripts/wheels ] && [ "$(ls -A /app/scripts/wheels)" ]; then \
       python3 -m pip install --break-system-packages --prefer-binary --default-timeout=600 --retries=8 -r /app/scripts/requirements.txt ; \
     fi
 
+# 非 root 実行用のユーザー(#1410)。
+# 任意ファイル書き込み系の不具合が出たときの被害範囲を抑える。
+# 8080 番で待ち受けるため特権ポートの問題は無い。
+RUN groupadd --gid 10001 app \
+ && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/app --shell /bin/sh app
+
+# Go のキャッシュ類を /root から app のホーム配下へ移す。
+# /root は 0700 で、非 root からは GOPATH も GOCACHE も書けない。
+ENV GOPATH=/home/app/go
+ENV GOCACHE=/home/app/.cache/go-build
+
 # 実行時に config/match_reason_templates.json 等を相対パスで読むため、ソース一式が必要。
-COPY --from=builder /app /app
+COPY --from=builder --chown=app:app /app /app
 
 # Copy built binaries
 COPY --from=builder /bin/server /bin/server
@@ -90,6 +102,12 @@ COPY --from=builder /bin/migrate /bin/migrate
 # Make them executable
 RUN chmod +x /bin/server /bin/migrate
 
+# 書き込み先の所有権を合わせる。
+# storage は履歴書の保存先(resume_service.go の既定 storage/resumes が /app 相対)。
+RUN mkdir -p /app/storage /home/app/go/pkg/mod /home/app/.cache/go-build \
+ && chown -R app:app /app/storage /home/app
+
+USER app
 
 EXPOSE 8080
 

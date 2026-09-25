@@ -11,6 +11,7 @@ import {
 import { authService } from '@/lib/auth'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
+import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
 
 type Company = { id: number; name: string }
 type JobPosition = { id: number; title: string; company?: Company }
@@ -32,6 +33,9 @@ export default function PageContent() {
   const [graduateName, setGraduateName] = useState('')
   const [graduationYear, setGraduationYear] = useState('')
   const [schoolName, setSchoolName] = useState('')
+  // 担当校を持つ管理者(先生)が複数校を担当している場合、school_id 未指定だと 400 になる。
+  // 1校のみなら Backend 側が自動で埋めるため、この選択は表示されない(#1157)
+  const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
   const [department, setDepartment] = useState('')
   const [hiredAt, setHiredAt] = useState('')
   const [note, setNote] = useState('')
@@ -53,6 +57,7 @@ export default function PageContent() {
         graduate_name: graduateName,
         graduation_year: graduationYear ? Number(graduationYear) : 0,
         school_name: schoolName,
+        school_id: schoolId,
         department,
         hired_at: hiredAt,
         note,
@@ -89,6 +94,8 @@ export default function PageContent() {
         <TextField label="卒業生氏名" value={graduateName} onChange={(e) => setGraduateName(e.target.value)} />
         <TextField label="卒業年度" value={graduationYear} onChange={(e) => setGraduationYear(e.target.value)} type="number" />
         <TextField label="学校名" value={schoolName} onChange={(e) => setSchoolName(e.target.value)} />
+        {/* 担当校が複数ある管理者のみ表示される（1校なら Backend が自動で紐付ける） */}
+        <SchoolFilterSelect value={schoolId} onChange={setSchoolId} />
         <TextField label="学科/専攻" value={department} onChange={(e) => setDepartment(e.target.value)} />
         <TextField label="就職日 (YYYY-MM-DD)" value={hiredAt} onChange={(e) => setHiredAt(e.target.value)} />
         <TextField label="メモ" value={note} onChange={(e) => setNote(e.target.value)} multiline minRows={2} />

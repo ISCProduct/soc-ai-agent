@@ -1,3 +1,20 @@
+# ============================================================
+# staging (ECS on EC2) の EC2 ホスト用 Compose
+#
+# ローカル開発では使わない。ECR のイメージを pull して起動し、RDS 等の
+# マネージドリソースに接続するため、ローカルで実行すると staging の
+# リソースへ接続しにいく。ローカル開発は compose.yml を使うこと。
+#
+# 注意: このファイル自体は staging へ配布されない（#1477 のレビューで判明）。
+# EC2 上の /opt/app/docker-compose.yml を書くのは
+# infra/terraform/environments/staging/app_user_data.sh.tftpl で、
+# .github/workflows/deployment.yml はそれを `docker compose pull && up -d` するだけ
+# （scp するのは nginx 設定と ensure-edge-compose.sh のみ）。
+# 実際に staging で動くサービスは user_data 側の定義が正であり、
+# ここにしかない company-graph は staging / 本番のどちらでも起動していない。
+# 構成を変えるときは app_user_data.sh.tftpl と infra/staging/ensure-edge-compose.sh を直すこと。
+# 手順: docs/wiki/operations.md
+# ============================================================
 services:
   backend:
     image: 970835573274.dkr.ecr.ap-northeast-1.amazonaws.com/soc-backend:latest
@@ -48,7 +65,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       OPENAI_HINTS_MODEL: ${OPENAI_HINTS_MODEL:-gpt-4o-mini}
-      OPENAI_HINTS_PARSE_MODEL: ${OPENAI_HINTS_PARSE_MODEL:-gpt-4o}
+      OPENAI_HINTS_PARSE_MODEL: ${OPENAI_HINTS_PARSE_MODEL:-gpt-4o-mini}
       CHROMA_HOST: chroma
       CHROMA_PORT: "8000"
     depends_on:

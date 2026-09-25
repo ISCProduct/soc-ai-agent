@@ -22,7 +22,7 @@ import {
   type CapitalRelation,
   type CompanyMarketInfo,
   type MarketType,
-} from '@/lib/company-data'
+} from '@/lib/company/data'
 import { edgeTypes } from './CustomEdge'
 import { createDiagramData } from './createDiagramData'
 

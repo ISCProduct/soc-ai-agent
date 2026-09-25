@@ -15,8 +15,8 @@
 # crewai は依存衝突のため requirements.txt から除外済み（langchain 上限は crewai 制約によらない）。
 # 2026-08 に 1.x 系列へ移行（#894）。langchain-community は未使用のため削除。
 langchain>=1.4.0,<2.0
-langchain-core>=1.0,<2.0
-langchain-openai>=1.0,<2.0
+langchain-core>=1.6.3,<2.0
+langchain-openai>=1.6.2,<2.0
 langchain-text-splitters>=1.0,<2.0
 
 # --- ベクトルストア ---
@@ -31,7 +31,7 @@ numpy<3.0
 
 # --- LLM プロキシ ---
 # litellm は推移的依存。メジャーバージョン固定で API 互換性を保証。
-litellm>=1.99.0,<2.0
+litellm>=1.101.0,<2.0
 
 # --- OpenAI SDK ---
 # litellm>=1.83.7 が openai 2.x を要求するため 2.x 系列に移行。
@@ -47,3 +47,14 @@ tiktoken>=0.13.0,<0.14
 # openai SDK との互換性が確認された 0.28.x 系列に固定。
 # 0.29.x 以降は再検証が必要なため上限を設定。
 httpx>=0.28.1,<0.29
+
+# --- メトリクス（#1186） ---
+# /metrics の公開に使用。8.x を fastapi 0.141.1 と組み合わせて動作確認済み。
+# 9.x は未検証のため上限を設定する。
+prometheus-fastapi-instrumentator>=8.1.0,<9.0
+# 上記の推移的依存。Prometheus テキスト形式の互換を保つため 0.x 系に固定。
+prometheus-client>=0.26.0,<1.0
+
+# --- エラートラッキング（#1185） ---
+# FastAPI / Starlette 統合付き。3.x は未検証のため上限を設定する。
+sentry-sdk>=2.69.2,<3.0

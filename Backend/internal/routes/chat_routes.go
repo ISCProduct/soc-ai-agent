@@ -1,14 +1,14 @@
 package routes
 
 import (
-	"Backend/internal/controllers"
+	chatcontrollers "Backend/internal/controllers/chat"
 	"Backend/internal/services/auth"
 
 	"github.com/labstack/echo/v4"
 )
 
 // SetupChatRoutes チャット関連のルーティング設定
-func SetupChatRoutes(api *echo.Group, chatController *controllers.ChatController, questionController *controllers.QuestionController, userSecret string, access auth.UserAccessGuard, orgs OrganizationIDResolver) {
+func SetupChatRoutes(api *echo.Group, chatController *chatcontrollers.ChatController, questionController *chatcontrollers.QuestionController, userSecret string, access auth.UserAccessGuard, orgs OrganizationIDResolver) {
 	// チャットエンドポイント（認証必須）
 	chat := api.Group("/chat", EchoUserAuth(userSecret, access, orgs))
 	chat.POST("", chatController.Chat)

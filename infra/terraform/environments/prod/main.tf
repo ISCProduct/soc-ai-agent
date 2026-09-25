@@ -8,7 +8,10 @@ locals {
   backend_domain  = "api.${var.domain_name}"
 
   backend_secret_arns = compact(concat(
-    [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn, aws_secretsmanager_secret.email.arn, aws_secretsmanager_secret.admin.arn, aws_secretsmanager_secret.openai.arn, aws_secretsmanager_secret.rag_internal.arn],
+    [module.secrets.db_secret_arn, aws_secretsmanager_secret.oauth.arn, aws_secretsmanager_secret.email.arn, aws_secretsmanager_secret.admin.arn, aws_secretsmanager_secret.openai.arn, aws_secretsmanager_secret.rag_internal.arn, aws_secretsmanager_secret.bff_internal.arn],
+    # 法人番号API / gBizINFO(#1360)。AWS 側には既にあったがコードに無く、
+    # apply すると実行ロールからこの2つの取得許可が外れ、次のタスク起動が失敗する状態だった。
+    [aws_secretsmanager_secret.houjin_bangou.arn, aws_secretsmanager_secret.gbizinfo.arn],
     var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
     var.additional_secret_arns
   ))
@@ -38,8 +41,11 @@ locals {
     ],
     [
       {
-        name      = "OPENAI_API_KEY"
-        valueFrom = var.openai_api_key != "" ? "${aws_secretsmanager_secret.openai.arn}:openai_api_key::" : var.openai_secret_arn
+        name = "OPENAI_API_KEY"
+        # 既定は Terraform 管理のシークレットを指す。tfvars を空にする運用(#1158)でも
+        # 参照先が空文字にならないようにするため、フォールバックの向きをこうしている。
+        # 外部で作った別のシークレットを使いたいときだけ openai_secret_arn を指定する。
+        valueFrom = var.openai_api_key == "" && var.openai_secret_arn != "" ? var.openai_secret_arn : "${aws_secretsmanager_secret.openai.arn}:openai_api_key::"
       }
     ],
     [
@@ -94,6 +100,26 @@ locals {
       {
         name      = "RAG_INTERNAL_TOKEN"
         valueFrom = "${aws_secretsmanager_secret.rag_internal.arn}:rag_internal_token::"
+      },
+      {
+        # frontend(BFF)が転送する X-Client-IP を信用してよいかの判定に使う(#1407)。
+        # 未設定でも起動はする（その場合はIP単位の制限が従来どおりBFFの出口IPで集計される）。
+        name      = "BFF_INTERNAL_TOKEN"
+        valueFrom = "${aws_secretsmanager_secret.bff_internal.arn}:bff_internal_token::"
+      }
+    ],
+    [
+      # 手で登録されたタスク定義(rev 70/71)は HOUJIN 側の ARN が壊れており
+      # (/houjin-bangou-xxxx:h が欠落)、存在しないシークレットを指していた。
+      # ECS は起動時に全シークレットを解決するため、次の起動で失敗する(#1371)。
+      # 参照をコードで組み立てて、手作業のタイプミスが入らないようにする。
+      {
+        name      = "HOUJIN_BANGOU_APP_ID"
+        valueFrom = "${aws_secretsmanager_secret.houjin_bangou.arn}:houjin_bangou_app_id::"
+      },
+      {
+        name      = "GBIZINFO_API_KEY"
+        valueFrom = "${aws_secretsmanager_secret.gbizinfo.arn}:gbizinfo_api_key::"
       }
     ]
   )
@@ -136,6 +162,13 @@ resource "aws_secretsmanager_secret_version" "oauth" {
     github_client_id     = var.github_client_id
     github_client_secret = var.github_client_secret
   })
+
+  lifecycle {
+    # 値の管理をTerraformから外す(#1158)。初回作成後はSecrets Manager側の値が正。
+    # これが無いと、ローカルのtfvarsに本番の平文を置き続けない限りplanが差分を出し、
+    # 空文字で上書きしてしまう。外部サービス由来のキーはAWS CLI/コンソールで更新する。
+    ignore_changes = [secret_string]
+  }
 }
 
 # Resend(メール送信)APIキー(#756: EMAIL_PROVIDER未設定でもRESEND_API_KEYがあれば自動選択される)
@@ -149,6 +182,11 @@ resource "aws_secretsmanager_secret_version" "email" {
   secret_string = jsonencode({
     resend_api_key = var.resend_api_key
   })
+
+  lifecycle {
+    # 値の管理をTerraformから外す(#1158)。
+    ignore_changes = [secret_string]
+  }
 }
 
 # 管理者認証シークレット(sync-whats-newジョブ等、CIからのサービス間呼び出しに使用)
@@ -157,15 +195,62 @@ resource "aws_secretsmanager_secret" "admin" {
   tags = local.tags
 }
 
+# admin_secret は staging と同じ固定値を入れる運用だったが、staging の漏洩が
+# そのまま本番の管理者権限になる(#1158)。未指定なら本番専用の値を自動生成する。
+# CI(sync-whats-new)は Secrets Manager から読む形に変えてあるため、既知の値である必要はない。
+resource "random_password" "admin_secret" {
+  length  = 48
+  special = false
+}
+
 resource "aws_secretsmanager_secret_version" "admin" {
   secret_id = aws_secretsmanager_secret.admin.id
   secret_string = jsonencode({
-    admin_secret         = var.admin_secret
+    admin_secret         = var.admin_secret != "" ? var.admin_secret : random_password.admin_secret.result
     user_secret          = random_password.user_secret.result
     company_user_secret  = random_password.company_user_secret.result
     oauth_state_secret   = random_password.oauth_state_secret.result
     token_encryption_key = random_id.token_encryption_key.hex
   })
+
+  lifecycle {
+    # 値の管理をTerraformから外す(#1158)。
+    # user_secret 等の random_password は再生成されても全セッションが無効になるだけで
+    # 済むが、それを意図せず引き起こさないためにも固定する。ローテーションは
+    # AWS CLI で値を書き換える(docs/wiki/prod-secrets-rotation.md)。
+    ignore_changes = [secret_string]
+  }
+}
+
+# 法人番号API / gBizINFO のシークレット(#1360)。
+#
+# AWS 側には手作業で作成されており、タスク定義もこれを注入していたが、
+# Terraform には定義が無かった。そのまま apply すると実行ロールの許可から
+# この2つが外れ、次にタスクを起動したとき(=稼働日の朝)に失敗する状態だった。
+#
+# 値は Terraform で管理しない(#1158 と同じ方針)。ここでは入れ物だけを持つ。
+# secret_version を作ると、既存の値を空文字で上書きしてしまう。
+import {
+  to = aws_secretsmanager_secret.houjin_bangou
+  id = "arn:aws:secretsmanager:ap-northeast-1:508897596159:secret:soc-app/houjin-bangou-5RpFkr"
+}
+
+resource "aws_secretsmanager_secret" "houjin_bangou" {
+  name = "${var.project_name}/houjin-bangou"
+  # AWS 側に入っている説明をそのまま持つ。書かないと import で消える。
+  description = "国税庁 法人番号システムWeb-API のアプリケーションID"
+  tags        = local.tags
+}
+
+import {
+  to = aws_secretsmanager_secret.gbizinfo
+  id = "arn:aws:secretsmanager:ap-northeast-1:508897596159:secret:soc-app/gbizinfo-KojOzj"
+}
+
+resource "aws_secretsmanager_secret" "gbizinfo" {
+  name        = "${var.project_name}/gbizinfo"
+  description = "gBizINFO Web-API のアクセストークン"
+  tags        = local.tags
 }
 
 # OpenAI APIキー(DB/OAuth同様、Secrets Managerで管理しECSタスク実行ロール経由で注入)
@@ -181,13 +266,19 @@ resource "aws_secretsmanager_secret_version" "openai" {
   })
 
   lifecycle {
+    # 値の管理をTerraformから外す(#1158)。
+    ignore_changes = [secret_string]
+
     # openai_api_key/openai_secret_arnの両方が空のままapplyされると、OPENAI_API_KEYが
     # 空文字で本番backendが起動時にクラッシュする(過去に実際発生した障害)。
     # variable validationでのvar間参照はTerraform 1.9+が必要(このリポジトリの
     # required_version >= 1.5.0と非互換)なため、resourceのpreconditionで検証する。
+    #
+    # 値をSecrets Manager側で管理している環境(secret_values_managed_outside=true)では
+    # tfvarsが空なのが正しい状態なので、この検査は初期構築時のみに効かせる。
     precondition {
-      condition     = var.openai_api_key != "" || var.openai_secret_arn != ""
-      error_message = "openai_api_key と openai_secret_arn のいずれかを設定してください(両方空だと本番backendが起動できません)。"
+      condition     = var.secret_values_managed_outside || var.openai_api_key != "" || var.openai_secret_arn != ""
+      error_message = "openai_api_key と openai_secret_arn のいずれかを設定してください(両方空だと本番backendが起動できません)。値をSecrets Manager側で管理している場合は secret_values_managed_outside = true を設定してください。"
     }
   }
 }
@@ -468,6 +559,41 @@ resource "aws_secretsmanager_secret_version" "rag_internal" {
   })
 }
 
+# frontend(BFF) -> backend の内部認証トークン(#1407)。
+# backend の ALB はインターネット直結なので、X-Client-IP は誰でも送れる。
+# このトークンが一致したときだけ backend が X-Client-IP を実クライアントIPとして採用し、
+# IP単位のレート制限を利用者ごとに効かせる。不一致・未設定なら無視して従来の XFF 末尾を使う
+# （fail-closed で拒否はしない。シークレット未配布でサイトを落とさないため）。
+resource "random_password" "bff_internal_token" {
+  length  = 48
+  special = false
+}
+
+# CloudFront -> ALB の経路証明トークン(#1407)。
+# ALB は 0.0.0.0/0 に開いており、api.${var.domain_name} から得た同じALBのIPへ
+# frontend の Host/SNI で直接接続できる。この迂回経路で詐称 X-Forwarded-For を送られても
+# 段数だけ見ると「CloudFront+ALBの2段」と区別が付かないため、CloudFront が付与する
+# このトークンが一致したときだけ frontend が段数を信用する。
+# bff_internal_token とは別値にする（CloudFront 設定側に置く値なので、漏れても
+# backend の X-Client-IP 採用権限までは渡らないようにする）。
+resource "random_password" "cloudfront_origin_token" {
+  length  = 48
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "bff_internal" {
+  name = "${var.project_name}/bff-internal"
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "bff_internal" {
+  secret_id = aws_secretsmanager_secret.bff_internal.id
+  secret_string = jsonencode({
+    bff_internal_token      = random_password.bff_internal_token.result
+    cloudfront_origin_token = random_password.cloudfront_origin_token.result
+  })
+}
+
 # --- ドメイン紐付け（既存 Route53 ホストゾーンを使用） ---
 data "aws_route53_zone" "selected" {
   name = var.domain_name
@@ -488,6 +614,9 @@ module "alb" {
   target_type          = "ip"
   # 本番反映の切り替え待機を短縮する(デプロイ頻度が高いため #運用実績)
   deregistration_delay = 10
+  # 5xxの発生元を特定できるようにする。無効だった間、14日で50,997件のELB 5xxが
+  # 出ていたのに誰が来ているのか分からなかった。
+  enable_access_logs = true
   # 学園マルチテナント(<学園slug>.shukatsu-ai.jp)とadmin.shukatsu-ai.jp用のワイルドカードSAN
   additional_san_domains = ["*.${var.domain_name}"]
   tags                   = local.tags
@@ -522,10 +651,16 @@ module "backend" {
     OPENAI_WEB_SEARCH_MODEL     = "gpt-4o-mini"
     OPENAI_COMPANY_SEARCH_MODEL = "gpt-4o-mini"
     OPENAI_HINTS_MODEL          = "gpt-4o-mini"
+    # 企業検索の web_search のコスト調整ノブ (#1124)。
+    # 検索結果が固定トークンとして課金されるため、1コールの重さがそのままコストに効く。
+    # 品質が落ちたら "high" に戻す（apply とサービス更新が必要）。
+    OPENAI_WEB_SEARCH_CONTEXT_SIZE = "medium"
     # AI面接のSTT。miniは「御社」を「本社」と誤認しやすく、問題発話だけ
     # gpt-4o-transcribe へ自動で再送する(stt_fallback.go)。
     # 精度に問題が出たら var.openai_whisper_model を gpt-4o-transcribe にする。
     OPENAI_WHISPER_MODEL = var.openai_whisper_model
+    # gBizINFO の参照先(#1360)。実体のタスク定義に入っていたがコードに無かった。
+    GBIZINFO_BASE_URL = var.gbizinfo_base_url
     # 未設定だとOAuthコールバックURLがlocalhost:8080にフォールバックし、
     # 本番でOAuthログインが機能しなくなる(実際に発生した障害)。
     BASE_URL = "https://${local.backend_domain}"
@@ -535,6 +670,10 @@ module "backend" {
     # 同一タスク内のredisサイドカーへlocalhost経由で接続(awsvpcモードはコンテナ間で
     # ネットワーク名前空間を共有するため)
     REDIS_URL = "redis://localhost:6379/0"
+    # 本番だけ Sentry が未設定で、エラーがどこにも残っていなかった(stagingにはある)。
+    # 空文字なら InitSentry が no-op になるので、未設定のままでも起動はする。
+    SENTRY_DSN         = var.sentry_dsn
+    SENTRY_ENVIRONMENT = "production"
     # Cloud Map(Service Discovery)経由でrag-reviewタスクへ到達する
     RAG_REVIEW_URL = "http://rag-review.${aws_service_discovery_private_dns_namespace.internal.name}:9000"
   }
@@ -580,7 +719,29 @@ module "frontend" {
     # セッションリフレッシュ等)がprocess.envを実行時に読む経路のために設定する。
     BACKEND_URL             = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
     NEXT_PUBLIC_BACKEND_URL = var.frontend_api_base_url != "" ? var.frontend_api_base_url : "https://${local.backend_domain}"
+    # X-Forwarded-For のどこが実クライアントIPかは frontend の手前の段数で決まる(#1407)。
+    # enable_error_fallback が有効なときだけ CloudFront が1段増える。
+    TRUSTED_PROXY_HOPS = var.enable_error_fallback ? "2" : "1"
   }
+  # Route Handler から backend を呼ぶときに実クライアントIPを添えるための共有トークン(#1407)。
+  # backend 側と同じ値でないと X-Client-IP は無視される。
+  secret_arns = [aws_secretsmanager_secret.bff_internal.arn]
+  secrets = concat(
+    [
+      {
+        name      = "BFF_INTERNAL_TOKEN"
+        valueFrom = "${aws_secretsmanager_secret.bff_internal.arn}:bff_internal_token::"
+      }
+    ],
+    # CloudFront 経由であることの証明。これを設定した環境では、一致しない
+    # リクエスト(=ALB直叩き)の X-Forwarded-For を実IPとして採用しない(#1407)。
+    var.enable_error_fallback ? [
+      {
+        name      = "CLOUDFRONT_ORIGIN_TOKEN"
+        valueFrom = "${aws_secretsmanager_secret.bff_internal.arn}:cloudfront_origin_token::"
+      }
+    ] : []
+  )
   tags = local.tags
 }
 
@@ -603,11 +764,18 @@ module "rag_review" {
   enable_execute_command         = true
   region                         = var.region
   s3_bucket_arn                  = module.s3.bucket_arn
-  secret_arns                    = [aws_secretsmanager_secret.openai.arn, aws_secretsmanager_secret.rag_internal.arn]
+  # openai_secret_arn を使う経路では実行ロールにその ARN の取得許可が要る。
+  # backend 側(local.backend_secret_arns)には入っているが、ここには無かった。
+  secret_arns = compact(concat(
+    [aws_secretsmanager_secret.openai.arn, aws_secretsmanager_secret.rag_internal.arn],
+    var.openai_secret_arn != "" ? [var.openai_secret_arn] : [],
+  ))
   secrets = [
     {
-      name      = "OPENAI_API_KEY"
-      valueFrom = var.openai_api_key != "" ? "${aws_secretsmanager_secret.openai.arn}:openai_api_key::" : var.openai_secret_arn
+      name = "OPENAI_API_KEY"
+      # backend 側(local.backend_secrets)と同じ向き。tfvars を空にする運用(#1158)で
+      # 参照先が空文字にならないよう、既定は Terraform 管理のシークレットを指す。
+      valueFrom = var.openai_api_key == "" && var.openai_secret_arn != "" ? var.openai_secret_arn : "${aws_secretsmanager_secret.openai.arn}:openai_api_key::"
     },
     {
       name      = "RAG_INTERNAL_TOKEN"
@@ -617,7 +785,10 @@ module "rag_review" {
   environment = {
     OPENAI_EMBEDDING_MODEL   = "text-embedding-3-small"
     OPENAI_HINTS_MODEL       = "gpt-4o-mini"
-    OPENAI_HINTS_PARSE_MODEL = "gpt-4o"
+    OPENAI_HINTS_PARSE_MODEL = "gpt-4o-mini"
+    # Web検索のコスト調整ノブ (#1124)。品質が落ちたら戻す（apply が必要）
+    OPENAI_WEB_SEARCH_CONTEXT_SIZE = "medium"
+    OPENAI_WEB_SEARCH_MAX_QUERIES  = "4"
     # chromaは独立サービス。Cloud Map経由で名前解決する
     CHROMA_HOST = "chroma.${aws_service_discovery_private_dns_namespace.internal.name}"
     CHROMA_PORT = "8000"
@@ -795,6 +966,7 @@ module "cloudfront_app_proxy" {
   aliases                   = [local.frontend_domain, "*.${var.domain_name}"]
   route53_zone_id           = data.aws_route53_zone.selected.zone_id
   alb_dns_name              = module.alb.alb_dns_name
+  origin_token              = random_password.cloudfront_origin_token.result
   service_unavailable_html  = file("${path.module}/../../../static/service-unavailable.html")
   tags                      = local.tags
 }

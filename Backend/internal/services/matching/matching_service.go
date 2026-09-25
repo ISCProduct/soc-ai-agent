@@ -9,6 +9,7 @@ import (
 	"Backend/internal/openai"
 	"Backend/internal/services/prompts"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"context"
 	"errors"
 	"fmt"
@@ -85,12 +86,23 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 
 	// 3. 各企業とのマッチングを計算（プロファイルはメモリ上で参照）
 	pending := make([]*entity.UserCompanyMatch, 0, len(companies))
+	skippedNoProfile := 0
 	for i := range companies {
 		company := &companies[i]
 		profile, ok := profiles[company.ID]
 		if !ok || profile == nil {
-			log.Printf("[CalculateMatching] Warning: No profile for company %d; using default weights\n", company.ID)
-			profile = defaultCompanyWeightProfile(company.ID)
+			// プロファイルが無い企業はマッチング対象から外す（#1380）。
+			//
+			// 以前は全軸50のデフォルトで埋めていたが、全軸50は「取りうる中で
+			// 最も平坦なプロファイル」で、マッチ度が 100-|差| である以上、
+			// スコアが50付近の平均的な学生に対して各軸100点になる。
+			// 情報が無い企業ほど上位に来るという逆のインセンティブになり、
+			// 学生にも「なぜ1位なのか」を説明できない。
+			//
+			// 根拠が無いなら勧めない。件数は CountPublishedWithoutWeightProfile
+			// （GetDiagnostics の companies_without_profile）で集計できる。
+			skippedNoProfile++
+			continue
 		}
 
 		match := s.calculateMatchScore(scoreMap, profile)
@@ -99,9 +111,24 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 		match.CompanyID = company.ID
 		match.Company = mapper.CompanyToEntity(company)
 
-		// ここでは LLM を呼ばず、テンプレ+DB のみで理由を埋める（外部I/Oなし）
-		match.MatchReason = BuildMatchReason(match, userScores)
+		// テンプレ理由はここでは作らない。
+		//
+		// 以前は全公開企業ぶん BuildMatchReason を回して match_reason に保存していた。
+		// だが表示されるのは match_score 降順の上位10件だけで、読み出し側
+		// (chat_controller の推薦一覧・メールレポート) はどちらも BuildMatchReason を
+		// 呼び直す。保存済みが空ならその場で同じ文面が作られるため結果は変わらない。
+		//
+		// 実測: BuildMatchReason は 16.7KB/回。本番想定の4,000社では1回の診断で
+		// 67MB を確保し、うち表示されるのは10件ぶんだけだった（CalculateMatching
+		// 全体の確保メモリの96%）。あわせて TEXT 列を4,000行ぶん書いていた。
+		//
+		// AI 生成の理由は高価なので上位N件だけ保存する（applyAIReasonsToTopMatches）。
 		pending = append(pending, match)
+	}
+
+	if skippedNoProfile > 0 {
+		log.Printf("[CalculateMatching] Skipped %d of %d published companies without weight profile\n",
+			skippedNoProfile, len(companies))
 	}
 
 	// 4. 表示されるのは match_score 降順の上位のみ（FindTopMatchesByUserAndSession）。
@@ -123,8 +150,9 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 // 全公開企業ぶん生成すると、本番想定 2,500〜4,000 社では大半が捨てられる LLM 呼び出しになり、
 // #588 が既定オフにした理由（コストとレイテンシ）がそのまま戻る。
 //
-// 呼び出し前に全件が BuildMatchReason で埋まっているため、AI 生成に失敗しても
-// テンプレ理由が残る。既定オフのときは何もしない。
+// AI 生成に失敗した場合 match_reason は空のままになる。読み出し側が
+// BuildMatchReason でテンプレ理由を作るため、利用者から見える結果は変わらない。
+// 既定オフのときは何もしない（その場合 match_reason は全件空になる）。
 func (s *MatchingService) applyAIReasonsToTopMatches(
 	ctx context.Context, pending []*entity.UserCompanyMatch, userScores []entity.UserWeightScore,
 ) {
@@ -136,6 +164,12 @@ func (s *MatchingService) applyAIReasonsToTopMatches(
 	log.Printf("[CalculateMatching] Generating AI reasons for top %d of %d matches\n", len(top), len(pending))
 
 	for _, match := range top {
+		// 打ち切り済みなら残りのLLM呼び出しは全て失敗するだけなので、ここで抜ける（#1167）。
+		// 最も時間を使うのがこのループなので、キャンセルが実際に効くのもここ。
+		if ctx.Err() != nil {
+			log.Printf("[CalculateMatching] AI reason generation aborted: %v\n", ctx.Err())
+			return
+		}
 		reason, err := s.GenerateMatchReason(ctx, match, userScores)
 		if err != nil {
 			log.Printf("[CalculateMatching] Warning: Failed to generate AI reason for company %d: %v\n", match.CompanyID, err)
@@ -214,7 +248,9 @@ func (s *MatchingService) calculateMatchScore(
 	match.DetailMatch, evaluatedCount, totalScore = scoredMatch(userScores, "細部志向", float64(companyProfile.DetailOrientation), evaluatedCount, totalScore)
 	match.CommunicationMatch, evaluatedCount, totalScore = scoredMatch(userScores, "コミュニケーション力", float64(companyProfile.CommunicationSkill), evaluatedCount, totalScore)
 
-	// 総合マッチ度を計算（全カテゴリの平均）
+	// 総合マッチ度は「計測できた軸だけ」の平均（#1124）。
+	// 何件で算出したかを持たせ、表示側が根拠の薄さを示せるようにする。
+	match.MatchedAxisCount = evaluatedCount
 	if evaluatedCount > 0 {
 		match.MatchScore = totalScore / float64(evaluatedCount)
 	} else {
@@ -224,44 +260,44 @@ func (s *MatchingService) calculateMatchScore(
 	return match
 }
 
-func defaultCompanyWeightProfile(companyID uint) *models.CompanyWeightProfile {
-	return &models.CompanyWeightProfile{
-		CompanyID:             companyID,
-		TechnicalOrientation:  50,
-		TeamworkOrientation:   50,
-		LeadershipOrientation: 50,
-		CreativityOrientation: 50,
-		StabilityOrientation:  50,
-		GrowthOrientation:     50,
-		WorkLifeBalance:       50,
-		ChallengeSeeking:      50,
-		DetailOrientation:     50,
-		CommunicationSkill:    50,
-	}
-}
-
+// scoredMatch はカテゴリ1つ分のマッチ度を返す。
+//
+// 未計測カテゴリは平均に含めない（#1124）。以前は中立値(50)で埋めたうえで
+// 評価対象に数えていたため、企業の重視度が 45〜70 に寄っている実データでは
+// 差が小さくなり、スコアを1つも持たないユーザーでも全企業と97%前後で
+// 一致してしまっていた。計測できていない軸は「一致」ではなく「不明」。
 func scoredMatch(userScores map[string]float64, category string, companyWeight float64, evaluatedCount int, totalScore float64) (float64, int, float64) {
-	// 未評価カテゴリは中立値(50)として扱い、評価対象に含める
 	userScore, ok := userScores[category]
 	if !ok {
-		userScore = 50.0
+		// 未計測。0 を返すが平均には数えない（MatchedAxisCount で件数が分かる）
+		return 0, evaluatedCount, totalScore
 	}
 	matchScore := CalculateCategoryMatch(userScore, companyWeight)
 	return matchScore, evaluatedCount + 1, totalScore + matchScore
 }
 
-// CalculateCategoryMatch カテゴリごとのマッチ度を計算
-// 差分を直接線形に扱う代わりに、意味的な緩やかな変化を持つシグモイド関数でスケーリングする。
-// ユーザースコアと企業重視度の差が小さいほど高スコア（0-100）。
+// CalculateCategoryMatch カテゴリごとのマッチ度を計算する（0-100）。
+//
+// ユーザースコアと企業重視度の差をそのまま減点する。
+//
+//	差   0 -> 100
+//	差  10 -> 90
+//	差  20 -> 80
+//	差  30 -> 70
+//	差  50 -> 50
+//	差 100 -> 0
+//
+// 以前はロジスティック関数（k=12）でスケーリングしていたが、実際に現れる差の範囲
+// （企業の重視度 35〜92、ユーザースコア 0〜80）がすべて曲線の平坦部に入り、
+// 差20で97.3、差30で91.7と、ほとんど差が出なかった。
+// 本番相当DBでは全90社が91〜99%（平均97%）に固まり、
+// 「どの企業とも高相性」としか読めない状態だった（#1124）。
+//
+// 線形にしたのは、スコアの意味が読み手に伝わるようにするため。
+// 「差がそのまま減点」なら結果から逆算でき、係数の調整も要らない。
 func CalculateCategoryMatch(userScore, companyWeight float64) float64 {
 	diff := math.Abs(userScore - companyWeight) // 0..100
-	// similarity: 1.0 (完全一致) -> 0.0 (完全不一致)
-	sim := 1.0 - diff/100.0
-	// ロジスティック関数でスケーリング。中心を 0.5、スロープを適度に設定して差の小さい領域で緩やかに変化するようにする。
-	k := 12.0
-	x := k * (sim - 0.5)
-	s := 1.0 / (1.0 + math.Exp(-x))
-	return math.Max(0.0, math.Min(100.0, 100.0*s))
+	return math.Max(0.0, math.Min(100.0, 100.0-diff))
 }
 
 // GetTopMatches マッチング度の高い企業を取得
@@ -289,6 +325,9 @@ type MatchingDiagnostics struct {
 	UserScoreCount     int64 `json:"user_score_count"`
 	ActiveCompanyCount int64 `json:"active_company_count"`
 	WeightProfileCount int64 `json:"weight_profile_count"`
+	// CompaniesWithoutProfile は公開中なのに会社単位プロファイルを持たない企業数（#1380）。
+	// これらはマッチング対象から外れるため、推薦が出ない原因を運用者が数えられるようにする。
+	CompaniesWithoutProfile int64 `json:"companies_without_profile"`
 }
 
 func (s *MatchingService) GetDiagnostics(userID uint, sessionID string) (*MatchingDiagnostics, error) {
@@ -304,10 +343,15 @@ func (s *MatchingService) GetDiagnostics(userID uint, sessionID string) (*Matchi
 	if err != nil {
 		return nil, err
 	}
+	companiesWithoutProfile, err := s.companyRepo.CountPublishedWithoutWeightProfile()
+	if err != nil {
+		return nil, err
+	}
 	return &MatchingDiagnostics{
-		UserScoreCount:     userScoreCount,
-		ActiveCompanyCount: activeCompanyCount,
-		WeightProfileCount: weightProfileCount,
+		UserScoreCount:          userScoreCount,
+		ActiveCompanyCount:      activeCompanyCount,
+		WeightProfileCount:      weightProfileCount,
+		CompaniesWithoutProfile: companiesWithoutProfile,
 	}, nil
 }
 
@@ -325,6 +369,7 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 	}
 
 	userPrompt := buildMatchingReasonUserPrompt(match, userScores)
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureMatchingReason)
 	reason, err := s.aiClient.ResponsesWithTemperature(
 		ctx,
 		prompts.MatchingReasonSystemPrompt,

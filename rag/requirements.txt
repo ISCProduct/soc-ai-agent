@@ -6,12 +6,19 @@ chromadb>=0.6.3,<0.7.0
 fastapi==0.141.1
 # LangChain（埋め込み・検索・今後のチェーン化）。1.x 系に固定（constraints.txt 参照）。
 langchain>=1.4.0,<2.0
-langchain-core>=1.0,<2.0
-langchain-openai>=1.0,<2.0
+langchain-core>=1.6.3,<2.0
+langchain-openai>=1.6.2,<2.0
 langchain-text-splitters>=1.0,<2.0
 # openai SDK 2.x 系（litellm との両立）
 openai>=1.109.1,<3.0
+# /metrics 公開（#1186）
+prometheus-fastapi-instrumentator==8.1.0
+# エラートラッキング（#1185）。DSN 未設定時は起動時に何もしない。
+# extras は付けない。CI が本ファイルを -c constraints としても使うため、
+# pip が "Constraints cannot have extras" で落ちる（rag-tests.yml）。
+# FastAPI 統合は fastapi が既に入っているので sentry_sdk 本体で足りる。
+sentry-sdk>=2.69.2,<3.0
 pydantic==2.13.5
 pytest==9.1.1
 tiktoken==0.13.0
-uvicorn==0.52.3
+uvicorn==0.53.0

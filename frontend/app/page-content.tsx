@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Box, IconButton, AppBar, Toolbar, Typography, Alert, Link as MuiLink } from '@mui/material'
 import NextLink from 'next/link'
 import { Menu as MenuIcon } from '@mui/icons-material'
-import { AnalysisSidebar } from '@/components/analysis-sidebar'
+import { AnalysisSidebar } from '@/components/AnalysisSidebar'
 import { MuiChat } from '@/components/mui-chat'
 import { PageLoading } from '@/components/common/PageLoading'
 import { authService, User } from '@/lib/auth'
@@ -73,8 +73,15 @@ export default function PageContent() {
         <AppBar
           position="static"
           elevation={0}
-          className={styles.mobileHeader}
-          sx={{ backgroundColor: '#fff', borderBottom: '1px solid #e0e0e0' }}
+          // 表示条件は sx に一本化する。
+          // CSS Modules の `@media (min-width:900px){ display:none }` は
+          // MUI が AppBar へ当てる `display:flex` に負けており、PCでも
+          // 高さ49pxのモバイルヘッダーが残ってチャット内のタイトルと重複していた。
+          sx={{
+            display: { xs: 'flex', md: 'none' },
+            backgroundColor: '#fff',
+            borderBottom: '1px solid #e0e0e0',
+          }}
         >
           <Toolbar variant="dense" sx={{ minHeight: 48 }}>
             <IconButton
@@ -85,7 +92,9 @@ export default function PageContent() {
             >
               <MenuIcon />
             </IconButton>
-            <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'text.primary' }}>
+            {/* モバイル専用の見出し（#1479）。PCでは AppBar ごと非表示になり、
+                代わりに ChatHeader 側のタイトルが h1 として見える。 */}
+            <Typography variant="subtitle1" component="h1" sx={{ fontWeight: 600, color: 'text.primary' }}>
               IT業界キャリアエージェント
             </Typography>
           </Toolbar>

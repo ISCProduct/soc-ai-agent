@@ -24,6 +24,8 @@ export interface Company {
   employees: string
   description: string
   matchScore: number
+  /** matchScore の算出に使えた軸の数（0-10、#1124）。少ないほど根拠が薄い */
+  matchedAxisCount?: number
   tags: string[]
   techStack: string[]
   categoryScores?: CategoryScores
@@ -58,4 +60,6 @@ export interface RecommendationsDiagnostics {
   user_score_count?: number
   active_company_count?: number
   weight_profile_count?: number
+  /** 公開中なのに重視度プロファイルを持たない企業数（#1380。マッチング対象外） */
+  companies_without_profile?: number
 }

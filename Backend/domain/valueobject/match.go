@@ -79,9 +79,9 @@ func (m MatchScore) String() string {
 // 正典は上の10種類だが、シードデータ・質問体系・面接スコアの写像が
 // それぞれ独自の表記を持っており、user_weight_scores に正典外の値が
 // 書き込まれていた。マッチング側は scoreMap を正典キーで引くため、
-// 不一致の行は引かれず、代わりに中立50が使われる
-// （matching_service.go の scoredMatch）。エラーもログも出ないまま
-// ユーザーの実スコアが捨てられる。
+// 不一致の行は引かれず、その軸は未計測として平均から除外される
+// （matching_service.go の scoredMatch。#1124 以前は中立50で埋めていた）。
+// エラーもログも出ないままユーザーの実スコアが捨てられる。
 //
 // 表記を1箇所に集約し、保存経路で必ず通すことで再発を止める。
 var weightCategoryAliases = map[string]WeightCategory{
@@ -106,16 +106,15 @@ var weightCategoryAliases = map[string]WeightCategory{
 	// 正典10軸に対応する軸が無いものを最も近い軸へ寄せているため、
 	// スコアの意味が元の質問の意図とは変わる。
 	//
-	// 特に ビジネス思考・目標志向 -> 成長志向 は消去法で、対応が弱い。
-	// 正典に事業志向の軸が無いためどこへ寄せても不正解になる。
-	// 詳細と切り離す条件は docs/wiki/scoring.md「カテゴリの正典と別名」を参照。
+	// ビジネス思考・目標志向は成長志向へ寄せない（学習意欲と混ざるため）。
+	// 成果・目標達成はチャレンジ志向へ。詳細は docs/wiki/scoring.md。
 	"創造性・発想力":     CategoryCreativity,
 	"学習意欲・成長志向":   CategoryGrowth,
 	"問題解決力":       CategoryTechnical,
 	"分析思考":        CategoryTechnical,
 	"計画性・実行力":     CategoryDetail,
 	"ストレス耐性・粘り強さ": CategoryChallenge,
-	"ビジネス思考・目標志向": CategoryGrowth,
+	"ビジネス思考・目標志向": CategoryChallenge,
 }
 
 // NormalizeWeightCategory は表記揺れを正典へ寄せる。

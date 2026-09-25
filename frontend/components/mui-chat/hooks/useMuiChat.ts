@@ -6,12 +6,11 @@ import { sendChatMessage, getChatHistory, type ChatRequest, type ChatResponse } 
 import { UserFacingApiError, gatewayErrorPath } from '@/lib/user-facing-error'
 import { authService } from '@/lib/auth'
 import { buildResultsPath, getResultsSessionContext } from '@/lib/results-navigation'
-import { resolveChatOutgoingMessage } from '@/lib/chat-choices'
+import { buildChoiceOutgoingMessage, resolveChatOutgoingMessage } from '@/lib/chat-choices'
 import {
   extractChoices,
   makeMessageId,
   INITIAL_GREETING,
-  RESET_GREETING,
   clearChatSessionOnEnd,
   readStoredJobCategoryId,
   writeStoredJobCategoryId,
@@ -41,6 +40,7 @@ export function useMuiChat() {
   const [showEndChatModal, setShowEndChatModal] = useState(false)
   const [showTerminationModal, setShowTerminationModal] = useState(false)
   const [otherChoiceActive, setOtherChoiceActive] = useState(false)
+  const [selectedChoiceValue, setSelectedChoiceValue] = useState<string | null>(null)
   const [phaseProgresses, setPhaseProgresses] = useState<PhaseProgress[] | null>(null)
   const [historyLoadError, setHistoryLoadError] = useState<string | null>(null)
   const [historyRetrying, setHistoryRetrying] = useState(false)
@@ -189,7 +189,6 @@ export function useMuiChat() {
       // 3. 新規生成
       let storedSessionId = localStorage.getItem('currentSessionId')
       if (storedSessionId) {
-        console.log('[MUI Chat] Loading session from localStorage:', storedSessionId)
         // localStorageから読み込んだ後は削除
         localStorage.removeItem('currentSessionId')
       } else {
@@ -198,7 +197,6 @@ export function useMuiChat() {
 
       if (!storedSessionId) {
         storedSessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`
-        console.log('[MUI Chat] Created new session:', storedSessionId)
       }
 
       sessionStorage.setItem('chatSessionId', storedSessionId)
@@ -206,7 +204,6 @@ export function useMuiChat() {
       setJobCategoryId(readStoredJobCategoryId(storedSessionId))
 
       try {
-        console.log('[MUI Chat] Loading history for session:', storedSessionId)
         await loadChatHistory(storedSessionId)
       } catch (error) {
         if (isSessionExpiredError(error)) {
@@ -228,22 +225,27 @@ export function useMuiChat() {
   }, [])
 
   const handleSend = async (overrideMessage?: string) => {
-    const rawText = (overrideMessage ?? input).trim()
-    if (!rawText || isLoading || !sessionId || !userId || historyLoadError) return
-
-    // ボタン送信はそのまま。自由入力は直近の選択肢ラベルを記号へ正規化する
-    const lastAssistant = findLastAssistantQuestionMessage(messages)
-    const currentChoices = lastAssistant ? extractChoices(lastAssistant.content) : []
-    const messageText =
-      overrideMessage !== undefined
-        ? rawText
-        : resolveChatOutgoingMessage(rawText, currentChoices, otherChoiceActive)
+    if (isLoading || !sessionId || !userId || historyLoadError) return
 
     // 分析完了後はメッセージ送信を無効化
     if (analysisComplete) {
-      console.log('[MUI Chat] Analysis already complete, ignoring message')
       return
     }
+
+    const lastAssistant = findLastAssistantQuestionMessage(messages)
+    const currentChoices = lastAssistant ? extractChoices(lastAssistant.content) : []
+
+    let messageText: string
+    if (overrideMessage !== undefined) {
+      // クイック選択など明示 override
+      messageText = overrideMessage.trim()
+    } else if (selectedChoiceValue && !otherChoiceActive) {
+      messageText = buildChoiceOutgoingMessage(selectedChoiceValue, input)
+    } else {
+      messageText = resolveChatOutgoingMessage(input.trim(), currentChoices, otherChoiceActive)
+    }
+
+    if (!messageText) return
 
     const userMessage: Message = {
       id: makeMessageId(),
@@ -255,6 +257,7 @@ export function useMuiChat() {
     setMessages((prev) => [...prev, userMessage])
     setInput('')
     setOtherChoiceActive(false)
+    setSelectedChoiceValue(null)
     setIsLoading(true)
 
     try {
@@ -297,7 +300,6 @@ export function useMuiChat() {
 
         // セッション終了の場合 - 専用モーダルを表示
         if (isTerminated) {
-          console.log('[MUI Chat] Session terminated due to invalid answers')
           setAnalysisComplete(true)
           setShowTerminationModal(true) // 終了専用モーダル
           return newMessages
@@ -333,19 +335,6 @@ export function useMuiChat() {
           }, 0)
 
           // **重要: バックエンドのis_completeのみを信頼**
-          console.log(
-            '[MUI Chat] is_complete:',
-            response.is_complete,
-            'type:',
-            typeof response.is_complete,
-          )
-          console.log(
-            '[MUI Chat] evaluated_categories:',
-            response.evaluated_categories,
-            'total:',
-            response.total_categories,
-          )
-
           const allCompleted =
             response.all_phases?.every((phase) => {
               const required = phase.max_questions > 0 ? phase.max_questions : phase.min_questions
@@ -367,22 +356,18 @@ export function useMuiChat() {
           }
 
           if (response.is_complete === true) {
-            console.log('[MUI Chat] AI分析完了 - モーダルを表示します')
-            console.log('[MUI Chat] All phases completed:', allCompleted)
             setTimeout(() => {
               setAnalysisComplete(true)
               setAllPhasesCompleted(allCompleted)
               setShowCompletionModal(true)
             }, 300)
           } else {
-            console.log(`[MUI Chat] 質問継続中 (${newCount}/${response.total_questions ?? 15})`)
             // 明示的にfalseを設定
             setAnalysisComplete(false)
             setAllPhasesCompleted(false)
           }
         } else {
           // バリデーションエラーの場合は質問カウントを進めないが、完了状態はリセット
-          console.log('[MUI Chat] Validation error detected, not updating question count')
           // バリデーションエラー後も質問を継続できるように、完了状態を解除
           setAnalysisComplete(false)
           setAllPhasesCompleted(false)
@@ -400,7 +385,6 @@ export function useMuiChat() {
       // "all phases completed"エラーの場合は分析完了として扱う
       const errorMessage = (error as Error).message
       if (errorMessage.includes('all phases completed')) {
-        console.log('[MUI Chat] All phases completed - showing completion modal')
         setAnalysisComplete(true)
         setAllPhasesCompleted(true)
         setShowCompletionModal(true)
@@ -448,7 +432,7 @@ export function useMuiChat() {
     const initialMessage: Message = {
       id: '0',
       role: 'assistant',
-      content: RESET_GREETING,
+      content: INITIAL_GREETING,
       timestamp: new Date(),
     }
     setMessages([initialMessage])
@@ -493,11 +477,8 @@ export function useMuiChat() {
   }
 
   const handleContinueChat = () => {
-    console.log('[MUI Chat] Continuing chat after completion')
-    console.log('[MUI Chat] Before reset - analysisComplete:', analysisComplete)
     setShowCompletionModal(false)
     setAnalysisComplete(false)
-    console.log('[MUI Chat] After reset - modal closed, analysisComplete set to false')
     // 入力フィールドを有効化するためにフォーカス
     setTimeout(() => {
       inputRef.current?.focus()
@@ -512,18 +493,38 @@ export function useMuiChat() {
   const inputPlaceholder = otherChoiceActive
     ? 'その他の内容を入力...'
     : showChoiceButtons
-      ? '選択肢と同じ内容を入力しても送信できます'
+      ? selectedChoiceValue
+        ? '任意: そう思う理由を一言（空でも送信可）'
+        : '選択肢を選ぶか、同じ内容を入力してください'
       : 'メッセージを入力...'
+
+  const canSend = otherChoiceActive
+    ? input.trim().length > 0
+    : selectedChoiceValue !== null || input.trim().length > 0
 
   useEffect(() => {
     if (!showChoiceButtons) {
       setOtherChoiceActive(false)
+      setSelectedChoiceValue(null)
     }
   }, [showChoiceButtons])
 
+  // 新しい質問が来たら選択をクリア
+  useEffect(() => {
+    setSelectedChoiceValue(null)
+    setOtherChoiceActive(false)
+  }, [lastAssistantMessage?.id])
+
   const handleOtherChoice = () => {
     setOtherChoiceActive(true)
+    setSelectedChoiceValue(null)
     setInput('')
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  const handleSelectChoice = (value: string) => {
+    setOtherChoiceActive(false)
+    setSelectedChoiceValue(value)
     setTimeout(() => inputRef.current?.focus(), 0)
   }
 
@@ -542,6 +543,7 @@ export function useMuiChat() {
     showEndChatModal,
     showTerminationModal,
     otherChoiceActive,
+    selectedChoiceValue,
     historyLoadError,
     historyRetrying,
     messagesEndRef,
@@ -551,6 +553,7 @@ export function useMuiChat() {
     choiceOptions,
     showChoiceButtons,
     inputPlaceholder,
+    canSend,
     handleSend,
     handleReset,
     handleEndChat,
@@ -560,5 +563,6 @@ export function useMuiChat() {
     handleContinueChat,
     handleRetryHistoryLoad,
     handleOtherChoice,
+    handleSelectChoice,
   }
 }

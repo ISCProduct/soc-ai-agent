@@ -2,8 +2,13 @@ package costs
 
 import (
 	"Backend/internal/models"
+	openaiPkg "Backend/internal/openai"
 	"Backend/internal/repositories"
+	"Backend/internal/safego"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
+	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -26,25 +31,129 @@ var modelPricing = map[string][2]float64{
 	"o3":                     {10.00, 40.00},
 	"text-embedding-3-small": {0.02, 0.02},
 	"text-embedding-3-large": {0.13, 0.13},
+	// Web検索系。検索結果が固定トークンとして課金されるため入力トークンが
+	// 桁違いに大きい（実測で1コール平均3万トークン）。
+	// gpt-4o-mini-search-preview は最長一致が無いと gpt-4o 単価に当たり得るので
+	// 明示が必要。残り2つは既定と同値だが、単価の根拠を残すために書いておく。
+	"gpt-4o-search-preview":      {2.50, 10.00},
+	"gpt-4o-mini-search-preview": {0.15, 0.60},
+	"gpt-5-search-api":           {2.50, 10.00},
 }
 
-// calculateCost は入力/出力トークン数とモデル名からUSDコストを計算する
-func calculateCost(model string, promptTokens, completionTokens int) float64 {
+// 音声経路の単価（#1294 DesignDoc §3.4）。
+//
+// STT は分単位、TTS は文字単位で課金され、トークン単価の表では表せない。
+//
+// 既定値は 2026-05 時点で確認した公開価格に基づく。価格改定が入っている可能性があるため、
+// 実請求額との突き合わせで必ず確認すること（#1193 では旧価格が3年ぶん残っていた）。
+// 生の使用量（audio_seconds / characters）を保存しているので、単価が違っていても
+// 後から再計算できる。
+func sttCostPerMinuteUSD() float64 {
+	return shared.GetFloatEnv("STT_COST_PER_MINUTE_USD", 0.006)
+}
+
+func ttsCostPer1MCharsUSD() float64 {
+	return shared.GetFloatEnv("TTS_COST_PER_1M_CHARS_USD", 15.0)
+}
+
+// webSearchCostPerCallUSD は web_search ツール1コールあたりの料金。
+//
+// このツールはトークンとは別に1コール単位で課金される。単価表はトークンしか
+// 持っていなかったため、検索コストの大半が記録から抜けていた。実測では
+// 2026-08 の web_search 772 コールぶん、$7.72 が api_call_logs に現れていない。
+//
+// 検索1回の内訳は「ツール料 $0.010 + 固定8,000入力トークン」で、ツール料が
+// 85% を占める。ここが抜けていると、モデルを安くしても下がらないコストが
+// 見えず、削減の判断材料にならない。
+//
+// 既定値は 2026-09 時点の公開価格（$10 / 1,000 コール）。価格改定に備えて
+// 生の回数を api_call_logs.web_search_calls に残してあるので、後から再計算できる。
+func webSearchCostPerCallUSD() float64 {
+	return shared.GetFloatEnv("WEB_SEARCH_COST_PER_CALL_USD", 0.010)
+}
+
+// calculateAudioCost は音声経路のコストを返す。ローカル推論は 0。
+func calculateAudioCost(provider string, audioSeconds float64, characters int) float64 {
+	if provider != "" && !strings.EqualFold(provider, "openai") {
+		return 0
+	}
+	cost := 0.0
+	if audioSeconds > 0 {
+		cost += audioSeconds / 60.0 * sttCostPerMinuteUSD()
+	}
+	if characters > 0 {
+		cost += float64(characters) / 1_000_000.0 * ttsCostPer1MCharsUSD()
+	}
+	return cost
+}
+
+// modelPricingOverrideEnv は単価表を再ビルドなしに差し替える env（#1294 DesignDoc §3.4）。
+//
+//	AI_MODEL_PRICING_JSON={"gpt-4o":[2.5,10.0],"gpt-5.2":[1.25,5.0]}
+//
+// 価格改定は不定期に起きるのに、テーブルは定数なのでデプロイを待つことになる。
+// 実測値が狂うと「ローカル化でいくら減ったか」の判断材料そのものが狂うため、
+// 運用側で先に直せるようにする。
+const modelPricingOverrideEnv = "AI_MODEL_PRICING_JSON"
+
+func init() {
+	applyModelPricingOverride(os.Getenv(modelPricingOverrideEnv))
+}
+
+// applyModelPricingOverride は JSON の単価をテーブルへ上書きする。
+// 不正な値は無視してログに残す。計測の設定ミスでサーバーを起動不能にしない。
+func applyModelPricingOverride(raw string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return
+	}
+	var override map[string][]float64
+	if err := json.Unmarshal([]byte(raw), &override); err != nil {
+		log.Printf("[APICost] %s を解釈できませんでした（既定の単価表を使います）: %v", modelPricingOverrideEnv, err)
+		return
+	}
+	for model, rates := range override {
+		key := strings.ToLower(strings.TrimSpace(model))
+		if key == "" || len(rates) != 2 || rates[0] < 0 || rates[1] < 0 {
+			log.Printf("[APICost] %s の %q を無視しました（[入力単価, 出力単価] の非負の2要素が必要）", modelPricingOverrideEnv, model)
+			continue
+		}
+		modelPricing[key] = [2]float64{rates[0], rates[1]}
+	}
+}
+
+// calculateCost は入力/出力トークン数とモデル名からUSDコストを計算する。
+//
+// provider が openai 以外のときは 0 を返す。ローカル推論は無料であり、
+// かつローカルのモデル名（gpt-oss-20b 等）は単価表に無いため
+// 未知モデルの既定（gpt-4o 単価）が架空のコストとして記録されてしまう（#1293）。
+func calculateCost(provider, model string, promptTokens, completionTokens int) float64 {
+	if provider != "" && !strings.EqualFold(provider, "openai") {
+		return 0
+	}
 	lower := strings.ToLower(strings.TrimSpace(model))
 
-	// prefix match for versioned model names (e.g. gpt-4o-2024-08-06)
-	var pricing [2]float64
-	var found bool
-	for k, v := range modelPricing {
-		if lower == k || strings.HasPrefix(lower, k+"-") || strings.HasPrefix(lower, k+":") {
-			pricing = v
-			found = true
-			break
+	// バージョン付きモデル名（gpt-4o-2024-08-06 等）に対応するため前方一致を使うが、
+	// 必ず**最長一致**を取る。
+	//
+	// 以前は map を range して最初に一致したもので break していた。Go の map の
+	// 反復順序はランダムなので、"gpt-4o-mini" が "gpt-4o" の前方一致に当たると
+	// 16.7倍高い gpt-4o 単価で記録されていた。しかも実行ごとに結果が変わる。
+	// 実測（本番相当DB, 2026-08-13以降）では gpt-4o-mini の 892万入力トークンが
+	// $26.32 として記録されており、正しい mini 単価なら $1.79 だった。
+	// コスト削減の判断材料が15倍近く狂っていたことになる。
+	pricing := [2]float64{2.50, 10.00} // 未知モデルは gpt-4o 単価に倒す（過小評価しない）
+	best := ""
+	for k := range modelPricing {
+		if lower != k && !strings.HasPrefix(lower, k+"-") && !strings.HasPrefix(lower, k+":") {
+			continue
+		}
+		if len(k) > len(best) {
+			best = k
 		}
 	}
-	if !found {
-		// Default to gpt-4o pricing
-		pricing = [2]float64{2.50, 10.00}
+	if best != "" {
+		pricing = modelPricing[best]
 	}
 
 	inputCost := float64(promptTokens) * pricing[0] / 1_000_000
@@ -76,24 +185,58 @@ func NewAPICostService(repo *repositories.APICallLogRepository) *APICostService 
 	return &APICostService{repo: repo, alertThresholdUSD: threshold}
 }
 
-// LogCall は非同期でAPIコールログをDBに記録する
-func (s *APICostService) LogCall(model string, promptTokens, completionTokens int) {
-	go func() {
-		cost := calculateCost(model, promptTokens, completionTokens)
+// usageCostUSD は1コールぶんの課金額を返す。
+//
+// トークン・音声・ツール料の3つを1か所にまとめる。以前はトークンだけを見ており、
+// web_search のツール料が丸ごと抜けていた。
+func usageCostUSD(u openaiPkg.Usage) float64 {
+	// 音声経路（STT/TTS）はトークンが返らない。秒数・文字数から計算する。
+	cost := calculateCost(u.Provider, u.Model, u.PromptTokens, u.CompletionTokens)
+	if u.AudioSeconds > 0 || u.Characters > 0 {
+		cost = calculateAudioCost(u.Provider, u.AudioSeconds, u.Characters)
+	}
+	// web_search はトークンとは別に1コール単位で課金される。
+	// ローカル推論(provider != openai)には存在しないので加算しない。
+	if u.WebSearchCalls > 0 && (u.Provider == "" || strings.EqualFold(u.Provider, "openai")) {
+		cost += float64(u.WebSearchCalls) * webSearchCostPerCallUSD()
+	}
+	return cost
+}
+
+// LogUsage は非同期でAPIコールログをDBに記録する。
+//
+// provider / via_fallback を残すのは、この表を「OpenAI への課金額」として
+// 使えるようにするため（#1293）。フォールバックの USD 上限は via_fallback だけを
+// 集計するので、通常の OpenAI 利用（企業検索など）が保険の予算を食わない。
+func (s *APICostService) LogUsage(u openaiPkg.Usage) {
+	safego.Go(func() {
+		cost := usageCostUSD(u)
 		entry := &models.APICallLog{
-			Model:            model,
-			PromptTokens:     promptTokens,
-			CompletionTokens: completionTokens,
-			TotalTokens:      promptTokens + completionTokens,
+			Model:            u.Model,
+			PromptTokens:     u.PromptTokens,
+			CompletionTokens: u.CompletionTokens,
+			TotalTokens:      u.PromptTokens + u.CompletionTokens,
 			CostUSD:          cost,
+			Provider:         u.Provider,
+			ViaFallback:      u.ViaFallback,
 			CalledAt:         time.Now().UTC(),
+			// 配賦軸（#1294）。Feature が空の経路は unknown として残し、
+			// 「まだ計測できていない経路」を件数で追えるようにする。
+			Feature:        featureOrUnknown(u.Feature),
+			UserID:         u.UserID,
+			OrganizationID: u.OrganizationID,
+			AudioSeconds:   u.AudioSeconds,
+			Characters:     u.Characters,
+			WebSearchCalls: u.WebSearchCalls,
+			LatencyMs:      u.LatencyMs,
+			CacheHit:       u.CacheHit,
 		}
 		if err := s.repo.Create(entry); err != nil {
 			log.Printf("[APICost] failed to log: %v", err)
 			return
 		}
 		s.checkAndNotifyThreshold()
-	}()
+	})
 }
 
 // checkAndNotifyThreshold は当月（UTC）累計が閾値を超えたら Slack/Discord に通知する。
@@ -275,6 +418,37 @@ func (s *APICostService) GetModelBreakdown(since time.Time) ([]ModelCostSummary,
 	return result, nil
 }
 
+// UsageBreakdownSummary は軸ごとの利用量集計（#1294）。
+type UsageBreakdownSummary struct {
+	Key           string  `json:"key"`
+	TotalCostUSD  float64 `json:"total_cost_usd"`
+	TotalTokens   int64   `json:"total_tokens"`
+	CallCount     int64   `json:"call_count"`
+	AvgLatencyMs  float64 `json:"avg_latency_ms"`
+	CacheHitCount int64   `json:"cache_hit_count"`
+}
+
+// GetUsageBreakdown は指定軸（機能/プロバイダ/モデル/組織）で利用量を集計する（#1294）。
+// 未知の軸はエラーにする。呼び出し元のクエリパラメータをそのまま SQL へ渡さないため。
+func (s *APICostService) GetUsageBreakdown(ctx context.Context, since time.Time, dim repositories.BreakdownDimension) ([]UsageBreakdownSummary, error) {
+	rows, err := s.repo.UsageBreakdown(ctx, since, dim)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]UsageBreakdownSummary, len(rows))
+	for i, r := range rows {
+		result[i] = UsageBreakdownSummary{
+			Key:           r.Key,
+			TotalCostUSD:  r.TotalCostUSD,
+			TotalTokens:   r.TotalTokens,
+			CallCount:     r.CallCount,
+			AvgLatencyMs:  r.AvgLatencyMs,
+			CacheHitCount: r.CacheHitCount,
+		}
+	}
+	return result, nil
+}
+
 func (s *APICostService) GetCurrentMonthTotal() (float64, error) {
 	now := time.Now().UTC()
 	since := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
@@ -298,4 +472,13 @@ func (s *APICostService) SetAlertHooksForTest(
 	s.modelBreakdownFn = func(time.Time) ([]ModelCostSummary, error) {
 		return nil, nil
 	}
+}
+
+// featureOrUnknown は空の機能名を 'unknown' に寄せる（#1294）。
+// DB 側の既定値と一致させ、集計時に空文字と unknown が分かれないようにする。
+func featureOrUnknown(feature string) string {
+	if feature == "" {
+		return usagectx.FeatureUnknown
+	}
+	return feature
 }

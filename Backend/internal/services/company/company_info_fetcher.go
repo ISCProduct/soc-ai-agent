@@ -11,7 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -46,6 +48,12 @@ type CompanyInfoFetcher struct {
 	llm    *companyfetch.LLM
 	gbiz   *gbizinfo.GBizInfoService
 	flight *CompanySearchFlight
+	shared *SearchContext
+
+	// provisionFailures は ProvisionByName が失敗した企業名の記録（#1124）。
+	// 打ち間違えを繰り返し投げられたときに毎回 Web検索を払わないためのネガティブキャッシュ。
+	provisionMu       sync.RWMutex
+	provisionFailures map[string]time.Time
 }
 
 func NewCompanyInfoFetcher(repo repository.CompanyRepository, client *openai.Client, gbiz ...*gbizinfo.GBizInfoService) *CompanyInfoFetcher {
@@ -57,6 +65,14 @@ func NewCompanyInfoFetcher(repo repository.CompanyRepository, client *openai.Cli
 }
 
 // SetSearchBudget は月次 Search 予算ガードを注入する。
+// SetSharedSearch は企業ごとに1回だけ行う検索の結果を共有する入れ物を注入する。
+// 未注入なら従来どおり系統ごとに検索する(#1124)。
+func (f *CompanyInfoFetcher) SetSharedSearch(sc *SearchContext) {
+	if f != nil {
+		f.shared = sc
+	}
+}
+
 func (f *CompanyInfoFetcher) SetSearchBudget(budget companyfetch.SearchBudget) {
 	if f == nil {
 		return
@@ -194,6 +210,151 @@ func (f *CompanyInfoFetcher) ConfirmAndSave(companyID uint, result *CompanyInfoR
 	return companyInfoFromModel(company), nil
 }
 
+// ProvisionByName は DB に無い企業を取得して登録する（#1124）。
+//
+// 従来、履歴書レビューで未登録の企業名が来ると Web検索で実在確認だけを行い、
+// **結果を捨てていた**。1コールあたり約3万入力トークン払って真偽値しか得られず、
+// 企業情報が無いのでレビューは一般論になり、次に同じ企業名が来ればまた払っていた。
+//
+// ここでは同じ取得結果を companies に登録する。以後その企業は
+// 履歴書レビュー・企業検索・マッチング・面接ヒントのすべてから
+// 追加コストなしで参照できる（既存企業と同じ扱いになる）。
+//
+// 取得は gBizinfo（無料）を先に試すが、**AI 検索は事実上必ず走る**。
+// gBizinfo は法人登記由来のため文化・働き方・主要事業を返さず、
+// enrichGapsWithAI の穴判定(companyInfoHasGaps)がそれらの空欄で必ず真になるため。
+// なお gBiz と AI Search の間で公式サイト本文の取得も走る(enrichGapsWithAI 参照)。
+// 「gBiz で済めば無料」ではなく「gBiz は AI の入力を良くするだけ」と考えること。
+//
+// 検索予算（SearchBudget）は SearchLiteJSON の入口で効く
+// （main.go で SetSearchBudget 済み。未注入なら何も止まらない）。
+//
+// 十分な情報が得られなければ登録せずエラーを返す（推測で企業を作らない）。
+func (f *CompanyInfoFetcher) ProvisionByName(ctx context.Context, companyName string) (*models.Company, error) {
+	name := strings.TrimSpace(companyName)
+	if name == "" {
+		return nil, fmt.Errorf("company name is empty")
+	}
+
+	key := normalizeCompanyKey(name)
+	// 直近で取得に失敗した名前は再試行しない（#1124）。
+	// 打ち間違えを繰り返し投げられたときに毎回 Web検索を払わないため。
+	if f.recentlyFailedProvision(key) {
+		return nil, fmt.Errorf("企業情報を取得できませんでした（直近の試行が失敗）: %s", name)
+	}
+
+	// 同名の同時リクエストで二重登録しないよう singleflight を通す
+	run := func() (any, error) {
+		// 直前に別リクエストが登録している可能性があるので再確認する
+		if existing, err := f.repo.FindByName(name); err == nil && existing != nil {
+			return existing, nil
+		}
+
+		result, err := f.Acquire(ctx, name, "")
+		if err != nil {
+			// 取得エラーは記録しない。
+			//
+			// タイムアウト・ユーザー離脱・OpenAI の 5xx・空応答・JSONデコード失敗は
+			// いずれも「その企業が存在しない」証拠ではなく、こちら側やプロバイダの都合。
+			// 記録すると実在する企業が1時間ブロックされ、しかも DB に無いので
+			// 企業検索からも選べず行き止まりになる。
+			//
+			// 代償として、検索が走った後で失敗するケース（JSONデコード失敗など）は
+			// 再送のたびに課金される。予算超過は ErrSearchBudgetExceeded が
+			// 検索の手前で返るので課金されず、ここでは問題にならない。
+			// 行き止まりを作るより、その分を払うほうがましと判断している。
+			return nil, err
+		}
+		if result == nil || !companyInfoIsSubstantive(result) {
+			// 取得は成功したのに中身が無い = 打ち間違いなど「実在しない企業名」の signal。
+			// ネガティブキャッシュはこの場合だけ効かせる。
+			f.markProvisionFailed(key)
+			return nil, fmt.Errorf("企業情報を取得できませんでした: %s", name)
+		}
+
+		now := time.Now()
+		company := &models.Company{
+			Name:            name,
+			SourceType:      result.Source,
+			SourceURL:       result.SourceURL,
+			SourceFetchedAt: &now,
+			InfoFetchedAt:   &now,
+			// 取得直後は暫定。人手または後続の取得で確定させる
+			IsProvisional:       true,
+			DataStatus:          "draft",
+			IsActive:            true,
+			LastModelUsed:       result.ModelUsed,
+			LastFetchConfidence: result.Confidence,
+		}
+		applyCompanyInfoResult(company, result)
+		if strings.TrimSpace(company.Name) == "" {
+			company.Name = name
+		}
+		if err := f.repo.Create(company); err != nil {
+			return nil, fmt.Errorf("failed to create company: %w", err)
+		}
+		return company, nil
+	}
+
+	var v any
+	var err error
+	if f.flight != nil {
+		v, err = f.flight.Do("provision", key, run)
+	} else {
+		v, err = run()
+	}
+	if err != nil {
+		return nil, err
+	}
+	company, _ := v.(*models.Company)
+	if company == nil {
+		return nil, fmt.Errorf("company provision returned nil: %s", name)
+	}
+	return company, nil
+}
+
+// companyInfoIsSubstantive は登録に足る中身があるかを判定する。
+//
+// 事業内容（Description か MainBusiness）を必須にする。業種や公式URLだけでは
+// 「打ち間違えた名前 ＋ 情報通信業」のレコードが学生の企業検索に載ってしまう。
+// 企業briefの中核も事業内容なので、これが無い企業を登録しても
+// レビューは一般論になり、登録する意味がない。
+func companyInfoIsSubstantive(result *CompanyInfoResult) bool {
+	return strings.TrimSpace(result.Description) != "" ||
+		strings.TrimSpace(result.MainBusiness) != ""
+}
+
+// provisionFailureTTL は取得に失敗した企業名を再試行しない期間（#1124）。
+//
+// これが無いと、打ち間違えた企業名を投げるたびに gBizinfo + Web検索（最大3回）が
+// フルで走る。singleflight は同時実行しかまとめないので、間隔を空けた再送は素通りする。
+const provisionFailureTTL = time.Hour
+
+// markProvisionFailed / recentlyFailedProvision は失敗した企業名を一定時間おぼえる。
+func (f *CompanyInfoFetcher) markProvisionFailed(key string) {
+	f.provisionMu.Lock()
+	defer f.provisionMu.Unlock()
+	if f.provisionFailures == nil {
+		f.provisionFailures = map[string]time.Time{}
+	}
+	// 有効期限切れをここで掃除する。件数が増え続けないようにするだけなので
+	// ponytail: 専用の purge ループは置かない
+	now := time.Now()
+	for k, at := range f.provisionFailures {
+		if now.Sub(at) > provisionFailureTTL {
+			delete(f.provisionFailures, k)
+		}
+	}
+	f.provisionFailures[key] = now
+}
+
+func (f *CompanyInfoFetcher) recentlyFailedProvision(key string) bool {
+	f.provisionMu.RLock()
+	defer f.provisionMu.RUnlock()
+	at, ok := f.provisionFailures[key]
+	return ok && time.Since(at) <= provisionFailureTTL
+}
+
 // Acquire は企業名から基本情報をプレビュー取得する（DB 非更新）。
 func (f *CompanyInfoFetcher) Acquire(ctx context.Context, companyName, websiteURL string) (*CompanyInfoResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
@@ -227,15 +388,19 @@ func (f *CompanyInfoFetcher) acquireFromGBizCompany(ctx context.Context, company
 		if err != nil || len(hits) == 0 {
 			return nil, fmt.Errorf("gbizinfo: corporate number not found for %s", company.Name)
 		}
-		company.CorporateNumber = hits[0].CorporateNumber
-		if company.WebsiteURL == "" && hits[0].CompanyURL != "" {
-			company.WebsiteURL = hits[0].CompanyURL
+		hit := pickGBizHit(hits, company.Name, company.Location)
+		if hit == nil {
+			return nil, fmt.Errorf("gbizinfo: 商号が一致する法人を特定できませんでした: %s", company.Name)
 		}
-		if company.Location == "" && hits[0].Location != "" {
-			company.Location = hits[0].Location
+		company.CorporateNumber = hit.CorporateNumber
+		if company.WebsiteURL == "" && hit.CompanyURL != "" {
+			company.WebsiteURL = hit.CompanyURL
 		}
-		if company.EmployeeCount == 0 && hits[0].EmployeeNumber > 0 {
-			company.EmployeeCount = hits[0].EmployeeNumber
+		if company.Location == "" && hit.Location != "" {
+			company.Location = hit.Location
+		}
+		if company.EmployeeCount == 0 && hit.EmployeeNumber > 0 {
+			company.EmployeeCount = hit.EmployeeNumber
 			company.EmployeeCountBasis = models.EmployeeCountBasisStandalone
 		}
 		_ = f.repo.Update(company)
@@ -290,12 +455,45 @@ func gbizResultUseful(r *CompanyInfoResult) bool {
 
 // enrichGapsWithAI は gBiz で埋まった結果の空欄だけ、安価 AI Search で補完する。
 func (f *CompanyInfoFetcher) enrichGapsWithAI(ctx context.Context, companyName, websiteURL string, base *CompanyInfoResult) (*CompanyInfoResult, error) {
-	needsAI := base.Description == "" || base.MainBusiness == "" || base.Industry == "" ||
-		base.Culture == "" || base.WorkStyle == "" || base.WebsiteURL == ""
-	if !needsAI {
+	if !companyInfoHasGaps(base) {
 		return base, nil
 	}
-	ai, err := f.acquireViaAISearch(ctx, companyName, firstNonEmpty(websiteURL, base.WebsiteURL))
+	siteURL := firstNonEmpty(websiteURL, base.WebsiteURL)
+
+	// 公式サイトの本文から穴を埋める経路。既定では無効。
+	//
+	// 相手サイトの利用規約が自動取得を禁じている場合があり、規約は企業ごとに
+	// 異なるため機械的に判断できない。robots.txt も未対応。これらを詰めるまでは
+	// 動かさない。COMPANY_WEBSITE_EXTRACT=1 で明示的に有効化したときだけ走る。
+	//
+	// #1338 の時点では gBizINFO が 404 で必ず失敗していたため、この経路には
+	// そもそも到達していなかった。#1341 で gBizINFO を直した結果、意図せず
+	// 動き出す状態になっていた。
+	//
+	// 有効化してもコスト削減にはならない。実測では「勤務スタイル」が公式サイトから
+	// ほぼ取れず、下の穴判定に含まれているため、多くの場合そのまま Search へ進む。
+	// Search を省けるのは gBiz とサイトを合わせて companyInfoHasGaps の6項目が
+	// 埋まったときだけで、それ以外は公式サイトの HTTP 取得(最大3ページ + politeDelay)と
+	// 安価モデルの抽出コールを払ったうえで Search も呼ぶ純増になる。
+	// #1124 でコストを触るときはここを見ること。
+	if websiteExtractEnabled() {
+		if site, siteErr := f.acquireFromWebsite(ctx, companyName, siteURL); siteErr == nil {
+			mergeCompanyInfoGaps(base, site)
+			if !companyInfoHasGaps(base) {
+				base.Source = companyfetch.SourceGBiz + "+" + companyfetch.SourceScrape
+				base.Confidence = companyfetch.ConfidenceMedium
+				if site.ModelUsed != "" {
+					base.ModelUsed = "gbizinfo+" + site.ModelUsed
+				}
+				return base, nil
+			}
+		} else {
+			// JS描画のサイトなど、本文が取れないことは珍しくない。Searchへ戻すだけ。
+			log.Printf("website extract skipped company=%s: %v", companyName, siteErr)
+		}
+	}
+
+	ai, err := f.acquireViaAISearch(ctx, companyName, siteURL)
 	if err != nil {
 		// Search モデル廃止などで AI が落ちても、gBiz の法人データは返す。
 		// ここで error にするとバッチが「失敗 N」になり、保存済み gBiz も無かったことになる。
@@ -313,6 +511,45 @@ func (f *CompanyInfoFetcher) enrichGapsWithAI(ctx context.Context, companyName, 
 	base.Source = companyfetch.SourceGBiz + "+" + companyfetch.SourceWebSearch
 	base.Confidence = companyfetch.ConfidenceMedium
 	return base, nil
+}
+
+// websiteExtractEnabled は公式サイトからの本文取得を行うかを返す。
+//
+// 既定は無効。利用規約・robots.txt の扱いを詰めるまで自動では動かさない。
+func websiteExtractEnabled() bool {
+	return os.Getenv("COMPANY_WEBSITE_EXTRACT") == "1"
+}
+
+// companyInfoHasGaps は AI で補う必要のある空欄が残っているかを返す。
+func companyInfoHasGaps(r *CompanyInfoResult) bool {
+	return r.Description == "" || r.MainBusiness == "" || r.Industry == "" ||
+		r.Culture == "" || r.WorkStyle == "" || r.WebsiteURL == ""
+}
+
+// acquireFromWebsite は公式サイトの本文から情報を組み立てる（web_search を使わない）。
+//
+// 本文が取れなければエラーを返す。呼び出し側は web_search へ戻すこと。
+func (f *CompanyInfoFetcher) acquireFromWebsite(ctx context.Context, companyName, websiteURL string) (*CompanyInfoResult, error) {
+	if strings.TrimSpace(websiteURL) == "" {
+		return nil, fmt.Errorf("公式サイトURLが無いためスキップします")
+	}
+
+	text, err := collectWebsiteText(ctx, websiteURL)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := f.acquireCheapExtract(ctx, companyName, websiteURL, text)
+	if err != nil {
+		return nil, err
+	}
+	// 読んだページが根拠なので、検索結果ではなくスクレイプとして記録する。
+	result.Source = companyfetch.SourceScrape
+	result.SourceURL = strings.TrimSpace(websiteURL)
+	if result.WebsiteURL == "" {
+		result.WebsiteURL = strings.TrimSpace(websiteURL)
+	}
+	return result, nil
 }
 
 // acquireViaAISearch は安価な mini-search → Parse で事実のみ取得する（deep search なし）。
@@ -334,9 +571,30 @@ func (f *CompanyInfoFetcher) acquireViaAISearch(ctx context.Context, companyName
 		"企業名「%s」について、検索結果の事実のみに基づき次のJSON形式で回答してください。検索結果に無い項目は空文字または0。推測禁止。\n%s",
 		companyName, companyInfoJSONSchema,
 	)
-	raw, modelsUsed, err := f.llm.SearchLiteThenParse(ctx, searchPrompt, systemPrompt, parseUser, 600)
-	if err != nil {
-		return nil, fmt.Errorf("企業情報のAI取得失敗: %w", err)
+	// 検索は企業ごとに1回に寄せる。relations / tech も同じ結果を使うため、
+	// web_search の固定課金(8,000トークン/call)が1社1回で済む(#1124)。
+	// 共有が未注入なら従来どおり検索+解析をまとめて行う。
+	var raw, modelsUsed string
+	var err error
+	if f.shared != nil {
+		searchText, searchModel, searchErr := f.shared.Fetch(companyName, func() (string, string, error) {
+			return f.llm.SearchLiteJSON(ctx, sharedSearchPrompt(companyName, websiteURL), 1500)
+		})
+		if searchErr != nil {
+			return nil, fmt.Errorf("企業情報のAI取得失敗: %w", searchErr)
+		}
+		parsed, parseModel, parseErr := f.llm.ParseJSONWithSchema(ctx, systemPrompt,
+			parseUser+"\n\n---\n検索結果:\n"+companyfetch.TrimText(searchText, 2000), 600,
+			companyInfoResponseSchema())
+		if parseErr != nil {
+			return nil, fmt.Errorf("企業情報のAI取得失敗: %w", parseErr)
+		}
+		raw, modelsUsed = parsed, searchModel+"+"+parseModel
+	} else {
+		raw, modelsUsed, err = f.llm.SearchLiteThenParseWithSchema(ctx, searchPrompt, systemPrompt, parseUser, 600, companyInfoResponseSchema())
+		if err != nil {
+			return nil, fmt.Errorf("企業情報のAI取得失敗: %w", err)
+		}
 	}
 	result, err := parseCompanyInfoResult(raw)
 	if err != nil {
@@ -412,7 +670,7 @@ func (f *CompanyInfoFetcher) acquireCheapExtract(ctx context.Context, companyNam
 		return f.acquireViaAISearch(ctx, companyName, websiteURL)
 	}
 
-	raw, model, err := f.llm.ExtractJSON(ctx, systemPrompt, userPrompt, 600)
+	raw, model, err := f.llm.ExtractJSONWithSchema(ctx, systemPrompt, userPrompt, 600, companyInfoResponseSchema())
 	if err != nil {
 		return nil, fmt.Errorf("企業情報の取得失敗: %w", err)
 	}
@@ -439,6 +697,9 @@ func parseCompanyInfoResult(text string) (*CompanyInfoResult, error) {
 	if result.EmployeeCount > 0 && result.EmployeeCountBasis == "" {
 		result.EmployeeCountBasis = models.EmployeeCountBasisConsolidated
 	}
+	// スキーマで縛れない内容(業種の表記ゆれ、年や人数の妥当性)をここで潰す。
+	// スキーマ非対応モデルへフォールバックした場合もここを通る。
+	sanitizeCompanyInfo(&result)
 	return &result, nil
 }
 

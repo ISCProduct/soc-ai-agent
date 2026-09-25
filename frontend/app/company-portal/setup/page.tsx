@@ -12,7 +12,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import { companyAuthService } from '@/lib/company-auth'
+import { companyAuthService } from '@/lib/company/auth'
 
 function SetupContent() {
   const router = useRouter()
@@ -79,6 +79,7 @@ function SetupContent() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              autoComplete="new-password"
               sx={{ mb: 3 }}
             />
             <Button

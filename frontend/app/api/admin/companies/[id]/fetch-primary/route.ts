@@ -4,7 +4,7 @@ import {
   jsonFromProxyResult,
   proxyAdminBackend,
   proxyErrorResponse,
-} from '@/lib/admin-backend-proxy'
+} from '@/lib/admin/backend-proxy'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300

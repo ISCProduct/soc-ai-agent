@@ -24,10 +24,15 @@ type Company struct {
 	SourceURL          string     `gorm:"type:varchar(500)" json:"source_url"`
 	SourceFetchedAt    *time.Time `json:"source_fetched_at,omitempty"`
 	IsProvisional      bool       `gorm:"default:true" json:"is_provisional"`
-	DataStatus         string     `gorm:"type:varchar(20);default:'draft';index:idx_companies_active_status_industry,priority:2;index:idx_companies_active_status_id,priority:2" json:"data_status"` // draft, published
-	GBizLastSyncedAt   *time.Time `json:"gbiz_last_synced_at,omitempty"`
-	GBizSyncStatus     string     `gorm:"type:varchar(20)" json:"gbiz_sync_status"` // success, failed
-	GBizSyncMessage    string     `gorm:"type:text" json:"gbiz_sync_message"`
+	// IsGuestEntry はゲスト投稿(/company-entry)由来かどうか。表示可否の判断に使う(#1409)。
+	// 以前は company_entry_submissions に行があるかで判定していたが、
+	// その行が消えると審査前の企業が公開APIへ出た(fail-open)。監査用テーブルではなく
+	// 企業行そのものに持たせる。
+	IsGuestEntry     bool       `gorm:"not null;default:false;index:idx_companies_guest_entry" json:"is_guest_entry"`
+	DataStatus       string     `gorm:"type:varchar(20);default:'draft';index:idx_companies_active_status_industry,priority:2;index:idx_companies_active_status_id,priority:2" json:"data_status"` // draft, published
+	GBizLastSyncedAt *time.Time `json:"gbiz_last_synced_at,omitempty"`
+	GBizSyncStatus   string     `gorm:"type:varchar(20)" json:"gbiz_sync_status"` // success, failed
+	GBizSyncMessage  string     `gorm:"type:text" json:"gbiz_sync_message"`
 
 	// #557 フィールド別鮮度・provenance
 	InfoFetchedAt       *time.Time `json:"info_fetched_at,omitempty"`
@@ -136,11 +141,12 @@ type L1CoverageStats struct {
 
 // UserCompanyMatch ユーザーと企業のマッチング結果
 type UserCompanyMatch struct {
-	ID            uint                `gorm:"primaryKey"`
-	UserID        uint                `gorm:"not null;index:idx_user_session"`
+	ID uint `gorm:"primaryKey"`
+	// uniq_user_session_company は migration 000023 で追加した一意キー（#1166 の upsert が依存）
+	UserID        uint                `gorm:"not null;index:idx_user_session;uniqueIndex:uniq_user_session_company,priority:1"`
 	User          User                `gorm:"foreignKey:UserID"`
-	SessionID     string              `gorm:"type:varchar(255);index:idx_user_session"`
-	CompanyID     uint                `gorm:"not null;index"`
+	SessionID     string              `gorm:"type:varchar(255);index:idx_user_session;uniqueIndex:uniq_user_session_company,priority:2"`
+	CompanyID     uint                `gorm:"not null;index;uniqueIndex:uniq_user_session_company,priority:3"`
 	Company       Company             `gorm:"foreignKey:CompanyID"`
 	JobPositionID *uint               `gorm:"index"`
 	JobPosition   *CompanyJobPosition `gorm:"foreignKey:JobPositionID"`
@@ -157,6 +163,13 @@ type UserCompanyMatch struct {
 	ChallengeMatch     float64 // チャレンジ志向マッチ度
 	DetailMatch        float64 // 細部志向マッチ度
 	CommunicationMatch float64 // コミュニケーション力マッチ度
+
+	// MatchedAxisCount は MatchScore の算出に使えた軸の数（0-10）。
+	// 未計測の軸は平均に含めないため、この値が小さいほど根拠が薄い（#1124）。
+	//
+	// 名前を evaluated_categories にしないのは、チャットの進捗表示が返す
+	// 同名のJSONフィールド（ユーザースコアの非ゼロ件数）と意味が違うため。
+	MatchedAxisCount int `gorm:"not null;default:0" json:"matched_axis_count"`
 
 	// マッチング理由・推薦文
 	MatchReason string `gorm:"type:text"` // AIが生成したマッチング理由

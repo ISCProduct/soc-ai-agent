@@ -18,6 +18,30 @@ type Case struct {
 	ReferenceText string   `json:"reference_text"`
 	Tags          []string `json:"tags"`
 	Checks        []string `json:"checks"`
+	// Condition は録音条件（例: clean / noisy / reverb / fast / hesitation）。
+	// 実発話を条件別に評価するために使う（#1484）。省略時は "unspecified"。
+	Condition string `json:"condition,omitempty"`
+	// Source は音声の由来。"synthetic"（合成）か "real"（実発話）。
+	// 合成音声だけの結果を本番品質の根拠にしないため、両者を区別して集計する。
+	// 省略時は "synthetic"（既存フィクスチャは全て合成のため）。
+	Source string `json:"source,omitempty"`
+}
+
+// ConditionOf は集計・フィルタ用の録音条件を返す。空なら "unspecified"。
+func (c Case) ConditionOf() string {
+	if strings.TrimSpace(c.Condition) == "" {
+		return "unspecified"
+	}
+	return c.Condition
+}
+
+// SourceOf は音声の由来を返す。空なら既定の "synthetic"。
+// 既存の manifest は全て合成音声なので、未指定を synthetic とみなすのが安全。
+func (c Case) SourceOf() string {
+	if strings.TrimSpace(c.Source) == "" {
+		return "synthetic"
+	}
+	return c.Source
 }
 
 // LoadManifest は manifest.jsonl を読む。

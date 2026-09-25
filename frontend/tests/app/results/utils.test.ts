@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import type { CapitalRelation } from '@/lib/company-data'
+import type { CapitalRelation } from '@/lib/company/data'
 import type { CategoryScores } from '@/app/results/types'
 import {
   buildEmptyRecommendationsMessage,
@@ -93,6 +93,15 @@ describe('buildEmptyRecommendationsMessage', () => {
 
   it('insufficient_company_data の場合は企業データ不足メッセージ', () => {
     expect(buildEmptyRecommendationsMessage('insufficient_company_data')).toContain('公開済みの企業データがありません')
+  })
+
+  // #1380: 企業は公開済みでプロファイルだけが無い状態。
+  // 「企業情報を公開するまで」と案内すると、公開作業では直らない問題に
+  // 誤った復旧手順を見せることになる。
+  it('insufficient_company_profiles は公開を促さずプロファイル生成を案内する', () => {
+    const message = buildEmptyRecommendationsMessage('insufficient_company_profiles')
+    expect(message).toContain('プロファイル')
+    expect(message).not.toContain('公開済みの企業データがありません')
   })
 
   it('diagnostics が渡されてもユーザー向けメッセージに内部指標を含めない', () => {

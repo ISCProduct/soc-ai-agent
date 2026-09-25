@@ -4,6 +4,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
@@ -68,6 +69,7 @@ func (s *InterviewService) GetPhraseSuggestions(ctx context.Context, userID uint
 %s`, transcript)
 
 	model := shared.GetEnv("INTERVIEW_REPORT_MODEL", "")
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewRealtime)
 	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.5, 1000, model)
 	if err != nil {
 		return nil, err
@@ -84,8 +86,15 @@ func (s *InterviewService) GetPhraseSuggestions(ctx context.Context, userID uint
 
 // GetTrend は指定ユーザーの完了済み面接セッションのスコア時系列を返す。
 // sessions は古い順（昇順）で返却されるため、フロントエンドでそのままグラフに使える。
+// maxTrendLimit は GetTrend が一度に読む完了済みセッションの上限。
+// コントローラー側の httpapi.MaxListLimit(100) と同じ値にしておかないと、
+// クランプ済みの limit=51〜100 がここで既定値20へ戻され、利用側は
+// 100件を要求したのに20件しか受け取れない(#1478)。
+// services から controllers/httpapi を import すると依存が逆転するため値で揃える。
+const maxTrendLimit = 100
+
 func (s *InterviewService) GetTrend(userID uint, limit int) ([]InterviewTrendPoint, error) {
-	if limit <= 0 || limit > 50 {
+	if limit <= 0 || limit > maxTrendLimit {
 		limit = 20
 	}
 	// 新しい順で取得し、後で逆順にする（古い順でグラフ描画するため）

@@ -32,7 +32,7 @@ import { CERTIFICATION_OPTIONS, joinCertifications, splitCertifications } from '
 import GitHubSkills from '@/components/github-skills'
 import { ScoutPreferencesCard } from '@/components/profile/ScoutPreferencesCard'
 import { PageLoading } from '@/components/common/PageLoading'
-import { StudentThemeToggle } from '@/components/student-theme-toggle'
+import { StudentThemeToggle } from '@/components/StudentThemeToggle'
 
 export default function PageContent() {
   return (
@@ -234,7 +234,7 @@ function ProfilePageContent() {
       <Box sx={{ bgcolor: 'white', borderBottom: '1px solid #e0e0e0', px: { xs: 2, sm: 3 }, py: 1.5 }}>
         <Container maxWidth="lg">
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Typography variant="h6" fontWeight="bold" color="primary">
+            <Typography variant="h6" component="h1" fontWeight="bold" color="primary">
               プロフィール
             </Typography>
             <Button

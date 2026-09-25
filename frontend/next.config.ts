@@ -22,8 +22,8 @@ const securityHeaders = [
       "media-src 'self' blob:",
       // 開発モードでは webpack HMR の WebSocket 接続を許可
       isDev
-        ? "connect-src 'self' blob: http://localhost:* https://api.openai.com ws://localhost:* wss://localhost:*"
-        : `connect-src 'self' blob: https://api.openai.com${backendOrigin ? ` ${backendOrigin}` : ''}`,
+        ? "connect-src 'self' blob: http://localhost:* https://api.openai.com https://*.sentry.io ws://localhost:* wss://localhost:*"
+        : `connect-src 'self' blob: https://api.openai.com https://*.sentry.io${backendOrigin ? ` ${backendOrigin}` : ''}`,
       "frame-ancestors 'none'",
     ].join('; '),
   },
@@ -47,6 +47,8 @@ const nextConfig: NextConfig = {
   // MUI emotion CSS-in-JS のSSR対応
   compiler: {
     emotion: true,
+    // 本番ビルドのみ console.log 等を除去（error/warn は残す）。開発時は従来どおり全て出力する
+    removeConsole: isDev ? false : { exclude: ['error', 'warn'] },
   },
   async headers() {
     return [

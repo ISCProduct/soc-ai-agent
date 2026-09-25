@@ -23,6 +23,7 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 
@@ -43,6 +44,7 @@ type HistoryEntry = {
 }
 
 export default function PageContent() {
+  const platformReady = useRequirePlatformAdmin()
   const [loading, setLoading] = useState(false)
   const [results, setResults] = useState<RecalcResult[]>([])
   const [error, setError] = useState('')
@@ -66,6 +68,8 @@ export default function PageContent() {
       window.location.href = '/'
     }
   }, [])
+
+  if (!platformReady) return null
 
   const headers = authService.getAdminFetchHeaders()
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { Box, Button, LinearProgress, Typography } from '@mui/material'
-import styles from '../../mui-chat.module.css'
+import styles from '../MuiChat.module.css'
 import { CHAT_BRAND } from '../utils'
 import type { ProgressTotals } from '../types'
 
@@ -27,11 +27,21 @@ export function ChatHeader({
   return (
     <Box className={styles.chatHeader}>
       <Box sx={{ minWidth: 0, flex: 1, pr: 1 }}>
-        <Typography variant="h5" className={styles.chatTitle}>
+        {/*
+          「AI適性診断 — 0/15問（0%）」をやめた。
+          学生が見たいのは「あと何問か」であって、何が診断しているかではない。
+          %は棒グラフが同じことを示しているので数字からは外す。
+        */}
+        {/*
+          チャット画面の見出し（#1479）。
+          このタイトルはモバイルでは display:none で、代わりに app/page-content.tsx の
+          モバイルヘッダー側が h1 を担う。両方が同時に見えることはない。
+        */}
+        <Typography variant="h5" component="h1" className={styles.chatTitle}>
           IT業界キャリアエージェント
         </Typography>
         <Typography variant="body2" color="text.secondary" className={styles.chatProgress}>
-          AI適性診断 — {valid}/{required} 問完了（想定{required}問・{percent}%）
+          {valid}問に回答（全{required}問）
         </Typography>
         <LinearProgress
           variant="determinate"

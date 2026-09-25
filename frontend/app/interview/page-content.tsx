@@ -49,6 +49,8 @@ function InterviewContent() {
   const [companySourceTab, setCompanySourceTab] = useState<'db' | 'web'>('db')
   const [webSearchResults, setWebSearchResults] = useState<{ name: string; description: string }[]>([])
   const [webSearchLoading, setWebSearchLoading] = useState(false)
+  const [webSearchError, setWebSearchError] = useState<string | null>(null)
+  const [webSearchRefreshKey, setWebSearchRefreshKey] = useState(0)
   const [positionCategory, setPositionCategory] = useState<'general' | 'sier'>('general')
   const [companyHints, setCompanyHints] = useState<{ style_tags: string[]; top_questions: string[]; company_brief?: string } | null>(null)
   const [hintsLoading, setHintsLoading] = useState(false)
@@ -125,6 +127,10 @@ function InterviewContent() {
     setCompaniesRefreshKey(k => k + 1)
   }, [])
 
+  const retryWebSearch = useCallback(() => {
+    setWebSearchRefreshKey(k => k + 1)
+  }, [])
+
   // Load company list for selection screen (initial fetch + debounced search)
   useEffect(() => {
     if (loading || companySourceTab !== 'db') return
@@ -139,6 +145,9 @@ function InterviewContent() {
         if (cancelled) return
         if (!r.ok) throw new Error('企業一覧の取得に失敗しました')
         const data = await r.json()
+        // r.json() の待ち中に検索語が変わることがある。setState 直前で
+        // 再確認して、古い一覧が最新を上書きするのを防ぐ(#1464)。
+        if (cancelled) return
         const list: InterviewCompany[] = Array.isArray(data?.companies) ? data.companies : []
         setAllCompanies(list)
       } catch (e) {
@@ -174,23 +183,52 @@ function InterviewContent() {
   }, [interviewCompany?.name, selectedPosition.title]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // WEB検索
+  // 失敗とヒット0件を必ず区別する。以前はどちらも空配列にしていたため、
+  // APIが落ちていても「検索結果が見つかりません」と出て、学生には
+  // その企業が存在しないように見えていた(#1447)。
   useEffect(() => {
     if (loading || companySourceTab !== 'web') return
-    if (!companySearch.trim()) { setWebSearchResults([]); return }
+    if (!companySearch.trim()) { setWebSearchResults([]); setWebSearchError(null); return }
     let cancelled = false
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       setWebSearchLoading(true)
-      fetch(`/api/companies/web-search?q=${encodeURIComponent(companySearch.trim())}`, { cache: 'no-store' })
-        .then(r => r.ok ? r.json() : null)
-        .then(data => {
-          if (cancelled) return
-          setWebSearchResults(Array.isArray(data?.results) ? data.results : [])
-        })
-        .catch(() => { if (!cancelled) setWebSearchResults([]) })
-        .finally(() => { if (!cancelled) setWebSearchLoading(false) })
+      setWebSearchError(null)
+      try {
+        const r = await fetch(
+          `/api/companies/web-search?q=${encodeURIComponent(companySearch.trim())}`,
+          { cache: 'no-store' },
+        )
+        if (cancelled) return
+        if (!r.ok) {
+          // 学生向けの画面なのでステータスコードは出さない。
+          // 待てば直る 429 だけは次の行動が変わるので文言を分ける。
+          throw new Error(
+            r.status === 429
+              ? '検索の回数が多すぎます。少し時間を置いてからお試しください。'
+              : '検索できませんでした。しばらくしてからもう一度お試しください。',
+          )
+        }
+        const data = await r.json()
+        // JSON パース中に検索語が変わってクリーンアップが走ったら、
+        // この結果は古い。setState 直前で再確認して上書きを防ぐ(#1464)。
+        // fetch 後の1回だけでは足りない: r.json() も待ちであり、その間に
+        // 別の検索が cancelled を立てうる。
+        if (cancelled) return
+        setWebSearchResults(Array.isArray(data?.results) ? data.results : [])
+      } catch (e) {
+        if (cancelled) return
+        setWebSearchError(
+          e instanceof Error && e.message
+            ? e.message
+            : '検索できませんでした。しばらくしてからもう一度お試しください。',
+        )
+        setWebSearchResults([])
+      } finally {
+        if (!cancelled) setWebSearchLoading(false)
+      }
     }, 500)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [loading, companySearch, companySourceTab]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loading, companySearch, companySourceTab, webSearchRefreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleBackToSelection = useCallback(() => {
     clearInterviewLobbyDraft()
@@ -241,6 +279,8 @@ function InterviewContent() {
         webSearchResults={webSearchResults}
         setWebSearchResults={setWebSearchResults}
         webSearchLoading={webSearchLoading}
+        webSearchError={webSearchError}
+        onRetryWebSearch={retryWebSearch}
         positionCategory={positionCategory}
         setPositionCategory={setPositionCategory}
         selectedPosition={selectedPosition}
@@ -319,9 +359,11 @@ function InterviewContent() {
         isGuest={!user || user.is_guest}
         onRegisterClick={() => router.push(GUEST_REGISTER_PATH)}
         onSendEmail={session.sendReportEmail}
-        onRetryReport={session.retryReportPolling}
+        onRetryReport={() => { void session.retryReportPolling() }}
+        reportRetryError={session.reportRetryError}
         finishFailed={session.finishFailed}
         onRetryFinish={session.retryFinish}
+        utteranceSaveFailed={session.utteranceSaveFailed}
         videoUploadStatus={session.videoUploadStatus}
         videoUploadProgress={session.videoUploadProgress}
         videoSizeWarning={session.videoSizeWarning}
@@ -360,6 +402,7 @@ function InterviewContent() {
       isRecording={session.isRecording}
       turnPending={session.turnPending}
       errorMessage={session.errorMessage}
+      utteranceSaveFailed={session.utteranceSaveFailed}
       sessionVideoCallbackRef={media.sessionVideoCallbackRef}
       transcriptEndRef={session.transcriptEndRef}
       aiAudioRef={session.aiAudioRef}

@@ -12,7 +12,7 @@ import {
   Typography,
 } from '@mui/material'
 import Link from 'next/link'
-import { companyAuthService } from '@/lib/company-auth'
+import { companyAuthService } from '@/lib/company/auth'
 
 export default function CompanyPortalForgotPasswordPage() {
   const [email, setEmail] = useState('')
@@ -48,7 +48,7 @@ export default function CompanyPortalForgotPasswordPage() {
     >
       <Card sx={{ maxWidth: 450, width: '100%' }}>
         <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
-          <Typography variant="h5" align="center" gutterBottom fontWeight="bold">
+          <Typography variant="h5" component="h1" align="center" gutterBottom fontWeight="bold">
             パスワードをお忘れですか？
           </Typography>
           <Typography variant="body2" align="center" color="text.secondary" sx={{ mb: 3 }}>
@@ -76,6 +76,8 @@ export default function CompanyPortalForgotPasswordPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                autoComplete="email"
+                slotProps={{ htmlInput: { inputMode: 'email' } }}
                 sx={{ mb: 3 }}
               />
               <Button
@@ -92,7 +94,7 @@ export default function CompanyPortalForgotPasswordPage() {
           )}
 
           <Box sx={{ textAlign: 'center', mt: 2 }}>
-            <Link href="/company-portal/sign-in" style={{ fontSize: '0.875rem' }}>
+            <Link href="/company-portal/sign-in" className="auth-link">
               ログインページへ戻る
             </Link>
           </Box>

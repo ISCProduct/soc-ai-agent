@@ -84,7 +84,7 @@ func (c *GBizClient) Search(ctx context.Context, name, postalCode string) ([]GBi
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("gbizinfo: 401 Unauthorized (check GBIZINFO_API_TOKEN)")
+		return nil, fmt.Errorf("gbizinfo: 401 Unauthorized (GBIZINFO_API_KEY を確認してください)")
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("gbizinfo: HTTP %d", resp.StatusCode)
@@ -181,7 +181,7 @@ func (c *GBizClient) SearchByKeyword(ctx context.Context, keyword string, limit 
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, nil, fmt.Errorf("gbizinfo: 401 Unauthorized (check GBIZINFO_API_TOKEN)")
+		return nil, nil, fmt.Errorf("gbizinfo: 401 Unauthorized (GBIZINFO_API_KEY を確認してください)")
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, nil, fmt.Errorf("gbizinfo: HTTP %d", resp.StatusCode)

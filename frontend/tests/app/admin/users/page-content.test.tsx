@@ -11,9 +11,11 @@ jest.mock('@/lib/auth', () => ({
   },
 }))
 
-// 学校絞り込みUI(SchoolFilterSelect)は独自に fetch するため、本テストの対象外として固定する
-jest.mock('@/lib/admin-school-access', () => ({
-  getAdminSchoolAccess: async () => ({ restricted: false, schools: [] }),
+// 学校絞り込みUI(SchoolFilterSelect)は独自に fetch するため、本テストの対象外として固定する。
+// 既定は担当校なし(restricted: false)。テストごとに差し替えられるよう jest.fn で持つ。
+const mockGetAdminSchoolAccess = jest.fn(async () => ({ restricted: false, schools: [] }))
+jest.mock('@/lib/admin/school-access', () => ({
+  getAdminSchoolAccess: () => mockGetAdminSchoolAccess(),
 }))
 
 const USER = {
@@ -107,5 +109,55 @@ describe('管理ユーザー画面 通信失敗時の挙動 (#1066)', () => {
 
     expect(await screen.findByText('ただいま接続できません。しばらくしてから再試行してください。')).toBeInTheDocument()
     expect(screen.queryByText(/<html>/)).not.toBeInTheDocument()
+  })
+})
+
+// 担当校スコープの取得が失敗したとき、フェイルオープンして教員に権限変更ボタンを
+// 見せていた(#1448)。バックエンドは403を返すので権限昇格ではないが、
+// 「押せば必ず403になるボタンを出さない」という #1157 の意図が取得失敗時に崩れていた。
+describe('管理ユーザー画面 担当校スコープの取得失敗 (#1448)', () => {
+  afterEach(() => {
+    global.fetch = originalFetch
+    mockGetAdminSchoolAccess.mockImplementation(async () => ({ restricted: false, schools: [] }))
+  })
+
+  /** 一覧取得だけ成功させる */
+  function mockListOk() {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ users: [USER], total: 1 }),
+    })
+  }
+
+  it('担当校スコープの取得に失敗したら権限変更ボタンを出さず、失敗を表示する', async () => {
+    // SchoolFilterSelect も同じ関数を呼ぶため Once だとそちらに消費される。
+    // 画面全体で失敗する状況を再現したいので実装ごと差し替える。
+    mockGetAdminSchoolAccess.mockImplementation(() => Promise.reject(new Error('boom')))
+    mockListOk()
+    render(<PageContent />)
+
+    expect(await screen.findByText('権限情報の取得に失敗しました')).toBeInTheDocument()
+    // 行が描画されたことを、権限とは無関係に常に出る削除ボタンで待つ
+    await screen.findByRole('button', { name: '削除' })
+    expect(screen.queryByRole('button', { name: '管理者にする' })).not.toBeInTheDocument()
+  })
+
+  it('担当校ありの管理者には権限変更ボタンを出さない', async () => {
+    mockGetAdminSchoolAccess.mockImplementation(async () => ({ restricted: true, schools: [] }))
+    mockListOk()
+    render(<PageContent />)
+
+    await screen.findByRole('button', { name: '削除' })
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: '管理者にする' })).not.toBeInTheDocument()
+    })
+  })
+
+  it('担当校なしの管理者には従来どおり権限変更ボタンを出す', async () => {
+    mockListOk()
+    render(<PageContent />)
+
+    expect(await screen.findByRole('button', { name: '管理者にする' })).toBeInTheDocument()
   })
 })

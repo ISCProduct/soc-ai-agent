@@ -7,6 +7,7 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
@@ -24,6 +25,7 @@ type AuditLog = {
 }
 
 export default function PageContent() {
+  const platformReady = useRequirePlatformAdmin()
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
@@ -49,8 +51,9 @@ export default function PageContent() {
   }
 
   useEffect(() => {
+    if (!platformReady) return
     loadLogs()
-  }, [])
+  }, [platformReady])
 
   const filtered = useMemo(() => {
     if (!query) return logs
@@ -59,6 +62,9 @@ export default function PageContent() {
       `${log.action} ${log.actor_email || ''} ${log.target_type}`.toLowerCase().includes(q),
     )
   }, [logs, query])
+
+  // フック呼び出し順を変えないため、ガードは全フックの後に置く
+  if (!platformReady) return null
 
   const renderMetadata = (raw?: string) => {
     if (!raw) return '-'

@@ -12,11 +12,13 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 
 export default function PageContent() {
+  const platformReady = useRequirePlatformAdmin()
   const router = useRouter()
   const { id } = useParams<{ id: string }>()
 
@@ -36,7 +38,7 @@ export default function PageContent() {
   const [contractEndDate, setContractEndDate] = useState('')
 
   useEffect(() => {
-    if (!id) return
+    if (!id || !platformReady) return
     fetch(`/api/admin/organizations/${id}`, { headers: authService.getAdminFetchHeaders() })
       .then(async (r) => {
         const org = await r.json()
@@ -57,7 +59,9 @@ export default function PageContent() {
         setError('学園情報の取得に失敗しました')
         setLoading(false)
       })
-  }, [id])
+  }, [id, platformReady])
+
+  if (!platformReady) return null
 
   const handleUpdate = async () => {
     setError('')

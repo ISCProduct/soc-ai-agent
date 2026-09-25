@@ -240,6 +240,14 @@ resource "aws_iam_role_policy" "app" {
         ]
       },
       {
+        # デプロイ手順(deployment.yml)が稼働中インスタンスの /opt/app/.env を
+        # 全台同じ BFF_INTERNAL_TOKEN へ更新するために読む(#1407)。
+        Sid      = "BffInternalTokenSsmRead"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = [aws_ssm_parameter.bff_internal_token.arn]
+      },
+      {
         # コンテナログを CloudWatch Logs へ転送する(awslogsログドライバ)。
         # 権限が無いとログ転送だけでなくコンテナ起動自体が失敗するため、
         # ロググループを作る aws_cloudwatch_log_group.app より後に評価されるよう
@@ -273,6 +281,37 @@ resource "random_password" "oauth_state_secret" {
 
 resource "random_id" "token_encryption_key" {
   byte_length = 32
+}
+
+# frontend(BFF) -> backend の内部認証トークン(#1407)。
+# backend は このトークンが一致したときだけ BFF の X-Client-IP を実クライアントIPとして
+# 採用する。staging は1ホストの docker compose で .env を共有するため、
+# この1つの値が frontend/backend の両コンテナへ渡る。
+resource "random_password" "bff_internal_token" {
+  length  = 48
+  special = false
+}
+
+# 上のトークンは staging 全インスタンスで同一でなければならない(#1407)。
+# frontend は BACKEND_URL=https://<backend_domain> 経由、つまり ALB 配下の任意の
+# インスタンスの backend を叩く。負荷試験で ASG が最大3台まで増えると、
+# インスタンス毎にトークンを生成した場合は frontend と backend の組み合わせ次第で
+# 検証に失敗し、X-Client-IP が捨てられて全利用者が frontend の出口IP1つへ再集約される。
+#
+# user_data(新規インスタンス)は下の launch template から直接この値を受け取り、
+# 稼働中インスタンスは deployment.yml が SSM からこの値を読んで .env を更新する。
+# どちらも出どころが random_password.bff_internal_token 1つなので必ず一致する。
+# 型は String。この同じ値が下の launch template の user_data に平文で載っており
+# (db_password や oauth_state_secret など既存の秘密も同様)、
+# ec2:DescribeLaunchTemplateVersions で読めるため、SecureString を足しても
+# 実際の境界は IAM のまま変わらない。読み出しはこのパラメータ1本へ限定する。
+resource "aws_ssm_parameter" "bff_internal_token" {
+  name        = "/${var.project_name}/bff-internal-token"
+  description = "BFF(frontend) -> backend の X-Client-IP 検証用共有トークン(#1407)"
+  type        = "String"
+  value       = random_password.bff_internal_token.result
+
+  tags = local.tags
 }
 
 data "aws_ami" "app" {
@@ -311,6 +350,11 @@ resource "aws_launch_template" "app" {
     }
   }
 
+  # trusted_proxy_hops は常に2（ALB + edge nginx）(#1407)。
+  # staging の CloudFront(error_fallback) は Route53 SECONDARY の S3 静的エラーページ専用で、
+  # 正常時は PRIMARY の ALB へ直接届くため成功経路には存在せず、段数に数えてはいけない。
+  # 3 にすると通常の2要素XFFでは転送が無効になり、さらにクライアントが先頭へIPを1個足すと
+  # その詐称値が3段目として内部トークン付きで署名され、IP単位の制限を回避できてしまう。
   user_data = base64encode(templatefile("${path.module}/app_user_data.sh.tftpl", {
     aws_region               = var.region
     log_group_name           = aws_cloudwatch_log_group.app.name
@@ -324,6 +368,9 @@ resource "aws_launch_template" "app" {
     db_password              = module.rds.master_password
     s3_bucket                = module.s3.bucket_id
     openai_api_key           = var.openai_api_key_plain
+    houjin_bangou_app_id     = var.houjin_bangou_app_id
+    gbizinfo_api_key         = var.gbizinfo_api_key
+    gbizinfo_base_url        = var.gbizinfo_base_url
     openai_model             = var.openai_model
     resend_api_key           = var.resend_api_key_plain
     google_client_id         = var.google_client_id
@@ -340,7 +387,10 @@ resource "aws_launch_template" "app" {
     github_dispatch_token    = var.github_dispatch_token
     github_dispatch_repo     = var.github_dispatch_repo
     oauth_state_secret       = random_password.oauth_state_secret.result
+    sentry_dsn               = var.sentry_dsn
     token_encryption_key     = random_id.token_encryption_key.hex
+    bff_internal_token       = random_password.bff_internal_token.result
+    trusted_proxy_hops       = "2"
     edge_nginx_conf          = file("${path.module}/../../../nginx/staging-edge.conf")
     service_unavailable_html = file("${path.module}/../../../static/service-unavailable.html")
     service_starting_html    = file("${path.module}/../../../static/service-starting.html")
@@ -378,6 +428,11 @@ resource "aws_autoscaling_group" "app" {
   # 起動直後はコンテナのpull/起動に時間がかかる。短いと起動途中で置換され続ける。
   health_check_grace_period = 600
 
+  # "$Latest" はこの指定自体が変化しないため、user_data を変えて新しい LT 版を作っても
+  # ASG のリソース差分にならず instance refresh は走らない（＝稼働中インスタンスの
+  # /opt/app/.env は古いまま）。ここを latest_version にすると apply の度に
+  # ローリング置換が走り、stagingが数分落ちる。
+  # そのため .env の追記は deployment.yml のデプロイ手順で行う（#1407）。
   launch_template {
     id      = aws_launch_template.app.id
     version = "$Latest"

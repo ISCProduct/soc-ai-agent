@@ -25,7 +25,7 @@ import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContaine
 import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
 import { ScoreBar } from '@/components/admin/ScoreBar'
-import { getAdminSchoolAccess } from '@/lib/admin-school-access'
+import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 import {
   displayCategories,
   displayIndustries,

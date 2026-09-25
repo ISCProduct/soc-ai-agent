@@ -3,11 +3,31 @@ import {
   SERVER_BACKEND_URL,
   setSessionCookies,
   setCompanySessionCookies,
-} from '@/lib/session-cookies'
+} from '@/lib/auth/session-cookies'
 import { extractTenantSlug, isAdminHost } from '@/lib/tenant'
 
 // アクセストークンの残り有効期間がこの秒数を下回ったらリフレッシュする (#616)
 const REFRESH_MARGIN_SECONDS = 120
+
+// リクエストID (#1188)。FE -> BE -> RAG のログを1つのIDで突き合わせるため、
+// 入口であるここで採番し、Route Handler 経由でBackendへ渡す。
+const REQUEST_ID_HEADER = 'X-Request-ID'
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
+
+// クライアント指定値はログに出るため形式を検証し、不正なら採番し直す
+function resolveRequestId(incoming: string | null): string {
+  return incoming && REQUEST_ID_PATTERN.test(incoming) ? incoming : crypto.randomUUID()
+}
+
+// 企業相関図の旧URL。app/ 配下で唯一の大文字始まりセグメントだったため
+// /correlation-diagram へ揃えた。既存のリンクやブックマークを切らさないよう
+// ここで恒久リダイレクトする。
+//
+// next.config の redirects() を使わないのは、source の照合が大文字小文字を
+// 区別せず、新URL自身もマッチして無限リダイレクトになるため(実測で確認)。
+// ここでは pathname を厳密比較する。
+const LEGACY_CORRELATION_DIAGRAM_PATH = '/Correlation-diagram'
+const CORRELATION_DIAGRAM_PATH = '/correlation-diagram'
 
 interface RefreshedSession {
   userId: string
@@ -88,6 +108,13 @@ function isUnderAdminPath(pathname: string): boolean {
 export async function middleware(request: NextRequest) {
   const host = request.headers.get('host') ?? ''
   const pathname = request.nextUrl.pathname
+
+  // 認証まわりの処理に入る前に返す（リダイレクトだけのためにトークン更新を走らせない）
+  if (pathname === LEGACY_CORRELATION_DIAGRAM_PATH) {
+    const redirectUrl = request.nextUrl.clone()
+    redirectUrl.pathname = CORRELATION_DIAGRAM_PATH
+    return NextResponse.redirect(redirectUrl, 308)
+  }
   // admin.shukatsu-ai.jp は /admin 配下へ内部的にrewriteする(URLバーの表示は変えない)。
   // /api配下はNext.jsのAPI Route Handlerであり/admin/api/...という実体は存在しないため対象外。
   const needsAdminRewrite =
@@ -116,6 +143,9 @@ export async function middleware(request: NextRequest) {
   // 学園サブドメイン(<学園slug>.shukatsu-ai.jp)をBackendへ引き継ぐ
   const tenantSlug = extractTenantSlug(request.headers.get('host') ?? '')
   if (tenantSlug) requestHeaders.set('X-Tenant-Slug', tenantSlug)
+
+  const requestId = resolveRequestId(request.headers.get(REQUEST_ID_HEADER))
+  requestHeaders.set(REQUEST_ID_HEADER, requestId)
 
   if (userId && userToken) {
     let effectiveUserId = userId
@@ -160,6 +190,9 @@ export async function middleware(request: NextRequest) {
   } else {
     response = NextResponse.next({ request: { headers: requestHeaders } })
   }
+
+  // 問い合わせ時にユーザーがIDを提示できるよう、ブラウザ側にも返す(#1188)
+  response.headers.set(REQUEST_ID_HEADER, requestId)
 
   // ローテーションされた新しいトークンペアをCookieへ反映
   if (refreshed) {

@@ -2,6 +2,7 @@ package companyfetch
 
 import (
 	"Backend/internal/openai"
+	"Backend/internal/usagectx"
 	"context"
 	"fmt"
 	"strings"
@@ -32,7 +33,22 @@ func (l *LLM) ExtractJSON(ctx context.Context, systemPrompt, userPrompt string, 
 		maxTokens = 600
 	}
 	model = ExtractModel()
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureCompanyParse)
 	text, err = l.Client.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.2, maxTokens, model)
+	return text, model, err
+}
+
+// ExtractJSONWithSchema は JSON Schema を強制して抽出する（Structured Outputs）。
+// スキーマ非対応のモデルでは JSON mode へ落ちるため、呼び出し側の検証は外さないこと。
+func (l *LLM) ExtractJSONWithSchema(ctx context.Context, systemPrompt, userPrompt string, maxTokens int, schema *openai.ResponseSchema) (text string, model string, err error) {
+	if l == nil || l.Client == nil {
+		return "", "", fmt.Errorf("openai client is nil")
+	}
+	if maxTokens <= 0 {
+		maxTokens = 600
+	}
+	model = ExtractModel()
+	text, err = l.Client.ChatCompletionWithSchema(ctx, systemPrompt, userPrompt, 0.2, maxTokens, schema, model)
 	return text, model, err
 }
 
@@ -62,6 +78,25 @@ func (l *LLM) SearchJSON(ctx context.Context, userPrompt string, maxTokens int) 
 }
 
 // SearchLiteThenParse は安価 Search → Parse の 2 段構成（高額な deep search なし）。
+// SearchLiteThenParseWithSchema は検索結果のパース段でスキーマを強制する。
+// 検索そのものは自由テキストのままで、構造化するのはパース時だけでよい。
+func (l *LLM) SearchLiteThenParseWithSchema(ctx context.Context, searchPrompt, parseSystem, parseUserPrefix string, parseMaxTokens int, schema *openai.ResponseSchema) (jsonText string, modelsUsed string, err error) {
+	searchText, searchModel, err := l.SearchLiteJSON(ctx, searchPrompt, 1500)
+	if err != nil {
+		return "", "", fmt.Errorf("web search failed: %w", err)
+	}
+	if strings.TrimSpace(searchText) == "" {
+		return "", "", fmt.Errorf("web search returned empty")
+	}
+
+	parseUser := parseUserPrefix + "\n\n---\n検索結果:\n" + TrimText(searchText, 2000)
+	parsed, parseModel, err := l.ParseJSONWithSchema(ctx, parseSystem, parseUser, parseMaxTokens, schema)
+	if err != nil {
+		return "", searchModel, err
+	}
+	return parsed, searchModel + "+" + parseModel, nil
+}
+
 func (l *LLM) SearchLiteThenParse(ctx context.Context, searchPrompt, parseSystem, parseUserPrefix string, parseMaxTokens int) (jsonText string, modelsUsed string, err error) {
 	searchText, searchModel, err := l.SearchLiteJSON(ctx, searchPrompt, 1500)
 	if err != nil {
@@ -85,6 +120,19 @@ func (l *LLM) SearchThenParse(ctx context.Context, searchPrompt, parseSystem, pa
 }
 
 // ParseJSON は Parse モデルで JSON 化する。
+// ParseJSONWithSchema は JSON Schema を強制してパースする。
+func (l *LLM) ParseJSONWithSchema(ctx context.Context, systemPrompt, userPrompt string, maxTokens int, schema *openai.ResponseSchema) (text string, model string, err error) {
+	if l == nil || l.Client == nil {
+		return "", "", fmt.Errorf("openai client is nil")
+	}
+	if maxTokens <= 0 {
+		maxTokens = 600
+	}
+	model = ParseModel()
+	text, err = l.Client.ChatCompletionWithSchema(ctx, systemPrompt, userPrompt, 0.2, maxTokens, schema, model)
+	return text, model, err
+}
+
 func (l *LLM) ParseJSON(ctx context.Context, systemPrompt, userPrompt string, maxTokens int) (text string, model string, err error) {
 	if l == nil || l.Client == nil {
 		return "", "", fmt.Errorf("openai client is nil")
@@ -93,6 +141,7 @@ func (l *LLM) ParseJSON(ctx context.Context, systemPrompt, userPrompt string, ma
 		maxTokens = 600
 	}
 	model = ParseModel()
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureCompanyParse)
 	text, err = l.Client.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.2, maxTokens, model)
 	return text, model, err
 }

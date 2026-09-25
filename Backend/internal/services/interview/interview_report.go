@@ -2,15 +2,81 @@ package interview
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/repositories"
+	"Backend/internal/safego"
 	"Backend/internal/services/email"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"strings"
+
+	"gorm.io/gorm"
 )
+
+// ErrNoUtterances は発話が1件も保存されていないセッションのレポート生成エラー（#1476）。
+//
+// 以前はこの場合に「発話データがありませんでした」という空レポートを保存して正常終了していた。
+// しかし発話0件は「面接に中身が無かった」とは限らない。発話保存(POST /utterances)は
+// ブラウザから別リクエストで行われるため、ネットワーク瞬断やトークン失効で丸ごと欠落しうる。
+// そこで空レポートを成功として確定させると、面接をやり切ったユーザーに中身のないレポートが
+// 届き、失敗の痕跡もどこにも残らない（スコアと LoRA 学習データの欠損もそのまま伝播する）。
+//
+// レポートは作らずエラーを返し、ジョブの再試行（asynq: MaxRetry=3）に委ねる。
+// 再試行し切っても0件なら、レポートは未生成のままフロントのポーリングがタイムアウトし、
+// 「生成できなかった」ことがユーザーに見える状態で止まる。
+var ErrNoUtterances = errors.New("interview: no utterances for session")
+
+// ErrSessionNotFinished は未終了セッションに対してレポート再生成を要求されたことを表す(#1476)。
+var ErrSessionNotFinished = errors.New("interview: session is not finished")
+
+// ErrReportQueueNotAvailable はレポート生成ジョブを投入できなかったことを表す(#1476)。
+//
+// Redis 未設定/障害時のフォールバック channel が満杯だとジョブは捨てられる。
+// ここを成功(202)で返すと、フロントは存在しないジョブを3分ポーリングして
+// 再びタイムアウトするだけになるため、投入失敗はそのままエラーとして返す。
+var ErrReportQueueNotAvailable = errors.New("interview: report job queue is not available")
+
+// RegenerateReport は未生成のレポートを作り直すためにジョブを再投入する(#1476)。
+//
+// レポート生成ジョブは失われうる。asynq の再試行を使い切った場合、Redis 無しの
+// フォールバック worker では1回で（発話0件なら ErrNoUtterances で確実に）、
+// jobCh が満杯なら投入すらされずに捨てられる。FinishSession は終了済みセッションを
+// 再キューしない（#1019 の冪等性）ため、これまでユーザーには回復手段が無く、
+// 遅れて発話が保存されてもレポートは永久に未生成のままだった。
+//
+// レポートが既にあるときは何もしない。ここで無条件に再投入すると、
+// 生成中のジョブと二重に走って LLM 費用が二重に掛かり、レポートが上書きされる。
+// 呼び出し側（フロントの再試行ボタン）はポーリングがタイムアウト/失敗した後にだけ叩く。
+//
+// 戻り値の queued は「新たにジョブを投入したか」。false は「既に生成済みなので不要」。
+// 投入そのものに失敗したときは ErrReportQueueNotAvailable を返す（成功として返さない）。
+func (s *InterviewService) RegenerateReport(userID uint, sessionID uint) (queued bool, err error) {
+	session, err := s.sessionRepo.FindByID(sessionID)
+	if err != nil {
+		return false, err
+	}
+	if !s.isAllowed(userID, session.UserID) {
+		return false, shared.ErrForbidden
+	}
+	if session.Status != "finished" {
+		return false, ErrSessionNotFinished
+	}
+	report, err := s.reportRepo.FindBySessionID(sessionID)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, err
+	}
+	if report != nil {
+		return false, nil
+	}
+	if !s.enqueueReportGeneration(sessionID) {
+		return false, ErrReportQueueNotAvailable
+	}
+	return true, nil
+}
 
 func (s *InterviewService) StartWorker() {
 	// Redis キュー利用時は asynq worker が処理する。フォールバック用 channel worker は常に起動。
@@ -21,12 +87,20 @@ func (s *InterviewService) StartWorker() {
 
 func (s *InterviewService) runWorker() {
 	for sessionID := range s.jobCh {
-		if err := s.generateReport(context.Background(), sessionID); err != nil {
-			log.Printf("[Interview] Report generation failed for session %d: %v\n", sessionID, err)
-			continue
-		}
-		log.Printf("[Interview] Report generation completed for session %d\n", sessionID)
+		s.runReportJob(sessionID)
 	}
+}
+
+// runReportJob は1件分のレポート生成を実行し、終わったら重複排除の登録を外す(#1476)。
+// 処理中も登録を保持するのは、生成が3分のUIタイムアウトを超えたときの再試行で
+// 同じセッションが二重に走らないようにするため。
+func (s *InterviewService) runReportJob(sessionID uint) {
+	defer s.clearReportJobInFlight(sessionID)
+	if err := s.generateReport(context.Background(), sessionID); err != nil {
+		log.Printf("[Interview] Report generation failed for session %d: %v\n", sessionID, err)
+		return
+	}
+	log.Printf("[Interview] Report generation completed for session %d\n", sessionID)
 }
 
 // buildTranscript formats utterances into a plain-text transcript for the LLM prompt.
@@ -75,22 +149,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		return err
 	}
 	if len(utterances) == 0 {
-		// utterances が0件の場合は空レポートを保存して正常終了。
-		//
-		// スコアは書かない。以前は全項目0点を書いていたが、
-		// 「発話が無い」ことと「全項目が最低評価」は違う。
-		// 0点は画面に最低評価として表示され、学生を誤解させる
-		// （docs/wiki/scoring.md §2-3 と同じ理由）。
-		empty := &models.InterviewReport{
-			SessionID:         sessionID,
-			SummaryText:       "発話データがありませんでした。",
-			ScoresJSON:        "",
-			EvidenceJSON:      "",
-			StrengthsJSON:     `[]`,
-			ImprovementsJSON:  `[]`,
-			TeacherReportJSON: `{}`,
-		}
-		return s.reportRepo.Upsert(empty)
+		return fmt.Errorf("%w (session=%d)", ErrNoUtterances, sessionID)
 	}
 	transcript := BuildTranscript(utterances)
 	systemPrompt := buildReportSystemPrompt(lang)
@@ -134,6 +193,7 @@ Interview transcript:
 	var haveBody bool
 	var lastErr error
 	for attempt := range reportGenerationAttempts {
+		ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport)
 		raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 2000, model)
 		if err != nil {
 			return err
@@ -194,12 +254,24 @@ Interview transcript:
 		return err
 	}
 
-	// 面接スコアを UserWeightScore に反映（crossFeature が設定済みの場合のみ）
+	// 面接スコアをチャット診断セッションへ反映し、可能なら再マッチングする。
 	if s.crossFeature != nil {
-		chatSessionID := fmt.Sprintf("interview-%d", session.UserID)
-		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, chatSessionID, report); err != nil {
-			// スコア反映失敗はレポート生成を失敗扱いにしない
+		targetSession, err := s.crossFeature.ResolveDiagnosisSessionID(session.UserID)
+		if err != nil {
+			// 診断セッションを特定できないまま書くと別セッションを汚す。
+			// ここで握りつぶすと面接スコアがどこにも反映されないまま消えるので、
+			// エラーを返してキュー(asynq)のリトライに載せる。レポート本体は Upsert 済みで冪等。
+			return fmt.Errorf("診断セッションの解決に失敗 (session=%d): %w", sessionID, err)
+		}
+		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, targetSession, report); err != nil {
 			log.Printf("[CrossFeature] interview score update failed for session %d: %v\n", sessionID, err)
+		} else if s.matchingRunner != nil && !repositories.IsInterviewSnapshotSession(targetSession) {
+			userID, sessionID := session.UserID, targetSession
+			safego.Go(func() {
+				if err := s.matchingRunner.CalculateMatching(context.Background(), userID, sessionID); err != nil {
+					log.Printf("[CrossFeature] rematch after interview failed user=%d session=%s: %v\n", userID, sessionID, err)
+				}
+			})
 		}
 	}
 	return nil

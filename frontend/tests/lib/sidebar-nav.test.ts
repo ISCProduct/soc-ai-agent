@@ -18,7 +18,7 @@ describe('sidebar-nav', () => {
   it('面接・相関図・プロフィールへのリンクを含む', () => {
     const hrefs = SIDEBAR_NAV_ITEMS.map((i) => i.href)
     expect(hrefs).toContain('/interview')
-    expect(hrefs).toContain('/Correlation-diagram')
+    expect(hrefs).toContain('/correlation-diagram')
     expect(hrefs).toContain('/profile')
   })
 

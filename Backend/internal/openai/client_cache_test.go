@@ -32,11 +32,12 @@ func TestResponses_CachedTokensLogging(t *testing.T) {
 
 	client := NewWithBaseURL(server.URL, "gpt-4o-mini")
 	called := false
-	client.OnUsage = func(model string, promptTokens, completionTokens int) {
+	client.OnUsage = func(u Usage) {
 		called = true
-		assert.Equal(t, "gpt-4o-mini", model)
-		assert.Equal(t, 100, promptTokens)
-		assert.Equal(t, 10, completionTokens)
+		assert.Equal(t, "gpt-4o-mini", u.Model)
+		assert.Equal(t, 100, u.PromptTokens)
+		assert.Equal(t, 10, u.CompletionTokens)
+		assert.False(t, u.ViaFallback, "フォールバックしていないので false")
 	}
 
 	ctx := context.Background()
@@ -69,11 +70,12 @@ func TestChatCompletion_CachedTokensLogging(t *testing.T) {
 
 	client := NewWithBaseURL(server.URL, "gpt-4o-mini")
 	called := false
-	client.OnUsage = func(model string, promptTokens, completionTokens int) {
+	client.OnUsage = func(u Usage) {
 		called = true
-		assert.Equal(t, "gpt-4o-mini", model)
-		assert.Equal(t, 100, promptTokens)
-		assert.Equal(t, 10, completionTokens)
+		assert.Equal(t, "gpt-4o-mini", u.Model)
+		assert.Equal(t, 100, u.PromptTokens)
+		assert.Equal(t, 10, u.CompletionTokens)
+		assert.False(t, u.ViaFallback, "フォールバックしていないので false")
 	}
 
 	ctx := context.Background()
@@ -99,6 +101,10 @@ func TestWebSearchJSON_UsesResponsesWebSearchTool(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// 既定値(medium)のままだと「ノブを無視して medium 決め打ち」でも通ってしまう。
+	// 既定と違う値を与えて、env が実際にワイヤまで届くことを確認する（#1124）
+	t.Setenv("OPENAI_WEB_SEARCH_CONTEXT_SIZE", "low")
+
 	client := NewWithBaseURL(server.URL, "gpt-4o-mini")
 	out, err := client.WebSearchJSON(context.Background(), "NECについて", 400, "gpt-5-search-api")
 	assert.NoError(t, err)
@@ -109,5 +115,6 @@ func TestWebSearchJSON_UsesResponsesWebSearchTool(t *testing.T) {
 	assert.NotEmpty(t, tools)
 	tool, _ := tools[0].(map[string]any)
 	assert.Equal(t, "web_search", tool["type"])
-	assert.Equal(t, "high", tool["search_context_size"])
+	// env の値がそのまま届くこと。境界値は TestWebSearchContextSize が担保する
+	assert.Equal(t, "low", tool["search_context_size"])
 }

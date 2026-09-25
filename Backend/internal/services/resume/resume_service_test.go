@@ -21,6 +21,8 @@ import (
 
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
+
+	"gorm.io/gorm"
 )
 
 func makeUploadedFileHeader(t *testing.T, filename string, content []byte, contentType string) *multipart.FileHeader {
@@ -84,6 +86,15 @@ func (r *resumeRepoStub) UpdateDocument(doc *models.ResumeDocument) error {
 func (r *resumeRepoStub) FindDocumentByID(id uint) (*models.ResumeDocument, error) {
 	if r.doc == nil || r.doc.ID != id {
 		return nil, errors.New("not found")
+	}
+	return r.doc, nil
+}
+
+// FindDocumentByIDForUser は user_id でスコープした取得（#1156）。
+// 所有者が違えば gorm.ErrRecordNotFound を返す（実装と同じ挙動）。
+func (r *resumeRepoStub) FindDocumentByIDForUser(id, userID uint) (*models.ResumeDocument, error) {
+	if r.doc == nil || r.doc.ID != id || r.doc.UserID != userID {
+		return nil, gorm.ErrRecordNotFound
 	}
 	return r.doc, nil
 }
@@ -242,7 +253,7 @@ func TestResumeService_ReviewDocumentRejectsOtherUser(t *testing.T) {
 		},
 	}, "", nil)
 
-	_, _, err := service.ReviewDocument(10, 2, "ACME", "Engineer", "new_grad")
+	_, _, err := service.ReviewDocument(context.Background(), 10, 2, "ACME", "Engineer", "new_grad")
 	if !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("他ユーザーのレビュー実行は forbidden であるべき: got %v", err)
 	}
@@ -360,74 +371,5 @@ func TestValidateURL(t *testing.T) {
 				t.Errorf("エラーなしを期待したが発生した: url=%s, err=%v", tt.rawURL, err)
 			}
 		})
-	}
-}
-
-// TestSsrfSafeDialContext_BlocksInternalAddresses はDNSリバインディング対策の
-// DialContextガードが内部IPへの接続を拒否することを検証する（#940）。
-// 実際に外部ネットワークへ接続する成功系は統合/手動テストでカバーする（ここではユニットテスト化しない）。
-func TestSsrfSafeDialContext_BlocksInternalAddresses(t *testing.T) {
-	originalLookup := lookupIP
-	defer func() { lookupIP = originalLookup }()
-
-	tests := []struct {
-		name    string
-		addr    string
-		mockIPs []net.IP
-		mockErr error
-	}{
-		{
-			name: "リテラル内部IPへのdialはブロックされる",
-			addr: "127.0.0.1:80",
-		},
-		{
-			name:    "内部IPに解決されるホスト名へのdialはブロックされる(DNSリバインディング対策)",
-			addr:    "internal.example.com:80",
-			mockIPs: []net.IP{net.ParseIP("169.254.169.254")},
-		},
-		{
-			name:    "公開IPと内部IPが混在するホスト名へのdialはブロックされる",
-			addr:    "mixed.example.com:80",
-			mockIPs: []net.IP{net.ParseIP("93.184.216.34"), net.ParseIP("169.254.169.254")},
-		},
-		{
-			name:    "名前解決に失敗した場合はブロックされる",
-			addr:    "unresolvable.example.com:80",
-			mockErr: errors.New("no such host"),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			lookupIP = func(host string) ([]net.IP, error) {
-				return tt.mockIPs, tt.mockErr
-			}
-			_, err := ssrfSafeDialContext(context.Background(), "tcp", tt.addr)
-			if err == nil {
-				t.Errorf("内部アドレスへのdialはエラーになるべき: addr=%s", tt.addr)
-			}
-		})
-	}
-}
-
-func TestResolveLocalPathCopiesStoredFileIntoWorkDir(t *testing.T) {
-	storage := t.TempDir()
-	work := t.TempDir()
-	src := filepath.Join(storage, "resume.pdf")
-	if err := os.WriteFile(src, []byte("%PDF-1.4\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got, err := (&ResumeService{}).resolveLocalPath(&models.ResumeDocument{
-		StoredPath:       src,
-		OriginalFilename: "resume.pdf",
-	}, work)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got == src {
-		t.Fatal("永続パスをそのまま返してはいけない")
-	}
-	if err := validatePathInDir(got, work); err != nil {
-		t.Fatalf("workDir 配下であるべき: %v", err)
 	}
 }

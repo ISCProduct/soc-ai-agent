@@ -41,7 +41,7 @@ describe('server-auth', () => {
       },
     })
 
-    const { getSessionCredentials } = await import('@/lib/server-auth')
+    const { getSessionCredentials } = await import('@/lib/auth/server')
     await expect(getSessionCredentials()).resolves.toEqual({
       userId: '42',
       userToken: 'token-abc',
@@ -72,7 +72,7 @@ describe('server-auth', () => {
       ),
     )
 
-    const { getSessionUser } = await import('@/lib/server-auth')
+    const { getSessionUser } = await import('@/lib/auth/server')
     const user = await getSessionUser()
     expect(user).toMatchObject({ user_id: 1, email: 'a@example.com' } satisfies Partial<User>)
   })
@@ -87,7 +87,7 @@ describe('server-auth', () => {
       },
     })
 
-    const { getSessionUser } = await import('@/lib/server-auth')
+    const { getSessionUser } = await import('@/lib/auth/server')
     const user = await getSessionUser()
     expect(user).toMatchObject({ user_id: 99, is_admin: true } satisfies Partial<User>)
     expect(global.fetch).not.toHaveBeenCalled()
@@ -96,7 +96,7 @@ describe('server-auth', () => {
   it('requireSessionUser は未ログイン時に /login へリダイレクトする', async () => {
     mockCookies.mockResolvedValue({ get: () => undefined })
 
-    const { requireSessionUser } = await import('@/lib/server-auth')
+    const { requireSessionUser } = await import('@/lib/auth/server')
     await expect(requireSessionUser()).rejects.toThrow('REDIRECT:/login')
   })
 
@@ -110,7 +110,7 @@ describe('server-auth', () => {
       },
     })
 
-    const { requireAdminUser } = await import('@/lib/server-auth')
+    const { requireAdminUser } = await import('@/lib/auth/server')
     await expect(requireAdminUser()).rejects.toThrow('REDIRECT:/')
   })
 })

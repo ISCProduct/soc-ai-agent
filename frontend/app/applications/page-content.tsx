@@ -144,7 +144,7 @@ function ApplicationsContent() {
         <IconButton onClick={() => router.back()}>
           <ArrowBack />
         </IconButton>
-        <Typography variant="h5" fontWeight="bold">
+        <Typography variant="h5" component="h1" fontWeight="bold">
           選考管理
         </Typography>
       </Stack>

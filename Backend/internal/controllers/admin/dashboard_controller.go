@@ -1,0 +1,370 @@
+package admin
+
+import (
+	"Backend/domain/repository"
+	"Backend/internal/controllers/httpapi"
+	"Backend/internal/entitlement"
+	"Backend/internal/middleware"
+	"Backend/internal/models"
+	ifaces "Backend/internal/services/interfaces"
+	"Backend/internal/services/organization"
+	"Backend/internal/services/school"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/labstack/echo/v4"
+)
+
+// AdminDashboardController provides admin endpoints for the user score dashboard.
+type AdminDashboardController struct {
+	userRepo    repository.UserRepository
+	sessionRepo ifaces.DashboardSessionRepo
+	reportRepo  ifaces.DashboardReportRepo
+	schools     *school.SchoolService
+	orgs        *organization.OrganizationService
+}
+
+func NewAdminDashboardController(
+	userRepo repository.UserRepository,
+	sessionRepo ifaces.DashboardSessionRepo,
+	reportRepo ifaces.DashboardReportRepo,
+) *AdminDashboardController {
+	return &AdminDashboardController{
+		userRepo:    userRepo,
+		sessionRepo: sessionRepo,
+		reportRepo:  reportRepo,
+	}
+}
+
+// SetSchoolService は担当校スコープの検証に使うサービスを設定する(#984)
+func (c *AdminDashboardController) SetSchoolService(schools *school.SchoolService) {
+	c.schools = schools
+}
+
+// SetOrganizationService はプラン判定(組織ごとのplan/contract_end_date)に使うサービスを設定する(#985)
+func (c *AdminDashboardController) SetOrganizationService(orgs *organization.OrganizationService) {
+	c.orgs = orgs
+}
+
+// currentAdminPlan は呼び出し元adminが所属する組織の契約プランを返す(#985)。
+// グローバル環境変数DEFAULT_PLAN基準だと、契約が切れた/標準プランの組織でも
+// pro相当の機能(CSVエクスポート等)が使え続けてしまっていた。
+// 組織未所属(ErrOrganizationNotFound、プラットフォーム管理者)はCurrentPlan()(DEFAULT_PLAN)に
+// フォールバックするが、それ以外のエラー経路(DB障害等)はfail-closed(PlanFree)にする。
+// CurrentPlan()はDEFAULT_PLAN未設定時にPlanProを返すため、エラー経路でも
+// CurrentPlan()にフォールバックすると、組織解決の一時的な失敗でPro機能が
+// 素通りしてしまう(#985の意図を回避する経路になる)。
+func (c *AdminDashboardController) currentAdminPlan(ctx echo.Context) entitlement.PlanID {
+	if c.orgs == nil {
+		return entitlement.CurrentPlan()
+	}
+	adminUserID, ok := middleware.AdminUserIDFromContext(ctx.Request().Context())
+	if !ok {
+		return entitlement.PlanFree
+	}
+	orgID, err := c.orgs.ResolveOrganizationID(adminUserID)
+	if errors.Is(err, organization.ErrOrganizationNotFound) {
+		// 担当組織が無いプラットフォーム管理者は、既存動作どおりグローバル既定プランで判定する。
+		return entitlement.CurrentPlan()
+	}
+	if err != nil {
+		return entitlement.PlanFree
+	}
+	org, err := c.orgs.Get(orgID)
+	if err != nil || org == nil {
+		return entitlement.PlanFree
+	}
+	return entitlement.PlanForOrganization(org.Plan, org.ContractEndDate)
+}
+
+type UserScoreSummary struct {
+	UserID        uint       `json:"user_id"`
+	Name          string     `json:"name"`
+	Email         string     `json:"email"`
+	Role          string     `json:"role"`
+	RegisteredAt  time.Time  `json:"registered_at"`
+	SessionCount  int64      `json:"session_count"`
+	LastSessionAt *time.Time `json:"last_session_at,omitempty"`
+	AvgScore      *float64   `json:"avg_score,omitempty"`
+}
+
+type SessionScoreEntry struct {
+	SessionID uint               `json:"session_id"`
+	EndedAt   *time.Time         `json:"ended_at,omitempty"`
+	AvgScore  *float64           `json:"avg_score,omitempty"`
+	Scores    map[string]float64 `json:"scores,omitempty"`
+}
+
+// avgScoresJSON parses ScoresJSON like {"logic":5,"specificity":4,...} and returns the mean.
+func avgScoresJSON(scoresJSON string) (map[string]float64, *float64) {
+	if scoresJSON == "" {
+		return nil, nil
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(scoresJSON), &raw); err != nil {
+		return nil, nil
+	}
+	scores := make(map[string]float64, len(raw))
+	var sum float64
+	var count int
+	for k, v := range raw {
+		switch val := v.(type) {
+		case float64:
+			scores[k] = val
+			sum += val
+			count++
+		}
+	}
+	if count == 0 {
+		return scores, nil
+	}
+	avg := sum / float64(count)
+	return scores, &avg
+}
+
+// ListUsers handles GET /api/admin/dashboard/users
+func (c *AdminDashboardController) ListUsers(ctx echo.Context) error {
+	limit := httpapi.LimitQuery(ctx, "limit", 25)
+	offset := (httpapi.IntQuery(ctx, "page", 1) - 1) * limit
+	query := ctx.QueryParam("query")
+	sort := ctx.QueryParam("sort") // avg_score_asc | avg_score_desc | session_count_desc | registered_desc
+	schoolID, err := httpapi.AdminSchoolFilter(ctx)
+	if err != nil {
+		return err
+	}
+
+	users, total, err := c.userRepo.ListUsersPaged(limit, offset, query, schoolID)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+
+	userIDs := make([]uint, len(users))
+	for i, u := range users {
+		userIDs[i] = u.ID
+	}
+
+	statMap, err := c.sessionRepo.GetUserStatsBatch(userIDs)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+
+	// Collect all finished session IDs to batch-fetch reports
+	var allSessionIDs []uint
+	sessionToUser := map[uint]uint{}
+	for _, u := range users {
+		ids, err := c.sessionRepo.ListFinishedSessionIDsByUser(u.ID)
+		if err != nil {
+			continue
+		}
+		for _, id := range ids {
+			allSessionIDs = append(allSessionIDs, id)
+			sessionToUser[id] = u.ID
+		}
+	}
+
+	reports, err := c.reportRepo.FindBySessionIDs(allSessionIDs)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+
+	// Compute per-user avg scores
+	userScoreSum := map[uint]float64{}
+	userScoreCount := map[uint]int{}
+	for _, rep := range reports {
+		_, avg := avgScoresJSON(rep.ScoresJSON)
+		if avg != nil {
+			uid := sessionToUser[rep.SessionID]
+			userScoreSum[uid] += *avg
+			userScoreCount[uid]++
+		}
+	}
+
+	summaries := make([]UserScoreSummary, 0, len(users))
+	for _, u := range users {
+		stat := statMap[u.ID]
+		var avgScore *float64
+		if cnt := userScoreCount[u.ID]; cnt > 0 {
+			v := userScoreSum[u.ID] / float64(cnt)
+			avgScore = &v
+		}
+		summaries = append(summaries, UserScoreSummary{
+			UserID:        u.ID,
+			Name:          u.Name,
+			Email:         u.Email,
+			Role:          u.TargetLevel,
+			RegisteredAt:  u.CreatedAt,
+			SessionCount:  stat.SessionCount,
+			LastSessionAt: stat.LastSessionAt,
+			AvgScore:      avgScore,
+		})
+	}
+
+	// Client-side sort on the current page
+	switch sort {
+	case "avg_score_desc":
+		stableSort(summaries, func(a, b UserScoreSummary) bool {
+			av := scoreVal(a.AvgScore)
+			bv := scoreVal(b.AvgScore)
+			return av > bv
+		})
+	case "avg_score_asc":
+		stableSort(summaries, func(a, b UserScoreSummary) bool {
+			return scoreVal(a.AvgScore) < scoreVal(b.AvgScore)
+		})
+	case "session_count_desc":
+		stableSort(summaries, func(a, b UserScoreSummary) bool {
+			return a.SessionCount > b.SessionCount
+		})
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"users": summaries,
+		"total": total,
+	})
+}
+
+func scoreVal(p *float64) float64 {
+	if p == nil {
+		return -1
+	}
+	return *p
+}
+
+// stableSort is a simple insertion sort (small slices only)
+func stableSort(s []UserScoreSummary, less func(a, b UserScoreSummary) bool) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && less(s[j], s[j-1]); j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
+}
+
+// UserSessions handles GET /api/admin/dashboard/users/:id/sessions
+func (c *AdminDashboardController) UserSessions(ctx echo.Context) error {
+	var userID uint
+	if _, err := fmt.Sscanf(ctx.Param("id"), "%d", &userID); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid user id")
+	}
+
+	target, err := c.userRepo.GetUserByID(userID)
+	if err != nil || target == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "user not found")
+	}
+	if err := httpapi.EnsureAdminSchoolAccess(ctx, c.schools, target.SchoolID); err != nil {
+		return err
+	}
+
+	sessionIDs, err := c.sessionRepo.ListFinishedSessionIDsByUser(userID)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+
+	reports, err := c.reportRepo.FindBySessionIDs(sessionIDs)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+	reportBySession := map[uint]*models.InterviewReport{}
+	for i := range reports {
+		reportBySession[reports[i].SessionID] = &reports[i]
+	}
+
+	sessions, err := c.sessionRepo.ListFinishedByUser(userID, 0)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+
+	entries := make([]SessionScoreEntry, 0, len(sessions))
+	for _, s := range sessions {
+		entry := SessionScoreEntry{SessionID: s.ID, EndedAt: s.EndedAt}
+		if rep, ok := reportBySession[s.ID]; ok {
+			scores, avg := avgScoresJSON(rep.ScoresJSON)
+			entry.Scores = scores
+			entry.AvgScore = avg
+		}
+		entries = append(entries, entry)
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]any{"sessions": entries})
+}
+
+// ExportCSV handles GET /api/admin/dashboard/export/csv
+func (c *AdminDashboardController) ExportCSV(ctx echo.Context) error {
+	if !entitlement.Can(c.currentAdminPlan(ctx), entitlement.FeatureExport) {
+		return echo.NewHTTPError(http.StatusForbidden, "plan_feature_required")
+	}
+	schoolID, err := httpapi.AdminSchoolFilter(ctx)
+	if err != nil {
+		return err
+	}
+	users, _, err := c.userRepo.ListUsersPaged(10000, 0, "", schoolID)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+	userIDs := make([]uint, len(users))
+	for i, u := range users {
+		userIDs[i] = u.ID
+	}
+
+	statMap, _ := c.sessionRepo.GetUserStatsBatch(userIDs)
+
+	var allSessionIDs []uint
+	sessionToUser := map[uint]uint{}
+	for _, u := range users {
+		ids, _ := c.sessionRepo.ListFinishedSessionIDsByUser(u.ID)
+		for _, id := range ids {
+			allSessionIDs = append(allSessionIDs, id)
+			sessionToUser[id] = u.ID
+		}
+	}
+	reports, _ := c.reportRepo.FindBySessionIDs(allSessionIDs)
+	userScoreSum := map[uint]float64{}
+	userScoreCount := map[uint]int{}
+	for _, rep := range reports {
+		_, avg := avgScoresJSON(rep.ScoresJSON)
+		if avg != nil {
+			uid := sessionToUser[rep.SessionID]
+			userScoreSum[uid] += *avg
+			userScoreCount[uid]++
+		}
+	}
+
+	w := ctx.Response().Writer
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"user_scores.csv\"")
+
+	fmt.Fprint(w, "\xef\xbb\xbf") // Excel用BOM
+	fmt.Fprintln(w, "ユーザーID,名前,メール,ロール,登録日,練習回数,最終練習日,平均スコア")
+	for _, u := range users {
+		stat := statMap[u.ID]
+		avgScore := ""
+		if cnt := userScoreCount[u.ID]; cnt > 0 {
+			avgScore = fmt.Sprintf("%.2f", userScoreSum[u.ID]/float64(cnt))
+		}
+		lastSession := ""
+		if stat.LastSessionAt != nil {
+			lastSession = stat.LastSessionAt.Format("2006-01-02 15:04")
+		}
+		fmt.Fprintf(w, "%d,%s,%s,%s,%s,%d,%s,%s\n",
+			u.ID,
+			csvEscape(u.Name),
+			csvEscape(u.Email),
+			u.TargetLevel,
+			u.CreatedAt.Format("2006-01-02"),
+			stat.SessionCount,
+			lastSession,
+			avgScore,
+		)
+	}
+	return nil
+}
+
+func csvEscape(s string) string {
+	if strings.ContainsAny(s, ",\"\n") {
+		return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+	}
+	return s
+}

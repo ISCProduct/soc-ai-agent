@@ -34,6 +34,9 @@ func (m *jobCategoryRepoMock) GetTopCategories() ([]models.JobCategory, error) {
 	return m.topCategories, nil
 }
 
+// 質問文が渡らない場合は大分類の一覧に当てる（従来の挙動）。
+// 初回の職種選択は GenerateJobSelectionQuestion が大分類をその順で並べるため、
+// この経路でも表示と一致する。
 func TestNormalizeNumericAnswer_mapsTopCategory(t *testing.T) {
 	v := &JobCategoryValidator{
 		jobCategoryRepo: &jobCategoryRepoMock{
@@ -44,7 +47,7 @@ func TestNormalizeNumericAnswer_mapsTopCategory(t *testing.T) {
 		},
 	}
 
-	got, err := v.normalizeNumericAnswer("1")
+	got, err := v.normalizeNumericAnswer("1", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -63,7 +66,7 @@ func TestNormalizeNumericAnswer_mapsUndecidedOption(t *testing.T) {
 		},
 	}
 
-	got, err := v.normalizeNumericAnswer("3")
+	got, err := v.normalizeNumericAnswer("3", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -82,7 +85,7 @@ func TestNormalizeNumericAnswer_keepsOriginalForOutOfRange(t *testing.T) {
 		},
 	}
 
-	got, err := v.normalizeNumericAnswer("9")
+	got, err := v.normalizeNumericAnswer("9", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -96,7 +99,7 @@ func TestNormalizeNumericAnswer_keepsOriginalForText(t *testing.T) {
 		jobCategoryRepo: &jobCategoryRepoMock{},
 	}
 
-	got, err := v.normalizeNumericAnswer("エンジニア")
+	got, err := v.normalizeNumericAnswer("エンジニア", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -112,7 +115,7 @@ func TestNormalizeNumericAnswer_returnsErrorOnTopCategoryFetchFailure(t *testing
 		},
 	}
 
-	if _, err := v.normalizeNumericAnswer("1"); err == nil {
+	if _, err := v.normalizeNumericAnswer("1", ""); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }

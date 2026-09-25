@@ -48,6 +48,9 @@ AWS_REGION=${aws_region}
 AWS_S3_BUCKET=${s3_bucket}
 S3_BUCKET=${s3_bucket}
 OPENAI_API_KEY=${openai_api_key}
+HOUJIN_BANGOU_APP_ID=${houjin_bangou_app_id}
+GBIZINFO_API_KEY=${gbizinfo_api_key}
+GBIZINFO_BASE_URL=${gbizinfo_base_url}
 OPENAI_MODEL=${openai_model}
 OPENAI_WEB_SEARCH_MODEL=gpt-4o-mini
 OPENAI_COMPANY_SEARCH_MODEL=gpt-4o-mini
@@ -70,12 +73,24 @@ DISCORD_ALLOWED_ROLE_ID=${discord_allowed_role_id}
 GITHUB_DISPATCH_TOKEN=${github_dispatch_token}
 GITHUB_DISPATCH_REPO=${github_dispatch_repo}
 OAUTH_STATE_SECRET=${oauth_state_secret}
+# サーバー側(Backend/RAG)のエラートラッキング(#1185)。
+# 未設定なら Backend の observability.InitSentry / RAG の sentry_sdk は初期化しない。
+# rag-review も同じ .env を env_file で読むため、この1行で両方に渡る。
+SENTRY_DSN=${sentry_dsn}
 TOKEN_ENCRYPTION_KEY=${token_encryption_key}
 BASE_URL=https://${backend_domain}
 APP_URL=https://${frontend_domain}
 ALLOWED_ORIGINS=https://${frontend_domain}
 NEXT_PUBLIC_BACKEND_URL=https://${backend_domain}
 BACKEND_URL=https://${backend_domain}
+# BFFが転送する X-Client-IP を backend が信用してよいかの共有トークン(#1407)。
+# frontend/backend が同じ .env を読むので、この1行で両方に同じ値が渡る。
+BFF_INTERNAL_TOKEN=${bff_internal_token}
+# X-Forwarded-For のどこが実クライアントIPかは frontend の手前の段数で決まる(#1407)。
+# staging は常に ALB -> edge nginx -> frontend の2段。
+# edge nginx へは ALB の SG からしか届かないため、この2段は迂回できない。
+# CloudFront(error_fallback)は S3 エラーページ専用の失敗時経路なので段数に数えない。
+TRUSTED_PROXY_HOPS=${trusted_proxy_hops}
 RAG_REVIEW_URL=http://rag-review:9000
 CHROMA_HOST=chroma
 CHROMA_PORT=8000

@@ -73,8 +73,14 @@ func (r *UserApplicationStatusRepository) FindByUserID(userID uint) ([]*entity.U
 
 // FindAll 条件を指定して応募一覧を取得する（管理者向け。§10.5）。
 // userID/companyID が 0、status が空文字の場合はその条件で絞り込まない。
-func (r *UserApplicationStatusRepository) FindAll(userID, companyID uint, status string) ([]*entity.UserApplicationStatus, error) {
+func (r *UserApplicationStatusRepository) FindAll(userID, companyID uint, status string, schoolID *uint) ([]*entity.UserApplicationStatus, error) {
 	q := r.db.Preload("Company")
+	// 担当校を持つ管理者(先生)には自校の生徒の応募だけを返す(#1157)。
+	// 呼び出し側の検証だけに頼らず、クエリ自体をスコープする。
+	if schoolID != nil {
+		q = q.Joins("JOIN users ON users.id = user_application_statuses.user_id").
+			Where("users.school_id = ?", *schoolID)
+	}
 	if userID != 0 {
 		q = q.Where("user_id = ?", userID)
 	}
@@ -85,7 +91,7 @@ func (r *UserApplicationStatusRepository) FindAll(userID, companyID uint, status
 		q = q.Where("status = ?", status)
 	}
 	var ms []*models.UserApplicationStatus
-	if err := q.Order("created_at DESC").Find(&ms).Error; err != nil {
+	if err := q.Order("user_application_statuses.created_at DESC").Find(&ms).Error; err != nil {
 		return nil, err
 	}
 	result := make([]*entity.UserApplicationStatus, len(ms))
@@ -93,6 +99,23 @@ func (r *UserApplicationStatusRepository) FindAll(userID, companyID uint, status
 		result[i] = mapper.UserApplicationStatusToEntity(m)
 	}
 	return result, nil
+}
+
+// FindOwnerSchoolID は応募データを所有するユーザーの学校ID(未所属ならnil)を返す。
+// 管理者の担当校スコープ検証に使う(#1157)。応募が存在しない場合は gorm.ErrRecordNotFound。
+func (r *UserApplicationStatusRepository) FindOwnerSchoolID(applicationID uint) (*uint, error) {
+	var row struct {
+		SchoolID *uint
+	}
+	err := r.db.Model(&models.UserApplicationStatus{}).
+		Select("users.school_id AS school_id").
+		Joins("JOIN users ON users.id = user_application_statuses.user_id").
+		Where("user_application_statuses.id = ?", applicationID).
+		Take(&row).Error
+	if err != nil {
+		return nil, err
+	}
+	return row.SchoolID, nil
 }
 
 // UpdateStatus 選考ステータスを更新する。notes が nil ならメモは変更しない（#1084）。
@@ -185,7 +208,7 @@ var terminalApplicationStatuses = []string{"withdrawn", "rejected", "not_applied
 // （学生側の needsLowMatchConfirm と揃える。片方だけ <= にすると
 // 「学生には確認が出ないのに教員一覧には出る」という食い違いが起きる）。
 func (r *UserApplicationStatusRepository) FindLowMatchApplicationsByUsers(
-	userIDs []uint, threshold float64,
+	userIDs []uint, threshold float64, minMatchedAxes int,
 ) (map[uint][]LowMatchApplication, error) {
 	result := map[uint][]LowMatchApplication{}
 	if len(userIDs) == 0 {
@@ -200,6 +223,13 @@ func (r *UserApplicationStatusRepository) FindLowMatchApplicationsByUsers(
 		Where("a.user_id IN ?", userIDs).
 		Where("a.status NOT IN ?", terminalApplicationStatuses).
 		Where("m.match_score < ?", threshold).
+		// 算出軸が少ない行は「低マッチ」ではなく「計測不足」（#1124）。
+		// 再計算前の行は matched_axis_count = 0 なので、ここで一緒に除外される。
+		Where("m.matched_axis_count >= ?", minMatchedAxes).
+		// プロファイルを失った企業のマッチ行は古いスコアのまま残る（#1380）。
+		// 学生側の推薦から消えた企業が教員の「低マッチ」一覧にだけ残ると、
+		// 学生と教員で見えている数字が食い違う。
+		Where(CompanyHasWeightProfileSQL("m.company_id")).
 		Order("m.match_score ASC, a.id ASC").
 		Scan(&rows).Error
 	if err != nil {
@@ -209,4 +239,69 @@ func (r *UserApplicationStatusRepository) FindLowMatchApplicationsByUsers(
 		result[row.UserID] = append(result[row.UserID], row)
 	}
 	return result, nil
+}
+
+// --- 企業ポータル向け（#1320） ---
+
+// FindByCompanyPaged は企業ポータルの応募者一覧。
+//
+// company_id は呼び出し側がJWTから解決した値のみを渡す。
+// クエリパラメータ由来の値を渡してはいけない（他社の応募が見える）。
+// 0 を渡すと全社分になってしまうため、ここで明示的に弾く。
+//
+// 学生名の表示に User を使うので Preload する。
+func (r *UserApplicationStatusRepository) FindByCompanyPaged(
+	companyID uint, status string, limit, offset int,
+) ([]*entity.UserApplicationStatus, int64, error) {
+	if companyID == 0 {
+		return nil, 0, gorm.ErrInvalidValue
+	}
+
+	q := r.db.Model(&models.UserApplicationStatus{}).Where("company_id = ?", companyID)
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var ms []*models.UserApplicationStatus
+	rows := q.Session(&gorm.Session{}).Preload("User").Preload("Company").
+		Order("user_application_statuses.created_at DESC")
+	if limit > 0 {
+		rows = rows.Limit(limit)
+	}
+	if offset > 0 {
+		rows = rows.Offset(offset)
+	}
+	if err := rows.Find(&ms).Error; err != nil {
+		return nil, 0, err
+	}
+
+	result := make([]*entity.UserApplicationStatus, len(ms))
+	for i, m := range ms {
+		result[i] = mapper.UserApplicationStatusToEntity(m)
+	}
+	return result, total, nil
+}
+
+// CountByCompanyAndStatuses は企業の応募をステータスで数える。
+// statuses が空なら全件。ダッシュボードの「未対応」件数に使う。
+func (r *UserApplicationStatusRepository) CountByCompanyAndStatuses(
+	companyID uint, statuses []string,
+) (int64, error) {
+	if companyID == 0 {
+		return 0, gorm.ErrInvalidValue
+	}
+	q := r.db.Model(&models.UserApplicationStatus{}).Where("company_id = ?", companyID)
+	if len(statuses) > 0 {
+		q = q.Where("status IN ?", statuses)
+	}
+	var n int64
+	if err := q.Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return n, nil
 }

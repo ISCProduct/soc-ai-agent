@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import {
+  Alert,
   Button,
   Chip,
   Stack,
@@ -14,13 +15,14 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
-import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin-fetch'
+import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin/fetch'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
+import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 
 type AdminUser = {
   id: number
@@ -45,11 +47,35 @@ export default function PageContent() {
   const [rowsPerPage, setRowsPerPage] = useState(25)
   const [loading, setLoading] = useState(false)
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
+  // 担当校を持つ管理者(先生)かどうか。true のとき管理者権限の変更ボタンを出さない(#1157)。
+  // null は「まだ分からない」。取得に失敗したときも安全側の true へ倒すので、
+  // ボタンを出す条件は restricted === false だけになる。false 初期値だと、
+  // 取得が失敗した瞬間に教員へ権限変更ボタンが出ていた(#1448)。
+  const [restricted, setRestricted] = useState<boolean | null>(null)
+  const [accessError, setAccessError] = useState<string | null>(null)
 
   useEffect(() => {
     const user = authService.getStoredUser()
     if (!user?.is_admin) {
       window.location.href = '/'
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const access = await getAdminSchoolAccess()
+        if (!cancelled) setRestricted(access.restricted)
+      } catch {
+        if (cancelled) return
+        setAccessError('権限情報の取得に失敗しました')
+        setRestricted(true)
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
     }
   }, [])
 
@@ -147,6 +173,18 @@ export default function PageContent() {
 
       <ErrorAlert error={error} />
 
+      {accessError && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {accessError}
+        </Alert>
+      )}
+
+      {restricted === null && !accessError && (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          権限を確認しています…
+        </Typography>
+      )}
+
       <AdminPanel title="検索" sx={{ mb: 3 }}>
         <AdminPanelBody>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
@@ -203,14 +241,18 @@ export default function PageContent() {
                         <TableCell>{user.updated_at}</TableCell>
                         <TableCell align="right">
                           <Stack direction="row" spacing={1} justifyContent="flex-end">
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              disabled={loading}
-                              onClick={() => handleToggleAdmin(user)}
-                            >
-                              {user.is_admin ? '管理者権限を外す' : '管理者にする'}
-                            </Button>
+                            {/* 担当校を持つ管理者(先生)は is_admin を変更できない(#1157)。
+                                押せば必ず403になるボタンを出さない */}
+                            {restricted === false && (
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                disabled={loading}
+                                onClick={() => handleToggleAdmin(user)}
+                              >
+                                {user.is_admin ? '管理者権限を外す' : '管理者にする'}
+                              </Button>
+                            )}
                             <Button
                               size="small"
                               variant="outlined"

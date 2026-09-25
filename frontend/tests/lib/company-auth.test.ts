@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { companyAuthService } from '@/lib/company-auth'
+import { companyAuthService } from '@/lib/company/auth'
 
 function createStorageMock(initial: Record<string, string> = {}): Storage {
   const store = new Map<string, string>(Object.entries(initial))

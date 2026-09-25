@@ -56,7 +56,8 @@ UserCompanyMatch（総合マッチ度 0-100）
 ### スコアの範囲
 
 - 各カテゴリ: **0〜100**
-- 未評価のカテゴリは中立値 **50** として扱われます
+- チャット進捗の「評価済み」判定は **score ≠ 0** の件数
+- マッチングでは未計測カテゴリを中立50で埋めず、平均から除外する（#1124）
 
 ### データ構造（`UserWeightScore`）
 
@@ -77,9 +78,9 @@ type UserWeightScore struct {
 ## 2-1. カテゴリの正典と別名（#929）
 
 カテゴリ名の正典は `Backend/domain/valueobject/match.go` の10種類。
-マッチングは `scoreMap` をこのキーで引き、**見つからないカテゴリは中立50に置き換えて
-評価件数にも数える**（`matching_service.go` の `scoredMatch`）。つまり名前が揺れると
-エラーもログも出ないまま、ユーザーの実スコアが捨てられて薄まる。
+マッチングは `scoreMap` をこのキーで引き、**見つからないカテゴリは平均から除外する**
+（`matching_service.go` の `scoredMatch`、#1124）。名前が揺れるとユーザーの実スコアが
+捨てられて軸数が減るため、保存経路では正典化が必須。
 
 保存経路（`UserWeightScoreRepository.SetScore/AddScore`、`POST /api/questions/*`）は
 `valueobject.ParseWeightCategory` を必ず通し、正典外を弾く。
@@ -107,17 +108,20 @@ type UserWeightScore struct {
 | 計画性・実行力 | 細部志向 | 妥当 |
 | ストレス耐性・粘り強さ | チャレンジ志向 | 妥当 |
 | 学習意欲・成長志向 | 成長志向 | 妥当 |
-| **ビジネス思考・目標志向** | **成長志向** | **弱い（消去法）** |
+| **ビジネス思考・目標志向** | **チャレンジ志向** | 成果・目標達成に寄せる（成長＝学習意欲と分離） |
 
-### ビジネス思考・目標志向は暫定対応
+### ビジネス思考・目標志向の寄せ先
 
-正典10軸に事業志向・目標達成の軸が無いため、どこへ寄せても不正解になる。
-現状は消去法で成長志向へ統合しているが、以下の副作用がある。
+正典10軸に事業志向の専用軸は無い。成長志向へ寄せると学習意欲質問と同軸になり
+ユーザーの Growth だけが膨らむため、**チャレンジ志向**へ統合する（migration 028）。
 
-- 「顧客や利用者の視点で」「どのような成果を出すことを重視するか」といった質問への回答が、
-  学習意欲の質問と同じ軸に集計される
-- ユーザー側の成長志向だけが構造的に膨らみ、企業側 `CompanyWeightProfile.GrowthOrientation`
-  （企業が「成長志向」として入力した値）との差分が系統的にずれる
+seed 質問の振り分け:
+
+| 質問の意図 | 正典カテゴリ |
+|---|---|
+| 成果を重視するか | チャレンジ志向 |
+| 顧客・利用者視点 | コミュニケーション力 |
+| 社会・組織への価値提供 | リーダーシップ志向 |
 
 同じ理由で `技術志向` も 問題解決力 + 分析思考 の受け皿になっている。
 
@@ -126,7 +130,7 @@ type UserWeightScore struct {
 次のいずれかに当たったら、統合をやめて正典に軸を追加することを検討する。
 
 1. 事業志向・目標達成を企業側が明示的に重視したいという要求が出たとき
-2. `score_validation` でユーザー側の成長志向・技術志向が企業側と系統的にずれていると確認できたとき
+2. `score_validation` でチャレンジ志向・技術志向が企業側と系統的にずれていると確認できたとき
 3. 統合先の軸のスコア分布が、統合前と比べて明らかに歪んでいるとき
 
 **分離する場合の影響範囲**（1マイグレーションでは済まない）:
@@ -197,7 +201,7 @@ PRD でも「初期データ投入作業自体はスコープ外」としてい�
 教員向けの傾向分析（#1027）の両方が読む。**誤ったスコアを書くと、
 どちらにも静かに混ざり、後から区別できない。**
 
-一方スコアが無い場合は、マッチングが中立50で扱い（`matching_service.go` の
+一方スコアが無い場合は、マッチングがその軸を平均から除外し（`matching_service.go` の
 `scoredMatch`）、傾向分析は「分析データ不足」と表示する（#1027）。
 **欠損は画面に出るが、誤りは出ない。**
 
@@ -218,6 +222,7 @@ PRD でも「初期データ投入作業自体はスコープ外」としてい�
 ## 3. 企業プロファイル（CompanyWeightProfile）
 
 各企業は 10 カテゴリそれぞれに「重視度（0〜100）」を持ちます。
+プロファイルが無い企業はマッチングの対象外（[#1380](#プロファイルを持たない企業1380)）。
 
 ```go
 type CompanyWeightProfile struct {
@@ -253,20 +258,52 @@ type CompanyWeightProfile struct {
 ### 総合マッチスコアの計算
 
 ```
-総合マッチスコア = 全カテゴリのマッチ度の平均
+総合マッチスコア = 計測できたカテゴリのマッチ度の平均
 ```
 
-未評価カテゴリは中立値（50）として計算に含めます。
+未計測カテゴリは平均に**含めない**（#1124）。件数は `matched_axis_count` に保存する。
+以前は中立値50で埋めていたが、企業重視度が50前後に寄ると未診断でも97%前後に飽和するため廃止した。
+
+### プロファイルを持たない企業（#1380）
+
+**`CompanyWeightProfile` が無い公開企業はマッチング対象から外す**（`CalculateMatching` が `continue` する）。
+
+以前は全軸50のデフォルトで埋めていたが、全軸50は取りうる中で最も平坦なプロファイルで、
+マッチ度が `100 - |差|` である以上、スコアが50付近の平均的な学生に対して各軸100点になる。
+**情報が無い企業ほど上位に出る**という逆のインセンティブになり、
+学生にも「なぜこの企業が1位なのか」を説明できなかった。
+
+- 学生から見える影響: プロファイルが無い企業は推薦に出ない（`user_company_matches` に行を作らない）
+- **既存行も読み出し時に除外する**: `CalculateMatching` は行を作らないだけで、過去に作られた
+  `user_company_matches` は残る（`CreateOrUpdateBatch` は upsert で削除しない）。
+  そのため読み出し側でも外す — `FindTopMatchesByUserAndSession`（推薦一覧・メールレポート）と
+  `FindLowMatchApplicationsByUsers`（教員の低マッチ集計）に
+  `CompanyHasWeightProfileSQL` の EXISTS 条件を入れている。
+  **行は消さない**。`is_viewed` / `is_favorited` / `is_applied` はユーザー操作の結果で、
+  プロファイルを生成し直せば元のスコアごと復帰する。削除すると復帰できない
+- 運用者から見える影響:
+  - 一部欠損の常時監視は `GET /api/admin/companies/l1-coverage` の
+    `companies_without_profile`（= `published_total - has_profile`。追加クエリ無し）。
+    `profile_rate` / `profile_target=0.95` のアラートも同じ数字から出る
+  - 推薦が0件になったときは `GET /api/chat/recommendations` の
+    `diagnostics.companies_without_profile`（`CountPublishedWithoutWeightProfile`）
+  - 公開企業がすべてプロファイル未設定なら `reason = insufficient_company_profiles` を返す。
+    公開企業が0社の `insufficient_company_data` とは分ける
+    （前者は「プロファイル生成が必要」、後者は「企業公開が必要」で復旧手順が違う）
+- プロファイルは `FetchAndSavePersona`（AI）で生成する。失敗した企業は推薦に出ないまま残るため、
+  上の件数が増え続けていないかを見る
+- 識別力が低いだけ（全軸ほぼ同値）のプロファイルは**除外しない**。保存はして記録に残す（#1331）
 
 ### 実装（`matching_service.go`）
 
 ```go
 // scoredMatch 1カテゴリのマッチ度を計算
 func scoredMatch(userScores map[string]float64, category string, companyWeight float64, ...) (...) {
-    // 未評価カテゴリは中立値(50)として扱い、評価対象に含める
-    userScore := userScores[category]  // 未評価の場合は 0 → 中立値補完
-    diff := math.Abs(userScore - companyWeight)
-    matchDegree := 100.0 - diff
+    userScore, ok := userScores[category]
+    if !ok {
+        return 0, evaluatedCount, totalScore // 未計測は平均から除外
+    }
+    matchDegree := 100.0 - math.Abs(userScore - companyWeight) // 線形
     // ...
 }
 ```
@@ -276,6 +313,29 @@ func scoredMatch(userScores map[string]float64, category string, companyWeight f
 ```
 マッチ度 >= 80 → 高マッチ（IsHighMatch = true）
 ```
+
+### 選択肢回答の根拠品質
+
+選択肢記号の**生の位置**は `A=100 … E=20`。ただしそのまま書くと理由なしの極端値が量産されるため、書き込み時に調整する（`choice_evidence.go`）。
+
+| 状況 | 扱い |
+|------|------|
+| 理由なし（または極短） | 中立50へ減衰（距離×0.55）。フラグ `choice_only_evidence` |
+| 支持する理由あり | 生の位置を採用 |
+| 理由が選択と矛盾 | 強く減衰（距離×0.25）。フラグ `choice_reason_contradiction` |
+
+文章の「品質スコア」と軸位置はスケールが違うため**混ぜない**（混ぜると理由を書いた人ほど中央に寄る）。
+
+### 診断妥当性と暫定表示
+
+診断完了後の品質ジョブはスコアを**自動補正せず**、`diagnosis_quality_reports` に confidence / flags を保存する。
+`GET /api/chat/recommendations` は次のいずれかで `is_provisional=true` とする。
+
+- 評価カテゴリ数が 4 未満
+- 上位マッチの最小 `matched_axis_count` が 4 未満
+- 診断信頼度が 55 未満、または薄い根拠フラグ（`thin_chat_evidence` / `mostly_choice_only` 等）
+
+レスポンスに `diagnosis_confidence` / `diagnosis_flags` / `diagnosis_summary` / `min_matched_axis_count` を載せる。
 
 ---
 
@@ -327,9 +387,15 @@ type UserCompanyMatch struct {
 ### 6.3 面接・職務経歴書スコア → UserWeightScore 更新（#204）
 
 ```
-面接完了 → 面接スコア → UserWeightScore 更新 → 再マッチング
-職務経歴書レビュー → レビュースコア → UserWeightScore 更新 → 再マッチング
+面接完了
+  → 最新のチャット診断 session_id を解決（無ければ interview-{userId}）
+  → 面接スコアを移動平均で UserWeightScore に反映
+  → チャット session なら CalculateMatching で再マッチング
+職務経歴書レビュー → レビュースコア → UserWeightScore 更新
+（職務経歴書側の自動再マッチは未接続）
 ```
+
+チャット診断と面接スナップショットを混ぜない。`FindLatestByUser` もチャット session を優先する。
 
 ---
 

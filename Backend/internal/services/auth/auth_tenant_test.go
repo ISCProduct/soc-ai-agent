@@ -68,7 +68,7 @@ func TestAuthServiceRegister_AssignsTenantOrganization(t *testing.T) {
 		Email:    "new-user@example.com",
 		Password: "password123",
 		Name:     "New User",
-	}, 7)
+	}, 7, 0)
 	if err != nil {
 		t.Fatalf("register failed: %v", err)
 	}

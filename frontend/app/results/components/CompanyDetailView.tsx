@@ -15,8 +15,9 @@ import {
 } from '@mui/material'
 import { ArrowBack, LocationOn, People, TrendingUp as TrendingUpIcon } from '@mui/icons-material'
 import dynamic from 'next/dynamic'
-import type { CapitalRelation, CompanyMarketInfo } from '@/lib/company-data'
+import type { CapitalRelation, CompanyMarketInfo } from '@/lib/company/data'
 import type { Company } from '../types'
+import { UI } from '@/lib/design/tokens'
 
 const CompanyRelationDiagram = dynamic(() => import('./CompanyRelationDiagram'), {
   ssr: false,
@@ -79,7 +80,7 @@ export default function CompanyDetailView({
         backgroundColor: '#fafafa',
       }}>
         <Box sx={{ maxWidth: 1200, mx: 'auto' }}>
-          <Card elevation={3}>
+          <Card elevation={0} sx={{ border: `1px solid ${UI.rule}`, borderRadius: 1 }}>
             <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
               {/* 企業名とマッチスコア */}
               <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'flex-start' }, mb: 3, gap: 1 }}>
@@ -92,7 +93,14 @@ export default function CompanyDetailView({
                   </Typography>
                 </Box>
                 <Box sx={{ textAlign: { xs: 'left', sm: 'right' }, display: 'flex', alignItems: 'center', gap: 1, flexDirection: { xs: 'row', sm: 'column' } }}>
-                  <Typography variant="h2" color="primary.main" fontWeight="bold" sx={{ fontSize: { xs: '2rem', sm: '3.75rem' } }}>
+                  {/*
+                    3.75rem は一覧側(26px)と揃わず、遷移すると別画面に見えた。
+                    数字を大きくしても意味は増えないので、一覧に合わせる。
+                  */}
+                  <Typography sx={{
+                    fontSize: { xs: 26, sm: 32 }, fontWeight: 700, color: UI.ink,
+                    fontVariantNumeric: 'tabular-nums', lineHeight: 1,
+                  }}>
                     {company.matchScore}
                   </Typography>
                   <Typography variant="body1" color="text.secondary">
@@ -139,15 +147,18 @@ export default function CompanyDetailView({
                     </Stack>
                   </Box>
 
+                  {/*
+                    絵文字見出しとグレーの箱をやめた。
+                    ここは読ませる本文なので、箱で囲うと引用のように見えて
+                    かえって読み飛ばされる。見出しの重さと行長で階層を作る。
+                  */}
                   <Box sx={{ mb: 4 }}>
-                    <Typography variant="h6" fontWeight="bold" gutterBottom>
-                      💡 マッチング理由
+                    <Typography sx={{ fontSize: 17, fontWeight: 700, color: UI.ink, mb: 1 }}>
+                      この企業をすすめる理由
                     </Typography>
-                    <Paper sx={{ p: 2, backgroundColor: '#f5f5f5' }}>
-                      <Typography variant="body1">
-                        {company.description}
-                      </Typography>
-                    </Paper>
+                    <Typography sx={{ fontSize: 15, lineHeight: 1.9, color: UI.ink, maxWidth: '68ch' }}>
+                      {company.description}
+                    </Typography>
                   </Box>
 
                   {company.techStack && company.techStack.length > 0 && (

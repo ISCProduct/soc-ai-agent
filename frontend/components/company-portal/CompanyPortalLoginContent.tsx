@@ -12,8 +12,8 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import { StudentThemeToggle } from '@/components/student-theme-toggle'
-import { companyAuthService } from '@/lib/company-auth'
+import { StudentThemeToggle } from '@/components/StudentThemeToggle'
+import { companyAuthService } from '@/lib/company/auth'
 
 export function CompanyPortalLoginContent() {
   const router = useRouter()
@@ -49,7 +49,7 @@ export function CompanyPortalLoginContent() {
     >
       <Card sx={{ maxWidth: 520, width: '100%' }}>
         <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
-          <Typography variant="h4" align="center" gutterBottom fontWeight="bold">
+          <Typography variant="h4" component="h1" align="center" gutterBottom fontWeight="bold">
             IT業界キャリアエージェント
           </Typography>
           <Typography variant="body2" align="center" color="text.secondary" sx={{ mb: 3 }}>
@@ -70,6 +70,8 @@ export function CompanyPortalLoginContent() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
+              autoComplete="username"
+              slotProps={{ htmlInput: { inputMode: 'email' } }}
               sx={{ mb: 2 }}
             />
             <TextField
@@ -79,6 +81,7 @@ export function CompanyPortalLoginContent() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              autoComplete="current-password"
               sx={{ mb: 3 }}
             />
             <Button
@@ -93,7 +96,7 @@ export function CompanyPortalLoginContent() {
           </Box>
 
           <Box sx={{ textAlign: 'center', mt: 2 }}>
-            <Link href="/company-portal/forgot-password" style={{ fontSize: '0.875rem' }}>
+            <Link href="/company-portal/forgot-password" className="auth-link">
               パスワードをお忘れですか？
             </Link>
           </Box>

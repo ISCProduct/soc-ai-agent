@@ -97,8 +97,9 @@ NEXT_PUBLIC_INTERVIEW_COST_PER_MIN_USD=0.18
 docker compose up -d --build
 
 # RAG + 独立 Chroma（履歴書レビュー / 面接 hints で必須）
+# どちらも既定サービスなので上の up -d で一緒に起動する。
+# 作り直したいときだけ:
 make rag-up
-# または: docker compose --profile rag up -d --build chroma rag-review
 ```
 
 | サービス | URL |
@@ -135,7 +136,7 @@ make rag-rebuild
 ```sh
 docker compose logs -f app       # バックエンド
 docker compose logs -f frontend  # フロントエンド
-docker compose --profile rag logs -f chroma rag-review
+docker compose logs -f chroma rag-review
 ```
 
 > **注意**: プロジェクトルートには `docker-compose.yml`（ハイフンあり）と `compose.yml` の2つが存在します。
@@ -186,14 +187,14 @@ RAG サービスは重いため、必要な場合のみ起動してください�
 ```sh
 cd rag
 
-# 依存インストール（constraints.txt で固定バージョンを使用）
-pip install -r constraints.txt
+# 依存インストール（requirements.txt の宣言を constraints.txt で縛る）
+pip install -r requirements.txt -c constraints.txt
 
 # サービス起動（http://localhost:9000）
 python3 main.py
 ```
 
-> **重要**: RAG の依存パッケージは `constraints.txt` で固定されています。`requirements.txt` ではなく `constraints.txt` を使用してください。バージョンの違いで動作しなくなる場合があります。
+> **重要**: 必ず `-c constraints.txt` を付けてください。`pip install -r constraints.txt`（constraints を requirements として渡す形）だと、`requirements.txt` にしか宣言が無いパッケージ（uvicorn 等）が推移的依存として最新版で入り、宣言と実インストールが乖離します（#1159）。乖離は `rag/tests/test_dependency_constraints.py` が検知して落ちます。
 
 ---
 
@@ -216,10 +217,13 @@ go run ./cmd/migrate
 
 ```sh
 cd Backend
-go test ./internal/...      # 内部パッケージテスト
-go test ./test/...          # 統合テスト・コントローラーテスト
-go test ./...               # 全テスト
+go test ./internal/... ./migrations/...   # 本体のテスト（対象パッケージの隣に配置）
+go test ./test/...                        # 複数パッケージ横断のテストのみ（4ファイル）
+go test ./...                             # 全テスト
 ```
+
+> テストは対象パッケージの隣に置きます（例: `internal/controllers/admin/*_test.go`）。
+> `Backend/test/` に残しているのは、対象が1パッケージに定まらないものだけです。
 
 ### フロントエンド
 
@@ -244,11 +248,34 @@ npx playwright test
 |------|------|------|
 | `DB接続エラー` | MySQL が未起動 / `.env` の設定ミス | `docker compose up -d db` を実行、または `.env` を確認 |
 | `OPENAI_API_KEY が未設定` | AI 機能を使う場合に必要 | `.env` に `OPENAI_API_KEY` を設定 |
-| `rag-review 起動失敗` | 依存パッケージのバージョン不一致 | `pip install -r constraints.txt` で固定バージョンを使用 |
+| `rag-review 起動失敗` | 依存パッケージのバージョン不一致 | `pip install -r requirements.txt -c constraints.txt` で作り直す |
 | `CORS エラー（開発時）` | `ALLOWED_ORIGINS` 未設定 | `.env` に `ALLOWED_ORIGINS=http://localhost:3000` を追加 |
 | `フロントビルド失敗` | Node.js バージョンが古い | Node.js 18 以上を使用（`nvm use 18` 等） |
 | `TOKEN_ENCRYPTION_KEY 警告` | GitHub 連携に必要 | 64 桁の hex キーを生成して設定（`python3 -c "import secrets; print(secrets.token_hex(32))"`) |
 | `S3アップロード失敗` | IAM 権限不足 | `s3:PutObject` / `s3:GetObject` 権限を確認 |
+| `frontend が EACCES で起動しない`（Linux） | ホストの UID が 1000 以外で、bind mount した `./frontend` に `next dev` が `next-env.d.ts` を書けない | `.env` に `FRONTEND_USER=$(id -u):$(id -g)` を設定し、下記のボリューム作り直しも行う |
+| `rag-review が /data で PermissionError` | root 実行時代のデータが `rag_data` に残っている（`RAG_CHROMA_DATA_DIR=/data/...` を使う場合のみ） | `docker compose run --rm --user root rag-review chown -R 10001:10001 /data`（ファイルは消えない） |
+
+### コンテナ非root化（#1477）にともなう既存環境の移行
+
+全コンテナを非rootで動かすようにしたため、**root で動いていた頃に作られたボリュームが残っていると書き込みに失敗する**。
+
+- **frontend の `.next` / `node_modules`**: 匿名ボリュームをやめて名前付き（`frontend_next` / `frontend_node_modules`）にしたので、**次の `docker compose up` で自動的に新しいボリュームが作られ移行が済む**。旧ボリュームは残るだけなので、回収したければ `docker volume prune`。
+- **`FRONTEND_USER` を変えた場合**: 名前付きボリュームは `node`（uid 1000）所有で作られるため、作り直しが必要。どちらもビルドキャッシュなので消してよい。
+
+  ```sh
+  docker compose down
+  docker volume rm "$(basename "$PWD")_frontend_node_modules" "$(basename "$PWD")_frontend_next"
+  docker compose up -d --build
+  ```
+
+- **`rag_data`**: ChromaDB の実データが入りうるので**消さずに所有権だけ移す**。既定構成（`CHROMA_HOST=chroma`）では `/data` を使わないため、この作業が要るのは `RAG_CHROMA_DATA_DIR=/data/...` へ切り替えている環境だけ。
+
+  ```sh
+  docker compose run --rm --user root rag-review chown -R 10001:10001 /data
+  ```
+
+- **`mysql_data` / `chroma_data`**: 対象外。MySQL・Chroma の公式イメージは非root化していないので、これまでどおり動く。
 
 ---
 

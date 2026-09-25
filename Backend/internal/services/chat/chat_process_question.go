@@ -35,13 +35,13 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	trimmedAnswer := strings.TrimSpace(req.Message)
 	lastAssistantQuestion := findLastAssistantQuestion(history)
 	resolved := ResolveChoiceAnswer(lastAssistantQuestion, trimmedAnswer)
-	log.Printf("[ProcessChat] Checking answer: raw=%q resolved_choice=%v letter=%q free_text=%v\n",
-		trimmedAnswer, resolved.IsChoice, resolved.Letter, resolved.IsFreeText)
+	log.Printf("[ProcessChat] Checking answer: raw=%q resolved_choice=%v letter=%q reason=%q free_text=%v\n",
+		trimmedAnswer, resolved.IsChoice, resolved.Letter, resolved.Reason, resolved.IsFreeText)
 	isQualityAnswer := false
 	if resolved.IsChoice && s.isChoiceAnswer(resolved.Letter) {
 		log.Printf("[ProcessChat] Processing as choice answer\n")
 		var err error
-		isQualityAnswer, err = s.processChoiceAnswer(ctx, req.UserID, req.SessionID, resolved.Letter, history, jobCategoryID)
+		isQualityAnswer, err = s.processChoiceAnswer(ctx, req.UserID, req.SessionID, resolved.Letter, resolved.Reason, history, jobCategoryID)
 		if err != nil {
 			log.Printf("Warning: failed to process choice answer: %v\n", err)
 		}
@@ -143,10 +143,21 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 		log.Printf("[RuleBased] Using predefined question (ID: %d) for category: %s\n", predefinedQ.ID, predefinedQ.Category)
 		aiResponse = predefinedQ.QuestionText
 		questionWeightID = predefinedQ.ID
+		// 事前定義質問はカテゴリを自分で持っている。そちらを正とする(#1333)。
+		if predefinedQ.Category != "" {
+			targetCategory = predefinedQ.Category
+		}
 	} else {
 		// ルールベース質問がない場合、AIで生成
 		log.Printf("[AI] No predefined question available, generating with AI for category: %s (asked: %d questions)\n", targetCategory, len(askedTexts))
-		aiResponse, _, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, jobCategoryID, targetLevel, currentPhase)
+		// AI生成はフェーズで絞った候補から軸を選び直すので、ここで決めた
+		// targetCategory とは一致しないことがある。実際に狙った軸を受け取って
+		// 質問メッセージに残す(#1333)。
+		var usedCategory string
+		aiResponse, _, usedCategory, err = s.generateStrategicQuestion(ctx, recentHistory, req.UserID, req.SessionID, scoreMap, allCategories, askedTexts, req.IndustryID, jobCategoryID, targetLevel, currentPhase)
+		if usedCategory != "" {
+			targetCategory = usedCategory
+		}
 		if err != nil {
 			// エラーは致命的にせずフォールバック質問を設定
 			log.Printf("Warning: failed to generate question via AI: %v\n", err)
@@ -216,6 +227,8 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 			Role:             "assistant",
 			Content:          aiResponse,
 			QuestionWeightID: questionWeightID,
+			// 採点側が質問文から推測し直さずに済むよう、狙った軸を残す(#1333)。
+			WeightCategory: targetCategory,
 		}
 		if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
 			log.Printf("Warning: failed to save assistant message: %v\n", err)

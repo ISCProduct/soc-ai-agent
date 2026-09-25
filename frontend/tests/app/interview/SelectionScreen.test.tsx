@@ -38,6 +38,8 @@ describe('SelectionScreen', () => {
         webSearchResults={[]}
         setWebSearchResults={noop}
         webSearchLoading={false}
+        webSearchError={null}
+        onRetryWebSearch={noop}
         positionCategory="general"
         setPositionCategory={noop}
         selectedPosition={POSITIONS[0]}
@@ -55,7 +57,7 @@ describe('SelectionScreen', () => {
   it('最小限の props でステップタイトルと企業名を表示する', () => {
     renderScreen()
 
-    expect(screen.getByText('InterviewAI')).toBeInTheDocument()
+    expect(screen.getByText('IT業界キャリアエージェント')).toBeInTheDocument()
     expect(screen.getByText('練習する企業・職種を選ぶ')).toBeInTheDocument()
     expect(screen.getByText('企業未選択')).toBeInTheDocument()
     expect(screen.getAllByText(POSITIONS[0].title).length).toBeGreaterThan(0)
@@ -85,6 +87,37 @@ describe('SelectionScreen', () => {
   it('取得成功かつ0件のときだけ登録企業が見つかりませんを表示する', () => {
     renderScreen({ allCompanies: [], companiesLoadError: null })
     expect(screen.getByText('登録企業が見つかりません')).toBeInTheDocument()
+  })
+
+  // WEB検索は外部APIを叩くぶん落ちやすい。失敗を0件と同じ見た目にすると、
+  // 学生には「その企業は存在しない」と読めてしまう(#1447)。
+  it('WEB検索の失敗時はエラーと再試行を出し、0件の文言は出さない', () => {
+    const onRetry = jest.fn()
+    renderScreen({
+      companySourceTab: 'web',
+      companySearch: 'サイボウズ',
+      webSearchResults: [],
+      webSearchError: '検索できませんでした。しばらくしてからもう一度お試しください。',
+      onRetryWebSearch: onRetry,
+    })
+
+    expect(
+      screen.getByText('検索できませんでした。しばらくしてからもう一度お試しください。'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('検索結果が見つかりません')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '再試行' }))
+    expect(onRetry).toHaveBeenCalled()
+  })
+
+  it('WEB検索が成功して0件のときだけ検索結果が見つかりませんを表示する', () => {
+    renderScreen({
+      companySourceTab: 'web',
+      companySearch: 'サイボウズ',
+      webSearchResults: [],
+      webSearchError: null,
+    })
+    expect(screen.getByText('検索結果が見つかりません')).toBeInTheDocument()
   })
 
   it('DB一覧に名前一致があるとき id:0 の仮選択を登録企業へ昇格する', () => {

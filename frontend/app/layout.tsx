@@ -1,11 +1,12 @@
 import './globals.css'
 import type { Metadata } from 'next'
-import { MuiProvider } from '@/components/mui-provider'
-import { StudentBottomNav } from '@/components/student-bottom-nav'
-import { GlobalNavMenu } from '@/components/global-nav-menu'
+import { MuiProvider } from '@/components/MuiProvider'
+import { StudentBottomNav } from '@/components/StudentBottomNav'
+import { GlobalNavMenu } from '@/components/GlobalNavMenu'
 import { Analytics } from '@vercel/analytics/react'
 // Vercelでホスティングされるまで実データは収集されない(AWS ECSデプロイのため現状は未計測)
 import { SpeedInsights } from '@vercel/speed-insights/next'
+import { SentryClientInit } from '@/components/SentryClientInit'
 
 const TITLE = 'IT企業エージェント | 就活AI'
 const DESCRIPTION = '適性診断から企業マッチングまで。IT就活を支援するAIエージェントです。'
@@ -38,7 +39,8 @@ export default function RootLayout({
       <head>
         <meta charSet="UTF-8" />
       </head>
-      <body style={{ margin: 0, padding: 0 }}>
+      <body>
+        <SentryClientInit />
         <MuiProvider>
           {children}
           <GlobalNavMenu />

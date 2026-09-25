@@ -29,6 +29,7 @@ func main() {
 	format := flag.String("format", "wav", "使用する音声形式: wav | webm")
 	out := flag.String("out", "", "結果JSONの出力先。未指定なら標準出力のみ")
 	dryRun := flag.Bool("dry-run", false, "APIを呼ばず、音声とmanifestの対応だけ検証する")
+	condition := flag.String("condition", "", "評価する録音条件で絞る（例: noisy）。未指定なら全件")
 	flag.Parse()
 
 	if *manifestPath == "" {
@@ -40,6 +41,15 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "manifest読み込み失敗: %v\n", err)
 		os.Exit(1)
+	}
+	if *condition != "" {
+		filtered := sttbench.FilterByCondition(cases, *condition)
+		if len(filtered) == 0 {
+			fmt.Fprintf(os.Stderr, "条件 %q に一致するケースがありません\n", *condition)
+			os.Exit(1)
+		}
+		fmt.Printf("=== 条件で絞り込み: %s（%d/%d件） ===\n", *condition, len(filtered), len(cases))
+		cases = filtered
 	}
 	baseDir := filepath.Dir(*manifestPath)
 

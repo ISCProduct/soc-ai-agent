@@ -234,7 +234,7 @@ Validation の `confidence` は **メモリキャッシュ（30分）のみ**で
 | `OPENAI_HINTS_MODEL` | RAG hints の Search | `rag/main.py` は **`OPENAI_WEB_SEARCH_MODEL`** を参照。HINTS_MODEL は未使用 |
 | `OPENAI_HINTS_PARSE_MODEL` | hints JSON 化 | RAG で使用（既定 `gpt-4o`） |
 | `OPENAI_WEB_SEARCH_MODEL` | Go `WebSearchJSON` + RAG Search | `.env.example` に **未記載** |
-| Brave Search MCP | `mcp/README.md` | **`compose.mcp.yml` がリポジトリに存在しない**。アプリコードからの呼び出しもなし |
+| Brave Search MCP | `docs/mcp-resume-review.md` | **`compose.mcp.yml` がリポジトリに存在しない**。アプリコードからの呼び出しもなし |
 
 ### 2.5 参考になる既存パターン
 
@@ -263,6 +263,26 @@ Validation の `confidence` は **メモリキャッシュ（30分）のみ**で
 
 判定ルール: 各フィールドは対応する `info_fetched_at` / `jobs_fetched_at` / `tech_fetched_at` のみで TTL 判定する。  
 `SourceFetchedAt` / `GBizLastSyncedAt` は企業レコード全体のメタデータであり、求人・Tech など他フィールドの鮮度判定には使わない。期限内は再取得しない。未充足フィールドのみパイプラインを走らせる。
+
+---
+
+### 3.1 ハードコードされた法人番号の扱い
+
+シード `Backend/internal/models/seed_company_relations.go` にハードコードされていた
+法人番号 19 件のうち 8 件が登記に存在しない番号だった。これらは
+`SourceType='public_registry'` / `IsProvisional=0` で投入されており、
+登記由来の確定情報として扱われていた。親会社側の番号が不正なため
+gBizINFO 同期も 404 で失敗し続けていた。
+
+対策:
+
+- `houjinbangou.ValidateNumber` が検査用数字（先頭1桁）を検証する。外部APIを
+  叩かないため、`TestSeedCompanyRelationsCorporateNumbers` がシード全件を自動検証する。
+  実測で、誤っていた 8 件のうち 7 件をここで検出できる。
+- 残り 1 件のように検査用数字を通過する番号は、国税庁「法人番号システムWeb-API」
+  (`/4/num`) の実在確認でしか弾けない。番号の追加・変更時は必ず実行する。
+- 資本関係そのものは法人番号の正しさと別問題。`（出所: 公開情報）` ラベルが付くため、
+  一次情報で裏が取れない関係はシードに入れない。取引関係と資本関係は別物として扱う。
 
 ---
 
@@ -625,5 +645,5 @@ PoC（実装前の確認項目）: 大手〜スタートアップ 10 社で (a) 
 - `Backend/internal/models/company.go`
 - `rag/main.py`（hints / web_search）
 - `tools/company-graph/internal/scraper/`
-- `mcp/README.md`
+- `docs/mcp-resume-review.md`
 - `docs/design/vector-db.md`

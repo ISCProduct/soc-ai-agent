@@ -17,6 +17,9 @@ type GBizCompanyProfile struct {
 	EmployeeNumber  int    `json:"employee_number"`
 	DateEstablished string `gorm:"type:varchar(20)" json:"date_established"`
 	CompanyURL      string `gorm:"type:varchar(500)" json:"company_url"`
+	// BusinessSummary は gBizINFO の business_summary(事業概要)。
+	// 「メディア事業\nインターネット広告事業」のように複数行で返ることがある。
+	BusinessSummary string `gorm:"type:text" json:"business_summary"`
 	UpdateDate      string `gorm:"type:varchar(20)" json:"update_date"`
 	SourceFetchedAt time.Time
 	CreatedAt       time.Time

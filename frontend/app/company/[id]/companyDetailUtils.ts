@@ -1,6 +1,7 @@
 /**
  * 企業詳細ページ用のユーティリティ。
  */
+import type { CompanyProvenanceInput } from '@/lib/company/provenance'
 
 export function parseJsonArray(s?: string): string[] {
   if (!s) return []
@@ -12,7 +13,7 @@ export function parseJsonArray(s?: string): string[] {
   }
 }
 
-import { formatEmployeeCount } from '@/lib/company-data'
+import { formatEmployeeCount } from '@/lib/company/data'
 
 /** API / プロキシ応答から企業オブジェクトを取り出す */
 export function unwrapCompanyRecord(raw: unknown): Record<string, unknown> | null {
@@ -49,6 +50,41 @@ export type CompanyDetailViewModel = {
   parentCompany?: string
   subsidiaries?: string[]
   partnerships?: string[]
+  /** 出どころ表示用（#1125 フェーズ1）。セクションごとに取得時刻が違うため個別に持つ */
+  provenance: {
+    basic: CompanyProvenanceInput
+    tech: CompanyProvenanceInput
+    relations: CompanyProvenanceInput
+  }
+}
+
+// 出どころ関連フィールドを文字列として安全に取り出す
+function provenanceString(data: Record<string, unknown>, key: string): string | undefined {
+  const v = data[key]
+  return typeof v === 'string' && v.length > 0 ? v : undefined
+}
+
+// セクション別の取得時刻を組み合わせた出どころ入力を作る（#1125 フェーズ1）
+//
+// sectionAIFetched は「このセクションがAI取得パイプラインで埋まったか」。
+// companies.source_type は行に1つしか無く、技術スタック取得・関連企業取得が
+// 走るたびに上書きされるため、それだけではセクションごとの出どころを区別できない。
+// tech_fetched_at / relations_fetched_at はAI取得側だけが打刻するので、
+// その有無で「この節はAIが埋めた」と判定する。
+function buildProvenance(
+  data: Record<string, unknown>,
+  fetchedAtKey: string,
+  sectionAIFetched = false,
+): CompanyProvenanceInput {
+  return {
+    source_type: provenanceString(data, 'source_type'),
+    source_url: provenanceString(data, 'source_url'),
+    last_fetch_confidence: provenanceString(data, 'last_fetch_confidence'),
+    last_model_used: provenanceString(data, 'last_model_used'),
+    gbiz_last_synced_at: provenanceString(data, 'gbiz_last_synced_at'),
+    fetched_at: provenanceString(data, fetchedAtKey) ?? provenanceString(data, 'source_fetched_at'),
+    section_ai_fetched: sectionAIFetched,
+  }
 }
 
 export function mapCompanyApiToViewModel(raw: unknown): CompanyDetailViewModel | null {
@@ -94,5 +130,15 @@ export function mapCompanyApiToViewModel(raw: unknown): CompanyDetailViewModel |
     parentCompany: typeof data.parentCompany === 'string' ? data.parentCompany : undefined,
     subsidiaries: Array.isArray(data.subsidiaries) ? data.subsidiaries.map(String) : undefined,
     partnerships: Array.isArray(data.partnerships) ? data.partnerships.map(String) : undefined,
+    provenance: {
+      basic: buildProvenance(data, 'info_fetched_at'),
+      // tech_fetched_at / relations_fetched_at の打刻は AI 取得側だけが行う
+      tech: buildProvenance(data, 'tech_fetched_at', provenanceString(data, 'tech_fetched_at') !== undefined),
+      relations: buildProvenance(
+        data,
+        'relations_fetched_at',
+        provenanceString(data, 'relations_fetched_at') !== undefined,
+      ),
+    },
   }
 }

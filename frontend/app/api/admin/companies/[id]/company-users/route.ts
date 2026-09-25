@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { adminProxyHeaders } from '@/lib/admin/backend-proxy'
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
@@ -6,7 +7,7 @@ export const dynamic = 'force-dynamic'
 
 function adminHeaders(request: NextRequest): Record<string, string> {
   return {
-    'Content-Type': 'application/json',
+    ...adminProxyHeaders(request.headers),
     'X-Admin-Email': request.headers.get('x-admin-email') || '',
     'X-Admin-Token': request.headers.get('x-admin-token') || '',
   }

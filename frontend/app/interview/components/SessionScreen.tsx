@@ -19,8 +19,10 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import ClosedCaptionIcon from '@mui/icons-material/ClosedCaption'
 import dynamic from 'next/dynamic'
 import { PRIMARY } from '../constants'
-import { formatSeconds } from '@/lib/interview-utils'
+import { UTTERANCE_SAVE_FAILED_MESSAGE } from '../utteranceSave'
+import { formatSeconds } from '@/lib/interview/utils'
 import type { Utterance } from '../types'
+import styles from './interview.module.css'
 
 const ThreeAvatar = dynamic(() => import('./ThreeAvatar'), {
   ssr: false,
@@ -60,6 +62,8 @@ export interface SessionScreenProps {
   isRecording: boolean
   turnPending: boolean
   errorMessage: string | null
+  /** 発話保存が再試行しても失敗したか。true なら「記録できていない」ことを画面に出す（#1476） */
+  utteranceSaveFailed?: boolean
   /** video 要素がマウントした瞬間にストリームをアタッチするための callback ref（page.tsx 側で理由を解説） */
   sessionVideoCallbackRef: RefCallback<HTMLVideoElement>
   transcriptEndRef: RefObject<HTMLDivElement | null>
@@ -107,6 +111,7 @@ export default function SessionScreen({
   isRecording,
   turnPending,
   errorMessage,
+  utteranceSaveFailed,
   sessionVideoCallbackRef,
   transcriptEndRef,
   aiAudioRef,
@@ -277,12 +282,7 @@ export default function SessionScreen({
                 ref={sessionVideoCallbackRef}
                 muted
                 playsInline
-                style={{
-                  position: 'absolute', inset: 0,
-                  width: '100%', height: '100%',
-                  objectFit: 'cover', transform: 'scaleX(-1)',
-                  display: cameraEnabled ? 'block' : 'none',
-                }}
+                className={`${styles.cameraVideo} ${styles.cameraVideoFill} ${cameraEnabled ? '' : styles.cameraVideoHidden}`}
               />
               {!cameraEnabled && (
                 <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -314,6 +314,15 @@ export default function SessionScreen({
 
         {/* ── 右: チャット + コントロール ── */}
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5, minWidth: 0, overflow: 'hidden' }}>
+
+          {/* 発話保存の失敗を面接中に見せる（#1476）。面接は続行できるため止めない */}
+          {utteranceSaveFailed && (
+            <Box role="alert" sx={{ bgcolor: 'rgba(251,188,5,0.15)', border: '1px solid rgba(251,188,5,0.4)', borderRadius: 2, p: 1.5 }}>
+              <Typography sx={{ color: '#fdd663', fontSize: 13, lineHeight: 1.6 }}>
+                {UTTERANCE_SAVE_FAILED_MESSAGE}
+              </Typography>
+            </Box>
+          )}
 
           {/* 発話履歴 */}
           <Box sx={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1.5, py: 1,
@@ -388,8 +397,13 @@ export default function SessionScreen({
             {/* 主要ボタン行 */}
             <Box sx={{ display: 'flex', gap: 1 }}>
               {/* 録音 / 話す ボタン */}
-              <Tooltip title={aiSpeaking ? 'AI発話中...' : turnPending ? 'AIが考えています...' : isRecording ? 'クリックして送信' : 'クリックして話す'}>
-                <span style={{ flex: 1 }}>
+              {/*
+                「AI発話中」「AIが考えています」をやめた。
+                面接練習は「面接官と話している」という前提が成り立ってこそ
+                練習になる。話し相手をAIと呼ぶとその前提が崩れる。
+              */}
+              <Tooltip title={aiSpeaking ? '面接官が話しています' : turnPending ? '面接官が考えています' : isRecording ? 'クリックして送信' : 'クリックして話す'}>
+                <span className={styles.recordButtonWrap}>
                   <Button
                     fullWidth
                     onClick={isRecording ? onStopRecording : onStartRecording}
@@ -413,7 +427,7 @@ export default function SessionScreen({
                       '&:disabled': { bgcolor: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.3)', border: '1px solid rgba(255,255,255,0.1)' },
                     }}
                   >
-                    {isRecording ? 'レコーディング中...' : turnPending ? '処理中...' : aiSpeaking ? 'AI発話中' : '話す'}
+                    {isRecording ? '録音中' : turnPending ? '送信中' : aiSpeaking ? '面接官が発言中' : '話す'}
                   </Button>
                 </span>
               </Tooltip>

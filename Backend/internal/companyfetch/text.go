@@ -3,6 +3,7 @@ package companyfetch
 import (
 	"Backend/internal/companyfields"
 	"Backend/internal/config"
+	"Backend/internal/netsafe"
 	"context"
 	"fmt"
 	"html"
@@ -187,6 +188,15 @@ func ValidatePublicHTTPURL(rawURL string) error {
 	return nil
 }
 
+// safeTransport は SSRF 対策付きの Transport を返す。
+// allowPrivateURLs は単体テスト専用で、httptest の 127.0.0.1 へ繋ぐために素へ倒す。
+func safeTransport() http.RoundTripper {
+	if allowPrivateURLs {
+		return http.DefaultTransport
+	}
+	return netsafe.NewTransport()
+}
+
 // FetchURLText は URL から HTML を取得し、正規化・トリムしたテキストを返す。
 func FetchURLText(ctx context.Context, rawURL string) (string, error) {
 	if err := ValidatePublicHTTPURL(rawURL); err != nil {
@@ -200,10 +210,16 @@ func FetchURLText(ctx context.Context, rawURL string) (string, error) {
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; SocAI/1.0; +https://example.com/bot)")
 	client := &http.Client{
 		Timeout: 15 * time.Second,
+		// 接続直前に解決済みIPを検査する(#1408)。ValidatePublicHTTPURL だけだと
+		// 検査と接続で別々に名前解決するため、短いTTLを返すDNSサーバーで
+		// 検査後に内部アドレスへ差し替えられる(DNSリバインディング)。
+		// リダイレクト先もこの Transport を通るので同じ検査が掛かる。
+		Transport: safeTransport(),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= maxRedirects {
 				return fmt.Errorf("stopped after %d redirects", maxRedirects)
 			}
+			// スキームとホスト表記の検査はこちらで行う。IPの検査は Transport 側。
 			if err := ValidatePublicHTTPURL(req.URL.String()); err != nil {
 				return err
 			}

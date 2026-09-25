@@ -17,7 +17,7 @@ import {
 import CheckIcon from '@mui/icons-material/Check'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { InterviewReport, PhraseSuggestion, interviewApi } from '@/lib/interview'
-import { parseJsonSafe } from '@/lib/interview-utils'
+import { parseJsonSafe } from '@/lib/interview/utils'
 import { PRIMARY } from '../constants'
 
 const SCORE_LABELS: Record<string, string> = {
@@ -98,10 +98,13 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
         </Typography>
       </Paper>
 
-      {/* Scores */}
+      {/*
+        評価の内訳は後ろへ回す。練習で次に動くのは「何を直すか」であって、
+        5項目のスコアを眺めることではない。JSXは動かさず order で並べ替える。
+      */}
       {scoreValues.length > 0 && (
-        <Paper sx={{ bgcolor: paperBg, border: paperBorder, p: 3, borderRadius: 2 }}>
-          <Typography sx={{ color: textPrimary, fontWeight: 700, mb: 2 }}>カテゴリ別スコア</Typography>
+        <Paper sx={{ bgcolor: paperBg, border: paperBorder, p: 3, borderRadius: 2, order: 3 }}>
+          <Typography sx={{ color: textPrimary, fontWeight: 700, mb: 2 }}>評価の内訳</Typography>
           <Stack spacing={1.5}>
             {Object.entries(scores ?? {}).map(([key, value]) => (
               <Box key={key}>
@@ -134,9 +137,16 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
         </Paper>
       )}
 
-      {/* Strengths & Improvements */}
+      {/* 強み・改善点。改善点を先に読ませる（強みはその後ろで足りる） */}
       {(strengths?.length || improvements?.length) ? (
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
+        <Box sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+          gap: 2,
+          order: 2,
+          '& > :nth-of-type(1)': { order: 2 },
+          '& > :nth-of-type(2)': { order: 1 },
+        }}>
           {strengths && strengths.length > 0 && (
             <Paper sx={{ bgcolor: paperBg, border: paperBorder, p: 3, borderRadius: 2 }}>
               <Typography sx={{ color: '#34a853', fontWeight: 700, mb: 1.5 }}>強み</Typography>
@@ -156,7 +166,11 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
               <Stack spacing={1}>
                 {improvements.map((item, i) => (
                   <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-                    <Typography sx={{ color: '#fbbc04', fontSize: 16, lineHeight: 1.4, flexShrink: 0 }}>→</Typography>
+                    {/*
+                      「→」をやめた。矢印は「次に進む」を意味するが、
+                      ここは改善点の列挙で順序も遷移も無い。
+                    */}
+                    <Typography sx={{ color: '#fbbc04', fontSize: 16, lineHeight: 1.4, flexShrink: 0 }}>・</Typography>
                     <Typography variant="body2" sx={{ color: textSecondary, lineHeight: 1.6 }}>{item}</Typography>
                   </Box>
                 ))}

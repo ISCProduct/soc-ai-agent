@@ -22,7 +22,7 @@ import {
   marketLabels,
   type CompanySummary,
   type MarketType,
-} from '@/lib/company-data'
+} from '@/lib/company/data'
 
 export const CORRELATION_DETAIL_PANEL_WIDTH = 360
 

@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,7 +16,7 @@ func (s *ChatService) buildAndSaveSessionSummary(ctx context.Context, userID uin
 	}
 
 	// 直近のユーザーメッセージを収集
-	msgs, err := s.chatMessageRepo.FindRecentBySessionID(sessionID, 30)
+	msgs, err := s.chatMessageRepo.FindRecentBySessionIDForUser(sessionID, userID, 30)
 	if err != nil {
 		return nil, err
 	}
@@ -50,6 +51,7 @@ func (s *ChatService) buildAndSaveSessionSummary(ctx context.Context, userID uin
 	systemPrompt := "あなたは就職適性診断の専門家です。以下の情報をもとに、ユーザー向けに短く親しみやすい日本語で要約を生成してください。出力は必ずJSONのみを返してください。フォーマット: {\"strengths\": \"...\", \"weaknesses\": \"...\", \"recommended_working_style\": \"...\"}。各項目は2〜3文、合計で200文字程度を目安にしてください。"
 	userPrompt := "解析情報: " + string(contextBytes) + "\n\n直近のユーザーメッセージ:\n" + userContext
 
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureChatSummary)
 	raw, err := s.aiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.2, 400)
 	if err != nil {
 		log.Printf("LLM session summary generation failed: %v", err)

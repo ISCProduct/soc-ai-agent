@@ -1,7 +1,7 @@
 package routes
 
 import (
-	"Backend/internal/controllers"
+	companycontrollers "Backend/internal/controllers/company"
 	"Backend/internal/middleware"
 	"Backend/internal/repositories"
 
@@ -41,6 +41,9 @@ func EchoCompanyAuth(companySecret string, users *repositories.CompanyUserReposi
 			}
 			ctx := context.WithValue(c.Request().Context(), middleware.CompanyUserIDContextKey, companyUserID)
 			ctx = context.WithValue(ctx, middleware.CompanyIDContextKey, user.CompanyID)
+			// 破壊的操作を owner に限るため、役割もここで載せる（#1319）。
+			// ハンドラごとに引き直すと、引き忘れた経路だけ権限判定が抜ける。
+			ctx = context.WithValue(ctx, middleware.CompanyUserRoleContextKey, user.Role)
 			c.SetRequest(c.Request().WithContext(ctx))
 			return next(c)
 		}
@@ -49,9 +52,13 @@ func EchoCompanyAuth(companySecret string, users *repositories.CompanyUserReposi
 
 func SetupCompanyAuthRoutes(
 	api *echo.Group,
-	authController *controllers.CompanyAuthController,
-	portalController *controllers.CompanyPortalController,
-	studentController *controllers.CompanyStudentController,
+	authController *companycontrollers.CompanyAuthController,
+	portalController *companycontrollers.CompanyPortalController,
+	studentController *companycontrollers.CompanyStudentController,
+	applicationController *companycontrollers.CompanyPortalApplicationController,
+	jobController *companycontrollers.CompanyPortalJobController,
+	profileController *companycontrollers.CompanyPortalProfileController,
+	schoolAppController *companycontrollers.CompanyPortalSchoolApplicationController,
 	companySecret string,
 	users *repositories.CompanyUserRepository,
 ) {
@@ -79,4 +86,41 @@ func SetupCompanyAuthRoutes(
 	portal.DELETE("/students/:userID/tags/:tagID", studentController.RemoveTag)
 	portal.GET("/tags", studentController.ListTags)
 	portal.GET("/industries", studentController.Industries)
+
+	// ダッシュボードと応募者管理 (#1320)。
+	// company_id はJWT由来。他社の応募IDを指定された場合は 403 を返す。
+	if applicationController != nil {
+		portal.GET("/dashboard", applicationController.Dashboard)
+		portal.GET("/applications", applicationController.List)
+		// 選考ステータスの変更は破壊的操作なので owner のみ（コントローラ側で判定）。
+		portal.PATCH("/applications/:id/status", applicationController.UpdateStatus)
+	}
+
+	// 求人管理 (#1321)。一覧は全員、作成・編集・公開は owner のみ
+	// （コントローラ側で判定）。削除は提供しない（応募が紐づくため非公開化で対応）。
+	if jobController != nil {
+		portal.GET("/jobs", jobController.List)
+		portal.POST("/jobs", jobController.Create)
+		portal.PATCH("/jobs/:id", jobController.Update)
+		portal.POST("/jobs/:id/publish", jobController.Publish)
+	}
+
+	// 自社プロフィール編集と担当者管理 (#1322)。
+	// 管理者向けは :id で企業を指定するが、ここでは自社しか触れないため
+	// パラメータを持たせない。更新系は owner のみ（コントローラ側で判定）。
+	if profileController != nil {
+		portal.GET("/company", profileController.GetCompany)
+		portal.PATCH("/company", profileController.UpdateCompany)
+		portal.GET("/members", profileController.ListMembers)
+		portal.POST("/members", profileController.InviteMember)
+		portal.PATCH("/members/:userID", profileController.SetMemberDisabled)
+	}
+
+	// 学校への掲載申請 (#1506)。一覧は全員、申請・取消は owner のみ
+	// （コントローラ側で判定）。company_id はJWT由来。
+	if schoolAppController != nil {
+		portal.GET("/school-applications", schoolAppController.List)
+		portal.POST("/school-applications", schoolAppController.Create)
+		portal.DELETE("/school-applications/:id", schoolAppController.Delete)
+	}
 }
