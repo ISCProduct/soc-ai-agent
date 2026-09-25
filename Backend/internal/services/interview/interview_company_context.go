@@ -88,14 +88,36 @@ func (s *InterviewService) resolveCompanyReading(ctx context.Context, companyID 
 		}
 		s.companyReadingCache.Delete(cacheKey)
 	}
-	value, _, _ := s.companyReadingFlight.Do(cacheKey, func() (any, error) {
-		reading := s.lookupCompanyReading(ctx, companyName)
-		s.companyReadingCache.Store(cacheKey, companyReadingCacheEntry{
-			value:     strings.TrimSpace(reading),
-			expiresAt: time.Now().Add(companyReadingCacheTTL),
-		})
+	value, err, shared := s.companyReadingFlight.Do(cacheKey, func() (any, error) {
+		if cached, ok := s.companyReadingCache.Load(cacheKey); ok {
+			if entry, ok := cached.(companyReadingCacheEntry); ok &&
+				time.Now().Before(entry.expiresAt) {
+				return entry.value, nil
+			}
+			s.companyReadingCache.Delete(cacheKey)
+		}
+		reading, err := s.lookupCompanyReading(ctx, companyName)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(reading) != "" {
+			s.companyReadingCache.Store(cacheKey, companyReadingCacheEntry{
+				value:     strings.TrimSpace(reading),
+				expiresAt: time.Now().Add(companyReadingCacheTTL),
+			})
+		}
 		return reading, nil
 	})
+	if err != nil && shared && ctx.Err() == nil {
+		reading, retryErr := s.lookupCompanyReading(ctx, companyName)
+		if retryErr == nil && strings.TrimSpace(reading) != "" {
+			s.companyReadingCache.Store(cacheKey, companyReadingCacheEntry{
+				value:     strings.TrimSpace(reading),
+				expiresAt: time.Now().Add(companyReadingCacheTTL),
+			})
+		}
+		return reading
+	}
 	reading, _ := value.(string)
 	return reading
 }
