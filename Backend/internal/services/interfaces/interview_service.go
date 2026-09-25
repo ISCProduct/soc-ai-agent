@@ -17,7 +17,8 @@ type InterviewService interface {
 	GetPhraseSuggestions(ctx context.Context, userID uint, sessionID uint) ([]interview.PhraseSuggestion, error)
 	GetTrend(userID uint, limit int) ([]interview.InterviewTrendPoint, error)
 	SendReportEmail(userID, sessionID uint) error
-	SaveUtterance(userID uint, sessionID uint, role string, text string) error
+	SaveUtterance(userID uint, sessionID uint, role string, text string, clientUtteranceID string) error
+	RegenerateReport(userID uint, sessionID uint) (bool, error)
 	EnsureSessionOwnership(userID uint, sessionID uint) error
 	CreateRealtimeToken(ctx context.Context, userID uint, sessionID uint) (string, error)
 	Turn(

@@ -6,6 +6,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/safego"
 	ifaces "Backend/internal/services/interfaces"
+	interviewsvc "Backend/internal/services/interview"
 	"Backend/internal/services/shared"
 	"Backend/internal/services/storage"
 	"context"
@@ -46,6 +47,9 @@ type interviewCreateRequest struct {
 type interviewUtteranceRequest struct {
 	Role string `json:"role"`
 	Text string `json:"text"`
+	// ClientUtteranceID は発話ごとにクライアントが発行する一意ID(#1476)。
+	// 保存の再試行で同じ発話が二重に入らないよう、サーバー側の一意制約で弾くために使う。
+	ClientUtteranceID string `json:"client_utterance_id"`
 }
 
 // GetTrend GET /api/interviews/trend?limit=N
@@ -86,6 +90,39 @@ func (c *InterviewController) GetReport(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "report not yet available")
 	}
 	return ctx.JSON(http.StatusOK, report)
+}
+
+// RegenerateReport POST /api/interviews/:id/report/regenerate
+//
+// 未生成のレポートを作り直すためにジョブを再投入する(#1476)。
+// レポート生成ジョブは asynq の再試行を使い切ったりキューが溢れたりすると失われ、
+// FinishSession は終了済みセッションを再キューしないため、これまで回復手段が無かった。
+// フロントのレポート再試行ボタン（ポーリングのタイムアウト/失敗後）から叩く。
+func (c *InterviewController) RegenerateReport(ctx echo.Context) error {
+	sessionID, err := httpapi.UintParam(ctx, "id")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid session ID")
+	}
+	userID, ok := httpapi.UserID(ctx)
+	if !ok {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	queued, err := c.interviewService.RegenerateReport(userID, sessionID)
+	if err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
+		if errors.Is(err, interviewsvc.ErrSessionNotFinished) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		// キューへ入れられなかったのに202を返すと、フロントは存在しないジョブを
+		// 3分ポーリングして再びタイムアウトするだけになる(#1476)。
+		if errors.Is(err, interviewsvc.ErrReportQueueNotAvailable) {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "レポート生成を受け付けられませんでした。時間をおいて再試行してください。")
+		}
+		return httpapi.InternalError(err)
+	}
+	return ctx.JSON(http.StatusAccepted, map[string]bool{"queued": queued})
 }
 
 // GetPhraseSuggestions GET /api/interviews/:id/phrase-suggestions
@@ -546,7 +583,7 @@ func (c *InterviewController) AddUtterance(ctx echo.Context) error {
 	if err := ctx.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
 	}
-	if err := c.interviewService.SaveUtterance(userID, sessionID, req.Role, req.Text); err != nil {
+	if err := c.interviewService.SaveUtterance(userID, sessionID, req.Role, req.Text, req.ClientUtteranceID); err != nil {
 		if errors.Is(err, shared.ErrForbidden) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}

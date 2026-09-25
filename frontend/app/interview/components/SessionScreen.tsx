@@ -19,6 +19,7 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import ClosedCaptionIcon from '@mui/icons-material/ClosedCaption'
 import dynamic from 'next/dynamic'
 import { PRIMARY } from '../constants'
+import { UTTERANCE_SAVE_FAILED_MESSAGE } from '../utteranceSave'
 import { formatSeconds } from '@/lib/interview/utils'
 import type { Utterance } from '../types'
 import styles from './interview.module.css'
@@ -61,6 +62,8 @@ export interface SessionScreenProps {
   isRecording: boolean
   turnPending: boolean
   errorMessage: string | null
+  /** 発話保存が再試行しても失敗したか。true なら「記録できていない」ことを画面に出す（#1476） */
+  utteranceSaveFailed?: boolean
   /** video 要素がマウントした瞬間にストリームをアタッチするための callback ref（page.tsx 側で理由を解説） */
   sessionVideoCallbackRef: RefCallback<HTMLVideoElement>
   transcriptEndRef: RefObject<HTMLDivElement | null>
@@ -108,6 +111,7 @@ export default function SessionScreen({
   isRecording,
   turnPending,
   errorMessage,
+  utteranceSaveFailed,
   sessionVideoCallbackRef,
   transcriptEndRef,
   aiAudioRef,
@@ -310,6 +314,15 @@ export default function SessionScreen({
 
         {/* ── 右: チャット + コントロール ── */}
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5, minWidth: 0, overflow: 'hidden' }}>
+
+          {/* 発話保存の失敗を面接中に見せる（#1476）。面接は続行できるため止めない */}
+          {utteranceSaveFailed && (
+            <Box role="alert" sx={{ bgcolor: 'rgba(251,188,5,0.15)', border: '1px solid rgba(251,188,5,0.4)', borderRadius: 2, p: 1.5 }}>
+              <Typography sx={{ color: '#fdd663', fontSize: 13, lineHeight: 1.6 }}>
+                {UTTERANCE_SAVE_FAILED_MESSAGE}
+              </Typography>
+            </Box>
+          )}
 
           {/* 発話履歴 */}
           <Box sx={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1.5, py: 1,

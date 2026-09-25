@@ -76,8 +76,13 @@ func (m *InterviewServiceMock) SendReportEmail(userID, sessionID uint) error {
 	return m.Called(userID, sessionID).Error(0)
 }
 
-func (m *InterviewServiceMock) SaveUtterance(userID uint, sessionID uint, role string, text string) error {
-	return m.Called(userID, sessionID, role, text).Error(0)
+func (m *InterviewServiceMock) SaveUtterance(userID uint, sessionID uint, role string, text string, clientUtteranceID string) error {
+	return m.Called(userID, sessionID, role, text, clientUtteranceID).Error(0)
+}
+
+func (m *InterviewServiceMock) RegenerateReport(userID uint, sessionID uint) (bool, error) {
+	args := m.Called(userID, sessionID)
+	return args.Bool(0), args.Error(1)
 }
 
 func (m *InterviewServiceMock) EnsureSessionOwnership(userID uint, sessionID uint) error {
