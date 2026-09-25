@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # デプロイスモーク結果を Discord Incoming Webhook へ投稿する。
-# DISCORD_DEPLOY_WEBHOOK_URL 未設定ならスキップ（デプロイ本体は壊さない）。
+#
+# Webhook は DISCORD_DEPLOY_WEBHOOK_URL → DISCORD_OPS_WEBHOOK_URL → DISCORD_RELEASE_WEBHOOK_URL
+# の順に探す。DISCORD_DEPLOY_WEBHOOK_URL はリポジトリにも environment にも存在せず、
+# 通知が1件も飛ばないまま「スキップ」されていた(#1354)。
+#
+# どれも無い場合は ::error:: を出して気づけるようにするが、終了コードは 0 のままにする。
+# 通知先の設定漏れでデプロイ自体を落とすのは blast radius が大きすぎる。
+# (起動ジョブ側の automation/ops/notify-discord.sh は、ジョブが既に失敗している文脈なので 1 を返す)
 set -euo pipefail
 
 status="${1:-unknown}"       # success | failure
@@ -9,8 +16,9 @@ base_url="${3:-}"
 run_url="${4:-}"
 github_actor="${5:-}"
 
-if [[ -z "${DISCORD_DEPLOY_WEBHOOK_URL:-}" ]]; then
-  echo "DISCORD_DEPLOY_WEBHOOK_URL is not set; skip Discord notify"
+webhook_url="${DISCORD_DEPLOY_WEBHOOK_URL:-${DISCORD_OPS_WEBHOOK_URL:-${DISCORD_RELEASE_WEBHOOK_URL:-}}}"
+if [[ -z "$webhook_url" ]]; then
+  echo "::error::Discord Webhook が未設定のためスモーク結果を通知できません(DISCORD_DEPLOY_WEBHOOK_URL / DISCORD_OPS_WEBHOOK_URL / DISCORD_RELEASE_WEBHOOK_URL のいずれかを設定してください)" >&2
   exit 0
 fi
 
@@ -43,5 +51,5 @@ Run: ${run_url}
 fi
 
 payload="$(python3 -c "import json,sys; print(json.dumps({'content': sys.argv[1]}))" "$content")"
-curl -sS -X POST -H 'Content-Type: application/json' -d "$payload" "$DISCORD_DEPLOY_WEBHOOK_URL"
+curl -sS -X POST -H 'Content-Type: application/json' -d "$payload" "$webhook_url"
 echo

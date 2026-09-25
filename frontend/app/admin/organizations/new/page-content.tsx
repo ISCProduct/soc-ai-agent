@@ -10,10 +10,12 @@ import {
   Typography,
 } from '@mui/material'
 import { authService } from '@/lib/auth'
+import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 import { AdminFormContainer } from '@/components/admin/AdminFormContainer'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 
 export default function PageContent() {
+  const platformReady = useRequirePlatformAdmin()
   const router = useRouter()
 
   useEffect(() => {
@@ -27,6 +29,8 @@ export default function PageContent() {
   const [contractStartDate, setContractStartDate] = useState('')
   const [contractEndDate, setContractEndDate] = useState('')
   const [error, setError] = useState('')
+
+  if (!platformReady) return null
 
   const handleCreate = async () => {
     setError('')

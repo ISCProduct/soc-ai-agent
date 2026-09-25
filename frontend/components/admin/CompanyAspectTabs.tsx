@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { Button, Stack } from '@mui/material'
-import { resolveIndustryFieldProfile } from '@/lib/admin-company-field-profile'
+import { resolveIndustryFieldProfile } from '@/lib/admin/company-field-profile'
 
 export type CompanyAspect = 'info' | 'tech' | 'relations'
 

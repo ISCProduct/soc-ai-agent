@@ -30,6 +30,8 @@ import {
   ListItemIcon,
   ListItemText,
 } from '@mui/material'
+import { adminFetchJson, toAdminErrorMessage } from '@/lib/admin/fetch'
+import { approvalChipState, canToggleApproval } from '@/lib/admin/company-approval'
 import SearchIcon from '@mui/icons-material/Search'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
@@ -37,12 +39,13 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import { authService } from '@/lib/auth'
+import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { companyAspectHref, type CompanyAspect } from '@/components/admin/CompanyAspectTabs'
-import { fetchCompanyPrimary, formatFetchPrimarySummary, formatFetchPrimaryEmptyAspects, hasActionableSoftEmpty } from '@/lib/admin-company-fetch'
+import { fetchCompanyPrimary, formatFetchPrimarySummary, formatFetchPrimaryEmptyAspects, hasActionableSoftEmpty } from '@/lib/admin/company-fetch'
 import {
   applyBatchWave,
   batchItemFailuresFromResponse,
@@ -55,8 +58,8 @@ import {
   shouldContinueBatch,
   type BatchItemFailure,
   type BatchProgress,
-} from '@/lib/admin-company-batch-progress'
-import { resolveIndustryFieldProfile } from '@/lib/admin-company-field-profile'
+} from '@/lib/admin/company-batch-progress'
+import { resolveIndustryFieldProfile } from '@/lib/admin/company-field-profile'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
 
 const PAGE_SIZE = 50
@@ -184,11 +187,17 @@ function groupCompaniesByIndustry(companies: Company[]): { key: string; label: s
 }
 
 export default function PageContent() {
+  const [isPlatform, setIsPlatform] = useState(false)
+
   useEffect(() => {
     const user = authService.getStoredUser()
     if (!user?.is_admin) {
       window.location.href = '/'
+      return
     }
+    void getAdminSchoolAccess()
+      .then((access) => setIsPlatform(!access.restricted))
+      .catch(() => setIsPlatform(false))
   }, [])
 
   const [companies, setCompanies] = useState<Company[]>([])
@@ -214,8 +223,11 @@ export default function PageContent() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [bulkPublishing, setBulkPublishing] = useState(false)
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
-  const [approvedCompanyIds, setApprovedCompanyIds] = useState<Set<number>>(new Set())
+  // 学校の承認済み企業ID。null は「取得できていない」。空集合と区別する(#1452)。
+  // 以前は失敗時も空集合のままで、承認済みの企業まで一覧が全件「未承認」に見えていた。
+  const [approvedCompanyIds, setApprovedCompanyIds] = useState<Set<number> | null>(null)
   const [approvalBusyId, setApprovalBusyId] = useState<number | null>(null)
+  const [approvalError, setApprovalError] = useState('')
 
   const fetchCoverage = useCallback(async () => {
     const res = await fetch('/api/admin/companies/l1-coverage', {
@@ -308,44 +320,65 @@ export default function PageContent() {
   }, [companies])
 
   useEffect(() => {
-    void fetchCoverage()
+    if (isPlatform) void fetchCoverage()
     void fetchIndustries()
-  }, [fetchCoverage, fetchIndustries])
+  }, [isPlatform, fetchCoverage, fetchIndustries])
 
   useEffect(() => {
     if (schoolId === undefined) {
-      setApprovedCompanyIds(new Set())
+      setApprovedCompanyIds(null)
+      setApprovalError('')
       return
     }
     let cancelled = false
-    fetch(`/api/admin/schools/${schoolId}/company-approvals`, {
-      headers: authService.getAdminFetchHeaders(),
-      cache: 'no-store',
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (!cancelled) setApprovedCompanyIds(new Set(data?.company_ids || []))
-      })
-      .catch(() => {})
+    const load = async () => {
+      setApprovalError('')
+      try {
+        // adminFetchJson は非2xx・タイムアウト・ALB の HTML エラーページを
+        // すべて日本語メッセージ付きの例外へ正規化する(#1066)。素の fetch だと
+        // 500 が HTML を返したとき .json() が例外になり、空集合のまま
+        // 「全件未承認」に見えてしまう。
+        const data = await adminFetchJson<{ company_ids?: number[] }>(
+          `/api/admin/schools/${schoolId}/company-approvals`,
+          { headers: authService.getAdminFetchHeaders(), cache: 'no-store' },
+          '承認状態の取得に失敗しました',
+        )
+        if (!cancelled) setApprovedCompanyIds(new Set<number>(data?.company_ids || []))
+      } catch (e) {
+        if (cancelled) return
+        setApprovedCompanyIds(null)
+        setApprovalError(toAdminErrorMessage(e))
+      }
+    }
+    void load()
     return () => { cancelled = true }
   }, [schoolId])
 
   const toggleCompanyApproval = async (companyId: number, approved: boolean) => {
-    if (schoolId === undefined) return
+    // 承認状態が取れていないときは操作させない。サーバー側の実態と食い違うため。
+    if (!canToggleApproval(approvedCompanyIds, schoolId)) return
     setApprovalBusyId(companyId)
+    setApprovalError('')
     try {
-      const res = await fetch(`/api/admin/schools/${schoolId}/company-approvals${approved ? `/${companyId}` : ''}`, {
-        method: approved ? 'DELETE' : 'POST',
-        headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
-        body: approved ? undefined : JSON.stringify({ company_id: companyId }),
-      })
-      if (!res.ok) return
+      await adminFetchJson(
+        `/api/admin/schools/${schoolId}/company-approvals${approved ? `/${companyId}` : ''}`,
+        {
+          method: approved ? 'DELETE' : 'POST',
+          headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
+          body: approved ? undefined : JSON.stringify({ company_id: companyId }),
+        },
+        approved ? '承認の解除に失敗しました' : '承認に失敗しました',
+      )
       setApprovedCompanyIds((prev) => {
-        const next = new Set(prev)
+        const next = new Set(prev ?? [])
         if (approved) next.delete(companyId)
         else next.add(companyId)
         return next
       })
+    } catch (e) {
+      // 無言で返すと、押しても反応しないチップを何度も押すことになる(#1452)。
+      // 成功していないので approvedCompanyIds は変えない。
+      setApprovalError(toAdminErrorMessage(e))
     } finally {
       setApprovalBusyId(null)
     }
@@ -660,7 +693,8 @@ export default function PageContent() {
     )
   }
 
-  const selectableOnPage = companies.filter(canSelectForPublish)
+  // 公開操作はシステム管理者専用なので、一括公開の選択UIも担当校管理者には出さない
+  const selectableOnPage = isPlatform ? companies.filter(canSelectForPublish) : []
   const selectedSelectableCount = selectableOnPage.filter((c) => selectedIds.includes(c.id)).length
   const allSelectableSelected =
     selectableOnPage.length > 0 && selectedSelectableCount === selectableOnPage.length
@@ -798,19 +832,26 @@ export default function PageContent() {
         }
         backHref={busy ? undefined : '/admin'}
         actions={
-          <Button
-            variant="contained"
-            component={Link}
-            href="/admin/companies/new"
-            disableElevation
-            disabled={busy}
-          >
-            企業を追加
-          </Button>
+          isPlatform ? (
+            <Button
+              variant="contained"
+              component={Link}
+              href="/admin/companies/new"
+              disableElevation
+              disabled={busy}
+            >
+              企業を追加
+            </Button>
+          ) : undefined
         }
       />
 
       <ErrorAlert error={error} />
+      {approvalError ? (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {approvalError}
+        </Alert>
+      ) : null}
       {fetchMessage && (
         <Alert severity={fetchSeverity} sx={{ mb: 2 }} onClose={() => setFetchMessage('')}>
           {fetchMessage}
@@ -832,17 +873,24 @@ export default function PageContent() {
         </Typography>
         <Stack spacing={0.5}>
           <Typography variant="body2" color="text.secondary">
-            1. 企業名で探し、情報が足りなければ「情報を取得」します
+            {isPlatform
+              ? '1. 企業名で探し、情報が足りなければ「情報を取得」します'
+              : '1. 企業名で探し、「会社概要」「技術情報」「関連企業」で内容を確認します'}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            2. 「会社概要」「技術情報」「関連企業」で内容を確認・修正します
+            {isPlatform
+              ? '2. 「会社概要」「技術情報」「関連企業」で内容を確認・修正します'
+              : '2. 必要なら内容を修正し、担当校向けの掲載承認を設定します'}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            3. 情報がそろった企業を選んで「学生に公開」します（足りない企業は選べません）
+            {isPlatform
+              ? '3. 情報がそろった企業を選んで「学生に公開」します（足りない企業は選べません）'
+              : '3. 学生への公開はシステム管理者が行います'}
           </Typography>
         </Stack>
       </Box>
 
+      {isPlatform && (
       <Box
         sx={{
           mb: 2,
@@ -901,6 +949,7 @@ export default function PageContent() {
           </Stack>
         </Stack>
       </Box>
+      )}
 
       <AdminPanel title="企業一覧">
         <Box
@@ -1116,11 +1165,11 @@ export default function PageContent() {
                 <Button variant="outlined" size="small" onClick={resetFilters}>
                   絞り込みを解除
                 </Button>
-              ) : (
+              ) : isPlatform ? (
                 <Button component={Link} href="/admin/companies/new" variant="outlined" size="small">
                   最初の企業を追加
                 </Button>
-              )}
+              ) : null}
             </Box>
           )}
 
@@ -1181,13 +1230,15 @@ export default function PageContent() {
                         justifyContent="space-between"
                       >
                         <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ minWidth: 0, flex: 1 }}>
-                          <Checkbox
-                            checked={selected}
-                            onChange={() => toggleSelect(company.id)}
-                            disabled={busy || !canSelectForPublish(company)}
-                            inputProps={{ 'aria-label': `${company.name}を選択` }}
-                            sx={{ mt: -0.5 }}
-                          />
+                          {isPlatform && (
+                            <Checkbox
+                              checked={selected}
+                              onChange={() => toggleSelect(company.id)}
+                              disabled={busy || !canSelectForPublish(company)}
+                              inputProps={{ 'aria-label': `${company.name}を選択` }}
+                              sx={{ mt: -0.5 }}
+                            />
+                          )}
                           <Box sx={{ minWidth: 0, flex: 1 }}>
                             <Stack
                               direction="row"
@@ -1212,15 +1263,25 @@ export default function PageContent() {
                               </Typography>
                               <Chip label={status.label} color={status.color} size="small" />
                               {schoolId !== undefined ? (
-                                <Chip
-                                  label={approvedCompanyIds.has(company.id) ? '承認済み' : '未承認'}
-                                  color={approvedCompanyIds.has(company.id) ? 'success' : 'default'}
-                                  variant={approvedCompanyIds.has(company.id) ? 'filled' : 'outlined'}
-                                  size="small"
-                                  disabled={approvalBusyId === company.id}
-                                  onClick={() => toggleCompanyApproval(company.id, approvedCompanyIds.has(company.id))}
-                                  sx={{ cursor: 'pointer' }}
-                                />
+                                // 取得できていない状態を「未承認」と同じ見た目にしない(#1452)。
+                                approvalChipState(approvedCompanyIds, company.id) === 'unknown' ? (
+                                  <Chip label="承認状態 不明" color="warning" variant="outlined" size="small" />
+                                ) : (
+                                  (() => {
+                                    const approved = approvalChipState(approvedCompanyIds, company.id) === 'approved'
+                                    return (
+                                      <Chip
+                                        label={approved ? '承認済み' : '未承認'}
+                                        color={approved ? 'success' : 'default'}
+                                        variant={approved ? 'filled' : 'outlined'}
+                                        size="small"
+                                        disabled={approvalBusyId === company.id}
+                                        onClick={() => toggleCompanyApproval(company.id, approved)}
+                                        sx={{ cursor: 'pointer' }}
+                                      />
+                                    )
+                                  })()
+                                )
                               ) : null}
                               {!groupByIndustry && industryLabel ? (
                                 <Chip
@@ -1328,6 +1389,7 @@ export default function PageContent() {
                           sx={{ flexShrink: 0, pl: { xs: 5, md: 0 } }}
                         >
                           {!ready ? (
+                            isPlatform ? (
                             <Button
                               variant="contained"
                               size="small"
@@ -1339,7 +1401,8 @@ export default function PageContent() {
                             >
                               {fetching ? '取得中…' : '情報を取得'}
                             </Button>
-                          ) : isDraft ? (
+                            ) : null
+                          ) : isDraft && isPlatform ? (
                             <Button
                               variant="contained"
                               size="small"
@@ -1352,14 +1415,17 @@ export default function PageContent() {
                             </Button>
                           ) : null}
 
-                          <IconButton
-                            size="small"
-                            aria-label={`${company.name}のその他の操作`}
-                            disabled={busy && !fetching}
-                            onClick={(e) => setMenuAnchor({ el: e.currentTarget, company })}
-                          >
-                            <MoreVertIcon fontSize="small" />
-                          </IconButton>
+                          {/* メニューの中身はすべてシステム管理者専用。空のメニューを開かせない */}
+                          {isPlatform && (
+                            <IconButton
+                              size="small"
+                              aria-label={`${company.name}のその他の操作`}
+                              disabled={busy && !fetching}
+                              onClick={(e) => setMenuAnchor({ el: e.currentTarget, company })}
+                            >
+                              <MoreVertIcon fontSize="small" />
+                            </IconButton>
+                          )}
                         </Stack>
                       </Stack>
                     </Box>
@@ -1384,25 +1450,29 @@ export default function PageContent() {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
-        <MenuItem
-          disabled={busy}
-          onClick={() => menuAnchor && handleFetchPrimary(menuAnchor.company.id, false)}
-        >
-          <ListItemIcon>
-            <RefreshIcon fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>情報を取得</ListItemText>
-        </MenuItem>
-        <MenuItem
-          disabled={busy}
-          onClick={() => menuAnchor && handleFetchPrimary(menuAnchor.company.id, true)}
-        >
-          <ListItemIcon>
-            <RefreshIcon fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>最新の情報に更新</ListItemText>
-        </MenuItem>
-        {menuAnchor?.company.data_status !== 'published' ? (
+        {isPlatform && (
+          <MenuItem
+            disabled={busy}
+            onClick={() => menuAnchor && handleFetchPrimary(menuAnchor.company.id, false)}
+          >
+            <ListItemIcon>
+              <RefreshIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>情報を取得</ListItemText>
+          </MenuItem>
+        )}
+        {isPlatform && (
+          <MenuItem
+            disabled={busy}
+            onClick={() => menuAnchor && handleFetchPrimary(menuAnchor.company.id, true)}
+          >
+            <ListItemIcon>
+              <RefreshIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>最新の情報に更新</ListItemText>
+          </MenuItem>
+        )}
+        {!isPlatform ? null : menuAnchor?.company.data_status !== 'published' ? (
           [
             <MenuItem
               key="publish"
@@ -1448,6 +1518,7 @@ export default function PageContent() {
         </AccordionSummary>
         <AccordionDetails sx={{ pt: 0 }}>
           <Stack spacing={2}>
+            {isPlatform && (
             <Box>
               <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
                 マッチング用データの更新
@@ -1494,6 +1565,7 @@ export default function PageContent() {
                 </Button>
               </Stack>
             </Box>
+            )}
 
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Button component={Link} href="/admin/job-positions" size="small" variant="outlined">

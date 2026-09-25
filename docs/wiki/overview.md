@@ -18,10 +18,15 @@ SOC AI Agent は、採用支援を目的としたフルスタック SaaS プロ�
                 │  DDD: entity → repo → service → ctl │
                 └──┬─────────────┬──────────┬─────────┘
                    │             │          │
-        ┌──────────▼──┐  ┌──────▼──┐  ┌───▼───────────────┐
-        │  MySQL 8.0   │  │ AWS S3  │  │  FastAPI RAG       │
-        │  (GORM)      │  │(動画/PDF)│  │  (Python / 9000)   │
-        └─────────────┘  └─────────┘  └────────────────────┘
+        ┌──────────▼──┐ ┌───▼───┐ ┌──▼──────┐ ┌──▼─────────────┐
+        │  MySQL 8.0   │ │ Redis │ │ AWS S3  │ │  FastAPI RAG    │
+        │  (GORM)      │ │ジョブ │ │(動画/PDF)│ │ (Python / 9000) │
+        └─────────────┘ └───────┘ └─────────┘ └───┬────────────┘
+                                                  │
+                                            ┌─────▼──────┐
+                                            │  ChromaDB  │
+                                            │ ベクトルDB │
+                                            └────────────┘
 ```
 
 ### 各サービスの責務
@@ -32,6 +37,8 @@ SOC AI Agent は、採用支援を目的としたフルスタック SaaS プロ�
 | Backend | Go 1.25 / Echo / GORM | 8080 | ビジネスロジック・API |
 | MySQL | MySQL 8.0 | 3306 | 永続データストア |
 | RAG | Python / FastAPI / ChromaDB | 9000 | 職務経歴書レビュー・企業情報収集 |
+| Redis | Redis 7 | 6379 | ジョブキュー・レート制限 |
+| ChromaDB | Chroma | 8000 | ベクトルストア |
 | AWS S3 | — | — | 面接動画・PDF 保管 |
 
 ---
@@ -43,7 +50,7 @@ SOC AI Agent は、採用支援を目的としたフルスタック SaaS プロ�
 | AI チャット分析 | 4フェーズ・10カテゴリのスコアリング | — |
 | 音声面接練習 | OpenAI Realtime API + 3D アバター | — |
 | 面接動画管理 | AWS S3 アップロード・Presigned URL | — |
-| 職務経歴書レビュー | RAG (DuckDuckGo + Embeddings) | — |
+| 職務経歴書レビュー | RAG (ChromaDB + OpenAI Embeddings) | — |
 | 選考管理 | 応募〜内定の状態遷移管理 | #201 |
 | 集合知レコメンド | 類似ユーザー通過企業の匿名集計 | #205 |
 | スコア精度検証 | 通過率相関・A/B テスト・キャリブレーション | #203 |
@@ -99,42 +106,58 @@ SOC AI Agent は、採用支援を目的としたフルスタック SaaS プロ�
 ```
 /
 ├── Backend/
-│   ├── cmd/server/          # サーバーエントリポイント
+│   ├── cmd/server/          # サーバーエントリポイント（手動DI）
 │   ├── cmd/migrate/         # DBマイグレーション
+│   ├── migrations/          # up/down SQL（AutoMigrate は廃止済み）
 │   ├── domain/
 │   │   ├── entity/          # ドメインエンティティ（Go struct）
 │   │   ├── mapper/          # model ↔ entity 変換
-│   │   ├── repository/      # リポジトリインターフェース
+│   │   ├── repository/      # リポジトリインターフェース（ポート）
 │   │   └── valueobject/     # 値オブジェクト
 │   ├── internal/
-│   │   ├── controllers/     # HTTP ハンドラー（Echo）
-│   │   ├── services/        # ビジネスロジック
-│   │   │   └── interfaces/  # サービスインターフェース
-│   │   ├── repositories/    # DB アクセス（GORM）
-│   │   ├── models/          # GORM モデル・AutoMigrate
+│   │   ├── controllers/     # HTTP ハンドラー（ドメイン別13パッケージ）
+│   │   │   ├── admin/ auth/ chat/ company/ es/ github/ insight/
+│   │   │   ├── interview/ application/ release/ resume/ schedule/ user/
+│   │   │   ├── httpapi/     # 共通HTTPヘルパー（エラー応答・パラメータ取得）
+│   │   │   └── mocks/ testsupport/   # テスト用ダブル・共有ヘルパー
+│   │   ├── services/        # ビジネスロジック（ドメイン別30パッケージ + shared/interfaces/prompts）
+│   │   │   ├── interfaces/  # サービスインターフェース
+│   │   │   └── shared/      # サービス横断の共通処理
+│   │   ├── repositories/    # DB アクセス（domain/repository の実装）
+│   │   ├── models/          # GORM モデル
 │   │   ├── routes/          # ルーティング定義
-│   │   └── middleware/      # 認証・CORS ミドルウェア
-│   └── test/
-│       ├── controllers/     # コントローラーテスト（モック）
-│       ├── services/        # サービステスト
-│       └── ...
+│   │   ├── middleware/      # 認証・CORS・スコープ制御
+│   │   ├── observability/   # Sentry・メトリクス
+│   │   └── queue/           # Redis ジョブキュー
+│   └── test/                # 複数パッケージを横断するテストのみ（4ファイル）
 ├── frontend/
-│   ├── app/                 # Next.js App Router ページ
-│   ├── components/          # 共通コンポーネント
-│   └── e2e/                 # Playwright E2E テスト
+│   ├── app/                 # Next.js App Router ページ・Route Handler
+│   ├── components/          # コンポーネント（PascalCase / ui は shadcn 規約）
+│   ├── lib/                 # admin/ auth/ company/ interview/ + 共通ユーティリティ
+│   ├── middleware.ts        # 認証Cookie→ヘッダー注入・テナント解決
+│   ├── tests/               # Jest ユニットテスト
+│   └── e2e/                 # Playwright E2E・デプロイ後スモーク
 ├── rag/                     # RAG サービス（Python / FastAPI）
 │   ├── main.py              # FastAPI アプリケーション
-│   ├── training_api.py      # ファインチューニングデータ出力
+│   ├── routers/ services/   # エンドポイント・処理本体
+│   ├── training_api.py      # ファインチューニングデータ出力 API
+│   ├── training/            # LoRA 学習・学習データ出力スクリプト
 │   ├── constraints.txt      # 固定バージョン依存関係
 │   └── tests/               # RAG テスト
 ├── docs/
-│   ├── wiki/                # 運用ドキュメント
-│   └── requirements/        # 要件定義書
-├── infra/                   # AWS インフラ設定
-├── mysql/                   # MySQL ローカル設定
+│   ├── wiki/                # 運用ドキュメント（正本）
+│   ├── design/ requirements/ # 設計・要件
+│   └── finetune/            # ファインチューニング関連
+├── infra/terraform/         # AWS インフラ設定（staging / prod / modules）
+├── automation/              # Discord通知・ワークフロー検査スクリプト
+├── tools/company-graph/     # 企業スクレイピング（別Goモジュール）
 ├── compose.yml              # Docker Compose（ローカル開発用）
-└── docker-compose.yml       # Docker Compose（本番環境用）
+└── docker-compose.yml       # Docker Compose（staging EC2 用）
 ```
+
+> **テストの置き場所**: Go のテストは対象パッケージの隣に置きます
+> （`internal/controllers/admin/*_test.go` など）。`Backend/test/` に残しているのは
+> 複数パッケージを横断する4ファイルのみです。
 
 ---
 
@@ -148,7 +171,7 @@ SOC AI Agent は、採用支援を目的としたフルスタック SaaS プロ�
 | Frontend | Next.js / React / TypeScript | 16 / 19 / — |
 | UI ライブラリ | MUI | v7 |
 | 3D アバター | Three.js + wawa-lipsync | — |
-| RAG | Python / FastAPI / CrewAI | 3.10+ |
+| RAG | Python / FastAPI / LangChain / ChromaDB | 3.10+ |
 | ベクトル DB | ChromaDB | — |
 | AI | OpenAI API（GPT-4o / Realtime） | — |
 | 動画・PDF | AWS S3 | — |

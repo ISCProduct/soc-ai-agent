@@ -19,7 +19,11 @@ on:
     - cron: "5 * * * *" # 毎時5分(UTC)
   workflow_dispatch:
 
-permissions: {}
+# checkout(通知スクリプトの取得)と、whats-new 取り込みの gh pr list に必要な分だけ与える。
+# 以前は {} だったため、GITHUB_TOKEN で読む経路は権限不足になりうる状態だった。
+permissions:
+  contents: read
+  pull-requests: read
 
 # 同時実行を許すと、起動側(RDSのavailable待ちで最大10分ループする)と停止側が
 # すれ違い、SSMは off なのに本番が起動したまま次の毎時実行まで課金され続ける。
@@ -39,6 +43,10 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
       PROJECT_NAME: ${{ vars.PROJECT_NAME || 'soc-app' }}
     steps:
+      # 失敗通知に automation/ops/notify-discord.sh を使うため必須。
+      # checkout 漏れは automation/test/workflow-checkout-test.sh が静的に検出する。
+      - uses: actions/checkout@v4
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -47,6 +55,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Determine desired state and apply
+        id: apply
         run: |
           set -e
 
@@ -88,12 +97,54 @@ jobs:
           # 書き換えたときに表示と実挙動が食い違わないよう、こちらでも正規化する。
           OVERRIDE=$(echo "$OVERRIDE" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
 
+          # 復帰日つきオーバーライド(on:YYYY-MM-DD / off:YYYY-MM-DD)を解決する。
+          # 「この日(JST)になったら auto へ戻す」という意味。
+          #
+          # 期限の無い off は戻し忘れると起動日が丸ごと潰れる。実際 2026-09-12 に
+          # 設定された off が 9/23 まで放置され、9/24 の起動日を潰しかけたうえ、
+          # 本番デプロイのマイグレーションが3回失敗していた。
+          #
+          # 判定は Go 側 (discord.ResolveOverride) と同じ。YYYY-MM-DD は辞書順が
+          # 日付順と一致するので、両方とも文字列比較で揃えている。
+          #
+          # case ではなく if で書くのは、automation/test/prod-uptime-decision-test.sh が
+          # 「TODAY_JST= から最初の esac まで」で判定ロジックを抽出しているため。
+          # ここに esac を増やすと抽出が途中で切れ、テストが本体を素通しする。
+          OVERRIDE_RAW="$OVERRIDE"
+          OVERRIDE_EXPIRY=""
+          if [ "${OVERRIDE%%:*}" == "on" ] || [ "${OVERRIDE%%:*}" == "off" ]; then
+            if [ "$OVERRIDE" != "${OVERRIDE%%:*}" ]; then
+              OVERRIDE_EXPIRY="${OVERRIDE#*:}"
+              # date は環境差(GNU/BSD)とテストのスタブがあるため使わず、python3 で実在日付を見る。
+              if ! echo "$OVERRIDE_EXPIRY" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' \
+                || ! python3 -c 'import sys,datetime; datetime.date.fromisoformat(sys.argv[1])' \
+                  "$OVERRIDE_EXPIRY" 2>/dev/null; then
+                # 形式だけ見ると 2026-09-31 や 9999-99-99 を通してしまう。
+                # 前者は9/30にも停止固定が続き、後者は事実上解除されない。
+                # Go 側 (discord.ResolveOverride) は time.Parse で実在日付のみ許すので合わせる。
+                echo "override='$OVERRIDE_RAW' の復帰日が不正なため auto として扱う" >&2
+                OVERRIDE="auto"
+              elif [[ ! "$TODAY_JST" < "$OVERRIDE_EXPIRY" ]]; then
+                echo "override='$OVERRIDE_RAW' は復帰日 $OVERRIDE_EXPIRY に達したため auto として扱う (今日=$TODAY_JST)"
+                OVERRIDE="auto"
+              else
+                echo "override='$OVERRIDE_RAW' は $OVERRIDE_EXPIRY まで有効 (今日=$TODAY_JST)"
+                OVERRIDE="${OVERRIDE%%:*}"
+              fi
+            fi
+          fi
+
           case "$OVERRIDE" in
             on)
               DESIRED=1
               echo "override=on -> desired_count=1 (日付リストは無視)"
-              # 戻し忘れると請求で気づくことになるので、実行ログに毎回残す
-              echo "::warning::本番は /prod で「常時起動」に固定されています。不要なら /prod state:auto に戻してください"
+              # 戻し忘れると請求で気づくことになるので、実行ログに毎回残す。
+              # 復帰日つきなら自動で戻るため warning にはしない。
+              if [ -n "$OVERRIDE_EXPIRY" ]; then
+                echo "本番は $OVERRIDE_EXPIRY まで常時起動に固定されています(その日に auto へ自動復帰)"
+              else
+                echo "::warning::本番は /prod で「常時起動」に固定されています。不要なら /prod state:auto に戻してください"
+              fi
               ;;
             off)
               DESIRED=0
@@ -116,6 +167,7 @@ jobs:
           esac
 
           DB_ID="${PROJECT_NAME}-mysql"
+          echo "desired=$DESIRED" >> "$GITHUB_OUTPUT"
 
           if [ "$DESIRED" == "1" ]; then
             # RDSを先に起動し、利用可能になってからECSを起動する
@@ -213,3 +265,114 @@ jobs:
             echo "手動オーバーライドを読めませんでした(/prod が無効のまま動いています)" >&2
             exit 1
           fi
+
+      # 本番が停止している間に main へデプロイすると、deployment.yml の
+      # 「Sync whats-new from merged PRs」は curl に失敗して取り込みをスキップする
+      # (|| echo で握りつぶされ、ジョブは success になるので気づけない)。
+      # 結果、更新情報の追加・削除が本番へ反映されないまま残る。実際に、運用作業が
+      # ユーザー向け更新情報に出たまま消えない状態になった(#1290)。
+      #
+      # 本番を起動したこのタイミングで取り込み直す。ingest は pr_number で冪等、
+      # かつ毎回 purge が走るので、何度呼んでも害はない。
+      - name: Sync whats-new (本番起動時の取りこぼしを回収)
+        id: whatsnew
+        if: steps.apply.outputs.desired == '1'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          PROD_API_BASE: https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }}
+        run: |
+          # backend のタスク起動とヘルスチェック通過を待つ。
+          # ここで待たずに叩くと必ず失敗し、取りこぼしを回収できない。
+          for _ in $(seq 1 40); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 10 "$PROD_API_BASE/health" || echo "000")
+            [ "$CODE" = "200" ] && break
+            echo "backend health: $CODE (waiting...)"
+            sleep 15
+          done
+          if [ "$CODE" != "200" ]; then
+            echo "healthy=0" >> "$GITHUB_OUTPUT"
+            echo "::warning::本番backendが応答しないため更新情報の取り込みを見送ります(次回起動時に回収されます)"
+            exit 0
+          fi
+          echo "healthy=1" >> "$GITHUB_OUTPUT"
+
+          # 本番の admin_secret は Secrets Manager を正とする(#1158)。
+          # 読めない場合だけリポジトリシークレットへフォールバックする(移行期間の両対応)。
+          # 失敗理由(AccessDenied / ResourceNotFound / ExpiredToken)を残す。値は stdout 側。
+          sm_err=$(mktemp)
+          PROD_ADMIN_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id "${PROJECT_NAME:-soc-app}/admin" --query SecretString --output text 2>"$sm_err" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('admin_secret',''))" 2>>"$sm_err" || true)
+          if [ -n "$PROD_ADMIN_SECRET" ]; then
+            echo "::add-mask::$PROD_ADMIN_SECRET"
+          else
+            echo "::warning::Secrets Manager から admin_secret を読めませんでした。リポジトリシークレットで続行します(IAMに secretsmanager:GetSecretValue を確認してください)"
+            sed 's/^/  aws: /' "$sm_err"
+            PROD_ADMIN_SECRET="$ADMIN_SECRET"
+          fi
+          rm -f "$sm_err"
+
+          sources=$(gh pr list --repo "${{ github.repository }}" --state merged --base main --limit 20 \
+            --json number,title,body,mergedAt \
+            --jq '[.[] | {pr_number: .number, title: .title, body: .body, merged_at: .mergedAt}]')
+
+          # 起動確認済みの状態で 401/403 なら「停止中」ではなく鍵の不一致。
+          # ここは最後の回収経路なので、warning で流すと誰も気づけない。
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PROD_API_BASE/api/admin/whats-new/ingest" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Secret: $PROD_ADMIN_SECRET" \
+            -d "{\"sources\": $sources}" \
+            --max-time 60 || true)
+          case "$code" in
+            2*)
+              echo "更新情報を取り込みました"
+              ;;
+            401|403)
+              # このステップは continue-on-error なので、ここで exit しても
+              # ジョブは落ちない。下の「失敗させる」ステップへ出力で伝える。
+              echo "rejected=$code" >> "$GITHUB_OUTPUT"
+              echo "::error::更新情報の取り込みが $code で拒否されました(admin_secret が本番の値と一致していない、または未設定)"
+              ;;
+            *)
+              echo "::warning::更新情報の取り込みに失敗しました(HTTP $code / 次回起動時に回収されます)"
+              ;;
+          esac
+
+      # 「起動したのに backend が上がってこない」は最も重要な事象なのに、
+      # 上のステップは continue-on-error + warning で成功扱いになっていた(#1354)。
+      # ジョブの失敗へ昇格させ、下の通知に乗せる。
+      - name: 起動日にbackendが応答しない場合は失敗させる
+        if: steps.apply.outputs.desired == '1' && steps.whatsnew.outputs.healthy != '1'
+        run: |
+          echo "本番を起動しましたが backend の /health が 200 を返しませんでした" > "$RUNNER_TEMP/alert-reason.txt"
+          echo "::error::本番を起動しましたが backend の /health が 200 を返しませんでした"
+          exit 1
+
+      # 鍵の不一致は「停止中で届かない」と違い、放っておいても直らない。
+      # ここが最後の回収経路なので、警告で流すと更新情報が出ないまま気づけない。
+      - name: 更新情報の取り込みが拒否されたら失敗させる
+        if: steps.whatsnew.outputs.rejected != ''
+        run: |
+          reason="本番への更新情報の取り込みが HTTP ${{ steps.whatsnew.outputs.rejected }} で拒否されました(admin_secret の不一致または未設定)"
+          echo "$reason" > "$RUNNER_TEMP/alert-reason.txt"
+          echo "::error::$reason"
+          exit 1
+
+      # schedule で動くジョブは誰も結果を見ない。失敗を人へ届ける唯一の経路。
+      # concurrency の cancel-in-progress によるキャンセルは failure() に含まれない(通知されない)。
+      - name: 失敗をDiscordへ通知
+        if: failure()
+        env:
+          DISCORD_OPS_WEBHOOK_URL: ${{ secrets.DISCORD_OPS_WEBHOOK_URL }}
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+        run: |
+          REASON=""
+          if [ -f "$RUNNER_TEMP/alert-reason.txt" ]; then
+            REASON=$(cat "$RUNNER_TEMP/alert-reason.txt")
+          fi
+          ./automation/ops/notify-discord.sh "@here ❌ **本番の起動/停止ジョブが失敗しました**
+          ${REASON}
+          稼働日であれば本番が起動していない可能性があります。/prod state:on で手動起動できます。
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

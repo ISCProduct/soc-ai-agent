@@ -25,6 +25,21 @@ type responsesRequest struct {
 	ToolChoice      any              `json:"tool_choice,omitempty"`
 }
 
+// countWebSearchTools はリクエストに含まれる web_search ツールの数を返す。
+//
+// web_search は検索結果の固定トークンに加えて1コール単位のツール料が課金される。
+// モデル名からは判別できない（同じ gpt-4o-mini でも通常のチャットと混ざる）ため、
+// リクエスト内容から数える。
+func countWebSearchTools(tools []map[string]any) int {
+	n := 0
+	for _, t := range tools {
+		if v, ok := t["type"].(string); ok && strings.HasPrefix(v, "web_search") {
+			n++
+		}
+	}
+	return n
+}
+
 func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string, temperature *float32, maxOutputTokens int, includeTextFormat bool) (string, error) {
 	payload := responsesRequest{
 		Model:           model,
@@ -69,8 +84,11 @@ func (e *ResponsesAPIError) Retryable() bool {
 }
 
 func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (string, error) {
-	if cli.apiKey == "" {
-		return "", errors.New("openai api key is not set")
+	ctx = withFallbackFlag(ctx)
+	// ensureText と二重管理にすると local プロバイダで Responses 系が全滅するため、
+	// ここも同じガードに寄せる（#1293 レビュー指摘）
+	if err := cli.ensureText(); err != nil {
+		return "", err
 	}
 
 	body, err := json.Marshal(payload)
@@ -78,14 +96,15 @@ func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (s
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.baseURL+"/responses", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cli.BaseURL()+"/responses", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+cli.apiKey)
+	req.Header.Set("Authorization", "Bearer "+cli.textKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := cli.httpClientFor("text", 120*time.Second)
+	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -135,8 +154,16 @@ func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (s
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return "", err
 	}
-	if cli.OnUsage != nil && (parsed.Usage.InputTokens > 0 || parsed.Usage.OutputTokens > 0) {
-		cli.OnUsage(payload.Model, parsed.Usage.InputTokens, parsed.Usage.OutputTokens)
+	if parsed.Usage.InputTokens > 0 || parsed.Usage.OutputTokens > 0 {
+		cli.reportUsage(ctx, usageReport{
+			provider:         cli.textProvider,
+			model:            payload.Model,
+			promptTokens:     parsed.Usage.InputTokens,
+			completionTokens: parsed.Usage.OutputTokens,
+			latency:          time.Since(start),
+			cacheHit:         parsed.Usage.PromptTokensDetails != nil && parsed.Usage.PromptTokensDetails.CachedTokens > 0,
+			webSearchCalls:   countWebSearchTools(payload.Tools),
+		})
 		if parsed.Usage.PromptTokensDetails != nil {
 			cached := parsed.Usage.PromptTokensDetails.CachedTokens
 			var hit float64
@@ -245,8 +272,8 @@ func (cli *Client) callResponsesAPIWithTempFallback(ctx context.Context, input a
 }
 
 func (cli *Client) Responses(ctx context.Context, input string, modelOverride ...string) (string, error) {
-	if cli == nil || cli.c == nil {
-		return "", errors.New("openai client is nil")
+	if err := cli.ensureText(); err != nil {
+		return "", err
 	}
 
 	model := cli.DefaultModel
@@ -309,8 +336,8 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 	return "", lastErr
 }
 func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, userPrompt string, temperature float32, modelOverride ...string) (string, error) {
-	if cli == nil || cli.c == nil {
-		return "", errors.New("openai client is nil")
+	if err := cli.ensureText(); err != nil {
+		return "", err
 	}
 
 	model := cli.DefaultModel
@@ -382,8 +409,8 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 
 // ChatCompletionJSON uses the go-openai SDK to request a JSON response.
 func (cli *Client) ResponsesWithMaxTokens(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxOutputTokens int, modelOverride ...string) (string, error) {
-	if cli == nil || cli.c == nil {
-		return "", errors.New("openai client is nil")
+	if err := cli.ensureText(); err != nil {
+		return "", err
 	}
 
 	model := cli.DefaultModel

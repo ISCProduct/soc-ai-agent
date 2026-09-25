@@ -30,6 +30,7 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { authService } from '@/lib/auth'
+import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 
 type VectorStats = {
   total_collections: number
@@ -72,6 +73,7 @@ const DOC_TYPES = [
 ]
 
 export default function PageContent() {
+  const platformReady = useRequirePlatformAdmin()
   const [company, setCompany] = useState('')
   const [status, setStatus] = useState<VectorStatus | null>(null)
   const [stats, setStats] = useState<VectorStats | null>(null)
@@ -132,9 +134,12 @@ export default function PageContent() {
   }, [])
 
   useEffect(() => {
+    if (!platformReady) return
     void loadStatus()
     void loadStats()
-  }, [loadStatus, loadStats])
+  }, [platformReady, loadStatus, loadStats])
+
+  if (!platformReady) return null
 
   const handleReembed = async () => {
     const name = reembedCompany.trim()

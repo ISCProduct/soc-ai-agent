@@ -1,189 +1,178 @@
 package routes
 
 import (
-	"Backend/internal/controllers"
+	admincontrollers "Backend/internal/controllers/admin"
+	applicationcontrollers "Backend/internal/controllers/application"
+	insightcontrollers "Backend/internal/controllers/insight"
 	"Backend/internal/repositories"
-	"Backend/internal/services"
+	"Backend/internal/services/school"
 
 	"github.com/labstack/echo/v4"
 )
 
 func SetupAdminRoutes(
 	api *echo.Group,
-	adminCompanyController *controllers.AdminCompanyController,
-	adminCrawlController *controllers.AdminCrawlController,
-	adminJobController *controllers.AdminJobController,
-	adminUserController *controllers.AdminUserController,
-	adminOrganizationController *controllers.AdminOrganizationController,
-	adminSchoolController *controllers.AdminSchoolController,
-	adminAuditController *controllers.AdminAuditController,
-	adminCompanyGraphController *controllers.AdminCompanyGraphController,
-	adminInterviewController *controllers.AdminInterviewController,
-	adminDashboardController *controllers.AdminDashboardController,
-	adminCostsController *controllers.AdminCostsController,
-	profileRecalcController *controllers.AdminProfileRecalculationController,
-	scoreValidationController *controllers.AdminScoreValidationController,
-	collectiveInsightController *controllers.CollectiveInsightController,
-	scraperSessionController *controllers.AdminScraperSessionController,
-	adminVectorController *controllers.AdminVectorController,
-	appController *controllers.ApplicationController,
-	teacherInsightController *controllers.TeacherStudentInsightController,
+	adminCompanyController *admincontrollers.AdminCompanyController,
+	adminCrawlController *admincontrollers.AdminCrawlController,
+	adminJobController *admincontrollers.AdminJobController,
+	adminUserController *admincontrollers.AdminUserController,
+	adminOrganizationController *admincontrollers.AdminOrganizationController,
+	adminSchoolController *admincontrollers.AdminSchoolController,
+	adminAuditController *admincontrollers.AdminAuditController,
+	adminCompanyGraphController *admincontrollers.AdminCompanyGraphController,
+	adminInterviewController *admincontrollers.AdminInterviewController,
+	adminDashboardController *admincontrollers.AdminDashboardController,
+	adminCostsController *admincontrollers.AdminCostsController,
+	profileRecalcController *admincontrollers.AdminProfileRecalculationController,
+	scoreValidationController *admincontrollers.AdminScoreValidationController,
+	diagnosisQualityController *admincontrollers.AdminDiagnosisQualityController,
+	collectiveInsightController *insightcontrollers.CollectiveInsightController,
+	scraperSessionController *admincontrollers.AdminScraperSessionController,
+	adminVectorController *admincontrollers.AdminVectorController,
+	appController *applicationcontrollers.ApplicationController,
+	teacherInsightController *insightcontrollers.TeacherStudentInsightController,
 	userRepo *repositories.UserRepository,
-	schoolService *services.SchoolService,
+	schoolService *school.SchoolService,
 	adminSecret string,
 ) {
-	// 認証不要（公開）エンドポイント
-	companyGraph := api.Group("/admin/company-graph")
-	companyGraph.GET("/target-year", adminCompanyGraphController.TargetYear)
-
-	// 管理者認証必須エンドポイント
 	admin := api.Group("/admin", EchoAdminAuth(userRepo, adminSecret))
-	// 個別校での絞り込み対象(#798): ユーザー・卒業生就職情報・面接・ダッシュボード・企業・求人のみ。
-	// 他のadmin機能(組織/監査ログ/コスト等)はschool_idを要求しない。
 	schoolScope := EchoAdminSchoolScope(schoolService)
+	// システム管理者専用。担当校を持つ教員・学園側管理者は 403。
+	platform := EchoRequirePlatformAdmin(schoolService)
 
-	// 企業管理
-	// 企業カタログ自体は学園横断で共有のため school_id での閲覧制限はしない。
-	// school_id は「その学校向けに承認済みの企業だけを見る」任意の絞り込みとして機能する(新規承認のため全件閲覧は誰でも可能)。
-	admin.GET("/companies", adminCompanyController.List)
-	admin.POST("/companies", adminCompanyController.Create)
-	admin.GET("/companies/industries", adminCompanyController.Industries)
-	// 軽量な企業名一覧（セレクト用）
-	admin.GET("/companies/names", adminCompanyController.Names)
-	admin.GET("/companies/l1-coverage", adminCompanyController.GetL1Coverage)
-	admin.POST("/companies/warm-l1", adminCompanyController.WarmL1Catalog)
-	admin.POST("/companies/fetch-missing-batch", adminCompanyController.FetchMissingBatch)
-	admin.POST("/companies/seed-l1", adminCompanyController.SeedL1Catalog)
-	admin.GET("/companies/:id", adminCompanyController.Get)
-	admin.PUT("/companies/:id", adminCompanyController.Update)
-	admin.PATCH("/companies/:id/publish", adminCompanyController.Publish)
-	admin.PATCH("/companies/:id/reject", adminCompanyController.Reject)
-	admin.POST("/companies/web-search", adminCompanyController.WebSearchCompanyInfo)
-	admin.POST("/companies/web-search-relations", adminCompanyController.WebSearchCompanyRelations)
-	admin.GET("/companies/:id/gbiz-search", adminCompanyController.SearchGBiz)
-	admin.POST("/companies/:id/gbiz-sync", adminCompanyController.SyncGBiz)
-	admin.POST("/companies/:id/fetch-tech-stack", adminCompanyController.FetchTechStack)
-	admin.POST("/companies/:id/fetch-info", adminCompanyController.FetchCompanyInfo)
-	admin.POST("/companies/:id/confirm-info", adminCompanyController.ConfirmCompanyInfo)
-	admin.POST("/companies/:id/fetch-relations", adminCompanyController.FetchCompanyRelations)
-	admin.POST("/companies/:id/confirm-relations", adminCompanyController.ConfirmCompanyRelations)
-	// #720 資本関係の多段階可視化（親会社→子会社→孫会社等）
-	admin.GET("/companies/:id/relation-graph", adminCompanyGraphController.RelationGraph)
-	admin.POST("/companies/:id/fetch-jobs", adminCompanyController.FetchJobs)
-	admin.POST("/companies/:id/fetch-persona", adminCompanyController.FetchPersona)
-	admin.POST("/companies/:id/fetch-all", adminCompanyController.FetchAllMissing)
-	// 主3種（基本・技術・ビジネス関係）を1リクエストで取得する専用 API
-	admin.POST("/companies/:id/fetch-primary", adminCompanyController.FetchPrimary)
+	// ── 学校運営・教員向け（担当校スコープ）────────────────────────────
+	admin.GET("/me/school-access", adminSchoolController.MySchoolAccess)
 
-	// クロールソース管理
-	admin.GET("/crawl-sources", adminCrawlController.ListSources)
-	admin.POST("/crawl-sources", adminCrawlController.CreateSource)
-	admin.PUT("/crawl-sources/:id", adminCrawlController.UpdateSource)
-	admin.POST("/crawl-sources/:id/run", adminCrawlController.RunSource)
-	admin.GET("/crawl-runs", adminCrawlController.Runs)
+	admin.GET("/users", adminUserController.List, schoolScope)
+	admin.PUT("/users/:id", adminUserController.Update)
+	admin.DELETE("/users/:id", adminUserController.Delete)
+	admin.GET("/teacher/students/tendency-analysis", teacherInsightController.TendencyAnalysis, schoolScope)
 
-	// 求人・カテゴリ管理
-	admin.GET("/job-categories", adminJobController.JobCategories)
-	admin.GET("/job-positions", adminJobController.JobPositions)
-	admin.POST("/job-positions", adminJobController.CreateJobPosition)
-	admin.Any("/job-positions/:id/:action", adminJobController.JobPositionAction)
+	admin.GET("/interviews", adminInterviewController.ListSessions, schoolScope)
+	admin.GET("/interviews/:id/videos", adminInterviewController.ListVideos)
+	admin.GET("/interviews/videos/:video_id/url", adminInterviewController.VideoURL)
+
+	admin.GET("/dashboard/users", adminDashboardController.ListUsers, schoolScope)
+	admin.GET("/dashboard/users/:id", adminDashboardController.UserSessions)
+	admin.GET("/dashboard/export/csv", adminDashboardController.ExportCSV, schoolScope)
+
+	admin.GET("/applications", appController.AdminList, schoolScope)
+	admin.PATCH("/applications/:id/status", appController.AdminUpdateStatus)
+
 	admin.GET("/graduate-employments", adminJobController.GraduateEmployments, schoolScope)
 	admin.POST("/graduate-employments", adminJobController.CreateGraduateEmployment)
 	admin.GET("/graduate-employments/:id", adminJobController.GetGraduateEmployment)
 	admin.PUT("/graduate-employments/:id", adminJobController.UpdateGraduateEmployment)
 
-	// ユーザー管理
-	admin.GET("/users", adminUserController.List, schoolScope)
-
-	// 教員（担当校を持つ管理者）向けの生徒傾向分析（#1027）。
-	// schoolScope により、担当校を持つ管理者は自校の生徒しか見られない。
-	admin.GET("/teacher/students/tendency-analysis", teacherInsightController.TendencyAnalysis, schoolScope)
-	admin.PUT("/users/:id", adminUserController.Update)
-	admin.DELETE("/users/:id", adminUserController.Delete)
-	admin.POST("/users/purge-expired", adminUserController.PurgeExpired)
-
-	// 組織（テナント）管理 (#611)
-	admin.GET("/organizations", adminOrganizationController.List)
-	admin.POST("/organizations", adminOrganizationController.Create)
-	admin.GET("/organizations/:id", adminOrganizationController.Get)
-	admin.PUT("/organizations/:id", adminOrganizationController.Update)
-	admin.GET("/organizations/:id/members", adminOrganizationController.ListMembers)
-	admin.POST("/organizations/:id/members", adminOrganizationController.AddMember)
-	admin.PUT("/organizations/:id/members/:user_id", adminOrganizationController.UpdateMember)
-	admin.DELETE("/organizations/:id/members/:user_id", adminOrganizationController.RemoveMember)
-
-	// 個別校管理(#798)
-	admin.GET("/schools", adminSchoolController.List)
-	admin.POST("/schools", adminSchoolController.Create)
+	// 学校メンバー・企業承認は担当校の運営業務
 	admin.GET("/schools/:id", adminSchoolController.Get)
 	admin.POST("/schools/:id/members", adminSchoolController.AddMember)
 	admin.DELETE("/schools/:id/members/:user_id", adminSchoolController.RemoveMember)
 	admin.GET("/schools/:id/company-approvals", adminSchoolController.ListCompanyApprovals)
 	admin.POST("/schools/:id/company-approvals", adminSchoolController.AddCompanyApproval)
 	admin.DELETE("/schools/:id/company-approvals/:company_id", adminSchoolController.RemoveCompanyApproval)
-	admin.GET("/me/school-access", adminSchoolController.MySchoolAccess)
 
-	// 監査ログ
-	admin.GET("/audit-logs", adminAuditController.List)
-
-	// 企業関係グラフ
-	admin.POST("/company-graph/crawl", adminCompanyGraphController.Crawl)
-	admin.POST("/company-graph/enrich-relations", adminCompanyGraphController.EnrichRelations)
-
-	// 面接管理
-	admin.GET("/interviews", adminInterviewController.ListSessions, schoolScope)
-	admin.GET("/interviews/:id/videos", adminInterviewController.ListVideos)
-	admin.GET("/interviews/videos/:video_id/url", adminInterviewController.VideoURL)
-
-	// 企業別面接質問管理
+	// 企業・求人カタログの閲覧と基本編集（掲載承認のため全件閲覧は担当校管理者にも必要）
+	admin.GET("/companies", adminCompanyController.List)
+	admin.GET("/companies/industries", adminCompanyController.Industries)
+	admin.GET("/companies/names", adminCompanyController.Names)
+	admin.GET("/companies/:id", adminCompanyController.Get)
+	admin.PUT("/companies/:id", adminCompanyController.Update)
+	// 掲載公開・非公開は全テナント共通の DataStatus / IsActive を書き換えるのでシステム管理者専用。
+	// 担当校ごとの掲載可否は /schools/:id/company-approvals で扱う。
+	admin.PATCH("/companies/:id/publish", adminCompanyController.Publish, platform)
+	admin.PATCH("/companies/:id/reject", adminCompanyController.Reject, platform)
+	admin.GET("/companies/:id/relation-graph", adminCompanyGraphController.RelationGraph)
 	admin.GET("/companies/:id/interview-questions", adminInterviewController.ListCompanyQuestions)
 	admin.POST("/companies/:id/interview-questions", adminInterviewController.CreateCompanyQuestion)
 	admin.POST("/companies/:id/interview-questions/generate", adminInterviewController.GenerateCompanyQuestions)
 	admin.PUT("/companies/:id/interview-questions/:qid", adminInterviewController.UpdateCompanyQuestion)
 	admin.DELETE("/companies/:id/interview-questions/:qid", adminInterviewController.DeleteCompanyQuestion)
+	admin.GET("/job-categories", adminJobController.JobCategories)
+	admin.GET("/job-positions", adminJobController.JobPositions)
+	admin.POST("/job-positions", adminJobController.CreateJobPosition)
+	// 求人の公開・却下も企業と同じく全テナント共通の DataStatus / IsActive を書き換える。
+	// 未公開企業の求人を公開できてしまうため、企業側と揃えてシステム管理者専用にする。
+	admin.Any("/job-positions/:id/:action", adminJobController.JobPositionAction, platform)
 
-	// ダッシュボード
-	admin.GET("/dashboard/users", adminDashboardController.ListUsers, schoolScope)
-	admin.GET("/dashboard/users/:id", adminDashboardController.UserSessions)
-	admin.GET("/dashboard/export/csv", adminDashboardController.ExportCSV, schoolScope)
+	// ── システム管理者専用（テナント横断・インフラ）────────────────────
+	admin.POST("/users/purge-expired", adminUserController.PurgeExpired, platform)
+
+	admin.GET("/organizations", adminOrganizationController.List, platform)
+	admin.POST("/organizations", adminOrganizationController.Create, platform)
+	admin.GET("/organizations/:id", adminOrganizationController.Get, platform)
+	admin.PUT("/organizations/:id", adminOrganizationController.Update, platform)
+	admin.GET("/organizations/:id/members", adminOrganizationController.ListMembers, platform)
+	admin.POST("/organizations/:id/members", adminOrganizationController.AddMember, platform)
+	admin.PUT("/organizations/:id/members/:user_id", adminOrganizationController.UpdateMember, platform)
+	admin.DELETE("/organizations/:id/members/:user_id", adminOrganizationController.RemoveMember, platform)
+
+	admin.GET("/schools", adminSchoolController.List, platform)
+	admin.POST("/schools", adminSchoolController.Create, platform)
+
+	admin.GET("/audit-logs", adminAuditController.List, platform)
 
 	// コスト管理
-	admin.GET("/costs/summary", adminCostsController.Summary)
-	admin.GET("/costs/daily", adminCostsController.Daily)
-	admin.GET("/costs/monthly", adminCostsController.Monthly)
+	admin.GET("/costs/summary", adminCostsController.Summary, platform)
+	admin.GET("/costs/breakdown", adminCostsController.Breakdown, platform)
+	admin.GET("/costs/daily", adminCostsController.Daily, platform)
+	admin.GET("/costs/monthly", adminCostsController.Monthly, platform)
 
-	// プロファイル再計算
-	admin.POST("/profile-recalculation", profileRecalcController.RecalculateAll)
-	admin.POST("/profile-recalculation/:id", profileRecalcController.RecalculateOne)
-	admin.POST("/profile-recalculation/:id/rollback", profileRecalcController.Rollback)
-	admin.GET("/profile-recalculation/history", profileRecalcController.GetHistory)
+	admin.POST("/profile-recalculation", profileRecalcController.RecalculateAll, platform)
+	admin.POST("/profile-recalculation/:id", profileRecalcController.RecalculateOne, platform)
+	admin.POST("/profile-recalculation/:id/rollback", profileRecalcController.Rollback, platform)
+	admin.GET("/profile-recalculation/history", profileRecalcController.GetHistory, platform)
 
-	// スコアバリデーション
-	admin.GET("/score-validation/correlation", scoreValidationController.GetCorrelation)
-	admin.GET("/score-validation/phase-metrics", scoreValidationController.GetPhaseMetrics)
-	admin.GET("/score-validation/calibration", scoreValidationController.GetCalibration)
-	admin.POST("/score-validation/calibration/run", scoreValidationController.RunCalibration)
-	admin.GET("/score-validation/calibration/history", scoreValidationController.GetCalibrationHistory)
-	admin.GET("/score-validation/variants", scoreValidationController.ListVariants)
-	admin.POST("/score-validation/variants", scoreValidationController.CreateVariant)
-	admin.GET("/score-validation/variants/results", scoreValidationController.GetVariantResults)
+	admin.GET("/score-validation/correlation", scoreValidationController.GetCorrelation, platform)
+	admin.GET("/score-validation/phase-metrics", scoreValidationController.GetPhaseMetrics, platform)
+	admin.GET("/score-validation/calibration", scoreValidationController.GetCalibration, platform)
+	admin.POST("/score-validation/calibration/run", scoreValidationController.RunCalibration, platform)
+	admin.GET("/score-validation/calibration/history", scoreValidationController.GetCalibrationHistory, platform)
+	admin.GET("/score-validation/variants", scoreValidationController.ListVariants, platform)
+	admin.POST("/score-validation/variants", scoreValidationController.CreateVariant, platform)
+	admin.GET("/score-validation/variants/results", scoreValidationController.GetVariantResults, platform)
+	admin.GET("/diagnosis-quality", diagnosisQualityController.List, platform)
 
-	// 集合知管理
-	admin.POST("/collective-insights/rebuild-summaries", collectiveInsightController.RebuildSummaries)
+	admin.POST("/collective-insights/rebuild-summaries", collectiveInsightController.RebuildSummaries, platform)
 
-	// スクレイパーセッション管理
-	admin.GET("/scraper-sessions", scraperSessionController.List)
-	admin.POST("/scraper-sessions", scraperSessionController.Upsert)
-	admin.DELETE("/scraper-sessions/:site_key", scraperSessionController.Delete)
+	admin.GET("/scraper-sessions", scraperSessionController.List, platform)
+	admin.POST("/scraper-sessions", scraperSessionController.Upsert, platform)
+	admin.DELETE("/scraper-sessions/:site_key", scraperSessionController.Delete, platform)
 
-	// ベクトルDB管理（#573 Phase 3）
-	admin.GET("/vector/status", adminVectorController.Status)
-	admin.POST("/vector/reembed", adminVectorController.Reembed)
-	admin.GET("/vector/stats", adminVectorController.Stats)
-	admin.GET("/vector/collections", adminVectorController.Collections)
+	admin.GET("/vector/status", adminVectorController.Status, platform)
+	admin.POST("/vector/reembed", adminVectorController.Reembed, platform)
+	admin.GET("/vector/stats", adminVectorController.Stats, platform)
+	admin.GET("/vector/collections", adminVectorController.Collections, platform)
 
-	// 選考ステータス管理(#1016): user_id/company_id/statusで絞り込み可能な一覧、
-	// および進捗更新（isAdminは常にtrue固定。サービス層の遷移表が正）
-	admin.GET("/applications", appController.AdminList)
-	admin.PATCH("/applications/:id/status", appController.AdminUpdateStatus)
+	admin.GET("/crawl-sources", adminCrawlController.ListSources, platform)
+	admin.POST("/crawl-sources", adminCrawlController.CreateSource, platform)
+	admin.PUT("/crawl-sources/:id", adminCrawlController.UpdateSource, platform)
+	admin.POST("/crawl-sources/:id/run", adminCrawlController.RunSource, platform)
+	admin.GET("/crawl-runs", adminCrawlController.Runs, platform)
+
+	// /admin 配下に認証なしのグループを作らない(#1411)。年度計算だけを返す軽い
+	// エンドポイントだが、認証の外にあると「/admin に生やせば守られる」前提が崩れ、
+	// 次にこのグループへ足したハンドラが無認証で公開される。
+	admin.GET("/company-graph/target-year", adminCompanyGraphController.TargetYear)
+	admin.POST("/company-graph/crawl", adminCompanyGraphController.Crawl, platform)
+	admin.POST("/company-graph/enrich-relations", adminCompanyGraphController.EnrichRelations, platform)
+
+	admin.POST("/companies", adminCompanyController.Create, platform)
+	admin.GET("/companies/l1-coverage", adminCompanyController.GetL1Coverage, platform)
+	admin.POST("/companies/warm-l1", adminCompanyController.WarmL1Catalog, platform)
+	admin.POST("/companies/fetch-missing-batch", adminCompanyController.FetchMissingBatch, platform)
+	admin.POST("/companies/seed-l1", adminCompanyController.SeedL1Catalog, platform)
+	admin.POST("/companies/web-search", adminCompanyController.WebSearchCompanyInfo, platform)
+	admin.POST("/companies/web-search-relations", adminCompanyController.WebSearchCompanyRelations, platform)
+	admin.GET("/companies/:id/gbiz-search", adminCompanyController.SearchGBiz, platform)
+	admin.POST("/companies/:id/gbiz-sync", adminCompanyController.SyncGBiz, platform)
+	admin.POST("/companies/:id/fetch-tech-stack", adminCompanyController.FetchTechStack, platform)
+	admin.POST("/companies/:id/fetch-info", adminCompanyController.FetchCompanyInfo, platform)
+	admin.POST("/companies/:id/confirm-info", adminCompanyController.ConfirmCompanyInfo, platform)
+	admin.POST("/companies/:id/fetch-relations", adminCompanyController.FetchCompanyRelations, platform)
+	admin.POST("/companies/:id/confirm-relations", adminCompanyController.ConfirmCompanyRelations, platform)
+	admin.POST("/companies/:id/fetch-jobs", adminCompanyController.FetchJobs, platform)
+	admin.POST("/companies/:id/fetch-persona", adminCompanyController.FetchPersona, platform)
+	admin.POST("/companies/:id/fetch-all", adminCompanyController.FetchAllMissing, platform)
+	admin.POST("/companies/:id/fetch-primary", adminCompanyController.FetchPrimary, platform)
 }

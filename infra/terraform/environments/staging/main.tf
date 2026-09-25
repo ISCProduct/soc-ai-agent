@@ -324,6 +324,9 @@ resource "aws_launch_template" "app" {
     db_password              = module.rds.master_password
     s3_bucket                = module.s3.bucket_id
     openai_api_key           = var.openai_api_key_plain
+    houjin_bangou_app_id     = var.houjin_bangou_app_id
+    gbizinfo_api_key         = var.gbizinfo_api_key
+    gbizinfo_base_url        = var.gbizinfo_base_url
     openai_model             = var.openai_model
     resend_api_key           = var.resend_api_key_plain
     google_client_id         = var.google_client_id
@@ -340,6 +343,7 @@ resource "aws_launch_template" "app" {
     github_dispatch_token    = var.github_dispatch_token
     github_dispatch_repo     = var.github_dispatch_repo
     oauth_state_secret       = random_password.oauth_state_secret.result
+    sentry_dsn               = var.sentry_dsn
     token_encryption_key     = random_id.token_encryption_key.hex
     edge_nginx_conf          = file("${path.module}/../../../nginx/staging-edge.conf")
     service_unavailable_html = file("${path.module}/../../../static/service-unavailable.html")

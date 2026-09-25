@@ -1,7 +1,7 @@
 package routes
 
 import (
-	"Backend/internal/controllers"
+	authcontrollers "Backend/internal/controllers/auth"
 	"Backend/internal/middleware"
 	"Backend/internal/services/auth"
 	"net/http"
@@ -10,7 +10,7 @@ import (
 )
 
 // SetupAuthRoutes 認証関連のルーティング設定
-func SetupAuthRoutes(api *echo.Group, authController *controllers.AuthController, oauthController *controllers.OAuthController, userSecret string, access auth.UserAccessGuard, orgs OrganizationIDResolver) {
+func SetupAuthRoutes(api *echo.Group, authController *authcontrollers.AuthController, oauthController *authcontrollers.OAuthController, userSecret string, access auth.UserAccessGuard, orgs OrganizationIDResolver) {
 	auth := api.Group("/auth")
 
 	// 認証不要エンドポイント

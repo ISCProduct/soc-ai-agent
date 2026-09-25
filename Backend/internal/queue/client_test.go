@@ -59,7 +59,7 @@ func TestEnqueueAndProcessEmailVerification(t *testing.T) {
 	email := &stubEmail{}
 	interview := &stubInterview{}
 	srv := queue.NewServer(rdb)
-	srv.RegisterHandlers(email, interview)
+	srv.RegisterHandlers(email, interview, nil)
 	if err := srv.Start(); err != nil {
 		t.Fatal(err)
 	}

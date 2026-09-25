@@ -9,7 +9,7 @@ import (
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/routes"
-	"Backend/internal/services"
+	"Backend/internal/services/school"
 
 	"github.com/labstack/echo/v4"
 )
@@ -36,7 +36,7 @@ func (f *fakeSchoolRepo) RemoveCompanyApproval(uint, uint) error                
 func (f *fakeSchoolRepo) IsCompanyApproved(uint, uint) (bool, error)             { return false, nil }
 func (f *fakeSchoolRepo) ListApprovedCompanyIDs(uint) ([]uint, error)            { return nil, nil }
 
-func newSchoolScopeTestEcho(schools *services.SchoolService, adminUserID uint) (*echo.Echo, *httptest.ResponseRecorder) {
+func newSchoolScopeTestEcho(schools *school.SchoolService, adminUserID uint) (*echo.Echo, *httptest.ResponseRecorder) {
 	e := echo.New()
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -50,7 +50,7 @@ func newSchoolScopeTestEcho(schools *services.SchoolService, adminUserID uint) (
 }
 
 func TestEchoAdminSchoolScope_UnrestrictedNoFilter(t *testing.T) {
-	schools := services.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{}})
+	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{}})
 	e, rec := newSchoolScopeTestEcho(schools, 1)
 
 	req := httptest.NewRequest(http.MethodGet, "/x", nil)
@@ -62,7 +62,7 @@ func TestEchoAdminSchoolScope_UnrestrictedNoFilter(t *testing.T) {
 }
 
 func TestEchoAdminSchoolScope_RestrictedMissingSchoolID(t *testing.T) {
-	schools := services.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{
+	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{
 		2: {{ID: 5}},
 	}})
 	e, rec := newSchoolScopeTestEcho(schools, 2)
@@ -76,7 +76,7 @@ func TestEchoAdminSchoolScope_RestrictedMissingSchoolID(t *testing.T) {
 }
 
 func TestEchoAdminSchoolScope_RestrictedDeniedSchool(t *testing.T) {
-	schools := services.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{
+	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{
 		2: {{ID: 5}},
 	}})
 	e, rec := newSchoolScopeTestEcho(schools, 2)
@@ -90,7 +90,7 @@ func TestEchoAdminSchoolScope_RestrictedDeniedSchool(t *testing.T) {
 }
 
 func TestEchoAdminSchoolScope_RestrictedAllowedSchool(t *testing.T) {
-	schools := services.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{
+	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{
 		2: {{ID: 5}},
 	}})
 	e, rec := newSchoolScopeTestEcho(schools, 2)
@@ -100,5 +100,43 @@ func TestEchoAdminSchoolScope_RestrictedAllowedSchool(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestEchoRequirePlatformAdmin_UnrestrictedOK(t *testing.T) {
+	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{}})
+	e := echo.New()
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ctx := context.WithValue(c.Request().Context(), middleware.AdminUserIDContextKey, uint(1))
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	})
+	e.GET("/x", func(c echo.Context) error { return c.String(http.StatusOK, "ok") }, routes.EchoRequirePlatformAdmin(schools))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestEchoRequirePlatformAdmin_RestrictedForbidden(t *testing.T) {
+	schools := school.NewSchoolService(&fakeSchoolRepo{assigned: map[uint][]models.School{
+		2: {{ID: 5}},
+	}})
+	e := echo.New()
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ctx := context.WithValue(c.Request().Context(), middleware.AdminUserIDContextKey, uint(2))
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	})
+	e.GET("/x", func(c echo.Context) error { return c.String(http.StatusOK, "ok") }, routes.EchoRequirePlatformAdmin(schools))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
 	}
 }

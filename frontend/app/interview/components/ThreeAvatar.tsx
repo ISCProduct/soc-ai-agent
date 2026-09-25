@@ -5,7 +5,8 @@ import * as THREE from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { Box } from '@mui/material'
 import { loadAvatar, type AvatarGender } from '@/lib/avatar-loader'
-import { LipsyncManager } from '@/lib/lipsync-manager'
+import { LipsyncManager } from '@/lib/interview/lipsync-manager'
+import styles from './interview.module.css'
 
 interface ThreeAvatarProps {
   gender: AvatarGender
@@ -442,7 +443,7 @@ function InterviewerFallbackAvatar({
       transition: 'all 0.16s ease',
     }}>
       <svg viewBox="0 0 120 140" width="100%" height="100%"
-           style={{ position: 'absolute', top: 0, left: 0 }}>
+           className={styles.avatarSvg}>
         <defs>
           <radialGradient id="face-grad" cx="50%" cy="40%">
             <stop offset="0%" stopColor="#ffe8d4" />

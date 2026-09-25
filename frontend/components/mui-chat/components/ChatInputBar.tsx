@@ -11,7 +11,7 @@ import {
   Typography,
 } from '@mui/material'
 import { Send } from '@mui/icons-material'
-import styles from '../../mui-chat.module.css'
+import styles from '../MuiChat.module.css'
 import type { ChoiceOption } from '../types'
 import { CHAT_BRAND, CHAT_BRAND_HOVER, shouldSendChatOnKeyDown } from '../utils'
 
@@ -19,13 +19,16 @@ type ChatInputBarProps = {
   analysisComplete: boolean
   showChoiceButtons: boolean
   choiceOptions: ChoiceOption[]
+  selectedChoiceValue: string | null
   input: string
   inputPlaceholder: string
   isLoading: boolean
   historyLoadError: string | null
+  canSend: boolean
   inputRef: React.RefObject<HTMLTextAreaElement | null>
   onInputChange: (value: string) => void
-  onSend: (overrideMessage?: string) => void
+  onSelectChoice: (value: string) => void
+  onSend: () => void
   onOtherChoice: () => void
   onShowCompletionModal: () => void
 }
@@ -35,12 +38,15 @@ export function ChatInputBar({
   analysisComplete,
   showChoiceButtons,
   choiceOptions,
+  selectedChoiceValue,
   input,
   inputPlaceholder,
   isLoading,
   historyLoadError,
+  canSend,
   inputRef,
   onInputChange,
+  onSelectChoice,
   onSend,
   onOtherChoice,
   onShowCompletionModal,
@@ -71,7 +77,7 @@ export function ChatInputBar({
               '&:hover': { bgcolor: CHAT_BRAND_HOVER },
             }}
           >
-            🎉 分析完了！結果を見る
+            結果を見る
           </Button>
           <Typography variant="caption" display="block" sx={{ mt: 1 }} color="text.secondary">
             あなたに最適な企業をマッチングしました
@@ -90,25 +96,35 @@ export function ChatInputBar({
               }}
             >
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                選択肢を選んでください（同じ内容を入力しても構いません。「その他」は自由記述）
+                選択肢を選んでください。任意で理由を入力してから送信できます（「その他」は自由記述）
               </Typography>
               <Stack direction="row" spacing={1} flexWrap="wrap" gap={1}>
                 {choiceOptions.map((choice) => {
                   const isOtherChoice = choice.text.includes('その他')
+                  const selected = selectedChoiceValue === choice.value
                   return (
                     <Button
                       key={`${choice.label}-${choice.text}`}
-                      variant="outlined"
+                      variant={selected ? 'contained' : 'outlined'}
                       onClick={() => {
                         if (isOtherChoice) {
                           onOtherChoice()
                           return
                         }
-                        onSend(choice.value)
+                        onSelectChoice(choice.value)
                       }}
                       disabled={isLoading}
                       className={styles.choiceButton}
-                      sx={{ borderRadius: 2 }}
+                      sx={{
+                        borderRadius: 2,
+                        ...(selected
+                          ? {
+                              bgcolor: CHAT_BRAND,
+                              color: '#fff',
+                              '&:hover': { bgcolor: CHAT_BRAND_HOVER },
+                            }
+                          : {}),
+                      }}
                     >
                       {choice.label}. {choice.text}
                     </Button>
@@ -131,7 +147,7 @@ export function ChatInputBar({
               onKeyDown={(e) => {
                 if (shouldSendChatOnKeyDown(e)) {
                   e.preventDefault()
-                  onSend()
+                  if (canSend) onSend()
                 }
               }}
               disabled={isLoading || !!historyLoadError}
@@ -149,7 +165,7 @@ export function ChatInputBar({
             <IconButton
               color="primary"
               onClick={() => onSend()}
-              disabled={!input.trim() || isLoading || !!historyLoadError}
+              disabled={!canSend || isLoading || !!historyLoadError}
               aria-label="メッセージを送信"
               sx={{
                 bgcolor: CHAT_BRAND,

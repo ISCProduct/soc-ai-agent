@@ -30,6 +30,7 @@ type InterviewService struct {
 	budgetGuard          interviewBudgetGuard
 	realtimeUsageService *costs.RealtimeUsageService
 	crossFeature         *flywheel.CrossFeatureIntegrationService
+	matchingRunner       MatchingRunner
 	companyQuestionRepo  repository.InterviewCompanyQuestionRepository
 	questionStateRepo    repository.InterviewQuestionStateRepository
 	skillScoreRepo       SkillScoreReader
@@ -88,9 +89,19 @@ func (s *InterviewService) SetCompanyRepo(r shared.CompanyBriefReader) {
 	s.companyRepo = r
 }
 
+// MatchingRunner は面接スコア反映後の再マッチング面。
+type MatchingRunner interface {
+	CalculateMatching(ctx context.Context, userID uint, sessionID string) error
+}
+
 // SetCrossFeatureService 機能間連携サービスを注入する（オプション）
 func (s *InterviewService) SetCrossFeatureService(cf *flywheel.CrossFeatureIntegrationService) {
 	s.crossFeature = cf
+}
+
+// SetMatchingRunner は面接→スコア反映後の再マッチングを注入する（オプション）。
+func (s *InterviewService) SetMatchingRunner(m MatchingRunner) {
+	s.matchingRunner = m
 }
 
 // SetJobEnqueuer は面接レポート等の永続キュー投入先を設定する（#617）。

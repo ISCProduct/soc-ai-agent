@@ -3,7 +3,7 @@
  * next/link で prefetch するため href を一元管理する。
  */
 export const SIDEBAR_NAV_ITEMS = [
-  { href: '/Correlation-diagram', label: '企業相関図' },
+  { href: '/correlation-diagram', label: '企業相関図' },
   { href: '/chat-history', label: 'チャット履歴' },
   { href: '/resume', label: '履歴書レビュー' },
   { href: '/interview', label: '面接練習' },

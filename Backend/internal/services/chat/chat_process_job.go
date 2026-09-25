@@ -39,7 +39,10 @@ func (s *ChatService) resolveJobCategoryForChat(ctx context.Context, req ChatReq
 
 	if jobCategoryID == 0 && s.shouldValidateJobCategory(history) {
 		log.Printf("[JobValidation] Validating job category answer: %s\n", req.Message)
-		jobValidation, err := s.jobValidator.ValidateJobCategory(ctx, req.Message)
+		// 直前に提示した質問文を渡す。番号だけの回答は、そのとき並んでいた
+		// 選択肢に対して解釈しないと別の職種になる（#1330）。
+		presentedQuestion := findLastAssistantQuestion(history)
+		jobValidation, err := s.jobValidator.ValidateJobCategoryWithQuestion(ctx, req.Message, presentedQuestion)
 		if err != nil {
 			log.Printf("[JobValidation] Error: %v\n", err)
 			// 判定エラーでも会話は続行（職種未設定のまま）

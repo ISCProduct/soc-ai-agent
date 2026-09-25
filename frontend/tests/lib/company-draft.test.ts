@@ -1,4 +1,4 @@
-import { isCompanyUnpublished } from '@/lib/company-draft'
+import { isCompanyUnpublished } from '@/lib/company/draft'
 
 describe('isCompanyUnpublished', () => {
   it('published なら警告しない', () => {

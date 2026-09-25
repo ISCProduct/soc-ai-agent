@@ -35,9 +35,12 @@ export function extractUserAuthHeaders(request: NextRequest): Record<string, str
   const xUserId = request.headers.get('X-User-ID')
   const xUserToken = request.headers.get('X-User-Token')
   const xTenantSlug = request.headers.get('X-Tenant-Slug')
+  // middleware.ts が採番したリクエストIDをBackend/RAGまで引き継ぐ(#1188)
+  const xRequestId = request.headers.get('X-Request-ID')
   if (xUserId) headers['X-User-ID'] = xUserId
   if (xUserToken) headers['X-User-Token'] = xUserToken
   if (xTenantSlug) headers['X-Tenant-Slug'] = xTenantSlug
+  if (xRequestId) headers['X-Request-ID'] = xRequestId
   return headers
 }
 

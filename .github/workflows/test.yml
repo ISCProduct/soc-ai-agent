@@ -119,6 +119,11 @@ jobs:
 
       # Dependabot のPRで必ず失敗するワークフローが無いこと。
       # Dependabot 起因の実行には通常の secrets が渡らない（GitHubの仕様）。
+      # 本番は通常日はRDSが停止している。ガードが外れると main へのマージが
+      # マイグレーションで必ず失敗する（#1488 で実際に発生）。
+      - name: 本番デプロイのRDSガード検査
+        run: ./automation/test/prod-deploy-db-guard-test.sh
+
       - name: Dependabot 互換性の検査
         run: ./automation/test/dependabot-workflow-test.sh
 
@@ -126,6 +131,11 @@ jobs:
       # schedule で動くワークフローは誰も結果を見ないため、壊れても気づけない。
       - name: ワークフローの checkout 漏れ検査
         run: ./automation/test/workflow-checkout-test.sh
+
+      # 反映後スモークがデプロイと同じ concurrency group にいること。
+      # ずれるとスモーク中に次のデプロイが環境を落とし、変更と無関係に全滅する。
+      - name: スモークの concurrency group 検査
+        run: ./automation/test/deploy-smoke-concurrency-test.sh
 
       # ステージングの起動/停止判定。間違えると開発中に環境が理由不明で落ちる。
       - name: ステージング uptime 判定のテスト
@@ -135,6 +145,27 @@ jobs:
       # 以前は curl -sf で握り潰しており、登録できない原因が追えなかった。
       - name: Discord コマンド登録スクリプトのテスト
         run: ./automation/test/discord-register-commands-test.sh
+
+      # 起動ジョブの失敗通知。沈黙すると障害時にしか露見しない。
+      - name: 運用アラート通知スクリプトのテスト
+        run: ./automation/test/ops-notify-discord-test.sh
+
+      # Bind のエラー握りつぶし。#1064 は修正が入らないままクローズされた。
+      - name: Bind エラー握りつぶしの検査
+        run: ./automation/test/bind-error-check.sh
+
+      # 検査スクリプト自体が壊れると「検査したつもり」で素通りする。
+      - name: Bind 検査スクリプトのテスト
+        run: ./automation/test/bind-error-check-test.sh
+
+      # Backlog 同期は「キーが見つかりません」で success のまま何もしない。
+      # 黙って取りこぼすので、キー解決元の抽出だけは固定する。
+      - name: Backlog キー検出のテスト
+        run: ./automation/test/backlog-key-detection-test.sh
+
+      # AI呼び出しの機能名。付け忘れると feature='unknown' で記録され、機能別に割れない。
+      - name: AI利用量の機能名付与の検査
+        run: ./automation/test/ai-usage-feature-check.sh
 
       - name: ワークフロー埋め込み Python の構文チェック
         run: |

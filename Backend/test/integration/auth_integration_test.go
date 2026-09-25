@@ -20,7 +20,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"Backend/internal/controllers"
+	authcontrollers "Backend/internal/controllers/auth"
 	"Backend/internal/repositories"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/email"
@@ -46,13 +46,13 @@ func newIntegrationDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 	return db, mock
 }
 
-func newAuthController(t *testing.T, db *gorm.DB) *controllers.AuthController {
+func newAuthController(t *testing.T, db *gorm.DB) *authcontrollers.AuthController {
 	t.Helper()
 	userRepo := repositories.NewUserRepository(db)
 	pendingRepo := repositories.NewPendingRegistrationRepository(db)
 	emailService := email.NewEmailService() // SMTP未設定時はログ出力のみ
 	authService := auth.NewAuthService(userRepo, pendingRepo, emailService)
-	return controllers.NewAuthController(authService)
+	return authcontrollers.NewAuthController(authService, "test-user-secret")
 }
 
 // TestLogin_Integration は POST /api/auth/login の完全な統合フローを検証する

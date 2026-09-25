@@ -25,6 +25,7 @@ import {
 } from '@mui/material'
 import DeleteIcon from '@mui/icons-material/Delete'
 import { authService } from '@/lib/auth'
+import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
 
@@ -37,6 +38,7 @@ type ScraperSession = {
 }
 
 export default function PageContent() {
+  const platformReady = useRequirePlatformAdmin()
   const [sessions, setSessions] = useState<ScraperSession[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -77,8 +79,11 @@ export default function PageContent() {
   }
 
   useEffect(() => {
-    loadSessions()
-  }, [])
+    if (!platformReady) return
+    void loadSessions()
+  }, [platformReady])
+
+  if (!platformReady) return null
 
   const handleUpsert = async () => {
     if (!siteKey || !cookies) return

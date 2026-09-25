@@ -31,9 +31,14 @@ export async function POST(request: NextRequest) {
 }
 
 /** 年度の自動計算（Go バックエンドから取得）*/
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    // target-year は管理者認証の内側へ移した(#1411)。POST と同じヘッダーを転送する。
     const res = await fetch(`${BACKEND_URL}/api/admin/company-graph/target-year`, {
+      headers: {
+        'X-Admin-Email': request.headers.get('X-Admin-Email') ?? '',
+        'X-Admin-Token': request.headers.get('X-Admin-Token') ?? '',
+      },
       signal: AbortSignal.timeout(3000),
     })
     if (res.ok) {

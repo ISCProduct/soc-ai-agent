@@ -12,7 +12,7 @@ import {
   Typography,
 } from '@mui/material'
 import Link from 'next/link'
-import { companyAuthService } from '@/lib/company-auth'
+import { companyAuthService } from '@/lib/company/auth'
 
 export default function CompanyPortalForgotPasswordPage() {
   const [email, setEmail] = useState('')
@@ -92,7 +92,7 @@ export default function CompanyPortalForgotPasswordPage() {
           )}
 
           <Box sx={{ textAlign: 'center', mt: 2 }}>
-            <Link href="/company-portal/sign-in" style={{ fontSize: '0.875rem' }}>
+            <Link href="/company-portal/sign-in" className="auth-link">
               ログインページへ戻る
             </Link>
           </Box>

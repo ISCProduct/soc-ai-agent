@@ -2,8 +2,11 @@ package interview
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/repositories"
+	"Backend/internal/safego"
 	"Backend/internal/services/email"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
@@ -134,6 +137,7 @@ Interview transcript:
 	var haveBody bool
 	var lastErr error
 	for attempt := range reportGenerationAttempts {
+		ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport)
 		raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 2000, model)
 		if err != nil {
 			return err
@@ -194,12 +198,24 @@ Interview transcript:
 		return err
 	}
 
-	// 面接スコアを UserWeightScore に反映（crossFeature が設定済みの場合のみ）
+	// 面接スコアをチャット診断セッションへ反映し、可能なら再マッチングする。
 	if s.crossFeature != nil {
-		chatSessionID := fmt.Sprintf("interview-%d", session.UserID)
-		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, chatSessionID, report); err != nil {
-			// スコア反映失敗はレポート生成を失敗扱いにしない
+		targetSession, err := s.crossFeature.ResolveDiagnosisSessionID(session.UserID)
+		if err != nil {
+			// 診断セッションを特定できないまま書くと別セッションを汚す。
+			// ここで握りつぶすと面接スコアがどこにも反映されないまま消えるので、
+			// エラーを返してキュー(asynq)のリトライに載せる。レポート本体は Upsert 済みで冪等。
+			return fmt.Errorf("診断セッションの解決に失敗 (session=%d): %w", sessionID, err)
+		}
+		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, targetSession, report); err != nil {
 			log.Printf("[CrossFeature] interview score update failed for session %d: %v\n", sessionID, err)
+		} else if s.matchingRunner != nil && !repositories.IsInterviewSnapshotSession(targetSession) {
+			userID, sessionID := session.UserID, targetSession
+			safego.Go(func() {
+				if err := s.matchingRunner.CalculateMatching(context.Background(), userID, sessionID); err != nil {
+					log.Printf("[CrossFeature] rematch after interview failed user=%d session=%s: %v\n", userID, sessionID, err)
+				}
+			})
 		}
 	}
 	return nil

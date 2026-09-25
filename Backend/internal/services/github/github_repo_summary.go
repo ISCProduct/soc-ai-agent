@@ -2,6 +2,7 @@ package github
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -164,6 +165,7 @@ GitHubリポジトリのREADMEを読み、%sの観点から強みを簡潔にま
 
 ※ 情報が不足している場合はREADMEから推測して記述してください。各フィールドは1〜2文で簡潔に。`, fullName, cfg.analysisFocus, cfg.summaryHint, readmeSection)
 
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureGitHubSummary)
 	raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.5, 800)
 	if err != nil {
 		return nil, err

@@ -20,6 +20,7 @@ import PsychologyIcon from '@mui/icons-material/Psychology'
 import { interviewLimits } from '@/lib/interview'
 import { PRIMARY, BG_LIGHT } from '../constants'
 import type { InterviewCompany } from '../types'
+import styles from './interview.module.css'
 
 export interface LobbyScreenProps {
   userName: string
@@ -91,13 +92,7 @@ export default function LobbyScreen({
                 ref={lobbyVideoRef}
                 muted
                 playsInline
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                  transform: 'scaleX(-1)',
-                  display: lobbyPermissionError || !cameraEnabled ? 'none' : 'block',
-                }}
+                className={`${styles.cameraVideo} ${lobbyPermissionError || !cameraEnabled ? styles.cameraVideoHidden : ''}`}
               />
               {lobbyPermissionError ? (
                 <Box sx={{ textAlign: 'center', p: 3, position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>

@@ -74,11 +74,15 @@ func (s *InterviewService) Turn(
 	// 面接コンテキストの語を補助語として渡す（音声R&D Task 4）。
 	// 実測では固有名詞が改善し、無関係な語での幻覚は起きなかった。
 	// 特に「御社」は mini が補助語なしだと8回中0回しか正しく取れない。
-	const sttMimeType = "audio/webm"
+	// 形式はバイト列から判定する。以前は "audio.webm" 固定だったが、
+	// MediaRecorder が出せる形式はブラウザによって違う（Safari は MP4）。
+	// API は拡張子で形式を判断するため、食い違うと復号に失敗するか
+	// 誤って解釈され、認識精度が落ちる。
+	audioFormat := DetectAudioFormat(audioData)
 	sttHints := BuildSTTHints(companyName, companyReading, position, companyInfo)
 	sttStart := time.Now()
-	userText, err := s.openaiClient.TranscribeWithHints(ctx, audioData, "audio.webm", sttHints)
-	obs := ObserveTranscribe(sessionID, turnCount, len(audioData), sttMimeType, sttStart, userText, err)
+	userText, err := s.openaiClient.TranscribeWithHints(ctx, audioData, audioFormat.AudioFilename(), sttHints)
+	obs := ObserveTranscribe(sessionID, turnCount, len(audioData), audioFormat.MIME, sttStart, userText, err)
 
 	// 問題が疑われる結果だけ高精度モデルへ再送する（音声R&D Task 5）。
 	// 通常の発話は再送しない。再送率がそのまま追加費用になる。
@@ -89,7 +93,7 @@ func (s *InterviewService) Turn(
 		// STTだけで最悪120秒かかる。面接の体感を優先して短く打ち切る。
 		retryCtx, cancelRetry := context.WithTimeout(ctx, sttFallbackTimeout)
 		retried, retryErr := s.openaiClient.TranscribeWithModel(
-			retryCtx, audioData, "audio.webm", sttHints, FallbackModel,
+			retryCtx, audioData, audioFormat.AudioFilename(), sttHints, FallbackModel,
 		)
 		cancelRetry()
 		// 再送に失敗しても面接は止めない。元の結果のまま続ける
@@ -103,6 +107,10 @@ func (s *InterviewService) Turn(
 			sessionID, turnCount, reason, applied)
 	}
 	LogSTTObservation(obs)
+	// 利用量として記録する（#1294）。STT のレスポンスにはトークンが入らないため、
+	// 既に計測している音声秒数とレイテンシをそのまま渡す。
+	// 再送が発生した場合は2回課金されるので、その分も記録する。
+	recordSTTUsage(ctx, s.openaiClient, obs)
 
 	if err != nil {
 		log.Printf("[Interview] transcribe error: %v", err)
@@ -167,7 +175,11 @@ func (s *InterviewService) Turn(
 	// TTS: AI返答を音声化（企業名は読み仮名に置換して誤読を防ぐ。表示用のaiTextはそのまま保持）。
 	// TTS失敗時もターンは中断させず、音声なし（テキストのみ）で返す（#910）。
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
-	audio, err := s.openaiClient.TTS(ctx, applyCompanyReadingForTTS(aiText, companyName, companyReading), voice)
+	ttsText := applyCompanyReadingForTTS(aiText, companyName, companyReading)
+	ttsStart := time.Now()
+	audio, err := s.openaiClient.TTS(ctx, ttsText, voice)
+	// 失敗しても課金されている可能性があるため、成否に関わらず記録する（#1294）。
+	recordTTSUsage(ctx, s.openaiClient, ttsText, time.Since(ttsStart))
 	if err != nil {
 		log.Printf("[Interview] tts error: %v", err)
 		audio = nil
@@ -269,7 +281,11 @@ func (s *InterviewService) StartTurn(
 	// TTS: 企業名は読み仮名に置換して誤読を防ぐ（表示用のaiTextはそのまま保持）。
 	// TTS失敗時もターンは中断させず、音声なし（テキストのみ）で返す（#910）。
 	voice := ttsVoiceForGenderAndLang(session.InterviewerGender, session.Language)
-	audio, err := s.openaiClient.TTS(ctx, applyCompanyReadingForTTS(aiText, companyName, companyReading), voice)
+	ttsText := applyCompanyReadingForTTS(aiText, companyName, companyReading)
+	ttsStart := time.Now()
+	audio, err := s.openaiClient.TTS(ctx, ttsText, voice)
+	// 失敗しても課金されている可能性があるため、成否に関わらず記録する（#1294）。
+	recordTTSUsage(ctx, s.openaiClient, ttsText, time.Since(ttsStart))
 	if err != nil {
 		log.Printf("[Interview] tts error: %v", err)
 		audio = nil

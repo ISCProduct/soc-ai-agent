@@ -2,6 +2,7 @@ package company
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
@@ -156,6 +157,7 @@ Text:
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureCompanyCrawl)
 	content, err := s.aiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.2, 800)
 	if err != nil {
 		return nil, err

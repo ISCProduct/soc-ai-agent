@@ -17,16 +17,19 @@ import (
 // 戻り値の bool は「有効な品質回答かどうか」を示す（進捗カウントに使用）。
 func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, sessionID, message string, jobCategoryID uint) (bool, error) {
 	// 会話履歴から直近の質問を取得
-	history, err := s.chatMessageRepo.FindRecentBySessionID(sessionID, 5)
+	history, err := s.chatMessageRepo.FindRecentBySessionIDForUser(sessionID, userID, 5)
 	if err != nil {
 		log.Printf("Warning: failed to get history for analysis: %v\n", err)
 		history = []models.ChatMessage{}
 	}
 
 	lastQuestion := ""
+	// 出題時に保存した軸。推測より確実なので、あればこれを使う(#1333)。
+	storedCategory := ""
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Role == "assistant" {
 			lastQuestion = history[i].Content
+			storedCategory = history[i].WeightCategory
 			break
 		}
 	}
@@ -41,7 +44,14 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 		return true, nil
 	}
 
-	targetCategory := s.inferCategoryFromQuestion(lastQuestion)
+	// 出題時に狙った軸を最優先する。質問文からの推測は、キーワードに
+	// 当たらない質問が既定の技術志向に落ちるため、狙った軸が未評価のまま
+	// 残って次のターンでも同じ軸が選ばれる。15問で6軸しか埋まらない原因(#1333)。
+	// 保存が無い過去のメッセージのみ、従来どおり推測にフォールバックする。
+	targetCategory := storedCategory
+	if targetCategory == "" {
+		targetCategory = s.inferCategoryFromQuestion(lastQuestion)
+	}
 	scoreAnswer := message
 	isChoice := false
 	if !isTextBasedQuestion(lastQuestion) {
@@ -77,8 +87,9 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 }
 
 // processChoiceAnswer 選択肢回答を処理してスコアを更新する。
+// reason の有無・矛盾で軸スコアを中立寄りに減衰する（文章品質スコアとは混ぜない）。
 // 戻り値の bool は「有効な品質回答かどうか」を示す（進捗カウントに使用）。
-func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sessionID, answer string, history []models.ChatMessage, jobCategoryID uint) (bool, error) {
+func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sessionID, answer, reason string, history []models.ChatMessage, jobCategoryID uint) (bool, error) {
 	// 最後のAIの質問を取得
 	var lastQuestion string
 	var targetCategory string
@@ -86,6 +97,8 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Role == "assistant" {
 			lastQuestion = history[i].Content
+			// 出題時に保存した軸があればそれを正とする(#1333)。
+			targetCategory = history[i].WeightCategory
 			break
 		}
 	}
@@ -105,13 +118,16 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 		return false, fmt.Errorf("failed to get AI questions: %w", err)
 	}
 
-	for i := len(aiQuestions) - 1; i >= 0; i-- {
-		if strings.Contains(lastQuestion, aiQuestions[i].QuestionText) ||
-			strings.Contains(aiQuestions[i].QuestionText, strings.Split(lastQuestion, "\n")[0]) {
-			if aiQuestions[i].Template != nil {
-				targetCategory = aiQuestions[i].Template.Category
+	// 保存済みの軸があるならそれが最も確実なので、テンプレート由来の上書きはしない。
+	if targetCategory == "" {
+		for i := len(aiQuestions) - 1; i >= 0; i-- {
+			if strings.Contains(lastQuestion, aiQuestions[i].QuestionText) ||
+				strings.Contains(aiQuestions[i].QuestionText, strings.Split(lastQuestion, "\n")[0]) {
+				if aiQuestions[i].Template != nil {
+					targetCategory = aiQuestions[i].Template.Category
+				}
+				break
 			}
-			break
 		}
 	}
 
@@ -119,7 +135,7 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 		targetCategory = s.inferCategoryFromQuestion(lastQuestion)
 	}
 
-	log.Printf("[Choice Answer] Processing choice '%s' for category: %s\n", answer, targetCategory)
+	log.Printf("[Choice Answer] Processing choice '%s' reason=%q for category: %s\n", answer, reason, targetCategory)
 
 	result := s.answerEvaluator.EvaluateHumanScoring(lastQuestion, answer, true, jobCategoryID != 0, nil)
 	if result.Action != PrecheckScore {
@@ -127,30 +143,15 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 		return false, nil
 	}
 
-	if err := s.updateCategoryScore(userID, sessionID, targetCategory, result.Score); err != nil {
+	finalScore, evidenceFlags := AdjustChoiceAxisScore(result.Score, reason)
+	log.Printf("[Choice Answer] axis score choice=%d -> adjusted=%d flags=%v reason_len=%d\n",
+		result.Score, finalScore, evidenceFlags, len([]rune(strings.TrimSpace(reason))))
+
+	if err := s.updateCategoryScore(userID, sessionID, targetCategory, finalScore); err != nil {
 		return false, err
 	}
 	// 選択肢回答は選択した内容に関わらず有効（スコア0でも意思表示）
 	return true, nil
-}
-
-// convertChoiceToScore 選択肢をスコアに変換
-func (s *ChatService) convertChoiceToScore(choice string) int {
-	choice = strings.ToUpper(strings.TrimSpace(choice))
-	switch choice {
-	case "A", "1":
-		return 100 // 非常に高い/強く同意
-	case "B", "2":
-		return 75 // やや高い/やや同意
-	case "C", "3":
-		return 50 // 中立/どちらでもない
-	case "D", "4":
-		return 25 // やや低い/やや不同意
-	case "E", "5":
-		return 0 // 低い/不同意
-	default:
-		return 50 // デフォルト
-	}
 }
 
 // inferCategoryFromQuestion 質問文からカテゴリを推測

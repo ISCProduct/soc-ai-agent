@@ -1,5 +1,5 @@
 import { Box, Container, Typography, Divider } from '@mui/material'
-import { BackButton } from '@/components/common/back-button'
+import { BackButton } from '@/components/common/BackButton'
 
 export default function PrivacyPage() {
   return (

@@ -45,6 +45,7 @@ jobs:
           sys.path.insert(0, ".github/scripts")
           from backlog_client import (
               load_backlog_env, resolve_bl_base, set_issue_status,
+              parse_priority_id, should_skip_backlog_sync,
               bl_request as _bl_request,
           )
 
@@ -60,8 +61,10 @@ jobs:
           GH_BASE = "https://api.github.com"
           BL_BASE, BL_DOMAIN = resolve_bl_base(SPACE_ID, API_KEY, DOMAIN)
 
-          # Backlog 側から同期された Issue はスキップ（ループ防止）
-          if '<!-- backlog-synced -->' in GH_BODY:
+          # Backlog 側から同期された Issue はタイトル・本文を書き戻すとループするため
+          # 同期しない。ただし開閉だけは Backlog へ返す（should_skip_backlog_sync 参照）。
+          # 返さないと、Backlog 起源の課題は GitHub を閉じても Backlog が未対応のまま残る。
+          if should_skip_backlog_sync(GH_BODY, ACTION):
               print("Backlog 側から同期された Issue のためスキップします。")
               sys.exit(0)
 
@@ -105,7 +108,9 @@ jobs:
                   'projectId':   project_id,
                   'summary':     GH_TITLE,
                   'issueTypeId': type_id,
-                  'priorityId':  3,
+                  # Issue Form の「優先度」セレクトをそのまま Backlog の優先度にする。
+                  # 対応順番はここで決まる。未選択・フォーム未使用なら「中」。
+                  'priorityId':  parse_priority_id(GH_BODY),
                   'description': f"GitHub Issue: {GH_URL}\n\n{GH_BODY}",
               })
               bl_key = result['issueKey']
@@ -137,6 +142,8 @@ jobs:
               bl_request('PATCH', f"/issues/{bl_key}", {
                   'summary':     clean_title,
                   'description': new_desc,
+                  # セレクトを直せば Backlog の優先度も追随する（対応順番の付け替え）
+                  'priorityId':  parse_priority_id(GH_BODY),
               })
               print(f"Backlog 課題を更新しました: {bl_key}")
 

@@ -12,8 +12,8 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import { StudentThemeToggle } from '@/components/student-theme-toggle'
-import { companyAuthService } from '@/lib/company-auth'
+import { StudentThemeToggle } from '@/components/StudentThemeToggle'
+import { companyAuthService } from '@/lib/company/auth'
 
 export function CompanyPortalLoginContent() {
   const router = useRouter()
@@ -93,7 +93,7 @@ export function CompanyPortalLoginContent() {
           </Box>
 
           <Box sx={{ textAlign: 'center', mt: 2 }}>
-            <Link href="/company-portal/forgot-password" style={{ fontSize: '0.875rem' }}>
+            <Link href="/company-portal/forgot-password" className="auth-link">
               パスワードをお忘れですか？
             </Link>
           </Box>

@@ -1,7 +1,7 @@
 /**
  * マッチング結果ページ向けの純粋ヘルパー（React state 非依存）。
  */
-import type { CapitalRelation } from '@/lib/company-data'
+import type { CapitalRelation } from '@/lib/company/data'
 import type {
   AnalysisScores,
   CategoryScores,
@@ -41,6 +41,7 @@ export function mapRecommendationToCompany(
     employees: rec.employees || '未定',
     description: rec.reason || '詳細情報は準備中です',
     matchScore: rec.score || 0,
+    matchedAxisCount: rec.matched_axis_count,
     tags: rec.tags || [],
     techStack: rec.tech_stack || [],
     categoryScores: normalizeCategoryScores(rec.category_scores),

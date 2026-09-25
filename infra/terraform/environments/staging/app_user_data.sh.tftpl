@@ -48,6 +48,9 @@ AWS_REGION=${aws_region}
 AWS_S3_BUCKET=${s3_bucket}
 S3_BUCKET=${s3_bucket}
 OPENAI_API_KEY=${openai_api_key}
+HOUJIN_BANGOU_APP_ID=${houjin_bangou_app_id}
+GBIZINFO_API_KEY=${gbizinfo_api_key}
+GBIZINFO_BASE_URL=${gbizinfo_base_url}
 OPENAI_MODEL=${openai_model}
 OPENAI_WEB_SEARCH_MODEL=gpt-4o-mini
 OPENAI_COMPANY_SEARCH_MODEL=gpt-4o-mini
@@ -70,6 +73,10 @@ DISCORD_ALLOWED_ROLE_ID=${discord_allowed_role_id}
 GITHUB_DISPATCH_TOKEN=${github_dispatch_token}
 GITHUB_DISPATCH_REPO=${github_dispatch_repo}
 OAUTH_STATE_SECRET=${oauth_state_secret}
+# サーバー側(Backend/RAG)のエラートラッキング(#1185)。
+# 未設定なら Backend の observability.InitSentry / RAG の sentry_sdk は初期化しない。
+# rag-review も同じ .env を env_file で読むため、この1行で両方に渡る。
+SENTRY_DSN=${sentry_dsn}
 TOKEN_ENCRYPTION_KEY=${token_encryption_key}
 BASE_URL=https://${backend_domain}
 APP_URL=https://${frontend_domain}

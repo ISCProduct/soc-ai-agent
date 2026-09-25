@@ -3,6 +3,7 @@ package repositories
 import (
 	"Backend/internal/models"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -132,4 +133,47 @@ func (r *StudentSearchRepository) IsVisible(userID uint) (bool, error) {
 func escapeLike(s string) string {
 	r := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_")
 	return r.Replace(s)
+}
+
+// CountNewStudents は直近 since 日以内に登録された、自社から見える学生数を返す（#1320）。
+//
+// 可視性の判定は visibleStudents を必ず通す。ここで条件を書き直すと、
+// スカウト可視性に同意していない学生を数えてしまう経路が増える。
+func (r *StudentSearchRepository) CountNewStudents(companyID uint, since time.Time) (int64, error) {
+	var n int64
+	err := r.visibleStudents(companyID, StudentSearchFilters{}).
+		Where("u.created_at >= ?", since).
+		Count(&n).Error
+	return n, err
+}
+
+// VisibleStudentNames は指定したユーザーIDのうち、自社から見える学生の氏名を返す（#1320）。
+//
+// 応募者一覧に氏名を出すために使う。可視性の判定は visibleStudents を通す。
+// スカウト公開に同意していない学生はここに現れないため、呼び出し側は
+// 「取れなかった＝表示してはいけない」として扱うこと。
+//
+// 「自社に応募した学生を同意の有無に関わらず見せるか」は #1319 で未決定。
+// 決まるまでは既存の同意ルールをそのまま適用する。
+func (r *StudentSearchRepository) VisibleStudentNames(companyID uint, userIDs []uint) (map[uint]string, error) {
+	if len(userIDs) == 0 {
+		return map[uint]string{}, nil
+	}
+	type row struct {
+		UserID uint
+		Name   string
+	}
+	var rows []row
+	err := r.visibleStudents(companyID, StudentSearchFilters{}).
+		Select("u.id AS user_id, u.name AS name").
+		Where("u.id IN ?", userIDs).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uint]string, len(rows))
+	for _, x := range rows {
+		out[x.UserID] = x.Name
+	}
+	return out, nil
 }

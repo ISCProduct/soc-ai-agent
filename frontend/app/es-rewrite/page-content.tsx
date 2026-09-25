@@ -64,11 +64,14 @@ type ReviewResult = {
   company_strategy?: string | null
 }
 
-const STAR_LABELS: { key: keyof StarBreakdown; label: string; color: string; emoji: string }[] = [
-  { key: 'situation', label: 'Situation（状況）', color: '#3b82f6', emoji: '📍' },
-  { key: 'task',      label: 'Task（課題）',      color: '#8b5cf6', emoji: '🎯' },
-  { key: 'action',    label: 'Action（施策）',    color: PRIMARY,   emoji: '⚡' },
-  { key: 'result',    label: 'Result（成果）',    color: '#10b981', emoji: '📊' },
+// マーカーは S / T / A / R の頭文字を使う。
+// 📍🎯⚡📊 を当てていたが、絵文字と項目の対応に意味が無く、
+// STAR という枠組みそのものを隠していた。頭文字なら対応が自明。
+const STAR_LABELS: { key: keyof StarBreakdown; label: string; color: string; initial: string }[] = [
+  { key: 'situation', label: 'Situation（状況）', color: '#3b82f6', initial: 'S' },
+  { key: 'task',      label: 'Task（課題）',      color: '#8b5cf6', initial: 'T' },
+  { key: 'action',    label: 'Action（施策）',    color: PRIMARY,   initial: 'A' },
+  { key: 'result',    label: 'Result（成果）',    color: '#10b981', initial: 'R' },
 ]
 
 const SCORE_ITEMS: { key: keyof Omit<ReviewResult, 'feedback' | 'improved_text'>; label: string; color: string }[] = [
@@ -167,7 +170,11 @@ function ESRewriteContent() {
           <Box sx={{ color: PRIMARY }}><EditNoteIcon sx={{ fontSize: 32 }} /></Box>
           <Box>
             <Typography sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: '#0f172a' }}>ES添削・リライト</Typography>
-            <Typography sx={{ fontSize: 12, color: '#64748b' }}>AIがあなたのES文章を添削・リライトします</Typography>
+            {/*
+              「AIがあなたのES文章を添削・リライトします」をやめた。
+              誰が添削するかより、何が返ってくるかを書く。
+            */}
+            <Typography sx={{ fontSize: 12, color: '#64748b' }}>書いた文章を読み、直したほうがよい点と書き直し例を返します</Typography>
           </Box>
         </Box>
         <IconButton onClick={() => router.push('/')} sx={{ bgcolor: '#f1f5f9', color: '#475569' }}>
@@ -188,7 +195,7 @@ function ESRewriteContent() {
               '&:hover': { bgcolor: mode === 'review' ? `${PRIMARY}e0` : '#e2e8f0' },
             }}
           >
-            ES添削（RAGフィードバック）
+            ES添削
           </Button>
           <Button
             startIcon={<AutoFixHighIcon />}
@@ -344,7 +351,7 @@ function ESRewriteContent() {
             >
               {loading
                 ? (mode === 'review' ? '添削中...' : 'リライト中...')
-                : (mode === 'review' ? 'AIで添削する' : 'AIでリライトする')
+                : (mode === 'review' ? '添削する' : '書き直す')
               }
             </Button>
 
@@ -464,13 +471,21 @@ function ESRewriteContent() {
 
               {/* STAR breakdown */}
               <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
-                <Typography sx={{ fontWeight: 700, fontSize: 16, mb: 2 }}>STAR法 分解</Typography>
+                <Typography sx={{ fontWeight: 700, fontSize: 16, mb: 0.5 }}>STAR法 分解</Typography>
+                {/* 学生には初見の用語なので、見出しの下で一度だけ説明する。 */}
+                <Typography sx={{ fontSize: 13, color: '#64748b', mb: 2 }}>
+                  「どんな状況で、何が課題で、何をして、どうなったか」の4つが書けているかを見ます。
+                </Typography>
                 <Stack spacing={2}>
-                  {STAR_LABELS.map(({ key, label, color, emoji }, idx) => (
+                  {STAR_LABELS.map(({ key, label, color, initial }, idx) => (
                     <Box key={key}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.8 }}>
-                        <Box sx={{ width: 28, height: 28, borderRadius: 1.5, bgcolor: `${color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>
-                          {emoji}
+                        <Box sx={{
+                          width: 28, height: 28, borderRadius: 1.5, bgcolor: `${color}15`,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 14, fontWeight: 700, color,
+                        }}>
+                          {initial}
                         </Box>
                         <Typography sx={{ fontWeight: 700, fontSize: 13, color }}>{label}</Typography>
                       </Box>

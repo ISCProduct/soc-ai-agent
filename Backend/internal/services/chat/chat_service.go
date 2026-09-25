@@ -155,7 +155,9 @@ func (s *ChatService) ProcessChat(ctx context.Context, req ChatRequest) (*ChatRe
 	}
 
 	// 2. 会話履歴を取得（ユーザーメッセージ保存後に取得）
-	history, err := s.chatMessageRepo.FindRecentBySessionID(req.SessionID, 100)
+	//    user_id でスコープする。他人のセッションIDを渡されても他人の発言が
+	//    LLM のコンテキストへ入らないようにする（#1156 多層防御）
+	history, err := s.chatMessageRepo.FindRecentBySessionIDForUser(req.SessionID, req.UserID, 100)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get chat history: %w", err)
 	}

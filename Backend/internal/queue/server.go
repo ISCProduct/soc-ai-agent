@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"Backend/internal/safego"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,6 +24,11 @@ type EmailSender interface {
 // InterviewReportGenerator は面接レポート生成面。
 type InterviewReportGenerator interface {
 	GenerateReportForSession(ctx context.Context, sessionID uint) error
+}
+
+// DiagnosisQualityRunner は診断妥当性評価面。
+type DiagnosisQualityRunner interface {
+	RunDiagnosisQuality(ctx context.Context, userID uint, sessionID string) error
 }
 
 // Server は asynq ワーカーを起動する（#617）。
@@ -49,8 +55,8 @@ func NewServer(rdb *redis.Client) *Server {
 	return &Server{server: srv, mux: asynq.NewServeMux()}
 }
 
-// RegisterHandlers はメール・面接レポートのハンドラを登録する。
-func (s *Server) RegisterHandlers(email EmailSender, interview InterviewReportGenerator) {
+// RegisterHandlers はメール・面接レポート・診断妥当性のハンドラを登録する。
+func (s *Server) RegisterHandlers(email EmailSender, interview InterviewReportGenerator, diagnosis DiagnosisQualityRunner) {
 	if s == nil {
 		return
 	}
@@ -59,6 +65,7 @@ func (s *Server) RegisterHandlers(email EmailSender, interview InterviewReportGe
 	s.mux.HandleFunc(TaskEmailRegistration, handleEmailRegistration(email))
 	s.mux.HandleFunc(TaskEmailPasswordReset, handleEmailPasswordReset(email))
 	s.mux.HandleFunc(TaskInterviewReport, handleInterviewReport(interview))
+	s.mux.HandleFunc(TaskDiagnosisQuality, handleDiagnosisQuality(diagnosis))
 }
 
 // Start はブロッキングせずにワーカーを開始する。
@@ -66,12 +73,12 @@ func (s *Server) Start() error {
 	if s == nil || s.server == nil {
 		return nil
 	}
-	go func() {
+	safego.Go(func() {
 		log.Printf("[queue] asynq worker starting")
 		if err := s.server.Run(s.mux); err != nil {
 			log.Printf("[queue] asynq worker stopped: %v", err)
 		}
-	}()
+	})
 	return nil
 }
 
@@ -138,5 +145,18 @@ func handleInterviewReport(interview InterviewReportGenerator) asynq.HandlerFunc
 			return fmt.Errorf("interview report generator is nil")
 		}
 		return interview.GenerateReportForSession(ctx, p.SessionID)
+	}
+}
+
+func handleDiagnosisQuality(diagnosis DiagnosisQualityRunner) asynq.HandlerFunc {
+	return func(ctx context.Context, t *asynq.Task) error {
+		var p DiagnosisQualityPayload
+		if err := json.Unmarshal(t.Payload(), &p); err != nil {
+			return fmt.Errorf("decode payload: %w", err)
+		}
+		if diagnosis == nil {
+			return fmt.Errorf("diagnosis quality runner is nil")
+		}
+		return diagnosis.RunDiagnosisQuality(ctx, p.UserID, p.SessionID)
 	}
 }

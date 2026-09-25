@@ -477,24 +477,24 @@ func seedDetailedQuestions(db *gorm.DB) error {
 			IsActive:       true,
 		},
 
-		// ビジネス思考・目標志向
+		// ビジネス思考・目標志向（成長志向へ寄せない）
 		{
 			Question:       "仕事やプロジェクトにおいて、どのような成果を出すことを重視しますか？",
-			WeightCategory: "成長志向",
+			WeightCategory: "チャレンジ志向",
 			WeightValue:    8,
 			Description:    "成果志向を評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "顧客や利用者の視点で考えたり、行動したりした経験はありますか？",
-			WeightCategory: "成長志向",
+			WeightCategory: "コミュニケーション力",
 			WeightValue:    8,
 			Description:    "顧客志向を評価",
 			IsActive:       true,
 		},
 		{
 			Question:       "将来、どのような価値を社会や組織に提供したいと考えていますか？",
-			WeightCategory: "成長志向",
+			WeightCategory: "リーダーシップ志向",
 			WeightValue:    7,
 			Description:    "キャリアビジョンと価値観を評価",
 			IsActive:       true,

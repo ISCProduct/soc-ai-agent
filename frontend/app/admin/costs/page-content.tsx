@@ -13,6 +13,7 @@ import {
 } from 'recharts'
 import { ArrowLeft, Info } from 'lucide-react'
 import { authService } from '@/lib/auth'
+import { useRequirePlatformAdmin } from '@/lib/admin/use-require-platform-admin'
 import { cn } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -46,6 +47,25 @@ type ModelRow = {
   total_tokens: number
   call_count: number
 }
+
+// #1294: 機能別・プロバイダ別・モデル別・組織別の内訳
+type BreakdownRow = {
+  key: string
+  total_cost_usd: number
+  total_tokens: number
+  call_count: number
+  avg_latency_ms: number
+  cache_hit_count: number
+}
+
+const BREAKDOWN_AXES = [
+  { value: 'feature', label: '機能別' },
+  { value: 'provider', label: '推論先別' },
+  { value: 'model', label: 'モデル別' },
+  { value: 'organization', label: '学校/企業別' },
+] as const
+
+type BreakdownAxis = (typeof BREAKDOWN_AXES)[number]['value']
 
 type Summary = {
   current_month_cost_usd: number
@@ -184,12 +204,15 @@ function CostBarChart({
 }
 
 export default function PageContent() {
+  const platformReady = useRequirePlatformAdmin()
   const [adminEmail, setAdminEmail] = useState('')
   const [summary, setSummary] = useState<Summary | null>(null)
   const [daily, setDaily] = useState<DailyRow[]>([])
   const [monthly, setMonthly] = useState<MonthlyRow[]>([])
   const [realtimeDaily, setRealtimeDaily] = useState<RealtimeDailyRow[]>([])
   const [dailyDays, setDailyDays] = useState<(typeof DAY_RANGES)[number]>(30)
+  const [breakdownAxis, setBreakdownAxis] = useState<BreakdownAxis>('feature')
+  const [breakdown, setBreakdown] = useState<BreakdownRow[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -208,17 +231,23 @@ export default function PageContent() {
     setError('')
     const h = { 'X-Admin-Email': adminEmail, 'X-Admin-Token': authService.getStoredToken() || '' }
     try {
-      const [sumRes, dailyRes, monthlyRes] = await Promise.all([
+      const [sumRes, dailyRes, monthlyRes, breakdownRes] = await Promise.all([
         fetch('/api/admin/costs', { headers: h }),
         fetch(`/api/admin/costs/daily?days=${dailyDays}`, { headers: h }),
         fetch('/api/admin/costs/monthly?months=12', { headers: h }),
+        fetch(`/api/admin/costs/breakdown?by=${breakdownAxis}&days=${dailyDays}`, { headers: h }),
       ])
-      const [sumData, dailyData, monthlyData] = await Promise.all([
+      const [sumData, dailyData, monthlyData, breakdownData] = await Promise.all([
         readCostJson(sumRes),
         readCostJson(dailyRes),
         readCostJson(monthlyRes),
+        readCostJson(breakdownRes),
       ])
-      const fail = costErrorMessage(sumData) || costErrorMessage(dailyData) || costErrorMessage(monthlyData)
+      const fail =
+        costErrorMessage(sumData) ||
+        costErrorMessage(dailyData) ||
+        costErrorMessage(monthlyData) ||
+        costErrorMessage(breakdownData)
       if (fail) {
         setError(fail)
         return
@@ -227,14 +256,21 @@ export default function PageContent() {
       setDaily((dailyData.daily as DailyRow[] | undefined) ?? [])
       setMonthly((monthlyData.monthly as MonthlyRow[] | undefined) ?? [])
       setRealtimeDaily((dailyData.realtime_daily as RealtimeDailyRow[] | undefined) ?? [])
+      setBreakdown((breakdownData.breakdown as BreakdownRow[] | undefined) ?? [])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '取得に失敗しました')
     } finally {
       setLoading(false)
     }
-  }, [adminEmail, dailyDays])
+  }, [adminEmail, dailyDays, breakdownAxis])
 
-  useEffect(() => { fetchAll() }, [fetchAll])
+  useEffect(() => {
+    if (!platformReady) return
+    fetchAll()
+  }, [platformReady, fetchAll])
+
+  // フック呼び出し順を変えないため、ガードは全フックの後に置く
+  if (!platformReady) return null
 
   const totalDailyCost = daily.reduce((s, r) => s + r.total_cost_usd, 0)
   const maxDailyModel = summary?.model_breakdown?.[0]?.total_cost_usd ?? 0.0001
@@ -493,6 +529,72 @@ export default function PageContent() {
               </TableBody>
             </Table>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* 利用量の内訳（#1294）。ローカル推論はコスト0なので、件数とレイテンシで効果を見る */}
+      <Card className="mb-6">
+        <CardHeader>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <CardTitle className="text-base">AI利用量の内訳（過去{dailyDays}日）</CardTitle>
+            <div className="inline-flex rounded-md border p-0.5">
+              {BREAKDOWN_AXES.map((axis) => (
+                <button
+                  key={axis.value}
+                  type="button"
+                  onClick={() => setBreakdownAxis(axis.value)}
+                  className={cn(
+                    'px-3 py-1 text-xs rounded-sm font-medium transition-colors',
+                    breakdownAxis === axis.value
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-accent',
+                  )}
+                >
+                  {axis.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {breakdown.length === 0 ? (
+            <p className="text-center text-muted-foreground py-6">データなし</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{BREAKDOWN_AXES.find((a) => a.value === breakdownAxis)?.label}</TableHead>
+                    <TableHead className="text-right">コスト (推定 USD)</TableHead>
+                    <TableHead className="text-right">呼び出し数</TableHead>
+                    <TableHead className="text-right">トークン数</TableHead>
+                    <TableHead className="text-right">平均レイテンシ</TableHead>
+                    <TableHead className="text-right">キャッシュヒット</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {breakdown.map((row) => (
+                    <TableRow key={row.key}>
+                      <TableCell>
+                        <Badge variant="outline">{row.key}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">${row.total_cost_usd.toFixed(4)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{row.call_count.toLocaleString()}</TableCell>
+                      <TableCell className="text-right tabular-nums">{row.total_tokens.toLocaleString()}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {Math.round(row.avg_latency_ms).toLocaleString()} ms
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{row.cache_hit_count.toLocaleString()}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <p className="text-xs text-muted-foreground mt-3">
+                コストは記録時の単価で計算した推定値です。実請求額とは一致しません。
+                ローカル推論は $0 で記録されるため、件数とレイテンシで効果を見てください。
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 

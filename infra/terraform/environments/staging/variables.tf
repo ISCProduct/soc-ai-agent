@@ -157,6 +157,26 @@ variable "openai_api_key_plain" {
   default     = ""
 }
 
+variable "gbizinfo_api_key" {
+  type        = string
+  description = "gBizINFO Web-APIのアクセストークン(平文、Secrets Manager未使用のためuser_dataに直接埋め込む)。未設定時はgBizINFO連携が無効になり、企業情報の取得がweb_searchに寄る"
+  sensitive   = true
+  default     = ""
+}
+
+variable "gbizinfo_base_url" {
+  type        = string
+  description = "gBizINFOのベースURL。提供されているのはv1で、コード側が /v1/hojin/... を付ける"
+  default     = "https://info.gbiz.go.jp/hojin"
+}
+
+variable "houjin_bangou_app_id" {
+  type        = string
+  description = "国税庁 法人番号システムWeb-APIのアプリケーションID(平文、Secrets Manager未使用のためuser_dataに直接埋め込む)。未設定時は法人番号の自動特定だけが無効になる"
+  sensitive   = true
+  default     = ""
+}
+
 variable "openai_model" {
   type        = string
   description = "チャット採点・要約・面接進行など汎用タスクのデフォルトモデル。未設定時はコード側でgpt-4o-miniにフォールバックするが、環境変数の設定漏れ・実験用設定の残留による意図しない高コストモデル化を防ぐため明示的に固定する"
@@ -251,4 +271,11 @@ variable "staging_api_subdomain" {
   type        = string
   description = "staging バックエンドAPI用サブドメインラベル"
   default     = "api-stg"
+}
+
+variable "sentry_dsn" {
+  type        = string
+  description = "サーバー側(Backend/RAG)のSentry DSN(#1185)。未設定ならSentryは初期化されない。ブラウザ側はビルド時に焼き込むためCIのシークレット(SENTRY_DSN_FRONTEND_STAGING)で渡す"
+  sensitive   = true
+  default     = ""
 }

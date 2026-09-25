@@ -3,7 +3,9 @@ package chat
 import (
 	"Backend/internal/models"
 	internalOpenAI "Backend/internal/openai"
+	"Backend/internal/safego"
 	"Backend/internal/services/prompts"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -43,6 +45,7 @@ func (e *AnswerEvaluator) llmEvaluate(ctx context.Context, question, answer stri
 		return nil
 	}
 	userPrompt := prompts.BuildAnswerQualityUserPrompt(question, answer)
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureChatAnswerEval)
 	raw, err := e.llmClient.ChatCompletionJSON(ctx, prompts.AnswerQualitySystemPrompt, userPrompt, 0.2, 256)
 	if err != nil {
 		log.Printf("[AnswerEvaluator] LLM評価エラー: %v", err)
@@ -111,20 +114,20 @@ func (e *AnswerEvaluator) EvaluateHybrid(ctx context.Context, question *models.P
 	)
 
 	wg.Add(2)
-	go func() {
+	safego.Go(func() {
 		defer wg.Done()
 		r, err := e.Evaluate(question, answer)
 		mu.Lock()
 		ruleResult, ruleErr = r, err
 		mu.Unlock()
-	}()
-	go func() {
+	})
+	safego.Go(func() {
 		defer wg.Done()
 		r := e.llmEvaluate(ctx, questionText, answer)
 		mu.Lock()
 		llmResult = r
 		mu.Unlock()
-	}()
+	})
 	wg.Wait()
 
 	if ruleErr != nil {

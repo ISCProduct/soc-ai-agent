@@ -1,4 +1,4 @@
-import type { MarketType } from '@/lib/company-data'
+import type { MarketType } from '@/lib/company/data'
 
 // --- 編集リストのグルーピング（企業ごと・関連会社ごとにまとめる） -----------------
 

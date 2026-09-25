@@ -19,8 +19,9 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import ClosedCaptionIcon from '@mui/icons-material/ClosedCaption'
 import dynamic from 'next/dynamic'
 import { PRIMARY } from '../constants'
-import { formatSeconds } from '@/lib/interview-utils'
+import { formatSeconds } from '@/lib/interview/utils'
 import type { Utterance } from '../types'
+import styles from './interview.module.css'
 
 const ThreeAvatar = dynamic(() => import('./ThreeAvatar'), {
   ssr: false,
@@ -277,12 +278,7 @@ export default function SessionScreen({
                 ref={sessionVideoCallbackRef}
                 muted
                 playsInline
-                style={{
-                  position: 'absolute', inset: 0,
-                  width: '100%', height: '100%',
-                  objectFit: 'cover', transform: 'scaleX(-1)',
-                  display: cameraEnabled ? 'block' : 'none',
-                }}
+                className={`${styles.cameraVideo} ${styles.cameraVideoFill} ${cameraEnabled ? '' : styles.cameraVideoHidden}`}
               />
               {!cameraEnabled && (
                 <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -388,8 +384,13 @@ export default function SessionScreen({
             {/* 主要ボタン行 */}
             <Box sx={{ display: 'flex', gap: 1 }}>
               {/* 録音 / 話す ボタン */}
-              <Tooltip title={aiSpeaking ? 'AI発話中...' : turnPending ? 'AIが考えています...' : isRecording ? 'クリックして送信' : 'クリックして話す'}>
-                <span style={{ flex: 1 }}>
+              {/*
+                「AI発話中」「AIが考えています」をやめた。
+                面接練習は「面接官と話している」という前提が成り立ってこそ
+                練習になる。話し相手をAIと呼ぶとその前提が崩れる。
+              */}
+              <Tooltip title={aiSpeaking ? '面接官が話しています' : turnPending ? '面接官が考えています' : isRecording ? 'クリックして送信' : 'クリックして話す'}>
+                <span className={styles.recordButtonWrap}>
                   <Button
                     fullWidth
                     onClick={isRecording ? onStopRecording : onStartRecording}
@@ -413,7 +414,7 @@ export default function SessionScreen({
                       '&:disabled': { bgcolor: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.3)', border: '1px solid rgba(255,255,255,0.1)' },
                     }}
                   >
-                    {isRecording ? 'レコーディング中...' : turnPending ? '処理中...' : aiSpeaking ? 'AI発話中' : '話す'}
+                    {isRecording ? '録音中' : turnPending ? '送信中' : aiSpeaking ? '面接官が発言中' : '話す'}
                   </Button>
                 </span>
               </Tooltip>

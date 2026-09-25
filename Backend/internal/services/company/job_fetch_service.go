@@ -3,10 +3,12 @@ package company
 import (
 	"Backend/domain/repository"
 	"Backend/internal/companyfetch"
+	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/ragclient"
 	"Backend/internal/scraper"
+	"Backend/internal/usagectx"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -126,7 +128,7 @@ func (s *JobFetchService) FetchAndSaveJobs(ctx context.Context, companyID uint, 
 	// RAGのChromaDBに求人情報を保存してレビュー精度を向上させる
 	if len(saved) > 0 {
 		ragContent := buildJobsRAGContent(company.Name, allJobs)
-		go s.pushContextToRAG(company.Name, "jobs", ragContent)
+		go s.pushContextToRAG(middleware.GetRequestID(ctx), company.Name, "jobs", ragContent)
 	}
 
 	return saved, nil
@@ -180,13 +182,14 @@ func (s *JobFetchService) FetchAndSavePersona(ctx context.Context, companyID uin
 
 	// RAGのChromaDBに人物像データを保存して履歴書・ESレビューの精度を向上させる
 	ragContent := buildPersonaRAGContent(company.Name, companyInfo, profile)
-	go s.pushContextToRAG(company.Name, "persona", ragContent)
+	go s.pushContextToRAG(middleware.GetRequestID(ctx), company.Name, "persona", ragContent)
 
 	return profile, nil
 }
 
 // pushContextToRAG は取得した企業情報をRAGサービスのChromaDBに非同期でpushする。
-func (s *JobFetchService) pushContextToRAG(companyName, contextType, content string) {
+// requestID は呼び出し元リクエストのIDをRAGのログまで引き継ぐために受け取る(#1188)。
+func (s *JobFetchService) pushContextToRAG(requestID, companyName, contextType, content string) {
 	ragURL := strings.TrimSpace(os.Getenv("RAG_REVIEW_URL"))
 	if ragURL == "" {
 		return
@@ -200,15 +203,16 @@ func (s *JobFetchService) pushContextToRAG(companyName, contextType, content str
 		return
 	}
 	url := strings.TrimRight(ragURL, "/") + "/company/context"
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
+	// 呼び出し元リクエストはすでに完了している可能性があるため、
+	// キャンセルは引き継がずリクエストIDのみ引き継ぐ。
+	ctx, cancel := context.WithTimeout(middleware.WithRequestID(context.Background(), requestID), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 	ragclient.SetAuthHeader(req)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	req = req.WithContext(ctx)
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -345,8 +349,27 @@ func (s *JobFetchService) upsertJobPosition(companyID uint, job scraper.JobPosti
 
 // analyzePersonaProfile は企業情報と求人情報テキストから10カテゴリのスコアを導出する。
 func (s *JobFetchService) analyzePersonaProfile(ctx context.Context, companyName, companyInfo, positionText string) (*models.CompanyWeightProfile, error) {
-	systemPrompt := `あなたは採用コンサルタントです。企業情報から「企業が重視する人物像」を10カテゴリのスコア（0〜100）で評価し、指定のJSON形式のみで回答してください。`
-	userPrompt := fmt.Sprintf(`「%s」が求める人物像を以下の10カテゴリでスコア化してください（0〜100、50が中立）。
+	// 各軸を独立した絶対評価で尋ねると、どの企業でも「重視する」と答えるため
+	// 全社が上限に張り付き、識別に使えないプロファイルになる(#1331)。
+	// 「平均的な日本企業と比べた相対評価」であることと、
+	// 全軸を高くできないことを明示する。
+	systemPrompt := `あなたは採用コンサルタントです。企業が求める人物像を10カテゴリのスコアで評価し、指定のJSON形式のみで回答してください。
+
+スコアは「平均的な日本企業と比べてどれだけ重視するか」の相対評価です。
+- 50 = 平均的な日本企業と同程度
+- 80以上 = その企業を特徴づけるほど強く重視する
+- 20以下 = 平均的な企業より明らかに重視しない
+
+どの企業もチームワークや誠実さは重視します。そういう「どこでも重視するもの」は
+50前後にしてください。高くしてよいのは、同業他社と比べてもその企業を
+際立たせている項目だけです。
+
+必ず守ること:
+- 80以上を付けてよいのは最大3項目まで
+- 少なくとも2項目は40以下にする
+- 10項目すべてを似た値にしない（最大値と最小値の差を40以上にする）`
+	userPrompt := fmt.Sprintf(`「%s」が求める人物像を以下の10カテゴリでスコア化してください（0〜100）。
+平均的な日本企業を50とした相対評価です。この企業を他社と見分けられる形にしてください。
 JSON形式のみで回答してください（説明文は不要）。
 
 {
@@ -368,6 +391,7 @@ JSON形式のみで回答してください（説明文は不要）。
 求人情報:
 %s`, companyName, companyInfo, positionText)
 
+	ctx = usagectx.WithFeature(ctx, usagectx.FeatureCompanyJobFetch)
 	jsonStr, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.3, 500)
 	if err != nil {
 		return nil, fmt.Errorf("人物像分析失敗: %w", err)
@@ -395,7 +419,7 @@ JSON形式のみで回答してください（説明文は不要）。
 		return nil, fmt.Errorf("人物像JSONのunmarshal失敗: %w", err)
 	}
 
-	return &models.CompanyWeightProfile{
+	profile := &models.CompanyWeightProfile{
 		TechnicalOrientation:  clampScore(raw.TechnicalOrientation),
 		TeamworkOrientation:   clampScore(raw.TeamworkOrientation),
 		LeadershipOrientation: clampScore(raw.LeadershipOrientation),
@@ -406,7 +430,27 @@ JSON形式のみで回答してください（説明文は不要）。
 		ChallengeSeeking:      clampScore(raw.ChallengeSeeking),
 		DetailOrientation:     clampScore(raw.DetailOrientation),
 		CommunicationSkill:    clampScore(raw.CommunicationSkill),
-	}, nil
+	}
+
+	// プロンプトで分散を要求しても従わないことがあるため、幅が狭ければ
+	// 順序を保ったまま引き伸ばす。識別力の無いプロファイルは、その軸が
+	// 全企業に同じ定数を足すだけになり並び順に寄与しない(#1331)。
+	if normalizeProfileSpread(profile) {
+		log.Printf("[Persona] %s: プロファイルの幅が狭いため正規化した", companyName)
+	}
+	if profileIsDegenerate(profile) {
+		// 引き伸ばしても差が出ない（全軸ほぼ同値）。
+		//
+		// ここでエラーにしてはいけない。プロファイルが無い企業は
+		// matching_service.go の defaultCompanyWeightProfile（全軸50）に
+		// フォールバックするため、保存を拒むと「最も平坦なプロファイル」に
+		// 落ちる。平均的な学生に対してマッチ度がほぼ100になり、かえって
+		// 上位に来てしまう。
+		//
+		// 保存はしたうえで記録に残し、再生成の判断材料にする。
+		log.Printf("[Persona] %s: 識別力の無いプロファイル（全軸ほぼ同値）。企業情報が薄い可能性がある", companyName)
+	}
+	return profile, nil
 }
 
 func clampScore(v int) int {

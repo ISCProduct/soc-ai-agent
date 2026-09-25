@@ -122,6 +122,24 @@ run_case "前後に空白があっても on として扱う"               " on 
 run_case "日付リスト未設定でも override=on なら起動する"    "on"          "__missing__" "$TODAY" 1
 run_case "部分一致で誤判定しない(前方一致の別日)"           "auto"        "2026-09-081" "$TODAY" 0
 
+# 復帰日つきオーバーライド(on:YYYY-MM-DD / off:YYYY-MM-DD)。
+# 「この日(JST)になったら auto へ戻す」。期限の無い off を戻し忘れて
+# 起動日を丸ごと潰す事故(2026-09-12 の off が 9/23 まで放置)を防ぐための機能。
+# Go 側 (discord.ResolveOverride) と同じ判定になっている必要がある。
+run_case "off:復帰日の前日はまだ停止する"                   "off:2026-09-09" "$TODAY"      "$TODAY" 0
+run_case "off:復帰日の当日は auto へ戻り、対象日なら起動"   "off:2026-09-08" "$TODAY"      "$TODAY" 1
+run_case "off:復帰日を過ぎていれば auto へ戻る"             "off:2026-09-01" "$TODAY"      "$TODAY" 1
+run_case "off:復帰後も対象外の日なら起動しない"             "off:2026-09-01" "$NOT_TODAY"  "$TODAY" 0
+run_case "on:復帰日の前日はまだ起動する"                    "on:2026-09-09"  "$NOT_TODAY"  "$TODAY" 1
+run_case "on:復帰日の当日は auto へ戻り、対象外なら停止"    "on:2026-09-08"  "$NOT_TODAY"  "$TODAY" 0
+run_case "年跨ぎの復帰日も文字列比較で正しい"               "on:2027-01-01"  "$NOT_TODAY"  "$TODAY" 1
+run_case "復帰日が不正な形式なら auto に倒す"               "off:2026/09/08" "$NOT_TODAY"  "$TODAY" 0
+# 形式だけ見ると通ってしまう値。9/31 は実在せず、9999-99-99 は事実上の永久停止になる。
+run_case "存在しない日付の復帰日は auto に倒す"             "off:2026-09-31" "$TODAY"      "$TODAY" 1
+run_case "9999-99-99 のような値も auto に倒す"             "off:9999-99-99" "$TODAY"      "$TODAY" 1
+run_case "復帰日が空なら auto に倒す"                       "off:"           "$NOT_TODAY"  "$TODAY" 0
+run_case "大文字と空白があっても復帰日を解釈する"           " OFF:2026-09-09 " "$TODAY"    "$TODAY" 0
+
 # 日付リストのAWSエラーは握り潰してはいけない(誤って全サービスを0にしないため)
 run_exit_case "日付リスト取得のAWSエラーで失敗する"         "auto"        "__error__"   nonzero
 run_exit_case "正常系は0で終了する"                         "auto"        "$TODAY"      zero
@@ -139,7 +157,7 @@ fi
 ran=$((ran + 1))
 
 # 関数名の打ち間違い等でケースが丸ごと実行されないまま PASS になるのを防ぐ
-EXPECTED_CASES=16
+EXPECTED_CASES=28
 if [ "$ran" != "$EXPECTED_CASES" ]; then
   echo "NG   実行されたケースが $ran 件。想定は $EXPECTED_CASES 件(ケースの追加時は EXPECTED_CASES も更新すること)"
   fail=1

@@ -1,7 +1,9 @@
 package interfaces
 
 import (
+	"Backend/internal/repositories"
 	"Backend/internal/services/costs"
+	"context"
 	"time"
 )
 
@@ -11,6 +13,8 @@ type APICostService interface {
 	GetModelBreakdown(since time.Time) ([]costs.ModelCostSummary, error)
 	GetDailyCosts(nDays int) ([]costs.DailyCostSummary, error)
 	GetMonthlyCosts(nMonths int) ([]costs.MonthlyCostSummary, error)
+	// GetUsageBreakdown は機能別・プロバイダ別・モデル別・組織別の集計（#1294）。
+	GetUsageBreakdown(ctx context.Context, since time.Time, dim repositories.BreakdownDimension) ([]costs.UsageBreakdownSummary, error)
 }
 
 // RealtimeUsageService リアルタイム使用量サービスのインターフェース

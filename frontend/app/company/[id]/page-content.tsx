@@ -35,8 +35,9 @@ import {
   type CompanyDetailViewModel,
 } from './companyDetailUtils'
 import { fetchWithTimeout } from '@/lib/fetch-timeout'
+import { ProvenanceBadge } from '@/components/company/ProvenanceBadge'
 
-const CompanyDiagram = dynamic(() => import('@/components/company-diagram'), {
+const CompanyDiagram = dynamic(() => import('@/components/CompanyDiagram'), {
   ssr: false,
   loading: () => (
     <Box sx={{ py: 4, textAlign: 'center', color: 'text.secondary' }}>
@@ -186,7 +187,11 @@ export default function PageContent() {
                     {company.name}
                   </Typography>
                 </Stack>
-                <Typography color="text.secondary">{company.industry || '業種未登録'}</Typography>
+                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                  <Typography color="text.secondary">{company.industry || '業種未登録'}</Typography>
+                  {/* 情報の出どころ（公的DB由来かAI推定か）を明示する(#1125) */}
+                  <ProvenanceBadge provenance={company.provenance.basic} target="基本情報" />
+                </Stack>
               </Box>
               <Box sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
                 <Stack direction="row" spacing={0.75} alignItems="center" justifyContent={{ sm: 'flex-end' }}>
@@ -270,6 +275,7 @@ export default function PageContent() {
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
                 <CodeIcon fontSize="small" />
                 <Typography fontWeight={700}>技術スタック</Typography>
+                <ProvenanceBadge provenance={company.provenance.tech} target="技術スタック" />
               </Stack>
               <Stack spacing={1.5}>
                 {company.techStack.length > 0 && (
@@ -440,6 +446,7 @@ export default function PageContent() {
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
               <AccountTreeIcon fontSize="small" />
               <Typography fontWeight={700}>企業関連図</Typography>
+              <ProvenanceBadge provenance={company.provenance.relations} target="企業関連図" />
             </Stack>
 
             <Tabs

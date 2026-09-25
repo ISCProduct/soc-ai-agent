@@ -1,3 +1,14 @@
+# ============================================================
+# ローカル開発用 Compose（既定ファイル）
+#
+# `docker compose` は compose.yml を優先して読み込むため、ローカル開発では
+# ファイル指定なしの `docker compose up -d` でこのファイルが使われる。
+# ソースを build して起動し、DB は named volume mysql_data を使う。
+#
+# 同ディレクトリの docker-compose.yml は staging EC2 用（ECR イメージを pull）。
+# ローカルで誤って指定しないこと。
+# 手順: docs/wiki/getting-started.md
+# ============================================================
 services:
   # Backend API Server
   app:
@@ -11,8 +22,8 @@ services:
     volumes:
       # 開発環境: ソースコードをマウント
       - ./Backend:/app
-      - go_mod_cache:/go/pkg/mod
-      - go_build_cache:/root/.cache/go-build
+      - go_mod_cache_app:/home/app/go/pkg/mod
+      - go_build_cache_app:/home/app/.cache/go-build
     # compose up 時に migrate → air の順で起動（スキーマ未適用で API が落ちないようにする）
     entrypoint: ["/bin/sh", "/app/scripts/docker-entrypoint.dev.sh"]
     command: ["air", "-c", ".air.toml"]
@@ -44,8 +55,8 @@ services:
     container_name: soc-ai-migrate
     volumes:
       - ./Backend:/app
-      - go_mod_cache:/go/pkg/mod
-      - go_build_cache:/root/.cache/go-build
+      - go_mod_cache_app:/home/app/go/pkg/mod
+      - go_build_cache_app:/home/app/.cache/go-build
     working_dir: /app
     command: ["go", "run", "./cmd/migrate", "up"]
     env_file:
@@ -129,6 +140,9 @@ services:
       - BACKEND_URL=${BACKEND_URL:-http://app:8080}
       - COMPANY_GRAPH_URL=${COMPANY_GRAPH_URL:-http://company-graph:9100}
       - WATCHPACK_POLLING=${WATCHPACK_POLLING:-true}
+      - NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN:-}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_RELEASE=${SENTRY_RELEASE:-}
     depends_on:
       app:
         condition: service_started
@@ -165,12 +179,15 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       - OPENAI_HINTS_MODEL=${OPENAI_HINTS_MODEL:-gpt-4o-mini}
-      - OPENAI_HINTS_PARSE_MODEL=${OPENAI_HINTS_PARSE_MODEL:-gpt-4o}
+      - OPENAI_HINTS_PARSE_MODEL=${OPENAI_HINTS_PARSE_MODEL:-gpt-4o-mini}
       - CHROMA_HOST=${CHROMA_HOST:-chroma}
       - CHROMA_PORT=${CHROMA_PORT:-8000}
       # Phase 1B: Read 経路は既定で Search しない（admin 温存時のみ true）
       - RAG_ALLOW_WEB_SEARCH_FALLBACK=${RAG_ALLOW_WEB_SEARCH_FALLBACK:-false}
       - RAG_USE_DEEP_RESEARCH=${RAG_USE_DEEP_RESEARCH:-false}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_RELEASE=${SENTRY_RELEASE:-}
+      - APP_ENV=${APP_ENV:-development}
     volumes:
       - rag_data:/data
     depends_on:
@@ -200,9 +217,9 @@ volumes:
     driver: local
   chroma_data:
     driver: local
-  go_mod_cache:
+  go_mod_cache_app:
     driver: local
-  go_build_cache:
+  go_build_cache_app:
     driver: local
 
 networks:

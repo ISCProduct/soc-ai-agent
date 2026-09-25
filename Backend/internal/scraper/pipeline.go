@@ -27,7 +27,7 @@ func (p *Pipeline) Run(ctx context.Context, req RunRequest) (*RunResult, error) 
 			TargetYear: year,
 			Nodes:      map[string]*CompanyNode{},
 			Logs:       log.Lines(),
-		}, fmt.Errorf("GBizClient が設定されていません (GBIZINFO_API_TOKEN を確認してください)")
+		}, fmt.Errorf("GBizClient が設定されていません (GBIZINFO_API_KEY を確認してください)")
 	}
 
 	limit := req.MaxPages * 10

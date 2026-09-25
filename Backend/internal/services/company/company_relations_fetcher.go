@@ -55,6 +55,7 @@ type CompanyRelationsFetcher struct {
 	llm          *companyfetch.LLM
 	gbiz         *gbizinfo.GBizInfoService
 	flight       *CompanySearchFlight
+	shared       *SearchContext
 	infoFetcher  *CompanyInfoFetcher
 }
 
@@ -91,6 +92,13 @@ func (f *CompanyRelationsFetcher) SetSearchBudget(budget companyfetch.SearchBudg
 		f.llm = &companyfetch.LLM{}
 	}
 	f.llm.Budget = budget
+}
+
+// SetSharedSearch は企業ごとに1回だけ行う検索の結果を共有する入れ物を注入する(#1124)。
+func (f *CompanyRelationsFetcher) SetSharedSearch(sc *SearchContext) {
+	if f != nil {
+		f.shared = sc
+	}
 }
 
 func (f *CompanyRelationsFetcher) SetSearchFlight(flight *CompanySearchFlight) {
@@ -342,7 +350,7 @@ func (f *CompanyRelationsFetcher) acquireViaAISearch(ctx context.Context, compan
 		"企業名「%s」について次のJSON形式で回答してください。name ははっきりした組織名のみ（曖昧・JV・その他は禁止）。subsidiaries は議決権50%%以上のみ。50%%未満の出資は affiliates。資本関係が無い相手は business_partners。入札案件は省庁・自治体名。ratio はパーセント。description は取引内容（推定可、弱ければ空）。\n%s",
 		companyName, companyRelationsJSONSchema,
 	)
-	raw, modelsUsed, err := f.llm.SearchLiteThenParse(ctx, searchPrompt, systemPrompt, parseUser, 1200)
+	raw, modelsUsed, err := searchThenParse(ctx, f.shared, f.llm, companyName, sharedSearchPrompt(companyName, websiteURL), searchPrompt, systemPrompt, parseUser, 1200)
 	if err != nil {
 		return nil, fmt.Errorf("企業関係情報のAI取得失敗: %w", err)
 	}
@@ -407,6 +415,12 @@ description は具体的な取引内容（推定可）。弱い場合は空文�
 		"企業「%s」と関連企業（%s）について次のJSONを返してください。description は具体的な取引内容（推定可）。弱いフォールバックなら空文字（『主要取引先』と書かない）。\n%s",
 		companyName, partnerList, parseSchema,
 	)
+	// ここは共有検索を使わない。この補完パスが走るのは、1回目の取得で
+	// description が空だった相手が残っているときだけで、その「1回目」が
+	// 読んだのが共有テキストそのものだからだ。同じテキストを読み直しても
+	// description は埋まらず、補完が丸ごと無意味になる。
+	// 技術スタックを統合から外したのと同じ理由(#1124)。
+	// 相手を名指しした検索をここで別に撃つ。
 	raw, modelsUsed, err := f.llm.SearchLiteThenParse(ctx, searchPrompt, systemPrompt, parseUser, 1000)
 	if err != nil {
 		return nil, err
