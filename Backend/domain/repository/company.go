@@ -49,6 +49,8 @@ type CompanyRepository interface {
 	ListJobPositions(companyID, schoolID *uint, limit int) ([]models.CompanyJobPosition, error)
 	CreateOrUpdateWeightProfile(profile *models.CompanyWeightProfile) error
 	CountWeightProfiles() (int64, error)
+	// CountPublishedWithoutWeightProfile は公開中で会社単位プロファイルを持たない企業数を返す（#1380）。
+	CountPublishedWithoutWeightProfile() (int64, error)
 	ListPublishedL1WarmCandidates(limit int, infoTTL time.Duration) ([]models.CompanyL1WarmRow, error)
 	CountL1Coverage(infoTTL time.Duration) (*models.L1CoverageStats, error)
 	// ListActiveMissingFetchCandidates は基本情報/求人/Tech/関係のいずれかが不足しているアクティブ企業を返す。

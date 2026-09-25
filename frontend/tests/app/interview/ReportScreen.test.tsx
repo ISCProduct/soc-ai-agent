@@ -3,6 +3,8 @@
  */
 import { render, screen } from '@testing-library/react'
 import ReportScreen from '@/app/interview/components/ReportScreen'
+import { UTTERANCE_SAVE_FAILED_MESSAGE } from '@/app/interview/utteranceSave'
+import { REPORT_RETRY_FAILED_MESSAGE } from '@/app/interview/hooks/useInterviewSession'
 
 describe('ReportScreen', () => {
   const noop = () => {}
@@ -33,6 +35,20 @@ describe('ReportScreen', () => {
       />
     )
   }
+
+  // #1476: 発話保存が落ちたまま面接が終わると、レポートが欠ける/生成されない。
+  // その理由が画面に出ないとユーザーも運用側も原因に辿り着けない。
+  it('発話保存に失敗していたら、その旨を警告として表示する', () => {
+    renderScreen({ utteranceSaveFailed: true })
+
+    expect(screen.getByText(UTTERANCE_SAVE_FAILED_MESSAGE)).toBeInTheDocument()
+  })
+
+  it('発話保存に失敗していなければ警告を出さない', () => {
+    renderScreen()
+
+    expect(screen.queryByText(UTTERANCE_SAVE_FAILED_MESSAGE)).not.toBeInTheDocument()
+  })
 
   it('タイトル「面接レポート」を表示する', () => {
     renderScreen()
@@ -70,6 +86,18 @@ describe('ReportScreen', () => {
 
     expect(screen.getByText('レポート生成に失敗しました。')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '再試行' })).toBeInTheDocument()
+  })
+
+  // #1476: 再生成リクエスト自体が失敗したのに黙ってポーリングへ戻すと、
+  // ユーザーは「生成中」を見せられたまま再びタイムアウトするだけになる。
+  it('再生成リクエストが失敗したら、そのエラーを表示する', () => {
+    renderScreen({
+      reportStatus: 'timeout',
+      onRetryReport: jest.fn(),
+      reportRetryError: REPORT_RETRY_FAILED_MESSAGE,
+    })
+
+    expect(screen.getByText(REPORT_RETRY_FAILED_MESSAGE)).toBeInTheDocument()
   })
 
   it('再試行ボタン押下で onRetryReport が呼ばれる', () => {

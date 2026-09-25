@@ -183,7 +183,7 @@ export default function SelectionScreen({
                 <Box sx={{ height: '100%', width: '33%', bgcolor: PRIMARY }} />
               </Box>
             </Box>
-            <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>練習する企業・職種を選ぶ</Typography>
+            <Typography variant="h4" component="h1" sx={{ fontWeight: 700, color: '#0f172a', fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>練習する企業・職種を選ぶ</Typography>
             <Typography sx={{ color: '#64748b', fontSize: 15 }}>
               志望企業と職種を選択して、AIが面接内容をカスタマイズします。
             </Typography>

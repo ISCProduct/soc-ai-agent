@@ -128,7 +128,7 @@ func avgScoresJSON(scoresJSON string) (map[string]float64, *float64) {
 
 // ListUsers handles GET /api/admin/dashboard/users
 func (c *AdminDashboardController) ListUsers(ctx echo.Context) error {
-	limit := httpapi.IntQuery(ctx, "limit", 25)
+	limit := httpapi.LimitQuery(ctx, "limit", 25)
 	offset := (httpapi.IntQuery(ctx, "page", 1) - 1) * limit
 	query := ctx.QueryParam("query")
 	sort := ctx.QueryParam("sort") // avg_score_asc | avg_score_desc | session_count_desc | registered_desc

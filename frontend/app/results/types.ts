@@ -60,4 +60,6 @@ export interface RecommendationsDiagnostics {
   user_score_count?: number
   active_company_count?: number
   weight_profile_count?: number
+  /** 公開中なのに重視度プロファイルを持たない企業数（#1380。マッチング対象外） */
+  companies_without_profile?: number
 }

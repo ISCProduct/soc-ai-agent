@@ -50,4 +50,30 @@ describe('CompanyEntryPage', () => {
     expect(body.privacy_consent).toBe(true)
     expect(await screen.findByText(/会員登録のご案内をお送りしました/)).toBeInTheDocument()
   })
+
+  // 送信完了は早期returnでフォームごと差し替わるため、フォーム側の h1 を付けただけでは
+  // 「正常に投稿できたときだけ h1 が消える」状態になる（#1479）。
+  it('送信完了画面にも h1 が1つ残る', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ message: 'ok' }),
+    })
+
+    render(<CompanyEntryPage />)
+
+    // 送信前はフォーム見出しが h1。
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('企業情報登録フォーム')
+
+    fireEvent.change(screen.getByLabelText(/企業名/), { target: { value: 'テスト株式会社' } })
+    fireEvent.change(screen.getByLabelText(/担当者メールアドレス/), {
+      target: { value: 'hr@example.com' },
+    })
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: '送信する' }))
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('送信が完了しました')
+    })
+  })
 })

@@ -1,6 +1,9 @@
 package observability
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -29,8 +32,13 @@ func TestScrubEvent_RemovesSecrets(t *testing.T) {
 				"X-User-Token":         "user-secret",
 				"X-Company-User-Token": "company-secret",
 				"X-Internal-Token":     "rag-secret",
-				"X-Request-ID":         "req-keep",
-				"Content-Type":         "application/json",
+				// CloudFront は aliases の `*.shukatsu-ai.jp` 経由で api ドメインにも
+				// このヘッダーを付けて到達する。Sentry に残ると公開ALBへの frontend
+				// 直叩きで詐称 X-Forwarded-For を署名させられる(#1407)。
+				"x-origin-token": "cf-secret",
+				"Referer":        "https://shukatsu-ai.jp/verify-email?token=ONETIME",
+				"X-Request-ID":   "req-keep",
+				"Content-Type":   "application/json",
 			},
 			QueryString: "email=student@example.com",
 		},
@@ -48,7 +56,7 @@ func TestScrubEvent_RemovesSecrets(t *testing.T) {
 	}
 	for _, key := range []string{
 		"Authorization", "Cookie", "X-Admin-Token", "X-User-Token",
-		"X-Company-User-Token", "X-Internal-Token",
+		"X-Company-User-Token", "X-Internal-Token", "x-origin-token", "Referer",
 	} {
 		if _, ok := out.Request.Headers[key]; ok {
 			t.Errorf("%s が残っている", key)
@@ -92,5 +100,38 @@ func TestScrubEvent_短いメッセージはそのまま(t *testing.T) {
 	event := &sentry.Event{Exception: []sentry.Exception{{Value: "db connection failed"}}}
 	if got := scrubEvent(event, nil).Exception[0].Value; got != "db connection failed" {
 		t.Errorf("短いメッセージまで加工している: %q", got)
+	}
+}
+
+// 秘匿ヘッダーの一覧は frontend(lib/sentry.ts)と Backend の2箇所にある。
+// 片方へ足して他方を忘れると、同じヘッダーが一方の Sentry にだけ残る
+// （X-Origin-Token で実際に起きた）。両者を突き合わせて食い違いで落とす。
+func TestSensitiveHeaders_フロントと同期(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "..", "frontend", "lib", "sentry.ts"))
+	if err != nil {
+		t.Fatalf("frontend/lib/sentry.ts を読めない（移動したならこのテストも直す）: %v", err)
+	}
+	block := regexp.MustCompile(`(?s)SENSITIVE_HEADERS = new Set\(\[(.*?)\]\)`).FindSubmatch(src)
+	if block == nil {
+		t.Fatal("frontend/lib/sentry.ts の SENSITIVE_HEADERS を見つけられない")
+	}
+
+	front := map[string]bool{}
+	for _, m := range regexp.MustCompile(`'([^']+)'`).FindAllSubmatch(block[1], -1) {
+		front[string(m[1])] = true
+	}
+	if len(front) == 0 {
+		t.Fatal("frontend 側のヘッダーを1つも抽出できていない（記法が変わった可能性）")
+	}
+
+	for h := range front {
+		if !sensitiveHeaders[h] {
+			t.Errorf("frontend にだけある: %s（Backend の sensitiveHeaders にも足す）", h)
+		}
+	}
+	for h := range sensitiveHeaders {
+		if !front[h] {
+			t.Errorf("Backend にだけある: %s（frontend の SENSITIVE_HEADERS にも足す）", h)
+		}
 	}
 }

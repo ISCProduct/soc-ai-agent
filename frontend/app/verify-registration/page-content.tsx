@@ -127,6 +127,7 @@ function VerifyRegistrationContent() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              autoComplete="new-password"
               sx={{ mb: 2 }}
             />
             <TextField

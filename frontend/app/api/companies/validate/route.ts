@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { clientIpHeaders } from '@/lib/api-proxy'
 
 const API_BASE_URL = process.env.BACKEND_URL || 'http://app:8080'
 
@@ -7,7 +8,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const response = await fetch(`${API_BASE_URL}/api/companies/validate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // ゲストAIのIP単位制限を利用者ごとに効かせる(#1407)
+      headers: { 'Content-Type': 'application/json', ...clientIpHeaders(request) },
       body: JSON.stringify(body),
       cache: 'no-store',
     })

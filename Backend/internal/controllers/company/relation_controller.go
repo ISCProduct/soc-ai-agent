@@ -3,6 +3,7 @@ package company
 import (
 	"Backend/domain/repository"
 	"Backend/internal/companyfetch"
+	"Backend/internal/controllers/httpapi"
 	"Backend/internal/openai"
 	"Backend/internal/services/company"
 	"Backend/internal/services/shared"
@@ -127,23 +128,13 @@ func (ctrl *CompanyRelationController) GetCompanyJobPositions(ctx echo.Context) 
 // GetCompanies 企業一覧を取得
 // GET /api/companies
 func (ctrl *CompanyRelationController) GetCompanies(ctx echo.Context) error {
-	limitStr := ctx.QueryParam("limit")
 	offsetStr := ctx.QueryParam("offset")
 	industry := ctx.QueryParam("industry")
 	name := ctx.QueryParam("name")
 	tech := ctx.QueryParam("tech")
 
-	limit := 10 // デフォルト
+	limit := httpapi.LimitQuery(ctx, "limit", 10)
 	offset := 0
-
-	if limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
-			limit = l
-			if limit > 100 {
-				limit = 100 // 最大100件
-			}
-		}
-	}
 
 	if offsetStr != "" {
 		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {

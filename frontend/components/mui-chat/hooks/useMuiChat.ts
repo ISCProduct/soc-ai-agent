@@ -189,7 +189,6 @@ export function useMuiChat() {
       // 3. 新規生成
       let storedSessionId = localStorage.getItem('currentSessionId')
       if (storedSessionId) {
-        console.log('[MUI Chat] Loading session from localStorage:', storedSessionId)
         // localStorageから読み込んだ後は削除
         localStorage.removeItem('currentSessionId')
       } else {
@@ -198,7 +197,6 @@ export function useMuiChat() {
 
       if (!storedSessionId) {
         storedSessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`
-        console.log('[MUI Chat] Created new session:', storedSessionId)
       }
 
       sessionStorage.setItem('chatSessionId', storedSessionId)
@@ -206,7 +204,6 @@ export function useMuiChat() {
       setJobCategoryId(readStoredJobCategoryId(storedSessionId))
 
       try {
-        console.log('[MUI Chat] Loading history for session:', storedSessionId)
         await loadChatHistory(storedSessionId)
       } catch (error) {
         if (isSessionExpiredError(error)) {
@@ -232,7 +229,6 @@ export function useMuiChat() {
 
     // 分析完了後はメッセージ送信を無効化
     if (analysisComplete) {
-      console.log('[MUI Chat] Analysis already complete, ignoring message')
       return
     }
 
@@ -304,7 +300,6 @@ export function useMuiChat() {
 
         // セッション終了の場合 - 専用モーダルを表示
         if (isTerminated) {
-          console.log('[MUI Chat] Session terminated due to invalid answers')
           setAnalysisComplete(true)
           setShowTerminationModal(true) // 終了専用モーダル
           return newMessages
@@ -340,19 +335,6 @@ export function useMuiChat() {
           }, 0)
 
           // **重要: バックエンドのis_completeのみを信頼**
-          console.log(
-            '[MUI Chat] is_complete:',
-            response.is_complete,
-            'type:',
-            typeof response.is_complete,
-          )
-          console.log(
-            '[MUI Chat] evaluated_categories:',
-            response.evaluated_categories,
-            'total:',
-            response.total_categories,
-          )
-
           const allCompleted =
             response.all_phases?.every((phase) => {
               const required = phase.max_questions > 0 ? phase.max_questions : phase.min_questions
@@ -374,22 +356,18 @@ export function useMuiChat() {
           }
 
           if (response.is_complete === true) {
-            console.log('[MUI Chat] AI分析完了 - モーダルを表示します')
-            console.log('[MUI Chat] All phases completed:', allCompleted)
             setTimeout(() => {
               setAnalysisComplete(true)
               setAllPhasesCompleted(allCompleted)
               setShowCompletionModal(true)
             }, 300)
           } else {
-            console.log(`[MUI Chat] 質問継続中 (${newCount}/${response.total_questions ?? 15})`)
             // 明示的にfalseを設定
             setAnalysisComplete(false)
             setAllPhasesCompleted(false)
           }
         } else {
           // バリデーションエラーの場合は質問カウントを進めないが、完了状態はリセット
-          console.log('[MUI Chat] Validation error detected, not updating question count')
           // バリデーションエラー後も質問を継続できるように、完了状態を解除
           setAnalysisComplete(false)
           setAllPhasesCompleted(false)
@@ -407,7 +385,6 @@ export function useMuiChat() {
       // "all phases completed"エラーの場合は分析完了として扱う
       const errorMessage = (error as Error).message
       if (errorMessage.includes('all phases completed')) {
-        console.log('[MUI Chat] All phases completed - showing completion modal')
         setAnalysisComplete(true)
         setAllPhasesCompleted(true)
         setShowCompletionModal(true)
@@ -500,11 +477,8 @@ export function useMuiChat() {
   }
 
   const handleContinueChat = () => {
-    console.log('[MUI Chat] Continuing chat after completion')
-    console.log('[MUI Chat] Before reset - analysisComplete:', analysisComplete)
     setShowCompletionModal(false)
     setAnalysisComplete(false)
-    console.log('[MUI Chat] After reset - modal closed, analysisComplete set to false')
     // 入力フィールドを有効化するためにフォーカス
     setTimeout(() => {
       inputRef.current?.focus()
