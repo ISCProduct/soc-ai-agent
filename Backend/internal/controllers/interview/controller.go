@@ -354,6 +354,8 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		"is_deepening":             result.IsDeepening,
 		"resolved_company_id":      result.ResolvedCompanyID,
 		"custom_questions_enabled": result.CustomQuestionsEnabled,
+		"company_reading":          result.CompanyReading,
+		"company_info":             result.CompanyInfo,
 	})
 
 	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})
@@ -426,6 +428,8 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 		"is_deepening":             result.IsDeepening,
 		"resolved_company_id":      result.ResolvedCompanyID,
 		"custom_questions_enabled": result.CustomQuestionsEnabled,
+		"company_reading":          result.CompanyReading,
+		"company_info":             result.CompanyInfo,
 	})
 
 	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})

@@ -5,9 +5,17 @@ import (
 	"Backend/internal/services/company"
 	"context"
 	"strings"
+	"time"
 )
 
-// resolveCompanyInfo は共有キャッシュの brief を優先し、無ければクライアント文面を使う。
+const companyReadingCacheTTL = 24 * time.Hour
+
+type companyReadingCacheEntry struct {
+	value     string
+	expiresAt time.Time
+}
+
+// resolveCompanyInfo は共有企業情報を優先し、無ければクライアント文面を使う。
 // Search/LLM 調査はしない。companyType（general/sier）ではゲートしない。
 func (s *InterviewService) resolveCompanyInfo(companyID uint, companyName, clientInfo string) string {
 	brief := ""
@@ -72,5 +80,44 @@ func (s *InterviewService) resolveCompanyReading(ctx context.Context, companyID 
 			return reading
 		}
 	}
-	return s.lookupCompanyReading(ctx, companyName)
+	cacheKey := strings.TrimSpace(companyName)
+	if cached, ok := s.companyReadingCache.Load(cacheKey); ok {
+		entry, ok := cached.(companyReadingCacheEntry)
+		if ok && time.Now().Before(entry.expiresAt) {
+			return entry.value
+		}
+		s.companyReadingCache.Delete(cacheKey)
+	}
+	value, err, shared := s.companyReadingFlight.Do(cacheKey, func() (any, error) {
+		if cached, ok := s.companyReadingCache.Load(cacheKey); ok {
+			if entry, ok := cached.(companyReadingCacheEntry); ok &&
+				time.Now().Before(entry.expiresAt) {
+				return entry.value, nil
+			}
+			s.companyReadingCache.Delete(cacheKey)
+		}
+		reading, err := s.lookupCompanyReading(ctx, companyName)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(reading) != "" {
+			s.companyReadingCache.Store(cacheKey, companyReadingCacheEntry{
+				value:     strings.TrimSpace(reading),
+				expiresAt: time.Now().Add(companyReadingCacheTTL),
+			})
+		}
+		return reading, nil
+	})
+	if err != nil && shared && ctx.Err() == nil {
+		reading, retryErr := s.lookupCompanyReading(ctx, companyName)
+		if retryErr == nil && strings.TrimSpace(reading) != "" {
+			s.companyReadingCache.Store(cacheKey, companyReadingCacheEntry{
+				value:     strings.TrimSpace(reading),
+				expiresAt: time.Now().Add(companyReadingCacheTTL),
+			})
+		}
+		return reading
+	}
+	reading, _ := value.(string)
+	return reading
 }

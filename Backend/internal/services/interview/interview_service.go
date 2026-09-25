@@ -12,6 +12,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // jobChBufferSize はフォールバック用レポート生成キューのバッファ長。
@@ -36,11 +38,13 @@ type InterviewService struct {
 	jobCh                chan uint
 	// inFlightJobs はフォールバック channel 経路の重複排除（Redis 経路の TaskID 相当、#1476）。
 	// 投入時に登録し、worker が処理し終えるまで保持する。
-	inFlightJobs map[uint]struct{}
-	inFlightMu   sync.Mutex
-	workerOnce   sync.Once
-	jobs         shared.JobEnqueuer
-	ownsCompany  func(userID, companyID uint) (bool, error)
+	inFlightJobs         map[uint]struct{}
+	inFlightMu           sync.Mutex
+	workerOnce           sync.Once
+	jobs                 shared.JobEnqueuer
+	ownsCompany          func(userID, companyID uint) (bool, error)
+	companyReadingCache  sync.Map
+	companyReadingFlight singleflight.Group
 }
 
 // SkillScoreReader はGitHubスキルスコア取得の最小インターフェース。
@@ -227,6 +231,8 @@ type TurnResult struct {
 	UserText               string
 	AIText                 string
 	Audio                  []byte
+	CompanyReading         string
+	CompanyInfo            string
 	QuestionSource         string
 	QuestionCategory       string
 	IsDeepening            bool
