@@ -4,31 +4,23 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/services/company"
 	"context"
-	"fmt"
 	"strings"
+	"time"
 )
 
-// resolveCompanyInfo は共有キャッシュの brief を優先し、無ければクライアント文面を使う。
+const companyReadingCacheTTL = 24 * time.Hour
+
+type companyReadingCacheEntry struct {
+	value     string
+	expiresAt time.Time
+}
+
+// resolveCompanyInfo は共有企業情報を優先し、無ければクライアント文面を使う。
 // Search/LLM 調査はしない。companyType（general/sier）ではゲートしない。
 func (s *InterviewService) resolveCompanyInfo(companyID uint, companyName, clientInfo string) string {
 	brief := ""
 	if companyID > 0 || strings.TrimSpace(companyName) != "" {
-		cacheKey := fmt.Sprintf("%d:%s", companyID, strings.TrimSpace(companyName))
-		if cached, ok := s.companyProfileCache.Load(cacheKey); ok {
-			brief, _ = cached.(string)
-		} else {
-			value, _, _ := s.companyProfileFlight.Do(cacheKey, func() (any, error) {
-				if cached, ok := s.companyProfileCache.Load(cacheKey); ok {
-					return cached, nil
-				}
-				lookup := s.lookupCompanyProfile(companyID, companyName)
-				if strings.TrimSpace(lookup) != "" {
-					s.companyProfileCache.Store(cacheKey, lookup)
-				}
-				return lookup, nil
-			})
-			brief, _ = value.(string)
-		}
+		brief = s.lookupCompanyProfile(companyID, companyName)
 	}
 	if brief != "" {
 		return brief
@@ -90,17 +82,18 @@ func (s *InterviewService) resolveCompanyReading(ctx context.Context, companyID 
 	}
 	cacheKey := strings.TrimSpace(companyName)
 	if cached, ok := s.companyReadingCache.Load(cacheKey); ok {
-		reading, _ := cached.(string)
-		return reading
+		entry, ok := cached.(companyReadingCacheEntry)
+		if ok && time.Now().Before(entry.expiresAt) {
+			return entry.value
+		}
+		s.companyReadingCache.Delete(cacheKey)
 	}
 	value, _, _ := s.companyReadingFlight.Do(cacheKey, func() (any, error) {
-		if cached, ok := s.companyReadingCache.Load(cacheKey); ok {
-			return cached, nil
-		}
 		reading := s.lookupCompanyReading(ctx, companyName)
-		if strings.TrimSpace(reading) != "" {
-			s.companyReadingCache.Store(cacheKey, reading)
-		}
+		s.companyReadingCache.Store(cacheKey, companyReadingCacheEntry{
+			value:     strings.TrimSpace(reading),
+			expiresAt: time.Now().Add(companyReadingCacheTTL),
+		})
 		return reading, nil
 	})
 	reading, _ := value.(string)

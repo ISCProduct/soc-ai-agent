@@ -39,9 +39,7 @@ type InterviewService struct {
 	jobs                 shared.JobEnqueuer
 	ownsCompany          func(userID, companyID uint) (bool, error)
 	companyReadingCache  sync.Map
-	companyProfileCache  sync.Map
 	companyReadingFlight singleflight.Group
-	companyProfileFlight singleflight.Group
 }
 
 // SkillScoreReader はGitHubスキルスコア取得の最小インターフェース。

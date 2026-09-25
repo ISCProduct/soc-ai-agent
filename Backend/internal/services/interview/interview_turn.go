@@ -50,13 +50,18 @@ func (s *InterviewService) Turn(
 	}
 	companyContextCh := make(chan companyContextResult, 1)
 	go func() {
-		resolvedID := s.resolveCompanyID(companyID, companyName)
-		resolvedReading := companyReading
-		if companyName != "" && resolvedReading == "" {
-			resolvedReading = s.resolveCompanyReading(ctx, resolvedID, companyName)
+		result := companyContextResult{id: companyID, reading: companyReading, info: companyInfo}
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				log.Printf("[Interview] company context panic: %v", recovered)
+			}
+			companyContextCh <- result
+		}()
+		result.id = s.resolveCompanyID(companyID, companyName)
+		if companyName != "" && result.reading == "" {
+			result.reading = s.resolveCompanyReading(ctx, result.id, companyName)
 		}
-		resolvedInfo := s.resolveCompanyInfo(resolvedID, companyName, companyInfo)
-		companyContextCh <- companyContextResult{id: resolvedID, reading: resolvedReading, info: resolvedInfo}
+		result.info = s.resolveCompanyInfo(result.id, companyName, companyInfo)
 	}()
 
 	// STT: Whisper でユーザー音声をテキスト化。

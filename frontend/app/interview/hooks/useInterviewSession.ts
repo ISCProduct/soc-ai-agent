@@ -321,6 +321,7 @@ export function useInterviewSession({
     setSessionWarningShown(false)
     media.setMicEnabled(true); media.setCameraEnabled(true)
     historyRef.current = []
+    companyContextRef.current = { reading: '', info: '' }
 
     try {
       setStatus('connecting')
