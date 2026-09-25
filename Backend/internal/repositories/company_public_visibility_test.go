@@ -59,15 +59,23 @@ func newCapturingDB(t *testing.T) (*gorm.DB, *[]string) {
 // guard は #1203 のガード条件。cols は企業IDを持つ列。
 //
 // この文字列そのものが検査対象。
-//   - JOIN のキーが c.id = s.company_id であること（取り違えるとガードが無効化する）
 //   - 条件が NOT EXISTS であること（反転すると未審査企業「だけ」を返す）
 //   - 却下済み(is_active=false)も除くこと
 //   - relations では端点4本すべてを見ること（1本でも漏れると素通りする）
+//   - companies.is_guest_entry を見ていること（#1409）
+//   - company_entry_submissions 側の条件も残っていること（#1409）
+//
+// #1409 で判定の主体を company_entry_submissions の行の有無から
+// companies.is_guest_entry へ移した。投稿行が消えると「ゲスト投稿ではない」と
+// 判定され、審査前の企業が未認証の公開APIへ出ていた（fail-open）。
+// 埋め漏れや、フラグを立てない経路が後から増えたときに備えて、
+// 投稿行側の条件も OR で残してある。
 func guard(cols ...string) string {
-	return normalizeSQL(`NOT EXISTS ( SELECT 1 FROM company_entry_submissions s
-		JOIN companies c ON c.id = s.company_id
-		WHERE (c.data_status <> 'published' OR c.is_active = false)
-		AND s.company_id IN (` + strings.Join(cols, ", ") + `) )`)
+	return normalizeSQL(`NOT EXISTS ( SELECT 1 FROM companies c
+		WHERE c.id IN (` + strings.Join(cols, ", ") + `)
+		AND (c.data_status <> 'published' OR c.is_active = false)
+		AND ( c.is_guest_entry = true
+		OR EXISTS (SELECT 1 FROM company_entry_submissions s WHERE s.company_id = c.id) ) )`)
 }
 
 // publishedCompanyGuard は「企業が掲載承認済みで有効」を要求する条件。

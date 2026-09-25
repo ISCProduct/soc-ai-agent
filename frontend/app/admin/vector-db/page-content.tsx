@@ -185,7 +185,7 @@ export default function PageContent() {
         <IconButton component={Link} href="/admin">
           <ArrowBackIcon />
         </IconButton>
-        <Typography variant="h4" fontWeight="bold">
+        <Typography variant="h4" component="h1" fontWeight="bold">
           AI/RAG 運用管理
         </Typography>
         <Box sx={{ ml: 'auto' }}>

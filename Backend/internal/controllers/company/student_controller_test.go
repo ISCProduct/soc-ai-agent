@@ -151,6 +151,37 @@ func TestCompanyStudentController_List_UsesJWTCompanyIDAndFilters(t *testing.T) 
 	assert.Equal(t, 20, search.lastFilters.Offset)
 }
 
+// TestCompanyStudentController_List_LimitCap は limit クエリの頭打ちを固定する(#1478)。
+//
+// 上限が無いと limit=1000000 がそのまま検索へ渡り、学生全件が読まれてJSON化される。
+func TestCompanyStudentController_List_LimitCap(t *testing.T) {
+	tests := []struct {
+		name      string
+		query     string
+		wantLimit int
+	}{
+		{name: "未指定は既定の30", query: "", wantLimit: 30},
+		{name: "上限内はそのまま", query: "?limit=10", wantLimit: 10},
+		{name: "上限ちょうど", query: "?limit=100", wantLimit: 100},
+		{name: "上限超過は100へ頭打ち", query: "?limit=101", wantLimit: 100},
+		{name: "極端な値も100へ頭打ち", query: "?limit=1000000", wantLimit: 100},
+		{name: "0は既定の30", query: "?limit=0", wantLimit: 30},
+		{name: "数値以外は既定の30", query: "?limit=abc", wantLimit: 30},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			search := &companyStudentSearchStub{result: &hrsvc.StudentSearchResult{Items: []hrsvc.StudentListItem{}}}
+			req := httptest.NewRequest(http.MethodGet, "/api/company-portal/students"+tt.query, nil)
+			req = withCompanyContext(req, 42, 7)
+			rec := httptest.NewRecorder()
+
+			testsupport.AssertStatus(t, newCompanyStudentController(search, nil).List, testsupport.NewCtx(req, rec), http.StatusOK)
+			assert.Equal(t, tt.wantLimit, search.lastFilters.Limit)
+		})
+	}
+}
+
 // ── セマンティック検索 ─────────────────────────────────────────────
 
 func TestCompanyStudentController_SemanticSearch(t *testing.T) {

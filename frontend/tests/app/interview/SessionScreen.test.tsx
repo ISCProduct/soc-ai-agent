@@ -9,6 +9,7 @@ jest.mock('@/app/interview/components/ThreeAvatar', () => ({
 }))
 
 import SessionScreen from '@/app/interview/components/SessionScreen'
+import { UTTERANCE_SAVE_FAILED_MESSAGE } from '@/app/interview/utteranceSave'
 
 describe('SessionScreen', () => {
   const noop = () => {}
@@ -77,5 +78,18 @@ describe('SessionScreen', () => {
     renderScreen()
 
     expect(screen.getByRole('button', { name: '話す' })).toBeInTheDocument()
+  })
+
+  // #1476: 保存に失敗したまま無言で面接が続くと、ユーザーは空のレポートを受け取るまで気づけない
+  it('発話保存に失敗したら面接中でも警告を表示する', () => {
+    renderScreen({ utteranceSaveFailed: true })
+
+    expect(screen.getByText(UTTERANCE_SAVE_FAILED_MESSAGE)).toBeInTheDocument()
+  })
+
+  it('発話保存に失敗していなければ警告を出さない', () => {
+    renderScreen()
+
+    expect(screen.queryByText(UTTERANCE_SAVE_FAILED_MESSAGE)).not.toBeInTheDocument()
   })
 })

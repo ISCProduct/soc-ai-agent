@@ -120,12 +120,13 @@ export default function PageContent() {
       <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: { xs: 2, sm: 3, lg: 8 }, py: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Box sx={{ color: PRIMARY }}><PsychologyIcon sx={{ fontSize: 32 }} /></Box>
-          <Typography sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: '#0f172a' }}>面接履歴</Typography>
+          <Typography component="h1" sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: '#0f172a' }}>面接履歴</Typography>
           {user?.role === 'teacher' && (
             <Chip label="教員モード" size="small" sx={{ bgcolor: '#3b82f6', color: '#fff', fontWeight: 700, ml: 1 }} />
           )}
         </Box>
-        <IconButton onClick={() => router.push('/interview')} sx={{ bgcolor: '#f1f5f9', color: '#475569' }}>
+        {/* 既定の40x40ではモバイルのタップ領域が足りない（#1481） */}
+        <IconButton onClick={() => router.push('/interview')} aria-label="面接画面へ戻る" sx={{ bgcolor: '#f1f5f9', color: '#475569', width: 44, height: 44 }}>
           <ArrowBackIcon />
         </IconButton>
       </Box>
@@ -141,9 +142,10 @@ export default function PageContent() {
               onChange={(_, v) => { if (v !== null) setTrendLimit(v) }}
               size="small"
             >
-              <ToggleButton value={5} sx={{ fontSize: 12, px: 1.5 }}>直近5回</ToggleButton>
-              <ToggleButton value={10} sx={{ fontSize: 12, px: 1.5 }}>直近10回</ToggleButton>
-              <ToggleButton value={0} sx={{ fontSize: 12, px: 1.5 }}>全期間</ToggleButton>
+              {/* size="small" の高さ37pxではモバイルのタップ領域が足りない（#1481） */}
+              <ToggleButton value={5} sx={{ fontSize: 12, px: 1.5, minHeight: 44 }}>直近5回</ToggleButton>
+              <ToggleButton value={10} sx={{ fontSize: 12, px: 1.5, minHeight: 44 }}>直近10回</ToggleButton>
+              <ToggleButton value={0} sx={{ fontSize: 12, px: 1.5, minHeight: 44 }}>全期間</ToggleButton>
             </ToggleButtonGroup>
           </Stack>
           {trendLoading ? (

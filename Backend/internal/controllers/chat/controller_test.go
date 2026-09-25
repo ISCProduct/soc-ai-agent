@@ -19,6 +19,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/services/analysis"
 	"Backend/internal/services/chat"
+	"Backend/internal/services/matching"
 	"Backend/internal/services/shared"
 
 	"github.com/stretchr/testify/mock"
@@ -505,6 +506,72 @@ func TestChatController_GetRecommendations_NoMatches_ReturnEmpty(t *testing.T) {
 	matchSvc.AssertExpectations(t)
 }
 
+// TestChatController_GetRecommendations_EmptyReason は空レスポンスの reason を固定する（#1380）。
+//
+// insufficient_company_data はフロント（frontend/app/results/utils.ts）で
+// 「企業情報を公開するまでお待ちください」と表示される。企業は公開済みで
+// プロファイルだけが無いケースにこれを返すと、公開作業では直らない問題に
+// 誤った復旧手順を案内することになる。
+func TestChatController_GetRecommendations_EmptyReason(t *testing.T) {
+	tests := []struct {
+		name string
+		diag *matching.MatchingDiagnostics
+		want string
+	}{
+		{
+			name: "ユーザースコアが無い",
+			diag: &matching.MatchingDiagnostics{UserScoreCount: 0, ActiveCompanyCount: 10},
+			want: "insufficient_user_scores",
+		},
+		{
+			name: "公開企業が0社",
+			diag: &matching.MatchingDiagnostics{UserScoreCount: 10, ActiveCompanyCount: 0},
+			want: "insufficient_company_data",
+		},
+		{
+			name: "公開企業はあるが全社プロファイル未設定",
+			diag: &matching.MatchingDiagnostics{
+				UserScoreCount: 10, ActiveCompanyCount: 10, CompaniesWithoutProfile: 10,
+			},
+			want: "insufficient_company_profiles",
+		},
+		{
+			name: "一部だけプロファイル欠損（原因は別）",
+			diag: &matching.MatchingDiagnostics{
+				UserScoreCount: 10, ActiveCompanyCount: 10, WeightProfileCount: 9, CompaniesWithoutProfile: 1,
+			},
+			want: "matching_results_empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matchSvc := &mocks.MatchingServiceMock{}
+			chatSvc := &mocks.ChatServiceMock{}
+			matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", 10).Return(nil, nil)
+			matchSvc.On("GetDiagnostics", uint(1), "s1").Return(tt.diag, nil)
+			chatSvc.On("GetUserScores", uint(1), "s1").Return([]entity.UserWeightScore{}, nil)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations?session_id=s1", nil)
+			req = testsupport.WithUserID(req, 1)
+			rec := httptest.NewRecorder()
+			testsupport.AssertStatus(t, newChatController(chatSvc, matchSvc, nil, nil, nil).GetRecommendations,
+				testsupport.NewCtx(req, rec), http.StatusOK)
+
+			var body struct {
+				Reason string `json:"reason"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("レスポンスをデコードできない: %v (%s)", err, rec.Body.String())
+			}
+			if body.Reason != tt.want {
+				t.Errorf("reason=%q want %q", body.Reason, tt.want)
+			}
+			matchSvc.AssertExpectations(t)
+		})
+	}
+}
+
 func TestChatController_GetRecommendations_WithMatches_Success(t *testing.T) {
 	matchSvc := &mocks.MatchingServiceMock{}
 	chatSvc := &mocks.ChatServiceMock{}
@@ -519,4 +586,43 @@ func TestChatController_GetRecommendations_WithMatches_Success(t *testing.T) {
 	rec := httptest.NewRecorder()
 	testsupport.AssertStatus(t, newChatController(chatSvc, matchSvc, nil, nil, nil).GetRecommendations, testsupport.NewCtx(req, rec), http.StatusOK)
 	matchSvc.AssertExpectations(t)
+}
+
+// TestChatController_GetRecommendations_LimitCap は limit クエリの頭打ちを固定する(#1478)。
+//
+// 上限が無いと limit=1000000 がそのままマッチングサービスへ渡り、1リクエストで
+// 全件が読まれてJSON化される。他の一覧APIと同じ 100 に揃える。
+func TestChatController_GetRecommendations_LimitCap(t *testing.T) {
+	tests := []struct {
+		name      string
+		query     string
+		wantLimit int
+	}{
+		{name: "未指定は既定の10", query: "", wantLimit: 10},
+		{name: "上限内はそのまま", query: "&limit=30", wantLimit: 30},
+		{name: "上限ちょうど", query: "&limit=100", wantLimit: 100},
+		{name: "上限超過は100へ頭打ち", query: "&limit=101", wantLimit: 100},
+		{name: "極端な値も100へ頭打ち", query: "&limit=1000000", wantLimit: 100},
+		{name: "0は既定の10", query: "&limit=0", wantLimit: 10},
+		{name: "負値は既定の10", query: "&limit=-1", wantLimit: 10},
+		{name: "数値以外は既定の10", query: "&limit=abc", wantLimit: 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matchSvc := &mocks.MatchingServiceMock{}
+			chatSvc := &mocks.ChatServiceMock{}
+			matches := []*entity.UserCompanyMatch{
+				{MatchScore: 85.0, Company: &entity.Company{ID: 1, Name: "Test Corp"}},
+			}
+			matchSvc.On("GetTopMatches", mock.Anything, uint(1), "s1", tt.wantLimit).Return(matches, nil)
+			chatSvc.On("GetUserScores", uint(1), "s1").Return([]entity.UserWeightScore{}, nil)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/chat/recommendations?session_id=s1"+tt.query, nil)
+			req = testsupport.WithUserID(req, 1)
+			rec := httptest.NewRecorder()
+			testsupport.AssertStatus(t, newChatController(chatSvc, matchSvc, nil, nil, nil).GetRecommendations, testsupport.NewCtx(req, rec), http.StatusOK)
+			matchSvc.AssertExpectations(t)
+		})
+	}
 }

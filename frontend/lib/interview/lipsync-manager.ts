@@ -81,7 +81,6 @@ export class LipsyncManager {
       this.sourceNode = this.audioContext.createMediaStreamSource(audioStream)
       this.sourceNode.connect(this.analyser)
 
-      console.log('[LipsyncManager] Audio analysis initialized')
       this.startAnalysis()
     } catch (error) {
       console.error('[LipsyncManager] Failed to initialize audio analysis:', error)
@@ -221,6 +220,5 @@ export class LipsyncManager {
     this.analyser = null
     this.freqData = null
     this.timeData = null
-    console.log('[LipsyncManager] Disposed')
   }
 }

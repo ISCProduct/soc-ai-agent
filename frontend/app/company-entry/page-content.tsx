@@ -201,7 +201,9 @@ export default function PageContent() {
     return (
       <Box sx={{ p: 4, maxWidth: 700, mx: 'auto', textAlign: 'center' }}>
         <Alert severity="success" sx={{ mb: 3 }}>
-          <Typography variant="h6" gutterBottom>
+          {/* 送信後はこの早期returnに入りフォーム側の h1 が描画されないため、
+              完了見出しを h1 にしてページ見出しを残す（#1479） */}
+          <Typography variant="h6" component="h1" gutterBottom>
             送信が完了しました
           </Typography>
           <Typography sx={{ mb: 1 }}>
@@ -223,7 +225,7 @@ export default function PageContent() {
 
   return (
     <Box sx={{ p: { xs: 2, sm: 4 }, maxWidth: 800, mx: 'auto' }}>
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
+      <Typography variant="h4" component="h1" fontWeight="bold" gutterBottom>
         企業情報登録フォーム
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
@@ -250,6 +252,8 @@ export default function PageContent() {
               value={contactEmail}
               onChange={(e) => setContactEmail(e.target.value)}
               required
+              autoComplete="email"
+              slotProps={{ htmlInput: { inputMode: 'email' } }}
               helperText="感謝メールおよび会員登録のご案内に使用します"
             />
             <TextField
@@ -282,7 +286,13 @@ export default function PageContent() {
               }
               label={
                 <Typography variant="body2">
-                  <Link href="/privacy" target="_blank" rel="noopener noreferrer">
+                  {/* 20px しかないリンクを上下パディングで44pxのタップ領域にする（#1481） */}
+                  <Link
+                    href="/privacy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    sx={{ display: 'inline-block', py: 1.5 }}
+                  >
                     プライバシーポリシー
                   </Link>
                   に同意し、連絡先メールの保存・感謝メール／会員登録案内の送信に同意します *

@@ -24,10 +24,15 @@ type Company struct {
 	SourceURL          string     `gorm:"type:varchar(500)" json:"source_url"`
 	SourceFetchedAt    *time.Time `json:"source_fetched_at,omitempty"`
 	IsProvisional      bool       `gorm:"default:true" json:"is_provisional"`
-	DataStatus         string     `gorm:"type:varchar(20);default:'draft';index:idx_companies_active_status_industry,priority:2;index:idx_companies_active_status_id,priority:2" json:"data_status"` // draft, published
-	GBizLastSyncedAt   *time.Time `json:"gbiz_last_synced_at,omitempty"`
-	GBizSyncStatus     string     `gorm:"type:varchar(20)" json:"gbiz_sync_status"` // success, failed
-	GBizSyncMessage    string     `gorm:"type:text" json:"gbiz_sync_message"`
+	// IsGuestEntry はゲスト投稿(/company-entry)由来かどうか。表示可否の判断に使う(#1409)。
+	// 以前は company_entry_submissions に行があるかで判定していたが、
+	// その行が消えると審査前の企業が公開APIへ出た(fail-open)。監査用テーブルではなく
+	// 企業行そのものに持たせる。
+	IsGuestEntry     bool       `gorm:"not null;default:false;index:idx_companies_guest_entry" json:"is_guest_entry"`
+	DataStatus       string     `gorm:"type:varchar(20);default:'draft';index:idx_companies_active_status_industry,priority:2;index:idx_companies_active_status_id,priority:2" json:"data_status"` // draft, published
+	GBizLastSyncedAt *time.Time `json:"gbiz_last_synced_at,omitempty"`
+	GBizSyncStatus   string     `gorm:"type:varchar(20)" json:"gbiz_sync_status"` // success, failed
+	GBizSyncMessage  string     `gorm:"type:text" json:"gbiz_sync_message"`
 
 	// #557 フィールド別鮮度・provenance
 	InfoFetchedAt       *time.Time `json:"info_fetched_at,omitempty"`
