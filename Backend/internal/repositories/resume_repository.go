@@ -121,6 +121,61 @@ func (r *ResumeRepository) FindLatestDocumentWithReview(userID uint) (*models.Re
 	return &doc, &review, nil
 }
 
+// FindLatestResumeFactsByUsers は複数ユーザーの最新履歴書有無とスコアをまとめて返す（#1030）。
+//
+// 教員向け一覧は生徒ごとに FindLatestDocumentWithReview を回すと N+1 になるため、
+// ウィンドウ関数でユーザーごと最新ドキュメント→その最新レビューを1クエリで取る。
+// 戻り値に無い user_id は未提出。
+func (r *ResumeRepository) FindLatestResumeFactsByUsers(userIDs []uint) (map[uint]models.ResumeLatestFact, error) {
+	result := map[uint]models.ResumeLatestFact{}
+	if len(userIDs) == 0 {
+		return result, nil
+	}
+
+	type row struct {
+		UserID uint
+		Score  *int
+	}
+	var rows []row
+
+	const q = `
+WITH latest_docs AS (
+  SELECT id, user_id,
+         ROW_NUMBER() OVER (
+           PARTITION BY user_id
+           ORDER BY created_at DESC, id DESC
+         ) AS rn
+  FROM resume_documents
+  WHERE user_id IN (?)
+),
+latest_reviews AS (
+  SELECT document_id, score,
+         ROW_NUMBER() OVER (
+           PARTITION BY document_id
+           ORDER BY created_at DESC, id DESC
+         ) AS rn
+  FROM resume_reviews
+  WHERE document_id IN (SELECT id FROM latest_docs WHERE rn = 1)
+)
+SELECT d.user_id, r.score
+FROM latest_docs d
+LEFT JOIN latest_reviews r ON r.document_id = d.id AND r.rn = 1
+WHERE d.rn = 1`
+
+	if err := r.db.Raw(q, userIDs).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, x := range rows {
+		fact := models.ResumeLatestFact{HasDocument: true}
+		if x.Score != nil {
+			score := *x.Score
+			fact.LatestScore = &score
+		}
+		result[x.UserID] = fact
+	}
+	return result, nil
+}
+
 func (r *ResumeRepository) FindReviewItems(reviewID uint) ([]models.ResumeReviewItem, error) {
 	var items []models.ResumeReviewItem
 	if err := r.db.Where("review_id = ?", reviewID).

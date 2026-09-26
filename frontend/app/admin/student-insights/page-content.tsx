@@ -31,6 +31,7 @@ import {
   displayIndustries,
   displayTypeLabel,
   lowMatchApplications,
+  resumeAttentionLabel,
   NO_DATA_LABEL,
   type StudentTendency,
 } from '@/lib/student-insights'
@@ -44,6 +45,7 @@ export default function PageContent() {
   const [rowsPerPage, setRowsPerPage] = useState(25)
   const [query, setQuery] = useState('')
   const [lowMatchOnly, setLowMatchOnly] = useState(false)
+  const [resumeNeedsAttentionOnly, setResumeNeedsAttentionOnly] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
@@ -85,6 +87,7 @@ export default function PageContent() {
         ...(query ? { q: query } : {}),
         ...(schoolId !== undefined ? { school_id: String(schoolId) } : {}),
         ...(lowMatchOnly ? { low_match_only: 'true' } : {}),
+        ...(resumeNeedsAttentionOnly ? { resume_needs_attention_only: 'true' } : {}),
       })
       const res = await fetch(`/api/admin/teacher/students/tendency-analysis?${params}`, {
         headers: authService.getAdminFetchHeaders(),
@@ -102,7 +105,7 @@ export default function PageContent() {
     } finally {
       if (!isCancelled?.()) setLoading(false)
     }
-  }, [adminEmail, schoolRequired, schoolId, page, rowsPerPage, query, lowMatchOnly])
+  }, [adminEmail, schoolRequired, schoolId, page, rowsPerPage, query, lowMatchOnly, resumeNeedsAttentionOnly])
 
   // 検索入力のたびに投げると古いレスポンスが新しい結果を上書きするため、デバウンス+キャンセルする
   useEffect(() => {
@@ -156,6 +159,17 @@ export default function PageContent() {
           label={`マッチ度${LOW_MATCH_THRESHOLD}未満の応募がある生徒のみ`}
           slotProps={{ typography: { variant: 'body2', noWrap: true } }}
         />
+        <FormControlLabel
+          control={
+            <Checkbox
+              size="small"
+              checked={resumeNeedsAttentionOnly}
+              onChange={(e) => { setResumeNeedsAttentionOnly(e.target.checked); setPage(0) }}
+            />
+          }
+          label="履歴書要対応の生徒のみ"
+          slotProps={{ typography: { variant: 'body2', noWrap: true } }}
+        />
       </Stack>
 
       <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
@@ -168,18 +182,19 @@ export default function PageContent() {
               <TableCell>上位カテゴリ</TableCell>
               <TableCell>向いている業界 TOP3</TableCell>
               <TableCell>要フォローの応募</TableCell>
+              <TableCell>履歴書</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
                   <CircularProgress size={24} />
                 </TableCell>
               </TableRow>
             ) : students.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                <TableCell colSpan={7} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                   生徒が見つかりません
                 </TableCell>
               </TableRow>
@@ -189,6 +204,7 @@ export default function PageContent() {
               const typeLabel = displayTypeLabel(s)
               const noData = typeLabel === NO_DATA_LABEL
               const lowMatches = lowMatchApplications(s)
+              const resumeLabel = resumeAttentionLabel(s)
               return (
                 <TableRow key={s.user_id} hover>
                   <TableCell>
@@ -247,6 +263,13 @@ export default function PageContent() {
                           />
                         ))}
                       </Stack>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {resumeLabel ? (
+                      <Chip label={resumeLabel} size="small" color="warning" variant="outlined" />
+                    ) : (
+                      <Typography variant="body2" color="text.disabled">—</Typography>
                     )}
                   </TableCell>
                 </TableRow>

@@ -26,6 +26,25 @@ describe('GET /api/admin/teacher/students/tendency-analysis', () => {
     expect(forwarded.get('low_match_only')).toBe('true')
   })
 
+  // allowlist から漏れるとフィルタは黙って無効になる（#1030）。
+  it('resume_needs_attention_only を転送する', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ students: [], total: 0, limit: 25, offset: 0 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    const request = new NextRequest(
+      'http://localhost:3000/api/admin/teacher/students/tendency-analysis?resume_needs_attention_only=true',
+      { headers: { 'X-Admin-Email': 'admin@example.com', 'X-Admin-Token': 'admin-token' } },
+    )
+    await GET(request)
+
+    const forwarded = new URL(String(fetchMock.mock.calls[0][0])).searchParams
+    expect(forwarded.get('resume_needs_attention_only')).toBe('true')
+  })
+
   it('管理者認証ヘッダとクエリパラメータをそのままバックエンドへ転送する', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ students: [], total: 0, limit: 25, offset: 0 }), {
