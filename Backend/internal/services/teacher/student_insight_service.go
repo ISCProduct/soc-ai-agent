@@ -92,11 +92,21 @@ type TendencyResult struct {
 	Offset   int               `json:"offset"`
 }
 
-// tendencyFilters は一覧の後段絞り込み。ページ取得後に適用する。
+// tendencyFilters は一覧の後段絞り込み。
 type tendencyFilters struct {
 	lowMatchOnly             bool
 	resumeNeedsAttentionOnly bool
 }
+
+func (f tendencyFilters) active() bool {
+	return f.lowMatchOnly || f.resumeNeedsAttentionOnly
+}
+
+// filteredListScanLimit は後段フィルタ時に DB から先読みする上限。
+// ページ取得→絞り込みだと「先頭ページに該当0・次ページに該当あり」で
+// total=0 になりページ送りも消える（#1536 review）。先に上限まで読み、
+// 絞り込み後に limit/offset を当てる。担当校の生徒一覧用途の天井。
+const filteredListScanLimit = 10000
 
 // ListTendencies は担当生徒の傾向タイプと向いている業界を返す（#1027）。
 //
@@ -110,10 +120,6 @@ func (s *StudentInsightService) ListTendencies(limit, offset int, query string, 
 }
 
 // ListTendenciesLowMatchOnly は低マッチのまま進行中の応募がある生徒だけを返す（#1028）。
-//
-// 絞り込みはページ取得後に行う。件数(total)は絞り込み後の実数になるため、
-// ページングとは整合しない点に注意。「今フォローすべき生徒を見つける」用途で、
-// 大量ページを繰る使い方は想定していない。
 func (s *StudentInsightService) ListTendenciesLowMatchOnly(limit, offset int, query string, schoolID *uint) (*TendencyResult, error) {
 	return s.listTendencies(limit, offset, query, schoolID, tendencyFilters{lowMatchOnly: true})
 }
@@ -126,10 +132,14 @@ func (s *StudentInsightService) ListTendenciesWithFilters(limit, offset int, que
 	})
 }
 
-// ListTendenciesFiltered は削除済み。ListTendenciesWithFilters を使う。
-
 func (s *StudentInsightService) listTendencies(limit, offset int, query string, schoolID *uint, filters tendencyFilters) (*TendencyResult, error) {
-	students, total, err := s.users.ListStudentsPaged(limit, offset, query, schoolID)
+	fetchLimit, fetchOffset := limit, offset
+	if filters.active() {
+		// 絞り込み後にページングするため、先に上限まで読む。
+		fetchLimit = filteredListScanLimit
+		fetchOffset = 0
+	}
+	students, total, err := s.users.ListStudentsPaged(fetchLimit, fetchOffset, query, schoolID)
 	if err != nil {
 		return nil, err
 	}
@@ -188,6 +198,7 @@ func (s *StudentInsightService) listTendencies(limit, offset int, query string, 
 	}
 	threshold := config.ResumeCompletenessThreshold()
 
+	matched := make([]StudentTendency, 0, len(students))
 	for _, u := range students {
 		if filters.lowMatchOnly && len(lowMatchByUser[u.ID]) == 0 {
 			continue
@@ -199,13 +210,25 @@ func (s *StudentInsightService) listTendencies(limit, offset int, query string, 
 		t := BuildTendency(u.ID, u.Name, u.Email, scoresByUser[u.ID], industries, profileByIndustry)
 		t.LowMatchApplications = lowMatchByUser[u.ID]
 		t.ResumeStatus = attn
-		result.Students = append(result.Students, t)
+		matched = append(matched, t)
 	}
-	if filters.lowMatchOnly || filters.resumeNeedsAttentionOnly {
-		// 絞り込み後は total を実数に置き換える。
-		// ページ全体の件数を返すと、画面が「該当0件なのに総数100」と表示する。
-		result.Total = int64(len(result.Students))
+
+	if !filters.active() {
+		result.Students = matched
+		return result, nil
 	}
+
+	// 絞り込み後の実数でページングする。
+	result.Total = int64(len(matched))
+	start := offset
+	if start > len(matched) {
+		start = len(matched)
+	}
+	end := start + limit
+	if end > len(matched) {
+		end = len(matched)
+	}
+	result.Students = matched[start:end]
 	return result, nil
 }
 

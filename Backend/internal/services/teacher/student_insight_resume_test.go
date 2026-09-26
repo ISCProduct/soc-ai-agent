@@ -138,3 +138,63 @@ func TestListTendencies_ResumeDisabledWithoutReader(t *testing.T) {
 		}
 	}
 }
+
+// 先頭ページに該当が無くても、後段の要対応生徒を落とさないこと（#1536 review）。
+// ページ取得→絞り込みだと limit=25 のとき 26人目が要対応でも total=0 になる。
+func TestListTendencies_ResumeFilterPagesAfterMatch(t *testing.T) {
+	t.Setenv("RESUME_COMPLETENESS_THRESHOLD", "60")
+
+	students := make([]entity.User, 0, 26)
+	for i := 1; i <= 26; i++ {
+		students = append(students, entity.User{
+			ID:    uint(i),
+			Name:  "生徒",
+			Email: "s@example.com",
+		})
+	}
+	// 1〜25 は提出済み・閾値以上。26 だけ未提出（map に載せない）。
+	ok := 80
+	facts := map[uint]models.ResumeLatestFact{}
+	for i := 1; i <= 25; i++ {
+		score := ok
+		facts[uint(i)] = models.ResumeLatestFact{HasDocument: true, LatestScore: &score}
+	}
+	lister := &pagingLister{students: students}
+	svc := NewStudentInsightService(
+		lister,
+		&stubScores{scores: map[uint]map[string]float64{}},
+		&stubIndustries{},
+		&stubProfiles{},
+	)
+	svc.SetResumeFactReader(&stubResumeFacts{byUser: facts})
+
+	res, err := svc.ListTendenciesWithFilters(25, 0, "", nil, false, true)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if lister.gotLimit != filteredListScanLimit || lister.gotOffset != 0 {
+		t.Fatalf("フィルタ時は先読みすること: limit=%d offset=%d", lister.gotLimit, lister.gotOffset)
+	}
+	if res.Total != 1 || len(res.Students) != 1 || res.Students[0].UserID != 26 {
+		t.Fatalf("26人目の要対応を返すこと: total=%d students=%+v", res.Total, res.Students)
+	}
+}
+
+// pagingLister は limit/offset を実際に切る。ページ後絞り込みバグの再現用。
+type pagingLister struct {
+	students            []entity.User
+	gotLimit, gotOffset int
+}
+
+func (s *pagingLister) ListStudentsPaged(limit, offset int, _ string, _ *uint) ([]entity.User, int64, error) {
+	s.gotLimit, s.gotOffset = limit, offset
+	total := int64(len(s.students))
+	if offset >= len(s.students) {
+		return nil, total, nil
+	}
+	end := offset + limit
+	if end > len(s.students) {
+		end = len(s.students)
+	}
+	return s.students[offset:end], total, nil
+}
