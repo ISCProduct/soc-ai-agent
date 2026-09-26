@@ -88,11 +88,13 @@ else
   # always() が無いと、安定待ちで落ちたときにタスクが起動したまま課金が続く。
   DOWN_END=$(awk -v s="$DOWN" 'NR > s && /^      - name:/ { print NR - 1; exit }' "$WF")
   [ -z "$DOWN_END" ] && DOWN_END=$((DOWN + 40))
-  if ! sed -n "${DOWN},${DOWN_END}p" "$WF" | grep -q "always()"; then
+  # `if:` はステップ名の直後にしか書けない。次のステップ直前までを見ると、そのステップの
+  # 説明コメント（「…always()。」）を拾って always() が無くても通ってしまう。
+  if ! sed -n "${DOWN},$((DOWN + 3))p" "$WF" | grep -q "always()"; then
     echo "FAIL 0へ戻すステップに always() が無い（失敗時に起動したまま残る）"
     fail=$((fail + 1))
   fi
-  if ! sed -n "${DOWN},${DOWN_END}p" "$WF" | grep -q "was_down == 'true'"; then
+  if ! sed -n "${DOWN},$((DOWN + 3))p" "$WF" | grep -q "was_down == 'true'"; then
     echo "FAIL 0へ戻すステップが was_down を見ていない（稼働日の本番を0にしうる）"
     fail=$((fail + 1))
   fi
@@ -145,10 +147,97 @@ else
     fail=$((fail + 1))
   fi
 
+  # 反映確認を人の目視に任せない（#1518）。ECSの安定待ちは「タスクが立った」までしか
+  # 見ておらず、画面が出ているかは分からない。停止日は後段で0へ戻すため、スモークは
+  # 一時起動の最中でなければ実行できない。
+  SMOKE=$(line_of "Run Playwright smoke (production)")
+  if [ -z "$SMOKE" ]; then
+    echo "FAIL 本番デプロイに Playwright スモークが無い（反映確認が人の目視に戻る）"
+    fail=$((fail + 1))
+  elif [ -n "$WAIT" ] && { [ "$SMOKE" -le "$WAIT" ] || [ "$SMOKE" -ge "$DOWN" ]; }; then
+    echo "FAIL スモークは 安定待ち→スモーク→0へ戻す の順に置くこと（wait=${WAIT} smoke=${SMOKE} down=${DOWN}）"
+    fail=$((fail + 1))
+  else
+    echo "ok   一時起動→安定待ち→スモーク→0へ戻す の順になっている"
+    SMOKE_END=$(awk -v s="$SMOKE" 'NR > s && /^      - name:/ { print NR - 1; exit }' "$WF")
+    [ -z "$SMOKE_END" ] && SMOKE_END=$((SMOKE + 20))
+    SMOKE_BODY=$(sed -n "${SMOKE},${SMOKE_END}p" "$WF")
+    # continue-on-error を付けると「スモークが落ちてもデプロイ成功」になり意味が無い。
+    if grep -q "continue-on-error" <<< "$SMOKE_BODY"; then
+      echo "FAIL スモークが continue-on-error（失敗してもデプロイが成功扱いになる）"
+      fail=$((fail + 1))
+    fi
+    if ! grep -q "playwright.smoke.config.ts" <<< "$SMOKE_BODY"; then
+      echo "FAIL スモークが playwright.smoke.config.ts を使っていない（staging と別実装になる）"
+      fail=$((fail + 1))
+    fi
+    # 通知を二重実装しない（deploy-smoke.yml と同じスクリプトを使う）。
+    if ! grep -q "automation/deploy-smoke/notify-discord.sh" "$WF"; then
+      echo "FAIL 本番スモークの結果通知が既存スクリプトを使っていない"
+      fail=$((fail + 1))
+    fi
+  fi
+  if [ ! -f "$ROOT/frontend/e2e/smoke/smoke.spec.ts" ]; then
+    echo "FAIL frontend/e2e/smoke/smoke.spec.ts が無い（staging/production 共用のスモーク）"
+    fail=$((fail + 1))
+  fi
+
+  # サーキットブレーカーの戻し先イメージがECRから消えていると、起動不能なタスク定義を
+  # 指したまま残る（#1518: 停止日は desired=0 なので次の稼働日まで気づけない）。
+  VERIFY=$(line_of "Verify task definition images exist in ECR")
+  if [ -z "$VERIFY" ]; then
+    echo "FAIL タスク定義のイメージ存在検査が無い（起動不能なリビジョンを指したまま残る）"
+    fail=$((fail + 1))
+  else
+    VERIFY_END=$(awk -v s="$VERIFY" 'NR > s && /^      - name:/ { print NR - 1; exit }' "$WF")
+    [ -z "$VERIFY_END" ] && VERIFY_END=$((VERIFY + 20))
+    VERIFY_BODY=$(sed -n "${VERIFY},${VERIFY_END}p" "$WF")
+    # 失敗した経路でこそ必要な検査。always() が無いと壊れた状態のまま終わる。
+    # `if:` はステップ名の直後にしか書けない。次のステップまでを見ると、そのステップの
+    # 説明コメント（「always() が無いと…」）を拾って常に通ってしまう。
+    if ! sed -n "${VERIFY},$((VERIFY + 3))p" "$WF" | grep -q "always()"; then
+      echo "FAIL イメージ存在検査に always() が無い（ロールバックした時に走らない）"
+      fail=$((fail + 1))
+    fi
+    if ! grep -q "automation/ops/verify-task-def-images.sh" <<< "$VERIFY_BODY"; then
+      echo "FAIL イメージ存在検査が automation/ops/verify-task-def-images.sh を使っていない"
+      fail=$((fail + 1))
+    fi
+    if [ ! -x "$ROOT/automation/ops/verify-task-def-images.sh" ]; then
+      echo "FAIL automation/ops/verify-task-def-images.sh が無い、または実行権限が無い"
+      fail=$((fail + 1))
+    fi
+  fi
+
   if [ "$fail" -eq 0 ]; then
-    echo "ok   一時起動→安定待ち→0へ戻す→RDS停止 の順で、失敗時も0へ戻る"
+    echo "ok   一時起動→安定待ち→スモーク→0へ戻す→RDS停止 の順で、失敗時も0へ戻る"
     echo "ok   override=on / runningCount / ワンオフタスク停止のガードがある"
     echo "ok   起動/停止は prod-scale.sh 経由（chroma込み・min_capacity同期）"
+    echo "ok   タスク定義のイメージ存在検査が always() で走る"
+  fi
+fi
+
+# 毎時の起動/停止ジョブ(prod-uptime-scheduler)が、デプロイ中の本番RDSを止めないこと。
+# 2026-09-25 はこれが無く、デプロイの最中にRDSを停止され backend がDBへ繋がらず、
+# サーキットブレーカーがECRから消えた旧イメージへロールバックした（#1518）。
+SCHED="$ROOT/.github/workflows/prod-uptime-scheduler.yml"
+if [ ! -f "$SCHED" ]; then
+  echo "FAIL prod-uptime-scheduler.yml が無い"
+  fail=$((fail + 1))
+else
+  if ! grep -q "workflow deployment.yml" "$SCHED"; then
+    echo "FAIL スケジューラが本番デプロイの実行中かを見ていない（デプロイ中にRDSを止める）"
+    fail=$((fail + 1))
+  elif ! grep -q 'DESIRED" == "0" \]; then' "$SCHED"; then
+    echo "FAIL デプロイ中の見送りが停止側(DESIRED=0)限定になっていない（稼働日の起動が遅れる）"
+    fail=$((fail + 1))
+  else
+    echo "ok   スケジューラはデプロイ中の停止処理を見送る（起動側は見送らない）"
+  fi
+  # permissions に actions:read が無いと gh run list が失敗し、ガードが常に素通りする。
+  if ! grep -q "actions: read" "$SCHED"; then
+    echo "FAIL スケジューラの permissions に actions: read が無い（デプロイ実行中を読めない）"
+    fail=$((fail + 1))
   fi
 fi
 

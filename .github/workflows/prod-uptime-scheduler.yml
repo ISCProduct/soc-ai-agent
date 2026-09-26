@@ -21,9 +21,11 @@ on:
 
 # checkout(通知スクリプトの取得)と、whats-new 取り込みの gh pr list に必要な分だけ与える。
 # 以前は {} だったため、GITHUB_TOKEN で読む経路は権限不足になりうる状態だった。
+# actions:read は「本番デプロイが実行中か」を gh run list で見るために必要(#1518)。
 permissions:
   contents: read
   pull-requests: read
+  actions: read
 
 # 同時実行を許すと、起動側(RDSのavailable待ちで最大10分ループする)と停止側が
 # すれ違い、SSMは off なのに本番が起動したまま次の毎時実行まで課金され続ける。
@@ -56,6 +58,9 @@ jobs:
 
       - name: Determine desired state and apply
         id: apply
+        env:
+          # 停止処理の前に「本番デプロイが実行中か」を gh run list で確認する(#1518)。
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -e
 
@@ -168,6 +173,38 @@ jobs:
 
           DB_ID="${PROJECT_NAME}-mysql"
           echo "desired=$DESIRED" >> "$GITHUB_OUTPUT"
+
+          # 本番デプロイ(deployment.yml)の実行中は「止める側」の処理をしない。
+          #
+          # 停止日のデプロイは、マイグレーションと反映確認のためにRDSとECSを一時的に
+          # 起動する。そこへ毎時5分のこのジョブが重なると、デプロイの途中でRDSを停止し、
+          # 起動したばかりの backend が "no route to host" でDBに繋がらずヘルスチェックに
+          # 落ちる。3回連続で落ちるとECSのサーキットブレーカーが旧リビジョンへ
+          # ロールバックし、そのイメージがECRから失効していると起動不能なタスク定義が
+          # 残る。2026-09-25 に実際にこれが起きた(#1518)。
+          #   09:05:41 このジョブ開始 -> 09:06:11 RDS停止
+          #   09:08:00 デプロイが desired=1 -> 09:11:30 backend がDBに繋がらず
+          #   09:15:03 サーキットブレーカーが :86 へロールバック -> pull できず起動不能
+          #
+          # 起動側(DESIRED=1)は止めない。稼働日の起動が1時間遅れる方が影響が大きく、
+          # デプロイ中に起動してもぶつかる処理が無い。
+          # 判定できなかった場合はそのまま停止へ進む(fail-open)。ここで止めると
+          # gh/API の不調が続く限り本番が起動したまま課金され続ける。
+          # デプロイ側は最後に必ず desired=0 へ戻し、イメージ検査で壊れた状態も直すため、
+          # 取りこぼしても被害は「停止が最大1時間遅れる」で止まる。
+          if [ "$DESIRED" == "0" ]; then
+            DEPLOYING=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deployment.yml \
+              --branch main --limit 20 --json status \
+              --jq '[.[] | select(.status == "in_progress" or .status == "queued")] | length' \
+              2>/tmp/gh_run_list_err || echo "")
+            if [ -z "$DEPLOYING" ]; then
+              cat /tmp/gh_run_list_err >&2 || true
+              echo "::warning::本番デプロイの実行状況を取得できませんでした。停止処理を続行します(IAM/権限ではなく actions:read を確認してください)"
+            elif [ "$DEPLOYING" != "0" ]; then
+              echo "::notice::本番デプロイが実行中のため、停止処理(desired=0 / RDS停止)は見送ります。次の毎時実行で反映されます"
+              exit 0
+            fi
+          fi
 
           if [ "$DESIRED" == "1" ]; then
             # RDSを先に起動し、利用可能になってからECSを起動する

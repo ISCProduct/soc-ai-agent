@@ -8,7 +8,8 @@
 |--------|------|------|
 | 1 | staging 実URLスモーク + artifact | 実装済 |
 | 2 | Discord 結果通知 + 担当者メンション | 実装済 |
-| 3 | staging デプロイ後フック / production dispatch | 実装済（本番自動は未接続。ECS 未作成のため） |
+| 3 | staging デプロイ後フック / production dispatch | 実装済 |
+| 4 | 本番デプロイ後の自動スモーク | 実装済（#1518。`deployment.yml` の `deploy-production` ジョブ内で実行） |
 
 ## 実行方法
 
@@ -17,7 +18,9 @@ gh workflow run deploy-smoke.yml -f environment=staging
 gh workflow run deploy-smoke.yml -f environment=production
 ```
 
-staging は `deployment.yml` の `deploy-staging` 成功後にも自動起動する。production のデプロイ後フックは、本番 ECS を作ってから足す。
+staging は `deployment.yml` の `deploy-staging` 成功後に `deploy-smoke.yml` として自動起動する。
+
+production は `deployment.yml` の `deploy-production` ジョブが**そのジョブ内で**同じ設定・同じ通知スクリプトを使って実行する（#1518）。別ジョブにできないのは、本番が停止日だと一時起動している間しか叩けないため。`deploy-smoke.yml` は `concurrency: deploy-production` を使うので、同ジョブから呼ぶとデッドロックする。
 
 ラベル `stage:develop` / `stage:main` は従来の人手確認用。スモークが通れば「チェックして」依頼は不要。
 
@@ -32,9 +35,10 @@ Variables: `STAGING_BASE_URL` / `STAGING_API_BASE_URL` / `PROD_BASE_URL` / `PROD
 
 ## チェック内容（非破壊のみ）
 
-`frontend/e2e/smoke/staging.spec.ts`
+`frontend/e2e/smoke/smoke.spec.ts`（staging / production 共用）
 
 - トップ到達、ログイン画面、Backend `/healthz`、Frontend `/api/healthz`
+- ログイン画面のパスワード欄に `autocomplete="current-password"` があること（パスワードマネージャが効かなくなる回帰の検出）
 - データの作成・削除は行わない（本番フル E2E は Out of scope）
 
 ## Discord
