@@ -2,6 +2,13 @@ package models
 
 import "time"
 
+// ResumeLatestFact は教員一覧向けの「最新履歴書＋レビュー」要約（#1030）。
+// ドキュメント無しのユーザーは map に載らない（呼び出し側で未提出扱い）。
+type ResumeLatestFact struct {
+	HasDocument bool
+	LatestScore *int // レビュー未生成なら nil
+}
+
 type ResumeDocument struct {
 	ID               uint      `gorm:"primaryKey" json:"id"`
 	OrganizationID   uint      `gorm:"not null;index;column:organization_id" json:"organization_id"`

@@ -1,6 +1,7 @@
 import {
   displayCategories,
   lowMatchApplications,
+  resumeAttentionLabel,
   displayIndustries,
   displayTypeLabel,
   formatScore,
@@ -116,5 +117,29 @@ describe('lowMatchApplications', () => {
     const apps = [{ company_name: '株式会社テスト', match_score: 21.4, status: 'applied' }]
     const s = { ...withData, low_match_applications: apps } as StudentTendency
     expect(lowMatchApplications(s)).toEqual(apps)
+  })
+})
+
+describe('resumeAttentionLabel', () => {
+  it('要対応でなければ空', () => {
+    expect(resumeAttentionLabel(withData)).toBe('')
+    expect(resumeAttentionLabel({
+      ...withData,
+      resume_status: { needs_attention: false, has_document: true, latest_score: 80 },
+    })).toBe('')
+  })
+
+  it('理由があればそれを返す', () => {
+    expect(resumeAttentionLabel({
+      ...withData,
+      resume_status: { needs_attention: true, has_document: false, reason: '未提出' },
+    })).toBe('未提出')
+  })
+
+  it('理由が無い要対応はフォールバック', () => {
+    expect(resumeAttentionLabel({
+      ...withData,
+      resume_status: { needs_attention: true, has_document: true },
+    })).toBe('要対応')
   })
 })

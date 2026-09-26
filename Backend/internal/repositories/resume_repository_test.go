@@ -92,3 +92,38 @@ func TestFindLatestDocumentWithReview_PropagatesError(t *testing.T) {
 	require.Error(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+// TestFindLatestResumeFactsByUsers_EmptyInput は空入力でクエリを飛ばさないことを検証する。
+func TestFindLatestResumeFactsByUsers_EmptyInput(t *testing.T) {
+	db, mock := newResumeMockDB(t)
+	repo := NewResumeRepository(db)
+
+	got, err := repo.FindLatestResumeFactsByUsers(nil)
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestFindLatestResumeFactsByUsers_MapsScoreAndMissingReview はバッチ結果の形を検証する。
+func TestFindLatestResumeFactsByUsers_MapsScoreAndMissingReview(t *testing.T) {
+	db, mock := newResumeMockDB(t)
+	repo := NewResumeRepository(db)
+
+	score := 45
+	mock.ExpectQuery("WITH latest_docs").
+		WithArgs(uint(1), uint(2)).
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "score"}).
+			AddRow(1, score).
+			AddRow(2, nil))
+
+	got, err := repo.FindLatestResumeFactsByUsers([]uint{1, 2})
+	require.NoError(t, err)
+	require.True(t, got[1].HasDocument)
+	require.NotNil(t, got[1].LatestScore)
+	require.Equal(t, 45, *got[1].LatestScore)
+	require.True(t, got[2].HasDocument)
+	require.Nil(t, got[2].LatestScore, "レビュー無しは score=nil")
+	_, ok := got[3]
+	require.False(t, ok, "未提出ユーザーは map に載らない")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
