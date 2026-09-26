@@ -3,6 +3,8 @@ import {
   SERVER_BACKEND_URL,
   setSessionCookies,
   setCompanySessionCookies,
+  clearSessionCookies,
+  clearCompanySessionCookies,
 } from '@/lib/auth/session-cookies'
 import { extractTenantSlug, isAdminHost } from '@/lib/tenant'
 
@@ -138,6 +140,9 @@ export async function middleware(request: NextRequest) {
   requestHeaders.delete('X-Company-User-Token')
   requestHeaders.delete('X-Tenant-Slug')
   let refreshed: RefreshedSession | null = null
+  // リフレッシュに失敗したセッション。Cookieを消して作り直させる(#1519)
+  let sessionExpired = false
+  let companySessionExpired = false
   let companyRefreshed: RefreshedCompanySession | null = null
 
   // 学園サブドメイン(<学園slug>.shukatsu-ai.jp)をBackendへ引き継ぐ
@@ -157,12 +162,26 @@ export async function middleware(request: NextRequest) {
       if (refreshed) {
         effectiveUserId = refreshed.userId
         effectiveToken = refreshed.userToken
+      } else {
+        // リフレッシュに失敗したらセッションを捨てる(#1519)。
+        //
+        // 以前はここで何もせず、期限切れのトークンをそのままヘッダーへ注入し
+        // Cookie も残していた。結果、ページが 401 を受けてログイン画面へ飛び、
+        // そのログイン画面でも Cookie が残っているため再びリフレッシュを試み、
+        // ログイン画面とローディングを無限に往復した。利用者は Cookie を
+        // 消す方法を知らないので自力で復帰できない。
+        //
+        // リフレッシュトークンの有効期間は30日なので、30日以上ぶりに
+        // アクセスした利用者は全員これに入る。
+        sessionExpired = true
       }
     }
 
-    // httpOnly CookieからX-User-*ヘッダーを注入（クライアント送信ヘッダーを上書き）
-    requestHeaders.set('X-User-ID', effectiveUserId)
-    requestHeaders.set('X-User-Token', effectiveToken)
+    if (!sessionExpired) {
+      // httpOnly CookieからX-User-*ヘッダーを注入（クライアント送信ヘッダーを上書き）
+      requestHeaders.set('X-User-ID', effectiveUserId)
+      requestHeaders.set('X-User-Token', effectiveToken)
+    }
   }
 
   if (companyUserId && companyUserToken) {
@@ -175,11 +194,16 @@ export async function middleware(request: NextRequest) {
       if (companyRefreshed) {
         effectiveCompanyUserId = companyRefreshed.companyUserId
         effectiveCompanyToken = companyRefreshed.companyUserToken
+      } else {
+        // 企業ポータル側も同じ構造。学生側だけ直すと企業ユーザーが同じループに残る。
+        companySessionExpired = true
       }
     }
 
-    requestHeaders.set('X-Company-User-ID', effectiveCompanyUserId)
-    requestHeaders.set('X-Company-User-Token', effectiveCompanyToken)
+    if (!companySessionExpired) {
+      requestHeaders.set('X-Company-User-ID', effectiveCompanyUserId)
+      requestHeaders.set('X-Company-User-Token', effectiveCompanyToken)
+    }
   }
 
   let response: NextResponse
@@ -207,6 +231,15 @@ export async function middleware(request: NextRequest) {
       companyRefreshed.companyUserToken,
       companyRefreshed.companyRefreshToken,
     )
+  }
+
+  // リフレッシュできなかったセッションは消す。残すと次のリクエストでも
+  // 同じリフレッシュを試み、ログイン画面とローディングを往復し続ける(#1519)。
+  if (sessionExpired) {
+    clearSessionCookies(response)
+  }
+  if (companySessionExpired) {
+    clearCompanySessionCookies(response)
   }
 
   return response
