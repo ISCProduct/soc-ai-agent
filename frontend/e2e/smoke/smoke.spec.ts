@@ -18,6 +18,12 @@ test.describe('反映後スモーク', () => {
     await expect(page.getByRole('tab', { name: 'ログイン' })).toBeVisible()
     await expect(page.locator('input[type="email"]')).toBeVisible()
     await expect(page.locator('input[type="password"]')).toBeVisible()
+    // autocomplete が外れるとパスワードマネージャが効かず、利用者はログインできたまま
+    // 「保存されない」で詰まる。画面は正常に見えるので人の目視では気づけない。
+    await expect(page.locator('input[type="password"]')).toHaveAttribute(
+      'autocomplete',
+      'current-password',
+    )
   })
 
   test('バックエンドAPIのヘルスチェックが疎通する', async ({ request }) => {

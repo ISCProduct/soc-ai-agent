@@ -111,6 +111,11 @@ jobs:
       # 10GB共有・LRU退避されるため、他イメージのビルドで頻繁に追い出されて無関係な変更でも
       # apt-get等の重いレイヤーから毎回リビルドされてしまう)。3イメージを並列ビルドする。
       # staging EC2はamd64（instance_type変更済み、旧t4g.small/ARM64からの移行に伴う）。
+      #
+      # --provenance=false: 既定のbuildxは1タグにつき image index + プラットフォーム
+      # manifest + attestation の3件をECRへ積む。ECRのライフサイクルは manifest 単位で
+      # 数えるため、この2件の余分が本番イメージの保持枠を食い潰していた（#1518）。
+      # provenance は誰も参照していないので止める（ECRは staging と本番で共用）。
       - name: Build and push images (frontend/backend/rag-review, parallel)
         run: |
           set -e
@@ -120,7 +125,7 @@ jobs:
           # 同じシークレットから渡すと、staging を有効化した瞬間に次の本番デプロイでも
           # 有効になってしまい、環境ごとに段階導入できない。シークレットを分ける。
           if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then
-            (cd frontend && docker buildx build --platform linux/amd64 \
+            (cd frontend && docker buildx build --platform linux/amd64 --provenance=false \
               --build-arg NODE_ENV=production \
               --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.STAGING_API_DOMAIN || 'api-stg.shukatsu-ai.jp' }} \
               --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND_STAGING }} \
@@ -135,7 +140,7 @@ jobs:
           fi
 
           if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then
-            (cd Backend && docker buildx build --platform linux/amd64 \
+            (cd Backend && docker buildx build --platform linux/amd64 --provenance=false \
               --cache-from type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-staging \
               --cache-to type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-staging,mode=max \
               -t $ECR_REGISTRY/soc-backend:$IMAGE_TAG --push .) &
@@ -145,7 +150,7 @@ jobs:
           fi
 
           if [ "${{ steps.changes.outputs.rag }}" = "true" ]; then
-            (cd rag && docker buildx build --platform linux/amd64 \
+            (cd rag && docker buildx build --platform linux/amd64 --provenance=false \
               --cache-from type=registry,ref=$ECR_REGISTRY/soc-rag-review:buildcache-staging \
               --cache-to type=registry,ref=$ECR_REGISTRY/soc-rag-review:buildcache-staging,mode=max \
               -t $ECR_REGISTRY/soc-rag-review:$IMAGE_TAG --push .) &
@@ -534,6 +539,35 @@ jobs:
             echo "rag=$(echo "$CHANGED" | grep -q '^rag/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
           fi
 
+      # スモーク(Playwright)の準備は「本番AWS認証情報を入れる前」に済ませる。
+      # このジョブの認証情報は ECS/RDS/ECR を操作できる長期キーで、
+      # configure-aws-credentials 以降はジョブ全体の環境変数として残る。
+      # そのあとで npm ci を走らせると、依存パッケージの install/postinstall
+      # スクリプトからその認証情報とECRのDocker認証を読めてしまう。
+      # 侵害された推移的依存1つで本番を触られるため、認証より前に置く。
+      #
+      # 本番を起動する前に終わらせる意味もある（npm ci とブラウザ取得で数分かかり、
+      # 起動後にやるとその分だけ停止日の一時起動が延びる）。
+      - name: Set up Node.js (smoke)
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: ./frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: ./frontend/package-lock.json
+
+      - name: Install smoke test dependencies
+        working-directory: ./frontend
+        # ハングしたまま既定上限(6時間)まで concurrency と起動済みRDSを占有しないよう
+        # 上限を切る。ジョブ全体ではなくステップに付けるのは、ジョブのタイムアウトだと
+        # 後段の always()（desired=0 へ戻す / RDS停止）まで打ち切られ、
+        # 停止日の本番が起動したまま残るため（deploy-smoke.yml の15分と同水準）。
+        timeout-minutes: 15
+        # --with-deps は内部で apt-get update を実行し、ミラーへの接続がハングして
+        # タイムアウトまで進まない事象が頻発したため外す（deploy-smoke.yml と同じ）。
+        run: |
+          npm ci
+          npx playwright install chromium
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -550,13 +584,14 @@ jobs:
       # レイヤーキャッシュはECRへ保存するtype=registryを使う(type=ghaはリポジトリ全体で
       # 10GB共有・LRU退避されるため、他イメージのビルドで頻繁に追い出されて無関係な変更でも
       # apt-get等の重いレイヤーから毎回リビルドされてしまう)。3イメージを並列ビルドする
+      # --provenance=false の理由は staging 側のビルドステップのコメントを参照（#1518）。
       - name: Build and push images (frontend/backend/rag-review, parallel)
         run: |
           set -e
           pids=()
 
           if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then
-            (cd frontend && docker buildx build --platform linux/amd64 \
+            (cd frontend && docker buildx build --platform linux/amd64 --provenance=false \
               --build-arg NODE_ENV=production \
               --build-arg NEXT_PUBLIC_BACKEND_URL=https://${{ vars.PROD_API_DOMAIN || 'api.shukatsu-ai.jp' }} \
               --build-arg NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND_PROD }} \
@@ -571,7 +606,7 @@ jobs:
           fi
 
           if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then
-            (cd Backend && docker buildx build --platform linux/amd64 \
+            (cd Backend && docker buildx build --platform linux/amd64 --provenance=false \
               --cache-from type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-production \
               --cache-to type=registry,ref=$ECR_REGISTRY/soc-backend:buildcache-production,mode=max \
               -t $ECR_REGISTRY/soc-backend:$IMAGE_TAG --push .) &
@@ -581,7 +616,7 @@ jobs:
           fi
 
           if [ "${{ steps.changes.outputs.rag }}" = "true" ]; then
-            (cd rag && docker buildx build --platform linux/amd64 \
+            (cd rag && docker buildx build --platform linux/amd64 --provenance=false \
               --cache-from type=registry,ref=$ECR_REGISTRY/soc-rag-review:buildcache-production \
               --cache-to type=registry,ref=$ECR_REGISTRY/soc-rag-review:buildcache-production,mode=max \
               -t $ECR_REGISTRY/soc-rag-review:$IMAGE_TAG --push .) &
@@ -741,6 +776,9 @@ jobs:
 
       - name: Deploy backend service
         if: steps.changes.outputs.backend == 'true'
+        # 後段の「ECRにイメージが在るか」検査で、サーキットブレーカーに戻された場合の
+        # 復帰先として今回登録したリビジョンを使う（#1518）。
+        id: deploy-backend
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-backend.outputs.task-definition }}
@@ -768,6 +806,7 @@ jobs:
 
       - name: Deploy frontend service
         if: steps.changes.outputs.frontend == 'true'
+        id: deploy-frontend
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-frontend.outputs.task-definition }}
@@ -798,6 +837,7 @@ jobs:
 
       - name: Deploy rag-review service
         if: steps.changes.outputs.rag == 'true'
+        id: deploy-rag-review
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-rag-review.outputs.task-definition }}
@@ -816,6 +856,7 @@ jobs:
       # 変更のあったサービスだけを起動しても確認にならない。rag-review は chroma が居ないと
       # ヘルスチェックが503を返し、backend も RAG を同期で呼ぶ。本番と同じ組み合わせで起動する。
       # desired と min_capacity を揃えるのも必須（揃えないとターゲット追跡が0へ縮退する）。
+      # 起動できたかの先は Playwright スモーク（後段）で画面とAPIまで見る。
       - name: Start production services for verification
         if: steps.prod-svc.outputs.was_down == 'true'
         run: ./automation/ops/prod-scale.sh 1
@@ -823,10 +864,19 @@ jobs:
       - name: Wait for services to stabilize (parallel)
         run: |
           set -e
-          services=""
-          if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then services="$services backend"; fi
-          if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then services="$services frontend"; fi
-          if [ "${{ steps.changes.outputs.rag }}" = "true" ]; then services="$services rag-review"; fi
+          # 一時起動した場合は、変更の有無に関わらず起動した全サービス(chroma込み)を待つ。
+          # 変更のあったサービスだけ待つと、ドキュメント/Terraformのみのデプロイや
+          # backend だけの変更で frontend が cold start 中のままスモークが走り、
+          # 503 や接続失敗で正常なデプロイが失敗扱いになる。
+          # prod-scale.sh が起動する対象と同じ並びにする（片方だけ増えると待ち漏れる）。
+          if [ "${{ steps.prod-svc.outputs.was_down }}" = "true" ]; then
+            services="chroma rag-review backend frontend"
+          else
+            services=""
+            if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then services="$services backend"; fi
+            if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then services="$services frontend"; fi
+            if [ "${{ steps.changes.outputs.rag }}" = "true" ]; then services="$services rag-review"; fi
+          fi
           if [ -z "$services" ]; then
             echo "no service deployed; nothing to wait for"
             exit 0
@@ -850,6 +900,80 @@ jobs:
             echo "one or more services did not reach a stable state" >&2
           fi
           exit $fail
+
+      # 本番の反映確認を人の目視に頼らないようにする。ECSの安定待ちは「タスクが立った」
+      # までしか見ておらず、画面が出ているか・APIが応答するかは分からない。
+      #
+      # 停止日は後段で desired=0 へ戻すため、スモークはこの一時起動の最中でなければ
+      # 実行できない。deploy-smoke.yml（workflow_call）は同じ concurrency group
+      # `deploy-production` を使うので、このジョブが走っている間は開始できず、
+      # ここから呼ぶとデッドロックする。そのため設定ファイル
+      # (playwright.smoke.config.ts) と通知スクリプトは共用したまま、実行だけを
+      # このジョブ内で行う。staging 側は従来どおり deploy-smoke.yml を使う。
+      - name: Run Playwright smoke (production)
+        id: smoke
+        working-directory: ./frontend
+        # インストールと同じ理由でステップ側に上限を置く（ジョブ側だと always() の
+        # 後片付けまで打ち切られる）。deploy-smoke.yml のスモークジョブと同水準。
+        timeout-minutes: 15
+        env:
+          CI: true
+          # スモークは公開URLしか見ない。node_modules 由来のコードに本番AWS認証を
+          # 渡さないため、このステップでは空にして上書きする（configure-aws-credentials
+          # はジョブ全体の環境変数として認証情報を残す）。
+          AWS_ACCESS_KEY_ID: ''
+          AWS_SECRET_ACCESS_KEY: ''
+          AWS_SESSION_TOKEN: ''
+          PLAYWRIGHT_BASE_URL: ${{ vars.PROD_BASE_URL || 'https://shukatsu-ai.jp' }}
+          PLAYWRIGHT_API_BASE_URL: ${{ vars.PROD_API_BASE_URL || 'https://api.shukatsu-ai.jp' }}
+        run: npx playwright test --config=playwright.smoke.config.ts
+
+      - name: Upload Playwright report
+        if: always() && steps.smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-production
+          path: frontend/playwright-report/
+          retention-days: 7
+
+      # 通知は deploy-smoke.yml と同じスクリプトを使う（文面・メンション解決を二重に持たない）。
+      # スモークを実行していない場合（安定待ちで落ちた等）は鳴らさない。`!= 'skipped'` ではなく
+      # success/failure を明示するのは、実行されなかったステップの outcome を空文字で
+      # 受け取った場合でも「失敗」を送りつけないため。
+      - name: Notify Discord (production smoke)
+        if: always() && (steps.smoke.outcome == 'success' || steps.smoke.outcome == 'failure')
+        env:
+          DISCORD_DEPLOY_WEBHOOK_URL: ${{ secrets.DISCORD_DEPLOY_WEBHOOK_URL }}
+          DISCORD_OPS_WEBHOOK_URL: ${{ secrets.DISCORD_OPS_WEBHOOK_URL }}
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+        run: |
+          STATUS=failure
+          if [ "${{ steps.smoke.outcome }}" = "success" ]; then
+            STATUS=success
+          fi
+          chmod +x automation/deploy-smoke/notify-discord.sh
+          automation/deploy-smoke/notify-discord.sh \
+            "$STATUS" \
+            "production" \
+            "${{ vars.PROD_BASE_URL || 'https://shukatsu-ai.jp' }}" \
+            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "${{ github.actor }}"
+
+      # ECSのデプロイサーキットブレーカーは失敗すると「直前の安定デプロイ」へ戻すが、
+      # そのタスク定義のイメージがECRに残っているかは見ない。2026-09-25 はそれで
+      # backend が起動不能なリビジョン(:86)を指したまま残った(#1518)。
+      # 停止日は desired=0 なので誰も気づけず、次の稼働日に本番が上がらない。
+      #
+      # 失敗した経路でも必ず通す(always)。イメージが無ければ今回のリビジョンへ戻し、
+      # そのうえでジョブは失敗させる(黙って直すと「ロールバックが起きた」事実が消える)。
+      - name: Verify task definition images exist in ECR
+        if: always()
+        run: |
+          ./automation/ops/verify-task-def-images.sh \
+            "backend=${{ steps.deploy-backend.outputs.task-definition-arn }}" \
+            "frontend=${{ steps.deploy-frontend.outputs.task-definition-arn }}" \
+            "rag-review=${{ steps.deploy-rag-review.outputs.task-definition-arn }}" \
+            "chroma="
 
       # merge commit 件名（Merge pull request #N）ではなく、マージPRのタイトル
       # （Release to production: ...）と本文の機能一覧を通知に使う。
@@ -900,8 +1024,14 @@ jobs:
       # 停止するのは「このデプロイが stopped から起動した」場合だけで、かつ本番が稼働状態でない
       # (全サービス desired=0)ときに限る。稼働日にデプロイした本番は落とさない。
       # 途中で失敗しても課金を残さないため always()。
+      #
+      # 条件に changes.outputs.backend を入れてはいけない。起動側(Start production RDS)は
+      # 「backend変更 または 停止日」で起動するため、停止日に frontend / rag-review だけを
+      # 変更したデプロイでは起動だけされて停止されず、RDSが起動したまま残る。
+      # started_by_deploy は起動ステップが実際に start-db-instance を打てた時だけ true
+      # になるので、これ単独が正しいゲート。
       - name: Stop production RDS if this deploy started it
-        if: always() && steps.changes.outputs.backend == 'true' && steps.prod-db.outputs.started_by_deploy == 'true'
+        if: always() && steps.prod-db.outputs.started_by_deploy == 'true'
         run: |
           set -uo pipefail
           # マイグレーションのワンオフタスクがまだ動いている状態でDBを落とすと、

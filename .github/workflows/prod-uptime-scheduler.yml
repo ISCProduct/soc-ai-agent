@@ -10,9 +10,11 @@ name: Prod uptime scheduler
 # オーバーライドは日付リストより優先する。これが無いと、手動起動しても次の毎時実行が
 # 日付リストどおりに戻してしまい「起動したのに落ちている」状態になる。
 #
-# ponytail: デプロイ中(deployment.yml)との競合を防ぐロックは未実装。
-# 反映作業と本ジョブの実行が重なった場合、一時的にdesired_countが競合する可能性がある。
-# 実運用で問題になれば、SSM Parameterへのメンテナンスロックフラグ追加を検討する。
+# デプロイ中(deployment.yml)の停止処理は gh run list で見送る(#1518)。
+# ponytail: GitHub Actions の concurrency を共有する形の厳密な相互排他にはしていない。
+# 同じ group にすると、pending のジョブは後から pending になったジョブに
+# キャンセルされる仕様のため、毎時のこのジョブが main へのデプロイを取り消しうる。
+# 代わりに「停止する直前に毎回見る」+「判定不能なら停止しない」で塞いでいる。
 
 on:
   schedule:
@@ -21,9 +23,11 @@ on:
 
 # checkout(通知スクリプトの取得)と、whats-new 取り込みの gh pr list に必要な分だけ与える。
 # 以前は {} だったため、GITHUB_TOKEN で読む経路は権限不足になりうる状態だった。
+# actions:read は「本番デプロイが実行中か」を gh run list で見るために必要(#1518)。
 permissions:
   contents: read
   pull-requests: read
+  actions: read
 
 # 同時実行を許すと、起動側(RDSのavailable待ちで最大10分ループする)と停止側が
 # すれ違い、SSMは off なのに本番が起動したまま次の毎時実行まで課金され続ける。
@@ -56,6 +60,9 @@ jobs:
 
       - name: Determine desired state and apply
         id: apply
+        env:
+          # 停止処理の前に「本番デプロイが実行中か」を gh run list で確認する(#1518)。
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -e
 
@@ -169,6 +176,72 @@ jobs:
           DB_ID="${PROJECT_NAME}-mysql"
           echo "desired=$DESIRED" >> "$GITHUB_OUTPUT"
 
+          # 本番デプロイ(deployment.yml)の実行中は「止める側」の処理をしない。
+          #
+          # 停止日のデプロイは、マイグレーションと反映確認のためにRDSとECSを一時的に
+          # 起動する。そこへ毎時5分のこのジョブが重なると、デプロイの途中でRDSを停止し、
+          # 起動したばかりの backend が "no route to host" でDBに繋がらずヘルスチェックに
+          # 落ちる。3回連続で落ちるとECSのサーキットブレーカーが旧リビジョンへ
+          # ロールバックし、そのイメージがECRから失効していると起動不能なタスク定義が
+          # 残る。2026-09-25 に実際にこれが起きた(#1518)。
+          #   09:05:41 このジョブ開始 -> 09:06:11 RDS停止
+          #   09:08:00 デプロイが desired=1 -> 09:11:30 backend がDBに繋がらず
+          #   09:15:03 サーキットブレーカーが :86 へロールバック -> pull できず起動不能
+          #
+          # 起動側(DESIRED=1)は止めない。稼働日の起動が1時間遅れる方が影響が大きく、
+          # デプロイ中に起動してもぶつかる処理が無い。
+          #
+          # 判定できなかった場合は停止しない(fail-closed)。続行すると、上のロールバック
+          # 事故をAPI障害のたびに再発させうる。見送りの代償は「本番が最大1時間起動した
+          # まま残る」だけなので、ジョブを失敗させてDiscordへ流し、人が気づける形にする。
+          prod_deploy_running() {
+            local out attempt
+            # status は in_progress / queued 以外にも waiting(承認待ち) / pending /
+            # requested という未完了状態がある。列挙すると新しい状態が増えたときに
+            # 「実行中0件」と誤判定するため、completed 以外を未完了として数える。
+            for attempt in 1 2 3; do
+              if out=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deployment.yml \
+                --branch main --limit 20 --json status \
+                --jq '[.[] | select(.status != "completed")] | length' 2>/tmp/gh_run_list_err); then
+                # 取得できたのに空なら jq の失敗。0件と読み替えず「実行中」に倒す。
+                if [ "$out" == "0" ]; then return 0; fi
+                return 1
+              fi
+              # 一時的な失敗で毎時 @here を鳴らさないための再試行。
+              # `[ ... ] && sleep` と書くと最終試行で非0を返し、set -e でステップが落ちる。
+              if [ "$attempt" != "3" ]; then sleep 3; fi
+            done
+            cat /tmp/gh_run_list_err >&2 || true
+            return 2
+          }
+
+          # 停止処理を進めて良いかを見て、進めてはいけない場合はこのステップを終える。
+          # $1 には「何を見送ったか」をログ・通知に出すための名前を渡す。
+          guard_stop_against_deploy() {
+            # set -e 下では「非0を返す素の呼び出し」でステップが落ちる。
+            # || で受けて errexit を抑えつつ戻り値を残す。
+            local state=0
+            prod_deploy_running || state=$?
+            case $state in
+              0) return 0 ;;
+              1)
+                echo "::notice::本番デプロイが実行中のため、$1 は見送ります。次の毎時実行で反映されます"
+                exit 0
+                ;;
+              *)
+                echo "本番デプロイの実行状況を取得できず、$1 を見送りました(本番が起動したまま残っています)" \
+                  > "$RUNNER_TEMP/alert-reason.txt"
+                echo "::error::本番デプロイの実行状況を取得できませんでした。デプロイ中に停止すると本番が起動不能になるため $1 は行いません(permissions の actions:read とGitHub APIの状況を確認してください)"
+                exit 1
+                ;;
+            esac
+          }
+          # --- デプロイ中ガード ここまで（automation/test/prod-deploy-db-guard-test.sh が抽出する） ---
+
+          if [ "$DESIRED" == "0" ]; then
+            guard_stop_against_deploy "停止処理(desired=0 / RDS停止)"
+          fi
+
           if [ "$DESIRED" == "1" ]; then
             # RDSを先に起動し、利用可能になってからECSを起動する
             # (backendがDB未起動のままタスク起動してクラッシュループするのを防ぐ。staging側の
@@ -242,6 +315,12 @@ jobs:
           done
 
           if [ "$DESIRED" == "0" ]; then
+            # 上のECSループ(4サービス×オートスケーリング同期)で1〜2分かかる。その間に
+            # デプロイが始まっていないかを、RDSを止める直前にもう一度見る。
+            # 確認→停止のあいだに始まったデプロイを取りこぼすと、起動したばかりの
+            # backend からDB接続を切ることになる(2026-09-25 の事象そのもの)。
+            guard_stop_against_deploy "RDS停止"
+
             # ECSを先に0にしてから(上のループで完了済み)RDSを止める。
             # 起動中(available)の時だけ止める。starting/stopping等の遷移中に叩くとエラーになるため
             RDS_STATUS=$(aws rds describe-db-instances --db-instance-identifier "$DB_ID" \
