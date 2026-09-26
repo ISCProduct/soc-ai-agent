@@ -94,8 +94,8 @@ type TendencyResult struct {
 
 // tendencyFilters は一覧の後段絞り込み。ページ取得後に適用する。
 type tendencyFilters struct {
-	lowMatchOnly               bool
-	resumeNeedsAttentionOnly   bool
+	lowMatchOnly             bool
+	resumeNeedsAttentionOnly bool
 }
 
 // ListTendencies は担当生徒の傾向タイプと向いている業界を返す（#1027）。
