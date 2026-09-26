@@ -11,6 +11,11 @@ import { PageLoading } from '@/components/common/PageLoading'
 import { authService, User } from '@/lib/auth'
 import { WhatsNewEntry, fetchWhatsNewEntries, hasUnreadWhatsNew, markWhatsNewAsSeen } from '@/lib/whats-new-data'
 import { fetchResumeStatus, resumeReminderMessage } from '@/lib/resume-reminder'
+import {
+  dismissGuidance,
+  fetchActiveGuidances,
+  type StudentGuidance,
+} from '@/lib/teacher-guidance'
 import styles from './page.module.css'
 
 export default function PageContent() {
@@ -21,6 +26,7 @@ export default function PageContent() {
   const [whatsNewEntries, setWhatsNewEntries] = useState<WhatsNewEntry[]>([])
   const [showWhatsNewBanner, setShowWhatsNewBanner] = useState(false)
   const [resumeReminder, setResumeReminder] = useState<string | null>(null)
+  const [guidances, setGuidances] = useState<StudentGuidance[]>([])
 
   useEffect(() => {
     const storedUser = authService.getStoredUser()
@@ -42,6 +48,11 @@ export default function PageContent() {
       .then((status) => setResumeReminder(resumeReminderMessage(status)))
       .catch(() => {
         // 履歴書状態の取得失敗はホーム画面を壊さない（バナーを出さない）
+      })
+    fetchActiveGuidances()
+      .then((rows) => setGuidances(rows))
+      .catch(() => {
+        // 教員案内の取得失敗はホームを壊さない
       })
   }, [router])
 
@@ -131,6 +142,22 @@ export default function PageContent() {
             </MuiLink>
           </Alert>
         )}
+        {guidances.map((g) => (
+          <Alert
+            key={g.id}
+            severity="info"
+            onClose={() => {
+              dismissGuidance(g.id).catch(() => {})
+              setGuidances((prev) => prev.filter((x) => x.id !== g.id))
+            }}
+            sx={{ borderRadius: 0 }}
+          >
+            {g.message}
+            {g.suggested_industries && g.suggested_industries.length > 0 && (
+              <>（参考: {g.suggested_industries.join('、')}）</>
+            )}
+          </Alert>
+        ))}
         <div className={styles.chatWrapper}>
           <MuiChat />
         </div>

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Alert,
+  Button,
   Checkbox,
   Chip,
   FormControlLabel,
@@ -36,6 +37,7 @@ import {
   type StudentTendency,
 } from '@/lib/student-insights'
 import { LOW_MATCH_THRESHOLD } from '@/lib/low-match'
+import { sendTeacherGuidance } from '@/lib/teacher-guidance'
 
 export default function PageContent() {
   const [adminEmail, setAdminEmail] = useState('')
@@ -48,6 +50,8 @@ export default function PageContent() {
   const [resumeNeedsAttentionOnly, setResumeNeedsAttentionOnly] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [sendingId, setSendingId] = useState<number | null>(null)
+  const [sentIds, setSentIds] = useState<Set<number>>(() => new Set())
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
   // 担当校を持つ管理者は school_id が必須(無いと403)なので、学校が確定するまで取得しない
   const [schoolRequired, setSchoolRequired] = useState<boolean | null>(null)
@@ -116,6 +120,22 @@ export default function PageContent() {
     return () => { cancelled = true; clearTimeout(timer) }
   }, [fetchStudents, query])
 
+  const sendGuidance = async (s: StudentTendency, kind: 'low_match' | 'resume') => {
+    setSendingId(s.user_id)
+    setError('')
+    try {
+      await sendTeacherGuidance(s.user_id, {
+        kind,
+        suggested_industries: displayIndustries(s).map((i) => i.industry_name),
+      })
+      setSentIds((prev) => new Set(prev).add(s.user_id))
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '案内の送信に失敗しました')
+    } finally {
+      setSendingId(null)
+    }
+  }
+
   return (
     <PageContainer maxWidth={ADMIN_PAGE_WIDTH.wide}>
       <AdminPageHeader
@@ -183,18 +203,19 @@ export default function PageContent() {
               <TableCell>向いている業界 TOP3</TableCell>
               <TableCell>要フォローの応募</TableCell>
               <TableCell>履歴書</TableCell>
+              <TableCell>案内</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                   <CircularProgress size={24} />
                 </TableCell>
               </TableRow>
             ) : students.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                <TableCell colSpan={8} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                   生徒が見つかりません
                 </TableCell>
               </TableRow>
@@ -205,6 +226,10 @@ export default function PageContent() {
               const noData = typeLabel === NO_DATA_LABEL
               const lowMatches = lowMatchApplications(s)
               const resumeLabel = resumeAttentionLabel(s)
+              const canGuideLowMatch = lowMatches.length > 0
+              const canGuideResume = Boolean(resumeLabel)
+              const busy = sendingId === s.user_id
+              const sent = sentIds.has(s.user_id)
               return (
                 <TableRow key={s.user_id} hover>
                   <TableCell>
@@ -271,6 +296,34 @@ export default function PageContent() {
                     ) : (
                       <Typography variant="body2" color="text.disabled">—</Typography>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <Stack spacing={0.5} sx={{ minWidth: 120 }}>
+                      {canGuideLowMatch && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          disabled={busy || sent}
+                          onClick={() => sendGuidance(s, 'low_match')}
+                        >
+                          {sent ? '送信済' : '軌道修正'}
+                        </Button>
+                      )}
+                      {canGuideResume && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="warning"
+                          disabled={busy || sent}
+                          onClick={() => sendGuidance(s, 'resume')}
+                        >
+                          {sent ? '送信済' : '履歴書案内'}
+                        </Button>
+                      )}
+                      {!canGuideLowMatch && !canGuideResume && (
+                        <Typography variant="body2" color="text.disabled">—</Typography>
+                      )}
+                    </Stack>
                   </TableCell>
                 </TableRow>
               )
