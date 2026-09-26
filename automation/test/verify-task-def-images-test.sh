@@ -19,7 +19,8 @@ trap 'rm -rf "$WORK"' EXIT
 REGISTRY="508897596159.dkr.ecr.ap-northeast-1.amazonaws.com"
 
 # aws スタブ。
-#   - describe-services は TD_<サービス> で「サービスが今指しているタスク定義」を返す
+#   - describe-services は TD_<サービス> / DC_<サービス> / RC_<サービス> で
+#     「今指しているタスク定義 / desiredCount / runningCount」を返す（既定 0 / 0）
 #   - describe-task-definition は `soc-app-<svc>:<rev>` から `<registry>/soc-<svc>:img<rev>` を作る
 #     （NON_ECR に入れたサービスは Docker Hub のイメージを返す）
 #   - describe-images は MISSING_TAGS / ERROR_TAGS に応じて失敗する
@@ -39,8 +40,13 @@ arg_after() {
 case "$1 $2" in
   "ecs describe-services")
     svc=$(arg_after --services "$@")
-    var="TD_${svc//-/_}"
-    echo "${!var:-arn:aws:ecs:ap-northeast-1:1:task-definition/soc-app-${svc}:88}"
+    key="${svc//-/_}"
+    td="TD_$key"; dc="DC_$key"; rc="RC_$key"
+    # 本体は `--query 'services[0].[taskDefinition,desiredCount,runningCount]'` で
+    # タブ区切り1行を受け取る。ここも同じ形で返す。
+    printf '%s\t%s\t%s\n' \
+      "${!td:-arn:aws:ecs:ap-northeast-1:1:task-definition/soc-app-${svc}:88}" \
+      "${!dc:-0}" "${!rc:-0}"
     ;;
   "ecs describe-task-definition")
     td=$(arg_after --task-definition "$@")
@@ -86,13 +92,14 @@ run() {
   : > "$CALLS"
   out=$(PATH="$WORK/bin:$PATH" PROJECT_NAME=soc-app REGISTRY="$REGISTRY" CALLS="$CALLS" \
     TD_backend="${TD_backend:-}" TD_frontend="${TD_frontend:-}" \
+    DC_backend="${DC_backend:-}" RC_backend="${RC_backend:-}" \
     MISSING_TAGS="${MISSING_TAGS:-}" ERROR_TAGS="${ERROR_TAGS:-}" \
     NON_ECR="${NON_ECR:-}" BROKEN_TD="${BROKEN_TD:-}" \
     bash "$TARGET" "$@" 2>&1)
   actual=$?
   # `VAR=x run ...` の前置代入は、関数呼び出しでは呼び出し後も残る（bashの仕様）。
   # 消さないと次のケースへ設定が漏れ、「別の条件を確かめたつもり」になる。
-  unset TD_backend TD_frontend MISSING_TAGS ERROR_TAGS NON_ECR BROKEN_TD
+  unset TD_backend TD_frontend DC_backend RC_backend MISSING_TAGS ERROR_TAGS NON_ECR BROKEN_TD
   calls=$(tr -d '\n' < "$CALLS")
   if [ "$actual" -ne "$want_exit" ]; then
     echo "FAIL $name: 終了コード 期待=$want_exit 実際=$actual"
@@ -159,6 +166,31 @@ case "${LAST_OUT:-}" in
   *"ok   frontend"*) : ;;
   *) echo "FAIL 後続サービス(frontend)を検査していない"; fail=$((fail + 1)) ;;
 esac
+
+# 稼働中のサービスは戻さない（Codex #1534 指摘）。
+#
+# 稼働日のデプロイで新リビジョンがヘルスチェックに落ち、サーキットブレーカーが
+# 「タグは失効済みだが既存タスクは動いている」旧リビジョンへ戻した状況。
+# ここで $wanted（直前に落ちたリビジョン）へ update-service すると、
+# minimumHealthyPercent=0 のため健全な稼働タスクが先に落とされて本番が止まる。
+TD_backend="$ARN86" MISSING_TAGS="img86" DC_backend=1 RC_backend=1 \
+  run "稼働中(desired=1 running=1)なら戻さず失敗" 1 "" "backend=$ARN88"
+case "${LAST_OUT:-}" in
+  *"稼働中"*) : ;;
+  *) echo "FAIL 稼働中で見送ったことがログに出ていない"; fail=$((fail + 1)) ;;
+esac
+
+# 起動途中（desired=1, running=0）も「これから running になる」ので触らない。
+TD_backend="$ARN86" MISSING_TAGS="img86" DC_backend=1 RC_backend=0 \
+  run "起動要求あり(desired=1 running=0)なら戻さず失敗" 1 "" "backend=$ARN88"
+
+# ドレイン中（desired=0, running=1）も、残っているタスクを失う可能性がある。
+TD_backend="$ARN86" MISSING_TAGS="img86" DC_backend=0 RC_backend=1 \
+  run "ドレイン中(desired=0 running=1)なら戻さず失敗" 1 "" "backend=$ARN88"
+
+# desired/running が取れない（空・None）場合も「稼働中かもしれない」側へ倒す。
+TD_backend="$ARN86" MISSING_TAGS="img86" DC_backend="None" RC_backend="None" \
+  run "desired/running が不明なら戻さず失敗" 1 "" "backend=$ARN88"
 
 # サービス名を1つも渡さない使い方は事故（全サービス素通りで緑になる）。
 run "引数無しは使用方法エラー" 2 ""

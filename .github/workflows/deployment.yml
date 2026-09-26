@@ -539,6 +539,35 @@ jobs:
             echo "rag=$(echo "$CHANGED" | grep -q '^rag/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
           fi
 
+      # スモーク(Playwright)の準備は「本番AWS認証情報を入れる前」に済ませる。
+      # このジョブの認証情報は ECS/RDS/ECR を操作できる長期キーで、
+      # configure-aws-credentials 以降はジョブ全体の環境変数として残る。
+      # そのあとで npm ci を走らせると、依存パッケージの install/postinstall
+      # スクリプトからその認証情報とECRのDocker認証を読めてしまう。
+      # 侵害された推移的依存1つで本番を触られるため、認証より前に置く。
+      #
+      # 本番を起動する前に終わらせる意味もある（npm ci とブラウザ取得で数分かかり、
+      # 起動後にやるとその分だけ停止日の一時起動が延びる）。
+      - name: Set up Node.js (smoke)
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: ./frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: ./frontend/package-lock.json
+
+      - name: Install smoke test dependencies
+        working-directory: ./frontend
+        # ハングしたまま既定上限(6時間)まで concurrency と起動済みRDSを占有しないよう
+        # 上限を切る。ジョブ全体ではなくステップに付けるのは、ジョブのタイムアウトだと
+        # 後段の always()（desired=0 へ戻す / RDS停止）まで打ち切られ、
+        # 停止日の本番が起動したまま残るため（deploy-smoke.yml の15分と同水準）。
+        timeout-minutes: 15
+        # --with-deps は内部で apt-get update を実行し、ミラーへの接続がハングして
+        # タイムアウトまで進まない事象が頻発したため外す（deploy-smoke.yml と同じ）。
+        run: |
+          npm ci
+          npx playwright install chromium
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -817,24 +846,6 @@ jobs:
           # 3サービスを同時に走らせ、安定待ちは後段でまとめて行う（直列だと合計待ちが積み上がる）
           wait-for-service-stability: false
 
-      # スモーク(Playwright)の準備は本番を起動する前に終わらせる。npm ci と
-      # ブラウザ取得で数分かかるため、起動後にやるとその分だけ停止日の一時起動が
-      # 延び、公開URLも余計に長く生きたままになる。
-      - name: Set up Node.js (smoke)
-        uses: actions/setup-node@v7
-        with:
-          node-version-file: ./frontend/.nvmrc
-          cache: npm
-          cache-dependency-path: ./frontend/package-lock.json
-
-      - name: Install smoke test dependencies
-        working-directory: ./frontend
-        # --with-deps は内部で apt-get update を実行し、ミラーへの接続がハングして
-        # タイムアウトまで進まない事象が頻発したため外す（deploy-smoke.yml と同じ）。
-        run: |
-          npm ci
-          npx playwright install chromium
-
       # backend/frontend/rag-review全てのECSデプロイが安定するまで待った後(=本番反映が実際に完了した後)に通知する。
       # DISCORD_RELEASE_WEBHOOK_URL未設定でもデプロイ自体は失敗させない(automation/deploy-smoke/notify-discord.shと同じ方針)。
       # 直列に待つと 588s + 302s + 88s と積み上がるため、3サービスの安定待ちを並列化する。
@@ -853,10 +864,19 @@ jobs:
       - name: Wait for services to stabilize (parallel)
         run: |
           set -e
-          services=""
-          if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then services="$services backend"; fi
-          if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then services="$services frontend"; fi
-          if [ "${{ steps.changes.outputs.rag }}" = "true" ]; then services="$services rag-review"; fi
+          # 一時起動した場合は、変更の有無に関わらず起動した全サービス(chroma込み)を待つ。
+          # 変更のあったサービスだけ待つと、ドキュメント/Terraformのみのデプロイや
+          # backend だけの変更で frontend が cold start 中のままスモークが走り、
+          # 503 や接続失敗で正常なデプロイが失敗扱いになる。
+          # prod-scale.sh が起動する対象と同じ並びにする（片方だけ増えると待ち漏れる）。
+          if [ "${{ steps.prod-svc.outputs.was_down }}" = "true" ]; then
+            services="chroma rag-review backend frontend"
+          else
+            services=""
+            if [ "${{ steps.changes.outputs.backend }}" = "true" ]; then services="$services backend"; fi
+            if [ "${{ steps.changes.outputs.frontend }}" = "true" ]; then services="$services frontend"; fi
+            if [ "${{ steps.changes.outputs.rag }}" = "true" ]; then services="$services rag-review"; fi
+          fi
           if [ -z "$services" ]; then
             echo "no service deployed; nothing to wait for"
             exit 0
@@ -893,8 +913,17 @@ jobs:
       - name: Run Playwright smoke (production)
         id: smoke
         working-directory: ./frontend
+        # インストールと同じ理由でステップ側に上限を置く（ジョブ側だと always() の
+        # 後片付けまで打ち切られる）。deploy-smoke.yml のスモークジョブと同水準。
+        timeout-minutes: 15
         env:
           CI: true
+          # スモークは公開URLしか見ない。node_modules 由来のコードに本番AWS認証を
+          # 渡さないため、このステップでは空にして上書きする（configure-aws-credentials
+          # はジョブ全体の環境変数として認証情報を残す）。
+          AWS_ACCESS_KEY_ID: ''
+          AWS_SECRET_ACCESS_KEY: ''
+          AWS_SESSION_TOKEN: ''
           PLAYWRIGHT_BASE_URL: ${{ vars.PROD_BASE_URL || 'https://shukatsu-ai.jp' }}
           PLAYWRIGHT_API_BASE_URL: ${{ vars.PROD_API_BASE_URL || 'https://api.shukatsu-ai.jp' }}
         run: npx playwright test --config=playwright.smoke.config.ts
@@ -995,8 +1024,14 @@ jobs:
       # 停止するのは「このデプロイが stopped から起動した」場合だけで、かつ本番が稼働状態でない
       # (全サービス desired=0)ときに限る。稼働日にデプロイした本番は落とさない。
       # 途中で失敗しても課金を残さないため always()。
+      #
+      # 条件に changes.outputs.backend を入れてはいけない。起動側(Start production RDS)は
+      # 「backend変更 または 停止日」で起動するため、停止日に frontend / rag-review だけを
+      # 変更したデプロイでは起動だけされて停止されず、RDSが起動したまま残る。
+      # started_by_deploy は起動ステップが実際に start-db-instance を打てた時だけ true
+      # になるので、これ単独が正しいゲート。
       - name: Stop production RDS if this deploy started it
-        if: always() && steps.changes.outputs.backend == 'true' && steps.prod-db.outputs.started_by_deploy == 'true'
+        if: always() && steps.prod-db.outputs.started_by_deploy == 'true'
         run: |
           set -uo pipefail
           # マイグレーションのワンオフタスクがまだ動いている状態でDBを落とすと、

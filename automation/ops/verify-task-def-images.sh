@@ -1,6 +1,8 @@
 #!/bin/bash
 # 本番サービスが参照しているタスク定義のイメージがECRに存在するかを検査し、
 # 存在しなければ「今回のデプロイで登録したリビジョン」へ戻す。
+# 戻すのは desired=0 かつ running=0 のサービスだけ。稼働中のタスクがある場合は
+# 検査結果を出して失敗させるだけにする（詳細は後述の「稼働中のサービスは触らない」）。
 #
 # なぜ必要か（#1518）:
 #   ECSのデプロイサーキットブレーカーは失敗すると「直前の安定デプロイ」へ戻すが、
@@ -82,12 +84,17 @@ for arg in "$@"; do
   wanted="${arg#*=}"
   [ "$wanted" = "$service" ] && wanted=""
 
-  if ! current=$(aws ecs describe-services --cluster "$PROJECT_NAME" --services "$service" \
-    --query 'services[0].taskDefinition' --output text); then
+  # desired / running も一緒に読む。復旧(update-service)して良いのは「今どのタスクも
+  # 動いていないサービス」だけなので、タスク定義だけでは判断できない。
+  if ! svc=$(aws ecs describe-services --cluster "$PROJECT_NAME" --services "$service" \
+    --query 'services[0].[taskDefinition,desiredCount,runningCount]' --output text); then
     echo "::error::$service: サービスを取得できず、参照しているタスク定義を検査できません"
     fail=1
     continue
   fi
+  current=$(printf '%s' "$svc" | awk '{print $1}')
+  desired=$(printf '%s' "$svc" | awk '{print $2}')
+  running=$(printf '%s' "$svc" | awk '{print $3}')
   if [ -z "$current" ] || [ "$current" = "None" ]; then
     echo "::error::$service: サービスのタスク定義が取得できません(値='$current')"
     fail=1
@@ -115,6 +122,23 @@ for arg in "$@"; do
   fi
   if [ "$wanted" = "$current" ]; then
     echo "::error::$service は今回デプロイしたリビジョン($current)を指していますが、そのイメージがECRにありません"
+    continue
+  fi
+
+  # 稼働中のサービスは触らない。
+  #
+  # 稼働日のデプロイで新リビジョンがヘルスチェックに落ち、サーキットブレーカーが
+  # 「ECRのタグは失効済みだが既存タスクは動き続けている」旧リビジョンへ戻した場合、
+  # ここで $wanted（＝直前に落ちたリビジョン）へ update-service すると、
+  # minimumHealthyPercent=0 のため健全な稼働タスクが先に落とされ、
+  # 起動しないタスクに入れ替わって本番が停止する。
+  # このステップは安定待ち失敗時にも always() で走るので、その経路に必ず当たる。
+  #
+  # 逆に desired=0 / running=0 のサービス（停止日の本番、または起動前）は、
+  # 壊れたタスク定義を指したまま残す方が危険（次の稼働日に起動しない）。
+  # 失うタスクが無いのでここだけ自動で向け直す。
+  if [ "$desired" != "0" ] || [ "$running" != "0" ]; then
+    echo "::error::$service は $current のイメージがECRにありませんが、タスクが稼働中(desired=$desired running=$running)のため自動では戻しません。稼働中のタスクを失うおそれがあります。手動で復旧してください(戻し先候補: $wanted)"
     continue
   fi
 
