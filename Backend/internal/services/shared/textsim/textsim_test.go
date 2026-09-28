@@ -12,7 +12,8 @@ func TestNormalize(t *testing.T) {
 		{name: "空白と改行は除去する", in: " 貴社の\nサービス　です ", want: "貴社のサービスです"},
 		{name: "約物は除去する", in: "資格は簿記2級です、実務で活用（予定）。", want: "資格は簿記2級です実務で活用予定"},
 		{name: "長音記号は残す", in: "サーバー運用", want: "サーバー運用"},
-		{name: "数字に挟まれた小数点・桁区切りは残す", in: "売上1.5倍／1,200万円", want: "売上1.5倍1,200万円"},
+		{name: "数字に挟まれた小数点は残す", in: "売上1.5倍", want: "売上1.5倍"},
+		{name: "桁区切りのカンマは除去する", in: "売上1,200万円", want: "売上1200万円"},
 		{name: "数字に挟まれない記号は除去する", in: "以上.。", want: "以上"},
 		{name: "波ダッシュは除去する", in: "2020〜2023年", want: "20202023年"},
 		{name: "全角チルダも同じ結果になる", in: "2020～2023年", want: "20202023年"},
@@ -27,7 +28,7 @@ func TestNormalize(t *testing.T) {
 	}
 }
 
-func TestScore(t *testing.T) {
+func TestMatchScore(t *testing.T) {
 	tests := []struct {
 		name     string
 		haystack string
@@ -69,9 +70,9 @@ func TestScore(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Score(tt.haystack, tt.needle)
+			got := New(tt.haystack).MatchScore(New(tt.needle))
 			if got < tt.wantMin || got > tt.wantMax {
-				t.Errorf("Score() = %.3f, want %.3f〜%.3f", got, tt.wantMin, tt.wantMax)
+				t.Errorf("MatchScore() = %.3f, want %.3f〜%.3f", got, tt.wantMin, tt.wantMax)
 			}
 		})
 	}
@@ -80,6 +81,6 @@ func TestScore(t *testing.T) {
 func TestBigramsLen(t *testing.T) {
 	// Len は正規化後の文字数（約物・空白を除いた数）
 	if got := New(" 売上を、1.5倍に　しました。").Len(); got != 12 {
-		t.Errorf("Len() = %d, want 12 (%q)", got, New(" 売上を、1.5倍に　しました。").Norm())
+		t.Errorf("Len() = %d, want 12", got)
 	}
 }

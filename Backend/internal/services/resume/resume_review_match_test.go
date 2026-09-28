@@ -14,7 +14,12 @@ import (
 	"Backend/internal/services/shared/textsim"
 )
 
-// makeBlocks はテスト用の本文ブロックを組み立てる。
+// score は本文ブロックに対する引用の一致度を返す（境界値の記録用）。
+func score(blockText, quote string) float64 {
+	return textsim.New(blockText).MatchScore(textsim.New(quote))
+}
+
+// makeBlocks はテスト用の本文ブロックを1ページ分組み立てる。
 // BBox は "bbox-1" から始まる連番で、どのブロックに紐づいたかの目印に使う。
 func makeBlocks(texts ...string) []models.ResumeTextBlock {
 	blocks := make([]models.ResumeTextBlock, 0, len(texts))
@@ -121,11 +126,18 @@ func TestQuoteMatching(t *testing.T) {
 			wantBBox: "",
 		},
 		{
-			// 小数点を残しているので「1.5倍」と「15倍」は区別される
+			// 小数点は残すので「1.5倍」と「15倍」は区別される
 			name:     "数値が違う記述ではなく一致する記述に紐づく",
 			blocks:   makeBlocks("売上を1.5倍にしました", "売上を15倍にしました"),
 			item:     aiReviewItem{Quote: "売上を15倍にしました"},
 			wantBBox: "bbox-2",
+		},
+		{
+			// 桁区切りのカンマは落とすので書式差では減点しない
+			name:     "桁区切りの有無は同一視する",
+			blocks:   makeBlocks("売上を1,200万円伸ばしました"),
+			item:     aiReviewItem{Quote: "売上を1200万円伸ばしました"},
+			wantBBox: "bbox-1",
 		},
 		{
 			name:     "波ダッシュと全角チルダの違い",
@@ -147,6 +159,53 @@ func TestQuoteMatching(t *testing.T) {
 				t.Errorf("BBox = %q, want %q", got, tt.wantBBox)
 			}
 		})
+	}
+}
+
+// TestQuoteMatchingIgnoresPageHint は page_hint が幻覚しても
+// 他ページの完全一致を取りこぼさないことを固定する。
+// page_hint でページを絞ると、同ページの弱い候補(0.851)に誤って紐づく。
+func TestQuoteMatchingIgnoresPageHint(t *testing.T) {
+	const quote = "アルバイトでは接客を通じて売上向上に貢献しました。"
+	blocks := []models.ResumeTextBlock{
+		{PageNumber: 1, BlockIndex: 1, Text: "アルバイトでは接客を通して売上の向上に貢献しました。", BBox: "p1"},
+		{PageNumber: 2, BlockIndex: 1, Text: quote, BBox: "p2"},
+	}
+	if got := score(blocks[0].Text, quote); got < 0.846 || got > 0.856 {
+		t.Fatalf("前提が崩れた: p1のスコア = %.4f, want 0.851 前後", got)
+	}
+
+	// block_index を伴わない page_hint は当てにならないので無視する
+	for _, pageHint := range []int{0, 1, 2} {
+		t.Run(fmt.Sprintf("page_hint=%d", pageHint), func(t *testing.T) {
+			got := mapOne(t, blocks, aiReviewItem{Quote: quote, PageHint: pageHint})
+			if got != "p2" {
+				t.Errorf("BBox = %q, want p2（完全一致するブロック）", got)
+			}
+		})
+	}
+}
+
+// TestQuoteMatchUniqueExactWins は「完全一致が1件だけなら margin を適用せず採用する」を固定する。
+// 1行が長いほど1語違いの行のスコアは 1.0 に漸近する(≒1-2/N)ため、
+// margin だけに任せると長い行の完全一致が次点に潰されて欠落する。
+func TestQuoteMatchUniqueExactWins(t *testing.T) {
+	const (
+		quote = "アルバイト先の書店では店長の代理として発注業務とシフト作成を任され、繁忙期には新人スタッフ5名の教育も並行して担当し、前年比110%の売上を達成することができ、店長からも高い評価をいただきました。"
+		near  = "アルバイト先の書店では店長の代理として発注業務とシフト作成を任され、繁忙期には新人スタッフ6名の教育も並行して担当し、前年比110%の売上を達成することができ、店長からも高い評価をいただきました。"
+	)
+	blocks := makeBlocks(near, quote)
+
+	exact, second := score(quote, quote), score(near, quote)
+	if exact != 1 {
+		t.Fatalf("完全一致の前提が崩れた: %.4f", exact)
+	}
+	if diff := exact - second; diff >= quoteMatchMargin {
+		t.Fatalf("次点との差 %.4f が margin %.3f 以上では、このテストがガードを検証できない", diff, quoteMatchMargin)
+	}
+
+	if got := mapOne(t, blocks, aiReviewItem{Quote: quote}); got != "bbox-2" {
+		t.Errorf("BBox = %q, want bbox-2（唯一の完全一致）", got)
 	}
 }
 
@@ -177,74 +236,122 @@ func TestQuoteMatchThresholdBoundary(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if score := textsim.Score(tt.block, quote); score < tt.wantScore-0.005 || score > tt.wantScore+0.005 {
-				t.Fatalf("Score = %.3f, want %.3f 前後（類似度の計算式が変わった）", score, tt.wantScore)
+			if got := score(tt.block, quote); got < tt.wantScore-0.005 || got > tt.wantScore+0.005 {
+				t.Fatalf("Score = %.3f, want %.3f 前後（類似度の計算式が変わった）", got, tt.wantScore)
 			}
 			// 0.514 < quoteMatchThreshold <= 0.556 でなければどちらかが落ちる
 			got := mapOne(t, makeBlocks(tt.block), aiReviewItem{Quote: quote})
 			if gotMatch := got != ""; gotMatch != tt.wantMatch {
-				t.Errorf("紐づき = %v, want %v (quoteMatchThreshold=%.2f)", gotMatch, tt.wantMatch, quoteMatchThreshold)
+				t.Errorf("紐づき = %v, want %v (quoteMatchThreshold=%.3f)", gotMatch, tt.wantMatch, quoteMatchThreshold)
 			}
 		})
 	}
 }
 
 // TestQuoteMatchMarginBoundary は quoteMatchMargin を上下から固定する。
-// どちらの候補もしきい値を超えているので、採否は1位と2位の差だけで決まる。
+// どちらの候補もしきい値を超え、完全一致は含まないので、採否は1位と2位の差だけで決まる。
+//
+// 一文が2行に分かれた引用は、行の長さが近いほど差が小さくなる（均等分割で 0.038 まで）。
+// margin を大きくするとこの種の引用がまるごと欠落するので、上限として固定している。
+// 3行以上に分かれるケースは原理的に届かない（Issue #1559）。
 func TestQuoteMatchMarginBoundary(t *testing.T) {
 	tests := []struct {
-		name      string
-		blocks    []models.ResumeTextBlock
-		quote     string
-		wantDiff  float64 // 1位と2位の実測差
-		wantBBox  string
-		wantMatch bool
+		name     string
+		blocks   []models.ResumeTextBlock
+		quote    string
+		wantDiff float64 // 1位と2位の実測差
+		wantBBox string  // 空文字なら紐づかないことを期待する
 	}{
 		{
-			name: "1位と2位の差が小さいなら紐づけない",
+			name: "1語違いのブロックどうしなら紐づけない",
 			blocks: makeBlocks(
 				"Webサイトの制作を担当し表示速度を改善しました。",  // 0.634
 				"Webサイトの制作を担当しアクセス数を伸ばしました。", // 0.619
 			),
-			quote:     "Webサイトの制作を担当し成果を出した",
-			wantDiff:  0.015,
-			wantMatch: false,
+			quote:    "Webサイトの制作を担当し成果を出した",
+			wantDiff: 0.015,
+			wantBBox: "",
 		},
 		{
-			name: "1位と2位の差が十分なら1位に紐づく",
+			name: "一文が偏って2行に分かれたケース",
 			blocks: makeBlocks(
 				"50名の入会につなげました。",      // 0.571
 				"学生時代はサークルの新人勧誘を担当し、", // 0.723
 			),
-			quote:     "学生時代はサークルの新人勧誘を担当し、50名の入会につなげました。",
-			wantDiff:  0.152,
-			wantBBox:  "bbox-2",
-			wantMatch: true,
+			quote:    "学生時代はサークルの新人勧誘を担当し、50名の入会につなげました。",
+			wantDiff: 0.152,
+			wantBBox: "bbox-2",
+		},
+		{
+			name: "一文がほぼ均等に2行に分かれたケース",
+			blocks: makeBlocks(
+				"アルバイトでは接客を通じて店舗の", // 0.682
+				"売上向上に大きく貢献しました。",  // 0.619
+			),
+			quote:    "アルバイトでは接客を通じて店舗の売上向上に大きく貢献しました。",
+			wantDiff: 0.063,
+			wantBBox: "bbox-1",
+		},
+		{
+			name: "一文が均等に2行に分かれた最も差の小さいケース",
+			blocks: makeBlocks(
+				"私は責任感を持って最後まで", // 0.667
+				"やり遂げることができます。", // 0.629
+			),
+			quote:    "私は責任感を持って最後までやり遂げることができます。",
+			wantDiff: 0.038,
+			wantBBox: "bbox-1",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			first := textsim.Score(tt.blocks[0].Text, tt.quote)
-			second := textsim.Score(tt.blocks[1].Text, tt.quote)
+			first := score(tt.blocks[0].Text, tt.quote)
+			second := score(tt.blocks[1].Text, tt.quote)
 			if first < quoteMatchThreshold || second < quoteMatchThreshold {
-				t.Fatalf("両候補がしきい値を超えている前提が崩れた: %.3f / %.3f", first, second)
+				t.Fatalf("両候補がしきい値を超えている前提が崩れた: %.4f / %.4f", first, second)
+			}
+			if first == 1 || second == 1 {
+				t.Fatalf("完全一致を含まない前提が崩れた: %.4f / %.4f", first, second)
 			}
 			diff := first - second
 			if diff < 0 {
 				diff = -diff
 			}
 			if diff < tt.wantDiff-0.005 || diff > tt.wantDiff+0.005 {
-				t.Fatalf("差 = %.3f, want %.3f 前後（類似度の計算式が変わった）", diff, tt.wantDiff)
+				t.Fatalf("差 = %.4f, want %.3f 前後（類似度の計算式が変わった）", diff, tt.wantDiff)
 			}
-			// 0.015 < quoteMatchMargin <= 0.152 でなければどちらかが落ちる
-			got := mapOne(t, tt.blocks, aiReviewItem{Quote: tt.quote})
-			if gotMatch := got != ""; gotMatch != tt.wantMatch {
-				t.Fatalf("紐づき = %v, want %v (quoteMatchMargin=%.2f)", gotMatch, tt.wantMatch, quoteMatchMargin)
+			// 0.015 < quoteMatchMargin <= 0.038 でなければどれかが落ちる
+			if got := mapOne(t, tt.blocks, aiReviewItem{Quote: tt.quote}); got != tt.wantBBox {
+				t.Errorf("BBox = %q, want %q (quoteMatchMargin=%.3f)", got, tt.wantBBox, quoteMatchMargin)
 			}
-			if got != tt.wantBBox {
-				// 一文が複数ブロックに分かれる場合は、引用と長く重なる方（=Dice係数が高い方）を採る
-				t.Errorf("BBox = %q, want %q", got, tt.wantBBox)
+		})
+	}
+}
+
+// TestAdoptRetryItems は紐づけリトライの結果を採用する条件を固定する。
+func TestAdoptRetryItems(t *testing.T) {
+	items := func(n int) []models.ResumeReviewItem {
+		return make([]models.ResumeReviewItem, n)
+	}
+
+	tests := []struct {
+		name    string
+		initial []models.ResumeReviewItem
+		retry   []models.ResumeReviewItem
+		want    int
+	}{
+		{name: "リトライが0件なら初回を残す", initial: items(2), retry: nil, want: 2},
+		{name: "どちらも0件なら0件（呼び出し側がエラーにする）", initial: nil, retry: nil, want: 0},
+		{name: "リトライが増えたら採用する", initial: items(2), retry: items(3), want: 3},
+		{name: "同数ならリトライを採用しない", initial: items(3), retry: items(3), want: 3},
+		{name: "初回0件・リトライ1件なら採用する", initial: nil, retry: items(1), want: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := adoptRetryItems(tt.initial, tt.retry); len(got) != tt.want {
+				t.Errorf("件数 = %d, want %d", len(got), tt.want)
 			}
 		})
 	}

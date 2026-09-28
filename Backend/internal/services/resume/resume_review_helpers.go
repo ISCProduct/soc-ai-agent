@@ -21,9 +21,12 @@ const (
 	// quoteMatchMargin は最良候補と次点の類似度差の下限。
 	// これ未満なら「どちらのブロックとも言える」状態なので紐づけを諦める。
 	// 誤ったブロックに紐づくと注釈PDFに焼かれ、学生が無関係な記述を直すことになるため、
-	// 迷うくらいなら欠落させる。言い回しが1語だけ違うブロックどうしの差は 0.015（実測）、
-	// 一文が2行に分かれたときの正解と不正解の差は 0.152（実測）なので、その間の値。
-	quoteMatchMargin = 0.1
+	// 迷うくらいなら欠落させる。
+	//
+	// 言い回しが1語だけ違うブロックどうしの差は 0.015（実測）。一方、一文が2行に
+	// ほぼ均等に分かれたときの正解と不正解の差は 0.038〜0.063（実測）しかないので、
+	// 大きくすると均等分割の引用がまるごと欠落する。その間の値。
+	quoteMatchMargin = 0.025
 )
 
 func fallbackResumeReview(blocks []models.ResumeTextBlock) (*models.ResumeReview, []models.ResumeReviewItem) {
@@ -112,7 +115,7 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 		}
 		// findBestBlock が quoteMatchThreshold を保証して返すため、追加の照合はしない。
 		if block == nil && runeLen(item.Quote) >= 6 {
-			block = findBestBlock(blocks, blockTexts, item.Quote, item.PageHint)
+			block = findBestBlock(blocks, blockTexts, item.Quote)
 		}
 		if block == nil {
 			continue
@@ -135,29 +138,23 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 // findBestBlock は引用に最も近い本文ブロックを返す。
 // blockTexts は blocks と同じ並びの正規化済みテキスト。
 // しきい値未満、または次点と差が小さく曖昧な場合は nil を返す。
-func findBestBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Bigrams, quote string, pageHint int) *models.ResumeTextBlock {
+//
+// page_hint での絞り込みはしない。page_hint はLLM生成で幻覚するため、
+// 絞り込むと他ページの完全一致を見ずに同ページの弱い候補を採ってしまう。
+func findBestBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Bigrams, quote string) *models.ResumeTextBlock {
 	quoteText := textsim.New(quote)
 	if quoteText.Empty() {
 		return nil
 	}
-	// page_hint のページ内を優先し、見つからなければ全ページから探す。
-	if best := bestMatchingBlock(blocks, blockTexts, quoteText, pageHint); best != nil {
-		return best
-	}
-	if pageHint > 0 {
-		return bestMatchingBlock(blocks, blockTexts, quoteText, 0)
-	}
-	return nil
-}
 
-func bestMatchingBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Bigrams, quoteText textsim.Bigrams, pageHint int) *models.ResumeTextBlock {
 	var best *models.ResumeTextBlock
 	bestScore, secondScore := 0.0, 0.0
+	exactCount := 0
 	for i := range blocks {
-		if pageHint > 0 && blocks[i].PageNumber != pageHint {
-			continue
+		score := blockTexts[i].MatchScore(quoteText)
+		if score == 1 {
+			exactCount++
 		}
-		score := blockTexts[i].Score(quoteText)
 		if score > bestScore {
 			bestScore, secondScore, best = score, bestScore, &blocks[i]
 			continue
@@ -169,12 +166,30 @@ func bestMatchingBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Big
 	if best == nil || bestScore < quoteMatchThreshold {
 		return nil
 	}
+	// 完全包含が1件だけならそれが引用元。行が長いほど1語違いの行のスコアは
+	// 1.0に漸近する(≒1-2/N)ので、marginで捨てると長文行が必ず落ちてしまう。
+	if bestScore == 1 && exactCount == 1 {
+		return best
+	}
 	// 次点と差が小さいときは、どちらのブロックとも言える状態。
-	// 誤ったブロックに紐づけるより欠落させる（同点の完全一致も同様に捨てる）。
+	// 誤ったブロックに紐づけるより欠落させる（同じ言い回しが2箇所にある場合など）。
 	if bestScore-secondScore < quoteMatchMargin {
 		return nil
 	}
 	return best
+}
+
+// adoptRetryItems は紐づけリトライの結果を採用するかを決める。
+// 件数が増えたときだけ採用する。初回より少ない結果で上書きすると、
+// 初回2件・リトライ0件のようなケースで紐づけ失敗エラーになってしまう。
+//
+// 結合ではなく置き換えにしているのは、リトライのプロンプトが初回と同じブロックに
+// 対する指摘を求めるもので内容が重複し、同じ箇所に注釈が二重に打たれるため。
+func adoptRetryItems(initial, retry []models.ResumeReviewItem) []models.ResumeReviewItem {
+	if len(retry) > len(initial) {
+		return retry
+	}
+	return initial
 }
 
 func findBlockByIndex(blocks []models.ResumeTextBlock, pageHint int, blockIndex int) *models.ResumeTextBlock {

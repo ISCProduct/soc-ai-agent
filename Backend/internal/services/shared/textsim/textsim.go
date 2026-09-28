@@ -18,8 +18,10 @@ import (
 //   - 約物・記号（、。・「」（）!? 〜 ~ など）の除去
 //   - 小文字化
 //
-// ただし数字に挟まれた小数点・桁区切りは残す。「1.5倍」と「15倍」は別の記述であり、
+// ただし数字に挟まれた小数点は残す。「1.5倍」と「15倍」は別の数値であり、
 // 同一視すると数値が違う箇所に注釈が飛ぶため。
+// 桁区切りのカンマは逆に落とす。「1,200」と「1200」は同じ数値の書式差にすぎず、
+// 残すとOCRとLLMで書式が違うだけでスコアが下がる。
 func Normalize(s string) string {
 	runes := []rune(norm.NFKC.String(strings.TrimSpace(s)))
 	var b strings.Builder
@@ -31,7 +33,7 @@ func Normalize(s string) string {
 		case unicode.IsPunct(r) || unicode.IsSymbol(r):
 			// 記号も落とす。波ダッシュ〜(Pd)と全角チルダ～(NFKC後は~/Sm)のように
 			// 見た目が同じで分類が違う文字を取りこぼさないため。
-			if !isDigitSeparator(runes, i) {
+			if !isDecimalPoint(runes, i) {
 				continue
 			}
 		}
@@ -40,9 +42,9 @@ func Normalize(s string) string {
 	return strings.ToLower(b.String())
 }
 
-// isDigitSeparator は runes[i] が数字に挟まれた小数点・桁区切りかを判定する。
-func isDigitSeparator(runes []rune, i int) bool {
-	if runes[i] != '.' && runes[i] != ',' {
+// isDecimalPoint は runes[i] が数字に挟まれた小数点かを判定する。
+func isDecimalPoint(runes []rune, i int) bool {
+	if runes[i] != '.' {
 		return false
 	}
 	return i > 0 && i+1 < len(runes) && unicode.IsDigit(runes[i-1]) && unicode.IsDigit(runes[i+1])
@@ -66,24 +68,23 @@ func New(s string) Bigrams {
 	}
 }
 
-// Norm は正規化済み文字列を返す。
-func (t Bigrams) Norm() string { return t.norm }
-
 // Len は正規化後の文字数を返す（事前計算済み）。
 func (t Bigrams) Len() int { return t.runes }
 
 // Empty は正規化後に文字が残らなかったかを返す。
 func (t Bigrams) Empty() bool { return t.norm == "" }
 
-// Score は needle が t（本文側）にどれだけ一致するかを 0.0〜1.0 で返す。
-// t が needle をそのまま含む場合は 1.0、それ以外は文字bigramのDice係数
-// 2|A∩B| / (|A|+|B|) を返す。
+// MatchScore は needle が t（本文側）にどれだけ一致するかを 0.0〜1.0 で返す。
+//
+// 純粋なDice係数ではない。t が needle をそのまま含む場合は長さ差を無視して 1.0 を返し、
+// それ以外のときだけ文字bigramのDice係数 2|A∩B| / (|A|+|B|) を返す非対称な指標。
+// 対称な類似度が必要なら別名の関数を足すこと（この関数を流用しないこと）。
 //
 // 逆向き（t が needle に含まれる）は1.0にしない。OCRの行単位ブロックには
 // 「年」「なし」のような短い表ヘッダが必ず混ざり、引用の部分文字列として
 // 無条件に最高スコアを取ってしまうため。短いブロックはDice係数で自然に沈み、
 // 引用と長く重なるブロックほど高いスコアになる。
-func (t Bigrams) Score(needle Bigrams) float64 {
+func (t Bigrams) MatchScore(needle Bigrams) float64 {
 	if t.norm == "" || needle.norm == "" {
 		return 0
 	}
@@ -104,12 +105,6 @@ func (t Bigrams) Score(needle Bigrams) float64 {
 		}
 	}
 	return 2 * float64(common) / float64(len(t.bigrams)+len(needle.bigrams))
-}
-
-// Score は haystack に対する needle の一致度を返す（使い回さない単発比較向け）。
-// 引数の順序に意味がある非対称な関数。対称な類似度が欲しい場合は別関数を足すこと。
-func Score(haystack, needle string) float64 {
-	return New(haystack).Score(New(needle))
 }
 
 // bigramSet は正規化済みテキストの隣接2文字の集合を返す。
