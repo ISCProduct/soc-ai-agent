@@ -39,36 +39,14 @@ const (
 	quoteMinRunes = 6
 )
 
-func fallbackResumeReview(blocks []models.ResumeTextBlock) (*models.ResumeReview, []models.ResumeReviewItem) {
-	score := 70
-	summary := "主要セクションを確認しました。具体性の強化が改善ポイントです。"
-	items := make([]models.ResumeReviewItem, 0)
-	bbox, _ := json.Marshal([]float64{20, 20, 260, 80})
-	items = append(items, models.ResumeReviewItem{
-		PageNumber: 1,
-		BBox:       string(bbox),
-		Severity:   "info",
-		Message:    "内容は整理されていますが、成果の具体性や背景の説明が不足しがちです。",
-		Suggestion: "成果を数値で示し、役割や工夫点・課題を一文ずつ補足してください。",
-	})
-	return &models.ResumeReview{
-		Score:   score,
-		Summary: summary,
-	}, items
-}
-
-func fallbackResumeReviewDetailed(blocks []models.ResumeTextBlock) (*models.ResumeReview, []models.ResumeReviewItem) {
-	score := 70
-	summary := "内容を確認しました。各項目の具体性を高めると説得力が増します。"
-	items := buildHeuristicItems(blocks, 8)
-	if len(items) == 0 {
-		return fallbackResumeReview(blocks)
-	}
-	return &models.ResumeReview{
-		Score:   score,
-		Summary: summary,
-	}, items
-}
+// fallbackResumeReview / fallbackResumeReviewDetailed は削除した（#1529）。
+//
+// どちらも本番コードから一度も呼ばれておらず、固定値70のスコアを返していた。
+// 「70点」が良かったから70なのか失敗したから70なのか区別できない元凶で、
+// 復活させると採点基準の無いスコアがマッチングへ流れる。
+// LLM が使えないときはスコアを書かない（docs/wiki/scoring.md §2-3）。
+// ヒューリスティックな指摘生成（buildHeuristicItems / classifyBlock）も
+// 呼び出し元が無くなったため併せて削除した。
 
 func buildResumeText(blocks []models.ResumeTextBlock, maxLen int) string {
 	if len(blocks) == 0 {
@@ -222,90 +200,6 @@ func findBlockByIndex(blocks []models.ResumeTextBlock, pageHint int, blockIndex 
 
 func runeLen(s string) int {
 	return len([]rune(strings.TrimSpace(s)))
-}
-
-func buildHeuristicItems(blocks []models.ResumeTextBlock, max int) []models.ResumeReviewItem {
-	if len(blocks) == 0 || max <= 0 {
-		return nil
-	}
-	result := make([]models.ResumeReviewItem, 0, max)
-	seen := make(map[string]bool)
-	for _, block := range blocks {
-		text := strings.TrimSpace(block.Text)
-		if runeLen(text) < 12 {
-			continue
-		}
-		label, message, suggestion := classifyBlock(text)
-		if label == "" {
-			continue
-		}
-		key := fmt.Sprintf("%d-%d-%s", block.PageNumber, block.BlockIndex, label)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		result = append(result, models.ResumeReviewItem{
-			PageNumber: block.PageNumber,
-			BBox:       block.BBox,
-			Severity:   "info",
-			Message:    message,
-			Suggestion: suggestion,
-		})
-		if len(result) >= max {
-			return result
-		}
-	}
-	if len(result) == 0 {
-		for _, block := range blocks {
-			text := strings.TrimSpace(block.Text)
-			if runeLen(text) < 16 {
-				continue
-			}
-			result = append(result, models.ResumeReviewItem{
-				PageNumber: block.PageNumber,
-				BBox:       block.BBox,
-				Severity:   "info",
-				Message:    "この記述は成果や役割の具体性が読み取りづらいです。",
-				Suggestion: "成果の数値や担当範囲、工夫点を一文ずつ補足してください。",
-			})
-			if len(result) >= max {
-				return result
-			}
-		}
-	}
-	return result
-}
-
-func classifyBlock(text string) (string, string, string) {
-	switch {
-	case strings.Contains(text, "志望") || strings.Contains(text, "動機"):
-		return "motivation",
-			"志望動機の根拠が抽象的に見えます。",
-			"企業の事業や職種と自分の経験の接点を1文で明示し、具体的な業務貢献を追記してください。"
-	case strings.Contains(text, "自己PR") || strings.Contains(text, "自己ＰＲ"):
-		return "pr",
-			"自己PRが強みの列挙にとどまっています。",
-			"成果の数値、工夫した点、再現性が分かる行動を1文ずつ追加してください。"
-	case strings.Contains(text, "学歴"):
-		return "", "", ""
-	case strings.Contains(text, "職歴"):
-		return "", "", ""
-	case strings.Contains(text, "資格") || strings.Contains(text, "免許"):
-		return "license",
-			"資格が応募職種にどう活かせるかが伝わりづらいです。",
-			"資格で得たスキルと職務での活用例を一文追加してください。"
-	case strings.Contains(text, "得意") || strings.Contains(text, "特技") || strings.Contains(text, "スキル"):
-		return "skill",
-			"スキルの記載が抽象的で実務イメージが湧きにくいです。",
-			"使用期間、具体的な成果物、担当範囲を補足してください。"
-	case strings.Contains(text, "学生時代"):
-		return "student",
-			"活動の規模や成果が読み取りづらいです。",
-			"人数・期間・結果などの具体的な数値を補足してください。"
-	}
-	return "generic",
-		"この記述は成果や役割の具体性が読み取りづらいです。",
-		"成果の数値、役割、工夫点を一文ずつ補足してください。"
 }
 
 func selectReviewBlocks(blocks []models.ResumeTextBlock, max int) []models.ResumeTextBlock {

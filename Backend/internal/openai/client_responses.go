@@ -11,8 +11,46 @@ import (
 	"math/rand"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 )
+
+// truncationFlagKey は「出力が max_output_tokens で切れたか」を呼び出し側へ
+// 伝えるためのコンテキストキー（#1529）。doResponses が書き、呼び出し側が読む。
+//
+// 戻り値で返さないのは、Responses API の呼び出しが
+// doResponses → callResponsesAPI → …WithTempFallback → 各公開メソッド と4段あり、
+// 全段の戻り値を増やすと12箇所の呼び出し元を巻き込むため。
+// フォールバック判定（withFallbackFlag）と同じ形に揃えている。
+type truncationFlagKey struct{}
+
+// WithTruncationFlag は上限到達フラグをコンテキストに載せる。
+//
+// 切れた出力を「壊れていない出力」として扱いたくない呼び出し側だけが載せる。
+// 載せない呼び出し側の挙動は変わらない（従来どおり途中までの本文を受け取る）。
+//
+// フラグは一度立つと下がらない。上限到達は同じ入力で再試行しても同じ位置で
+// 切れるため、試行をまたいで残っても実害が無い。
+func WithTruncationFlag(ctx context.Context) context.Context {
+	return context.WithValue(ctx, truncationFlagKey{}, &atomic.Bool{})
+}
+
+// OutputTruncated は WithTruncationFlag を通したコンテキストで、
+// 出力が max_output_tokens により途中で切れたかを返す。
+func OutputTruncated(ctx context.Context) bool {
+	flag, ok := ctx.Value(truncationFlagKey{}).(*atomic.Bool)
+	return ok && flag.Load()
+}
+
+// markOutputTruncated は上限到達をコンテキストのフラグへ記録する。
+func markOutputTruncated(ctx context.Context) {
+	if flag, ok := ctx.Value(truncationFlagKey{}).(*atomic.Bool); ok {
+		flag.Store(true)
+	}
+}
+
+// truncationReasonMaxTokens は Responses API が返す上限到達の理由。
+const truncationReasonMaxTokens = "max_output_tokens"
 
 type responsesRequest struct {
 	Model           string           `json:"model"`
@@ -153,6 +191,11 @@ func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (s
 	var parsed responsesResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return "", err
+	}
+	// 上限到達は本文が途中まで返っていても起きる。OutputText の早期 return より
+	// 先に記録しないと、切れた本文が正常な応答として呼び出し側へ渡る（#1529）。
+	if parsed.IncompleteDetails.Reason == truncationReasonMaxTokens {
+		markOutputTruncated(ctx)
 	}
 	if parsed.Usage.InputTokens > 0 || parsed.Usage.OutputTokens > 0 {
 		cli.reportUsage(ctx, usageReport{

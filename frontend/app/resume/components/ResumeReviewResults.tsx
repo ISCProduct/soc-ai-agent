@@ -8,13 +8,14 @@ import {
   CardContent,
   Chip,
   Divider,
+  LinearProgress,
   Paper,
   Stack,
   Typography,
 } from '@mui/material'
 import ScoreUpdateBanner, { type WeightScore } from '@/components/ScoreUpdateBanner'
 import type { ReviewResult } from '../types'
-import { getSeverityConfig } from '../utils'
+import { getSeverityConfig, parseItemScores, RUBRIC_SCORE_MAX } from '../utils'
 
 type ResumeReviewResultsProps = {
   review: ReviewResult | null
@@ -33,6 +34,9 @@ export function ResumeReviewResults({
 }: ResumeReviewResultsProps) {
   if (!review) return null
 
+  // 内訳は item_scores_json から作る。#1529 以前のレビューとスコア無しのレビューは空になる。
+  const itemScores = parseItemScores(review.review.item_scores_json)
+
   return (
     <>
       {scoresAfter && (
@@ -50,13 +54,47 @@ export function ResumeReviewResults({
           指摘事項
         </Typography>
         <Box sx={{ mb: 2 }}>
-          <Typography variant="h6" gutterBottom>
-            総合スコア: {review.review.score} / 100
-          </Typography>
+          {review.review.score === null ? (
+            // スコア無し（#1529）。0点と書くと最低評価に見えるため、算出できなかったことを伝える。
+            <Alert severity="info" sx={{ mb: 1 }}>
+              総合スコアを算出できませんでした。下の指摘事項はご利用いただけます。もう一度レビューを実行するとスコアが付く場合があります。
+            </Alert>
+          ) : (
+            <Typography variant="h6" gutterBottom>
+              総合スコア: {review.review.score} / 100
+            </Typography>
+          )}
           <Typography variant="body1" color="text.secondary">
             {review.review.summary}
           </Typography>
         </Box>
+        {itemScores.length > 0 && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+              評価の内訳
+            </Typography>
+            <Stack spacing={1.5}>
+              {itemScores.map((item) => (
+                <Box key={item.key}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      {item.label}
+                    </Typography>
+                    <Typography variant="body2" fontWeight="bold">
+                      {item.score} / {RUBRIC_SCORE_MAX}
+                    </Typography>
+                  </Box>
+                  <LinearProgress
+                    variant="determinate"
+                    value={(item.score / RUBRIC_SCORE_MAX) * 100}
+                    aria-label={`${item.label} ${item.score} / ${RUBRIC_SCORE_MAX}`}
+                    sx={{ height: 6, borderRadius: 3 }}
+                  />
+                </Box>
+              ))}
+            </Stack>
+          </Box>
+        )}
         <Divider sx={{ mb: 3 }} />
         <Stack spacing={2}>
           {(review.items ?? []).map((item) => {

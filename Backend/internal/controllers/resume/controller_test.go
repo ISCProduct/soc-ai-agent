@@ -115,7 +115,8 @@ func TestResumeController_Review_Forbidden(t *testing.T) {
 
 func TestResumeController_Review_Success(t *testing.T) {
 	svc := &mocks.ResumeServiceMock{}
-	review := &models.ResumeReview{Score: 80}
+	score := 80
+	review := &models.ResumeReview{Score: &score}
 	items := []models.ResumeReviewItem{{Severity: "info", Message: "構成良好"}}
 	svc.On("EnsureDocumentOwner", uint(1), uint(1)).Return(nil)
 	svc.On("ReviewDocument", uint(1), uint(1), "", "", "").Return(review, items, nil)
