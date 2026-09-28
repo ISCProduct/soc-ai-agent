@@ -10,6 +10,7 @@ import json
 import logging
 import math
 import os
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
@@ -24,11 +25,15 @@ logger = logging.getLogger("main")
 #   v3 で文字数上限の指示(#1523)とSTAR分解(#1533)を第2呼び出しへ統合した
 _PROMPT_VERSION = "es_review_v3"
 
-# 日本語の出力トークン見積もり。tiktoken(o200k_base)の実測は素の日本語で0.80〜0.81
-# tok/char、半角カナは1.36 tok/char。実測値そのままだと2,000字ESで余裕が1.6%しか
-# 残らず、モデルが目安の130%を少し超えるだけで初回から上限到達→再試行になるため、
-# 安全率を乗せて0.85で見積もる（再試行1回分の生成コストより安い）。
-# 半角カナだらけの極端な入力は見積もりを超えるが、その場合は再試行で吸収する。
+# 日本語の出力トークン見積もり。tiktoken(o200k_base)の実測は素材で大きく散り、
+# 素の日本語（漢字かな混在）で0.80〜0.81 tok/char、ひらがな主体で約0.95、
+# 半角カナは約1.71 tok/char。0.85 は「素の日本語 + 安全率」であり、
+# 全素材を覆う値ではない。
+#
+# 注意: この係数は半角カナ主体の入力では実トークンの半分以下にしかならない。
+# その場合 _MAX_OUTPUT_TOKENS(8192) まで引き上げても足りず、再試行では吸収できずに
+# 422 になる（実測で半角カナは約3,375字が天井に収まる限界。ES_TEXT_MAX_LENGTH=6000 は
+# 素の日本語での見積もりに基づく値）。係数の素材別見直しは #1564 に残している。
 _JP_TOKENS_PER_CHAR = 0.85
 _IMPROVED_TEXT_RATIO = 1.3
 # JSONのキー・括弧・エスケープ分の固定オーバーヘッド
@@ -63,6 +68,14 @@ _TRUNCATED_MESSAGES = {
     "review": _REVIEW_TRUNCATED_MESSAGE,
     "improved_text": _TOO_LONG_MESSAGE,
 }
+# char_limit 指定時の改善文の出力予算は指定字数だけで決まり、ES本文の長さに依存しない。
+# そのため「文字数を減らして」と案内しても利用者は何も直せない(#1523)。
+_CHAR_LIMIT_TOO_TIGHT_MESSAGE = "指定字数に収められませんでした。文字数上限を緩めるか、もう一度お試しください。"
+
+# 字数超過の再生成を打ち切る経過時間。手前のALB / CloudFront が60秒で切るため(#1556)、
+# その前に「収まらなかった」と明示して返し、生成済みの結果を利用者へ届ける。
+# 打ち切っても結果は返る（char_limit_satisfied=false）ので、失敗にはしない。
+_CHAR_LIMIT_RETRY_DEADLINE_SEC = 45.0
 
 
 def count_es_chars(text: str) -> int:
@@ -160,6 +173,7 @@ def _call_json_with_retry(
         max_tokens: int,
         label: str,
         tally: Optional[_UsageTally] = None,
+        truncated_message: Optional[str] = None,
 ) -> Dict[str, Any]:
     """出力上限に到達した場合のみ、上限を引き上げて1回だけ再試行する。
 
@@ -180,7 +194,10 @@ def _call_json_with_retry(
             # 引き上げ余地が無いため再試行しても同じ結果になる（無駄な呼び出しを避ける）
             break
         max_tokens = min(max_tokens * 2, _MAX_OUTPUT_TOKENS)
-    raise HTTPException(status_code=422, detail=_TRUNCATED_MESSAGES.get(label, _TOO_LONG_MESSAGE))
+    raise HTTPException(
+        status_code=422,
+        detail=truncated_message or _TRUNCATED_MESSAGES.get(label, _TOO_LONG_MESSAGE),
+    )
 
 
 def _clamp_score(value: Any, default: int = 5) -> int:
@@ -393,6 +410,11 @@ def _run_es_review(
     else:
         expected_chars = int(len(es_text) * _IMPROVED_TEXT_RATIO)
     improved_budget = _estimate_max_tokens(expected_chars + _STAR_TEXT_CHARS)
+    # 予算が char_limit だけで決まるときは、ES本文を短くしても上限到達は直らない
+    improved_truncated_message = (
+        _CHAR_LIMIT_TOO_TIGHT_MESSAGE if char_limit is not None else None
+    )
+    started_at = time.monotonic()
 
     try:
         review_data = _call_json_with_retry(
@@ -414,6 +436,7 @@ def _run_es_review(
             improved_budget,
             label="improved_text",
             tally=tally,
+            truncated_message=improved_truncated_message,
         )
         improved_text = str(improved_data.get("improved_text", ""))
         improved_length = count_es_chars(improved_text)
@@ -423,6 +446,15 @@ def _run_es_review(
         if allowed_max is not None:
             for attempt in range(1, _MAX_CHAR_LIMIT_RETRIES + 1):
                 if improved_length <= allowed_max:
+                    break
+                elapsed = time.monotonic() - started_at
+                if elapsed >= _CHAR_LIMIT_RETRY_DEADLINE_SEC:
+                    # 作り直すより、いま手元にある結果を届けるほうが利用者の利益が大きい。
+                    # 60秒で切られると 422 の案内文も生成済みの本文も届かない(#1556)。
+                    logger.warning(
+                        "es review char limit retry skipped by deadline elapsed=%.1fs length=%d limit=%d",
+                        elapsed, improved_length, allowed_max,
+                    )
                     break
                 logger.info(
                     "es review char limit exceeded length=%d limit=%d mode=%s attempt=%d",
@@ -440,6 +472,7 @@ def _run_es_review(
                     improved_budget,
                     label="improved_text",
                     tally=tally,
+                    truncated_message=improved_truncated_message,
                 )
                 improved_text = str(improved_data.get("improved_text", ""))
                 improved_length = count_es_chars(improved_text)

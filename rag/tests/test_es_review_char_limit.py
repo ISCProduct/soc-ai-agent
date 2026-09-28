@@ -7,11 +7,15 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 from services.es_review import (
     _CHAR_LIMIT_RANGE,
+    _CHAR_LIMIT_RETRY_DEADLINE_SEC,
+    _CHAR_LIMIT_TOO_TIGHT_MESSAGE,
     _MAX_CHAR_LIMIT_RETRIES,
     _STAR_TEXT_CHARS,
+    _TOO_LONG_MESSAGE,
     _char_limit_bounds,
     _run_es_review,
     count_es_chars,
@@ -406,3 +410,98 @@ def test_router_passes_char_limit_and_tech_stack(monkeypatch, client):
     assert body["char_limit_satisfied"] is True
     assert body["improved_text_length"] == 2
     assert body["star"] == {"situation": "", "task": "", "action": "", "result": ""}
+
+
+# ---- 再生成の打ち切り（#1556 の60秒切断を跨がないためのガード） ----
+
+def test_regeneration_stops_at_deadline(monkeypatch):
+    """経過時間が上限を超えたら再生成せず、手元の結果を返す(#1523/#1556)。
+
+    60秒で切られると 422 の案内文も生成済みの本文も届かないため、
+    「収まらなかった」と明示して返すほうを優先する。
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    client = _client([900, 800, 700])
+    # 1回目の改善文が出た直後に締め切り(45秒)を超える時計。
+    # 定数から組み立てず実数で置くので、締め切りを緩めるとこのテストも落ちる
+    ticks = iter([0.0, 46.0])
+    monkeypatch.setattr(
+        "services.es_review.time.monotonic", lambda: next(ticks, 999.0)
+    )
+
+    result = _run(client, char_limit=400)
+
+    # 評価1 + 改善文1のみ。再生成は行わない
+    assert client.chat.completions.create.call_count == 2
+    assert result.char_limit_satisfied is False
+    assert result.improved_text_length == 900
+
+
+def test_regeneration_runs_within_deadline(monkeypatch):
+    """締め切り内なら従来どおり作り直す（ガードが常時効いてしまわないこと）。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    client = _client([900, 390])
+    monkeypatch.setattr("services.es_review.time.monotonic", lambda: 0.0)
+
+    result = _run(client, char_limit=400)
+
+    assert len(_improved_calls(client)) == 2
+    assert result.char_limit_satisfied is True
+
+
+def test_retry_deadline_is_pinned():
+    """実効タイムアウト60秒(#1556)に対する余裕。緩めると504で結果が届かなくなる。"""
+    assert _CHAR_LIMIT_RETRY_DEADLINE_SEC == 45.0
+
+
+# ---- 422 の案内文（#1523: 指定字数のときは「文字数を減らして」では直らない） ----
+
+def _truncating_client() -> MagicMock:
+    """改善文の生成が毎回出力上限に達するクライアント。"""
+
+    def _create(**kwargs):
+        user = next(msg["content"] for msg in kwargs["messages"] if msg["role"] == "user")
+        if "【添削フィードバック】" in user:
+            return MagicMock(
+                choices=[MagicMock(message=MagicMock(content='{"improved_text": "あ'), finish_reason="length")],
+                usage=MagicMock(prompt_tokens=1, completion_tokens=1),
+            )
+        return MagicMock(
+            choices=[
+                MagicMock(
+                    message=MagicMock(content=json.dumps(_REVIEW_PAYLOAD, ensure_ascii=False)),
+                    finish_reason="stop",
+                )
+            ],
+            usage=MagicMock(prompt_tokens=1, completion_tokens=1),
+        )
+
+    client = MagicMock()
+    client.chat.completions.create.side_effect = _create
+    return client
+
+
+def test_char_limit_truncation_message_does_not_ask_to_shorten_es(monkeypatch):
+    """char_limit 指定時の422は「ES本文を短くして」と言わない。
+
+    予算は char_limit だけで決まるので、ES本文を減らしても同じ結果になる。
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    with pytest.raises(HTTPException) as exc_info:
+        _run(_truncating_client(), es_text="あ" * 3000, char_limit=400)
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == _CHAR_LIMIT_TOO_TIGHT_MESSAGE
+    assert "文字数を減らして" not in exc_info.value.detail
+    assert "上限を緩める" in exc_info.value.detail
+
+
+def test_without_char_limit_keeps_shorten_message(monkeypatch):
+    """上限未指定のときは従来どおりES本文の短縮を案内する(#1521)。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    with pytest.raises(HTTPException) as exc_info:
+        _run(_truncating_client(), es_text="あ" * 3000)
+
+    assert exc_info.value.detail == _TOO_LONG_MESSAGE

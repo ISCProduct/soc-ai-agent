@@ -774,6 +774,41 @@ jobs:
           fi
           echo "✓ Migration applied successfully"
 
+      # rag-review は backend より先に入れ替える(#1533)。backend の ES 経路は
+      # RAG の /es/review に生成を委譲しており、旧 RAG は Pydantic の extra=ignore で
+      # 新フィールド(char_limit / tech_stack)を黙って捨てるため、逆順だと
+      # ロール中の数分だけ「字数上限を指定しても無視される」窓ができる。
+      # rag-reviewはchroma(ベクトルDB)とのサイドカー構成で、DBを持たないため
+      # マイグレーション相当のステップは無い。差し替えるのはrag-reviewコンテナの
+      # イメージのみで、chromaコンテナはタスク定義上そのまま維持される。
+      - name: Fetch current rag-review task definition
+        if: steps.changes.outputs.rag == 'true'
+        run: |
+          aws ecs describe-task-definition --task-definition "${PROJECT_NAME}-rag-review" \
+            --query 'taskDefinition' \
+            | jq 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' \
+            > rag-review-task-def.json
+
+      - name: Render rag-review task definition
+        if: steps.changes.outputs.rag == 'true'
+        id: render-rag-review
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: rag-review-task-def.json
+          container-name: rag-review
+          image: ${{ env.ECR_REGISTRY }}/soc-rag-review:${{ env.IMAGE_TAG }}
+
+      - name: Deploy rag-review service
+        if: steps.changes.outputs.rag == 'true'
+        id: deploy-rag-review
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-rag-review.outputs.task-definition }}
+          service: rag-review
+          cluster: ${{ env.PROJECT_NAME }}
+          # 3サービスを同時に走らせ、安定待ちは後段でまとめて行う（直列だと合計待ちが積み上がる）
+          wait-for-service-stability: false
+
       - name: Deploy backend service
         if: steps.changes.outputs.backend == 'true'
         # 後段の「ECRにイメージが在るか」検査で、サーキットブレーカーに戻された場合の
@@ -811,37 +846,6 @@ jobs:
         with:
           task-definition: ${{ steps.render-frontend.outputs.task-definition }}
           service: frontend
-          cluster: ${{ env.PROJECT_NAME }}
-          # 3サービスを同時に走らせ、安定待ちは後段でまとめて行う（直列だと合計待ちが積み上がる）
-          wait-for-service-stability: false
-
-      # rag-reviewはchroma(ベクトルDB)とのサイドカー構成で、DBを持たないため
-      # マイグレーション相当のステップは無い。差し替えるのはrag-reviewコンテナの
-      # イメージのみで、chromaコンテナはタスク定義上そのまま維持される。
-      - name: Fetch current rag-review task definition
-        if: steps.changes.outputs.rag == 'true'
-        run: |
-          aws ecs describe-task-definition --task-definition "${PROJECT_NAME}-rag-review" \
-            --query 'taskDefinition' \
-            | jq 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' \
-            > rag-review-task-def.json
-
-      - name: Render rag-review task definition
-        if: steps.changes.outputs.rag == 'true'
-        id: render-rag-review
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: rag-review-task-def.json
-          container-name: rag-review
-          image: ${{ env.ECR_REGISTRY }}/soc-rag-review:${{ env.IMAGE_TAG }}
-
-      - name: Deploy rag-review service
-        if: steps.changes.outputs.rag == 'true'
-        id: deploy-rag-review
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.render-rag-review.outputs.task-definition }}
-          service: rag-review
           cluster: ${{ env.PROJECT_NAME }}
           # 3サービスを同時に走らせ、安定待ちは後段でまとめて行う（直列だと合計待ちが積み上がる）
           wait-for-service-stability: false

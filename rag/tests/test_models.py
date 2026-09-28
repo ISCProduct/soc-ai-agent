@@ -1,4 +1,6 @@
 """rag/models.py の Pydantic バリデーションのテスト。"""
+import math
+
 import pytest
 from pydantic import ValidationError
 
@@ -10,6 +12,8 @@ from models import (
 )
 from services.es_review import (
     _IMPROVED_TEXT_RATIO,
+    _JP_TOKENS_PER_CHAR,
+    _JSON_OVERHEAD_TOKENS,
     _MAX_OUTPUT_TOKENS,
     _STAR_TEXT_CHARS,
     _estimate_max_tokens,
@@ -29,16 +33,39 @@ class TestESReviewRequestEsTextMaxLength:
         with pytest.raises(ValidationError):
             ESReviewRequest(es_text="a" * (ES_TEXT_MAX_LENGTH + 1))
 
-    def test_max_length_output_fits_in_output_cap(self) -> None:
-        """上限いっぱいの入力でも改善文+STARが出力天井に収まること(#1564)。
+    def test_max_length_output_fits_in_output_cap_for_plain_japanese(self) -> None:
+        """上限いっぱいの入力でも、素の日本語なら改善文+STARが天井に収まること(#1564)。
 
-        ここが破れると「入力は通るが必ず 422」の帯が戻る。入力上限を上げるか
-        STARの見積もりを増やすなら、_MAX_OUTPUT_TOKENS 側も一緒に見直すこと。
+        _estimate_max_tokens は内部で _MAX_OUTPUT_TOKENS に丸めるため、戻り値を
+        比較しても「飽和したか」しか分からない。丸める前の必要量で比較する。
+
+        検証できるのは _JP_TOKENS_PER_CHAR(0.85) と実測 0.81 の範囲、つまり
+        漢字かな混在の入力までで、半角カナ主体の入力は覆っていない
+        （次の test_halfwidth_kana_exceeds_the_cap_known_limitation 参照）。
         """
-        needed = _estimate_max_tokens(
-            int(ES_TEXT_MAX_LENGTH * _IMPROVED_TEXT_RATIO) + _STAR_TEXT_CHARS
-        )
-        assert needed < _MAX_OUTPUT_TOKENS, f"見積もり {needed} が天井 {_MAX_OUTPUT_TOKENS} に達している"
+        chars = int(ES_TEXT_MAX_LENGTH * _IMPROVED_TEXT_RATIO) + _STAR_TEXT_CHARS
+        # 丸める前の必要量（_estimate_max_tokens の中身と同じ式）
+        needed = math.ceil(chars * _JP_TOKENS_PER_CHAR) + _JSON_OVERHEAD_TOKENS
+        assert needed < _MAX_OUTPUT_TOKENS, f"見積もり {needed} が天井 {_MAX_OUTPUT_TOKENS} を超えている"
+        # 見積もりが天井に飽和していない＝初回から再試行になる長さではない
+        assert _estimate_max_tokens(chars) == needed
+        # 実測レート(漢字かな混在 0.81)でも収まる
+        assert math.ceil(chars * 0.81) + _JSON_OVERHEAD_TOKENS < _MAX_OUTPUT_TOKENS
+
+    def test_halfwidth_kana_exceeds_the_cap_known_limitation(self) -> None:
+        """半角カナ主体の入力は 6,000字だと天井に収まらない（既知の未解決 / #1564）。
+
+        tiktoken(o200k_base) の実測で半角カナは約1.71 tok/char。0.85 の見積もりでは
+        半分以下にしかならず、_MAX_OUTPUT_TOKENS まで引き上げても足りずに 422 になる。
+        「解決済み」と書き換えられないよう、限界を数値で残しておく。
+        係数の素材別見直しは #1564 に残している。
+        """
+        kana_rate = 1.71
+        chars = int(ES_TEXT_MAX_LENGTH * _IMPROVED_TEXT_RATIO) + _STAR_TEXT_CHARS
+        assert math.ceil(chars * kana_rate) + _JSON_OVERHEAD_TOKENS > _MAX_OUTPUT_TOKENS
+        # 天井に収まる半角カナの限界はおよそ 3,300〜3,400字
+        fits = (_MAX_OUTPUT_TOKENS - _JSON_OVERHEAD_TOKENS) / kana_rate
+        assert 3300 < (fits - _STAR_TEXT_CHARS) / _IMPROVED_TEXT_RATIO < 3400
 
 
 class TestESReviewRequestCharLimit:

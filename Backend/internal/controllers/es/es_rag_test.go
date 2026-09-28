@@ -115,18 +115,32 @@ func TestRewrite_UsesRAGReviewAndKeepsResponseShape(t *testing.T) {
 	}
 }
 
-// #1533: 添削は RAG のレスポンスをそのまま転送するが、usage だけは取り除く。
-func TestReview_ForwardsBodyAndStripsUsage(t *testing.T) {
-	srv := ragStub(t, http.StatusOK, ragOKBody, nil)
+// #1523/#1533: 添削も char_limit を RAG まで運び、レスポンスはそのまま転送する
+// （usage だけ取り除く）。
+func TestReview_ForwardsCharLimitAndStripsUsage(t *testing.T) {
+	var ragReq map[string]any
+	srv := ragStub(t, http.StatusOK, ragOKBody, &ragReq)
 	defer srv.Close()
 	t.Setenv("RAG_REVIEW_URL", srv.URL)
 
 	var usages []openai.Usage
 	cli := &openai.Client{OnUsage: func(u openai.Usage) { usages = append(usages, u) }}
-	ctx, rec := newCtx(http.MethodPost, "/api/es/review", `{"es_text": "元の文章", "char_limit": 400}`)
+	ctx, rec := newCtx(http.MethodPost, "/api/es/review",
+		`{"es_text": "元の文章", "char_limit": 400, "char_limit_mode": "around"}`)
 
 	if err := NewESReviewController(cli).Review(ctx); err != nil {
 		t.Fatalf("Review が失敗: %v", err)
+	}
+
+	// ES添削タブが #1523 の主経路。ここで落とすと字数指定が黙って無視される
+	if ragReq["es_text"] != "元の文章" {
+		t.Errorf("es_text = %v, want 元の文章", ragReq["es_text"])
+	}
+	if ragReq["char_limit"] != float64(400) {
+		t.Errorf("char_limit = %v, want 400", ragReq["char_limit"])
+	}
+	if ragReq["char_limit_mode"] != "around" {
+		t.Errorf("char_limit_mode = %v, want around", ragReq["char_limit_mode"])
 	}
 
 	var got map[string]any
@@ -143,6 +157,25 @@ func TestReview_ForwardsBodyAndStripsUsage(t *testing.T) {
 	}
 	if len(usages) != 1 || usages[0].Feature != usagectx.FeatureESReview {
 		t.Errorf("es_review としてコストが記録されていない: %+v", usages)
+	}
+}
+
+// 上限が未指定なら char_limit を送らず、RAG 側の既定（上限なし / within）に任せる。
+func TestReview_OmitsCharLimitWhenNotSpecified(t *testing.T) {
+	var ragReq map[string]any
+	srv := ragStub(t, http.StatusOK, ragOKBody, &ragReq)
+	defer srv.Close()
+	t.Setenv("RAG_REVIEW_URL", srv.URL)
+
+	ctx, _ := newCtx(http.MethodPost, "/api/es/review", `{"es_text": "元の文章"}`)
+	if err := NewESReviewController(nil).Review(ctx); err != nil {
+		t.Fatalf("Review が失敗: %v", err)
+	}
+	if _, ok := ragReq["char_limit"]; ok {
+		t.Errorf("char_limit を送っている: %+v", ragReq)
+	}
+	if _, ok := ragReq["char_limit_mode"]; ok {
+		t.Errorf("char_limit_mode を送っている: %+v", ragReq)
 	}
 }
 
