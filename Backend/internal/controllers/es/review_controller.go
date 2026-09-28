@@ -62,7 +62,15 @@ func (c *ESReviewController) Review(ctx echo.Context) error {
 	ragReq.Header.Set("Content-Type", "application/json")
 	ragclient.SetAuthHeader(ragReq)
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	// RAG側は評価と改善文で2回OpenAIを直列呼び出しし、各段が出力上限到達時に1回
+	// 再試行するため、LLM呼び出しは最悪4回直列になる(#1521)。1回あたり最大
+	// RAG_OPENAI_TIMEOUT_SEC(既定60秒)で、さらに企業名指定時は前段のWeb Searchも直列。
+	// 60秒だとRAGが正常に生成中でもBackendが先に打ち切り、422の案内文も結果も
+	// ユーザーへ届かないため延長する。
+	// 注意: 現状この180秒は最後まで効かない。手前のALB(idle_timeout未指定=既定60秒)と
+	// CloudFront(origin_read_timeout=60秒)が先に切るため、実効値は60秒。
+	// インフラ側の延長は #1556 で対応する。
+	client := &http.Client{Timeout: 180 * time.Second}
 	resp, err := client.Do(ragReq)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, "RAG service unavailable: "+err.Error())

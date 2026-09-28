@@ -291,16 +291,26 @@ export default function PageContent() {
                             </Stack>
                           </Box>
                         )}
+                        {/* 実発話と照合できなかった根拠は空文字で保存される(#1527)。
+                            ラベルだけが残らないよう中身のある項目に絞り、全部空なら
+                            「破棄された」ことを明示する。黙って消すと、教員には
+                            機能が動いていないのか根拠が無かったのか区別できない。 */}
                         {tr.detailed_evidence && Object.keys(tr.detailed_evidence).length > 0 && (
                           <Box>
                             <Typography variant="caption" sx={{ fontWeight: 700, color: '#1d4ed8', display: 'block', mb: 0.5 }}>評価根拠（詳細）</Typography>
                             <Stack spacing={0.5}>
-                              {Object.entries(tr.detailed_evidence).map(([k, v]) => (
-                                <Box key={k}>
-                                  <Typography variant="caption" sx={{ fontWeight: 700, color: '#2563eb' }}>{k}: </Typography>
-                                  <Typography variant="caption" sx={{ color: '#1e3a8a' }}>{v}</Typography>
-                                </Box>
-                              ))}
+                              {Object.values(tr.detailed_evidence).some((v) => v) ? (
+                                Object.entries(tr.detailed_evidence).filter(([, v]) => v).map(([k, v]) => (
+                                  <Box key={k}>
+                                    <Typography variant="caption" sx={{ fontWeight: 700, color: '#2563eb' }}>{k}: </Typography>
+                                    <Typography variant="caption" sx={{ color: '#1e3a8a' }}>{v}</Typography>
+                                  </Box>
+                                ))
+                              ) : (
+                                <Typography variant="caption" sx={{ color: '#64748b' }}>
+                                  実発話と照合できた根拠はありませんでした（照合できない根拠は破棄されます）
+                                </Typography>
+                              )}
                             </Stack>
                           </Box>
                         )}

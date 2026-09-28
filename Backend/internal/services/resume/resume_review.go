@@ -602,8 +602,9 @@ OCRテキスト:
 		if err == nil {
 			responseRetry := aiReviewResponse{}
 			if decodeJSON(rawRetry, &responseRetry) == nil {
-				items = mapReviewItems(blocks, responseRetry.Items)
-				log.Printf("resume_review: retry items mapped=%d raw=%d", len(items), len(responseRetry.Items))
+				retryItems := mapReviewItems(blocks, responseRetry.Items)
+				log.Printf("resume_review: retry items mapped=%d raw=%d", len(retryItems), len(responseRetry.Items))
+				items = adoptRetryItems(items, retryItems)
 			}
 		}
 	}

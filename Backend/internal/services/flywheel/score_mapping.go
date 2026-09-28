@@ -56,6 +56,17 @@ var resumeScoreMapping = []struct {
 // criticalPenaltyMax で止める。上限を置くのは、critical が10件あっても
 // 「書類が荒い」以上の情報は増えず、レビュースコア本体の寄与を消し切って
 // 全員を0点に潰してしまうため。
+//
+// review.Score と critical 件数が同じレビュー出力なので、critical を別途引くのは
+// 一見二重計上に見える（score=85 / critical=3 → 細部志向 70）。それでも引く理由（#1555）:
+//   - プロンプト（resume_review.go）は score と items.severity を並べて出させるだけで、
+//     「critical があれば score を下げろ」とは指示していない。score に反映されている保証が無い。
+//   - items は件数不足時に別プロンプトで再生成され差し替わるが、score は差し替えない。
+//     つまり score と critical 件数は別々の生成結果になり得る。
+//   - score <= 0 や AI 失敗時は score=70 のフォールバックが入る（critical だけが残る）。
+//
+// 相関する分だけ効きが強くなるのは承知の上で、致命的な粗がある書類を細部志向で
+// 下げ切れない方を避ける。効き過ぎを criticalPenaltyMax(20点) で止めている。
 const (
 	criticalPenaltyPerItem = 5
 	criticalPenaltyMax     = 20
@@ -132,7 +143,12 @@ func NewInterviewTranscriptStats(utterances []models.InterviewUtterance) Intervi
 // mapInterviewScore はルーブリックスコア（0〜5）を 0〜100 へ写す。
 //
 // ルーブリックが主軸で、evidence の量と回答量で ±5点だけ動かす。
-// 6段階しか取れなかった値が band ごとに11段階になり、マッチングの入力として使える。
+// 6段階しか取れなかった値が rubric 1〜4 では帯ごとに11段階になる。
+// rubric 0 と 5 は 0〜100 の clamp に当たるため段階数が減る（#1555）。
+//
+// この分解能が保存値に残るのは初回書き込み（既存行なし＝SetScore の絶対値パス）だけで、
+// 2回目以降は blendScore で ×0.3 され、score カラムが int なので delta の整数化でさらに潰れる。
+// 詳細は docs/wiki/scoring.md §6.3。
 func mapInterviewScore(rubric int, evidence string, stats InterviewTranscriptStats) int {
 	base := clampInt(rubric, 0, 5) * rubricStep
 	// signal 0.5 を無補正の基準点にする。
@@ -146,8 +162,38 @@ func mapInterviewScore(rubric int, evidence string, stats InterviewTranscriptSta
 // #1527 で実装中で、現時点の evidence には未検証のものが混ざる。
 // 内容の正しさに依存させると、その未検証の文章がスコアを動かしてしまうため、
 // #1527 がマージされるまでは長さのみを使う。
+//
+// evidence・発話統計のどちらも「欠損は中立(0.5)」で揃える（#1554）。
+// evidence を signal から外す選択もあったが、外すと補正が回答量だけになり
+// #1528 で増やした分解能が半分落ちるので、欠損の扱いを揃える方を採った。
+//
+// # 既知の歪み: 短い evidence は無記録より最大3点低く出る
+//
+// 欠損を中立(0.5)に置く以上、evidence が 1〜59文字のときは
+// signalRatio < 0.5 となり「1文字も書かなかったレポート」より低く出る。
+// 実測（rubric=3・発話十分）: 0文字=62 / 1文字=59 / 30文字=61 / 60文字=62 / 120文字=65。
+// 境界は TestMapInterviewScore_ShortEvidenceIsBelowMissing で固定している。
+//
+// これを承知で残す判断の理由（#1558 レビュー）:
+//   - 非単調性は「未知は中央値で補完／観測された低い値はそのまま低い」という
+//     補完の性質そのもので、中立値をどこに置いても消えない。
+//     「欠損時は重みごと落として補正幅を縮める」案でも 1文字(59) < 無記録(62) は残る。
+//   - 消すには観測値にも下限0.5を入れるしかないが、それは evidence 0〜59文字
+//     （簡潔な引用が実際に収まるレンジ）の分解能を丸ごと捨て、
+//     補正幅も -2〜+5 の非対称になる。#1528 の目的である分解能を、
+//     #1554（記録の不備で下げない）の修正に混ぜて削りたくない。
+//   - 歪みは最大3点で、移動平均(×0.3)と int 量子化を通ると保存値では最大1点。
+//   - そもそも evidence の長さは LLM の引用の冗長さでもある。
+//     #1527 の内容照合が入った時点で evidence の評価軸自体を見直す。
 func interviewSignal(evidence string, stats InterviewTranscriptStats) float64 {
-	ev := signalRatio(len([]rune(strings.TrimSpace(evidence))), evidenceFullRunes)
+	// evidence が空なのは「根拠の無い面接」ではなく「レポートに記録が無い」。
+	// LLM が evidence を省いた場合（ValidateRubricScores はスコアだけを見る）や
+	// evidence_json が壊れて nil map になった場合に 0 扱いで減点すると、
+	// どれだけ良い面接でも signal の上限が 0.4 になり全カテゴリが一律で下がる。
+	ev := 0.5
+	if trimmed := strings.TrimSpace(evidence); trimmed != "" {
+		ev = signalRatio(len([]rune(trimmed)), evidenceFullRunes)
+	}
 
 	if stats.UserTurns <= 0 {
 		// 発話統計が無いのは「話していない」ではなく「記録が無い」。
