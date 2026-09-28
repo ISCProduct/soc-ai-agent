@@ -387,9 +387,53 @@ GHSTUB
       echo "FAIL 判定不能の理由を alert-reason.txt に残していない（Discord通知が理由なしになる）"
       fail=$((fail + 1))
     fi
+    # prod_deploy_running_quiet は「見送るがECSは戻す」経路のための静かな判定。
+    # 取得失敗(2以上)を「動いていない」に倒すと、分からないまま停止へ進んでしまう。
+    # prod_deploy_running_quiet は「見送るがECSは戻す」経路のための静かな判定。
+    # guard_stop_against_deploy は見送り時に exit してしまうため、ECSを戻してから
+    # 抜けたいこの経路では使えない。
+    quiet_case() {
+      local name="$1" want="$2" ghfail="$3" runs="$4" actual
+      (
+        PATH="$GUARD_WORK/bin:$PATH" GH_FAIL="$ghfail" RUNS="$runs" \
+        GITHUB_REPOSITORY="ISCProduct/soc-ai-agent" RUNNER_TEMP="$GUARD_WORK" \
+        bash -c 'set +e; source "$1"; prod_deploy_running_quiet; exit $?' _ "$GUARD_FRAG"
+      ) >/dev/null 2>&1
+      actual=$?
+      if [ "$actual" -ne "$want" ]; then
+        echo "FAIL $name: 終了コード 期待=$want 実際=$actual"
+        fail=$((fail + 1))
+        return
+      fi
+      echo "ok   $name"
+    }
+
+    quiet_case "デプロイが無ければ 0（停止へ進める）" 0 "" '[{"status":"completed"}]'
+    quiet_case "実行中なら非0（ECSを戻して見送る）" 1 "" '[{"status":"in_progress"}]'
+    # 取得失敗を「動いていない」に倒すと、分からないまま停止へ進んでしまう
+    quiet_case "判定不能も非0（停止へ進めない）" 1 "1" '[]'
+
     rm -rf "$GUARD_WORK"
   fi
   rm -f "$GUARD_FRAG"
+fi
+
+# ECSを0へ落とした後にデプロイが始まった場合、停止を見送るだけでは足りない。
+# desired_count=0 / min_capacity=0 のまま残り、デプロイ中の本番が止まったままになる。
+# 見送るなら ECS も起動状態へ戻していることを静的に確認する。
+WF_SCHED="$(dirname "$0")/../../.github/workflows/prod-uptime-scheduler.yml"
+RESTORE_BLOCK=$(awk '/if ! prod_deploy_running_quiet; then/,/^            fi$/' "$WF_SCHED")
+if [ -z "$RESTORE_BLOCK" ]; then
+  echo "FAIL ECS停止後にデプロイを検知したときの復帰処理が見つからない"
+  fail=$((fail + 1))
+elif ! printf '%s' "$RESTORE_BLOCK" | grep -q "prod-scale.sh 1"; then
+  echo "FAIL 復帰処理が prod-scale.sh 1 でECSを戻していない（desired=0のまま残る）"
+  fail=$((fail + 1))
+elif ! printf '%s' "$RESTORE_BLOCK" | grep -q "::error::"; then
+  echo "FAIL 戻しに失敗したときに ::error:: を出していない（誰も気付けない）"
+  fail=$((fail + 1))
+else
+  echo "ok   ECS停止後にデプロイを検知したら desired_count を戻して見送る"
 fi
 
 echo

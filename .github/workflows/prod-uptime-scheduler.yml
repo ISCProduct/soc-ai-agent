@@ -217,6 +217,16 @@ jobs:
 
           # 停止処理を進めて良いかを見て、進めてはいけない場合はこのステップを終える。
           # $1 には「何を見送ったか」をログ・通知に出すための名前を渡す。
+          # prod_deploy_running_quiet はデプロイが動いていなければ 0、動いていれば 1 を返す。
+          # guard_stop_against_deploy は「見送って exit」する作りなので、ECS を戻してから
+          # 抜けたいこの経路では使えない。取得失敗(2以上)も「動いている扱い」に倒す。
+          # 分からないまま停止を進めると、デプロイ中の本番からDBを切ることになる。
+          prod_deploy_running_quiet() {
+            local state=0
+            prod_deploy_running || state=$?
+            [ "$state" == "0" ]
+          }
+
           guard_stop_against_deploy() {
             # set -e 下では「非0を返す素の呼び出し」でステップが落ちる。
             # || で受けて errexit を抑えつつ戻り値を残す。
@@ -319,6 +329,24 @@ jobs:
             # デプロイが始まっていないかを、RDSを止める直前にもう一度見る。
             # 確認→停止のあいだに始まったデプロイを取りこぼすと、起動したばかりの
             # backend からDB接続を切ることになる(2026-09-25 の事象そのもの)。
+            #
+            # ただし「見送る」だけでは足りない。ここへ来た時点で ECS は既に
+            # desired_count=0 / min_capacity=0 へ落としてあり、RDS を残しても
+            # デプロイ中のタスクは止まったままになる。ループ中に始まったデプロイを
+            # 邪魔しないよう、停止を見送るなら ECS も元へ戻す。
+            if ! prod_deploy_running_quiet; then
+              echo "::notice::ECS停止中に本番デプロイが始まったため、desired_count を 1 へ戻して停止を見送ります"
+              if ./automation/ops/prod-scale.sh 1; then
+                echo "ECS を起動状態へ戻しました。停止は次の毎時実行で再判定します"
+              else
+                echo "ECS を起動状態へ戻せませんでした(desired_count が 0 のまま残っています)" \
+                  > "$RUNNER_TEMP/alert-reason.txt"
+                echo "::error::ECS を起動状態へ戻せませんでした。デプロイ中の本番が停止したままになります"
+                exit 1
+              fi
+              exit 0
+            fi
+
             guard_stop_against_deploy "RDS停止"
 
             # ECSを先に0にしてから(上のループで完了済み)RDSを止める。
