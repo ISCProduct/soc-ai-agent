@@ -65,3 +65,103 @@ describe('ESRewritePage エラー表示 (#1015)', () => {
     })
   })
 })
+
+
+describe('ESRewritePage 企業適合性の表示 (#1524)', () => {
+  const REVIEW_BASE = {
+    specificity_score: 7,
+    star_score: 6,
+    length_balance_score: 5,
+    feedback: 'フィードバック本文',
+    improved_text: '改善後の文章',
+  }
+
+  const review = async (result: Record<string, unknown>, company?: string) => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => result })
+    render(<ESRewritePage />)
+    fireEvent.click(screen.getByRole('button', { name: 'ES添削' }))
+    fireEvent.change(screen.getByPlaceholderText(/チームで開発した経験があります/), {
+      target: { value: '元の文章です。' },
+    })
+    if (company !== undefined) {
+      fireEvent.change(screen.getByLabelText(/志望企業名/), { target: { value: company } })
+    }
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+    await screen.findByText('添削スコア')
+  }
+
+  beforeEach(() => {
+    global.fetch = jest.fn()
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  it('企業情報を取得できなかったときは企業適合性を出さず、理由と次の操作を案内する', async () => {
+    await review(
+      { ...REVIEW_BASE, company_fit_score: null, company_strategy: null, company_context_source: 'none' },
+      '株式会社サイバーエージェント',
+    )
+
+    // 0/10 に見える空のバーを出さない（低評価と誤解させるため）
+    expect(screen.queryByText('企業適合性')).not.toBeInTheDocument()
+    expect(
+      screen.getByText(/企業情報を取得できなかったため、企業適合性は評価していません/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/株式会社サイバーエージェント/)).toBeInTheDocument()
+    expect(screen.queryByText(/への対策アドバイス/)).not.toBeInTheDocument()
+    // 他の項目は通常どおり評価されている
+    expect(screen.getByText('具体性')).toBeInTheDocument()
+  })
+
+  it('企業名未入力のときは入力を促す', async () => {
+    await review(
+      { ...REVIEW_BASE, company_fit_score: null, company_strategy: null, company_context_source: 'none' },
+      '',
+    )
+
+    expect(screen.getByText(/企業名を入力して添削すると、企業適合性も評価します/)).toBeInTheDocument()
+    expect(screen.queryByText(/企業情報を取得できなかったため/)).not.toBeInTheDocument()
+  })
+
+  it('企業情報を取得できたときは企業適合性と対策アドバイスを表示する', async () => {
+    await review(
+      {
+        ...REVIEW_BASE,
+        company_fit_score: 8,
+        company_strategy: '求める人物像に沿って準備しましょう。',
+        company_context_source: 'web_search',
+      },
+      '株式会社サイバーエージェント',
+    )
+
+    expect(screen.getByText('企業適合性')).toBeInTheDocument()
+    expect(screen.getByText('8 / 10')).toBeInTheDocument()
+    expect(screen.getByText(/への対策アドバイス/)).toBeInTheDocument()
+    expect(screen.queryByText(/企業情報を取得できなかったため/)).not.toBeInTheDocument()
+  })
+
+  it('422は detail の案内文をそのまま表示する（BFFの一般文で上書きしない / #1521）', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: async () => ({
+        error: '処理に失敗しました。しばらくしてから再試行してください。',
+        status: 422,
+        detail: '文章が長すぎて添削できませんでした。文字数を減らしてお試しください。',
+      }),
+    })
+
+    render(<ESRewritePage />)
+    fireEvent.click(screen.getByRole('button', { name: 'ES添削' }))
+    fireEvent.change(screen.getByPlaceholderText(/チームで開発した経験があります/), {
+      target: { value: '長い文章です。' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+
+    expect(
+      await screen.findByText('文章が長すぎて添削できませんでした。文字数を減らしてお試しください。'),
+    ).toBeInTheDocument()
+  })
+})

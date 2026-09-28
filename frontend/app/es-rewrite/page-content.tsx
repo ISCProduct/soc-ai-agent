@@ -69,6 +69,8 @@ type ReviewResult = {
   feedback: string
   improved_text: string
   company_strategy?: string | null
+  // 企業情報の取得元。"none" なら企業適合性を評価していない(#1524)
+  company_context_source?: 'company_brief' | 'cache' | 'web_search' | 'none'
 }
 
 // マーカーは S / T / A / R の頭文字を使う。
@@ -100,6 +102,8 @@ function ESRewriteContent() {
   const [loading, setLoading] = useState(false)
   const [rewriteResult, setRewriteResult] = useState<RewriteResult | null>(null)
   const [reviewResult, setReviewResult] = useState<ReviewResult | null>(null)
+  // 添削リクエストに使った企業名。入力欄はあとから編集できるため結果と一緒に保持する
+  const [reviewedCompany, setReviewedCompany] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
@@ -146,6 +150,7 @@ function ESRewriteContent() {
         }),
       })
       if (!res.ok) throw new Error(await readApiErrorMessage(res, '添削に失敗しました。再試行してください。'))
+      setReviewedCompany(companyName.trim())
       setReviewResult(await res.json())
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '添削に失敗しました。再試行してください。')
@@ -376,15 +381,9 @@ function ESRewriteContent() {
                 <Stack spacing={2}>
                   {SCORE_ITEMS.map(({ key, label, color }) => {
                     const score = reviewResult[key]
-                    if (score === null) return (
-                      <Box key={key}>
-                        <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
-                          <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#94a3b8' }}>{label}</Typography>
-                          <Typography sx={{ fontSize: 12, color: '#94a3b8' }}>企業名未入力</Typography>
-                        </Stack>
-                        <LinearProgress variant="determinate" value={0} sx={{ height: 6, borderRadius: 3, bgcolor: '#e2e8f0', '& .MuiLinearProgress-bar': { bgcolor: '#e2e8f0' } }} />
-                      </Box>
-                    )
+                    // 未評価（企業情報なし）の項目は行ごと出さない。空のバーは 0/10 に見え、
+                    // 「低く評価された」と誤解させるため(#1524)。理由はスコアの下でまとめて案内する。
+                    if (score === null) return null
                     const pct = ((score as number) / 10) * 100
                     return (
                       <Box key={key}>
@@ -401,6 +400,24 @@ function ESRewriteContent() {
                     )
                   })}
                 </Stack>
+                {reviewResult.company_fit_score === null && (
+                  reviewedCompany ? (
+                    <Alert severity="info" sx={{ mt: 2, borderRadius: 2, fontSize: 13 }}>
+                      <Typography sx={{ fontSize: 13, fontWeight: 700, mb: 0.5 }}>
+                        企業情報を取得できなかったため、企業適合性は評価していません
+                      </Typography>
+                      <Typography sx={{ fontSize: 13, lineHeight: 1.8 }}>
+                        「{reviewedCompany}」の公開情報が見つかりませんでした。根拠のない点数は出さないようにしています。
+                        上の3項目とフィードバックは通常どおり評価済みです。
+                        企業名を正式名称（例: 株式会社◯◯）で入力し直すと、企業適合性も評価できる場合があります。
+                      </Typography>
+                    </Alert>
+                  ) : (
+                    <Typography sx={{ mt: 2, fontSize: 13, color: '#64748b', lineHeight: 1.8 }}>
+                      企業名を入力して添削すると、企業適合性も評価します。
+                    </Typography>
+                  )
+                )}
               </Paper>
 
               {/* Feedback */}
@@ -413,7 +430,7 @@ function ESRewriteContent() {
 
               {reviewResult.company_strategy && (
                 <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #f1f5f9', bgcolor: '#fff' }}>
-                  <Typography sx={{ fontWeight: 700, fontSize: 16, mb: 1.5 }}>🏢 {companyName || '志望企業'}への対策アドバイス</Typography>
+                  <Typography sx={{ fontWeight: 700, fontSize: 16, mb: 1.5 }}>🏢 {reviewedCompany || '志望企業'}への対策アドバイス</Typography>
                   <Typography variant="body2" sx={{ color: '#475569', lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{reviewResult.company_strategy}</Typography>
                 </Paper>
               )}

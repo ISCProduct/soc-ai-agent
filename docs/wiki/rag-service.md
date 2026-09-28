@@ -124,6 +124,7 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
   - 改善文の段: 「文章が長すぎて添削できませんでした。文字数を減らしてお試しください。」
   - 評価の段: 「添削コメントが長くなりすぎて最後まで生成できませんでした。もう一度お試しください。」
 - 422 の案内文は Go を透過し、FE では `frontend/app/es-rewrite/page-content.tsx` の `readApiErrorMessage` が 422 のとき `detail` を優先して表示する（BFF が `error` に入れる一般文では利用者が対処できないため）
+- FEの表示（`/es-rewrite` の添削結果）: `company_fit_score` が null のときは「企業適合性」のスコア行を出さない（空のバーは 0/10 に見え低評価と誤解させるため）。代わりに、企業名を入力済みなら「企業情報を取得できなかったため、企業適合性は評価していません」＋入力し直しの案内を、企業名未入力なら「企業名を入力して添削すると、企業適合性も評価します」を出す。`company_strategy` が null なら対策アドバイスのカードごと非表示
 - LLM呼び出しは最悪4回直列（2段 × 各1回再試行）。OpenAI SDK の `max_retries` は 1 を明示している。Backend 側の `/api/es/review` は 180秒だが、ALB(`idle_timeout` 既定60秒) / CloudFront(`origin_read_timeout` 60秒) が先に切るため実効は60秒（#1556 で対応）
 
 ---
