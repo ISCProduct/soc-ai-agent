@@ -30,15 +30,32 @@ func NewCrossFeatureIntegrationService(
 
 // interviewScoreMapping 面接5項目と10カテゴリの対応
 // 値域の変換は mapInterviewScore（score_mapping.go）が行う
+//
+// interviewKey は面接プロンプトのルーブリックキー（interview.RubricKeys）と同じ綴りである必要がある。
+// ずれた項目は interviewScores から引けず、そのカテゴリが一切書かれない。
+// 同一パッケージのテスト（package flywheel）からは interview を import できない
+// （interview → flywheel の依存があるため）。外部テストパッケージ + export_test.go でも組めるが、
+// 本番APIを広げても誤用リスクが低いので InterviewRubricKeys を公開し、
+// 一致は interview 側のテストで固定している（#1554）。
 var interviewScoreMapping = []struct {
 	interviewKey string
-	categories   []string // 反映先カテゴリ（複数可: 均等に按分）
+	categories   []string // 反映先カテゴリ（複数可: 同じ値をそれぞれに入れる。分割はしない）
 }{
 	{"communication", []string{"コミュニケーション力"}},
 	{"logic", []string{"技術志向"}},
 	{"specificity", []string{"細部志向"}},
 	{"ownership", []string{"リーダーシップ志向", "チャレンジ志向"}},
 	{"enthusiasm", []string{"成長志向", "チームワーク志向"}},
+}
+
+// InterviewRubricKeys は写像が参照している面接ルーブリックキーを定義順で返す。
+// プロンプト側との一致をテストで固定するために公開している。
+func InterviewRubricKeys() []string {
+	keys := make([]string, len(interviewScoreMapping))
+	for i, m := range interviewScoreMapping {
+		keys[i] = m.interviewKey
+	}
+	return keys
 }
 
 // ResolveDiagnosisSessionID は面接スコアを流し込むチャット診断セッションを決める。
@@ -95,6 +112,8 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromInterviewReport(
 		return fmt.Errorf("面接スコアのパースエラー: %w", err)
 	}
 	// evidence は壊れていても補正が中立に寄るだけなのでエラーにしない。
+	// nil map になっても evidence[key] は "" で、interviewSignal が欠損を中立(0.5)扱いにするため
+	// ルーブリック相応の値がそのまま反映される（#1554 で実装をこのコメントに合わせた）。
 	var evidence map[string]string
 	_ = json.Unmarshal([]byte(report.EvidenceJSON), &evidence)
 
@@ -102,6 +121,10 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromInterviewReport(
 	for _, mapping := range interviewScoreMapping {
 		raw, ok := interviewScores[mapping.interviewKey]
 		if !ok {
+			// ValidateRubricScores を通ったレポートなら5項目すべて揃っている。
+			// 引けないのはプロンプト側のキーとずれている兆候なので、黙って飛ばさない。
+			log.Printf("[CrossFeature] 面接スコアに項目 %s が無い（プロンプトのルーブリックキーとずれている可能性）\n",
+				mapping.interviewKey)
 			continue
 		}
 		// 0-5 → 0-100。evidence 量と回答量で ±5点だけ補正して分解能を上げる（#1528）

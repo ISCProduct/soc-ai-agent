@@ -206,16 +206,33 @@ score critical | 旧(細部/コミュ/技術) | 新(細部/コミュ)
 
 === 面接レポート → user_weight_scores ===
 rubric evidence文字数 平均回答文字数 ターン | 旧 | 新
-     3              0              0      0 |  60 |  57
+     3              0              0      0 |  60 |  60
      3            200            120     10 |  60 |  65
 ```
+
+evidence も発話統計も無い行が補正なし（`60`）なのは仕様です。
+**記録の不備で下げない**（#1554）ため、どちらの欠損も中立扱いにしています。
 
 変換式と各カテゴリの対応の根拠は
 [スコアリング設計 §6.3](./scoring.md) と
 `Backend/internal/services/flywheel/score_mapping.go` にあります。
 
+この出力は `testdata/score_mapping_dryrun.golden` として固定されています。
+キャリブレーション定数（`criticalPenaltyPerItem` / `evidenceFullRunes` /
+`evidenceSignalWeight` など）を**意図して**変えたときは、
+差分を確認した上で次のコマンドでゴールデンを更新してください。
+
+```sh
+cd Backend && go test ./internal/services/flywheel/ -run DryRun -update
+```
+
 **既存行は一括再計算しません。** 次のレビュー・面接から移動平均
 （`既存*0.7 + 新*0.3`）で徐々に置き換わります。
+このとき新値は ×0.3 され、`score` が int なので差分の整数化でさらに潰れます。
+`delta == 0` になる範囲（既存60に対する新値59〜61）は書き込み自体をスキップするため、
+`updated_at` も動きません。**ドライランの分解能がそのまま保存されるのは初回書き込みのとき**で、
+2回目以降は1回の面接あたりの効きが弱くなります（繰り返せば収束します）。
+詳細は [スコアリング設計 §6.3](./scoring.md) と #1560 を参照してください。
 
 ---
 

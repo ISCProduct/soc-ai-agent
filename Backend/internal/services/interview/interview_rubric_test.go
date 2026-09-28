@@ -2,8 +2,11 @@ package interview
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
+
+	"Backend/internal/services/flywheel"
 )
 
 // 完了定義: スキーマ違反の LLM 出力を検知して弾けること。
@@ -237,4 +240,22 @@ func TestFinalizeReportPayload(t *testing.T) {
 			t.Errorf("不正なスコアが残っている: %v / %v", got.Scores, got.Evidence)
 		}
 	})
+}
+
+// TestRubricKeys_MatchesFlywheelMapping はプロンプトのルーブリックキーと
+// user_weight_scores への写像キーが一致していることを固定する（#1554）。
+//
+// ずれると flywheel 側は interviewScores からその項目を引けず、
+// 対応カテゴリが一切書かれないまま成功が返る（ログも出ない）。
+// flywheel は interview を import できない（interview → flywheel の依存がある）ため、
+// 一致の検証はこちら側に置く。
+func TestRubricKeys_MatchesFlywheelMapping(t *testing.T) {
+	prompt := slices.Sorted(slices.Values(RubricKeys()))
+	mapped := slices.Sorted(slices.Values(flywheel.InterviewRubricKeys()))
+
+	if !slices.Equal(prompt, mapped) {
+		t.Errorf("プロンプトのキー %v と写像のキー %v が一致していない。"+
+			"どちらかを変えたら両方を揃えること（flywheel/cross_feature_integration_service.go）",
+			prompt, mapped)
+	}
 }
