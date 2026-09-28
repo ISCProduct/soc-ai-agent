@@ -237,12 +237,126 @@ describe('ESRewritePage 422の生JSON表示防止 (#1015 / #1521)', () => {
     expect(screen.queryByText(new RegExp(longText.slice(0, 40)))).not.toBeInTheDocument()
   })
 
-  it('ES本文の入力欄はAPIの上限(10,000字)で止める', () => {
+  it('ES本文の入力欄はAPIの上限(6,000字)で止める (#1564)', () => {
     render(<ESRewritePage />)
 
+    // RAG側 models.ES_TEXT_MAX_LENGTH と同値。緩めると「送れるが必ず422」が復活する
     expect(screen.getByPlaceholderText(/チームで開発した経験があります/)).toHaveAttribute(
       'maxlength',
-      '10000',
+      '6000',
     )
+  })
+})
+
+describe('ESRewritePage 設問の文字数上限 (#1523)', () => {
+  beforeEach(() => {
+    global.fetch = jest.fn()
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  const setup = (tab: 'ES添削' | 'ESリライト（STAR法）') => {
+    render(<ESRewritePage />)
+    fireEvent.click(screen.getByRole('button', { name: tab }))
+    fireEvent.change(screen.getByPlaceholderText(/チームで開発した経験があります/), {
+      target: { value: '元の文章です。' },
+    })
+  }
+
+  const lastRequestBody = (): Record<string, unknown> => {
+    const calls = (global.fetch as jest.Mock).mock.calls
+    const init = calls[calls.length - 1][1] as { body: string }
+    return JSON.parse(init.body) as Record<string, unknown>
+  }
+
+  it('入力した上限とモードを添削リクエストへ載せる', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        specificity_score: 7, star_score: 6, length_balance_score: 5,
+        feedback: 'f', improved_text: 'あ'.repeat(390),
+        improved_text_length: 390, char_limit_satisfied: true,
+      }),
+    })
+    setup('ES添削')
+    fireEvent.change(screen.getByLabelText(/設問の文字数上限/), { target: { value: '400' } })
+    fireEvent.click(screen.getByRole('button', { name: '400字程度' }))
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+
+    await screen.findByText('添削スコア')
+    expect(lastRequestBody()).toMatchObject({ char_limit: 400, char_limit_mode: 'around' })
+    expect(screen.getByText(/390 \/ 400 文字/)).toBeInTheDocument()
+  })
+
+  it('リライトでも同じ上限を送り、字数を表示する（同じ経路に統合済み / #1533）', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        rewritten_text: 'あ'.repeat(380),
+        star: { situation: 'S', task: 'T', action: 'A', result: 'R' },
+        improved_text_length: 380,
+        char_limit_satisfied: true,
+      }),
+    })
+    setup('ESリライト（STAR法）')
+    fireEvent.change(screen.getByLabelText(/設問の文字数上限/), { target: { value: '400' } })
+    fireEvent.click(screen.getByRole('button', { name: '書き直す' }))
+
+    await screen.findByText('リライト後')
+    expect(lastRequestBody()).toMatchObject({ char_limit: 400, char_limit_mode: 'within' })
+    expect(screen.getByText(/380 \/ 400 文字/)).toBeInTheDocument()
+    // 統合後もSTAR分解は表示される
+    expect(screen.getByText('STAR法 分解')).toBeInTheDocument()
+  })
+
+  it('収まらなかったときは切り詰めず、収まらなかったことを伝える', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        specificity_score: 7, star_score: 6, length_balance_score: 5,
+        feedback: 'f', improved_text: 'あ'.repeat(520),
+        improved_text_length: 520, char_limit_satisfied: false,
+      }),
+    })
+    setup('ES添削')
+    fireEvent.change(screen.getByLabelText(/設問の文字数上限/), { target: { value: '400' } })
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+
+    await screen.findByText('添削スコア')
+    expect(screen.getByText(/520 \/ 400 文字/)).toBeInTheDocument()
+    expect(screen.getByText(/指定字数に収まりませんでした/)).toBeInTheDocument()
+  })
+
+  it('上限未指定なら char_limit を送らず、警告も出さない', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        specificity_score: 7, star_score: 6, length_balance_score: 5,
+        feedback: 'f', improved_text: 'あ'.repeat(250),
+        improved_text_length: 250, char_limit_satisfied: null,
+      }),
+    })
+    setup('ES添削')
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+
+    await screen.findByText('添削スコア')
+    const body = lastRequestBody()
+    expect(body).not.toHaveProperty('char_limit')
+    expect(body).not.toHaveProperty('char_limit_mode')
+    expect(screen.getByText(/250 文字/)).toBeInTheDocument()
+    expect(screen.queryByText(/指定字数に収まりませんでした/)).not.toBeInTheDocument()
+  })
+
+  it('範囲外の上限は送信させない（RAGのバリデーション422を踏ませない）', () => {
+    setup('ES添削')
+    fireEvent.change(screen.getByLabelText(/設問の文字数上限/), { target: { value: '99' } })
+
+    expect(screen.getByRole('button', { name: '添削する' })).toBeDisabled()
+    expect(screen.getByText(/100〜2000 の整数で入力してください/)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText(/設問の文字数上限/), { target: { value: '400' } })
+    expect(screen.getByRole('button', { name: '添削する' })).not.toBeDisabled()
   })
 })
