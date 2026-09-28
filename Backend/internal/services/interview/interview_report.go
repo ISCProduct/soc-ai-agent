@@ -136,26 +136,15 @@ func ExtractJSONObject(raw string) string {
 	return s
 }
 
-func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) error {
-	session, err := s.sessionRepo.FindByID(sessionID)
-	if err != nil {
-		return err
-	}
-	lang := session.Language
-	if lang == "" {
-		lang = "ja"
-	}
-
-	utterances, err := s.utterRepo.FindBySessionID(sessionID)
-	if err != nil {
-		return err
-	}
-	if len(utterances) == 0 {
-		return fmt.Errorf("%w (session=%d)", ErrNoUtterances, sessionID)
-	}
-	transcript := BuildTranscript(utterances)
-	systemPrompt := buildReportSystemPrompt(lang)
-	userPrompt := fmt.Sprintf(`以下の面接ログを読み、下記の評価基準に従ってJSONのみで出力してください。
+// BuildReportPrompts は面接レポート生成のプロンプトを組み立てる。
+//
+// generateReport から切り出してあるのは、評価ハーネス（cmd/aibench）が DB も
+// セッションも用意せずに**本番と同一のプロンプト**を評価できるようにするため。
+// ハーネス側にプロンプトを写すと、本文を直した瞬間に測っている対象が本番と
+// 別物になり、出た数字が判断材料として使えなくなる。
+func BuildReportPrompts(lang, transcript string) (systemPrompt, userPrompt string) {
+	systemPrompt = buildReportSystemPrompt(lang)
+	userPrompt = fmt.Sprintf(`以下の面接ログを読み、下記の評価基準に従ってJSONのみで出力してください。
 出力言語: %s
 
 %s
@@ -190,6 +179,28 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 
 Interview transcript:
 %s`, lang, BuildRubricPromptSection(), transcript)
+	return systemPrompt, userPrompt
+}
+
+func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) error {
+	session, err := s.sessionRepo.FindByID(sessionID)
+	if err != nil {
+		return err
+	}
+	lang := session.Language
+	if lang == "" {
+		lang = "ja"
+	}
+
+	utterances, err := s.utterRepo.FindBySessionID(sessionID)
+	if err != nil {
+		return err
+	}
+	if len(utterances) == 0 {
+		return fmt.Errorf("%w (session=%d)", ErrNoUtterances, sessionID)
+	}
+	transcript := BuildTranscript(utterances)
+	systemPrompt, userPrompt := BuildReportPrompts(lang, transcript)
 
 	model := shared.GetEnv("INTERVIEW_REPORT_MODEL", "")
 	// 受験者の発話は候補ごとに作り直さない（#1527）

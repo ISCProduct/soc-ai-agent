@@ -499,7 +499,7 @@ func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, c
 	if s.aiClient == nil {
 		return nil, nil, fmt.Errorf("AIクライアントが初期化されていません")
 	}
-	text := buildResumeText(blocks, 30000)
+	text := buildResumeText(blocks, reviewTextLimit)
 	// 企業briefは RAGレポートの有無に関わらず必ず併記する（#1124）。
 	//
 	// 「重視傾向」を出力するのは brief だけで、RAGレポートには含まれない。
@@ -516,8 +516,73 @@ func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, c
 		}
 	}
 
-	prompt := fmt.Sprintf(`以下は履歴書/エントリーシートのOCRテキストです。
-この内容をレビューし、改善すべき点を最大8件までJSONで返してください。
+	prompt := buildReviewPrompt(text, companyName, jobTitle, companyInfo, candidateType)
+
+	modelOverride := ReviewModel()
+	raw, err := s.aiClient.ResponsesWithMaxTokens(context.Background(), ReviewSystemPrompt, prompt, ReviewTemperature, ReviewMaxOutputTokens, modelOverride)
+	if err != nil {
+		log.Printf("resume_review: openai review failed: %v", err)
+		return nil, nil, fmt.Errorf("AIレビューの生成に失敗しました。しばらく待ってから再度お試しください")
+	}
+
+	response := aiReviewResponse{}
+	if err := decodeJSON(raw, &response); err != nil {
+		log.Printf("resume_review: decode failed: %v", err)
+		return nil, nil, fmt.Errorf("AIレビュー結果の解析に失敗しました。再度お試しください")
+	}
+	return s.finishReviewScoreItems(blocks, companyName, jobTitle, candidateType, companyInfo, modelOverride, response)
+}
+
+// 評価ハーネス（cmd/aibench）が本番と同じ指示・同じ呼び出し条件で測れるように、
+// プロンプトと呼び出しパラメータをここで公開する。
+// ハーネス側に写すと、本文やパラメータを直した瞬間に測っている対象が本番と
+// 別物になり、出た数字が判断材料として使えなくなる。
+const (
+	// ReviewSystemPrompt は履歴書レビューの system プロンプト。
+	ReviewSystemPrompt = "あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案をJSON形式で提示します。"
+	// ReviewMaxItems はプロンプトが指定している items の上限。
+	// 指示遵守率の判定とプロンプト本文で同じ値を使う。
+	ReviewMaxItems = 8
+	// ReviewTemperature / ReviewMaxOutputTokens は本番の呼び出しパラメータ。
+	ReviewTemperature     = 0.2
+	ReviewMaxOutputTokens = 2000
+	// reviewTextLimit はプロンプトへ載せるOCRテキストの上限バイト数。
+	reviewTextLimit = 30000
+)
+
+// ReviewModel はレビューに使うモデル名を返す（env 未設定なら既定）。
+func ReviewModel() string {
+	if m := strings.TrimSpace(os.Getenv("OPENAI_REVIEW_MODEL")); m != "" {
+		return m
+	}
+	return "gpt-4o-mini"
+}
+
+// BuildReviewPromptFromText は行区切りの平文から本番と同一の user プロンプトを作る。
+//
+// 評価ハーネス用の入口。ゴールデンセットは OCR 結果ではなく平文で持つため、
+// 本番の [P#B#] 付きテキストへ同じ手順で変換してからプロンプトへ載せる。
+// 1行=1ブロック（ページは1固定）として扱う。
+func BuildReviewPromptFromText(resumeText, companyName, jobTitle, companyInfo, candidateType string) string {
+	blocks := make([]models.ResumeTextBlock, 0, 16)
+	for _, line := range strings.Split(resumeText, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		blocks = append(blocks, models.ResumeTextBlock{
+			PageNumber: 1,
+			BlockIndex: len(blocks),
+			Text:       line,
+		})
+	}
+	return buildReviewPrompt(buildResumeText(blocks, reviewTextLimit), companyName, jobTitle, companyInfo, candidateType)
+}
+
+// buildReviewPrompt は履歴書レビューの user プロンプトを組み立てる。
+// text は buildResumeText が付ける [P#B#] 付きのOCRテキスト。
+func buildReviewPrompt(text, companyName, jobTitle, companyInfo, candidateType string) string {
+	return fmt.Sprintf(`以下は履歴書/エントリーシートのOCRテキストです。
+この内容をレビューし、改善すべき点を最大%d件までJSONで返してください。
 必ず本文中に存在する短い引用(quote)を入れてください。quoteは後で位置合わせに使います。
 
 原則として、本文の内容に基づいた具体的な改善点のみを書いてください。
@@ -551,24 +616,11 @@ suggestionは「どう直すか」が分かるように書いてください（�
 {"score":0-100,"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}
 
 OCRテキスト:
-%s`, companyName, jobTitle, companyInfo, candidateType, text)
+%s`, ReviewMaxItems, companyName, jobTitle, companyInfo, candidateType, text)
+}
 
-	modelOverride := strings.TrimSpace(os.Getenv("OPENAI_REVIEW_MODEL"))
-	if modelOverride == "" {
-		modelOverride = "gpt-4o-mini"
-	}
-	raw, err := s.aiClient.ResponsesWithMaxTokens(context.Background(), "あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案をJSON形式で提示します。", prompt, 0.2, 2000, modelOverride)
-	if err != nil {
-		log.Printf("resume_review: openai review failed: %v", err)
-		return nil, nil, fmt.Errorf("AIレビューの生成に失敗しました。しばらく待ってから再度お試しください")
-	}
-
-	response := aiReviewResponse{}
-	if err := decodeJSON(raw, &response); err != nil {
-		log.Printf("resume_review: decode failed: %v", err)
-		return nil, nil, fmt.Errorf("AIレビュー結果の解析に失敗しました。再度お試しください")
-	}
-
+// finishReviewScoreItems は1回目のレスポンスを受け取り、必要なら作り直して保存用の値にする。
+func (s *ResumeService) finishReviewScoreItems(blocks []models.ResumeTextBlock, companyName, jobTitle, candidateType, companyInfo, modelOverride string, response aiReviewResponse) (*models.ResumeReview, []models.ResumeReviewItem, error) {
 	if response.Score <= 0 {
 		response.Score = 70
 	}

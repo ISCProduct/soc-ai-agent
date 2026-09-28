@@ -102,6 +102,14 @@ docs/research/**
 !docs/research/**/
 !docs/research/**/RESULTS_*.md
 
+# AI出力評価ハーネスのゴールデンセットと手順書は追跡する（#1525）。
+# 入力が追跡されていなければ「誰が測っても同じ数字」にならず、
+# 前回実行との比較もできない。中身は合成データのみで、
+# 実データはリポジトリに置かない（docs/wiki/data-privacy.md）。
+# 実行結果のJSONは出力本文が入るため追跡しない（-out はリポジトリ外へ）。
+!docs/research/ai-eval/README.md
+!docs/research/ai-eval/*.jsonl
+
 # アーキテクチャ図・インフラ構成メモ（draw.io / PNG / 環境依存ドキュメント）
 docs/architecture/
 
