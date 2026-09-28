@@ -291,11 +291,13 @@ export default function PageContent() {
                             </Stack>
                           </Box>
                         )}
-                        {tr.detailed_evidence && Object.keys(tr.detailed_evidence).length > 0 && (
+                        {/* 実発話と照合できなかった根拠は空文字で保存される(#1527)。
+                            ラベルだけが残らないよう、中身のある項目に絞る。 */}
+                        {tr.detailed_evidence && Object.values(tr.detailed_evidence).some((v) => v) && (
                           <Box>
                             <Typography variant="caption" sx={{ fontWeight: 700, color: '#1d4ed8', display: 'block', mb: 0.5 }}>評価根拠（詳細）</Typography>
                             <Stack spacing={0.5}>
-                              {Object.entries(tr.detailed_evidence).map(([k, v]) => (
+                              {Object.entries(tr.detailed_evidence).filter(([, v]) => v).map(([k, v]) => (
                                 <Box key={k}>
                                   <Typography variant="caption" sx={{ fontWeight: 700, color: '#2563eb' }}>{k}: </Typography>
                                   <Typography variant="caption" sx={{ color: '#1e3a8a' }}>{v}</Typography>

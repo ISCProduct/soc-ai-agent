@@ -1,6 +1,9 @@
 package textsim
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestNormalize(t *testing.T) {
 	t.Parallel()
@@ -13,10 +16,15 @@ func TestNormalize(t *testing.T) {
 		{"全角英数を半角に畳む", "ＡＢＣ１２３", "abc123"},
 		{"半角カナを全角に畳む", "ｻｰｸﾙ", "サークル"},
 		{"句読点と空白を落とす", "部員数を、3倍に しました。", "部員数を3倍にしました"},
-		{"括弧や記号も落とす", "「代表」を務めた（2年間）", "代表を務めた2年間"},
+		{"括弧や引用符も落とす", "「代表」を務めた（2年間）", "代表を務めた2年間"},
+		{"記号・絵文字を落とす", "3倍にした🎉👏", "3倍にした"},
 		{"改行を落とす", "一行目\n二行目", "一行目二行目"},
+		{"数字に挟まれた小数点は残す", "1.5倍に伸びた", "1.5倍に伸びた"},
+		{"数字に挟まれた桁区切りも残す", "1,200人が参加", "1,200人が参加"},
+		{"数字に挟まれていない句点は落とす", "増えました。次は", "増えました次は"},
 		{"空文字", "", ""},
 		{"記号だけなら空になる", "。、！？ ", ""},
+		{"絵文字だけなら空になる", "🎉🎉🎉", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -28,111 +36,186 @@ func TestNormalize(t *testing.T) {
 	}
 }
 
-func TestSimilarity(t *testing.T) {
+// 「1.5倍」と「15倍」が同一視されないこと。
+// 正規化で小数点を落とすと、数値の捏造が引用として通ってしまう。
+func TestNormalize_KeepsDecimalPoint(t *testing.T) {
+	t.Parallel()
+	if Normalize("1.5倍") == Normalize("15倍") {
+		t.Error("1.5倍 と 15倍 が同一視されている")
+	}
+}
+
+func TestBigrams(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		a, b    string
-		want    float64
-		wantMin float64
-		wantMax float64
+		name      string
+		in        string
+		wantNorm  string
+		wantLen   int
+		wantEmpty bool
 	}{
-		{name: "完全一致", a: "サークルの代表", b: "サークルの代表", want: 1},
-		{name: "両方空", a: "", b: "", want: 1},
-		{name: "片方だけ空", a: "代表", b: "", want: 0},
-		{name: "共通部分なし", a: "野球部", b: "簿記検定", want: 0},
-		{name: "1文字同士の一致", a: "あ", b: "あ", want: 1},
-		{name: "1文字同士の不一致", a: "あ", b: "い", want: 0},
-		{name: "部分的に重なる", a: "部員数を3倍にした", b: "部員数を2倍にした", wantMin: 0.5, wantMax: 0.99},
+		{"通常", "部員数を、3倍に", "部員数を3倍に", 7, false},
+		{"空文字", "", "", 0, true},
+		{"記号だけ", "。。。！？", "", 0, true},
+		{"1文字", "私", "私", 1, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := Similarity(tt.a, tt.b)
+			got := New(tt.in)
+			if got.Norm() != tt.wantNorm {
+				t.Errorf("Norm() = %q, want %q", got.Norm(), tt.wantNorm)
+			}
+			if got.Len() != tt.wantLen {
+				t.Errorf("Len() = %d, want %d", got.Len(), tt.wantLen)
+			}
+			if got.Empty() != tt.wantEmpty {
+				t.Errorf("Empty() = %v, want %v", got.Empty(), tt.wantEmpty)
+			}
+		})
+	}
+}
+
+// Score は非対称。第1引数（レシーバ）が探される側。
+func TestScore(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name             string
+		haystack         string
+		needle           string
+		want             float64
+		wantMin, wantMax float64
+	}{
+		{name: "完全一致", haystack: "サークルの代表", needle: "サークルの代表", want: 1},
+		{name: "needle が haystack の部分文字列なら1.0", haystack: "私はサークルの代表を務めていました", needle: "サークルの代表", want: 1},
+		{name: "表記ゆれだけの部分文字列も1.0", haystack: "部員数を3倍にしました", needle: "部員数を３倍に、", want: 1},
+		{name: "両方空なら0（照合できたとはみなさない）", haystack: "", needle: "", want: 0},
+		{name: "haystack だけ空", haystack: "", needle: "代表", want: 0},
+		{name: "needle だけ空", haystack: "代表", needle: "", want: 0},
+		{name: "記号だけの needle は空扱い", haystack: "代表を務めた", needle: "🎉🎉🎉", want: 0},
+		{name: "共通部分なし", haystack: "野球部", needle: "簿記検定", want: 0},
+		{name: "1文字同士の一致", haystack: "あ", needle: "あ", want: 1},
+		{name: "1文字同士の不一致", haystack: "あ", needle: "い", want: 0},
+		{name: "部分的に重なる", haystack: "部員数を3倍にした", needle: "部員数を2倍にした", wantMin: 0.5, wantMax: 0.99},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := Score(tt.haystack, tt.needle)
 			if tt.wantMax == 0 {
 				if got != tt.want {
-					t.Errorf("Similarity(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+					t.Errorf("Score(%q, %q) = %v, want %v", tt.haystack, tt.needle, got, tt.want)
 				}
 				return
 			}
 			if got < tt.wantMin || got > tt.wantMax {
-				t.Errorf("Similarity(%q, %q) = %v, want %v〜%v", tt.a, tt.b, got, tt.wantMin, tt.wantMax)
+				t.Errorf("Score(%q, %q) = %v, want %v〜%v", tt.haystack, tt.needle, got, tt.wantMin, tt.wantMax)
 			}
 		})
 	}
 }
 
-// 事前計算した Text/Score と簡易版 Similarity が一致すること。
-// ずれると「繰り返し比較する側だけ事前計算する」最適化が結果を変えてしまう。
-func TestScore_MatchesSimilarity(t *testing.T) {
+// 包含は片側だけ。長い文を短い文で探しても1.0にはならない。
+// 対称にすると「発話の一部を引用した」と「発話に無い内容を足した」が区別できない。
+func TestScore_Asymmetric(t *testing.T) {
 	t.Parallel()
-	a, b := "新歓ライブを企画した", "新歓ライブの企画を提案した"
-	ta := Text(a)
-	if got, want := Score(ta, Text(b)), Similarity(a, b); got != want {
-		t.Errorf("Score = %v, Similarity = %v", got, want)
+	long, short := "私はサークルの代表を務めていました", "サークルの代表"
+	if got := Score(long, short); got != 1 {
+		t.Errorf("Score(長, 短) = %v, want 1", got)
 	}
-	if ta.Len() != len([]rune(a)) {
-		t.Errorf("Len = %d, want %d", ta.Len(), len([]rune(a)))
-	}
-}
-
-// Dice は対称であること。非対称だと引数の順番で結果が変わり、呼び出し側が壊れる。
-func TestSimilarity_Symmetric(t *testing.T) {
-	t.Parallel()
-	a, b := "新歓ライブを企画した", "新歓ライブの企画を提案した"
-	if Similarity(a, b) != Similarity(b, a) {
-		t.Errorf("非対称: %v != %v", Similarity(a, b), Similarity(b, a))
+	if got := Score(short, long); got == 1 {
+		t.Error("Score(短, 長) が 1 になっている。包含判定が双方向になっている")
 	}
 }
 
-// BestMatch の肝は「長い haystack に短い needle が入っていても落ちない」こと。
-// haystack 全体と素で Dice を取ると分母が膨らんで完全一致の引用まで落ちる。
-func TestBestMatch(t *testing.T) {
+// 事前計算した Bigrams と文字列版が一致すること。
+func TestScore_MethodMatchesFunc(t *testing.T) {
+	t.Parallel()
+	a, b := "新歓ライブを企画した", "新歓ライブの企画を提案した"
+	if got, want := New(a).Score(New(b)), Score(a, b); got != want {
+		t.Errorf("メソッド版 = %v, 関数版 = %v", got, want)
+	}
+}
+
+// BestMatch の実測値を固定する（#1527）。
+//
+// しきい値（呼び出し側の EvidenceMatchThreshold）は、ここで測った値の分布から
+// 決めている。アルゴリズムを変えると分布ごと動くため、代表値を固定して
+// 「静かにずれた」ことに気付けるようにする。値を動かしたときは
+// docs/wiki/scoring.md §2-4 の実測表も引き直すこと。
+func TestBestMatch_PinnedScores(t *testing.T) {
 	t.Parallel()
 
-	haystack := Normalize(`はい、私は大学時代に軽音サークルの代表を務めていました。
+	haystack := New(`はい、私は大学時代に軽音サークルの代表を務めていました。
 入学した当初は部員が8人しかいなくて、このままだと廃部になるという話が出ていました。
 そこで私が新歓ライブの企画を提案して、SNSでの告知を担当しました。
-結果として、翌年の新入部員は23人まで増えて、部員数を3倍にすることができました。`)
+結果として、翌年の新入部員は23人まで増えて、部員数を3倍にすることができました。
+えー、その、あ、すみません、言い直します。プログラミングは独学で、毎日2時間くらい続けています。`)
 
 	tests := []struct {
-		name    string
-		needle  string
-		wantMin float64
-		wantMax float64
+		name   string
+		needle string
+		want   float64
 	}{
-		{"長い文の完全一致", "結果として、翌年の新入部員は23人まで増えて、部員数を3倍にすることができました。", 0.99, 1},
-		{"短い断片の完全一致", "私が新歓ライブの企画を提案して", 0.99, 1},
-		{"要約", "新歓ライブを企画してSNS告知を担当し、部員数を3倍にした", 0.4, 1},
-		{"表記ゆれ（全角数字・句読点なし）", "翌年の新入部員は２３人まで増えて 部員数を３倍にすることができました", 0.99, 1},
-		{"捏造", "TOEICで900点を取得し、英語での商談経験もあります。", 0, 0.2},
-		{"needle が空なら照合対象が無い", "", 1, 1},
+		{"長い文の完全一致", "結果として、翌年の新入部員は23人まで増えて、部員数を3倍にすることができました。", 1},
+		{"短い断片の完全一致", "私が新歓ライブの企画を提案して", 1},
+		{"表記ゆれ（全角数字・句読点なし）", "翌年の新入部員は２３人まで増えて 部員数を３倍にすることができました", 1},
+		{"助詞違い", "私が新歓ライブの企画も提案し、SNSでの告知も担当しました", 0.7778},
+		{"言い直しを除いた引用", "プログラミングは独学で毎日2時間続けている", 0.8000},
+		{"要約", "新歓ライブを企画してSNS告知を担当し、部員数を3倍にした", 0.5556},
+		{"要約（最も低いもの）", "部員が8人から23人に増えた", 0.3200},
+		// しきい値近傍。ここが動くと照合の合否が入れ替わる
+		{"境界の上側", "自分から提案した", 0.2857},
+		{"境界の下側", "顧問と相談した", 0.1818},
+		{"捏造（別エピソード）", "TOEICで900点を取得し、英語での商談経験もあります。", 0.0392},
+		// 既知の限界: 実引用＋捏造の継ぎ足しは正当な要約と同じ帯に入る
+		{"実引用＋捏造の継ぎ足し", "入学した当初は部員が8人しかいなくて、私が部長として3年間で部員数を50人まで増やしました", 0.4500},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := BestMatch(Normalize(tt.needle), haystack)
-			if got < tt.wantMin || got > tt.wantMax {
-				t.Errorf("BestMatch = %.3f, want %v〜%v", got, tt.wantMin, tt.wantMax)
+			got := BestMatch(tt.needle, haystack)
+			if math.Abs(got-tt.want) > 0.0001 {
+				t.Errorf("BestMatch = %.4f, want %.4f", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestBestMatch_EmptyHaystack(t *testing.T) {
+// 空・不正な入力で照合成功にしないこと。
+// needle が空で1.0を返すと、記号だけの引用が「照合済み」として保存される。
+func TestBestMatch_EmptyIsNotAMatch(t *testing.T) {
 	t.Parallel()
-	if got := BestMatch(Normalize("部員数を3倍にした"), ""); got != 0 {
-		t.Errorf("BestMatch = %v, want 0（照合先が無ければ一致とみなさない）", got)
+
+	hay := New("部員数を3倍にしました")
+	tests := []struct {
+		name     string
+		needle   string
+		haystack Bigrams
+	}{
+		{"needle が空", "", hay},
+		{"needle が記号だけ", "。。。！？", hay},
+		{"needle が絵文字だけ", "🎉🎉🎉", hay},
+		{"haystack が空", "部員数を3倍にした", New("")},
+		{"haystack が記号だけ", "部員数を3倍にした", New("。。。")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := BestMatch(tt.needle, tt.haystack); got != 0 {
+				t.Errorf("BestMatch = %v, want 0", got)
+			}
+		})
 	}
 }
 
 // needle が haystack より長いケース（要約されていない冗長な引用）でも落ちないこと。
 func TestBestMatch_NeedleLongerThanHaystack(t *testing.T) {
 	t.Parallel()
-	hay := Normalize("部員数を3倍にしました")
-	got := BestMatch(Normalize("部員数を3倍にしました、と申し上げました通りです"), hay)
-	if got < 0.5 {
+	hay := New("部員数を3倍にしました")
+	if got := BestMatch("部員数を3倍にしました、と申し上げました通りです", hay); got < 0.5 {
 		t.Errorf("BestMatch = %.3f, want >= 0.5", got)
 	}
 }

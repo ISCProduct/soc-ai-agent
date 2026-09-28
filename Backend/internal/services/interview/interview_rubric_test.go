@@ -82,6 +82,7 @@ func TestValidateEvidence(t *testing.T) {
 		evidence      map[string]string
 		utterances    []models.InterviewUtterance
 		wantUnmatched []string
+		wantChecked   int
 		why           string
 	}{
 		{
@@ -93,8 +94,9 @@ func TestValidateEvidence(t *testing.T) {
 				"communication": "プログラミングは独学で、毎日2時間くらい続けています。",
 				"enthusiasm":    "私は大学時代に軽音サークルの代表を務めていました。",
 			},
-			utterances: testUtterances(),
-			why:        "実際の発言をそのまま引用したのに未照合にしている",
+			utterances:  testUtterances(),
+			wantChecked: 5,
+			why:         "実際の発言をそのまま引用したのに未照合にしている",
 		},
 		{
 			name: "要約された根拠も照合できる",
@@ -102,8 +104,9 @@ func TestValidateEvidence(t *testing.T) {
 				"logic":       "新歓ライブを企画してSNS告知を担当し、部員数を3倍にした",
 				"specificity": "部員が8人から23人に増えた",
 			},
-			utterances: testUtterances(),
-			why:        "要約された正しい根拠まで落としている（しきい値が厳しすぎる）",
+			utterances:  testUtterances(),
+			wantChecked: 2,
+			why:         "要約された正しい根拠まで落としている（しきい値が厳しすぎる）",
 		},
 		{
 			name: "表記ゆれ（全角半角・句読点・助詞）も照合できる",
@@ -113,8 +116,9 @@ func TestValidateEvidence(t *testing.T) {
 				"ownership":     "私が新歓ライブの企画も提案し、SNSでの告知も担当しました", // 助詞の差
 				"communication": "プログラミングは独学で毎日2時間続けている",         // 言い直し
 			},
-			utterances: testUtterances(),
-			why:        "表記ゆれだけで未照合にしている",
+			utterances:  testUtterances(),
+			wantChecked: 4,
+			why:         "表記ゆれだけで未照合にしている",
 		},
 		{
 			name: "完全に捏造された根拠は未照合になる",
@@ -126,6 +130,7 @@ func TestValidateEvidence(t *testing.T) {
 			},
 			utterances:    testUtterances(),
 			wantUnmatched: []string{"communication", "ownership", "specificity"},
+			wantChecked:   4,
 			why:           "言っていない発言を根拠として通している",
 		},
 		{
@@ -135,6 +140,7 @@ func TestValidateEvidence(t *testing.T) {
 			},
 			utterances:    testUtterances(),
 			wantUnmatched: []string{"logic"},
+			wantChecked:   1,
 			why:           "面接官の質問文をそのまま根拠にできてしまっている",
 		},
 		{
@@ -147,6 +153,7 @@ func TestValidateEvidence(t *testing.T) {
 				{Role: "ai", Text: "学生時代に力を入れたことを教えてください。"},
 			},
 			wantUnmatched: []string{"logic", "specificity"},
+			wantChecked:   2,
 			why:           "照合先が無いのに根拠を通している",
 		},
 		{
@@ -155,30 +162,100 @@ func TestValidateEvidence(t *testing.T) {
 			utterances: nil,
 			// レポート自体は保存される（この関数は未照合キーを返すだけで、生成を落とさない）
 			wantUnmatched: []string{"logic"},
+			wantChecked:   1,
 			why:           "発話0件なのに根拠を通している",
 		},
 		{
-			name:       "空文字の項目は照合対象にしない",
-			evidence:   map[string]string{"logic": "", "specificity": "   "},
-			utterances: testUtterances(),
-			why:        "既に欠落している項目を未照合として扱い、無駄な再生成を招いている",
+			name:        "空文字の項目は照合対象にしない",
+			evidence:    map[string]string{"logic": "", "specificity": "   "},
+			utterances:  testUtterances(),
+			wantChecked: 0,
+			why:         "既に欠落している項目を未照合として扱い、無駄な再生成を招いている",
 		},
 		{
-			name:       "evidence が空なら何も返さない",
-			evidence:   nil,
-			utterances: testUtterances(),
-			why:        "検証対象が無いのに未照合を報告している",
+			name: "記号や絵文字だけの項目は未照合にする",
+			evidence: map[string]string{
+				"logic":         "。。。！？",
+				"specificity":   "🎉🎉🎉",
+				"ownership":     "-----",
+				"communication": "???",
+			},
+			utterances:    testUtterances(),
+			wantUnmatched: []string{"communication", "logic", "ownership", "specificity"},
+			wantChecked:   4,
+			why:           "正規化すると空になる文字列を照合成功として通し、そのまま画面に出している",
+		},
+		{
+			name: "しきい値の境界",
+			evidence: map[string]string{
+				// 0.2857: 「私が新歓ライブの企画を提案して」の言い換え。通すべき
+				"logic": "自分から提案した",
+				// 0.1818: 発話に無い内容。弾くべき
+				"specificity": "顧問と相談した",
+			},
+			utterances:    testUtterances(),
+			wantUnmatched: []string{"specificity"},
+			wantChecked:   2,
+			why:           "しきい値が境界の内側/外側に動いている（EvidenceMatchThreshold の実測表を引き直すこと）",
+		},
+		{
+			name:        "evidence が空なら何も返さない",
+			evidence:    nil,
+			utterances:  testUtterances(),
+			wantChecked: 0,
+			why:         "検証対象が無いのに未照合を報告している",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := ValidateEvidence(tt.evidence, tt.utterances)
-			if !slices.Equal(got, tt.wantUnmatched) {
-				t.Errorf("未照合=%v want %v: %s", got, tt.wantUnmatched, tt.why)
+			got := ValidateEvidence(tt.evidence, SpokenText(tt.utterances))
+			if !slices.Equal(got.Unmatched, tt.wantUnmatched) {
+				t.Errorf("未照合=%v want %v: %s", got.Unmatched, tt.wantUnmatched, tt.why)
+			}
+			// Checked は照合率ログの分母。空文字を数えると指標が上方に歪む。
+			if got.Checked != tt.wantChecked {
+				t.Errorf("照合対象数=%d want %d", got.Checked, tt.wantChecked)
+			}
+			if got.Matched() != tt.wantChecked-len(tt.wantUnmatched) {
+				t.Errorf("Matched()=%d want %d", got.Matched(), tt.wantChecked-len(tt.wantUnmatched))
 			}
 		})
+	}
+}
+
+// しきい値そのものを固定する（#1527）。
+//
+// 実測分布から決めた値なので、勘で動かされると捏造が通るか正当な要約が落ちる。
+// EvidenceMatchThreshold を書き換えるなら、この定数と
+// interview_rubric.go / docs/wiki/scoring.md §2-4 の実測表を必ず一緒に引き直すこと。
+func TestEvidenceMatchThreshold_Pinned(t *testing.T) {
+	t.Parallel()
+	if EvidenceMatchThreshold != 0.25 {
+		t.Errorf("EvidenceMatchThreshold = %v。実測表を引き直さずに変更していないか確認すること", EvidenceMatchThreshold)
+	}
+}
+
+// 照合で検出できない捏造を明示的に固定する（#1527）。
+//
+// 文字bigramの一致度である以上、**実発話の言い換えに事実を継ぎ足した捏造**は
+// 正当な要約と同じ帯（0.43〜0.58）に入り、しきい値をどこに置いても分離できない。
+// この限界を「たまたま通っている」ではなくテストで明示しておく。
+// 検出できるのは「発話と無関係な根拠」だけである。
+func TestValidateEvidence_KnownLimitation(t *testing.T) {
+	t.Parallel()
+
+	spoken := SpokenText(testUtterances())
+	partial := map[string]string{
+		// 前半は実発話、後半は捏造（部長・3年間・50人はどこにも出てこない）
+		"logic": "入学した当初は部員が8人しかいなくて、私が部長として3年間で部員数を50人まで増やしました",
+		// 発話の語彙を転記しつつ事実を入れ替えた捏造
+		"specificity": "部員が8人から100人に増えて、部費を3倍にすることができました",
+	}
+	if got := ValidateEvidence(partial, spoken); len(got.Unmatched) != 0 {
+		t.Errorf("未照合=%v。部分的な捏造を弾けるようになったなら、"+
+			"interview_rubric.go と docs/wiki/scoring.md §2-4 の「検出できないもの」を更新すること", got.Unmatched)
 	}
 }
 
@@ -191,7 +268,8 @@ func TestBlankUnmatchedEvidence(t *testing.T) {
 		"specificity": "TOEICで900点を取得しました。",
 		"ownership":   "私が新歓ライブの企画を提案して",
 	}
-	got := blankUnmatchedEvidence(evidence, []string{"specificity", "unknown_key"})
+	got := evidence
+	blankUnmatchedEvidence(got, []string{"specificity", "unknown_key"})
 
 	if got["specificity"] != "" {
 		t.Errorf("未照合の項目が残っている: %q", got["specificity"])
