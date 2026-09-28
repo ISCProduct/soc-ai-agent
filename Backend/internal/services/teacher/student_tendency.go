@@ -33,9 +33,19 @@ type StudentTendency struct {
 	SuitedIndustries []SuitedIndustry `json:"suited_industries"`
 	// 低マッチのまま進行中の応募（#1028）。無ければ空。
 	LowMatchApplications []repositories.LowMatchApplication `json:"low_match_applications,omitempty"`
+	// 履歴書の対応要否（#1030）。注入が無いときは nil。
+	ResumeStatus *ResumeAttention `json:"resume_status,omitempty"`
 	// DataAvailable が false のときタイプも業界も参考にならない。
 	// UI 側で「分析データ不足」と出す（PRD 境界値）。
 	DataAvailable bool `json:"data_available"`
+}
+
+// ResumeAttention は教員一覧向けの履歴書対応要否（#1030）。
+type ResumeAttention struct {
+	NeedsAttention bool   `json:"needs_attention"`
+	HasDocument    bool   `json:"has_document"`
+	LatestScore    *int   `json:"latest_score,omitempty"`
+	Reason         string `json:"reason,omitempty"`
 }
 
 const (

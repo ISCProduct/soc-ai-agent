@@ -2,8 +2,10 @@ package teacher
 
 import (
 	"Backend/domain/entity"
+	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
+	"Backend/internal/services/resume"
 )
 
 // StudentLister は生徒一覧の取得面。テストで差し替えられるよう最小の面に絞る。
@@ -32,6 +34,11 @@ type LowMatchApplicationReader interface {
 	FindLowMatchApplicationsByUsers(userIDs []uint, threshold float64, minMatchedAxes int) (map[uint][]repositories.LowMatchApplication, error)
 }
 
+// ResumeFactReader は複数生徒の最新履歴書事実の一括読み出し面（#1030）。
+type ResumeFactReader interface {
+	FindLatestResumeFactsByUsers(userIDs []uint) (map[uint]models.ResumeLatestFact, error)
+}
+
 type StudentInsightService struct {
 	users      StudentLister
 	scores     ScoreBatchReader
@@ -39,6 +46,8 @@ type StudentInsightService struct {
 	profiles   IndustryProfileReader
 	// 低マッチ応募の読み出し（#1028）。未注入なら該当機能を無効にする。
 	lowMatch LowMatchApplicationReader
+	// 履歴書事実の読み出し（#1030）。未注入なら該当機能を無効にする。
+	resumes ResumeFactReader
 }
 
 // LowMatchThreshold はこの値を下回る応募を「軌道修正の対象」とみなす（#1028）。
@@ -70,6 +79,11 @@ func (s *StudentInsightService) SetLowMatchReader(r LowMatchApplicationReader) {
 	s.lowMatch = r
 }
 
+// SetResumeFactReader は履歴書事実の読み出しを注入する（#1030、オプション）。
+func (s *StudentInsightService) SetResumeFactReader(r ResumeFactReader) {
+	s.resumes = r
+}
+
 // TendencyResult は一覧APIのレスポンス。
 type TendencyResult struct {
 	Students []StudentTendency `json:"students"`
@@ -77,6 +91,22 @@ type TendencyResult struct {
 	Limit    int               `json:"limit"`
 	Offset   int               `json:"offset"`
 }
+
+// tendencyFilters は一覧の後段絞り込み。
+type tendencyFilters struct {
+	lowMatchOnly             bool
+	resumeNeedsAttentionOnly bool
+}
+
+func (f tendencyFilters) active() bool {
+	return f.lowMatchOnly || f.resumeNeedsAttentionOnly
+}
+
+// filteredListScanLimit は後段フィルタ時に DB から先読みする上限。
+// ページ取得→絞り込みだと「先頭ページに該当0・次ページに該当あり」で
+// total=0 になりページ送りも消える（#1536 review）。先に上限まで読み、
+// 絞り込み後に limit/offset を当てる。担当校の生徒一覧用途の天井。
+const filteredListScanLimit = 10000
 
 // ListTendencies は担当生徒の傾向タイプと向いている業界を返す（#1027）。
 //
@@ -86,20 +116,30 @@ type TendencyResult struct {
 // 生徒数に対して N+1 にしないため、スコアは FindLatestScoresByUsers で
 // 一括取得し、業界と業界プロファイルはページ全体で1回ずつしか読まない。
 func (s *StudentInsightService) ListTendencies(limit, offset int, query string, schoolID *uint) (*TendencyResult, error) {
-	return s.listTendencies(limit, offset, query, schoolID, false)
+	return s.listTendencies(limit, offset, query, schoolID, tendencyFilters{})
 }
 
 // ListTendenciesLowMatchOnly は低マッチのまま進行中の応募がある生徒だけを返す（#1028）。
-//
-// 絞り込みはページ取得後に行う。件数(total)は絞り込み後の実数になるため、
-// ページングとは整合しない点に注意。「今フォローすべき生徒を見つける」用途で、
-// 大量ページを繰る使い方は想定していない。
 func (s *StudentInsightService) ListTendenciesLowMatchOnly(limit, offset int, query string, schoolID *uint) (*TendencyResult, error) {
-	return s.listTendencies(limit, offset, query, schoolID, true)
+	return s.listTendencies(limit, offset, query, schoolID, tendencyFilters{lowMatchOnly: true})
 }
 
-func (s *StudentInsightService) listTendencies(limit, offset int, query string, schoolID *uint, lowMatchOnly bool) (*TendencyResult, error) {
-	students, total, err := s.users.ListStudentsPaged(limit, offset, query, schoolID)
+// ListTendenciesWithFilters は低マッチ／履歴書要対応の組み合わせで絞る（#1028/#1030）。
+func (s *StudentInsightService) ListTendenciesWithFilters(limit, offset int, query string, schoolID *uint, lowMatchOnly, resumeNeedsAttentionOnly bool) (*TendencyResult, error) {
+	return s.listTendencies(limit, offset, query, schoolID, tendencyFilters{
+		lowMatchOnly:             lowMatchOnly,
+		resumeNeedsAttentionOnly: resumeNeedsAttentionOnly,
+	})
+}
+
+func (s *StudentInsightService) listTendencies(limit, offset int, query string, schoolID *uint, filters tendencyFilters) (*TendencyResult, error) {
+	fetchLimit, fetchOffset := limit, offset
+	if filters.active() {
+		// 絞り込み後にページングするため、先に上限まで読む。
+		fetchLimit = filteredListScanLimit
+		fetchOffset = 0
+	}
+	students, total, err := s.users.ListStudentsPaged(fetchLimit, fetchOffset, query, schoolID)
 	if err != nil {
 		return nil, err
 	}
@@ -149,20 +189,63 @@ func (s *StudentInsightService) listTendencies(limit, offset int, query string, 
 		}
 	}
 
+	resumeByUser := map[uint]models.ResumeLatestFact{}
+	if s.resumes != nil {
+		resumeByUser, err = s.resumes.FindLatestResumeFactsByUsers(userIDs)
+		if err != nil {
+			return nil, err
+		}
+	}
+	threshold := config.ResumeCompletenessThreshold()
+
+	matched := make([]StudentTendency, 0, len(students))
 	for _, u := range students {
-		if lowMatchOnly && len(lowMatchByUser[u.ID]) == 0 {
+		if filters.lowMatchOnly && len(lowMatchByUser[u.ID]) == 0 {
+			continue
+		}
+		attn := buildResumeAttention(resumeByUser[u.ID], s.resumes != nil, threshold)
+		if filters.resumeNeedsAttentionOnly && (attn == nil || !attn.NeedsAttention) {
 			continue
 		}
 		t := BuildTendency(u.ID, u.Name, u.Email, scoresByUser[u.ID], industries, profileByIndustry)
 		t.LowMatchApplications = lowMatchByUser[u.ID]
-		result.Students = append(result.Students, t)
+		t.ResumeStatus = attn
+		matched = append(matched, t)
 	}
-	if lowMatchOnly {
-		// 絞り込み後は total を実数に置き換える。
-		// ページ全体の件数を返すと、画面が「該当0件なのに総数100」と表示する。
-		result.Total = int64(len(result.Students))
+
+	if !filters.active() {
+		result.Students = matched
+		return result, nil
 	}
+
+	// 絞り込み後の実数でページングする。
+	result.Total = int64(len(matched))
+	start := offset
+	if start > len(matched) {
+		start = len(matched)
+	}
+	end := start + limit
+	if end > len(matched) {
+		end = len(matched)
+	}
+	result.Students = matched[start:end]
 	return result, nil
+}
+
+// buildResumeAttention はバッチ事実から教員一覧用の対応要否を組み立てる。
+// reader 未注入なら nil（機能オフ）。未提出は map に無いので空 fact を未提出扱い。
+func buildResumeAttention(fact models.ResumeLatestFact, enabled bool, threshold int) *ResumeAttention {
+	if !enabled {
+		return nil
+	}
+	status := resume.EvaluateResumeStatus(fact.HasDocument, fact.LatestScore, threshold)
+	attn := &ResumeAttention{
+		NeedsAttention: status.NeedsAttention,
+		HasDocument:    status.HasDocument,
+		LatestScore:    status.LatestScore,
+		Reason:         resume.AttentionReason(status),
+	}
+	return attn
 }
 
 // topLevelIndustries は大分類(level 0)だけに絞る（#1027）。
