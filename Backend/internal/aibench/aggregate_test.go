@@ -167,6 +167,27 @@ func TestAggregate通信エラーは破損率とレイテンシから除く(t *t
 	}
 }
 
+// 応答が返っていない呼び出しにトークン課金は無い。
+// ES添削はトークン数を概算で埋めるため、除外しないと実行されなかった
+// 呼び出しのコストが合計に混ざる。
+func TestAggregate通信エラーはコストに数えない(t *testing.T) {
+	obs := []Observation{
+		{CaseID: "c1", Label: LabelGood, Score: 0.8, PromptTokens: 1000, CompletionTokens: 500, TokensEstimated: true},
+		// ES添削は通信エラーでも概算トークンが入っている
+		{CaseID: "c1", Label: LabelGood, PromptTokens: 1000, CompletionTokens: 500, TokensEstimated: true,
+			Broken: true, BrokenReason: BrokenNetwork},
+	}
+	s := Aggregate(TargetES, "gpt-4o-mini", "", "", obs)
+	want := 1000*0.15/1_000_000 + 500*0.60/1_000_000
+	if math.Abs(s.TotalCostUSD-want) > 1e-12 {
+		t.Errorf("合計コスト = %v, want %v（通信エラー分を除外していない）", s.TotalCostUSD, want)
+	}
+	// 1件あたりも計測できた1回で割る
+	if math.Abs(s.CostPerCallUSD-want) > 1e-12 {
+		t.Errorf("1件あたりコスト = %v, want %v", s.CostPerCallUSD, want)
+	}
+}
+
 // 使える出力が返らなかった場合は破損として数える（通信エラーと区別する）。
 func TestAggregate応答はあったが使えない場合は破損に数える(t *testing.T) {
 	obs := []Observation{

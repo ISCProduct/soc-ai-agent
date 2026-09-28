@@ -157,18 +157,21 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 			caseOrder = append(caseOrder, o.CaseID)
 		}
 		byCase[o.CaseID] = append(byCase[o.CaseID], o)
-		promptTokens += o.PromptTokens
-		completionTokens += o.CompletionTokens
-		if o.TokensEstimated {
-			estimated = true
-		}
 		// 通信エラーは計測できなかった回数として別に数え、
-		// 破損率・レイテンシの両方から外す（品質の話ではない）。
+		// 破損率・レイテンシ・コストのすべてから外す（品質の話ではない）。
+		// コストから外すのは、応答が返っていない呼び出しにトークン課金が無いため。
+		// ES添削はトークン数を概算で埋めるので、ここで外さないと
+		// 実行されなかった呼び出しのコストが合計に混ざる。
 		if o.BrokenReason == BrokenNetwork {
 			s.UnmeasuredRuns++
 			continue
 		}
 		measured++
+		promptTokens += o.PromptTokens
+		completionTokens += o.CompletionTokens
+		if o.TokensEstimated {
+			estimated = true
+		}
 		latencies = append(latencies, float64(o.LatencyMS))
 		if o.Broken {
 			broken++
