@@ -387,6 +387,84 @@ GHSTUB
       echo "FAIL 判定不能の理由を alert-reason.txt に残していない（Discord通知が理由なしになる）"
       fail=$((fail + 1))
     fi
+
+    # 縮退（desired=0 へ更新）を終えた後でデプロイを検知した場合、0にしたECSを
+    # 起動状態へ戻してから見送ること（Codex #1534 指摘）。
+    #
+    # 戻さないと: 入口のガードを通った直後に始まったデプロイが、縮退の途中で
+    # desired 合計を読んで was_down=false と記録し、一時起動も後片付けもしない。
+    # 安定待ちは desired=0 を安定状態として通過し、スモークだけ落ちて本番は
+    # 停止したまま残る。
+    if ! grep -q 'SCALED_DOWN=1' "$SCHED"; then
+      echo "FAIL 縮退したことを記録していない（後段のガードで戻す対象が分からない）"
+      fail=$((fail + 1))
+    fi
+
+    GUARD_WORK2=$(mktemp -d)
+    mkdir -p "$GUARD_WORK2/bin" "$GUARD_WORK2/repo/automation/ops"
+    cp "$GUARD_WORK/bin/gh" "$GUARD_WORK2/bin/gh"
+    # prod-scale.sh のスタブ。復元は「desired と min_capacity を揃えて4サービスを
+    # 起動する」既存スクリプトへ寄せるのが正しいので、呼び出しだけを検査する。
+    cat > "$GUARD_WORK2/repo/automation/ops/prod-scale.sh" <<'SCALESTUB'
+#!/bin/bash
+echo "prod-scale $1" >> "$SCALE_CALLS"
+exit "${SCALE_EXIT:-0}"
+SCALESTUB
+    chmod +x "$GUARD_WORK2/repo/automation/ops/prod-scale.sh"
+
+    # $1 ケース名 / $2 期待exit / $3 SCALED_DOWN の初期値 / $4 prod-scale.sh の終了コード
+    # / $5 期待する prod-scale.sh 呼び出し / $6 GH_FAIL / $7 RUNS
+    restore_case() {
+      local name="$1" want="$2" scaled="$3" scale_exit="$4" want_call="$5" ghfail="$6" runs="$7"
+      local actual out calls
+      SCALE_CALLS="$GUARD_WORK2/scale-calls"
+      : > "$SCALE_CALLS"
+      : > "$GUARD_WORK2/alert-reason.txt"
+      out=$(
+        cd "$GUARD_WORK2/repo" &&
+        PATH="$GUARD_WORK2/bin:$PATH" GH_FAIL="$ghfail" RUNS="$runs" \
+        SCALE_CALLS="$SCALE_CALLS" SCALE_EXIT="$scale_exit" \
+        GITHUB_REPOSITORY="ISCProduct/soc-ai-agent" RUNNER_TEMP="$GUARD_WORK2" \
+        bash -c 'set -e; source "$1"; SCALED_DOWN="$2"; guard_stop_against_deploy "停止処理"; exit 10' \
+          _ "$GUARD_FRAG" "$scaled" 2>&1
+      )
+      actual=$?
+      calls=$(tr '\n' ' ' < "$SCALE_CALLS" | sed 's/ *$//')
+      if [ "$actual" -ne "$want" ]; then
+        echo "FAIL $name: 終了コード 期待=$want 実際=$actual"
+        printf '%s\n' "$out" | sed 's/^/     /'
+        fail=$((fail + 1))
+        return
+      fi
+      if [ "$calls" != "$want_call" ]; then
+        echo "FAIL $name: prod-scale.sh 呼び出し 期待='$want_call' 実際='$calls'"
+        printf '%s\n' "$out" | sed 's/^/     /'
+        fail=$((fail + 1))
+        return
+      fi
+      echo "ok   $name"
+      RESTORE_OUT="$out"
+    }
+
+    # まだECSに触っていない入口のガードでは、本番を起動してはいけない
+    # （停止日にデプロイが走るたび本番が上がると課金が残る）。
+    restore_case "縮退前にデプロイを検知しても本番は起動しない" 0 "" 0 "" "" '[{"status":"in_progress"}]'
+    # 縮退済みなら戻す。これが無いと本番が停止したまま次の毎時実行まで残る。
+    restore_case "縮退後にデプロイを検知したら起動状態へ戻す" 0 1 0 "prod-scale 1" "" '[{"status":"in_progress"}]'
+    # 判定不能(fail-closed)も同じ。停止側の処理を見送るなら縮退も取り消す。
+    restore_case "判定不能でも縮退済みなら戻す" 1 1 0 "prod-scale 1" "1" '[]'
+    # 戻せなかったことを 0 で握りつぶすと、本番が停止したまま誰も気づけない。
+    restore_case "復元に失敗したらジョブを失敗させる" 1 1 1 "prod-scale 1" "" '[{"status":"in_progress"}]'
+    case "${RESTORE_OUT:-}" in
+      *"::error::"*) : ;;
+      *) echo "FAIL 復元失敗を ::error:: で出していない"; fail=$((fail + 1)) ;;
+    esac
+    if [ ! -s "$GUARD_WORK2/alert-reason.txt" ]; then
+      echo "FAIL 復元失敗の理由を alert-reason.txt に残していない（Discord通知が理由なしになる）"
+      fail=$((fail + 1))
+    fi
+    rm -rf "$GUARD_WORK2"
+
     rm -rf "$GUARD_WORK"
   fi
   rm -f "$GUARD_FRAG"
