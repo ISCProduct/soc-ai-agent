@@ -181,6 +181,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 }
 
 ※ scoresは実際の会話内容に基づいて正直に採点してください（全て同じ値は避ける）。
+※ evidenceは受験者（User）が実際に話した発言をそのまま引用してください。言い換えや推測で書かず、根拠が見つからない項目は空文字にしてください（実発話と照合され、一致しない根拠は破棄されます）。
 ※ strengths/improvementsは各2〜4件のリスト形式で具体的に記述してください。
 ※ teacher以下は教員専用の詳細情報として出力してください。
 
@@ -188,10 +189,11 @@ Interview transcript:
 %s`, lang, BuildRubricPromptSection(), transcript)
 
 	model := shared.GetEnv("INTERVIEW_REPORT_MODEL", "")
-	// スキーマ違反は弾いて1度だけ作り直す（#795）。
+	// スキーマ違反と根拠の捏造は弾いて1度だけ作り直す（#795, #1527）。
 	var payload reportPayload
 	var haveBody bool
 	var lastErr error
+	var unmatched []string
 	for attempt := range reportGenerationAttempts {
 		ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport)
 		raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 2000, model)
@@ -207,11 +209,23 @@ Interview transcript:
 		}
 		// 本文は読めた。以降は最低限これを保存できる
 		payload, haveBody = candidate, true
-		if lastErr = ValidateRubricScores(candidate.Scores); lastErr == nil {
+		// unmatched は候補ごとに引き直す。前回の候補の結果を持ち越すと、
+		// スコア不正でやり直した後に無関係な項目を空にしてしまう。
+		unmatched = nil
+		if lastErr = ValidateRubricScores(candidate.Scores); lastErr != nil {
+			log.Printf("[Interview] report scores invalid (session %d, attempt %d/%d): %v",
+				sessionID, attempt+1, reportGenerationAttempts, lastErr)
+			continue
+		}
+		// 根拠が実際の発話に基づくかを照合する（#1527）。LLM は呼ばない。
+		unmatched = ValidateEvidence(candidate.Evidence, utterances)
+		log.Printf("[Interview] report evidence session=%d matched=%d/%d",
+			sessionID, len(candidate.Evidence)-len(unmatched), len(candidate.Evidence))
+		if len(unmatched) == 0 {
 			break
 		}
-		log.Printf("[Interview] report scores invalid (session %d, attempt %d/%d): %v",
-			sessionID, attempt+1, reportGenerationAttempts, lastErr)
+		log.Printf("[Interview] report evidence unmatched (session %d, attempt %d/%d): %s",
+			sessionID, attempt+1, reportGenerationAttempts, strings.Join(unmatched, ", "))
 	}
 	payload, err = finalizeReportPayload(payload, haveBody, lastErr)
 	if err != nil {
@@ -219,6 +233,13 @@ Interview transcript:
 	}
 	if lastErr != nil {
 		log.Printf("[Interview] report saved without scores (session %d): %v", sessionID, lastErr)
+	}
+	// やり直しても照合できなかった根拠は空にして保存する。
+	// スコアと講評は残す（誤りを載せるより欠落させる。docs/wiki/scoring.md §2-3）。
+	if lastErr == nil && len(unmatched) > 0 {
+		payload.Evidence = blankUnmatchedEvidence(payload.Evidence, unmatched)
+		log.Printf("[Interview] report saved with blanked evidence (session %d): %s",
+			sessionID, strings.Join(unmatched, ", "))
 	}
 
 	// スコアを捨てた場合は空文字にする。json.Marshal(nil map) は "null" を返すが、

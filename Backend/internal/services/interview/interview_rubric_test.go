@@ -2,8 +2,11 @@ package interview
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
+
+	"Backend/internal/models"
 )
 
 // 完了定義: スキーマ違反の LLM 出力を検知して弾けること。
@@ -52,6 +55,155 @@ func TestValidateRubricScores_RejectsViolations(t *testing.T) {
 				t.Errorf("err = %v, want に %q を含む", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// testUtterances は照合テスト用の面接ログ。
+// 面接官(ai)の発話も混ぜてあるのは、それが照合先に入ってしまわないかを見るため。
+func testUtterances() []models.InterviewUtterance {
+	return []models.InterviewUtterance{
+		{Role: "ai", Text: "学生時代に力を入れたことを教えてください。海外留学の経験はありますか？"},
+		{Role: "user", Text: "はい、私は大学時代に軽音サークルの代表を務めていました。入学した当初は部員が8人しかいなくて、このままだと廃部になるという話が出ていました。"},
+		{Role: "ai", Text: "そこではどう動きましたか？"},
+		{Role: "user", Text: "そこで私が新歓ライブの企画を提案して、SNSでの告知を担当しました。結果として、翌年の新入部員は23人まで増えて、部員数を3倍にすることができました。"},
+		{Role: "user", Text: "えー、その、あ、すみません、言い直します。プログラミングは独学で、毎日2時間くらい続けています。"},
+	}
+}
+
+// 完了定義: evidence が実際の受験者発話に基づくかを照合できること（#1527）。
+//
+// 捏造された根拠は学生向け・教員向けの両レポートに出る。スコアの値域と違って
+// スキーマ検証では捕まらないため、実発話との照合が唯一の検出手段になる。
+func TestValidateEvidence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		evidence      map[string]string
+		utterances    []models.InterviewUtterance
+		wantUnmatched []string
+		why           string
+	}{
+		{
+			name: "発話と完全一致なら照合できる",
+			evidence: map[string]string{
+				"logic":         "結果として、翌年の新入部員は23人まで増えて、部員数を3倍にすることができました。",
+				"specificity":   "入学した当初は部員が8人しかいなくて",
+				"ownership":     "そこで私が新歓ライブの企画を提案して、SNSでの告知を担当しました。",
+				"communication": "プログラミングは独学で、毎日2時間くらい続けています。",
+				"enthusiasm":    "私は大学時代に軽音サークルの代表を務めていました。",
+			},
+			utterances: testUtterances(),
+			why:        "実際の発言をそのまま引用したのに未照合にしている",
+		},
+		{
+			name: "要約された根拠も照合できる",
+			evidence: map[string]string{
+				"logic":       "新歓ライブを企画してSNS告知を担当し、部員数を3倍にした",
+				"specificity": "部員が8人から23人に増えた",
+			},
+			utterances: testUtterances(),
+			why:        "要約された正しい根拠まで落としている（しきい値が厳しすぎる）",
+		},
+		{
+			name: "表記ゆれ（全角半角・句読点・助詞）も照合できる",
+			evidence: map[string]string{
+				"logic":         "翌年の新入部員は２３人まで増えて 部員数を３倍にすることができました",
+				"specificity":   "入学した当初は部員が8人しかいなくて、",           // 句読点の差
+				"ownership":     "私が新歓ライブの企画も提案し、SNSでの告知も担当しました", // 助詞の差
+				"communication": "プログラミングは独学で毎日2時間続けている",         // 言い直し
+			},
+			utterances: testUtterances(),
+			why:        "表記ゆれだけで未照合にしている",
+		},
+		{
+			name: "完全に捏造された根拠は未照合になる",
+			evidence: map[string]string{
+				"logic":         "結果として、翌年の新入部員は23人まで増えて、部員数を3倍にすることができました。",
+				"specificity":   "TOEICで900点を取得し、英語での商談経験もあります。",
+				"ownership":     "高校時代は野球部でキャプテンを務め、県大会でベスト8に入りました。",
+				"communication": "アルバイト先で売上を前年比150%に伸ばし、店長から表彰されました。",
+			},
+			utterances:    testUtterances(),
+			wantUnmatched: []string{"communication", "ownership", "specificity"},
+			why:           "言っていない発言を根拠として通している",
+		},
+		{
+			name: "面接官の発話は根拠として認めない",
+			evidence: map[string]string{
+				"logic": "学生時代に力を入れたことを教えてください。海外留学の経験はありますか？",
+			},
+			utterances:    testUtterances(),
+			wantUnmatched: []string{"logic"},
+			why:           "面接官の質問文をそのまま根拠にできてしまっている",
+		},
+		{
+			name: "受験者の発話が無ければ全項目が未照合になる",
+			evidence: map[string]string{
+				"logic":       "結果として、部員数を3倍にすることができました。",
+				"specificity": "部員が8人しかいなかった",
+			},
+			utterances: []models.InterviewUtterance{
+				{Role: "ai", Text: "学生時代に力を入れたことを教えてください。"},
+			},
+			wantUnmatched: []string{"logic", "specificity"},
+			why:           "照合先が無いのに根拠を通している",
+		},
+		{
+			name:       "発話そのものが無ければ全項目が未照合になる",
+			evidence:   map[string]string{"logic": "部員数を3倍にした"},
+			utterances: nil,
+			// レポート自体は保存される（この関数は未照合キーを返すだけで、生成を落とさない）
+			wantUnmatched: []string{"logic"},
+			why:           "発話0件なのに根拠を通している",
+		},
+		{
+			name:       "空文字の項目は照合対象にしない",
+			evidence:   map[string]string{"logic": "", "specificity": "   "},
+			utterances: testUtterances(),
+			why:        "既に欠落している項目を未照合として扱い、無駄な再生成を招いている",
+		},
+		{
+			name:       "evidence が空なら何も返さない",
+			evidence:   nil,
+			utterances: testUtterances(),
+			why:        "検証対象が無いのに未照合を報告している",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := ValidateEvidence(tt.evidence, tt.utterances)
+			if !slices.Equal(got, tt.wantUnmatched) {
+				t.Errorf("未照合=%v want %v: %s", got, tt.wantUnmatched, tt.why)
+			}
+		})
+	}
+}
+
+// 一部だけ未照合のとき、その項目だけ空になり他は残ること（#1527）。
+func TestBlankUnmatchedEvidence(t *testing.T) {
+	t.Parallel()
+
+	evidence := map[string]string{
+		"logic":       "結果として、部員数を3倍にすることができました。",
+		"specificity": "TOEICで900点を取得しました。",
+		"ownership":   "私が新歓ライブの企画を提案して",
+	}
+	got := blankUnmatchedEvidence(evidence, []string{"specificity", "unknown_key"})
+
+	if got["specificity"] != "" {
+		t.Errorf("未照合の項目が残っている: %q", got["specificity"])
+	}
+	if got["logic"] == "" || got["ownership"] == "" {
+		t.Errorf("照合できた項目まで空にしている: %v", got)
+	}
+	if _, ok := got["specificity"]; !ok {
+		t.Error("キーごと消している。中身の有無で欠落を表すべき")
+	}
+	if _, ok := got["unknown_key"]; ok {
+		t.Error("存在しないキーを追加している")
 	}
 }
 

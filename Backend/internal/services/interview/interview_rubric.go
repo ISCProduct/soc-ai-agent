@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"Backend/internal/models"
+	"Backend/internal/services/shared/textsim"
 )
 
 // 構造化面接ルーブリック（#795）。
@@ -120,4 +123,84 @@ func ValidateRubricScores(scores map[string]int) error {
 			RubricScoreMin, RubricScoreMax, strings.Join(outOfRange, ", "))
 	}
 	return nil
+}
+
+// EvidenceMatchThreshold は evidence を「実発話に基づく」と認める最小一致度（#1527）。
+//
+// 面接ログを模した実測での分布は次の通りで、捏造と引用の間に明確な谷がある。
+//
+//	引用そのまま / 表記ゆれのみ    1.00
+//	言い直し・助詞違い             0.74〜0.80
+//	要約された引用                 0.40〜0.56
+//	抽象化された言い換え           0.31
+//	---------------- しきい値 0.30 ----------------
+//	捏造（エピソードごと別物）     0.00〜0.17
+//	相槌など内容の無い文字列       0.14
+//
+// 厳しくすると要約された正しい evidence まで落ちる。緩めると捏造が通る。
+// 谷の中で捏造側から離した 0.30 を採る。評価項目やプロンプトを変えたときは
+// textsim で実測してここを引き直すこと。
+const EvidenceMatchThreshold = 0.30
+
+// ValidateEvidence は evidence の各項目が実際の受験者発話に基づくかを照合し、
+// 照合できなかったキーを昇順で返す（#1527）。
+//
+// LLM は根拠として「言っていない発言」を書きうる。スコアの値域と違って
+// evidence は自由記述なのでスキーマ検証では捕まらないが、学生向け・教員向けの
+// 両レポートに表示される。教員がレポートを前提に指導する運用では、
+// 根拠の捏造はスコアの誤りより直接に信頼を損なう。
+//
+// 照合はローカル計算だけで行う（LLM を再度呼ばない）。文字bigramの Dice 係数なので
+// 形態素解析も要らず、言い直し・助詞の差・表記ゆれはしきい値で吸収する。
+//
+// 空文字の項目は照合対象にしない。「根拠が無い」ことは既に欠落として表現されており、
+// 捏造ではないため再生成を促す必要がない。
+func ValidateEvidence(evidence map[string]string, utterances []models.InterviewUtterance) []string {
+	if len(evidence) == 0 {
+		return nil
+	}
+	spoken := textsim.Normalize(userUtterancesText(utterances))
+
+	var unmatched []string
+	for key, text := range evidence {
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		if textsim.BestMatch(textsim.Normalize(text), spoken) < EvidenceMatchThreshold {
+			unmatched = append(unmatched, key)
+		}
+	}
+	// map の順序は不定なので、ログを安定させる
+	sort.Strings(unmatched)
+	return unmatched
+}
+
+// userUtterancesText は受験者(role=user)の発話だけを連結する。
+//
+// 面接官(role=ai)の発話を混ぜると、質問文をそのまま根拠として引用しても
+// 照合が通ってしまう。照合したいのは「学生が言ったか」である。
+func userUtterancesText(utterances []models.InterviewUtterance) string {
+	var b strings.Builder
+	for _, u := range utterances {
+		if u.Role != "user" {
+			continue
+		}
+		b.WriteString(u.Text)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// blankUnmatchedEvidence は照合できなかった項目の evidence を空文字にする（#1527）。
+//
+// キーごと削除せず空文字を入れるのは、キーの有無ではなく中身の有無で
+// 「根拠を出せなかった」ことを表すため。スコアと講評はそのまま残す。
+// 誤った根拠を載せるより欠落させる（docs/wiki/scoring.md §2-3）。
+func blankUnmatchedEvidence(evidence map[string]string, unmatched []string) map[string]string {
+	for _, key := range unmatched {
+		if _, ok := evidence[key]; ok {
+			evidence[key] = ""
+		}
+	}
+	return evidence
 }
