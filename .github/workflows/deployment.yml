@@ -959,22 +959,6 @@ jobs:
             "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             "${{ github.actor }}"
 
-      # ECSのデプロイサーキットブレーカーは失敗すると「直前の安定デプロイ」へ戻すが、
-      # そのタスク定義のイメージがECRに残っているかは見ない。2026-09-25 はそれで
-      # backend が起動不能なリビジョン(:86)を指したまま残った(#1518)。
-      # 停止日は desired=0 なので誰も気づけず、次の稼働日に本番が上がらない。
-      #
-      # 失敗した経路でも必ず通す(always)。イメージが無ければ今回のリビジョンへ戻し、
-      # そのうえでジョブは失敗させる(黙って直すと「ロールバックが起きた」事実が消える)。
-      - name: Verify task definition images exist in ECR
-        if: always()
-        run: |
-          ./automation/ops/verify-task-def-images.sh \
-            "backend=${{ steps.deploy-backend.outputs.task-definition-arn }}" \
-            "frontend=${{ steps.deploy-frontend.outputs.task-definition-arn }}" \
-            "rag-review=${{ steps.deploy-rag-review.outputs.task-definition-arn }}" \
-            "chroma="
-
       # merge commit 件名（Merge pull request #N）ではなく、マージPRのタイトル
       # （Release to production: ...）と本文の機能一覧を通知に使う。
       # 確認が済んだ（または失敗した）ら0へ戻す。always() が無いと、
@@ -1019,6 +1003,25 @@ jobs:
           fi
 
           ./automation/ops/prod-scale.sh 0
+
+      # ECSのデプロイサーキットブレーカーは失敗すると「直前の安定デプロイ」へ戻すが、
+      # そのタスク定義のイメージがECRに残っているかは見ない。2026-09-25 はそれで
+      # backend が起動不能なリビジョン(:86)を指したまま残った(#1518)。
+      # 停止日は desired=0 なので誰も気づけず、次の稼働日に本番が上がらない。
+      #
+      # 失敗した経路でも必ず通す(always)。イメージが無ければ今回のリビジョンへ戻し、
+      # そのうえでジョブは失敗させる(黙って直すと「ロールバックが起きた」事実が消える)。
+      #
+      # 0へ戻すステップより後に置く。スクリプトは desired=0 のサービスしか戻さないため、
+      # 一時起動中(desired=1)に検査すると停止日の事故を検出するだけで復旧できない。
+      - name: Verify task definition images exist in ECR
+        if: always()
+        run: |
+          ./automation/ops/verify-task-def-images.sh \
+            "backend=${{ steps.deploy-backend.outputs.task-definition-arn }}" \
+            "frontend=${{ steps.deploy-frontend.outputs.task-definition-arn }}" \
+            "rag-review=${{ steps.deploy-rag-review.outputs.task-definition-arn }}" \
+            "chroma="
 
       # デプロイが終わったら、このデプロイが起動したRDSは停止へ戻す。
       # 停止するのは「このデプロイが stopped から起動した」場合だけで、かつ本番が稼働状態でない

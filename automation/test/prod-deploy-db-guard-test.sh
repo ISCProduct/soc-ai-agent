@@ -259,6 +259,12 @@ else
       echo "FAIL イメージ存在検査に always() が無い（ロールバックした時に走らない）"
       fail=$((fail + 1))
     fi
+    # スクリプトは desired=0 のサービスしか戻さない。一時起動中(desired=1)に検査すると
+    # 停止日のロールバック事故を検出しても復旧できず、壊れた定義のまま0へ戻る。
+    if [ "$VERIFY" -le "$DOWN" ]; then
+      echo "FAIL イメージ存在検査は0へ戻すステップより後に置くこと（verify=${VERIFY} down=${DOWN}）"
+      fail=$((fail + 1))
+    fi
     if ! grep -q "automation/ops/verify-task-def-images.sh" <<< "$VERIFY_BODY"; then
       echo "FAIL イメージ存在検査が automation/ops/verify-task-def-images.sh を使っていない"
       fail=$((fail + 1))
