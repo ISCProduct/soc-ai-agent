@@ -98,6 +98,40 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 | `web_search` | OpenAI Web Search（gpt-4o-search-preview）を使用 |
 | `cache` | ChromaDB のキャッシュを使用（Web 検索なし） |
 
+### `/es/review` レスポンス例
+
+```json
+{
+  "specificity_score": 7,
+  "star_score": 6,
+  "company_fit_score": null,
+  "length_balance_score": 5,
+  "feedback": "...",
+  "improved_text": "...",
+  "company_strategy": null,
+  "company_context_source": "none"
+}
+```
+
+- `company_context_source`: 企業コンテキストの取得元（`company_brief` / `cache` / `web_search` / `none`）
+- **企業コンテキストが0件（`none`）のときは企業名もプロンプトへ入れず、`company_fit_score` と `company_strategy` は必ず `null`** になる（モデルの内部知識による根拠の無い企業評価を防ぐ / #1524）
+- 生成は2回の呼び出しに分割している（#1521）
+  - 第1: スコア4軸 + `feedback` + `company_strategy`（企業情報の生データはこちらだけに渡す）
+  - 第2: `improved_text` のみ（第1の `feedback` を「改善の観点」として渡す。企業情報は再投入しない＝入力トークンの二重計上を避ける）
+- `max_tokens` は日本語 **0.85トークン/文字**（tiktoken `o200k_base` の実測は素の日本語 0.80〜0.81、半角カナ 1.36。安全率込み）・改善文は入力の最大1.3倍 + JSONオーバーヘッド120で見積もる。上限は 8192
+- `finish_reason == "length"`（出力上限到達）を検知したら上限を2倍にして**1回だけ**再試行する。既に 8192 なら引き上げ余地が無いので再試行しない
+- 再試行しても上限に達した場合は 422 を返す。案内文は段ごとに変える（評価の出力量はESの長さに依存しないため、そちらで「文字数を減らして」と案内しても直らない）
+  - 改善文の段: 「文章が長すぎて添削できませんでした。文字数を減らしてお試しください。」
+  - 評価の段: 「添削コメントが長くなりすぎて最後まで生成できませんでした。もう一度お試しください。」
+- 422 の案内文は Go を透過し、FE では `frontend/app/es-rewrite/page-content.tsx` の `readApiErrorMessage` が 422 のとき `detail` を優先して表示する（BFF が `error` に入れる一般文では利用者が対処できないため）
+- FEの表示（`/es-rewrite` の添削結果）: `company_fit_score` が null のときは「企業適合性」のスコア行を出さない（空のバーは 0/10 に見え低評価と誤解させるため）。案内文は **`company_context_source` で出し分ける**
+  - 企業名未入力: 「企業名を入力して添削すると、企業適合性も評価します」
+  - 企業名あり × `none`: 「企業情報を取得できなかったため、企業適合性は評価していません」＋正式名称での入力し直しの案内
+  - 企業名あり × `none` 以外（企業情報は取得できたが点数化できなかった）: 「今回は企業適合性の点数を算出できませんでした」。ここで「公開情報が見つかりませんでした」と出すと、同じ画面に出る企業対策アドバイスと矛盾する
+  - `company_strategy` が null なら対策アドバイスのカードごと非表示
+- FEの入力欄は `maxLength=10000`（RAGの `es_text` 上限と同値）。超過分を送ると FastAPI のバリデーション 422 になり、その `detail` は配列＋ES全文を含むため利用者向けの文面にならない。FE 側も 422 の `detail` は「200字以内で `{`/`[` 始まりでない」ものだけ表示する（#1015 の生JSONを出さない方針）
+- LLM呼び出しは最悪4回直列（2段 × 各1回再試行）。OpenAI SDK の `max_retries` は 1 を明示している。Backend 側の `/api/es/review` は 180秒だが、ALB(`idle_timeout` 既定60秒) / CloudFront(`origin_read_timeout` 60秒) が先に切るため実効は60秒（#1556 で対応）
+
 ---
 
 ## ChromaDB キャッシュ戦略

@@ -29,15 +29,41 @@ import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 
 const QUESTION_TYPES = ['志望動機', '自己PR', '学チカ', 'ガクチカ', 'その他']
 
+// RAG側 ESReviewRequest.es_text の上限と合わせる
+const ES_TEXT_MAX_LENGTH = 10000
+
 /**
  * APIプロキシのエラーレスポンス（{ error, status, detail }想定）から
  * 日本語の短いメッセージを取り出す。生JSON/HTMLをそのまま表示しないため(#1015)。
+ *
+ * 422 のみ detail を優先する。RAGが利用者向けの具体的な案内（例: 「文章が長すぎて
+ * 添削できませんでした。文字数を減らしてお試しください。」#1521）を detail に入れる一方、
+ * api-proxy が error へ一般文「処理に失敗しました。しばらくしてから再試行してください。」を
+ * 入れるため、error だけを読むと何をすれば直るのか分からなくなる。
+ *
+ * ただし detail は文字列とは限らない。api-proxy の getDetailText は本文に文字列 detail が
+ * 無いとレスポンス本文そのものを入れるため（FastAPIのバリデーションエラーは detail が配列で、
+ * しかも input にES全文が入る）、案内文の形をしているものだけを採用する。#1015 の
+ * 「生JSONを画面に出さない」を壊さないための検査。
  */
+const USER_FACING_DETAIL_MAX = 200
+
+function userFacingDetail(detail: unknown): string | undefined {
+  if (typeof detail !== 'string') return undefined
+  const text = detail.trim()
+  if (!text || text.length > USER_FACING_DETAIL_MAX) return undefined
+  if (text.startsWith('{') || text.startsWith('[')) return undefined
+  return text
+}
+
 async function readApiErrorMessage(res: Response, fallback: string): Promise<string> {
   try {
     const data: unknown = await res.json()
-    const error = (data as { error?: unknown })?.error
+    const { error, detail } = (data ?? {}) as { error?: unknown; detail?: unknown }
+    const safeDetail = userFacingDetail(detail)
+    if (res.status === 422 && safeDetail) return safeDetail
     if (typeof error === 'string' && error) return error
+    if (safeDetail) return safeDetail
   } catch { /* ignore */ }
   return fallback
 }
@@ -62,6 +88,8 @@ type ReviewResult = {
   feedback: string
   improved_text: string
   company_strategy?: string | null
+  // 企業情報の取得元。"none" なら企業適合性を評価していない(#1524)
+  company_context_source?: 'company_brief' | 'cache' | 'web_search' | 'none'
 }
 
 // マーカーは S / T / A / R の頭文字を使う。
@@ -74,7 +102,9 @@ const STAR_LABELS: { key: keyof StarBreakdown; label: string; color: string; ini
   { key: 'result',    label: 'Result（成果）',    color: '#10b981', initial: 'R' },
 ]
 
-const SCORE_ITEMS: { key: keyof Omit<ReviewResult, 'feedback' | 'improved_text'>; label: string; color: string }[] = [
+type ScoreKey = 'specificity_score' | 'star_score' | 'company_fit_score' | 'length_balance_score'
+
+const SCORE_ITEMS: { key: ScoreKey; label: string; color: string }[] = [
   { key: 'specificity_score',    label: '具体性',       color: '#3b82f6' },
   { key: 'star_score',           label: 'STAR法準拠',   color: '#8b5cf6' },
   { key: 'company_fit_score',    label: '企業適合性',   color: PRIMARY },
@@ -93,6 +123,8 @@ function ESRewriteContent() {
   const [loading, setLoading] = useState(false)
   const [rewriteResult, setRewriteResult] = useState<RewriteResult | null>(null)
   const [reviewResult, setReviewResult] = useState<ReviewResult | null>(null)
+  // 添削リクエストに使った企業名。入力欄はあとから編集できるため結果と一緒に保持する
+  const [reviewedCompany, setReviewedCompany] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
@@ -139,6 +171,7 @@ function ESRewriteContent() {
         }),
       })
       if (!res.ok) throw new Error(await readApiErrorMessage(res, '添削に失敗しました。再試行してください。'))
+      setReviewedCompany(companyName.trim())
       setReviewResult(await res.json())
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '添削に失敗しました。再試行してください。')
@@ -256,6 +289,10 @@ function ESRewriteContent() {
               value={originalText}
               onChange={e => setOriginalText(e.target.value)}
               placeholder="例）チームで開発した経験があります。最初は上手くいきませんでしたが、話し合いを重ねて最終的には完成させることができました。この経験から協調性の大切さを学びました。"
+              // APIの上限は10,000字。超えた分を送るとRAGのバリデーションエラーになり、
+              // 利用者には何が悪いのか伝わらないため入力段階で止める(#1521)
+              slotProps={{ htmlInput: { maxLength: ES_TEXT_MAX_LENGTH } }}
+              helperText={`${originalText.length} / ${ES_TEXT_MAX_LENGTH} 文字`}
               sx={{
                 mb: 2.5,
                 '& .MuiOutlinedInput-root': {
@@ -369,16 +406,11 @@ function ESRewriteContent() {
                 <Stack spacing={2}>
                   {SCORE_ITEMS.map(({ key, label, color }) => {
                     const score = reviewResult[key]
-                    if (score === null) return (
-                      <Box key={key}>
-                        <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
-                          <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#94a3b8' }}>{label}</Typography>
-                          <Typography sx={{ fontSize: 12, color: '#94a3b8' }}>企業名未入力</Typography>
-                        </Stack>
-                        <LinearProgress variant="determinate" value={0} sx={{ height: 6, borderRadius: 3, bgcolor: '#e2e8f0', '& .MuiLinearProgress-bar': { bgcolor: '#e2e8f0' } }} />
-                      </Box>
-                    )
-                    const pct = ((score as number) / 10) * 100
+                    // 未評価（企業情報なし）の項目は行ごと出さない。空のバーは 0/10 に見え、
+                    // 「低く評価された」と誤解させるため(#1524)。理由はスコアの下でまとめて案内する。
+                    // null だけでなく undefined も弾く（値が欠けたレスポンスで NaN のバーを出さない）
+                    if (score == null) return null
+                    const pct = (score / 10) * 100
                     return (
                       <Box key={key}>
                         <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
@@ -394,6 +426,33 @@ function ESRewriteContent() {
                     )
                   })}
                 </Stack>
+                {reviewResult.company_fit_score == null && (
+                  !reviewedCompany ? (
+                    <Typography sx={{ mt: 2, fontSize: 13, color: '#64748b', lineHeight: 1.8 }}>
+                      企業名を入力して添削すると、企業適合性も評価します。
+                    </Typography>
+                  ) : (
+                    // 「企業情報を取得できたか」は company_fit_score ではなく company_context_source で判断する。
+                    // 取得できていてもスコアだけ算出できないことがあり（企業情報を根拠にした対策アドバイスは
+                    // 出ている）、そこで「公開情報が見つかりませんでした」と出すと画面が矛盾する(#1524)。
+                    <Alert
+                      severity="info"
+                      role="status"
+                      sx={{ mt: 2, borderRadius: 2, fontSize: 13 }}
+                    >
+                      <Typography component="h3" sx={{ fontSize: 13, fontWeight: 700, mb: 0.5 }}>
+                        {(reviewResult.company_context_source ?? 'none') === 'none'
+                          ? '企業情報を取得できなかったため、企業適合性は評価していません'
+                          : '今回は企業適合性の点数を算出できませんでした'}
+                      </Typography>
+                      <Typography sx={{ fontSize: 13, lineHeight: 1.8 }}>
+                        {(reviewResult.company_context_source ?? 'none') === 'none'
+                          ? `「${reviewedCompany}」の公開情報が見つかりませんでした。根拠のない点数は出さないようにしています。上の項目とフィードバックは通常どおり評価済みです。企業名を正式名称（例: 株式会社◯◯）で入力し直すと、企業適合性も評価できる場合があります。`
+                          : `「${reviewedCompany}」の情報は参照できましたが、点数としてまとめられませんでした。上の項目とフィードバック、企業ごとの対策アドバイスは通常どおり利用できます。点数も知りたい場合は、もう一度「添削する」を押してください。`}
+                      </Typography>
+                    </Alert>
+                  )
+                )}
               </Paper>
 
               {/* Feedback */}
@@ -406,7 +465,7 @@ function ESRewriteContent() {
 
               {reviewResult.company_strategy && (
                 <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #f1f5f9', bgcolor: '#fff' }}>
-                  <Typography sx={{ fontWeight: 700, fontSize: 16, mb: 1.5 }}>🏢 {companyName || '志望企業'}への対策アドバイス</Typography>
+                  <Typography sx={{ fontWeight: 700, fontSize: 16, mb: 1.5 }}>🏢 {reviewedCompany || '志望企業'}への対策アドバイス</Typography>
                   <Typography variant="body2" sx={{ color: '#475569', lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{reviewResult.company_strategy}</Typography>
                 </Paper>
               )}
