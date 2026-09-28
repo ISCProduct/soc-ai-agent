@@ -29,23 +29,25 @@ type truncationFlagKey struct{}
 // 切れた出力を「壊れていない出力」として扱いたくない呼び出し側だけが載せる。
 // 載せない呼び出し側の挙動は変わらない（従来どおり途中までの本文を受け取る）。
 //
-// フラグは一度立つと下がらない。上限到達は同じ入力で再試行しても同じ位置で
-// 切れるため、試行をまたいで残っても実害が無い。
+// フラグが表すのは「最後の応答が切れていたか」である。公開メソッドは
+// 空応答・上限エラーのときに条件を変えて呼び直すので、立ったままにすると
+// 「1回目が上限に当たり、出力枠を倍にした2回目が成功した」場合に
+// 正常な応答を切れた扱いにしてしまう。
 func WithTruncationFlag(ctx context.Context) context.Context {
 	return context.WithValue(ctx, truncationFlagKey{}, &atomic.Bool{})
 }
 
 // OutputTruncated は WithTruncationFlag を通したコンテキストで、
-// 出力が max_output_tokens により途中で切れたかを返す。
+// 最後の応答が max_output_tokens により途中で切れたかを返す。
 func OutputTruncated(ctx context.Context) bool {
 	flag, ok := ctx.Value(truncationFlagKey{}).(*atomic.Bool)
 	return ok && flag.Load()
 }
 
-// markOutputTruncated は上限到達をコンテキストのフラグへ記録する。
-func markOutputTruncated(ctx context.Context) {
+// setOutputTruncated は今回の応答が上限到達だったかをコンテキストへ記録する。
+func setOutputTruncated(ctx context.Context, truncated bool) {
 	if flag, ok := ctx.Value(truncationFlagKey{}).(*atomic.Bool); ok {
-		flag.Store(true)
+		flag.Store(truncated)
 	}
 }
 
@@ -194,9 +196,8 @@ func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (s
 	}
 	// 上限到達は本文が途中まで返っていても起きる。OutputText の早期 return より
 	// 先に記録しないと、切れた本文が正常な応答として呼び出し側へ渡る（#1529）。
-	if parsed.IncompleteDetails.Reason == truncationReasonMaxTokens {
-		markOutputTruncated(ctx)
-	}
+	// 切れていなければ下げる（出力枠を増やした再試行が成功した場合に効く）。
+	setOutputTruncated(ctx, parsed.IncompleteDetails.Reason == truncationReasonMaxTokens)
 	if parsed.Usage.InputTokens > 0 || parsed.Usage.OutputTokens > 0 {
 		cli.reportUsage(ctx, usageReport{
 			provider:         cli.textProvider,

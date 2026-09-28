@@ -80,6 +80,37 @@ func TestDoResponses_OutputTruncated(t *testing.T) {
 			}
 		})
 	}
+
+	// 公開メソッドは上限エラー時に出力枠を倍にして呼び直す。
+	// フラグが立ったままだと、成功した2回目の応答を切れた扱いにしてしまう。
+	t.Run("枠を増やした再試行が成功したらフラグは下がる", func(t *testing.T) {
+		bodies := []string{
+			`{"output":[],"incomplete_details":{"reason":"max_output_tokens"}}`,
+			`{"output_text":"{\"scores\":{}}"}`,
+		}
+		calls := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(bodies[min(calls, len(bodies)-1)]))
+			calls++
+		}))
+		defer srv.Close()
+
+		ctx := WithTruncationFlag(context.Background())
+		cli := NewWithBaseURL(srv.URL, "gpt-4o-mini")
+		req := responsesRequest{Model: "gpt-4o-mini", Input: "q"}
+		if _, err := cli.doResponses(ctx, req); err == nil {
+			t.Fatal("1回目は上限到達でエラーになるべき")
+		}
+		if !OutputTruncated(ctx) {
+			t.Fatal("1回目でフラグが立っていない")
+		}
+		if _, err := cli.doResponses(ctx, req); err != nil {
+			t.Fatalf("2回目は成功するべき: %v", err)
+		}
+		if OutputTruncated(ctx) {
+			t.Error("2回目が成功したのにフラグが下がっていない")
+		}
+	})
 }
 
 // doResponses が 2xx 以外でステータスコードを保持することを検証する。
