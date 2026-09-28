@@ -197,7 +197,6 @@ func (s *InterviewService) Turn(
 		Audio:                  audio,
 		CompanyReading:         companyReading,
 		CompanyReadingResolved: companyReadingResolved,
-		CompanyInfo:            companyInfo,
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
 	}
@@ -305,7 +304,6 @@ func (s *InterviewService) StartTurn(
 		Audio:                  audio,
 		CompanyReading:         companyReading,
 		CompanyReadingResolved: companyReadingResolved,
-		CompanyInfo:            companyInfo,
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
 	}
