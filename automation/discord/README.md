@@ -39,8 +39,9 @@ python3 -m unittest discover -s automation/discord -p 'notify_progress_test.py' 
 チャンネルの履歴を確認してから再実行する。HTTP 429の場合は時間を置く。
 ## 毎週日曜日18:00（日本時間）の定期通知
 
-GitHub Actions の `Discord Progress Reminder` が毎週日曜日09:00 UTC
-（18:00 JST）に実行する。Macの稼働状態には依存しない。
+GitHub Actions の `Discord Progress Reminder` が毎週日曜日09:07 UTC
+（18:07 JST）に実行する。毎時0分はスケジュールが欠落しやすいため7分にずらしている
+（2026-09-27 に `0 9 * * 0` が発火しなかった）。Macの稼働状態には依存しない。
 GitHub側の混雑で開始が遅れる場合があり、厳密な定刻実行は保証されない。
 
 設定ファイル: `.github/workflows/discord-progress-reminder.yml`
