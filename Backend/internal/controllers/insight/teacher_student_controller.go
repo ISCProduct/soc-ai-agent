@@ -57,17 +57,13 @@ func (c *TeacherStudentInsightController) TendencyAnalysis(ctx echo.Context) err
 	}
 
 	// low_match_only=true で「低マッチのまま進行中の応募がある生徒」に絞る（#1028）。
-	// 既定は false。不正値は false 扱いにして絞り込みが効かない方向へ倒す
+	// resume_needs_attention_only=true で「履歴書要対応」の生徒に絞る（#1030）。
+	// 両方 true なら AND。不正値は false 扱いにして絞り込みが効かない方向へ倒す
 	// （誤って生徒を隠さない）。
 	lowMatchOnly, _ := strconv.ParseBool(ctx.QueryParam("low_match_only"))
+	resumeNeedsAttentionOnly, _ := strconv.ParseBool(ctx.QueryParam("resume_needs_attention_only"))
 
-	var result *teacher.TendencyResult
-	var err error
-	if lowMatchOnly {
-		result, err = c.svc.ListTendenciesLowMatchOnly(limit, offset, query, schoolID)
-	} else {
-		result, err = c.svc.ListTendencies(limit, offset, query, schoolID)
-	}
+	result, err := c.svc.ListTendenciesWithFilters(limit, offset, query, schoolID, lowMatchOnly, resumeNeedsAttentionOnly)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}

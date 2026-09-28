@@ -381,6 +381,10 @@ func hardDeleteUserData(tx *gorm.DB, userID uint) error {
 			return err
 		}
 	}
+	// 教員案内は生徒・送信教員のどちらとして退会しても本文が残らないよう両側で消す
+	if err := tx.Where("student_user_id = ? OR teacher_user_id = ?", userID, userID).Delete(&models.TeacherStudentGuidance{}).Error; err != nil {
+		return err
+	}
 	// organization_memberships は users への FK があるため、ユーザー削除前に除去する
 	if err := tx.Where("user_id = ?", userID).Delete(&models.OrganizationMembership{}).Error; err != nil {
 		return err
