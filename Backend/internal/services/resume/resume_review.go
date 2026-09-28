@@ -93,8 +93,57 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 	return review, items, nil
 }
 
+// reviewMaxOutputTokens はレビュー生成の出力上限。
+//
+// 指摘8件（引用・指摘・改善案の3文×8）が出力の大半で、#1529 で追加した
+// scores 5項目は数十トークン程度。実測で8件のとき約1310〜1360トークンなので
+// 1.8倍程度の余裕がある。上限に達したときは requestReviewJSON が枠を倍にして
+// 1度だけやり直す。
+const reviewMaxOutputTokens = 2400
+
+// errReviewOutputTruncated は出力上限に達して JSON が完結しなかったことを表す。
+//
+// ValidationError にしてあるのは、コントローラが 422 に写すため。
+// #1521 の ES 添削（docs/wiki/rag-service.md）も再試行後の上限到達は 422 で返す。
+// 文言はそのまま学生に見えるため、内部事情は書かない。
+var errReviewOutputTruncated error = &shared.ValidationError{
+	Message: "AIレビューの出力が長すぎて途中で切れました。再度お試しください",
+}
+
+// requestReviewJSON はレビュー用の JSON を取得する。
+// 出力上限に達したら枠を倍にして1度だけやり直し、それでも切れたら
+// errReviewOutputTruncated を返す（#1521 の定石。docs/wiki/rag-service.md）。
+//
+// クライアント内部にも枠を倍にする再試行はあるが、発火条件は
+// 「本文が空で、エラー文に max_output_tokens が含まれる」ときだけで、
+// 本文が途中まで返っているときは発火しない。そこがここの担当分である。
+//
+// 切れた本文を decodeJSON へ渡さないのは、現在のスキーマでは items が最後の
+// フィールドなので必ず解析エラーになるものの、**エラー文言が
+// 「解析に失敗しました」になって原因が上限だと分からない**ため。
+// items を最後以外へ動かすと途中までが読めてしまう余地も残るので、
+// スキーマ変更に対する保険も兼ねている。
+func (s *ResumeService) requestReviewJSON(systemPrompt, userPrompt, model string) (string, error) {
+	// 同じ枠・同じ温度でやり直しても同じ位置で切れるので、枠を倍にする方だけ試す。
+	for _, maxTokens := range []int{reviewMaxOutputTokens, reviewMaxOutputTokens * 2} {
+		// 上限到達を検知するためフラグ付きのコンテキストで呼ぶ（#1529）。
+		aiCtx := openai.WithTruncationFlag(context.Background())
+		raw, err := s.aiClient.ResponsesWithMaxTokens(aiCtx, systemPrompt, userPrompt, 0.2, maxTokens, model)
+		if err != nil {
+			return "", err
+		}
+		if !openai.OutputTruncated(aiCtx) {
+			return raw, nil
+		}
+		log.Printf("resume_review: 出力が max_output_tokens=%d に達して切れた（解析しない）", maxTokens)
+	}
+	return "", errReviewOutputTruncated
+}
+
 type aiReviewResponse struct {
-	Score          int            `json:"score"`
+	// Scores はルーブリックの項目別スコア（各0〜5）。総合スコアは
+	// ComputeResumeOverallScore でサーバー側が算出するため LLM には出させない（#1529）。
+	Scores         map[string]int `json:"scores"`
 	Summary        string         `json:"summary"`
 	CompanySummary string         `json:"company_summary,omitempty"`
 	Items          []aiReviewItem `json:"items"`
@@ -547,19 +596,26 @@ suggestionは「どう直すか」が分かるように書いてください（�
 企業情報が空、または重視傾向が無い場合は、一般的な観点でレビューしてください
 （存在しない企業の特徴を推測して書かないこと）。
 
+%s
+scoresは上の評価基準の全項目を必ず含めてください。総合点は出力しないでください（サーバー側で算出します）。
+
 出力は次のJSONのみ:
-{"score":0-100,"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}
+{"scores":{%s},"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}
 
 OCRテキスト:
-%s`, companyName, jobTitle, companyInfo, candidateType, text)
+%s`, companyName, jobTitle, companyInfo, candidateType,
+		BuildResumeRubricPromptSection(), buildRubricJSONHint(), text)
 
 	modelOverride := strings.TrimSpace(os.Getenv("OPENAI_REVIEW_MODEL"))
 	if modelOverride == "" {
 		modelOverride = "gpt-4o-mini"
 	}
-	raw, err := s.aiClient.ResponsesWithMaxTokens(context.Background(), "あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案をJSON形式で提示します。", prompt, 0.2, 2000, modelOverride)
+	raw, err := s.requestReviewJSON("あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案をJSON形式で提示します。", prompt, modelOverride)
 	if err != nil {
 		log.Printf("resume_review: openai review failed: %v", err)
+		if errors.Is(err, errReviewOutputTruncated) {
+			return nil, nil, err
+		}
 		return nil, nil, fmt.Errorf("AIレビューの生成に失敗しました。しばらく待ってから再度お試しください")
 	}
 
@@ -569,16 +625,21 @@ OCRテキスト:
 		return nil, nil, fmt.Errorf("AIレビュー結果の解析に失敗しました。再度お試しください")
 	}
 
-	if response.Score <= 0 {
-		response.Score = 70
-	}
 	if response.Summary == "" {
 		response.Summary = "内容を確認しました。具体性と成果の明確化が改善ポイントです。"
 	}
 
+	// スコアはルーブリック検証を通ったものだけ採用する。違反したら固定値を入れず
+	// スコア無しにする（docs/wiki/scoring.md §2-3 / §2-5）。
+	overall, scoreErr := ComputeResumeOverallScore(response.Scores, candidateType)
+	if scoreErr != nil {
+		log.Printf("resume_review: ルーブリック違反のためスコアを捨てる: %v", scoreErr)
+	}
+
 	items := mapReviewItems(blocks, response.Items)
 	log.Printf("resume_review: items mapped=%d raw=%d", len(items), len(response.Items))
-	if len(items) < 3 {
+	// スコアだけが不正なときもやり直す。面接（#795）と同じく作り直しは1度だけ。
+	if len(items) < 3 || scoreErr != nil {
 		blocksForRetry := selectReviewBlocks(blocks, 40)
 		blockList := buildBlockList(blocksForRetry)
 		retryPrompt := fmt.Sprintf(`以下のブロック一覧から、各ブロックに必ず紐づく指摘を最大8件返してください。
@@ -595,16 +656,38 @@ OCRテキスト:
 ブロック一覧:
 %s
 
+%s
+scoresは上の評価基準の全項目を必ず含めてください。総合点は出力しないでください（サーバー側で算出します）。
+
 出力は次のJSONのみ:
-{"score":0-100,"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}`,
-			companyName, jobTitle, companyInfo, candidateType, blockList)
-		rawRetry, err := s.aiClient.ResponsesWithMaxTokens(context.Background(), "あなたは日本語の履歴書・エントリーシートを添削する専門家です。JSON形式で出力してください。", retryPrompt, 0.2, 2000, modelOverride)
-		if err == nil {
+{"scores":{%s},"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}`,
+			companyName, jobTitle, companyInfo, candidateType, blockList,
+			BuildResumeRubricPromptSection(), buildRubricJSONHint())
+		rawRetry, retryReqErr := s.requestReviewJSON("あなたは日本語の履歴書・エントリーシートを添削する専門家です。JSON形式で出力してください。", retryPrompt, modelOverride)
+		if retryReqErr != nil {
+			log.Printf("resume_review: やり直しの生成に失敗: %v", retryReqErr)
+		}
+		if retryReqErr == nil {
 			responseRetry := aiReviewResponse{}
 			if decodeJSON(rawRetry, &responseRetry) == nil {
 				retryItems := mapReviewItems(blocks, responseRetry.Items)
 				log.Printf("resume_review: retry items mapped=%d raw=%d", len(retryItems), len(responseRetry.Items))
-				items = adoptRetryItems(items, retryItems)
+				// 指摘の差し替えは「初回が3件未満」のときだけ。スコアだけが不正で
+				// 初回の指摘が足りているなら、本文に紐づいた初回の指摘を守る。
+				// やり直しはブロック一覧ベースの別プロンプトで、件数は増えても
+				// 紐づきの質が上がる保証が無い（採点のやり直しに指摘を賭けない）。
+				if len(items) < 3 {
+					items = adoptRetryItems(items, retryItems)
+				}
+				// スコアが不正だったときだけ差し替える。初回が正当なら上書きしない
+				// （やり直しは指摘の紐づけを増やすためのもので、採点のやり直しではない）。
+				if scoreErr != nil {
+					if retryScore, retryErr := ComputeResumeOverallScore(responseRetry.Scores, candidateType); retryErr == nil {
+						overall, scoreErr = retryScore, nil
+					} else {
+						log.Printf("resume_review: やり直してもルーブリック違反: %v", retryErr)
+					}
+				}
 			}
 		}
 	}
@@ -613,8 +696,31 @@ OCRテキスト:
 		return nil, nil, fmt.Errorf("AIが生成した指摘内容を履歴書ブロックに紐づけられませんでした。再度お試しください")
 	}
 
-	return &models.ResumeReview{
-		Score:   response.Score,
-		Summary: response.Summary,
-	}, items, nil
+	review := &models.ResumeReview{Summary: response.Summary}
+	// スコア無しのときは Score / ItemScoresJSON をどちらも nil のままにする。
+	// 片方だけ残すと画面の総合スコアと内訳が食い違う。
+	if scoreErr == nil {
+		encoded, err := json.Marshal(response.Scores)
+		if err != nil {
+			// map[string]int なので実際には起きない。起きたら内訳だけ落とす。
+			log.Printf("resume_review: 項目スコアのJSON化に失敗: %v", err)
+		} else {
+			itemScores := string(encoded)
+			review.ItemScoresJSON = &itemScores
+		}
+		review.Score = &overall
+		log.Printf("resume_review: 総合スコア=%d 候補者区分=%q 内訳=%v", overall, candidateType, response.Scores)
+	}
+	return review, items, nil
+}
+
+// buildRubricJSONHint はプロンプトの出力例に入れる scores のキー列を作る。
+// 例を手書きすると評価項目を増減したときに食い違うため、定義から作る。
+func buildRubricJSONHint() string {
+	keys := ResumeRubricKeys()
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%q:0-%d", key, ResumeRubricScoreMax))
+	}
+	return strings.Join(parts, ",")
 }

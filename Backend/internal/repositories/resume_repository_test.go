@@ -42,7 +42,8 @@ func TestFindLatestDocumentWithReview_OrdersByNewest(t *testing.T) {
 	require.NotNil(t, review)
 	require.Equal(t, uint(20), doc.ID, "最新のドキュメントが選ばれること")
 	require.Equal(t, uint(99), review.ID, "そのドキュメントの最新レビューが選ばれること")
-	require.Equal(t, 45, review.Score)
+	require.NotNil(t, review.Score)
+	require.Equal(t, 45, *review.Score)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
