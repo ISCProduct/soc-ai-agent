@@ -62,9 +62,10 @@ type GuidanceView struct {
 }
 
 // ResolveStudentSchool は教員の学校スコープ検証用に生徒の school_id を返す。
+// 対象は ListStudentsPaged と同じ在籍中の生徒に限る（教員・管理者・ゲスト・退会者は不可）。
 func (s *GuidanceService) ResolveStudentSchool(studentUserID uint) (*uint, error) {
 	u, err := s.students.GetUserByID(studentUserID)
-	if err != nil || u == nil {
+	if err != nil || u == nil || u.Role != "student" || u.IsAdmin || u.IsGuest || u.IsWithdrawn() {
 		return nil, ErrGuidanceStudentNotFound
 	}
 	return u.SchoolID, nil
@@ -88,14 +89,16 @@ func (s *GuidanceService) Create(in CreateGuidanceInput) (*GuidanceView, error) 
 		return nil, ErrGuidanceMessageTooLong
 	}
 
+	// JSON カラムに '' は書けない（Invalid JSON text）。候補なしは NULL にする。
 	industries := trimIndustries(in.SuggestedIndustries)
-	var industriesJSON string
+	var industriesJSON *string
 	if len(industries) > 0 {
 		b, err := json.Marshal(industries)
 		if err != nil {
 			return nil, err
 		}
-		industriesJSON = string(b)
+		s := string(b)
+		industriesJSON = &s
 	}
 
 	g := &models.TeacherStudentGuidance{
@@ -175,9 +178,9 @@ func toGuidanceView(g *models.TeacherStudentGuidance) *GuidanceView {
 		Message:   g.Message,
 		CreatedAt: g.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
-	if g.SuggestedIndustries != "" {
+	if g.SuggestedIndustries != nil {
 		var names []string
-		if err := json.Unmarshal([]byte(g.SuggestedIndustries), &names); err == nil {
+		if err := json.Unmarshal([]byte(*g.SuggestedIndustries), &names); err == nil {
 			v.SuggestedIndustries = names
 		}
 	}

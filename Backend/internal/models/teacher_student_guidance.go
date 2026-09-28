@@ -15,7 +15,7 @@ type TeacherStudentGuidance struct {
 	TeacherUserID       uint       `gorm:"not null;index" json:"teacher_user_id"`
 	Kind                string     `gorm:"size:32;not null" json:"kind"`
 	Message             string     `gorm:"type:text;not null" json:"message"`
-	SuggestedIndustries string     `gorm:"type:json" json:"suggested_industries,omitempty"`
+	SuggestedIndustries *string    `gorm:"type:json" json:"suggested_industries,omitempty"`
 	DismissedAt         *time.Time `json:"dismissed_at,omitempty"`
 	CreatedAt           time.Time  `json:"created_at"`
 	UpdatedAt           time.Time  `json:"updated_at"`

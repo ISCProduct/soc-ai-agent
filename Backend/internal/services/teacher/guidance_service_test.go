@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"Backend/domain/entity"
 	"Backend/internal/models"
@@ -86,10 +87,43 @@ func TestGuidanceService_RejectsBadKind(t *testing.T) {
 func TestGuidanceService_ResolveStudentSchool(t *testing.T) {
 	schoolID := uint(7)
 	svc := NewGuidanceService(&stubGuidanceStore{}, &stubStudentByID{
-		user: &entity.User{ID: 3, SchoolID: &schoolID},
+		user: &entity.User{ID: 3, Role: "student", SchoolID: &schoolID},
 	})
 	got, err := svc.ResolveStudentSchool(3)
 	if err != nil || got == nil || *got != 7 {
 		t.Fatalf("got=%v err=%v", got, err)
+	}
+}
+
+func TestGuidanceService_ResolveStudentSchool_RejectsNonStudents(t *testing.T) {
+	schoolID := uint(7)
+	now := time.Now()
+	tests := []struct {
+		name string
+		user entity.User
+	}{
+		{"教員", entity.User{Role: "teacher", SchoolID: &schoolID}},
+		{"管理者", entity.User{Role: "student", IsAdmin: true, SchoolID: &schoolID}},
+		{"ゲスト", entity.User{Role: "student", IsGuest: true, SchoolID: &schoolID}},
+		{"退会済み", entity.User{Role: "student", WithdrawnAt: &now, SchoolID: &schoolID}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewGuidanceService(&stubGuidanceStore{}, &stubStudentByID{user: &tt.user})
+			if _, err := svc.ResolveStudentSchool(3); !errors.Is(err, ErrGuidanceStudentNotFound) {
+				t.Fatalf("err = %v, want ErrGuidanceStudentNotFound", err)
+			}
+		})
+	}
+}
+
+func TestGuidanceService_CreateWithoutIndustriesStoresNull(t *testing.T) {
+	store := &stubGuidanceStore{}
+	svc := NewGuidanceService(store, &stubStudentByID{})
+	if _, err := svc.Create(CreateGuidanceInput{TeacherUserID: 9, StudentUserID: 3, Kind: models.GuidanceKindResume}); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got := store.created[0].SuggestedIndustries; got != nil {
+		t.Fatalf("SuggestedIndustries = %q, want nil (JSON カラムに空文字は書けない)", *got)
 	}
 }

@@ -27,6 +27,7 @@ export default function PageContent() {
   const [showWhatsNewBanner, setShowWhatsNewBanner] = useState(false)
   const [resumeReminder, setResumeReminder] = useState<string | null>(null)
   const [guidances, setGuidances] = useState<StudentGuidance[]>([])
+  const [guidanceError, setGuidanceError] = useState('')
 
   useEffect(() => {
     const storedUser = authService.getStoredUser()
@@ -147,8 +148,10 @@ export default function PageContent() {
             key={g.id}
             severity="info"
             onClose={() => {
-              dismissGuidance(g.id).catch(() => {})
-              setGuidances((prev) => prev.filter((x) => x.id !== g.id))
+              setGuidanceError('')
+              dismissGuidance(g.id)
+                .then(() => setGuidances((prev) => prev.filter((x) => x.id !== g.id)))
+                .catch(() => setGuidanceError('案内を閉じられませんでした。時間をおいて再度お試しください'))
             }}
             sx={{ borderRadius: 0 }}
           >
@@ -158,6 +161,11 @@ export default function PageContent() {
             )}
           </Alert>
         ))}
+        {guidanceError && (
+          <Alert severity="error" onClose={() => setGuidanceError('')} sx={{ borderRadius: 0 }}>
+            {guidanceError}
+          </Alert>
+        )}
         <div className={styles.chatWrapper}>
           <MuiChat />
         </div>

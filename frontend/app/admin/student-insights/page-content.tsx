@@ -39,6 +39,8 @@ import {
 import { LOW_MATCH_THRESHOLD } from '@/lib/low-match'
 import { sendTeacherGuidance } from '@/lib/teacher-guidance'
 
+const guidanceKey = (userId: number, kind: 'low_match' | 'resume') => `${userId}:${kind}`
+
 export default function PageContent() {
   const [adminEmail, setAdminEmail] = useState('')
   const [students, setStudents] = useState<StudentTendency[]>([])
@@ -50,8 +52,9 @@ export default function PageContent() {
   const [resumeNeedsAttentionOnly, setResumeNeedsAttentionOnly] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [sendingId, setSendingId] = useState<number | null>(null)
-  const [sentIds, setSentIds] = useState<Set<number>>(() => new Set())
+  // 送信中・送信済は「生徒×案内種別」単位で持つ（同時送信や2種類目の案内を妨げない）
+  const [sendingKeys, setSendingKeys] = useState<Set<string>>(() => new Set())
+  const [sentKeys, setSentKeys] = useState<Set<string>>(() => new Set())
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
   // 担当校を持つ管理者は school_id が必須(無いと403)なので、学校が確定するまで取得しない
   const [schoolRequired, setSchoolRequired] = useState<boolean | null>(null)
@@ -121,18 +124,23 @@ export default function PageContent() {
   }, [fetchStudents, query])
 
   const sendGuidance = async (s: StudentTendency, kind: 'low_match' | 'resume') => {
-    setSendingId(s.user_id)
+    const key = guidanceKey(s.user_id, kind)
+    setSendingKeys((prev) => new Set(prev).add(key))
     setError('')
     try {
       await sendTeacherGuidance(s.user_id, {
         kind,
         suggested_industries: displayIndustries(s).map((i) => i.industry_name),
       })
-      setSentIds((prev) => new Set(prev).add(s.user_id))
+      setSentKeys((prev) => new Set(prev).add(key))
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '案内の送信に失敗しました')
     } finally {
-      setSendingId(null)
+      setSendingKeys((prev) => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
     }
   }
 
@@ -228,8 +236,10 @@ export default function PageContent() {
               const resumeLabel = resumeAttentionLabel(s)
               const canGuideLowMatch = lowMatches.length > 0
               const canGuideResume = Boolean(resumeLabel)
-              const busy = sendingId === s.user_id
-              const sent = sentIds.has(s.user_id)
+              const lowMatchKey = guidanceKey(s.user_id, 'low_match')
+              const resumeKey = guidanceKey(s.user_id, 'resume')
+              const lowMatchSent = sentKeys.has(lowMatchKey)
+              const resumeSent = sentKeys.has(resumeKey)
               return (
                 <TableRow key={s.user_id} hover>
                   <TableCell>
@@ -303,10 +313,10 @@ export default function PageContent() {
                         <Button
                           size="small"
                           variant="outlined"
-                          disabled={busy || sent}
+                          disabled={sendingKeys.has(lowMatchKey) || lowMatchSent}
                           onClick={() => sendGuidance(s, 'low_match')}
                         >
-                          {sent ? '送信済' : '軌道修正'}
+                          {lowMatchSent ? '送信済' : '軌道修正'}
                         </Button>
                       )}
                       {canGuideResume && (
@@ -314,10 +324,10 @@ export default function PageContent() {
                           size="small"
                           variant="outlined"
                           color="warning"
-                          disabled={busy || sent}
+                          disabled={sendingKeys.has(resumeKey) || resumeSent}
                           onClick={() => sendGuidance(s, 'resume')}
                         >
-                          {sent ? '送信済' : '履歴書案内'}
+                          {resumeSent ? '送信済' : '履歴書案内'}
                         </Button>
                       )}
                       {!canGuideLowMatch && !canGuideResume && (

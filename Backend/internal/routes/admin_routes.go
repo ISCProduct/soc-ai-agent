@@ -50,7 +50,9 @@ func SetupAdminRoutes(
 	admin.PUT("/users/:id", adminUserController.Update)
 	admin.DELETE("/users/:id", adminUserController.Delete)
 	admin.GET("/teacher/students/tendency-analysis", teacherInsightController.TendencyAnalysis, schoolScope)
-	admin.POST("/teacher/students/:id/guidances", teacherGuidanceController.Create, schoolScope)
+	// 単一生徒ルートは school_id クエリを持たないため schoolScope を掛けず、
+	// コントローラで対象生徒の学校に対して EnsureAdminSchoolAccess を行う。
+	admin.POST("/teacher/students/:id/guidances", teacherGuidanceController.Create)
 
 	admin.GET("/interviews", adminInterviewController.ListSessions, schoolScope)
 	admin.GET("/interviews/:id/videos", adminInterviewController.ListVideos)
