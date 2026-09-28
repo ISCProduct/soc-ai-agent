@@ -333,8 +333,8 @@ func TestBuildReviewScoreItems_TruncatedOutputRetriesWithDoubleBudget(t *testing
 	if len(items) == 0 {
 		t.Error("指摘が紐づいていない")
 	}
-	if got := stub.requestedMaxTokens(); !slices.Equal(got, []int{reviewMaxOutputTokens, reviewMaxOutputTokens * 2}) {
-		t.Errorf("要求した出力上限 = %v, want [%d %d]", got, reviewMaxOutputTokens, reviewMaxOutputTokens*2)
+	if got := stub.requestedMaxTokens(); !slices.Equal(got, []int{ReviewMaxOutputTokens, ReviewMaxOutputTokens * 2}) {
+		t.Errorf("要求した出力上限 = %v, want [%d %d]", got, ReviewMaxOutputTokens, ReviewMaxOutputTokens*2)
 	}
 }
 

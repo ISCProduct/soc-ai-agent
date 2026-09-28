@@ -93,13 +93,40 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 	return review, items, nil
 }
 
-// reviewMaxOutputTokens はレビュー生成の出力上限。
-//
-// 指摘8件（引用・指摘・改善案の3文×8）が出力の大半で、#1529 で追加した
-// scores 5項目は数十トークン程度。実測で8件のとき約1310〜1360トークンなので
-// 1.8倍程度の余裕がある。上限に達したときは requestReviewJSON が枠を倍にして
-// 1度だけやり直す。
-const reviewMaxOutputTokens = 2400
+// 評価ハーネス（cmd/aibench）が本番と同じ指示・同じ呼び出し条件で測れるように、
+// プロンプトと呼び出しパラメータを公開する（#1525）。
+// ハーネス側に写すと、本文やパラメータを直した瞬間に測っている対象が本番と
+// 別物になり、出た数字が判断材料として使えなくなる。
+const (
+	// ReviewSystemPrompt はレビュー生成の system プロンプト。
+	ReviewSystemPrompt = "あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案をJSON形式で提示します。"
+
+	// ReviewMaxOutputTokens はレビュー生成の出力上限。
+	//
+	// 指摘8件（引用・指摘・改善案の3文×8）が出力の大半で、#1529 で追加した
+	// scores 5項目は数十トークン程度。実測で8件のとき約1310〜1360トークンなので
+	// 1.8倍程度の余裕がある。上限に達したときは requestReviewJSON が枠を倍にして
+	// 1度だけやり直す。
+	ReviewMaxOutputTokens = 2400
+
+	// ReviewTemperature はレビュー生成の温度。
+	ReviewTemperature = 0.2
+
+	// ReviewMaxItems はプロンプトが指定している items の上限。
+	// プロンプト本文と指示遵守率の判定で同じ値を使う。
+	ReviewMaxItems = 8
+
+	// reviewTextLimit はプロンプトへ載せるOCRテキストの上限バイト数。
+	reviewTextLimit = 30000
+)
+
+// ReviewModel はレビューに使うモデル名を返す（env 未設定なら既定）。
+func ReviewModel() string {
+	if m := strings.TrimSpace(os.Getenv("OPENAI_REVIEW_MODEL")); m != "" {
+		return m
+	}
+	return "gpt-4o-mini"
+}
 
 // errReviewOutputTruncated は出力上限に達して JSON が完結しなかったことを表す。
 //
@@ -125,10 +152,10 @@ var errReviewOutputTruncated error = &shared.ValidationError{
 // スキーマ変更に対する保険も兼ねている。
 func (s *ResumeService) requestReviewJSON(systemPrompt, userPrompt, model string) (string, error) {
 	// 同じ枠・同じ温度でやり直しても同じ位置で切れるので、枠を倍にする方だけ試す。
-	for _, maxTokens := range []int{reviewMaxOutputTokens, reviewMaxOutputTokens * 2} {
+	for _, maxTokens := range []int{ReviewMaxOutputTokens, ReviewMaxOutputTokens * 2} {
 		// 上限到達を検知するためフラグ付きのコンテキストで呼ぶ（#1529）。
 		aiCtx := openai.WithTruncationFlag(context.Background())
-		raw, err := s.aiClient.ResponsesWithMaxTokens(aiCtx, systemPrompt, userPrompt, 0.2, maxTokens, model)
+		raw, err := s.aiClient.ResponsesWithMaxTokens(aiCtx, systemPrompt, userPrompt, ReviewTemperature, maxTokens, model)
 		if err != nil {
 			return "", err
 		}
@@ -405,7 +432,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	}
 	_ = s.repo.ReplaceTextBlocks(doc.ID, blocks)
 
-	text := buildResumeText(blocks, 30000)
+	text := buildResumeText(blocks, reviewTextLimit)
 
 	// RAGレポートをストリーミングしつつ全文を収集する
 	var ragReport string
@@ -523,7 +550,7 @@ func relaySSEChunks(body io.Reader, w http.ResponseWriter) (string, error) {
 }
 
 func (s *ResumeService) buildResumeReviewWithAI(ctx context.Context, blocks []models.ResumeTextBlock, companyName string, jobTitle string, candidateType string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
-	text := buildResumeText(blocks, 30000)
+	text := buildResumeText(blocks, reviewTextLimit)
 	if strings.TrimSpace(text) == "" {
 		return nil, nil, &shared.ValidationError{Message: "履歴書からテキストを抽出できませんでした。PDF の画質や形式を確認してください"}
 	}
@@ -548,7 +575,7 @@ func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, c
 	if s.aiClient == nil {
 		return nil, nil, fmt.Errorf("AIクライアントが初期化されていません")
 	}
-	text := buildResumeText(blocks, 30000)
+	text := buildResumeText(blocks, reviewTextLimit)
 	// 企業briefは RAGレポートの有無に関わらず必ず併記する（#1124）。
 	//
 	// 「重視傾向」を出力するのは brief だけで、RAGレポートには含まれない。
@@ -565,52 +592,10 @@ func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, c
 		}
 	}
 
-	prompt := fmt.Sprintf(`以下は履歴書/エントリーシートのOCRテキストです。
-この内容をレビューし、改善すべき点を最大8件までJSONで返してください。
-必ず本文中に存在する短い引用(quote)を入れてください。quoteは後で位置合わせに使います。
+	prompt := buildReviewPrompt(text, companyName, jobTitle, companyInfo, candidateType)
 
-原則として、本文の内容に基づいた具体的な改善点のみを書いてください。
-「記載されていません」「未記入」といった欠落の指摘は、次の条件を**すべて**満たす場合にだけ
-許可します。それ以外の欠落指摘は禁止です。
-  (1) 「企業情報(参考)」に「重視傾向:」の行があり、
-  (2) 指摘する内容がその重視傾向に挙がっている軸に対応していて、
-  (3) quote に本文の実在するブロックを選び、
-  (4) suggestion に「その軸を裏付けるには、この記述に何を足せばよいか」を具体的に書く
-（例: 重視傾向がリーダーシップなら、既存の活動記述に役割・人数・期間・成果を足す案を出す）。
-「重視傾向:」の行が無い場合は、欠落の指摘を一切しないでください。
-page_hintは本文の行頭にある [P#B#] の P# を使ってください。
-block_indexは本文の行頭にある [P#B#] の B# を使ってください。
-各itemsは必ず本文の1ブロックに対応させ、総合的なまとめや全体評価だけの項目は禁止です。
-messageとsuggestionは該当ブロックの内容を引用・要約して具体的に指摘してください。
-suggestionは「どう直すか」が分かるように書いてください（数値・役割・成果・再現性など具体語を含める）。
-
-応募企業名: %s
-応募職種: %s
-企業情報(参考): %s
-候補者区分: %s
-企業名が空欄の場合は一般的な観点でレビューしてください。
-学歴/職歴は明らかな矛盾・不足がある場合のみ指摘し、それ以外は指摘から除外してください。
-企業に合わせた観点（求める人物像・事業領域・評価軸）に照らし、応募書類の内容がどう評価されるかを具体的に指摘してください。
-一般論ではなく、この応募企業に合わせた改善提案を優先してください。
-「企業情報(参考)」に重視傾向がある場合は、その軸を優先的に扱ってください。
-企業情報が空、または重視傾向が無い場合は、一般的な観点でレビューしてください
-（存在しない企業の特徴を推測して書かないこと）。
-
-%s
-scoresは上の評価基準の全項目を必ず含めてください。総合点は出力しないでください（サーバー側で算出します）。
-
-出力は次のJSONのみ:
-{"scores":{%s},"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}
-
-OCRテキスト:
-%s`, companyName, jobTitle, companyInfo, candidateType,
-		BuildResumeRubricPromptSection(), buildRubricJSONHint(), text)
-
-	modelOverride := strings.TrimSpace(os.Getenv("OPENAI_REVIEW_MODEL"))
-	if modelOverride == "" {
-		modelOverride = "gpt-4o-mini"
-	}
-	raw, err := s.requestReviewJSON("あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案をJSON形式で提示します。", prompt, modelOverride)
+	modelOverride := ReviewModel()
+	raw, err := s.requestReviewJSON(ReviewSystemPrompt, prompt, modelOverride)
 	if err != nil {
 		log.Printf("resume_review: openai review failed: %v", err)
 		if errors.Is(err, errReviewOutputTruncated) {
@@ -723,4 +708,72 @@ func buildRubricJSONHint() string {
 		parts = append(parts, fmt.Sprintf("%q:0-%d", key, ResumeRubricScoreMax))
 	}
 	return strings.Join(parts, ",")
+}
+
+// buildReviewPrompt は履歴書レビューの user プロンプトを組み立てる。
+// text は buildResumeText が付ける [P#B#] 付きのOCRテキスト。
+//
+// buildReviewScoreItems から切り出してあるのは、評価ハーネス（cmd/aibench）が
+// DB・S3・RAG を用意せずに**本番と同一のプロンプト**を評価できるようにするため（#1525）。
+func buildReviewPrompt(text, companyName, jobTitle, companyInfo, candidateType string) string {
+	return fmt.Sprintf(`以下は履歴書/エントリーシートのOCRテキストです。
+この内容をレビューし、改善すべき点を最大%d件までJSONで返してください。
+必ず本文中に存在する短い引用(quote)を入れてください。quoteは後で位置合わせに使います。
+
+原則として、本文の内容に基づいた具体的な改善点のみを書いてください。
+「記載されていません」「未記入」といった欠落の指摘は、次の条件を**すべて**満たす場合にだけ
+許可します。それ以外の欠落指摘は禁止です。
+  (1) 「企業情報(参考)」に「重視傾向:」の行があり、
+  (2) 指摘する内容がその重視傾向に挙がっている軸に対応していて、
+  (3) quote に本文の実在するブロックを選び、
+  (4) suggestion に「その軸を裏付けるには、この記述に何を足せばよいか」を具体的に書く
+（例: 重視傾向がリーダーシップなら、既存の活動記述に役割・人数・期間・成果を足す案を出す）。
+「重視傾向:」の行が無い場合は、欠落の指摘を一切しないでください。
+page_hintは本文の行頭にある [P#B#] の P# を使ってください。
+block_indexは本文の行頭にある [P#B#] の B# を使ってください。
+各itemsは必ず本文の1ブロックに対応させ、総合的なまとめや全体評価だけの項目は禁止です。
+messageとsuggestionは該当ブロックの内容を引用・要約して具体的に指摘してください。
+suggestionは「どう直すか」が分かるように書いてください（数値・役割・成果・再現性など具体語を含める）。
+
+応募企業名: %s
+応募職種: %s
+企業情報(参考): %s
+候補者区分: %s
+企業名が空欄の場合は一般的な観点でレビューしてください。
+学歴/職歴は明らかな矛盾・不足がある場合のみ指摘し、それ以外は指摘から除外してください。
+企業に合わせた観点（求める人物像・事業領域・評価軸）に照らし、応募書類の内容がどう評価されるかを具体的に指摘してください。
+一般論ではなく、この応募企業に合わせた改善提案を優先してください。
+「企業情報(参考)」に重視傾向がある場合は、その軸を優先的に扱ってください。
+企業情報が空、または重視傾向が無い場合は、一般的な観点でレビューしてください
+（存在しない企業の特徴を推測して書かないこと）。
+
+%s
+scoresは上の評価基準の全項目を必ず含めてください。総合点は出力しないでください（サーバー側で算出します）。
+
+出力は次のJSONのみ:
+{"scores":{%s},"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}
+
+OCRテキスト:
+%s`, ReviewMaxItems, companyName, jobTitle, companyInfo, candidateType,
+		BuildResumeRubricPromptSection(), buildRubricJSONHint(), text)
+}
+
+// BuildReviewPromptFromText は行区切りの平文から本番と同一の user プロンプトを作る。
+//
+// 評価ハーネス用の入口。ゴールデンセットは OCR 結果ではなく平文で持つため、
+// 本番の [P#B#] 付きテキストへ同じ手順で変換してからプロンプトへ載せる。
+// 1行=1ブロック（ページは1固定）として扱う。
+func BuildReviewPromptFromText(resumeText, companyName, jobTitle, companyInfo, candidateType string) string {
+	blocks := make([]models.ResumeTextBlock, 0, 16)
+	for _, line := range strings.Split(resumeText, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		blocks = append(blocks, models.ResumeTextBlock{
+			PageNumber: 1,
+			BlockIndex: len(blocks),
+			Text:       line,
+		})
+	}
+	return buildReviewPrompt(buildResumeText(blocks, reviewTextLimit), companyName, jobTitle, companyInfo, candidateType)
 }
