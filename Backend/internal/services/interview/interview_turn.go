@@ -19,11 +19,9 @@ func (s *InterviewService) Turn(
 	sessionID uint,
 	audioData []byte,
 	history []map[string]string,
-	companyName,
-	companyReading,
-	position,
-	companyInfo,
-	companyType string,
+	companyName, companyReading string,
+	companyReadingResolved bool,
+	position, companyInfo, companyType string,
 	companyID uint,
 	turnCount int,
 	remainingSeconds int,
@@ -44,13 +42,19 @@ func (s *InterviewService) Turn(
 	}
 
 	type companyContextResult struct {
-		id      uint
-		reading string
-		info    string
+		id              uint
+		reading         string
+		readingResolved bool
+		info            string
 	}
 	companyContextCh := make(chan companyContextResult, 1)
 	go func() {
-		result := companyContextResult{id: companyID, reading: companyReading, info: companyInfo}
+		result := companyContextResult{
+			id:              companyID,
+			reading:         companyReading,
+			readingResolved: companyReadingResolved || strings.TrimSpace(companyReading) != "",
+			info:            companyInfo,
+		}
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				log.Printf("[Interview] company context panic: %v", recovered)
@@ -58,8 +62,9 @@ func (s *InterviewService) Turn(
 			companyContextCh <- result
 		}()
 		result.id = s.resolveCompanyID(companyID, companyName)
-		if companyName != "" && result.reading == "" {
+		if companyName != "" && result.reading == "" && !result.readingResolved {
 			result.reading = s.resolveCompanyReading(ctx, result.id, companyName)
+			result.readingResolved = true
 		}
 		result.info = s.resolveCompanyInfo(result.id, companyName, companyInfo)
 	}()
@@ -131,6 +136,7 @@ func (s *InterviewService) Turn(
 
 	// 企業情報: 共有キャッシュ優先（general/sier 問わず）。無ければクライアント文面をフォールバック
 	companyInfo = companyContext.info
+	companyReadingResolved = companyContext.readingResolved
 
 	// 企業別カスタム質問とGitHubスキルスコアを取得
 	customQuestions := s.fetchCustomQuestions(companyID, position)
@@ -190,6 +196,7 @@ func (s *InterviewService) Turn(
 		AIText:                 aiText,
 		Audio:                  audio,
 		CompanyReading:         companyReading,
+		CompanyReadingResolved: companyReadingResolved,
 		CompanyInfo:            companyInfo,
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
@@ -233,8 +240,10 @@ func (s *InterviewService) StartTurn(
 	companyID = s.resolveCompanyID(companyID, companyName)
 
 	// 読み仮名: 共有DB優先。無い場合のみモデル知識（Searchではない）
+	companyReadingResolved := strings.TrimSpace(companyReading) != ""
 	if companyName != "" && companyReading == "" {
 		companyReading = s.resolveCompanyReading(ctx, companyID, companyName)
+		companyReadingResolved = true
 	}
 
 	// 企業情報: 共有キャッシュ優先（general/sier 問わず）。無ければクライアント文面をフォールバック
@@ -295,6 +304,7 @@ func (s *InterviewService) StartTurn(
 		AIText:                 aiText,
 		Audio:                  audio,
 		CompanyReading:         companyReading,
+		CompanyReadingResolved: companyReadingResolved,
 		CompanyInfo:            companyInfo,
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,

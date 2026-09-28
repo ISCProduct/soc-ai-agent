@@ -43,7 +43,7 @@ type InterviewService struct {
 	workerOnce           sync.Once
 	jobs                 shared.JobEnqueuer
 	ownsCompany          func(userID, companyID uint) (bool, error)
-	companyReadingCache  sync.Map
+	companyReadingCache  companyReadingCache
 	companyReadingFlight singleflight.Group
 }
 
@@ -232,6 +232,7 @@ type TurnResult struct {
 	AIText                 string
 	Audio                  []byte
 	CompanyReading         string
+	CompanyReadingResolved bool
 	CompanyInfo            string
 	QuestionSource         string
 	QuestionCategory       string

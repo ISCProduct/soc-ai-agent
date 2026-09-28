@@ -4,15 +4,71 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/services/company"
 	"context"
+	"errors"
 	"strings"
+	"sync"
 	"time"
 )
 
 const companyReadingCacheTTL = 24 * time.Hour
+const companyReadingCacheMaxEntries = 1024
 
 type companyReadingCacheEntry struct {
 	value     string
 	expiresAt time.Time
+}
+
+type companyReadingCache struct {
+	mu      sync.Mutex
+	entries map[string]companyReadingCacheEntry
+}
+
+func (c *companyReadingCache) load(key string) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	entry, ok := c.entries[key]
+	if !ok {
+		return "", false
+	}
+	if !time.Now().Before(entry.expiresAt) {
+		delete(c.entries, key)
+		return "", false
+	}
+	return entry.value, true
+}
+
+func (c *companyReadingCache) store(key, value string) {
+	if key == "" || strings.TrimSpace(value) == "" {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := time.Now()
+	for cachedKey, entry := range c.entries {
+		if !now.Before(entry.expiresAt) {
+			delete(c.entries, cachedKey)
+		}
+	}
+	if c.entries == nil {
+		c.entries = make(map[string]companyReadingCacheEntry)
+	}
+	if _, exists := c.entries[key]; !exists && len(c.entries) >= companyReadingCacheMaxEntries {
+		var oldestKey string
+		var oldestExpiry time.Time
+		for cachedKey, entry := range c.entries {
+			if oldestKey == "" || entry.expiresAt.Before(oldestExpiry) {
+				oldestKey, oldestExpiry = cachedKey, entry.expiresAt
+			}
+		}
+		delete(c.entries, oldestKey)
+	}
+	c.entries[key] = companyReadingCacheEntry{
+		value:     strings.TrimSpace(value),
+		expiresAt: now.Add(companyReadingCacheTTL),
+	}
 }
 
 // resolveCompanyInfo は共有企業情報を優先し、無ければクライアント文面を使う。
@@ -81,43 +137,49 @@ func (s *InterviewService) resolveCompanyReading(ctx context.Context, companyID 
 		}
 	}
 	cacheKey := strings.TrimSpace(companyName)
-	if cached, ok := s.companyReadingCache.Load(cacheKey); ok {
-		entry, ok := cached.(companyReadingCacheEntry)
-		if ok && time.Now().Before(entry.expiresAt) {
-			return entry.value
-		}
-		s.companyReadingCache.Delete(cacheKey)
+	if cacheKey == "" {
+		return ""
 	}
-	value, err, shared := s.companyReadingFlight.Do(cacheKey, func() (any, error) {
-		if cached, ok := s.companyReadingCache.Load(cacheKey); ok {
-			if entry, ok := cached.(companyReadingCacheEntry); ok &&
-				time.Now().Before(entry.expiresAt) {
-				return entry.value, nil
-			}
-			s.companyReadingCache.Delete(cacheKey)
+	return s.cachedCompanyReading(ctx, cacheKey, companyName, s.lookupCompanyReading)
+}
+
+func (s *InterviewService) cachedCompanyReading(
+	ctx context.Context,
+	cacheKey string,
+	companyName string,
+	lookupReading func(context.Context, string) (string, error),
+) string {
+	if cached, ok := s.companyReadingCache.load(cacheKey); ok {
+		return cached
+	}
+
+	lookup := func() (any, error) {
+		if cached, ok := s.companyReadingCache.load(cacheKey); ok {
+			return cached, nil
 		}
-		reading, err := s.lookupCompanyReading(ctx, companyName)
+		reading, err := lookupReading(ctx, companyName)
 		if err != nil {
 			return "", err
 		}
-		if strings.TrimSpace(reading) != "" {
-			s.companyReadingCache.Store(cacheKey, companyReadingCacheEntry{
-				value:     strings.TrimSpace(reading),
-				expiresAt: time.Now().Add(companyReadingCacheTTL),
-			})
+		s.companyReadingCache.store(cacheKey, reading)
+		return strings.TrimSpace(reading), nil
+	}
+
+	value, err, shared := s.companyReadingFlight.Do(cacheKey, lookup)
+	if errors.Is(err, context.Canceled) && shared && ctx.Err() == nil {
+		// 共有元のリクエストがキャンセルされた場合だけ、待機側の有効なctxで再試行する。
+		// 再びsingleflightを通し、複数の待機リクエストが一斉に外部APIを呼ばないようにする。
+		retryCh := s.companyReadingFlight.DoChan(cacheKey, lookup)
+		select {
+		case retryResult := <-retryCh:
+			value, err = retryResult.Val, retryResult.Err
+		case <-ctx.Done():
+			return ""
 		}
-		return reading, nil
-	})
-	if err != nil && shared && ctx.Err() == nil {
-		reading, retryErr := s.lookupCompanyReading(ctx, companyName)
-		if retryErr == nil && strings.TrimSpace(reading) != "" {
-			s.companyReadingCache.Store(cacheKey, companyReadingCacheEntry{
-				value:     strings.TrimSpace(reading),
-				expiresAt: time.Now().Add(companyReadingCacheTTL),
-			})
-		}
-		return reading
+	}
+	if err != nil {
+		return ""
 	}
 	reading, _ := value.(string)
-	return reading
+	return strings.TrimSpace(reading)
 }

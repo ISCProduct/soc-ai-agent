@@ -1,13 +1,89 @@
 package interview
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"Backend/internal/models"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestCompanyReadingCacheExpiresAndCapsEntries(t *testing.T) {
+	cache := companyReadingCache{entries: map[string]companyReadingCacheEntry{
+		"expired": {value: "old", expiresAt: time.Now().Add(-time.Second)},
+	}}
+	cache.store("first", "first reading")
+	assert.Len(t, cache.entries, 1, "expired entries are removed before storing")
+
+	for i := range companyReadingCacheMaxEntries {
+		cache.store(fmt.Sprintf("company-%d", i), "reading")
+	}
+	assert.Len(t, cache.entries, companyReadingCacheMaxEntries)
+	if _, ok := cache.load("first"); ok {
+		t.Fatal("oldest entry should have been evicted at the cache limit")
+	}
+
+	cache.store("blank", "  ")
+	if _, ok := cache.load("blank"); ok {
+		t.Fatal("blank readings should not be cached")
+	}
+}
+
+func TestCachedCompanyReadingSharesLookupAndRetriesCancelledLeader(t *testing.T) {
+	svc := NewInterviewService(nil, nil, nil, nil, nil, nil, nil)
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	defer cancelLeader()
+
+	var calls atomic.Int32
+	lookupStarted := make(chan struct{})
+	lookup := func(ctx context.Context, _ string) (string, error) {
+		if calls.Add(1) == 1 {
+			close(lookupStarted)
+			<-ctx.Done()
+			return "", ctx.Err()
+		}
+		return "えーしーみー", nil
+	}
+
+	leaderResult := make(chan string, 1)
+	go func() {
+		leaderResult <- svc.cachedCompanyReading(leaderCtx, "Acme", "Acme", lookup)
+	}()
+	<-lookupStarted
+
+	const waiters = 8
+	var ready sync.WaitGroup
+	var done sync.WaitGroup
+	ready.Add(waiters)
+	done.Add(waiters)
+	results := make(chan string, waiters)
+	for range waiters {
+		go func() {
+			defer done.Done()
+			ready.Done()
+			results <- svc.cachedCompanyReading(context.Background(), "Acme", "Acme", lookup)
+		}()
+	}
+	ready.Wait()
+	time.Sleep(20 * time.Millisecond)
+	cancelLeader()
+
+	if got := <-leaderResult; got != "" {
+		t.Fatalf("cancelled leader result = %q, want empty", got)
+	}
+	done.Wait()
+	close(results)
+	for got := range results {
+		assert.Equal(t, "えーしーみー", got)
+	}
+	assert.EqualValues(t, 2, calls.Load(), "the lookup is retried once and shared among waiters")
+}
 
 type briefRepoStub struct {
 	byID map[uint]*models.Company
