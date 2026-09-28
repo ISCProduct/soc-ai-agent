@@ -98,6 +98,28 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 | `web_search` | OpenAI Web Search（gpt-4o-search-preview）を使用 |
 | `cache` | ChromaDB のキャッシュを使用（Web 検索なし） |
 
+### `/es/review` レスポンス例
+
+```json
+{
+  "specificity_score": 7,
+  "star_score": 6,
+  "company_fit_score": null,
+  "length_balance_score": 5,
+  "feedback": "...",
+  "improved_text": "...",
+  "company_strategy": null,
+  "company_context_source": "none"
+}
+```
+
+- `company_context_source`: 企業コンテキストの取得元（`company_brief` / `cache` / `web_search` / `none`）
+- **企業コンテキストが0件（`none`）のときは企業名もプロンプトへ入れず、`company_fit_score` と `company_strategy` は必ず `null`** になる（モデルの内部知識による根拠の無い企業評価を防ぐ / #1524）
+- 生成は2回の呼び出しに分割している（#1521）
+  - 第1: スコア4軸 + `feedback` + `company_strategy`
+  - 第2: `improved_text` のみ（第1の `feedback` を入力に渡して内容の整合を取る）
+- `max_tokens` は日本語 約0.78トークン/文字・改善文は入力の最大1.3倍という見積もりで算出する。`finish_reason == "length"`（出力上限到達）を検知したら上限を引き上げて**1回だけ**再試行し、それでも上限に達した場合は 422 と「文章が長すぎて添削できませんでした。文字数を減らしてお試しください。」を返す
+
 ---
 
 ## ChromaDB キャッシュ戦略

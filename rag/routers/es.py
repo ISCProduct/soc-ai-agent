@@ -21,6 +21,8 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
 
     context_docs: List[str] = []
     safe_company_name = ""
+    # #1524: 企業コンテキストの取得元をレスポンスへ返す（0件なら "none"）
+    context_source = "none"
     if request.company_name.strip():
         safe_company_name = _sanitize_company_name_for_query(request.company_name)
         # #938: キャッシュキーはサニタイズ前の企業名のハッシュで衝突回避する
@@ -29,6 +31,7 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
         )
         if request.company_context:
             context_docs = [request.company_context]
+            context_source = "company_brief"
             m.set_cached_context(
                 cache_key,
                 context_docs,
@@ -39,6 +42,8 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
             context_docs = m.get_cached_context(
                 cache_key, query=f"{safe_company_name} 求める人物像 採用 価値観"
             )
+            if context_docs:
+                context_source = "cache"
         if not context_docs and m.ALLOW_WEB_SEARCH_FALLBACK:
             logger.info("es review web search start company=%s", safe_company_name)
             try:
@@ -52,6 +57,7 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
                     if len(combined) > 2000:
                         combined = combined[:2000]
                     context_docs = [combined]
+                    context_source = "web_search"
                     m.set_cached_context(
                         cache_key,
                         context_docs,
@@ -71,4 +77,5 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
         question_type=request.question_type,
         company_name=safe_company_name,
         context_docs=context_docs,
+        company_context_source=context_source,
     )

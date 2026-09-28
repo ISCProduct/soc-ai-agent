@@ -65,6 +65,8 @@ class ESReviewResponse(BaseModel):
     feedback: str  # 全体フィードバック文
     improved_text: str  # 改善後テキスト
     company_strategy: Optional[str] = None  # 企業特化の対策アドバイス（企業名なしは null）
+    # 企業コンテキストの取得元: "company_brief" / "cache" / "web_search" / "none"(#1524)
+    company_context_source: str = "none"
 
 
 class CompanyContextRequest(BaseModel):
