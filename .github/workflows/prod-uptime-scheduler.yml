@@ -194,15 +194,28 @@ jobs:
           # 判定できなかった場合は停止しない(fail-closed)。続行すると、上のロールバック
           # 事故をAPI障害のたびに再発させうる。見送りの代償は「本番が最大1時間起動した
           # まま残る」だけなので、ジョブを失敗させてDiscordへ流し、人が気づける形にする。
+          # 数えるのは in_progress、つまり「実際に走り出したデプロイ」だけ。
+          #
+          # queued(ランナー待ち) / waiting(承認待ち) / pending / requested は、まだ
+          # 本番を一度も触っていない。これらまで「実行中」として停止を見送ると、
+          # 承認待ちのまま放置されたデプロイ1本で毎時の停止が無期限に見送られ、
+          # ECSと(このジョブが止めそこねた)RDSが承認まで課金され続ける(#1563 の指摘)。
+          #
+          # 未開始のデプロイの真上で停止して良い理由:
+          #   - 停止は「ECSを0にしてからRDSを止める」順で、開始前に完了している。
+          #     デプロイ側の「Record production service state」は落ち着いた desired=0 を
+          #     読むので was_down=true になり、一時起動も0への後片付けも正しく走る。
+          #   - デプロイ側の「Start production RDS if stopped」は stopped を見るたび
+          #     start を打ち直し、stopping の数分も待つループなので、直前に止めた
+          #     RDSは自力で起動し直される。
+          # 逆に in_progress のデプロイは、縮退やRDS停止がその最中に割り込む
+          # （2026-09-25 の #1518 はこの形）ため、従来どおり見送る。
           prod_deploy_running() {
             local out attempt
-            # status は in_progress / queued 以外にも waiting(承認待ち) / pending /
-            # requested という未完了状態がある。列挙すると新しい状態が増えたときに
-            # 「実行中0件」と誤判定するため、completed 以外を未完了として数える。
             for attempt in 1 2 3; do
               if out=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deployment.yml \
                 --branch main --limit 20 --json status \
-                --jq '[.[] | select(.status != "completed")] | length' 2>/tmp/gh_run_list_err); then
+                --jq '[.[] | select(.status == "in_progress")] | length' 2>/tmp/gh_run_list_err); then
                 # 取得できたのに空なら jq の失敗。0件と読み替えず「実行中」に倒す。
                 if [ "$out" == "0" ]; then return 0; fi
                 return 1

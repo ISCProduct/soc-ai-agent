@@ -371,12 +371,18 @@ GHSTUB
 
     guard_case "デプロイが無ければ停止処理へ進む" 10 "" '[{"status":"completed"},{"status":"completed"}]'
     guard_case "in_progress があれば見送る" 0 "" '[{"status":"in_progress"}]'
-    guard_case "queued があれば見送る" 0 "" '[{"status":"queued"}]'
-    # waiting(承認待ち) / pending / requested を completed 扱いすると、承認待ちの
-    # デプロイの真上でECSとRDSを止めてしまう。
-    guard_case "waiting も実行中として見送る" 0 "" '[{"status":"waiting"}]'
-    guard_case "pending も実行中として見送る" 0 "" '[{"status":"pending"}]'
-    guard_case "requested も実行中として見送る" 0 "" '[{"status":"requested"}]'
+    # queued(ランナー待ち) / waiting(承認待ち) / pending / requested はまだ本番を
+    # 触っていない。これらで停止を見送ると、承認待ちのまま放置されたデプロイ1本で
+    # 毎時の停止が無期限に見送られ、ECSとRDSが課金され続ける（Codex #1563 指摘）。
+    # 未開始のデプロイは、落ち着いた desired=0 を読んで was_down=true になり、
+    # RDSも自力で起動し直すので、先に止めてよい。
+    guard_case "queued(未開始)なら停止処理へ進む" 10 "" '[{"status":"queued"}]'
+    guard_case "waiting(承認待ち)なら停止処理へ進む" 10 "" '[{"status":"waiting"}]'
+    guard_case "pending(未開始)なら停止処理へ進む" 10 "" '[{"status":"pending"}]'
+    guard_case "requested(未開始)なら停止処理へ進む" 10 "" '[{"status":"requested"}]'
+    # 承認待ちが混ざっていても、走っているデプロイが1本でもあれば見送る。
+    guard_case "承認待ちに混ざった in_progress は見送る" 0 "" \
+      '[{"status":"waiting"},{"status":"in_progress"},{"status":"completed"}]'
     # 判定不能で停止へ進むと、デプロイ中のRDS停止で本番が起動不能になる（#1518 の再発）。
     guard_case "判定不能なら停止せずジョブを失敗させる" 1 "1" '[]'
     case "${GUARD_OUT:-}" in
@@ -463,6 +469,10 @@ SCALESTUB
       echo "FAIL 復元失敗の理由を alert-reason.txt に残していない（Discord通知が理由なしになる）"
       fail=$((fail + 1))
     fi
+    # 承認待ちのデプロイでは縮退を戻さず、そのまま停止処理(RDS停止)へ進む。
+    # 戻してしまうと、承認されるまで毎時「見送り」が続き、ECSとRDSが課金され続ける
+    # （Codex #1563 指摘）。
+    restore_case "承認待ちのデプロイなら縮退を戻さず停止を続ける" 10 1 0 "" "" '[{"status":"waiting"}]'
     rm -rf "$GUARD_WORK2"
 
     rm -rf "$GUARD_WORK"
