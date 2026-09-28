@@ -1,6 +1,8 @@
 package flywheel
 
 import (
+	"flag"
+	"os"
 	"strings"
 	"testing"
 
@@ -128,14 +130,16 @@ func TestMapInterviewScore_EvidenceChangesValue(t *testing.T) {
 	thin := InterviewTranscriptStats{UserTurns: 1, AvgAnswerRunes: 5}
 	rich := InterviewTranscriptStats{UserTurns: 10, AvgAnswerRunes: 150}
 
+	// evidence 欠損は「記録が無い」＝中立扱いなので（#1554）、
+	// ここでは evidence がある入力だけを並べて補正の効きを見る。
 	tests := []struct {
 		name     string
 		evidence string
 		stats    InterviewTranscriptStats
 	}{
-		{name: "evidenceなし・発話わずか", evidence: "", stats: thin},
-		{name: "evidenceなし・発話十分", evidence: "", stats: rich},
+		{name: "evidence短い・発話わずか", evidence: strings.Repeat("あ", 20), stats: thin},
 		{name: "evidence短い・発話十分", evidence: strings.Repeat("あ", 20), stats: rich},
+		{name: "evidence中くらい・発話十分", evidence: strings.Repeat("あ", 60), stats: rich},
 		{name: "evidence十分・発話十分", evidence: strings.Repeat("あ", 200), stats: rich},
 	}
 
@@ -246,6 +250,34 @@ func TestInterviewSignal_MissingStatsIsNeutral(t *testing.T) {
 	}
 }
 
+// TestInterviewSignal_MissingEvidenceIsNeutral は evidence が無い場合に
+// 減点せず中立に寄せることを検証する（#1554）。
+//
+// 修正前は evidence 欠損で signal の上限が 0.6*0+0.4*1 = 0.4 に下がり、
+// どれだけ良い面接でも全カテゴリが必ずマイナス補正されていた。
+// LLM が evidence を省く／evidence_json が壊れるだけで静かに全カテゴリが下がる経路だった。
+func TestInterviewSignal_MissingEvidenceIsNeutral(t *testing.T) {
+	rich := InterviewTranscriptStats{UserTurns: 10, AvgAnswerRunes: 150}
+
+	// evidence・発話統計の両方が欠損 = 補正なし。ルーブリックの ×20 がそのまま出る。
+	for rubric := range 6 {
+		want := rubric * rubricStep
+		if got := mapInterviewScore(rubric, "", InterviewTranscriptStats{}); got != want {
+			t.Errorf("rubric=%d: 記録が無いだけで %d 点になった（補正なしの %d 点であるべき）", rubric, got, want)
+		}
+	}
+
+	// evidence だけが欠損しても、ルーブリックの帯から下へ外れない。
+	if got := mapInterviewScore(3, "", rich); got < 3*rubricStep {
+		t.Errorf("evidence欠損・発話十分で %d 点。%d 点を下回ってはいけない", got, 3*rubricStep)
+	}
+	// 一方で、evidence が十分にある場合より高くはならない。
+	best := mapInterviewScore(3, strings.Repeat("あ", 200), rich)
+	if got := mapInterviewScore(3, "", rich); got >= best {
+		t.Errorf("evidence欠損(%d)が evidence十分(%d)以上になった", got, best)
+	}
+}
+
 // TestBlendScore は移動平均が既存値を踏まえて動くことを検証する。
 func TestBlendScore(t *testing.T) {
 	tests := []struct {
@@ -272,12 +304,41 @@ func TestBlendScore(t *testing.T) {
 	}
 }
 
-// TestFormatScoreMappingDryRun は新旧比較表を出力する（DB には触らない）。
+// updateGolden はドライランのゴールデンを更新するフラグ。
+// 写像を意図して変えたときだけ使う:
+//
+//	cd Backend && go test ./internal/services/flywheel/ -run DryRun -update
+var updateGolden = flag.Bool("update", false, "ドライランのゴールデンファイルを更新する")
+
+const dryRunGoldenPath = "testdata/score_mapping_dryrun.golden"
+
+// TestFormatScoreMappingDryRun は新旧比較表をゴールデンと突き合わせる（DB には触らない）。
+//
+// キャリブレーション定数（criticalPenaltyPerItem / criticalPenaltyMax / weight /
+// evidenceFullRunes / answerFullRunes / answerFullTurns / evidenceSignalWeight など）は
+// 単調性や飽和のアサーションでは固定できない。criticalPenaltyPerItem を 5→25 にしても
+// 「critical が増えれば下がる」は成立してしまうため、出力そのものを固定する（#1555）。
+//
 // `go test ./internal/services/flywheel/ -run DryRun -v` で分布の変化を確認する。
 func TestFormatScoreMappingDryRun(t *testing.T) {
 	out := FormatScoreMappingDryRun()
-	if !strings.Contains(out, "履歴書") || !strings.Contains(out, "面接") {
-		t.Fatalf("ドライラン出力が壊れている:\n%s", out)
-	}
 	t.Log("\n" + out)
+
+	if *updateGolden {
+		if err := os.WriteFile(dryRunGoldenPath, []byte(out), 0o644); err != nil {
+			t.Fatalf("ゴールデンの更新に失敗: %v", err)
+		}
+		t.Log("ゴールデンを更新した: " + dryRunGoldenPath)
+		return
+	}
+
+	want, err := os.ReadFile(dryRunGoldenPath)
+	if err != nil {
+		t.Fatalf("ゴールデンが読めない: %v", err)
+	}
+	if out != string(want) {
+		t.Errorf("写像の出力がゴールデンと一致しない。\n"+
+			"キャリブレーションを意図して変えたなら -update で更新すること。\n"+
+			"--- want ---\n%s\n--- got ---\n%s", want, out)
+	}
 }

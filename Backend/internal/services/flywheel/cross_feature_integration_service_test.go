@@ -1,0 +1,150 @@
+package flywheel
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"Backend/internal/models"
+	"Backend/internal/repositories"
+
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+)
+
+// 面接レポート → user_weight_scores の反映をサービス層ごと検証する（#1554）。
+//
+// これまで写像の純関数だけをテストしており、サービス層のテストが1本も無かった。
+// そのため次の2つが静かに壊れる余地があった。
+//   - プロンプト側のルーブリックキー（interview.RubricKeys）を変えると
+//     interviewScores から引けなくなり、そのカテゴリが一切書かれない
+//   - evidence が空だと補正が最大 -3点側に倒れ、全カテゴリが一律で下がる
+//
+// ここでは INSERT の引数で保存値そのものを固定し、
+// 7カテゴリ分の書き込みが揃うことを ExpectationsWereMet で確かめる。
+
+const (
+	testUserID    = uint(7)
+	testSessionID = "chat-session-1"
+	testOrgID     = 3
+)
+
+func newCrossFeatureService(t *testing.T) (*CrossFeatureIntegrationService, sqlmock.Sqlmock) {
+	t.Helper()
+	sqlDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}),
+		&gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	// カテゴリごとに SELECT → INSERT が走るので、順序ではなく引数で突き合わせる。
+	mock.MatchExpectationsInOrder(false)
+	return NewCrossFeatureIntegrationService(repositories.NewUserWeightScoreRepository(db)), mock
+}
+
+func newInterviewReport(scoresJSON, evidenceJSON string) *models.InterviewReport {
+	return &models.InterviewReport{SessionID: 1, ScoresJSON: scoresJSON, EvidenceJSON: evidenceJSON}
+}
+
+func TestUpdateScoresFromInterviewReport_SavedValues(t *testing.T) {
+	// ルーブリックは項目ごとに別の値にして、写像先の取り違えを検出できるようにする。
+	rubric := map[string]int{
+		"logic":         4,
+		"specificity":   3,
+		"ownership":     2,
+		"communication": 5,
+		"enthusiasm":    1,
+	}
+	scoresJSON, err := json.Marshal(rubric)
+	require.NoError(t, err)
+
+	fullEvidence := map[string]string{}
+	for key := range rubric {
+		fullEvidence[key] = strings.Repeat("あ", 200)
+	}
+	fullEvidenceJSON, err := json.Marshal(fullEvidence)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name         string
+		evidenceJSON string
+		stats        InterviewTranscriptStats
+		// want は「保存されるべき絶対値」。evidence・発話が無いときは補正0で ×20 のまま。
+		want map[string]int
+	}{
+		{
+			name:         "evidenceも発話統計も無い（記録漏れ）",
+			evidenceJSON: "",
+			stats:        InterviewTranscriptStats{},
+			want: map[string]int{
+				"コミュニケーション力": 100, // communication=5
+				"技術志向":       80,  // logic=4
+				"細部志向":       60,  // specificity=3
+				"リーダーシップ志向":  40,  // ownership=2
+				"チャレンジ志向":    40,  // ownership=2
+				"成長志向":       20,  // enthusiasm=1
+				"チームワーク志向":   20,  // enthusiasm=1
+			},
+		},
+		{
+			name:         "evidence_jsonが壊れている（nil mapになる）",
+			evidenceJSON: `{"logic":`,
+			stats:        InterviewTranscriptStats{},
+			want: map[string]int{
+				"コミュニケーション力": 100,
+				"技術志向":       80,
+				"細部志向":       60,
+				"リーダーシップ志向":  40,
+				"チャレンジ志向":    40,
+				"成長志向":       20,
+				"チームワーク志向":   20,
+			},
+		},
+		{
+			name:         "evidenceも発話も十分（補正は上限の+5点）",
+			evidenceJSON: string(fullEvidenceJSON),
+			stats:        InterviewTranscriptStats{UserTurns: 10, AvgAnswerRunes: 120},
+			want: map[string]int{
+				"コミュニケーション力": 100, // 105 を 100 で clamp
+				"技術志向":       85,
+				"細部志向":       65,
+				"リーダーシップ志向":  45,
+				"チャレンジ志向":    45,
+				"成長志向":       25,
+				"チームワーク志向":   25,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, mock := newCrossFeatureService(t)
+
+			for category, score := range tt.want {
+				// 既存行なし → SetScore（絶対値でINSERT）
+				mock.ExpectQuery("SELECT \\* FROM `user_weight_scores`").
+					WithArgs(testUserID, testSessionID, category, 1).
+					WillReturnRows(sqlmock.NewRows([]string{"id", "score"}))
+				mock.ExpectQuery("SELECT `organization_id` FROM `users`").
+					WithArgs(testUserID).
+					WillReturnRows(sqlmock.NewRows([]string{"organization_id"}).AddRow(testOrgID))
+				mock.ExpectBegin()
+				mock.ExpectExec("INSERT INTO `user_weight_scores`").
+					WithArgs(testOrgID, testUserID, testSessionID, category, score,
+						sqlmock.AnyArg(), sqlmock.AnyArg()).
+					WillReturnResult(sqlmock.NewResult(1, 1))
+				mock.ExpectCommit()
+			}
+
+			err := svc.UpdateScoresFromInterviewReport(testUserID, testSessionID,
+				newInterviewReport(string(scoresJSON), tt.evidenceJSON), tt.stats)
+			require.NoError(t, err)
+			// 期待した値のINSERTが7カテゴリ分すべて起きたこと。
+			// 写像キーがプロンプト側とずれると、そのカテゴリのINSERTが来ずここで落ちる。
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
