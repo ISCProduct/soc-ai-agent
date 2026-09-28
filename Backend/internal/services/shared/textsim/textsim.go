@@ -15,52 +15,85 @@ import (
 // Normalize は比較用にテキストを正規化する。
 //   - NFKC正規化（全角英数字・半角カナなどの統一。例: "Ｗｅｂ" -> "Web"）
 //   - 空白・改行・タブの除去
-//   - 約物（、。・「」（）!? など）の除去
+//   - 約物・記号（、。・「」（）!? 〜 ~ など）の除去
 //   - 小文字化
+//
+// ただし数字に挟まれた小数点・桁区切りは残す。「1.5倍」と「15倍」は別の記述であり、
+// 同一視すると数値が違う箇所に注釈が飛ぶため。
 func Normalize(s string) string {
-	s = norm.NFKC.String(strings.TrimSpace(s))
-	s = strings.Map(func(r rune) rune {
-		if unicode.IsSpace(r) || unicode.IsPunct(r) {
-			return -1
+	runes := []rune(norm.NFKC.String(strings.TrimSpace(s)))
+	var b strings.Builder
+	b.Grow(len(runes))
+	for i, r := range runes {
+		switch {
+		case unicode.IsSpace(r):
+			continue
+		case unicode.IsPunct(r) || unicode.IsSymbol(r):
+			// 記号も落とす。波ダッシュ〜(Pd)と全角チルダ～(NFKC後は~/Sm)のように
+			// 見た目が同じで分類が違う文字を取りこぼさないため。
+			if !isDigitSeparator(runes, i) {
+				continue
+			}
 		}
-		return r
-	}, s)
-	return strings.ToLower(s)
+		b.WriteRune(r)
+	}
+	return strings.ToLower(b.String())
 }
 
-// Text は正規化済み文字列と、その文字bigram集合を保持する。
-// 比較対象を何度も突き合わせる場合は New で事前計算して使い回すこと。
-type Text struct {
+// isDigitSeparator は runes[i] が数字に挟まれた小数点・桁区切りかを判定する。
+func isDigitSeparator(runes []rune, i int) bool {
+	if runes[i] != '.' && runes[i] != ',' {
+		return false
+	}
+	return i > 0 && i+1 < len(runes) && unicode.IsDigit(runes[i-1]) && unicode.IsDigit(runes[i+1])
+}
+
+// Bigrams は正規化済み文字列と、その文字bigram集合を保持する。
+// 同じテキストを何度も突き合わせる場合は New で事前計算して使い回すこと。
+type Bigrams struct {
 	norm    string
+	runes   int
 	bigrams map[string]struct{}
 }
 
 // New はテキストを正規化し、文字bigramを事前計算する。
-func New(s string) Text {
+func New(s string) Bigrams {
 	normalized := Normalize(s)
-	return Text{norm: normalized, bigrams: bigrams(normalized)}
+	return Bigrams{
+		norm:    normalized,
+		runes:   len([]rune(normalized)),
+		bigrams: bigramSet(normalized),
+	}
 }
 
 // Norm は正規化済み文字列を返す。
-func (t Text) Norm() string { return t.norm }
+func (t Bigrams) Norm() string { return t.norm }
+
+// Len は正規化後の文字数を返す（事前計算済み）。
+func (t Bigrams) Len() int { return t.runes }
 
 // Empty は正規化後に文字が残らなかったかを返す。
-func (t Text) Empty() bool { return t.norm == "" }
+func (t Bigrams) Empty() bool { return t.norm == "" }
 
-// Score は2テキストの一致度を 0.0〜1.0 で返す。
-// 一方が他方を部分文字列として含む場合は 1.0（そのまま抜粋されたケース）、
-// それ以外は文字bigramのDice係数 2|A∩B| / (|A|+|B|) を返す。
-func (t Text) Score(other Text) float64 {
-	if t.norm == "" || other.norm == "" {
+// Score は needle が t（本文側）にどれだけ一致するかを 0.0〜1.0 で返す。
+// t が needle をそのまま含む場合は 1.0、それ以外は文字bigramのDice係数
+// 2|A∩B| / (|A|+|B|) を返す。
+//
+// 逆向き（t が needle に含まれる）は1.0にしない。OCRの行単位ブロックには
+// 「年」「なし」のような短い表ヘッダが必ず混ざり、引用の部分文字列として
+// 無条件に最高スコアを取ってしまうため。短いブロックはDice係数で自然に沈み、
+// 引用と長く重なるブロックほど高いスコアになる。
+func (t Bigrams) Score(needle Bigrams) float64 {
+	if t.norm == "" || needle.norm == "" {
 		return 0
 	}
-	if strings.Contains(t.norm, other.norm) || strings.Contains(other.norm, t.norm) {
+	if strings.Contains(t.norm, needle.norm) {
 		return 1
 	}
-	if len(t.bigrams) == 0 || len(other.bigrams) == 0 {
+	if len(t.bigrams) == 0 || len(needle.bigrams) == 0 {
 		return 0
 	}
-	small, large := t.bigrams, other.bigrams
+	small, large := t.bigrams, needle.bigrams
 	if len(small) > len(large) {
 		small, large = large, small
 	}
@@ -70,16 +103,17 @@ func (t Text) Score(other Text) float64 {
 			common++
 		}
 	}
-	return 2 * float64(common) / float64(len(t.bigrams)+len(other.bigrams))
+	return 2 * float64(common) / float64(len(t.bigrams)+len(needle.bigrams))
 }
 
-// Similarity は2つの生テキストの一致度を返す（使い回さない単発比較向け）。
-func Similarity(a, b string) float64 {
-	return New(a).Score(New(b))
+// Score は haystack に対する needle の一致度を返す（使い回さない単発比較向け）。
+// 引数の順序に意味がある非対称な関数。対称な類似度が欲しい場合は別関数を足すこと。
+func Score(haystack, needle string) float64 {
+	return New(haystack).Score(New(needle))
 }
 
-// bigrams は正規化済みテキストの隣接2文字の集合を返す。
-func bigrams(normalized string) map[string]struct{} {
+// bigramSet は正規化済みテキストの隣接2文字の集合を返す。
+func bigramSet(normalized string) map[string]struct{} {
 	runes := []rune(normalized)
 	if len(runes) < 2 {
 		return nil

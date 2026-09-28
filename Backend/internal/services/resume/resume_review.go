@@ -602,8 +602,13 @@ OCRテキスト:
 		if err == nil {
 			responseRetry := aiReviewResponse{}
 			if decodeJSON(rawRetry, &responseRetry) == nil {
-				items = mapReviewItems(blocks, responseRetry.Items)
-				log.Printf("resume_review: retry items mapped=%d raw=%d", len(items), len(responseRetry.Items))
+				retryItems := mapReviewItems(blocks, responseRetry.Items)
+				log.Printf("resume_review: retry items mapped=%d raw=%d", len(retryItems), len(responseRetry.Items))
+				// 件数が増えたときだけ採用する。初回より少ない結果で上書きすると
+				// 初回2件・リトライ0件のようなケースで紐づけ失敗エラーになってしまう。
+				if len(retryItems) > len(items) {
+					items = retryItems
+				}
 			}
 		}
 	}

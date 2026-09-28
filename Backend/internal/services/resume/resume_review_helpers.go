@@ -10,15 +10,19 @@ import (
 	"Backend/internal/services/shared/textsim"
 )
 
+// 引用とブロックの照合しきい値。値は resume_review_match_test.go の
+// TestQuoteMatchThresholdBoundary / TestQuoteMatchMarginBoundary が
+// 実測スコアの境界ケースで上下から固定している（動かすとどちらかが落ちる）。
 const (
 	// quoteMatchThreshold は引用と本文ブロックを同一と見なす最小類似度。
-	// 語尾・送り仮名の違いや一節の省略でもDice係数は0.6前後を保つ一方、
-	// 無関係な日本語文どうしのbigram重複は0.3程度に収まるため、その中間に置いている。
+	// 語尾・送り仮名の違いや一節の省略は 0.55〜0.95（実測）に収まり、
+	// 助詞や語順まで変わった言い換えは 0.51 以下に落ちるため、その境目に置いている。
 	quoteMatchThreshold = 0.55
 	// quoteMatchMargin は最良候補と次点の類似度差の下限。
 	// これ未満なら「どちらのブロックとも言える」状態なので紐づけを諦める。
 	// 誤ったブロックに紐づくと注釈PDFに焼かれ、学生が無関係な記述を直すことになるため、
-	// 迷うくらいなら欠落させる。
+	// 迷うくらいなら欠落させる。言い回しが1語だけ違うブロックどうしの差は 0.015（実測）、
+	// 一文が2行に分かれたときの正解と不正解の差は 0.152（実測）なので、その間の値。
 	quoteMatchMargin = 0.1
 )
 
@@ -92,7 +96,7 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 		return nil
 	}
 	// ブロック側の正規化とbigramは指摘ごとに作り直さず、ここで一度だけ計算して使い回す。
-	blockTexts := make([]textsim.Text, len(blocks))
+	blockTexts := make([]textsim.Bigrams, len(blocks))
 	for i := range blocks {
 		blockTexts[i] = textsim.New(blocks[i].Text)
 	}
@@ -103,20 +107,14 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 			continue
 		}
 		var block *models.ResumeTextBlock
-		foundByIndex := false
 		if item.PageHint > 0 && item.BlockIndex > 0 {
 			block = findBlockByIndex(blocks, item.PageHint, item.BlockIndex)
-			if block != nil {
-				foundByIndex = true
-			}
 		}
+		// findBestBlock が quoteMatchThreshold を保証して返すため、追加の照合はしない。
 		if block == nil && runeLen(item.Quote) >= 6 {
 			block = findBestBlock(blocks, blockTexts, item.Quote, item.PageHint)
 		}
 		if block == nil {
-			continue
-		}
-		if !foundByIndex && !quoteInBlock(item.Quote, block.Text) {
 			continue
 		}
 		severity := strings.ToLower(item.Severity)
@@ -137,7 +135,7 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 // findBestBlock は引用に最も近い本文ブロックを返す。
 // blockTexts は blocks と同じ並びの正規化済みテキスト。
 // しきい値未満、または次点と差が小さく曖昧な場合は nil を返す。
-func findBestBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Text, quote string, pageHint int) *models.ResumeTextBlock {
+func findBestBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Bigrams, quote string, pageHint int) *models.ResumeTextBlock {
 	quoteText := textsim.New(quote)
 	if quoteText.Empty() {
 		return nil
@@ -152,36 +150,28 @@ func findBestBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Text, q
 	return nil
 }
 
-func bestMatchingBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Text, quoteText textsim.Text, pageHint int) *models.ResumeTextBlock {
+func bestMatchingBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Bigrams, quoteText textsim.Bigrams, pageHint int) *models.ResumeTextBlock {
 	var best *models.ResumeTextBlock
 	bestScore, secondScore := 0.0, 0.0
-	bestLen := 0
 	for i := range blocks {
 		if pageHint > 0 && blocks[i].PageNumber != pageHint {
 			continue
 		}
 		score := blockTexts[i].Score(quoteText)
-		length := runeLen(blockTexts[i].Norm())
 		if score > bestScore {
-			secondScore = bestScore
-			bestScore, bestLen, best = score, length, &blocks[i]
+			bestScore, secondScore, best = score, bestScore, &blocks[i]
 			continue
 		}
 		if score > secondScore {
 			secondScore = score
 		}
-		// 完全包含(1.0)が複数あるのは一文が複数行のブロックに分かれているケース。
-		// 引用と最も長く重なるブロックを採る。
-		if score == bestScore && bestScore == 1 && length > bestLen {
-			bestLen, best = length, &blocks[i]
-		}
 	}
 	if best == nil || bestScore < quoteMatchThreshold {
 		return nil
 	}
-	// 完全包含はそのまま抜粋されたケースなので曖昧扱いしない。
-	// それ以外で次点と差が小さいときは、誤ったブロックに紐づけるより欠落させる。
-	if bestScore < 1 && bestScore-secondScore < quoteMatchMargin {
+	// 次点と差が小さいときは、どちらのブロックとも言える状態。
+	// 誤ったブロックに紐づけるより欠落させる（同点の完全一致も同様に捨てる）。
+	if bestScore-secondScore < quoteMatchMargin {
 		return nil
 	}
 	return best
@@ -195,12 +185,6 @@ func findBlockByIndex(blocks []models.ResumeTextBlock, pageHint int, blockIndex 
 		}
 	}
 	return nil
-}
-
-// quoteInBlock は引用が本文ブロックに一致すると見なせるかを判定する。
-// 正規化後の部分一致、または類似度がしきい値以上なら一致とする。
-func quoteInBlock(quote string, blockText string) bool {
-	return textsim.Similarity(blockText, quote) >= quoteMatchThreshold
 }
 
 func runeLen(s string) int {
