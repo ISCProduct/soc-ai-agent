@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"Backend/internal/models"
+	"Backend/internal/services/shared/textsim"
 )
 
 // 構造化面接ルーブリック（#795）。
@@ -120,4 +123,104 @@ func ValidateRubricScores(scores map[string]int) error {
 			RubricScoreMin, RubricScoreMax, strings.Join(outOfRange, ", "))
 	}
 	return nil
+}
+
+// EvidenceMatchThreshold は evidence を「実発話に基づく」と認める最小一致度（#1527）。
+//
+// 実測した分布（全文と例は docs/wiki/scoring.md §2-4）。
+//
+//	引用そのまま / 表記ゆれのみ        1.00        照合
+//	助詞違い・言い直し                0.78〜0.80  照合
+//	要約された引用                    0.32〜0.56  照合
+//	フィラー単語（「はい」等）        1.00        照合（通ってしまう）
+//	捏造（発話の述語末尾を流用）      0.27〜0.56  照合（通ってしまう）
+//	捏造（発話の語彙を転記）          0.56〜0.58  照合（通ってしまう）
+//	実引用＋事実の継ぎ足し            0.45〜0.55  照合（通ってしまう）
+//	---------------- しきい値 0.25 ----------------
+//	抽象化された言い換え              0.07〜0.31  大半が未照合
+//	捏造（述語も流用しない）          0.04〜0.21  未照合
+//	記号・絵文字だけ                  0.00        未照合
+//
+// **この検証で弾けるのは「発話の言い回しをまったく流用していない根拠」だけである。**
+// 内容語を100%でっち上げても、「〜することができました」のような述語を発話から
+// 流用すれば 0.27〜0.56 に乗って通る（実測で8/8通過）。
+// 「はい」「すみません」のようなフィラーは発話の部分文字列なので 1.00 になる。
+// しきい値をどこに置いてもこれらは分離できない。根本対応は Issue #1566。
+//
+// しきい値は「発話と無関係（≤0.21）」と「発話由来の要約（≥0.32）」の間を採っている。
+// 0.30 との差で新たに通る捏造は実測30件中1件だけで、この値の精度は防御力に
+// ほとんど寄与しない。一方で下げすぎると正当な要約が落ちて再生成が空回りする。
+// 評価項目やプロンプトを変えたときは textsim で実測してこの表を引き直すこと。
+const EvidenceMatchThreshold = 0.25
+
+// EvidenceCheck は evidence の照合結果。
+type EvidenceCheck struct {
+	// Checked は照合対象にした項目数。空文字の項目は数えない。
+	Checked int
+	// Unmatched は照合できなかったキー（昇順）。
+	Unmatched []string
+}
+
+// Matched は照合できた項目数を返す。
+func (c EvidenceCheck) Matched() int { return c.Checked - len(c.Unmatched) }
+
+// SpokenText は受験者(role=user)の発話だけを照合用に前処理する（#1527）。
+//
+// 面接官(role=ai)の発話を混ぜると、質問文をそのまま根拠として引用しても
+// 照合が通ってしまう。照合したいのは「学生が言ったか」である。
+//
+// evidence の件数ぶん作り直さないよう、呼び出し側で1度だけ作って使い回す。
+func SpokenText(utterances []models.InterviewUtterance) textsim.Bigrams {
+	var b strings.Builder
+	for _, u := range utterances {
+		if u.Role != "user" {
+			continue
+		}
+		b.WriteString(u.Text)
+		b.WriteString("\n")
+	}
+	return textsim.New(b.String())
+}
+
+// ValidateEvidence は evidence の各項目が実際の受験者発話に基づくかを照合する（#1527）。
+//
+// LLM は根拠として「言っていない発言」を書きうる。スコアの値域と違って
+// evidence は自由記述なのでスキーマ検証では捕まらないが、学生向け・教員向けの
+// 両レポートに表示される。教員がレポートを前提に指導する運用では、
+// 根拠の捏造はスコアの誤りより直接に信頼を損なう。
+//
+// 照合はローカル計算だけで行う（LLM を再度呼ばない）。文字bigramの Dice 係数なので
+// 形態素解析も要らず、言い直し・助詞の差・表記ゆれはしきい値で吸収する。
+//
+// 空文字の項目は照合対象にしない（Checked にも数えない）。「根拠が無い」ことは
+// 既に欠落として表現されており、捏造ではないため再生成を促す必要がない。
+// 一方で記号や絵文字だけの項目は空ではないので照合対象になり、
+// 正規化後に中身が残らないため未照合になる（そのまま表示させない）。
+func ValidateEvidence(evidence map[string]string, spoken textsim.Bigrams) EvidenceCheck {
+	var out EvidenceCheck
+	for key, text := range evidence {
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		out.Checked++
+		if textsim.BestMatch(text, spoken) < EvidenceMatchThreshold {
+			out.Unmatched = append(out.Unmatched, key)
+		}
+	}
+	// map の順序は不定なので、ログを安定させる
+	sort.Strings(out.Unmatched)
+	return out
+}
+
+// blankUnmatchedEvidence は照合できなかった項目の evidence を空文字にする（#1527）。
+//
+// キーごと削除せず空文字を入れるのは、キーの有無ではなく中身の有無で
+// 「根拠を出せなかった」ことを表すため。スコアと講評はそのまま残す。
+// 誤った根拠を載せるより欠落させる（docs/wiki/scoring.md §2-3）。
+func blankUnmatchedEvidence(evidence map[string]string, unmatched []string) {
+	for _, key := range unmatched {
+		if _, ok := evidence[key]; ok {
+			evidence[key] = ""
+		}
+	}
 }

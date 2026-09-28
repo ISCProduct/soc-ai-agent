@@ -1,7 +1,7 @@
 """RAG API の Pydantic リクエスト/レスポンスモデル。"""
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -65,6 +65,8 @@ class ESReviewResponse(BaseModel):
     feedback: str  # 全体フィードバック文
     improved_text: str  # 改善後テキスト
     company_strategy: Optional[str] = None  # 企業特化の対策アドバイス（企業名なしは null）
+    # 企業コンテキストの取得元(#1524)
+    company_context_source: Literal["company_brief", "cache", "web_search", "none"] = "none"
 
 
 class CompanyContextRequest(BaseModel):

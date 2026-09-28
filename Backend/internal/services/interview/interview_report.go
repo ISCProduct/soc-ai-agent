@@ -5,6 +5,7 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/safego"
 	"Backend/internal/services/email"
+	"Backend/internal/services/flywheel"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
@@ -12,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 
 	"gorm.io/gorm"
@@ -173,7 +175,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
   "improvements": ["改善点1", "改善点2", "改善点3"],
   "teacher": {
     "overall_comment": "教員向け総評（指導観点・クラス内での位置づけ等）",
-    "detailed_evidence": {"logic": "詳細な根拠と指導ポイント", "specificity": "詳細な根拠と指導ポイント", "ownership": "詳細な根拠と指導ポイント"},
+    "detailed_evidence": {"logic": "根拠となった発言の引用＋指導ポイント", "specificity": "根拠となった発言の引用＋指導ポイント", "ownership": "根拠となった発言の引用＋指導ポイント"},
     "coaching_points": ["具体的な改善指導ポイント1", "ポイント2", "ポイント3"],
     "strengths_for_teacher": ["指導者が把握すべき強み1", "強み2"],
     "next_steps": ["次回面接に向けた具体的な課題1", "課題2"]
@@ -181,6 +183,8 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 }
 
 ※ scoresは実際の会話内容に基づいて正直に採点してください（全て同じ値は避ける）。
+※ evidence と teacher.detailed_evidence は、受験者（User）が実際に話した発言をそのまま引用して始めてください。言い換えや推測で書かず、根拠が見つからない項目は空文字にしてください。
+※ 上記2つは実発話と自動照合され、一致しない項目は破棄されます（teacher.detailed_evidence の指導ポイントは引用の後に続けてください）。
 ※ strengths/improvementsは各2〜4件のリスト形式で具体的に記述してください。
 ※ teacher以下は教員専用の詳細情報として出力してください。
 
@@ -188,13 +192,31 @@ Interview transcript:
 %s`, lang, BuildRubricPromptSection(), transcript)
 
 	model := shared.GetEnv("INTERVIEW_REPORT_MODEL", "")
-	// スキーマ違反は弾いて1度だけ作り直す（#795）。
+	// 受験者の発話は候補ごとに作り直さない（#1527）
+	spoken := SpokenText(utterances)
+
+	// スキーマ違反と根拠の捏造は弾いて1度だけ作り直す（#795, #1527）。
+	//
+	// best* は「スコアが妥当だった候補のうち、照合できた根拠が最も多いもの」を保持する。
+	// 作り直した結果が壊れていても、ここに残した候補を保存できる。
+	// 最後の候補だけを見ていると、attempt 1 が妥当で attempt 2 が壊れたときに
+	// 妥当なスコアまで捨ててしまう。
+	var best reportPayload
+	var bestEvidence, bestTeacher EvidenceCheck
+	var bestUnmatched []string
+	var bestMatched int
+	var haveBest bool
+	// retryNote は作り直しのときだけプロンプトへ足す指示（#1527）。
+	// 温度0.4の単純な再抽選では2回目が改善する理由が無いので、
+	// どの項目が照合できなかったかを具体的に伝える。
+	var retryNote string
+	// payload/haveBody は「JSON としては読めた候補」。スコアを捨ててでも講評は残す用。
 	var payload reportPayload
 	var haveBody bool
 	var lastErr error
 	for attempt := range reportGenerationAttempts {
 		ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport)
-		raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 2000, model)
+		raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt+retryNote, 0.4, 2000, model)
 		if err != nil {
 			return err
 		}
@@ -207,17 +229,66 @@ Interview transcript:
 		}
 		// 本文は読めた。以降は最低限これを保存できる
 		payload, haveBody = candidate, true
-		if lastErr = ValidateRubricScores(candidate.Scores); lastErr == nil {
+		if scoreErr := ValidateRubricScores(candidate.Scores); scoreErr != nil {
+			lastErr = scoreErr
+			log.Printf("[Interview] report scores invalid (session %d, attempt %d/%d): %v",
+				sessionID, attempt+1, reportGenerationAttempts, scoreErr)
+			continue
+		}
+		// 根拠が実際の発話に基づくかを照合する（#1527）。LLM は呼ばない。
+		// 教員向けの detailed_evidence も同じ経路で照合する。教員向けだけ無検証だと、
+		// 指導の前提になるレポートに捏造が残る（Issue #1527 の動機そのもの）。
+		ev := ValidateEvidence(candidate.Evidence, spoken)
+		te := ValidateEvidence(teacherDetailedEvidence(candidate), spoken)
+		unmatched := append(slices.Clone(ev.Unmatched), prefixKeys("teacher.", te.Unmatched)...)
+		matched, checked := ev.Matched()+te.Matched(), ev.Checked+te.Checked
+		if checked == 0 {
+			// 根拠を1件も返さなかった。照合すべきものが無いので 0/0 になる。
+			// 「完璧に照合できた」と区別できるようにしておく。
+			log.Printf("[Interview] report evidence session=%d matched=0/0 (no evidence returned)", sessionID)
+		} else {
+			log.Printf("[Interview] report evidence session=%d matched=%d/%d", sessionID, matched, checked)
+		}
+
+		// 照合できた根拠が最も多い候補を残す。
+		//
+		// 未照合の「件数」だけで比べてはいけない。根拠を1件しか返さずそれが未照合だった候補
+		// （matched=0/1）が、5件照合できた候補（matched=5/7）に件数では勝ってしまい、
+		// 照合済みの根拠をまとめて捨てることになる。プロンプトで
+		// 「根拠が無い項目は空文字に」と指示しているため、疎な候補は現実に出てくる。
+		//
+		// 同数なら先の試行を残す（後の試行に乗り換える理由が無い）。
+		//
+		// evidence 起因の失敗では lastErr を汚さない
+		// （汚すと finalizeReportPayload がスコアまで捨てる）。
+		if !haveBest || matched > bestMatched {
+			best, bestEvidence, bestTeacher = candidate, ev, te
+			bestUnmatched, bestMatched, haveBest = unmatched, matched, true
+		}
+		if len(unmatched) == 0 {
 			break
 		}
-		log.Printf("[Interview] report scores invalid (session %d, attempt %d/%d): %v",
-			sessionID, attempt+1, reportGenerationAttempts, lastErr)
+		log.Printf("[Interview] report evidence unmatched (session %d, attempt %d/%d): %s",
+			sessionID, attempt+1, reportGenerationAttempts, strings.Join(unmatched, ", "))
+		retryNote = buildEvidenceRetryNote(unmatched)
 	}
-	payload, err = finalizeReportPayload(payload, haveBody, lastErr)
-	if err != nil {
-		return err
-	}
-	if lastErr != nil {
+
+	if haveBest {
+		// スコアが妥当な候補があるなら、後続の試行が壊れていてもそれを保存する。
+		payload = best
+		if len(bestUnmatched) > 0 {
+			// やり直しても照合できなかった根拠は空にして保存する。
+			// スコアと講評は残す（誤りを載せるより欠落させる。docs/wiki/scoring.md §2-3）。
+			blankUnmatchedEvidence(payload.Evidence, bestEvidence.Unmatched)
+			blankUnmatchedEvidence(teacherDetailedEvidence(payload), bestTeacher.Unmatched)
+			log.Printf("[Interview] report saved with blanked evidence (session %d): %s",
+				sessionID, strings.Join(bestUnmatched, ", "))
+		}
+	} else {
+		payload, err = finalizeReportPayload(payload, haveBody, lastErr)
+		if err != nil {
+			return err
+		}
 		log.Printf("[Interview] report saved without scores (session %d): %v", sessionID, lastErr)
 	}
 
@@ -263,7 +334,10 @@ Interview transcript:
 			// エラーを返してキュー(asynq)のリトライに載せる。レポート本体は Upsert 済みで冪等。
 			return fmt.Errorf("診断セッションの解決に失敗 (session=%d): %w", sessionID, err)
 		}
-		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, targetSession, report); err != nil {
+		// 発話量はレポートに残らないので、ここで統計を作って渡す（#1528）。
+		// ルーブリック6段階だけでは分解能が足りないため、回答量と evidence 量で補正する。
+		stats := flywheel.NewInterviewTranscriptStats(utterances)
+		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, targetSession, report, stats); err != nil {
 			log.Printf("[CrossFeature] interview score update failed for session %d: %v\n", sessionID, err)
 		} else if s.matchingRunner != nil && !repositories.IsInterviewSnapshotSession(targetSession) {
 			userID, sessionID := session.UserID, targetSession
@@ -359,6 +433,42 @@ type teacherReport struct {
 	CoachingPoints      []string          `json:"coaching_points"`
 	StrengthsForTeacher []string          `json:"strengths_for_teacher"`
 	NextSteps           []string          `json:"next_steps"`
+}
+
+// teacherDetailedEvidence は教員向けレポートの根拠マップを返す（無ければ nil）。
+//
+// 呼び出し側がこのマップを直接書き換えて未照合項目を空にするため、
+// コピーではなく実体を返す。
+func teacherDetailedEvidence(p reportPayload) map[string]string {
+	if p.Teacher == nil {
+		return nil
+	}
+	return p.Teacher.DetailedEvidence
+}
+
+// buildEvidenceRetryNote は照合できなかった項目を作り直しプロンプトへ伝える（#1527）。
+//
+// 同じプロンプトで引き直すだけでは、2回目が1回目より良くなる理由が無い。
+// どの項目が落ちたかを渡せば、LLM はその項目だけを発話から引き直せる。
+func buildEvidenceRetryNote(unmatched []string) string {
+	return fmt.Sprintf(`
+
+## やり直しの指示
+次の項目の根拠は面接ログの発言と一致しませんでした: %s
+これらは受験者（User）の発言をそのまま抜き出して書き直してください。
+該当する発言が見つからない項目は、推測で埋めずに空文字にしてください。
+（"teacher." が付いた項目は teacher.detailed_evidence 側です）`, strings.Join(unmatched, ", "))
+}
+
+// prefixKeys はログ用にキーへ接頭辞を付ける。
+// evidence と teacher.detailed_evidence で同じキー名（logic 等）を使うため、
+// 接頭辞が無いとログでどちらが未照合なのか分からない。
+func prefixKeys(prefix string, keys []string) []string {
+	out := make([]string, len(keys))
+	for i, k := range keys {
+		out[i] = prefix + k
+	}
+	return out
 }
 
 // reportPayload は LLM に出力させるレポート JSON。
