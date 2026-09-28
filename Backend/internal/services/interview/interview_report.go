@@ -5,6 +5,7 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/safego"
 	"Backend/internal/services/email"
+	"Backend/internal/services/flywheel"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
@@ -333,7 +334,10 @@ Interview transcript:
 			// エラーを返してキュー(asynq)のリトライに載せる。レポート本体は Upsert 済みで冪等。
 			return fmt.Errorf("診断セッションの解決に失敗 (session=%d): %w", sessionID, err)
 		}
-		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, targetSession, report); err != nil {
+		// 発話量はレポートに残らないので、ここで統計を作って渡す（#1528）。
+		// ルーブリック6段階だけでは分解能が足りないため、回答量と evidence 量で補正する。
+		stats := flywheel.NewInterviewTranscriptStats(utterances)
+		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, targetSession, report, stats); err != nil {
 			log.Printf("[CrossFeature] interview score update failed for session %d: %v\n", sessionID, err)
 		} else if s.matchingRunner != nil && !repositories.IsInterviewSnapshotSession(targetSession) {
 			userID, sessionID := session.UserID, targetSession

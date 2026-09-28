@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"strings"
 
 	"gorm.io/gorm"
@@ -29,17 +28,34 @@ func NewCrossFeatureIntegrationService(
 
 // ── 面接レポート → UserWeightScore ──────────────────────────────────────────
 
-// interviewScoreMapping 面接5項目と10カテゴリの対応と重み
-// 面接スコアは 0-5、UserWeightScore は 0-100 なので ×20 で正規化する
+// interviewScoreMapping 面接5項目と10カテゴリの対応
+// 値域の変換は mapInterviewScore（score_mapping.go）が行う
+//
+// interviewKey は面接プロンプトのルーブリックキー（interview.RubricKeys）と同じ綴りである必要がある。
+// ずれた項目は interviewScores から引けず、そのカテゴリが一切書かれない。
+// 同一パッケージのテスト（package flywheel）からは interview を import できない
+// （interview → flywheel の依存があるため）。外部テストパッケージ + export_test.go でも組めるが、
+// 本番APIを広げても誤用リスクが低いので InterviewRubricKeys を公開し、
+// 一致は interview 側のテストで固定している（#1554）。
 var interviewScoreMapping = []struct {
 	interviewKey string
-	categories   []string // 反映先カテゴリ（複数可: 均等に按分）
+	categories   []string // 反映先カテゴリ（複数可: 同じ値をそれぞれに入れる。分割はしない）
 }{
 	{"communication", []string{"コミュニケーション力"}},
 	{"logic", []string{"技術志向"}},
 	{"specificity", []string{"細部志向"}},
 	{"ownership", []string{"リーダーシップ志向", "チャレンジ志向"}},
 	{"enthusiasm", []string{"成長志向", "チームワーク志向"}},
+}
+
+// InterviewRubricKeys は写像が参照している面接ルーブリックキーを定義順で返す。
+// プロンプト側との一致をテストで固定するために公開している。
+func InterviewRubricKeys() []string {
+	keys := make([]string, len(interviewScoreMapping))
+	for i, m := range interviewScoreMapping {
+		keys[i] = m.interviewKey
+	}
+	return keys
 }
 
 // ResolveDiagnosisSessionID は面接スコアを流し込むチャット診断セッションを決める。
@@ -72,10 +88,13 @@ func PickDiagnosisSessionID(userID uint, latestChatSession string, err error) (s
 
 // UpdateScoresFromInterviewReport 面接レポートを元に UserWeightScore を更新する
 // chatSessionID は診断・マッチング対象のセッション（ResolveDiagnosisSessionID の結果を渡す）。
+// stats は発話ログから作る補正用の連続量（NewInterviewTranscriptStats）。
+// ゼロ値を渡した場合は補正を中立扱いにするので、発話を持たない呼び出し元でも使える。
 func (s *CrossFeatureIntegrationService) UpdateScoresFromInterviewReport(
 	userID uint,
 	chatSessionID string,
 	report *models.InterviewReport,
+	stats InterviewTranscriptStats,
 ) error {
 	if report == nil || report.ScoresJSON == "" {
 		return nil
@@ -92,17 +111,26 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromInterviewReport(
 	if err := json.Unmarshal([]byte(report.ScoresJSON), &interviewScores); err != nil {
 		return fmt.Errorf("面接スコアのパースエラー: %w", err)
 	}
+	// evidence は壊れていても補正が中立に寄るだけなのでエラーにしない。
+	// nil map になっても evidence[key] は "" で、interviewSignal が欠損を中立(0.5)扱いにするため
+	// ルーブリック相応の値がそのまま反映される（#1554 で実装をこのコメントに合わせた）。
+	var evidence map[string]string
+	_ = json.Unmarshal([]byte(report.EvidenceJSON), &evidence)
 
 	applied, failed := 0, 0
 	for _, mapping := range interviewScoreMapping {
 		raw, ok := interviewScores[mapping.interviewKey]
 		if !ok {
+			// ValidateRubricScores を通ったレポートなら5項目すべて揃っている。
+			// 引けないのはプロンプト側のキーとずれている兆候なので、黙って飛ばさない。
+			log.Printf("[CrossFeature] 面接スコアに項目 %s が無い（プロンプトのルーブリックキーとずれている可能性）\n",
+				mapping.interviewKey)
 			continue
 		}
-		// 0-5 → 0-100 に正規化
-		normalized := raw * 20
+		// 0-5 → 0-100。evidence 量と回答量で ±5点だけ補正して分解能を上げる（#1528）
+		normalized := mapInterviewScore(raw, evidence[mapping.interviewKey], stats)
 
-		// 複数カテゴリに均等按分して移動平均で更新
+		// 複数カテゴリへ同じ値を移動平均で反映
 		for _, category := range mapping.categories {
 			if err := s.applyMovingAverage(userID, chatSessionID, category, normalized); err != nil {
 				// 一部失敗は警告ログのみ（処理継続）
@@ -135,10 +163,6 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromResumeReview(
 		return nil
 	}
 
-	// 総合スコアを 0-100 として活用
-	score := review.Score
-
-	// critical 件数をカウント
 	criticalCount := 0
 	for _, item := range items {
 		if item.Severity == "critical" {
@@ -146,23 +170,11 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromResumeReview(
 		}
 	}
 
-	// スコアが高い場合: 表現力・詳細志向・技術志向を加点
-	if score >= 70 {
-		bonus := int(math.Round(float64(score-70) / 3)) // 最大 +10
-		for _, category := range []string{"細部志向", "コミュニケーション力", "技術志向"} {
-			if err := s.applyMovingAverage(userID, chatSessionID, category, score+bonus); err != nil {
-				log.Printf("[CrossFeature] resume→score bonus failed (cat=%s): %v\n", category, err)
-			}
-		}
-	}
-
-	// critical 指摘が多い場合: 関連カテゴリを現在値より低く調整
-	if criticalCount >= 3 {
-		penalty := clampInt(score-10*criticalCount, 0, 100)
-		for _, category := range []string{"細部志向", "コミュニケーション力"} {
-			if err := s.applyMovingAverage(userID, chatSessionID, category, penalty); err != nil {
-				log.Printf("[CrossFeature] resume→score penalty failed (cat=%s): %v\n", category, err)
-			}
+	// 対応表と式は resumeScoreMapping / mapResumeScore（score_mapping.go）に集約している。
+	// 高ければ高く、低ければ低く、スコア全域を使って反映する（#1528）。
+	for _, mapped := range mapResumeScore(review.Score, criticalCount) {
+		if err := s.applyMovingAverage(userID, chatSessionID, mapped.category, mapped.score); err != nil {
+			log.Printf("[CrossFeature] resume→score update failed (cat=%s): %v\n", mapped.category, err)
 		}
 	}
 	return nil
@@ -336,6 +348,10 @@ func (s *CrossFeatureIntegrationService) BuildIntegratedProfile(
 func (s *CrossFeatureIntegrationService) applyMovingAverage(
 	userID uint, sessionID, category string, newValue int,
 ) error {
+	// リポジトリ側も 0〜100 に丸めるが、呼び出し側でも範囲を守る。
+	// 丸めに頼ると、範囲外の値が「意図」なのか事故なのか読み取れなくなる（#1528）。
+	newValue = clampInt(newValue, 0, 100)
+
 	existing, err := s.weightScoreRepo.FindByUserSessionAndCategory(userID, sessionID, category)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return fmt.Errorf("スコア取得エラー: %w", err)
@@ -345,9 +361,7 @@ func (s *CrossFeatureIntegrationService) applyMovingAverage(
 		return s.weightScoreRepo.SetScore(userID, sessionID, category, newValue)
 	}
 
-	// 移動平均: new = existing * 0.7 + newValue * 0.3
-	blended := int(math.Round(float64(existing.Score)*0.7 + float64(newValue)*0.3))
-	delta := blended - existing.Score
+	delta := blendScore(existing.Score, newValue) - existing.Score
 	if delta == 0 {
 		return nil
 	}
