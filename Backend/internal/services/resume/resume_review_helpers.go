@@ -26,7 +26,17 @@ const (
 	// 言い回しが1語だけ違うブロックどうしの差は 0.015（実測）。一方、一文が2行に
 	// ほぼ均等に分かれたときの正解と不正解の差は 0.038〜0.063（実測）しかないので、
 	// 大きくすると均等分割の引用がまるごと欠落する。その間の値。
+	//
+	// 振る舞いで固定できている帯は 0.016〜0.038。0.022 以下にすると
+	// TestQuoteMatchUniqueExactWins の前提チェックが鳴るため、実際に通るのは
+	// 0.023〜0.038。帯がこれだけ狭いのは一文が2行に分かれた引用を1行ブロックと
+	// 突き合わせているからで、隣接行の連結窓(Issue #1559)が入れば 0.1 に戻せる。
 	quoteMatchMargin = 0.025
+	// quoteMinRunes は照合に使う引用の最小文字数（正規化後）。
+	// Normalize は約物・記号を落とすので、生8文字の「「、。・（）粘」」は「粘」1文字まで縮む。
+	// こうした引用が1ブロックにだけ含まれるのは偶然の一致であり、
+	// 1〜2文字の漢字で注釈PDFにピンが打たれてしまうため捨てる。
+	quoteMinRunes = 6
 )
 
 func fallbackResumeReview(blocks []models.ResumeTextBlock) (*models.ResumeReview, []models.ResumeReviewItem) {
@@ -106,16 +116,26 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 
 	result := make([]models.ResumeReviewItem, 0, len(aiItems))
 	for _, item := range aiItems {
-		if strings.TrimSpace(item.Quote) == "" {
+		// 長さは正規化後で判定する。生の文字数で見ると約物だけの引用が通ってしまう。
+		// page_hint 経路も同じゲートを通すため、ここで1回だけ判定する。
+		quoteText := textsim.New(item.Quote)
+		if quoteText.Len() < quoteMinRunes {
 			continue
 		}
+
 		var block *models.ResumeTextBlock
-		if item.PageHint > 0 && item.BlockIndex > 0 {
-			block = findBlockByIndex(blocks, item.PageHint, item.BlockIndex)
+		// page_hint / block_index はLLM生成で幻覚するので、指しているブロックが
+		// 実際に引用と一致するかを裏取りし、外れていたら通常の探索に落とす。
+		// block_index は ocr_extract.py が 0 始まりで振るため 0 も受ける。
+		if item.PageHint > 0 {
+			if i := findBlockByIndex(blocks, item.PageHint, item.BlockIndex); i >= 0 &&
+				blockTexts[i].MatchScore(quoteText) >= quoteMatchThreshold {
+				block = &blocks[i]
+			}
 		}
 		// findBestBlock が quoteMatchThreshold を保証して返すため、追加の照合はしない。
-		if block == nil && runeLen(item.Quote) >= 6 {
-			block = findBestBlock(blocks, blockTexts, item.Quote)
+		if block == nil {
+			block = findBestBlock(blocks, blockTexts, quoteText)
 		}
 		if block == nil {
 			continue
@@ -141,19 +161,14 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 //
 // page_hint での絞り込みはしない。page_hint はLLM生成で幻覚するため、
 // 絞り込むと他ページの完全一致を見ずに同ページの弱い候補を採ってしまう。
-func findBestBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Bigrams, quote string) *models.ResumeTextBlock {
-	quoteText := textsim.New(quote)
-	if quoteText.Empty() {
-		return nil
-	}
-
+func findBestBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Bigrams, quoteText textsim.Bigrams) *models.ResumeTextBlock {
 	var best *models.ResumeTextBlock
 	bestScore, secondScore := 0.0, 0.0
-	exactCount := 0
+	fullScoreCount := 0
 	for i := range blocks {
 		score := blockTexts[i].MatchScore(quoteText)
 		if score == 1 {
-			exactCount++
+			fullScoreCount++
 		}
 		if score > bestScore {
 			bestScore, secondScore, best = score, bestScore, &blocks[i]
@@ -166,9 +181,11 @@ func findBestBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Bigrams
 	if best == nil || bestScore < quoteMatchThreshold {
 		return nil
 	}
-	// 完全包含が1件だけならそれが引用元。行が長いほど1語違いの行のスコアは
+	// 満点が1件だけならそれが引用元。行が長いほど1語違いの行のスコアは
 	// 1.0に漸近する(≒1-2/N)ので、marginで捨てると長文行が必ず落ちてしまう。
-	if bestScore == 1 && exactCount == 1 {
+	// 満点はほぼ「本文が引用を含む」ケースだが、bigram集合が一致しても1.0になり得る
+	// （"あいあ"と"いあい"）ため、包含とは言わず満点として数える。
+	if bestScore == 1 && fullScoreCount == 1 {
 		return best
 	}
 	// 次点と差が小さいときは、どちらのブロックとも言える状態。
@@ -183,8 +200,9 @@ func findBestBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Bigrams
 // 件数が増えたときだけ採用する。初回より少ない結果で上書きすると、
 // 初回2件・リトライ0件のようなケースで紐づけ失敗エラーになってしまう。
 //
-// 結合ではなく置き換えにしているのは、リトライのプロンプトが初回と同じブロックに
-// 対する指摘を求めるもので内容が重複し、同じ箇所に注釈が二重に打たれるため。
+// 結合ではなく置き換えにしているのは、リトライが selectReviewBlocks で選び直した
+// 別のブロック集合に指摘を再依頼するもので初回と内容が重複し得るのに、
+// (PageNumber, BBox) での重複排除を持たないため。同じ箇所への二重注釈を避ける。
 func adoptRetryItems(initial, retry []models.ResumeReviewItem) []models.ResumeReviewItem {
 	if len(retry) > len(initial) {
 		return retry
@@ -192,14 +210,14 @@ func adoptRetryItems(initial, retry []models.ResumeReviewItem) []models.ResumeRe
 	return initial
 }
 
-func findBlockByIndex(blocks []models.ResumeTextBlock, pageHint int, blockIndex int) *models.ResumeTextBlock {
+// findBlockByIndex は page_hint / block_index が指すブロックの添字を返す（無ければ -1）。
+func findBlockByIndex(blocks []models.ResumeTextBlock, pageHint int, blockIndex int) int {
 	for i := range blocks {
-		block := &blocks[i]
-		if block.PageNumber == pageHint && block.BlockIndex == blockIndex {
-			return block
+		if blocks[i].PageNumber == pageHint && blocks[i].BlockIndex == blockIndex {
+			return i
 		}
 	}
-	return nil
+	return -1
 }
 
 func runeLen(s string) int {

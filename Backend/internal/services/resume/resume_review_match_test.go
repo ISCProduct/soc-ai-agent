@@ -146,9 +146,28 @@ func TestQuoteMatching(t *testing.T) {
 			wantBBox: "bbox-1",
 		},
 		{
-			name:     "page_hintとblock_indexが一致すれば引用が弱くても紐づく",
+			// page_hint が指すブロックも引用と一致しなければ採用しない
+			name:     "page_hintが指すブロックが引用と無関係なら紐づけない",
 			blocks:   standard,
-			item:     aiReviewItem{Quote: "宇宙開発の研究", PageHint: 1, BlockIndex: 2},
+			item:     aiReviewItem{Quote: "宇宙開発の研究室で衛星の姿勢制御を研究しました", PageHint: 1, BlockIndex: 2},
+			wantBBox: "",
+		},
+		{
+			// page_hint は曖昧な候補の決定には使える（裏取りが通るため）
+			name:     "同じ言い回しが2箇所でもpage_hintが裏取りできれば紐づく",
+			blocks:   duplicated,
+			item:     aiReviewItem{Quote: "接客のアルバイトで培った傾聴力", PageHint: 1, BlockIndex: 2},
+			wantBBox: "bbox-2",
+		},
+		{
+			// M1: margin 0.025 では語尾だけ違う近似ブロックの差(0.036)を拾えず誤紐づけする。
+			// 隣接行の連結窓(Issue #1559)が入れば margin を 0.1 に戻して解消できる既知の穴。
+			name: "既知の穴: 語尾だけ違う近似ブロックには誤って紐づく",
+			blocks: makeBlocks(
+				"接客のアルバイトで培った傾聴力を活かしたいです。",
+				"接客のアルバイトで培った傾聴力を発揮します。",
+			),
+			item:     aiReviewItem{Quote: "接客のアルバイトで培った傾聴力を仕事で使う"},
 			wantBBox: "bbox-2",
 		},
 	}
@@ -159,6 +178,100 @@ func TestQuoteMatching(t *testing.T) {
 				t.Errorf("BBox = %q, want %q", got, tt.wantBBox)
 			}
 		})
+	}
+}
+
+// TestQuoteMatchingRejectsDegenerateQuotes は、正規化で1〜3文字まで縮む引用を捨てることを固定する。
+// Normalize は約物・記号を落とすので、生の文字数でゲートすると素通りしてしまう。
+// 1文字の漢字は1ブロックにだけ含まれることがあり、満点1件として margin も抜けて
+// 無関係な行に注釈PDFのピンが打たれる。
+func TestQuoteMatchingRejectsDegenerateQuotes(t *testing.T) {
+	blocks := makeBlocks(
+		"私の強みは課題を分解して粘り強く取り組めることです。",
+		blockWeb,
+		blockMotive,
+		"普通自動車免許を取得しています。",
+	)
+
+	tests := []struct {
+		name  string
+		quote string
+	}{
+		{name: "約物と記号だけで1文字に縮む", quote: "「、。・（）粘」"},
+		{name: "記号で2文字に縮む", quote: "◯◯◯◯◯免許"},
+		{name: "中黒で3文字に縮む", quote: "・・・・・自動車"},
+		{name: "空白だけ", quote: "　 \n "},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if n := textsim.New(tt.quote).Len(); n >= quoteMinRunes {
+				t.Fatalf("正規化後 %d 文字では前提が崩れる（quoteMinRunes=%d 未満のはず）", n, quoteMinRunes)
+			}
+			if got := mapOne(t, blocks, aiReviewItem{Quote: tt.quote}); got != "" {
+				t.Errorf("BBox = %q, want 空文字（生%d文字でも正規化後は短すぎる）", got, len([]rune(tt.quote)))
+			}
+			// page_hint 経路も同じゲートを通ること
+			hinted := aiReviewItem{Quote: tt.quote, PageHint: 1, BlockIndex: 1}
+			if got := mapOne(t, blocks, hinted); got != "" {
+				t.Errorf("page_hint あり: BBox = %q, want 空文字", got)
+			}
+		})
+	}
+}
+
+// TestQuoteMatchingVerifiesPageHint は page_hint / block_index が指すブロックを
+// 引用で裏取りすることを固定する。page_hint は幻覚するので無条件には信頼できない。
+func TestQuoteMatchingVerifiesPageHint(t *testing.T) {
+	// ocr_extract.py は block_index を 0 始まりで振る
+	blocks := []models.ResumeTextBlock{
+		{PageNumber: 1, BlockIndex: 0, Text: blockPR, BBox: "p1b0"},
+		{PageNumber: 2, BlockIndex: 0, Text: "普通自動車免許を取得しています。", BBox: "p2b0"},
+	}
+
+	tests := []struct {
+		name     string
+		item     aiReviewItem
+		wantBBox string
+	}{
+		{
+			name:     "別ページを指していても引用に一致するブロックへ落ちる",
+			item:     aiReviewItem{Quote: blockPR, PageHint: 2, BlockIndex: 0},
+			wantBBox: "p1b0",
+		},
+		{
+			name:     "本文に存在しない引用は紐づけない",
+			item:     aiReviewItem{Quote: "宇宙開発の研究室で衛星の姿勢制御を研究しました", PageHint: 2, BlockIndex: 0},
+			wantBBox: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := mapOne(t, blocks, tt.item); got != tt.wantBBox {
+				t.Errorf("BBox = %q, want %q", got, tt.wantBBox)
+			}
+		})
+	}
+}
+
+// TestQuoteMatchingAcceptsZeroBlockIndex は 0 始まりの block_index を受けることを固定する。
+// ocr_extract.py は enumerate で block_index を振るので各ページ先頭行は B0 になる。
+// 曖昧で探索だけでは決まらない候補を使い、page_hint 経路が実際に効いていることを確かめる。
+func TestQuoteMatchingAcceptsZeroBlockIndex(t *testing.T) {
+	const quote = "接客のアルバイトで培った傾聴力"
+	blocks := []models.ResumeTextBlock{
+		{PageNumber: 1, BlockIndex: 0, Text: "接客のアルバイトで培った傾聴力を活かしたいです。", BBox: "p1b0"},
+		{PageNumber: 1, BlockIndex: 1, Text: "接客のアルバイトで培った傾聴力を仕事で発揮します。", BBox: "p1b1"},
+	}
+
+	// 前提: どちらも満点なので、探索だけでは曖昧として捨てられる
+	if got := mapOne(t, blocks, aiReviewItem{Quote: quote}); got != "" {
+		t.Fatalf("page_hint なしで BBox = %q, want 空文字（このテストの前提が崩れた）", got)
+	}
+
+	if got := mapOne(t, blocks, aiReviewItem{Quote: quote, PageHint: 1, BlockIndex: 0}); got != "p1b0" {
+		t.Errorf("BBox = %q, want p1b0（0始まりのblock_index）", got)
 	}
 }
 
