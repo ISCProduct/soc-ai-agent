@@ -113,6 +113,16 @@ go run ./cmd/aibench -target es -manifest ../docs/research/ai-eval/es.jsonl -n 3
   実測でこれを混ぜると数字が壊れた: ローカルの通信断2回で破損率が11.1%になり、
   120秒のタイムアウトが p95 を120,001msに押し上げた。どちらもモデルの品質とは
   無関係で、測り直せば消える。
+### 履歴書レビューのスコアと「やり直し前」の数字
+
+総合スコア（0〜100）は LLM に出させず、項目スコア5つ（specificity / achievement /
+role_fit / completeness / readability、各0〜5）の加重和から本番と同じ
+`resume.ComputeResumeOverallScore` で算出する（#1529）。重みは候補者区分で変わる。
+
+本番はルーブリック違反のとき別プロンプトで1度やり直してからスコアを捨てる。
+ハーネスはリトライを通さないので、**`schema_incomplete` の発生率はやり直し前の値**である。
+ユーザーが実際にスコア無しになる割合はこれより低い。
+
 - **認証エラー（401/403）・モデル名の誤り（404）・APIキー未設定** は設定の問題なので、
   検知したら即座に実行を打ち切る（終了コード4）。続行すると「破損率100%」という
   もっともらしい数字が出て、設定ミスを品質の問題と読み違える。
@@ -164,7 +174,7 @@ go run ./cmd/aibench -target es -manifest ../docs/research/ai-eval/es.jsonl -n 3
 target ごとの `input`:
 
 - `es`: `es_text`（必須）, `question_type`, `company_name`
-- `resume`: `resume_text`（必須。**1行=1ブロック**として本番のOCRブロックに変換される）, `company_name`, `job_title`, `candidate_type`
+- `resume`: `resume_text`（必須。**1行=1ブロック**として本番のOCRブロックに変換される）, `company_name`, `job_title`, `candidate_type`（**`new_grad` / `mid_career` のみ**。ルーブリックの重みをこの値で引くため、他の値だと本番と違う条件で測ることになる）
 - `interview-report`: `transcript`（必須。`Interviewer: ` / `User: ` 行。`interview.BuildTranscript` と同形式）, `lang`
 
 `transcript` の役割ラベルは必須。根拠の捏造チェック（`ValidateEvidence`）が
@@ -275,9 +285,12 @@ target ごとの `input`:
 
 **`resume`**
 
+項目スコア（ルーブリック）の欠落・値域外・未知キーは違反ではなく**破損**（`schema_incomplete`）
+として数える。本番も `ValidateResumeRubricScores` を通らなければ固定値を入れずスコアを
+捨てる（#1529）ので、スコアが取れないこと自体が品質の欠落である。
+
 | 違反名 | 内容 |
 |---|---|
-| `score_out_of_range` | score が 0〜100 の外 |
 | `items_empty` / `items_over_limit` | items が0件、または8件超 |
 | `item_missing_fields` | quote / message / suggestion のいずれかが空 |
 | `severity_invalid` | severity が info / warning / critical 以外 |
@@ -293,8 +306,18 @@ target ごとの `input`:
 | `evidence_not_spoken` | **根拠が受験者の発話に基づかない（捏造）**。本番と同じ `ValidateEvidence` で照合する |
 | `teacher_evidence_not_spoken` | 同じく教員向けの詳細根拠 |
 
-捏造の照合は本番と同じ関数を呼んでいる。ハーネス側で別実装にすると、
-本番が弾く/弾かないの境界とハーネスの数字がずれる。
+捏造の照合は本番と同じ関数を呼んでいる（`interview.SpokenContent` +
+`interview.ValidateEvidence`）。ハーネス側で別実装にすると、本番が弾く/弾かないの
+境界とハーネスの数字がずれる。
+
+**`evidence_not_spoken` は「引用になっていない」を数える指標である。** #1580 で照合が
+内容語ベースになったため、発話の語彙を引き継がない抽象的な講評
+（「論理的に筋道立てて説明できていました」等）は通らない。完全引用は1.000、
+語彙を引き継いだ要約は0.667で通り、面接官の発言は0.154で落ちる（しきい値0.25）。
+この境界は `TestゴールデンセットでEvidence照合が正しく分かれる` が固定している。
+
+照合の実装が変わると同じ出力でもこの違反数が変わる。**照合を変えた前後の数字を
+「モデルが悪化した」と読まないこと。** 比較できるのは照合が同じ実行同士だけである。
 
 ---
 
