@@ -129,7 +129,7 @@ func TestInterviewController_Turn_OmitsCompanyInfoFromResponse(t *testing.T) {
 		"Example", "", true, "", "private company profile", "general", uint(42),
 		0, 0, 0, 0, 0, 0,
 	).Return(&interview.TurnResult{
-		AIText: "response",
+		AIText:                 "response",
 		CompanyReadingResolved: true,
 	}, nil)
 	if err := newInterviewController(svc).Turn(ctx); err != nil {
@@ -167,7 +167,7 @@ func TestInterviewController_StartTurn_OmitsCompanyInfoFromResponse(t *testing.T
 		"Example", "", "", "private company profile", "general", uint(42),
 		1, 5, 0, 180,
 	).Return(&interview.TurnResult{
-		AIText: "response",
+		AIText:                 "response",
 		CompanyReadingResolved: true,
 	}, nil)
 	if err := newInterviewController(svc).StartTurn(ctx); err != nil {
