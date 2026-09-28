@@ -140,6 +140,30 @@ describe('ESRewritePage 企業適合性の表示 (#1524)', () => {
     expect(screen.getByText('8 / 10')).toBeInTheDocument()
     expect(screen.getByText(/への対策アドバイス/)).toBeInTheDocument()
     expect(screen.queryByText(/企業情報を取得できなかったため/)).not.toBeInTheDocument()
+
+    // 添削後に入力欄だけ書き換えても、結果カードは添削に使った企業名を出し続ける
+    fireEvent.change(screen.getByLabelText(/志望企業名/), { target: { value: '別の会社' } })
+    expect(screen.getByText('🏢 株式会社サイバーエージェントへの対策アドバイス')).toBeInTheDocument()
+    expect(screen.queryByText(/別の会社への対策アドバイス/)).not.toBeInTheDocument()
+  })
+
+  it('企業情報は取得できたが点数だけ出せないときは「見つかりませんでした」と言わない (H-2)', async () => {
+    // _clamp_company_fit がモデルの非数値回答を null にするため、
+    // company_context_source が none 以外でも fit が null になるレスポンスが実在する
+    await review(
+      {
+        ...REVIEW_BASE,
+        company_fit_score: null,
+        company_strategy: '企業情報に基づく対策',
+        company_context_source: 'web_search',
+      },
+      '株式会社テスト',
+    )
+
+    expect(screen.getByText(/今回は企業適合性の点数を算出できませんでした/)).toBeInTheDocument()
+    expect(screen.queryByText(/公開情報が見つかりませんでした/)).not.toBeInTheDocument()
+    // 取得できた企業情報を根拠にした対策アドバイスは出したまま（説明と矛盾させない）
+    expect(screen.getByText(/への対策アドバイス/)).toBeInTheDocument()
   })
 
   it('422は detail の案内文をそのまま表示する（BFFの一般文で上書きしない / #1521）', async () => {
@@ -163,5 +187,62 @@ describe('ESRewritePage 企業適合性の表示 (#1524)', () => {
     expect(
       await screen.findByText('文章が長すぎて添削できませんでした。文字数を減らしてお試しください。'),
     ).toBeInTheDocument()
+  })
+})
+
+
+describe('ESRewritePage 422の生JSON表示防止 (#1015 / #1521)', () => {
+  beforeEach(() => {
+    global.fetch = jest.fn()
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  it('detailが文字列でない422では生の本文を表示せず、一般文にフォールバックする', async () => {
+    const longText = 'あ'.repeat(10001)
+    // api-proxy は本文に文字列 detail が無いとレスポンス本文そのものを detail に入れる
+    const rawBody = JSON.stringify({
+      detail: [
+        {
+          type: 'string_too_long',
+          loc: ['body', 'es_text'],
+          msg: 'String should have at most 10000 characters',
+          input: longText,
+        },
+      ],
+    })
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: async () => ({
+        error: '処理に失敗しました。しばらくしてから再試行してください。',
+        status: 422,
+        detail: rawBody,
+      }),
+    })
+
+    render(<ESRewritePage />)
+    fireEvent.click(screen.getByRole('button', { name: 'ES添削' }))
+    fireEvent.change(screen.getByPlaceholderText(/チームで開発した経験があります/), {
+      target: { value: '長い文章です。' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+
+    expect(
+      await screen.findByText('処理に失敗しました。しばらくしてから再試行してください。'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/string_too_long/)).not.toBeInTheDocument()
+    expect(screen.queryByText(new RegExp(longText.slice(0, 40)))).not.toBeInTheDocument()
+  })
+
+  it('ES本文の入力欄はAPIの上限(10,000字)で止める', () => {
+    render(<ESRewritePage />)
+
+    expect(screen.getByPlaceholderText(/チームで開発した経験があります/)).toHaveAttribute(
+      'maxlength',
+      '10000',
+    )
   })
 })
