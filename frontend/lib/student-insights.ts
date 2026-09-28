@@ -19,6 +19,14 @@ export interface LowMatchApplication {
   status: string
 }
 
+// 履歴書の対応要否(Issue #1030)。
+export interface ResumeAttention {
+  needs_attention: boolean
+  has_document: boolean
+  latest_score?: number | null
+  reason?: string
+}
+
 export interface StudentTendency {
   user_id: number
   name: string
@@ -27,6 +35,7 @@ export interface StudentTendency {
   top_categories: CategoryScore[] | null
   suited_industries: SuitedIndustry[] | null
   low_match_applications?: LowMatchApplication[] | null
+  resume_status?: ResumeAttention | null
   data_available: boolean
 }
 
@@ -69,4 +78,11 @@ export function formatScore(score: number): string {
 // バックエンドは該当なしのとき項目ごと省略する(omitempty)ので、null も空として扱う。
 export function lowMatchApplications(student: StudentTendency): LowMatchApplication[] {
   return student.low_match_applications ?? []
+}
+
+// 履歴書要対応の表示文言。要対応でなければ空。
+export function resumeAttentionLabel(student: StudentTendency): string {
+  const status = student.resume_status
+  if (!status?.needs_attention) return ''
+  return status.reason || '要対応'
 }

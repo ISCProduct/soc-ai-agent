@@ -124,6 +124,11 @@ jobs:
       - name: 本番デプロイのRDSガード検査
         run: ./automation/test/prod-deploy-db-guard-test.sh
 
+      # サーキットブレーカーの戻し先イメージがECRから消えていると、起動不能なタスク定義を
+      # 指したまま残る（#1518）。停止日は desired=0 なので次の稼働日まで気づけない。
+      - name: タスク定義イメージ存在検査のテスト
+        run: ./automation/test/verify-task-def-images-test.sh
+
       # 運用手順の `aws ecs update-service --task-definition <family>`（リビジョン省略）。
       # 最新 ACTIVE = terraform が tfvars の image(:latest) で登録した定義が選ばれ、
       # 本番は SHA タグしか push しないため稼働中イメージが巻き戻る/存在せず落ちる。

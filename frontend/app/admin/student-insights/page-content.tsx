@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Alert,
+  Button,
   Checkbox,
   Chip,
   FormControlLabel,
@@ -31,10 +32,14 @@ import {
   displayIndustries,
   displayTypeLabel,
   lowMatchApplications,
+  resumeAttentionLabel,
   NO_DATA_LABEL,
   type StudentTendency,
 } from '@/lib/student-insights'
 import { LOW_MATCH_THRESHOLD } from '@/lib/low-match'
+import { sendTeacherGuidance } from '@/lib/teacher-guidance'
+
+const guidanceKey = (userId: number, kind: 'low_match' | 'resume') => `${userId}:${kind}`
 
 export default function PageContent() {
   const [adminEmail, setAdminEmail] = useState('')
@@ -44,8 +49,12 @@ export default function PageContent() {
   const [rowsPerPage, setRowsPerPage] = useState(25)
   const [query, setQuery] = useState('')
   const [lowMatchOnly, setLowMatchOnly] = useState(false)
+  const [resumeNeedsAttentionOnly, setResumeNeedsAttentionOnly] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  // 送信中・送信済は「生徒×案内種別」単位で持つ（同時送信や2種類目の案内を妨げない）
+  const [sendingKeys, setSendingKeys] = useState<Set<string>>(() => new Set())
+  const [sentKeys, setSentKeys] = useState<Set<string>>(() => new Set())
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
   // 担当校を持つ管理者は school_id が必須(無いと403)なので、学校が確定するまで取得しない
   const [schoolRequired, setSchoolRequired] = useState<boolean | null>(null)
@@ -85,6 +94,7 @@ export default function PageContent() {
         ...(query ? { q: query } : {}),
         ...(schoolId !== undefined ? { school_id: String(schoolId) } : {}),
         ...(lowMatchOnly ? { low_match_only: 'true' } : {}),
+        ...(resumeNeedsAttentionOnly ? { resume_needs_attention_only: 'true' } : {}),
       })
       const res = await fetch(`/api/admin/teacher/students/tendency-analysis?${params}`, {
         headers: authService.getAdminFetchHeaders(),
@@ -102,7 +112,7 @@ export default function PageContent() {
     } finally {
       if (!isCancelled?.()) setLoading(false)
     }
-  }, [adminEmail, schoolRequired, schoolId, page, rowsPerPage, query, lowMatchOnly])
+  }, [adminEmail, schoolRequired, schoolId, page, rowsPerPage, query, lowMatchOnly, resumeNeedsAttentionOnly])
 
   // 検索入力のたびに投げると古いレスポンスが新しい結果を上書きするため、デバウンス+キャンセルする
   useEffect(() => {
@@ -112,6 +122,27 @@ export default function PageContent() {
     }, query ? 400 : 0)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [fetchStudents, query])
+
+  const sendGuidance = async (s: StudentTendency, kind: 'low_match' | 'resume') => {
+    const key = guidanceKey(s.user_id, kind)
+    setSendingKeys((prev) => new Set(prev).add(key))
+    setError('')
+    try {
+      await sendTeacherGuidance(s.user_id, {
+        kind,
+        suggested_industries: displayIndustries(s).map((i) => i.industry_name),
+      })
+      setSentKeys((prev) => new Set(prev).add(key))
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '案内の送信に失敗しました')
+    } finally {
+      setSendingKeys((prev) => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
+    }
+  }
 
   return (
     <PageContainer maxWidth={ADMIN_PAGE_WIDTH.wide}>
@@ -156,6 +187,17 @@ export default function PageContent() {
           label={`マッチ度${LOW_MATCH_THRESHOLD}未満の応募がある生徒のみ`}
           slotProps={{ typography: { variant: 'body2', noWrap: true } }}
         />
+        <FormControlLabel
+          control={
+            <Checkbox
+              size="small"
+              checked={resumeNeedsAttentionOnly}
+              onChange={(e) => { setResumeNeedsAttentionOnly(e.target.checked); setPage(0) }}
+            />
+          }
+          label="履歴書要対応の生徒のみ"
+          slotProps={{ typography: { variant: 'body2', noWrap: true } }}
+        />
       </Stack>
 
       <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
@@ -168,18 +210,20 @@ export default function PageContent() {
               <TableCell>上位カテゴリ</TableCell>
               <TableCell>向いている業界 TOP3</TableCell>
               <TableCell>要フォローの応募</TableCell>
+              <TableCell>履歴書</TableCell>
+              <TableCell>案内</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                   <CircularProgress size={24} />
                 </TableCell>
               </TableRow>
             ) : students.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                <TableCell colSpan={8} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                   生徒が見つかりません
                 </TableCell>
               </TableRow>
@@ -189,6 +233,13 @@ export default function PageContent() {
               const typeLabel = displayTypeLabel(s)
               const noData = typeLabel === NO_DATA_LABEL
               const lowMatches = lowMatchApplications(s)
+              const resumeLabel = resumeAttentionLabel(s)
+              const canGuideLowMatch = lowMatches.length > 0
+              const canGuideResume = Boolean(resumeLabel)
+              const lowMatchKey = guidanceKey(s.user_id, 'low_match')
+              const resumeKey = guidanceKey(s.user_id, 'resume')
+              const lowMatchSent = sentKeys.has(lowMatchKey)
+              const resumeSent = sentKeys.has(resumeKey)
               return (
                 <TableRow key={s.user_id} hover>
                   <TableCell>
@@ -248,6 +299,41 @@ export default function PageContent() {
                         ))}
                       </Stack>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    {resumeLabel ? (
+                      <Chip label={resumeLabel} size="small" color="warning" variant="outlined" />
+                    ) : (
+                      <Typography variant="body2" color="text.disabled">—</Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Stack spacing={0.5} sx={{ minWidth: 120 }}>
+                      {canGuideLowMatch && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          disabled={sendingKeys.has(lowMatchKey) || lowMatchSent}
+                          onClick={() => sendGuidance(s, 'low_match')}
+                        >
+                          {lowMatchSent ? '送信済' : '軌道修正'}
+                        </Button>
+                      )}
+                      {canGuideResume && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="warning"
+                          disabled={sendingKeys.has(resumeKey) || resumeSent}
+                          onClick={() => sendGuidance(s, 'resume')}
+                        >
+                          {resumeSent ? '送信済' : '履歴書案内'}
+                        </Button>
+                      )}
+                      {!canGuideLowMatch && !canGuideResume && (
+                        <Typography variant="body2" color="text.disabled">—</Typography>
+                      )}
+                    </Stack>
                   </TableCell>
                 </TableRow>
               )

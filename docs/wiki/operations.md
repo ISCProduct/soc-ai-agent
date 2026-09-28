@@ -3,13 +3,14 @@
 ## 目次
 
 1. [デプロイ手順](#1-デプロイ手順)
+   - [停止日の本番デプロイ](#11-停止日の本番デプロイ-1518)
 2. [定期バッチ作業](#2-定期バッチ作業)
 3. [監視項目](#3-監視項目)
    - [リクエストIDでサービス横断追跡](#31-リクエストidでサービス横断追跡-1188)
    - [メトリクスを見る](#32-メトリクスを見る-1186)
    - [稼働日の前日チェックリスト](#33-稼働日の前日チェックリスト-1388)
    - [エラートラッキング(Sentry)の有効化](#34-エラートラッキングsentryの有効化-1185)
-   - [エラートラッキング（Sentry）](#34-エラートラッキングsentry-619--1185)
+   - [エラートラッキング（Sentry）](#34-エラートラッキングsentry619--1185)
    - [クライアントIPをBFFからBackendへ引き継ぐ](#35-クライアントipをbffからbackendへ引き継ぐ-1407)
 4. [障害対応](#4-障害対応)
 5. [データベース管理](#5-データベース管理)
@@ -93,6 +94,114 @@ aws ecs update-service --cluster soc-app --service frontend \
 # のが確実（GitHub Actions を workflow_dispatch で該当コミットに対して再実行）
 gh workflow run deployment.yml --ref <直前の安定コミットSHA>
 ```
+
+**戻す前に、戻し先のイメージがECRに在ることを必ず確認する（#1518）。**
+ECRのライフサイクルで失効していると、リビジョンは残っていても `CannotPullContainerError`
+で起動できない。
+
+```sh
+img=$(aws ecs describe-task-definition --task-definition soc-app-backend:<リビジョン> \
+  --query 'taskDefinition.containerDefinitions[0].image' --output text)
+aws ecr describe-images --repository-name soc-backend \
+  --image-ids imageTag="${img##*:}" --query 'imageDetails[0].imagePushedAt' --output text
+```
+
+---
+
+## 1.1 停止日の本番デプロイ (#1518)
+
+本番は「指定日のみ終日起動」なので、通常日のデプロイは **RDS とECSサービスを一時的に
+起動して確認し、終わったら desired=0 とRDS停止へ戻す**。`deployment.yml` の
+`deploy-production` ジョブが1ジョブの中で次の順に行う。
+
+1. Playwright スモークの準備（`npm ci` / ブラウザ取得）
+   ※**本番AWS認証情報を入れる前**に済ませる。`configure-aws-credentials` 以降は
+   ECS/RDS/ECR を操作できるキーがジョブ全体の環境変数に残るため、その状態で
+   `npm ci` を走らせると依存パッケージの install スクリプトから本番を触れる。
+   スモーク本体のステップも `AWS_ACCESS_KEY_ID` などを空で上書きしてから実行する。
+2. イメージのビルド / push（`--provenance=false`。理由は後述）
+3. 新しいタスク定義を登録し、ワンオフタスクで `migrate up`（backend 変更時のみ）
+4. 各サービスへ新しいタスク定義を適用
+5. **一時起動**（`automation/ops/prod-scale.sh 1`）
+6. ECSの安定待ち（一時起動したときは chroma を含む**全サービス**を待つ。
+   変更のあったサービスだけ待つと、cold start 中の frontend をスモークが叩いて落ちる）
+7. **Playwright スモーク**（`frontend/e2e/smoke/smoke.spec.ts`。結果は Discord へ）
+8. **タスク定義のイメージ存在検査**（`automation/ops/verify-task-def-images.sh`、`always()`）
+9. desired=0 へ戻す（`always()`、`override=on` と起動日は尊重する）
+10. このデプロイが起動したRDSを停止（`always()`）。
+    backend を変更していない停止日のデプロイでも 5 のために RDS を起動するので、
+    停止の条件は「このデプロイが起動したか（`started_by_deploy`）」だけで見る。
+
+**この5〜9の間（数分）、本番の公開URLが実際に生きる。** 停止日でも
+`https://shukatsu-ai.jp` が応答するのはこのためで、スモークを足した分だけ
+その時間は伸びた（従来の「起動確認だけ」より1〜2分程度）。
+
+長時間ハングでRDSを起動したまま `concurrency` を占有しないよう、`npm ci` と
+スモークのステップには `timeout-minutes: 15` を入れている。ジョブ全体ではなく
+ステップに入れるのは、ジョブのタイムアウトだと後段の `always()`（desired=0 へ戻す /
+RDS停止）まで打ち切られ、停止日の本番が起動したまま残るため。
+
+### 毎時の起動/停止ジョブとの排他
+
+`prod-uptime-scheduler.yml`（毎時5分）は、**本番デプロイが実行中なら停止処理を見送る**
+（`gh run list --workflow deployment.yml --branch main` で確認）。起動処理は見送らない。
+
+これが無かった 2026-09-25 は、デプロイの最中にスケジューラがRDSを停止し、起動した
+backend がDBへ繋がらずヘルスチェックに落ち、ECSのサーキットブレーカーが旧リビジョンへ
+ロールバックした。その旧イメージはECRから失効していたため、**backend が起動不能な
+タスク定義を指したまま残った**（停止日なので即時の障害にはならず、次の稼働日に発覚する）。
+
+見送りは「最大1時間、停止が遅れる」だけで、デプロイ自身が最後に必ず0へ戻す。
+
+**判定できなかった場合（API障害・権限不足）は停止しない。** そのまま停止へ進むと、
+上のロールバック事故をGitHub APIが不調なたびに再発させることになる。
+代わりにスケジューラのジョブを失敗させ、Discord（`@here`）へ理由を流す。
+
+確認と停止のあいだにデプロイが始まる競合を避けるため、確認は
+**RDSを止める直前にもう一度**行う（ECSの縮退ループに1〜2分かかるため）。
+GitHub Actions の `concurrency` を `deploy-production` と共有する形の厳密な排他は
+採っていない。同一 group では「pending のジョブは後から pending になったジョブに
+キャンセルされる」ため、毎時のこのジョブが main へのデプロイを取り消しうる。
+
+### ロールバック先の健全性
+
+ECSのデプロイサーキットブレーカーは「直前の安定デプロイ」へ戻すが、そのイメージが
+ECRに在るかは見ない。そこで、デプロイの最後に
+`automation/ops/verify-task-def-images.sh` が各サービスのタスク定義を検査し、
+イメージが無ければ**今回のデプロイで登録したリビジョンへ戻したうえでジョブを失敗させる**。
+
+ただし**自動で戻すのは desired=0 かつ running=0 のサービスだけ**。稼働日に
+「タグはECRから失効しているが既存タスクは動き続けている」旧リビジョンへ
+サーキットブレーカーが戻した場合、そこで新リビジョン（＝直前にヘルスチェックに
+落ちたもの）へ向け直すと、`minimumHealthyPercent=0` のため健全な稼働タスクが先に
+落とされて本番が停止する。稼働中は検査結果を出してジョブを失敗させるだけにし、
+復旧は人が判断する。
+
+手で確認・復旧する場合:
+
+```sh
+PROJECT_NAME=soc-app ./automation/ops/verify-task-def-images.sh \
+  backend=arn:aws:ecs:ap-northeast-1:<account>:task-definition/soc-app-backend:<リビジョン>
+```
+
+### ECRのライフサイクル
+
+ECRリポジトリ（`soc-backend` / `soc-frontend` / `soc-rag-review`）は **staging と本番で
+共用**で、Terraform では `environments/staging` の `module "ecr"` が持つ。
+
+| ルール | 対象 | 保持数 |
+| --- | --- | --- |
+| 1 | タグ無し（タグが外れた古い index / 古い buildcache 等） | `lifecycle_untagged_keep_count`（既定60） |
+| 2 | タグ付き（リリースのSHAタグ / `staging` / `buildcache-*`） | `lifecycle_keep_count`（既定20） |
+
+以前は `tagStatus=any` の1ルール（20件）だけだった。1ビルドで積まれるマニフェストは
+4件（image index・その子のプラットフォーム manifest・attestation・buildcache）で、
+**タグ無しの山がタグ付きのリリースイメージを枠から押し出していた**。
+staging のデプロイ回数もそのまま本番イメージの寿命を削るため、実質4デプロイ程度で
+前回の本番イメージが消えていた。
+
+あわせてビルドに `--provenance=false` を付け、1タグあたりのマニフェストを
+index+attestation の分だけ減らしている（provenance は誰も参照していない）。
 
 ---
 

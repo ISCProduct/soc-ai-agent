@@ -11,6 +11,14 @@ import { PageLoading } from '@/components/common/PageLoading'
 import { authService, User } from '@/lib/auth'
 import { WhatsNewEntry, fetchWhatsNewEntries, hasUnreadWhatsNew, markWhatsNewAsSeen } from '@/lib/whats-new-data'
 import { fetchResumeStatus, resumeReminderMessage } from '@/lib/resume-reminder'
+import {
+  canDismiss,
+  dismissGuidance,
+  fetchActiveGuidances,
+  withDismissing,
+  withoutDismissing,
+  type StudentGuidance,
+} from '@/lib/teacher-guidance'
 import styles from './page.module.css'
 
 export default function PageContent() {
@@ -21,6 +29,10 @@ export default function PageContent() {
   const [whatsNewEntries, setWhatsNewEntries] = useState<WhatsNewEntry[]>([])
   const [showWhatsNewBanner, setShowWhatsNewBanner] = useState(false)
   const [resumeReminder, setResumeReminder] = useState<string | null>(null)
+  const [guidances, setGuidances] = useState<StudentGuidance[]>([])
+  const [guidanceError, setGuidanceError] = useState('')
+  // 閉じる処理中のID。連打すると同じ案内へ何度もPOSTが飛ぶ(教員側は disabled で防いでいる)
+  const [dismissingIds, setDismissingIds] = useState<Set<number>>(() => new Set())
 
   useEffect(() => {
     const storedUser = authService.getStoredUser()
@@ -42,6 +54,11 @@ export default function PageContent() {
       .then((status) => setResumeReminder(resumeReminderMessage(status)))
       .catch(() => {
         // 履歴書状態の取得失敗はホーム画面を壊さない（バナーを出さない）
+      })
+    fetchActiveGuidances()
+      .then((rows) => setGuidances(rows))
+      .catch(() => {
+        // 教員案内の取得失敗はホームを壊さない
       })
   }, [router])
 
@@ -129,6 +146,48 @@ export default function PageContent() {
             >
               履歴書を確認する
             </MuiLink>
+          </Alert>
+        )}
+        {/*
+          案内は最大10件・1件1000文字まで返る(guidance_service.go)。
+          そのまま積むとチャット(この画面の主機能)が画面外へ押し出されるため、
+          バナー全体の高さを抑えてこの中でスクロールさせる。
+        */}
+        {guidances.length > 0 && (
+          <Box sx={{ maxHeight: 220, overflowY: 'auto' }}>
+            {guidances.map((g) => (
+              <Alert
+                key={g.id}
+                severity="info"
+                // 閉じる処理中は無効化する。連打すると同じ案内へ何度もPOSTが飛ぶ。
+                closeText="閉じる"
+                onClose={
+                  !canDismiss(dismissingIds, g.id)
+                    ? undefined
+                    : () => {
+                        setGuidanceError('')
+                        setDismissingIds((prev) => withDismissing(prev, g.id))
+                        dismissGuidance(g.id)
+                          .then(() => setGuidances((prev) => prev.filter((x) => x.id !== g.id)))
+                          .catch(() =>
+                            setGuidanceError('案内を閉じられませんでした。時間をおいて再度お試しください'),
+                          )
+                          .finally(() => setDismissingIds((prev) => withoutDismissing(prev, g.id)))
+                      }
+                }
+                sx={{ borderRadius: 0 }}
+              >
+                {g.message}
+                {g.suggested_industries && g.suggested_industries.length > 0 && (
+                  <>（参考: {g.suggested_industries.join('、')}）</>
+                )}
+              </Alert>
+            ))}
+          </Box>
+        )}
+        {guidanceError && (
+          <Alert severity="error" onClose={() => setGuidanceError('')} sx={{ borderRadius: 0 }}>
+            {guidanceError}
           </Alert>
         )}
         <div className={styles.chatWrapper}>

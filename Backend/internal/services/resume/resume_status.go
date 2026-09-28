@@ -46,6 +46,22 @@ func EvaluateResumeStatus(hasDocument bool, latestScore *int, threshold int) Res
 	return status
 }
 
+// AttentionReason は教員一覧向けの短い理由文言（#1030）。
+// NeedsAttention でないときは空文字。
+func AttentionReason(status ResumeStatus) string {
+	if !status.NeedsAttention {
+		return ""
+	}
+	switch {
+	case !status.HasDocument:
+		return "未提出"
+	case status.LatestScore == nil:
+		return "レビュー未実施"
+	default:
+		return "スコア低"
+	}
+}
+
 // GetResumeStatus は指定ユーザーの履歴書の対応要否を返す。
 // 呼び出し元(コントローラ)で本人以外のIDを渡さないこと。
 func (s *ResumeService) GetResumeStatus(userID uint) (*ResumeStatus, error) {
