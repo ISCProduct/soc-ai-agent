@@ -44,3 +44,33 @@ export async function sendTeacherGuidance(
     throw new Error(data.message || data.error || '案内の送信に失敗しました')
   }
 }
+
+/**
+ * canDismiss は案内を閉じる操作を受け付けてよいかを返す。
+ *
+ * 学生側のホームは閉じるボタンに進行中の状態を持っておらず、連打すると
+ * 同じ案内へ何度も POST が飛んでいた（教員側の送信ボタンは disabled で
+ * 防いでいるのに、学生側だけ抜けていた）。
+ *
+ * app/page-content.tsx は jsdom で描画できない（依存が重く OOM する）ため、
+ * 判定だけをここに置いてテストする。
+ */
+export function canDismiss(dismissingIds: Set<number>, id: number): boolean {
+  return !dismissingIds.has(id)
+}
+
+/**
+ * withDismissing / withoutDismissing は進行中IDの集合を更新する。
+ * Set を直接変更すると React が再描画しないため、必ず新しい Set を返す。
+ */
+export function withDismissing(dismissingIds: Set<number>, id: number): Set<number> {
+  const next = new Set(dismissingIds)
+  next.add(id)
+  return next
+}
+
+export function withoutDismissing(dismissingIds: Set<number>, id: number): Set<number> {
+  const next = new Set(dismissingIds)
+  next.delete(id)
+  return next
+}
