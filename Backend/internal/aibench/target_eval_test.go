@@ -2,6 +2,7 @@ package aibench
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"slices"
@@ -14,8 +15,19 @@ import (
 
 func TestEvaluateResumeResponse(t *testing.T) {
 	resumeText := "接客のアルバイトで売上を前年比120%に伸ばしました\n研究室でGoのCLIツールを作りました"
-	c := Case{ID: "r-001", Label: LabelGood, Target: TargetResume, Input: Input{ResumeText: resumeText}}
-	okJSON := `{"score":72,"summary":"要約","items":[{"quote":"接客のアルバイトで売上を前年比120%に伸ばしました","message":"指摘","suggestion":"改善案","severity":"warning"}]}`
+	c := Case{ID: "r-001", Label: LabelGood, Target: TargetResume,
+		Input: Input{ResumeText: resumeText, CandidateType: "new_grad"}}
+
+	// #1529 のルーブリック（全5項目 各0〜5）。新卒の重みで
+	// specificity30/achievement20/role_fit15/completeness20/readability15。
+	scores := func(sp, ac, rf, co, re int) string {
+		return fmt.Sprintf(`"scores":{"specificity":%d,"achievement":%d,"role_fit":%d,"completeness":%d,"readability":%d}`,
+			sp, ac, rf, co, re)
+	}
+	item := `{"quote":"接客のアルバイトで売上を前年比120%に伸ばしました","message":"指摘","suggestion":"改善案","severity":"warning"}`
+	okJSON := `{` + scores(4, 3, 3, 4, 3) + `,"summary":"要約","items":[` + item + `]}`
+	// 総合 = (30*4+20*3+15*3+20*4+15*3)/(100*5)*100 = 70
+	const okScore = 0.70
 
 	tests := []struct {
 		name           string
@@ -26,13 +38,13 @@ func TestEvaluateResumeResponse(t *testing.T) {
 		wantViolations []string
 	}{
 		{
-			name:      "正常",
+			name:      "正常（総合スコアは本番と同じ加重和で算出する）",
 			res:       CallResult{Text: okJSON},
-			wantScore: 0.72,
+			wantScore: okScore,
 		},
 		{
 			name:       "出力上限到達はJSON不正と分けて数える",
-			res:        CallResult{Text: `{"score":72,"items":[{"quo`, Truncated: true},
+			res:        CallResult{Text: `{"scores":{"specificity":4,"achie`, Truncated: true},
 			wantBroken: true, wantReason: BrokenTruncated,
 		},
 		{
@@ -46,8 +58,27 @@ func TestEvaluateResumeResponse(t *testing.T) {
 			wantBroken: true, wantReason: BrokenJSONInvalid,
 		},
 		{
-			name:       "スコアもitemsも無い",
-			res:        CallResult{Text: `{"summary":"要約"}`},
+			// 本番もルーブリック違反ならスコアを捨てる（固定値を入れない / #1529）。
+			// ハーネスは「スコアが取れなかった」として破損に数える。
+			name:       "scoresが無い",
+			res:        CallResult{Text: `{"summary":"要約","items":[` + item + `]}`},
+			wantBroken: true, wantReason: BrokenSchema,
+		},
+		{
+			name: "評価項目が欠けている",
+			res: CallResult{Text: `{"scores":{"specificity":4,"achievement":3},"summary":"要約","items":[` +
+				item + `]}`},
+			wantBroken: true, wantReason: BrokenSchema,
+		},
+		{
+			// 100点満点で返す事故。本番の ValidateResumeRubricScores が弾く
+			name:       "項目スコアが値域外",
+			res:        CallResult{Text: `{` + scores(80, 3, 3, 4, 3) + `,"summary":"要約","items":[` + item + `]}`},
+			wantBroken: true, wantReason: BrokenSchema,
+		},
+		{
+			name:       "未知の評価項目が混ざる",
+			res:        CallResult{Text: `{"scores":{"specificity":4,"achievement":3,"role_fit":3,"completeness":4,"readability":3,"passion":5},"summary":"要約","items":[` + item + `]}`},
 			wantBroken: true, wantReason: BrokenSchema,
 		},
 		{
@@ -55,56 +86,57 @@ func TestEvaluateResumeResponse(t *testing.T) {
 			// ただし「JSONのみ」という指示には違反しているので別に数える。
 			name:           "散文で包まれたJSONは破損ではなく指示違反",
 			res:            CallResult{Text: "以下が結果です。\n```json\n" + okJSON + "\n```"},
-			wantScore:      0.72,
+			wantScore:      okScore,
 			wantViolations: []string{"json_not_bare"},
 		},
 		{
 			name: "本文に無い引用は捏造として数える",
-			res: CallResult{Text: `{"score":60,"summary":"要約","items":[` +
+			res: CallResult{Text: `{` + scores(4, 3, 3, 4, 3) + `,"summary":"要約","items":[` +
 				`{"quote":"TOEIC900点を取得しました","message":"指摘","suggestion":"改善案","severity":"info"}]}`},
-			wantScore:      0.60,
+			wantScore:      okScore,
 			wantViolations: []string{"quote_not_in_text"},
 		},
 		{
 			// 引用時の改行・空白の入れ直しは捏造ではない
 			name: "空白と改行の差は捏造にしない",
-			res: CallResult{Text: `{"score":60,"summary":"要約","items":[` +
+			res: CallResult{Text: `{` + scores(4, 3, 3, 4, 3) + `,"summary":"要約","items":[` +
 				`{"quote":"接客のアルバイトで 売上を前年比120%に\n伸ばしました","message":"指摘","suggestion":"改善案","severity":"info"}]}`},
-			wantScore: 0.60,
+			wantScore: okScore,
 		},
 		{
 			name: "itemsが上限超え",
-			res: CallResult{Text: `{"score":80,"summary":"要約","items":[` +
+			res: CallResult{Text: `{` + scores(4, 3, 3, 4, 3) + `,"summary":"要約","items":[` +
 				strings.Repeat(`{"quote":"研究室でGoのCLIツールを作りました","message":"m","suggestion":"s","severity":"info"},`, 8) +
 				`{"quote":"研究室でGoのCLIツールを作りました","message":"m","suggestion":"s","severity":"info"}]}`},
-			wantScore:      0.80,
+			wantScore:      okScore,
 			wantViolations: []string{"items_over_limit"},
 		},
 		{
 			name: "severityが規定外",
-			res: CallResult{Text: `{"score":80,"summary":"要約","items":[` +
+			res: CallResult{Text: `{` + scores(4, 3, 3, 4, 3) + `,"summary":"要約","items":[` +
 				`{"quote":"研究室でGoのCLIツールを作りました","message":"m","suggestion":"s","severity":"高"}]}`},
-			wantScore:      0.80,
+			wantScore:      okScore,
 			wantViolations: []string{"severity_invalid"},
 		},
 		{
 			name: "itemsのフィールド欠落",
-			res: CallResult{Text: `{"score":80,"summary":"要約","items":[` +
+			res: CallResult{Text: `{` + scores(4, 3, 3, 4, 3) + `,"summary":"要約","items":[` +
 				`{"quote":"研究室でGoのCLIツールを作りました","message":"m","severity":"info"}]}`},
-			wantScore:      0.80,
+			wantScore:      okScore,
 			wantViolations: []string{"item_missing_fields"},
 		},
 		{
-			name:           "summaryが空",
-			res:            CallResult{Text: `{"score":80,"summary":"","items":[{"quote":"研究室でGoのCLIツールを作りました","message":"m","suggestion":"s","severity":"info"}]}`},
-			wantScore:      0.80,
+			name: "summaryが空",
+			res: CallResult{Text: `{` + scores(4, 3, 3, 4, 3) + `,"summary":"","items":[` +
+				`{"quote":"研究室でGoのCLIツールを作りました","message":"m","suggestion":"s","severity":"info"}]}`},
+			wantScore:      okScore,
 			wantViolations: []string{"summary_empty"},
 		},
 		{
-			name:           "値域外のスコア",
-			res:            CallResult{Text: `{"score":120,"summary":"要約","items":[{"quote":"研究室でGoのCLIツールを作りました","message":"m","suggestion":"s","severity":"info"}]}`},
-			wantScore:      1.20,
-			wantViolations: []string{"score_out_of_range"},
+			name:           "itemsが空",
+			res:            CallResult{Text: `{` + scores(4, 3, 3, 4, 3) + `,"summary":"要約","items":[]}`},
+			wantScore:      okScore,
+			wantViolations: []string{"items_empty"},
 		},
 	}
 	for _, tt := range tests {
@@ -112,6 +144,30 @@ func TestEvaluateResumeResponse(t *testing.T) {
 			got := evaluateResumeResponse(Observation{CaseID: c.ID, Label: c.Label}, c, tt.res)
 			checkObservation(t, got, tt.wantBroken, tt.wantReason, tt.wantScore, tt.wantViolations)
 		})
+	}
+}
+
+// 総合スコアは本番（resume.ComputeResumeOverallScore）と同じ値でなければ、
+// ハーネスの数字がユーザーに見える点数と乖離する。
+func TestEvaluateResumeResponseは本番と同じ総合スコアを出す(t *testing.T) {
+	body := `{"scores":{"specificity":5,"achievement":5,"role_fit":5,"completeness":5,"readability":5},` +
+		`"summary":"要約","items":[{"quote":"本文","message":"m","suggestion":"s","severity":"info"}]}`
+	c := Case{ID: "r-002", Label: LabelGood, Input: Input{ResumeText: "本文", CandidateType: "new_grad"}}
+	got := evaluateResumeResponse(Observation{CaseID: c.ID}, c, CallResult{Text: body})
+	if got.RawScore != 100 || got.Score != 1.0 {
+		t.Errorf("全項目満点 = raw %v / 正規化 %v, want 100 / 1.0", got.RawScore, got.Score)
+	}
+
+	// 候補者区分で重みが変わる（新卒は具体性重視、中途は成果重視）。
+	// 区分を無視すると、同じ出力でも本番と違う点数になる。
+	lowAchievement := `{"scores":{"specificity":5,"achievement":0,"role_fit":5,"completeness":5,"readability":5},` +
+		`"summary":"要約","items":[{"quote":"本文","message":"m","suggestion":"s","severity":"info"}]}`
+	newGrad := evaluateResumeResponse(Observation{}, Case{Input: Input{ResumeText: "本文", CandidateType: "new_grad"}},
+		CallResult{Text: lowAchievement})
+	midCareer := evaluateResumeResponse(Observation{}, Case{Input: Input{ResumeText: "本文", CandidateType: "mid_career"}},
+		CallResult{Text: lowAchievement})
+	if newGrad.RawScore <= midCareer.RawScore {
+		t.Errorf("成果0点は中途の方が低くなるべき: 新卒 %v / 中途 %v", newGrad.RawScore, midCareer.RawScore)
 	}
 }
 

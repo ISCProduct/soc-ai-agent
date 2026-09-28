@@ -208,3 +208,64 @@ func TestUpdateScoresFromInterviewReport_ExistingRowBlends(t *testing.T) {
 	// delta==0 の細部志向に UPDATE が来ていたら「予期しないExec」で落ちる。
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+// TestUpdateScoresFromResumeReview_ScoreIsNilWritesNothing はスコア無しの履歴書レビューが
+// user_weight_scores へ一切書き込まないことを検証する（#1529）。
+//
+// critical 指摘だけでペナルティを書くと「基準の無い減点」がマッチングと
+// 教員向け傾向分析に静かに混ざる（docs/wiki/scoring.md §2-3）。
+//
+// 反映の失敗はログだけで握り潰される（他カテゴリを止めないため）ので、
+// 「予期しないクエリが来たら落ちる」形では検出できない。
+// そこで「スコア無しを0点と誤って扱ったときに来る SELECT」を期待として登録し、
+// **その期待が満たされないこと**を成功条件にする。
+func TestUpdateScoresFromResumeReview_ScoreIsNilWritesNothing(t *testing.T) {
+	svc, mock := newCrossFeatureService(t)
+
+	for _, category := range []string{"細部志向", "コミュニケーション力"} {
+		mock.ExpectQuery("SELECT \\* FROM `user_weight_scores`").
+			WithArgs(testUserID, testSessionID, category, 1).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "score"}))
+	}
+
+	items := []models.ResumeReviewItem{
+		{Severity: "critical"}, {Severity: "critical"}, {Severity: "critical"},
+	}
+	err := svc.UpdateScoresFromResumeReview(testUserID, testSessionID,
+		&models.ResumeReview{ID: 11, Score: nil}, items)
+	require.NoError(t, err)
+	require.Error(t, mock.ExpectationsWereMet(),
+		"スコア無しなのに user_weight_scores を読み書きしている")
+}
+
+// TestUpdateScoresFromResumeReview_SavedValues はスコアがあるときの保存値を固定する。
+// 写像は mapResumeScore（score_mapping.go）。critical 3件は 15点のペナルティ。
+func TestUpdateScoresFromResumeReview_SavedValues(t *testing.T) {
+	svc, mock := newCrossFeatureService(t)
+
+	// score=85 / critical=3 → 細部志向 50+(35-15)*1.0=70、コミュニケーション力 50+(35-15)*0.6=62
+	want := map[string]int{"細部志向": 70, "コミュニケーション力": 62}
+	for category, score := range want {
+		mock.ExpectQuery("SELECT \\* FROM `user_weight_scores`").
+			WithArgs(testUserID, testSessionID, category, 1).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "score"}))
+		mock.ExpectQuery("SELECT `organization_id` FROM `users`").
+			WithArgs(testUserID).
+			WillReturnRows(sqlmock.NewRows([]string{"organization_id"}).AddRow(testOrgID))
+		mock.ExpectBegin()
+		mock.ExpectExec("INSERT INTO `user_weight_scores`").
+			WithArgs(testOrgID, testUserID, testSessionID, category, score,
+				sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectCommit()
+	}
+
+	score := 85
+	items := []models.ResumeReviewItem{
+		{Severity: "critical"}, {Severity: "critical"}, {Severity: "critical"}, {Severity: "info"},
+	}
+	err := svc.UpdateScoresFromResumeReview(testUserID, testSessionID,
+		&models.ResumeReview{ID: 11, Score: &score}, items)
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}

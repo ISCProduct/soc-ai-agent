@@ -1,6 +1,6 @@
 package resume
 
-// 引用(quote)と本文ブロックの照合テスト（Issue #1522）
+// 引用(quote)と本文ブロックの照合テスト（Issue #1522 / #1559）
 // 実行: cd Backend && go test ./internal/services/resume/... -run TestQuoteMatch -v
 //
 // quoteMatchThreshold / quoteMatchMargin の値は TestQuoteMatchThresholdBoundary と
@@ -8,6 +8,7 @@ package resume
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"Backend/internal/models"
@@ -17,6 +18,52 @@ import (
 // score は本文ブロックに対する引用の一致度を返す（境界値の記録用）。
 func score(blockText, quote string) float64 {
 	return textsim.New(blockText).MatchScore(textsim.New(quote))
+}
+
+// matchedLineOnly は連結窓を使わず1行ずつ照合したときに紐づくかを返す（#1559 以前の実装）。
+// 現行のしきい値・margin・満点の扱いは findBestBlock と揃えてある。
+func matchedLineOnly(blocks []models.ResumeTextBlock, quote string) bool {
+	quoteText := textsim.New(quote)
+	best, second := 0.0, 0.0
+	for i := range blocks {
+		s := textsim.New(blocks[i].Text).MatchScore(quoteText)
+		if s > best {
+			best, second = s, best
+			continue
+		}
+		second = max(second, s)
+	}
+	if best < quoteMatchThreshold {
+		return false
+	}
+	if best == 1 && second < 1 {
+		return true
+	}
+	return best-second >= quoteMatchMargin
+}
+
+// windowScores は連結窓の照合結果（最良の窓と、それに重ならない次点）を返す。
+// margin の境界ケースで実測値を記録するために使う。
+func windowScores(blocks []models.ResumeTextBlock, quote string) (best, second float64) {
+	blockTexts := make([]textsim.Bigrams, len(blocks))
+	for i := range blocks {
+		blockTexts[i] = textsim.New(blocks[i].Text)
+	}
+	windows := buildBlockWindows(blocks, blockTexts)
+	quoteText := textsim.New(quote)
+	var bestWindow blockWindow
+	for _, w := range windows {
+		if s := w.text.MatchScore(quoteText); s > best {
+			best, bestWindow = s, w
+		}
+	}
+	for _, w := range windows {
+		if w.overlaps(bestWindow) {
+			continue
+		}
+		second = max(second, w.text.MatchScore(quoteText))
+	}
+	return best, second
 }
 
 // makeBlocks はテスト用の本文ブロックを1ページ分組み立てる。
@@ -160,15 +207,15 @@ func TestQuoteMatching(t *testing.T) {
 			wantBBox: "bbox-2",
 		},
 		{
-			// M1: margin 0.025 では語尾だけ違う近似ブロックの差(0.036)を拾えず誤紐づけする。
-			// 隣接行の連結窓(Issue #1559)が入れば margin を 0.1 に戻して解消できる既知の穴。
-			name: "既知の穴: 語尾だけ違う近似ブロックには誤って紐づく",
+			// #1522 では margin 0.025 がこの差(0.036)を拾えず誤紐づけしていた。
+			// 連結窓(#1559)で margin を 0.1 に戻せたので欠落するようになった。
+			name: "語尾だけ違う近似ブロックには紐づけない",
 			blocks: makeBlocks(
 				"接客のアルバイトで培った傾聴力を活かしたいです。",
 				"接客のアルバイトで培った傾聴力を発揮します。",
 			),
 			item:     aiReviewItem{Quote: "接客のアルバイトで培った傾聴力を仕事で使う"},
-			wantBBox: "bbox-2",
+			wantBBox: "",
 		},
 	}
 
@@ -362,19 +409,30 @@ func TestQuoteMatchThresholdBoundary(t *testing.T) {
 }
 
 // TestQuoteMatchMarginBoundary は quoteMatchMargin を上下から固定する。
-// どちらの候補もしきい値を超え、完全一致は含まないので、採否は1位と2位の差だけで決まる。
+// 最良の窓と、それに重ならない次点の窓との差だけで採否が決まるケースを並べている。
 //
-// 一文が2行に分かれた引用は、行の長さが近いほど差が小さくなる（均等分割で 0.038 まで）。
-// margin を大きくするとこの種の引用がまるごと欠落するので、上限として固定している。
-// 3行以上に分かれるケースは原理的に届かない（Issue #1559）。
+// 固定できている帯は 0.0989〜0.1278（この帯を外すとどれかが落ちる）。
+// #1522 時点では 0.023〜0.038 しか使えなかったが、連結窓(#1559)で
+// 一文全体が1つの候補になり、2行・3行に分かれた引用が次点を大きく上回るようになった。
 func TestQuoteMatchMarginBoundary(t *testing.T) {
 	tests := []struct {
 		name     string
 		blocks   []models.ResumeTextBlock
 		quote    string
-		wantDiff float64 // 1位と2位の実測差
+		wantDiff float64 // 最良の窓と、重ならない次点の窓との実測差
 		wantBBox string  // 空文字なら紐づかないことを期待する
 	}{
+		{
+			// margin の下限。これを 0.036 以下にすると誤った行に注釈が焼かれる
+			name: "語尾だけ違う近似ブロックなら紐づけない",
+			blocks: makeBlocks(
+				"接客のアルバイトで培った傾聴力を活かしたいです。", // 0.837
+				"接客のアルバイトで培った傾聴力を発揮します。",   // 0.873
+			),
+			quote:    "接客のアルバイトで培った傾聴力を仕事で使う",
+			wantDiff: 0.036,
+			wantBBox: "",
+		},
 		{
 			name: "1語違いのブロックどうしなら紐づけない",
 			blocks: makeBlocks(
@@ -386,57 +444,175 @@ func TestQuoteMatchMarginBoundary(t *testing.T) {
 			wantBBox: "",
 		},
 		{
-			name: "一文が偏って2行に分かれたケース",
+			// margin の実質的な下限。2行の引用元(0.750)に対し、別箇所の似た一文が
+			// 0.651 まで迫るので、margin を 0.0988 以下にするとここへ紐づいてしまう
+			name: "別の箇所に似た一文があるなら紐づけない",
 			blocks: makeBlocks(
-				"50名の入会につなげました。",      // 0.571
-				"学生時代はサークルの新人勧誘を担当し、", // 0.723
+				"アルバイトでは接客を通じて店舗の",
+				"売上向上に大きく貢献しました。",
+				"自己PR",
+				"インターンでは接客を通じて店舗の集客に貢献しました。",
 			),
-			quote:    "学生時代はサークルの新人勧誘を担当し、50名の入会につなげました。",
-			wantDiff: 0.152,
+			quote:    "接客を通じて店舗の売上向上に貢献しました",
+			wantDiff: 0.0988,
+			wantBBox: "",
+		},
+		{
+			// margin の上限。0.1278 より大きくすると、2行に分かれた引用が
+			// 似た一文に押されてまるごと欠落する
+			name: "別箇所の一文が似ていても差があれば紐づく",
+			blocks: makeBlocks(
+				"アルバイトでは接客を通じて店舗の",
+				"売上向上に大きく貢献しました。",
+				"自己PR",
+				"アルバイトでは接客を通じて店舗の課題解決に貢献しました。",
+			),
+			quote:    "接客を通じて店舗の売上向上に貢献しました",
+			wantDiff: 0.1278,
 			wantBBox: "bbox-2",
-		},
-		{
-			name: "一文がほぼ均等に2行に分かれたケース",
-			blocks: makeBlocks(
-				"アルバイトでは接客を通じて店舗の", // 0.682
-				"売上向上に大きく貢献しました。",  // 0.619
-			),
-			quote:    "アルバイトでは接客を通じて店舗の売上向上に大きく貢献しました。",
-			wantDiff: 0.063,
-			wantBBox: "bbox-1",
-		},
-		{
-			name: "一文が均等に2行に分かれた最も差の小さいケース",
-			blocks: makeBlocks(
-				"私は責任感を持って最後まで", // 0.667
-				"やり遂げることができます。", // 0.629
-			),
-			quote:    "私は責任感を持って最後までやり遂げることができます。",
-			wantDiff: 0.038,
-			wantBBox: "bbox-1",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			first := score(tt.blocks[0].Text, tt.quote)
-			second := score(tt.blocks[1].Text, tt.quote)
-			if first < quoteMatchThreshold || second < quoteMatchThreshold {
-				t.Fatalf("両候補がしきい値を超えている前提が崩れた: %.4f / %.4f", first, second)
+			best, second := windowScores(tt.blocks, tt.quote)
+			if best < quoteMatchThreshold || second < quoteMatchThreshold {
+				t.Fatalf("両候補がしきい値を超えている前提が崩れた: %.4f / %.4f", best, second)
 			}
-			if first == 1 || second == 1 {
-				t.Fatalf("完全一致を含まない前提が崩れた: %.4f / %.4f", first, second)
+			if best == 1 {
+				t.Fatalf("完全一致を含まない前提が崩れた（満点は margin を通らない）: %.4f", best)
 			}
-			diff := first - second
-			if diff < 0 {
-				diff = -diff
-			}
-			if diff < tt.wantDiff-0.005 || diff > tt.wantDiff+0.005 {
+			if diff := best - second; diff < tt.wantDiff-0.005 || diff > tt.wantDiff+0.005 {
 				t.Fatalf("差 = %.4f, want %.3f 前後（類似度の計算式が変わった）", diff, tt.wantDiff)
 			}
-			// 0.015 < quoteMatchMargin <= 0.038 でなければどれかが落ちる
+			// 0.0988 < quoteMatchMargin <= 0.1278 でなければどれかが落ちる
 			if got := mapOne(t, tt.blocks, aiReviewItem{Quote: tt.quote}); got != tt.wantBBox {
 				t.Errorf("BBox = %q, want %q (quoteMatchMargin=%.3f)", got, tt.wantBBox, quoteMatchMargin)
+			}
+		})
+	}
+}
+
+// TestQuoteMatchMultiLineSplit は一文が複数のOCR行に分かれた引用が
+// 正しい行に紐づくことを固定する（Issue #1559）。
+//
+// OCRブロックは行単位（ocr_extract.py）なのに、プロンプトが要求する引用は一文なので、
+// 自己PRや志望動機では1文が2〜4行に折り返すのが主系。1行ずつの照合では
+// Dice 係数が原理的にしきい値へ届かず（3等分なら最大 0.525 前後）、
+// しきい値を下げても1位と2位の差が 0.025 しかなく margin で落ちていた。
+//
+// 期待する紐づけ先は「引用と最も長く重なる行」。注釈PDFのbboxは行単位なので、
+// 窓が複数行にまたがっても代表の1行に寄せる（pickRepresentative のコメント参照）。
+func TestQuoteMatchMultiLineSplit(t *testing.T) {
+	// 紙面に必ず混ざる短い行と、紛らわしい別の一文
+	noise := []string{"氏名", "年", "月", "日"}
+
+	tests := []struct {
+		name string
+		// lines は連結すると引用になる行。
+		lines []string
+		// wantBBox は代表行（noise 4行のあとに並ぶので bbox-5 から）。
+		wantBBox string
+		// needsWindow は「1行ずつの照合では紐づかない＝#1559 の再現」であることを表す。
+		// 行の長さが偏っていると1行でも margin を抜けられるので、全ケースには立たない。
+		needsWindow bool
+	}{
+		{
+			name:        "2行に均等に分かれた自己PR",
+			lines:       []string{"私は責任感を持って最後まで", "やり遂げることができます。"},
+			wantBBox:    "bbox-5",
+			needsWindow: true,
+		},
+		{
+			name:     "2行に偏って分かれたガクチカ",
+			lines:    []string{"学生時代はサークルの新人勧誘を担当し、", "50名の入会につなげました。"},
+			wantBBox: "bbox-5",
+		},
+		{
+			name:        "3行に分かれた自己PR",
+			lines:       []string{"飲食店のアルバイトでは常に", "お客様の様子を観察し、注文前に水を", "追加するなどの先回りを心がけました。"},
+			wantBBox:    "bbox-7",
+			needsWindow: true,
+		},
+		{
+			name:     "3行に分かれた課題解決のエピソード",
+			lines:    []string{"研究室ではデータ収集の手順が属人化していたため、", "手順書を作成して後輩でも同じ精度で", "測定できる状態に整えました。"},
+			wantBBox: "bbox-5",
+		},
+		{
+			name: "4行に分かれた志望動機",
+			lines: []string{
+				"御社を志望した理由は、地域の中小企業を", "支えるという理念に共感したからです。",
+				"学生時代に商店街の活性化イベントを", "運営した経験を活かせると考えています。",
+			},
+			wantBBox:    "bbox-5",
+			needsWindow: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			texts := append(append([]string{}, noise...), tt.lines...)
+			blocks := makeBlocks(texts...)
+			quote := strings.Join(tt.lines, "")
+
+			// 前提: needsWindow のケースは1行ずつの照合（#1559 以前）では紐づかないこと。
+			// これが成り立たないと、連結窓が効いている証拠にならない。
+			if lineOnly := matchedLineOnly(blocks, quote); lineOnly == tt.needsWindow {
+				t.Fatalf("1行ずつの照合で紐づく=%v, needsWindow=%v（#1559 の再現条件が変わった）",
+					lineOnly, tt.needsWindow)
+			}
+			if got := mapOne(t, blocks, aiReviewItem{Quote: quote}); got != tt.wantBBox {
+				t.Errorf("BBox = %q, want %q", got, tt.wantBBox)
+			}
+		})
+	}
+}
+
+// TestQuoteMaxWindowBlocks_Pinned は連結窓の上限を固定する（#1559）。
+//
+// 振る舞いでは上限を挟めない（広げても既存ケースは通る）ので値そのものを固定する。
+// 4行にしているのは、履歴書・ESの記入欄で一文が折り返すのが2〜4行までという前提と、
+// 窓を広げるほど無関係な行を巻き込んだ窓が増えて誤紐づけの危険が上がるため。
+// 1行に戻すと TestQuoteMatchMultiLineSplit が落ちる（連結窓そのものの効果はそちらで固定）。
+// 広げるなら、まず TestQuoteMatchMultiLineDoesNotOverreach のような
+// 誤紐づけの実測をやり直すこと。
+func TestQuoteMaxWindowBlocks_Pinned(t *testing.T) {
+	if quoteMaxWindowBlocks != 4 {
+		t.Errorf("quoteMaxWindowBlocks = %d。誤紐づけの実測をやり直さずに変更していないか確認すること", quoteMaxWindowBlocks)
+	}
+}
+
+// TestQuoteMatchMultiLineDoesNotOverreach は連結窓が誤紐づけを増やさないことを固定する。
+// 窓を広げるほど「無関係な行を巻き込んだ窓」が増えるため、本文に無い引用が
+// どこかの窓に吸着しないかを確かめる。
+func TestQuoteMatchMultiLineDoesNotOverreach(t *testing.T) {
+	blocks := makeBlocks(
+		"氏名", "年", "月", "日",
+		"飲食店のアルバイトでは常に",
+		"お客様の様子を観察し、注文前に水を",
+		"追加するなどの先回りを心がけました。",
+		"御社を志望した理由は、地域の中小企業を",
+		"支えるという理念に共感したからです。",
+		"普通自動車第一種運転免許", "なし", "以上",
+	)
+
+	tests := []struct {
+		name  string
+		quote string
+	}{
+		{name: "本文に無い研究の話", quote: "宇宙開発の研究室で衛星の姿勢制御を研究しました"},
+		{name: "本文に無い資格の話", quote: "TOEICで900点を取得し英語での商談経験もあります"},
+		{name: "本文に無い部活の話", quote: "高校時代は野球部でキャプテンを務め県大会でベスト8に入りました"},
+		{name: "本文に無いアルバイトの話", quote: "アルバイトでは効率を優先して作業していました"},
+		{name: "短い行だけを拾える引用", quote: "賞罰の欄にはなしと記載しています"},
+		{name: "語彙は本文由来だが内容が別", quote: "接客では常にお客様の様子を観察していました"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := mapOne(t, blocks, aiReviewItem{Quote: tt.quote}); got != "" {
+				t.Errorf("BBox = %q, want 空文字（本文に無い引用を紐づけている）", got)
 			}
 		})
 	}

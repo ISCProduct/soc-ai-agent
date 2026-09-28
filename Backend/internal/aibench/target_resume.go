@@ -37,8 +37,9 @@ func (t *resumeTarget) Model() string    { return t.model }
 func (t *resumeTarget) Endpoint() string { return "openai:/responses" }
 
 func (t *resumeTarget) EstimateTokens(c Case) (int, int) {
-	// 1200 はプロンプト定型文ぶんの概算。出力は max_output_tokens を上限とする。
-	return ApproxTokensJA(c.Input.ResumeText) + 1200, resume.ReviewMaxOutputTokens
+	// 1500 はプロンプト定型文＋ルーブリック説明ぶんの概算（#1529 で増えた）。
+	// 出力は max_output_tokens を上限とする。
+	return ApproxTokensJA(c.Input.ResumeText) + 1500, resume.ReviewMaxOutputTokens
 }
 
 func (t *resumeTarget) Run(ctx context.Context, c Case) Observation {
@@ -51,10 +52,13 @@ func (t *resumeTarget) Run(ctx context.Context, c Case) Observation {
 //
 // 本番の aiReviewResponse を借りずにハーネス側で定義しているのは、
 // ここで検証したいのが「プロンプトに書いた契約を守っているか」であって
-// 「本番のパーサが読めるか」ではないため。本番のパーサは欠損を既定値で
-// 埋めるので、そこに通すと指示違反が見えなくなる。
+// 「本番のパーサが読めるか」ではないため。
+//
+// scores は #1529 のルーブリック（specificity / achievement / role_fit /
+// completeness / readability、各0〜5）。総合点は LLM に出させず、
+// 本番と同じ resume.ComputeResumeOverallScore で算出する。
 type resumeReviewResponse struct {
-	Score   int                `json:"score"`
+	Scores  map[string]int     `json:"scores"`
 	Summary string             `json:"summary"`
 	Items   []resumeReviewItem `json:"items"`
 }
@@ -95,20 +99,26 @@ func evaluateResumeResponse(o Observation, c Case, res CallResult) Observation {
 		o.Broken, o.BrokenReason, o.Error = true, BrokenJSONInvalid, err.Error()
 		return o
 	}
-	if resp.Score == 0 && len(resp.Items) == 0 {
-		o.Broken, o.BrokenReason, o.Error = true, BrokenSchema, "score も items も無い"
+	// 総合スコアは本番と同じ関数で算出する。ルーブリック違反なら本番も
+	// スコアを捨てる（固定値を入れない / #1529）ので、ハーネスも
+	// 「スコアが取れなかった」として破損に数える。
+	//
+	// 本番はルーブリック違反のとき別プロンプトで1度やり直す。ハーネスは
+	// リトライを通さない方針なので、ここで出る schema_incomplete は
+	// **やり直し前**の発生率である（README に明記）。
+	candidateType := c.Input.CandidateType
+	overall, scoreErr := resume.ComputeResumeOverallScore(resp.Scores, candidateType)
+	if scoreErr != nil {
+		o.Broken, o.BrokenReason, o.Error = true, BrokenSchema, scoreErr.Error()
 		return o
 	}
 
-	o.RawScore = float64(resp.Score)
-	o.Score = float64(resp.Score) / 100
+	o.RawScore = float64(overall)
+	o.Score = float64(overall) / 100
 
 	if needsJSONRecovery(res.Text) {
 		// プロンプトは「出力は次のJSONのみ」と指示している
 		o.Violations = append(o.Violations, "json_not_bare")
-	}
-	if resp.Score < 0 || resp.Score > 100 {
-		o.Violations = append(o.Violations, "score_out_of_range")
 	}
 	if len(resp.Items) == 0 {
 		o.Violations = append(o.Violations, "items_empty")

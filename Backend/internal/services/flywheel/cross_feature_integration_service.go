@@ -162,6 +162,16 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromResumeReview(
 	if review == nil {
 		return nil
 	}
+	// スコア無しのレビューは user_weight_scores へ流さない（#1529）。
+	//
+	// critical 件数だけでペナルティを書くこともできるが、それは
+	// 「基準の無い減点」を書くことになる。マッチングと教員向け傾向分析の両方に
+	// 静かに混ざり後から区別できないため、欠落させる方を採る
+	// （docs/wiki/scoring.md §2-3）。
+	if review.Score == nil {
+		log.Printf("[CrossFeature] 履歴書レビュー(review_id=%d)はスコア無しのため user_weight_scores へ反映しない\n", review.ID)
+		return nil
+	}
 
 	criticalCount := 0
 	for _, item := range items {
@@ -172,7 +182,7 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromResumeReview(
 
 	// 対応表と式は resumeScoreMapping / mapResumeScore（score_mapping.go）に集約している。
 	// 高ければ高く、低ければ低く、スコア全域を使って反映する（#1528）。
-	for _, mapped := range mapResumeScore(review.Score, criticalCount) {
+	for _, mapped := range mapResumeScore(*review.Score, criticalCount) {
 		if err := s.applyMovingAverage(userID, chatSessionID, mapped.category, mapped.score); err != nil {
 			log.Printf("[CrossFeature] resume→score update failed (cat=%s): %v\n", mapped.category, err)
 		}

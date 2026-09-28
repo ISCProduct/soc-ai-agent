@@ -139,9 +139,10 @@ func evaluateInterviewResponse(o Observation, c Case, res CallResult) Observatio
 	}
 
 	// 根拠の捏造。プロンプトは「受験者が実際に話した発言をそのまま引用」を
-	// 指示しており、本番も同じ照合で弾いている（#1527）。
+	// 指示しており、本番も同じ照合で弾いている（#1527 / #1566）。
 	// ハーネス側で別の照合を書くと、本番が弾く/弾かないの境界と数字がずれる。
-	spoken := interview.SpokenText(utterancesFromTranscript(c.Input.Transcript))
+	// #1580 で照合が内容語ベース（SpokenContent）になっている。
+	spoken := interview.SpokenContent(utterancesFromTranscript(c.Input.Transcript))
 	if check := interview.ValidateEvidence(resp.Evidence, spoken); len(check.Unmatched) > 0 {
 		o.Violations = append(o.Violations, "evidence_not_spoken")
 	}

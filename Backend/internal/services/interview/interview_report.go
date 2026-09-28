@@ -204,7 +204,7 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 
 	model := shared.GetEnv("INTERVIEW_REPORT_MODEL", "")
 	// 受験者の発話は候補ごとに作り直さない（#1527）
-	spoken := SpokenText(utterances)
+	spoken := SpokenContent(utterances)
 
 	// スキーマ違反と根拠の捏造は弾いて1度だけ作り直す（#795, #1527）。
 	//
