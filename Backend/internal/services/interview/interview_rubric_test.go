@@ -237,25 +237,63 @@ func TestEvidenceMatchThreshold_Pinned(t *testing.T) {
 	}
 }
 
-// 照合で検出できない捏造を明示的に固定する（#1527）。
+// 照合で検出できない捏造を明示的に固定する（#1527 / Issue #1566）。
 //
-// 文字bigramの一致度である以上、**実発話の言い換えに事実を継ぎ足した捏造**は
-// 正当な要約と同じ帯（0.43〜0.58）に入り、しきい値をどこに置いても分離できない。
-// この限界を「たまたま通っている」ではなくテストで明示しておく。
-// 検出できるのは「発話と無関係な根拠」だけである。
+// 文字bigramの一致度である以上、**発話の言い回しを流用した捏造は弾けない**。
+// これを「たまたま通っている」ではなくテストで明示しておく。
+// #1566 でアルゴリズムを直したらここが落ちるので、
+// interview_rubric.go と docs/wiki/scoring.md §2-4 の表も一緒に更新すること。
 func TestValidateEvidence_KnownLimitation(t *testing.T) {
 	t.Parallel()
 
 	spoken := SpokenText(testUtterances())
-	partial := map[string]string{
-		// 前半は実発話、後半は捏造（部長・3年間・50人はどこにも出てこない）
-		"logic": "入学した当初は部員が8人しかいなくて、私が部長として3年間で部員数を50人まで増やしました",
-		// 発話の語彙を転記しつつ事実を入れ替えた捏造
-		"specificity": "部員が8人から100人に増えて、部費を3倍にすることができました",
+
+	tests := []struct {
+		name     string
+		evidence map[string]string
+		why      string
+	}{
+		{
+			name: "述語末尾を流用した捏造（内容語は100%でっち上げ）",
+			evidence: map[string]string{
+				// 「〜することができました」「〜を担当しました」「〜を提案して」だけが発話由来
+				"logic":       "国際特許を3件取得することができました",
+				"specificity": "学部長賞の選考を担当しました",
+				"ownership":   "研究室のサーバー移行を提案して",
+			},
+			why: "実測 0.27〜0.56。発話の述語を流用すると内容が全部嘘でも通る",
+		},
+		{
+			name: "実引用に事実を継ぎ足した捏造",
+			evidence: map[string]string{
+				// 前半は実発話、後半は捏造（部長・3年間・50人はどこにも出てこない）
+				"logic": "入学した当初は部員が8人しかいなくて、私が部長として3年間で部員数を50人まで増やしました",
+				// 発話の語彙を転記しつつ事実を入れ替えた捏造
+				"specificity": "部員が8人から100人に増えて、部費を3倍にすることができました",
+			},
+			why: "実測 0.45〜0.58。正当な要約（0.32〜0.56）と同じ帯に入る",
+		},
+		{
+			name: "フィラー・相槌をそのまま根拠にしたもの",
+			evidence: map[string]string{
+				// 発話の部分文字列なので完全一致になる
+				"logic":       "はい",
+				"specificity": "すみません",
+				"ownership":   "えー、その、あ",
+			},
+			why: "実測 1.00。部分文字列判定が効くため、中身が無くても最高点になる",
+		},
 	}
-	if got := ValidateEvidence(partial, spoken); len(got.Unmatched) != 0 {
-		t.Errorf("未照合=%v。部分的な捏造を弾けるようになったなら、"+
-			"interview_rubric.go と docs/wiki/scoring.md §2-4 の「検出できないもの」を更新すること", got.Unmatched)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ValidateEvidence(tt.evidence, spoken); len(got.Unmatched) != 0 {
+				t.Errorf("未照合=%v（%s）。弾けるようになったなら "+
+					"interview_rubric.go と docs/wiki/scoring.md §2-4 の「検出できないもの」を更新すること",
+					got.Unmatched, tt.why)
+			}
+		})
 	}
 }
 

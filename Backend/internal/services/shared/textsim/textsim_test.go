@@ -20,7 +20,7 @@ func TestNormalize(t *testing.T) {
 		{"記号・絵文字を落とす", "3倍にした🎉👏", "3倍にした"},
 		{"改行を落とす", "一行目\n二行目", "一行目二行目"},
 		{"数字に挟まれた小数点は残す", "1.5倍に伸びた", "1.5倍に伸びた"},
-		{"数字に挟まれた桁区切りも残す", "1,200人が参加", "1,200人が参加"},
+		{"桁区切りのカンマは落とす", "1,200人が参加", "1200人が参加"},
 		{"数字に挟まれていない句点は落とす", "増えました。次は", "増えました次は"},
 		{"空文字", "", ""},
 		{"記号だけなら空になる", "。、！？ ", ""},
@@ -45,28 +45,34 @@ func TestNormalize_KeepsDecimalPoint(t *testing.T) {
 	}
 }
 
-func TestBigrams(t *testing.T) {
+// 桁区切りのカンマは書式差にすぎないので、有無で一致度が落ちないこと。
+// 元テキストが「1,200」でLLMが「1200」と書いた（または逆の）場合に落ちるのは損。
+func TestNormalize_IgnoresThousandsSeparator(t *testing.T) {
+	t.Parallel()
+	if Normalize("売上1,200万円") != Normalize("売上1200万円") {
+		t.Errorf("桁区切りの有無で別テキストになっている: %q / %q",
+			Normalize("売上1,200万円"), Normalize("売上1200万円"))
+	}
+}
+
+func TestNew(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name      string
 		in        string
-		wantNorm  string
 		wantLen   int
 		wantEmpty bool
 	}{
-		{"通常", "部員数を、3倍に", "部員数を3倍に", 7, false},
-		{"空文字", "", "", 0, true},
-		{"記号だけ", "。。。！？", "", 0, true},
-		{"1文字", "私", "私", 1, false},
+		{"通常", "部員数を、3倍に", 7, false},
+		{"空文字", "", 0, true},
+		{"記号だけ", "。。。！？", 0, true},
+		{"1文字", "私", 1, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := New(tt.in)
-			if got.Norm() != tt.wantNorm {
-				t.Errorf("Norm() = %q, want %q", got.Norm(), tt.wantNorm)
-			}
 			if got.Len() != tt.wantLen {
 				t.Errorf("Len() = %d, want %d", got.Len(), tt.wantLen)
 			}
@@ -77,8 +83,8 @@ func TestBigrams(t *testing.T) {
 	}
 }
 
-// Score は非対称。第1引数（レシーバ）が探される側。
-func TestScore(t *testing.T) {
+// MatchScore は非対称。レシーバが探される側。
+func TestMatchScore(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -103,15 +109,15 @@ func TestScore(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := Score(tt.haystack, tt.needle)
+			got := New(tt.haystack).MatchScore(New(tt.needle))
 			if tt.wantMax == 0 {
 				if got != tt.want {
-					t.Errorf("Score(%q, %q) = %v, want %v", tt.haystack, tt.needle, got, tt.want)
+					t.Errorf("MatchScore(%q <- %q) = %v, want %v", tt.haystack, tt.needle, got, tt.want)
 				}
 				return
 			}
 			if got < tt.wantMin || got > tt.wantMax {
-				t.Errorf("Score(%q, %q) = %v, want %v〜%v", tt.haystack, tt.needle, got, tt.wantMin, tt.wantMax)
+				t.Errorf("MatchScore(%q <- %q) = %v, want %v〜%v", tt.haystack, tt.needle, got, tt.wantMin, tt.wantMax)
 			}
 		})
 	}
@@ -119,23 +125,14 @@ func TestScore(t *testing.T) {
 
 // 包含は片側だけ。長い文を短い文で探しても1.0にはならない。
 // 対称にすると「発話の一部を引用した」と「発話に無い内容を足した」が区別できない。
-func TestScore_Asymmetric(t *testing.T) {
+func TestMatchScore_Asymmetric(t *testing.T) {
 	t.Parallel()
-	long, short := "私はサークルの代表を務めていました", "サークルの代表"
-	if got := Score(long, short); got != 1 {
-		t.Errorf("Score(長, 短) = %v, want 1", got)
+	long, short := New("私はサークルの代表を務めていました"), New("サークルの代表")
+	if got := long.MatchScore(short); got != 1 {
+		t.Errorf("長.MatchScore(短) = %v, want 1", got)
 	}
-	if got := Score(short, long); got == 1 {
-		t.Error("Score(短, 長) が 1 になっている。包含判定が双方向になっている")
-	}
-}
-
-// 事前計算した Bigrams と文字列版が一致すること。
-func TestScore_MethodMatchesFunc(t *testing.T) {
-	t.Parallel()
-	a, b := "新歓ライブを企画した", "新歓ライブの企画を提案した"
-	if got, want := New(a).Score(New(b)), Score(a, b); got != want {
-		t.Errorf("メソッド版 = %v, 関数版 = %v", got, want)
+	if got := short.MatchScore(long); got == 1 {
+		t.Error("短.MatchScore(長) が 1 になっている。包含判定が双方向になっている")
 	}
 }
 

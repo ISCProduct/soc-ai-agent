@@ -42,7 +42,26 @@ func genuineTeacherEvidence() map[string]string {
 }
 
 // fabricated は実発話のどこにも無い根拠。
+// 述語まで発話から流用していないので確実に未照合になる（#1566 の限界の外側）。
 const fabricated = "TOEICで900点を取得し、英語での商談経験もあります。"
+
+// withEvidence は1項目だけ差し替えたコピーを返す。
+func withEvidence(m map[string]string, key, val string) map[string]string {
+	out := maps.Clone(m)
+	out[key] = val
+	return out
+}
+
+// countNonEmpty は中身のある根拠の件数を返す。
+func countNonEmpty(m map[string]string) int {
+	n := 0
+	for _, v := range m {
+		if v != "" {
+			n++
+		}
+	}
+	return n
+}
 
 // reportJSON はレポート1件分の LLM 応答を組み立てる。
 func reportJSON(t *testing.T, evidence, teacherEvidence map[string]string) string {
@@ -133,12 +152,6 @@ func savedTeacherEvidence(t *testing.T, report *models.InterviewReport) map[stri
 func TestGenerateReport_EvidenceVerification(t *testing.T) {
 	t.Parallel()
 
-	withKey := func(m map[string]string, key, val string) map[string]string {
-		out := maps.Clone(m)
-		out[key] = val
-		return out
-	}
-
 	tests := []struct {
 		name         string
 		utterances   []models.InterviewUtterance
@@ -161,7 +174,7 @@ func TestGenerateReport_EvidenceVerification(t *testing.T) {
 			name:       "学生向けに捏造があれば作り直し、2回目が通ればそれを保存する",
 			utterances: evidenceTestUtterances(),
 			responses: []string{
-				reportJSON(t, withKey(genuineEvidence(), "specificity", fabricated), genuineTeacherEvidence()),
+				reportJSON(t, withEvidence(genuineEvidence(), "specificity", fabricated), genuineTeacherEvidence()),
 				reportJSON(t, genuineEvidence(), genuineTeacherEvidence()),
 			},
 			wantCalls:    2,
@@ -173,10 +186,10 @@ func TestGenerateReport_EvidenceVerification(t *testing.T) {
 			name:       "作り直しても捏造なら、その項目だけ空にして保存する",
 			utterances: evidenceTestUtterances(),
 			responses: []string{
-				reportJSON(t, withKey(genuineEvidence(), "specificity", fabricated), genuineTeacherEvidence()),
+				reportJSON(t, withEvidence(genuineEvidence(), "specificity", fabricated), genuineTeacherEvidence()),
 			},
 			wantCalls:    reportGenerationAttempts,
-			wantEvidence: withKey(genuineEvidence(), "specificity", ""),
+			wantEvidence: withEvidence(genuineEvidence(), "specificity", ""),
 			wantTeacher:  genuineTeacherEvidence(),
 			why:          "捏造された根拠が残っている、または照合できた項目まで捨てている",
 		},
@@ -185,19 +198,19 @@ func TestGenerateReport_EvidenceVerification(t *testing.T) {
 			name:       "教員向けの根拠が捏造なら、その項目だけ空にして保存する",
 			utterances: evidenceTestUtterances(),
 			responses: []string{
-				reportJSON(t, genuineEvidence(), withKey(genuineTeacherEvidence(), "specificity",
+				reportJSON(t, genuineEvidence(), withEvidence(genuineTeacherEvidence(), "specificity",
 					"「"+fabricated+"」と述べており、語学力の裏付けがある。実務での活用場面を聞き出したい。")),
 			},
 			wantCalls:    reportGenerationAttempts,
 			wantEvidence: genuineEvidence(),
-			wantTeacher:  withKey(genuineTeacherEvidence(), "specificity", ""),
+			wantTeacher:  withEvidence(genuineTeacherEvidence(), "specificity", ""),
 			why:          "教員向けレポートに捏造された根拠が残っている",
 		},
 		{
 			name:       "教員向けの捏造でも作り直しが走り、2回目が通ればそれを保存する",
 			utterances: evidenceTestUtterances(),
 			responses: []string{
-				reportJSON(t, genuineEvidence(), withKey(genuineTeacherEvidence(), "specificity", fabricated)),
+				reportJSON(t, genuineEvidence(), withEvidence(genuineTeacherEvidence(), "specificity", fabricated)),
 				reportJSON(t, genuineEvidence(), genuineTeacherEvidence()),
 			},
 			wantCalls:    2,
@@ -349,6 +362,59 @@ func TestGenerateReport_KeepsValidCandidateWhenRetryBreaks(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGenerateReport_PicksCandidateWithMostMatchedEvidence は候補の選択基準を固定する（#1527）。
+//
+// 未照合の「件数」で比べると、根拠を1件しか返さずそれが未照合だった候補（matched=0/1）が
+// 5件照合できた候補（matched=5/7）に勝ってしまい、照合済みの根拠をまとめて捨てる。
+// プロンプトで「根拠が無い項目は空文字に」と指示している分、疎な候補は現実に出てくる。
+// 選ぶ基準は「照合できた根拠の数」。
+func TestGenerateReport_PicksCandidateWithMostMatchedEvidence(t *testing.T) {
+	t.Parallel()
+
+	// 根拠1件だけ、しかも捏造（matched=0/1、未照合1件）
+	sparseAndFake := reportJSON(t, map[string]string{"logic": fabricated}, nil)
+	// 5件照合＋2件捏造（matched=5/7、未照合2件）。件数では負けるが中身は上
+	richMostlyGood := reportJSON(t,
+		withEvidence(genuineEvidence(), "specificity", fabricated),
+		withEvidence(genuineTeacherEvidence(), "communication", fabricated))
+
+	t.Run("未照合件数が多くても照合できた根拠が多い候補を選ぶ", func(t *testing.T) {
+		t.Parallel()
+		report, _ := runReport(t, evidenceTestUtterances(), sparseAndFake, richMostlyGood)
+
+		got := savedEvidence(t, report)
+		if got["logic"] != genuineEvidence()["logic"] {
+			t.Errorf("照合できた根拠を捨てて疎な候補を選んでいる: evidence=%v", got)
+		}
+		if n := countNonEmpty(got); n != 4 {
+			t.Errorf("非空の根拠=%d want 4: evidence=%v", n, got)
+		}
+		if got["specificity"] != "" {
+			t.Errorf("捏造された根拠が残っている: %q", got["specificity"])
+		}
+		if n := countNonEmpty(savedTeacherEvidence(t, report)); n != 2 {
+			t.Errorf("教員向けの非空の根拠=%d want 2", n)
+		}
+	})
+
+	t.Run("照合できた数が同じなら先の試行を残す", func(t *testing.T) {
+		t.Parallel()
+		// 同じ照合数・同じ未照合数で、捏造キーだけが違う2候補
+		first := reportJSON(t, withEvidence(genuineEvidence(), "specificity", fabricated), nil)
+		second := reportJSON(t, withEvidence(genuineEvidence(), "communication", fabricated), nil)
+
+		report, calls := runReport(t, evidenceTestUtterances(), first, second)
+		if got := calls(); got != reportGenerationAttempts {
+			t.Fatalf("LLM呼び出し=%d want %d", got, reportGenerationAttempts)
+		}
+		got := savedEvidence(t, report)
+		// 1回目が残っていれば specificity だけが空になる
+		if got["specificity"] != "" || got["communication"] == "" {
+			t.Errorf("同数のときに後の試行へ乗り換えている: evidence=%v", got)
+		}
+	})
 }
 
 // 全試行のスコアが不正なら、#795 どおり evidence も含めてまとめて捨てる。

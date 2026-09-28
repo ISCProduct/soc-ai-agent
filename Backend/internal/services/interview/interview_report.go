@@ -196,21 +196,26 @@ Interview transcript:
 
 	// スキーマ違反と根拠の捏造は弾いて1度だけ作り直す（#795, #1527）。
 	//
-	// best* は「スコアが妥当だった候補のうち最も照合率が高いもの」を保持する。
+	// best* は「スコアが妥当だった候補のうち、照合できた根拠が最も多いもの」を保持する。
 	// 作り直した結果が壊れていても、ここに残した候補を保存できる。
 	// 最後の候補だけを見ていると、attempt 1 が妥当で attempt 2 が壊れたときに
 	// 妥当なスコアまで捨ててしまう。
 	var best reportPayload
 	var bestEvidence, bestTeacher EvidenceCheck
 	var bestUnmatched []string
+	var bestMatched int
 	var haveBest bool
+	// retryNote は作り直しのときだけプロンプトへ足す指示（#1527）。
+	// 温度0.4の単純な再抽選では2回目が改善する理由が無いので、
+	// どの項目が照合できなかったかを具体的に伝える。
+	var retryNote string
 	// payload/haveBody は「JSON としては読めた候補」。スコアを捨ててでも講評は残す用。
 	var payload reportPayload
 	var haveBody bool
 	var lastErr error
 	for attempt := range reportGenerationAttempts {
 		ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport)
-		raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.4, 2000, model)
+		raw, err := s.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt+retryNote, 0.4, 2000, model)
 		if err != nil {
 			return err
 		}
@@ -235,19 +240,36 @@ Interview transcript:
 		ev := ValidateEvidence(candidate.Evidence, spoken)
 		te := ValidateEvidence(teacherDetailedEvidence(candidate), spoken)
 		unmatched := append(slices.Clone(ev.Unmatched), prefixKeys("teacher.", te.Unmatched)...)
-		log.Printf("[Interview] report evidence session=%d matched=%d/%d",
-			sessionID, ev.Matched()+te.Matched(), ev.Checked+te.Checked)
+		matched, checked := ev.Matched()+te.Matched(), ev.Checked+te.Checked
+		if checked == 0 {
+			// 根拠を1件も返さなかった。照合すべきものが無いので 0/0 になる。
+			// 「完璧に照合できた」と区別できるようにしておく。
+			log.Printf("[Interview] report evidence session=%d matched=0/0 (no evidence returned)", sessionID)
+		} else {
+			log.Printf("[Interview] report evidence session=%d matched=%d/%d", sessionID, matched, checked)
+		}
 
-		// 照合率が最も高い候補を残す。evidence 起因の失敗では lastErr を汚さない
+		// 照合できた根拠が最も多い候補を残す。
+		//
+		// 未照合の「件数」だけで比べてはいけない。根拠を1件しか返さずそれが未照合だった候補
+		// （matched=0/1）が、5件照合できた候補（matched=5/7）に件数では勝ってしまい、
+		// 照合済みの根拠をまとめて捨てることになる。プロンプトで
+		// 「根拠が無い項目は空文字に」と指示しているため、疎な候補は現実に出てくる。
+		//
+		// 同数なら先の試行を残す（後の試行に乗り換える理由が無い）。
+		//
+		// evidence 起因の失敗では lastErr を汚さない
 		// （汚すと finalizeReportPayload がスコアまで捨てる）。
-		if !haveBest || len(unmatched) < len(bestUnmatched) {
-			best, bestEvidence, bestTeacher, bestUnmatched, haveBest = candidate, ev, te, unmatched, true
+		if !haveBest || matched > bestMatched {
+			best, bestEvidence, bestTeacher = candidate, ev, te
+			bestUnmatched, bestMatched, haveBest = unmatched, matched, true
 		}
 		if len(unmatched) == 0 {
 			break
 		}
 		log.Printf("[Interview] report evidence unmatched (session %d, attempt %d/%d): %s",
 			sessionID, attempt+1, reportGenerationAttempts, strings.Join(unmatched, ", "))
+		retryNote = buildEvidenceRetryNote(unmatched)
 	}
 
 	if haveBest {
@@ -418,6 +440,20 @@ func teacherDetailedEvidence(p reportPayload) map[string]string {
 		return nil
 	}
 	return p.Teacher.DetailedEvidence
+}
+
+// buildEvidenceRetryNote は照合できなかった項目を作り直しプロンプトへ伝える（#1527）。
+//
+// 同じプロンプトで引き直すだけでは、2回目が1回目より良くなる理由が無い。
+// どの項目が落ちたかを渡せば、LLM はその項目だけを発話から引き直せる。
+func buildEvidenceRetryNote(unmatched []string) string {
+	return fmt.Sprintf(`
+
+## やり直しの指示
+次の項目の根拠は面接ログの発言と一致しませんでした: %s
+これらは受験者（User）の発言をそのまま抜き出して書き直してください。
+該当する発言が見つからない項目は、推測で埋めずに空文字にしてください。
+（"teacher." が付いた項目は teacher.detailed_evidence 側です）`, strings.Join(unmatched, ", "))
 }
 
 // prefixKeys はログ用にキーへ接頭辞を付ける。
