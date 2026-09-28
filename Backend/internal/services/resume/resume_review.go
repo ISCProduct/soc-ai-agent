@@ -96,10 +96,49 @@ func (s *ResumeService) ReviewDocument(ctx context.Context, documentID uint, req
 // reviewMaxOutputTokens はレビュー生成の出力上限。
 //
 // 指摘8件（引用・指摘・改善案の3文×8）が出力の大半で、#1529 で追加した
-// scores 5項目は数十トークン程度。2000 のままでも足りるはずだが、
-// 上限に達すると JSON が途中で切れてレビューごと失敗する（#1521）ので余裕を持たせる。
-// 上限到達は openai.OutputTruncated で検知し、切れた JSON は解析しない。
+// scores 5項目は数十トークン程度。実測で8件のとき約1310〜1360トークンなので
+// 1.8倍程度の余裕がある。上限に達したときは requestReviewJSON が枠を倍にして
+// 1度だけやり直す。
 const reviewMaxOutputTokens = 2400
+
+// errReviewOutputTruncated は出力上限に達して JSON が完結しなかったことを表す。
+//
+// ValidationError にしてあるのは、コントローラが 422 に写すため。
+// #1521 の ES 添削（docs/wiki/rag-service.md）も再試行後の上限到達は 422 で返す。
+// 文言はそのまま学生に見えるため、内部事情は書かない。
+var errReviewOutputTruncated error = &shared.ValidationError{
+	Message: "AIレビューの出力が長すぎて途中で切れました。再度お試しください",
+}
+
+// requestReviewJSON はレビュー用の JSON を取得する。
+// 出力上限に達したら枠を倍にして1度だけやり直し、それでも切れたら
+// errReviewOutputTruncated を返す（#1521 の定石。docs/wiki/rag-service.md）。
+//
+// クライアント内部にも枠を倍にする再試行はあるが、発火条件は
+// 「本文が空で、エラー文に max_output_tokens が含まれる」ときだけで、
+// 本文が途中まで返っているときは発火しない。そこがここの担当分である。
+//
+// 切れた本文を decodeJSON へ渡さないのは、現在のスキーマでは items が最後の
+// フィールドなので必ず解析エラーになるものの、**エラー文言が
+// 「解析に失敗しました」になって原因が上限だと分からない**ため。
+// items を最後以外へ動かすと途中までが読めてしまう余地も残るので、
+// スキーマ変更に対する保険も兼ねている。
+func (s *ResumeService) requestReviewJSON(systemPrompt, userPrompt, model string) (string, error) {
+	// 同じ枠・同じ温度でやり直しても同じ位置で切れるので、枠を倍にする方だけ試す。
+	for _, maxTokens := range []int{reviewMaxOutputTokens, reviewMaxOutputTokens * 2} {
+		// 上限到達を検知するためフラグ付きのコンテキストで呼ぶ（#1529）。
+		aiCtx := openai.WithTruncationFlag(context.Background())
+		raw, err := s.aiClient.ResponsesWithMaxTokens(aiCtx, systemPrompt, userPrompt, 0.2, maxTokens, model)
+		if err != nil {
+			return "", err
+		}
+		if !openai.OutputTruncated(aiCtx) {
+			return raw, nil
+		}
+		log.Printf("resume_review: 出力が max_output_tokens=%d に達して切れた（解析しない）", maxTokens)
+	}
+	return "", errReviewOutputTruncated
+}
 
 type aiReviewResponse struct {
 	// Scores はルーブリックの項目別スコア（各0〜5）。総合スコアは
@@ -571,18 +610,13 @@ OCRテキスト:
 	if modelOverride == "" {
 		modelOverride = "gpt-4o-mini"
 	}
-	// 上限到達を検知するためフラグ付きのコンテキストで呼ぶ（#1529）。
-	aiCtx := openai.WithTruncationFlag(context.Background())
-	raw, err := s.aiClient.ResponsesWithMaxTokens(aiCtx, "あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案をJSON形式で提示します。", prompt, 0.2, reviewMaxOutputTokens, modelOverride)
+	raw, err := s.requestReviewJSON("あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案をJSON形式で提示します。", prompt, modelOverride)
 	if err != nil {
 		log.Printf("resume_review: openai review failed: %v", err)
+		if errors.Is(err, errReviewOutputTruncated) {
+			return nil, nil, err
+		}
 		return nil, nil, fmt.Errorf("AIレビューの生成に失敗しました。しばらく待ってから再度お試しください")
-	}
-	if openai.OutputTruncated(aiCtx) {
-		// 切れたJSONをパースしない。decodeJSON は最後の '}' までを拾うため、
-		// 途中で切れた出力でも「items が数件・scores が欠けた」形で読めてしまう（#1521 と同型）。
-		log.Printf("resume_review: 出力が max_output_tokens=%d に達して切れた（解析しない）", reviewMaxOutputTokens)
-		return nil, nil, fmt.Errorf("AIレビューの出力が長すぎて途中で切れました。再度お試しください")
 	}
 
 	response := aiReviewResponse{}
@@ -629,14 +663,22 @@ scoresは上の評価基準の全項目を必ず含めてください。総合�
 {"scores":{%s},"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}`,
 			companyName, jobTitle, companyInfo, candidateType, blockList,
 			BuildResumeRubricPromptSection(), buildRubricJSONHint())
-		retryCtx := openai.WithTruncationFlag(context.Background())
-		rawRetry, err := s.aiClient.ResponsesWithMaxTokens(retryCtx, "あなたは日本語の履歴書・エントリーシートを添削する専門家です。JSON形式で出力してください。", retryPrompt, 0.2, reviewMaxOutputTokens, modelOverride)
-		if err == nil && !openai.OutputTruncated(retryCtx) {
+		rawRetry, retryReqErr := s.requestReviewJSON("あなたは日本語の履歴書・エントリーシートを添削する専門家です。JSON形式で出力してください。", retryPrompt, modelOverride)
+		if retryReqErr != nil {
+			log.Printf("resume_review: やり直しの生成に失敗: %v", retryReqErr)
+		}
+		if retryReqErr == nil {
 			responseRetry := aiReviewResponse{}
 			if decodeJSON(rawRetry, &responseRetry) == nil {
 				retryItems := mapReviewItems(blocks, responseRetry.Items)
 				log.Printf("resume_review: retry items mapped=%d raw=%d", len(retryItems), len(responseRetry.Items))
-				items = adoptRetryItems(items, retryItems)
+				// 指摘の差し替えは「初回が3件未満」のときだけ。スコアだけが不正で
+				// 初回の指摘が足りているなら、本文に紐づいた初回の指摘を守る。
+				// やり直しはブロック一覧ベースの別プロンプトで、件数は増えても
+				// 紐づきの質が上がる保証が無い（採点のやり直しに指摘を賭けない）。
+				if len(items) < 3 {
+					items = adoptRetryItems(items, retryItems)
+				}
 				// スコアが不正だったときだけ差し替える。初回が正当なら上書きしない
 				// （やり直しは指摘の紐づけを増やすためのもので、採点のやり直しではない）。
 				if scoreErr != nil {

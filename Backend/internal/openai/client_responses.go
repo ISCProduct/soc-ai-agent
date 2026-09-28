@@ -33,6 +33,9 @@ type truncationFlagKey struct{}
 // 空応答・上限エラーのときに条件を変えて呼び直すので、立ったままにすると
 // 「1回目が上限に当たり、出力枠を倍にした2回目が成功した」場合に
 // 正常な応答を切れた扱いにしてしまう。
+//
+// したがって1つのフラグ付きコンテキストは1回の論理呼び出しで使い切ること。
+// 並行する複数の呼び出しで共有すると「最後の応答」がどれか決まらない。
 func WithTruncationFlag(ctx context.Context) context.Context {
 	return context.WithValue(ctx, truncationFlagKey{}, &atomic.Bool{})
 }

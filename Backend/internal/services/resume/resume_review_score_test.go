@@ -2,8 +2,11 @@ package resume
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -19,17 +22,20 @@ import (
 // 「上限到達なら切れたJSONを読まない」という配線が壊れても気付けない。
 
 // aiStub は Responses API のスタブ。bodies を呼び出し順に返し、尽きたら最後を繰り返す。
+// 呼び出しごとに要求された max_output_tokens を記録する（上限到達時のやり直し検証用）。
 type aiStub struct {
-	mu     sync.Mutex
-	bodies []string
-	calls  int
+	mu        sync.Mutex
+	bodies    []string
+	calls     int
+	maxTokens []int
 }
 
-func (s *aiStub) next() string {
+func (s *aiStub) next(requestedMaxTokens int) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	body := s.bodies[min(s.calls, len(s.bodies)-1)]
 	s.calls++
+	s.maxTokens = append(s.maxTokens, requestedMaxTokens)
 	return body
 }
 
@@ -39,12 +45,23 @@ func (s *aiStub) count() int {
 	return s.calls
 }
 
+func (s *aiStub) requestedMaxTokens() []int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.maxTokens)
+}
+
 // newReviewService は OpenAI をスタブに向けた ResumeService を返す。
 func newReviewService(t *testing.T, bodies ...string) (*ResumeService, *aiStub) {
 	t.Helper()
 	stub := &aiStub{bodies: bodies}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(stub.next()))
+		var req struct {
+			MaxOutputTokens int `json:"max_output_tokens"`
+		}
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &req)
+		_, _ = w.Write([]byte(stub.next(req.MaxOutputTokens)))
 	}))
 	t.Cleanup(srv.Close)
 	svc := NewResumeService(&resumeRepoStub{}, t.TempDir(), openai.NewWithBaseURL(srv.URL, "gpt-4o-mini"))
@@ -67,16 +84,22 @@ func responsesBody(t *testing.T, outputText, incompleteReason string) string {
 }
 
 // reviewJSON はレビュー結果のJSON（LLM の出力に相当）を組み立てる。
+// 指摘は本文ブロックの先頭3件に紐づく。
 func reviewJSON(t *testing.T, scores map[string]int) string {
 	t.Helper()
-	payload := map[string]any{
-		"summary": "確認しました",
-		"items": []map[string]any{
-			{"quote": "売上を前年比120%に伸ばしました", "message": "指摘1", "suggestion": "改善1", "severity": "info"},
-			{"quote": "3名のチームでリーダーを担当しました", "message": "指摘2", "suggestion": "改善2", "severity": "warning"},
-			{"quote": "基本情報技術者試験に合格しています", "message": "指摘3", "suggestion": "改善3", "severity": "critical"},
-		},
+	return reviewJSONItems(t, scores, "指摘", blockTexts[:3])
+}
+
+// reviewJSONItems は指摘の件数と文言を指定してレビュー結果のJSONを組み立てる。
+func reviewJSONItems(t *testing.T, scores map[string]int, message string, quotes []string) string {
+	t.Helper()
+	items := make([]map[string]any, 0, len(quotes))
+	for _, quote := range quotes {
+		items = append(items, map[string]any{
+			"quote": quote, "message": message, "suggestion": "改善案", "severity": "info",
+		})
 	}
+	payload := map[string]any{"summary": "確認しました", "items": items}
 	if scores != nil {
 		payload["scores"] = scores
 	}
@@ -87,12 +110,17 @@ func reviewJSON(t *testing.T, scores map[string]int) string {
 	return string(encoded)
 }
 
+// blockTexts は本文ブロックの文面。引用の照合が一意に決まるよう内容を離している。
+var blockTexts = []string{
+	"売上を前年比120%に伸ばしました",
+	"3名のチームでリーダーを担当しました",
+	"基本情報技術者試験に合格しています",
+	"TOEICで800点を取得しました",
+	"Webサイトの運用を2年間担当しました",
+}
+
 func reviewBlocks() []models.ResumeTextBlock {
-	texts := []string{
-		"売上を前年比120%に伸ばしました",
-		"3名のチームでリーダーを担当しました",
-		"基本情報技術者試験に合格しています",
-	}
+	texts := blockTexts
 	blocks := make([]models.ResumeTextBlock, 0, len(texts))
 	for i, text := range texts {
 		blocks = append(blocks, models.ResumeTextBlock{
@@ -227,18 +255,108 @@ func TestBuildReviewScoreItems_RetryFixesScore(t *testing.T) {
 	}
 }
 
-// TestBuildReviewScoreItems_TruncatedOutputFails は出力が上限で切れたときに
-// 切れたJSONを解析せず失敗させることを検証する（#1521 と同型の事故）。
+// TestBuildReviewScoreItems_RetryKeepsInitialItems はスコアだけが不正なときに
+// 初回の指摘集合を守ることを検証する。
 //
-// スタブが返すのは「items が1件・scores が欠けた」途中までのJSONで、
-// decodeJSON の波括弧探索では読めてしまう形にしてある。
+// やり直しはブロック一覧ベースの別プロンプトで、件数が増えても紐づきの質が
+// 上がる保証が無い。採点のやり直しのために本文へ良く紐づいた指摘を賭けない。
+func TestBuildReviewScoreItems_RetryKeepsInitialItems(t *testing.T) {
+	svc, stub := newReviewService(t,
+		// 初回: スコアだけ不正。指摘は3件紐づく
+		responsesBody(t, reviewJSONItems(t, map[string]int{"specificity": 4}, "初回の指摘", blockTexts[:3]), ""),
+		// やり直し: スコアは正常。指摘は5件（件数だけなら初回より多い）
+		responsesBody(t, reviewJSONItems(t, rubricScores(3, 3, 3, 3, 3), "やり直しの指摘", blockTexts), ""),
+	)
+
+	review, items, err := svc.buildReviewScoreItems(reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// スコアはやり直しの分を採る
+	if review.Score == nil || *review.Score != 60 {
+		t.Fatalf("Score = %v, want 60（やり直しのスコアを採用）", review.Score)
+	}
+	// 指摘は初回のまま
+	if len(items) != 3 {
+		t.Errorf("指摘件数 = %d, want 3（初回の集合を保つ）", len(items))
+	}
+	for _, item := range items {
+		if item.Message != "初回の指摘" {
+			t.Errorf("指摘が差し替わっている: %q", item.Message)
+		}
+	}
+	if got := stub.count(); got != 2 {
+		t.Errorf("AI 呼び出し回数 = %d, want 2", got)
+	}
+}
+
+// TestBuildReviewScoreItems_RetryFillsMissingItems は初回の指摘が3件未満のときは
+// 従来どおりやり直しの結果で件数を増やすことを検証する（#1529 で壊していないこと）。
+func TestBuildReviewScoreItems_RetryFillsMissingItems(t *testing.T) {
+	svc, _ := newReviewService(t,
+		// 初回: 紐づく指摘が1件だけ（スコアは正常）
+		responsesBody(t, reviewJSONItems(t, rubricScores(3, 3, 3, 3, 3), "初回の指摘", blockTexts[:1]), ""),
+		// やり直し: 5件
+		responsesBody(t, reviewJSONItems(t, rubricScores(3, 3, 3, 3, 3), "やり直しの指摘", blockTexts), ""),
+	)
+
+	_, items, err := svc.buildReviewScoreItems(reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(items) != len(blockTexts) {
+		t.Fatalf("指摘件数 = %d, want %d（やり直しで増やす）", len(items), len(blockTexts))
+	}
+	if items[0].Message != "やり直しの指摘" {
+		t.Errorf("やり直しの指摘が採用されていない: %q", items[0].Message)
+	}
+}
+
+// TestBuildReviewScoreItems_TruncatedOutputRetriesWithDoubleBudget は出力が上限で
+// 切れたとき、枠を倍にして1度だけやり直すことを検証する（#1521 の定石）。
+//
+// クライアント内部の「枠を倍にして再試行」は本文が空のときしか発火しないため、
+// 本文が途中まで返る切れ方はここでしか救えない。
+func TestBuildReviewScoreItems_TruncatedOutputRetriesWithDoubleBudget(t *testing.T) {
+	svc, stub := newReviewService(t,
+		responsesBody(t, truncatedReviewJSON, "max_output_tokens"),       // 1回目: 2400 で切れる
+		responsesBody(t, reviewJSON(t, rubricScores(3, 3, 3, 3, 3)), ""), // 2回目: 4800 で収まる
+	)
+
+	review, items, err := svc.buildReviewScoreItems(reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
+	if err != nil {
+		t.Fatalf("枠を倍にしたやり直しで成功するべき: %v", err)
+	}
+	if review.Score == nil || *review.Score != 60 {
+		t.Errorf("Score = %v, want 60", review.Score)
+	}
+	if len(items) == 0 {
+		t.Error("指摘が紐づいていない")
+	}
+	if got := stub.requestedMaxTokens(); !slices.Equal(got, []int{reviewMaxOutputTokens, reviewMaxOutputTokens * 2}) {
+		t.Errorf("要求した出力上限 = %v, want [%d %d]", got, reviewMaxOutputTokens, reviewMaxOutputTokens*2)
+	}
+}
+
+// TestBuildReviewScoreItems_TruncatedOutputFails は枠を倍にしても切れるなら
+// レビューごと失敗させることを検証する。
+//
+// **このテストが固定しているのは文言と呼び出し回数であって、
+// 「部分的なレビューが保存されない」ことではない。** 現在のスキーマは items が
+// 最後のフィールドなので、どこで切れても外側の '{' と '[' が閉じず decodeJSON は
+// 必ず失敗する（チェックを外しても失敗する。変わるのはエラー文言だけ）。
+// 上限到達の検知は「原因が分かる文言を出すこと」と、items を最後以外へ動かす
+// スキーマ変更に対する保険の2点が目的である。
 func TestBuildReviewScoreItems_TruncatedOutputFails(t *testing.T) {
-	partial := `{"summary":"確認しました","scores":{"specificity":4},"items":[{"quote":"売上を前年比120%に伸ばしました","message":"指摘1"}]`
-	svc, stub := newReviewService(t, responsesBody(t, partial, "max_output_tokens"))
+	body := responsesBody(t, truncatedReviewJSON, "max_output_tokens")
+	svc, stub := newReviewService(t, body, body)
 
 	review, items, err := svc.buildReviewScoreItems(reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
 	if err == nil {
 		t.Fatalf("エラーが返るべき（review=%+v items=%d）", review, len(items))
+	}
+	if !errors.Is(err, errReviewOutputTruncated) {
+		t.Errorf("上限到達のエラーであるべき: %v", err)
 	}
 	if !strings.Contains(err.Error(), "切れ") {
 		t.Errorf("エラーメッセージが上限到達を伝えていない: %v", err)
@@ -246,11 +364,15 @@ func TestBuildReviewScoreItems_TruncatedOutputFails(t *testing.T) {
 	if review != nil || items != nil {
 		t.Error("切れた出力から部分的な結果を作ってはいけない")
 	}
-	// 上限到達は再試行しても同じ位置で切れるので、やり直さない
-	if got := stub.count(); got != 1 {
-		t.Errorf("AI 呼び出し回数 = %d, want 1", got)
+	// 初回＋枠を倍にしたやり直しの2回で打ち切る（同じ枠での再試行はしない）
+	if got := stub.count(); got != 2 {
+		t.Errorf("AI 呼び出し回数 = %d, want 2", got)
 	}
 }
+
+// truncatedReviewJSON は出力上限で途中まで返った JSON。
+// items が最後のフィールドなので外側の '{' と配列の '[' が閉じていない。
+const truncatedReviewJSON = `{"summary":"確認しました","scores":{"specificity":4},"items":[{"quote":"売上を前年比120%に伸ばしました","message":"指摘1"`
 
 // TestBuildRubricJSONHint はプロンプトの出力例が評価項目の定義から作られることを検証する。
 // 出力例を手書きすると、項目を増減したときに検証と食い違う。

@@ -39,7 +39,12 @@ export function ResumeReviewResults({
 
   return (
     <>
-      {scoresAfter && (
+      {/*
+        スコア無しのときは BE が user_weight_scores へ意図的に何も書かないので、
+        反映済みバナーを出さない（#1529）。既存スコア行があるユーザーでは
+        差分0件でも「反映されました」と表示され、虚偽の主張になる。
+      */}
+      {scoresAfter && review.review.score !== null && (
         <Box mt={4}>
           <ScoreUpdateBanner
             beforeScores={scoresBefore}

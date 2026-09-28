@@ -72,6 +72,14 @@ func TestResumeRubricWeights_CoverAllCriteria(t *testing.T) {
 			if weights[key] <= 0 {
 				t.Errorf("%s: %s の重みが未定義または0", candidateType, key)
 			}
+			// 重みが満点(5)の倍数なら Σ(重み×項目スコア)/5 が常に整数になり、
+			// ComputeResumeOverallScore の丸め方向が結果に影響しない。
+			// この不変条件が崩れると 33/33/34 のような重みで60境界の値が
+			// 丸めに依存し始めるので、そのときは丸め方向をテストで固定すること。
+			if weights[key]%ResumeRubricScoreMax != 0 {
+				t.Errorf("%s: %s の重み %d は満点 %d の倍数であるべき（丸めが効き始める）",
+					candidateType, key, weights[key], ResumeRubricScoreMax)
+			}
 		}
 	}
 }
