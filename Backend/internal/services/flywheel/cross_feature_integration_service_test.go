@@ -148,3 +148,63 @@ func TestUpdateScoresFromInterviewReport_SavedValues(t *testing.T) {
 		})
 	}
 }
+
+// TestUpdateScoresFromInterviewReport_ExistingRowBlends は既存行がある2回目以降の経路を検証する。
+//
+// 実ユーザーはほぼこちら（AddScore の差分加算）を通る。絶対値INSERTのテストだけでは
+// movingAvgNewWeight や delta == 0 の早期リターンを壊しても気付けない。
+func TestUpdateScoresFromInterviewReport_ExistingRowBlends(t *testing.T) {
+	scoresJSON := `{"logic":4,"specificity":3,"ownership":2,"communication":5,"enthusiasm":1}`
+
+	const existing = 60 // 全カテゴリの既存値
+	// 新値（evidence・発話統計なし = ルーブリック×20）から
+	// delta = round(既存*0.7 + 新*0.3) - 既存 を期待する。
+	tests := []struct {
+		category string
+		newValue int
+		delta    int // 0 なら書き込み自体が起きない
+	}{
+		{category: "コミュニケーション力", newValue: 100, delta: 12},
+		{category: "技術志向", newValue: 80, delta: 6},
+		{category: "細部志向", newValue: 60, delta: 0}, // 既存と同じ → UPDATE を発行しない
+		{category: "リーダーシップ志向", newValue: 40, delta: -6},
+		{category: "チャレンジ志向", newValue: 40, delta: -6},
+		{category: "成長志向", newValue: 20, delta: -12},
+		{category: "チームワーク志向", newValue: 20, delta: -12},
+	}
+
+	svc, mock := newCrossFeatureService(t)
+	for i, tt := range tests {
+		rowID := i + 1
+		// 期待する delta を写像から導き直して、移動平均の定数のズレも検出する。
+		if want := blendScore(existing, tt.newValue) - existing; want != tt.delta {
+			t.Fatalf("%s: delta の期待値が写像と合っていない: %d, want %d", tt.category, tt.delta, want)
+		}
+		row := func() *sqlmock.Rows {
+			return sqlmock.NewRows([]string{"id", "user_id", "session_id", "weight_category", "score"}).
+				AddRow(rowID, testUserID, testSessionID, tt.category, existing)
+		}
+		// applyMovingAverage の既存値取得
+		mock.ExpectQuery("SELECT \\* FROM `user_weight_scores`").
+			WithArgs(testUserID, testSessionID, tt.category, 1).
+			WillReturnRows(row())
+		if tt.delta == 0 {
+			continue
+		}
+		// AddScore 内の再取得 → 差分UPDATE
+		mock.ExpectQuery("SELECT \\* FROM `user_weight_scores`").
+			WithArgs(testUserID, testSessionID, tt.category, 1).
+			WillReturnRows(row())
+		mock.ExpectBegin()
+		mock.ExpectExec("UPDATE `user_weight_scores` SET `score`=GREATEST").
+			WithArgs(tt.delta, sqlmock.AnyArg(), rowID).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectCommit()
+	}
+
+	err := svc.UpdateScoresFromInterviewReport(testUserID, testSessionID,
+		newInterviewReport(scoresJSON, ""), InterviewTranscriptStats{})
+	require.NoError(t, err)
+	// delta==0 の細部志向に UPDATE が来ていたら「予期しないExec」で落ちる。
+	require.NoError(t, mock.ExpectationsWereMet())
+}

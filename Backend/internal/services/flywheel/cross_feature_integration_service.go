@@ -32,12 +32,14 @@ func NewCrossFeatureIntegrationService(
 // 値域の変換は mapInterviewScore（score_mapping.go）が行う
 //
 // interviewKey は面接プロンプトのルーブリックキー（interview.RubricKeys）と同じ綴りである必要がある。
-// ずれた項目は interviewScores から引けず、そのカテゴリが一切書かれない（ログも出ない）。
-// flywheel は interview を import できない（逆向きの依存がある）ため、
-// 一致は InterviewRubricKeys 経由で interview 側のテストが固定している（#1554）。
+// ずれた項目は interviewScores から引けず、そのカテゴリが一切書かれない。
+// 同一パッケージのテスト（package flywheel）からは interview を import できない
+// （interview → flywheel の依存があるため）。外部テストパッケージ + export_test.go でも組めるが、
+// 本番APIを広げても誤用リスクが低いので InterviewRubricKeys を公開し、
+// 一致は interview 側のテストで固定している（#1554）。
 var interviewScoreMapping = []struct {
 	interviewKey string
-	categories   []string // 反映先カテゴリ（複数可: 均等に按分）
+	categories   []string // 反映先カテゴリ（複数可: 同じ値をそれぞれに入れる。分割はしない）
 }{
 	{"communication", []string{"コミュニケーション力"}},
 	{"logic", []string{"技術志向"}},
@@ -119,6 +121,10 @@ func (s *CrossFeatureIntegrationService) UpdateScoresFromInterviewReport(
 	for _, mapping := range interviewScoreMapping {
 		raw, ok := interviewScores[mapping.interviewKey]
 		if !ok {
+			// ValidateRubricScores を通ったレポートなら5項目すべて揃っている。
+			// 引けないのはプロンプト側のキーとずれている兆候なので、黙って飛ばさない。
+			log.Printf("[CrossFeature] 面接スコアに項目 %s が無い（プロンプトのルーブリックキーとずれている可能性）\n",
+				mapping.interviewKey)
 			continue
 		}
 		// 0-5 → 0-100。evidence 量と回答量で ±5点だけ補正して分解能を上げる（#1528）

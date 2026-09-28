@@ -250,13 +250,50 @@ func TestInterviewSignal_MissingStatsIsNeutral(t *testing.T) {
 	}
 }
 
-// TestInterviewSignal_MissingEvidenceIsNeutral は evidence が無い場合に
+// TestMapInterviewScore_ShortEvidenceIsBelowMissing は
+// 「短い evidence は無記録より低く出る」という既知の歪みを固定する（#1554 / #1558 レビュー）。
+//
+// 欠損を中立(0.5)に置く以上この非単調性は消えない（判断の理由は interviewSignal のコメント）。
+// 歪みの大きさをここで固定して、意図せず広がったら気付けるようにする。
+// 上限は3点（rubric1段の 20点 に対して 15%）。これを超えたら中立値の置き方から見直す。
+func TestMapInterviewScore_ShortEvidenceIsBelowMissing(t *testing.T) {
+	rich := InterviewTranscriptStats{UserTurns: 10, AvgAnswerRunes: 120}
+
+	tests := []struct {
+		name          string
+		evidenceRunes int
+		want          int
+	}{
+		{name: "無記録（中立0.5）", evidenceRunes: 0, want: 62},
+		{name: "1文字（最も不利）", evidenceRunes: 1, want: 59},
+		{name: "中立の直前", evidenceRunes: 59, want: 62},
+		{name: "中立と同じ（full の半分）", evidenceRunes: evidenceFullRunes / 2, want: 62},
+		{name: "full で頭打ち", evidenceRunes: evidenceFullRunes, want: 65},
+		{name: "full 超も頭打ちのまま", evidenceRunes: evidenceFullRunes * 2, want: 65},
+	}
+
+	missing := mapInterviewScore(3, "", rich)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mapInterviewScore(3, strings.Repeat("あ", tt.evidenceRunes), rich)
+			if got != tt.want {
+				t.Errorf("evidence=%d文字: %d, want %d", tt.evidenceRunes, got, tt.want)
+			}
+			if loss := missing - got; loss > 3 {
+				t.Errorf("evidence=%d文字: 無記録(%d)より %d 点低い。歪みが3点を超えた",
+					tt.evidenceRunes, missing, loss)
+			}
+		})
+	}
+}
+
+// TestMapInterviewScore_MissingEvidenceIsNeutral は evidence が無い場合に
 // 減点せず中立に寄せることを検証する（#1554）。
 //
 // 修正前は evidence 欠損で signal の上限が 0.6*0+0.4*1 = 0.4 に下がり、
 // どれだけ良い面接でも全カテゴリが必ずマイナス補正されていた。
 // LLM が evidence を省く／evidence_json が壊れるだけで静かに全カテゴリが下がる経路だった。
-func TestInterviewSignal_MissingEvidenceIsNeutral(t *testing.T) {
+func TestMapInterviewScore_MissingEvidenceIsNeutral(t *testing.T) {
 	rich := InterviewTranscriptStats{UserTurns: 10, AvgAnswerRunes: 150}
 
 	// evidence・発話統計の両方が欠損 = 補正なし。ルーブリックの ×20 がそのまま出る。
