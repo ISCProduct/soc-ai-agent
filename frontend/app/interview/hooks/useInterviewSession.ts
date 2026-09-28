@@ -175,16 +175,16 @@ export function useInterviewSession({
   useEffect(() => { userRef.current = user }, [user])
 
   // Cleanup on unmount
-  useEffect(() => () => cleanupConnection(), [])
+  useEffect(() => () => cleanupConnection(true), [])
 
   // Auto-scroll transcript
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [utterances, partialAi])
 
-  const cleanupConnection = () => {
+  const cleanupConnection = (invalidateCompanyContext = false) => {
     audioGenerationRef.current++
-    companyContextGenerationRef.current++
+    if (invalidateCompanyContext) companyContextGenerationRef.current++
     ;[timerRef, pollRef].forEach(r => { if (r.current) { clearInterval(r.current); r.current = null } })
     if (mediaRecorderRef.current) {
       // 録音中に終了した場合、stop() の onstop で新しいターンを送ると
