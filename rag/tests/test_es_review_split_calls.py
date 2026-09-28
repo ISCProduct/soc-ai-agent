@@ -38,14 +38,12 @@ def _mock_client(finish_reasons: list[str] | None = None) -> MagicMock:
     finish_reasons を渡すと、その順序で finish_reason を差し替える。
     """
     reasons = list(finish_reasons or [])
-    calls = {"n": 0}
 
     def _create(**kwargs):
         reason = reasons.pop(0) if reasons else "stop"
         # improved_text だけを求めるプロンプトかどうかで返すペイロードを切り替える
         user = next(msg["content"] for msg in kwargs["messages"] if msg["role"] == "user")
         payload = _IMPROVED_PAYLOAD if "【添削フィードバック】" in user else _REVIEW_PAYLOAD
-        calls["n"] += 1
         return _chat_response(payload, reason)
 
     client = MagicMock()
@@ -156,6 +154,20 @@ def test_company_context_present_keeps_company_fields(monkeypatch):
     )
     assert "【志望企業】株式会社サイバーエージェント" in review_user
     assert "求める人物像: 自走できる人" in review_user
+
+
+def test_non_numeric_score_falls_back_to_default(monkeypatch):
+    """モデルがスコアに文字列を返しても500にせず既定値で通す。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    client = _mock_client()
+    _REVIEW_PAYLOAD["specificity_score"] = "8点"
+    try:
+        result = _run(client)
+    finally:
+        _REVIEW_PAYLOAD["specificity_score"] = 7
+
+    assert result.specificity_score == 5
+    assert result.improved_text == "改善後の文章"
 
 
 def test_prompt_injection_guard_on_both_calls(monkeypatch):

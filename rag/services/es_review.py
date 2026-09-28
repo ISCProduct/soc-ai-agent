@@ -92,7 +92,13 @@ def _call_json_with_retry(
 
 
 def _clamp_score(value: Any, default: int = 5) -> int:
-    return max(1, min(10, int(value if value is not None else default)))
+    """スコアを1-10に丸める。モデルが "8点"/"N/A" 等を返しても既定値で通す。"""
+    try:
+        score = int(value if value is not None else default)
+    except (TypeError, ValueError):
+        logger.warning("es review invalid score value=%r; fallback=%d", value, default)
+        score = default
+    return max(1, min(10, score))
 
 
 def _run_es_review(
