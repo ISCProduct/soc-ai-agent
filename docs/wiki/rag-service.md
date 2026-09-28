@@ -116,9 +116,15 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 - `company_context_source`: 企業コンテキストの取得元（`company_brief` / `cache` / `web_search` / `none`）
 - **企業コンテキストが0件（`none`）のときは企業名もプロンプトへ入れず、`company_fit_score` と `company_strategy` は必ず `null`** になる（モデルの内部知識による根拠の無い企業評価を防ぐ / #1524）
 - 生成は2回の呼び出しに分割している（#1521）
-  - 第1: スコア4軸 + `feedback` + `company_strategy`
-  - 第2: `improved_text` のみ（第1の `feedback` を入力に渡して内容の整合を取る）
-- `max_tokens` は日本語 約0.78トークン/文字・改善文は入力の最大1.3倍という見積もりで算出する。`finish_reason == "length"`（出力上限到達）を検知したら上限を引き上げて**1回だけ**再試行し、それでも上限に達した場合は 422 と「文章が長すぎて添削できませんでした。文字数を減らしてお試しください。」を返す
+  - 第1: スコア4軸 + `feedback` + `company_strategy`（企業情報の生データはこちらだけに渡す）
+  - 第2: `improved_text` のみ（第1の `feedback` を「改善の観点」として渡す。企業情報は再投入しない＝入力トークンの二重計上を避ける）
+- `max_tokens` は日本語 **0.85トークン/文字**（tiktoken `o200k_base` の実測は素の日本語 0.80〜0.81、半角カナ 1.36。安全率込み）・改善文は入力の最大1.3倍 + JSONオーバーヘッド120で見積もる。上限は 8192
+- `finish_reason == "length"`（出力上限到達）を検知したら上限を2倍にして**1回だけ**再試行する。既に 8192 なら引き上げ余地が無いので再試行しない
+- 再試行しても上限に達した場合は 422 を返す。案内文は段ごとに変える（評価の出力量はESの長さに依存しないため、そちらで「文字数を減らして」と案内しても直らない）
+  - 改善文の段: 「文章が長すぎて添削できませんでした。文字数を減らしてお試しください。」
+  - 評価の段: 「添削コメントが長くなりすぎて最後まで生成できませんでした。もう一度お試しください。」
+- 422 の案内文は Go を透過し、FE では `frontend/app/es-rewrite/page-content.tsx` の `readApiErrorMessage` が 422 のとき `detail` を優先して表示する（BFF が `error` に入れる一般文では利用者が対処できないため）
+- LLM呼び出しは最悪4回直列（2段 × 各1回再試行）。OpenAI SDK の `max_retries` は 1 を明示している。Backend 側の `/api/es/review` は 180秒だが、ALB(`idle_timeout` 既定60秒) / CloudFront(`origin_read_timeout` 60秒) が先に切るため実効は60秒（#1556 で対応）
 
 ---
 

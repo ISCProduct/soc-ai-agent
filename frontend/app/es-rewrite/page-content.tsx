@@ -32,12 +32,19 @@ const QUESTION_TYPES = ['志望動機', '自己PR', '学チカ', 'ガクチカ',
 /**
  * APIプロキシのエラーレスポンス（{ error, status, detail }想定）から
  * 日本語の短いメッセージを取り出す。生JSON/HTMLをそのまま表示しないため(#1015)。
+ *
+ * 422 のみ detail を優先する。RAGが利用者向けの具体的な案内（例: 「文章が長すぎて
+ * 添削できませんでした。文字数を減らしてお試しください。」#1521）を detail に入れる一方、
+ * api-proxy が error へ一般文「処理に失敗しました。しばらくしてから再試行してください。」を
+ * 入れるため、error だけを読むと何をすれば直るのか分からなくなる。
  */
 async function readApiErrorMessage(res: Response, fallback: string): Promise<string> {
   try {
     const data: unknown = await res.json()
-    const error = (data as { error?: unknown })?.error
+    const { error, detail } = (data ?? {}) as { error?: unknown; detail?: unknown }
+    if (res.status === 422 && typeof detail === 'string' && detail) return detail
     if (typeof error === 'string' && error) return error
+    if (typeof detail === 'string' && detail) return detail
   } catch { /* ignore */ }
   return fallback
 }
