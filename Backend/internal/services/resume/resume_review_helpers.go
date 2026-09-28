@@ -7,6 +7,19 @@ import (
 	"strings"
 
 	"Backend/internal/models"
+	"Backend/internal/services/shared/textsim"
+)
+
+const (
+	// quoteMatchThreshold は引用と本文ブロックを同一と見なす最小類似度。
+	// 語尾・送り仮名の違いや一節の省略でもDice係数は0.6前後を保つ一方、
+	// 無関係な日本語文どうしのbigram重複は0.3程度に収まるため、その中間に置いている。
+	quoteMatchThreshold = 0.55
+	// quoteMatchMargin は最良候補と次点の類似度差の下限。
+	// これ未満なら「どちらのブロックとも言える」状態なので紐づけを諦める。
+	// 誤ったブロックに紐づくと注釈PDFに焼かれ、学生が無関係な記述を直すことになるため、
+	// 迷うくらいなら欠落させる。
+	quoteMatchMargin = 0.1
 )
 
 func fallbackResumeReview(blocks []models.ResumeTextBlock) (*models.ResumeReview, []models.ResumeReviewItem) {
@@ -78,6 +91,12 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 	if len(aiItems) == 0 {
 		return nil
 	}
+	// ブロック側の正規化とbigramは指摘ごとに作り直さず、ここで一度だけ計算して使い回す。
+	blockTexts := make([]textsim.Text, len(blocks))
+	for i := range blocks {
+		blockTexts[i] = textsim.New(blocks[i].Text)
+	}
+
 	result := make([]models.ResumeReviewItem, 0, len(aiItems))
 	for _, item := range aiItems {
 		if strings.TrimSpace(item.Quote) == "" {
@@ -92,7 +111,7 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 			}
 		}
 		if block == nil && runeLen(item.Quote) >= 6 {
-			block = findBestBlock(blocks, item.Quote, item.PageHint)
+			block = findBestBlock(blocks, blockTexts, item.Quote, item.PageHint)
 		}
 		if block == nil {
 			continue
@@ -115,42 +134,55 @@ func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []m
 	return result
 }
 
-func findBestBlock(blocks []models.ResumeTextBlock, quote string, pageHint int) *models.ResumeTextBlock {
-	quoteNorm := normalizeText(quote)
-	if quoteNorm == "" {
+// findBestBlock は引用に最も近い本文ブロックを返す。
+// blockTexts は blocks と同じ並びの正規化済みテキスト。
+// しきい値未満、または次点と差が小さく曖昧な場合は nil を返す。
+func findBestBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Text, quote string, pageHint int) *models.ResumeTextBlock {
+	quoteText := textsim.New(quote)
+	if quoteText.Empty() {
 		return nil
 	}
-
-	var best *models.ResumeTextBlock
-	bestScore := 0
-	for i := range blocks {
-		block := &blocks[i]
-		if pageHint > 0 && block.PageNumber != pageHint {
-			continue
-		}
-		blockNorm := normalizeText(block.Text)
-		if blockNorm == "" {
-			continue
-		}
-		score := textMatchScore(blockNorm, quoteNorm)
-		if score > bestScore {
-			bestScore = score
-			best = block
-		}
-	}
-
-	if best != nil {
+	// page_hint のページ内を優先し、見つからなければ全ページから探す。
+	if best := bestMatchingBlock(blocks, blockTexts, quoteText, pageHint); best != nil {
 		return best
 	}
+	if pageHint > 0 {
+		return bestMatchingBlock(blocks, blockTexts, quoteText, 0)
+	}
+	return nil
+}
 
+func bestMatchingBlock(blocks []models.ResumeTextBlock, blockTexts []textsim.Text, quoteText textsim.Text, pageHint int) *models.ResumeTextBlock {
+	var best *models.ResumeTextBlock
+	bestScore, secondScore := 0.0, 0.0
+	bestLen := 0
 	for i := range blocks {
-		block := &blocks[i]
-		blockNorm := normalizeText(block.Text)
-		score := textMatchScore(blockNorm, quoteNorm)
-		if score > bestScore {
-			bestScore = score
-			best = block
+		if pageHint > 0 && blocks[i].PageNumber != pageHint {
+			continue
 		}
+		score := blockTexts[i].Score(quoteText)
+		length := runeLen(blockTexts[i].Norm())
+		if score > bestScore {
+			secondScore = bestScore
+			bestScore, bestLen, best = score, length, &blocks[i]
+			continue
+		}
+		if score > secondScore {
+			secondScore = score
+		}
+		// 完全包含(1.0)が複数あるのは一文が複数行のブロックに分かれているケース。
+		// 引用と最も長く重なるブロックを採る。
+		if score == bestScore && bestScore == 1 && length > bestLen {
+			bestLen, best = length, &blocks[i]
+		}
+	}
+	if best == nil || bestScore < quoteMatchThreshold {
+		return nil
+	}
+	// 完全包含はそのまま抜粋されたケースなので曖昧扱いしない。
+	// それ以外で次点と差が小さいときは、誤ったブロックに紐づけるより欠落させる。
+	if bestScore < 1 && bestScore-secondScore < quoteMatchMargin {
+		return nil
 	}
 	return best
 }
@@ -165,15 +197,10 @@ func findBlockByIndex(blocks []models.ResumeTextBlock, pageHint int, blockIndex 
 	return nil
 }
 
-func normalizeText(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	s = strings.ReplaceAll(s, " ", "")
-	s = strings.ReplaceAll(s, "　", "")
-	return s
-}
-
+// quoteInBlock は引用が本文ブロックに一致すると見なせるかを判定する。
+// 正規化後の部分一致、または類似度がしきい値以上なら一致とする。
 func quoteInBlock(quote string, blockText string) bool {
-	return strings.Contains(normalizeText(blockText), normalizeText(quote))
+	return textsim.Similarity(blockText, quote) >= quoteMatchThreshold
 }
 
 func runeLen(s string) int {
@@ -315,50 +342,4 @@ func buildBlockList(blocks []models.ResumeTextBlock) string {
 		b.WriteString(fmt.Sprintf("[P%dB%d] %s\n", block.PageNumber, block.BlockIndex, line))
 	}
 	return b.String()
-}
-
-func textMatchScore(block, quote string) int {
-	if block == "" || quote == "" {
-		return 0
-	}
-	if strings.Contains(block, quote) || strings.Contains(quote, block) {
-		return 100
-	}
-	blockTokens := splitTokens(block)
-	quoteTokens := splitTokens(quote)
-	if len(blockTokens) == 0 || len(quoteTokens) == 0 {
-		return 0
-	}
-	score := 0
-	for _, token := range quoteTokens {
-		for _, b := range blockTokens {
-			if token == b {
-				score += 10
-				break
-			}
-		}
-	}
-	return score
-}
-
-func splitTokens(s string) []string {
-	s = strings.ReplaceAll(s, "。", " ")
-	s = strings.ReplaceAll(s, "、", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	parts := strings.Fields(s)
-	if len(parts) == 0 {
-		return nil
-	}
-	seen := make(map[string]bool)
-	result := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if len(part) < 2 {
-			continue
-		}
-		if !seen[part] {
-			seen[part] = true
-			result = append(result, part)
-		}
-	}
-	return result
 }
