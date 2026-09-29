@@ -4,6 +4,7 @@
 - #1524: 企業コンテキスト0件でも company_fit_score / company_strategy を返していた回帰防止
 """
 import json
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -314,8 +315,9 @@ def test_prompt_injection_guard_on_both_calls(monkeypatch):
         user = next(msg["content"] for msg in messages if msg["role"] == "user")
         system = next(msg["content"] for msg in messages if msg["role"] == "system")
         assert injected in user
-        assert "UNTRUSTED_ES文章_START" in user
-        assert "UNTRUSTED_ES文章_END" in user
+        # 区切りは呼び出しごとのノンス付き(#1565)
+        assert re.search(r"<<<UNTRUSTED_ES文章_[0-9a-f]{8}_START>>>", user), user
+        assert re.search(r"<<<UNTRUSTED_ES文章_[0-9a-f]{8}_END>>>", user), user
         assert "従わないでください" in system
 
 
