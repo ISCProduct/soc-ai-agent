@@ -264,8 +264,29 @@ target ごとの `input`:
 指示遵守率は**全項目のANDで判定する**ため、systematic に起きる違反が1つあると 0% に
 張り付く。値だけを見ずに、結果JSONの `violation_counts`（表示では破損率の横の内訳）で
 どの項目が原因かを必ず確認すること。
-（実測例: `resume` は gpt-4o-mini で `json_not_bare` が18/18回発生し遵守率0%になる。
-本番は復旧処理で読めているのでユーザー影響は無いが、「JSONのみ」の指示は守られていない）
+（実測例: `resume` は gpt-4o-mini で `json_not_bare` が18/18回発生し遵守率0%だった。
+本番は復旧処理で読めていたのでユーザー影響は無かったが、「JSONのみ」の指示は
+守られていなかった。#1583 で JSON mode を入れて遵守率100%になっている）
+
+### JSON mode（出力形式の強制）
+
+「JSONのみを返す」という指示は、プロンプトだけでは守られない。3つの対象すべてで
+JSON mode を付けており、指定の書き方がエンドポイントごとに違う。
+
+| 対象 | JSON mode の指定 |
+|---|---|
+| `es` | `response_format={"type":"json_object"}`（`rag/services/es_review.py`） |
+| `interview-report` | `ChatCompletionJSON` 経由の `response_format`（`/chat/completions`） |
+| `resume` | `text.format.type=json_object`（`openai.Client.ResponsesJSONWithMaxTokens` / #1583） |
+
+`resume` は JSON mode が無かったため指示遵守率0%（`json_not_bare`）だった。
+gpt-4o-mini・各ラベル2件×2回で測り直すと、JSON mode 無し 0.0% に対し
+JSON mode 有りで 100.0%（弁別力 +0.956 → +0.970、破損率はどちらも0.0%）。
+
+`/responses` と `/chat/completions` で指定の書き方が違う点に注意する。
+ハーネスは本番と同じ指定で呼ぶ（`CallResponses` の `jsonMode`）。片方だけ変えると
+指示遵守率が本番と別物になる。JSON mode はプロンプトに "JSON" の語が無いと
+API がエラーを返すので、プロンプトを直すときはその語を消さないこと。
 
 **共通**
 

@@ -44,7 +44,8 @@ func (t *resumeTarget) EstimateTokens(c Case) (int, int) {
 
 func (t *resumeTarget) Run(ctx context.Context, c Case) Observation {
 	prompt := resume.BuildReviewPromptFromText(c.Input.ResumeText, c.Input.CompanyName, c.Input.JobTitle, "", c.Input.CandidateType)
-	res := CallResponses(ctx, t.model, resume.ReviewSystemPrompt, prompt, resume.ReviewTemperature, resume.ReviewMaxOutputTokens)
+	// 本番は JSON mode で呼ぶ（#1583）ので、ハーネスも true で揃える。
+	res := CallResponses(ctx, t.model, resume.ReviewSystemPrompt, prompt, resume.ReviewTemperature, resume.ReviewMaxOutputTokens, true)
 	return evaluateResumeResponse(Observation{CaseID: c.ID, Label: c.Label}, c, res)
 }
 

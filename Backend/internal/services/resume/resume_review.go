@@ -101,6 +101,10 @@ const (
 	// ReviewSystemPrompt はレビュー生成の system プロンプト。
 	ReviewSystemPrompt = "あなたは日本語の履歴書・エントリーシートを添削する専門家です。必ず具体的な書き換え案をJSON形式で提示します。"
 
+	// reviewRetrySystemPrompt は指摘不足・スコア不正のときのやり直し用 system プロンプト。
+	// どちらの経路も JSON mode で呼ぶため、"JSON" の語を必ず含めること（#1583）。
+	reviewRetrySystemPrompt = "あなたは日本語の履歴書・エントリーシートを添削する専門家です。JSON形式で出力してください。"
+
 	// ReviewMaxOutputTokens はレビュー生成の出力上限。
 	//
 	// 指摘8件（引用・指摘・改善案の3文×8）が出力の大半で、#1529 で追加した
@@ -155,7 +159,11 @@ func (s *ResumeService) requestReviewJSON(systemPrompt, userPrompt, model string
 	for _, maxTokens := range []int{ReviewMaxOutputTokens, ReviewMaxOutputTokens * 2} {
 		// 上限到達を検知するためフラグ付きのコンテキストで呼ぶ（#1529）。
 		aiCtx := openai.WithTruncationFlag(context.Background())
-		raw, err := s.aiClient.ResponsesWithMaxTokens(aiCtx, systemPrompt, userPrompt, ReviewTemperature, maxTokens, model)
+		// JSON mode で呼ぶ（#1583）。素の JSON しか返らなくなるので、decodeJSON の
+		// 復旧処理（'{' 〜 '}' の切り出し）は保険として残るだけで通らなくなる。
+		// JSON mode がプロンプトへ要求する "JSON" の語は、初回の ReviewSystemPrompt と
+		// やり直し側の system プロンプトの両方に入っている。
+		raw, err := s.aiClient.ResponsesJSONWithMaxTokens(aiCtx, systemPrompt, userPrompt, ReviewTemperature, maxTokens, model)
 		if err != nil {
 			return "", err
 		}
@@ -648,7 +656,7 @@ scoresは上の評価基準の全項目を必ず含めてください。総合�
 {"scores":{%s},"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}`,
 			companyName, jobTitle, companyInfo, candidateType, blockList,
 			BuildResumeRubricPromptSection(), buildRubricJSONHint())
-		rawRetry, retryReqErr := s.requestReviewJSON("あなたは日本語の履歴書・エントリーシートを添削する専門家です。JSON形式で出力してください。", retryPrompt, modelOverride)
+		rawRetry, retryReqErr := s.requestReviewJSON(reviewRetrySystemPrompt, retryPrompt, modelOverride)
 		if retryReqErr != nil {
 			log.Printf("resume_review: やり直しの生成に失敗: %v", retryReqErr)
 		}

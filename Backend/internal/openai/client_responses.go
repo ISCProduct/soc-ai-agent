@@ -57,6 +57,19 @@ func setOutputTruncated(ctx context.Context, truncated bool) {
 // truncationReasonMaxTokens は Responses API が返す上限到達の理由。
 const truncationReasonMaxTokens = "max_output_tokens"
 
+// Responses API の text.format.type に入れる値。
+//
+// textFormatNone は text を送らない（Chat Completions の response_format 未指定に相当）。
+// textFormatJSON は JSON mode。指定すると本文が素の JSON になり、コードフェンスや
+// 前置きが付かなくなる（#1583）。Chat Completions の
+// response_format={"type":"json_object"} と同じ強制で、プロンプト側に "JSON" の語が
+// 必要な点も同じ。
+const (
+	textFormatNone = ""
+	textFormatText = "text"
+	textFormatJSON = "json_object"
+)
+
 type responsesRequest struct {
 	Model           string           `json:"model"`
 	Input           any              `json:"input"`
@@ -83,7 +96,7 @@ func countWebSearchTools(tools []map[string]any) int {
 	return n
 }
 
-func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string, temperature *float32, maxOutputTokens int, includeTextFormat bool) (string, error) {
+func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string, temperature *float32, maxOutputTokens int, textFormat string) (string, error) {
 	payload := responsesRequest{
 		Model:           model,
 		Input:           input,
@@ -95,10 +108,10 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 	if isReasoningModel(model) {
 		payload.Reasoning = map[string]string{"effort": "low"}
 	}
-	if includeTextFormat {
+	if textFormat != textFormatNone {
 		payload.Text = map[string]any{
 			"format": map[string]string{
-				"type": "text",
+				"type": textFormat,
 			},
 		}
 	}
@@ -310,10 +323,10 @@ func isModelNotFoundErr(err error) bool {
 	return strings.Contains(msg, "model") && (strings.Contains(msg, "not found") || strings.Contains(msg, "does not exist") || strings.Contains(msg, "unsupported"))
 }
 
-func (cli *Client) callResponsesAPIWithTempFallback(ctx context.Context, input any, model string, temperature *float32, maxOutputTokens int, includeTextFormat bool) (string, error) {
-	content, err := cli.callResponsesAPI(ctx, input, model, temperature, maxOutputTokens, includeTextFormat)
+func (cli *Client) callResponsesAPIWithTempFallback(ctx context.Context, input any, model string, temperature *float32, maxOutputTokens int, textFormat string) (string, error) {
+	content, err := cli.callResponsesAPI(ctx, input, model, temperature, maxOutputTokens, textFormat)
 	if err != nil && isUnsupportedTemperatureErr(err) {
-		return cli.callResponsesAPI(ctx, input, model, nil, maxOutputTokens, includeTextFormat)
+		return cli.callResponsesAPI(ctx, input, model, nil, maxOutputTokens, textFormat)
 	}
 	return content, err
 }
@@ -346,17 +359,17 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 				},
 			},
 		}
-		content, err := cli.callResponsesAPI(ctxReq, messageInput, model, nil, 600, true)
+		content, err := cli.callResponsesAPI(ctxReq, messageInput, model, nil, 600, textFormatText)
 		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
 			// キャッシュ活用のため、system/user を分離したまま再試行する（combinedPrompt を作らない）
-			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, nil, 600, false)
+			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, nil, 600, textFormatNone)
 		}
 		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
 			// それでも空応答なら maxOutputTokens を増やして再試行（system/user を分離したまま）
-			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, nil, 1200, false)
+			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, nil, 1200, textFormatNone)
 		}
 		if err != nil && strings.Contains(err.Error(), "max_output_tokens") {
-			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, nil, 1200, true)
+			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, nil, 1200, textFormatText)
 		}
 		cancel()
 
@@ -418,17 +431,17 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 				},
 			},
 		}
-		content, err := cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 100, true)
+		content, err := cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 100, textFormatText)
 		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
 			// キャッシュを活かすために system/user を分離したまま再試行
-			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 100, false)
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 100, textFormatNone)
 		}
 		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
 			// 空応答が続く場合は出力トークン上限を増やして再試行
-			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 200, false)
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 200, textFormatNone)
 		}
 		if err != nil && strings.Contains(err.Error(), "max_output_tokens") {
-			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 200, true)
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 200, textFormatText)
 		}
 		cancel()
 
@@ -454,8 +467,26 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 	return "", lastErr
 }
 
-// ChatCompletionJSON uses the go-openai SDK to request a JSON response.
+// ResponsesWithMaxTokens は Responses API で出力上限を指定してテキストを取得する。
+// 出力形式は強制しない（JSON が欲しいときは ResponsesJSONWithMaxTokens を使う）。
 func (cli *Client) ResponsesWithMaxTokens(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxOutputTokens int, modelOverride ...string) (string, error) {
+	return cli.responsesWithMaxTokens(ctx, systemPrompt, userPrompt, temperature, maxOutputTokens, false, modelOverride...)
+}
+
+// ResponsesJSONWithMaxTokens は JSON mode（text.format.type=json_object）で呼ぶ。
+//
+// 素の JSON だけが返るため、コードフェンスや前置きの除去が不要になり、
+// 構文として壊れた JSON も返らなくなる（#1583）。
+// JSON mode はオプトインにしてある。JSON を期待しない呼び出し
+// （面接の質問プラン等）に強制すると出力そのものが変わってしまうため。
+//
+// 注意: JSON mode はプロンプト（system か user）に "JSON" の語が無いと
+// API がエラーを返す。呼び出し側のプロンプトで担保すること。
+func (cli *Client) ResponsesJSONWithMaxTokens(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxOutputTokens int, modelOverride ...string) (string, error) {
+	return cli.responsesWithMaxTokens(ctx, systemPrompt, userPrompt, temperature, maxOutputTokens, true, modelOverride...)
+}
+
+func (cli *Client) responsesWithMaxTokens(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxOutputTokens int, jsonMode bool, modelOverride ...string) (string, error) {
 	if err := cli.ensureText(); err != nil {
 		return "", err
 	}
@@ -466,6 +497,11 @@ func (cli *Client) ResponsesWithMaxTokens(ctx context.Context, systemPrompt, use
 	}
 	if strings.TrimSpace(model) == "" {
 		model = "gpt-4o-mini"
+	}
+
+	format := textFormatNone
+	if jsonMode {
+		format = textFormatJSON
 	}
 
 	var lastErr error
@@ -485,12 +521,15 @@ func (cli *Client) ResponsesWithMaxTokens(ctx context.Context, systemPrompt, use
 				},
 			},
 		}
-		content, err := cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, false)
-		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
-			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, true)
+		content, err := cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, format)
+		// 空応答のときに text.format を付け替えて試すのは JSON mode 以外だけ。
+		// JSON mode で text を落とすと出力形式の強制も一緒に消えるので、
+		// 同じ形式のまま外側のループで再試行させる。
+		if err != nil && !jsonMode && strings.Contains(err.Error(), "empty response from responses api") {
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, textFormatText)
 		}
 		if err != nil && strings.Contains(err.Error(), "max_output_tokens") {
-			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens*2, false)
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens*2, format)
 		}
 		cancel()
 

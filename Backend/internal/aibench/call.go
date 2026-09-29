@@ -154,12 +154,17 @@ func CallChatCompletions(ctx context.Context, model, systemPrompt, userPrompt st
 
 // CallResponses は /responses を1回だけ叩く（履歴書レビューの本番経路）。
 // リトライしない理由は CallChatCompletions と同じ。
-func CallResponses(ctx context.Context, model, systemPrompt, userPrompt string, temperature float64, maxOutputTokens int) CallResult {
+//
+// jsonMode は text.format.type=json_object を送るかどうか。/responses での
+// JSON mode の指定方法で、Chat Completions の response_format と同じ強制になる。
+// 本番（openai.Client.ResponsesJSONWithMaxTokens）と同じ値を渡すこと。
+// ここだけ外すと指示遵守率が本番と別物になる（#1583）。
+func CallResponses(ctx context.Context, model, systemPrompt, userPrompt string, temperature float64, maxOutputTokens int, jsonMode bool) CallResult {
 	key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if key == "" {
 		return CallResult{Err: ErrNoAPIKey, Fatal: true}
 	}
-	// 本番（openai.Client.ResponsesWithMaxTokens）と同じ input 形式にする。
+	// 本番（openai.Client.ResponsesJSONWithMaxTokens）と同じ input 形式にする。
 	input := []map[string]any{
 		{"role": "system", "content": []map[string]string{{"type": "input_text", "text": systemPrompt}}},
 		{"role": "user", "content": []map[string]string{{"type": "input_text", "text": userPrompt}}},
@@ -169,6 +174,9 @@ func CallResponses(ctx context.Context, model, systemPrompt, userPrompt string, 
 		"input":             input,
 		"temperature":       temperature,
 		"max_output_tokens": maxOutputTokens,
+	}
+	if jsonMode {
+		payload["text"] = map[string]any{"format": map[string]string{"type": "json_object"}}
 	}
 
 	start := time.Now()

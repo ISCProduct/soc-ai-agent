@@ -74,6 +74,12 @@ func buildResumeText(blocks []models.ResumeTextBlock, maxLen int) string {
 	return b.String()
 }
 
+// decodeJSON はレビューJSONを読む。
+//
+// 本文は JSON mode（#1583）で素の JSON が返るため、通常は最初の Unmarshal で通る。
+// 後半の '{' 〜 '}' の切り出しは、JSON mode が使えないモデルへ差し替えたときの
+// 保険として残している。前置きに '{' が含まれると誤った範囲を切り出すため、
+// この経路に依存してはいけない（TestDecodeJSON_復旧経路 が挙動を固定している）。
 func decodeJSON(raw string, out any) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

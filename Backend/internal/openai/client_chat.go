@@ -269,8 +269,6 @@ func (cli *Client) WebSearchJSON(ctx context.Context, userPrompt string, maxToke
 	return "", lastErr
 }
 
-// ResponsesWithMaxTokens は Responses API を使い、maxOutputTokens を指定してテキストを取得します。
-
 // responseFormatFor はスキーマの有無に応じた response_format を返す。
 func responseFormatFor(schema *ResponseSchema) *openai.ChatCompletionResponseFormat {
 	if schema == nil || len(schema.Schema) == 0 {
