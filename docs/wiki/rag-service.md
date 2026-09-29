@@ -130,7 +130,8 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
   - 企業名あり × `none` 以外（企業情報は取得できたが点数化できなかった）: 「今回は企業適合性の点数を算出できませんでした」。ここで「公開情報が見つかりませんでした」と出すと、同じ画面に出る企業対策アドバイスと矛盾する
   - `company_strategy` が null なら対策アドバイスのカードごと非表示
 - FEの入力欄は `maxLength=10000`（RAGの `es_text` 上限と同値）。超過分を送ると FastAPI のバリデーション 422 になり、その `detail` は配列＋ES全文を含むため利用者向けの文面にならない。FE 側も 422 の `detail` は「200字以内で `{`/`[` 始まりでない」ものだけ表示する（#1015 の生JSONを出さない方針）
-- LLM呼び出しは最悪4回直列（2段 × 各1回再試行）。OpenAI SDK の `max_retries` は 1 を明示している。Backend 側の `/api/es/review` は 180秒だが、ALB(`idle_timeout` 既定60秒) / CloudFront(`origin_read_timeout` 60秒) が先に切るため実効は60秒（#1556 で対応）
+- LLM呼び出しは最悪4回直列（2段 × 各1回再試行）。OpenAI SDK の `max_retries` は 1 を明示している。1回あたりの上限は `RAG_OPENAI_TIMEOUT_SEC`（既定60秒）
+- `/api/es/review` の実効タイムアウトは **90秒**（ALB `idle_timeout` / CloudFront `origin_read_timeout` / staging の edge nginx `proxy_read_timeout`、#1556）。Backend の `http.Client` は意図的に1段短い85秒で、切れたときCloudFrontの汎用504ではなく理由付きの502が返る。4段すべてが上限近くまで粘ると90秒でも足りないため、処理側の打ち切りと併用する必要がある（設定値の一覧と切り分けは `operations.md` の「ES添削が結果を返さない / 504 になる」）
 
 ---
 

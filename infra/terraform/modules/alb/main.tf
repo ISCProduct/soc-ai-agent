@@ -86,6 +86,15 @@ resource "aws_lb" "this" {
   subnets            = var.subnet_ids
   security_groups    = [var.security_group_id]
 
+  # 既定60秒では ES添削(#1556)が結果を返す前に接続を切られ、生成済みの本文も
+  # 422 の案内文も利用者へ届かない。実測は通常15〜35秒だが、企業名指定で企業情報が
+  # キャッシュミスすると前段の Web Search が直列に +10〜30秒乗って60秒を超える。
+  # 90秒ならこの帯 + 最後の生成1回(最悪約30秒)を通せる。有効範囲は 1〜4000秒。
+  # 最悪ケース(LLM 8回直列の60〜160秒)まで面倒を見ないのは、落ちている経路を掴んだまま
+  # 待つ時間が延びるだけで利用者には何も届かないため。処理側の打ち切り(#1523)と併用する。
+  # ES添削以外の全リクエストにも効く。副作用は docs/wiki/operations.md を参照。
+  idle_timeout = 90
+
   dynamic "access_logs" {
     for_each = var.enable_access_logs ? [1] : []
     content {

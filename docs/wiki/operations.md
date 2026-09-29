@@ -872,6 +872,52 @@ make rag-rebuild
 docker compose logs --tail 80 chroma rag-review
 ```
 
+### ES添削が結果を返さない / 504 になる（#1556）
+
+`/api/es/review` は browser → CloudFront → FE の BFF → ALB → Go → RAG と直列に流れる。
+**経路のどれか1つが短いとそこが実効上限**になり、RAG が正常に生成中でも結果も 422 の
+案内文も利用者へ届かない（CloudFront の汎用 504 に差し替わる）。
+
+| ホップ | 設定 | 値 | 効く環境 |
+|---|---|---|---|
+| CloudFront | `origin_read_timeout`（`modules/cloudfront_app_proxy`） | 90秒 | 本番のみ（`enable_error_fallback = true` のとき） |
+| ALB | `idle_timeout`（`modules/alb`） | 90秒 | staging / 本番 |
+| edge nginx | `proxy_read_timeout`（`infra/nginx/staging-edge.conf`） | 90秒 | staging のみ |
+| Go | `http.Client{Timeout}`（`es/review_controller.go`） | 85秒 | 全環境 |
+| RAG | `RAG_OPENAI_TIMEOUT_SEC` | 60秒（LLM 1回あたり） | 全環境 |
+
+- Go を上流より1段短くしているのは意図的。上限に達したとき CloudFront の汎用 504
+  ページではなく Backend の 502（理由付き）が返るので、原因が追える。
+- **90秒は「待つ上限」で「処理の上限」ではない。** 1回の LLM 呼び出しが最大
+  `RAG_OPENAI_TIMEOUT_SEC` × SDKリトライ1回で、現状は最悪4回直列（#1521。#1523 の
+  字数上限が入ると最悪8回）なので理論上は90秒を超えうる。処理側の打ち切り
+  （#1523 の再生成の経過時間ガード）と併用して初めて成立する。
+- 実測は通常15〜35秒。企業名指定で企業情報がキャッシュミスすると前段の Web Search が
+  直列に +10〜30秒乗り、ここが60秒を超えて 504 になっていた。
+- 最悪ケース（8回直列で60〜160秒）まで延ばしていない。延ばしても落ちている経路を
+  掴んだまま待つ時間が伸びるだけで、利用者には何も届かない。
+- CloudFront の `origin_read_timeout` はクォータ「Response timeout per origin」で既定
+  1〜120秒。**120秒を超える値は引き上げ申請が必要**。
+- ALB の `idle_timeout` は **ES添削以外の全リクエストにも効く**（有効範囲 1〜4000秒）。
+  無応答の接続を掴む時間が 60 → 90秒に伸びるぶん、同時接続数と LCU がわずかに増える。
+- ALB のターゲット側のアイドルタイムアウトは AWS 推奨どおり ALB より長くする。staging の
+  edge nginx は `keepalive_timeout 100s`（nginx 既定75秒のままだと ALB が再利用しようと
+  した接続を nginx が先に閉じ、502 になりうる）。本番のターゲットは Next.js で、
+  `server.keepAliveTimeout` が Node 既定の5秒のまま ALB より短い。これは #1556 以前から
+  同じで今回の変更で悪化はしないが、ELB 5xx の候補として別途見る。
+
+**切り分け:**
+
+```sh
+# どのホップの504か。CloudFront 起因なら x-cache: Error from cloudfront が付く
+curl -si -X POST https://<host>/api/es/review \
+  -H 'content-type: application/json' \
+  -d '{"es_text":"...","question_type":"その他"}' | head -20
+
+# ALB 起因かはアクセスログの elb_status_code / target_status_code /
+# target_processing_time で見る（#1513 で有効化済み）
+```
+
 ### スコアキャリブレーション「サンプル不足」エラー
 
 各カテゴリのサンプルが5件以上必要です。十分なデータが溜まるまでは手動キャリブレーションは不要です。
