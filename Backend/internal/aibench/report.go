@@ -29,6 +29,10 @@ func PrintSummary(w io.Writer, s *Summary) {
 		formatUnstable(s.UnstableCaseIDs))
 	fmt.Fprintf(w, "%-16s %+.3f（1.000が完全一致）%s\n", "弁別力(順位相関)",
 		s.LabelRankCorrelation, formatByLabel(s.MeanScoreByLabel))
+	// 交絡は弁別力の直下に必ず出す。弁別力だけを見ると、長さを測っているだけの
+	// 測定を「内容の質を測れている」と読んでしまう（#1593）。
+	fmt.Fprintf(w, "%-16s %+.3f%s\n", "交絡(vs文字数)", s.LengthRankCorrelation,
+		lengthWarning(s.LabelRankCorrelation, s.LengthRankCorrelation))
 	fmt.Fprintf(w, "%-16s %.1f%%%s\n", "指示遵守率", s.ComplianceRate*100, formatCounts(s.ViolationCounts))
 	fmt.Fprintf(w, "%-16s p50 %dms / p95 %dms\n", "レイテンシ", s.LatencyP50MS, s.LatencyP95MS)
 	costNote := ""
@@ -37,11 +41,44 @@ func PrintSummary(w io.Writer, s *Summary) {
 	}
 	fmt.Fprintf(w, "%-16s 1件 $%.5f / 合計 $%.4f%s\n", "コスト", s.CostPerCallUSD, s.TotalCostUSD, costNote)
 
-	fmt.Fprintf(w, "\n%-14s %-6s %6s %8s %8s\n", "ケース", "ラベル", "破損", "平均", "σ")
-	for _, c := range s.CaseDetails {
-		fmt.Fprintf(w, "%-14s %-6s %6s %8.3f %8.3f\n", c.CaseID, c.Label,
-			fmt.Sprintf("%d/%d", c.BrokenRuns, c.Runs), c.MeanScore, c.ScoreStdDev)
+	if len(s.LengthStrata) > 0 {
+		// 層の中では入力の長さがほぼ揃っている。ここで good/bad が分かれるなら
+		// 「長さで分かれているだけ」では説明できない。
+		fmt.Fprintf(w, "\n文字数で層化した弁別力（同じ長さ帯の中で分かれるか）\n")
+		fmt.Fprintf(w, "%-14s %5s %-22s %8s %s\n", "文字数帯", "件数", "ラベル構成", "順位相関", "平均スコア")
+		for _, st := range s.LengthStrata {
+			fmt.Fprintf(w, "%-14s %5d %-22s %+8.3f %s\n",
+				fmt.Sprintf("%d-%d", st.MinChars, st.MaxChars), st.Cases,
+				formatLabelCounts(st.LabelCounts), st.LabelRankCorrelation,
+				strings.TrimSpace(formatByLabel(st.MeanScoreByLabel)))
+		}
 	}
+
+	fmt.Fprintf(w, "\n%-14s %-6s %6s %8s %8s %6s\n", "ケース", "ラベル", "破損", "平均", "σ", "文字数")
+	for _, c := range s.CaseDetails {
+		fmt.Fprintf(w, "%-14s %-6s %6s %8.3f %8.3f %6d\n", c.CaseID, c.Label,
+			fmt.Sprintf("%d/%d", c.BrokenRuns, c.Runs), c.MeanScore, c.ScoreStdDev, c.InputChars)
+	}
+}
+
+// lengthWarning は文字数との相関がラベルとの相関に迫っているときに注意書きを返す。
+//
+// 閾値 0.1 は「実質的に同じ」と読む幅。ラベル相関 +0.95 に対して文字数相関 +0.95 なら、
+// 「内容の質を測れている」仮説と「長さを測っているだけ」仮説が同じ数字を予測するので、
+// その弁別力は前者の証拠にならない。
+func lengthWarning(labelCorr, lengthCorr float64) string {
+	if lengthCorr < labelCorr-0.1 {
+		return ""
+	}
+	return "  ⚠ ラベルとの相関に迫っている。弁別力を「内容の質」の証拠として読めない"
+}
+
+func formatLabelCounts(m map[string]int) string {
+	parts := make([]string, 0, 3)
+	for _, k := range []string{LabelGood, LabelMid, LabelBad} {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, m[k]))
+	}
+	return strings.Join(parts, " ")
 }
 
 func formatCounts(m map[string]int) string {
@@ -173,6 +210,7 @@ func PrintDiff(w io.Writer, prev, cur *Summary) bool {
 	row("破損率", prev.BrokenRate, cur.BrokenRate, true)
 	row("指示遵守率", prev.ComplianceRate, cur.ComplianceRate, true)
 	row("弁別力(順位相関)", prev.LabelRankCorrelation, cur.LabelRankCorrelation, false)
+	row("交絡(vs文字数)", prev.LengthRankCorrelation, cur.LengthRankCorrelation, false)
 	row("再現性(平均σ)", prev.MeanScoreStdDev, cur.MeanScoreStdDev, false)
 	fmt.Fprintf(w, "%-18s %10d %10d %+10d\n", "p95(ms)", prev.LatencyP95MS, cur.LatencyP95MS, cur.LatencyP95MS-prev.LatencyP95MS)
 	fmt.Fprintf(w, "%-18s %10.5f %10.5f %+10.5f\n", "コスト/件($)", prev.CostPerCallUSD, cur.CostPerCallUSD, cur.CostPerCallUSD-prev.CostPerCallUSD)

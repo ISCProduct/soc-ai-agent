@@ -183,3 +183,22 @@ func LabelCounts(cases []Case) map[string]int {
 	}
 	return out
 }
+
+// InputText は target ごとの入力本文を返す。
+//
+// 文字数の交絡（スコアが内容ではなく長さに従っていないか）を測るのに使う。
+// target ごとに入力フィールドが違うので、集計側で switch を書かないための一箇所。
+func (c Case) InputText() string {
+	switch c.Target {
+	case TargetES:
+		return c.Input.ESText
+	case TargetResume:
+		return c.Input.ResumeText
+	case TargetInterviewReport:
+		return c.Input.Transcript
+	}
+	return ""
+}
+
+// InputChars は入力本文の文字数（バイト数ではなく）。
+func (c Case) InputChars() int { return len([]rune(c.InputText())) }
