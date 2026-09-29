@@ -23,6 +23,19 @@ func NewSessionValidationRepository(db *gorm.DB) *SessionValidationRepository {
 // 競合時には一方だけが owner を獲得し、他方は forbidden を返す。
 func (r *SessionValidationRepository) ClaimSessionOwnership(sessionID string, userID uint) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		rejectIfOtherUserMessagesExist := func() error {
+			var count int64
+			if err := tx.Model(&models.ChatMessage{}).
+				Where("session_id = ? AND user_id <> ?", sessionID, userID).
+				Count(&count).Error; err != nil {
+				return err
+			}
+			if count > 0 {
+				return shared.ErrForbidden
+			}
+			return nil
+		}
+
 		var existing models.SessionValidation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("session_id = ?", sessionID).
@@ -31,9 +44,12 @@ func (r *SessionValidationRepository) ClaimSessionOwnership(sessionID string, us
 				return err
 			}
 
+			if err := rejectIfOtherUserMessagesExist(); err != nil {
+				return err
+			}
 			newRow := models.SessionValidation{
 				SessionID:          sessionID,
-				UserID:            &userID,
+				UserID:             &userID,
 				InvalidAnswerCount: 0,
 				IsTerminated:       false,
 			}
@@ -46,6 +62,9 @@ func (r *SessionValidationRepository) ClaimSessionOwnership(sessionID string, us
 						return err
 					}
 					if existing.UserID == nil {
+						if err := rejectIfOtherUserMessagesExist(); err != nil {
+							return err
+						}
 						existing.UserID = &userID
 						return tx.Model(&existing).Update("user_id", userID).Error
 					}
@@ -60,6 +79,9 @@ func (r *SessionValidationRepository) ClaimSessionOwnership(sessionID string, us
 		}
 
 		if existing.UserID == nil {
+			if err := rejectIfOtherUserMessagesExist(); err != nil {
+				return err
+			}
 			existing.UserID = &userID
 			return tx.Model(&existing).Update("user_id", userID).Error
 		}
