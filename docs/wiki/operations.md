@@ -949,16 +949,23 @@ browser → ALB frontend(90) → edge nginx(90) → Next.js BFF
 同じ 503 + 静的HTML に差し替える）。一次情報は ALB アクセスログと Go のログ。
 
 ```sh
-# ALB アクセスログ（#1513 で有効化済み）。target_status_code が 502 で
-# target_processing_time が 85 前後なら Go が RAG を待ちきれずに諦めた側。
-# target_status_code が - / -1 で 90 前後なら ALB か CloudFront が先に切った側。
-aws s3 cp s3://<alb-access-logs-bucket>/<prefix>/... - | \
-  awk '$13 ~ /es\/review/ {print $6, $7, $8, $9, $10}'
+# ALB アクセスログ（#1513 で有効化済み）から該当リクエストの行を取り出す。
+# 行の並びは type time elb client:port target:port request_processing_time
+# target_processing_time response_processing_time elb_status_code target_status_code ...
+aws s3 cp s3://<alb-access-logs-bucket>/<prefix>/<file>.log.gz - | gunzip | grep 'es/review'
 
 # Go 側。context deadline exceeded なら 85秒に到達している
-docker compose logs app | grep "es_review"          # staging
-aws logs tail /ecs/<project>/backend --filter-pattern es_review  # 本番
+docker compose logs app | grep es_review                         # staging
+aws logs tail /ecs/<project>/backend --filter-pattern es_review   # 本番
 ```
+
+読み方:
+
+- `target_status_code` が `502` で `target_processing_time` が **85前後** → Go が RAG を
+  待ちきれずに諦めた側（＝処理が85秒を超えている。RAG 側を見る）
+- `target_status_code` が `-` で `elb_status_code` が `504`、`target_processing_time` が
+  **90前後** → ALB（本番はさらに手前の CloudFront も候補）が先に切った側
+- `target_processing_time` が **10前後**でデプロイ時刻と重なる → `deregistration_delay = 10`
 
 ### スコアキャリブレーション「サンプル不足」エラー
 
