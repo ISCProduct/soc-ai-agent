@@ -77,23 +77,34 @@ func buildResumeText(blocks []models.ResumeTextBlock, maxLen int) string {
 // decodeJSON はレビューJSONを読む。
 //
 // 本文は JSON mode（#1583）で素の JSON が返るため、通常は最初の Unmarshal で通る。
-// 後半の '{' 〜 '}' の切り出しは、JSON mode が使えないモデルへ差し替えたときの
-// 保険として残している。前置きに '{' が含まれると誤った範囲を切り出すため、
-// この経路に依存してはいけない（TestDecodeJSON_復旧経路 が挙動を固定している）。
+// '{' 〜 '}' の切り出しは、JSON mode が使えないモデルへ差し替えたときの保険として
+// 残している。前置きに '{' が含まれると誤った範囲を切り出すため、この経路に
+// 依存してはいけない。
 func decodeJSON(raw string, out any) error {
+	_, err := decodeJSONRecovered(raw, out)
+	return err
+}
+
+// decodeJSONRecovered は decodeJSON と同じ処理をしつつ、'{' 〜 '}' の切り出し
+// （復旧処理）を通ったかどうかも返す。
+//
+// 戻り値を分けているのは、「JSON mode を入れたら復旧処理を通らなくなる」ことを
+// 外から観測できるようにするため（TestDecodeJSON_復旧経路）。テスト側で
+// 分岐条件を書き写すと、実装をどう変えても落ちない恒真テストになる。
+func decodeJSONRecovered(raw string, out any) (recovered bool, err error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return errors.New("empty response")
+		return false, errors.New("empty response")
 	}
 	if err := json.Unmarshal([]byte(raw), out); err == nil {
-		return nil
+		return false, nil
 	}
 	start := strings.Index(raw, "{")
 	end := strings.LastIndex(raw, "}")
 	if start >= 0 && end > start {
-		return json.Unmarshal([]byte(raw[start:end+1]), out)
+		return true, json.Unmarshal([]byte(raw[start:end+1]), out)
 	}
-	return errors.New("invalid JSON response")
+	return false, errors.New("invalid JSON response")
 }
 
 func mapReviewItems(blocks []models.ResumeTextBlock, aiItems []aiReviewItem) []models.ResumeReviewItem {

@@ -1,7 +1,6 @@
 package resume
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -61,14 +60,19 @@ func TestRequestReviewJSON_JSONmodeで呼ぶ(t *testing.T) {
 }
 
 // TestRequestReviewJSON_プロンプトにJSONの語がある は JSON mode の前提を固定する。
-// json_object を指定したプロンプトに "JSON" の語が無いと API がエラーを返すため、
+// json_object を指定したプロンプトに "json" の語が無いと API がエラーを返すため、
 // system プロンプトから語を消すとレビューが丸ごと失敗する。
+//
+// API の要求は "the word 'json' in some form" で大小を区別しないため、
+// 判定も小文字化して行う（"json形式" でも通るのが正しい）。
 func TestRequestReviewJSON_プロンプトにJSONの語がある(t *testing.T) {
-	if !strings.Contains(ReviewSystemPrompt, "JSON") {
-		t.Errorf("ReviewSystemPrompt に \"JSON\" が無い: %q", ReviewSystemPrompt)
-	}
-	if !strings.Contains(reviewRetrySystemPrompt, "JSON") {
-		t.Errorf("reviewRetrySystemPrompt に \"JSON\" が無い: %q", reviewRetrySystemPrompt)
+	for name, prompt := range map[string]string{
+		"ReviewSystemPrompt":      ReviewSystemPrompt,
+		"reviewRetrySystemPrompt": reviewRetrySystemPrompt,
+	} {
+		if !strings.Contains(strings.ToLower(prompt), "json") {
+			t.Errorf("%s に \"json\" が無い: %q", name, prompt)
+		}
 	}
 }
 
@@ -112,15 +116,13 @@ func TestDecodeJSON_復旧経路(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// 「復旧処理を通ったか」は、最初の Unmarshal が成功するかで決まる。
-			var direct map[string]any
-			gotRecovery := json.Unmarshal([]byte(strings.TrimSpace(tt.raw)), &direct) != nil
+			// 復旧処理を通ったかは実装から受け取る。テスト側で分岐条件を
+			// 書き写すと、実装をどう変えても落ちない恒真テストになる。
+			var out aiReviewResponse
+			gotRecovery, err := decodeJSONRecovered(tt.raw, &out)
 			if gotRecovery != tt.wantRecovery {
 				t.Errorf("復旧処理を通ったか = %v, want %v", gotRecovery, tt.wantRecovery)
 			}
-
-			var out aiReviewResponse
-			err := decodeJSON(tt.raw, &out)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("エラーになるべき（summary=%q）", out.Summary)
@@ -132,6 +134,15 @@ func TestDecodeJSON_復旧経路(t *testing.T) {
 			}
 			if out.Summary != tt.wantSummary {
 				t.Errorf("Summary = %q, want %q", out.Summary, tt.wantSummary)
+			}
+
+			// decodeJSON（本番の入口）も同じ結果になることを確認する。
+			var viaDecodeJSON aiReviewResponse
+			if err := decodeJSON(tt.raw, &viaDecodeJSON); err != nil {
+				t.Fatalf("decodeJSON が失敗: %v", err)
+			}
+			if viaDecodeJSON.Summary != tt.wantSummary {
+				t.Errorf("decodeJSON の Summary = %q, want %q", viaDecodeJSON.Summary, tt.wantSummary)
 			}
 		})
 	}
