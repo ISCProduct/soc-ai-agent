@@ -164,7 +164,6 @@ def _run_es_review(
             company_context_source,
         )
 
-    safe_es_text = _wrap_untrusted_text(es_text, "ES文章")
     # 企業情報は評価（第1呼び出し）のみに渡す。改善文の生成に必要な企業観点は
     # feedback 経由で伝わるので、第2呼び出しへ生データを再投入すると入力トークンが
     # ほぼ倍になるだけになる(#1521)。
@@ -196,9 +195,13 @@ def _run_es_review(
         if has_company_context
         else "具体性・STAR準拠・文字数について400字程度でアドバイス。企業情報は与えられていないため、企業適合性には触れないでください"
     )
+    # 非信頼テキストは呼び出しごとに囲み直す（_wrap_untrusted_text が区切りへランダムな
+    # ノンスを混ぜるため / #1565）。第1呼び出しのLLMはES本文の区切りを見ているので、
+    # それを feedback に引用させて第2呼び出しのブロックを閉じる余地がある。区切りを
+    # 使い回さず囲み直せば第2呼び出しの区切りは第1と別物になり、その経路が塞がる。
     review_user_prompt = (
             f"【質問種別】{_wrap_untrusted_text(question_type, '質問種別')}\n"
-            f"【ES文章】\n{safe_es_text}"
+            f"【ES文章】\n{_wrap_untrusted_text(es_text, 'ES文章')}"
             + company_block
             + f"""
 
@@ -238,7 +241,7 @@ def _run_es_review(
 
         improved_user_prompt = (
                 f"【質問種別】{_wrap_untrusted_text(question_type, '質問種別')}\n"
-                f"【ES文章】\n{safe_es_text}\n\n"
+                f"【ES文章】\n{_wrap_untrusted_text(es_text, 'ES文章')}\n\n"
                 f"【添削フィードバック】\n{_wrap_untrusted_text(feedback, 'フィードバック')}"
                 + """
 
