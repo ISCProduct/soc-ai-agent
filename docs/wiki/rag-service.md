@@ -165,6 +165,12 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 
 ---
 
+職種（`position` / `job_title`）も囲む。囲みブロックの外に置くと、リサーチ結果だけを
+囲んでも隣のフィールドから指示を通せる（実APIで `style_tags` を `["PWNED"]` に
+上書きできることを確認）。`_sanitize_job_title` は改行と記号を落とすだけで
+1行の指示文はそのまま残るため、サニタイズだけでは足りない。サニタイズは
+キャッシュキーの衛生のために残している。
+
 ## ChromaDB キャッシュ戦略
 
 ### キャッシュの仕組み

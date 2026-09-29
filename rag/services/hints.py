@@ -70,7 +70,12 @@ async def _run_hints_web_search_pipeline(
                  "企業名: {company}\n"
                  "職種: {role}\n\n"
                  "以下の検索結果から、面接・選考に関する情報を採用観点で整理してください。\n\n"
-             ).format(company=company_name, role=role_text) + (
+             ).format(
+                 # 職種はクライアント入力。サニタイズでは改行と記号しか落ちず
+                 # 1行の指示文は残るので囲む（#1591）
+                 company=company_name,
+                 role=_wrap_untrusted_text(role_text, "職種"),
+             ) + (
                  "【優先情報ソース（重要度順）】\n"
                  "1. 企業公式採用サイト・説明会レポート\n"
                  "2. 実際の選考体験談（一次情報）\n"
@@ -134,7 +139,8 @@ def _parse_hints_from_text(company_name: str, position: str, research_text: str)
     )
     user_prompt = (
         f"企業名: {company_name}\n"
-        f"職種: {role_text}\n\n"
+        # 同上（#1591）。リサーチ結果だけ囲んでも隣のフィールドから通せる
+        f"職種: {_wrap_untrusted_text(role_text, '職種')}\n\n"
         # リサーチ結果はキャッシュ/Web Search/Backend brief 由来の外部テキスト。
         # 読み出し後＝プロンプト組み立て時に囲む（#1591）
         f"リサーチ結果:\n{_wrap_untrusted_text(research_text[:3000], 'リサーチ結果')}"

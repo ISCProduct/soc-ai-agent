@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field, field_validator
 COMPANY_CONTEXT_MAX_LENGTH = 20000
 # 質問種別は FE 側は固定の選択肢だが、自由記述で送れてしまうので上限を付ける(#1591)。
 QUESTION_TYPE_MAX_LENGTH = 100
+# 職種名。FE の選択肢は最長でも数十字で、これを超える値は入力ミスか攻撃(#1591)
+POSITION_MAX_LENGTH = 100
 
 
 class ReviewRequest(BaseModel):
@@ -37,7 +39,8 @@ class ReviewResponse(BaseModel):
 
 class CompanyHintsRequest(BaseModel):
     company_name: str = Field(min_length=1)
-    position: str = Field(default="")
+    # 職種はプロンプトとキャッシュキーの両方に入るので上限を置く(#1591)
+    position: str = Field(default="", max_length=POSITION_MAX_LENGTH)
     company_context: str = Field(default="")
 
     @field_validator("company_context")
