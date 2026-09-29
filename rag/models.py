@@ -5,6 +5,15 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+# 企業コンテキスト（Backend 共有 brief）の受け入れ上限。
+# プロンプト側でさらに短く切られる参考情報なので、422 でリクエストを落とさず
+# 切り詰める（DoS・入力トークンのコスト上限 / #1591）。
+COMPANY_CONTEXT_MAX_LENGTH = 20000
+# 質問種別は FE 側は固定の選択肢だが、自由記述で送れてしまうので上限を付ける(#1591)。
+QUESTION_TYPE_MAX_LENGTH = 100
+# 職種名。FE の選択肢は最長でも数十字で、これを超える値は入力ミスか攻撃(#1591)
+POSITION_MAX_LENGTH = 100
+
 
 class ReviewRequest(BaseModel):
     resume_text: str = Field(min_length=1, max_length=10000)
@@ -21,7 +30,7 @@ class ReviewRequest(BaseModel):
     @field_validator("company_context")
     @classmethod
     def normalize_company_context(cls, v: str) -> str:
-        return (v or "").strip()
+        return (v or "").strip()[:COMPANY_CONTEXT_MAX_LENGTH]
 
 
 class ReviewResponse(BaseModel):
@@ -30,13 +39,14 @@ class ReviewResponse(BaseModel):
 
 class CompanyHintsRequest(BaseModel):
     company_name: str = Field(min_length=1)
-    position: str = Field(default="")
+    # 職種はプロンプトとキャッシュキーの両方に入るので上限を置く(#1591)
+    position: str = Field(default="", max_length=POSITION_MAX_LENGTH)
     company_context: str = Field(default="")
 
     @field_validator("company_context")
     @classmethod
     def normalize_hints_company_context(cls, v: str) -> str:
-        return (v or "").strip()
+        return (v or "").strip()[:COMPANY_CONTEXT_MAX_LENGTH]
 
 
 class CompanyHintsResponse(BaseModel):
@@ -47,14 +57,14 @@ class CompanyHintsResponse(BaseModel):
 
 class ESReviewRequest(BaseModel):
     es_text: str = Field(min_length=1, max_length=10000)
-    question_type: str = Field(default="その他")
+    question_type: str = Field(default="その他", max_length=QUESTION_TYPE_MAX_LENGTH)
     company_name: str = Field(default="")
     company_context: str = Field(default="")
 
     @field_validator("company_context")
     @classmethod
     def normalize_es_company_context(cls, v: str) -> str:
-        return (v or "").strip()
+        return (v or "").strip()[:COMPANY_CONTEXT_MAX_LENGTH]
 
 
 class ESReviewResponse(BaseModel):

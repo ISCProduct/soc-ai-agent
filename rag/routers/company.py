@@ -11,7 +11,7 @@ from models import (
     CompanyHintsRequest,
     CompanyHintsResponse,
 )
-from services.sanitize import _sanitize_company_name_for_query
+from services.sanitize import _sanitize_company_name_for_query, _sanitize_job_title
 from vector_store import build_cache_key, upsert_by_doc_type
 
 logger = logging.getLogger("main")
@@ -25,7 +25,9 @@ def company_hints(request: CompanyHintsRequest) -> CompanyHintsResponse:
 
     # 入力値サニタイズ（#331: クエリインジェクション対策）
     safe_company_name = _sanitize_company_name_for_query(request.company_name)
-    role_label = request.position or "一般職"
+    # 職種もプロンプトへ入る（hints.py の「職種:」は囲みブロックの外＝信頼領域）。
+    # 他の呼び出し元は全て _sanitize_job_title を通しており、ここだけ抜けていた(#1591)。
+    role_label = _sanitize_job_title(request.position) if request.position else "一般職"
     # #938: キャッシュキーはサニタイズ前の企業名のハッシュで衝突回避する
     cache_key = build_cache_key(
         "interview_hints", safe_company_name, role_label, company_original=request.company_name
