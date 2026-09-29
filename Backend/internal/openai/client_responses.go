@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/getsentry/sentry-go"
 )
 
 // truncationFlagKey は「出力が max_output_tokens で切れたか」を呼び出し側へ
@@ -481,9 +483,46 @@ func (cli *Client) ResponsesWithMaxTokens(ctx context.Context, systemPrompt, use
 // （面接の質問プラン等）に強制すると出力そのものが変わってしまうため。
 //
 // 注意: JSON mode はプロンプト（system か user）に "JSON" の語が無いと
-// API がエラーを返す。呼び出し側のプロンプトで担保すること。
+// API がエラーを返す。呼び出し側のプロンプトで担保するのが基本だが、
+// プロンプト編集で語が落ちても壊れないよう下でも足す（#1595）。
 func (cli *Client) ResponsesJSONWithMaxTokens(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxOutputTokens int, modelOverride ...string) (string, error) {
+	// json_object はプロンプトのどこかに "json" の語を要求する。無いだけなら
+	// JSON mode 自体は動くので、形式を落として指示遵守率を捨てるのではなく語を足す。
+	if !strings.Contains(strings.ToLower(systemPrompt+userPrompt), "json") {
+		systemPrompt += "\n出力は JSON のみ。"
+	}
 	return cli.responsesWithMaxTokens(ctx, systemPrompt, userPrompt, temperature, maxOutputTokens, true, modelOverride...)
+}
+
+// responsesBackoff は attempt 回目の失敗後に待つ時間（2,4,8,16秒 + ジッタ）。
+// 変数にしてあるのはテストから差し替えて「最後の試行のあとは待たない」ことを
+// 実時間ぬきで確かめるため（TestResponsesWithMaxTokens_最後の試行のあとは待たない）。
+var responsesBackoff = func(attempt int) time.Duration {
+	return time.Duration(1<<attempt)*time.Second + time.Duration(rand.Intn(1000))*time.Millisecond
+}
+
+// logTextFormatFallback は text.format を落として試すことを記録する。
+//
+// これが起きた呼び出しは JSON mode を失っている（＝指示遵守率が 100% から落ちる）
+// ので、log だけだと本番で誰も気づけない。Sentry は SENTRY_DSN 未設定なら no-op で、
+// 送信時は scrubEvent が Message を300 rune に切る（#1595）。
+func logTextFormatFallback(model string, status int, err error) {
+	msg := fmt.Sprintf("[openai] model=%s status=%d text.format を落として1度だけ試す: %s", model, status, truncateErrForLog(err))
+	log.Print(msg)
+	sentry.CaptureMessage(msg)
+}
+
+// truncateErrForLog はエラー文を先頭だけに切る。
+// ResponsesAPIError.Error() はレスポンス本文を全文含み、リクエストをエコーする
+// OpenAI 互換サーバ相手だと履歴書OCR本文（最大30KB）がログへ流れる。
+// 上限は observability.scrubEvent と同じ 300 rune に揃えている。
+func truncateErrForLog(err error) string {
+	const limit = 300
+	runes := []rune(strings.TrimSpace(err.Error()))
+	if len(runes) <= limit {
+		return string(runes)
+	}
+	return string(runes[:limit]) + "…(truncated)"
 }
 
 func (cli *Client) responsesWithMaxTokens(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxOutputTokens int, jsonMode bool, modelOverride ...string) (string, error) {
@@ -504,8 +543,9 @@ func (cli *Client) responsesWithMaxTokens(ctx context.Context, systemPrompt, use
 		format = textFormatJSON
 	}
 
+	const maxAttempts = 5
 	var lastErr error
-	for attempt := 1; attempt <= 5; attempt++ {
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		ctxReq, cancel := context.WithTimeout(ctx, 90*time.Second)
 		messageInput := []map[string]any{
 			{
@@ -522,6 +562,34 @@ func (cli *Client) responsesWithMaxTokens(ctx context.Context, systemPrompt, use
 			},
 		}
 		content, err := cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, format)
+		// 4xx（429 以外）は投げ直しても同じ結果なので待たずに返す。5回とも同じ400を
+		// 踏んでバックオフ分（62秒）だけ空転してから失敗していた（#1595）。
+		// 判定は WebSearchJSON と同じ ResponsesAPIError.Retryable() を使う。
+		// isRetryableAPIErr は使わない（*ResponsesAPIError 以外に false を返すので、
+		// ネットワークエラーや90秒タイムアウトの再試行まで止まってしまう）。
+		//
+		// ただし text.format を送っていたなら、それ自体が拒否の原因かもしれないので
+		// 形式なしで1度だけ確かめる。形式が原因でなければ2回目も同じく失敗するため、
+		// 誤って JSON mode を落とす（＝指示遵守率が黙って 0% に戻る）ことが起きない。
+		// 逆に2回目が通ったなら、それが形式が原因だった証明になる。
+		var apiErr *ResponsesAPIError
+		if err != nil && errors.As(err, &apiErr) && !apiErr.Retryable() {
+			fatal := err
+			if format != textFormatNone {
+				logTextFormatFallback(model, apiErr.StatusCode, err)
+				content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, textFormatNone)
+				if err == nil {
+					// 形式が原因だったと確定。以降の試行も形式なしで投げる。
+					// jsonMode も倒して「JSON mode である」前提の下のガードと食い違わせない。
+					format, jsonMode, fatal = textFormatNone, false, nil
+				}
+			}
+			if fatal != nil {
+				// 返すのは元のエラー。形式なしの2回目は原因の切り分け用でしかない。
+				cancel()
+				return "", fatal
+			}
+		}
 		// 空応答のときに text.format を付け替えて試すのは JSON mode 以外だけ。
 		// JSON mode で text を落とすと出力形式の強制も一緒に消えるので、
 		// 同じ形式のまま外側のループで再試行させる。
@@ -542,9 +610,17 @@ func (cli *Client) responsesWithMaxTokens(ctx context.Context, systemPrompt, use
 			lastErr = err
 		}
 
-		backoff := time.Duration(1<<attempt) * time.Second
-		jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
-		time.Sleep(backoff + jitter)
+		// 最後の試行のあとに待つ意味は無い（待ってから失敗を返すだけ）。
+		if attempt == maxAttempts {
+			break
+		}
+		// 待っている間に呼び出し側が諦めたら即座に返す（WebSearchJSON と同じ形）。
+		// 返すのは ctx.Err() ではなく直前のエラーで、原因が分かるようにする。
+		select {
+		case <-ctx.Done():
+			return "", lastErr
+		case <-time.After(responsesBackoff(attempt)):
+		}
 	}
 
 	if lastErr == nil {

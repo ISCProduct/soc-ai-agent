@@ -1131,7 +1131,43 @@ JSON mode を入れて指示遵守率は0%→100%、破損率は0%のまま。
 - JSON mode はプロンプト（system か user）に "json" の語（大小問わず）が無いと
   API がエラーを返す。初回は `ReviewSystemPrompt`、やり直しは
   `reviewRetrySystemPrompt` で満たしており、`TestRequestReviewJSON_プロンプトにJSONの語がある`
-  が固定している
+  が固定している。加えて `ResponsesJSONWithMaxTokens` の入口で語の有無を見て、
+  無ければ system プロンプトへ `出力は JSON のみ。` を足す（#1595）。
+  **語が無いだけなら JSON mode 自体は動く**ので、形式を落として指示遵守率を
+  捨てるのではなく足りない語を足す（往復は増えない）。プロンプト編集で語が消えても壊れない
+- **再試行不可の 4xx（429 以外）は待たずに返す**（#1595）。判定は `WebSearchJSON` と同じ
+  `ResponsesAPIError.Retryable()`。従来は 4xx も外側のリトライへ渡していたので、
+  最初の50msで確定した失敗を5回とも踏み、バックオフの 62秒を待ってから学生へ見せていた。
+  `isRetryableAPIErr` は使わない（`*ResponsesAPIError` 以外に `false` を返すため、
+  ネットワークエラーや90秒タイムアウトの再試行まで止まる）
+- その 4xx で `text.format` を送っていたなら、**形式なしで1度だけ投げ直して確かめる**（#1595）。
+  ローカルLLM／OpenAI 互換実装では `text.format` 未対応が珍しくない。
+  判定は **エラー本文の字句ではなく構造**（2回の試行の差分が `text.format` だけ）にしてある。
+  - 形式が原因でなければ2回目も同じく失敗するので、**JSON mode が黙って無効化されることが
+    原理的に起こらない**。逆に2回目が通れば、それが形式が原因だった証明になる
+  - 字句判定（`unsupported` などの語をエラー本文から探す）を捨てたのはこれが理由。
+    pydantic/FastAPI 系の互換サーバは**リクエスト payload をエコーするのが既定動作**で、
+    エコーされた `json_object` が判定を通ってしまう。つまり字句判定は
+    「退避が必要な環境でこそ過剰一致する」。素の OpenAI は payload をエコーしないので
+    安全側に見えるだけだった
+  - 2回目も失敗したら**元のエラー**を返す（形式なしの試行は原因の切り分け用でしかない）。
+    追加コストは1リクエストだけで、4xx は課金されない
+  - 形式を落としたら `jsonMode` も倒す。そうしないと「JSON mode である」前提の
+    空応答復旧ガードだけが、リクエストに JSON mode が入っていないのに無効のまま残る
+  - 記録は `[openai] model=... status=... text.format を落として1度だけ試す: ...` の
+    ログと `sentry.CaptureMessage`。**ログだけだと本番（展示会日のみ稼働）で誰も気づけない**
+    ため Sentry へも上げる。5xx が出ないので CloudWatch アラームは沈黙する経路であり、
+    Sentry Alert Rule から Discord / Slack へ転送する（`docs/wiki/operations.md` 参照）。
+    エラー本文は300 rune に切る（`ResponsesAPIError.Error()` はレスポンス本文を全文含み、
+    payload をエコーする互換サーバ相手だと履歴書OCR本文がログへ流れる）
+- 429 / 5xx・空応答では形式を落とさない。再試行すれば成功しうるし、JSON mode を指定したのに
+  勝手に外れると出力そのものが変わるため（#1583 の判断を維持）
+- 待機は試行の「間」だけで、最後の試行のあとには待たない。待機中は `ctx.Done()` で打ち切る。
+  打ち切りが効くのは期限付きで呼ぶ `interview_turn_question_plan.go`（20秒 timeout）側で、
+  `context.Background()` で呼ぶレビュー生成には届かない（そちらは上の 4xx 即返しが担当）
+- 形式を落としたあとの本文は JSON mode 以前と同じくコードフェンス付きになり得るので、
+  `decodeJSON` の復旧処理が効く。通しの検証は
+  `TestBuildReviewScoreItems_JSONmode非対応でもレビューが成立する`
 - `decodeJSON` の `{` 〜 `}` 切り出しは保険として残すが、通常は通らない。
   前置きに `{` が含まれると誤った範囲を切り出すので、この経路に依存してはいけない。
   復旧処理を通ったかは `decodeJSONRecovered` の戻り値で観測でき、
