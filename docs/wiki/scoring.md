@@ -977,7 +977,7 @@ summary / strengths / improvements はスコアと独立して有用なので届
 
 ### 出力が上限で切れたら枠を倍にして1度だけやり直す
 
-レビュー生成は `requestReviewJSON` 経由で `ResponsesWithMaxTokens(..., 2400, ...)` を呼ぶ。
+レビュー生成は `requestReviewJSON` 経由で `ResponsesJSONWithMaxTokens(..., 2400, ...)` を呼ぶ。
 上限到達は `openai.WithTruncationFlag` を通したコンテキストと
 `openai.OutputTruncated`（Responses API の `incomplete_details.reason`）で検知し、
 **枠を倍（4800）にして1度だけやり直す。それでも切れたらレビューごと失敗させる**
@@ -1001,6 +1001,27 @@ summary / strengths / improvements はスコアと独立して有用なので届
 1. エラー文言を「解析に失敗しました」ではなく上限到達だと分かるものにする
 2. `items` を最後以外のフィールドへ動かすスキーマ変更に対する保険
    （そのときは途中までが読めてしまう）
+
+### レビュー生成は JSON mode で呼ぶ（#1583）
+
+`/responses` の JSON mode は `text.format.type=json_object` で指定する
+（`ResponsesJSONWithMaxTokens`。`/chat/completions` の `response_format` に相当）。
+これが無かった間、評価ハーネス（`docs/research/ai-eval/README.md`）の実測で
+**「出力は次のJSONのみ」の指示が一度も守られていなかった**（`json_not_bare`）。
+JSON mode を入れて指示遵守率は0%→100%、破損率は0%のまま。
+**弁別力と再現性(σ)は測定誤差内で差が無い**（n=2 では判定できない。README 参照）。
+
+- JSON mode はオプトイン。JSON を期待しない `/responses` の呼び出し
+  （面接の質問プラン等）は `ResponsesWithMaxTokens` のまま
+- JSON mode はプロンプト（system か user）に "json" の語（大小問わず）が無いと
+  API がエラーを返す。初回は `ReviewSystemPrompt`、やり直しは
+  `reviewRetrySystemPrompt` で満たしており、`TestRequestReviewJSON_プロンプトにJSONの語がある`
+  が固定している
+- `decodeJSON` の `{` 〜 `}` 切り出しは保険として残すが、通常は通らない。
+  前置きに `{` が含まれると誤った範囲を切り出すので、この経路に依存してはいけない。
+  復旧処理を通ったかは `decodeJSONRecovered` の戻り値で観測でき、
+  `TestDecodeJSON_復旧経路` がそれを固定している（実装の分岐をテスト側へ写すと
+  恒真テストになるため、観測は実装から受け取る）
 
 ---
 

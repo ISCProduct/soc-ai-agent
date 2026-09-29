@@ -22,21 +22,32 @@ import (
 // 「上限到達なら切れたJSONを読まない」という配線が壊れても気付けない。
 
 // aiStub は Responses API のスタブ。bodies を呼び出し順に返し、尽きたら最後を繰り返す。
-// 呼び出しごとに要求された max_output_tokens を記録する（上限到達時のやり直し検証用）。
+// 呼び出しごとに要求された max_output_tokens を記録する（上限到達時のやり直し検証用）と、
+// text.format.type（JSON mode の指定 / #1583）を記録する。
 type aiStub struct {
-	mu        sync.Mutex
-	bodies    []string
-	calls     int
-	maxTokens []int
+	mu          sync.Mutex
+	bodies      []string
+	calls       int
+	maxTokens   []int
+	textFormats []string
 }
 
-func (s *aiStub) next(requestedMaxTokens int) string {
+func (s *aiStub) next(requestedMaxTokens int, textFormat string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	body := s.bodies[min(s.calls, len(s.bodies)-1)]
 	s.calls++
 	s.maxTokens = append(s.maxTokens, requestedMaxTokens)
+	s.textFormats = append(s.textFormats, textFormat)
 	return body
+}
+
+// requestedTextFormats は呼び出しごとの text.format.type を返す。
+// text を送っていない呼び出しは空文字列になる。
+func (s *aiStub) requestedTextFormats() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.textFormats)
 }
 
 func (s *aiStub) count() int {
@@ -58,10 +69,15 @@ func newReviewService(t *testing.T, bodies ...string) (*ResumeService, *aiStub) 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			MaxOutputTokens int `json:"max_output_tokens"`
+			Text            struct {
+				Format struct {
+					Type string `json:"type"`
+				} `json:"format"`
+			} `json:"text"`
 		}
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &req)
-		_, _ = w.Write([]byte(stub.next(req.MaxOutputTokens)))
+		_, _ = w.Write([]byte(stub.next(req.MaxOutputTokens, req.Text.Format.Type)))
 	}))
 	t.Cleanup(srv.Close)
 	svc := NewResumeService(&resumeRepoStub{}, t.TempDir(), openai.NewWithBaseURL(srv.URL, "gpt-4o-mini"))
