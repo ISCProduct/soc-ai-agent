@@ -1,6 +1,8 @@
 package resume
 
 import (
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -282,6 +284,57 @@ func TestValidateResumeRubricScores(t *testing.T) {
 	}
 }
 
+// TestResumeRubricLevels_Defined は全項目に 0〜5 のレベル定義があることを固定する（#1584）。
+//
+// レベル定義が無いと「3点が2点や4点と何が違うか」がプロンプトに無く、
+// good と mid が同じ点に潰れる（Issue #1584 の実測）。項目を足してレベルを
+// 書き忘れると空文字のレベルがプロンプトに出るので、ここで止める。
+// **配列型はこれを止めない**（短いコンポジットリテラルはゼロ値で埋まる）。
+//
+// 添字と本文の対応（順序）はここでは見ていない。golden が見る
+// （TestResumeRubricPromptSection_Golden）。
+func TestResumeRubricLevels_Defined(t *testing.T) {
+	for _, c := range ResumeRubricCriteria() {
+		t.Run(c.Key, func(t *testing.T) {
+			seen := map[string]int{}
+			for score, level := range c.Levels {
+				if strings.TrimSpace(level) == "" {
+					t.Errorf("%d点のレベル定義が空", score)
+					continue
+				}
+				if prev, dup := seen[level]; dup {
+					t.Errorf("%d点と%d点のレベル定義が同一（隣接レベルを判別できない）: %q", prev, score, level)
+				}
+				seen[level] = score
+			}
+		})
+	}
+}
+
+// TestResumeRubricPromptSection_Golden はプロンプトの評価基準セクションを1文字も違わず固定する（#1584）。
+//
+// **これが無いとレベル定義を逆順（0点＝最良）にしても全テストが通る。**
+// 他のテストは期待値を c.Levels 自身から取って部分一致を見るだけなので、
+// 添字と本文の対応を誰も見ていなかった。採点が反転したルーブリックが
+// user_weight_scores まで流れるので、順序は文字列そのもので固定する。
+//
+// レベル定義を意図して変えたときは、失敗出力に出る実際のセクションを
+// testdata/rubric_prompt.golden へ丸ごと置き換え、**弁別力をハーネスで
+// 測り直してから**コミットすること（docs/wiki/scoring.md §2-5）。
+func TestResumeRubricPromptSection_Golden(t *testing.T) {
+	const goldenPath = "testdata/rubric_prompt.golden"
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("golden の読み込みに失敗: %v", err)
+	}
+	got := BuildResumeRubricPromptSection()
+	if got != string(want) {
+		t.Errorf("プロンプトの評価基準セクションが golden と一致しない。\n"+
+			"意図した変更なら %s を下記の内容へ置き換え、ハーネスで弁別力を測り直すこと。\n"+
+			"--- 実際の出力 ---\n%s\n--- golden ---\n%s", goldenPath, got, want)
+	}
+}
+
 // TestBuildResumeRubricPromptSection はプロンプトが評価項目の定義だけから作られることを検証する。
 // プロンプトに項目をハードコードすると、項目を増減したときに検証と食い違う。
 func TestBuildResumeRubricPromptSection(t *testing.T) {
@@ -290,6 +343,16 @@ func TestBuildResumeRubricPromptSection(t *testing.T) {
 		for _, want := range []string{c.Key, c.Label, c.Description} {
 			if !strings.Contains(section, want) {
 				t.Errorf("プロンプトに %q が含まれない:\n%s", want, section)
+			}
+		}
+		// レベル定義（アンカー）が全段載っていること（#1584）。
+		// ここが漏れるとプロンプトは Yes/No 型の説明だけに戻る。
+		for score, level := range c.Levels {
+			if !strings.Contains(section, level) {
+				t.Errorf("%s の%d点のレベル定義がプロンプトに含まれない: %q", c.Key, score, level)
+			}
+			if !strings.Contains(section, fmt.Sprintf("%d点:", score)) {
+				t.Errorf("%d点の見出しがプロンプトに無い:\n%s", score, section)
 			}
 		}
 	}
