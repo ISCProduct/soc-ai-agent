@@ -110,6 +110,17 @@ docs/research/**
 !docs/research/ai-eval/README.md
 !docs/research/ai-eval/*.jsonl
 
+# 音声評価フィクスチャは「作り方」だけ追跡する（#1603）。
+# 生成器・マニフェスト・手順があれば同じ音声を作り直せる。
+# ただし元になる8ケースの音声自体は従来から追跡していないので、
+# 手元に無い場合は先にそちらを用意する必要がある。
+!docs/research/interview-audio-eval/README.md
+!docs/research/interview-audio-eval/make_degraded.py
+!docs/research/interview-audio-eval/manifest_degraded.jsonl
+# 生成物は追跡しない。8ケース×27条件×2形式で448ファイル・約115MBになる。
+docs/research/interview-audio-eval/audio/
+docs/research/interview-audio-eval/*.tsv
+
 # アーキテクチャ図・インフラ構成メモ（draw.io / PNG / 環境依存ドキュメント）
 docs/architecture/
 

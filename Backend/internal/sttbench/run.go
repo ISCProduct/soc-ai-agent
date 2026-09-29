@@ -57,6 +57,9 @@ type Report struct {
 	GeneratedAt string                   `json:"generated_at"`
 	Format      string                   `json:"format"`
 	Models      map[string]*ModelSummary `json:"models"`
+	// Hints は実際に prompt へ渡した補助語。どちらの条件で測ったのか
+	// 出力ファイルだけで分かるように残す（企業情報は含めない）。
+	Hints string `json:"hints,omitempty"`
 }
 
 // 公表単価（2026-09-09 時点）。$/分。
@@ -74,7 +77,10 @@ var costPerMinUSD = map[string]float64{
 const minCharsPerSec = 1.0
 
 // RunModel は1モデルで全ケースを実行して集計する。
-func RunModel(model string, cases []Case, audios []Audio) *ModelSummary {
+//
+// hints は Transcription API の prompt に渡す補助語。空なら渡さない。
+// 補助語の有無で結果が変わるかを同じ指標で比べるために引数で受ける。
+func RunModel(model string, cases []Case, audios []Audio, hints string) *ModelSummary {
 	byID := map[string]Case{}
 	for _, c := range cases {
 		byID[c.ID] = c
@@ -87,7 +93,7 @@ func RunModel(model string, cases []Case, audios []Audio) *ModelSummary {
 
 	for _, a := range audios {
 		c := byID[a.ID]
-		text, latency, err := transcribe(model, a)
+		text, latency, err := transcribe(model, hints, a)
 		r := CaseResult{ID: a.ID, DurationSec: a.DurationSec, LatencyMS: latency, Condition: c.ConditionOf(), Source: c.SourceOf()}
 		if err != nil {
 			r.Error = err.Error()
@@ -136,28 +142,43 @@ func RunModel(model string, cases []Case, audios []Audio) *ModelSummary {
 	return s
 }
 
-func transcribe(model string, a Audio) (string, int64, error) {
+// buildTranscribeForm は Transcription API へ送る multipart 本体を組み立てる。
+//
+// hints が空のときに prompt フィールドを付けないのが要点。空文字を送るのと
+// 送らないのを同じ扱いにすると、「補助語なし」の測定が成立しない。
+func buildTranscribeForm(model, hints string, a Audio) (*bytes.Buffer, string, error) {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	_ = w.WriteField("model", model)
 	_ = w.WriteField("language", "ja")
+	if hints != "" {
+		_ = w.WriteField("prompt", hints)
+	}
 	part, err := w.CreateFormFile("file", filepath.Base(a.Path))
+	if err != nil {
+		return nil, "", err
+	}
+	if _, err := part.Write(a.Data); err != nil {
+		return nil, "", err
+	}
+	if err := w.Close(); err != nil {
+		return nil, "", err
+	}
+	return &buf, w.FormDataContentType(), nil
+}
+
+func transcribe(model, hints string, a Audio) (string, int64, error) {
+	buf, contentType, err := buildTranscribeForm(model, hints, a)
 	if err != nil {
 		return "", 0, err
 	}
-	if _, err := part.Write(a.Data); err != nil {
-		return "", 0, err
-	}
-	if err := w.Close(); err != nil {
-		return "", 0, err
-	}
 
-	req, err := http.NewRequest(http.MethodPost, "https://api.openai.com/v1/audio/transcriptions", &buf)
+	req, err := http.NewRequest(http.MethodPost, "https://api.openai.com/v1/audio/transcriptions", buf)
 	if err != nil {
 		return "", 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+os.Getenv("OPENAI_API_KEY"))
-	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Content-Type", contentType)
 
 	start := time.Now()
 	resp, err := (&http.Client{Timeout: 120 * time.Second}).Do(req)
