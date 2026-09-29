@@ -17,12 +17,18 @@ logger = logging.getLogger("main")
 # プロンプト版: v2 で「評価＋対策」と「改善文」の2呼び出しに分割した(#1521)
 _PROMPT_VERSION = "es_review_v2"
 
-# 日本語の出力トークン見積もり。tiktoken(o200k_base)の実測は素の日本語で0.80〜0.81
-# tok/char、半角カナは1.36 tok/char。実測値そのままだと2,000字ESで余裕が1.6%しか
-# 残らず、モデルが目安の130%を少し超えるだけで初回から上限到達→再試行になるため、
-# 安全率を乗せて0.85で見積もる（再試行1回分の生成コストより安い）。
-# 半角カナだらけの極端な入力は見積もりを超えるが、その場合は再試行で吸収する。
+# 日本語の出力トークン見積もり。tiktoken(o200k_base)の実測レートは素材で大きく散る
+# （英数混在 0.20 / 日本語＋英数 0.53 / 漢字かな混在 0.78〜0.81 / ひらがな主体 0.91 /
+# 全角カタカナ 0.97 / 半角カナ 1.71 tok/char。#1564 で再実測。以前ここに書いていた
+# 「半角カナ 1.36」は実測と合っていなかったので訂正した）。実測値そのままだと余裕が
+# 無く、モデルが目安を少し超えるだけで初回から上限到達→再試行になるため、安全率を
+# 乗せて0.85で見積もる（再試行1回分の生成コストより安い）。
+# #1564 以降、この見積もりを使うのは出力量が入力長に依存しない評価の段
+# （_REVIEW_TEXT_CHARS）だけ。最も重い半角カナで書かれても再試行1回の引き上げ
+# （885→1770）で吸収できる。
 _JP_TOKENS_PER_CHAR = 0.85
+# プロンプトが改善文へ指示している目標倍率（元の文字数の110〜130%）。
+# 出力予算の見積もりには使わない（#1564。改善文の段は max_tokens を渡さない）。
 _IMPROVED_TEXT_RATIO = 1.3
 # JSONのキー・括弧・エスケープ分の固定オーバーヘッド
 _JSON_OVERHEAD_TOKENS = 120
@@ -56,13 +62,16 @@ def _chat_json(
         model: str,
         system_prompt: str,
         user_prompt: str,
-        max_tokens: int,
+        max_tokens: Optional[int],
 ) -> Tuple[str, str]:
     """JSONモードでチャット補完を1回呼び、(本文, finish_reason) を返す。
 
     JSONパースの成否ではなく finish_reason で出力上限の到達を判定するため、
     ここではパースせず生の本文を返す（上限到達時はJSONが途中で切れている）。
     """
+    # max_tokens が None の段（改善文 / #1564）はキー自体を送らない。null を送っても
+    # OpenAI 側は既定扱いだが、OpenAI 互換サーバ（vLLM / llama.cpp）での解釈差を避ける。
+    budget_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
     resp = client.chat.completions.create(
         model=model,
         messages=[
@@ -70,8 +79,8 @@ def _chat_json(
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.3,
-        max_tokens=max_tokens,
         response_format={"type": "json_object"},
+        **budget_kwargs,
     )
     choice = resp.choices[0]
     return (choice.message.content or "", getattr(choice, "finish_reason", "") or "")
@@ -82,23 +91,25 @@ def _call_json_with_retry(
         model: str,
         system_prompt: str,
         user_prompt: str,
-        max_tokens: int,
+        max_tokens: Optional[int],
         label: str,
 ) -> Dict[str, Any]:
     """出力上限に到達した場合のみ、上限を引き上げて1回だけ再試行する。
 
     通常時は追加の呼び出しをしないため、コストは分割分の2回に収まる。
     2回目も上限到達なら、段(label)に応じた案内文と共に 422 を返す。
+    max_tokens が None（＝上限を渡さずモデル自身の上限に任せる段）は引き上げ余地が
+    無いため再試行しない（#1564）。
     """
     for attempt in (1, 2):
         content, finish_reason = _chat_json(client, model, system_prompt, user_prompt, max_tokens)
         if finish_reason != "length":
             return json.loads(content or "{}")
         logger.warning(
-            "es review output truncated label=%s attempt=%d max_tokens=%d prompt_version=%s",
+            "es review output truncated label=%s attempt=%d max_tokens=%s prompt_version=%s",
             label, attempt, max_tokens, _PROMPT_VERSION,
         )
-        if max_tokens >= _MAX_OUTPUT_TOKENS:
+        if max_tokens is None or max_tokens >= _MAX_OUTPUT_TOKENS:
             # 引き上げ余地が無いため再試行しても同じ結果になる（無駄な呼び出しを避ける）
             break
         max_tokens = min(max_tokens * 2, _MAX_OUTPUT_TOKENS)
@@ -265,7 +276,13 @@ def _run_es_review(
             model,
             improved_system_prompt,
             improved_user_prompt,
-            _estimate_max_tokens(int(len(es_text) * _IMPROVED_TEXT_RATIO)),
+            # 改善文は max_tokens を渡さず、モデル自身の出力上限に任せる（#1564）。
+            # 入力長へ比例させると _MAX_OUTPUT_TOKENS で飽和して無駄な再試行を1回挟む
+            # だけになり（引き上げても同じ予算なので結果は変わらない）、定数を渡すと
+            # 今度は OPENAI_CHAT_MODEL を出力上限4,096のモデルに差し替えた瞬間に
+            # 全リクエストが 400 になる。渡さなければどちらも起きない。
+            # 打ち切りの検知は従来どおり finish_reason == "length"（→ 422）で行う。
+            None,
             label="improved_text",
         )
 
