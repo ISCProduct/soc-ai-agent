@@ -114,3 +114,131 @@ func TestゴールデンセットがCommitされている(t *testing.T) {
 		})
 	}
 }
+
+// ラベルが表層特徴（文字数・数値トークン数）だけで当たるセットでは、弁別力が
+// 高いことと「内容の質を測れている」ことが同じ数字になり区別できない（#1593）。
+// ケースを足すときにこの相関を悪化させないよう、上限を固定する。
+//
+// 数値トークン数も測るのは、履歴書ルーブリックがその軸を直接数えているため。
+// specificity（数値・固有名詞・期間が何種類あるか）+ achievement（結果が数値で
+// 示されているか）+ completeness（項目がいくつ埋まっているか）で新卒の70/100点が
+// 決まる。ラベルを数値の個数で付けると、ゴールデンセットのラベルが評価器と
+// 同じ関数で定義される（循環）。#1593 の追加16件は実際にこれを起こしており、
+// 数値トークン数だけでラベルが 16/16 当たる（レンジが完全に非重複）。
+//
+// 上限の決め方: **実測値 + 0.05（0.01刻みで切り上げ）**。0.05 は report.go の
+// 他の劣化閾値（破損率・σ）と同じ幅で、「測り直しの揺れでは動かないが、
+// ケースを数件足して悪化させたら落ちる」幅として揃えている。目標値ではなく
+// 「今より悪くしない」ための天井なので、実測が下がったらここも下げる。
+//
+// 現状: resume の文字数は #1593 で +0.944 → +0.456 まで下げた。
+// **resume の数値トークン数は +0.870 → +0.901 で悪化している**（追加16件が
+// 数値の個数でラベルを分けているため。下げるには「数値はあるが内容が薄い bad」
+// 「数値が無いが検証可能な具体がある good」を足す必要がある → 別Issue #____）。
+// es と interview-report も未対応で、現状値をそのまま天井にしてある
+// （ここで落として赤くしても直る当てが無い → 別Issue #____）。
+func Testゴールデンセットのラベルが表層特徴だけで当たらない(t *testing.T) {
+	tests := []struct {
+		file string
+		// maxChars / maxNumeric は「ラベル vs 文字数」「ラベル vs 数値トークン数」の上限。
+		maxChars   float64
+		maxNumeric float64
+	}{
+		// 実測 chars +0.852 / numeric +0.830（どちらも未対応）
+		{file: "es.jsonl", maxChars: 0.91, maxNumeric: 0.88},
+		// 実測 chars +0.456（#1593 で対応）/ numeric +0.901（**未対応・悪化**）
+		{file: "resume.jsonl", maxChars: 0.51, maxNumeric: 0.96},
+		// 実測 chars +0.943 / numeric +0.838（どちらも未対応）
+		{file: "interview-report.jsonl", maxChars: 0.99, maxNumeric: 0.89},
+	}
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			path := filepath.Join("..", "..", "..", "docs", "research", "ai-eval", tt.file)
+			cases, err := LoadManifest(path)
+			if err != nil {
+				t.Fatalf("%s の読み込みに失敗: %v", path, err)
+			}
+			labels := make([]float64, 0, len(cases))
+			chars := make([]float64, 0, len(cases))
+			numeric := make([]float64, 0, len(cases))
+			for _, c := range cases {
+				labels = append(labels, labelRank[c.Label])
+				chars = append(chars, float64(c.InputChars()))
+				numeric = append(numeric, float64(c.InputNumericTokens()))
+			}
+			features := []struct {
+				name   string
+				values []float64
+				max    float64
+			}{
+				{name: "文字数", values: chars, max: tt.maxChars},
+				{name: "数値トークン数", values: numeric, max: tt.maxNumeric},
+			}
+			for _, f := range features {
+				corr := SpearmanCorrelation(labels, f.values)
+				// 実測は常に出す。天井を割っているかだけでなく、どの表層特徴に
+				// どれだけ寄っているかを読めるようにしておく。
+				t.Logf("ラベル vs %s = %+.3f（上限 %.2f）", f.name, corr, f.max)
+				if corr > f.max {
+					t.Errorf("ラベルと%sの順位相関 = %+.3f, 上限 %.2f を超えた（%sだけでラベルが当たるセットになっている）",
+						f.name, corr, f.max, f.name)
+				}
+			}
+		})
+	}
+}
+
+// InputText / InputChars / InputNumericTokens が target ごとに正しいフィールドを
+// 見ているか。ここが壊れると交絡の測定が全 target で静かに死ぬ（InputChars が
+// 常に 0 を返しても、弁別力は出るのでテストは緑のままになる）。
+func TestCaseの入力本文と表層特徴(t *testing.T) {
+	tests := []struct {
+		name      string
+		c         Case
+		wantText  string
+		wantChars int
+		wantNums  int
+	}{
+		{
+			name:      "es は es_text を見る",
+			c:         Case{Target: TargetES, Input: Input{ESText: "売上を12%伸ばした", ResumeText: "無関係", Transcript: "無関係"}},
+			wantText:  "売上を12%伸ばした",
+			wantChars: 10,
+			wantNums:  1,
+		},
+		{
+			name:      "resume は resume_text を見る",
+			c:         Case{Target: TargetResume, Input: Input{ESText: "無関係", ResumeText: "2024年4月〜2025年3月 店長", Transcript: "無関係"}},
+			wantText:  "2024年4月〜2025年3月 店長",
+			wantChars: 18,
+			wantNums:  4,
+		},
+		{
+			name:      "interview-report は transcript を見る",
+			c:         Case{Target: TargetInterviewReport, Input: Input{ESText: "無関係", ResumeText: "無関係", Transcript: "User: ３名で対応しました"}},
+			wantText:  "User: ３名で対応しました",
+			wantChars: 15,
+			wantNums:  1, // 全角数字も数値トークンとして数える
+		},
+		{
+			name:      "未知の target は空（数えない）",
+			c:         Case{Target: "chat", Input: Input{ESText: "本文1"}},
+			wantText:  "",
+			wantChars: 0,
+			wantNums:  0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.c.InputText(); got != tt.wantText {
+				t.Errorf("InputText() = %q, want %q", got, tt.wantText)
+			}
+			if got := tt.c.InputChars(); got != tt.wantChars {
+				t.Errorf("InputChars() = %d, want %d", got, tt.wantChars)
+			}
+			if got := tt.c.InputNumericTokens(); got != tt.wantNums {
+				t.Errorf("InputNumericTokens() = %d, want %d", got, tt.wantNums)
+			}
+		})
+	}
+}
