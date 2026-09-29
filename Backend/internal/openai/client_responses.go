@@ -10,6 +10,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -307,6 +308,47 @@ func isUnsupportedResponseFormatErr(err error) bool {
 	return strings.Contains(msg, "response_format") && strings.Contains(msg, "Unsupported")
 }
 
+// isUnsupportedJSONModeErr は JSON mode（text.format.type=json_object）そのものが
+// 400 で拒否されたかを判定する（#1595）。
+//
+// 400 は同じ条件で投げ直しても結果が変わらないため、これに当たったら外側の
+// リトライへ渡さず、形式を落として1度だけやり直す。
+//
+// ただし 400 には JSON mode 以外の原因（プロンプト長超過・必須パラメータ不足・
+// コンテンツフィルタ）も含まれる。それらで形式を落としても無意味なので、
+// **JSON mode 起因と読めるものだけ**に絞る。判定できない 400 は従来どおり
+// 外側のループへ渡す。
+//
+// 判定語は実際に OpenAI が返す文面に合わせている。
+//   - "Response input messages must contain the word 'json' in some form to use
+//     'text.format' of type 'json_object'."（プロンプトに json の語が無い / #1595 で実測）
+//   - "Unsupported parameter: 'text.format' is not supported with this model."
+//     （既存の isUnsupportedTemperatureErr が拾う文面と同型）
+//   - "Unknown parameter: 'text.format'."（パラメータ自体を知らないエンドポイント）
+//   - "Invalid value: 'json_object'. Supported values are: ..."（値だけ非対応）
+//   - OpenAI 互換実装の "response_format json_object is not supported" 系
+func isUnsupportedJSONModeErr(err error) bool {
+	var apiErr *ResponsesAPIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	body := strings.ToLower(apiErr.Body)
+	// 出力形式のパラメータ名・値に触れていない 400 は対象外
+	// （プロンプト長超過やコンテンツフィルタをここで拾わないため）。
+	if !strings.Contains(body, "text.format") &&
+		!strings.Contains(body, "json_object") &&
+		!strings.Contains(body, "response_format") {
+		return false
+	}
+	return slices.ContainsFunc([]string{
+		"unsupported",
+		"not supported",
+		"unknown parameter",
+		"invalid value",
+		"must contain the word",
+	}, func(marker string) bool { return strings.Contains(body, marker) })
+}
+
 func isBetaLimitationsErr(err error) bool {
 	if err == nil {
 		return false
@@ -504,8 +546,9 @@ func (cli *Client) responsesWithMaxTokens(ctx context.Context, systemPrompt, use
 		format = textFormatJSON
 	}
 
+	const maxAttempts = 5
 	var lastErr error
-	for attempt := 1; attempt <= 5; attempt++ {
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		ctxReq, cancel := context.WithTimeout(ctx, 90*time.Second)
 		messageInput := []map[string]any{
 			{
@@ -522,6 +565,18 @@ func (cli *Client) responsesWithMaxTokens(ctx context.Context, systemPrompt, use
 			},
 		}
 		content, err := cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, format)
+		// JSON mode 自体が 400 で拒否されたら、形式を落として1度だけやり直す（#1595）。
+		// 400 は投げ直しても同じ結果なので、外側のループに任せると5回とも同じ400を
+		// 踏んでスリープ分だけ空転してから失敗する。
+		//
+		// format を戻さないのは、以降の attempt（429 等で再試行になった場合）で
+		// 同じ400を踏み直さないため。jsonMode はそのままにしておくので、
+		// 下の「空応答なら text へ付け替える」経路は退避後も無効のままになる。
+		if err != nil && format == textFormatJSON && isUnsupportedJSONModeErr(err) {
+			log.Printf("[openai] model=%s JSON mode が拒否されたため text.format なしで再試行する: %v", model, err)
+			format = textFormatNone
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, format)
+		}
 		// 空応答のときに text.format を付け替えて試すのは JSON mode 以外だけ。
 		// JSON mode で text を落とすと出力形式の強制も一緒に消えるので、
 		// 同じ形式のまま外側のループで再試行させる。
@@ -542,9 +597,19 @@ func (cli *Client) responsesWithMaxTokens(ctx context.Context, systemPrompt, use
 			lastErr = err
 		}
 
+		// 最後の試行のあとに待つ意味は無い（待ってから失敗を返すだけ）。
+		if attempt == maxAttempts {
+			break
+		}
 		backoff := time.Duration(1<<attempt) * time.Second
 		jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
-		time.Sleep(backoff + jitter)
+		// 待っている間に呼び出し側が諦めたら即座に返す（WebSearchJSON と同じ形）。
+		// 返すのは ctx.Err() ではなく直前のエラーで、原因が分かるようにする。
+		select {
+		case <-ctx.Done():
+			return "", lastErr
+		case <-time.After(backoff + jitter):
+		}
 	}
 
 	if lastErr == nil {

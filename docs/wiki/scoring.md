@@ -1017,6 +1017,25 @@ JSON mode を入れて指示遵守率は0%→100%、破損率は0%のまま。
   API がエラーを返す。初回は `ReviewSystemPrompt`、やり直しは
   `reviewRetrySystemPrompt` で満たしており、`TestRequestReviewJSON_プロンプトにJSONの語がある`
   が固定している
+- JSON mode が **400 で拒否**されたら `text.format` を落として1度だけやり直す（#1595）。
+  ローカルLLM／OpenAI 互換実装では `text.format` 未対応が珍しくなく、退避が無いと
+  外側のリトライが5回とも同じ400を踏み、バックオフの分だけ空転してから失敗する。
+  退避条件（`isUnsupportedJSONModeErr`）は次の3つをすべて満たすこと。
+  1. HTTP 400（429/5xx は再試行すれば成功しうるので形式は落とさない）
+  2. 本文が `text.format` / `json_object` / `response_format` のいずれかに触れている
+  3. 本文が `unsupported` / `not supported` / `unknown parameter` / `invalid value` /
+     `must contain the word` のいずれかを含む
+     （実測例: `Response input messages must contain the word 'json' in some form to use 'text.format' of type 'json_object'.`）
+
+  プロンプト長超過・コンテンツフィルタ・必須パラメータ不足の 400 は形式を落としても
+  解決しないため、**判定できない 400 は従来どおり**外側のリトライへ渡す。
+  退避したときは `[openai] model=... JSON mode が拒否されたため text.format なしで再試行する`
+  をログに残す。退避後は同じ呼び出しの以降の試行も形式なしで投げる（同じ400を踏み直さない）
+- 空応答（400 ではない）では形式を落とさない。JSON mode を指定したのに勝手に外れると
+  出力そのものが変わるため（#1583 の判断を維持）
+- 退避後の本文は JSON mode 以前と同じくコードフェンス付きになり得るので、
+  `decodeJSON` の復旧処理が効く。通しの検証は
+  `TestBuildReviewScoreItems_JSONmode非対応でもレビューが成立する`
 - `decodeJSON` の `{` 〜 `}` 切り出しは保険として残すが、通常は通らない。
   前置きに `{` が含まれると誤った範囲を切り出すので、この経路に依存してはいけない。
   復旧処理を通ったかは `decodeJSONRecovered` の戻り値で観測でき、
