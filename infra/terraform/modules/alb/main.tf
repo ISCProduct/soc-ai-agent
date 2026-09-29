@@ -86,6 +86,18 @@ resource "aws_lb" "this" {
   subnets            = var.subnet_ids
   security_groups    = [var.security_group_id]
 
+  # 既定60秒では ES添削(#1556)が結果を返す前に接続を切られ、生成済みの本文も
+  # 422 の案内文も利用者へ届かない。develop の実測は通常15〜35秒で、企業名指定で企業
+  # 情報がキャッシュミスすると前段の Web Search が直列に +10〜30秒乗って60秒を超える。
+  # 90秒はこの帯(25〜65秒)を通すための値。有効範囲は 1〜4000秒。
+  # 上限の保証ではない。1回のLLM呼び出しは RAG_OPENAI_TIMEOUT_SEC(既定60秒) × SDK
+  # リトライ1回で、#1523 の字数上限が入ると最悪8回直列になる。処理側の打ち切りと
+  # 併用して初めて成立する(#1523 のガードは Web Search を数えていない点に注意)。
+  # 最悪ケースまで面倒を見ないのは、落ちている経路を掴んだまま待つ時間が延びるだけで
+  # 利用者には何も届かないため。
+  # ES添削以外の全リクエストにも効く。副作用は docs/wiki/operations.md を参照。
+  idle_timeout = 90
+
   dynamic "access_logs" {
     for_each = var.enable_access_logs ? [1] : []
     content {

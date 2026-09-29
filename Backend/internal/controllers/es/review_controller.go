@@ -65,12 +65,16 @@ func (c *ESReviewController) Review(ctx echo.Context) error {
 	// RAG側は評価と改善文で2回OpenAIを直列呼び出しし、各段が出力上限到達時に1回
 	// 再試行するため、LLM呼び出しは最悪4回直列になる(#1521)。1回あたり最大
 	// RAG_OPENAI_TIMEOUT_SEC(既定60秒)で、さらに企業名指定時は前段のWeb Searchも直列。
-	// 60秒だとRAGが正常に生成中でもBackendが先に打ち切り、422の案内文も結果も
-	// ユーザーへ届かないため延長する。
-	// 注意: 現状この180秒は最後まで効かない。手前のALB(idle_timeout未指定=既定60秒)と
-	// CloudFront(origin_read_timeout=60秒)が先に切るため、実効値は60秒。
-	// インフラ側の延長は #1556 で対応する。
-	client := &http.Client{Timeout: 180 * time.Second}
+	// 手前の経路(CloudFront origin_read_timeout / ALB idle_timeout / stagingのedge nginx
+	// proxy_read_timeout)は #1556 で90秒へ揃えた。ここを上流より1段短い85秒にするのは、
+	// 利用者向けの文面が変わるからではない。prodのCloudFrontは502/504とも503+
+	// /service-unavailable.html へ、stagingのnginxも502/504とも「起動中」ページへ差し替える
+	// ため、85で切っても90で切っても画面は同じ。目的は上流の汎用504より先に手放して、
+	// このログと ALB アクセスログ(target_status_code=502 / target_processing_time)に
+	// 原因を残すこと。
+	// 90秒は「待つ上限」であって「処理の上限」ではない。各段が上限近くまで粘るケースは
+	// 救えないので、RAG側の経過時間ガード(#1523)と併用する前提。
+	client := &http.Client{Timeout: 85 * time.Second}
 	resp, err := client.Do(ragReq)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, "RAG service unavailable: "+err.Error())
