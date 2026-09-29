@@ -10,20 +10,22 @@ import (
 	"Backend/internal/openai"
 )
 
-// jsonModeRejected400 は JSON mode を受け付けない API が返す 400（#1595 で実測した文面）。
-const jsonModeRejected400 = `{"error":{"message":"Response input messages must contain the word 'json' in some form to use 'text.format' of type 'json_object'.","type":"invalid_request_error","param":"text.format","code":null}}`
+// textFormatRejected400 は text.format を受け付けない互換サーバが返す 400。
+// 文面はクライアント側の判定に使われない（判定は「再試行不可の 4xx かつ text.format を
+// 送っていた」という構造だけ）ので、素文でも pydantic の 422 でも同じ経路を通る（#1595）。
+const textFormatRejected400 = `{"error":{"message":"text.format is not supported by this server"}}`
 
 // TestBuildReviewScoreItems_JSONmode非対応でもレビューが成立する は、
 // JSON mode を拒否する API（ローカルLLM / OpenAI 互換実装）を相手にしても
 // レビューが完成することを検証する（#1595）。
 //
-// 退避後の本文は JSON mode 以前と同じくコードフェンス付きになるため、
+// 形式を落としたあとの本文は JSON mode 以前と同じくコードフェンス付きになるため、
 // `decodeJSON` の '{' 〜 '}' 切り出し（#1583 の後も残している復旧経路）を通る。
 // 退避だけ入れても復旧経路が死んでいたら意味が無いので、ここで通しで見る。
 func TestBuildReviewScoreItems_JSONmode非対応でもレビューが成立する(t *testing.T) {
 	var mu sync.Mutex
 	var formats []string
-	// 退避後にモデルが返す形（JSON mode が無いと前置きやコードフェンスが付く）
+	// 形式を落としたあとにモデルが返す形（JSON mode が無いと前置きやコードフェンスが付く）
 	fenced := "```json\n" + reviewJSON(t, rubricScores(5, 4, 4, 5, 4)) + "\n```"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,7 +46,7 @@ func TestBuildReviewScoreItems_JSONmode非対応でもレビューが成立す�
 		w.Header().Set("Content-Type", "application/json")
 		if req.Text.Format.Type == reviewJSONModeType {
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(jsonModeRejected400))
+			_, _ = w.Write([]byte(textFormatRejected400))
 			return
 		}
 		_, _ = w.Write([]byte(responsesBody(t, fenced, "")))
@@ -54,7 +56,7 @@ func TestBuildReviewScoreItems_JSONmode非対応でもレビューが成立す�
 	svc := NewResumeService(&resumeRepoStub{}, t.TempDir(), openai.NewWithBaseURL(srv.URL, "gpt-4o-mini"))
 	review, items, err := svc.buildReviewScoreItems(reviewBlocks(), "", "エンジニア", candidateTypeNewGrad, "")
 	if err != nil {
-		t.Fatalf("退避してレビューが成立するべき: %v", err)
+		t.Fatalf("形式を落としてレビューが成立するべき: %v", err)
 	}
 	if len(items) == 0 {
 		t.Fatal("指摘が1件も紐づいていない（復旧経路で読めていない）")
