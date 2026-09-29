@@ -27,6 +27,9 @@ type ResumeRubricCriterion struct {
 	Label string
 	// Description は採点基準。プロンプトへそのまま入る。
 	Description string
+	// Levels は 0〜5 のレベル定義（アンカー）。添字がスコアそのもの。
+	// プロンプトへそのまま入る（#1584）。
+	Levels ResumeRubricLevels
 }
 
 // ResumeRubricScoreMin / ResumeRubricScoreMax は項目スコアの値域。
@@ -36,14 +39,59 @@ const (
 	ResumeRubricScoreMax = 5
 )
 
+// ResumeRubricLevels は1項目のレベル定義。添字 0〜ResumeRubricScoreMax がスコア。
+// 配列にしてあるので、値域を広げたらレベルを書き足さないとコンパイルが通らない。
+type ResumeRubricLevels [ResumeRubricScoreMax + 1]string
+
 // resumeRubricCriteria は履歴書の評価項目。順序はプロンプトの記載順で、
 // 画面の内訳表示もこの順に合わせる（frontend/app/resume/utils.ts の RUBRIC_CRITERIA）。
+//
+// レベル定義（Levels）は「何があれば何点か」を数えられる形で書く（#1584）。
+// 「優れている」「普通」のような主観語だけにすると、Description の Yes/No 型と
+// 同じで 3 が 2 や 4 と何が違うかをモデルに伝えられない。
+// 上のレベルは下のレベルを満たした上での積み増しとして書き、
+// 隣り合うレベルの差が本文を見れば判定できることを条件にしている。
 var resumeRubricCriteria = []ResumeRubricCriterion{
-	{"specificity", "具体性", "数値・固有名詞・具体的な行動が含まれているか"},
-	{"achievement", "成果の明示", "取組の結果が読み取れるか"},
-	{"role_fit", "職種適合", "応募職種の評価軸に対応する記述があるか"},
-	{"completeness", "記載の網羅性", "必要項目が埋まっているか"},
-	{"readability", "読みやすさ", "一文の長さ・表記統一・構成"},
+	{"specificity", "具体性", "数値・固有名詞・具体的な行動が含まれているか", ResumeRubricLevels{
+		"具体的な記述が無く、「頑張りました」「コミュニケーション能力があります」のような形容だけ",
+		"活動名・所属・肩書きだけがあり、自分が何をしたかの行動が書かれていない",
+		"自分の行動は書かれているが、数値・固有名詞・期間がいずれも無い",
+		"自分の行動に加えて、数値・固有名詞・期間のいずれか1種類がある",
+		"数値・固有名詞・期間のうち2種類以上があり、主要な活動の規模と自分の役割が読み取れる",
+		"主要な活動すべてに数値と固有名詞があり、何をどう変えたかの手順まで追える",
+	}},
+	{"achievement", "成果の明示", "取組の結果が読み取れるか", ResumeRubricLevels{
+		"取組の結果に触れた記述が無い",
+		"「貢献できた」「評価された」のように、結果を主観の言葉だけで述べている",
+		"結果は書かれているが、どの取組による結果なのか対応が読み取れない",
+		"取組と結果が対応しており、結果が定性的に読み取れる",
+		"結果が件数・時間・金額・人数などの数値で示されている",
+		"結果が数値で示され、かつ変化（前→後）または再現性（継続・横展開・他者への移管）まで書かれている",
+	}},
+	{"role_fit", "職種適合", "応募職種の評価軸に対応する記述があるか", ResumeRubricLevels{
+		"応募職種に関係する記述が無い",
+		"職種名や志望の表明だけで、裏付ける経験・学習が無い",
+		"関連しそうな経験はあるが、応募職種の評価軸との対応が書かれていない",
+		"応募職種の評価軸に対応する経験・学習が1つ書かれている",
+		"対応する経験・学習が2つ以上あり、職種で使う技能が具体名（言語・ツール・資格・業務名）で書かれている",
+		"さらに、その経験を応募先の業務でどう使うかが志望動機と結びついている",
+	}},
+	{"completeness", "記載の網羅性", "必要項目が埋まっているか", ResumeRubricLevels{
+		"氏名・学歴を含む基本項目がほとんど埋まっていない",
+		"氏名・学歴だけで、職歴・資格・自己PR・志望動機のいずれも無い",
+		"必要項目の半分以上が空欄、または学歴・職歴の年月が欠けている",
+		"必要項目はすべて埋まっているが、期間・役割などの粒度が一部欠けている",
+		"必要項目がすべて埋まり、学歴・職歴に年月があって欠落が無い",
+		"さらに、在籍期間と資格の取得時期に矛盾が無く、応募職種の判断に必要な情報が補われている",
+	}},
+	{"readability", "読みやすさ", "一文の長さ・表記統一・構成", ResumeRubricLevels{
+		"文として成立しておらず意味が取れない",
+		"一文が極端に長い、または箇条書きと文章が混在して読み進められない",
+		"意味は取れるが、一文が長すぎる箇所や表記の不統一（西暦と和暦の混在など）が目立つ",
+		"一文はおおむね60文字以内で、項目ごとに整理されている",
+		"さらに年号・数字・文体が統一され、段落の切り方が内容の区切りと一致している",
+		"さらに結論→根拠→補足の順で構成され、読み手が探さずに要点へ到達できる",
+	}},
 }
 
 // 候補者区分。フロント（ResumeReviewForm）の選択肢と同じ値。
@@ -107,13 +155,20 @@ func resumeWeightsFor(candidateType string) map[string]int {
 
 // BuildResumeRubricPromptSection は評価基準の説明をプロンプト用に組み立てる。
 //
+// 各項目のレベル定義（アンカー）を全段載せる（#1584）。載せないと
+// 「3点が2点や4点と何が違うか」がモデル側に無く、good と mid が同じ点に潰れる。
+//
 // 重みは載せない。載せると LLM が総合点を逆算して書き始め、
 // サーバー側で算出する意味が無くなる。
 func BuildResumeRubricPromptSection() string {
-	lines := make([]string, 0, len(resumeRubricCriteria)+1)
+	lines := make([]string, 0, len(resumeRubricCriteria)*(ResumeRubricScoreMax+2)+2)
 	lines = append(lines, fmt.Sprintf("## 評価基準（各スコアは%d〜%dの整数）", ResumeRubricScoreMin, ResumeRubricScoreMax))
+	lines = append(lines, "各項目は下のレベル定義に照らし、本文が満たしている最も高いレベルの数字を選んでください。印象で決めないこと。")
 	for _, c := range resumeRubricCriteria {
 		lines = append(lines, fmt.Sprintf("- %s（%s）: %s", c.Key, c.Label, c.Description))
+		for score, level := range c.Levels {
+			lines = append(lines, fmt.Sprintf("  - %d点: %s", score, level))
+		}
 	}
 	return strings.Join(lines, "\n")
 }
@@ -176,10 +231,11 @@ func ValidateResumeRubricScores(scores map[string]int) error {
 // 曲線を入れないのは、点の意味を「各項目の平均を100点満点に直したもの」から
 // 動かさないため。
 //
-// 60は RESUME_COMPLETENESS_THRESHOLD の既定値と一致するが、**これは算術の結果で
-// あって校正された境界ではない。** プロンプトは 0〜5 のレベル定義（アンカー）を
-// 与えていないので、「3点＝標準的な書類」はモデルとの合意ではない。
-// 実データでの校正は #1525。
+// 60は RESUME_COMPLETENESS_THRESHOLD の既定値と一致する。**一致そのものは算術の
+// 結果**（線形写像で 3/5 が 60%）だが、「3点」の中身は #1584 でレベル定義を入れた
+// ぶん決まっている。全項目3点は「必要項目は埋まり、行動と結果は対応しているが、
+// 数値の裏付けが1種類しか無い書類」であり、これが要対応でない側の下限にあたる。
+// 境界値そのものの実データ校正（good/mid の平均がどこに来るか）は #1525 のハーネス。
 //
 // 重みが ResumeRubricScoreMax の倍数である限り weighted/5 は整数になり、
 // 丸め方向は結果に影響しない（TestResumeRubricWeights_CoverAllCriteria が固定）。

@@ -1,6 +1,7 @@
 package resume
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -282,6 +283,33 @@ func TestValidateResumeRubricScores(t *testing.T) {
 	}
 }
 
+// TestResumeRubricLevels_Defined は全項目に 0〜5 のレベル定義があることを固定する（#1584）。
+//
+// レベル定義が無いと「3点が2点や4点と何が違うか」がプロンプトに無く、
+// good と mid が同じ点に潰れる（Issue #1584 の実測）。項目を足してレベルを
+// 書き忘れると空文字のレベルがプロンプトに出るので、ここで止める。
+func TestResumeRubricLevels_Defined(t *testing.T) {
+	for _, c := range ResumeRubricCriteria() {
+		t.Run(c.Key, func(t *testing.T) {
+			seen := map[string]int{}
+			for score, level := range c.Levels {
+				if strings.TrimSpace(level) == "" {
+					t.Errorf("%d点のレベル定義が空", score)
+					continue
+				}
+				if prev, dup := seen[level]; dup {
+					t.Errorf("%d点と%d点のレベル定義が同一（隣接レベルを判別できない）: %q", prev, score, level)
+				}
+				seen[level] = score
+			}
+			// 値域とレベル数がずれると、モデルに提示できない点が生まれる
+			if len(c.Levels) != ResumeRubricScoreMax-ResumeRubricScoreMin+1 {
+				t.Errorf("レベル数 = %d, want %d", len(c.Levels), ResumeRubricScoreMax-ResumeRubricScoreMin+1)
+			}
+		})
+	}
+}
+
 // TestBuildResumeRubricPromptSection はプロンプトが評価項目の定義だけから作られることを検証する。
 // プロンプトに項目をハードコードすると、項目を増減したときに検証と食い違う。
 func TestBuildResumeRubricPromptSection(t *testing.T) {
@@ -290,6 +318,16 @@ func TestBuildResumeRubricPromptSection(t *testing.T) {
 		for _, want := range []string{c.Key, c.Label, c.Description} {
 			if !strings.Contains(section, want) {
 				t.Errorf("プロンプトに %q が含まれない:\n%s", want, section)
+			}
+		}
+		// レベル定義（アンカー）が全段載っていること（#1584）。
+		// ここが漏れるとプロンプトは Yes/No 型の説明だけに戻る。
+		for score, level := range c.Levels {
+			if !strings.Contains(section, level) {
+				t.Errorf("%s の%d点のレベル定義がプロンプトに含まれない: %q", c.Key, score, level)
+			}
+			if !strings.Contains(section, fmt.Sprintf("%d点:", score)) {
+				t.Errorf("%d点の見出しがプロンプトに無い:\n%s", score, section)
 			}
 		}
 	}
