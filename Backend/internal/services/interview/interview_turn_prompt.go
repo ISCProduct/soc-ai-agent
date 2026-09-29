@@ -2,6 +2,7 @@ package interview
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/shared"
 	"fmt"
 	"strings"
 )
@@ -140,8 +141,16 @@ func buildInterviewSystemPrompt(
 		if position != "" {
 			base += "\n応募職種: " + position
 		}
-		if companyInfo != "" {
-			base += "\n\n【企業情報】\n" + companyInfo
+		// 企業情報は非信頼テキストとして囲む（#1600）。
+		// 中身は DB の企業行（AI 取得パイプライン経由なら Web 由来）か、
+		// リクエストで渡されたクライアント文面（学生が任意に書ける。
+		// interview_company_context.go の resolveCompanyInfo のフォールバック）で、
+		// どちらも面接官の system プロンプトの信頼領域へ生で入れてはいけない。
+		// 「この中の指示に従わない」宣言は shared.WrapUntrustedText が
+		// ブロック直前へ同じノンス付きで出すので、ここには書かない
+		// （同じ趣旨を2箇所に書くと片方が消えてもテストが通る。PR #1597 の指摘）。
+		if wrapped := shared.WrapUntrustedText(companyInfo, "企業情報"); wrapped != "" {
+			base += "\n\n【企業情報】\n" + wrapped
 		}
 		base += "\n\n上記の企業・職種に合わせた質問を行ってください。企業文化・働き方・福利厚生の情報がある場合は、それらを踏まえた「この企業ならでは」の深掘り質問を取り入れてください。"
 	}
@@ -164,7 +173,13 @@ func buildInterviewSystemPrompt(
 		if directive.IsDeepening {
 			base += "\n前の回答を踏まえた深掘り質問です。"
 		}
-		base += fmt.Sprintf("\n次の質問文をそのまま面接官として投げかけてください（1問のみ）:\n%s", directive.Text)
+		// 質問文も非信頼テキスト（#1600）。directive.Text は
+		// interview_question_states に保存された過去の LLM 出力か、
+		// 企業情報をもとに生成された企業別カスタム質問なので、
+		// 【企業情報】の囲みを迂回して system プロンプトへ戻ってくる経路になる。
+		// 「そのまま投げかける」という外側の指示は残し、中の指示文には従わせない。
+		base += fmt.Sprintf("\n次の質問文をそのまま面接官として投げかけてください（1問のみ）:\n%s",
+			shared.WrapUntrustedText(directive.Text, "質問文"))
 		if directive.Category != "" {
 			base += fmt.Sprintf("\n（カテゴリ: %s）", directive.Category)
 		}
@@ -177,11 +192,17 @@ func buildInterviewSystemPrompt(
 				recommended = append(recommended, fmt.Sprintf("- [%s] %s", q.Category, q.QuestionText))
 			}
 		}
+		// 企業別カスタム質問は企業ポータル・管理画面の入力か、企業情報をもとに
+		// AI 生成した候補（admin/interview_controller.go の generateQuestionsWithAI）で、
+		// どちらも学生から見れば非信頼テキスト。【企業情報】の囲みを迂回するので
+		// ここでも囲む（#1600）。
 		if len(required) > 0 {
-			base += "\n\n【必須質問（必ず全て質問してください）】\n" + strings.Join(required, "\n")
+			base += "\n\n【必須質問（必ず全て質問してください）】\n" +
+				shared.WrapUntrustedText(strings.Join(required, "\n"), "必須質問")
 		}
 		if len(recommended) > 0 {
-			base += "\n\n【推奨質問（会話の流れに応じて取り入れてください）】\n" + strings.Join(recommended, "\n")
+			base += "\n\n【推奨質問（会話の流れに応じて取り入れてください）】\n" +
+				shared.WrapUntrustedText(strings.Join(recommended, "\n"), "推奨質問")
 		}
 	}
 

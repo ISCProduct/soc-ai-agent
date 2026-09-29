@@ -642,7 +642,8 @@ func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, c
 
 応募企業名: %s
 応募職種: %s
-企業情報(参考): %s
+企業情報(参考):
+%s
 候補者区分: %s
 学歴/職歴は明らかな矛盾・不足がある場合のみ指摘し、それ以外は指摘から除外してください。
 
@@ -654,7 +655,10 @@ scoresは上の評価基準の全項目を必ず含めてください。総合�
 
 出力は次のJSONのみ:
 {"scores":{%s},"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}`,
-			companyName, jobTitle, companyInfo, candidateType, blockList,
+			companyName, jobTitle,
+			// やり直しも囲み直す（ノンスは呼び出しごとに変わる）#1600
+			shared.WrapUntrustedText(companyInfo, "企業情報"),
+			candidateType, blockList,
 			BuildResumeRubricPromptSection(), buildRubricJSONHint())
 		rawRetry, retryReqErr := s.requestReviewJSON(reviewRetrySystemPrompt, retryPrompt, modelOverride)
 		if retryReqErr != nil {
@@ -745,7 +749,8 @@ suggestionは「どう直すか」が分かるように書いてください（�
 
 応募企業名: %s
 応募職種: %s
-企業情報(参考): %s
+企業情報(参考):
+%s
 候補者区分: %s
 企業名が空欄の場合は一般的な観点でレビューしてください。
 学歴/職歴は明らかな矛盾・不足がある場合のみ指摘し、それ以外は指摘から除外してください。
@@ -762,7 +767,13 @@ scoresは上の評価基準の全項目を必ず含めてください。総合�
 {"scores":{%s},"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}
 
 OCRテキスト:
-%s`, ReviewMaxItems, companyName, jobTitle, companyInfo, candidateType,
+%s`, ReviewMaxItems, companyName, jobTitle,
+		// 企業情報は DB の企業ブリーフと RAG レポートの連結で、どちらも
+		// 取得したテキスト（Web 由来を含む）なので非信頼として囲む（#1600）。
+		// 評価ハーネス（cmd/aibench）が本番と同一のプロンプトを見られるよう、
+		// 囲みは buildReviewPrompt の中で行う。
+		shared.WrapUntrustedText(companyInfo, "企業情報"),
+		candidateType,
 		BuildResumeRubricPromptSection(), buildRubricJSONHint(), text)
 }
 

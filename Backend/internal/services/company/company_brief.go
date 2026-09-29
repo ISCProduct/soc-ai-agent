@@ -10,7 +10,7 @@ import (
 // 壁打ち/面接/レビュー用の短いスナップショット文を組み立てる。
 // Search / LLM 調査は行わない。
 func BuildCompanyBrief(company *models.Company, profile *models.CompanyWeightProfile) string {
-	if company == nil {
+	if company == nil || !briefVisible(company) {
 		return ""
 	}
 	var b strings.Builder
@@ -47,6 +47,31 @@ func BuildCompanyBrief(company *models.Company, profile *models.CompanyWeightPro
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// briefVisible は brief に文面を出してよい企業行かを判定する（#1600）。
+//
+// /company-entry は無認証（honeypot とレート制限のみ）で投稿でき、
+// data_status='draft' / is_provisional=true / is_guest_entry=true の企業行が
+// 即座に出来上がる（company_entry_service.go）。審査前のその文面が
+// 面接・履歴書レビューのプロンプトへ入ると、任意の指示文を仕込めてしまう。
+//
+// 条件は SQL 側のガード guestEntryVisibilityGuard（company_query_repository.go）の
+// 企業行側の半分と同じ。二重に持つ理由は、brief の読み出し口が
+// shared.CompanyBriefReader インターフェース越しで、フィルタ無しの
+// CompanyRepository を注入しても型が通るため。現在の DI（cmd/server/main.go）は
+// CompanyPublicRepository を渡しているが、その取り違えは型では防げない。
+//
+// data_status='published' は必須にしない。draft は自動収集した全企業の既定状態でもあり
+// （実データで 842社中 752社）、published だけに絞ると面接の企業選択・履歴書レビューの
+// 企業ブリーフがほぼ空になる（guestEntryVisibilityGuard のコメント参照）。
+// ゲスト投稿由来かどうかで分けるのが #1203 / #1409 で決めた線。
+func briefVisible(c *models.Company) bool {
+	if !c.IsGuestEntry {
+		return true
+	}
+	// 管理者が公開したものは出す。公開後に却下されると is_active=false になる。
+	return c.DataStatus == "published" && c.IsActive
 }
 
 func trimRunes(s string, max int) string {
