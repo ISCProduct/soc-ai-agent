@@ -11,7 +11,65 @@ import (
 	"math/rand"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
+
+	"github.com/getsentry/sentry-go"
+)
+
+// truncationFlagKey は「出力が max_output_tokens で切れたか」を呼び出し側へ
+// 伝えるためのコンテキストキー（#1529）。doResponses が書き、呼び出し側が読む。
+//
+// 戻り値で返さないのは、Responses API の呼び出しが
+// doResponses → callResponsesAPI → …WithTempFallback → 各公開メソッド と4段あり、
+// 全段の戻り値を増やすと12箇所の呼び出し元を巻き込むため。
+// フォールバック判定（withFallbackFlag）と同じ形に揃えている。
+type truncationFlagKey struct{}
+
+// WithTruncationFlag は上限到達フラグをコンテキストに載せる。
+//
+// 切れた出力を「壊れていない出力」として扱いたくない呼び出し側だけが載せる。
+// 載せない呼び出し側の挙動は変わらない（従来どおり途中までの本文を受け取る）。
+//
+// フラグが表すのは「最後の応答が切れていたか」である。公開メソッドは
+// 空応答・上限エラーのときに条件を変えて呼び直すので、立ったままにすると
+// 「1回目が上限に当たり、出力枠を倍にした2回目が成功した」場合に
+// 正常な応答を切れた扱いにしてしまう。
+//
+// したがって1つのフラグ付きコンテキストは1回の論理呼び出しで使い切ること。
+// 並行する複数の呼び出しで共有すると「最後の応答」がどれか決まらない。
+func WithTruncationFlag(ctx context.Context) context.Context {
+	return context.WithValue(ctx, truncationFlagKey{}, &atomic.Bool{})
+}
+
+// OutputTruncated は WithTruncationFlag を通したコンテキストで、
+// 最後の応答が max_output_tokens により途中で切れたかを返す。
+func OutputTruncated(ctx context.Context) bool {
+	flag, ok := ctx.Value(truncationFlagKey{}).(*atomic.Bool)
+	return ok && flag.Load()
+}
+
+// setOutputTruncated は今回の応答が上限到達だったかをコンテキストへ記録する。
+func setOutputTruncated(ctx context.Context, truncated bool) {
+	if flag, ok := ctx.Value(truncationFlagKey{}).(*atomic.Bool); ok {
+		flag.Store(truncated)
+	}
+}
+
+// truncationReasonMaxTokens は Responses API が返す上限到達の理由。
+const truncationReasonMaxTokens = "max_output_tokens"
+
+// Responses API の text.format.type に入れる値。
+//
+// textFormatNone は text を送らない（Chat Completions の response_format 未指定に相当）。
+// textFormatJSON は JSON mode。指定すると本文が素の JSON になり、コードフェンスや
+// 前置きが付かなくなる（#1583）。Chat Completions の
+// response_format={"type":"json_object"} と同じ強制で、プロンプト側に "JSON" の語が
+// 必要な点も同じ。
+const (
+	textFormatNone = ""
+	textFormatText = "text"
+	textFormatJSON = "json_object"
 )
 
 type responsesRequest struct {
@@ -40,7 +98,7 @@ func countWebSearchTools(tools []map[string]any) int {
 	return n
 }
 
-func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string, temperature *float32, maxOutputTokens int, includeTextFormat bool) (string, error) {
+func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string, temperature *float32, maxOutputTokens int, textFormat string) (string, error) {
 	payload := responsesRequest{
 		Model:           model,
 		Input:           input,
@@ -52,10 +110,10 @@ func (cli *Client) callResponsesAPI(ctx context.Context, input any, model string
 	if isReasoningModel(model) {
 		payload.Reasoning = map[string]string{"effort": "low"}
 	}
-	if includeTextFormat {
+	if textFormat != textFormatNone {
 		payload.Text = map[string]any{
 			"format": map[string]string{
-				"type": "text",
+				"type": textFormat,
 			},
 		}
 	}
@@ -154,6 +212,10 @@ func (cli *Client) doResponses(ctx context.Context, payload responsesRequest) (s
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return "", err
 	}
+	// 上限到達は本文が途中まで返っていても起きる。OutputText の早期 return より
+	// 先に記録しないと、切れた本文が正常な応答として呼び出し側へ渡る（#1529）。
+	// 切れていなければ下げる（出力枠を増やした再試行が成功した場合に効く）。
+	setOutputTruncated(ctx, parsed.IncompleteDetails.Reason == truncationReasonMaxTokens)
 	if parsed.Usage.InputTokens > 0 || parsed.Usage.OutputTokens > 0 {
 		cli.reportUsage(ctx, usageReport{
 			provider:         cli.textProvider,
@@ -263,10 +325,10 @@ func isModelNotFoundErr(err error) bool {
 	return strings.Contains(msg, "model") && (strings.Contains(msg, "not found") || strings.Contains(msg, "does not exist") || strings.Contains(msg, "unsupported"))
 }
 
-func (cli *Client) callResponsesAPIWithTempFallback(ctx context.Context, input any, model string, temperature *float32, maxOutputTokens int, includeTextFormat bool) (string, error) {
-	content, err := cli.callResponsesAPI(ctx, input, model, temperature, maxOutputTokens, includeTextFormat)
+func (cli *Client) callResponsesAPIWithTempFallback(ctx context.Context, input any, model string, temperature *float32, maxOutputTokens int, textFormat string) (string, error) {
+	content, err := cli.callResponsesAPI(ctx, input, model, temperature, maxOutputTokens, textFormat)
 	if err != nil && isUnsupportedTemperatureErr(err) {
-		return cli.callResponsesAPI(ctx, input, model, nil, maxOutputTokens, includeTextFormat)
+		return cli.callResponsesAPI(ctx, input, model, nil, maxOutputTokens, textFormat)
 	}
 	return content, err
 }
@@ -299,17 +361,17 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 				},
 			},
 		}
-		content, err := cli.callResponsesAPI(ctxReq, messageInput, model, nil, 600, true)
+		content, err := cli.callResponsesAPI(ctxReq, messageInput, model, nil, 600, textFormatText)
 		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
 			// キャッシュ活用のため、system/user を分離したまま再試行する（combinedPrompt を作らない）
-			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, nil, 600, false)
+			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, nil, 600, textFormatNone)
 		}
 		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
 			// それでも空応答なら maxOutputTokens を増やして再試行（system/user を分離したまま）
-			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, nil, 1200, false)
+			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, nil, 1200, textFormatNone)
 		}
 		if err != nil && strings.Contains(err.Error(), "max_output_tokens") {
-			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, nil, 1200, true)
+			content, err = cli.callResponsesAPI(ctxReq, messageInput, model, nil, 1200, textFormatText)
 		}
 		cancel()
 
@@ -371,17 +433,17 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 				},
 			},
 		}
-		content, err := cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 100, true)
+		content, err := cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 100, textFormatText)
 		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
 			// キャッシュを活かすために system/user を分離したまま再試行
-			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 100, false)
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 100, textFormatNone)
 		}
 		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
 			// 空応答が続く場合は出力トークン上限を増やして再試行
-			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 200, false)
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 200, textFormatNone)
 		}
 		if err != nil && strings.Contains(err.Error(), "max_output_tokens") {
-			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 200, true)
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, 200, textFormatText)
 		}
 		cancel()
 
@@ -407,8 +469,63 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 	return "", lastErr
 }
 
-// ChatCompletionJSON uses the go-openai SDK to request a JSON response.
+// ResponsesWithMaxTokens は Responses API で出力上限を指定してテキストを取得する。
+// 出力形式は強制しない（JSON が欲しいときは ResponsesJSONWithMaxTokens を使う）。
 func (cli *Client) ResponsesWithMaxTokens(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxOutputTokens int, modelOverride ...string) (string, error) {
+	return cli.responsesWithMaxTokens(ctx, systemPrompt, userPrompt, temperature, maxOutputTokens, false, modelOverride...)
+}
+
+// ResponsesJSONWithMaxTokens は JSON mode（text.format.type=json_object）で呼ぶ。
+//
+// 素の JSON だけが返るため、コードフェンスや前置きの除去が不要になり、
+// 構文として壊れた JSON も返らなくなる（#1583）。
+// JSON mode はオプトインにしてある。JSON を期待しない呼び出し
+// （面接の質問プラン等）に強制すると出力そのものが変わってしまうため。
+//
+// 注意: JSON mode はプロンプト（system か user）に "JSON" の語が無いと
+// API がエラーを返す。呼び出し側のプロンプトで担保するのが基本だが、
+// プロンプト編集で語が落ちても壊れないよう下でも足す（#1595）。
+func (cli *Client) ResponsesJSONWithMaxTokens(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxOutputTokens int, modelOverride ...string) (string, error) {
+	// json_object はプロンプトのどこかに "json" の語を要求する。無いだけなら
+	// JSON mode 自体は動くので、形式を落として指示遵守率を捨てるのではなく語を足す。
+	if !strings.Contains(strings.ToLower(systemPrompt+userPrompt), "json") {
+		systemPrompt += "\n出力は JSON のみ。"
+	}
+	return cli.responsesWithMaxTokens(ctx, systemPrompt, userPrompt, temperature, maxOutputTokens, true, modelOverride...)
+}
+
+// responsesBackoff は attempt 回目の失敗後に待つ時間（2,4,8,16秒 + ジッタ）。
+// 変数にしてあるのはテストから差し替えて「最後の試行のあとは待たない」ことを
+// 実時間ぬきで確かめるため（TestResponsesWithMaxTokens_最後の試行のあとは待たない）。
+var responsesBackoff = func(attempt int) time.Duration {
+	return time.Duration(1<<attempt)*time.Second + time.Duration(rand.Intn(1000))*time.Millisecond
+}
+
+// logTextFormatFallback は text.format を落として試すことを記録する。
+//
+// これが起きた呼び出しは JSON mode を失っている（＝指示遵守率が 100% から落ちる）
+// ので、log だけだと本番で誰も気づけない。Sentry は SENTRY_DSN 未設定なら no-op で、
+// 送信時は scrubEvent が Message を300 rune に切る（#1595）。
+func logTextFormatFallback(model string, status int, err error) {
+	msg := fmt.Sprintf("[openai] model=%s status=%d text.format を落として1度だけ試す: %s", model, status, truncateErrForLog(err))
+	log.Print(msg)
+	sentry.CaptureMessage(msg)
+}
+
+// truncateErrForLog はエラー文を先頭だけに切る。
+// ResponsesAPIError.Error() はレスポンス本文を全文含み、リクエストをエコーする
+// OpenAI 互換サーバ相手だと履歴書OCR本文（最大30KB）がログへ流れる。
+// 上限は observability.scrubEvent と同じ 300 rune に揃えている。
+func truncateErrForLog(err error) string {
+	const limit = 300
+	runes := []rune(strings.TrimSpace(err.Error()))
+	if len(runes) <= limit {
+		return string(runes)
+	}
+	return string(runes[:limit]) + "…(truncated)"
+}
+
+func (cli *Client) responsesWithMaxTokens(ctx context.Context, systemPrompt, userPrompt string, temperature float32, maxOutputTokens int, jsonMode bool, modelOverride ...string) (string, error) {
 	if err := cli.ensureText(); err != nil {
 		return "", err
 	}
@@ -421,8 +538,14 @@ func (cli *Client) ResponsesWithMaxTokens(ctx context.Context, systemPrompt, use
 		model = "gpt-4o-mini"
 	}
 
+	format := textFormatNone
+	if jsonMode {
+		format = textFormatJSON
+	}
+
+	const maxAttempts = 5
 	var lastErr error
-	for attempt := 1; attempt <= 5; attempt++ {
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		ctxReq, cancel := context.WithTimeout(ctx, 90*time.Second)
 		messageInput := []map[string]any{
 			{
@@ -438,12 +561,43 @@ func (cli *Client) ResponsesWithMaxTokens(ctx context.Context, systemPrompt, use
 				},
 			},
 		}
-		content, err := cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, false)
-		if err != nil && strings.Contains(err.Error(), "empty response from responses api") {
-			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, true)
+		content, err := cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, format)
+		// 4xx（429 以外）は投げ直しても同じ結果なので待たずに返す。5回とも同じ400を
+		// 踏んでバックオフ分（62秒）だけ空転してから失敗していた（#1595）。
+		// 判定は WebSearchJSON と同じ ResponsesAPIError.Retryable() を使う。
+		// isRetryableAPIErr は使わない（*ResponsesAPIError 以外に false を返すので、
+		// ネットワークエラーや90秒タイムアウトの再試行まで止まってしまう）。
+		//
+		// ただし text.format を送っていたなら、それ自体が拒否の原因かもしれないので
+		// 形式なしで1度だけ確かめる。形式が原因でなければ2回目も同じく失敗するため、
+		// 誤って JSON mode を落とす（＝指示遵守率が黙って 0% に戻る）ことが起きない。
+		// 逆に2回目が通ったなら、それが形式が原因だった証明になる。
+		var apiErr *ResponsesAPIError
+		if err != nil && errors.As(err, &apiErr) && !apiErr.Retryable() {
+			fatal := err
+			if format != textFormatNone {
+				logTextFormatFallback(model, apiErr.StatusCode, err)
+				content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, textFormatNone)
+				if err == nil {
+					// 形式が原因だったと確定。以降の試行も形式なしで投げる。
+					// jsonMode も倒して「JSON mode である」前提の下のガードと食い違わせない。
+					format, jsonMode, fatal = textFormatNone, false, nil
+				}
+			}
+			if fatal != nil {
+				// 返すのは元のエラー。形式なしの2回目は原因の切り分け用でしかない。
+				cancel()
+				return "", fatal
+			}
+		}
+		// 空応答のときに text.format を付け替えて試すのは JSON mode 以外だけ。
+		// JSON mode で text を落とすと出力形式の強制も一緒に消えるので、
+		// 同じ形式のまま外側のループで再試行させる。
+		if err != nil && !jsonMode && strings.Contains(err.Error(), "empty response from responses api") {
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens, textFormatText)
 		}
 		if err != nil && strings.Contains(err.Error(), "max_output_tokens") {
-			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens*2, false)
+			content, err = cli.callResponsesAPIWithTempFallback(ctxReq, messageInput, model, &temperature, maxOutputTokens*2, format)
 		}
 		cancel()
 
@@ -456,9 +610,17 @@ func (cli *Client) ResponsesWithMaxTokens(ctx context.Context, systemPrompt, use
 			lastErr = err
 		}
 
-		backoff := time.Duration(1<<attempt) * time.Second
-		jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
-		time.Sleep(backoff + jitter)
+		// 最後の試行のあとに待つ意味は無い（待ってから失敗を返すだけ）。
+		if attempt == maxAttempts {
+			break
+		}
+		// 待っている間に呼び出し側が諦めたら即座に返す（WebSearchJSON と同じ形）。
+		// 返すのは ctx.Err() ではなく直前のエラーで、原因が分かるようにする。
+		select {
+		case <-ctx.Done():
+			return "", lastErr
+		case <-time.After(responsesBackoff(attempt)):
+		}
 	}
 
 	if lastErr == nil {
