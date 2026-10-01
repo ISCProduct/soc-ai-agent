@@ -145,6 +145,46 @@ describe('useSpeechInput', () => {
     expect(result.current.listening).toBe(false)
   })
 
+  it('応答が返らないまま固まったら打ち切る', () => {
+    // Chrome の音声認識はクラウドへ投げるため、通信が詰まると onend が返らない。
+    // 実ブラウザで試したときは30秒待っても「聞き取り中」のままだった。
+    // 放置するとマイクを掴み続けるので、時間で畳む。
+    jest.useFakeTimers()
+    try {
+      installRecognition()
+      const { result } = renderHook(() => useSpeechInput(jest.fn()))
+      act(() => result.current.start())
+      expect(result.current.listening).toBe(true)
+
+      act(() => {
+        jest.advanceTimersByTime(15_000)
+      })
+
+      expect(result.current.listening).toBe(false)
+      expect(latest?.aborted).toBeGreaterThan(0)
+      expect(result.current.error).toContain('キーボード')
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('結果が返れば打ち切りは発火しない', () => {
+    jest.useFakeTimers()
+    try {
+      installRecognition()
+      const { result } = renderHook(() => useSpeechInput(jest.fn()))
+      act(() => result.current.start())
+      act(() => latest?.onend?.())
+      act(() => {
+        jest.advanceTimersByTime(30_000)
+      })
+      // 正常に終わったのにエラーを出さない。
+      expect(result.current.error).toBeNull()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it('画面を離れるときにマイクを握ったままにしない', () => {
     installRecognition()
     const { result, unmount } = renderHook(() => useSpeechInput(jest.fn()))

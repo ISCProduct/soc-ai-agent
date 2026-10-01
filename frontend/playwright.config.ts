@@ -8,6 +8,7 @@ export default defineConfig({
     'chat.spec.ts',
     'chat-critical-flow.spec.ts',
     'chat-history-loading.spec.ts',
+    'chat-voice-input.spec.ts',
     'chat-mobile-progress.spec.ts',
     'resume.spec.ts',
     'resume-reminder.spec.ts',

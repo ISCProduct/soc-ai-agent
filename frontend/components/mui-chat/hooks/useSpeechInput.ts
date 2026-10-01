@@ -75,11 +75,22 @@ function describeError(code: string): string {
   }
 }
 
+/**
+ * 聞き取りを打ち切るまでの時間。
+ *
+ * Chrome の音声認識はクラウドへ投げるため、通信が詰まると onend が返らず、
+ * ボタンが「聞き取り中」のまま固まってマイクを掴み続ける。
+ * 実際、自動実行の環境では 30 秒待っても戻らなかった。
+ * 一区切りを話すには十分な長さで切り上げる。
+ */
+const LISTEN_TIMEOUT_MS = 15_000
+
 export function useSpeechInput(onText: (text: string) => void): SpeechInput {
   const [supported, setSupported] = useState(false)
   const [listening, setListening] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // 認識中にコールバックが差し替わっても、古い参照を掴まないようにする。
   const onTextRef = useRef(onText)
   onTextRef.current = onText
@@ -88,15 +99,24 @@ export function useSpeechInput(onText: (text: string) => void): SpeechInput {
     setSupported(getRecognitionCtor() !== null)
     return () => {
       // 画面を離れるときにマイクを握ったままにしない。
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
       recognitionRef.current?.abort()
       recognitionRef.current = null
     }
   }, [])
 
+  const clearTimer = useCallback(() => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current)
+      timeoutRef.current = null
+    }
+  }, [])
+
   const stop = useCallback(() => {
+    clearTimer()
     recognitionRef.current?.stop()
     setListening(false)
-  }, [])
+  }, [clearTimer])
 
   const start = useCallback(() => {
     const Ctor = getRecognitionCtor()
@@ -122,10 +142,12 @@ export function useSpeechInput(onText: (text: string) => void): SpeechInput {
       if (trimmed) onTextRef.current(trimmed)
     }
     recognition.onerror = (event) => {
+      clearTimer()
       setError(describeError(event.error))
       setListening(false)
     }
     recognition.onend = () => {
+      clearTimer()
       setListening(false)
     }
 
@@ -133,11 +155,18 @@ export function useSpeechInput(onText: (text: string) => void): SpeechInput {
     try {
       recognition.start()
       setListening(true)
+      // 応答が返らないまま固まる場合に備えて打ち切る。
+      clearTimer()
+      timeoutRef.current = setTimeout(() => {
+        recognitionRef.current?.abort()
+        setListening(false)
+        setError('音声を聞き取れませんでした。キーボードで入力することもできます。')
+      }, LISTEN_TIMEOUT_MS)
     } catch {
       // すでに開始済みなど。握ったままにしないよう畳む。
       setListening(false)
     }
-  }, [])
+  }, [clearTimer])
 
   return { supported, listening, error, start, stop }
 }
