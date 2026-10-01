@@ -88,8 +88,10 @@ describe('makeMessageId / INITIAL_GREETING', () => {
     expect(a.length).toBeGreaterThan(0)
   })
 
-  it('INITIAL_GREETING は挨拶文を含む', () => {
-    expect(INITIAL_GREETING).toContain('キャリアエージェント')
+  it('INITIAL_GREETING は最初の質問まで案内する', () => {
+    // 以前は「キャリアエージェント」という名乗りを固定していたが、
+    // 人を名乗らない方針に変えたので、保証したいこと自体を書く。
+    expect(INITIAL_GREETING).toContain('どんな仕事に興味がありますか')
   })
 })
 
@@ -368,5 +370,38 @@ describe('案内・打ち切りの判定', () => {
       { role: 'assistant', content: retry },
     ]
     expect(findLastAssistantQuestionMessage(messages)?.content).toContain('A) はい')
+  })
+})
+
+describe('最初の案内（INITIAL_GREETING）', () => {
+  it('AIが応答していることを示す', () => {
+    // 人と話していると受け取られないようにする（NN/g）。
+    expect(INITIAL_GREETING).toContain('AI')
+  })
+
+  it('人を名乗らない', () => {
+    // 旧文は「IT業界専門のキャリアエージェントです」と名乗るだけだった。
+    expect(INITIAL_GREETING).not.toContain('キャリアエージェントです')
+  })
+
+  it('できないことを明示する', () => {
+    // 範囲を限った方が満足度が高い（NN/g）。
+    expect(INITIAL_GREETING).toContain('できないのは')
+  })
+
+  it('相談先を示す', () => {
+    expect(INITIAL_GREETING).toContain('先生')
+  })
+
+  it('結果を断定しない', () => {
+    // §6: AIが出した情報を確定情報のように見せない。
+    for (const ng of ['最適な', '必ず', '確実']) {
+      expect(INITIAL_GREETING).not.toContain(ng)
+    }
+  })
+
+  it('最初の質問まで辿り着ける長さに収める', () => {
+    // 会話型は一度に少ししか表示できない。長いと読み飛ばされる。
+    expect(INITIAL_GREETING.length).toBeLessThan(220)
   })
 })
