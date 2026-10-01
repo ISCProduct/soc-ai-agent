@@ -194,14 +194,43 @@ export function shouldSendChatOnKeyDown(e: {
   return e.ctrlKey || e.metaKey
 }
 
-/** 無効回答の警告・強制終了メッセージか（選択肢抽出の対象外） */
+/**
+ * 無効回答の案内・打ち切りメッセージを見分ける目印。
+ *
+ * Backend/internal/services/chat/chat_answer_validator.go の
+ * validationMarkers と同じ文字列。片方だけ変えると、画面側が案内文を
+ * 「直近の質問」として拾い、選択肢の復元が壊れる。
+ *
+ * 旧文言も残す。既存セッションの DB には旧文言のまま保存されている。
+ */
+export const VALIDATION_FEEDBACK_MARKERS = [
+  '質問に沿った内容でもう一度お願いします',
+  'このチャットを終了しました',
+  // 旧文言（2026-10 以前に保存されたもの）
+  '書かれた内容にはお答えできません',
+  '質問と関係のない内容が3回続いた',
+] as const
+
+/** 打ち切りの目印だけを見る（案内と打ち切りで表示を変えるため） */
+export const VALIDATION_TERMINATION_MARKERS = [
+  'このチャットを終了しました',
+  // 旧文言
+  '質問と関係のない内容が3回続いた',
+  'チャットを終了させていただきます',
+] as const
+
+/** 打ち切りメッセージか */
+export function isValidationTerminationMessage(content: string): boolean {
+  const trimmed = content.trim()
+  if (!trimmed) return false
+  return VALIDATION_TERMINATION_MARKERS.some((marker) => trimmed.includes(marker))
+}
+
+/** 無効回答の案内・打ち切りメッセージか（選択肢抽出の対象外） */
 export function isValidationFeedbackMessage(content: string): boolean {
   const trimmed = content.trim()
   if (!trimmed) return false
-  return (
-    trimmed.includes('書かれた内容にはお答えできません') ||
-    trimmed.includes('質問と関係のない内容が3回続いた')
-  )
+  return VALIDATION_FEEDBACK_MARKERS.some((marker) => trimmed.includes(marker))
 }
 
 /** 警告を飛ばして直近のアシスタント質問メッセージを返す */

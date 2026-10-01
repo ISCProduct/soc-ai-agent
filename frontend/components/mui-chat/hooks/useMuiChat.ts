@@ -17,6 +17,8 @@ import {
   computeProgressTotals,
   shouldAutoScrollToBottom,
   findLastAssistantQuestionMessage,
+  isValidationFeedbackMessage,
+  isValidationTerminationMessage,
 } from '../utils'
 import type { Message, PhaseProgress, ProgressTotals, ChoiceOption } from '../types'
 
@@ -297,16 +299,14 @@ export function useMuiChat() {
         timestamp: new Date(),
       }
 
-      // バリデーションエラーかどうかをチェック
-      const isValidationError =
-        response.response?.includes('書かれた内容にはお答えできません') ||
-        response.response?.includes('質問に回答してください') ||
-        response.response?.includes('質問と関係のない内容が3回続いた')
+      // 判定は構造化フィールドを先に見る。本文の文字列一致は、
+      // 旧いバックエンドが is_terminated を返さない場合の保険として残す。
+      // 目印は utils 側（VALIDATION_*_MARKERS）に寄せてある。
+      const isValidationError = isValidationFeedbackMessage(response.response ?? '')
 
-      // セッション終了チェック
       const isTerminated =
         response.is_terminated === true ||
-        response.response?.includes('チャットを終了させていただきます')
+        isValidationTerminationMessage(response.response ?? '')
 
       setMessages((prev) => {
         const newMessages = [...prev, assistantMessage]

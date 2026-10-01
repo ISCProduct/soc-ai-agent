@@ -23,6 +23,8 @@ import {
   CHAT_WARN_EDGE,
   CHAT_WARN_TEXT,
   extractChoices,
+  isValidationFeedbackMessage,
+  isValidationTerminationMessage,
   JOB_QUICK_OPTIONS,
   messageAccessibleLabel,
   stripChoiceLines,
@@ -118,15 +120,16 @@ export function ChatMessageList({
       )}
 
       {messages.map((message) => {
+        // 目印は utils の VALIDATION_FEEDBACK_MARKERS に寄せる。
+        // ここだけ別の文字列を見ていると、文言を変えたときに
+        // 片方の判定だけ外れて表示が崩れる。
+        const isTerminationMessage =
+          message.role === 'assistant' && isValidationTerminationMessage(message.content)
+
         const isValidationError =
           message.role === 'assistant' &&
-          (message.content.includes('書かれた内容にはお答えできません') ||
-            message.content.includes('質問に回答してください') ||
-            message.content.includes('質問と関係のない内容が3回続いた'))
-
-        const isTerminationMessage =
-          message.role === 'assistant' &&
-          message.content.includes('チャットを終了させていただきます')
+          !isTerminationMessage &&
+          isValidationFeedbackMessage(message.content)
 
         const choices =
           message.role === 'assistant' ? extractChoices(message.content) : []

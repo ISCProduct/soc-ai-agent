@@ -1,22 +1,23 @@
 import { BRAND_LOGO_COLOR } from '@/lib/brand'
 import {
-  extractChoices,
-  makeMessageId,
-  INITIAL_GREETING,
-  clearChatSessionOnEnd,
-  readStoredJobCategoryId,
-  writeStoredJobCategoryId,
-  shouldSendChatOnKeyDown,
-  jobCategoryStorageKey,
-  stripChoiceLines,
-  computeProgressTotals,
-  shouldAutoScrollToBottom,
+  CHAT_ACCENT,
   CHAT_BRAND,
   CHAT_STOP_TEXT,
   CHAT_WARN_TEXT,
-  CHAT_ACCENT,
+  INITIAL_GREETING,
+  clearChatSessionOnEnd,
+  computeProgressTotals,
+  extractChoices,
   findLastAssistantQuestionMessage,
   isValidationFeedbackMessage,
+  isValidationTerminationMessage,
+  jobCategoryStorageKey,
+  makeMessageId,
+  readStoredJobCategoryId,
+  shouldAutoScrollToBottom,
+  shouldSendChatOnKeyDown,
+  stripChoiceLines,
+  writeStoredJobCategoryId,
 } from '@/components/mui-chat/utils'
 
 describe('extractChoices', () => {
@@ -326,5 +327,46 @@ describe('isValidationFeedbackMessage', () => {
       isValidationFeedbackMessage('質問と関係のない内容が3回続いたため、チャットを終了させていただきます。'),
     ).toBe(true)
     expect(isValidationFeedbackMessage('一番近いものを選んでください')).toBe(false)
+  })
+})
+
+describe('案内・打ち切りの判定', () => {
+  // Backend/internal/services/chat/chat_answer_validator.go の
+  // validationMarkers と同じ文字列を見ている。片方だけ変えると、
+  // 画面側が案内文を「直近の質問」として拾い、選択肢の復元が壊れる。
+  const retry =
+    'いまの質問に対する答えとして受け取れませんでした。質問に沿った内容でもう一度お願いします。選択肢が出ているときは、そこから選んでも大丈夫です。'
+  const terminated =
+    'うまく受け取れないまま続いたため、このチャットを終了しました。新しく始めれば最初からやり直せます。'
+
+  it('新しい案内文を判定できる', () => {
+    expect(isValidationFeedbackMessage(retry)).toBe(true)
+    expect(isValidationTerminationMessage(retry)).toBe(false)
+  })
+
+  it('新しい打ち切り文を判定できる', () => {
+    expect(isValidationFeedbackMessage(terminated)).toBe(true)
+    expect(isValidationTerminationMessage(terminated)).toBe(true)
+  })
+
+  it('旧文言も判定できる（保存済みデータが残っているため）', () => {
+    const legacyRetry = '書かれた内容にはお答えできません。質問に回答してください。（1/3回目の警告）'
+    const legacyStop = '質問と関係のない内容が3回続いたため、チャットを終了させていただきます。'
+    expect(isValidationFeedbackMessage(legacyRetry)).toBe(true)
+    expect(isValidationTerminationMessage(legacyStop)).toBe(true)
+  })
+
+  it('普通の質問は案内文と見なさない', () => {
+    expect(isValidationFeedbackMessage('どんな仕事に興味がありますか？')).toBe(false)
+    expect(isValidationTerminationMessage('どんな仕事に興味がありますか？')).toBe(false)
+  })
+
+  it('案内文は直近の質問として拾わない', () => {
+    const messages = [
+      { role: 'assistant', content: 'A) はい\nB) いいえ' },
+      { role: 'user', content: 'あ' },
+      { role: 'assistant', content: retry },
+    ]
+    expect(findLastAssistantQuestionMessage(messages)?.content).toContain('A) はい')
   })
 })
