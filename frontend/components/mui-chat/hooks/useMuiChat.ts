@@ -44,6 +44,13 @@ export function useMuiChat() {
   const [phaseProgresses, setPhaseProgresses] = useState<PhaseProgress[] | null>(null)
   const [historyLoadError, setHistoryLoadError] = useState<string | null>(null)
   const [historyRetrying, setHistoryRetrying] = useState(false)
+  /**
+   * 履歴の初回読み込み中。
+   *
+   * 履歴が0件でも挨拶メッセージを入れるので、messages が空なのはこの取得中だけ。
+   * フラグが無かったため、その間は画面が空白のまま待たされていた。
+   */
+  const [historyLoading, setHistoryLoading] = useState(true)
   const [jobCategoryId, setJobCategoryId] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesAreaRef = useRef<HTMLDivElement>(null)
@@ -144,8 +151,14 @@ export function useMuiChat() {
 
   const loadChatHistory = useCallback(
     async (targetSessionId: string) => {
-      const history = await getChatHistory(targetSessionId)
-      applyHistoryOrGreeting(history)
+      setHistoryLoading(true)
+      try {
+        const history = await getChatHistory(targetSessionId)
+        applyHistoryOrGreeting(history)
+      } finally {
+        // 失敗時も下ろす。下ろさないと、エラー表示の裏で Skeleton が残り続ける。
+        setHistoryLoading(false)
+      }
     },
     [applyHistoryOrGreeting],
   )
@@ -546,6 +559,7 @@ export function useMuiChat() {
     selectedChoiceValue,
     historyLoadError,
     historyRetrying,
+    historyLoading,
     messagesEndRef,
     messagesAreaRef,
     inputRef,

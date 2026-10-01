@@ -8,6 +8,7 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Skeleton,
   Paper,
   Stack,
   Typography,
@@ -27,6 +28,8 @@ import type { Message } from '../types'
 type ChatMessageListProps = {
   messages: Message[]
   isLoading: boolean
+  /** 履歴の初回読み込み中。true のあいだは吹き出しの骨格を出す */
+  historyLoading?: boolean
   historyLoadError: string | null
   historyRetrying: boolean
   messagesEndRef: React.RefObject<HTMLDivElement | null>
@@ -39,6 +42,7 @@ type ChatMessageListProps = {
 export function ChatMessageList({
   messages,
   isLoading,
+  historyLoading = false,
   historyLoadError,
   historyRetrying,
   messagesEndRef,
@@ -77,6 +81,32 @@ export function ChatMessageList({
           >
             {historyRetrying ? '再読み込み中...' : '再試行'}
           </Button>
+        </Box>
+      )}
+
+      {/*
+        履歴の読み込み中。履歴が0件でも挨拶が入るので、messages が空なのはこの間だけ。
+        以前はここが空白で、通信が遅いと壊れているようにしか見えなかった（§23）。
+        吹き出しの形に合わせた骨格にして、これから会話が出ることを示す。
+      */}
+      {historyLoading && messages.length === 0 && !historyLoadError && (
+        <Box sx={{ px: { xs: 2, md: 3 }, pt: 2 }} aria-hidden>
+          {[0, 1, 2].map((i) => (
+            <Box
+              key={i}
+              sx={{
+                display: 'flex',
+                mb: { xs: 2, md: 2.5 },
+                justifyContent: i % 2 === 1 ? 'flex-end' : 'flex-start',
+              }}
+            >
+              <Skeleton
+                variant="rounded"
+                height={i % 2 === 1 ? 40 : 64}
+                sx={{ width: i % 2 === 1 ? '45%' : '70%', borderRadius: 2 }}
+              />
+            </Box>
+          ))}
         </Box>
       )}
 
