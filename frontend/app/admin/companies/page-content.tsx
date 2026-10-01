@@ -867,7 +867,7 @@ export default function PageContent() {
           p: 2,
           border: '1px solid',
           borderColor: 'divider',
-          borderRadius: '10px',
+          borderRadius: 1,
           bgcolor: 'grey.50',
         }}
       >
@@ -900,7 +900,7 @@ export default function PageContent() {
           p: 2.5,
           border: '1px solid',
           borderColor: 'divider',
-          borderRadius: '10px',
+          borderRadius: 1,
           bgcolor: 'background.paper',
         }}
       >
@@ -1241,7 +1241,7 @@ export default function PageContent() {
                         justifyContent="space-between"
                       >
                         <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ minWidth: 0, flex: 1 }}>
-                          <Box sx={{ pt: 0.5, width: 16, flexShrink: 0, textAlign: 'center' }}>
+                          <Box sx={{ pt: '3px', width: 20, mr: 0.5, flexShrink: 0, textAlign: 'center' }}>
                             <FreshnessMark freshness={fresh.freshness} detail={fresh.detail} compact />
                           </Box>
                           {isPlatform && (
@@ -1517,7 +1517,7 @@ export default function PageContent() {
           mt: 2,
           border: '1px solid',
           borderColor: 'divider',
-          borderRadius: '10px !important',
+          borderRadius: 1,
           '&:before': { display: 'none' },
           overflow: 'hidden',
         }}

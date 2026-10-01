@@ -32,6 +32,7 @@ export function createAdminMuiTheme() {
     palette: {
       mode: 'light',
       primary: { main: ADMIN_COLORS.indigo },
+      secondary: { main: ADMIN_COLORS.teal },
       error: { main: ADMIN_COLORS.seal },
       background: { default: ADMIN_COLORS.rail, paper: ADMIN_COLORS.paper },
       text: { primary: ADMIN_COLORS.ink, secondary: ADMIN_COLORS.muted },

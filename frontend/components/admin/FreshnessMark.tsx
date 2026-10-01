@@ -29,7 +29,7 @@ export function FreshnessMark({ freshness, detail, compact = false }: FreshnessM
     return (
       <Box
         component="span"
-        sx={{ color, fontSize: 14, lineHeight: 1 }}
+        sx={{ color, fontSize: 17, lineHeight: 1, fontWeight: 700 }}
         // 字形だけでは読み上げられないため、意味はここで渡す。
         role="img"
         aria-label={fullLabel}

@@ -22,7 +22,7 @@ const cardSx = {
   height: '100%',
   border: '1px solid',
   borderColor: 'divider',
-  borderRadius: '10px',
+  borderRadius: 1,
 } as const
 
 type HubCard = {

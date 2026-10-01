@@ -271,7 +271,7 @@ export default function PageContent() {
       </Stack>
 
       {/* Table */}
-      <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
+      <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
         <TableContainer>
           <Table size="small">
             <TableHead>
