@@ -129,7 +129,7 @@ export default function PageContent() {
       )}
 
       {playingURL && (
-        <Card elevation={0} sx={{ mb: 3, border: '1px solid', borderColor: 'primary.main', borderRadius: '10px' }}>
+        <Card elevation={0} sx={{ mb: 3, border: '1px solid', borderColor: 'primary.main', borderRadius: 1 }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>
               動画プレイヤー
@@ -152,7 +152,7 @@ export default function PageContent() {
         </Card>
       )}
 
-      <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
+      <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>
             録画動画

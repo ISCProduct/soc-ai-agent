@@ -1,4 +1,5 @@
 import { createTheme } from '@mui/material/styles'
+import { FONT_STACK_PROPORTIONAL } from './design-tokens'
 
 export const STUDENT_THEME_STORAGE_KEY = 'student-theme-mode'
 
@@ -11,9 +12,8 @@ export const STUDENT_THEME_LABELS: Record<StudentThemeMode, string> = {
 
 // BIZ UDPGothic は学校配布物・自治体文書で使われるユニバーサルデザイン書体。
 // 利用者（専門学校生）が日頃目にしている字面で、判別性も高い。
-// Noto Sans JP は読み込み失敗時のフォールバックとして残す。
-const FONT_FAMILY =
-  "'BIZ UDPGothic', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+// 定義は design-tokens に一本化してある（企業ポータルも同じ書体を使うため）。
+const FONT_FAMILY = FONT_STACK_PROPORTIONAL
 
 /** パターン3 既定: Wong に近い色覚セーフ青 */
 export const COMFORTABLE_PRIMARY = '#0072B2'
