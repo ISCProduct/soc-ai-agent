@@ -13,7 +13,7 @@ import {
 import { Send } from '@mui/icons-material'
 import styles from '../MuiChat.module.css'
 import type { ChoiceOption } from '../types'
-import { CHAT_BRAND, CHAT_BRAND_HOVER, shouldSendChatOnKeyDown } from '../utils'
+import { CHAT_ACCENT, CHAT_ACCENT_HOVER, shouldSendChatOnKeyDown } from '../utils'
 
 type ChatInputBarProps = {
   analysisComplete: boolean
@@ -70,8 +70,8 @@ export function ChatInputBar({
               px: 4,
               fontSize: '1.1rem',
               fontWeight: 'bold',
-              bgcolor: CHAT_BRAND,
-              '&:hover': { bgcolor: CHAT_BRAND_HOVER },
+              bgcolor: CHAT_ACCENT,
+              '&:hover': { bgcolor: CHAT_ACCENT_HOVER },
             }}
           >
             結果を見る
@@ -116,9 +116,9 @@ export function ChatInputBar({
                         borderRadius: 2,
                         ...(selected
                           ? {
-                              bgcolor: CHAT_BRAND,
+                              bgcolor: CHAT_ACCENT,
                               color: '#fff',
-                              '&:hover': { bgcolor: CHAT_BRAND_HOVER },
+                              '&:hover': { bgcolor: CHAT_ACCENT_HOVER },
                             }
                           : {}),
                       }}
@@ -165,11 +165,11 @@ export function ChatInputBar({
               disabled={!canSend || isLoading || !!historyLoadError}
               aria-label="メッセージを送信"
               sx={{
-                bgcolor: CHAT_BRAND,
+                bgcolor: CHAT_ACCENT,
                 color: '#fff',
                 mb: 2.5,
                 '&:hover': {
-                  bgcolor: CHAT_BRAND_HOVER,
+                  bgcolor: CHAT_ACCENT_HOVER,
                 },
                 '&.Mui-disabled': {
                   bgcolor: '#e0e0e0',

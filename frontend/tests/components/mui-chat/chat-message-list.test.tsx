@@ -81,3 +81,40 @@ describe('ChatMessageList の読み込み表示', () => {
     expect(log?.getAttribute('aria-live')).toBe('polite')
   })
 })
+
+describe('読み上げでの区別（WCAG）', () => {
+  const at = new Date('2026-10-01T09:05:00')
+
+  it('一覧に名前が付いている', () => {
+    // 名前が無いと読み上げでは「ログ」としか案内されない。
+    const { container } = render(<ChatMessageList {...baseProps()} messages={[greeting]} />)
+    expect(container.querySelector('[role="log"]')?.getAttribute('aria-label')).toBe(
+      '自己分析チャットのやり取り',
+    )
+  })
+
+  it('各メッセージが発言者と時刻を持つ区切りになっている', () => {
+    // 位置と色でしか区別していなかったため、支援技術では誰の発言か分からなかった。
+    render(
+      <ChatMessageList
+        {...baseProps()}
+        messages={[
+          { id: 'a', role: 'assistant', content: '質問です', timestamp: at },
+          { id: 'b', role: 'user', content: '回答です', timestamp: at },
+        ]}
+      />,
+    )
+    expect(screen.getByRole('article', { name: 'エージェント、9時05分' })).toBeInTheDocument()
+    expect(screen.getByRole('article', { name: 'あなた、9時05分' })).toBeInTheDocument()
+  })
+
+  it('時刻が壊れていても発言者は伝える', () => {
+    render(
+      <ChatMessageList
+        {...baseProps()}
+        messages={[{ id: 'a', role: 'user', content: 'x', timestamp: new Date('invalid') }]}
+      />,
+    )
+    expect(screen.getByRole('article', { name: 'あなた' })).toBeInTheDocument()
+  })
+})

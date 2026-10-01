@@ -46,8 +46,28 @@ export const JOB_QUICK_OPTIONS = [
 ] as const
 
 /** チャット画面のアクセント（サイドバーと同じブランドオレンジ） */
+/**
+ * ブランドの橙（ロゴと同じ #ec5b13）。
+ *
+ * 文字を載せない装飾にだけ使う。白地に対して 3.46:1 しかなく、
+ * 文字色や「白文字を載せる塗り」にすると WCAG AA(4.5:1)を満たさない。
+ * 非文字UI（進捗バーの塗りなど）は 3:1 でよいのでここだけに留める。
+ */
 export const CHAT_BRAND = '#ec5b13'
-export const CHAT_BRAND_HOVER = '#c44d0e'
+
+/**
+ * 文字・塗り・罫線に使う色。学生テーマの primary（Wong の色覚セーフ青）。
+ *
+ * 以前は上の橙を吹き出しの塗りと「終了」ボタンの文字色に使っており、
+ * どちらもコントラスト不足だった。白文字を載せて 5.19:1。
+ */
+export const CHAT_ACCENT = '#0072B2'
+export const CHAT_ACCENT_HOVER = '#005B8E'
+
+export const CHAT_WARN_EDGE = '#E69F00'
+export const CHAT_WARN_TEXT = '#946200'
+export const CHAT_STOP_EDGE = '#D55E00'
+export const CHAT_STOP_TEXT = '#99370A'
 
 /**
  * 選択肢行（A) / 1. など）を本文から除き、バブルとボタンの二重表示を防ぐ。
@@ -197,3 +217,21 @@ export function findLastAssistantQuestionMessage<T extends { role: string; conte
   return undefined
 }
 
+
+
+/**
+ * メッセージ1件の読み上げ名。
+ *
+ * 支援技術には発言者と時刻の手がかりが一切無かった。
+ * 左右の位置と色でしか区別しておらず、アイコンも代替テキストを持っていなかったため、
+ * アイコンがあった頃から誰の発言かは伝わっていない。
+ *
+ * 画面には出さず名前としてだけ渡す。15問の短いやり取りに時刻を並べると
+ * 本文より目立ってしまい、読む順番を乱す。
+ */
+export function messageAccessibleLabel(role: 'user' | 'assistant', at: Date): string {
+  const who = role === 'user' ? 'あなた' : 'エージェント'
+  if (Number.isNaN(at.getTime())) return who
+  const time = `${at.getHours()}時${String(at.getMinutes()).padStart(2, '0')}分`
+  return `${who}、${time}`
+}

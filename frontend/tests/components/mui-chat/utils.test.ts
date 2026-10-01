@@ -1,3 +1,4 @@
+import { BRAND_LOGO_COLOR } from '@/lib/brand'
 import {
   extractChoices,
   makeMessageId,
@@ -11,6 +12,9 @@ import {
   computeProgressTotals,
   shouldAutoScrollToBottom,
   CHAT_BRAND,
+  CHAT_STOP_TEXT,
+  CHAT_WARN_TEXT,
+  CHAT_ACCENT,
   findLastAssistantQuestionMessage,
   isValidationFeedbackMessage,
 } from '@/components/mui-chat/utils'
@@ -244,9 +248,38 @@ describe('shouldAutoScrollToBottom', () => {
   })
 })
 
-describe('CHAT_BRAND', () => {
-  it('サイドバー等と同じブランドオレンジである', () => {
-    expect(CHAT_BRAND).toBe('#ec5b13')
+describe('チャットの色', () => {
+  /** 相対輝度（WCAG 2.x）。 */
+  function luminance(hex: string): number {
+    const c = hex.replace('#', '')
+    const channels = [0, 2, 4].map((i) => {
+      const v = parseInt(c.slice(i, i + 2), 16) / 255
+      return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+    })
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+  }
+  function contrast(a: string, b: string): number {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+    return (hi + 0.05) / (lo + 0.05)
+  }
+
+  it('ブランド橙はロゴと同じ値を保つ', () => {
+    // 文字を載せない装飾にだけ使う前提で、ブランド同一性は維持する。
+    expect(CHAT_BRAND).toBe(BRAND_LOGO_COLOR)
+  })
+
+  it('ブランド橙は文字には使えない（だから装飾限定にしている）', () => {
+    // この前提が崩れたら、用途を分けている理由も変わる。
+    expect(contrast(CHAT_BRAND, '#FFFFFF')).toBeLessThan(4.5)
+  })
+
+  it('文字と塗りに使う色は白文字で AA を満たす', () => {
+    expect(contrast(CHAT_ACCENT, '#FFFFFF')).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('注意・打ち切りの文字色は白地で AA を満たす', () => {
+    expect(contrast(CHAT_WARN_TEXT, '#FFFFFF')).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(CHAT_STOP_TEXT, '#FFFFFF')).toBeGreaterThanOrEqual(4.5)
   })
 })
 
