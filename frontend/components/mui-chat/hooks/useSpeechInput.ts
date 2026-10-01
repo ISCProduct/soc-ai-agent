@@ -23,16 +23,49 @@ type SpeechInput = {
   listening: boolean
   /** 認識できなかった理由。画面に出す文言をそのまま入れる。 */
   error: string | null
+  /**
+   * 端末内だけで処理しているか。
+   *
+   * false のときは音声が Google のサーバーへ送られる。
+   * 「端末内で処理します」と画面に書いてよいのは true のときだけ。
+   */
+  local: boolean
   start: () => void
   stop: () => void
 }
 
+type AvailabilityStatus = 'available' | 'downloadable' | 'downloading' | 'unavailable'
+
+/** Chrome 139+ の端末内認識。実装が無いブラウザでは undefined。 */
+type RecognitionCtor = (new () => SpeechRecognitionLike) & {
+  available?: (o: { langs: string[]; processLocally: boolean }) => Promise<AvailabilityStatus>
+  install?: (o: { langs: string[]; processLocally: boolean }) => Promise<boolean>
+}
+
+const LOCAL_OPTIONS = { langs: ['ja-JP'], processLocally: true }
+
+/**
+ * 端末内処理を試みるか。既定は有効。
+ *
+ * SpeechRecognition.available() は Chromium のビルドによってタブごと落ちる。
+ * Playwright 同梱の Chromium で再現した（実物の Chrome 143 では
+ * 'downloadable' を正常に返す）。レンダラが落ちると .catch() では拾えず、
+ * 押した学生のチャットがその場で終わる。
+ *
+ * 実利用のブラウザでは問題ない見込みだが、万一 staging で出たときに
+ * デプロイを待たずに止められるよう、環境変数で切れるようにしてある。
+ *   NEXT_PUBLIC_SPEECH_ON_DEVICE=0
+ */
+function onDeviceEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_SPEECH_ON_DEVICE !== '0'
+}
+
 /** 標準名と webkit 接頭辞の両方を見る。Safari は後者。 */
-function getRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
+function getRecognitionCtor(): RecognitionCtor | null {
   if (typeof window === 'undefined') return null
   const w = window as unknown as {
-    SpeechRecognition?: new () => SpeechRecognitionLike
-    webkitSpeechRecognition?: new () => SpeechRecognitionLike
+    SpeechRecognition?: RecognitionCtor
+    webkitSpeechRecognition?: RecognitionCtor
   }
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null
 }
@@ -40,6 +73,8 @@ function getRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
 /** 使う範囲だけを写した型。lib.dom の定義はブラウザ差があり当てにしない。 */
 type SpeechRecognitionLike = {
   lang: string
+  /** Chrome 139+ の端末内処理。古い実装には無いので任意。 */
+  options?: { langs: string[]; processLocally: boolean }
   continuous: boolean
   interimResults: boolean
   start: () => void
@@ -89,6 +124,9 @@ export function useSpeechInput(onText: (text: string) => void): SpeechInput {
   const [supported, setSupported] = useState(false)
   const [listening, setListening] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [local, setLocal] = useState(false)
+  /** 端末内処理の可否を調べたか。調べるのはマイクを押したときの1回だけ。 */
+  const checkedRef = useRef(false)
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // 認識中にコールバックが差し替わっても、古い参照を掴まないようにする。
@@ -96,7 +134,16 @@ export function useSpeechInput(onText: (text: string) => void): SpeechInput {
   onTextRef.current = onText
 
   useEffect(() => {
-    setSupported(getRecognitionCtor() !== null)
+    const Ctor = getRecognitionCtor()
+    setSupported(Ctor !== null)
+
+    // ここでは端末内処理の可否を調べない。
+    //
+    // SpeechRecognition.available() は Playwright 同梱の Chromium で
+    // タブごとクラッシュした（実物の Chrome 143 では正常に 'downloadable' を返す）。
+    // レンダラが落ちると .catch() では拾えず、チャット画面全体が開けなくなる。
+    // 読み込み時に呼ぶと全利用者が巻き添えになるので、
+    // マイクを押したとき（本人の操作）に初めて調べる。
     return () => {
       // 画面を離れるときにマイクを握ったままにしない。
       if (timeoutRef.current) clearTimeout(timeoutRef.current)
@@ -121,12 +168,39 @@ export function useSpeechInput(onText: (text: string) => void): SpeechInput {
   const start = useCallback(() => {
     const Ctor = getRecognitionCtor()
     if (!Ctor) return
+
+    // 端末内で処理できるかを、押されたときに1度だけ調べる。
+    //
+    // 待たない。調べ終わる前に始めても従来どおり（クラウド）で動くし、
+    // 言語パックの取得は数十MBになりうるので、そこで黙って止めない。
+    // 2回目以降の押下から端末内処理になる。
+    if (onDeviceEnabled() && !checkedRef.current && Ctor.available) {
+      checkedRef.current = true
+      void Ctor.available(LOCAL_OPTIONS)
+        .then(async (status) => {
+          if (status === 'available') {
+            setLocal(true)
+            return
+          }
+          // 言語パックが未取得。押したのは本人の操作なので取りに行く。
+          if (status === 'downloadable' && Ctor.install) {
+            const ok = await Ctor.install(LOCAL_OPTIONS)
+            if (ok) setLocal(true)
+          }
+        })
+        .catch(() => {
+          // 判定できない。従来どおりで動かす。
+        })
+    }
     // 連打で複数の認識が走らないようにする。
     recognitionRef.current?.abort()
     setError(null)
 
     const recognition = new Ctor()
     recognition.lang = 'ja-JP'
+    // 端末内で処理できると分かっているときだけ指定する。
+    // 使えないのに true を渡すと language-not-supported で落ちる。
+    if (local) recognition.options = LOCAL_OPTIONS
     // 一区切りで止める。話し続ける用途ではないので、長く開けてもマイクを握るだけ。
     recognition.continuous = false
     // 確定前の文字は入力欄へ入れない。書き換わる様子が見えると直しにくい。
@@ -166,7 +240,7 @@ export function useSpeechInput(onText: (text: string) => void): SpeechInput {
       // すでに開始済みなど。握ったままにしないよう畳む。
       setListening(false)
     }
-  }, [clearTimer])
+  }, [clearTimer, local])
 
-  return { supported, listening, error, start, stop }
+  return { supported, listening, error, local, start, stop }
 }

@@ -20,6 +20,18 @@ type Handlers = {
 let latest: FakeRecognition | null = null
 
 class FakeRecognition {
+  static availability: string = 'unavailable'
+  static installResult = false
+  static installCalls = 0
+  static available(_o: unknown) {
+    return Promise.resolve(FakeRecognition.availability)
+  }
+  static install(_o: unknown) {
+    FakeRecognition.installCalls++
+    return Promise.resolve(FakeRecognition.installResult)
+  }
+
+  options: { langs: string[]; processLocally: boolean } | undefined
   lang = ''
   continuous = false
   interimResults = false
@@ -66,6 +78,9 @@ function removeRecognition() {
 describe('useSpeechInput', () => {
   beforeEach(() => {
     latest = null
+    FakeRecognition.availability = 'unavailable'
+    FakeRecognition.installResult = false
+    FakeRecognition.installCalls = 0
     removeRecognition()
   })
   afterEach(removeRecognition)
@@ -192,5 +207,101 @@ describe('useSpeechInput', () => {
     const started = latest
     unmount()
     expect(started?.aborted).toBeGreaterThan(0)
+  })
+})
+
+describe('端末内での処理', () => {
+  beforeEach(() => {
+    latest = null
+    FakeRecognition.availability = 'unavailable'
+    FakeRecognition.installResult = false
+    FakeRecognition.installCalls = 0
+    removeRecognition()
+  })
+  afterEach(removeRecognition)
+
+  it('画面を開いただけでは可否を調べない', async () => {
+    // SpeechRecognition.available() は一部の Chromium でタブごと落ちる。
+    // 読み込み時に呼ぶと全利用者がチャットを開けなくなる。
+    FakeRecognition.availability = 'available'
+    const spy = jest.spyOn(FakeRecognition, 'available')
+    installRecognition()
+    renderHook(() => useSpeechInput(jest.fn()))
+    await act(async () => {})
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
+  it('押したときに調べ、使えるなら次から端末内で処理する', async () => {
+    FakeRecognition.availability = 'available'
+    installRecognition()
+    const { result } = renderHook(() => useSpeechInput(jest.fn()))
+
+    await act(async () => {
+      result.current.start()
+    })
+    expect(result.current.local).toBe(true)
+
+    // 2回目から options が付く（1回目は待たずに始めている）
+    await act(async () => {
+      result.current.start()
+    })
+    expect(latest?.options).toEqual({ langs: ['ja-JP'], processLocally: true })
+  })
+
+  it('調べるのは1度だけ', async () => {
+    FakeRecognition.availability = 'unavailable'
+    const spy = jest.spyOn(FakeRecognition, 'available')
+    installRecognition()
+    const { result } = renderHook(() => useSpeechInput(jest.fn()))
+    await act(async () => {
+      result.current.start()
+    })
+    await act(async () => {
+      result.current.start()
+    })
+    expect(spy).toHaveBeenCalledTimes(1)
+    spy.mockRestore()
+  })
+
+  it('使えないときは processLocally を渡さない', async () => {
+    // 使えないのに true を渡すと language-not-supported で落ちる。
+    // Android / ChromeOS は端末内処理に未対応なので、ここを通る。
+    FakeRecognition.availability = 'unavailable'
+    installRecognition()
+    const { result } = renderHook(() => useSpeechInput(jest.fn()))
+    await act(async () => {
+      result.current.start()
+    })
+    expect(result.current.local).toBe(false)
+    expect(latest?.options).toBeUndefined()
+  })
+
+  it('言語パックは押したときに取りに行く', async () => {
+    // 数十MBの通信が発生しうるので、画面を開いただけでは落とさない。
+    FakeRecognition.availability = 'downloadable'
+    FakeRecognition.installResult = true
+    installRecognition()
+    const { result } = renderHook(() => useSpeechInput(jest.fn()))
+
+    expect(FakeRecognition.installCalls).toBe(0)
+    await act(async () => {
+      result.current.start()
+    })
+    expect(FakeRecognition.installCalls).toBe(1)
+    expect(result.current.local).toBe(true)
+  })
+
+  it('端末内処理に対応していない実装でも動く', async () => {
+    class Legacy extends FakeRecognition {}
+    // @ts-expect-error 静的メソッドを消して古い実装を模す
+    delete Legacy.available
+    ;(window as unknown as Record<string, unknown>).SpeechRecognition = Legacy
+    const { result } = renderHook(() => useSpeechInput(jest.fn()))
+    await act(async () => {
+      result.current.start()
+    })
+    expect(result.current.supported).toBe(true)
+    expect(result.current.local).toBe(false)
   })
 })

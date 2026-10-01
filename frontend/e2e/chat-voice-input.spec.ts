@@ -3,6 +3,10 @@ import { test, expect, type Page } from '@playwright/test'
 /**
  * 音声入力を、マイクを許可した実ブラウザで確かめる。
  *
+ * 端末内処理は Playwright 同梱の Chromium で SpeechRecognition.available() が
+ * タブごと落ちるため、ここでは切って回す（実物の Chrome では正常に動く）。
+ * 切っていても聞き取りの開始・打ち切り・自動送信しないことは同じ経路で確かめられる。
+ *
  * Chrome の fake device にWAVを流し込んで「話した」状態を作る。
  * 実機で声を出す代わりになるが、Web Speech API は Chrome がクラウドの
  * 音声認識へ投げるため、自動実行の環境では応答が返らないことがある。

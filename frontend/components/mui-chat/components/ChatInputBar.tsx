@@ -156,7 +156,17 @@ export function ChatInputBar({
               アイコンだけのボタンなので aria-label と Tooltip を付ける（§17）。
             */}
             {speech.supported && (
-              <Tooltip title={speech.listening ? '音声入力を止める' : '音声で入力する'}>
+              <Tooltip
+                title={
+                  speech.listening
+                    ? '音声入力を止める'
+                    : speech.local
+                      ? // 端末内で処理しているときだけそう書く。
+                        // クラウドへ送っているのに「端末内」と書くと嘘になる。
+                        '音声で入力する（この端末内で処理します）'
+                      : '音声で入力する'
+                }
+              >
                 <span>
                   <IconButton
                     onClick={() => (speech.listening ? speech.stop() : speech.start())}
