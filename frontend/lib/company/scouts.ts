@@ -88,8 +88,12 @@ export const companyScoutService = {
     return request(`/scout-templates/${id}`, { method: 'DELETE' })
   },
 
-  listScouts(): Promise<{ items: CompanyScout[]; total: number }> {
-    return request('/scouts')
+  listScouts(params?: { limit?: number; offset?: number }): Promise<{ items: CompanyScout[]; total: number }> {
+    const q = new URLSearchParams()
+    if (params?.limit != null) q.set('limit', String(params.limit))
+    if (params?.offset != null) q.set('offset', String(params.offset))
+    const search = q.toString()
+    return request(`/scouts${search ? `?${search}` : ''}`)
   },
 
   send(input: { userId: number; templateId: number; message?: string }): Promise<CompanyScout> {

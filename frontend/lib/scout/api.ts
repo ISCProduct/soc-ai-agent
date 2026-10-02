@@ -43,8 +43,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const studentScoutService = {
-  list(): Promise<StudentScoutList> {
-    return request('/scouts')
+  list(params?: { limit?: number; offset?: number }): Promise<StudentScoutList> {
+    const q = new URLSearchParams()
+    if (params?.limit != null) q.set('limit', String(params.limit))
+    if (params?.offset != null) q.set('offset', String(params.offset))
+    const search = q.toString()
+    return request(`/scouts${search ? `?${search}` : ''}`)
   },
 
   view(id: number): Promise<StudentScout & { company_id: number }> {

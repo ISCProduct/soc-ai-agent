@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Alert,
@@ -27,6 +27,8 @@ import {
   type StudentScout,
 } from '@/lib/scout/api'
 
+const PAGE_SIZE = 30
+
 function formatWhen(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
@@ -38,20 +40,27 @@ export default function PageContent() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [items, setItems] = useState<StudentScout[]>([])
+  const [total, setTotal] = useState(0)
+  const [offset, setOffset] = useState(0)
   const [blockedIds, setBlockedIds] = useState<number[]>([])
   const [opened, setOpened] = useState<StudentScout | null>(null)
   const [blockTarget, setBlockTarget] = useState<StudentScout | null>(null)
+  const loadSeq = useRef(0)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (nextOffset: number) => {
+    const seq = ++loadSeq.current
     setError('')
     try {
-      const data = await studentScoutService.list()
+      const data = await studentScoutService.list({ limit: PAGE_SIZE, offset: nextOffset })
+      if (seq !== loadSeq.current) return
       setItems(data.items)
+      setTotal(data.total)
       setBlockedIds(data.blocked_company_ids || [])
     } catch (e) {
+      if (seq !== loadSeq.current) return
       setError(e instanceof Error ? e.message : 'スカウトを取得できませんでした')
     } finally {
-      setLoading(false)
+      if (seq === loadSeq.current) setLoading(false)
     }
   }, [])
 
@@ -61,7 +70,7 @@ export default function PageContent() {
       router.replace('/login')
       return
     }
-    void load()
+    void load(0)
   }, [router, load])
 
   const openScout = async (s: StudentScout) => {
@@ -123,7 +132,7 @@ export default function PageContent() {
           severity="error"
           sx={{ mb: 2 }}
           action={
-            <Button color="inherit" size="small" onClick={() => void load()}>
+            <Button color="inherit" size="small" onClick={() => void load(offset)}>
               再読み込み
             </Button>
           }
@@ -138,7 +147,7 @@ export default function PageContent() {
         </Alert>
       )}
 
-      {items.length === 0 ? (
+      {items.length === 0 && total === 0 ? (
         <Paper variant="outlined" sx={{ p: 3 }}>
           <Typography fontWeight="bold" gutterBottom>
             届いているスカウトはまだありません
@@ -185,6 +194,36 @@ export default function PageContent() {
             </Paper>
           ))}
         </Stack>
+      )}
+
+      {total > PAGE_SIZE && (
+        <Box sx={{ mt: 2, display: 'flex', gap: 1, alignItems: 'center' }}>
+          <Button
+            size="small"
+            disabled={offset === 0}
+            onClick={() => {
+              const next = Math.max(offset - PAGE_SIZE, 0)
+              setOffset(next)
+              void load(next)
+            }}
+          >
+            前へ
+          </Button>
+          <Typography variant="body2" color="text.secondary">
+            {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} / {total}件
+          </Typography>
+          <Button
+            size="small"
+            disabled={offset + PAGE_SIZE >= total}
+            onClick={() => {
+              const next = offset + PAGE_SIZE
+              setOffset(next)
+              void load(next)
+            }}
+          >
+            次へ
+          </Button>
+        </Box>
       )}
 
       <Dialog open={Boolean(opened)} onClose={() => setOpened(null)} fullWidth maxWidth="sm">
