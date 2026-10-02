@@ -18,6 +18,7 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/services/email"
 
+	"github.com/go-sql-driver/mysql"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
@@ -250,6 +251,11 @@ func (s *CompanyUserService) Register(req RegisterRequest) (*AuthResponse, error
 			Role:      models.CompanyUserRoleOwner,
 		}
 		if err := tx.Create(user).Error; err != nil {
+			// 事前のメール検索と INSERT の間に同じアドレスが登録されると、
+			// 一意制約（1062）になる。TranslateError が無いのでここで重複に正規化する。
+			if isDuplicateEntryErr(err) {
+				return ErrEmailExists
+			}
 			return err
 		}
 		created = user
@@ -259,6 +265,12 @@ func (s *CompanyUserService) Register(req RegisterRequest) (*AuthResponse, error
 		return nil, err
 	}
 	return s.buildAuthResponse(created, true)
+}
+
+// isDuplicateEntryErr は MySQL の一意制約違反 (Error 1062) かどうか。
+func isDuplicateEntryErr(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
 }
 
 func (s *CompanyUserService) AcceptInvite(req AcceptInviteRequest) (*AuthResponse, error) {

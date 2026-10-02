@@ -8,6 +8,7 @@ import (
 	"Backend/internal/repositories"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -69,6 +70,34 @@ func TestRegister_DuplicateEmail(t *testing.T) {
 		WithArgs("hr@example.com", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "company_id", "email", "password", "name", "role"}).
 			AddRow(1, 10, "hr@example.com", "x", "既存", models.CompanyUserRoleOwner))
+
+	_, err := svc.Register(RegisterRequest{
+		CompanyName: "デモ株式会社",
+		Name:        "担当",
+		Email:       "hr@example.com",
+		Password:    "password1",
+	})
+	if err != ErrEmailExists {
+		t.Fatalf("expected ErrEmailExists, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestRegister_ConcurrentDuplicateEmail(t *testing.T) {
+	db, mock := newCompanyAuthTestDB(t)
+	svc := newTestService(t, db)
+
+	mock.ExpectQuery("SELECT \\* FROM `company_users`").
+		WithArgs("hr@example.com", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO `companies`").
+		WillReturnResult(sqlmock.NewResult(10, 1))
+	mock.ExpectExec("INSERT INTO `company_users`").
+		WillReturnError(&mysqldriver.MySQLError{Number: 1062, Message: "Duplicate entry 'hr@example.com'"})
+	mock.ExpectRollback()
 
 	_, err := svc.Register(RegisterRequest{
 		CompanyName: "デモ株式会社",
