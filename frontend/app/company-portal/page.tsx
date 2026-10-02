@@ -174,6 +174,12 @@ export default function CompanyPortalDashboardPage() {
       )}
 
       <Stack direction="row" spacing={1}>
+        <Button variant="outlined" onClick={() => router.push('/company-portal/scout-templates')}>
+          スカウトテンプレート
+        </Button>
+        <Button variant="outlined" onClick={() => router.push('/company-portal/scouts')}>
+          スカウト履歴
+        </Button>
         <Button variant="outlined" onClick={() => router.push('/company-portal/settings')}>
           設定
         </Button>

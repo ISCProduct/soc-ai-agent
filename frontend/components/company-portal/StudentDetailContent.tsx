@@ -18,6 +18,7 @@ import {
 import { PageContainer } from '@/components/admin/PageContainer'
 import { companyAuthService } from '@/lib/company/auth'
 import { companyStudentService, StudentDetail, StudentTag } from '@/lib/company/students'
+import { SendScoutDialog } from '@/components/company-portal/SendScoutDialog'
 
 /** 面接レポートのJSON文字列配列を安全にパースする（不正なJSONは無視する） */
 function parseJsonList(raw: string): string[] {
@@ -38,6 +39,7 @@ export function StudentDetailContent({ userId }: { userId: number }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [tagError, setTagError] = useState('')
+  const [scoutOpen, setScoutOpen] = useState(false)
 
   const load = useCallback(() => {
     companyStudentService
@@ -107,9 +109,18 @@ export function StudentDetailContent({ userId }: { userId: number }) {
 
   return (
     <PageContainer maxWidth={880}>
-      <Button sx={{ mb: 2 }} onClick={() => router.push('/company-portal/students')}>
-        ← 一覧へ戻る
-      </Button>
+      <Stack
+        direction={{ xs: 'column', sm: 'row' }}
+        justifyContent="space-between"
+        alignItems={{ xs: 'stretch', sm: 'center' }}
+        spacing={1}
+        sx={{ mb: 2 }}
+      >
+        <Button onClick={() => router.push('/company-portal/students')}>← 一覧へ戻る</Button>
+        <Button variant="contained" onClick={() => setScoutOpen(true)}>
+          スカウトする
+        </Button>
+      </Stack>
 
       <Typography variant="h4" fontWeight="bold" gutterBottom>
         学生プロフィール
@@ -215,6 +226,13 @@ export function StudentDetailContent({ userId }: { userId: number }) {
           )}
         </CardContent>
       </Card>
+
+      <SendScoutDialog
+        open={scoutOpen}
+        userId={userId}
+        studentName={`学生 #${userId}`}
+        onClose={() => setScoutOpen(false)}
+      />
     </PageContainer>
   )
 }

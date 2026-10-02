@@ -43,6 +43,47 @@ func newTestService(t *testing.T, db *gorm.DB) *CompanyUserService {
 	)
 }
 
+func TestRegister_Validation(t *testing.T) {
+	db, mock := newCompanyAuthTestDB(t)
+	svc := newTestService(t, db)
+
+	_, err := svc.Register(RegisterRequest{
+		CompanyName: "",
+		Name:        "担当",
+		Email:       "hr@example.com",
+		Password:    "password1",
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestRegister_DuplicateEmail(t *testing.T) {
+	db, mock := newCompanyAuthTestDB(t)
+	svc := newTestService(t, db)
+
+	mock.ExpectQuery("SELECT \\* FROM `company_users`").
+		WithArgs("hr@example.com", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "company_id", "email", "password", "name", "role"}).
+			AddRow(1, 10, "hr@example.com", "x", "既存", models.CompanyUserRoleOwner))
+
+	_, err := svc.Register(RegisterRequest{
+		CompanyName: "デモ株式会社",
+		Name:        "担当",
+		Email:       "hr@example.com",
+		Password:    "password1",
+	})
+	if err != ErrEmailExists {
+		t.Fatalf("expected ErrEmailExists, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestInvite_RejectsUnverifiedCompany(t *testing.T) {
 	db, mock := newCompanyAuthTestDB(t)
 	svc := newTestService(t, db)

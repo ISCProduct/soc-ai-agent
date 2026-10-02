@@ -59,11 +59,13 @@ func SetupCompanyAuthRoutes(
 	jobController *companycontrollers.CompanyPortalJobController,
 	profileController *companycontrollers.CompanyPortalProfileController,
 	schoolAppController *companycontrollers.CompanyPortalSchoolApplicationController,
+	scoutController *companycontrollers.CompanyPortalScoutController,
 	companySecret string,
 	users *repositories.CompanyUserRepository,
 ) {
 	auth := api.Group("/company-auth")
 	auth.POST("/login", authController.Login, echoLoginRateLimit())
+	auth.POST("/register", authController.Register, echoLoginRateLimit())
 	auth.POST("/accept-invite", authController.AcceptInvite, echoLoginRateLimit())
 	// パスワードリセット（#1196）。総当たりとメール爆撃を防ぐためレート制限をかける。
 	auth.POST("/forgot-password", authController.ForgotPassword, echoPasswordResetRateLimit())
@@ -122,5 +124,16 @@ func SetupCompanyAuthRoutes(
 		portal.GET("/school-applications", schoolAppController.List)
 		portal.POST("/school-applications", schoolAppController.Create)
 		portal.DELETE("/school-applications/:id", schoolAppController.Delete)
+	}
+
+	// スカウト送信・テンプレート管理 (#1095)。company_id はJWT由来。
+	if scoutController != nil {
+		portal.GET("/scout-templates", scoutController.ListTemplates)
+		portal.POST("/scout-templates", scoutController.CreateTemplate)
+		portal.PATCH("/scout-templates/:id", scoutController.UpdateTemplate)
+		portal.DELETE("/scout-templates/:id", scoutController.DeleteTemplate)
+		portal.GET("/scouts", scoutController.List)
+		portal.POST("/scouts", scoutController.Send)
+		portal.GET("/scouts/cooldown", scoutController.Cooldown)
 	}
 }
