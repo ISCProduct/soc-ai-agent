@@ -5,10 +5,17 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
 export async function POST(request: NextRequest) {
   const body = await request.text()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...clientIpHeaders(request),
+  }
+  // middleware が採番したリクエストIDを Backend まで引き継ぐ（#1188）
+  const requestId = request.headers.get('X-Request-ID')
+  if (requestId) headers['X-Request-ID'] = requestId
   try {
     const res = await fetch(`${BACKEND_URL}/api/company-auth/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...clientIpHeaders(request) },
+      headers,
       body,
     })
     const text = await res.text()
