@@ -1,13 +1,16 @@
 package routes
 
 import (
+	"context"
+	"errors"
+	"net/http"
+
 	companycontrollers "Backend/internal/controllers/company"
 	"Backend/internal/middleware"
 	"Backend/internal/repositories"
 
-	"context"
-
 	"github.com/labstack/echo/v4"
+	"gorm.io/gorm"
 )
 
 // EchoCompanyAuth は X-Company-User-Token JWT を検証し、企業ユーザーIDと company_id をコンテキストへ載せる。
@@ -50,6 +53,35 @@ func EchoCompanyAuth(companySecret string, users *repositories.CompanyUserReposi
 	}
 }
 
+// EchoRequireVerifiedCompany は審査前の企業が学生情報を見たりスカウトを送ったりできないようにする。
+//
+// 公開登録は審査前でもJWTを返す（プロフィール整備のため）。学生検索・分析・スカウトは
+// companies.is_verified が true になるまで拒否する。企業が見つからない場合も同じ403にする。
+func EchoRequireVerifiedCompany(companies *repositories.CompanyRepository) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if companies == nil {
+				return echo.NewHTTPError(http.StatusServiceUnavailable, "Service Unavailable: company verification not configured")
+			}
+			companyID, ok := middleware.CompanyIDFromContext(c.Request().Context())
+			if !ok || companyID == 0 {
+				return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+			}
+			company, err := companies.FindByID(companyID)
+			if err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return echo.NewHTTPError(http.StatusForbidden, "企業の審査が完了するまで学生情報の閲覧とスカウト送信はできません")
+				}
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve company")
+			}
+			if company == nil || !company.IsVerified {
+				return echo.NewHTTPError(http.StatusForbidden, "企業の審査が完了するまで学生情報の閲覧とスカウト送信はできません")
+			}
+			return next(c)
+		}
+	}
+}
+
 func SetupCompanyAuthRoutes(
 	api *echo.Group,
 	authController *companycontrollers.CompanyAuthController,
@@ -62,6 +94,7 @@ func SetupCompanyAuthRoutes(
 	scoutController *companycontrollers.CompanyPortalScoutController,
 	companySecret string,
 	users *repositories.CompanyUserRepository,
+	companies *repositories.CompanyRepository,
 ) {
 	auth := api.Group("/company-auth")
 	auth.POST("/login", authController.Login, echoLoginRateLimit())
@@ -79,13 +112,15 @@ func SetupCompanyAuthRoutes(
 	portal := api.Group("/company-portal", EchoCompanyAuth(companySecret, users))
 	portal.GET("/companies/:id", portalController.GetCompany)
 
-	// 学生検索・タグ管理 (#1094)。company_id はJWT由来のため、
-	// 他社データへ越境するクエリパラメータは受け付けない。
-	portal.GET("/students", studentController.List)
-	portal.POST("/students/semantic-search", studentController.SemanticSearch)
-	portal.GET("/students/:userID", studentController.Detail)
-	portal.POST("/students/:userID/tags", studentController.AddTag)
-	portal.DELETE("/students/:userID/tags/:tagID", studentController.RemoveTag)
+	// 学生検索・分析とスカウトは審査完了まで開けない。
+	// 求人や自社プロフィールは審査前でも編集できる。
+	verified := portal.Group("", EchoRequireVerifiedCompany(companies))
+	verified.GET("/students", studentController.List)
+	verified.POST("/students/semantic-search", studentController.SemanticSearch)
+	verified.GET("/students/:userID", studentController.Detail)
+	verified.POST("/students/:userID/tags", studentController.AddTag)
+	verified.DELETE("/students/:userID/tags/:tagID", studentController.RemoveTag)
+
 	portal.GET("/tags", studentController.ListTags)
 	portal.GET("/industries", studentController.Industries)
 
@@ -127,13 +162,14 @@ func SetupCompanyAuthRoutes(
 	}
 
 	// スカウト送信・テンプレート管理 (#1095)。company_id はJWT由来。
+	// 審査前の企業には学生への送信手段を開けない。
 	if scoutController != nil {
-		portal.GET("/scout-templates", scoutController.ListTemplates)
-		portal.POST("/scout-templates", scoutController.CreateTemplate)
-		portal.PATCH("/scout-templates/:id", scoutController.UpdateTemplate)
-		portal.DELETE("/scout-templates/:id", scoutController.DeleteTemplate)
-		portal.GET("/scouts", scoutController.List)
-		portal.POST("/scouts", scoutController.Send)
-		portal.GET("/scouts/cooldown", scoutController.Cooldown)
+		verified.GET("/scout-templates", scoutController.ListTemplates)
+		verified.POST("/scout-templates", scoutController.CreateTemplate)
+		verified.PATCH("/scout-templates/:id", scoutController.UpdateTemplate)
+		verified.DELETE("/scout-templates/:id", scoutController.DeleteTemplate)
+		verified.GET("/scouts", scoutController.List)
+		verified.POST("/scouts", scoutController.Send)
+		verified.GET("/scouts/cooldown", scoutController.Cooldown)
 	}
 }

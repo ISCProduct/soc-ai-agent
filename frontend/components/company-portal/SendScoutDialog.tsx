@@ -37,7 +37,7 @@ export function SendScoutDialog({
 }) {
   const [templates, setTemplates] = useState<ScoutTemplate[]>([])
   const [templateId, setTemplateId] = useState<number>(0)
-  const [companyName, setCompanyName] = useState('貴社')
+  const [companyName, setCompanyName] = useState('')
   const [remainingMs, setRemainingMs] = useState(0)
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
@@ -48,16 +48,21 @@ export function SendScoutDialog({
     setLoading(true)
     setError('')
     setNotice('')
+    setCompanyName('')
     try {
       const [tpl, cool, profile] = await Promise.all([
         companyScoutService.listTemplates(),
         companyScoutService.cooldown(userId),
-        companyProfileService.get().catch(() => null),
+        companyProfileService.get(),
       ])
+      const name = profile.name?.trim() ?? ''
+      if (!name) {
+        throw new Error('企業名を取得できませんでした。時間をおいて再度開いてください。')
+      }
       setTemplates(tpl.items)
       setTemplateId(tpl.items[0]?.id ?? 0)
       setRemainingMs(cool.remaining_ms)
-      if (profile?.name) setCompanyName(profile.name)
+      setCompanyName(name)
     } catch (e) {
       setError(e instanceof Error ? e.message : '準備に失敗しました')
     } finally {
@@ -79,6 +84,10 @@ export function SendScoutDialog({
     e.preventDefault()
     if (!template) {
       setError('テンプレートを選んでください')
+      return
+    }
+    if (!companyName.trim()) {
+      setError('企業名を取得できませんでした。送信できません。')
       return
     }
     setSending(true)
@@ -116,7 +125,7 @@ export function SendScoutDialog({
               同じ学生への再送は24時間空ける必要があります（クールダウン中）。
             </Alert>
           )}
-          {!loading && templates.length === 0 ? (
+          {!loading && !error && templates.length === 0 ? (
             <Alert severity="info">
               先にテンプレートを作成してください。ダッシュボードの「スカウトテンプレート」から追加できます。
             </Alert>
@@ -158,7 +167,9 @@ export function SendScoutDialog({
           type="submit"
           form="send-scout-form"
           variant="contained"
-          disabled={sending || loading || !template || remainingMs > 0 || Boolean(notice)}
+          disabled={
+            sending || loading || !template || !companyName.trim() || remainingMs > 0 || Boolean(notice)
+          }
         >
           スカウトを送る
         </Button>

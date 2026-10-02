@@ -5,6 +5,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { StudentDetailContent } from '@/components/company-portal/StudentDetailContent'
 import { companyStudentService } from '@/lib/company/students'
 import { companyScoutService } from '@/lib/company/scouts'
+import { companyProfileService } from '@/lib/company/profile'
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ replace: jest.fn(), push: jest.fn() }),
@@ -55,6 +56,7 @@ jest.mock('@/lib/company/profile', () => ({
 }))
 
 const detail = companyStudentService.detail as jest.Mock
+const getProfile = companyProfileService.get as jest.Mock
 
 function visibleStudent(name: string) {
   detail.mockResolvedValue({
@@ -94,5 +96,18 @@ describe('StudentDetailContent', () => {
 
     expect(await screen.findByRole('heading', { name: '氏名未設定' })).toBeInTheDocument()
     expect(screen.queryByText(/学生 #5/)).not.toBeInTheDocument()
+  })
+
+  it('企業名の取得に失敗したらスカウトを送れない', async () => {
+    getProfile.mockRejectedValueOnce(new Error('取得に失敗しました'))
+    visibleStudent('山田太郎')
+    render(<StudentDetailContent userId={5} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'スカウトする' }))
+
+    expect(await screen.findByText('取得に失敗しました')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'スカウトを送る' })).toBeDisabled()
+    expect(screen.queryByText(/貴社/)).not.toBeInTheDocument()
+    expect(companyScoutService.send).not.toHaveBeenCalled()
   })
 })
