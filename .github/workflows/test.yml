@@ -107,6 +107,12 @@ jobs:
       - name: Backlog クライアントの自己チェック
         run: python3 .github/scripts/backlog_client.py
 
+      # マイグレーションの版番号。並行してブランチを切ると次の番号を取り合うため、
+      # 人の注意では防げない。重複したままマージすると golang-migrate が
+      # source を開く時点で落ち、staging と本番の両方でデプロイが止まる。
+      - name: マイグレーション版番号の重複検査
+        run: ./automation/test/migration-version-unique-test.sh
+
       # 本番の起動/停止判定。間違えると展示会当日に本番が落ちたまま、
       # または止めたはずの本番が課金され続ける。
       - name: 本番 uptime 判定のテスト
