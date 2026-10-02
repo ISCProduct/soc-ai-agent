@@ -20,6 +20,12 @@ import { companyAuthService } from '@/lib/company/auth'
 import { companyStudentService, StudentDetail, StudentTag } from '@/lib/company/students'
 import { SendScoutDialog } from '@/components/company-portal/SendScoutDialog'
 
+/** スカウト公開に同意した学生の表示名。未設定のときはIDの仮名にしない。 */
+export function displayStudentName(name: string | undefined): string {
+  const trimmed = name?.trim() ?? ''
+  return trimmed || '氏名未設定'
+}
+
 /** 面接レポートのJSON文字列配列を安全にパースする（不正なJSONは無視する） */
 function parseJsonList(raw: string): string[] {
   if (!raw) return []
@@ -106,6 +112,7 @@ export function StudentDetailContent({ userId }: { userId: number }) {
   }
 
   const summary = detail.analysis.chat_summary
+  const studentName = displayStudentName(detail.analysis.name)
 
   return (
     <PageContainer maxWidth={880}>
@@ -122,7 +129,10 @@ export function StudentDetailContent({ userId }: { userId: number }) {
         </Button>
       </Stack>
 
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
+      <Typography variant="h4" fontWeight="bold">
+        {studentName}
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         学生プロフィール
       </Typography>
 
@@ -230,7 +240,7 @@ export function StudentDetailContent({ userId }: { userId: number }) {
       <SendScoutDialog
         open={scoutOpen}
         userId={userId}
-        studentName={`学生 #${userId}`}
+        studentName={studentName}
         onClose={() => setScoutOpen(false)}
       />
     </PageContainer>
