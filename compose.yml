@@ -158,10 +158,23 @@ services:
     #
     # --max-old-space-size を入れると V8 が上限手前で強く GC するので頭打ちになる。
     # mem_limit はその外側の保険で、万一超えても DB や Backend を巻き込まないようにする。
-    # ヒープ上限より大きくしないと GC が効く前にコンテナごと落ちるので、差を空けてある。
-    mem_limit: ${FRONTEND_MEM_LIMIT:-2560m}
+    #
+    # 差は広く取ること。--max-old-space-size は V8 のヒープだけの上限で、
+    # Node 本体や webpack のネイティブ確保は含まない。2048m / 2560m にしたときは
+    # 合計が上限を超え、cgroup の OOM killer に子プロセス(next dev)だけを殺されていた。
+    # 親の npm は 0 で終わるため、docker inspect の OOMKilled は false に見える。
+    # `docker events --filter event=oom` を見ると記録が残っている。
+    #
+    # 症状はブラウザ側の「接続がリセットされました」。落ちた瞬間に切れ、
+    # restart で起き上がるので、利用者にはリロードが要るように見える。
+    #
+    # 上限は広めに取る。定常は 1.8GiB 程度だが、`next dev --webpack` が
+    # 大きいページ(admin/companies は1,583行)を組み直すときに瞬間的に跳ねる。
+    # 2560m では跳ねた瞬間に殺されていた。Docker VM 全体は 30% 程度しか
+    # 使っていないので、ここを絞っても他サービスの役には立たない。
+    mem_limit: ${FRONTEND_MEM_LIMIT:-3584m}
     environment:
-      - NODE_OPTIONS=${FRONTEND_NODE_OPTIONS:---max-old-space-size=2048}
+      - NODE_OPTIONS=${FRONTEND_NODE_OPTIONS:---max-old-space-size=1536}
       - NODE_ENV=${NODE_ENV:-development}
       - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8080}
       - BACKEND_URL=${BACKEND_URL:-http://app:8080}

@@ -255,8 +255,22 @@ npx playwright test
 | `S3アップロード失敗` | IAM 権限不足 | `s3:PutObject` / `s3:GetObject` 権限を確認 |
 | `frontend が EACCES で起動しない`（Linux） | ホストの UID が 1000 以外で、bind mount した `./frontend` に `next dev` が `next-env.d.ts` を書けない | `.env` に `FRONTEND_USER=$(id -u):$(id -g)` を設定し、下記のボリューム作り直しも行う |
 | `rag-review が /data で PermissionError` | root 実行時代のデータが `rag_data` に残っている（`RAG_CHROMA_DATA_DIR=/data/...` を使う場合のみ） | `docker compose run --rm --user root rag-review chown -R 10001:10001 /data`（ファイルは消えない） |
-| `ブラウザに「接続がリセットされました」が出る`（開発時） | `next dev` のメモリが増え続けて落ち、`restart: unless-stopped` で再起動している。落ちた瞬間に接続が切れる | 既定で `mem_limit` と `NODE_OPTIONS=--max-old-space-size` を入れてある。`docker compose ps frontend` が `Up xx seconds` を繰り返すなら `docker inspect soc-ai-agent-frontend --format '{{.RestartCount}}'` で確認。Docker Desktop の割当メモリが少ない場合は `.env` の `FRONTEND_MEM_LIMIT` / `FRONTEND_NODE_OPTIONS` で調整する |
+| `ブラウザに「接続がリセットされました」が出る`（開発時） | `next dev` が cgroup の OOM killer に殺され、`restart: unless-stopped` で再起動している。落ちた瞬間に接続が切れるため、利用者にはリロードが要るように見える | `docker inspect soc-ai-agent-frontend --format '{{.RestartCount}}'` が増えていれば該当。**`docker events --filter event=oom` に記録が残る**（子プロセスだけ殺されるので `docker inspect` の `OOMKilled` は `false` のまま。ここだけ見ると見逃す）。`.env` の `FRONTEND_MEM_LIMIT` を上げる |
 | `frontend が EACCES: mkdir '/app/.next/dev' で起動ループ` | イメージが古く `/app/.next` を含まないため、名前付きボリュームが root 所有の空で作られた。`node`(uid 1000) で動くコンテナが書けない | イメージを作り直してからボリュームを消す（下記の手順）。`docker compose up` だけでは直らない |
+
+### frontend の dev サーバが繰り返し落ちるとき
+
+`next dev --webpack` は、定常では 1.8GiB 程度だが、大きいページ
+（`app/admin/companies/page-content.tsx` は 1,583 行）を組み直すときに
+**瞬間的に 2.5GiB を超える**。実測で 2.493GiB を確認している。
+
+`mem_limit` が足りないとその瞬間に cgroup の OOM killer が `next dev` を殺し、
+親の `npm` は 0 で終わるため **`docker inspect` の `OOMKilled` は `false` のまま**になる。
+見分けるには `docker events --filter event=oom` を見る。
+
+`NODE_OPTIONS=--max-old-space-size` は V8 のヒープだけの上限で、
+webpack のネイティブ確保は含まない。ヒープを絞っても跳ねは止まらないので、
+**`mem_limit` との差を広く取る**こと（既定はヒープ 1536m / 上限 3584m）。
 
 ### コンテナ非root化（#1477）にともなう既存環境の移行
 

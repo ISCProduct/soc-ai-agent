@@ -42,6 +42,23 @@ test.use({
 test.describe('音声入力', () => {
   test.skip(!PASSWORD, 'E2E_PASSWORD が未設定のため実行しない')
 
+  test.beforeEach(async ({ page }) => {
+    // 端末内処理の判定をブラウザ側で無効にする。
+    //
+    // SpeechRecognition.available() は Playwright 同梱の Chromium で
+    // タブごと落ちる（実物の Chrome では正常）。サーバー側のフラグに頼ると
+    // ビルド条件で結果が変わるので、ここで確実に落としておく。
+    // 残りの経路（開始・打ち切り・自動送信しない）は同じまま確かめられる。
+    await page.addInitScript(() => {
+      for (const name of ['SpeechRecognition', 'webkitSpeechRecognition']) {
+        const ctor = (window as unknown as Record<string, unknown>)[name] as
+          | { available?: unknown }
+          | undefined
+        if (ctor?.available) delete ctor.available
+      }
+    })
+  })
+
   test('マイクを許可すると聞き取りに入り、応答が無ければ自分で畳む', async ({ page }) => {
     await login(page)
 
