@@ -73,9 +73,9 @@ func (c *StudentScoutController) List(ctx echo.Context) error {
 		return mapStudentScoutError(err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
-		"items":                  out,
-		"total":                  total,
-		"blocked_company_ids":    blocked,
+		"items":               out,
+		"total":               total,
+		"blocked_company_ids": blocked,
 	})
 }
 
