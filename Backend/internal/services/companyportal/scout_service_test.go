@@ -2,6 +2,7 @@ package companyportal
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 )
 
 type fakeScoutStore struct {
+	mu        sync.Mutex
 	templates []models.ScoutTemplate
 	scouts    []models.Scout
 	blocks    map[uint]map[uint]bool
@@ -73,12 +75,24 @@ func (f *fakeScoutStore) FindTemplate(companyID, id uint) (*models.ScoutTemplate
 	return nil, gorm.ErrRecordNotFound
 }
 
-func (f *fakeScoutStore) CreateScout(s *models.Scout) error {
+func (f *fakeScoutStore) CreateScoutWithinCooldown(s *models.Scout, cooldown time.Duration, now time.Time) (time.Duration, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	last, err := f.latestBetween(s.CompanyID, s.UserID)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, err
+	}
+	if err == nil {
+		elapsed := now.Sub(last.CreatedAt)
+		if elapsed < cooldown {
+			return cooldown - elapsed, nil
+		}
+	}
 	s.ID = f.nextID
 	f.nextID++
-	s.CreatedAt = time.UnixMilli(1_700_000_000_000)
+	s.CreatedAt = now
 	f.scouts = append(f.scouts, *s)
-	return nil
+	return 0, nil
 }
 
 func (f *fakeScoutStore) ListByCompany(companyID uint, _, _ int) ([]models.Scout, int64, error) {
@@ -126,12 +140,19 @@ func (f *fakeScoutStore) UpdateStatusForUser(userID, id uint, fromStatuses []str
 }
 
 func (f *fakeScoutStore) LatestBetween(companyID, userID uint) (*models.Scout, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.latestBetween(companyID, userID)
+}
+
+func (f *fakeScoutStore) latestBetween(companyID, userID uint) (*models.Scout, error) {
 	var latest *models.Scout
 	for i := range f.scouts {
 		s := &f.scouts[i]
 		if s.CompanyID == companyID && s.UserID == userID {
-			if latest == nil || s.CreatedAt.After(latest.CreatedAt) {
-				latest = s
+			if latest == nil || s.CreatedAt.After(latest.CreatedAt) || (s.CreatedAt.Equal(latest.CreatedAt) && s.ID > latest.ID) {
+				cp := *s
+				latest = &cp
 			}
 		}
 	}
@@ -177,10 +198,15 @@ type fakeCompanyReader struct{ company *models.Company }
 
 func (f fakeCompanyReader) FindByID(uint) (*models.Company, error) { return f.company, nil }
 
-type fakeMailer struct{ sent int }
+type fakeMailer struct {
+	mu   sync.Mutex
+	sent int
+}
 
 func (f *fakeMailer) SendScoutOfferEmail(_, _, _, _, _ string) error {
+	f.mu.Lock()
 	f.sent++
+	f.mu.Unlock()
 	return nil
 }
 
@@ -222,6 +248,60 @@ func TestScoutService_Send_クールダウンとブロック(t *testing.T) {
 	_, err = svc.Send(1, 9, SendScoutInput{UserID: 101, TemplateID: 1})
 	if !errors.Is(err, ErrScoutBlocked) {
 		t.Fatalf("blocked want %v got %v", ErrScoutBlocked, err)
+	}
+}
+
+func TestScoutService_Send_並行送信は1件だけ保存してメールも1通(t *testing.T) {
+	store := newFakeScoutStore()
+	_ = store.CreateTemplate(&models.ScoutTemplate{
+		CompanyID: 1, Title: "案内", Body: "{{学生名}} さん", CreatedBy: 9,
+	})
+	mailer := &fakeMailer{}
+	svc := NewScoutService(
+		store,
+		fakeVisible{ok: true},
+		fakeUserReader{user: &entity.User{ID: 101, Name: "山田", Email: "a@example.com"}},
+		fakeCompanyReader{company: &models.Company{ID: 1, Name: "デモ株式会社"}},
+		mailer,
+		"http://localhost:3000",
+	)
+	now := time.UnixMilli(1_700_000_000_000)
+	svc.now = func() time.Time { return now }
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	okCount := 0
+	cooldownCount := 0
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := svc.Send(1, 9, SendScoutInput{UserID: 101, TemplateID: 1})
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case err == nil:
+				okCount++
+			case errors.Is(err, ErrScoutCooldown):
+				cooldownCount++
+			default:
+				t.Errorf("並行送信: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if okCount != 1 || cooldownCount != 1 {
+		t.Fatalf("成功=%d クールダウン=%d、同時送信は1件だけ通る", okCount, cooldownCount)
+	}
+	mailer.mu.Lock()
+	sent := mailer.sent
+	mailer.mu.Unlock()
+	if sent != 1 {
+		t.Fatalf("メールは1通であるべき、実際は %d", sent)
+	}
+	if len(store.scouts) != 1 {
+		t.Fatalf("保存件数=%d", len(store.scouts))
 	}
 }
 

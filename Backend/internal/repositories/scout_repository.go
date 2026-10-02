@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"errors"
 	"time"
 
 	"Backend/internal/models"
@@ -64,8 +65,54 @@ func (r *ScoutRepository) FindTemplate(companyID, id uint) (*models.ScoutTemplat
 	return &t, nil
 }
 
-func (r *ScoutRepository) CreateScout(s *models.Scout) error {
-	return r.db.Create(s).Error
+// CreateScoutWithinCooldown は、同一企業から同一学生への直近送信が cooldown 未満なら
+// スカウトを作らず残り時間を返す。判定と INSERT は1トランザクションで、
+// (company_id, user_id) のロック行を排他ロックしてから行う。
+// ロックなしの「読んでから書く」だと、二つのタブからの同時送信が両方履歴なしと見て保存され、
+// 24時間クールダウンと重複メールをすり抜ける。
+func (r *ScoutRepository) CreateScoutWithinCooldown(s *models.Scout, cooldown time.Duration, now time.Time) (time.Duration, error) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	var remaining time.Duration
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		lock := models.ScoutSendLock{CompanyID: s.CompanyID, UserID: s.UserID}
+		// 行が無い組でも待たせるため、先にロック行を作る（既存なら同じ行を掴む）。
+		if err := tx.Clauses(clause.OnConflict{
+			DoUpdates: clause.Assignments(map[string]any{
+				"company_id": lock.CompanyID,
+			}),
+		}).Create(&lock).Error; err != nil {
+			return err
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("company_id = ? AND user_id = ?", s.CompanyID, s.UserID).
+			Take(&lock).Error; err != nil {
+			return err
+		}
+
+		var last models.Scout
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("company_id = ? AND user_id = ?", s.CompanyID, s.UserID).
+			Order("created_at DESC, id DESC").
+			First(&last).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err == nil {
+			elapsed := now.Sub(last.CreatedAt)
+			if elapsed < cooldown {
+				remaining = cooldown - elapsed
+				return nil
+			}
+		}
+		s.CreatedAt = now
+		return tx.Create(s).Error
+	})
+	if err != nil {
+		return 0, err
+	}
+	return remaining, nil
 }
 
 func (r *ScoutRepository) ListByCompany(companyID uint, limit, offset int) ([]models.Scout, int64, error) {

@@ -31,7 +31,9 @@ type scoutStore interface {
 	DeleteTemplate(companyID, id uint) error
 	ListTemplates(companyID uint) ([]models.ScoutTemplate, error)
 	FindTemplate(companyID, id uint) (*models.ScoutTemplate, error)
-	CreateScout(s *models.Scout) error
+	// CreateScoutWithinCooldown はクールダウン中なら残り時間を返し、切れていれば保存する。
+	// 判定と作成はストア側で直列化する。
+	CreateScoutWithinCooldown(s *models.Scout, cooldown time.Duration, now time.Time) (time.Duration, error)
 	ListByCompany(companyID uint, limit, offset int) ([]models.Scout, int64, error)
 	ListByUser(userID uint, limit, offset int) ([]models.Scout, int64, error)
 	FindByIDForUser(userID, id uint) (*models.Scout, error)
@@ -231,14 +233,6 @@ func (s *ScoutService) Send(companyID, companyUserID uint, in SendScoutInput) (*
 		return nil, ErrScoutBlocked
 	}
 
-	remaining, err := s.CooldownRemaining(companyID, in.UserID)
-	if err != nil {
-		return nil, err
-	}
-	if remaining > 0 {
-		return &SendScoutResult{RemainingMs: remaining.Milliseconds()}, ErrScoutCooldown
-	}
-
 	company, err := s.companies.FindByID(companyID)
 	if err != nil || company == nil {
 		return nil, fmt.Errorf("company lookup: %w", err)
@@ -279,8 +273,12 @@ func (s *ScoutService) Send(companyID, companyUserID uint, in SendScoutInput) (*
 		Message:    message,
 		Status:     models.ScoutStatusSent,
 	}
-	if err := s.store.CreateScout(scout); err != nil {
+	remaining, err := s.store.CreateScoutWithinCooldown(scout, ScoutCooldown, s.now())
+	if err != nil {
 		return nil, err
+	}
+	if remaining > 0 {
+		return &SendScoutResult{RemainingMs: remaining.Milliseconds()}, ErrScoutCooldown
 	}
 
 	if s.mailer != nil && student.Email != "" && !student.IsGuest {
