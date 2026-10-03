@@ -198,7 +198,12 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
       if (caps && motion) {
         const state: InterviewerState = speakingRef.current ? 'speaking' : 'listening'
         motion.setState(state, t)
-        motion.update(caps, t, Math.min(1, levelRef.current * 1.4))
+        // level はすでに useInterviewSession が rms*6 で正規化した 0〜1 の値。
+        // ここでさらに 1.4 を掛けると発話中ほぼ常に 1.0 に張り付き、
+        // 口が開きっぱなしになって喋っているように見えない。
+        // 旧実装は 1.4 を掛けていたが、当時はモデルにモーフが無く
+        // 口が一切動かなかったので飽和が表に出ていなかった。
+        motion.update(caps, t, levelRef.current)
       }
 
       // ── Mouth shape key (legacy path) ───────────────────────────────────
