@@ -142,7 +142,7 @@ func TestGetResumeStatus(t *testing.T) {
 	t.Run("レビュー済みならスコアが返る", func(t *testing.T) {
 		repo := &resumeRepoStub{
 			latestDoc:    &models.ResumeDocument{ID: 10, UserID: 1},
-			latestReview: &models.ResumeReview{ID: 5, DocumentID: 10, Score: 42},
+			latestReview: &models.ResumeReview{ID: 5, DocumentID: 10, Score: intPtr(42)},
 		}
 		svc := NewResumeService(repo, t.TempDir(), nil)
 		got, err := svc.GetResumeStatus(1)
@@ -169,13 +169,34 @@ func TestGetResumeStatus(t *testing.T) {
 		}
 	})
 
+	// レビューはあるがスコアが算出できなかった場合（ルーブリック違反 / #1529）。
+	// 固定値70を保存していた頃はこれが「対応不要」に見えていた。
+	// スコア無しを「レビュー未実施」と同じ要対応に倒す（再レビューすれば解消する）。
+	t.Run("レビューありスコア無しは要対応", func(t *testing.T) {
+		repo := &resumeRepoStub{
+			latestDoc:    &models.ResumeDocument{ID: 10, UserID: 1},
+			latestReview: &models.ResumeReview{ID: 5, DocumentID: 10, Score: nil},
+		}
+		svc := NewResumeService(repo, t.TempDir(), nil)
+		got, err := svc.GetResumeStatus(1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !got.HasDocument || !got.NeedsAttention || got.LatestScore != nil {
+			t.Errorf("got %+v, want has=true, attention=true, score=nil", got)
+		}
+		if reason := AttentionReason(*got); reason != "レビュー未実施" {
+			t.Errorf("AttentionReason = %q, want \"レビュー未実施\"", reason)
+		}
+	})
+
 	// S2: 閾値の環境変数が GetResumeStatus まで実際に配線されていることを検証する。
 	// これが無いと config の getter を握り潰してリテラル60を書いてもテストが通ってしまう。
 	t.Run("閾値の環境変数がGetResumeStatusまで効いている", func(t *testing.T) {
 		t.Setenv("RESUME_COMPLETENESS_THRESHOLD", "40")
 		repo := &resumeRepoStub{
 			latestDoc:    &models.ResumeDocument{ID: 10, UserID: 1},
-			latestReview: &models.ResumeReview{ID: 5, DocumentID: 10, Score: 42},
+			latestReview: &models.ResumeReview{ID: 5, DocumentID: 10, Score: intPtr(42)},
 		}
 		svc := NewResumeService(repo, t.TempDir(), nil)
 		got, err := svc.GetResumeStatus(1)
@@ -192,7 +213,7 @@ func TestGetResumeStatus(t *testing.T) {
 		t.Setenv("RESUME_COMPLETENESS_THRESHOLD", "200")
 		repo := &resumeRepoStub{
 			latestDoc:    &models.ResumeDocument{ID: 10, UserID: 1},
-			latestReview: &models.ResumeReview{ID: 5, DocumentID: 10, Score: 100},
+			latestReview: &models.ResumeReview{ID: 5, DocumentID: 10, Score: intPtr(100)},
 		}
 		svc := NewResumeService(repo, t.TempDir(), nil)
 		got, err := svc.GetResumeStatus(1)

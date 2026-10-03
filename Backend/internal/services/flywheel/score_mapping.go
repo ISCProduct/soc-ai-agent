@@ -61,9 +61,13 @@ var resumeScoreMapping = []struct {
 // 一見二重計上に見える（score=85 / critical=3 → 細部志向 70）。それでも引く理由（#1555）:
 //   - プロンプト（resume_review.go）は score と items.severity を並べて出させるだけで、
 //     「critical があれば score を下げろ」とは指示していない。score に反映されている保証が無い。
-//   - items は件数不足時に別プロンプトで再生成され差し替わるが、score は差し替えない。
-//     つまり score と critical 件数は別々の生成結果になり得る。
-//   - score <= 0 や AI 失敗時は score=70 のフォールバックが入る（critical だけが残る）。
+//   - items は件数不足時に別プロンプトで再生成され差し替わるが、score は
+//     初回の採点が正当なら差し替えない。つまり score と critical 件数は
+//     別々の生成結果になり得る（#1529）。
+//
+// #1529 以降、採点できなかったレビューは score=nil（スコア無し）で保存され、
+// UpdateScoresFromResumeReview が反映自体を行わない。
+// 「critical だけが残って減点される」経路は無くなった。
 //
 // 相関する分だけ効きが強くなるのは承知の上で、致命的な粗がある書類を細部志向で
 // 下げ切れない方を避ける。効き過ぎを criticalPenaltyMax(20点) で止めている。

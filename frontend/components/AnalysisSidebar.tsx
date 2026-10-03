@@ -115,7 +115,7 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                 const fresh = await authService.getUser()
                 if (fresh?.is_admin) {
                     setIsAdmin(true)
-                    authService.saveAuth({ ...fresh, user_id: fresh.user_id, is_guest: fresh.is_guest } as any)
+                    await authService.saveAuth({ ...fresh, user_id: fresh.user_id, is_guest: fresh.is_guest } as any)
                 }
             } catch {
                 // ignore

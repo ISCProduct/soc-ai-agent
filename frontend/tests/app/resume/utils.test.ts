@@ -8,6 +8,9 @@ import {
   mapDbCompanyResults,
   mapWebSearchResults,
   parseApiErrorMessage,
+  parseItemScores,
+  RUBRIC_CRITERIA,
+  RUBRIC_SCORE_MAX,
   severityConfig,
 } from '@/app/resume/utils'
 
@@ -156,5 +159,61 @@ describe('isAnnotatedPdfResponse', () => {
 
   it('PDF でない応答は false', () => {
     expect(isAnnotatedPdfResponse('application/json', '', 404)).toBe(false)
+  })
+})
+
+describe('parseItemScores', () => {
+  const fullScores = JSON.stringify({
+    specificity: 4,
+    achievement: 3,
+    role_fit: 5,
+    completeness: 2,
+    readability: 1,
+  })
+
+  it('ルーブリックの定義順で内訳を返す', () => {
+    expect(parseItemScores(fullScores)).toEqual([
+      { key: 'specificity', label: '具体性', score: 4 },
+      { key: 'achievement', label: '成果の明示', score: 3 },
+      { key: 'role_fit', label: '職種適合', score: 5 },
+      { key: 'completeness', label: '記載の網羅性', score: 2 },
+      { key: 'readability', label: '読みやすさ', score: 1 },
+    ])
+  })
+
+  it('内訳が無いレビュー（#1529 以前の行・スコア無し）は空配列', () => {
+    expect(parseItemScores(undefined)).toEqual([])
+    expect(parseItemScores(null)).toEqual([])
+    expect(parseItemScores('')).toEqual([])
+  })
+
+  it('壊れたJSON・オブジェクト以外は空配列', () => {
+    expect(parseItemScores('{"specificity":')).toEqual([])
+    expect(parseItemScores('[1,2,3]')).toEqual([])
+    expect(parseItemScores('"text"')).toEqual([])
+  })
+
+  it('値域外・数値以外・未知のキーは落とす（誤った内訳を出さない）', () => {
+    const scores = JSON.stringify({
+      specificity: 80, // 100点満点で返された
+      achievement: '3', // 文字列
+      role_fit: -1, // 負値
+      completeness: 2, // 正常
+      passion: 5, // 未知のキー
+    })
+    expect(parseItemScores(scores)).toEqual([
+      { key: 'completeness', label: '記載の網羅性', score: 2 },
+    ])
+  })
+
+  it('評価項目とその満点はバックエンドの定義と揃えている', () => {
+    expect(RUBRIC_CRITERIA.map((c) => c.key)).toEqual([
+      'specificity',
+      'achievement',
+      'role_fit',
+      'completeness',
+      'readability',
+    ])
+    expect(RUBRIC_SCORE_MAX).toBe(5)
   })
 })

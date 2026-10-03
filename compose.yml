@@ -149,7 +149,19 @@ services:
       - frontend_next:/app/.next
     ports:
       - "3000:3000"
+    # dev サーバのメモリを上限で縛る。
+    #
+    # next dev のメモリは使っているうちに増え続け、放っておくと数GiBに達して落ちる。
+    # restart: unless-stopped で起き上がるが、落ちた瞬間にブラウザ側は接続が
+    # リセットされ、操作中の画面が切れる。実測では CPU 1% 程度のまま
+    # 1.7GiB → 2.6GiB へ数分で増えていた（負荷ではなく増加そのものが問題）。
+    #
+    # --max-old-space-size を入れると V8 が上限手前で強く GC するので頭打ちになる。
+    # mem_limit はその外側の保険で、万一超えても DB や Backend を巻き込まないようにする。
+    # ヒープ上限より大きくしないと GC が効く前にコンテナごと落ちるので、差を空けてある。
+    mem_limit: ${FRONTEND_MEM_LIMIT:-2560m}
     environment:
+      - NODE_OPTIONS=${FRONTEND_NODE_OPTIONS:---max-old-space-size=2048}
       - NODE_ENV=${NODE_ENV:-development}
       - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8080}
       - BACKEND_URL=${BACKEND_URL:-http://app:8080}

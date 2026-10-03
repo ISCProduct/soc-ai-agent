@@ -4,6 +4,7 @@
 - #1533: 同じ呼び出しから STAR 分解も返し、tech_stack も非信頼データとして扱う
 """
 import json
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -336,8 +337,8 @@ def test_tech_stack_is_wrapped_as_untrusted(monkeypatch):
 
     improved_user = _improved_calls(client)[0]
     assert injected in improved_user
-    assert "UNTRUSTED_技術スタック_START" in improved_user
-    assert "UNTRUSTED_技術スタック_END" in improved_user
+    assert re.search(r"UNTRUSTED_技術スタック_[0-9a-f]+_START", improved_user)
+    assert re.search(r"UNTRUSTED_技術スタック_[0-9a-f]+_END", improved_user)
     improved_system = next(
         msg["content"]
         for msg in client.chat.completions.create.call_args_list[1].kwargs["messages"]
