@@ -1,57 +1,67 @@
-# Avatar Files
+# 面接官アバター
 
-This directory should contain 3D avatar GLB files for the AI interview feature.
+AI面接の面接官として表示する3Dモデルを置く場所。
 
-## Required Files
+## いま入っているモデルの問題（#1603）
 
-- `male-avatar.glb` - Male interviewer avatar
-- `female-avatar.glb` - Female interviewer avatar
+`male-avatar.glb` / `female-avatar.glb` は **Tripo（画像から3Dを生成するAIツール）製の静止メッシュ**で、動かすための要素を1つも持っていない。GLBを直接解析した結果が次のとおり。
 
-## How to Get Avatar Files
+```
+generator: Tripo
+skins: 0                                   骨格が無い
+animations: 0
+morph targets: 0                           表情ブレンドシェイプが無い
+attributes: POSITION, NORMAL, TEXCOORD_0   JOINTS_0 / WEIGHTS_0 が無い
+nodes: 1 / meshes: 1
+```
 
-### Option 1: Ready Player Me (Recommended)
+**首の関節も頂点ウェイトも無いので、どんなコードを書いてもうなずかない。口も動かない。** `ThreeAvatar.tsx` は口のモーフ検出（多数の命名パターン）と顎ボーンのフォールバックを実装しているが、モデルがどれも提供しないため全部空振りする。
 
-1. Go to [Ready Player Me](https://readyplayer.me/)
-2. Click "Create Avatar" or "Get Started"
-3. Create a male and female avatar using the customization tools
-4. For each avatar:
-   - Click the download/export button
-   - Use this URL format to download with morph targets:
-   ```
-   https://models.readyplayer.me/[YOUR_AVATAR_ID].glb?morphTargets=Oculus+Visemes&compression=draco
-   ```
-   - Save as `male-avatar.glb` or `female-avatar.glb` in this directory
+## 置くべきもの
 
-### Option 2: Use Free 3D Models
+**VRM を推奨する。** 人型ボーンの割り当てと表情が規格化されているので、うなずき・まばたき・口の動きを実装依存なしに動かせる。
 
-You can use any humanoid GLB model that includes Oculus OVR LipSync viseme morph targets:
-- [Mixamo](https://www.mixamo.com/) - Free character models (requires rigging for morph targets)
-- [Sketchfab](https://sketchfab.com/) - Search for "avatar" or "character" (filter by glTF/GLB)
+- `male-avatar.vrm`
+- `female-avatar.vrm`
 
-### Option 3: Use the Fallback
+`.vrm` が無ければ `.glb` を探す（後方互換）。
 
-If no local files are found, the app will:
-1. Try to load from Ready Player Me API URLs (if configured)
-2. Fall back to a simple SVG avatar illustration
+### VRoid Studio で作る（推奨）
 
-The SVG fallback works perfectly fine for development and testing!
+1. [VRoid Studio](https://vroid.com/studio) を入れる（無料）
+2. 面接官らしい見た目のアバターを作る
+3. **VRM としてエクスポート**する。書き出し設定で表情（`Blink` / `A` など）を含めること
+4. `male-avatar.vrm` / `female-avatar.vrm` としてこのディレクトリへ置く
 
-## File Requirements
+VRoid の出力はボーン名が `J_Bip_C_Head` のような内部名になるが、`vrm-adapter.ts` が VRM の `humanoid.getNormalizedBoneNode('head')` で引くので名前には依存しない。
 
-- **Format**: GLB (binary glTF)
-- **Morph Targets**: Must include Oculus OVR LipSync visemes for lipsync
-  - `viseme_sil`, `viseme_PP`, `viseme_FF`, `viseme_TH`, `viseme_DD`
-  - `viseme_kk`, `viseme_CH`, `viseme_SS`, `viseme_nn`, `viseme_RR`
-  - `viseme_aa`, `viseme_E`, `viseme_I`, `viseme_O`, `viseme_U`
-- **Size**: Keep under 3MB for fast loading (use DRACO compression)
-- **Optimization**: Use DRACO compression for smaller file sizes
+### Ready Player Me を使う場合
 
-## Testing
+GLB だが Oculus ビセーム付きで書き出せば動く。
 
-After adding the files, test by:
-1. Starting the dev server: `npm run dev`
-2. Going to `/interview`
-3. Starting an interview session
-4. The 3D avatar should load and show lipsync when AI speaks
+```
+https://models.readyplayer.me/[YOUR_AVATAR_ID].glb?morphTargets=Oculus+Visemes&compression=draco
+```
 
-If the avatars don't load, check the browser console for error messages.
+商用利用の条件は各自で確認すること。
+
+## 置いたモデルが動くかを確かめる
+
+`lib/interview/avatar-capabilities.ts` の `inspectAvatar` が、読み込んだモデルから動かせる部位を洗い出す。足りない部位があれば**ブラウザのコンソールに原因が1行で出る**。
+
+```
+[ThreeAvatar] アバターモデルが要件を満たしていません: 骨格（skin）が無い。静止メッシュなので全身が動かせない / 頭・首のボーンが無いのでうなずけない / ...
+```
+
+描画は止めない（面接を止めるより、動かないアバターでも面接を続けるほうがよい）。
+
+要件は次の4つ。優先順は「うなずき > 口 > まばたき」で、うなずきは相手が話を聞いていることを示す最小の動作なので、無いと会話として成立しない。
+
+| 要件 | 無いとどうなるか |
+|---|---|
+| 骨格（skin） | 全身が動かせない |
+| 頭または首のボーン | うなずけない |
+| 口のモーフ または 顎ボーン | 口が動かない |
+| まばたきのモーフ | まばたきしない |
+
+静止メッシュを置いたら検出できることは `tests/lib/interview/avatar-capabilities.test.ts` で固定している。
