@@ -9,7 +9,9 @@
     "lint": "eslint .",
     "test": "jest",
     "test:watch": "jest --watch",
-    "check:avatar": "node scripts/check-avatar.mjs"
+    "check:avatar": "node scripts/check-avatar.mjs",
+    "avatar:rig": "node scripts/add-rig.mjs",
+    "avatar:placeholder": "node scripts/make-placeholder-avatar.mjs"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
