@@ -320,6 +320,47 @@ def advance_issue_status(
     return "updated"
 
 
+def resolve_status_id(
+    base: str,
+    api_key: str,
+    proj_key: str,
+    name: str,
+    fallback: int | None = None,
+    request=None,
+) -> int | None:
+    """プロジェクトのステータス名から statusId を引く。
+
+    ステータスIDをコードに直書きすると、プロジェクト側でワークフローを
+    組み替えたときに黙って別の状態へ飛ぶか、`statusId` が認識されずに
+    「変化のない更新」として 400 `No comment content.` (code 7) で弾かれる。
+    pr-to-backlog.yml と backlog-status-backfill.yml は既に名前で引いているが、
+    github-issue-to-backlog.yml だけが 4 / 1 を直書きしていた（SOCAIAGENT-415 で
+    Issue クローズ時に発生）。
+
+    fallback は Backlog 既定ステータス（1:未対応 2:処理中 3:処理済み 4:完了）を
+    想定した保険。名前解決に失敗した事実はログへ出し、黙って既定値へ倒れない。
+
+    戻り値: statusId。名前が無く fallback も無ければ None。
+    request はテスト用の差し替え口（省略時は bl_request、失敗は None）。
+    """
+    call = request or (
+        lambda method, path, data=None: bl_request(base, api_key, method, path, data, fatal=False)
+    )
+    statuses = call("GET", f"/projects/{proj_key}/statuses") or []
+    status_map = {s.get("name"): s.get("id") for s in statuses if s.get("name")}
+    if name in status_map:
+        return status_map[name]
+    available = ", ".join(f"{n}={i}" for n, i in status_map.items()) or "(取得できず)"
+    print(
+        f"警告: ステータス '{name}' がプロジェクト {proj_key} に見つかりません。"
+        f" 利用可能: {available}",
+        file=sys.stderr,
+    )
+    if fallback is not None:
+        print(f"既定ステータス {fallback} で続行します。", file=sys.stderr)
+    return fallback
+
+
 def set_issue_status(base: str, api_key: str, issue_key: str, status_id: int) -> bool:
     """課題のステータスを更新する。既に同じステータスなら何もしない。
 
@@ -487,6 +528,33 @@ if __name__ == "__main__":
     assert should_skip_backlog_sync("ふつうの本文", "edited") is False
     assert should_skip_backlog_sync("", "opened") is False
     assert should_skip_backlog_sync(None, "closed") is False
+
+    # --- ステータス名 → statusId の解決（SOCAIAGENT-415）---
+    def _statuses(rows):
+        sent: list[tuple] = []
+
+        def _req(method, path, data=None):
+            sent.append((method, path, data))
+            return rows
+
+        return _req, sent
+
+    # カスタムワークフローでIDが既定と違っても名前で正しく引ける
+    req, sent = _statuses([{"id": 1000123, "name": "完了"}, {"id": 1, "name": "未対応"}])
+    assert resolve_status_id("b", "k", "P", "完了", 4, request=req) == 1000123
+    assert sent == [("GET", "/projects/P/statuses", None)], f"statuses を引いていない: {sent}"
+
+    # 名前が無ければ fallback へ倒す（既定ステータスのための保険）
+    req, _ = _statuses([{"id": 1, "name": "未対応"}])
+    assert resolve_status_id("b", "k", "P", "完了", 4, request=req) == 4
+
+    # fallback が無ければ None。呼び出し側が「解決できなかった」と判断できる
+    req, _ = _statuses([{"id": 1, "name": "未対応"}])
+    assert resolve_status_id("b", "k", "P", "完了", None, request=req) is None
+
+    # 取得そのものが失敗（None）でも落とさず fallback を返す
+    req, _ = _statuses(None)
+    assert resolve_status_id("b", "k", "P", "完了", 4, request=req) == 4
 
     globals()["bl_request"] = _orig
     assert normalize_space_id("https://myspace.backlog.jp") == "myspace"

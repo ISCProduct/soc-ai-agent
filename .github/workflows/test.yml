@@ -102,10 +102,15 @@ jobs:
       - uses: actions/checkout@v7
 
       # Backlog 同期スクリプトの自己チェック。
-      # ワークフロー内の Python は CI で動くまで構文エラーに気づけないため、
-      # 埋め込みコードのコンパイルも合わせて確認する。
       - name: Backlog クライアントの自己チェック
         run: python3 .github/scripts/backlog_client.py
+
+      # ワークフローへ埋め込んだ Python の構文。そのワークフローが起動するまで
+      # 気づけないため、ここでコンパイルする。github-issue-to-backlog.yml は
+      # issues イベント起動なので「Issue を閉じたときに初めて落ちる」形で出る。
+      # 以前はこの検証を上のステップのコメントだけが約束していて、実体が無かった。
+      - name: ワークフロー埋め込み Python の構文検査
+        run: ./automation/test/workflow-embedded-python-test.sh
 
       # マイグレーションの版番号。並行してブランチを切ると次の番号を取り合うため、
       # 人の注意では防げない。重複したままマージすると golang-migrate が
