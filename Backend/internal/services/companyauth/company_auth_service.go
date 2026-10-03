@@ -18,6 +18,7 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/services/email"
 
+	"github.com/go-sql-driver/mysql"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
@@ -49,6 +50,13 @@ type InviteRequest struct {
 	Email string `json:"email"`
 	Name  string `json:"name"`
 	Role  string `json:"role"`
+}
+
+type RegisterRequest struct {
+	CompanyName string `json:"company_name"`
+	Name        string `json:"name"`
+	Email       string `json:"email"`
+	Password    string `json:"password"`
 }
 
 type LoginRequest struct {
@@ -182,6 +190,87 @@ func (s *CompanyUserService) Invite(companyID uint, req InviteRequest) (*models.
 		}
 	}
 	return user, nil
+}
+
+// Register は企業担当者が招待なしでアカウントを作成する。
+// 企業（下書き）と owner ユーザーを同時に作り、そのままログイン可能にする。
+func (s *CompanyUserService) Register(req RegisterRequest) (*AuthResponse, error) {
+	companyName := strings.TrimSpace(req.CompanyName)
+	name := strings.TrimSpace(req.Name)
+	emailAddr := strings.ToLower(strings.TrimSpace(req.Email))
+	password := req.Password
+
+	if companyName == "" || name == "" || emailAddr == "" || password == "" {
+		return nil, errors.New("company_name, name, email and password are required")
+	}
+	if _, err := mail.ParseAddress(emailAddr); err != nil {
+		return nil, errors.New("email is invalid")
+	}
+	if len([]rune(companyName)) > 255 {
+		return nil, errors.New("company_name is too long")
+	}
+	if len([]rune(name)) > 255 {
+		return nil, errors.New("name is too long")
+	}
+	if len(password) < 8 {
+		return nil, errors.New("password must be at least 8 characters")
+	}
+
+	existing, err := s.users.FindByEmail(emailAddr)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return nil, ErrEmailExists
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+	if err != nil {
+		return nil, err
+	}
+
+	var created *models.CompanyUser
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		company := &models.Company{
+			Name:          companyName,
+			SourceType:    "manual",
+			DataStatus:    "draft",
+			IsProvisional: true,
+			IsActive:      true,
+			IsVerified:    false,
+			IsGuestEntry:  false,
+		}
+		if err := tx.Create(company).Error; err != nil {
+			return err
+		}
+		user := &models.CompanyUser{
+			CompanyID: company.ID,
+			Email:     emailAddr,
+			Password:  string(hashed),
+			Name:      name,
+			Role:      models.CompanyUserRoleOwner,
+		}
+		if err := tx.Create(user).Error; err != nil {
+			// 事前のメール検索と INSERT の間に同じアドレスが登録されると、
+			// 一意制約（1062）になる。TranslateError が無いのでここで重複に正規化する。
+			if isDuplicateEntryErr(err) {
+				return ErrEmailExists
+			}
+			return err
+		}
+		created = user
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.buildAuthResponse(created, true)
+}
+
+// isDuplicateEntryErr は MySQL の一意制約違反 (Error 1062) かどうか。
+func isDuplicateEntryErr(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
 }
 
 func (s *CompanyUserService) AcceptInvite(req AcceptInviteRequest) (*AuthResponse, error) {

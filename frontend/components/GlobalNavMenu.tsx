@@ -22,6 +22,7 @@ import AssessmentIcon from '@mui/icons-material/Assessment'
 import EditNoteIcon from '@mui/icons-material/EditNote'
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth'
 import AssignmentIcon from '@mui/icons-material/Assignment'
+import MailOutlineIcon from '@mui/icons-material/MailOutline'
 import ManageAccountsIcon from '@mui/icons-material/ManageAccounts'
 import { SIDEBAR_NAV_ITEMS, shouldShowStudentBottomNav } from '@/lib/sidebar-nav'
 
@@ -34,6 +35,7 @@ const NAV_ICONS: Record<(typeof SIDEBAR_NAV_ITEMS)[number]['href'], React.ReactN
   '/es-rewrite': <EditNoteIcon color="primary" />,
   '/schedule': <CalendarMonthIcon color="primary" />,
   '/applications': <AssignmentIcon color="primary" />,
+  '/scout': <MailOutlineIcon color="primary" />,
   '/profile': <ManageAccountsIcon color="primary" />,
 }
 
