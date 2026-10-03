@@ -1,6 +1,7 @@
 package aibench
 
 import (
+	"slices"
 	"sort"
 
 	"Backend/internal/services/costs"
@@ -55,6 +56,11 @@ type Observation struct {
 
 	// Violations は指示違反の内容。空なら指示を守れている。
 	Violations []string `json:"violations,omitempty"`
+
+	// InputChars は入力本文の文字数。交絡（スコアが長さに従っているだけでないか）の
+	// 測定に使う。ラベルと文字数が相関しているセットでは、弁別力が高いことと
+	// 「内容の質を測れている」ことが同じ数字になり区別できない（#1593）。
+	InputChars int `json:"input_chars"`
 }
 
 // CaseSummary はケース単位の集計。再現性（同一入力のばらつき）をここで見る。
@@ -65,7 +71,32 @@ type CaseSummary struct {
 	BrokenRuns  int     `json:"broken_runs"`
 	MeanScore   float64 `json:"mean_score"`
 	ScoreStdDev float64 `json:"score_stddev"`
+	InputChars  int     `json:"input_chars"`
 }
+
+// LengthStratum は文字数で層化した1層の弁別力。
+//
+// 層の中では入力の長さがほぼ揃っているので、ここで good/mid/bad が分かれるなら
+// 「長さではなく内容で分かれている」と言える。層化しない弁別力だけでは、
+// ラベルと文字数が相関しているセットでその区別が付かない。
+type LengthStratum struct {
+	// MinChars / MaxChars はこの層に入ったケースの文字数の範囲。
+	MinChars int `json:"min_chars"`
+	MaxChars int `json:"max_chars"`
+	Cases    int `json:"cases"`
+	// LabelCounts は層の中のラベル構成。1種類しか無い層では弁別力が定義できない。
+	LabelCounts map[string]int `json:"label_counts"`
+	// LabelRankCorrelation は層の中でのラベルとスコアの順位相関。
+	LabelRankCorrelation float64            `json:"label_rank_correlation"`
+	MeanScoreByLabel     map[string]float64 `json:"mean_score_by_label"`
+}
+
+// LengthStrataCount は文字数で層化するときの層の数。
+//
+// 3 にしているのは good/mid/bad の3値に合わせたのではなく、1層あたりの件数を
+// 確保するため。30〜50件のゴールデンセットを4層以上に割ると1層10件を割り、
+// 層内の相関が数件の入れ替わりで大きく動く。
+const LengthStrataCount = 3
 
 // Summary は1回の実行（1 target × 1モデル）の集計。
 //
@@ -101,6 +132,15 @@ type Summary struct {
 	// 弁別力: ゴールドラベル（良/中/悪）とスコアの順位相関（1.0が完全一致）。
 	LabelRankCorrelation float64            `json:"label_rank_correlation"`
 	MeanScoreByLabel     map[string]float64 `json:"mean_score_by_label"`
+
+	// 交絡: 入力の文字数とスコアの順位相関。**弁別力と必ず並べて読む。**
+	// ラベルとの相関が高くてもこれが同じくらい高ければ、その測定は
+	// 「内容の質を測れている」ことの証拠にならない（長さを測っているだけでも
+	// 同じ数字が出る）。#1593 で入れた。
+	LengthRankCorrelation float64 `json:"length_rank_correlation"`
+	// LengthStrata は文字数で層化した中での弁別力。長さを揃えた中で
+	// good/bad が分かれるかを見る。
+	LengthStrata []LengthStratum `json:"length_strata,omitempty"`
 
 	// 指示遵守率: 違反が1件も無かった実行の割合（破損した実行は分母から外す）
 	ComplianceRate  float64        `json:"compliance_rate"`
@@ -203,6 +243,8 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 	// ケース単位: 再現性と、弁別力に使う代表値（破損を除いた平均）
 	labelSeries := make([]float64, 0, len(byCase))
 	scoreSeries := make([]float64, 0, len(byCase))
+	charSeries := make([]float64, 0, len(byCase))
+	scored := make([]CaseSummary, 0, len(byCase))
 	stddevs := make([]float64, 0, len(byCase))
 	scoresByLabel := map[string][]float64{}
 	for _, id := range caseOrder {
@@ -218,7 +260,8 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 			}
 			scores = append(scores, o.Score)
 		}
-		cs := CaseSummary{CaseID: id, Label: runs[0].Label, Runs: len(runs), BrokenRuns: brokenRuns}
+		cs := CaseSummary{CaseID: id, Label: runs[0].Label, Runs: len(runs), BrokenRuns: brokenRuns,
+			InputChars: runs[0].InputChars}
 		if len(scores) > 0 {
 			cs.MeanScore = Mean(scores)
 			cs.ScoreStdDev = StdDev(scores)
@@ -229,6 +272,8 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 			if rank, ok := labelRank[cs.Label]; ok {
 				labelSeries = append(labelSeries, rank)
 				scoreSeries = append(scoreSeries, cs.MeanScore)
+				charSeries = append(charSeries, float64(cs.InputChars))
+				scored = append(scored, cs)
 				scoresByLabel[cs.Label] = append(scoresByLabel[cs.Label], cs.MeanScore)
 			}
 		}
@@ -242,6 +287,8 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 	}
 	sort.Strings(s.UnstableCaseIDs)
 	s.LabelRankCorrelation = SpearmanCorrelation(labelSeries, scoreSeries)
+	s.LengthRankCorrelation = SpearmanCorrelation(charSeries, scoreSeries)
+	s.LengthStrata = LengthStrata(scored, LengthStrataCount)
 	for label, xs := range scoresByLabel {
 		s.MeanScoreByLabel[label] = Mean(xs)
 	}
@@ -254,4 +301,77 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 	}
 	s.CostIsEstimated = estimated
 	return s
+}
+
+// LengthStrata はケースを入力文字数で層化し、層ごとの弁別力を返す。
+//
+// 層化するのは「スコアが内容の質ではなく長さに従っているだけ」の可能性を
+// 切り離すため。ラベルと文字数が相関しているセットでは、層化しない弁別力は
+// どちらの仮説でも同じ値になる（#1593）。層の中では長さがほぼ揃うので、
+// そこで good/bad が分かれるなら長さでは説明できない。
+//
+// 境界は等件数で切るが、同じ文字数のケースは同じ層へ入れる（境界を跨がせない）。
+// 跨がせると並べ替えの安定性しだいで層の構成が変わり、同じ入力・同じ出力から
+// 違う数字が出る。ハーネスの目的（誰が測っても同じ数字）に反する。
+//
+// 1層あたり2件を割るときは層化しない（nil を返す）。数件では層内の相関が
+// 1件の入れ替わりで大きく動き、読んでも判断材料にならない。
+func LengthStrata(cases []CaseSummary, strata int) []LengthStratum {
+	if strata < 2 || len(cases) < strata*2 {
+		return nil
+	}
+	sorted := slices.Clone(cases)
+	// 文字数が同じときは CaseID で決める。並べ替えの不安定さで層の構成が
+	// 変わらないようにするため。
+	sort.Slice(sorted, func(a, b int) bool {
+		if sorted[a].InputChars != sorted[b].InputChars {
+			return sorted[a].InputChars < sorted[b].InputChars
+		}
+		return sorted[a].CaseID < sorted[b].CaseID
+	})
+
+	out := make([]LengthStratum, 0, strata)
+	start := 0
+	for i := 1; i <= strata && start < len(sorted); i++ {
+		end := i * len(sorted) / strata
+		if i == strata {
+			end = len(sorted)
+		}
+		if end <= start {
+			continue
+		}
+		// 同じ文字数のケースは同じ層へ入れる。
+		for end < len(sorted) && sorted[end].InputChars == sorted[end-1].InputChars {
+			end++
+		}
+		out = append(out, newLengthStratum(sorted[start:end]))
+		start = end
+	}
+	return out
+}
+
+func newLengthStratum(group []CaseSummary) LengthStratum {
+	st := LengthStratum{
+		MinChars:         group[0].InputChars,
+		MaxChars:         group[len(group)-1].InputChars,
+		Cases:            len(group),
+		LabelCounts:      map[string]int{},
+		MeanScoreByLabel: map[string]float64{},
+	}
+	labels := make([]float64, 0, len(group))
+	scores := make([]float64, 0, len(group))
+	byLabel := map[string][]float64{}
+	for _, c := range group {
+		st.LabelCounts[c.Label]++
+		labels = append(labels, labelRank[c.Label])
+		scores = append(scores, c.MeanScore)
+		byLabel[c.Label] = append(byLabel[c.Label], c.MeanScore)
+	}
+	// ラベルが1種類しか無い層では相関が定義できない。SpearmanCorrelation が
+	// 0 を返すので、LabelCounts を見ずに 0 を「分かれていない」と読まないこと。
+	st.LabelRankCorrelation = SpearmanCorrelation(labels, scores)
+	for label, xs := range byLabel {
+		st.MeanScoreByLabel[label] = Mean(xs)
+	}
+	return st
 }

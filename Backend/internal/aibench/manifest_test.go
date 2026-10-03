@@ -114,3 +114,41 @@ func TestゴールデンセットがCommitされている(t *testing.T) {
 		})
 	}
 }
+
+// ラベルと文字数が相関しているセットでは、弁別力が高いことと「内容の質を
+// 測れている」ことが同じ数字になり区別できない（#1593）。ケースを足すときに
+// この相関を悪化させないよう、現状の値を上限として固定する。
+//
+// 上限は「今より悪くしない」ためのもので、目標値ではない。resume は #1593 で
+// 長さを揃えたケースを16件足して +0.944 → +0.456 まで下げた。es と
+// interview-report は未対応なので、現状値をそのまま天井にしてある
+// （下げる作業は別Issue。ここで落として赤くしても直る当てが無い）。
+func Testゴールデンセットのラベルと文字数が相関しすぎていない(t *testing.T) {
+	tests := []struct {
+		file    string
+		maxCorr float64
+	}{
+		{file: "es.jsonl", maxCorr: 0.90},               // 実測 +0.852（未対応）
+		{file: "resume.jsonl", maxCorr: 0.60},           // 実測 +0.456（#1593 で対応）
+		{file: "interview-report.jsonl", maxCorr: 0.96}, // 実測 +0.943（未対応）
+	}
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			path := filepath.Join("..", "..", "..", "docs", "research", "ai-eval", tt.file)
+			cases, err := LoadManifest(path)
+			if err != nil {
+				t.Fatalf("%s の読み込みに失敗: %v", path, err)
+			}
+			labels := make([]float64, 0, len(cases))
+			chars := make([]float64, 0, len(cases))
+			for _, c := range cases {
+				labels = append(labels, labelRank[c.Label])
+				chars = append(chars, float64(c.InputChars()))
+			}
+			corr := SpearmanCorrelation(labels, chars)
+			if corr > tt.maxCorr {
+				t.Errorf("ラベルと文字数の順位相関 = %+.3f, 上限 %.2f を超えた（長さだけでラベルが当たるセットになっている）", corr, tt.maxCorr)
+			}
+		})
+	}
+}

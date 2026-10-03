@@ -279,3 +279,81 @@ func TestDiff前提の違いを警告する(t *testing.T) {
 		})
 	}
 }
+
+// 交絡の指標（#1593）。ラベルとの相関が高くても文字数との相関が同じくらい高ければ
+// 「内容の質を測れている」ことの証拠にならない。両方を必ず出せているかを固定する。
+func Test交絡指標と層化した弁別力(t *testing.T) {
+	// 長さとラベルを意図的にずらす: 各長さ帯に good と bad が1件ずつ入る。
+	// ラベルとの相関は 1.0 になるが、文字数との相関は 0.2 にしかならない。
+	obs := []Observation{
+		{CaseID: "s1-good", Label: LabelGood, Run: 1, Score: 0.80, InputChars: 100},
+		{CaseID: "s1-bad", Label: LabelBad, Run: 1, Score: 0.30, InputChars: 110},
+		{CaseID: "s2-good", Label: LabelGood, Run: 1, Score: 0.85, InputChars: 200},
+		{CaseID: "s2-bad", Label: LabelBad, Run: 1, Score: 0.35, InputChars: 210},
+		{CaseID: "s3-good", Label: LabelGood, Run: 1, Score: 0.90, InputChars: 300},
+		{CaseID: "s3-bad", Label: LabelBad, Run: 1, Score: 0.40, InputChars: 310},
+	}
+	s := Aggregate(TargetResume, "gpt-4o-mini", "openai:/responses", "2026-09-28T00:00:00Z", obs)
+
+	// good/bad 各3件でスコアが全て異なるため、ラベル側の同順位に押し下げられて
+	// 1.0 には届かない（順序自体は完全に正しい）。README の注意書きと同じ理由。
+	if math.Abs(s.LabelRankCorrelation-0.878310) > 1e-6 {
+		t.Errorf("弁別力 = %v, want 0.878310", s.LabelRankCorrelation)
+	}
+	if math.Abs(s.LengthRankCorrelation-0.2) > 1e-9 {
+		t.Errorf("文字数との相関 = %v, want 0.2", s.LengthRankCorrelation)
+	}
+	if len(s.LengthStrata) != LengthStrataCount {
+		t.Fatalf("層の数 = %d, want %d", len(s.LengthStrata), LengthStrataCount)
+	}
+	// 各層は good/bad が1件ずつで、層の中でも順位が正しい（= 長さでは説明できない）
+	for i, want := range [][2]int{{100, 110}, {200, 210}, {300, 310}} {
+		st := s.LengthStrata[i]
+		if st.MinChars != want[0] || st.MaxChars != want[1] {
+			t.Errorf("層%d の文字数帯 = %d-%d, want %d-%d", i, st.MinChars, st.MaxChars, want[0], want[1])
+		}
+		if st.Cases != 2 || st.LabelCounts[LabelGood] != 1 || st.LabelCounts[LabelBad] != 1 {
+			t.Errorf("層%d の構成 = %d件 %v", i, st.Cases, st.LabelCounts)
+		}
+		if math.Abs(st.LabelRankCorrelation-1) > 1e-9 {
+			t.Errorf("層%d の弁別力 = %v, want 1", i, st.LabelRankCorrelation)
+		}
+	}
+	// ケース明細にも文字数を残す（後から交絡を検算できるようにする）
+	if s.CaseDetails[0].InputChars != 100 {
+		t.Errorf("ケース明細の文字数 = %d, want 100", s.CaseDetails[0].InputChars)
+	}
+}
+
+func TestLengthStrata(t *testing.T) {
+	cs := func(id string, label string, chars int) CaseSummary {
+		return CaseSummary{CaseID: id, Label: label, InputChars: chars, MeanScore: 0.5}
+	}
+	t.Run("1層2件を割るなら層化しない", func(t *testing.T) {
+		in := []CaseSummary{cs("a", LabelGood, 100), cs("b", LabelBad, 200), cs("c", LabelMid, 300),
+			cs("d", LabelGood, 400), cs("e", LabelBad, 500)}
+		if got := LengthStrata(in, 3); got != nil {
+			t.Errorf("LengthStrata = %v, want nil（5件では1層2件を割る）", got)
+		}
+	})
+	t.Run("同じ文字数は同じ層へ入れる", func(t *testing.T) {
+		// 境界（2件目と3件目の間）に同じ文字数が並ぶ。跨がせると並べ替えの
+		// 安定性しだいで層の構成が変わり、同じ入力から違う数字が出る。
+		in := []CaseSummary{cs("a", LabelGood, 100), cs("b", LabelBad, 150), cs("c", LabelMid, 150),
+			cs("d", LabelGood, 200), cs("e", LabelBad, 300), cs("f", LabelMid, 400)}
+		got := LengthStrata(in, 3)
+		if len(got) != 3 {
+			t.Fatalf("層の数 = %d, want 3", len(got))
+		}
+		if got[0].Cases != 3 || got[0].MaxChars != 150 {
+			t.Errorf("1層目 = %d件 max=%d, want 3件 max=150", got[0].Cases, got[0].MaxChars)
+		}
+		total := 0
+		for _, st := range got {
+			total += st.Cases
+		}
+		if total != len(in) {
+			t.Errorf("層の合計件数 = %d, want %d", total, len(in))
+		}
+	})
+}
