@@ -27,6 +27,7 @@ from models import (  # noqa: F401 — re-export for import main / tests
     CompanyHintsResponse,
     ESReviewRequest,
     ESReviewResponse,
+    ESStarBreakdown,
     ReviewRequest,
     ReviewResponse,
     VectorReembedRequest,
@@ -43,7 +44,7 @@ from services.embed import (  # noqa: F401
     embed_texts,
     retrieve_docs,
 )
-from services.es_review import _run_es_review  # noqa: F401
+from services.es_review import _run_es_review, count_es_chars  # noqa: F401
 from services.hints import (  # noqa: F401
     _parse_hints_from_text,
     _run_hints_web_search,
