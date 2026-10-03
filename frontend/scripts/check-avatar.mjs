@@ -82,11 +82,25 @@ function inspect(j) {
   }
 
   const hit = (list, words) => list.filter((n) => words.some((w) => norm(n).includes(norm(w))))
+  // 実行時(avatar-capabilities.ts findBone)と同じ優先順にする。
+  // 単語の並び順が優先度で、Head と Neck の両方があるモデルでは Head を使う。
+  // ここだけ走査順で先に出たものを表示すると、実行時と食い違って誤解を生む。
+  const hitOrdered = (list, words) => {
+    for (const w of words) {
+      const exact = list.find((n) => norm(n) === norm(w))
+      if (exact) return exact
+    }
+    for (const w of words) {
+      const partial = list.find((n) => norm(n).includes(norm(w)))
+      if (partial) return partial
+    }
+    return null
+  }
 
   return {
     skins, animations, morphCount, vrmVersion,
     nodeCount: nodes.length,
-    headBone: humanoidHead ?? (hit(nodes, HEAD_WORDS)[0] ?? null),
+    headBone: humanoidHead ?? hitOrdered(nodes, HEAD_WORDS),
     blink: [...hit(vrmExpr, BLINK_WORDS), ...hit(morphNames, BLINK_WORDS)],
     mouth: [...hit(vrmExpr, MOUTH_WORDS), ...hit(morphNames, MOUTH_WORDS)],
     jaw: hit(nodes, ['jaw', '顎']),
