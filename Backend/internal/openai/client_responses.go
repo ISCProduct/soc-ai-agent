@@ -348,7 +348,8 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 
 	var lastErr error
 	// attempts を 5 回に増やし、各リクエストにタイムアウトを設定
-	for attempt := 1; attempt <= 5; attempt++ {
+	const maxAttempts = 5
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		ctxReq, cancel := context.WithTimeout(ctx, 60*time.Second)
 		messageInput := []map[string]any{
 			{
@@ -386,10 +387,9 @@ func (cli *Client) Responses(ctx context.Context, input string, modelOverride ..
 			println("OpenAI API error (attempt", attempt, "):", err.Error())
 		}
 
-		// 指数バックオフ + ジッター
-		backoff := time.Duration(1<<attempt) * time.Second
-		jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
-		time.Sleep(backoff + jitter)
+		if stop := waitBeforeRetry(ctx, lastErr, attempt, maxAttempts); stop {
+			return "", lastErr
+		}
 	}
 
 	if lastErr == nil {
@@ -411,7 +411,8 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 	}
 
 	var lastErr error
-	for attempt := 1; attempt <= 5; attempt++ {
+	const maxAttempts = 5
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		ctxReq, cancel := context.WithTimeout(ctx, 60*time.Second)
 		messageInput := []map[string]any{
 			{
@@ -458,15 +459,45 @@ func (cli *Client) ResponsesWithTemperature(ctx context.Context, systemPrompt, u
 			println("OpenAI API error (attempt", attempt, "):", err.Error())
 		}
 
-		backoff := time.Duration(1<<attempt) * time.Second
-		jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
-		time.Sleep(backoff + jitter)
+		if stop := waitBeforeRetry(ctx, lastErr, attempt, maxAttempts); stop {
+			return "", lastErr
+		}
 	}
 
 	if lastErr == nil {
 		lastErr = errors.New("no response from model")
 	}
 	return "", lastErr
+}
+
+// waitBeforeRetry は次の試行へ進む前の待機を担う。打ち切るべきなら true を返す（#1605）。
+//
+// 打ち切る条件は3つ。いずれも responsesWithMaxTokens（#1595）で先に入れたものと同じで、
+// Responses / ResponsesWithTemperature だけ素の time.Sleep が残っていた。
+//
+//  1. 429 以外の 4xx。投げ直しても同じ応答になるので待つ意味が無い。
+//     5回とも同じ400を踏んでバックオフ分（2+4+8+16+32=62秒）だけ空転していた。
+//  2. 最後の試行のあと。待ってから失敗を返すだけで、62秒のうち最後の32秒は完全な無駄。
+//  3. 待機中の ctx キャンセル。time.Sleep は ctx を見ないため、学生が画面を
+//     閉じてもサーバ側は最大62秒寝ていた。
+//
+// 判定に isRetryableAPIErr を使わないのは responsesWithMaxTokens と同じ理由で、
+// *ResponsesAPIError 以外に false を返すため、ネットワークエラーや60秒タイムアウトの
+// 再試行まで止めてしまう。ここでは「API が明示的に 4xx を返した」場合だけ打ち切る。
+func waitBeforeRetry(ctx context.Context, lastErr error, attempt, maxAttempts int) bool {
+	var apiErr *ResponsesAPIError
+	if errors.As(lastErr, &apiErr) && !apiErr.Retryable() {
+		return true
+	}
+	if attempt >= maxAttempts {
+		return false // ループ側が終わるので待たない。打ち切りではない
+	}
+	select {
+	case <-ctx.Done():
+		return true
+	case <-time.After(responsesBackoff(attempt)):
+		return false
+	}
 }
 
 // ResponsesWithMaxTokens は Responses API で出力上限を指定してテキストを取得する。
