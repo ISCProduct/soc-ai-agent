@@ -44,7 +44,7 @@ jobs:
 
           sys.path.insert(0, ".github/scripts")
           from backlog_client import (
-              load_backlog_env, resolve_bl_base, set_issue_status,
+              load_backlog_env, resolve_bl_base, set_issue_status, resolve_status_id,
               parse_priority_id, should_skip_backlog_sync,
               bl_request as _bl_request,
           )
@@ -97,6 +97,22 @@ jobs:
               """タイトルから [PROJ-N] プレフィックスを除去"""
               return re.sub(rf'^\[{re.escape(PROJ_KEY)}-\d+\]\s*', '', title).strip()
 
+          def sync_status(bl_key, name, fallback):
+              """ステータス名から statusId を引いて更新する。
+
+              ID を直書きすると、プロジェクト側でワークフローを組み替えたときに
+              `statusId` が認識されず「変化のない更新」として 400
+              `No comment content.` (code 7) で弾かれる。pr-to-backlog.yml と
+              backlog-status-backfill.yml は既に名前で引いていたが、ここだけ
+              4 / 1 を直書きしていた（SOCAIAGENT-415 のクローズで発生）。
+              """
+              status_id = resolve_status_id(BL_BASE, API_KEY, PROJ_KEY, name, fallback)
+              if status_id is None:
+                  print(f"ステータス '{name}' を解決できないため {bl_key} は更新しません。",
+                        file=sys.stderr)
+                  sys.exit(1)
+              set_issue_status(BL_BASE, API_KEY, bl_key, status_id)
+
           # ---- opened: Backlog 課題を新規作成 ----
           if ACTION == 'opened':
               project    = bl_request('GET', f"/projects/{PROJ_KEY}")
@@ -147,7 +163,7 @@ jobs:
               })
               print(f"Backlog 課題を更新しました: {bl_key}")
 
-          # ---- closed: Backlog 課題を完了（ステータス 4）にする ----
+          # ---- closed: Backlog 課題を完了にする ----
           elif ACTION == 'closed':
               bl_key = extract_bl_key(GH_BODY, GH_TITLE)
               if not bl_key:
@@ -155,13 +171,13 @@ jobs:
                   sys.exit(0)
               # 既に完了なら何もしない。Backlog 側で先に完了にしてから GitHub を
               # 閉じた場合、変更なしの更新になり Backlog が 400 で拒否する。
-              set_issue_status(BL_BASE, API_KEY, bl_key, 4)
+              sync_status(bl_key, '完了', 4)
 
-          # ---- reopened: Backlog 課題を未対応（ステータス 1）に戻す ----
+          # ---- reopened: Backlog 課題を未対応に戻す ----
           elif ACTION == 'reopened':
               bl_key = extract_bl_key(GH_BODY, GH_TITLE)
               if not bl_key:
                   print("Backlog 課題キーが見つかりません。スキップします。")
                   sys.exit(0)
-              set_issue_status(BL_BASE, API_KEY, bl_key, 1)
+              sync_status(bl_key, '未対応', 1)
           PYEOF
