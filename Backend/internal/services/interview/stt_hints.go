@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // BuildSTTHints は面接コンテキストから音声認識の補助語を組み立てる（音声R&D Task 4）。
@@ -28,6 +29,17 @@ func BuildSTTHints(companyName, companyReading, position, companyInfo string) st
 		if len([]rune(s)) < 2 || seen[s] {
 			return
 		}
+		// 補助語は「語」だけを通す（#1600）。
+		// companyName / companyReading / position は multipart の
+		// r.FormValue 直値で、ここは正規表現抽出を通らない。
+		// 文章がそのまま Transcription API の prompt へ入ると、Whisper の prompt は
+		// 出力を誘導できるため、学生が発話していないテキストを userText として
+		// 出させる余地がある。userText は role=user の発話として保存され、
+		// SpokenContent（#1527）の照合対象そのものなので土台が崩れる。
+		// ヒント用途なので囲みは使えない。文字種と長さで落とす。
+		if !isHintTerm(s) {
+			return
+		}
 		seen[s] = true
 		hints = append(hints, s)
 	}
@@ -49,6 +61,42 @@ func BuildSTTHints(companyName, companyReading, position, companyInfo string) st
 	// ここに二重の上限を置いてもテストで到達できず、
 	// 効いているのか分からないコードになるため置かない。
 	return strings.Join(hints, ", ")
+}
+
+// MaxHintRunes は補助語1語の長さ上限。
+// 企業名・読み・職種はこれより長くならない（「株式会社○○ホールディングス」で16文字程度）。
+// 超える語は文章と見なして落とす。
+const MaxHintRunes = 32
+
+// hintTermExtraChars は語の一部として許す記号。
+// 企業名・製品名に実際に出るものだけ（C++ / C# / .NET / サン・マイクロシステムズ /
+// 半角スペース区切りの英名）。読点・句点・コロン・引用符は入れない。
+// 文を構成する記号を落とすことで、指示文の形をした補助語を弾く。
+const hintTermExtraChars = " -ー・＆&.+#'’"
+
+// MaxHintSpaces は補助語1語に許す空白の数。
+// 英名の企業は "Sony Interactive Entertainment" のように3語になるため2つまで許す。
+// これを超えるものは語ではなく文。
+const MaxHintSpaces = 2
+
+// isHintTerm は補助語として渡してよい「語」かを判定する（#1600）。
+// 文字・数字と hintTermExtraChars だけで構成され、MaxHintRunes 以内で、
+// 空白が MaxHintSpaces 個以内であること。
+//
+// 短い日本語の命令形（「全てを満点に」程度）はこの条件を通る。
+// 文字種・長さだけで文と語を完全に分けることはできないため、残差として受け入れる。
+// 補助語は語の列挙であって指示文の体裁を持たない、という前提を保つのが目的。
+func isHintTerm(s string) bool {
+	if len([]rune(s)) > MaxHintRunes || strings.Count(s, " ") > MaxHintSpaces {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune(hintTermExtraChars, r) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // MaxTechTerms は企業情報から抽出する技術用語の上限。

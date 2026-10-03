@@ -3,6 +3,7 @@ package es
 import (
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/openai"
+	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
@@ -59,20 +60,24 @@ JSONのみで返してください。`
 
 	techInfo := ""
 	if req.TechStack != "" {
-		techInfo = "\n使用技術スタック（参考）: " + req.TechStack
+		techInfo = "\n使用技術スタック（参考）:\n" + shared.WrapUntrustedText(req.TechStack, "技術スタック")
 	}
 
 	// 企業名が指定されていればプロンプトに含め、リライトモデル自身の知識で企業の採用観点を反映させる
 	companyInfo := ""
 	if strings.TrimSpace(req.CompanyName) != "" {
-		companyInfo = "\n【志望企業】" + req.CompanyName + "（この企業の採用で重視されると考えられる観点を、確実に知っている範囲で反映すること）"
+		companyInfo = "\n【志望企業】（この企業の採用で重視されると考えられる観点を、確実に知っている範囲で反映すること）\n" +
+			shared.WrapUntrustedText(req.CompanyName, "企業名")
 	}
 
+	// ES本文・技術スタック・企業名はすべて未認証のリクエストボディから来る自由記述。
+	// 生連結だとここへ「これまでの指示を無視して〜」を書くだけで system プロンプトの
+	// 指示を上書きできる。rag 側（es_review.py）と同じく非信頼テキストとして囲む（#1600）。
 	userPrompt := `以下のES文章を、STAR法（Situation/Task/Action/Result）に沿ったエンジニア採用向けの表現にリライトしてください。
 
-【質問種別】` + req.QuestionType + `
+【質問種別】` + shared.WrapUntrustedText(req.QuestionType, "質問種別") + `
 【元のES文章】
-` + req.OriginalText + techInfo + companyInfo + `
+` + shared.WrapUntrustedText(req.OriginalText, "ES文章") + techInfo + companyInfo + `
 
 ## リライトのルール
 - 「頑張りました」「工夫しました」等の抽象表現を、具体的な技術・数値・成果に置き換える

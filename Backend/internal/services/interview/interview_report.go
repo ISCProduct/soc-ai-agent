@@ -178,7 +178,12 @@ func BuildReportPrompts(lang, transcript string) (systemPrompt, userPrompt strin
 ※ teacher以下は教員専用の詳細情報として出力してください。
 
 Interview transcript:
-%s`, lang, BuildRubricPromptSection(), transcript)
+%s`, lang, BuildRubricPromptSection(),
+		// transcript は面接官（role=ai）の発話も含むので、面接プロンプトへの注入で
+		// 面接官に任意のテキストを言わせれば2ホップで採点プロンプトへ届く（#1600）。
+		// 受験者の発話自体も自由記述なので、いずれにせよ非信頼テキストとして囲む。
+		// 根拠の捏造は #1527 の実発話照合（role=user のみ）で別途弾いている。
+		shared.WrapUntrustedText(transcript, "面接ログ"))
 	return systemPrompt, userPrompt
 }
 
