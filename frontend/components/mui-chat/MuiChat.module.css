@@ -46,7 +46,8 @@
 .messageBubble {
     padding: 10px 12px !important;
     max-width: 88% !important;
-    border-radius: 12px !important;
+    /* 角丸は役割ごとに変えるので sx 側で指定する。
+       ここで !important を付けると上書きできない。 */
 }
 
 /* 選択肢ボタン */
