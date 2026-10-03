@@ -200,7 +200,7 @@ export default function PageContent() {
         />
       </Stack>
 
-      <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
+      <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
         <AdminTableWrapper>
           <TableHead>
             <TableRow sx={{ bgcolor: '#f5f5f5' }}>

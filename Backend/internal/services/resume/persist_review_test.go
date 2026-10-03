@@ -76,7 +76,7 @@ func TestPersistReview_レビューと指摘項目を保存する(t *testing.T) 
 	s := &ResumeService{repo: repo} // crossFeature は nil（連携は別途 nil ガード済み）
 
 	doc := &models.ResumeDocument{ID: 7, UserID: 8, SessionID: "sess-1"}
-	review := &models.ResumeReview{Score: 80, Summary: "よくまとまっています"}
+	review := &models.ResumeReview{Score: intPtr(80), Summary: "よくまとまっています"}
 	items := []models.ResumeReviewItem{{Message: "志望動機が薄い"}, {Message: "数値が無い"}}
 
 	if err := s.persistReview(doc, review, items); err != nil {

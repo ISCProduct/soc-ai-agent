@@ -194,15 +194,28 @@ jobs:
           # 判定できなかった場合は停止しない(fail-closed)。続行すると、上のロールバック
           # 事故をAPI障害のたびに再発させうる。見送りの代償は「本番が最大1時間起動した
           # まま残る」だけなので、ジョブを失敗させてDiscordへ流し、人が気づける形にする。
+          # 数えるのは in_progress、つまり「実際に走り出したデプロイ」だけ。
+          #
+          # queued(ランナー待ち) / waiting(承認待ち) / pending / requested は、まだ
+          # 本番を一度も触っていない。これらまで「実行中」として停止を見送ると、
+          # 承認待ちのまま放置されたデプロイ1本で毎時の停止が無期限に見送られ、
+          # ECSと(このジョブが止めそこねた)RDSが承認まで課金され続ける(#1563 の指摘)。
+          #
+          # 未開始のデプロイの真上で停止して良い理由:
+          #   - 停止は「ECSを0にしてからRDSを止める」順で、開始前に完了している。
+          #     デプロイ側の「Record production service state」は落ち着いた desired=0 を
+          #     読むので was_down=true になり、一時起動も0への後片付けも正しく走る。
+          #   - デプロイ側の「Start production RDS if stopped」は stopped を見るたび
+          #     start を打ち直し、stopping の数分も待つループなので、直前に止めた
+          #     RDSは自力で起動し直される。
+          # 逆に in_progress のデプロイは、縮退やRDS停止がその最中に割り込む
+          # （2026-09-25 の #1518 はこの形）ため、従来どおり見送る。
           prod_deploy_running() {
             local out attempt
-            # status は in_progress / queued 以外にも waiting(承認待ち) / pending /
-            # requested という未完了状態がある。列挙すると新しい状態が増えたときに
-            # 「実行中0件」と誤判定するため、completed 以外を未完了として数える。
             for attempt in 1 2 3; do
               if out=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deployment.yml \
                 --branch main --limit 20 --json status \
-                --jq '[.[] | select(.status != "completed")] | length' 2>/tmp/gh_run_list_err); then
+                --jq '[.[] | select(.status == "in_progress")] | length' 2>/tmp/gh_run_list_err); then
                 # 取得できたのに空なら jq の失敗。0件と読み替えず「実行中」に倒す。
                 if [ "$out" == "0" ]; then return 0; fi
                 return 1
@@ -215,8 +228,45 @@ jobs:
             return 2
           }
 
+          # ECSの縮退を実際に行ったかどうか。行った後でデプロイを検知した場合、
+          # ここを見て起動状態を元へ戻す。
+          #
+          # 入口のガードを通った直後にデプロイが始まると、4サービスの縮退(1〜2分)の
+          # 途中で deployment.yml の「Record production service state」が
+          # desired の合計を読む。合計が非ゼロ(縮退の途中)だと was_down=false と
+          # 記録され、デプロイ側は一時起動も0への後片付けもしない。そのまま縮退が
+          # 完了すると、安定待ちは desired=0 を安定状態として通過し、スモークだけが
+          # 失敗して本番は停止したまま残る(#1534 の指摘)。
+          # 後段のガードで見送るときに縮退を戻せば、デプロイ側がどちらを読んでいても
+          # 破綻しない(was_down=true なら一時起動と後片付けが、false なら稼働状態が続く)。
+          SCALED_DOWN=""
+
+          # restore_scaled_down は縮退したECSを起動状態(desired=1)へ戻す。
+          # 起動/停止の手順(min_capacity の同期・起動順)は prod-scale.sh を正とする。
+          # ここで desired だけ戻すと min_capacity=0 のままターゲット追跡が0へ縮退する。
+          # ponytail: 復元先は1固定。オートスケールで2以上だった場合は max まで自力で戻る。
+          restore_scaled_down() {
+            [ -n "$SCALED_DOWN" ] || return 0
+            echo "::notice::縮退済みの本番ECSを desired=1 へ戻します(デプロイと競合したため)"
+            if ./automation/ops/prod-scale.sh 1; then
+              SCALED_DOWN=""
+              return 0
+            fi
+            echo "::error::縮退した本番ECSを desired=1 へ戻せませんでした。手動で automation/ops/prod-scale.sh 1 を実行してください"
+            echo "縮退した本番ECSを戻せませんでした(本番が停止したまま残っています)" \
+              >> "$RUNNER_TEMP/alert-reason.txt"
+            return 1
+          }
+
           # 停止処理を進めて良いかを見て、進めてはいけない場合はこのステップを終える。
           # $1 には「何を見送ったか」をログ・通知に出すための名前を渡す。
+          # 既にECSを縮退させていた場合は、見送る前に起動状態へ戻す。
+          # 「見送る」だけでは足りない、という #1557 の指摘はこの関数の中で満たす。
+          # ECS を 0 にした後で見送ると、RDS を残してもデプロイ中のタスクが起動できず、
+          # 次の毎時実行まで本番が止まったままになるため、見送る前に必ず戻す。
+          # #1557 は同じことを呼び出し側で(静かな判定関数 prod_deploy_running_quiet を
+          # 足して)やっていたが、復元をこの関数へ入れた今は呼び出し側の分岐が要らない。
+          # 判定不能(取得失敗)も「デプロイ中」と同じ扱いに倒すのは両者共通。
           guard_stop_against_deploy() {
             # set -e 下では「非0を返す素の呼び出し」でステップが落ちる。
             # || で受けて errexit を抑えつつ戻り値を残す。
@@ -226,12 +276,16 @@ jobs:
               0) return 0 ;;
               1)
                 echo "::notice::本番デプロイが実行中のため、$1 は見送ります。次の毎時実行で反映されます"
+                # 復元に失敗したら黙って終わらせない(本番が停止したまま残るため)。
+                restore_scaled_down || exit 1
                 exit 0
                 ;;
               *)
                 echo "本番デプロイの実行状況を取得できず、$1 を見送りました(本番が起動したまま残っています)" \
                   > "$RUNNER_TEMP/alert-reason.txt"
                 echo "::error::本番デプロイの実行状況を取得できませんでした。デプロイ中に停止すると本番が起動不能になるため $1 は行いません(permissions の actions:read とGitHub APIの状況を確認してください)"
+                # 判定不能もデプロイ中と同じ扱い(fail-closed)。縮退済みなら戻してから失敗させる。
+                restore_scaled_down || true
                 exit 1
                 ;;
             esac
@@ -312,6 +366,12 @@ jobs:
             aws ecs update-service --cluster "$PROJECT_NAME" --service "$SERVICE" \
               --desired-count "$DESIRED" > /dev/null
             echo "$SERVICE updated: $CURRENT -> $DESIRED"
+            # 「起動していたものを落とした」ときだけ控える。元から0のサービスを
+            # 数えると、停止日にデプロイが重なるたび本番を無用に起動してしまう。
+            # CURRENT が読めなかった場合("" / None)は稼働中だったかもしれない側へ倒す。
+            if [ "$DESIRED" == "0" ] && [ "$CURRENT" != "0" ]; then
+              SCALED_DOWN=1
+            fi
           done
 
           if [ "$DESIRED" == "0" ]; then
@@ -319,6 +379,9 @@ jobs:
             # デプロイが始まっていないかを、RDSを止める直前にもう一度見る。
             # 確認→停止のあいだに始まったデプロイを取りこぼすと、起動したばかりの
             # backend からDB接続を切ることになる(2026-09-25 の事象そのもの)。
+            # ここへ来た時点で ECS は既に 0 なので、見送るだけでは本番が停止したまま
+            # 残る(#1557)。guard_stop_against_deploy が restore_scaled_down で
+            # 起動状態へ戻してから抜けるため、ここは呼ぶだけでよい。
             guard_stop_against_deploy "RDS停止"
 
             # ECSを先に0にしてから(上のループで完了済み)RDSを止める。

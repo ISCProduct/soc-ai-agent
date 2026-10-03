@@ -14,9 +14,9 @@
 # --- LangChain エコシステム ---
 # crewai は依存衝突のため requirements.txt から除外済み（langchain 上限は crewai 制約によらない）。
 # 2026-08 に 1.x 系列へ移行（#894）。langchain-community は未使用のため削除。
-langchain>=1.4.0,<2.0
-langchain-core>=1.6.3,<2.0
-langchain-openai>=1.6.2,<2.0
+langchain>=1.4.2,<2.0
+langchain-core>=1.6.5,<2.0
+langchain-openai>=1.6.6,<2.0
 langchain-text-splitters>=1.0,<2.0
 
 # --- ベクトルストア ---
@@ -57,4 +57,4 @@ prometheus-client>=0.26.0,<1.0
 
 # --- エラートラッキング（#1185） ---
 # FastAPI / Starlette 統合付き。3.x は未検証のため上限を設定する。
-sentry-sdk>=2.69.2,<3.0
+sentry-sdk>=2.70.0,<3.0

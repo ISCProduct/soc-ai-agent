@@ -37,7 +37,7 @@ python3 -m unittest discover -s automation/discord -p 'notify_progress_test.py' 
 `wait=true` で投稿確認ができた場合のみ成功終了する。
 失敗時は終了コード1。タイムアウト等で送信済みの可能性があるため、自動再送しない。
 チャンネルの履歴を確認してから再実行する。HTTP 429の場合は時間を置く。
-## 毎週日曜日18:00（日本時間）の定期通知
+## 毎週日曜日18:07（日本時間）の定期通知
 
 GitHub Actions の `Discord Progress Reminder` が毎週日曜日09:07 UTC
 （18:07 JST）に実行する。毎時0分はスケジュールが欠落しやすいため7分にずらしている

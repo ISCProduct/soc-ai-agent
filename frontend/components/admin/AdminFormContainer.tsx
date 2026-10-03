@@ -49,7 +49,7 @@ export function AdminFormContainer({
       />
       <Card
         elevation={0}
-        sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}
+        sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}
       >
         <CardContent sx={{ p: { xs: 2, sm: 3 } }}>{children}</CardContent>
       </Card>
