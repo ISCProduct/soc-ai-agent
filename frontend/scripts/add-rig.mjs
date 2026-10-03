@@ -145,7 +145,10 @@ function addRig(path) {
   function appendView(buf) {
     const pad = alignTo4(extraLen)
     if (pad > 0) { extra.push(Buffer.alloc(pad)); extraLen += pad }
-    const view = { byteOffset: bin.length + extraLen, byteLength: buf.length }
+    // buffer は glTF の必須プロパティ。入れ忘れると three の GLTFLoader が
+    // loadBuffer で json.buffers[undefined] を引いて落ちる
+    // （Cannot read properties of undefined (reading 'type')）。
+    const view = { buffer: 0, byteOffset: bin.length + extraLen, byteLength: buf.length }
     extra.push(buf); extraLen += buf.length
     newViews.push(view)
     return json.bufferViews.length + newViews.length - 1
@@ -191,8 +194,15 @@ function addRig(path) {
   // ノードを足す。既存のメッシュノードに skin を付ける。
   const meshNodeIndex = json.nodes.findIndex((n) => n.mesh === 0)
   const base = json.nodes.length
+  // Tripo の出力は顔が +X を向いている。ThreeAvatar.tsx は「骨があるか」で
+  // 向きの補正を出し分けており（hasSkeleton ? 0 : -PI/2）、骨を足すと
+  // その補正が効かなくなって横を向く。骨格のルートに回転を焼き込んでおく。
+  // スキンを持つノードの transform は glTF 仕様上無視されるので、
+  // メッシュ側ではなくジョイント側を回す必要がある。
+  // -90度/Y: (1,0,0) → (0,0,1)。+X 向きが +Z 向きになる。
+  const S2 = Math.SQRT1_2
   json.nodes.push(
-    { name: 'Hips', translation: [0, jointWorldY[0], 0], children: [base + 1] },
+    { name: 'Hips', translation: [0, jointWorldY[0], 0], rotation: [0, -S2, 0, S2], children: [base + 1] },
     { name: 'Neck', translation: [0, jointWorldY[1] - jointWorldY[0], 0], children: [base + 2] },
     { name: 'Head', translation: [0, jointWorldY[2] - jointWorldY[1], 0] },
   )

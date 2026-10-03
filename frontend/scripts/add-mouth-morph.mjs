@@ -65,38 +65,61 @@ function addMouth(path) {
   for (const p of pos) { if (p[1] < yMin) yMin = p[1]; if (p[1] > yMax) yMax = p[1] }
   const H = yMax - yMin
 
-  // 顔の前面を取る。首より上・前向き・中央寄り。
+  // 顔がどちらを向いているか。
+  //
+  // 鼻の突出から自動検出しようとしたが当てにならなかった（男性 -X / 女性 -Z と
+  // 割れたのに、実際はどちらも +X。髪の膨らみが鼻より前に出るため）。
+  // 推定に頼らず明示する。Tripo の出力は顔が +X を向いており、これは
+  // add-rig.mjs が骨格へ -90度/Y を焼き込んで正面へ向けることと、
+  // 実際に描画して確認した結果に基づく。
+  // 別の作りのモデルを入れるときは --front=+Z のように指定する。
+  const frontArg = (process.argv.find((a) => a.startsWith('--front=')) ?? '--front=+X').slice(8)
+  const axis = frontArg.includes('Z') ? 'Z' : 'X'
+  const sign = frontArg.startsWith('-') ? -1 : 1
+
   const neckY = yMin + H * 0.55
+  const headIdx = []
+  for (let i = 0; i < pos.length; i++) if (pos[i][1] > neckY) headIdx.push(i)
+  if (headIdx.length === 0) throw new Error('頭部を検出できませんでした')
+  let cx = 0, cz = 0
+  for (const i of headIdx) { cx += pos[i][0]; cz += pos[i][2] }
+  cx /= headIdx.length; cz /= headIdx.length
+
+  console.log(`${basename(path)}`)
+  console.log(`  顔の向き ${sign > 0 ? '+' : '-'}${axis}`)
+
+  // 正面方向の座標。以降は「前後」をこれで扱う。
+  const fwd = (p) => (axis === 'X' ? p[0] : p[2]) * sign
+  // 左右方向（正面に直交する水平軸）
+  const side = (p) => (axis === 'X' ? p[2] : p[0])
+  const center = axis === 'X' ? cx * sign : cz * sign
+
   const faceIdx = []
-  for (let i = 0; i < pos.length; i++) {
-    if (pos[i][1] > neckY && pos[i][2] > 0.03 && Math.abs(pos[i][0]) < 0.12) faceIdx.push(i)
+  for (const i of headIdx) {
+    if (fwd(pos[i]) - center > 0.03 && Math.abs(side(pos[i])) < 0.12) faceIdx.push(i)
   }
   if (faceIdx.length === 0) throw new Error('顔の前面を検出できませんでした')
 
-  // 顔前面の縦範囲から口の高さを決める。
-  // 下端は顎、上端は額。口は顎から上へ 18〜38% のあたりにある。
   let fMin = Infinity, fMax = -Infinity, zMax = -Infinity
   for (const i of faceIdx) {
     if (pos[i][1] < fMin) fMin = pos[i][1]
     if (pos[i][1] > fMax) fMax = pos[i][1]
-    if (pos[i][2] > zMax) zMax = pos[i][2]
+    const f = fwd(pos[i])
+    if (f > zMax) zMax = f
   }
   const faceH = fMax - fMin
   const mouthY = fMin + faceH * 0.28
-  // 口の広がり。顔の幅の基準として、口の高さ付近のX幅を使う。
   let xw = 0
   for (const i of faceIdx) {
-    if (Math.abs(pos[i][1] - mouthY) < faceH * 0.05) xw = Math.max(xw, Math.abs(pos[i][0]))
+    if (Math.abs(pos[i][1] - mouthY) < faceH * 0.05) xw = Math.max(xw, Math.abs(side(pos[i])))
   }
   // 縦の影響範囲。狭いと変位の勾配が急になり、テクスチャが伸びて滲む。
   // 歪み（＝変位÷影響範囲）を3割程度に収めるため広めに取る。
-  // 結果として唇だけでなく顎全体が動き、実際の口の開き方に近くなる。
   const radiusY = faceH * 0.16
   const radiusX = Math.max(xw * 0.75, 0.02)
 
-  console.log(`${basename(path)}`)
   console.log(`  顔の前面 ${faceIdx.length.toLocaleString()} 頂点（縦 ${faceH.toFixed(3)}）`)
-  console.log(`  口の中心 Y=${mouthY.toFixed(3)}（顎から ${(28).toFixed(0)}%）影響範囲 縦±${radiusY.toFixed(3)} 横±${radiusX.toFixed(3)}`)
+  console.log(`  口の中心 Y=${mouthY.toFixed(3)}（顎から28%）影響範囲 縦±${radiusY.toFixed(3)} 横±${radiusX.toFixed(3)}`)
 
   // 口が開く変位。口の中心からの3次元の距離でなめらかに減衰させる。
   //
@@ -107,32 +130,32 @@ function addMouth(path) {
   // 口の動きは「量」より「動いていること」が伝わればよいので控えめにする。
   // avatar-motion.ts は音声振幅(0〜1)でこのモーフを駆動するので、
   // 通常の発話ではこの全開値には届かない。
-  const DROP = faceH * 0.05
-  const PULL = faceH * 0.012
-  // 口の中心は顔の前面。奥行きも減衰に含めて後頭部を動かさない。
+  // 開き量。顔の造りで見え方が変わるのでモデルごとに指定できるようにする
+  // （男性0.11で自然、女性は同じ値だと唇がすぼまって見えた）。
+  const dropArg = process.argv.find((a) => a.startsWith('--drop='))
+  const DROP = faceH * (dropArg ? parseFloat(dropArg.slice(7)) : 0.11)
+  const PULL = DROP * 0.22
   const mouthZ = zMax * 0.75
   const radiusZ = Math.max(zMax * 0.9, 0.03)
   const delta = new Float32Array(pos.length * 3)
   let moved = 0, maxMove = 0
   for (let i = 0; i < pos.length; i++) {
-    const dx = pos[i][0] / radiusX
+    const dx = side(pos[i]) / radiusX
     const dy = (pos[i][1] - mouthY) / radiusY
-    const dz = (pos[i][2] - mouthZ) / radiusZ
+    const dz = (fwd(pos[i]) - mouthZ) / radiusZ
     const d = Math.sqrt(dx * dx + dy * dy + dz * dz)
     if (d >= 1) continue
     const t = 1 - d
     const w = t * t * (3 - 2 * t)
-    // 口より下（顎側）を強く動かす。上唇より下唇が大きく動くのが自然。
-    //
-    // ここを三項演算子で 1.0 / 0.45 と切り替えると mouthY で段差ができ、
-    // その境界をまたぐ辺が裂ける（実測で最大956%伸び、25%超が2,618本）。
-    // 境界をまたぐ辺の両端でウェイトが2倍以上違うのが原因だった。
-    // 口の高さを中心になめらかに移す。
+    // 口より下（顎側）を強く動かす。段差を作ると辺が裂けるのでなめらかに。
     const biasT = Math.max(0, Math.min(1, (mouthY - pos[i][1]) / radiusY + 0.5))
     const bias = 0.45 + 0.55 * (biasT * biasT * (3 - 2 * biasT))
     const m = w * bias
     delta[i * 3 + 1] = -DROP * m
-    delta[i * 3 + 2] = -PULL * m
+    // 奥へ引く向きは正面方向の逆
+    const pull = -PULL * m * sign
+    if (axis === 'X') delta[i * 3 + 0] = pull
+    else delta[i * 3 + 2] = pull
     if (m > 0.01) moved++
     if (DROP * m > maxMove) maxMove = DROP * m
   }

@@ -72,6 +72,31 @@ nodes: 1 / meshes: 1
 
 これは口を**全開**にしたときの値。`avatar-motion.ts` は音声振幅（0〜1）で駆動するので、通常の発話ではここまで開かない。
 
+開き量はモデルごとに指定する。顔の造りで見え方が変わる。
+
+```sh
+node scripts/add-mouth-morph.mjs public/avatars/male-avatar.glb   --drop=0.11
+node scripts/add-mouth-morph.mjs public/avatars/female-avatar.glb --drop=0.07
+```
+
+女性を男性と同じ0.11にすると唇がすぼまって顎が潰れて見えた。描画して決めること。
+
+## 必ず描画して確認する（`npm run avatar:shoot`）
+
+**数値の検証だけでは足りない。** 実際に次の2つは、描画して初めて気付いた。
+
+- 骨を足したことで `ThreeAvatar.tsx` の向き補正（`hasSkeleton ? 0 : -PI/2`）が効かなくなり、**アバターが横を向いた**。骨格のルートに -90度/Y を焼き込んで解決
+- 口のモーフが**顔ではなく側頭部を動かしていた**。顔の前面を `z > 0` で判定していたが、このモデルは顔が **+X** を向いている
+
+```sh
+# frontend 直下で静的サーバを立てる
+python3 -m http.server 8099 --directory .
+# 別のターミナルで
+npm run avatar:shoot /tmp/avatar-shots
+```
+
+無表情・うなずき・口を開いた状態を男女ぶん撮る。`scripts/avatar-preview.html` は `ThreeAvatar.tsx` と同じカメラ・照明・正規化で描くので、本番の見え方に近い。
+
 ### まばたきが入れられない理由
 
 テクスチャが**1枚のJPEGだけ**（1.2MB / 911KB）で、顔の前面の頂点分布が**ほぼ均一**だった。目や口が立体なら、その高さに頂点が集中する。
