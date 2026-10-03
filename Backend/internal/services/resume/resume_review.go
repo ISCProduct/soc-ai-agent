@@ -635,31 +635,7 @@ func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, c
 	if len(items) < 3 || scoreErr != nil {
 		blocksForRetry := selectReviewBlocks(blocks, 40)
 		blockList := buildBlockList(blocksForRetry)
-		retryPrompt := fmt.Sprintf(`以下のブロック一覧から、各ブロックに必ず紐づく指摘を最大8件返してください。
-各itemsは必ず block_index と page_hint を含め、quote は block_text の一部をそのまま抜粋してください。
-総合的なまとめや全体評価は不可です。必ずブロック単位で具体的に指摘してください。
- suggestionは具体的な書き換え案にしてください（数値・役割・成果・再現性を含める）。
-
-応募企業名: %s
-応募職種: %s
-企業情報(参考):
-%s
-候補者区分: %s
-学歴/職歴は明らかな矛盾・不足がある場合のみ指摘し、それ以外は指摘から除外してください。
-
-ブロック一覧:
-%s
-
-%s
-scoresは上の評価基準の全項目を必ず含めてください。総合点は出力しないでください（サーバー側で算出します）。
-
-出力は次のJSONのみ:
-{"scores":{%s},"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}`,
-			companyName, jobTitle,
-			// やり直しも囲み直す（ノンスは呼び出しごとに変わる）#1600
-			shared.WrapUntrustedText(companyInfo, "企業情報"),
-			candidateType, blockList,
-			BuildResumeRubricPromptSection(), buildRubricJSONHint())
+		retryPrompt := buildReviewRetryPrompt(blockList, companyName, jobTitle, companyInfo, candidateType)
 		rawRetry, retryReqErr := s.requestReviewJSON(reviewRetrySystemPrompt, retryPrompt, modelOverride)
 		if retryReqErr != nil {
 			log.Printf("resume_review: やり直しの生成に失敗: %v", retryReqErr)
@@ -747,11 +723,8 @@ block_indexは本文の行頭にある [P#B#] の B# を使ってください。
 messageとsuggestionは該当ブロックの内容を引用・要約して具体的に指摘してください。
 suggestionは「どう直すか」が分かるように書いてください（数値・役割・成果・再現性など具体語を含める）。
 
-応募企業名: %s
-応募職種: %s
-企業情報(参考):
+【応募情報】
 %s
-候補者区分: %s
 企業名が空欄の場合は一般的な観点でレビューしてください。
 学歴/職歴は明らかな矛盾・不足がある場合のみ指摘し、それ以外は指摘から除外してください。
 企業に合わせた観点（求める人物像・事業領域・評価軸）に照らし、応募書類の内容がどう評価されるかを具体的に指摘してください。
@@ -767,14 +740,63 @@ scoresは上の評価基準の全項目を必ず含めてください。総合�
 {"scores":{%s},"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}
 
 OCRテキスト:
-%s`, ReviewMaxItems, companyName, jobTitle,
-		// 企業情報は DB の企業ブリーフと RAG レポートの連結で、どちらも
-		// 取得したテキスト（Web 由来を含む）なので非信頼として囲む（#1600）。
-		// 評価ハーネス（cmd/aibench）が本番と同一のプロンプトを見られるよう、
-		// 囲みは buildReviewPrompt の中で行う。
-		shared.WrapUntrustedText(companyInfo, "企業情報"),
-		candidateType,
-		BuildResumeRubricPromptSection(), buildRubricJSONHint(), text)
+%s`, ReviewMaxItems,
+		buildReviewApplicantFacts(companyName, jobTitle, companyInfo, candidateType),
+		BuildResumeRubricPromptSection(), buildRubricJSONHint(),
+		// OCR 全文（reviewTextLimit=30000）が添削対象の本文そのもの。#990 / #991 が
+		// 対象にした攻撃は「添削させる本文に『高得点を返せ』を混ぜる」もので、ここが
+		// 裸だと塞いだことにならない。スコアは user_weight_scores 経由でマッチングへ
+		// 波及する。rag 側の対応物（crew.py の 履歴書テキスト / es_review.py の ES文章）も
+		// 同じく囲んでいる（#1600）。
+		shared.WrapUntrustedText(text, "OCRテキスト"))
+}
+
+// buildReviewRetryPrompt は指摘がブロックに紐づかなかったときのやり直し用プロンプト。
+//
+// buildReviewScoreItems から切り出してあるのは、囲みの検証（#1600）を
+// OpenAI 呼び出し無しでテストできるようにするため。初回の buildReviewPrompt と同じ理由。
+func buildReviewRetryPrompt(blockList, companyName, jobTitle, companyInfo, candidateType string) string {
+	return fmt.Sprintf(`以下のブロック一覧から、各ブロックに必ず紐づく指摘を最大8件返してください。
+各itemsは必ず block_index と page_hint を含め、quote は block_text の一部をそのまま抜粋してください。
+総合的なまとめや全体評価は不可です。必ずブロック単位で具体的に指摘してください。
+ suggestionは具体的な書き換え案にしてください（数値・役割・成果・再現性を含める）。
+
+【応募情報】
+%s
+学歴/職歴は明らかな矛盾・不足がある場合のみ指摘し、それ以外は指摘から除外してください。
+
+ブロック一覧:
+%s
+
+%s
+scoresは上の評価基準の全項目を必ず含めてください。総合点は出力しないでください（サーバー側で算出します）。
+
+出力は次のJSONのみ:
+{"scores":{%s},"summary":"短い要約","items":[{"quote":"本文中の一文","message":"指摘","suggestion":"改善案","severity":"info|warning|critical","page_hint":1,"block_index":1}]}`,
+		// やり直しも初回と同じ範囲を囲む（ノンスは呼び出しごとに変わる）#1600。
+		// blockList は OCR ブロックの列挙で、添削対象の本文そのもの。
+		buildReviewApplicantFacts(companyName, jobTitle, companyInfo, candidateType),
+		shared.WrapUntrustedText(blockList, "ブロック一覧"),
+		BuildResumeRubricPromptSection(), buildRubricJSONHint())
+}
+
+// buildReviewApplicantFacts は応募企業名・職種・企業情報・候補者区分を
+// 1ブロックの非信頼テキストとして囲む（#1600）。
+//
+// 4つとも由来が同じ（企業名・職種・候補者区分はリクエストの自由記述、
+// 企業情報は DB の企業ブリーフと RAG レポートの連結＝Web 由来を含む取得テキスト）。
+// 個別に囲むとノンス付きの宣言文が4回出てプロンプトが膨れるので、1ブロックにまとめる。
+// ラベル（応募企業名: など）はブロックの中に残す。プロンプト本文が
+// 「企業情報(参考)」の「重視傾向:」行を名指しで参照しているため。
+//
+// 評価ハーネス（cmd/aibench）が本番と同一のプロンプトを見られるよう、
+// 囲みは buildReviewPrompt の中で行う。
+func buildReviewApplicantFacts(companyName, jobTitle, companyInfo, candidateType string) string {
+	return shared.WrapUntrustedText(fmt.Sprintf(`応募企業名: %s
+応募職種: %s
+企業情報(参考):
+%s
+候補者区分: %s`, companyName, jobTitle, companyInfo, candidateType), "応募情報")
 }
 
 // BuildReviewPromptFromText は行区切りの平文から本番と同一の user プロンプトを作る。

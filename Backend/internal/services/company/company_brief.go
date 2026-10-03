@@ -56,14 +56,29 @@ func BuildCompanyBrief(company *models.Company, profile *models.CompanyWeightPro
 // 即座に出来上がる（company_entry_service.go）。審査前のその文面が
 // 面接・履歴書レビューのプロンプトへ入ると、任意の指示文を仕込めてしまう。
 //
-// 条件は SQL 側のガード guestEntryVisibilityGuard（company_query_repository.go）の
-// 企業行側の半分と同じ。二重に持つ理由は、brief の読み出し口が
-// shared.CompanyBriefReader インターフェース越しで、フィルタ無しの
-// CompanyRepository を注入しても型が通るため。現在の DI（cmd/server/main.go）は
-// CompanyPublicRepository を渡しているが、その取り違えは型では防げない。
+// ここは SQL ガード guestEntryVisibilityGuard（company_query_repository.go）と
+// 同等ではない。SQL 側は
 //
-// data_status='published' は必須にしない。draft は自動収集した全企業の既定状態でもあり
-// （実データで 842社中 752社）、published だけに絞ると面接の企業選択・履歴書レビューの
+//	(data_status <> 'published' OR is_active = false)
+//	AND (is_guest_entry = true OR EXISTS (company_entry_submissions ...))
+//
+// の第2項に company_entry_submissions の行の有無も OR で持っているが、
+// models.Company から submissions は見えないため、ここは is_guest_entry しか見られない。
+// 残差は「is_guest_entry=0 だが company_entry_submissions に行がある未公開企業」で、
+// SQL ガードは弾くがここは通す。SQL 側がその第2項を残しているのは
+// 「マイグレーションの埋め漏れや、フラグを立てない経路が後から増えたときに、
+// 片方だけで素通りさせない」ためで（同ファイルのコメント参照）、
+// その保険はこちらには無い。
+//
+// したがってこれは SQL ガードの代わりではなく、それより弱い多層防御の2枚目。
+// 唯一の防壁は読み出し口のリポジトリ側で、BuildCompanyBrief の本番呼び出し元3箇所
+// （interview_company_context.go / resume_service.go / relation_controller.go）は
+// すべて SQL ガード付き（CompanyPublicRepository / CompanyQueryRepository）を経由する。
+// ここを置く理由は、brief の読み出し口が shared.CompanyBriefReader インターフェース
+// 越しで、フィルタ無しの CompanyRepository を注入しても型が通るため。
+//
+// data_status='published' を全企業に必須にはしない。draft は自動収集した企業の
+// 既定状態でもあり、published だけに絞ると面接の企業選択・履歴書レビューの
 // 企業ブリーフがほぼ空になる（guestEntryVisibilityGuard のコメント参照）。
 // ゲスト投稿由来かどうかで分けるのが #1203 / #1409 で決めた線。
 func briefVisible(c *models.Company) bool {

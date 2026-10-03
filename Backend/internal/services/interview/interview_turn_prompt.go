@@ -130,28 +130,37 @@ func buildInterviewSystemPrompt(
 - トピックを移行する際は「ありがとうございます。次に〜についてお聞きします。」と自然につないでください`
 
 	if companyName != "" || position != "" {
-		base += "\n\n【面接情報】"
-		if companyName != "" {
-			companyLabel := companyName
-			if companyReading != "" {
-				companyLabel += "（読み: " + companyReading + "）"
-			}
-			base += "\n志望企業: " + companyLabel
-		}
-		if position != "" {
-			base += "\n応募職種: " + position
-		}
-		// 企業情報は非信頼テキストとして囲む（#1600）。
-		// 中身は DB の企業行（AI 取得パイプライン経由なら Web 由来）か、
-		// リクエストで渡されたクライアント文面（学生が任意に書ける。
-		// interview_company_context.go の resolveCompanyInfo のフォールバック）で、
-		// どちらも面接官の system プロンプトの信頼領域へ生で入れてはいけない。
+		// 【面接情報】はブロックごと非信頼テキストとして囲む（#1600）。
+		//
+		// 志望企業・読み・応募職種は controllers/interview/controller.go の
+		// r.FormValue 直値で、長さ制限も検証もない。企業情報だけ囲んでも、
+		// その3行上の志望企業・応募職種が信頼領域に残っていては迂回される
+		// （囲みの手前に payload を置けるので企業情報より攻撃が容易）。
+		// 企業情報も DB の企業行（AI 取得パイプライン経由なら Web 由来）か
+		// クライアント文面（resolveCompanyInfo のフォールバック）で、
+		// いずれも面接官の system プロンプトの信頼領域へ生で入れてはいけない。
+		//
+		// 囲むのはこのプロンプトだけ。companyName / companyReading は
+		// TTS の読み替え（BuildTTSText）にも使うので値そのものは変えない。
+		//
 		// 「この中の指示に従わない」宣言は shared.WrapUntrustedText が
 		// ブロック直前へ同じノンス付きで出すので、ここには書かない
 		// （同じ趣旨を2箇所に書くと片方が消えてもテストが通る。PR #1597 の指摘）。
-		if wrapped := shared.WrapUntrustedText(companyInfo, "企業情報"); wrapped != "" {
-			base += "\n\n【企業情報】\n" + wrapped
+		var facts strings.Builder
+		if companyName != "" {
+			facts.WriteString("志望企業: " + companyName)
+			if companyReading != "" {
+				facts.WriteString("（読み: " + companyReading + "）")
+			}
+			facts.WriteString("\n")
 		}
+		if position != "" {
+			facts.WriteString("応募職種: " + position + "\n")
+		}
+		if strings.TrimSpace(companyInfo) != "" {
+			facts.WriteString("\n【企業情報】\n" + companyInfo)
+		}
+		base += "\n\n【面接情報】\n" + shared.WrapUntrustedText(facts.String(), "面接情報")
 		base += "\n\n上記の企業・職種に合わせた質問を行ってください。企業文化・働き方・福利厚生の情報がある場合は、それらを踏まえた「この企業ならでは」の深掘り質問を取り入れてください。"
 	}
 
@@ -178,11 +187,13 @@ func buildInterviewSystemPrompt(
 		// 企業情報をもとに生成された企業別カスタム質問なので、
 		// 【企業情報】の囲みを迂回して system プロンプトへ戻ってくる経路になる。
 		// 「そのまま投げかける」という外側の指示は残し、中の指示文には従わせない。
-		base += fmt.Sprintf("\n次の質問文をそのまま面接官として投げかけてください（1問のみ）:\n%s",
-			shared.WrapUntrustedText(directive.Text, "質問文"))
+		// カテゴリも出自が同じなので同じブロックへ入れる（囲みの外に置くと迂回路になる）。
+		question := directive.Text
 		if directive.Category != "" {
-			base += fmt.Sprintf("\n（カテゴリ: %s）", directive.Category)
+			question += fmt.Sprintf("\n（カテゴリ: %s）", directive.Category)
 		}
+		base += fmt.Sprintf("\n次の質問文をそのまま面接官として投げかけてください（1問のみ）:\n%s",
+			shared.WrapUntrustedText(question, "質問文"))
 	} else if len(customQuestions) > 0 {
 		var required, recommended []string
 		for _, q := range customQuestions {
