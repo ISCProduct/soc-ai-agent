@@ -2,14 +2,23 @@ name: Discord Progress Reminder
 
 on:
   schedule:
-    # 毎週日曜日18:07 JST = 日曜日09:07 UTC
+    # 日曜 09:07 UTC（= 18:07 JST）から3時間おきに21:07 UTCまで、計5回。
     #
-    # 毎時0分にしない。GitHub Actions のスケジュールは高負荷時に遅延・欠落し、
-    # 0分は世界中のcronが集中する最悪のスロットで公式にも回避が推奨されている。
-    # 実際 2026-09-27(日) の `0 9 * * 0` は発火せず、このワークフローの
-    # schedule 実行は一度も記録されていなかった（他の定期実行は同日も動いており、
-    # いずれも 5/10/17/*15分 と0分以外を使っている）。
-    - cron: '7 9 * * 0'
+    # 1回だけの指定では週次の投稿が成立しなかった。GitHub Actions の schedule は
+    # 配信を保証せず、高負荷時に遅延・欠落する（公式にも明記）。実績は次のとおり。
+    #
+    #   2026-09-23  `0 9 * * 0` で追加
+    #   2026-09-27(日)  09:00 に発火せず、14:38 に5時間38分遅れて1回だけ実行
+    #   2026-09-28  0分を避けて `7 9 * * 0` へ変更
+    #   2026-10-04(日)  09:07 を過ぎても発火せず
+    #
+    # 2回の日曜で成功0・遅延1。0分を避けるだけでは足りない。
+    # 他の定期実行（uptime-scheduler は毎時、backlog 連携は15分おき）と同じく
+    # 「頻繁に試行して冪等にする」形へ揃える。下の週キーで週1回に絞る。
+    # `*/3` にすると最初の試行が 00:07 UTC = 日曜09:07 JST になり、
+    # 本来の 18:07 JST より9時間早く投稿されてしまう。開始時刻は動かさない。
+    # 月曜へは延ばさない。ISO週キーが変わって同じ週に二重投稿になるため。
+    - cron: '7 9-23/3 * * 0'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -30,6 +39,7 @@ permissions:
   contents: read
 
 concurrency:
+  # 同じ週の試行は直列化する。並行すると両方が「未送信」を見て二重投稿になる。
   group: discord-progress-reminder-${{ github.event_name }}-${{ github.ref }}
   # 送信ジョブは途中キャンセルしない。PRのテスト実行だけはキャンセルしてよい。
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -46,10 +56,44 @@ jobs:
         run: python3 -m unittest discover -s automation/discord -p 'notify_progress_test.py' -v
       - name: Preview message
         run: python3 automation/discord/notify_progress.py --dry-run
+
+      # 週キー。ISO週（%G-W%V）なので年またぎでも連続する。
+      - name: Resolve week key
+        id: week
+        run: echo "key=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      # 送信済みの印。日曜に8回試行するので、1回目だけが送るようにする。
+      # 手動実行(workflow_dispatch)は印を見ない。意図して送り直す操作なので塞がない。
+      - name: Check already sent this week
+        id: sent
+        if: github.event_name == 'schedule'
+        uses: actions/cache/restore@v4
+        with:
+          path: .progress-reminder-sent
+          key: progress-reminder-${{ steps.week.outputs.key }}
+
       - name: Send reminder
+        id: send
         # Dependabot の実行には secrets が渡らないため除外する
         # （automation/test/dependabot-workflow-test.sh で規約化）
-        if: github.actor != 'dependabot[bot]' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
+        if: >-
+          github.actor != 'dependabot[bot]'
+          && (
+            (github.event_name == 'schedule' && steps.sent.outputs.cache-hit != 'true')
+            || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+          )
         env:
           DISCORD_PROGRESS_WEBHOOK_URL: ${{ secrets.DISCORD_PROGRESS_WEBHOOK_URL }}
         run: python3 automation/discord/notify_progress.py
+
+      # 送信が成功したときだけ印を残す。失敗した回で印を付けると、
+      # その週は二度と試行されず（8回の救済が無駄になり）投稿が落ちる。
+      - name: Mark as sent
+        if: github.event_name == 'schedule' && steps.send.outcome == 'success'
+        run: date -u +%FT%TZ > .progress-reminder-sent
+      - name: Save sent marker
+        if: github.event_name == 'schedule' && steps.send.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: .progress-reminder-sent
+          key: progress-reminder-${{ steps.week.outputs.key }}

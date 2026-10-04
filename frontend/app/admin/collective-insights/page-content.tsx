@@ -63,7 +63,7 @@ export default function PageContent() {
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>{success}</Alert>}
 
-      <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
+      <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>サマリー再構築</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>

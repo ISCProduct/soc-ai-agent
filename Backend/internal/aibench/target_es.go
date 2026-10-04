@@ -108,7 +108,7 @@ func (t *esTarget) EstimateTokens(c Case) (int, int) {
 }
 
 func (t *esTarget) Run(ctx context.Context, c Case) Observation {
-	o := Observation{CaseID: c.ID, Label: c.Label}
+	o := newObservation(c)
 	payload := map[string]string{
 		"es_text":       c.Input.ESText,
 		"question_type": c.Input.QuestionType,
