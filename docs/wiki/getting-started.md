@@ -255,6 +255,8 @@ npx playwright test
 | `S3アップロード失敗` | IAM 権限不足 | `s3:PutObject` / `s3:GetObject` 権限を確認 |
 | `frontend が EACCES で起動しない`（Linux） | ホストの UID が 1000 以外で、bind mount した `./frontend` に `next dev` が `next-env.d.ts` を書けない | `.env` に `FRONTEND_USER=$(id -u):$(id -g)` を設定し、下記のボリューム作り直しも行う |
 | `rag-review が /data で PermissionError` | root 実行時代のデータが `rag_data` に残っている（`RAG_CHROMA_DATA_DIR=/data/...` を使う場合のみ） | `docker compose run --rm --user root rag-review chown -R 10001:10001 /data`（ファイルは消えない） |
+| `ブラウザに「接続がリセットされました」が出る`（開発時） | `next dev` のメモリが増え続けて落ち、`restart: unless-stopped` で再起動している。落ちた瞬間に接続が切れる | 既定で `mem_limit` と `NODE_OPTIONS=--max-old-space-size` を入れてある。`docker compose ps frontend` が `Up xx seconds` を繰り返すなら `docker inspect soc-ai-agent-frontend --format '{{.RestartCount}}'` で確認。Docker Desktop の割当メモリが少ない場合は `.env` の `FRONTEND_MEM_LIMIT` / `FRONTEND_NODE_OPTIONS` で調整する |
+| `frontend が EACCES: mkdir '/app/.next/dev' で起動ループ` | イメージが古く `/app/.next` を含まないため、名前付きボリュームが root 所有の空で作られた。`node`(uid 1000) で動くコンテナが書けない | イメージを作り直してからボリュームを消す（下記の手順）。`docker compose up` だけでは直らない |
 
 ### コンテナ非root化（#1477）にともなう既存環境の移行
 
@@ -267,6 +269,19 @@ npx playwright test
   docker compose down
   docker volume rm "$(basename "$PWD")_frontend_node_modules" "$(basename "$PWD")_frontend_next"
   docker compose up -d --build
+  ```
+
+- **イメージが古い場合**: `/app/.next` を作る `RUN mkdir -p /app/.next && chown -R node:node /app` は後から入った。
+  それ以前にビルドしたイメージを使っていると、名前付きボリュームが**root 所有の空**で初期化され、
+  `EACCES: mkdir '/app/.next/dev'` で起動ループする。ボリュームを消すだけでは同じ状態が再発するので、
+  **先にイメージを作り直してからボリュームを消す**。`node_modules` 側も同時に作り直さないと、
+  古い依存が残って `Module not found` になる。
+
+  ```sh
+  docker compose stop frontend && docker compose rm -f frontend
+  docker compose build frontend
+  docker volume rm "$(basename "$PWD")_frontend_next" "$(basename "$PWD")_frontend_node_modules"
+  docker compose up -d frontend
   ```
 
 - **`rag_data`**: ChromaDB の実データが入りうるので**消さずに所有権だけ移す**。既定構成（`CHROMA_HOST=chroma`）では `/data` を使わないため、この作業が要るのは `RAG_CHROMA_DATA_DIR=/data/...` へ切り替えている環境だけ。

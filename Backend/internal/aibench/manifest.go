@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -182,4 +183,38 @@ func LabelCounts(cases []Case) map[string]int {
 		out[c.Label]++
 	}
 	return out
+}
+
+// InputText は target ごとの入力本文を返す。
+//
+// 文字数の交絡（スコアが内容ではなく長さに従っていないか）を測るのに使う。
+// target ごとに入力フィールドが違うので、集計側で switch を書かないための一箇所。
+func (c Case) InputText() string {
+	switch c.Target {
+	case TargetES:
+		return c.Input.ESText
+	case TargetResume:
+		return c.Input.ResumeText
+	case TargetInterviewReport:
+		return c.Input.Transcript
+	}
+	return ""
+}
+
+// InputChars は入力本文の文字数（バイト数ではなく）。
+func (c Case) InputChars() int { return len([]rune(c.InputText())) }
+
+// numericTokenPattern は数値トークン（連続した数字）。全角数字も数える。
+var numericTokenPattern = regexp.MustCompile(`[0-9０-９]+`)
+
+// InputNumericTokens は入力本文に現れる数値トークンの個数。
+//
+// 文字数と並ぶ「表層特徴」として測る。履歴書ルーブリックは specificity
+// （数値・固有名詞・期間が何種類あるか）/ achievement（結果が数値で示されて
+// いるか）/ completeness（項目がいくつ埋まっているか）で新卒の70点を決めて
+// おり、評価器が数値の個数を直接数えている。ラベルを数値の個数で付けると
+// ゴールデンセットのラベルが評価器と同じ関数で定義される（循環）ので、
+// 文字数と同じようにこの相関も上限を固定する（#1593 のレビュー指摘）。
+func (c Case) InputNumericTokens() int {
+	return len(numericTokenPattern.FindAllString(c.InputText(), -1))
 }

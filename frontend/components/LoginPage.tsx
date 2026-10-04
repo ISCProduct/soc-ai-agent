@@ -52,7 +52,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
     setLoading(true)
     try {
       const response = await authService.login(email, password)
-      authService.saveAuth(response)
+      await authService.saveAuth(response)
       onAuthSuccess(response)
     } catch (err: any) {
       const msg = err.message || ''
@@ -87,7 +87,7 @@ export function LoginPage({ onAuthSuccess, initialTab = 0 }: LoginPageProps) {
     setLoading(true)
     try {
       const response = await authService.createGuest()
-      authService.saveAuth(response)
+      await authService.saveAuth(response)
       onAuthSuccess(response)
     } catch (err: any) {
       setError(err.message)

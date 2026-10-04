@@ -319,6 +319,16 @@ else
     echo "FAIL 再確認が rds stop-db-instance より後にある（guard=${LAST_GUARD} stop=${RDS_STOP_LINE}）"
     fail=$((fail + 1))
   fi
+  # 再確認はECSの縮退ループより後に置くこと（#1557）。前に戻すと、縮退の途中で
+  # 始まったデプロイを検知できず、desired_count=0 / min_capacity=0 のまま残って
+  # デプロイ中の本番が起動できない。SCALED_DOWN の記録より後にあることで確かめる。
+  SCALED_DOWN_LINE=$(grep -n 'SCALED_DOWN=1' "$SCHED" | tail -1 | cut -d: -f1)
+  if [ -z "$SCALED_DOWN_LINE" ] || [ -z "$LAST_GUARD" ] || [ "$LAST_GUARD" -le "$SCALED_DOWN_LINE" ]; then
+    echo "FAIL 再確認がECSの縮退より前にある（縮退したECSを戻す経路に入れない: guard=${LAST_GUARD:-なし} scaled_down=${SCALED_DOWN_LINE:-なし}）"
+    fail=$((fail + 1))
+  else
+    echo "ok   再確認はECS縮退の後・RDS停止の前にある（縮退を戻してから見送れる）"
+  fi
 
   # ここまでは構造の検査。実際の振る舞い（判定不能なら止めない / waiting も実行中として
   # 数える）は文字列検査では固定できないため、ガード部分だけを抽出して走らせる。

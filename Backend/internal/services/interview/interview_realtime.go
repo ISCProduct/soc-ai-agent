@@ -170,10 +170,9 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 			return "", fmt.Errorf("realtime capacity exceeded: active=%d limit=%d", active, maxAllowed)
 		}
 	}
-	lang := session.Language
-	if lang == "" {
-		lang = "ja"
-	}
+	// 既存セッションには修正前の未検証値が残っている可能性がある。
+	// Realtime は lang を言語コードとして API へ渡すので、ここでも正規化する。
+	lang := normalizeLanguage(session.Language)
 	gender := session.InterviewerGender
 	if gender == "" {
 		gender = "female"

@@ -261,7 +261,7 @@ export default function PageContent() {
               p: 2,
               border: '1px solid',
               borderColor: 'divider',
-              borderRadius: '10px',
+              borderRadius: 1,
               bgcolor: 'background.paper',
             }}
           >

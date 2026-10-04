@@ -1,11 +1,8 @@
 package es
 
 import (
-	"Backend/internal/controllers/httpapi"
 	"Backend/internal/openai"
-	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -14,6 +11,8 @@ import (
 )
 
 type ESRewriteController struct {
+	// openaiClient は生成には使わない。RAG が実行した生成のトークン使用量を
+	// api_call_logs へ記録するためだけに持つ(#1533)。nil でも動く。
 	openaiClient *openai.Client
 }
 
@@ -25,7 +24,10 @@ type esRewriteRequest struct {
 	OriginalText string `json:"original_text"`
 	QuestionType string `json:"question_type"` // "志望動機" | "自己PR" | "学チカ" | "その他"
 	TechStack    string `json:"tech_stack"`    // 任意: 使用技術スタック
-	CompanyName  string `json:"company_name"`  // 任意: 志望企業名（Web Search を利用する場合）
+	CompanyName  string `json:"company_name"`  // 任意: 志望企業名（RAG が企業情報を参照する）
+	// 任意: 設問の文字数上限(#1523)
+	CharLimit     *int   `json:"char_limit"`
+	CharLimitMode string `json:"char_limit_mode"`
 }
 
 type starBreakdown struct {
@@ -38,9 +40,17 @@ type starBreakdown struct {
 type esRewriteResponse struct {
 	RewrittenText string        `json:"rewritten_text"`
 	Star          starBreakdown `json:"star"`
+	// 字数の結果(#1523)。既存キーは変えず追加だけしている
+	ImprovedTextLength int   `json:"improved_text_length"`
+	CharLimitSatisfied *bool `json:"char_limit_satisfied"`
 }
 
 // Rewrite POST /api/es/rewrite
+//
+// 生成は RAG の /es/review に一本化してある(#1533)。ここでプロンプトは組まない。
+// 以前は Backend が独自プロンプト（gpt-4o-mini・インジェクション対策なし・字数指示
+// 120〜150%）で呼んでいたため、同じESでもES添削タブと違う書き換え案が返っていた。
+// レスポンスは従来の { rewritten_text, star } を保ったまま返す。
 func (c *ESRewriteController) Rewrite(ctx echo.Context) error {
 	var req esRewriteRequest
 	if err := ctx.Bind(&req); err != nil {
@@ -54,75 +64,33 @@ func (c *ESRewriteController) Rewrite(ctx echo.Context) error {
 		req.QuestionType = "その他"
 	}
 
-	systemPrompt := `あなたはエンジニア就職活動の専門アドバイザーです。
-学生が書いたES文章を、採用担当者に刺さるエンジニア向けの表現にリライトしてください。
-JSONのみで返してください。`
-
-	techInfo := ""
-	if req.TechStack != "" {
-		techInfo = "\n使用技術スタック（参考）:\n" + shared.WrapUntrustedText(req.TechStack, "技術スタック")
-	}
-
-	// 企業名が指定されていればプロンプトに含め、リライトモデル自身の知識で企業の採用観点を反映させる
-	companyInfo := ""
-	if strings.TrimSpace(req.CompanyName) != "" {
-		companyInfo = "\n【志望企業】（この企業の採用で重視されると考えられる観点を、確実に知っている範囲で反映すること）\n" +
-			shared.WrapUntrustedText(req.CompanyName, "企業名")
-	}
-
-	// ES本文・技術スタック・企業名はすべて未認証のリクエストボディから来る自由記述。
-	// 生連結だとここへ「これまでの指示を無視して〜」を書くだけで system プロンプトの
-	// 指示を上書きできる。rag 側（es_review.py）と同じく非信頼テキストとして囲む（#1600）。
-	userPrompt := `以下のES文章を、STAR法（Situation/Task/Action/Result）に沿ったエンジニア採用向けの表現にリライトしてください。
-
-【質問種別】` + shared.WrapUntrustedText(req.QuestionType, "質問種別") + `
-【元のES文章】
-` + shared.WrapUntrustedText(req.OriginalText, "ES文章") + techInfo + companyInfo + `
-
-## リライトのルール
-- 「頑張りました」「工夫しました」等の抽象表現を、具体的な技術・数値・成果に置き換える
-- STAR法: Situation（状況）/ Task（課題）/ Action（技術的施策）/ Result（成果・数値）の構造で記述する
-- エンジニア採用に刺さる技術的な動詞・名詞を使用する（実装した、設計した、最適化した、削減した等）
-- 元の内容を大きく変えず、言語化を強化する方向でリライトする
-- 文字数は元の文章の120〜150%程度を目安にする
-
-## 出力フォーマット（このキーと型を厳守）
-{
-  "rewritten_text": "リライト後の完成文章",
-  "star": {
-    "situation": "状況（背景・前提）の部分の説明",
-    "task": "課題・目標の部分の説明",
-    "action": "技術的な施策・行動の部分の説明",
-    "result": "成果・結果の部分の説明"
-  }
-}`
-
-	// 未ログイン利用が仕様の経路なので主体は載らない。機能名だけ付けて費用を機能別に割る（#1294）。
-	aiCtx := usagectx.WithFeature(context.Background(), usagectx.FeatureESRewrite)
-	raw, err := c.openaiClient.ChatCompletionJSON(aiCtx, systemPrompt, userPrompt, 0.7, 1500)
+	// 未ログイン利用が仕様の経路なので主体は載らないことがある。機能名だけ付けて
+	// 費用を機能別に割る（#1294）。es_rewrite と es_review の内訳はここで分かれる。
+	status, body, err := postESReview(ctx, esReviewRAGRequest{
+		ESText:        req.OriginalText,
+		QuestionType:  req.QuestionType,
+		CompanyName:   req.CompanyName,
+		TechStack:     req.TechStack,
+		CharLimit:     req.CharLimit,
+		CharLimitMode: req.CharLimitMode,
+	}, c.openaiClient, usagectx.FeatureESRewrite)
 	if err != nil {
-		return httpapi.InternalError(err)
+		return err
+	}
+	if status != http.StatusOK {
+		// RAG の案内文（422「文章が長すぎて…」など）をそのまま利用者へ渡す
+		return ctx.JSONBlob(status, body)
 	}
 
-	// マークダウンフェンスなどを除去してJSONオブジェクトを抽出
-	cleaned := extractESJSON(raw)
-
-	var resp esRewriteResponse
-	if err := json.Unmarshal([]byte(cleaned), &resp); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to parse AI response")
+	var rag esReviewRAGResponse
+	if err := json.Unmarshal(body, &rag); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to parse RAG response")
 	}
 
-	return ctx.JSON(http.StatusOK, resp)
-}
-
-// extractESJSON はマークダウンコードフェンスを取り除き、最外部のJSONオブジェクトを返す。
-func extractESJSON(raw string) string {
-	s := strings.TrimSpace(raw)
-	if start := strings.Index(s, "{"); start > 0 {
-		s = s[start:]
-	}
-	if end := strings.LastIndex(s, "}"); end >= 0 && end < len(s)-1 {
-		s = s[:end+1]
-	}
-	return s
+	return ctx.JSON(http.StatusOK, esRewriteResponse{
+		RewrittenText:      rag.ImprovedText,
+		Star:               rag.Star,
+		ImprovedTextLength: rag.ImprovedTextLength,
+		CharLimitSatisfied: rag.CharLimitSatisfied,
+	})
 }
