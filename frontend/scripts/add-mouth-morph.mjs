@@ -127,13 +127,13 @@ function addMouth(path) {
   // 頂点の一方が動かず、辺が極端に伸びてメッシュが裂ける（実測で最大1013%）。
   // 距離による減衰を全頂点に適用して、境界そのものを無くす。
   // 変位。大きくすると口は開くがテクスチャが伸びる。
-  // 口の動きは「量」より「動いていること」が伝わればよいので控えめにする。
-  // avatar-motion.ts は音声振幅(0〜1)でこのモーフを駆動するので、
-  // 通常の発話ではこの全開値には届かない。
-  // 開き量。顔の造りで見え方が変わるのでモデルごとに指定できるようにする
-  // （男性0.11で自然、女性は同じ値だと唇がすぼまって見えた）。
+  // 唇はテクスチャに描かれているだけなので、顎を大きく下げると口が開くより先に
+  // 唇の絵が一緒に伸びて滲む。音声振幅は通常の発話で 1.0 まで振れる
+  // （useInterviewSession が rms*6 でクリップする）ので、全開の値そのものを
+  // 「ずっと出ていても見られる」大きさに抑える。
+  // 開き量は顔の造りで見え方が変わるのでモデルごとに指定する。
   const dropArg = process.argv.find((a) => a.startsWith('--drop='))
-  const DROP = faceH * (dropArg ? parseFloat(dropArg.slice(7)) : 0.11)
+  const DROP = faceH * (dropArg ? parseFloat(dropArg.slice(7)) : 0.055)
   const PULL = DROP * 0.22
   const mouthZ = zMax * 0.75
   const radiusZ = Math.max(zMax * 0.9, 0.03)
@@ -161,11 +161,6 @@ function addMouth(path) {
   }
   console.log(`  動く頂点 ${moved.toLocaleString()}  最大変位 ${maxMove.toFixed(4)}`)
 
-  // バッファに追記
-  const deltaBuf = Buffer.from(delta.buffer, delta.byteOffset, delta.byteLength)
-  const pad = Buffer.alloc(align4(bin.length))
-  const viewOffset = bin.length + pad.length
-  json.bufferViews.push({ buffer: 0, byteOffset: viewOffset, byteLength: deltaBuf.length })
   // min/max は必須
   let mn = [0, 0, 0], mx = [0, 0, 0]
   for (let i = 0; i < pos.length; i++) {
@@ -175,16 +170,49 @@ function addMouth(path) {
       if (v > mx[k]) mx[k] = v
     }
   }
+
+  // sparse accessor で書く。動くのは全頂点の2%ほどなので、
+  // 全頂点ぶんを密に持つと 2.7MB 増える（sparse なら 70KB 程度）。
+  // 動かない頂点は bufferView を省いた既定値（ゼロ）になる。
+  const moving = []
+  for (let i = 0; i < pos.length; i++) {
+    if (delta[i * 3] !== 0 || delta[i * 3 + 1] !== 0 || delta[i * 3 + 2] !== 0) moving.push(i)
+  }
+  if (moving.length === 0) throw new Error('動く頂点が1つもありません')
+  const idxBuf = Buffer.alloc(moving.length * 4)
+  const valBuf = Buffer.alloc(moving.length * 3 * 4)
+  moving.forEach((vi, k) => {
+    idxBuf.writeUInt32LE(vi, k * 4)
+    for (let c = 0; c < 3; c++) valBuf.writeFloatLE(delta[vi * 3 + c], (k * 3 + c) * 4)
+  })
+
+  // バッファに追記
+  const chunks = []
+  let offset = bin.length
+  const appendView = (buf) => {
+    const pad = align4(offset)
+    if (pad > 0) { chunks.push(Buffer.alloc(pad)); offset += pad }
+    json.bufferViews.push({ buffer: 0, byteOffset: offset, byteLength: buf.length })
+    chunks.push(buf); offset += buf.length
+    return json.bufferViews.length - 1
+  }
+  const idxView = appendView(idxBuf)
+  const valView = appendView(valBuf)
+
   json.accessors.push({
-    bufferView: json.bufferViews.length - 1,
     componentType: COMP.FLOAT, count: pos.length, type: 'VEC3', min: mn, max: mx,
+    sparse: {
+      count: moving.length,
+      indices: { bufferView: idxView, byteOffset: 0, componentType: COMP.UINT },
+      values: { bufferView: valView, byteOffset: 0 },
+    },
   })
   prim.targets = [{ POSITION: json.accessors.length - 1 }]
   // 'aa' は VRM / Oculus viseme と同じ命名。avatar-capabilities.ts がこの名前を照合する。
   mesh.extras = { ...(mesh.extras ?? {}), targetNames: ['aa'] }
   mesh.weights = [0]
 
-  const newBin = Buffer.concat([bin, pad, deltaBuf])
+  const newBin = Buffer.concat([bin, ...chunks])
   json.buffers[0].byteLength = newBin.length
   json.asset.generator = (json.asset.generator ?? '') + ' + add-mouth-morph'
 
@@ -201,7 +229,8 @@ function addMouth(path) {
   console.log(`  → ${path} (${(out.length / 1024 / 1024).toFixed(1)}MB)\n`)
 }
 
-const args = process.argv.slice(2)
+// --drop= などのオプションをファイル名として開こうとしないよう外す
+const args = process.argv.slice(2).filter((a) => !a.startsWith('--'))
 const targets = args.length > 0 ? args
   : ['public/avatars/male-avatar.glb', 'public/avatars/female-avatar.glb']
 for (const t of targets) addMouth(t)

@@ -1,17 +1,13 @@
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { VRMLoaderPlugin } from '@pixiv/three-vrm'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
 const avatarCache = new Map<string, GLTF>()
 const loadingPromises = new Map<string, Promise<GLTF>>()
 
-// VRM を先に探す。VRM は humanoid のボーン割り当てと表情が規格化されているので、
-// うなずき・まばたき・口の動きを実装依存なしに動かせる（#1603 の調査で、
-// 以前入っていた Tripo 製の GLB は skins 0 / morph 0 で静止メッシュだった）。
 const AVATAR_PATHS = {
-  male: ['/avatars/male-avatar.vrm', '/avatars/male-avatar.glb'],
-  female: ['/avatars/female-avatar.vrm', '/avatars/female-avatar.glb'],
+  male: '/avatars/male-avatar.glb',
+  female: '/avatars/female-avatar.glb',
 } as const
 
 const READY_PLAYER_ME_FALLBACK = {
@@ -59,26 +55,18 @@ export async function loadAvatar(gender: AvatarGender): Promise<GLTF> {
  */
 async function loadAvatarInternal(gender: AvatarGender): Promise<GLTF> {
   const loader = createGLTFLoader()
+  const localPath = AVATAR_PATHS[gender]
 
-  // VRM → GLB の順に試す
-  for (const localPath of AVATAR_PATHS[gender]) {
-    try {
-      const gltf = await loadWithTimeout(loader, localPath, 10000)
-      if (!hasMorphTargets(gltf) && !gltf.userData?.vrm) {
-        console.warn(
-          `[AvatarLoader] ${localPath} は表情（morph target）も VRM の表情も持ちません。` +
-          '口の動きは顎ボーンがあればそちらで代替しますが、無ければ動きません。'
-        )
-      }
-      return gltf
-    } catch {
-      // 次の候補へ
+  // Try loading from local file first
+  try {
+    const gltf = await loadWithTimeout(loader, localPath, 10000)
+    if (!hasMorphTargets(gltf)) {
+      console.warn('[AvatarLoader] Avatar does not have morph targets. Lipsync will not work.')
     }
+    return gltf
+  } catch {
+    console.warn(`[AvatarLoader] Local avatar not found (${localPath}). Trying Ready Player Me fallback...`)
   }
-  console.warn(
-    `[AvatarLoader] ローカルのアバターが見つかりません（${AVATAR_PATHS[gender].join(' / ')}）。` +
-    'Ready Player Me のフォールバックを試します'
-  )
 
   // Fallback to Ready Player Me CDN
   const fallbackUrl = READY_PLAYER_ME_FALLBACK[gender]
@@ -87,8 +75,8 @@ async function loadAvatarInternal(gender: AvatarGender): Promise<GLTF> {
     return gltf
   } catch {
     throw new Error(
-      `アバターの読み込みに失敗しました（${gender}）。` +
-      `frontend/public/avatars/ に ${gender}-avatar.vrm を置いてください（README 参照）。`
+      `Avatar loading failed for "${gender}". ` +
+      `Add ${gender}-avatar.glb to frontend/public/avatars/ or check your network connection.`
     )
   }
 }
@@ -98,10 +86,6 @@ async function loadAvatarInternal(gender: AvatarGender): Promise<GLTF> {
  */
 function createGLTFLoader(): GLTFLoader {
   const loader = new GLTFLoader()
-
-  // .vrm は glTF なので GLTFLoader で読める。プラグインを入れると
-  // gltf.userData.vrm に humanoid / expressionManager が入る。
-  loader.register((parser) => new VRMLoaderPlugin(parser))
 
   // Set up DRACO loader for compressed models
   const dracoLoader = new DRACOLoader()

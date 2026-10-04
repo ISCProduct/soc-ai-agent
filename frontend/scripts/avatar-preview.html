@@ -56,6 +56,15 @@ loader.load(file, (gltf) => {
       }
     }
   })
+  // うなずきの向きと口の開き具合は全身の絵では小さすぎて判断できない。
+  // ?cam=face で顔に寄せる。正規化後の目はおよそ y=0.77 にある。
+  if (params.get('cam') === 'face') {
+    camera.position.set(0, 0.74, 0.8)
+    camera.lookAt(0, 0.74, 0)
+  }
+
+  // うなずきは Head のローカル X 軸まわり。向きの補正は逆バインド行列側に
+  // 入っていて Head のローカル軸はワールドと一致するので、これがピッチになる。
   if (head && nod !== 0) head.rotation.x += nod
   if (morphMesh && morphIndex >= 0) morphMesh.morphTargetInfluences[morphIndex] = mouth
 

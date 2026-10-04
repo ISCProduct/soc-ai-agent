@@ -232,7 +232,14 @@ export default function SessionScreen({
 
           {/* アバター（全面） */}
           <Box sx={{ width: '100%', height: '100%' }}>
-            <ThreeAvatar gender={avatarGender} audioStream={null} level={aiLevel} speaking={aiSpeaking} />
+            <ThreeAvatar
+              gender={avatarGender}
+              audioStream={null}
+              level={aiLevel}
+              speaking={aiSpeaking}
+              active={isConnected}
+              pending={turnPending}
+            />
           </Box>
 
           {/* 面接官ロールラベル */}

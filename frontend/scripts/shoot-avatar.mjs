@@ -17,22 +17,30 @@ import { mkdirSync } from 'node:fs'
 const outDir = process.argv[2] ?? '/tmp/avatar-shots'
 mkdirSync(outDir, { recursive: true })
 
-const shots = [
-  ['male-neutral', '/public/avatars/male-avatar.glb', 0, 0],
-  ['male-nod', '/public/avatars/male-avatar.glb', 0.11, 0],
-  ['male-mouth', '/public/avatars/male-avatar.glb', 0, 1],
-  ['female-neutral', '/public/avatars/female-avatar.glb', 0, 0],
-  ['female-nod', '/public/avatars/female-avatar.glb', 0.11, 0],
-  ['female-mouth', '/public/avatars/female-avatar.glb', 0, 1],
+// うなずきの向きと口の開きは全身の絵では小さすぎて判断できないので、
+// 顔に寄せた絵（cam=face）も撮る。首かしげとうなずきの取り違えは
+// 全身の絵では気付けなかった。
+const POSES = [
+  ['neutral', 0, 0],
+  ['nod', 0.11, 0],   // AvatarMotion の nodDepthRad と同じ 6.3度
+  ['mouth', 0, 1],    // 口を全開（音声振幅 1.0 のとき）
 ]
+const shots = []
+for (const g of ['male', 'female']) {
+  for (const [pose, nod, mouth] of POSES) {
+    for (const cam of ['', 'face']) {
+      shots.push([`${g}-${pose}${cam ? '-face' : ''}`, `/public/avatars/${g}-avatar.glb`, nod, mouth, cam])
+    }
+  }
+}
 
 const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
 })
 const page = await browser.newPage({ viewport: { width: 520, height: 620 }, deviceScaleFactor: 2 })
 let failed = 0
-for (const [name, file, nod, mouth] of shots) {
-  const url = `http://127.0.0.1:8099/scripts/avatar-preview.html?file=${encodeURIComponent(file)}&nod=${nod}&mouth=${mouth}`
+for (const [name, file, nod, mouth, cam] of shots) {
+  const url = `http://127.0.0.1:8099/scripts/avatar-preview.html?file=${encodeURIComponent(file)}&nod=${nod}&mouth=${mouth}&cam=${cam}`
   await page.goto(url, { waitUntil: 'load' })
   await page.waitForFunction('window.__ready === true', { timeout: 60000 })
   const err = await page.evaluate('window.__error')

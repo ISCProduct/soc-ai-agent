@@ -32,22 +32,6 @@ export interface AvatarCapabilities {
   jawBone: Bone | null
   /** スキニングされているか（skins があるか）。 */
   skinned: boolean
-  /**
-   * VRM の表情API。VRM では表情が morphTargetDictionary の名前と1対1でなく、
-   * expressionManager 経由で指定する（VRoid の出力は 'Fcl_ALL_Blink' のような
-   * 内部名で、規格上の名前は 'blink' / 'aa'）。あるなら生のモーフより優先する。
-   */
-  vrmExpression: VrmExpressionSetter | null
-}
-
-/** VRM の expressionManager への最小のアクセス。three-vrm に依存させない。 */
-export interface VrmExpressionSetter {
-  setBlink(value: number): void
-  setMouthOpen(value: number): void
-  /** まばたき表情を持っているか。 */
-  hasBlink: boolean
-  /** 口の表情を持っているか。 */
-  hasMouth: boolean
 }
 
 export interface MorphRef {
@@ -134,28 +118,20 @@ function findMorphs(root: Object3D, patterns: string[]): MorphRef[] {
 /**
  * 読み込んだモデルから、動かせる部位を洗い出す。
  *
- * vrm を渡した場合は VRM の API を優先する。VRM のボーン名は実装依存で
- * （VRoid は 'J_Bip_C_Head'）、表情も expressionManager 経由なので、
- * 名前のパターン照合より規格のAPIのほうが確実である。
+ * ボーン名・モーフ名のパターン照合だけで判定する。VRM の humanoid /
+ * expressionManager 経由の判定は入れていない（VRM 対応は別Issue）。
  */
-export function inspectAvatar(
-  root: Object3D,
-  vrm?: { headBone: Bone | null; expression: VrmExpressionSetter | null } | null,
-): AvatarCapabilities {
+export function inspectAvatar(root: Object3D): AvatarCapabilities {
   let skinned = false
   root.traverse((o) => {
     if ((o as { isSkinnedMesh?: boolean }).isSkinnedMesh) skinned = true
   })
-  const expression = vrm?.expression ?? null
   return {
-    // VRM の humanoid が頭を教えてくれるならそれを使う
-    headBone: vrm?.headBone ?? findBone(root, HEAD_BONE_PATTERNS),
+    headBone: findBone(root, HEAD_BONE_PATTERNS),
     jawBone: findBone(root, JAW_BONE_PATTERNS),
-    // VRM の表情があるなら生のモーフは見ない（二重に動かすと破綻する）
-    blinkTargets: expression?.hasBlink ? [] : findMorphs(root, BLINK_PATTERNS),
-    mouthTargets: expression?.hasMouth ? [] : findMorphs(root, MOUTH_PATTERNS),
+    blinkTargets: findMorphs(root, BLINK_PATTERNS),
+    mouthTargets: findMorphs(root, MOUTH_PATTERNS),
     skinned,
-    vrmExpression: expression,
   }
 }
 
@@ -169,10 +145,8 @@ export function avatarDeficiencies(caps: AvatarCapabilities): AvatarDeficiency[]
   const out: AvatarDeficiency[] = []
   if (!caps.skinned) out.push('no-skeleton')
   if (!caps.headBone) out.push('no-head-bone')
-  if (caps.mouthTargets.length === 0 && !caps.jawBone && !caps.vrmExpression?.hasMouth) {
-    out.push('no-mouth')
-  }
-  if (caps.blinkTargets.length === 0 && !caps.vrmExpression?.hasBlink) out.push('no-blink')
+  if (caps.mouthTargets.length === 0 && !caps.jawBone) out.push('no-mouth')
+  if (caps.blinkTargets.length === 0) out.push('no-blink')
   return out
 }
 
@@ -188,5 +162,5 @@ export function describeDeficiencies(d: AvatarDeficiency[]): string {
   if (d.length === 0) return ''
   return 'アバターモデルが要件を満たしていません: ' +
     d.map((k) => DEFICIENCY_MESSAGE[k]).join(' / ') +
-    '。リグ済みのモデル（VRM 推奨）に差し替えてください。public/avatars/README.md 参照'
+    '。リグ済みのモデルに差し替えてください。public/avatars/README.md 参照'
 }

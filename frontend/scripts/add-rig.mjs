@@ -142,13 +142,16 @@ function addRig(path) {
   const extra = []
   let extraLen = 0
   const newViews = []
-  function appendView(buf) {
+  // target は頂点属性なら 34962(ARRAY_BUFFER)。省くと gltf-validator の
+  // BUFFER_VIEW_TARGET_MISSING が出る。逆バインド行列には付けない。
+  function appendView(buf, target) {
     const pad = alignTo4(extraLen)
     if (pad > 0) { extra.push(Buffer.alloc(pad)); extraLen += pad }
     // buffer は glTF の必須プロパティ。入れ忘れると three の GLTFLoader が
     // loadBuffer で json.buffers[undefined] を引いて落ちる
     // （Cannot read properties of undefined (reading 'type')）。
     const view = { buffer: 0, byteOffset: bin.length + extraLen, byteLength: buf.length }
+    if (target !== undefined) view.target = target
     extra.push(buf); extraLen += buf.length
     newViews.push(view)
     return json.bufferViews.length + newViews.length - 1
@@ -162,29 +165,45 @@ function addRig(path) {
   let headVerts = 0
   for (let pi = 0; pi < prims.length; pi++) {
     const pos = posPerPrim[pi]
-    const jointsBuf = Buffer.alloc(pos.length * 4)       // VEC4 / UBYTE
-    const weightsBuf = Buffer.alloc(pos.length * 4 * 4)  // VEC4 / FLOAT
+    const jointsBuf = Buffer.alloc(pos.length * 4)   // VEC4 / UBYTE
+    // ウェイトは正規化 UBYTE。FLOAT だと頂点あたり16バイトで、20万頂点で2.7MB になる。
+    // 使う骨は高々2本（頭と胴）で中間の値も滑らかな補間なので 1/255 刻みで足りる。
+    const weightsBuf = Buffer.alloc(pos.length * 4)  // VEC4 / UBYTE(normalized)
     for (let i = 0; i < pos.length; i++) {
       const w = weightFor(pos[i][1], neckY, band)
       if (w > 0.5) headVerts++
       // 頭(2) と 胴(0) の2本に配分する。Neck(1) は中継用で直接は使わない。
-      jointsBuf[i * 4 + 0] = 2
+      // 量子化後の値で判定する。ウェイト0の枠に 2 を書くと glTF の
+      // ACCESSOR_JOINTS_USED_ZERO_WEIGHT 警告が頂点数ぶん出る。
+      const w8 = Math.round(w * 255)
+      jointsBuf[i * 4 + 0] = w8 > 0 ? 2 : 0
       jointsBuf[i * 4 + 1] = 0
-      weightsBuf.writeFloatLE(w, (i * 4 + 0) * 4)
-      weightsBuf.writeFloatLE(1 - w, (i * 4 + 1) * 4)
+      // 和をちょうど 255（=1.0）にする。丸めで和がずれると
+      // ACCESSOR_WEIGHTS_NON_NORMALIZED になる。
+      weightsBuf[i * 4 + 0] = w8
+      weightsBuf[i * 4 + 1] = 255 - w8
     }
-    const jv = appendView(jointsBuf)
-    const wv = appendView(weightsBuf)
+    const jv = appendView(jointsBuf, 34962)
+    const wv = appendView(weightsBuf, 34962)
     json.accessors.push({ bufferView: jv, componentType: COMP.UBYTE, count: pos.length, type: 'VEC4' })
     prims[pi].attributes.JOINTS_0 = json.accessors.length - 1
-    json.accessors.push({ bufferView: wv, componentType: COMP.FLOAT, count: pos.length, type: 'VEC4' })
+    json.accessors.push({
+      bufferView: wv, componentType: COMP.UBYTE, normalized: true,
+      count: pos.length, type: 'VEC4',
+    })
     prims[pi].attributes.WEIGHTS_0 = json.accessors.length - 1
   }
 
-  // 逆バインド行列（平行移動の逆だけ）
+  // 逆バインド行列。平行移動の逆と、顔を正面（+Z）へ向ける -90度/Y を入れる。
+  //
+  // 向きの補正をジョイントノードの rotation に焼き込むと、子である Head の
+  // ローカル軸も一緒に回ってしまい、head.rotation.x がうなずき（ピッチ）では
+  // なく首をかしげる動き（ロール）になる。逆バインド行列側に入れれば、
+  // 見た目は同じまま Head のローカル軸はワールドと一致する。
+  // 列優先。-90度/Y は (1,0,0) → (0,0,1)。
   const ibm = Buffer.alloc(jointWorldY.length * 16 * 4)
   jointWorldY.forEach((y, i) => {
-    const m = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,-y,0,1]
+    const m = [0,0,1,0, 0,1,0,0, -1,0,0,0, 0,-y,0,1]
     m.forEach((v, k) => ibm.writeFloatLE(v, (i * 16 + k) * 4))
   })
   const ibmView = appendView(ibm)
@@ -196,13 +215,12 @@ function addRig(path) {
   const base = json.nodes.length
   // Tripo の出力は顔が +X を向いている。ThreeAvatar.tsx は「骨があるか」で
   // 向きの補正を出し分けており（hasSkeleton ? 0 : -PI/2）、骨を足すと
-  // その補正が効かなくなって横を向く。骨格のルートに回転を焼き込んでおく。
-  // スキンを持つノードの transform は glTF 仕様上無視されるので、
-  // メッシュ側ではなくジョイント側を回す必要がある。
-  // -90度/Y: (1,0,0) → (0,0,1)。+X 向きが +Z 向きになる。
-  const S2 = Math.SQRT1_2
+  // その補正が効かなくなって横を向く。スキンを持つノードの transform は
+  // glTF 仕様上無視されるのでメッシュ側では回せない。
+  // ジョイントの rotation に入れると Head のローカル軸も回ってうなずきが
+  // 首かしげになるため、上の逆バインド行列側へ入れている。
   json.nodes.push(
-    { name: 'Hips', translation: [0, jointWorldY[0], 0], rotation: [0, -S2, 0, S2], children: [base + 1] },
+    { name: 'Hips', translation: [0, jointWorldY[0], 0], children: [base + 1] },
     { name: 'Neck', translation: [0, jointWorldY[1] - jointWorldY[0], 0], children: [base + 2] },
     { name: 'Head', translation: [0, jointWorldY[2] - jointWorldY[1], 0] },
   )

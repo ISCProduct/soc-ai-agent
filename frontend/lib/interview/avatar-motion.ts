@@ -144,7 +144,6 @@ export class AvatarMotion {
         value = pulse(p)
       }
     }
-    caps.vrmExpression?.setBlink(value)
     for (const t of caps.blinkTargets) {
       if (t.mesh.morphTargetInfluences) t.mesh.morphTargetInfluences[t.index] = value
     }
@@ -195,12 +194,11 @@ export class AvatarMotion {
     // 追従なので厳密には 0 に落ちない。閉じ切らないと口が半開きのままに見える。
     if (this.mouth < 0.01) this.mouth = 0
     const open = this.mouth
-    caps.vrmExpression?.setMouthOpen(open)
     for (const t of caps.mouthTargets) {
       if (t.mesh.morphTargetInfluences) t.mesh.morphTargetInfluences[t.index] = open
     }
     // モーフが無いモデルは顎ボーンで代替する
-    if (caps.mouthTargets.length === 0 && !caps.vrmExpression?.hasMouth && caps.jawBone) {
+    if (caps.mouthTargets.length === 0 && caps.jawBone) {
       caps.jawBone.rotation.x = open * 0.25
     }
   }

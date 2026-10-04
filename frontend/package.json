@@ -13,6 +13,7 @@
     "avatar:rig": "node scripts/add-rig.mjs",
     "avatar:placeholder": "node scripts/make-placeholder-avatar.mjs",
     "avatar:mouth": "node scripts/add-mouth-morph.mjs",
+    "avatar:measure": "node scripts/measure-avatar.mjs",
     "avatar:shoot": "node scripts/shoot-avatar.mjs"
   },
   "dependencies": {
@@ -21,7 +22,6 @@
     "@mui/icons-material": "^7.3.5",
     "@mui/material": "^7.3.5",
     "@mui/material-nextjs": "^7.3.5",
-    "@pixiv/three-vrm": "^3.5.5",
     "@radix-ui/react-avatar": "^1.1.0",
     "@radix-ui/react-label": "^2.0.0",
     "@radix-ui/react-progress": "^1.1.8",

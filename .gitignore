@@ -116,3 +116,6 @@ docs/architecture/
 # UI監査の成果物（スクリーンショット数百枚で数MBになる）。
 # レポートと指摘内容はIssue/PRへ転記し、画像はローカルに置く。
 /artifacts/
+
+# アバター加工時の中間画像（比較用。170MB規模になるので追跡しない）
+frontend/.avatar-work/
