@@ -102,9 +102,12 @@ var transcribeFn = transcribe
 // hints は Transcription API の prompt に渡す補助語。空なら渡さない。
 // 補助語の有無で結果が変わるかを同じ指標で比べるために引数で受ける。
 //
-// 平均値の母数は「APIが成功し、かつ認識失敗でもない件数」。
-// APIエラーを分母に残すと分子へ 0 を足すだけになり、失敗が多い run ほど
-// CER が良く出てしまう（残高切れの run が「改善」に見える）。
+// 平均値の母数は「APIが成功した件数」。APIエラーを分母に残すと分子へ 0 を
+// 足すだけになり、失敗が多い run ほど CER が良く出てしまう
+// （残高切れの run が「改善」に見える）。
+//
+// 認識失敗（空・短すぎる出力）は母数から外さない。APIは正常応答していて
+// モデルが何も返せなかったという測定結果そのものなので、全ミスとして数える。
 func RunModel(model string, cases []Case, audios []Audio, hints string) *ModelSummary {
 	byID := map[string]Case{}
 	for _, c := range cases {
@@ -125,7 +128,7 @@ func RunModel(model string, cases []Case, audios []Audio, hints string) *ModelSu
 			s.ErroredCases++
 			s.Cases = append(s.Cases, r)
 			var se *statusError
-			if errors.As(err, &se) && se.code >= 400 && se.code < 500 {
+			if errors.As(err, &se) && se.fatal() {
 				consecutive4xx++
 			} else {
 				consecutive4xx = 0
@@ -193,10 +196,39 @@ func buildTranscribeForm(model, hints string, a Audio) (*bytes.Buffer, string, e
 }
 
 // statusError は Transcription API が 2xx 以外を返したことを表す。
+//
+// 429 は「残高切れ・レート上限」のどちらでも返る。前者は後続も必ず失敗するが、
+// 後者は待てば通るので打ち切ってはいけない。区別はレスポンス本文の
+// error.code（insufficient_quota / rate_limit_exceeded）にしか出ないため、
+// 本文のうち判定に必要な分だけ持つ。
 // 4xx の連続で打ち切る判定にステータスコードが必要なので型で持つ。
-type statusError struct{ code int }
+type statusError struct {
+	code int
+	// quotaExhausted は残高切れ（insufficient_quota）。打ち切り対象。
+	quotaExhausted bool
+}
 
-func (e *statusError) Error() string { return fmt.Sprintf("HTTP %d", e.code) }
+func (e *statusError) Error() string {
+	if e.quotaExhausted {
+		return fmt.Sprintf("HTTP %d (insufficient_quota)", e.code)
+	}
+	return fmt.Sprintf("HTTP %d", e.code)
+}
+
+// fatal は「後続も必ず失敗する」エラーか。これが続いたときだけ打ち切る。
+//
+// 401/403（キー失効・権限なし）と残高切れは必ず失敗する。
+// レート上限の 429 は待てば通るので、3件続いても run を捨てない
+// （216件の run が一時的な混雑で丸ごと無駄になる）。
+func (e *statusError) fatal() bool {
+	switch e.code {
+	case 401, 403:
+		return true
+	case 429:
+		return e.quotaExhausted
+	}
+	return e.code >= 400 && e.code < 500
+}
 
 func transcribe(model, hints string, a Audio) (string, int64, error) {
 	buf, contentType, err := buildTranscribeForm(model, hints, a)
@@ -223,8 +255,12 @@ func transcribe(model, hints string, a Audio) (string, int64, error) {
 		return "", latency, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		// APIキーが本文に含まれることはないが、念のため本文全体は出さない
-		return "", latency, &statusError{code: resp.StatusCode}
+		// APIキーが本文に含まれることはないが、念のため本文全体は出さない。
+		// 残高切れとレート上限の区別だけ取り出す。
+		return "", latency, &statusError{
+			code:           resp.StatusCode,
+			quotaExhausted: bytes.Contains(body, []byte("insufficient_quota")),
+		}
 	}
 	var out struct {
 		Text string `json:"text"`

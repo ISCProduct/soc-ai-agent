@@ -117,20 +117,27 @@ func TestRunModelSeparatesRecognitionFailureFromAPIError(t *testing.T) {
 	}
 }
 
-// 残高切れ（429）やキー失効（401）は後続も必ず失敗する。
+// 残高切れ（insufficient_quota）やキー失効（401）は後続も必ず失敗する。
 // 打ち切らないと216件が一瞬で「完走」して空の結果ファイルが残る。
+//
+// 逆に、レート上限の 429 は待てば通るので打ち切ってはいけない。
+// 一時的な混雑で216件の run が丸ごと無駄になる。429 はどちらでも返るため、
+// レスポンス本文の error.code で区別する。
 func TestRunModelAbortsOnConsecutive4xx(t *testing.T) {
 	tests := []struct {
 		name      string
 		code      int
-		breakWith int // 途中に挟む別系統のステータス（0 なら挟まない）
+		quota     bool // 本文に insufficient_quota が入っているか
+		breakWith int  // 途中に挟む別系統のステータス（0 なら挟まない）
 		wantCases int
 		wantAbort bool
 	}{
-		{name: "429が連続したら打ち切る", code: 429, wantCases: maxConsecutive4xx, wantAbort: true},
+		{name: "残高切れの429が連続したら打ち切る", code: 429, quota: true, wantCases: maxConsecutive4xx, wantAbort: true},
 		{name: "401が連続したら打ち切る", code: 401, wantCases: maxConsecutive4xx, wantAbort: true},
+		// レート上限の429は待てば通る。全件走り切る（216件を捨てない）。
+		{name: "レート上限の429は打ち切らない", code: 429, wantCases: 5, wantAbort: false},
 		// 5xx は一時的な失敗なので連続判定をリセットする。全件走り切る。
-		{name: "5xxが挟まれば打ち切らない", code: 429, breakWith: 503, wantCases: 5, wantAbort: false},
+		{name: "5xxが挟まれば打ち切らない", code: 429, quota: true, breakWith: 503, wantCases: 5, wantAbort: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -138,11 +145,11 @@ func TestRunModelAbortsOnConsecutive4xx(t *testing.T) {
 			cases, audios := fixture(ids...)
 			replies := map[string]stubReply{}
 			for i, id := range ids {
-				code := tt.code
+				code, quota := tt.code, tt.quota
 				if tt.breakWith != 0 && i%2 == 1 {
-					code = tt.breakWith
+					code, quota = tt.breakWith, false
 				}
-				replies[id] = stubReply{err: &statusError{code: code}}
+				replies[id] = stubReply{err: &statusError{code: code, quotaExhausted: quota}}
 			}
 			withStub(t, replies)
 

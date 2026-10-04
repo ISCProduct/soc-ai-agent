@@ -287,6 +287,15 @@ def render(src: Path, v: Variant, dst: Path, webm: Path, seed: int) -> dict:
     run(["ffmpeg", "-y", "-hide_banner", "-i", str(dst), *WEBM_ARGS, "-b:a", br, str(webm)])
 
     mean, mx, clipped = measure(dst)
+    # amix は normalize=0 なので、SNR 0/5dB では信号+雑音が 0dBFS を超えて潰れる。
+    # 潰れた分は「雑音の影響」ではなく「クリップ歪み」なので、そのまま読むと
+    # 2つの要因を切り分けられない。clipped-* は意図的に潰す条件なので除く。
+    if clipped > 0 and v.condition != "clipped":
+        print(
+            f"  ⚠ {v.condition} でクリップ {clipped} サンプル"
+            f"（max {mx:.1f}dB）。雑音の影響とクリップ歪みが混ざる",
+            file=sys.stderr,
+        )
     return {
         "condition": v.condition,
         "src_mean_db": src_mean,
