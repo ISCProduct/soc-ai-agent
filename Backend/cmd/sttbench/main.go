@@ -7,6 +7,9 @@
 //	go run ./cmd/sttbench -manifest ../docs/research/interview-audio-eval/manifest.jsonl \
 //	  -models gpt-4o-transcribe,gpt-4o-mini-transcribe -out /tmp/stt-result.json
 //
+// -hints に面接コンテキストを渡すと、本番と同じ BuildSTTHints の出力を
+// prompt へ載せて測れる。補助語ありと無しを同じ指標で比べるために使う。
+//
 // 出力はリポジトリ外へ書くこと。認識結果には学生の発話が入りうるため、
 // フィクスチャであってもリポジトリに残さない運用に揃える。
 package main
@@ -20,8 +23,20 @@ import (
 	"strings"
 	"time"
 
+	"Backend/internal/services/interview"
 	"Backend/internal/sttbench"
 )
+
+// parseHintsContext は `会社名|読み|職種|企業情報` を分解する。
+// 足りない要素は空文字。多すぎる場合、余りは企業情報へ寄せる
+// （企業情報は自由記述で、区切り文字が現れうるため）。
+func parseHintsContext(s string) (name, reading, position, info string) {
+	parts := strings.SplitN(s, "|", 4)
+	for len(parts) < 4 {
+		parts = append(parts, "")
+	}
+	return parts[0], parts[1], parts[2], parts[3]
+}
 
 func main() {
 	manifestPath := flag.String("manifest", "", "manifest.jsonl のパス（必須）")
@@ -30,6 +45,7 @@ func main() {
 	out := flag.String("out", "", "結果JSONの出力先。未指定なら標準出力のみ")
 	dryRun := flag.Bool("dry-run", false, "APIを呼ばず、音声とmanifestの対応だけ検証する")
 	condition := flag.String("condition", "", "評価する録音条件で絞る（例: noisy）。未指定なら全件")
+	hintsCtx := flag.String("hints", "", "補助語に使う面接コンテキスト `会社名|読み|職種|企業情報`。未指定なら補助語なし")
 	flag.Parse()
 
 	if *manifestPath == "" {
@@ -66,6 +82,16 @@ func main() {
 		fmt.Printf("%-26s %10.2f %9dB %s\n", a.ID, a.DurationSec, a.Bytes, a.Format)
 	}
 
+	// 補助語は本番と同じ BuildSTTHints を通す。ここで別の文字列を作ると
+	// 「本番の補助語が効くのか」を測ったことにならない。
+	// -dry-run でも出すのは、API費用を掛けずに補助語を確認できるようにするため。
+	hints := ""
+	if *hintsCtx != "" {
+		name, reading, position, info := parseHintsContext(*hintsCtx)
+		hints = interview.BuildSTTHints(name, reading, position, info)
+		fmt.Printf("\n補助語: %s\n", hints)
+	}
+
 	if *dryRun {
 		fmt.Println("\n-dry-run のためAPIは呼びません")
 		return
@@ -82,6 +108,7 @@ func main() {
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 		Format:      *format,
 		Models:      map[string]*sttbench.ModelSummary{},
+		Hints:       hints,
 	}
 	for _, m := range modelList {
 		m = strings.TrimSpace(m)
@@ -89,7 +116,7 @@ func main() {
 			continue
 		}
 		fmt.Printf("\n=== %s ===\n", m)
-		summary := sttbench.RunModel(m, cases, audios)
+		summary := sttbench.RunModel(m, cases, audios, hints)
 		report.Models[m] = summary
 		sttbench.PrintSummary(os.Stdout, m, summary)
 	}

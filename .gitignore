@@ -110,6 +110,24 @@ docs/research/**
 !docs/research/ai-eval/README.md
 !docs/research/ai-eval/*.jsonl
 
+# 音声評価フィクスチャは「作り方」だけ追跡する（#1603）。
+# 生成器・マニフェスト・手順があれば同じ音声を作り直せる。
+# ただし元になる8ケースの音声自体は従来から追跡していないので、
+# 手元に無い場合は先にそちらを用意する必要がある。
+#
+# 許可はファイル名の完全一致ではなく拡張子で書く。完全一致にすると
+# 生成器を増やす・マニフェストを改名した瞬間に無言で無視される。
+!docs/research/interview-audio-eval/README.md
+!docs/research/interview-audio-eval/*.py
+!docs/research/interview-audio-eval/*.jsonl
+# 生成物は追跡しない。8ケース×28条件×2形式で448ファイル・約115MBになる。
+docs/research/interview-audio-eval/audio/
+docs/research/interview-audio-eval/*.tsv
+# 実発話（#1603 の⑤）のマニフェストは PII を含みうるので許可から外す。
+# *.jsonl を許可した副作用で実発話が追跡対象に入らないようにする。
+docs/research/interview-audio-eval/real/
+docs/research/interview-audio-eval/*real*.jsonl
+
 # アーキテクチャ図・インフラ構成メモ（draw.io / PNG / 環境依存ドキュメント）
 docs/architecture/
 
