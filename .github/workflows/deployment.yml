@@ -78,7 +78,11 @@ jobs:
           RDS_STATUS=$(aws rds describe-db-instances --db-instance-identifier ${PROJECT_NAME}-mysql \
             --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null || echo "unknown")
           if [ "$RDS_STATUS" == "stopped" ]; then
-            aws rds start-db-instance --db-instance-identifier ${PROJECT_NAME}-mysql
+            # InsufficientDBInstanceCapacity のようにAZの空き待ちで弾かれることがある。
+            # 後続の "Wait for staging infra ready" が20分間 start を打ち直すため、
+            # ここで落とさず素通りさせる。
+            # 2026-10-04 はこれでデプロイ1本が丸ごと落ちた。
+            aws rds start-db-instance --db-instance-identifier ${PROJECT_NAME}-mysql || true
           fi
 
           DESIRED=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "${PROJECT_NAME}-app" \
