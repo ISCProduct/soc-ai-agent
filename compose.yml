@@ -151,15 +151,23 @@ services:
       - "3000:3000"
     # dev サーバのメモリを上限で縛る。
     #
-    # next dev のメモリは使っているうちに増え続け、放っておくと数GiBに達して落ちる。
-    # restart: unless-stopped で起き上がるが、落ちた瞬間にブラウザ側は接続が
-    # リセットされ、操作中の画面が切れる。実測では CPU 1% 程度のまま
-    # 1.7GiB → 2.6GiB へ数分で増えていた（負荷ではなく増加そのものが問題）。
+    # next dev のメモリは使っているうちに増え続ける。限界に達すると Next.js が
+    # 「Server is approaching the used memory threshold, restarting...」で
+    # 自分を再起動する（閾値はヒープ上限の80%）。コンテナは落ちないので
+    # RestartCount は 0 のままだが、その瞬間に処理中のリクエストが切れ、
+    # 復帰後もルートの再コンパイルで数秒〜10秒かかる。
+    # 実測では /admin/audit-logs のコンパイル中に再起動し、次の /admin/costs が
+    # 9.2秒かかっていた（#1616 の時点では原因をコンテナの死と見ていたが、
+    # 実際にはコンテナは生きていて dev サーバだけが入れ替わっていた）。
+    #
+    # 一番効いたのは Turbopack への切り替え。同じ8ページを叩いた実測で
+    # 通過後のRSSが webpack 3347MB に対し Turbopack 1732MB（増分は 1614MB → 217MB）。
     #
     # --max-old-space-size を入れると V8 が上限手前で強く GC するので頭打ちになる。
     # mem_limit はその外側の保険で、万一超えても DB や Backend を巻き込まないようにする。
-    # ヒープ上限より大きくしないと GC が効く前にコンテナごと落ちるので、差を空けてある。
-    mem_limit: ${FRONTEND_MEM_LIMIT:-2560m}
+    # ヒープ上限より十分大きくしないと、GC やしきい値再起動が効く前にコンテナごと
+    # 落ちる（RSS はヒープ + ネイティブなので、ヒープ上限とほぼ同じ値にしてはいけない）。
+    mem_limit: ${FRONTEND_MEM_LIMIT:-3584m}
     environment:
       - NODE_OPTIONS=${FRONTEND_NODE_OPTIONS:---max-old-space-size=2048}
       - NODE_ENV=${NODE_ENV:-development}
