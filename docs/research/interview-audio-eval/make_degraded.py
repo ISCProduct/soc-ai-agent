@@ -9,9 +9,20 @@
     python3 make_degraded.py --manifest-only      # マニフェストだけ作り直す
     python3 make_degraded.py --only noisy         # 条件名の前方一致で絞る
 
-強度は「狙った値」ではなく必ず実測して合わせる。特に SNR は amix の重みだけでは
-決まらないので、(1)音声のRMSを測る (2)目標SNRになる雑音ゲインを計算する
-(3)生成した雑音をもう一度測って狙い通りか確認する、の3段で扱う。
+SNR は amix の重みだけでは決まらないので、(1)音声の発話区間のRMSを測る
+(2)目標SNRになる雑音ゲインを計算する (3)そのゲインで雑音を作る、の順で扱う。
+
+**この手順は SNR を「検証」していない。** volume フィルタは指示どおりの線形ゲインを
+掛けるので、生成後の雑音をもう一度測って目標との差を出しても必ず 0 になる
+（恒等式であって測定ではない）。以前の版はその 0 を「誤差 0.000 dB」として
+品質の根拠にしていたが、確かめていたのは volume フィルタの動作だけだった。
+いまは生の `speech_mean_db` / `noise_mean_db` を TSV に残すだけにして、
+SNR の解釈は読み手に委ねる。
+
+信号レベルは `silenceremove` で無音を落としてから測る。ファイル全体のRMSだと
+前後・語間の無音ぶん過小評価になり、ラベルより実際は楽な条件になる
+（無音率はケースごとに違うのでケース間でもラベルが揃わない）。
+
 雑音は seed 固定なので、同じ入力からは毎回同じ音声ができる。
 
 実発話・PIIは扱わない。入力は合成音声のみ（source は常に synthetic）。
@@ -121,10 +132,28 @@ def variants() -> list[Variant]:
             snr_db=10.0,
             noise_color="pink",
             post="highpass=f=300,lowpass=f=3400",
-            note="ピンク雑音 SNR 10dB + 300-3400Hz",
+            note="ピンク雑音 SNR 10dB + 300-3400Hz（post が掛かるので配信ファイルのSNRは10dBではない）",
         )
     )
+    check_variants(out)
     return out
+
+
+def check_variants(vs: list[Variant]) -> None:
+    """SNRラベルが成立しない組み合わせを弾く。
+
+    雑音ゲインは「加工前の音声レベル」から計算している。pre で減衰や増幅を
+    掛けると amix に入る音声はそのレベルではなくなり、SNRラベルが丸ごとずれる
+    （quiet×noisy を足した瞬間に起きる）。やるなら pre 適用後の音声を測り直す
+    実装に直すこと。ここで落としておけば気づかずに混ざることはない。
+    """
+    for v in vs:
+        if v.snr_db is not None and v.pre != "anull":
+            raise SystemExit(
+                f"{v.condition}: snr_db と pre の併用は未対応です。"
+                "雑音ゲインは pre 適用前のレベルから計算しているため、"
+                "SNRラベルが実際とずれます（pre適用後を測り直す実装が必要）"
+            )
 
 
 def run(args: list[str]) -> str:
@@ -153,6 +182,35 @@ def measure(path: Path) -> tuple[float, float, int]:
         raise SystemExit(f"音量を測れませんでした: {path}")
     h0 = HIST0_RE.search(out)
     return float(mean.group(1)), float(mx.group(1)), int(h0.group(1)) if h0 else 0
+
+
+# 発話区間の判定しきい値。そのファイルのピークから何dB下を無音とみなすか。
+# 絶対値（-45dBFSなど）だと入力の録音レベルが変わった瞬間に全部無音判定または
+# 全部発話判定に倒れるため、ピーク相対で決める。
+SILENCE_GATE_BELOW_PEAK_DB = 30.0
+
+
+def speech_mean(path: Path, peak_db: float, full_mean_db: float) -> float:
+    """無音を落としたうえでの mean_volume(dBFS) を返す。
+
+    SNR の分子はファイル全体のRMSではなく発話中のレベルでなければならない。
+    前後と語間の無音を含めると信号レベルを過小評価し、雑音を実際より小さく
+    混ぜることになる（ラベルより楽な条件になる）。
+
+    無音判定が全部削ってしまった場合だけ、ファイル全体のRMSへ落とす。
+    """
+    gate = peak_db - SILENCE_GATE_BELOW_PEAK_DB
+    af = (
+        f"silenceremove=start_periods=1:start_threshold={gate:.1f}dB"
+        f":stop_periods=-1:stop_threshold={gate:.1f}dB:stop_duration=0.1:detection=rms"
+        ",volumedetect"
+    )
+    out = run(["ffmpeg", "-hide_banner", "-i", str(path), "-af", af, "-f", "null", "/dev/null"])
+    m = MEAN_RE.search(out)
+    if not m:
+        sys.stderr.write(f"警告: 発話区間を取れなかったので全体RMSを使います: {path}\n")
+        return full_mean_db
+    return float(m.group(1))
 
 
 def duration(path: Path) -> float:
@@ -185,24 +243,26 @@ def render(src: Path, v: Variant, dst: Path, webm: Path, seed: int) -> dict:
     if v.opus_bitrate:
         stage = TMP_DIR / (dst.stem + ".pre.wav")
 
-    achieved_snr: float | None = None
+    src_speech_mean: float | None = None
     noise_mean: float | None = None
     if v.snr_db is None:
         run(["ffmpeg", "-y", "-hide_banner", "-i", str(src), "-af", f"{v.pre},{v.post}", *WAV_ARGS, str(stage)])
     else:
         # 早口などで長さが変わる条件と雑音は併用しないので、元の長さで雑音を作る。
         dur = duration(src)
-        # (1) 無加工の雑音のRMSを測る → (2) 目標SNRとの差からゲインを決める
+        # (1) 信号レベルは発話区間だけで測る（無音込みの全体RMSでは過小評価になる）
+        src_speech_mean = speech_mean(src, src_max, src_mean)
+        # (2) 無加工の雑音のRMSを測り、目標SNRとの差からゲインを決める
         probe = TMP_DIR / (dst.stem + ".noise0.wav")
         run(["ffmpeg", "-y", "-hide_banner", "-f", "lavfi", "-i", noise_graph(v, dur, seed, None), *WAV_ARGS, str(probe)])
         n0, _, _ = measure(probe)
-        target = src_mean - v.snr_db
-        gain = target - n0
-        # (3) ゲインを掛けた雑音を測り直して、狙い通りに落ちているか確認する
+        gain = (src_speech_mean - v.snr_db) - n0
+        # (3) ゲインを掛けた雑音を作る。ここで測り直して目標と比べても
+        #     volume が線形ゲインである以上必ず一致するので、検証にはならない。
+        #     生の値だけ TSV に残す。
         noise = TMP_DIR / (dst.stem + ".noise.wav")
         run(["ffmpeg", "-y", "-hide_banner", "-f", "lavfi", "-i", noise_graph(v, dur, seed, gain), *WAV_ARGS, str(noise)])
         noise_mean, _, _ = measure(noise)
-        achieved_snr = src_mean - noise_mean
         run(
             [
                 "ffmpeg", "-y", "-hide_banner",
@@ -231,12 +291,18 @@ def render(src: Path, v: Variant, dst: Path, webm: Path, seed: int) -> dict:
         "condition": v.condition,
         "src_mean_db": src_mean,
         "src_max_db": src_max,
+        # 雑音ゲインの計算に使った信号レベル（発話区間のRMS）。
+        # target_snr_db = src_speech_mean_db - noise_mean_db が成り立つが、
+        # これは計算式そのものなので測定結果ではない。
+        "src_speech_mean_db": src_speech_mean,
+        "noise_mean_db": noise_mean,
+        "target_snr_db": v.snr_db,
+        # post は amix の後に掛かる。空でないとき、配信ファイルのSNRは
+        # target_snr_db ではない（帯域を削れば雑音も信号も一緒に変わる）。
+        "post_filter": v.post if v.post != "anull" else "",
         "mean_db": mean,
         "max_db": mx,
         "clipped_samples": clipped,
-        "noise_mean_db": noise_mean,
-        "target_snr_db": v.snr_db,
-        "achieved_snr_db": achieved_snr,
         "duration_sec": duration(dst),
         "wav_bytes": dst.stat().st_size,
         "webm_bytes": webm.stat().st_size,
@@ -266,9 +332,12 @@ def main() -> None:
                 m = render(HERE / c["file"], v, wav, webm, seed_of(c["id"], v.condition))
                 m["id"] = cid
                 levels.append(m)
+                speech = m["src_speech_mean_db"]
+                noise = m["noise_mean_db"]
                 print(
                     f"{cid:58s} mean {m['mean_db']:7.1f}dB max {m['max_db']:6.1f}dB "
-                    f"SNR {('%.1f' % m['achieved_snr_db']) if m['achieved_snr_db'] is not None else '-':>6s} "
+                    f"発話 {('%.1f' % speech) if speech is not None else '-':>6s} "
+                    f"雑音 {('%.1f' % noise) if noise is not None else '-':>6s} "
                     f"{m['duration_sec']:6.2f}s"
                 )
             lines.append(
@@ -292,9 +361,12 @@ def main() -> None:
     print(f"\nマニフェスト: {OUT_MANIFEST} ({len(lines)}件)")
 
     if levels:
+        # achieved_snr_db は出さない。src - noise で必ず target に一致する恒等式で、
+        # 測定ではないため（読み手が誤解する）。生の2値を残して計算は読み手に委ねる。
         cols = [
-            "id", "condition", "src_mean_db", "mean_db", "max_db", "clipped_samples",
-            "noise_mean_db", "target_snr_db", "achieved_snr_db", "duration_sec", "wav_bytes", "webm_bytes",
+            "id", "condition", "src_mean_db", "src_speech_mean_db", "noise_mean_db",
+            "target_snr_db", "post_filter", "mean_db", "max_db", "clipped_samples",
+            "duration_sec", "wav_bytes", "webm_bytes",
         ]
         rows = ["\t".join(cols)]
         rows += ["\t".join("" if r.get(k) is None else str(r.get(k)) for k in cols) for r in levels]
