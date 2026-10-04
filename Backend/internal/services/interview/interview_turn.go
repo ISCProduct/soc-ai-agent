@@ -58,7 +58,10 @@ func (s *InterviewService) Turn(
 	// API は拡張子で形式を判断するため、食い違うと復号に失敗するか
 	// 誤って解釈され、認識精度が落ちる。
 	audioFormat := DetectAudioFormat(audioData)
-	sttHints := BuildSTTHints(companyName, companyReading, position, companyInfo)
+	// 補助語に使う企業名・読みは DB 解決済みの値だけ。クライアント直値は使わない
+	// （BuildSTTHints のコメント参照、#1600）。
+	hintName, hintReading := s.sttHintCompany(companyID, companyName)
+	sttHints := BuildSTTHints(hintName, hintReading, companyInfo)
 	sttStart := time.Now()
 	userText, err := s.openaiClient.TranscribeWithHints(ctx, audioData, audioFormat.AudioFilename(), sttHints)
 	obs := ObserveTranscribe(sessionID, turnCount, len(audioData), audioFormat.MIME, sttStart, userText, err)

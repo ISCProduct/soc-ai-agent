@@ -10,7 +10,7 @@ import (
 // 壁打ち/面接/レビュー用の短いスナップショット文を組み立てる。
 // Search / LLM 調査は行わない。
 func BuildCompanyBrief(company *models.Company, profile *models.CompanyWeightProfile) string {
-	if company == nil {
+	if company == nil || !briefVisible(company) {
 		return ""
 	}
 	var b strings.Builder
@@ -47,6 +47,46 @@ func BuildCompanyBrief(company *models.Company, profile *models.CompanyWeightPro
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// briefVisible は brief に文面を出してよい企業行かを判定する（#1600）。
+//
+// /company-entry は無認証（honeypot とレート制限のみ）で投稿でき、
+// data_status='draft' / is_provisional=true / is_guest_entry=true の企業行が
+// 即座に出来上がる（company_entry_service.go）。審査前のその文面が
+// 面接・履歴書レビューのプロンプトへ入ると、任意の指示文を仕込めてしまう。
+//
+// ここは SQL ガード guestEntryVisibilityGuard（company_query_repository.go）と
+// 同等ではない。SQL 側は
+//
+//	(data_status <> 'published' OR is_active = false)
+//	AND (is_guest_entry = true OR EXISTS (company_entry_submissions ...))
+//
+// の第2項に company_entry_submissions の行の有無も OR で持っているが、
+// models.Company から submissions は見えないため、ここは is_guest_entry しか見られない。
+// 残差は「is_guest_entry=0 だが company_entry_submissions に行がある未公開企業」で、
+// SQL ガードは弾くがここは通す。SQL 側がその第2項を残しているのは
+// 「マイグレーションの埋め漏れや、フラグを立てない経路が後から増えたときに、
+// 片方だけで素通りさせない」ためで（同ファイルのコメント参照）、
+// その保険はこちらには無い。
+//
+// したがってこれは SQL ガードの代わりではなく、それより弱い多層防御の2枚目。
+// 唯一の防壁は読み出し口のリポジトリ側で、BuildCompanyBrief の本番呼び出し元3箇所
+// （interview_company_context.go / resume_service.go / relation_controller.go）は
+// すべて SQL ガード付き（CompanyPublicRepository / CompanyQueryRepository）を経由する。
+// ここを置く理由は、brief の読み出し口が shared.CompanyBriefReader インターフェース
+// 越しで、フィルタ無しの CompanyRepository を注入しても型が通るため。
+//
+// data_status='published' を全企業に必須にはしない。draft は自動収集した企業の
+// 既定状態でもあり、published だけに絞ると面接の企業選択・履歴書レビューの
+// 企業ブリーフがほぼ空になる（guestEntryVisibilityGuard のコメント参照）。
+// ゲスト投稿由来かどうかで分けるのが #1203 / #1409 で決めた線。
+func briefVisible(c *models.Company) bool {
+	if !c.IsGuestEntry {
+		return true
+	}
+	// 管理者が公開したものは出す。公開後に却下されると is_active=false になる。
+	return c.DataStatus == "published" && c.IsActive
 }
 
 func trimRunes(s string, max int) string {
