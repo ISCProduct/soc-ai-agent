@@ -120,7 +120,7 @@ docs/research/**
 !docs/research/interview-audio-eval/README.md
 !docs/research/interview-audio-eval/*.py
 !docs/research/interview-audio-eval/*.jsonl
-# 生成物は追跡しない。8ケース×27条件×2形式で448ファイル・約115MBになる。
+# 生成物は追跡しない。8ケース×28条件×2形式で448ファイル・約115MBになる。
 docs/research/interview-audio-eval/audio/
 docs/research/interview-audio-eval/*.tsv
 # 実発話（#1603 の⑤）のマニフェストは PII を含みうるので許可から外す。

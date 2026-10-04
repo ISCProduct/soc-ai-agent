@@ -106,9 +106,14 @@ func TestRunModelSeparatesRecognitionFailureFromAPIError(t *testing.T) {
 	if math.Abs(s.FailureRate-0.5) > 1e-9 {
 		t.Errorf("FailureRate = %f, want 0.5（分母はAPI成功2件）", s.FailureRate)
 	}
-	// CER の母数は成功かつ認識できた1件だけ。
-	if math.Abs(s.MeanCER-s.Cases[0].CER) > 1e-9 {
-		t.Errorf("MeanCER = %f, want %f（分母は1件）", s.MeanCER, s.Cases[0].CER)
+	// CER の母数はAPIが成功した2件。認識失敗は全ミス（空出力なのでCER=1.0）
+	// として数える。外すと「何も返さないほど成績が良く見える」逆転が起きる。
+	want := (s.Cases[0].CER + s.Cases[1].CER) / 2
+	if math.Abs(s.MeanCER-want) > 1e-9 {
+		t.Errorf("MeanCER = %f, want %f（分母はAPI成功2件）", s.MeanCER, want)
+	}
+	if s.Cases[1].CER < 0.99 {
+		t.Errorf("無音応答のCER = %f, want ~1.0（全ミス）", s.Cases[1].CER)
 	}
 }
 

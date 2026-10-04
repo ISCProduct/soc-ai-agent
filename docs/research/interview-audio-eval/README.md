@@ -9,7 +9,7 @@
 - `manifest_degraded.jsonl`: 生成器が書き出す劣化版のマニフェスト（追跡対象）
 - `compare_degraded.py`: 結果JSONから「clean からの悪化」を数える集計（追跡対象）
 
-音声とレベル値（`degraded_levels.tsv`）は追跡しません。8ケース×27条件×2形式で
+音声とレベル値（`degraded_levels.tsv`）は追跡しません。8ケース×28条件×2形式で
 448ファイル・約115MBになり、リポジトリを圧迫するためです。
 **作り方（生成器・マニフェスト・集計）を追跡し、音声は各自の手元で作り直します。**
 
@@ -110,8 +110,22 @@ cd docs/research/interview-audio-eval
 python3 compare_degraded.py <リポジトリ外>/off.json
 python3 compare_degraded.py <リポジトリ外>/off.json --with <リポジトリ外>/on.json
 python3 compare_degraded.py <リポジトリ外>/off.json --keyword-cases-only
+# RESULTS_degraded.md §4 の「12/54」を再現する
+python3 compare_degraded.py <リポジトリ外>/off.json --with <リポジトリ外>/on.json \
+  --cases proper-nouns-and-tech,company-and-position
 python3 compare_degraded.py --selftest   # 判定ロジックの自己テスト
 ```
+
+分母が3通りあるので取り違えないでください。
+
+| 絞り込み | 分母 | 何の数字か |
+|---|---|---|
+| なし | 216 | 全ケース（8×28 − clean 8） |
+| `--keyword-cases-only` | 162 | キーワードを持つ6ケース（`120時間` 等も含む） |
+| `--cases proper-nouns-and-tech,company-and-position` | 54 | §4 の固有名詞2ケース（2×28 − clean 2） |
+
+表示される「分母」は**判定不能を除いた件数**です。APIエラーを分母に残すと、
+エラーが増えるほど悪化の比率が下がって「劣化の影響が小さい」と読めてしまいます。
 
 比較相手は**正解テキストではなく同じケースの `clean` 結果**です。正解と比べると
 `30パーセント` → `30%` のような表記ゆれを劣化のせいに数えてしまいます
@@ -121,4 +135,8 @@ python3 compare_degraded.py --selftest   # 判定ロジックの自己テスト
 API エラーは平均の母数から外れるので、残高切れで大半が落ちた run は
 件数を見ないと「CER が良くなった」ように読めます。4xx が3件続くと
 `sttbench` 側が打ち切って `aborted: true` を立てます。
+
+母数から外すのは**APIエラーだけ**です。認識失敗（空・短すぎる出力）は
+APIが正常応答していてモデルが何も返せなかったという測定結果そのものなので、
+**全ミスとして数えます**。外すと「何も返さないほど成績が良く見える」逆転が起きます。
 

@@ -357,8 +357,17 @@ def main() -> None:
                 )
             )
 
-    OUT_MANIFEST.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"\nマニフェスト: {OUT_MANIFEST} ({len(lines)}件)")
+    # --only で条件を絞ったときは追跡対象のマニフェストを上書きしない。
+    # README は `--only noisy` を通常用法として案内しているので、上書きすると
+    # 224行が64行へ黙って縮み、以後の集計の分母が変わる（git diff を見るまで
+    # 気づけない）。部分集合は別ファイルへ書く。
+    out = OUT_MANIFEST
+    if args.only:
+        out = OUT_MANIFEST.with_name(f"{OUT_MANIFEST.stem}_{args.only}{OUT_MANIFEST.suffix}")
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"\nマニフェスト: {out} ({len(lines)}件)")
+    if args.only:
+        print(f"  --only 指定のため {OUT_MANIFEST.name} は変更していません")
 
     if levels:
         # achieved_snr_db は出さない。src - noise で必ず target に一致する恒等式で、

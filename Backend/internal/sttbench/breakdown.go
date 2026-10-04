@@ -25,10 +25,14 @@ type GroupSummary struct {
 // キーワード・数値の正解率は、対象が無いグループでは 0 ではなく
 // 「母数なし」を表す -1 を返す。0（全滅）と区別するため。
 //
-// 母数の扱いは2段。APIエラーはどの指標の母数にも入れない（呼べていないので
-// 何も測れていない）。認識失敗は failure_rate の分子・分母に入れるが、
-// CER 等の平均からは外す。この2つを混ぜると、失敗が多い run ほど
-// CER が良く出るという逆転が起きる。
+// 母数に入れないのは APIエラーだけ。呼べていないので何も測れていない。
+//
+// 認識失敗（IsRecognitionFailure）は**全ミスとして数える**。APIは正常応答して
+// いて、モデルが空・短すぎる出力を返したという測定結果そのものだからである。
+// CER 等の平均から外すと「何も返さないほど成績が良く見える」逆転が起きる
+// （完璧1件＋無音1件で MeanCER=0.000 / KeywordAccuracy=1.000 になっていた）。
+// run.go は r.Failed を立てる前に CER・キーワードを計算しているので、
+// 空出力なら CER=1.0 / KeywordsHit=0 が既に入っており、そのまま足せばよい。
 func Breakdown(results []CaseResult, keyOf func(CaseResult) string) []GroupSummary {
 	type acc struct {
 		n               int
@@ -54,10 +58,9 @@ func Breakdown(results []CaseResult, keyOf func(CaseResult) string) []GroupSumma
 			continue
 		}
 		if r.Failed {
+			// failure_rate の分子に数えるだけ。CER・キーワードの母数からは
+			// 外さない（外すと失敗が多いほど good に見える）。
 			a.failed++
-			// 失敗ケースは CER 等が意味を持たないので平均へ入れない。
-			// ただし failure_rate の母数には数える。
-			continue
 		}
 		a.cer += r.CER
 		a.sem += r.SemanticCER
@@ -77,12 +80,11 @@ func Breakdown(results []CaseResult, keyOf func(CaseResult) string) []GroupSumma
 	out := make([]GroupSummary, 0, len(order))
 	for _, k := range order {
 		a := groups[k]
-		apiOK := a.n - a.errored   // APIが成功した件数
-		scored := apiOK - a.failed // CER等を計算できた件数
+		apiOK := a.n - a.errored // APIが成功した件数＝全指標の母数
 		g := GroupSummary{Key: k, Cases: a.n, Errored: a.errored}
-		if scored > 0 {
-			g.MeanCER = a.cer / float64(scored)
-			g.MeanSemanticCER = a.sem / float64(scored)
+		if apiOK > 0 {
+			g.MeanCER = a.cer / float64(apiOK)
+			g.MeanSemanticCER = a.sem / float64(apiOK)
 		}
 		if apiOK > 0 {
 			g.FailureRate = float64(a.failed) / float64(apiOK)
