@@ -76,3 +76,11 @@ func normalizeForQuote(s string) string {
 
 // runeLen は文字数（バイト数ではなく）を返す。文字数の指示遵守判定に使う。
 func runeLen(s string) int { return len([]rune(s)) }
+
+// newObservation は1ケース1回の結果の入れ物を作る。
+//
+// 入力の文字数をここで引いておく。集計側（Aggregate）はケースを受け取らないので、
+// ラベルと同じように Observation へ持たせないと文字数との交絡が測れない。
+func newObservation(c Case) Observation {
+	return Observation{CaseID: c.ID, Label: c.Label, InputChars: c.InputChars()}
+}

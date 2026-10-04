@@ -1,5 +1,5 @@
 import { BACKEND_URL } from '../backend-url'
-import { AUTH_REFRESH_TIMEOUT_MS, fetchAndReadWithTimeout } from '../fetch-timeout'
+import { AUTH_REFRESH_TIMEOUT_MS, fetchAndReadWithTimeout, fetchWithTimeout } from '../fetch-timeout'
 import { extractTenantSlug } from '../tenant'
 import { clearChatSessionOnEnd } from '@/components/mui-chat/utils'
 
@@ -328,7 +328,20 @@ export const authService = {
     }
   },
 
-  saveAuth(authResponse: AuthResponse) {
+  /**
+   * ログイン結果を保存する。
+   *
+   * httpOnly Cookie の設定(POST /api/auth/session)まで待ってから返す。
+   * 以前は投げっぱなしにしていたため、呼び出し側が直後に画面遷移すると
+   * リクエストが破棄され、Cookie が設定されないままになっていた。
+   * サーバーコンポーネントの requireSessionUser() は Cookie しか見ないので、
+   * ログインには成功しているのに保護された画面へ入れない(#1547 で塞ぎ切れなかった残り)。
+   *
+   * Cookie の設定に失敗してもここでは投げない。localStorage には保存済みで、
+   * 一時障害で logout() すると有効なセッションを捨てることになるため。
+   * 待つことで、通信が成功している限り確実に Cookie が入る。
+   */
+  async saveAuth(authResponse: AuthResponse): Promise<void> {
     const user: User = {
       user_id: typeof authResponse.user_id === 'string' ? Number(authResponse.user_id) : authResponse.user_id,
       email: authResponse.email,
@@ -361,15 +374,26 @@ export const authService = {
     // refresh_token はストレージには保存せず httpOnly Cookie のみで保持する (#616)
     if (authResponse.user_token) {
       const userId = typeof authResponse.user_id === 'string' ? Number(authResponse.user_id) : authResponse.user_id
-      fetch('/api/auth/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          userToken: authResponse.user_token,
-          refreshToken: authResponse.refresh_token,
-        }),
-      }).catch(() => {})
+      // 遷移で打ち切られないよう待つ。ただし無期限には待たない。
+      // Backend が半開きで固まるとログイン操作が戻らず、利用者は何が
+      // 起きたか分からないまま放置されるため。
+      try {
+        await fetchWithTimeout(
+          '/api/auth/session',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId,
+              userToken: authResponse.user_token,
+              refreshToken: authResponse.refresh_token,
+            }),
+          },
+          AUTH_REFRESH_TIMEOUT_MS,
+        )
+      } catch {
+        // 通信断・タイムアウト。Cookie は無いが localStorage には入っている。
+      }
     }
   },
 

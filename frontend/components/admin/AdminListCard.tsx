@@ -15,7 +15,7 @@ export function AdminListCard({ sx, children, ...rest }: AdminListCardProps) {
         {
           border: ADMIN_CARD_BORDER,
           borderColor: ADMIN_CARD_BORDER_COLOR,
-          borderRadius: '8px',
+          borderRadius: 1,
           p: 2,
         },
         ...sxList,

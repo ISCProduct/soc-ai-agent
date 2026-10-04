@@ -3,6 +3,7 @@ package aibench
 import (
 	"math"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -216,6 +217,8 @@ func TestDiff(t *testing.T) {
 			Target: TargetES, Model: "gpt-4o", ManifestSHA256: "abc", Cases: 30,
 			BrokenRate: 0.10, ComplianceRate: 0.90, LabelRankCorrelation: 0.80,
 			MeanScoreStdDev: 0.03, LatencyP95MS: 5000, CostPerCallUSD: 0.001,
+			LengthRankCorrelation: 0.50, LabelLengthRankCorrelation: 0.45,
+			LengthMetricsMeasured: true,
 		}
 	}
 	tests := []struct {
@@ -230,6 +233,15 @@ func TestDiff(t *testing.T) {
 		{name: "指示遵守率が下がったら劣化", mutate: func(s *Summary) { s.ComplianceRate = 0.85 }, wantMetric: "指示遵守率"},
 		{name: "指示遵守率が上がるのは劣化ではない", mutate: func(s *Summary) { s.ComplianceRate = 1.0 }},
 		{name: "順位相関が下がったら劣化", mutate: func(s *Summary) { s.LabelRankCorrelation = 0.70 }, wantMetric: "弁別力(順位相関)"},
+		// 交絡も劣化ゲートに入れる。弁別力だけをゲートにすると、長さへの依存を
+		// 強めて弁別力を上げた変更が緑で通る（#1593）。
+		{name: "交絡が上がったら劣化", mutate: func(s *Summary) { s.LengthRankCorrelation = 0.95 },
+			wantMetric: "交絡(スコアvs文字数)"},
+		{name: "交絡が閾値未満の増加なら劣化ではない", mutate: func(s *Summary) { s.LengthRankCorrelation = 0.58 }},
+		{name: "交絡が下がるのは劣化ではない", mutate: func(s *Summary) { s.LengthRankCorrelation = 0.10 }},
+		// 絶対値で見る。符号だけ見ると「スコアが長さだけで決まっている」実行を通す。
+		{name: "交絡が負の方向に強まっても劣化", mutate: func(s *Summary) { s.LengthRankCorrelation = -0.95 },
+			wantMetric: "交絡(スコアvs文字数)"},
 		{name: "σが増えたら劣化", mutate: func(s *Summary) { s.MeanScoreStdDev = 0.08 }, wantMetric: "再現性(平均σ)"},
 		{name: "p95が1.2倍なら劣化", mutate: func(s *Summary) { s.LatencyP95MS = 6000 }, wantMetric: "レイテンシ(p95)"},
 		{name: "p95が1.1倍なら劣化ではない", mutate: func(s *Summary) { s.LatencyP95MS = 5500 }},
@@ -251,6 +263,69 @@ func TestDiff(t *testing.T) {
 			}
 			if len(regs) != 1 || regs[0].Metric != tt.wantMetric {
 				t.Errorf("劣化 = %+v, want %q 1件", regs, tt.wantMetric)
+			}
+		})
+	}
+}
+
+// #1593 より前の結果JSONは交絡のフィールドを持たず、デコードすると 0.000 になる。
+// それを「交絡なし」として比べると 0.000 → 0.920 (+0.920) と出て必ず誤検知する。
+func TestDiff交絡が未計測なら比較しない(t *testing.T) {
+	measured := func() *Summary {
+		return &Summary{Target: TargetES, Model: "gpt-4o", ManifestSHA256: "abc", Cases: 30,
+			LengthRankCorrelation: 0.920, LengthMetricsMeasured: true}
+	}
+	tests := []struct {
+		name string
+		prev *Summary
+		cur  *Summary
+	}{
+		{name: "前回が未計測", prev: &Summary{Target: TargetES, Model: "gpt-4o", ManifestSHA256: "abc", Cases: 30}, cur: measured()},
+		{name: "今回が未計測", prev: measured(), cur: &Summary{Target: TargetES, Model: "gpt-4o", ManifestSHA256: "abc", Cases: 30}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			regs, warnings := Diff(tt.prev, tt.cur)
+			for _, r := range regs {
+				if strings.Contains(r.Metric, "交絡") {
+					t.Errorf("未計測なのに交絡の劣化を出した: %+v", r)
+				}
+			}
+			found := false
+			for _, m := range warnings {
+				if strings.Contains(m, "交絡") {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("比較不能の警告が出ていない: %v", warnings)
+			}
+		})
+	}
+}
+
+// ⚠ は誤読を止める唯一の装置なので、出る/出ないの境界をテーブルで固定する。
+// ここが常に "" を返しても他のテストは全て通る（= 無テストだと気付けない）。
+func Test交絡の警告(t *testing.T) {
+	tests := []struct {
+		name      string
+		labelCorr float64
+		lenCorr   float64
+		wantWarn  bool
+	}{
+		{name: "差が0.1より大きければ出ない", labelCorr: 0.924, lenCorr: 0.646},
+		{name: "差がちょうど0.1なら出る", labelCorr: 0.95, lenCorr: 0.85, wantWarn: true},
+		{name: "迫っていれば出る", labelCorr: 0.945, lenCorr: 0.920, wantWarn: true},
+		{name: "超えていれば出る", labelCorr: 0.80, lenCorr: 0.90, wantWarn: true},
+		// 負の交絡も交絡。符号だけ見ると、スコアが長さだけで決まっている実行を通す。
+		{name: "負の方向に強い交絡でも出る", labelCorr: 1.00, lenCorr: -1.00, wantWarn: true},
+		{name: "負でも弱ければ出ない", labelCorr: 0.84, lenCorr: -0.06},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := lengthWarning(tt.labelCorr, tt.lenCorr)
+			if (got != "") != tt.wantWarn {
+				t.Errorf("lengthWarning(%v, %v) = %q, 警告の有無 want %v", tt.labelCorr, tt.lenCorr, got, tt.wantWarn)
 			}
 		})
 	}
@@ -278,4 +353,127 @@ func TestDiff前提の違いを警告する(t *testing.T) {
 			}
 		})
 	}
+}
+
+// 交絡の指標（#1593）。ラベルとの相関が高くても文字数との相関が同じくらい高ければ
+// 「内容の質を測れている」ことの証拠にならない。両方を必ず出せているかを固定する。
+func Test交絡指標と層化した弁別力(t *testing.T) {
+	// 長さとラベルを意図的にずらす: 各長さ帯に good と bad が1件ずつ入る。
+	// ラベルとの相関は 1.0 になるが、文字数との相関は 0.2 にしかならない。
+	obs := []Observation{
+		{CaseID: "s1-good", Label: LabelGood, Run: 1, Score: 0.80, InputChars: 100},
+		{CaseID: "s1-bad", Label: LabelBad, Run: 1, Score: 0.30, InputChars: 110},
+		{CaseID: "s2-good", Label: LabelGood, Run: 1, Score: 0.85, InputChars: 200},
+		{CaseID: "s2-bad", Label: LabelBad, Run: 1, Score: 0.35, InputChars: 210},
+		{CaseID: "s3-good", Label: LabelGood, Run: 1, Score: 0.90, InputChars: 300},
+		{CaseID: "s3-bad", Label: LabelBad, Run: 1, Score: 0.40, InputChars: 310},
+	}
+	s := Aggregate(TargetResume, "gpt-4o-mini", "openai:/responses", "2026-09-28T00:00:00Z", obs)
+
+	// good/bad 各3件でスコアが全て異なるため、ラベル側の同順位に押し下げられて
+	// 1.0 には届かない（順序自体は完全に正しい）。README の注意書きと同じ理由。
+	if math.Abs(s.LabelRankCorrelation-0.878310) > 1e-6 {
+		t.Errorf("弁別力 = %v, want 0.878310", s.LabelRankCorrelation)
+	}
+	if math.Abs(s.LengthRankCorrelation-0.2) > 1e-9 {
+		t.Errorf("文字数との相関 = %v, want 0.2", s.LengthRankCorrelation)
+	}
+	// セットが交絡しているかを決めるのはこの数。これが無いと
+	// 「スコアvs文字数」の大小が読めない（#1593 のレビュー指摘）。
+	//
+	// このデータは各帯で good が短く bad が長いので label~chars = −0.293。
+	// 長さに完全に盲目な採点器なら「スコアvs文字数」は
+	// 0.878 × (−0.293) = −0.257 付近に出るはずで、実際の +0.200 は
+	// **長さがスコアを押し上げている**ことを意味する。+0.200 という小さな値を
+	// 「長さを打ち消した」と読んではいけないことの実例。
+	if math.Abs(s.LabelLengthRankCorrelation-(-0.292770)) > 1e-6 {
+		t.Errorf("ラベルと文字数の相関 = %v, want -0.292770", s.LabelLengthRankCorrelation)
+	}
+	if !s.LengthMetricsMeasured {
+		t.Error("交絡を計測したフラグが立っていない（旧JSONと区別できない）")
+	}
+	if len(s.LengthStrata) != LengthStrataCount {
+		t.Fatalf("層の数 = %d, want %d", len(s.LengthStrata), LengthStrataCount)
+	}
+	// 各層は good/bad が1件ずつで、層の中でも順位が正しい（= 長さでは説明できない）
+	for i, want := range [][2]int{{100, 110}, {200, 210}, {300, 310}} {
+		st := s.LengthStrata[i]
+		if st.MinChars != want[0] || st.MaxChars != want[1] {
+			t.Errorf("層%d の文字数帯 = %d-%d, want %d-%d", i, st.MinChars, st.MaxChars, want[0], want[1])
+		}
+		if st.Cases != 2 || st.LabelCounts[LabelGood] != 1 || st.LabelCounts[LabelBad] != 1 {
+			t.Errorf("層%d の構成 = %d件 %v", i, st.Cases, st.LabelCounts)
+		}
+		if math.Abs(st.LabelRankCorrelation-1) > 1e-9 {
+			t.Errorf("層%d の弁別力 = %v, want 1", i, st.LabelRankCorrelation)
+		}
+		// 層内の「ラベルvs文字数」も必ず出す。層化は交絡を自動で消さないので、
+		// これが小さい層でだけ層内の弁別力を根拠にできる。この層は2件
+		// （good が短く bad が長い）なので −1 に張り付き、層内の弁別力 +1 は
+		// 「長さでは説明できない」の根拠にならない。
+		if math.Abs(st.LabelLengthRankCorrelation-(-1)) > 1e-9 {
+			t.Errorf("層%d のラベルvs文字数 = %v, want -1", i, st.LabelLengthRankCorrelation)
+		}
+	}
+	// ケース明細にも文字数を残す（後から交絡を検算できるようにする）
+	if s.CaseDetails[0].InputChars != 100 {
+		t.Errorf("ケース明細の文字数 = %d, want 100", s.CaseDetails[0].InputChars)
+	}
+}
+
+func TestLengthStrata(t *testing.T) {
+	cs := func(id string, label string, chars int) CaseSummary {
+		return CaseSummary{CaseID: id, Label: label, InputChars: chars, MeanScore: 0.5}
+	}
+	t.Run("1層2件を割るなら層化しない", func(t *testing.T) {
+		in := []CaseSummary{cs("a", LabelGood, 100), cs("b", LabelBad, 200), cs("c", LabelMid, 300),
+			cs("d", LabelGood, 400), cs("e", LabelBad, 500)}
+		if got := LengthStrata(in, 3); got != nil {
+			t.Errorf("LengthStrata = %v, want nil（5件では1層2件を割る）", got)
+		}
+	})
+	t.Run("同じ文字数は同じ層へ入れる", func(t *testing.T) {
+		// 境界（2件目と3件目の間）に同じ文字数が並ぶ。跨がせると並べ替えの
+		// 安定性しだいで層の構成が変わり、同じ入力から違う数字が出る。
+		in := []CaseSummary{cs("a", LabelGood, 100), cs("b", LabelBad, 150), cs("c", LabelMid, 150),
+			cs("d", LabelGood, 200), cs("e", LabelBad, 300), cs("f", LabelMid, 400)}
+		got := LengthStrata(in, 3)
+		// 150 を跨がせないことで1層目が3件になり、2層目に1件しか残らない。
+		// その1件は前の層へ統合されるので層は2つになる（4件 + 2件）。
+		if len(got) != 2 {
+			t.Fatalf("層の数 = %d, want 2", len(got))
+		}
+		if got[0].Cases != 4 || got[0].MaxChars != 200 {
+			t.Errorf("1層目 = %d件 max=%d, want 4件 max=200", got[0].Cases, got[0].MaxChars)
+		}
+		total := 0
+		for _, st := range got {
+			total += st.Cases
+		}
+		if total != len(in) {
+			t.Errorf("層の合計件数 = %d, want %d", total, len(in))
+		}
+	})
+	t.Run("境界調整で2件を割った層は前の層へ統合する", func(t *testing.T) {
+		// 等件数の境界は 2/4/6 だが、2層目の末尾に同じ文字数が並ぶので
+		// 境界が5件目まで伸び、3層目に1件しか残らない。そのまま出すと
+		// 「1層2件未満なら層化しない」保証が破れる。
+		in := []CaseSummary{cs("a", LabelBad, 100), cs("b", LabelBad, 110), cs("c", LabelMid, 200),
+			cs("d", LabelMid, 200), cs("e", LabelGood, 200), cs("f", LabelGood, 400)}
+		got := LengthStrata(in, 3)
+		if len(got) != 2 {
+			t.Fatalf("層の数 = %d, want 2（1件の層は前の層へ統合する）", len(got))
+		}
+		if got[0].Cases != 2 || got[1].Cases != 4 {
+			t.Errorf("層の件数 = %d / %d, want 2 / 4", got[0].Cases, got[1].Cases)
+		}
+		if got[1].MinChars != 200 || got[1].MaxChars != 400 {
+			t.Errorf("2層目の文字数帯 = %d-%d, want 200-400", got[1].MinChars, got[1].MaxChars)
+		}
+		for i, st := range got {
+			if st.Cases < minCasesPerStratum {
+				t.Errorf("層%d が %d件（最低 %d件）", i, st.Cases, minCasesPerStratum)
+			}
+		}
+	})
 }

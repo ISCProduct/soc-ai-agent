@@ -156,7 +156,7 @@ export default function PageContent() {
       {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>{success}</Alert>}
 
       <Stack spacing={3}>
-        <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
+        <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>セッション一覧</Typography>
             {loading ? (
@@ -206,7 +206,7 @@ export default function PageContent() {
           </CardContent>
         </Card>
 
-        <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
+        <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>セッションを追加・更新</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
