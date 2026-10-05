@@ -7,6 +7,7 @@ import (
 	"Backend/internal/services/shared"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -176,5 +177,64 @@ func TestClaimSessionOwnership_UnsetOwnerWithOnlyRequestingUsersMessagesClaimsOw
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("未充足の SQL 期待: %v", err)
+	}
+}
+
+func TestClaimSessionOwnership_DuplicateInsertReloadsOwner(t *testing.T) {
+	const sessionID = "concurrent-session"
+	const requestingUserID = uint(22)
+	const otherUserID = uint(11)
+
+	tests := []struct {
+		name       string
+		existingID uint
+		wantErr    error
+	}{
+		{
+			name:       "別ユーザーが先に所有者になった場合はForbidden",
+			existingID: otherUserID,
+			wantErr:    shared.ErrForbidden,
+		},
+		{
+			name:       "同じユーザーが先に所有者になった場合は成功",
+			existingID: requestingUserID,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, mock := newSessionValidationRepositoryTestDB(t)
+
+			mock.ExpectBegin()
+			expectSessionValidationLookup(mock, sessionID, sqlmock.NewRows([]string{
+				"id", "session_id", "user_id", "invalid_answer_count", "is_terminated",
+				"last_invalid_answer_time", "created_at", "updated_at",
+			}))
+			expectOtherUserMessageCount(mock, sessionID, requestingUserID, 0)
+			mock.ExpectExec("INSERT INTO `session_validations`").
+				WithArgs(sessionID, 0, false, sqlmock.AnyArg(), sqlmock.AnyArg(), requestingUserID).
+				WillReturnError(&mysqlDriver.MySQLError{
+					Number:  1062,
+					Message: "Duplicate entry",
+				})
+			expectSessionValidationLookup(mock, sessionID, sqlmock.NewRows([]string{
+				"id", "session_id", "user_id", "invalid_answer_count", "is_terminated",
+				"last_invalid_answer_time", "created_at", "updated_at",
+			}).AddRow(1, sessionID, tt.existingID, 0, false, nil, nil, nil))
+
+			if tt.wantErr != nil {
+				mock.ExpectRollback()
+			} else {
+				mock.ExpectCommit()
+			}
+
+			err := repo.ClaimSessionOwnership(sessionID, requestingUserID)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("ClaimSessionOwnership() error = %v, want %v", err, tt.wantErr)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("未充足の SQL 期待: %v", err)
+			}
+		})
 	}
 }
