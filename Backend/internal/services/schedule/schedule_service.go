@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"Backend/internal/safego"
 )
 
 type ScheduleService struct {
@@ -44,7 +46,8 @@ func (s *ScheduleService) Create(userID uint, companyName, stage, title string, 
 	}
 	// Googleカレンダーへの同期は非同期で実行（スケジュール登録の成否には影響しない）
 	if s.calendarSync != nil {
-		go s.calendarSync.CreateEvent(context.Background(), userID, event)
+		// カレンダー同期は投げっぱなし。panic でプロセスを落とさない(#1446)。
+		safego.Go(func() { s.calendarSync.CreateEvent(context.Background(), userID, event) })
 	}
 	return event, nil
 }
@@ -83,7 +86,7 @@ func (s *ScheduleService) Update(userID, eventID uint, companyName, stage, title
 		return nil, err
 	}
 	if s.calendarSync != nil {
-		go s.calendarSync.UpdateEvent(context.Background(), userID, event)
+		safego.Go(func() { s.calendarSync.UpdateEvent(context.Background(), userID, event) })
 	}
 	return event, nil
 }
@@ -101,7 +104,7 @@ func (s *ScheduleService) Delete(userID, eventID uint) error {
 		return err
 	}
 	if s.calendarSync != nil && googleEventID != "" {
-		go s.calendarSync.DeleteEvent(context.Background(), userID, googleEventID)
+		safego.Go(func() { s.calendarSync.DeleteEvent(context.Background(), userID, googleEventID) })
 	}
 	return nil
 }

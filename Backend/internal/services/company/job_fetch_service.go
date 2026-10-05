@@ -19,6 +19,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"Backend/internal/safego"
 )
 
 // JobFetchService は企業の求人情報と求める人物像を取得・保存するサービス。
@@ -128,7 +130,9 @@ func (s *JobFetchService) FetchAndSaveJobs(ctx context.Context, companyID uint, 
 	// RAGのChromaDBに求人情報を保存してレビュー精度を向上させる
 	if len(saved) > 0 {
 		ragContent := buildJobsRAGContent(company.Name, allJobs)
-		go s.pushContextToRAG(middleware.GetRequestID(ctx), company.Name, "jobs", ragContent)
+		// RAGへの push は投げっぱなし。panic でプロセスを落とさない(#1446)。
+		reqID := middleware.GetRequestID(ctx)
+		safego.Go(func() { s.pushContextToRAG(reqID, company.Name, "jobs", ragContent) })
 	}
 
 	return saved, nil
@@ -182,7 +186,8 @@ func (s *JobFetchService) FetchAndSavePersona(ctx context.Context, companyID uin
 
 	// RAGのChromaDBに人物像データを保存して履歴書・ESレビューの精度を向上させる
 	ragContent := buildPersonaRAGContent(company.Name, companyInfo, profile)
-	go s.pushContextToRAG(middleware.GetRequestID(ctx), company.Name, "persona", ragContent)
+	personaReqID := middleware.GetRequestID(ctx)
+	safego.Go(func() { s.pushContextToRAG(personaReqID, company.Name, "persona", ragContent) })
 
 	return profile, nil
 }
