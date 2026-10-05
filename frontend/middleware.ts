@@ -65,17 +65,33 @@ function isAuthFailureStatus(status: number): boolean {
 // JWTのexpを検証なしでデコードし、残り有効期間がmarginSecondsを下回るか判定する
 // （署名検証はBackendが行う。ここでは自動リフレッシュの契機判定と、
 //   期限切れトークンを後段へ流さない判定のみ）
+/**
+ * トークンの期限が近いか。**読めないトークンは期限切れとして扱う**（#1535）。
+ *
+ * 以前は payload が無い・base64デコードに失敗する・exp が数値でない、の
+ * いずれでも false（＝期限に余裕あり）を返していた。そのため exp が読めない
+ * トークンは次の輪から出られなかった。
+ *
+ *   1. リフレッシュがそもそも試みられない → refreshSession を通らず Cookie も消えない
+ *   2. tokenExpiresSoon(token, 0) も false なので X-User-Token として後段へ注入される
+ *   3. Backend が 401 → ログイン画面へ → Cookie は残っているので 1 へ戻る
+ *
+ * user_token は Backend の GenerateJWT が必ず exp 付きで発行する
+ * （失敗時は空文字）。exp が読めないトークンは壊れているか別物なので、
+ * 期限切れとして扱ってリフレッシュへ送るのが正しい。リフレッシュも失敗すれば
+ * Cookie が消えて輪が切れる。
+ */
 function tokenExpiresSoon(token: string, marginSeconds = REFRESH_MARGIN_SECONDS): boolean {
   try {
     const payload = token.split('.')[1]
-    if (!payload) return false
+    if (!payload) return true
     const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
     const decoded: unknown = JSON.parse(atob(normalized))
     const exp = (decoded as { exp?: unknown }).exp
-    if (typeof exp !== 'number') return false
+    if (typeof exp !== 'number') return true
     return exp - Date.now() / 1000 < marginSeconds
   } catch {
-    return false
+    return true
   }
 }
 
@@ -241,7 +257,11 @@ export async function middleware(request: NextRequest) {
       // 期限切れトークンは後段へ渡さないので、未ログイン扱いで描画されループしない。
     }
 
-    if (sessionExpired || tokenExpiresSoon(effectiveToken, 0)) {
+    // いま発行されたトークンは期限判定にかけない（#1535）。
+    // tokenExpiresSoon は読めないトークンを期限切れ扱いにするので、ここを通すと
+    // 「リフレッシュは成功したのに新しいトークンを捨てる」が起きうる。
+    // 判定したいのは Cookie に残っていた古いトークンの方。
+    if (sessionExpired || (!refreshed && tokenExpiresSoon(effectiveToken, 0))) {
       // 期限切れトークンを後段へ渡すとBackendが401を返し、ページがログイン画面へ
       // 飛び、そのログイン画面でも同じCookieで同じことを繰り返す(#1519)。
       // X-User-* を注入しないだけでなく、Cookie経由の抜け道も閉じる。
@@ -270,7 +290,7 @@ export async function middleware(request: NextRequest) {
       }
     }
 
-    if (companySessionExpired || tokenExpiresSoon(effectiveCompanyToken, 0)) {
+    if (companySessionExpired || (!companyRefreshed && tokenExpiresSoon(effectiveCompanyToken, 0))) {
       dropRequestCookies(requestHeaders, ['company_user_id', 'company_user_token'])
     } else {
       requestHeaders.set('X-Company-User-ID', effectiveCompanyUserId)
