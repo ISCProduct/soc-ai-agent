@@ -332,6 +332,7 @@ export default function ResultsListView({
                         <IconButton
                           size="small"
                           onClick={(e) => onToggleFavorite(e, company)}
+                          aria-label="お気に入りの切り替え"
                           disabled={favoritingId === company.matchId}
                           sx={{ color: company.isFavorited ? UI.flag : UI.rule }}
                         >

@@ -389,7 +389,7 @@ export default function PageContent() {
                 <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
                   <Typography variant="subtitle2">求人 {idx + 1}</Typography>
                   {jobPositions.length > 1 && (
-                    <IconButton size="small" onClick={() => setJobPositions((prev) => prev.filter((_, i) => i !== idx))}>
+                    <IconButton size="small" onClick={() => setJobPositions((prev) => prev.filter((_, i) => i !== idx))} aria-label="募集職種を削除">
                       <DeleteIcon fontSize="small" />
                     </IconButton>
                   )}
@@ -464,7 +464,7 @@ export default function PageContent() {
               <Box key={idx} sx={{ border: '1px solid #eee', borderRadius: 1, p: 2 }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
                   <Typography variant="subtitle2">卒業生 {idx + 1}</Typography>
-                  <IconButton size="small" onClick={() => setGraduates((prev) => prev.filter((_, i) => i !== idx))}>
+                  <IconButton size="small" onClick={() => setGraduates((prev) => prev.filter((_, i) => i !== idx))} aria-label="卒業生の実績を削除">
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 </Stack>
