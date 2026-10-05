@@ -142,7 +142,7 @@ function ApplicationsContent() {
   return (
     <Box sx={{ maxWidth: 800, mx: 'auto', p: { xs: 2, sm: 3 } }}>
       <Stack direction="row" alignItems="center" spacing={1} mb={3}>
-        <IconButton onClick={() => router.back()}>
+        <IconButton onClick={() => router.back()} aria-label="前の画面へ戻る">
           <ArrowBack />
         </IconButton>
         <Typography variant="h5" component="h1" fontWeight="bold">

@@ -43,7 +43,7 @@ export default function CompanyDetailModal({ open, onCloseAction, data }: Props)
         {/* Header */}
         <Box display="flex" justifyContent="space-between" alignItems="center" px={2} py={1}>
           <DialogTitle sx={{ m: 0, p: 0 }}>{data.name}</DialogTitle>
-          <IconButton onClick={onCloseAction}>
+          <IconButton onClick={onCloseAction} aria-label="閉じる">
             <X size={22} />
           </IconButton>
         </Box>
