@@ -83,7 +83,9 @@ func (s *InterviewService) RegenerateReport(userID uint, sessionID uint) (queued
 func (s *InterviewService) StartWorker() {
 	// Redis キュー利用時は asynq worker が処理する。フォールバック用 channel worker は常に起動。
 	s.workerOnce.Do(func() {
-		go s.runWorker()
+		// レポート生成ワーカー。panic で落ちるとレポートが二度と生成されない上に
+		// プロセスごと死ぬ(#1446)。
+		safego.Go(s.runWorker)
 	})
 }
 
@@ -343,11 +345,30 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 
 	// 面接スコアをチャット診断セッションへ反映し、可能なら再マッチングする。
 	if s.crossFeature != nil {
+		// スコア反映は1回だけ（#1512）。
+		//
+		// Redis 障害時のフォールバック経路はプロセス内の map でしか重複排除して
+		// おらず、本番の backend は最大2タスクへスケールする。排他が無いと
+		// user_weight_scores の移動平均へ二重に反映される。
+		// scores_applied_at が NULL の行を条件付き UPDATE で奪い合い、
+		// 勝った1つだけが以降へ進む。
+		claimed, claimErr := s.reportRepo.ClaimScoresApplication(sessionID)
+		if claimErr != nil {
+			return fmt.Errorf("スコア反映の確保に失敗 (session=%d): %w", sessionID, claimErr)
+		}
+		if !claimed {
+			// 他のタスクが反映済み。レポート本体は保存できているので成功扱いにする。
+			log.Printf("[Interview] scores already applied for session %d, skipped\n", sessionID)
+			return nil
+		}
+
 		targetSession, err := s.crossFeature.ResolveDiagnosisSessionID(session.UserID)
 		if err != nil {
 			// 診断セッションを特定できないまま書くと別セッションを汚す。
 			// ここで握りつぶすと面接スコアがどこにも反映されないまま消えるので、
 			// エラーを返してキュー(asynq)のリトライに載せる。レポート本体は Upsert 済みで冪等。
+			// 確保した権利は返す。返さないとリトライがスコアを書けないまま成功扱いになる。
+			s.releaseScoresClaim(sessionID)
 			return fmt.Errorf("診断セッションの解決に失敗 (session=%d): %w", sessionID, err)
 		}
 		// 発話量はレポートに残らないので、ここで統計を作って渡す（#1528）。
@@ -355,6 +376,8 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		stats := flywheel.NewInterviewTranscriptStats(utterances)
 		if err := s.crossFeature.UpdateScoresFromInterviewReport(session.UserID, targetSession, report, stats); err != nil {
 			log.Printf("[CrossFeature] interview score update failed for session %d: %v\n", sessionID, err)
+			// 反映できていないので権利を返す。次の試行が改めて確保できる。
+			s.releaseScoresClaim(sessionID)
 		} else if s.matchingRunner != nil && !repositories.IsInterviewSnapshotSession(targetSession) {
 			userID, sessionID := session.UserID, targetSession
 			safego.Go(func() {
@@ -365,6 +388,15 @@ func (s *InterviewService) generateReport(ctx context.Context, sessionID uint) e
 		}
 	}
 	return nil
+}
+
+// releaseScoresClaim は確保したスコア反映の権利を返す（#1512）。
+// 失敗してもログだけにする。ここで返せなくても、レポート自体は保存済みで
+// スコアが未反映のまま残るだけ。元のエラーを覆い隠さないことを優先する。
+func (s *InterviewService) releaseScoresClaim(sessionID uint) {
+	if err := s.reportRepo.ReleaseScoresApplication(sessionID); err != nil {
+		log.Printf("[Interview] failed to release scores claim for session %d: %v\n", sessionID, err)
+	}
 }
 
 // SendReportEmail 面接レポートをメールで送信

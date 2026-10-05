@@ -48,3 +48,14 @@ export function shouldShowStudentBottomNav(pathname: string): boolean {
 
 /** モバイルの Bottom nav（固定表示）の実高さ相当。スクロール末尾の余白確保に使う。 */
 export const BOTTOM_NAV_HEIGHT = 'calc(56px + env(safe-area-inset-bottom))'
+
+/**
+ * 画面下に固定表示するものの sx。Bottom nav の上へ逃がす（#1570）。
+ *
+ * MUI の Snackbar は下から 24px に出るので、56px の Bottom nav と重なって
+ * 読めない・押せない。画面ごとに数字を書くと必ずどこかで取りこぼすため、
+ * ここに集約する。md 以上は Bottom nav が出ないので既定へ戻す。
+ */
+export const ABOVE_BOTTOM_NAV_SX = {
+  bottom: { xs: `calc(${BOTTOM_NAV_HEIGHT} + 16px)`, md: 24 },
+} as const

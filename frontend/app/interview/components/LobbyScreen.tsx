@@ -76,7 +76,7 @@ export default function LobbyScreen({
             <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>セッション: {companyName}</Typography>
           </Box>
         </Box>
-        <IconButton size="small" onClick={onBack}>
+        <IconButton size="small" onClick={onBack} aria-label="前の画面へ戻る">
           <ArrowBackIcon fontSize="small" />
         </IconButton>
       </Box>
@@ -129,6 +129,7 @@ export default function LobbyScreen({
                 <Tooltip title={micEnabled ? 'マイクをオフ' : 'マイクをオン'}>
                   <IconButton
                     onClick={onToggleMic}
+                    aria-label="マイクの入切"
                     sx={{ bgcolor: micEnabled ? 'rgba(255,255,255,0.15)' : '#ea4335', border: '1px solid rgba(255,255,255,0.3)', '&:hover': { bgcolor: micEnabled ? 'rgba(255,255,255,0.25)' : '#c5221f' } }}
                   >
                     {micEnabled ? <MicIcon sx={{ color: '#fff' }} /> : <MicOffIcon sx={{ color: '#fff' }} />}
@@ -137,6 +138,7 @@ export default function LobbyScreen({
                 <Tooltip title={cameraEnabled ? 'カメラをオフ' : 'カメラをオン'}>
                   <IconButton
                     onClick={onToggleCamera}
+                    aria-label="カメラの入切"
                     sx={{ bgcolor: cameraEnabled ? 'rgba(255,255,255,0.15)' : '#ea4335', border: '1px solid rgba(255,255,255,0.3)', '&:hover': { bgcolor: cameraEnabled ? 'rgba(255,255,255,0.25)' : '#c5221f' } }}
                   >
                     {cameraEnabled ? <VideocamIcon sx={{ color: '#fff' }} /> : <VideocamOffIcon sx={{ color: '#fff' }} />}

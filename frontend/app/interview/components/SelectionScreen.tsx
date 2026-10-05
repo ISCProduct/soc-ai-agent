@@ -158,7 +158,7 @@ export default function SelectionScreen({
           <Typography noWrap sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: '#0f172a' }}>IT業界キャリアエージェント</Typography>
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
-          <IconButton sx={{ bgcolor: '#f1f5f9', color: '#475569' }} size="small" onClick={onBack}>
+          <IconButton sx={{ bgcolor: '#f1f5f9', color: '#475569' }} size="small" onClick={onBack} aria-label="前の画面へ戻る">
             <ArrowBackIcon fontSize="small" />
           </IconButton>
           <Box sx={{ width: 40, height: 40, borderRadius: '50%', bgcolor: `${PRIMARY}30`, border: `1px solid ${PRIMARY}50`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

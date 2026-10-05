@@ -262,11 +262,11 @@ export default function PageContent() {
         <Paper elevation={1} sx={{ borderRadius: 2, overflow: 'hidden', mb: 3 }}>
           {/* Month navigation */}
           <Stack direction="row" alignItems="center" justifyContent="center" sx={{ p: 2, bgcolor: '#fff' }}>
-            <IconButton onClick={handlePrevMonth}><ArrowBackIosIcon fontSize="small" /></IconButton>
+            <IconButton onClick={handlePrevMonth} aria-label="前の月"><ArrowBackIosIcon fontSize="small" /></IconButton>
             <Typography variant="h6" fontWeight={600} sx={{ minWidth: { xs: 120, sm: 160 }, textAlign: 'center' }}>
               {viewYear}年 {viewMonth + 1}月
             </Typography>
-            <IconButton onClick={handleNextMonth}><ArrowForwardIosIcon fontSize="small" /></IconButton>
+            <IconButton onClick={handleNextMonth} aria-label="次の月"><ArrowForwardIosIcon fontSize="small" /></IconButton>
           </Stack>
 
           <Divider />
@@ -403,10 +403,10 @@ export default function PageContent() {
                   )}
                 </Box>
                 <Stack direction="row" sx={{ flexShrink: 0 }}>
-                  <IconButton size="small" onClick={() => openEditDialog(ev)}>
+                  <IconButton size="small" onClick={() => openEditDialog(ev)} aria-label="予定を編集">
                     <EditIcon fontSize="small" />
                   </IconButton>
-                  <IconButton size="small" onClick={() => handleDelete(ev.id)}>
+                  <IconButton size="small" onClick={() => handleDelete(ev.id)} aria-label="予定を削除">
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 </Stack>
