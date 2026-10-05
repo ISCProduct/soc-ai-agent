@@ -92,13 +92,30 @@ export type PhraseSuggestion = {
   suggestions: string[]
 }
 
-async function interviewFetch(input: string, init?: RequestInit, timeoutMs?: number): Promise<Response> {
+/**
+ * 面接APIの共通 fetch。**必ずタイムアウトを付ける**（#1514）。
+ *
+ * 以前は `timeoutMs` 省略時に素の `fetch` へ落ちていた。半開きの接続で固まると
+ * 呼び出し側の await が解決しない。特に `finishSession` は
+ * `useInterviewSession.handleStop` が待ってから `startReportPolling` を呼ぶため、
+ * ここで止まるとポーリングが永久に始まらず、画面は「レポートを生成中」のまま
+ * 失敗も表示されない（会場Wi-Fiで現実的に起きる）。
+ *
+ * 既定値を入れて「無期限」を選べないようにする。`timeoutMs` は短くしたいときだけ
+ * 渡す。打ち切った場合でも、finishSession の失敗は `finishFailed` でレポート画面に
+ * 再試行UIが出るので回復手段はある。
+ */
+async function interviewFetch(
+  input: string,
+  init?: RequestInit,
+  timeoutMs: number = LIST_FETCH_TIMEOUT_MS,
+): Promise<Response> {
   await authService.ensureFreshUserToken()
   const headers = new Headers(init?.headers)
   const authHeaders = authService.getUserFetchHeaders()
   Object.entries(authHeaders).forEach(([k, v]) => headers.set(k, v))
   const next = { ...init, headers }
-  return timeoutMs ? fetchWithTimeout(input, next, timeoutMs) : fetch(input, next)
+  return fetchWithTimeout(input, next, timeoutMs)
 }
 
 export const interviewApi = {
