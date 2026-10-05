@@ -63,9 +63,21 @@ test.describe('認証フロー', () => {
     await expect(page.getByRole('heading', { name: 'IT企業エージェント' })).toBeVisible({
       timeout: 15000,
     })
-    for (const name of ['学生の方', '企業の方', '学校・教員の方']) {
-      await expect(page.getByRole('heading', { name })).toBeVisible()
+    // 見出しは「学生」「企業」「学校・教員」。exact にしないと
+    // 「学生が進める順序」にも当たる。
+    for (const name of ['学生', '企業', '学校・教員']) {
+      await expect(page.getByRole('heading', { name, exact: true })).toBeVisible()
     }
+    // 3系統それぞれの遷移先
+    await expect(page.getByRole('link', { name: 'ログイン・新規登録' })).toHaveAttribute(
+      'href',
+      '/login',
+    )
+    await expect(page.getByRole('link', { name: '企業ポータルへ' })).toHaveAttribute(
+      'href',
+      '/company-portal/sign-in',
+    )
+    await expect(page.getByRole('link', { name: '管理画面へ' })).toHaveAttribute('href', '/admin')
   })
 
   // セッションCookieが失効し、ストレージだけが残った状態の回帰テスト(#1519)。
@@ -105,7 +117,7 @@ test.describe('認証フロー', () => {
     // LPからログイン画面へ進んでも、ストレージを見て / へ送り返されない。
     // 送り返しを止めているのは LoginContent 側の Cookie 確認
     // (/api/auth/session が401ならその場に留まる)。
-    await page.getByRole('link', { name: /学生/ }).first().click()
+    await page.getByRole('link', { name: 'ログイン・新規登録' }).click()
     await expect(page).toHaveURL(/\/login/, { timeout: 15000 })
     await expect(page.getByRole('tab', { name: 'ログイン' })).toBeVisible({ timeout: 10000 })
 
