@@ -35,6 +35,8 @@ import {
   getGuestEmailButtonProps,
 } from '@/lib/guest-limits'
 import { UI, leadSentences, scaleBand } from '@/lib/design/tokens'
+import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
+import { ABOVE_BOTTOM_NAV_SX } from '@/lib/sidebar-nav'
 
 export interface ResultsListViewProps {
   companies: Company[]
@@ -111,7 +113,6 @@ export default function ResultsListView({
       flexDirection: 'column',
       overflow: 'hidden',
       backgroundColor: UI.paper,
-      pb: { xs: 7, md: 0 },
     }}>
       {/* ヘッダー部分 */}
       <Box sx={{
@@ -504,11 +505,14 @@ export default function ResultsListView({
         </Box>
       </Box>
 
+      {/* 手書きの pb ではなく共通部品で余白を取る（#1570） */}
+      <BottomNavSpacer />
       <Snackbar
         open={snackbar.open}
         autoHideDuration={5000}
         onClose={onCloseSnackbar}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        sx={ABOVE_BOTTOM_NAV_SX}
       >
         <Alert
           severity={snackbar.severity}
