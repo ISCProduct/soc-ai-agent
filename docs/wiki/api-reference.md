@@ -39,6 +39,16 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
 実装は `Backend/internal/routes/echo_adapter.go` の `EchoUserAuth` /
 `EchoAdminAuth` / `EchoStaticSecretAuth` です。
 
+### 対象ユーザーはクエリで指定しない
+
+学生向けAPIの対象ユーザーは `X-User-Token` から決まります。**`user_id` をクエリに
+付けません。** Backend は読んでおらず、付けても URL・アクセスログ・ブラウザ履歴・
+Referer に user_id が残るだけです。
+
+`user_id` クエリを読んでいるのは管理者APIの2箇所だけで、どちらも「管理者が
+対象の学生を指定する」用途です（`/api/admin/diagnosis-quality` と
+`/api/admin/applications` の絞り込み）。
+
 > **Basic 認証は使っていません。** 以前このページには管理者APIが
 > `Authorization: Basic` と書かれていましたが、実装に存在したことはありません。
 > 同じくユーザーAPIを「クエリパラメータ `user_id` で識別（将来JWT化予定）」と
@@ -95,12 +105,23 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
 
 ## チャット分析
 
+全8本。スキーマは [`Backend/api/openapi.yaml`](../../Backend/api/openapi.yaml) にあります（`make api-docs` で閲覧）。
+
 | メソッド | パス | パラメータ | 概要 |
 |---------|------|-----------|------|
-| POST | `/api/chat/messages` | body: message, user_id, session_id | メッセージ送信・スコア更新 |
-| GET | `/api/chat/scores` | ?user_id&session_id | 10カテゴリスコア取得 |
-| GET | `/api/chat/companies` | ?user_id&session_id | マッチング企業一覧 |
-| POST | `/api/chat/send-report` | body: user_id, session_id | 分析レポートメール送信 |
+| POST | `/api/chat` | body: session_id, message | 発言・スコア更新・次の質問 |
+| GET | `/api/chat/history` | ?session_id | 履歴 |
+| GET | `/api/chat/scores` | ?session_id | 10カテゴリスコア取得 |
+| GET | `/api/chat/recommendations` | ?session_id | マッチング企業一覧 |
+| GET | `/api/chat/analysis` | ?session_id | 診断結果サマリ |
+| GET | `/api/chat/sessions` | — | セッション一覧 |
+| POST | `/api/chat/send-report` | body: session_id | 分析レポートメール送信 |
+| POST | `/api/chat/favorite` | body: session_id | お気に入り切替 |
+
+以前この表には `/api/chat/messages` と `/api/chat/companies` が載っていましたが、
+どちらも実装に存在しません。実体は `/api/chat` と `/api/chat/recommendations` です。
+`POST /api/chat` は body の `user_id` を受け取りますが、サーバ側で
+`X-User-Token` の値に上書きするため、指定しても意味がありません。
 
 ### スコアレスポンス例
 ```json
@@ -120,7 +141,7 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
 | メソッド | パス | 概要 |
 |---------|------|------|
 | POST | `/api/interviews` | セッション作成 |
-| GET | `/api/interviews?user_id=xxx` | セッション一覧 |
+| GET | `/api/interviews?page=&limit=` | セッション一覧 |
 | POST | `/api/interviews/{id}/start` | 開始（チャットスコアをAIプロンプトに注入） |
 | POST | `/api/interviews/{id}/turn` | 1ターン実行（音声→テキスト→AI→音声） |
 | POST | `/api/interviews/{id}/finish` | 終了・レポート生成キュー |
@@ -203,7 +224,7 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
 | メソッド | パス | 概要 |
 |---------|------|------|
 | POST | `/api/applications` | 応募登録 |
-| GET | `/api/applications?user_id=xxx` | 選考一覧 |
+| GET | `/api/applications` | 選考一覧 |
 | PUT | `/api/applications/{id}` | ステータス更新 |
 
 ### ステータス一覧
@@ -223,7 +244,7 @@ rejected         → 不合格
 
 | メソッド | パス | 概要 |
 |---------|------|------|
-| GET | `/api/user/profile?user_id=xxx&session_id=xxx` | 統合プロファイル取得 |
+| GET | `/api/user/profile?session_id=xxx` | 統合プロファイル取得 |
 
 ### レスポンス例
 ```json
@@ -248,7 +269,7 @@ rejected         → 不合格
 
 | メソッド | パス | 概要 |
 |---------|------|------|
-| GET | `/api/collective-insights/recommendations?user_id=xxx&session_id=xxx` | 集合知レコメンド |
+| GET | `/api/collective-insights/recommendations?session_id=xxx` | 集合知レコメンド |
 | GET | `/api/collective-insights/top-companies?limit=10` | 通過率上位企業 |
 | PUT | `/api/collective-insights/consent` | 同意設定更新 |
 | POST | `/api/collective-insights/actions` | 行動ログ記録 |
