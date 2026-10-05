@@ -122,9 +122,21 @@ export function StudentSearchContent() {
 
   return (
     <PageContainer maxWidth={1080}>
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
-        学生を探す
-      </Typography>
+      <Stack
+        direction="row"
+        alignItems="center"
+        justifyContent="space-between"
+        flexWrap="wrap"
+        useFlexGap
+        sx={{ mb: 1 }}
+      >
+        <Typography variant="h4" fontWeight="bold">
+          学生を探す
+        </Typography>
+        <Button variant="outlined" onClick={() => router.push('/company-portal')}>
+          ダッシュボードへ
+        </Button>
+      </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         公開に同意した学生のみが表示されます。
       </Typography>
