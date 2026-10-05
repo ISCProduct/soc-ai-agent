@@ -1,6 +1,6 @@
 import { Box, Button, Container, Typography } from '@mui/material'
 import { LandingVisual } from './LandingVisual'
-import { LP } from './tokens'
+import { LP, RISE, delay } from './tokens'
 
 /**
  * 未ログインの訪問者に出す公開ランディングページ（#1653）。
@@ -10,8 +10,8 @@ import { LP } from './tokens'
  * いきなりログインフォームを見ることになっていた。
  *
  * **このコンポーネントはAPIを呼ばない。** 本番は展示会運用で `desired=0` から
- * 起動するため、Backend の起動を待たずに表示できる必要がある
- * （受け入れ条件6）。Server Component のまま保つこと。
+ * 起動するため、Backend の起動を待たずに表示できる必要がある（受け入れ条件6）。
+ * Server Component のまま保つこと。モーションもCSSだけで出している。
  *
  * リンクに `component={Link}` を使わないこと。MUI の Button は Client Component で、
  * Server Component から関数を渡すと RSC の境界を越えられず
@@ -26,31 +26,37 @@ import { LP } from './tokens'
  *   → 3者の入口 → FAQ → クロージングCTA
  *
  * BtoB寄りの商材なので、感情訴求や限定訴求は入れない。
- * 「校内・社内で説明できる理屈」を優先する。
+ *
+ * ## 見た目の設計
+ *
+ * 地の色で段を作る: 濃色(FV) → 白(課題) → 薄青(解決策) → 白(入口) → 白(FAQ) → 濃色(締め)。
+ * 全セクションを同じ白地に並べると、構成が正しくても平坦に見える。
+ *
+ * 大胆さは1箇所に集める。濃色のFVがそれで、以降は落ち着かせる。
+ * 強調の橙は番号とラベルに点で置き、面では塗らない。
  *
  * ## 数字について
  *
  * **持っていない数字は書かない。** 導入校数・内定率・満足度は計測していないので
  * 載せない。載せるのは製品の事実（評価観点5つ、スコアの構成、掲載企業数）だけ。
- * 導入事例もまだ無いので、そのセクション自体を置いていない。
- * 数字を足すときは出どころを確認すること。
+ * 導入事例もまだ無いのでセクション自体を置いていない。
  */
 
 /** 就活で実際に詰まるところ。機能から逆算せず、利用者の言葉で書く。 */
 const PROBLEMS = [
   {
     who: '学生',
-    quote: '何から始めればいいか分からない',
+    quote: '何から始めればいいか\n分からない',
     body: '自己分析のやり方が分からないまま、とりあえず求人サイトを眺めて終わってしまう。',
   },
   {
     who: '学生',
-    quote: '面接の練習相手がいない',
+    quote: '面接の練習相手が\nいない',
     body: '先生の時間は限られていて、本番までに数回しか練習できない。何が悪かったのかも分からない。',
   },
   {
     who: '先生',
-    quote: '一人ひとりの状況を把握しきれない',
+    quote: '一人ひとりの状況を\n把握しきれない',
     body: '誰が止まっているのか、どこで止まっているのかが、面談するまで見えない。',
   },
 ] as const
@@ -86,8 +92,8 @@ const SOLUTIONS = [
 /** 製品の事実だけ。計測していない指標は載せない。 */
 const FACTS = [
   { v: '4万社', k: 'から企業を選定' },
-  { v: '10カテゴリ', k: '× 4フェーズでスコア化' },
-  { v: '5観点', k: 'で面接を講評' },
+  { v: '10', k: 'カテゴリ × 4フェーズでスコア化' },
+  { v: '5', k: '観点で面接を講評' },
 ] as const
 
 /** 振り分け先。未ログインで到達する3系統に対応する。 */
@@ -135,28 +141,38 @@ const FAQS = [
   },
 ] as const
 
-/** セクション見出し。小さいラベルと大きい見出しの2段で統一する。 */
-function SectionHead({ label, title, light }: { label: string; title: string; light?: boolean }) {
+/** セクションのラベル。短い横線を伴わせて、見出しの立ち上がりを作る。 */
+function Eyebrow({ children, light }: { children: string; light?: boolean }) {
   return (
-    <Box sx={{ mb: { xs: 3, md: 5 } }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+      <Box sx={{ width: 28, height: 2, bgcolor: LP.accent }} />
       <Typography
         component="p"
         sx={{
-          fontSize: 12,
+          fontSize: 11.5,
           fontWeight: 700,
-          letterSpacing: '.18em',
+          letterSpacing: '.22em',
           color: light ? LP.accent : LP.primary,
         }}
       >
-        {label}
+        {children}
       </Typography>
+    </Box>
+  )
+}
+
+function SectionHead({ label, title, light }: { label: string; title: string; light?: boolean }) {
+  return (
+    <Box sx={{ mb: { xs: 4, md: 6 }, ...RISE }}>
+      <Eyebrow light={light}>{label}</Eyebrow>
       <Typography
         component="h2"
         sx={{
-          mt: 1,
-          fontSize: { xs: 24, md: 32 },
+          mt: 2,
+          fontSize: { xs: 26, md: 38 },
           fontWeight: 700,
-          lineHeight: 1.45,
+          lineHeight: 1.4,
+          letterSpacing: '-0.015em',
           color: light ? LP.paper : LP.ink,
         }}
       >
@@ -166,41 +182,74 @@ function SectionHead({ label, title, light }: { label: string; title: string; li
   )
 }
 
+/** 主CTA。FV・入口・締めで見た目を揃える。 */
+const ctaSx = (variant: 'onDark' | 'onLight') => {
+  const skin =
+    variant === 'onDark'
+      ? { bgcolor: LP.paper, color: LP.ink, shadow: '0 10px 26px rgba(0,0,0,.30)', hoverBg: 'rgba(255,255,255,.9)' }
+      : { bgcolor: LP.primary, color: LP.paper, shadow: '0 8px 20px rgba(0,114,178,.28)', hoverBg: LP.primaryHover }
+  return {
+    borderRadius: '8px',
+    fontSize: 16,
+    fontWeight: 700,
+    px: 4,
+    py: 1.75,
+    bgcolor: skin.bgcolor,
+    color: skin.color,
+    boxShadow: skin.shadow,
+    transition: 'transform .2s, box-shadow .2s, background-color .2s',
+    // hover と reduced-motion はここで1回だけ定義する。
+    // 共通側と variant 側の両方に書くと後勝ちで静かに上書きされる（TS2783）。
+    '&:hover': { bgcolor: skin.hoverBg, transform: 'translateY(-2px)' },
+    '@media (prefers-reduced-motion: reduce)': {
+      transition: 'none',
+      '&:hover': { transform: 'none' },
+    },
+  }
+}
+
 export function LandingContent() {
   return (
     <Box component="main" sx={{ bgcolor: LP.paper, color: LP.ink }}>
-      {/* ── ファーストビュー ───────────────────────── */}
-      <Box
-        sx={{
-          background: `linear-gradient(180deg, ${LP.tint} 0%, ${LP.paper} 100%)`,
-          borderBottom: `1px solid ${LP.rule}`,
-        }}
-      >
-        <Container maxWidth="lg" sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 6, md: 10 } }}>
+      {/* ── ファーストビュー（濃色。大胆さはここに集める） ───────── */}
+      <Box sx={{ position: 'relative', bgcolor: LP.ink, color: LP.paper, overflow: 'hidden' }}>
+        {/* 奥行きのための光。面で塗らず、滲みで出す。 */}
+        <Box
+          aria-hidden
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            background: `radial-gradient(70% 55% at 78% 8%, rgba(86,180,233,.20), transparent 68%),
+                         radial-gradient(50% 45% at 8% 92%, rgba(230,159,0,.12), transparent 70%)`,
+          }}
+        />
+        <Container
+          maxWidth="lg"
+          sx={{ position: 'relative', px: { xs: 2.5, md: 4 }, py: { xs: 7, md: 13 } }}
+        >
           <Box
             sx={{
               display: 'grid',
-              gridTemplateColumns: { xs: '1fr', md: '1.15fr 0.85fr' },
-              gap: { xs: 5, md: 8 },
+              gridTemplateColumns: { xs: '1fr', md: '1.1fr 0.9fr' },
+              gap: { xs: 6, md: 9 },
               alignItems: 'center',
             }}
           >
             <Box>
-              <Typography
-                component="p"
-                sx={{ fontSize: 13, fontWeight: 700, letterSpacing: '.16em', color: LP.primary }}
-              >
-                専門学校の就職活動を支援するAIエージェント
-              </Typography>
+              <Box sx={{ ...RISE }}>
+                <Eyebrow light>FOR VOCATIONAL SCHOOLS</Eyebrow>
+              </Box>
 
               <Typography
                 component="h1"
                 sx={{
-                  mt: 2,
-                  fontSize: { xs: 32, sm: 44, md: 52 },
+                  mt: 2.5,
+                  fontSize: { xs: 34, sm: 48, md: 60 },
                   fontWeight: 700,
-                  lineHeight: 1.3,
-                  letterSpacing: '-0.02em',
+                  lineHeight: 1.26,
+                  letterSpacing: '-0.025em',
+                  ...RISE,
+                  ...delay(1),
                 }}
               >
                 何から始めればいいか
@@ -210,12 +259,12 @@ export function LandingContent() {
                 <Box
                   component="span"
                   sx={{
-                    // 強調は面で塗らず下に引く。文字の可読性を落とさない。
-                    // マーカーは行をまたぐと途切れて見えるので、必ず単独行に置く。
+                    // 強調は面で塗らず下に引く。マーカーは行をまたぐと途切れるので
+                    // 必ず単独行に置く。
                     display: 'inline-block',
                     backgroundImage: `linear-gradient(${LP.accent}, ${LP.accent})`,
-                    backgroundSize: '100% 0.34em',
-                    backgroundPosition: '0 88%',
+                    backgroundSize: '100% 0.3em',
+                    backgroundPosition: '0 86%',
                     backgroundRepeat: 'no-repeat',
                   }}
                 >
@@ -224,56 +273,87 @@ export function LandingContent() {
               </Typography>
 
               <Typography
-                sx={{ mt: 3, fontSize: { xs: 15, md: 17 }, lineHeight: 2, maxWidth: '32em' }}
+                sx={{
+                  mt: 3.5,
+                  fontSize: { xs: 15, md: 17 },
+                  lineHeight: 2.1,
+                  color: 'rgba(255,255,255,.80)',
+                  maxWidth: '30em',
+                  ...RISE,
+                  ...delay(2),
+                }}
               >
                 AIとの対話で適性を診断し、企業とのマッチング、面接練習、履歴書・ES添削まで。
                 就職活動をひと続きで進められます。
               </Typography>
 
-              <Box sx={{ mt: 4, display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
-                <Button
-                  href="/login"
-                  disableElevation
-                  variant="contained"
-                  sx={{
-                    bgcolor: LP.primary,
-                    borderRadius: '6px',
-                    fontSize: 16,
-                    fontWeight: 700,
-                    px: 4,
-                    py: 1.5,
-                    '&:hover': { bgcolor: '#005B8E' },
-                  }}
-                >
+              <Box
+                sx={{
+                  mt: 4.5,
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 2,
+                  alignItems: 'center',
+                  ...RISE,
+                  ...delay(3),
+                }}
+              >
+                <Button href="/login" disableElevation variant="contained" sx={ctaSx('onDark')}>
                   無料で診断を始める
                 </Button>
                 <Button
                   href="#entrances"
-                  sx={{ fontSize: 15, fontWeight: 700, color: LP.ink, borderRadius: '6px' }}
+                  sx={{
+                    fontSize: 15,
+                    fontWeight: 700,
+                    color: 'rgba(255,255,255,.88)',
+                    borderRadius: '8px',
+                    px: 2,
+                    py: 1.5,
+                  }}
                 >
-                  企業・学校の方はこちら
+                  企業・学校の方はこちら →
                 </Button>
               </Box>
 
               {/* 権威づけの代わりに製品の事実を置く。実績値は持っていないので使わない。 */}
               <Box
                 sx={{
-                  mt: 5,
-                  pt: 3,
-                  borderTop: `1px solid ${LP.rule}`,
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: { xs: 3, sm: 5 },
+                  mt: 6,
+                  pt: 3.5,
+                  borderTop: '1px solid rgba(255,255,255,.14)',
+                  display: 'grid',
+                  gridTemplateColumns: { xs: 'repeat(3, auto)', sm: 'repeat(3, auto)' },
+                  justifyContent: 'start',
+                  gap: { xs: 3, sm: 6 },
+                  ...RISE,
+                  ...delay(4),
                 }}
               >
                 {FACTS.map((f) => (
-                  <Box key={f.v}>
+                  <Box key={f.k}>
                     <Typography
-                      sx={{ fontSize: { xs: 22, md: 26 }, fontWeight: 700, lineHeight: 1.2 }}
+                      sx={{
+                        fontSize: { xs: 24, md: 30 },
+                        fontWeight: 700,
+                        lineHeight: 1.1,
+                        letterSpacing: '-0.02em',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
                     >
                       {f.v}
                     </Typography>
-                    <Typography sx={{ fontSize: 12, color: LP.muted, mt: 0.5 }}>{f.k}</Typography>
+                    <Typography
+                      sx={{
+                        fontSize: 11.5,
+                        color: 'rgba(255,255,255,.62)',
+                        mt: 1,
+                        lineHeight: 1.6,
+                        maxWidth: '11em',
+                      }}
+                    >
+                      {f.k}
+                    </Typography>
                   </Box>
                 ))}
               </Box>
@@ -285,26 +365,55 @@ export function LandingContent() {
       </Box>
 
       {/* ── 課題提起 ─────────────────────────────── */}
-      <Container maxWidth="lg" sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 7, md: 12 } }}>
+      <Container maxWidth="lg" sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 8, md: 14 } }}>
         <SectionHead label="ISSUE" title="就活は、つまずく場所が決まっています。" />
         <Box
           sx={{
             display: 'grid',
             gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' },
-            gap: { xs: 3, md: 4 },
+            gap: { xs: 4, md: 5 },
           }}
         >
-          {PROBLEMS.map((p) => (
-            <Box key={p.quote} sx={{ borderTop: `3px solid ${LP.ink}`, pt: 2.5 }}>
-              <Typography sx={{ fontSize: 12, fontWeight: 700, color: LP.muted }}>
+          {PROBLEMS.map((p, i) => (
+            <Box key={p.body} sx={{ ...RISE, ...delay(i) }}>
+              <Typography
+                aria-hidden
+                sx={{
+                  fontSize: 56,
+                  fontWeight: 700,
+                  lineHeight: 0.8,
+                  color: LP.rule,
+                  fontFamily: 'Georgia, serif',
+                }}
+              >
+                “
+              </Typography>
+              <Typography
+                sx={{
+                  mt: 1,
+                  fontSize: { xs: 19, md: 21 },
+                  fontWeight: 700,
+                  lineHeight: 1.65,
+                  whiteSpace: 'pre-line',
+                }}
+              >
+                {p.quote}
+              </Typography>
+              <Typography
+                sx={{ mt: 2, fontSize: 11.5, fontWeight: 700, color: LP.primary, letterSpacing: '.1em' }}
+              >
                 {p.who}
               </Typography>
               <Typography
-                sx={{ mt: 1, fontSize: { xs: 18, md: 19 }, fontWeight: 700, lineHeight: 1.6 }}
+                sx={{
+                  mt: 2,
+                  pt: 2.5,
+                  borderTop: `1px solid ${LP.rule}`,
+                  fontSize: 14,
+                  lineHeight: 2,
+                  color: LP.muted,
+                }}
               >
-                「{p.quote}」
-              </Typography>
-              <Typography sx={{ mt: 1.5, fontSize: 14, lineHeight: 1.95, color: LP.muted }}>
                 {p.body}
               </Typography>
             </Box>
@@ -312,30 +421,46 @@ export function LandingContent() {
         </Box>
       </Container>
 
-      {/* ── 解決策（濃い地で切り替える） ────────────────── */}
-      <Box sx={{ bgcolor: LP.ink, color: LP.paper }}>
-        <Container maxWidth="lg" sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 7, md: 12 } }}>
-          <SectionHead light label="SOLUTION" title="つまずく場所に、ひとつずつ手を当てます。" />
-          <Box sx={{ display: 'grid', gap: { xs: 4, md: 5 } }}>
-            {SOLUTIONS.map((s) => (
+      {/* ── 解決策（薄青。番号を大きく立てる） ─────────────── */}
+      <Box sx={{ bgcolor: LP.tint, borderTop: `1px solid ${LP.rule}` }}>
+        <Container maxWidth="lg" sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 8, md: 14 } }}>
+          <SectionHead label="SOLUTION" title="つまずく場所に、ひとつずつ手を当てます。" />
+          <Box sx={{ display: 'grid', gap: { xs: 2.5, md: 3 } }}>
+            {SOLUTIONS.map((s, i) => (
               <Box
                 key={s.n}
                 sx={{
+                  bgcolor: LP.paper,
+                  borderRadius: '14px',
+                  border: `1px solid ${LP.rule}`,
+                  p: { xs: 3, md: 4 },
                   display: 'grid',
-                  gridTemplateColumns: { xs: '1fr', md: '4rem 1fr 1fr' },
-                  gap: { xs: 1.5, md: 4 },
-                  pt: { xs: 3, md: 4 },
-                  borderTop: '1px solid rgba(255,255,255,.18)',
+                  gridTemplateColumns: { xs: '1fr', md: '5rem 1.05fr 1fr' },
+                  gap: { xs: 2, md: 4 },
                   alignItems: 'start',
+                  transition: 'box-shadow .25s, transform .25s',
+                  '&:hover': {
+                    boxShadow: '0 14px 34px rgba(12,22,32,.09)',
+                    transform: 'translateY(-2px)',
+                  },
+                  ...RISE,
+                  ...delay(i),
+                  '@media (prefers-reduced-motion: reduce)': {
+                    animation: 'none',
+                    transition: 'none',
+                    '&:hover': { transform: 'none' },
+                  },
                 }}
               >
                 <Typography
+                  aria-hidden
                   sx={{
-                    fontSize: { xs: 13, md: 15 },
+                    fontSize: { xs: 34, md: 46 },
                     fontWeight: 700,
+                    lineHeight: 0.95,
                     color: LP.accent,
+                    letterSpacing: '-0.03em',
                     fontVariantNumeric: 'tabular-nums',
-                    letterSpacing: '.06em',
                   }}
                 >
                   {s.n}
@@ -347,11 +472,23 @@ export function LandingContent() {
                   >
                     {s.title}
                   </Typography>
-                  <Typography sx={{ mt: 1.5, fontSize: 12, color: LP.accent, fontWeight: 700 }}>
-                    → 「{s.forWhom}」に効きます
+                  <Typography
+                    sx={{
+                      mt: 1.5,
+                      display: 'inline-block',
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      color: LP.primary,
+                      bgcolor: LP.tint,
+                      borderRadius: 99,
+                      px: 1.5,
+                      py: 0.5,
+                    }}
+                  >
+                    「{s.forWhom}」に効きます
                   </Typography>
                 </Box>
-                <Typography sx={{ fontSize: 14, lineHeight: 2, color: 'rgba(255,255,255,.78)' }}>
+                <Typography sx={{ fontSize: 14, lineHeight: 2.05, color: LP.muted }}>
                   {s.body}
                 </Typography>
               </Box>
@@ -361,34 +498,74 @@ export function LandingContent() {
       </Box>
 
       {/* ── 3者の入口 ────────────────────────────── */}
-      <Box id="entrances" sx={{ bgcolor: LP.tint }}>
-        <Container maxWidth="lg" sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 7, md: 12 } }}>
+      <Box id="entrances">
+        <Container maxWidth="lg" sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 8, md: 14 } }}>
           <SectionHead label="ENTRANCE" title="ご利用の方を選んでください。" />
           <Box
             sx={{
               display: 'grid',
               gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' },
-              gap: 2.5,
+              gap: 3,
             }}
           >
-            {ENTRANCES.map((e) => (
+            {ENTRANCES.map((e, i) => (
               <Box
                 key={e.href}
                 sx={{
-                  bgcolor: LP.paper,
-                  border: `1px solid ${e.primary ? LP.primary : LP.rule}`,
-                  borderTopWidth: e.primary ? 4 : 1,
-                  borderRadius: '8px',
-                  p: { xs: 2.5, md: 3 },
+                  position: 'relative',
+                  borderRadius: '14px',
+                  p: { xs: 3, md: 3.5 },
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 1,
+                  gap: 1.25,
+                  transition: 'box-shadow .25s, transform .25s',
+                  ...(e.primary
+                    ? {
+                        bgcolor: LP.ink,
+                        color: LP.paper,
+                        boxShadow: '0 16px 36px rgba(12,22,32,.22)',
+                      }
+                    : { bgcolor: LP.paper, border: `1px solid ${LP.rule}` }),
+                  ...RISE,
+                  ...delay(i),
+                  // hover と reduced-motion は最後に1回だけ。variant 側にも書くと
+                  // 後勝ちで静かに上書きされる（TS2783）。
+                  '&:hover': {
+                    transform: 'translateY(-3px)',
+                    boxShadow: e.primary
+                      ? '0 22px 46px rgba(12,22,32,.28)'
+                      : '0 14px 30px rgba(12,22,32,.10)',
+                  },
+                  '@media (prefers-reduced-motion: reduce)': {
+                    animation: 'none',
+                    transition: 'none',
+                    '&:hover': { transform: 'none' },
+                  },
                 }}
               >
-                <Typography component="h3" sx={{ fontSize: 20, fontWeight: 700 }}>
+                {e.primary && (
+                  <Typography
+                    sx={{
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      letterSpacing: '.16em',
+                      color: LP.accent,
+                    }}
+                  >
+                    おすすめ
+                  </Typography>
+                )}
+                <Typography component="h3" sx={{ fontSize: 22, fontWeight: 700 }}>
                   {e.label}
                 </Typography>
-                <Typography sx={{ fontSize: 13, color: LP.muted, lineHeight: 1.8, flexGrow: 1 }}>
+                <Typography
+                  sx={{
+                    fontSize: 13,
+                    lineHeight: 1.9,
+                    flexGrow: 1,
+                    color: e.primary ? 'rgba(255,255,255,.74)' : LP.muted,
+                  }}
+                >
                   {e.target}
                 </Typography>
                 <Button
@@ -397,13 +574,13 @@ export function LandingContent() {
                   variant={e.primary ? 'contained' : 'outlined'}
                   sx={{
                     mt: 1.5,
-                    borderRadius: '6px',
+                    borderRadius: '8px',
                     fontWeight: 700,
                     fontSize: 15,
-                    py: 1.25,
+                    py: 1.4,
                     ...(e.primary
-                      ? { bgcolor: LP.primary, '&:hover': { bgcolor: '#005B8E' } }
-                      : { borderColor: LP.rule, color: LP.ink }),
+                      ? { bgcolor: LP.paper, color: LP.ink, '&:hover': { bgcolor: 'rgba(255,255,255,.9)' } }
+                      : { borderColor: LP.rule, color: LP.ink, '&:hover': { borderColor: LP.ink } }),
                   }}
                 >
                   {e.action}
@@ -415,80 +592,109 @@ export function LandingContent() {
       </Box>
 
       {/* ── FAQ ────────────────────────────────── */}
-      <Container maxWidth="lg" sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 7, md: 12 } }}>
-        <SectionHead label="FAQ" title="よくあるご質問" />
-        {/* 読み幅は絞るが、左端は他セクションと揃える。Container を細くすると
-            中央寄せになって、ISSUE / SOLUTION と縦のラインがずれる。 */}
-        <Box sx={{ maxWidth: 760, borderTop: `1px solid ${LP.rule}` }}>
-          {FAQS.map((f) => (
-            <Box key={f.q} sx={{ borderBottom: `1px solid ${LP.rule}`, py: 3 }}>
-              <Typography
-                component="h3"
-                sx={{ fontSize: { xs: 16, md: 17 }, fontWeight: 700, lineHeight: 1.6 }}
+      <Box sx={{ bgcolor: LP.tint, borderTop: `1px solid ${LP.rule}` }}>
+        <Container maxWidth="lg" sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 8, md: 14 } }}>
+          <SectionHead label="FAQ" title="よくあるご質問" />
+          {/* 読み幅は絞るが、左端は他セクションと揃える。Container を細くすると
+              中央寄せになって縦のラインがずれる。 */}
+          <Box sx={{ maxWidth: 820, display: 'grid', gap: 2 }}>
+            {FAQS.map((f, i) => (
+              <Box
+                key={f.q}
+                sx={{
+                  bgcolor: LP.paper,
+                  border: `1px solid ${LP.rule}`,
+                  borderRadius: '12px',
+                  px: { xs: 2.5, md: 3.5 },
+                  py: { xs: 2.5, md: 3 },
+                  ...RISE,
+                  ...delay(i),
+                }}
               >
-                {f.q}
-              </Typography>
-              <Typography sx={{ mt: 1.25, fontSize: 14, lineHeight: 2, color: LP.muted }}>
-                {f.a}
-              </Typography>
-            </Box>
-          ))}
-        </Box>
-      </Container>
+                <Typography
+                  component="h3"
+                  sx={{ fontSize: { xs: 16, md: 17 }, fontWeight: 700, lineHeight: 1.65 }}
+                >
+                  {f.q}
+                </Typography>
+                <Typography sx={{ mt: 1.25, fontSize: 14, lineHeight: 2.05, color: LP.muted }}>
+                  {f.a}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+        </Container>
+      </Box>
 
       {/* ── クロージング ───────────────────────────── */}
-      <Box sx={{ bgcolor: LP.ink, color: LP.paper }}>
+      <Box sx={{ position: 'relative', bgcolor: LP.ink, color: LP.paper, overflow: 'hidden' }}>
+        <Box
+          aria-hidden
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            background: `radial-gradient(60% 70% at 50% 0%, rgba(86,180,233,.18), transparent 70%)`,
+          }}
+        />
         <Container
           maxWidth="md"
-          sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 7, md: 11 }, textAlign: 'center' }}
+          sx={{
+            position: 'relative',
+            px: { xs: 2.5, md: 4 },
+            py: { xs: 9, md: 14 },
+            textAlign: 'center',
+          }}
         >
           <Typography
             component="p"
-            sx={{ fontSize: { xs: 22, md: 30 }, fontWeight: 700, lineHeight: 1.55 }}
+            sx={{
+              fontSize: { xs: 24, md: 36 },
+              fontWeight: 700,
+              lineHeight: 1.5,
+              letterSpacing: '-0.02em',
+            }}
           >
-            登録して、最初の質問に答えるところから。
+            登録して、最初の質問に
+            <Box component="br" sx={{ display: { md: 'none' } }} />
+            答えるところから。
           </Typography>
-          <Typography sx={{ mt: 2, fontSize: 14, color: 'rgba(255,255,255,.72)', lineHeight: 2 }}>
+          <Typography
+            sx={{ mt: 2.5, fontSize: 14, color: 'rgba(255,255,255,.70)', lineHeight: 2 }}
+          >
             在校生の利用は学校の導入に含まれます。学生個人への課金はありません。
           </Typography>
           <Button
             href="/login"
             disableElevation
             variant="contained"
-            sx={{
-              mt: 4,
-              bgcolor: LP.paper,
-              color: LP.ink,
-              borderRadius: '6px',
-              fontSize: 16,
-              fontWeight: 700,
-              px: 5,
-              py: 1.5,
-              '&:hover': { bgcolor: 'rgba(255,255,255,.88)' },
-            }}
+            sx={{ mt: 4.5, ...ctaSx('onDark'), px: 5.5 }}
           >
             無料で診断を始める
           </Button>
         </Container>
       </Box>
 
-      <Box component="footer" sx={{ borderTop: `1px solid ${LP.rule}` }}>
+      <Box component="footer" sx={{ bgcolor: LP.ink, borderTop: '1px solid rgba(255,255,255,.1)' }}>
         <Container
           maxWidth="lg"
           sx={{
             px: { xs: 2.5, md: 4 },
-            py: 3,
+            py: 3.5,
             display: 'flex',
             flexWrap: 'wrap',
-            gap: 2.5,
+            gap: 3,
             alignItems: 'baseline',
           }}
         >
-          <Typography sx={{ fontSize: 13, color: LP.muted }}>© 就活AI</Typography>
+          <Typography sx={{ fontSize: 13, color: 'rgba(255,255,255,.55)' }}>© 就活AI</Typography>
           <Typography
             component="a"
             href="/privacy"
-            sx={{ fontSize: 13, color: LP.ink, textUnderlineOffset: '3px' }}
+            sx={{
+              fontSize: 13,
+              color: 'rgba(255,255,255,.80)',
+              textUnderlineOffset: '3px',
+            }}
           >
             プライバシーポリシー
           </Typography>
