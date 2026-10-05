@@ -54,6 +54,20 @@ test.describe('認証フロー', () => {
     await expect(errorAlert).toBeVisible({ timeout: 5000 })
   })
 
+  // 未ログインの訪問者に公開LPが出ること(#1653)。
+  // 以前は / が認証必須で、説明なしにログインフォームへ飛ばされていた。
+  test('未ログインで / を開くと公開LPが表示され、3つの入口が出る', async ({ page }) => {
+    await page.goto('/')
+
+    await expect(page).toHaveURL(/\/$/)
+    await expect(page.getByRole('heading', { name: 'IT企業エージェント' })).toBeVisible({
+      timeout: 15000,
+    })
+    for (const name of ['学生の方', '企業の方', '学校・教員の方']) {
+      await expect(page.getByRole('heading', { name })).toBeVisible()
+    }
+  })
+
   // セッションCookieが失効し、ストレージだけが残った状態の回帰テスト(#1519)。
   //
   // 「ローディングとログイン画面がぐちゃぐちゃになる」と報告された症状。
@@ -81,7 +95,17 @@ test.describe('認証フロー', () => {
 
     await page.goto('/')
 
-    // ログイン画面に落ち着き、フォームが操作できる
+    // / は公開LPになったので /login へは飛ばされない(#1653)。
+    // ループの起点だった「サーバー側リダイレクト」自体が無くなっている。
+    await expect(page.getByRole('heading', { name: 'IT企業エージェント' })).toBeVisible({
+      timeout: 15000,
+    })
+    await expect(page).toHaveURL(/\/$/)
+
+    // LPからログイン画面へ進んでも、ストレージを見て / へ送り返されない。
+    // 送り返しを止めているのは LoginContent 側の Cookie 確認
+    // (/api/auth/session が401ならその場に留まる)。
+    await page.getByRole('link', { name: /学生/ }).first().click()
     await expect(page).toHaveURL(/\/login/, { timeout: 15000 })
     await expect(page.getByRole('tab', { name: 'ログイン' })).toBeVisible({ timeout: 10000 })
 
