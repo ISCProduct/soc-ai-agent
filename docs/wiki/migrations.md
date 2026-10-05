@@ -96,6 +96,63 @@ go run ./cmd/migrate force 2   # version 2 が適用済みの状態に補修し�
 go run ./cmd/migrate force 1   # version 2 を取り消した状態に補修した場合
 ```
 
+## DBがコードより先に進んでいる場合
+
+ブランチを行き来していると、別ブランチのマイグレーションを適用したDBのまま
+develop に戻ることがあります。`schema_migrations` のバージョンに対応する
+ファイルが無いため、起動時の自動マイグレーションが次のエラーで失敗します。
+
+```
+Failed to migrate database: マイグレーション適用に失敗:
+  no migration found for version 44: read down for version 44 .: file does not exist
+Process Exit with Code: 1
+```
+
+**backend が起動しないので、frontend の SSR は `TypeError: fetch failed`
+（`connect ECONNREFUSED app:8080`）になります。** 画面側のエラーだけを見ると
+frontend の不具合に見えるため、まず backend のログを確認してください。
+
+### 直し方
+
+1. DBの実際のスキーマがどのバージョンまで当たっているかを確認する
+
+   ```bash
+   docker compose run --rm --no-deps migrate go run ./cmd/migrate version
+   # => Current version: 44 (dirty: false)   ← ファイルが無いバージョン
+   ```
+
+   対応するバージョンのマイグレーションが**本当に適用されているか**を
+   `information_schema` で確かめます。テーブル名・列名はマイグレーションの
+   SQL から拾ってください。
+
+   ```sql
+   SELECT COUNT(*) FROM information_schema.columns
+     WHERE table_schema='app_db' AND table_name='interview_reports'
+       AND column_name='scores_applied_at';
+   ```
+
+2. 実際に当たっているバージョンへ `force` で合わせる
+
+   ```bash
+   docker compose run --rm --no-deps migrate go run ./cmd/migrate force 42
+   docker compose run --rm --no-deps migrate go run ./cmd/migrate up
+   docker compose restart app
+   ```
+
+`force` はバージョンの印を書き換えるだけで、スキーマには触りません。
+**実際のスキーマと一致する値を指定すること。** 一致しない値を入れると、
+以後のマイグレーションが当たらないまま進んで静かに壊れます。
+
+他ブランチのマイグレーションが実際に適用済みだった場合は、`force` の前に
+そのブランチの down を当てて取り消してください。
+
+> 版番号は**ブランチをまたいで衝突しうる**点に注意してください。
+> CI の重複検知（`automation/test/migration-version-unique-test.sh`）は
+> 単一ブランチ内しか見ないため、別々のブランチで同じ番号を使っていても
+> マージまで気づけません。新しいマイグレーションを足すときは
+> `git log --all --name-only -- Backend/migrations` で他ブランチの使用状況も
+> 確認するのが安全です。
+
 ## 既存DB（AutoMigrate時代）の移行
 
 `schema_migrations` テーブルが存在せず、かつ `users` テーブルが存在するDBは、
