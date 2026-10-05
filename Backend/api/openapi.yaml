@@ -1,0 +1,652 @@
+openapi: 3.0.3
+
+# SOC AI Agent の HTTP API。
+#
+# これは手で書くファイル。生成しない。
+# 実装に登録されている全エンドポイントの一覧は api/routes.txt（自動生成）にある。
+#
+# routes.txt が 237 本に対し、このファイルはまだ一部しか埋まっていない。
+# 網羅率は `cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths` で出る。
+#
+# ここに書いたパス・メソッドが実装に存在しないと CI が落ちる（inventory_test.go）。
+# 逆（実装にあるが未記載）では落とさない。少しずつ埋める前提。
+
+info:
+  title: SOC AI Agent API
+  version: "1.0.0"
+  description: |
+    採用支援 SaaS のバックエンド API。
+
+    ## 認証
+
+    方式が4つある。どれを使うかはエンドポイントごとの `security` を見ること。
+
+    | 方式 | ヘッダ | 用途 |
+    |---|---|---|
+    | `userToken` | `X-User-Token` | 学生・教員。ログインで発行される短TTLのJWT |
+    | `adminAuth` | `X-Admin-Email` + `X-Admin-Token` | 管理画面。管理者本人の認証 |
+    | `serviceSecret` | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない |
+    | `companyCookie` | Cookie | 企業ポータル。httpOnly Cookie 3本 |
+
+    テナントの切り替えが必要な場合は `X-Tenant-Slug` を併せて送る。
+
+    ## エラー
+
+    Echo の `HTTPError` をそのまま返すため、本文は `{"message": "..."}` 形式。
+    一部の古いエンドポイントは `{"error": "..."}` を返す。統一は未完。
+
+servers:
+  - url: http://localhost:8080
+    description: ローカル開発
+  - url: https://stg.shukatsu-ai.jp
+    description: staging
+
+tags:
+  - name: auth
+    description: 学生・教員の認証とプロフィール
+  - name: chat
+    description: 診断チャットとスコア
+  - name: questions
+    description: 質問の生成・管理
+
+components:
+  securitySchemes:
+    userToken:
+      type: apiKey
+      in: header
+      name: X-User-Token
+    adminAuth:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+      description: 併せて `X-Admin-Email` も必要。
+    serviceSecret:
+      type: apiKey
+      in: header
+      name: X-Admin-Secret
+    companyCookie:
+      type: apiKey
+      in: cookie
+      name: company_user_token
+
+  responses:
+    Unauthorized:
+      description: 認証情報が無い、または無効
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: 権限が足りない
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooManyRequests:
+      description: レート制限
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            message: "Too Many Requests: お試し回数の上限に達しました。しばらく待ってから再試行してください。"
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        message:
+          type: string
+
+    AuthResponse:
+      type: object
+      description: |
+        ログイン・登録・リフレッシュの共通レスポンス。
+        `token` は管理者のみ、`user_token` と `refresh_token` は全ユーザーに入る。
+      required: [user_id, email, name, is_guest, target_level, is_admin, email_verified]
+      properties:
+        user_id: { type: integer }
+        email: { type: string, format: email }
+        name: { type: string }
+        is_guest: { type: boolean }
+        target_level: { type: string, description: "新卒 / 中途" }
+        school_name: { type: string }
+        is_admin: { type: boolean }
+        certifications_acquired: { type: string }
+        certifications_in_progress: { type: string }
+        avatar_url: { type: string }
+        oauth_provider: { type: string, description: "google / github" }
+        token: { type: string, description: 管理者トークン。管理者のみ }
+        user_token: { type: string, description: ユーザー認証トークン（短TTL） }
+        refresh_token: { type: string, description: "リフレッシュトークン（#616）" }
+        email_verified: { type: boolean }
+        requires_re_verification: { type: boolean }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+
+    RegisterRequest:
+      type: object
+      required: [email, password, name]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password, minLength: 8 }
+        name: { type: string }
+        target_level: { type: string }
+        school_name: { type: string }
+        certifications_acquired: { type: string }
+        certifications_in_progress: { type: string }
+        registration_token: { type: string }
+        promote_guest:
+          type: boolean
+          description: |
+            ゲストの診断結果を引き継いで本登録するか。
+            対象のゲストは `X-User-Token` から特定する。この値は意思表明にすぎず、
+            誰を昇格するかの決定には使わない。
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        name: { type: string }
+        target_level: { type: string }
+        school_name: { type: string }
+        certifications_acquired: { type: string }
+        certifications_in_progress: { type: string }
+
+    UserWeightScore:
+      type: object
+      description: 10カテゴリの重みスコア。
+      properties:
+        id: { type: integer }
+        user_id: { type: integer }
+        session_id: { type: string }
+        category:
+          type: string
+          enum:
+            - technical_orientation
+            - teamwork_orientation
+            - leadership_orientation
+            - creativity_orientation
+            - stability_orientation
+            - growth_orientation
+            - work_life_balance
+            - challenge_seeking
+            - detail_orientation
+            - communication_skill
+        score: { type: integer, minimum: 0, maximum: 100 }
+
+    PhaseProgress:
+      type: object
+      description: 診断4フェーズの進捗。
+      properties:
+        phase_name:
+          type: string
+          enum: [job_analysis, interest_analysis, aptitude_analysis, future_analysis]
+        answered_questions: { type: integer }
+        min_questions: { type: integer }
+        is_complete: { type: boolean }
+
+    ChatRequest:
+      type: object
+      required: [session_id, message]
+      properties:
+        user_id: { type: integer, description: サーバ側で X-User-Token から決まるため省略可 }
+        session_id: { type: string }
+        message: { type: string }
+        industry_id: { type: integer }
+        job_category_id: { type: integer }
+
+    ChatResponse:
+      type: object
+      required: [response, is_complete, total_questions, answered_questions]
+      properties:
+        response: { type: string }
+        question_weight_id: { type: integer }
+        current_scores:
+          type: array
+          items: { $ref: "#/components/schemas/UserWeightScore" }
+        current_phase: { $ref: "#/components/schemas/PhaseProgress" }
+        all_phases:
+          type: array
+          items: { $ref: "#/components/schemas/PhaseProgress" }
+        is_complete: { type: boolean }
+        is_terminated:
+          type: boolean
+          description: 質問と無関係な回答が続いてチャットを終了した場合に true。
+        suggest_restart: { type: boolean }
+        invalid_answer_count: { type: integer }
+        total_questions: { type: integer }
+        answered_questions: { type: integer }
+        evaluated_categories: { type: integer }
+        total_categories: { type: integer }
+
+paths:
+  # ── auth（認証不要）────────────────────────────────
+  /api/auth/request-registration:
+    post:
+      tags: [auth]
+      summary: 本登録の前に確認メールを送る
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "200": { description: 送信した }
+        "400": { description: メールアドレスの形式が不正 }
+
+  /api/auth/verify-registration:
+    post:
+      tags: [auth]
+      summary: 確認メールのトークンを検証して registration_token を得る
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string }
+      responses:
+        "200": { description: 検証に成功。registration_token を返す }
+        "400": { description: トークンが無効か期限切れ }
+
+  /api/auth/register:
+    post:
+      tags: [auth]
+      summary: 本登録
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "200":
+          description: 登録した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "400": { description: 入力が不正 }
+        "409": { description: すでに登録済みのメールアドレス }
+
+  /api/auth/login:
+    post:
+      tags: [auth]
+      summary: ログイン
+      description: IP 単位のレート制限がかかる。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: ログインした
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/auth/guest:
+    post:
+      tags: [auth]
+      summary: ゲストユーザーを作る
+      description: 登録せずに診断を試すための経路。後から promote_guest で引き継げる。
+      responses:
+        "200":
+          description: 作成した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+
+  /api/auth/verify-email:
+    get:
+      tags: [auth]
+      summary: メールアドレスの確認
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 確認した }
+        "400": { description: トークンが無効か期限切れ }
+
+  /api/auth/forgot-password:
+    post:
+      tags: [auth]
+      summary: パスワード再設定メールを送る
+      description: IP 単位のレート制限がかかる。存在しないメールでも 200 を返す（存在を伏せる）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "200": { description: 受け付けた }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/auth/reset-password:
+    post:
+      tags: [auth]
+      summary: パスワードを再設定する
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: { type: string }
+                password: { type: string, format: password, minLength: 8 }
+      responses:
+        "200": { description: 再設定した }
+        "400": { description: トークンが無効か期限切れ }
+
+  /api/auth/refresh:
+    post:
+      tags: [auth]
+      summary: アクセストークンを更新する
+      description: |
+        リフレッシュトークン自体が認証情報なので `X-User-Token` は不要（#616）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        "200":
+          description: 更新した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/auth/logout:
+    post:
+      tags: [auth]
+      summary: ログアウト（リフレッシュトークンを失効させる）
+      responses:
+        "200": { description: ログアウトした }
+
+  /api/auth/google:
+    get:
+      tags: [auth]
+      summary: Google OAuth を開始する
+      responses:
+        "302": { description: Google の認可画面へリダイレクト }
+
+  /api/auth/google/callback:
+    get:
+      tags: [auth]
+      summary: Google OAuth のコールバック
+      parameters:
+        - in: query
+          name: code
+          schema: { type: string }
+        - in: query
+          name: state
+          schema: { type: string }
+      responses:
+        "302": { description: フロントエンドへリダイレクト }
+
+  /api/auth/github:
+    get:
+      tags: [auth]
+      summary: GitHub OAuth を開始する
+      responses:
+        "302": { description: GitHub の認可画面へリダイレクト }
+
+  /api/auth/github/callback:
+    get:
+      tags: [auth]
+      summary: GitHub OAuth のコールバック
+      parameters:
+        - in: query
+          name: code
+          schema: { type: string }
+        - in: query
+          name: state
+          schema: { type: string }
+      responses:
+        "302": { description: フロントエンドへリダイレクト }
+
+  # ── auth（認証必須）────────────────────────────────
+  /api/auth/user:
+    get:
+      tags: [auth]
+      summary: ログイン中のユーザーを取得する
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 取得した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/auth/profile:
+    put:
+      tags: [auth]
+      summary: プロフィールを更新する
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateProfileRequest" }
+      responses:
+        "200":
+          description: 更新した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [auth]
+      summary: プロフィールを更新する（旧クライアント互換）
+      description: PUT と同じ処理。古いクライアントのために残している。新規実装では PUT を使う。
+      deprecated: true
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateProfileRequest" }
+      responses:
+        "200":
+          description: 更新した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/auth/account:
+    delete:
+      tags: [auth]
+      summary: 退会する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 退会した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/users/me:
+    delete:
+      tags: [auth]
+      summary: 退会する（明示的な本人退会パス）
+      description: "`/api/auth/account` と同等（#613）。"
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 退会した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ── chat ───────────────────────────────────────────
+  /api/chat:
+    post:
+      tags: [chat]
+      summary: 診断チャットに発言する
+      description: |
+        回答を受け取り、スコアを更新して次の質問を返す。
+        質問と無関係な回答が続くと `is_terminated` が true になる。
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChatRequest" }
+      responses:
+        "200":
+          description: 応答
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/chat/history:
+    get:
+      tags: [chat]
+      summary: チャット履歴を取得する
+      security: [{ userToken: [] }]
+      parameters:
+        - in: query
+          name: session_id
+          schema: { type: string }
+      responses:
+        "200": { description: 履歴 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/chat/scores:
+    get:
+      tags: [chat]
+      summary: 現在のスコアを取得する
+      security: [{ userToken: [] }]
+      parameters:
+        - in: query
+          name: session_id
+          schema: { type: string }
+      responses:
+        "200":
+          description: 10カテゴリのスコア
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/UserWeightScore" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/chat/recommendations:
+    get:
+      tags: [chat]
+      summary: スコアに基づく推薦企業を取得する
+      security: [{ userToken: [] }]
+      parameters:
+        - in: query
+          name: session_id
+          schema: { type: string }
+      responses:
+        "200": { description: 推薦企業 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/chat/analysis:
+    get:
+      tags: [chat]
+      summary: 診断結果のサマリを取得する
+      security: [{ userToken: [] }]
+      parameters:
+        - in: query
+          name: session_id
+          schema: { type: string }
+      responses:
+        "200": { description: サマリ }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/chat/sessions:
+    get:
+      tags: [chat]
+      summary: セッション一覧を取得する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: セッション一覧 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/chat/send-report:
+    post:
+      tags: [chat]
+      summary: 診断結果をメールで送る
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id: { type: string }
+      responses:
+        "200": { description: 送信した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/chat/favorite:
+    post:
+      tags: [chat]
+      summary: セッションのお気に入りを切り替える
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id: { type: string }
+      responses:
+        "200": { description: 切り替えた }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ── questions ──────────────────────────────────────
+  /api/questions/generate:
+    post:
+      tags: [questions]
+      summary: 質問を生成する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 生成した質問 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/questions/create:
+    post:
+      tags: [questions]
+      summary: 質問を登録する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 登録した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/questions/list:
+    get:
+      tags: [questions]
+      summary: カテゴリ別に質問を取得する
+      security: [{ userToken: [] }]
+      parameters:
+        - in: query
+          name: category
+          schema: { type: string }
+      responses:
+        "200": { description: 質問一覧 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
