@@ -118,7 +118,7 @@ export default function PageContent() {
   const fetchEvents = useCallback(async () => {
     if (!userId) return
     try {
-      const res = await fetch(`/api/schedule?user_id=${userId}`)
+      const res = await fetch('/api/schedule')
       if (!res.ok) throw new Error('スケジュールの取得に失敗しました')
       const data = await res.json()
       setEvents(Array.isArray(data) ? data : [])

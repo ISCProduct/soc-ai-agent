@@ -183,20 +183,20 @@ export const interviewApi = {
 
   async getDetail(sessionId: number, userId: number, role?: string): Promise<InterviewDetail> {
     const roleParam = role ? `&role=${role}` : ''
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}?user_id=${userId}${roleParam}`, undefined, LIST_FETCH_TIMEOUT_MS)
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}${roleParam}`, undefined, LIST_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
   async getReport(sessionId: number, userId: number): Promise<InterviewReport | null> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/report?user_id=${userId}`)
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/report`)
     if (res.status === 404) return null
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
 
   async listSessions(userId: number, page = 1, limit = 20): Promise<{ sessions: InterviewSession[]; total: number }> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews?user_id=${userId}&page=${page}&limit=${limit}`, undefined, LIST_FETCH_TIMEOUT_MS)
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews?page=${page}&limit=${limit}`, undefined, LIST_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()
   },
@@ -213,14 +213,14 @@ export const interviewApi = {
   },
 
   async getPhraseSuggestions(sessionId: number, userId: number): Promise<PhraseSuggestion[]> {
-    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/phrase-suggestions?user_id=${userId}`, undefined, LIST_FETCH_TIMEOUT_MS)
+    const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}/phrase-suggestions`, undefined, LIST_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     const data = await res.json()
     return data.suggestions as PhraseSuggestion[]
   },
 
   async getTrend(userId: number, limit = 0): Promise<InterviewTrendPoint[]> {
-    const params = limit > 0 ? `?user_id=${userId}&limit=${limit}` : `?user_id=${userId}`
+    const params = limit > 0 ? `?limit=${limit}` : ''
     const res = await interviewFetch(`${BACKEND_URL}/api/interviews/trend${params}`, undefined, LIST_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     const data = await res.json()
