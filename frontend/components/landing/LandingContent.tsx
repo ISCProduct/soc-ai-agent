@@ -1,6 +1,7 @@
 import { Box, Button, Container, Typography } from '@mui/material'
 import { LandingHeader } from './LandingHeader'
 import { LandingVisual } from './LandingVisual'
+import { LandingWalkthrough } from './LandingWalkthrough'
 import { LandingFooter } from './LandingFooter'
 import { LP, GENKO_GRID, RISE, NO_MOTION, delay } from './tokens'
 
@@ -47,18 +48,18 @@ import { LP, GENKO_GRID, RISE, NO_MOTION, delay } from './tokens'
 const PROBLEMS = [
   {
     who: '学生',
-    quote: '何から始めればいいか分からない',
-    body: '自己分析のやり方が分からないまま、とりあえず求人サイトを眺めて終わってしまう。',
+    quote: '自己PRに何を書けばいいか分からない',
+    body: '授業の課題もアルバイトもやってきたのに、いざ書こうとすると「普通のことしかしていない」と思えてくる。',
   },
   {
     who: '学生',
-    quote: '面接の練習相手がいない',
-    body: '先生の時間は限られていて、本番までに数回しか練習できない。何が悪かったのかも分からない。',
+    quote: '面接で答えがまとまらない',
+    body: '練習相手がいない。先生に見てもらえるのは数回で、何が悪かったのかも分からないまま本番が来る。',
   },
   {
     who: '先生',
-    quote: '一人ひとりの状況を把握しきれない',
-    body: '誰が止まっているのか、どこで止まっているのかが、面談するまで見えない。',
+    quote: '誰が止まっているか、面談するまで分からない',
+    body: '受け持ちの学生全員の進み具合を追いきれない。気づいたときには応募が止まっていることがある。',
   },
 ] as const
 
@@ -66,41 +67,78 @@ const PROBLEMS = [
 const SOLUTIONS = [
   {
     n: '一',
-    title: 'AIと話すだけで、自己分析が進む',
-    forWhom: '何から始めればいいか分からない',
-    body: 'チャットで答えていくと、強みと志向が10カテゴリのスコアになります。就活の進み方に合わせて4フェーズで記録するので、自分がどう変わったかも残ります。',
+    title: '授業やアルバイトの経験から、自分の強みを整理する',
+    forWhom: '自己PRに何を書けばいいか分からない',
+    body: 'AIとの対話で、やってきたことを掘り下げます。出てくるのは「協調性がある」のような言葉ではなく、どの経験がどの強みの根拠になるかという並びです。自己PRにそのまま使えます。',
   },
   {
     n: '二',
-    title: 'スコアに合う企業が、根拠つきで出る',
-    forWhom: '求人サイトを眺めて終わってしまう',
-    body: '診断結果と、企業側が求める人物像を突き合わせて候補を出します。なぜ合うのかが見えるので、志望動機にそのまま使えます。',
+    title: '制作課題のコードから、技術の実績を出す',
+    forWhom: '実務経験がないから書くことがない',
+    body: 'GitHub をつなぐと、使ってきた言語とリポジトリから Frontend / Backend / Infrastructure / Database のスキルが出ます。授業や個人制作が、そのまま応募の材料になります。',
   },
   {
     n: '三',
-    title: '面接は何度でも、音声で練習できる',
-    forWhom: '面接の練習相手がいない',
-    body: '論理性・具体性・主体性・コミュニケーション力・積極性の5つの観点で講評します。根拠は実際の発言から引用するので、どこを直すかが分かります。',
+    title: '合う企業が、合う理由つきで出る',
+    forWhom: '求人サイトを眺めて終わってしまう',
+    body: '整理した強みと、企業が求める人物像を突き合わせます。「なぜ合うのか」が文章で付くので、志望動機を書くときの材料になります。',
   },
   {
     n: '四',
-    title: '書類は添削まで、ひと続きで',
-    forWhom: 'ESが書けない',
-    body: '職務経歴書のレビューと、ESの添削・リライト。設問の文字数上限に合わせて整えます。',
+    title: 'ESは、設問の文字数に収まる形まで直す',
+    forWhom: '書いたものが長すぎる・薄い',
+    body: '職務経歴書のレビューと、ESの添削・リライト。設問ごとの文字数上限に合わせて整えます。',
   },
 ] as const
 
 /** 製品の事実だけ。計測していない指標は載せない。 */
+/**
+ * 製品の事実だけ。**計測していない指標は載せない。**
+ * 以前は「4万社から選定」と書いていたが、その件数の根拠がコード上に無かったので外した。
+ * ここに書いてよいのは、実装を読めば確かめられることだけ。
+ */
 const FACTS = [
-  { v: '4万', unit: '社', k: 'から企業を選定' },
-  { v: '10', unit: 'カテゴリ', k: '× 4フェーズでスコア化' },
-  { v: '5', unit: '観点', k: 'で面接を講評' },
+  {
+    v: '5',
+    unit: '観点',
+    k: '論理性・具体性・主体性・コミュニケーション力・積極性で面接を講評',
+  },
+  {
+    v: '4',
+    unit: '分野',
+    k: 'GitHub から Frontend / Backend / Infrastructure / Database のスキルを算出',
+  },
+  {
+    v: '0',
+    unit: '件',
+    k: '実際の発言と照合できない指摘は表示しない',
+  },
+] as const
+
+/**
+ * 専門学校・大学での使われ方。他の就活サービスに置き換えられない部分を書く。
+ * いずれも実装にある挙動（GitHubスキルスコア / 教員の就活状況確認 /
+ * 企業の掲載審査）に対応させること。無い機能を書かない。
+ */
+const SCHOOL_TIES = [
+  {
+    title: '制作課題が実績になる',
+    body: 'GitHub をつなぐと、授業や個人制作で使ってきた言語とリポジトリから技術スキルが出ます。アルバイト以外に書くことがない、という状態になりません。',
+  },
+  {
+    title: '先生が、止まっている人に気づける',
+    body: '先生は受け持ちの学生の就活状況を一覧で見られます。応募が止まっている人、面接が近い人が分かるので、面談の前に声をかけられます。',
+  },
+  {
+    title: '載っている企業は、学校が通したものだけ',
+    body: '企業が求人を出すには学校側の審査を通る必要があります。学校が把握していない求人は学生に表示されません。',
+  },
 ] as const
 
 const ENTRANCES = [
   {
     label: '学生',
-    target: '専門学校で就職活動をしている方',
+    target: '専門学校・大学で就職活動をしている方',
     action: '無料で診断を始める',
     href: '/login',
     primary: true,
@@ -274,7 +312,7 @@ export function LandingContent() {
                     ...NO_MOTION,
                   }}
                 >
-                  専門学校の就職活動に
+                  専門学校・大学の学生のための就活AI
                 </Typography>
 
                 <Typography
@@ -319,8 +357,8 @@ export function LandingContent() {
                     ...NO_MOTION,
                   }}
                 >
-                  AIとの対話で適性を診断し、企業とのマッチング、面接練習、履歴書・ES添削まで。
-                  就職活動をひと続きで進められます。
+                  授業やアルバイト、制作課題の経験から、自己PRに書ける強みを整理します。
+                  面接は音声で何度でも練習でき、直すところが自分の言葉で返ってきます。
                 </Typography>
 
                 <Box
@@ -398,7 +436,7 @@ export function LandingContent() {
         </Box>
 
         {/* ── 課題提起 ──────────────────────────── */}
-        <Section id="issue" label="課題" title="就活は、つまずく場所が決まっています。">
+        <Section id="issue" label="課題" title="就活でつまずくのは、だいたい同じところです。">
           <Box sx={{ borderTop: `2px solid ${LP.ink}` }}>
             {PROBLEMS.map((p, i) => (
               <Box
@@ -438,8 +476,50 @@ export function LandingContent() {
           </Box>
         </Section>
 
+        {/* ── 使ってみる。ここが一番大きい（情報の強弱） ──────── */}
+        <Section
+          id="walkthrough"
+          tinted
+          label="使ってみる"
+          title="面接の前日に、答えが出てこないとき。"
+        >
+          <LandingWalkthrough />
+        </Section>
+
+        {/* ── 専門学校・大学ならでは ───────────────── */}
+        <Section
+          id="school"
+          label="学校との関わり"
+          title="授業も、制作課題も、就職の材料になります。"
+        >
+          <Box sx={{ borderTop: `2px solid ${LP.ink}` }}>
+            {SCHOOL_TIES.map((t, i) => (
+              <Box
+                key={t.title}
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: { xs: '1fr', md: '12rem 1fr' },
+                  gap: { xs: 1, md: 4 },
+                  py: { xs: 3, md: 3.5 },
+                  borderBottom: `1px solid ${LP.rule}`,
+                  ...RISE,
+                  ...delay(i),
+                  ...NO_MOTION,
+                }}
+              >
+                <Typography sx={{ fontSize: 15, fontWeight: 700, lineHeight: 1.7 }}>
+                  {t.title}
+                </Typography>
+                <Typography sx={{ fontSize: 13.5, lineHeight: 2.15, color: LP.muted }}>
+                  {t.body}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+        </Section>
+
         {/* ── 解決策。節は漢数字で送る ────────────────── */}
-        <Section id="solution" tinted label="できること" title="つまずく場所に、ひとつずつ手を当てます。">
+        <Section id="solution" tinted label="できること" title="自己PRが書けないときも、面接で答えがまとまらないときも。">
           <Box sx={{ borderTop: `2px solid ${LP.ink}` }}>
             {SOLUTIONS.map((s, i) => (
               <Box

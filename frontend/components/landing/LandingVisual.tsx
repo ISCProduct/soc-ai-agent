@@ -49,6 +49,22 @@ export function LandingVisual() {
         pl: { md: 3 },
       }}
     >
+      {/* 実データに見えないよう明記する。数値も文面も例。 */}
+      <Box
+        sx={{
+          justifySelf: 'start',
+          fontSize: 10.5,
+          color: LP.muted,
+          border: `1px solid ${LP.rule}`,
+          bgcolor: LP.card,
+          px: 1,
+          py: 0.25,
+          ...NO_MOTION,
+        }}
+      >
+        画面は表示例です
+      </Box>
+
       {/* 1. 対話 */}
       <Box
         sx={{
@@ -185,6 +201,9 @@ export function LandingVisual() {
               </Box>
             </Box>
           ))}
+        </Box>
+        <Box sx={{ mt: 1.5, fontSize: 10, lineHeight: 1.8, color: LP.muted }}>
+          ※ 整理した強みと、企業が求める人物像の一致度です
         </Box>
       </Box>
     </Box>
