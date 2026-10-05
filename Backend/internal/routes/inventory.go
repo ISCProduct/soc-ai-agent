@@ -1,6 +1,7 @@
 package routes
 
 import (
+	companycontrollers "Backend/internal/controllers/company"
 	"cmp"
 	"slices"
 	"strings"
@@ -65,7 +66,16 @@ func Inventory() []Route {
 	SetupScheduleRoutes(api, nil, "", nil, nil)
 	SetupGoogleCalendarRoutes(api, nil, "", nil, nil)
 	SetupApplicationRoutes(api, nil, nil, "", nil, nil)
-	SetupCompanyAuthRoutes(api, nil, nil, nil, nil, nil, nil, nil, "", nil)
+	// company_auth_routes.go は 4 つのコントローラを `!= nil` で囲んでいる。
+	// nil を渡すとそのブロックの 16 本が登録されず、カタログから静かに漏れる。
+	// ゼロ値のポインタは非 nil なのでブロックを通り、ハンドラは値として
+	// 受け取るだけなので中身は呼ばれない。
+	SetupCompanyAuthRoutes(api, nil, nil, nil,
+		&companycontrollers.CompanyPortalApplicationController{},
+		&companycontrollers.CompanyPortalJobController{},
+		&companycontrollers.CompanyPortalProfileController{},
+		&companycontrollers.CompanyPortalSchoolApplicationController{},
+		"", nil)
 	SetupUserRoutes(api, nil, nil, nil, nil, "", nil, nil)
 	SetupCollectiveInsightRoutes(api, nil, "", nil, nil)
 

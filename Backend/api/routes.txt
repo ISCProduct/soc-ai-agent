@@ -1,7 +1,7 @@
 # 実装に登録されている全エンドポイント。
 # 手で編集しない。次のコマンドで生成する:
 #   cd Backend && go test ./internal/routes/ -run TestRouteCatalog -update
-# 合計 237 本
+# 合計 252 本
 GET /api/admin/applications
 PATCH /api/admin/applications/:id/status
 GET /api/admin/audit-logs
@@ -173,8 +173,23 @@ GET /api/company-auth/me
 POST /api/company-auth/refresh
 POST /api/company-auth/reset-password
 POST /api/company-entry
+GET /api/company-portal/applications
+PATCH /api/company-portal/applications/:id/status
 GET /api/company-portal/companies/:id
+GET /api/company-portal/company
+PATCH /api/company-portal/company
+GET /api/company-portal/dashboard
 GET /api/company-portal/industries
+GET /api/company-portal/jobs
+POST /api/company-portal/jobs
+PATCH /api/company-portal/jobs/:id
+POST /api/company-portal/jobs/:id/publish
+GET /api/company-portal/members
+POST /api/company-portal/members
+PATCH /api/company-portal/members/:userID
+GET /api/company-portal/school-applications
+POST /api/company-portal/school-applications
+DELETE /api/company-portal/school-applications/:id
 GET /api/company-portal/students
 GET /api/company-portal/students/:userID
 POST /api/company-portal/students/:userID/tags
