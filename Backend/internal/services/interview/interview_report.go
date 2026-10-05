@@ -83,7 +83,9 @@ func (s *InterviewService) RegenerateReport(userID uint, sessionID uint) (queued
 func (s *InterviewService) StartWorker() {
 	// Redis キュー利用時は asynq worker が処理する。フォールバック用 channel worker は常に起動。
 	s.workerOnce.Do(func() {
-		go s.runWorker()
+		// レポート生成ワーカー。panic で落ちるとレポートが二度と生成されない上に
+		// プロセスごと死ぬ(#1446)。
+		safego.Go(s.runWorker)
 	})
 }
 

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"Backend/internal/safego"
 )
 
 // KeyRateLimiter はキー単位のレート制限インターフェース（#617）。
@@ -35,7 +37,8 @@ type RateLimiter struct {
 // NewRateLimiter は新しいインメモリ RateLimiter を生成する
 func NewRateLimiter(window time.Duration, maxReqs int) *RateLimiter {
 	rl := &RateLimiter{window: window, maxReqs: maxReqs}
-	go rl.cleanupLoop()
+	// 掃除ループが panic するとプロセスごと落ちる。safego 経由にする(#1446)。
+	safego.Go(rl.cleanupLoop)
 	return rl
 }
 
