@@ -15,7 +15,14 @@ type InterviewReport struct {
 	// NULL なら未反映。反映する側が NULL から条件付き UPDATE で奪い合い、
 	// 勝った1つだけがスコアを書く。Redis 障害中に複数タスクで同じセッションの
 	// レポート生成が走っても、移動平均へ二重に反映されない。
-	ScoresAppliedAt *time.Time `gorm:"index"                        json:"scores_applied_at,omitempty"`
+	// 索引は張らない。検索条件は `session_id = ? AND scores_applied_at IS NULL` で、
+	// session_id が主キーなので1行に絞れている。scores_applied_at 単体の索引は
+	// 使われない。
+	//
+	// `gorm:"index"` と書いても索引はできない。このプロジェクトは AutoMigrate を
+	// 使わず、スキーマは Backend/migrations の SQL が唯一の定義（CLAUDE.md）。
+	// タグだけ書くと「索引がある」と誤解させる。
+	ScoresAppliedAt *time.Time `json:"scores_applied_at,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
