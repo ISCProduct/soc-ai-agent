@@ -5,7 +5,8 @@ openapi: 3.0.3
 # これは手で書くファイル。生成しない。
 # 実装に登録されている全エンドポイントの一覧は api/routes.txt（自動生成）にある。
 #
-# routes.txt が 237 本に対し、このファイルはまだ一部しか埋まっていない。
+# routes.txt が 237 本に対し、このファイルは 64 本(27%)まで埋まっている。
+# 残りの大半(117本)は /api/admin/*。
 # 網羅率は `cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths` で出る。
 #
 # ここに書いたパス・メソッドが実装に存在しないと CI が落ちる（inventory_test.go）。
@@ -49,6 +50,18 @@ tags:
   - name: questions
     description: 質問の生成・管理
 
+  - name: interviews
+    description: AI面接のセッション・発話・レポート
+  - name: realtime
+    description: 面接のリアルタイム音声セッション
+  - name: resume
+    description: 職務経歴書のアップロードと添削
+  - name: es
+    description: エントリーシートの添削とリライト（未ログインでも使える）
+  - name: schedule
+    description: 選考スケジュール
+  - name: google-calendar
+    description: Google カレンダー連携
 components:
   securitySchemes:
     userToken:
@@ -220,6 +233,98 @@ components:
         answered_questions: { type: integer }
         evaluated_categories: { type: integer }
         total_categories: { type: integer }
+
+    InterviewSession:
+      type: object
+      description: 面接セッション。モデルではなく専用DTOを返す。
+      required: [id, user_id, status, language, interviewer_gender, estimated_cost_usd, template_version, created_at, updated_at]
+      properties:
+        id: { type: integer }
+        user_id: { type: integer }
+        status: { type: string, description: "作成直後から終了までの状態" }
+        language: { type: string, default: ja }
+        interviewer_gender: { type: string, default: female }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        estimated_cost_usd: { type: number, format: double }
+        template_version: { type: string, default: v1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ScheduleEvent:
+      type: object
+      description: 選考スケジュールイベント。
+      required: [id, user_id, company_name, stage, scheduled_at]
+      properties:
+        id: { type: integer }
+        user_id: { type: integer }
+        company_name: { type: string }
+        stage:
+          type: string
+          enum: [書類選考, 1次面接, 2次面接, 最終面接, 内定, その他]
+        title: { type: string }
+        scheduled_at: { type: string, format: date-time }
+        notes: { type: string }
+        google_calendar_event_id: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    StarBreakdown:
+      type: object
+      description: STAR法の分解結果。
+      properties:
+        situation: { type: string }
+        task: { type: string }
+        action: { type: string }
+        result: { type: string }
+
+    ESRewriteRequest:
+      type: object
+      required: [original_text, question_type]
+      properties:
+        original_text: { type: string }
+        question_type:
+          type: string
+          enum: [志望動機, 自己PR, 学チカ, その他]
+        tech_stack: { type: string, description: 任意。使用技術スタック }
+        company_name: { type: string, description: 任意。RAG が企業情報を参照する }
+        char_limit: { type: integer, nullable: true, description: "設問の文字数上限（#1523）" }
+        char_limit_mode: { type: string }
+
+    ESRewriteResponse:
+      type: object
+      properties:
+        rewritten_text: { type: string }
+        star: { $ref: "#/components/schemas/StarBreakdown" }
+        improved_text_length: { type: integer }
+        char_limit_satisfied: { type: boolean, nullable: true }
+
+    ESReviewRequest:
+      type: object
+      required: [es_text, question_type]
+      properties:
+        es_text: { type: string }
+        question_type: { type: string }
+        company_name: { type: string }
+        char_limit: { type: integer, nullable: true }
+        char_limit_mode: { type: string, description: "未指定は RAG 側の既定（上限なし / within）" }
+
+    ESReviewResponse:
+      type: object
+      properties:
+        improved_text: { type: string }
+        improved_text_length: { type: integer }
+        char_limit_satisfied: { type: boolean, nullable: true }
+        star: { $ref: "#/components/schemas/StarBreakdown" }
+
+    ResumeStatus:
+      type: object
+      description: "履歴書の対応要否（#1030）。リマインダー表示の判定に使う。"
+      required: [has_document, needs_attention]
+      properties:
+        has_document: { type: boolean, description: 一度でもアップロードしているか }
+        latest_score: { type: integer, nullable: true, minimum: 0, maximum: 100, description: 最新レビューのスコア。未生成なら null }
+        needs_attention: { type: boolean, description: 学生に改善を促すべき状態か }
 
 paths:
   # ── auth（認証不要）────────────────────────────────
@@ -649,4 +754,482 @@ paths:
           schema: { type: string }
       responses:
         "200": { description: 質問一覧 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ── interviews ─────────────────────────────────────
+  /api/interviews:
+    get:
+      tags: [interviews]
+      summary: 面接セッション一覧
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: page, schema: { type: integer, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, default: 20 } }
+        - in: query
+          name: all
+          description: "`1` または `true` で全件（既定は自分の進行中のみ）"
+          schema: { type: string }
+      responses:
+        "200":
+          description: 一覧
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items: { $ref: "#/components/schemas/InterviewSession" }
+                  total: { type: integer }
+                  page: { type: integer }
+                  limit: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [interviews]
+      summary: 面接セッションを作る
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                language: { type: string, default: ja }
+                interviewer_gender: { type: string }
+      responses:
+        "200":
+          description: 作成した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InterviewSession" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/trend:
+    get:
+      tags: [interviews]
+      summary: スコア推移
+      description: "`/:id` より先に登録している（Echo のルーターが先に解決するため）。"
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: limit, schema: { type: integer } }
+      responses:
+        "200": { description: 推移 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}:
+    get:
+      tags: [interviews]
+      summary: セッション詳細
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: role, schema: { type: string } }
+      responses:
+        "200": { description: 詳細 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: 存在しない }
+
+  /api/interviews/{id}/start:
+    post:
+      tags: [interviews]
+      summary: 面接を開始する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200":
+          description: 開始した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InterviewSession" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}/finish:
+    post:
+      tags: [interviews]
+      summary: 面接を終了しレポート生成を予約する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 終了した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}/start-turn:
+    post:
+      tags: [interviews]
+      summary: 1ターンを開始する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 開始した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}/turn:
+    post:
+      tags: [interviews]
+      summary: 1ターンの応答を処理する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 次の質問 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}/utterances:
+    post:
+      tags: [interviews]
+      summary: 発話を記録する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 記録した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}/report:
+    get:
+      tags: [interviews]
+      summary: 面接レポートを取得する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: レポート }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: まだ生成されていない }
+
+  /api/interviews/{id}/report/regenerate:
+    post:
+      tags: [interviews]
+      summary: レポートを作り直す
+      description: "生成ジョブが失われたレポートをユーザー操作で回復する経路（#1476）。"
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 再生成を予約した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}/send-report:
+    post:
+      tags: [interviews]
+      summary: レポートをメールで送る
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 送信した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}/phrase-suggestions:
+    get:
+      tags: [interviews]
+      summary: 言い回しの提案を取得する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 提案 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}/upload-video:
+    post:
+      tags: [interviews]
+      summary: 面接動画をアップロードする
+      description: |
+        このエンドポイントだけ本文上限が **512MB**（動画 500MB + multipart のオーバーヘッド）。
+        他は全体設定の 32MB。
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "200": { description: アップロードした }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { description: 512MB を超えた }
+
+  /api/hr/interviews:
+    get:
+      tags: [interviews]
+      summary: 企業オーナー向け面接一覧
+      description: "企業の採用担当が自社の面接を見る（#1083）。`company_id` は必須。"
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: company_id, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: 一覧 }
+        "400": { description: company_id が無い }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  # ── realtime ───────────────────────────────────────
+  /api/realtime/token:
+    post:
+      tags: [realtime]
+      summary: リアルタイム音声セッションの一時トークンを発行する
+      description: |
+        `user_id` を body で受け取るが、`X-User-Token` の値と一致しない場合は拒否する。
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id: { type: integer, description: 省略可。指定する場合はトークンの値と一致させる }
+                interview_id: { type: integer }
+      responses:
+        "200":
+          description: 発行した
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  client_secret: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/realtime/session-info:
+    get:
+      tags: [realtime]
+      summary: リアルタイムセッションの情報を取得する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: セッション情報 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ── resume ─────────────────────────────────────────
+  /api/resume/upload:
+    post:
+      tags: [resume]
+      summary: 職務経歴書をアップロードする
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "200": { description: アップロードした }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { description: 32MB を超えた }
+
+  /api/resume/review:
+    post:
+      tags: [resume]
+      summary: 添削する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 添削結果 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/resume/review/stream:
+    post:
+      tags: [resume]
+      summary: 添削する（ストリーミング）
+      description: Server-Sent Events で逐次返す。
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: SSE ストリーム
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/resume/status:
+    get:
+      tags: [resume]
+      summary: 履歴書の対応要否を取得する
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 対応要否
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResumeStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/resume/annotated:
+    get:
+      tags: [resume]
+      summary: 注釈付きの履歴書を取得する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 注釈付きデータ }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ── es（認証なし。レート制限のみ）────────────────────
+  /api/es/rewrite:
+    post:
+      tags: [es]
+      summary: エントリーシートをリライトする
+      description: |
+        **未ログインでも使える。** 認証は付けず、コスト濫用はレート制限で止める（#1154）。
+        生成は RAG の `/es/review` に一本化してあり、ここでプロンプトは組まない（#1533）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ESRewriteRequest" }
+      responses:
+        "200":
+          description: リライト結果
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ESRewriteResponse" }
+        "400": { description: 本文が不正 }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/es/review:
+    post:
+      tags: [es]
+      summary: エントリーシートを添削する
+      description: "**未ログインでも使える。** 認証は付けず、レート制限のみ（#1154）。"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ESReviewRequest" }
+      responses:
+        "200":
+          description: 添削結果
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ESReviewResponse" }
+        "400": { description: 本文が不正 }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  # ── schedule ───────────────────────────────────────
+  /api/schedule:
+    get:
+      tags: [schedule]
+      summary: 選考スケジュール一覧
+      description: "対象は `X-User-Token` から決まる（#983 で user_id クエリ認証を廃止）。"
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ScheduleEvent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [schedule]
+      summary: 予定を作る
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduleEvent" }
+      responses:
+        "200":
+          description: 作成した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScheduleEvent" }
+        "400": { description: 入力が不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/schedule/{id}:
+    get:
+      tags: [schedule]
+      summary: 予定を取得する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200":
+          description: 予定
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScheduleEvent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 存在しない（他人の予定も 404 で伏せる） }
+    put:
+      tags: [schedule]
+      summary: 予定を更新する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduleEvent" }
+      responses:
+        "200":
+          description: 更新した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScheduleEvent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 存在しない }
+    delete:
+      tags: [schedule]
+      summary: 予定を削除する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 削除した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 存在しない }
+
+  /api/schedule/export/ics:
+    get:
+      tags: [schedule]
+      summary: iCalendar 形式で書き出す
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: ics ファイル
+          content:
+            text/calendar:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ── google-calendar ────────────────────────────────
+  /api/google-calendar/connect:
+    get:
+      tags: [google-calendar]
+      summary: Google カレンダー連携を開始する
+      security: [{ userToken: [] }]
+      responses:
+        "302": { description: Google の認可画面へリダイレクト }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/google-calendar/callback:
+    get:
+      tags: [google-calendar]
+      summary: 連携のコールバック
+      parameters:
+        - { in: query, name: code, schema: { type: string } }
+        - { in: query, name: state, schema: { type: string } }
+      responses:
+        "302": { description: フロントエンドへリダイレクト }
+
+  /api/google-calendar/status:
+    get:
+      tags: [google-calendar]
+      summary: 連携状態を取得する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 連携状態 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/google-calendar/disconnect:
+    delete:
+      tags: [google-calendar]
+      summary: 連携を解除する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 解除した }
         "401": { $ref: "#/components/responses/Unauthorized" }
