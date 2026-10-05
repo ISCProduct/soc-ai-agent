@@ -47,6 +47,8 @@ export default function CompanyPortalJobsPage() {
   const [saving, setSaving] = useState(false)
 
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<JobInput>(EMPTY_FORM)
 
@@ -83,6 +85,7 @@ export default function CompanyPortalJobsPage() {
   const openCreate = () => {
     setEditingId(null)
     setForm(EMPTY_FORM)
+    setDeleteError('')
     setDialogOpen(true)
   }
 
@@ -98,7 +101,25 @@ export default function CompanyPortalJobsPage() {
       work_location: job.work_location,
       remote_option: job.remote_option,
     })
+    setDeleteError('')
     setDialogOpen(true)
+  }
+
+  const remove = async () => {
+    if (editingId === null) return
+    setSaving(true)
+    setDeleteError('')
+    try {
+      await companyJobService.remove(editingId)
+      setConfirmOpen(false)
+      setDialogOpen(false)
+      await load()
+      setError('')
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : '削除できませんでした')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const save = async () => {
@@ -156,7 +177,7 @@ export default function CompanyPortalJobsPage() {
         </Stack>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        公開した求人は学生の企業詳細に表示されます。削除はできません（応募が紐づくため、非公開にしてください）。
+        公開した求人は学生の企業詳細に表示されます。不要な求人は編集から削除できます。
       </Typography>
 
       {error && (
@@ -310,14 +331,45 @@ export default function CompanyPortalJobsPage() {
             </Typography>
           </Stack>
         </DialogContent>
+        <DialogActions sx={{ justifyContent: 'space-between', px: 3, pb: 2 }}>
+          {editingId !== null ? (
+            <Button color="error" disabled={saving} onClick={() => setConfirmOpen(true)}>
+              この求人を削除
+            </Button>
+          ) : (
+            <span />
+          )}
+          <Stack direction="row" spacing={1}>
+            <Button onClick={() => setDialogOpen(false)}>キャンセル</Button>
+            <Button
+              variant="contained"
+              disabled={saving || !form.title.trim()}
+              onClick={() => void save()}
+            >
+              保存
+            </Button>
+          </Stack>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>求人を削除</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            「{form.title.trim() || 'この求人'}」を削除します。学生の企業詳細からも消えます。削除した求人は元に戻せません。
+          </Typography>
+          {deleteError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {deleteError}
+            </Alert>
+          )}
+        </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>キャンセル</Button>
-          <Button
-            variant="contained"
-            disabled={saving || !form.title.trim()}
-            onClick={() => void save()}
-          >
-            保存
+          <Button onClick={() => setConfirmOpen(false)} disabled={saving}>
+            戻る
+          </Button>
+          <Button color="error" variant="contained" disabled={saving} onClick={() => void remove()}>
+            削除する
           </Button>
         </DialogActions>
       </Dialog>
