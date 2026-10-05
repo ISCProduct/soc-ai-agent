@@ -45,7 +45,7 @@ func main() {
 	out := flag.String("out", "", "結果JSONの出力先。未指定なら標準出力のみ")
 	dryRun := flag.Bool("dry-run", false, "APIを呼ばず、音声とmanifestの対応だけ検証する")
 	condition := flag.String("condition", "", "評価する録音条件で絞る（例: noisy）。未指定なら全件")
-	hintsCtx := flag.String("hints", "", "補助語に使う面接コンテキスト `会社名|読み|職種|企業情報`。未指定なら補助語なし")
+	hintsCtx := flag.String("hints", "", "補助語に使う面接コンテキスト `会社名|読み|職種|企業情報`。職種は本番が補助語に使わないため無視される。未指定なら補助語なし")
 	flag.Parse()
 
 	if *manifestPath == "" {
@@ -87,8 +87,11 @@ func main() {
 	// -dry-run でも出すのは、API費用を掛けずに補助語を確認できるようにするため。
 	hints := ""
 	if *hintsCtx != "" {
-		name, reading, position, info := parseHintsContext(*hintsCtx)
-		hints = interview.BuildSTTHints(name, reading, position, info)
+		// 職種は補助語に使わない（#1600）。クライアント直値で DB 由来の対応物が無く、
+		// 本番の BuildSTTHints が受け取らなくなった。ここで渡すと、本番がやらない
+		// 条件で測ることになる。入力の書式は変えない（手順をそのまま使えるように）。
+		name, reading, _, info := parseHintsContext(*hintsCtx)
+		hints = interview.BuildSTTHints(name, reading, info)
 		fmt.Printf("\n補助語: %s\n", hints)
 	}
 
