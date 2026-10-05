@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Alert, Box, Button, Chip, Paper, Stack, Typography } from '@mui/material'
+import { Alert, Box, Button, Paper, Stack, Typography } from '@mui/material'
+import { MarkLabel } from '@/components/company-portal/MarkLabel'
+import { scoutMark } from '@/lib/company/marks'
 import { PageContainer } from '@/components/admin/PageContainer'
 import { PageLoading } from '@/components/common/PageLoading'
 import { companyAuthService } from '@/lib/company/auth'
-import { SCOUT_STATUS_LABEL, companyScoutService, type CompanyScout } from '@/lib/company/scouts'
+import { companyScoutService, type CompanyScout } from '@/lib/company/scouts'
 
 const PAGE_SIZE = 30
 
@@ -51,19 +53,22 @@ export default function CompanyPortalScoutsPage() {
 
   return (
     <PageContainer maxWidth={800}>
-      <Stack direction="row" spacing={1} sx={{ mb: 2 }} flexWrap="wrap">
-        <Button onClick={() => router.push('/company-portal')}>← ダッシュボードへ</Button>
+      <Stack
+        direction="row"
+        alignItems="center"
+        justifyContent="space-between"
+        flexWrap="wrap"
+        useFlexGap
+        spacing={1}
+        sx={{ mb: 1 }}
+      >
+        <Typography variant="h4" component="h1" fontWeight="bold">
+          スカウト
+        </Typography>
         <Button variant="outlined" onClick={() => router.push('/company-portal/scout-templates')}>
-          テンプレート管理
-        </Button>
-        <Button variant="outlined" onClick={() => router.push('/company-portal/students')}>
-          学生を探す
+          テンプレートを編集
         </Button>
       </Stack>
-
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
-        スカウト送信履歴
-      </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         自社から送ったスカウトの状態を確認できます。
       </Typography>
@@ -94,7 +99,7 @@ export default function CompanyPortalScoutsPage() {
                 <Typography fontWeight="bold">
                   {s.student_name ? `${s.student_name}さん` : `学生 #${s.user_id}`}
                 </Typography>
-                <Chip size="small" label={SCOUT_STATUS_LABEL[s.status]} />
+                <MarkLabel {...scoutMark(s.status)} />
               </Stack>
               <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
                 {formatWhen(s.created_at)}

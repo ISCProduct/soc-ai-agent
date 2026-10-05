@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import {
   Alert,
   Button,
-  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -24,6 +23,8 @@ import {
 } from '@mui/material'
 import { PageContainer } from '@/components/admin/PageContainer'
 import { PageLoading } from '@/components/common/PageLoading'
+import { MarkLabel } from '@/components/company-portal/MarkLabel'
+import { jobPublishMark } from '@/lib/company/marks'
 import { companyAuthService } from '@/lib/company/auth'
 import { companyJobService, isPublished, type CompanyJob, type JobInput } from '@/lib/company/jobs'
 
@@ -161,20 +162,23 @@ export default function CompanyPortalJobsPage() {
 
   return (
     <PageContainer maxWidth={1080}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-        <Typography variant="h4" fontWeight="bold">
-          求人管理
+      <Stack
+        direction="row"
+        alignItems="center"
+        justifyContent="space-between"
+        flexWrap="wrap"
+        useFlexGap
+        spacing={1}
+        sx={{ mb: 1 }}
+      >
+        <Typography variant="h4" component="h1" fontWeight="bold">
+          求人
         </Typography>
-        <Stack direction="row" spacing={1}>
-          {isOwner && (
-            <Button variant="contained" onClick={openCreate}>
-              求人を作る
-            </Button>
-          )}
-          <Button variant="outlined" onClick={() => router.push('/company-portal')}>
-            ダッシュボードへ
+        {isOwner && (
+          <Button variant="contained" onClick={openCreate}>
+            求人を作る
           </Button>
-        </Stack>
+        )}
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         公開した求人は学生の企業詳細に表示されます。不要な求人は編集から削除できます。
@@ -196,7 +200,7 @@ export default function CompanyPortalJobsPage() {
       {jobs.length === 0 ? (
         <Paper
           elevation={0}
-          sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px', p: 4 }}
+          sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '4px', p: 4 }}
         >
           <Typography variant="h6" gutterBottom>
             求人がまだありません
@@ -217,7 +221,7 @@ export default function CompanyPortalJobsPage() {
       ) : (
         <Paper
           elevation={0}
-          sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px', overflowX: 'auto' }}
+          sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '4px', overflowX: 'auto' }}
         >
           <Table size="small">
             <TableHead>
@@ -240,11 +244,7 @@ export default function CompanyPortalJobsPage() {
                       : '—'}
                   </TableCell>
                   <TableCell>
-                    <Chip
-                      size="small"
-                      color={isPublished(job) ? 'success' : 'default'}
-                      label={isPublished(job) ? '公開中' : '下書き'}
-                    />
+                    <MarkLabel {...jobPublishMark(isPublished(job))} />
                   </TableCell>
                   {isOwner && (
                     <TableCell>

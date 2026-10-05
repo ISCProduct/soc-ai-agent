@@ -122,21 +122,9 @@ export function StudentSearchContent() {
 
   return (
     <PageContainer maxWidth={1080}>
-      <Stack
-        direction="row"
-        alignItems="center"
-        justifyContent="space-between"
-        flexWrap="wrap"
-        useFlexGap
-        sx={{ mb: 1 }}
-      >
-        <Typography variant="h4" fontWeight="bold">
-          学生を探す
-        </Typography>
-        <Button variant="outlined" onClick={() => router.push('/company-portal')}>
-          ダッシュボードへ
-        </Button>
-      </Stack>
+      <Typography variant="h4" component="h1" fontWeight="bold" sx={{ mb: 1 }}>
+        学生を探す
+      </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         公開に同意した学生のみが表示されます。
       </Typography>
@@ -145,7 +133,7 @@ export function StudentSearchContent() {
         component="form"
         onSubmit={onSubmit}
         elevation={0}
-        sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px', mb: 3 }}
+        sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '4px', mb: 3 }}
       >
         <CardContent>
           <TextField
@@ -237,7 +225,7 @@ export function StudentSearchContent() {
                   sx={{
                     border: '1px solid',
                     borderColor: 'divider',
-                    borderRadius: '10px',
+                    borderRadius: '4px',
                     cursor: 'pointer',
                   }}
                   onClick={() => router.push(`/company-portal/students/${student.user_id}`)}

@@ -6,12 +6,7 @@ import {
   Alert,
   Box,
   Button,
-  Chip,
-  FormControl,
-  InputLabel,
-  MenuItem,
   Paper,
-  Select,
   Stack,
   Table,
   TableBody,
@@ -22,14 +17,16 @@ import {
 } from '@mui/material'
 import { PageContainer } from '@/components/admin/PageContainer'
 import { PageLoading } from '@/components/common/PageLoading'
+import { MarkLabel } from '@/components/company-portal/MarkLabel'
+import { PipelineBand, pipelineTotal } from '@/components/company-portal/PipelineBand'
 import { companyAuthService } from '@/lib/company/auth'
 import {
   ALLOWED_TRANSITIONS,
-  APPLICATION_STATUS_LABELS,
   companyApplicationService,
   statusLabel,
   type ApplicationListItem,
 } from '@/lib/company/applications'
+import { applicationMark } from '@/lib/company/marks'
 
 const PAGE_SIZE = 30
 
@@ -48,8 +45,18 @@ export default function CompanyPortalApplicationsPage() {
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
   const [status, setStatus] = useState('')
+  const [counts, setCounts] = useState<Record<string, number>>({})
   const [error, setError] = useState('')
   const [updatingId, setUpdatingId] = useState<number | null>(null)
+
+  const loadCounts = useCallback(async () => {
+    try {
+      const dashboard = await companyApplicationService.fetchDashboard()
+      setCounts(dashboard.status_counts ?? {})
+    } catch {
+      // 帯が取れなくても一覧は使える。
+    }
+  }, [])
 
   const load = useCallback(async (nextOffset: number, nextStatus: string) => {
     try {
@@ -72,26 +79,28 @@ export default function CompanyPortalApplicationsPage() {
       router.replace('/company-portal/sign-in')
       return
     }
+    const initial = new URLSearchParams(window.location.search).get('status') ?? ''
+    setStatus(initial)
     companyAuthService
       .fetchMe()
       .then((me) => {
         // 選考ステータスの変更は owner のみ。サーバー側でも弾くが、
         // 操作できないものを見せない。
         setIsOwner(me.role === 'owner')
-        return load(0, '')
+        return Promise.all([load(0, initial), loadCounts()])
       })
       .catch(() => {
         companyAuthService.logout()
         router.replace('/company-portal/sign-in')
       })
       .finally(() => setLoading(false))
-  }, [router, load])
+  }, [router, load, loadCounts])
 
   const onChangeStatus = async (id: number, next: string) => {
     setUpdatingId(id)
     try {
       await companyApplicationService.updateStatus(id, next)
-      await load(offset, status)
+      await Promise.all([load(offset, status), loadCounts()])
       setError('')
     } catch (e) {
       setError(e instanceof Error ? e.message : '更新できませんでした')
@@ -106,16 +115,11 @@ export default function CompanyPortalApplicationsPage() {
 
   return (
     <PageContainer maxWidth={1080}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-        <Typography variant="h4" fontWeight="bold">
-          応募者
-        </Typography>
-        <Button variant="outlined" onClick={() => router.push('/company-portal')}>
-          ダッシュボードへ
-        </Button>
-      </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        自社宛ての応募を確認し、選考ステータスを更新できます。
+      <Typography variant="h4" component="h1" fontWeight="bold" sx={{ mb: 1 }}>
+        応募者
+      </Typography>
+      <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+        段階を選ぶと、その状態で止まっている応募だけを表示します。
       </Typography>
 
       {error && (
@@ -124,32 +128,24 @@ export default function CompanyPortalApplicationsPage() {
         </Alert>
       )}
 
-      <FormControl size="small" sx={{ minWidth: 200, mb: 2 }}>
-        <InputLabel id="status-filter-label">ステータス</InputLabel>
-        <Select
-          labelId="status-filter-label"
-          label="ステータス"
-          value={status}
-          onChange={(e) => {
-            const next = e.target.value
+      {(pipelineTotal(counts) > 0 || status) && (
+        <PipelineBand
+          counts={counts}
+          selected={status}
+          onSelect={(next) => {
             setStatus(next)
             setOffset(0)
             void load(0, next)
           }}
-        >
-          <MenuItem value="">すべて</MenuItem>
-          {Object.entries(APPLICATION_STATUS_LABELS).map(([value, label]) => (
-            <MenuItem key={value} value={value}>
-              {label}
-            </MenuItem>
-          ))}
-        </Select>
-      </FormControl>
+        />
+      )}
 
-      {items.length === 0 ? (
+      {items.length === 0 && status ? (
+        <Typography>この段階の応募はありません。別の段階を選ぶと一覧が切り替わります。</Typography>
+      ) : items.length === 0 ? (
         <Paper
           elevation={0}
-          sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px', p: 4 }}
+          sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '4px', p: 4 }}
         >
           <Typography variant="h6" gutterBottom>
             応募はまだありません
@@ -169,7 +165,7 @@ export default function CompanyPortalApplicationsPage() {
       ) : (
         <Paper
           elevation={0}
-          sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px', overflowX: 'auto' }}
+          sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '4px', overflowX: 'auto' }}
         >
           <Table size="small">
             <TableHead>
@@ -201,7 +197,7 @@ export default function CompanyPortalApplicationsPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Chip size="small" label={statusLabel(item.status)} />
+                      <MarkLabel {...applicationMark(item.status)} />
                     </TableCell>
                     <TableCell>{formatDate(item.applied_at)}</TableCell>
                     <TableCell>{formatDate(item.status_updated_at)}</TableCell>

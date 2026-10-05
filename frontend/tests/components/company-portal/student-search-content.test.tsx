@@ -1,8 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from '@testing-library/react'
-import { useRouter } from 'next/navigation'
+import { render, screen } from '@testing-library/react'
 import { StudentSearchContent } from '@/components/company-portal/StudentSearchContent'
 import { companyStudentService } from '@/lib/company/students'
 
@@ -37,12 +36,10 @@ describe('StudentSearchContent', () => {
     }) as unknown as typeof fetch
   })
 
-  it('ダッシュボードへ戻れる', async () => {
+  it('学生を探す見出しを出す', async () => {
     render(<StudentSearchContent />)
 
     expect(await screen.findByRole('heading', { name: '学生を探す' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'ダッシュボードへ' }))
-
-    expect(useRouter().push).toHaveBeenCalledWith('/company-portal')
+    expect(screen.queryByRole('button', { name: 'ダッシュボードへ' })).not.toBeInTheDocument()
   })
 })

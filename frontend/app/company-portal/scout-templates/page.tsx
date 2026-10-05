@@ -76,10 +76,7 @@ export default function CompanyPortalScoutTemplatesPage() {
 
   return (
     <PageContainer maxWidth={800}>
-      <Button sx={{ mb: 2 }} onClick={() => router.push('/company-portal')}>
-        ← ダッシュボードへ
-      </Button>
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
+      <Typography variant="h4" component="h1" fontWeight="bold" gutterBottom>
         スカウトテンプレート
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
