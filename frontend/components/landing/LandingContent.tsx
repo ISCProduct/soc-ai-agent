@@ -1,5 +1,17 @@
 import { Box, Button, Container, Typography } from '@mui/material'
+import {
+  ArrowRight,
+  Building2,
+  ClipboardCheck,
+  GraduationCap,
+  Mic,
+  Search,
+  Sparkles,
+  UserRound,
+} from 'lucide-react'
+import { LandingHeader } from './LandingHeader'
 import { LandingVisual } from './LandingVisual'
+import { LandingFooter } from './LandingFooter'
 import { LP, RISE, delay } from './tokens'
 
 /**
@@ -65,24 +77,28 @@ const PROBLEMS = [
 const SOLUTIONS = [
   {
     n: '01',
+    icon: Sparkles,
     title: 'AIと話すだけで、自己分析が進む',
     forWhom: '何から始めればいいか分からない',
     body: 'チャットで答えていくと、強みと志向が10カテゴリのスコアになります。就活の進み方に合わせて4フェーズで記録するので、自分がどう変わったかも残ります。',
   },
   {
     n: '02',
+    icon: Search,
     title: 'スコアに合う企業が、根拠つきで出る',
     forWhom: '求人サイトを眺めて終わってしまう',
     body: '診断結果と、企業側が求める人物像を突き合わせて候補を出します。なぜ合うのかが見えるので、志望動機にそのまま使えます。',
   },
   {
     n: '03',
+    icon: Mic,
     title: '面接は何度でも、音声で練習できる',
     forWhom: '面接の練習相手がいない',
     body: '論理性・具体性・主体性・コミュニケーション力・積極性の5つの観点で講評します。根拠は実際の発言から引用するので、どこを直すかが分かります。',
   },
   {
     n: '04',
+    icon: ClipboardCheck,
     title: '書類は添削まで、ひと続きで',
     forWhom: 'ESが書けない',
     body: '職務経歴書のレビューと、ESの添削・リライト。設問の文字数上限に合わせて整えます。',
@@ -100,6 +116,7 @@ const FACTS = [
 const ENTRANCES = [
   {
     label: '学生',
+    icon: UserRound,
     target: '専門学校で就職活動をしている方',
     action: '無料で診断を始める',
     href: '/login',
@@ -107,6 +124,7 @@ const ENTRANCES = [
   },
   {
     label: '企業',
+    icon: Building2,
     target: '学生の採用を検討している企業の採用担当者',
     action: '企業ポータルへ',
     href: '/company-portal/sign-in',
@@ -114,6 +132,7 @@ const ENTRANCES = [
   },
   {
     label: '学校・教員',
+    icon: GraduationCap,
     target: '導入校の先生・就職課の方',
     action: '管理画面へ',
     href: '/admin',
@@ -210,7 +229,9 @@ const ctaSx = (variant: 'onDark' | 'onLight') => {
 
 export function LandingContent() {
   return (
-    <Box component="main" sx={{ bgcolor: LP.paper, color: LP.ink }}>
+    <Box sx={{ bgcolor: LP.paper, color: LP.ink }}>
+      <LandingHeader />
+      <Box component="main" id="top">
       {/* ── ファーストビュー（濃色。大胆さはここに集める） ───────── */}
       <Box sx={{ position: 'relative', bgcolor: LP.ink, color: LP.paper, overflow: 'hidden' }}>
         {/* 奥行きのための光。面で塗らず、滲みで出す。 */}
@@ -298,11 +319,18 @@ export function LandingContent() {
                   ...delay(3),
                 }}
               >
-                <Button href="/login" disableElevation variant="contained" sx={ctaSx('onDark')}>
+                <Button
+                  href="/login"
+                  disableElevation
+                  variant="contained"
+                  endIcon={<ArrowRight size={18} strokeWidth={2.4} />}
+                  sx={ctaSx('onDark')}
+                >
                   無料で診断を始める
                 </Button>
                 <Button
                   href="#entrances"
+                  endIcon={<ArrowRight size={16} strokeWidth={2.4} />}
                   sx={{
                     fontSize: 15,
                     fontWeight: 700,
@@ -312,7 +340,7 @@ export function LandingContent() {
                     py: 1.5,
                   }}
                 >
-                  企業・学校の方はこちら →
+                  企業・学校の方はこちら
                 </Button>
               </Box>
 
@@ -365,7 +393,7 @@ export function LandingContent() {
       </Box>
 
       {/* ── 課題提起 ─────────────────────────────── */}
-      <Container maxWidth="lg" sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 8, md: 14 } }}>
+      <Container id="issue" maxWidth="lg" sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 8, md: 14 } }}>
         <SectionHead label="ISSUE" title="就活は、つまずく場所が決まっています。" />
         <Box
           sx={{
@@ -422,7 +450,7 @@ export function LandingContent() {
       </Container>
 
       {/* ── 解決策（薄青。番号を大きく立てる） ─────────────── */}
-      <Box sx={{ bgcolor: LP.tint, borderTop: `1px solid ${LP.rule}` }}>
+      <Box id="solution" sx={{ bgcolor: LP.tint, borderTop: `1px solid ${LP.rule}` }}>
         <Container maxWidth="lg" sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 8, md: 14 } }}>
           <SectionHead label="SOLUTION" title="つまずく場所に、ひとつずつ手を当てます。" />
           <Box sx={{ display: 'grid', gap: { xs: 2.5, md: 3 } }}>
@@ -452,19 +480,33 @@ export function LandingContent() {
                   },
                 }}
               >
-                <Typography
-                  aria-hidden
-                  sx={{
-                    fontSize: { xs: 34, md: 46 },
-                    fontWeight: 700,
-                    lineHeight: 0.95,
-                    color: LP.accent,
-                    letterSpacing: '-0.03em',
-                    fontVariantNumeric: 'tabular-nums',
-                  }}
-                >
-                  {s.n}
-                </Typography>
+                <Box aria-hidden sx={{ display: 'grid', gap: 1.5, justifyItems: 'start' }}>
+                  <Box
+                    sx={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: '11px',
+                      display: 'grid',
+                      placeItems: 'center',
+                      color: LP.primary,
+                      bgcolor: LP.tint,
+                    }}
+                  >
+                    <s.icon size={21} strokeWidth={2} />
+                  </Box>
+                  <Typography
+                    sx={{
+                      fontSize: { xs: 26, md: 32 },
+                      fontWeight: 700,
+                      lineHeight: 0.95,
+                      color: LP.accent,
+                      letterSpacing: '-0.03em',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {s.n}
+                  </Typography>
+                </Box>
                 <Box>
                   <Typography
                     component="h3"
@@ -555,6 +597,22 @@ export function LandingContent() {
                     おすすめ
                   </Typography>
                 )}
+                <Box
+                  aria-hidden
+                  sx={{
+                    width: 46,
+                    height: 46,
+                    borderRadius: '12px',
+                    display: 'grid',
+                    placeItems: 'center',
+                    mb: 0.5,
+                    ...(e.primary
+                      ? { bgcolor: 'rgba(255,255,255,.12)', color: LP.accent }
+                      : { bgcolor: LP.tint, color: LP.primary }),
+                  }}
+                >
+                  <e.icon size={22} strokeWidth={2} />
+                </Box>
                 <Typography component="h3" sx={{ fontSize: 22, fontWeight: 700 }}>
                   {e.label}
                 </Typography>
@@ -592,7 +650,7 @@ export function LandingContent() {
       </Box>
 
       {/* ── FAQ ────────────────────────────────── */}
-      <Box sx={{ bgcolor: LP.tint, borderTop: `1px solid ${LP.rule}` }}>
+      <Box id="faq" sx={{ bgcolor: LP.tint, borderTop: `1px solid ${LP.rule}` }}>
         <Container maxWidth="lg" sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 8, md: 14 } }}>
           <SectionHead label="FAQ" title="よくあるご質問" />
           {/* 読み幅は絞るが、左端は他セクションと揃える。Container を細くすると
@@ -674,32 +732,8 @@ export function LandingContent() {
         </Container>
       </Box>
 
-      <Box component="footer" sx={{ bgcolor: LP.ink, borderTop: '1px solid rgba(255,255,255,.1)' }}>
-        <Container
-          maxWidth="lg"
-          sx={{
-            px: { xs: 2.5, md: 4 },
-            py: 3.5,
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 3,
-            alignItems: 'baseline',
-          }}
-        >
-          <Typography sx={{ fontSize: 13, color: 'rgba(255,255,255,.55)' }}>© 就活AI</Typography>
-          <Typography
-            component="a"
-            href="/privacy"
-            sx={{
-              fontSize: 13,
-              color: 'rgba(255,255,255,.80)',
-              textUnderlineOffset: '3px',
-            }}
-          >
-            プライバシーポリシー
-          </Typography>
-        </Container>
       </Box>
+      <LandingFooter />
     </Box>
   )
 }
