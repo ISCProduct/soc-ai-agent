@@ -18,7 +18,7 @@
 2. [開発の流れで使う順番](#2-開発の流れで使う順番)
 3. [各コマンド](#3-各コマンド)
 4. [書き方のルール](#4-書き方のルール)
-5. [既知の不整合](#5-既知の不整合)
+5. [優先順位の落とし穴](#5-優先順位の落とし穴)
 6. [新しく追加する](#6-新しく追加する)
 
 ---
@@ -179,7 +179,9 @@ PR を出す前に通すと、CI で落ちる前に規約違反を拾えます�
 
 ブランチ名は `feature/issue-<番号>`。本文に `Closes #<番号>` を入れて Issue と自動で紐付けます。タイトルは `Resolve #<番号>: <要約>`。
 
-> **⚠ そのまま実行しないでください。** コマンド本体が `--base main` を指定しています。`main` への push は**本番（ECS on Fargate）への自動デプロイ**を引きます。本来のブランチフローは `feature/* → develop → release → main` なので、宛先は `develop` です。詳細は[既知の不整合](#5-既知の不整合)。
+> **宛先は `develop` です。** 以前は `--base main` が指定されており、`main` への push は
+> **本番（ECS on Fargate）への自動デプロイ**を引くため、develop と release のレビューゲートを
+> 飛ばす状態でした。修正済みです。差分の基点も `origin/develop...HEAD` になっています。
 
 ### `/code-review` ／ `/code-review-local`
 
@@ -291,54 +293,63 @@ description: 現在のブランチの変更をマージ前にセルフチェッ�
 
 ---
 
-## 5. 既知の不整合
+## 5. 優先順位の落とし穴
 
-現状のコマンド群には食い違いがあります。**使う前に把握しておいてください。**
+### 🔴 `~/.claude/commands/` がリポジトリ側を上書きする
 
-### 🔴 `/pr` の宛先が `main` になっている
+同じ名前のコマンドが両方にあると、**ユーザーレベルが勝ちます。**
 
-`pr.md` が `--base main` と `git diff main...HEAD` を指定しています。`selfcheck.prompt.md` も `git diff main...HEAD` です。
+```
+~/.claude/commands/issue.md       ← こちらが使われる
+.claude/commands/issue.md         ← 無視される
+```
+
+実際に `/issue` を叩くと、リポジトリ側（PRD / DesignDoc / 仕様書の3点セット）ではなく
+ユーザーレベル側（PRD / DesignDoc の2点）が動いていました。
+リポジトリ側を直してもチームに配られない人がいるので、**同名の個人用コマンドは消すか、
+別名にする**のが安全です。
+
+確認方法:
 
 ```bash
-gh pr create ... --base main      # ← pr.md の記述
+ls ~/.claude/commands/ .claude/commands/
 ```
 
-`main` への push は**本番（ECS on Fargate）への自動デプロイ**を引きます（`deployment.yml`）。ブランチフローは `feature/* → develop → release → main` で、`develop` と `release` のレビューゲートを飛ばすことになります。
+### 🟡 `.github/prompts/` に同じ内容のコピーがある
 
-テスト自体は `main` 宛ての PR でも走ります（`test.yml` の `pull_request.branches` に `main` が含まれる）ので、CI が無いわけではありません。問題は**宛先**です。
+`.github/prompts/*.prompt.md` は VS Code Copilot のプロンプトファイル用です。
+`implement` / `issue` / `pr` は `.claude/commands/` と**内容が重複**しています。
 
-`/pr` を使うときは宛先を `develop` に読み替えるか、`gh pr create --base develop` を自分で実行してください。
+| ファイル | 使う側 |
+|---|---|
+| `.github/prompts/selfcheck.prompt.md` | **両方**（`.claude/commands/selfcheck.md` が `@` で読む） |
+| `.github/prompts/{implement,issue,pr}.prompt.md` | Copilot のみ |
 
-### 🟡 `/requirements` と `/design` の frontmatter が効いていない
+`/pr` の宛先を直すときは**両方**直す必要があります（実際に `.github/prompts/pr.prompt.md`
+側に `--base main` が残っていました）。片方だけ直すと、Copilot 利用者には古い挙動が残ります。
 
-両ファイルは JSON ブロックで始まっています。
+### 直したもの
 
-```
-{
-  "name": "spec-requirements",
-  "description": "要件抽出＋ユーザーストーリー生成",
-  "argument_hint": "機能名、ターゲットユーザー、目的、制約を入力"
-}
----
-```
+以前ここに挙げていた不整合は解消しました。
 
-1行目が `---` ではないため、これは frontmatter ではなく**プロンプト本文の一部**として扱われます。結果:
+| 内容 | 対応 |
+|---|---|
+| `/pr` の宛先が `main`（本番自動デプロイを引く） | `--base develop` に変更。冒頭に注意を明記 |
+| `/pr` `/selfcheck` の差分基点が `main` | `origin/develop...HEAD` に変更 |
+| `/requirements` `/design` の frontmatter が JSON で効いていない | YAML に修正。`/help` に説明が出るようになった |
+| `{{number}}` が展開されない | `$1` に修正（`implement` / `pr` / `selfcheck`） |
+| `/code-review` 系に `description` が無い | 追加 |
+| `/issue` が GitHub Issue を直接起票していた | **Backlog 起点**に変更 |
 
-- `description` が `/help` に出ない
-- 宣言されている `spec-requirements` / `spec-design` という名前は効かない。実際の名前は **`/requirements` と `/design`**（ファイル名）
-- `argument_hint` はキー名も違う（正しくは `argument-hint`）
+### `/issue` の起票先は Backlog
 
-`SRE.md` / `selfcheck.md` と同じ YAML 形式に直せば解消します。
+Backlog 課題を作ると、`backlog-to-github-issue.yml` が 15分ごとのポーリングで
+GitHub Issue を作ります（タイトルは `[SOCAIAGENT-N] ...`）。
 
-### 🟡 `{{number}}` が展開されない
+`gh issue create` で直接作らないでください。両方から作ると課題が二重にできます。
+`SOCAIAGENT-N` は Backlog 作成時に即座に得られるので、Notion の `Backlogキー` には
+それをそのまま入れます。
 
-`implement.md` `pr.md` `issue.md` が `{{number}}` `{{title}}` などを使っています。Claude Code の置換対象ではないため、文字列のまま残ります。`$1` に置き換えるのが正しい形です。
-
-### 🟡 `/issue` と Backlog 起点運用の衝突
-
-`/issue` は GitHub Issue を直接起票します。一方で `github-issue-to-backlog.yml` による GitHub → Backlog 同期があり、場面によっては Backlog 起点で運用しています。どちらを正とするかはチームで決めてから使ってください。
-
----
 
 ## 6. 新しく追加する
 

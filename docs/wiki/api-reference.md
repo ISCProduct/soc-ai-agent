@@ -12,7 +12,7 @@ API の情報は役割で分けてあります。探しているものに応じ�
 
 Swagger UI で読む場合は `make api-docs`（http://localhost:8081 ）。
 
-OpenAPI はまだ全体を覆っていません。網羅率は次で確認できます。
+OpenAPI はまだ全体を覆っていません（現在 114 / 237 本）。網羅率は次で確認できます。
 
 ```bash
 cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths

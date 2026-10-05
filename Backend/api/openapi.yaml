@@ -5,7 +5,8 @@ openapi: 3.0.3
 # これは手で書くファイル。生成しない。
 # 実装に登録されている全エンドポイントの一覧は api/routes.txt（自動生成）にある。
 #
-# routes.txt が 237 本に対し、このファイルはまだ一部しか埋まっていない。
+# routes.txt が 237 本に対し、このファイルは 114 本(48%)まで埋まっている。
+# 未記載の大半は /api/admin/* の残り(学校・組織・分析系)。
 # 網羅率は `cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths` で出る。
 #
 # ここに書いたパス・メソッドが実装に存在しないと CI が落ちる（inventory_test.go）。
@@ -49,6 +50,24 @@ tags:
   - name: questions
     description: 質問の生成・管理
 
+  - name: interviews
+    description: AI面接のセッション・発話・レポート
+  - name: realtime
+    description: 面接のリアルタイム音声セッション
+  - name: resume
+    description: 職務経歴書のアップロードと添削
+  - name: es
+    description: エントリーシートの添削とリライト（未ログインでも使える）
+  - name: schedule
+    description: 選考スケジュール
+  - name: google-calendar
+    description: Google カレンダー連携
+  - name: admin-companies
+    description: 管理画面の企業カタログ・求人・面接質問
+  - name: admin-crawl
+    description: 管理画面のクロールとスクレイパ
+  - name: admin-vector
+    description: 管理画面のベクトルストア
 components:
   securitySchemes:
     userToken:
@@ -88,6 +107,13 @@ components:
           example:
             message: "Too Many Requests: お試し回数の上限に達しました。しばらく待ってから再試行してください。"
 
+    PlatformAdminOnly:
+      description: |
+        **システム管理者専用。** 担当校を持つ教員・学園側管理者は 403。
+        `EchoRequirePlatformAdmin` が担当校の有無で判定する。
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
   schemas:
     Error:
       type: object
@@ -221,6 +247,147 @@ components:
         evaluated_categories: { type: integer }
         total_categories: { type: integer }
 
+    InterviewSession:
+      type: object
+      description: 面接セッション。モデルではなく専用DTOを返す。
+      required: [id, user_id, status, language, interviewer_gender, estimated_cost_usd, template_version, created_at, updated_at]
+      properties:
+        id: { type: integer }
+        user_id: { type: integer }
+        status: { type: string, description: "作成直後から終了までの状態" }
+        language: { type: string, default: ja }
+        interviewer_gender: { type: string, default: female }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        estimated_cost_usd: { type: number, format: double }
+        template_version: { type: string, default: v1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ScheduleEvent:
+      type: object
+      description: 選考スケジュールイベント。
+      required: [id, user_id, company_name, stage, scheduled_at]
+      properties:
+        id: { type: integer }
+        user_id: { type: integer }
+        company_name: { type: string }
+        stage:
+          type: string
+          enum: [書類選考, 1次面接, 2次面接, 最終面接, 内定, その他]
+        title: { type: string }
+        scheduled_at: { type: string, format: date-time }
+        notes: { type: string }
+        google_calendar_event_id: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    StarBreakdown:
+      type: object
+      description: STAR法の分解結果。
+      properties:
+        situation: { type: string }
+        task: { type: string }
+        action: { type: string }
+        result: { type: string }
+
+    ESRewriteRequest:
+      type: object
+      required: [original_text, question_type]
+      properties:
+        original_text: { type: string }
+        question_type:
+          type: string
+          enum: [志望動機, 自己PR, 学チカ, その他]
+        tech_stack: { type: string, description: 任意。使用技術スタック }
+        company_name: { type: string, description: 任意。RAG が企業情報を参照する }
+        char_limit: { type: integer, nullable: true, description: "設問の文字数上限（#1523）" }
+        char_limit_mode: { type: string }
+
+    ESRewriteResponse:
+      type: object
+      properties:
+        rewritten_text: { type: string }
+        star: { $ref: "#/components/schemas/StarBreakdown" }
+        improved_text_length: { type: integer }
+        char_limit_satisfied: { type: boolean, nullable: true }
+
+    ESReviewRequest:
+      type: object
+      required: [es_text, question_type]
+      properties:
+        es_text: { type: string }
+        question_type: { type: string }
+        company_name: { type: string }
+        char_limit: { type: integer, nullable: true }
+        char_limit_mode: { type: string, description: "未指定は RAG 側の既定（上限なし / within）" }
+
+    ESReviewResponse:
+      type: object
+      properties:
+        improved_text: { type: string }
+        improved_text_length: { type: integer }
+        char_limit_satisfied: { type: boolean, nullable: true }
+        star: { $ref: "#/components/schemas/StarBreakdown" }
+
+    ResumeStatus:
+      type: object
+      description: "履歴書の対応要否（#1030）。リマインダー表示の判定に使う。"
+      required: [has_document, needs_attention]
+      properties:
+        has_document: { type: boolean, description: 一度でもアップロードしているか }
+        latest_score: { type: integer, nullable: true, minimum: 0, maximum: 100, description: 最新レビューのスコア。未生成なら null }
+        needs_attention: { type: boolean, description: 学生に改善を促すべき状態か }
+
+    Company:
+      type: object
+      description: |
+        企業。`models/company.go` の GORM モデルをそのまま返す。
+        企業カタログは全テナント共有で、学校ごとの承認は別テーブルで管理する。
+      required: [id, name]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        name_reading: { type: string, description: 企業名の読み仮名 }
+        description: { type: string }
+        industry: { type: string }
+        employee_count: { type: integer }
+        employee_count_basis: { type: string, enum: [consolidated, standalone] }
+        founded_year: { type: integer }
+        location: { type: string }
+        website_url: { type: string }
+        logo_url: { type: string }
+        corporate_number: { type: string, maxLength: 13, description: 法人番号 }
+        source_type: { type: string, enum: [official, job_site, manual, scrape, web_search] }
+        source_url: { type: string }
+        source_fetched_at: { type: string, format: date-time }
+        is_provisional: { type: boolean, default: true }
+        is_guest_entry: { type: boolean, default: false }
+        data_status: { type: string, enum: [draft, published], default: draft }
+        gbiz_last_synced_at: { type: string, format: date-time }
+        gbiz_sync_status: { type: string, enum: [success, failed] }
+        gbiz_sync_message: { type: string }
+        info_fetched_at: { type: string, format: date-time }
+        jobs_fetched_at: { type: string, format: date-time }
+        tech_fetched_at: { type: string, format: date-time }
+        relations_fetched_at: { type: string, format: date-time }
+        last_model_used: { type: string }
+        last_fetch_confidence: { type: string, enum: [high, medium, low] }
+        culture: { type: string }
+        work_style: { type: string, description: "リモート / ハイブリッド / オフィス" }
+        welfare_details: { type: string }
+        tech_stack: { type: string, description: JSON文字列。言語・フレームワーク }
+        infra_stack: { type: string, description: JSON文字列。AWS/GCP/Azure 等 }
+        cicd_tools: { type: string, description: JSON文字列 }
+        development_style: { type: string, description: スクラム / ウォーターフォール等 }
+        main_business: { type: string }
+        average_age: { type: number, format: double }
+        female_ratio: { type: number, format: double, description: 女性比率（%） }
+        is_active: { type: boolean, default: true }
+        is_verified: { type: boolean, default: false }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        deleted_at: { type: string, format: date-time }
 paths:
   # ── auth（認証不要）────────────────────────────────
   /api/auth/request-registration:
@@ -650,3 +817,1326 @@ paths:
       responses:
         "200": { description: 質問一覧 }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ── interviews ─────────────────────────────────────
+  /api/interviews:
+    get:
+      tags: [interviews]
+      summary: 面接セッション一覧
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: page, schema: { type: integer, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, default: 20 } }
+        - in: query
+          name: all
+          description: "`1` または `true` で全件（既定は自分の進行中のみ）"
+          schema: { type: string }
+      responses:
+        "200":
+          description: 一覧
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items: { $ref: "#/components/schemas/InterviewSession" }
+                  total: { type: integer }
+                  page: { type: integer }
+                  limit: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [interviews]
+      summary: 面接セッションを作る
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                language: { type: string, default: ja }
+                interviewer_gender: { type: string }
+      responses:
+        "200":
+          description: 作成した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InterviewSession" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/trend:
+    get:
+      tags: [interviews]
+      summary: スコア推移
+      description: "`/:id` より先に登録している（Echo のルーターが先に解決するため）。"
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: limit, schema: { type: integer } }
+      responses:
+        "200": { description: 推移 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}:
+    get:
+      tags: [interviews]
+      summary: セッション詳細
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: role, schema: { type: string } }
+      responses:
+        "200": { description: 詳細 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: 存在しない }
+
+  /api/interviews/{id}/start:
+    post:
+      tags: [interviews]
+      summary: 面接を開始する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200":
+          description: 開始した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InterviewSession" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}/finish:
+    post:
+      tags: [interviews]
+      summary: 面接を終了しレポート生成を予約する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 終了した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}/start-turn:
+    post:
+      tags: [interviews]
+      summary: 1ターンを開始する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 開始した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}/turn:
+    post:
+      tags: [interviews]
+      summary: 1ターンの応答を処理する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 次の質問 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}/utterances:
+    post:
+      tags: [interviews]
+      summary: 発話を記録する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 記録した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}/report:
+    get:
+      tags: [interviews]
+      summary: 面接レポートを取得する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: レポート }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: まだ生成されていない }
+
+  /api/interviews/{id}/report/regenerate:
+    post:
+      tags: [interviews]
+      summary: レポートを作り直す
+      description: "生成ジョブが失われたレポートをユーザー操作で回復する経路（#1476）。"
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 再生成を予約した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}/send-report:
+    post:
+      tags: [interviews]
+      summary: レポートをメールで送る
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 送信した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}/phrase-suggestions:
+    get:
+      tags: [interviews]
+      summary: 言い回しの提案を取得する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 提案 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/interviews/{id}/upload-video:
+    post:
+      tags: [interviews]
+      summary: 面接動画をアップロードする
+      description: |
+        このエンドポイントだけ本文上限が **512MB**（動画 500MB + multipart のオーバーヘッド）。
+        他は全体設定の 32MB。
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "200": { description: アップロードした }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { description: 512MB を超えた }
+
+  /api/hr/interviews:
+    get:
+      tags: [interviews]
+      summary: 企業オーナー向け面接一覧
+      description: "企業の採用担当が自社の面接を見る（#1083）。`company_id` は必須。"
+      security: [{ userToken: [] }]
+      parameters:
+        - { in: query, name: company_id, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: 一覧 }
+        "400": { description: company_id が無い }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  # ── realtime ───────────────────────────────────────
+  /api/realtime/token:
+    post:
+      tags: [realtime]
+      summary: リアルタイム音声セッションの一時トークンを発行する
+      description: |
+        `user_id` を body で受け取るが、`X-User-Token` の値と一致しない場合は拒否する。
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id: { type: integer, description: 省略可。指定する場合はトークンの値と一致させる }
+                interview_id: { type: integer }
+      responses:
+        "200":
+          description: 発行した
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  client_secret: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/realtime/session-info:
+    get:
+      tags: [realtime]
+      summary: リアルタイムセッションの情報を取得する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: セッション情報 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ── resume ─────────────────────────────────────────
+  /api/resume/upload:
+    post:
+      tags: [resume]
+      summary: 職務経歴書をアップロードする
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "200": { description: アップロードした }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { description: 32MB を超えた }
+
+  /api/resume/review:
+    post:
+      tags: [resume]
+      summary: 添削する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 添削結果 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/resume/review/stream:
+    post:
+      tags: [resume]
+      summary: 添削する（ストリーミング）
+      description: Server-Sent Events で逐次返す。
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: SSE ストリーム
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/resume/status:
+    get:
+      tags: [resume]
+      summary: 履歴書の対応要否を取得する
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 対応要否
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResumeStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/resume/annotated:
+    get:
+      tags: [resume]
+      summary: 注釈付きの履歴書を取得する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 注釈付きデータ }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ── es（認証なし。レート制限のみ）────────────────────
+  /api/es/rewrite:
+    post:
+      tags: [es]
+      summary: エントリーシートをリライトする
+      description: |
+        **未ログインでも使える。** 認証は付けず、コスト濫用はレート制限で止める（#1154）。
+        生成は RAG の `/es/review` に一本化してあり、ここでプロンプトは組まない（#1533）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ESRewriteRequest" }
+      responses:
+        "200":
+          description: リライト結果
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ESRewriteResponse" }
+        "400": { description: 本文が不正 }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/es/review:
+    post:
+      tags: [es]
+      summary: エントリーシートを添削する
+      description: "**未ログインでも使える。** 認証は付けず、レート制限のみ（#1154）。"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ESReviewRequest" }
+      responses:
+        "200":
+          description: 添削結果
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ESReviewResponse" }
+        "400": { description: 本文が不正 }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  # ── schedule ───────────────────────────────────────
+  /api/schedule:
+    get:
+      tags: [schedule]
+      summary: 選考スケジュール一覧
+      description: "対象は `X-User-Token` から決まる（#983 で user_id クエリ認証を廃止）。"
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ScheduleEvent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [schedule]
+      summary: 予定を作る
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduleEvent" }
+      responses:
+        "200":
+          description: 作成した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScheduleEvent" }
+        "400": { description: 入力が不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/schedule/{id}:
+    get:
+      tags: [schedule]
+      summary: 予定を取得する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200":
+          description: 予定
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScheduleEvent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 存在しない（他人の予定も 404 で伏せる） }
+    put:
+      tags: [schedule]
+      summary: 予定を更新する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduleEvent" }
+      responses:
+        "200":
+          description: 更新した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScheduleEvent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 存在しない }
+    delete:
+      tags: [schedule]
+      summary: 予定を削除する
+      security: [{ userToken: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: 削除した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 存在しない }
+
+  /api/schedule/export/ics:
+    get:
+      tags: [schedule]
+      summary: iCalendar 形式で書き出す
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: ics ファイル
+          content:
+            text/calendar:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ── google-calendar ────────────────────────────────
+  /api/google-calendar/connect:
+    get:
+      tags: [google-calendar]
+      summary: Google カレンダー連携を開始する
+      security: [{ userToken: [] }]
+      responses:
+        "302": { description: Google の認可画面へリダイレクト }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/google-calendar/callback:
+    get:
+      tags: [google-calendar]
+      summary: 連携のコールバック
+      parameters:
+        - { in: query, name: code, schema: { type: string } }
+        - { in: query, name: state, schema: { type: string } }
+      responses:
+        "302": { description: フロントエンドへリダイレクト }
+
+  /api/google-calendar/status:
+    get:
+      tags: [google-calendar]
+      summary: 連携状態を取得する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 連携状態 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/google-calendar/disconnect:
+    delete:
+      tags: [google-calendar]
+      summary: 連携を解除する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 解除した }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+
+  # ── admin: 企業管理・クロール・ベクトル ──────────────
+  /api/admin/companies:
+    get:
+      tags: [admin-companies]
+      summary: 企業一覧
+      description: |
+        `limit` は既定 50 / 上限 100。上限が無いと `limit=1000000` で DB と JSON 生成にタスクが詰まる（#1412）。
+
+        `school_id` は**閲覧制限ではなく任意の絞り込み**（その学校が承認済みの企業だけ見る）。企業カタログは全テナント共有。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+        - in: query
+          name: name
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+          description: data_status での絞り込み
+        - in: query
+          name: industry
+          schema:
+            type: string
+        - in: query
+          name: readiness
+          schema:
+            type: string
+        - in: query
+          name: order
+          schema:
+            type: string
+        - in: query
+          name: school_id
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 一覧。絞り込み条件をそのまま返す
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  companies:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Company"
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+                  name:
+                    type: string
+                  status:
+                    type: string
+                  industry:
+                    type: string
+                  readiness:
+                    type: string
+                  order:
+                    type: string
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [admin-companies]
+      summary: 企業を作る
+      security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Company"
+      responses:
+        "200":
+          description: 作成した
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Company"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/industries:
+    get:
+      tags: [admin-companies]
+      summary: 業界名の一覧
+      description: |
+        アクティブ企業に付いている業界名。絞り込み用。
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 業界名
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  industries:
+                    type: array
+                    items:
+                      type: string
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/companies/names:
+    get:
+      tags: [admin-companies]
+      summary: 企業名の一覧
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/companies/{id}:
+    get:
+      tags: [admin-companies]
+      summary: 企業を取得
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 企業
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Company"
+        "404":
+          description: 存在しない
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      tags: [admin-companies]
+      summary: 企業を更新
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Company"
+      responses:
+        "200":
+          description: 更新した
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Company"
+        "404":
+          description: 存在しない
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/companies/{id}/publish:
+    patch:
+      tags: [admin-companies]
+      summary: 企業を公開する
+      description: |
+        全テナント共通の `data_status` / `is_active` を書き換えるためシステム管理者専用。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/{id}/reject:
+    patch:
+      tags: [admin-companies]
+      summary: 企業を却下する
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/{id}/relation-graph:
+    get:
+      tags: [admin-companies]
+      summary: 企業相関図を取得
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/companies/{id}/interview-questions:
+    get:
+      tags: [admin-companies]
+      summary: 企業の面接質問一覧
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [admin-companies]
+      summary: 企業の面接質問を作る
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/companies/{id}/interview-questions/generate:
+    post:
+      tags: [admin-companies]
+      summary: 企業の面接質問をAIで生成する
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/companies/{id}/interview-questions/{qid}:
+    put:
+      tags: [admin-companies]
+      summary: 企業の面接質問を更新
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+        - in: path
+          name: qid
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    delete:
+      tags: [admin-companies]
+      summary: 企業の面接質問を削除
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+        - in: path
+          name: qid
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/companies/{id}/fetch-info:
+    post:
+      tags: [admin-companies]
+      summary: 企業情報を取得する
+      description: |
+        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/{id}/confirm-info:
+    post:
+      tags: [admin-companies]
+      summary: 取得した企業情報を確定する
+      description: |
+        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/{id}/fetch-relations:
+    post:
+      tags: [admin-companies]
+      summary: 取引先・関連企業を取得する
+      description: |
+        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/{id}/confirm-relations:
+    post:
+      tags: [admin-companies]
+      summary: 取得した関連企業を確定する
+      description: |
+        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/{id}/fetch-jobs:
+    post:
+      tags: [admin-companies]
+      summary: 求人情報を取得する
+      description: |
+        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/{id}/fetch-tech-stack:
+    post:
+      tags: [admin-companies]
+      summary: 技術スタックを取得する
+      description: |
+        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/{id}/fetch-persona:
+    post:
+      tags: [admin-companies]
+      summary: 求める人物像を取得する
+      description: |
+        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/{id}/fetch-all:
+    post:
+      tags: [admin-companies]
+      summary: 未取得の項目をまとめて取得する
+      description: |
+        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/{id}/fetch-primary:
+    post:
+      tags: [admin-companies]
+      summary: 主要項目を取得する
+      description: |
+        外部APIとLLMを呼ぶため従量課金が発生する。システム管理者専用。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/{id}/gbiz-search:
+    get:
+      tags: [admin-companies]
+      summary: gBizINFO を検索する
+      description: |
+        法人番号をもとに公的APIを引く。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/{id}/gbiz-sync:
+    post:
+      tags: [admin-companies]
+      summary: gBizINFO の内容を取り込む
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/l1-coverage:
+    get:
+      tags: [admin-companies]
+      summary: L1カタログの網羅状況
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/warm-l1:
+    post:
+      tags: [admin-companies]
+      summary: L1カタログを温める
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/seed-l1:
+    post:
+      tags: [admin-companies]
+      summary: L1カタログを投入する
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/fetch-missing-batch:
+    post:
+      tags: [admin-companies]
+      summary: 未取得の企業をまとめて取得する
+      description: |
+        従量課金が大きい。実行前に対象件数を確認すること。
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/web-search:
+    post:
+      tags: [admin-companies]
+      summary: Web検索で企業情報を引く
+      description: |
+        OpenAI の web_search を呼ぶ。1回あたりの単価が高い（#1124 でコスト削減を追跡中）。
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/companies/web-search-relations:
+    post:
+      tags: [admin-companies]
+      summary: Web検索で関連企業を引く
+      description: |
+        OpenAI の web_search を呼ぶ。単価が高い。
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/job-categories:
+    get:
+      tags: [admin-companies]
+      summary: 職種カテゴリ一覧
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/job-positions:
+    get:
+      tags: [admin-companies]
+      summary: 求人一覧
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [admin-companies]
+      summary: 求人を作る
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/job-positions/{id}/{action}:
+    patch:
+      tags: [admin-companies]
+      summary: 求人を公開・却下する
+      description: |
+        `action` は `publish` または `reject`。ハンドラは HTTP メソッドを見ず `action` で分岐する。
+
+        以前は `Any` で登録されており GET でも公開できたため PATCH に絞った。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+        - in: path
+          name: action
+          required: true
+          schema:
+            type: string
+            enum:
+              - publish
+              - reject
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/company-graph/target-year:
+    get:
+      tags: [admin-companies]
+      summary: 相関図の対象年度を取得
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/company-graph/crawl:
+    post:
+      tags: [admin-crawl]
+      summary: 相関図のクロールを実行する
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/company-graph/enrich-relations:
+    post:
+      tags: [admin-crawl]
+      summary: 関連企業を補完する
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/crawl-sources:
+    get:
+      tags: [admin-crawl]
+      summary: クロール元の一覧
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+    post:
+      tags: [admin-crawl]
+      summary: クロール元を登録する
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/crawl-sources/{id}:
+    put:
+      tags: [admin-crawl]
+      summary: クロール元を更新する
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/crawl-sources/{id}/run:
+    post:
+      tags: [admin-crawl]
+      summary: クロールを実行する
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/crawl-runs:
+    get:
+      tags: [admin-crawl]
+      summary: クロール実行履歴
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/scraper-sessions:
+    get:
+      tags: [admin-crawl]
+      summary: スクレイパのセッション一覧
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+    post:
+      tags: [admin-crawl]
+      summary: スクレイパのセッションを登録・更新する
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/scraper-sessions/{site_key}:
+    delete:
+      tags: [admin-crawl]
+      summary: スクレイパのセッションを削除する
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: site_key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/vector/status:
+    get:
+      tags: [admin-vector]
+      summary: ベクトルストアの状態
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/vector/stats:
+    get:
+      tags: [admin-vector]
+      summary: ベクトルの統計
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/vector/collections:
+    get:
+      tags: [admin-vector]
+      summary: コレクション一覧
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
+  /api/admin/vector/reembed:
+    post:
+      tags: [admin-vector]
+      summary: 再エンベッドする
+      description: |
+        埋め込みAPIを呼ぶため従量課金が発生する。
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
