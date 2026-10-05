@@ -1,14 +1,50 @@
 # API リファレンス
 
+## 3つの置き場所
+
+API の情報は役割で分けてあります。探しているものに応じて見る先が変わります。
+
+| 見る先 | 中身 | 更新 |
+|---|---|---|
+| `Backend/api/routes.txt` | **全エンドポイントの一覧**（237本） | 自動生成。`make api-catalog` |
+| `Backend/api/openapi.yaml` | リクエスト/レスポンスのスキーマ付き契約 | 手で書く |
+| このページ | テーマ別の解説。方針や経緯 | 手で書く |
+
+Swagger UI で読む場合は `make api-docs`（http://localhost:8081 ）。
+
+OpenAPI はまだ全体を覆っていません。網羅率は次で確認できます。
+
+```bash
+cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
+```
+
+`openapi.yaml` に実装に無いパスを書くと CI が落ちます（`internal/routes/inventory_test.go`）。
+逆方向（実装にあるが未記載）では落ちないので、記載漏れは網羅率で見てください。
+
+---
+
 ## 認証
 
-### 管理者API
+方式は4つあります。エンドポイントごとにどれが必要かは `openapi.yaml` の `security` を見てください。
 
-`Authorization: Basic {base64(email:password)}` ヘッダーが必要です。
+| 方式 | ヘッダ | 用途 |
+|---|---|---|
+| ユーザー | `X-User-Token` | 学生・教員。ログインで発行される短TTLのJWT |
+| 管理者 | `X-Admin-Email` + `X-Admin-Token` | 管理画面。管理者本人の認証 |
+| サービス間 | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない |
+| 企業ポータル | Cookie 3本 | `company_user_id` / `company_user_token` / `company_refresh_token` |
 
-### ユーザーAPI
+テナントを切り替える場合は `X-Tenant-Slug` を併せて送ります。
 
-現在はクエリパラメータ `user_id` で識別します（将来的にJWT化予定）。
+実装は `Backend/internal/routes/echo_adapter.go` の `EchoUserAuth` /
+`EchoAdminAuth` / `EchoStaticSecretAuth` です。
+
+> **Basic 認証は使っていません。** 以前このページには管理者APIが
+> `Authorization: Basic` と書かれていましたが、実装に存在したことはありません。
+> 同じくユーザーAPIを「クエリパラメータ `user_id` で識別（将来JWT化予定）」と
+> 書いていましたが、JWT 化は済んでいます。残っている `user_id` クエリは
+> 管理者が対象ユーザーを指定する用途（`diagnosis_quality_controller.go`）と
+> 応募一覧の絞り込み（`application/controller.go`）だけで、認証には使いません。
 
 ---
 
