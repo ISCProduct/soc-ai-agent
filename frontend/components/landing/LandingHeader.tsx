@@ -2,13 +2,13 @@ import { Box, Button, Container } from '@mui/material'
 import { LP } from './tokens'
 
 /**
- * LPの固定ヘッダー（#1653）。
+ * LPのヘッダー（#1653）。
  *
- * サービスLPにヘッダーが無いと、それだけで作りかけに見える。
- * ロゴ・ページ内ナビ・CTA の3点を常に出す。
+ * 半透明＋blur の固定ヘッダーは SaaS の LP で最も使い回されている形なので使わない。
+ * 紙に押した版面のヘッダーとして、紙色のまま太い下罫で受ける。
  *
- * ページ内アンカーだけで動かし、JS は足さない（LandingContent を
- * Server Component のまま保つため）。スクロール連動の縮小なども入れない。
+ * ページ内アンカーだけで動かし、JS は足さない
+ * （LandingContent を Server Component のまま保つため）。
  */
 
 const NAV = [
@@ -26,17 +26,15 @@ export function LandingHeader() {
         position: 'sticky',
         top: 0,
         zIndex: 10,
-        bgcolor: 'rgba(12,22,32,.86)',
-        backdropFilter: 'blur(10px)',
-        borderBottom: '1px solid rgba(255,255,255,.10)',
-        color: LP.paper,
+        bgcolor: LP.paper,
+        borderBottom: `2px solid ${LP.ink}`,
       }}
     >
       <Container
         maxWidth="lg"
         sx={{
-          px: { xs: 2.5, md: 4 },
-          minHeight: { xs: 58, md: 68 },
+          px: { xs: 2.5, md: 5 },
+          minHeight: { xs: 56, md: 64 },
           display: 'flex',
           alignItems: 'center',
           gap: 2,
@@ -48,22 +46,21 @@ export function LandingHeader() {
           sx={{
             display: 'flex',
             alignItems: 'baseline',
-            gap: 0.75,
+            gap: 1,
             textDecoration: 'none',
-            color: 'inherit',
+            color: LP.ink,
             flexShrink: 0,
           }}
         >
-          <Box sx={{ fontSize: { xs: 17, md: 19 }, fontWeight: 700, letterSpacing: '-0.02em' }}>
+          <Box sx={{ fontSize: { xs: 17, md: 18 }, fontWeight: 700, letterSpacing: '.02em' }}>
             就活AI
           </Box>
           <Box
             sx={{
               fontSize: 10.5,
-              fontWeight: 700,
-              letterSpacing: '.14em',
-              color: 'rgba(255,255,255,.55)',
+              color: LP.muted,
               display: { xs: 'none', sm: 'block' },
+              letterSpacing: '.08em',
             }}
           >
             IT企業エージェント
@@ -72,12 +69,7 @@ export function LandingHeader() {
 
         <Box
           component="nav"
-          sx={{
-            ml: 'auto',
-            display: { xs: 'none', md: 'flex' },
-            alignItems: 'center',
-            gap: 0.5,
-          }}
+          sx={{ ml: 'auto', display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 3 }}
         >
           {NAV.map((n) => (
             <Box
@@ -86,14 +78,13 @@ export function LandingHeader() {
               href={n.href}
               sx={{
                 fontSize: 13.5,
-                fontWeight: 700,
-                color: 'rgba(255,255,255,.80)',
+                color: LP.inkSoft,
                 textDecoration: 'none',
-                px: 1.5,
-                py: 1,
-                borderRadius: '6px',
-                transition: 'color .2s, background-color .2s',
-                '&:hover': { color: LP.paper, bgcolor: 'rgba(255,255,255,.08)' },
+                pb: 0.25,
+                borderBottom: '1px solid transparent',
+                transition: 'border-color .2s',
+                '&:hover': { borderBottomColor: LP.ink },
+                '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
               }}
             >
               {n.label}
@@ -104,18 +95,18 @@ export function LandingHeader() {
         <Button
           href="/login"
           disableElevation
-          variant="contained"
+          variant="outlined"
           sx={{
-            ml: { xs: 'auto', md: 1.5 },
+            ml: { xs: 'auto', md: 3 },
             flexShrink: 0,
-            bgcolor: LP.paper,
+            borderRadius: 0,
+            borderColor: LP.ink,
             color: LP.ink,
-            borderRadius: '7px',
-            fontSize: { xs: 13, md: 14 },
+            fontSize: { xs: 12.5, md: 13.5 },
             fontWeight: 700,
-            px: { xs: 2, md: 2.75 },
-            py: 1,
-            '&:hover': { bgcolor: 'rgba(255,255,255,.88)' },
+            px: { xs: 1.75, md: 2.5 },
+            py: 0.75,
+            '&:hover': { bgcolor: LP.ink, color: LP.paper, borderColor: LP.ink },
           }}
         >
           ログイン

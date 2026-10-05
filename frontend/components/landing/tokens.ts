@@ -1,49 +1,67 @@
 /**
- * 公開LP専用の配色・モーショントークン（#1653）。
+ * 公開LP専用のトークン（#1653）。
  *
- * 画面内の primary は学生テーマの `#0072B2`（Wong の色覚セーフ青）をそのまま使う。
- * 既存画面と別の青を持ち込むと、LPからログインした瞬間に色が変わる。
+ * ## 方向
  *
- * ただしBtoB SaaSのLPは青が圧倒的多数で埋もれやすい。差別化はキーカラーを
- * 変えるのではなく、**濃い地のファーストビュー**と、Wong の橙 `#E69F00` を
- * 強調に使うことで作る。橙も学生テーマが warning として持っている値で、
- * 色覚セーフの組み合わせを崩さない。
+ * BtoB SaaS の LP で最も多い「濃紺の地＋青い放射グラデ＋同じ角丸の白カードの反復」
+ * を避ける。見分けがつかず、生成物に見える。
  *
- * `BRAND_LOGO_COLOR`（#ec5b13）は使わない。`lib/brand.ts` が
- * 「ロゴ・OGP専用。画面の primary には使わない（#853）」と定めている。
+ * 代わりに題材の語彙を使う。ES（エントリーシート）の原稿用紙のマス目を地紋にし、
+ * 見出しは漢数字と縦組みで送る。日本の就職活動にしか無い形で、
+ * 汎用テンプレートからは出てこない。
+ *
+ * 色数は絞る。墨・紙・朱の3色＋操作の青。面で塗らず、罫と余白で持たせる。
  */
 export const LP = {
-  /** 濃色の地。ファーストビューとクロージングに使う。 */
-  ink: '#0C1620',
-  /** ink より一段明るい。濃色セクション内の面に使う。 */
-  inkSoft: '#152433',
-  paper: '#FFFFFF',
-  /** 薄い地。セクションの切り替えに使う。 */
-  tint: '#EEF4F9',
-  rule: '#D4DEE7',
-  muted: '#5A6B7A',
-  /** 主操作。学生テーマの COMFORTABLE_PRIMARY と同じ値。 */
+  /** 本文。純黒を使わない。わずかに温かい墨。 */
+  ink: '#1C1A17',
+  /** 見出しの濃度を1段落とす。 */
+  inkSoft: '#3A3732',
+  /** 紙。白ではなく生成りに寄せる。 */
+  paper: '#FAF8F4',
+  /** 面を起こすときの白。 */
+  card: '#FFFFFF',
+  /** 罫。原稿用紙の罫の濃度。 */
+  rule: '#DAD4C8',
+  ruleSoft: '#E8E3D9',
+  muted: '#6E675C',
+  /** 操作。学生テーマの COMFORTABLE_PRIMARY と同じ値（Wong の色覚セーフ青）。
+   *  LPで別の青を使うと、ログインした瞬間に色が変わる。 */
   primary: '#0072B2',
   primaryHover: '#00598B',
-  /** 濃色の上で使う明るい青。#0072B2 は濃色地だとコントラストが足りない。 */
-  primaryOnDark: '#56B4E9',
-  /** 強調。Wong の橙。学生テーマの warning と同じ値。 */
-  accent: '#E69F00',
+  /** 朱。印と強調だけに使う。面では塗らない。Wong の朱寄り。 */
+  seal: '#B4452F',
 } as const
+
+/**
+ * 原稿用紙のマス目。ES の地紋として使う。
+ * 面で主張させない。罫の濃度を落として、紙の質感として効かせる。
+ */
+export const GENKO_GRID = (size = 28, color = '#E8E3D9') => ({
+  backgroundImage: `linear-gradient(${color} 1px, transparent 1px),
+                    linear-gradient(90deg, ${color} 1px, transparent 1px)`,
+  backgroundSize: `${size}px ${size}px`,
+})
 
 /**
  * 読み込み時のフェードアップ。スクロール連動にはしない。
  * LandingContent は Server Component のままにしたいので、JS を足さずCSSだけで出す。
- * `prefers-reduced-motion` を尊重すること（各所で指定している）。
  */
 export const RISE = {
   '@keyframes lpRise': {
-    from: { opacity: 0, transform: 'translateY(14px)' },
+    from: { opacity: 0, transform: 'translateY(12px)' },
     to: { opacity: 1, transform: 'none' },
   },
-  animation: 'lpRise .7s cubic-bezier(.22,.61,.36,1) both',
-  '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
+  animation: 'lpRise .8s cubic-bezier(.22,.61,.36,1) both',
 } as const
 
 /** 段差をつけて順に出す。 */
-export const delay = (i: number) => ({ animationDelay: `${0.08 * i}s` })
+export const delay = (i: number) => ({ animationDelay: `${0.07 * i}s` })
+
+/** モーションを切る指定。RISE と併せて使う。 */
+export const NO_MOTION = {
+  '@media (prefers-reduced-motion: reduce)': {
+    animation: 'none',
+    transition: 'none',
+  },
+} as const

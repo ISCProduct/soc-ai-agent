@@ -67,8 +67,9 @@ test.describe('認証フロー', () => {
 
     // LPの骨格。索引ページに戻していないことを見る（#1653）。
     // 課題提起と解決策が無いと、できることを並べただけのページになる。
-    for (const label of ['ISSUE', 'SOLUTION', 'ENTRANCE', 'FAQ']) {
-      await expect(page.getByText(label, { exact: true })).toBeVisible()
+    // ラベルの文言ではなくセクションIDで見る（見出しの言い回しは変わりうる）。
+    for (const id of ['#issue', '#solution', '#entrances', '#faq']) {
+      await expect(page.locator(id)).toBeVisible()
     }
 
     // 3系統の入口。文言が重複するので入口セクションに絞る。
