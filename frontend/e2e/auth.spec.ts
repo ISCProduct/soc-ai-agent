@@ -60,24 +60,35 @@ test.describe('認証フロー', () => {
     await page.goto('/')
 
     await expect(page).toHaveURL(/\/$/)
-    await expect(page.getByRole('heading', { name: 'IT企業エージェント' })).toBeVisible({
+    // ファーストビューのキャッチコピー
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('最初の一歩から', {
       timeout: 15000,
     })
-    // 見出しは「学生」「企業」「学校・教員」。exact にしないと
-    // 「学生が進める順序」にも当たる。
-    for (const name of ['学生', '企業', '学校・教員']) {
-      await expect(page.getByRole('heading', { name, exact: true })).toBeVisible()
+
+    // LPの骨格。索引ページに戻していないことを見る（#1653）。
+    // 課題提起と解決策が無いと、できることを並べただけのページになる。
+    for (const label of ['ISSUE', 'SOLUTION', 'ENTRANCE', 'FAQ']) {
+      await expect(page.getByText(label, { exact: true })).toBeVisible()
     }
-    // 3系統それぞれの遷移先
-    await expect(page.getByRole('link', { name: 'ログイン・新規登録' })).toHaveAttribute(
+
+    // 3系統の入口。文言が重複するので入口セクションに絞る。
+    // 「無料で診断を始める」は FV・入口・クロージングの3箇所に出る。
+    const entrances = page.locator('#entrances')
+    for (const name of ['学生', '企業', '学校・教員']) {
+      await expect(entrances.getByRole('heading', { name, exact: true })).toBeVisible()
+    }
+    await expect(entrances.getByRole('link', { name: '無料で診断を始める' })).toHaveAttribute(
       'href',
       '/login',
     )
-    await expect(page.getByRole('link', { name: '企業ポータルへ' })).toHaveAttribute(
+    await expect(entrances.getByRole('link', { name: '企業ポータルへ' })).toHaveAttribute(
       'href',
       '/company-portal/sign-in',
     )
-    await expect(page.getByRole('link', { name: '管理画面へ' })).toHaveAttribute('href', '/admin')
+    await expect(entrances.getByRole('link', { name: '管理画面へ' })).toHaveAttribute(
+      'href',
+      '/admin',
+    )
   })
 
   // セッションCookieが失効し、ストレージだけが残った状態の回帰テスト(#1519)。
@@ -109,7 +120,7 @@ test.describe('認証フロー', () => {
 
     // / は公開LPになったので /login へは飛ばされない(#1653)。
     // ループの起点だった「サーバー側リダイレクト」自体が無くなっている。
-    await expect(page.getByRole('heading', { name: 'IT企業エージェント' })).toBeVisible({
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('最初の一歩から', {
       timeout: 15000,
     })
     await expect(page).toHaveURL(/\/$/)
@@ -117,7 +128,7 @@ test.describe('認証フロー', () => {
     // LPからログイン画面へ進んでも、ストレージを見て / へ送り返されない。
     // 送り返しを止めているのは LoginContent 側の Cookie 確認
     // (/api/auth/session が401ならその場に留まる)。
-    await page.getByRole('link', { name: 'ログイン・新規登録' }).click()
+    await page.locator('#entrances').getByRole('link', { name: '無料で診断を始める' }).click()
     await expect(page).toHaveURL(/\/login/, { timeout: 15000 })
     await expect(page.getByRole('tab', { name: 'ログイン' })).toBeVisible({ timeout: 10000 })
 
