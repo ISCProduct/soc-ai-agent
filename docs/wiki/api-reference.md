@@ -6,14 +6,18 @@ API の情報は役割で分けてあります。探しているものに応じ�
 
 | 見る先 | 中身 | 更新 |
 |---|---|---|
-| `Backend/api/routes.txt` | **全エンドポイントの一覧**（237本） | 自動生成。`make api-catalog` |
-| `Backend/api/openapi.yaml` | リクエスト/レスポンスのスキーマ付き契約 | 手で書く |
+| `Backend/api/routes.txt` | **全エンドポイントの一覧**（252本） | 自動生成。`make api-catalog` |
+| `Backend/api/openapi.yaml` | スキーマ・権限・エラー付きの契約（全252本） | 手で書く |
 | このページ | テーマ別の解説。方針や経緯 | 手で書く |
 
 Swagger UI で読む場合は `make api-docs`（http://localhost:8081 ）。
 
-OpenAPI は **186 / 237 本**（78.5%）。`/api/admin/*` と監視系は全件記載済みで、
-未記載は学生向けと企業ポータルの 51 本です。網羅率は次で確認できます。
+OpenAPI は**全 252 本を記載済み**です（網羅率 100%）。
+
+実装と spec は**双方向**で突き合わせているので、どちらかに無いものがあると CI が落ちます。
+体裁（summary / tags / security / responses の有無、`$ref` の解決）も `TestOpenAPILint` が見ます。
+
+確認は次のコマンドで行えます。
 
 ```bash
 cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
