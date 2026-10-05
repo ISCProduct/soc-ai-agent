@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { Box, Button, Card, CardContent, Container, Divider, Stack, Typography } from '@mui/material'
 
 /**
@@ -14,6 +13,13 @@ import { Box, Button, Card, CardContent, Container, Divider, Stack, Typography }
  * **このコンポーネントはAPIを呼ばない。** 本番は展示会運用で `desired=0` から
  * 起動するため、Backend の起動を待たずに表示できる必要がある
  * （docs: Issue #1653 の受け入れ条件6）。Server Component のまま保つこと。
+ *
+ * リンクに `component={Link}` を使わないこと。MUI の Button は Client Component で、
+ * Server Component から関数（コンポーネント参照）を渡すと RSC の境界を越えられず
+ * 「Functions cannot be passed directly to Client Components」で描画ごと落ちる。
+ * ビルドも型検査も通り、落ちるのは実行時（エラー境界が出る）。
+ * `href` だけ渡せば Button はアンカーを描画する。遷移先はいずれも別の画面群なので
+ * クライアント側ルーティングでなくて困らない。
  */
 
 /** 振り分け先。未ログインで到達する3系統に対応する。 */
@@ -93,7 +99,6 @@ export function LandingContent() {
                   {e.body}
                 </Typography>
                 <Button
-                  component={Link}
                   href={e.href}
                   variant={e.primary ? 'contained' : 'outlined'}
                   size="large"
@@ -146,7 +151,7 @@ export function LandingContent() {
           <Typography variant="body2" color="text.secondary">
             © 就活AI
           </Typography>
-          <Button component={Link} href="/privacy" size="small" color="inherit">
+          <Button href="/privacy" size="small" color="inherit">
             プライバシーポリシー
           </Button>
         </Stack>
