@@ -185,7 +185,10 @@ resource "aws_cloudfront_distribution" "app" {
       origin_protocol_policy   = "https-only"
       origin_ssl_protocols     = ["TLSv1.2"]
       origin_keepalive_timeout = 5
-      origin_read_timeout      = 60
+      # ALB の idle_timeout と同値にする。ここが経路で最小だと ES添削(#1556)は
+      # 完了前に CloudFront の 504 に差し替えられる。CloudFront のクォータ
+      # 「Response timeout per origin」は既定 1〜120秒で、120秒超は引き上げ申請が必要。
+      origin_read_timeout = 90
     }
   }
 

@@ -177,7 +177,7 @@ export default function PageContent() {
       {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>{success}</Alert>}
 
       <Stack spacing={3}>
-        <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
+        <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>一括再計算</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -235,7 +235,7 @@ export default function PageContent() {
           </CardContent>
         </Card>
 
-        <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
+        <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>個別再計算</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -276,7 +276,7 @@ export default function PageContent() {
           </CardContent>
         </Card>
 
-        <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
+        <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>再計算履歴</Typography>
             <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>

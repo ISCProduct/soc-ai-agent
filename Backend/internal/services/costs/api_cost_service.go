@@ -161,6 +161,15 @@ func calculateCost(provider, model string, promptTokens, completionTokens int) f
 	return inputCost + outputCost
 }
 
+// EstimateCostUSD は単価表を使ってトークン数から料金を見積もる。
+//
+// 評価ハーネス（cmd/aibench）が1件あたりのコストを出すために使う。
+// 単価表をハーネス側へ写すと値上げのたびに2箇所を直すことになり、
+// 片方だけ古いまま「安くなった」と誤判定する（#1193 で実際に起きた）。
+func EstimateCostUSD(model string, promptTokens, completionTokens int) float64 {
+	return calculateCost("openai", model, promptTokens, completionTokens)
+}
+
 // APICostService はAPIコスト記録・集計・月次閾値アラートを担当する
 type APICostService struct {
 	repo              *repositories.APICallLogRepository

@@ -65,7 +65,7 @@ function RegisterConfirmForm() {
     setSubmitting(true)
     try {
       const response = await authService.register(email, password, name, '新卒', '', '', token)
-      authService.saveAuth(response)
+      await authService.saveAuth(response)
       router.push('/')
     } catch (err: any) {
       setError(err.message || '登録に失敗しました。')

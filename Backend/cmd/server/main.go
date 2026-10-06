@@ -533,7 +533,7 @@ func main() {
 	scheduleService.SetCalendarSyncService(calendarSyncService)
 	googleCalendarController := schedulecontrollers.NewGoogleCalendarController(calendarSyncService)
 	scheduleController := schedulecontrollers.NewScheduleController(scheduleService)
-	esReviewController := escontrollers.NewESReviewController()
+	esReviewController := escontrollers.NewESReviewController(aiClient)
 	appService := application.NewApplicationService(appStatusRepo, matchRepo, db)
 	appController := applicationcontrollers.NewApplicationController(appService)
 	appController.SetSchoolAccess(schoolService)

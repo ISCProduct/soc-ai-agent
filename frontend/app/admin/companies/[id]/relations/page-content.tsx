@@ -310,7 +310,7 @@ export default function PageContent() {
           p: 2,
           border: '1px solid',
           borderColor: 'divider',
-          borderRadius: '10px',
+          borderRadius: 1,
           bgcolor: 'background.paper',
         }}
       >
@@ -413,7 +413,7 @@ export default function PageContent() {
                         {categoryGroup.companies.map((companyGroup) => (
                           <Box
                             key={companyGroup.name}
-                            sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}
+                            sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}
                           >
                             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
                               <Typography variant="body1" fontWeight={700}>
@@ -540,7 +540,7 @@ export default function PageContent() {
               sx={{
                 border: '1px solid',
                 borderColor: 'divider',
-                borderRadius: '10px !important',
+                borderRadius: 1,
                 '&:before': { display: 'none' },
                 overflow: 'hidden',
               }}

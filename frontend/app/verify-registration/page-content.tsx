@@ -66,7 +66,7 @@ function VerifyRegistrationContent() {
         certificationsInProgress,
         token,
       )
-      authService.saveAuth(response)
+      await authService.saveAuth(response)
       router.push('/')
     } catch (err: any) {
       setSubmitError(err.message)

@@ -37,12 +37,18 @@ type ResumeTextBlock struct {
 }
 
 type ResumeReview struct {
-	ID         uint      `gorm:"primaryKey" json:"id"`
-	DocumentID uint      `gorm:"not null;index" json:"document_id"`
-	Score      int       `gorm:"not null;default:0" json:"score"`
-	Summary    string    `gorm:"type:text" json:"summary"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID         uint `gorm:"primaryKey" json:"id"`
+	DocumentID uint `gorm:"not null;index" json:"document_id"`
+	// Score は総合スコア(0-100)。ルーブリックの項目スコアからサーバー側で算出する。
+	// 生成に失敗した・ルーブリック違反だったときは nil（スコア無し）。
+	// 固定値70を入れない。良かった70と失敗した70が区別できなくなる（#1529）。
+	Score *int `gorm:"column:score" json:"score"`
+	// ItemScoresJSON は項目別スコア(0-5)のJSON。#1529 以前の行とスコア無しの行は nil。
+	// 画面は nil を「内訳なし」に倒す。
+	ItemScoresJSON *string   `gorm:"type:json;column:item_scores_json" json:"item_scores_json,omitempty"`
+	Summary        string    `gorm:"type:text" json:"summary"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type ResumeReviewItem struct {

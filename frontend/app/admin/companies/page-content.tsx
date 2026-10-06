@@ -59,6 +59,9 @@ import {
   type BatchItemFailure,
   type BatchProgress,
 } from '@/lib/admin/company-batch-progress'
+import { FreshnessMark } from '@/components/admin/FreshnessMark'
+import { EmptyState } from '@/components/common/EmptyState'
+import { companyFreshness } from '@/lib/admin/company-freshness'
 import { resolveIndustryFieldProfile } from '@/lib/admin/company-field-profile'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
 
@@ -864,7 +867,7 @@ export default function PageContent() {
           p: 2,
           border: '1px solid',
           borderColor: 'divider',
-          borderRadius: '10px',
+          borderRadius: 1,
           bgcolor: 'grey.50',
         }}
       >
@@ -897,7 +900,7 @@ export default function PageContent() {
           p: 2.5,
           border: '1px solid',
           borderColor: 'divider',
-          borderRadius: '10px',
+          borderRadius: 1,
           bgcolor: 'background.paper',
         }}
       >
@@ -1155,22 +1158,27 @@ export default function PageContent() {
 
         <Stack divider={<Box sx={{ borderBottom: '1px solid', borderColor: 'divider' }} />}>
           {companies.length === 0 && (
-            <Box sx={{ px: 2.5, py: 6, textAlign: 'center' }}>
-              <Typography color="text.secondary" sx={{ mb: 1 }}>
-                {hasActiveFilters
-                  ? '条件に一致する企業がありません。絞り込みを変えてみてください。'
-                  : '該当する企業がありません'}
-              </Typography>
-              {hasActiveFilters ? (
-                <Button variant="outlined" size="small" onClick={resetFilters}>
-                  絞り込みを解除
-                </Button>
-              ) : isPlatform ? (
-                <Button component={Link} href="/admin/companies/new" variant="outlined" size="small">
-                  最初の企業を追加
-                </Button>
-              ) : null}
-            </Box>
+            <EmptyState
+              title={hasActiveFilters ? '条件に一致する企業がありません' : 'まだ企業が登録されていません'}
+              description={
+                hasActiveFilters
+                  ? '絞り込みを変えるか、解除してもう一度お試しください。'
+                  : isPlatform
+                    ? '企業を追加すると、学生に見せる情報の取得を始められます。'
+                    : '担当校に公開できる企業がまだありません。追加はシステム管理者が行います。'
+              }
+              action={
+                hasActiveFilters ? (
+                  <Button variant="outlined" size="small" onClick={resetFilters}>
+                    絞り込みを解除
+                  </Button>
+                ) : isPlatform ? (
+                  <Button component={Link} href="/admin/companies/new" variant="outlined" size="small">
+                    最初の企業を追加
+                  </Button>
+                ) : null
+              }
+            />
           )}
 
           {companyGroups.map((group) => (
@@ -1212,6 +1220,9 @@ export default function PageContent() {
                       : locationLabel
                   const status = statusLabel(company.data_status)
                   const selected = selectedIds.includes(company.id)
+                  // 欠損だけでなく TTL 超過も行頭で示す。既存表示では取得済みだが古いデータが
+                  // 見えず、バッチに再取得され続けていても気づけなかった。
+                  const fresh = companyFreshness(company)
 
                   return (
                     <Box
@@ -1230,6 +1241,9 @@ export default function PageContent() {
                         justifyContent="space-between"
                       >
                         <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ minWidth: 0, flex: 1 }}>
+                          <Box sx={{ pt: '3px', width: 20, mr: 0.5, flexShrink: 0, textAlign: 'center' }}>
+                            <FreshnessMark freshness={fresh.freshness} detail={fresh.detail} compact />
+                          </Box>
                           {isPlatform && (
                             <Checkbox
                               checked={selected}
@@ -1503,7 +1517,7 @@ export default function PageContent() {
           mt: 2,
           border: '1px solid',
           borderColor: 'divider',
-          borderRadius: '10px !important',
+          borderRadius: 1,
           '&:before': { display: 'none' },
           overflow: 'hidden',
         }}

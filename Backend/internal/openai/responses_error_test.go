@@ -2,12 +2,116 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+// TestDoResponses_OutputTruncated は max_output_tokens で切れた応答を検知できることを検証する（#1529）。
+//
+// 要点は「本文が途中まで返っている」ケースである。旧実装は本文が空のときだけ
+// incomplete_details を見ていたため、途中で切れた JSON が正常な応答として
+// 呼び出し側へ渡っていた（#1521 と同型）。
+func TestDoResponses_OutputTruncated(t *testing.T) {
+	// 途中で切れた JSON。decodeJSON 相当の波括弧探索では「読めてしまう」形。
+	const partial = `{"scores":{"specificity":4},"items":[{"quote":"あ`
+	// output_text に入れるため JSON 文字列としてエスケープする
+	escaped, err := json.Marshal(partial)
+	if err != nil {
+		t.Fatalf("テスト用ボディの組み立てに失敗: %v", err)
+	}
+	truncatedBody := `{"output_text":` + string(escaped) + `,"incomplete_details":{"reason":"max_output_tokens"}}`
+
+	tests := []struct {
+		name          string
+		body          string
+		withFlag      bool
+		wantTruncated bool
+		wantErr       bool
+	}{
+		{
+			name:          "上限到達で本文が途中まで",
+			body:          truncatedBody,
+			withFlag:      true,
+			wantTruncated: true,
+		},
+		{
+			name:          "正常な応答ではフラグが立たない",
+			body:          `{"output_text":"{\"scores\":{}}"}`,
+			withFlag:      true,
+			wantTruncated: false,
+		},
+		{
+			name:          "上限到達で本文が空（従来どおりエラー）",
+			body:          `{"output":[],"incomplete_details":{"reason":"max_output_tokens"}}`,
+			withFlag:      true,
+			wantTruncated: true,
+			wantErr:       true,
+		},
+		{
+			name:          "フラグを載せない呼び出し側は従来どおり本文を受け取る",
+			body:          truncatedBody,
+			withFlag:      false,
+			wantTruncated: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
+
+			ctx := context.Background()
+			if tt.withFlag {
+				ctx = WithTruncationFlag(ctx)
+			}
+			cli := NewWithBaseURL(srv.URL, "gpt-4o-mini")
+			content, err := cli.doResponses(ctx, responsesRequest{Model: "gpt-4o-mini", Input: "q"})
+			if tt.wantErr != (err != nil) {
+				t.Fatalf("err = %v, wantErr = %v", err, tt.wantErr)
+			}
+			if got := OutputTruncated(ctx); got != tt.wantTruncated {
+				t.Errorf("OutputTruncated = %v, want %v（本文=%q）", got, tt.wantTruncated, content)
+			}
+		})
+	}
+
+	// 公開メソッドは上限エラー時に出力枠を倍にして呼び直す。
+	// フラグが立ったままだと、成功した2回目の応答を切れた扱いにしてしまう。
+	t.Run("枠を増やした再試行が成功したらフラグは下がる", func(t *testing.T) {
+		bodies := []string{
+			`{"output":[],"incomplete_details":{"reason":"max_output_tokens"}}`,
+			`{"output_text":"{\"scores\":{}}"}`,
+		}
+		calls := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(bodies[min(calls, len(bodies)-1)]))
+			calls++
+		}))
+		defer srv.Close()
+
+		ctx := WithTruncationFlag(context.Background())
+		cli := NewWithBaseURL(srv.URL, "gpt-4o-mini")
+		req := responsesRequest{Model: "gpt-4o-mini", Input: "q"}
+		if _, err := cli.doResponses(ctx, req); err == nil {
+			t.Fatal("1回目は上限到達でエラーになるべき")
+		}
+		if !OutputTruncated(ctx) {
+			t.Fatal("1回目でフラグが立っていない")
+		}
+		if _, err := cli.doResponses(ctx, req); err != nil {
+			t.Fatalf("2回目は成功するべき: %v", err)
+		}
+		if OutputTruncated(ctx) {
+			t.Error("2回目が成功したのにフラグが下がっていない")
+		}
+	})
+}
 
 // doResponses が 2xx 以外でステータスコードを保持することを検証する。
 // 本文が空でもエラーメッセージが空にならないことが要点（旧実装は errors.New("") を返していた）。

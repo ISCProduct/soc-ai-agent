@@ -1,6 +1,10 @@
 import { test, expect } from '@playwright/test'
 import { setupAuth, TEST_ADMIN } from './fixtures/auth'
 
+// 本文の検証は getByRole('main') に限定する。
+// 管理画面の共通シェル(app/admin/layout.tsx)がサイドバーに同じ文言を出すため、
+// ページ全体から探すとナビと二重に一致して strict mode で落ちる。
+// ナビ自体の検証は tests/lib/admin-nav.test.ts で行う。
 test.describe('管理者ダッシュボードフロー', () => {
   test.beforeEach(async ({ page }) => {
     await setupAuth(page, TEST_ADMIN)
@@ -52,7 +56,7 @@ test.describe('管理者ダッシュボードフロー', () => {
   test('管理者ダッシュボードが表示される', async ({ page }) => {
     await page.goto('/admin')
     await page.waitForLoadState('networkidle')
-    await expect(page.getByText('管理メニュー')).toBeVisible({ timeout: 8000 })
+    await expect(page.getByRole('main').getByText('管理メニュー')).toBeVisible({ timeout: 8000 })
   })
 
   test('管理者ダッシュボードにメニューカードが表示される', async ({ page }) => {
@@ -91,7 +95,7 @@ test.describe('管理者ダッシュボードフロー', () => {
 
     await page.goto('/admin/score-validation')
     await page.waitForLoadState('networkidle')
-    await expect(page.getByText('スコア精度検証')).toBeVisible({ timeout: 8000 })
+    await expect(page.getByRole('main').getByText('スコア精度検証')).toBeVisible({ timeout: 8000 })
     await expect(page.getByRole('tab', { name: '相関分析' })).toBeVisible()
     await expect(page.getByRole('tab', { name: 'A/Bテスト管理' })).toBeVisible()
   })

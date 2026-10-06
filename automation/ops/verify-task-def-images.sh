@@ -1,8 +1,9 @@
 #!/bin/bash
 # 本番サービスが参照しているタスク定義のイメージがECRに存在するかを検査し、
 # 存在しなければ「今回のデプロイで登録したリビジョン」へ戻す。
-# 戻すのは desired=0 かつ running=0 のサービスだけ。稼働中のタスクがある場合は
-# 検査結果を出して失敗させるだけにする（詳細は後述の「稼働中のサービスは触らない」）。
+# 戻すのは running=0 かつ pending=0（稼働中のタスクも起動中のタスクも1つも無い）
+# サービスだけ。どちらかが居る場合は検査結果を出して失敗させるだけにする
+# （詳細は後述の「稼働中・起動中のタスクは失わない」）。
 #
 # なぜ必要か（#1518）:
 #   ECSのデプロイサーキットブレーカーは失敗すると「直前の安定デプロイ」へ戻すが、
@@ -78,16 +79,25 @@ task_def_state() {
   return $worst
 }
 
+# describe_service は「今指しているタスク定義 / desired / running / pending」を
+# タブ区切り1行で返す。復旧(update-service)して良いのは「稼働中のタスクも起動中の
+# タスクも居ないサービス」だけなので、タスク定義だけでは判断できない。
+describe_service() {
+  aws ecs describe-services --cluster "$PROJECT_NAME" --services "$1" \
+    --query 'services[0].[taskDefinition,desiredCount,runningCount,pendingCount]' --output text
+}
+
+# ドレイン待ちの間隔と回数。既定で最大120秒(5秒×24回)待つ。テストから短縮する。
+DRAIN_WAIT_INTERVAL="${DRAIN_WAIT_INTERVAL:-5}"
+DRAIN_WAIT_ATTEMPTS="${DRAIN_WAIT_ATTEMPTS:-24}"
+
 fail=0
 for arg in "$@"; do
   service="${arg%%=*}"
   wanted="${arg#*=}"
   [ "$wanted" = "$service" ] && wanted=""
 
-  # desired / running も一緒に読む。復旧(update-service)して良いのは「今どのタスクも
-  # 動いていないサービス」だけなので、タスク定義だけでは判断できない。
-  if ! svc=$(aws ecs describe-services --cluster "$PROJECT_NAME" --services "$service" \
-    --query 'services[0].[taskDefinition,desiredCount,runningCount]' --output text); then
+  if ! svc=$(describe_service "$service"); then
     echo "::error::$service: サービスを取得できず、参照しているタスク定義を検査できません"
     fail=1
     continue
@@ -95,6 +105,7 @@ for arg in "$@"; do
   current=$(printf '%s' "$svc" | awk '{print $1}')
   desired=$(printf '%s' "$svc" | awk '{print $2}')
   running=$(printf '%s' "$svc" | awk '{print $3}')
+  pending=$(printf '%s' "$svc" | awk '{print $4}')
   if [ -z "$current" ] || [ "$current" = "None" ]; then
     echo "::error::$service: サービスのタスク定義が取得できません(値='$current')"
     fail=1
@@ -125,7 +136,29 @@ for arg in "$@"; do
     continue
   fi
 
-  # 稼働中のサービスは触らない。
+  # 停止要求済み(desired=0)なら、残っているタスクのドレインを待ってから判断する。
+  #
+  # `update-service --desired-count 0` は即座に返るが、既存タスクは ALB の
+  # deregistration_delay と stopTimeout のあいだ runningCount=1 のまま残る。
+  # 待たずに検査すると running=1 を見て復旧を見送り、その後 0 になっても
+  # 再試行する経路が無いため、壊れたタスク定義のまま次の稼働日を迎える（#1563 の指摘）。
+  #
+  # 待つのは desired=0 のときだけ。稼働日(desired>=1)はタスクが減らないので待つ意味が
+  # 無く、待ち切った末に稼働中のタスクを置き換える危険だけが増える。
+  # 取得に失敗した回は前の値を保つ（読めないまま0扱いにして書き換えない）。
+  if [ "$desired" = "0" ]; then
+    for _ in $(seq 1 "$DRAIN_WAIT_ATTEMPTS"); do
+      { [ "$running" = "0" ] && [ "$pending" = "0" ]; } && break
+      echo "  ドレイン待ち $service (running=$running pending=$pending)" >&2
+      sleep "$DRAIN_WAIT_INTERVAL"
+      if svc=$(describe_service "$service"); then
+        running=$(printf '%s' "$svc" | awk '{print $3}')
+        pending=$(printf '%s' "$svc" | awk '{print $4}')
+      fi
+    done
+  fi
+
+  # 稼働中・起動中のタスクは失わない。見るのは running と pending で、desired は見ない。
   #
   # 稼働日のデプロイで新リビジョンがヘルスチェックに落ち、サーキットブレーカーが
   # 「ECRのタグは失効済みだが既存タスクは動き続けている」旧リビジョンへ戻した場合、
@@ -133,12 +166,21 @@ for arg in "$@"; do
   # minimumHealthyPercent=0 のため健全な稼働タスクが先に落とされ、
   # 起動しないタスクに入れ替わって本番が停止する。
   # このステップは安定待ち失敗時にも always() で走るので、その経路に必ず当たる。
+  # 失うものがあるかを決めるのは running/pending であって desired ではない。
   #
-  # 逆に desired=0 / running=0 のサービス（停止日の本番、または起動前）は、
-  # 壊れたタスク定義を指したまま残す方が危険（次の稼働日に起動しない）。
-  # 失うタスクが無いのでここだけ自動で向け直す。
-  if [ "$desired" != "0" ] || [ "$running" != "0" ]; then
-    echo "::error::$service は $current のイメージがECRにありませんが、タスクが稼働中(desired=$desired running=$running)のため自動では戻しません。稼働中のタスクを失うおそれがあります。手動で復旧してください(戻し先候補: $wanted)"
+  # pending も見る理由（#1563 の指摘）: 置換タスクが PENDING / ACTIVATING の間は
+  # runningCount=0 でも「これから RUNNING になるタスク」が居る。旧イメージを既に
+  # pull し終えたタスクが RUNNING へ遷移する直前にECRのタグが失効した場合、
+  # running だけを見ると、回復しかけた本番を直前に落ちた定義へ入れ替えて再び止める。
+  #
+  # 逆に running=0 かつ pending=0 のサービスは、壊れたタスク定義を指したまま残す方が危険
+  # （停止日は誰も気づかず、次の稼働日に起動しない）。失うタスクが無いので向け直す。
+  # ここで desired まで 0 を要求すると、停止日デプロイの一時起動(desired=1)や、
+  # 0へ戻すステップが override=on 等で見送られた場合に復旧が発動しない（#1534 の指摘）。
+  # update-service に渡すのはタスク定義だけで desiredCount は触らないため、
+  # 稼働日の本番であっても起動状態（desired）は変えない。
+  if [ "$running" != "0" ] || [ "$pending" != "0" ]; then
+    echo "::error::$service は $current のイメージがECRにありませんが、タスクが稼働中/起動中(desired=$desired running=$running pending=$pending)のため自動では戻しません。稼働中のタスクを失うおそれがあります。手動で復旧してください(戻し先候補: $wanted)"
     continue
   fi
 

@@ -91,7 +91,7 @@ export default function CompanyRelationGraph({ companyId }: CompanyRelationGraph
         style: {
           background: n.is_focus ? '#FFF3CD' : '#fff',
           border: `${n.is_focus ? 3 : 2}px solid ${n.is_focus ? '#FFC107' : marketColors[marketType]}`,
-          borderRadius: '8px',
+          borderRadius: 1,
           padding: '8px',
           minWidth: '180px',
         },
@@ -186,7 +186,7 @@ export default function CompanyRelationGraph({ companyId }: CompanyRelationGraph
                     py: 1,
                     border: '1px solid',
                     borderColor: 'divider',
-                    borderRadius: '8px',
+                    borderRadius: 1,
                     bgcolor: 'background.paper',
                   }}
                 >

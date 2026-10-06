@@ -152,7 +152,7 @@ function ProfilePageContent() {
         joinCertifications(certificationsAcquired),
         certificationsInProgress,
       )
-      authService.saveAuth(response)
+      await authService.saveAuth(response)
       setUser(authService.getStoredUser())
       setSaved(true)
       if (isFirstTime) {

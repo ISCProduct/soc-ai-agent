@@ -131,7 +131,13 @@ func (c *ResumeController) Review(ctx echo.Context) error {
 		}
 		return httpapi.InternalError(err)
 	}
-	log.Printf("resume_review: completed document_id=%d score=%d items=%d", docID, review.Score, len(items))
+	// スコア無し（ルーブリック違反）のときは "none" と出す。0 と混ざると
+	// ログから「採点できなかったレビュー」を数えられない（#1529）。
+	scoreLog := "none"
+	if review.Score != nil {
+		scoreLog = strconv.Itoa(*review.Score)
+	}
+	log.Printf("resume_review: completed document_id=%d score=%s items=%d", docID, scoreLog, len(items))
 
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"review": review,

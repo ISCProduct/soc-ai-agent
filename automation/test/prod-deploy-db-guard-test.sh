@@ -319,6 +319,16 @@ else
     echo "FAIL 再確認が rds stop-db-instance より後にある（guard=${LAST_GUARD} stop=${RDS_STOP_LINE}）"
     fail=$((fail + 1))
   fi
+  # 再確認はECSの縮退ループより後に置くこと（#1557）。前に戻すと、縮退の途中で
+  # 始まったデプロイを検知できず、desired_count=0 / min_capacity=0 のまま残って
+  # デプロイ中の本番が起動できない。SCALED_DOWN の記録より後にあることで確かめる。
+  SCALED_DOWN_LINE=$(grep -n 'SCALED_DOWN=1' "$SCHED" | tail -1 | cut -d: -f1)
+  if [ -z "$SCALED_DOWN_LINE" ] || [ -z "$LAST_GUARD" ] || [ "$LAST_GUARD" -le "$SCALED_DOWN_LINE" ]; then
+    echo "FAIL 再確認がECSの縮退より前にある（縮退したECSを戻す経路に入れない: guard=${LAST_GUARD:-なし} scaled_down=${SCALED_DOWN_LINE:-なし}）"
+    fail=$((fail + 1))
+  else
+    echo "ok   再確認はECS縮退の後・RDS停止の前にある（縮退を戻してから見送れる）"
+  fi
 
   # ここまでは構造の検査。実際の振る舞い（判定不能なら止めない / waiting も実行中として
   # 数える）は文字列検査では固定できないため、ガード部分だけを抽出して走らせる。
@@ -371,12 +381,18 @@ GHSTUB
 
     guard_case "デプロイが無ければ停止処理へ進む" 10 "" '[{"status":"completed"},{"status":"completed"}]'
     guard_case "in_progress があれば見送る" 0 "" '[{"status":"in_progress"}]'
-    guard_case "queued があれば見送る" 0 "" '[{"status":"queued"}]'
-    # waiting(承認待ち) / pending / requested を completed 扱いすると、承認待ちの
-    # デプロイの真上でECSとRDSを止めてしまう。
-    guard_case "waiting も実行中として見送る" 0 "" '[{"status":"waiting"}]'
-    guard_case "pending も実行中として見送る" 0 "" '[{"status":"pending"}]'
-    guard_case "requested も実行中として見送る" 0 "" '[{"status":"requested"}]'
+    # queued(ランナー待ち) / waiting(承認待ち) / pending / requested はまだ本番を
+    # 触っていない。これらで停止を見送ると、承認待ちのまま放置されたデプロイ1本で
+    # 毎時の停止が無期限に見送られ、ECSとRDSが課金され続ける（Codex #1563 指摘）。
+    # 未開始のデプロイは、落ち着いた desired=0 を読んで was_down=true になり、
+    # RDSも自力で起動し直すので、先に止めてよい。
+    guard_case "queued(未開始)なら停止処理へ進む" 10 "" '[{"status":"queued"}]'
+    guard_case "waiting(承認待ち)なら停止処理へ進む" 10 "" '[{"status":"waiting"}]'
+    guard_case "pending(未開始)なら停止処理へ進む" 10 "" '[{"status":"pending"}]'
+    guard_case "requested(未開始)なら停止処理へ進む" 10 "" '[{"status":"requested"}]'
+    # 承認待ちが混ざっていても、走っているデプロイが1本でもあれば見送る。
+    guard_case "承認待ちに混ざった in_progress は見送る" 0 "" \
+      '[{"status":"waiting"},{"status":"in_progress"},{"status":"completed"}]'
     # 判定不能で停止へ進むと、デプロイ中のRDS停止で本番が起動不能になる（#1518 の再発）。
     guard_case "判定不能なら停止せずジョブを失敗させる" 1 "1" '[]'
     case "${GUARD_OUT:-}" in
@@ -387,6 +403,88 @@ GHSTUB
       echo "FAIL 判定不能の理由を alert-reason.txt に残していない（Discord通知が理由なしになる）"
       fail=$((fail + 1))
     fi
+
+    # 縮退（desired=0 へ更新）を終えた後でデプロイを検知した場合、0にしたECSを
+    # 起動状態へ戻してから見送ること（Codex #1534 指摘）。
+    #
+    # 戻さないと: 入口のガードを通った直後に始まったデプロイが、縮退の途中で
+    # desired 合計を読んで was_down=false と記録し、一時起動も後片付けもしない。
+    # 安定待ちは desired=0 を安定状態として通過し、スモークだけ落ちて本番は
+    # 停止したまま残る。
+    if ! grep -q 'SCALED_DOWN=1' "$SCHED"; then
+      echo "FAIL 縮退したことを記録していない（後段のガードで戻す対象が分からない）"
+      fail=$((fail + 1))
+    fi
+
+    GUARD_WORK2=$(mktemp -d)
+    mkdir -p "$GUARD_WORK2/bin" "$GUARD_WORK2/repo/automation/ops"
+    cp "$GUARD_WORK/bin/gh" "$GUARD_WORK2/bin/gh"
+    # prod-scale.sh のスタブ。復元は「desired と min_capacity を揃えて4サービスを
+    # 起動する」既存スクリプトへ寄せるのが正しいので、呼び出しだけを検査する。
+    cat > "$GUARD_WORK2/repo/automation/ops/prod-scale.sh" <<'SCALESTUB'
+#!/bin/bash
+echo "prod-scale $1" >> "$SCALE_CALLS"
+exit "${SCALE_EXIT:-0}"
+SCALESTUB
+    chmod +x "$GUARD_WORK2/repo/automation/ops/prod-scale.sh"
+
+    # $1 ケース名 / $2 期待exit / $3 SCALED_DOWN の初期値 / $4 prod-scale.sh の終了コード
+    # / $5 期待する prod-scale.sh 呼び出し / $6 GH_FAIL / $7 RUNS
+    restore_case() {
+      local name="$1" want="$2" scaled="$3" scale_exit="$4" want_call="$5" ghfail="$6" runs="$7"
+      local actual out calls
+      SCALE_CALLS="$GUARD_WORK2/scale-calls"
+      : > "$SCALE_CALLS"
+      : > "$GUARD_WORK2/alert-reason.txt"
+      out=$(
+        cd "$GUARD_WORK2/repo" &&
+        PATH="$GUARD_WORK2/bin:$PATH" GH_FAIL="$ghfail" RUNS="$runs" \
+        SCALE_CALLS="$SCALE_CALLS" SCALE_EXIT="$scale_exit" \
+        GITHUB_REPOSITORY="ISCProduct/soc-ai-agent" RUNNER_TEMP="$GUARD_WORK2" \
+        bash -c 'set -e; source "$1"; SCALED_DOWN="$2"; guard_stop_against_deploy "停止処理"; exit 10' \
+          _ "$GUARD_FRAG" "$scaled" 2>&1
+      )
+      actual=$?
+      calls=$(tr '\n' ' ' < "$SCALE_CALLS" | sed 's/ *$//')
+      if [ "$actual" -ne "$want" ]; then
+        echo "FAIL $name: 終了コード 期待=$want 実際=$actual"
+        printf '%s\n' "$out" | sed 's/^/     /'
+        fail=$((fail + 1))
+        return
+      fi
+      if [ "$calls" != "$want_call" ]; then
+        echo "FAIL $name: prod-scale.sh 呼び出し 期待='$want_call' 実際='$calls'"
+        printf '%s\n' "$out" | sed 's/^/     /'
+        fail=$((fail + 1))
+        return
+      fi
+      echo "ok   $name"
+      RESTORE_OUT="$out"
+    }
+
+    # まだECSに触っていない入口のガードでは、本番を起動してはいけない
+    # （停止日にデプロイが走るたび本番が上がると課金が残る）。
+    restore_case "縮退前にデプロイを検知しても本番は起動しない" 0 "" 0 "" "" '[{"status":"in_progress"}]'
+    # 縮退済みなら戻す。これが無いと本番が停止したまま次の毎時実行まで残る。
+    restore_case "縮退後にデプロイを検知したら起動状態へ戻す" 0 1 0 "prod-scale 1" "" '[{"status":"in_progress"}]'
+    # 判定不能(fail-closed)も同じ。停止側の処理を見送るなら縮退も取り消す。
+    restore_case "判定不能でも縮退済みなら戻す" 1 1 0 "prod-scale 1" "1" '[]'
+    # 戻せなかったことを 0 で握りつぶすと、本番が停止したまま誰も気づけない。
+    restore_case "復元に失敗したらジョブを失敗させる" 1 1 1 "prod-scale 1" "" '[{"status":"in_progress"}]'
+    case "${RESTORE_OUT:-}" in
+      *"::error::"*) : ;;
+      *) echo "FAIL 復元失敗を ::error:: で出していない"; fail=$((fail + 1)) ;;
+    esac
+    if [ ! -s "$GUARD_WORK2/alert-reason.txt" ]; then
+      echo "FAIL 復元失敗の理由を alert-reason.txt に残していない（Discord通知が理由なしになる）"
+      fail=$((fail + 1))
+    fi
+    # 承認待ちのデプロイでは縮退を戻さず、そのまま停止処理(RDS停止)へ進む。
+    # 戻してしまうと、承認されるまで毎時「見送り」が続き、ECSとRDSが課金され続ける
+    # （Codex #1563 指摘）。
+    restore_case "承認待ちのデプロイなら縮退を戻さず停止を続ける" 10 1 0 "" "" '[{"status":"waiting"}]'
+    rm -rf "$GUARD_WORK2"
+
     rm -rf "$GUARD_WORK"
   fi
   rm -f "$GUARD_FRAG"

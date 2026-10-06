@@ -70,9 +70,11 @@ func (s *ResumeService) GetResumeStatus(userID uint) (*ResumeStatus, error) {
 		return nil, err
 	}
 
+	// レビューが無い場合と、レビューはあるがスコア無しの場合（#1529）はどちらも nil。
+	// どちらも「学生が（再）レビューを実行すれば解消する」状態で、要対応の理由も同じ。
 	var latestScore *int
-	if review != nil {
-		score := review.Score
+	if review != nil && review.Score != nil {
+		score := *review.Score
 		latestScore = &score
 	}
 

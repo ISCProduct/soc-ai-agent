@@ -15,6 +15,46 @@ export function getSeverityConfig(severity: string): SeverityConfig {
   return severityConfig[severity] ?? { color: 'default', label: severity, borderColor: '#9e9e9e' }
 }
 
+/**
+ * ルーブリックの評価項目（#1529）。順序・キーはバックエンドの
+ * Backend/internal/services/resume/resume_rubric.go と対応させる。
+ * ここに無いキーは表示しない（項目を増やしたら両方に足す）。
+ */
+export const RUBRIC_CRITERIA: { key: string; label: string }[] = [
+  { key: 'specificity', label: '具体性' },
+  { key: 'achievement', label: '成果の明示' },
+  { key: 'role_fit', label: '職種適合' },
+  { key: 'completeness', label: '記載の網羅性' },
+  { key: 'readability', label: '読みやすさ' },
+]
+
+/** 項目スコアの満点（0〜5） */
+export const RUBRIC_SCORE_MAX = 5
+
+/**
+ * item_scores_json を内訳表示用に変換する。
+ * 壊れている・項目が欠けている・値域外の項目は落とす（誤った内訳を出さない）。
+ * 1件も残らなければ空配列を返し、画面は「内訳なし」に倒す。
+ */
+export function parseItemScores(json?: string | null): { key: string; label: string; score: number }[] {
+  if (!json) return []
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(json)
+  } catch {
+    return []
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return []
+
+  const scores = parsed as Record<string, unknown>
+  return RUBRIC_CRITERIA.flatMap(({ key, label }) => {
+    const value = scores[key]
+    if (typeof value !== 'number' || !Number.isFinite(value)) return []
+    if (value < 0 || value > RUBRIC_SCORE_MAX) return []
+    return [{ key, label, score: value }]
+  })
+}
+
 /** API エラーテキストからユーザー向けメッセージを抽出する */
 export function parseApiErrorMessage(errText: string, defaultMessage: string): string {
   if (!errText) return defaultMessage

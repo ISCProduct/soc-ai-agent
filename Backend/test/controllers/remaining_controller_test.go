@@ -271,7 +271,7 @@ func TestCompanyRelationController_WebSearchCompanies_MissingQuery(t *testing.T)
 // ---- ESReviewController ----
 
 func TestESReviewController_Review_MissingESText(t *testing.T) {
-	c := escontrollers.NewESReviewController()
+	c := escontrollers.NewESReviewController(nil)
 	body, _ := json.Marshal(map[string]any{"es_text": ""})
 	req := httptest.NewRequest(http.MethodPost, "/api/es/review", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")

@@ -21,6 +21,7 @@ SOC AI Agent（採用支援SaaS: Go + Next.js + Python RAG）。
 - 入力バリデーションが信頼境界（HTTPハンドラ）にあるか。
 
 ### フロントエンド
+- UI/UXの設計判断は `.claude/skills/school-career-ui-design/SKILL.md` を基準にする（行動中心の情報設計、Loading/Empty/Error、色だけで状態を伝えない、AI生成物を確定情報として見せない）。
 - `any` を使っていないか。失敗を握りつぶして成功扱いにしていないか（エラーはユーザーに見せる）。
 - 非同期処理で**後着の応答が新しい結果を上書きする競合**がないか。検索・絞り込み・タブ切替は特に確認する。
 

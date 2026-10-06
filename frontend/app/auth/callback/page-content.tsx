@@ -83,7 +83,7 @@ function OAuthCallbackContent() {
         }
 
         // ローカルストレージに保存
-        authService.saveAuth(userData)
+        await authService.saveAuth(userData)
         localStorage.removeItem('oauth_state')
 
         // 名前が未設定の場合のみオンボーディングへ（初回登録ユーザー）

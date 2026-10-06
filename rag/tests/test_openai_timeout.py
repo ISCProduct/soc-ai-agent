@@ -46,3 +46,6 @@ def test_run_es_review_passes_timeout(monkeypatch):
         _run_es_review(es_text="hello", question_type="自己PR", company_name="", context_docs=[])
 
     assert mock_openai_cls.call_args.kwargs["timeout"] == OPENAI_TIMEOUT_SEC
+    # #1521で評価と改善文の2呼び出しに分割したので、両方が同じクライアント（=同じ
+    # タイムアウト）で走っていることも確認する
+    assert mock_client.chat.completions.create.call_count == 2

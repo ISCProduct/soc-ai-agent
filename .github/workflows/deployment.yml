@@ -774,6 +774,41 @@ jobs:
           fi
           echo "✓ Migration applied successfully"
 
+      # rag-review は backend より先に入れ替える(#1533)。backend の ES 経路は
+      # RAG の /es/review に生成を委譲しており、旧 RAG は Pydantic の extra=ignore で
+      # 新フィールド(char_limit / tech_stack)を黙って捨てるため、逆順だと
+      # ロール中の数分だけ「字数上限を指定しても無視される」窓ができる。
+      # rag-reviewはchroma(ベクトルDB)とのサイドカー構成で、DBを持たないため
+      # マイグレーション相当のステップは無い。差し替えるのはrag-reviewコンテナの
+      # イメージのみで、chromaコンテナはタスク定義上そのまま維持される。
+      - name: Fetch current rag-review task definition
+        if: steps.changes.outputs.rag == 'true'
+        run: |
+          aws ecs describe-task-definition --task-definition "${PROJECT_NAME}-rag-review" \
+            --query 'taskDefinition' \
+            | jq 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' \
+            > rag-review-task-def.json
+
+      - name: Render rag-review task definition
+        if: steps.changes.outputs.rag == 'true'
+        id: render-rag-review
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: rag-review-task-def.json
+          container-name: rag-review
+          image: ${{ env.ECR_REGISTRY }}/soc-rag-review:${{ env.IMAGE_TAG }}
+
+      - name: Deploy rag-review service
+        if: steps.changes.outputs.rag == 'true'
+        id: deploy-rag-review
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-rag-review.outputs.task-definition }}
+          service: rag-review
+          cluster: ${{ env.PROJECT_NAME }}
+          # 3サービスを同時に走らせ、安定待ちは後段でまとめて行う（直列だと合計待ちが積み上がる）
+          wait-for-service-stability: false
+
       - name: Deploy backend service
         if: steps.changes.outputs.backend == 'true'
         # 後段の「ECRにイメージが在るか」検査で、サーキットブレーカーに戻された場合の
@@ -811,37 +846,6 @@ jobs:
         with:
           task-definition: ${{ steps.render-frontend.outputs.task-definition }}
           service: frontend
-          cluster: ${{ env.PROJECT_NAME }}
-          # 3サービスを同時に走らせ、安定待ちは後段でまとめて行う（直列だと合計待ちが積み上がる）
-          wait-for-service-stability: false
-
-      # rag-reviewはchroma(ベクトルDB)とのサイドカー構成で、DBを持たないため
-      # マイグレーション相当のステップは無い。差し替えるのはrag-reviewコンテナの
-      # イメージのみで、chromaコンテナはタスク定義上そのまま維持される。
-      - name: Fetch current rag-review task definition
-        if: steps.changes.outputs.rag == 'true'
-        run: |
-          aws ecs describe-task-definition --task-definition "${PROJECT_NAME}-rag-review" \
-            --query 'taskDefinition' \
-            | jq 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' \
-            > rag-review-task-def.json
-
-      - name: Render rag-review task definition
-        if: steps.changes.outputs.rag == 'true'
-        id: render-rag-review
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: rag-review-task-def.json
-          container-name: rag-review
-          image: ${{ env.ECR_REGISTRY }}/soc-rag-review:${{ env.IMAGE_TAG }}
-
-      - name: Deploy rag-review service
-        if: steps.changes.outputs.rag == 'true'
-        id: deploy-rag-review
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.render-rag-review.outputs.task-definition }}
-          service: rag-review
           cluster: ${{ env.PROJECT_NAME }}
           # 3サービスを同時に走らせ、安定待ちは後段でまとめて行う（直列だと合計待ちが積み上がる）
           wait-for-service-stability: false
@@ -1012,8 +1016,17 @@ jobs:
       # 失敗した経路でも必ず通す(always)。イメージが無ければ今回のリビジョンへ戻し、
       # そのうえでジョブは失敗させる(黙って直すと「ロールバックが起きた」事実が消える)。
       #
-      # 0へ戻すステップより後に置く。スクリプトは desired=0 のサービスしか戻さないため、
-      # 一時起動中(desired=1)に検査すると停止日の事故を検出するだけで復旧できない。
+      # 0へ戻すステップより後に置く。停止日の一時起動(desired=1 / タスク稼働中)のまま
+      # 検査すると、スクリプトは「稼働中のタスクを失う」側に倒して復旧を見送る。
+      # 先に0へ戻しておけば、壊れたリビジョンを指したサービスは running=0 になり復旧できる。
+      # 0へ戻すステップが override=on 等で見送られた場合も、スクリプト側は
+      # running=0 かつ pending=0 なら復旧する（desired は見ない）ので、
+      # ここで検知した事故は必ず直る(#1534)。
+      #
+      # 直前の prod-scale.sh 0 は即座に返り、既存タスクはしばらくドレインする。
+      # その待ちはスクリプト側が持つ（desired=0 のとき running/pending が0になるまで
+      # 最大2分待つ）。ここで待つとワークフローにしか効かず、手動実行や他の
+      # 呼び出し経路が同じ取りこぼしを起こすため(#1563)。
       - name: Verify task definition images exist in ECR
         if: always()
         run: |

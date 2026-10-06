@@ -31,7 +31,7 @@ SOC AI Agent: 採用支援SaaS (Go + Next.js + Python RAG)
 ## コード規約
 - **共通**: 日本語(コメント/コミット), UTF-8/LF, camelCase(Go/TS), snake_case(Py)
 - **Go 1.25+**: `any`, `slices`, `for i := range n`, `errors.Is/As`, 手動DI, テーブル駆動テスト,TDD
-- **FE**: 型安全(any禁止), Functional Components/Hooks, MUI, App Router
+- **FE**: 型安全(any禁止), Functional Components/Hooks, MUI, App Router。UI/UXの設計・改修は `.claude/skills/school-career-ui-design/SKILL.md` に従う
 - **RAG**: Python 3.10+ 型ヒント, Pydantic, `logging`, プロンプト管理
 - **AI/LLM**: プロンプト版管理, ストリーミング, JSON出力検証, APIキー秘匿
 
