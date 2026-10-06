@@ -108,14 +108,24 @@ export default function CompanyPortalJobsPage() {
 
   const remove = async () => {
     if (editingId === null) return
+    const removedID = editingId
     setSaving(true)
     setDeleteError('')
     try {
-      await companyJobService.remove(editingId)
+      await companyJobService.remove(removedID)
       setConfirmOpen(false)
       setDialogOpen(false)
-      await load()
-      setError('')
+      // 再取得が失敗しても、消した求人を操作できる状態で残さない。
+      setJobs((current) => current.filter((job) => job.id !== removedID))
+      try {
+        const res = await companyJobService.list()
+        setJobs(res.jobs)
+        setCompanyPublished(res.companyPublished)
+        setError('')
+      } catch (e) {
+        const detail = e instanceof Error ? e.message : '求人を取得できませんでした'
+        setError(`${detail} 削除は完了しています。ページを再読み込みしてください。`)
+      }
     } catch (e) {
       setDeleteError(e instanceof Error ? e.message : '削除できませんでした')
     } finally {

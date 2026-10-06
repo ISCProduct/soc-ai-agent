@@ -18,7 +18,7 @@ const (
 )
 
 // ScoutTemplate は企業ごとのスカウト定型文。
-// スキーマは migrations/000042_scouts.up.sql で管理。
+// スキーマは migrations/000043_scouts.up.sql で管理。
 type ScoutTemplate struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	CompanyID uint      `gorm:"not null;index" json:"company_id"`
@@ -58,7 +58,7 @@ func (ScoutCompanyBlock) TableName() string { return "scout_company_blocks" }
 
 // ScoutSendLock は企業と学生の組に1行だけあるロック行。
 // 送信時にこの行を排他ロックし、クールダウン判定と scouts への INSERT を直列化する。
-// スキーマは migrations/000043_scout_send_locks.up.sql で管理。
+// スキーマは migrations/000044_scout_send_locks.up.sql で管理。
 type ScoutSendLock struct {
 	CompanyID uint `gorm:"primaryKey"`
 	UserID    uint `gorm:"primaryKey"`

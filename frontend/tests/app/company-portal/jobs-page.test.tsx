@@ -73,4 +73,43 @@ describe('求人管理', () => {
 
     expect(remove).toHaveBeenCalledWith(7)
   })
+
+  it('削除後の一覧再取得に失敗してもエラーを残し、消した求人は一覧から外す', async () => {
+    list.mockResolvedValueOnce({
+      jobs: [
+        {
+          id: 7,
+          title: 'バックエンド',
+          description: '',
+          job_url: '',
+          job_category_id: 0,
+          min_salary: 0,
+          max_salary: 0,
+          employment_type: '',
+          work_location: '東京',
+          remote_option: false,
+          required_skills: '',
+          preferred_skills: '',
+          data_status: 'draft',
+          is_active: true,
+          created_at: '',
+          updated_at: '',
+        },
+      ],
+      companyPublished: true,
+    })
+    list.mockRejectedValueOnce(new Error('通信エラー'))
+
+    render(<CompanyPortalJobsPage />)
+
+    expect(await screen.findByText('バックエンド')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '編集' }))
+    fireEvent.click(screen.getByRole('button', { name: 'この求人を削除' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '削除する' }))
+    })
+
+    expect(await screen.findByText(/削除は完了しています/)).toBeInTheDocument()
+    expect(screen.queryByText('バックエンド')).not.toBeInTheDocument()
+  })
 })
