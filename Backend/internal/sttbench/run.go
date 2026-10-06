@@ -7,11 +7,126 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
+
+const (
+	defaultOpenAIBaseURL = "https://api.openai.com/v1"
+	localAPIKey          = "local"
+)
+
+var (
+	ErrMissingOpenAIAPIKey = errors.New("OPENAI_API_KEY is required for the OpenAI audio provider")
+	ErrMissingLocalBaseURL = errors.New("AI_AUDIO_BASE_URL is required for the local audio provider")
+)
+
+// APIConfig は sttbench が使う音声推論先。API キーは出力・ログへ含めない。
+type APIConfig struct {
+	Provider string
+	BaseURL  string
+	apiKey   string
+}
+
+// APIConfigFromEnv は Backend の AI_AUDIO_* 設定に合わせて音声推論先を解決する。
+// 音声 Provider 未指定時は AI_TEXT_PROVIDER を継承し、同じ Provider なら
+// AI_TEXT_BASE_URL も継承する（Backend の Client と同じ規則）。
+func APIConfigFromEnv() (APIConfig, error) {
+	if err := validateProviderEnv("AI_TEXT_PROVIDER"); err != nil {
+		return APIConfig{}, err
+	}
+	if err := validateProviderEnv("AI_AUDIO_PROVIDER"); err != nil {
+		return APIConfig{}, err
+	}
+	textProvider := resolveProvider(os.Getenv("AI_TEXT_PROVIDER"), "openai")
+	audioProvider := configuredAudioProvider()
+	config := APIConfig{Provider: audioProvider}
+
+	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("AI_AUDIO_BASE_URL")), "/")
+	if baseURL == "" && audioProvider == textProvider {
+		baseURL = strings.TrimRight(strings.TrimSpace(os.Getenv("AI_TEXT_BASE_URL")), "/")
+	}
+	if baseURL == "" && audioProvider == "openai" {
+		baseURL = defaultOpenAIBaseURL
+	}
+	if baseURL == "" {
+		return config, ErrMissingLocalBaseURL
+	}
+	if err := validateBaseURL(baseURL); err != nil {
+		return config, err
+	}
+	config.BaseURL = baseURL
+
+	if audioProvider == "local" {
+		config.apiKey = localAPIKey
+		return config, nil
+	}
+
+	config.apiKey = strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	if config.apiKey == "" {
+		return config, ErrMissingOpenAIAPIKey
+	}
+	if !allowsRealKey(baseURL) {
+		return config, errors.New("OpenAI API key may only be sent to HTTPS or a loopback audio endpoint")
+	}
+	return config, nil
+}
+
+func validateProviderEnv(name string) error {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	if value != "" && value != "openai" && value != "local" {
+		return fmt.Errorf("%s must be openai or local", name)
+	}
+	return nil
+}
+
+func configuredAudioProvider() string {
+	textProvider := resolveProvider(os.Getenv("AI_TEXT_PROVIDER"), "openai")
+	return resolveProvider(os.Getenv("AI_AUDIO_PROVIDER"), textProvider)
+}
+
+func resolveProvider(value, fallback string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return fallback
+	}
+	if value == "local" {
+		return "local"
+	}
+	return "openai"
+}
+
+func validateBaseURL(value string) error {
+	u, err := url.Parse(value)
+	if err != nil || u.Host == "" || (!strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https")) {
+		return errors.New("audio base URL must be an absolute http:// or https:// URL")
+	}
+	return nil
+}
+
+func allowsRealKey(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	if strings.EqualFold(u.Scheme, "https") {
+		return true
+	}
+	if !strings.EqualFold(u.Scheme, "http") {
+		return false
+	}
+	host := strings.Trim(u.Hostname(), "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
 
 // CaseResult は1ケース1モデルの評価結果。
 //
@@ -41,6 +156,8 @@ type CaseResult struct {
 // ModelSummary はモデル単位の集計。
 type ModelSummary struct {
 	Model           string       `json:"model"`
+	Provider        string       `json:"provider"`
+	CostBasis       string       `json:"cost_basis"`
 	Cases           []CaseResult `json:"cases"`
 	MeanCER         float64      `json:"mean_cer"`
 	MeanSemanticCER float64      `json:"mean_semantic_cer"`
@@ -114,7 +231,16 @@ func RunModel(model string, cases []Case, audios []Audio, hints string) *ModelSu
 		byID[c.ID] = c
 	}
 
-	s := &ModelSummary{Model: model, EstCostPerMinUSD: costPerMinUSD[model]}
+	provider := configuredAudioProvider()
+	s := &ModelSummary{Model: model, Provider: provider}
+	if provider == "local" {
+		s.CostBasis = "local_api_only_excludes_compute"
+	} else if price, ok := costPerMinUSD[model]; ok {
+		s.EstCostPerMinUSD = price
+		s.CostBasis = "openai_published_price"
+	} else {
+		s.CostBasis = "unknown_model_price"
+	}
 	var totalLatency int64
 	var apiOK, consecutive4xx int
 
@@ -231,16 +357,20 @@ func (e *statusError) fatal() bool {
 }
 
 func transcribe(model, hints string, a Audio) (string, int64, error) {
+	config, err := APIConfigFromEnv()
+	if err != nil {
+		return "", 0, err
+	}
 	buf, contentType, err := buildTranscribeForm(model, hints, a)
 	if err != nil {
 		return "", 0, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, "https://api.openai.com/v1/audio/transcriptions", buf)
+	req, err := http.NewRequest(http.MethodPost, config.BaseURL+"/audio/transcriptions", buf)
 	if err != nil {
 		return "", 0, err
 	}
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("OPENAI_API_KEY"))
+	req.Header.Set("Authorization", "Bearer "+config.apiKey)
 	req.Header.Set("Content-Type", contentType)
 
 	start := time.Now()
