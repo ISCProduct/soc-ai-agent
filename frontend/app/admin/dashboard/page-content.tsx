@@ -332,7 +332,7 @@ export default function PageContent() {
                   </TableCell>
                   <TableCell>
                     <Tooltip title="セッション詳細">
-                      <IconButton size="small" onClick={() => handleOpenDetail(u)} disabled={u.session_count === 0}>
+                      <IconButton size="small" onClick={() => handleOpenDetail(u)} disabled={u.session_count === 0} aria-label="利用者の詳細を開く">
                         <ExpandMoreIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>

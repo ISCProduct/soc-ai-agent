@@ -1,0 +1,79 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>avatar preview</title>
+<style>html,body{margin:0;background:#f7f4ec}#c{width:520px;height:620px}</style>
+<div id="c"></div>
+<script type="importmap">
+{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+
+const params = new URLSearchParams(location.search)
+const file = params.get('file') || '/public/avatars/male-avatar.glb'
+const nod = parseFloat(params.get('nod') || '0')     // rad
+const mouth = parseFloat(params.get('mouth') || '0') // 0-1
+
+const el = document.getElementById('c')
+const scene = new THREE.Scene()
+// ThreeAvatar.tsx と同じカメラ設定
+const camera = new THREE.PerspectiveCamera(40, 520/620, 0.1, 20)
+camera.position.set(0, 0.8, 2.8)
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true })
+renderer.setSize(520, 620)
+renderer.outputColorSpace = THREE.SRGBColorSpace
+el.appendChild(renderer.domElement)
+scene.add(new THREE.AmbientLight(0xffffff, 1.2))
+const key = new THREE.DirectionalLight(0xffffff, 1.5); key.position.set(2,2,3); scene.add(key)
+const fill = new THREE.DirectionalLight(0xffffff, 0.6); fill.position.set(-2,1,-2); scene.add(fill)
+const rim = new THREE.DirectionalLight(0xffffff, 0.4); rim.position.set(0,2,-3); scene.add(rim)
+
+const group = new THREE.Group(); scene.add(group)
+const loader = new GLTFLoader()
+loader.load(file, (gltf) => {
+  const model = gltf.scene
+  // ThreeAvatar.tsx と同じ正規化
+  let hasSkeleton = false
+  model.traverse(c => { if (c.isBone) hasSkeleton = true })
+  model.rotation.set(0, hasSkeleton ? 0 : -Math.PI/2, 0)
+  model.updateMatrixWorld(true)
+  const box = new THREE.Box3().setFromObject(model)
+  const size = box.getSize(new THREE.Vector3())
+  const center = box.getCenter(new THREE.Vector3())
+  const s = size.y > 0 ? 1.8/size.y : 1
+  model.scale.setScalar(s)
+  model.position.set(-center.x*s, -center.y*s + 0.3, -center.z*s)
+  group.add(model)
+
+  // うなずき: Head ボーンを回す
+  let head = null, morphMesh = null, morphIndex = -1
+  model.traverse((o) => {
+    if (o.isBone && o.name === 'Head') head = o
+    if (o.isMesh && o.morphTargetDictionary) {
+      for (const [k, i] of Object.entries(o.morphTargetDictionary)) {
+        if (k.toLowerCase() === 'aa') { morphMesh = o; morphIndex = i }
+      }
+    }
+  })
+  // うなずきの向きと口の開き具合は全身の絵では小さすぎて判断できない。
+  // ?cam=face で顔に寄せる。正規化後の目はおよそ y=0.77 にある。
+  if (params.get('cam') === 'face') {
+    camera.position.set(0, 0.74, 0.8)
+    camera.lookAt(0, 0.74, 0)
+  }
+
+  // うなずきは Head のローカル X 軸まわり。向きの補正は逆バインド行列側に
+  // 入っていて Head のローカル軸はワールドと一致するので、これがピッチになる。
+  if (head && nod !== 0) head.rotation.x += nod
+  if (morphMesh && morphIndex >= 0) morphMesh.morphTargetInfluences[morphIndex] = mouth
+
+  window.__info = {
+    headFound: !!head, morphFound: morphIndex >= 0,
+    hasSkeleton, nod, mouth,
+    morphNames: morphMesh ? Object.keys(morphMesh.morphTargetDictionary) : [],
+  }
+  renderer.render(scene, camera)
+  window.__ready = true
+}, undefined, (e) => { window.__error = String(e); window.__stack = (e && e.stack) ? String(e.stack) : ''; window.__ready = true })
+</script>

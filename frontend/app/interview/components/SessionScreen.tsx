@@ -232,7 +232,14 @@ export default function SessionScreen({
 
           {/* アバター（全面） */}
           <Box sx={{ width: '100%', height: '100%' }}>
-            <ThreeAvatar gender={avatarGender} audioStream={null} level={aiLevel} speaking={aiSpeaking} />
+            <ThreeAvatar
+              gender={avatarGender}
+              audioStream={null}
+              level={aiLevel}
+              speaking={aiSpeaking}
+              active={isConnected}
+              pending={turnPending}
+            />
           </Box>
 
           {/* 面接官ロールラベル */}
@@ -374,20 +381,20 @@ export default function SessionScreen({
             <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
               <Tooltip title={cameraEnabled ? 'カメラをオフ' : 'カメラをオン'}>
                 <span>
-                  <IconButton onClick={onToggleCamera} disabled={!isConnected} size="small"
+                  <IconButton onClick={onToggleCamera} disabled={!isConnected} size="small" aria-label="カメラの入切"
                     sx={{ bgcolor: cameraEnabled ? 'rgba(255,255,255,0.15)' : '#ea4335', width: 36, height: 36, '&:hover': { bgcolor: cameraEnabled ? 'rgba(255,255,255,0.25)' : '#c5221f' }, '&:disabled': { bgcolor: 'rgba(255,255,255,0.06)' } }}>
                     {cameraEnabled ? <VideocamIcon sx={{ color: '#fff', fontSize: 18 }} /> : <VideocamOffIcon sx={{ color: '#fff', fontSize: 18 }} />}
                   </IconButton>
                 </span>
               </Tooltip>
               <Tooltip title={captionsVisible ? '字幕をオフ' : '字幕をオン'}>
-                <IconButton onClick={onToggleCaptions} size="small"
+                <IconButton onClick={onToggleCaptions} size="small" aria-label="字幕の表示切替"
                   sx={{ bgcolor: captionsVisible ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', width: 36, height: 36 }}>
                   <ClosedCaptionIcon sx={{ color: captionsVisible ? '#fff' : 'rgba(255,255,255,0.5)', fontSize: 18 }} />
                 </IconButton>
               </Tooltip>
               <Tooltip title={handsFreeMode ? 'ハンズフリーをオフ' : 'ハンズフリーをオン'}>
-                <IconButton onClick={onToggleHandsFree} disabled={!isConnected} size="small"
+                <IconButton onClick={onToggleHandsFree} disabled={!isConnected} size="small" aria-label="ハンズフリーの入切"
                   sx={{ bgcolor: handsFreeMode ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', width: 36, height: 36 }}>
                   <MicIcon sx={{ color: handsFreeMode ? '#fff' : 'rgba(255,255,255,0.5)', fontSize: 18 }} />
                 </IconButton>

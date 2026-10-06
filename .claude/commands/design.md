@@ -1,8 +1,6 @@
-{
-  "name": "spec-design",
-  "description": "データフロー・アーキテクチャ設計",
-  "argument_hint": "要件サマリと既存システム情報を入力"
-}
+---
+description: アーキテクチャとデータフローを設計する
+argument-hint: 要件サマリ / 既存システム情報
 ---
 # システム設計レビュー
 

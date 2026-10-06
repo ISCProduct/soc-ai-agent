@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"Backend/internal/safego"
 )
 
 var companyValidationCacheTTL = 30 * time.Minute
@@ -66,7 +68,8 @@ func NewCompanyValidationService(companyRepo companyLookup, client *openai.Clien
 		openaiClient: client,
 		cache:        make(map[string]companyValidationCacheEntry),
 	}
-	go s.purgeLoop()
+	// キャッシュ掃除ループが panic するとプロセスごと落ちる(#1446)。
+	safego.Go(s.purgeLoop)
 	return s
 }
 

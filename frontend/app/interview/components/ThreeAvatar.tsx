@@ -6,6 +6,13 @@ import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.j
 import { Box } from '@mui/material'
 import { loadAvatar, type AvatarGender } from '@/lib/avatar-loader'
 import { LipsyncManager } from '@/lib/interview/lipsync-manager'
+import {
+  inspectAvatar,
+  avatarDeficiencies,
+  describeDeficiencies,
+  type AvatarCapabilities,
+} from '@/lib/interview/avatar-capabilities'
+import { AvatarMotion, type InterviewerState } from '@/lib/interview/avatar-motion'
 import styles from './interview.module.css'
 
 interface ThreeAvatarProps {
@@ -13,6 +20,10 @@ interface ThreeAvatarProps {
   audioStream: MediaStream | null
   level: number      // AI audio amplitude 0–1 (drives mouth open shape key)
   speaking: boolean
+  /** 面接が始まっているか。false の間は相槌を打たない（学生はまだ何も話していない）。 */
+  active: boolean
+  /** 面接官が次の質問を用意している最中か。視線を少し外す。 */
+  pending?: boolean
 }
 
 // ─── Shape key discovery ──────────────────────────────────────────────────────
@@ -89,12 +100,16 @@ function findMouthTarget(root: THREE.Object3D): MouthTarget | null {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function ThreeAvatar({ gender, audioStream, level, speaking }: ThreeAvatarProps) {
+export default function ThreeAvatar({
+  gender, audioStream, level, speaking, active, pending = false,
+}: ThreeAvatarProps) {
   const [useFallback, setUseFallback] = useState(false)
   const [isLoading, setIsLoading]   = useState(true)
   const containerRef    = useRef<HTMLDivElement | null>(null)
   const levelRef        = useRef(level)
   const speakingRef     = useRef(speaking)
+  const activeRef       = useRef(active)
+  const pendingRef      = useRef(pending)
   const lipsyncMgrRef   = useRef<LipsyncManager | null>(null)
   const avatarMeshRef   = useRef<THREE.Object3D | null>(null)
   const mouthTargetRef  = useRef<MouthTarget | null>(null)
@@ -104,9 +119,14 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
   const jawSmoothedRef  = useRef(0)
   // Morph meshes for Oculus viseme fallback (RPM-style models)
   const visemeMeshesRef = useRef<THREE.Mesh[]>([])
+  // うなずき・まばたき・視線。モデルが対応していない部位は黙って飛ばす。
+  const capsRef   = useRef<AvatarCapabilities | null>(null)
+  const motionRef = useRef<AvatarMotion | null>(null)
 
   useEffect(() => { levelRef.current = level },    [level])
   useEffect(() => { speakingRef.current = speaking }, [speaking])
+  useEffect(() => { activeRef.current = active },     [active])
+  useEffect(() => { pendingRef.current = pending },   [pending])
 
   useEffect(() => {
     if (lipsyncMgrRef.current && audioStream) {
@@ -179,8 +199,35 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
         avatarGroup.scale.set(breathe, breathe, breathe)
       }
 
-      // ── Mouth shape key (primary path) ─────────────────────────────────
-      const mt = mouthTargetRef.current
+      // ── うなずき・まばたき・視線・口（#1603）────────────────────────────
+      // 面接官が話しているか聞いているかで動きを変える。学生が話している間は
+      // 相槌としてうなずき、面接官が話している間は口だけ動かす。
+      const caps = capsRef.current
+      const motion = motionRef.current
+      if (caps && motion) {
+        // 面接が始まる前に相槌を打つと、学生が何も話していないのにうなずく
+        // 面接官になる。開始前は idle（呼吸とまばたきだけ）にする。
+        const state: InterviewerState = speakingRef.current ? 'speaking'
+          : !activeRef.current ? 'idle'
+          : pendingRef.current ? 'thinking'
+          : 'listening'
+        motion.setState(state, t)
+        // level はすでに useInterviewSession が rms*6 で正規化した 0〜1 の値。
+        // ここでさらに 1.4 を掛けると発話中ほぼ常に 1.0 に張り付き、
+        // 口が開きっぱなしになって喋っているように見えない。
+        // 旧実装は 1.4 を掛けていたが、当時はモデルにモーフが無く
+        // 口が一切動かなかったので飽和が表に出ていなかった。
+        motion.update(caps, t, levelRef.current)
+      }
+
+      // ── Mouth shape key (legacy path) ───────────────────────────────────
+      // caps が口を動かせるなら口は caps の持ち物。以下の3経路（モーフ・顎
+      // ボーン・ビセーム）はどれも触らない。同じモーフを2箇所から毎フレーム
+      // 書くと値が競合して口が震える。顎ボーンも AvatarMotion の代替経路と
+      // 二重になる。
+      const capsOwnsMouth = caps !== null &&
+        (caps.mouthTargets.length > 0 || caps.jawBone !== null)
+      const mt = capsOwnsMouth ? null : mouthTargetRef.current
       if (mt && mt.mesh.morphTargetInfluences) {
         const target = Math.min(1, levelRef.current * 1.4)
         if (target > mt.smoothed) {
@@ -191,8 +238,8 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
         mt.mesh.morphTargetInfluences[mt.index] = mt.smoothed
       }
 
-      // ── Jaw bone rotation (for models without morph targets) ───────────
-      const jaw = jawBoneRef.current
+      // ── Jaw bone rotation (legacy path) ────────────────────────────────
+      const jaw = capsOwnsMouth ? null : jawBoneRef.current
       if (jaw && jawRestRotRef.current) {
         const target = Math.min(1, levelRef.current * 1.4)
         const prev = jawSmoothedRef.current
@@ -202,7 +249,8 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
       }
 
       // ── Oculus viseme fallback (for RPM-style models with no mouth_open) ─
-      if (!mt && !jaw && lipsyncMgrRef.current && visemeMeshesRef.current.length > 0) {
+      if (!capsOwnsMouth && !mt && !jaw &&
+          lipsyncMgrRef.current && visemeMeshesRef.current.length > 0) {
         const visemes = lipsyncMgrRef.current.getCurrentVisemes()
         visemeMeshesRef.current.forEach((mesh) => {
           if (!mesh.morphTargetDictionary || !mesh.morphTargetInfluences) return
@@ -268,6 +316,18 @@ export default function ThreeAvatar({ gender, audioStream, level, speaking }: Th
         model.position.x = -center.x * s
         model.position.y = -center.y * s + 0.3   // shift up so head/torso fill camera frame
         model.position.z = -center.z * s
+
+        // ── 動かせる部位を洗い出す（#1603）──────────────────────────────
+        // うなずかない・口が動かない原因はほぼモデル側にある。実際に本番へ
+        // 入っていた Tripo 製の GLB は骨格も表情も持たない静止メッシュだった。
+        // 描画は止めず、原因が開発者に分かるようにログへ残す。
+        const caps = inspectAvatar(model)
+        const missing = avatarDeficiencies(caps)
+        if (missing.length > 0) {
+          console.warn('[ThreeAvatar] ' + describeDeficiencies(missing))
+        }
+        capsRef.current = caps
+        motionRef.current = new AvatarMotion()
 
         // ─────────────────────────────────────────────────────────────────
 

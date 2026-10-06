@@ -110,7 +110,12 @@ func SetupAdminRoutes(
 	admin.POST("/job-positions", adminJobController.CreateJobPosition)
 	// 求人の公開・却下も企業と同じく全テナント共通の DataStatus / IsActive を書き換える。
 	// 未公開企業の求人を公開できてしまうため、企業側と揃えてシステム管理者専用にする。
-	admin.Any("/job-positions/:id/:action", adminJobController.JobPositionAction, platform)
+	// Any だと GET/HEAD/TRACE/PROPFIND まで同じハンドラに入る。ハンドラは
+	// HTTP メソッドを見ず :action だけで publish / reject を分岐するので、
+	// GET で公開・却下が実行できてしまう（状態変更を GET に載せない）。
+	// 呼び出し元(FE・BFF・テスト)は全て PATCH で、ハンドラのコメントも PATCH
+	// と書いてあるため、PATCH に絞る。
+	admin.PATCH("/job-positions/:id/:action", adminJobController.JobPositionAction, platform)
 
 	// ── システム管理者専用（テナント横断・インフラ）────────────────────
 	admin.POST("/users/purge-expired", adminUserController.PurgeExpired, platform)
