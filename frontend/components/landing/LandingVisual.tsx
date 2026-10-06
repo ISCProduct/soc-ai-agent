@@ -16,10 +16,14 @@ import { LP, RISE, NO_MOTION, delay } from './tokens'
  * スコアの観点は interview_rubric.go の rubricCriteria と揃えること。
  */
 
+/** 値域は interview_rubric.go の RubricScoreMin/Max（0〜5の整数）と揃えること。
+ *  百分率で描くと実画面に無い尺度になる。 */
+const RUBRIC_MAX = 5
+
 const SCORES = [
-  { label: '論理性', v: 82 },
-  { label: '具体性', v: 64 },
-  { label: '主体性', v: 91 },
+  { label: '論理性', v: 4 },
+  { label: '具体性', v: 2 },
+  { label: '主体性', v: 4 },
 ] as const
 
 /** 紙片。白をわずかに起こして、紙の上に紙を重ねた段差を出す。 */
@@ -118,7 +122,7 @@ export function LandingVisual() {
               key={s.label}
               sx={{
                 display: 'grid',
-                gridTemplateColumns: '4rem 1fr 2rem',
+                gridTemplateColumns: '4rem 1fr 2.6rem',
                 alignItems: 'center',
                 gap: 1.25,
               }}
@@ -126,7 +130,9 @@ export function LandingVisual() {
               <Box sx={{ fontSize: 12, color: LP.muted }}>{s.label}</Box>
               {/* 棒は角丸にしない。方眼の目盛りに合わせる。 */}
               <Box sx={{ height: 8, bgcolor: LP.paper, border: `1px solid ${LP.ruleSoft}` }}>
-                <Box sx={{ width: `${s.v}%`, height: '100%', bgcolor: LP.primary }} />
+                <Box
+                  sx={{ width: `${(s.v / RUBRIC_MAX) * 100}%`, height: '100%', bgcolor: LP.primary }}
+                />
               </Box>
               <Box
                 sx={{
@@ -138,13 +144,16 @@ export function LandingVisual() {
                 }}
               >
                 {s.v}
+                <Box component="span" sx={{ fontSize: 10, color: LP.muted, fontWeight: 400 }}>
+                  /{RUBRIC_MAX}
+                </Box>
               </Box>
             </Box>
           ))}
         </Box>
       </Box>
 
-      {/* 3. 企業の適合 */}
+      {/* 3. マッチ度（CompanyCard と同じ「マッチ度 ％」で出す） */}
       <Box
         sx={{
           ...SHEET,
@@ -154,7 +163,7 @@ export function LandingVisual() {
           ...delay(5),
         }}
       >
-        <Box sx={TAG}>企業の適合</Box>
+        <Box sx={TAG}>マッチ度</Box>
         <Box sx={{ display: 'grid' }}>
           {[
             { n: '株式会社サンプルソフト', m: 92 },

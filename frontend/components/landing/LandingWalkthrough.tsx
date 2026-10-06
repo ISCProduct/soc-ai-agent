@@ -27,13 +27,13 @@ const STEPS = [
     n: '2',
     when: 'その場で',
     title: '声に出して、何度でも練習する',
-    body: 'AI面接官が質問し、声で答える。時間も回数も決まっていないので、言い直しながら固めていける。',
+    body: 'AI面接官が5つのトピック（自己紹介・志望動機／職務経験・実績／強み・弱み／キャリアビジョン／逆質問）を聞き、声で答えます。1トピックは最大2往復、1問の目安は180秒。セッション自体は何度でもやり直せます。',
   },
   {
     n: '3',
     when: '終わった直後',
     title: '直すところが、自分の言葉で返ってくる',
-    body: '5つの観点で講評が出る。根拠は実際に話した言葉から引用されるので、どこを直すかが分かる。',
+    body: '5つの観点で講評が出る。根拠は実際に話した言葉と照合できたものだけを引用するので、どこを直すかが分かる。',
   },
 ] as const
 
@@ -145,13 +145,13 @@ export function LandingWalkthrough() {
               { label: '具体性', v: 2 },
               { label: '主体性', v: 4 },
               { label: 'コミュニケーション力', v: 3 },
-              { label: '積極性', v: 4 },
+              { label: '積極性・熱意', v: 4 },
             ].map((s) => (
               <Box
                 key={s.label}
                 sx={{
                   display: 'grid',
-                  gridTemplateColumns: '9.5rem 1fr 1.5rem',
+                  gridTemplateColumns: '10.5rem 1fr 1.5rem',
                   alignItems: 'center',
                   gap: 1.25,
                 }}
@@ -223,7 +223,7 @@ export function LandingWalkthrough() {
 
         <Box sx={{ px: { xs: 2.5, md: 3.5 }, py: 2 }}>
           <Typography sx={{ fontSize: 12, lineHeight: 2, color: LP.muted }}>
-            根拠は、実際に話した言葉と照合できたものだけが出ます。照合できない指摘は表示しません。
+            根拠は、実際に話した言葉と照合できたものだけが出ます。照合できなかった根拠は空欄になります（スコアと講評は残ります）。
           </Typography>
         </Box>
       </Box>
