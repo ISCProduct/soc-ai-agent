@@ -37,6 +37,12 @@ type APIConfig struct {
 // 音声 Provider 未指定時は AI_TEXT_PROVIDER を継承し、同じ Provider なら
 // AI_TEXT_BASE_URL も継承する（Backend の Client と同じ規則）。
 func APIConfigFromEnv() (APIConfig, error) {
+	if err := validateProviderEnv("AI_TEXT_PROVIDER"); err != nil {
+		return APIConfig{}, err
+	}
+	if err := validateProviderEnv("AI_AUDIO_PROVIDER"); err != nil {
+		return APIConfig{}, err
+	}
 	textProvider := resolveProvider(os.Getenv("AI_TEXT_PROVIDER"), "openai")
 	audioProvider := configuredAudioProvider()
 	config := APIConfig{Provider: audioProvider}
@@ -69,6 +75,14 @@ func APIConfigFromEnv() (APIConfig, error) {
 		return config, errors.New("OpenAI API key may only be sent to HTTPS or a loopback audio endpoint")
 	}
 	return config, nil
+}
+
+func validateProviderEnv(name string) error {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	if value != "" && value != "openai" && value != "local" {
+		return fmt.Errorf("%s must be openai or local", name)
+	}
+	return nil
 }
 
 func configuredAudioProvider() string {

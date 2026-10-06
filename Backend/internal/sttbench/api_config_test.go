@@ -58,6 +58,16 @@ func TestAPIConfigFromEnv_RequiresLocalBaseURL(t *testing.T) {
 	}
 }
 
+func TestAPIConfigFromEnv_RejectsUnknownProvider(t *testing.T) {
+	clearAudioProviderEnv(t)
+	t.Setenv("AI_AUDIO_PROVIDER", "locla")
+	t.Setenv("OPENAI_API_KEY", "test-secret")
+
+	if _, err := APIConfigFromEnv(); err == nil {
+		t.Fatal("misspelled provider must not silently fall back to a billable OpenAI endpoint")
+	}
+}
+
 func TestTranscribe_RoutesToLocalAudioProvider(t *testing.T) {
 	clearAudioProviderEnv(t)
 	var gotPath, gotAuthorization, gotModel string
