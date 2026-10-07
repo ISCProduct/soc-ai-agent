@@ -46,6 +46,14 @@ func expectOtherUserMessageCount(mock sqlmock.Sqlmock, sessionID string, userID 
 		WillReturnRows(sqlmock.NewRows([]string{"count(*)"}).AddRow(count))
 }
 
+func expectSessionValidationDeadlock(mock sqlmock.Sqlmock, sessionID string) {
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT .* FROM `session_validations`").
+		WithArgs(sessionID, 1).
+		WillReturnError(&mysqlDriver.MySQLError{Number: 1213, Message: "Deadlock found"})
+	mock.ExpectRollback()
+}
+
 func TestClaimSessionOwnership_UnsetOwnerWithOtherUserMessageIsForbidden(t *testing.T) {
 	repo, mock := newSessionValidationRepositoryTestDB(t)
 	const sessionID = "legacy-owned-by-other"
@@ -236,5 +244,70 @@ func TestClaimSessionOwnership_DuplicateInsertReloadsOwner(t *testing.T) {
 				t.Fatalf("未充足の SQL 期待: %v", err)
 			}
 		})
+	}
+}
+
+func TestClaimSessionOwnership_RetriesDeadlockAndSucceeds(t *testing.T) {
+	repo, mock := newSessionValidationRepositoryTestDB(t)
+	const sessionID = "deadlock-then-success"
+	const userID = uint(22)
+
+	expectSessionValidationDeadlock(mock, sessionID)
+	mock.ExpectBegin()
+	expectSessionValidationLookup(mock, sessionID, sqlmock.NewRows([]string{
+		"id", "session_id", "user_id", "invalid_answer_count", "is_terminated",
+		"last_invalid_answer_time", "created_at", "updated_at",
+	}))
+	expectOtherUserMessageCount(mock, sessionID, userID, 0)
+	mock.ExpectExec("INSERT INTO `session_validations`").
+		WithArgs(sessionID, 0, false, sqlmock.AnyArg(), sqlmock.AnyArg(), userID).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	if err := repo.ClaimSessionOwnership(sessionID, userID); err != nil {
+		t.Fatalf("ClaimSessionOwnership() error = %v, want nil", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("未充足の SQL 期待: %v", err)
+	}
+}
+
+func TestClaimSessionOwnership_ReturnsErrorAfterThreeDeadlocks(t *testing.T) {
+	repo, mock := newSessionValidationRepositoryTestDB(t)
+	const sessionID = "persistent-deadlock"
+	const userID = uint(22)
+
+	for range 3 {
+		expectSessionValidationDeadlock(mock, sessionID)
+	}
+
+	err := repo.ClaimSessionOwnership(sessionID, userID)
+	var mysqlErr *mysqlDriver.MySQLError
+	if !errors.As(err, &mysqlErr) || mysqlErr.Number != 1213 {
+		t.Fatalf("ClaimSessionOwnership() error = %v, want MySQL error 1213", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("未充足の SQL 期待: %v", err)
+	}
+}
+
+func TestClaimSessionOwnership_DoesNotRetryNonDeadlockError(t *testing.T) {
+	repo, mock := newSessionValidationRepositoryTestDB(t)
+	const sessionID = "non-deadlock-error"
+	const userID = uint(22)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT .* FROM `session_validations`").
+		WithArgs(sessionID, 1).
+		WillReturnError(&mysqlDriver.MySQLError{Number: 1205, Message: "Lock wait timeout"})
+	mock.ExpectRollback()
+
+	err := repo.ClaimSessionOwnership(sessionID, userID)
+	var mysqlErr *mysqlDriver.MySQLError
+	if !errors.As(err, &mysqlErr) || mysqlErr.Number != 1205 {
+		t.Fatalf("ClaimSessionOwnership() error = %v, want MySQL error 1205", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("未充足の SQL 期待: %v", err)
 	}
 }

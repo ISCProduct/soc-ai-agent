@@ -22,6 +22,22 @@ func NewSessionValidationRepository(db *gorm.DB) *SessionValidationRepository {
 // ClaimSessionOwnership は session_id の初回所有者を原子的に確定する。
 // 競合時には一方だけが owner を獲得し、他方は forbidden を返す。
 func (r *SessionValidationRepository) ClaimSessionOwnership(sessionID string, userID uint) error {
+	const maxAttempts = 3
+	for attempt := 1; ; attempt++ {
+		err := r.claimSessionOwnershipTransaction(sessionID, userID)
+		if err == nil || !isMySQLDeadlock(err) || attempt == maxAttempts {
+			return err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func isMySQLDeadlock(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1213
+}
+
+func (r *SessionValidationRepository) claimSessionOwnershipTransaction(sessionID string, userID uint) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		rejectIfOtherUserMessagesExist := func() error {
 			var count int64
