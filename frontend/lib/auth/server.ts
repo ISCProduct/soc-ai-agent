@@ -46,6 +46,7 @@ function mapUser(data: Record<string, unknown>): User {
     target_level: typeof data.target_level === 'string' ? data.target_level : undefined,
     school_name: typeof data.school_name === 'string' ? data.school_name : undefined,
     is_admin: typeof data.is_admin === 'boolean' ? data.is_admin : undefined,
+    is_staff: typeof data.is_staff === 'boolean' ? data.is_staff : undefined,
     certifications_acquired:
       typeof data.certifications_acquired === 'string' ? data.certifications_acquired : undefined,
     certifications_in_progress:
@@ -126,6 +127,7 @@ export async function requireSessionUser(): Promise<User> {
 
 export async function requireAdminUser(): Promise<User> {
   const user = await requireSessionUser()
-  if (!user.is_admin) redirect('/')
+  // 管理者に加えて職員（教員・キャリア担当）も管理エリアに入れる。
+  if (!user.is_admin && !user.is_staff) redirect('/')
   return user
 }

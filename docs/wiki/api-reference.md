@@ -44,6 +44,26 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
 実装は `Backend/internal/routes/echo_adapter.go` の `EchoUserAuth` /
 `EchoAdminAuth` / `EchoStaticSecretAuth` です。
 
+### ロールと職員（staff）
+
+主体は **学生 / 職員 / 企業担当者 / 管理者** で、`users.role`（`student` / `staff`）と
+`users.is_admin` の組み合わせで決まります。
+
+- **職員（staff）** ＝ 学校の教員・キャリア担当。`role='staff'`。`is_admin` とは独立で、
+  **全権限を持たない純粋な職員（is_admin=false）も表現できます**。既存の教員（担当校を
+  持つ管理者）は migration で `role='staff'` にバックフィル済み。
+- 管理エリア（`/api/admin/*`）に入れるのは **`is_admin` または `role='staff'`**
+  （`EchoAdminAuth`）。ログインで職員にも管理者トークンを発行します。
+- **「無制限＝全校閲覧」は `is_admin` のときだけ**成立します（`SchoolService.ResolveAccess`）。
+  職員は担当校（`admin_school_memberships`）に絞られ、**担当校0件の職員は何も見えません**
+  （fail-close）。これが無いと担当校未設定の職員が全校の学生PIIを閲覧できてしまいます。
+- **プラットフォーム系ルート**（組織・監査・コスト等）は `is_admin && 担当校0件` のみ
+  （`EchoRequirePlatformAdmin`）。**権限管理**（学校メンバー＝教員の割当、ユーザー
+  アカウント編集/削除）は `is_admin` 必須（`EchoRequireAdmin`、職員は不可）。
+- ログイン応答と `/api/auth/session` は **`is_staff`** を返します。フロントは職員を
+  ログイン直後からチャット画面ではなく教員指導画面（`/admin`）へ送り、`/`（チャット）へ
+  直リンクしても `/admin` へ退避させます。
+
 ### 対象ユーザーはクエリで指定しない
 
 学生向けAPIの対象ユーザーは `X-User-Token` から決まります。**`user_id` をクエリに
