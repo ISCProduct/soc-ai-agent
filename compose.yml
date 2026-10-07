@@ -78,6 +78,9 @@ services:
     container_name: soc-ai-swagger-ui
     ports:
       - "${SWAGGER_UI_PORT:-8081}:8080"
+    # root で nginx を動かさない。イメージに USER 指定が無いため明示する。
+    # 101 は同イメージの nginx ユーザー。
+    user: "101:101"
     environment:
       - SWAGGER_JSON=/spec/openapi.yaml
     volumes:
