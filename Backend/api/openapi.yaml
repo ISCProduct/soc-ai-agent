@@ -34,8 +34,14 @@ info:
 
     ## エラー
 
-    Echo の `HTTPError` をそのまま返すため、本文は `{"message": "..."}` 形式。
-    一部の古いエンドポイントは `{"error": "..."}` を返す。統一は未完。
+    グローバルハンドラ（`internal/middleware/error_handler.go`）が全エラーを
+    次の形に揃えて返す。`message` は返らない。
+
+    ```json
+    { "error": "...", "code": "...", "detail": "..." }
+    ```
+
+    `detail` は省略されることがある（`omitempty`）。
 
 servers:
   - url: http://localhost:8080
@@ -144,7 +150,8 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
           example:
-            message: "Too Many Requests: お試し回数の上限に達しました。しばらく待ってから再試行してください。"
+            error: "Too Many Requests: お試し回数の上限に達しました。しばらく待ってから再試行してください。"
+            code: "TOO_MANY_REQUESTS"
 
     PlatformAdminOnly:
       description: |
@@ -163,9 +170,28 @@ components:
   schemas:
     Error:
       type: object
+      description: |
+        `internal/middleware/error_handler.go` の `APIErrorResponse`。
+        全エラーがこの形で返る。
+      required: [error, code]
       properties:
-        message:
+        error: { type: string, description: 表示用のメッセージ }
+        code:
           type: string
+          description: |
+            `defaultCodeByStatus` が HTTP ステータスから決める。
+            コントローラが明示したコードがあればそれが入る。
+          enum:
+            - BAD_GATEWAY
+            - CONFLICT
+            - FORBIDDEN
+            - INTERNAL_ERROR
+            - NOT_FOUND
+            - SERVICE_UNAVAILABLE
+            - TOO_MANY_REQUESTS
+            - UNAUTHORIZED
+            - VALIDATION_ERROR
+        detail: { type: string, description: 補足。無い場合は省略される }
 
     AuthResponse:
       type: object
@@ -228,12 +254,20 @@ components:
 
     UserWeightScore:
       type: object
-      description: 10カテゴリの重みスコア。
+      description: |
+        10カテゴリの重みスコア。
+
+        **キーが Go のフィールド名のままになっている。**
+        `domain/entity.UserWeightScore` を直接 JSON 化しており、同型に json タグが
+        無いため `id` や `user_id` ではなく `ID` / `UserID` が返る。
+        snake_case を前提に生成したクライアントは値を取得できない。
       properties:
-        id: { type: integer }
-        user_id: { type: integer }
-        session_id: { type: string }
-        category:
+        ID: { type: integer }
+        UserID: { type: integer }
+        SessionID: { type: string }
+        CreatedAt: { type: string, format: date-time }
+        UpdatedAt: { type: string, format: date-time }
+        WeightCategory:
           type: string
           enum:
             - technical_orientation
@@ -246,18 +280,23 @@ components:
             - challenge_seeking
             - detail_orientation
             - communication_skill
-        score: { type: integer, minimum: 0, maximum: 100 }
+        Score: { type: integer, minimum: 0, maximum: 100 }
 
     PhaseProgress:
       type: object
-      description: 診断4フェーズの進捗。
+      description: 診断4フェーズの進捗（`services/chat.PhaseProgress`）。
       properties:
+        phase_id: { type: integer }
         phase_name:
           type: string
           enum: [job_analysis, interest_analysis, aptitude_analysis, future_analysis]
-        answered_questions: { type: integer }
+        display_name: { type: string }
+        questions_asked: { type: integer }
+        valid_answers: { type: integer, description: 有効と判定された回答数 }
+        completion_score: { type: number, format: double }
+        is_completed: { type: boolean }
         min_questions: { type: integer }
-        is_complete: { type: boolean }
+        max_questions: { type: integer, description: 0 なら上限なし }
 
     ChatRequest:
       type: object
@@ -522,7 +561,7 @@ paths:
             schema: { $ref: "#/components/schemas/RegisterRequest" }
       security: []
       responses:
-        "200":
+        "201":
           description: 登録した
           content:
             application/json:
@@ -557,7 +596,7 @@ paths:
       description: 登録せずに診断を試すための経路。後から promote_guest で引き継げる。
       security: []
       responses:
-        "200":
+        "201":
           description: 作成した
           content:
             application/json:
@@ -643,6 +682,18 @@ paths:
     post:
       tags: [auth]
       summary: ログアウト（リフレッシュトークンを失効させる）
+      description: |
+        本文の `refresh_token` を失効させる。**本文を省略すると失効処理が
+        空文字に対する no-op になり、200 は返るが既存のトークンは使い続けられる。**
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
       security: []
       responses:
         "200": { description: ログアウトした }
@@ -792,6 +843,7 @@ paths:
       parameters:
         - in: query
           name: session_id
+          required: true
           schema: { type: string }
       responses:
         "200": { description: 履歴 }
@@ -805,6 +857,7 @@ paths:
       parameters:
         - in: query
           name: session_id
+          required: true
           schema: { type: string }
       responses:
         "200":
@@ -824,6 +877,7 @@ paths:
       parameters:
         - in: query
           name: session_id
+          required: true
           schema: { type: string }
       responses:
         "200": { description: 推薦企業 }
@@ -837,6 +891,7 @@ paths:
       parameters:
         - in: query
           name: session_id
+          required: true
           schema: { type: string }
       responses:
         "200": { description: サマリ }
@@ -871,7 +926,8 @@ paths:
   /api/chat/favorite:
     post:
       tags: [chat]
-      summary: セッションのお気に入りを切り替える
+      summary: 企業マッチのお気に入りを切り替える
+      description: 対象は `match_id`（`UserCompanyMatch` のID）。`session_id` では切り替わらない。
       security: [{ userToken: [] }]
       requestBody:
         required: true
@@ -879,10 +935,12 @@ paths:
           application/json:
             schema:
               type: object
+              required: [match_id]
               properties:
-                session_id: { type: string }
+                match_id: { type: integer }
       responses:
         "200": { description: 切り替えた }
+        "400": { description: match_id が無い }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   # ── questions ──────────────────────────────────────
@@ -891,8 +949,20 @@ paths:
       tags: [questions]
       summary: 質問を生成する
       security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category]
+              properties:
+                category:
+                  type: string
+                  description: 正典10カテゴリのいずれか
       responses:
         "200": { description: 生成した質問 }
+        "400": { description: category が無い }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/questions/create:
@@ -900,8 +970,21 @@ paths:
       tags: [questions]
       summary: 質問を登録する
       security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question, weight_category]
+              properties:
+                question: { type: string }
+                weight_category:
+                  type: string
+                  description: 正典10カテゴリのいずれか
       responses:
         "200": { description: 登録した }
+        "400": { description: question か weight_category が無い }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/questions/list:
@@ -912,6 +995,7 @@ paths:
       parameters:
         - in: query
           name: category
+          required: true
           schema: { type: string }
       responses:
         "200": { description: 質問一覧 }
