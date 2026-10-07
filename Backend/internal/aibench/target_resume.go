@@ -40,10 +40,12 @@ func (t *resumeTarget) Endpoint() string { return "openai:/responses" }
 // 概算トークン数。**本文を空にした BuildReviewPromptFromText を ApproxTokensJA に
 // 通した実測値**で、#1584 でルーブリックに 0〜5 のレベル定義を足して
 // 1153 → 2384 に増えた（約2.1倍）。
+// #1600 で応募情報とOCR本文をノンス付き区切りで囲んだ分（宣言文2つ）がさらに乗り、
+// 実測 2528 になった。
 //
 // ここを更新し忘れると事前の概算コストが過小になり、-yes を付けずに回したときの
 // 確認画面が実費と合わなくなる。プロンプトかルーブリックを変えたら測り直すこと。
-const resumePromptOverheadTokens = 2400
+const resumePromptOverheadTokens = 2550
 
 func (t *resumeTarget) EstimateTokens(c Case) (int, int) {
 	// 出力は max_output_tokens を上限とする。

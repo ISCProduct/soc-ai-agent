@@ -1,14 +1,65 @@
 # API リファレンス
 
+## 3つの置き場所
+
+API の情報は役割で分けてあります。探しているものに応じて見る先が変わります。
+
+| 見る先 | 中身 | 更新 |
+|---|---|---|
+| `Backend/api/routes.txt` | **全エンドポイントの一覧**（252本） | 自動生成。`make api-catalog` |
+| `Backend/api/openapi.yaml` | スキーマ・権限・エラー付きの契約（全252本） | 手で書く |
+| このページ | テーマ別の解説。方針や経緯 | 手で書く |
+
+Swagger UI で読む場合は `make api-docs`（http://localhost:8081 ）。
+
+OpenAPI は**全 252 本を記載済み**です（網羅率 100%）。
+
+実装と spec は**双方向**で突き合わせているので、どちらかに無いものがあると CI が落ちます。
+体裁（summary / tags / security / responses の有無、`$ref` の解決）も `TestOpenAPILint` が見ます。
+
+確認は次のコマンドで行えます。
+
+```bash
+cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
+```
+
+`openapi.yaml` に実装に無いパスを書くと CI が落ちます（`internal/routes/inventory_test.go`）。
+逆方向（実装にあるが未記載）では落ちないので、記載漏れは網羅率で見てください。
+
+---
+
 ## 認証
 
-### 管理者API
+方式は4つあります。エンドポイントごとにどれが必要かは `openapi.yaml` の `security` を見てください。
 
-`Authorization: Basic {base64(email:password)}` ヘッダーが必要です。
+| 方式 | ヘッダ | 用途 |
+|---|---|---|
+| ユーザー | `X-User-Token` | 学生・教員。ログインで発行される短TTLのJWT |
+| 管理者 | `X-Admin-Email` + `X-Admin-Token` | 管理画面。管理者本人の認証 |
+| サービス間 | `X-Admin-Secret` | CI・運用からのマシン間呼び出し。管理者になりすまさない |
+| 企業ポータル | Cookie 3本 | `company_user_id` / `company_user_token` / `company_refresh_token` |
 
-### ユーザーAPI
+テナントを切り替える場合は `X-Tenant-Slug` を併せて送ります。
 
-現在はクエリパラメータ `user_id` で識別します（将来的にJWT化予定）。
+実装は `Backend/internal/routes/echo_adapter.go` の `EchoUserAuth` /
+`EchoAdminAuth` / `EchoStaticSecretAuth` です。
+
+### 対象ユーザーはクエリで指定しない
+
+学生向けAPIの対象ユーザーは `X-User-Token` から決まります。**`user_id` をクエリに
+付けません。** Backend は読んでおらず、付けても URL・アクセスログ・ブラウザ履歴・
+Referer に user_id が残るだけです。
+
+`user_id` クエリを読んでいるのは管理者APIの2箇所だけで、どちらも「管理者が
+対象の学生を指定する」用途です（`/api/admin/diagnosis-quality` と
+`/api/admin/applications` の絞り込み）。
+
+> **Basic 認証は使っていません。** 以前このページには管理者APIが
+> `Authorization: Basic` と書かれていましたが、実装に存在したことはありません。
+> 同じくユーザーAPIを「クエリパラメータ `user_id` で識別（将来JWT化予定）」と
+> 書いていましたが、JWT 化は済んでいます。残っている `user_id` クエリは
+> 管理者が対象ユーザーを指定する用途（`diagnosis_quality_controller.go`）と
+> 応募一覧の絞り込み（`application/controller.go`）だけで、認証には使いません。
 
 ---
 
@@ -59,12 +110,23 @@
 
 ## チャット分析
 
+全8本。スキーマは [`Backend/api/openapi.yaml`](../../Backend/api/openapi.yaml) にあります（`make api-docs` で閲覧）。
+
 | メソッド | パス | パラメータ | 概要 |
 |---------|------|-----------|------|
-| POST | `/api/chat/messages` | body: message, user_id, session_id | メッセージ送信・スコア更新 |
-| GET | `/api/chat/scores` | ?user_id&session_id | 10カテゴリスコア取得 |
-| GET | `/api/chat/companies` | ?user_id&session_id | マッチング企業一覧 |
-| POST | `/api/chat/send-report` | body: user_id, session_id | 分析レポートメール送信 |
+| POST | `/api/chat` | body: session_id, message | 発言・スコア更新・次の質問 |
+| GET | `/api/chat/history` | ?session_id | 履歴 |
+| GET | `/api/chat/scores` | ?session_id | 10カテゴリスコア取得 |
+| GET | `/api/chat/recommendations` | ?session_id | マッチング企業一覧 |
+| GET | `/api/chat/analysis` | ?session_id | 診断結果サマリ |
+| GET | `/api/chat/sessions` | — | セッション一覧 |
+| POST | `/api/chat/send-report` | body: session_id | 分析レポートメール送信 |
+| POST | `/api/chat/favorite` | body: session_id | お気に入り切替 |
+
+以前この表には `/api/chat/messages` と `/api/chat/companies` が載っていましたが、
+どちらも実装に存在しません。実体は `/api/chat` と `/api/chat/recommendations` です。
+`POST /api/chat` は body の `user_id` を受け取りますが、サーバ側で
+`X-User-Token` の値に上書きするため、指定しても意味がありません。
 
 ### スコアレスポンス例
 ```json
@@ -84,7 +146,7 @@
 | メソッド | パス | 概要 |
 |---------|------|------|
 | POST | `/api/interviews` | セッション作成 |
-| GET | `/api/interviews?user_id=xxx` | セッション一覧 |
+| GET | `/api/interviews?page=&limit=` | セッション一覧 |
 | POST | `/api/interviews/{id}/start` | 開始（チャットスコアをAIプロンプトに注入） |
 | POST | `/api/interviews/{id}/turn` | 1ターン実行（音声→テキスト→AI→音声） |
 | POST | `/api/interviews/{id}/finish` | 終了・レポート生成キュー |
@@ -167,7 +229,7 @@
 | メソッド | パス | 概要 |
 |---------|------|------|
 | POST | `/api/applications` | 応募登録 |
-| GET | `/api/applications?user_id=xxx` | 選考一覧 |
+| GET | `/api/applications` | 選考一覧 |
 | PUT | `/api/applications/{id}` | ステータス更新 |
 
 ### ステータス一覧
@@ -187,7 +249,7 @@ rejected         → 不合格
 
 | メソッド | パス | 概要 |
 |---------|------|------|
-| GET | `/api/user/profile?user_id=xxx&session_id=xxx` | 統合プロファイル取得 |
+| GET | `/api/user/profile?session_id=xxx` | 統合プロファイル取得 |
 
 ### レスポンス例
 ```json
@@ -212,7 +274,7 @@ rejected         → 不合格
 
 | メソッド | パス | 概要 |
 |---------|------|------|
-| GET | `/api/collective-insights/recommendations?user_id=xxx&session_id=xxx` | 集合知レコメンド |
+| GET | `/api/collective-insights/recommendations?session_id=xxx` | 集合知レコメンド |
 | GET | `/api/collective-insights/top-companies?limit=10` | 通過率上位企業 |
 | PUT | `/api/collective-insights/consent` | 同意設定更新 |
 | POST | `/api/collective-insights/actions` | 行動ログ記録 |

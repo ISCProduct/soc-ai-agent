@@ -73,7 +73,7 @@ export default function ScoreUpdateBanner({ beforeScores, afterScores, title = '
               <Typography fontWeight={700} color="primary.main" fontSize="0.95rem">
                 {title}
               </Typography>
-              <IconButton size="small" onClick={() => setOpen(false)}>
+              <IconButton size="small" onClick={() => setOpen(false)} aria-label="通知を閉じる">
                 <CloseIcon fontSize="small" />
               </IconButton>
             </Stack>

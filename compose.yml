@@ -70,6 +70,25 @@ services:
     profiles:
       - tools
 
+  # OpenAPI(Backend/api/openapi.yaml) の閲覧用。`make api-docs` で起動する。
+  # Backend 本体に /docs を生やすと本番にも出てしまうため、
+  # ローカル専用のコンテナとして分けている。DB も Backend も要らない。
+  swagger-ui:
+    image: swaggerapi/swagger-ui:v5.17.14
+    container_name: soc-ai-swagger-ui
+    ports:
+      - "${SWAGGER_UI_PORT:-8081}:8080"
+    # root で nginx を動かさない。イメージに USER 指定が無いため明示する。
+    # 101 は同イメージの nginx ユーザー。
+    user: "101:101"
+    environment:
+      - SWAGGER_JSON=/spec/openapi.yaml
+    volumes:
+      - ./Backend/api:/spec:ro
+    restart: "no"
+    profiles:
+      - docs
+
 
   # MySQL Database
   db:

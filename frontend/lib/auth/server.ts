@@ -1,6 +1,7 @@
 import { cookies, headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { SERVER_BACKEND_URL } from '@/lib/auth/session-cookies'
+import { AUTH_REFRESH_TIMEOUT_MS, fetchAndReadWithTimeout } from '@/lib/fetch-timeout'
 import { extractTenantSlug } from '@/lib/tenant'
 import type { User } from '@/lib/auth'
 
@@ -94,12 +95,26 @@ export async function getSessionUser(): Promise<User | null> {
   const authHeaders = buildUserAuthHeaders(creds, tenantSlug || undefined)
   if (!authHeaders['X-User-Token']) return null
 
-  const res = await fetch(`${SERVER_BACKEND_URL}/api/auth/user`, {
-    headers: authHeaders,
-    cache: 'no-store',
-  })
-  if (!res.ok) return null
-  const data: Record<string, unknown> = await res.json()
+  // Backend が落ちていると fetch は例外を投げる。これを Server Component の
+  // 外へ出すと `requireSessionUser()` を呼ぶ全ページが 500 になり、画面には
+  // digest 付きの `TypeError: fetch failed` しか出ない。未ログイン扱いにして
+  // /login へ倒す。/login は同じ経路を通らないのでループしない。
+  //
+  // タイムアウトは本文の読み込みまで掛ける（#1476）。SSR はこの応答を待って
+  // から描画するので、ヘッダーだけに掛けると res.json() が半開きで固まった
+  // ときに画面が返らない。
+  let data: Record<string, unknown> | null
+  try {
+    data = await fetchAndReadWithTimeout(
+      `${SERVER_BACKEND_URL}/api/auth/user`,
+      { headers: authHeaders, cache: 'no-store' },
+      AUTH_REFRESH_TIMEOUT_MS,
+      async (res) => (res.ok ? ((await res.json()) as Record<string, unknown>) : null),
+    )
+  } catch {
+    return null
+  }
+  if (!data) return null
   return mapUser(data)
 }
 

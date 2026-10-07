@@ -202,8 +202,14 @@ func SpokenContent(utterances []models.InterviewUtterance) textsim.Bigrams {
 // spoken は SpokenContent で作ること（内容語だけの Bigrams）。
 func ValidateEvidence(evidence map[string]string, spoken textsim.Bigrams) EvidenceCheck {
 	var out EvidenceCheck
-	for key, text := range evidence {
-		if strings.TrimSpace(text) == "" {
+	// キーは評価項目側から回す。evidence は LLM 出力の JSON をそのまま
+	// unmarshal したものなので、キー自体もモデルが自由に書ける。
+	// Unmatched は buildEvidenceRetryNote 経由でやり直しプロンプトの
+	// 信頼領域へ連結されるため、キーに指示文を入れれば囲みを迂回できた（#1600）。
+	// 評価項目に無いキーは読み出し側（OwnEvid 等）も使わないので捨てる。
+	for _, key := range RubricKeys() {
+		text, ok := evidence[key]
+		if !ok || strings.TrimSpace(text) == "" {
 			continue
 		}
 		out.Checked++
@@ -211,7 +217,7 @@ func ValidateEvidence(evidence map[string]string, spoken textsim.Bigrams) Eviden
 			out.Unmatched = append(out.Unmatched, key)
 		}
 	}
-	// map の順序は不定なので、ログを安定させる
+	// RubricKeys() は定義順で安定しているが、ログの比較を容易にするため並べ替えは残す
 	sort.Strings(out.Unmatched)
 	return out
 }

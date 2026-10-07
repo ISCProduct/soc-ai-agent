@@ -169,7 +169,7 @@ function ProfilePageContent() {
     if (!user) return
     setDeleting(true)
     try {
-      const res = await fetch(`/api/auth/account?user_id=${user.user_id}`, {
+      const res = await fetch('/api/auth/account', {
         method: 'DELETE',
         headers: authService.getUserFetchHeaders(),
       })

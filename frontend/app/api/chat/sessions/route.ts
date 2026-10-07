@@ -8,12 +8,9 @@ export const dynamic = 'force-dynamic'
 export async function GET(request: NextRequest) {
   try {
     const authHeaders = extractUserAuthHeaders(request)
-    // 旧バックエンド（ECR）との互換性のため user_id クエリパラメータも付与する
-    const userId = authHeaders['X-User-ID']
-    const url = userId
-      ? `${BACKEND_URL}/api/chat/sessions?user_id=${userId}`
-      : `${BACKEND_URL}/api/chat/sessions`
-    const response = await fetch(url, {
+    // 旧バックエンド(ECR)互換の user_id クエリは外した。デプロイ経路は ECS に
+    // 一本化済みで、現行 Backend は user_id クエリを読んでいない。
+    const response = await fetch(`${BACKEND_URL}/api/chat/sessions`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
