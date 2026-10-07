@@ -4,6 +4,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/services/shared"
 	"errors"
+	"math/rand/v2"
 	"time"
 
 	mysql "github.com/go-sql-driver/mysql"
@@ -22,13 +23,18 @@ func NewSessionValidationRepository(db *gorm.DB) *SessionValidationRepository {
 // ClaimSessionOwnership は session_id の初回所有者を原子的に確定する。
 // 競合時には一方だけが owner を獲得し、他方は forbidden を返す。
 func (r *SessionValidationRepository) ClaimSessionOwnership(sessionID string, userID uint) error {
-	const maxAttempts = 3
+	const (
+		maxAttempts    = 5
+		initialBackoff = 10 * time.Millisecond
+	)
 	for attempt := 1; ; attempt++ {
 		err := r.claimSessionOwnershipTransaction(sessionID, userID)
 		if err == nil || !isMySQLDeadlock(err) || attempt == maxAttempts {
 			return err
 		}
-		time.Sleep(10 * time.Millisecond)
+		backoff := initialBackoff * time.Duration(1<<(attempt-1))
+		jitter := time.Duration(rand.Int64N(int64(backoff)))
+		time.Sleep(backoff + jitter)
 	}
 }
 

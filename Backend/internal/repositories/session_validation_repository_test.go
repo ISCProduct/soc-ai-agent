@@ -272,12 +272,12 @@ func TestClaimSessionOwnership_RetriesDeadlockAndSucceeds(t *testing.T) {
 	}
 }
 
-func TestClaimSessionOwnership_ReturnsErrorAfterThreeDeadlocks(t *testing.T) {
+func TestClaimSessionOwnership_ReturnsErrorAfterFiveDeadlocks(t *testing.T) {
 	repo, mock := newSessionValidationRepositoryTestDB(t)
 	const sessionID = "persistent-deadlock"
 	const userID = uint(22)
 
-	for range 3 {
+	for range 5 {
 		expectSessionValidationDeadlock(mock, sessionID)
 	}
 
