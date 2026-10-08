@@ -257,11 +257,17 @@ export async function middleware(request: NextRequest) {
       // 期限切れトークンは後段へ渡さないので、未ログイン扱いで描画されループしない。
     }
 
-    // いま発行されたトークンは期限判定にかけない（#1535）。
-    // tokenExpiresSoon は読めないトークンを期限切れ扱いにするので、ここを通すと
-    // 「リフレッシュは成功したのに新しいトークンを捨てる」が起きうる。
-    // 判定したいのは Cookie に残っていた古いトークンの方。
-    if (sessionExpired || (!refreshed && tokenExpiresSoon(effectiveToken, 0))) {
+    // リフレッシュ直後のトークンも同じ判定にかける（#1535）。
+    //
+    // 以前は !refreshed で除外していたが、refreshSession は応答JSONの user_token が
+    // 空でないことしか見ない。200 で期限切れ・壊れたトークンが返ると、検査を迂回して
+    // そのままヘッダーとCookieへ入る。Backend の ParseJWT はこれを拒むので、次の
+    // リクエストでも再リフレッシュと401が繰り返され、止めたかったループが残る。
+    //
+    // 正常に発行されたトークンは exp が十分先にあるため marginSeconds=0 の判定を
+    // 通る。ここで落ちるのは「リフレッシュは200だが中身が使えない」場合だけで、
+    // そのときは未ログイン扱いにしてログイン画面へ送るのが正しい。
+    if (sessionExpired || tokenExpiresSoon(effectiveToken, 0)) {
       // 期限切れトークンを後段へ渡すとBackendが401を返し、ページがログイン画面へ
       // 飛び、そのログイン画面でも同じCookieで同じことを繰り返す(#1519)。
       // X-User-* を注入しないだけでなく、Cookie経由の抜け道も閉じる。
@@ -290,7 +296,8 @@ export async function middleware(request: NextRequest) {
       }
     }
 
-    if (companySessionExpired || (!companyRefreshed && tokenExpiresSoon(effectiveCompanyToken, 0))) {
+    // 学生側と同じ理由でリフレッシュ直後も判定にかける（#1535）。
+    if (companySessionExpired || tokenExpiresSoon(effectiveCompanyToken, 0)) {
       dropRequestCookies(requestHeaders, ['company_user_id', 'company_user_token'])
     } else {
       requestHeaders.set('X-Company-User-ID', effectiveCompanyUserId)

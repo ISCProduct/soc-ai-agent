@@ -90,6 +90,8 @@ describe('middleware: リフレッシュ失敗時のセッション破棄 (#1519
   }
 
   const expiredJwt = () => jwt(-3600)
+  // Backend が実際に発行する形。exp は十分先にあるので marginSeconds=0 の判定を通る。
+  const freshToken = jwt(3600)
 
   /** 後段(Route Handler / Server Component)が受け取るCookieヘッダー */
   function forwardedCookie(response: Response): string | null {
@@ -195,7 +197,7 @@ describe('middleware: リフレッシュ失敗時のセッション破棄 (#1519
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ user_id: 1, user_token: 'fresh-token', refresh_token: 'fresh-refresh' }),
+      json: async () => ({ user_id: 1, user_token: freshToken, refresh_token: 'fresh-refresh' }),
     })
 
     const request = new NextRequest('http://localhost:3000/api/schedule', {
@@ -204,8 +206,44 @@ describe('middleware: リフレッシュ失敗時のセッション破棄 (#1519
 
     const response = await middleware(request)
 
-    expect(response.headers.get('x-middleware-request-x-user-token')).toBe('fresh-token')
+    expect(response.headers.get('x-middleware-request-x-user-token')).toBe(freshToken)
     expect(response.headers.get('set-cookie') ?? '').toContain('fresh-refresh')
+  })
+
+  // refreshSession は応答の user_token が空でないことしか見ない。200 でも中身が
+  // 使えないことがあり、素通しすると Backend の ParseJWT が弾いて 401 → 再リフレッシュ
+  // の往復に戻る。#1535 で止めたいのはこのループなので、リフレッシュ直後も判定する。
+  it('リフレッシュが200でも読めないトークンならCookieを落として後段へ渡さない', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ user_id: 1, user_token: 'not-a-jwt', refresh_token: 'fresh-refresh' }),
+    })
+
+    const request = new NextRequest('http://localhost:3000/api/schedule', {
+      headers: { cookie: `user_id=1; user_token=${expiredJwt()}; refresh_token=ok` },
+    })
+
+    const response = await middleware(request)
+
+    expect(response.headers.get('x-middleware-request-x-user-token')).toBeNull()
+    expect(forwardedCookie(response) ?? '').not.toContain('user_token=')
+  })
+
+  it('リフレッシュが200でも期限切れのトークンならCookieを落とす', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ user_id: 1, user_token: expiredJwt(), refresh_token: 'fresh-refresh' }),
+    })
+
+    const request = new NextRequest('http://localhost:3000/api/schedule', {
+      headers: { cookie: `user_id=1; user_token=${expiredJwt()}; refresh_token=ok` },
+    })
+
+    const response = await middleware(request)
+
+    expect(response.headers.get('x-middleware-request-x-user-token')).toBeNull()
   })
 
   it('企業ポータル側も401ならCookieを消し、失効値を後段へ渡さない', async () => {
