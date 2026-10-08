@@ -63,6 +63,7 @@ type ConversationContextRepository interface {
 // SessionValidationRepository はセッション検証情報の永続化インターフェース。
 type SessionValidationRepository interface {
 	GetOrCreate(sessionID string) (*models.SessionValidation, error)
+	ClaimSessionOwnership(sessionID string, userID uint) error
 	IncrementInvalidCount(sessionID string) (*models.SessionValidation, error)
 	ResetInvalidCount(sessionID string) error
 	TerminateSession(sessionID string) error

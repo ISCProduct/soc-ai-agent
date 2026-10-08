@@ -2,9 +2,14 @@ package repositories
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/shared"
+	"errors"
+	"math/rand/v2"
 	"time"
 
+	mysql "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type SessionValidationRepository struct {
@@ -13,6 +18,100 @@ type SessionValidationRepository struct {
 
 func NewSessionValidationRepository(db *gorm.DB) *SessionValidationRepository {
 	return &SessionValidationRepository{db: db}
+}
+
+// ClaimSessionOwnership は session_id の初回所有者を原子的に確定する。
+// 競合時には一方だけが owner を獲得し、他方は forbidden を返す。
+func (r *SessionValidationRepository) ClaimSessionOwnership(sessionID string, userID uint) error {
+	const (
+		maxAttempts    = 5
+		initialBackoff = 10 * time.Millisecond
+	)
+	for attempt := 1; ; attempt++ {
+		err := r.claimSessionOwnershipTransaction(sessionID, userID)
+		if err == nil || !isMySQLDeadlock(err) || attempt == maxAttempts {
+			return err
+		}
+		backoff := initialBackoff * time.Duration(1<<(attempt-1))
+		jitter := time.Duration(rand.Int64N(int64(backoff)))
+		time.Sleep(backoff + jitter)
+	}
+}
+
+func isMySQLDeadlock(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1213
+}
+
+func (r *SessionValidationRepository) claimSessionOwnershipTransaction(sessionID string, userID uint) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		rejectIfOtherUserMessagesExist := func() error {
+			var count int64
+			if err := tx.Model(&models.ChatMessage{}).
+				Where("session_id = ? AND user_id <> ?", sessionID, userID).
+				Count(&count).Error; err != nil {
+				return err
+			}
+			if count > 0 {
+				return shared.ErrForbidden
+			}
+			return nil
+		}
+
+		var existing models.SessionValidation
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("session_id = ?", sessionID).
+			First(&existing).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+
+			if err := rejectIfOtherUserMessagesExist(); err != nil {
+				return err
+			}
+			newRow := models.SessionValidation{
+				SessionID:          sessionID,
+				UserID:             &userID,
+				InvalidAnswerCount: 0,
+				IsTerminated:       false,
+			}
+			if err := tx.Create(&newRow).Error; err != nil {
+				var mysqlErr *mysql.MySQLError
+				if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+					if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+						Where("session_id = ?", sessionID).
+						First(&existing).Error; err != nil {
+						return err
+					}
+					if existing.UserID == nil {
+						if err := rejectIfOtherUserMessagesExist(); err != nil {
+							return err
+						}
+						existing.UserID = &userID
+						return tx.Model(&existing).Update("user_id", userID).Error
+					}
+					if *existing.UserID != userID {
+						return shared.ErrForbidden
+					}
+					return nil
+				}
+				return err
+			}
+			return nil
+		}
+
+		if existing.UserID == nil {
+			if err := rejectIfOtherUserMessagesExist(); err != nil {
+				return err
+			}
+			existing.UserID = &userID
+			return tx.Model(&existing).Update("user_id", userID).Error
+		}
+		if *existing.UserID != userID {
+			return shared.ErrForbidden
+		}
+		return nil
+	})
 }
 
 // GetOrCreate セッションのバリデーション情報を取得または作成
