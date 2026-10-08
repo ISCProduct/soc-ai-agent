@@ -36,7 +36,7 @@ litellm>=1.101.0,<2.0
 # --- OpenAI SDK ---
 # litellm>=1.83.7 が openai 2.x を要求するため 2.x 系列に移行。
 # client.responses / chat.completions / embeddings API は 2.x でも互換性あり。
-openai>=1.0,<3.0
+openai>=3.24.0,<4.0
 
 # --- トークナイザー ---
 # tiktoken: OpenAI エンコーダーとのバイト互換を保つため 0.13.x に固定。
