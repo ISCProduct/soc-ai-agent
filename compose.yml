@@ -206,8 +206,12 @@ services:
     environment:
       - NODE_OPTIONS=${FRONTEND_NODE_OPTIONS:---max-old-space-size=1536}
       - NODE_ENV=${NODE_ENV:-development}
+      # ブラウザ向け。利用者のマシンから Backend に届くURL。
       - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8080}
-      - BACKEND_URL=${BACKEND_URL:-http://app:8080}
+      # Next.js API Route（サーバー側）から Backend へ繋ぐURL。
+      # ホストの BACKEND_URL=localhost を引き継ぐと、コンテナ内で ECONNREFUSED になる。
+      # Docker ネットワーク上のサービス名を固定する。
+      - BACKEND_URL=http://app:8080
       - COMPANY_GRAPH_URL=${COMPANY_GRAPH_URL:-http://company-graph:9100}
       - WATCHPACK_POLLING=${WATCHPACK_POLLING:-true}
       - NEXT_PUBLIC_SPEECH_ON_DEVICE=${NEXT_PUBLIC_SPEECH_ON_DEVICE:-}

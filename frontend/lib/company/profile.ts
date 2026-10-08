@@ -29,6 +29,7 @@ export interface CompanyProfile {
 export type ProfileUpdate = Partial<
   Pick<
     CompanyProfile,
+    | 'name'
     | 'description'
     | 'industry'
     | 'location'
@@ -78,6 +79,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
+}
+
+export const COMPANY_NAME_CHANGED_EVENT = 'company-portal:name-changed'
+
+// 企業名が変わったときだけ出す文面。同じ名前や空欄では出さない。
+export function companyNameChangeNotice(before: string, after: string): string | null {
+  const prev = before.trim()
+  const next = after.trim()
+  if (next === '' || prev === next) return null
+  return `企業名を「${prev}」から「${next}」に変更しました`
+}
+
+export function notifyCompanyNameChanged(name: string) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(COMPANY_NAME_CHANGED_EVENT, { detail: name }))
 }
 
 export const companyProfileService = {

@@ -672,8 +672,15 @@ func main() {
 	companyPortalSchoolApplicationController := companycontrollers.NewCompanyPortalSchoolApplicationController(
 		companyportal.NewSchoolApplicationService(repositories.NewSchoolCompanyApplicationRepository(db)),
 	)
-	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, companyPortalSchoolApplicationController, cfg.CompanyUserSecret, companyUserRepo)
-	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, studentGuidanceController, cfg.UserSecret, userDeletionService, organizationService)
+	// スカウト送信・テンプレート (#1095)
+	scoutRepo := repositories.NewScoutRepository(db)
+	// 通知メールのリンクはデプロイが設定する APP_URL を使う。
+	// FRONTEND_URL は staging / production に無く、未設定だと localhost になる。
+	scoutService := companyportal.NewScoutService(scoutRepo, studentSearchRepo, userRepo, companyRepo, emailService, config.AppURL())
+	companyPortalScoutController := companycontrollers.NewCompanyPortalScoutController(scoutService)
+	studentScoutController := usercontrollers.NewStudentScoutController(scoutService)
+	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, companyPortalSchoolApplicationController, companyPortalScoutController, cfg.CompanyUserSecret, companyUserRepo, companyRepo)
+	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, studentGuidanceController, studentScoutController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())
 	api.GET("/whats-new", releaseNoteController.List, routes.EchoUserAuth(cfg.UserSecret, userDeletionService))

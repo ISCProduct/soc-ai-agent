@@ -571,3 +571,30 @@ func (s *EmailService) SendCompanyUserPasswordReset(email, resetToken string) er
 </body></html>`, resetURL)
 	return s.sendHTML([]string{email}, "【AI就活エージェント】企業ポータル パスワードの再設定", body)
 }
+
+// SendScoutOfferEmail は学生へスカウト受信通知メールを送る（#1095）。
+func (s *EmailService) SendScoutOfferEmail(toEmail, studentName, companyName, message, appURL string) error {
+	if strings.TrimSpace(toEmail) == "" {
+		return nil
+	}
+	if appURL == "" {
+		appURL = "http://localhost:3000"
+	}
+	safeStudent := template.HTMLEscapeString(strings.TrimSpace(studentName))
+	safeCompany := template.HTMLEscapeString(strings.TrimSpace(companyName))
+	safeMessage := template.HTMLEscapeString(message)
+	scoutURL := strings.TrimRight(appURL, "/") + "/scout"
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="ja"><head><meta charset="UTF-8"><title>スカウトが届きました</title></head>
+<body style="font-family:sans-serif;background:#f5f5f5;padding:20px;">
+<div style="max-width:560px;margin:0 auto;background:#fff;border-radius:8px;padding:32px;">
+<h2 style="color:#1976D2;">スカウトが届きました</h2>
+<p>%s さん</p>
+<p><strong>%s</strong> からスカウトが届いています。</p>
+<pre style="white-space:pre-wrap;background:#f8f8f8;padding:16px;border-radius:6px;font-family:inherit;">%s</pre>
+<a href="%s" style="display:inline-block;background:#1976D2;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin:16px 0;">内容を確認する</a>
+<p style="color:#888;font-size:12px;">このメールはAI就活エージェントから自動送信されました。</p>
+</div>
+</body></html>`, safeStudent, safeCompany, safeMessage, scoutURL)
+	return s.sendHTML([]string{toEmail}, "【AI就活エージェント】スカウトが届きました", body)
+}

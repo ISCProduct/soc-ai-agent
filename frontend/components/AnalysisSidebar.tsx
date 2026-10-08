@@ -41,6 +41,7 @@ import {
     CalendarMonth,
     Business,
     Assignment,
+    MailOutline,
     NewReleases,
     Assessment,
 } from '@mui/icons-material'
@@ -66,6 +67,7 @@ const NAV_ICONS: Record<(typeof SIDEBAR_NAV_ITEMS)[number]['href'], React.ReactN
     '/es-rewrite': <EditNote color="primary"/>,
     '/schedule': <CalendarMonth color="primary"/>,
     '/applications': <Assignment color="primary"/>,
+    '/scout': <MailOutline color="primary"/>,
     '/profile': <ManageAccounts color="primary"/>,
 }
 
