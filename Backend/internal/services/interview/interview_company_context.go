@@ -38,8 +38,18 @@ func (c *companyReadingCache) load(key string) (string, bool) {
 	return entry.value, true
 }
 
+// store は読みを記憶する。value が空でも記憶する（ネガティブキャッシュ）。
+//
+// lookupCompanyReading は「確実に知っている場合のみ答える」プロンプトの
+// 最大15秒のLLM呼び出し。読みを返せない企業（マイナー企業・手入力の表記ゆれ）で
+// 空を捨てると、フロントも company_reading="" を送り続けるため毎ターン同じ
+// 呼び出しが走り、毎回課金される。STT の裏に隠れるのは STT が遅いときだけで、
+// 速ければそのままターンのレイテンシに乗る。
+//
+// DB に読みが入れば resolveCompanyReading が先に返すので、空を覚えても取りこぼさない。
+// TTL が切れれば引き直すため、あとから読みが付いた企業も拾える。
 func (c *companyReadingCache) store(key, value string) {
-	if key == "" || strings.TrimSpace(value) == "" {
+	if key == "" {
 		return
 	}
 

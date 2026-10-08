@@ -29,10 +29,30 @@ func TestCompanyReadingCacheExpiresAndCapsEntries(t *testing.T) {
 		t.Fatal("oldest entry should have been evicted at the cache limit")
 	}
 
+	// 空の読みも記憶する。捨てると毎ターン最大15秒のLLM呼び出しが走り続ける。
 	cache.store("blank", "  ")
-	if _, ok := cache.load("blank"); ok {
-		t.Fatal("blank readings should not be cached")
+	got, ok := cache.load("blank")
+	if !ok {
+		t.Fatal("空の読みも「引いた」事実として記憶する必要がある")
 	}
+	assert.Equal(t, "", got, "空白は空文字に正規化して保持する")
+}
+
+// 読みを返せない企業でも、LLM 呼び出しは1回で済む（#521 レビュー指摘）。
+func TestCachedCompanyReadingCachesEmptyResult(t *testing.T) {
+	svc := NewInterviewService(nil, nil, nil, nil, nil, nil, nil)
+	var calls atomic.Int32
+	lookup := func(context.Context, string) (string, error) {
+		calls.Add(1)
+		return "", nil // 読みが分からなかった
+	}
+
+	for i := range 3 {
+		got := svc.cachedCompanyReading(context.Background(), "読み不明企業", "読み不明企業", lookup)
+		assert.Equal(t, "", got, "%d回目", i+1)
+	}
+
+	assert.Equal(t, int32(1), calls.Load(), "空でもキャッシュするので呼び出しは1回")
 }
 
 func TestCachedCompanyReadingSharesLookupAndRetriesCancelledLeader(t *testing.T) {
