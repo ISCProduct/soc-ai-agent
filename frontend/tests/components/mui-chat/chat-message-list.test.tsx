@@ -43,6 +43,26 @@ describe('ChatMessageList の読み込み表示', () => {
     expect(skeletonCount(container)).toBeGreaterThan(0)
   })
 
+  // 骨格は装飾なので aria-hidden のままにする。そのぶん、読み上げ利用者には
+  // 待機中だと分かる手掛かりが何も無くなる。初期表示の PageLoading は mounted が
+  // 立った時点で消えるため、履歴を待つ間はここが唯一の通知になる。
+  it('履歴の読み込み中は読み上げ向けの通知を出す', () => {
+    const { container } = render(<ChatMessageList {...baseProps()} historyLoading />)
+
+    const status = container.querySelector('[role="status"]')
+    expect(status).not.toBeNull()
+    expect(status).toHaveTextContent('チャット履歴を読み込んでいます')
+    // 骨格そのものは読み上げ対象にしない
+    expect(container.querySelector('.MuiSkeleton-root')?.closest('[aria-hidden]')).not.toBeNull()
+  })
+
+  it('読み込みが終わったら読み上げ向けの通知も消す', () => {
+    const { container } = render(
+      <ChatMessageList {...baseProps()} historyLoading={false} messages={[greeting]} />,
+    )
+    expect(container.querySelector('[role="status"]')).toBeNull()
+  })
+
   it('読み込みが終わったら骨格を消す', () => {
     const { container } = render(
       <ChatMessageList {...baseProps()} historyLoading={false} messages={[greeting]} />,

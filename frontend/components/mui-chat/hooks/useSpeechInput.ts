@@ -74,7 +74,12 @@ function getRecognitionCtor(): RecognitionCtor | null {
 type SpeechRecognitionLike = {
   lang: string
   /** Chrome 139+ の端末内処理。古い実装には無いので任意。 */
-  options?: { langs: string[]; processLocally: boolean }
+  /**
+   * 端末内で処理するかどうか。インスタンスのプロパティで、コンストラクタ引数でも
+   * options オブジェクトでもない（MDN: SpeechRecognition/processLocally）。
+   * true は端末内処理を必須にする。既定の false はブラウザが端末内か遠隔かを選ぶ。
+   */
+  processLocally?: boolean
   continuous: boolean
   interimResults: boolean
   start: () => void
@@ -200,13 +205,21 @@ export function useSpeechInput(onText: (text: string) => void): SpeechInput {
     recognition.lang = 'ja-JP'
     // 端末内で処理できると分かっているときだけ指定する。
     // 使えないのに true を渡すと language-not-supported で落ちる。
-    if (local) recognition.options = LOCAL_OPTIONS
+    if (local) recognition.processLocally = true
     // 一区切りで止める。話し続ける用途ではないので、長く開けてもマイクを握るだけ。
     recognition.continuous = false
     // 確定前の文字は入力欄へ入れない。書き換わる様子が見えると直しにくい。
     recognition.interimResults = false
 
+    // 上の abort() の後、古い認識器の end / error / result はブラウザから非同期で届く。
+    // そのときには新しい認識が既に始まっているので、素通しすると
+    // 新しい認識の打ち切りタイマーが消され、マイクは握ったままボタンだけ
+    // 「音声で入力する」に戻る。遅れて届いた結果も入力欄へ入ってしまう。
+    // 停止直後にもう一度押すと再現する。
+    const isCurrent = () => recognitionRef.current === recognition
+
     recognition.onresult = (event) => {
+      if (!isCurrent()) return
       let text = ''
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i]
@@ -216,11 +229,13 @@ export function useSpeechInput(onText: (text: string) => void): SpeechInput {
       if (trimmed) onTextRef.current(trimmed)
     }
     recognition.onerror = (event) => {
+      if (!isCurrent()) return
       clearTimer()
       setError(describeError(event.error))
       setListening(false)
     }
     recognition.onend = () => {
+      if (!isCurrent()) return
       clearTimer()
       setListening(false)
     }

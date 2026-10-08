@@ -99,7 +99,7 @@ export function ChatModals({
       >
         <DialogTitle sx={{ textAlign: 'center', pb: 1 }}>
           <Typography variant="h5" component="div" sx={{ fontWeight: 'bold', color: 'warning.main' }}>
-            チャットを終了しましたか？
+            チャットを終了しますか？
           </Typography>
         </DialogTitle>
         <DialogContent sx={{ pt: 2, pb: 2 }}>

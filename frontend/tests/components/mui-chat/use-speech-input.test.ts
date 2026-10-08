@@ -31,7 +31,8 @@ class FakeRecognition {
     return Promise.resolve(FakeRecognition.installResult)
   }
 
-  options: { langs: string[]; processLocally: boolean } | undefined
+  // 実APIと同じくインスタンスのプロパティ。options オブジェクトではない。
+  processLocally: boolean | undefined
   lang = ''
   continuous = false
   interimResults = false
@@ -242,11 +243,11 @@ describe('端末内での処理', () => {
     })
     expect(result.current.local).toBe(true)
 
-    // 2回目から options が付く（1回目は待たずに始めている）
+    // 2回目から processLocally が付く（1回目は待たずに始めている）
     await act(async () => {
       result.current.start()
     })
-    expect(latest?.options).toEqual({ langs: ['ja-JP'], processLocally: true })
+    expect(latest?.processLocally).toBe(true)
   })
 
   it('調べるのは1度だけ', async () => {
@@ -274,7 +275,52 @@ describe('端末内での処理', () => {
       result.current.start()
     })
     expect(result.current.local).toBe(false)
-    expect(latest?.options).toBeUndefined()
+    expect(latest?.processLocally).toBeUndefined()
+  })
+
+  // abort() の後、古い認識器の end / error / result は非同期で届く。そのときには
+  // 新しい認識が始まっているので、素通しすると新しい認識の打ち切りタイマーが消え、
+  // マイクを握ったままボタンだけ戻る。停止直後にもう一度押すと再現する。
+  it('古い認識器のイベントで新しい認識の状態を壊さない', async () => {
+    installRecognition()
+    const onText = jest.fn()
+    const { result } = renderHook(() => useSpeechInput(onText))
+
+    await act(async () => {
+      result.current.start()
+    })
+    const old = latest as FakeRecognition
+
+    await act(async () => {
+      result.current.start()
+    })
+    const current = latest as FakeRecognition
+    expect(current).not.toBe(old)
+    expect(result.current.listening).toBe(true)
+
+    // 遅れて届いた古い認識器の end。新しい認識は続いているので無視する。
+    act(() => {
+      old.onend?.()
+    })
+    expect(result.current.listening).toBe(true)
+
+    // 古い認識器のエラーも、新しい認識のエラー表示にしない。
+    act(() => {
+      old.onerror?.({ error: 'aborted' })
+    })
+    expect(result.current.error).toBeNull()
+
+    // 遅れて届いた古い認識結果も入力欄へ入れない。
+    act(() => {
+      old.onresult?.(finalResult('古い結果'))
+    })
+    expect(onText).not.toHaveBeenCalled()
+
+    // 現在の認識器のイベントはこれまでどおり効く。
+    act(() => {
+      current.onresult?.(finalResult('新しい結果'))
+    })
+    expect(onText).toHaveBeenCalledWith('新しい結果')
   })
 
   it('言語パックは押したときに取りに行く', async () => {

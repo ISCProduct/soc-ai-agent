@@ -99,24 +99,53 @@ export function ChatMessageList({
         吹き出しの形に合わせた骨格にして、これから会話が出ることを示す。
       */}
       {historyLoading && messages.length === 0 && !historyLoadError && (
-        <Box sx={{ px: { xs: 2, md: 3 }, pt: 2 }} aria-hidden>
-          {[0, 1, 2].map((i) => (
-            <Box
-              key={i}
-              sx={{
-                display: 'flex',
-                mb: { xs: 2, md: 2.5 },
-                justifyContent: i % 2 === 1 ? 'flex-end' : 'flex-start',
-              }}
-            >
-              <Skeleton
-                variant="rounded"
-                height={i % 2 === 1 ? 40 : 64}
-                sx={{ width: i % 2 === 1 ? '45%' : '70%', borderRadius: 2 }}
-              />
-            </Box>
-          ))}
-        </Box>
+        <>
+          {/*
+            読み上げ向けの通知。骨格そのものは装飾なので aria-hidden のままにする。
+            初期表示の PageLoading は mounted が立った時点で消えるため、そのあと
+            履歴を待っている間は、これが無いと空のチャットログと入力欄だけが
+            読み上げられ、待機中だと分からない。
+          */}
+          <Box
+            role="status"
+            sx={{
+              position: 'absolute',
+              width: 1,
+              height: 1,
+              overflow: 'hidden',
+              clip: 'rect(0 0 0 0)',
+              clipPath: 'inset(50%)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            チャット履歴を読み込んでいます
+          </Box>
+          <Box sx={{ px: { xs: 2, md: 3 }, pt: 2 }} aria-hidden>
+            {[0, 1, 2].map((i) => (
+              <Box
+                key={i}
+                sx={{
+                  display: 'flex',
+                  mb: { xs: 2, md: 2.5 },
+                  justifyContent: i % 2 === 1 ? 'flex-end' : 'flex-start',
+                }}
+              >
+                <Skeleton
+                  variant="rounded"
+                  height={i % 2 === 1 ? 40 : 64}
+                  sx={{
+                    width: i % 2 === 1 ? '45%' : '70%',
+                    borderRadius: 2,
+                    // Skeleton の既定は pulse で、点滅し続ける。TypingIndicator の
+                    // 回転と跳ねだけ止めても、この画面で最初に出る反復アニメーションが
+                    // 残ってしまう。止めても灰色の面は残るので、待ち状態は伝わる。
+                    '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
+                  }}
+                />
+              </Box>
+            ))}
+          </Box>
+        </>
       )}
 
       {messages.map((message) => {
