@@ -74,7 +74,21 @@ interface AnalysisStep {
     label: string
     icon: React.ReactNode
     completed: boolean
-    progress?: number
+    /** 0〜100。待機中(0)と完了(100)も値を持つ。表示するかどうかは描画側で決める。 */
+    progress: number
+}
+
+/**
+ * 進捗の文言。0%と100%でも必ず何か出す。
+ *
+ * 以前は progress を undefined にしていたため、待機中と完了の項目から進捗の表示が
+ * 丸ごと消え、学生からは「何も起きていない」ように見えていた。
+ * 「0% 完了」は日本語として読みにくいので、両端だけ言葉にする。
+ */
+function stepCaption(percent: number): string {
+    if (percent >= 100) return '完了'
+    if (percent <= 0) return 'これから'
+    return `${percent}% 完了`
 }
 
 interface PhaseProgress {
@@ -151,13 +165,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
         }
         return Math.min(100, Math.floor((phase.valid_answers / phase.questions_asked) * 100))
     }
-    const getPhaseStatus = (phaseName: string, defaultLabel: string) => {
-        const phase = phaseProgressFor(phaseName)
-        if (!phase) return defaultLabel
-        if (phase.is_completed) return defaultLabel.replace('進行中', '完了').replace('待機中', '完了')
-        if (phase.questions_asked > 0) return defaultLabel.replace('待機中', '進行中')
-        return defaultLabel
-    }
 
     const expectedTotalQuestions = (() => {
         if (!phases || phases.length === 0) return totalQuestions
@@ -195,34 +202,38 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
     // ヘッダー（ChatHeader）と同じ算出ロジックを使い、「X/Y 完了」の表示が一致するようにする
     const progressTotals = computeProgressTotals({ phases, questionCount, totalQuestions })
 
+    // ラベルは話題名のままにする。「職種分析進行中」のような内部フェーズ名＋状態は、
+    // 学生に何について答えているのかではなく処理の名前を読ませることになる
+    // (.claude/skills/school-career-ui-design/SKILL.md 4.3「学生向け画面では
+    // システム用語を避ける」)。状態はアイコン・太字・進捗バーと下の文言で示す。
     const analysisSteps: AnalysisStep[] = [
         {
             id: 'job',
-            label: getPhaseStatus('job_analysis', progress.job === 100 ? '職種分析完了' : '職種分析進行中'),
+            label: '希望の職種',
             icon: <Work/>,
             completed: getPhasePercent('job_analysis', progress.job) === 100,
-            progress: getPhasePercent('job_analysis', progress.job) < 100 ? getPhasePercent('job_analysis', progress.job) : undefined,
+            progress: getPhasePercent('job_analysis', progress.job),
         },
         {
             id: 'interest',
-            label: getPhaseStatus('interest_analysis', progress.interest === 100 ? '興味分析完了' : progress.interest > 0 ? '興味分析進行中' : '興味分析待機中'),
+            label: '興味のあること',
             icon: <Psychology/>,
             completed: getPhasePercent('interest_analysis', progress.interest) === 100,
-            progress: getPhasePercent('interest_analysis', progress.interest) > 0 && getPhasePercent('interest_analysis', progress.interest) < 100 ? getPhasePercent('interest_analysis', progress.interest) : undefined,
+            progress: getPhasePercent('interest_analysis', progress.interest),
         },
         {
             id: 'aptitude',
-            label: getPhaseStatus('aptitude_analysis', progress.aptitude === 100 ? '適性分析完了' : progress.aptitude > 0 ? '適性分析進行中' : '適性分析待機中'),
+            label: '得意なこと',
             icon: <TrendingUp/>,
             completed: getPhasePercent('aptitude_analysis', progress.aptitude) === 100,
-            progress: getPhasePercent('aptitude_analysis', progress.aptitude) > 0 && getPhasePercent('aptitude_analysis', progress.aptitude) < 100 ? getPhasePercent('aptitude_analysis', progress.aptitude) : undefined,
+            progress: getPhasePercent('aptitude_analysis', progress.aptitude),
         },
         {
             id: 'future',
-            label: getPhaseStatus('future_analysis', progress.future === 100 ? '将来分析完了' : progress.future > 0 ? '将来分析進行中' : '将来分析待機中'),
+            label: '働き方の希望',
             icon: <EmojiEvents/>,
             completed: getPhasePercent('future_analysis', progress.future) === 100,
-            progress: getPhasePercent('future_analysis', progress.future) > 0 && getPhasePercent('future_analysis', progress.future) < 100 ? getPhasePercent('future_analysis', progress.future) : undefined,
+            progress: getPhasePercent('future_analysis', progress.future),
         },
     ]
 
@@ -341,8 +352,9 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                                     }}
                                 />
                             </ListItem>
-                            {step.progress !== undefined && (
-                                <Box sx={{px: 2, pb: 1}}>
+                            <Box sx={{px: 2, pb: 1}}>
+                                {/* バーは進行中だけに出す。0%と100%の棒は情報を足さない。 */}
+                                {step.progress > 0 && step.progress < 100 && (
                                     <LinearProgress
                                         variant="determinate"
                                         value={step.progress}
@@ -356,15 +368,16 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                                           },
                                         }}
                                     />
-                                    <Typography
-                                        variant="caption"
-                                        color="text.secondary"
-                                        sx={{mt: 0.5, display: 'block'}}
-                                    >
-                                        {step.progress}% 完了
-                                    </Typography>
-                                </Box>
-                            )}
+                                )}
+                                {/* 文言は常に出す。待機中と完了の項目が無表示にならないようにする。 */}
+                                <Typography
+                                    variant="caption"
+                                    color="text.secondary"
+                                    sx={{mt: 0.5, display: 'block'}}
+                                >
+                                    {stepCaption(step.progress)}
+                                </Typography>
+                            </Box>
                         </React.Fragment>
                     ))}
                 </List>
