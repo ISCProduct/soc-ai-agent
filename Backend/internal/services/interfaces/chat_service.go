@@ -17,6 +17,7 @@ type ChatService interface {
 	// 所有者判定に使う（#1156）
 	GetChatHistoryForUser(sessionID string, userID uint) ([]models.ChatMessage, error)
 	SessionHasOtherUserMessages(sessionID string, userID uint) (bool, error)
+	ClaimSessionOwnership(sessionID string, userID uint) error
 	GetUserScores(userID uint, sessionID string) ([]entity.UserWeightScore, error)
 	GetUserChatSessions(userID uint) ([]models.ChatSession, error)
 }

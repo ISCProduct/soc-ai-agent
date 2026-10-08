@@ -22,6 +22,11 @@ func (s *ChatService) SessionHasOtherUserMessages(sessionID string, userID uint)
 	return s.chatMessageRepo.ExistsBySessionIDForOtherUser(sessionID, userID)
 }
 
+// ClaimSessionOwnership は session_id の新規開始を、DB レベルで最初の所有者だけが獲得できるようにする。
+func (s *ChatService) ClaimSessionOwnership(sessionID string, userID uint) error {
+	return s.sessionValidationRepo.ClaimSessionOwnership(sessionID, userID)
+}
+
 // GetUserScores ユーザーのスコアを取得
 func (s *ChatService) GetUserScores(userID uint, sessionID string) ([]entity.UserWeightScore, error) {
 	return s.userWeightScoreRepo.FindByUserAndSession(userID, sessionID)
