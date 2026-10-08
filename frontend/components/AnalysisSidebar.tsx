@@ -71,12 +71,24 @@ const NAV_ICONS: Record<(typeof SIDEBAR_NAV_ITEMS)[number]['href'], React.ReactN
 
 interface AnalysisStep {
     id: string
-    /** 話題の状態。ラベルとは分けて2行で出す */
-    status: string
     label: string
     icon: React.ReactNode
     completed: boolean
-    progress?: number
+    /** 0〜100。待機中(0)と完了(100)も値を持つ。表示するかどうかは描画側で決める。 */
+    progress: number
+}
+
+/**
+ * 進捗の文言。0%と100%でも必ず何か出す。
+ *
+ * 以前は progress を undefined にしていたため、待機中と完了の項目から進捗の表示が
+ * 丸ごと消え、学生からは「何も起きていない」ように見えていた。
+ * 「0% 完了」は日本語として読みにくいので、両端だけ言葉にする。
+ */
+function stepCaption(percent: number): string {
+    if (percent >= 100) return '完了'
+    if (percent <= 0) return 'これから'
+    return `${percent}% 完了`
 }
 
 interface PhaseProgress {
@@ -153,13 +165,6 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
         }
         return Math.min(100, Math.floor((phase.valid_answers / phase.questions_asked) * 100))
     }
-    const getPhaseStatus = (phaseName: string, defaultLabel: string) => {
-        const phase = phaseProgressFor(phaseName)
-        if (!phase) return defaultLabel
-        if (phase.is_completed) return defaultLabel.replace('進行中', '完了').replace('待機中', '完了')
-        if (phase.questions_asked > 0) return defaultLabel.replace('待機中', '進行中')
-        return defaultLabel
-    }
 
     const expectedTotalQuestions = (() => {
         if (!phases || phases.length === 0) return totalQuestions
@@ -197,38 +202,38 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
     // ヘッダー（ChatHeader）と同じ算出ロジックを使い、「X/Y 完了」の表示が一致するようにする
     const progressTotals = computeProgressTotals({ phases, questionCount, totalQuestions })
 
+    // ラベルは話題名のままにする。「職種分析進行中」のような内部フェーズ名＋状態は、
+    // 学生に何について答えているのかではなく処理の名前を読ませることになる
+    // (.claude/skills/school-career-ui-design/SKILL.md 4.3「学生向け画面では
+    // システム用語を避ける」)。状態はアイコン・太字・進捗バーと下の文言で示す。
     const analysisSteps: AnalysisStep[] = [
         {
             id: 'job',
-            status: progress.job === 100 ? '聞けました' : '聞いています',
-            label: getPhaseStatus('job_analysis', progress.job === 100 ? '希望の職種' : '希望の職種'),
+            label: '希望の職種',
             icon: <Work/>,
             completed: getPhasePercent('job_analysis', progress.job) === 100,
-            progress: getPhasePercent('job_analysis', progress.job) < 100 ? getPhasePercent('job_analysis', progress.job) : undefined,
+            progress: getPhasePercent('job_analysis', progress.job),
         },
         {
             id: 'interest',
-            status: progress.interest === 100 ? '聞けました' : progress.interest > 0 ? '聞いています' : 'これから',
-            label: getPhaseStatus('interest_analysis', progress.interest === 100 ? '興味のあること' : '興味のあること'),
+            label: '興味のあること',
             icon: <Psychology/>,
             completed: getPhasePercent('interest_analysis', progress.interest) === 100,
-            progress: getPhasePercent('interest_analysis', progress.interest) > 0 && getPhasePercent('interest_analysis', progress.interest) < 100 ? getPhasePercent('interest_analysis', progress.interest) : undefined,
+            progress: getPhasePercent('interest_analysis', progress.interest),
         },
         {
             id: 'aptitude',
-            status: progress.aptitude === 100 ? '聞けました' : progress.aptitude > 0 ? '聞いています' : 'これから',
-            label: getPhaseStatus('aptitude_analysis', progress.aptitude === 100 ? '得意なこと' : '得意なこと'),
+            label: '得意なこと',
             icon: <TrendingUp/>,
             completed: getPhasePercent('aptitude_analysis', progress.aptitude) === 100,
-            progress: getPhasePercent('aptitude_analysis', progress.aptitude) > 0 && getPhasePercent('aptitude_analysis', progress.aptitude) < 100 ? getPhasePercent('aptitude_analysis', progress.aptitude) : undefined,
+            progress: getPhasePercent('aptitude_analysis', progress.aptitude),
         },
         {
             id: 'future',
-            status: progress.future === 100 ? '聞けました' : progress.future > 0 ? '聞いています' : 'これから',
-            label: getPhaseStatus('future_analysis', progress.future === 100 ? '働き方の希望' : '働き方の希望'),
+            label: '働き方の希望',
             icon: <EmojiEvents/>,
             completed: getPhasePercent('future_analysis', progress.future) === 100,
-            progress: getPhasePercent('future_analysis', progress.future) > 0 && getPhasePercent('future_analysis', progress.future) < 100 ? getPhasePercent('future_analysis', progress.future) : undefined,
+            progress: getPhasePercent('future_analysis', progress.future),
         },
     ]
 
@@ -312,15 +317,11 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                     </Box>
                 )}
 
-                {/*
-                  「AI分析進捗」をやめた。
-                  学生が知りたいのは何を聞かれているかで、AIの作業状況ではない。
-                */}
                 <Typography variant="h6" sx={{fontWeight: 600, mb: 1}}>
-                    ここまで聞いたこと
+                    AI分析進捗
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{mb: 2}}>
-                    {progressTotals.valid}問に回答（全{progressTotals.required}問）
+                    質問 {progressTotals.valid}/{progressTotals.required}（{progressTotals.percent}%）
                 </Typography>
 
                 <List sx={{p: 0}}>
@@ -343,22 +344,17 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                                         <RadioButtonUnchecked color="action" aria-label="未完了" />
                                     )}
                                 </ListItemIcon>
-                                {/*
-                                  状態をラベルに含めると狭い幅で折り返して読みにくい。
-                                  話題を主、状態を従にして2行に分ける。
-                                */}
                                 <ListItemText
                                     primary={step.label}
-                                    secondary={step.status}
                                     primaryTypographyProps={{
                                         fontSize: '0.95rem',
                                         fontWeight: step.completed ? 700 : 500,
                                     }}
-                                    secondaryTypographyProps={{ fontSize: '0.8rem' }}
                                 />
                             </ListItem>
-                            {step.progress !== undefined && (
-                                <Box sx={{px: 2, pb: 1}}>
+                            <Box sx={{px: 2, pb: 1}}>
+                                {/* バーは進行中だけに出す。0%と100%の棒は情報を足さない。 */}
+                                {step.progress > 0 && step.progress < 100 && (
                                     <LinearProgress
                                         variant="determinate"
                                         value={step.progress}
@@ -372,8 +368,16 @@ export function AnalysisSidebar({user, onLogout, mobileOpen = false, onMobileClo
                                           },
                                         }}
                                     />
-                                </Box>
-                            )}
+                                )}
+                                {/* 文言は常に出す。待機中と完了の項目が無表示にならないようにする。 */}
+                                <Typography
+                                    variant="caption"
+                                    color="text.secondary"
+                                    sx={{mt: 0.5, display: 'block'}}
+                                >
+                                    {stepCaption(step.progress)}
+                                </Typography>
+                            </Box>
                         </React.Fragment>
                     ))}
                 </List>
