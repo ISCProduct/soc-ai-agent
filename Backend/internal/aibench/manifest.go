@@ -218,3 +218,18 @@ var numericTokenPattern = regexp.MustCompile(`[0-9０-９]+`)
 func (c Case) InputNumericTokens() int {
 	return len(numericTokenPattern.FindAllString(c.InputText(), -1))
 }
+
+// properNounPattern はゴールデンセットで使う固有名詞。合成データなので
+// 社名・学校名は「サンプル」「株式会社」で始まる形に統一してある。
+// 実在の固有名詞を一般に検出するものではない（そもそも実データは入れない）。
+var properNounPattern = regexp.MustCompile(`(?:株式会社|サンプル)[^\s、。]*`)
+
+// InputProperNouns は入力本文に現れる固有名詞の個数。
+//
+// 文字数・数値トークン数に続く3つ目の表層特徴として測る（#1637）。
+// specificity のレベル定義は「数値・固有名詞・期間」を並列に数えるので、
+// 数値の交絡を下げたぶんを固有名詞へ移しただけ、という逃げ方ができてしまう。
+// 同じ罠を3つ目で塞ぐために上限を固定する。
+func (c Case) InputProperNouns() int {
+	return len(properNounPattern.FindAllString(c.InputText(), -1))
+}
