@@ -12,7 +12,7 @@ require (
 	github.com/labstack/echo/v4 v4.15.3
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/crypto v0.52.0
+	golang.org/x/crypto v0.53.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/time v0.15.0
 	gorm.io/driver/mysql v1.6.0
@@ -23,8 +23,8 @@ require (
 	github.com/alicebob/miniredis/v2 v2.34.0
 	github.com/aws/aws-lambda-go v1.54.0
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.73.6
-	github.com/getsentry/sentry-go v0.35.1
-	github.com/getsentry/sentry-go/echo v0.35.1
+	github.com/getsentry/sentry-go v0.49.0
+	github.com/getsentry/sentry-go/echo v0.49.0
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
@@ -44,6 +44,7 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/labstack/echo/v5 v5.2.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
@@ -88,8 +89,8 @@ require (
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
-	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.39.0
-	gopkg.in/yaml.v3 v3.0.1 // indirect
+	gopkg.in/yaml.v3 v3.0.1
 )
