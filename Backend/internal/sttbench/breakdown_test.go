@@ -40,21 +40,48 @@ func TestBreakdown_SeparatesConditions(t *testing.T) {
 	}
 }
 
-// 失敗ケースは平均CERに含めず、失敗率の母数には数える。
-func TestBreakdown_FailuresExcludedFromMeanButCounted(t *testing.T) {
+// 認識失敗は全ミスとして平均CERに含め、失敗率の分子にも数える。
+//
+// 平均から外すと「何も返さないほど成績が良く見える」逆転が起きる。
+// APIは正常応答しており、空・短すぎる出力はモデルの測定結果そのもの。
+func TestBreakdown_FailuresCountedAsFullMiss(t *testing.T) {
 	results := []CaseResult{
-		{ID: "a", Condition: "x", CER: 0.02},
-		{ID: "b", Condition: "x", Failed: true, CER: 0.99}, // 失敗はCERを平均に入れない
+		{ID: "a", Condition: "x", CER: 0.0, KeywordsHit: []string{"Go", "AWS"}},
+		// 無音応答。run.go が CER=1.0 / KeywordsMiss=全部 を既に入れている
+		{ID: "b", Condition: "x", Failed: true, CER: 1.0, KeywordsMiss: []string{"Go", "AWS"}},
 	}
 	g := Breakdown(results, condKey)[0]
 	if g.Cases != 2 {
 		t.Errorf("件数 = %d, want 2", g.Cases)
 	}
-	if g.MeanCER < 0.019 || g.MeanCER > 0.021 {
-		t.Errorf("平均CER = %.3f, want ~0.02（失敗を除く）", g.MeanCER)
+	// 外していた頃は 0.000 だった（完璧1件だけが母数になる）
+	if g.MeanCER < 0.49 || g.MeanCER > 0.51 {
+		t.Errorf("平均CER = %.3f, want ~0.50（失敗も全ミスとして数える）", g.MeanCER)
+	}
+	// 外していた頃は 1.000 だった
+	if g.KeywordAccuracy < 0.49 || g.KeywordAccuracy > 0.51 {
+		t.Errorf("固有名詞正解率 = %.3f, want ~0.50", g.KeywordAccuracy)
 	}
 	if g.FailureRate != 0.5 {
 		t.Errorf("失敗率 = %.2f, want 0.5", g.FailureRate)
+	}
+}
+
+// APIエラーだけは母数から外す（呼べていないので何も測れていない）。
+func TestBreakdown_APIErrorsExcludedFromAllMetrics(t *testing.T) {
+	results := []CaseResult{
+		{ID: "a", Condition: "x", CER: 0.10, KeywordsHit: []string{"Go"}},
+		{ID: "b", Condition: "x", Errored: true}, // 呼べていない
+	}
+	g := Breakdown(results, condKey)[0]
+	if g.Cases != 2 || g.Errored != 1 {
+		t.Errorf("件数 = %d / APIエラー = %d, want 2 / 1", g.Cases, g.Errored)
+	}
+	if g.MeanCER < 0.09 || g.MeanCER > 0.11 {
+		t.Errorf("平均CER = %.3f, want ~0.10（母数はAPI成功1件）", g.MeanCER)
+	}
+	if g.FailureRate != 0.0 {
+		t.Errorf("失敗率 = %.2f, want 0.0（APIエラーは認識失敗ではない）", g.FailureRate)
 	}
 }
 

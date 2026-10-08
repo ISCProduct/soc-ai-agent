@@ -9,9 +9,9 @@
 **Execution Workflow:**
 
 1. **変更内容の取得**
-   * `git diff main...HEAD` で変更差分を取得する。
-   * `git log main...HEAD --oneline` でコミット一覧を確認する。
-   * Issue番号が指定された場合は `gh issue view {{number}}` で要件を確認する。
+   * `git diff origin/develop...HEAD` で変更差分を取得する。
+   * `git log origin/develop...HEAD --oneline` でコミット一覧を確認する。
+   * Issue番号が指定された場合は `gh issue view $1` で要件を確認する。
 
 2. **チェック実行（以下の全項目を自動検査）**
 

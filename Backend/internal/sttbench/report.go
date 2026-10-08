@@ -22,14 +22,28 @@ func PrintSummary(w io.Writer, model string, s *ModelSummary) {
 		if c.NumbersTotal > 0 {
 			num = fmt.Sprintf("%d/%d", c.NumbersMatched, c.NumbersTotal)
 		}
+		// APIエラーと認識失敗は別物なので記号を分ける。
+		// 「APIが落ちていた」のか「聞き取れなかった」のかで打つ手が違う。
 		mark := ""
-		if c.Failed {
+		switch {
+		case c.Errored:
+			mark = "E"
+		case c.Failed:
 			mark = "✗"
 		}
 		fmt.Fprintf(w, "%-26s %8.3f %8.3f %10s %10s %6s %8d\n", c.ID, c.CER, c.SemanticCER, kw, num, mark, c.LatencyMS)
 	}
-	fmt.Fprintf(w, "  平均CER %.3f(意味 %.3f) / 固有名詞 %.1f%% / 数値 %.1f%% / 失敗率 %.1f%% / 平均 %dms\n",
-		s.MeanCER, s.MeanSemanticCER, s.KeywordAccuracy*100, s.NumberAccuracy*100, s.FailureRate*100, s.MeanLatencyMS)
+	// 平均の母数は「APIが成功し、かつ認識失敗でもない件数」。
+	// APIエラー件数を必ず添えるのは、残高切れで大半が落ちた run を
+	// 「CERが改善した」と読まないため。
+	scored := len(s.Cases) - s.ErroredCases
+	fmt.Fprintf(w, "  平均CER %.3f(意味 %.3f) / 固有名詞 %s / 数値 %s / 認識失敗率 %.1f%% / 平均 %dms\n",
+		s.MeanCER, s.MeanSemanticCER, pctOrDash(s.KeywordAccuracy), pctOrDash(s.NumberAccuracy),
+		s.FailureRate*100, s.MeanLatencyMS)
+	fmt.Fprintf(w, "  APIエラー %d件（平均の母数は %d件 / 全 %d件）\n", s.ErroredCases, scored, len(s.Cases))
+	if s.Aborted {
+		fmt.Fprintf(w, "  ⚠ 4xx が %d件連続したため打ち切りました。この結果で判断しないこと\n", maxConsecutive4xx)
+	}
 
 	// 落としたキーワードは、どの語で失敗したかが分かると対策に直結する
 	miss := map[string]int{}
@@ -66,8 +80,8 @@ func printGroups(w io.Writer, title string, groups []GroupSummary) {
 	}
 	fmt.Fprintf(w, "  [%s]\n", title)
 	for _, g := range groups {
-		fmt.Fprintf(w, "    %-16s 件数%3d  CER %.3f  固有名詞 %s  数値 %s  失敗率 %.1f%%\n",
-			g.Key, g.Cases, g.MeanCER,
+		fmt.Fprintf(w, "    %-16s 件数%3d(APIエラー%3d)  CER %.3f  固有名詞 %s  数値 %s  認識失敗率 %.1f%%\n",
+			g.Key, g.Cases, g.Errored, g.MeanCER,
 			pctOrDash(g.KeywordAccuracy), pctOrDash(g.NumberAccuracy), g.FailureRate*100)
 	}
 }
@@ -84,8 +98,10 @@ func pctOrDash(v float64) string {
 // 「どちらが安いか」ではなく「何を失うか」が読み取れる並びにする。
 func PrintComparison(w io.Writer, models []string, r Report) {
 	fmt.Fprintf(w, "\n=== 比較 ===\n")
-	fmt.Fprintf(w, "%-26s %8s %8s %10s %8s %8s %12s\n",
-		"モデル", "平均CER", "意味CER", "固有名詞", "数値", "失敗率", "$/面接30分")
+	// 平均の母数（CER等を計算できた件数）とAPIエラー件数を並べる。
+	// CER だけを横に並べると、落ちた run のほうが良く見えて判断を誤る。
+	fmt.Fprintf(w, "%-26s %8s %8s %10s %8s %10s %8s %8s %12s\n",
+		"モデル", "平均CER", "意味CER", "固有名詞", "数値", "認識失敗率", "母数", "APIエラー", "$/面接30分")
 	for _, m := range models {
 		m = strings.TrimSpace(m)
 		s := r.Models[m]
@@ -95,8 +111,9 @@ func PrintComparison(w io.Writer, models []string, r Report) {
 		// 面接30分ぶんの発話を10分と仮定した概算。
 		// 学生が話す時間は面接時間そのものではない。
 		const speechMinPerInterview = 10.0
-		fmt.Fprintf(w, "%-26s %8.3f %8.3f %9.1f%% %7.1f%% %7.1f%% %12.4f\n",
-			m, s.MeanCER, s.MeanSemanticCER, s.KeywordAccuracy*100, s.NumberAccuracy*100,
-			s.FailureRate*100, s.EstCostPerMinUSD*speechMinPerInterview)
+		fmt.Fprintf(w, "%-26s %8.3f %8.3f %10s %8s %9.1f%% %8d %8d %12.4f\n",
+			m, s.MeanCER, s.MeanSemanticCER, pctOrDash(s.KeywordAccuracy), pctOrDash(s.NumberAccuracy),
+			s.FailureRate*100, len(s.Cases)-s.ErroredCases, s.ErroredCases,
+			s.EstCostPerMinUSD*speechMinPerInterview)
 	}
 }

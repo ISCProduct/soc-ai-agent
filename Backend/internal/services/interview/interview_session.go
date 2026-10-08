@@ -39,9 +39,9 @@ func (s *InterviewService) CreateSession(userID uint, language string, interview
 	if err != nil || user == nil {
 		return nil, errors.New("user not found")
 	}
-	if language == "" {
-		language = "ja"
-	}
+	// 対応言語のホワイトリスト。以前は空文字しか弾いておらず、未知の値が
+	// 採点プロンプトへ生で入った（normalizeLanguage のコメント参照、#1600）。
+	language = normalizeLanguage(language)
 	if interviewerGender != "male" && interviewerGender != "female" {
 		interviewerGender = "female"
 	}

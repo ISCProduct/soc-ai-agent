@@ -200,7 +200,8 @@ func (c *AdminJobController) resolveGraduateSchoolID(ctx echo.Context, requested
 	if !ok {
 		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	restricted, allowed, err := c.schools.ResolveAdminAccess(adminUserID)
+	isPlatform := middleware.AdminIsPlatformFromContext(ctx.Request().Context())
+	restricted, allowed, err := c.schools.ResolveAccess(isPlatform, adminUserID)
 	if err != nil {
 		return nil, httpapi.InternalError(err)
 	}

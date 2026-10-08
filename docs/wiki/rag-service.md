@@ -98,6 +98,23 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 | `web_search` | OpenAI Web Search（gpt-4o-search-preview）を使用 |
 | `cache` | ChromaDB のキャッシュを使用（Web 検索なし） |
 
+### `/es/review` リクエスト例
+
+```json
+{
+  "es_text": "学生時代に力を入れたことは...",
+  "question_type": "学チカ",
+  "company_name": "株式会社Example",
+  "tech_stack": "Go, React",
+  "char_limit": 400,
+  "char_limit_mode": "within"
+}
+```
+
+- `es_text` の上限は **6,000字**（#1564。後述「入力上限の決め方」）
+- `tech_stack`（任意）はESリライト経路の入力。改善文の生成側にだけ渡す（#1533）
+- `char_limit`（任意・100〜2000）は設問の文字数上限、`char_limit_mode` は `within`（「400字以内」＝超過不可・既定）/ `around`（「400字程度」＝+10%まで）（#1523）
+
 ### `/es/review` レスポンス例
 
 ```json
@@ -109,7 +126,11 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
   "feedback": "...",
   "improved_text": "...",
   "company_strategy": null,
-  "company_context_source": "none"
+  "company_context_source": "none",
+  "star": { "situation": "...", "task": "...", "action": "...", "result": "..." },
+  "improved_text_length": 392,
+  "char_limit_satisfied": true,
+  "usage": { "model": "gpt-4o", "prompt_tokens": 1200, "completion_tokens": 900, "calls": 2 }
 }
 ```
 
@@ -124,7 +145,9 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
   - 改善文の段: **`max_tokens` を渡さない**（入力長から見積もらず、モデル自身の出力上限に任せる）
 - `finish_reason == "length"`（出力上限到達）を検知したら上限を2倍にして**1回だけ**再試行する。既に天井なら引き上げ余地が無いので再試行しない（改善文の段は `max_tokens` を渡さない＝引き上げ余地が無いので再試行せず、上限到達時は2呼び出しで 422 を返す）
 - 再試行しても上限に達した場合は 422 を返す。案内文は段ごとに変える（評価の出力量はESの長さに依存しないため、そちらで「文字数を減らして」と案内しても直らない）
-  - 改善文の段: 「文章が長すぎて添削できませんでした。文字数を減らしてお試しください。」
+  - 改善文の段（`char_limit` なし）: 「文章が長すぎて添削できませんでした。文字数を減らしてお試しください。」
+  - 改善文の段（`char_limit` あり）: 「指定字数に収められませんでした。文字数上限を緩めるか、もう一度お試しください。」
+    `char_limit` があると出力予算は指定字数だけで決まり、ES本文の長さに依存しない。ここで「文字数を減らして」と案内すると、ES本文をいくら削っても直らない案内になる（#1523）
   - 評価の段: 「添削コメントが長くなりすぎて最後まで生成できませんでした。もう一度お試しください。」
 - 422 の案内文は Go を透過し、FE では `frontend/app/es-rewrite/page-content.tsx` の `readApiErrorMessage` が 422 のとき `detail` を優先して表示する（BFF が `error` に入れる一般文では利用者が対処できないため）
 - FEの表示（`/es-rewrite` の添削結果）: `company_fit_score` が null のときは「企業適合性」のスコア行を出さない（空のバーは 0/10 に見え低評価と誤解させるため）。案内文は **`company_context_source` で出し分ける**
@@ -132,9 +155,35 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
   - 企業名あり × `none`: 「企業情報を取得できなかったため、企業適合性は評価していません」＋正式名称での入力し直しの案内
   - 企業名あり × `none` 以外（企業情報は取得できたが点数化できなかった）: 「今回は企業適合性の点数を算出できませんでした」。ここで「公開情報が見つかりませんでした」と出すと、同じ画面に出る企業対策アドバイスと矛盾する
   - `company_strategy` が null なら対策アドバイスのカードごと非表示
-- FEの入力欄は `maxLength=10000`（RAGの `es_text` 上限と同値）。超過分を送ると FastAPI のバリデーション 422 になり、その `detail` は配列＋ES全文を含むため利用者向けの文面にならない。FE 側も 422 の `detail` は「200字以内で `{`/`[` 始まりでない」ものだけ表示する（#1015 の生JSONを出さない方針）
-- LLM呼び出しは最悪3回直列（評価の段2回＋改善文の段1回。改善文の段は引き上げ余地が無いので再試行しない / #1564）。OpenAI SDK の `max_retries` は 1 を明示しているので1論理呼び出しは最大2 HTTP。1回あたりの上限は `RAG_OPENAI_TIMEOUT_SEC`（既定60秒、HTTPリクエスト1本あたり）
-- `/api/es/review` の実効タイムアウトは **90秒**（ALB `idle_timeout` / CloudFront `origin_read_timeout` / staging の edge nginx `proxy_read_timeout`、#1556）。Backend の `http.Client` は意図的に1段短い85秒。**利用者に見える画面は変わらない**（prod の CloudFront は502/504とも503+`/service-unavailable.html`、staging の nginx は502/504とも「起動中」ページへ差し替える）。85秒の目的は上流の汎用504より先に手放して Go のログと ALB アクセスログに原因を残すこと。4段すべてが上限近くまで粘ると90秒でも足りないため、処理側の打ち切りと併用する必要がある（設定値の一覧と切り分けは `operations.md` の「ES添削が結果を返さない / 504 になる」）
+- FEの入力欄は `maxLength=6000`（RAGの `es_text` 上限と同値 / #1564）。超過分を送ると FastAPI のバリデーション 422 になり、その `detail` は配列＋ES全文を含むため利用者向けの文面にならない。FE 側も 422 の `detail` は「200字以内で `{`/`[` 始まりでない」ものだけ表示する（#1015 の生JSONを出さない方針）
+- OpenAI SDK の `max_retries` は 1 を明示している。経路のタイムアウトは #1556 で CloudFront / ALB / staging の edge nginx を90秒へ揃え、Backend 側の `/api/es/review` は上流より1段短い85秒にした（上流の汎用504より先に手放してログに原因を残すため）
+
+### 設問の文字数上限（#1523）
+
+- 字数の数え方は `services/es_review.py` の **`count_es_chars` が唯一の定義**: 改行と前後の空白は数えず、それ以外（全角・半角・記号・文中の空白）は1文字。プロンプトの指示・生成後の検査・`length_balance_score` の採点基準・FEの表示はすべてこの値に揃える（FEで数え直さない）
+- 目標レンジは `_CHAR_LIMIT_RANGE`: `within` = 指定字数の85〜100%、`around` = 90〜110%
+- 生成後にサーバ側で字数を検査し、許容上限を超えていたら**改善文だけ**を最大2回（`_MAX_CHAR_LIMIT_RETRIES`）作り直す。再生成プロンプトには「直前は N 字で、目標の M 字を超えた」と実測値を入れる（モデルの自己申告には頼らない）。評価（第1呼び出し）は作り直さない
+- 再生成は**開始から45秒（`_CHAR_LIMIT_RETRY_DEADLINE_SEC`）を超えたら打ち切る**。手前のALB / CloudFront が60秒で切るため(#1556)、跨ぐと 422 の案内文も生成済みの本文も利用者へ届かない。打ち切りは失敗ではなく `char_limit_satisfied: false` として返す
+- それでも収まらない場合は**切り詰めず**、`char_limit_satisfied: false` と `improved_text_length` を返す。FEは字数を出し、収まらなかったことを警告で明示する
+- `char_limit` 指定時の改善文の出力予算は、入力長ではなく指定字数から見積もる（長いESを短く直す指定が通常ケース）。**`char_limit` が無いときは `max_tokens` を渡さない**（#1564。入力長へ比例させると天井で飽和して無駄な再試行を1回挟み、定数を常に渡すと出力上限4,096のモデルへ差し替えた瞬間に全リクエストが400になる）
+
+### ES添削とESリライトの統合（#1533）
+
+- ESの評価・書き換えの実装は `services/es_review.py` のみ。Backend の `/api/es/review`（ES添削タブ）と `/api/es/rewrite`（ESリライトタブ）はどちらも RAG の `/es/review` を呼ぶ
+- 旧実装では `/api/es/rewrite` が Backend 内の独自プロンプト（gpt-4o-mini・**インジェクション対策なし**・字数指示120〜150%）で生成していたため、同じESでも添削タブと違う書き換え案が返っていた。統合でプロンプト・出力スキーマ・インジェクション対策が1箇所になった
+- `/api/es/rewrite` のレスポンスは従来互換（`rewritten_text` / `star`）。`improved_text` を `rewritten_text` に詰め替えて返し、`improved_text_length` / `char_limit_satisfied` を追加している
+- STAR分解（`star`）は改善文と同じ第2呼び出しで生成する。ES添削タブは `star_score`、ESリライトタブは `star` の内訳を同じレスポンスから表示する
+- **デプロイ順は rag-review を backend より先**にする（`.github/workflows/deployment.yml`）。Backend の ES 経路は生成を RAG へ委譲しており、旧 RAG は Pydantic の `extra=ignore` で `char_limit` / `tech_stack` を**黙って捨てる**ため、逆順だとロール中の数分だけ「字数上限を指定しても無視され、画面に手がかりも出ない」窓ができる
+- コストの機能別内訳（`es_review` / `es_rewrite`）は、RAG が返す `usage` を Backend が `openai.Client.ReportProxyUsage` で `api_call_logs` へ記録して残す。RAG 自身は記録先を持たないため、この経路が唯一の記録手段（統合前は RAG 経由の添削ぶんが記録されていなかった）。`usage` は内部情報なので Backend が転送前に本文から取り除く
+
+### 入力上限の決め方（#1564）
+
+- `es_text` の上限 6,000字は「改善文（入力の最大130%）＋STAR分解(400字)を `_MAX_OUTPUT_TOKENS` 内で生成できる長さ」から決めている: `(6000 * 1.3 + 400) * 0.85 + 120 = 7,090` トークン < 8,192
+- **この 6,000 は「素の日本語（漢字かな混在）での見積もり」に基づく値**。tiktoken(o200k_base) の実測レートは素材で大きく散り、漢字かな混在 0.80〜0.81 / ひらがな主体 約0.95 / **半角カナ 約1.71** tok/char。`_JP_TOKENS_PER_CHAR = 0.85` は全素材を覆っていない
+- **未解決（#1564 は開けたまま）**: 半角カナ主体のESは約3,375字で天井に達するため、3,376〜6,000字では再試行しても足りず 422 になる。係数を素材別にするか `_MAX_OUTPUT_TOKENS` を上げるかは同Issueで継続検討する。テスト `test_halfwidth_kana_exceeds_the_cap_known_limitation` にこの限界を数値で残している
+- `_MAX_OUTPUT_TOKENS` を引き上げる案は採らなかった。`OPENAI_CHAT_MODEL` は環境変数で差し替えられ、出力上限4,096のモデルでは API 400 になるリスクが増すうえ、1回の生成コストも上がる。実務のESは400〜800字が中心で、`char_limit` が入ると長大なESを投げる動機自体が減る
+- 上限を超えた入力は FastAPI のバリデーションで弾く（FEの `maxLength=6000` で手前でも止める）。**以前は 7,300〜10,000字が「送れるが必ず422」の帯**で、しかも2回の生成に課金してから失敗していた
+- テストで固定している不変条件: `tests/test_models.py::test_max_length_output_fits_in_output_cap_for_plain_japanese`（入力上限いっぱいの**丸める前の**見積もりが出力天井未満であること。`_estimate_max_tokens` の戻り値は天井で丸められるため、そのまま比較しても「飽和したか」しか分からない）
 
 ---
 

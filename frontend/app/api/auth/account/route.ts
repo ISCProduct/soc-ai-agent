@@ -5,13 +5,9 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://app:8080'
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-    const userId = searchParams.get('user_id')
-    if (!userId) {
-      return NextResponse.json({ error: 'user_id is required' }, { status: 400 })
-    }
-
-    const response = await fetch(`${BACKEND_URL}/api/auth/account?user_id=${userId}`, {
+    // 退会対象は X-User-Token から決まる。クエリの user_id は Backend 側で
+    // 読んでおらず、URL とアクセスログに user_id を残すだけだったので送らない。
+    const response = await fetch(`${BACKEND_URL}/api/auth/account`, {
       method: 'DELETE',
       headers: extractUserAuthHeaders(request),
     })

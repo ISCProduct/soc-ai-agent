@@ -11,7 +11,7 @@ const securityHeaders = [
     key: 'Content-Security-Policy',
     value: [
       "default-src 'self'",
-      // 開発モードでは webpack が eval() を使うため 'unsafe-eval' が必要
+      // 開発モードのバンドラ（Turbopack）が eval() を使うため 'unsafe-eval' が必要
       isDev
         ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://va.vercel-scripts.com"
         : "script-src 'self' 'unsafe-inline' https://va.vercel-scripts.com",
@@ -20,7 +20,7 @@ const securityHeaders = [
       "img-src 'self' data: https:",
       // blob: URL の音声/動画再生を許可（AI面接の TTS は blob: 経由で再生。connect-src の blob: では不足）
       "media-src 'self' blob:",
-      // 開発モードでは webpack HMR の WebSocket 接続を許可
+      // 開発モードの HMR の WebSocket 接続を許可
       isDev
         ? "connect-src 'self' blob: http://localhost:* https://api.openai.com https://*.sentry.io ws://localhost:* wss://localhost:*"
         : `connect-src 'self' blob: https://api.openai.com https://*.sentry.io${backendOrigin ? ` ${backendOrigin}` : ''}`,

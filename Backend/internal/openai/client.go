@@ -101,6 +101,39 @@ func (cli *Client) ReportAudioUsage(ctx context.Context, u AudioUsage) {
 	})
 }
 
+// ProxyUsage は Backend 以外（RAGサービス）が実行した生成1リクエスト分の使用量(#1533)。
+//
+// ES添削/リライトの生成は RAG に一本化したため、Backend の SDK 経路を通らない。
+// RAG は api_call_logs を持たないので、機能別コストの内訳はレスポンスで受け取った
+// トークン量をここから記録するしかない。
+type ProxyUsage struct {
+	Model            string
+	PromptTokens     int
+	CompletionTokens int
+	Latency          time.Duration
+}
+
+// ReportProxyUsage は RAG が実行した生成の使用量を記録する(#1533)。
+//
+// 機能名と実行主体は他の経路と同じく context から取るので、呼び出し側は
+// usagectx.WithFeature を通すこと。課金先は RAG が直接叩く OpenAI になる。
+func (cli *Client) ReportProxyUsage(ctx context.Context, u ProxyUsage) {
+	if cli == nil || cli.OnUsage == nil {
+		return
+	}
+	userID, orgID := usagectx.Actor(ctx)
+	cli.OnUsage(Usage{
+		Model:            u.Model,
+		Provider:         providerOpenAI,
+		Feature:          usagectx.Feature(ctx),
+		UserID:           userID,
+		OrganizationID:   orgID,
+		PromptTokens:     u.PromptTokens,
+		CompletionTokens: u.CompletionTokens,
+		LatencyMs:        int(u.Latency.Milliseconds()),
+	})
+}
+
 // usageReport は reportUsage への入力。引数が増えたため構造体にする（DesignDoc §4）。
 type usageReport struct {
 	provider         string

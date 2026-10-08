@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"Backend/internal/safego"
 )
 
 // Login はメール・パスワードでログインする。
@@ -81,10 +83,15 @@ func (s *AuthService) Login(req LoginRequest, tenantOrgID uint) (*AuthResponse, 
 			if s.jobs != nil {
 				if err := s.jobs.EnqueueEmailReVerification(user.ID, user.Email, user.Name, user.EmailVerificationToken, appURL); err != nil {
 					log.Printf("[AuthService] enqueue re-verification email failed, fallback goroutine: %v", err)
-					go s.emailService.SendReVerificationEmail(user, user.EmailVerificationToken, appURL)
+					// メール送信は投げっぱなし。panic でプロセスを落とさない(#1446)。
+					safego.Go(func() {
+						s.emailService.SendReVerificationEmail(user, user.EmailVerificationToken, appURL)
+					})
 				}
 			} else {
-				go s.emailService.SendReVerificationEmail(user, user.EmailVerificationToken, appURL)
+				safego.Go(func() {
+					s.emailService.SendReVerificationEmail(user, user.EmailVerificationToken, appURL)
+				})
 			}
 			requiresReVerification = true
 			return nil, errors.New("re_verification_required")
