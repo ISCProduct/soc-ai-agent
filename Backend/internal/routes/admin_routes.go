@@ -42,13 +42,15 @@ func SetupAdminRoutes(
 	schoolScope := EchoAdminSchoolScope(schoolService)
 	// システム管理者専用。担当校を持つ教員・学園側管理者は 403。
 	platform := EchoRequirePlatformAdmin(schoolService)
+	// is_admin 必須（職員=staff は不可）。権限管理・アカウント操作に使う。
+	requireAdmin := EchoRequireAdmin()
 
 	// ── 学校運営・教員向け（担当校スコープ）────────────────────────────
 	admin.GET("/me/school-access", adminSchoolController.MySchoolAccess)
 
 	admin.GET("/users", adminUserController.List, schoolScope)
-	admin.PUT("/users/:id", adminUserController.Update)
-	admin.DELETE("/users/:id", adminUserController.Delete)
+	admin.PUT("/users/:id", adminUserController.Update, requireAdmin)
+	admin.DELETE("/users/:id", adminUserController.Delete, requireAdmin)
 	admin.GET("/teacher/students/tendency-analysis", teacherInsightController.TendencyAnalysis, schoolScope)
 	// 単一生徒ルートは school_id クエリを持たないため schoolScope を掛けず、
 	// コントローラで対象生徒の学校に対して EnsureAdminSchoolAccess を行う。
@@ -72,8 +74,8 @@ func SetupAdminRoutes(
 
 	// 学校メンバー・企業承認は担当校の運営業務
 	admin.GET("/schools/:id", adminSchoolController.Get)
-	admin.POST("/schools/:id/members", adminSchoolController.AddMember)
-	admin.DELETE("/schools/:id/members/:user_id", adminSchoolController.RemoveMember)
+	admin.POST("/schools/:id/members", adminSchoolController.AddMember, requireAdmin)
+	admin.DELETE("/schools/:id/members/:user_id", adminSchoolController.RemoveMember, requireAdmin)
 	admin.GET("/schools/:id/company-approvals", adminSchoolController.ListCompanyApprovals)
 	admin.POST("/schools/:id/company-approvals", adminSchoolController.AddCompanyApproval)
 	admin.DELETE("/schools/:id/company-approvals/:company_id", adminSchoolController.RemoveCompanyApproval)

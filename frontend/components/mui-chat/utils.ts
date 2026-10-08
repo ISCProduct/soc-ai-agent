@@ -7,8 +7,24 @@ export const makeMessageId = () => `${Date.now()}-${Math.random().toString(36).s
  * この直後にクイック選択のチップ(JOB_QUICK_OPTIONS)が並ぶため、
  * 文中に別の職種リストを置くと選べない候補を見せることになる。
  */
+/**
+ * 最初の案内。
+ *
+ * 旧文は「IT業界専門のキャリアエージェントです」と名乗るだけで、
+ * AI が応答していることを書いていなかった。人と話していると受け取られうる。
+ * NN/g は、人でなくボットだと率直に示すことと、
+ * できることの範囲を明示的に限ることを勧めている
+ * （何でも答えようとするものは結局どれも上手くこなせない）。
+ *
+ * できないことを書くのは不親切に見えるが、
+ * 書かない方が「聞いたのに答えてくれない」という失望を生む。
+ * 進路相談の宛先を先に示しておくほうが、学生は迷わない。
+ *
+ * 長くしすぎない。会話型は一度に少ししか表示できないため、
+ * 冒頭が長いと最初の質問まで辿り着く前に読み飛ばされる。
+ */
 export const INITIAL_GREETING =
-  'こんにちは！IT業界専門のキャリアエージェントです。\n\n10〜15問の質問に答えていただくと、あなたに合いそうな企業をご提案します。\n答えた内容に合わせて次の質問が変わるので、思ったとおりに答えてください。\n\nまず、どんな仕事に興味がありますか？下のボタンから選ぶか、気になる仕事を入力してください。'
+  'このチャットはAIが自動で応答します。\n\n10〜15問に答えると、希望に近い企業を探せるようになります。答えた内容に合わせて次の質問が変わります。\n\nこのチャットでできないのは、選考の合否を決めることと、企業への応募です。進路の相談は先生にお願いします。\n\nまず、どんな仕事に興味がありますか？下のボタンから選ぶか、入力してください。'
 
 /**
  * アシスタント応答から A)/1) 形式の選択肢を抽出する。
@@ -46,8 +62,28 @@ export const JOB_QUICK_OPTIONS = [
 ] as const
 
 /** チャット画面のアクセント（サイドバーと同じブランドオレンジ） */
+/**
+ * ブランドの橙（ロゴと同じ #ec5b13）。
+ *
+ * 文字を載せない装飾にだけ使う。白地に対して 3.46:1 しかなく、
+ * 文字色や「白文字を載せる塗り」にすると WCAG AA(4.5:1)を満たさない。
+ * 非文字UI（進捗バーの塗りなど）は 3:1 でよいのでここだけに留める。
+ */
 export const CHAT_BRAND = '#ec5b13'
-export const CHAT_BRAND_HOVER = '#c44d0e'
+
+/**
+ * 文字・塗り・罫線に使う色。学生テーマの primary（Wong の色覚セーフ青）。
+ *
+ * 以前は上の橙を吹き出しの塗りと「終了」ボタンの文字色に使っており、
+ * どちらもコントラスト不足だった。白文字を載せて 5.19:1。
+ */
+export const CHAT_ACCENT = '#0072B2'
+export const CHAT_ACCENT_HOVER = '#005B8E'
+
+export const CHAT_WARN_EDGE = '#E69F00'
+export const CHAT_WARN_TEXT = '#946200'
+export const CHAT_STOP_EDGE = '#D55E00'
+export const CHAT_STOP_TEXT = '#99370A'
 
 /**
  * 選択肢行（A) / 1. など）を本文から除き、バブルとボタンの二重表示を防ぐ。
@@ -174,14 +210,43 @@ export function shouldSendChatOnKeyDown(e: {
   return e.ctrlKey || e.metaKey
 }
 
-/** 無効回答の警告・強制終了メッセージか（選択肢抽出の対象外） */
+/**
+ * 無効回答の案内・打ち切りメッセージを見分ける目印。
+ *
+ * Backend/internal/services/chat/chat_answer_validator.go の
+ * validationMarkers と同じ文字列。片方だけ変えると、画面側が案内文を
+ * 「直近の質問」として拾い、選択肢の復元が壊れる。
+ *
+ * 旧文言も残す。既存セッションの DB には旧文言のまま保存されている。
+ */
+export const VALIDATION_FEEDBACK_MARKERS = [
+  '質問に沿った内容でもう一度お願いします',
+  'このチャットを終了しました',
+  // 旧文言（2026-10 以前に保存されたもの）
+  '書かれた内容にはお答えできません',
+  '質問と関係のない内容が3回続いた',
+] as const
+
+/** 打ち切りの目印だけを見る（案内と打ち切りで表示を変えるため） */
+export const VALIDATION_TERMINATION_MARKERS = [
+  'このチャットを終了しました',
+  // 旧文言
+  '質問と関係のない内容が3回続いた',
+  'チャットを終了させていただきます',
+] as const
+
+/** 打ち切りメッセージか */
+export function isValidationTerminationMessage(content: string): boolean {
+  const trimmed = content.trim()
+  if (!trimmed) return false
+  return VALIDATION_TERMINATION_MARKERS.some((marker) => trimmed.includes(marker))
+}
+
+/** 無効回答の案内・打ち切りメッセージか（選択肢抽出の対象外） */
 export function isValidationFeedbackMessage(content: string): boolean {
   const trimmed = content.trim()
   if (!trimmed) return false
-  return (
-    trimmed.includes('書かれた内容にはお答えできません') ||
-    trimmed.includes('質問と関係のない内容が3回続いた')
-  )
+  return VALIDATION_FEEDBACK_MARKERS.some((marker) => trimmed.includes(marker))
 }
 
 /** 警告を飛ばして直近のアシスタント質問メッセージを返す */
@@ -197,3 +262,21 @@ export function findLastAssistantQuestionMessage<T extends { role: string; conte
   return undefined
 }
 
+
+
+/**
+ * メッセージ1件の読み上げ名。
+ *
+ * 支援技術には発言者と時刻の手がかりが一切無かった。
+ * 左右の位置と色でしか区別しておらず、アイコンも代替テキストを持っていなかったため、
+ * アイコンがあった頃から誰の発言かは伝わっていない。
+ *
+ * 画面には出さず名前としてだけ渡す。15問の短いやり取りに時刻を並べると
+ * 本文より目立ってしまい、読む順番を乱す。
+ */
+export function messageAccessibleLabel(role: 'user' | 'assistant', at: Date): string {
+  const who = role === 'user' ? 'あなた' : 'エージェント'
+  if (Number.isNaN(at.getTime())) return who
+  const time = `${at.getHours()}時${String(at.getMinutes()).padStart(2, '0')}分`
+  return `${who}、${time}`
+}

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { testJwt } from './fixtures/auth'
 
 test.describe('認証フロー', () => {
   test('ログインページが表示される', async ({ page }) => {
@@ -18,7 +19,8 @@ test.describe('認証フロー', () => {
           email: 'test@example.com',
           name: 'テストユーザー',
           token: 'mock-token',
-          user_token: 'mock-user-token',
+          // middleware が exp を読むので実物の形にする(#1535)
+          user_token: testJwt(1),
           is_guest: false,
         }),
       })
