@@ -64,6 +64,10 @@ func (m *mockUtterRepo) FindBySessionID(sessionID uint) ([]models.InterviewUtter
 
 type mockReportRepo struct{ mock.Mock }
 
+func (m *mockReportRepo) ClaimScoresApplication(uint) (bool, error) { return true, nil }
+
+func (m *mockReportRepo) ReleaseScoresApplication(uint) error { return nil }
+
 func (m *mockReportRepo) FindBySessionID(sessionID uint) (*models.InterviewReport, error) {
 	args := m.Called(sessionID)
 	if args.Get(0) == nil {

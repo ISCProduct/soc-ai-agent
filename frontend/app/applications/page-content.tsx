@@ -25,6 +25,7 @@ import { authService } from '@/lib/auth'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import { fetchWithTimeout } from '@/lib/fetch-timeout'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
+import { ABOVE_BOTTOM_NAV_SX } from '@/lib/sidebar-nav'
 import {
   STATUS_COLORS,
   STATUS_LABELS,
@@ -141,7 +142,7 @@ function ApplicationsContent() {
   return (
     <Box sx={{ maxWidth: 800, mx: 'auto', p: { xs: 2, sm: 3 } }}>
       <Stack direction="row" alignItems="center" spacing={1} mb={3}>
-        <IconButton onClick={() => router.back()}>
+        <IconButton onClick={() => router.back()} aria-label="前の画面へ戻る">
           <ArrowBack />
         </IconButton>
         <Typography variant="h5" component="h1" fontWeight="bold">
@@ -256,6 +257,7 @@ function ApplicationsContent() {
         autoHideDuration={4000}
         onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        sx={ABOVE_BOTTOM_NAV_SX}
       >
         <Alert severity={snackbar.severity} onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}>
           {snackbar.message}

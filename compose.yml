@@ -70,6 +70,25 @@ services:
     profiles:
       - tools
 
+  # OpenAPI(Backend/api/openapi.yaml) の閲覧用。`make api-docs` で起動する。
+  # Backend 本体に /docs を生やすと本番にも出てしまうため、
+  # ローカル専用のコンテナとして分けている。DB も Backend も要らない。
+  swagger-ui:
+    image: swaggerapi/swagger-ui:v5.17.14
+    container_name: soc-ai-swagger-ui
+    ports:
+      - "${SWAGGER_UI_PORT:-8081}:8080"
+    # root で nginx を動かさない。イメージに USER 指定が無いため明示する。
+    # 101 は同イメージの nginx ユーザー。
+    user: "101:101"
+    environment:
+      - SWAGGER_JSON=/spec/openapi.yaml
+    volumes:
+      - ./Backend/api:/spec:ro
+    restart: "no"
+    profiles:
+      - docs
+
 
   # MySQL Database
   db:
@@ -149,12 +168,49 @@ services:
       - frontend_next:/app/.next
     ports:
       - "3000:3000"
+    # dev サーバのメモリを上限で縛る。
+    #
+    # next dev のメモリは使っているうちに増え続ける。限界に達すると Next.js が
+    # 「Server is approaching the used memory threshold, restarting...」で
+    # 自分を再起動する（閾値はヒープ上限の80%）。コンテナは落ちないので
+    # RestartCount は 0 のままだが、その瞬間に処理中のリクエストが切れ、
+    # 復帰後もルートの再コンパイルで数秒〜10秒かかる。
+    # 実測では /admin/audit-logs のコンパイル中に再起動し、次の /admin/costs が
+    # 9.2秒かかっていた（#1616 の時点では原因をコンテナの死と見ていたが、
+    # 実際にはコンテナは生きていて dev サーバだけが入れ替わっていた）。
+    #
+    # 一番効いたのは Turbopack への切り替え。同じ8ページを叩いた実測で
+    # 通過後のRSSが webpack 3347MB に対し Turbopack 1732MB（増分は 1614MB → 217MB）。
+    #
+    # --max-old-space-size を入れると V8 が上限手前で強く GC するので頭打ちになる。
+    # mem_limit はその外側の保険で、万一超えても DB や Backend を巻き込まないようにする。
+    #
+    # 差は広く取ること。--max-old-space-size は V8 のヒープだけの上限で、
+    # Node 本体や webpack のネイティブ確保は含まない。2048m / 2560m にしたときは
+    # 合計が上限を超え、cgroup の OOM killer に子プロセス(next dev)だけを殺されていた。
+    # 親の npm は 0 で終わるため、docker inspect の OOMKilled は false に見える。
+    # `docker events --since 10m --filter event=oom` を見ると記録が残っている
+    # （--since が無いと以後の新しいイベントを待つだけで、落ちたあとには出てこない）。
+    #
+    # 症状はブラウザ側の「接続がリセットされました」。落ちた瞬間に切れ、
+    # restart で起き上がるので、利用者にはリロードが要るように見える。
+    #
+    # 上限は広めに取る。定常は 1.8GiB 程度だが、`next dev --webpack` が
+    # 大きいページ(admin/companies は1,583行)を組み直すときに瞬間的に跳ねる。
+    # 2560m では跳ねた瞬間に殺されていた。Docker VM 全体は 30% 程度しか
+    # 使っていないので、ここを絞っても他サービスの役には立たない。
+    #
+    # ヒープ上限とほぼ同じ値にしないこと。RSS はヒープ＋ネイティブなので、
+    # 差が無いと GC やしきい値再起動が効く前にコンテナごと落ちる。
+    mem_limit: ${FRONTEND_MEM_LIMIT:-3584m}
     environment:
+      - NODE_OPTIONS=${FRONTEND_NODE_OPTIONS:---max-old-space-size=1536}
       - NODE_ENV=${NODE_ENV:-development}
       - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8080}
       - BACKEND_URL=${BACKEND_URL:-http://app:8080}
       - COMPANY_GRAPH_URL=${COMPANY_GRAPH_URL:-http://company-graph:9100}
       - WATCHPACK_POLLING=${WATCHPACK_POLLING:-true}
+      - NEXT_PUBLIC_SPEECH_ON_DEVICE=${NEXT_PUBLIC_SPEECH_ON_DEVICE:-}
       - NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN:-}
       - SENTRY_DSN=${SENTRY_DSN:-}
       - SENTRY_RELEASE=${SENTRY_RELEASE:-}

@@ -29,8 +29,20 @@ func WithUserID(r *http.Request, userID uint) *http.Request {
 	return r.WithContext(ctx)
 }
 
+// WithAdminUserID は認証済み管理者（is_admin）のコンテキストを積む。
+// 歴史的にこのヘルパーは is_admin な主体を表すため、is_platform も true にする
+// （EchoAdminAuth が実際に積む内容と揃える）。職員（is_admin=false）は WithStaffUserID を使う。
 func WithAdminUserID(r *http.Request, adminUserID uint) *http.Request {
 	ctx := context.WithValue(r.Context(), middleware.AdminUserIDContextKey, adminUserID)
+	ctx = context.WithValue(ctx, middleware.AdminIsPlatformContextKey, true)
+	return r.WithContext(ctx)
+}
+
+// WithStaffUserID は職員（role=staff で is_admin=false）のコンテキストを積む。
+// is_platform は false。担当校スコープ・プラットフォーム系の判定を職員として検証するのに使う。
+func WithStaffUserID(r *http.Request, staffUserID uint) *http.Request {
+	ctx := context.WithValue(r.Context(), middleware.AdminUserIDContextKey, staffUserID)
+	ctx = context.WithValue(ctx, middleware.AdminIsPlatformContextKey, false)
 	return r.WithContext(ctx)
 }
 

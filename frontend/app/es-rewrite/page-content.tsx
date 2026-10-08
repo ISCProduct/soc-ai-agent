@@ -29,8 +29,13 @@ import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 
 const QUESTION_TYPES = ['志望動機', '自己PR', '学チカ', 'ガクチカ', 'その他']
 
-// RAG側 ESReviewRequest.es_text の上限と合わせる
-const ES_TEXT_MAX_LENGTH = 10000
+// RAG側 models.ES_TEXT_MAX_LENGTH と合わせる。
+// 10,000字だった頃は7,300字を超えた入力が必ず 422 になっていた（#1564）
+const ES_TEXT_MAX_LENGTH = 6000
+
+// RAG側 models.ES_CHAR_LIMIT_MIN / MAX と合わせる（設問の文字数上限 / #1523）
+const CHAR_LIMIT_MIN = 100
+const CHAR_LIMIT_MAX = 2000
 
 /**
  * APIプロキシのエラーレスポンス（{ error, status, detail }想定）から
@@ -75,12 +80,19 @@ type StarBreakdown = {
   result: string
 }
 
-type RewriteResult = {
+// 字数の結果(#1523)。ES添削・ESリライトで同じ形を返す（生成経路が同じ / #1533）
+type CharLimitResult = {
+  improved_text_length?: number
+  // 指定字数に収まったか。上限未指定なら null
+  char_limit_satisfied?: boolean | null
+}
+
+type RewriteResult = CharLimitResult & {
   rewritten_text: string
   star: StarBreakdown
 }
 
-type ReviewResult = {
+type ReviewResult = CharLimitResult & {
   specificity_score: number
   star_score: number
   company_fit_score: number | null
@@ -101,6 +113,31 @@ const STAR_LABELS: { key: keyof StarBreakdown; label: string; color: string; ini
   { key: 'action',    label: 'Action（施策）',    color: PRIMARY,   initial: 'A' },
   { key: 'result',    label: 'Result（成果）',    color: '#10b981', initial: 'R' },
 ]
+
+/**
+ * 生成結果の字数表示(#1523)。
+ *
+ * 字数はサーバが数えた値をそのまま出す（改行と前後の空白を数えない数え方は
+ * RAG 側の count_es_chars が唯一の定義。画面で数え直すと定義が二重になる）。
+ */
+function CharCountNote({ result, charLimit }: { result: CharLimitResult; charLimit: number | null }) {
+  const length = result.improved_text_length
+  if (typeof length !== 'number' || length <= 0) return null
+  const overLimit = result.char_limit_satisfied === false
+  return (
+    <Box sx={{ mt: 1.5 }}>
+      <Typography sx={{ fontSize: 13, fontWeight: 600, color: overLimit ? '#b45309' : '#64748b' }}>
+        {charLimit === null ? `${length} 文字` : `${length} / ${charLimit} 文字`}
+        （改行と前後の空白は数えません）
+      </Typography>
+      {overLimit && (
+        <Alert severity="warning" role="status" sx={{ mt: 1, borderRadius: 2, fontSize: 13 }}>
+          指定字数に収まりませんでした。勝手に切り詰めずそのまま出しているので、削る箇所を選んでから提出してください。もう一度実行すると収まることもあります。
+        </Alert>
+      )}
+    </Box>
+  )
+}
 
 type ScoreKey = 'specificity_score' | 'star_score' | 'company_fit_score' | 'length_balance_score'
 
@@ -125,8 +162,26 @@ function ESRewriteContent() {
   const [reviewResult, setReviewResult] = useState<ReviewResult | null>(null)
   // 添削リクエストに使った企業名。入力欄はあとから編集できるため結果と一緒に保持する
   const [reviewedCompany, setReviewedCompany] = useState('')
+  // 設問の文字数上限(#1523)。数値入力は空文字も扱うため文字列で持つ
+  const [charLimit, setCharLimit] = useState('')
+  const [charLimitMode, setCharLimitMode] = useState<'within' | 'around'>('within')
+  // 実行時に使った上限。入力欄はあとから編集できるため結果と一緒に保持する
+  const [requestedCharLimit, setRequestedCharLimit] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+
+  const parsedCharLimit = charLimit.trim() === '' ? null : Number(charLimit)
+  const charLimitInvalid =
+    parsedCharLimit !== null &&
+    (!Number.isInteger(parsedCharLimit) ||
+      parsedCharLimit < CHAR_LIMIT_MIN ||
+      parsedCharLimit > CHAR_LIMIT_MAX)
+
+  // 上限が未入力/不正なら送らない（RAG側の既定＝上限なしに任せる）
+  const charLimitBody =
+    parsedCharLimit !== null && !charLimitInvalid
+      ? { char_limit: parsedCharLimit, char_limit_mode: charLimitMode }
+      : {}
 
   const handleRewrite = async () => {
     if (!originalText.trim()) return
@@ -142,15 +197,17 @@ function ESRewriteContent() {
           original_text: originalText,
           question_type: questionType,
           tech_stack: techStack,
-      company_name: companyName,
-    }),
-  })
-  if (!res.ok) throw new Error(await readApiErrorMessage(res, 'リライトに失敗しました。再試行してください。'))
-  setRewriteResult(await res.json())
+          company_name: companyName,
+          ...charLimitBody,
+        }),
+      })
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, 'リライトに失敗しました。再試行してください。'))
+      setRequestedCharLimit(charLimitInvalid ? null : parsedCharLimit)
+      setRewriteResult(await res.json())
     } catch (e: unknown) {
-  setError(e instanceof Error ? e.message : 'リライトに失敗しました。再試行してください。')
+      setError(e instanceof Error ? e.message : 'リライトに失敗しました。再試行してください。')
     } finally {
-  setLoading(false)
+      setLoading(false)
     }
   }
 
@@ -168,10 +225,12 @@ function ESRewriteContent() {
           es_text: originalText,
           question_type: questionType,
           company_name: companyName,
+          ...charLimitBody,
         }),
       })
       if (!res.ok) throw new Error(await readApiErrorMessage(res, '添削に失敗しました。再試行してください。'))
       setReviewedCompany(companyName.trim())
+      setRequestedCharLimit(charLimitInvalid ? null : parsedCharLimit)
       setReviewResult(await res.json())
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '添削に失敗しました。再試行してください。')
@@ -210,7 +269,7 @@ function ESRewriteContent() {
             <Typography sx={{ fontSize: 12, color: '#64748b' }}>書いた文章を読み、直したほうがよい点と書き直し例を返します</Typography>
           </Box>
         </Box>
-        <IconButton onClick={() => router.push('/')} sx={{ bgcolor: '#f1f5f9', color: '#475569' }}>
+        <IconButton onClick={() => router.push('/')} sx={{ bgcolor: '#f1f5f9', color: '#475569' }} aria-label="ホームへ戻る">
           <ArrowBackIcon />
         </IconButton>
       </Box>
@@ -303,6 +362,55 @@ function ESRewriteContent() {
               }}
             />
 
+            {/* 設問の文字数上限(#1523)。「400字以内」が前提のESに合わせる */}
+            <Box sx={{ mb: 3 }}>
+              <TextField
+                fullWidth
+                size="small"
+                type="number"
+                value={charLimit}
+                onChange={e => setCharLimit(e.target.value)}
+                label="設問の文字数上限（任意）"
+                placeholder="例: 400"
+                error={charLimitInvalid}
+                helperText={
+                  charLimitInvalid
+                    ? `${CHAR_LIMIT_MIN}〜${CHAR_LIMIT_MAX} の整数で入力してください`
+                    : '指定すると、書き直し後の文章をこの字数に収めます（未指定なら元の文章の長さを基準にします）'
+                }
+                slotProps={{
+                  htmlInput: { min: CHAR_LIMIT_MIN, max: CHAR_LIMIT_MAX, step: 50, inputMode: 'numeric' },
+                }}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: charLimitInvalid ? undefined : PRIMARY },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: charLimitInvalid ? undefined : PRIMARY },
+                  },
+                  '& .MuiInputLabel-root.Mui-focused': { color: charLimitInvalid ? undefined : PRIMARY },
+                }}
+              />
+              {parsedCharLimit !== null && !charLimitInvalid && (
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1.5 }}>
+                  {([
+                    { value: 'within', label: `${parsedCharLimit}字以内` },
+                    { value: 'around', label: `${parsedCharLimit}字程度` },
+                  ] as const).map(({ value, label }) => (
+                    <Chip
+                      key={value}
+                      label={label}
+                      onClick={() => setCharLimitMode(value)}
+                      sx={{
+                        cursor: 'pointer', fontWeight: 600,
+                        bgcolor: charLimitMode === value ? PRIMARY : '#f1f5f9',
+                        color: charLimitMode === value ? '#fff' : '#475569',
+                        '&:hover': { bgcolor: charLimitMode === value ? `${PRIMARY}e0` : '#e2e8f0' },
+                      }}
+                    />
+                  ))}
+                </Box>
+              )}
+            </Box>
+
             {/* 添削モード: 志望企業 / リライトモード: 技術スタック */}
             {mode === 'review' ? (
               <>
@@ -376,7 +484,7 @@ function ESRewriteContent() {
               variant="contained"
               fullWidth
               size="large"
-              disabled={!originalText.trim() || loading}
+              disabled={!originalText.trim() || loading || charLimitInvalid}
               onClick={mode === 'review' ? handleReview : handleRewrite}
               startIcon={loading ? <CircularProgress size={18} sx={{ color: '#fff' }} /> : (mode === 'review' ? <RateReviewIcon /> : <AutoFixHighIcon />)}
               sx={{
@@ -479,6 +587,7 @@ function ESRewriteContent() {
                       <IconButton
                         size="small"
                         onClick={() => handleCopy(reviewResult.improved_text)}
+                        aria-label="改善文をコピー"
                         sx={{ bgcolor: copied ? '#10b981' : '#f1f5f9', '&:hover': { bgcolor: copied ? '#059669' : '#e2e8f0' } }}
                       >
                         {copied
@@ -488,10 +597,11 @@ function ESRewriteContent() {
                       </IconButton>
                     </Tooltip>
                   </Box>
-                  <Typography sx={{ fontSize: 14, lineHeight: 1.9, color: '#1e293b', whiteSpace: 'pre-wrap', mb: 2 }}>
+                  <Typography sx={{ fontSize: 14, lineHeight: 1.9, color: '#1e293b', whiteSpace: 'pre-wrap' }}>
                     {reviewResult.improved_text}
                   </Typography>
-                  <Divider sx={{ mb: 2 }} />
+                  <CharCountNote result={reviewResult} charLimit={requestedCharLimit} />
+                  <Divider sx={{ my: 2 }} />
                   <Typography sx={{ fontWeight: 700, fontSize: 13, mb: 1, color: '#64748b' }}>元の文章</Typography>
                   <Typography variant="body2" sx={{ color: '#94a3b8', lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>
                     {originalText}
@@ -514,6 +624,7 @@ function ESRewriteContent() {
                     <IconButton
                       size="small"
                       onClick={() => handleCopy(rewriteResult.rewritten_text)}
+                      aria-label="リライト結果をコピー"
                       sx={{ bgcolor: copied ? '#10b981' : '#f1f5f9', '&:hover': { bgcolor: copied ? '#059669' : '#e2e8f0' } }}
                     >
                       {copied
@@ -526,6 +637,7 @@ function ESRewriteContent() {
                 <Typography sx={{ fontSize: 14, lineHeight: 1.9, color: '#1e293b', whiteSpace: 'pre-wrap' }}>
                   {rewriteResult.rewritten_text}
                 </Typography>
+                <CharCountNote result={rewriteResult} charLimit={requestedCharLimit} />
               </Paper>
 
               {/* STAR breakdown */}

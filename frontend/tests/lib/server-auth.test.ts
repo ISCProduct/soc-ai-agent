@@ -100,6 +100,55 @@ describe('server-auth', () => {
     await expect(requireSessionUser()).rejects.toThrow('REDIRECT:/login')
   })
 
+  // Backend 停止時に fetch が投げる例外が Server Component を突き抜けると、
+  // requireSessionUser() を呼ぶ全ページが 500 になる（TypeError: fetch failed）。
+  const loggedInCookies = {
+    get: (name: string) => {
+      if (name === 'user_id') return { value: '1' }
+      if (name === 'user_token') return { value: 'jwt' }
+      return undefined
+    },
+  }
+
+  it('getSessionUser は Backend が落ちていても例外を投げず null を返す', async () => {
+    process.env.E2E_MOCK_AUTH = 'false'
+    mockCookies.mockResolvedValue(loggedInCookies)
+    mockHeaders.mockResolvedValue({ get: () => 'localhost:3000' })
+    ;(global.fetch as jest.Mock).mockRejectedValue(
+      Object.assign(new TypeError('fetch failed'), {
+        cause: new Error('connect ECONNREFUSED 172.24.0.4:8080'),
+      }),
+    )
+
+    const { getSessionUser } = await import('@/lib/auth/server')
+    await expect(getSessionUser()).resolves.toBeNull()
+  })
+
+  it('requireSessionUser は Backend が落ちていると /login へ倒す（500にしない）', async () => {
+    process.env.E2E_MOCK_AUTH = 'false'
+    mockCookies.mockResolvedValue(loggedInCookies)
+    mockHeaders.mockResolvedValue({ get: () => 'localhost:3000' })
+    ;(global.fetch as jest.Mock).mockRejectedValue(new TypeError('fetch failed'))
+
+    const { requireSessionUser } = await import('@/lib/auth/server')
+    await expect(requireSessionUser()).rejects.toThrow('REDIRECT:/login')
+  })
+
+  // 本文の読み込みで失敗する場合（応答が途中で切れる等）も同じく倒す。
+  it('getSessionUser は本文の読み込みに失敗しても null を返す', async () => {
+    process.env.E2E_MOCK_AUTH = 'false'
+    mockCookies.mockResolvedValue(loggedInCookies)
+    mockHeaders.mockResolvedValue({ get: () => 'localhost:3000' })
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.reject(new Error('unexpected end of JSON input')),
+    })
+
+    const { getSessionUser } = await import('@/lib/auth/server')
+    await expect(getSessionUser()).resolves.toBeNull()
+  })
+
   it('requireAdminUser は非管理者を / へリダイレクトする', async () => {
     process.env.E2E_MOCK_AUTH = 'true'
     mockCookies.mockResolvedValue({

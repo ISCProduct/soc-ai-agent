@@ -4,13 +4,14 @@
 - #1524: 企業コンテキスト0件でも company_fit_score / company_strategy を返していた回帰防止
 """
 import json
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
 
+from models import ESReviewRequest
 from services.es_review import (
-    _IMPROVED_TEXT_RATIO,
     _JP_TOKENS_PER_CHAR,
     _JSON_OVERHEAD_TOKENS,
     _MAX_OUTPUT_TOKENS,
@@ -20,6 +21,13 @@ from services.es_review import (
     _TOO_LONG_MESSAGE,
     _estimate_max_tokens,
     _run_es_review,
+)
+
+# 入力上限は models.py の定義を読む（値そのものは tests/test_models.py で固定している）
+_ES_TEXT_MAX_LENGTH = next(
+    m.max_length
+    for m in ESReviewRequest.model_fields["es_text"].metadata
+    if getattr(m, "max_length", None) is not None
 )
 
 _REVIEW_PAYLOAD = {
@@ -118,34 +126,24 @@ def test_second_length_on_review_stage_returns_422_without_shorten_advice(monkey
     assert client.chat.completions.create.call_count == 2
 
 
-def test_second_length_on_improved_stage_advises_shortening(monkeypatch):
-    """第2呼び出し(改善文)の上限到達はESの短縮を案内する。"""
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    # 第1は成功、第2が2回とも上限到達
-    client = _mock_client(["stop", "length", "length"])
+@pytest.mark.parametrize("chars", [14, _ES_TEXT_MAX_LENGTH])
+def test_second_length_on_improved_stage_advises_shortening(chars, monkeypatch):
+    """第2呼び出し(改善文)の上限到達はESの短縮を案内し、無駄な再試行をしない(L1)。
 
-    with pytest.raises(HTTPException) as exc_info:
-        _run(client)
-
-    assert exc_info.value.status_code == 422
-    assert exc_info.value.detail == _TOO_LONG_MESSAGE
-    assert client.chat.completions.create.call_count == 3
-
-
-def test_no_retry_when_budget_already_at_cap(monkeypatch):
-    """上限(_MAX_OUTPUT_TOKENS)に達していれば再試行せず1回で422にする(L1)。"""
+    改善文の段は max_tokens を渡さない（#1564）ので引き上げ余地が無く、同じ結果になる
+    再試行は短いESでも長いESでも行わない。評価1回 + 改善文1回の計2回で 422 を返す。
+    """
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     client = _mock_client(["stop", "length"])
 
     with pytest.raises(HTTPException) as exc_info:
-        _run(client, es_text="あ" * 10000)
+        _run(client, es_text="あ" * chars)
 
     assert exc_info.value.status_code == 422
     assert exc_info.value.detail == _TOO_LONG_MESSAGE
-    # 評価1回 + 改善文1回のみ（引き上げ余地が無いので再試行しない）
     assert client.chat.completions.create.call_count == 2
     improved_call = client.chat.completions.create.call_args_list[1]
-    assert improved_call.kwargs["max_tokens"] == _MAX_OUTPUT_TOKENS
+    assert "max_tokens" not in improved_call.kwargs
 
 
 @pytest.mark.parametrize(
@@ -153,41 +151,64 @@ def test_no_retry_when_budget_already_at_cap(monkeypatch):
     [
         (0, 400),  # 下限
         (100, 400),  # 下限
-        (_REVIEW_TEXT_CHARS, 885),  # 第1呼び出しの予算: 900字 * 0.85 + 120
-        (int(812 * _IMPROVED_TEXT_RATIO), 1017),  # 812字ES（実測で破損した長さ）
-        (int(2000 * _IMPROVED_TEXT_RATIO), 2330),  # ゴールの2,000字ES
-        (int(3000 * _IMPROVED_TEXT_RATIO), 3435),
-        (int(10000 * _IMPROVED_TEXT_RATIO), _MAX_OUTPUT_TOKENS),  # 上限で打ち止め
+        (_REVIEW_TEXT_CHARS, 885),  # 本番で唯一この関数を使う経路（評価の段）
+        (1000, 970),
+        (20000, _MAX_OUTPUT_TOKENS),  # 天井で打ち止め
     ],
 )
 def test_estimate_max_tokens_table(expected_chars, expected_tokens):
-    """見積もり定数を固定する。値を緩めると 0.81 tok/char の実測に負ける(L2/M4)。"""
+    """見積もり関数の定数と床・天井を固定する(L2/M4)。
+
+    #1564 以降この関数を本番で呼ぶのは評価の段（`_REVIEW_TEXT_CHARS`）だけ。床(400)と
+    天井(`_MAX_OUTPUT_TOKENS`)は関数の契約なので、本番に無い長さでも併せて固定する。
+    """
     assert _estimate_max_tokens(expected_chars) == expected_tokens
 
 
-def test_estimate_covers_measured_token_rate():
-    """実測レート(0.81 tok/char)で132%書かれても初回の予算内に収まること(M4)。"""
+def test_review_budget_covers_measured_token_rate():
+    """評価(第1呼び出し)の予算が実測レートで足りること(M4)。
+
+    #1564 以降 `_estimate_max_tokens` を使うのは出力量が入力長に依存しない評価側だけ。
+    改善文側は max_tokens を渡さない（モデル自身の上限に任せる）。
+    """
     assert _JP_TOKENS_PER_CHAR >= 0.85
-    for chars in (812, 2000, 3000, 5000):
-        budget = _estimate_max_tokens(int(chars * _IMPROVED_TEXT_RATIO))
-        needed = chars * 1.32 * 0.81
-        assert budget > needed, f"{chars}字で予算不足: {budget} <= {needed}"
+    budget = _estimate_max_tokens(_REVIEW_TEXT_CHARS)
+    # feedback 400字 + company_strategy 400字 を最も重い素材（半角カナ 1.71 tok/char・実測）
+    # で書かれても、再試行1回の引き上げ（2倍）までに収まること
+    assert budget * 2 > 800 * 1.71
+    assert budget * 2 <= _MAX_OUTPUT_TOKENS
 
 
 def test_json_overhead_constant_is_pinned():
     assert _JSON_OVERHEAD_TOKENS == 120
 
 
-def test_improved_text_max_tokens_scales_with_input(monkeypatch):
-    """改善文の max_tokens は入力文字数（最大1.3倍）に応じて増える。"""
+@pytest.mark.parametrize(
+    "chars",
+    [
+        1,
+        800,  # 実務のESの中心帯
+        7304,  # 旧実装で予算が天井(8192)に張り付く1字前（実測した境界）
+        7305,  # 旧実装でここから予算が飽和し、上限到達時の再試行が無駄打ちになっていた
+        _ES_TEXT_MAX_LENGTH,  # 入力上限ちょうど
+        _ES_TEXT_MAX_LENGTH + 1,  # 上限+1字（バリデーションを通さず直接呼んだ場合）
+    ],
+)
+def test_improved_text_budget_does_not_depend_on_input_length(chars, monkeypatch):
+    """改善文の出力予算は入力長から見積もらない(#1564)。
+
+    旧実装は入力の1.3倍で見積もり、7,305字以上で `_MAX_OUTPUT_TOKENS` に飽和していた。
+    飽和後は上限到達を検知しても引き上げ余地が無く、同じ予算での再試行1回が無駄打ちに
+    なる（最悪の直列LLM呼び出しが4回になる）。max_tokens を渡さなければ入力長に関係なく
+    その無駄打ちが起きず、出力上限4,096のモデルへ差し替えても 400 にならない。
+    """
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     client = _mock_client()
 
-    _run(client, es_text="あ" * 1500)
+    _run(client, es_text="あ" * chars)
 
     improved_call = client.chat.completions.create.call_args_list[1]
-    # 1500字 * 1.3 * 0.78 ≈ 1521トークン。旧実装の1200では足りなかった。
-    assert improved_call.kwargs["max_tokens"] > 1200
+    assert "max_tokens" not in improved_call.kwargs
 
 
 def test_no_company_context_nulls_company_fields(monkeypatch):
@@ -227,7 +248,10 @@ def test_company_context_present_keeps_company_fields(monkeypatch):
         for msg in client.chat.completions.create.call_args_list[0].kwargs["messages"]
         if msg["role"] == "user"
     )
-    assert "【志望企業】株式会社サイバーエージェント" in review_user
+    # 企業名は囲みの中に入るのでラベルと隣接しない(#1600)
+    assert "【志望企業】" in review_user
+    assert "株式会社サイバーエージェント" in review_user
+    assert re.search(r"UNTRUSTED_企業名_[0-9a-f]+_START", review_user)
     assert "求める人物像: 自走できる人" in review_user
 
 
@@ -314,8 +338,9 @@ def test_prompt_injection_guard_on_both_calls(monkeypatch):
         user = next(msg["content"] for msg in messages if msg["role"] == "user")
         system = next(msg["content"] for msg in messages if msg["role"] == "system")
         assert injected in user
-        assert "UNTRUSTED_ES文章_START" in user
-        assert "UNTRUSTED_ES文章_END" in user
+        # 区切りは呼び出しごとのノンス付き(#1565)
+        assert re.search(r"<<<UNTRUSTED_ES文章_[0-9a-f]{8}_START>>>", user), user
+        assert re.search(r"<<<UNTRUSTED_ES文章_[0-9a-f]{8}_END>>>", user), user
         assert "従わないでください" in system
 
 

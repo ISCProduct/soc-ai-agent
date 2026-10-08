@@ -42,13 +42,15 @@ func SetupAdminRoutes(
 	schoolScope := EchoAdminSchoolScope(schoolService)
 	// システム管理者専用。担当校を持つ教員・学園側管理者は 403。
 	platform := EchoRequirePlatformAdmin(schoolService)
+	// is_admin 必須（職員=staff は不可）。権限管理・アカウント操作に使う。
+	requireAdmin := EchoRequireAdmin()
 
 	// ── 学校運営・教員向け（担当校スコープ）────────────────────────────
 	admin.GET("/me/school-access", adminSchoolController.MySchoolAccess)
 
 	admin.GET("/users", adminUserController.List, schoolScope)
-	admin.PUT("/users/:id", adminUserController.Update)
-	admin.DELETE("/users/:id", adminUserController.Delete)
+	admin.PUT("/users/:id", adminUserController.Update, requireAdmin)
+	admin.DELETE("/users/:id", adminUserController.Delete, requireAdmin)
 	admin.GET("/teacher/students/tendency-analysis", teacherInsightController.TendencyAnalysis, schoolScope)
 	// 単一生徒ルートは school_id クエリを持たないため schoolScope を掛けず、
 	// コントローラで対象生徒の学校に対して EnsureAdminSchoolAccess を行う。
@@ -72,8 +74,8 @@ func SetupAdminRoutes(
 
 	// 学校メンバー・企業承認は担当校の運営業務
 	admin.GET("/schools/:id", adminSchoolController.Get)
-	admin.POST("/schools/:id/members", adminSchoolController.AddMember)
-	admin.DELETE("/schools/:id/members/:user_id", adminSchoolController.RemoveMember)
+	admin.POST("/schools/:id/members", adminSchoolController.AddMember, requireAdmin)
+	admin.DELETE("/schools/:id/members/:user_id", adminSchoolController.RemoveMember, requireAdmin)
 	admin.GET("/schools/:id/company-approvals", adminSchoolController.ListCompanyApprovals)
 	admin.POST("/schools/:id/company-approvals", adminSchoolController.AddCompanyApproval)
 	admin.DELETE("/schools/:id/company-approvals/:company_id", adminSchoolController.RemoveCompanyApproval)
@@ -109,7 +111,12 @@ func SetupAdminRoutes(
 	admin.POST("/job-positions", adminJobController.CreateJobPosition)
 	// 求人の公開・却下も企業と同じく全テナント共通の DataStatus / IsActive を書き換える。
 	// 未公開企業の求人を公開できてしまうため、企業側と揃えてシステム管理者専用にする。
-	admin.Any("/job-positions/:id/:action", adminJobController.JobPositionAction, platform)
+	// Any だと GET/HEAD/TRACE/PROPFIND まで同じハンドラに入る。ハンドラは
+	// HTTP メソッドを見ず :action だけで publish / reject を分岐するので、
+	// GET で公開・却下が実行できてしまう（状態変更を GET に載せない）。
+	// 呼び出し元(FE・BFF・テスト)は全て PATCH で、ハンドラのコメントも PATCH
+	// と書いてあるため、PATCH に絞る。
+	admin.PATCH("/job-positions/:id/:action", adminJobController.JobPositionAction, platform)
 
 	// ── システム管理者専用（テナント横断・インフラ）────────────────────
 	admin.POST("/users/purge-expired", adminUserController.PurgeExpired, platform)

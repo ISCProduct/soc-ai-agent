@@ -8,6 +8,7 @@ import (
 
 	"Backend/internal/models"
 	"Backend/internal/services/flywheel"
+	"Backend/internal/services/shared/textsim"
 )
 
 // 完了定義: スキーマ違反の LLM 出力を検知して弾けること。
@@ -174,6 +175,50 @@ func TestValidateEvidence(t *testing.T) {
 			why:         "既に欠落している項目を未照合として扱い、無駄な再生成を招いている",
 		},
 		{
+			// #1566 で塞いだクラス1。内容語だけで照合するので、述語をそのまま
+			// 借りても内容語が発話に無ければ 0.00〜0.14 に落ちる
+			name: "述語末尾を流用しただけの捏造は未照合になる",
+			evidence: map[string]string{
+				// 「〜することができました」「〜を担当しました」「〜を提案して」だけが発話由来
+				"logic":         "国際特許を3件取得することができました",
+				"specificity":   "学部長賞の選考を担当しました",
+				"ownership":     "研究室のサーバー移行を提案して",
+				"communication": "宇宙飛行士の訓練を修了することができました",
+			},
+			utterances:    testUtterances(),
+			wantUnmatched: []string{"communication", "logic", "ownership", "specificity"},
+			wantChecked:   4,
+			why:           "述語を借りただけで内容語が全部捏造の根拠を通している（#1566）",
+		},
+		{
+			// #1566 で塞いだクラス2。内容語が残らないので照合対象から落ちる
+			name: "フィラー・相槌は未照合になる",
+			evidence: map[string]string{
+				"logic":         "はい",
+				"specificity":   "すみません",
+				"ownership":     "えー、その、あ",
+				"communication": "はい、わかりました",
+				"enthusiasm":    "なるほど",
+			},
+			utterances:    testUtterances(),
+			wantUnmatched: []string{"communication", "enthusiasm", "logic", "ownership", "specificity"},
+			wantChecked:   5,
+			why:           "相槌を根拠として通し、学生画面に「はい」と表示している（#1566）",
+		},
+		{
+			// 内容語が1文字では bigram が作れず、部分文字列判定だけで満点になってしまう
+			name: "内容語が1文字しかない根拠は未照合になる",
+			evidence: map[string]string{
+				"logic":       "私",
+				"specificity": "その、私が",
+				"ownership":   "3",
+			},
+			utterances:    testUtterances(),
+			wantUnmatched: []string{"logic", "ownership", "specificity"},
+			wantChecked:   3,
+			why:           "内容語1文字の根拠が満点で通っている",
+		},
+		{
 			name: "記号や絵文字だけの項目は未照合にする",
 			evidence: map[string]string{
 				"logic":         "。。。！？",
@@ -189,9 +234,9 @@ func TestValidateEvidence(t *testing.T) {
 		{
 			name: "しきい値の境界",
 			evidence: map[string]string{
-				// 0.2857: 「私が新歓ライブの企画を提案して」の言い換え。通すべき
+				// 0.3333: 「私が新歓ライブの企画を提案して」の言い換え。通すべき
 				"logic": "自分から提案した",
-				// 0.1818: 発話に無い内容。弾くべき
+				// 0.0000: 発話に無い内容。弾くべき
 				"specificity": "顧問と相談した",
 			},
 			utterances:    testUtterances(),
@@ -211,7 +256,7 @@ func TestValidateEvidence(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := ValidateEvidence(tt.evidence, SpokenText(tt.utterances))
+			got := ValidateEvidence(tt.evidence, SpokenContent(tt.utterances))
 			if !slices.Equal(got.Unmatched, tt.wantUnmatched) {
 				t.Errorf("未照合=%v want %v: %s", got.Unmatched, tt.wantUnmatched, tt.why)
 			}
@@ -238,32 +283,82 @@ func TestEvidenceMatchThreshold_Pinned(t *testing.T) {
 	}
 }
 
-// 照合で検出できない捏造を明示的に固定する（#1527 / Issue #1566）。
+// EvidenceMatchThreshold を上下から固定する（#1566）。
 //
-// 文字bigramの一致度である以上、**発話の言い回しを流用した捏造は弾けない**。
+// 内容語だけの照合にしたので、#1527 時点（全文の文字bigram）とは分布が別物になっている。
+// 使える帯は 0.143〜0.286（実測）。下限は内容語を流用しない捏造の最高値、
+// 上限は正当な要約の最低値。
+func TestEvidenceMatchThreshold_Boundary(t *testing.T) {
+	t.Parallel()
+
+	spoken := SpokenContent(testUtterances())
+	tests := []struct {
+		name      string
+		evidence  string
+		wantScore float64 // 実測値
+		wantMatch bool
+	}{
+		{
+			// 帯の上限。これより高くすると正当な要約が落ちて再生成が空回りする
+			name:      "正当な要約のうち最も低いもの",
+			evidence:  "廃部の危機にあった軽音サークルを立て直した",
+			wantScore: 0.400,
+			wantMatch: true,
+		},
+		{
+			name:      "言い換えの度合いが強い要約",
+			evidence:  "自分から提案した",
+			wantScore: 0.333,
+			wantMatch: true,
+		},
+		{
+			// 帯の下限。これより低くすると内容語を流用しない捏造が通る
+			name:      "述語末尾を流用した捏造のうち最も高いもの",
+			evidence:  "学部長賞の選考を担当しました",
+			wantScore: 0.143,
+			wantMatch: false,
+		},
+		{
+			name:      "発話と無関係な根拠",
+			evidence:  "顧問と相談した",
+			wantScore: 0.000,
+			wantMatch: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := textsim.ContentBestMatch(tt.evidence, spoken)
+			if got < tt.wantScore-0.005 || got > tt.wantScore+0.005 {
+				t.Fatalf("一致度 = %.4f, want %.3f 前後（照合方法が変わった。実測表を引き直すこと）", got, tt.wantScore)
+			}
+			// 0.143 < EvidenceMatchThreshold <= 0.286 でなければどれかが落ちる
+			check := ValidateEvidence(map[string]string{"logic": tt.evidence}, spoken)
+			if gotMatch := len(check.Unmatched) == 0; gotMatch != tt.wantMatch {
+				t.Errorf("照合 = %v, want %v (EvidenceMatchThreshold=%v)", gotMatch, tt.wantMatch, EvidenceMatchThreshold)
+			}
+		})
+	}
+}
+
+// 照合で検出できない捏造を明示的に固定する（#1527 / #1566）。
+//
+// #1566 で「述語末尾だけの流用」と「相槌」は弾けるようになった（上の TestValidateEvidence 参照）。
+// 残るのは**発話の内容語を流用して事実だけ入れ替えた捏造**で、
+// 内容語で照合しても正当な要約と同じ帯（0.29〜0.75）に入るため分離できない。
 // これを「たまたま通っている」ではなくテストで明示しておく。
-// #1566 でアルゴリズムを直したらここが落ちるので、
+// 弾けるようになったらここが落ちるので、
 // interview_rubric.go と docs/wiki/scoring.md §2-4 の表も一緒に更新すること。
 func TestValidateEvidence_KnownLimitation(t *testing.T) {
 	t.Parallel()
 
-	spoken := SpokenText(testUtterances())
+	spoken := SpokenContent(testUtterances())
 
 	tests := []struct {
 		name     string
 		evidence map[string]string
 		why      string
 	}{
-		{
-			name: "述語末尾を流用した捏造（内容語は100%でっち上げ）",
-			evidence: map[string]string{
-				// 「〜することができました」「〜を担当しました」「〜を提案して」だけが発話由来
-				"logic":       "国際特許を3件取得することができました",
-				"specificity": "学部長賞の選考を担当しました",
-				"ownership":   "研究室のサーバー移行を提案して",
-			},
-			why: "実測 0.27〜0.56。発話の述語を流用すると内容が全部嘘でも通る",
-		},
 		{
 			name: "実引用に事実を継ぎ足した捏造",
 			evidence: map[string]string{
@@ -272,17 +367,17 @@ func TestValidateEvidence_KnownLimitation(t *testing.T) {
 				// 発話の語彙を転記しつつ事実を入れ替えた捏造
 				"specificity": "部員が8人から100人に増えて、部費を3倍にすることができました",
 			},
-			why: "実測 0.45〜0.58。正当な要約（0.32〜0.56）と同じ帯に入る",
+			why: "内容語での実測 0.36 / 0.35。正当な要約（0.29〜1.00）と同じ帯に入る",
 		},
 		{
-			name: "フィラー・相槌をそのまま根拠にしたもの",
+			name: "発話の内容語を流用して別の事実をでっち上げた捏造",
 			evidence: map[string]string{
-				// 発話の部分文字列なので完全一致になる
-				"logic":       "はい",
-				"specificity": "すみません",
-				"ownership":   "えー、その、あ",
+				// 「新歓ライブ」「企画」「提案」は実発話の内容語。組み合わせだけが嘘
+				"logic": "新歓ライブの企画で部員数を提案しました",
+				// 「軽音サークル」「代表」は実発話の内容語
+				"ownership": "軽音サークルの代表として全国大会に出場しました",
 			},
-			why: "実測 1.00。部分文字列判定が効くため、中身が無くても最高点になる",
+			why: "内容語を流用されると、どの語が捏造かは文字の一致度では分からない",
 		},
 	}
 

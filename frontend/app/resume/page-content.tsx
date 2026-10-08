@@ -9,6 +9,7 @@ import { ResumeUploadForm } from './components/ResumeUploadForm'
 import { ResumeReviewForm } from './components/ResumeReviewForm'
 import { ResumeRagReport } from './components/ResumeRagReport'
 import { ResumeReviewResults } from './components/ResumeReviewResults'
+import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 
 /**
  * 履歴書レビューページのオーケストレーション。
@@ -107,6 +108,8 @@ function ResumeContent() {
         annotateError={annotateError}
         onDownload={handleDownload}
       />
+      {/* 固定の下部ナビに末尾が隠れないようにする（#1570） */}
+      <BottomNavSpacer />
     </Box>
   )
 }

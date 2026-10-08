@@ -36,6 +36,7 @@ import {
 } from './companyDetailUtils'
 import { fetchWithTimeout } from '@/lib/fetch-timeout'
 import { ProvenanceBadge } from '@/components/company/ProvenanceBadge'
+import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 
 const CompanyDiagram = dynamic(() => import('@/components/CompanyDiagram'), {
   ssr: false,
@@ -501,6 +502,8 @@ export default function PageContent() {
           ) : null}
         </Stack>
       </Box>
+      {/* 固定の下部ナビに末尾が隠れないようにする（#1570） */}
+      <BottomNavSpacer />
     </Box>
   )
 }

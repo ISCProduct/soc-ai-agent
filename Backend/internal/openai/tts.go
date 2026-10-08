@@ -149,7 +149,15 @@ func (cli *Client) ChatInterview(ctx context.Context, systemPrompt string, histo
 
 	msgs := []message{{Role: "system", Content: systemPrompt}}
 	for _, h := range history {
-		msgs = append(msgs, message{Role: h["role"], Content: h["content"]})
+		// role はクライアント（multipart の history フィールド）由来なので
+		// ホワイトリストで落とす（#1600）。素通しだと学生が
+		// {"role":"system","content":"..."} を送るだけで面接官の system 指示を
+		// 上書きできる。区切りで囲む対策はこの型の注入には効かない。
+		role := h["role"]
+		if role != "user" && role != "assistant" {
+			role = "user"
+		}
+		msgs = append(msgs, message{Role: role, Content: h["content"]})
 	}
 
 	payload := request{

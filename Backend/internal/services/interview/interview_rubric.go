@@ -125,31 +125,29 @@ func ValidateRubricScores(scores map[string]int) error {
 	return nil
 }
 
-// EvidenceMatchThreshold は evidence を「実発話に基づく」と認める最小一致度（#1527）。
+// EvidenceMatchThreshold は evidence を「実発話に基づく」と認める最小一致度（#1527 / #1566）。
 //
-// 実測した分布（全文と例は docs/wiki/scoring.md §2-4）。
+// 照合は**内容語だけ**で行う（textsim.ContentBestMatch）。実測した分布は下表で、
+// 全文の文字bigramで測っていた #1527 時点の値とは別物になっている
+// （例と測り方は docs/wiki/scoring.md §2-4）。
 //
-//	引用そのまま / 表記ゆれのみ        1.00        照合
-//	助詞違い・言い直し                0.78〜0.80  照合
-//	要約された引用                    0.32〜0.56  照合
-//	フィラー単語（「はい」等）        1.00        照合（通ってしまう）
-//	捏造（発話の述語末尾を流用）      0.27〜0.56  照合（通ってしまう）
-//	捏造（発話の語彙を転記）          0.56〜0.58  照合（通ってしまう）
-//	実引用＋事実の継ぎ足し            0.45〜0.55  照合（通ってしまう）
+//	引用そのまま / 表記ゆれ / 助詞違い  1.00        照合
+//	要約された引用                     0.29〜1.00  照合
+//	実引用＋事実の継ぎ足し             0.29〜0.75  照合（通ってしまう）
 //	---------------- しきい値 0.25 ----------------
-//	抽象化された言い換え              0.07〜0.31  大半が未照合
-//	捏造（述語も流用しない）          0.04〜0.21  未照合
-//	記号・絵文字だけ                  0.00        未照合
+//	捏造（内容語を一部流用）           0.20〜0.22  未照合
+//	捏造（発話の述語末尾だけを流用）   0.00〜0.14  未照合
+//	捏造（述語も流用しない）           0.00〜0.13  未照合
+//	フィラー・相槌（「はい」等）       0.00        未照合（内容語が残らない）
+//	記号・絵文字だけ                   0.00        未照合
 //
-// **この検証で弾けるのは「発話の言い回しをまったく流用していない根拠」だけである。**
-// 内容語を100%でっち上げても、「〜することができました」のような述語を発話から
-// 流用すれば 0.27〜0.56 に乗って通る（実測で8/8通過）。
-// 「はい」「すみません」のようなフィラーは発話の部分文字列なので 1.00 になる。
-// しきい値をどこに置いてもこれらは分離できない。根本対応は Issue #1566。
+// 使える帯は 0.143〜0.286（実測）。下限は内容語を流用しない捏造の最高値、
+// 上限は正当な要約の最低値。TestEvidenceMatchThreshold_Boundary が上下から固定している。
 //
-// しきい値は「発話と無関係（≤0.21）」と「発話由来の要約（≥0.32）」の間を採っている。
-// 0.30 との差で新たに通る捏造は実測30件中1件だけで、この値の精度は防御力に
-// ほとんど寄与しない。一方で下げすぎると正当な要約が落ちて再生成が空回りする。
+// **通った根拠が実発話に基づくとは限らない。** 内容語を発話から流用して事実だけ
+// 入れ替えた捏造（「部費を3倍にすることができました」）は正当な要約と同じ帯に入り、
+// しきい値では分離できない（`TestValidateEvidence_KnownLimitation`、Issue #1566）。
+//
 // 評価項目やプロンプトを変えたときは textsim で実測してこの表を引き直すこと。
 const EvidenceMatchThreshold = 0.25
 
@@ -164,13 +162,17 @@ type EvidenceCheck struct {
 // Matched は照合できた項目数を返す。
 func (c EvidenceCheck) Matched() int { return c.Checked - len(c.Unmatched) }
 
-// SpokenText は受験者(role=user)の発話だけを照合用に前処理する（#1527）。
+// SpokenContent は受験者(role=user)の発話を内容語だけに落として返す（#1527 / #1566）。
 //
 // 面接官(role=ai)の発話を混ぜると、質問文をそのまま根拠として引用しても
 // 照合が通ってしまう。照合したいのは「学生が言ったか」である。
 //
+// 内容語だけにするのは、述語末尾や相槌の流用を弾くため（textsim.ContentRunes）。
+// 戻り値は ValidateEvidence（＝textsim.ContentBestMatch）専用で、
+// 助詞を含む生の needle と突き合わせても意味のある値にはならない。
+//
 // evidence の件数ぶん作り直さないよう、呼び出し側で1度だけ作って使い回す。
-func SpokenText(utterances []models.InterviewUtterance) textsim.Bigrams {
+func SpokenContent(utterances []models.InterviewUtterance) textsim.Bigrams {
 	var b strings.Builder
 	for _, u := range utterances {
 		if u.Role != "user" {
@@ -179,7 +181,7 @@ func SpokenText(utterances []models.InterviewUtterance) textsim.Bigrams {
 		b.WriteString(u.Text)
 		b.WriteString("\n")
 	}
-	return textsim.New(b.String())
+	return textsim.NewContent(b.String())
 }
 
 // ValidateEvidence は evidence の各項目が実際の受験者発話に基づくかを照合する（#1527）。
@@ -189,25 +191,33 @@ func SpokenText(utterances []models.InterviewUtterance) textsim.Bigrams {
 // 両レポートに表示される。教員がレポートを前提に指導する運用では、
 // 根拠の捏造はスコアの誤りより直接に信頼を損なう。
 //
-// 照合はローカル計算だけで行う（LLM を再度呼ばない）。文字bigramの Dice 係数なので
-// 形態素解析も要らず、言い直し・助詞の差・表記ゆれはしきい値で吸収する。
+// 照合はローカル計算だけで行う（LLM を再度呼ばない）。内容語の文字bigramの
+// Dice 係数なので形態素解析器も要らず、言い直し・助詞の差・表記ゆれは自然に吸収する。
 //
 // 空文字の項目は照合対象にしない（Checked にも数えない）。「根拠が無い」ことは
 // 既に欠落として表現されており、捏造ではないため再生成を促す必要がない。
-// 一方で記号や絵文字だけの項目は空ではないので照合対象になり、
-// 正規化後に中身が残らないため未照合になる（そのまま表示させない）。
+// 一方で記号・絵文字・相槌だけの項目は空ではないので照合対象になり、
+// 内容語が残らないため未照合になる（そのまま表示させない）。
+//
+// spoken は SpokenContent で作ること（内容語だけの Bigrams）。
 func ValidateEvidence(evidence map[string]string, spoken textsim.Bigrams) EvidenceCheck {
 	var out EvidenceCheck
-	for key, text := range evidence {
-		if strings.TrimSpace(text) == "" {
+	// キーは評価項目側から回す。evidence は LLM 出力の JSON をそのまま
+	// unmarshal したものなので、キー自体もモデルが自由に書ける。
+	// Unmatched は buildEvidenceRetryNote 経由でやり直しプロンプトの
+	// 信頼領域へ連結されるため、キーに指示文を入れれば囲みを迂回できた（#1600）。
+	// 評価項目に無いキーは読み出し側（OwnEvid 等）も使わないので捨てる。
+	for _, key := range RubricKeys() {
+		text, ok := evidence[key]
+		if !ok || strings.TrimSpace(text) == "" {
 			continue
 		}
 		out.Checked++
-		if textsim.BestMatch(text, spoken) < EvidenceMatchThreshold {
+		if textsim.ContentBestMatch(text, spoken) < EvidenceMatchThreshold {
 			out.Unmatched = append(out.Unmatched, key)
 		}
 	}
-	// map の順序は不定なので、ログを安定させる
+	// RubricKeys() は定義順で安定しているが、ログの比較を容易にするため並べ替えは残す
 	sort.Strings(out.Unmatched)
 	return out
 }

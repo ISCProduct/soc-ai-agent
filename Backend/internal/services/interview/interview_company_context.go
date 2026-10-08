@@ -129,6 +129,21 @@ func (s *InterviewService) resolveCompanyID(companyID uint, companyName string) 
 	return 0
 }
 
+// sttHintCompany は音声認識の補助語に使える企業名・読みを DB から返す。
+//
+// 解決できなければ両方空にする。補助語は「御社」＋ companyInfo の技術用語だけになり、
+// #1603 で測った固有名詞の改善は DB 登録済みの企業で保たれる。
+// クライアント直値を補助語へ入れないのが目的なので、ここで LLM 補完
+// （lookupCompanyReading）は使わない。STT はターンの先頭にあり、
+// ここに LLM 呼び出しを足すと応答遅延がそのまま増える。
+func (s *InterviewService) sttHintCompany(companyID uint, companyName string) (string, string) {
+	c := s.findCompany(companyID, companyName)
+	if c == nil {
+		return "", ""
+	}
+	return strings.TrimSpace(c.Name), strings.TrimSpace(c.NameReading)
+}
+
 // resolveCompanyReading は共有DBの NameReading を優先し、無ければモデル知識で補完する。
 func (s *InterviewService) resolveCompanyReading(ctx context.Context, companyID uint, companyName string) string {
 	if company := s.findCompany(companyID, companyName); company != nil {

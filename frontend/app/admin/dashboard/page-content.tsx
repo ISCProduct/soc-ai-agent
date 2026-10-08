@@ -271,7 +271,7 @@ export default function PageContent() {
       </Stack>
 
       {/* Table */}
-      <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}>
+      <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
         <TableContainer>
           <Table size="small">
             <TableHead>
@@ -332,7 +332,7 @@ export default function PageContent() {
                   </TableCell>
                   <TableCell>
                     <Tooltip title="セッション詳細">
-                      <IconButton size="small" onClick={() => handleOpenDetail(u)} disabled={u.session_count === 0}>
+                      <IconButton size="small" onClick={() => handleOpenDetail(u)} disabled={u.session_count === 0} aria-label="利用者の詳細を開く">
                         <ExpandMoreIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>

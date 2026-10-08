@@ -872,6 +872,102 @@ make rag-rebuild
 docker compose logs --tail 80 chroma rag-review
 ```
 
+### ES添削が結果を返さない / 504 になる（#1556）
+
+**経路のどれか1つが短いとそこが実効上限**になり、RAG が正常に生成中でも結果も 422 の
+案内文も利用者へ届かない。
+
+本番の経路は **ALB を2回通る**（`BACKEND_URL = https://<backend_domain>` なので BFF →
+Backend も ALB 経由）。
+
+```
+browser → CloudFront(90) → ALB frontend(90) → Next.js BFF
+        → ALB backend(90) → Go(85) → RAG
+```
+
+staging は CloudFront が無く（`enable_error_fallback` 既定 false）、代わりに edge nginx が入る。
+
+```
+browser → ALB frontend(90) → edge nginx(90) → Next.js BFF
+        → ALB backend(90) → Go(85) → RAG
+```
+
+| ホップ | 設定 | 値 | 効く環境 |
+|---|---|---|---|
+| CloudFront | `origin_read_timeout`（`modules/cloudfront_app_proxy`） | 90秒 | 本番のみ（`enable_error_fallback = true` のとき） |
+| ALB（frontend / backend の2回） | `idle_timeout`（`modules/alb`） | 90秒 | staging / 本番 |
+| edge nginx | `proxy_read_timeout`（`infra/nginx/staging-edge.conf`） | 90秒 | staging のみ |
+| Go | `http.Client{Timeout}`（`es/review_controller.go`） | 85秒 | 全環境 |
+| RAG | `RAG_OPENAI_TIMEOUT_SEC` | 60秒（LLM 1回あたり） | 全環境 |
+
+- **Go の85秒は利用者に見える文面を変えない。** 本番の CloudFront は
+  `custom_error_response` で **502 も 504 も 503 + `/service-unavailable.html`** に差し替え、
+  staging の nginx も `error_page 502 503 504 =503` で「起動中」ページに差し替える。
+  85秒で切っても90秒で切っても画面は同じ。1段短くしている目的は、上流の汎用504より
+  先に手放して **Go のログと ALB アクセスログに原因を残す**こと。
+- **90秒は「待つ上限」で「処理の上限」ではない。** 1回の LLM 呼び出しが最大
+  `RAG_OPENAI_TIMEOUT_SEC` × SDKリトライ1回で、現状は最悪3回直列（評価の段2回＋改善文の段1回。
+  改善文の段は `max_tokens` を渡さず引き上げ余地が無いため再試行しない / #1521, #1564）なので
+  理論上は90秒を超えうる（#1523 の字数上限が入るとさらに増える）。処理側の打ち切りと併用して
+  初めて成立する。
+- **#1523 の45秒の経過時間ガードは Web Search を数えていない。** Web Search は
+  `rag/routers/es.py` が `_run_es_review` を呼ぶ前に実行し、ガードの時計は
+  `_run_es_review` の中で始まる。Web Search 30秒 → ガード内44秒 → 再生成1回 という
+  順で合計90秒を超えうる。#1523 が入ったら **ガードを Web Search 込みの締め切りへ
+  直す**必要がある（#1588 単体＝`char_limit` が無い状態ではこの経路は存在しない）。
+- 90秒の根拠は develop の実測帯。通常15〜35秒、企業名指定で企業情報がキャッシュミスすると
+  前段の Web Search が直列に +10〜30秒乗って合計25〜65秒で、これが60秒を超えて 504 に
+  なっていた。最悪ケースまでは延ばさない（延ばしても落ちている経路を掴んだまま待つ
+  時間が伸びるだけで、利用者には何も届かない）。
+- CloudFront の `origin_read_timeout` はクォータ「Response timeout per origin」で既定
+  1〜120秒。**120秒を超える値は引き上げ申請が必要**。
+- ALB の `idle_timeout` は **ES添削以外の全リクエストにも効く**（有効範囲 1〜4000秒）。
+  無応答の接続を掴む時間が 60 → 90秒に伸びるぶん、同時接続数と LCU がわずかに増える。
+- **本番デプロイ中は `deregistration_delay = 10`（staging は既定300）が先に効く。**
+  切り替え中に走っている ES添削は10秒で切られる。長い処理を確実に通したいなら
+  デプロイ中は避ける。
+
+**ターゲット側のアイドルタイムアウトは ALB より長くする**（AWS 推奨。短いとターゲットが
+先に接続を閉じ、ALB が再利用しようとして 502 になる）。
+
+| ホップ | 設定 | 値 |
+|---|---|---|
+| staging edge nginx | `keepalive_timeout`（nginx 既定75秒） | 100s |
+| Next.js（両環境の ALB ターゲット） | `next start --keepAliveTimeout`（Node 既定5秒） | 100000ms |
+
+- `--keepAliveTimeout` が無いと Node は既定5秒で TCP 接続を**ALB に通知せず**切る。
+  ALB 側が 60 → 90秒に伸びたので「アイドル60〜90秒」の帯が新たに危険になる。低トラフィック
+  ではこの帯が最も頻出で、`enable_access_logs` で見えた ELB 5xx の第一候補でもある。
+- **staging ではこのリスクを再現できない**。edge nginx は `upstream ... keepalive` を
+  持たないため nginx → Next.js は毎回新規接続になる。
+- **RAG（uvicorn）は未対応**。`rag/Dockerfile` の uvicorn は `--timeout-keep-alive` 未指定
+  （既定5秒）で、Go の `IdleConnTimeout`（既定90秒）に対して同じクラスのレースが残る。
+  #1556 以前からの既存問題。
+
+**切り分け:**
+
+`curl` のステータスコードでは切り分けられない（前述のとおり本番も staging も 502/504 を
+同じ 503 + 静的HTML に差し替える）。一次情報は ALB アクセスログと Go のログ。
+
+```sh
+# ALB アクセスログ（#1513 で有効化済み）から該当リクエストの行を取り出す。
+# 行の並びは type time elb client:port target:port request_processing_time
+# target_processing_time response_processing_time elb_status_code target_status_code ...
+aws s3 cp s3://<alb-access-logs-bucket>/<prefix>/<file>.log.gz - | gunzip | grep 'es/review'
+
+# Go 側。context deadline exceeded なら 85秒に到達している
+docker compose logs app | grep es_review                         # staging
+aws logs tail /ecs/<project>/backend --filter-pattern es_review   # 本番
+```
+
+読み方:
+
+- `target_status_code` が `502` で `target_processing_time` が **85前後** → Go が RAG を
+  待ちきれずに諦めた側（＝処理が85秒を超えている。RAG 側を見る）
+- `target_status_code` が `-` で `elb_status_code` が `504`、`target_processing_time` が
+  **90前後** → ALB（本番はさらに手前の CloudFront も候補）が先に切った側
+- `target_processing_time` が **10前後**でデプロイ時刻と重なる → `deregistration_delay = 10`
+
 ### スコアキャリブレーション「サンプル不足」エラー
 
 各カテゴリのサンプルが5件以上必要です。十分なデータが溜まるまでは手動キャリブレーションは不要です。

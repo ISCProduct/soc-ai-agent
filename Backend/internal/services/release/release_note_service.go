@@ -306,7 +306,8 @@ func audienceForRole(role string, isAdmin bool) []string {
 	if isAdmin {
 		return []string{models.ReleaseNoteAudienceAll, "admin"}
 	}
-	if role == "teacher" {
+	// staff（職員・教員の正式ロール）と legacy の teacher はどちらも教員向け面を見る。
+	if role == models.UserRoleStaff || role == "teacher" {
 		return []string{models.ReleaseNoteAudienceAll, "teacher"}
 	}
 	return []string{models.ReleaseNoteAudienceAll, "student"}

@@ -92,7 +92,7 @@ export default function ReportScreen({
     <Box sx={{ minHeight: '100vh', bgcolor: BG_DARK, color: '#e8eaed', overflowY: 'auto', p: { xs: 2, md: 4 } }}>
       <Box sx={{ maxWidth: 720, mx: 'auto' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 4 }}>
-          <IconButton sx={{ color: '#bdc1c6' }} onClick={onBack}>
+          <IconButton sx={{ color: '#bdc1c6' }} onClick={onBack} aria-label="前の画面へ戻る">
             <ArrowBackIcon />
           </IconButton>
           <Typography variant="h5" sx={{ fontWeight: 700, color: '#e8eaed', flex: 1 }}>面接レポート</Typography>

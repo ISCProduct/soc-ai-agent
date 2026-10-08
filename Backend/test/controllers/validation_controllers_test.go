@@ -23,7 +23,7 @@ func TestESReviewController_Review_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/es/review", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	testsupport.AssertStatus(t, escontrollers.NewESReviewController().Review, testsupport.NewCtx(req, rec), http.StatusBadRequest)
+	testsupport.AssertStatus(t, escontrollers.NewESReviewController(nil).Review, testsupport.NewCtx(req, rec), http.StatusBadRequest)
 }
 
 func TestESReviewController_Review_MissingRAGURL(t *testing.T) {
@@ -35,7 +35,7 @@ func TestESReviewController_Review_MissingRAGURL(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/es/review", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	testsupport.AssertStatus(t, escontrollers.NewESReviewController().Review, testsupport.NewCtx(req, rec), http.StatusServiceUnavailable)
+	testsupport.AssertStatus(t, escontrollers.NewESReviewController(nil).Review, testsupport.NewCtx(req, rec), http.StatusServiceUnavailable)
 }
 
 // ---- ESRewriteController ----
