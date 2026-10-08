@@ -1,6 +1,7 @@
 package aibench
 
 import (
+	"slices"
 	"sort"
 
 	"Backend/internal/services/costs"
@@ -55,6 +56,11 @@ type Observation struct {
 
 	// Violations は指示違反の内容。空なら指示を守れている。
 	Violations []string `json:"violations,omitempty"`
+
+	// InputChars は入力本文の文字数。交絡（スコアが長さに従っているだけでないか）の
+	// 測定に使う。ラベルと文字数が相関しているセットでは、弁別力が高いことと
+	// 「内容の質を測れている」ことが同じ数字になり区別できない（#1593）。
+	InputChars int `json:"input_chars"`
 }
 
 // CaseSummary はケース単位の集計。再現性（同一入力のばらつき）をここで見る。
@@ -65,7 +71,44 @@ type CaseSummary struct {
 	BrokenRuns  int     `json:"broken_runs"`
 	MeanScore   float64 `json:"mean_score"`
 	ScoreStdDev float64 `json:"score_stddev"`
+	InputChars  int     `json:"input_chars"`
 }
+
+// LengthStratum は文字数で層化した1層の弁別力。
+//
+// 層の中で good/mid/bad が分かれても、それだけでは「長さではなく内容で
+// 分かれている」とは言えない。層内でもラベルと文字数が相関していれば、
+// 層化しない弁別力と同じ曖昧さが残る。そのため層内の
+// LabelLengthRankCorrelation を必ず併記し、これが小さい層でだけ
+// 「長さでは説明できない」と読む（#1593 のレビュー指摘）。
+type LengthStratum struct {
+	// MinChars / MaxChars はこの層に入ったケースの文字数の範囲。
+	MinChars int `json:"min_chars"`
+	MaxChars int `json:"max_chars"`
+	Cases    int `json:"cases"`
+	// LabelCounts は層の中のラベル構成。1種類しか無い層では弁別力が定義できない。
+	LabelCounts map[string]int `json:"label_counts"`
+	// LabelRankCorrelation は層の中でのラベルとスコアの順位相関。
+	LabelRankCorrelation float64 `json:"label_rank_correlation"`
+	// LabelLengthRankCorrelation は層の中でのラベルと文字数の順位相関。
+	// **層内の弁別力はこれと必ず並べて読む。** これが層内の弁別力に
+	// 近いほど、その層は「長さが揃っている」と言えない。
+	LabelLengthRankCorrelation float64            `json:"label_length_rank_correlation"`
+	MeanScoreByLabel           map[string]float64 `json:"mean_score_by_label"`
+}
+
+// LengthStrataCount は文字数で層化するときの層の数。
+//
+// 3 にしているのは good/mid/bad の3値に合わせたのではなく、1層あたりの件数を
+// 確保するため。30〜50件のゴールデンセットを4層以上に割ると1層10件を割り、
+// 層内の相関が数件の入れ替わりで大きく動く。
+const LengthStrataCount = 3
+
+// minCasesPerStratum は1層に最低限必要な件数。
+//
+// これを割る層は層化しない（または前の層へ統合する）。数件では層内の相関が
+// 1件の入れ替わりで大きく動き、読んでも判断材料にならない。
+const minCasesPerStratum = 2
 
 // Summary は1回の実行（1 target × 1モデル）の集計。
 //
@@ -101,6 +144,30 @@ type Summary struct {
 	// 弁別力: ゴールドラベル（良/中/悪）とスコアの順位相関（1.0が完全一致）。
 	LabelRankCorrelation float64            `json:"label_rank_correlation"`
 	MeanScoreByLabel     map[string]float64 `json:"mean_score_by_label"`
+
+	// 交絡: 入力の文字数とスコアの順位相関。**弁別力と必ず並べて読む。**
+	// ラベルとの相関が高くてもこれが同じくらい高ければ、その測定は
+	// 「内容の質を測れている」ことの証拠にならない（長さを測っているだけでも
+	// 同じ数字が出る）。#1593 で入れた。
+	LengthRankCorrelation float64 `json:"length_rank_correlation"`
+	// LabelLengthRankCorrelation はゴールドラベルと入力文字数の順位相関。
+	//
+	// **セットが交絡しているかを決めるのはこの数で、上の2つではない。**
+	// 上の2つだけでは LengthRankCorrelation の大小を読み違える:
+	// 長さに完全に盲目な採点器なら LengthRankCorrelation は
+	// LabelRankCorrelation × LabelLengthRankCorrelation 付近に出るので、
+	// 0 に近い値は「長さを打ち消した」ではなく「長さが押し上げている」を
+	// 意味することがある（#1593 のレビュー指摘）。
+	LabelLengthRankCorrelation float64 `json:"label_length_rank_correlation"`
+	// LengthMetricsMeasured は上の3つを計測したか。
+	//
+	// #1593 より前の結果JSONはこれらのフィールドを持たず、デコードすると
+	// 0.000 になる。false を「交絡が無い」と読むと -diff が必ず誤検知するため、
+	// 比較側はこのフラグで未計測を判別する。
+	LengthMetricsMeasured bool `json:"length_metrics_measured"`
+	// LengthStrata は文字数で層化した中での弁別力。長さを揃えた中で
+	// good/bad が分かれるかを見る。
+	LengthStrata []LengthStratum `json:"length_strata,omitempty"`
 
 	// 指示遵守率: 違反が1件も無かった実行の割合（破損した実行は分母から外す）
 	ComplianceRate  float64        `json:"compliance_rate"`
@@ -203,6 +270,8 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 	// ケース単位: 再現性と、弁別力に使う代表値（破損を除いた平均）
 	labelSeries := make([]float64, 0, len(byCase))
 	scoreSeries := make([]float64, 0, len(byCase))
+	charSeries := make([]float64, 0, len(byCase))
+	scored := make([]CaseSummary, 0, len(byCase))
 	stddevs := make([]float64, 0, len(byCase))
 	scoresByLabel := map[string][]float64{}
 	for _, id := range caseOrder {
@@ -218,7 +287,8 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 			}
 			scores = append(scores, o.Score)
 		}
-		cs := CaseSummary{CaseID: id, Label: runs[0].Label, Runs: len(runs), BrokenRuns: brokenRuns}
+		cs := CaseSummary{CaseID: id, Label: runs[0].Label, Runs: len(runs), BrokenRuns: brokenRuns,
+			InputChars: runs[0].InputChars}
 		if len(scores) > 0 {
 			cs.MeanScore = Mean(scores)
 			cs.ScoreStdDev = StdDev(scores)
@@ -229,6 +299,8 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 			if rank, ok := labelRank[cs.Label]; ok {
 				labelSeries = append(labelSeries, rank)
 				scoreSeries = append(scoreSeries, cs.MeanScore)
+				charSeries = append(charSeries, float64(cs.InputChars))
+				scored = append(scored, cs)
 				scoresByLabel[cs.Label] = append(scoresByLabel[cs.Label], cs.MeanScore)
 			}
 		}
@@ -242,6 +314,10 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 	}
 	sort.Strings(s.UnstableCaseIDs)
 	s.LabelRankCorrelation = SpearmanCorrelation(labelSeries, scoreSeries)
+	s.LengthRankCorrelation = SpearmanCorrelation(charSeries, scoreSeries)
+	s.LabelLengthRankCorrelation = SpearmanCorrelation(labelSeries, charSeries)
+	s.LengthMetricsMeasured = true
+	s.LengthStrata = LengthStrata(scored, LengthStrataCount)
 	for label, xs := range scoresByLabel {
 		s.MeanScoreByLabel[label] = Mean(xs)
 	}
@@ -254,4 +330,94 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 	}
 	s.CostIsEstimated = estimated
 	return s
+}
+
+// LengthStrata はケースを入力文字数で層化し、層ごとの弁別力を返す。
+//
+// 層化するのは「スコアが内容の質ではなく長さに従っているだけ」の可能性を
+// 切り離すため。ラベルと文字数が相関しているセットでは、層化しない弁別力は
+// どちらの仮説でも同じ値になる（#1593）。
+//
+// **ただし層化は交絡を自動で消さない。** 層内でもラベルと文字数が相関して
+// いれば同じ曖昧さが残るので、各層の LabelLengthRankCorrelation を見て、
+// それが小さい層でだけ「長さでは説明できない」と読むこと。
+//
+// 境界は等件数で切るが、同じ文字数のケースは同じ層へ入れる（境界を跨がせない）。
+// 跨がせると並べ替えの安定性しだいで層の構成が変わり、同じ入力・同じ出力から
+// 違う数字が出る。ハーネスの目的（誰が測っても同じ数字）に反する。
+//
+// 1層あたり minCasesPerStratum 件を割るときは層化しない（nil を返す）。
+// 境界を跨がせない調整の結果それを割った層は、前の層へ統合する。
+func LengthStrata(cases []CaseSummary, strata int) []LengthStratum {
+	if strata < 2 || len(cases) < strata*minCasesPerStratum {
+		return nil
+	}
+	sorted := slices.Clone(cases)
+	// 文字数が同じときは CaseID で決める。並べ替えの不安定さで層の構成が
+	// 変わらないようにするため。
+	sort.Slice(sorted, func(a, b int) bool {
+		if sorted[a].InputChars != sorted[b].InputChars {
+			return sorted[a].InputChars < sorted[b].InputChars
+		}
+		return sorted[a].CaseID < sorted[b].CaseID
+	})
+
+	out := make([]LengthStratum, 0, strata)
+	// starts は確定した各層の開始 index。統合のとき前の層を作り直すのに使う。
+	starts := make([]int, 0, strata)
+	start := 0
+	for i := 1; i <= strata && start < len(sorted); i++ {
+		end := i * len(sorted) / strata
+		if i == strata {
+			end = len(sorted)
+		}
+		if end <= start {
+			continue
+		}
+		// 同じ文字数のケースは同じ層へ入れる。
+		for end < len(sorted) && sorted[end].InputChars == sorted[end-1].InputChars {
+			end++
+		}
+		// 上の調整で残りが minCasesPerStratum を割ったら、独立した層にせず
+		// 前の層へ統合する。2件未満の層を表示すると、1件の入れ替わりで
+		// 符号が変わる相関を「層内では分かれていない」と読んでしまう。
+		if end-start < minCasesPerStratum && len(out) > 0 {
+			prev := starts[len(starts)-1]
+			out[len(out)-1] = newLengthStratum(sorted[prev:end])
+		} else {
+			starts = append(starts, start)
+			out = append(out, newLengthStratum(sorted[start:end]))
+		}
+		start = end
+	}
+	return out
+}
+
+func newLengthStratum(group []CaseSummary) LengthStratum {
+	st := LengthStratum{
+		MinChars:         group[0].InputChars,
+		MaxChars:         group[len(group)-1].InputChars,
+		Cases:            len(group),
+		LabelCounts:      map[string]int{},
+		MeanScoreByLabel: map[string]float64{},
+	}
+	labels := make([]float64, 0, len(group))
+	scores := make([]float64, 0, len(group))
+	chars := make([]float64, 0, len(group))
+	byLabel := map[string][]float64{}
+	for _, c := range group {
+		st.LabelCounts[c.Label]++
+		labels = append(labels, labelRank[c.Label])
+		scores = append(scores, c.MeanScore)
+		chars = append(chars, float64(c.InputChars))
+		byLabel[c.Label] = append(byLabel[c.Label], c.MeanScore)
+	}
+	// ラベルが1種類しか無い層では相関が定義できない。SpearmanCorrelation が
+	// 0 を返すので、LabelCounts を見ずに 0 を「分かれていない」と読まないこと。
+	st.LabelRankCorrelation = SpearmanCorrelation(labels, scores)
+	st.LabelLengthRankCorrelation = SpearmanCorrelation(labels, chars)
+	for label, xs := range byLabel {
+		st.MeanScoreByLabel[label] = Mean(xs)
+	}
+	return st
 }

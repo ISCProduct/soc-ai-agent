@@ -102,15 +102,31 @@ jobs:
       - uses: actions/checkout@v7
 
       # Backlog 同期スクリプトの自己チェック。
-      # ワークフロー内の Python は CI で動くまで構文エラーに気づけないため、
-      # 埋め込みコードのコンパイルも合わせて確認する。
       - name: Backlog クライアントの自己チェック
         run: python3 .github/scripts/backlog_client.py
+
+      # ワークフローへ埋め込んだ Python の構文。そのワークフローが起動するまで
+      # 気づけないため、ここでコンパイルする。github-issue-to-backlog.yml は
+      # issues イベント起動なので「Issue を閉じたときに初めて落ちる」形で出る。
+      # 以前はこの検証を上のステップのコメントだけが約束していて、実体が無かった。
+      - name: ワークフロー埋め込み Python の構文検査
+        run: ./automation/test/workflow-embedded-python-test.sh
+
+      # 版番号の比較対象。checkout の既定は fetch-depth=1 で origin/develop を
+      # 持たないため、ここで取得する。
+      - name: develop を取得（版番号の比較用）
+        run: git fetch --depth=1 origin develop:refs/remotes/origin/develop
 
       # マイグレーションの版番号。並行してブランチを切ると次の番号を取り合うため、
       # 人の注意では防げない。重複したままマージすると golang-migrate が
       # source を開く時点で落ち、staging と本番の両方でデプロイが止まる。
+      #
+      # BASE_REF を渡すと develop 側との衝突も見る。これが無いと、自分の
+      # ブランチ内では一意でも develop と衝突していることにマージまで
+      # 気づけない（#1585 と #1621 が両方 develop の 000042 と衝突していた）。
       - name: マイグレーション版番号の重複検査
+        env:
+          BASE_REF: origin/develop
         run: ./automation/test/migration-version-unique-test.sh
 
       # 本番の起動/停止判定。間違えると展示会当日に本番が落ちたまま、

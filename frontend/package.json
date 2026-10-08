@@ -3,12 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
+    "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start --keepAliveTimeout 100000",
     "lint": "eslint .",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "check:avatar": "node scripts/check-avatar.mjs",
+    "avatar:rig": "node scripts/add-rig.mjs",
+    "avatar:placeholder": "node scripts/make-placeholder-avatar.mjs",
+    "avatar:mouth": "node scripts/add-mouth-morph.mjs",
+    "avatar:measure": "node scripts/measure-avatar.mjs",
+    "avatar:shoot": "node scripts/shoot-avatar.mjs"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -26,7 +32,7 @@
     "@vercel/speed-insights": "^2.0.0",
     "class-variance-authority": "^0.7.0",
     "lucide-react": "^0.454.0",
-    "next": "^16.0.4",
+    "next": "^16.4.0",
     "next-themes": "^0.4.6",
     "react": "^19.2.0",
     "react-day-picker": "9.8.0",

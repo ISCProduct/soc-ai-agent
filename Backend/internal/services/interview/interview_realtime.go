@@ -66,7 +66,10 @@ func (s *InterviewService) GetPhraseSuggestions(ctx context.Context, userID uint
 {"suggestions": [{"original": "元の表現", "suggestions": ["言い換え1", "言い換え2"]}, ...]}
 
 応募者発言:
-%s`, transcript)
+%s`,
+		// 発言は POST /api/interviews/:id/utterances で学生が直接書ける任意長テキスト。
+		// interview_report.go の面接ログと同じものなので同じく囲む（#1600）。
+		shared.WrapUntrustedText(transcript, "応募者発言"))
 
 	model := shared.GetEnv("INTERVIEW_REPORT_MODEL", "")
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewRealtime)
@@ -167,10 +170,9 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 			return "", fmt.Errorf("realtime capacity exceeded: active=%d limit=%d", active, maxAllowed)
 		}
 	}
-	lang := session.Language
-	if lang == "" {
-		lang = "ja"
-	}
+	// 既存セッションには修正前の未検証値が残っている可能性がある。
+	// Realtime は lang を言語コードとして API へ渡すので、ここでも正規化する。
+	lang := normalizeLanguage(session.Language)
 	gender := session.InterviewerGender
 	if gender == "" {
 		gender = "female"

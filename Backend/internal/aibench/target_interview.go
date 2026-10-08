@@ -56,7 +56,7 @@ func (t *interviewTarget) Run(ctx context.Context, c Case) Observation {
 	}
 	systemPrompt, userPrompt := interview.BuildReportPrompts(lang, c.Input.Transcript)
 	res := CallChatCompletions(ctx, t.model, systemPrompt, userPrompt, interviewTemperature, interviewMaxTokens, true)
-	return evaluateInterviewResponse(Observation{CaseID: c.ID, Label: c.Label}, c, res)
+	return evaluateInterviewResponse(newObservation(c), c, res)
 }
 
 // interviewReportResponse はプロンプトが指定している出力形式。

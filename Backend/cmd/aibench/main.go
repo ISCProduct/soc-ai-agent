@@ -28,7 +28,10 @@ import (
 func main() {
 	target := flag.String("target", "", "評価対象: "+strings.Join(aibench.ValidTargets(), " | "))
 	manifestPath := flag.String("manifest", "", "マニフェスト(jsonl)のパス")
-	n := flag.Int("n", 1, "同一入力の実行回数（再現性の測定に使う。2以上で意味を持つ）")
+	// 既定を 2 にしているのは、1 だと σ が常に 0 になり再現性が測れないため。
+	// 既定値で測った結果を比較の根拠に使われると、ばらつきを見ないまま
+	// 弁別力の差を判定することになる（#1593）。
+	n := flag.Int("n", 2, "同一入力の実行回数（再現性の測定に使う。1 では σ が常に 0 になり比較の根拠に使えない）")
 	model := flag.String("model", "", "モデル名。未指定なら本番と同じ既定値を使う")
 	out := flag.String("out", "", "結果JSONの出力先。リポジトリ外を指定すること")
 	limit := flag.Int("limit", 0, "各ラベルから先頭N件だけ実行する（動作確認用。0で全件）")

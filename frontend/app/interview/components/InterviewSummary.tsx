@@ -236,6 +236,7 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
                             <IconButton
                               size="small"
                               onClick={() => handleCopy(s, copyKey)}
+                              aria-label="要約をコピー"
                               sx={{ p: 0.5, color: isDark ? '#9aa0a6' : '#64748b' }}
                             >
                               {copiedIdx === copyKey

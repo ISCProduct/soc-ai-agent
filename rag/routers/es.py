@@ -78,4 +78,7 @@ def es_review(request: ESReviewRequest) -> ESReviewResponse:
         company_name=safe_company_name,
         context_docs=context_docs,
         company_context_source=context_source,
+        tech_stack=request.tech_stack,
+        char_limit=request.char_limit,
+        char_limit_mode=request.char_limit_mode,
     )

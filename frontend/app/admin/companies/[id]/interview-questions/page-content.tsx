@@ -317,12 +317,12 @@ export default function PageContent() {
                   <TableCell>
                     <Stack direction="row" spacing={0.5}>
                       <Tooltip title="編集">
-                        <IconButton size="small" onClick={() => openEdit(q)}>
+                        <IconButton size="small" onClick={() => openEdit(q)} aria-label="質問を編集">
                           <EditIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
                       <Tooltip title="削除">
-                        <IconButton size="small" color="error" onClick={() => setDeleteConfirmId(q.id)}>
+                        <IconButton size="small" color="error" onClick={() => setDeleteConfirmId(q.id)} aria-label="質問を削除">
                           <DeleteIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>

@@ -255,8 +255,52 @@ npx playwright test
 | `S3アップロード失敗` | IAM 権限不足 | `s3:PutObject` / `s3:GetObject` 権限を確認 |
 | `frontend が EACCES で起動しない`（Linux） | ホストの UID が 1000 以外で、bind mount した `./frontend` に `next dev` が `next-env.d.ts` を書けない | `.env` に `FRONTEND_USER=$(id -u):$(id -g)` を設定し、下記のボリューム作り直しも行う |
 | `rag-review が /data で PermissionError` | root 実行時代のデータが `rag_data` に残っている（`RAG_CHROMA_DATA_DIR=/data/...` を使う場合のみ） | `docker compose run --rm --user root rag-review chown -R 10001:10001 /data`（ファイルは消えない） |
-| `ブラウザに「接続がリセットされました」が出る`（開発時） | `next dev` のメモリが増え続けて落ち、`restart: unless-stopped` で再起動している。落ちた瞬間に接続が切れる | 既定で `mem_limit` と `NODE_OPTIONS=--max-old-space-size` を入れてある。`docker compose ps frontend` が `Up xx seconds` を繰り返すなら `docker inspect soc-ai-agent-frontend --format '{{.RestartCount}}'` で確認。Docker Desktop の割当メモリが少ない場合は `.env` の `FRONTEND_MEM_LIMIT` / `FRONTEND_NODE_OPTIONS` で調整する |
+| `チャットで「送信に失敗しました」が出る` | `schema_migrations` のバージョンは最新なのに、実際の列が無い。`POST /api/chat` が 500 を返している | backend のログに `Error 1054 (42S22): Unknown column '...'` が出ていれば該当。下記「スキーマがマイグレーションと食い違うとき」の手順で埋める |
+| `ブラウザに「接続がリセットされました」が出る`（開発時） | `next dev` が cgroup の OOM killer に殺され、`restart: unless-stopped` で再起動している。落ちた瞬間に接続が切れるため、利用者にはリロードが要るように見える | `docker inspect soc-ai-agent-frontend --format '{{.RestartCount}}'` が増えていれば該当。**`docker events --since 10m --filter event=oom` に記録が残る**（子プロセスだけ殺されるので `docker inspect` の `OOMKilled` は `false` のまま。ここだけ見ると見逃す。`--since` が無いと以後の新しいイベントを待つだけで、落ちたあとに叩いても出てこない）。`.env` の `FRONTEND_MEM_LIMIT` を上げる |
 | `frontend が EACCES: mkdir '/app/.next/dev' で起動ループ` | イメージが古く `/app/.next` を含まないため、名前付きボリュームが root 所有の空で作られた。`node`(uid 1000) で動くコンテナが書けない | イメージを作り直してからボリュームを消す（下記の手順）。`docker compose up` だけでは直らない |
+
+### スキーマがマイグレーションと食い違うとき
+
+`schema_migrations.version` は最新を指しているのに、その版で入るはずの列が無いことがある。
+`migrate` は版だけ見るので再実行しても埋まらず、`dirty` も立たないため気づけない。
+
+症状はアプリ側の汎用エラー（チャットなら「送信に失敗しました」）で、
+原因は backend のログにだけ出る。
+
+```sh
+# 1. 何が足りないかを特定する（列名はログの Unknown column に出る）
+docker compose logs --tail=200 app | grep "Unknown column"
+
+# 2. 実際に当たっているか確認する
+docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" app_db' <<'SQL'
+SELECT version, dirty FROM schema_migrations;
+SELECT COLUMN_NAME FROM information_schema.COLUMNS
+ WHERE TABLE_SCHEMA='app_db' AND TABLE_NAME='chat_messages';
+SQL
+
+# 3. 該当マイグレーションの DDL だけを流して実体を合わせる
+#    （version は既に先を指しているので、版は動かさない）
+sed -n '/^ALTER TABLE/,$p' Backend/migrations/000030_chat_message_weight_category.up.sql   | docker compose exec -T db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" app_db'
+```
+
+staging・本番はデプロイのたびに `migrate up` が走る（`deployment.yml`）ので、
+この食い違いはローカルで起きる。DB を長く使い回している環境で出やすい。
+
+### frontend の dev サーバが繰り返し落ちるとき
+
+`next dev --webpack` は、定常では 1.8GiB 程度だが、大きいページ
+（`app/admin/companies/page-content.tsx` は 1,583 行）を組み直すときに
+**瞬間的に 2.5GiB を超える**。実測で 2.493GiB を確認している。
+
+`mem_limit` が足りないとその瞬間に cgroup の OOM killer が `next dev` を殺し、
+親の `npm` は 0 で終わるため **`docker inspect` の `OOMKilled` は `false` のまま**になる。
+見分けるには `docker events --since 10m --filter event=oom` を見る。
+`--since` を付けないと以後の新しいイベントを待つだけなので、
+落ちたあとに叩いても既に起きた OOM は出てこない。
+
+`NODE_OPTIONS=--max-old-space-size` は V8 のヒープだけの上限で、
+webpack のネイティブ確保は含まない。ヒープを絞っても跳ねは止まらないので、
+**`mem_limit` との差を広く取る**こと（既定はヒープ 1536m / 上限 3584m）。
 
 ### コンテナ非root化（#1477）にともなう既存環境の移行
 

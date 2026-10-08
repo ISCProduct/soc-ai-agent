@@ -501,7 +501,7 @@ export function useInterviewSession({
 
     const scoreSessionId = resolveScoreSessionId(currentUser.user_id)
     try {
-      const res = await fetch(`/api/user/weight-scores?user_id=${currentUser.user_id}&session_id=${encodeURIComponent(scoreSessionId)}`)
+      const res = await fetch(`/api/user/weight-scores?session_id=${encodeURIComponent(scoreSessionId)}`)
       const data = await res.json()
       setScoresBefore(data.weight_scores ?? null)
     } catch {
@@ -580,7 +580,7 @@ export function useInterviewSession({
   const loadScoresAfter = async (userId: number) => {
     const scoreSessionId = resolveScoreSessionId(userId)
     try {
-      const res = await fetch(`/api/user/weight-scores?user_id=${userId}&session_id=${encodeURIComponent(scoreSessionId)}`)
+      const res = await fetch(`/api/user/weight-scores?session_id=${encodeURIComponent(scoreSessionId)}`)
       const data = await res.json()
       setScoresAfter(data.weight_scores ?? null)
     } catch { /* ignore */ }
