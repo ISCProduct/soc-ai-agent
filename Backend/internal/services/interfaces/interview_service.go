@@ -27,7 +27,9 @@ type InterviewService interface {
 		sessionID uint,
 		audioData []byte,
 		history []map[string]string,
-		companyName, companyReading, position, companyInfo, companyType string,
+		companyName, companyReading string,
+		companyReadingResolved bool,
+		position, companyInfo, companyType string,
 		companyID uint,
 		turnCount, remainingSeconds, questionIndex, totalQuestions, questionElapsedSeconds, questionDurationSeconds int,
 	) (*interview.TurnResult, error)
