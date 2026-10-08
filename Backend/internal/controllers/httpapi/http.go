@@ -97,7 +97,8 @@ func EnsureAdminSchoolAccess(ctx echo.Context, schools *school.SchoolService, ta
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	allowed, err := schools.CanAdminAccessSchool(adminUserID, targetSchoolID)
+	isPlatform := middleware.AdminIsPlatformFromContext(ctx.Request().Context())
+	allowed, err := schools.CanAdminAccessSchool(isPlatform, adminUserID, targetSchoolID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
 	}

@@ -80,7 +80,8 @@ export default function PageContent() {
 
   useEffect(() => {
     const user = authService.getStoredUser()
-    if (!user?.is_admin) {
+    // 管理者に加えて職員（教員・キャリア担当）も管理エリアに入れる。
+    if (!user?.is_admin && !user?.is_staff) {
       window.location.href = '/'
     }
   }, [])
