@@ -269,7 +269,7 @@ function ESRewriteContent() {
             <Typography sx={{ fontSize: 12, color: '#64748b' }}>書いた文章を読み、直したほうがよい点と書き直し例を返します</Typography>
           </Box>
         </Box>
-        <IconButton onClick={() => router.push('/')} sx={{ bgcolor: '#f1f5f9', color: '#475569' }}>
+        <IconButton onClick={() => router.push('/')} sx={{ bgcolor: '#f1f5f9', color: '#475569' }} aria-label="ホームへ戻る">
           <ArrowBackIcon />
         </IconButton>
       </Box>
@@ -587,6 +587,7 @@ function ESRewriteContent() {
                       <IconButton
                         size="small"
                         onClick={() => handleCopy(reviewResult.improved_text)}
+                        aria-label="改善文をコピー"
                         sx={{ bgcolor: copied ? '#10b981' : '#f1f5f9', '&:hover': { bgcolor: copied ? '#059669' : '#e2e8f0' } }}
                       >
                         {copied
@@ -623,6 +624,7 @@ function ESRewriteContent() {
                     <IconButton
                       size="small"
                       onClick={() => handleCopy(rewriteResult.rewritten_text)}
+                      aria-label="リライト結果をコピー"
                       sx={{ bgcolor: copied ? '#10b981' : '#f1f5f9', '&:hover': { bgcolor: copied ? '#059669' : '#e2e8f0' } }}
                     >
                       {copied
