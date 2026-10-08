@@ -16,7 +16,7 @@
  */
 import { render, screen, act } from '@testing-library/react'
 import { AnalysisSidebar } from '@/components/AnalysisSidebar'
-import type { User } from '@/lib/types'
+import type { User } from '@/lib/auth'
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn(), refresh: jest.fn() }),
