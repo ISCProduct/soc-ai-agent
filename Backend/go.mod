@@ -1,6 +1,6 @@
 module Backend
 
-go 1.25.13
+go 1.26.9
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
@@ -12,7 +12,7 @@ require (
 	github.com/labstack/echo/v4 v4.15.3
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/crypto v0.52.0
+	golang.org/x/crypto v0.57.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/time v0.15.0
 	gorm.io/driver/mysql v1.6.0
@@ -32,7 +32,7 @@ require (
 	github.com/labstack/echo-contrib v0.50.1
 	github.com/redis/go-redis/v9 v9.7.3
 	github.com/resend/resend-go/v3 v3.10.1
-	golang.org/x/sync v0.21.0
+	golang.org/x/sync v0.23.0
 )
 
 require (
@@ -88,8 +88,8 @@ require (
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
-	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
-	golang.org/x/text v0.39.0
-	gopkg.in/yaml.v3 v3.0.1 // indirect
+	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0
+	gopkg.in/yaml.v3 v3.0.1
 )

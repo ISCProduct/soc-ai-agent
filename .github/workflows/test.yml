@@ -72,12 +72,12 @@ jobs:
       # 全PRのCIが落ちる。実際 v1.8.0 が go>=1.26 を要求するようになり、
       # go 1.25 + GOTOOLCHAIN=local の本CIでインストール自体が失敗した(2026-09-09)。
       #
-      #   golang.org/x/vuln@v1.8.0 requires go >= 1.26.0 (running go 1.25.13)
-      #
-      # v1.7.0 が go 1.25 系に対応する最新。Go を上げるときは合わせて見直すこと。
+      # Go を 1.26.9 へ上げたので v1.8.0 を使う（GO-2026-6610〜6617 の対応）。
+      # 1.25 系にはこれらの修正が入らず、fixed は 1.26.9 / 1.27.2 だけである。
+      # Go を動かすときはここの対応バージョンも合わせて見直すこと。
       - name: Security scan (govulncheck)
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
           govulncheck ./...
 
   # 旧 audit-frontend (npm audit) の置き換え (#1132)。
