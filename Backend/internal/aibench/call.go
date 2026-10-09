@@ -31,16 +31,63 @@ type CallResult struct {
 
 // isUnmeasurable は「モデルの出力品質とは無関係で、測り直せば消える」ステータスか。
 // 429 はレート制限、5xx は API 側の一時障害。
-func isUnmeasurable(status int) bool {
-	return status == http.StatusTooManyRequests || status >= 500
+//
+// 429 でも残高切れは測り直しても消えないので、body を見て分ける
+// （quotaExhausted / #1634）。status だけで判定しないこと。
+func isUnmeasurable(status int, body []byte) bool {
+	if status == http.StatusTooManyRequests {
+		return !quotaExhausted(body)
+	}
+	return status >= 500
 }
 
 // isSetupFailure は「設定を直さないと何度やっても同じ」ステータスか。
 // 401/403 は認証、404 はモデル名やエンドポイントの誤り。
 // これらを破損率に数えると、設定ミスの実行が破損率100%という
 // もっともらしい数字を出してしまう。
-func isSetupFailure(status int) bool {
+//
+// 429 の残高切れもここに入れる。OpenAI は一時的なレート制限と残高切れを
+// 同じ 429 で返すが、本文の code で区別できる（#1634）。
+//
+//	rate_limit_exceeded  一時的。再試行してよい
+//	insufficient_quota   残高切れ。何度やっても同じ
+//
+// 分けずにネットワーク系へ寄せていたため、残高が尽きた実行が全件失敗のまま
+// 完走し「破損率 0.0% / 弁別力 +0.000」というもっともらしい報告を出していた。
+func isSetupFailure(status int, body []byte) bool {
+	if status == http.StatusTooManyRequests {
+		return quotaExhausted(body)
+	}
 	return status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusNotFound
+}
+
+// quotaExhausted は 429 の本文が残高切れを示すか。
+//
+// 判定は error.code を正とする。type は insufficient_quota でも
+// "insufficient_quota" と "billing" の揺れがあるため、code が取れないときの
+// 保険としてだけ本文の部分一致を見る。
+func quotaExhausted(body []byte) bool {
+	var parsed struct {
+		Error struct {
+			Code string `json:"code"`
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &parsed); err == nil {
+		for _, v := range []string{parsed.Error.Code, parsed.Error.Type} {
+			switch strings.ToLower(strings.TrimSpace(v)) {
+			case "insufficient_quota", "credit_balance_exhausted":
+				return true
+			}
+		}
+		if parsed.Error.Code != "" || parsed.Error.Type != "" {
+			return false
+		}
+	}
+	// JSON として読めない・code も type も空のときだけ本文を見る。
+	lower := strings.ToLower(string(body))
+	return strings.Contains(lower, "insufficient_quota") ||
+		strings.Contains(lower, "credit_balance_exhausted")
 }
 
 // callTimeout は1回の呼び出しの上限。本番のクライアントは60〜90秒で切っている。
@@ -121,7 +168,7 @@ func CallChatCompletions(ctx context.Context, model, systemPrompt, userPrompt st
 		return CallResult{LatencyMS: latency, Err: err, Unmeasured: true}
 	}
 	if status != http.StatusOK {
-		return CallResult{LatencyMS: latency, Fatal: isSetupFailure(status), Unmeasured: isUnmeasurable(status),
+		return CallResult{LatencyMS: latency, Fatal: isSetupFailure(status, body), Unmeasured: isUnmeasurable(status, body),
 			Err: fmt.Errorf("chat/completions HTTP %d: %s", status, snippet(body))}
 	}
 
@@ -189,7 +236,7 @@ func CallResponses(ctx context.Context, model, systemPrompt, userPrompt string, 
 		return CallResult{LatencyMS: latency, Err: err, Unmeasured: true}
 	}
 	if status != http.StatusOK {
-		return CallResult{LatencyMS: latency, Fatal: isSetupFailure(status), Unmeasured: isUnmeasurable(status),
+		return CallResult{LatencyMS: latency, Fatal: isSetupFailure(status, body), Unmeasured: isUnmeasurable(status, body),
 			Err: fmt.Errorf("responses HTTP %d: %s", status, snippet(body))}
 	}
 

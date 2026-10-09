@@ -1682,6 +1682,40 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/PlatformAdminOnly" }
 
+  /api/admin/companies/{id}/verify:
+    patch:
+      tags: [admin-companies]
+      summary: 学生検索の審査を完了する、または取り消す
+      description: |
+        `companies.is_verified` を更新する。公開（`data_status`）とは別で、重み付けプロファイルは不要。
+        true になるまで企業ポータルの学生検索とスカウト送信は 403。システム管理者専用。
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verified]
+              properties:
+                verified:
+                  type: boolean
+      responses:
+        "200":
+          description: 成功
+        "400":
+          description: verified が無い、または真偽値でない
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "404":
+          description: 存在しない
+
   /api/admin/companies/{id}/reject:
     patch:
       tags: [admin-companies]
@@ -3716,6 +3750,60 @@ paths:
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/user/scouts:
+    get:
+      tags: [user]
+      summary: 受け取ったスカウト一覧
+      description: |
+        `limit` と `offset` でページを送る。
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/user/scouts/{id}/view:
+    post:
+      tags: [user]
+      summary: スカウトを既読にする
+      security: [{ userToken: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/user/scouts/{id}/decline:
+    post:
+      tags: [user]
+      summary: スカウトを辞退する
+      security: [{ userToken: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/user/scout-blocks:
+    post:
+      tags: [user]
+      summary: 企業からのスカウトを受け取らない
+      security: [{ userToken: [] }]
+      responses:
+        "204":
+          description: ブロックした
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /api/user/guidances/{id}/dismiss:
     post:
       tags: [user]
@@ -3993,6 +4081,23 @@ paths:
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/company-auth/register:
+    post:
+      tags: [company-auth]
+      summary: 企業アカウントを自己登録する
+      description: |
+        審査前でもアカウントは作れる。学生検索とスカウトは `is_verified` が true になるまで使えない。
+        IP 単位でログインと同じレート制限がかかる。
+      security: []
+      responses:
+        "201":
+          description: 登録した
+        "400":
+          description: 入力が不正
+        "409":
+          description: 同じメールアドレスが既にある
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
   /api/company-auth/login:
     post:
       tags: [company-auth]
@@ -4019,7 +4124,7 @@ paths:
       description: |
         **初回はここから。** 招待トークンの有効期限は 24 時間で、DB にはハッシュだけ保存する。
 
-        企業側から自分でアカウントを作ることはできない。必ず学校側の管理者の招待から始まる。
+        追加の担当者は学校側の管理者、または既存の owner からの招待で入る。企業自身の初回登録は `/register`。
       security: []
       responses:
         "200":
@@ -4253,6 +4358,24 @@ paths:
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CompanyOwnerOnly" }
+    delete:
+      tags: [company-portal]
+      summary: 求人を削除する
+      description: |
+        論理削除。応募やマッチの参照は残し、一覧と学生向け公開から外す。
+        **owner のみ実行できる。** `member` は 403（コントローラ側で判定）。
+      security: [{ companyCookie: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: 削除した
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/CompanyOwnerOnly" }
 
   /api/company-portal/jobs/{id}/publish:
     post:
@@ -4261,7 +4384,7 @@ paths:
       description: |
         **owner のみ実行できる。** `member` は 403（コントローラ側で判定）。
 
-        **削除は提供していない。** 応募が紐づくため、非公開化で対応する（#1321）。
+        不要な求人は `DELETE /api/company-portal/jobs/{id}` で論理削除する。
       security: [{ companyCookie: [] }]
       parameters:
         - in: path
@@ -4274,6 +4397,104 @@ paths:
           description: 成功
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/CompanyOwnerOnly" }
+
+  /api/company-portal/scout-templates:
+    get:
+      tags: [company-portal]
+      summary: スカウト定型文の一覧
+      description: |
+        審査完了（`is_verified`）まで 403。
+      security: [{ companyCookie: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [company-portal]
+      summary: スカウト定型文を作る
+      description: |
+        審査完了（`is_verified`）まで 403。
+      security: [{ companyCookie: [] }]
+      responses:
+        "201":
+          description: 作成した
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/company-portal/scout-templates/{id}:
+    patch:
+      tags: [company-portal]
+      summary: スカウト定型文を更新する
+      description: |
+        審査完了（`is_verified`）まで 403。
+      security: [{ companyCookie: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    delete:
+      tags: [company-portal]
+      summary: スカウト定型文を削除する
+      description: |
+        審査完了（`is_verified`）まで 403。
+      security: [{ companyCookie: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: 削除した
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/company-portal/scouts:
+    get:
+      tags: [company-portal]
+      summary: スカウト送信履歴
+      description: |
+        審査完了（`is_verified`）まで 403。`limit` と `offset` でページを送る。
+      security: [{ companyCookie: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [company-portal]
+      summary: 学生へスカウトを送る
+      description: |
+        審査完了（`is_verified`）まで 403。同一学生へは 24 時間のクールダウンがある。
+      security: [{ companyCookie: [] }]
+      responses:
+        "201":
+          description: 送信した
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/company-portal/scouts/cooldown:
+    get:
+      tags: [company-portal]
+      summary: スカウト再送までの残り時間
+      description: |
+        審査完了（`is_verified`）まで 403。
+      security: [{ companyCookie: [] }]
+      responses:
+        "200":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/company-portal/students:
     get:

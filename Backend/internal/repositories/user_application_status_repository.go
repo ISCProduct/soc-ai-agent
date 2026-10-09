@@ -305,3 +305,29 @@ func (r *UserApplicationStatusRepository) CountByCompanyAndStatuses(
 	}
 	return n, nil
 }
+
+// CountGroupedByStatus は企業の応募をステータスごとに数える。
+// ポータルのパイプライン帯が、一覧を全件読まずに段階別の滞留を出すために使う。
+func (r *UserApplicationStatusRepository) CountGroupedByStatus(companyID uint) (map[string]int64, error) {
+	if companyID == 0 {
+		return nil, gorm.ErrInvalidValue
+	}
+	type row struct {
+		Status string
+		Count  int64
+	}
+	var rows []row
+	err := r.db.Model(&models.UserApplicationStatus{}).
+		Select("status, COUNT(*) AS count").
+		Where("company_id = ?", companyID).
+		Group("status").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		out[row.Status] = row.Count
+	}
+	return out, nil
+}
