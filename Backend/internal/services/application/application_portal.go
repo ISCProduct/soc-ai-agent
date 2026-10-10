@@ -53,6 +53,15 @@ func (s *ApplicationService) CountPendingForCompanyPortal(companyID uint) (int64
 	return s.appRepo.CountByCompanyAndStatuses(companyID, PortalPendingStatuses)
 }
 
+// CountStatusesForCompanyPortal は選考ステータスごとの件数を返す。
+// 件数が0のステータスはマップに含まれない。
+func (s *ApplicationService) CountStatusesForCompanyPortal(companyID uint) (map[string]int64, error) {
+	if companyID == 0 {
+		return nil, shared.ErrForbidden
+	}
+	return s.appRepo.CountGroupedByStatus(companyID)
+}
+
 // UpdateStatusForCompanyPortal は企業ポータルからの選考ステータス更新。
 //
 // 他社の応募IDを指定された場合は 403 を返す。404 にすると

@@ -243,7 +243,7 @@ func TestCompanyStudentController_Detail(t *testing.T) {
 
 func TestCompanyStudentController_Detail_ReturnsOwnCompanyTags(t *testing.T) {
 	search := &companyStudentSearchStub{tags: []hrsvc.StudentTagView{{ID: 1, TagName: "即戦力"}}}
-	analysis := &companyStudentAnalysisStub{resp: &hrsvc.StudentAnalysisResponse{UserID: 5}}
+	analysis := &companyStudentAnalysisStub{resp: &hrsvc.StudentAnalysisResponse{UserID: 5, Name: "山田太郎"}}
 	req := httptest.NewRequest(http.MethodGet, "/api/company-portal/students/5", nil)
 	req = withCompanyContext(req, 42, 7)
 	rec := httptest.NewRecorder()
@@ -252,9 +252,13 @@ func TestCompanyStudentController_Detail_ReturnsOwnCompanyTags(t *testing.T) {
 		companyStudentCtx(req, rec, []string{"userID"}, []string{"5"}), http.StatusOK)
 
 	var body struct {
+		Analysis struct {
+			Name string `json:"name"`
+		} `json:"analysis"`
 		Tags []hrsvc.StudentTagView `json:"tags"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	assert.Equal(t, "山田太郎", body.Analysis.Name)
 	require.Len(t, body.Tags, 1)
 	assert.Equal(t, "即戦力", body.Tags[0].TagName)
 	assert.Equal(t, uint(7), search.lastCompany, "タグは自社IDでのみ取得される")
