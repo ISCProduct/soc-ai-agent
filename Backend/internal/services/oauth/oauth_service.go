@@ -178,6 +178,7 @@ func (s *OAuthService) HandleGoogleCallback(ctx context.Context, code string, te
 		TargetLevel:              user.TargetLevel,
 		SchoolName:               user.SchoolName,
 		IsAdmin:                  user.IsAdmin,
+		IsStaff:                  user.HasStaffRole(),
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
@@ -308,6 +309,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string, te
 		TargetLevel:              user.TargetLevel,
 		SchoolName:               user.SchoolName,
 		IsAdmin:                  user.IsAdmin,
+		IsStaff:                  user.HasStaffRole(),
 		CertificationsAcquired:   user.CertificationsAcquired,
 		CertificationsInProgress: user.CertificationsInProgress,
 		AvatarURL:                user.AvatarURL,
@@ -317,7 +319,7 @@ func (s *OAuthService) HandleGitHubCallback(ctx context.Context, code string, te
 		authResp.UserToken = middleware.GenerateUserToken(user.ID, user.Email, userSecret)
 		authResp.RefreshToken = s.issueRefreshToken(user.ID)
 	}
-	if user.IsAdmin {
+	if user.CanAccessAdminArea() {
 		if adminSecret := os.Getenv("ADMIN_SECRET"); adminSecret != "" {
 			authResp.Token = middleware.GenerateAdminToken(user.ID, user.Email, adminSecret)
 		}

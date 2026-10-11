@@ -1,18 +1,23 @@
+import { BRAND_LOGO_COLOR } from '@/lib/brand'
 import {
-  extractChoices,
-  makeMessageId,
+  CHAT_ACCENT,
+  CHAT_BRAND,
+  CHAT_STOP_TEXT,
+  CHAT_WARN_TEXT,
   INITIAL_GREETING,
   clearChatSessionOnEnd,
-  readStoredJobCategoryId,
-  writeStoredJobCategoryId,
-  shouldSendChatOnKeyDown,
-  jobCategoryStorageKey,
-  stripChoiceLines,
   computeProgressTotals,
-  shouldAutoScrollToBottom,
-  CHAT_BRAND,
+  extractChoices,
   findLastAssistantQuestionMessage,
   isValidationFeedbackMessage,
+  isValidationTerminationMessage,
+  jobCategoryStorageKey,
+  makeMessageId,
+  readStoredJobCategoryId,
+  shouldAutoScrollToBottom,
+  shouldSendChatOnKeyDown,
+  stripChoiceLines,
+  writeStoredJobCategoryId,
 } from '@/components/mui-chat/utils'
 
 describe('extractChoices', () => {
@@ -83,8 +88,10 @@ describe('makeMessageId / INITIAL_GREETING', () => {
     expect(a.length).toBeGreaterThan(0)
   })
 
-  it('INITIAL_GREETING は挨拶文を含む', () => {
-    expect(INITIAL_GREETING).toContain('キャリアエージェント')
+  it('INITIAL_GREETING は最初の質問まで案内する', () => {
+    // 以前は「キャリアエージェント」という名乗りを固定していたが、
+    // 人を名乗らない方針に変えたので、保証したいこと自体を書く。
+    expect(INITIAL_GREETING).toContain('どんな仕事に興味がありますか')
   })
 })
 
@@ -244,9 +251,38 @@ describe('shouldAutoScrollToBottom', () => {
   })
 })
 
-describe('CHAT_BRAND', () => {
-  it('サイドバー等と同じブランドオレンジである', () => {
-    expect(CHAT_BRAND).toBe('#ec5b13')
+describe('チャットの色', () => {
+  /** 相対輝度（WCAG 2.x）。 */
+  function luminance(hex: string): number {
+    const c = hex.replace('#', '')
+    const channels = [0, 2, 4].map((i) => {
+      const v = parseInt(c.slice(i, i + 2), 16) / 255
+      return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+    })
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+  }
+  function contrast(a: string, b: string): number {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+    return (hi + 0.05) / (lo + 0.05)
+  }
+
+  it('ブランド橙はロゴと同じ値を保つ', () => {
+    // 文字を載せない装飾にだけ使う前提で、ブランド同一性は維持する。
+    expect(CHAT_BRAND).toBe(BRAND_LOGO_COLOR)
+  })
+
+  it('ブランド橙は文字には使えない（だから装飾限定にしている）', () => {
+    // この前提が崩れたら、用途を分けている理由も変わる。
+    expect(contrast(CHAT_BRAND, '#FFFFFF')).toBeLessThan(4.5)
+  })
+
+  it('文字と塗りに使う色は白文字で AA を満たす', () => {
+    expect(contrast(CHAT_ACCENT, '#FFFFFF')).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('注意・打ち切りの文字色は白地で AA を満たす', () => {
+    expect(contrast(CHAT_WARN_TEXT, '#FFFFFF')).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(CHAT_STOP_TEXT, '#FFFFFF')).toBeGreaterThanOrEqual(4.5)
   })
 })
 
@@ -293,5 +329,79 @@ describe('isValidationFeedbackMessage', () => {
       isValidationFeedbackMessage('質問と関係のない内容が3回続いたため、チャットを終了させていただきます。'),
     ).toBe(true)
     expect(isValidationFeedbackMessage('一番近いものを選んでください')).toBe(false)
+  })
+})
+
+describe('案内・打ち切りの判定', () => {
+  // Backend/internal/services/chat/chat_answer_validator.go の
+  // validationMarkers と同じ文字列を見ている。片方だけ変えると、
+  // 画面側が案内文を「直近の質問」として拾い、選択肢の復元が壊れる。
+  const retry =
+    'いまの質問に対する答えとして受け取れませんでした。質問に沿った内容でもう一度お願いします。選択肢が出ているときは、そこから選んでも大丈夫です。'
+  const terminated =
+    'うまく受け取れないまま続いたため、このチャットを終了しました。新しく始めれば最初からやり直せます。'
+
+  it('新しい案内文を判定できる', () => {
+    expect(isValidationFeedbackMessage(retry)).toBe(true)
+    expect(isValidationTerminationMessage(retry)).toBe(false)
+  })
+
+  it('新しい打ち切り文を判定できる', () => {
+    expect(isValidationFeedbackMessage(terminated)).toBe(true)
+    expect(isValidationTerminationMessage(terminated)).toBe(true)
+  })
+
+  it('旧文言も判定できる（保存済みデータが残っているため）', () => {
+    const legacyRetry = '書かれた内容にはお答えできません。質問に回答してください。（1/3回目の警告）'
+    const legacyStop = '質問と関係のない内容が3回続いたため、チャットを終了させていただきます。'
+    expect(isValidationFeedbackMessage(legacyRetry)).toBe(true)
+    expect(isValidationTerminationMessage(legacyStop)).toBe(true)
+  })
+
+  it('普通の質問は案内文と見なさない', () => {
+    expect(isValidationFeedbackMessage('どんな仕事に興味がありますか？')).toBe(false)
+    expect(isValidationTerminationMessage('どんな仕事に興味がありますか？')).toBe(false)
+  })
+
+  it('案内文は直近の質問として拾わない', () => {
+    const messages = [
+      { role: 'assistant', content: 'A) はい\nB) いいえ' },
+      { role: 'user', content: 'あ' },
+      { role: 'assistant', content: retry },
+    ]
+    expect(findLastAssistantQuestionMessage(messages)?.content).toContain('A) はい')
+  })
+})
+
+describe('最初の案内（INITIAL_GREETING）', () => {
+  it('AIが応答していることを示す', () => {
+    // 人と話していると受け取られないようにする（NN/g）。
+    expect(INITIAL_GREETING).toContain('AI')
+  })
+
+  it('人を名乗らない', () => {
+    // 旧文は「IT業界専門のキャリアエージェントです」と名乗るだけだった。
+    expect(INITIAL_GREETING).not.toContain('キャリアエージェントです')
+  })
+
+  it('できないことを明示する', () => {
+    // 範囲を限った方が満足度が高い（NN/g）。
+    expect(INITIAL_GREETING).toContain('できないのは')
+  })
+
+  it('相談先を示す', () => {
+    expect(INITIAL_GREETING).toContain('先生')
+  })
+
+  it('結果を断定しない', () => {
+    // §6: AIが出した情報を確定情報のように見せない。
+    for (const ng of ['最適な', '必ず', '確実']) {
+      expect(INITIAL_GREETING).not.toContain(ng)
+    }
+  })
+
+  it('最初の質問まで辿り着ける長さに収める', () => {
+    // 会話型は一度に少ししか表示できない。長いと読み飛ばされる。
+    expect(INITIAL_GREETING.length).toBeLessThan(220)
   })
 })

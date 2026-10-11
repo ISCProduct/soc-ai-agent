@@ -11,20 +11,17 @@ export type MockUser = {
 }
 
 /**
- * テスト用の user_token を作る（#1535）。
+ * テスト用の JWT を組み立てる。
  *
- * middleware は署名を検証せず exp だけ見てリフレッシュ契機を決める。
- * exp が読めないトークンは**期限切れとして扱われ**、後段へ注入されない。
- *
- * 本番の Backend（`GenerateJWT`）は必ず exp 付きの JWT を発行するので、
- * ダミー文字列を置くと実態と違う条件でテストすることになる。
- * 以前は 'test-user-token-xyz789' のような文字列で、middleware が
- * フェイルオープンだったからたまたま通っていた。
+ * Backend の GenerateJWT は必ず exp 付きで発行する。ここを不透明な文字列にすると
+ * middleware が「読めない＝期限切れ」と判定して Cookie を落とすため(#1535)、
+ * ログイン済みのはずの全テストが未ログイン扱いになる。署名は検証しないので
+ * 中身だけ実物と揃える。
  */
-function testJwt(sub: number, expiresInSeconds = 60 * 60 * 24): string {
+export function testJwt(userId: number, expiresInSeconds = 60 * 60): string {
   const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
   const exp = Math.floor(Date.now() / 1000) + expiresInSeconds
-  return `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: String(sub), exp })}.e2e-signature`
+  return `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: String(userId), exp })}.test-signature`
 }
 
 export const TEST_USER: MockUser = {

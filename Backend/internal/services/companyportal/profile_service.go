@@ -34,6 +34,8 @@ func NewProfileService(repo companyRepository) *ProfileService {
 // ポインタ型は「指定されなかった項目は変更しない」を表す。
 // 未指定とゼロ値を区別しないと、一部だけ更新したつもりで他が消える。
 type ProfileInput struct {
+	// Name は企業名。未指定なら変えない。空文字は不可。
+	Name           *string
 	Description    *string
 	Industry       *string
 	Location       *string
@@ -55,6 +57,15 @@ const (
 )
 
 func (in ProfileInput) validate() error {
+	if in.Name != nil {
+		name := strings.TrimSpace(*in.Name)
+		if name == "" {
+			return &shared.ValidationError{Message: "企業名を入力してください"}
+		}
+		if len([]rune(name)) > maxProfileShortLen {
+			return &shared.ValidationError{Message: "企業名が長すぎます"}
+		}
+	}
 	if in.Description != nil && len([]rune(*in.Description)) > maxProfileTextLen {
 		return &shared.ValidationError{Message: "企業概要が長すぎます"}
 	}
@@ -105,6 +116,7 @@ func (s *ProfileService) Update(companyID uint, in ProfileInput) (*models.Compan
 		return nil, err
 	}
 
+	applyString(&company.Name, in.Name)
 	applyString(&company.Description, in.Description)
 	applyString(&company.Industry, in.Industry)
 	applyString(&company.Location, in.Location)

@@ -157,8 +157,39 @@ def bl_request(
         return None
 
 
+def load_dotenv_if_missing(names: tuple[str, ...], path: str = ".env") -> None:
+    """未設定の環境変数だけ .env から補う。
+
+    CI では Secrets から渡るので何も起きない。ローカルでは認証情報を .env に
+    置く運用なので、ここで読まないと「.env に入れたのに未設定で止まる」ことになる
+    （呼び出し側に `set -a; . ./.env` を強いるのをやめる）。
+    既に設定済みの値は上書きしない。
+    """
+    if all(os.environ.get(n) for n in names):
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key not in names or os.environ.get(key):
+            continue
+        value = value.strip().strip('"').strip("'")
+        if value:
+            os.environ[key] = value
+
+
 def load_backlog_env() -> tuple[str, str, str, str]:
     """API_KEY, SPACE_ID, PROJECT_KEY, DOMAIN を読み込む。"""
+    load_dotenv_if_missing(
+        ("BACKLOG_API_KEY", "BACKLOG_SPACE_ID", "BACKLOG_PROJECT_KEY", "BACKLOG_DOMAIN")
+    )
     api_key = env_required("BACKLOG_API_KEY")
     space_id = normalize_space_id(env_required("BACKLOG_SPACE_ID"))
     proj_key = env_required("BACKLOG_PROJECT_KEY")

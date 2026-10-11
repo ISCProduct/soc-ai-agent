@@ -14,6 +14,7 @@ import (
 	"Backend/internal/services/shared"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -285,7 +286,14 @@ func (c *ChatController) Chat(ctx echo.Context) error {
 	}
 
 	// 既存セッションへの書き込みの場合、他ユーザーのセッションでないことを検証する（#946 IDOR対策）。
-	// 履歴自体は ProcessChat が LIMIT 付きで読み直すので、ここでは所有者判定だけ行う。
+	// さらに NEW セッションの同時開始時には session_id の所有権を原子的に確定させ、
+	// TOCTOU を防ぐ（#963）。この判定は他人のメッセージの有無によるフェイルクローズと同時に行う。
+	if err := c.chatService.ClaimSessionOwnership(req.SessionID, userID); err != nil {
+		if errors.Is(err, shared.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
+		}
+		return httpapi.InternalError(err)
+	}
 	if err := c.ensureSessionNotOwnedByOthers(req.SessionID, userID); err != nil {
 		if err == shared.ErrForbidden {
 			return echo.NewHTTPError(http.StatusForbidden, "Forbidden")

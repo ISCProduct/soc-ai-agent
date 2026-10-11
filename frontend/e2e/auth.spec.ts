@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { TEST_USER } from './fixtures/auth'
+import { testJwt } from './fixtures/auth'
 
 test.describe('認証フロー', () => {
   test('ログインページが表示される', async ({ page }) => {
@@ -19,9 +19,8 @@ test.describe('認証フロー', () => {
           email: 'test@example.com',
           name: 'テストユーザー',
           token: 'mock-token',
-          // Backend は必ず exp 付きJWTを返す。ダミー文字列だと middleware が
-          // 期限切れ扱いにする(#1535)。
-          user_token: TEST_USER.user_token,
+          // middleware が exp を読むので実物の形にする(#1535)
+          user_token: testJwt(1),
           is_guest: false,
         }),
       })

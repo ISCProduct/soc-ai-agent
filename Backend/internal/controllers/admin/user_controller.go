@@ -121,7 +121,8 @@ func (c *AdminUserController) denyIfRestricted(ctx echo.Context, message string)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	restricted, _, err := c.schools.ResolveAdminAccess(adminUserID)
+	isPlatform := middleware.AdminIsPlatformFromContext(ctx.Request().Context())
+	restricted, _, err := c.schools.ResolveAccess(isPlatform, adminUserID)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}

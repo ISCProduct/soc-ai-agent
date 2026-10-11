@@ -134,6 +134,8 @@ type Summary struct {
 	// UnmeasuredRuns は通信エラー等で計測できなかった回数（破損率の分母から除外）。
 	// これが多い実行は数字自体が信用できない。
 	UnmeasuredRuns int `json:"unmeasured_runs"`
+	// MeasuredRuns は実際にスコアを取れた実行回数。0 のとき指標は無意味になる。
+	MeasuredRuns int `json:"measured_runs"`
 
 	// 再現性: ケースごとのスコア標準偏差の平均と最大（小さいほど安定）
 	MeanScoreStdDev float64 `json:"mean_score_stddev"`
@@ -258,6 +260,7 @@ func Aggregate(target, model, endpoint, generatedAt string, obs []Observation) *
 
 	s.Cases = len(byCase)
 	s.Runs = len(obs) / max(1, len(byCase))
+	s.MeasuredRuns = measured
 	if measured > 0 {
 		s.BrokenRate = float64(broken) / float64(measured)
 	}

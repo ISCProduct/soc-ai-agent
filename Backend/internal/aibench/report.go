@@ -21,6 +21,18 @@ func PrintSummary(w io.Writer, s *Summary) {
 	}
 	fmt.Fprintf(w, "件数 %d × %d回 = %d呼び出し\n", s.Cases, s.Runs, len(s.Observations))
 
+	// 1件も計測できていない実行で指標を出さない（#1634）。
+	//
+	// 残高切れで全件が失敗した実行でも「破損率 0.0% / 弁別力 +0.000」という
+	// 体裁の整った表が出ていた。どちらも品質が良いときと見分けが付かない数字で、
+	// 設定の問題を品質の問題と読み違える。指標ではなく失敗として出す。
+	if s.MeasuredRuns == 0 {
+		fmt.Fprintf(w, "\n計測できた呼び出しが1件もありません。指標は表示しません。\n")
+		fmt.Fprintf(w, "計測できず %d回%s\n", s.UnmeasuredRuns, formatCounts(s.BrokenByReason))
+		fmt.Fprintf(w, "APIキー・残高・ネットワークを確認してから測り直してください。\n")
+		return
+	}
+
 	fmt.Fprintf(w, "\n%-16s %s\n", "指標", "値")
 	fmt.Fprintf(w, "%-16s %.1f%%%s\n", "破損率", s.BrokenRate*100, formatCounts(s.BrokenByReason))
 	if s.UnmeasuredRuns > 0 {

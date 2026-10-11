@@ -40,6 +40,12 @@ export default function PageContent() {
       router.replace('/login')
       return
     }
+    // 職員（教員・キャリア担当）にはチャットを見せず、教員指導画面(/admin)へ送る。
+    // 直リンクで / に来た場合もここで退避する。
+    if (storedUser.is_staff) {
+      router.replace('/admin')
+      return
+    }
     setUser(storedUser)
     setLoading(false)
     fetchWhatsNewEntries()

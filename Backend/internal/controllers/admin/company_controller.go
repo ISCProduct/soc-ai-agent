@@ -346,6 +346,9 @@ func (c *AdminCompanyController) Publish(ctx echo.Context) error {
 	}
 	company.DataStatus = "published"
 	company.IsProvisional = false
+	// 学生検索とスカウトは is_verified で止める。公開したのにこのフラグが
+	// false のままだと、管理画面で公開しても企業ポータルは403のままになる。
+	company.IsVerified = true
 	if err := c.repo.Update(company); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to publish company")
 	}
@@ -366,6 +369,48 @@ func (c *AdminCompanyController) Publish(ctx echo.Context) error {
 	actor := ctx.Request().Header.Get("X-Admin-Email")
 	c.audit.Record(actor, "company.publish", "company", company.ID, map[string]any{
 		"name": company.Name,
+	})
+	return ctx.JSON(http.StatusOK, company)
+}
+
+// Verify PATCH /api/admin/companies/:id/verify
+//
+// 学生検索・スカウトを許可する審査完了フラグを立てる、または取り消す。
+// Publish は重み付けプロファイルが必要で、自己登録企業はそれを持たないことがある。
+// 審査完了は公開とは別に行い、学生への掲載（data_status）は変えない。
+func (c *AdminCompanyController) Verify(ctx echo.Context) error {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid company id")
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(ctx.Response(), ctx.Request().Body, 1<<10))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
+	}
+	var sent map[string]json.RawMessage
+	if err := json.Unmarshal(body, &sent); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid payload")
+	}
+	raw, ok := sent["verified"]
+	if !ok {
+		return echo.NewHTTPError(http.StatusBadRequest, "verified is required")
+	}
+	var verified bool
+	if err := json.Unmarshal(raw, &verified); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "verified must be boolean")
+	}
+	company, err := c.repo.FindByID(uint(id))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "company not found")
+	}
+	company.IsVerified = verified
+	if err := c.repo.Update(company); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update verification")
+	}
+	actor := ctx.Request().Header.Get("X-Admin-Email")
+	c.audit.Record(actor, "company.verify", "company", company.ID, map[string]any{
+		"name":        company.Name,
+		"is_verified": company.IsVerified,
 	})
 	return ctx.JSON(http.StatusOK, company)
 }

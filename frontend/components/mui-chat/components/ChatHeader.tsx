@@ -2,7 +2,7 @@
 
 import { Box, Button, LinearProgress, Typography } from '@mui/material'
 import styles from '../MuiChat.module.css'
-import { CHAT_BRAND } from '../utils'
+import { CHAT_ACCENT, CHAT_BRAND } from '../utils'
 import type { ProgressTotals } from '../types'
 
 type ChatHeaderProps = {
@@ -60,7 +60,8 @@ export function ChatHeader({
         size="small"
         onClick={onEndChat}
         className={styles.endButton}
-        sx={{ borderColor: CHAT_BRAND, color: CHAT_BRAND, flexShrink: 0 }}
+        // 文字色は青。橙の文字は白地で 3.46:1 しかなく AA を満たさない。
+        sx={{ borderColor: CHAT_ACCENT, color: CHAT_ACCENT, flexShrink: 0 }}
       >
         終了
       </Button>

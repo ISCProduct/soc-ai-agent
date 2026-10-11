@@ -28,6 +28,7 @@ const newCandidateWindowDays = 7
 type portalApplicationLister interface {
 	ListForCompanyPortal(companyID uint, status string, limit, offset int) ([]*entity.UserApplicationStatus, int64, error)
 	CountPendingForCompanyPortal(companyID uint) (int64, error)
+	CountStatusesForCompanyPortal(companyID uint) (map[string]int64, error)
 	UpdateStatusForCompanyPortal(applicationID, companyID uint, status string, notes *string) (*entity.UserApplicationStatus, error)
 }
 
@@ -67,6 +68,8 @@ type DashboardResponse struct {
 	// NewCandidateWindowDays は new_candidates が何日ぶんかを示す。
 	// UI 側で「過去7日」と出すために返す。
 	NewCandidateWindowDays int `json:"new_candidate_window_days"`
+	// StatusCounts は選考ステータスごとの件数。0件の段階は含まれない。
+	StatusCounts map[string]int64 `json:"status_counts"`
 }
 
 // Dashboard GET /api/company-portal/dashboard
@@ -92,12 +95,20 @@ func (c *CompanyPortalApplicationController) Dashboard(ctx echo.Context) error {
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
+	counts, err := c.apps.CountStatusesForCompanyPortal(companyID)
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
+	if counts == nil {
+		counts = map[string]int64{}
+	}
 
 	return ctx.JSON(http.StatusOK, DashboardResponse{
 		PendingApplications:    pending,
 		PublishedJobs:          jobs,
 		NewCandidates:          candidates,
 		NewCandidateWindowDays: newCandidateWindowDays,
+		StatusCounts:           counts,
 	})
 }
 

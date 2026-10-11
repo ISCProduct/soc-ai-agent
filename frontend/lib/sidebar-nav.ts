@@ -11,6 +11,7 @@ export const SIDEBAR_NAV_ITEMS = [
   { href: '/es-rewrite', label: 'ESリライト・添削' },
   { href: '/schedule', label: '選考スケジュール' },
   { href: '/applications', label: '選考管理' },
+  { href: '/scout', label: 'スカウト' },
   { href: '/profile', label: 'プロフィール設定' },
 ] as const
 

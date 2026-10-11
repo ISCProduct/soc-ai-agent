@@ -123,6 +123,7 @@ func (s *StudentAnalysisService) buildAnalysis(targetUserID uint) (*StudentAnaly
 
 	resp := &StudentAnalysisResponse{
 		UserID:            targetUserID,
+		Name:              student.Name,
 		IntegratedProfile: profile,
 		InterviewReports:  []InterviewReportView{},
 	}

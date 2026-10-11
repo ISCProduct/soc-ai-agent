@@ -15,13 +15,67 @@ import (
 
 // isValidationFeedbackMessage: 無効回答の警告・強制終了メッセージか。
 // これらを「直近の質問」と誤認すると、再回答が職種選択扱いなどになり連鎖で無効になる。
+// 回答が質問に沿っていないときの案内文。
+//
+// 文面の方針:
+//   - 「書かれた内容にはお答えできません」と断じるのをやめた。
+//     受け取れなかったのは系の側なので、そう書く。学生に非があるように読ませない。
+//   - 「（1/3回目の警告）」という数え上げもやめた。警告の回数を突きつけられる形は
+//     指導や処分に見え、答えにくい質問で詰まっているだけの学生を追い込む。
+//     終了が近いことは、回数ではなく「次も同じなら終了する」と事実で伝える。
+//   - 次にできることを必ず添える（選択肢から選ぶ／先生に相談する）。
+//
+// マーカーは画面側の判定とも一致させる必要がある。
+// frontend/components/mui-chat/utils.ts の isValidationFeedbackMessage と、
+// frontend/components/mui-chat/components/ChatMessageList.tsx が同じ文字列を見ている。
+// 変えるときは3か所まとめて変えること。
+const (
+	validationMarkerRetry      = "質問に沿った内容でもう一度お願いします"
+	validationMarkerTerminated = "このチャットを終了しました"
+)
+
+// validationMarkers は判定に使う目印。
+//
+// 旧文言も残す。既存セッションの DB には旧文言のまま保存されており、
+// 落とすと過去の警告が「直近の質問」として拾われ、選択肢の復元が壊れる。
+// 新規に生成することはもう無いので、保存済みデータが流れ切るまでの互換用。
+var validationMarkers = []string{
+	validationMarkerRetry,
+	validationMarkerTerminated,
+	// 旧文言（2026-10 以前に保存されたもの）
+	"書かれた内容にはお答えできません",
+	"質問と関係のない内容が3回続いた",
+}
+
+// validationRetryMessage は1〜2回目の案内。残り1回のときだけ終了が近いことを添える。
+func validationRetryMessage(invalidCount, limit int) string {
+	msg := "いまの質問に対する答えとして受け取れませんでした。" +
+		validationMarkerRetry +
+		"。選択肢が出ているときは、そこから選んでも大丈夫です。"
+	if invalidCount >= limit-1 {
+		msg += "次も同じだと、このチャットは一度終了します。"
+	}
+	return msg
+}
+
+// validationTerminatedMessage は打ち切りの案内。
+func validationTerminatedMessage() string {
+	return "うまく受け取れないまま続いたため、" + validationMarkerTerminated +
+		"。新しく始めれば最初からやり直せます。" +
+		"答えにくい質問が続くときは、先生にも相談してみてください。"
+}
+
 func isValidationFeedbackMessage(content string) bool {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
 		return false
 	}
-	return strings.Contains(trimmed, "書かれた内容にはお答えできません") ||
-		strings.Contains(trimmed, "質問と関係のない内容が3回続いた")
+	for _, marker := range validationMarkers {
+		if strings.Contains(trimmed, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // findLastAssistantQuestion: 警告・終了メッセージを飛ばし、履歴上の直近の質問文を返す。
@@ -88,10 +142,10 @@ func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.
 		if err := s.sessionValidationRepo.TerminateSession(sessionID); err != nil {
 			log.Printf("Warning: failed to terminate session: %v\n", err)
 		}
-		assistantText = "申し訳ございませんが、質問と関係のない内容が3回続いたため、チャットを終了させていただきます。「最初からやり直す」から新しいセッションを開始するか、この質問をスキップして別の話題からお試しください。"
+		assistantText = validationTerminatedMessage()
 	} else {
 		// 1-2回目の無効回答 -> 警告メッセージ
-		assistantText = fmt.Sprintf("書かれた内容にはお答えできません。質問に回答してください。（%d/3回目の警告）", validation.InvalidAnswerCount)
+		assistantText = validationRetryMessage(validation.InvalidAnswerCount, 3)
 	}
 
 	assistantMsg := &models.ChatMessage{

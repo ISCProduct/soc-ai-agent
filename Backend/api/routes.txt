@@ -1,7 +1,7 @@
 # 実装に登録されている全エンドポイント。
 # 手で編集しない。次のコマンドで生成する:
 #   cd Backend && go test ./internal/routes/ -run TestRouteCatalog -update
-# 合計 252 本
+# 合計 266 本
 GET /api/admin/applications
 PATCH /api/admin/applications/:id/status
 GET /api/admin/audit-logs
@@ -32,6 +32,7 @@ POST /api/admin/companies/:id/interview-questions/generate
 PATCH /api/admin/companies/:id/publish
 PATCH /api/admin/companies/:id/reject
 GET /api/admin/companies/:id/relation-graph
+PATCH /api/admin/companies/:id/verify
 POST /api/admin/companies/fetch-missing-batch
 GET /api/admin/companies/industries
 GET /api/admin/companies/l1-coverage
@@ -171,6 +172,7 @@ POST /api/company-auth/login
 POST /api/company-auth/logout
 GET /api/company-auth/me
 POST /api/company-auth/refresh
+POST /api/company-auth/register
 POST /api/company-auth/reset-password
 POST /api/company-entry
 GET /api/company-portal/applications
@@ -182,6 +184,7 @@ GET /api/company-portal/dashboard
 GET /api/company-portal/industries
 GET /api/company-portal/jobs
 POST /api/company-portal/jobs
+DELETE /api/company-portal/jobs/:id
 PATCH /api/company-portal/jobs/:id
 POST /api/company-portal/jobs/:id/publish
 GET /api/company-portal/members
@@ -190,6 +193,13 @@ PATCH /api/company-portal/members/:userID
 GET /api/company-portal/school-applications
 POST /api/company-portal/school-applications
 DELETE /api/company-portal/school-applications/:id
+GET /api/company-portal/scout-templates
+POST /api/company-portal/scout-templates
+DELETE /api/company-portal/scout-templates/:id
+PATCH /api/company-portal/scout-templates/:id
+GET /api/company-portal/scouts
+POST /api/company-portal/scouts
+GET /api/company-portal/scouts/cooldown
 GET /api/company-portal/students
 GET /api/company-portal/students/:userID
 POST /api/company-portal/students/:userID/tags
@@ -249,6 +259,10 @@ GET /api/user/industries
 GET /api/user/preferences
 PUT /api/user/preferences
 GET /api/user/profile
+POST /api/user/scout-blocks
+GET /api/user/scouts
+POST /api/user/scouts/:id/decline
+POST /api/user/scouts/:id/view
 DELETE /api/users/me
 GET /api/whats-new
 GET /health

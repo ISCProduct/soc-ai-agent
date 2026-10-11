@@ -84,6 +84,7 @@ type Company = {
   source_type?: string
   is_provisional?: boolean
   data_status?: string
+  is_verified?: boolean
   info_fetched_at?: string | null
   jobs_fetched_at?: string | null
   tech_fetched_at?: string | null
@@ -714,6 +715,31 @@ export default function PageContent() {
     })
   }
 
+  const handleSetVerified = async (companyId: number, verified: boolean) => {
+    setError('')
+    setMenuAnchor(null)
+    const res = await fetch(`/api/admin/companies/${companyId}/verify`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authService.getAdminFetchHeaders(),
+      },
+      body: JSON.stringify({ verified }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      setError(data?.error || `学生検索の審査を更新できませんでした (${res.status})`)
+      return
+    }
+    setFetchSeverity('success')
+    setFetchMessage(
+      verified
+        ? '学生検索の審査を完了しました。この企業は学生の検索とスカウト送信ができます。'
+        : '学生検索の審査を取り消しました。学生の検索とスカウト送信はできません。',
+    )
+    await reloadCurrentList()
+  }
+
   const handleReject = async (companyId: number) => {
     setError('')
     setMenuAnchor(null)
@@ -1276,6 +1302,13 @@ export default function PageContent() {
                                 {company.name}
                               </Typography>
                               <Chip label={status.label} color={status.color} size="small" />
+                              {isPlatform ? (
+                                <Chip
+                                  size="small"
+                                  variant="outlined"
+                                  label={company.is_verified ? '学生検索 審査済' : '学生検索 未審査'}
+                                />
+                              ) : null}
                               {schoolId !== undefined ? (
                                 // 取得できていない状態を「未承認」と同じ見た目にしない(#1452)。
                                 approvalChipState(approvedCompanyIds, company.id) === 'unknown' ? (
@@ -1508,6 +1541,18 @@ export default function PageContent() {
             <ListItemText sx={{ color: 'error.main' }}>非公開にする</ListItemText>
           </MenuItem>
         )}
+        {isPlatform && menuAnchor ? (
+          <MenuItem
+            disabled={busy}
+            onClick={() =>
+              handleSetVerified(menuAnchor.company.id, !menuAnchor.company.is_verified)
+            }
+          >
+            <ListItemText>
+              {menuAnchor.company.is_verified ? '学生検索の審査を取り消す' : '学生検索の審査を完了'}
+            </ListItemText>
+          </MenuItem>
+        ) : null}
       </Menu>
 
       <Accordion

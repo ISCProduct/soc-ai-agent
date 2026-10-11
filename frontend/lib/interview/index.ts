@@ -182,7 +182,10 @@ export const interviewApi = {
   },
 
   async getDetail(sessionId: number, userId: number, role?: string): Promise<InterviewDetail> {
-    const roleParam = role ? `&role=${role}` : ''
+    // user_id クエリを外した(#1666)ことで先頭が `?` になった。`&` のままだと
+    // `/api/interviews/5&role=teacher` になり、role がクエリにならず id の一部として
+    // 読まれて UintParam が 400 を返す（履歴から教員がレポートを開けなくなる）。
+    const roleParam = role ? `?role=${encodeURIComponent(role)}` : ''
     const res = await interviewFetch(`${BACKEND_URL}/api/interviews/${sessionId}${roleParam}`, undefined, LIST_FETCH_TIMEOUT_MS)
     if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
     return res.json()

@@ -115,10 +115,11 @@ export interface User {
   email: string
   name: string
   is_guest: boolean
-  role?: 'student' | 'teacher'
+  role?: 'student' | 'teacher' | 'staff'
   target_level?: string
   school_name?: string
   is_admin?: boolean
+  is_staff?: boolean
   certifications_acquired?: string
   certifications_in_progress?: string
   oauth_provider?: string
@@ -133,6 +134,7 @@ export interface AuthResponse {
   target_level?: string
   school_name?: string
   is_admin?: boolean
+  is_staff?: boolean
   certifications_acquired?: string
   certifications_in_progress?: string
   oauth_provider?: string
@@ -274,6 +276,7 @@ export const authService = {
       target_level: data.target_level,
       school_name: data.school_name,
       is_admin: data.is_admin,
+      is_staff: data.is_staff,
       certifications_acquired: data.certifications_acquired,
       certifications_in_progress: data.certifications_in_progress,
       oauth_provider: data.oauth_provider,
@@ -350,6 +353,7 @@ export const authService = {
       target_level: authResponse.target_level,
       school_name: authResponse.school_name,
       is_admin: authResponse.is_admin,
+      is_staff: authResponse.is_staff,
       certifications_acquired: authResponse.certifications_acquired,
       certifications_in_progress: authResponse.certifications_in_progress,
       oauth_provider: authResponse.oauth_provider,

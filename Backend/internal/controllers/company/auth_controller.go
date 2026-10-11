@@ -32,6 +32,20 @@ func (c *CompanyAuthController) Login(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, resp)
 }
 
+// Register POST /api/company-auth/register
+// 招待なしで企業＋担当者（owner）を作成し、そのままログイン状態を返す。
+func (c *CompanyAuthController) Register(ctx echo.Context) error {
+	var req companyauth.RegisterRequest
+	if err := ctx.Bind(&req); err != nil {
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "リクエストの形式が正しくありません")
+	}
+	resp, err := c.svc.Register(req)
+	if err != nil {
+		return mapCompanyAuthError(err)
+	}
+	return ctx.JSON(http.StatusCreated, resp)
+}
+
 func (c *CompanyAuthController) AcceptInvite(ctx echo.Context) error {
 	var req companyauth.AcceptInviteRequest
 	if err := ctx.Bind(&req); err != nil {
@@ -130,34 +144,58 @@ func (c *CompanyAuthController) Me(ctx echo.Context) error {
 func mapCompanyAuthError(err error) error {
 	switch {
 	case errors.Is(err, companyauth.ErrInvalidCredentials):
-		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "invalid email or password")
+		return httpapi.NewAPIError(http.StatusUnauthorized, httpapi.ErrCodeUnauthorized, "メールアドレスまたはパスワードが正しくありません")
 	case errors.Is(err, companyauth.ErrInviteNotFound):
-		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "invalid invite token")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "招待リンクが無効です")
 	case errors.Is(err, companyauth.ErrInviteExpired):
-		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "invite token expired")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "招待リンクの有効期限が切れています")
 	case errors.Is(err, companyauth.ErrEmailExists):
-		return httpapi.NewAPIError(http.StatusConflict, httpapi.ErrCodeConflict, "email already exists")
+		return httpapi.NewAPIError(http.StatusConflict, httpapi.ErrCodeConflict, "このメールアドレスは既に登録されています")
 	case errors.Is(err, companyauth.ErrCompanyNotFound):
-		return httpapi.NewAPIError(http.StatusNotFound, httpapi.ErrCodeNotFound, "company not found")
+		return httpapi.NewAPIError(http.StatusNotFound, httpapi.ErrCodeNotFound, "企業が見つかりません")
 	case errors.Is(err, companyauth.ErrCompanyNotVerified):
-		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "company is not verified")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "この企業はまだ認証されていないため招待できません")
 	case errors.Is(err, companyauth.ErrAccountDisabled):
 		return httpapi.NewAPIError(http.StatusForbidden, httpapi.ErrCodeForbidden, "このアカウントは無効化されています")
 	case errors.Is(err, companyauth.ErrResetTokenInvalid):
-		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "invalid password reset token")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "パスワード再設定リンクが無効です")
 	case errors.Is(err, companyauth.ErrResetTokenExpired):
-		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "password reset token expired")
+		return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "パスワード再設定リンクの有効期限が切れています")
 	case errors.Is(err, companyauth.ErrUserNotFound):
-		return httpapi.NewAPIError(http.StatusNotFound, httpapi.ErrCodeNotFound, "company user not found")
+		return httpapi.NewAPIError(http.StatusNotFound, httpapi.ErrCodeNotFound, "企業ユーザーが見つかりません")
 	default:
 		msg := err.Error()
 		if msg == "forbidden" {
-			return httpapi.NewAPIError(http.StatusForbidden, httpapi.ErrCodeForbidden, "Forbidden")
+			return httpapi.NewAPIError(http.StatusForbidden, httpapi.ErrCodeForbidden, "権限がありません")
 		}
-		if msg == "email and password are required" || msg == "token and password are required" ||
-			msg == "password must be at least 8 characters" || msg == "email and name are required" ||
-			msg == "email is invalid" || msg == "invalid role" || msg == "invite already accepted" {
-			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, msg)
+		if msg == "COMPANY_USER_SECRET is not configured" {
+			return httpapi.NewAPIError(
+				http.StatusServiceUnavailable,
+				httpapi.ErrCodeServiceUnavail,
+				"企業ポータルの認証設定（COMPANY_USER_SECRET）が未設定です。管理者に連絡してください",
+			)
+		}
+		switch msg {
+		case "email and password are required":
+			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "メールアドレスとパスワードを入力してください")
+		case "token and password are required":
+			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "トークンとパスワードを入力してください")
+		case "password must be at least 8 characters":
+			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "パスワードは8文字以上で入力してください")
+		case "email and name are required":
+			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "メールアドレスと担当者名を入力してください")
+		case "email is invalid":
+			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "メールアドレスの形式を確認してください")
+		case "invalid role":
+			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "権限の指定が不正です")
+		case "invite already accepted":
+			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "この招待はすでに受諾済みです")
+		case "company_name, name, email and password are required":
+			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "企業名・担当者名・メールアドレス・パスワードを入力してください")
+		case "company_name is too long":
+			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "企業名が長すぎます")
+		case "name is too long":
+			return httpapi.NewAPIError(http.StatusBadRequest, httpapi.ErrCodeValidationError, "担当者名が長すぎます")
 		}
 		return httpapi.InternalError(err)
 	}

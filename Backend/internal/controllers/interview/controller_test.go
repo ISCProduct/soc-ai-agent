@@ -8,6 +8,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -27,6 +30,28 @@ import (
 
 func newInterviewController(svc *mocks.InterviewServiceMock) *interviewcontrollers.InterviewController {
 	return interviewcontrollers.NewInterviewController(svc, nil, nil)
+}
+
+func readInterviewMetadata(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	_, params, err := mime.ParseMediaType(rec.Header().Get("Content-Type"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := multipart.NewReader(bytes.NewReader(rec.Body.Bytes()), params["boundary"])
+	part, err := reader.NextPart()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	return metadata
 }
 
 // ---- Create ----
@@ -68,6 +93,93 @@ func TestInterviewController_Create_ServiceError(t *testing.T) {
 	svc := &mocks.InterviewServiceMock{}
 	svc.On("CreateSession", uint(1), "ja", "").Return(nil, errors.New("guest limit exceeded"))
 	testsupport.AssertStatus(t, newInterviewController(svc).Create, testsupport.NewCtx(req, rec), http.StatusBadRequest)
+}
+
+func TestInterviewController_Turn_OmitsCompanyInfoFromResponse(t *testing.T) {
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	for key, value := range map[string]string{
+		"history": "[]", "company_name": "Example", "company_reading_resolved": "true",
+		"company_info": "private company profile", "company_type": "general", "company_id": "42",
+	} {
+		if err := form.WriteField(key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	audio, err := form.CreateFormFile("audio", "audio.webm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = audio.Write([]byte("audio"))
+	if err := form.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/interviews/10/turn", &body)
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	ctx := testsupport.NewCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("10")
+
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("Turn",
+		mock.Anything, uint(1), uint(10), []byte("audio"), []map[string]string{},
+		"Example", "", true, "", "private company profile", "general", uint(42),
+		0, 0, 0, 0, 0, 0,
+	).Return(&interview.TurnResult{
+		AIText:                 "response",
+		CompanyReadingResolved: true,
+	}, nil)
+	if err := newInterviewController(svc).Turn(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	metadata := readInterviewMetadata(t, rec)
+	// 企業ブリーフは非公開データなので学生へ返さない。TurnResult 自体にも
+	// 持たせていないが、リクエストのフォーム値をそのまま返す改変を止めるために検査する。
+	assert.NotContains(t, metadata, "company_info")
+	assert.Equal(t, true, metadata["company_reading_resolved"])
+	svc.AssertExpectations(t)
+}
+
+func TestInterviewController_StartTurn_OmitsCompanyInfoFromResponse(t *testing.T) {
+	body, err := json.Marshal(map[string]any{
+		"company_name": "Example", "company_info": "private company profile",
+		"company_type": "general", "company_id": 42, "question_index": 1,
+		"total_questions": 5, "question_elapsed_seconds": 0, "question_duration_seconds": 180,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/interviews/10/start-turn", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = testsupport.WithUserID(req, 1)
+	rec := httptest.NewRecorder()
+	ctx := testsupport.NewCtx(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("10")
+
+	svc := &mocks.InterviewServiceMock{}
+	svc.On("StartTurn",
+		mock.Anything, uint(1), uint(10),
+		"Example", "", "", "private company profile", "general", uint(42),
+		1, 5, 0, 180,
+	).Return(&interview.TurnResult{
+		AIText:                 "response",
+		CompanyReadingResolved: true,
+	}, nil)
+	if err := newInterviewController(svc).StartTurn(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	metadata := readInterviewMetadata(t, rec)
+	// 企業ブリーフは非公開データなので学生へ返さない。TurnResult 自体にも
+	// 持たせていないが、リクエストのフォーム値をそのまま返す改変を止めるために検査する。
+	assert.NotContains(t, metadata, "company_info")
+	assert.Equal(t, true, metadata["company_reading_resolved"])
+	svc.AssertExpectations(t)
 }
 
 // ---- List ----

@@ -1361,6 +1361,13 @@ jobs:
             exit 0
           fi
 
+          # gh run watch は監視中に GitHub API が 500 を返すとその場で落ちる。
+          # 2026-10-08 の本番デプロイがこれで failure になった（同期ワークフロー
+          # 自体は起動も完了もしていた）。デプロイ本体が終わったあとの後処理で、
+          # API の一時障害のためにデプロイ全体が赤くなるのは割に合わない。
+          #
+          # watch を数回やり直し、それでも読めなければ結果だけ問い合わせる。
+          # 起動した run は残っているので、最後は conclusion を見れば足りる。
           for pr in "${prs[@]}"; do
             echo "Backlog同期を再実行します: PR #$pr"
             run_url="$(gh workflow run pr-to-backlog.yml \
@@ -1368,9 +1375,27 @@ jobs:
               --ref main \
               -f pr_number="$pr")"
             run_id="${run_url##*/}"
-            gh run watch "$run_id" \
-              --repo "${{ github.repository }}" \
-              --exit-status
+
+            watched=0
+            for attempt in 1 2 3; do
+              if gh run watch "$run_id" --repo "${{ github.repository }}" --exit-status; then
+                watched=1
+                break
+              fi
+              echo "run watch が失敗しました（$attempt 回目）。10秒後にやり直します: run $run_id" >&2
+              sleep 10
+            done
+
+            if [ "$watched" != "1" ]; then
+              # watch が通らなくても、run の結果そのものは取れることが多い。
+              conclusion="$(gh run view "$run_id" --repo "${{ github.repository }}" \
+                --json conclusion --jq '.conclusion' 2>/dev/null || echo "")"
+              echo "run watch を諦め、結果を直接確認しました: ${conclusion:-取得できず}" >&2
+              if [ "$conclusion" != "success" ]; then
+                echo "Backlog同期が成功していません: PR #$pr / run $run_id" >&2
+                exit 1
+              fi
+            fi
           done
 
   # developへのマージPRもstagingでは即時確認できるようにする（本番には反映しない）。

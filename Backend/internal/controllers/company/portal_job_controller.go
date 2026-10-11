@@ -23,6 +23,7 @@ type portalJobService interface {
 	List(companyID uint) ([]models.CompanyJobPosition, error)
 	Create(companyID uint, in companyportal.JobInput) (*models.CompanyJobPosition, error)
 	Update(jobID, companyID uint, in companyportal.JobInput) (*models.CompanyJobPosition, error)
+	Delete(jobID, companyID uint) error
 	SetPublished(jobID, companyID uint, published bool) (*companyportal.JobVisibility, error)
 	CompanyPublished(companyID uint) bool
 }
@@ -174,9 +175,23 @@ type publishBody struct {
 	Published *bool `json:"published"`
 }
 
+// Delete DELETE /api/company-portal/jobs/:id （owner のみ）
+func (c *CompanyPortalJobController) Delete(ctx echo.Context) error {
+	companyID, apiErr := c.requireOwner(ctx)
+	if apiErr != nil {
+		return apiErr
+	}
+	id, apiErr := httpapi.UintParam(ctx, "id")
+	if apiErr != nil {
+		return apiErr
+	}
+	if err := c.jobs.Delete(id, companyID); err != nil {
+		return mapPortalJobError(err)
+	}
+	return ctx.NoContent(http.StatusNoContent)
+}
+
 // Publish POST /api/company-portal/jobs/:id/publish （owner のみ）
-//
-// 削除は提供しない。応募が紐づくため、非公開化で対応する。
 func (c *CompanyPortalJobController) Publish(ctx echo.Context) error {
 	companyID, apiErr := c.requireOwner(ctx)
 	if apiErr != nil {

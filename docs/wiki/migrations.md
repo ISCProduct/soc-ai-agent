@@ -148,10 +148,15 @@ frontend の不具合に見えるため、まず backend のログを確認し�
 
 > 版番号は**ブランチをまたいで衝突しうる**点に注意してください。
 > CI の重複検知（`automation/test/migration-version-unique-test.sh`）は
-> 単一ブランチ内しか見ないため、別々のブランチで同じ番号を使っていても
-> マージまで気づけません。新しいマイグレーションを足すときは
-> `git log --all --name-only -- Backend/migrations` で他ブランチの使用状況も
-> 確認するのが安全です。
+> `BASE_REF=origin/develop` を渡すと develop 側との衝突も見ます（PR の CI は
+> この形で動きます）。手元で確かめる場合も同じように渡してください。
+>
+> ```bash
+> BASE_REF=origin/develop ./automation/test/migration-version-unique-test.sh
+> ```
+>
+> feature ブランチ同士の衝突は、先にマージされた側が develop に入った時点で
+> もう一方の CI が落ちる形で検知されます。
 
 ## 既存DB（AutoMigrate時代）の移行
 
