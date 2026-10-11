@@ -40,7 +40,7 @@ func parseHintsContext(s string) (name, reading, position, info string) {
 
 func main() {
 	manifestPath := flag.String("manifest", "", "manifest.jsonl のパス（必須）")
-	models := flag.String("models", "gpt-4o-transcribe,gpt-4o-mini-transcribe", "比較するモデル（カンマ区切り）")
+	models := flag.String("models", "gpt-transcribe,gpt-4o-mini-transcribe", "比較するモデル（カンマ区切り）")
 	format := flag.String("format", "wav", "使用する音声形式: wav | webm")
 	out := flag.String("out", "", "結果JSONの出力先。未指定なら標準出力のみ")
 	dryRun := flag.Bool("dry-run", false, "APIを呼ばず、音声とmanifestの対応だけ検証する")

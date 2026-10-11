@@ -27,6 +27,8 @@ import {
   type ApplicationListItem,
 } from '@/lib/company/applications'
 import { applicationMark } from '@/lib/company/marks'
+import { EmptyState } from '@/components/common/EmptyState'
+import { ListSkeleton } from '@/components/common/ListSkeleton'
 
 const PAGE_SIZE = 30
 
@@ -110,7 +112,14 @@ export default function CompanyPortalApplicationsPage() {
   }
 
   if (loading) {
-    return <PageLoading message="応募者を読み込んでいます..." />
+    return (
+      <PageContainer maxWidth={1080}>
+        <Typography variant="h4" component="h1" fontWeight="bold" sx={{ mb: 3 }}>
+          応募者
+        </Typography>
+        <ListSkeleton rows={3} label="応募者を読み込み中" />
+      </PageContainer>
+    )
   }
 
   return (
@@ -141,7 +150,7 @@ export default function CompanyPortalApplicationsPage() {
       )}
 
       {items.length === 0 && status ? (
-        <Typography>この段階の応募はありません。別の段階を選ぶと一覧が切り替わります。</Typography>
+        <EmptyState title="この段階の応募はありません" description="別の段階を選ぶと一覧が切り替わります。" />
       ) : items.length === 0 ? (
         <Paper
           elevation={0}

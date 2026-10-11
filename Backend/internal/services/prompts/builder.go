@@ -8,12 +8,13 @@ import (
 )
 
 // PromptVersion はプロンプトバージョンを管理する。
-// 環境変数 PROMPT_VERSION で上書き可能（デフォルト: "v1"）。
+// 環境変数 PROMPT_VERSION で上書き可能（デフォルト: "v2"）。
+// v2: 会話履歴・回答など外部テキストを信頼境界で包んだ（#1636）。
 var PromptVersion = func() string {
 	if v := os.Getenv("PROMPT_VERSION"); v != "" {
 		return v
 	}
-	return "v1"
+	return "v2"
 }()
 
 // JobType は職種タイプを表す。

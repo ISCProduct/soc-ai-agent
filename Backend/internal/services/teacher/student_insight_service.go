@@ -1,6 +1,8 @@
 package teacher
 
 import (
+	"time"
+
 	"Backend/domain/entity"
 	"Backend/internal/config"
 	"Backend/internal/models"
@@ -39,6 +41,12 @@ type ResumeFactReader interface {
 	FindLatestResumeFactsByUsers(userIDs []uint) (map[uint]models.ResumeLatestFact, error)
 }
 
+// LastActivityReader は複数生徒の最終活動日時の一括読み出し面（#1573）。
+// 戻り値に無い user_id は活動の記録なし。
+type LastActivityReader interface {
+	FindLastActivityByUsers(userIDs []uint) (map[uint]time.Time, error)
+}
+
 type StudentInsightService struct {
 	users      StudentLister
 	scores     ScoreBatchReader
@@ -48,6 +56,9 @@ type StudentInsightService struct {
 	lowMatch LowMatchApplicationReader
 	// 履歴書事実の読み出し（#1030）。未注入なら該当機能を無効にする。
 	resumes ResumeFactReader
+	// 最終活動日時の読み出し（#1573）。未注入なら列も未活動の絞り込みも無効にする。
+	lastActivity LastActivityReader
+	now          func() time.Time
 }
 
 // LowMatchThreshold はこの値を下回る応募を「軌道修正の対象」とみなす（#1028）。
@@ -71,7 +82,7 @@ func NewStudentInsightService(
 	industries IndustryReader,
 	profiles IndustryProfileReader,
 ) *StudentInsightService {
-	return &StudentInsightService{users: users, scores: scores, industries: industries, profiles: profiles}
+	return &StudentInsightService{users: users, scores: scores, industries: industries, profiles: profiles, now: time.Now}
 }
 
 // SetLowMatchReader は低マッチ応募の読み出しを注入する（#1028、オプション）。
@@ -82,6 +93,11 @@ func (s *StudentInsightService) SetLowMatchReader(r LowMatchApplicationReader) {
 // SetResumeFactReader は履歴書事実の読み出しを注入する（#1030、オプション）。
 func (s *StudentInsightService) SetResumeFactReader(r ResumeFactReader) {
 	s.resumes = r
+}
+
+// SetLastActivityReader は最終活動日時の読み出しを注入する（#1573、オプション）。
+func (s *StudentInsightService) SetLastActivityReader(r LastActivityReader) {
+	s.lastActivity = r
 }
 
 // TendencyResult は一覧APIのレスポンス。
@@ -96,17 +112,27 @@ type TendencyResult struct {
 type tendencyFilters struct {
 	lowMatchOnly             bool
 	resumeNeedsAttentionOnly bool
+	// inactiveDays > 0 なら、この日数のあいだ活動が無い生徒だけに絞る（#1573）。
+	inactiveDays int
 }
 
 func (f tendencyFilters) active() bool {
-	return f.lowMatchOnly || f.resumeNeedsAttentionOnly
+	return f.lowMatchOnly || f.resumeNeedsAttentionOnly || f.inactiveDays > 0
 }
 
-// filteredListScanLimit は後段フィルタ時に DB から先読みする上限。
+// TendencyFilters は一覧の絞り込み条件。ゼロ値は絞り込みなし。
+type TendencyFilters struct {
+	LowMatchOnly             bool
+	ResumeNeedsAttentionOnly bool
+	InactiveDays             int
+}
+
+// filteredScanChunk は後段フィルタ時に DB から1回で読む件数。
 // ページ取得→絞り込みだと「先頭ページに該当0・次ページに該当あり」で
-// total=0 になりページ送りも消える（#1536 review）。先に上限まで読み、
-// 絞り込み後に limit/offset を当てる。担当校の生徒一覧用途の天井。
-const filteredListScanLimit = 10000
+// total=0 になりページ送りも消える（#1536 review）。対象全件をこの単位で走査し、
+// 絞り込み後に limit/offset を当てる。上限を置くと全校横断のシステム管理者で
+// 上限より後ろの該当生徒へ到達できなくなる（#1692）。
+const filteredScanChunk = 1000
 
 // ListTendencies は担当生徒の傾向タイプと向いている業界を返す（#1027）。
 //
@@ -126,33 +152,66 @@ func (s *StudentInsightService) ListTendenciesLowMatchOnly(limit, offset int, qu
 
 // ListTendenciesWithFilters は低マッチ／履歴書要対応の組み合わせで絞る（#1028/#1030）。
 func (s *StudentInsightService) ListTendenciesWithFilters(limit, offset int, query string, schoolID *uint, lowMatchOnly, resumeNeedsAttentionOnly bool) (*TendencyResult, error) {
+	return s.ListTendenciesFiltered(limit, offset, query, schoolID, TendencyFilters{
+		LowMatchOnly:             lowMatchOnly,
+		ResumeNeedsAttentionOnly: resumeNeedsAttentionOnly,
+	})
+}
+
+// ListTendenciesFiltered は低マッチ／履歴書要対応／未活動を AND で絞る（#1573）。
+func (s *StudentInsightService) ListTendenciesFiltered(limit, offset int, query string, schoolID *uint, f TendencyFilters) (*TendencyResult, error) {
 	return s.listTendencies(limit, offset, query, schoolID, tendencyFilters{
-		lowMatchOnly:             lowMatchOnly,
-		resumeNeedsAttentionOnly: resumeNeedsAttentionOnly,
+		lowMatchOnly:             f.LowMatchOnly,
+		resumeNeedsAttentionOnly: f.ResumeNeedsAttentionOnly,
+		inactiveDays:             f.InactiveDays,
 	})
 }
 
 func (s *StudentInsightService) listTendencies(limit, offset int, query string, schoolID *uint, filters tendencyFilters) (*TendencyResult, error) {
-	fetchLimit, fetchOffset := limit, offset
-	if filters.active() {
-		// 絞り込み後にページングするため、先に上限まで読む。
-		fetchLimit = filteredListScanLimit
-		fetchOffset = 0
-	}
-	students, total, err := s.users.ListStudentsPaged(fetchLimit, fetchOffset, query, schoolID)
-	if err != nil {
-		return nil, err
+	result := &TendencyResult{Students: []StudentTendency{}, Limit: limit, Offset: offset}
+	if !filters.active() {
+		students, total, err := s.users.ListStudentsPaged(limit, offset, query, schoolID)
+		if err != nil {
+			return nil, err
+		}
+		result.Total = total
+		result.Students, err = s.buildTendencies(students, filters)
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
 	}
 
-	result := &TendencyResult{
-		Students: make([]StudentTendency, 0, len(students)),
-		Total:    total,
-		Limit:    limit,
-		Offset:   offset,
+	// 対象全件を走査し、絞り込み後の実数でページングする。
+	// ponytail: 該当生徒は全件メモリに載る。全校横断で数十万人規模になったら
+	// 低マッチ／履歴書要対応の判定を SQL の WHERE へ落とす。
+	var matched []StudentTendency
+	for scanOffset := 0; ; scanOffset += filteredScanChunk {
+		chunk, total, err := s.users.ListStudentsPaged(filteredScanChunk, scanOffset, query, schoolID)
+		if err != nil {
+			return nil, err
+		}
+		hit, err := s.buildTendencies(chunk, filters)
+		if err != nil {
+			return nil, err
+		}
+		matched = append(matched, hit...)
+		if len(chunk) < filteredScanChunk || int64(scanOffset+len(chunk)) >= total {
+			break
+		}
 	}
+	result.Total = int64(len(matched))
+	start := min(offset, len(matched))
+	end := min(start+limit, len(matched))
+	result.Students = matched[start:end]
+	return result, nil
+}
+
+// buildTendencies は生徒群のスコア・低マッチ・履歴書事実を一括で読み、filters に合う生徒だけ返す。
+func (s *StudentInsightService) buildTendencies(students []entity.User, filters tendencyFilters) ([]StudentTendency, error) {
 	// 担当生徒が0人でも空一覧を返す（PRD 境界値）。
 	if len(students) == 0 {
-		return result, nil
+		return []StudentTendency{}, nil
 	}
 
 	userIDs := make([]uint, 0, len(students))
@@ -198,6 +257,15 @@ func (s *StudentInsightService) listTendencies(limit, offset int, query string, 
 	}
 	threshold := config.ResumeCompletenessThreshold()
 
+	var lastByUser map[uint]time.Time
+	if s.lastActivity != nil {
+		lastByUser, err = s.lastActivity.FindLastActivityByUsers(userIDs)
+		if err != nil {
+			return nil, err
+		}
+	}
+	now := s.now()
+
 	matched := make([]StudentTendency, 0, len(students))
 	for _, u := range students {
 		if filters.lowMatchOnly && len(lowMatchByUser[u.ID]) == 0 {
@@ -207,29 +275,22 @@ func (s *StudentInsightService) listTendencies(limit, offset int, query string, 
 		if filters.resumeNeedsAttentionOnly && (attn == nil || !attn.NeedsAttention) {
 			continue
 		}
+		last, hasLast := lastByUser[u.ID]
+		// 読み出し未注入なら判定できないので絞らない（誤って生徒を隠さない方へ倒す）。
+		// 活動の記録が1件も無い生徒は「未活動」に含める。
+		if filters.inactiveDays > 0 && lastByUser != nil && hasLast &&
+			now.Sub(last) < time.Duration(filters.inactiveDays)*24*time.Hour {
+			continue
+		}
 		t := BuildTendency(u.ID, u.Name, u.Email, scoresByUser[u.ID], industries, profileByIndustry)
 		t.LowMatchApplications = lowMatchByUser[u.ID]
 		t.ResumeStatus = attn
+		if hasLast {
+			t.LastActivityAt = &last
+		}
 		matched = append(matched, t)
 	}
-
-	if !filters.active() {
-		result.Students = matched
-		return result, nil
-	}
-
-	// 絞り込み後の実数でページングする。
-	result.Total = int64(len(matched))
-	start := offset
-	if start > len(matched) {
-		start = len(matched)
-	}
-	end := start + limit
-	if end > len(matched) {
-		end = len(matched)
-	}
-	result.Students = matched[start:end]
-	return result, nil
+	return matched, nil
 }
 
 // buildResumeAttention はバッチ事実から教員一覧用の対応要否を組み立てる。

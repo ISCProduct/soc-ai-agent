@@ -229,7 +229,7 @@ function ProfilePageContent() {
   const isGuest = user.is_guest === true
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f5f7fa' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       {/* ページヘッダー */}
       <Box sx={{ bgcolor: 'white', borderBottom: '1px solid #e0e0e0', px: { xs: 2, sm: 3 }, py: 1.5 }}>
         <Container maxWidth="lg">

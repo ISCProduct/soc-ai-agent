@@ -14,6 +14,9 @@ import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { AdminListCard } from '@/components/admin/AdminListCard'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
+import { EmptyState } from '@/components/common/EmptyState'
+import { ListSkeleton } from '@/components/common/ListSkeleton'
+import { ErrorAlert } from '@/components/common/ErrorAlert'
 
 type GraduateEmployment = {
   id: number
@@ -39,16 +42,31 @@ export default function PageContent() {
 
   const [graduateEntries, setGraduateEntries] = useState<GraduateEmployment[]>([])
   const [schoolId, setSchoolId] = useState<number | undefined>(undefined)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   useEffect(() => {
+    // 学校を素早く切り替えたとき、後着の古い応答で一覧を上書きしない
+    let stale = false
+    setLoading(true)
+    setError('')
     const params = new URLSearchParams({ limit: '100' })
     if (schoolId !== undefined) params.set('school_id', String(schoolId))
     fetch(`/api/admin/graduate-employments?${params}`, {
       headers: authService.getAdminFetchHeaders(),
     })
-      .then((r) => r.json())
-      .then((data) => setGraduateEntries(data?.entries || []))
-      .catch(() => {})
+      .then(async (r) => {
+        const data = await r.json()
+        if (!r.ok) throw new Error(data?.error || '就職情報の取得に失敗しました')
+        if (!stale) setGraduateEntries(data?.entries || [])
+      })
+      .catch((e: unknown) => {
+        if (!stale) setError(e instanceof Error ? e.message : '就職情報の取得に失敗しました')
+      })
+      .finally(() => {
+        if (!stale) setLoading(false)
+      })
+    return () => { stale = true }
   }, [schoolId])
 
   return (
@@ -83,10 +101,17 @@ export default function PageContent() {
           <Stack spacing={2}>
             <SchoolFilterSelect value={schoolId} onChange={setSchoolId} />
             <Stack spacing={1}>
-            {graduateEntries.length === 0 ? (
-              <Typography variant="body2" color="text.secondary">
-                まだ就職情報がありません。
-              </Typography>
+            <ErrorAlert error={error} />
+            {loading ? (
+              <ListSkeleton rows={3} label="就職情報を読み込み中" />
+            ) : graduateEntries.length === 0 ? (
+              error ? null : (
+                <EmptyState
+                  title="まだ就職情報がありません"
+                  description="卒業生の就職先を登録すると、学生が企業を選ぶときの参考になります。"
+                  action={<Button variant="contained" component={Link} href="/admin/graduate-employments/new" disableElevation>就職情報を登録</Button>}
+                />
+              )
             ) : (
               graduateEntries.map((entry) => (
                 <AdminListCard key={entry.id}>

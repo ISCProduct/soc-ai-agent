@@ -280,12 +280,6 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
-	historyStr := r.FormValue("history")
-	var history []map[string]string
-	if historyStr != "" {
-		json.Unmarshal([]byte(historyStr), &history)
-	}
-
 	// フォームから各パラメータを取得
 	companyName := r.FormValue("company_name")
 	companyReading := r.FormValue("company_reading")
@@ -317,7 +311,6 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		userID,
 		sessionID,
 		audioData,
-		history,
 		companyName,
 		companyReading,
 		companyReadingResolved,

@@ -18,6 +18,10 @@ async function silenceWhatsNew(page: Page) {
   await page.route('**/api/whats-new', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
   })
+  // お知らせは先頭1件だけ出す（#1576）。先生の案内の取得失敗が先頭に来てリマインダーが隠れないよう空にする。
+  await page.route('**/api/user/guidances', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ guidances: [] }) })
+  })
 }
 
 /** 履歴書リマインダーの Alert だけに絞り込む。 */

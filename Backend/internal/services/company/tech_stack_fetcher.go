@@ -6,6 +6,7 @@ import (
 	"Backend/internal/companyfields"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/services/shared"
 	"context"
 	"encoding/json"
 	"errors"
@@ -190,10 +191,7 @@ func (f *TechStackFetcher) Acquire(ctx context.Context, companyName, websiteURL,
 			candidateURLs = candidateURLs[:3]
 		}
 		if pageText, sourceURL, ferr := companyfetch.FirstFetchableText(scrapeCtx, candidateURLs); ferr == nil && pageText != "" {
-			parseUser := fmt.Sprintf(
-				"企業「%s」の公開ページ本文です。本文に明示された%sのみ次のJSON形式で抽出してください。推測禁止。\n%s\n\n---\n本文:\n%s",
-				companyName, domainLabel, schema, pageText,
-			)
+			parseUser := buildTechScrapeParseUser(companyName, domainLabel, schema, pageText)
 			raw, model, err := f.llm.ExtractJSON(ctx, systemPrompt, parseUser, 400)
 			if err == nil {
 				if result, perr := parseTechStackResult(raw); perr == nil && techResultHasData(result) {
@@ -323,4 +321,12 @@ func techResultFromCompany(company *models.Company) *TechStackResult {
 	_ = json.Unmarshal([]byte(company.InfraStack), &result.InfraStack)
 	_ = json.Unmarshal([]byte(company.CicdTools), &result.CicdTools)
 	return result
+}
+
+// buildTechScrapeParseUser は採用ページ本文からの抽出指示を組み立てる。本文は外部サイト由来なので囲む（#1636）。
+func buildTechScrapeParseUser(companyName, domainLabel, schema, pageText string) string {
+	return fmt.Sprintf(
+		"企業「%s」の公開ページ本文です。本文に明示された%sのみ次のJSON形式で抽出してください。推測禁止。\n%s\n\n---\n本文:\n%s",
+		companyName, domainLabel, schema, shared.WrapUntrustedText(pageText, "ページ本文"),
+	)
 }

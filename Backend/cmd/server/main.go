@@ -4,6 +4,7 @@ import (
 	"Backend/internal/config"
 	admincontrollers "Backend/internal/controllers/admin"
 	applicationcontrollers "Backend/internal/controllers/application"
+	assessmentcontrollers "Backend/internal/controllers/assessment"
 	authcontrollers "Backend/internal/controllers/auth"
 	chatcontrollers "Backend/internal/controllers/chat"
 	companycontrollers "Backend/internal/controllers/company"
@@ -29,6 +30,7 @@ import (
 	"Backend/internal/services/admin"
 	"Backend/internal/services/analysis"
 	"Backend/internal/services/application"
+	assessmentsvc "Backend/internal/services/assessment"
 	"Backend/internal/services/auth"
 	"Backend/internal/services/chat"
 	"Backend/internal/services/company"
@@ -641,6 +643,8 @@ func main() {
 	teacherInsightService.SetLowMatchReader(appStatusRepo)
 	// 履歴書要対応を教員一覧に出す（#1030）
 	teacherInsightService.SetResumeFactReader(resumeRepo)
+	// 最終活動日と未活動の絞り込みを教員一覧に出す（#1573）
+	teacherInsightService.SetLastActivityReader(userRepo)
 	teacherInsightController := insightcontrollers.NewTeacherStudentInsightController(teacherInsightService)
 	guidanceRepo := repositories.NewTeacherStudentGuidanceRepository(db)
 	guidanceService := teacher.NewGuidanceService(guidanceRepo, userRepo)
@@ -648,6 +652,11 @@ func main() {
 	studentGuidanceController := usercontrollers.NewStudentGuidanceController(guidanceService)
 	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminSchoolAppController, adminSchoolJobSuppressionController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, teacherGuidanceController, userRepo, schoolService, cfg.AdminSecret)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
+	// 適性検査 第1段（#1678）。結果は source=assessment で user_weight_scores へ入り、マッチングへ合流する
+	assessmentRepo := repositories.NewAssessmentRepository(db)
+	matchingService.SetAssessmentScoreReader(assessmentRepo)
+	assessmentService := assessmentsvc.NewService(assessmentRepo, matchingService, userWeightScoreRepo)
+	routes.SetupAssessmentRoutes(api, assessmentcontrollers.NewController(assessmentService), cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupInterviewRoutes(api, interviewController, realtimeController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupGitHubRoutes(api, githubController, cfg.UserSecret, userDeletionService, organizationService)
 	routes.SetupESRoutes(api, esRewriteController, esReviewController)

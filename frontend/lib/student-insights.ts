@@ -36,6 +36,8 @@ export interface StudentTendency {
   suited_industries: SuitedIndustry[] | null
   low_match_applications?: LowMatchApplication[] | null
   resume_status?: ResumeAttention | null
+  // 最終活動日時（#1573）。チャット発言・応募更新・スコア更新のうち最新。記録が無ければ省略。
+  last_activity_at?: string | null
   data_available: boolean
 }
 
@@ -78,6 +80,27 @@ export function formatScore(score: number): string {
 // バックエンドは該当なしのとき項目ごと省略する(omitempty)ので、null も空として扱う。
 export function lowMatchApplications(student: StudentTendency): LowMatchApplication[] {
   return student.low_match_applications ?? []
+}
+
+// 「対応が必要な学生」とみなす未活動の日数（#1573）。教員入口と一覧の絞り込みで共用する。
+export const INACTIVE_DAYS = 14
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+// 最終活動の表示。事実だけを書き、人物評価の言葉を使わない（#1573）。
+export function lastActivityLabel(student: StudentTendency, now: Date): string {
+  if (!student.last_activity_at) return '活動の記録なし'
+  const at = new Date(student.last_activity_at)
+  if (Number.isNaN(at.getTime())) return '活動の記録なし'
+  const days = Math.floor((now.getTime() - at.getTime()) / DAY_MS)
+  return days <= 0 ? '今日' : `${days}日前`
+}
+
+// 未活動の日数以上活動が無いか。記録なしも含める（バックエンドの絞り込みと同じ判定）。
+export function isInactive(student: StudentTendency, now: Date, days = INACTIVE_DAYS): boolean {
+  if (!student.last_activity_at) return true
+  const at = new Date(student.last_activity_at).getTime()
+  return Number.isNaN(at) || now.getTime() - at >= days * DAY_MS
 }
 
 // 履歴書要対応の表示文言。要対応でなければ空。

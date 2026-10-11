@@ -160,7 +160,15 @@ const (
 	correlationWorseBy  = 0.10 // 順位相関が0.1以上下がった
 	stddevWorseBy       = 0.05 // 再現性のσが0.05以上増えた
 	latencyWorseByRatio = 1.20 // p95 が1.2倍以上になった
-	costWorseByRatio    = 1.20 // 1件あたりコストが1.2倍以上になった
+)
+
+// コストは比率ではなく月額換算の絶対増で判定する（#1598）。
+// 比率だけだと安い工程の +$0.00026/件（1.42倍）が赤になり、高い工程の
+// +$0.0095/件（1.19倍）が緑になって、判断を取り違える。
+// 想定件数は全工程で共通の暫定値。実運用の件数が分かったら更新する。
+const (
+	assumedMonthlyCalls = 10000 // 1工程あたりの想定月間処理件数
+	costWorseMonthlyUSD = 10.0  // 月額換算でこれ以上増えたら劣化
 )
 
 // Diff は前回結果と比べて劣化を洗い出す。
@@ -213,9 +221,14 @@ func Diff(prev, cur *Summary) (regs []Regression, warnings []string) {
 		regs = append(regs, Regression{Metric: "レイテンシ(p95)", Prev: float64(prev.LatencyP95MS), Cur: float64(cur.LatencyP95MS),
 			Reason: fmt.Sprintf("%.2f倍に増えた", float64(cur.LatencyP95MS)/float64(prev.LatencyP95MS))})
 	}
-	if prev.CostPerCallUSD > 0 && cur.CostPerCallUSD >= prev.CostPerCallUSD*costWorseByRatio-eps {
-		regs = append(regs, Regression{Metric: "コスト(1件)", Prev: prev.CostPerCallUSD, Cur: cur.CostPerCallUSD,
-			Reason: fmt.Sprintf("%.2f倍に増えた", cur.CostPerCallUSD/prev.CostPerCallUSD)})
+	if prev.CostPerCallUSD > 0 {
+		perCall := cur.CostPerCallUSD - prev.CostPerCallUSD
+		monthly := perCall * assumedMonthlyCalls
+		if monthly >= costWorseMonthlyUSD-eps {
+			regs = append(regs, Regression{Metric: "コスト(1件)", Prev: prev.CostPerCallUSD, Cur: cur.CostPerCallUSD,
+				Reason: fmt.Sprintf("%.2f倍・1件 %+.5f$・月%d件で %+.2f$ が閾値 %.2f$ 以上",
+					cur.CostPerCallUSD/prev.CostPerCallUSD, perCall, assumedMonthlyCalls, monthly, costWorseMonthlyUSD)})
+		}
 	}
 	return regs, warnings
 }
@@ -265,6 +278,9 @@ func PrintDiff(w io.Writer, prev, cur *Summary) bool {
 	row("再現性(平均σ)", prev.MeanScoreStdDev, cur.MeanScoreStdDev, false)
 	fmt.Fprintf(w, "%-18s %10d %10d %+10d\n", "p95(ms)", prev.LatencyP95MS, cur.LatencyP95MS, cur.LatencyP95MS-prev.LatencyP95MS)
 	fmt.Fprintf(w, "%-18s %10.5f %10.5f %+10.5f\n", "コスト/件($)", prev.CostPerCallUSD, cur.CostPerCallUSD, cur.CostPerCallUSD-prev.CostPerCallUSD)
+	fmt.Fprintf(w, "%-18s %10.2f %10.2f %+10.2f\n", fmt.Sprintf("月%d件換算($)", assumedMonthlyCalls),
+		prev.CostPerCallUSD*assumedMonthlyCalls, cur.CostPerCallUSD*assumedMonthlyCalls,
+		(cur.CostPerCallUSD-prev.CostPerCallUSD)*assumedMonthlyCalls)
 
 	if len(regs) == 0 {
 		fmt.Fprintln(w, "\n劣化は検知されませんでした")
