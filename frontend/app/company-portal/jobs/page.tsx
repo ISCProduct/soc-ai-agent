@@ -27,6 +27,7 @@ import { MarkLabel } from '@/components/company-portal/MarkLabel'
 import { jobPublishMark } from '@/lib/company/marks'
 import { companyAuthService } from '@/lib/company/auth'
 import { companyJobService, isPublished, type CompanyJob, type JobInput } from '@/lib/company/jobs'
+import { ListSkeleton } from '@/components/common/ListSkeleton'
 
 const EMPTY_FORM: JobInput = {
   title: '',
@@ -167,7 +168,14 @@ export default function CompanyPortalJobsPage() {
   }
 
   if (loading) {
-    return <PageLoading message="求人を読み込んでいます..." />
+    return (
+      <PageContainer maxWidth={1080}>
+        <Typography variant="h4" component="h1" fontWeight="bold" sx={{ mb: 3 }}>
+          求人
+        </Typography>
+        <ListSkeleton rows={3} label="求人を読み込み中" />
+      </PageContainer>
+    )
   }
 
   return (

@@ -44,6 +44,7 @@ import {
     MailOutline,
     NewReleases,
     Assessment,
+    Quiz,
 } from '@mui/icons-material'
 import {authService, User} from '@/lib/auth'
 import {useRouter} from 'next/navigation'
@@ -62,6 +63,7 @@ const NAV_ICONS: Record<(typeof SIDEBAR_NAV_ITEMS)[number]['href'], React.ReactN
     '/correlation-diagram': <BorderAll color="primary"/>,
     '/chat-history': <History color="primary"/>,
     '/resume': <Description color="primary"/>,
+    '/assessments': <Quiz color="primary"/>,
     '/interview': <RecordVoiceOver color="primary"/>,
     '/interview/history': <Assessment color="primary"/>,
     '/es-rewrite': <EditNote color="primary"/>,

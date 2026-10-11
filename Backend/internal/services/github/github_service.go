@@ -14,10 +14,9 @@ const (
 	// レート制限: 最終同期から1時間以内は再同期しない
 	syncCacheDuration = time.Hour
 	// レート制限リトライ: 最大2回
-	maxRetries                  = 2
-	githubTokenEncryptionKeyEnv = "GITHUB_TOKEN_ENCRYPTION_KEY"
+	maxRetries = 2
 	// プロンプトバージョン（#457）
-	repoSummaryPromptVersion = "v2"
+	repoSummaryPromptVersion = "v3"
 )
 
 // GitHubService GitHub API連携サービス

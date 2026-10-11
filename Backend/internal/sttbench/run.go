@@ -1,6 +1,7 @@
 package sttbench
 
 import (
+	"Backend/internal/openai"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -78,6 +79,7 @@ type Report struct {
 // コード内の定数は過去に実価格と10倍ずれていたことがあるため、
 // 変更時は必ず公表価格を確認すること。
 var costPerMinUSD = map[string]float64{
+	"gpt-transcribe":         0.0045,
 	"gpt-4o-transcribe":      0.006,
 	"gpt-4o-mini-transcribe": 0.003,
 	"whisper-1":              0.006,
@@ -177,11 +179,7 @@ func RunModel(model string, cases []Case, audios []Audio, hints string) *ModelSu
 func buildTranscribeForm(model, hints string, a Audio) (*bytes.Buffer, string, error) {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
-	_ = w.WriteField("model", model)
-	_ = w.WriteField("language", "ja")
-	if hints != "" {
-		_ = w.WriteField("prompt", hints)
-	}
+	openai.WriteTranscribeContext(w, model, hints)
 	part, err := w.CreateFormFile("file", filepath.Base(a.Path))
 	if err != nil {
 		return nil, "", err

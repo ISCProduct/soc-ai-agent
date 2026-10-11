@@ -245,7 +245,9 @@ func TestDiff(t *testing.T) {
 		{name: "σが増えたら劣化", mutate: func(s *Summary) { s.MeanScoreStdDev = 0.08 }, wantMetric: "再現性(平均σ)"},
 		{name: "p95が1.2倍なら劣化", mutate: func(s *Summary) { s.LatencyP95MS = 6000 }, wantMetric: "レイテンシ(p95)"},
 		{name: "p95が1.1倍なら劣化ではない", mutate: func(s *Summary) { s.LatencyP95MS = 5500 }},
-		{name: "コストが1.2倍なら劣化", mutate: func(s *Summary) { s.CostPerCallUSD = 0.0012 }, wantMetric: "コスト(1件)"},
+		// コストは月額換算の絶対増で見る（#1598）。比率が大きくても少額なら劣化ではない。
+		{name: "コストが1.2倍でも月+$2なら劣化ではない", mutate: func(s *Summary) { s.CostPerCallUSD = 0.0012 }},
+		{name: "コストが月+$10以上増えたら劣化", mutate: func(s *Summary) { s.CostPerCallUSD = 0.002 }, wantMetric: "コスト(1件)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -263,6 +265,38 @@ func TestDiff(t *testing.T) {
 			}
 			if len(regs) != 1 || regs[0].Metric != tt.wantMetric {
 				t.Errorf("劣化 = %+v, want %q 1件", regs, tt.wantMetric)
+			}
+		})
+	}
+}
+
+// #1598: 比率だけのゲートは判定を取り違える。受け入れ条件の2ケースを固定する。
+func TestDiffコストは絶対額で判定する(t *testing.T) {
+	tests := []struct {
+		name        string
+		prev, cur   float64
+		wantRegress bool
+	}{
+		{name: "#1584 の実測: 1.42倍だが +$0.00026/件", prev: 0.000622, cur: 0.000882, wantRegress: false},
+		{name: "高い工程: 1.19倍だが +$0.0095/件", prev: 0.05, cur: 0.0595, wantRegress: true},
+		{name: "コスト減は劣化ではない", prev: 0.05, cur: 0.01, wantRegress: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prev := &Summary{Target: TargetES, Model: "gpt-4o", ManifestSHA256: "abc", Cases: 30, CostPerCallUSD: tt.prev}
+			cur := &Summary{Target: TargetES, Model: "gpt-4o", ManifestSHA256: "abc", Cases: 30, CostPerCallUSD: tt.cur}
+			regs, _ := Diff(prev, cur)
+			got := false
+			for _, r := range regs {
+				if r.Metric == "コスト(1件)" {
+					got = true
+					if !strings.Contains(r.Reason, "月") {
+						t.Errorf("理由に月額換算が出ていない: %s", r.Reason)
+					}
+				}
+			}
+			if got != tt.wantRegress {
+				t.Errorf("劣化判定 = %v, want %v (regs=%+v)", got, tt.wantRegress, regs)
 			}
 		})
 	}

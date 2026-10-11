@@ -7,7 +7,7 @@ import BusinessIcon from '@mui/icons-material/Business'
 import RecordVoiceOverIcon from '@mui/icons-material/RecordVoiceOver'
 import DescriptionIcon from '@mui/icons-material/Description'
 import ManageAccountsIcon from '@mui/icons-material/ManageAccounts'
-import { STUDENT_BOTTOM_NAV_ITEMS, shouldShowStudentBottomNav } from '@/lib/sidebar-nav'
+import { STUDENT_BOTTOM_NAV_ITEMS, isCurrentNav, shouldShowStudentBottomNav } from '@/lib/sidebar-nav'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 
 const ICONS = {
@@ -24,9 +24,7 @@ export function StudentBottomNav() {
   if (!shouldShowStudentBottomNav(pathname)) return null
 
   const current =
-    STUDENT_BOTTOM_NAV_ITEMS.find((i) =>
-      i.href === '/' ? pathname === '/' : pathname === i.href || pathname.startsWith(`${i.href}/`),
-    )?.href ?? false
+    STUDENT_BOTTOM_NAV_ITEMS.find((i) => isCurrentNav(pathname, i.href))?.href ?? false
 
   return (
     <Paper
@@ -60,11 +58,11 @@ export function StudentBottomNav() {
               // 設定の右端が 360 まで押し出されて押せない）。
               // 0 にして等分させる。文字は隠さない。
               minWidth: 0,
-              px: 0.5,
+              px: 0.25,
               '& .MuiBottomNavigationAction-label': {
-                // 等分すると320pxでは1項目64px。既定12pxだと「履歴書」が折り返すため
-                // わずかに縮める。読めなくなる大きさにはしない。
-                fontSize: { xs: '0.6875rem', sm: '0.75rem' },
+                // 等分すると320pxでは1項目64px。「プロフィール」(6字)が収まる大きさまで
+                // 縮める。読めなくなる大きさにはしない。
+                fontSize: { xs: '0.625rem', sm: '0.75rem' },
                 whiteSpace: 'nowrap',
               },
             }}

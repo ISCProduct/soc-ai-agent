@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 )
@@ -16,6 +17,18 @@ var ErrInterviewBudgetExceeded = errors.New("interview monthly budget exceeded")
 
 // maxClientUtteranceIDLen は client_utterance_id の上限。DBの VARCHAR(64) と揃える。
 const maxClientUtteranceIDLen = 64
+
+// 発話の上限（#1636）。STT の1発話は長くても数百字。30分の面接で往復は20前後。
+// ponytail: 件数判定は保存済み発話を全件読む。上限が小さいので Count クエリは足さない。
+const (
+	maxUtteranceRunes       = 2000
+	maxUtterancesPerSession = 200
+)
+
+var (
+	ErrUtteranceTooLong  = errors.New("utterance too long")
+	ErrTooManyUtterances = errors.New("too many utterances in session")
+)
 
 // interviewBudgetGuard は月次上限の判定面。未設定なら常に許可する。
 type interviewBudgetGuard interface {
@@ -147,6 +160,18 @@ func (s *InterviewService) SaveUtterance(userID uint, sessionID uint, role strin
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return errors.New("empty text")
+	}
+	// 発話はスコアとレポートの入力で、面接官の履歴にもなる（#1636）。
+	// 長さと件数に上限が無いと、1リクエストで文脈を埋め尽くせる。
+	if utf8.RuneCountInString(text) > maxUtteranceRunes {
+		return ErrUtteranceTooLong
+	}
+	existing, err := s.utterRepo.FindBySessionID(sessionID)
+	if err != nil {
+		return err
+	}
+	if len(existing) >= maxUtterancesPerSession {
+		return ErrTooManyUtterances
 	}
 	utter := &models.InterviewUtterance{
 		SessionID: sessionID,

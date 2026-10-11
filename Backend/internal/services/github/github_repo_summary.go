@@ -2,6 +2,7 @@ package github
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
 	"encoding/base64"
@@ -36,9 +37,9 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	// README取得
-	token, err := decryptGitHubToken(profile.AccessToken)
+	token, err := loadAccessToken(userID, profile.AccessToken)
 	if err != nil {
-		return nil, fmt.Errorf("decrypt github access token: %w", err)
+		return nil, err
 	}
 	readme, err := s.fetchREADME(ctx, client, token, fullName)
 	if err != nil {
@@ -138,9 +139,9 @@ func (s *GitHubService) generateRepoSummary(ctx context.Context, fullName, readm
 		return nil, fmt.Errorf("openai client not configured")
 	}
 
-	readmeSection := "（READMEなし）"
-	if readme != "" {
-		readmeSection = readme
+	readmeSection := shared.WrapUntrustedText(readme, "README")
+	if readmeSection == "" {
+		readmeSection = "（READMEなし）"
 	}
 
 	cfg := getRolePromptConfig(targetRole)

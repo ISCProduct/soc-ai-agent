@@ -2,6 +2,7 @@ package interview
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -205,6 +206,7 @@ func ValidateRubricScores(scores map[string]int) error {
 // **通った根拠が実発話に基づくとは限らない。** 内容語を発話から流用して事実だけ
 // 入れ替えた捏造（「部費を3倍にすることができました」）は正当な要約と同じ帯に入り、
 // しきい値では分離できない（`TestValidateEvidence_KnownLimitation`、Issue #1566）。
+// 発話に無い数値を含むものだけは hasUnspokenNumber で別に弾く（#1596）。
 //
 // 評価項目やプロンプトを変えたときは textsim で実測してこの表を引き直すこと。
 const EvidenceMatchThreshold = 0.25
@@ -230,7 +232,7 @@ func (c EvidenceCheck) Matched() int { return c.Checked - len(c.Unmatched) }
 // 助詞を含む生の needle と突き合わせても意味のある値にはならない。
 //
 // evidence の件数ぶん作り直さないよう、呼び出し側で1度だけ作って使い回す。
-func SpokenContent(utterances []models.InterviewUtterance) textsim.Bigrams {
+func SpokenContent(utterances []models.InterviewUtterance) SpokenEvidence {
 	var b strings.Builder
 	for _, u := range utterances {
 		if u.Role != "user" {
@@ -239,7 +241,60 @@ func SpokenContent(utterances []models.InterviewUtterance) textsim.Bigrams {
 		b.WriteString(u.Text)
 		b.WriteString("\n")
 	}
-	return textsim.NewContent(b.String())
+	numbers := map[string]bool{}
+	for _, n := range extractNumbers(b.String()) {
+		numbers[n] = true
+	}
+	return SpokenEvidence{Content: textsim.NewContent(b.String()), numbers: numbers}
+}
+
+// SpokenEvidence は受験者発話の照合用の表現。
+type SpokenEvidence struct {
+	// Content は内容語だけの文字bigram（textsim.ContentBestMatch 用）。
+	Content textsim.Bigrams
+	// numbers は発話に出た数値（正規化済み）。
+	numbers map[string]bool
+}
+
+var numberPattern = regexp.MustCompile(`[0-9０-９]+(?:[,，.．][0-9０-９]+)*`)
+
+// extractNumbers は算用数字の数値を正規化して返す（全角→半角、桁区切りのカンマを除去）。
+//
+// ponytail: 漢数字（三倍・五十人）は拾わない。発話側が漢数字で evidence 側が算用数字だと
+// 正当な引用も未照合になるが、誤った値より欠損を選ぶ（docs/wiki/scoring.md §2-3）。
+// 取りこぼしが目立つようなら漢数字の数値化を足す。
+func extractNumbers(s string) []string {
+	var out []string
+	for _, m := range numberPattern.FindAllString(s, -1) {
+		var b strings.Builder
+		for _, r := range m {
+			switch {
+			case r >= '０' && r <= '９':
+				b.WriteRune('0' + (r - '０'))
+			case r == ',' || r == '，':
+			case r == '．':
+				b.WriteRune('.')
+			default:
+				b.WriteRune(r)
+			}
+		}
+		out = append(out, b.String())
+	}
+	return out
+}
+
+// hasUnspokenNumber は evidence に、受験者が発話していない数値があるかを返す（#1596）。
+//
+// 内容語を発話から流用して数値だけ入れ替えた捏造（「部費を3倍にした」）は、
+// 局所類似度では正当な要約と同じ帯に入り、しきい値で分離できない。
+// 数値は完全一致で別に照合する。学生が言っていない数値は最も信じられやすい捏造になる。
+func hasUnspokenNumber(text string, spoken SpokenEvidence) bool {
+	for _, n := range extractNumbers(text) {
+		if !spoken.numbers[n] {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateEvidence は evidence の各項目が実際の受験者発話に基づくかを照合する（#1527）。
@@ -258,7 +313,7 @@ func SpokenContent(utterances []models.InterviewUtterance) textsim.Bigrams {
 // 内容語が残らないため未照合になる（そのまま表示させない）。
 //
 // spoken は SpokenContent で作ること（内容語だけの Bigrams）。
-func ValidateEvidence(evidence map[string]string, spoken textsim.Bigrams) EvidenceCheck {
+func ValidateEvidence(evidence map[string]string, spoken SpokenEvidence) EvidenceCheck {
 	var out EvidenceCheck
 	// キーは評価項目側から回す。evidence は LLM 出力の JSON をそのまま
 	// unmarshal したものなので、キー自体もモデルが自由に書ける。
@@ -271,7 +326,7 @@ func ValidateEvidence(evidence map[string]string, spoken textsim.Bigrams) Eviden
 			continue
 		}
 		out.Checked++
-		if textsim.ContentBestMatch(text, spoken) < EvidenceMatchThreshold {
+		if textsim.ContentBestMatch(text, spoken.Content) < EvidenceMatchThreshold || hasUnspokenNumber(text, spoken) {
 			out.Unmatched = append(out.Unmatched, key)
 		}
 	}

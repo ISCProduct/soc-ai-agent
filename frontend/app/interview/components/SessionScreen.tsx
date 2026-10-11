@@ -18,17 +18,18 @@ import VideocamOffIcon from '@mui/icons-material/VideocamOff'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import ClosedCaptionIcon from '@mui/icons-material/ClosedCaption'
 import dynamic from 'next/dynamic'
-import { PRIMARY } from '../constants'
+
 import { UTTERANCE_SAVE_FAILED_MESSAGE } from '../utteranceSave'
 import { formatSeconds } from '@/lib/interview/utils'
 import type { Utterance } from '../types'
 import styles from './interview.module.css'
+import { UI } from '@/lib/design/tokens'
 
 const ThreeAvatar = dynamic(() => import('./ThreeAvatar'), {
   ssr: false,
   loading: () => (
     <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <CircularProgress size={36} sx={{ color: PRIMARY }} />
+      <CircularProgress size={36} sx={{ color: UI.mark }} />
     </Box>
   ),
 })
@@ -53,6 +54,8 @@ export interface SessionScreenProps {
   avatarGender: 'male' | 'female'
   aiLevel: number
   aiSpeaking: boolean
+  /** 学生の発話の区切りの回数。変わるたびに面接官が相槌を打つ。 */
+  studentPauseCount?: number
   cameraEnabled: boolean
   captionsVisible: boolean
   handsFreeMode: boolean
@@ -102,6 +105,7 @@ export default function SessionScreen({
   avatarGender,
   aiLevel,
   aiSpeaking,
+  studentPauseCount = 0,
   cameraEnabled,
   captionsVisible,
   handsFreeMode,
@@ -125,7 +129,7 @@ export default function SessionScreen({
   onStop,
 }: SessionScreenProps) {
   return (
-    <Box sx={{ height: '100vh', width: '100vw', bgcolor: '#606553', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <Box sx={{ height: '100vh', width: '100vw', bgcolor: UI.nightStage, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
       {/* ── Header ── */}
       <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 3, py: 1.5, flexShrink: 0 }}>
@@ -176,11 +180,11 @@ export default function SessionScreen({
               flexShrink: 0, display: 'flex', alignItems: 'center', gap: 0.5,
               bgcolor: 'rgba(255,255,255,0.12)', borderRadius: 1, px: 1, py: 0.3,
             }}>
-              <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Q</Typography>
+              <Typography sx={{ color: UI.nightMuted, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Q</Typography>
               <Typography sx={{ color: '#fff', fontSize: 13, fontWeight: 700, lineHeight: 1 }}>
                 {currentQuestionIndex}
               </Typography>
-              <Typography sx={{ color: 'rgba(255,255,255,0.4)', fontSize: 10 }}>
+              <Typography sx={{ color: UI.nightMuted, fontSize: 10 }}>
                 /{totalQuestionCount}
               </Typography>
             </Box>
@@ -239,6 +243,7 @@ export default function SessionScreen({
               speaking={aiSpeaking}
               active={isConnected}
               pending={turnPending}
+              acknowledgeSignal={studentPauseCount}
             />
           </Box>
 
@@ -302,8 +307,8 @@ export default function SessionScreen({
           {/* 接続中オーバーレイ */}
           {status === 'connecting' && (
             <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-              <Typography sx={{ color: '#e8eaed', fontSize: 15 }}>接続中...</Typography>
-              <LinearProgress sx={{ width: 160, bgcolor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { bgcolor: PRIMARY } }} />
+              <Typography sx={{ color: UI.nightInk, fontSize: 15 }}>接続中...</Typography>
+              <LinearProgress sx={{ width: 160, bgcolor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { bgcolor: UI.mark } }} />
             </Box>
           )}
 

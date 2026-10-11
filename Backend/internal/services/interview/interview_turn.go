@@ -1,6 +1,7 @@
 package interview
 
 import (
+	"Backend/internal/models"
 	"Backend/internal/services/shared"
 	"context"
 	"log"
@@ -12,13 +13,41 @@ import (
 // 生のAPIエラーをユーザーに見せず、面接を自然に継続させるためのフォールバック(#910)。
 const interviewFallbackReplyText = "すみません、うまく聞き取れませんでした。もう一度お答えいただけますか？"
 
+// 面接官の文脈に渡す履歴の上限（#1636）。
+// 30分の面接でも往復は20前後なので、直近40件で文脈は足りる。
+// 1件の長さは SaveUtterance の上限と揃える。
+const (
+	maxHistoryMessages = 40
+	maxHistoryRunes    = maxUtteranceRunes
+)
+
+// historyFromUtterances は保存済みの発話を ChatInterview の履歴形式に変換する。
+// 直近 maxHistoryMessages 件に絞り、1件は maxHistoryRunes で切り詰める。
+func historyFromUtterances(utterances []models.InterviewUtterance) []map[string]string {
+	if len(utterances) > maxHistoryMessages {
+		utterances = utterances[len(utterances)-maxHistoryMessages:]
+	}
+	history := make([]map[string]string, 0, len(utterances)+1)
+	for _, u := range utterances {
+		role := "user"
+		if u.Role == "ai" {
+			role = "assistant"
+		}
+		text := []rune(u.Text)
+		if len(text) > maxHistoryRunes {
+			text = text[:maxHistoryRunes]
+		}
+		history = append(history, map[string]string{"role": role, "content": string(text)})
+	}
+	return history
+}
+
 // Turn はユーザー音声を受け取り、STT→Chat→TTSを実行してTurnResultを返します
 func (s *InterviewService) Turn(
 	ctx context.Context,
 	userID uint,
 	sessionID uint,
 	audioData []byte,
-	history []map[string]string,
 	companyName, companyReading string,
 	companyReadingResolved bool,
 	position, companyInfo, companyType string,
@@ -149,7 +178,17 @@ func (s *InterviewService) Turn(
 		log.Printf("[Interview] advanceQuestionPlan error: %v", err)
 	}
 
-	// 履歴にユーザー発言を追加
+	// 履歴はクライアントから受け取らず、保存済みの発話から組み直す（#1636）。
+	// クライアントの history は件数・長さ・role のどれも信頼できない。
+	// 取得に失敗しても面接は止めず、今回の発話だけで続ける。
+	var utterances []models.InterviewUtterance
+	if s.utterRepo != nil {
+		if utterances, err = s.utterRepo.FindBySessionID(sessionID); err != nil {
+			log.Printf("[Interview] load utterances for history error: %v", err)
+			utterances = nil
+		}
+	}
+	history := historyFromUtterances(utterances)
 	history = append(history, map[string]string{"role": "user", "content": userText})
 
 	// Chat: 面接官として返答生成

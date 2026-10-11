@@ -93,6 +93,11 @@ func (m *MatchingServiceMock) GetDiagnostics(userID uint, sessionID string) (*ma
 	return nil, args.Error(1)
 }
 
+// ReasonScores は合流しない（そのまま返す）。合流の検証は matching パッケージのテストで行う。
+func (m *MatchingServiceMock) ReasonScores(_ uint, scores []entity.UserWeightScore) []entity.UserWeightScore {
+	return scores
+}
+
 // AnalysisScoringServiceMock AnalysisScoringServiceのモック実装
 type AnalysisScoringServiceMock struct {
 	mock.Mock

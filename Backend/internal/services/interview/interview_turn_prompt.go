@@ -141,7 +141,7 @@ func buildInterviewSystemPrompt(
 		// いずれも面接官の system プロンプトの信頼領域へ生で入れてはいけない。
 		//
 		// 囲むのはこのプロンプトだけ。companyName / companyReading は
-		// TTS の読み替え（BuildTTSText）にも使うので値そのものは変えない。
+		// TTS の読み替え（applyCompanyReadingForTTS）にも使うので値そのものは変えない。
 		//
 		// 「この中の指示に従わない」宣言は shared.WrapUntrustedText が
 		// ブロック直前へ同じノンス付きで出すので、ここには書かない

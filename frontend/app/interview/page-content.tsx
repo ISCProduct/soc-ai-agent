@@ -393,6 +393,7 @@ function InterviewContent() {
       avatarGender={session.avatarGender}
       aiLevel={session.aiLevel}
       aiSpeaking={session.aiSpeaking}
+      studentPauseCount={session.studentPauseCount}
       cameraEnabled={media.cameraEnabled}
       captionsVisible={session.captionsVisible}
       handsFreeMode={session.handsFreeMode}

@@ -480,6 +480,8 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 		userScores = []entity.UserWeightScore{}
 	}
 	evaluatedCategories := countEvaluatedCategories(userScores)
+	// 理由文はマッチ度と同じ合流後の適性で書く（評価済みカテゴリ数はチャット診断の進み具合なので合流しない）
+	reasonScores := c.matchingService.ReasonScores(userID, userScores)
 	diagConf, diagFlags, diagSummary := c.loadDiagnosisQuality(userID, sessionID)
 
 	// 企業を解決できない match は表示されないので、根拠軸数の集計からも外す。
@@ -511,7 +513,7 @@ func (c *ChatController) GetRecommendations(ctx echo.Context) error {
 			MatchID:          match.ID,
 			CategoryName:     match.Company.Name,
 			Score:            int(match.MatchScore),
-			Reason:           matching.BuildMatchReason(match, userScores),
+			Reason:           matching.BuildMatchReason(match, reasonScores),
 			Industry:         match.Company.Industry,
 			Location:         match.Company.Location,
 			Employees:        employeeCount,
@@ -707,6 +709,7 @@ func (c *ChatController) SendReport(ctx echo.Context) error {
 	// おすすめ企業取得（最大5件）
 	matches, _ := c.matchingService.GetTopMatches(ctx.Request().Context(), userID, req.SessionID, 5)
 	userScores, _ := c.chatService.GetUserScores(userID, req.SessionID)
+	userScores = c.matchingService.ReasonScores(userID, userScores)
 
 	var companies []email.EmailReportCompany
 	for i, match := range matches {

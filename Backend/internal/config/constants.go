@@ -76,6 +76,14 @@ func ResumeCompletenessThreshold() int {
 // MissingBatchMaxConcurrency は企業間並列の上限。既定8は Fargate 0.25vCPU/512MB と OpenAI RPM の天井。
 func MissingBatchMaxConcurrency() int { return getIntOrDefault("MISSING_BATCH_MAX_CONCURRENCY", 8) }
 
+// AssessmentScoreMergeEnabled は適性検査スコアをマッチングへ合流させるか（#1678）。
+// 既定は有効。マッチングが劣化したら ASSESSMENT_SCORE_MERGE=false で合流だけ止める
+// （検査の受検・結果表示はそのまま使える）。
+func AssessmentScoreMergeEnabled() bool {
+	v, err := strconv.ParseBool(os.Getenv("ASSESSMENT_SCORE_MERGE"))
+	return err != nil || v
+}
+
 func RelationGraphMaxDepth() int { return getIntOrDefault("RELATION_GRAPH_MAX_DEPTH", 4) }
 func RelationGraphMaxNodes() int { return getIntOrDefault("RELATION_GRAPH_MAX_NODES", 60) }
 
