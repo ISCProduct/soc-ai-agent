@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -425,19 +426,25 @@ def _save_search_log(
         raw_results: List[str],
         summary: str,
 ) -> None:
-    """検索結果をJSONL形式でログ保存する（ファインチューニング用データセット）。"""
+    """検索メタデータと本文・要約のダイジェストを保存し、外部文章を複製しない。"""
     import main as m
 
     try:
         os.makedirs(m.SEARCH_LOG_DIR, exist_ok=True)
         log_path = os.path.join(m.SEARCH_LOG_DIR, "search_log.jsonl")
+        raw_results_digest = hashlib.sha256(
+            json.dumps(raw_results, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        summary_digest = hashlib.sha256(summary.encode("utf-8")).hexdigest()
         record = {
             "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
             "company_name": company_name,
             "job_title": job_title,
             "queries": queries,
-            "raw_results": raw_results,
-            "summary": summary,
+            "raw_result_count": len(raw_results),
+            "raw_results_sha256": raw_results_digest,
+            "summary_sha256": summary_digest,
+            "summary_chars": len(summary),
         }
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")

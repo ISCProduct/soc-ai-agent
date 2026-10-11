@@ -1,4 +1,4 @@
-"""CrewAI による履歴書レビュー。"""
+"""依存が明示的に導入された場合に限り使う CrewAI の履歴書レビュー経路。"""
 from __future__ import annotations
 
 import json
@@ -21,7 +21,8 @@ def run_crewai(
         context_source: str = "none",
 ) -> str:
     """CrewAI を実行し、構造化されたレポートを試みる。
-    crewai は依存衝突のため requirements.txt に含まれておらず、インストールされている場合のみ動作する。
+    crewai は依存衝突のため requirements.txt に含めず、このIssueでも復活させない。
+    明示的な依存整理タスクで互換性が解決されるまでは、未導入時の固定文言へ縮退する。
 
     フェーズ1: 出力をまず文字列で受け取り、JSON 形式なら Pydantic で検証。
     構造化に失敗した場合は元の文字列をフォールバックとして返し、詳細ログを残す。

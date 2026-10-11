@@ -1,9 +1,12 @@
 """RAG API の Pydantic リクエスト/レスポンスモデル。"""
 from __future__ import annotations
 
+import logging
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 # 企業コンテキスト（Backend 共有 brief）の受け入れ上限。
 # プロンプト側でさらに短く切られる参考情報なので、422 でリクエストを落とさず
@@ -13,6 +16,19 @@ COMPANY_CONTEXT_MAX_LENGTH = 20000
 QUESTION_TYPE_MAX_LENGTH = 100
 # 職種名。FE の選択肢は最長でも数十字で、これを超える値は入力ミスか攻撃(#1591)
 POSITION_MAX_LENGTH = 100
+
+
+def _normalize_company_context(value: str, field_name: str) -> str:
+    normalized = (value or "").strip()
+    if len(normalized) > COMPANY_CONTEXT_MAX_LENGTH:
+        logger.info(
+            "company context truncated field=%s original_chars=%d max_chars=%d",
+            field_name,
+            len(normalized),
+            COMPANY_CONTEXT_MAX_LENGTH,
+        )
+        return normalized[:COMPANY_CONTEXT_MAX_LENGTH]
+    return normalized
 
 
 class ReviewRequest(BaseModel):
@@ -30,7 +46,7 @@ class ReviewRequest(BaseModel):
     @field_validator("company_context")
     @classmethod
     def normalize_company_context(cls, v: str) -> str:
-        return (v or "").strip()[:COMPANY_CONTEXT_MAX_LENGTH]
+        return _normalize_company_context(v, "review")
 
 
 class ReviewResponse(BaseModel):
@@ -46,7 +62,7 @@ class CompanyHintsRequest(BaseModel):
     @field_validator("company_context")
     @classmethod
     def normalize_hints_company_context(cls, v: str) -> str:
-        return (v or "").strip()[:COMPANY_CONTEXT_MAX_LENGTH]
+        return _normalize_company_context(v, "hints")
 
 
 class CompanyHintsResponse(BaseModel):
@@ -85,7 +101,7 @@ class ESReviewRequest(BaseModel):
     @field_validator("company_context")
     @classmethod
     def normalize_es_company_context(cls, v: str) -> str:
-        return (v or "").strip()[:COMPANY_CONTEXT_MAX_LENGTH]
+        return _normalize_company_context(v, "es_review")
 
 
 class ESStarBreakdown(BaseModel):
@@ -132,7 +148,8 @@ class ESReviewResponse(BaseModel):
 class CompanyContextRequest(BaseModel):
     company_name: str = Field(min_length=1)
     context_type: str = Field(default="general")  # "jobs", "persona", "general"
-    content: str = Field(min_length=1)
+    # Backend が企業横断キャッシュへ保存する本文も他の企業コンテキストと同じ上限で拒否する。
+    content: str = Field(min_length=1, max_length=COMPANY_CONTEXT_MAX_LENGTH)
 
 
 class CompanyContextResponse(BaseModel):
