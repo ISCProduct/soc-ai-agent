@@ -197,13 +197,13 @@ variable "admin_secret_plain" {
   default     = ""
 }
 
-# AI面接の音声認識モデル。既定はコード側と同じ mini。
-# 精度に問題が出たときに gpt-4o-transcribe へ戻せるよう、
-# 値を明示して切り替え口を用意しておく（既定と同値なので挙動は変わらない）。
+# AI面接の音声認識モデル。既定はコード側と同じ gpt-transcribe。
+# 実音声の誤り率は mini 23% / gpt-transcribe 18%。費用を優先するなら
+# gpt-4o-mini-transcribe に戻せる（問題発話だけ gpt-transcribe へ再送される）。
 variable "openai_whisper_model" {
-  description = "AI面接のSTTモデル。品質に問題が出たら gpt-4o-transcribe に変更する"
+  description = "AI面接のSTTモデル。費用を下げるなら gpt-4o-mini-transcribe に変更する"
   type        = string
-  default     = "gpt-4o-mini-transcribe"
+  default     = "gpt-transcribe"
 }
 
 variable "discord_public_key" {
