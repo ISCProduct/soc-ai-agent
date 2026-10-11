@@ -46,7 +46,7 @@ describe('StudentBottomNav の表示条件', () => {
 
     const { findByRole, getByRole } = render(<StudentBottomNav />)
     expect(await findByRole('button', { name: '診断' })).toBeInTheDocument()
-    for (const label of ['結果', '面接', '履歴書', '設定']) {
+    for (const label of ['結果', '面接', '履歴書', 'プロフィール']) {
       expect(getByRole('button', { name: label })).toBeInTheDocument()
     }
   })
