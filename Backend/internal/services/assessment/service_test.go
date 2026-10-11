@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"Backend/internal/models"
+	"Backend/internal/repositories"
 
 	"gorm.io/gorm"
 )
@@ -172,6 +173,42 @@ func TestService_StartResumesInProgress(t *testing.T) {
 	got, _ := svc.Get(7, first.SessionID)
 	if len(got.Questions) != 2 {
 		t.Fatalf("版の凍結が効いていない: %+v", got.Questions)
+	}
+	// 一覧の問題数も受検中の版で数える（v3 の問題数を出すと「進捗が終わらない」ように見える）
+	repo.questions = append(repo.questions, models.AssessmentQuestion{ID: 13, TemplateID: 1, TemplateVersion: 3, Position: 1, WeightCategory: "技術志向"})
+	list, _ := svc.List(7)
+	if list[0].QuestionCount != 2 {
+		t.Fatalf("一覧の問題数が受検中の版になっていない: %+v", list[0])
+	}
+}
+
+// racingRepo は「未存在を確認した後に別リクエストが先に作った」状況を再現する。
+type racingRepo struct {
+	*memRepo
+	winner *models.AssessmentSession
+}
+
+func (r *racingRepo) FindInProgressSession(userID, templateID uint) (*models.AssessmentSession, error) {
+	if r.winner == nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return r.winner, nil
+}
+
+func (r *racingRepo) CreateSession(s *models.AssessmentSession) error {
+	r.winner = &models.AssessmentSession{ID: 99, PublicID: "winner", UserID: s.UserID, TemplateID: s.TemplateID, TemplateVersion: s.TemplateVersion, Status: models.AssessmentStatusInProgress}
+	return repositories.ErrAssessmentSessionExists
+}
+
+// 並行して開始されたら、一意制約で負けた側は先に作られた受検を返す（二重の受検を作らない）。
+func TestService_StartRaceReturnsExisting(t *testing.T) {
+	svc := NewService(&racingRepo{memRepo: newMemRepo()}, nil, nil)
+	got, err := svc.Start(7, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SessionID != "winner" {
+		t.Fatalf("先に作られた受検を返していない: %+v", got)
 	}
 }
 

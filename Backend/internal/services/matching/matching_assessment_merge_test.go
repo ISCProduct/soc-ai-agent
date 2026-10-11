@@ -70,4 +70,32 @@ func TestCalculateMatching_MergesAssessmentScores(t *testing.T) {
 	}
 }
 
+// 理由文の適性もマッチ度と同じ合流後の値にする（チャット40・検査80 → 60 と書く）。
+func TestReasonScores_UsesMergedScores(t *testing.T) {
+	chat := []entity.UserWeightScore{{SessionID: "sess-chat", WeightCategory: "安定志向", Score: 60}, {SessionID: "sess-chat", WeightCategory: "技術志向", Score: 40}}
+	svc := NewMatchingService(nil, nil, nil, nil)
+	svc.SetAssessmentScoreReader(stubAssessmentScores{scores: map[string]float64{"技術志向": 80, "成長志向": 90}})
+
+	t.Setenv("ASSESSMENT_SCORE_MERGE", "")
+	got := svc.ReasonScores(1, chat)
+	want := []entity.UserWeightScore{
+		{UserID: 1, SessionID: "sess-chat", WeightCategory: "技術志向", Score: 60},
+		{UserID: 1, SessionID: "sess-chat", WeightCategory: "安定志向", Score: 60},
+		{UserID: 1, SessionID: "sess-chat", WeightCategory: "成長志向", Score: 90},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("[%d] got %+v want %+v", i, got[i], want[i])
+		}
+	}
+
+	t.Setenv("ASSESSMENT_SCORE_MERGE", "false")
+	if got := svc.ReasonScores(1, chat); len(got) != 2 || got[1].Score != 40 {
+		t.Fatalf("フラグで切ったらチャットのまま: %+v", got)
+	}
+}
+
 func ptr(v float64) *float64 { return &v }

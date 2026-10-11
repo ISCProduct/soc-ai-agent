@@ -773,6 +773,9 @@ export function useInterviewSession({
     formData.append('company_id', String(interviewCompany?.id || 0))
     const companyContextGeneration = companyContextGenerationRef.current
     const receive = async (): Promise<Blob> => {
+      // Backend は保存済みの発話から履歴を組み直す（#1636）。前ターンの保存が終わる前に送ると
+      // 直前のやり取りが履歴から抜けて、面接官が同じ質問を繰り返す。チェーンは必ず解決する。
+      await utteranceSaveChainRef.current
       await authService.ensureFreshUserToken()
       const { meta, audio } = await fetchAndReadWithTimeout(`${BACKEND_URL}/api/interviews/${session.id}/turn`, {
         method: 'POST',

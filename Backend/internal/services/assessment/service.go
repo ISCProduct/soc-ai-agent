@@ -102,12 +102,18 @@ func (s *Service) List(userID uint) ([]TemplateStatus, error) {
 
 	var open, done []TemplateStatus
 	for _, t := range templates {
-		qs, err := s.repo.ListQuestions(t.ID, t.Version)
+		// 受検済み・受検中は開始時の版に固定されているので、その版の問題数を出す
+		version := t.Version
+		ss, hasSession := latest[t.ID]
+		if hasSession {
+			version = ss.TemplateVersion
+		}
+		qs, err := s.repo.ListQuestions(t.ID, version)
 		if err != nil {
 			return nil, err
 		}
 		st := TemplateStatus{TemplateID: t.ID, Title: t.Title, Description: t.Description, QuestionCount: len(qs), Status: StatusNotStarted}
-		if ss, ok := latest[t.ID]; ok {
+		if hasSession {
 			st.Status = ss.Status
 			st.SessionID = ss.PublicID
 			st.AnsweredCount = counts[ss.ID]
@@ -153,6 +159,10 @@ func (s *Service) Start(userID, templateID uint) (*SessionView, error) {
 			TemplateVersion: t.Version, Status: models.AssessmentStatusInProgress,
 		}
 		err = s.repo.CreateSession(sess)
+		if errors.Is(err, repositories.ErrAssessmentSessionExists) {
+			// 別タブ・並行POSTが先に作った。そちらを使う（回答が2つに割れないように）
+			sess, err = s.repo.FindInProgressSession(userID, templateID)
+		}
 	}
 	if err != nil {
 		return nil, err

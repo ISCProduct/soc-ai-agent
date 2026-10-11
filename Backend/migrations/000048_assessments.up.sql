@@ -47,8 +47,12 @@ CREATE TABLE IF NOT EXISTS `assessment_sessions` (
   `submitted_at` datetime(3) DEFAULT NULL,
   `created_at` datetime(3) DEFAULT NULL,
   `updated_at` datetime(3) DEFAULT NULL,
+  -- 受検中だけ template_id を持つ。提出済みは NULL なので一意制約から外れる。
+  `active_template_id` bigint unsigned GENERATED ALWAYS AS (IF(`status` = 'in_progress', `template_id`, NULL)) STORED,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_assessment_sessions_public_id` (`public_id`),
+  -- 同じ検査の受検中は1人1件。複数タブ・並行POSTで二重に作られるのを DB で止める。
+  UNIQUE KEY `uniq_assessment_sessions_active` (`user_id`, `active_template_id`),
   KEY `idx_assessment_sessions_user_template` (`user_id`, `template_id`, `status`),
   CONSTRAINT `fk_assessment_sessions_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_assessment_sessions_template` FOREIGN KEY (`template_id`) REFERENCES `assessment_templates` (`id`)

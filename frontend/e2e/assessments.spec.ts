@@ -17,6 +17,9 @@ async function mockBackend(page: Page, opts: MockOptions = {}) {
     status: 'not_started' as 'not_started' | 'in_progress' | 'submitted',
     answers: {} as Record<string, number>,
     puts: [] as { id: string; value: number }[],
+    submits: 0,
+    // テスト途中から保存を遅らせて失敗させる（選び直しの保存が提出に間に合わないケース）
+    slowFailPuts: false,
   }
   const json = (route: Route, body: unknown, status = 200) =>
     route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
@@ -46,12 +49,17 @@ async function mockBackend(page: Page, opts: MockOptions = {}) {
     const put = path.match(new RegExp(`^/sessions/${SESSION_ID}/answers/(\\d+)$`))
     if (req.method() === 'PUT' && put) {
       if (opts.failAnswers) return json(route, { error: 'boom' }, 500)
+      if (state.slowFailPuts) {
+        await new Promise((r) => setTimeout(r, 800))
+        return json(route, { error: 'boom' }, 500)
+      }
       const { value } = req.postDataJSON() as { value: number }
       state.answers[put[1]] = value
       state.puts.push({ id: put[1], value })
       return route.fulfill({ status: 204 })
     }
     if (req.method() === 'POST' && path === `/sessions/${SESSION_ID}/submit`) {
+      state.submits++
       if (state.status === 'submitted') return json(route, { error: 'この検査はすでに提出済みです' }, 409)
       if (Object.keys(state.answers).length < QUESTIONS.length) return json(route, { error: '未回答' }, 400)
       state.status = 'submitted'
@@ -156,6 +164,28 @@ test.describe('適性検査', () => {
       await page.getByRole('group', { name: new RegExp(q.body) }).getByRole('radio', { name: 'あてはまる', exact: true }).check()
     }
     await expect(page.getByRole('button', { name: '提出する' })).toBeDisabled()
+  })
+
+  test('選び直した回答の保存が失敗したら、古い回答のまま提出しない', async ({ page }) => {
+    const state = await mockBackend(page)
+    await page.goto(`/assessments/${SESSION_ID}`)
+    await choose(page, QUESTIONS[0].body, 'あてはまる')
+    await choose(page, QUESTIONS[1].body, 'あてはまる')
+    await page.getByRole('button', { name: '次へ' }).click()
+    await choose(page, QUESTIONS[2].body, 'あてはまる')
+    await choose(page, QUESTIONS[3].body, 'あてはまる')
+
+    // 全問保存済みの状態から選び直し、その保存が終わる前に提出を押す
+    state.slowFailPuts = true
+    await page
+      .getByRole('group', { name: new RegExp(QUESTIONS[3].body) })
+      .getByRole('radio', { name: 'あてはまらない', exact: true })
+      .check()
+    await page.getByRole('button', { name: '提出する' }).click()
+
+    await expect(page.getByText('保存できていない回答があります')).toBeVisible()
+    expect(state.submits).toBe(0)
+    await expect(page).toHaveURL(new RegExp(`/assessments/${SESSION_ID}$`))
   })
 
   test('読み込み中は枠を出し、検査が無ければ理由と次の行動を出す', async ({ page }) => {

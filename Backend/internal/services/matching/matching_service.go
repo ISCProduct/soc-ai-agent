@@ -4,6 +4,7 @@ import (
 	"Backend/domain/entity"
 	"Backend/domain/mapper"
 	"Backend/domain/repository"
+	"Backend/domain/valueobject"
 	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/openai"
@@ -162,7 +163,11 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 
 	// 4. 表示されるのは match_score 降順の上位のみ（FindTopMatchesByUserAndSession）。
 	//    AI 理由の生成もその範囲に限定する（#1061 / #588 のコスト・レイテンシ懸念）
-	s.applyAIReasonsToTopMatches(ctx, pending, userScores)
+	reasonScores := userScores
+	if merged {
+		reasonScores = scoresFromMap(userID, sessionID, scoreMap)
+	}
+	s.applyAIReasonsToTopMatches(ctx, pending, reasonScores)
 
 	matchCount, err := s.matchRepo.CreateOrUpdateBatch(pending)
 	if err != nil {
@@ -526,6 +531,34 @@ func (s *MatchingService) mergeAssessmentScores(userID uint, chat map[string]flo
 		return chat
 	}
 	return assessment.MergeScores(chat, assess, assessment.ChatWeight)
+}
+
+// ReasonScores は理由文に出す学生の適性を、マッチ度の計算と同じ合流後の値にする（#1678）。
+// チャットだけの値を出すと「マッチ度60」の根拠に「技術志向40」が並び、数値が食い違う。
+func (s *MatchingService) ReasonScores(userID uint, scores []entity.UserWeightScore) []entity.UserWeightScore {
+	chat := make(map[string]float64, len(scores))
+	for _, sc := range scores {
+		chat[sc.WeightCategory] = float64(sc.Score)
+	}
+	merged := s.mergeAssessmentScores(userID, chat)
+	if len(merged) == len(chat) && sameScores(merged, chat) {
+		return scores
+	}
+	sessionID := ""
+	if len(scores) > 0 {
+		sessionID = scores[0].SessionID
+	}
+	return scoresFromMap(userID, sessionID, merged)
+}
+
+func scoresFromMap(userID uint, sessionID string, m map[string]float64) []entity.UserWeightScore {
+	out := make([]entity.UserWeightScore, 0, len(m))
+	for _, c := range valueobject.AllWeightCategories() {
+		if v, ok := m[string(c)]; ok {
+			out = append(out, entity.UserWeightScore{UserID: userID, SessionID: sessionID, WeightCategory: string(c), Score: int(math.Round(v))})
+		}
+	}
+	return out
 }
 
 func sameScores(a, b map[string]float64) bool {

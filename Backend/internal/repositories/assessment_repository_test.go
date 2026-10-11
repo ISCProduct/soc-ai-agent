@@ -7,6 +7,7 @@ import (
 	"Backend/internal/models"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	gomysql "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -22,6 +23,18 @@ func newAssessmentRepo(t *testing.T) (*AssessmentRepository, sqlmock.Sqlmock) {
 		&gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
 	return NewAssessmentRepository(db), mock
+}
+
+// 受検中の一意制約（uniq_assessment_sessions_active）に負けたら、呼び出し側が読み直せる専用エラーにする。
+func TestAssessmentRepository_CreateSessionDuplicateActive(t *testing.T) {
+	repo, mock := newAssessmentRepo(t)
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO `assessment_sessions`").
+		WillReturnError(&gomysql.MySQLError{Number: 1062, Message: "Duplicate entry for key 'uniq_assessment_sessions_active'"})
+	mock.ExpectRollback()
+	err := repo.CreateSession(&models.AssessmentSession{PublicID: "p", UserID: 7, TemplateID: 1, TemplateVersion: 1, Status: models.AssessmentStatusInProgress})
+	require.ErrorIs(t, err, ErrAssessmentSessionExists)
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 // 自動保存の再送は1行に畳む（#1678）。INSERT だけだと UNIQUE 違反で2回目が失敗する。

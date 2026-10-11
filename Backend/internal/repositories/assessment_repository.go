@@ -7,12 +7,16 @@ import (
 
 	"Backend/internal/models"
 
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 // ErrAssessmentAlreadySubmitted は提出済みの受検へ回答・提出しようとしたとき（#1678）。
 var ErrAssessmentAlreadySubmitted = errors.New("assessment already submitted")
+
+// ErrAssessmentSessionExists は同じ検査の受検中が既にあるとき（並行して開始された側）。
+var ErrAssessmentSessionExists = errors.New("assessment session already in progress")
 
 // AssessmentRepository は適性検査（#1678）の永続化。
 type AssessmentRepository struct {
@@ -64,7 +68,11 @@ func (r *AssessmentRepository) FindInProgressSession(userID, templateID uint) (*
 }
 
 func (r *AssessmentRepository) CreateSession(s *models.AssessmentSession) error {
-	return r.db.Create(s).Error
+	err := r.db.Create(s).Error
+	if mysqlErr := (*mysql.MySQLError)(nil); errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+		return ErrAssessmentSessionExists
+	}
+	return err
 }
 
 // FindSessionByPublicID は本人の受検だけを返す。他人の public_id は見つからない扱い。

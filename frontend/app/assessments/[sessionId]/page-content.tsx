@@ -41,6 +41,8 @@ export default function PageContent() {
   const [submitting, setSubmitting] = useState(false)
   // 同じ問題への保存は直列に送る。後から選んだ値が先に届いて古い値で上書きされるのを防ぐ。
   const queues = useRef<Record<string, Promise<void>>>({})
+  // 最後の保存が失敗している問題。提出直前に見る（state は submit のクロージャでは古いため ref で持つ）。
+  const failed = useRef(new Set<string>())
   const headingRef = useRef<HTMLHeadingElement>(null)
 
   const load = useCallback(async () => {
@@ -75,9 +77,15 @@ export default function PageContent() {
       try {
         await assessmentApi(`/sessions/${sessionId}/answers/${questionId}`, { method: 'PUT', body: { value } })
         // 後続の保存が待っているなら、その結果を待つ（途中の「保存しました」で誤魔化さない）
-        if (queues.current[key] === run) setSaveState((prev) => ({ ...prev, [key]: 'saved' }))
+        if (queues.current[key] === run) {
+          failed.current.delete(key)
+          setSaveState((prev) => ({ ...prev, [key]: 'saved' }))
+        }
       } catch {
-        if (queues.current[key] === run) setSaveState((prev) => ({ ...prev, [key]: 'error' }))
+        if (queues.current[key] === run) {
+          failed.current.add(key)
+          setSaveState((prev) => ({ ...prev, [key]: 'error' }))
+        }
       }
     })
     queues.current[key] = run
@@ -93,6 +101,12 @@ export default function PageContent() {
     setSubmitError(null)
     try {
       await Promise.all(Object.values(queues.current))
+      // 画面で選び直した回答が保存できていないまま提出すると、サーバーに残る古い回答で採点が確定する
+      if (failed.current.size > 0) {
+        setSubmitError('保存できていない回答があります。「保存できませんでした」と出ている問題を選び直してから提出してください')
+        setSubmitting(false)
+        return
+      }
       await assessmentApi(`/sessions/${sessionId}/submit`, { method: 'POST' })
       router.push(`/assessments/${sessionId}/result`)
     } catch (e) {

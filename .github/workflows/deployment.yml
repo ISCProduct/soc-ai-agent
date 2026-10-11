@@ -209,11 +209,9 @@ jobs:
 
           # 前回デプロイの auto-stop が起動キックの後に desired を 0 へ戻すことがある(#1693)。
           # 待機中も desired を見て、0 なら上げ直す（自己修復）。
+          # desired=0 の直後でも終了処理が始まるまで EC2 は running のままなので、
+          # running だけで抜けるとこの後のデプロイ中に唯一の台が落とされる。desired を先に見る。
           for i in $(seq 1 20); do
-            STATE=$(aws ec2 describe-instances \
-              --filters "Name=tag:Name,Values=${PROJECT_NAME}-app" "Name=instance-state-name,Values=running" \
-              --query 'Reservations[0].Instances[0].State.Name' --output text)
-            [ "$STATE" == "running" ] && break
             DESIRED=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "${PROJECT_NAME}-app" \
               --query 'AutoScalingGroups[0].DesiredCapacity' --output text 2>/dev/null || echo "unknown")
             if [ "$DESIRED" == "0" ]; then
@@ -221,7 +219,11 @@ jobs:
               aws autoscaling update-auto-scaling-group --auto-scaling-group-name "${PROJECT_NAME}-app" \
                 --min-size 1 --desired-capacity 1
             fi
-            echo "EC2 state: $STATE (waiting...)"
+            STATE=$(aws ec2 describe-instances \
+              --filters "Name=tag:Name,Values=${PROJECT_NAME}-app" "Name=instance-state-name,Values=running" \
+              --query 'Reservations[0].Instances[0].State.Name' --output text)
+            [ "$STATE" == "running" ] && [ "$DESIRED" != "0" ] && break
+            echo "EC2 state: $STATE desired: $DESIRED (waiting...)"
             sleep 15
           done
           if [ "$STATE" != "running" ]; then
