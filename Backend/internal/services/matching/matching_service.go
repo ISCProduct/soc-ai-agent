@@ -7,6 +7,7 @@ import (
 	"Backend/internal/config"
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/services/assessment"
 	"Backend/internal/services/prompts"
 	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
@@ -27,6 +28,18 @@ type MatchingService struct {
 	companyRepo         repository.CompanyRepository
 	matchRepo           repository.UserCompanyMatchRepository
 	aiClient            *openai.Client
+	// 適性検査の結果（#1678）。未注入なら合流しない。
+	assessmentScores AssessmentScoreReader
+}
+
+// AssessmentScoreReader は最新の標準適性検査のカテゴリ別スコアを返す。未受検なら nil。
+type AssessmentScoreReader interface {
+	LatestStandardScores(userID uint) (map[string]float64, error)
+}
+
+// SetAssessmentScoreReader は適性検査スコアの合流を有効にする（#1678、オプション）。
+func (s *MatchingService) SetAssessmentScoreReader(r AssessmentScoreReader) {
+	s.assessmentScores = r
 }
 
 func NewMatchingService(
@@ -65,6 +78,12 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 	}
 
 	log.Printf("[CalculateMatching] User scores: %v\n", scoreMap)
+
+	// 適性検査の合流（#1678）。合流前のスコアは分布の記録用に残す。
+	chatOnly := scoreMap
+	scoreMap = s.mergeAssessmentScores(userID, scoreMap)
+	merged := len(scoreMap) != len(chatOnly) || !sameScores(scoreMap, chatOnly)
+	var before, after []float64
 
 	// 2. 公開済み企業のプロファイルを取得（ダミー企業を除外）。ページングで全件走査する（#1063）
 	companies, err := s.loadAllPublishedCompanies()
@@ -106,6 +125,10 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 		}
 
 		match := s.calculateMatchScore(scoreMap, profile)
+		if merged {
+			before = append(before, s.calculateMatchScore(chatOnly, profile).MatchScore)
+			after = append(after, match.MatchScore)
+		}
 		match.UserID = userID
 		match.SessionID = sessionID
 		match.CompanyID = company.ID
@@ -124,6 +147,12 @@ func (s *MatchingService) CalculateMatching(ctx context.Context, userID uint, se
 		//
 		// AI 生成の理由は高価なので上位N件だけ保存する（applyAIReasonsToTopMatches）。
 		pending = append(pending, match)
+	}
+
+	if merged {
+		// 合流で分布がどう動いたかを残す。これが無いとマッチングの劣化に気づけない。
+		log.Printf("[CalculateMatching] assessment merge user=%d companies=%d before(mean=%.1f p50=%.1f) after(mean=%.1f p50=%.1f)\n",
+			userID, len(after), meanOf(before), medianOf(before), meanOf(after), medianOf(after))
 	}
 
 	if skippedNoProfile > 0 {
@@ -395,9 +424,8 @@ func matchingReasonUseAI() bool {
 
 func buildMatchingReasonUserPrompt(match *entity.UserCompanyMatch, userScores []entity.UserWeightScore) string {
 	company := match.Company
-	return fmt.Sprintf(
-		prompts.MatchingReasonUserPromptTemplate,
-		prompts.MatchingReasonPromptVersion,
+	companyInfo := fmt.Sprintf(
+		"- 企業名: %s\n- 業界: %s\n- 主事業: %s\n- 文化: %s\n- 働き方: %s\n- 開発スタイル: %s\n- 技術スタック: %s",
 		company.Name,
 		fallbackValue(company.Industry, "未設定"),
 		fallbackValue(company.MainBusiness, "未設定"),
@@ -405,6 +433,11 @@ func buildMatchingReasonUserPrompt(match *entity.UserCompanyMatch, userScores []
 		fallbackValue(company.WorkStyle, "未設定"),
 		fallbackValue(company.DevelopmentStyle, "未設定"),
 		fallbackValue(company.TechStack, "未設定"),
+	)
+	return fmt.Sprintf(
+		prompts.MatchingReasonUserPromptTemplate,
+		prompts.MatchingReasonPromptVersion,
+		shared.WrapUntrustedText(companyInfo, "企業情報"),
 		formatTopUserScores(userScores),
 		formatTopMatchAxes(match),
 		match.MatchScore,
@@ -476,4 +509,50 @@ func FormatTopUserScores(scores []entity.UserWeightScore) string { return format
 // NewMatchingServiceForTest returns a MatchingService with no AI client, suitable for unit tests.
 func NewMatchingServiceForTest() *MatchingService {
 	return &MatchingService{}
+}
+
+// mergeAssessmentScores はチャット由来のスコアへ最新の標準適性検査を合流させる（#1678）。
+// 読み出しに失敗したときはチャットだけで計算する（検査の不調でマッチングを止めない）。
+func (s *MatchingService) mergeAssessmentScores(userID uint, chat map[string]float64) map[string]float64 {
+	if s.assessmentScores == nil || !config.AssessmentScoreMergeEnabled() {
+		return chat
+	}
+	assess, err := s.assessmentScores.LatestStandardScores(userID)
+	if err != nil {
+		log.Printf("[CalculateMatching] assessment scores unavailable user=%d: %v\n", userID, err)
+		return chat
+	}
+	if len(assess) == 0 {
+		return chat
+	}
+	return assessment.MergeScores(chat, assess, assessment.ChatWeight)
+}
+
+func sameScores(a, b map[string]float64) bool {
+	for k, v := range a {
+		if w, ok := b[k]; !ok || w != v {
+			return false
+		}
+	}
+	return true
+}
+
+func meanOf(xs []float64) float64 {
+	if len(xs) == 0 {
+		return 0
+	}
+	sum := 0.0
+	for _, x := range xs {
+		sum += x
+	}
+	return sum / float64(len(xs))
+}
+
+func medianOf(xs []float64) float64 {
+	if len(xs) == 0 {
+		return 0
+	}
+	c := append([]float64(nil), xs...)
+	sort.Float64s(c)
+	return c[len(c)/2]
 }

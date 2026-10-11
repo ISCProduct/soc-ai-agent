@@ -44,7 +44,7 @@ const AnswerQualitySystemPrompt = `あなたは就職面接の回答品質を評
 
 // BuildAnswerQualityUserPrompt は回答品質評価用のユーザープロンプトを構築します。
 func BuildAnswerQualityUserPrompt(question, answer string) string {
-	return fmt.Sprintf("【質問】\n%s\n\n【回答】\n%s", question, answer)
+	return fmt.Sprintf("【質問】\n%s\n\n【回答】\n%s", question, wrapAnswer(answer))
 }
 
 // BuildAnswerQualitySystemPromptWithContext はユーザーの学年・志望職種を考慮した

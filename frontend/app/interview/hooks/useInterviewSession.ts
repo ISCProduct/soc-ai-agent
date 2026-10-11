@@ -84,6 +84,8 @@ export function useInterviewSession({
   const [emailError, setEmailError] = useState('')
   const [aiLevel, setAiLevel] = useState(0)
   const [aiSpeaking, _setAiSpeaking] = useState(false)
+  /** 学生の発話に区切りが来るたびに増える。面接官アバターの相槌の合図（#1646）。 */
+  const [studentPauseCount, setStudentPauseCount] = useState(0)
   const [avatarGender, setAvatarGender] = useState<'male' | 'female'>('male')
   const [captionsVisible, setCaptionsVisible] = useState(true)
   const [handsFreeMode, setHandsFreeMode] = useState(false)
@@ -170,6 +172,7 @@ export function useInterviewSession({
     startRecording: () => startRecordingRef.current(),
     stopRecording: () => stopRecordingRef.current(),
     discardRecording: () => discardRecordingRef.current(),
+    onPause: () => setStudentPauseCount((n) => n + 1),
   })
 
   useEffect(() => { userRef.current = user }, [user])
@@ -753,7 +756,6 @@ export function useInterviewSession({
     const formData = new FormData()
     formData.append('audio', audioBlob, `audio.${ext}`)
     formData.append('user_id', String(user.user_id))
-    formData.append('history', JSON.stringify(historyRef.current))
     formData.append('turn_count', String(Math.floor(historyRef.current.length / 2) + 1))
     formData.append('remaining_seconds', String(remainingSeconds))
     formData.append('question_index', String(currentQuestionIndex))
@@ -853,6 +855,7 @@ export function useInterviewSession({
     emailError,
     aiLevel,
     aiSpeaking,
+    studentPauseCount,
     avatarGender,
     captionsVisible,
     setCaptionsVisible,

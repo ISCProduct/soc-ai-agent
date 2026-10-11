@@ -1,0 +1,129 @@
+package repositories
+
+import (
+	"errors"
+	"testing"
+
+	"Backend/internal/models"
+
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+)
+
+func newAssessmentRepo(t *testing.T) (*AssessmentRepository, sqlmock.Sqlmock) {
+	t.Helper()
+	sqlDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}),
+		&gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	return NewAssessmentRepository(db), mock
+}
+
+// 自動保存の再送は1行に畳む（#1678）。INSERT だけだと UNIQUE 違反で2回目が失敗する。
+func TestAssessmentRepository_UpsertAnswerIsIdempotent(t *testing.T) {
+	repo, mock := newAssessmentRepo(t)
+	for range 2 {
+		mock.ExpectBegin()
+		mock.ExpectExec("INSERT INTO `assessment_answers`.*ON DUPLICATE KEY UPDATE `value`=VALUES\\(`value`\\),`updated_at`=VALUES\\(`updated_at`\\)").
+			WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectCommit()
+		require.NoError(t, repo.UpsertAnswer(3, 11, 4))
+	}
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 提出は条件付き UPDATE で排他する。0行なら二重提出で、何も書かずにロールバックする。
+func TestAssessmentRepository_SubmitTwiceRollsBack(t *testing.T) {
+	repo, mock := newAssessmentRepo(t)
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `assessment_sessions` SET .* WHERE id = \\? AND status = \\?").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectRollback()
+
+	err := repo.Submit(&models.AssessmentSession{ID: 3, UserID: 7, Status: models.AssessmentStatusInProgress}, map[string]float64{"技術志向": 50}, "assessment:x")
+	require.True(t, errors.Is(err, ErrAssessmentAlreadySubmitted), "err = %v", err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 成功時は結果とスコアを同じトランザクションで書く。スコアは source=assessment の新しい行で、
+// チャット由来の行には UPDATE も DELETE も発行しない（sqlmock は想定外の SQL で失敗する）。
+func TestAssessmentRepository_SubmitWritesAssessmentRowsOnly(t *testing.T) {
+	repo, mock := newAssessmentRepo(t)
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `assessment_sessions` SET .* WHERE id = \\? AND status = \\?").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO `assessment_results`").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery("SELECT .*organization_id.* FROM `users`").
+		WillReturnRows(sqlmock.NewRows([]string{"organization_id"}).AddRow(1))
+	mock.ExpectExec("INSERT INTO `user_weight_scores` \\(`organization_id`,`user_id`,`session_id`,`source`,`weight_category`,`score`,`created_at`,`updated_at`\\)").
+		WithArgs(1, 7, "assessment:x", models.ScoreSourceAssessment, "技術志向", 63, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	s := &models.AssessmentSession{ID: 3, UserID: 7, Status: models.AssessmentStatusInProgress}
+	require.NoError(t, repo.Submit(s, map[string]float64{"技術志向": 62.5}, "assessment:x"))
+	require.Equal(t, models.AssessmentStatusSubmitted, s.Status)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 正典外カテゴリは UserWeightScoreRepository で弾かれ、結果ごとロールバックされる。
+func TestAssessmentRepository_SubmitRejectsUnknownCategory(t *testing.T) {
+	repo, mock := newAssessmentRepo(t)
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `assessment_sessions`").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO `assessment_results`").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectRollback()
+
+	err := repo.Submit(&models.AssessmentSession{ID: 3, UserID: 7}, map[string]float64{"やる気": 50}, "assessment:x")
+	require.Error(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 未受検なら nil（合流しない）。エラーにしない。
+func TestAssessmentRepository_LatestStandardScoresNone(t *testing.T) {
+	repo, mock := newAssessmentRepo(t)
+	mock.ExpectQuery("FROM assessment_results AS r JOIN assessment_sessions s .* JOIN assessment_templates t .* WHERE r.user_id = \\? AND t.is_standard = \\?").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	got, err := repo.LatestStandardScores(7)
+	require.NoError(t, err)
+	require.Nil(t, got)
+}
+
+func TestAssessmentRepository_LatestStandardScoresParsesJSON(t *testing.T) {
+	repo, mock := newAssessmentRepo(t)
+	mock.ExpectQuery("FROM assessment_results AS r").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "session_id", "user_id", "category_scores"}).AddRow(1, 3, 7, `{"技術志向":62.5}`))
+	got, err := repo.LatestStandardScores(7)
+	require.NoError(t, err)
+	require.Equal(t, 62.5, got["技術志向"])
+}
+
+// 「最新のチャット診断」を探す経路は検査の行を候補にしない（#1678）。
+// 候補にすると、検査の直後にチャット完了扱い・マッチングの土台が検査に置き換わる。
+func TestUserWeightScoreRepository_LatestQueriesExcludeAssessment(t *testing.T) {
+	repo, mock := newWeightScoreBatchRepo(t)
+
+	mock.ExpectQuery("WHERE user_id = \\? AND session_id NOT LIKE \\? AND source <> \\?").
+		WithArgs(7, "interview-%", models.ScoreSourceAssessment, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"session_id"}).AddRow("session_chat"))
+	got, err := repo.FindLatestDiagnosisSessionID(7)
+	require.NoError(t, err)
+	require.Equal(t, "session_chat", got)
+
+	mock.ExpectQuery("WHERE user_id IN \\(\\?\\) AND source <> 'assessment'").
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "weight_category", "score"}))
+	_, err = repo.FindLatestScoresByUsers([]uint{7})
+	require.NoError(t, err)
+
+	mock.ExpectQuery("WHERE user_id = \\? AND source <> \\?").
+		WithArgs(7, models.ScoreSourceAssessment, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"session_id"}))
+	_, err = repo.FindLatestByUser(7)
+	require.Error(t, err) // 行なし
+	require.NoError(t, mock.ExpectationsWereMet())
+}

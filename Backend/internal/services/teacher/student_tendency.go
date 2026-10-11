@@ -3,6 +3,7 @@ package teacher
 
 import (
 	"sort"
+	"time"
 
 	"Backend/domain/valueobject"
 	"Backend/internal/models"
@@ -35,6 +36,8 @@ type StudentTendency struct {
 	LowMatchApplications []repositories.LowMatchApplication `json:"low_match_applications,omitempty"`
 	// 履歴書の対応要否（#1030）。注入が無いときは nil。
 	ResumeStatus *ResumeAttention `json:"resume_status,omitempty"`
+	// 最終活動日時（#1573）。活動の記録が無い／読み出し未注入なら nil。
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
 	// DataAvailable が false のときタイプも業界も参考にならない。
 	// UI 側で「分析データ不足」と出す（PRD 境界値）。
 	DataAvailable bool `json:"data_available"`

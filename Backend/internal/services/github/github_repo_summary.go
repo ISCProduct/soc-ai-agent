@@ -2,6 +2,7 @@ package github
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
 	"encoding/base64"
@@ -138,9 +139,9 @@ func (s *GitHubService) generateRepoSummary(ctx context.Context, fullName, readm
 		return nil, fmt.Errorf("openai client not configured")
 	}
 
-	readmeSection := "（READMEなし）"
-	if readme != "" {
-		readmeSection = readme
+	readmeSection := shared.WrapUntrustedText(readme, "README")
+	if readmeSection == "" {
+		readmeSection = "（READMEなし）"
 	}
 
 	cfg := getRolePromptConfig(targetRole)

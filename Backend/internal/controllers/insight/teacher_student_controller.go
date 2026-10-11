@@ -63,7 +63,17 @@ func (c *TeacherStudentInsightController) TendencyAnalysis(ctx echo.Context) err
 	lowMatchOnly, _ := strconv.ParseBool(ctx.QueryParam("low_match_only"))
 	resumeNeedsAttentionOnly, _ := strconv.ParseBool(ctx.QueryParam("resume_needs_attention_only"))
 
-	result, err := c.svc.ListTendenciesWithFilters(limit, offset, query, schoolID, lowMatchOnly, resumeNeedsAttentionOnly)
+	// inactive_days=N で「N日間活動が無い生徒」に絞る（#1573）。範囲外・不正値は絞り込みなし。
+	inactiveDays := 0
+	if d, err := strconv.Atoi(ctx.QueryParam("inactive_days")); err == nil && d >= 1 && d <= 365 {
+		inactiveDays = d
+	}
+
+	result, err := c.svc.ListTendenciesFiltered(limit, offset, query, schoolID, teacher.TendencyFilters{
+		LowMatchOnly:             lowMatchOnly,
+		ResumeNeedsAttentionOnly: resumeNeedsAttentionOnly,
+		InactiveDays:             inactiveDays,
+	})
 	if err != nil {
 		return httpapi.InternalError(err)
 	}

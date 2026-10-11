@@ -63,6 +63,8 @@ tags:
     description: 面接のリアルタイム音声セッション
   - name: resume
     description: 職務経歴書のアップロードと添削
+  - name: assessments
+    description: 適性検査の受検と結果（#1678）
   - name: es
     description: エントリーシートの添削とリライト（未ログインでも使える）
   - name: schedule
@@ -1246,6 +1248,81 @@ paths:
       responses:
         "200": { description: セッション情報 }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ── assessments ────────────────────────────────────
+  /api/assessments:
+    get:
+      tags: [assessments]
+      summary: 受けられる検査と自分の受検状況を一覧する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 検査一覧（未受検が先） }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/assessments/{templateId}/sessions:
+    post:
+      tags: [assessments]
+      summary: 受検を始める（受検中があればそれを返す）
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 受検セッションと問題 }
+        "400": { description: 検査IDが不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 検査が無い }
+
+  /api/assessments/sessions/{sessionId}:
+    get:
+      tags: [assessments]
+      summary: 受検セッションと保存済みの回答を取得する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 受検セッション }
+        "400": { description: セッションIDが不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 本人のセッションが無い }
+
+  /api/assessments/sessions/{sessionId}/answers/{questionId}:
+    put:
+      tags: [assessments]
+      summary: 1問の回答を保存する（同じ問題は上書き）
+      security: [{ userToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value: { type: integer, minimum: 1, maximum: 5 }
+      responses:
+        "204": { description: 保存した }
+        "400": { description: 回答が1〜5の範囲外、またはIDが不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: セッションか問題が無い }
+        "409": { description: 提出済み }
+
+  /api/assessments/sessions/{sessionId}/submit:
+    post:
+      tags: [assessments]
+      summary: 提出してスコアを確定する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: 提出した }
+        "400": { description: 未回答の問題がある }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 本人のセッションが無い }
+        "409": { description: 提出済み }
+
+  /api/assessments/sessions/{sessionId}/result:
+    get:
+      tags: [assessments]
+      summary: 提出済みの結果を取得する
+      security: [{ userToken: [] }]
+      responses:
+        "200": { description: カテゴリ別スコア }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 未提出または本人のセッションが無い }
 
   # ── resume ─────────────────────────────────────────
   /api/resume/upload:

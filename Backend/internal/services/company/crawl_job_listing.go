@@ -2,6 +2,7 @@ package company
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
@@ -167,7 +168,7 @@ Rules:
 - Do not fabricate data.
 
 Text:
-%s`, clean)
+%s`, shared.WrapUntrustedText(clean, "ページ本文"))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()

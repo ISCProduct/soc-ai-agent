@@ -10,6 +10,20 @@ on:
   workflow_dispatch:
 
 jobs:
+  # 前回デプロイの auto-stop をデプロイ開始時点で取り消す(#1693)。
+  # staging-auto-stop は deploy-staging の後続なので、そこだけに任せると
+  # デプロイ中（や失敗時）に前回の auto-stop が走り、起動中の staging を落とす。
+  cancel-staging-auto-stop:
+    if: github.ref_name == 'develop'
+    name: Cancel previous staging auto-stop
+    runs-on: ubuntu-latest
+    permissions: {}
+    concurrency:
+      group: staging-auto-stop
+      cancel-in-progress: true
+    steps:
+      - run: echo "previous staging auto-stop cancelled"
+
   deploy-staging:
     if: github.ref_name == 'develop'
     name: Deploy to staging
@@ -193,11 +207,20 @@ jobs:
             exit 1
           fi
 
+          # 前回デプロイの auto-stop が起動キックの後に desired を 0 へ戻すことがある(#1693)。
+          # 待機中も desired を見て、0 なら上げ直す（自己修復）。
           for i in $(seq 1 20); do
             STATE=$(aws ec2 describe-instances \
               --filters "Name=tag:Name,Values=${PROJECT_NAME}-app" "Name=instance-state-name,Values=running" \
               --query 'Reservations[0].Instances[0].State.Name' --output text)
             [ "$STATE" == "running" ] && break
+            DESIRED=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "${PROJECT_NAME}-app" \
+              --query 'AutoScalingGroups[0].DesiredCapacity' --output text 2>/dev/null || echo "unknown")
+            if [ "$DESIRED" == "0" ]; then
+              echo "ASG desired が 0 に戻っていたため 1 に上げ直します"
+              aws autoscaling update-auto-scaling-group --auto-scaling-group-name "${PROJECT_NAME}-app" \
+                --min-size 1 --desired-capacity 1
+            fi
             echo "EC2 state: $STATE (waiting...)"
             sleep 15
           done

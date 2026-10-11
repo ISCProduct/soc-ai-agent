@@ -5,27 +5,20 @@ import {
   Typography,
   Button,
   Stack,
-  CircularProgress,
 } from '@mui/material'
 import { Refresh } from '@mui/icons-material'
+import { ListSkeleton } from '@/components/common/ListSkeleton'
 
 type NavigateHandler = () => void
 
-/** 推薦データ読み込み中 */
+/** 推薦データ読み込み中。確定後と同じ一覧の形を先に出す（§23）。 */
 export function ResultsLoadingView() {
   return (
-    <Box sx={{
-      height: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      flexDirection: 'column',
-      gap: 2,
-    }}>
-      <CircularProgress size={60} />
-      <Typography variant="h6" color="text.secondary">
-        AIが企業を分析中...
+    <Box sx={{ maxWidth: 960, mx: 'auto', p: { xs: 2, sm: 3 } }}>
+      <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+        希望条件との一致度を計算しています
       </Typography>
+      <ListSkeleton rows={4} label="おすすめ企業を読み込み中" />
     </Box>
   )
 }
@@ -42,8 +35,12 @@ export function ResultsEmptyView({ onBackToChat }: { onBackToChat: NavigateHandl
       gap: 2,
       p: 3,
     }}>
-      <Typography variant="h6" color="text.secondary" sx={{ textAlign: 'center' }}>
-        データがありません。診断を完了してから数秒待ち、ページを更新してください。
+      <Typography variant="h6" component="p" sx={{ textAlign: 'center', fontWeight: 700 }}>
+        まだおすすめ企業を計算できていません
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', maxWidth: '44ch' }}>
+        診断チャットを最後まで進めると、希望条件との一致度が高い企業がここに並びます。
+        診断を終えた直後は数秒かかるので、ページを更新してください。
       </Typography>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ width: { xs: '100%', sm: 'auto' } }}>
         <Button

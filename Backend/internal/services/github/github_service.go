@@ -17,7 +17,7 @@ const (
 	maxRetries                  = 2
 	githubTokenEncryptionKeyEnv = "GITHUB_TOKEN_ENCRYPTION_KEY"
 	// プロンプトバージョン（#457）
-	repoSummaryPromptVersion = "v2"
+	repoSummaryPromptVersion = "v3"
 )
 
 // GitHubService GitHub API連携サービス

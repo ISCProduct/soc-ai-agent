@@ -45,13 +45,13 @@ test('片方の案内を送っても、もう片方の案内は送信できる',
   })
 
   render(<PageContent />)
-  fireEvent.click(await screen.findByRole('button', { name: '軌道修正' }))
+  fireEvent.click(await screen.findByRole('button', { name: '応募先の見直しを案内する' }))
 
-  await waitFor(() => expect(screen.getByRole('button', { name: '送信済' })).toBeDisabled())
-  const resumeButton = screen.getByRole('button', { name: '履歴書案内' })
+  await waitFor(() => expect(screen.getByRole('button', { name: '送信済（学生のホームに表示中）' })).toBeDisabled())
+  const resumeButton = screen.getByRole('button', { name: '履歴書の見直しを案内する' })
   expect(resumeButton).toBeEnabled()
 
   fireEvent.click(resumeButton)
-  await waitFor(() => expect(screen.getAllByRole('button', { name: '送信済' })).toHaveLength(2))
+  await waitFor(() => expect(screen.getAllByRole('button', { name: '送信済（学生のホームに表示中）' })).toHaveLength(2))
   expect(posts).toEqual(['low_match', 'resume'])
 })

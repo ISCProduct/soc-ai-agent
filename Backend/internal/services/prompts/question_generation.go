@@ -1,10 +1,24 @@
 package prompts
 
-import "fmt"
+import (
+	"fmt"
+
+	"Backend/internal/services/shared"
+)
 
 // ──────────────────────────────────────────────
 // 戦略的質問生成プロンプト（generateStrategicQuestion 用）
 // ──────────────────────────────────────────────
+
+// wrapHistory は会話履歴を非信頼データとして囲む（#1636）。
+// 履歴には学生の自由回答がそのまま入るため、質問生成の指示を上書きできる。
+// 質問生成7経路はすべてここを通る。
+func wrapHistory(historyText string) string {
+	if wrapped := shared.WrapUntrustedText(historyText, "会話履歴"); wrapped != "" {
+		return wrapped
+	}
+	return "（まだ会話はありません）"
+}
 
 // buildStrategicQuestionBase は戦略的質問生成の共通ベースを構築します。
 func buildStrategicQuestionBase(
@@ -55,7 +69,7 @@ func buildStrategicQuestionBase(
 		RealityCheckGuidelines,
 		guidelines,
 		CommonConstraintPrompt,
-		historyText,
+		wrapHistory(historyText),
 		scoreAnalysis,
 		askedQuestionsText,
 		questionPurpose,
@@ -120,7 +134,7 @@ func BuildLowConfidenceQuestionPrompt(historyText, lastQuestion string, industry
 %s
 %s
 
-%s`, SystemRoleExpert, historyText, lastQuestion, NewGradGuidelines, RealityCheckGuidelines, jobContext, CommonConstraintPrompt)
+%s`, SystemRoleExpert, wrapHistory(historyText), lastQuestion, NewGradGuidelines, RealityCheckGuidelines, jobContext, CommonConstraintPrompt)
 }
 
 // BuildUnevaluatedCategoryQuestionPrompt は未評価カテゴリに対する質問プロンプトを構築します。
@@ -138,7 +152,7 @@ func BuildUnevaluatedCategoryQuestionPrompt(historyText, targetCategory, descrip
 %s
 %s
 
-%s`, SystemRoleExpert, historyText, targetCategory, description, NewGradGuidelines, RealityCheckGuidelines, jobContext, CommonConstraintPrompt)
+%s`, SystemRoleExpert, wrapHistory(historyText), targetCategory, description, NewGradGuidelines, RealityCheckGuidelines, jobContext, CommonConstraintPrompt)
 }
 
 // BuildDeepeningQuestionPrompt は全カテゴリ評価済み後の深掘り質問プロンプトを構築します。
@@ -158,7 +172,7 @@ func BuildDeepeningQuestionPrompt(historyText, highestCategory string, highestSc
 %s
 %s
 
-%s`, SystemRoleExpert, historyText, highestCategory, highestScore, NewGradGuidelines, RealityCheckGuidelines, DeepeningGuidelines, jobContext, CommonConstraintPrompt)
+%s`, SystemRoleExpert, wrapHistory(historyText), highestCategory, highestScore, NewGradGuidelines, RealityCheckGuidelines, DeepeningGuidelines, jobContext, CommonConstraintPrompt)
 }
 
 // ──────────────────────────────────────────────

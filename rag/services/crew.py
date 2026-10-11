@@ -40,6 +40,9 @@ def run_crewai(
     # Web Search 由来の外部サイトの文章がそのまま入りうる。
     joined_context = "\n\n".join(d for d in context_docs if d)
     context_block = _wrap_untrusted_text(joined_context, "企業情報") if joined_context else ""
+    # 企業名・職種も囲む。サニタイズは記号しか削らず日本語の指示文は残る（#1643）。
+    wrapped_company = _wrap_untrusted_text(safe_company, "企業名")
+    wrapped_role = _wrap_untrusted_text(safe_job_title, "職種")
 
     source_labels = {
         "deep_research": "OpenAI Deep Research（o3-deep-research）",
@@ -81,7 +84,7 @@ def run_crewai(
             "Company: {company}\n"
             "Role: {role}\n"
             "Context:\n{context}\n"
-        ).format(company=safe_company, role=safe_job_title, context=context_block),
+        ).format(company=wrapped_company, role=wrapped_role, context=context_block),
         expected_output="Bullet keywords",
         agent=researcher,
     )
@@ -92,13 +95,13 @@ def run_crewai(
             "【企業別レビュー報告書】\n"
             "---\n"
             "#### ■ 対象企業\n"
-            "{company}\n\n"
+            "（下の Company に示した企業名）\n\n"
             "#### ■ この企業が求めている核心的要素\n"
             "- ...\n\n"
             "#### ■ 履歴書の最適化アドバイス\n"
             "- **強みの再定義**: ...\n"
             "- **不足している情報の補足**: ...\n\n"
-            "#### ■ 職種別アドバイス（{role}）\n"
+            "#### ■ 職種別アドバイス（下の Role に示した職種）\n"
             "この職種特有の評価ポイント（技術スキル・マインドセット・実績の見せ方など）を "
             "3点以上、具体的に記述してください。\n\n"
             "#### ■ 修正後の自己PRイメージ\n"
@@ -112,8 +115,8 @@ def run_crewai(
             "Role: {role}\n"
             "Resume:\n{resume}\n"
         ).format(
-            company=safe_company,
-            role=safe_job_title,
+            company=wrapped_company,
+            role=wrapped_role,
             resume=_wrap_untrusted_text(resume_text, "履歴書テキスト"),
             source=source_label,
         ),

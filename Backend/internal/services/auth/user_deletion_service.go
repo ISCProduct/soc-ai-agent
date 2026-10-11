@@ -375,6 +375,9 @@ func hardDeleteUserData(tx *gorm.DB, userID uint) error {
 		&models.GitHubRepo{},
 		&models.GitHubProfile{},
 		&models.UserGoogleToken{},
+		// 適性検査（#1678）。回答は assessment_sessions の FK CASCADE で消える
+		&models.AssessmentResult{},
+		&models.AssessmentSession{},
 	}
 	for _, m := range deletes {
 		if err := tx.Where("user_id = ?", userID).Delete(m).Error; err != nil {
