@@ -37,6 +37,83 @@ const HIGH_CONTRAST = {
   paper: '#ffffff',
 }
 
+/**
+ * 学生画面の地・面・文字・罫線（#1572）。ここが唯一の出どころ。
+ * lib/design/tokens.ts の UI はこの値を CSS 変数経由で参照するので、
+ * テーマを経由しない画面（直書きしていた /interview /es-rewrite /results）も
+ * 高コントラストへ追従する（#1571）。
+ */
+export type StudentSurface = {
+  paper: string
+  field: string
+  tint: string
+  ink: string
+  inkSoft: string
+  inkFaint: string
+  rule: string
+  ruleSoft: string
+  mark: string
+  flag: string
+  /** 面接の暗い画面（ロビー・面接中・レポート）の地・面・文字。 */
+  nightBg: string
+  nightStage: string
+  nightPanel: string
+  nightInk: string
+  nightSoft: string
+  nightMuted: string
+}
+
+export const STUDENT_SURFACES: Record<StudentThemeMode, StudentSurface> = {
+  comfortable: {
+    paper: COMFORTABLE.background,
+    field: COMFORTABLE.paper,
+    tint: '#f1f5f9',
+    ink: '#0f172a',
+    inkSoft: '#475569',
+    // 旧 #94a3b8 は白地で 2.6:1 しかなく本文に使えない。4.5:1 を満たす #64748b に寄せた。
+    inkFaint: '#64748b',
+    rule: '#d0d7de',
+    ruleSoft: '#e2e8f0',
+    mark: COMFORTABLE.primary,
+    flag: '#B44A00',
+    nightBg: '#221610',
+    nightStage: '#606553',
+    nightPanel: '#2d2e31',
+    nightInk: '#e8eaed',
+    nightSoft: '#bdc1c6',
+    nightMuted: '#9aa0a6',
+  },
+  'high-contrast': {
+    paper: HIGH_CONTRAST.background,
+    field: HIGH_CONTRAST.paper,
+    tint: '#f0f0f0',
+    ink: '#000000',
+    inkSoft: '#1a1a1a',
+    inkFaint: '#333333',
+    rule: '#000000',
+    ruleSoft: '#4d4d4d',
+    mark: HIGH_CONTRAST.primary,
+    flag: HIGH_CONTRAST.error,
+    nightBg: '#000000',
+    nightStage: '#000000',
+    nightPanel: '#000000',
+    nightInk: '#ffffff',
+    nightSoft: '#ffffff',
+    nightMuted: '#ffffff',
+  },
+}
+
+/** UI トークンが参照する CSS 変数名。 */
+export function surfaceVar(key: keyof StudentSurface): string {
+  return `--ui-${key.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase())}`
+}
+
+function surfaceCssVars(mode: StudentThemeMode): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(STUDENT_SURFACES[mode]).map(([k, v]) => [surfaceVar(k as keyof StudentSurface), v]),
+  )
+}
+
 export function isStudentThemeMode(value: string | null | undefined): value is StudentThemeMode {
   return value === 'comfortable' || value === 'high-contrast'
 }
@@ -73,6 +150,7 @@ export function createStudentMuiTheme(mode: StudentThemeMode) {
     components: {
       MuiCssBaseline: {
         styleOverrides: {
+          ':root': surfaceCssVars(mode),
           body: { fontFamily: FONT_FAMILY },
           '*:focus-visible': {
             outline: `${focusWidth}px solid ${p.primary}`,

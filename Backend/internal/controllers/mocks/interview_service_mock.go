@@ -99,14 +99,13 @@ func (m *InterviewServiceMock) Turn(
 	userID uint,
 	sessionID uint,
 	audioData []byte,
-	history []map[string]string,
 	companyName, companyReading string,
 	companyReadingResolved bool,
 	position, companyInfo, companyType string,
 	companyID uint,
 	turnCount, remainingSeconds, questionIndex, totalQuestions, questionElapsedSeconds, questionDurationSeconds int,
 ) (*interview.TurnResult, error) {
-	args := m.Called(ctx, userID, sessionID, audioData, history,
+	args := m.Called(ctx, userID, sessionID, audioData,
 		companyName, companyReading, companyReadingResolved, position, companyInfo, companyType, companyID,
 		turnCount, remainingSeconds, questionIndex, totalQuestions, questionElapsedSeconds, questionDurationSeconds)
 	if args.Get(0) == nil {

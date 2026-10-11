@@ -1,28 +1,19 @@
+import { STUDENT_SURFACES, surfaceVar, type StudentSurface } from '../student-theme'
+
 /**
- * 学生向け画面の配色。
+ * 学生向け画面の地・面・文字・罫線（#1572）。
  *
- * 学生が受け取るのは「応募先の候補リスト」であって、ダッシュボードではない。
- * 学校の就職課で配られる一覧に近い見え方を狙い、地の色を淡い灰緑にしている。
- * SaaS既定の寒色グレー(#f4f7fb)でも、生成AIの定番になったクリーム系でもない。
+ * 値の出どころは lib/student-theme.ts の STUDENT_SURFACES に一本化した。
+ * 以前は /results だけが独自の灰緑(#E5E8DF)を持ち、他の画面はテーマの #f4f7fb で
+ * 別製品のように見えていた。テーマ側を正とした。
  *
- * アクセントは既存の Wong 配色（色覚セーフ）をそのまま使う。ここは意匠ではなく
- * 要件なので変えない。地の色だけを替えて印象を動かす。
+ * 値は CSS 変数で、テーマ（MuiCssBaseline の :root）が表示設定に応じて差し替える。
+ * テーマの外で描画されたとき（単体テスト等）は既定配色にフォールバックする。
+ * アクセントは Wong 配色（色覚セーフ）。ここは意匠ではなく要件なので変えない。
  */
-export const UI = {
-  /** 地。藁半紙寄りの淡い灰緑 */
-  paper: '#E5E8DF',
-  /** 本文が乗る面 */
-  field: '#FCFCFA',
-  ink: '#1C201D',
-  inkSoft: '#545C56',
-  /** 罫線 */
-  rule: '#B9BEB2',
-  ruleSoft: '#D5D8CE',
-  /** 既存の Wong 青（色覚セーフ）。順位・操作の色 */
-  mark: '#0072B2',
-  /** 要確認だけに使う。紙に合わせて彩度を落とした vermillion */
-  flag: '#B44A00',
-} as const
+export const UI = Object.fromEntries(
+  Object.entries(STUDENT_SURFACES.comfortable).map(([k, v]) => [k, `var(${surfaceVar(k as keyof StudentSurface)}, ${v})`]),
+) as Record<keyof StudentSurface, string>
 
 /**
  * 適合度の共通スケール。結果画面でのみ使う。

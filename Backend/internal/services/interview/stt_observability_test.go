@@ -79,8 +79,8 @@ func TestObserveTranscribe_RecordsFailure(t *testing.T) {
 // openai.TestTranscribeWithHints_OmitsEmptyPrompt が固定している。
 func TestSTTModelName(t *testing.T) {
 	t.Setenv("OPENAI_WHISPER_MODEL", "")
-	if got := STTModelName(); got != "gpt-4o-mini-transcribe" {
-		t.Errorf("既定 = %q, want gpt-4o-mini-transcribe", got)
+	if got := STTModelName(); got != "gpt-transcribe" {
+		t.Errorf("既定 = %q, want gpt-transcribe", got)
 	}
 	t.Setenv("OPENAI_WHISPER_MODEL", "gpt-4o-transcribe")
 	if got := STTModelName(); got != "gpt-4o-transcribe" {

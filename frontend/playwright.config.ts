@@ -12,6 +12,13 @@ export default defineConfig({
     'chat-mobile-progress.spec.ts',
     'resume.spec.ts',
     'resume-reminder.spec.ts',
+    'teacher-guidance-home.spec.ts',
+    'student-theme-contrast.spec.ts',
+    'list-loading-empty.spec.ts',
+    'home-next-actions.spec.ts',
+    'chat-ui-states.spec.ts',
+    'correlation-diagram-a11y.spec.ts',
+    'assessments.spec.ts',
     'schedule.spec.ts',
     'admin.spec.ts',
     'public-pages.spec.ts',
@@ -52,7 +59,9 @@ export default defineConfig({
     env: {
       PORT: '3000',
       NEXT_PUBLIC_BACKEND_URL: 'http://localhost:3000',
-      BACKEND_URL: 'http://localhost:3000',
+      // サーバー側の転送先を自分自身にすると、モック漏れのAPIが Route Handler を再帰的に呼び続けて
+      // ポートを使い切り、後続テストの goto まで落ちる。誰も待ち受けないポートで即失敗させる。
+      BACKEND_URL: 'http://127.0.0.1:9',
       E2E_MOCK_AUTH: 'true',
     },
   },

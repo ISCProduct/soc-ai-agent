@@ -12,7 +12,8 @@ import {
   describeDeficiencies,
   type AvatarCapabilities,
 } from '@/lib/interview/avatar-capabilities'
-import { AvatarMotion, type InterviewerState } from '@/lib/interview/avatar-motion'
+import { AvatarMotion } from '@/lib/interview/avatar-motion'
+import { interviewerStateFor, legacyMouthPaths } from '@/lib/interview/avatar-wiring'
 import styles from './interview.module.css'
 
 interface ThreeAvatarProps {
@@ -24,6 +25,8 @@ interface ThreeAvatarProps {
   active: boolean
   /** 面接官が次の質問を用意している最中か。視線を少し外す。 */
   pending?: boolean
+  /** 学生の発話の区切りで増える値。変わるたびに相槌を1回打つ（#1646）。 */
+  acknowledgeSignal?: number
 }
 
 // ─── Shape key discovery ──────────────────────────────────────────────────────
@@ -101,7 +104,7 @@ function findMouthTarget(root: THREE.Object3D): MouthTarget | null {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function ThreeAvatar({
-  gender, audioStream, level, speaking, active, pending = false,
+  gender, audioStream, level, speaking, active, pending = false, acknowledgeSignal = 0,
 }: ThreeAvatarProps) {
   const [useFallback, setUseFallback] = useState(false)
   const [isLoading, setIsLoading]   = useState(true)
@@ -127,6 +130,9 @@ export default function ThreeAvatar({
   useEffect(() => { speakingRef.current = speaking }, [speaking])
   useEffect(() => { activeRef.current = active },     [active])
   useEffect(() => { pendingRef.current = pending },   [pending])
+  useEffect(() => {
+    if (acknowledgeSignal > 0) motionRef.current?.acknowledge(performance.now() / 1000)
+  }, [acknowledgeSignal])
 
   useEffect(() => {
     if (lipsyncMgrRef.current && audioStream) {
@@ -205,13 +211,11 @@ export default function ThreeAvatar({
       const caps = capsRef.current
       const motion = motionRef.current
       if (caps && motion) {
-        // 面接が始まる前に相槌を打つと、学生が何も話していないのにうなずく
-        // 面接官になる。開始前は idle（呼吸とまばたきだけ）にする。
-        const state: InterviewerState = speakingRef.current ? 'speaking'
-          : !activeRef.current ? 'idle'
-          : pendingRef.current ? 'thinking'
-          : 'listening'
-        motion.setState(state, t)
+        motion.setState(interviewerStateFor({
+          speaking: speakingRef.current,
+          active: activeRef.current,
+          pending: pendingRef.current,
+        }), t)
         // level はすでに useInterviewSession が rms*6 で正規化した 0〜1 の値。
         // ここでさらに 1.4 を掛けると発話中ほぼ常に 1.0 に張り付き、
         // 口が開きっぱなしになって喋っているように見えない。
@@ -221,13 +225,13 @@ export default function ThreeAvatar({
       }
 
       // ── Mouth shape key (legacy path) ───────────────────────────────────
-      // caps が口を動かせるなら口は caps の持ち物。以下の3経路（モーフ・顎
-      // ボーン・ビセーム）はどれも触らない。同じモーフを2箇所から毎フレーム
-      // 書くと値が競合して口が震える。顎ボーンも AvatarMotion の代替経路と
-      // 二重になる。
-      const capsOwnsMouth = caps !== null &&
-        (caps.mouthTargets.length > 0 || caps.jawBone !== null)
-      const mt = capsOwnsMouth ? null : mouthTargetRef.current
+      // 3経路（モーフ・顎ボーン・ビセーム）の排他は legacyMouthPaths が決める。
+      const paths = legacyMouthPaths(caps, {
+        morph: mouthTargetRef.current !== null,
+        jaw: jawBoneRef.current !== null,
+        viseme: lipsyncMgrRef.current !== null && visemeMeshesRef.current.length > 0,
+      })
+      const mt = paths.morph ? mouthTargetRef.current : null
       if (mt && mt.mesh.morphTargetInfluences) {
         const target = Math.min(1, levelRef.current * 1.4)
         if (target > mt.smoothed) {
@@ -239,7 +243,7 @@ export default function ThreeAvatar({
       }
 
       // ── Jaw bone rotation (legacy path) ────────────────────────────────
-      const jaw = capsOwnsMouth ? null : jawBoneRef.current
+      const jaw = paths.jaw ? jawBoneRef.current : null
       if (jaw && jawRestRotRef.current) {
         const target = Math.min(1, levelRef.current * 1.4)
         const prev = jawSmoothedRef.current
@@ -249,8 +253,7 @@ export default function ThreeAvatar({
       }
 
       // ── Oculus viseme fallback (for RPM-style models with no mouth_open) ─
-      if (!capsOwnsMouth && !mt && !jaw &&
-          lipsyncMgrRef.current && visemeMeshesRef.current.length > 0) {
+      if (paths.viseme && lipsyncMgrRef.current) {
         const visemes = lipsyncMgrRef.current.getCurrentVisemes()
         visemeMeshesRef.current.forEach((mesh) => {
           if (!mesh.morphTargetDictionary || !mesh.morphTargetInfluences) return

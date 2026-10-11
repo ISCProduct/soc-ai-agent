@@ -28,6 +28,7 @@ type MatchingService interface {
 	GetTopMatches(ctx context.Context, userID uint, sessionID string, limit int) ([]*entity.UserCompanyMatch, error)
 	ToggleFavorite(matchID uint, userID uint) error
 	GetDiagnostics(userID uint, sessionID string) (*matching.MatchingDiagnostics, error)
+	ReasonScores(userID uint, scores []entity.UserWeightScore) []entity.UserWeightScore
 }
 
 // AnalysisScoringService 分析・スコアリングサービスのインターフェース

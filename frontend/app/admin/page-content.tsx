@@ -17,6 +17,7 @@ import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 import { visibleAdminNav } from '@/lib/admin-nav'
 import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContainer'
+import { StudentsNeedingAttention } from '@/components/admin/StudentsNeedingAttention'
 
 const cardSx = {
   height: '100%',
@@ -129,6 +130,9 @@ export default function PageContent() {
           権限を確認しています…
         </Typography>
       )}
+
+      {/* 教員が最初に見るべきもの（いま声をかける学生）をカードより先に出す（#1573） */}
+      <StudentsNeedingAttention />
 
       {visibleAdminNav(restricted === null ? null : isPlatform).map((group) => (
         <HubSection

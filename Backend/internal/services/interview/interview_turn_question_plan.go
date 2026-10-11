@@ -2,6 +2,7 @@ package interview
 
 import (
 	"Backend/internal/models"
+	"Backend/internal/services/shared"
 	"context"
 	"errors"
 	"fmt"
@@ -134,7 +135,7 @@ func (s *InterviewService) generateFollowUpQuestion(ctx context.Context, origina
 // STAR で欠けている要素を明示して、追質問の狙いを固定する（#794）。
 // 指定しないと、成果が語られていない回答にも「きっかけ」を聞き返すことがある。
 func buildFollowUpUserPrompt(originalQuestion, userAnswer string) string {
-	prompt := fmt.Sprintf("元の質問: %s\n応募者回答: %s", originalQuestion, userAnswer)
+	prompt := fmt.Sprintf("元の質問: %s\n応募者回答:\n%s", originalQuestion, shared.WrapUntrustedText(userAnswer, "応募者回答"))
 	if _, missing := STARFollowUpQuestion(userAnswer); missing != "" {
 		label := STARLabel(missing)
 		prompt += fmt.Sprintf("\n\nこの回答には「%s」が含まれていません。「%s」を引き出す質問にしてください。", label, label)
