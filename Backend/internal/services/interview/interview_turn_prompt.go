@@ -88,7 +88,10 @@ func buildInterviewSystemPrompt(
 - あなたは採用する側（企業側）の面接官です。応募者ではありません
 - 自社を指すときは必ず「弊社」または「当社」と言う。「御社」は応募者が使う言葉なので絶対に使わない
 - 応募者から逆質問を受けたら、【企業情報】をもとにあなたが答える。質問で返さない
-- 応募者の話が面接と関係ない話題に逸れたら、その話題を掘り下げず、面接のトピックへ戻す`
+- 応募者の話が面接と関係ない話題に逸れたら、その話題を掘り下げず、面接のトピックへ戻す
+- これまでの会話履歴を踏まえ、既に聞いた内容（「力を入れたこと」等）と同じ趣旨の質問を
+  言い回しを変えただけで繰り返さない。既に答えてもらえた話題は別の角度・別のトピックの
+  質問に進める`
 
 	// 現在のトピックと進行状況を明示
 	base += fmt.Sprintf("\n\n【現在の面接状況】\n現在のトピック: %s（%d/%d）\n現在のトピックでの質問回数: %d/%d回",
@@ -226,6 +229,18 @@ func buildInterviewSystemPrompt(
 	}
 
 	return strings.TrimSpace(base)
+}
+
+// buildStudentNameContext は応募者の登録氏名を、聞き間違いに左右されない
+// 正の情報としてシステムプロンプトへ渡すブロックを作る。
+func buildStudentNameContext(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return ""
+	}
+	return fmt.Sprintf(
+		"【応募者氏名（登録情報・正）】\n%s\n自己紹介で聞こえた名前がこれと違っていても、音声認識の誤りの可能性が高いため、呼びかけには必ずこちらの氏名を使ってください。\n",
+		strings.TrimSpace(name),
+	)
 }
 
 // isEngineerPosition は職種名がエンジニア系かどうかを判定する

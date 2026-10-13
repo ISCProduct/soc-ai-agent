@@ -180,6 +180,7 @@ func TestInterviewService_TTSVoiceSelection(t *testing.T) {
 			Language:          "ja",
 		}
 		sRepo.On("FindByID", uint(100)).Return(session, nil)
+		uRepo.On("GetUserByID", uint(1)).Return(&entity.User{ID: 1, Name: "テスト太郎"}, nil)
 
 		_, err := svc.StartTurn(context.Background(), 1, 100, "", "", "", "", "", 0, 0, 0, 0, 0)
 		assert.NoError(t, err)
@@ -213,6 +214,7 @@ func TestInterviewService_TTSVoiceSelection(t *testing.T) {
 			Language:          "ja",
 		}
 		sRepo.On("FindByID", uint(101)).Return(session, nil)
+		uRepo.On("GetUserByID", uint(1)).Return(&entity.User{ID: 1, Name: "テスト太郎"}, nil)
 
 		_, err := svc.StartTurn(context.Background(), 1, 101, "", "", "", "", "", 0, 0, 0, 0, 0)
 		assert.NoError(t, err)
@@ -249,6 +251,7 @@ func TestInterviewService_TurnDegradesGracefullyOnAPIFailure(t *testing.T) {
 
 		session := newSession(200)
 		sRepo.On("FindByID", uint(200)).Return(session, nil)
+		uRepo.On("GetUserByID", uint(1)).Return(&entity.User{ID: 1, Name: "テスト太郎"}, nil)
 
 		result, err := svc.Turn(context.Background(), 1, 200, []byte("dummy-audio"), "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 		assert.NoError(t, err)
@@ -277,6 +280,7 @@ func TestInterviewService_TurnDegradesGracefullyOnAPIFailure(t *testing.T) {
 
 		session := newSession(201)
 		sRepo.On("FindByID", uint(201)).Return(session, nil)
+		uRepo.On("GetUserByID", uint(1)).Return(&entity.User{ID: 1, Name: "テスト太郎"}, nil)
 
 		result, err := svc.Turn(context.Background(), 1, 201, []byte("dummy-audio"), "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 		assert.NoError(t, err)
@@ -306,6 +310,7 @@ func TestInterviewService_TurnDegradesGracefullyOnAPIFailure(t *testing.T) {
 
 		session := newSession(202)
 		sRepo.On("FindByID", uint(202)).Return(session, nil)
+		uRepo.On("GetUserByID", uint(1)).Return(&entity.User{ID: 1, Name: "テスト太郎"}, nil)
 
 		result, err := svc.Turn(context.Background(), 1, 202, []byte("dummy-audio"), "", "", false, "", "", "", 0, 1, 0, 1, 1, 0, 0)
 		assert.NoError(t, err)
