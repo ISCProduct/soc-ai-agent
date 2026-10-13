@@ -43,7 +43,8 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: 'standalone',
   // zod v4 は ESM-first ("type":"module") のため Webpack が解決できない場合がある
-  transpilePackages: ['zod'],
+  // three@0.186+ は CJS ビルドを廃止（require() 経由でも ESM 本体を読むだけになった）
+  transpilePackages: ['zod', 'three'],
   // MUI emotion CSS-in-JS のSSR対応
   compiler: {
     emotion: true,
