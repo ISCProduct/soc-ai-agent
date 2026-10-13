@@ -213,6 +213,9 @@ func (s *InterviewService) Turn(
 			systemPrompt = profileCtx + "\n" + systemPrompt
 		}
 	}
+	if nameCtx := buildStudentNameContext(s.fetchStudentName(userID)); nameCtx != "" {
+		systemPrompt = nameCtx + "\n" + systemPrompt
+	}
 	// Chat失敗時も面接官としての言い換え応答にフォールバックし、ターンを中断させない（#910）
 	aiText, err := s.openaiClient.ChatInterview(ctx, systemPrompt, history)
 	if err != nil {
@@ -318,6 +321,9 @@ func (s *InterviewService) StartTurn(
 		if profileCtx := s.crossFeature.BuildInterviewContextFromUser(userID); profileCtx != "" {
 			systemPromptStart = profileCtx + "\n" + systemPromptStart
 		}
+	}
+	if nameCtx := buildStudentNameContext(s.fetchStudentName(userID)); nameCtx != "" {
+		systemPromptStart = nameCtx + "\n" + systemPromptStart
 	}
 	// Chat失敗時も面接開始を中断させず、定型の冒頭挨拶にフォールバックする（#910）
 	aiText, err := s.openaiClient.ChatInterview(ctx, systemPromptStart, []map[string]string{
