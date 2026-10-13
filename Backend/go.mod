@@ -32,7 +32,7 @@ require (
 	github.com/hibiken/asynq v0.25.1
 	github.com/labstack/echo-contrib v0.50.1
 	github.com/redis/go-redis/v9 v9.7.3
-	github.com/resend/resend-go/v3 v3.10.1
+	github.com/resend/resend-go/v3 v3.17.0
 	golang.org/x/sync v0.23.0
 )
 
