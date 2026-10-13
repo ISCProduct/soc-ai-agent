@@ -37,6 +37,23 @@ func (s *InterviewService) fetchSkillScores(userID uint) []models.SkillScore {
 	return scores
 }
 
+// fetchStudentName は応募者の登録氏名を取得する。
+// 自己紹介の音声認識結果だけで氏名を判定すると、聞き間違い（例:
+// 「田中優希」→「玉川」）がそのまま面接官の呼び方として固定されてしまう
+// （履歴に残り続けるため以降のターンでも引きずる）。登録済みの氏名を
+// システムプロンプトへ正として渡し、以後はそちらを使わせる。
+func (s *InterviewService) fetchStudentName(userID uint) string {
+	if s.userRepo == nil {
+		return ""
+	}
+	user, err := s.userRepo.GetUserByID(userID)
+	if err != nil {
+		log.Printf("[Interview] fetchStudentName error: %v", err)
+		return ""
+	}
+	return strings.TrimSpace(user.Name)
+}
+
 // lookupCompanyReading はAIモデルの知識から企業名の日本語読み（ふりがな）を取得します。
 // 取得に失敗した場合はエラーを返し、不明な場合は空文字とnilを返します。
 func (s *InterviewService) lookupCompanyReading(ctx context.Context, companyName string) (string, error) {
