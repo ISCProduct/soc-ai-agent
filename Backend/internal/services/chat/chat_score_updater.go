@@ -23,23 +23,17 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 		history = []models.ChatMessage{}
 	}
 
-	lastQuestion := ""
 	// 出題時に保存した軸。推測より確実なので、あればこれを使う(#1333)。
-	storedCategory := ""
-	for i := len(history) - 1; i >= 0; i-- {
-		if history[i].Role == "assistant" {
-			lastQuestion = history[i].Content
-			storedCategory = history[i].WeightCategory
-			break
-		}
-	}
+	lastQuestion, storedCategory := lastQuestionForScoring(history)
 
 	if strings.TrimSpace(lastQuestion) == "" {
 		log.Printf("Warning: no previous question found for scoring\n")
 		// 質問が見つからない場合は進捗を進める（チャット開始直後など）
 		return true, nil
 	}
-	if s.isJobSelectionQuestion(lastQuestion) {
+	// 保存された軸があるなら診断の出題。職種選択の判定より保存値を優先する。
+	// （判定は本文のキーワードなので、選択肢に「役割」「興味」などが入ると倒れる）
+	if storedCategory == "" && s.isJobSelectionQuestion(lastQuestion) {
 		log.Printf("Skipping analysis for job selection question\n")
 		return true, nil
 	}
@@ -90,23 +84,17 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 // reason の有無・矛盾で軸スコアを中立寄りに減衰する（文章品質スコアとは混ぜない）。
 // 戻り値の bool は「有効な品質回答かどうか」を示す（進捗カウントに使用）。
 func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sessionID, answer, reason string, history []models.ChatMessage, jobCategoryID uint) (bool, error) {
-	// 最後のAIの質問を取得
-	var lastQuestion string
-	var targetCategory string
-
-	for i := len(history) - 1; i >= 0; i-- {
-		if history[i].Role == "assistant" {
-			lastQuestion = history[i].Content
-			// 出題時に保存した軸があればそれを正とする(#1333)。
-			targetCategory = history[i].WeightCategory
-			break
-		}
-	}
+	// 最後のAIの質問を取得。出題時に保存した軸があればそれを正とする(#1333)。
+	lastQuestion, targetCategory := lastQuestionForScoring(history)
 
 	if lastQuestion == "" {
 		return false, fmt.Errorf("no previous question found")
 	}
-	if s.isJobSelectionQuestion(lastQuestion) {
+	// 出題時に軸を保存してあるなら、それは採点対象の質問。
+	// 本文のキーワード判定は「選んでください」＋「興味」のような語の同居でも
+	// 職種選択に倒れるので、保存値があるときはそちらを信じる(#1333)。
+	// 職種選択の質問は軸を持たずに保存される。
+	if targetCategory == "" && s.isJobSelectionQuestion(lastQuestion) {
 		log.Printf("[Choice Answer] Skipping score update for job selection question\n")
 		// 職種選択は進捗カウントする（ユーザーが意思表示した）
 		return true, nil
@@ -229,51 +217,4 @@ func (s *ChatService) isChoiceAnswer(answer string) bool {
 	// A-E または 1-5 の形式
 	return answer == "A" || answer == "B" || answer == "C" || answer == "D" || answer == "E" ||
 		answer == "1" || answer == "2" || answer == "3" || answer == "4" || answer == "5"
-}
-
-func buildChoiceFallback(questionText, phaseName string) string {
-	choices := []string{}
-	switch phaseName {
-	case "job_analysis":
-		choices = []string{
-			"1) ものづくり・開発系（Web/アプリ/設計）",
-			"2) データ・分析系（分析/企画/改善）",
-			"3) インフラ・運用系（基盤/安定稼働）",
-			"4) 対人・調整系（営業/人事/サポート）",
-			"5) その他（自由記述）",
-		}
-	case "interest_analysis":
-		choices = []string{
-			"1) 新しい技術やツールに触れる",
-			"2) 仕組みを考えたり設計する",
-			"3) 人と関わりながら進める",
-			"4) コツコツ改善・整理する",
-			"5) その他（自由記述）",
-		}
-	case "aptitude_analysis":
-		choices = []string{
-			"1) 自分から主導して進める",
-			"2) みんなで協力して進める",
-			"3) 支える・サポート役に回る",
-			"4) 一人で集中して進める",
-			"5) その他（自由記述）",
-		}
-	case "future_analysis":
-		choices = []string{
-			"1) 安定や福利厚生を重視",
-			"2) 成長や挑戦を重視",
-			"3) ワークライフバランス重視",
-			"4) 裁量や自由度重視",
-			"5) その他（自由記述）",
-		}
-	default:
-		choices = []string{
-			"1) とても当てはまる",
-			"2) まあ当てはまる",
-			"3) あまり当てはまらない",
-			"4) まったく当てはまらない",
-			"5) その他（自由記述）",
-		}
-	}
-	return fmt.Sprintf("%s\n\n%s", strings.TrimSpace(questionText), strings.Join(choices, "\n"))
 }

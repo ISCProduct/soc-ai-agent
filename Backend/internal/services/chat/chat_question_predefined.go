@@ -74,13 +74,19 @@ func (s *ChatService) isJobSelectionQuestion(text string) bool {
 
 func (s *ChatService) shouldValidateJobCategory(history []models.ChatMessage) bool {
 	// 警告メッセージを飛ばし、実質の直前質問で判定する
-	lastAssistant := findLastAssistantQuestion(history)
-	if strings.TrimSpace(lastAssistant) == "" {
+	msg := findLastAssistantQuestionMessage(history)
+	if msg == nil {
 		// 質問がまだ無い初回のみ職種判定へ
 		if s.getLastAssistantMessage(history) == "" {
 			return true
 		}
 		return false
 	}
-	return s.isJobSelectionQuestion(lastAssistant)
+	// 評価軸を持つ質問は診断の出題。職種選択ではないので判定に再突入しない。
+	// 本文のキーワード判定だけだと、選択肢に「役割」「興味」などが入った
+	// 出題が職種選択に倒れ、回答が職種の候補として読み直されてしまう。
+	if msg.WeightCategory != "" {
+		return false
+	}
+	return s.isJobSelectionQuestion(msg.Content)
 }
