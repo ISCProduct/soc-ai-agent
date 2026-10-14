@@ -48,7 +48,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	} else {
 		log.Printf("[ProcessChat] Processing as text answer\n")
 		var err error
-		isQualityAnswer, err = s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, resolved.Text, jobCategoryID)
+		isQualityAnswer, err = s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, resolved.Text, jobCategoryID, history)
 		if err != nil {
 			log.Printf("Warning: failed to update weights: %v\n", err)
 		}
@@ -171,7 +171,9 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	}
 	if currentPhaseName != "" && isTextBasedQuestion(aiResponse) && !shouldForceTextQuestion(recentHistory, currentPhase) {
 		if currentPhaseName == "job_analysis" || currentPhaseName == "interest_analysis" || currentPhaseName == "aptitude_analysis" || currentPhaseName == "future_analysis" {
-			aiResponse = buildChoiceFallback(aiResponse, currentPhaseName)
+			// 選択肢はフェーズではなく評価軸で決める。フェーズは3〜4問続くので、
+			// フェーズ単位にすると質問が変わっても同じ選択肢が並び続ける。
+			aiResponse = buildChoiceFallback(aiResponse, targetCategory)
 		}
 	}
 

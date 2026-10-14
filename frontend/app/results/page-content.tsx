@@ -83,15 +83,13 @@ function ResultsContent() {
 
   if (error) {
     return (
-      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-        <Box sx={{ maxWidth: 1200, mx: 'auto', p: { xs: 2, sm: 4 }, pb: 0, width: '100%' }}>
-          <AnalysisScoreCard
-            analysisScores={analysisScores}
-            scoreComment={scoreComment}
-            analysisError={analysisError}
-            onRetryAnalysis={handleRetryAnalysis}
-          />
-        </Box>
+      <Box sx={{ maxWidth: 1200, mx: 'auto', p: { xs: 2, sm: 4 }, width: '100%' }}>
+        <AnalysisScoreCard
+          analysisScores={analysisScores}
+          scoreComment={scoreComment}
+          analysisError={analysisError}
+          onRetryAnalysis={handleRetryAnalysis}
+        />
         <ResultsErrorView
           error={error}
           onBack={handleBack}
@@ -103,15 +101,13 @@ function ResultsContent() {
 
   if (companies.length === 0) {
     return (
-      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-        <Box sx={{ maxWidth: 1200, mx: 'auto', p: { xs: 2, sm: 4 }, pb: 0, width: '100%' }}>
-          <AnalysisScoreCard
-            analysisScores={analysisScores}
-            scoreComment={scoreComment}
-            analysisError={analysisError}
-            onRetryAnalysis={handleRetryAnalysis}
-          />
-        </Box>
+      <Box sx={{ maxWidth: 1200, mx: 'auto', p: { xs: 2, sm: 4 }, width: '100%' }}>
+        <AnalysisScoreCard
+          analysisScores={analysisScores}
+          scoreComment={scoreComment}
+          analysisError={analysisError}
+          onRetryAnalysis={handleRetryAnalysis}
+        />
         <ResultsNoMatchView onReset={handleReset} />
       </Box>
     )
