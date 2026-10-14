@@ -15,14 +15,12 @@ import (
 
 // analyzeAndUpdateWeights ユーザーの回答を分析し重み係数を更新する。
 // 戻り値の bool は「有効な品質回答かどうか」を示す（進捗カウントに使用）。
-func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, sessionID, message string, jobCategoryID uint) (bool, error) {
-	// 会話履歴から直近の質問を取得
-	history, err := s.chatMessageRepo.FindRecentBySessionIDForUser(sessionID, userID, 5)
-	if err != nil {
-		log.Printf("Warning: failed to get history for analysis: %v\n", err)
-		history = []models.ChatMessage{}
-	}
-
+//
+// history は呼び出し元が取得済みのものを受け取る。
+// 以前はここで直近5件を取り直していたが、案内や警告が往復すると元の質問が
+// 窓から外れ、軸を失って別の軸へ採点していた。回答の検証・選択肢の解決は
+// 呼び出し元の履歴を見ているので、採点も同じものを見る。
+func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, sessionID, message string, jobCategoryID uint, history []models.ChatMessage) (bool, error) {
 	// 出題時に保存した軸。推測より確実なので、あればこれを使う(#1333)。
 	lastQuestion, storedCategory := lastQuestionForScoring(history)
 

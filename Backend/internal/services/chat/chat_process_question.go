@@ -48,7 +48,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	} else {
 		log.Printf("[ProcessChat] Processing as text answer\n")
 		var err error
-		isQualityAnswer, err = s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, resolved.Text, jobCategoryID)
+		isQualityAnswer, err = s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, resolved.Text, jobCategoryID, history)
 		if err != nil {
 			log.Printf("Warning: failed to update weights: %v\n", err)
 		}

@@ -170,3 +170,47 @@ func TestLastQuestionForScoringFallsBackToLatestAssistant(t *testing.T) {
 		t.Fatalf("従来の挙動に落ちない: %q / %q", got, category)
 	}
 }
+
+// 案内の目印が短いと、同じ言い回しを含む通常の質問まで案内として読み飛ばされ、
+// その質問が採点対象から外れる（画面にも古い選択肢が残る）。
+func TestGuidanceMarkerDoesNotSwallowNormalQuestions(t *testing.T) {
+	normal := "あなたの考えに一番近いものを選んでください。当てはまらなければ内容も書いて送ってください。"
+	if isValidationFeedbackMessage(normal) {
+		t.Fatalf("通常の質問が案内として判定される: %q", normal)
+	}
+	if !isValidationFeedbackMessage(validationOtherNeedsTextMessage()) {
+		t.Fatal("案内そのものが判定されない")
+	}
+}
+
+// 案内が往復しても、採点は元の質問とその軸を使う。
+// 以前は直近5件だけを取り直していたので、案内3往復で元の質問が窓から外れていた。
+func TestScoringKeepsAxisAcrossRepeatedGuidance(t *testing.T) {
+	question := buildChoiceFallback("新しいことに挑戦しましたか？", "成長志向")
+	history := []models.ChatMessage{
+		{Role: "assistant", Content: question, WeightCategory: "成長志向"},
+	}
+	for range 3 {
+		history = append(history,
+			models.ChatMessage{Role: "user", Content: "5"},
+			models.ChatMessage{Role: "assistant", Content: validationOtherNeedsTextMessage()},
+		)
+	}
+	if _, category := lastQuestionForScoring(history); category != "成長志向" {
+		t.Fatalf("案内3往復で軸を失う: %q", category)
+	}
+}
+
+// 「5:」のように区切りだけで本文が無いものも、内容なしの「その他」として扱う。
+func TestEmptyOtherChoiceWithTrailingDelimiter(t *testing.T) {
+	question := buildChoiceFallback("新しいことに挑戦しましたか？", "成長志向")
+	for _, answer := range []string{"5", "5:", "5：", "5： ", "5。"} {
+		if !isEmptyOtherChoiceAnswer(question, answer) {
+			t.Fatalf("内容なしの「その他」として扱われない: %q", answer)
+		}
+	}
+	// 本文があるものは通常どおり通す
+	if isEmptyOtherChoiceAnswer(question, "5: 部活で新しい練習方法を考えました") {
+		t.Fatal("本文のある「その他」まで案内に落ちている")
+	}
+}

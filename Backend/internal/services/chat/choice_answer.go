@@ -161,6 +161,9 @@ func ResolveChoiceAnswer(question, answer string) ChoiceResolution {
 // 選択肢の番号を手で打つ利用者がいる（FE は 1〜5 の入力をそのまま送る）。
 func isEmptyOtherChoiceAnswer(question, answer string) bool {
 	answer = strings.ToUpper(strings.TrimSpace(answer))
+	// 「5:」「5：」は本文が無いのに isChoiceToken に一致しない。
+	// 短い記号回答を通す代替検証をすり抜けて、内容なしのまま次へ進んでしまう。
+	answer = strings.TrimSpace(strings.TrimRight(answer, ":：、。 　"))
 	if !isChoiceToken(answer) {
 		return false
 	}
