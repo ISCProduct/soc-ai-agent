@@ -54,9 +54,16 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 		}
 	}
 
-	// 品質回答のみ valid_answers をインクリメントして進捗を進める
-	if err := s.updatePhaseProgress(currentPhase, isQualityAnswer); err != nil {
-		log.Printf("Warning: failed to update phase progress: %v\n", err)
+	// 品質回答のみ valid_answers をインクリメントして進捗を進める。
+	// 職種選択に答えたこの回答は resolveJobCategoryForChat 内の
+	// completeJobAnalysisPhase で job_analysis を完了済みにする分として既に
+	// 消費されている。ここで currentPhase（次のフェーズ）にも数えると、
+	// 同じ1回の回答が job_analysis 完了分＋次フェーズの1問分で二重に
+	// カウントされ、進捗表示が実際の回答数より多く見える。
+	if !jobJustResolved {
+		if err := s.updatePhaseProgress(currentPhase, isQualityAnswer); err != nil {
+			log.Printf("Warning: failed to update phase progress: %v\n", err)
+		}
 	}
 
 	// 4. 既に聞いた質問を全て収集（重複防止を徹底）
