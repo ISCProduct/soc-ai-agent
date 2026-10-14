@@ -128,9 +128,16 @@ func ResolveChoiceAnswer(question, answer string) ChoiceResolution {
 	upper := strings.ToUpper(answer)
 	if isChoiceToken(upper) {
 		for _, opt := range options {
-			if strings.EqualFold(opt.Value, upper) {
-				return ChoiceResolution{Letter: opt.Value, IsChoice: true, Text: opt.Value}
+			if !strings.EqualFold(opt.Value, upper) {
+				continue
 			}
+			if isOtherChoiceText(opt.Text) {
+				// 記号だけで「その他」を選んだ場合も記号採点へ落とさない。
+				// 「その他」は末尾に置くので、落とすとその軸の最低点
+				// （5番目=20点）として採点されてしまう。
+				return ChoiceResolution{IsFreeText: true}
+			}
+			return ChoiceResolution{Letter: opt.Value, IsChoice: true, Text: opt.Value}
 		}
 		return ChoiceResolution{Letter: upper, IsChoice: true, Text: upper}
 	}
