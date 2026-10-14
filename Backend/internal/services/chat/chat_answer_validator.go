@@ -106,6 +106,28 @@ func findLastAssistantQuestionMessage(history []models.ChatMessage) *models.Chat
 	return nil
 }
 
+// lastQuestionForScoring は採点に使う質問文と、出題時に保存した評価軸を返す。
+//
+// 警告・案内メッセージを飛ばすのが要点。飛ばさないと、案内の直後の回答が
+// 案内文を質問として採点してしまう。案内文は軸を持たないので、軸は本文からの
+// 推測になり既定の技術志向へ落ちる（回答と無関係な軸に点が入る）。
+// 回答の検証・選択肢の解決は既に findLastAssistantQuestion を見ているので、
+// 採点側も同じ基準に揃える。
+//
+// 質問として判定できる assistant メッセージが無い履歴では、従来どおり
+// 直近の assistant メッセージに落ちる。
+func lastQuestionForScoring(history []models.ChatMessage) (content, category string) {
+	if msg := findLastAssistantQuestionMessage(history); msg != nil {
+		return msg.Content, msg.WeightCategory
+	}
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "assistant" {
+			return history[i].Content, history[i].WeightCategory
+		}
+	}
+	return "", ""
+}
+
 // findLastAssistantQuestion: 警告・終了メッセージを飛ばし、履歴上の直近の質問文を返す。
 // 見つからない場合は空文字（呼び出し側で初回職種選択フォールバック）。
 func findLastAssistantQuestion(history []models.ChatMessage) string {

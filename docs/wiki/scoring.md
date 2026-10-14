@@ -374,6 +374,10 @@ func scoredMatch(userScores map[string]float64, category string, companyWeight f
 普通の語が入ると倒れる。**出題時に保存した評価軸（`chat_messages.weight_category`）があるときは
 そちらを優先**する。倒れたまま進むと、採点が丸ごと飛ばされるか、回答が職種の候補として読み直される。
 
+採点対象の質問は `lastQuestionForScoring` で引く。**警告・案内メッセージは飛ばす**。
+飛ばさないと、案内の直後の回答が案内文を質問として採点する。案内文は軸を持たないため
+本文からの推測になり、既定の技術志向へ落ちて無関係な軸に点が入る。
+
 ### 診断妥当性と暫定表示
 
 診断完了後の品質ジョブはスコアを**自動補正せず**、`diagnosis_quality_reports` に confidence / flags を保存する。

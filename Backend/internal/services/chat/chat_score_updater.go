@@ -23,16 +23,8 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 		history = []models.ChatMessage{}
 	}
 
-	lastQuestion := ""
 	// 出題時に保存した軸。推測より確実なので、あればこれを使う(#1333)。
-	storedCategory := ""
-	for i := len(history) - 1; i >= 0; i-- {
-		if history[i].Role == "assistant" {
-			lastQuestion = history[i].Content
-			storedCategory = history[i].WeightCategory
-			break
-		}
-	}
+	lastQuestion, storedCategory := lastQuestionForScoring(history)
 
 	if strings.TrimSpace(lastQuestion) == "" {
 		log.Printf("Warning: no previous question found for scoring\n")
@@ -92,18 +84,8 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 // reason の有無・矛盾で軸スコアを中立寄りに減衰する（文章品質スコアとは混ぜない）。
 // 戻り値の bool は「有効な品質回答かどうか」を示す（進捗カウントに使用）。
 func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sessionID, answer, reason string, history []models.ChatMessage, jobCategoryID uint) (bool, error) {
-	// 最後のAIの質問を取得
-	var lastQuestion string
-	var targetCategory string
-
-	for i := len(history) - 1; i >= 0; i-- {
-		if history[i].Role == "assistant" {
-			lastQuestion = history[i].Content
-			// 出題時に保存した軸があればそれを正とする(#1333)。
-			targetCategory = history[i].WeightCategory
-			break
-		}
-	}
+	// 最後のAIの質問を取得。出題時に保存した軸があればそれを正とする(#1333)。
+	lastQuestion, targetCategory := lastQuestionForScoring(history)
 
 	if lastQuestion == "" {
 		return false, fmt.Errorf("no previous question found")

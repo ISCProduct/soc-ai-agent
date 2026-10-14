@@ -132,3 +132,41 @@ func TestJobSelectionWithoutStoredCategoryStillDetected(t *testing.T) {
 		t.Fatal("職種選択の質問が検出されない")
 	}
 }
+
+// 「その他」の案内を挟んだあとの再回答は、案内文ではなく元の質問を採点する。
+// 案内文は軸を持たないので、拾うと軸が既定（技術志向）へ落ち、
+// 成長志向の質問に答えたのに技術志向へ点が入る。
+func TestScoringSkipsGuidanceAndKeepsOriginalQuestion(t *testing.T) {
+	question := buildChoiceFallback("新しいことに挑戦しましたか？", "成長志向")
+	history := []models.ChatMessage{
+		{Role: "assistant", Content: question, WeightCategory: "成長志向"},
+		{Role: "user", Content: "5"},
+		{Role: "assistant", Content: validationOtherNeedsTextMessage()},
+	}
+
+	gotQuestion, gotCategory := lastQuestionForScoring(history)
+	if gotCategory != "成長志向" {
+		t.Fatalf("軸が引き継がれない: %q", gotCategory)
+	}
+	if gotQuestion != question {
+		t.Fatalf("採点対象が元の質問でない:\n%s", gotQuestion)
+	}
+
+	// 無効回答の警告でも同じ（こちらは以前から保存されている文言）
+	history[2].Content = validationRetryMessage(1, 3)
+	if _, c := lastQuestionForScoring(history); c != "成長志向" {
+		t.Fatalf("警告を挟むと軸が落ちる: %q", c)
+	}
+}
+
+// 質問として判定できない履歴では従来どおり直近の assistant メッセージに落ちる。
+func TestLastQuestionForScoringFallsBackToLatestAssistant(t *testing.T) {
+	history := []models.ChatMessage{
+		{Role: "assistant", Content: "ありがとうございます。", WeightCategory: "細部志向"},
+		{Role: "user", Content: "はい"},
+	}
+	got, category := lastQuestionForScoring(history)
+	if got != "ありがとうございます。" || category != "細部志向" {
+		t.Fatalf("従来の挙動に落ちない: %q / %q", got, category)
+	}
+}
