@@ -209,17 +209,6 @@ export default function ResultsListView({
               >
                 {diagnosisSummary ||
                   '回答の根拠がまだ薄いため、適合度は参考値です。選択肢に理由を添えると精度が上がります。'}
-                {(evaluatedCategories != null || minMatchedAxisCount != null || diagnosisConfidence != null) && (
-                  <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
-                    {[
-                      evaluatedCategories != null ? `評価カテゴリ ${evaluatedCategories}` : null,
-                      minMatchedAxisCount != null ? `最小根拠軸 ${minMatchedAxisCount}` : null,
-                      diagnosisConfidence != null ? `診断信頼度 ${diagnosisConfidence}` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' / ')}
-                  </Typography>
-                )}
               </Alert>
             </Box>
           )}
