@@ -95,6 +95,12 @@ var choiceScaleDefault = []string{
 	"まったく当てはまらない",
 }
 
+// 事前定義質問は「経験はありますか／どんな工夫をしましたか」のように、
+// 自由記述を前提にした書き方をしている。そこへ度合いの選択肢だけを足すと、
+// 何について選ぶのかが曖昧になる（経験を聞かれたのに傾向を選ばされる）。
+// 選ぶ対象を一行で言い直してから並べる。
+const choiceLeadIn = "この中で、あなたに一番近いものを選んでください。"
+
 // otherChoiceText は最後に置く自由記述。
 // ResolveChoiceAnswer が「その他」を記号採点から外して文章採点へ回すので、
 // 末尾（最低点の位置）に置いても度合いとしては採点されない。
@@ -114,5 +120,5 @@ func buildChoiceFallback(questionText, category string) string {
 	}
 	lines = append(lines, fmt.Sprintf("%d) %s", len(scale)+1, otherChoiceText))
 
-	return fmt.Sprintf("%s\n\n%s", strings.TrimSpace(questionText), strings.Join(lines, "\n"))
+	return fmt.Sprintf("%s\n\n%s\n%s", strings.TrimSpace(questionText), choiceLeadIn, strings.Join(lines, "\n"))
 }

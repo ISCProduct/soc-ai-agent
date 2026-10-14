@@ -2,6 +2,7 @@ package chat
 
 import (
 	"Backend/domain/valueobject"
+	"Backend/internal/models"
 	"strings"
 	"testing"
 )
@@ -53,5 +54,81 @@ func TestBuildChoiceFallbackIsOrdinalWithOtherLast(t *testing.T) {
 		if first := ResolveChoiceAnswer(question, options[0].Value); first.Letter != "1" {
 			t.Fatalf("%s: 先頭の選択肢が1番目として解決されない: %q", category, first.Letter)
 		}
+	}
+}
+
+// 「その他」を記号だけで選んだ回答は、内容が無いので通常の回答経路へ通さない。
+// 通すと採点も進捗もできないまま次の質問だけ進み、フェーズが完了しなくなる。
+func TestIsEmptyOtherChoiceAnswer(t *testing.T) {
+	question := buildChoiceFallback("新しいことに挑戦しましたか？", "成長志向")
+	cases := []struct {
+		name   string
+		answer string
+		want   bool
+	}{
+		{"末尾のその他を記号だけで選ぶ", "5", true},
+		{"全角空白つき", "　5　", true},
+		{"通常の選択肢", "1", false},
+		{"理由つきのその他", "5: 部活で新しい練習方法を考えました", false},
+		{"自由記述", "資格の勉強を始めました", false},
+		{"選択肢の無い質問", "5", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q := question
+			if tc.name == "選択肢の無い質問" {
+				q = "最近頑張ったことを教えてください。"
+			}
+			if got := isEmptyOtherChoiceAnswer(q, tc.answer); got != tc.want {
+				t.Fatalf("isEmptyOtherChoiceAnswer(%q)=%v want %v", tc.answer, got, tc.want)
+			}
+		})
+	}
+}
+
+// 案内文は画面側が「警告」として読み飛ばせる必要がある。
+// 読み飛ばせないと直近の質問として拾われ、選択肢が消えて選び直せなくなる。
+func TestOtherNeedsTextMessageIsValidationFeedback(t *testing.T) {
+	msg := validationOtherNeedsTextMessage()
+	if !isValidationFeedbackMessage(msg) {
+		t.Fatalf("案内文が警告として判定されない: %q", msg)
+	}
+	// 打ち切り扱いにはしない（「その他」を押しただけで終了されては困る）
+	if strings.Contains(msg, validationMarkerTerminated) {
+		t.Fatalf("案内文が打ち切りとして判定される: %q", msg)
+	}
+}
+
+// 冒頭の案内（「…一番近いものを選んでください。」）と、選択肢に入る「役割」「興味」
+// といった普通の語が重なると、本文のキーワード判定は職種選択の質問に倒れる。
+// 倒れると採点が丸ごと飛ばされ、その軸が未評価のまま残る。
+// 出題時に保存した評価軸があるときは、そちらを信じて採点を続ける。
+func TestStoredCategoryBeatsJobSelectionHeuristic(t *testing.T) {
+	s := &ChatService{}
+	for _, c := range valueobject.AllWeightCategories() {
+		category := string(c)
+		question := buildChoiceFallback("あなたはどうですか？", category)
+		history := []models.ChatMessage{
+			{Role: "assistant", Content: question, WeightCategory: category},
+		}
+
+		// 職種判定へ再突入すると、回答が職種の候補として読み直される
+		if s.shouldValidateJobCategory(history) {
+			t.Fatalf("%s: 職種判定へ再突入する", category)
+		}
+		if got := findLastAssistantQuestionMessage(history); got == nil || got.WeightCategory != category {
+			t.Fatalf("%s: 直近の質問から軸を取り出せない", category)
+		}
+	}
+}
+
+// 軸を持たない質問（職種選択）はこれまでどおり本文で判定する。
+func TestJobSelectionWithoutStoredCategoryStillDetected(t *testing.T) {
+	s := &ChatService{}
+	history := []models.ChatMessage{
+		{Role: "assistant", Content: "「開発系エンジニア」とのことですが、以下のうちどれが一番近いですか？\n1. ソフトウェアエンジニア\n2. Webエンジニア"},
+	}
+	if !s.shouldValidateJobCategory(history) {
+		t.Fatal("職種選択の質問が検出されない")
 	}
 }

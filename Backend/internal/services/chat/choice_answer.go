@@ -154,6 +154,24 @@ func ResolveChoiceAnswer(question, answer string) ChoiceResolution {
 	return ChoiceResolution{IsFreeText: true, Text: answer}
 }
 
+// isEmptyOtherChoiceAnswer は「その他（自由記述）」を記号だけで選んだ回答か。
+//
+// 記号だけなので書かれた内容が無く、採点も進捗もできない。
+// 画面の「その他」ボタンは自由記述へ切り替わるのでここは通らないが、
+// 選択肢の番号を手で打つ利用者がいる（FE は 1〜5 の入力をそのまま送る）。
+func isEmptyOtherChoiceAnswer(question, answer string) bool {
+	answer = strings.ToUpper(strings.TrimSpace(answer))
+	if !isChoiceToken(answer) {
+		return false
+	}
+	for _, opt := range ParseChoiceOptions(question) {
+		if strings.EqualFold(opt.Value, answer) {
+			return isOtherChoiceText(opt.Text)
+		}
+	}
+	return false
+}
+
 func isChoiceToken(answer string) bool {
 	switch answer {
 	case "A", "B", "C", "D", "E", "1", "2", "3", "4", "5":

@@ -39,7 +39,9 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 		// 質問が見つからない場合は進捗を進める（チャット開始直後など）
 		return true, nil
 	}
-	if s.isJobSelectionQuestion(lastQuestion) {
+	// 保存された軸があるなら診断の出題。職種選択の判定より保存値を優先する。
+	// （判定は本文のキーワードなので、選択肢に「役割」「興味」などが入ると倒れる）
+	if storedCategory == "" && s.isJobSelectionQuestion(lastQuestion) {
 		log.Printf("Skipping analysis for job selection question\n")
 		return true, nil
 	}
@@ -106,7 +108,11 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 	if lastQuestion == "" {
 		return false, fmt.Errorf("no previous question found")
 	}
-	if s.isJobSelectionQuestion(lastQuestion) {
+	// 出題時に軸を保存してあるなら、それは採点対象の質問。
+	// 本文のキーワード判定は「選んでください」＋「興味」のような語の同居でも
+	// 職種選択に倒れるので、保存値があるときはそちらを信じる(#1333)。
+	// 職種選択の質問は軸を持たずに保存される。
+	if targetCategory == "" && s.isJobSelectionQuestion(lastQuestion) {
 		log.Printf("[Choice Answer] Skipping score update for job selection question\n")
 		// 職種選択は進捗カウントする（ユーザーが意思表示した）
 		return true, nil
