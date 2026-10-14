@@ -33,7 +33,12 @@ const (
 	validationMarkerRetry      = "質問に沿った内容でもう一度お願いします"
 	validationMarkerTerminated = "このチャットを終了しました"
 	// 「その他」を記号だけで選んだときの案内。無効回答ではないので別の目印にする。
-	validationMarkerOtherNeedsText = "内容も書いて送ってください"
+	//
+	// 部分一致で判定するので、短くすると通常の質問と衝突する。
+	// 「内容も書いて送ってください」だけだと、AI が自由記述を促す文を
+	// 質問末尾に付けた場合に、その質問が案内として読み飛ばされ、
+	// 採点対象から外れて画面にも古い選択肢が残る。文ごと目印にする。
+	validationMarkerOtherNeedsText = "「その他」を選んだときは、内容も書いて送ってください"
 )
 
 // validationMarkers は判定に使う目印。
@@ -64,8 +69,7 @@ func validationRetryMessage(invalidCount, limit int) string {
 // validationOtherNeedsTextMessage は「その他」を記号だけで選んだときの案内。
 // 無効回答として数えないので、打ち切りの予告は付けない。
 func validationOtherNeedsTextMessage() string {
-	return "「その他」を選んだときは、" + validationMarkerOtherNeedsText +
-		"。ほかの選択肢から選び直しても大丈夫です。"
+	return validationMarkerOtherNeedsText + "。ほかの選択肢から選び直しても大丈夫です。"
 }
 
 // validationTerminatedMessage は打ち切りの案内。
