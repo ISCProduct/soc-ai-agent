@@ -128,9 +128,16 @@ func ResolveChoiceAnswer(question, answer string) ChoiceResolution {
 	upper := strings.ToUpper(answer)
 	if isChoiceToken(upper) {
 		for _, opt := range options {
-			if strings.EqualFold(opt.Value, upper) {
-				return ChoiceResolution{Letter: opt.Value, IsChoice: true, Text: opt.Value}
+			if !strings.EqualFold(opt.Value, upper) {
+				continue
 			}
+			if isOtherChoiceText(opt.Text) {
+				// 記号だけで「その他」を選んだ場合も記号採点へ落とさない。
+				// 「その他」は末尾に置くので、落とすとその軸の最低点
+				// （5番目=20点）として採点されてしまう。
+				return ChoiceResolution{IsFreeText: true}
+			}
+			return ChoiceResolution{Letter: opt.Value, IsChoice: true, Text: opt.Value}
 		}
 		return ChoiceResolution{Letter: upper, IsChoice: true, Text: upper}
 	}
@@ -145,6 +152,27 @@ func ResolveChoiceAnswer(question, answer string) ChoiceResolution {
 	}
 
 	return ChoiceResolution{IsFreeText: true, Text: answer}
+}
+
+// isEmptyOtherChoiceAnswer は「その他（自由記述）」を記号だけで選んだ回答か。
+//
+// 記号だけなので書かれた内容が無く、採点も進捗もできない。
+// 画面の「その他」ボタンは自由記述へ切り替わるのでここは通らないが、
+// 選択肢の番号を手で打つ利用者がいる（FE は 1〜5 の入力をそのまま送る）。
+func isEmptyOtherChoiceAnswer(question, answer string) bool {
+	answer = strings.ToUpper(strings.TrimSpace(answer))
+	// 「5:」「5：」は本文が無いのに isChoiceToken に一致しない。
+	// 短い記号回答を通す代替検証をすり抜けて、内容なしのまま次へ進んでしまう。
+	answer = strings.TrimSpace(strings.TrimRight(answer, ":：、。 　"))
+	if !isChoiceToken(answer) {
+		return false
+	}
+	for _, opt := range ParseChoiceOptions(question) {
+		if strings.EqualFold(opt.Value, answer) {
+			return isOtherChoiceText(opt.Text)
+		}
+	}
+	return false
 }
 
 func isChoiceToken(answer string) bool {

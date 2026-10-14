@@ -73,14 +73,13 @@ export function ResultsErrorView({
 }) {
   return (
     <Box sx={{
-      flex: 1,
-      minHeight: 0,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       flexDirection: 'column',
       gap: 2,
-      p: 3,
+      py: 6,
+      px: 3,
     }}>
       <Typography variant="h6" color="error" sx={{ whiteSpace: 'pre-line', textAlign: 'center' }}>
         {error}
@@ -115,13 +114,12 @@ export function ResultsErrorView({
 export function ResultsNoMatchView({ onReset }: { onReset: NavigateHandler }) {
   return (
     <Box sx={{
-      flex: 1,
-      minHeight: 0,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       flexDirection: 'column',
       gap: 2,
+      py: 6,
     }}>
       <Typography variant="h6" color="text.secondary">
         適合する企業が見つかりませんでした

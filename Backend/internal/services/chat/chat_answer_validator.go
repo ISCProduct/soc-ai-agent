@@ -32,6 +32,13 @@ import (
 const (
 	validationMarkerRetry      = "質問に沿った内容でもう一度お願いします"
 	validationMarkerTerminated = "このチャットを終了しました"
+	// 「その他」を記号だけで選んだときの案内。無効回答ではないので別の目印にする。
+	//
+	// 部分一致で判定するので、短くすると通常の質問と衝突する。
+	// 「内容も書いて送ってください」だけだと、AI が自由記述を促す文を
+	// 質問末尾に付けた場合に、その質問が案内として読み飛ばされ、
+	// 採点対象から外れて画面にも古い選択肢が残る。文ごと目印にする。
+	validationMarkerOtherNeedsText = "「その他」を選んだときは、内容も書いて送ってください"
 )
 
 // validationMarkers は判定に使う目印。
@@ -42,6 +49,7 @@ const (
 var validationMarkers = []string{
 	validationMarkerRetry,
 	validationMarkerTerminated,
+	validationMarkerOtherNeedsText,
 	// 旧文言（2026-10 以前に保存されたもの）
 	"書かれた内容にはお答えできません",
 	"質問と関係のない内容が3回続いた",
@@ -56,6 +64,12 @@ func validationRetryMessage(invalidCount, limit int) string {
 		msg += "次も同じだと、このチャットは一度終了します。"
 	}
 	return msg
+}
+
+// validationOtherNeedsTextMessage は「その他」を記号だけで選んだときの案内。
+// 無効回答として数えないので、打ち切りの予告は付けない。
+func validationOtherNeedsTextMessage() string {
+	return validationMarkerOtherNeedsText + "。ほかの選択肢から選び直しても大丈夫です。"
 }
 
 // validationTerminatedMessage は打ち切りの案内。
@@ -78,9 +92,9 @@ func isValidationFeedbackMessage(content string) bool {
 	return false
 }
 
-// findLastAssistantQuestion: 警告・終了メッセージを飛ばし、履歴上の直近の質問文を返す。
-// 見つからない場合は空文字（呼び出し側で初回職種選択フォールバック）。
-func findLastAssistantQuestion(history []models.ChatMessage) string {
+// findLastAssistantQuestionMessage: 警告・終了メッセージを飛ばし、履歴上の直近の
+// 質問メッセージを返す。本文だけでなく出題時に保存した評価軸も要るときに使う。
+func findLastAssistantQuestionMessage(history []models.ChatMessage) *models.ChatMessage {
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Role != "assistant" {
 			continue
@@ -90,8 +104,39 @@ func findLastAssistantQuestion(history []models.ChatMessage) string {
 			continue
 		}
 		if isQuestion(content) {
-			return content
+			return &history[i]
 		}
+	}
+	return nil
+}
+
+// lastQuestionForScoring は採点に使う質問文と、出題時に保存した評価軸を返す。
+//
+// 警告・案内メッセージを飛ばすのが要点。飛ばさないと、案内の直後の回答が
+// 案内文を質問として採点してしまう。案内文は軸を持たないので、軸は本文からの
+// 推測になり既定の技術志向へ落ちる（回答と無関係な軸に点が入る）。
+// 回答の検証・選択肢の解決は既に findLastAssistantQuestion を見ているので、
+// 採点側も同じ基準に揃える。
+//
+// 質問として判定できる assistant メッセージが無い履歴では、従来どおり
+// 直近の assistant メッセージに落ちる。
+func lastQuestionForScoring(history []models.ChatMessage) (content, category string) {
+	if msg := findLastAssistantQuestionMessage(history); msg != nil {
+		return msg.Content, msg.WeightCategory
+	}
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "assistant" {
+			return history[i].Content, history[i].WeightCategory
+		}
+	}
+	return "", ""
+}
+
+// findLastAssistantQuestion: 警告・終了メッセージを飛ばし、履歴上の直近の質問文を返す。
+// 見つからない場合は空文字（呼び出し側で初回職種選択フォールバック）。
+func findLastAssistantQuestion(history []models.ChatMessage) string {
+	if msg := findLastAssistantQuestionMessage(history); msg != nil {
+		return msg.Content
 	}
 	return ""
 }
@@ -106,6 +151,27 @@ func (s *ChatService) checkAnswerValidity(ctx context.Context, history []models.
 	if questionText == "" {
 		// 履歴に質問が無い初回などは職種選択を期待
 		questionText = "どのようなIT職種に興味がありますか？"
+	}
+
+	// 「その他（自由記述）」を記号だけで選んだ場合。
+	//
+	// 書かれた内容が無いので採点も進捗もできない。そのまま通すと、質問だけ進んで
+	// フェーズがいつまでも完了しない。かといって無効回答として数えると、
+	// 「その他」を押しただけで3回の打ち切りに近づいてしまう。
+	// カウントには触れず、書き方だけ伝えて同じ質問に留める。
+	if isEmptyOtherChoiceAnswer(questionText, userMessage) {
+		log.Printf("[Validation] Empty 'other' choice answer: %s\n", userMessage)
+		assistantText := validationOtherNeedsTextMessage()
+		assistantMsg := &models.ChatMessage{
+			SessionID: sessionID,
+			UserID:    userID,
+			Role:      "assistant",
+			Content:   assistantText,
+		}
+		if err := s.chatMessageRepo.Create(assistantMsg); err != nil {
+			return true, "", fmt.Errorf("failed to save assistant message for empty other choice: %w", err)
+		}
+		return true, assistantText, nil
 	}
 
 	// ユーザー回答が質問に対する答えかどうか判定
