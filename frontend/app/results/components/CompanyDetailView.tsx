@@ -17,7 +17,7 @@ import { ArrowBack, LocationOn, People, TrendingUp as TrendingUpIcon } from '@mu
 import dynamic from 'next/dynamic'
 import type { CapitalRelation, CompanyMarketInfo } from '@/lib/company/data'
 import type { Company } from '../types'
-import { UI } from '@/lib/design/tokens'
+import { CONTENT_MAX_WIDTH, UI } from '@/lib/design/tokens'
 
 const CompanyRelationDiagram = dynamic(() => import('./CompanyRelationDiagram'), {
   ssr: false,
@@ -60,16 +60,19 @@ export default function CompanyDetailView({
       overflow: 'hidden',
       backgroundColor: '#fff',
     }}>
-      {/* ヘッダー */}
+      {/* ヘッダー。帯は全幅、中身は本文と同じ列に揃える（一覧側と同じ扱い）。 */}
       <Box sx={{
-        p: { xs: 2, sm: 3 },
+        px: { xs: 2, sm: 3 },
+        py: { xs: 2, sm: 3 },
         borderBottom: '1px solid #e0e0e0',
         backgroundColor: '#fff',
         flexShrink: 0,
       }}>
-        <Button variant="outlined" startIcon={<ArrowBack />} onClick={onBack}>
-          企業一覧に戻る
-        </Button>
+        <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', width: '100%' }}>
+          <Button variant="outlined" startIcon={<ArrowBack />} onClick={onBack}>
+            企業一覧に戻る
+          </Button>
+        </Box>
       </Box>
 
       {/* 企業詳細コンテンツ */}
@@ -79,7 +82,7 @@ export default function CompanyDetailView({
         p: { xs: 2, sm: 3 },
         backgroundColor: '#fafafa',
       }}>
-        <Box sx={{ maxWidth: 1200, mx: 'auto' }}>
+        <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto' }}>
           <Card elevation={0} sx={{ border: `1px solid ${UI.rule}`, borderRadius: 1 }}>
             <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
               {/* 企業名とマッチスコア */}
