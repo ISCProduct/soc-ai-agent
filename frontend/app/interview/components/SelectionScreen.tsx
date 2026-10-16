@@ -149,23 +149,28 @@ export default function SelectionScreen({
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: UI.paper }}>
-      {/* Header */}
-      <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: { xs: 2, sm: 3, lg: 10 }, py: 2, bgcolor: UI.field, borderBottom: `1px solid ${UI.ruleSoft}` }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0, flex: 1 }}>
-          <Box sx={{ color: UI.mark, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-            <PsychologyIcon sx={{ fontSize: 32 }} />
+      {/* Header。
+          帯（背景と区切り線）は全幅のまま、中身は本文の列幅(maxWidth:896)に
+          揃えて中央寄せする。帯の中身を直接 flex で左右に広げていたため、
+          本文側が中央寄せの列に収まる広い画面ほど左端がずれていた(#1784)。 */}
+      <Box component="header" sx={{ px: { xs: 2, sm: 3, lg: 10 }, py: 2, bgcolor: UI.field, borderBottom: `1px solid ${UI.ruleSoft}` }}>
+        <Box data-testid="selection-header-row" sx={{ maxWidth: 896, mx: 'auto', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0, flex: 1 }}>
+            <Box sx={{ color: UI.mark, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+              <PsychologyIcon sx={{ fontSize: 32 }} />
+            </Box>
+            {/* 13文字あるので、縮み代(minWidth:0)を与えないと右の戻る/アバターを画面外へ押し出す。 */}
+            <Typography noWrap sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: UI.ink }}>IT業界キャリアエージェント</Typography>
           </Box>
-          {/* 13文字あるので、縮み代(minWidth:0)を与えないと右の戻る/アバターを画面外へ押し出す。 */}
-          <Typography noWrap sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: UI.ink }}>IT業界キャリアエージェント</Typography>
-        </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
-          <IconButton sx={{ bgcolor: UI.tint, color: UI.inkSoft }} size="small" onClick={onBack} aria-label="前の画面へ戻る">
-            <ArrowBackIcon fontSize="small" />
-          </IconButton>
-          <Box sx={{ width: 40, height: 40, borderRadius: '50%', bgcolor: `color-mix(in srgb, ${UI.mark} 19%, transparent)`, border: `1px solid color-mix(in srgb, ${UI.mark} 31%, transparent)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Typography sx={{ fontWeight: 700, color: UI.mark, fontSize: 14 }}>
-              {(user.name || 'U').charAt(0).toUpperCase()}
-            </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
+            <IconButton sx={{ bgcolor: UI.tint, color: UI.inkSoft }} size="small" onClick={onBack} aria-label="前の画面へ戻る">
+              <ArrowBackIcon fontSize="small" />
+            </IconButton>
+            <Box sx={{ width: 40, height: 40, borderRadius: '50%', bgcolor: `color-mix(in srgb, ${UI.mark} 19%, transparent)`, border: `1px solid color-mix(in srgb, ${UI.mark} 31%, transparent)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Typography sx={{ fontWeight: 700, color: UI.mark, fontSize: 14 }}>
+                {(user.name || 'U').charAt(0).toUpperCase()}
+              </Typography>
+            </Box>
           </Box>
         </Box>
       </Box>
