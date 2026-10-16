@@ -16,6 +16,7 @@ type OAuthUser = {
   is_guest: boolean
   target_level?: string
   is_admin?: boolean
+  is_staff?: boolean
   oauth_provider?: string
   avatar_url?: string
 }
@@ -39,6 +40,7 @@ function validateOAuthPayload(raw: unknown): OAuthUser {
     is_guest: typeof d.is_guest === 'boolean' ? d.is_guest : false,
     target_level: typeof d.target_level === 'string' ? d.target_level : '',
     is_admin: typeof d.is_admin === 'boolean' ? d.is_admin : undefined,
+    is_staff: typeof d.is_staff === 'boolean' ? d.is_staff : undefined,
     oauth_provider: typeof d.oauth_provider === 'string' ? d.oauth_provider : undefined,
     avatar_url: typeof d.avatar_url === 'string' ? d.avatar_url : undefined,
   }
@@ -92,7 +94,8 @@ function OAuthCallbackContent() {
           return
         }
 
-        router.push('/')
+        // 職員（教員・キャリア担当）はチャットではなく教員指導画面(/admin)へ。
+        router.push(userData.is_staff ? '/admin' : '/')
       } catch (err: any) {
         setError('認証データの処理に失敗しました: ' + err.message)
       }

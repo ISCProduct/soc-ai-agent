@@ -693,7 +693,10 @@ func main() {
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())
 	api.GET("/whats-new", releaseNoteController.List, routes.EchoUserAuth(cfg.UserSecret, userDeletionService))
-	adminEntry := api.Group("/admin", routes.EchoAdminAuth(userRepo, cfg.AdminSecret))
+	// これらは企業ユーザー招待・学習データのエクスポート等、担当校に閉じない
+	// 横断操作なので is_admin 必須にする（職員=staff は不可）。SetupAdminRoutes の外で
+	// 作られているため EchoRequireAdmin をグループに明示的に掛ける(#職員ロール)。
+	adminEntry := api.Group("/admin", routes.EchoAdminAuth(userRepo, cfg.AdminSecret), routes.EchoRequireAdmin())
 	adminEntry.POST("/company-entry-submissions/:id/resend-email", companyEntryController.ResendEmail)
 	adminEntry.POST("/companies/:id/company-users", adminCompanyUserController.Invite)
 	adminEntry.GET("/companies/:id/company-users", adminCompanyUserController.List)
