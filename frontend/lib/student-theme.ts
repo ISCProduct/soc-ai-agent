@@ -1,5 +1,5 @@
 import { createTheme } from '@mui/material/styles'
-import { FONT_STACK_PROPORTIONAL } from './design-tokens'
+import { BODY_FONT_SIZE, FONT_STACK_PROPORTIONAL } from './design-tokens'
 
 export const STUDENT_THEME_STORAGE_KEY = 'student-theme-mode'
 
@@ -145,7 +145,19 @@ export function createStudentMuiTheme(mode: StudentThemeMode) {
       background: { default: p.background, paper: p.paper },
       text: { primary: '#111111', secondary: '#333333' },
     },
-    typography: { fontFamily: FONT_FAMILY },
+    typography: {
+      fontFamily: FONT_FAMILY,
+      // #1572: 本文の既定サイズ。以前は MUI 既定の14pxのままだった。
+      // fontSize だけでなく body1/body2 も明示し、計算係数のズレで意図せず
+      // ぶれないようにする（企業ポータル側 company-theme.ts と同じ考え方）。
+      fontSize: BODY_FONT_SIZE,
+      body1: { fontSize: '1rem', lineHeight: 1.6 },
+      body2: { fontSize: '1rem', lineHeight: 1.6 },
+      caption: { fontSize: '0.875rem', lineHeight: 1.5 },
+      h4: { fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.01em' },
+      h5: { fontSize: '1.375rem', fontWeight: 700 },
+      h6: { fontSize: '1.125rem', fontWeight: 700 },
+    },
     shape: { borderRadius: mode === 'high-contrast' ? 4 : 12 },
     components: {
       MuiCssBaseline: {
