@@ -154,22 +154,22 @@ export default function CompanyPortalApplicationsPage() {
       ) : items.length === 0 ? (
         <Paper
           elevation={0}
-          sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '4px', p: 4 }}
+          sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '4px' }}
         >
-          <Typography variant="h6" gutterBottom>
-            応募はまだありません
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            公開中の求人がないと応募は発生しません。求人を用意するか、学生を探してみてください。
-          </Typography>
-          <Stack direction="row" spacing={1}>
-            <Button variant="contained" onClick={() => router.push('/company-portal/jobs')}>
-              求人を作る
-            </Button>
-            <Button variant="outlined" onClick={() => router.push('/company-portal/students')}>
-              学生を探す
-            </Button>
-          </Stack>
+          <EmptyState
+            title="応募はまだありません"
+            description="公開中の求人がないと応募は発生しません。求人を用意するか、学生を探してみてください。"
+            action={
+              <Stack direction="row" spacing={1} justifyContent="center">
+                <Button variant="contained" onClick={() => router.push('/company-portal/jobs')}>
+                  求人を作る
+                </Button>
+                <Button variant="outlined" onClick={() => router.push('/company-portal/students')}>
+                  学生を探す
+                </Button>
+              </Stack>
+            }
+          />
         </Paper>
       ) : (
         <Paper

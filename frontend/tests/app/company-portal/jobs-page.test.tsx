@@ -112,4 +112,17 @@ describe('求人管理', () => {
     expect(await screen.findByText(/削除は完了しています/)).toBeInTheDocument()
     expect(screen.queryByText('バックエンド')).not.toBeInTheDocument()
   })
+
+  it('求人が0件のとき理由と次の操作を表示する（SOCAIAGENT-401）', async () => {
+    list.mockResolvedValueOnce({ jobs: [], companyPublished: true })
+
+    render(<CompanyPortalJobsPage />)
+
+    expect(await screen.findByText('求人がまだありません')).toBeInTheDocument()
+    expect(
+      screen.getByText('求人がないと学生からの応募は発生しません。職種名だけで作成できます。'),
+    ).toBeInTheDocument()
+    // ヘッダーとEmpty state双方に「求人を作る」ボタンがある
+    expect(screen.getAllByRole('button', { name: '求人を作る' })).toHaveLength(2)
+  })
 })
