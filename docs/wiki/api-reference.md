@@ -60,9 +60,10 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
 - **プラットフォーム系ルート**（組織・監査・コスト等）は `is_admin && 担当校0件` のみ
   （`EchoRequirePlatformAdmin`）。**権限管理**（学校メンバー＝教員の割当、ユーザー
   アカウント編集/削除）は `is_admin` 必須（`EchoRequireAdmin`、職員は不可）。
-- ログイン応答と `/api/auth/session` は **`is_staff`** を返します。フロントは職員を
+- ログイン/リフレッシュの **`AuthResponse` に `is_staff`** が入ります（`token`＝管理者
+  トークンも管理者と職員に発行）。フロントは保存済みユーザーの `is_staff` を見て、職員を
   ログイン直後からチャット画面ではなく教員指導画面（`/admin`）へ送り、`/`（チャット）へ
-  直リンクしても `/admin` へ退避させます。
+  直リンクしても `/admin` へ退避させます。OAuth コールバックでも `is_staff` を保持します。
 
 ### 対象ユーザーはクエリで指定しない
 
