@@ -1,6 +1,6 @@
 'use client'
 
-import type { ReactNode, RefCallback, RefObject } from 'react'
+import { useEffect, type ReactNode, type RefCallback, type RefObject } from 'react'
 import {
   Box,
   Button,
@@ -24,6 +24,7 @@ import { formatSeconds } from '@/lib/interview/utils'
 import type { Utterance } from '../types'
 import styles from './interview.module.css'
 import { UI } from '@/lib/design/tokens'
+import { setInterviewSessionActive } from '../sessionChrome'
 
 const ThreeAvatar = dynamic(() => import('./ThreeAvatar'), {
   ssr: false,
@@ -128,8 +129,16 @@ export default function SessionScreen({
   onJoin,
   onStop,
 }: SessionScreenProps) {
+  // 面接セッション中は学生下部ナビを隠す（#1569）。SelectionScreen/LobbyScreen は
+  // 同じ /interview パス上の別 status なので、ここでは「このコンポーネントが
+  // マウントされている間」を「セッション中」として扱う。
+  useEffect(() => {
+    setInterviewSessionActive(true)
+    return () => setInterviewSessionActive(false)
+  }, [])
+
   return (
-    <Box sx={{ height: '100vh', width: '100vw', bgcolor: UI.nightStage, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <Box className={styles.sessionRoot} sx={{ bgcolor: UI.nightStage, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
       {/* ── Header ── */}
       <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 3, py: 1.5, flexShrink: 0 }}>
@@ -229,10 +238,14 @@ export default function SessionScreen({
       )}
 
       {/* ── Main ── */}
-      <Box sx={{ flex: 1, display: 'flex', gap: 2, px: 2, pb: 2, overflow: 'hidden', minHeight: 0 }}>
+      {/* md未満では縦積みにする（アバター帯→文字起こし→コントロール）。
+          useMediaQueryでの分岐は使わず、sxのブレークポイントだけで解く
+          （ThreeAvatarの再マウント・Realtime再接続を避けるため #1569） */}
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, px: 2, pb: 2, overflow: 'hidden', minHeight: 0 }}>
 
         {/* ── 左: アバターパネル ── */}
-        <Box sx={{ flex: '0 0 62%', position: 'relative', borderRadius: 3, overflow: 'hidden' }}>
+        {/* xsでは高さ固定の帯にする。md以上は従来どおり幅62%で高さはMainに追従 */}
+        <Box sx={{ flex: { xs: '0 0 auto', md: '0 0 62%' }, height: { xs: 200, md: '100%' }, position: 'relative', borderRadius: 3, overflow: 'hidden' }}>
 
           {/* アバター（全面） */}
           <Box sx={{ width: '100%', height: '100%' }}>
@@ -325,7 +338,9 @@ export default function SessionScreen({
         </Box>
 
         {/* ── 右: チャット + コントロール ── */}
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5, minWidth: 0, overflow: 'hidden' }}>
+        {/* minHeight:0 がないとflex:1の文字起こし領域がoverflow:autoで
+            縮まらず、コントロールが画面外へ押し出される（xs縦積み時） */}
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
 
           {/* 発話保存の失敗を面接中に見せる（#1476）。面接は続行できるため止めない */}
           {utteranceSaveFailed && (
@@ -384,23 +399,24 @@ export default function SessionScreen({
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, flexShrink: 0 }}>
             {/* サブコントロール行 */}
             <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+              {/* #1481: タップ領域は44px以上にする */}
               <Tooltip title={cameraEnabled ? 'カメラをオフ' : 'カメラをオン'}>
                 <span>
-                  <IconButton onClick={onToggleCamera} disabled={!isConnected} size="small" aria-label="カメラの入切"
-                    sx={{ bgcolor: cameraEnabled ? 'rgba(255,255,255,0.15)' : '#ea4335', width: 36, height: 36, '&:hover': { bgcolor: cameraEnabled ? 'rgba(255,255,255,0.25)' : '#c5221f' }, '&:disabled': { bgcolor: 'rgba(255,255,255,0.06)' } }}>
+                  <IconButton onClick={onToggleCamera} disabled={!isConnected} aria-label="カメラの入切"
+                    sx={{ bgcolor: cameraEnabled ? 'rgba(255,255,255,0.15)' : '#ea4335', width: 44, height: 44, '&:hover': { bgcolor: cameraEnabled ? 'rgba(255,255,255,0.25)' : '#c5221f' }, '&:disabled': { bgcolor: 'rgba(255,255,255,0.06)' } }}>
                     {cameraEnabled ? <VideocamIcon sx={{ color: '#fff', fontSize: 18 }} /> : <VideocamOffIcon sx={{ color: '#fff', fontSize: 18 }} />}
                   </IconButton>
                 </span>
               </Tooltip>
               <Tooltip title={captionsVisible ? '字幕をオフ' : '字幕をオン'}>
-                <IconButton onClick={onToggleCaptions} size="small" aria-label="字幕の表示切替"
-                  sx={{ bgcolor: captionsVisible ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', width: 36, height: 36 }}>
+                <IconButton onClick={onToggleCaptions} aria-label="字幕の表示切替"
+                  sx={{ bgcolor: captionsVisible ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', width: 44, height: 44 }}>
                   <ClosedCaptionIcon sx={{ color: captionsVisible ? '#fff' : 'rgba(255,255,255,0.5)', fontSize: 18 }} />
                 </IconButton>
               </Tooltip>
               <Tooltip title={handsFreeMode ? 'ハンズフリーをオフ' : 'ハンズフリーをオン'}>
-                <IconButton onClick={onToggleHandsFree} disabled={!isConnected} size="small" aria-label="ハンズフリーの入切"
-                  sx={{ bgcolor: handsFreeMode ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', width: 36, height: 36 }}>
+                <IconButton onClick={onToggleHandsFree} disabled={!isConnected} aria-label="ハンズフリーの入切"
+                  sx={{ bgcolor: handsFreeMode ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', width: 44, height: 44 }}>
                   <MicIcon sx={{ color: handsFreeMode ? '#fff' : 'rgba(255,255,255,0.5)', fontSize: 18 }} />
                 </IconButton>
               </Tooltip>
@@ -428,7 +444,7 @@ export default function SessionScreen({
                           : <MicIcon sx={{ fontSize: 18 }} />
                     }
                     sx={{
-                      borderRadius: 9999, py: 1.1,
+                      borderRadius: 9999, py: 1.1, minHeight: 44,
                       bgcolor: isRecording ? 'rgba(234,67,53,0.25)' : 'rgba(255,255,255,0.18)',
                       color: isRecording ? '#ff8a80' : 'rgba(255,255,255,0.9)',
                       border: `1px solid ${isRecording ? 'rgba(234,67,53,0.5)' : 'rgba(255,255,255,0.25)'}`,
@@ -449,7 +465,7 @@ export default function SessionScreen({
                 <Button
                   variant="contained"
                   onClick={onJoin}
-                  sx={{ borderRadius: 9999, px: 2.5, py: 1.1, fontWeight: 600, textTransform: 'none', fontSize: 13, bgcolor: '#34a853', '&:hover': { bgcolor: '#2d8f47' }, flexShrink: 0 }}
+                  sx={{ borderRadius: 9999, px: 2.5, py: 1.1, minHeight: 44, fontWeight: 600, textTransform: 'none', fontSize: 13, bgcolor: '#34a853', '&:hover': { bgcolor: '#2d8f47' }, flexShrink: 0 }}
                 >
                   面接を開始
                 </Button>
@@ -457,7 +473,7 @@ export default function SessionScreen({
                 <Button
                   variant="contained"
                   onClick={() => onStop(false)}
-                  sx={{ borderRadius: 9999, px: 2.5, py: 1.1, fontWeight: 600, textTransform: 'none', fontSize: 13, bgcolor: 'rgba(255,255,255,0.22)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', boxShadow: 'none', '&:hover': { bgcolor: 'rgba(255,255,255,0.32)', boxShadow: 'none' }, flexShrink: 0 }}
+                  sx={{ borderRadius: 9999, px: 2.5, py: 1.1, minHeight: 44, fontWeight: 600, textTransform: 'none', fontSize: 13, bgcolor: 'rgba(255,255,255,0.22)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', boxShadow: 'none', '&:hover': { bgcolor: 'rgba(255,255,255,0.32)', boxShadow: 'none' }, flexShrink: 0 }}
                 >
                   完了する
                 </Button>

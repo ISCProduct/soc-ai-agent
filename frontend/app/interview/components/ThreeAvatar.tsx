@@ -441,11 +441,13 @@ export default function ThreeAvatar({
   }
 
   return (
+    // 親（SessionScreenのアバターパネル）のサイズに追従させる（#1569）。
+    // 固定px指定だとxs/md/lgの境界でパネル側のレイアウト変更に追従できない。
     <Box
       ref={containerRef}
       sx={{
-        width:  { xs: 214, md: 330, lg: 380 },
-        height: { xs: 214, md: 330, lg: 380 },
+        width: '100%',
+        height: '100%',
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
