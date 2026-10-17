@@ -224,6 +224,7 @@ export default function CompanyPortalJobsPage() {
           <EmptyState
             title="求人がまだありません"
             description="求人がないと学生からの応募は発生しません。職種名だけで作成できます。"
+            titleComponent="h2"
             action={
               isOwner ? (
                 <Button variant="contained" onClick={openCreate}>

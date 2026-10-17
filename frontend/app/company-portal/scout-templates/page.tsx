@@ -127,6 +127,7 @@ export default function CompanyPortalScoutTemplatesPage() {
           <EmptyState
             title="まだテンプレートがありません"
             description="上のフォームから1件保存すると、学生詳細から送信時に選べます。"
+            titleComponent="h2"
           />
         </Paper>
       ) : (

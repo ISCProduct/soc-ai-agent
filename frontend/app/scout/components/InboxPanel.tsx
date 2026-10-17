@@ -44,6 +44,7 @@ export function InboxPanel({
         <EmptyState
           title="届いているスカウトはまだありません"
           description="企業が送るとここに表示されます。公開設定はプロフィールから変更できます。"
+          titleComponent="h2"
           action={
             <Button component={Link} href="/profile">
               公開設定を確認

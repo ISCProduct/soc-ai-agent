@@ -154,7 +154,11 @@ export default function CompanyPortalApplicationsPage() {
           elevation={0}
           sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '4px' }}
         >
-          <EmptyState title="この段階の応募はありません" description="別の段階を選ぶと一覧が切り替わります。" />
+          <EmptyState
+            title="この段階の応募はありません"
+            description="別の段階を選ぶと一覧が切り替わります。"
+            titleComponent="h2"
+          />
         </Paper>
       ) : items.length === 0 ? (
         <Paper
@@ -164,6 +168,7 @@ export default function CompanyPortalApplicationsPage() {
           <EmptyState
             title="応募はまだありません"
             description="公開中の求人がないと応募は発生しません。求人を用意するか、学生を探してみてください。"
+            titleComponent="h2"
             action={
               <Stack direction="row" spacing={1} justifyContent="center">
                 <Button variant="contained" onClick={() => router.push('/company-portal/jobs')}>

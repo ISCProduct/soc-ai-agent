@@ -17,6 +17,7 @@ export function HistoryPanel({ state }: { state: ScoutState }) {
         <EmptyState
           title="まだ送信したスカウトはありません"
           description="「送る」タブから学生を選んで送信すると、ここに履歴が残ります。"
+          titleComponent="h2"
         />
       </Paper>
     )

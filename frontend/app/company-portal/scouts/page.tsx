@@ -85,6 +85,7 @@ export default function CompanyPortalScoutsPage() {
           <EmptyState
             title="まだ送信したスカウトはありません"
             description="学生詳細の「スカウトする」から送れます。"
+            titleComponent="h2"
             action={
               <Button variant="contained" onClick={() => router.push('/company-portal/students')}>
                 学生を探す

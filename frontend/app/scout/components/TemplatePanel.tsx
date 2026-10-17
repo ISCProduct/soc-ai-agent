@@ -103,6 +103,7 @@ export function TemplatePanel({
           <EmptyState
             title="まだテンプレートがありません"
             description="上のフォームから1件保存すると、送信時に選べます。"
+            titleComponent="h2"
           />
         </Paper>
       ) : (
