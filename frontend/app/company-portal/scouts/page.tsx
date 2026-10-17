@@ -6,8 +6,8 @@ import { Alert, Box, Button, Paper, Stack, Typography } from '@mui/material'
 import { MarkLabel } from '@/components/company-portal/MarkLabel'
 import { scoutMark } from '@/lib/company/marks'
 import { PageContainer } from '@/components/admin/PageContainer'
-import { PageLoading } from '@/components/common/PageLoading'
 import { EmptyState } from '@/components/common/EmptyState'
+import { ListSkeleton } from '@/components/common/ListSkeleton'
 import { companyAuthService } from '@/lib/company/auth'
 import { companyScoutService, type CompanyScout } from '@/lib/company/scouts'
 
@@ -50,7 +50,16 @@ export default function CompanyPortalScoutsPage() {
     load(0).finally(() => setLoading(false))
   }, [router, load])
 
-  if (loading) return <PageLoading message="送信履歴を読み込んでいます..." />
+  if (loading) {
+    return (
+      <PageContainer maxWidth={800}>
+        <Typography variant="h4" component="h1" fontWeight="bold" sx={{ mb: 3 }}>
+          スカウト
+        </Typography>
+        <ListSkeleton rows={3} label="送信履歴を読み込み中" />
+      </PageContainer>
+    )
+  }
 
   return (
     <PageContainer maxWidth={800}>

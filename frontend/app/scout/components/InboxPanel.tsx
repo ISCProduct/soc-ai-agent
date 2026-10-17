@@ -16,7 +16,6 @@ import {
   Typography,
 } from '@mui/material'
 import { SCOUT_STATUS_LABEL, type ScoutMessage, type ScoutState } from '@/lib/scout/store'
-import { EmptyState } from '@/components/common/EmptyState'
 
 function formatWhen(iso: string): string {
   const d = new Date(iso)
@@ -40,17 +39,16 @@ export function InboxPanel({
 
   if (state.scouts.length === 0) {
     return (
-      <Paper variant="outlined">
-        <EmptyState
-          title="届いているスカウトはまだありません"
-          description="企業が送るとここに表示されます。公開設定はプロフィールから変更できます。"
-          titleComponent="h2"
-          action={
-            <Button component={Link} href="/profile">
-              公開設定を確認
-            </Button>
-          }
-        />
+      <Paper variant="outlined" sx={{ p: 3 }}>
+        <Typography fontWeight="bold" gutterBottom>
+          届いているスカウトはまだありません
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          企業が送るとここに表示されます。公開設定はプロフィールから変更できます。
+        </Typography>
+        <Button component={Link} href="/profile" sx={{ mt: 2 }}>
+          公開設定を確認
+        </Button>
       </Paper>
     )
   }

@@ -16,8 +16,8 @@ import {
   Typography,
 } from '@mui/material'
 import { PageContainer } from '@/components/admin/PageContainer'
-import { PageLoading } from '@/components/common/PageLoading'
 import { EmptyState } from '@/components/common/EmptyState'
+import { ListSkeleton } from '@/components/common/ListSkeleton'
 import { companyAuthService } from '@/lib/company/auth'
 import { companyScoutService, type ScoutTemplate } from '@/lib/company/scouts'
 
@@ -73,7 +73,16 @@ export default function CompanyPortalScoutTemplatesPage() {
     }
   }
 
-  if (loading) return <PageLoading message="テンプレートを読み込んでいます..." />
+  if (loading) {
+    return (
+      <PageContainer maxWidth={800}>
+        <Typography variant="h4" component="h1" fontWeight="bold" sx={{ mb: 3 }}>
+          スカウトテンプレート
+        </Typography>
+        <ListSkeleton rows={3} label="テンプレートを読み込み中" />
+      </PageContainer>
+    )
+  }
 
   return (
     <PageContainer maxWidth={800}>

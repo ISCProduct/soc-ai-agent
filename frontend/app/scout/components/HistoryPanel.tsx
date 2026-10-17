@@ -2,7 +2,6 @@
 
 import { Chip, Paper, Stack, Typography } from '@mui/material'
 import { SCOUT_STATUS_LABEL, type ScoutState } from '@/lib/scout/store'
-import { EmptyState } from '@/components/common/EmptyState'
 
 function formatWhen(iso: string): string {
   const d = new Date(iso)
@@ -13,12 +12,13 @@ function formatWhen(iso: string): string {
 export function HistoryPanel({ state }: { state: ScoutState }) {
   if (state.scouts.length === 0) {
     return (
-      <Paper variant="outlined">
-        <EmptyState
-          title="まだ送信したスカウトはありません"
-          description="「送る」タブから学生を選んで送信すると、ここに履歴が残ります。"
-          titleComponent="h2"
-        />
+      <Paper variant="outlined" sx={{ p: 3 }}>
+        <Typography fontWeight="bold" gutterBottom>
+          まだ送信したスカウトはありません
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          「送る」タブから学生を選んで送信すると、ここに履歴が残ります。
+        </Typography>
       </Paper>
     )
   }
