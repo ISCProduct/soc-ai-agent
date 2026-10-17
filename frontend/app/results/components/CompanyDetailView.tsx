@@ -58,14 +58,14 @@ export default function CompanyDetailView({
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      backgroundColor: '#fff',
+      backgroundColor: UI.paper,
     }}>
       {/* ヘッダー。帯は全幅、中身は本文と同じ列に揃える（一覧側と同じ扱い）。 */}
       <Box sx={{
         px: { xs: 2, sm: 3 },
         py: { xs: 2, sm: 3 },
-        borderBottom: '1px solid #e0e0e0',
-        backgroundColor: '#fff',
+        borderBottom: `1px solid ${UI.rule}`,
+        backgroundColor: UI.paper,
         flexShrink: 0,
       }}>
         <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', width: '100%' }}>
@@ -80,7 +80,7 @@ export default function CompanyDetailView({
         flexGrow: 1,
         overflowY: 'auto',
         p: { xs: 2, sm: 3 },
-        backgroundColor: '#fafafa',
+        backgroundColor: UI.paper,
       }}>
         <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto' }}>
           <Card elevation={0} sx={{ border: `1px solid ${UI.rule}`, borderRadius: 1 }}>
