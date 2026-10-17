@@ -157,6 +157,18 @@ export function createStudentMuiTheme(mode: StudentThemeMode) {
       h4: { fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.01em' },
       h5: { fontSize: '1.375rem', fontWeight: 700 },
       h6: { fontSize: '1.125rem', fontWeight: 700 },
+      // fontSize(14→16)はMUI内部の係数(coef = fontSize/14)としても働き、
+      // 明示していない variant 全てを約1.143倍にする（レビュー指摘）。
+      // h4-h6・body・caption は上で意図的に決めた値だが、それ以外の
+      // 既存画面で使われている variant（h1-h3, subtitle1/2, button, overline）
+      // まで意図せず拡大・縮小させないよう、MUI既定値(coef=1相当)に固定する。
+      h1: { fontSize: '6rem' },
+      h2: { fontSize: '3.75rem' },
+      h3: { fontSize: '3rem' },
+      subtitle1: { fontSize: '1rem' },
+      subtitle2: { fontSize: '0.875rem' },
+      button: { fontSize: '0.875rem' },
+      overline: { fontSize: '0.75rem' },
     },
     shape: { borderRadius: mode === 'high-contrast' ? 4 : 12 },
     components: {
