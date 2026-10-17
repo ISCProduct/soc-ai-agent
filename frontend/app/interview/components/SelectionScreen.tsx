@@ -28,6 +28,10 @@ import { resolveCompanyByName, mergeResolvedCompany } from '../utils'
 import { UI } from '@/lib/design/tokens'
 
 const COMPANY_RESOLVE_DEBOUNCE_MS = 400
+// ヘッダー帯と本文の列幅。#1761のCONTENT_MAX_WIDTH(1200)とは別に、
+// この画面は本文が896で設計されているため専用の定数にする（#1784 レビュー指摘）。
+// 一方だけ変更すると今回直した列ずれが再発するので、両箇所でこの定数を使う。
+const SELECTION_CONTENT_MAX_WIDTH = 896
 
 function activateOnEnterOrSpace(event: KeyboardEvent, action: () => void) {
   if (event.key === 'Enter' || event.key === ' ') {
@@ -154,7 +158,7 @@ export default function SelectionScreen({
           揃えて中央寄せする。帯の中身を直接 flex で左右に広げていたため、
           本文側が中央寄せの列に収まる広い画面ほど左端がずれていた(#1784)。 */}
       <Box component="header" sx={{ px: { xs: 2, sm: 3, lg: 10 }, py: 2, bgcolor: UI.field, borderBottom: `1px solid ${UI.ruleSoft}` }}>
-        <Box data-testid="selection-header-row" sx={{ maxWidth: 896, mx: 'auto', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Box data-testid="selection-header-row" sx={{ maxWidth: SELECTION_CONTENT_MAX_WIDTH, mx: 'auto', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0, flex: 1 }}>
             <Box sx={{ color: UI.mark, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
               <PsychologyIcon sx={{ fontSize: 32 }} />
@@ -177,7 +181,7 @@ export default function SelectionScreen({
 
       {/* Main */}
       <Box component="main" sx={{ display: 'flex', justifyContent: 'center', py: { xs: 3, sm: 5 }, px: { xs: 2, sm: 3, lg: 10 } }}>
-        <Box sx={{ maxWidth: 896, width: '100%', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <Box sx={{ maxWidth: SELECTION_CONTENT_MAX_WIDTH, width: '100%', display: 'flex', flexDirection: 'column', gap: 4 }}>
 
           {/* Step indicator + Title */}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
