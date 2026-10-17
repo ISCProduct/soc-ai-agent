@@ -150,7 +150,12 @@ export default function CompanyPortalApplicationsPage() {
       )}
 
       {items.length === 0 && status ? (
-        <EmptyState title="この段階の応募はありません" description="別の段階を選ぶと一覧が切り替わります。" />
+        <Paper
+          elevation={0}
+          sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '4px' }}
+        >
+          <EmptyState title="この段階の応募はありません" description="別の段階を選ぶと一覧が切り替わります。" />
+        </Paper>
       ) : items.length === 0 ? (
         <Paper
           elevation={0}

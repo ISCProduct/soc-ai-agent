@@ -15,6 +15,7 @@ import {
   Typography,
 } from '@mui/material'
 import type { ScoutState, ScoutTemplate } from '@/lib/scout/store'
+import { EmptyState } from '@/components/common/EmptyState'
 
 export function TemplatePanel({
   state,
@@ -98,13 +99,11 @@ export function TemplatePanel({
       </Box>
 
       {state.templates.length === 0 ? (
-        <Paper variant="outlined" sx={{ p: 3 }}>
-          <Typography fontWeight="bold" gutterBottom>
-            まだテンプレートがありません
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            上のフォームから1件保存すると、送信時に選べます。
-          </Typography>
+        <Paper variant="outlined">
+          <EmptyState
+            title="まだテンプレートがありません"
+            description="上のフォームから1件保存すると、送信時に選べます。"
+          />
         </Paper>
       ) : (
         <Stack spacing={1.5}>

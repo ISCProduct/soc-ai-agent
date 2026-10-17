@@ -7,6 +7,7 @@ import { MarkLabel } from '@/components/company-portal/MarkLabel'
 import { scoutMark } from '@/lib/company/marks'
 import { PageContainer } from '@/components/admin/PageContainer'
 import { PageLoading } from '@/components/common/PageLoading'
+import { EmptyState } from '@/components/common/EmptyState'
 import { companyAuthService } from '@/lib/company/auth'
 import { companyScoutService, type CompanyScout } from '@/lib/company/scouts'
 
@@ -80,16 +81,16 @@ export default function CompanyPortalScoutsPage() {
       )}
 
       {items.length === 0 && total === 0 ? (
-        <Paper variant="outlined" sx={{ p: 3 }}>
-          <Typography fontWeight="bold" gutterBottom>
-            まだ送信したスカウトはありません
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            学生詳細の「スカウトする」から送れます。
-          </Typography>
-          <Button variant="contained" onClick={() => router.push('/company-portal/students')}>
-            学生を探す
-          </Button>
+        <Paper variant="outlined">
+          <EmptyState
+            title="まだ送信したスカウトはありません"
+            description="学生詳細の「スカウトする」から送れます。"
+            action={
+              <Button variant="contained" onClick={() => router.push('/company-portal/students')}>
+                学生を探す
+              </Button>
+            }
+          />
         </Paper>
       ) : (
         <Stack spacing={1.5}>

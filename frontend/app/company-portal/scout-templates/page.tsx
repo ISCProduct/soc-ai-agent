@@ -17,6 +17,7 @@ import {
 } from '@mui/material'
 import { PageContainer } from '@/components/admin/PageContainer'
 import { PageLoading } from '@/components/common/PageLoading'
+import { EmptyState } from '@/components/common/EmptyState'
 import { companyAuthService } from '@/lib/company/auth'
 import { companyScoutService, type ScoutTemplate } from '@/lib/company/scouts'
 
@@ -122,13 +123,11 @@ export default function CompanyPortalScoutTemplatesPage() {
       </Box>
 
       {items.length === 0 ? (
-        <Paper variant="outlined" sx={{ p: 3 }}>
-          <Typography fontWeight="bold" gutterBottom>
-            まだテンプレートがありません
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            上のフォームから1件保存すると、学生詳細から送信時に選べます。
-          </Typography>
+        <Paper variant="outlined">
+          <EmptyState
+            title="まだテンプレートがありません"
+            description="上のフォームから1件保存すると、学生詳細から送信時に選べます。"
+          />
         </Paper>
       ) : (
         <Stack spacing={1.5}>
