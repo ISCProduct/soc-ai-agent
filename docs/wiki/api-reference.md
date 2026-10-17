@@ -64,6 +64,11 @@ cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths
   トークンも管理者と職員に発行）。フロントは保存済みユーザーの `is_staff` を見て、職員を
   ログイン直後からチャット画面ではなく教員指導画面（`/admin`）へ送り、`/`（チャット）へ
   直リンクしても `/admin` へ退避させます。OAuth コールバックでも `is_staff` を保持します。
+- **職員ロールの付与/剥奪**は `PUT /api/admin/users/{id}` に `is_staff`（true で
+  `users.role=staff`）を渡します。`is_admin` と同じく無制限管理者のみ変更可
+  （制限adminは403）。UI はユーザー管理画面（`/admin/users`）の「職員にする/外す」
+  ボタン。純粋な職員を実際に働かせるには別途、担当校の割当
+  （`POST /api/admin/schools/{id}/members`）が必要です（担当校0件は fail-close）。
 
 ### 対象ユーザーはクエリで指定しない
 

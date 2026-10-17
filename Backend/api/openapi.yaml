@@ -2897,6 +2897,9 @@ paths:
     put:
       tags: [admin-users]
       summary: 利用者を更新
+      description: |
+        `is_admin`（管理者権限）と `is_staff`（職員ロール= users.role を staff にする）は
+        権限の付与/剥奪にあたるため、無制限管理者のみ変更可能（担当校を持つ制限adminは403）。
       security: [{ adminAuth: [] }]
       parameters:
         - in: path
@@ -2904,6 +2907,17 @@ paths:
           required: true
           schema:
             type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                is_admin: { type: boolean, description: 管理者権限（無制限管理者のみ変更可） }
+                is_staff: { type: boolean, description: 職員ロール（無制限管理者のみ変更可）。true で users.role=staff }
+                name: { type: string }
+                target_level: { type: string, enum: ["新卒", "中途", ""] }
+                school_name: { type: string }
       responses:
         "200":
           description: 成功
