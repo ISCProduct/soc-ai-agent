@@ -75,6 +75,9 @@ func (c *AdminSchoolController) Get(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := c.ensureSchoolAccess(ctx, id); err != nil {
+		return err
+	}
 	found, err := c.schools.Get(id)
 	if err != nil {
 		return mapSchoolError(err)
@@ -182,6 +185,9 @@ func (c *AdminSchoolController) RemoveMember(ctx echo.Context) error {
 func (c *AdminSchoolController) ListCompanyApprovals(ctx echo.Context) error {
 	id, err := httpapi.UintParam(ctx, "id")
 	if err != nil {
+		return err
+	}
+	if err := c.ensureSchoolAccess(ctx, id); err != nil {
 		return err
 	}
 	ids, err := c.schools.ListApprovedCompanyIDs(id)

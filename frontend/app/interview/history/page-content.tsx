@@ -118,7 +118,7 @@ export default function PageContent() {
   const totalPages = Math.ceil(total / limit)
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f8f6f6' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: UI.paper }}>
       {/* Header */}
       <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: { xs: 2, sm: 3, lg: 8 }, py: 2, bgcolor: UI.field, borderBottom: `1px solid ${UI.ruleSoft}` }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>

@@ -21,6 +21,7 @@ import {
 import { ArrowBack } from '@mui/icons-material'
 import { authService } from '@/lib/auth'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
+import { EmptyState } from '@/components/common/EmptyState'
 import {
   SCOUT_STATUS_LABEL,
   studentScoutService,
@@ -148,16 +149,17 @@ export default function PageContent() {
       )}
 
       {items.length === 0 && total === 0 ? (
-        <Paper variant="outlined" sx={{ p: 3 }}>
-          <Typography fontWeight="bold" gutterBottom>
-            届いているスカウトはまだありません
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            企業が送るとここに表示されます。公開設定はプロフィールから変更できます。
-          </Typography>
-          <Button component={Link} href="/profile" sx={{ mt: 2 }}>
-            公開設定を確認
-          </Button>
+        <Paper variant="outlined">
+          <EmptyState
+            title="届いているスカウトはまだありません"
+            description="企業が送るとここに表示されます。公開設定はプロフィールから変更できます。"
+            titleComponent="h2"
+            action={
+              <Button component={Link} href="/profile">
+                公開設定を確認
+              </Button>
+            }
+          />
         </Paper>
       ) : (
         <Stack spacing={1.5}>

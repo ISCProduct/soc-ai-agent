@@ -112,4 +112,31 @@ describe('求人管理', () => {
     expect(await screen.findByText(/削除は完了しています/)).toBeInTheDocument()
     expect(screen.queryByText('バックエンド')).not.toBeInTheDocument()
   })
+
+  it('求人が0件のとき理由と次の操作を表示する（SOCAIAGENT-401）', async () => {
+    list.mockResolvedValueOnce({ jobs: [], companyPublished: true })
+
+    render(<CompanyPortalJobsPage />)
+
+    expect(await screen.findByText('求人がまだありません')).toBeInTheDocument()
+    expect(
+      screen.getByText('求人がないと学生からの応募は発生しません。職種名だけで作成できます。'),
+    ).toBeInTheDocument()
+    // ヘッダーとEmpty state双方に「求人を作る」ボタンがある
+    expect(screen.getAllByRole('button', { name: '求人を作る' })).toHaveLength(2)
+  })
+
+  it('非ownerが求人0件を見たとき、作成ボタンの代わりに案内文を出す（SOCAIAGENT-401）', async () => {
+    const { companyAuthService } = jest.requireMock('@/lib/company/auth') as {
+      companyAuthService: { fetchMe: jest.Mock }
+    }
+    companyAuthService.fetchMe.mockResolvedValueOnce({ role: 'member', name: '担当' })
+    list.mockResolvedValueOnce({ jobs: [], companyPublished: true })
+
+    render(<CompanyPortalJobsPage />)
+
+    expect(await screen.findByText('求人がまだありません')).toBeInTheDocument()
+    expect(screen.getByText('求人の作成は管理者のみ行えます。')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '求人を作る' })).not.toBeInTheDocument()
+  })
 })

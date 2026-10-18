@@ -6,7 +6,8 @@ import { Alert, Box, Button, Paper, Stack, Typography } from '@mui/material'
 import { MarkLabel } from '@/components/company-portal/MarkLabel'
 import { scoutMark } from '@/lib/company/marks'
 import { PageContainer } from '@/components/admin/PageContainer'
-import { PageLoading } from '@/components/common/PageLoading'
+import { EmptyState } from '@/components/common/EmptyState'
+import { ListSkeleton } from '@/components/common/ListSkeleton'
 import { companyAuthService } from '@/lib/company/auth'
 import { companyScoutService, type CompanyScout } from '@/lib/company/scouts'
 
@@ -49,7 +50,16 @@ export default function CompanyPortalScoutsPage() {
     load(0).finally(() => setLoading(false))
   }, [router, load])
 
-  if (loading) return <PageLoading message="送信履歴を読み込んでいます..." />
+  if (loading) {
+    return (
+      <PageContainer maxWidth={800}>
+        <Typography variant="h4" component="h1" fontWeight="bold" sx={{ mb: 3 }}>
+          スカウト
+        </Typography>
+        <ListSkeleton rows={3} label="送信履歴を読み込み中" />
+      </PageContainer>
+    )
+  }
 
   return (
     <PageContainer maxWidth={800}>
@@ -80,16 +90,17 @@ export default function CompanyPortalScoutsPage() {
       )}
 
       {items.length === 0 && total === 0 ? (
-        <Paper variant="outlined" sx={{ p: 3 }}>
-          <Typography fontWeight="bold" gutterBottom>
-            まだ送信したスカウトはありません
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            学生詳細の「スカウトする」から送れます。
-          </Typography>
-          <Button variant="contained" onClick={() => router.push('/company-portal/students')}>
-            学生を探す
-          </Button>
+        <Paper variant="outlined">
+          <EmptyState
+            title="まだ送信したスカウトはありません"
+            description="学生詳細の「スカウトする」から送れます。"
+            titleComponent="h2"
+            action={
+              <Button variant="contained" onClick={() => router.push('/company-portal/students')}>
+                学生を探す
+              </Button>
+            }
+          />
         </Paper>
       ) : (
         <Stack spacing={1.5}>

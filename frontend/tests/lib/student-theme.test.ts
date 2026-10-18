@@ -91,6 +91,31 @@ describe('student-theme', () => {
     expect(contrast(h.nightMuted, h.nightBg)).toBeGreaterThan(contrast(c.nightMuted, c.nightBg))
   })
 
+  // #1572: 本文サイズは MUI 既定の14pxのまま放置されていた。16px相当に揃える。
+  it('本文サイズは16px相当である', () => {
+    for (const mode of ['comfortable', 'high-contrast'] as const) {
+      const typography = createStudentMuiTheme(mode).typography
+      expect(typography.fontSize).toBe(16)
+      expect(typography.body1.fontSize).toBe('1rem')
+      expect(typography.body2.fontSize).toBe('1rem')
+    }
+  })
+
+  // fontSize(14→16)はMUI内部でcoef=fontSize/14として全variantに掛かるため、
+  // 明示していないvariantまで意図せず拡大・縮小しないことを確認する（レビュー指摘）。
+  it('fontSizeの変更がh1-h3・subtitle・button・overlineの見た目を変えない', () => {
+    for (const mode of ['comfortable', 'high-contrast'] as const) {
+      const typography = createStudentMuiTheme(mode).typography
+      expect(typography.h1.fontSize).toBe('6rem')
+      expect(typography.h2.fontSize).toBe('3.75rem')
+      expect(typography.h3.fontSize).toBe('3rem')
+      expect(typography.subtitle1.fontSize).toBe('1rem')
+      expect(typography.subtitle2.fontSize).toBe('0.875rem')
+      expect(typography.button.fontSize).toBe('0.875rem')
+      expect(typography.overline.fontSize).toBe('0.75rem')
+    }
+  })
+
   it('本文に使う文字色は既定でも白地で 4.5:1 を満たす', () => {
     for (const mode of ['comfortable', 'high-contrast'] as const) {
       const s = STUDENT_SURFACES[mode]

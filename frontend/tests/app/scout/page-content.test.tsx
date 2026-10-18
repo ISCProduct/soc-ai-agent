@@ -84,4 +84,16 @@ describe('学生のスカウト受信箱', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'ブロックする' }))
     expect(blockCompany).toHaveBeenCalledWith(8)
   })
+
+  it('スカウトが0件のとき理由と次の操作を表示する（SOCAIAGENT-401）', async () => {
+    list.mockResolvedValueOnce({ items: [], total: 0, blocked_company_ids: [] })
+
+    render(<PageContent />)
+
+    expect(await screen.findByText('届いているスカウトはまだありません')).toBeInTheDocument()
+    expect(
+      screen.getByText('企業が送るとここに表示されます。公開設定はプロフィールから変更できます。'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '公開設定を確認' })).toHaveAttribute('href', '/profile')
+  })
 })
