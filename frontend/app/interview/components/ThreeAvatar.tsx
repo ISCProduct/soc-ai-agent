@@ -397,19 +397,24 @@ export default function ThreeAvatar({
 
     loadModel()
 
+    // windowのresizeイベントは、親パネルの高さだけが変わる場合（質問タイマー表示等）
+    // 発生しないため、コンテナ自身のサイズ変更をResizeObserverで監視する（レビュー指摘, #1569）。
+    // 高さ0での初期化時はaspect計算がInfinity/NaNになるためスキップする。
     const onResize = () => {
       const w = container.clientWidth
       const h = container.clientHeight
+      if (w === 0 || h === 0) return
       camera.aspect = w / h
       camera.updateProjectionMatrix()
       renderer.setSize(w, h)
     }
-    window.addEventListener('resize', onResize)
+    const resizeObserver = new ResizeObserver(onResize)
+    resizeObserver.observe(container)
 
     return () => {
       disposed = true
       cancelAnimationFrame(frameId)
-      window.removeEventListener('resize', onResize)
+      resizeObserver.disconnect()
 
       lipsyncMgrRef.current?.dispose()
       lipsyncMgrRef.current = null

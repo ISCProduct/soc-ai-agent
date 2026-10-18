@@ -340,7 +340,11 @@ export default function SessionScreen({
         {/* ── 右: チャット + コントロール ── */}
         {/* minHeight:0 がないとflex:1の文字起こし領域がoverflow:autoで
             縮まらず、コントロールが画面外へ押し出される（xs縦積み時） */}
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+        {/* xsでは右パネル自体を縦スクロール可能にする。横向き(844x390等)で
+            アバター帯200px+ヘッダー+2行の操作行の合計がビューポートを超えると
+            overflow:hiddenのままでは主要ボタンが完全にクリップされる
+            （レビュー指摘, #1569） */}
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5, minWidth: 0, minHeight: 0, overflowX: 'hidden', overflowY: { xs: 'auto', md: 'hidden' } }}>
 
           {/* 発話保存の失敗を面接中に見せる（#1476）。面接は続行できるため止めない */}
           {utteranceSaveFailed && (
