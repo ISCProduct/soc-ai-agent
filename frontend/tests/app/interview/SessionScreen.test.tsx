@@ -1,12 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from '@testing-library/react'
-
-jest.mock('@/app/interview/components/ThreeAvatar', () => ({
-  __esModule: true,
-  default: () => <div data-testid="three-avatar-mock" />,
-}))
+import { fireEvent, render, screen } from '@testing-library/react'
 
 import SessionScreen from '@/app/interview/components/SessionScreen'
 import { UTTERANCE_SAVE_FAILED_MESSAGE } from '@/app/interview/utteranceSave'
@@ -107,5 +102,105 @@ describe('SessionScreen', () => {
 
     unmount()
     expect(flag.result.current).toBe(false)
+  })
+
+  // 2D化(#2D化)に伴うレイアウト再構築: 専用の「現在の質問」枠を新設し、
+  // 既存の発話ストリーム(utterances/partialAi)から導出する。新規データは持たない。
+  describe('現在の質問・ライブ回答パネル', () => {
+    it('確定済みのAI発話を「現在の質問」として表示する', () => {
+      renderScreen({ utterances: [{ role: 'ai', text: 'あなたの強みを教えてください' }] })
+      expect(screen.getByText('あなたの強みを教えてください')).toBeInTheDocument()
+    })
+
+    it('読み上げ中(partialAi)があればそちらを優先して表示する', () => {
+      renderScreen({
+        utterances: [{ role: 'ai', text: '前の質問' }],
+        partialAi: '読み上げ中の質問です',
+      })
+      expect(screen.getByText('読み上げ中の質問です')).toBeInTheDocument()
+      expect(screen.queryByText('前の質問')).not.toBeInTheDocument()
+    })
+
+    it('認識中(partialUser)の発話をライブ回答として表示する', () => {
+      renderScreen({
+        utterances: [{ role: 'ai', text: '質問' }],
+        partialUser: '話している途中の内容',
+      })
+      expect(screen.getByText('話している途中の内容')).toBeInTheDocument()
+    })
+
+    // CodeRabbit指摘: 次の質問が確定した直後(まだ何も話していない間)、末尾の
+    // user発話をそのまま使うと前の質問への回答が「現在の質問の回答」として
+    // 表示され続けてしまっていた。
+    it('次の質問が確定したら、前の質問への回答をライブ回答に出さずプレースホルダーに戻す', () => {
+      renderScreen({
+        utterances: [
+          { role: 'ai', text: '質問1' },
+          { role: 'user', text: '質問1への回答' },
+          { role: 'ai', text: '質問2' },
+        ],
+        partialUser: '',
+      })
+      expect(screen.getByText('質問2')).toBeInTheDocument()
+      // 「これまでの質問・回答」は既定で折りたたまれているため、ここに
+      // '質問1への回答' が見えるとすればライブ回答パネル側の表示漏れバグ
+      expect(screen.queryByText('質問1への回答')).not.toBeInTheDocument()
+      expect(screen.getByText('「話す」ボタンを押して回答してください')).toBeInTheDocument()
+    })
+  })
+
+  describe('STAR回答フレームワーク思考ガイド', () => {
+    it('既定で表示されており、クリックで折りたためる', () => {
+      renderScreen({ utterances: [{ role: 'ai', text: '質問' }] })
+
+      expect(screen.getByText(/Situation/)).toBeVisible()
+
+      fireEvent.click(screen.getByText('STAR回答フレームワーク思考ガイド'))
+      expect(screen.queryByText(/Situation/)).not.toBeInTheDocument()
+    })
+
+    // キーボード操作(Tab+Enter/Space)でも開閉できること。role="button"の自前実装のため、
+    // クリック操作だけでなくキーボード操作の回帰も防ぐ(テスター指摘)。
+    it('キーボード操作(Enter/Space)でも折りたためる', () => {
+      renderScreen({ utterances: [{ role: 'ai', text: '質問' }] })
+      const toggle = screen.getByText('STAR回答フレームワーク思考ガイド').closest('[role="button"]')!
+
+      fireEvent.keyDown(toggle, { key: 'Enter' })
+      expect(screen.queryByText(/Situation/)).not.toBeInTheDocument()
+
+      fireEvent.keyDown(toggle, { key: ' ' })
+      expect(screen.getByText(/Situation/)).toBeVisible()
+    })
+  })
+
+  describe('これまでの質問・回答', () => {
+    it('既定では折りたたまれており、過去の発話は表示しない', () => {
+      renderScreen({
+        utterances: [
+          { role: 'ai', text: '1つ目の質問' },
+          { role: 'user', text: '1つ目の回答' },
+          { role: 'ai', text: '2つ目の質問（現在）' },
+        ],
+      })
+      // 「現在の質問」枠には最新のAI発話のみ表示され、過去分は折りたたみの中
+      expect(screen.getByText('2つ目の質問（現在）')).toBeInTheDocument()
+      expect(screen.queryByText('1つ目の質問')).not.toBeInTheDocument()
+    })
+
+    it('開くと過去の質問・回答が表示される', () => {
+      renderScreen({
+        utterances: [
+          { role: 'ai', text: '1つ目の質問' },
+          { role: 'user', text: '1つ目の回答' },
+          { role: 'ai', text: '2つ目の質問（現在）' },
+        ],
+      })
+
+      fireEvent.click(screen.getByText(/これまでの質問・回答/))
+      expect(screen.getByText('1つ目の質問')).toBeInTheDocument()
+      // 「1つ目の回答」は「あなたの回答」ライブパネル（直近の確定発話へのフォールバック）
+      // と履歴の両方に出るため、複数件の存在だけを確認する
+      expect(screen.getAllByText('1つ目の回答').length).toBeGreaterThanOrEqual(1)
+    })
   })
 })
