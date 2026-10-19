@@ -4,7 +4,7 @@ import "fmt"
 
 // MatchingReasonPromptVersion は後方互換のための固定バージョン定数です。
 // 新規コードでは GetMatchingReasonPromptVersion() を使用してください。
-const MatchingReasonPromptVersion = "matching_reason_v1"
+const MatchingReasonPromptVersion = "matching_reason_v2"
 
 // GetMatchingReasonPromptVersion は環境変数 PROMPT_VERSION に基づいた
 // マッチング理由プロンプトのバージョン文字列を返します。
@@ -26,13 +26,7 @@ const MatchingReasonUserPromptTemplate = `【PromptVersion】
 %s
 
 【企業情報】
-- 企業名: %s
-- 業界: %s
-- 主事業: %s
-- 文化: %s
-- 働き方: %s
-- 開発スタイル: %s
-- 技術スタック: %s
+%s
 
 【ユーザー適性（上位3）】
 %s

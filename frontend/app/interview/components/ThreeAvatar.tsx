@@ -12,7 +12,8 @@ import {
   describeDeficiencies,
   type AvatarCapabilities,
 } from '@/lib/interview/avatar-capabilities'
-import { AvatarMotion, type InterviewerState } from '@/lib/interview/avatar-motion'
+import { AvatarMotion } from '@/lib/interview/avatar-motion'
+import { interviewerStateFor, legacyMouthPaths } from '@/lib/interview/avatar-wiring'
 import styles from './interview.module.css'
 
 interface ThreeAvatarProps {
@@ -24,6 +25,8 @@ interface ThreeAvatarProps {
   active: boolean
   /** 面接官が次の質問を用意している最中か。視線を少し外す。 */
   pending?: boolean
+  /** 学生の発話の区切りで増える値。変わるたびに相槌を1回打つ（#1646）。 */
+  acknowledgeSignal?: number
 }
 
 // ─── Shape key discovery ──────────────────────────────────────────────────────
@@ -100,8 +103,26 @@ function findMouthTarget(root: THREE.Object3D): MouthTarget | null {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// パネルが全面表示(width/height:100%)になったことで、親パネルのサイズ次第で
+// WebGLの描画バッファが従来(最大380x380)より大きく増え、統合GPU機での
+// 連続描画負荷が上がる(Codexレビュー指摘, #1569)。表示サイズ自体はパネルに
+// 追従させつつ、実際にレンダリングする内部解像度(=描画バッファ)には上限を設ける。
+// renderer.setSize(w, h)の実バッファはpixelRatio倍されるため(CodeRabbit指摘)、
+// ここでの上限はpixelRatio適用後の実バッファサイズに対するものとして扱う。
+const MAX_RENDER_DIMENSION = 420
+
+/**
+ * アスペクト比を保ったまま、pixelRatio適用後の実バッファの長辺が
+ * MAX_RENDER_DIMENSIONを超えないレンダーサイズ(setSizeに渡す論理サイズ)を返す。
+ */
+function cappedRenderSize(width: number, height: number, pixelRatio: number): { width: number; height: number } {
+  const maxLogicalDimension = MAX_RENDER_DIMENSION / pixelRatio
+  const scale = Math.min(1, maxLogicalDimension / Math.max(width, height))
+  return { width: Math.round(width * scale), height: Math.round(height * scale) }
+}
+
 export default function ThreeAvatar({
-  gender, audioStream, level, speaking, active, pending = false,
+  gender, audioStream, level, speaking, active, pending = false, acknowledgeSignal = 0,
 }: ThreeAvatarProps) {
   const [useFallback, setUseFallback] = useState(false)
   const [isLoading, setIsLoading]   = useState(true)
@@ -127,6 +148,9 @@ export default function ThreeAvatar({
   useEffect(() => { speakingRef.current = speaking }, [speaking])
   useEffect(() => { activeRef.current = active },     [active])
   useEffect(() => { pendingRef.current = pending },   [pending])
+  useEffect(() => {
+    if (acknowledgeSignal > 0) motionRef.current?.acknowledge(performance.now() / 1000)
+  }, [acknowledgeSignal])
 
   useEffect(() => {
     if (lipsyncMgrRef.current && audioStream) {
@@ -146,9 +170,15 @@ export default function ThreeAvatar({
     const camera   = new THREE.PerspectiveCamera(40, width / height, 0.1, 20)
     camera.position.set(0, 0.8, 2.8)
 
+    const pixelRatio = Math.min(window.devicePixelRatio, 2)
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    renderer.setSize(width, height)
+    renderer.setPixelRatio(pixelRatio)
+    // updateStyle=falseで内部解像度(描画バッファ)だけをcapし、
+    // canvasの表示サイズ(CSS)はコンテナに追従させる
+    const initialSize = cappedRenderSize(width, height, pixelRatio)
+    renderer.setSize(initialSize.width, initialSize.height, false)
+    renderer.domElement.style.width = '100%'
+    renderer.domElement.style.height = '100%'
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.shadowMap.enabled = true
     renderer.shadowMap.type = THREE.PCFSoftShadowMap
@@ -205,13 +235,11 @@ export default function ThreeAvatar({
       const caps = capsRef.current
       const motion = motionRef.current
       if (caps && motion) {
-        // 面接が始まる前に相槌を打つと、学生が何も話していないのにうなずく
-        // 面接官になる。開始前は idle（呼吸とまばたきだけ）にする。
-        const state: InterviewerState = speakingRef.current ? 'speaking'
-          : !activeRef.current ? 'idle'
-          : pendingRef.current ? 'thinking'
-          : 'listening'
-        motion.setState(state, t)
+        motion.setState(interviewerStateFor({
+          speaking: speakingRef.current,
+          active: activeRef.current,
+          pending: pendingRef.current,
+        }), t)
         // level はすでに useInterviewSession が rms*6 で正規化した 0〜1 の値。
         // ここでさらに 1.4 を掛けると発話中ほぼ常に 1.0 に張り付き、
         // 口が開きっぱなしになって喋っているように見えない。
@@ -221,13 +249,13 @@ export default function ThreeAvatar({
       }
 
       // ── Mouth shape key (legacy path) ───────────────────────────────────
-      // caps が口を動かせるなら口は caps の持ち物。以下の3経路（モーフ・顎
-      // ボーン・ビセーム）はどれも触らない。同じモーフを2箇所から毎フレーム
-      // 書くと値が競合して口が震える。顎ボーンも AvatarMotion の代替経路と
-      // 二重になる。
-      const capsOwnsMouth = caps !== null &&
-        (caps.mouthTargets.length > 0 || caps.jawBone !== null)
-      const mt = capsOwnsMouth ? null : mouthTargetRef.current
+      // 3経路（モーフ・顎ボーン・ビセーム）の排他は legacyMouthPaths が決める。
+      const paths = legacyMouthPaths(caps, {
+        morph: mouthTargetRef.current !== null,
+        jaw: jawBoneRef.current !== null,
+        viseme: lipsyncMgrRef.current !== null && visemeMeshesRef.current.length > 0,
+      })
+      const mt = paths.morph ? mouthTargetRef.current : null
       if (mt && mt.mesh.morphTargetInfluences) {
         const target = Math.min(1, levelRef.current * 1.4)
         if (target > mt.smoothed) {
@@ -239,7 +267,7 @@ export default function ThreeAvatar({
       }
 
       // ── Jaw bone rotation (legacy path) ────────────────────────────────
-      const jaw = capsOwnsMouth ? null : jawBoneRef.current
+      const jaw = paths.jaw ? jawBoneRef.current : null
       if (jaw && jawRestRotRef.current) {
         const target = Math.min(1, levelRef.current * 1.4)
         const prev = jawSmoothedRef.current
@@ -249,8 +277,7 @@ export default function ThreeAvatar({
       }
 
       // ── Oculus viseme fallback (for RPM-style models with no mouth_open) ─
-      if (!capsOwnsMouth && !mt && !jaw &&
-          lipsyncMgrRef.current && visemeMeshesRef.current.length > 0) {
+      if (paths.viseme && lipsyncMgrRef.current) {
         const visemes = lipsyncMgrRef.current.getCurrentVisemes()
         visemeMeshesRef.current.forEach((mesh) => {
           if (!mesh.morphTargetDictionary || !mesh.morphTargetInfluences) return
@@ -394,19 +421,25 @@ export default function ThreeAvatar({
 
     loadModel()
 
+    // windowのresizeイベントは、親パネルの高さだけが変わる場合（質問タイマー表示等）
+    // 発生しないため、コンテナ自身のサイズ変更をResizeObserverで監視する（レビュー指摘, #1569）。
+    // 高さ0での初期化時はaspect計算がInfinity/NaNになるためスキップする。
     const onResize = () => {
       const w = container.clientWidth
       const h = container.clientHeight
+      if (w === 0 || h === 0) return
       camera.aspect = w / h
       camera.updateProjectionMatrix()
-      renderer.setSize(w, h)
+      const { width: rw, height: rh } = cappedRenderSize(w, h, pixelRatio)
+      renderer.setSize(rw, rh, false)
     }
-    window.addEventListener('resize', onResize)
+    const resizeObserver = new ResizeObserver(onResize)
+    resizeObserver.observe(container)
 
     return () => {
       disposed = true
       cancelAnimationFrame(frameId)
-      window.removeEventListener('resize', onResize)
+      resizeObserver.disconnect()
 
       lipsyncMgrRef.current?.dispose()
       lipsyncMgrRef.current = null
@@ -438,11 +471,13 @@ export default function ThreeAvatar({
   }
 
   return (
+    // 親（SessionScreenのアバターパネル）のサイズに追従させる（#1569）。
+    // 固定px指定だとxs/md/lgの境界でパネル側のレイアウト変更に追従できない。
     <Box
       ref={containerRef}
       sx={{
-        width:  { xs: 214, md: 330, lg: 380 },
-        height: { xs: 214, md: 330, lg: 380 },
+        width: '100%',
+        height: '100%',
         position: 'relative',
         display: 'flex',
         alignItems: 'center',

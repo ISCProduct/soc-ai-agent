@@ -26,6 +26,11 @@ var allowed = map[string]string{
 	"internal/safego/safego.go": "safego の実装そのもの",
 	// 結果を done チャネルへ返すため、自前で recover してエラーを送り返している。
 	"internal/services/company/website_extract.go": "結果を返す goroutine（自前 recover 済み）",
+	// 企業コンテキストの先読み。STT と並行させてターンのレイテンシを下げる（#521）。
+	// defer で recover したうえで、panic しても必ず結果をチャネルへ送る。
+	// safego.Go にすると送信が飛び、受信側の <-companyContextCh が永久に
+	// ブロックして面接が止まる。
+	"internal/services/interview/interview_turn.go": "結果を返す goroutine（自前 recover 済み）",
 }
 
 func TestNoBareGoroutine(t *testing.T) {

@@ -280,15 +280,10 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
-	historyStr := r.FormValue("history")
-	var history []map[string]string
-	if historyStr != "" {
-		json.Unmarshal([]byte(historyStr), &history)
-	}
-
 	// フォームから各パラメータを取得
 	companyName := r.FormValue("company_name")
 	companyReading := r.FormValue("company_reading")
+	companyReadingResolved := r.FormValue("company_reading_resolved") == "true"
 	position := r.FormValue("position")
 	companyInfo := r.FormValue("company_info")
 	companyType := r.FormValue("company_type")
@@ -316,9 +311,9 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		userID,
 		sessionID,
 		audioData,
-		history,
 		companyName,
 		companyReading,
+		companyReadingResolved,
 		position,
 		companyInfo,
 		companyType,
@@ -354,6 +349,8 @@ func (c *InterviewController) Turn(ctx echo.Context) error {
 		"is_deepening":             result.IsDeepening,
 		"resolved_company_id":      result.ResolvedCompanyID,
 		"custom_questions_enabled": result.CustomQuestionsEnabled,
+		"company_reading":          result.CompanyReading,
+		"company_reading_resolved": result.CompanyReadingResolved,
 	})
 
 	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})
@@ -426,6 +423,8 @@ func (c *InterviewController) StartTurn(ctx echo.Context) error {
 		"is_deepening":             result.IsDeepening,
 		"resolved_company_id":      result.ResolvedCompanyID,
 		"custom_questions_enabled": result.CustomQuestionsEnabled,
+		"company_reading":          result.CompanyReading,
+		"company_reading_resolved": result.CompanyReadingResolved,
 	})
 
 	audioPart, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"audio/mpeg"}})

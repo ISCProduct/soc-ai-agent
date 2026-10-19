@@ -10,6 +10,8 @@ jest.mock('@/app/interview/components/ThreeAvatar', () => ({
 
 import SessionScreen from '@/app/interview/components/SessionScreen'
 import { UTTERANCE_SAVE_FAILED_MESSAGE } from '@/app/interview/utteranceSave'
+import { setInterviewSessionActive, useInterviewSessionActive } from '@/app/interview/sessionChrome'
+import { renderHook } from '@testing-library/react'
 
 describe('SessionScreen', () => {
   const noop = () => {}
@@ -17,7 +19,7 @@ describe('SessionScreen', () => {
   function renderScreen(
     overrides: Partial<React.ComponentProps<typeof SessionScreen>> = {},
   ) {
-    render(
+    return render(
       <SessionScreen
         status="connected"
         companyName="テスト株式会社"
@@ -91,5 +93,19 @@ describe('SessionScreen', () => {
     renderScreen()
 
     expect(screen.queryByText(UTTERANCE_SAVE_FAILED_MESSAGE)).not.toBeInTheDocument()
+  })
+
+  // #1569: セッション画面表示中は学生下部ナビを隠す。SelectionScreen/LobbyScreenと
+  // 同一パス(/interview)のため、マウント中かどうかで判定する。
+  it('マウント中はsetInterviewSessionActiveをtrueにし、アンマウントでfalseに戻す', () => {
+    setInterviewSessionActive(false)
+    const flag = renderHook(() => useInterviewSessionActive())
+    expect(flag.result.current).toBe(false)
+
+    const { unmount } = renderScreen()
+    expect(flag.result.current).toBe(true)
+
+    unmount()
+    expect(flag.result.current).toBe(false)
   })
 })

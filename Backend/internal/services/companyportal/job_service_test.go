@@ -16,13 +16,14 @@ import (
 )
 
 type fakeJobRepo struct {
-	company *models.Company
-	jobs    map[uint]*models.CompanyJobPosition
-	listed  []models.CompanyJobPosition
-	created *models.CompanyJobPosition
-	updated *models.CompanyJobPosition
-	nextID  uint
-	findErr error
+	company   *models.Company
+	jobs      map[uint]*models.CompanyJobPosition
+	listed    []models.CompanyJobPosition
+	created   *models.CompanyJobPosition
+	updated   *models.CompanyJobPosition
+	deletedID uint
+	nextID    uint
+	findErr   error
 }
 
 func newFakeJobRepo() *fakeJobRepo {
@@ -75,6 +76,12 @@ func (r *fakeJobRepo) CreateJobPosition(p *models.CompanyJobPosition) error {
 func (r *fakeJobRepo) UpdateJobPosition(p *models.CompanyJobPosition) error {
 	r.jobs[p.ID] = p
 	r.updated = p
+	return nil
+}
+
+func (r *fakeJobRepo) DeleteJobPosition(id uint) error {
+	delete(r.jobs, id)
+	r.deletedID = id
 	return nil
 }
 
@@ -141,6 +148,37 @@ func TestUpdate_他社の求人は403(t *testing.T) {
 	}
 	if repo.updated != nil {
 		t.Error("他社の求人が更新された")
+	}
+}
+
+func TestDelete_自社の求人だけ消える(t *testing.T) {
+	repo := newFakeJobRepo()
+	repo.jobs[1] = &models.CompanyJobPosition{ID: 1, CompanyID: 5, Title: "自社"}
+	repo.jobs[2] = &models.CompanyJobPosition{ID: 2, CompanyID: 99, Title: "他社"}
+	s := NewJobService(repo)
+
+	if err := s.Delete(1, 5); err != nil {
+		t.Fatalf("削除に失敗: %v", err)
+	}
+	if _, ok := repo.jobs[1]; ok {
+		t.Error("自社の求人が残っている")
+	}
+	if _, ok := repo.jobs[2]; !ok {
+		t.Error("他社の求人まで消えた")
+	}
+
+	if err := s.Delete(2, 5); !errors.Is(err, shared.ErrForbidden) {
+		t.Errorf("他社の求人は403にすべき: %v", err)
+	}
+	if _, ok := repo.jobs[2]; !ok {
+		t.Error("拒否したのに他社の求人が消えた")
+	}
+}
+
+func TestDelete_存在しないIDも403(t *testing.T) {
+	s := NewJobService(newFakeJobRepo())
+	if err := s.Delete(12345, 5); !errors.Is(err, shared.ErrForbidden) {
+		t.Errorf("403 を返すべき: %v", err)
 	}
 }
 

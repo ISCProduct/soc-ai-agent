@@ -10,6 +10,20 @@ on:
   workflow_dispatch:
 
 jobs:
+  # 前回デプロイの auto-stop をデプロイ開始時点で取り消す(#1693)。
+  # staging-auto-stop は deploy-staging の後続なので、そこだけに任せると
+  # デプロイ中（や失敗時）に前回の auto-stop が走り、起動中の staging を落とす。
+  cancel-staging-auto-stop:
+    if: github.ref_name == 'develop'
+    name: Cancel previous staging auto-stop
+    runs-on: ubuntu-latest
+    permissions: {}
+    concurrency:
+      group: staging-auto-stop
+      cancel-in-progress: true
+    steps:
+      - run: echo "previous staging auto-stop cancelled"
+
   deploy-staging:
     if: github.ref_name == 'develop'
     name: Deploy to staging
@@ -193,12 +207,23 @@ jobs:
             exit 1
           fi
 
+          # 前回デプロイの auto-stop が起動キックの後に desired を 0 へ戻すことがある(#1693)。
+          # 待機中も desired を見て、0 なら上げ直す（自己修復）。
+          # desired=0 の直後でも終了処理が始まるまで EC2 は running のままなので、
+          # running だけで抜けるとこの後のデプロイ中に唯一の台が落とされる。desired を先に見る。
           for i in $(seq 1 20); do
+            DESIRED=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "${PROJECT_NAME}-app" \
+              --query 'AutoScalingGroups[0].DesiredCapacity' --output text 2>/dev/null || echo "unknown")
+            if [ "$DESIRED" == "0" ]; then
+              echo "ASG desired が 0 に戻っていたため 1 に上げ直します"
+              aws autoscaling update-auto-scaling-group --auto-scaling-group-name "${PROJECT_NAME}-app" \
+                --min-size 1 --desired-capacity 1
+            fi
             STATE=$(aws ec2 describe-instances \
               --filters "Name=tag:Name,Values=${PROJECT_NAME}-app" "Name=instance-state-name,Values=running" \
               --query 'Reservations[0].Instances[0].State.Name' --output text)
-            [ "$STATE" == "running" ] && break
-            echo "EC2 state: $STATE (waiting...)"
+            [ "$STATE" == "running" ] && [ "$DESIRED" != "0" ] && break
+            echo "EC2 state: $STATE desired: $DESIRED (waiting...)"
             sleep 15
           done
           if [ "$STATE" != "running" ]; then
@@ -1361,6 +1386,17 @@ jobs:
             exit 0
           fi
 
+          # gh run watch は監視中に GitHub API が 500 を返すとその場で落ちる。
+          # 2026-10-08 の本番デプロイがこれで failure になった（同期ワークフロー
+          # 自体は起動も完了もしていた）。デプロイ本体が終わったあとの後処理で、
+          # API の一時障害のためにデプロイ全体が赤くなるのは割に合わない。
+          #
+          # watch を数回やり直し、それでも読めなければ結果だけ問い合わせる。
+          # 結果が読めなかった場合は警告にとどめて続行し、失敗が確定した場合だけ
+          # ジョブを失敗させる。conclusion が空のときは API 障害のほか、run が実行中
+          # のこともあり区別できない。実行中だった run がのちに失敗しても、このジョブ
+          # では検知できない（警告の run を後から確認する）。
+          unreadable=()
           for pr in "${prs[@]}"; do
             echo "Backlog同期を再実行します: PR #$pr"
             run_url="$(gh workflow run pr-to-backlog.yml \
@@ -1368,10 +1404,39 @@ jobs:
               --ref main \
               -f pr_number="$pr")"
             run_id="${run_url##*/}"
-            gh run watch "$run_id" \
-              --repo "${{ github.repository }}" \
-              --exit-status
+
+            watched=0
+            for attempt in 1 2 3; do
+              if gh run watch "$run_id" --repo "${{ github.repository }}" --exit-status; then
+                watched=1
+                break
+              fi
+              echo "run watch が失敗しました（$attempt 回目）。10秒後にやり直します: run $run_id" >&2
+              sleep 10
+            done
+
+            if [ "$watched" != "1" ]; then
+              # watch が通らなくても、run の結果そのものは取れることが多い。
+              conclusion="$(gh run view "$run_id" --repo "${{ github.repository }}" \
+                --json conclusion --jq '.conclusion' 2>/dev/null || echo "")"
+              echo "run watch を諦め、結果を直接確認しました: ${conclusion:-取得できず}" >&2
+              if [ -z "$conclusion" ]; then
+                # 結果が読めなかっただけ（同期が失敗したとは限らない）。デプロイは
+                # 成功しているので赤くせず、後から確認できるよう run を控えておく。
+                echo "::warning::Backlog同期の結果を確認できませんでした（取得失敗または実行中）: PR #$pr / run $run_id"
+                unreadable+=("PR #$pr / run $run_id")
+              elif [ "$conclusion" != "success" ]; then
+                echo "Backlog同期が成功していません: PR #$pr / run $run_id ($conclusion)" >&2
+                exit 1
+              fi
+            fi
           done
+
+          if [ "${#unreadable[@]}" -gt 0 ]; then
+            for u in "${unreadable[@]}"; do
+              echo "::warning::結果未確認の同期run（Actionsで確認し、必要なら pr-to-backlog.yml を再実行してください）: $u"
+            done
+          fi
 
   # developへのマージPRもstagingでは即時確認できるようにする（本番には反映しない）。
   # pr_numberでべき等のため、後日releaseブランチ経由でmainへ入った際に

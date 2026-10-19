@@ -103,6 +103,10 @@ func TestFallbackIsRedundant(t *testing.T) {
 	if !FallbackIsRedundant() {
 		t.Error("既定が高精度モデルなのに再送しようとしている")
 	}
+	t.Setenv("OPENAI_WHISPER_MODEL", "")
+	if !FallbackIsRedundant() {
+		t.Error("既定モデルのままで再送しようとしている")
+	}
 	t.Setenv("OPENAI_WHISPER_MODEL", "gpt-4o-mini-transcribe")
 	if FallbackIsRedundant() {
 		t.Error("既定がminiなのに再送しないと判定されている")

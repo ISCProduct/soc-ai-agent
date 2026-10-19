@@ -36,6 +36,7 @@ export interface StudentFilters {
 export interface StudentDetail {
   analysis: {
     user_id: number
+    name: string
     integrated_profile?: unknown
     chat_summary?: {
       strengths: string

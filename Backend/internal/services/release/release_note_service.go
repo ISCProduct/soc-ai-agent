@@ -3,6 +3,7 @@ package release
 import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
+	"Backend/internal/services/shared"
 	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
@@ -284,8 +285,8 @@ func (s *ReleaseNoteService) IngestMergedPRs(ctx context.Context, sources []Rele
 
 func (s *ReleaseNoteService) summarize(ctx context.Context, src ReleaseNoteSource) (*releaseNoteSummaryResult, error) {
 	userPrompt := fmt.Sprintf(
-		"以下のPR内容を次のJSON形式で要約してください。\n%s\n\n---\nPRタイトル: %s\nPR本文:\n%s",
-		releaseNoteSummarySchema, src.Title, src.Body,
+		"以下のPR内容を次のJSON形式で要約してください。\n%s\n\n---\nPRタイトル:\n%s\nPR本文:\n%s",
+		releaseNoteSummarySchema, shared.WrapUntrustedText(src.Title, "PRタイトル"), shared.WrapUntrustedText(src.Body, "PR本文"),
 	)
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureReleaseNote)
 	raw, err := s.llm.ChatCompletionJSON(ctx, releaseNoteSummarySystemPrompt, userPrompt, 0.3, 300)
@@ -306,7 +307,8 @@ func audienceForRole(role string, isAdmin bool) []string {
 	if isAdmin {
 		return []string{models.ReleaseNoteAudienceAll, "admin"}
 	}
-	if role == "teacher" {
+	// staff（職員・教員の正式ロール）と legacy の teacher はどちらも教員向け面を見る。
+	if role == models.UserRoleStaff || role == "teacher" {
 		return []string{models.ReleaseNoteAudienceAll, "teacher"}
 	}
 	return []string{models.ReleaseNoteAudienceAll, "student"}

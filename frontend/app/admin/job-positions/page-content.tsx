@@ -242,7 +242,7 @@ function JobPositionCard({
 export default function PageContent() {
   useEffect(() => {
     const user = authService.getStoredUser()
-    if (!user?.is_admin) {
+    if (!user?.is_admin && !user?.is_staff) {
       window.location.href = '/'
     }
   }, [])

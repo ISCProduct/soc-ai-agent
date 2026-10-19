@@ -38,6 +38,12 @@ export const SPEECH_ABSOLUTE_MIN = 0.008
 export const CONFIRM_MS = 700
 /** この無音が続いたら送信する。 */
 export const SILENCE_MS = 2500
+/**
+ * 発話中の無音がこの長さに達したら「区切り」とみなして相槌の合図を出す（#1646）。
+ * 学生の発話は送信後にしか文字にならないので、文末（。？！）は使えない。
+ * 文と文の間の息継ぎ（0.3〜0.6秒程度）を区切りとして拾う。
+ */
+export const PAUSE_MS = 400
 /** 録音開始からこの時間は無音でも止めない（息継ぎ対策）。 */
 export const MIN_RECORDING_MS = 1000
 /**
@@ -84,6 +90,8 @@ export type VadState = {
   startedAt: number | null
   /** 無音が始まった時刻 (ms)。無音でなければ null。 */
   silenceSince: number | null
+  /** 今の無音で区切りの合図を出したか。1回の無音で1回だけ出す。 */
+  pauseSignaled: boolean
   /** 暗騒音の推定値。 */
   noiseFloor: number
   /** 較正のために観測した非録音フレーム数。 */
@@ -96,13 +104,14 @@ export function initialVadState(): VadState {
     speechConfirmed: false,
     startedAt: null,
     silenceSince: null,
+    pauseSignaled: false,
     noiseFloor: NOISE_FLOOR_MIN,
     observed: 0,
   }
 }
 
-/** 呼び出し側が実行すべき動作。 */
-export type VadAction = 'none' | 'start' | 'stop' | 'discard'
+/** 呼び出し側が実行すべき動作。pause は録音を続けたまま相槌だけ打つ合図。 */
+export type VadAction = 'none' | 'start' | 'stop' | 'discard' | 'pause'
 
 export type VadInput = {
   rms: number
@@ -134,6 +143,7 @@ export function stepVad(state: VadState, input: VadInput): { state: VadState; ac
           speechConfirmed: rms > speechThreshold(noiseFloor),
           startedAt: now,
           silenceSince: null,
+          pauseSignaled: false,
           noiseFloor,
           observed,
         },
@@ -147,7 +157,7 @@ export function stepVad(state: VadState, input: VadInput): { state: VadState; ac
   const speaking = rms > speechThreshold(state.noiseFloor)
   if (speaking) {
     return {
-      state: { ...state, speechConfirmed: true, silenceSince: null },
+      state: { ...state, speechConfirmed: true, silenceSince: null, pauseSignaled: false },
       action: 'none',
     }
   }
@@ -165,6 +175,9 @@ export function stepVad(state: VadState, input: VadInput): { state: VadState; ac
       const silenceSince = state.silenceSince ?? now
       if (now - silenceSince >= SILENCE_MS) {
         return { state: initialVadStateKeepingNoise(state.noiseFloor), action: 'stop' }
+      }
+      if (!state.pauseSignaled && now - silenceSince >= PAUSE_MS) {
+        return { state: { ...state, silenceSince, pauseSignaled: true }, action: 'pause' }
       }
       return { state: { ...state, silenceSince }, action: 'none' }
     }

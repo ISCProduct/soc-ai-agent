@@ -9,6 +9,7 @@ type TendencyStudent = {
   top_categories: { category: string; score: number }[] | null
   suited_industries: { industry_id: number; industry_name: string; score: number }[] | null
   data_available: boolean
+  last_activity_at?: string | null
 }
 
 // data_available: true の生徒。タイプと業界が出る
@@ -74,11 +75,15 @@ test.describe('生徒の傾向分析', () => {
     await expect(row).toBeVisible({ timeout: 8000 })
     await expect(row.getByText('yamada@example.com')).toBeVisible()
     await expect(row.getByText('対話タイプ')).toBeVisible()
+    // スコアバーは一覧を縦に伸ばすので詳細に畳む（#1573）。開くと出る
+    await expect(page.getByRole('img', { name: 'コミュニケーション力 90点' })).toHaveCount(0)
+    await row.getByRole('button', { name: 'スコアを見る' }).click()
+    await expect(row.getByRole('button', { name: '閉じる' })).toHaveAttribute('aria-expanded', 'true')
     // スコアはバー表示(#1225)なので、ラベルと数値は別要素。
     // 読み上げ用の aria-label で「どのラベルが何点か」を確認する
-    await expect(row.getByRole('img', { name: 'コミュニケーション力 90点' })).toBeVisible()
-    await expect(row.getByRole('img', { name: 'ソフトウェア開発 81.2点' })).toBeVisible()
-    await expect(row.getByRole('img', { name: '情報通信業 76.4点' })).toBeVisible()
+    await expect(page.getByRole('img', { name: 'コミュニケーション力 90点' })).toBeVisible()
+    await expect(page.getByRole('img', { name: 'ソフトウェア開発 81.2点' })).toBeVisible()
+    await expect(page.getByRole('img', { name: '情報通信業 76.4点' })).toBeVisible()
 
     // 参考情報である旨の注記(教育現場での誤用防止)
     await expect(page.getByText('あくまで参考情報')).toBeVisible()
@@ -130,7 +135,111 @@ test.describe('生徒の傾向分析', () => {
 
     await page.goto('/admin/student-insights')
     await expect(page.getByRole('heading', { name: '生徒の傾向分析' })).toBeVisible({ timeout: 15000 })
-    await expect(page.getByText('生徒が見つかりません')).toBeVisible({ timeout: 8000 })
+    await expect(page.getByText('担当の生徒がまだいません')).toBeVisible({ timeout: 8000 })
     await expect(page.getByText('あくまで参考情報')).toBeVisible()
+  })
+})
+
+const DAY = 24 * 60 * 60 * 1000
+
+// #1573: 未活動の学生を教員が見つけられる。文言は事実ベース。
+test.describe('未活動の学生', () => {
+  test('最終活動の列を出し、14日以上・記録なしの生徒に事実を添える', async ({ page }) => {
+    await mockCommon(page)
+    await mockTendency(page, [
+      { ...STUDENT_WITH_DATA, last_activity_at: new Date(Date.now() - 3 * DAY).toISOString() },
+      { ...STUDENT_WITHOUT_DATA, last_activity_at: null },
+    ])
+
+    await page.goto('/admin/student-insights')
+    const active = page.getByRole('row').filter({ hasText: '山田太郎' })
+    await expect(active).toContainText('3日前', { timeout: 15000 })
+    await expect(active).not.toContainText('活動がありません')
+    const idle = page.getByRole('row').filter({ hasText: '佐藤花子' })
+    await expect(idle).toContainText('活動の記録なし')
+    await expect(idle).toContainText('最近14日間、活動がありません')
+  })
+
+  test('?inactive_days で開くと絞り込み済みで取得し、0件なら絞り込みを外せる', async ({ page }) => {
+    await mockCommon(page)
+    const seen: URLSearchParams[] = []
+    await page.route('**/api/admin/teacher/students/**', async (route) => {
+      const params = new URL(route.request().url()).searchParams
+      seen.push(params)
+      const students = params.has('inactive_days') ? [] : [STUDENT_WITH_DATA]
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ students, total: students.length, limit: 25, offset: 0 }),
+      })
+    })
+
+    await page.goto('/admin/student-insights?inactive_days=14')
+    await expect(page.getByText('条件に合う生徒はいません')).toBeVisible({ timeout: 15000 })
+    await expect(page.getByRole('checkbox', { name: '最近14日間、活動がない生徒のみ' })).toBeChecked()
+    expect(seen.some((p) => p.get('inactive_days') === '14')).toBe(true)
+
+    await page.getByRole('button', { name: '絞り込みを外す' }).click()
+    await expect(page.getByRole('row').filter({ hasText: '山田太郎' })).toBeVisible()
+    await expect(page.getByRole('checkbox', { name: '最近14日間、活動がない生徒のみ' })).not.toBeChecked()
+  })
+
+  test('タブレット幅で絞り込みが折り返し、横にはみ出さない', async ({ page }) => {
+    await page.setViewportSize({ width: 768, height: 1024 })
+    await mockCommon(page)
+    await mockTendency(page, [STUDENT_WITH_DATA])
+
+    await page.goto('/admin/student-insights')
+    const lastFilter = page.getByRole('checkbox', { name: '履歴書要対応の生徒のみ' })
+    await expect(lastFilter).toBeVisible({ timeout: 15000 })
+    const box = await lastFilter.boundingBox()
+    expect(box && box.x + box.width).toBeLessThanOrEqual(768)
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(overflow).toBeLessThanOrEqual(0)
+  })
+})
+
+test.describe('教員の入口', () => {
+  test('対応が必要な学生を条件ごとに出し、その条件で一覧を開ける', async ({ page }) => {
+    await mockCommon(page)
+    await page.route('**/api/admin/companies*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ companies: [] }) }),
+    )
+    await page.route('**/api/admin/teacher/students/**', async (route) => {
+      const params = new URL(route.request().url()).searchParams
+      const students = params.has('inactive_days') ? [STUDENT_WITHOUT_DATA] : []
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ students, total: students.length ? 4 : 0, limit: 3, offset: 0 }),
+      })
+    })
+
+    await page.goto('/admin')
+    const section = page.getByRole('region', { name: '対応が必要な学生' })
+    await expect(section).toContainText('4人: 最近14日間、活動がありません', { timeout: 15000 })
+    await expect(section).toContainText('佐藤花子 ほか3人')
+    // 0人の条件は出さない
+    await expect(section).not.toContainText('履歴書が未提出か')
+
+    await section.getByRole('link', { name: '該当する学生を一覧で見る' }).click()
+    await expect(page).toHaveURL(/\/admin\/student-insights\?inactive_days=14/, { timeout: 30000 })
+    await expect(page.getByRole('checkbox', { name: '最近14日間、活動がない生徒のみ' })).toBeChecked({ timeout: 15000 })
+  })
+
+  test('読み込みに失敗したら空ではなくエラーと再読み込みを出す', async ({ page }) => {
+    await mockCommon(page)
+    await page.route('**/api/admin/companies*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ companies: [] }) }),
+    )
+    await page.route('**/api/admin/teacher/students/**', (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }),
+    )
+
+    await page.goto('/admin')
+    const section = page.getByRole('region', { name: '対応が必要な学生' })
+    await expect(section.getByRole('alert')).toContainText('読み込めませんでした', { timeout: 15000 })
+    await expect(section.getByRole('button', { name: '再読み込み' })).toBeVisible()
+    await expect(section).not.toContainText('いま当てはまる学生はいません')
   })
 })

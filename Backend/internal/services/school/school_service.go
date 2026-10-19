@@ -87,8 +87,9 @@ func (s *SchoolService) RemoveMember(userID, schoolID uint) error {
 	return s.repo.RemoveMember(userID, schoolID)
 }
 
-// ResolveAdminAccess は管理者の担当校を返す。
-// 0件(未割当)の管理者は「システム管理者」として学校による絞り込みを受けない(restricted=false)。
+// ResolveAdminAccess はユーザーの担当校一覧（membership）だけを返す。is_admin は見ない。
+// 対象ユーザーの担当状況を調べる用途（メンバー管理の相手側確認など）に使う。
+// リクエスト主体のスコープ判定には ResolveAccess を使うこと（is_admin を考慮する）。
 func (s *SchoolService) ResolveAdminAccess(userID uint) (restricted bool, schoolIDs []uint, err error) {
 	schools, err := s.repo.ListSchoolsForAdmin(userID)
 	if err != nil {
@@ -104,14 +105,33 @@ func (s *SchoolService) ResolveAdminAccess(userID uint) (restricted bool, school
 	return true, ids, nil
 }
 
-// CanAdminAccessSchool は、対象リソースの学校ID(未割当ならnil)に対して指定の管理者が
-// アクセスしてよいかを判定する。無制限admin(担当校未割当)は常にtrue。担当校ありの
-// 制限adminは、対象のtargetSchoolIDがnilの場合および担当校一覧に含まれない場合はfalseを
-// 返す(fail-closed)。Update/Delete/詳細取得など、school_idクエリパラメータを介さず
-// パスパラメータで単一リソースを直接指定するエンドポイントで、対象リソースをロードした後に
-// 呼び出すことを想定する(#980/#981/#982/#984)。
-func (s *SchoolService) CanAdminAccessSchool(adminUserID uint, targetSchoolID *uint) (bool, error) {
-	restricted, allowedSchoolIDs, err := s.ResolveAdminAccess(adminUserID)
+// ResolveAccess はリクエスト主体の実効スコープを返す。
+//
+// 「無制限（restricted=false, 全校閲覧）」は is_admin のときだけ成立する。
+// 職員（is_admin=false）は担当校0件でも restricted=true（＝allowedが空＝何も見えない）。
+// これを守らないと、担当校未設定の職員が全校の学生PIIを閲覧できてしまう。
+func (s *SchoolService) ResolveAccess(isAdmin bool, userID uint) (restricted bool, schoolIDs []uint, err error) {
+	schools, err := s.repo.ListSchoolsForAdmin(userID)
+	if err != nil {
+		return false, nil, err
+	}
+	if isAdmin && len(schools) == 0 {
+		return false, nil, nil // 無制限のプラットフォーム管理者
+	}
+	ids := make([]uint, len(schools))
+	for i, sc := range schools {
+		ids[i] = sc.ID
+	}
+	return true, ids, nil
+}
+
+// CanAdminAccessSchool は、対象リソースの学校ID(未割当ならnil)に対してリクエスト主体が
+// アクセスしてよいかを判定する。無制限admin(is_admin かつ担当校未割当)は常にtrue。
+// それ以外（担当校ありの制限admin・職員）は、targetSchoolIDがnilの場合および担当校一覧に
+// 含まれない場合はfalseを返す(fail-closed)。パスパラメータで単一リソースを直接指定する
+// エンドポイントで、対象リソースをロードした後に呼び出すことを想定する(#980/#981/#982/#984)。
+func (s *SchoolService) CanAdminAccessSchool(isAdmin bool, adminUserID uint, targetSchoolID *uint) (bool, error) {
+	restricted, allowedSchoolIDs, err := s.ResolveAccess(isAdmin, adminUserID)
 	if err != nil {
 		return false, err
 	}
@@ -129,15 +149,19 @@ func (s *SchoolService) CanAdminAccessSchool(adminUserID uint, targetSchoolID *u
 	return false, nil
 }
 
-// ListAccessibleSchools は管理者がフィルタUIで選べる学校一覧を返す。
-// 担当校がある管理者にはその学校群を、無制限(未割当)管理者には全学校を返す。
-func (s *SchoolService) ListAccessibleSchools(userID uint) (restricted bool, schools []models.School, err error) {
+// ListAccessibleSchools は主体がフィルタUIで選べる学校一覧を返す。
+// 担当校がある主体にはその学校群を、無制限(is_admin かつ未割当)管理者には全学校を返す。
+// 職員で担当校0件なら空（何も選べない）。
+func (s *SchoolService) ListAccessibleSchools(isAdmin bool, userID uint) (restricted bool, schools []models.School, err error) {
 	assigned, err := s.repo.ListSchoolsForAdmin(userID)
 	if err != nil {
 		return false, nil, err
 	}
 	if len(assigned) > 0 {
 		return true, assigned, nil
+	}
+	if !isAdmin {
+		return true, []models.School{}, nil // 職員で担当校なし＝何も見えない
 	}
 	all, _, err := s.repo.List(1000, 0)
 	if err != nil {

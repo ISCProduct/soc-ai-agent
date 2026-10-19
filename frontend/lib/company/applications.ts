@@ -10,6 +10,8 @@ export interface CompanyDashboard {
   published_jobs: number
   new_candidates: number
   new_candidate_window_days: number
+  // 0件の段階は含まれない。未取得のときは空。
+  status_counts?: Record<string, number>
 }
 
 export interface ApplicationListItem {

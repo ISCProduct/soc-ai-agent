@@ -123,8 +123,10 @@ export class AvatarMotion {
    */
   update(caps: AvatarCapabilities, now: number, mouthLevel: number): void {
     this.updateBlink(caps, now)
-    this.updateHead(caps, now)
+    // 口より先に更新する。updateHead が this.mouth（平滑化済みの音声振幅）を
+    // 話している感の補強に使うため。
     this.updateMouth(caps, mouthLevel)
+    this.updateHead(caps, now)
   }
 
   private updateBlink(caps: AvatarCapabilities, now: number): void {
@@ -182,7 +184,20 @@ export class AvatarMotion {
     // 呼吸。常に乗せる微動。止まっていると人形に見える。
     const breath = Math.sin(now * 0.8) * 0.012
 
-    head.rotation.x = this.headRest.x + nodAmount + breath
+    // 話している間の微動。手持ちの male/female-avatar.glb は口モーフ "aa" が
+    // 顎下を少し凹ませるだけで、唇が開いて見えるほどの変形を持たない
+    // （measure-avatar.mjs 実測・shoot-avatar.mjs 目視済み、重みを上げても
+    // 唇は変わらず顔が歪むだけ）。モーフだけでは「喋っている」と伝わらないため、
+    // 音声振幅(this.mouth)に連動した小さな頭の揺れで補う。
+    // うなずき(0.11rad を 0.45 秒かけた単発の山)と混同されないよう振幅は
+    // その1/4程度に抑え、2つの速い周波数を混ぜてチャタリングに見せる。
+    // ponytail: モデル差し替えで口モーフが効くようになったら不要、または
+    // this.mouth の寄与度を下げて頭の揺れを控えめにする。
+    const talkBob = this.state === 'speaking'
+      ? (Math.sin(now * 9) * 0.6 + Math.sin(now * 13.7) * 0.4) * this.mouth * this.cfg.nodDepthRad * 0.22
+      : 0
+
+    head.rotation.x = this.headRest.x + nodAmount + breath + talkBob
     head.rotation.y = this.headRest.y + this.gaze
   }
 

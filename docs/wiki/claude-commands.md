@@ -113,12 +113,14 @@
 1. 規模を決める（Lite / Standard / Full、不明なら Standard）
 2. 不足情報を確認
 3. 要約とメタ情報を提示 → **承認を取ってから**作成に進む
-4. GitHub Issue を先に作る（番号を採番するため）
+4. **Backlog 課題を先に作る**（`SOCAIAGENT-N` を採番するため）。GitHub Issue は `backlog-to-github-issue.yml` が15分ごとに作るので `gh issue create` しない
 5. Notion に PRD → DesignDoc（PRD と Relation 相互リンク）→ 仕様書
 6. Issue 本文に Notion の URL だけを書き戻す
 7. Notion 側に Issue番号 / GitHub / Name / **Backlogキー** を書き戻す
 
-`Backlogキー` は注意が必要です。`github-issue-to-backlog.yml` が Backlog 課題を作って Issue タイトルを `[SOCAIAGENT-N] ...` に書き換えるまで数十秒かかります。`gh issue view <番号> --json title -q .title` を何度か試してプレフィックスが付いたら書き込みます。付かないまま終わる場合は**空欄のまま放置せず理由を伝える**（空欄だと Backlog と突き合わせられません）。
+`Backlogキー` は手順4で得た `SOCAIAGENT-N` をそのまま入れます（Backlog 起点なので待ち時間はありません）。
+
+一方で **GitHub Issue の番号は最大15分あとまで存在しません。** Notion の `Issue番号` と `GitHub` URL、`#N` 付きの `Name` はその時点では埋められないので、同期後に書き戻すか、後続の作業へ回してください。ここで推測した番号を入れてはいけません。
 
 `ステータス` は `承認済み` にします。`レビュー中` にすると誰も動かさず全件止まるため、意図的にこうなっています。
 

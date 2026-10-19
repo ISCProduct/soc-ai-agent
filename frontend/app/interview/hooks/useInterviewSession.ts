@@ -16,6 +16,7 @@ import {
   REPORT_POLL_TIMEOUT_MS,
 } from '../reportPolling'
 import { resolveFinishOutcomeMessage } from '../finishOutcome'
+import { applyCompanyReadingResponse } from '../companyReadingContext'
 import { saveUtteranceWithRetry, newClientUtteranceId, flushThenFinish } from '../utteranceSave'
 import { fetchAndReadWithTimeout } from '@/lib/fetch-timeout'
 import type { Utterance, InterviewCompany, Position, InterviewStatus } from '../types'
@@ -83,6 +84,8 @@ export function useInterviewSession({
   const [emailError, setEmailError] = useState('')
   const [aiLevel, setAiLevel] = useState(0)
   const [aiSpeaking, _setAiSpeaking] = useState(false)
+  /** 学生の発話に区切りが来るたびに増える。面接官アバターの相槌の合図（#1646）。 */
+  const [studentPauseCount, setStudentPauseCount] = useState(0)
   const [avatarGender, setAvatarGender] = useState<'male' | 'female'>('male')
   const [captionsVisible, setCaptionsVisible] = useState(true)
   const [handsFreeMode, setHandsFreeMode] = useState(false)
@@ -125,6 +128,8 @@ export function useInterviewSession({
   const discardTurnRef = useRef(false)
   const audioChunksRef = useRef<Blob[]>([])
   const historyRef = useRef<{ role: string; content: string }[]>([])
+  const companyContextRef = useRef({ reading: '', readingResolved: false })
+  const companyContextGenerationRef = useRef(0)
   const aiAudioRef = useRef<HTMLAudioElement | null>(null)
   const aiAudioCtxRef = useRef<AudioContext | null>(null)
   const aiLevelRafRef = useRef<number | null>(null)
@@ -167,20 +172,22 @@ export function useInterviewSession({
     startRecording: () => startRecordingRef.current(),
     stopRecording: () => stopRecordingRef.current(),
     discardRecording: () => discardRecordingRef.current(),
+    onPause: () => setStudentPauseCount((n) => n + 1),
   })
 
   useEffect(() => { userRef.current = user }, [user])
 
   // Cleanup on unmount
-  useEffect(() => () => cleanupConnection(), [])
+  useEffect(() => () => cleanupConnection(true), [])
 
   // Auto-scroll transcript
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [utterances, partialAi])
 
-  const cleanupConnection = () => {
+  const cleanupConnection = (invalidateCompanyContext = false) => {
     audioGenerationRef.current++
+    if (invalidateCompanyContext) companyContextGenerationRef.current++
     ;[timerRef, pollRef].forEach(r => { if (r.current) { clearInterval(r.current); r.current = null } })
     if (mediaRecorderRef.current) {
       // 録音中に終了した場合、stop() の onstop で新しいターンを送ると
@@ -379,6 +386,7 @@ export function useInterviewSession({
   }
 
   const doStartTurn = async (sessionId: number, userId: number) => {
+    const companyContextGeneration = companyContextGenerationRef.current
     const receive = async (): Promise<Blob> => {
       await authService.ensureFreshUserToken()
       const { meta, audio } = await fetchAndReadWithTimeout(`${BACKEND_URL}/api/interviews/${sessionId}/start-turn`, {
@@ -401,6 +409,13 @@ export function useInterviewSession({
         if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
         return parseMultipartResponse(res)
       })
+      if (companyContextGeneration !== companyContextGenerationRef.current) return audio
+      companyContextRef.current = applyCompanyReadingResponse(
+        companyContextRef.current,
+        meta,
+        companyContextGeneration,
+        companyContextGenerationRef.current,
+      )
       const aiText: string = meta.ai_text || ''
       setIsDeepeningQuestion(Boolean(meta.is_deepening))
       setQuestionCategory(typeof meta.question_category === 'string' ? meta.question_category : null)
@@ -424,6 +439,7 @@ export function useInterviewSession({
 
   const handleJoin = async () => {
     if (!user) return
+    companyContextGenerationRef.current++
     setErrorMessage(null)
     setUtterances([])
     setPartialUser(''); setPartialAi('')
@@ -439,6 +455,7 @@ export function useInterviewSession({
     inFlightTurnRef.current = Promise.resolve()
     media.setMicEnabled(true); media.setCameraEnabled(true)
     historyRef.current = []
+    companyContextRef.current = { reading: '', readingResolved: false }
 
     try {
       setStatus('connecting')
@@ -739,7 +756,6 @@ export function useInterviewSession({
     const formData = new FormData()
     formData.append('audio', audioBlob, `audio.${ext}`)
     formData.append('user_id', String(user.user_id))
-    formData.append('history', JSON.stringify(historyRef.current))
     formData.append('turn_count', String(Math.floor(historyRef.current.length / 2) + 1))
     formData.append('remaining_seconds', String(remainingSeconds))
     formData.append('question_index', String(currentQuestionIndex))
@@ -747,12 +763,19 @@ export function useInterviewSession({
     formData.append('question_elapsed_seconds', String(questionElapsedSeconds))
     formData.append('question_duration_seconds', String(Math.max(60, interviewLimits.questionDurationSeconds || 180)))
     formData.append('company_name', interviewCompany?.name || '')
-    formData.append('company_reading', interviewCompany?.name_reading || '')
+    formData.append('company_reading', companyContextRef.current.reading || interviewCompany?.name_reading || '')
+    formData.append('company_reading_resolved', String(
+      companyContextRef.current.readingResolved || Boolean(interviewCompany?.name_reading),
+    ))
     formData.append('position', selectedPosition?.title || '')
     formData.append('company_info', buildCompanyInfo(interviewCompany))
     formData.append('company_type', selectedPosition?.category || 'general')
     formData.append('company_id', String(interviewCompany?.id || 0))
+    const companyContextGeneration = companyContextGenerationRef.current
     const receive = async (): Promise<Blob> => {
+      // Backend は保存済みの発話から履歴を組み直す（#1636）。前ターンの保存が終わる前に送ると
+      // 直前のやり取りが履歴から抜けて、面接官が同じ質問を繰り返す。チェーンは必ず解決する。
+      await utteranceSaveChainRef.current
       await authService.ensureFreshUserToken()
       const { meta, audio } = await fetchAndReadWithTimeout(`${BACKEND_URL}/api/interviews/${session.id}/turn`, {
         method: 'POST',
@@ -762,6 +785,13 @@ export function useInterviewSession({
         if (!res.ok) throw new Error(extractApiErrorMessage(await res.text()))
         return parseMultipartResponse(res)
       })
+      if (companyContextGeneration !== companyContextGenerationRef.current) return audio
+      companyContextRef.current = applyCompanyReadingResponse(
+        companyContextRef.current,
+        meta,
+        companyContextGeneration,
+        companyContextGenerationRef.current,
+      )
       const userText: string = meta.user_text || ''
       const aiText: string = meta.ai_text || ''
       setIsDeepeningQuestion(Boolean(meta.is_deepening))
@@ -781,9 +811,13 @@ export function useInterviewSession({
     try {
       await playTurnAudio(receive())
     } catch (e: unknown) {
-      setErrorMessage(parseMediaError(e))
+      if (companyContextGeneration === companyContextGenerationRef.current) {
+        setErrorMessage(parseMediaError(e))
+      }
     } finally {
-      setTurnPending(false)
+      if (companyContextGeneration === companyContextGenerationRef.current) {
+        setTurnPending(false)
+      }
     }
   }
 
@@ -824,6 +858,7 @@ export function useInterviewSession({
     emailError,
     aiLevel,
     aiSpeaking,
+    studentPauseCount,
     avatarGender,
     captionsVisible,
     setCaptionsVisible,

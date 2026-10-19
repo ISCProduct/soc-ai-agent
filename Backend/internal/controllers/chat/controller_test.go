@@ -92,7 +92,7 @@ func TestChatController_GetHistory_Forbidden(t *testing.T) {
 
 func TestChatController_Chat_Forbidden_ExistingSessionOwnedByAnotherUser(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
-	chatSvc.On("SessionHasOtherUserMessages", "s1", uint(1)).Return(true, nil)
+	chatSvc.On("ClaimSessionOwnership", "s1", uint(1)).Return(shared.ErrForbidden)
 
 	body := `{"session_id":"s1","message":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/chat", bytes.NewBufferString(body))
@@ -101,6 +101,7 @@ func TestChatController_Chat_Forbidden_ExistingSessionOwnedByAnotherUser(t *test
 	rec := httptest.NewRecorder()
 	testsupport.AssertStatus(t, newChatController(chatSvc, nil, nil, nil, nil).Chat, testsupport.NewCtx(req, rec), http.StatusForbidden)
 	chatSvc.AssertExpectations(t)
+	chatSvc.AssertNotCalled(t, "SessionHasOtherUserMessages", mock.Anything, mock.Anything)
 	chatSvc.AssertNotCalled(t, "ProcessChat", mock.Anything, mock.Anything)
 }
 
@@ -108,7 +109,7 @@ func TestChatController_Chat_Forbidden_ExistingSessionOwnedByAnotherUser(t *test
 // 誰の履歴にも現れないため拒否される（#1156）。
 func TestChatController_Chat_Forbidden_ExistingSessionWithUnsetOwner(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
-	chatSvc.On("SessionHasOtherUserMessages", "s0", uint(1)).Return(true, nil)
+	chatSvc.On("ClaimSessionOwnership", "s0", uint(1)).Return(shared.ErrForbidden)
 
 	body := `{"session_id":"s0","message":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/chat", bytes.NewBufferString(body))
@@ -117,13 +118,13 @@ func TestChatController_Chat_Forbidden_ExistingSessionWithUnsetOwner(t *testing.
 	rec := httptest.NewRecorder()
 	testsupport.AssertStatus(t, newChatController(chatSvc, nil, nil, nil, nil).Chat, testsupport.NewCtx(req, rec), http.StatusForbidden)
 	chatSvc.AssertExpectations(t)
+	chatSvc.AssertNotCalled(t, "SessionHasOtherUserMessages", mock.Anything, mock.Anything)
 	chatSvc.AssertNotCalled(t, "ProcessChat", mock.Anything, mock.Anything)
 }
 
 func TestChatController_Chat_Success_NewSession(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
-	// session s2 はまだメッセージが存在しない新規セッション。
-	// Chat は履歴を使わないので所有者判定だけを行う（GetChatHistoryForUser は呼ばない）
+	chatSvc.On("ClaimSessionOwnership", "s2", uint(1)).Return(nil)
 	chatSvc.On("SessionHasOtherUserMessages", "s2", uint(1)).Return(false, nil)
 	chatSvc.On("ProcessChat", mock.Anything, mock.Anything).Return(&chat.ChatResponse{Response: "ok"}, nil)
 
@@ -138,7 +139,7 @@ func TestChatController_Chat_Success_NewSession(t *testing.T) {
 
 func TestChatController_Chat_Success_OwnExistingSession(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
-	// session s3 は既にuserID=1（リクエスト本人）のメッセージのみが存在する
+	chatSvc.On("ClaimSessionOwnership", "s3", uint(1)).Return(nil)
 	chatSvc.On("SessionHasOtherUserMessages", "s3", uint(1)).Return(false, nil)
 	chatSvc.On("ProcessChat", mock.Anything, mock.Anything).Return(&chat.ChatResponse{Response: "ok"}, nil)
 
@@ -149,7 +150,6 @@ func TestChatController_Chat_Success_OwnExistingSession(t *testing.T) {
 	rec := httptest.NewRecorder()
 	testsupport.AssertStatus(t, newChatController(chatSvc, nil, nil, nil, nil).Chat, testsupport.NewCtx(req, rec), http.StatusOK)
 	chatSvc.AssertExpectations(t)
-	// 履歴は ProcessChat が LIMIT 付きで読み直すので、ここで全件 SELECT を出さない
 	chatSvc.AssertNotCalled(t, "GetChatHistoryForUser", mock.Anything, mock.Anything)
 }
 
@@ -160,6 +160,7 @@ func TestChatController_Chat_Success_OwnExistingSession(t *testing.T) {
 // 下流の要約・埋め込み・分析に相手の自由記述が混ざる。
 func TestChatController_Chat_Forbidden_MixedOwnerSession(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
+	chatSvc.On("ClaimSessionOwnership", "s4", uint(1)).Return(nil)
 	chatSvc.On("SessionHasOtherUserMessages", "s4", uint(1)).Return(true, nil)
 
 	body := `{"session_id":"s4","message":"hello"}`
@@ -176,6 +177,7 @@ func TestChatController_Chat_Forbidden_MixedOwnerSession(t *testing.T) {
 // 他人判定のクエリが失敗したら 500 にする（「他人はいない」に倒さない）。
 func TestChatController_Chat_InternalError_OwnershipCheckFails(t *testing.T) {
 	chatSvc := &mocks.ChatServiceMock{}
+	chatSvc.On("ClaimSessionOwnership", "s5", uint(1)).Return(nil)
 	chatSvc.On("SessionHasOtherUserMessages", "s5", uint(1)).Return(false, errors.New("db error"))
 
 	body := `{"session_id":"s5","message":"hello"}`

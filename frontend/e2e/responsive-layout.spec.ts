@@ -74,3 +74,95 @@ test.describe('レスポンシブ: 横方向の破綻', () => {
     }
   })
 })
+
+// 結果画面の列ずれの回帰テスト（本番で発覚 2026-10-15）。
+//
+// ヘッダーの帯は全幅のまま中身が左端に張り付き、本文だけ maxWidth:1200 で
+// 中央寄せだったため、画面が広いほど見出しと一覧がずれた。実測値:
+//   2000px: 見出し x=24 / 一覧 x=400（376px のずれ）
+//   1440px: 見出し x=24 / 一覧 x=120（96px のずれ）
+//   1024px: 見出し x=24 / 一覧 x=32（padding の差で 8px）
+//
+// 片方だけ直しても気付けないので、左端が一致することを測る。
+test.describe('レスポンシブ: 結果画面の列揃え', () => {
+  const RECOMMENDATIONS = {
+    recommendations: [1, 2, 3].map((i) => ({
+      id: i,
+      category_name: `テスト株式会社${i}`,
+      industry: 'IT',
+      score: 90 - i,
+      matched_axis_count: 3,
+      reason: 'テスト用の推薦理由です。',
+    })),
+    evaluated_categories: 4,
+    min_matched_axis_count: 3,
+  }
+
+  test('ヘッダーの見出しと企業一覧の左端が揃う', async ({ page }) => {
+    await setupAuth(page, TEST_USER)
+    await stubApi(page)
+    // stubApi より後に登録したものが優先される
+    await page.route('**/api/chat/recommendations*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(RECOMMENDATIONS) }),
+    )
+
+    for (const width of [2000, 1440, 1024]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/results?user_id=1&session_id=layout-check')
+
+      const heading = page.getByRole('heading', { level: 1 })
+      await expect(heading).toBeVisible()
+      const firstRow = page.locator('ol > li').first()
+      await expect(firstRow).toBeVisible()
+
+      const h = await heading.boundingBox()
+      const r = await firstRow.boundingBox()
+      expect(h, `${width}px: 見出しが取得できない`).not.toBeNull()
+      expect(r, `${width}px: 企業一覧が取得できない`).not.toBeNull()
+      // 1px はブラウザの丸め誤差の許容
+      expect(
+        Math.abs((h?.x ?? 0) - (r?.x ?? 0)),
+        `${width}px で見出し(x=${h?.x})と一覧(x=${r?.x})の左端がずれている`,
+      ).toBeLessThanOrEqual(1)
+    }
+  })
+})
+
+// AI面接・企業選択画面の列ずれの回帰テスト（SOCAIAGENT-443 / #1784）。
+//
+// /results（#1761）と同一原因: ヘッダーの帯の中身を直接 flex で全幅に
+// 広げ、本文だけ maxWidth:896 で中央寄せしていたため、画面が広いほど
+// 帯の行と本文の左端がずれた。実測値:
+//   2000px: 帯 x=124 / 本文 x=552（428pxのずれ）
+//   1440px: 帯 x=124 / 本文 x=272（148pxのずれ）
+//   768px : 帯 x=68  / 本文 x=24（44pxのずれ。向きが逆転する幅なので必ず含める）
+//
+// 帯側はアイコン+ギャップの分だけ見出しテキストが右へ寄るため、テキスト同士
+// ではなく「行全体」のボックス（data-testid="selection-header-row"）の
+// 左端で本文の見出し(h1)と比べる。
+test.describe('レスポンシブ: AI面接・企業選択画面の列揃え', () => {
+  test('ヘッダーの行と本文見出しの左端が揃う', async ({ page }) => {
+    await setupAuth(page, TEST_USER)
+    await stubApi(page)
+
+    for (const width of [2000, 1440, 1024, 768]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/interview')
+
+      const headerRow = page.getByTestId('selection-header-row')
+      await expect(headerRow).toBeVisible()
+      const heading = page.getByRole('heading', { level: 1 })
+      await expect(heading).toBeVisible()
+
+      const row = await headerRow.boundingBox()
+      const h = await heading.boundingBox()
+      expect(row, `${width}px: ヘッダー行が取得できない`).not.toBeNull()
+      expect(h, `${width}px: 見出しが取得できない`).not.toBeNull()
+      // 1px はブラウザの丸め誤差の許容
+      expect(
+        Math.abs((row?.x ?? 0) - (h?.x ?? 0)),
+        `${width}px でヘッダー行(x=${row?.x})と見出し(x=${h?.x})の左端がずれている`,
+      ).toBeLessThanOrEqual(1)
+    }
+  })
+})

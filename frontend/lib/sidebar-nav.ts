@@ -6,11 +6,13 @@ export const SIDEBAR_NAV_ITEMS = [
   { href: '/correlation-diagram', label: '企業相関図' },
   { href: '/chat-history', label: 'チャット履歴' },
   { href: '/resume', label: '履歴書レビュー' },
+  { href: '/assessments', label: '適性検査' },
   { href: '/interview', label: '面接練習' },
   { href: '/interview/history', label: '面接履歴' },
   { href: '/es-rewrite', label: 'ESリライト・添削' },
   { href: '/schedule', label: '選考スケジュール' },
   { href: '/applications', label: '選考管理' },
+  { href: '/scout', label: 'スカウト' },
   { href: '/profile', label: 'プロフィール設定' },
 ] as const
 
@@ -24,8 +26,24 @@ export const STUDENT_BOTTOM_NAV_ITEMS = [
   { href: '/results', label: '結果' },
   { href: '/interview', label: '面接' },
   { href: '/resume', label: '履歴書' },
-  { href: '/profile', label: '設定' },
+  // 行き先の見出し（プロフィール）と名前を揃える（#1576）。
+  { href: '/profile', label: 'プロフィール' },
 ] as const
+
+/**
+ * ホーム以外の画面のメニュー先頭に置く項目（#1576）。
+ * SIDEBAR_NAV_ITEMS はホームのサイドバーと共用で、ホーム自身と結果画面を含まない。
+ * そのままだと PC で /schedule などからホームにもマッチング結果にも戻れなかった。
+ */
+export const GLOBAL_NAV_HOME_ITEMS = [
+  { href: '/', label: 'ホーム（AI相談）' },
+  { href: '/results', label: 'マッチング結果' },
+] as const
+
+/** 今いる画面がナビ項目に当たるか。/ は完全一致、それ以外は配下も含める。 */
+export function isCurrentNav(pathname: string, href: string): boolean {
+  return href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(`${href}/`)
+}
 
 const HIDE_BOTTOM_NAV = [
   '/login',

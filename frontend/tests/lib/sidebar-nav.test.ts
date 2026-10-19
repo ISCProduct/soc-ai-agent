@@ -26,6 +26,7 @@ describe('sidebar-nav', () => {
     const hrefs = SIDEBAR_NAV_ITEMS.map((i) => i.href)
     expect(hrefs).toContain('/applications')
     expect(hrefs).toContain('/interview/history')
+    expect(hrefs).toContain('/scout')
   })
 
   it('Bottom nav の高さ相当の余白定義を持つ', () => {

@@ -79,6 +79,31 @@ describe('AvatarMotion', () => {
     expect(span).toBeLessThan(DEFAULT_MOTION.nodDepthRad * 0.5)
   })
 
+  it('speaking 中に音声振幅があると、呼吸だけのときより頭が揺れる（喋っている感）', () => {
+    const caps = inspectAvatar(rigged())
+    const silent = new AvatarMotion(DEFAULT_MOTION, mid)
+    silent.setState('speaking', 0)
+    const talking = new AvatarMotion(DEFAULT_MOTION, mid)
+    talking.setState('speaking', 0)
+
+    const silentSamples: number[] = []
+    const talkingSamples: number[] = []
+    for (let t = 0; t < 5; t += 0.02) {
+      silent.update(caps, t, 0)
+      silentSamples.push(caps.headBone!.rotation.x)
+    }
+    const caps2 = inspectAvatar(rigged())
+    for (let t = 0; t < 5; t += 0.02) {
+      talking.update(caps2, t, 0.8)
+      talkingSamples.push(caps2.headBone!.rotation.x)
+    }
+    const silentSpan = Math.max(...silentSamples) - Math.min(...silentSamples)
+    const talkingSpan = Math.max(...talkingSamples) - Math.min(...talkingSamples)
+    expect(talkingSpan).toBeGreaterThan(silentSpan)
+    // うなずきと見分けがつくよう、単発のうなずきの深さには届かせない
+    expect(talkingSpan).toBeLessThan(DEFAULT_MOTION.nodDepthRad * 0.5)
+  })
+
   it('聞いている間は繰り返しうなずく', () => {
     const caps = inspectAvatar(rigged())
     const m = new AvatarMotion(DEFAULT_MOTION, mid)
