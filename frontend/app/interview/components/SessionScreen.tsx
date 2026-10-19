@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, type ReactNode, type RefCallback, type RefObject } from 'react'
+import { useEffect, useState, type ReactNode, type RefCallback, type RefObject } from 'react'
 import {
   Box,
   Button,
@@ -17,7 +17,8 @@ import VideocamIcon from '@mui/icons-material/Videocam'
 import VideocamOffIcon from '@mui/icons-material/VideocamOff'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import ClosedCaptionIcon from '@mui/icons-material/ClosedCaption'
-import dynamic from 'next/dynamic'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import HistoryIcon from '@mui/icons-material/History'
 
 import { UTTERANCE_SAVE_FAILED_MESSAGE } from '../utteranceSave'
 import { formatSeconds } from '@/lib/interview/utils'
@@ -25,17 +26,15 @@ import type { Utterance } from '../types'
 import styles from './interview.module.css'
 import { UI } from '@/lib/design/tokens'
 import { setInterviewSessionActive } from '../sessionChrome'
+import Avatar2D from './Avatar2D'
 
-const ThreeAvatar = dynamic(() => import('./ThreeAvatar'), {
-  ssr: false,
-  loading: () => (
-    <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <CircularProgress size={36} sx={{ color: UI.mark }} />
-    </Box>
-  ),
-})
-
-const waveHeights = [5, 8, 13, 18, 25, 34, 42, 48, 44, 36, 28, 20, 14, 9, 6, 7, 11, 18, 27, 36, 44, 48, 42, 34, 26, 18, 12, 8, 5, 7, 10, 14]
+/** 回答に迷ったときの思考の補助線。チケット固有の採点基準ではなく、どの質問にも共通する一般的な枠組み。 */
+const STAR_GUIDE = [
+  { key: 'S', label: 'Situation', description: 'どんな状況・背景だったか' },
+  { key: 'T', label: 'Task', description: '達成すべき課題は何だったか' },
+  { key: 'A', label: 'Action', description: '自分が具体的に取った行動' },
+  { key: 'R', label: 'Result', description: '行動の結果どうなったか' },
+] as const
 
 export interface SessionScreenProps {
   status: string
@@ -136,6 +135,17 @@ export default function SessionScreen({
     setInterviewSessionActive(true)
     return () => setInterviewSessionActive(false)
   }, [])
+
+  const [starGuideOpen, setStarGuideOpen] = useState(true)
+  const [historyOpen, setHistoryOpen] = useState(false)
+
+  // 「現在の質問」「ライブ回答」は新規のデータを持たず、既存の発話ストリーム
+  // (utterances/partialAi/partialUser)から導出する。確定済みの発話が無い間は
+  // 直近のAI/ユーザー発話にフォールバックする。
+  const latestAiUtterance = [...utterances].reverse().find((u) => u.role === 'ai')?.text ?? ''
+  const currentQuestionText = partialAi || latestAiUtterance
+  const latestUserUtterance = [...utterances].reverse().find((u) => u.role === 'user')?.text ?? ''
+  const liveAnswerText = partialUser || latestUserUtterance
 
   return (
     <Box className={styles.sessionRoot} sx={{ bgcolor: UI.nightStage, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -238,103 +248,108 @@ export default function SessionScreen({
       )}
 
       {/* ── Main ── */}
-      {/* md未満では縦積みにする（アバター帯→文字起こし→コントロール）。
+      {/* md未満では縦積みにする（自分のカメラ→面接官→質問パネル）。
           useMediaQueryでの分岐は使わず、sxのブレークポイントだけで解く
-          （ThreeAvatarの再マウント・Realtime再接続を避けるため #1569） */}
+          （video要素の再マウント・Realtime再接続を避けるため #1569） */}
       <Box sx={{ flex: 1, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, px: 2, pb: 2, overflow: 'hidden', minHeight: 0 }}>
 
-        {/* ── 左: アバターパネル ── */}
-        {/* xsでは高さ固定の帯にする。md以上は従来どおり幅62%で高さはMainに追従 */}
-        <Box sx={{ flex: { xs: '0 0 auto', md: '0 0 62%' }, height: { xs: 200, md: '100%' }, position: 'relative', borderRadius: 3, overflow: 'hidden' }}>
+        {/* ── 左: 自分のカメラ(主役) + 面接官(2Dアバター、小) ── */}
+        {/* 自分の映像を中心に据える構成に変更(#2D化)。以前は面接官アバターが
+            全面で自分のカメラは左下の小さいオーバーレイだったが、面接練習で
+            本人が自分の映り・姿勢を確認しやすいよう主従を入れ替えた。 */}
+        <Box sx={{ flex: { xs: '0 0 auto', md: '0 0 58%' }, display: 'flex', flexDirection: 'column', gap: 1.5, minHeight: 0 }}>
 
-          {/* アバター（全面） */}
-          <Box sx={{ width: '100%', height: '100%' }}>
-            <ThreeAvatar
-              gender={avatarGender}
-              audioStream={null}
-              level={aiLevel}
-              speaking={aiSpeaking}
-              active={isConnected}
-              pending={turnPending}
-              acknowledgeSignal={studentPauseCount}
+          {/* 自分のカメラ(大) */}
+          <Box sx={{ flex: { xs: '0 0 auto', md: 1 }, height: { xs: 220, md: 'auto' }, minHeight: 0, position: 'relative', borderRadius: 3, overflow: 'hidden', bgcolor: '#1a1a1a' }}>
+            <video
+              ref={sessionVideoCallbackRef}
+              muted
+              playsInline
+              className={`${styles.cameraVideo} ${styles.cameraVideoFill} ${cameraEnabled ? '' : styles.cameraVideoHidden}`}
             />
-          </Box>
+            {!cameraEnabled && (
+              <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <VideocamOffIcon sx={{ color: '#666', fontSize: 40 }} />
+              </Box>
+            )}
 
-          {/* 面接官ロールラベル */}
-          <Box sx={{
-            position: 'absolute', top: 12, left: 0, right: 0,
-            display: 'flex', justifyContent: 'center',
-          }}>
+            {/* 自分のラベル */}
             <Box sx={{
+              position: 'absolute', top: 12, left: 12,
               bgcolor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)',
-              borderRadius: 9999, px: 2, py: 0.6,
-              display: 'flex', alignItems: 'center', gap: 0.75,
+              borderRadius: 9999, px: 1.75, py: 0.5,
             }}>
-              <Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: '#34a853' }} />
               <Typography sx={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>
-                {companyName} 面接官
+                あなた{userName ? `（${userName}）` : ''}
               </Typography>
             </Box>
+
+            {/* 接続中オーバーレイ */}
+            {status === 'connecting' && (
+              <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
+                <Typography sx={{ color: UI.nightInk, fontSize: 15 }}>接続中...</Typography>
+                <LinearProgress sx={{ width: 160, bgcolor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { bgcolor: UI.mark } }} />
+              </Box>
+            )}
+
+            {/* エラーオーバーレイ */}
+            {status === 'error' && (
+              <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'rgba(0,0,0,0.75)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', p: 3, gap: 2 }}>
+                <Typography sx={{ color: '#f28b82', textAlign: 'center', fontSize: 14, lineHeight: 1.6 }}>{errorMessage}</Typography>
+                <Button variant="contained" startIcon={<RefreshIcon />} onClick={onJoin}
+                  sx={{ bgcolor: '#4285f4', '&:hover': { bgcolor: '#3367d6' }, textTransform: 'none' }}>
+                  再接続する
+                </Button>
+              </Box>
+            )}
           </Box>
 
-          {/* 音声波形 */}
-          <Box sx={{
-            position: 'absolute', bottom: 88, left: 0, right: 0,
-            display: 'flex', justifyContent: 'center', alignItems: 'flex-end',
-            gap: '3px', height: 52, px: 6,
-          }}>
-            {waveHeights.map((h, i) => (
-              <Box key={i} sx={{
-                width: 3,
-                height: `${Math.max(4, h * Math.max(0.12, aiSpeaking ? aiLevel * 1.2 : 0.12))}px`,
-                bgcolor: 'rgba(255,255,255,0.75)',
-                borderRadius: '2px 2px 1px 1px',
-                transition: 'height 0.09s ease',
-              }} />
-            ))}
-          </Box>
-
-          {/* ユーザーカメラ（小）- 左下オーバーレイ */}
-          <Box sx={{
-            position: 'absolute', bottom: 16, left: 16,
-            width: 128, borderRadius: 2, overflow: 'hidden',
-            border: '2px solid rgba(255,255,255,0.3)',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-            bgcolor: '#1a1a1a',
-          }}>
-            <Box sx={{ paddingTop: '75%', position: 'relative' }}>
-              <video
-                ref={sessionVideoCallbackRef}
-                muted
-                playsInline
-                className={`${styles.cameraVideo} ${styles.cameraVideoFill} ${cameraEnabled ? '' : styles.cameraVideoHidden}`}
+          {/* 面接官(2Dアバター、小) + 発話中の字幕 */}
+          <Box sx={{ flexShrink: 0, height: 128, display: 'flex', gap: 1.5 }}>
+            <Box sx={{ width: 128, flexShrink: 0, borderRadius: 2, overflow: 'hidden', position: 'relative', bgcolor: UI.nightPanel, border: '1px solid rgba(255,255,255,0.14)' }}>
+              <Avatar2D
+                gender={avatarGender}
+                level={aiLevel}
+                speaking={aiSpeaking}
+                active={isConnected}
+                pending={turnPending}
+                acknowledgeSignal={studentPauseCount}
               />
-              {!cameraEnabled && (
-                <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <VideocamOffIcon sx={{ color: '#666', fontSize: 28 }} />
-                </Box>
-              )}
+              <Box sx={{
+                position: 'absolute', top: 6, left: 6, right: 6,
+                display: 'flex', alignItems: 'center', gap: 0.5,
+              }}>
+                <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: aiSpeaking ? '#34a853' : 'rgba(255,255,255,0.4)', flexShrink: 0 }} />
+                <Typography noWrap sx={{ color: '#fff', fontSize: 10.5, fontWeight: 600 }}>
+                  {(companyName || 'AI面接練習') + ' 面接官'}
+                </Typography>
+              </Box>
             </Box>
+
+            {/* 発話中の字幕(リアルタイムTTSテキスト)。「字幕」トグルで表示/非表示。
+                右パネルの「現在の質問」カードと内容が重複するため、実際に
+                読み上げている間だけ出す（クローズドキャプションと同じ考え方）。 */}
+            {captionsVisible && aiSpeaking ? (
+              <Box sx={{
+                flex: 1, minWidth: 0, borderRadius: 2, px: 2, py: 1.25,
+                bgcolor: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)',
+                display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 0.3,
+                overflow: 'hidden',
+              }}>
+                <Typography sx={{ color: UI.nightMuted, fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}>
+                  AI面接官 音声読み上げ中
+                </Typography>
+                <Typography sx={{
+                  color: '#fff', fontSize: 13, lineHeight: 1.5,
+                  display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                }}>
+                  {partialAi || currentQuestionText}
+                </Typography>
+              </Box>
+            ) : (
+              <Box sx={{ flex: 1 }} />
+            )}
           </Box>
-
-          {/* 接続中オーバーレイ */}
-          {status === 'connecting' && (
-            <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-              <Typography sx={{ color: UI.nightInk, fontSize: 15 }}>接続中...</Typography>
-              <LinearProgress sx={{ width: 160, bgcolor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { bgcolor: UI.mark } }} />
-            </Box>
-          )}
-
-          {/* エラーオーバーレイ */}
-          {status === 'error' && (
-            <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'rgba(0,0,0,0.75)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', p: 3, gap: 2 }}>
-              <Typography sx={{ color: '#f28b82', textAlign: 'center', fontSize: 14, lineHeight: 1.6 }}>{errorMessage}</Typography>
-              <Button variant="contained" startIcon={<RefreshIcon />} onClick={onJoin}
-                sx={{ bgcolor: '#4285f4', '&:hover': { bgcolor: '#3367d6' }, textTransform: 'none' }}>
-                再接続する
-              </Button>
-            </Box>
-          )}
         </Box>
 
         {/* ── 右: チャット + コントロール ── */}
@@ -355,45 +370,107 @@ export default function SessionScreen({
             </Box>
           )}
 
-          {/* 発話履歴 */}
-          <Box sx={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1.5, py: 1,
+          {/* 質問・回答エリア(スクロール可能) */}
+          <Box sx={{ flex: 1, overflowY: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1.5, py: 1,
             '&::-webkit-scrollbar': { width: 4 },
             '&::-webkit-scrollbar-thumb': { bgcolor: 'rgba(255,255,255,0.2)', borderRadius: 2 },
           }}>
-            {utterances.length === 0 && !partialAi && (
+            {utterances.length === 0 && !partialAi ? (
               <Typography sx={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, textAlign: 'center', mt: 4 }}>
-                面接が始まると会話がここに表示されます
+                面接が始まると質問がここに表示されます
               </Typography>
-            )}
-            {utterances.map((u, i) => (
-              <Box key={i} sx={{ display: 'flex', flexDirection: 'column', gap: 0.3, alignItems: u.role === 'ai' ? 'flex-start' : 'flex-end' }}>
-                <Box sx={{
-                  bgcolor: u.role === 'ai' ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.18)',
-                  color: u.role === 'ai' ? '#1a1a1a' : '#fff',
-                  px: 2, py: 1.2,
-                  borderRadius: u.role === 'ai' ? '4px 16px 16px 16px' : '16px 4px 16px 16px',
-                  maxWidth: '88%',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                }}>
-                  <Typography sx={{ fontSize: 13.5, lineHeight: 1.65 }}>{u.text}</Typography>
+            ) : (
+              <>
+                {/* 現在の質問 */}
+                <Box sx={{ bgcolor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 2, p: 2 }}>
+                  <Typography sx={{ color: UI.nightMuted, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, mb: 1 }}>
+                    {isActive ? '現在の質問' : '前回の質問'}
+                  </Typography>
+                  <Typography sx={{ color: '#fff', fontSize: 15, lineHeight: 1.75, whiteSpace: 'pre-wrap' }}>
+                    {currentQuestionText || '質問を準備しています…'}
+                  </Typography>
                 </Box>
-              </Box>
-            ))}
 
-            {partialAi && (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.3 }}>
-                <Box sx={{ bgcolor: 'rgba(255,255,255,0.7)', px: 2, py: 1.2, borderRadius: '4px 16px 16px 16px', maxWidth: '88%', opacity: 0.8 }}>
-                  <Typography sx={{ fontSize: 13.5, color: '#1a1a1a', lineHeight: 1.65 }}>{partialAi}</Typography>
+                {/* STAR回答フレームワーク思考ガイド */}
+                <Box sx={{ bgcolor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden' }}>
+                  <Box
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setStarGuideOpen((v) => !v)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setStarGuideOpen((v) => !v) } }}
+                    aria-expanded={starGuideOpen}
+                    sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2, py: 1.25, cursor: 'pointer', minHeight: 44 }}
+                  >
+                    <Typography sx={{ color: 'rgba(255,255,255,0.85)', fontSize: 12.5, fontWeight: 600 }}>
+                      STAR回答フレームワーク思考ガイド
+                    </Typography>
+                    <ExpandMoreIcon sx={{ color: 'rgba(255,255,255,0.6)', fontSize: 20, transform: starGuideOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+                  </Box>
+                  {starGuideOpen && (
+                    <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, px: 2, pb: 2 }}>
+                      {STAR_GUIDE.map((s) => (
+                        <Box key={s.key} sx={{ bgcolor: 'rgba(255,255,255,0.06)', borderRadius: 1.5, p: 1.25 }}>
+                          <Typography sx={{ color: UI.mark, fontSize: 12, fontWeight: 700 }}>
+                            {s.key} ({s.label})
+                          </Typography>
+                          <Typography sx={{ color: 'rgba(255,255,255,0.75)', fontSize: 11.5, lineHeight: 1.5, mt: 0.3 }}>
+                            {s.description}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
                 </Box>
-              </Box>
-            )}
 
-            {partialUser && (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.3, alignItems: 'flex-end' }}>
-                <Box sx={{ bgcolor: 'rgba(255,255,255,0.12)', px: 2, py: 1.2, borderRadius: '16px 4px 16px 16px', maxWidth: '88%', opacity: 0.8 }}>
-                  <Typography sx={{ fontSize: 13.5, color: '#fff', lineHeight: 1.65 }}>{partialUser}</Typography>
-                </Box>
-              </Box>
+                {/* ライブ回答(あなたの発話) */}
+                {isActive && (
+                  <Box sx={{ bgcolor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 2, p: 2 }}>
+                    <Typography sx={{ color: UI.nightMuted, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, mb: 1 }}>
+                      あなたの回答{partialUser ? '（認識中）' : ''}
+                    </Typography>
+                    <Typography sx={{ color: liveAnswerText ? '#fff' : 'rgba(255,255,255,0.4)', fontSize: 13.5, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
+                      {liveAnswerText || '「話す」ボタンを押して回答してください'}
+                    </Typography>
+                  </Box>
+                )}
+
+                {/* これまでの質問・回答(折りたたみ) */}
+                {utterances.length > 0 && (
+                  <Box sx={{ bgcolor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden' }}>
+                    <Box
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setHistoryOpen((v) => !v)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setHistoryOpen((v) => !v) } }}
+                      aria-expanded={historyOpen}
+                      sx={{ display: 'flex', alignItems: 'center', gap: 0.75, px: 2, py: 1.25, cursor: 'pointer', minHeight: 44 }}
+                    >
+                      <HistoryIcon sx={{ color: 'rgba(255,255,255,0.6)', fontSize: 18 }} />
+                      <Typography sx={{ color: 'rgba(255,255,255,0.85)', fontSize: 12.5, fontWeight: 600, flex: 1 }}>
+                        これまでの質問・回答（{utterances.length}）
+                      </Typography>
+                      <ExpandMoreIcon sx={{ color: 'rgba(255,255,255,0.6)', fontSize: 20, transform: historyOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+                    </Box>
+                    {historyOpen && (
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, px: 2, pb: 2 }}>
+                        {utterances.map((u, i) => (
+                          <Box key={i} sx={{ display: 'flex', flexDirection: 'column', gap: 0.3, alignItems: u.role === 'ai' ? 'flex-start' : 'flex-end' }}>
+                            <Box sx={{
+                              bgcolor: u.role === 'ai' ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.18)',
+                              color: u.role === 'ai' ? '#1a1a1a' : '#fff',
+                              px: 2, py: 1.2,
+                              borderRadius: u.role === 'ai' ? '4px 16px 16px 16px' : '16px 4px 16px 16px',
+                              maxWidth: '92%',
+                            }}>
+                              <Typography sx={{ fontSize: 13, lineHeight: 1.6 }}>{u.text}</Typography>
+                            </Box>
+                          </Box>
+                        ))}
+                      </Box>
+                    )}
+                  </Box>
+                )}
+              </>
             )}
 
             <div ref={transcriptEndRef} />
