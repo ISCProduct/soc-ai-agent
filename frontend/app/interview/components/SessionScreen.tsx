@@ -159,7 +159,11 @@ export default function SessionScreen({
   // 現在の質問(最新のAI発話)より後に来たuser発話だけを「現在の質問への回答」として扱う。
   // 末尾のuser発話をそのまま使うと、次の質問が確定した直後(まだ何も話していない間)に
   // 前の質問への回答が「現在の質問の回答」として出続けてしまう(CodeRabbit指摘)。
-  const latestUserUtterance = utterances.slice(lastAiIndex + 1).findLast((u) => u.role === 'user')?.text ?? ''
+  // AI発話が一度も無い(lastAiIndex=-1)間は、質問自体が無いのでuser発話も拾わない
+  // (テスター指摘。通常の面接フローではAIが必ず先に質問するため起きないが念のため)。
+  const latestUserUtterance = lastAiIndex >= 0
+    ? utterances.slice(lastAiIndex + 1).findLast((u) => u.role === 'user')?.text ?? ''
+    : ''
   const liveAnswerText = partialUser || latestUserUtterance
   const urgency = urgencyOf(questionRemainingSeconds)
 
