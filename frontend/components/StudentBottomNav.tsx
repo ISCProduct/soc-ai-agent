@@ -11,6 +11,7 @@ import ManageAccountsIcon from '@mui/icons-material/ManageAccounts'
 import { STUDENT_BOTTOM_NAV_ITEMS, isCurrentNav, shouldShowStudentBottomNav } from '@/lib/sidebar-nav'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import { authService } from '@/lib/auth'
+import { useInterviewSessionActive } from '@/app/interview/sessionChrome'
 
 const ICONS = {
   '/': <ChatIcon />,
@@ -46,7 +47,12 @@ export function StudentBottomNav() {
     setMounted(true)
   }, [])
 
+  // AI面接のセッション画面（/interview の内部 status）表示中は隠す。
+  // SelectionScreen/LobbyScreen と同一パスのため pathname では区別できない（#1569）。
+  const interviewSessionActive = useInterviewSessionActive()
+
   if (!shouldShowStudentBottomNav(pathname)) return null
+  if (interviewSessionActive) return null
   if (!mounted || !hasStoredUser) return null
 
   const current =

@@ -27,6 +27,7 @@ import { MarkLabel } from '@/components/company-portal/MarkLabel'
 import { jobPublishMark } from '@/lib/company/marks'
 import { companyAuthService } from '@/lib/company/auth'
 import { companyJobService, isPublished, type CompanyJob, type JobInput } from '@/lib/company/jobs'
+import { EmptyState } from '@/components/common/EmptyState'
 import { ListSkeleton } from '@/components/common/ListSkeleton'
 
 const EMPTY_FORM: JobInput = {
@@ -218,23 +219,24 @@ export default function CompanyPortalJobsPage() {
       {jobs.length === 0 ? (
         <Paper
           elevation={0}
-          sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '4px', p: 4 }}
+          sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '4px' }}
         >
-          <Typography variant="h6" gutterBottom>
-            求人がまだありません
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            求人がないと学生からの応募は発生しません。職種名だけで作成できます。
-          </Typography>
-          {isOwner ? (
-            <Button variant="contained" onClick={openCreate}>
-              求人を作る
-            </Button>
-          ) : (
-            <Typography variant="body2" color="text.secondary">
-              求人の作成は管理者のみ行えます。
-            </Typography>
-          )}
+          <EmptyState
+            title="求人がまだありません"
+            description="求人がないと学生からの応募は発生しません。職種名だけで作成できます。"
+            titleComponent="h2"
+            action={
+              isOwner ? (
+                <Button variant="contained" onClick={openCreate}>
+                  求人を作る
+                </Button>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  求人の作成は管理者のみ行えます。
+                </Typography>
+              )
+            }
+          />
         </Paper>
       ) : (
         <Paper

@@ -36,8 +36,12 @@ type User struct {
 }
 
 // UserRoleStaff は学校職員（教員・キャリア担当）のロール値。
-// models.UserRoleStaff と同じ値（GORM非依存のため定数を重複定義）。
-const UserRoleStaff = "staff"
+// UserRoleStudent は既定の学生ロール。職員ロールを剥奪したときの戻り先。
+// models 側と同じ値（GORM非依存のため定数を重複定義）。
+const (
+	UserRoleStudent = "student"
+	UserRoleStaff   = "staff"
+)
 
 // HasStaffRole は職員ロールを持つか。
 func (u *User) HasStaffRole() bool {

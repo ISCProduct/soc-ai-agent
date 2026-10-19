@@ -228,7 +228,7 @@ export default function PageContent() {
   const today = new Date()
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f5f5f5', p: { xs: 1.5, sm: 3 } }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', p: { xs: 1.5, sm: 3 } }}>
       <Box sx={{ maxWidth: 900, mx: 'auto' }}>
         {/* Header */}
         <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, mb: 3 }}>

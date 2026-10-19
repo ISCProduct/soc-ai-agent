@@ -1,5 +1,8 @@
--- staff ロールを学生へ戻す。role は元が 'student' 既定のため、staff を student に戻す。
--- （このバックフィル以前に staff を手で設定していた運用は無い想定。）
-UPDATE `users`
-SET `role` = 'student', `updated_at` = NOW()
-WHERE `role` = 'staff';
+-- 意図的に no-op。
+-- このマイグレーションは「担当校を持つ既存ユーザーを role='staff' にする」データ
+-- バックフィルで、安全な逆操作が存在しない:
+--   - up 適用後に追加された純粋職員(is_admin=false, role=staff)まで student へ降格すると
+--     認可情報を壊す。
+--   - up は legacy の teacher など元の値を区別せず staff にするため、元ロールを復元できない。
+-- そのため down ではロールを変更しない。ロールの訂正が必要な場合は個別に行う。
+SELECT 1;

@@ -199,7 +199,8 @@ components:
       type: object
       description: |
         ログイン・登録・リフレッシュの共通レスポンス。
-        `token` は管理者のみ、`user_token` と `refresh_token` は全ユーザーに入る。
+        `token`（管理者トークン）は管理者と職員（is_staff）に入る。
+        `user_token` と `refresh_token` は全ユーザーに入る。
       required: [user_id, email, name, is_guest, target_level, is_admin, email_verified]
       properties:
         user_id: { type: integer }
@@ -209,11 +210,12 @@ components:
         target_level: { type: string, description: "新卒 / 中途" }
         school_name: { type: string }
         is_admin: { type: boolean }
+        is_staff: { type: boolean, description: "学校職員（教員・キャリア担当）。ログイン後に /admin へ送る判定に使う" }
         certifications_acquired: { type: string }
         certifications_in_progress: { type: string }
         avatar_url: { type: string }
         oauth_provider: { type: string, description: "google / github" }
-        token: { type: string, description: 管理者トークン。管理者のみ }
+        token: { type: string, description: 管理者トークン。管理者と職員(is_staff)に発行 }
         user_token: { type: string, description: ユーザー認証トークン（短TTL） }
         refresh_token: { type: string, description: "リフレッシュトークン（#616）" }
         email_verified: { type: boolean }
@@ -2895,6 +2897,9 @@ paths:
     put:
       tags: [admin-users]
       summary: 利用者を更新
+      description: |
+        `is_admin`（管理者権限）と `is_staff`（職員ロール= users.role を staff にする）は
+        権限の付与/剥奪にあたるため、無制限管理者のみ変更可能（担当校を持つ制限adminは403）。
       security: [{ adminAuth: [] }]
       parameters:
         - in: path
@@ -2902,6 +2907,17 @@ paths:
           required: true
           schema:
             type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                is_admin: { type: boolean, description: 管理者権限（無制限管理者のみ変更可） }
+                is_staff: { type: boolean, description: 職員ロール（無制限管理者のみ変更可）。true で users.role=staff }
+                name: { type: string }
+                target_level: { type: string, enum: ["新卒", "中途", ""] }
+                school_name: { type: string }
       responses:
         "200":
           description: 成功

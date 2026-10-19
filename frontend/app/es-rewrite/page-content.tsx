@@ -248,7 +248,7 @@ function ESRewriteContent() {
   const result = mode === 'rewrite' ? rewriteResult : reviewResult
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f8f6f6' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: UI.paper }}>
       {/* Header */}
       <Box
         component="header"
