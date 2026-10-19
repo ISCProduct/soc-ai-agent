@@ -7,6 +7,7 @@ import (
 	"Backend/internal/openai"
 	"Backend/internal/services/gbizinfo"
 	"Backend/internal/services/prompts"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
@@ -358,6 +359,7 @@ func (f *CompanyInfoFetcher) recentlyFailedProvision(key string) bool {
 
 // Acquire は企業名から基本情報をプレビュー取得する（DB 非更新）。
 func (f *CompanyInfoFetcher) Acquire(ctx context.Context, companyName, websiteURL string) (*CompanyInfoResult, error) {
+	ctx = f.withCompanyExtractionVersion(ctx)
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
@@ -371,7 +373,7 @@ func (f *CompanyInfoFetcher) Acquire(ctx context.Context, companyName, websiteUR
 }
 
 func (f *CompanyInfoFetcher) acquireForCompany(ctx context.Context, company *models.Company) (*CompanyInfoResult, error) {
-	ctx, _ = prompts.WithPromptVersion(ctx, prompts.StageCompanyExtraction, company.ID)
+	ctx = f.withCompanyExtractionVersion(ctx)
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
@@ -382,6 +384,16 @@ func (f *CompanyInfoFetcher) acquireForCompany(ctx context.Context, company *mod
 	}
 
 	return f.acquireViaAISearch(ctx, company.Name, company.WebsiteURL)
+}
+
+func (f *CompanyInfoFetcher) withCompanyExtractionVersion(ctx context.Context) context.Context {
+	userID, _ := usagectx.Actor(ctx)
+	subjectID := uint(0)
+	if userID != nil {
+		subjectID = *userID
+	}
+	ctx, _ = prompts.WithPromptVersion(ctx, prompts.StageCompanyExtraction, subjectID)
+	return ctx
 }
 
 func (f *CompanyInfoFetcher) acquireFromGBizCompany(ctx context.Context, company *models.Company) (*CompanyInfoResult, error) {

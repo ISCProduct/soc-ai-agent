@@ -34,6 +34,10 @@ type VersionAssignment struct {
 // なかった利用者には工程別版、次に従来の PROMPT_VERSION が適用される。
 func ResolvePromptVersion(stage Stage, subjectID uint) VersionAssignment {
 	base := promptVersionForStage(stage)
+	if !promptVersionFitsStorage(stage, base) {
+		slog.Warn("プロンプト版設定を無視します", "stage", stage, "reason", "version too long")
+		base = "v2"
+	}
 	stageName := strings.ToUpper(string(stage))
 	experiment := strings.TrimSpace(os.Getenv("PROMPT_AB_" + stageName))
 	if experiment == "" {
@@ -53,10 +57,23 @@ func ResolvePromptVersion(stage Stage, subjectID uint) VersionAssignment {
 	if percent == 0 || subjectID == 0 {
 		return VersionAssignment{Version: base, Variant: "control"}
 	}
+	candidate := strings.TrimSpace(parts[0])
+	if !promptVersionFitsStorage(stage, candidate) {
+		slog.Warn("プロンプトA/B設定を無視します", "stage", stage, "reason", "candidate version too long")
+		return VersionAssignment{Version: base, Variant: "control"}
+	}
+	if candidate == base {
+		slog.Warn("プロンプトA/B設定を無視します", "stage", stage, "reason", "candidate and control versions are identical")
+		return VersionAssignment{Version: base, Variant: "control"}
+	}
+	if !hasVersionedPrompt(stage, base) || !hasVersionedPrompt(stage, candidate) {
+		slog.Warn("プロンプトA/B設定を無視します", "stage", stage, "reason", "candidate prompt is not registered")
+		return VersionAssignment{Version: base, Variant: "control"}
+	}
 
 	bucket := promptVersionBucket(stage, subjectID)
 	if bucket < percent {
-		return VersionAssignment{Version: strings.TrimSpace(parts[0]), Variant: "candidate"}
+		return VersionAssignment{Version: candidate, Variant: "candidate"}
 	}
 	return VersionAssignment{Version: base, Variant: "control"}
 }
@@ -79,6 +96,28 @@ func promptVersionForStage(stage Stage) string {
 		return strings.TrimSpace(PromptVersion)
 	}
 	return "v2"
+}
+
+func promptVersionFitsStorage(stage Stage, version string) bool {
+	maxLength := 64
+	if stage == StageMatchingReason {
+		maxLength -= len("matching_reason_")
+	}
+	return len(version) <= maxLength
+}
+
+// hasVersionedPrompt は、実際に本文を実装している工程・版だけを実験候補として許可する。
+// 新しい本文を追加した際は、ここにも工程・版を登録する。
+func hasVersionedPrompt(stage Stage, version string) bool {
+	if version != "v2" {
+		return false
+	}
+	switch stage {
+	case StageQuestionGeneration, StageScoreEvaluation, StageMatchingReason, StageCompanyExtraction:
+		return true
+	default:
+		return false
+	}
 }
 
 func promptVersionBucket(stage Stage, subjectID uint) int {

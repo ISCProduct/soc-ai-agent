@@ -323,33 +323,51 @@ func TestResolvePromptVersion(t *testing.T) {
 		}
 	})
 
-	t.Run("利用者単位で再現可能なA/B割当", func(t *testing.T) {
-		t.Setenv("PROMPT_VERSION", "control-v2")
+	t.Run("同一版はA/B候補として割り当てない", func(t *testing.T) {
+		t.Setenv("PROMPT_VERSION", "v2")
 		t.Setenv("PROMPT_VERSION_SCORE_EVALUATION", "")
-		t.Setenv("PROMPT_AB_SCORE_EVALUATION", "candidate-v3:50")
+		t.Setenv("PROMPT_AB_SCORE_EVALUATION", "v2:100")
+		got := ResolvePromptVersion(StageScoreEvaluation, 1)
+		if got.Version != "v2" || got.Variant != "control" {
+			t.Fatalf("同一版指定時の割当=%+v", got)
+		}
+	})
 
+	t.Run("未登録候補はcontrolへ戻す", func(t *testing.T) {
+		t.Setenv("PROMPT_VERSION", "v2")
+		t.Setenv("PROMPT_VERSION_SCORE_EVALUATION", "")
+		t.Setenv("PROMPT_AB_SCORE_EVALUATION", "candidate-v3:100")
+
+		got := ResolvePromptVersion(StageScoreEvaluation, 1)
+		if got.Version != "v2" || got.Variant != "control" {
+			t.Fatalf("未登録候補時の割当=%+v", got)
+		}
+	})
+
+	t.Run("利用者IDでのbucket割当は再現可能かつ分散", func(t *testing.T) {
+		if got := promptVersionBucket(StageScoreEvaluation, 1); got != 23 {
+			t.Fatalf("user 1 のbucket=%d, want 23", got)
+		}
 		candidateCount := 0
 		for userID := uint(1); userID <= 1000; userID++ {
-			first := ResolvePromptVersion(StageScoreEvaluation, userID)
-			second := ResolvePromptVersion(StageScoreEvaluation, userID)
-			if first != second {
-				t.Fatalf("user %d 割当が不安定: %+v != %+v", userID, first, second)
-			}
-			if first.Variant == "candidate" && first.Version != "candidate-v3" {
-				t.Fatalf("candidate版=%q", first.Version)
-			}
-			if first.Variant == "candidate" {
+			first := promptVersionBucket(StageScoreEvaluation, userID)
+			if first < 50 {
 				candidateCount++
 			}
 		}
 		if candidateCount < 450 || candidateCount > 550 {
-			t.Fatalf("50%%割当の候補数=%d/1000, want 450..550", candidateCount)
+			t.Fatalf("50%% bucket の候補数=%d/1000, want 450..550", candidateCount)
 		}
+	})
 
-		t.Setenv("PROMPT_AB_SCORE_EVALUATION", "candidate-v3:100")
-		got := ResolvePromptVersion(StageScoreEvaluation, 1)
-		if got.Version != "candidate-v3" || got.Variant != "candidate" {
-			t.Fatalf("100%% candidate の割当=%+v", got)
+	t.Run("マッチング版はDBの接頭辞込み上限に制限", func(t *testing.T) {
+		t.Setenv("PROMPT_VERSION", "")
+		t.Setenv("PROMPT_VERSION_MATCHING_REASON", strings.Repeat("x", 49))
+		t.Setenv("PROMPT_AB_MATCHING_REASON", "")
+
+		got := ResolvePromptVersion(StageMatchingReason, 1)
+		if got.Version != "v2" || got.Variant != "control" {
+			t.Fatalf("長すぎる版のfallback=%+v", got)
 		}
 	})
 
