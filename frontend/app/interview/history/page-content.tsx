@@ -120,18 +120,20 @@ export default function PageContent() {
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: UI.paper }}>
       {/* Header */}
-      <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: { xs: 2, sm: 3, lg: 8 }, py: 2, bgcolor: UI.field, borderBottom: `1px solid ${UI.ruleSoft}` }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Box sx={{ color: UI.mark }}><PsychologyIcon sx={{ fontSize: 32 }} /></Box>
-          <Typography component="h1" sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: UI.ink }}>面接履歴</Typography>
-          {user?.role === 'teacher' && (
-            <Chip label="教員モード" size="small" sx={{ bgcolor: '#3b82f6', color: '#fff', fontWeight: 700, ml: 1 }} />
-          )}
+      <Box component="header" sx={{ py: 2, bgcolor: UI.field, borderBottom: `1px solid ${UI.ruleSoft}` }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', maxWidth: 1100, mx: 'auto', px: { xs: 2, md: 4 } }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Typography component="h1" sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: UI.ink }}>面接履歴</Typography>
+            <Box sx={{ color: UI.mark }}><PsychologyIcon sx={{ fontSize: 32 }} /></Box>
+            {user?.role === 'teacher' && (
+              <Chip label="教員モード" size="small" sx={{ bgcolor: '#3b82f6', color: '#fff', fontWeight: 700, ml: 1 }} />
+            )}
+          </Box>
+          {/* 既定の40x40ではモバイルのタップ領域が足りない（#1481） */}
+          <IconButton onClick={() => router.push('/interview')} aria-label="面接画面へ戻る" sx={{ bgcolor: UI.tint, color: UI.inkSoft, width: 44, height: 44 }}>
+            <ArrowBackIcon />
+          </IconButton>
         </Box>
-        {/* 既定の40x40ではモバイルのタップ領域が足りない（#1481） */}
-        <IconButton onClick={() => router.push('/interview')} aria-label="面接画面へ戻る" sx={{ bgcolor: UI.tint, color: UI.inkSoft, width: 44, height: 44 }}>
-          <ArrowBackIcon />
-        </IconButton>
       </Box>
 
       {/* Trend chart */}
