@@ -251,7 +251,13 @@ export default function SessionScreen({
       {/* md未満では縦積みにする（自分のカメラ→面接官→質問パネル）。
           useMediaQueryでの分岐は使わず、sxのブレークポイントだけで解く
           （video要素の再マウント・Realtime再接続を避けるため #1569） */}
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, px: 2, pb: 2, overflow: 'hidden', minHeight: 0 }}>
+      {/* xsでは全体を縦スクロール可能にする。自分のカメラ+面接官帯(固定高さ)と
+          質問パネルの合計が、横向き(844x390等)の短いビューポートではヘッダー分を
+          引いた残り高さに収まらないことがあり、overflow:hiddenのままだと右パネルの
+          操作ボタンが高さ0まで圧縮されて消える（レビュー指摘, #1569の再発パターン）。
+          右パネル側にもminHeightの floor を持たせた上で、収まらない場合は
+          画面全体をスクロールして操作ボタンへ到達できるようにする。 */}
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, px: 2, pb: 2, overflowX: 'hidden', overflowY: { xs: 'auto', md: 'hidden' }, minHeight: 0 }}>
 
         {/* ── 左: 自分のカメラ(主役) + 面接官(2Dアバター、小) ── */}
         {/* 自分の映像を中心に据える構成に変更(#2D化)。以前は面接官アバターが
@@ -260,7 +266,7 @@ export default function SessionScreen({
         <Box sx={{ flex: { xs: '0 0 auto', md: '0 0 58%' }, display: 'flex', flexDirection: 'column', gap: 1.5, minHeight: 0 }}>
 
           {/* 自分のカメラ(大) */}
-          <Box sx={{ flex: { xs: '0 0 auto', md: 1 }, height: { xs: 220, md: 'auto' }, minHeight: 0, position: 'relative', borderRadius: 3, overflow: 'hidden', bgcolor: '#1a1a1a' }}>
+          <Box sx={{ flex: { xs: '0 0 auto', md: 1 }, height: { xs: 180, md: 'auto' }, minHeight: 0, position: 'relative', borderRadius: 3, overflow: 'hidden', bgcolor: '#1a1a1a' }}>
             <video
               ref={sessionVideoCallbackRef}
               muted
@@ -305,8 +311,8 @@ export default function SessionScreen({
           </Box>
 
           {/* 面接官(2Dアバター、小) + 発話中の字幕 */}
-          <Box sx={{ flexShrink: 0, height: 128, display: 'flex', gap: 1.5 }}>
-            <Box sx={{ width: 128, flexShrink: 0, borderRadius: 2, overflow: 'hidden', position: 'relative', bgcolor: UI.nightPanel, border: '1px solid rgba(255,255,255,0.14)' }}>
+          <Box sx={{ flexShrink: 0, height: { xs: 100, md: 128 }, display: 'flex', gap: 1.5 }}>
+            <Box sx={{ width: { xs: 100, md: 128 }, flexShrink: 0, borderRadius: 2, overflow: 'hidden', position: 'relative', bgcolor: UI.nightPanel, border: '1px solid rgba(255,255,255,0.14)' }}>
               <Avatar2D
                 gender={avatarGender}
                 level={aiLevel}
@@ -336,7 +342,7 @@ export default function SessionScreen({
                 display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 0.3,
                 overflow: 'hidden',
               }}>
-                <Typography sx={{ color: UI.nightMuted, fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}>
+                <Typography sx={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}>
                   AI面接官 音声読み上げ中
                 </Typography>
                 <Typography sx={{
@@ -359,7 +365,11 @@ export default function SessionScreen({
             アバター帯200px+ヘッダー+2行の操作行の合計がビューポートを超えると
             overflow:hiddenのままでは主要ボタンが完全にクリップされる
             （レビュー指摘, #1569） */}
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5, minWidth: 0, minHeight: 0, overflowX: 'hidden', overflowY: { xs: 'auto', md: 'hidden' } }}>
+        {/* minHeightに床を設ける。0のままだと、短い縦積みビューポートで左の
+            カメラ+面接官帯に押されてこのパネルが高さ0まで潰れ、話す/完了する
+            ボタンが見えなくなる（レビュー指摘）。床を超える分は、親Main側の
+            overflowY:autoで画面全体をスクロールして到達できるようにしてある。 */}
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5, minWidth: 0, minHeight: { xs: 220, md: 0 }, overflowX: 'hidden', overflowY: { xs: 'auto', md: 'hidden' } }}>
 
           {/* 発話保存の失敗を面接中に見せる（#1476）。面接は続行できるため止めない */}
           {utteranceSaveFailed && (
@@ -383,7 +393,7 @@ export default function SessionScreen({
               <>
                 {/* 現在の質問 */}
                 <Box sx={{ bgcolor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 2, p: 2 }}>
-                  <Typography sx={{ color: UI.nightMuted, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, mb: 1 }}>
+                  <Typography sx={{ color: 'rgba(255,255,255,0.7)', fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, mb: 1 }}>
                     {isActive ? '現在の質問' : '前回の質問'}
                   </Typography>
                   <Typography sx={{ color: '#fff', fontSize: 15, lineHeight: 1.75, whiteSpace: 'pre-wrap' }}>
@@ -410,7 +420,10 @@ export default function SessionScreen({
                     <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, px: 2, pb: 2 }}>
                       {STAR_GUIDE.map((s) => (
                         <Box key={s.key} sx={{ bgcolor: 'rgba(255,255,255,0.06)', borderRadius: 1.5, p: 1.25 }}>
-                          <Typography sx={{ color: UI.mark, fontSize: 12, fontWeight: 700 }}>
+                          {/* UI.markは白背景前提の色で、この画面の夜間背景ではほぼ見えない
+                              (コントラスト比約1.1:1、レビュー指摘)。暗背景用の見やすい
+                              アクセント色に変える。 */}
+                          <Typography sx={{ color: '#8ab4f8', fontSize: 12, fontWeight: 700 }}>
                             {s.key} ({s.label})
                           </Typography>
                           <Typography sx={{ color: 'rgba(255,255,255,0.75)', fontSize: 11.5, lineHeight: 1.5, mt: 0.3 }}>
@@ -425,7 +438,7 @@ export default function SessionScreen({
                 {/* ライブ回答(あなたの発話) */}
                 {isActive && (
                   <Box sx={{ bgcolor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 2, p: 2 }}>
-                    <Typography sx={{ color: UI.nightMuted, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, mb: 1 }}>
+                    <Typography sx={{ color: 'rgba(255,255,255,0.7)', fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, mb: 1 }}>
                       あなたの回答{partialUser ? '（認識中）' : ''}
                     </Typography>
                     <Typography sx={{ color: liveAnswerText ? '#fff' : 'rgba(255,255,255,0.4)', fontSize: 13.5, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>

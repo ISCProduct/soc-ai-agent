@@ -24,9 +24,11 @@ function randomBetween([lo, hi]: [number, number]): number {
   return lo + Math.random() * (hi - lo)
 }
 
+// 肌色は性別と無関係な属性なので固定にし、髪色・服色のみをgenderで変える（レビュー指摘）。
+const SKIN = '#e8b38c'
 const PALETTE = {
-  male: { skin: '#e8b38c', hair: '#1f1f1f', outfit: '#2d3a4f' },
-  female: { skin: '#f0c9a6', hair: '#3a2a22', outfit: '#4a2d3a' },
+  male: { skin: SKIN, hair: '#1f1f1f', outfit: '#2d3a4f' },
+  female: { skin: SKIN, hair: '#3a2a22', outfit: '#4a2d3a' },
 } as const
 
 /**
