@@ -349,7 +349,7 @@ export default function SessionScreen({
                   color: '#fff', fontSize: 13, lineHeight: 1.5,
                   display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
                 }}>
-                  {partialAi || currentQuestionText}
+                  {currentQuestionText}
                 </Typography>
               </Box>
             ) : (
@@ -392,7 +392,12 @@ export default function SessionScreen({
             ) : (
               <>
                 {/* 現在の質問 */}
-                <Box sx={{ bgcolor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 2, p: 2 }}>
+                {/* カード背景は白を薄く重ねる方式(rgba(255,255,255,x))だと、
+                    夜間背景(UI.nightStage)自体の明るさのせいで白文字との
+                    コントラストが不足する(テスター計測でAA基準4.5:1未達)。
+                    この画面の既存要素(質問タイマー帯など)と同じ、黒を重ねて
+                    暗くする方式に統一し、白文字側は変えずに済むようにする。 */}
+                <Box sx={{ bgcolor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 2, p: 2 }}>
                   <Typography sx={{ color: 'rgba(255,255,255,0.7)', fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, mb: 1 }}>
                     {isActive ? '現在の質問' : '前回の質問'}
                   </Typography>
@@ -402,13 +407,14 @@ export default function SessionScreen({
                 </Box>
 
                 {/* STAR回答フレームワーク思考ガイド */}
-                <Box sx={{ bgcolor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden' }}>
+                <Box sx={{ bgcolor: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden' }}>
                   <Box
                     role="button"
                     tabIndex={0}
                     onClick={() => setStarGuideOpen((v) => !v)}
                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setStarGuideOpen((v) => !v) } }}
                     aria-expanded={starGuideOpen}
+                    aria-controls="star-guide-panel"
                     sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2, py: 1.25, cursor: 'pointer', minHeight: 44 }}
                   >
                     <Typography sx={{ color: 'rgba(255,255,255,0.85)', fontSize: 12.5, fontWeight: 600 }}>
@@ -417,9 +423,9 @@ export default function SessionScreen({
                     <ExpandMoreIcon sx={{ color: 'rgba(255,255,255,0.6)', fontSize: 20, transform: starGuideOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
                   </Box>
                   {starGuideOpen && (
-                    <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, px: 2, pb: 2 }}>
+                    <Box id="star-guide-panel" sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, px: 2, pb: 2 }}>
                       {STAR_GUIDE.map((s) => (
-                        <Box key={s.key} sx={{ bgcolor: 'rgba(255,255,255,0.06)', borderRadius: 1.5, p: 1.25 }}>
+                        <Box key={s.key} sx={{ bgcolor: 'rgba(0,0,0,0.2)', borderRadius: 1.5, p: 1.25 }}>
                           {/* UI.markは白背景前提の色で、この画面の夜間背景ではほぼ見えない
                               (コントラスト比約1.1:1、レビュー指摘)。暗背景用の見やすい
                               アクセント色に変える。 */}
@@ -437,7 +443,7 @@ export default function SessionScreen({
 
                 {/* ライブ回答(あなたの発話) */}
                 {isActive && (
-                  <Box sx={{ bgcolor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 2, p: 2 }}>
+                  <Box sx={{ bgcolor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 2, p: 2 }}>
                     <Typography sx={{ color: 'rgba(255,255,255,0.7)', fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, mb: 1 }}>
                       あなたの回答{partialUser ? '（認識中）' : ''}
                     </Typography>
@@ -449,13 +455,14 @@ export default function SessionScreen({
 
                 {/* これまでの質問・回答(折りたたみ) */}
                 {utterances.length > 0 && (
-                  <Box sx={{ bgcolor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden' }}>
+                  <Box sx={{ bgcolor: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden' }}>
                     <Box
                       role="button"
                       tabIndex={0}
                       onClick={() => setHistoryOpen((v) => !v)}
                       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setHistoryOpen((v) => !v) } }}
                       aria-expanded={historyOpen}
+                      aria-controls="interview-history-panel"
                       sx={{ display: 'flex', alignItems: 'center', gap: 0.75, px: 2, py: 1.25, cursor: 'pointer', minHeight: 44 }}
                     >
                       <HistoryIcon sx={{ color: 'rgba(255,255,255,0.6)', fontSize: 18 }} />
@@ -465,7 +472,7 @@ export default function SessionScreen({
                       <ExpandMoreIcon sx={{ color: 'rgba(255,255,255,0.6)', fontSize: 20, transform: historyOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
                     </Box>
                     {historyOpen && (
-                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, px: 2, pb: 2 }}>
+                      <Box id="interview-history-panel" sx={{ display: 'flex', flexDirection: 'column', gap: 1, px: 2, pb: 2 }}>
                         {utterances.map((u, i) => (
                           <Box key={i} sx={{ display: 'flex', flexDirection: 'column', gap: 0.3, alignItems: u.role === 'ai' ? 'flex-start' : 'flex-end' }}>
                             <Box sx={{

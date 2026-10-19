@@ -139,6 +139,19 @@ describe('SessionScreen', () => {
       fireEvent.click(screen.getByText('STAR回答フレームワーク思考ガイド'))
       expect(screen.queryByText(/Situation/)).not.toBeInTheDocument()
     })
+
+    // キーボード操作(Tab+Enter/Space)でも開閉できること。role="button"の自前実装のため、
+    // クリック操作だけでなくキーボード操作の回帰も防ぐ(テスター指摘)。
+    it('キーボード操作(Enter/Space)でも折りたためる', () => {
+      renderScreen({ utterances: [{ role: 'ai', text: '質問' }] })
+      const toggle = screen.getByText('STAR回答フレームワーク思考ガイド').closest('[role="button"]')!
+
+      fireEvent.keyDown(toggle, { key: 'Enter' })
+      expect(screen.queryByText(/Situation/)).not.toBeInTheDocument()
+
+      fireEvent.keyDown(toggle, { key: ' ' })
+      expect(screen.getByText(/Situation/)).toBeVisible()
+    })
   })
 
   describe('これまでの質問・回答', () => {
