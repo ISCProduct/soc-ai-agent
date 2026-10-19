@@ -28,3 +28,15 @@
 .recordButtonWrap {
   flex: 1;
 }
+
+/*
+ * 面接セッション画面(SessionScreen)のルート。全画面固定レイアウト(#1569)。
+ * 100dvh 未対応ブラウザ用に 100vh を先に書き、後から上書きされる形で
+ * 併記する（sx の style object では同一プロパティの重複宣言ができないため
+ * CSS Module 側で持つ）。100vw は縦スクロールバー分の横はみ出しを避けて 100% にする。
+ */
+.sessionRoot {
+  height: 100vh;
+  height: 100dvh;
+  width: 100%;
+}
