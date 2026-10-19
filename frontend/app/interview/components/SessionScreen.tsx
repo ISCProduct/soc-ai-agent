@@ -352,6 +352,13 @@ export default function SessionScreen({
 
             {/* ── 右: 質問パネル ── */}
             <Box className={styles.questionPanel}>
+              {/* useInterviewSession.ts側が utterances/partialAi の変化ごとにこの
+                  要素へ自動スクロールする。以前のチャット履歴UIでは末尾(＝最新発言)に
+                  置くのが正しかったが、この画面では「現在の質問」を先頭に固定表示する
+                  構成に変えたため、末尾に置いたままだと新しい質問が届くたびに履歴の
+                  下までスクロールして現在の質問が画面外に隠れてしまう(Codexレビュー指摘)。
+                  パネルの先頭に置き、常に現在の質問が見える位置へスクロールさせる。 */}
+              <div ref={transcriptEndRef} />
 
               {/* 発話保存の失敗を面接中に見せる（#1476）。面接は続行できるため止めない */}
               {utteranceSaveFailed && (
@@ -470,8 +477,6 @@ export default function SessionScreen({
                   )}
                 </>
               )}
-
-              <div ref={transcriptEndRef} />
             </Box>
           </Box>
         </Box>
