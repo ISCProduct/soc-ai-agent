@@ -106,12 +106,18 @@ function findMouthTarget(root: THREE.Object3D): MouthTarget | null {
 // パネルが全面表示(width/height:100%)になったことで、親パネルのサイズ次第で
 // WebGLの描画バッファが従来(最大380x380)より大きく増え、統合GPU機での
 // 連続描画負荷が上がる(Codexレビュー指摘, #1569)。表示サイズ自体はパネルに
-// 追従させつつ、実際にレンダリングする内部解像度には上限を設ける。
+// 追従させつつ、実際にレンダリングする内部解像度(=描画バッファ)には上限を設ける。
+// renderer.setSize(w, h)の実バッファはpixelRatio倍されるため(CodeRabbit指摘)、
+// ここでの上限はpixelRatio適用後の実バッファサイズに対するものとして扱う。
 const MAX_RENDER_DIMENSION = 420
 
-/** アスペクト比を保ったまま、長辺がMAX_RENDER_DIMENSIONを超えないレンダーサイズを返す。 */
-function cappedRenderSize(width: number, height: number): { width: number; height: number } {
-  const scale = Math.min(1, MAX_RENDER_DIMENSION / Math.max(width, height))
+/**
+ * アスペクト比を保ったまま、pixelRatio適用後の実バッファの長辺が
+ * MAX_RENDER_DIMENSIONを超えないレンダーサイズ(setSizeに渡す論理サイズ)を返す。
+ */
+function cappedRenderSize(width: number, height: number, pixelRatio: number): { width: number; height: number } {
+  const maxLogicalDimension = MAX_RENDER_DIMENSION / pixelRatio
+  const scale = Math.min(1, maxLogicalDimension / Math.max(width, height))
   return { width: Math.round(width * scale), height: Math.round(height * scale) }
 }
 
@@ -164,11 +170,12 @@ export default function ThreeAvatar({
     const camera   = new THREE.PerspectiveCamera(40, width / height, 0.1, 20)
     camera.position.set(0, 0.8, 2.8)
 
+    const pixelRatio = Math.min(window.devicePixelRatio, 2)
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.setPixelRatio(pixelRatio)
     // updateStyle=falseで内部解像度(描画バッファ)だけをcapし、
     // canvasの表示サイズ(CSS)はコンテナに追従させる
-    const initialSize = cappedRenderSize(width, height)
+    const initialSize = cappedRenderSize(width, height, pixelRatio)
     renderer.setSize(initialSize.width, initialSize.height, false)
     renderer.domElement.style.width = '100%'
     renderer.domElement.style.height = '100%'
@@ -423,7 +430,7 @@ export default function ThreeAvatar({
       if (w === 0 || h === 0) return
       camera.aspect = w / h
       camera.updateProjectionMatrix()
-      const { width: rw, height: rh } = cappedRenderSize(w, h)
+      const { width: rw, height: rh } = cappedRenderSize(w, h, pixelRatio)
       renderer.setSize(rw, rh, false)
     }
     const resizeObserver = new ResizeObserver(onResize)

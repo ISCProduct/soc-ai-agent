@@ -75,4 +75,26 @@ describe('ThreeAvatar', () => {
 
     jest.restoreAllMocks()
   })
+
+  // renderer.setSizeの実バッファはpixelRatio倍されるため、devicePixelRatio=2の
+  // 環境では論理サイズ自体を420/2=210pxに抑えないと実バッファが420pxを超える
+  // （CodeRabbit指摘）。
+  it('devicePixelRatioが2の場合は論理サイズをさらに半分に抑える', async () => {
+    jest.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(873)
+    jest.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(776)
+    const originalDpr = window.devicePixelRatio
+    Object.defineProperty(window, 'devicePixelRatio', { value: 2, configurable: true })
+
+    try {
+      const props = { gender: 'male' as const, audioStream: null, level: 0, speaking: false, active: true }
+      render(<ThreeAvatar {...props} />)
+      await waitFor(() => expect(screen.queryByText('アバター読込中...')).toBeNull())
+
+      // 210(論理) x pixelRatio 2 = 実バッファ420px。373の半分(187)も同様。
+      expect(setSizeSpy).toHaveBeenCalledWith(210, 187, false)
+    } finally {
+      Object.defineProperty(window, 'devicePixelRatio', { value: originalDpr, configurable: true })
+      jest.restoreAllMocks()
+    }
+  })
 })
