@@ -6,6 +6,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/gbizinfo"
+	"Backend/internal/services/prompts"
 	"context"
 	"encoding/json"
 	"errors"
@@ -370,6 +371,7 @@ func (f *CompanyInfoFetcher) Acquire(ctx context.Context, companyName, websiteUR
 }
 
 func (f *CompanyInfoFetcher) acquireForCompany(ctx context.Context, company *models.Company) (*CompanyInfoResult, error) {
+	ctx, _ = prompts.WithPromptVersion(ctx, prompts.StageCompanyExtraction, company.ID)
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
