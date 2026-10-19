@@ -103,6 +103,18 @@ function findMouthTarget(root: THREE.Object3D): MouthTarget | null {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// パネルが全面表示(width/height:100%)になったことで、親パネルのサイズ次第で
+// WebGLの描画バッファが従来(最大380x380)より大きく増え、統合GPU機での
+// 連続描画負荷が上がる(Codexレビュー指摘, #1569)。表示サイズ自体はパネルに
+// 追従させつつ、実際にレンダリングする内部解像度には上限を設ける。
+const MAX_RENDER_DIMENSION = 420
+
+/** アスペクト比を保ったまま、長辺がMAX_RENDER_DIMENSIONを超えないレンダーサイズを返す。 */
+function cappedRenderSize(width: number, height: number): { width: number; height: number } {
+  const scale = Math.min(1, MAX_RENDER_DIMENSION / Math.max(width, height))
+  return { width: Math.round(width * scale), height: Math.round(height * scale) }
+}
+
 export default function ThreeAvatar({
   gender, audioStream, level, speaking, active, pending = false, acknowledgeSignal = 0,
 }: ThreeAvatarProps) {
@@ -154,7 +166,12 @@ export default function ThreeAvatar({
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    renderer.setSize(width, height)
+    // updateStyle=falseで内部解像度(描画バッファ)だけをcapし、
+    // canvasの表示サイズ(CSS)はコンテナに追従させる
+    const initialSize = cappedRenderSize(width, height)
+    renderer.setSize(initialSize.width, initialSize.height, false)
+    renderer.domElement.style.width = '100%'
+    renderer.domElement.style.height = '100%'
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.shadowMap.enabled = true
     renderer.shadowMap.type = THREE.PCFSoftShadowMap
@@ -406,7 +423,8 @@ export default function ThreeAvatar({
       if (w === 0 || h === 0) return
       camera.aspect = w / h
       camera.updateProjectionMatrix()
-      renderer.setSize(w, h)
+      const { width: rw, height: rh } = cappedRenderSize(w, h)
+      renderer.setSize(rw, rh, false)
     }
     const resizeObserver = new ResizeObserver(onResize)
     resizeObserver.observe(container)

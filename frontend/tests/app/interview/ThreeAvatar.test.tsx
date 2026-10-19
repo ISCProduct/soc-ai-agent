@@ -10,6 +10,8 @@ import * as THREE from 'three'
 import ThreeAvatar from '@/app/interview/components/ThreeAvatar'
 import { AvatarMotion } from '@/lib/interview/avatar-motion'
 
+const setSizeSpy = jest.fn()
+
 jest.mock('three', () => {
   const actual = jest.requireActual('three')
   class FakeRenderer {
@@ -17,7 +19,7 @@ jest.mock('three', () => {
     shadowMap = { enabled: false, type: 0 }
     outputColorSpace = ''
     setPixelRatio() {}
-    setSize() {}
+    setSize(...args: unknown[]) { setSizeSpy(...args) }
     render() {}
     dispose() {}
   }
@@ -56,5 +58,21 @@ describe('ThreeAvatar', () => {
     // 他の props が変わっただけでは打たない
     rerender(<ThreeAvatar {...props} level={0.5} acknowledgeSignal={2} />)
     expect(ack).toHaveBeenCalledTimes(2)
+  })
+
+  // パネル全面表示化(#1569)でWebGL描画バッファが肥大化しないよう、
+  // 内部解像度には上限(420px)を設けている（レビュー指摘）。
+  it('パネルが大きい場合は内部解像度を420pxに上限を設けて描画する', async () => {
+    jest.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(873)
+    jest.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(776)
+
+    const props = { gender: 'male' as const, audioStream: null, level: 0, speaking: false, active: true }
+    render(<ThreeAvatar {...props} />)
+    await waitFor(() => expect(screen.queryByText('アバター読込中...')).toBeNull())
+
+    // 第3引数 false = canvasのCSSサイズは変えず、内部解像度(描画バッファ)だけをcapする
+    expect(setSizeSpy).toHaveBeenCalledWith(420, 373, false)
+
+    jest.restoreAllMocks()
   })
 })
