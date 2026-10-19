@@ -75,6 +75,9 @@ func (c *AdminSchoolController) Get(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := c.ensureSchoolAccess(ctx, id); err != nil {
+		return err
+	}
 	found, err := c.schools.Get(id)
 	if err != nil {
 		return mapSchoolError(err)
@@ -184,6 +187,9 @@ func (c *AdminSchoolController) ListCompanyApprovals(ctx echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := c.ensureSchoolAccess(ctx, id); err != nil {
+		return err
+	}
 	ids, err := c.schools.ListApprovedCompanyIDs(id)
 	if err != nil {
 		return httpapi.InternalError(err)
@@ -238,7 +244,8 @@ func (c *AdminSchoolController) ensureSchoolAccess(ctx echo.Context, schoolID ui
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	restricted, allowedSchoolIDs, err := c.schools.ResolveAdminAccess(adminUserID)
+	isPlatform := middleware.AdminIsPlatformFromContext(ctx.Request().Context())
+	restricted, allowedSchoolIDs, err := c.schools.ResolveAccess(isPlatform, adminUserID)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
@@ -260,7 +267,8 @@ func (c *AdminSchoolController) MySchoolAccess(ctx echo.Context) error {
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	restricted, schools, err := c.schools.ListAccessibleSchools(adminUserID)
+	isPlatform := middleware.AdminIsPlatformFromContext(ctx.Request().Context())
+	restricted, schools, err := c.schools.ListAccessibleSchools(isPlatform, adminUserID)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}

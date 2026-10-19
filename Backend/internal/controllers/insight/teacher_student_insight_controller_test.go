@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"Backend/domain/entity"
 	insightcontrollers "Backend/internal/controllers/insight"
@@ -151,4 +152,44 @@ func TestTeacherStudentInsight_ResponseShape(t *testing.T) {
 	// スコアが無いのでデータ不足として返る。
 	assert.False(t, got.Students[0].DataAvailable)
 	assert.Equal(t, "分析データ不足", got.Students[0].TypeLabel)
+}
+
+type recentActivity struct{}
+
+func (recentActivity) FindLastActivityByUsers(_ []uint) (map[uint]time.Time, error) {
+	return map[uint]time.Time{1: time.Now().Add(-24 * time.Hour)}, nil
+}
+
+// inactive_days の解釈（#1573）。範囲外・不正値は絞り込みなしに倒し、生徒を隠さない。
+func TestTeacherStudentInsight_InactiveDaysParam(t *testing.T) {
+	tests := []struct {
+		query     string
+		wantCount int
+	}{
+		{"inactive_days=14", 0}, // 1日前に活動した生徒は未活動に出ない
+		{"inactive_days=0", 1},
+		{"inactive_days=366", 1},
+		{"inactive_days=abc", 1},
+		{"", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.query, func(t *testing.T) {
+			svc := teacher.NewStudentInsightService(&schoolScopeSpy{}, noopScores{}, noopIndustries{}, noopProfiles{})
+			svc.SetLastActivityReader(recentActivity{})
+			req := testsupport.WithSchoolFilter(httptest.NewRequest(http.MethodGet, "/api/admin/teacher/students/tendency-analysis?"+tt.query, nil), nil)
+			rec := httptest.NewRecorder()
+			testsupport.AssertStatus(t, insightcontrollers.NewTeacherStudentInsightController(svc).TendencyAnalysis, testsupport.NewCtx(req, rec), http.StatusOK)
+
+			var body struct {
+				Students []struct {
+					LastActivityAt *time.Time `json:"last_activity_at"`
+				} `json:"students"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			require.Len(t, body.Students, tt.wantCount)
+			if tt.wantCount > 0 {
+				require.NotNil(t, body.Students[0].LastActivityAt, "最終活動日時がレスポンスに出ていない")
+			}
+		})
+	}
 }

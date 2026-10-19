@@ -13,6 +13,8 @@ import { AdminPageHeader } from '@/components/admin/AdminPageHeader'
 import { AdminPanel, AdminPanelBody } from '@/components/admin/AdminPanel'
 import { ErrorAlert } from '@/components/common/ErrorAlert'
 import { AdminListCard } from '@/components/admin/AdminListCard'
+import { EmptyState } from '@/components/common/EmptyState'
+import { ListSkeleton } from '@/components/common/ListSkeleton'
 
 type AuditLog = {
   id: number
@@ -28,6 +30,7 @@ export default function PageContent() {
   const platformReady = useRequirePlatformAdmin()
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
 
   useEffect(() => {
@@ -39,15 +42,22 @@ export default function PageContent() {
 
   const loadLogs = async () => {
     setError('')
-    const response = await fetch('/api/admin/audit-logs', {
-      headers: authService.getAdminFetchHeaders(),
-    })
-    const data = await response.json()
-    if (!response.ok) {
-      setError(data?.error || '監査ログの取得に失敗しました')
-      return
+    setLoading(true)
+    try {
+      const response = await fetch('/api/admin/audit-logs', {
+        headers: authService.getAdminFetchHeaders(),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        setError(data?.error || '監査ログの取得に失敗しました')
+        return
+      }
+      setLogs(data?.logs || [])
+    } catch {
+      setError('監査ログの取得に失敗しました。通信状況を確認して再読み込みしてください')
+    } finally {
+      setLoading(false)
     }
-    setLogs(data?.logs || [])
   }
 
   useEffect(() => {
@@ -100,10 +110,16 @@ export default function PageContent() {
       <AdminPanel title="最新の操作履歴">
         <AdminPanelBody>
           <Stack spacing={2}>
-            {filtered.length === 0 && (
-              <Typography variant="body2" color="text.secondary">
-                ログがありません。
-              </Typography>
+            {loading && <ListSkeleton rows={3} label="操作履歴を読み込み中" />}
+            {!loading && !error && filtered.length === 0 && (
+              query ? (
+                <EmptyState
+                  title="検索に一致する操作履歴はありません"
+                  description="検索語を短くするか、消して全件を表示してください。"
+                />
+              ) : (
+                <EmptyState title="まだ操作履歴はありません" description="管理画面での操作が記録されると、ここに表示されます。" />
+              )
             )}
             {filtered.map((log) => (
               <AdminListCard key={log.id}>

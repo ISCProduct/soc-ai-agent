@@ -194,6 +194,7 @@ export default function PageContent() {
                           size="small"
                           color="error"
                           onClick={() => setDeleteTarget(s.site_key)}
+                          aria-label="取得設定を削除"
                         >
                           <DeleteIcon fontSize="small" />
                         </IconButton>

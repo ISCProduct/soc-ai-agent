@@ -3,7 +3,7 @@
 # インストール: pip install -r requirements.txt -c constraints.txt
 chromadb>=0.6.3,<0.7.0
 # crewai omitted due to dependency conflicts (embedchain/langchain). See Issue #273
-fastapi==0.141.1
+fastapi==0.143.0
 # LangChain（埋め込み・検索・今後のチェーン化）。1.x 系に固定（constraints.txt 参照）。
 langchain>=1.4.2,<2.0
 langchain-core>=1.6.5,<2.0
@@ -18,7 +18,7 @@ prometheus-fastapi-instrumentator==8.1.0
 # pip が "Constraints cannot have extras" で落ちる（rag-tests.yml）。
 # FastAPI 統合は fastapi が既に入っているので sentry_sdk 本体で足りる。
 sentry-sdk>=2.70.0,<3.0
-pydantic==2.13.5
+pydantic==2.14.0
 pytest==9.1.1
 tiktoken==0.13.0
 uvicorn==0.53.0

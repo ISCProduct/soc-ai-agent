@@ -144,7 +144,7 @@ function JobPositionCard({
           )}
           {hasCrawlInfo && (
             <Tooltip title={expanded ? '詳細を閉じる' : 'クロール情報を表示'}>
-              <IconButton size="small" onClick={() => setExpanded(!expanded)}>
+              <IconButton size="small" onClick={() => setExpanded(!expanded)} aria-label="詳細の開閉">
                 {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
               </IconButton>
             </Tooltip>
@@ -242,7 +242,7 @@ function JobPositionCard({
 export default function PageContent() {
   useEffect(() => {
     const user = authService.getStoredUser()
-    if (!user?.is_admin) {
+    if (!user?.is_admin && !user?.is_staff) {
       window.location.href = '/'
     }
   }, [])

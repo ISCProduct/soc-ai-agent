@@ -122,7 +122,7 @@ func TestTurn_RejectsFinishedSession(t *testing.T) {
 	svc := newTestInterviewService(repo)
 
 	// openaiClient は nil のまま: finished ガードが先に return するため触れられないことも同時に検証する。
-	result, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), nil,
+	result, err := svc.Turn(context.Background(), 10, 1, []byte("audio"),
 		"企業名", "", false, "position", "info", "general", 0, 0, 60, 0, 0, 0, 0)
 	assert.Nil(t, result)
 	assert.ErrorIs(t, err, shared.ErrSessionFinished)
@@ -151,7 +151,7 @@ func TestTurn_AllowsInProgressSession_UpToFinishedCheck(t *testing.T) {
 	repo := newSessionRepoStub(&models.InterviewSession{ID: 1, UserID: 10, Status: "in_progress"})
 	svc := newTestInterviewService(repo)
 
-	result, err := svc.Turn(context.Background(), 10, 1, []byte("audio"), nil,
+	result, err := svc.Turn(context.Background(), 10, 1, []byte("audio"),
 		"企業名", "", false, "position", "info", "general", 0, 0, 60, 0, 0, 0, 0)
 
 	// AI が使えないときは面接を落とさず、聞き取れなかった旨の応答で続行する（既存の縮退挙動）

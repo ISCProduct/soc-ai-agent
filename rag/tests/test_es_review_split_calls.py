@@ -248,7 +248,10 @@ def test_company_context_present_keeps_company_fields(monkeypatch):
         for msg in client.chat.completions.create.call_args_list[0].kwargs["messages"]
         if msg["role"] == "user"
     )
-    assert "【志望企業】株式会社サイバーエージェント" in review_user
+    # 企業名は囲みの中に入るのでラベルと隣接しない(#1600)
+    assert "【志望企業】" in review_user
+    assert "株式会社サイバーエージェント" in review_user
+    assert re.search(r"UNTRUSTED_企業名_[0-9a-f]+_START", review_user)
     assert "求める人物像: 自走できる人" in review_user
 
 

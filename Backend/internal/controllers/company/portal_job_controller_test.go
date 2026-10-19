@@ -18,6 +18,7 @@ import (
 type fakePortalJobService struct {
 	createdCompanyID uint
 	updatedID        uint
+	deletedID        uint
 	publishedID      uint
 	publishedValue   bool
 	listCalled       bool
@@ -37,6 +38,11 @@ func (f *fakePortalJobService) Create(companyID uint, _ companyportal.JobInput) 
 func (f *fakePortalJobService) Update(jobID, companyID uint, _ companyportal.JobInput) (*models.CompanyJobPosition, error) {
 	f.updatedID = jobID
 	return &models.CompanyJobPosition{ID: jobID, CompanyID: companyID}, nil
+}
+
+func (f *fakePortalJobService) Delete(jobID, _ uint) error {
+	f.deletedID = jobID
+	return nil
 }
 
 func (f *fakePortalJobService) SetPublished(jobID, companyID uint, published bool) (*companyportal.JobVisibility, error) {
@@ -90,6 +96,12 @@ func TestCompanyPortalJob_破壊的操作はownerのみ(t *testing.T) {
 			c.SetParamValues("1")
 			return ctrl.Publish(c)
 		}},
+		{"削除", func(ctrl *CompanyPortalJobController) error {
+			c, _ := portalRequest(t, http.MethodDelete, "/jobs/1", "", 5, "member")
+			c.SetParamNames("id")
+			c.SetParamValues("1")
+			return ctrl.Delete(c)
+		}},
 	}
 
 	for _, tt := range tests {
@@ -101,7 +113,7 @@ func TestCompanyPortalJob_破壊的操作はownerのみ(t *testing.T) {
 			assertAPIStatus(t, err, http.StatusForbidden)
 
 			// 権限が無いなら、サービスまで到達してはいけない。
-			if svc.createdCompanyID != 0 || svc.updatedID != 0 || svc.publishedID != 0 {
+			if svc.createdCompanyID != 0 || svc.updatedID != 0 || svc.publishedID != 0 || svc.deletedID != 0 {
 				t.Error("member なのにサービスが呼ばれた")
 			}
 		})
@@ -123,6 +135,25 @@ func TestCompanyPortalJob_Create_JWT由来の企業で作る(t *testing.T) {
 	}
 	if svc.createdCompanyID != 5 {
 		t.Errorf("ボディの company_id が使われた: %d", svc.createdCompanyID)
+	}
+}
+
+func TestCompanyPortalJob_Delete_ownerは自社求人を消せる(t *testing.T) {
+	svc := &fakePortalJobService{}
+	ctrl := NewCompanyPortalJobController(svc)
+
+	c, rec := portalRequest(t, http.MethodDelete, "/jobs/7", "", 5, models.CompanyUserRoleOwner)
+	c.SetParamNames("id")
+	c.SetParamValues("7")
+
+	if err := ctrl.Delete(c); err != nil {
+		t.Fatalf("エラー: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if svc.deletedID != 7 {
+		t.Errorf("削除対象が違う: %d", svc.deletedID)
 	}
 }
 

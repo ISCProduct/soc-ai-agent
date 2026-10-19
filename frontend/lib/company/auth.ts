@@ -84,6 +84,44 @@ export function validateNewPassword(password: string, confirmPassword: string): 
   return null
 }
 
+/** Backend の企業認証エラーを、画面に出せる日本語メッセージへ変換する */
+async function readCompanyAuthError(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await res.json()) as {
+      message?: string
+      error?: string
+      code?: string
+      detail?: string
+    }
+    const raw = (body.message ?? body.error ?? '').trim()
+    const detail = (body.detail ?? '').trim()
+
+    if (res.status === 409 || body.code === 'CONFLICT') {
+      return 'このメールアドレスは既に登録されています。ログインするか、別のメールアドレスを使ってください。'
+    }
+    if (res.status === 429 || body.code === 'TOO_MANY_REQUESTS') {
+      return '短時間に何度も試行されたため制限されています。しばらく時間をおいて再度お試しください。'
+    }
+    if (res.status === 503 || body.code === 'SERVICE_UNAVAILABLE') {
+      return raw || '現在アカウント作成を利用できません。時間をおいて再度お試しください。'
+    }
+    if (res.status >= 500) {
+      return raw && raw !== 'Internal Server Error'
+        ? `${raw}${detail ? `（${detail}）` : ''}`
+        : 'サーバー側でエラーが発生しました。時間をおいて再度お試しください。'
+    }
+    if (raw) {
+      return detail ? `${raw}（${detail}）` : raw
+    }
+  } catch {
+    // JSON でない場合はステータスから案内する
+  }
+  if (res.status >= 500) {
+    return 'サーバー側でエラーが発生しました。時間をおいて再度お試しください。'
+  }
+  return fallback
+}
+
 export const companyAuthService = {
   getStoredUser(): CompanyUser | null {
     const raw = getSessionStorage()?.getItem(COMPANY_AUTH_USER_KEY)
@@ -149,6 +187,36 @@ export const companyAuthService = {
     })
     if (!res.ok) {
       throw new Error('ログインに失敗しました')
+    }
+    const data = (await res.json()) as CompanyAuthResponse
+    persistCompanyAuth(data)
+    return data
+  },
+
+  async register(input: {
+    companyName: string
+    name: string
+    email: string
+    password: string
+  }): Promise<CompanyAuthResponse> {
+    let res: Response
+    try {
+      res = await fetch('/api/company-auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company_name: input.companyName,
+          name: input.name,
+          email: input.email,
+          password: input.password,
+        }),
+      })
+    } catch {
+      throw new Error('サーバーに接続できませんでした。通信状態を確認して、もう一度お試しください。')
+    }
+
+    if (!res.ok) {
+      throw new Error(await readCompanyAuthError(res, 'アカウントの作成に失敗しました'))
     }
     const data = (await res.json()) as CompanyAuthResponse
     persistCompanyAuth(data)

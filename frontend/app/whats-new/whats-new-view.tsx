@@ -1,5 +1,6 @@
 import { Box, Container, Typography, Divider } from '@mui/material'
 import type { WhatsNewEntry } from '@/lib/whats-new-data'
+import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 
 interface WhatsNewViewProps {
   entries: WhatsNewEntry[]
@@ -39,6 +40,8 @@ export function WhatsNewView({ entries, error }: WhatsNewViewProps) {
           ))}
         </Box>
       )}
+      {/* 固定の下部ナビに末尾が隠れないようにする（#1570） */}
+      <BottomNavSpacer />
     </>
   )
 }

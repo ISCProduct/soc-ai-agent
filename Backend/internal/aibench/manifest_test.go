@@ -132,24 +132,25 @@ func TestゴールデンセットがCommitされている(t *testing.T) {
 // 「今より悪くしない」ための天井なので、実測が下がったらここも下げる。
 //
 // 現状: resume の文字数は #1593 で +0.944 → +0.456 まで下げた。
-// **resume の数値トークン数は +0.870 → +0.901 で悪化している**（追加16件が
-// 数値の個数でラベルを分けているため。下げるには「数値はあるが内容が薄い bad」
-// 「数値が無いが検証可能な具体がある good」を足す必要がある → #1637）。
-// es と interview-report も未対応で、現状値をそのまま天井にしてある
-// （ここで落として赤くしても直る当てが無い → #1635）。
+// resume の数値トークン数は #1637 で +0.901 → +0.314 まで下げた
+// （「数値はあるが内容が薄い bad」「数値が無いが検証可能な具体がある good」を追加）。
+// es と interview-report も #1635 で同じ手順を適用し、「長いが中身が薄い bad」
+// 「短いが具体的な good」を追加して文字数・数値トークン数とも下げた。
 func Testゴールデンセットのラベルが表層特徴だけで当たらない(t *testing.T) {
 	tests := []struct {
 		file string
-		// maxChars / maxNumeric は「ラベル vs 文字数」「ラベル vs 数値トークン数」の上限。
+		// max* は「ラベル vs その表層特徴」の順位相関の上限。
 		maxChars   float64
 		maxNumeric float64
+		maxProper  float64
 	}{
-		// 実測 chars +0.852 / numeric +0.830（どちらも未対応）
-		{file: "es.jsonl", maxChars: 0.91, maxNumeric: 0.88},
-		// 実測 chars +0.456（#1593 で対応）/ numeric +0.901（**未対応・悪化**）
-		{file: "resume.jsonl", maxChars: 0.51, maxNumeric: 0.96},
-		// 実測 chars +0.943 / numeric +0.838（どちらも未対応）
-		{file: "interview-report.jsonl", maxChars: 0.99, maxNumeric: 0.89},
+		// #1635 で30件→42件に追加。実測 chars +0.301 / numeric +0.343 / proper +0.000
+		{file: "es.jsonl", maxChars: 0.36, maxNumeric: 0.40, maxProper: 0.05},
+		// #1593 で chars、#1637 で numeric と proper に対応した。
+		// 実測 chars +0.413 / numeric +0.314 / proper +0.538
+		{file: "resume.jsonl", maxChars: 0.47, maxNumeric: 0.37, maxProper: 0.59},
+		// #1635 で30件→42件に追加。実測 chars +0.515 / numeric +0.153 / proper +0.000
+		{file: "interview-report.jsonl", maxChars: 0.57, maxNumeric: 0.21, maxProper: 0.05},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
@@ -161,10 +162,12 @@ func Testゴールデンセットのラベルが表層特徴だけで当たら�
 			labels := make([]float64, 0, len(cases))
 			chars := make([]float64, 0, len(cases))
 			numeric := make([]float64, 0, len(cases))
+			proper := make([]float64, 0, len(cases))
 			for _, c := range cases {
 				labels = append(labels, labelRank[c.Label])
 				chars = append(chars, float64(c.InputChars()))
 				numeric = append(numeric, float64(c.InputNumericTokens()))
+				proper = append(proper, float64(c.InputProperNouns()))
 			}
 			features := []struct {
 				name   string
@@ -173,6 +176,7 @@ func Testゴールデンセットのラベルが表層特徴だけで当たら�
 			}{
 				{name: "文字数", values: chars, max: tt.maxChars},
 				{name: "数値トークン数", values: numeric, max: tt.maxNumeric},
+				{name: "固有名詞数", values: proper, max: tt.maxProper},
 			}
 			for _, f := range features {
 				corr := SpearmanCorrelation(labels, f.values)

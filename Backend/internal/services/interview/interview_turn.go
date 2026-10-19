@@ -1,6 +1,7 @@
 package interview
 
 import (
+	"Backend/internal/models"
 	"Backend/internal/services/shared"
 	"context"
 	"log"
@@ -12,13 +13,41 @@ import (
 // 生のAPIエラーをユーザーに見せず、面接を自然に継続させるためのフォールバック(#910)。
 const interviewFallbackReplyText = "すみません、うまく聞き取れませんでした。もう一度お答えいただけますか？"
 
+// 面接官の文脈に渡す履歴の上限（#1636）。
+// 30分の面接でも往復は20前後なので、直近40件で文脈は足りる。
+// 1件の長さは SaveUtterance の上限と揃える。
+const (
+	maxHistoryMessages = 40
+	maxHistoryRunes    = maxUtteranceRunes
+)
+
+// historyFromUtterances は保存済みの発話を ChatInterview の履歴形式に変換する。
+// 直近 maxHistoryMessages 件に絞り、1件は maxHistoryRunes で切り詰める。
+func historyFromUtterances(utterances []models.InterviewUtterance) []map[string]string {
+	if len(utterances) > maxHistoryMessages {
+		utterances = utterances[len(utterances)-maxHistoryMessages:]
+	}
+	history := make([]map[string]string, 0, len(utterances)+1)
+	for _, u := range utterances {
+		role := "user"
+		if u.Role == "ai" {
+			role = "assistant"
+		}
+		text := []rune(u.Text)
+		if len(text) > maxHistoryRunes {
+			text = text[:maxHistoryRunes]
+		}
+		history = append(history, map[string]string{"role": role, "content": string(text)})
+	}
+	return history
+}
+
 // Turn はユーザー音声を受け取り、STT→Chat→TTSを実行してTurnResultを返します
 func (s *InterviewService) Turn(
 	ctx context.Context,
 	userID uint,
 	sessionID uint,
 	audioData []byte,
-	history []map[string]string,
 	companyName, companyReading string,
 	companyReadingResolved bool,
 	position, companyInfo, companyType string,
@@ -84,7 +113,10 @@ func (s *InterviewService) Turn(
 	// API は拡張子で形式を判断するため、食い違うと復号に失敗するか
 	// 誤って解釈され、認識精度が落ちる。
 	audioFormat := DetectAudioFormat(audioData)
-	sttHints := BuildSTTHints(companyName, companyReading, position, companyInfo)
+	// 補助語に使う企業名・読みは DB 解決済みの値だけ。クライアント直値は使わない
+	// （BuildSTTHints のコメント参照、#1600）。
+	hintName, hintReading := s.sttHintCompany(companyID, companyName)
+	sttHints := BuildSTTHints(hintName, hintReading, companyInfo)
 	sttStart := time.Now()
 	userText, err := s.openaiClient.TranscribeWithHints(ctx, audioData, audioFormat.AudioFilename(), sttHints)
 	obs := ObserveTranscribe(sessionID, turnCount, len(audioData), audioFormat.MIME, sttStart, userText, err)
@@ -146,7 +178,17 @@ func (s *InterviewService) Turn(
 		log.Printf("[Interview] advanceQuestionPlan error: %v", err)
 	}
 
-	// 履歴にユーザー発言を追加
+	// 履歴はクライアントから受け取らず、保存済みの発話から組み直す（#1636）。
+	// クライアントの history は件数・長さ・role のどれも信頼できない。
+	// 取得に失敗しても面接は止めず、今回の発話だけで続ける。
+	var utterances []models.InterviewUtterance
+	if s.utterRepo != nil {
+		if utterances, err = s.utterRepo.FindBySessionID(sessionID); err != nil {
+			log.Printf("[Interview] load utterances for history error: %v", err)
+			utterances = nil
+		}
+	}
+	history := historyFromUtterances(utterances)
 	history = append(history, map[string]string{"role": "user", "content": userText})
 
 	// Chat: 面接官として返答生成
@@ -170,6 +212,9 @@ func (s *InterviewService) Turn(
 		if profileCtx := s.crossFeature.BuildInterviewContextFromUser(userID); profileCtx != "" {
 			systemPrompt = profileCtx + "\n" + systemPrompt
 		}
+	}
+	if nameCtx := buildStudentNameContext(s.fetchStudentName(userID)); nameCtx != "" {
+		systemPrompt = nameCtx + "\n" + systemPrompt
 	}
 	// Chat失敗時も面接官としての言い換え応答にフォールバックし、ターンを中断させない（#910）
 	aiText, err := s.openaiClient.ChatInterview(ctx, systemPrompt, history)
@@ -197,7 +242,6 @@ func (s *InterviewService) Turn(
 		Audio:                  audio,
 		CompanyReading:         companyReading,
 		CompanyReadingResolved: companyReadingResolved,
-		CompanyInfo:            companyInfo,
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
 	}
@@ -278,6 +322,9 @@ func (s *InterviewService) StartTurn(
 			systemPromptStart = profileCtx + "\n" + systemPromptStart
 		}
 	}
+	if nameCtx := buildStudentNameContext(s.fetchStudentName(userID)); nameCtx != "" {
+		systemPromptStart = nameCtx + "\n" + systemPromptStart
+	}
 	// Chat失敗時も面接開始を中断させず、定型の冒頭挨拶にフォールバックする（#910）
 	aiText, err := s.openaiClient.ChatInterview(ctx, systemPromptStart, []map[string]string{
 		{"role": "user", "content": "面接を開始してください。最初の自己紹介・志望動機の質問からお願いします。"},
@@ -305,7 +352,6 @@ func (s *InterviewService) StartTurn(
 		Audio:                  audio,
 		CompanyReading:         companyReading,
 		CompanyReadingResolved: companyReadingResolved,
-		CompanyInfo:            companyInfo,
 		ResolvedCompanyID:      companyID,
 		CustomQuestionsEnabled: companyID > 0 && s.questionStateRepo != nil,
 	}

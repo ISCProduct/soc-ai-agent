@@ -10,7 +10,9 @@ var ErrStudentNotVisible = errors.New("student not visible")
 
 // StudentAnalysisResponse 企業向け学生分析プロファイル
 type StudentAnalysisResponse struct {
-	UserID            uint                            `json:"user_id"`
+	UserID uint `json:"user_id"`
+	// Name はスカウト公開に同意した学生の氏名。詳細画面とスカウト文面で使う。
+	Name              string                          `json:"name"`
 	IntegratedProfile *flywheel.UserIntegratedProfile `json:"integrated_profile"`
 	ChatSummary       *ChatSummaryView                `json:"chat_summary,omitempty"`
 	InterviewReports  []InterviewReportView           `json:"interview_reports"`

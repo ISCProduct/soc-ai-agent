@@ -38,8 +38,18 @@ func (c *companyReadingCache) load(key string) (string, bool) {
 	return entry.value, true
 }
 
+// store は読みを記憶する。value が空でも記憶する（ネガティブキャッシュ）。
+//
+// lookupCompanyReading は「確実に知っている場合のみ答える」プロンプトの
+// 最大15秒のLLM呼び出し。読みを返せない企業（マイナー企業・手入力の表記ゆれ）で
+// 空を捨てると、フロントも company_reading="" を送り続けるため毎ターン同じ
+// 呼び出しが走り、毎回課金される。STT の裏に隠れるのは STT が遅いときだけで、
+// 速ければそのままターンのレイテンシに乗る。
+//
+// DB に読みが入れば resolveCompanyReading が先に返すので、空を覚えても取りこぼさない。
+// TTL が切れれば引き直すため、あとから読みが付いた企業も拾える。
 func (c *companyReadingCache) store(key, value string) {
-	if key == "" || strings.TrimSpace(value) == "" {
+	if key == "" {
 		return
 	}
 
@@ -127,6 +137,21 @@ func (s *InterviewService) resolveCompanyID(companyID uint, companyName string) 
 		return company.ID
 	}
 	return 0
+}
+
+// sttHintCompany は音声認識の補助語に使える企業名・読みを DB から返す。
+//
+// 解決できなければ両方空にする。補助語は「御社」＋ companyInfo の技術用語だけになり、
+// #1603 で測った固有名詞の改善は DB 登録済みの企業で保たれる。
+// クライアント直値を補助語へ入れないのが目的なので、ここで LLM 補完
+// （lookupCompanyReading）は使わない。STT はターンの先頭にあり、
+// ここに LLM 呼び出しを足すと応答遅延がそのまま増える。
+func (s *InterviewService) sttHintCompany(companyID uint, companyName string) (string, string) {
+	c := s.findCompany(companyID, companyName)
+	if c == nil {
+		return "", ""
+	}
+	return strings.TrimSpace(c.Name), strings.TrimSpace(c.NameReading)
 }
 
 // resolveCompanyReading は共有DBの NameReading を優先し、無ければモデル知識で補完する。

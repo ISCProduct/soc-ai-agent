@@ -169,7 +169,7 @@ function ProfilePageContent() {
     if (!user) return
     setDeleting(true)
     try {
-      const res = await fetch(`/api/auth/account?user_id=${user.user_id}`, {
+      const res = await fetch('/api/auth/account', {
         method: 'DELETE',
         headers: authService.getUserFetchHeaders(),
       })
@@ -229,7 +229,7 @@ function ProfilePageContent() {
   const isGuest = user.is_guest === true
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f5f7fa' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       {/* ページヘッダー */}
       <Box sx={{ bgcolor: 'white', borderBottom: '1px solid #e0e0e0', px: { xs: 2, sm: 3 }, py: 1.5 }}>
         <Container maxWidth="lg">

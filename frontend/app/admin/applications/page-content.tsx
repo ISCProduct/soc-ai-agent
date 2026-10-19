@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Button,
   FormControl,
@@ -24,6 +24,8 @@ import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { APPLICATION_STATUSES, STATUS_LABELS, adminNextStatuses } from '@/lib/application-status'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
+import { EmptyState } from '@/components/common/EmptyState'
+import { ListSkeleton } from '@/components/common/ListSkeleton'
 
 type AdminApplication = {
   id: number
@@ -38,6 +40,9 @@ export default function PageContent() {
   const [applications, setApplications] = useState<AdminApplication[]>([])
   const [statusFilter, setStatusFilter] = useState('')
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+  /** 絞り込みを素早く切り替えたとき、後着の古い応答で一覧を上書きしないための番号 */
+  const loadSeq = useRef(0)
   const [pending, setPending] = useState<Record<number, { status: string; notes: string }>>({})
   // 担当校を持つ管理者(先生)は school_id が必須（未指定は 400）。
   // 解決前に一覧を取ると必ず失敗するため、scopeReady で初回ロードを待たせる(#1157)
@@ -46,7 +51,7 @@ export default function PageContent() {
 
   useEffect(() => {
     const user = authService.getStoredUser()
-    if (!user?.is_admin) {
+    if (!user?.is_admin && !user?.is_staff) {
       window.location.href = '/'
     }
   }, [])
@@ -59,20 +64,29 @@ export default function PageContent() {
   }
 
   const load = async (status = statusFilter, school = schoolId) => {
+    const seq = ++loadSeq.current
     setError('')
+    setLoading(true)
     const params = new URLSearchParams()
     if (status) params.set('status', status)
     if (school !== undefined) params.set('school_id', String(school))
     const qs = params.toString()
-    const res = await fetch(`/api/admin/applications${qs ? `?${qs}` : ''}`, {
-      headers: authService.getAdminFetchHeaders(),
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      setError(data?.error || '応募一覧の取得に失敗しました')
-      return
+    try {
+      const res = await fetch(`/api/admin/applications${qs ? `?${qs}` : ''}`, {
+        headers: authService.getAdminFetchHeaders(),
+      })
+      const data = await res.json()
+      if (seq !== loadSeq.current) return
+      if (!res.ok) {
+        setError(data?.error || '応募一覧の取得に失敗しました')
+        return
+      }
+      setApplications(data?.applications || [])
+    } catch {
+      if (seq === loadSeq.current) setError('応募一覧の取得に失敗しました。通信状況を確認して再読み込みしてください')
+    } finally {
+      if (seq === loadSeq.current) setLoading(false)
     }
-    setApplications(data?.applications || [])
   }
 
   useEffect(() => {
@@ -137,10 +151,20 @@ export default function PageContent() {
             {/* 担当校が1校の管理者には表示されず自動適用される(#798 の既存コンポーネント) */}
             <SchoolFilterSelect value={schoolId} onChange={setSchoolId} onResolved={handleScopeResolved} />
           </Stack>
-          {applications.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              応募はありません。
-            </Typography>
+          {loading ? (
+            <ListSkeleton rows={3} label="応募を読み込み中" />
+          ) : applications.length === 0 ? (
+            error ? null : statusFilter ? (
+              <EmptyState
+                title="この条件に当てはまる応募はありません"
+                description="ステータスを「すべて」に戻すと、ほかの応募も表示されます。"
+              />
+            ) : (
+              <EmptyState
+                title="まだ応募はありません"
+                description="学生が企業へ応募すると、ここに一覧で表示されます。"
+              />
+            )
           ) : (
             <AdminTableWrapper>
               <TableHead>

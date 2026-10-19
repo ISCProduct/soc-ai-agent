@@ -655,9 +655,8 @@ module "backend" {
     # 検索結果が固定トークンとして課金されるため、1コールの重さがそのままコストに効く。
     # 品質が落ちたら "high" に戻す（apply とサービス更新が必要）。
     OPENAI_WEB_SEARCH_CONTEXT_SIZE = "medium"
-    # AI面接のSTT。miniは「御社」を「本社」と誤認しやすく、問題発話だけ
-    # gpt-4o-transcribe へ自動で再送する(stt_fallback.go)。
-    # 精度に問題が出たら var.openai_whisper_model を gpt-4o-transcribe にする。
+    # AI面接のSTT。既定は gpt-transcribe。mini にすると問題発話だけ
+    # gpt-transcribe へ自動で再送する(stt_fallback.go)。
     OPENAI_WHISPER_MODEL = var.openai_whisper_model
     # gBizINFO の参照先(#1360)。実体のタスク定義に入っていたがコードに無かった。
     GBIZINFO_BASE_URL = var.gbizinfo_base_url

@@ -8,6 +8,7 @@ import (
 	"Backend/internal/services/auth"
 	"Backend/internal/services/interview"
 	"Backend/internal/services/school"
+	"Backend/internal/services/shared"
 	"Backend/internal/services/storage"
 	"Backend/internal/usagectx"
 	"context"
@@ -271,12 +272,26 @@ func (c *AdminInterviewController) generateQuestionsWithAI(ctx context.Context, 
 	systemPrompt := `あなたは採用面接の専門家です。企業情報をもとに、その企業の面接で聞かれそうな質問を生成してください。
 以下のJSON配列形式のみで回答してください（説明文は不要）。`
 
-	userPrompt := fmt.Sprintf(`企業名: %s
+	// 企業情報・求人情報は非信頼テキストとして囲む（#1600）。
+	// ゲスト投稿（無認証）や AI 取得パイプライン（Web 由来）で入った文面がそのまま
+	// ここへ来る。生成された質問は interview_company_questions へ保存され、
+	// 面接官の system プロンプトの【必須質問】として再投入されるため、
+	// ここで仕込まれた指示文は2ホップで面接へ届く。
+	companyFacts := shared.WrapUntrustedText(fmt.Sprintf(`企業名: %s
 業種: %s
 企業文化: %s
 主要事業: %s
 技術スタック: %s
-求人情報: %s
+求人情報: %s`,
+		company.Name,
+		company.Industry,
+		company.Culture,
+		company.MainBusiness,
+		company.TechStack,
+		positionSummary,
+	), "企業情報")
+
+	userPrompt := fmt.Sprintf(`%s
 
 この企業の面接で聞かれそうな質問を10〜15件生成してください。
 カテゴリは「志望動機」「職務経験」「技術」「カルチャーフィット」「強み・弱み」「キャリアビジョン」「その他」から選んでください。
@@ -289,14 +304,7 @@ JSON配列形式のみで回答（説明文不要）:
     "priority": 優先度（0〜9の整数、小さいほど重要）,
     "is_required": true or false
   }
-]`,
-		company.Name,
-		company.Industry,
-		company.Culture,
-		company.MainBusiness,
-		company.TechStack,
-		positionSummary,
-	)
+]`, companyFacts)
 
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureInterviewReport)
 	jsonStr, err := c.openaiClient.ChatCompletionJSON(ctx, systemPrompt, userPrompt, 0.7, 2000)

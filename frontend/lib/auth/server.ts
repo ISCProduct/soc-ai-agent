@@ -1,6 +1,7 @@
 import { cookies, headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { SERVER_BACKEND_URL } from '@/lib/auth/session-cookies'
+import { AUTH_REFRESH_TIMEOUT_MS, fetchAndReadWithTimeout } from '@/lib/fetch-timeout'
 import { extractTenantSlug } from '@/lib/tenant'
 import type { User } from '@/lib/auth'
 
@@ -45,6 +46,7 @@ function mapUser(data: Record<string, unknown>): User {
     target_level: typeof data.target_level === 'string' ? data.target_level : undefined,
     school_name: typeof data.school_name === 'string' ? data.school_name : undefined,
     is_admin: typeof data.is_admin === 'boolean' ? data.is_admin : undefined,
+    is_staff: typeof data.is_staff === 'boolean' ? data.is_staff : undefined,
     certifications_acquired:
       typeof data.certifications_acquired === 'string' ? data.certifications_acquired : undefined,
     certifications_in_progress:
@@ -94,12 +96,26 @@ export async function getSessionUser(): Promise<User | null> {
   const authHeaders = buildUserAuthHeaders(creds, tenantSlug || undefined)
   if (!authHeaders['X-User-Token']) return null
 
-  const res = await fetch(`${SERVER_BACKEND_URL}/api/auth/user`, {
-    headers: authHeaders,
-    cache: 'no-store',
-  })
-  if (!res.ok) return null
-  const data: Record<string, unknown> = await res.json()
+  // Backend が落ちていると fetch は例外を投げる。これを Server Component の
+  // 外へ出すと `requireSessionUser()` を呼ぶ全ページが 500 になり、画面には
+  // digest 付きの `TypeError: fetch failed` しか出ない。未ログイン扱いにして
+  // /login へ倒す。/login は同じ経路を通らないのでループしない。
+  //
+  // タイムアウトは本文の読み込みまで掛ける（#1476）。SSR はこの応答を待って
+  // から描画するので、ヘッダーだけに掛けると res.json() が半開きで固まった
+  // ときに画面が返らない。
+  let data: Record<string, unknown> | null
+  try {
+    data = await fetchAndReadWithTimeout(
+      `${SERVER_BACKEND_URL}/api/auth/user`,
+      { headers: authHeaders, cache: 'no-store' },
+      AUTH_REFRESH_TIMEOUT_MS,
+      async (res) => (res.ok ? ((await res.json()) as Record<string, unknown>) : null),
+    )
+  } catch {
+    return null
+  }
+  if (!data) return null
   return mapUser(data)
 }
 
@@ -111,6 +127,7 @@ export async function requireSessionUser(): Promise<User> {
 
 export async function requireAdminUser(): Promise<User> {
   const user = await requireSessionUser()
-  if (!user.is_admin) redirect('/')
+  // 管理者に加えて職員（教員・キャリア担当）も管理エリアに入れる。
+  if (!user.is_admin && !user.is_staff) redirect('/')
   return user
 }

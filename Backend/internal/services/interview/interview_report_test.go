@@ -40,6 +40,30 @@ type reportRepoStub struct {
 	upsertCalls int
 	last        *models.InterviewReport
 	findErr     error
+	// スコア反映の権利（#1512）。実リポジトリは scores_applied_at の条件付き
+	// UPDATE で1つだけに与える。ここでは同じ意味をフラグで模す。
+	scoresClaimed bool
+	claimErr      error
+	claimCalls    int
+	releaseCalls  int
+}
+
+func (r *reportRepoStub) ClaimScoresApplication(uint) (bool, error) {
+	r.claimCalls++
+	if r.claimErr != nil {
+		return false, r.claimErr
+	}
+	if r.scoresClaimed {
+		return false, nil
+	}
+	r.scoresClaimed = true
+	return true, nil
+}
+
+func (r *reportRepoStub) ReleaseScoresApplication(uint) error {
+	r.releaseCalls++
+	r.scoresClaimed = false
+	return nil
 }
 
 func (r *reportRepoStub) FindBySessionID(sessionID uint) (*models.InterviewReport, error) {
@@ -219,5 +243,54 @@ func TestRegenerateReport(t *testing.T) {
 				t.Fatalf("投入されたジョブ数=%d want %d: %s", len(svc.jobCh), tt.wantJobs, tt.msg)
 			}
 		})
+	}
+}
+
+// スコア反映が1回だけであること（#1512）。
+//
+// レポート生成のフォールバック経路（Redis 障害時の in-process channel）は
+// プロセス内の map でしか重複排除しておらず、本番の backend は最大2タスクへ
+// スケールする。排他が無いと user_weight_scores の移動平均へ二重に反映される。
+//
+// ローカルは単一プロセスなので再現しない。リポジトリの確保が false を返す状況を
+// 直接作って固定する。
+func TestClaimScoresApplication_二重反映を防ぐ(t *testing.T) {
+	repo := &reportRepoStub{}
+
+	// 1回目は確保できる
+	ok, err := repo.ClaimScoresApplication(1)
+	if err != nil || !ok {
+		t.Fatalf("1回目は確保できるべき: ok=%v err=%v", ok, err)
+	}
+
+	// 2回目（別タスク相当）は確保できない
+	ok, err = repo.ClaimScoresApplication(1)
+	if err != nil {
+		t.Fatalf("予期しないエラー: %v", err)
+	}
+	if ok {
+		t.Error("2回目も確保できている。二重にスコアが反映される")
+	}
+
+	// 失敗時に返せば、次の試行は改めて確保できる（asynq のリトライを壊さない）
+	if err := repo.ReleaseScoresApplication(1); err != nil {
+		t.Fatalf("権利を返せない: %v", err)
+	}
+	ok, err = repo.ClaimScoresApplication(1)
+	if err != nil || !ok {
+		t.Fatalf("返したあとは再確保できるべき: ok=%v err=%v", ok, err)
+	}
+}
+
+// 確保に失敗したらスコア反映へ進まないこと。
+func TestClaimScoresApplication_確保失敗はエラーにする(t *testing.T) {
+	repo := &reportRepoStub{claimErr: errors.New("db down")}
+
+	ok, err := repo.ClaimScoresApplication(1)
+	if err == nil {
+		t.Error("DB障害を握り潰している。確保できたか分からないまま反映へ進んではいけない")
+	}
+	if ok {
+		t.Error("エラー時に確保できたことにしてはいけない")
 	}
 }

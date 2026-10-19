@@ -88,6 +88,30 @@ func TestProfileUpdate_企業が変えられない項目は据え置き(t *testi
 	}
 }
 
+func TestProfileUpdate_企業名を変える(t *testing.T) {
+	repo := &fakeCompanyRepo{company: baseCompany()}
+	s := NewProfileService(repo)
+
+	got, err := s.Update(5, ProfileInput{Name: strPtr("  新しい株式会社  ")})
+	if err != nil {
+		t.Fatalf("更新に失敗: %v", err)
+	}
+	if got.Name != "新しい株式会社" {
+		t.Errorf("企業名が反映されていない: %q", got.Name)
+	}
+}
+
+func TestProfileUpdate_企業名を空にはできない(t *testing.T) {
+	repo := &fakeCompanyRepo{company: baseCompany()}
+	s := NewProfileService(repo)
+
+	_, err := s.Update(5, ProfileInput{Name: strPtr("   ")})
+	var ve *shared.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("バリデーションエラーではない: %v", err)
+	}
+}
+
 func TestProfileUpdate_空文字で消せる(t *testing.T) {
 	// 「未指定」と「空にする」は別。誤った情報を消せないと直せない。
 	repo := &fakeCompanyRepo{company: baseCompany()}

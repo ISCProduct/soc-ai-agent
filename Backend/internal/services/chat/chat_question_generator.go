@@ -298,7 +298,7 @@ func (s *ChatService) generateStrategicQuestion(ctx context.Context, history []m
 			}
 		}
 		if isTextBasedQuestion(questionText) {
-			questionText = buildChoiceFallback(questionText, phaseName)
+			questionText = buildChoiceFallback(questionText, targetCategory)
 		}
 	}
 

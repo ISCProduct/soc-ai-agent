@@ -40,6 +40,12 @@ func (m *ChatServiceMock) SessionHasOtherUserMessages(sessionID string, userID u
 	return args.Bool(0), args.Error(1)
 }
 
+// ClaimSessionOwnership は session_id の初回所有者を原子的に確定する（#963）。
+func (m *ChatServiceMock) ClaimSessionOwnership(sessionID string, userID uint) error {
+	args := m.Called(sessionID, userID)
+	return args.Error(0)
+}
+
 func (m *ChatServiceMock) GetUserScores(userID uint, sessionID string) ([]entity.UserWeightScore, error) {
 	args := m.Called(userID, sessionID)
 	if v := args.Get(0); v != nil {
@@ -85,6 +91,11 @@ func (m *MatchingServiceMock) GetDiagnostics(userID uint, sessionID string) (*ma
 		return v.(*matching.MatchingDiagnostics), args.Error(1)
 	}
 	return nil, args.Error(1)
+}
+
+// ReasonScores は合流しない（そのまま返す）。合流の検証は matching パッケージのテストで行う。
+func (m *MatchingServiceMock) ReasonScores(_ uint, scores []entity.UserWeightScore) []entity.UserWeightScore {
+	return scores
 }
 
 // AnalysisScoringServiceMock AnalysisScoringServiceのモック実装

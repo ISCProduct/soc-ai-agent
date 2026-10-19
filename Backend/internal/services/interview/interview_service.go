@@ -233,7 +233,6 @@ type TurnResult struct {
 	Audio                  []byte
 	CompanyReading         string
 	CompanyReadingResolved bool
-	CompanyInfo            string
 	QuestionSource         string
 	QuestionCategory       string
 	IsDeepening            bool

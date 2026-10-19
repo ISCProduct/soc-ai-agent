@@ -96,7 +96,8 @@ func (c *AdminSchoolApplicationController) ensureSchoolAccess(ctx echo.Context, 
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	allowed, err := c.schools.CanAdminAccessSchool(adminUserID, &schoolID)
+	isPlatform := middleware.AdminIsPlatformFromContext(ctx.Request().Context())
+	allowed, err := c.schools.CanAdminAccessSchool(isPlatform, adminUserID, &schoolID)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}

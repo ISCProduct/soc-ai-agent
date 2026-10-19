@@ -37,13 +37,16 @@ func (t *resumeTarget) Model() string    { return t.model }
 func (t *resumeTarget) Endpoint() string { return "openai:/responses" }
 
 // resumePromptOverheadTokens はプロンプト定型文（指示＋ルーブリック＋出力例）の
-// 概算トークン数。**本文を空にした BuildReviewPromptFromText を ApproxTokensJA に
-// 通した実測値**で、#1584 でルーブリックに 0〜5 のレベル定義を足して
+// 概算トークン数。**本文1文字の BuildReviewPromptFromText を ApproxTokensJA に
+// 通し、本文の1文字を引いた実測値**で、#1584 でルーブリックに 0〜5 のレベル定義を足して
 // 1153 → 2384 に増えた（約2.1倍）。
+// #1600 で応募情報とOCR本文をノンス付き区切りで囲んだ分（宣言文2つ）がさらに乗り、
+// 実測 2685 になった。本文を空にして測ると WrapUntrustedText が空を返して
+// 宣言文が乗らず、約136トークン過小になる（#1644）。
 //
 // ここを更新し忘れると事前の概算コストが過小になり、-yes を付けずに回したときの
-// 確認画面が実費と合わなくなる。プロンプトかルーブリックを変えたら測り直すこと。
-const resumePromptOverheadTokens = 2400
+// 確認画面が実費と合わなくなる。TestResumePromptOverheadTokens_MatchesPrompt が検出する。
+const resumePromptOverheadTokens = 2685
 
 func (t *resumeTarget) EstimateTokens(c Case) (int, int) {
 	// 出力は max_output_tokens を上限とする。

@@ -168,6 +168,7 @@ type AuthResponse struct {
 	TargetLevel              string `json:"target_level"`
 	SchoolName               string `json:"school_name,omitempty"`
 	IsAdmin                  bool   `json:"is_admin"`
+	IsStaff                  bool   `json:"is_staff"` // 学校職員（教員・キャリア担当）。ログイン後の遷移先判定に使う。
 	CertificationsAcquired   string `json:"certifications_acquired,omitempty"`
 	CertificationsInProgress string `json:"certifications_in_progress,omitempty"`
 	AvatarURL                string `json:"avatar_url,omitempty"`

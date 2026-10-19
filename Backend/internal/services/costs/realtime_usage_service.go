@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+
+	"Backend/internal/safego"
 )
 
 // TokenUsage は Realtime API の response.done イベントから取得するトークン使用量。
@@ -162,7 +164,8 @@ func (s *RealtimeUsageService) EnsureSessionStarted(userID, sessionID uint) erro
 	if err := s.repo.Create(entry); err != nil {
 		return err
 	}
-	go s.checkAndNotifyThreshold()
+	// 閾値通知は投げっぱなし。panic でプロセスを落とさない(#1446)。
+	safego.Go(s.checkAndNotifyThreshold)
 	return nil
 }
 
@@ -201,7 +204,7 @@ func (s *RealtimeUsageService) CloseSession(sessionID uint, endedAt time.Time, t
 	if err := s.repo.Update(entry); err != nil {
 		return 0, 0, err
 	}
-	go s.checkAndNotifyThreshold()
+	safego.Go(s.checkAndNotifyThreshold)
 	return dur, cost, nil
 }
 

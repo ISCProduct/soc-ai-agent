@@ -32,6 +32,12 @@ type InterviewUtteranceRepository interface {
 type InterviewReportRepository interface {
 	FindBySessionID(sessionID uint) (*models.InterviewReport, error)
 	Upsert(report *models.InterviewReport) error
+	// ClaimScoresApplication はスコア反映の権利を1つのプロセスだけに与える（#1512）。
+	// scores_applied_at が NULL の行だけを更新するので、同時に呼んでも true を
+	// 返すのは1つだけ。false を受けた側はスコア反映を飛ばす。
+	ClaimScoresApplication(sessionID uint) (bool, error)
+	// ReleaseScoresApplication は確保した権利を返す。反映に失敗したときに呼ぶ。
+	ReleaseScoresApplication(sessionID uint) error
 }
 
 // InterviewVideoRepository は面接動画メタデータの永続化インターフェース。

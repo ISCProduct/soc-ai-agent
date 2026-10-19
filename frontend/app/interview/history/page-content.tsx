@@ -22,13 +22,16 @@ import { authService, User } from '@/lib/auth'
 import { interviewApi, InterviewDetail, InterviewSession, InterviewTrendPoint, TeacherReport } from '@/lib/interview'
 import InterviewSummary from '../components/InterviewSummary'
 import { parseJsonSafe } from '@/lib/interview/utils'
-import { PRIMARY } from '../constants'
+
+import { UI } from '@/lib/design/tokens'
+import { EmptyState } from '@/components/common/EmptyState'
+import { ListSkeleton } from '@/components/common/ListSkeleton'
 
 const InterviewTrendChart = dynamic(() => import('@/components/InterviewTrendChart'), {
   ssr: false,
   loading: () => (
     <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-      <CircularProgress size={28} sx={{ color: PRIMARY }} />
+      <CircularProgress size={28} sx={{ color: UI.mark }} />
     </Box>
   ),
 })
@@ -115,25 +118,25 @@ export default function PageContent() {
   const totalPages = Math.ceil(total / limit)
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f8f6f6' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: UI.paper }}>
       {/* Header */}
-      <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: { xs: 2, sm: 3, lg: 8 }, py: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
+      <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: { xs: 2, sm: 3, lg: 8 }, py: 2, bgcolor: UI.field, borderBottom: `1px solid ${UI.ruleSoft}` }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Box sx={{ color: PRIMARY }}><PsychologyIcon sx={{ fontSize: 32 }} /></Box>
-          <Typography component="h1" sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: '#0f172a' }}>面接履歴</Typography>
+          <Box sx={{ color: UI.mark }}><PsychologyIcon sx={{ fontSize: 32 }} /></Box>
+          <Typography component="h1" sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: UI.ink }}>面接履歴</Typography>
           {user?.role === 'teacher' && (
             <Chip label="教員モード" size="small" sx={{ bgcolor: '#3b82f6', color: '#fff', fontWeight: 700, ml: 1 }} />
           )}
         </Box>
         {/* 既定の40x40ではモバイルのタップ領域が足りない（#1481） */}
-        <IconButton onClick={() => router.push('/interview')} aria-label="面接画面へ戻る" sx={{ bgcolor: '#f1f5f9', color: '#475569', width: 44, height: 44 }}>
+        <IconButton onClick={() => router.push('/interview')} aria-label="面接画面へ戻る" sx={{ bgcolor: UI.tint, color: UI.inkSoft, width: 44, height: 44 }}>
           <ArrowBackIcon />
         </IconButton>
       </Box>
 
       {/* Trend chart */}
       <Box sx={{ maxWidth: 1100, mx: 'auto', px: { xs: 2, md: 4 }, pt: { xs: 2, md: 4 }, pb: 0 }}>
-        <Paper elevation={0} sx={{ p: { xs: 2, md: 3 }, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
+        <Paper elevation={0} sx={{ p: { xs: 2, md: 3 }, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }} flexWrap="wrap" gap={1}>
             <Typography sx={{ fontWeight: 700, fontSize: 16 }}>パフォーマンストレンド</Typography>
             <ToggleButtonGroup
@@ -150,7 +153,7 @@ export default function PageContent() {
           </Stack>
           {trendLoading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-              <CircularProgress size={28} sx={{ color: PRIMARY }} />
+              <CircularProgress size={28} sx={{ color: UI.mark }} />
             </Box>
           ) : trendError ? (
             <Stack spacing={1} alignItems="flex-start">
@@ -174,14 +177,20 @@ export default function PageContent() {
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>セッション一覧</Typography>
           {loading ? (
-            <CircularProgress size={32} sx={{ color: PRIMARY }} />
+            <ListSkeleton rows={3} label="面接履歴を読み込み中" />
           ) : listError ? (
             <Stack spacing={1} alignItems="flex-start">
               <Alert severity="error">{listError}</Alert>
               <Button size="small" variant="outlined" onClick={() => void loadSessions()}>再試行</Button>
             </Stack>
           ) : sessions.length === 0 ? (
-            <Typography color="text.secondary">面接履歴がありません。</Typography>
+            <Paper elevation={0} sx={{ border: `1px solid ${UI.ruleSoft}`, borderRadius: 2 }}>
+              <EmptyState
+                title="まだ面接の練習記録がありません"
+                description="AI面接で練習すると、回答の振り返りとスコアの推移がここに残ります。"
+                action={<Button variant="contained" onClick={() => router.push('/interview')}>AI面接を始める</Button>}
+              />
+            </Paper>
           ) : (
             <Stack spacing={1.5}>
               {sessions.map(s => (
@@ -190,10 +199,10 @@ export default function PageContent() {
                   elevation={0}
                   onClick={() => handleSelectSession(s)}
                   sx={{
-                    p: 2.5, borderRadius: 2, border: '1px solid #e2e8f0', cursor: 'pointer',
-                    borderColor: selectedDetail?.session.id === s.id ? PRIMARY : '#e2e8f0',
-                    bgcolor: selectedDetail?.session.id === s.id ? `${PRIMARY}05` : '#fff',
-                    '&:hover': { borderColor: PRIMARY, bgcolor: `${PRIMARY}05` },
+                    p: 2.5, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, cursor: 'pointer',
+                    borderColor: selectedDetail?.session.id === s.id ? UI.mark : UI.ruleSoft,
+                    bgcolor: selectedDetail?.session.id === s.id ? `color-mix(in srgb, ${UI.mark} 2%, transparent)` : UI.field,
+                    '&:hover': { borderColor: UI.mark, bgcolor: `color-mix(in srgb, ${UI.mark} 2%, transparent)` },
                     transition: 'all 0.15s',
                   }}
                 >
@@ -212,7 +221,7 @@ export default function PageContent() {
                       </Typography>
                     </Box>
                     <Box sx={{ textAlign: 'right' }}>
-                      <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>
+                      <Typography sx={{ fontSize: 13, fontWeight: 600, color: UI.inkSoft }}>
                         ${s.estimated_cost_usd.toFixed(3)}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">推定コスト</Typography>
@@ -227,7 +236,7 @@ export default function PageContent() {
           {totalPages > 1 && (
             <Stack direction="row" spacing={1} justifyContent="center" sx={{ mt: 3 }}>
               <Button size="small" disabled={page === 1} onClick={() => setPage(p => p - 1)}>前へ</Button>
-              <Typography sx={{ lineHeight: '32px', fontSize: 13, color: '#64748b' }}>{page} / {totalPages}</Typography>
+              <Typography sx={{ lineHeight: '32px', fontSize: 13, color: UI.inkFaint }}>{page} / {totalPages}</Typography>
               <Button size="small" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>次へ</Button>
             </Stack>
           )}
@@ -238,14 +247,14 @@ export default function PageContent() {
           <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>詳細・レポート</Typography>
           {detailLoading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-              <CircularProgress size={32} sx={{ color: PRIMARY }} />
+              <CircularProgress size={32} sx={{ color: UI.mark }} />
             </Box>
           ) : detailError ? (
-            <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
+            <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
               <Alert severity="error" sx={{ mb: 1 }}>{detailError}</Alert>
             </Paper>
           ) : !selectedDetail ? (
-            <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
+            <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
               <Typography color="text.secondary" fontSize={14}>左のセッションを選択すると詳細が表示されます。</Typography>
             </Paper>
           ) : (
@@ -307,7 +316,7 @@ export default function PageContent() {
                                   </Box>
                                 ))
                               ) : (
-                                <Typography variant="caption" sx={{ color: '#64748b' }}>
+                                <Typography variant="caption" sx={{ color: UI.inkFaint }}>
                                   実発話と照合できた根拠はありませんでした（照合できない根拠は破棄されます）
                                 </Typography>
                               )}
@@ -319,7 +328,7 @@ export default function PageContent() {
                   })()}
                 </>
               ) : (
-                <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
+                <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
                   <Typography variant="body2" color="text.secondary">
                     {selectedDetail.session.status === 'finished' ? 'レポートを生成中です...' : 'レポートは面接終了後に生成されます。'}
                   </Typography>
@@ -328,16 +337,16 @@ export default function PageContent() {
 
               {/* Utterances */}
               {selectedDetail.utterances.length > 0 && (
-                <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#fff' }}>
+                <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
                   <Typography sx={{ fontWeight: 700, mb: 1.5 }}>発話ログ</Typography>
                   <Stack spacing={1} sx={{ maxHeight: 320, overflowY: 'auto' }}>
                     {selectedDetail.utterances.map((u, i) => (
                       <Box key={i} sx={{ display: 'flex', flexDirection: 'column', alignItems: u.role === 'ai' ? 'flex-start' : 'flex-end' }}>
-                        <Typography sx={{ fontSize: 10, fontWeight: 700, color: u.role === 'ai' ? '#64748b' : PRIMARY, mb: 0.3 }}>
+                        <Typography sx={{ fontSize: 10, fontWeight: 700, color: u.role === 'ai' ? UI.inkFaint : UI.mark, mb: 0.3 }}>
                           {u.role === 'ai' ? '面接官AI' : 'あなた'}
                         </Typography>
-                        <Box sx={{ bgcolor: u.role === 'ai' ? '#f1f5f9' : `${PRIMARY}15`, px: 1.5, py: 0.8, borderRadius: 1.5, maxWidth: '90%' }}>
-                          <Typography variant="body2" sx={{ color: '#0f172a', lineHeight: 1.6 }}>{u.text}</Typography>
+                        <Box sx={{ bgcolor: u.role === 'ai' ? UI.tint : `color-mix(in srgb, ${UI.mark} 8%, transparent)`, px: 1.5, py: 0.8, borderRadius: 1.5, maxWidth: '90%' }}>
+                          <Typography variant="body2" sx={{ color: UI.ink, lineHeight: 1.6 }}>{u.text}</Typography>
                         </Box>
                       </Box>
                     ))}

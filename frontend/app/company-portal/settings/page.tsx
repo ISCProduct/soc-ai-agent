@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import {
   Alert,
   Button,
-  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -24,9 +23,13 @@ import {
 } from '@mui/material'
 import { PageContainer } from '@/components/admin/PageContainer'
 import { PageLoading } from '@/components/common/PageLoading'
+import { MarkLabel } from '@/components/company-portal/MarkLabel'
+import { memberMark, reviewMark } from '@/lib/company/marks'
 import { companyAuthService } from '@/lib/company/auth'
 import {
+  companyNameChangeNotice,
   companyProfileService,
+  notifyCompanyNameChanged,
   type CompanyMember,
   type CompanyProfile,
   type ProfileUpdate,
@@ -57,6 +60,7 @@ export default function CompanyPortalSettingsPage() {
       ])
       setProfile(p)
       setForm({
+        name: p.name,
         description: p.description,
         industry: p.industry,
         location: p.location,
@@ -98,9 +102,16 @@ export default function CompanyPortalSettingsPage() {
   const saveProfile = async () => {
     setSaving(true)
     try {
+      const previousName = profile?.name ?? ''
       const updated = await companyProfileService.update(form)
       setProfile(updated)
-      setNotice('企業情報を保存しました')
+      const rename = companyNameChangeNotice(previousName, updated.name)
+      if (rename) {
+        setNotice(rename)
+        notifyCompanyNameChanged(updated.name)
+      } else {
+        setNotice('企業情報を保存しました')
+      }
       setError('')
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存できませんでした')
@@ -146,14 +157,9 @@ export default function CompanyPortalSettingsPage() {
 
   return (
     <PageContainer maxWidth={960}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-        <Typography variant="h4" fontWeight="bold">
-          設定
-        </Typography>
-        <Button variant="outlined" onClick={() => router.push('/company-portal')}>
-          ダッシュボードへ
-        </Button>
-      </Stack>
+      <Typography variant="h4" component="h1" fontWeight="bold" sx={{ mb: 1 }}>
+        設定
+      </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         自社の情報と担当者を管理します。
       </Typography>
@@ -171,26 +177,26 @@ export default function CompanyPortalSettingsPage() {
 
       <Paper
         elevation={0}
-        sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px', p: 3, mb: 3 }}
+        sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '4px', p: 3, mb: 3 }}
       >
         <Typography variant="h6" gutterBottom>
           企業情報
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          企業名・法人番号・公開状態は変更できません。変更が必要な場合は運営にお問い合わせください。
+          法人番号と公開状態は変更できません。企業名を変えると、画面上部と学生に見える名前も変わります。
         </Typography>
 
         <Stack spacing={2}>
-          <Stack direction="row" spacing={2} alignItems="center">
-            <Typography variant="body2" color="text.secondary" sx={{ minWidth: 100 }}>
-              企業名
-            </Typography>
-            <Typography>{profile?.name}</Typography>
-            <Chip
-              size="small"
-              label={profile?.data_status === 'published' ? '公開中' : '未公開'}
-              color={profile?.data_status === 'published' ? 'success' : 'default'}
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
+            <TextField
+              label="企業名"
+              required
+              fullWidth
+              disabled={!isOwner}
+              value={form.name ?? ''}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
+            <MarkLabel {...reviewMark(profile?.data_status === 'published')} />
           </Stack>
 
           <TextField
@@ -278,7 +284,11 @@ export default function CompanyPortalSettingsPage() {
 
           {isOwner ? (
             <Stack direction="row">
-              <Button variant="contained" disabled={saving} onClick={() => void saveProfile()}>
+              <Button
+                variant="contained"
+                disabled={saving || !(form.name ?? '').trim()}
+                onClick={() => void saveProfile()}
+              >
                 保存
               </Button>
             </Stack>
@@ -292,7 +302,7 @@ export default function CompanyPortalSettingsPage() {
 
       <Paper
         elevation={0}
-        sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '10px', p: 3 }}
+        sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '4px', p: 3, overflowX: 'auto' }}
       >
         <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
           <Typography variant="h6">担当者</Typography>
@@ -323,13 +333,7 @@ export default function CompanyPortalSettingsPage() {
                 <TableCell>{m.email}</TableCell>
                 <TableCell>{m.role === 'owner' ? '管理者' : '担当者'}</TableCell>
                 <TableCell>
-                  {m.disabled ? (
-                    <Chip size="small" label="無効" />
-                  ) : m.invite_pending ? (
-                    <Chip size="small" color="warning" label="招待中" />
-                  ) : (
-                    <Chip size="small" color="success" label="有効" />
-                  )}
+                  <MarkLabel {...memberMark(m)} />
                 </TableCell>
                 {isOwner && (
                   <TableCell>

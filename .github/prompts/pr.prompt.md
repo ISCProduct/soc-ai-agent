@@ -1,3 +1,6 @@
+> **宛先は develop。** main への push は本番(ECS on Fargate)への自動デプロイを引く。
+> ブランチフローは `feature/* → develop → release → main`。`--base main` にしない。
+
 # ブランチ作成
 git checkout -b "feature/issue-{{issue_number}}"
 git add .
@@ -18,7 +21,7 @@ git push origin "feature/issue-{{issue_number}}"
     * コマンド例: `git checkout -b feature/issue-{{issue_number}}`
     * コマンド例: `git push origin feature/issue-{{issue_number}}`
 2.  **変更内容の解析（AIによる生成）**
-    * `git diff main...HEAD` を参照し、実装した具体的な変更点、追加機能、修正バグを箇条書きで整理する。
+    * `git diff origin/develop...HEAD` を参照し、実装した具体的な変更点、追加機能、修正バグを箇条書きで整理する。
 3.  **PRの作成**
     * `gh pr create` を使用し、以下の構成でPRを投げる。
     * **Title:** `Resolve #{{issue_number}}: [機能の短い要約]`
@@ -31,7 +34,7 @@ git push origin "feature/issue-{{issue_number}}"
 
       ## 変更内容
       {{ai_generated_summary}}" \
-                   --base main
+                   --base develop
       ```
 
 ---

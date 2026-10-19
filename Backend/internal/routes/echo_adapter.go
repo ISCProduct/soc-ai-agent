@@ -137,7 +137,10 @@ func EchoAdminAuth(userRepo *repositories.UserRepository, adminSecret string) ec
 				return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 			}
 			user, err := userRepo.GetUserByEmail(email)
-			if err != nil || user == nil || !user.IsAdmin {
+			// 管理者（is_admin）に加えて職員（role=staff）も管理エリアに入れる。
+			// 職員は後段の schoolScope で担当校に絞られ、プラットフォーム系ルートは
+			// EchoRequirePlatformAdmin / EchoRequireAdmin で弾かれる。
+			if err != nil || user == nil || !user.CanAccessAdminArea() {
 				return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
 			}
 			// ADMIN_SECRET 未設定の場合はフェイルクローズ（セキュリティ設定漏れを防ぐ）
@@ -153,6 +156,9 @@ func EchoAdminAuth(userRepo *repositories.UserRepository, adminSecret string) ec
 				return echo.NewHTTPError(http.StatusForbidden, "Forbidden")
 			}
 			ctx := context.WithValue(c.Request().Context(), middleware.AdminUserIDContextKey, user.ID)
+			// is_admin かどうかを積む。職員（staff かつ is_admin=false）と区別し、
+			// 「無制限＝全校」やプラットフォーム系の判定に使う。
+			ctx = context.WithValue(ctx, middleware.AdminIsPlatformContextKey, user.IsAdmin)
 			c.SetRequest(c.Request().WithContext(ctx))
 			return next(c)
 		}
@@ -169,7 +175,8 @@ func EchoAdminSchoolScope(schools *school.SchoolService) echo.MiddlewareFunc {
 			if !ok {
 				return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 			}
-			restricted, allowedSchoolIDs, err := schools.ResolveAdminAccess(adminUserID)
+			isPlatform := middleware.AdminIsPlatformFromContext(c.Request().Context())
+			restricted, allowedSchoolIDs, err := schools.ResolveAccess(isPlatform, adminUserID)
 			if err != nil {
 				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
 			}
@@ -216,12 +223,31 @@ func EchoRequirePlatformAdmin(schools *school.SchoolService) echo.MiddlewareFunc
 			if !ok {
 				return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 			}
-			restricted, _, err := schools.ResolveAdminAccess(adminUserID)
+			// 職員（is_admin=false）は担当校0件でも「無制限」にはならないため、
+			// is_admin を直接の条件にする。これが無いと職員ロール導入時に
+			// 担当校0件の職員がプラットフォーム系ルートへ入れる穴になる。
+			if !middleware.AdminIsPlatformFromContext(c.Request().Context()) {
+				return echo.NewHTTPError(http.StatusForbidden, "platform admin only")
+			}
+			restricted, _, err := schools.ResolveAccess(true, adminUserID)
 			if err != nil {
 				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve school access")
 			}
 			if restricted {
 				return echo.NewHTTPError(http.StatusForbidden, "platform admin only")
+			}
+			return next(c)
+		}
+	}
+}
+
+// EchoRequireAdmin は is_admin を必須にする（職員=staff は不可）。
+// 学校メンバー（教員）の割当など、権限管理に相当する操作に使う。
+func EchoRequireAdmin() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if !middleware.AdminIsPlatformFromContext(c.Request().Context()) {
+				return echo.NewHTTPError(http.StatusForbidden, "この操作は管理者のみ行えます")
 			}
 			return next(c)
 		}

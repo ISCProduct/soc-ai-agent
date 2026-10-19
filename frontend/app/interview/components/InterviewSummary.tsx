@@ -18,7 +18,8 @@ import CheckIcon from '@mui/icons-material/Check'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { InterviewReport, PhraseSuggestion, interviewApi } from '@/lib/interview'
 import { parseJsonSafe } from '@/lib/interview/utils'
-import { PRIMARY } from '../constants'
+
+import { UI } from '@/lib/design/tokens'
 
 const SCORE_LABELS: Record<string, string> = {
   logic: '論理性',
@@ -37,11 +38,11 @@ interface Props {
 
 export default function InterviewSummary({ report, userId, theme = 'dark' }: Props) {
   const isDark = theme === 'dark'
-  const paperBg = isDark ? '#2d2e31' : '#fff'
-  const paperBorder = isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #e2e8f0'
-  const textPrimary = isDark ? '#e8eaed' : '#0f172a'
-  const textSecondary = isDark ? '#bdc1c6' : '#475569'
-  const textMuted = isDark ? '#9aa0a6' : '#64748b'
+  const paperBg = isDark ? UI.nightPanel : '#fff'
+  const paperBorder = isDark ? '1px solid rgba(255,255,255,0.08)' : `1px solid ${UI.ruleSoft}`
+  const textPrimary = isDark ? UI.nightInk : UI.ink
+  const textSecondary = isDark ? UI.nightSoft : UI.inkSoft
+  const textMuted = isDark ? UI.nightMuted : UI.inkFaint
 
   const [suggestions, setSuggestions] = useState<PhraseSuggestion[] | null>(null)
   const [suggestionsLoading, setSuggestionsLoading] = useState(false)
@@ -84,12 +85,12 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
       {/* Summary text */}
       <Paper sx={{ bgcolor: paperBg, border: paperBorder, p: 3, borderRadius: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
-          <Typography sx={{ color: PRIMARY, fontWeight: 700 }}>総合評価</Typography>
+          <Typography sx={{ color: UI.mark, fontWeight: 700 }}>総合評価</Typography>
           {overallScore !== null && (
             <Chip
               label={`${overallScore} / 5`}
               size="small"
-              sx={{ bgcolor: PRIMARY, color: '#fff', fontWeight: 700, fontSize: 13 }}
+              sx={{ bgcolor: UI.mark, color: '#fff', fontWeight: 700, fontSize: 13 }}
             />
           )}
         </Box>
@@ -112,7 +113,7 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
                   <Typography variant="body2" sx={{ color: textSecondary }}>
                     {SCORE_LABELS[key] ?? key}
                   </Typography>
-                  <Typography variant="body2" sx={{ fontWeight: 700, color: PRIMARY }}>
+                  <Typography variant="body2" sx={{ fontWeight: 700, color: UI.mark }}>
                     {value} / 5
                   </Typography>
                 </Box>
@@ -122,8 +123,8 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
                   sx={{
                     height: 6,
                     borderRadius: 3,
-                    bgcolor: isDark ? '#3c4043' : '#e2e8f0',
-                    '& .MuiLinearProgress-bar': { bgcolor: PRIMARY, borderRadius: 3 },
+                    bgcolor: isDark ? '#3c4043' : UI.ruleSoft,
+                    '& .MuiLinearProgress-bar': { bgcolor: UI.mark, borderRadius: 3 },
                   }}
                 />
                 {evidence?.[key] && (
@@ -186,7 +187,7 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
           <Typography sx={{ color: textPrimary, fontWeight: 700, mb: 2 }}>言い換え提案</Typography>
           {suggestionsLoading ? (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <CircularProgress size={18} sx={{ color: PRIMARY }} />
+              <CircularProgress size={18} sx={{ color: UI.mark }} />
               <Typography variant="body2" sx={{ color: textMuted }}>分析中...</Typography>
             </Box>
           ) : suggestionsError ? (
@@ -200,7 +201,7 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
                     variant="body2"
                     sx={{
                       color: textSecondary,
-                      bgcolor: isDark ? '#3c4043' : '#f1f5f9',
+                      bgcolor: isDark ? '#3c4043' : UI.tint,
                       borderRadius: 1,
                       px: 1.5,
                       py: 0.75,
@@ -236,7 +237,8 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
                             <IconButton
                               size="small"
                               onClick={() => handleCopy(s, copyKey)}
-                              sx={{ p: 0.5, color: isDark ? '#9aa0a6' : '#64748b' }}
+                              aria-label="要約をコピー"
+                              sx={{ p: 0.5, color: isDark ? UI.nightMuted : UI.inkFaint }}
                             >
                               {copiedIdx === copyKey
                                 ? <CheckIcon sx={{ fontSize: 16, color: '#34a853' }} />
@@ -248,7 +250,7 @@ export default function InterviewSummary({ report, userId, theme = 'dark' }: Pro
                       )
                     })}
                   </Stack>
-                  {i < suggestions.length - 1 && <Divider sx={{ mt: 2, borderColor: isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9' }} />}
+                  {i < suggestions.length - 1 && <Divider sx={{ mt: 2, borderColor: isDark ? 'rgba(255,255,255,0.06)' : UI.tint }} />}
                 </Box>
               ))}
             </Stack>

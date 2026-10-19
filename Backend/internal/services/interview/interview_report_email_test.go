@@ -19,6 +19,10 @@ type mockInterviewReportRepo struct {
 	err    error
 }
 
+func (m *mockInterviewReportRepo) ClaimScoresApplication(uint) (bool, error) { return true, nil }
+
+func (m *mockInterviewReportRepo) ReleaseScoresApplication(uint) error { return nil }
+
 func (m *mockInterviewReportRepo) FindBySessionID(sessionID uint) (*models.InterviewReport, error) {
 	return m.report, m.err
 }

@@ -41,3 +41,44 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+
+  # frontend の npm 依存を週次で自動更新
+  - package-ecosystem: npm
+    directory: /frontend
+    # ここにエントリが無いと、セキュリティ更新も含めて既定ブランチ(main)宛に出る。
+    # 実際 #1685 / #1686 / #1687 は main 宛で作られ、develop・release を飛ばして
+    # 本番(ECS on Fargate)へ直行する形になっていた。pip と同じく develop 宛にする。
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - javascript
+    # メジャーバージョンアップは手動で判断するため対象外（pip と揃える）。
+    # Next.js は AGENTS.md のとおり訓練データと挙動が違うので、
+    # 版上げは必ず build と E2E を通してから入れる。
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # Backend の Go 依存を週次で自動更新
+  - package-ecosystem: gomod
+    directory: /Backend
+    # npm と同じ理由。エントリが無いと既定ブランチ(main)宛になる。
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - go
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]

@@ -102,7 +102,7 @@ export default function PageContent() {
     <Box
       sx={{
         minHeight: '100vh',
-        bgcolor: '#f5f5f5',
+        bgcolor: 'background.default',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -113,7 +113,7 @@ export default function PageContent() {
     >
       <Box sx={{ maxWidth: 720, width: '100%' }}>
         <Box sx={{ mb: 2 }}>
-          <IconButton component={Link} href="/"><ArrowBackIcon /></IconButton>
+          <IconButton component={Link} href="/" aria-label="ホームへ戻る"><ArrowBackIcon /></IconButton>
         </Box>
         {/* ウェルカムメッセージ */}
         <Box sx={{ textAlign: 'center', mb: 5 }}>

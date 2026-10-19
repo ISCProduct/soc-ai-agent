@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { Box, IconButton, AppBar, Toolbar, Typography, Alert, Link as MuiLink } from '@mui/material'
+import { Box, Button, IconButton, AppBar, Toolbar, Typography, Alert, Link as MuiLink } from '@mui/material'
 import NextLink from 'next/link'
 import { Menu as MenuIcon } from '@mui/icons-material'
 import { AnalysisSidebar } from '@/components/AnalysisSidebar'
@@ -19,6 +19,8 @@ import {
   withoutDismissing,
   type StudentGuidance,
 } from '@/lib/teacher-guidance'
+import { NextActionsBar } from '@/components/home/NextActionsBar'
+import { NoticeStack, type Notice } from '@/components/home/NoticeStack'
 import styles from './page.module.css'
 
 export default function PageContent() {
@@ -31,13 +33,29 @@ export default function PageContent() {
   const [resumeReminder, setResumeReminder] = useState<string | null>(null)
   const [guidances, setGuidances] = useState<StudentGuidance[]>([])
   const [guidanceError, setGuidanceError] = useState('')
+  const [guidanceLoadFailed, setGuidanceLoadFailed] = useState(false)
   // 閉じる処理中のID。連打すると同じ案内へ何度もPOSTが飛ぶ(教員側は disabled で防いでいる)
   const [dismissingIds, setDismissingIds] = useState<Set<number>>(() => new Set())
+
+  // 教員案内の取得失敗はホームを壊さないが、「案内なし」とは見せない（#1691）。
+  // 失敗を黙ると、教員が送った指導が届いていないことに学生が気づけない。
+  const loadGuidances = useCallback(() => {
+    setGuidanceLoadFailed(false)
+    fetchActiveGuidances()
+      .then((rows) => setGuidances(rows))
+      .catch(() => setGuidanceLoadFailed(true))
+  }, [])
 
   useEffect(() => {
     const storedUser = authService.getStoredUser()
     if (!storedUser) {
       router.replace('/login')
+      return
+    }
+    // 職員（教員・キャリア担当）にはチャットを見せず、教員指導画面(/admin)へ送る。
+    // 直リンクで / に来た場合もここで退避する。
+    if (storedUser.is_staff) {
+      router.replace('/admin')
       return
     }
     setUser(storedUser)
@@ -55,12 +73,8 @@ export default function PageContent() {
       .catch(() => {
         // 履歴書状態の取得失敗はホーム画面を壊さない（バナーを出さない）
       })
-    fetchActiveGuidances()
-      .then((rows) => setGuidances(rows))
-      .catch(() => {
-        // 教員案内の取得失敗はホームを壊さない
-      })
-  }, [router])
+    loadGuidances()
+  }, [router, loadGuidances])
 
   const dismissWhatsNewBanner = () => {
     markWhatsNewAsSeen(whatsNewEntries)
@@ -75,6 +89,113 @@ export default function PageContent() {
 
   if (loading || !user) {
     return <PageLoading message="チャット画面を準備しています..." />
+  }
+
+  // お知らせは重要度順に並べ、既定では先頭1件だけ出す（#1576）。
+  // 種類ごとに積むと、4種が同時に出たときチャット入力欄が画面外へ押し出される。
+  const notices: Notice[] = []
+  if (guidanceLoadFailed) {
+    notices.push({
+      key: 'guidance-load-failed',
+      node: (
+        <Alert
+          severity="error"
+          sx={{ borderRadius: 0 }}
+          action={
+            <Button color="inherit" size="small" onClick={loadGuidances}>
+              再読み込み
+            </Button>
+          }
+        >
+          先生からの案内を読み込めませんでした。通信状況を確認して再読み込みしてください
+        </Alert>
+      ),
+    })
+  }
+  if (guidanceError) {
+    notices.push({
+      key: 'guidance-error',
+      node: (
+        <Alert severity="error" onClose={() => setGuidanceError('')} sx={{ borderRadius: 0 }}>
+          {guidanceError}
+        </Alert>
+      ),
+    })
+  }
+  for (const g of guidances) {
+    notices.push({
+      key: `guidance-${g.id}`,
+      node: (
+        <Alert
+          severity="info"
+          // 閉じる処理中は無効化する。連打すると同じ案内へ何度もPOSTが飛ぶ。
+          closeText="閉じる"
+          onClose={
+            !canDismiss(dismissingIds, g.id)
+              ? undefined
+              : () => {
+                  setGuidanceError('')
+                  setDismissingIds((prev) => withDismissing(prev, g.id))
+                  dismissGuidance(g.id)
+                    .then(() => setGuidances((prev) => prev.filter((x) => x.id !== g.id)))
+                    .catch(() =>
+                      setGuidanceError('案内を閉じられませんでした。時間をおいて再度お試しください'),
+                    )
+                    .finally(() => setDismissingIds((prev) => withoutDismissing(prev, g.id)))
+                }
+          }
+          sx={{ borderRadius: 0 }}
+        >
+          <Box component="span" sx={{ fontWeight: 700 }}>先生から: </Box>
+          {g.message}
+          {g.suggested_industries && g.suggested_industries.length > 0 && (
+            <>（参考: {g.suggested_industries.join('、')}）</>
+          )}
+        </Alert>
+      ),
+    })
+  }
+  if (resumeReminder) {
+    notices.push({
+      key: 'resume',
+      node: (
+        // MUI の Alert は action を渡すと onClose の閉じるボタンを描画しないため
+        // (Alert.js: `action == null && onClose`)、導線は本文中に置いて閉じるボタンを残す。
+        <Alert severity="warning" onClose={() => setResumeReminder(null)} sx={{ borderRadius: 0 }}>
+          {resumeReminder}{' '}
+          <MuiLink
+            component={NextLink}
+            href="/resume"
+            sx={{ fontSize: '0.8rem', fontWeight: 600, color: 'inherit' }}
+          >
+            履歴書を確認する
+          </MuiLink>
+        </Alert>
+      ),
+    })
+  }
+  if (showWhatsNewBanner && whatsNewEntries.length > 0) {
+    notices.push({
+      key: 'whats-new',
+      node: (
+        <Alert
+          severity="info"
+          onClose={dismissWhatsNewBanner}
+          sx={{ borderRadius: 0 }}
+          action={
+            <Box
+              component="a"
+              href="/whats-new"
+              sx={{ fontSize: '0.8rem', fontWeight: 600, color: 'inherit', textDecoration: 'underline', mr: 1, alignSelf: 'center' }}
+            >
+              詳しく見る
+            </Box>
+          }
+        >
+          新着情報: {whatsNewEntries[0].title}
+        </Alert>
+      ),
+    })
   }
 
   return (
@@ -116,80 +237,8 @@ export default function PageContent() {
             </Typography>
           </Toolbar>
         </AppBar>
-        {showWhatsNewBanner && whatsNewEntries.length > 0 && (
-          <Alert
-            severity="info"
-            onClose={dismissWhatsNewBanner}
-            sx={{ borderRadius: 0 }}
-            action={
-              <Box
-                component="a"
-                href="/whats-new"
-                sx={{ fontSize: '0.8rem', fontWeight: 600, color: 'inherit', textDecoration: 'underline', mr: 1, alignSelf: 'center' }}
-              >
-                詳しく見る
-              </Box>
-            }
-          >
-            新着情報: {whatsNewEntries[0].title}
-          </Alert>
-        )}
-        {resumeReminder && (
-          // MUI の Alert は action を渡すと onClose の閉じるボタンを描画しないため
-          // (Alert.js: `action == null && onClose`)、導線は本文中に置いて閉じるボタンを残す。
-          <Alert severity="warning" onClose={() => setResumeReminder(null)} sx={{ borderRadius: 0 }}>
-            {resumeReminder}{' '}
-            <MuiLink
-              component={NextLink}
-              href="/resume"
-              sx={{ fontSize: '0.8rem', fontWeight: 600, color: 'inherit' }}
-            >
-              履歴書を確認する
-            </MuiLink>
-          </Alert>
-        )}
-        {/*
-          案内は最大10件・1件1000文字まで返る(guidance_service.go)。
-          そのまま積むとチャット(この画面の主機能)が画面外へ押し出されるため、
-          バナー全体の高さを抑えてこの中でスクロールさせる。
-        */}
-        {guidances.length > 0 && (
-          <Box sx={{ maxHeight: 220, overflowY: 'auto' }}>
-            {guidances.map((g) => (
-              <Alert
-                key={g.id}
-                severity="info"
-                // 閉じる処理中は無効化する。連打すると同じ案内へ何度もPOSTが飛ぶ。
-                closeText="閉じる"
-                onClose={
-                  !canDismiss(dismissingIds, g.id)
-                    ? undefined
-                    : () => {
-                        setGuidanceError('')
-                        setDismissingIds((prev) => withDismissing(prev, g.id))
-                        dismissGuidance(g.id)
-                          .then(() => setGuidances((prev) => prev.filter((x) => x.id !== g.id)))
-                          .catch(() =>
-                            setGuidanceError('案内を閉じられませんでした。時間をおいて再度お試しください'),
-                          )
-                          .finally(() => setDismissingIds((prev) => withoutDismissing(prev, g.id)))
-                      }
-                }
-                sx={{ borderRadius: 0 }}
-              >
-                {g.message}
-                {g.suggested_industries && g.suggested_industries.length > 0 && (
-                  <>（参考: {g.suggested_industries.join('、')}）</>
-                )}
-              </Alert>
-            ))}
-          </Box>
-        )}
-        {guidanceError && (
-          <Alert severity="error" onClose={() => setGuidanceError('')} sx={{ borderRadius: 0 }}>
-            {guidanceError}
-          </Alert>
-        )}
+        <NextActionsBar />
+        <NoticeStack notices={notices} />
         <div className={styles.chatWrapper}>
           <MuiChat />
         </div>

@@ -35,6 +35,25 @@ type User struct {
 	UpdatedAt                time.Time
 }
 
+// UserRoleStaff は学校職員（教員・キャリア担当）のロール値。
+// UserRoleStudent は既定の学生ロール。職員ロールを剥奪したときの戻り先。
+// models 側と同じ値（GORM非依存のため定数を重複定義）。
+const (
+	UserRoleStudent = "student"
+	UserRoleStaff   = "staff"
+)
+
+// HasStaffRole は職員ロールを持つか。
+func (u *User) HasStaffRole() bool {
+	return u != nil && u.Role == UserRoleStaff
+}
+
+// CanAccessAdminArea は管理エリア（/admin 配下のAPI）へ入れる主体か。
+// 管理者、または職員（is_admin=false の純粋な職員も含む）。
+func (u *User) CanAccessAdminArea() bool {
+	return u != nil && (u.IsAdmin || u.HasStaffRole())
+}
+
 // IsWithdrawn は退会済みかどうか。
 func (u *User) IsWithdrawn() bool {
 	return u != nil && u.WithdrawnAt != nil

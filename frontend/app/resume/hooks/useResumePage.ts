@@ -245,7 +245,7 @@ export function useResumePage() {
 
     if (userId && sessionId) {
       try {
-        const res = await fetch(`/api/user/weight-scores?user_id=${userId}&session_id=${encodeURIComponent(sessionId)}`, {
+        const res = await fetch(`/api/user/weight-scores?session_id=${encodeURIComponent(sessionId)}`, {
           signal: abortController.signal,
         })
         const data = await res.json()
@@ -324,7 +324,7 @@ export function useResumePage() {
             })
             if (userId && sessionId) {
               try {
-                const res = await fetch(`/api/user/weight-scores?user_id=${userId}&session_id=${encodeURIComponent(sessionId)}`, {
+                const res = await fetch(`/api/user/weight-scores?session_id=${encodeURIComponent(sessionId)}`, {
                   signal: abortController.signal,
                 })
                 const scoreData = await res.json()

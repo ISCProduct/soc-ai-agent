@@ -30,6 +30,8 @@ import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import { authService } from '@/lib/auth'
 import { datetimeLocalToISO, formatLocalDateKey, isoToDatetimeLocal } from '@/lib/datetime-local'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
+import { EmptyState } from '@/components/common/EmptyState'
+import { ListSkeleton } from '@/components/common/ListSkeleton'
 
 const STAGE_OPTIONS = [
   { value: '書類選考', label: '書類選考', color: '#9c27b0' },
@@ -99,6 +101,7 @@ export default function PageContent() {
   const [userId, setUserId] = useState<number | null>(null)
   const [events, setEvents] = useState<ScheduleEvent[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
   const [viewYear, setViewYear] = useState(new Date().getFullYear())
   const [viewMonth, setViewMonth] = useState(new Date().getMonth())
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -118,12 +121,14 @@ export default function PageContent() {
   const fetchEvents = useCallback(async () => {
     if (!userId) return
     try {
-      const res = await fetch(`/api/schedule?user_id=${userId}`)
+      const res = await fetch('/api/schedule')
       if (!res.ok) throw new Error('スケジュールの取得に失敗しました')
       const data = await res.json()
       setEvents(Array.isArray(data) ? data : [])
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'スケジュールの取得に失敗しました')
+    } finally {
+      setLoaded(true)
     }
   }, [userId])
 
@@ -223,7 +228,7 @@ export default function PageContent() {
   const today = new Date()
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f5f5f5', p: { xs: 1.5, sm: 3 } }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', p: { xs: 1.5, sm: 3 } }}>
       <Box sx={{ maxWidth: 900, mx: 'auto' }}>
         {/* Header */}
         <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, mb: 3 }}>
@@ -262,11 +267,11 @@ export default function PageContent() {
         <Paper elevation={1} sx={{ borderRadius: 2, overflow: 'hidden', mb: 3 }}>
           {/* Month navigation */}
           <Stack direction="row" alignItems="center" justifyContent="center" sx={{ p: 2, bgcolor: '#fff' }}>
-            <IconButton onClick={handlePrevMonth}><ArrowBackIosIcon fontSize="small" /></IconButton>
+            <IconButton onClick={handlePrevMonth} aria-label="前の月"><ArrowBackIosIcon fontSize="small" /></IconButton>
             <Typography variant="h6" fontWeight={600} sx={{ minWidth: { xs: 120, sm: 160 }, textAlign: 'center' }}>
               {viewYear}年 {viewMonth + 1}月
             </Typography>
-            <IconButton onClick={handleNextMonth}><ArrowForwardIosIcon fontSize="small" /></IconButton>
+            <IconButton onClick={handleNextMonth} aria-label="次の月"><ArrowForwardIosIcon fontSize="small" /></IconButton>
           </Stack>
 
           <Divider />
@@ -403,10 +408,10 @@ export default function PageContent() {
                   )}
                 </Box>
                 <Stack direction="row" sx={{ flexShrink: 0 }}>
-                  <IconButton size="small" onClick={() => openEditDialog(ev)}>
+                  <IconButton size="small" onClick={() => openEditDialog(ev)} aria-label="予定を編集">
                     <EditIcon fontSize="small" />
                   </IconButton>
-                  <IconButton size="small" onClick={() => handleDelete(ev.id)}>
+                  <IconButton size="small" onClick={() => handleDelete(ev.id)} aria-label="予定を削除">
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 </Stack>
@@ -414,13 +419,17 @@ export default function PageContent() {
             </Paper>
           ))}
 
-        {events.filter(ev => {
+        {!loaded ? (
+          <ListSkeleton rows={2} label="予定を読み込み中" />
+        ) : !error && events.filter(ev => {
           const d = new Date(ev.scheduled_at)
           return d.getFullYear() === viewYear && d.getMonth() === viewMonth
         }).length === 0 && (
-          <Typography color="text.secondary" textAlign="center" py={3}>
-            この月のイベントはありません
-          </Typography>
+          <EmptyState
+            title="この月の予定はまだありません"
+            description="面接や締切を登録すると、日付ごとに確認できます。"
+            action={<Button variant="outlined" onClick={() => openCreateDialog()}>予定を追加</Button>}
+          />
         )}
       </Box>
 

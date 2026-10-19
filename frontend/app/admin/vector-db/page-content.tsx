@@ -182,7 +182,7 @@ export default function PageContent() {
   return (
     <Box sx={{ p: 4, maxWidth: 1200, mx: 'auto' }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-        <IconButton component={Link} href="/admin">
+        <IconButton component={Link} href="/admin" aria-label="管理トップへ戻る">
           <ArrowBackIcon />
         </IconButton>
         <Typography variant="h4" component="h1" fontWeight="bold">

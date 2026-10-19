@@ -53,14 +53,31 @@ type adminUserResponse struct {
 	Name        string `json:"name"`
 	IsGuest     bool   `json:"is_guest"`
 	IsAdmin     bool   `json:"is_admin"`
+	IsStaff     bool   `json:"is_staff"`
 	TargetLevel string `json:"target_level"`
 	SchoolName  string `json:"school_name"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 }
 
+func toAdminUserResponse(u *entity.User) adminUserResponse {
+	return adminUserResponse{
+		ID:          u.ID,
+		Email:       u.Email,
+		Name:        u.Name,
+		IsGuest:     u.IsGuest,
+		IsAdmin:     u.IsAdmin,
+		IsStaff:     u.HasStaffRole(),
+		TargetLevel: u.TargetLevel,
+		SchoolName:  u.SchoolName,
+		CreatedAt:   u.CreatedAt.Format(timeLayout()),
+		UpdatedAt:   u.UpdatedAt.Format(timeLayout()),
+	}
+}
+
 type adminUserUpdateRequest struct {
 	IsAdmin     *bool   `json:"is_admin"`
+	IsStaff     *bool   `json:"is_staff"`
 	Name        *string `json:"name"`
 	TargetLevel *string `json:"target_level"`
 	SchoolName  *string `json:"school_name"`
@@ -91,18 +108,8 @@ func (c *AdminUserController) List(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch users")
 	}
 	resp := make([]adminUserResponse, 0, len(users))
-	for _, u := range users {
-		resp = append(resp, adminUserResponse{
-			ID:          u.ID,
-			Email:       u.Email,
-			Name:        u.Name,
-			IsGuest:     u.IsGuest,
-			IsAdmin:     u.IsAdmin,
-			TargetLevel: u.TargetLevel,
-			SchoolName:  u.SchoolName,
-			CreatedAt:   u.CreatedAt.Format(timeLayout()),
-			UpdatedAt:   u.UpdatedAt.Format(timeLayout()),
-		})
+	for i := range users {
+		resp = append(resp, toAdminUserResponse(&users[i]))
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{
 		"users":  resp,
@@ -121,7 +128,8 @@ func (c *AdminUserController) denyIfRestricted(ctx echo.Context, message string)
 	if !ok {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
-	restricted, _, err := c.schools.ResolveAdminAccess(adminUserID)
+	isPlatform := middleware.AdminIsPlatformFromContext(ctx.Request().Context())
+	restricted, _, err := c.schools.ResolveAccess(isPlatform, adminUserID)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
@@ -158,6 +166,19 @@ func (c *AdminUserController) Update(ctx echo.Context) error {
 		}
 		user.IsAdmin = *payload.IsAdmin
 	}
+	if payload.IsStaff != nil {
+		// 職員ロールの付与/剥奪は管理エリアへのアクセス権の変更そのもの。
+		// is_admin と同じく、無制限管理者に限る(担当校を持つ制限adminが自校の生徒を
+		// 職員に昇格させて越権させるのを防ぐ)。
+		if err := c.denyIfRestricted(ctx, "職員ロールの変更は無制限管理者のみ可能です"); err != nil {
+			return err
+		}
+		if *payload.IsStaff {
+			user.Role = entity.UserRoleStaff
+		} else {
+			user.Role = entity.UserRoleStudent
+		}
+	}
 	if payload.Name != nil {
 		user.Name = strings.TrimSpace(*payload.Name)
 	}
@@ -177,20 +198,11 @@ func (c *AdminUserController) Update(ctx echo.Context) error {
 	actor := ctx.Request().Header.Get("X-Admin-Email")
 	c.audit.Record(actor, "user.update", "user", user.ID, map[string]any{
 		"is_admin":     user.IsAdmin,
+		"role":         user.Role,
 		"target_level": user.TargetLevel,
 		"school_name":  user.SchoolName,
 	})
-	return ctx.JSON(http.StatusOK, adminUserResponse{
-		ID:          user.ID,
-		Email:       user.Email,
-		Name:        user.Name,
-		IsGuest:     user.IsGuest,
-		IsAdmin:     user.IsAdmin,
-		TargetLevel: user.TargetLevel,
-		SchoolName:  user.SchoolName,
-		CreatedAt:   user.CreatedAt.Format(timeLayout()),
-		UpdatedAt:   user.UpdatedAt.Format(timeLayout()),
-	})
+	return ctx.JSON(http.StatusOK, toAdminUserResponse(user))
 }
 
 // Delete DELETE /api/admin/users/:id

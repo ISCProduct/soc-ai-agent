@@ -99,7 +99,7 @@ func TestInterviewController_Turn_OmitsCompanyInfoFromResponse(t *testing.T) {
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
 	for key, value := range map[string]string{
-		"history": "[]", "company_name": "Example", "company_reading_resolved": "true",
+		"company_name": "Example", "company_reading_resolved": "true",
 		"company_info": "private company profile", "company_type": "general", "company_id": "42",
 	} {
 		if err := form.WriteField(key, value); err != nil {
@@ -125,11 +125,11 @@ func TestInterviewController_Turn_OmitsCompanyInfoFromResponse(t *testing.T) {
 
 	svc := &mocks.InterviewServiceMock{}
 	svc.On("Turn",
-		mock.Anything, uint(1), uint(10), []byte("audio"), []map[string]string{},
+		mock.Anything, uint(1), uint(10), []byte("audio"),
 		"Example", "", true, "", "private company profile", "general", uint(42),
 		0, 0, 0, 0, 0, 0,
 	).Return(&interview.TurnResult{
-		AIText: "response", CompanyInfo: "private company profile",
+		AIText:                 "response",
 		CompanyReadingResolved: true,
 	}, nil)
 	if err := newInterviewController(svc).Turn(ctx); err != nil {
@@ -137,6 +137,8 @@ func TestInterviewController_Turn_OmitsCompanyInfoFromResponse(t *testing.T) {
 	}
 
 	metadata := readInterviewMetadata(t, rec)
+	// 企業ブリーフは非公開データなので学生へ返さない。TurnResult 自体にも
+	// 持たせていないが、リクエストのフォーム値をそのまま返す改変を止めるために検査する。
 	assert.NotContains(t, metadata, "company_info")
 	assert.Equal(t, true, metadata["company_reading_resolved"])
 	svc.AssertExpectations(t)
@@ -165,7 +167,7 @@ func TestInterviewController_StartTurn_OmitsCompanyInfoFromResponse(t *testing.T
 		"Example", "", "", "private company profile", "general", uint(42),
 		1, 5, 0, 180,
 	).Return(&interview.TurnResult{
-		AIText: "response", CompanyInfo: "private company profile",
+		AIText:                 "response",
 		CompanyReadingResolved: true,
 	}, nil)
 	if err := newInterviewController(svc).StartTurn(ctx); err != nil {
@@ -173,6 +175,8 @@ func TestInterviewController_StartTurn_OmitsCompanyInfoFromResponse(t *testing.T
 	}
 
 	metadata := readInterviewMetadata(t, rec)
+	// 企業ブリーフは非公開データなので学生へ返さない。TurnResult 自体にも
+	// 持たせていないが、リクエストのフォーム値をそのまま返す改変を止めるために検査する。
 	assert.NotContains(t, metadata, "company_info")
 	assert.Equal(t, true, metadata["company_reading_resolved"])
 	svc.AssertExpectations(t)

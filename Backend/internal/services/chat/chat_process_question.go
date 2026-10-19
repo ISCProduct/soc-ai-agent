@@ -48,15 +48,22 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	} else {
 		log.Printf("[ProcessChat] Processing as text answer\n")
 		var err error
-		isQualityAnswer, err = s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, resolved.Text, jobCategoryID)
+		isQualityAnswer, err = s.analyzeAndUpdateWeights(ctx, req.UserID, req.SessionID, resolved.Text, jobCategoryID, history)
 		if err != nil {
 			log.Printf("Warning: failed to update weights: %v\n", err)
 		}
 	}
 
-	// 品質回答のみ valid_answers をインクリメントして進捗を進める
-	if err := s.updatePhaseProgress(currentPhase, isQualityAnswer); err != nil {
-		log.Printf("Warning: failed to update phase progress: %v\n", err)
+	// 品質回答のみ valid_answers をインクリメントして進捗を進める。
+	// 職種選択に答えたこの回答は resolveJobCategoryForChat 内の
+	// completeJobAnalysisPhase で job_analysis を完了済みにする分として既に
+	// 消費されている。ここで currentPhase（次のフェーズ）にも数えると、
+	// 同じ1回の回答が job_analysis 完了分＋次フェーズの1問分で二重に
+	// カウントされ、進捗表示が実際の回答数より多く見える。
+	if !jobJustResolved {
+		if err := s.updatePhaseProgress(currentPhase, isQualityAnswer); err != nil {
+			log.Printf("Warning: failed to update phase progress: %v\n", err)
+		}
 	}
 
 	// 4. 既に聞いた質問を全て収集（重複防止を徹底）
@@ -171,7 +178,9 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 	}
 	if currentPhaseName != "" && isTextBasedQuestion(aiResponse) && !shouldForceTextQuestion(recentHistory, currentPhase) {
 		if currentPhaseName == "job_analysis" || currentPhaseName == "interest_analysis" || currentPhaseName == "aptitude_analysis" || currentPhaseName == "future_analysis" {
-			aiResponse = buildChoiceFallback(aiResponse, currentPhaseName)
+			// 選択肢はフェーズではなく評価軸で決める。フェーズは3〜4問続くので、
+			// フェーズ単位にすると質問が変わっても同じ選択肢が並び続ける。
+			aiResponse = buildChoiceFallback(aiResponse, targetCategory)
 		}
 	}
 

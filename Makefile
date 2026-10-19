@@ -1,5 +1,5 @@
 # SOC AI Agent — ローカル開発用ショートカット (#589)
-.PHONY: help rag-up rag-down rag-smoke rag-rebuild core-up prod-status prod-logs prod-logs-follow prod-logs-errors
+.PHONY: help rag-up rag-down rag-smoke rag-rebuild core-up api-docs api-docs-down api-catalog prod-status prod-logs prod-logs-follow prod-logs-errors
 
 help:
 	@echo "Targets:"
@@ -8,6 +8,11 @@ help:
 	@echo "  make rag-smoke    # /health vector_store + chroma heartbeat"
 	@echo "  make rag-rebuild  # force-recreate rag-review image"
 	@echo "  make rag-down     # stop chroma + rag-review"
+	@echo ""
+	@echo "API ドキュメント:"
+	@echo "  make api-docs      # Swagger UI を起動 (http://localhost:8081)"
+	@echo "  make api-docs-down # Swagger UI を停止"
+	@echo "  make api-catalog   # routes.txt を実装に合わせて更新し網羅率を出す"
 	@echo ""
 	@echo "本番(AWS ECS)のログ:"
 	@echo "  make prod-status        # サービス稼働状態 + ログ最終書き込み時刻"
@@ -18,6 +23,18 @@ help:
 core-up:
 	docker compose up -d --build db app frontend
 	@echo "Migrations run automatically via app entrypoint (see Backend/scripts/docker-entrypoint.dev.sh)"
+
+api-docs:
+	docker compose --profile docs up -d swagger-ui
+	@echo "Swagger UI: http://localhost:$${SWAGGER_UI_PORT:-8081}"
+
+api-docs-down:
+	docker compose --profile docs down swagger-ui
+
+# routes.txt は実装から生成する。openapi.yaml は手で書くので触らない。
+api-catalog:
+	cd Backend && go test ./internal/routes/ -run TestRouteCatalog -update
+	cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths 2>&1 | grep -E '網羅率|FAIL' || true
 
 rag-up:
 	./scripts/dev-rag-up.sh

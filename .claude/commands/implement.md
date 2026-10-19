@@ -1,3 +1,8 @@
+---
+description: Issue または PR のレビュー指摘を読んで実装する
+argument-hint: <Issue番号 または PR番号>
+---
+
 ### 2. 実装の開始・修正 (`/implement`)
 
 指定されたIssueまたはPRレビューの内容を読み取り、コードの実装・修正を提案および実行します。
@@ -8,8 +13,8 @@
 **Execution Workflow:**
 
 1.  **情報の取得**
-    * 引数がIssueの場合: `gh issue view {{number}}` を実行。
-    * 引数がPR（レビュー対応）の場合: `gh pr view {{number}} --comments` を実行し、フィードバック内容を解析する。
+    * 引数がIssueの場合: `gh issue view $1` を実行。
+    * 引数がPR（レビュー対応）の場合: `gh pr view $1 --comments` を実行し、フィードバック内容を解析する。
 2.  **現状の把握と計画**
     * 既存コードや指摘箇所から修正が必要なファイルを特定する。
     * 実装前に「修正方針（レビュー指摘への回答を含む）」をユーザーに提示する。
@@ -17,8 +22,8 @@
     * 解析した要件または指摘に基づき、対象ファイルに対してコードの追加・修正を行う。
 4.  **変更の確定（コミット）**
     * 実装完了後、以下の形式でステージングおよびコミットを実行する。
-    * **新規実装の場合:** `git commit -m "feat: #{{number}} {{title}}"`
-    * **レビュー修正の場合:** `git commit -m "fix: address review comments for #{{number}}"`
+    * **新規実装の場合:** `git commit -m "feat: #$1 <Issueタイトル>"`
+    * **レビュー修正の場合:** `git commit -m "fix: address review comments for #$1"`
 
 ---
 

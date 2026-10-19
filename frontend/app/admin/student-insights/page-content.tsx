@@ -1,13 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import {
   Alert,
   Button,
   Checkbox,
   Chip,
+  Collapse,
   FormControlLabel,
-  CircularProgress,
   InputAdornment,
   Paper,
   Stack,
@@ -26,11 +26,16 @@ import { PageContainer, ADMIN_PAGE_WIDTH } from '@/components/admin/PageContaine
 import { AdminTableWrapper } from '@/components/admin/AdminTableWrapper'
 import { SchoolFilterSelect } from '@/components/admin/SchoolFilterSelect'
 import { ScoreBar } from '@/components/admin/ScoreBar'
+import { EmptyState } from '@/components/common/EmptyState'
+import { TableSkeletonRows } from '@/components/common/ListSkeleton'
 import { getAdminSchoolAccess } from '@/lib/admin/school-access'
 import {
   displayCategories,
   displayIndustries,
   displayTypeLabel,
+  INACTIVE_DAYS,
+  isInactive,
+  lastActivityLabel,
   lowMatchApplications,
   resumeAttentionLabel,
   NO_DATA_LABEL,
@@ -40,6 +45,7 @@ import { LOW_MATCH_THRESHOLD } from '@/lib/low-match'
 import { sendTeacherGuidance } from '@/lib/teacher-guidance'
 
 const guidanceKey = (userId: number, kind: 'low_match' | 'resume') => `${userId}:${kind}`
+const COLUMNS = 6
 
 export default function PageContent() {
   const [adminEmail, setAdminEmail] = useState('')
@@ -50,7 +56,10 @@ export default function PageContent() {
   const [query, setQuery] = useState('')
   const [lowMatchOnly, setLowMatchOnly] = useState(false)
   const [resumeNeedsAttentionOnly, setResumeNeedsAttentionOnly] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [inactiveOnly, setInactiveOnly] = useState(false)
+  const [expanded, setExpanded] = useState<number | null>(null)
+  // 初回取得前は Empty ではなく Skeleton を出す
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   // 送信中・送信済は「生徒×案内種別」単位で持つ（同時送信や2種類目の案内を妨げない）
   const [sendingKeys, setSendingKeys] = useState<Set<string>>(() => new Set())
@@ -61,10 +70,16 @@ export default function PageContent() {
 
   useEffect(() => {
     const user = authService.getStoredUser()
-    if (!user?.is_admin) {
+    if (!user?.is_admin && !user?.is_staff) {
       window.location.href = '/'
       return
     }
+    // 教員入口の「対応が必要な学生」から ?inactive_days=14 で来たら絞り込んだ状態で開く（#1573）。
+    // 取得は adminEmail が入るまで走らないので、同じ描画で両方を確定させる。
+    const params = new URLSearchParams(window.location.search)
+    setInactiveOnly(params.has('inactive_days'))
+    setLowMatchOnly(params.get('low_match_only') === 'true')
+    setResumeNeedsAttentionOnly(params.get('resume_needs_attention_only') === 'true')
     setAdminEmail(user.email)
   }, [])
 
@@ -95,6 +110,7 @@ export default function PageContent() {
         ...(schoolId !== undefined ? { school_id: String(schoolId) } : {}),
         ...(lowMatchOnly ? { low_match_only: 'true' } : {}),
         ...(resumeNeedsAttentionOnly ? { resume_needs_attention_only: 'true' } : {}),
+        ...(inactiveOnly ? { inactive_days: String(INACTIVE_DAYS) } : {}),
       })
       const res = await fetch(`/api/admin/teacher/students/tendency-analysis?${params}`, {
         headers: authService.getAdminFetchHeaders(),
@@ -112,7 +128,18 @@ export default function PageContent() {
     } finally {
       if (!isCancelled?.()) setLoading(false)
     }
-  }, [adminEmail, schoolRequired, schoolId, page, rowsPerPage, query, lowMatchOnly, resumeNeedsAttentionOnly])
+  }, [adminEmail, schoolRequired, schoolId, page, rowsPerPage, query, lowMatchOnly, resumeNeedsAttentionOnly, inactiveOnly])
+
+  // 未活動の判定は描画のたびに同じ基準時刻で行う
+  const [now] = useState(() => new Date())
+  const filtered = Boolean(query) || lowMatchOnly || resumeNeedsAttentionOnly || inactiveOnly
+  const clearFilters = () => {
+    setQuery('')
+    setLowMatchOnly(false)
+    setResumeNeedsAttentionOnly(false)
+    setInactiveOnly(false)
+    setPage(0)
+  }
 
   // 検索入力のたびに投げると古いレスポンスが新しい結果を上書きするため、デバウンス+キャンセルする
   useEffect(() => {
@@ -164,13 +191,14 @@ export default function PageContent() {
         </Alert>
       )}
 
-      <Stack direction="row" spacing={2} mb={2}>
+      {/* タブレット幅以下では折り返す（UI監査 R4 / #1573） */}
+      <Stack direction="row" useFlexGap spacing={2} mb={2} sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
         <TextField
           placeholder="氏名・メール・学校名で検索"
           value={query}
           onChange={(e) => { setQuery(e.target.value); setPage(0) }}
           size="small"
-          sx={{ flex: 1 }}
+          sx={{ flex: '1 1 240px' }}
           InputProps={{
             startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>,
           }}
@@ -180,12 +208,23 @@ export default function PageContent() {
           control={
             <Checkbox
               size="small"
+              checked={inactiveOnly}
+              onChange={(e) => { setInactiveOnly(e.target.checked); setPage(0) }}
+            />
+          }
+          label={`最近${INACTIVE_DAYS}日間、活動がない生徒のみ`}
+          slotProps={{ typography: { variant: 'body2' } }}
+        />
+        <FormControlLabel
+          control={
+            <Checkbox
+              size="small"
               checked={lowMatchOnly}
               onChange={(e) => { setLowMatchOnly(e.target.checked); setPage(0) }}
             />
           }
           label={`マッチ度${LOW_MATCH_THRESHOLD}未満の応募がある生徒のみ`}
-          slotProps={{ typography: { variant: 'body2', noWrap: true } }}
+          slotProps={{ typography: { variant: 'body2' } }}
         />
         <FormControlLabel
           control={
@@ -196,35 +235,40 @@ export default function PageContent() {
             />
           }
           label="履歴書要対応の生徒のみ"
-          slotProps={{ typography: { variant: 'body2', noWrap: true } }}
+          slotProps={{ typography: { variant: 'body2' } }}
         />
       </Stack>
 
       <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
         <AdminTableWrapper>
           <TableHead>
-            <TableRow sx={{ bgcolor: '#f5f5f5' }}>
+            <TableRow sx={{ bgcolor: 'action.hover' }}>
               <TableCell>氏名</TableCell>
-              <TableCell>メール</TableCell>
+              <TableCell>最終活動</TableCell>
               <TableCell>タイプ</TableCell>
-              <TableCell>上位カテゴリ</TableCell>
-              <TableCell>向いている業界 TOP3</TableCell>
-              <TableCell>要フォローの応募</TableCell>
-              <TableCell>履歴書</TableCell>
-              <TableCell>案内</TableCell>
+              <TableCell>気になる点</TableCell>
+              <TableCell>学生への案内</TableCell>
+              <TableCell>詳細</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {loading ? (
-              <TableRow>
-                <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
-                  <CircularProgress size={24} />
-                </TableCell>
-              </TableRow>
+              <TableSkeletonRows rows={5} columns={COLUMNS} label="生徒の一覧を読み込み中" />
             ) : students.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} align="center" sx={{ py: 4, color: 'text.secondary' }}>
-                  生徒が見つかりません
+                <TableCell colSpan={COLUMNS}>
+                  {error ? null : filtered ? (
+                    <EmptyState
+                      title="条件に合う生徒はいません"
+                      description="絞り込みを外すと、担当の生徒全員を表示します。"
+                      action={<Button variant="outlined" onClick={clearFilters}>絞り込みを外す</Button>}
+                    />
+                  ) : (
+                    <EmptyState
+                      title="担当の生徒がまだいません"
+                      description="生徒が学校のアカウントで登録すると、ここに並びます。"
+                    />
+                  )}
                 </TableCell>
               </TableRow>
             ) : students.map((s) => {
@@ -234,108 +278,124 @@ export default function PageContent() {
               const noData = typeLabel === NO_DATA_LABEL
               const lowMatches = lowMatchApplications(s)
               const resumeLabel = resumeAttentionLabel(s)
+              const inactive = isInactive(s, now)
               const canGuideLowMatch = lowMatches.length > 0
               const canGuideResume = Boolean(resumeLabel)
               const lowMatchKey = guidanceKey(s.user_id, 'low_match')
               const resumeKey = guidanceKey(s.user_id, 'resume')
               const lowMatchSent = sentKeys.has(lowMatchKey)
               const resumeSent = sentKeys.has(resumeKey)
+              const open = expanded === s.user_id
+              const detailId = `student-detail-${s.user_id}`
               return (
-                <TableRow key={s.user_id} hover>
-                  <TableCell>
-                    <Typography fontWeight={500}>{s.name || '—'}</Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" color="text.secondary">{s.email}</Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={typeLabel}
-                      size="small"
-                      variant={noData ? 'outlined' : 'filled'}
-                      color={noData ? 'default' : 'primary'}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    {categories.length === 0 ? (
-                      <Typography variant="body2" color="text.disabled">—</Typography>
-                    ) : (
-                      <Stack spacing={0.75} sx={{ minWidth: 170 }}>
-                        {categories.map((c) => (
-                          <ScoreBar key={c.category} label={c.category} score={c.score} />
-                        ))}
-                      </Stack>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {industries.length === 0 ? (
-                      <Typography variant="body2" color="text.disabled">—</Typography>
-                    ) : (
-                      <Stack spacing={0.75} sx={{ minWidth: 170 }}>
-                        {industries.map((i) => (
-                          <ScoreBar
-                            key={i.industry_id}
-                            label={i.industry_name}
-                            score={i.score}
-                            color="secondary.main"
-                          />
-                        ))}
-                      </Stack>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {lowMatches.length === 0 ? (
-                      <Typography variant="body2" color="text.disabled">—</Typography>
-                    ) : (
-                      <Stack spacing={0.5} sx={{ minWidth: 180 }}>
-                        {lowMatches.map((a, i) => (
-                          <Chip
-                            key={`${a.company_name}-${i}`}
-                            label={`${a.company_name}（${Math.round(a.match_score)}）`}
-                            size="small"
-                            color="warning"
-                            variant="outlined"
-                          />
-                        ))}
-                      </Stack>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {resumeLabel ? (
-                      <Chip label={resumeLabel} size="small" color="warning" variant="outlined" />
-                    ) : (
-                      <Typography variant="body2" color="text.disabled">—</Typography>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Stack spacing={0.5} sx={{ minWidth: 120 }}>
-                      {canGuideLowMatch && (
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          disabled={sendingKeys.has(lowMatchKey) || lowMatchSent}
-                          onClick={() => sendGuidance(s, 'low_match')}
-                        >
-                          {lowMatchSent ? '送信済' : '軌道修正'}
-                        </Button>
+                <Fragment key={s.user_id}>
+                  <TableRow hover>
+                    <TableCell>
+                      <Typography fontWeight={500}>{s.name || '—'}</Typography>
+                      <Typography variant="body2" color="text.secondary">{s.email}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={inactive ? 700 : 400}>
+                        {lastActivityLabel(s, now)}
+                      </Typography>
+                      {inactive && (
+                        <Typography variant="caption" color="text.secondary">
+                          {`最近${INACTIVE_DAYS}日間、活動がありません`}
+                        </Typography>
                       )}
-                      {canGuideResume && (
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color="warning"
-                          disabled={sendingKeys.has(resumeKey) || resumeSent}
-                          onClick={() => sendGuidance(s, 'resume')}
-                        >
-                          {resumeSent ? '送信済' : '履歴書案内'}
-                        </Button>
-                      )}
-                      {!canGuideLowMatch && !canGuideResume && (
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={typeLabel}
+                        size="small"
+                        variant={noData ? 'outlined' : 'filled'}
+                        color={noData ? 'default' : 'primary'}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      {lowMatches.length === 0 && !resumeLabel ? (
                         <Typography variant="body2" color="text.disabled">—</Typography>
+                      ) : (
+                        <Stack spacing={0.5} sx={{ minWidth: 180 }}>
+                          {lowMatches.map((a, i) => (
+                            <Chip
+                              key={`${a.company_name}-${i}`}
+                              label={`低マッチの応募: ${a.company_name}（${Math.round(a.match_score)}）`}
+                              size="small"
+                              color="warning"
+                              variant="outlined"
+                            />
+                          ))}
+                          {resumeLabel && (
+                            <Chip label={`履歴書: ${resumeLabel}`} size="small" color="warning" variant="outlined" />
+                          )}
+                        </Stack>
                       )}
-                    </Stack>
-                  </TableCell>
-                </TableRow>
+                    </TableCell>
+                    <TableCell>
+                      <Stack spacing={0.5} sx={{ minWidth: 180 }}>
+                        {canGuideLowMatch && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            disabled={sendingKeys.has(lowMatchKey) || lowMatchSent}
+                            onClick={() => sendGuidance(s, 'low_match')}
+                          >
+                            {lowMatchSent ? '送信済（学生のホームに表示中）' : '応募先の見直しを案内する'}
+                          </Button>
+                        )}
+                        {canGuideResume && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color="warning"
+                            disabled={sendingKeys.has(resumeKey) || resumeSent}
+                            onClick={() => sendGuidance(s, 'resume')}
+                          >
+                            {resumeSent ? '送信済（学生のホームに表示中）' : '履歴書の見直しを案内する'}
+                          </Button>
+                        )}
+                        {!canGuideLowMatch && !canGuideResume && (
+                          <Typography variant="body2" color="text.disabled">—</Typography>
+                        )}
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="small"
+                        aria-expanded={open}
+                        aria-controls={detailId}
+                        onClick={() => setExpanded(open ? null : s.user_id)}
+                      >
+                        {open ? '閉じる' : 'スコアを見る'}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell colSpan={COLUMNS} sx={{ py: 0, borderBottom: open ? undefined : 'none' }}>
+                      <Collapse in={open} unmountOnExit>
+                        <Stack id={detailId} direction={{ xs: 'column', md: 'row' }} spacing={4} sx={{ py: 2 }}>
+                          <Stack spacing={0.75} sx={{ minWidth: 220 }}>
+                            <Typography variant="subtitle2">上位カテゴリ</Typography>
+                            {categories.length === 0 ? (
+                              <Typography variant="body2" color="text.secondary">まだ計測されていません</Typography>
+                            ) : categories.map((c) => (
+                              <ScoreBar key={c.category} label={c.category} score={c.score} />
+                            ))}
+                          </Stack>
+                          <Stack spacing={0.75} sx={{ minWidth: 220 }}>
+                            <Typography variant="subtitle2">向いている業界 TOP3</Typography>
+                            {industries.length === 0 ? (
+                              <Typography variant="body2" color="text.secondary">まだ計測されていません</Typography>
+                            ) : industries.map((i) => (
+                              <ScoreBar key={i.industry_id} label={i.industry_name} score={i.score} color="secondary.main" />
+                            ))}
+                          </Stack>
+                        </Stack>
+                      </Collapse>
+                    </TableCell>
+                  </TableRow>
+                </Fragment>
               )
             })}
           </TableBody>

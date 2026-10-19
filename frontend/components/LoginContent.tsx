@@ -38,7 +38,8 @@ export function LoginContent() {
       signal: controller.signal,
     })
       .then((res) => {
-        if (res.ok) router.replace('/')
+        // 職員（教員・キャリア担当）はチャットではなく教員指導画面(/admin)へ送る。
+        if (res.ok) router.replace(authService.getStoredUser()?.is_staff ? '/admin' : '/')
         // 401 のときは送らずにこの画面へ留まる。それだけでループは止まる。
         //
         // ここで authService.logout() を呼んでストレージを掃除したくなるが、
@@ -57,8 +58,9 @@ export function LoginContent() {
     return () => controller.abort()
   }, [router, wantRegister])
 
-  const handleAuthSuccess = (_authResponse: AuthResponse) => {
-    router.push('/')
+  const handleAuthSuccess = (authResponse: AuthResponse) => {
+    // 職員はログイン直後から教員指導画面(/admin)へ。学生・企業はこれまで通り/へ。
+    router.push(authResponse.is_staff ? '/admin' : '/')
   }
 
   return <LoginPage onAuthSuccess={handleAuthSuccess} initialTab={wantRegister ? 1 : 0} />

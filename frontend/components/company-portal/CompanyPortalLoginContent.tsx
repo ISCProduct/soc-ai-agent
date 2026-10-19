@@ -101,6 +101,12 @@ export function CompanyPortalLoginContent() {
             </Link>
           </Box>
 
+          <Box sx={{ textAlign: 'center', mt: 1.5 }}>
+            <Link href="/company-portal/register" className="auth-link">
+              アカウントを作成
+            </Link>
+          </Box>
+
           <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center' }}>
             <StudentThemeToggle />
           </Box>

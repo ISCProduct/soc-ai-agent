@@ -84,6 +84,8 @@ export function useInterviewSession({
   const [emailError, setEmailError] = useState('')
   const [aiLevel, setAiLevel] = useState(0)
   const [aiSpeaking, _setAiSpeaking] = useState(false)
+  /** 学生の発話に区切りが来るたびに増える。面接官アバターの相槌の合図（#1646）。 */
+  const [studentPauseCount, setStudentPauseCount] = useState(0)
   const [avatarGender, setAvatarGender] = useState<'male' | 'female'>('male')
   const [captionsVisible, setCaptionsVisible] = useState(true)
   const [handsFreeMode, setHandsFreeMode] = useState(false)
@@ -170,6 +172,7 @@ export function useInterviewSession({
     startRecording: () => startRecordingRef.current(),
     stopRecording: () => stopRecordingRef.current(),
     discardRecording: () => discardRecordingRef.current(),
+    onPause: () => setStudentPauseCount((n) => n + 1),
   })
 
   useEffect(() => { userRef.current = user }, [user])
@@ -515,7 +518,7 @@ export function useInterviewSession({
 
     const scoreSessionId = resolveScoreSessionId(currentUser.user_id)
     try {
-      const res = await fetch(`/api/user/weight-scores?user_id=${currentUser.user_id}&session_id=${encodeURIComponent(scoreSessionId)}`)
+      const res = await fetch(`/api/user/weight-scores?session_id=${encodeURIComponent(scoreSessionId)}`)
       const data = await res.json()
       setScoresBefore(data.weight_scores ?? null)
     } catch {
@@ -594,7 +597,7 @@ export function useInterviewSession({
   const loadScoresAfter = async (userId: number) => {
     const scoreSessionId = resolveScoreSessionId(userId)
     try {
-      const res = await fetch(`/api/user/weight-scores?user_id=${userId}&session_id=${encodeURIComponent(scoreSessionId)}`)
+      const res = await fetch(`/api/user/weight-scores?session_id=${encodeURIComponent(scoreSessionId)}`)
       const data = await res.json()
       setScoresAfter(data.weight_scores ?? null)
     } catch { /* ignore */ }
@@ -753,7 +756,6 @@ export function useInterviewSession({
     const formData = new FormData()
     formData.append('audio', audioBlob, `audio.${ext}`)
     formData.append('user_id', String(user.user_id))
-    formData.append('history', JSON.stringify(historyRef.current))
     formData.append('turn_count', String(Math.floor(historyRef.current.length / 2) + 1))
     formData.append('remaining_seconds', String(remainingSeconds))
     formData.append('question_index', String(currentQuestionIndex))
@@ -771,6 +773,9 @@ export function useInterviewSession({
     formData.append('company_id', String(interviewCompany?.id || 0))
     const companyContextGeneration = companyContextGenerationRef.current
     const receive = async (): Promise<Blob> => {
+      // Backend は保存済みの発話から履歴を組み直す（#1636）。前ターンの保存が終わる前に送ると
+      // 直前のやり取りが履歴から抜けて、面接官が同じ質問を繰り返す。チェーンは必ず解決する。
+      await utteranceSaveChainRef.current
       await authService.ensureFreshUserToken()
       const { meta, audio } = await fetchAndReadWithTimeout(`${BACKEND_URL}/api/interviews/${session.id}/turn`, {
         method: 'POST',
@@ -853,6 +858,7 @@ export function useInterviewSession({
     emailError,
     aiLevel,
     aiSpeaking,
+    studentPauseCount,
     avatarGender,
     captionsVisible,
     setCaptionsVisible,

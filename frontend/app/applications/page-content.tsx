@@ -25,6 +25,7 @@ import { authService } from '@/lib/auth'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
 import { fetchWithTimeout } from '@/lib/fetch-timeout'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
+import { ABOVE_BOTTOM_NAV_SX } from '@/lib/sidebar-nav'
 import {
   STATUS_COLORS,
   STATUS_LABELS,
@@ -32,6 +33,8 @@ import {
   nextActionLabel,
   userNextStatuses,
 } from '@/lib/application-status'
+import { EmptyState } from '@/components/common/EmptyState'
+import { ListSkeleton } from '@/components/common/ListSkeleton'
 
 interface Application {
   id: number
@@ -130,18 +133,10 @@ function ApplicationsContent() {
     }
   }
 
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 8 }}>
-        <CircularProgress />
-      </Box>
-    )
-  }
-
   return (
     <Box sx={{ maxWidth: 800, mx: 'auto', p: { xs: 2, sm: 3 } }}>
       <Stack direction="row" alignItems="center" spacing={1} mb={3}>
-        <IconButton onClick={() => router.back()}>
+        <IconButton onClick={() => router.back()} aria-label="前の画面へ戻る">
           <ArrowBack />
         </IconButton>
         <Typography variant="h5" component="h1" fontWeight="bold">
@@ -149,7 +144,9 @@ function ApplicationsContent() {
         </Typography>
       </Stack>
 
-      {loadError ? (
+      {loading ? (
+        <ListSkeleton rows={3} label="応募を読み込み中" />
+      ) : loadError ? (
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <Alert severity="error" sx={{ mb: 2 }}>{loadError}</Alert>
           <Button variant="contained" onClick={() => void loadApplications()}>
@@ -157,11 +154,16 @@ function ApplicationsContent() {
           </Button>
         </Paper>
       ) : applications.length === 0 ? (
-        <Paper sx={{ p: 4, textAlign: 'center' }}>
-          <Typography color="text.secondary">応募した企業はまだありません</Typography>
-          <Button variant="contained" sx={{ mt: 2 }} onClick={() => router.push(getResultsPathOrChat())}>
-            マッチング結果に戻る
-          </Button>
+        <Paper>
+          <EmptyState
+            title="まだ応募した企業はありません"
+            description="マッチング結果から気になる企業を選び、応募すると選考の進み具合をここで管理できます。"
+            action={
+              <Button variant="contained" onClick={() => router.push(getResultsPathOrChat())}>
+                おすすめ企業を見る
+              </Button>
+            }
+          />
         </Paper>
       ) : (
         <Stack spacing={2}>
@@ -256,6 +258,7 @@ function ApplicationsContent() {
         autoHideDuration={4000}
         onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        sx={ABOVE_BOTTOM_NAV_SX}
       >
         <Alert severity={snackbar.severity} onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}>
           {snackbar.message}

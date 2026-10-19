@@ -54,6 +54,7 @@ type fakePortalApps struct {
 	total           int64
 
 	pending int64
+	counts  map[string]int64
 
 	updatedID        uint
 	updatedCompanyID uint
@@ -68,6 +69,14 @@ func (f *fakePortalApps) ListForCompanyPortal(companyID uint, status string, lim
 func (f *fakePortalApps) CountPendingForCompanyPortal(companyID uint) (int64, error) {
 	f.listedCompanyID = companyID
 	return f.pending, nil
+}
+
+func (f *fakePortalApps) CountStatusesForCompanyPortal(companyID uint) (map[string]int64, error) {
+	f.listedCompanyID = companyID
+	if f.counts == nil {
+		return map[string]int64{}, nil
+	}
+	return f.counts, nil
 }
 
 func (f *fakePortalApps) UpdateStatusForCompanyPortal(applicationID, companyID uint, status string, notes *string) (*entity.UserApplicationStatus, error) {
@@ -150,10 +159,13 @@ func TestCompanyPortalApplication_Dashboard_0件でもエラーにならない(t
 	if got.NewCandidateWindowDays != newCandidateWindowDays {
 		t.Errorf("集計期間が返っていない: %d", got.NewCandidateWindowDays)
 	}
+	if got.StatusCounts == nil {
+		t.Fatal("status_counts が null。段階が0件でも空オブジェクトを返す")
+	}
 }
 
 func TestCompanyPortalApplication_Dashboard_件数を返す(t *testing.T) {
-	apps := &fakePortalApps{pending: 3}
+	apps := &fakePortalApps{pending: 3, counts: map[string]int64{"applied": 2, "offered": 1}}
 	students := &fakePortalStudents{n: 7}
 	ctrl := NewCompanyPortalApplicationController(apps, &fakePortalJobs{n: 2}, students)
 
@@ -166,6 +178,9 @@ func TestCompanyPortalApplication_Dashboard_件数を返す(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &got)
 	if got.PendingApplications != 3 || got.PublishedJobs != 2 || got.NewCandidates != 7 {
 		t.Errorf("件数が違う: %+v", got)
+	}
+	if got.StatusCounts["applied"] != 2 || got.StatusCounts["offered"] != 1 {
+		t.Errorf("段階別の件数が違う: %+v", got.StatusCounts)
 	}
 	// JWT由来の company_id で集計していること
 	if apps.listedCompanyID != 5 {

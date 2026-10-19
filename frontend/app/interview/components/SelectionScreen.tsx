@@ -22,11 +22,16 @@ import PsychologyIcon from '@mui/icons-material/Psychology'
 import LightbulbIcon from '@mui/icons-material/Lightbulb'
 import type { User } from '@/lib/auth'
 import { interviewLimits } from '@/lib/interview'
-import { PRIMARY, BG_LIGHT, POSITIONS } from '../constants'
+import { POSITIONS } from '../constants'
 import type { InterviewCompany, Position } from '../types'
 import { resolveCompanyByName, mergeResolvedCompany } from '../utils'
+import { UI } from '@/lib/design/tokens'
 
 const COMPANY_RESOLVE_DEBOUNCE_MS = 400
+// ヘッダー帯と本文の列幅。#1761のCONTENT_MAX_WIDTH(1200)とは別に、
+// この画面は本文が896で設計されているため専用の定数にする（#1784 レビュー指摘）。
+// 一方だけ変更すると今回直した列ずれが再発するので、両箇所でこの定数を使う。
+const SELECTION_CONTENT_MAX_WIDTH = 896
 
 function activateOnEnterOrSpace(event: KeyboardEvent, action: () => void) {
   if (event.key === 'Enter' || event.key === ' ') {
@@ -147,44 +152,49 @@ export default function SelectionScreen({
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: BG_LIGHT }}>
-      {/* Header */}
-      <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: { xs: 2, sm: 3, lg: 10 }, py: 2, bgcolor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0, flex: 1 }}>
-          <Box sx={{ color: PRIMARY, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-            <PsychologyIcon sx={{ fontSize: 32 }} />
+    <Box sx={{ minHeight: '100vh', bgcolor: UI.paper }}>
+      {/* Header。
+          帯（背景と区切り線）は全幅のまま、中身は本文の列幅(maxWidth:896)に
+          揃えて中央寄せする。帯の中身を直接 flex で左右に広げていたため、
+          本文側が中央寄せの列に収まる広い画面ほど左端がずれていた(#1784)。 */}
+      <Box component="header" sx={{ px: { xs: 2, sm: 3, lg: 10 }, py: 2, bgcolor: UI.field, borderBottom: `1px solid ${UI.ruleSoft}` }}>
+        <Box data-testid="selection-header-row" sx={{ maxWidth: SELECTION_CONTENT_MAX_WIDTH, mx: 'auto', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0, flex: 1 }}>
+            <Box sx={{ color: UI.mark, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+              <PsychologyIcon sx={{ fontSize: 32 }} />
+            </Box>
+            {/* 13文字あるので、縮み代(minWidth:0)を与えないと右の戻る/アバターを画面外へ押し出す。 */}
+            <Typography noWrap sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: UI.ink }}>IT業界キャリアエージェント</Typography>
           </Box>
-          {/* 13文字あるので、縮み代(minWidth:0)を与えないと右の戻る/アバターを画面外へ押し出す。 */}
-          <Typography noWrap sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: '#0f172a' }}>IT業界キャリアエージェント</Typography>
-        </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
-          <IconButton sx={{ bgcolor: '#f1f5f9', color: '#475569' }} size="small" onClick={onBack}>
-            <ArrowBackIcon fontSize="small" />
-          </IconButton>
-          <Box sx={{ width: 40, height: 40, borderRadius: '50%', bgcolor: `${PRIMARY}30`, border: `1px solid ${PRIMARY}50`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Typography sx={{ fontWeight: 700, color: PRIMARY, fontSize: 14 }}>
-              {(user.name || 'U').charAt(0).toUpperCase()}
-            </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
+            <IconButton sx={{ bgcolor: UI.tint, color: UI.inkSoft }} size="small" onClick={onBack} aria-label="前の画面へ戻る">
+              <ArrowBackIcon fontSize="small" />
+            </IconButton>
+            <Box sx={{ width: 40, height: 40, borderRadius: '50%', bgcolor: `color-mix(in srgb, ${UI.mark} 19%, transparent)`, border: `1px solid color-mix(in srgb, ${UI.mark} 31%, transparent)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Typography sx={{ fontWeight: 700, color: UI.mark, fontSize: 14 }}>
+                {(user.name || 'U').charAt(0).toUpperCase()}
+              </Typography>
+            </Box>
           </Box>
         </Box>
       </Box>
 
       {/* Main */}
       <Box component="main" sx={{ display: 'flex', justifyContent: 'center', py: { xs: 3, sm: 5 }, px: { xs: 2, sm: 3, lg: 10 } }}>
-        <Box sx={{ maxWidth: 896, width: '100%', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <Box sx={{ maxWidth: SELECTION_CONTENT_MAX_WIDTH, width: '100%', display: 'flex', flexDirection: 'column', gap: 4 }}>
 
           {/* Step indicator + Title */}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <Typography sx={{ color: PRIMARY, fontWeight: 600, fontSize: 13, textTransform: 'uppercase', letterSpacing: 1 }}>
+              <Typography sx={{ color: UI.mark, fontWeight: 600, fontSize: 13, textTransform: 'uppercase', letterSpacing: 1 }}>
                 Step 1 / 3
               </Typography>
-              <Box sx={{ height: 4, width: 96, bgcolor: '#e2e8f0', borderRadius: 9999, overflow: 'hidden' }}>
-                <Box sx={{ height: '100%', width: '33%', bgcolor: PRIMARY }} />
+              <Box sx={{ height: 4, width: 96, bgcolor: UI.ruleSoft, borderRadius: 9999, overflow: 'hidden' }}>
+                <Box sx={{ height: '100%', width: '33%', bgcolor: UI.mark }} />
               </Box>
             </Box>
-            <Typography variant="h4" component="h1" sx={{ fontWeight: 700, color: '#0f172a', fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>練習する企業・職種を選ぶ</Typography>
-            <Typography sx={{ color: '#64748b', fontSize: 15 }}>
+            <Typography variant="h4" component="h1" sx={{ fontWeight: 700, color: UI.ink, fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>練習する企業・職種を選ぶ</Typography>
+            <Typography sx={{ color: UI.inkFaint, fontSize: 15 }}>
               志望企業と職種を選択して、AIが面接内容をカスタマイズします。
             </Typography>
           </Box>
@@ -196,7 +206,7 @@ export default function SelectionScreen({
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
 
               {/* Company section */}
-              <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e2e8f0' }}>
+              <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${UI.ruleSoft}` }}>
                 <Typography sx={{ fontWeight: 700, fontSize: 17, mb: 2 }}>志望企業</Typography>
 
                 {/* Source tab toggle */}
@@ -206,9 +216,9 @@ export default function SelectionScreen({
                     onClick={() => { setCompanySourceTab('db'); setWebSearchResults([]) }}
                     sx={{
                       px: 2, py: 0.6, borderRadius: 2, textTransform: 'none', fontWeight: 600, fontSize: 13,
-                      bgcolor: companySourceTab === 'db' ? PRIMARY : '#f1f5f9',
-                      color: companySourceTab === 'db' ? '#fff' : '#475569',
-                      '&:hover': { bgcolor: companySourceTab === 'db' ? `${PRIMARY}e0` : '#e2e8f0' },
+                      bgcolor: companySourceTab === 'db' ? UI.mark : UI.tint,
+                      color: companySourceTab === 'db' ? '#fff' : UI.inkSoft,
+                      '&:hover': { bgcolor: companySourceTab === 'db' ? `color-mix(in srgb, ${UI.mark} 88%, transparent)` : UI.ruleSoft },
                     }}
                   >
                     🏢 登録済みの企業から選ぶ
@@ -218,9 +228,9 @@ export default function SelectionScreen({
                     onClick={() => { setCompanySourceTab('web'); setAllCompanies([]) }}
                     sx={{
                       px: 2, py: 0.6, borderRadius: 2, textTransform: 'none', fontWeight: 600, fontSize: 13,
-                      bgcolor: companySourceTab === 'web' ? PRIMARY : '#f1f5f9',
-                      color: companySourceTab === 'web' ? '#fff' : '#475569',
-                      '&:hover': { bgcolor: companySourceTab === 'web' ? `${PRIMARY}e0` : '#e2e8f0' },
+                      bgcolor: companySourceTab === 'web' ? UI.mark : UI.tint,
+                      color: companySourceTab === 'web' ? '#fff' : UI.inkSoft,
+                      '&:hover': { bgcolor: companySourceTab === 'web' ? `color-mix(in srgb, ${UI.mark} 88%, transparent)` : UI.ruleSoft },
                     }}
                   >
                     Webから探す
@@ -229,7 +239,7 @@ export default function SelectionScreen({
 
                 {/* Search / direct input */}
                 <Box sx={{ position: 'relative', mb: 2 }}>
-                  <SearchIcon sx={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: 20 }} />
+                  <SearchIcon sx={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: UI.inkFaint, fontSize: 20 }} />
                   <Box
                     component="input"
                     value={companySearch}
@@ -249,10 +259,10 @@ export default function SelectionScreen({
                     placeholder={companySourceTab === 'web' ? '企業名を入力して検索' : '企業名を入力、または下のリストから選択'}
                     sx={{
                       width: '100%', pl: '40px', pr: 2, py: 1.5,
-                      bgcolor: '#f8fafc', border: '1px solid #e2e8f0',
-                      borderRadius: 2, fontSize: 14, color: '#0f172a',
+                      bgcolor: UI.tint, border: `1px solid ${UI.ruleSoft}`,
+                      borderRadius: 2, fontSize: 14, color: UI.ink,
                       outline: 'none', boxSizing: 'border-box',
-                      '&:focus': { borderColor: PRIMARY, boxShadow: `0 0 0 2px ${PRIMARY}20` },
+                      '&:focus': { borderColor: UI.mark, boxShadow: `0 0 0 2px color-mix(in srgb, ${UI.mark} 13%, transparent)` },
                       fontFamily: 'inherit',
                     }}
                   />
@@ -273,9 +283,9 @@ export default function SelectionScreen({
                   </Box>
                 )}
                 {interviewCompany && interviewCompany.id > 0 && companySourceTab !== 'db' && (
-                  <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, bgcolor: `${PRIMARY}08`, border: `1px solid ${PRIMARY}30`, display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <CheckCircleIcon sx={{ color: PRIMARY, fontSize: 18 }} />
-                    <Typography sx={{ fontSize: 13, color: PRIMARY, fontWeight: 600 }}>
+                  <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, bgcolor: `color-mix(in srgb, ${UI.mark} 3%, transparent)`, border: `1px solid color-mix(in srgb, ${UI.mark} 19%, transparent)`, display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <CheckCircleIcon sx={{ color: UI.mark, fontSize: 18 }} />
+                    <Typography sx={{ fontSize: 13, color: UI.mark, fontWeight: 600 }}>
                       企業管理の「{interviewCompany.name}」と一致しました（カスタム質問・深掘りが有効）
                     </Typography>
                   </Box>
@@ -284,7 +294,7 @@ export default function SelectionScreen({
                 {/* DB mode: Company chips from DB */}
                 {companySourceTab === 'db' && (
                   <>
-                    <Typography sx={{ fontSize: 12, color: '#94a3b8', mb: 1 }}>登録企業から選択</Typography>
+                    <Typography sx={{ fontSize: 12, color: UI.inkFaint, mb: 1 }}>登録企業から選択</Typography>
                     {companiesLoading ? (
                       <LinearProgress sx={{ borderRadius: 1 }} />
                     ) : (
@@ -301,9 +311,9 @@ export default function SelectionScreen({
                               sx={{
                                 px: 2, py: 0.8, borderRadius: 2, fontWeight: 500, fontSize: 13,
                                 textTransform: 'none',
-                                bgcolor: isSelected ? PRIMARY : '#f1f5f9',
-                                color: isSelected ? '#fff' : '#475569',
-                                '&:hover': { bgcolor: isSelected ? `${PRIMARY}e0` : '#e2e8f0' },
+                                bgcolor: isSelected ? UI.mark : UI.tint,
+                                color: isSelected ? '#fff' : UI.inkSoft,
+                                '&:hover': { bgcolor: isSelected ? `color-mix(in srgb, ${UI.mark} 88%, transparent)` : UI.ruleSoft },
                               }}
                             >
                               {c.name}
@@ -318,7 +328,7 @@ export default function SelectionScreen({
                             </Button>
                           </Stack>
                         ) : allCompanies.length === 0 && !companiesLoading && !companySearch.trim() ? (
-                          <Typography sx={{ color: '#94a3b8', fontSize: 13 }}>登録企業が見つかりません</Typography>
+                          <Typography sx={{ color: UI.inkFaint, fontSize: 13 }}>登録企業が見つかりません</Typography>
                         ) : null}
                       </Box>
                     )}
@@ -328,7 +338,7 @@ export default function SelectionScreen({
                 {/* WEB mode: web search results */}
                 {companySourceTab === 'web' && (
                   <>
-                    <Typography sx={{ fontSize: 12, color: '#94a3b8', mb: 1 }}>
+                    <Typography sx={{ fontSize: 12, color: UI.inkFaint, mb: 1 }}>
                       {companySearch.trim() ? '検索結果' : 'キーワードを入力してください'}
                     </Typography>
                     {webSearchLoading ? (
@@ -361,19 +371,19 @@ export default function SelectionScreen({
                               onKeyDown={(e) => activateOnEnterOrSpace(e, selectResult)}
                               sx={{
                                 p: 1.5, borderRadius: 2, cursor: 'pointer',
-                                border: `2px solid ${isSelected ? PRIMARY : '#e2e8f0'}`,
-                                bgcolor: isSelected ? `${PRIMARY}08` : '#f8fafc',
+                                border: `2px solid ${isSelected ? UI.mark : UI.ruleSoft}`,
+                                bgcolor: isSelected ? `color-mix(in srgb, ${UI.mark} 3%, transparent)` : UI.tint,
                                 transition: 'all 0.15s',
-                                '&:hover': { borderColor: PRIMARY, bgcolor: `${PRIMARY}05` },
-                                '&:focus-visible': { outline: `2px solid ${PRIMARY}`, outlineOffset: 2 },
+                                '&:hover': { borderColor: UI.mark, bgcolor: `color-mix(in srgb, ${UI.mark} 2%, transparent)` },
+                                '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: 2 },
                               }}
                             >
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                {isSelected && <CheckCircleIcon sx={{ color: PRIMARY, fontSize: 16, flexShrink: 0 }} />}
-                                <Typography sx={{ fontWeight: 600, fontSize: 14, color: '#0f172a' }}>{result.name}</Typography>
+                                {isSelected && <CheckCircleIcon sx={{ color: UI.mark, fontSize: 16, flexShrink: 0 }} />}
+                                <Typography sx={{ fontWeight: 600, fontSize: 14, color: UI.ink }}>{result.name}</Typography>
                               </Box>
                               {result.description && (
-                                <Typography sx={{ fontSize: 12, color: '#64748b', mt: 0.5, lineHeight: 1.5 }}>
+                                <Typography sx={{ fontSize: 12, color: UI.inkFaint, mt: 0.5, lineHeight: 1.5 }}>
                                   {result.description.slice(0, 100)}{result.description.length > 100 ? '...' : ''}
                                 </Typography>
                               )}
@@ -388,7 +398,7 @@ export default function SelectionScreen({
                             </Button>
                           </Stack>
                         ) : webSearchResults.length === 0 && companySearch.trim() && !webSearchLoading ? (
-                          <Typography sx={{ color: '#94a3b8', fontSize: 13 }}>検索結果が見つかりません</Typography>
+                          <Typography sx={{ color: UI.inkFaint, fontSize: 13 }}>検索結果が見つかりません</Typography>
                         ) : null}
                       </Stack>
                     )}
@@ -397,7 +407,7 @@ export default function SelectionScreen({
               </Paper>
 
               {/* Position section */}
-              <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e2e8f0' }}>
+              <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${UI.ruleSoft}` }}>
                 <Typography sx={{ fontWeight: 700, fontSize: 17, mb: 2 }}>応募職種</Typography>
 
                 {/* Category tab */}
@@ -410,9 +420,9 @@ export default function SelectionScreen({
                     }}
                     sx={{
                       px: 2, py: 0.6, borderRadius: 2, textTransform: 'none', fontWeight: 600, fontSize: 13,
-                      bgcolor: positionCategory === 'general' ? PRIMARY : '#f1f5f9',
-                      color: positionCategory === 'general' ? '#fff' : '#475569',
-                      '&:hover': { bgcolor: positionCategory === 'general' ? `${PRIMARY}e0` : '#e2e8f0' },
+                      bgcolor: positionCategory === 'general' ? UI.mark : UI.tint,
+                      color: positionCategory === 'general' ? '#fff' : UI.inkSoft,
+                      '&:hover': { bgcolor: positionCategory === 'general' ? `color-mix(in srgb, ${UI.mark} 88%, transparent)` : UI.ruleSoft },
                     }}
                   >
                     💼 一般・IT職種
@@ -428,9 +438,9 @@ export default function SelectionScreen({
                     }}
                     sx={{
                       px: 2, py: 0.6, borderRadius: 2, textTransform: 'none', fontWeight: 600, fontSize: 13,
-                      bgcolor: positionCategory === 'sier' ? PRIMARY : '#f1f5f9',
-                      color: positionCategory === 'sier' ? '#fff' : '#475569',
-                      '&:hover': { bgcolor: positionCategory === 'sier' ? `${PRIMARY}e0` : '#e2e8f0' },
+                      bgcolor: positionCategory === 'sier' ? UI.mark : UI.tint,
+                      color: positionCategory === 'sier' ? '#fff' : UI.inkSoft,
+                      '&:hover': { bgcolor: positionCategory === 'sier' ? `color-mix(in srgb, ${UI.mark} 88%, transparent)` : UI.ruleSoft },
                     }}
                   >
                     🏗️ SIer職種
@@ -455,22 +465,22 @@ export default function SelectionScreen({
                         sx={{
                           position: 'relative', display: 'flex', alignItems: 'center', gap: 1.5,
                           p: 2, borderRadius: 2, cursor: 'pointer',
-                          border: `2px solid ${isSelected ? PRIMARY : 'transparent'}`,
-                          bgcolor: isSelected ? `${PRIMARY}08` : '#f8fafc',
+                          border: `2px solid ${isSelected ? UI.mark : 'transparent'}`,
+                          bgcolor: isSelected ? `color-mix(in srgb, ${UI.mark} 3%, transparent)` : UI.tint,
                           transition: 'all 0.15s',
-                          '&:hover': { borderColor: isSelected ? PRIMARY : '#cbd5e1' },
-                          '&:focus-visible': { outline: `2px solid ${PRIMARY}`, outlineOffset: 2 },
+                          '&:hover': { borderColor: isSelected ? UI.mark : UI.rule },
+                          '&:focus-visible': { outline: `2px solid ${UI.mark}`, outlineOffset: 2 },
                         }}
                       >
                         <Typography sx={{ fontSize: 22 }}>{pos.icon}</Typography>
                         <Box sx={{ flex: 1 }}>
-                          <Typography sx={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>{pos.title}</Typography>
-                          <Typography sx={{ fontSize: 12, color: '#94a3b8' }}>{pos.department}</Typography>
+                          <Typography sx={{ fontWeight: 700, fontSize: 14, color: UI.ink }}>{pos.title}</Typography>
+                          <Typography sx={{ fontSize: 12, color: UI.inkFaint }}>{pos.department}</Typography>
                         </Box>
                         <Box sx={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }}>
                           {isSelected
-                            ? <CheckCircleIcon sx={{ color: PRIMARY, fontSize: 20 }} />
-                            : <Box sx={{ width: 18, height: 18, borderRadius: '50%', border: '2px solid #cbd5e1' }} />
+                            ? <CheckCircleIcon sx={{ color: UI.mark, fontSize: 20 }} />
+                            : <Box sx={{ width: 18, height: 18, borderRadius: '50%', border: `2px solid ${UI.rule}` }} />
                           }
                         </Box>
                       </Box>
@@ -482,38 +492,38 @@ export default function SelectionScreen({
 
             {/* Right: Summary + CTA */}
             <Box sx={{ position: { md: 'sticky' }, top: 32, display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${PRIMARY}30`, bgcolor: `${PRIMARY}05` }}>
+              <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid color-mix(in srgb, ${UI.mark} 19%, transparent)`, bgcolor: `color-mix(in srgb, ${UI.mark} 2%, transparent)` }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 3 }}>
-                  <Box sx={{ width: 48, height: 48, borderRadius: 2, bgcolor: '#fff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <ApartmentIcon sx={{ color: PRIMARY }} />
+                  <Box sx={{ width: 48, height: 48, borderRadius: 2, bgcolor: UI.field, border: `1px solid ${UI.ruleSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <ApartmentIcon sx={{ color: UI.mark }} />
                   </Box>
                   <Box>
                     <Typography sx={{ fontWeight: 700, fontSize: 15 }}>{interviewCompany?.name || '企業未選択'}</Typography>
-                    <Typography sx={{ fontSize: 13, color: '#64748b' }}>{interviewCompany?.industry || '業種未設定'}</Typography>
+                    <Typography sx={{ fontSize: 13, color: UI.inkFaint }}>{interviewCompany?.industry || '業種未設定'}</Typography>
                   </Box>
                 </Box>
 
                 <Stack spacing={2.5}>
                   <Box>
-                    <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1, mb: 0.5 }}>応募ポジション</Typography>
+                    <Typography sx={{ fontSize: 11, fontWeight: 700, color: UI.inkFaint, textTransform: 'uppercase', letterSpacing: 1, mb: 0.5 }}>応募ポジション</Typography>
                     <Typography sx={{ fontWeight: 600, fontSize: 15 }}>{selectedPosition.title}</Typography>
                   </Box>
                   <Box>
-                    <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1, mb: 0.5 }}>企業概要</Typography>
-                    <Typography sx={{ fontSize: 13, color: '#64748b', lineHeight: 1.7 }}>
+                    <Typography sx={{ fontSize: 11, fontWeight: 700, color: UI.inkFaint, textTransform: 'uppercase', letterSpacing: 1, mb: 0.5 }}>企業概要</Typography>
+                    <Typography sx={{ fontSize: 13, color: UI.inkFaint, lineHeight: 1.7 }}>
                       {interviewCompany?.description
                         ? interviewCompany.description.slice(0, 120) + (interviewCompany.description.length > 120 ? '...' : '')
                         : '企業を選択すると詳細が表示されます。'}
                     </Typography>
                   </Box>
-                  <Box sx={{ pt: 2, borderTop: `1px solid ${PRIMARY}15` }}>
+                  <Box sx={{ pt: 2, borderTop: `1px solid color-mix(in srgb, ${UI.mark} 8%, transparent)` }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                       <Typography sx={{ fontSize: 14 }}>⏱</Typography>
-                      <Typography sx={{ fontSize: 13, color: '#475569' }}>所要時間: {interviewLimits.maxMinutes}分</Typography>
+                      <Typography sx={{ fontSize: 13, color: UI.inkSoft }}>所要時間: {interviewLimits.maxMinutes}分</Typography>
                     </Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Typography sx={{ fontSize: 14 }}>❓</Typography>
-                      <Typography sx={{ fontSize: 13, color: '#475569' }}>
+                      <Typography sx={{ fontSize: 13, color: UI.inkSoft }}>
                         {selectedPosition.questions}問（1問あたり約{Math.round(questionDurationSeconds / 60)}分）
                       </Typography>
                     </Box>
@@ -561,7 +571,7 @@ export default function SelectionScreen({
                           <Stack spacing={0.5}>
                             {companyHints.top_questions.map((q, i) => (
                               <Box key={i} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-                                <Typography sx={{ fontSize: 11, fontWeight: 700, color: PRIMARY, minWidth: 16 }}>{i + 1}.</Typography>
+                                <Typography sx={{ fontSize: 11, fontWeight: 700, color: UI.mark, minWidth: 16 }}>{i + 1}.</Typography>
                                 <Typography sx={{ fontSize: 12, color: '#78350f', lineHeight: 1.5 }}>{q}</Typography>
                               </Box>
                             ))}
@@ -584,16 +594,16 @@ export default function SelectionScreen({
                 disabled={!interviewCompany}
                 onClick={() => { void handleStartInterview() }}
                 sx={{
-                  bgcolor: PRIMARY, '&:hover': { bgcolor: `${PRIMARY}e0` },
+                  bgcolor: UI.mark, '&:hover': { bgcolor: `color-mix(in srgb, ${UI.mark} 88%, transparent)` },
                   borderRadius: 2, py: 1.8, fontWeight: 700, fontSize: 16,
                   textTransform: 'none',
-                  boxShadow: `0 8px 24px ${PRIMARY}30`,
-                  '&:disabled': { bgcolor: '#e2e8f0', color: '#94a3b8', boxShadow: 'none' },
+                  boxShadow: `0 8px 24px color-mix(in srgb, ${UI.mark} 19%, transparent)`,
+                  '&:disabled': { bgcolor: UI.ruleSoft, color: UI.inkFaint, boxShadow: 'none' },
                 }}
               >
                 面接を開始する
               </Button>
-              <Typography sx={{ fontSize: 12, textAlign: 'center', color: '#94a3b8' }}>
+              <Typography sx={{ fontSize: 12, textAlign: 'center', color: UI.inkFaint }}>
                 開始すると<Box component="a" href="#" sx={{ textDecoration: 'underline', color: 'inherit' }}>利用規約</Box>に同意したことになります
               </Typography>
             </Box>
