@@ -103,6 +103,24 @@ function findMouthTarget(root: THREE.Object3D): MouthTarget | null {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// パネルが全面表示(width/height:100%)になったことで、親パネルのサイズ次第で
+// WebGLの描画バッファが従来(最大380x380)より大きく増え、統合GPU機での
+// 連続描画負荷が上がる(Codexレビュー指摘, #1569)。表示サイズ自体はパネルに
+// 追従させつつ、実際にレンダリングする内部解像度(=描画バッファ)には上限を設ける。
+// renderer.setSize(w, h)の実バッファはpixelRatio倍されるため(CodeRabbit指摘)、
+// ここでの上限はpixelRatio適用後の実バッファサイズに対するものとして扱う。
+const MAX_RENDER_DIMENSION = 420
+
+/**
+ * アスペクト比を保ったまま、pixelRatio適用後の実バッファの長辺が
+ * MAX_RENDER_DIMENSIONを超えないレンダーサイズ(setSizeに渡す論理サイズ)を返す。
+ */
+function cappedRenderSize(width: number, height: number, pixelRatio: number): { width: number; height: number } {
+  const maxLogicalDimension = MAX_RENDER_DIMENSION / pixelRatio
+  const scale = Math.min(1, maxLogicalDimension / Math.max(width, height))
+  return { width: Math.round(width * scale), height: Math.round(height * scale) }
+}
+
 export default function ThreeAvatar({
   gender, audioStream, level, speaking, active, pending = false, acknowledgeSignal = 0,
 }: ThreeAvatarProps) {
@@ -152,9 +170,15 @@ export default function ThreeAvatar({
     const camera   = new THREE.PerspectiveCamera(40, width / height, 0.1, 20)
     camera.position.set(0, 0.8, 2.8)
 
+    const pixelRatio = Math.min(window.devicePixelRatio, 2)
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    renderer.setSize(width, height)
+    renderer.setPixelRatio(pixelRatio)
+    // updateStyle=falseで内部解像度(描画バッファ)だけをcapし、
+    // canvasの表示サイズ(CSS)はコンテナに追従させる
+    const initialSize = cappedRenderSize(width, height, pixelRatio)
+    renderer.setSize(initialSize.width, initialSize.height, false)
+    renderer.domElement.style.width = '100%'
+    renderer.domElement.style.height = '100%'
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.shadowMap.enabled = true
     renderer.shadowMap.type = THREE.PCFSoftShadowMap
@@ -397,19 +421,25 @@ export default function ThreeAvatar({
 
     loadModel()
 
+    // windowのresizeイベントは、親パネルの高さだけが変わる場合（質問タイマー表示等）
+    // 発生しないため、コンテナ自身のサイズ変更をResizeObserverで監視する（レビュー指摘, #1569）。
+    // 高さ0での初期化時はaspect計算がInfinity/NaNになるためスキップする。
     const onResize = () => {
       const w = container.clientWidth
       const h = container.clientHeight
+      if (w === 0 || h === 0) return
       camera.aspect = w / h
       camera.updateProjectionMatrix()
-      renderer.setSize(w, h)
+      const { width: rw, height: rh } = cappedRenderSize(w, h, pixelRatio)
+      renderer.setSize(rw, rh, false)
     }
-    window.addEventListener('resize', onResize)
+    const resizeObserver = new ResizeObserver(onResize)
+    resizeObserver.observe(container)
 
     return () => {
       disposed = true
       cancelAnimationFrame(frameId)
-      window.removeEventListener('resize', onResize)
+      resizeObserver.disconnect()
 
       lipsyncMgrRef.current?.dispose()
       lipsyncMgrRef.current = null
@@ -441,11 +471,13 @@ export default function ThreeAvatar({
   }
 
   return (
+    // 親（SessionScreenのアバターパネル）のサイズに追従させる（#1569）。
+    // 固定px指定だとxs/md/lgの境界でパネル側のレイアウト変更に追従できない。
     <Box
       ref={containerRef}
       sx={{
-        width:  { xs: 214, md: 330, lg: 380 },
-        height: { xs: 214, md: 330, lg: 380 },
+        width: '100%',
+        height: '100%',
         position: 'relative',
         display: 'flex',
         alignItems: 'center',

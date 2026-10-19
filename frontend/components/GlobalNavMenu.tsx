@@ -34,6 +34,7 @@ import {
   shouldShowStudentBottomNav,
 } from '@/lib/sidebar-nav'
 import { getResultsPathOrChat } from '@/lib/results-navigation'
+import { useInterviewSessionActive } from '@/app/interview/sessionChrome'
 
 type NavHref = (typeof SIDEBAR_NAV_ITEMS)[number]['href'] | (typeof GLOBAL_NAV_HOME_ITEMS)[number]['href']
 
@@ -61,8 +62,11 @@ const NAV_ICONS: Record<NavHref, React.ReactNode> = {
 export function GlobalNavMenu() {
   const pathname = usePathname() || ''
   const [open, setOpen] = useState(false)
+  // AI面接のセッション画面表示中はFabが操作ボタンに重なるため隠す（StudentBottomNavと同じ理由、#1569）
+  const interviewSessionActive = useInterviewSessionActive()
 
   if (pathname === '/' || !shouldShowStudentBottomNav(pathname)) return null
+  if (interviewSessionActive) return null
 
   return (
     <>

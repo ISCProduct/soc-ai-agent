@@ -30,6 +30,7 @@ type AdminUser = {
   name: string
   is_guest: boolean
   is_admin: boolean
+  is_staff?: boolean
   target_level?: string
   school_name?: string
   created_at: string
@@ -56,7 +57,7 @@ export default function PageContent() {
 
   useEffect(() => {
     const user = authService.getStoredUser()
-    if (!user?.is_admin) {
+    if (!user?.is_admin && !user?.is_staff) {
       window.location.href = '/'
     }
   }, [])
@@ -107,7 +108,7 @@ export default function PageContent() {
     return () => { cancelled = true; clearTimeout(timer) }
   }, [page, rowsPerPage, query, schoolId])
 
-  const handleToggleAdmin = async (user: AdminUser) => {
+  const patchUser = async (user: AdminUser, body: Record<string, unknown>) => {
     const admin = authService.getStoredUser()
     if (!admin?.email) return
     setLoading(true)
@@ -118,7 +119,7 @@ export default function PageContent() {
         {
           method: 'PUT',
           headers: { ...authService.getAdminFetchHeaders(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ is_admin: !user.is_admin }),
+          body: JSON.stringify(body),
         },
         '権限更新に失敗しました',
       )
@@ -129,6 +130,9 @@ export default function PageContent() {
       setLoading(false)
     }
   }
+
+  const handleToggleAdmin = (user: AdminUser) => patchUser(user, { is_admin: !user.is_admin })
+  const handleToggleStaff = (user: AdminUser) => patchUser(user, { is_staff: !user.is_staff })
 
   const handleDeleteUser = async (user: AdminUser) => {
     if (!window.confirm(`${user.email} を完全削除します。履歴書・面接動画を含む個人データは復元できません。よろしいですか？`)) {
@@ -233,9 +237,9 @@ export default function PageContent() {
                         <TableCell>{user.school_name || '未設定'}</TableCell>
                         <TableCell>
                           <Chip
-                            label={user.is_admin ? '管理者' : user.is_guest ? 'ゲスト' : '一般'}
+                            label={user.is_admin ? '管理者' : user.is_staff ? '職員' : user.is_guest ? 'ゲスト' : '一般'}
                             size="small"
-                            color={user.is_admin ? 'success' : 'default'}
+                            color={user.is_admin ? 'success' : user.is_staff ? 'info' : 'default'}
                           />
                         </TableCell>
                         <TableCell>{user.updated_at}</TableCell>
@@ -244,14 +248,25 @@ export default function PageContent() {
                             {/* 担当校を持つ管理者(先生)は is_admin を変更できない(#1157)。
                                 押せば必ず403になるボタンを出さない */}
                             {restricted === false && (
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                disabled={loading}
-                                onClick={() => handleToggleAdmin(user)}
-                              >
-                                {user.is_admin ? '管理者権限を外す' : '管理者にする'}
-                              </Button>
+                              <>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  disabled={loading}
+                                  onClick={() => handleToggleAdmin(user)}
+                                >
+                                  {user.is_admin ? '管理者権限を外す' : '管理者にする'}
+                                </Button>
+                                {/* 職員(学校運営・教員業務)ロールの付与。管理者とは独立に判定される(#1681) */}
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  disabled={loading}
+                                  onClick={() => handleToggleStaff(user)}
+                                >
+                                  {user.is_staff ? '職員を外す' : '職員にする'}
+                                </Button>
+                              </>
                             )}
                             <Button
                               size="small"
