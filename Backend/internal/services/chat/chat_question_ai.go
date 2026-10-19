@@ -10,6 +10,8 @@ import (
 )
 
 func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []models.ChatMessage, userID uint, sessionID string, industryID, jobCategoryID uint) (string, uint, error) {
+	ctx, assignment := prompts.WithPromptVersion(ctx, prompts.StageQuestionGeneration, userID)
+
 	// 会話履歴を構築
 	historyText := ""
 	hasLowConfidenceAnswer := false
@@ -105,12 +107,13 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 
 	// AI生成質問をデータベースに保存
 	aiGenQuestion := &models.AIGeneratedQuestion{
-		UserID:       userID,
-		SessionID:    sessionID,
-		TemplateID:   nil, // AI生成の場合はNULL
-		QuestionText: questionText,
-		Weight:       5, // デフォルト重み
-		IsAnswered:   false,
+		UserID:        userID,
+		SessionID:     sessionID,
+		TemplateID:    nil, // AI生成の場合はNULL
+		QuestionText:  questionText,
+		Weight:        5, // デフォルト重み
+		IsAnswered:    false,
+		PromptVersion: assignment.Version,
 	}
 
 	if err := s.aiGeneratedQuestionRepo.Create(aiGenQuestion); err != nil {

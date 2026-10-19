@@ -232,6 +232,9 @@ func (s *APICostService) LogUsage(u openaiPkg.Usage) {
 			// 配賦軸（#1294）。Feature が空の経路は unknown として残し、
 			// 「まだ計測できていない経路」を件数で追えるようにする。
 			Feature:        featureOrUnknown(u.Feature),
+			PromptStage:    u.PromptStage,
+			PromptVersion:  u.PromptVersion,
+			PromptVariant:  u.PromptVariant,
 			UserID:         u.UserID,
 			OrganizationID: u.OrganizationID,
 			AudioSeconds:   u.AudioSeconds,

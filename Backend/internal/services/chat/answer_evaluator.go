@@ -44,6 +44,12 @@ func (e *AnswerEvaluator) llmEvaluate(ctx context.Context, question, answer stri
 	if e.llmClient == nil {
 		return nil
 	}
+	userID, _ := usagectx.Actor(ctx)
+	subjectID := uint(0)
+	if userID != nil {
+		subjectID = *userID
+	}
+	ctx, _ = prompts.WithPromptVersion(ctx, prompts.StageScoreEvaluation, subjectID)
 	userPrompt := prompts.BuildAnswerQualityUserPrompt(question, answer)
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureChatAnswerEval)
 	raw, err := e.llmClient.ChatCompletionJSON(ctx, prompts.AnswerQualitySystemPrompt, userPrompt, 0.2, 256)

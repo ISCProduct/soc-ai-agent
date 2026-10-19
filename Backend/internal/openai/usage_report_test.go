@@ -16,16 +16,23 @@ func TestReportUsageFillsAttribution(t *testing.T) {
 		ctx         context.Context
 		report      usageReport
 		wantFeature string
+		wantPrompt  usagectx.PromptVersion
 		wantUser    bool
 		wantOrg     bool
 		wantLatency int
 		wantCache   bool
 	}{
 		{
-			name:        "機能名と主体が載る",
-			ctx:         usagectx.WithActor(usagectx.WithFeature(context.Background(), usagectx.FeatureESReview), 42, 7),
+			name: "機能名と主体が載る",
+			ctx: usagectx.WithActor(
+				usagectx.WithPromptVersion(
+					usagectx.WithFeature(context.Background(), usagectx.FeatureESReview),
+					"matching_reason", "v3", "candidate",
+				), 42, 7,
+			),
 			report:      usageReport{provider: "openai", model: "gpt-4o", promptTokens: 10, completionTokens: 5, latency: 1500 * time.Millisecond},
 			wantFeature: usagectx.FeatureESReview,
+			wantPrompt:  usagectx.PromptVersion{Stage: "matching_reason", Version: "v3", Variant: "candidate"},
 			wantUser:    true,
 			wantOrg:     true,
 			wantLatency: 1500,
@@ -54,6 +61,9 @@ func TestReportUsageFillsAttribution(t *testing.T) {
 
 			if got.Feature != tt.wantFeature {
 				t.Errorf("Feature=%q, 期待=%q", got.Feature, tt.wantFeature)
+			}
+			if got.PromptStage != tt.wantPrompt.Stage || got.PromptVersion != tt.wantPrompt.Version || got.PromptVariant != tt.wantPrompt.Variant {
+				t.Errorf("PromptVersion=(%q,%q,%q), 期待=%+v", got.PromptStage, got.PromptVersion, got.PromptVariant, tt.wantPrompt)
 			}
 			if (got.UserID != nil) != tt.wantUser {
 				t.Errorf("UserID=%v, 主体の期待=%v", got.UserID, tt.wantUser)
