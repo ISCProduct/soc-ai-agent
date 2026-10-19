@@ -1,10 +1,11 @@
 package routes_test
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"runtime"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"testing"
@@ -17,7 +18,6 @@ import (
 	"Backend/internal/middleware"
 	"Backend/internal/models"
 	"Backend/internal/repositories"
-	"Backend/internal/routes"
 	"Backend/internal/services/school"
 
 	"github.com/labstack/echo/v4"
@@ -187,6 +187,22 @@ func mergeRouteClasses(ms ...map[string]routeClass) map[string]routeClass {
 
 const classificationAdminSecret = "test-admin-secret"
 
+// 担当校スコープ(EchoAdminSchoolScope)がミドルウェアで掛かっているルート。
+// school_id クエリの検証(担当校外は403・担当校ありで未指定は400)は、ここに挙げた
+// ルートだけがミドルウェアで行う。ここに無い指導系ルートは「スコープなし」で、
+// 単一リソースの所属校チェックはコントローラ側(EnsureAdminSchoolAccess 等)の責務。
+// コントローラ内の検査は各コントローラのテストで見ること(ここでは見ない)。
+// TestAdminRoutes_SchoolScopeMiddleware が、この集合と実際の挙動のずれを検出する。
+var schoolScopedRoutes = map[string]bool{
+	"GET /users": true,
+	"GET /teacher/students/tendency-analysis": true,
+	"GET /interviews":                         true,
+	"GET /dashboard/users":                    true,
+	"GET /dashboard/export/csv":               true,
+	"GET /applications":                       true,
+	"GET /graduate-employments":               true,
+}
+
 // 主体ごとの固定ID。fakeSchoolRepo の担当校は userID で引かれる。
 const (
 	staffWithSchoolID uint = iota + 1
@@ -196,21 +212,37 @@ const (
 )
 
 type principal struct {
+	name    string // サブテスト名に使うASCII名
 	id      uint
 	email   string
 	isAdmin bool
 	role    string
+	anon    bool // 認証ヘッダを付けない
 }
 
-var principals = map[string]principal{
-	"staff(担当校あり)":    {staffWithSchoolID, "staff1@example.com", false, models.UserRoleStaff},
-	"staff(担当校0件)":    {staffNoSchoolID, "staff2@example.com", false, models.UserRoleStaff},
-	"is_admin(担当校0件)": {adminNoSchoolID, "admin1@example.com", true, ""},
-	"is_admin(担当校あり)": {adminWithSchoolID, "admin2@example.com", true, ""},
-}
+// 順序固定(サブテスト名の安定のため)。
+var (
+	pStaffSchool   = principal{name: "staff_with_school", id: staffWithSchoolID, email: "staff1@example.com", role: models.UserRoleStaff}
+	pStaffNoSchool = principal{name: "staff_no_school", id: staffNoSchoolID, email: "staff2@example.com", role: models.UserRoleStaff}
+	pAdminNoSchool = principal{name: "admin_no_school", id: adminNoSchoolID, email: "admin1@example.com", isAdmin: true}
+	pAdminSchool   = principal{name: "admin_with_school", id: adminWithSchoolID, email: "admin2@example.com", isAdmin: true}
+	pAnonymous     = principal{name: "anonymous", anon: true}
+	allPrincipals  = []principal{pStaffSchool, pStaffNoSchool, pAdminNoSchool, pAdminSchool, pAnonymous}
+)
+
+// 認可で拒否されたときの本文。echo_adapter.go のメッセージと対応する。
+// GetUserByEmail 失敗などの AdminAuth 由来の403("Forbidden")と取り違えないために本文で区別する。
+const (
+	msgUnauthorized = "Unauthorized"
+	msgPlatformOnly = "platform admin only"
+	msgAdminOnly    = "この操作は管理者のみ行えます"
+	msgSchoolDenied = "school access denied"
+	msgSchoolIDReq  = "school_id is required"
+)
 
 // newClassificationEcho は実際の SetupAdminRoutes(認証込み)を、sqlmock の UserRepository と
 // 担当校を返す fake で組み立てる。コントローラーは nil のまま。
+// 共有の mock を使うため、このファイルのテストで t.Parallel() を使ってはならない。
 func newClassificationEcho(t *testing.T) (*echo.Echo, sqlmock.Sqlmock) {
 	t.Helper()
 	sqlDB, mock, err := sqlmock.New()
@@ -229,29 +261,25 @@ func newClassificationEcho(t *testing.T) (*echo.Echo, sqlmock.Sqlmock) {
 	}})
 
 	e := echo.New()
-	routes.SetupAdminRoutes(
-		e.Group("/api"),
-		// コントローラー22個(userRepo・schoolService の前まで)
-		nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil,
-		nil,
-		repositories.NewUserRepository(db), schools,
-		classificationAdminSecret,
-	)
+	registerAdminRoutesWithNilControllers(e.Group("/api"), repositories.NewUserRepository(db), schools, classificationAdminSecret)
 	return e, mock
 }
 
-func registeredAdminRoutes(e *echo.Echo) []string {
+// registeredAdminRoutes は /api/admin 配下の登録ルートを "METHOD /path" で返す。
+// echo が自動登録する 404 用の包括ルート(RouteNotFound)は対象外。
+// /api/admin 配下以外のルートが登録されていたら、登録関数の想定外の変更として失敗させる。
+func registeredAdminRoutes(t *testing.T, e *echo.Echo) []string {
+	t.Helper()
 	var got []string
 	for _, r := range e.Routes() {
-		// echo がグループ作成時に自動登録する 404 用の包括ルートは対象外。
 		if r.Method == echo.RouteNotFound {
 			continue
 		}
-		if p, ok := strings.CutPrefix(r.Path, "/api/admin"); ok {
-			got = append(got, r.Method+" "+p)
+		rest, ok := strings.CutPrefix(r.Path, "/api/admin")
+		if !ok || (rest != "" && !strings.HasPrefix(rest, "/")) {
+			t.Fatalf("/api/admin 配下ではないルートが登録されている: %s %s", r.Method, r.Path)
 		}
+		got = append(got, r.Method+" "+rest)
 	}
 	slices.Sort(got)
 	return got
@@ -260,7 +288,7 @@ func registeredAdminRoutes(e *echo.Echo) []string {
 // 全 /admin ルートが分類表に載っていること、表に余計なルートが無いことを固定する。
 func TestAdminRoutes_ClassificationIsExhaustive(t *testing.T) {
 	e, _ := newClassificationEcho(t)
-	registered := registeredAdminRoutes(e)
+	registered := registeredAdminRoutes(t, e)
 	if len(registered) == 0 {
 		t.Fatal("/api/admin 配下のルートが 1 本も登録されていない。登録関数のシグネチャ変更を疑うこと")
 	}
@@ -269,7 +297,7 @@ func TestAdminRoutes_ClassificationIsExhaustive(t *testing.T) {
 	for _, key := range registered {
 		seen[key] = true
 		if _, ok := expectedAdminRouteClasses[key]; !ok {
-			t.Errorf("分類されていないルート: %s（expectedAdminRouteClasses へ指導系/運用系/権限管理のどれかで追加すること）", key)
+			t.Errorf("分類されていないルート: %s（expectedAdminRouteClasses へ追加すること。迷ったら classPlatform(運用系)を既定にする）", key)
 		}
 	}
 	for key := range expectedAdminRouteClasses {
@@ -279,63 +307,169 @@ func TestAdminRoutes_ClassificationIsExhaustive(t *testing.T) {
 	}
 }
 
-// doAs は p として method path を叩く。ハンドラへ到達した場合(nil コントローラーで panic)は
-// reached=true を返す。認可で止まった場合は reached=false と応答コード。
-func doAs(e *echo.Echo, mock sqlmock.Sqlmock, p principal, method, path string) (code int, reached bool) {
-	mock.ExpectQuery("SELECT \\* FROM `users` WHERE email = \\?").
-		WithArgs(p.email, 1).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "email", "name", "is_admin", "is_guest", "role"}).
-			AddRow(p.id, p.email, "テスト", p.isAdmin, false, p.role))
+type response struct {
+	code    int
+	body    string
+	reached bool // 認可を通過してコントローラーまで到達した(nil コントローラーで panic した)
+}
 
-	req := httptest.NewRequest(method, path, nil)
-	req.Header.Set("X-Admin-Email", p.email)
-	req.Header.Set("X-Admin-Token", middleware.GenerateAdminToken(p.id, p.email, classificationAdminSecret))
+// passed は認可(とスコープ)で止まらなかったか。
+func (r response) passed() bool {
+	return r.reached || (r.code != http.StatusForbidden && r.code != http.StatusUnauthorized)
+}
+
+// cleared は認可・スコープのミドルウェアを通過したか。コントローラーが nil で panic した場合に加え、
+// 入力検証で先に 400 を返すコントローラーもあるため、ミドルウェア由来のメッセージが無いことで判定する。
+func (r response) cleared() bool {
+	if r.reached {
+		return true
+	}
+	for _, m := range []string{msgUnauthorized, msgPlatformOnly, msgAdminOnly, msgSchoolDenied, msgSchoolIDReq} {
+		if strings.Contains(r.body, m) {
+			return false
+		}
+	}
+	return true
+}
+
+// doAs は p として method target を叩く。共有 mock を使うため並列実行しないこと。
+// 「到達」とみなす panic は、コントローラー側で起きた runtime.Error の nil 参照だけ。
+// それ以外の panic(ミドルウェア内など)はテスト失敗にする。
+func doAs(t *testing.T, e *echo.Echo, mock sqlmock.Sqlmock, p principal, method, target string) response {
+	t.Helper()
+	req := httptest.NewRequest(method, target, nil)
+	if !p.anon {
+		mock.ExpectQuery("SELECT \\* FROM `users` WHERE email = \\?").
+			WithArgs(p.email, 1).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "email", "name", "is_admin", "is_guest", "role"}).
+				AddRow(p.id, p.email, "テスト", p.isAdmin, false, p.role))
+		req.Header.Set("X-Admin-Email", p.email)
+		req.Header.Set("X-Admin-Token", middleware.GenerateAdminToken(p.id, p.email, classificationAdminSecret))
+	}
 	rec := httptest.NewRecorder()
+	reached := false
 	func() {
 		defer func() {
-			if recover() != nil {
-				reached = true
+			v := recover()
+			if v == nil {
+				return
 			}
+			rerr, isRuntime := v.(runtime.Error)
+			if isRuntime && strings.Contains(rerr.Error(), "nil pointer dereference") &&
+				strings.Contains(string(debug.Stack()), "Backend/internal/controllers/") {
+				reached = true
+				return
+			}
+			t.Errorf("想定外の panic（nil コントローラー以外、またはミドルウェア内）: %v", v)
 		}()
 		e.ServeHTTP(rec, req)
 	}()
-	return rec.Code, reached
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("sqlmock の期待が満たされていない: %v", err)
+	}
+	return response{code: rec.Code, body: rec.Body.String(), reached: reached}
 }
 
-var pathParam = regexp.MustCompile(`:[A-Za-z_]+`)
+var (
+	pathParam          = regexp.MustCompile(`:[A-Za-z_]+`)
+	subtestNameReplace = strings.NewReplacer("/", "_", " ", "_", "?", "_", "=", "_")
+)
 
-// 分類表どおりに実際の認可が効いていることを、全ルート×4主体で確認する。
+func concretePath(tmpl string) string {
+	return "/api/admin" + pathParam.ReplaceAllString(tmpl, "1")
+}
+
+// expectedAuthz は class のルートを who が叩いたときの期待。
+// 通過しない場合は期待する拒否コードと本文(拒否の発生元)も返す。
+func expectedAuthz(class routeClass, who principal) (pass bool, code int, msg string) {
+	switch {
+	case who.anon:
+		return false, http.StatusUnauthorized, msgUnauthorized
+	case class == classPlatform && (!who.isAdmin || who.id == adminWithSchoolID):
+		return false, http.StatusForbidden, msgPlatformOnly
+	case class == classRequireAdmin && !who.isAdmin:
+		return false, http.StatusForbidden, msgAdminOnly
+	}
+	return true, 0, ""
+}
+
+// 分類表どおりに実際の認可が効いていることを、全ルート×5主体で確認する。
 // 運用系(/audit-logs, /costs, /scraper-sessions, /companies/:id/fetch-*, 学校メンバー操作など)の
-// staff 403 もここで網羅される。
+// staff 403 もここで網羅される。拒否は本文で発生元(platform / requireAdmin / 認証)まで区別する。
 func TestAdminRoutes_ClassificationMatchesAuthorization(t *testing.T) {
 	e, mock := newClassificationEcho(t)
 
-	// 各主体が「ハンドラ(または担当校スコープ)まで通るか」の期待。
-	// 通る = 403/401 ではない。
-	type want = map[string]bool
-	passByClass := map[routeClass]want{
-		classStaff:              {"staff(担当校あり)": true, "staff(担当校0件)": true, "is_admin(担当校0件)": true, "is_admin(担当校あり)": true},
-		classStaffPendingReview: {"staff(担当校あり)": true, "staff(担当校0件)": true, "is_admin(担当校0件)": true, "is_admin(担当校あり)": true},
-		classRequireAdmin:       {"staff(担当校あり)": false, "staff(担当校0件)": false, "is_admin(担当校0件)": true, "is_admin(担当校あり)": true},
-		classPlatform:           {"staff(担当校あり)": false, "staff(担当校0件)": false, "is_admin(担当校0件)": true, "is_admin(担当校あり)": false},
-	}
-
-	for _, key := range registeredAdminRoutes(e) {
+	for _, key := range registeredAdminRoutes(t, e) {
 		class, ok := expectedAdminRouteClasses[key]
 		if !ok {
 			continue // 未分類は網羅性テストが報告する
 		}
 		method, tmpl, _ := strings.Cut(key, " ")
-		path := "/api/admin" + pathParam.ReplaceAllString(tmpl, "1")
-		for name, p := range principals {
-			t.Run(fmt.Sprintf("%s/%s/%s", class, key, name), func(t *testing.T) {
-				code, reached := doAs(e, mock, p, method, path)
-				passed := reached || (code != http.StatusForbidden && code != http.StatusUnauthorized)
-				if want := passByClass[class][name]; passed != want {
-					t.Errorf("%s が %s で通過=%v(status=%d), want 通過=%v", name, key, passed, code, want)
+		for _, who := range allPrincipals {
+			t.Run(string(class)+"_"+subtestNameReplace.Replace(key)+"_"+who.name, func(t *testing.T) {
+				res := doAs(t, e, mock, who, method, concretePath(tmpl))
+				wantPass, wantCode, wantMsg := expectedAuthz(class, who)
+				if res.passed() != wantPass {
+					t.Fatalf("分類=%s 主体=%s: 通過=%v(status=%d), want 通過=%v(拒否なら status=%d)",
+						class, who.name, res.passed(), res.code, wantPass, wantCode)
 				}
-				if !passed && code != http.StatusForbidden {
-					t.Errorf("拒否の応答 = %d, want 403", code)
+				if !wantPass && (res.code != wantCode || !strings.Contains(res.body, wantMsg)) {
+					t.Errorf("分類=%s 主体=%s: 拒否 status=%d body=%q, want status=%d body に %q",
+						class, who.name, res.code, res.body, wantCode, wantMsg)
+				}
+			})
+		}
+	}
+}
+
+// 未知パスも認証で止まる(包括ルートの認証が外れていない)。
+func TestAdminRoutes_UnknownPathRequiresAuth(t *testing.T) {
+	e, mock := newClassificationEcho(t)
+	res := doAs(t, e, mock, pAnonymous, http.MethodGet, "/api/admin/__none__")
+	if res.code != http.StatusUnauthorized {
+		t.Errorf("未認証の未知パス status=%d, want %d", res.code, http.StatusUnauthorized)
+	}
+}
+
+// 担当校スコープ(EchoAdminSchoolScope)の責務はミドルウェアで、schoolScopedRoutes のルートにだけ掛かる。
+// 掛かっているルートは school_id を検証し、掛かっていない指導系ルートは素通しでコントローラーへ届く。
+// 単一リソースの所属校検査はコントローラ側の責務で、各コントローラのテストが担う。
+func TestAdminRoutes_SchoolScopeMiddleware(t *testing.T) {
+	e, mock := newClassificationEcho(t)
+
+	cases := []struct {
+		who      principal
+		query    string
+		wantCode int    // スコープ付きルートでの期待。0 ならコントローラーまで到達
+		wantMsg  string // 拒否時の本文
+	}{
+		{pStaffSchool, "?school_id=6", http.StatusForbidden, msgSchoolDenied},
+		{pStaffSchool, "?school_id=5", 0, ""},
+		{pStaffSchool, "", http.StatusBadRequest, msgSchoolIDReq},
+		{pStaffNoSchool, "?school_id=5", http.StatusForbidden, msgSchoolDenied},
+		{pStaffNoSchool, "", http.StatusBadRequest, msgSchoolIDReq},
+		{pAdminSchool, "?school_id=6", http.StatusForbidden, msgSchoolDenied},
+		{pAdminNoSchool, "?school_id=6", 0, ""},
+		{pAdminNoSchool, "", 0, ""},
+	}
+
+	for _, key := range registeredAdminRoutes(t, e) {
+		if c := expectedAdminRouteClasses[key]; c != classStaff && c != classStaffPendingReview {
+			continue
+		}
+		method, tmpl, _ := strings.Cut(key, " ")
+		scoped := schoolScopedRoutes[key]
+		for _, sc := range cases {
+			t.Run(subtestNameReplace.Replace(key)+"_"+sc.who.name+"_"+subtestNameReplace.Replace(sc.query), func(t *testing.T) {
+				res := doAs(t, e, mock, sc.who, method, concretePath(tmpl)+sc.query)
+				if !scoped || sc.wantCode == 0 {
+					if !res.cleared() {
+						t.Fatalf("スコープ付き=%v: ミドルウェアを通過するはずが status=%d body=%q", scoped, res.code, res.body)
+					}
+					return
+				}
+				if res.code != sc.wantCode || !strings.Contains(res.body, sc.wantMsg) {
+					t.Errorf("スコープ付きルート: status=%d body=%q, want status=%d body に %q", res.code, res.body, sc.wantCode, sc.wantMsg)
 				}
 			})
 		}
