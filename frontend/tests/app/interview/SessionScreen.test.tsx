@@ -128,6 +128,25 @@ describe('SessionScreen', () => {
       })
       expect(screen.getByText('話している途中の内容')).toBeInTheDocument()
     })
+
+    // CodeRabbit指摘: 次の質問が確定した直後(まだ何も話していない間)、末尾の
+    // user発話をそのまま使うと前の質問への回答が「現在の質問の回答」として
+    // 表示され続けてしまっていた。
+    it('次の質問が確定したら、前の質問への回答をライブ回答に出さずプレースホルダーに戻す', () => {
+      renderScreen({
+        utterances: [
+          { role: 'ai', text: '質問1' },
+          { role: 'user', text: '質問1への回答' },
+          { role: 'ai', text: '質問2' },
+        ],
+        partialUser: '',
+      })
+      expect(screen.getByText('質問2')).toBeInTheDocument()
+      // 「これまでの質問・回答」は既定で折りたたまれているため、ここに
+      // '質問1への回答' が見えるとすればライブ回答パネル側の表示漏れバグ
+      expect(screen.queryByText('質問1への回答')).not.toBeInTheDocument()
+      expect(screen.getByText('「話す」ボタンを押して回答してください')).toBeInTheDocument()
+    })
   })
 
   describe('STAR回答フレームワーク思考ガイド', () => {

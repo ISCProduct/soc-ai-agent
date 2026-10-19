@@ -153,9 +153,13 @@ export default function SessionScreen({
   // 「現在の質問」「ライブ回答」は新規のデータを持たず、既存の発話ストリーム
   // (utterances/partialAi/partialUser)から導出する。確定済みの発話が無い間は
   // 直近のAI/ユーザー発話にフォールバックする。
-  const latestAiUtterance = [...utterances].reverse().find((u) => u.role === 'ai')?.text ?? ''
+  const lastAiIndex = utterances.map((u) => u.role).lastIndexOf('ai')
+  const latestAiUtterance = lastAiIndex >= 0 ? utterances[lastAiIndex].text : ''
   const currentQuestionText = partialAi || latestAiUtterance
-  const latestUserUtterance = [...utterances].reverse().find((u) => u.role === 'user')?.text ?? ''
+  // 現在の質問(最新のAI発話)より後に来たuser発話だけを「現在の質問への回答」として扱う。
+  // 末尾のuser発話をそのまま使うと、次の質問が確定した直後(まだ何も話していない間)に
+  // 前の質問への回答が「現在の質問の回答」として出続けてしまう(CodeRabbit指摘)。
+  const latestUserUtterance = utterances.slice(lastAiIndex + 1).findLast((u) => u.role === 'user')?.text ?? ''
   const liveAnswerText = partialUser || latestUserUtterance
   const urgency = urgencyOf(questionRemainingSeconds)
 
@@ -491,9 +495,11 @@ export default function SessionScreen({
             </IconButton>
           </Tooltip>
           <Tooltip title={handsFreeMode ? 'ハンズフリーをオフ' : 'ハンズフリーをオン'}>
-            <IconButton onClick={onToggleHandsFree} disabled={!isConnected} aria-label="ハンズフリーの入切" className={styles.iconToggle} data-active={handsFreeMode}>
-              {handsFreeMode ? <MicIcon sx={{ color: 'var(--primary)', fontSize: 18 }} /> : <MicOffIcon sx={{ color: 'var(--on-surface-variant)', fontSize: 18 }} />}
-            </IconButton>
+            <span>
+              <IconButton onClick={onToggleHandsFree} disabled={!isConnected} aria-label="ハンズフリーの入切" className={styles.iconToggle} data-active={handsFreeMode}>
+                {handsFreeMode ? <MicIcon sx={{ color: 'var(--primary)', fontSize: 18 }} /> : <MicOffIcon sx={{ color: 'var(--on-surface-variant)', fontSize: 18 }} />}
+              </IconButton>
+            </span>
           </Tooltip>
 
           <Box className={styles.controlDivider} />

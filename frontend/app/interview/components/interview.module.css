@@ -65,6 +65,17 @@
   50% { opacity: 0.75; }
 }
 
+/* 前庭障害等でアニメーションを抑えたい利用者向け。点滅系の演出だけを止める
+   (レイアウト自体のtransitionは短く実害が小さいためそのまま、CodeRabbit指摘)。 */
+@media (prefers-reduced-motion: reduce) {
+  .liveDot,
+  .liveFeedDot,
+  .answerDot,
+  .talkButton[data-recording='true'] {
+    animation: none !important;
+  }
+}
+
 /* ── Header ── */
 .header {
   background: rgba(23, 27, 38, 0.92);
