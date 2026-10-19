@@ -147,7 +147,13 @@ func evaluateESResponse(o Observation, c Case, status int, body []byte) Observat
 		o.Error = fmt.Sprintf("RAGが認証を拒否しました（HTTP %d）。RAG_INTERNAL_TOKEN を確認してください", status)
 		return o
 	case status == http.StatusUnprocessableEntity:
-		o.Broken, o.BrokenReason, o.Error = true, BrokenTruncated, snippet(body)
+		reason := BrokenCallFailed
+		if isFastAPIValidationError(body) {
+			reason = BrokenValidation
+		} else if isESOutputTruncated(body) {
+			reason = BrokenTruncated
+		}
+		o.Broken, o.BrokenReason, o.Error = true, reason, snippet(body)
 		return o
 	case status != http.StatusOK:
 		reason := BrokenCallFailed
@@ -197,4 +203,33 @@ func evaluateESResponse(o Observation, c Case, status int, body []byte) Observat
 		}
 	}
 	return o
+}
+
+func isFastAPIValidationError(body []byte) bool {
+	var response struct {
+		Detail []struct {
+			Type string `json:"type"`
+		} `json:"detail"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil || len(response.Detail) == 0 {
+		return false
+	}
+	for _, issue := range response.Detail {
+		if issue.Type == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func isESOutputTruncated(body []byte) bool {
+	var response struct {
+		Detail string `json:"detail"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return false
+	}
+	return strings.Contains(response.Detail, "最後まで生成できませんでした") ||
+		strings.Contains(response.Detail, "文字数を減らしてお試しください") ||
+		strings.Contains(response.Detail, "文字数上限を緩めるか")
 }
