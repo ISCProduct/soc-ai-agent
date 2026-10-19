@@ -491,9 +491,10 @@ apply し、サービスを更新する必要がある。「env を戻すだけ�
 
 ### 計測できる範囲（重要）
 
-`api_call_logs` に記録しているのは **Backend (Go) のコールだけ**。
-RAG (Python) はトークン使用量をどこにも記録していないため、
-**RAG のコストは現状まったく計測できない**。
+`api_call_logs` に記録しているのは **Backend (Go) のコールと、ES添削・ESリライトの RAG 経由ぶん**
+（RAG が返す `usage` を Backend が記録する。「ES添削とESリライトの統合（#1533）」参照）。
+それ以外の RAG（企業リサーチ・面接ヒントなどの Web 検索経路）は
+トークン使用量をどこにも記録していないため、**Web 検索まわりの RAG コストは現状計測できない**。
 
 したがって上の表のうち RAG 側に効くノブ（クエリ数・RAGのモデル）は、
 変更しても `api_call_logs` では削減幅を確認できない。確認したい場合は
@@ -514,3 +515,23 @@ Backend 側（`OPENAI_WEB_SEARCH_CONTEXT_SIZE` が効く企業検索）は
 直近14日の実績は `gpt-4o-mini` 16コール / `gpt-5.2` 12コールで合計約 $0.12。
 **現時点で削るべき定常コストはほぼ無い。** 上のノブは、企業検索の利用が
 本格化したときに効くようにしてある予防的な設定。
+
+### 課題 #1349 時点の実装状況（origin/develop）
+
+「公的データでは description / industry が埋まらない」という前提で始まった削減課題の棚卸し。
+**コード変更は不要と判断し、方針は「情報量優先で現状維持」。** 以下は develop 時点で確認した事実。
+
+| 項目 | 状態 | 根拠 |
+| --- | --- | --- |
+| 既定モデルの `gpt-4o-mini` 化 | 済み | `rag/services/hints.py:94,128`、`rag/services/research.py:313,348,406`。prod の Backend 側も `OPENAI_WEB_SEARCH_MODEL` / `OPENAI_COMPANY_SEARCH_MODEL` を `gpt-4o-mini` に設定（`infra/terraform/environments/prod/main.tf:651-652`）。なお ES添削（`rag/services/es_review.py:279`）の既定は `gpt-4o` のままで、Web 検索コストの対象外 |
+| `search_context_size` | 済み（既定 `medium`） | `rag/services/research.py:215`（`web_search_context_size`）、`Backend/internal/openai/client_chat.go:199`（`webSearchContextSize`）。prod は Backend・RAG とも `OPENAI_WEB_SEARCH_CONTEXT_SIZE=medium`（`prod/main.tf:657,789`） |
+| クエリ数上限 | 済み（既定 4。以前は 5） | `rag/services/research.py:225`（`max_search_queries`）、prod は `OPENAI_WEB_SEARCH_MAX_QUERIES=4`（`prod/main.tf:790`） |
+| Brave Provider | 実装済み・未設定 | `Backend/internal/companyfetch/provider.go:20`（`NewSearchProviderFromEnv`）。`COMPANY_SEARCH_PROVIDER` は未設定または不明値で `openai`（`Backend/.env.example:187` も `openai`）。`brave` でも `BRAVE_SEARCH_API_KEY` が無ければ openai へフォールバックする。安い検索 API は正しさの検証前のため保留（公的 API を先に使う方針） |
+| Search 統合 | 一部のみ（「1回」は未達） | `info` と `relations` は 1 回の検索に統合済み（`Backend/internal/services/company/search_context.go:106` `sharedSearchPrompt`）。`tech` は統合すると技術キーワードが 6/10 → 3/10 に落ちる実測（同ファイル冒頭コメント）のため個別のまま。1社あたり 3〜4 回 → 2〜3 回 |
+| 公式サイト取得 | 既定無効 | `COMPANY_WEBSITE_EXTRACT=1` のときだけ動く（`company_info_fetcher.go:479,519`）。`robots.txt` は未対応。有効にしても Search を省けるのは穴判定の 6 項目が全部埋まったときだけで、多くは HTTP 取得と抽出コールが上乗せされる純増（`company_info_fetcher.go` 465〜478行のコメント）。利用規約まわりの法務確認は #1348 |
+| 穴判定 | 現状維持 | `companyInfoHasGaps`（`company_info_fetcher.go:524`）は description / mainBusiness / industry / culture / workStyle / websiteURL のどれかが空なら真。gBizINFO 由来の結果（`acquireFromGBizName`、同 425行〜）は description と industry を持たないため、**実質すべての企業で web_search が走る**。ここを緩めると情報量が減るため変えない |
+
+### 今後の方針
+
+- RAG（企業リサーチ等）のトークン使用量が `api_call_logs` に無いため、削減の効果を数字で確認できない（#1294）。**削減の再検討は計測の整備後**に行う。
+- 穴判定の緩和・Brave への切り替え・公式サイト取得の有効化・業種の LLM 分類は、いずれも今回は行わない。
