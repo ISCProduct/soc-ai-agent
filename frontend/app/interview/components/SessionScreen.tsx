@@ -12,6 +12,7 @@ import {
   Typography,
 } from '@mui/material'
 import MicIcon from '@mui/icons-material/Mic'
+import MicOffIcon from '@mui/icons-material/MicOff'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import VideocamIcon from '@mui/icons-material/Videocam'
 import VideocamOffIcon from '@mui/icons-material/VideocamOff'
@@ -19,12 +20,14 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import ClosedCaptionIcon from '@mui/icons-material/ClosedCaption'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import HistoryIcon from '@mui/icons-material/History'
+import LightbulbOutlinedIcon from '@mui/icons-material/LightbulbOutlined'
+import ScheduleIcon from '@mui/icons-material/Schedule'
+import CallEndIcon from '@mui/icons-material/CallEnd'
 
 import { UTTERANCE_SAVE_FAILED_MESSAGE } from '../utteranceSave'
 import { formatSeconds } from '@/lib/interview/utils'
 import type { Utterance } from '../types'
 import styles from './interview.module.css'
-import { UI } from '@/lib/design/tokens'
 import { setInterviewSessionActive } from '../sessionChrome'
 import Avatar2D from './Avatar2D'
 
@@ -35,6 +38,13 @@ const STAR_GUIDE = [
   { key: 'A', label: 'Action', description: '自分が具体的に取った行動' },
   { key: 'R', label: 'Result', description: '行動の結果どうなったか' },
 ] as const
+
+/** 質問タイマーの緊急度。色はすべて interview.module.css の data-urgency 側で持つ。 */
+function urgencyOf(remainingSeconds: number): 'safe' | 'warning' | 'critical' {
+  if (remainingSeconds <= 30) return 'critical'
+  if (remainingSeconds <= 60) return 'warning'
+  return 'safe'
+}
 
 export interface SessionScreenProps {
   status: string
@@ -86,6 +96,7 @@ export interface SessionScreenProps {
  * SESSION SCREEN (connecting / connected / error)
  * VAD・MediaRecorder・AudioContext・タイマー等の状態管理は親コンポーネント（page.tsx）が行い、
  * このコンポーネントは受け取った props をそのまま描画する presentational component。
+ * 見た目(色・形)は interview.module.css に集約し、ここでは className の出し分けだけを行う。
  */
 export default function SessionScreen({
   status,
@@ -146,441 +157,383 @@ export default function SessionScreen({
   const currentQuestionText = partialAi || latestAiUtterance
   const latestUserUtterance = [...utterances].reverse().find((u) => u.role === 'user')?.text ?? ''
   const liveAnswerText = partialUser || latestUserUtterance
+  const urgency = urgencyOf(questionRemainingSeconds)
 
   return (
-    <Box className={styles.sessionRoot} sx={{ bgcolor: UI.nightStage, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <Box className={styles.sessionRoot}>
 
       {/* ── Header ── */}
-      <Box component="header" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 3, py: 1.5, flexShrink: 0 }}>
-        {/* 企業名 */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, bgcolor: 'rgba(255,255,255,0.18)', borderRadius: 2, px: 2, py: 0.8, backdropFilter: 'blur(8px)' }}>
-          <Typography sx={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>
-            {companyName || 'AI面接練習'}
-          </Typography>
-          <Typography sx={{ color: 'rgba(255,255,255,0.65)', fontSize: 12, lineHeight: 1 }}>▾</Typography>
+      <Box component="header" className={styles.header}>
+        {/* LIVE表示 + 企業名 */}
+        <Box className={styles.headerTitleRow}>
+          {isConnected && (
+            <Box className={styles.liveBadge}>
+              <Box className={styles.liveDot} />
+              <Typography className={styles.liveLabel} component="span">LIVE</Typography>
+            </Box>
+          )}
+          <Box className={styles.headerCompanyRow}>
+            <Typography noWrap className={styles.companyName} component="span">
+              {companyName || 'AI面接練習'}
+            </Typography>
+            <Box className={styles.practiceModeBadge}>
+              <Typography component="span" className={styles.practiceModeBadgeText}>Practice Mode</Typography>
+            </Box>
+          </Box>
         </Box>
 
-        {/* タイマー + ユーザーアバター */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        {/* タイマー + 終了 + ユーザーアバター */}
+        <Box className={styles.headerRight}>
           {isActive && (
-            <Typography sx={{ color: 'rgba(255,255,255,0.75)', fontSize: 13, fontWeight: 500 }}>
-              {formatSeconds(remainingSeconds)}
-            </Typography>
+            <Box className={styles.timerBadge}>
+              <ScheduleIcon sx={{ color: 'var(--primary)', fontSize: 16 }} />
+              <Typography className={styles.timerText} component="span">
+                {formatSeconds(remainingSeconds)}
+              </Typography>
+            </Box>
           )}
-          <Box sx={{ width: 34, height: 34, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.22)', border: '1.5px solid rgba(255,255,255,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>
-              {(userName || 'U').charAt(0).toUpperCase()}
-            </Typography>
+          {isActive && (
+            <Button onClick={() => onStop(false)} startIcon={<CallEndIcon sx={{ fontSize: 18 }} />} className={styles.endButton}>
+              <Box component="span" className={styles.endButtonLabel}>終了</Box>
+            </Button>
+          )}
+          <Box className={styles.userAvatar}>
+            {(userName || 'U').charAt(0).toUpperCase()}
           </Box>
         </Box>
       </Box>
 
       {/* ── 残り時間警告 ── */}
       {isConnected && sessionWarningShown && (
-        <Box sx={{ px: 2, pb: 1, flexShrink: 0 }}>
-          <Box sx={{ bgcolor: remainingSeconds <= 0 ? 'rgba(234,67,53,0.25)' : 'rgba(251,188,4,0.2)', borderRadius: 1.5, px: 2, py: 0.7 }}>
-            <Typography sx={{ fontSize: 13, color: remainingSeconds <= 0 ? '#ffb3ae' : '#ffe082', fontWeight: 600 }}>
-              {remainingSeconds <= 0 ? 'セッションが終了しました。' : `⚠️ 残り約${Math.ceil(remainingSeconds / 60)}分です。`}
-            </Typography>
+        <Box className={styles.warningBanner}>
+          <Box className={styles.warningBannerInner} data-level={remainingSeconds <= 0 ? 'critical' : 'warning'}>
+            {remainingSeconds <= 0 ? 'セッションが終了しました。' : `⚠️ 残り約${Math.ceil(remainingSeconds / 60)}分です。`}
           </Box>
         </Box>
       )}
 
-      {/* ── 質問タイマー ── */}
-      {isConnected && (
-        <Box sx={{ px: 2, pb: 1.5, flexShrink: 0 }}>
-          <Box sx={{
-            bgcolor: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)',
-            borderRadius: 2, px: 2, py: 1,
-            display: 'flex', alignItems: 'center', gap: 2,
-          }}>
-            {/* 質問番号バッジ */}
-            <Box sx={{
-              flexShrink: 0, display: 'flex', alignItems: 'center', gap: 0.5,
-              bgcolor: 'rgba(255,255,255,0.12)', borderRadius: 1, px: 1, py: 0.3,
-            }}>
-              <Typography sx={{ color: UI.nightMuted, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Q</Typography>
-              <Typography sx={{ color: '#fff', fontSize: 13, fontWeight: 700, lineHeight: 1 }}>
-                {currentQuestionIndex}
+      {/* ── スクロール可能なコンテンツ領域(ヘッダー・下部コントロールバーは常に表示されたまま) ── */}
+      <Box className={styles.scrollArea}>
+        <Box className={styles.scrollAreaInner}>
+
+          {/* ── 質問タイマー ── */}
+          {isConnected && (
+            <Box className={styles.questionBar}>
+              {/* 質問番号バッジ */}
+              <Box className={styles.questionBadge}>
+                <Typography component="span" className={styles.questionBadgeQ}>Q</Typography>
+                <Typography component="span" className={styles.questionBadgeIndex}>{currentQuestionIndex}</Typography>
+                <Typography component="span" className={styles.questionBadgeTotal}>/{totalQuestionCount}</Typography>
+              </Box>
+
+              {/* プログレスバー */}
+              <Box className={styles.progressTrack}>
+                <Box className={styles.progressFill} data-urgency={urgency} style={{ width: `${questionProgress}%` }} />
+              </Box>
+
+              {/* カウントダウンテキスト */}
+              <Typography className={styles.countdownText} data-urgency={urgency} component="span">
+                {questionRemainingLabel}
               </Typography>
-              <Typography sx={{ color: UI.nightMuted, fontSize: 10 }}>
-                /{totalQuestionCount}
-              </Typography>
-            </Box>
-
-            {/* プログレスバー */}
-            <Box sx={{ flex: 1, height: 5, bgcolor: 'rgba(255,255,255,0.12)', borderRadius: 9999, overflow: 'hidden' }}>
-              <Box sx={{
-                height: '100%',
-                width: `${questionProgress}%`,
-                bgcolor: questionRemainingSeconds <= 30 ? '#f28b82'
-                       : questionRemainingSeconds <= 60 ? '#fdd663'
-                       : '#34a853',
-                borderRadius: 9999,
-                transition: 'width 1s linear, background-color 0.5s',
-              }} />
-            </Box>
-
-            {/* カウントダウンテキスト */}
-            <Typography sx={{
-              flexShrink: 0, fontSize: 12, fontWeight: 600,
-              color: questionRemainingSeconds <= 30 ? '#f28b82'
-                   : questionRemainingSeconds <= 60 ? '#fdd663'
-                   : 'rgba(255,255,255,0.75)',
-            }}>
-              {questionRemainingLabel}
-            </Typography>
-            {(isDeepeningQuestion || questionCategory) && (
-              <Chip
-                size="small"
-                label={isDeepeningQuestion ? '深掘り質問' : questionCategory || ''}
-                sx={{
-                  flexShrink: 0,
-                  height: 22,
-                  fontSize: 11,
-                  bgcolor: isDeepeningQuestion ? 'rgba(251,188,4,0.25)' : 'rgba(255,255,255,0.12)',
-                  color: '#fff',
-                }}
-              />
-            )}
-          </Box>
-        </Box>
-      )}
-
-      {/* ── Main ── */}
-      {/* md未満では縦積みにする（自分のカメラ→面接官→質問パネル）。
-          useMediaQueryでの分岐は使わず、sxのブレークポイントだけで解く
-          （video要素の再マウント・Realtime再接続を避けるため #1569） */}
-      {/* xsでは全体を縦スクロール可能にする。自分のカメラ+面接官帯(固定高さ)と
-          質問パネルの合計が、横向き(844x390等)の短いビューポートではヘッダー分を
-          引いた残り高さに収まらないことがあり、overflow:hiddenのままだと右パネルの
-          操作ボタンが高さ0まで圧縮されて消える（レビュー指摘, #1569の再発パターン）。
-          右パネル側にもminHeightの floor を持たせた上で、収まらない場合は
-          画面全体をスクロールして操作ボタンへ到達できるようにする。 */}
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, px: 2, pb: 2, overflowX: 'hidden', overflowY: { xs: 'auto', md: 'hidden' }, minHeight: 0 }}>
-
-        {/* ── 左: 自分のカメラ(主役) + 面接官(2Dアバター、小) ── */}
-        {/* 自分の映像を中心に据える構成に変更(#2D化)。以前は面接官アバターが
-            全面で自分のカメラは左下の小さいオーバーレイだったが、面接練習で
-            本人が自分の映り・姿勢を確認しやすいよう主従を入れ替えた。 */}
-        <Box sx={{ flex: { xs: '0 0 auto', md: '0 0 58%' }, display: 'flex', flexDirection: 'column', gap: 1.5, minHeight: 0 }}>
-
-          {/* 自分のカメラ(大) */}
-          <Box sx={{ flex: { xs: '0 0 auto', md: 1 }, height: { xs: 180, md: 'auto' }, minHeight: 0, position: 'relative', borderRadius: 3, overflow: 'hidden', bgcolor: '#1a1a1a' }}>
-            <video
-              ref={sessionVideoCallbackRef}
-              muted
-              playsInline
-              className={`${styles.cameraVideo} ${styles.cameraVideoFill} ${cameraEnabled ? '' : styles.cameraVideoHidden}`}
-            />
-            {!cameraEnabled && (
-              <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <VideocamOffIcon sx={{ color: '#666', fontSize: 40 }} />
-              </Box>
-            )}
-
-            {/* 自分のラベル */}
-            <Box sx={{
-              position: 'absolute', top: 12, left: 12,
-              bgcolor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)',
-              borderRadius: 9999, px: 1.75, py: 0.5,
-            }}>
-              <Typography sx={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>
-                あなた{userName ? `（${userName}）` : ''}
-              </Typography>
-            </Box>
-
-            {/* 接続中オーバーレイ */}
-            {status === 'connecting' && (
-              <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-                <Typography sx={{ color: UI.nightInk, fontSize: 15 }}>接続中...</Typography>
-                <LinearProgress sx={{ width: 160, bgcolor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { bgcolor: UI.mark } }} />
-              </Box>
-            )}
-
-            {/* エラーオーバーレイ */}
-            {status === 'error' && (
-              <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'rgba(0,0,0,0.75)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', p: 3, gap: 2 }}>
-                <Typography sx={{ color: '#f28b82', textAlign: 'center', fontSize: 14, lineHeight: 1.6 }}>{errorMessage}</Typography>
-                <Button variant="contained" startIcon={<RefreshIcon />} onClick={onJoin}
-                  sx={{ bgcolor: '#4285f4', '&:hover': { bgcolor: '#3367d6' }, textTransform: 'none' }}>
-                  再接続する
-                </Button>
-              </Box>
-            )}
-          </Box>
-
-          {/* 面接官(2Dアバター、小) + 発話中の字幕 */}
-          <Box sx={{ flexShrink: 0, height: { xs: 100, md: 128 }, display: 'flex', gap: 1.5 }}>
-            <Box sx={{ width: { xs: 100, md: 128 }, flexShrink: 0, borderRadius: 2, overflow: 'hidden', position: 'relative', bgcolor: UI.nightPanel, border: '1px solid rgba(255,255,255,0.14)' }}>
-              <Avatar2D
-                gender={avatarGender}
-                level={aiLevel}
-                speaking={aiSpeaking}
-                active={isConnected}
-                pending={turnPending}
-                acknowledgeSignal={studentPauseCount}
-              />
-              <Box sx={{
-                position: 'absolute', top: 6, left: 6, right: 6,
-                display: 'flex', alignItems: 'center', gap: 0.5,
-              }}>
-                <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: aiSpeaking ? '#34a853' : 'rgba(255,255,255,0.4)', flexShrink: 0 }} />
-                <Typography noWrap sx={{ color: '#fff', fontSize: 10.5, fontWeight: 600 }}>
-                  {(companyName || 'AI面接練習') + ' 面接官'}
-                </Typography>
-              </Box>
-            </Box>
-
-            {/* 発話中の字幕(リアルタイムTTSテキスト)。「字幕」トグルで表示/非表示。
-                右パネルの「現在の質問」カードと内容が重複するため、実際に
-                読み上げている間だけ出す（クローズドキャプションと同じ考え方）。 */}
-            {captionsVisible && aiSpeaking ? (
-              <Box sx={{
-                flex: 1, minWidth: 0, borderRadius: 2, px: 2, py: 1.25,
-                bgcolor: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)',
-                display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 0.3,
-                overflow: 'hidden',
-              }}>
-                <Typography sx={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}>
-                  AI面接官 音声読み上げ中
-                </Typography>
-                <Typography sx={{
-                  color: '#fff', fontSize: 13, lineHeight: 1.5,
-                  display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                }}>
-                  {currentQuestionText}
-                </Typography>
-              </Box>
-            ) : (
-              <Box sx={{ flex: 1 }} />
-            )}
-          </Box>
-        </Box>
-
-        {/* ── 右: チャット + コントロール ── */}
-        {/* minHeight:0 がないとflex:1の文字起こし領域がoverflow:autoで
-            縮まらず、コントロールが画面外へ押し出される（xs縦積み時） */}
-        {/* xsでは右パネル自体を縦スクロール可能にする。横向き(844x390等)で
-            アバター帯200px+ヘッダー+2行の操作行の合計がビューポートを超えると
-            overflow:hiddenのままでは主要ボタンが完全にクリップされる
-            （レビュー指摘, #1569） */}
-        {/* minHeightに床を設ける。0のままだと、短い縦積みビューポートで左の
-            カメラ+面接官帯に押されてこのパネルが高さ0まで潰れ、話す/完了する
-            ボタンが見えなくなる（レビュー指摘）。床を超える分は、親Main側の
-            overflowY:autoで画面全体をスクロールして到達できるようにしてある。 */}
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5, minWidth: 0, minHeight: { xs: 220, md: 0 }, overflowX: 'hidden', overflowY: { xs: 'auto', md: 'hidden' } }}>
-
-          {/* 発話保存の失敗を面接中に見せる（#1476）。面接は続行できるため止めない */}
-          {utteranceSaveFailed && (
-            <Box role="alert" sx={{ bgcolor: 'rgba(251,188,5,0.15)', border: '1px solid rgba(251,188,5,0.4)', borderRadius: 2, p: 1.5 }}>
-              <Typography sx={{ color: '#fdd663', fontSize: 13, lineHeight: 1.6 }}>
-                {UTTERANCE_SAVE_FAILED_MESSAGE}
-              </Typography>
+              {(isDeepeningQuestion || questionCategory) && (
+                <Chip
+                  size="small"
+                  label={isDeepeningQuestion ? '深掘り質問' : questionCategory || ''}
+                  sx={{
+                    flexShrink: 0, height: 22, fontSize: 11,
+                    bgcolor: isDeepeningQuestion ? 'rgba(251,188,4,0.25)' : 'var(--surface-container-high)',
+                    color: isDeepeningQuestion ? '#fff' : 'var(--on-surface-variant)',
+                  }}
+                />
+              )}
             </Box>
           )}
 
-          {/* 質問・回答エリア(スクロール可能) */}
-          <Box sx={{ flex: 1, overflowY: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1.5, py: 1,
-            '&::-webkit-scrollbar': { width: 4 },
-            '&::-webkit-scrollbar-thumb': { bgcolor: 'rgba(255,255,255,0.2)', borderRadius: 2 },
-          }}>
-            {utterances.length === 0 && !partialAi ? (
-              <Typography sx={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, textAlign: 'center', mt: 4 }}>
-                面接が始まると質問がここに表示されます
-              </Typography>
-            ) : (
-              <>
-                {/* 現在の質問 */}
-                {/* カード背景は白を薄く重ねる方式(rgba(255,255,255,x))だと、
-                    夜間背景(UI.nightStage)自体の明るさのせいで白文字との
-                    コントラストが不足する(テスター計測でAA基準4.5:1未達)。
-                    この画面の既存要素(質問タイマー帯など)と同じ、黒を重ねて
-                    暗くする方式に統一し、白文字側は変えずに済むようにする。 */}
-                <Box sx={{ bgcolor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 2, p: 2 }}>
-                  <Typography sx={{ color: 'rgba(255,255,255,0.7)', fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, mb: 1 }}>
-                    {isActive ? '現在の質問' : '前回の質問'}
-                  </Typography>
-                  <Typography sx={{ color: '#fff', fontSize: 15, lineHeight: 1.75, whiteSpace: 'pre-wrap' }}>
-                    {currentQuestionText || '質問を準備しています…'}
-                  </Typography>
-                </Box>
+          {/* ── Main: 左58% 自分のカメラ+面接官 / 右42% 質問パネル ── */}
+          <Box className={styles.mainGrid}>
 
-                {/* STAR回答フレームワーク思考ガイド */}
-                <Box sx={{ bgcolor: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden' }}>
-                  <Box
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setStarGuideOpen((v) => !v)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setStarGuideOpen((v) => !v) } }}
-                    aria-expanded={starGuideOpen}
-                    aria-controls="star-guide-panel"
-                    sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2, py: 1.25, cursor: 'pointer', minHeight: 44 }}
-                  >
-                    <Typography sx={{ color: 'rgba(255,255,255,0.85)', fontSize: 12.5, fontWeight: 600 }}>
-                      STAR回答フレームワーク思考ガイド
-                    </Typography>
-                    <ExpandMoreIcon sx={{ color: 'rgba(255,255,255,0.6)', fontSize: 20, transform: starGuideOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
-                  </Box>
-                  {starGuideOpen && (
-                    <Box id="star-guide-panel" sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, px: 2, pb: 2 }}>
-                      {STAR_GUIDE.map((s) => (
-                        <Box key={s.key} sx={{ bgcolor: 'rgba(0,0,0,0.2)', borderRadius: 1.5, p: 1.25 }}>
-                          {/* UI.markは白背景前提の色で、この画面の夜間背景ではほぼ見えない
-                              (コントラスト比約1.1:1、レビュー指摘)。暗背景用の見やすい
-                              アクセント色に変える。 */}
-                          <Typography sx={{ color: '#8ab4f8', fontSize: 12, fontWeight: 700 }}>
-                            {s.key} ({s.label})
-                          </Typography>
-                          <Typography sx={{ color: 'rgba(255,255,255,0.75)', fontSize: 11.5, lineHeight: 1.5, mt: 0.3 }}>
-                            {s.description}
-                          </Typography>
-                        </Box>
-                      ))}
-                    </Box>
-                  )}
-                </Box>
+            {/* ── 左: 自分のカメラ(主役) + 面接官(2Dアバター、小) ── */}
+            {/* 自分の映像を中心に据える構成に変更(#2D化)。以前は面接官アバターが
+                全面で自分のカメラは左下の小さいオーバーレイだったが、面接練習で
+                本人が自分の映り・姿勢を確認しやすいよう主従を入れ替えた。 */}
+            <Box className={styles.leftStage}>
 
-                {/* ライブ回答(あなたの発話) */}
-                {isActive && (
-                  <Box sx={{ bgcolor: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 2, p: 2 }}>
-                    <Typography sx={{ color: 'rgba(255,255,255,0.7)', fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, mb: 1 }}>
-                      あなたの回答{partialUser ? '（認識中）' : ''}
-                    </Typography>
-                    <Typography sx={{ color: liveAnswerText ? '#fff' : 'rgba(255,255,255,0.4)', fontSize: 13.5, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
-                      {liveAnswerText || '「話す」ボタンを押して回答してください'}
-                    </Typography>
+              {/* 自分のカメラ(大、16:9) */}
+              <Box className={styles.cameraCard}>
+                <video
+                  ref={sessionVideoCallbackRef}
+                  muted
+                  playsInline
+                  className={`${styles.cameraVideo} ${styles.cameraVideoFill} ${cameraEnabled ? '' : styles.cameraVideoHidden}`}
+                />
+                {!cameraEnabled && (
+                  <Box className={styles.cameraOffIcon}>
+                    <VideocamOffIcon sx={{ fontSize: 40 }} />
                   </Box>
                 )}
 
-                {/* これまでの質問・回答(折りたたみ) */}
-                {utterances.length > 0 && (
-                  <Box sx={{ bgcolor: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden' }}>
+                <Box className={styles.cameraScrim} />
+                <Box className={styles.liveFeedBadge}>
+                  <Box className={styles.liveFeedDot} />
+                  <Typography component="span" className={styles.liveFeedLabel}>LIVE FEED</Typography>
+                </Box>
+
+                <Box className={styles.candidateLabelWrap}>
+                  <Box className={styles.candidateLabel}>
+                    <Typography component="div" className={styles.candidateLabelEyebrow}>CANDIDATE</Typography>
+                    <Typography component="div" className={styles.candidateLabelName}>
+                      あなた{userName ? `（${userName}）` : ''}
+                    </Typography>
+                  </Box>
+                </Box>
+
+                {/* 接続中オーバーレイ */}
+                {status === 'connecting' && (
+                  <Box className={styles.statusOverlay} data-tone="connecting">
+                    <Typography component="span" className={styles.statusOverlayText}>接続中...</Typography>
+                    <LinearProgress sx={{ width: 160, bgcolor: 'var(--surface-variant)', '& .MuiLinearProgress-bar': { bgcolor: 'var(--primary-container)' } }} />
+                  </Box>
+                )}
+
+                {/* エラーオーバーレイ */}
+                {status === 'error' && (
+                  <Box className={styles.statusOverlay} data-tone="error">
+                    <Typography component="div" className={styles.errorOverlayText}>{errorMessage}</Typography>
+                    <Button variant="contained" startIcon={<RefreshIcon />} onClick={onJoin} className={styles.reconnectButton}>
+                      再接続する
+                    </Button>
+                  </Box>
+                )}
+              </Box>
+
+              {/* 面接官(2Dアバター、小) + 発話中の字幕 */}
+              <Box className={styles.avatarCard}>
+                <Box className={styles.avatarPanel}>
+                  <Avatar2D
+                    gender={avatarGender}
+                    level={aiLevel}
+                    speaking={aiSpeaking}
+                    active={isConnected}
+                    pending={turnPending}
+                    acknowledgeSignal={studentPauseCount}
+                  />
+                  <Box className={styles.avatarBadgeRow}>
+                    <Box className={styles.avatarBadgeDot} data-speaking={aiSpeaking} />
+                    <Typography noWrap component="span" className={styles.avatarBadgeLabel}>
+                      {(companyName || 'AI面接練習') + ' 面接官'}
+                    </Typography>
+                  </Box>
+                </Box>
+
+                {/* 発話中の字幕(リアルタイムTTSテキスト)。「字幕」トグルで表示/非表示。
+                    右パネルの「現在の質問」カードと内容が重複するため、実際に
+                    読み上げている間だけ出す（クローズドキャプションと同じ考え方）。 */}
+                {captionsVisible && aiSpeaking ? (
+                  <Box className={styles.captionBox}>
+                    <Box className={styles.captionEyebrowRow}>
+                      <VolumeUpIcon sx={{ color: 'var(--primary-container)', fontSize: 14 }} />
+                      <Typography component="span" className={styles.captionEyebrow}>
+                        AI面接官 音声読み上げ中
+                      </Typography>
+                    </Box>
+                    <Typography component="div" className={styles.captionText}>
+                      {partialAi || currentQuestionText}
+                    </Typography>
+                  </Box>
+                ) : (
+                  <Box sx={{ flex: 1 }} />
+                )}
+              </Box>
+            </Box>
+
+            {/* ── 右: 質問パネル ── */}
+            <Box className={styles.questionPanel}>
+
+              {/* 発話保存の失敗を面接中に見せる（#1476）。面接は続行できるため止めない */}
+              {utteranceSaveFailed && (
+                <Box role="alert" className={styles.saveFailedBanner}>
+                  <Typography component="div" className={styles.saveFailedText}>
+                    {UTTERANCE_SAVE_FAILED_MESSAGE}
+                  </Typography>
+                </Box>
+              )}
+
+              {utterances.length === 0 && !partialAi ? (
+                <Typography component="div" className={styles.emptyQuestionText}>
+                  面接が始まると質問がここに表示されます
+                </Typography>
+              ) : (
+                <>
+                  {/* CURRENT QUESTION ヘッダー */}
+                  <Box className={styles.currentQuestionHeader}>
+                    <Typography component="span" className={styles.currentQuestionBadge}>
+                      {isActive ? 'CURRENT QUESTION' : '前回の質問'}
+                    </Typography>
+                    <Typography component="span" className={styles.currentQuestionIndex}>
+                      {currentQuestionIndex} / {totalQuestionCount}
+                    </Typography>
+                  </Box>
+
+                  {/* 質問本文 */}
+                  <Box className={styles.insetBox}>
+                    <Typography component="div" className={styles.questionText}>
+                      {currentQuestionText || '質問を準備しています…'}
+                    </Typography>
+                  </Box>
+
+                  {/* ライブ回答(あなたの発話、STT) */}
+                  {isActive && (
+                    <Box className={styles.answerSection}>
+                      <Box className={styles.answerEyebrowRow}>
+                        <Box className={styles.answerDot} data-active={!!partialUser} />
+                        <Typography component="span" className={styles.answerEyebrow}>
+                          あなたの回答{partialUser ? '（認識中）' : ''}
+                        </Typography>
+                      </Box>
+                      <Box className={`${styles.insetBox} ${styles.answerBox}`}>
+                        <Typography component="div" className={styles.answerText} data-filled={!!liveAnswerText}>
+                          {liveAnswerText || '「話す」ボタンを押して回答してください'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  )}
+
+                  {/* STAR回答フレームワーク思考ガイド */}
+                  <Box className={styles.collapsibleCard}>
                     <Box
                       role="button"
                       tabIndex={0}
-                      onClick={() => setHistoryOpen((v) => !v)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setHistoryOpen((v) => !v) } }}
-                      aria-expanded={historyOpen}
-                      aria-controls="interview-history-panel"
-                      sx={{ display: 'flex', alignItems: 'center', gap: 0.75, px: 2, py: 1.25, cursor: 'pointer', minHeight: 44 }}
+                      onClick={() => setStarGuideOpen((v) => !v)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setStarGuideOpen((v) => !v) } }}
+                      aria-expanded={starGuideOpen}
+                      aria-controls="star-guide-panel"
+                      className={styles.collapsibleHeader}
                     >
-                      <HistoryIcon sx={{ color: 'rgba(255,255,255,0.6)', fontSize: 18 }} />
-                      <Typography sx={{ color: 'rgba(255,255,255,0.85)', fontSize: 12.5, fontWeight: 600, flex: 1 }}>
-                        これまでの質問・回答（{utterances.length}）
-                      </Typography>
-                      <ExpandMoreIcon sx={{ color: 'rgba(255,255,255,0.6)', fontSize: 20, transform: historyOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+                      <Box className={styles.collapsibleHeaderLeft}>
+                        <LightbulbOutlinedIcon sx={{ color: 'var(--tertiary)', fontSize: 18 }} />
+                        <Typography component="span" className={styles.collapsibleTitle}>
+                          STAR回答フレームワーク思考ガイド
+                        </Typography>
+                      </Box>
+                      <ExpandMoreIcon className={styles.collapsibleChevron} data-open={starGuideOpen} />
                     </Box>
-                    {historyOpen && (
-                      <Box id="interview-history-panel" sx={{ display: 'flex', flexDirection: 'column', gap: 1, px: 2, pb: 2 }}>
-                        {utterances.map((u, i) => (
-                          <Box key={i} sx={{ display: 'flex', flexDirection: 'column', gap: 0.3, alignItems: u.role === 'ai' ? 'flex-start' : 'flex-end' }}>
-                            <Box sx={{
-                              bgcolor: u.role === 'ai' ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.18)',
-                              color: u.role === 'ai' ? '#1a1a1a' : '#fff',
-                              px: 2, py: 1.2,
-                              borderRadius: u.role === 'ai' ? '4px 16px 16px 16px' : '16px 4px 16px 16px',
-                              maxWidth: '92%',
-                            }}>
-                              <Typography sx={{ fontSize: 13, lineHeight: 1.6 }}>{u.text}</Typography>
-                            </Box>
+                    {starGuideOpen && (
+                      <Box id="star-guide-panel" className={styles.starGrid}>
+                        {STAR_GUIDE.map((s) => (
+                          <Box key={s.key} className={styles.starItem}>
+                            <Typography component="div" className={styles.starKey}>
+                              {s.key} ({s.label})
+                            </Typography>
+                            <Typography component="div" className={styles.starDescription}>
+                              {s.description}
+                            </Typography>
                           </Box>
                         ))}
                       </Box>
                     )}
                   </Box>
-                )}
-              </>
-            )}
 
-            <div ref={transcriptEndRef} />
-          </Box>
-
-          {/* ── コントロールボタン ── */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, flexShrink: 0 }}>
-            {/* サブコントロール行 */}
-            <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
-              {/* #1481: タップ領域は44px以上にする */}
-              <Tooltip title={cameraEnabled ? 'カメラをオフ' : 'カメラをオン'}>
-                <span>
-                  <IconButton onClick={onToggleCamera} disabled={!isConnected} aria-label="カメラの入切"
-                    sx={{ bgcolor: cameraEnabled ? 'rgba(255,255,255,0.15)' : '#ea4335', width: 44, height: 44, '&:hover': { bgcolor: cameraEnabled ? 'rgba(255,255,255,0.25)' : '#c5221f' }, '&:disabled': { bgcolor: 'rgba(255,255,255,0.06)' } }}>
-                    {cameraEnabled ? <VideocamIcon sx={{ color: '#fff', fontSize: 18 }} /> : <VideocamOffIcon sx={{ color: '#fff', fontSize: 18 }} />}
-                  </IconButton>
-                </span>
-              </Tooltip>
-              <Tooltip title={captionsVisible ? '字幕をオフ' : '字幕をオン'}>
-                <IconButton onClick={onToggleCaptions} aria-label="字幕の表示切替"
-                  sx={{ bgcolor: captionsVisible ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', width: 44, height: 44 }}>
-                  <ClosedCaptionIcon sx={{ color: captionsVisible ? '#fff' : 'rgba(255,255,255,0.5)', fontSize: 18 }} />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title={handsFreeMode ? 'ハンズフリーをオフ' : 'ハンズフリーをオン'}>
-                <IconButton onClick={onToggleHandsFree} disabled={!isConnected} aria-label="ハンズフリーの入切"
-                  sx={{ bgcolor: handsFreeMode ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', width: 44, height: 44 }}>
-                  <MicIcon sx={{ color: handsFreeMode ? '#fff' : 'rgba(255,255,255,0.5)', fontSize: 18 }} />
-                </IconButton>
-              </Tooltip>
-            </Box>
-
-            {/* 主要ボタン行 */}
-            <Box sx={{ display: 'flex', gap: 1 }}>
-              {/* 録音 / 話す ボタン */}
-              {/*
-                「AI発話中」「AIが考えています」をやめた。
-                面接練習は「面接官と話している」という前提が成り立ってこそ
-                練習になる。話し相手をAIと呼ぶとその前提が崩れる。
-              */}
-              <Tooltip title={aiSpeaking ? '面接官が話しています' : turnPending ? '面接官が考えています' : isRecording ? 'クリックして送信' : 'クリックして話す'}>
-                <span className={styles.recordButtonWrap}>
-                  <Button
-                    fullWidth
-                    onClick={isRecording ? onStopRecording : onStartRecording}
-                    disabled={!isConnected || turnPending || aiSpeaking}
-                    startIcon={
-                      turnPending
-                        ? <CircularProgress size={16} sx={{ color: 'inherit' }} />
-                        : aiSpeaking
-                          ? <VolumeUpIcon sx={{ fontSize: 18 }} />
-                          : <MicIcon sx={{ fontSize: 18 }} />
-                    }
-                    sx={{
-                      borderRadius: 9999, py: 1.1, minHeight: 44,
-                      bgcolor: isRecording ? 'rgba(234,67,53,0.25)' : 'rgba(255,255,255,0.18)',
-                      color: isRecording ? '#ff8a80' : 'rgba(255,255,255,0.9)',
-                      border: `1px solid ${isRecording ? 'rgba(234,67,53,0.5)' : 'rgba(255,255,255,0.25)'}`,
-                      textTransform: 'none', fontWeight: 600, fontSize: 13,
-                      animation: isRecording ? 'micPulse 1.4s ease-in-out infinite' : 'none',
-                      '@keyframes micPulse': { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.75 } },
-                      '&:hover': { bgcolor: isRecording ? 'rgba(234,67,53,0.35)' : 'rgba(255,255,255,0.25)' },
-                      '&:disabled': { bgcolor: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.3)', border: '1px solid rgba(255,255,255,0.1)' },
-                    }}
-                  >
-                    {isRecording ? '録音中' : turnPending ? '送信中' : aiSpeaking ? '面接官が発言中' : '話す'}
-                  </Button>
-                </span>
-              </Tooltip>
-
-              {/* 完了 / 開始ボタン */}
-              {!isActive ? (
-                <Button
-                  variant="contained"
-                  onClick={onJoin}
-                  sx={{ borderRadius: 9999, px: 2.5, py: 1.1, minHeight: 44, fontWeight: 600, textTransform: 'none', fontSize: 13, bgcolor: '#34a853', '&:hover': { bgcolor: '#2d8f47' }, flexShrink: 0 }}
-                >
-                  面接を開始
-                </Button>
-              ) : (
-                <Button
-                  variant="contained"
-                  onClick={() => onStop(false)}
-                  sx={{ borderRadius: 9999, px: 2.5, py: 1.1, minHeight: 44, fontWeight: 600, textTransform: 'none', fontSize: 13, bgcolor: 'rgba(255,255,255,0.22)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', boxShadow: 'none', '&:hover': { bgcolor: 'rgba(255,255,255,0.32)', boxShadow: 'none' }, flexShrink: 0 }}
-                >
-                  完了する
-                </Button>
+                  {/* これまでの質問・回答(折りたたみ) */}
+                  {utterances.length > 0 && (
+                    <Box className={styles.collapsibleCard}>
+                      <Box
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setHistoryOpen((v) => !v)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setHistoryOpen((v) => !v) } }}
+                        aria-expanded={historyOpen}
+                        aria-controls="interview-history-panel"
+                        className={styles.collapsibleHeader}
+                      >
+                        <HistoryIcon sx={{ color: 'var(--on-surface-variant)', fontSize: 18 }} />
+                        <Typography component="span" className={styles.collapsibleTitle}>
+                          これまでの質問・回答（{utterances.length}）
+                        </Typography>
+                        <ExpandMoreIcon className={styles.collapsibleChevron} data-open={historyOpen} />
+                      </Box>
+                      {historyOpen && (
+                        <Box id="interview-history-panel" className={styles.historyList}>
+                          {utterances.map((u, i) => (
+                            <Box key={i} className={styles.historyRow} data-role={u.role}>
+                              <Box className={styles.historyBubble} data-role={u.role}>
+                                {u.text}
+                              </Box>
+                            </Box>
+                          ))}
+                        </Box>
+                      )}
+                    </Box>
+                  )}
+                </>
               )}
+
+              <div ref={transcriptEndRef} />
             </Box>
           </Box>
+        </Box>
+      </Box>
+
+      {/* ── 下部コントロールバー(常に表示。スクロール領域の外に置き、
+          短いビューポートでも操作ボタンが隠れないようにする) ── */}
+      <Box className={styles.controlBar}>
+        <Box className={styles.controlBarInner}>
+          {/* #1481: タップ領域は44px以上にする */}
+          <Tooltip title={cameraEnabled ? 'カメラをオフ' : 'カメラをオン'}>
+            <span>
+              <IconButton onClick={onToggleCamera} disabled={!isConnected} aria-label="カメラの入切" className={styles.iconToggle}>
+                {cameraEnabled ? <VideocamIcon sx={{ color: 'var(--primary)', fontSize: 18 }} /> : <VideocamOffIcon sx={{ color: 'var(--on-surface-variant)', fontSize: 18 }} />}
+              </IconButton>
+            </span>
+          </Tooltip>
+          <Tooltip title={captionsVisible ? '字幕をオフ' : '字幕をオン'}>
+            <IconButton onClick={onToggleCaptions} aria-label="字幕の表示切替" className={styles.iconToggle} data-active={captionsVisible}>
+              <ClosedCaptionIcon sx={{ color: captionsVisible ? 'var(--primary)' : 'var(--on-surface-variant)', fontSize: 18 }} />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title={handsFreeMode ? 'ハンズフリーをオフ' : 'ハンズフリーをオン'}>
+            <IconButton onClick={onToggleHandsFree} disabled={!isConnected} aria-label="ハンズフリーの入切" className={styles.iconToggle} data-active={handsFreeMode}>
+              {handsFreeMode ? <MicIcon sx={{ color: 'var(--primary)', fontSize: 18 }} /> : <MicOffIcon sx={{ color: 'var(--on-surface-variant)', fontSize: 18 }} />}
+            </IconButton>
+          </Tooltip>
+
+          <Box className={styles.controlDivider} />
+
+          {/* 録音 / 話す ボタン */}
+          {/*
+            「AI発話中」「AIが考えています」をやめた。
+            面接練習は「面接官と話している」という前提が成り立ってこそ
+            練習になる。話し相手をAIと呼ぶとその前提が崩れる。
+          */}
+          <Tooltip title={aiSpeaking ? '面接官が話しています' : turnPending ? '面接官が考えています' : isRecording ? 'クリックして送信' : 'クリックして話す'}>
+            <span>
+              <Button
+                onClick={isRecording ? onStopRecording : onStartRecording}
+                disabled={!isConnected || turnPending || aiSpeaking}
+                startIcon={
+                  turnPending
+                    ? <CircularProgress size={16} sx={{ color: 'inherit' }} />
+                    : aiSpeaking
+                      ? <VolumeUpIcon sx={{ fontSize: 18 }} />
+                      : <MicIcon sx={{ fontSize: 18 }} />
+                }
+                className={styles.talkButton}
+                data-recording={isRecording}
+              >
+                {isRecording ? '録音中' : turnPending ? '送信中' : aiSpeaking ? '面接官が発言中' : '話す'}
+              </Button>
+            </span>
+          </Tooltip>
+
+          {/* 完了 / 開始ボタン */}
+          {!isActive ? (
+            <Button variant="contained" onClick={onJoin} className={styles.primaryActionButton}>
+              面接を開始
+            </Button>
+          ) : (
+            <Button variant="contained" onClick={() => onStop(false)} className={styles.primaryActionButton}>
+              完了する
+            </Button>
+          )}
         </Box>
       </Box>
 

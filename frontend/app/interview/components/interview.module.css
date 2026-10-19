@@ -18,25 +18,752 @@
   display: none;
 }
 
-.avatarSvg {
-  position: absolute;
-  top: 0;
-  left: 0;
-}
-
-/* Tooltip 用の span を Button と同じ幅に広げる */
-.recordButtonWrap {
-  flex: 1;
-}
-
 /*
- * 面接セッション画面(SessionScreen)のルート。全画面固定レイアウト(#1569)。
- * 100dvh 未対応ブラウザ用に 100vh を先に書き、後から上書きされる形で
- * 併記する（sx の style object では同一プロパティの重複宣言ができないため
- * CSS Module 側で持つ）。100vw は縦スクロールバー分の横はみ出しを避けて 100% にする。
+ * ── SessionScreen (AI面接セッション画面) ──
+ * Stitchデザイン案(Material 3 ダークテーマ)のカラートークンをCSS変数として
+ * .sessionRoot に持たせ、配下の要素はこの変数を参照する。値はこの画面専用の
+ * ため、共有デザイントークン(lib/design/tokens.ts)には追加しない。
  */
 .sessionRoot {
+  /* 100dvh 未対応ブラウザ用に 100vh を先に書き、後から上書きされる形で併記する(#1569) */
   height: 100vh;
   height: 100dvh;
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  --surface-dim: #0f131d;
+  --surface-container-lowest: #0a0e18;
+  --surface-container-low: #171b26;
+  --surface-container: #1c1f2a;
+  --surface-container-high: #262a35;
+  --surface-variant: #313540;
+  --outline-variant: #3e484f;
+  --on-surface: #dfe2f1;
+  --on-surface-variant: #bdc8d1;
+  --primary: #8ed5ff;
+  --primary-container: #38bdf8;
+  --primary-container-hover: #2aa8e0;
+  --on-primary-container: #00354a;
+  --tertiary: #56e5a9;
+  --error: #ffb4ab;
+  --error-container: #93000a;
+  --warning: #fdd663;
+
+  background: var(--surface-dim);
+  color: var(--on-surface);
+}
+
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@keyframes micPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
+}
+
+/* ── Header ── */
+.header {
+  background: rgba(23, 27, 38, 0.92);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  gap: 16px;
+  flex-shrink: 0;
+}
+@media (min-width: 600px) {
+  .header { padding: 12px 24px; }
+}
+
+.liveBadge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface-container);
+  border-radius: 9999px;
+  padding: 4px 10px;
+  flex-shrink: 0;
+}
+.liveDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tertiary);
+  animation: livePulse 1.6s ease-in-out infinite;
+}
+.liveLabel {
+  color: var(--tertiary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.headerTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.headerCompanyRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.companyName {
+  color: var(--on-surface);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (min-width: 600px) {
+  .companyName { font-size: 16px; }
+}
+.practiceModeBadge {
+  display: none;
+  background: var(--surface-container-high);
+  border-radius: 4px;
+  padding: 2px 6px;
+  flex-shrink: 0;
+}
+.practiceModeBadgeText {
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+@media (min-width: 600px) {
+  .practiceModeBadge { display: block; }
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.timerBadge {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-container-lowest);
+  border-radius: 6px;
+  padding: 6px 12px;
+}
+@media (min-width: 900px) {
+  .timerBadge { display: flex; }
+}
+.timerText {
+  color: var(--on-surface);
+  font-size: 13px;
+  font-family: monospace;
+}
+.endButton {
+  color: var(--error) !important;
+  background: rgba(147, 0, 10, 0.18) !important;
+  border-radius: 6px !important;
+  padding: 6px 12px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  text-transform: none !important;
+  min-height: 36px !important;
+}
+.endButton:hover {
+  background: rgba(147, 0, 10, 0.3) !important;
+}
+.endButtonLabel {
+  display: none;
+}
+@media (min-width: 600px) {
+  .endButtonLabel { display: inline; }
+}
+.userAvatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--primary-container);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--on-primary-container);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* ── 残り時間警告 ── */
+.warningBanner {
+  padding: 8px 16px 0;
+  flex-shrink: 0;
+}
+.warningBannerInner {
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.warningBannerInner[data-level='critical'] {
+  background: rgba(147, 0, 10, 0.3);
+  color: var(--error);
+}
+.warningBannerInner[data-level='warning'] {
+  background: rgba(251, 188, 4, 0.2);
+  color: var(--warning);
+}
+
+/* ── スクロール可能なコンテンツ領域 ── */
+.scrollArea {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+.scrollAreaInner {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 16px;
+}
+@media (min-width: 600px) {
+  .scrollAreaInner { padding: 16px 24px; }
+}
+
+/* ── 質問タイマー ── */
+.questionBar {
+  background: var(--surface-container-low);
+  border-radius: 8px;
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.questionBadge {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--primary-container);
+  border-radius: 4px;
+  padding: 2px 8px;
+  color: var(--on-primary-container);
+}
+.questionBadgeQ {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.questionBadgeIndex {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+.questionBadgeTotal {
+  font-size: 10px;
+}
+.progressTrack {
+  flex: 1;
+  height: 5px;
+  background: var(--surface-variant);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+.progressFill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 1s linear, background-color 0.5s;
+}
+.progressFill[data-urgency='safe'] { background: var(--tertiary); }
+.progressFill[data-urgency='warning'] { background: var(--warning); }
+.progressFill[data-urgency='critical'] { background: var(--error); }
+.countdownText {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.countdownText[data-urgency='safe'] { color: var(--on-surface-variant); }
+.countdownText[data-urgency='warning'] { color: var(--warning); }
+.countdownText[data-urgency='critical'] { color: var(--error); }
+
+/* ── Main 2カラム ── */
+.mainGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+@media (min-width: 1200px) {
+  .mainGrid { flex-direction: row; }
+}
+
+.leftStage {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+@media (min-width: 1200px) {
+  .leftStage { flex: 0 0 58%; }
+}
+
+/* 自分のカメラ(大、16:9) */
+.cameraCard {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface-container-lowest);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+}
+.cameraOffIcon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--outline-variant);
+}
+.cameraScrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(10, 14, 24, 0.75), transparent 35%, transparent 65%, rgba(10, 14, 24, 0.75));
+}
+.liveFeedBadge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(23, 27, 38, 0.9);
+  backdrop-filter: blur(6px);
+  border-radius: 9999px;
+  padding: 4px 10px;
+}
+.liveFeedDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tertiary);
+}
+.liveFeedLabel {
+  color: var(--tertiary);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.candidateLabelWrap {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+}
+.candidateLabel {
+  background: rgba(23, 27, 38, 0.9);
+  backdrop-filter: blur(6px);
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+.candidateLabelEyebrow {
+  color: var(--on-surface-variant);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+.candidateLabelName {
+  color: var(--on-surface);
+  font-size: 13px;
+  font-weight: 600;
+}
+.statusOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+.statusOverlay[data-tone='connecting'] { background: rgba(10, 14, 24, 0.75); }
+.statusOverlay[data-tone='error'] { background: rgba(10, 14, 24, 0.9); padding: 24px; }
+.statusOverlayText {
+  font-size: 15px;
+}
+.errorOverlayText {
+  color: var(--error);
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.reconnectButton {
+  background: var(--primary-container) !important;
+  color: var(--on-primary-container) !important;
+  text-transform: none !important;
+}
+.reconnectButton:hover {
+  background: var(--primary-container-hover) !important;
+}
+
+/* 面接官(2Dアバター、小) + 発話中の字幕 */
+.avatarCard {
+  background: var(--surface-container-low);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  gap: 16px;
+}
+.avatarPanel {
+  width: 96px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  background: var(--surface-container);
+  aspect-ratio: 4 / 3;
+}
+@media (min-width: 600px) {
+  .avatarPanel { width: 120px; }
+}
+.avatarBadgeRow {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.avatarBadgeDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.avatarBadgeDot[data-speaking='true'] { background: var(--primary-container); }
+.avatarBadgeDot[data-speaking='false'] { background: rgba(255, 255, 255, 0.3); }
+.avatarBadgeLabel {
+  color: var(--on-surface);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.captionBox {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+.captionEyebrowRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.captionEyebrow {
+  color: var(--primary-container);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.captionText {
+  color: var(--on-surface);
+  font-size: 13px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── 右: 質問パネル ── */
+.questionPanel {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-container-low);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+@media (min-width: 600px) {
+  .questionPanel { padding: 20px; }
+}
+.saveFailedBanner {
+  background: rgba(251, 188, 5, 0.15);
+  border: 1px solid rgba(251, 188, 5, 0.4);
+  border-radius: 8px;
+  padding: 12px;
+}
+.saveFailedText {
+  color: var(--warning);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.emptyQuestionText {
+  color: var(--on-surface-variant);
+  font-size: 13px;
+  text-align: center;
+  margin-top: 32px;
+}
+
+.currentQuestionHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.currentQuestionBadge {
+  background: var(--primary-container);
+  border-radius: 4px;
+  padding: 3px 10px;
+  color: var(--on-primary-container);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.currentQuestionIndex {
+  color: var(--primary);
+  font-size: 15px;
+  font-weight: 700;
+  font-family: monospace;
+}
+.insetBox {
+  background: var(--surface-container-lowest);
+  border-radius: 8px;
+  padding: 16px;
+}
+.questionText {
+  color: var(--on-surface);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+
+.answerSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.answerEyebrowRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.answerDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--error);
+}
+.answerDot[data-active='true'] {
+  animation: livePulse 1.3s ease-in-out infinite;
+}
+.answerEyebrow {
+  color: var(--on-surface-variant);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.answerBox {
+  max-height: 160px;
+  overflow-y: auto;
+}
+.answerText {
+  font-size: 13.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+.answerText[data-filled='true'] { color: var(--on-surface-variant); }
+.answerText[data-filled='false'] { color: rgba(223, 226, 241, 0.4); }
+
+.collapsibleCard {
+  background: var(--surface-container);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.collapsibleHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  cursor: pointer;
+  min-height: 44px;
+}
+.collapsibleHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.collapsibleTitle {
+  color: var(--on-surface);
+  font-size: 12.5px;
+  font-weight: 600;
+  flex: 1;
+}
+.collapsibleChevron {
+  color: var(--on-surface-variant);
+  font-size: 20px;
+  transition: transform 0.15s ease;
+}
+.collapsibleChevron[data-open='true'] { transform: rotate(180deg); }
+
+.starGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 0 16px 16px;
+}
+.starItem {
+  background: var(--surface-container-low);
+  border-radius: 6px;
+  padding: 10px;
+}
+.starKey {
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 700;
+  font-family: monospace;
+}
+.starDescription {
+  color: var(--on-surface-variant);
+  font-size: 11.5px;
+  line-height: 1.5;
+  margin-top: 2px;
+}
+
+.historyList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 16px 16px;
+}
+.historyRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.historyRow[data-role='ai'] { align-items: flex-start; }
+.historyRow[data-role='user'] { align-items: flex-end; }
+.historyBubble {
+  padding: 10px 16px;
+  max-width: 92%;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.historyBubble[data-role='ai'] {
+  background: var(--surface-container-low);
+  color: var(--on-surface);
+  border-radius: 4px 16px 16px 16px;
+}
+.historyBubble[data-role='user'] {
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+  border-radius: 16px 4px 16px 16px;
+}
+
+/* ── 下部コントロールバー ── */
+.controlBar {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  padding: 12px 16px;
+  background: rgba(23, 27, 38, 0.92);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 -1px 8px rgba(0, 0, 0, 0.25);
+}
+.controlBarInner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.iconToggle {
+  width: 44px !important;
+  height: 44px !important;
+  background: var(--surface-container) !important;
+}
+.iconToggle:hover {
+  background: var(--surface-container-high) !important;
+}
+.iconToggle:disabled {
+  background: var(--surface-container-low) !important;
+}
+.iconToggle[data-active='true'] {
+  background: var(--surface-container-high) !important;
+}
+.controlDivider {
+  width: 1px;
+  height: 28px;
+  background: var(--surface-variant);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+.talkButton {
+  border-radius: 9999px !important;
+  padding: 9px 20px !important;
+  min-height: 44px !important;
+  white-space: nowrap !important;
+  text-transform: none !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  background: var(--surface-container) !important;
+  color: var(--on-surface) !important;
+  border: 1px solid var(--outline-variant) !important;
+}
+.talkButton:hover {
+  background: var(--surface-container-high) !important;
+}
+.talkButton:disabled {
+  background: var(--surface-container-low) !important;
+  color: var(--on-surface-variant) !important;
+  border: 1px solid var(--surface-container-low) !important;
+}
+.talkButton[data-recording='true'] {
+  background: var(--error-container) !important;
+  color: var(--error) !important;
+  border: 1px solid rgba(255, 180, 171, 0.4) !important;
+  animation: micPulse 1.4s ease-in-out infinite;
+}
+.talkButton[data-recording='true']:hover {
+  background: rgba(147, 0, 10, 0.4) !important;
+}
+.primaryActionButton {
+  border-radius: 9999px !important;
+  padding: 9px 24px !important;
+  min-height: 44px !important;
+  font-weight: 700 !important;
+  text-transform: none !important;
+  font-size: 13px !important;
+  white-space: nowrap !important;
+  background: var(--primary-container) !important;
+  color: var(--on-primary-container) !important;
+  box-shadow: none !important;
+  flex-shrink: 0;
+}
+.primaryActionButton:hover {
+  background: var(--primary-container-hover) !important;
+  box-shadow: none !important;
 }
