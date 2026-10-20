@@ -5,6 +5,7 @@ export type MockUser = {
   email: string
   name: string
   is_guest: boolean
+  role?: 'student' | 'teacher' | 'staff'
   is_admin?: boolean
   token: string
   user_token: string
@@ -71,6 +72,7 @@ export async function setupAuth(page: Page, user: MockUser = TEST_USER) {
         email: u.email,
         name: u.name,
         is_guest: u.is_guest,
+        role: u.role,
         is_admin: u.is_admin,
       }
       sessionStorage.setItem('user', JSON.stringify(userData))
