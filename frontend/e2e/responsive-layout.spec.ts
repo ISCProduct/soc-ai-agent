@@ -257,7 +257,7 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
       listDifference: Math.abs(headerRowBox!.x - listBox!.x),
       backButtonRight: backButtonBox!.x + backButtonBox!.width,
       backButtonDifference: Math.abs(
-        backButtonBox!.x + backButtonBox!.width - headerRowBox!.x - headerRowBox!.width,
+        backButtonBox!.x + backButtonBox!.width - trendBox!.x - trendBox!.width,
       ),
     }
   }
@@ -275,8 +275,8 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
       const measurements: Array<Awaited<ReturnType<typeof measureAlignment>>> = []
       for (const width of [2000, 1440, 1024, 768]) {
         await page.setViewportSize({ width, height: 900 })
-        await page.waitForFunction((w: number) => document.documentElement.clientWidth === w, width)
         await page.goto('/interview/history')
+        await page.waitForFunction((w: number) => document.documentElement.clientWidth === w, width)
         await expect(
           historyContent === 'session'
             ? page.getByText('面接セッション #1', { exact: true })
@@ -311,8 +311,8 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
 
     for (const width of [2000, 1440, 1024, 768]) {
       await page.setViewportSize({ width, height: 900 })
-      await page.waitForFunction((w: number) => document.documentElement.clientWidth === w, width)
       await page.goto('/interview/history')
+      await page.waitForFunction((w: number) => document.documentElement.clientWidth === w, width)
       await expect(page.getByText('まだ面接の練習記録がありません')).toBeVisible({ timeout: 15000 })
 
       const headerRow = page.getByTestId('history-header-row')
@@ -338,7 +338,7 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
         `${width}px: 教員モードのチップが見出しと同じ行にない`,
       ).toBeLessThanOrEqual(1)
       expect(
-        Math.abs(backButtonBox!.x + backButtonBox!.width - headerRowBox!.x - headerRowBox!.width),
+        Math.abs(backButtonBox!.x + backButtonBox!.width - trendBox!.x - trendBox!.width),
         `${width}px: 戻るボタンが列の右端に揃っていない`,
       ).toBeLessThanOrEqual(1)
       const { scrollWidth, clientWidth } = await page.evaluate(() => ({
