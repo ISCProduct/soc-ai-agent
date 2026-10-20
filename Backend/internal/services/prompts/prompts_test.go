@@ -301,14 +301,36 @@ func TestGetMatchingReasonPromptVersion(t *testing.T) {
 }
 
 func TestResolvePromptVersion(t *testing.T) {
-	t.Run("工程別設定が一括設定より優先", func(t *testing.T) {
+	t.Run("登録済みの工程別設定が一括設定より優先", func(t *testing.T) {
 		t.Setenv("PROMPT_VERSION", "legacy")
+		t.Setenv("PROMPT_VERSION_MATCHING_REASON", "v2")
+		t.Setenv("PROMPT_AB_MATCHING_REASON", "")
+
+		got := ResolvePromptVersion(StageMatchingReason, 1)
+		if got.Version != "v2" || got.Variant != "control" {
+			t.Fatalf("割当=%+v, want v2/control", got)
+		}
+	})
+
+	t.Run("未登録の工程別設定は従来の一括設定へフォールバック", func(t *testing.T) {
+		t.Setenv("PROMPT_VERSION", "legacy-v4")
 		t.Setenv("PROMPT_VERSION_MATCHING_REASON", "stage-v3")
 		t.Setenv("PROMPT_AB_MATCHING_REASON", "")
 
 		got := ResolvePromptVersion(StageMatchingReason, 1)
-		if got.Version != "stage-v3" || got.Variant != "control" {
-			t.Fatalf("割当=%+v, want stage-v3/control", got)
+		if got.Version != "legacy-v4" || got.Variant != "control" {
+			t.Fatalf("割当=%+v, want legacy-v4/control", got)
+		}
+	})
+
+	t.Run("未登録の工程別設定と一括設定がなければ既定値へフォールバック", func(t *testing.T) {
+		t.Setenv("PROMPT_VERSION", "")
+		t.Setenv("PROMPT_VERSION_QUESTION_GENERATION", "question-v3")
+		t.Setenv("PROMPT_AB_QUESTION_GENERATION", "")
+
+		got := ResolvePromptVersion(StageQuestionGeneration, 1)
+		if got.Version != strings.TrimSpace(PromptVersion) || got.Variant != "control" {
+			t.Fatalf("割当=%+v, want %s/control", got, strings.TrimSpace(PromptVersion))
 		}
 	})
 
@@ -372,11 +394,11 @@ func TestResolvePromptVersion(t *testing.T) {
 	})
 
 	t.Run("無効なA/B設定はcontrolへ戻す", func(t *testing.T) {
-		t.Setenv("PROMPT_VERSION_COMPANY_EXTRACTION", "company-v2")
+		t.Setenv("PROMPT_VERSION_COMPANY_EXTRACTION", "v2")
 		t.Setenv("PROMPT_AB_COMPANY_EXTRACTION", "candidate-v3:101")
 
 		got := ResolvePromptVersion(StageCompanyExtraction, 1)
-		if got.Version != "company-v2" || got.Variant != "control" {
+		if got.Version != "v2" || got.Variant != "control" {
 			t.Fatalf("無効設定時の割当=%+v", got)
 		}
 	})

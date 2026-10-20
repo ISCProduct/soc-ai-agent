@@ -87,7 +87,10 @@ func WithPromptVersion(ctx context.Context, stage Stage, subjectID uint) (contex
 func promptVersionForStage(stage Stage) string {
 	stageVersion := strings.TrimSpace(os.Getenv("PROMPT_VERSION_" + strings.ToUpper(string(stage))))
 	if stageVersion != "" {
-		return stageVersion
+		if hasVersionedPrompt(stage, stageVersion) {
+			return stageVersion
+		}
+		slog.Warn("工程別プロンプト版設定を無視します", "stage", stage, "reason", "prompt version is not registered")
 	}
 	if globalVersion := strings.TrimSpace(os.Getenv("PROMPT_VERSION")); globalVersion != "" {
 		return globalVersion
