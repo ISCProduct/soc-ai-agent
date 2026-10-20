@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Box, Button, CircularProgress, Typography } from '@mui/material'
 import { authService } from '@/lib/auth'
 
@@ -35,9 +35,11 @@ export function AIBudgetNotice() {
   const [status, setStatus] = useState<BudgetStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const requestID = useRef(0)
 
-  const fetchStatus = useCallback(async () => {
-    setLoading(true)
+  const fetchStatus = useCallback(async (showLoading = true) => {
+    const currentRequestID = ++requestID.current
+    if (showLoading) setLoading(true)
     setError('')
     try {
       const response = await fetch('/api/user/ai-budget', {
@@ -48,16 +50,22 @@ export function AIBudgetNotice() {
       if (!response.ok) {
         throw new Error(data.error || `AI利用予算を取得できませんでした (${response.status})`)
       }
-      setStatus(data)
+      if (currentRequestID === requestID.current) setStatus(data)
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'AI利用予算を取得できませんでした')
+      if (currentRequestID === requestID.current) {
+        setError(err instanceof Error ? err.message : 'AI利用予算を取得できませんでした')
+      }
     } finally {
-      setLoading(false)
+      if (showLoading && currentRequestID === requestID.current) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
     void fetchStatus()
+    const timer = window.setInterval(() => {
+      void fetchStatus(false)
+    }, 30_000)
+    return () => window.clearInterval(timer)
   }, [fetchStatus])
 
   if (loading) {

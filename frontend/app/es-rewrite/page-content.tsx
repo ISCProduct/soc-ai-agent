@@ -26,6 +26,7 @@ import RateReviewIcon from '@mui/icons-material/RateReview'
 import { PageLoading } from '@/components/common/PageLoading'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 import { UI } from '@/lib/design/tokens'
+import { authService } from '@/lib/auth'
 
 const QUESTION_TYPES = ['志望動機', '自己PR', '学チカ', 'ガクチカ', 'その他']
 
@@ -192,7 +193,7 @@ function ESRewriteContent() {
     try {
       const res = await fetch('/api/es/rewrite', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
         body: JSON.stringify({
           original_text: originalText,
           question_type: questionType,
@@ -220,7 +221,7 @@ function ESRewriteContent() {
     try {
       const res = await fetch('/api/es/review', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authService.getUserFetchHeaders() },
         body: JSON.stringify({
           es_text: originalText,
           question_type: questionType,

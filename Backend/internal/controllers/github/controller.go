@@ -4,6 +4,7 @@ import (
 	"Backend/internal/controllers/httpapi"
 	"Backend/internal/services/github"
 	ifaces "Backend/internal/services/interfaces"
+	"Backend/internal/usagectx"
 	"context"
 	"errors"
 	"net/http"
@@ -159,6 +160,12 @@ func (c *GitHubController) SummarizeRepo(ctx echo.Context) error {
 
 	summary, err := c.githubService.SummarizeRepo(ctx.Request().Context(), userID, body.FullName, body.ForceRefresh, body.TargetRole)
 	if err != nil {
+		if errors.Is(err, usagectx.ErrAIBudgetUnavailable) {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "AI利用予算を確認できません。時間をおいて再試行してください。")
+		}
+		if errors.Is(err, usagectx.ErrAIBudgetExceeded) {
+			return echo.NewHTTPError(http.StatusTooManyRequests, "AI利用予算の上限に達しました。翌日または翌月に再度お試しください。")
+		}
 		var reauthErr *github.GitHubReauthRequiredError
 		if errors.As(err, &reauthErr) {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())

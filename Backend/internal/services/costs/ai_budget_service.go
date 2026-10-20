@@ -39,10 +39,11 @@ type AIBudgetStatus struct {
 
 type aiBudgetRepository interface {
 	FindSetting(context.Context, string, uint) (*models.AIBudgetSetting, error)
-	ListSettings(context.Context) ([]models.AIBudgetSetting, error)
+	ListSettings(context.Context, int, int) ([]models.AIBudgetSetting, int64, error)
 	SaveSetting(context.Context, *models.AIBudgetSetting) error
 	DeleteSetting(context.Context, string, uint) error
 	SchoolIDForUser(context.Context, uint) (*uint, error)
+	AcquireBudgetLocks(context.Context, uint) (func() error, error)
 	UsageCostSince(context.Context, string, uint, time.Time, time.Time) (float64, error)
 	ScopeExists(context.Context, string, uint) (bool, error)
 }
@@ -87,6 +88,13 @@ func (s *AIBudgetService) Status(ctx context.Context, userID uint) (AIBudgetStat
 	return status, nil
 }
 
+func (s *AIBudgetService) Acquire(ctx context.Context, userID uint) (func() error, error) {
+	if s == nil || s.repo == nil || userID == 0 {
+		return nil, errors.New("AI budget service is not configured")
+	}
+	return s.repo.AcquireBudgetLocks(ctx, userID)
+}
+
 func (s *AIBudgetService) scopeStatus(
 	ctx context.Context,
 	scope string,
@@ -129,11 +137,11 @@ func remainingBudget(limit, used float64) float64 {
 	return limit - used
 }
 
-func (s *AIBudgetService) ListSettings(ctx context.Context) ([]models.AIBudgetSetting, error) {
+func (s *AIBudgetService) ListSettings(ctx context.Context, limit, offset int) ([]models.AIBudgetSetting, int64, error) {
 	if s == nil || s.repo == nil {
-		return nil, errors.New("AI budget service is not configured")
+		return nil, 0, errors.New("AI budget service is not configured")
 	}
-	return s.repo.ListSettings(ctx)
+	return s.repo.ListSettings(ctx, limit, offset)
 }
 
 func (s *AIBudgetService) SetLimit(
@@ -180,5 +188,9 @@ func (s *AIBudgetService) DeleteLimit(ctx context.Context, scope string, scopeID
 }
 
 func validBudgetLimit(value float64) bool {
-	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 999999.999999 {
+		return false
+	}
+	rounded := math.Round(value*1_000_000) / 1_000_000
+	return value == rounded
 }

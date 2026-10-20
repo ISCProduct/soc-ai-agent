@@ -8,11 +8,19 @@
 // openai → middleware → repositories → companyfetch → openai で循環する。
 package usagectx
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // FeatureUnknown は機能名が渡されなかった呼び出しの既定値。
 // この件数が「まだ計測できていない経路」の指標になる（DesignDoc §8）。
 const FeatureUnknown = "unknown"
+
+var (
+	ErrAIBudgetExceeded    = errors.New("AI budget exceeded")
+	ErrAIBudgetUnavailable = errors.New("AI budget check unavailable")
+)
 
 // 機能名の定数。api_call_logs.feature に入り、機能別のコスト集計軸になる。
 // LLM に分類させず、呼び出し元が定数で渡す（DesignDoc §3.5）。
@@ -45,6 +53,15 @@ const (
 
 type featureKey struct{}
 type actorKey struct{}
+type schoolKey struct{}
+type budgetCheckKey struct{}
+type budgetCheckedKey struct{}
+type budgetLockKey struct{}
+
+type budgetCheck func(context.Context) (context.Context, error)
+type budgetLock struct {
+	release func() error
+}
 
 // actor は実行主体と配賦先。どちらも解決できないことがあるためポインタで持つ。
 type actor struct {
@@ -102,4 +119,75 @@ func Actor(ctx context.Context) (userID, organizationID *uint) {
 		return nil, nil
 	}
 	return a.UserID, a.OrganizationID
+}
+
+func WithSchoolID(ctx context.Context, schoolID uint) context.Context {
+	if ctx == nil || schoolID == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, schoolKey{}, schoolID)
+}
+
+func SchoolID(ctx context.Context) *uint {
+	if ctx == nil {
+		return nil
+	}
+	schoolID, ok := ctx.Value(schoolKey{}).(uint)
+	if !ok || schoolID == 0 {
+		return nil
+	}
+	return &schoolID
+}
+
+func WithAIBudgetCheck(ctx context.Context, check func(context.Context) (context.Context, error)) context.Context {
+	if ctx == nil || check == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, budgetCheckKey{}, budgetCheck(check))
+}
+
+func CheckAIBudget(ctx context.Context) (context.Context, error) {
+	if ctx == nil {
+		return ctx, nil
+	}
+	check, ok := ctx.Value(budgetCheckKey{}).(budgetCheck)
+	if !ok {
+		return ctx, nil
+	}
+	return check(ctx)
+}
+
+func WithAIBudgetChecked(ctx context.Context) context.Context {
+	if ctx == nil {
+		return nil
+	}
+	return context.WithValue(ctx, budgetCheckedKey{}, true)
+}
+
+func AIBudgetChecked(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	checked, _ := ctx.Value(budgetCheckedKey{}).(bool)
+	return checked
+}
+
+func WithAIBudgetLock(ctx context.Context, release func() error) context.Context {
+	if ctx == nil || release == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, budgetLockKey{}, &budgetLock{release: release})
+}
+
+func ReleaseAIBudgetLock(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	lock, ok := ctx.Value(budgetLockKey{}).(*budgetLock)
+	if !ok || lock == nil || lock.release == nil {
+		return nil
+	}
+	release := lock.release
+	lock.release = nil
+	return release()
 }

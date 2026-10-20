@@ -154,11 +154,15 @@ var errReviewOutputTruncated error = &shared.ValidationError{
 // 「解析に失敗しました」になって原因が上限だと分からない**ため。
 // items を最後以外へ動かすと途中までが読めてしまう余地も残るので、
 // スキーマ変更に対する保険も兼ねている。
-func (s *ResumeService) requestReviewJSON(systemPrompt, userPrompt, model string) (string, error) {
+func (s *ResumeService) requestReviewJSON(systemPrompt, userPrompt, model string, requestContexts ...context.Context) (string, error) {
+	ctx := context.Background()
+	if len(requestContexts) > 0 && requestContexts[0] != nil {
+		ctx = requestContexts[0]
+	}
 	// 同じ枠・同じ温度でやり直しても同じ位置で切れるので、枠を倍にする方だけ試す。
 	for _, maxTokens := range []int{ReviewMaxOutputTokens, ReviewMaxOutputTokens * 2} {
 		// 上限到達を検知するためフラグ付きのコンテキストで呼ぶ（#1529）。
-		aiCtx := openai.WithTruncationFlag(context.Background())
+		aiCtx := openai.WithTruncationFlag(ctx)
 		// JSON mode で呼ぶ（#1583）。素の JSON しか返らなくなるので、decodeJSON の
 		// 復旧処理（'{' 〜 '}' の切り出し）は保険として残るだけで通らなくなる。
 		// JSON mode がプロンプトへ要求する "JSON" の語は、初回の ReviewSystemPrompt と
@@ -455,7 +459,7 @@ func (s *ResumeService) ReviewDocumentStream(ctx context.Context, documentID uin
 	}
 
 	// スコア・指摘事項を生成
-	review, items, err := s.buildReviewScoreItems(blocks, companyName, jobTitle, candidateType, ragReport)
+	review, items, err := s.buildReviewScoreItems(blocks, companyName, jobTitle, candidateType, ragReport, ctx)
 	if err != nil {
 		log.Printf("resume_review_stream: build score failed: %v", err)
 		var ve *shared.ValidationError
@@ -574,12 +578,16 @@ func (s *ResumeService) buildResumeReviewWithAI(ctx context.Context, blocks []mo
 			log.Printf("resume_review: rag report failed: %v", err)
 		}
 	}
-	return s.buildReviewScoreItems(blocks, companyName, jobTitle, candidateType, companyInfo)
+	return s.buildReviewScoreItems(blocks, companyName, jobTitle, candidateType, companyInfo, ctx)
 }
 
 // buildReviewScoreItems はcompanyInfoを受け取りOpenAIでスコア・指摘事項を生成する。
 // fetchRAGReportStream など外部から取得したRAGレポートを直接渡す場合に使用する。
-func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, companyName, jobTitle, candidateType, companyInfo string) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, companyName, jobTitle, candidateType, companyInfo string, requestContexts ...context.Context) (*models.ResumeReview, []models.ResumeReviewItem, error) {
+	ctx := context.Background()
+	if len(requestContexts) > 0 && requestContexts[0] != nil {
+		ctx = requestContexts[0]
+	}
 	if s.aiClient == nil {
 		return nil, nil, fmt.Errorf("AIクライアントが初期化されていません")
 	}
@@ -603,7 +611,7 @@ func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, c
 	prompt := buildReviewPrompt(text, companyName, jobTitle, companyInfo, candidateType)
 
 	modelOverride := ReviewModel()
-	raw, err := s.requestReviewJSON(ReviewSystemPrompt, prompt, modelOverride)
+	raw, err := s.requestReviewJSON(ReviewSystemPrompt, prompt, modelOverride, ctx)
 	if err != nil {
 		log.Printf("resume_review: openai review failed: %v", err)
 		if errors.Is(err, errReviewOutputTruncated) {
@@ -636,7 +644,7 @@ func (s *ResumeService) buildReviewScoreItems(blocks []models.ResumeTextBlock, c
 		blocksForRetry := selectReviewBlocks(blocks, 40)
 		blockList := buildBlockList(blocksForRetry)
 		retryPrompt := buildReviewRetryPrompt(blockList, companyName, jobTitle, companyInfo, candidateType)
-		rawRetry, retryReqErr := s.requestReviewJSON(reviewRetrySystemPrompt, retryPrompt, modelOverride)
+		rawRetry, retryReqErr := s.requestReviewJSON(reviewRetrySystemPrompt, retryPrompt, modelOverride, ctx)
 		if retryReqErr != nil {
 			log.Printf("resume_review: やり直しの生成に失敗: %v", retryReqErr)
 		}

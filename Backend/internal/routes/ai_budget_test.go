@@ -15,8 +15,13 @@ func TestRequiresAIBudget(t *testing.T) {
 		want   bool
 	}{
 		{http.MethodPost, "/api/chat", true},
+		{http.MethodGet, "/api/chat/analysis", true},
+		{http.MethodPost, "/api/chat/send-report", true},
 		{http.MethodPost, "/api/interviews", false},
+		{http.MethodGet, "/api/interviews/:id/phrase-suggestions", true},
+		{http.MethodPost, "/api/interviews/:id/send-report", true},
 		{http.MethodPost, "/api/interviews/:id/start", true},
+		{http.MethodPost, "/api/realtime/token", true},
 		{http.MethodPost, "/api/interviews/:id/utterances", false},
 		{http.MethodPost, "/api/interviews/:id/finish", false},
 		{http.MethodPost, "/api/interviews/:id/report/regenerate", true},

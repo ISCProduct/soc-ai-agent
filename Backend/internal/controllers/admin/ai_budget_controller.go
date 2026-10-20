@@ -20,11 +20,25 @@ func NewAIBudgetController(service *costs.AIBudgetService) *AIBudgetController {
 
 // List は GET /api/admin/ai-budgets の設定一覧を返す。
 func (c *AIBudgetController) List(ctx echo.Context) error {
-	settings, err := c.service.ListSettings(ctx.Request().Context())
+	limit := httpapi.LimitQuery(ctx, "limit", 50)
+	offset := 0
+	if raw := ctx.QueryParam("offset"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid offset")
+		}
+		offset = parsed
+	}
+	settings, total, err := c.service.ListSettings(ctx.Request().Context(), limit, offset)
 	if err != nil {
 		return httpapi.InternalError(err)
 	}
-	return ctx.JSON(http.StatusOK, map[string]any{"settings": settings})
+	return ctx.JSON(http.StatusOK, map[string]any{
+		"settings": settings,
+		"total":    total,
+		"limit":    limit,
+		"offset":   offset,
+	})
 }
 
 type setAIBudgetRequest struct {

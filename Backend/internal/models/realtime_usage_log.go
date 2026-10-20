@@ -6,6 +6,7 @@ import "time"
 type RealtimeUsageLog struct {
 	ID                 uint       `gorm:"primaryKey" json:"id"`
 	UserID             uint       `gorm:"index;not null" json:"user_id"`
+	SchoolID           *uint      `gorm:"index" json:"school_id,omitempty"`
 	InterviewSessionID uint       `gorm:"index;not null" json:"interview_session_id"`
 	Status             string     `gorm:"size:16;index;not null;default:'active'" json:"status"`
 	StartedAt          time.Time  `gorm:"not null;index" json:"started_at"`

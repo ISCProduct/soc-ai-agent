@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -16,8 +16,15 @@ type BudgetSetting = {
   monthly_limit_usd: number
 }
 
-type BudgetListResponse = { settings?: BudgetSetting[]; error?: string }
+type BudgetListResponse = {
+  settings?: BudgetSetting[]
+  total?: number
+  limit?: number
+  offset?: number
+  error?: string
+}
 type BudgetActionResponse = { error?: string }
+const PAGE_LIMIT = 50
 
 async function readBudgetResponse<T extends BudgetListResponse | BudgetActionResponse>(
   response: Response,
@@ -42,6 +49,8 @@ function limitLabel(value: number): string {
 
 export function AIBudgetSettings() {
   const [settings, setSettings] = useState<BudgetSetting[]>([])
+  const [total, setTotal] = useState(0)
+  const [offset, setOffset] = useState(0)
   const [scope, setScope] = useState<BudgetScope>('user')
   const [scopeID, setScopeID] = useState('')
   const [dailyLimit, setDailyLimit] = useState('')
@@ -50,13 +59,16 @@ export function AIBudgetSettings() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const requestID = useRef(0)
 
-  const fetchSettings = useCallback(async () => {
+  const fetchSettings = useCallback(async (requestedOffset = 0) => {
+    const currentRequestID = ++requestID.current
     setLoading(true)
     setError('')
     try {
       const user = authService.getStoredUser()
-      const response = await fetch('/api/admin/ai-budgets', {
+      const params = new URLSearchParams({ limit: String(PAGE_LIMIT), offset: String(requestedOffset) })
+      const response = await fetch(`/api/admin/ai-budgets?${params.toString()}`, {
         headers: {
           'X-Admin-Email': user?.email ?? '',
           'X-Admin-Token': authService.getStoredToken() || '',
@@ -64,16 +76,22 @@ export function AIBudgetSettings() {
         cache: 'no-store',
       })
       const data = await readBudgetResponse<BudgetListResponse>(response)
-      setSettings(data.settings ?? [])
+      if (currentRequestID === requestID.current) {
+        setSettings(data.settings ?? [])
+        setTotal(data.total ?? 0)
+        setOffset(data.offset ?? requestedOffset)
+      }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : '予算設定を取得できませんでした')
+      if (currentRequestID === requestID.current) {
+        setError(err instanceof Error ? err.message : '予算設定を取得できませんでした')
+      }
     } finally {
-      setLoading(false)
+      if (currentRequestID === requestID.current) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    void fetchSettings()
+    void fetchSettings(0)
   }, [fetchSettings])
 
   const saveSetting = async (event: FormEvent<HTMLFormElement>) => {
@@ -81,9 +99,12 @@ export function AIBudgetSettings() {
     const id = Number(scopeID)
     const daily = Number(dailyLimit)
     const monthly = Number(monthlyLimit)
+    const validLimit = (value: string, numeric: number) =>
+      /^\d{1,6}(?:\.\d{1,6})?$/.test(value.trim()) && numeric <= 999999.999999
     if (!Number.isSafeInteger(id) || id <= 0 || !Number.isFinite(daily) || daily < 0 ||
-      !Number.isFinite(monthly) || monthly < 0) {
-      setError('対象IDには正の整数、上限には0以上の金額を入力してください')
+      !Number.isFinite(monthly) || monthly < 0 ||
+      !validLimit(dailyLimit, daily) || !validLimit(monthlyLimit, monthly)) {
+      setError('対象IDは正の整数、上限額は0〜999,999.999999の範囲で小数6桁以内にしてください')
       return
     }
 
@@ -108,7 +129,7 @@ export function AIBudgetSettings() {
       })
       await readBudgetResponse<BudgetActionResponse>(response)
       setMessage('AI利用上限を保存しました')
-      await fetchSettings()
+      await fetchSettings(offset)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'AI利用上限を保存できませんでした')
     } finally {
@@ -135,7 +156,7 @@ export function AIBudgetSettings() {
       })
       await readBudgetResponse<BudgetActionResponse>(response)
       setMessage('AI利用上限を解除しました')
-      await fetchSettings()
+      await fetchSettings(settings.length === 1 && offset > 0 ? Math.max(0, offset - PAGE_LIMIT) : offset)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'AI利用上限を解除できませんでした')
     }
@@ -190,7 +211,8 @@ export function AIBudgetSettings() {
             <input
               type="number"
               min="0"
-              step="0.01"
+              step="0.000001"
+              max="999999.999999"
               required
               value={dailyLimit}
               onChange={(event) => setDailyLimit(event.target.value)}
@@ -202,7 +224,8 @@ export function AIBudgetSettings() {
             <input
               type="number"
               min="0"
-              step="0.01"
+              step="0.000001"
+              max="999999.999999"
               required
               value={monthlyLimit}
               onChange={(event) => setMonthlyLimit(event.target.value)}
@@ -255,6 +278,33 @@ export function AIBudgetSettings() {
             </tbody>
           </table>
         </div>
+        {total > PAGE_LIMIT && (
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span aria-live="polite">
+              {offset + 1}〜{Math.min(offset + settings.length, total)}件 / {total}件
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => void fetchSettings(Math.max(0, offset - PAGE_LIMIT))}
+                disabled={loading || offset === 0}
+                className="rounded-md border px-3 py-1 disabled:opacity-50"
+                aria-label="前の予算設定ページ"
+              >
+                前へ
+              </button>
+              <button
+                type="button"
+                onClick={() => void fetchSettings(offset + PAGE_LIMIT)}
+                disabled={loading || offset + PAGE_LIMIT >= total}
+                className="rounded-md border px-3 py-1 disabled:opacity-50"
+                aria-label="次の予算設定ページ"
+              >
+                次へ
+              </button>
+            </div>
+          </div>
+        )}
         {loading && <p role="status" className="text-sm text-muted-foreground">設定を読み込んでいます...</p>}
         {!loading && error && (
           <button type="button" onClick={() => void fetchSettings()} className="text-sm underline">

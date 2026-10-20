@@ -207,7 +207,7 @@ func (s *InterviewService) CreateRealtimeToken(ctx context.Context, userID uint,
 		return "", err
 	}
 	if s.realtimeUsageService != nil {
-		if err := s.realtimeUsageService.EnsureSessionStarted(userID, sessionID); err != nil {
+		if err := s.realtimeUsageService.EnsureSessionStarted(ctx, userID, sessionID); err != nil {
 			return "", err
 		}
 	}

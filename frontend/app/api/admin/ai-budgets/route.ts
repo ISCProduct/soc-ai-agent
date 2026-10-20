@@ -10,7 +10,14 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   try {
-    const result = await proxyAdminBackend('GET', '/api/admin/ai-budgets', {
+    const query = request.nextUrl.searchParams
+    const params = new URLSearchParams()
+    for (const key of ['limit', 'offset']) {
+      const value = query.get(key)
+      if (value !== null) params.set(key, value)
+    }
+    const path = params.size > 0 ? `/api/admin/ai-budgets?${params.toString()}` : '/api/admin/ai-budgets'
+    const result = await proxyAdminBackend('GET', path, {
       headers: adminProxyHeaders(request.headers),
       timeoutMs: 15_000,
     })

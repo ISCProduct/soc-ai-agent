@@ -58,6 +58,8 @@ type Usage struct {
 	Feature        string
 	UserID         *uint // 実行主体。バッチ経路は nil
 	OrganizationID *uint // 配賦先の学校/企業。解決できなければ nil
+	SchoolID       *uint // 呼び出し時点の所属校。所属変更後も帰属先を保持する
+	BudgetChecked  bool  // 予算ロック中にログ記録を完了させる
 	AudioSeconds   float64
 	Characters     int // TTS の入力文字数(rune)。トークン課金でない経路の課金単位
 	LatencyMs      int
@@ -95,6 +97,8 @@ func (cli *Client) ReportAudioUsage(ctx context.Context, u AudioUsage) {
 		Feature:        usagectx.Feature(ctx),
 		UserID:         userID,
 		OrganizationID: orgID,
+		SchoolID:       usagectx.SchoolID(ctx),
+		BudgetChecked:  usagectx.AIBudgetChecked(ctx),
 		AudioSeconds:   u.AudioSeconds,
 		Characters:     u.Characters,
 		LatencyMs:      int(u.Latency.Milliseconds()),
@@ -128,6 +132,8 @@ func (cli *Client) ReportProxyUsage(ctx context.Context, u ProxyUsage) {
 		Feature:          usagectx.Feature(ctx),
 		UserID:           userID,
 		OrganizationID:   orgID,
+		SchoolID:         usagectx.SchoolID(ctx),
+		BudgetChecked:    usagectx.AIBudgetChecked(ctx),
 		PromptTokens:     u.PromptTokens,
 		CompletionTokens: u.CompletionTokens,
 		LatencyMs:        int(u.Latency.Milliseconds()),
@@ -211,6 +217,8 @@ func (cli *Client) reportUsage(ctx context.Context, r usageReport) {
 		Feature:          usagectx.Feature(ctx),
 		UserID:           userID,
 		OrganizationID:   orgID,
+		SchoolID:         usagectx.SchoolID(ctx),
+		BudgetChecked:    usagectx.AIBudgetChecked(ctx),
 		AudioSeconds:     r.audioSeconds,
 		LatencyMs:        int(r.latency.Milliseconds()),
 		CacheHit:         r.cacheHit,

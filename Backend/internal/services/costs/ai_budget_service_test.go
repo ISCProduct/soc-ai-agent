@@ -24,8 +24,8 @@ func (r *fakeAIBudgetRepository) FindSetting(_ context.Context, scope string, sc
 	return &setting, nil
 }
 
-func (r *fakeAIBudgetRepository) ListSettings(context.Context) ([]models.AIBudgetSetting, error) {
-	return nil, nil
+func (r *fakeAIBudgetRepository) ListSettings(context.Context, int, int) ([]models.AIBudgetSetting, int64, error) {
+	return nil, 0, nil
 }
 
 func (r *fakeAIBudgetRepository) SaveSetting(_ context.Context, setting *models.AIBudgetSetting) error {
@@ -40,6 +40,10 @@ func (r *fakeAIBudgetRepository) DeleteSetting(context.Context, string, uint) er
 
 func (r *fakeAIBudgetRepository) SchoolIDForUser(context.Context, uint) (*uint, error) {
 	return r.schoolID, nil
+}
+
+func (r *fakeAIBudgetRepository) AcquireBudgetLocks(context.Context, uint) (func() error, error) {
+	return func() error { return nil }, nil
 }
 
 func (r *fakeAIBudgetRepository) UsageCostSince(_ context.Context, scope string, scopeID uint, since, _ time.Time) (float64, error) {
@@ -105,5 +109,26 @@ func TestAIBudgetSetLimitAllowsUserMonthlyLimit(t *testing.T) {
 	}
 	if repo.saved == nil || repo.saved.MonthlyLimitUSD != 50 {
 		t.Fatalf("saved setting = %+v, want user monthly limit $50", repo.saved)
+	}
+}
+
+func TestValidBudgetLimitMatchesDecimalColumnPrecision(t *testing.T) {
+	tests := []struct {
+		name  string
+		value float64
+		want  bool
+	}{
+		{"最大値", 999999.999999, true},
+		{"最大値超過", 1000000, false},
+		{"6桁小数", 1.123456, true},
+		{"7桁小数", 1.1234567, false},
+		{"7桁目が小さい値", 1.1234560001, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := validBudgetLimit(tt.value); got != tt.want {
+				t.Errorf("validBudgetLimit(%v) = %t, want %t", tt.value, got, tt.want)
+			}
+		})
 	}
 }
