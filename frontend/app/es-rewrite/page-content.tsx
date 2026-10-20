@@ -25,6 +25,7 @@ import EditNoteIcon from '@mui/icons-material/EditNote'
 import RateReviewIcon from '@mui/icons-material/RateReview'
 import { PRIMARY } from '@/app/interview/constants'
 import { PageLoading } from '@/components/common/PageLoading'
+import { CONTENT_MAX_WIDTH } from '@/lib/design/tokens'
 import { BottomNavSpacer } from '@/components/common/BottomNavSpacer'
 
 const QUESTION_TYPES = ['志望動機', '自己PR', '学チカ', 'ガクチカ', 'その他']
@@ -249,33 +250,30 @@ function ESRewriteContent() {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f8f6f6' }}>
-      {/* Header */}
-      <Box
-        component="header"
-        sx={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          px: { xs: 2, sm: 3, lg: 8 }, py: 2,
-          bgcolor: '#fff', borderBottom: '1px solid #e2e8f0',
-        }}
-      >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Box sx={{ color: PRIMARY }}><EditNoteIcon sx={{ fontSize: 32 }} /></Box>
-          <Box>
-            <Typography sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: '#0f172a' }}>ES添削・リライト</Typography>
-            {/*
-              「AIがあなたのES文章を添削・リライトします」をやめた。
-              誰が添削するかより、何が返ってくるかを書く。
-            */}
-            <Typography sx={{ fontSize: 12, color: '#64748b' }}>書いた文章を読み、直したほうがよい点と書き直し例を返します</Typography>
+      {/* 帯と区切り線は全幅のまま、中身だけ本文と同じ列に入れる（#1783） */}
+      <Box component="header" sx={{ bgcolor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
+        <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', width: '100%', px: { xs: 2, md: 4 }, py: 2 }}>
+          <Box data-testid="es-rewrite-header-row" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Box sx={{ color: PRIMARY }}><EditNoteIcon sx={{ fontSize: 32 }} /></Box>
+              <Box>
+                <Typography sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: '#0f172a' }}>ES添削・リライト</Typography>
+                {/*
+                  「AIがあなたのES文章を添削・リライトします」をやめた。
+                  誰が添削するかより、何が返ってくるかを書く。
+                */}
+                <Typography sx={{ fontSize: 12, color: '#64748b' }}>書いた文章を読み、直したほうがよい点と書き直し例を返します</Typography>
+              </Box>
+            </Box>
+            <IconButton onClick={() => router.push('/')} sx={{ bgcolor: '#f1f5f9', color: '#475569' }} aria-label="ホームへ戻る">
+              <ArrowBackIcon />
+            </IconButton>
           </Box>
         </Box>
-        <IconButton onClick={() => router.push('/')} sx={{ bgcolor: '#f1f5f9', color: '#475569' }} aria-label="ホームへ戻る">
-          <ArrowBackIcon />
-        </IconButton>
       </Box>
 
       {/* Mode toggle */}
-      <Box sx={{ maxWidth: 1200, mx: 'auto', px: { xs: 2, md: 4 }, pt: 3 }}>
+      <Box data-testid="es-rewrite-body" sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', px: { xs: 2, md: 4 }, pt: 3 }}>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 3 }}>
           <Button
             startIcon={<RateReviewIcon />}
@@ -305,7 +303,7 @@ function ESRewriteContent() {
       </Box>
 
       {/* Main */}
-      <Box sx={{ maxWidth: 1200, mx: 'auto', px: { xs: 2, md: 4 }, pb: 4 }}>
+      <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', px: { xs: 2, md: 4 }, pb: 4 }}>
         <Box
           sx={{
             display: 'grid',
