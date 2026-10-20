@@ -24,6 +24,9 @@ export const UI = Object.fromEntries(
  */
 export const CONTENT_MAX_WIDTH = 1200
 
+/** 面接履歴の本文列幅。 */
+export const INTERVIEW_HISTORY_CONTENT_MAX_WIDTH = 1100
+
 /**
  * 適合度の共通スケール。結果画面でのみ使う。
  *

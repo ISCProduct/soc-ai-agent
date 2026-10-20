@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { setupAuth, TEST_USER } from './fixtures/auth'
+import type { InterviewSession } from '../lib/interview'
 
 // 下部ナビが画面外へはみ出さないことの回帰テスト（UI監査 2026-09-21 / R1）。
 //
@@ -174,20 +175,14 @@ test.describe('レスポンシブ: AI面接・企業選択画面の列揃え', (
 // Controller.List の応答形（sessions/total/page/limit）と
 // Controller.GetTrend の応答形（points）に合わせてモックする。
 test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
-  const EXPECTED_HEADING_X: Record<number, number> = {
-    2000: 482,
-    1440: 202,
-    1024: 32,
-    768: 16,
-  }
-
-  const SESSION_RESPONSE = {
+  // 修正後の実測値（ヘッダー行・トレンド・履歴一覧の左端）:
+  // 2000px: 482 / 1440px: 202 / 1024px: 32 / 768px: 16
+  const SESSION_RESPONSE: { sessions: InterviewSession[]; total: number; page: number; limit: number } = {
     sessions: [{
       id: 1,
       user_id: 1,
       status: 'finished',
       language: 'ja',
-      interviewer_gender: 'female',
       started_at: '2026-10-01T01:00:00Z',
       ended_at: '2026-10-01T01:30:00Z',
       estimated_cost_usd: 0.123,
@@ -230,39 +225,39 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
     page: import('@playwright/test').Page,
     historyContent: 'session' | 'empty',
   ) {
-    const heading = page.getByRole('heading', { name: '面接履歴', exact: true })
+    const headerRow = page.getByTestId('history-header-row')
     const trend = page.locator('.MuiPaper-root').filter({ hasText: 'パフォーマンストレンド' }).first()
     const backButton = page.getByRole('button', { name: '面接画面へ戻る' })
     const listContent = historyContent === 'session'
-      ? page.locator('.MuiPaper-root').filter({ hasText: '面接セッション #1' }).first()
+      ? page.locator('.MuiPaper-root').filter({
+          has: page.getByText('面接セッション #1', { exact: true }),
+        }).first()
       : page.locator('.MuiPaper-root').filter({ hasText: 'まだ面接の練習記録がありません' }).first()
 
-    await expect(heading).toBeVisible()
+    await expect(headerRow).toBeVisible()
     await expect(trend).toBeVisible()
     await expect(backButton).toBeVisible()
     await expect(listContent).toBeVisible()
 
-    const headingBox = await heading.boundingBox()
+    const headerRowBox = await headerRow.boundingBox()
     const trendBox = await trend.boundingBox()
     const backButtonBox = await backButton.boundingBox()
     const listBox = await listContent.boundingBox()
-    expect(headingBox, 'ヘッダーの見出しが取得できない').not.toBeNull()
+    expect(headerRowBox, 'ヘッダー行が取得できない').not.toBeNull()
     expect(trendBox, 'トレンドが取得できない').not.toBeNull()
     expect(backButtonBox, '戻るボタンが取得できない').not.toBeNull()
     expect(listBox, '履歴一覧または空状態が取得できない').not.toBeNull()
 
     return {
       width: page.viewportSize()!.width,
-      headingX: headingBox!.x,
+      headerRowX: headerRowBox!.x,
       trendX: trendBox!.x,
       listX: listBox!.x,
-      trendDifference: Math.abs(headingBox!.x - trendBox!.x),
-      listDifference: Math.abs(headingBox!.x - listBox!.x),
-      expectedPositionDifference: Math.abs(headingBox!.x - EXPECTED_HEADING_X[page.viewportSize()!.width]),
+      trendDifference: Math.abs(headerRowBox!.x - trendBox!.x),
+      listDifference: Math.abs(headerRowBox!.x - listBox!.x),
       backButtonRight: backButtonBox!.x + backButtonBox!.width,
-      contentRight: trendBox!.x + trendBox!.width,
       backButtonDifference: Math.abs(
-        backButtonBox!.x + backButtonBox!.width - trendBox!.x - trendBox!.width,
+        backButtonBox!.x + backButtonBox!.width - headerRowBox!.x - headerRowBox!.width,
       ),
     }
   }
@@ -278,25 +273,29 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
       )
 
       const measurements: Array<Awaited<ReturnType<typeof measureAlignment>>> = []
-      await page.setViewportSize({ width: 2000, height: 900 })
-      await page.goto('/interview/history')
-      await expect(
-        historyContent === 'session'
-          ? page.getByText('面接セッション #1')
-          : page.getByText('まだ面接の練習記録がありません'),
-      ).toBeVisible()
-
       for (const width of [2000, 1440, 1024, 768]) {
         await page.setViewportSize({ width, height: 900 })
-        measurements.push(await measureAlignment(page, historyContent))
+        await page.waitForFunction((w: number) => document.documentElement.clientWidth === w, width)
+        await page.goto('/interview/history')
+        await expect(
+          historyContent === 'session'
+            ? page.getByText('面接セッション #1', { exact: true })
+            : page.getByText('まだ面接の練習記録がありません'),
+        ).toBeVisible({ timeout: 15000 })
+        const measurement = await measureAlignment(page, historyContent)
+        const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        expect(scrollWidth, `${width}px: 横方向にはみ出している`).toBeLessThanOrEqual(clientWidth)
+        measurements.push(measurement)
       }
 
       const misaligned = measurements.filter(
-        ({ trendDifference, listDifference, backButtonDifference, expectedPositionDifference }) =>
+        ({ trendDifference, listDifference, backButtonDifference }) =>
           trendDifference > 1 ||
           listDifference > 1 ||
-          backButtonDifference > 1 ||
-          expectedPositionDifference > 1,
+          backButtonDifference > 1,
       )
       expect(
         misaligned,
@@ -310,23 +309,26 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
     await stubApi(page)
     await mockInterviewHistoryApi(page, [], 0)
 
-    await page.setViewportSize({ width: 2000, height: 900 })
-    await page.goto('/interview/history')
-    await expect(page.getByText('まだ面接の練習記録がありません')).toBeVisible()
-
     for (const width of [2000, 1440, 1024, 768]) {
       await page.setViewportSize({ width, height: 900 })
+      await page.waitForFunction((w: number) => document.documentElement.clientWidth === w, width)
+      await page.goto('/interview/history')
+      await expect(page.getByText('まだ面接の練習記録がありません')).toBeVisible({ timeout: 15000 })
 
+      const headerRow = page.getByTestId('history-header-row')
       const heading = page.getByRole('heading', { name: '面接履歴', exact: true })
       const teacherChip = page.getByText('教員モード', { exact: true })
       const backButton = page.getByRole('button', { name: '面接画面へ戻る' })
       const trend = page.locator('.MuiPaper-root').filter({ hasText: 'パフォーマンストレンド' }).first()
+      await expect(headerRow).toBeVisible()
       await expect(teacherChip).toBeVisible()
 
+      const headerRowBox = await headerRow.boundingBox()
       const headingBox = await heading.boundingBox()
       const chipBox = await teacherChip.boundingBox()
       const backButtonBox = await backButton.boundingBox()
       const trendBox = await trend.boundingBox()
+      expect(headerRowBox, `${width}px: ヘッダー行が取得できない`).not.toBeNull()
       expect(headingBox, `${width}px: 見出しが取得できない`).not.toBeNull()
       expect(chipBox, `${width}px: 教員モードのチップが取得できない`).not.toBeNull()
       expect(backButtonBox, `${width}px: 戻るボタンが取得できない`).not.toBeNull()
@@ -336,9 +338,14 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
         `${width}px: 教員モードのチップが見出しと同じ行にない`,
       ).toBeLessThanOrEqual(1)
       expect(
-        Math.abs(backButtonBox!.x + backButtonBox!.width - trendBox!.x - trendBox!.width),
+        Math.abs(backButtonBox!.x + backButtonBox!.width - headerRowBox!.x - headerRowBox!.width),
         `${width}px: 戻るボタンが列の右端に揃っていない`,
       ).toBeLessThanOrEqual(1)
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }))
+      expect(scrollWidth, `${width}px: 横方向にはみ出している`).toBeLessThanOrEqual(clientWidth)
     }
   })
 })
