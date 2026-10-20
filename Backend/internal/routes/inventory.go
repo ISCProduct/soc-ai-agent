@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	admincontrollers "Backend/internal/controllers/admin"
 	companycontrollers "Backend/internal/controllers/company"
 	usercontrollers "Backend/internal/controllers/user"
 
@@ -60,7 +61,7 @@ func Inventory() []Route {
 	SetupCompanyRoutes(api, nil)
 	SetupAdminRoutes(api,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "")
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", &admincontrollers.AIBudgetController{})
 	SetupResumeRoutes(api, nil, "", nil, nil)
 	SetupInterviewRoutes(api, nil, nil, "", nil, nil)
 	SetupGitHubRoutes(api, nil, "", nil, nil)
@@ -81,7 +82,7 @@ func Inventory() []Route {
 		"", nil, nil)
 	SetupUserRoutes(api, nil, nil, nil, nil,
 		&usercontrollers.StudentScoutController{},
-		"", nil, nil)
+		"", nil, nil, &usercontrollers.AIBudgetController{})
 	SetupCollectiveInsightRoutes(api, nil, "", nil, nil)
 	SetupAssessmentRoutes(api, nil, "", nil, nil)
 

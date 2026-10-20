@@ -5,7 +5,7 @@ openapi: 3.0.3
 # これは手で書くファイル。生成しない。
 # 実装に登録されている全エンドポイントの一覧は api/routes.txt（自動生成）にある。
 #
-# 全 252 本を記載済み（網羅率 100%）。
+# 全 276 本を記載済み（網羅率 100%）。
 # 実装と spec は双方向で突き合わせており、どちらかに無いものがあると CI が落ちる。
 # 網羅率は `cd Backend && go test ./internal/routes/ -v -run TestOpenAPIPaths` で出る。
 #
@@ -3471,6 +3471,74 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/PlatformAdminOnly" }
 
+  /api/admin/ai-budgets:
+    get:
+      tags: [admin-costs]
+      summary: AI利用予算の設定一覧
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: 設定一覧
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+    put:
+      tags: [admin-costs]
+      summary: 利用者または学校のAI利用上限を設定
+      description: 0ドルはその期間の上限なし。上限に達すると新しいAIリクエストを拒否する。
+      security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scope, scope_id, daily_limit_usd, monthly_limit_usd]
+              properties:
+                scope:
+                  type: string
+                  enum: [user, school]
+                scope_id:
+                  type: integer
+                  minimum: 1
+                daily_limit_usd:
+                  type: number
+                  minimum: 0
+                monthly_limit_usd:
+                  type: number
+                  minimum: 0
+      responses:
+        "200":
+          description: 設定を保存
+        "400": { description: 入力値が不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+        "404": { description: 対象の利用者または学校が存在しない }
+
+  /api/admin/ai-budgets/{scope}/{scope_id}:
+    delete:
+      tags: [admin-costs]
+      summary: AI利用上限を解除
+      security: [{ adminAuth: [] }]
+      parameters:
+        - in: path
+          name: scope
+          required: true
+          schema:
+            type: string
+            enum: [user, school]
+        - in: path
+          name: scope_id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "204":
+          description: 上限を解除
+        "400": { description: パスパラメーターが不正 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/PlatformAdminOnly" }
+
   /api/admin/company-entry-submissions/{id}/resend-email:
     post:
       tags: [admin-companies]
@@ -3806,6 +3874,16 @@ paths:
       responses:
         "200":
           description: 成功
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/user/ai-budget:
+    get:
+      tags: [user]
+      summary: 自分のAI利用予算と残量を取得
+      security: [{ userToken: [] }]
+      responses:
+        "200":
+          description: 利用者・学校別の日次／月次利用状況
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/user/preferences:
