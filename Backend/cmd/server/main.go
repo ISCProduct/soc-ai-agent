@@ -290,6 +290,8 @@ func main() {
 	appStatusRepo := repositories.NewUserApplicationStatusRepository(db)
 	// APIコストモニタリング
 	apiCallLogRepo := repositories.NewAPICallLogRepository(db)
+	aiBudgetRepo := repositories.NewAIBudgetRepository(db)
+	aiBudgetService := costs.NewAIBudgetService(aiBudgetRepo)
 	realtimeUsageRepo := repositories.NewRealtimeUsageRepository(db)
 
 	// サービス層の初期化
@@ -511,6 +513,8 @@ func main() {
 	adminDashboardController.SetSchoolService(schoolService)
 	adminDashboardController.SetOrganizationService(organizationService)
 	adminCostsController := admincontrollers.NewAdminCostsController(apiCostService, realtimeUsageService, companySearchBudget)
+	adminAIBudgetController := admincontrollers.NewAIBudgetController(aiBudgetService)
+	userAIBudgetController := usercontrollers.NewAIBudgetController(aiBudgetService)
 	adminVectorController := admincontrollers.NewAdminVectorController(admin.NewAdminVectorService())
 	profileRecalcService := flywheel.NewProfileRecalculationService(profileRecalcRepo, companyRepo)
 	profileRecalcController := admincontrollers.NewAdminProfileRecalculationController(profileRecalcService)
@@ -606,6 +610,7 @@ func main() {
 	e.Use(echo.WrapMiddleware(securityHeadersMiddleware))
 	e.Use(echo.WrapMiddleware(buildCORSMiddleware()))
 	e.Use(routes.EchoTenantResolver(organizationService))
+	e.Use(routes.EchoAIBudget(aiBudgetService, cfg.UserSecret))
 
 	// メトリクス（#1186）。METRICS_TOKEN が未設定なら計装も公開もしない。
 	// 本番の backend ALB はインターネット直結なので、既定で開けたままにはしない。
@@ -650,7 +655,7 @@ func main() {
 	guidanceService := teacher.NewGuidanceService(guidanceRepo, userRepo)
 	teacherGuidanceController := insightcontrollers.NewTeacherGuidanceController(guidanceService, schoolService)
 	studentGuidanceController := usercontrollers.NewStudentGuidanceController(guidanceService)
-	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminSchoolAppController, adminSchoolJobSuppressionController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, teacherGuidanceController, userRepo, schoolService, cfg.AdminSecret)
+	routes.SetupAdminRoutes(api, adminCompanyController, adminCrawlController, adminJobController, adminUserController, adminOrganizationController, adminSchoolController, adminSchoolAppController, adminSchoolJobSuppressionController, adminAuditController, adminCompanyGraphController, adminInterviewController, adminDashboardController, adminCostsController, profileRecalcController, scoreValidationController, diagnosisQualityController, collectiveInsightController, scraperSessionController, adminVectorController, appController, teacherInsightController, teacherGuidanceController, userRepo, schoolService, cfg.AdminSecret, adminAIBudgetController)
 	routes.SetupResumeRoutes(api, resumeController, cfg.UserSecret, userDeletionService, organizationService)
 	// 適性検査 第1段（#1678）。結果は source=assessment で user_weight_scores へ入り、マッチングへ合流する
 	assessmentRepo := repositories.NewAssessmentRepository(db)
@@ -689,7 +694,7 @@ func main() {
 	companyPortalScoutController := companycontrollers.NewCompanyPortalScoutController(scoutService)
 	studentScoutController := usercontrollers.NewStudentScoutController(scoutService)
 	routes.SetupCompanyAuthRoutes(api, companyAuthController, companyPortalController, companyStudentController, companyPortalApplicationController, companyPortalJobController, companyPortalProfileController, companyPortalSchoolApplicationController, companyPortalScoutController, cfg.CompanyUserSecret, companyUserRepo, companyRepo)
-	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, studentGuidanceController, studentScoutController, cfg.UserSecret, userDeletionService, organizationService)
+	routes.SetupUserRoutes(api, integratedProfileController, entitlementController, userPreferenceController, studentGuidanceController, studentScoutController, cfg.UserSecret, userDeletionService, organizationService, userAIBudgetController)
 	routes.SetupCollectiveInsightRoutes(api, collectiveInsightController, cfg.UserSecret, userDeletionService, organizationService)
 	api.POST("/company-entry", companyEntryController.Submit, echoCompanyEntryRateLimit())
 	api.GET("/whats-new", releaseNoteController.List, routes.EchoUserAuth(cfg.UserSecret, userDeletionService))

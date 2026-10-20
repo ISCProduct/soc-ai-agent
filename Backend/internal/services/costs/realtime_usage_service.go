@@ -5,7 +5,9 @@ import (
 	"Backend/internal/repositories"
 	"Backend/internal/services/email"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -151,12 +153,13 @@ func (s *RealtimeUsageService) CanOpenNewConnection() (bool, int64, int64, error
 	return active < s.maxConcurrent, active, s.maxConcurrent, nil
 }
 
-func (s *RealtimeUsageService) EnsureSessionStarted(userID, sessionID uint) error {
+func (s *RealtimeUsageService) EnsureSessionStarted(ctx context.Context, userID, sessionID uint) error {
 	if _, err := s.repo.FindActiveBySessionID(sessionID); err == nil {
 		return nil
 	}
 	entry := &models.RealtimeUsageLog{
 		UserID:             userID,
+		SchoolID:           usagectx.SchoolID(ctx),
 		InterviewSessionID: sessionID,
 		Status:             "active",
 		StartedAt:          time.Now().UTC(),

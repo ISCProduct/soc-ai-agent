@@ -201,6 +201,12 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(ctx echo.Context) erro
 	if ctrl.validator != nil {
 		results, err := ctrl.validator.SearchCandidates(ctx.Request().Context(), query, true)
 		if err != nil {
+			if errors.Is(err, usagectx.ErrAIBudgetUnavailable) {
+				return echo.NewHTTPError(http.StatusServiceUnavailable, "AI利用予算を確認できません。時間をおいて再試行してください。")
+			}
+			if errors.Is(err, usagectx.ErrAIBudgetExceeded) {
+				return echo.NewHTTPError(http.StatusTooManyRequests, "AI利用予算の上限に達しました。翌日または翌月に再度お試しください。")
+			}
 			var ve *shared.ValidationError
 			if errors.As(err, &ve) {
 				return echo.NewHTTPError(http.StatusBadRequest, ve.Message)
@@ -227,7 +233,16 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(ctx echo.Context) erro
 		return ctx.JSON(http.StatusOK, map[string]any{"results": out})
 	}
 
-	results := ctrl.searchCompaniesWithOpenAI(ctx.Request().Context(), query)
+	results, err := ctrl.searchCompaniesWithOpenAI(ctx.Request().Context(), query)
+	if errors.Is(err, usagectx.ErrAIBudgetExceeded) {
+		return echo.NewHTTPError(http.StatusTooManyRequests, "AI利用予算の上限に達しました。翌日または翌月に再度お試しください。")
+	}
+	if errors.Is(err, usagectx.ErrAIBudgetUnavailable) {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "AI利用予算を確認できません。時間をおいて再試行してください。")
+	}
+	if err != nil {
+		return httpapi.InternalError(err)
+	}
 	return ctx.JSON(http.StatusOK, map[string]any{"results": results})
 }
 
@@ -245,6 +260,12 @@ func (ctrl *CompanyRelationController) ValidateCompany(ctx echo.Context) error {
 	}
 	result, err := ctrl.validator.Validate(ctx.Request().Context(), payload.Query)
 	if err != nil {
+		if errors.Is(err, usagectx.ErrAIBudgetUnavailable) {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "AI利用予算を確認できません。時間をおいて再試行してください。")
+		}
+		if errors.Is(err, usagectx.ErrAIBudgetExceeded) {
+			return echo.NewHTTPError(http.StatusTooManyRequests, "AI利用予算の上限に達しました。翌日または翌月に再度お試しください。")
+		}
 		var ve *shared.ValidationError
 		if errors.As(err, &ve) {
 			return echo.NewHTTPError(http.StatusBadRequest, ve.Message)
@@ -255,7 +276,12 @@ func (ctrl *CompanyRelationController) ValidateCompany(ctx echo.Context) error {
 }
 
 // searchCompaniesWithOpenAI はAIモデルの知識から企業候補を取得する（validator未設定時のフォールバック）
-func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Context, query string) []map[string]string {
+func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Context, query string) ([]map[string]string, error) {
+	checkedCtx, err := usagectx.CheckAIBudget(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx = checkedCtx
 	systemPrompt := `あなたは日本企業に詳しいアシスタントです。確実に知っている実在の企業のみを回答し、不明な場合は空配列にしてください。推測で企業を作らないでください。`
 	userPrompt := buildWebSearchUserPrompt(query)
 
@@ -265,25 +291,25 @@ func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Con
 	ctxTimeout = usagectx.WithFeature(ctxTimeout, usagectx.FeatureCompanySearch)
 	text, err := ctrl.openaiClient.ChatCompletionJSON(ctxTimeout, systemPrompt, userPrompt, 0.2, 500, companyfetch.ExtractModel())
 	if err != nil {
-		return []map[string]string{}
+		return []map[string]string{}, err
 	}
 
 	start := strings.Index(text, "{")
 	end := strings.LastIndex(text, "}")
 	if start == -1 || end == -1 || end <= start {
-		return []map[string]string{}
+		return []map[string]string{}, nil
 	}
 
 	var parsed struct {
 		Results []map[string]string `json:"results"`
 	}
 	if err := json.Unmarshal([]byte(text[start:end+1]), &parsed); err != nil {
-		return []map[string]string{}
+		return []map[string]string{}, nil
 	}
 	if parsed.Results == nil {
-		return []map[string]string{}
+		return []map[string]string{}, nil
 	}
-	return parsed.Results
+	return parsed.Results, nil
 }
 
 // buildWebSearchUserPrompt は企業のWEB検索のユーザープロンプトを組み立てる。

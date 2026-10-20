@@ -196,7 +196,7 @@ function InterviewContent() {
       try {
         const r = await fetch(
           `/api/companies/web-search?q=${encodeURIComponent(companySearch.trim())}`,
-          { cache: 'no-store' },
+          { headers: authService.getUserFetchHeaders(), cache: 'no-store' },
         )
         if (cancelled) return
         if (!r.ok) {

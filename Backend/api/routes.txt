@@ -1,7 +1,10 @@
 # 実装に登録されている全エンドポイント。
 # 手で編集しない。次のコマンドで生成する:
 #   cd Backend && go test ./internal/routes/ -run TestRouteCatalog -update
-# 合計 272 本
+# 合計 276 本
+GET /api/admin/ai-budgets
+PUT /api/admin/ai-budgets
+DELETE /api/admin/ai-budgets/:scope/:scope_id
 GET /api/admin/applications
 PATCH /api/admin/applications/:id/status
 GET /api/admin/audit-logs
@@ -259,6 +262,7 @@ DELETE /api/schedule/:id
 GET /api/schedule/:id
 PUT /api/schedule/:id
 GET /api/schedule/export/ics
+GET /api/user/ai-budget
 GET /api/user/guidances
 POST /api/user/guidances/:id/dismiss
 GET /api/user/industries

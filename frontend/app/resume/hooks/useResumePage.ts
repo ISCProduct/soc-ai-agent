@@ -141,7 +141,10 @@ export function useResumePage() {
       }
 
       // WEB: 候補一覧 API（DB優先 + WEB補完）。単体 validate より候補選択しやすい
-      const res = await fetch(`/api/companies/web-search?q=${encodeURIComponent(q)}`, { cache: 'no-store' })
+      const res = await fetch(`/api/companies/web-search?q=${encodeURIComponent(q)}`, {
+        headers: authService.getUserFetchHeaders(),
+        cache: 'no-store',
+      })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         throw new Error(parseApiErrorMessage(JSON.stringify(data), 'Web検索に失敗しました'))

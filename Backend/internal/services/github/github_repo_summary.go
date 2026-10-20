@@ -28,6 +28,16 @@ func (s *GitHubService) SummarizeRepo(ctx context.Context, userID uint, fullName
 			return cached, nil
 		}
 	}
+	checkedCtx, err := usagectx.CheckAIBudget(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx = checkedCtx
+	defer func() {
+		if err := usagectx.ReleaseAIBudgetLock(ctx); err != nil {
+			log.Printf("[SummarizeRepo] failed to release AI budget lock: %v", err)
+		}
+	}()
 
 	profile, err := s.githubRepo.GetProfile(userID)
 	if err != nil || profile == nil {

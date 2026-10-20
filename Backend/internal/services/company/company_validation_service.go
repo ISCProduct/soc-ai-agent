@@ -6,6 +6,7 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/shared"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
@@ -248,6 +249,16 @@ func (s *CompanyValidationService) validateWithWebSearch(ctx context.Context, qu
 	}
 
 	run := func() (*CompanyValidationResult, error) {
+		checkedCtx, err := usagectx.CheckAIBudget(ctx)
+		if err != nil {
+			return nil, err
+		}
+		runCtx := checkedCtx
+		defer func() {
+			if err := usagectx.ReleaseAIBudgetLock(runCtx); err != nil {
+				log.Printf("[CompanyValidation] failed to release AI budget lock: %v", err)
+			}
+		}()
 		if s.budget != nil {
 			if err := s.budget.AllowSearch(); err != nil {
 				if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
@@ -272,7 +283,7 @@ func (s *CompanyValidationService) validateWithWebSearch(ctx context.Context, qu
 
 exists=false の場合は canonical_name を空文字、evidence_urls を空配列にしてください。`, query)
 
-		text, err := s.openaiClient.WebSearchJSON(ctx, prompt, companyValidationMaxTok)
+		text, err := s.openaiClient.WebSearchJSON(runCtx, prompt, companyValidationMaxTok)
 		if err != nil {
 			log.Printf("[CompanyValidation] web search failed query=%q err=%v", query, err)
 			return &CompanyValidationResult{

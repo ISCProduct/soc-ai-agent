@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	admincontrollers "Backend/internal/controllers/admin"
 	"Backend/internal/routes"
 
 	"github.com/labstack/echo/v4"
@@ -32,6 +33,7 @@ func TestSetupAdminRoutes_AllRoutesRequireAuth(t *testing.T) {
 		nil, nil, nil, nil, nil, nil, nil,
 		nil, nil, nil,
 		"test-admin-secret",
+		&admincontrollers.AIBudgetController{},
 	)
 
 	var adminRoutes []*echo.Route

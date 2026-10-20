@@ -218,7 +218,7 @@ func usageCostUSD(u openaiPkg.Usage) float64 {
 // 使えるようにするため（#1293）。フォールバックの USD 上限は via_fallback だけを
 // 集計するので、通常の OpenAI 利用（企業検索など）が保険の予算を食わない。
 func (s *APICostService) LogUsage(u openaiPkg.Usage) {
-	safego.Go(func() {
+	writeUsage := func() error {
 		cost := usageCostUSD(u)
 		entry := &models.APICallLog{
 			Model:            u.Model,
@@ -233,6 +233,7 @@ func (s *APICostService) LogUsage(u openaiPkg.Usage) {
 			// 「まだ計測できていない経路」を件数で追えるようにする。
 			Feature:        featureOrUnknown(u.Feature),
 			UserID:         u.UserID,
+			SchoolID:       u.SchoolID,
 			OrganizationID: u.OrganizationID,
 			AudioSeconds:   u.AudioSeconds,
 			Characters:     u.Characters,
@@ -241,6 +242,20 @@ func (s *APICostService) LogUsage(u openaiPkg.Usage) {
 			CacheHit:       u.CacheHit,
 		}
 		if err := s.repo.Create(entry); err != nil {
+			return err
+		}
+		return nil
+	}
+	if u.BudgetChecked {
+		if err := writeUsage(); err != nil {
+			log.Printf("[APICost] failed to log budget-checked usage: %v", err)
+			return
+		}
+		safego.Go(s.checkAndNotifyThreshold)
+		return
+	}
+	safego.Go(func() {
+		if err := writeUsage(); err != nil {
 			log.Printf("[APICost] failed to log: %v", err)
 			return
 		}
