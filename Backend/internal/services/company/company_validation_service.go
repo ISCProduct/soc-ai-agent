@@ -8,7 +8,6 @@ import (
 	"Backend/internal/services/shared"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -224,8 +223,9 @@ func (s *CompanyValidationService) SearchCandidates(ctx context.Context, query s
 
 	validated, err := s.Validate(ctx, q)
 	if err != nil {
-		// WEB 補完失敗時も DB 結果（空）を返し、UI でメッセージ表示できるようにする
-		return out, nil
+		// 失敗を空の成功にすると、画面は「検索結果が見つかりません」になる。
+		// 学生にはその企業が無いように見える（#1447）。
+		return nil, err
 	}
 	if validated.Exists {
 		key := normalizeCompanyKey(validated.CanonicalName)
@@ -250,16 +250,6 @@ func (s *CompanyValidationService) validateWithWebSearch(ctx context.Context, qu
 	run := func() (*CompanyValidationResult, error) {
 		if s.budget != nil {
 			if err := s.budget.AllowSearch(); err != nil {
-				if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
-					return &CompanyValidationResult{
-						Exists:        false,
-						CanonicalName: "",
-						Source:        "cache",
-						Confidence:    "low",
-						Query:         query,
-						Description:   "月次の企業Search上限に達したため、キャッシュのみで確認しています。しばらくしてから再度お試しください",
-					}, nil
-				}
 				return nil, err
 			}
 		}
@@ -275,25 +265,13 @@ exists=false の場合は canonical_name を空文字、evidence_urls を空配�
 		text, err := s.openaiClient.WebSearchJSON(ctx, prompt, companyValidationMaxTok)
 		if err != nil {
 			log.Printf("[CompanyValidation] web search failed query=%q err=%v", query, err)
-			return &CompanyValidationResult{
-				Exists:        false,
-				CanonicalName: "",
-				Source:        "web_search",
-				Confidence:    "low",
-				Query:         query,
-				Description:   "WEB検索による実在確認に失敗しました。企業名を変えるか、しばらくしてから再度お試しください",
-			}, nil
+			return nil, err
 		}
 
 		parsed, parseErr := parseValidationJSON(text)
 		if parseErr != nil {
 			log.Printf("[CompanyValidation] parse failed query=%q raw=%q err=%v", query, truncateRunes(text, 200), parseErr)
-			return &CompanyValidationResult{
-				Exists:     false,
-				Source:     "web_search",
-				Confidence: "low",
-				Query:      query,
-			}, nil
+			return nil, fmt.Errorf("企業検索の結果を読み取れませんでした")
 		}
 
 		parsed.Source = "web_search"

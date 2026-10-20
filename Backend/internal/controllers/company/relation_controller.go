@@ -205,6 +205,9 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(ctx echo.Context) erro
 			if errors.As(err, &ve) {
 				return echo.NewHTTPError(http.StatusBadRequest, ve.Message)
 			}
+			if errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
+				return echo.NewHTTPError(http.StatusTooManyRequests, "検索の回数が多すぎます。少し時間を置いてからお試しください。")
+			}
 			return echo.NewHTTPError(http.StatusInternalServerError, "企業検索に失敗しました")
 		}
 		out := make([]map[string]any, 0, len(results))
@@ -227,7 +230,10 @@ func (ctrl *CompanyRelationController) WebSearchCompanies(ctx echo.Context) erro
 		return ctx.JSON(http.StatusOK, map[string]any{"results": out})
 	}
 
-	results := ctrl.searchCompaniesWithOpenAI(ctx.Request().Context(), query)
+	results, err := ctrl.searchCompaniesWithOpenAI(ctx.Request().Context(), query)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "企業検索に失敗しました")
+	}
 	return ctx.JSON(http.StatusOK, map[string]any{"results": results})
 }
 
@@ -255,7 +261,7 @@ func (ctrl *CompanyRelationController) ValidateCompany(ctx echo.Context) error {
 }
 
 // searchCompaniesWithOpenAI はAIモデルの知識から企業候補を取得する（validator未設定時のフォールバック）
-func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Context, query string) []map[string]string {
+func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Context, query string) ([]map[string]string, error) {
 	systemPrompt := `あなたは日本企業に詳しいアシスタントです。確実に知っている実在の企業のみを回答し、不明な場合は空配列にしてください。推測で企業を作らないでください。`
 	userPrompt := fmt.Sprintf(
 		`「%s」という検索キーワードに合致する日本の企業を最大5件挙げてください。キーワードと一致する企業が実在する場合は必ず最初に含めてください。以下のJSON形式のみで返してください。余分な説明は不要です。
@@ -269,23 +275,23 @@ func (ctrl *CompanyRelationController) searchCompaniesWithOpenAI(ctx context.Con
 	ctxTimeout = usagectx.WithFeature(ctxTimeout, usagectx.FeatureCompanySearch)
 	text, err := ctrl.openaiClient.ChatCompletionJSON(ctxTimeout, systemPrompt, userPrompt, 0.2, 500, companyfetch.ExtractModel())
 	if err != nil {
-		return []map[string]string{}
+		return nil, err
 	}
 
 	start := strings.Index(text, "{")
 	end := strings.LastIndex(text, "}")
 	if start == -1 || end == -1 || end <= start {
-		return []map[string]string{}
+		return nil, fmt.Errorf("企業検索の結果を読み取れませんでした")
 	}
 
 	var parsed struct {
 		Results []map[string]string `json:"results"`
 	}
 	if err := json.Unmarshal([]byte(text[start:end+1]), &parsed); err != nil {
-		return []map[string]string{}
+		return nil, fmt.Errorf("企業検索の結果を読み取れませんでした")
 	}
 	if parsed.Results == nil {
-		return []map[string]string{}
+		return []map[string]string{}, nil
 	}
-	return parsed.Results
+	return parsed.Results, nil
 }
