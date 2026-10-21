@@ -41,26 +41,31 @@ type LLMAnswerEvaluation struct {
 
 // llmEvaluate は質問と回答をLLMで評価する。llmClientがnilの場合はnilを返す。
 func (e *AnswerEvaluator) llmEvaluate(ctx context.Context, question, answer string) *LLMAnswerEvaluation {
+	result, _ := e.llmEvaluateWithPromptVersion(ctx, question, answer)
+	return result
+}
+
+func (e *AnswerEvaluator) llmEvaluateWithPromptVersion(ctx context.Context, question, answer string) (*LLMAnswerEvaluation, string) {
 	if e.llmClient == nil {
-		return nil
+		return nil, ""
 	}
 	userID, _ := usagectx.Actor(ctx)
 	subjectID := uint(0)
 	if userID != nil {
 		subjectID = *userID
 	}
-	ctx, _ = prompts.WithPromptVersion(ctx, prompts.StageScoreEvaluation, subjectID)
+	ctx, assignment := prompts.WithPromptVersion(ctx, prompts.StageScoreEvaluation, subjectID)
 	userPrompt := prompts.BuildAnswerQualityUserPrompt(question, answer)
 	ctx = usagectx.WithFeature(ctx, usagectx.FeatureChatAnswerEval)
 	raw, err := e.llmClient.ChatCompletionJSON(ctx, prompts.AnswerQualitySystemPrompt, userPrompt, 0.2, 256)
 	if err != nil {
 		log.Printf("[AnswerEvaluator] LLM評価エラー: %v", err)
-		return nil
+		return nil, ""
 	}
 	var eval LLMAnswerEvaluation
 	if err := json.Unmarshal([]byte(raw), &eval); err != nil {
 		log.Printf("[AnswerEvaluator] LLMレスポンスパースエラー: %v raw=%s", err, raw)
-		return nil
+		return nil, ""
 	}
 	if eval.Score < 0 {
 		eval.Score = 0
@@ -73,7 +78,7 @@ func (e *AnswerEvaluator) llmEvaluate(ctx context.Context, question, answer stri
 	}
 	log.Printf("[AnswerEvaluator] LLM評価完了: score=%d confidence=%s specificity=%d authenticity=%d consistency=%d",
 		eval.Score, eval.Confidence, eval.Specificity, eval.Authenticity, eval.Consistency)
-	return &eval
+	return &eval, assignment.Version
 }
 
 // EvaluateWithLLMFallback はルールベース評価を行い、信頼度が "low" の場合のみLLMで再評価する（Phase 1）。

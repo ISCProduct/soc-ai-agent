@@ -41,6 +41,7 @@ type Company struct {
 	RelationsFetchedAt  *time.Time `json:"relations_fetched_at,omitempty"`
 	LastModelUsed       string     `gorm:"type:varchar(64)" json:"last_model_used,omitempty"`
 	LastFetchConfidence string     `gorm:"type:varchar(16)" json:"last_fetch_confidence,omitempty"` // high|medium|low
+	InfoPromptVersion   string     `gorm:"type:varchar(64);not null;default:''" json:"info_prompt_version,omitempty"`
 
 	// 企業の特徴・文化
 	Culture        string `gorm:"type:text" json:"culture"`            // 企業文化の説明

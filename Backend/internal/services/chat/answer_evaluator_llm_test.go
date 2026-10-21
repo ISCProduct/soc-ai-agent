@@ -167,6 +167,27 @@ func TestLLM_HybridNilClientEqualsEvaluate(t *testing.T) {
 	assert.Equal(t, rule.Confidence, hybrid.Confidence)
 }
 
+func TestHumanScoring_RecordsPromptVersionOnlyAfterSuccessfulLLM(t *testing.T) {
+	srv := newMockLLMServer(t, 72, "medium", "評価結果")
+	defer srv.Close()
+
+	evaluator := chat.NewAnswerEvaluatorWithLLM(internalOpenAI.NewWithBaseURL(srv.URL, "gpt-4o-mini"))
+	result := evaluator.EvaluateHumanScoringWithContext(
+		context.Background(), "志望理由を教えてください", "成長できる環境で挑戦したいです", false, false, nil,
+	)
+	assert.Equal(t, "v2", result.PromptVersion)
+
+	failedServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer failedServer.Close()
+	failedEvaluator := chat.NewAnswerEvaluatorWithLLM(internalOpenAI.NewWithBaseURL(failedServer.URL, "gpt-4o-mini"))
+	failedResult := failedEvaluator.EvaluateHumanScoringWithContext(
+		context.Background(), "志望理由を教えてください", "成長できる環境で挑戦したいです", false, false, nil,
+	)
+	assert.Empty(t, failedResult.PromptVersion)
+}
+
 // ──────────────────────────────────────────────
 // MergeConfidence のテスト
 // ──────────────────────────────────────────────

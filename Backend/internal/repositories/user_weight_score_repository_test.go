@@ -55,6 +55,25 @@ func TestSetScore_CreatesNewRecord(t *testing.T) {
 	}
 }
 
+func TestSetScoreWithPromptVersion_SavesPromptVersion(t *testing.T) {
+	repo, mock := newScoreRepoTestDB(t)
+
+	mock.ExpectQuery("SELECT `organization_id` FROM `users` WHERE id = \\?").
+		WithArgs(uint(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"organization_id"}).AddRow(1))
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO `user_weight_scores`").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	if err := repo.SetScoreWithPromptVersion(1, "session-1", "技術志向", 80, "v2"); err != nil {
+		t.Fatalf("SetScoreWithPromptVersion returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 // TestAddScore_UpdatesExistingRecord は AddScore が既存レコードに差分加算することを検証する（#315修正）
 func TestAddScore_UpdatesExistingRecord(t *testing.T) {
 	repo, mock := newScoreRepoTestDB(t)
@@ -75,6 +94,26 @@ func TestAddScore_UpdatesExistingRecord(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("expectations not met: %v", err)
+	}
+}
+
+func TestAddScoreWithPromptVersion_UpdatesPromptVersion(t *testing.T) {
+	repo, mock := newScoreRepoTestDB(t)
+
+	mock.ExpectQuery("SELECT \\* FROM `user_weight_scores` WHERE").
+		WithArgs(uint(1), "session-1", "技術志向", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "session_id", "weight_category", "score"}).
+			AddRow(10, 1, "session-1", "技術志向", 70))
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `user_weight_scores`").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	if err := repo.AddScoreWithPromptVersion(1, "session-1", "技術志向", 0, "v2"); err != nil {
+		t.Fatalf("AddScoreWithPromptVersion returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
 	}
 }
 

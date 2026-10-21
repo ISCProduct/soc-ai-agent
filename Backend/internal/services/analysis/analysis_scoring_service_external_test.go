@@ -97,7 +97,13 @@ type mockUserWeightScoreRepo struct{}
 func (m *mockUserWeightScoreRepo) SetScore(userID uint, sessionID, category string, absoluteScore int) error {
 	return nil
 }
+func (m *mockUserWeightScoreRepo) SetScoreWithPromptVersion(userID uint, sessionID, category string, absoluteScore int, promptVersion string) error {
+	return nil
+}
 func (m *mockUserWeightScoreRepo) AddScore(userID uint, sessionID, category string, delta int) error {
+	return nil
+}
+func (m *mockUserWeightScoreRepo) AddScoreWithPromptVersion(userID uint, sessionID, category string, delta int, promptVersion string) error {
 	return nil
 }
 func (m *mockUserWeightScoreRepo) FindByUserAndSession(userID uint, sessionID string) ([]entity.UserWeightScore, error) {

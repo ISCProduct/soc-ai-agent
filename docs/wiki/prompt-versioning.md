@@ -2,7 +2,9 @@
 
 AI呼び出しの `api_call_logs` に `prompt_stage`、`prompt_version`、`prompt_variant` を記録する。
 質問生成は `ai_generated_questions.prompt_version`、AI生成マッチング理由は
-`user_company_matches.match_reason_prompt_version` にも実際に保存した本文の版を記録する。
+`user_company_matches.match_reason_prompt_version`、回答のLLMハイブリッド評価は
+`user_weight_scores.prompt_version`、企業情報抽出は `companies.info_prompt_version` にも
+実際に使った本文の版を記録する。
 マッチング理由の版は `api_call_logs` と同じ素の版名（例: `v2`）で保持する。
 
 現時点で実装済みの各工程の本文は `v2` のみである。未登録の版名は `v2` にフォールバックし、
@@ -13,9 +15,10 @@ AI呼び出しの `api_call_logs` に `prompt_stage`、`prompt_version`、`promp
 `PROMPT_AB_<STAGE>` は現在無効である。異なる候補本文を追加し、版ごとの本文選択と評価が検証された後に
 A/B割当を再導入する。
 
-質問生成とマッチング理由は、出力レコードにも版を保持する。回答評価と企業情報抽出は
-`api_call_logs` の工程・版記録で追跡する。`prompt_stage` が付与されないAI呼び出しは
-`unknown` として保存し、未計測経路を識別できるようにする。
+質問生成、AI評価スコア、企業情報、マッチング理由は、出力レコードにも版を保持する。
+AIを使わないルール評価や選択肢回答は版を記録しない。マッチング再計算で新しいAI理由が
+生成されなかった場合は、既存の版記録を空値で上書きしない。`prompt_stage` が付与されない
+AI呼び出しは `unknown` として保存し、未計測経路を識別できるようにする。
 
 `prompt_stage` は機能配賦用の `feature` とは異なる分析軸であり、1工程が複数の機能に対応する場合がある。
 例: `question_generation` → `chat_question`、`score_evaluation` → `chat_answer_eval`、
