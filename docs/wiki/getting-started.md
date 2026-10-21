@@ -11,7 +11,7 @@
 | ツール | 推奨バージョン | 確認コマンド |
 |-------|-------------|------------|
 | Go | 1.25 以上 | `go version` |
-| Node.js | 18 以上 | `node --version` |
+| Node.js | 24.22.1（`frontend/.nvmrc`） | `node --version` |
 | Python | 3.10 以上 | `python3 --version` |
 | Docker | 24 以上 | `docker --version` |
 | Docker Compose | v2 (Plugin) | `docker compose version` |
@@ -250,7 +250,7 @@ npx playwright test
 | `OPENAI_API_KEY が未設定` | AI 機能を使う場合に必要 | `.env` に `OPENAI_API_KEY` を設定 |
 | `rag-review 起動失敗` | 依存パッケージのバージョン不一致 | `pip install -r requirements.txt -c constraints.txt` で作り直す |
 | `CORS エラー（開発時）` | `ALLOWED_ORIGINS` 未設定 | `.env` に `ALLOWED_ORIGINS=http://localhost:3000` を追加 |
-| `フロントビルド失敗` | Node.js バージョンが古い | Node.js 18 以上を使用（`nvm use 18` 等） |
+| `フロントビルド失敗` | Node.js バージョンが古い | Node.js 24.22.1 を使用（`frontend/.nvmrc`） |
 | `TOKEN_ENCRYPTION_KEY 警告` | GitHub 連携に必要 | 64 桁の hex キーを生成して設定（`python3 -c "import secrets; print(secrets.token_hex(32))"`) |
 | `S3アップロード失敗` | IAM 権限不足 | `s3:PutObject` / `s3:GetObject` 権限を確認 |
 | `frontend が EACCES で起動しない`（Linux） | ホストの UID が 1000 以外で、bind mount した `./frontend` に `next dev` が `next-env.d.ts` を書けない | `.env` に `FRONTEND_USER=$(id -u):$(id -g)` を設定し、下記のボリューム作り直しも行う |
