@@ -301,65 +301,49 @@ func TestGetMatchingReasonPromptVersion(t *testing.T) {
 }
 
 func TestResolvePromptVersion(t *testing.T) {
-	t.Run("工程別設定が一括設定より優先", func(t *testing.T) {
-		t.Setenv("PROMPT_VERSION", "legacy")
-		t.Setenv("PROMPT_VERSION_MATCHING_REASON", "stage-v3")
+	t.Run("登録済み工程別設定が共通設定より優先", func(t *testing.T) {
+		t.Setenv("PROMPT_VERSION", "v2")
+		t.Setenv("PROMPT_VERSION_MATCHING_REASON", "v2")
 		t.Setenv("PROMPT_AB_MATCHING_REASON", "")
 
 		got := ResolvePromptVersion(StageMatchingReason, 1)
-		if got.Version != "stage-v3" || got.Variant != "control" {
-			t.Fatalf("割当=%+v, want stage-v3/control", got)
+		if got.Version != "v2" || got.Variant != "control" {
+			t.Fatalf("割当=%+v, want v2/control", got)
 		}
 	})
 
 	t.Run("一括設定の後方互換", func(t *testing.T) {
-		t.Setenv("PROMPT_VERSION", "legacy-v4")
+		t.Setenv("PROMPT_VERSION", "v2")
 		t.Setenv("PROMPT_VERSION_QUESTION_GENERATION", "")
 		t.Setenv("PROMPT_AB_QUESTION_GENERATION", "")
 
 		got := ResolvePromptVersion(StageQuestionGeneration, 1)
-		if got.Version != "legacy-v4" || got.Variant != "control" {
-			t.Fatalf("割当=%+v, want legacy-v4/control", got)
+		if got.Version != "v2" || got.Variant != "control" {
+			t.Fatalf("割当=%+v, want v2/control", got)
 		}
 	})
 
-	t.Run("利用者単位で再現可能なA/B割当", func(t *testing.T) {
-		t.Setenv("PROMPT_VERSION", "control-v2")
+	t.Run("候補本文未登録のA/B設定はcontrolへ戻す", func(t *testing.T) {
+		t.Setenv("PROMPT_VERSION", "v2")
 		t.Setenv("PROMPT_VERSION_SCORE_EVALUATION", "")
 		t.Setenv("PROMPT_AB_SCORE_EVALUATION", "candidate-v3:50")
 
-		candidateCount := 0
-		for userID := uint(1); userID <= 1000; userID++ {
-			first := ResolvePromptVersion(StageScoreEvaluation, userID)
-			second := ResolvePromptVersion(StageScoreEvaluation, userID)
-			if first != second {
-				t.Fatalf("user %d 割当が不安定: %+v != %+v", userID, first, second)
+		for userID := uint(1); userID <= 10; userID++ {
+			got := ResolvePromptVersion(StageScoreEvaluation, userID)
+			if got.Version != "v2" || got.Variant != "control" {
+				t.Fatalf("user %d の割当=%+v, want v2/control", userID, got)
 			}
-			if first.Variant == "candidate" && first.Version != "candidate-v3" {
-				t.Fatalf("candidate版=%q", first.Version)
-			}
-			if first.Variant == "candidate" {
-				candidateCount++
-			}
-		}
-		if candidateCount < 450 || candidateCount > 550 {
-			t.Fatalf("50%%割当の候補数=%d/1000, want 450..550", candidateCount)
-		}
-
-		t.Setenv("PROMPT_AB_SCORE_EVALUATION", "candidate-v3:100")
-		got := ResolvePromptVersion(StageScoreEvaluation, 1)
-		if got.Version != "candidate-v3" || got.Variant != "candidate" {
-			t.Fatalf("100%% candidate の割当=%+v", got)
 		}
 	})
 
-	t.Run("無効なA/B設定はcontrolへ戻す", func(t *testing.T) {
+	t.Run("未登録の工程別版と共通版を拒否", func(t *testing.T) {
+		t.Setenv("PROMPT_VERSION", "legacy-v4")
 		t.Setenv("PROMPT_VERSION_COMPANY_EXTRACTION", "company-v2")
-		t.Setenv("PROMPT_AB_COMPANY_EXTRACTION", "candidate-v3:101")
+		t.Setenv("PROMPT_AB_COMPANY_EXTRACTION", "")
 
 		got := ResolvePromptVersion(StageCompanyExtraction, 1)
-		if got.Version != "company-v2" || got.Variant != "control" {
-			t.Fatalf("無効設定時の割当=%+v", got)
+		if got.Version != "v2" || got.Variant != "control" {
+			t.Fatalf("未登録版を拒否した後の割当=%+v, want v2/control", got)
 		}
 	})
 }

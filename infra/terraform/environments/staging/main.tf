@@ -356,22 +356,29 @@ resource "aws_launch_template" "app" {
   # 3 にすると通常の2要素XFFでは転送が無効になり、さらにクライアントが先頭へIPを1個足すと
   # その詐称値が3段目として内部トークン付きで署名され、IP単位の制限を回避できてしまう。
   user_data = base64encode(templatefile("${path.module}/app_user_data.sh.tftpl", {
-    aws_region               = var.region
-    log_group_name           = aws_cloudwatch_log_group.app.name
-    backend_image            = local.backend_image
-    frontend_image           = local.frontend_image
-    rag_image                = local.rag_image
-    db_host                  = module.rds.address
-    db_port                  = module.rds.port
-    db_name                  = module.rds.db_name
-    db_user                  = module.rds.master_username
-    db_password              = module.rds.master_password
-    s3_bucket                = module.s3.bucket_id
-    openai_api_key           = var.openai_api_key_plain
-    houjin_bangou_app_id     = var.houjin_bangou_app_id
-    gbizinfo_api_key         = var.gbizinfo_api_key
-    gbizinfo_base_url        = var.gbizinfo_base_url
-    openai_model             = var.openai_model
+    aws_region           = var.region
+    log_group_name       = aws_cloudwatch_log_group.app.name
+    backend_image        = local.backend_image
+    frontend_image       = local.frontend_image
+    rag_image            = local.rag_image
+    db_host              = module.rds.address
+    db_port              = module.rds.port
+    db_name              = module.rds.db_name
+    db_user              = module.rds.master_username
+    db_password          = module.rds.master_password
+    s3_bucket            = module.s3.bucket_id
+    openai_api_key       = var.openai_api_key_plain
+    houjin_bangou_app_id = var.houjin_bangou_app_id
+    gbizinfo_api_key     = var.gbizinfo_api_key
+    gbizinfo_base_url    = var.gbizinfo_base_url
+    openai_model         = var.openai_model
+    prompt_version       = var.prompt_version
+    prompt_versions = merge({
+      question_generation = "v2"
+      score_evaluation    = "v2"
+      matching_reason     = "v2"
+      company_extraction  = "v2"
+    }, var.prompt_versions)
     resend_api_key           = var.resend_api_key_plain
     google_client_id         = var.google_client_id
     google_client_secret     = var.google_client_secret

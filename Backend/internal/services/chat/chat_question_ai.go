@@ -123,7 +123,8 @@ func (s *ChatService) generateQuestionWithAI(ctx context.Context, history []mode
 	return questionText, aiGenQuestion.ID, nil
 }
 
-func (s *ChatService) simplifyQuestionWithAI(ctx context.Context, question string) (string, error) {
+func (s *ChatService) simplifyQuestionWithAI(ctx context.Context, question string, userID uint) (string, error) {
+	ctx, _ = prompts.WithPromptVersion(ctx, prompts.StageQuestionGeneration, userID)
 	prompt := prompts.BuildSimplifyQuestionPrompt(question)
 	return s.aiCallWithRetries(ctx, prompt)
 }
