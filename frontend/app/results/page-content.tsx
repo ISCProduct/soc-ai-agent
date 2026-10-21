@@ -4,6 +4,7 @@ import { Suspense } from 'react'
 import dynamic from 'next/dynamic'
 import { Box, CircularProgress } from '@mui/material'
 import { PageLoading } from '@/components/common/PageLoading'
+import { CONTENT_MAX_WIDTH } from '@/lib/design/tokens'
 import { useResultsData } from './hooks/useResultsData'
 import {
   ResultsLoadingView,
@@ -83,7 +84,7 @@ function ResultsContent() {
 
   if (error) {
     return (
-      <Box sx={{ maxWidth: 1200, mx: 'auto', p: { xs: 2, sm: 4 }, width: '100%' }}>
+      <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', p: { xs: 2, sm: 4 }, width: '100%' }}>
         <AnalysisScoreCard
           analysisScores={analysisScores}
           scoreComment={scoreComment}
@@ -101,7 +102,7 @@ function ResultsContent() {
 
   if (companies.length === 0) {
     return (
-      <Box sx={{ maxWidth: 1200, mx: 'auto', p: { xs: 2, sm: 4 }, width: '100%' }}>
+      <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', p: { xs: 2, sm: 4 }, width: '100%' }}>
         <AnalysisScoreCard
           analysisScores={analysisScores}
           scoreComment={scoreComment}

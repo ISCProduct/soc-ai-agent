@@ -166,3 +166,54 @@ test.describe('レスポンシブ: AI面接・企業選択画面の列揃え', (
     }
   })
 })
+
+// ES添削画面の列ずれ（#1783）。
+// ヘッダーの帯は全幅の左寄せ、本文は maxWidth で中央寄せだったため、
+// 広い画面ほど見出しと入力欄の左端がずれる。帯は全幅のまま、中身だけ本文と同じ列に入れる。
+test.describe('レスポンシブ: ES添削画面の列揃え', () => {
+  test('ヘッダーと本文の左端が揃い、戻るボタンは列の右端に揃う', async ({ page }) => {
+    await setupAuth(page, TEST_USER)
+    await stubApi(page)
+
+    for (const width of [2000, 1440, 1024, 768]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.waitForFunction((w: number) => document.documentElement.clientWidth === w, width)
+      await page.goto('/es-rewrite')
+      await expect(page.getByText('ES添削・リライト', { exact: true })).toBeVisible({ timeout: 15000 })
+
+      const headerRow = page.getByTestId('es-rewrite-header-row')
+      const modeButton = page.getByRole('button', { name: 'ES添削' })
+      const form = page.locator('.MuiPaper-root').filter({ hasText: '元の文章を入力' }).first()
+      const backButton = page.getByRole('button', { name: 'ホームへ戻る' })
+      const band = page.locator('header')
+
+      await expect(headerRow).toBeVisible()
+      await expect(form).toBeVisible()
+
+      const headerRowBox = await headerRow.boundingBox()
+      const modeButtonBox = await modeButton.boundingBox()
+      const formBox = await form.boundingBox()
+      const backButtonBox = await backButton.boundingBox()
+      const bandBox = await band.boundingBox()
+      expect(headerRowBox, `${width}px: ヘッダー行が取得できない`).not.toBeNull()
+      expect(modeButtonBox, `${width}px: モード切替が取得できない`).not.toBeNull()
+      expect(formBox, `${width}px: 入力欄が取得できない`).not.toBeNull()
+      expect(backButtonBox, `${width}px: 戻るボタンが取得できない`).not.toBeNull()
+      expect(bandBox, `${width}px: ヘッダー帯が取得できない`).not.toBeNull()
+
+      expect(Math.abs(headerRowBox!.x - modeButtonBox!.x), `${width}px: 見出し列とモード切替の左端`).toBeLessThanOrEqual(1)
+      expect(Math.abs(headerRowBox!.x - formBox!.x), `${width}px: 見出し列と入力欄の左端`).toBeLessThanOrEqual(1)
+      expect(
+        Math.abs(backButtonBox!.x + backButtonBox!.width - headerRowBox!.x - headerRowBox!.width),
+        `${width}px: 戻るボタンが列の右端に揃っていない`,
+      ).toBeLessThanOrEqual(1)
+
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }))
+      expect(scrollWidth, `${width}px: 横方向にはみ出している`).toBeLessThanOrEqual(clientWidth)
+      expect(Math.abs(bandBox!.width - clientWidth), `${width}px: ヘッダー帯が全幅ではない`).toBeLessThanOrEqual(1)
+    }
+  })
+})
