@@ -114,6 +114,6 @@ func BuildJobTypeToneGuidance(jobCategoryName string) string {
 func LogPromptVersion(context string) {
 	slog.Info("プロンプトバージョン使用",
 		"context", context,
-		"version", PromptVersion,
+		"version", ResolvePromptVersion(StageQuestionGeneration, 0).Version,
 	)
 }

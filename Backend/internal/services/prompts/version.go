@@ -2,12 +2,11 @@ package prompts
 
 import (
 	"context"
-	"crypto/sha256"
-	"fmt"
 	"log/slog"
 	"os"
-	"strconv"
+	"regexp"
 	"strings"
+	"sync"
 
 	"Backend/internal/usagectx"
 )
@@ -16,6 +15,9 @@ import (
 type Stage string
 
 const (
+	// Stage は usagectx.Feature とは別の分析軸。question_generation は chat_question、
+	// score_evaluation は chat_answer_eval、matching_reason は matching_reason、
+	// company_extraction は company_search / company_parse のAI呼び出しに対応する。
 	StageQuestionGeneration Stage = "question_generation"
 	StageScoreEvaluation    Stage = "score_evaluation"
 	StageMatchingReason     Stage = "matching_reason"
@@ -28,54 +30,19 @@ type VersionAssignment struct {
 	Variant string
 }
 
-// ResolvePromptVersion は工程別設定と安定した利用者IDからプロンプト版を決める。
+var (
+	promptVersionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	warnedPromptSettings sync.Map
+)
+
+// ResolvePromptVersion は工程別設定と実装済みの本文からプロンプト版を決める。
 //
-// PROMPT_AB_<STAGE> は "candidate:percent" 形式で指定する。candidate に割り当たら
-// なかった利用者には工程別版、次に従来の PROMPT_VERSION が適用される。
-func ResolvePromptVersion(stage Stage, subjectID uint) VersionAssignment {
-	base := promptVersionForStage(stage)
-	if !promptVersionFitsStorage(stage, base) {
-		slog.Warn("プロンプト版設定を無視します", "stage", stage, "reason", "version too long")
-		base = "v2"
+// 候補本文が実装されるまでは、全ての利用者に実在するcontrol版のみを割り当てる。
+func ResolvePromptVersion(stage Stage, _ uint) VersionAssignment {
+	if strings.TrimSpace(os.Getenv("PROMPT_AB_"+strings.ToUpper(string(stage)))) != "" {
+		warnPromptVersionOnce(stage, "A/B assignment requires a registered candidate prompt")
 	}
-	stageName := strings.ToUpper(string(stage))
-	experiment := strings.TrimSpace(os.Getenv("PROMPT_AB_" + stageName))
-	if experiment == "" {
-		return VersionAssignment{Version: base, Variant: "control"}
-	}
-
-	parts := strings.Split(experiment, ":")
-	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
-		slog.Warn("プロンプトA/B設定を無視します", "stage", stage, "reason", "invalid format")
-		return VersionAssignment{Version: base, Variant: "control"}
-	}
-	percent, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err != nil || percent < 0 || percent > 100 {
-		slog.Warn("プロンプトA/B設定を無視します", "stage", stage, "reason", "invalid percent")
-		return VersionAssignment{Version: base, Variant: "control"}
-	}
-	if percent == 0 || subjectID == 0 {
-		return VersionAssignment{Version: base, Variant: "control"}
-	}
-	candidate := strings.TrimSpace(parts[0])
-	if !promptVersionFitsStorage(stage, candidate) {
-		slog.Warn("プロンプトA/B設定を無視します", "stage", stage, "reason", "candidate version too long")
-		return VersionAssignment{Version: base, Variant: "control"}
-	}
-	if candidate == base {
-		slog.Warn("プロンプトA/B設定を無視します", "stage", stage, "reason", "candidate and control versions are identical")
-		return VersionAssignment{Version: base, Variant: "control"}
-	}
-	if !hasVersionedPrompt(stage, base) || !hasVersionedPrompt(stage, candidate) {
-		slog.Warn("プロンプトA/B設定を無視します", "stage", stage, "reason", "candidate prompt is not registered")
-		return VersionAssignment{Version: base, Variant: "control"}
-	}
-
-	bucket := promptVersionBucket(stage, subjectID)
-	if bucket < percent {
-		return VersionAssignment{Version: candidate, Variant: "candidate"}
-	}
-	return VersionAssignment{Version: base, Variant: "control"}
+	return VersionAssignment{Version: promptVersionForStage(stage), Variant: "control"}
 }
 
 // WithPromptVersion は選択した版を利用量記録用 context に載せる。
@@ -85,32 +52,42 @@ func WithPromptVersion(ctx context.Context, stage Stage, subjectID uint) (contex
 }
 
 func promptVersionForStage(stage Stage) string {
+	if !hasVersionedPrompt(stage, "v2") {
+		warnPromptVersionOnce(stage, "unknown stage")
+		return "v2"
+	}
+
 	stageVersion := strings.TrimSpace(os.Getenv("PROMPT_VERSION_" + strings.ToUpper(string(stage))))
 	if stageVersion != "" {
-		if hasVersionedPrompt(stage, stageVersion) {
+		if validPromptVersion(stageVersion) && hasVersionedPrompt(stage, stageVersion) {
 			return stageVersion
 		}
-		slog.Warn("工程別プロンプト版設定を無視します", "stage", stage, "reason", "prompt version is not registered")
+		warnPromptVersionOnce(stage, "unregistered stage version")
 	}
-	if globalVersion := strings.TrimSpace(os.Getenv("PROMPT_VERSION")); globalVersion != "" {
-		return globalVersion
+
+	globalVersion := strings.TrimSpace(os.Getenv("PROMPT_VERSION"))
+	if globalVersion == "" {
+		globalVersion = strings.TrimSpace(PromptVersion)
 	}
-	if strings.TrimSpace(PromptVersion) != "" {
-		return strings.TrimSpace(PromptVersion)
+	if globalVersion != "" {
+		if validPromptVersion(globalVersion) && hasVersionedPrompt(stage, globalVersion) {
+			return globalVersion
+		}
+		warnPromptVersionOnce(stage, "unregistered global version")
 	}
 	return "v2"
 }
 
-func promptVersionFitsStorage(stage Stage, version string) bool {
-	maxLength := 64
-	if stage == StageMatchingReason {
-		maxLength -= len("matching_reason_")
-	}
-	return len(version) <= maxLength
+func validPromptVersion(version string) bool {
+	return promptVersionPattern.MatchString(version)
 }
 
-// hasVersionedPrompt は、実際に本文を実装している工程・版だけを実験候補として許可する。
-// 新しい本文を追加した際は、ここにも工程・版を登録する。
+// FormatMatchingReasonPromptVersion はプロンプト本文に表示する工程付き版名を返す。
+func FormatMatchingReasonPromptVersion(version string) string {
+	return "matching_reason_" + version
+}
+
+// hasVersionedPrompt は、工程ごとに本文が存在する版だけを許可する。
 func hasVersionedPrompt(stage Stage, version string) bool {
 	if version != "v2" {
 		return false
@@ -123,8 +100,9 @@ func hasVersionedPrompt(stage Stage, version string) bool {
 	}
 }
 
-func promptVersionBucket(stage Stage, subjectID uint) int {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", stage, subjectID)))
-	value := uint32(sum[0])<<24 | uint32(sum[1])<<16 | uint32(sum[2])<<8 | uint32(sum[3])
-	return int(value % 100)
+func warnPromptVersionOnce(stage Stage, reason string) {
+	key := string(stage) + ":" + reason + ":" + strings.TrimSpace(os.Getenv("PROMPT_VERSION_"+strings.ToUpper(string(stage))))
+	if _, loaded := warnedPromptSettings.LoadOrStore(key, struct{}{}); !loaded {
+		slog.Warn("プロンプト版設定を無視します", "stage", stage, "reason", reason)
+	}
 }

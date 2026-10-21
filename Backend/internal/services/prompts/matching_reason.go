@@ -1,7 +1,5 @@
 package prompts
 
-import "fmt"
-
 // MatchingReasonPromptVersion は後方互換のための固定バージョン定数です。
 // 新規コードでは GetMatchingReasonPromptVersion() を使用してください。
 const MatchingReasonPromptVersion = "matching_reason_v2"
@@ -9,7 +7,7 @@ const MatchingReasonPromptVersion = "matching_reason_v2"
 // GetMatchingReasonPromptVersion はマッチング理由工程の版を返す。
 func GetMatchingReasonPromptVersion() string {
 	version := ResolvePromptVersion(StageMatchingReason, 0).Version
-	return fmt.Sprintf("matching_reason_%s", version)
+	return FormatMatchingReasonPromptVersion(version)
 }
 
 const MatchingReasonSystemPrompt = `あなたは新卒向け採用マッチングのキャリアアドバイザーです。

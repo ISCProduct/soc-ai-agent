@@ -420,7 +420,7 @@ func (s *MatchingService) GenerateMatchReason(ctx context.Context, match *entity
 	if reason == "" {
 		return BuildMatchReason(match, userScores), nil
 	}
-	match.MatchReasonPromptVersion = fmt.Sprintf("matching_reason_%s", assignment.Version)
+	match.MatchReasonPromptVersion = assignment.Version
 	return reason, nil
 }
 
@@ -449,7 +449,7 @@ func buildMatchingReasonUserPromptWithVersion(match *entity.UserCompanyMatch, us
 	)
 	return fmt.Sprintf(
 		prompts.MatchingReasonUserPromptTemplate,
-		fmt.Sprintf("matching_reason_%s", version),
+		prompts.FormatMatchingReasonPromptVersion(version),
 		shared.WrapUntrustedText(companyInfo, "企業情報"),
 		formatTopUserScores(userScores),
 		formatTopMatchAxes(match),

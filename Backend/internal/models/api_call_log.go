@@ -24,7 +24,7 @@ type APICallLog struct {
 	// その件数が「まだ計測できていない経路」の指標になる（DesignDoc §8）。
 	Feature string `gorm:"size:64;not null;default:'unknown'" json:"feature"`
 	// PromptStage / PromptVersion / PromptVariant は工程別の品質比較に使う。
-	PromptStage   string `gorm:"size:64;not null;default:''" json:"prompt_stage,omitempty"`
+	PromptStage   string `gorm:"size:64;not null;default:'unknown'" json:"prompt_stage"`
 	PromptVersion string `gorm:"size:64;not null;default:''" json:"prompt_version,omitempty"`
 	PromptVariant string `gorm:"size:16;not null;default:''" json:"prompt_variant,omitempty"`
 	// 実行主体。バッチ経路は主体を持たないため nil。
