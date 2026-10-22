@@ -14,7 +14,7 @@ import { GUEST_REGISTER_PATH } from '@/lib/guest-limits'
 import { POSITIONS } from './constants'
 import type { InterviewCompany, Position, InterviewStatus } from './types'
 import { resolveCompanyByName } from './utils'
-import { fetchWithTimeout } from '@/lib/fetch-timeout'
+import { fetchAndReadWithTimeout, fetchWithTimeout } from '@/lib/fetch-timeout'
 import {
   clearInterviewLobbyDraft,
   loadInterviewLobbyDraft,
@@ -194,25 +194,25 @@ function InterviewContent() {
       setWebSearchLoading(true)
       setWebSearchError(null)
       try {
-        const r = await fetch(
+        const data = await fetchAndReadWithTimeout(
           `/api/companies/web-search?q=${encodeURIComponent(companySearch.trim())}`,
           { cache: 'no-store' },
+          45_000,
+          async (r) => {
+            if (!r.ok) {
+              // 学生向けの画面なのでステータスコードは出さない。
+              // 待てば直る 429 だけは次の行動が変わるので文言を分ける。
+              throw new Error(
+                r.status === 429
+                  ? '検索の回数が多すぎます。少し時間を置いてからお試しください。'
+                  : '検索できませんでした。しばらくしてからもう一度お試しください。',
+              )
+            }
+            return r.json() as Promise<{ results?: { name: string; description: string }[] }>
+          },
         )
-        if (cancelled) return
-        if (!r.ok) {
-          // 学生向けの画面なのでステータスコードは出さない。
-          // 待てば直る 429 だけは次の行動が変わるので文言を分ける。
-          throw new Error(
-            r.status === 429
-              ? '検索の回数が多すぎます。少し時間を置いてからお試しください。'
-              : '検索できませんでした。しばらくしてからもう一度お試しください。',
-          )
-        }
-        const data = await r.json()
         // JSON パース中に検索語が変わってクリーンアップが走ったら、
         // この結果は古い。setState 直前で再確認して上書きを防ぐ(#1464)。
-        // fetch 後の1回だけでは足りない: r.json() も待ちであり、その間に
-        // 別の検索が cancelled を立てうる。
         if (cancelled) return
         setWebSearchResults(Array.isArray(data?.results) ? data.results : [])
       } catch (e) {
