@@ -34,6 +34,7 @@ var upsertAssignments = clause.AssignmentColumns([]string{
 	"communication_match",
 	"matched_axis_count",
 	"match_reason",
+	"match_reason_prompt_version",
 	"updated_at",
 })
 

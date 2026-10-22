@@ -88,6 +88,27 @@ func TestCompanyInfoFetcher_FetchAndSave_TTLCache(t *testing.T) {
 	repo.AssertNotCalled(t, "Update", mock.Anything)
 }
 
+func TestCompanyInfoFetcher_AcquireRecordsPromptVersion(t *testing.T) {
+	srv := makeChatCompletionsServer(t, validCompanyInfoJSON())
+	defer srv.Close()
+
+	client := openai.NewWithBaseURL(srv.URL, "gpt-4o-mini")
+	var usages []openai.Usage
+	client.OnUsage = func(usage openai.Usage) {
+		usages = append(usages, usage)
+	}
+	fetcher := company.NewCompanyInfoFetcher(nil, client)
+
+	_, err := fetcher.Acquire(context.Background(), "テスト株式会社", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, usages)
+	for _, usage := range usages {
+		assert.Equal(t, "company_extraction", usage.PromptStage)
+		assert.Equal(t, "v2", usage.PromptVersion)
+		assert.Equal(t, "control", usage.PromptVariant)
+	}
+}
+
 func TestCompanyInfoFetcher_FetchAndSave_StampedSparseDoesNotSkipTTL(t *testing.T) {
 	now := time.Now()
 	repo := &mocks.CompanyRepositoryMock{}
