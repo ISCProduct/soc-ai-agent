@@ -61,6 +61,7 @@ type UserWeightScore struct {
 	SessionID      string
 	WeightCategory string
 	Score          int
+	PromptVersion  string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }

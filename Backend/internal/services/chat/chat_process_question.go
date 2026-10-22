@@ -216,7 +216,7 @@ func (s *ChatService) processAnswerAndNextQuestion(ctx context.Context, input pr
 			aiResponse = "ありがとうございます！それでは、適性診断を始めますね。\n\n" + aiResponse
 		}
 		if targetLevel == "新卒" && isVerboseQuestion(aiResponse) && isTextBasedQuestion(aiResponse) {
-			simple, err := s.simplifyQuestionWithAI(ctx, aiResponse)
+			simple, err := s.simplifyQuestionWithAI(ctx, req.UserID, aiResponse)
 			if err != nil || strings.TrimSpace(simple) == "" {
 				simple = s.selectFallbackQuestion(targetCategory, jobCategoryID, targetLevel, askedTexts)
 			}

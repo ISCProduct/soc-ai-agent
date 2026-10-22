@@ -6,6 +6,8 @@ import (
 	"Backend/internal/models"
 	"Backend/internal/openai"
 	"Backend/internal/services/gbizinfo"
+	"Backend/internal/services/prompts"
+	"Backend/internal/usagectx"
 	"context"
 	"encoding/json"
 	"errors"
@@ -35,6 +37,7 @@ type CompanyInfoResult struct {
 	SourceURL          string `json:"source_url,omitempty"`
 	ModelUsed          string `json:"model_used,omitempty"`
 	Confidence         string `json:"confidence,omitempty"`
+	PromptVersion      string `json:"prompt_version,omitempty"`
 	// Phase 3 運用メタ: TTL / 予算ガードで Search をスキップしたとき
 	FromCache      bool   `json:"from_cache,omitempty"`
 	BudgetExceeded bool   `json:"budget_exceeded,omitempty"`
@@ -357,6 +360,7 @@ func (f *CompanyInfoFetcher) recentlyFailedProvision(key string) bool {
 
 // Acquire は企業名から基本情報をプレビュー取得する（DB 非更新）。
 func (f *CompanyInfoFetcher) Acquire(ctx context.Context, companyName, websiteURL string) (*CompanyInfoResult, error) {
+	ctx = f.withCompanyExtractionVersion(ctx)
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
@@ -370,6 +374,7 @@ func (f *CompanyInfoFetcher) Acquire(ctx context.Context, companyName, websiteUR
 }
 
 func (f *CompanyInfoFetcher) acquireForCompany(ctx context.Context, company *models.Company) (*CompanyInfoResult, error) {
+	ctx = f.withCompanyExtractionVersion(ctx)
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
@@ -380,6 +385,16 @@ func (f *CompanyInfoFetcher) acquireForCompany(ctx context.Context, company *mod
 	}
 
 	return f.acquireViaAISearch(ctx, company.Name, company.WebsiteURL)
+}
+
+func (f *CompanyInfoFetcher) withCompanyExtractionVersion(ctx context.Context) context.Context {
+	userID, _ := usagectx.Actor(ctx)
+	subjectID := uint(0)
+	if userID != nil {
+		subjectID = *userID
+	}
+	ctx, _ = prompts.WithPromptVersion(ctx, prompts.StageCompanyExtraction, subjectID)
+	return ctx
 }
 
 func (f *CompanyInfoFetcher) acquireFromGBizCompany(ctx context.Context, company *models.Company) (*CompanyInfoResult, error) {
@@ -549,6 +564,7 @@ func (f *CompanyInfoFetcher) acquireFromWebsite(ctx context.Context, companyName
 	if result.WebsiteURL == "" {
 		result.WebsiteURL = strings.TrimSpace(websiteURL)
 	}
+	result.PromptVersion = promptVersionFromContext(ctx)
 	return result, nil
 }
 
@@ -604,10 +620,14 @@ func (f *CompanyInfoFetcher) acquireViaAISearch(ctx context.Context, companyName
 	result.SourceURL = strings.TrimSpace(websiteURL)
 	result.ModelUsed = modelsUsed
 	result.Confidence = companyfetch.ConfidenceMedium
+	result.PromptVersion = promptVersionFromContext(ctx)
 	return result, nil
 }
 
 func mergeCompanyInfoGaps(base, ai *CompanyInfoResult) {
+	if ai.PromptVersion != "" {
+		base.PromptVersion = ai.PromptVersion
+	}
 	if base.Description == "" {
 		base.Description = ai.Description
 	}
@@ -681,7 +701,16 @@ func (f *CompanyInfoFetcher) acquireCheapExtract(ctx context.Context, companyNam
 	result.Source = companyfetch.SourceLLMExtract
 	result.ModelUsed = model
 	result.Confidence = companyfetch.ConfidenceMedium
+	result.PromptVersion = promptVersionFromContext(ctx)
 	return result, nil
+}
+
+func promptVersionFromContext(ctx context.Context) string {
+	assignment := usagectx.PromptVersionFromContext(ctx)
+	if assignment.Stage != string(prompts.StageCompanyExtraction) {
+		return ""
+	}
+	return assignment.Version
 }
 
 func parseCompanyInfoResult(text string) (*CompanyInfoResult, error) {
@@ -721,6 +750,7 @@ func companyInfoFromModel(company *models.Company) *CompanyInfoResult {
 		SourceURL:          company.SourceURL,
 		ModelUsed:          company.LastModelUsed,
 		Confidence:         company.LastFetchConfidence,
+		PromptVersion:      company.InfoPromptVersion,
 	}
 }
 
@@ -770,6 +800,9 @@ func applyCompanyInfoResult(company *models.Company, result *CompanyInfoResult) 
 	}
 	if result.WelfareDetails != "" {
 		company.WelfareDetails = result.WelfareDetails
+	}
+	if result.PromptVersion != "" {
+		company.InfoPromptVersion = result.PromptVersion
 	}
 }
 

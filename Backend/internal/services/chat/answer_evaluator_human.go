@@ -26,6 +26,7 @@ type HumanScoreResult struct {
 	Penalties       []string
 	Boosts          []string
 	Reason          string
+	PromptVersion   string
 }
 
 type questionMeta struct {
@@ -93,10 +94,11 @@ func (e *AnswerEvaluator) EvaluateHumanScoringWithContext(
 		return rule
 	}
 
-	llmResult := e.llmEvaluate(ctx, question, answer)
+	llmResult, promptVersion := e.llmEvaluateWithPromptVersion(ctx, question, answer)
 	if llmResult == nil {
 		return rule
 	}
+	rule.PromptVersion = promptVersion
 
 	n := len([]rune(strings.TrimSpace(answer)))
 	ruleWeight := 0.55

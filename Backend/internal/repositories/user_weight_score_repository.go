@@ -21,11 +21,25 @@ func NewUserWeightScoreRepository(db *gorm.DB) *UserWeightScoreRepository {
 // 呼び出し前に対象レコードが存在しないことを確認すること。
 // スコアは 0〜100 に丸める。
 func (r *UserWeightScoreRepository) SetScore(userID uint, sessionID, category string, absoluteScore int) error {
-	return r.SetScoreWithSource(userID, sessionID, category, absoluteScore, models.ScoreSourceChat)
+	return r.SetScoreWithPromptVersion(userID, sessionID, category, absoluteScore, "")
+}
+
+func (r *UserWeightScoreRepository) SetScoreWithPromptVersion(
+	userID uint, sessionID, category string, absoluteScore int, promptVersion string,
+) error {
+	return r.setScoreWithSourceAndPromptVersion(
+		userID, sessionID, category, absoluteScore, models.ScoreSourceChat, promptVersion,
+	)
 }
 
 // SetScoreWithSource は由来（chat / assessment）を指定して SetScore する（#1678）。
 func (r *UserWeightScoreRepository) SetScoreWithSource(userID uint, sessionID, category string, absoluteScore int, source string) error {
+	return r.setScoreWithSourceAndPromptVersion(userID, sessionID, category, absoluteScore, source, "")
+}
+
+func (r *UserWeightScoreRepository) setScoreWithSourceAndPromptVersion(
+	userID uint, sessionID, category string, absoluteScore int, source, promptVersion string,
+) error {
 	// 正典外のカテゴリ名を書かせない（#929）。
 	// マッチングは正典キーで scoreMap を引くため、揺れた名前で保存されると
 	// その行は永久に引かれず、代わりに中立50が使われて静かにスコアが希釈される。
@@ -48,6 +62,7 @@ func (r *UserWeightScoreRepository) SetScoreWithSource(userID uint, sessionID, c
 		WeightCategory: category,
 		Score:          absoluteScore,
 		Source:         source,
+		PromptVersion:  promptVersion,
 	}
 	if err := fillOrganizationID(r.db, userID, &score.OrganizationID); err != nil {
 		return err
@@ -59,6 +74,12 @@ func (r *UserWeightScoreRepository) SetScoreWithSource(userID uint, sessionID, c
 // レコードが存在しない場合はエラーを返す。
 // 加算結果は SQL 側で 0〜100 に丸め、競合時も範囲外にならないようにする。
 func (r *UserWeightScoreRepository) AddScore(userID uint, sessionID, category string, delta int) error {
+	return r.AddScoreWithPromptVersion(userID, sessionID, category, delta, "")
+}
+
+func (r *UserWeightScoreRepository) AddScoreWithPromptVersion(
+	userID uint, sessionID, category string, delta int, promptVersion string,
+) error {
 	normalized, err := valueobject.ParseWeightCategory(category)
 	if err != nil {
 		return err
@@ -70,10 +91,13 @@ func (r *UserWeightScoreRepository) AddScore(userID uint, sessionID, category st
 		userID, sessionID, category).First(&score).Error; err != nil {
 		return err
 	}
-	return r.db.Model(&score).Update(
-		"score",
-		gorm.Expr("GREATEST(0, LEAST(100, score + ?))", delta),
-	).Error
+	updates := map[string]any{
+		"score": gorm.Expr("GREATEST(0, LEAST(100, score + ?))", delta),
+	}
+	if promptVersion != "" {
+		updates["prompt_version"] = promptVersion
+	}
+	return r.db.Model(&score).Updates(updates).Error
 }
 
 // FindByUserAndSession ユーザーとセッションに紐づく全スコアを取得

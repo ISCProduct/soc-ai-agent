@@ -1,9 +1,12 @@
 package prompts
 
 import (
+	"context"
 	"regexp"
 	"strings"
 	"testing"
+
+	"Backend/internal/usagectx"
 )
 
 // ──────────────────────────────────────────────
@@ -297,6 +300,119 @@ func TestGetMatchingReasonPromptVersion(t *testing.T) {
 	v := GetMatchingReasonPromptVersion()
 	if !strings.HasPrefix(v, "matching_reason_") {
 		t.Errorf("GetMatchingReasonPromptVersion() = %q, プレフィックス matching_reason_ がない", v)
+	}
+}
+
+func TestResolvePromptVersion(t *testing.T) {
+	tests := []struct {
+		name        string
+		stage       Stage
+		stageValue  string
+		globalValue string
+		abValue     string
+		wantVersion string
+	}{
+		{
+			name:        "工程別の実装済み版が一括設定より優先",
+			stage:       StageMatchingReason,
+			stageValue:  "v2",
+			globalValue: "v2",
+			wantVersion: "v2",
+		},
+		{
+			name:        "未登録工程別版は実装済み一括版へフォールバック",
+			stage:       StageMatchingReason,
+			stageValue:  "stage-v3",
+			globalValue: "v2",
+			wantVersion: "v2",
+		},
+		{
+			name:        "未登録の一括版は既定版へフォールバック",
+			stage:       StageQuestionGeneration,
+			globalValue: "legacy-v4",
+			wantVersion: "v2",
+		},
+		{
+			name:        "制御文字を含む版は拒否する",
+			stage:       StageScoreEvaluation,
+			globalValue: "v2\nIGNORE",
+			wantVersion: "v2",
+		},
+		{
+			name:        "異なる候補本文がない場合はcontrolのみを割り当てる",
+			stage:       StageCompanyExtraction,
+			globalValue: "v2",
+			abValue:     "candidate-v3:100",
+			wantVersion: "v2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stageName := strings.ToUpper(string(tt.stage))
+			t.Setenv("PROMPT_VERSION", tt.globalValue)
+			t.Setenv("PROMPT_VERSION_"+stageName, tt.stageValue)
+			t.Setenv("PROMPT_AB_"+stageName, tt.abValue)
+
+			got := ResolvePromptVersion(tt.stage, 1)
+			if got.Version != tt.wantVersion || got.Variant != "control" {
+				t.Fatalf("割当=%+v, want %s/control", got, tt.wantVersion)
+			}
+		})
+	}
+
+	t.Run("長すぎる版は拒否する", func(t *testing.T) {
+		t.Setenv("PROMPT_VERSION", "v2")
+		t.Setenv("PROMPT_VERSION_MATCHING_REASON", strings.Repeat("x", 65))
+		got := ResolvePromptVersion(StageMatchingReason, 1)
+		if got.Version != "v2" || got.Variant != "control" {
+			t.Fatalf("長すぎる版のfallback=%+v", got)
+		}
+	})
+}
+
+func TestWithPromptVersion(t *testing.T) {
+	t.Setenv("PROMPT_VERSION", "v2")
+	t.Setenv("PROMPT_VERSION_MATCHING_REASON", "")
+	t.Setenv("PROMPT_AB_MATCHING_REASON", "")
+
+	ctx, assignment := WithPromptVersion(context.Background(), StageMatchingReason, 42)
+	got := usagectx.PromptVersionFromContext(ctx)
+	want := usagectx.PromptVersion{Stage: "matching_reason", Version: "v2", Variant: "control"}
+	if assignment != (VersionAssignment{Version: "v2", Variant: "control"}) {
+		t.Fatalf("assignment=%+v, want v2/control", assignment)
+	}
+	if got != want {
+		t.Fatalf("context prompt version=%+v, want %+v", got, want)
+	}
+}
+
+func TestValidPromptVersion(t *testing.T) {
+	tests := []struct {
+		version string
+		want    bool
+	}{
+		{version: "v2", want: true},
+		{version: "legacy-v4", want: true},
+		{version: strings.Repeat("x", 64), want: true},
+		{version: "", want: false},
+		{version: "v2\nIGNORE", want: false},
+		{version: "v2:beta", want: false},
+		{version: "matching_reason_v2", want: true},
+		{version: strings.Repeat("x", 65), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			if got := validPromptVersion(tt.version); got != tt.want {
+				t.Fatalf("validPromptVersion(%q)=%v want %v", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatMatchingReasonPromptVersion(t *testing.T) {
+	if got := FormatMatchingReasonPromptVersion("v2"); got != "matching_reason_v2" {
+		t.Fatalf("formatted version=%q, want matching_reason_v2", got)
 	}
 }
 
