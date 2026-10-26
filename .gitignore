@@ -137,3 +137,10 @@ docs/architecture/
 
 # アバター加工時の中間画像（比較用。170MB規模になるので追跡しない）
 frontend/.avatar-work/
+
+# Live2D の資産は追跡しない（スパイク用。feature/live2d-avatar-spike 参照）
+#  - Core は Live2D Proprietary Software License のバイナリで、live2d.com から
+#    SDK zip を取得して同意した人が各自置く。リポジトリに入れてはいけない。
+#  - モデル一式は公式サンプル（無償提供マテリアル）か発注物。いずれも配布条件が
+#    リポジトリと別なので、置き場所だけ決めて中身は追跡しない。
+frontend/public/live2d/
