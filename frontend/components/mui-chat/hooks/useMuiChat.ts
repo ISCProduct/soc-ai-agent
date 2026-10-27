@@ -236,7 +236,6 @@ export function useMuiChat() {
 
     void initializeChat()
     // マウント時のみ初期化（loadChatHistory / router は安定参照）
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleSend = async (overrideMessage?: string) => {

@@ -161,7 +161,7 @@ function InterviewContent() {
       }
     }, companySearch ? 400 : 0)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [loading, companySearch, companySourceTab, companiesRefreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loading, companySearch, companySourceTab, companiesRefreshKey])
 
   // 企業別面接傾向ヒント取得
   useEffect(() => {
@@ -180,7 +180,7 @@ function InterviewContent() {
         .finally(() => { if (!cancelled) setHintsLoading(false) })
     }, 600)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [interviewCompany?.name, selectedPosition.title]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [interviewCompany?.name, selectedPosition.title])
 
   // WEB検索
   // 失敗とヒット0件を必ず区別する。以前はどちらも空配列にしていたため、
@@ -228,7 +228,7 @@ function InterviewContent() {
       }
     }, 500)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [loading, companySearch, companySourceTab, webSearchRefreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loading, companySearch, companySourceTab, webSearchRefreshKey])
 
   const handleBackToSelection = useCallback(() => {
     clearInterviewLobbyDraft()
