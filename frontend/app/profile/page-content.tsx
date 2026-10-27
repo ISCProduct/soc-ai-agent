@@ -231,7 +231,7 @@ function ProfilePageContent() {
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       {/* ページヘッダー */}
-      <Box sx={{ bgcolor: 'white', borderBottom: '1px solid #e0e0e0', px: { xs: 2, sm: 3 }, py: 1.5 }}>
+      <Box sx={{ bgcolor: 'white', borderBottom: '1px solid #e0e0e0', py: 1.5 }}>
         <Container maxWidth="lg">
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <Typography variant="h6" component="h1" fontWeight="bold" color="primary">
