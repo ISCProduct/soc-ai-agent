@@ -175,8 +175,8 @@ test.describe('レスポンシブ: AI面接・企業選択画面の列揃え', (
 // Controller.List の応答形（sessions/total/page/limit）と
 // Controller.GetTrend の応答形（points）に合わせてモックする。
 test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
-  // 修正後の実測値（ヘッダー行・トレンド・履歴一覧の左端）:
-  // 2000px: 482 / 1440px: 202 / 1024px: 32 / 768px: 16
+  // ヘッダー行・トレンド・履歴一覧の左端 = max(0, (画面幅 - 1100) / 2) + 左右余白（md 以上 32px / md 未満 16px）。
+  // 例: 2000px → 482 / 1440px → 202 / 1024px → 32 / 768px → 16。列幅の定数を変えたら、この式に従って変わる。
   const SESSION_RESPONSE: { sessions: InterviewSession[]; total: number; page: number; limit: number } = {
     sessions: [{
       id: 1,
@@ -197,7 +197,7 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
 
   async function mockInterviewHistoryApi(
     page: import('@playwright/test').Page,
-    sessions: typeof SESSION_RESPONSE.sessions,
+    sessions: InterviewSession[],
     total: number,
   ) {
     // stubApi より後の route が優先される。
@@ -273,7 +273,7 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
       )
 
       const measurements: Array<Awaited<ReturnType<typeof measureAlignment>>> = []
-      for (const width of [2000, 1440, 1024, 768]) {
+      for (const width of [2000, 1440, 1024, 768, 390, 320]) {
         await page.setViewportSize({ width, height: 900 })
         await page.goto('/interview/history')
         await page.waitForFunction((w: number) => document.documentElement.clientWidth === w, width)
@@ -314,7 +314,7 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
     await stubApi(page)
     await mockInterviewHistoryApi(page, [], 0)
 
-    for (const width of [2000, 1440, 1024, 768]) {
+    for (const width of [2000, 1440, 1024, 768, 390, 320]) {
       await page.setViewportSize({ width, height: 900 })
       await page.goto('/interview/history')
       await page.waitForFunction((w: number) => document.documentElement.clientWidth === w, width)
