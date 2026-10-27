@@ -356,6 +356,11 @@ func TestEvaluateESResponse(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := evaluateESResponse(Observation{CaseID: c.ID, Label: c.Label}, c, tt.status, tt.body)
 			checkObservation(t, got, tt.wantBroken, tt.wantReason, tt.wantScore, tt.wantViolations)
+			if tt.name == "正常" {
+				if got.ImprovedChars != 480 || math.Abs(got.ImprovedTextRatio-1.2) > 1e-9 {
+					t.Errorf("改善文の長さ = %d / ratio %v, want 480 / 1.2", got.ImprovedChars, got.ImprovedTextRatio)
+				}
+			}
 		})
 	}
 }

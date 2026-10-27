@@ -14,10 +14,14 @@ from services.es_review import (
     _CHAR_LIMIT_RANGE,
     _CHAR_LIMIT_RETRY_DEADLINE_SEC,
     _CHAR_LIMIT_TOO_TIGHT_MESSAGE,
+    _IMPROVED_TEXT_MIN_RATIO,
+    _MAX_SHORT_TEXT_RETRIES,
     _MAX_CHAR_LIMIT_RETRIES,
     _STAR_TEXT_CHARS,
     _TOO_LONG_MESSAGE,
     _char_limit_bounds,
+    _improved_length_bounds,
+    _improved_length_floor,
     _run_es_review,
     count_es_chars,
 )
@@ -238,10 +242,88 @@ def test_no_char_limit_leaves_satisfied_null(monkeypatch):
     result = _run(client, char_limit=None)
 
     assert result.char_limit_satisfied is None
+    assert result.improved_length_satisfied is True
     assert result.improved_text_length == 250
     prompts = _improved_calls(client)
-    assert "元の文字数の110〜130%を目安" in prompts[0]
+    assert len(prompts) == 1
+    # 「学生時代に力を入れたことは、」は14字。目標は切り上げた110〜130%
+    assert "元の文章は14字です。改善後は16〜19字" in prompts[0]
+    assert "要約して短くしないでください" in prompts[0]
     assert "【設問の文字数上限】" not in prompts[0]
+
+
+def test_length_floor_constants_are_pinned():
+    """下限を110%へ上げると、足りている短いESまで作り直す。回数を増やすと85秒を超える。"""
+    assert _IMPROVED_TEXT_MIN_RATIO == 1.0
+    assert _MAX_SHORT_TEXT_RETRIES == 1
+    assert _improved_length_floor(10000) == 10000
+    assert _improved_length_bounds(10000) == (11000, 13000)
+    assert _improved_length_bounds(6000) == (6600, 7800)
+
+
+def test_long_es_that_shrinks_is_regenerated_once_without_max_tokens(monkeypatch):
+    """10,000字が360字まで縮んだら、実測字数を渡して1回だけ作り直す(#1606)。
+
+    入力上限は6,000字だが、サービスを直接呼んだ10,000字でも同じ検査をする。
+    max_tokens は渡さない。入力長に比例させると #1564 の飽和が戻る。
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    source = "あ" * 10000
+    client = _client([360, 11000])
+
+    result = _run(client, es_text=source)
+
+    prompts = _improved_calls(client)
+    assert len(prompts) == 2
+    assert "元の文章は10000字です。改善後は11000〜13000字" in prompts[0]
+    assert "360字で、元の文章（10000字）より短いです" in prompts[1]
+    assert "11000〜13000字で書き直してください" in prompts[1]
+    for call in client.chat.completions.create.call_args_list:
+        user = next(msg["content"] for msg in call.kwargs["messages"] if msg["role"] == "user")
+        if "【添削フィードバック】" in user:
+            assert "max_tokens" not in call.kwargs
+    assert result.improved_text_length == 11000
+    assert result.improved_length_satisfied is True
+    assert result.char_limit_satisfied is None
+
+
+def test_short_text_retry_is_capped_and_keeps_the_text(monkeypatch):
+    """1回作り直しても短いままなら、切り詰めず短かったことを返す。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    client = _client([360, 400, 9000])
+
+    result = _run(client, es_text="あ" * 6000)
+
+    assert len(_improved_calls(client)) == 1 + _MAX_SHORT_TEXT_RETRIES
+    assert result.improved_text_length == 400
+    assert result.improved_length_satisfied is False
+    assert count_es_chars(result.improved_text) == 400
+
+
+def test_short_text_retry_stops_at_deadline(monkeypatch):
+    """45秒を超えたら作り直さず、短かったことだけ返す。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    client = _client([360, 11000])
+    ticks = iter([0.0, 46.0])
+    monkeypatch.setattr("services.es_review.time.monotonic", lambda: next(ticks, 999.0))
+
+    result = _run(client, es_text="あ" * 6000)
+
+    assert len(_improved_calls(client)) == 1
+    assert result.improved_length_satisfied is False
+    assert result.improved_text_length == 360
+
+
+def test_char_limit_does_not_use_the_source_length_floor(monkeypatch):
+    """指定字数があるときは、元の文章より短くても作り直さない（短くする指定が目的）。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    client = _client([380])
+
+    result = _run(client, es_text="あ" * 2000, char_limit=400)
+
+    assert len(_improved_calls(client)) == 1
+    assert result.char_limit_satisfied is True
+    assert result.improved_length_satisfied is None
 
 
 # ---- プロンプトへの反映 ----

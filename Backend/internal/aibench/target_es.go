@@ -38,10 +38,10 @@ type esReviewResponse struct {
 
 // ES添削の指示遵守の許容範囲。
 //
-// プロンプトは feedback を「400字程度」、improved_text を「元の文字数の
-// 110〜130%を目安」と指示している。「程度」「目安」なので幅を持たせるが、
-// 幅の根拠をここに書いておく。数字を動かすと遵守率も動くため、
-// 実行間で比較するには固定されていることが前提。
+// プロンプトは feedback を「400字程度」、improved_text を元の110〜130%と
+// 字数で指示している（#1606）。「程度」なので幅を持たせるが、幅の根拠を
+// ここに書いておく。数字を動かすと遵守率も動くため、実行間で比較するには
+// 固定されていることが前提。比率そのものは Observation に残す。
 const (
 	esFeedbackMinChars = 250 // 400字の約6割。これ未満は助言として薄い
 	esFeedbackMaxChars = 700 // 400字の約1.75倍。これ以上は読まれない
@@ -188,7 +188,10 @@ func evaluateESResponse(o Observation, c Case, status int, body []byte) Observat
 		o.Violations = append(o.Violations, "feedback_length")
 	}
 	if src := runeLen(c.Input.ESText); src > 0 {
-		ratio := float64(runeLen(resp.ImprovedText)) / float64(src)
+		improved := runeLen(resp.ImprovedText)
+		ratio := float64(improved) / float64(src)
+		o.ImprovedChars = improved
+		o.ImprovedTextRatio = ratio
 		if ratio < esImprovedMinRatio || ratio > esImprovedMaxRatio {
 			o.Violations = append(o.Violations, "improved_text_ratio")
 		}

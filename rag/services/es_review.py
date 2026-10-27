@@ -23,7 +23,8 @@ logger = logging.getLogger("main")
 # プロンプト版:
 #   v2 で「評価＋対策」と「改善文」の2呼び出しに分割した(#1521)
 #   v3 で文字数上限の指示(#1523)とSTAR分解(#1533)を第2呼び出しへ統合した
-_PROMPT_VERSION = "es_review_v3"
+#   v4 で改善文の目標字数を数値で明示し、元より短いときは1回作り直す(#1606)
+_PROMPT_VERSION = "es_review_v4"
 
 # 日本語の出力トークン見積もり。tiktoken(o200k_base)の実測レートは素材で大きく散る
 # （英数混在 0.20 / 日本語＋英数 0.53 / 漢字かな混在 0.78〜0.81 / ひらがな主体 0.91 /
@@ -40,7 +41,15 @@ _PROMPT_VERSION = "es_review_v3"
 _JP_TOKENS_PER_CHAR = 0.85
 # プロンプトが改善文へ指示している目標倍率（元の文字数の110〜130%）。
 # 出力予算の見積もりには使わない（#1564。改善文の段は max_tokens を渡さない）。
+_IMPROVED_TEXT_TARGET_LOW_RATIO = 1.1
 _IMPROVED_TEXT_RATIO = 1.3
+# これを下回る改善文は要約になっている（#1606。10,000字が約360字＝4%まで縮んだ実測）。
+# 下限はハーネスの improved_text_ratio と同じ100%。110%まで上げると、
+# すでに十分な短いESまで作り直し、品質と比較の前提が変わる。
+_IMPROVED_TEXT_MIN_RATIO = 1.0
+# 短すぎる改善文の作り直しは1回だけ。評価＋改善文＋この1回で3呼び出しになり、
+# それ以上は Backend 85秒 / 1呼び出し60秒（#1556）に収まらない。
+_MAX_SHORT_TEXT_RETRIES = 1
 # JSONのキー・括弧・エスケープ分の固定オーバーヘッド
 _JSON_OVERHEAD_TOKENS = 120
 # feedback(400字) + company_strategy(400字) + 余裕
@@ -244,10 +253,46 @@ def _parse_star(value: Any) -> ESStarBreakdown:
     )
 
 
-def _length_instruction(char_limit: Optional[int], mode: str) -> str:
-    """改善文の字数指示。char_limit 未指定時は従来どおり元の文章基準にする。"""
+def _ceil_ratio(source_chars: int, numerator: int, denominator: int) -> int:
+    """source * numerator / denominator を切り上げる。浮動小数の誤差で1字ずれない。"""
+    if source_chars <= 0:
+        return 0
+    return (source_chars * numerator + denominator - 1) // denominator
+
+
+def _improved_length_bounds(source_chars: int) -> Tuple[int, int]:
+    """元の文章から改善文の目標レンジ（下限, 上限）を返す。
+
+    倍率は _IMPROVED_TEXT_TARGET_LOW_RATIO / _IMPROVED_TEXT_RATIO（1.1 / 1.3）。
+    float のまま掛けると 6000 * 1.1 が 6600 をわずかに超え、切り上げが1字ずれる。
+    """
+    if (_IMPROVED_TEXT_TARGET_LOW_RATIO, _IMPROVED_TEXT_RATIO) != (1.1, 1.3):
+        raise RuntimeError("改善文の目標倍率と整数の切り上げがずれている")
+    return _ceil_ratio(source_chars, 11, 10), _ceil_ratio(source_chars, 13, 10)
+
+
+def _improved_length_floor(source_chars: int) -> int:
+    """これより短い改善文は作り直す。0字の入力では検査しない。"""
+    if source_chars <= 0:
+        return 0
+    return math.ceil(source_chars * _IMPROVED_TEXT_MIN_RATIO)
+
+
+def _length_instruction(char_limit: Optional[int], mode: str, source_chars: int) -> str:
+    """改善文の字数指示。char_limit 未指定時は元の文章の実測字数を書く。
+
+    「110〜130%を目安」だけだと長文で gpt-4o が220〜400字しか書かない（#1606）。
+    目標を字数で渡す。守らなくても生成後の検査で作り直す。
+    """
     if char_limit is None:
-        return "元の文字数の110〜130%を目安"
+        if source_chars <= 0:
+            return "元の文字数の110〜130%を目安"
+        low, high = _improved_length_bounds(source_chars)
+        return (
+            f"元の文章は{source_chars}字です。改善後は{low}〜{high}字"
+            "（元の110〜130%。改行と前後の空白は数えず、それ以外は全角・半角ともに1文字）"
+            "にしてください。要約して短くしないでください"
+        )
     low, high = _char_limit_bounds(char_limit, mode)
     suffix = "以内" if mode == "within" else "程度"
     return (
@@ -316,7 +361,8 @@ def _run_es_review(
         if has_company_context
         else ""
     )
-    length_instruction = _length_instruction(char_limit, char_limit_mode)
+    source_chars = count_es_chars(es_text)
+    length_instruction = _length_instruction(char_limit, char_limit_mode, source_chars)
     char_limit_block = (
         f"\n【設問の文字数上限】{length_instruction}" if char_limit is not None else ""
     )
@@ -516,6 +562,50 @@ def _run_es_review(
                     improved_length, allowed_max, char_limit_mode,
                 )
 
+        # char_limit が無いとき、元より短い改善文は要約になっている（#1606）。
+        # 目標字数を数値で渡してもモデルが守るとは限らないので、実測して1回だけ作り直す。
+        # max_tokens は渡さない（入力長に比例させると #1564 の飽和が戻る）。
+        length_floor = _improved_length_floor(source_chars) if char_limit is None else 0
+        improved_length_satisfied: Optional[bool] = None
+        if length_floor > 0:
+            for attempt in range(1, _MAX_SHORT_TEXT_RETRIES + 1):
+                if improved_length >= length_floor:
+                    break
+                elapsed = time.monotonic() - started_at
+                if elapsed >= _CHAR_LIMIT_RETRY_DEADLINE_SEC:
+                    logger.warning(
+                        "es review short text retry skipped by deadline elapsed=%.1fs length=%d floor=%d",
+                        elapsed, improved_length, length_floor,
+                    )
+                    break
+                target_low_chars, target_high_chars = _improved_length_bounds(source_chars)
+                logger.info(
+                    "es review improved text too short length=%d source=%d floor=%d attempt=%d",
+                    improved_length, source_chars, length_floor, attempt,
+                )
+                retry_note = (
+                    f"\n\n【前回の生成結果】{improved_length}字で、元の文章（{source_chars}字）より短いです。"
+                    f"要約せず、{target_low_chars}〜{target_high_chars}字で書き直してください。"
+                )
+                improved_data = _call_json_with_retry(
+                    client,
+                    model,
+                    improved_system_prompt,
+                    _improved_user_prompt(feedback, retry_note),
+                    None,
+                    label="improved_text",
+                    tally=tally,
+                    truncated_message=improved_truncated_message,
+                )
+                improved_text = str(improved_data.get("improved_text", ""))
+                improved_length = count_es_chars(improved_text)
+            improved_length_satisfied = improved_length >= length_floor
+            if not improved_length_satisfied:
+                logger.warning(
+                    "es review improved text still short length=%d source=%d floor=%d",
+                    improved_length, source_chars, length_floor,
+                )
+
         company_fit = review_data.get("company_fit_score")
         company_strategy = review_data.get("company_strategy")
         if not has_company_context:
@@ -536,6 +626,7 @@ def _run_es_review(
             char_limit_satisfied=(
                 None if allowed_max is None else improved_length <= allowed_max
             ),
+            improved_length_satisfied=improved_length_satisfied,
             usage=tally.to_model(),
         )
     except HTTPException:
