@@ -59,6 +59,36 @@ test.describe('チャット主要機能（職種・選択肢・送信）', () =>
     await mockEmptyChatAuxRoutes(page)
   })
 
+  // #1763: 横並びのタイルに戻ると、隣のボタンと y が揃ってこのテストが落ちる。
+  test('選択肢は1列で、表示中の入力欄は1行になる', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await mockChatHistory(page, [historyItem(1, 'assistant', INTERVIEW_MCQ)])
+
+    await page.goto('/')
+    const choiceA = page.getByRole('button', { name: /A\.\s*要件が曖昧/ })
+    const choiceB = page.getByRole('button', { name: /B\.\s*技術制約/ })
+    await expect(choiceA).toBeVisible({ timeout: 15000 })
+
+    const boxA = await choiceA.boundingBox()
+    const boxB = await choiceB.boundingBox()
+    expect(boxA).not.toBeNull()
+    expect(boxB).not.toBeNull()
+    expect(boxB!.y).toBeGreaterThan(boxA!.y + boxA!.height / 2)
+    expect(Math.abs(boxA!.x - boxB!.x)).toBeLessThan(4)
+    expect(Math.abs(boxA!.width - boxB!.width)).toBeLessThan(8)
+    // 2行のままなら入力欄はこれより高い。1行へ縮めたことを高さで見る。
+    const inputBox = await chatInput(page).boundingBox()
+    expect(inputBox!.height).toBeLessThan(56)
+
+    await page.setViewportSize({ width: 375, height: 700 })
+    const narrowA = await choiceA.boundingBox()
+    const narrowB = await choiceB.boundingBox()
+    expect(narrowB!.y).toBeGreaterThan(narrowA!.y + narrowA!.height / 2)
+    const log = page.getByRole('log', { name: '自己分析チャットのやり取り' })
+    const logBox = await log.boundingBox()
+    expect(logBox!.height).toBeGreaterThan(160)
+  })
+
   test('経験談MCQの選択肢Aは職種判定メッセージを出さず送信される', async ({ page }) => {
     await mockChatHistory(page, [
       historyItem(1, 'assistant', 'これまでの経験を具体的に教えてください。'),
