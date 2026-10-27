@@ -12,6 +12,8 @@
 - `ParamAngleY`、`ParamEyeLOpen`、`ParamEyeROpen`、`ParamMouthOpenY` を含むリギング仕様
 - Live2D Cubism Editor 5.3.04 FREE のインストールと起動確認
 - 男性の 2048 PNG を Cubism のアートメッシュとして取り込み確認
+- `~/Desktop/Untitled Model.cmo3` の実ファイルとCubism 5.3.04での再オープンを確認
+- 編集用バックアップを `docs/avatar/live2d-interviewers/cubism-wip/` へ保存
 
 ## 未完了のもの
 
@@ -23,6 +25,8 @@
 - `npm run check:live2d -- <model-dir>` の合格
 
 Cubism Editor の Java 製保存ダイアログが自動操作からファイル名・保存先の入力を受け付けず、実ファイルを書き出せなかった。`.moc3` は独自バイナリであり、正規の Cubism 書き出しを経ずに代用品を生成していない。
+
+追加確認の結果、男性WIPの「顔/目/口/髪」などは名前付きの空パーツフォルダーで、表示実体は全身画像1枚の `male-neutral-2048` ArtMeshのみだった。独立した目・口のリグには、差分PNGの追加ArtMesh化またはレイヤー分けPSDへの置き換えが必要。
 
 ## Cubism で残っている手順
 
