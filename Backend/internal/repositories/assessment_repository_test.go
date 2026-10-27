@@ -73,8 +73,8 @@ func TestAssessmentRepository_SubmitWritesAssessmentRowsOnly(t *testing.T) {
 	mock.ExpectExec("INSERT INTO `assessment_results`").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery("SELECT .*organization_id.* FROM `users`").
 		WillReturnRows(sqlmock.NewRows([]string{"organization_id"}).AddRow(1))
-	mock.ExpectExec("INSERT INTO `user_weight_scores` \\(`organization_id`,`user_id`,`session_id`,`source`,`weight_category`,`score`,`created_at`,`updated_at`\\)").
-		WithArgs(1, 7, "assessment:x", models.ScoreSourceAssessment, "技術志向", 63, sqlmock.AnyArg(), sqlmock.AnyArg()).
+	mock.ExpectExec("INSERT INTO `user_weight_scores` \\(`organization_id`,`user_id`,`session_id`,`source`,`weight_category`,`score`,`prompt_version`,`created_at`,`updated_at`\\)").
+		WithArgs(1, 7, "assessment:x", models.ScoreSourceAssessment, "技術志向", 63, "", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 

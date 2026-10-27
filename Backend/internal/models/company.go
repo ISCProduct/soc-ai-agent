@@ -41,6 +41,7 @@ type Company struct {
 	RelationsFetchedAt  *time.Time `json:"relations_fetched_at,omitempty"`
 	LastModelUsed       string     `gorm:"type:varchar(64)" json:"last_model_used,omitempty"`
 	LastFetchConfidence string     `gorm:"type:varchar(16)" json:"last_fetch_confidence,omitempty"` // high|medium|low
+	InfoPromptVersion   string     `gorm:"type:varchar(64);not null;default:''" json:"info_prompt_version,omitempty"`
 
 	// 企業の特徴・文化
 	Culture        string `gorm:"type:text" json:"culture"`            // 企業文化の説明
@@ -172,7 +173,8 @@ type UserCompanyMatch struct {
 	MatchedAxisCount int `gorm:"not null;default:0" json:"matched_axis_count"`
 
 	// マッチング理由・推薦文
-	MatchReason string `gorm:"type:text"` // AIが生成したマッチング理由
+	MatchReason              string `gorm:"type:text"` // AIが生成したマッチング理由
+	MatchReasonPromptVersion string `gorm:"size:64;not null;default:''" json:"match_reason_prompt_version,omitempty"`
 
 	// ステータス
 	IsViewed    bool `gorm:"default:false"` // ユーザーが閲覧したか

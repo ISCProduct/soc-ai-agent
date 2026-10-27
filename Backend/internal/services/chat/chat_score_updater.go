@@ -72,7 +72,7 @@ func (s *ChatService) analyzeAndUpdateWeights(ctx context.Context, userID uint, 
 		return false, nil
 	}
 
-	if err := s.updateCategoryScore(userID, sessionID, targetCategory, result.Score); err != nil {
+	if err := s.updateCategoryScore(userID, sessionID, targetCategory, result.Score, result.PromptVersion); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -133,7 +133,7 @@ func (s *ChatService) processChoiceAnswer(ctx context.Context, userID uint, sess
 	log.Printf("[Choice Answer] axis score choice=%d -> adjusted=%d flags=%v reason_len=%d\n",
 		result.Score, finalScore, evidenceFlags, len([]rune(strings.TrimSpace(reason))))
 
-	if err := s.updateCategoryScore(userID, sessionID, targetCategory, finalScore); err != nil {
+	if err := s.updateCategoryScore(userID, sessionID, targetCategory, finalScore, ""); err != nil {
 		return false, err
 	}
 	// 選択肢回答は選択した内容に関わらず有効（スコア0でも意思表示）
@@ -179,7 +179,7 @@ func (s *ChatService) inferCategoryFromQuestion(question string) string {
 }
 
 // updateCategoryScore カテゴリスコアを更新
-func (s *ChatService) updateCategoryScore(userID uint, sessionID, category string, score int) error {
+func (s *ChatService) updateCategoryScore(userID uint, sessionID, category string, score int, promptVersion string) error {
 	// 既存のスコアを取得
 	existingScore, err := s.userWeightScoreRepo.FindByUserSessionAndCategory(userID, sessionID, category)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -188,7 +188,17 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 
 	if existingScore == nil {
 		// 新規作成: 絶対値でセット
-		if err := s.userWeightScoreRepo.SetScore(userID, sessionID, category, score); err != nil {
+		var err error
+		if promptVersion == "" {
+			err = s.userWeightScoreRepo.SetScore(userID, sessionID, category, score)
+		} else if repo, ok := s.userWeightScoreRepo.(interface {
+			SetScoreWithPromptVersion(uint, string, string, int, string) error
+		}); ok {
+			err = repo.SetScoreWithPromptVersion(userID, sessionID, category, score, promptVersion)
+		} else {
+			return fmt.Errorf("score repository cannot persist prompt version")
+		}
+		if err != nil {
 			return fmt.Errorf("failed to create score: %w", err)
 		}
 		log.Printf("[Choice Answer] Created new score: %s = %d\n", category, score)
@@ -196,11 +206,21 @@ func (s *ChatService) updateCategoryScore(userID uint, sessionID, category strin
 		// 移動平均で更新（直近回答の影響を反映）: 差分を加算
 		newScore := int(math.Round(float64(existingScore.Score)*0.7 + float64(score)*0.3))
 		delta := newScore - existingScore.Score
-		if delta == 0 {
+		if delta == 0 && promptVersion == "" {
 			log.Printf("[Choice Answer] Score unchanged: %s = %d\n", category, existingScore.Score)
 			return nil
 		}
-		if err := s.userWeightScoreRepo.AddScore(userID, sessionID, category, delta); err != nil {
+		var err error
+		if promptVersion == "" {
+			err = s.userWeightScoreRepo.AddScore(userID, sessionID, category, delta)
+		} else if repo, ok := s.userWeightScoreRepo.(interface {
+			AddScoreWithPromptVersion(uint, string, string, int, string) error
+		}); ok {
+			err = repo.AddScoreWithPromptVersion(userID, sessionID, category, delta, promptVersion)
+		} else {
+			return fmt.Errorf("score repository cannot persist prompt version")
+		}
+		if err != nil {
 			return fmt.Errorf("failed to update score: %w", err)
 		}
 		log.Printf("[Choice Answer] Updated score: %s = %d (average)\n", category, newScore)

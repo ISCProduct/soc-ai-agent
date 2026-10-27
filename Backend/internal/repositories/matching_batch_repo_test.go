@@ -120,12 +120,15 @@ func TestCreateOrUpdateBatch_SingleUpsert(t *testing.T) {
 			t.Errorf("%s が衝突時の更新対象に含まれていない: %s", col, assignments)
 		}
 	}
+	if !strings.Contains(assignments, "IF(VALUES(match_reason_prompt_version)") {
+		t.Errorf("新しいAI生成版が空の場合に既存版を保持する式がない: %s", assignments)
+	}
 	// 10カテゴリのスコア列や job_position_id が upsertAssignments から抜け落ちても
 	// 上のアサートだけでは気づけないため、更新対象列の本数も固定する
 	// (job_position_id + match_score + 10カテゴリ + matched_axis_count
-	//  + match_reason + updated_at = 15)
+	//  + match_reason + updated_at = 15)。版は空値で既存値を消さない独自式で更新する。
 	if n := strings.Count(assignments, "=VALUES("); n != 15 {
-		t.Errorf("衝突時の更新対象列=%d want 15: %s", n, assignments)
+		t.Errorf("衝突時の通常更新対象列=%d want 15: %s", n, assignments)
 	}
 	// ユーザー操作の結果と作成時刻は再計算で消さない
 	for _, col := range []string{"is_viewed", "is_favorited", "is_applied", "created_at"} {
