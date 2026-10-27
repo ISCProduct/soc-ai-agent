@@ -247,6 +247,7 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
     expect(trendBox, 'トレンドが取得できない').not.toBeNull()
     expect(backButtonBox, '戻るボタンが取得できない').not.toBeNull()
     expect(listBox, '履歴一覧または空状態が取得できない').not.toBeNull()
+    expect(Math.abs(headerRowBox!.width - trendBox!.width), `${page.viewportSize()!.width}px: ヘッダー列と本文列の幅が違う`).toBeLessThanOrEqual(1)
 
     return {
       width: page.viewportSize()!.width,
@@ -255,7 +256,6 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
       listX: listBox!.x,
       trendDifference: Math.abs(headerRowBox!.x - trendBox!.x),
       listDifference: Math.abs(headerRowBox!.x - listBox!.x),
-      backButtonRight: backButtonBox!.x + backButtonBox!.width,
       backButtonDifference: Math.abs(
         backButtonBox!.x + backButtonBox!.width - trendBox!.x - trendBox!.width,
       ),
@@ -283,11 +283,16 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
             : page.getByText('まだ面接の練習記録がありません'),
         ).toBeVisible({ timeout: 15000 })
         const measurement = await measureAlignment(page, historyContent)
+        const band = page.locator('header')
+        await expect(band).toHaveCount(1)
+        const bandBox = await band.boundingBox()
+        expect(bandBox, `${width}px: ヘッダー帯が取得できない`).not.toBeNull()
         const { scrollWidth, clientWidth } = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
         }))
         expect(scrollWidth, `${width}px: 横方向にはみ出している`).toBeLessThanOrEqual(clientWidth)
+        expect(Math.abs(bandBox!.width - clientWidth), `${width}px: ヘッダー帯が全幅ではない`).toBeLessThanOrEqual(1)
         measurements.push(measurement)
       }
 
@@ -341,11 +346,16 @@ test.describe('レスポンシブ: 面接履歴画面の列揃え', () => {
         Math.abs(backButtonBox!.x + backButtonBox!.width - trendBox!.x - trendBox!.width),
         `${width}px: 戻るボタンが列の右端に揃っていない`,
       ).toBeLessThanOrEqual(1)
+      const band = page.locator('header')
+      await expect(band).toHaveCount(1)
+      const bandBox = await band.boundingBox()
+      expect(bandBox, `${width}px: ヘッダー帯が取得できない`).not.toBeNull()
       const { scrollWidth, clientWidth } = await page.evaluate(() => ({
         scrollWidth: document.documentElement.scrollWidth,
         clientWidth: document.documentElement.clientWidth,
       }))
       expect(scrollWidth, `${width}px: 横方向にはみ出している`).toBeLessThanOrEqual(clientWidth)
+      expect(Math.abs(bandBox!.width - clientWidth), `${width}px: ヘッダー帯が全幅ではない`).toBeLessThanOrEqual(1)
     }
   })
 })

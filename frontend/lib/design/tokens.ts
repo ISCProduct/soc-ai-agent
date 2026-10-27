@@ -25,8 +25,7 @@ export const UI = Object.fromEntries(
 export const CONTENT_MAX_WIDTH = 1200
 
 /**
- * 面接履歴の本文列幅。管理画面の ADMIN_PAGE_WIDTH.standard と同じ 1100px。
- * 管理画面と面接画面は別の画面なので、幅の変更が相互に波及しないよう定数を分ける。
+ * 管理画面とは別の画面なので、幅の変更が相互に波及しないよう専用の定数にする。
  */
 export const INTERVIEW_HISTORY_CONTENT_MAX_WIDTH = 1100
 

@@ -126,7 +126,7 @@ export default function PageContent() {
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Box sx={{ color: UI.mark }}><PsychologyIcon sx={{ fontSize: 32 }} /></Box>
               <Typography component="h1" sx={{ fontWeight: 700, fontSize: { xs: 16, sm: 20 }, color: UI.ink }}>面接履歴</Typography>
-              {user?.role === 'teacher' && (
+              {isTeacher && (
                 <Chip label="教員モード" size="small" sx={{ bgcolor: '#3b82f6', color: '#fff', fontWeight: 700, ml: 1 }} />
               )}
             </Box>
