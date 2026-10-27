@@ -22,7 +22,7 @@ require (
 require (
 	github.com/alicebob/miniredis/v2 v2.34.0
 	github.com/aws/aws-lambda-go v1.55.1
-	github.com/aws/aws-sdk-go-v2/service/ssm v1.73.6
+	github.com/aws/aws-sdk-go-v2/service/ssm v1.81.0
 	github.com/getsentry/sentry-go v0.35.1
 	github.com/getsentry/sentry-go/echo v0.35.1
 	github.com/go-playground/validator/v10 v10.30.2
