@@ -29,7 +29,7 @@ import { formatSeconds } from '@/lib/interview/utils'
 import type { Utterance } from '../types'
 import styles from './interview.module.css'
 import { setInterviewSessionActive } from '../sessionChrome'
-import Avatar2D from './Avatar2D'
+import InterviewerAvatar from './InterviewerAvatar'
 
 /** 回答に迷ったときの思考の補助線。チケット固有の採点基準ではなく、どの質問にも共通する一般的な枠組み。 */
 const STAR_GUIDE = [
@@ -317,7 +317,7 @@ export default function SessionScreen({
               {/* 面接官(2Dアバター、小) + 発話中の字幕 */}
               <Box className={styles.avatarCard}>
                 <Box className={styles.avatarPanel}>
-                  <Avatar2D
+                  <InterviewerAvatar
                     gender={avatarGender}
                     level={aiLevel}
                     speaking={aiSpeaking}

@@ -143,4 +143,7 @@ frontend/.avatar-work/
 #    SDK zip を取得して同意した人が各自置く。リポジトリに入れてはいけない。
 #  - モデル一式は公式サンプル（無償提供マテリアル）か発注物。いずれも配布条件が
 #    リポジトリと別なので、置き場所だけ決めて中身は追跡しない。
-frontend/public/live2d/
+#    ディレクトリ自体を除外すると配下のファイルは否定パターンで復活できないため、
+#    中身(*)だけを除外して READMEだけ復活させる。
+frontend/public/live2d/*
+!frontend/public/live2d/README.md
