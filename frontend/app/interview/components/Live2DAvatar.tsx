@@ -10,7 +10,6 @@ import {
   isUsableAsInterviewer,
   mouthOpenValue,
   nodAngleY,
-  PARAM,
   DEFICIENCY_REASON,
   type Live2DCapabilities,
 } from '@/lib/interview/live2d-params'
@@ -165,8 +164,8 @@ export default function Live2DAvatar({
           const mouthValue = mouthOpenValue(levelRef.current, speakingRef.current)
           for (const id of c.mouthParamIds) model.setParameterValue(id, mouthValue)
 
-          if (c.canNod) {
-            model.setParameterValue(PARAM.angleY, frame.nodProgress !== null ? nodAngleY(frame.nodProgress) : 0)
+          if (c.nodParamId) {
+            model.setParameterValue(c.nodParamId, frame.nodProgress !== null ? nodAngleY(frame.nodProgress) : 0)
           }
 
           if (c.blinkParamIds.length > 0) {

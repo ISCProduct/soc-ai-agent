@@ -60,6 +60,8 @@ export interface Live2DCapabilities {
   blinkParamIds: string[]
   /** うなずきに使える首の角度パラメータがあるか。 */
   canNod: boolean
+  /** うなずきに実際に書き込むパラメータ。ParamAngleY優先、無ければParamAngleX。無ければnull。 */
+  nodParamId: string | null
   /** 満たせなかった要件。空なら問題なし。 */
   deficiencies: Live2DDeficiency[]
 }
@@ -124,8 +126,12 @@ export function inspectLive2DModel(info: Live2DModelInfo): Live2DCapabilities {
   const mouth = pickMouth(info, ids)
   if (mouth.deficiency) deficiencies.push(mouth.deficiency)
 
-  // うなずきは上下(AngleY)が主役。片方しか無いモデルでも傾きで代用できる。
-  const canNod = ids.has(PARAM.angleY) || ids.has(PARAM.angleX)
+  // うなずきは上下(AngleY)が主役。片方しか無いモデルでも傾き(AngleX)で代用できる。
+  // ただし実際に書き込むのは1パラメータだけなので、どちらを使うかをここで確定させる
+  // （以前は判定だけAngleXも見て、描画側は常にAngleY決め打ちで書いていたため、
+  // AngleXしか無いモデルでは判定が通るのに実際はうなずかないバグがあった）。
+  const nodParamId = ids.has(PARAM.angleY) ? PARAM.angleY : ids.has(PARAM.angleX) ? PARAM.angleX : null
+  const canNod = nodParamId !== null
   if (!canNod) deficiencies.push('no-head-angle')
 
   // 申告があればそれを使う。無ければ標準名で拾う。
@@ -141,6 +147,7 @@ export function inspectLive2DModel(info: Live2DModelInfo): Live2DCapabilities {
     mouthParamIds: mouth.paramIds,
     blinkParamIds,
     canNod,
+    nodParamId,
     deficiencies,
   }
 }

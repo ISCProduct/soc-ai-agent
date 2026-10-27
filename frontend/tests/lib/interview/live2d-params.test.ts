@@ -65,10 +65,20 @@ describe('inspectLive2DModel', () => {
       expect(caps.mouthParamIds).toEqual([PARAM.mouthOpen])
       expect(caps.blinkParamIds).toEqual([PARAM.eyeLOpen, PARAM.eyeROpen])
       expect(caps.canNod).toBe(true)
+      expect(caps.nodParamId).toBe(PARAM.angleY)
       expect(caps.deficiencies).toEqual([])
       expect(isUsableAsInterviewer(caps)).toBe(true)
     },
   )
+
+  it('ParamAngleXしか無いモデルは、そのAngleXで代用する（AngleY決め打ちでは動かないバグの再発防止）', () => {
+    const caps = inspectLive2DModel({
+      parameterIds: [PARAM.mouthOpen, PARAM.angleX, PARAM.eyeLOpen, PARAM.eyeROpen],
+      lipSyncIds: [PARAM.mouthOpen],
+    })
+    expect(caps.canNod).toBe(true)
+    expect(caps.nodParamId).toBe(PARAM.angleX)
+  })
 
   // パラメータ数の多さは「動く」の保証にならない。
   it('Mao は132パラメータあっても母音方式。「あ」だけを動かす', () => {
@@ -94,6 +104,7 @@ describe('inspectLive2DModel', () => {
     expect(caps.mouth).toBe('none')
     expect(caps.mouthParamIds).toEqual([])
     expect(caps.canNod).toBe(false)
+    expect(caps.nodParamId).toBeNull()
     expect(caps.deficiencies).toEqual(['no-mouth-param', 'no-head-angle', 'no-eye-params'])
     expect(isUsableAsInterviewer(caps)).toBe(false)
   })
