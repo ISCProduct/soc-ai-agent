@@ -29,7 +29,7 @@ concurrency:
 jobs:
   smoke:
     name: Playwright Smoke (${{ inputs.environment }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: ${{ inputs.environment }}
     # Playwrightのブラウザインストールが稀にハングし、デフォルトの6時間上限まで
     # 実行され続けることがあったため設定(test.ymlのe2e-frontendと同様の対策)

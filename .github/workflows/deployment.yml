@@ -520,7 +520,7 @@ jobs:
   deploy-production:
     if: github.ref_name == 'main'
     name: Deploy to production
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: production
     # checkout と Notify Discord release の gh pr 参照に必要な分だけ与える。
     permissions:

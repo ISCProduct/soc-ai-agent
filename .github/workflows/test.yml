@@ -283,7 +283,7 @@ jobs:
 
   e2e-frontend:
     name: Frontend E2E Tests (Playwright)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Playwrightのブラウザインストール(apt-get/ネットワーク)が稀にハングし、
     # デフォルトの6時間上限まで実行され続けてランナー枠を圧迫することがあったため設定
     timeout-minutes: 15
