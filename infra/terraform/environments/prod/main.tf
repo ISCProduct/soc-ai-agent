@@ -643,14 +643,19 @@ module "backend" {
   secret_arns       = local.backend_secret_arns
   secrets           = local.backend_secrets
   environment = {
-    APP_ENV                     = "production"
-    AWS_REGION                  = var.region
-    AWS_S3_BUCKET               = module.s3.bucket_id
-    EMAIL_PROVIDER              = "resend"
-    EMAIL_FROM                  = "noreply@shukatsu-ai.jp"
-    OPENAI_WEB_SEARCH_MODEL     = "gpt-4o-mini"
-    OPENAI_COMPANY_SEARCH_MODEL = "gpt-4o-mini"
-    OPENAI_HINTS_MODEL          = "gpt-4o-mini"
+    APP_ENV                            = "production"
+    PROMPT_VERSION                     = var.prompt_version
+    PROMPT_VERSION_QUESTION_GENERATION = lookup(var.prompt_versions, "question_generation", "v2")
+    PROMPT_VERSION_SCORE_EVALUATION    = lookup(var.prompt_versions, "score_evaluation", "v2")
+    PROMPT_VERSION_MATCHING_REASON     = lookup(var.prompt_versions, "matching_reason", "v2")
+    PROMPT_VERSION_COMPANY_EXTRACTION  = lookup(var.prompt_versions, "company_extraction", "v2")
+    AWS_REGION                         = var.region
+    AWS_S3_BUCKET                      = module.s3.bucket_id
+    EMAIL_PROVIDER                     = "resend"
+    EMAIL_FROM                         = "noreply@shukatsu-ai.jp"
+    OPENAI_WEB_SEARCH_MODEL            = "gpt-4o-mini"
+    OPENAI_COMPANY_SEARCH_MODEL        = "gpt-4o-mini"
+    OPENAI_HINTS_MODEL                 = "gpt-4o-mini"
     # 企業検索の web_search のコスト調整ノブ (#1124)。
     # 検索結果が固定トークンとして課金されるため、1コールの重さがそのままコストに効く。
     # 品質が落ちたら "high" に戻す（apply とサービス更新が必要）。

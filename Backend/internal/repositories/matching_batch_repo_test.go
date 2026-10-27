@@ -120,12 +120,15 @@ func TestCreateOrUpdateBatch_SingleUpsert(t *testing.T) {
 			t.Errorf("%s が衝突時の更新対象に含まれていない: %s", col, assignments)
 		}
 	}
-	// 10カテゴリのスコア列や job_position_id が upsertAssignments から抜け落ちても
-	// 上のアサートだけでは気づけないため、更新対象列の本数も固定する
+	// 10カテゴリのスコア列、job_position_id、版情報が upsertAssignments から
+	// 抜け落ちても上のアサートだけでは気づけないため、更新対象列の本数も固定する。
 	// (job_position_id + match_score + 10カテゴリ + matched_axis_count
-	//  + match_reason + updated_at = 15)
-	if n := strings.Count(assignments, "=VALUES("); n != 15 {
-		t.Errorf("衝突時の更新対象列=%d want 15: %s", n, assignments)
+	//  + match_reason + match_reason_prompt_version + updated_at = 16)
+	if n := strings.Count(assignments, "=VALUES("); n != 16 {
+		t.Errorf("衝突時の更新対象列=%d want 16: %s", n, assignments)
+	}
+	if !strings.Contains(assignments, "match_reason_prompt_version") {
+		t.Errorf("版情報が衝突時の更新対象に含まれていない: %s", assignments)
 	}
 	// ユーザー操作の結果と作成時刻は再計算で消さない
 	for _, col := range []string{"is_viewed", "is_favorited", "is_applied", "created_at"} {

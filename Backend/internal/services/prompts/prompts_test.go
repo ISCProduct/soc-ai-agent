@@ -300,6 +300,54 @@ func TestGetMatchingReasonPromptVersion(t *testing.T) {
 	}
 }
 
+func TestResolvePromptVersion(t *testing.T) {
+	t.Run("登録済み工程別設定が共通設定より優先", func(t *testing.T) {
+		t.Setenv("PROMPT_VERSION", "v2")
+		t.Setenv("PROMPT_VERSION_MATCHING_REASON", "v2")
+		t.Setenv("PROMPT_AB_MATCHING_REASON", "")
+
+		got := ResolvePromptVersion(StageMatchingReason, 1)
+		if got.Version != "v2" || got.Variant != "control" {
+			t.Fatalf("割当=%+v, want v2/control", got)
+		}
+	})
+
+	t.Run("一括設定の後方互換", func(t *testing.T) {
+		t.Setenv("PROMPT_VERSION", "v2")
+		t.Setenv("PROMPT_VERSION_QUESTION_GENERATION", "")
+		t.Setenv("PROMPT_AB_QUESTION_GENERATION", "")
+
+		got := ResolvePromptVersion(StageQuestionGeneration, 1)
+		if got.Version != "v2" || got.Variant != "control" {
+			t.Fatalf("割当=%+v, want v2/control", got)
+		}
+	})
+
+	t.Run("候補本文未登録のA/B設定はcontrolへ戻す", func(t *testing.T) {
+		t.Setenv("PROMPT_VERSION", "v2")
+		t.Setenv("PROMPT_VERSION_SCORE_EVALUATION", "")
+		t.Setenv("PROMPT_AB_SCORE_EVALUATION", "candidate-v3:50")
+
+		for userID := uint(1); userID <= 10; userID++ {
+			got := ResolvePromptVersion(StageScoreEvaluation, userID)
+			if got.Version != "v2" || got.Variant != "control" {
+				t.Fatalf("user %d の割当=%+v, want v2/control", userID, got)
+			}
+		}
+	})
+
+	t.Run("未登録の工程別版と共通版を拒否", func(t *testing.T) {
+		t.Setenv("PROMPT_VERSION", "legacy-v4")
+		t.Setenv("PROMPT_VERSION_COMPANY_EXTRACTION", "company-v2")
+		t.Setenv("PROMPT_AB_COMPANY_EXTRACTION", "")
+
+		got := ResolvePromptVersion(StageCompanyExtraction, 1)
+		if got.Version != "v2" || got.Variant != "control" {
+			t.Fatalf("未登録版を拒否した後の割当=%+v, want v2/control", got)
+		}
+	})
+}
+
 func TestBuildAnswerQualitySystemPromptWithContext(t *testing.T) {
 	t.Run("属性なし→基本プロンプトと同一", func(t *testing.T) {
 		result := BuildAnswerQualitySystemPromptWithContext("", "")

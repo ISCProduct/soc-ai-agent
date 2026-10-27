@@ -51,7 +51,6 @@ func TestCachedCompanyReadingCachesEmptyResult(t *testing.T) {
 		got := svc.cachedCompanyReading(context.Background(), "読み不明企業", "読み不明企業", lookup)
 		assert.Equal(t, "", got, "%d回目", i+1)
 	}
-
 	assert.Equal(t, int32(1), calls.Load(), "空でもキャッシュするので呼び出しは1回")
 }
 
