@@ -49,7 +49,7 @@
     "@types/react-dom": "^19.3.0",
     "@typescript-eslint/eslint-plugin": "^8.58.2",
     "@typescript-eslint/parser": "^8.58.2",
-    "baseline-browser-mapping": "^2.11.29",
+    "baseline-browser-mapping": "^2.11.31",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "jest": "^30.2.0",
