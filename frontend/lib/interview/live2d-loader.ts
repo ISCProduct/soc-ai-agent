@@ -1,5 +1,5 @@
 /**
- * Live2D Cubism Core の読み込みとモデルからの情報抽出。
+ * Live2D Cubism Core（`<script>`タグでの読み込み）とデフォルトパスの定義。
  *
  * Core（`live2dcubismcore.*.js`）は Live2D Proprietary Software License の
  * バイナリなので npm には存在せず、リポジトリにも入れていない
@@ -8,16 +8,18 @@
  * <script> タグとして実行時に読み込むだけにする。
  *
  * モデル本体（.model3.json 一式）も配布条件がリポジトリと別なので同様に
- * 実行時に `public/live2d/model/` から読む。どちらも無ければ `loadLive2DModel`
- * が reject し、呼び出し側（Live2DAvatar）が既存の ThreeAvatar へフォールバックする
- * （描画は止めない。live2d-params.ts と同じ方針）。
+ * 実行時に `public/live2d/model/` から読む。どちらも無ければ Live2DAvatar が
+ * 既存の Avatar2D へフォールバックする（描画は止めない。live2d-params.ts と同じ方針）。
+ *
+ * モデルの読み込み・描画自体は `live2d-framework-model.ts`（公式Cubism Web Framework
+ * を直接使う実装）が担う。ここは「Coreスクリプトの注入」専任。
  */
-import type { Live2DModelInfo } from './live2d-params'
 
 export const DEFAULT_CORE_URL =
   process.env.NEXT_PUBLIC_LIVE2D_CORE_URL ?? '/live2d/core/live2dcubismcore.min.js'
 export const DEFAULT_MODEL_URL =
   process.env.NEXT_PUBLIC_LIVE2D_MODEL_URL ?? '/live2d/model/model.model3.json'
+export const DEFAULT_SHADER_PATH = '/live2d/shaders/'
 
 let coreLoadPromise: Promise<void> | null = null
 
@@ -50,39 +52,4 @@ export function ensureCubismCore(url: string = DEFAULT_CORE_URL): Promise<void> 
   })
 
   return coreLoadPromise
-}
-
-/**
- * pixi-live2d-display の `Live2DModel`（cubism4）インスタンスから、
- * `inspectLive2DModel` が要求する形に情報を抜き出す。
- *
- * モデルの実体にのみ依存する形にしてあるので、テストではこの形を満たす
- * 最小限のダミーを渡せば実際の pixi-live2d-display 無しで検証できる。
- */
-export interface Live2DModelLike {
-  internalModel: {
-    coreModel: {
-      getModel(): { parameters: { ids: readonly string[] } }
-    }
-    settings: {
-      json?: {
-        Groups?: ReadonlyArray<{ Name?: string; Ids?: readonly string[] }>
-        FileReferences?: { Groups?: ReadonlyArray<{ Name?: string; Ids?: readonly string[] }> }
-      }
-    }
-  }
-}
-
-function groupIds(model: Live2DModelLike, name: string): readonly string[] | undefined {
-  const json = model.internalModel.settings.json
-  const groups = json?.Groups ?? json?.FileReferences?.Groups ?? []
-  return groups.find((g) => g.Name === name)?.Ids
-}
-
-export function toLive2DModelInfo(model: Live2DModelLike): Live2DModelInfo {
-  return {
-    parameterIds: model.internalModel.coreModel.getModel().parameters.ids,
-    lipSyncIds: groupIds(model, 'LipSync'),
-    eyeBlinkIds: groupIds(model, 'EyeBlink'),
-  }
 }

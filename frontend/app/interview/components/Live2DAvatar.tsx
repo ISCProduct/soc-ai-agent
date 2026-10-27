@@ -2,15 +2,9 @@
 
 import { useEffect, useRef } from 'react'
 import { Box } from '@mui/material'
-import * as PIXI from 'pixi.js'
-import { Live2DModel } from 'pixi-live2d-display/cubism4'
 
-import {
-  ensureCubismCore,
-  toLive2DModelInfo,
-  DEFAULT_MODEL_URL,
-  type Live2DModelLike,
-} from '@/lib/interview/live2d-loader'
+import { ensureCubismCore, DEFAULT_MODEL_URL, DEFAULT_SHADER_PATH } from '@/lib/interview/live2d-loader'
+import type { Live2DFrameworkModel as Live2DFrameworkModelClass } from '@/lib/interview/live2d-framework-model'
 import {
   inspectLive2DModel,
   isUsableAsInterviewer,
@@ -21,28 +15,6 @@ import {
   type Live2DCapabilities,
 } from '@/lib/interview/live2d-params'
 import { Live2DMotion, pulse } from '@/lib/interview/live2d-motion'
-
-declare global {
-  interface Window {
-    PIXI?: typeof PIXI
-  }
-}
-
-/** pixi-live2d-display は `Live2DModel.registerTicker` かグローバル `window.PIXI` を見て自動更新する。一度でよい。 */
-let tickerRegistered = false
-
-type PixiLive2DModel = PIXI.Container & Live2DModelLike & {
-  width: number
-  height: number
-  scale: { set(x: number, y?: number): void }
-  anchor: { set(x: number, y?: number): void }
-  position: { set(x: number, y?: number): void }
-  destroy(options?: { children?: boolean; texture?: boolean; baseTexture?: boolean }): void
-}
-
-interface CubismCoreModel {
-  setParameterValueById(id: string, value: number, weight?: number): void
-}
 
 export interface Live2DAvatarProps {
   gender: 'male' | 'female'
@@ -62,13 +34,19 @@ export interface Live2DAvatarProps {
   onUnavailable: () => void
 }
 
+function modelDirOf(modelUrl: string): { dir: string; fileName: string } {
+  const i = modelUrl.lastIndexOf('/')
+  return { dir: modelUrl.slice(0, i + 1), fileName: modelUrl.slice(i + 1) }
+}
+
 /**
- * Live2Dの面接官アバター。
+ * Live2Dの面接官アバター。公式Cubism Web Framework（`lib/interview/live2d-framework-model.ts`）を
+ * 直接使って素のcanvas+WebGLに描画する（`pixi-live2d-display`は現行Coreと非互換なため不採用。
+ * 詳細はそちらのファイル先頭コメント参照）。
  *
  * `gender` は Avatar2D との props 互換のために受け取るが、v1では使わない
- * （Live2Dモデルは性別ごとに用意していない。配色の出し分けはモデル差し替え時に
- * 検討する）。口は顔パーツのビセームではなく `level`/`speaking` の音声振幅で
- * 駆動する（Avatar2D と同じ入力源）。
+ * （Live2Dモデルは性別ごとに用意していない）。口は顔パーツのビセームではなく
+ * `level`/`speaking` の音声振幅で駆動する（Avatar2D と同じ入力源）。
  */
 export default function Live2DAvatar({
   level,
@@ -79,6 +57,7 @@ export default function Live2DAvatar({
   onUnavailable,
 }: Live2DAvatarProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const levelRef = useRef(level)
   const speakingRef = useRef(speaking)
   const motionRef = useRef<Live2DMotion | null>(null)
@@ -86,19 +65,24 @@ export default function Live2DAvatar({
   const onUnavailableRef = useRef(onUnavailable)
   onUnavailableRef.current = onUnavailable
 
-  useEffect(() => { levelRef.current = level }, [level])
-  useEffect(() => { speakingRef.current = speaking }, [speaking])
+  useEffect(() => {
+    levelRef.current = level
+  }, [level])
+  useEffect(() => {
+    speakingRef.current = speaking
+  }, [speaking])
   useEffect(() => {
     if (acknowledgeSignal > 0) motionRef.current?.acknowledge(performance.now() / 1000)
   }, [acknowledgeSignal])
 
   useEffect(() => {
-    if (!containerRef.current) return
+    if (!containerRef.current || !canvasRef.current) return
     const container = containerRef.current
+    const canvas = canvasRef.current
     let disposed = false
-    let app: PIXI.Application | null = null
-    let pixiModel: PixiLive2DModel | null = null
-    let natural: { width: number; height: number } | null = null
+    let rafId = 0
+    let lastTime = 0
+    let model: Live2DFrameworkModelClass | null = null
 
     const bail = (reason: string, err?: unknown) => {
       if (err !== undefined) console.warn(`[Live2DAvatar] ${reason}`, err)
@@ -106,15 +90,16 @@ export default function Live2DAvatar({
       if (!disposed) onUnavailableRef.current()
     }
 
-    const layout = () => {
-      if (!app || !pixiModel || !natural) return
+    const resize = () => {
       const w = container.clientWidth
       const h = container.clientHeight
       if (w === 0 || h === 0) return
-      app.renderer.resize(w, h)
-      const scale = (Math.min(w / natural.width, h / natural.height) || 1) * 0.98
-      pixiModel.scale.set(scale)
-      pixiModel.position.set(w / 2, h / 2)
+      const dpr = Math.min(window.devicePixelRatio || 1, 2)
+      const pxW = Math.round(w * dpr)
+      const pxH = Math.round(h * dpr)
+      if (canvas.width !== pxW) canvas.width = pxW
+      if (canvas.height !== pxH) canvas.height = pxH
+      model?.resize(pxW, pxH)
     }
 
     const setup = async () => {
@@ -126,24 +111,38 @@ export default function Live2DAvatar({
       }
       if (disposed) return
 
-      window.PIXI = PIXI
-      if (!tickerRegistered) {
-        Live2DModel.registerTicker(PIXI.Ticker)
-        tickerRegistered = true
-      }
+      // Framework（vendor/live2d-framework）は一部ファイルがモジュール評価時に
+      // `Live2DCubismCore`（Core読込後に生えるグローバル）を参照するため、
+      // Core読込より前に静的importすると ReferenceError になる。動的importする。
+      const { ensureCubismFramework, Live2DFrameworkModel } = await import('@/lib/interview/live2d-framework-model')
+      ensureCubismFramework()
 
-      let loaded: Live2DModelLike
+      const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true }) as WebGLRenderingContext | null
+      if (!gl) {
+        bail('WebGLコンテキストを取得できなかった')
+        return
+      }
+      gl.clearColor(0, 0, 0, 0)
+
+      resize()
+      const { dir, fileName } = modelDirOf(DEFAULT_MODEL_URL)
+
+      let loaded: Live2DFrameworkModelClass
       try {
-        loaded = (await Live2DModel.from(DEFAULT_MODEL_URL)) as unknown as Live2DModelLike
+        loaded = await Live2DFrameworkModel.load(gl, dir, fileName, DEFAULT_SHADER_PATH, canvas.width, canvas.height)
       } catch (err) {
         bail('モデルを読み込めなかった（public/live2d/model/ に未配置の可能性）', err)
         return
       }
-      if (disposed) return
+      if (disposed) {
+        loaded.release()
+        return
+      }
 
-      const caps = inspectLive2DModel(toLive2DModelInfo(loaded))
+      const caps = inspectLive2DModel(loaded.getCapabilitiesInfo())
       if (!isUsableAsInterviewer(caps)) {
         bail(`モデルが面接官として使えない: ${caps.deficiencies.map((d) => DEFICIENCY_REASON[d]).join(' / ')}`)
+        loaded.release()
         return
       }
       if (caps.deficiencies.length > 0) {
@@ -151,63 +150,51 @@ export default function Live2DAvatar({
       }
       capsRef.current = caps
       motionRef.current = new Live2DMotion()
+      model = loaded
 
-      pixiModel = loaded as unknown as PixiLive2DModel
-      natural = { width: pixiModel.width || 1, height: pixiModel.height || 1 }
-      pixiModel.anchor.set(0.5, 0.5)
+      const tick = (nowMs: number) => {
+        if (disposed || !model) return
+        const now = nowMs / 1000
+        const dt = lastTime === 0 ? 0 : Math.min(now - lastTime, 0.1)
+        lastTime = now
 
-      const width = container.clientWidth
-      const height = container.clientHeight
-      app = new PIXI.Application({
-        width,
-        height,
-        backgroundAlpha: 0,
-        antialias: true,
-        resolution: Math.min(window.devicePixelRatio, 2),
-        autoDensity: true,
-      })
-      container.appendChild(app.view as unknown as Node)
-      app.stage.addChild(pixiModel)
-      layout()
-
-      app.ticker.add(() => {
-        if (disposed) return
         const motion = motionRef.current
         const c = capsRef.current
-        if (!motion || !c) return
-        const now = performance.now() / 1000
+        if (motion && c) {
+          const frame = motion.update(now)
+          const mouthValue = mouthOpenValue(levelRef.current, speakingRef.current)
+          for (const id of c.mouthParamIds) model.setParameterValue(id, mouthValue)
 
-        const frame = motion.update(now)
-        const core = loaded.internalModel.coreModel as unknown as CubismCoreModel
+          if (c.canNod) {
+            model.setParameterValue(PARAM.angleY, frame.nodProgress !== null ? nodAngleY(frame.nodProgress) : 0)
+          }
 
-        const mouthValue = mouthOpenValue(levelRef.current, speakingRef.current)
-        for (const id of c.mouthParamIds) core.setParameterValueById(id, mouthValue)
-
-        if (c.canNod) {
-          const angle = frame.nodProgress !== null ? nodAngleY(frame.nodProgress) : 0
-          core.setParameterValueById(PARAM.angleY, angle)
+          if (c.blinkParamIds.length > 0) {
+            const openness = frame.blinkProgress !== null ? 1 - pulse(frame.blinkProgress) : 1
+            for (const id of c.blinkParamIds) model.setParameterValue(id, openness)
+          }
         }
 
-        if (c.blinkParamIds.length > 0) {
-          const openness = frame.blinkProgress !== null ? 1 - pulse(frame.blinkProgress) : 1
-          for (const id of c.blinkParamIds) core.setParameterValueById(id, openness)
-        }
-      })
+        model.commitFrame(dt)
+        gl.viewport(0, 0, canvas.width, canvas.height)
+        gl.clear(gl.COLOR_BUFFER_BIT)
+        model.draw(gl, canvas.width, canvas.height)
+
+        rafId = requestAnimationFrame(tick)
+      }
+      rafId = requestAnimationFrame(tick)
     }
 
     setup()
 
-    window.addEventListener('resize', layout)
+    const resizeObserver = new ResizeObserver(resize)
+    resizeObserver.observe(container)
 
     return () => {
       disposed = true
-      window.removeEventListener('resize', layout)
-      pixiModel?.destroy({ children: true, texture: true, baseTexture: true })
-      if (app) {
-        const view = app.view as unknown as Node
-        app.destroy(false, { children: true, texture: true, baseTexture: true })
-        if (view.parentNode === container) container.removeChild(view)
-      }
+      if (rafId) cancelAnimationFrame(rafId)
+      resizeObserver.disconnect()
+      model?.release()
       motionRef.current = null
       capsRef.current = null
     }
@@ -224,6 +211,8 @@ export default function Live2DAvatar({
         opacity: active || pending ? 1 : 0.75,
         transition: 'opacity 0.3s ease',
       }}
-    />
+    >
+      <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
+    </Box>
   )
 }

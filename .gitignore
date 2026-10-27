@@ -147,3 +147,7 @@ frontend/.avatar-work/
 #    中身(*)だけを除外して READMEだけ復活させる。
 frontend/public/live2d/*
 !frontend/public/live2d/README.md
+# シェーダーは Core/モデルと違い Live2D Open Software License の Framework 付属物で、
+# 再配布可・コミットが前提（無いとビルドしたアプリがそもそも動かない）。
+!frontend/public/live2d/shaders/
+!frontend/public/live2d/shaders/*
