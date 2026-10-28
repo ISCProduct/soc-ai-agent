@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
-import { setupAuth, TEST_USER } from './fixtures/auth'
+import { setupAuth, TEST_ADMIN, TEST_USER } from './fixtures/auth'
 
 /**
  * #1481: モバイルのタップ領域は高さ44px以上。
@@ -35,6 +35,10 @@ test.describe('モバイルのタップ領域（#1481）', () => {
 
     await page.goto('/company-portal/forgot-password')
     await expectMinBox(page.getByRole('link', { name: 'ログインページへ戻る' }), 44)
+
+    // トークンが無くてもリンク自体は出る。ここだけ外すと約20pxへ戻っても気づけない。
+    await page.goto('/company-portal/reset-password')
+    await expectMinBox(page.getByRole('link', { name: 'ログインページへ戻る' }), 44)
   })
 
   test('企業登録のプライバシーポリシーは高さ44px以上', async ({ page }) => {
@@ -56,6 +60,48 @@ test.describe('モバイルのタップ領域（#1481）', () => {
     for (const name of ['直近5回', '直近10回', '全期間']) {
       await expectMinBox(page.getByRole('button', { name }), 44)
     }
+    await expectMinBox(page.getByRole('button', { name: '面接画面へ戻る' }), 44, 44)
+  })
+
+  test('予定表の戻るボタンは44x44以上', async ({ page }) => {
+    await setupAuth(page, TEST_USER)
+    await page.route('**/api/schedule*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([]),
+      }),
+    )
+    await page.goto('/schedule')
+    await expectMinBox(page.getByRole('button', { name: '前のページに戻る' }), 44, 44)
+  })
+
+  test('管理画面ヘッダーの戻るボタンは44x44以上', async ({ page }) => {
+    await setupAuth(page, TEST_ADMIN)
+    await page.route('**/api/admin/me/school-access*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ restricted: false, schools: [] }),
+      }),
+    )
+    await page.route('**/api/admin/companies*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ companies: [] }),
+      }),
+    )
+    await page.route('**/api/admin/teacher/students/tendency-analysis*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ students: [], total: 0 }),
+      }),
+    )
+    await page.goto('/admin')
+    // IconButton に Link を渡しているので button ではなく link になる。
+    await expectMinBox(page.getByRole('main').getByRole('link', { name: '戻る' }), 44, 44)
   })
 })
 
