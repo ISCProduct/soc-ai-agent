@@ -168,10 +168,12 @@ export default function Live2DAvatar({
             model.setParameterValue(c.nodParamId, frame.nodProgress !== null ? nodAngleY(frame.nodProgress) : 0)
           }
 
+          const eyeOpenness = frame.blinkProgress !== null ? 1 - pulse(frame.blinkProgress) : 1
           if (c.blinkParamIds.length > 0) {
-            const openness = frame.blinkProgress !== null ? 1 - pulse(frame.blinkProgress) : 1
-            for (const id of c.blinkParamIds) model.setParameterValue(id, openness)
+            for (const id of c.blinkParamIds) model.setParameterValue(id, eyeOpenness)
           }
+          // 差分画像を重ねるタイプのモデル（目閉じ・口開きがパラメータに結び付いていない）用。
+          model.setOverlayState(eyeOpenness, mouthValue)
         }
 
         model.commitFrame(dt)

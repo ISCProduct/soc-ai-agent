@@ -13,6 +13,7 @@ import type { ICubismModelSetting } from '@/vendor/live2d-framework/src/icubismm
 import { CubismUserModel } from '@/vendor/live2d-framework/src/model/cubismusermodel'
 import { CubismMatrix44 } from '@/vendor/live2d-framework/src/math/cubismmatrix44'
 import { buildCapabilitiesInfo, type Live2DFrameworkCapabilitiesInfo } from './live2d-capabilities-info'
+import { OVERLAY_MESH_IDS, overlayOpacities } from './live2d-overlay'
 
 export type { Live2DFrameworkCapabilitiesInfo }
 
@@ -59,6 +60,8 @@ function loadTexture(gl: WebGLRenderingContext, url: string): Promise<WebGLTextu
 export class Live2DFrameworkModel extends CubismUserModel {
   private modelSetting: ICubismModelSetting | null = null
   private readonly viewMatrix = new CubismMatrix44()
+  private overlay = { eyeOpen: 1, mouthOpen: 0 }
+  private overlayIndices: { eyesClosed: number; mouthOpen: number } | null = null
 
   static async load(
     gl: WebGLRenderingContext,
@@ -79,6 +82,11 @@ export class Live2DFrameworkModel extends CubismUserModel {
     const mocBuffer = await fetchArrayBuffer(`${modelDir}${mocFileName}`)
     model.loadModel(mocBuffer)
     if (!model.getModel()) throw new Error('moc3の読み込みに失敗した（壊れているか非対応バージョン）')
+
+    const drawableIds: string[] = Array.from(model.getModel().getModel().drawables.ids)
+    const eyesClosed = drawableIds.indexOf(OVERLAY_MESH_IDS.eyesClosed)
+    const mouthOpen = drawableIds.indexOf(OVERLAY_MESH_IDS.mouthOpen)
+    if (eyesClosed >= 0 && mouthOpen >= 0) model.overlayIndices = { eyesClosed, mouthOpen }
 
     const physicsFileName = setting.getPhysicsFileName()
     if (physicsFileName) {
@@ -121,12 +129,37 @@ export class Live2DFrameworkModel extends CubismUserModel {
     this.getModel().setParameterValueById(CubismFramework.getIdManager().getId(id), value)
   }
 
+  /**
+   * 目の開き・口の開き(0-1)を差分ArtMeshの不透明度として次の `commitFrame` で反映する。
+   * 差分ArtMeshがモデルに無ければ何もしない。`live2d-overlay.ts` 先頭のコメント参照。
+   */
+  setOverlayState(eyeOpen: number, mouthOpen: number): void {
+    this.overlay = { eyeOpen, mouthOpen }
+  }
+
+  /** 差分ArtMeshを持つモデルか（書き出し済み男性モデルは true）。 */
+  hasOverlayMeshes(): boolean {
+    return this.overlayIndices !== null
+  }
+
   /** 1フレームぶんパラメータを確定させてCoreのdrawable頂点を再計算する。描画前に呼ぶ。 */
   commitFrame(deltaTimeSeconds: number): void {
     const model = this.getModel()
     model.saveParameters()
     this._physics?.evaluate(model, deltaTimeSeconds)
     model.update()
+    this.applyOverlayOpacities()
+  }
+
+  private applyOverlayOpacities(): void {
+    const indices = this.overlayIndices
+    if (!indices) return
+    const { eyesClosed, mouthOpen } = overlayOpacities(this.overlay.eyeOpen, this.overlay.mouthOpen)
+    // Core の drawables.opacities は描画側(renderer)が読むのと同じ配列。update() のたびに
+    // Core が計算し直すので、毎フレームこの直後に上書きする。
+    const opacities = this.getModel().getModel().drawables.opacities
+    opacities[indices.eyesClosed] = eyesClosed
+    opacities[indices.mouthOpen] = mouthOpen
   }
 
   /**
