@@ -72,9 +72,8 @@ jobs:
       # 全PRのCIが落ちる。実際 v1.8.0 が go>=1.26 を要求するようになり、
       # go 1.25 + GOTOOLCHAIN=local の本CIでインストール自体が失敗した(2026-09-09)。
       #
-      # Go を 1.26.9 へ上げたので v1.8.0 を使う（GO-2026-6610〜6617 の対応）。
-      # 1.25 系にはこれらの修正が入らず、fixed は 1.26.9 / 1.27.2 だけである。
-      # Go を動かすときはここの対応バージョンも合わせて見直すこと。
+      # crypto/x509 の GO-2026-6809 修正に Go 1.26.10 が必要なため、
+      # go.mod の Go バージョンと合わせる。
       - name: Security scan (govulncheck)
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
