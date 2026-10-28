@@ -78,15 +78,47 @@ test.describe('チャット主要機能（職種・選択肢・送信）', () =>
     expect(Math.abs(boxA!.width - boxB!.width)).toBeLessThan(8)
     // 2行のままなら入力欄はこれより高い。1行へ縮めたことを高さで見る。
     const inputBox = await chatInput(page).boundingBox()
+    expect(inputBox).not.toBeNull()
     expect(inputBox!.height).toBeLessThan(56)
 
     await page.setViewportSize({ width: 375, height: 700 })
     const narrowA = await choiceA.boundingBox()
     const narrowB = await choiceB.boundingBox()
+    expect(narrowA).not.toBeNull()
+    expect(narrowB).not.toBeNull()
     expect(narrowB!.y).toBeGreaterThan(narrowA!.y + narrowA!.height / 2)
     const log = page.getByRole('log', { name: '自己分析チャットのやり取り' })
     const logBox = await log.boundingBox()
+    expect(logBox).not.toBeNull()
     expect(logBox!.height).toBeGreaterThan(160)
+  })
+
+  // 選択肢は A-E に加え番号でも並ぶ。4件以上で最大高さを超えたとき、
+  // 末尾までスクロールして選べることを固定する。3択のままではスクロールが起きない。
+  test('収まらない選択肢はスクロールして末尾を選べる', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    const lines = ['一番近いものを選んでください。', '']
+    for (let i = 1; i <= 8; i += 1) {
+      lines.push(`${i}) 選択肢${i}。具体的な状況を一文で書いてあります`)
+    }
+    await mockChatHistory(page, [historyItem(1, 'assistant', lines.join('\n'))])
+
+    await page.goto('/')
+    const group = page.getByRole('group', { name: '回答の選択肢' })
+    const last = page.getByRole('button', { name: /8\.\s*選択肢8/ })
+    await expect(last).toBeAttached({ timeout: 15000 })
+
+    const overflow = await group.evaluate((el) => el.scrollHeight > el.clientHeight + 8)
+    expect(overflow).toBe(true)
+    const groupBox = await group.boundingBox()
+    const before = await last.boundingBox()
+    expect(groupBox).not.toBeNull()
+    expect(before).not.toBeNull()
+    expect(before!.y).toBeGreaterThan(groupBox!.y + groupBox!.height)
+
+    await last.scrollIntoViewIfNeeded()
+    await last.click()
+    await expect(last).toHaveAttribute('aria-pressed', 'true')
   })
 
   test('経験談MCQの選択肢Aは職種判定メッセージを出さず送信される', async ({ page }) => {
