@@ -169,6 +169,46 @@ export function mouthOpenValue(level: number, speaking: boolean): number {
 }
 
 /**
+ * 口の開きを目標値へ近づける（指数平滑）。
+ * 音声の振幅は毎フレーム大きく揺れるので、そのまま口に使うと音節より速く
+ * パクパクして不自然になる。開くときは速く(attack)、閉じるときはやや遅く(release)
+ * 追従させ、音節ごとの開閉は残しつつ細かな揺れだけを均す。
+ */
+export function smoothMouth(prev: number, target: number, dtSeconds: number, attackTau = 0.04, releaseTau = 0.08): number {
+  if (!Number.isFinite(prev)) return target
+  const tau = target > prev ? attackTau : releaseTau
+  const k = 1 - Math.exp(-Math.max(0, dtSeconds) / tau)
+  return prev + (target - prev) * k
+}
+
+/**
+ * 音量を、直近の最大音量を基準に 0-1 へ正規化する（自動ゲイン）。
+ * 声の大きさは音声や再生環境で大きく違い、固定倍率だと小さい声では口がほとんど
+ * 開かない。直近の最大(peak)を基準にすれば、声の大小によらず強い音節で全開になる。
+ * peak は tau 秒で下がり、無音を増幅しないよう floor を下限にする。
+ */
+export function normalizeLevel(raw: number, peak: number, dtSeconds: number, floor = 0.15, tau = 2): { level: number; peak: number } {
+  const r = Number.isFinite(raw) ? Math.min(1, Math.max(0, raw)) : 0
+  const dt = Number.isFinite(dtSeconds) ? Math.max(0, dtSeconds) : 0
+  const decayed = (Number.isFinite(peak) ? peak : 0) * Math.exp(-dt / tau)
+  const nextPeak = Math.max(floor, decayed, r)
+  return { level: r / nextPeak, peak: nextPeak }
+}
+
+/**
+ * 時刻 t 以前で最も新しいサンプルの値を返す。無ければ最も古い値、空なら 0。
+ * 音量を再生の出力遅延ぶん遅らせて口に使うために、直近の履歴から引く。
+ */
+export function valueAt(history: ReadonlyArray<{ t: number; v: number }>, t: number): number {
+  let found: number | null = null
+  for (const h of history) {
+    if (h.t <= t) found = h.v
+    else break
+  }
+  return found ?? history[0]?.v ?? 0
+}
+
+/**
  * うなずき1回ぶんの首の角度を返す。0→1 の進行度に対し、下げて戻す山を1つ作る。
  * Cubism の Angle 系は -30..30 度。
  */

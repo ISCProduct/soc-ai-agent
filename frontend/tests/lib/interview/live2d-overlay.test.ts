@@ -5,8 +5,12 @@ describe('overlayOpacities', () => {
     expect(overlayOpacities(1, 0)).toEqual({ eyesClosed: 0, mouthOpen: 0 })
   })
 
-  it('follows the mouth value while the eyes are open', () => {
-    expect(overlayOpacities(1, 0.6)).toEqual({ eyesClosed: 0, mouthOpen: 0.6 })
+  it('switches the open-mouth image crisply instead of blending it half-transparent', () => {
+    expect(overlayOpacities(1, 0.2).mouthOpen).toBe(0)
+    expect(overlayOpacities(1, 0.6).mouthOpen).toBe(1)
+    const mid = overlayOpacities(1, 0.375).mouthOpen
+    expect(mid).toBeGreaterThan(0)
+    expect(mid).toBeLessThan(1)
   })
 
   it('shows the closed-eye image and hides the open-mouth image mid-blink', () => {

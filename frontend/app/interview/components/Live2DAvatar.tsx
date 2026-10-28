@@ -9,11 +9,34 @@ import {
   inspectLive2DModel,
   isUsableAsInterviewer,
   mouthOpenValue,
+  smoothMouth,
+  valueAt,
+  normalizeLevel,
   nodAngleY,
   DEFICIENCY_REASON,
   type Live2DCapabilities,
 } from '@/lib/interview/live2d-params'
 import { Live2DMotion, pulse } from '@/lib/interview/live2d-motion'
+import { getAiAudioMeter } from '@/lib/interview/ai-audio-meter'
+
+// 全身絵の余白を切って顔を大きく見せる。FACE_FOCUS_Y は画像の上端0・下端1とした顔の中心位置。
+// 書き出し済み男性モデルの絵に合わせた値なので、モデルを差し替えたら見直すこと。
+const FACE_ZOOM = 1.6
+const FACE_FOCUS_Y = 0.36
+
+/**
+ * 口と声のタイミング微調整(ミリ秒)。正の値で口を遅らせる。出力遅延は自動で補正するが、
+ * 機器によるずれが残るときに、ブラウザのコンソールで
+ * `localStorage.setItem('lipSyncOffsetMs', '80')` のように指定する（既定 0）。
+ */
+function lipSyncOffsetSec(): number {
+  try {
+    const v = Number(localStorage.getItem('lipSyncOffsetMs'))
+    return Number.isFinite(v) ? Math.max(-300, Math.min(500, v)) / 1000 : 0
+  } catch {
+    return 0
+  }
+}
 
 export interface Live2DAvatarProps {
   gender: 'male' | 'female'
@@ -58,6 +81,7 @@ export default function Live2DAvatar({
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const levelRef = useRef(level)
+  const mouthRef = useRef(0)
   const speakingRef = useRef(speaking)
   const motionRef = useRef<Live2DMotion | null>(null)
   const capsRef = useRef<Live2DCapabilities | null>(null)
@@ -151,6 +175,8 @@ export default function Live2DAvatar({
       motionRef.current = new Live2DMotion()
       model = loaded
 
+      const levelHistory: { t: number; v: number }[] = []
+      let levelPeak = 0
       const tick = (nowMs: number) => {
         if (disposed || !model) return
         const now = nowMs / 1000
@@ -161,7 +187,17 @@ export default function Live2DAvatar({
         const c = capsRef.current
         if (motion && c) {
           const frame = motion.update(now)
-          const mouthValue = mouthOpenValue(levelRef.current, speakingRef.current)
+          // 音量は状態を経由せず直接読み、再生の出力遅延ぶん遅らせて、聞こえる声に口を合わせる。
+          const meter = getAiAudioMeter()
+          if (!speakingRef.current) levelPeak = 0
+          const rawLevel = meter ? meter.read() : levelRef.current
+          const norm = normalizeLevel(rawLevel, levelPeak, dt)
+          levelPeak = norm.peak
+          levelHistory.push({ t: now, v: norm.level })
+          while (levelHistory.length > 1 && levelHistory[1].t < now - 1) levelHistory.shift()
+          const delayed = valueAt(levelHistory, now - (meter?.latencySec ?? 0) - lipSyncOffsetSec())
+          mouthRef.current = smoothMouth(mouthRef.current, mouthOpenValue(delayed, speakingRef.current), dt)
+          const mouthValue = mouthRef.current
           for (const id of c.mouthParamIds) model.setParameterValue(id, mouthValue)
 
           if (c.nodParamId) {
@@ -179,7 +215,7 @@ export default function Live2DAvatar({
         model.commitFrame(dt)
         gl.viewport(0, 0, canvas.width, canvas.height)
         gl.clear(gl.COLOR_BUFFER_BIT)
-        model.draw(gl, canvas.width, canvas.height)
+        model.draw(gl, canvas.width, canvas.height, 0.98, FACE_ZOOM, FACE_FOCUS_Y)
 
         rafId = requestAnimationFrame(tick)
       }

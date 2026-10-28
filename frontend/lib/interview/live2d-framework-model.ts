@@ -166,19 +166,24 @@ export class Live2DFrameworkModel extends CubismUserModel {
    * canvasのピクセルサイズいっぱいに、アスペクト比を保ったまま("contain")収まるスケールで描画する。
    * Cubismのunit空間はCore依存（CanvasWidth/Height ÷ PixelsPerUnit）なので、
    * 「1 unit が何pxか」を幅・高さそれぞれで求めて小さい方を採用する。
+   *
+   * `zoom` > 1 で拡大し、`focusY`（モデル画像の上端を0・下端を1とした位置）が
+   * canvasの縦中央に来るようにずらす。全身絵の余白を切って顔を大きく見せるのに使う。
    */
-  draw(gl: WebGLRenderingContext, canvasWidthPx: number, canvasHeightPx: number, margin = 0.98): void {
+  draw(gl: WebGLRenderingContext, canvasWidthPx: number, canvasHeightPx: number, margin = 0.98, zoom = 1, focusY = 0.5): void {
     const model = this.getModel()
     const canvasWidthUnit = model.getCanvasWidth()
     const canvasHeightUnit = model.getCanvasHeight()
     if (canvasWidthUnit <= 0 || canvasHeightUnit <= 0) return
 
-    const pxPerUnit = Math.min(canvasWidthPx / canvasWidthUnit, canvasHeightPx / canvasHeightUnit) * margin
+    const pxPerUnit = Math.min(canvasWidthPx / canvasWidthUnit, canvasHeightPx / canvasHeightUnit) * margin * zoom
     const scaleX = (pxPerUnit * 2) / canvasWidthPx
     const scaleY = (pxPerUnit * 2) / canvasHeightPx
 
     this.viewMatrix.loadIdentity()
     this.viewMatrix.scale(scaleX, scaleY)
+    // 画像中心(unit原点)から focusY の位置までの距離ぶん、上へ寄せる(clip空間は上がプラス)。
+    this.viewMatrix.translate(0, (focusY - 0.5) * canvasHeightUnit * scaleY)
 
     const renderer = this.getRenderer()
     renderer.setMvpMatrix(this.viewMatrix)

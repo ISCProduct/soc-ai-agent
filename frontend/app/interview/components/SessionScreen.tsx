@@ -257,43 +257,72 @@ export default function SessionScreen({
             </Box>
           )}
 
-          {/* ── Main: 左58% 自分のカメラ+面接官 / 右42% 質問パネル ── */}
+          {/* ── Main: 左58% 面接官ステージ / 右42% 質問パネル ── */}
           <Box className={styles.mainGrid}>
 
-            {/* ── 左: 自分のカメラ(主役) + 面接官(2Dアバター、小) ── */}
-            {/* 自分の映像を中心に据える構成に変更(#2D化)。以前は面接官アバターが
-                全面で自分のカメラは左下の小さいオーバーレイだったが、面接練習で
-                本人が自分の映り・姿勢を確認しやすいよう主従を入れ替えた。 */}
+            {/* ── 左: 面接官(主役、16:9) + 右上に自分のカメラ(PiP) ── */}
+            {/* 面接官と向き合う没入感を優先し、面接官を大きく、自分の映像を小窓にした。
+                自分の映りは右上のPiPで確認できる。 */}
             <Box className={styles.leftStage}>
+              <Box className={styles.stageCard}>
+                <Box className={styles.stageAvatar}>
+                  <InterviewerAvatar
+                    gender={avatarGender}
+                    level={aiLevel}
+                    speaking={aiSpeaking}
+                    active={isConnected}
+                    pending={turnPending}
+                    acknowledgeSignal={studentPauseCount}
+                  />
+                </Box>
+                <Box className={styles.stageScrim} />
 
-              {/* 自分のカメラ(大、16:9) */}
-              <Box className={styles.cameraCard}>
-                <video
-                  ref={sessionVideoCallbackRef}
-                  muted
-                  playsInline
-                  className={`${styles.cameraVideo} ${styles.cameraVideoFill} ${cameraEnabled ? '' : styles.cameraVideoHidden}`}
-                />
-                {!cameraEnabled && (
-                  <Box className={styles.cameraOffIcon}>
-                    <VideocamOffIcon sx={{ fontSize: 40 }} />
+                {/* 上部: 面接官バッジ */}
+                <Box className={styles.stageTop}>
+                  <Box className={styles.avatarBadgeRow}>
+                    <Box className={styles.avatarBadgeDot} data-speaking={aiSpeaking} />
+                    <Typography noWrap component="span" className={styles.avatarBadgeLabel}>
+                      {(companyName || 'AI面接練習') + ' 面接官'}
+                    </Typography>
                   </Box>
-                )}
-
-                <Box className={styles.cameraScrim} />
-                <Box className={styles.liveFeedBadge}>
-                  <Box className={styles.liveFeedDot} />
-                  <Typography component="span" className={styles.liveFeedLabel}>LIVE FEED</Typography>
                 </Box>
 
-                <Box className={styles.candidateLabelWrap}>
-                  <Box className={styles.candidateLabel}>
-                    <Typography component="div" className={styles.candidateLabelEyebrow}>CANDIDATE</Typography>
-                    <Typography component="div" className={styles.candidateLabelName}>
+                {/* 自分のカメラ(PiP、右上) */}
+                <Box className={styles.pipCard}>
+                  <video
+                    ref={sessionVideoCallbackRef}
+                    muted
+                    playsInline
+                    className={`${styles.cameraVideo} ${styles.cameraVideoFill} ${cameraEnabled ? '' : styles.cameraVideoHidden}`}
+                  />
+                  {!cameraEnabled && (
+                    <Box className={styles.cameraOffIcon}>
+                      <VideocamOffIcon sx={{ fontSize: 28 }} />
+                    </Box>
+                  )}
+                  <Box className={styles.pipLabel}>
+                    <Box className={styles.liveFeedDot} />
+                    <Typography noWrap component="span" className={styles.pipLabelText}>
                       あなた{userName ? `（${userName}）` : ''}
                     </Typography>
                   </Box>
                 </Box>
+
+                {/* 下部: 発話中の字幕(リアルタイムTTSテキスト)。「字幕」トグルで表示/非表示。
+                    右パネルの「現在の質問」と内容が重複するため、実際に読み上げている間だけ出す。 */}
+                {captionsVisible && aiSpeaking && (
+                  <Box className={styles.captionBox}>
+                    <Box className={styles.captionEyebrowRow}>
+                      <VolumeUpIcon sx={{ color: 'var(--primary-container)', fontSize: 14 }} />
+                      <Typography component="span" className={styles.captionEyebrow}>
+                        面接官 音声読み上げ中
+                      </Typography>
+                    </Box>
+                    <Typography component="div" className={styles.captionText}>
+                      {partialAi || currentQuestionText}
+                    </Typography>
+                  </Box>
+                )}
 
                 {/* 接続中オーバーレイ */}
                 {status === 'connecting' && (
@@ -311,45 +340,6 @@ export default function SessionScreen({
                       再接続する
                     </Button>
                   </Box>
-                )}
-              </Box>
-
-              {/* 面接官(2Dアバター、小) + 発話中の字幕 */}
-              <Box className={styles.avatarCard}>
-                <Box className={styles.avatarPanel}>
-                  <InterviewerAvatar
-                    gender={avatarGender}
-                    level={aiLevel}
-                    speaking={aiSpeaking}
-                    active={isConnected}
-                    pending={turnPending}
-                    acknowledgeSignal={studentPauseCount}
-                  />
-                  <Box className={styles.avatarBadgeRow}>
-                    <Box className={styles.avatarBadgeDot} data-speaking={aiSpeaking} />
-                    <Typography noWrap component="span" className={styles.avatarBadgeLabel}>
-                      {(companyName || 'AI面接練習') + ' 面接官'}
-                    </Typography>
-                  </Box>
-                </Box>
-
-                {/* 発話中の字幕(リアルタイムTTSテキスト)。「字幕」トグルで表示/非表示。
-                    右パネルの「現在の質問」カードと内容が重複するため、実際に
-                    読み上げている間だけ出す（クローズドキャプションと同じ考え方）。 */}
-                {captionsVisible && aiSpeaking ? (
-                  <Box className={styles.captionBox}>
-                    <Box className={styles.captionEyebrowRow}>
-                      <VolumeUpIcon sx={{ color: 'var(--primary-container)', fontSize: 14 }} />
-                      <Typography component="span" className={styles.captionEyebrow}>
-                        AI面接官 音声読み上げ中
-                      </Typography>
-                    </Box>
-                    <Typography component="div" className={styles.captionText}>
-                      {partialAi || currentQuestionText}
-                    </Typography>
-                  </Box>
-                ) : (
-                  <Box sx={{ flex: 1 }} />
                 )}
               </Box>
             </Box>

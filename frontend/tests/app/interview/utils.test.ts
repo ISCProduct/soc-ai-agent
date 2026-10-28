@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { resolveCompanyByName, getNextAvatarGender, mergeResolvedCompany, buildCompanyInfo } from '@/app/interview/utils'
+import { resolveCompanyByName, mergeResolvedCompany, buildCompanyInfo } from '@/app/interview/utils'
 
 describe('resolveCompanyByName', () => {
   const originalFetch = global.fetch
@@ -98,35 +98,6 @@ describe('mergeResolvedCompany', () => {
 
   it('prev が null なら null のまま', () => {
     expect(mergeResolvedCompany(null, 'X', { id: 1, name: 'X' })).toBeNull()
-  })
-})
-
-describe('getNextAvatarGender', () => {
-  const KEY = 'interview_avatar_index'
-
-  beforeEach(() => {
-    localStorage.clear()
-  })
-
-  it('呼び出しごとに male / female を交互に返す', () => {
-    expect(getNextAvatarGender()).toBe('male')
-    expect(getNextAvatarGender()).toBe('female')
-    expect(getNextAvatarGender()).toBe('male')
-  })
-
-  it('localStorage にインデックスを永続化する', () => {
-    getNextAvatarGender()
-    expect(localStorage.getItem(KEY)).toBe('1')
-    getNextAvatarGender()
-    expect(localStorage.getItem(KEY)).toBe('2')
-  })
-
-  it('localStorage が使用できない場合は male を返す', () => {
-    const spy = jest.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new Error('unavailable')
-    })
-    expect(getNextAvatarGender()).toBe('male')
-    spy.mockRestore()
   })
 })
 
