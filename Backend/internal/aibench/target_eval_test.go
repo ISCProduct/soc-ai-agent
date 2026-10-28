@@ -365,6 +365,35 @@ func TestEvaluateESResponse(t *testing.T) {
 	}
 }
 
+func TestEvaluateESResponseUsesReportedUsage(t *testing.T) {
+	esText := strings.Repeat("あ", 400)
+	c := Case{ID: "es-001", Label: LabelMid, Target: TargetES, Input: Input{ESText: esText}}
+	feedback := strings.Repeat("い", 400)
+	improved := strings.Repeat("う", 480)
+	body := []byte(`{"specificity_score":6,"star_score":7,"length_balance_score":8,` +
+		`"feedback":"` + feedback + `","improved_text":"` + improved + `",` +
+		`"usage":{"model":"gpt-4o","prompt_tokens":1800,"completion_tokens":2400,"calls":3}}`)
+
+	got := evaluateESResponse(Observation{
+		PromptTokens: 10, CompletionTokens: 20, TokensEstimated: true,
+	}, c, http.StatusOK, body)
+
+	if got.TokensEstimated {
+		t.Error("usage があるのに概算のまま")
+	}
+	if got.PromptTokens != 1800 || got.CompletionTokens != 2400 {
+		t.Errorf("tokens = %d / %d, want 1800 / 2400（3回目の作り直しを含む実数）", got.PromptTokens, got.CompletionTokens)
+	}
+
+	without := evaluateESResponse(Observation{
+		PromptTokens: 10, CompletionTokens: 20, TokensEstimated: true,
+	}, c, http.StatusOK, []byte(`{"specificity_score":6,"star_score":7,"length_balance_score":8,`+
+		`"feedback":"`+feedback+`","improved_text":"`+improved+`"}`))
+	if !without.TokensEstimated || without.PromptTokens != 10 || without.CompletionTokens != 20 {
+		t.Errorf("usage が無いときの概算が上書きされた: %+v", without)
+	}
+}
+
 // トランスクリプトから役割を復元できないと、面接官の発言を根拠にしても
 // 捏造として検出できない。
 func TestUtterancesFromTranscript(t *testing.T) {

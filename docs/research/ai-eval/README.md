@@ -666,6 +666,10 @@ interview-report、追加前の es）とは直接比較できない（マニフ�
 
 入力長ごとの長さは、結果JSONの `observations` を `input_chars` で並べて読む。
 例: 入力 10,000字に対し改善文 360字なら ratio は 0.036 で、`improved_text_ratio` 違反にもなる。
+
+トークン数は、レスポンスに `usage` があるときはその実数を使う（短い改善文の作り直しで
+3回目が走っても、その入力と出力がコストに入る）。`usage` が無いときだけ
+`EstimateTokens`（評価＋改善文の2回ぶん）の概算になり、`tokens_estimated` が true になる。
 | `company_fit_without_context` | 企業情報が無いのに企業適合度を返した（#1524違反） |
 | `company_strategy_without_context` | 企業情報が無いのに企業対策を返した（#1524違反） |
 

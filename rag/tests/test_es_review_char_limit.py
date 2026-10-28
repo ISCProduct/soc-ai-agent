@@ -300,6 +300,46 @@ def test_short_text_retry_is_capped_and_keeps_the_text(monkeypatch):
     assert count_es_chars(result.improved_text) == 400
 
 
+def test_short_text_retry_failure_keeps_the_first_text(monkeypatch):
+    """作り直しが上限到達や不正JSONでも、最初の改善文と「短い」警告を返す。
+
+    例外を外へ出すと 422/500 になり、生成済みの本文も improved_length_satisfied も消える。
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    improved_calls = {"n": 0}
+
+    def _create(**kwargs):
+        user = next(msg["content"] for msg in kwargs["messages"] if msg["role"] == "user")
+        if "【添削フィードバック】" not in user:
+            content = json.dumps(_REVIEW_PAYLOAD, ensure_ascii=False)
+            return MagicMock(
+                choices=[MagicMock(message=MagicMock(content=content), finish_reason="stop")],
+                usage=MagicMock(prompt_tokens=100, completion_tokens=200),
+            )
+        improved_calls["n"] += 1
+        if improved_calls["n"] == 1:
+            content = json.dumps({"improved_text": "あ" * 360, "star": _STAR_PAYLOAD}, ensure_ascii=False)
+            return MagicMock(
+                choices=[MagicMock(message=MagicMock(content=content), finish_reason="stop")],
+                usage=MagicMock(prompt_tokens=100, completion_tokens=200),
+            )
+        # 2回目は出力上限で途中までしか返らない（max_tokens 無しなので引き上げない）
+        return MagicMock(
+            choices=[MagicMock(message=MagicMock(content="not-json"), finish_reason="length")],
+            usage=MagicMock(prompt_tokens=100, completion_tokens=200),
+        )
+
+    client = MagicMock()
+    client.chat.completions.create.side_effect = _create
+
+    result = _run(client, es_text="あ" * 6000)
+
+    assert improved_calls["n"] == 2
+    assert result.improved_text_length == 360
+    assert result.improved_length_satisfied is False
+    assert result.improved_text == "あ" * 360
+
+
 def test_short_text_retry_stops_at_deadline(monkeypatch):
     """45秒を超えたら作り直さず、短かったことだけ返す。"""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")

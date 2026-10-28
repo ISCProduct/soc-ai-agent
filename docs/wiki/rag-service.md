@@ -172,6 +172,7 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 - プロンプト版は `es_review_v4`。`char_limit` が無いときの字数指示は「110〜130%を目安」ではなく、`count_es_chars` で数えた元の字数と目標レンジ（切り上げた110〜130%）を書く。要約して短くしないことも書く
 - 生成後、改善文が元の文章（100%）を下回っていたら**改善文だけ**を1回（`_MAX_SHORT_TEXT_RETRIES`）作り直す。再生成プロンプトには「直前は N 字で、元の M 字より短い」と実測値を入れる。評価は作り直さない。`max_tokens` は渡さない
 - 作り直しは #1523 と同じく開始から45秒で打ち切る。1呼び出し60秒・Backend 85秒（#1556）の中で、評価＋改善文＋この1回まで
+- 作り直し自体が上限到達・タイムアウト・不正JSONで失敗しても、最初の改善文は捨てない。422/500 にすると本文も警告も届かないので、短いまま `improved_length_satisfied: false` で返す
 - それでも短ければ切り詰めず、`improved_length_satisfied: false` で返す。FEは「元の文章より短くなりました」と出し、このまま提出しないよう案内する。下限を110%にしないのは、すでに十分な短いESまで作り直すと品質が変わるため。100%はハーネスの `improved_text_ratio` の下限と同じ
 - `char_limit` があるときはこの検査をしない（短くする指定が目的。字数は `char_limit_satisfied` で見る）
 - 公開APIの入力上限は 6,000字のまま（#1564）。10,000字はここで拒否する。6,000字の130%はトークン見積もり上 `_MAX_OUTPUT_TOKENS` に収まるが、モデルが実際にその長さを書くかはハーネスの `improved_chars` / `improved_text_ratio` で入力長ごとに見る
@@ -180,7 +181,7 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 
 - ESの評価・書き換えの実装は `services/es_review.py` のみ。Backend の `/api/es/review`（ES添削タブ）と `/api/es/rewrite`（ESリライトタブ）はどちらも RAG の `/es/review` を呼ぶ
 - 旧実装では `/api/es/rewrite` が Backend 内の独自プロンプト（gpt-4o-mini・**インジェクション対策なし**・字数指示120〜150%）で生成していたため、同じESでも添削タブと違う書き換え案が返っていた。統合でプロンプト・出力スキーマ・インジェクション対策が1箇所になった
-- `/api/es/rewrite` のレスポンスは従来互換（`rewritten_text` / `star`）。`improved_text` を `rewritten_text` に詰め替えて返し、`improved_text_length` / `char_limit_satisfied` を追加している
+- `/api/es/rewrite` のレスポンスは従来互換（`rewritten_text` / `star`）。`improved_text` を `rewritten_text` に詰め替えて返し、`improved_text_length` / `char_limit_satisfied` / `improved_length_satisfied` を追加している
 - STAR分解（`star`）は改善文と同じ第2呼び出しで生成する。ES添削タブは `star_score`、ESリライトタブは `star` の内訳を同じレスポンスから表示する
 - **デプロイ順は rag-review を backend より先**にする（`.github/workflows/deployment.yml`）。Backend の ES 経路は生成を RAG へ委譲しており、旧 RAG は Pydantic の `extra=ignore` で `char_limit` / `tech_stack` を**黙って捨てる**ため、逆順だとロール中の数分だけ「字数上限を指定しても無視され、画面に手がかりも出ない」窓ができる
 - コストの機能別内訳（`es_review` / `es_rewrite`）は、RAG が返す `usage` を Backend が `openai.Client.ReportProxyUsage` で `api_call_logs` へ記録して残す。RAG 自身は記録先を持たないため、この経路が唯一の記録手段（統合前は RAG 経由の添削ぶんが記録されていなかった）。`usage` は内部情報なので Backend が転送前に本文から取り除く

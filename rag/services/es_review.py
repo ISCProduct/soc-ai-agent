@@ -587,16 +587,26 @@ def _run_es_review(
                     f"\n\n【前回の生成結果】{improved_length}字で、元の文章（{source_chars}字）より短いです。"
                     f"要約せず、{target_low_chars}〜{target_high_chars}字で書き直してください。"
                 )
-                improved_data = _call_json_with_retry(
-                    client,
-                    model,
-                    improved_system_prompt,
-                    _improved_user_prompt(feedback, retry_note),
-                    None,
-                    label="improved_text",
-                    tally=tally,
-                    truncated_message=improved_truncated_message,
-                )
+                # 作り直しは品質のための任意の1回。上限到達・タイムアウト・不正JSONで
+                # 失敗しても、最初の改善文は有効なので捨てない。ここで例外を外へ出すと
+                # 422/500 になり、本文も improved_length_satisfied: false の警告も届かない。
+                try:
+                    improved_data = _call_json_with_retry(
+                        client,
+                        model,
+                        improved_system_prompt,
+                        _improved_user_prompt(feedback, retry_note),
+                        None,
+                        label="improved_text",
+                        tally=tally,
+                        truncated_message=improved_truncated_message,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "es review short text retry failed; keeping previous text error=%s length=%d",
+                        exc, improved_length,
+                    )
+                    break
                 improved_text = str(improved_data.get("improved_text", ""))
                 improved_length = count_es_chars(improved_text)
             improved_length_satisfied = improved_length >= length_floor
