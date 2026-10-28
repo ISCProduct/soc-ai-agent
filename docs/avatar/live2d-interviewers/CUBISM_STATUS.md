@@ -11,6 +11,9 @@ Last checked: 2026-10-28
   `ParamEyeROpen`, `ParamMouthOpenY`, `ParamAngleX`, and `ParamBreath`.
 - Named part folders exist for the face, eyes, pupils, eyebrows, mouth, nose,
   ears, hair, neck, and body.
+- The editable project is saved at `cubism-wip/male-interviewer.cmo3`.
+- An authentic Cubism runtime export exists at
+  `frontend/public/live2d/interviewers/male/`.
 
 ### Blocking source issue
 
@@ -26,16 +29,25 @@ seams must be adjusted in Cubism before the model is production-ready.
 
 ## Female model
 
-- `frontend/public/live2d/interviewers/cubism-input/female/female-neutral-2048.png`
-  is ready for import.
-- No `.cmo3` project or rig exists yet.
+- `female-neutral-2048.png` was imported into Cubism Editor.
+- The editable project is saved at `cubism-wip/female-interviewer.cmo3`.
+- An authentic Cubism runtime export exists at
+  `frontend/public/live2d/interviewers/female/`.
+- Like the male source, the visible character is a single flat ArtMesh; the
+  eyes and mouth have not been separated and keyed.
 
 ## Export and validation
 
-- Texture atlases have not been generated.
-- No authentic `.moc3`, `.model3.json`, or `.cdi3.json` has been exported.
-- `check:live2d` cannot pass until authentic Cubism runtime files exist.
-- No placeholder or validation-bypass files have been created.
+- Authentic `.moc3`, `.model3.json`, `.cdi3.json`, and 1024 px texture-atlas
+  files were exported for both models by Cubism Editor 5.3.04 FREE.
+- `npm run check:live2d -- public/live2d/interviewers/male` passes with a
+  LipSync-group warning.
+- `npm run check:live2d -- public/live2d/interviewers/female` passes with the
+  same warning.
+- No placeholder or validation-bypass files were created.
+- Passing the structural checker does not mean the flat ArtMesh is rigged:
+  moving the parameters still does not create visible blinking, mouth movement,
+  or nodding.
 
 ## Remaining work in Cubism
 
@@ -43,7 +55,8 @@ seams must be adjusted in Cubism before the model is production-ready.
    or replace the current flat source with a genuinely layered PSD.
 2. Add opacity/deformation keyforms for the four required parameters from
    `rigging-spec.json`.
-3. Register the LipSync and EyeBlink groups.
-4. Generate a single 2048 px texture atlas.
-5. Export the male runtime files, then repeat the process for the female model.
-6. Run `npm run check:live2d` for both exports and inspect them at 96–120 px.
+3. Register `ParamMouthOpenY` in the LipSync group and confirm both eye-open
+   parameters remain in EyeBlink.
+4. Regenerate the requested single 2048 px atlas (the current FREE-edition
+   exports contain a 1024 px atlas).
+5. Re-export both runtime models and inspect actual animation at 96–120 px.

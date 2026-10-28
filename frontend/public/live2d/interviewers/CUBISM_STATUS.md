@@ -14,28 +14,29 @@
 - 男性の 2048 PNG を Cubism のアートメッシュとして取り込み確認
 - `~/Desktop/Untitled Model.cmo3` の実ファイルとCubism 5.3.04での再オープンを確認
 - 編集用バックアップを `docs/avatar/live2d-interviewers/cubism-wip/` へ保存
+- 男性・女性の `.cmo3` を保存
+- 男性・女性の正規 `.moc3`、`.model3.json`、`.cdi3.json`、テクスチャを書き出し
+- 男女とも `npm run check:live2d` が「✓ 面接官として使えます（上の注意つき）。」で合格
 
 ## 未完了のもの
 
-- `.cmo3` の保存
 - パラメータへのキー割り当てと変形調整
-- テクスチャアトラス生成
-- `.moc3`、`.model3.json`、`.cdi3.json` の書き出し
-- 女性モデルの Cubism 取り込みとリギング
-- `npm run check:live2d -- <model-dir>` の合格
+- 目・口の独立アートメッシュ化（現在は男女とも表示実体が1枚絵）
+- `ParamMouthOpenY` の LipSync グループ登録
+- 指定の2048 pxアトラスへの再生成（現在の書き出しは1024 px）
+- 実際の口パク・まばたき・うなずきの目視確認
 
-Cubism Editor の Java 製保存ダイアログが自動操作からファイル名・保存先の入力を受け付けず、実ファイルを書き出せなかった。`.moc3` は独自バイナリであり、正規の Cubism 書き出しを経ずに代用品を生成していない。
+Cubism Editor の保存・書き出しダイアログはユーザーの手動操作で完了し、男女とも正規のランタイムファイルを取得した。`.moc3` はCubism Editorが生成した実ファイルで、代用品や検証回避用ファイルではない。
 
 追加確認の結果、男性WIPの「顔/目/口/髪」などは名前付きの空パーツフォルダーで、表示実体は全身画像1枚の `male-neutral-2048` ArtMeshのみだった。独立した目・口のリグには、差分PNGの追加ArtMesh化またはレイヤー分けPSDへの置き換えが必要。
 
 ## Cubism で残っている手順
 
-1. `cubism-input/male/male-neutral-2048.png` を取り込んだモデルを `runtime/male/male-interviewer.cmo3` として保存する。
-2. 目、口、顔を差分素材に合わせてアートメッシュへ分離する。
-3. `rigging-spec.json` のパラメータにキーを追加する。
-4. 2048 x 2048 のテクスチャアトラスを作成する。
-5. `runtime/male` へ組み込み用ファイル一式を書き出す。
-6. 女性も `cubism-input/female/female-neutral-2048.png` で同様に作成する。
-7. `frontend` で男女それぞれに `npm run check:live2d -- public/live2d/interviewers/runtime/<gender>` を実行する。
+1. 男女とも目、口、顔を差分素材に合わせて独立アートメッシュへ分離する。
+2. `rigging-spec.json` の必須パラメータにキーを追加し、変形を作る。
+3. `ParamMouthOpenY` を LipSync グループへ登録する。
+4. 2048 x 2048 のテクスチャアトラスを作り直す。
+5. 男女の組み込み用ファイルを再書き出しする。
+6. 小さい表示枠で口パク・まばたき・うなずきを目視確認する。
 
-`runtime` には正規書き出しが完了するまで、偽の `.moc3` や検証をすり抜けるだけの JSON を置かない。
+正規書き出し一式は `male/` と `female/` に配置済み。これらはアプリ実行用のためGitにはコミットしない。
