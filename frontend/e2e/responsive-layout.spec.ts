@@ -410,3 +410,49 @@ test.describe('レスポンシブ: ES添削画面の列揃え', () => {
     }
   })
 })
+
+// 集合知画面の列ずれ（#1766）。
+// 帯は管理シェルの AppBar で全幅。本文は maxWidth 720 の中央寄せだったため、
+// 画面幅が 720 を超えてサイドバーが出る前（768px）だけ見出しが 32px 右へずれた。
+// 帯が出ている幅ではテキストの左端を比べる。帯が消える md 以上は見出しが見えることだけ見る。
+test.describe('レスポンシブ: 集合知画面の列揃え', () => {
+  test('帯の見出しと本文見出しの左端が揃う', async ({ page }) => {
+    await setupAuth(page, TEST_ADMIN)
+    await stubApi(page)
+    await page.route('**/api/admin/me/school-access*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ restricted: false, schools: [] }),
+      }),
+    )
+
+    for (const width of [2000, 1440, 1024, 768, 375]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/admin/collective-insights')
+
+      const heading = page.getByRole('main').getByRole('heading', { name: '集合知サマリー管理' })
+      await expect(heading).toBeVisible({ timeout: 15000 })
+      const bandTitle = page.getByRole('banner').getByText('集合知サマリー再構築', { exact: true })
+
+      // 帯（AppBar）は md（900px）未満だけ出る。出ていない幅では比べない。
+      if (width < 900) {
+        await expect(bandTitle, `${width}px: 帯の見出しが出ていない`).toBeVisible()
+        const band = await bandTitle.boundingBox()
+        const body = await heading.boundingBox()
+        expect(band, `${width}px: 帯の見出しが取得できない`).not.toBeNull()
+        expect(body, `${width}px: 本文見出しが取得できない`).not.toBeNull()
+        expect(
+          Math.abs(band!.x - body!.x),
+          `${width}px で帯(x=${band!.x})と本文(x=${body!.x})の左端がずれている`,
+        ).toBeLessThanOrEqual(8)
+      }
+
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }))
+      expect(scrollWidth, `${width}px: 横方向にはみ出している`).toBeLessThanOrEqual(clientWidth)
+    }
+  })
+})

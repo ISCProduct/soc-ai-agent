@@ -4,11 +4,11 @@
 chromadb>=0.6.3,<0.7.0
 # CrewAI は embedchain/langchain の依存衝突が未解決のため意図的に無効化中。
 # #1604 では追加しない。互換性解消と依存整理は Issue #273 で別途対応する。
-fastapi==0.143.0
+fastapi==0.161.1
 # LangChain（埋め込み・検索・今後のチェーン化）。1.x 系に固定（constraints.txt 参照）。
-langchain>=1.4.6,<2.0
+langchain>=1.4.7,<2.0
 langchain-core>=1.6.11,<2.0
-langchain-openai>=1.6.6,<2.0
+langchain-openai>=1.7.2,<2.0
 langchain-text-splitters>=1.0,<2.0
 # openai SDK 2.x 系（litellm との両立）
 openai>=3.31.0,<4.0
@@ -19,7 +19,7 @@ prometheus-fastapi-instrumentator==8.1.0
 # pip が "Constraints cannot have extras" で落ちる（rag-tests.yml）。
 # FastAPI 統合は fastapi が既に入っているので sentry_sdk 本体で足りる。
 sentry-sdk>=2.72.0,<3.0
-pydantic==2.14.0
+pydantic==2.14.1
 pytest==9.1.1
 tiktoken==0.13.0
 uvicorn==0.53.0
