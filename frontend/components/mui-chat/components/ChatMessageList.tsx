@@ -71,7 +71,9 @@ export function ChatMessageList({
       aria-relevant="additions"
       sx={{
         flexGrow: 1,
-        minHeight: 0,
+        // 選択肢の最大高さとホーム上部の帯で、この領域が中身の高さまで潰れる。
+        // 375×700 でもやり取りが読めるよう、ここは縮めない（#1763）。
+        minHeight: 160,
         overflowY: 'auto',
         backgroundColor: '#fff',
       }}

@@ -56,9 +56,18 @@ export function NextActionsBar() {
         {state.kind === 'loading' ? (
           <Skeleton variant="text" width="60%" aria-label="次にやることを読み込み中" />
         ) : state.kind === 'error' ? (
-          <Typography variant="body2" role="alert">予定と選考状況を読み込めませんでした</Typography>
+          <Typography variant="body2" role="alert" noWrap>
+            予定と選考状況を読み込めませんでした
+          </Typography>
         ) : state.actions.length === 0 ? (
-          <Typography variant="body2">直近2週間の予定はありません。面接や締切を登録すると、ここに出ます</Typography>
+          // 折り返すと帯が2〜3行になり、375pxでは会話ログが下限まで潰れる（#1763）。
+          <Typography
+            variant="body2"
+            noWrap
+            title="直近2週間の予定はありません。面接や締切を登録すると、ここに出ます"
+          >
+            直近2週間の予定はありません。面接や締切を登録すると、ここに出ます
+          </Typography>
         ) : (
           <Typography variant="body2" fontWeight={700} noWrap title={state.actions[0].text}>
             {state.actions[0].text}
