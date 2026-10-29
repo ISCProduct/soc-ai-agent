@@ -142,6 +142,8 @@ class ESReviewResponse(BaseModel):
     improved_text_length: int = 0
     # 指定字数に収まったか。char_limit 未指定なら null(#1523)
     char_limit_satisfied: Optional[bool] = None
+    # 改善文が元の文章以上の長さか。char_limit 指定時は null（そちらは指定字数で見る / #1606）
+    improved_length_satisfied: Optional[bool] = None
     usage: Optional[ESReviewUsage] = None
 
 

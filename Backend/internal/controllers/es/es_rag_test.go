@@ -50,6 +50,7 @@ const ragOKBody = `{
   "star": {"situation": "状況", "task": "課題", "action": "施策", "result": "成果"},
   "improved_text_length": 6,
   "char_limit_satisfied": true,
+  "improved_length_satisfied": false,
   "usage": {"model": "gpt-4o", "prompt_tokens": 100, "completion_tokens": 200, "calls": 2}
 }`
 
@@ -98,6 +99,9 @@ func TestRewrite_UsesRAGReviewAndKeepsResponseShape(t *testing.T) {
 	}
 	if got.ImprovedTextLength != 6 || got.CharLimitSatisfied == nil || !*got.CharLimitSatisfied {
 		t.Errorf("字数の結果が落ちている: %+v", got)
+	}
+	if got.ImprovedLengthSatisfied == nil || *got.ImprovedLengthSatisfied {
+		t.Errorf("improved_length_satisfied が転送されていない: %+v", got)
 	}
 	// usage は内部情報。公開APIの本文には出さない
 	if strings.Contains(rec.Body.String(), "usage") || strings.Contains(rec.Body.String(), "prompt_tokens") {
@@ -150,7 +154,7 @@ func TestReview_ForwardsCharLimitAndStripsUsage(t *testing.T) {
 	if _, ok := got["usage"]; ok {
 		t.Errorf("usage がレスポンスに漏れている: %s", rec.Body.String())
 	}
-	for _, key := range []string{"feedback", "improved_text", "star", "improved_text_length", "char_limit_satisfied", "company_context_source"} {
+	for _, key := range []string{"feedback", "improved_text", "star", "improved_text_length", "char_limit_satisfied", "improved_length_satisfied", "company_context_source"} {
 		if _, ok := got[key]; !ok {
 			t.Errorf("%s が転送されていない: %s", key, rec.Body.String())
 		}

@@ -347,6 +347,26 @@ describe('ESRewritePage 設問の文字数上限 (#1523)', () => {
     expect(body).not.toHaveProperty('char_limit_mode')
     expect(screen.getByText(/250 文字/)).toBeInTheDocument()
     expect(screen.queryByText(/指定字数に収まりませんでした/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/元の文章より短くなりました/)).not.toBeInTheDocument()
+  })
+
+  it('改善文が元より短いときは、提出前に見比べるよう伝える', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        specificity_score: 7, star_score: 6, length_balance_score: 5,
+        feedback: 'f', improved_text: 'あ'.repeat(360),
+        improved_text_length: 360, char_limit_satisfied: null,
+        improved_length_satisfied: false,
+      }),
+    })
+    setup('ES添削')
+    fireEvent.click(screen.getByRole('button', { name: '添削する' }))
+
+    await screen.findByText('添削スコア')
+    expect(screen.getByText(/360 文字/)).toBeInTheDocument()
+    expect(screen.getByText(/元の文章より短くなりました/)).toBeInTheDocument()
+    expect(screen.getByText(/このまま提出せず/)).toBeInTheDocument()
   })
 
   it('範囲外の上限は送信させない（RAGのバリデーション422を踏ませない）', () => {

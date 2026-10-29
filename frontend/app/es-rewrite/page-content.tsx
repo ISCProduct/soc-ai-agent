@@ -80,11 +80,13 @@ type StarBreakdown = {
   result: string
 }
 
-// 字数の結果(#1523)。ES添削・ESリライトで同じ形を返す（生成経路が同じ / #1533）
+// 字数の結果(#1523 / #1606)。ES添削・ESリライトで同じ形を返す（生成経路が同じ / #1533）
 type CharLimitResult = {
   improved_text_length?: number
   // 指定字数に収まったか。上限未指定なら null
   char_limit_satisfied?: boolean | null
+  // 改善文が元の文章以上か。指定字数があるときは null
+  improved_length_satisfied?: boolean | null
 }
 
 type RewriteResult = CharLimitResult & {
@@ -124,15 +126,21 @@ function CharCountNote({ result, charLimit }: { result: CharLimitResult; charLim
   const length = result.improved_text_length
   if (typeof length !== 'number' || length <= 0) return null
   const overLimit = result.char_limit_satisfied === false
+  const tooShort = result.improved_length_satisfied === false
   return (
     <Box sx={{ mt: 1.5 }}>
-      <Typography sx={{ fontSize: 13, fontWeight: 600, color: overLimit ? '#b45309' : UI.inkFaint }}>
+      <Typography sx={{ fontSize: 13, fontWeight: 600, color: overLimit || tooShort ? '#b45309' : UI.inkFaint }}>
         {charLimit === null ? `${length} 文字` : `${length} / ${charLimit} 文字`}
         （改行と前後の空白は数えません）
       </Typography>
       {overLimit && (
         <Alert severity="warning" role="status" sx={{ mt: 1, borderRadius: 2, fontSize: 13 }}>
           指定字数に収まりませんでした。勝手に切り詰めずそのまま出しているので、削る箇所を選んでから提出してください。もう一度実行すると収まることもあります。
+        </Alert>
+      )}
+      {tooShort && (
+        <Alert severity="warning" role="status" sx={{ mt: 1, borderRadius: 2, fontSize: 13 }}>
+          改善文が元の文章より短くなりました。要約になっていて、元の内容が落ちていることがあります。このまま提出せず、もう一度実行するか、元の文章と見比べてください。
         </Alert>
       )}
     </Box>

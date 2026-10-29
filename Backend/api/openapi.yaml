@@ -400,6 +400,10 @@ components:
         star: { $ref: "#/components/schemas/StarBreakdown" }
         improved_text_length: { type: integer }
         char_limit_satisfied: { type: boolean, nullable: true }
+        improved_length_satisfied:
+          type: boolean
+          nullable: true
+          description: "改善文が元の文章以上か。char_limit 指定時は null（#1606）"
 
     ESReviewRequest:
       type: object
@@ -417,6 +421,10 @@ components:
         improved_text: { type: string }
         improved_text_length: { type: integer }
         char_limit_satisfied: { type: boolean, nullable: true }
+        improved_length_satisfied:
+          type: boolean
+          nullable: true
+          description: "改善文が元の文章以上か。char_limit 指定時は null（#1606）"
         star: { $ref: "#/components/schemas/StarBreakdown" }
 
     ResumeStatus:

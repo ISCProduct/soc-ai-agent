@@ -167,11 +167,21 @@ curl -H "X-Internal-Token: $RAG_INTERNAL_TOKEN" http://localhost:9000/vector/sta
 - それでも収まらない場合は**切り詰めず**、`char_limit_satisfied: false` と `improved_text_length` を返す。FEは字数を出し、収まらなかったことを警告で明示する
 - `char_limit` 指定時の改善文の出力予算は、入力長ではなく指定字数から見積もる（長いESを短く直す指定が通常ケース）。**`char_limit` が無いときは `max_tokens` を渡さない**（#1564。入力長へ比例させると天井で飽和して無駄な再試行を1回挟み、定数を常に渡すと出力上限4,096のモデルへ差し替えた瞬間に全リクエストが400になる）
 
+### 長文で改善文が縮むとき（#1606）
+
+- プロンプト版は `es_review_v4`。`char_limit` が無いときの字数指示は「110〜130%を目安」ではなく、`count_es_chars` で数えた元の字数と目標レンジ（切り上げた110〜130%）を書く。要約して短くしないことも書く
+- 生成後、改善文が元の文章（100%）を下回っていたら**改善文だけ**を1回（`_MAX_SHORT_TEXT_RETRIES`）作り直す。再生成プロンプトには「直前は N 字で、元の M 字より短い」と実測値を入れる。評価は作り直さない。`max_tokens` は渡さない
+- 作り直しは #1523 と同じく開始から45秒で打ち切る。1呼び出し60秒・Backend 85秒（#1556）の中で、評価＋改善文＋この1回まで
+- 作り直し自体が上限到達・タイムアウト・不正JSONで失敗しても、最初の改善文は捨てない。422/500 にすると本文も警告も届かないので、短いまま `improved_length_satisfied: false` で返す
+- それでも短ければ切り詰めず、`improved_length_satisfied: false` で返す。FEは「元の文章より短くなりました」と出し、このまま提出しないよう案内する。下限を110%にしないのは、すでに十分な短いESまで作り直すと品質が変わるため。100%はハーネスの `improved_text_ratio` の下限と同じ
+- `char_limit` があるときはこの検査をしない（短くする指定が目的。字数は `char_limit_satisfied` で見る）
+- 公開APIの入力上限は 6,000字のまま（#1564）。10,000字はここで拒否する。6,000字の130%はトークン見積もり上 `_MAX_OUTPUT_TOKENS` に収まるが、モデルが実際にその長さを書くかはハーネスの `improved_chars` / `improved_text_ratio` で入力長ごとに見る
+
 ### ES添削とESリライトの統合（#1533）
 
 - ESの評価・書き換えの実装は `services/es_review.py` のみ。Backend の `/api/es/review`（ES添削タブ）と `/api/es/rewrite`（ESリライトタブ）はどちらも RAG の `/es/review` を呼ぶ
 - 旧実装では `/api/es/rewrite` が Backend 内の独自プロンプト（gpt-4o-mini・**インジェクション対策なし**・字数指示120〜150%）で生成していたため、同じESでも添削タブと違う書き換え案が返っていた。統合でプロンプト・出力スキーマ・インジェクション対策が1箇所になった
-- `/api/es/rewrite` のレスポンスは従来互換（`rewritten_text` / `star`）。`improved_text` を `rewritten_text` に詰め替えて返し、`improved_text_length` / `char_limit_satisfied` を追加している
+- `/api/es/rewrite` のレスポンスは従来互換（`rewritten_text` / `star`）。`improved_text` を `rewritten_text` に詰め替えて返し、`improved_text_length` / `char_limit_satisfied` / `improved_length_satisfied` を追加している
 - STAR分解（`star`）は改善文と同じ第2呼び出しで生成する。ES添削タブは `star_score`、ESリライトタブは `star` の内訳を同じレスポンスから表示する
 - **デプロイ順は rag-review を backend より先**にする（`.github/workflows/deployment.yml`）。Backend の ES 経路は生成を RAG へ委譲しており、旧 RAG は Pydantic の `extra=ignore` で `char_limit` / `tech_stack` を**黙って捨てる**ため、逆順だとロール中の数分だけ「字数上限を指定しても無視され、画面に手がかりも出ない」窓ができる
 - コストの機能別内訳（`es_review` / `es_rewrite`）は、RAG が返す `usage` を Backend が `openai.Client.ReportProxyUsage` で `api_call_logs` へ記録して残す。RAG 自身は記録先を持たないため、この経路が唯一の記録手段（統合前は RAG 経由の添削ぶんが記録されていなかった）。`usage` は内部情報なので Backend が転送前に本文から取り除く
@@ -236,9 +246,8 @@ ES添削が全滅する。ローカルLLM（#1124 / #775 / #1131）でも vLLM /
   HTTPリクエスト内で前に直列実行されるぶんも引かれる）ので、上限は「モデルが受け付ける値」の話に
   留め、長さの制御は #1523 の字数上限で行う
 - 実測した振る舞い（2026-09-29 / gpt-4o・企業名なし）: 8,000字・10,000字の入力はいずれも
-  **7〜8秒で成功**する。モデルはプロンプトの「110〜130%」を長文では守らず改善文を220〜400字しか
-  書かないため、上限到達そのものが起きない。この「長いESほど改善文が短くなる（10,000字 → 約360字
-  ＝入力の4%）」品質の問題は別Issueで扱う（成功を装って無価値な出力を返すため 422 より重い）
+  **7〜8秒で成功**する。モデルは「110〜130%を目安」だけでは長文を220〜400字しか書かないため、
+  上限到達そのものが起きない。この品質の問題は #1606 で、目標字数の明示と生成後の検査に移した
 - テストで固定している不変条件（`tests/test_es_review_split_calls.py`）
   - `test_improved_text_budget_does_not_depend_on_input_length`: 1字 / 800字 / 7,304字 / 7,305字 /
     入力上限ちょうど / 上限+1字 のいずれでも改善文の呼び出しに `max_tokens` を渡さない
