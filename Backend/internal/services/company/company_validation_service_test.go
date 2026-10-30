@@ -1,10 +1,14 @@
 package company
 
 import (
+	"Backend/internal/companyfetch"
 	"Backend/internal/models"
+	"Backend/internal/openai"
 	"Backend/internal/services/shared"
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -127,12 +131,47 @@ func TestCompanyValidationService_NoOpenAIReturnsNotExists(t *testing.T) {
 }
 
 func TestCompanyValidationService_SearchCandidatesWebFailureReturnsEmpty(t *testing.T) {
+	// OpenAI 未設定は検索していない。失敗ではなく候補なし。
 	svc := NewCompanyValidationService(&fakeCompanyLookup{exact: map[string]*models.Company{}}, nil)
 	results, err := svc.SearchCandidates(context.Background(), "未知企業ABC", true)
 	if err != nil {
-		t.Fatalf("WEB補完失敗でもエラーにしない: %v", err)
+		t.Fatalf("未設定をエラーにしない: %v", err)
 	}
 	if len(results) != 0 {
 		t.Fatalf("候補なしを期待: %+v", results)
+	}
+}
+
+type denyValidationSearchBudget struct{}
+
+func (denyValidationSearchBudget) AllowSearch() error {
+	return companyfetch.ErrSearchBudgetExceeded
+}
+
+func TestCompanyValidationService_SearchCandidatesPropagatesWebSearchFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream down", http.StatusBadRequest)
+	}))
+	t.Cleanup(srv.Close)
+
+	svc := NewCompanyValidationService(
+		&fakeCompanyLookup{exact: map[string]*models.Company{}},
+		openai.NewWithBaseURL(srv.URL, "gpt-4o-mini"),
+	)
+	_, err := svc.SearchCandidates(context.Background(), "未知企業ABC", true)
+	if err == nil {
+		t.Fatal("WEB検索の失敗をエラーとして返す")
+	}
+}
+
+func TestCompanyValidationService_SearchCandidatesBudgetExceeded(t *testing.T) {
+	svc := NewCompanyValidationService(
+		&fakeCompanyLookup{exact: map[string]*models.Company{}},
+		openai.NewWithBaseURL("http://127.0.0.1:1", "gpt-4o-mini"),
+	)
+	svc.SetSearchBudget(denyValidationSearchBudget{})
+	_, err := svc.SearchCandidates(context.Background(), "未知企業ABC", true)
+	if !errors.Is(err, companyfetch.ErrSearchBudgetExceeded) {
+		t.Fatalf("want ErrSearchBudgetExceeded, got %v", err)
 	}
 }
