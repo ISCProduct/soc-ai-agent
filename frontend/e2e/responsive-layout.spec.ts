@@ -126,6 +126,53 @@ test.describe('レスポンシブ: 結果画面の列揃え', () => {
       ).toBeLessThanOrEqual(1)
     }
   })
+
+  // エラー・0件は一覧と別ラッパーだった。maxWidth と padding を同じボックスに置くと
+  // 分析カードが広幅で 32px(sm) / 16px(xs) 右へずれる。一覧のカードと左端を比べる。
+  test('エラー時の分析カードが一覧と同じ列に揃う', async ({ page }) => {
+    const ANALYSIS = {
+      score_comment: 'テスト用の分析コメントです。',
+      scores: { job_score: 0.8, interest_score: 0.7, aptitude_score: 0.6, future_score: 0.5 },
+    }
+    await setupAuth(page, TEST_USER)
+    await stubApi(page)
+    await page.route('**/api/chat/analysis*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ANALYSIS) }),
+    )
+    await page.route('**/api/chat/recommendations*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(RECOMMENDATIONS) }),
+    )
+
+    const scoreHeading = page.getByText('どこまで聞けているか', { exact: true })
+    // sm の余白 32px と xs の余白 16px。縦を十分に取り、一覧側のスクロールバーで幅が減らないようにする。
+    for (const width of [2000, 500]) {
+      await page.setViewportSize({ width, height: 2400 })
+      await page.goto('/results?user_id=1&session_id=layout-check')
+      await expect(scoreHeading).toBeVisible()
+      const listBox = await scoreHeading.boundingBox()
+
+      await page.unroute('**/api/chat/recommendations*')
+      await page.route('**/api/chat/recommendations*', (route) =>
+        route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }),
+      )
+      await page.goto('/results?user_id=1&session_id=layout-check')
+      await expect(page.getByText('企業データの取得に失敗しました')).toBeVisible()
+      await expect(scoreHeading).toBeVisible()
+      const errorBox = await scoreHeading.boundingBox()
+
+      expect(listBox, `${width}px: 一覧の分析カードが取得できない`).not.toBeNull()
+      expect(errorBox, `${width}px: エラー時の分析カードが取得できない`).not.toBeNull()
+      expect(
+        Math.abs((listBox?.x ?? 0) - (errorBox?.x ?? 0)),
+        `${width}px で一覧(x=${listBox?.x})とエラー(x=${errorBox?.x})の分析カード左端がずれている`,
+      ).toBeLessThanOrEqual(1)
+
+      await page.unroute('**/api/chat/recommendations*')
+      await page.route('**/api/chat/recommendations*', (route) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(RECOMMENDATIONS) }),
+      )
+    }
+  })
 })
 
 // AI面接・企業選択画面の列ずれの回帰テスト（SOCAIAGENT-443 / #1784）。
@@ -177,15 +224,14 @@ test.describe('レスポンシブ: ES添削画面の列揃え', () => {
 
     for (const width of [2000, 1440, 1024, 768]) {
       await page.setViewportSize({ width, height: 900 })
-      await page.waitForFunction((w: number) => document.documentElement.clientWidth === w, width)
       await page.goto('/es-rewrite')
       await expect(page.getByText('ES添削・リライト', { exact: true })).toBeVisible({ timeout: 15000 })
 
       const headerRow = page.getByTestId('es-rewrite-header-row')
       const modeButton = page.getByRole('button', { name: 'ES添削' })
-      const form = page.locator('.MuiPaper-root').filter({ hasText: '元の文章を入力' }).first()
+      const form = page.getByTestId('es-rewrite-form')
       const backButton = page.getByRole('button', { name: 'ホームへ戻る' })
-      const band = page.locator('header')
+      const band = page.getByTestId('es-rewrite-header')
 
       await expect(headerRow).toBeVisible()
       await expect(form).toBeVisible()
@@ -201,11 +247,21 @@ test.describe('レスポンシブ: ES添削画面の列揃え', () => {
       expect(backButtonBox, `${width}px: 戻るボタンが取得できない`).not.toBeNull()
       expect(bandBox, `${width}px: ヘッダー帯が取得できない`).not.toBeNull()
 
-      expect(Math.abs(headerRowBox!.x - modeButtonBox!.x), `${width}px: 見出し列とモード切替の左端`).toBeLessThanOrEqual(1)
-      expect(Math.abs(headerRowBox!.x - formBox!.x), `${width}px: 見出し列と入力欄の左端`).toBeLessThanOrEqual(1)
       expect(
-        Math.abs(backButtonBox!.x + backButtonBox!.width - headerRowBox!.x - headerRowBox!.width),
-        `${width}px: 戻るボタンが列の右端に揃っていない`,
+        Math.abs(headerRowBox!.x - modeButtonBox!.x),
+        `${width}px: 見出し列(x=${headerRowBox!.x})とモード切替(x=${modeButtonBox!.x})の左端`,
+      ).toBeLessThanOrEqual(1)
+      expect(
+        Math.abs(headerRowBox!.x - formBox!.x),
+        `${width}px: 見出し列(x=${headerRowBox!.x})と入力欄(x=${formBox!.x})の左端`,
+      ).toBeLessThanOrEqual(1)
+      // 戻るボタンはヘッダー行の flex 子なので、行自身の右端と比べると差は常に 0 になる。
+      // 本文の入力欄の右端と比べて、行だけ狭い・広いを検出する。
+      const backRight = backButtonBox!.x + backButtonBox!.width
+      const formRight = formBox!.x + formBox!.width
+      expect(
+        Math.abs(backRight - formRight),
+        `${width}px: 戻るボタンの右端(x=${backRight})が入力欄の右端(x=${formRight})に揃っていない`,
       ).toBeLessThanOrEqual(1)
 
       const { scrollWidth, clientWidth } = await page.evaluate(() => ({
