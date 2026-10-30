@@ -249,8 +249,13 @@ function ESRewriteContent() {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: UI.paper }}>
-      {/* 帯と区切り線は全幅のまま、中身だけ本文と同じ列に入れる（#1783） */}
-      <Box component="header" sx={{ bgcolor: UI.field, borderBottom: `1px solid ${UI.ruleSoft}` }}>
+      {/* 帯と区切り線は全幅のまま、中身だけ本文と同じ列に入れる（#1783）。
+          padding は列ラッパーに置き、行のボックスは入力欄と同じ幅にする。 */}
+      <Box
+        component="header"
+        data-testid="es-rewrite-header"
+        sx={{ bgcolor: UI.field, borderBottom: `1px solid ${UI.ruleSoft}` }}
+      >
         <Box sx={{ maxWidth: CONTENT_MAX_WIDTH, mx: 'auto', width: '100%', px: { xs: 2, md: 4 }, py: 2 }}>
           <Box data-testid="es-rewrite-header-row" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -312,7 +317,7 @@ function ESRewriteContent() {
           }}
         >
           {/* ── Left: Input ── */}
-          <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
+          <Paper data-testid="es-rewrite-form" elevation={0} sx={{ p: 3, borderRadius: 2, border: `1px solid ${UI.ruleSoft}`, bgcolor: UI.field }}>
             <Typography sx={{ fontWeight: 700, fontSize: 17, mb: 2.5 }}>
               {mode === 'review' ? 'ES添削' : 'ESリライト'} — 元の文章を入力
             </Typography>
