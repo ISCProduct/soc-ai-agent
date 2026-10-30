@@ -27,17 +27,41 @@ func NewAssessmentRepository(db *gorm.DB) *AssessmentRepository {
 	return &AssessmentRepository{db: db}
 }
 
-// ListTemplates は学生に見せる検査。
-// ponytail: 第1段は運営標準（school_id IS NULL）だけ。学校独自テンプレートを出すときは学校で絞る。
-func (r *AssessmentRepository) ListTemplates() ([]models.AssessmentTemplate, error) {
+// ListTemplates は学生に見せる検査。運営標準に加え、本人の学校の独自テンプレートを返す（#1675）。
+// 他校のテンプレートは返さない（schoolID が nil の学生は運営標準だけ）。
+func (r *AssessmentRepository) ListTemplates(schoolID *uint) ([]models.AssessmentTemplate, error) {
 	var ts []models.AssessmentTemplate
-	err := r.db.Where("school_id IS NULL").Order("id ASC").Find(&ts).Error
+	q := r.db.Order("id ASC")
+	if schoolID == nil {
+		q = q.Where("school_id IS NULL")
+	} else {
+		q = q.Where("school_id IS NULL OR school_id = ?", *schoolID)
+	}
+	err := q.Find(&ts).Error
 	return ts, err
 }
 
+// FindTemplate は id でテンプレートを引く。可視範囲の検査はしない。
+// 本人の受検（自分の session が指すテンプレート）を読むときに使う。受検を始めるときは FindVisibleTemplate。
 func (r *AssessmentRepository) FindTemplate(id uint) (*models.AssessmentTemplate, error) {
 	var t models.AssessmentTemplate
-	if err := r.db.Where("id = ? AND school_id IS NULL", id).First(&t).Error; err != nil {
+	if err := r.db.Where("id = ?", id).First(&t).Error; err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+// FindVisibleTemplate は学生が受検を始められるテンプレートだけを返す。
+// 他校の独自テンプレートは gorm.ErrRecordNotFound（存在を教えない）。
+func (r *AssessmentRepository) FindVisibleTemplate(id uint, schoolID *uint) (*models.AssessmentTemplate, error) {
+	var t models.AssessmentTemplate
+	q := r.db.Where("id = ?", id)
+	if schoolID == nil {
+		q = q.Where("school_id IS NULL")
+	} else {
+		q = q.Where("(school_id IS NULL OR school_id = ?)", *schoolID)
+	}
+	if err := q.First(&t).Error; err != nil {
 		return nil, err
 	}
 	return &t, nil
@@ -123,7 +147,10 @@ func (r *AssessmentRepository) CountAnswersBySessions(sessionIDs []uint) (map[ui
 // 状態の更新を条件付き UPDATE にして、同時に2回押されても片方だけが通る（もう片方は
 // ErrAssessmentAlreadySubmitted）。スコアは UserWeightScoreRepository を通して
 // source=assessment で書く。正典外カテゴリはそこで弾かれ、全体がロールバックされる。
-func (r *AssessmentRepository) Submit(s *models.AssessmentSession, scores map[string]float64, scoreSessionID string) error {
+//
+// writeScores が false のとき user_weight_scores へは書かない。学校独自テンプレートはマッチングに
+// 使わないため（#1675）。assessment_results には常に残す。
+func (r *AssessmentRepository) Submit(s *models.AssessmentSession, scores map[string]float64, scoreSessionID string, writeScores bool) error {
 	payload, err := json.Marshal(scores)
 	if err != nil {
 		return err
@@ -141,6 +168,11 @@ func (r *AssessmentRepository) Submit(s *models.AssessmentSession, scores map[st
 		}
 		if err := tx.Create(&models.AssessmentResult{SessionID: s.ID, UserID: s.UserID, CategoryScores: string(payload), CreatedAt: now}).Error; err != nil {
 			return err
+		}
+		if !writeScores {
+			s.Status = models.AssessmentStatusSubmitted
+			s.SubmittedAt = &now
+			return nil
 		}
 		scoreRepo := NewUserWeightScoreRepository(tx)
 		for category, score := range scores {
@@ -181,4 +213,98 @@ func (r *AssessmentRepository) LatestStandardScores(userID uint) (map[string]flo
 	}
 	out := map[string]float64{}
 	return out, json.Unmarshal([]byte(res.CategoryScores), &out)
+}
+
+// FindUserSchoolID は学生の所属校。未設定なら nil（運営標準だけ見える）。
+func (r *AssessmentRepository) FindUserSchoolID(userID uint) (*uint, error) {
+	var u struct{ SchoolID *uint }
+	if err := r.db.Table("users").Select("school_id").Where("id = ?", userID).Take(&u).Error; err != nil {
+		return nil, err
+	}
+	return u.SchoolID, nil
+}
+
+// FindSchoolOrganizationID は学校の所属学園。学校独自テンプレートのテナント境界に使う。
+func (r *AssessmentRepository) FindSchoolOrganizationID(schoolID uint) (uint, error) {
+	var sc models.School
+	if err := r.db.Select("id", "organization_id").Where("id = ?", schoolID).Take(&sc).Error; err != nil {
+		return 0, err
+	}
+	return sc.OrganizationID, nil
+}
+
+// CreateSchoolTemplate は学校独自テンプレートと問題を1トランザクションで作る。
+// is_standard は常に false（マッチングに合流させない）。
+func (r *AssessmentRepository) CreateSchoolTemplate(t *models.AssessmentTemplate, qs []models.AssessmentQuestion) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		t.IsStandard = false
+		if err := tx.Create(t).Error; err != nil {
+			return err
+		}
+		for i := range qs {
+			qs[i].TemplateID = t.ID
+			qs[i].TemplateVersion = t.Version
+		}
+		return tx.Create(&qs).Error
+	})
+}
+
+// ListSchoolTemplates は学校独自テンプレートだけ（運営標準は含まない）。新しい順。
+func (r *AssessmentRepository) ListSchoolTemplates(schoolID uint) ([]models.AssessmentTemplate, error) {
+	var ts []models.AssessmentTemplate
+	err := r.db.Where("school_id = ?", schoolID).Order("id DESC").Find(&ts).Error
+	return ts, err
+}
+
+// FindSchoolTemplate は指定校の独自テンプレート。他校のものは gorm.ErrRecordNotFound。
+func (r *AssessmentRepository) FindSchoolTemplate(id, schoolID uint) (*models.AssessmentTemplate, error) {
+	var t models.AssessmentTemplate
+	if err := r.db.Where("id = ? AND school_id = ?", id, schoolID).First(&t).Error; err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+// SchoolStudent は先生向け一覧に出す学生の最小限の情報。メール等は持たない。
+type SchoolStudent struct {
+	ID   uint
+	Name string
+}
+
+// ListSchoolStudents は指定校・指定学園の在籍学生（退会済み・職員を除く）。
+// organization_id も条件に入れ、学校IDの付け違いが他学園の学生を見せないようにする。
+func (r *AssessmentRepository) ListSchoolStudents(schoolID, organizationID uint) ([]SchoolStudent, error) {
+	var out []SchoolStudent
+	err := r.db.Table("users").Select("id, name").
+		Where("school_id = ? AND organization_id = ? AND role = ? AND withdrawn_at IS NULL",
+			schoolID, organizationID, models.UserRoleStudent).
+		Order("id ASC").Scan(&out).Error
+	return out, err
+}
+
+// ListSessionsByTemplate はテンプレートの全受検（ユーザーごとの最新を選ぶのは呼び出し側）。id 降順。
+func (r *AssessmentRepository) ListSessionsByTemplate(templateID uint) ([]models.AssessmentSession, error) {
+	var ss []models.AssessmentSession
+	err := r.db.Where("template_id = ?", templateID).Order("id DESC").Find(&ss).Error
+	return ss, err
+}
+
+// ListResultsBySessions は session_id -> カテゴリ別スコア。
+func (r *AssessmentRepository) ListResultsBySessions(sessionIDs []uint) (map[uint]map[string]float64, error) {
+	out := map[uint]map[string]float64{}
+	if len(sessionIDs) == 0 {
+		return out, nil
+	}
+	var rows []models.AssessmentResult
+	if err := r.db.Where("session_id IN ?", sessionIDs).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		m := map[string]float64{}
+		if err := json.Unmarshal([]byte(row.CategoryScores), &m); err != nil {
+			return nil, err
+		}
+		out[row.SessionID] = m
+	}
+	return out, nil
 }

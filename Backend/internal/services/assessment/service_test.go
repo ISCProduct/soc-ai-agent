@@ -22,6 +22,7 @@ type memRepo struct {
 	// chatScores は提出後も消えてはいけないチャット由来のスコア
 	chatScores    map[string]float64
 	writtenScores map[string]map[string]float64 // scoreSessionID -> category -> score
+	userSchools   map[uint]uint                 // user -> school（未設定は運営標準だけ見える）
 }
 
 func newMemRepo() *memRepo {
@@ -36,11 +37,34 @@ func newMemRepo() *memRepo {
 		results:       map[uint]map[string]float64{},
 		chatScores:    map[string]float64{"技術志向": 40},
 		writtenScores: map[string]map[string]float64{},
+		userSchools:   map[uint]uint{},
 	}
 }
 
-func (m *memRepo) ListTemplates() ([]models.AssessmentTemplate, error) {
-	return []models.AssessmentTemplate{m.templates[1]}, nil
+func visibleTo(t models.AssessmentTemplate, schoolID *uint) bool {
+	return t.SchoolID == nil || (schoolID != nil && *t.SchoolID == *schoolID)
+}
+func (m *memRepo) ListTemplates(schoolID *uint) ([]models.AssessmentTemplate, error) {
+	var out []models.AssessmentTemplate
+	for id := uint(1); id <= uint(len(m.templates)); id++ {
+		if t, ok := m.templates[id]; ok && visibleTo(t, schoolID) {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+func (m *memRepo) FindVisibleTemplate(id uint, schoolID *uint) (*models.AssessmentTemplate, error) {
+	t, ok := m.templates[id]
+	if !ok || !visibleTo(t, schoolID) {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &t, nil
+}
+func (m *memRepo) FindUserSchoolID(userID uint) (*uint, error) {
+	if sid, ok := m.userSchools[userID]; ok {
+		return &sid, nil
+	}
+	return nil, nil
 }
 func (m *memRepo) FindTemplate(id uint) (*models.AssessmentTemplate, error) {
 	t, ok := m.templates[id]
@@ -109,14 +133,16 @@ func (m *memRepo) CountAnswersBySessions(ids []uint) (map[uint]int, error) {
 	}
 	return out, nil
 }
-func (m *memRepo) Submit(s *models.AssessmentSession, scores map[string]float64, scoreSessionID string) error {
+func (m *memRepo) Submit(s *models.AssessmentSession, scores map[string]float64, scoreSessionID string, writeScores bool) error {
 	if s.Status != models.AssessmentStatusInProgress {
 		return ErrAlreadySubmitted
 	}
 	now := time.Now()
 	s.Status, s.SubmittedAt = models.AssessmentStatusSubmitted, &now
 	m.results[s.ID] = scores
-	m.writtenScores[scoreSessionID] = scores
+	if writeScores {
+		m.writtenScores[scoreSessionID] = scores
+	}
 	return nil
 }
 func (m *memRepo) FindResult(sessionID uint) (map[string]float64, error) {
