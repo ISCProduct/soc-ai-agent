@@ -325,8 +325,8 @@
   .leftStage { flex: 0 0 58%; }
 }
 
-/* 自分のカメラ(大、16:9) */
-.cameraCard {
+/* 面接官ステージ(主役、16:9)。アバターは全面、自分のカメラは右上のPiP */
+.stageCard {
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
@@ -334,6 +334,53 @@
   overflow: hidden;
   background: var(--surface-container-lowest);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+}
+.stageAvatar {
+  position: absolute;
+  inset: 0;
+}
+.stageScrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(10, 14, 24, 0.7), transparent 25%, transparent 60%, rgba(10, 14, 24, 0.85));
+}
+.stageTop {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 240px;
+}
+.pipCard {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 28%;
+  min-width: 120px;
+  max-width: 224px;
+  aspect-ratio: 16 / 10;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface-container-lowest);
+  border: 2px solid rgba(142, 213, 255, 0.4);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+.pipLabel {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(10, 14, 24, 0.8);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.pipLabelText {
+  color: var(--on-surface);
+  font-size: 10px;
+  font-weight: 600;
 }
 .cameraOffIcon {
   position: absolute;
@@ -343,63 +390,11 @@
   justify-content: center;
   color: var(--outline-variant);
 }
-.cameraScrim {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(to bottom, rgba(10, 14, 24, 0.75), transparent 35%, transparent 65%, rgba(10, 14, 24, 0.75));
-}
-.liveFeedBadge {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: rgba(23, 27, 38, 0.9);
-  backdrop-filter: blur(6px);
-  border-radius: 9999px;
-  padding: 4px 10px;
-}
 .liveFeedDot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--tertiary);
-}
-.liveFeedLabel {
-  color: var(--tertiary);
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.candidateLabelWrap {
-  position: absolute;
-  bottom: 12px;
-  left: 12px;
-  right: 12px;
-  display: flex;
-  align-items: center;
-}
-.candidateLabel {
-  background: rgba(23, 27, 38, 0.9);
-  backdrop-filter: blur(6px);
-  border-radius: 8px;
-  padding: 6px 12px;
-}
-.candidateLabelEyebrow {
-  color: var(--on-surface-variant);
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  line-height: 1.4;
-}
-.candidateLabelName {
-  color: var(--on-surface);
-  font-size: 13px;
-  font-weight: 600;
 }
 .statusOverlay {
   position: absolute;
@@ -430,38 +425,20 @@
   background: var(--primary-container-hover) !important;
 }
 
-/* 面接官(2Dアバター、小) + 発話中の字幕 */
-.avatarCard {
-  background: var(--surface-container-low);
-  border-radius: 12px;
-  padding: 16px;
-  display: flex;
-  gap: 16px;
-}
-.avatarPanel {
-  width: 96px;
-  flex-shrink: 0;
-  border-radius: 8px;
-  overflow: hidden;
-  position: relative;
-  background: var(--surface-container);
-  aspect-ratio: 4 / 3;
-}
-@media (min-width: 600px) {
-  .avatarPanel { width: 120px; }
-}
+/* 面接官バッジ + 発話中の字幕(ステージ上に重ねる) */
 .avatarBadgeRow {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  right: 6px;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  max-width: 100%;
+  background: rgba(23, 27, 38, 0.9);
+  backdrop-filter: blur(6px);
+  border-radius: 9999px;
+  padding: 4px 12px;
 }
 .avatarBadgeDot {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -469,19 +446,25 @@
 .avatarBadgeDot[data-speaking='false'] { background: rgba(255, 255, 255, 0.3); }
 .avatarBadgeLabel {
   color: var(--on-surface);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .captionBox {
-  flex: 1;
-  min-width: 0;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   gap: 4px;
+  background: rgba(10, 14, 24, 0.88);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 10px;
+  padding: 10px 14px;
 }
 .captionEyebrowRow {
   display: flex;
@@ -497,8 +480,8 @@
 }
 .captionText {
   color: var(--on-surface);
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 14px;
+  line-height: 1.6;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;

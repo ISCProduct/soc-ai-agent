@@ -135,16 +135,16 @@ func TestInterviewService_CreateSession(t *testing.T) {
 		assert.Equal(t, "male", resp.InterviewerGender)
 	})
 
-	t.Run("Default female", func(t *testing.T) {
+	t.Run("Default male", func(t *testing.T) {
 		uRepo.On("GetUserByID", uint(1)).Return(&entity.User{ID: 1}, nil).Once()
 		sRepo.On("Create", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 			s := args.Get(0).(*models.InterviewSession)
-			assert.Equal(t, "female", s.InterviewerGender)
+			assert.Equal(t, "male", s.InterviewerGender)
 		}).Once()
 
 		resp, err := svc.CreateSession(1, "ja", "invalid")
 		assert.NoError(t, err)
-		assert.Equal(t, "female", resp.InterviewerGender)
+		assert.Equal(t, "male", resp.InterviewerGender)
 	})
 }
 
