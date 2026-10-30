@@ -46,7 +46,6 @@ export function SchoolFilterSelect({ value, onChange, onResolved }: SchoolFilter
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   if (!loaded || (restricted && schools.length <= 1)) {

@@ -29,6 +29,7 @@ export default defineConfig({
     'request-id.spec.ts',
     'responsive-layout.spec.ts',
     'profile-layout.spec.ts',
+    'tap-targets.spec.ts',
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
