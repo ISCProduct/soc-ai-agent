@@ -16,6 +16,7 @@ const (
 	BrokenTruncated   = "output_truncated"  // 出力上限に到達して途中で切れた
 	BrokenCallFailed  = "call_failed"       // 応答は得たが使える出力ではなかった
 	BrokenSchema      = "schema_incomplete" // JSONは読めたが必須キーが無くスコアが取れない
+	BrokenValidation  = "input_validation"  // 入力がRAGのバリデーションで拒否された
 
 	// BrokenNetwork は通信・レート制限・サーバ側エラー。品質ではないので
 	// 破損率とレイテンシの両方から除外し、「計測できなかった回数」として別に出す。

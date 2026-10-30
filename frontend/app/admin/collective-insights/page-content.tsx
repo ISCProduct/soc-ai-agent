@@ -53,7 +53,17 @@ export default function PageContent() {
   }
 
   return (
-    <PageContainer maxWidth={ADMIN_PAGE_WIDTH.form}>
+    <PageContainer
+      maxWidth={ADMIN_PAGE_WIDTH.form}
+      sx={{
+        // #1766: 帯（管理シェルの AppBar）は md 未満で全幅。
+        // 本文を sm から maxWidth 720 で中央寄せし、横余白も sm で増やすと、
+        // 768px だけ見出しが帯より 32px 右へずれる。
+        // 帯が消える md 以上でだけ 720px に収め、それ未満は帯と同じ横余白にする。
+        maxWidth: { xs: '100%', md: ADMIN_PAGE_WIDTH.form },
+        p: { xs: 2, sm: 2, md: 4 },
+      }}
+    >
       <AdminPageHeader
         title="集合知サマリー管理"
         description="ユーザー行動データをもとに全企業の集合知サマリーを再集計します。"

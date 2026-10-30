@@ -77,7 +77,8 @@ export const STUDENT_SURFACES: Record<StudentThemeMode, StudentSurface> = {
     mark: COMFORTABLE.primary,
     flag: '#B44A00',
     nightBg: '#221610',
-    nightStage: '#606553',
+    // Stitchデザイン案のダークテーマ(Material 3の surface-dim/background相当)に合わせた(#2D化)
+    nightStage: '#0f131d',
     nightPanel: '#2d2e31',
     nightInk: '#e8eaed',
     nightSoft: '#bdc1c6',

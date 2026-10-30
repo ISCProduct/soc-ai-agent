@@ -12,7 +12,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
-import { Mic, MicOff, Send } from '@mui/icons-material'
+import { Check, Mic, MicOff, Send } from '@mui/icons-material'
 import styles from '../MuiChat.module.css'
 import type { ChoiceOption } from '../types'
 import { CHAT_ACCENT, CHAT_ACCENT_HOVER, shouldSendChatOnKeyDown } from '../utils'
@@ -36,7 +36,7 @@ type ChatInputBarProps = {
   onShowCompletionModal: () => void
 }
 
-/** 選択肢チップ・入力欄・分析完了ボタン */
+/** 選択肢リスト・入力欄・分析完了ボタン */
 export function ChatInputBar({
   analysisComplete,
   showChoiceButtons,
@@ -64,7 +64,8 @@ export function ChatInputBar({
   return (
     <Box
       sx={{
-        p: 2,
+        px: 2,
+        py: showChoiceButtons ? 1.25 : 2,
         borderTop: '1px solid #e0e0e0',
         backgroundColor: '#fff',
       }}
@@ -96,23 +97,33 @@ export function ChatInputBar({
             <Paper
               elevation={0}
               sx={{
-                p: 1.5,
+                p: 1,
                 borderRadius: 2,
                 border: '1px solid #e0e0e0',
                 backgroundColor: '#fafafa',
               }}
             >
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                選択肢を選んでください。任意で理由を入力してから送信できます（「その他」は自由記述）
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+                選んで送信できます。理由は任意です。
               </Typography>
-              <Stack direction="row" spacing={1} flexWrap="wrap" gap={1}>
+              <Stack
+                role="group"
+                aria-label="回答の選択肢"
+                spacing={0.5}
+                sx={{
+                  maxHeight: { xs: '34dvh', md: 220 },
+                  overflowY: 'auto',
+                }}
+              >
                 {choiceOptions.map((choice) => {
                   const isOtherChoice = choice.text.includes('その他')
                   const selected = selectedChoiceValue === choice.value
                   return (
                     <Button
                       key={`${choice.label}-${choice.text}`}
+                      fullWidth
                       variant={selected ? 'contained' : 'outlined'}
+                      aria-pressed={selected}
                       onClick={() => {
                         if (isOtherChoice) {
                           onOtherChoice()
@@ -123,17 +134,32 @@ export function ChatInputBar({
                       disabled={isLoading}
                       className={styles.choiceButton}
                       sx={{
-                        borderRadius: 2,
+                        borderRadius: 1.5,
                         ...(selected
                           ? {
                               bgcolor: CHAT_ACCENT,
                               color: '#fff',
+                              fontWeight: 700,
                               '&:hover': { bgcolor: CHAT_ACCENT_HOVER },
                             }
-                          : {}),
+                          : { fontWeight: 500 }),
                       }}
                     >
-                      {choice.label}. {choice.text}
+                      <Box
+                        component="span"
+                        sx={{
+                          display: 'flex',
+                          width: '100%',
+                          alignItems: 'flex-start',
+                          gap: 0.75,
+                          textAlign: 'left',
+                        }}
+                      >
+                        <Box component="span" sx={{ flex: 1 }}>
+                          {choice.label}. {choice.text}
+                        </Box>
+                        {selected && <Check aria-hidden sx={{ fontSize: 18, flexShrink: 0 }} />}
+                      </Box>
                     </Button>
                   )
                 })}
@@ -188,8 +214,8 @@ export function ChatInputBar({
             <TextField
               fullWidth
               multiline
-              minRows={2}
-              maxRows={6}
+              minRows={showChoiceButtons ? 1 : 2}
+              maxRows={showChoiceButtons ? 3 : 6}
               placeholder={inputPlaceholder}
               value={input}
               onChange={(e) => {
@@ -204,7 +230,11 @@ export function ChatInputBar({
               disabled={isLoading || !!historyLoadError}
               size="small"
               inputRef={inputRef}
-              helperText="改行: Enter　／　送信: Ctrl+Enter（Mac は ⌘+Enter）"
+              helperText={
+                showChoiceButtons
+                  ? 'Ctrl+Enterで送信'
+                  : '改行: Enter　／　送信: Ctrl+Enter（Mac は ⌘+Enter）'
+              }
               FormHelperTextProps={{ sx: { mx: 0.5 } }}
               sx={{
                 '& .MuiOutlinedInput-root': {

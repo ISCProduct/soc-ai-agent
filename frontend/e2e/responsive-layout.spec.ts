@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { setupAuth, TEST_USER } from './fixtures/auth'
+import { setupAuth, TEST_ADMIN, TEST_USER } from './fixtures/auth'
 
 // 下部ナビが画面外へはみ出さないことの回帰テスト（UI監査 2026-09-21 / R1）。
 //
@@ -126,6 +126,53 @@ test.describe('レスポンシブ: 結果画面の列揃え', () => {
       ).toBeLessThanOrEqual(1)
     }
   })
+
+  // エラー・0件は一覧と別ラッパーだった。maxWidth と padding を同じボックスに置くと
+  // 分析カードが広幅で 32px(sm) / 16px(xs) 右へずれる。一覧のカードと左端を比べる。
+  test('エラー時の分析カードが一覧と同じ列に揃う', async ({ page }) => {
+    const ANALYSIS = {
+      score_comment: 'テスト用の分析コメントです。',
+      scores: { job_score: 0.8, interest_score: 0.7, aptitude_score: 0.6, future_score: 0.5 },
+    }
+    await setupAuth(page, TEST_USER)
+    await stubApi(page)
+    await page.route('**/api/chat/analysis*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ANALYSIS) }),
+    )
+    await page.route('**/api/chat/recommendations*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(RECOMMENDATIONS) }),
+    )
+
+    const scoreHeading = page.getByText('どこまで聞けているか', { exact: true })
+    // sm の余白 32px と xs の余白 16px。縦を十分に取り、一覧側のスクロールバーで幅が減らないようにする。
+    for (const width of [2000, 500]) {
+      await page.setViewportSize({ width, height: 2400 })
+      await page.goto('/results?user_id=1&session_id=layout-check')
+      await expect(scoreHeading).toBeVisible()
+      const listBox = await scoreHeading.boundingBox()
+
+      await page.unroute('**/api/chat/recommendations*')
+      await page.route('**/api/chat/recommendations*', (route) =>
+        route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }),
+      )
+      await page.goto('/results?user_id=1&session_id=layout-check')
+      await expect(page.getByText('企業データの取得に失敗しました')).toBeVisible()
+      await expect(scoreHeading).toBeVisible()
+      const errorBox = await scoreHeading.boundingBox()
+
+      expect(listBox, `${width}px: 一覧の分析カードが取得できない`).not.toBeNull()
+      expect(errorBox, `${width}px: エラー時の分析カードが取得できない`).not.toBeNull()
+      expect(
+        Math.abs((listBox?.x ?? 0) - (errorBox?.x ?? 0)),
+        `${width}px で一覧(x=${listBox?.x})とエラー(x=${errorBox?.x})の分析カード左端がずれている`,
+      ).toBeLessThanOrEqual(1)
+
+      await page.unroute('**/api/chat/recommendations*')
+      await page.route('**/api/chat/recommendations*', (route) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(RECOMMENDATIONS) }),
+      )
+    }
+  })
 })
 
 // AI面接・企業選択画面の列ずれの回帰テスト（SOCAIAGENT-443 / #1784）。
@@ -163,6 +210,112 @@ test.describe('レスポンシブ: AI面接・企業選択画面の列揃え', (
         Math.abs((row?.x ?? 0) - (h?.x ?? 0)),
         `${width}px でヘッダー行(x=${row?.x})と見出し(x=${h?.x})の左端がずれている`,
       ).toBeLessThanOrEqual(1)
+    }
+  })
+})
+
+// ES添削画面の列ずれ（#1783）。
+// ヘッダーの帯は全幅の左寄せ、本文は maxWidth で中央寄せだったため、
+// 広い画面ほど見出しと入力欄の左端がずれる。帯は全幅のまま、中身だけ本文と同じ列に入れる。
+test.describe('レスポンシブ: ES添削画面の列揃え', () => {
+  test('ヘッダーと本文の左端が揃い、戻るボタンは列の右端に揃う', async ({ page }) => {
+    await setupAuth(page, TEST_USER)
+    await stubApi(page)
+
+    for (const width of [2000, 1440, 1024, 768]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/es-rewrite')
+      await expect(page.getByText('ES添削・リライト', { exact: true })).toBeVisible({ timeout: 15000 })
+
+      const headerRow = page.getByTestId('es-rewrite-header-row')
+      const modeButton = page.getByRole('button', { name: 'ES添削' })
+      const form = page.getByTestId('es-rewrite-form')
+      const backButton = page.getByRole('button', { name: 'ホームへ戻る' })
+      const band = page.getByTestId('es-rewrite-header')
+
+      await expect(headerRow).toBeVisible()
+      await expect(form).toBeVisible()
+
+      const headerRowBox = await headerRow.boundingBox()
+      const modeButtonBox = await modeButton.boundingBox()
+      const formBox = await form.boundingBox()
+      const backButtonBox = await backButton.boundingBox()
+      const bandBox = await band.boundingBox()
+      expect(headerRowBox, `${width}px: ヘッダー行が取得できない`).not.toBeNull()
+      expect(modeButtonBox, `${width}px: モード切替が取得できない`).not.toBeNull()
+      expect(formBox, `${width}px: 入力欄が取得できない`).not.toBeNull()
+      expect(backButtonBox, `${width}px: 戻るボタンが取得できない`).not.toBeNull()
+      expect(bandBox, `${width}px: ヘッダー帯が取得できない`).not.toBeNull()
+
+      expect(
+        Math.abs(headerRowBox!.x - modeButtonBox!.x),
+        `${width}px: 見出し列(x=${headerRowBox!.x})とモード切替(x=${modeButtonBox!.x})の左端`,
+      ).toBeLessThanOrEqual(1)
+      expect(
+        Math.abs(headerRowBox!.x - formBox!.x),
+        `${width}px: 見出し列(x=${headerRowBox!.x})と入力欄(x=${formBox!.x})の左端`,
+      ).toBeLessThanOrEqual(1)
+      // 戻るボタンはヘッダー行の flex 子なので、行自身の右端と比べると差は常に 0 になる。
+      // 本文の入力欄の右端と比べて、行だけ狭い・広いを検出する。
+      const backRight = backButtonBox!.x + backButtonBox!.width
+      const formRight = formBox!.x + formBox!.width
+      expect(
+        Math.abs(backRight - formRight),
+        `${width}px: 戻るボタンの右端(x=${backRight})が入力欄の右端(x=${formRight})に揃っていない`,
+      ).toBeLessThanOrEqual(1)
+
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }))
+      expect(scrollWidth, `${width}px: 横方向にはみ出している`).toBeLessThanOrEqual(clientWidth)
+      expect(Math.abs(bandBox!.width - clientWidth), `${width}px: ヘッダー帯が全幅ではない`).toBeLessThanOrEqual(1)
+    }
+  })
+})
+
+// 集合知画面の列ずれ（#1766）。
+// 帯は管理シェルの AppBar で全幅。本文は maxWidth 720 の中央寄せだったため、
+// 画面幅が 720 を超えてサイドバーが出る前（768px）だけ見出しが 32px 右へずれた。
+// 帯が出ている幅ではテキストの左端を比べる。帯が消える md 以上は見出しが見えることだけ見る。
+test.describe('レスポンシブ: 集合知画面の列揃え', () => {
+  test('帯の見出しと本文見出しの左端が揃う', async ({ page }) => {
+    await setupAuth(page, TEST_ADMIN)
+    await stubApi(page)
+    await page.route('**/api/admin/me/school-access*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ restricted: false, schools: [] }),
+      }),
+    )
+
+    for (const width of [2000, 1440, 1024, 768, 375]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/admin/collective-insights')
+
+      const heading = page.getByRole('main').getByRole('heading', { name: '集合知サマリー管理' })
+      await expect(heading).toBeVisible({ timeout: 15000 })
+      const bandTitle = page.getByRole('banner').getByText('集合知サマリー再構築', { exact: true })
+
+      // 帯（AppBar）は md（900px）未満だけ出る。出ていない幅では比べない。
+      if (width < 900) {
+        await expect(bandTitle, `${width}px: 帯の見出しが出ていない`).toBeVisible()
+        const band = await bandTitle.boundingBox()
+        const body = await heading.boundingBox()
+        expect(band, `${width}px: 帯の見出しが取得できない`).not.toBeNull()
+        expect(body, `${width}px: 本文見出しが取得できない`).not.toBeNull()
+        expect(
+          Math.abs(band!.x - body!.x),
+          `${width}px で帯(x=${band!.x})と本文(x=${body!.x})の左端がずれている`,
+        ).toBeLessThanOrEqual(8)
+      }
+
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }))
+      expect(scrollWidth, `${width}px: 横方向にはみ出している`).toBeLessThanOrEqual(clientWidth)
     }
   })
 })

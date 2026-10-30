@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"Backend/internal/repositories"
 	"Backend/internal/routes"
+	"Backend/internal/services/school"
 
 	"github.com/labstack/echo/v4"
 )
@@ -24,15 +26,7 @@ import (
 func TestSetupAdminRoutes_AllRoutesRequireAuth(t *testing.T) {
 	e := echo.New()
 	api := e.Group("/api")
-	routes.SetupAdminRoutes(
-		api,
-		// コントローラー22個 + userRepo + schoolService
-		nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil,
-		"test-admin-secret",
-	)
+	registerAdminRoutesWithNilControllers(api, nil, nil, "test-admin-secret")
 
 	var adminRoutes []*echo.Route
 	for _, r := range e.Routes() {
@@ -63,4 +57,19 @@ func TestSetupAdminRoutes_AllRoutesRequireAuth(t *testing.T) {
 			}
 		})
 	}
+}
+
+// registerAdminRoutesWithNilControllers は SetupAdminRoutes をコントローラー nil で登録する。
+// ルート登録時にメソッド値を取るだけでデリファレンスは起きないため nil で足りる。
+// 引数の数(コントローラー22個 + userRepo + schoolService + secret)が変わったらここだけ直す。
+func registerAdminRoutesWithNilControllers(api *echo.Group, userRepo *repositories.UserRepository, schools *school.SchoolService, secret string) {
+	routes.SetupAdminRoutes(
+		api,
+		nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil,
+		nil,
+		userRepo, schools,
+		secret,
+	)
 }

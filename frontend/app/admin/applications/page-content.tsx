@@ -92,7 +92,6 @@ export default function PageContent() {
   useEffect(() => {
     if (!scopeReady) return
     void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, schoolId, scopeReady])
 
   const save = async (app: AdminApplication) => {
