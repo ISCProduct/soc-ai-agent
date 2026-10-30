@@ -82,3 +82,10 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # sentry-go/echo は 0.x なので、0.36.0 以降への更新も dependabot からは
+      # semver-minor に見え、major 除外にも自動マージ除外にも引っかからない。
+      # 実際 0.50.0 は Echo v5 へ移行しており、Echo v4 の本体はビルド不能になる
+      # (internal/middleware/error_handler.go の sentryecho.GetHubFromContext)。
+      # #1804 がこれで develop に入ってビルドを壊したため明示的に除外する。
+      # Echo v5 へ移行するときに、この行を消して手動で上げる。
+      - dependency-name: "github.com/getsentry/sentry-go/echo"

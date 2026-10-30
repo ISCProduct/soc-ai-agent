@@ -90,6 +90,5 @@ export function useHandsFreeVad({
       source.disconnect()
       audioCtx.close().catch(() => {})
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, status])
 }

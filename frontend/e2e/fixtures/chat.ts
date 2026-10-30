@@ -39,25 +39,44 @@ export async function mockChatHistory(page: Page, messages: ChatHistoryItem[]) {
   })
 }
 
+function jsonOk(body: unknown) {
+  return {
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify(body),
+  }
+}
+
 export async function mockEmptyChatAuxRoutes(page: Page) {
   await page.route('**/api/chat/session', async (route) => {
     if (route.request().method() === 'POST') {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ session_id: CHAT_SESSION_ID }),
-      })
+      await route.fulfill(jsonOk({ session_id: CHAT_SESSION_ID }))
       return
     }
     await route.continue()
   })
 
   await page.route('**/api/chat/messages*', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ messages: [] }),
-    })
+    await route.fulfill(jsonOk({ messages: [] }))
+  })
+
+  // 予定・案内・履歴書の取得を空にしておく。CIはバックエンドがいないので、
+  // モックしないと「読み込めませんでした」の帯が積まれ、375pxでは会話ログが
+  // 中身の高さ（約46px）まで潰れる（#1763）。
+  await page.route('**/api/schedule', async (route) => {
+    await route.fulfill(jsonOk([]))
+  })
+  await page.route('**/api/applications', async (route) => {
+    await route.fulfill(jsonOk({ applications: [] }))
+  })
+  await page.route('**/api/user/guidances', async (route) => {
+    await route.fulfill(jsonOk({ guidances: [] }))
+  })
+  await page.route('**/api/whats-new', async (route) => {
+    await route.fulfill(jsonOk([]))
+  })
+  await page.route('**/api/resume/status', async (route) => {
+    await route.fulfill(jsonOk({ has_document: true, latest_score: 90, needs_attention: false }))
   })
 }
 
